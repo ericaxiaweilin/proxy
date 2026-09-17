@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { FixtureNotice } from "../components/FixtureNotice";
 
 type EnginePayload = {
+  dataSource?: string;
   engine: { evaluate_calls_30d: string; p99_ms: number; evidence_pass: string; active_orchestrate: string; human_value_block: string; lineage_complete: string };
   policy_resolver: { policy_version: string; guardrails: string[] };
   trace_sample: { decision_id: string; context_snapshot_id: string; chain: string[] };
@@ -12,7 +14,12 @@ export function Engine() {
   if (!data) return <div className="notice">加载 Decision Engine…</div>;
   return (
     <>
-      <div className="engine-hero"><h2>Decision Engine Runtime</h2><p>业务智能已直连在线决策引擎 · POST /v1/decisions/evaluate → Gravity → Evidence → Resource → Human Value → Eligibility</p></div>
+      <FixtureNotice dataSource={data.dataSource} />
+      {/* OPS-TELEMETRY-001: 原文写的是"业务智能**已直连**在线决策引擎"。
+          核实结果：/v1/decisions/evaluate 在 server.go 里**没有任何路由注册**，
+          它只作为字符串出现在 operator_remaining.go:61 的端点清单和静态原型里。
+          说"已直连"会让读者以为主链在跑。改成目标态 + 明确当前状态。 */}
+      <div className="engine-hero"><h2>Decision Engine Runtime</h2><p>目标链路：POST /v1/decisions/evaluate → Gravity → Evidence → Resource → Human Value → Eligibility。该端点当前<b>未注册路由</b>，本页全部指标为占位值。</p></div>
       <div className="engine-status" style={{ marginTop: 12 }}>
         <div className="engine-mini"><div className="k">Evaluate 30D</div><div className="v">{data.engine.evaluate_calls_30d}</div></div>
         <div className="engine-mini"><div className="k">p99 Latency</div><div className="v">{data.engine.p99_ms}ms</div><div className="d">target &lt;150ms</div></div>

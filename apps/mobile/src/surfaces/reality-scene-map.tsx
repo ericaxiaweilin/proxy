@@ -32,6 +32,13 @@ import type { SecureSessionStore, StoredSession } from "../secure-session";
 import { parseCommandResult } from "../login-client";
 import { localApiBaseUrl } from "../native-clients";
 
+// GEO-HONEST-001: 取不到位置时地图的兜底中心。
+//
+// 它是**视口默认值** —— 不是"用户位置"，也不是任何场景的坐标。原先写成内联
+// 字面量 `21.036, 105.842`，在代码里读起来和真实坐标没有区别，容易被下一个人
+// 当成实测数据。提成具名常量，把语义写进名字。
+const HANOI_CENTER_FALLBACK = { latitude: 21.036, longitude: 105.842 } as const;
+
 // IDENTITY-ID-001: 真人头像与账号同源。服务端可能返回以 "/" 开头的媒体路径（账号头像
 // 资产，见 internal/mockidentity），这里统一拼 API base；空串表示该人暂无头像，卡片
 // 回落首字母（不再对外链/空串渲染破图）。
@@ -100,10 +107,14 @@ type SceneDetail = {
   logoUrl?: string;
   selectedVariant: string;
   variants: Array<{ id: string; name: string; window: string; facets: string[]; bestFor: string }>;
-  liveState: { state: string; label: string; bestWindow: string; capacityPct: number; freshUntil: string };
+  // GEO-HONEST-001: capacityPct / freshUntil 是可空的。服务端在没有真实来源时
+  // 会**省略**它们，而不是填一个看着像真的数字。所以这两个字段必须在类型上
+  // 就是 optional —— 否则 undefined 会一路渲染成「容量 undefined%」。
+  liveState: { state: string; label: string; bestWindow: string; capacityPct?: number | undefined; freshUntil?: string | undefined };
   menu: Array<{ id: string; name: string; priceLabel: string; sceneFit: string; available: boolean; imageUrl: string }>;
   fullMenu: Array<{ id: string; name: string; priceLabel: string; sceneFit: string; available: boolean; imageUrl: string }>;
-  humans: Array<{ id: string; name: string; role: string; availability: string; fitReason: string; sceneFit: number; isAI: boolean; avatarUrl: string }>;
+  // sceneFit / source 同理由 optional：没有评分来源时省略，UI 不编一个百分比。
+  humans: Array<{ id: string; name: string; role: string; availability: string; fitReason: string; sceneFit?: number | undefined; isAI: boolean; source?: string | undefined; avatarUrl: string }>;
   actions: DynamicSceneAction[];
   truthBoundary: string;
   // SCENE-BADGE-001：绑定本场景的小美（真实映射，不编计数）。
@@ -642,18 +653,18 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             {featuredAIAccount?.boundSceneId === detail.sceneId ? <View testID="ai-scene-binding" style={styles.aiBindingCard}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-ai:${featuredAIAccount.accountId}:${featuredAIAccount.avatarVersion ?? 1}`} source={aiAccountPhoto(featuredAIAccount)} style={styles.aiBindingAvatar} transition={0} /><View style={styles.aiBindingCopy}><Text style={styles.aiBindingEyebrow}>AI 小美 × 当前 Scene</Text><Text style={styles.aiBindingTitle}>{featuredAIAccount.displayName} · {featuredAIAccount.boundActivityTitle}</Text><Text style={styles.aiBindingText}>{featuredAIAccount.role}，可围绕这个场景聊天、陪伴和生成 UGC 灵感；不能到场、接单或报名活动。</Text><Pressable accessibilityLabel={`查看${featuredAIAccount.displayName}主页`} onPress={() => onOpenAIProfile?.(featuredAIAccount)} style={styles.aiProfileButton}><Text style={styles.aiProfileButtonText}>查看小美主页</Text></Pressable></View></View> : null}
             {featuredHuman ? <View testID="human-scene-binding" style={styles.humanBindingCard}>{featuredHuman.avatarUri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-person:${featuredHuman.userId}`} source={{ uri: featuredHuman.avatarUri }} style={styles.aiBindingAvatar} transition={0} /> : null}<View style={styles.aiBindingCopy}><Text style={styles.humanBindingEyebrow}>真人 × 当前 Scene</Text><Text style={styles.aiBindingTitle}>{featuredHuman.name}适合这个场景</Text><Text style={styles.aiBindingText}>这是基于场景的真人推荐，尚未代表本人到场或接受邀请。可进入主页了解后，再发起好友或现实活动邀请。</Text><Pressable accessibilityLabel={`查看${featuredHuman.name}主页`} onPress={() => onOpenHumanProfile?.(featuredHuman)} style={styles.aiProfileButton}><Text style={styles.aiProfileButtonText}>查看真人主页</Text></Pressable></View></View> : null}
             <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>现在最适合</Text><Pressable onPress={() => setWhyOpen((open) => !open)}><Text style={styles.sectionLink}>{whyOpen ? "收起依据" : "为什么"}</Text></Pressable></View>
-            <View style={styles.bestGrid}><View style={styles.bestCard}><Text style={styles.bestTitle}>{activeVariant?.bestFor}</Text><Text style={styles.bestSub}>按当前时段、现场状态和可用资源推荐。</Text></View><View style={styles.bestCard}><Text style={styles.bestTitle}>{detail.liveState.state.replaceAll("_", " ")}</Text><Text style={styles.bestSub}>{detail.liveState.bestWindow} · 容量 {detail.liveState.capacityPct}%</Text></View></View>
-            {whyOpen ? <View style={styles.whyCard}><Text style={styles.whyTitle}>推荐依据</Text><Text style={styles.whyText}>当前时段：{activeVariant?.window}</Text><Text style={styles.whyText}>场景标签：{activeVariant?.facets.join(" · ")}</Text><Text style={styles.whyText}>现场状态：{detail.liveState.label}，数据有效至 {new Date(detail.liveState.freshUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Text><Text style={styles.whyBoundary}>这是场景推荐，不代表真人在场，也不生成到访、订单或履约证明。</Text></View> : null}
+            <View style={styles.bestGrid}><View style={styles.bestCard}><Text style={styles.bestTitle}>{activeVariant?.bestFor}</Text><Text style={styles.bestSub}>按当前时段、现场状态和可用资源推荐。</Text></View><View style={styles.bestCard}><Text style={styles.bestTitle}>{detail.liveState.state.replaceAll("_", " ")}</Text>{/* GEO-HONEST-001: 没有容量来源时明说"未知"，绝不回落到一个数字。 */}<Text style={styles.bestSub}>{detail.liveState.bestWindow}{detail.liveState.capacityPct === undefined ? " · 容量未知" : ` · 容量 ${detail.liveState.capacityPct}%`}</Text></View></View>
+            {whyOpen ? <View style={styles.whyCard}><Text style={styles.whyTitle}>推荐依据</Text><Text style={styles.whyText}>当前时段：{activeVariant?.window}</Text><Text style={styles.whyText}>场景标签：{activeVariant?.facets.join(" · ")}</Text>{/* GEO-HONEST-001: 时效声明只在对数据真有来源时才出现 —— 给编造的数字配一个"有效至"时间戳，比数字本身更误导。 */}<Text style={styles.whyText}>现场状态：{detail.liveState.label}{detail.liveState.freshUntil === undefined ? "（容量数据未接入，故无时效）" : `，数据有效至 ${new Date(detail.liveState.freshUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}</Text><Text style={styles.whyBoundary}>这是场景推荐，不代表真人在场，也不生成到访、订单或履约证明。</Text></View> : null}
             <Text style={styles.sectionTitle}>适合一起的人</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.humanRail}>
               {/* SCENE-HUMANS-002: 纯圆头 rail，不要白卡片 —— 和首页同款圆头像放大
                   （64），名字 + 可约状态居中跟在下面。选中态改用头像外圈紫环
                   （卡片删了，边框无处可画）；点按仍是“选中邀约对象”，链不断。 */}
-              {detail.humans.map((human) => <Pressable key={human.id} accessibilityLabel={`选择${human.name}`} onPress={() => setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))} style={styles.humanPlain}><View style={[styles.humanRing, selectedHumanId === human.id && styles.humanRingSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <CircularAvatarImage accessibilityLabel={`${human.name}头像`} size={64} uri={humanAvatarUri(human.avatarUrl)!} /> : <View style={styles.humanAvatarFallback}><Text style={styles.humanAvatarText}>{human.name.slice(0, 1).toUpperCase()}</Text></View>}</View><Text style={styles.humanPlainName}>{human.name}</Text><Text style={styles.humanPlainSub}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}</Text></Pressable>)}
+              {detail.humans.map((human) => <Pressable key={human.id} accessibilityLabel={`选择${human.name}`} onPress={() => setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))} style={styles.humanPlain}><View style={[styles.humanRing, selectedHumanId === human.id && styles.humanRingSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <CircularAvatarImage accessibilityLabel={`${human.name}头像`} size={64} uri={humanAvatarUri(human.avatarUrl)!} /> : <View style={styles.humanAvatarFallback}><Text style={styles.humanAvatarText}>{human.name.slice(0, 1).toUpperCase()}</Text></View>}</View><Text style={styles.humanPlainName}>{human.name}</Text><Text style={styles.humanPlainSub}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}{human.source === "FIXTURE" ? " · 占位候选" : ""}</Text></Pressable>)}
               {/* SCENE-HUMANS-001: 只露圆头像 + 名字 + 可约状态。点按仍是“选中邀约对象”
                   （DIRECT_INVITE 靠 selectedHumanId 找人，链不断）；role 与 fit% 删掉，
                   可约原文（本周可约/上午可约…）是服务端真值，原样展示不改写。 */}
-              {detail.humans.map((human) => <Pressable key={human.id} accessibilityLabel={`选择${human.name}`} onPress={() => setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))} style={styles.humanPlain}><View style={[styles.humanRing, selectedHumanId === human.id && styles.humanRingSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <CircularAvatarImage accessibilityLabel={`${human.name}头像`} size={64} uri={humanAvatarUri(human.avatarUrl)!} /> : <View style={styles.humanAvatarFallback}><Text style={styles.humanAvatarText}>{human.name.slice(0, 1).toUpperCase()}</Text></View>}</View><Text style={styles.humanPlainName}>{human.name}</Text><Text style={styles.humanPlainSub}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}</Text></Pressable>)}
+              {detail.humans.map((human) => <Pressable key={human.id} accessibilityLabel={`选择${human.name}`} onPress={() => setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))} style={styles.humanPlain}><View style={[styles.humanRing, selectedHumanId === human.id && styles.humanRingSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <CircularAvatarImage accessibilityLabel={`${human.name}头像`} size={64} uri={humanAvatarUri(human.avatarUrl)!} /> : <View style={styles.humanAvatarFallback}><Text style={styles.humanAvatarText}>{human.name.slice(0, 1).toUpperCase()}</Text></View>}</View><Text style={styles.humanPlainName}>{human.name}</Text><Text style={styles.humanPlainSub}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}{human.source === "FIXTURE" ? " · 占位候选" : ""}</Text></Pressable>)}
             </ScrollView>
             <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>{fullMenuOpen ? `${detail.venueName} · 完整菜单` : "这个 Scene 喝什么"}</Text><Pressable onPress={() => setFullMenuOpen((open) => !open)}><Text style={styles.sectionLink}>{fullMenuOpen ? "只看当前 Scene" : "完整菜单"}</Text></Pressable></View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>{(fullMenuOpen ? detail.fullMenu : detail.menu).map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</ScrollView>
@@ -802,7 +813,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       {view === "MAP" ? (
         <View style={styles.mapWrap}>
           {/* 人位晚到时 remount 一次吃新 initialRegion（origin 只接第一次，后续不变）。 */}
-          <MapView key={origin ? `${origin.latitude}:${origin.longitude}` : "catalog"} initialRegion={{ latitude: origin?.latitude ?? 21.036, longitude: origin?.longitude ?? 105.842, latitudeDelta: origin ? 0.12 : 0.115, longitudeDelta: origin ? 0.12 : 0.115 }} showsUserLocation={!!origin} style={StyleSheet.absoluteFill}>
+          <MapView key={origin ? `${origin.latitude}:${origin.longitude}` : "catalog"} initialRegion={{ latitude: origin?.latitude ?? HANOI_CENTER_FALLBACK.latitude, longitude: origin?.longitude ?? HANOI_CENTER_FALLBACK.longitude, latitudeDelta: origin ? 0.12 : 0.115, longitudeDelta: origin ? 0.12 : 0.115 }} showsUserLocation={!!origin} style={StyleSheet.absoluteFill}>
             {heat
               ? filtered.map((scene) => {
                   const score = sceneHeatScore(scene);

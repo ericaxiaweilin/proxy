@@ -357,6 +357,55 @@ same commit. Do not record routine business logic changes here.
     —— root Chrome 的 `LocationContext`（城市 + 切换 + 地图入口）只在
     `tab === "HOME"` 渲染；MESSAGES 分支摘掉，入口只在 Home 留一个。
     picker sheet 与定位状态透传不变，无新增入口、无列表结构改动。
+## Revision 209 — 2026-09-16
+
+- 「编造数据清扫批」的续批 —— 补 Rev207 漏掉的地图/场景域残留。
+  原则与 Rev207 一致：**没有数据源时不许显示成数字**。
+  涉及回归 ID：`GEO-HONEST-001`、`OPS-TELEMETRY-001`。
+
+  为什么 Rev207 没扫到：那一批钉的是 `Scene` 结构体上的字段
+  （`Quality`/`Posts`/`Creators`/`Activities`/`Invites`），
+  而这三处编造值不在 `Scene` 上，在**详情响应**里，所以绕过了清扫。
+
+  最刺眼的一处不是"数字是假的"，而是**假数字和真数据在接口上长得一模一样**：
+  `capacityFor()` 用一张写死的 map 返回 61/39/74/81 当"容量"，
+  `LiveState.FreshUntil` 又把它声明成"5 分钟内有效"，客户端渲染成
+  「容量 61%」「数据有效至 14:32」—— 一个带保鲜期的实时占用率。
+  而仓库里**存在**真实容量来源：`business.scene_supply_snapshots`
+  （internal/business/operating_resolver.go，命令 `UpsertSceneSupplySnapshot`）。
+  所以这不是"没数据"，是"生产方存在、读取方绕过了它"。
+  接上它属于 `GEO-SUPPLY-WIRE-001`，不在本次范围。
+
+  - **基线敏感文件**：
+    - `apps/mobile/src/surfaces/market.tsx`（market scope）—— 三处改动，
+      均为**文案与常量提取**，不改列表结构、不改交互、不新增入口：
+      1. `EXPLORER_SPOTS` → `SEEDED_EXPLORER_SPOTS`；marker 文案
+         「热门探索点」→「种子探索点 · 非实时热度」。原先注释声称
+         "如果 server 返回了真实推荐点，该结构被覆盖"，实测**没有这段覆盖代码**，
+         渲染是无条件的 —— 已删除该说法。
+      2. 兜底视口坐标 `21.0285, 105.8542` 内联字面量 → 具名常量
+         `HANOI_VIEWPORT_FALLBACK`。
+      3. 删除零调用方的死桩 `mapConfig()`。
+  - 其余文件均非基线敏感：
+    - `apps/api-go/internal/realityscene/service.go` —— `LiveState.CapacityPct` /
+      `FreshUntil` 改为可空并省略；`Human` 增加 `source` 字段、`SceneFit` 改为可空；
+      删除 `capacityFor()`；`humansFor()` 的 `FitReason` 由断言
+      "同类 Scene 有真实完成记录" 改为自报占位。
+    - `apps/mobile/src/surfaces/reality-scene-map.tsx` —— 删除
+      `TEMP-DIAG-MAPDEAD-001`（4 处调试输出 + 2 个只打日志的 handler）、
+      兜底中心提取为具名常量；「容量 N%」在无来源时显示「容量未知」，
+      占位候选不显示「Scene fit 96%」。
+    - `apps/api-go/internal/api/operator_market_execution.go` —— 三个纯字面量端点
+      增加 `dataSource: "FIXTURE"`。
+    - `apps/market-intelligence-console/**` —— 新增 `FixtureNotice` 组件，
+      由服务端的 `dataSource` 字段驱动显示占位横幅；`Engine.tsx` 删去
+      "业务智能**已直连**在线决策引擎"的说法（`/v1/decisions/evaluate`
+      在 server.go 里没有任何路由注册，属可证伪的假话）。
+    - 命名测试、回归契约条目、`AGENT_LOCK.md`。
+
+  反向注入验证：14 条钉（7 条 Go 测试 + 7 条静态）全部实测会变红，
+  且每条注入都先确认写入、再确认**注入后仍能编译**（否则编译失败会被误读成钉生效）。
+  过程中抓到两条我自己的假守卫，已修：见 `AGENT_LOCK.md`。
 
 ## Revision 208 — 2026-09-16
 

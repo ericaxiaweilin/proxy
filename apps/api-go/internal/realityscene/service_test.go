@@ -982,4 +982,99 @@ func TestListMyCheckinHistoryCommand(t *testing.T) {
 	if r2.Outcome != "ACCEPTED" {
 		t.Fatalf("empty history must be accepted: got %s", r2.Outcome)
 	}
+// GEO-HONEST-001: 场景详情不许再有"没有来源、却长得像实测"的字段。
+//
+// 修之前这里是：
+//
+//	capacityFor() 用一张写死的 map 返回 61/39/74/81，
+//	LiveState.FreshUntil 又把这个编出来的数字声明成"5 分钟内有效"，
+//	humansFor() 给三个占位候选写上 SceneFit 96/92/88 和
+//	FitReason:"同类 Scene 有真实完成记录"。
+//
+// 客户端把它们渲染成「容量 61%」「数据有效至 14:32」「Scene fit 96%」。
+//
+// 关键不是"数字是假的"，而是**假数字和真数据在接口上长得一模一样**。
+// 所以修法不是换个数字，而是让"没有来源"在类型上可表达：
+//
+//	capacityPct / freshUntil 省略（不是 0、不是 now）
+//	human.source = FIXTURE
+//	human.sceneFit 省略（不是 0 —— 0% 是"测出来不匹配"，省略才是"没测过"）
+//
+// 真计算出来的 state / label / bestWindow 必须留下：它们由当前分钟与
+// variant.StartMinute/EndMinute 比较得出，是这套里唯一有依据的部分。
+func TestSceneDetailDeclaresFixtureProvenance(t *testing.T) {
+	s := New()
+	detail, found, err := s.GetDetail(t.Context(), "threebeans", "sunlight", time.Date(2026, 9, 6, 15, 0, 0, 0, time.UTC))
+	if err != nil || !found {
+		t.Fatalf("detail found=%v err=%v", found, err)
+	}
+	// 1) 反向钉：真算出来的排班状态必须还在，别删过头。
+	if detail.LiveState.State != "AVAILABLE_NOW" || detail.LiveState.BestWindow == "" || detail.LiveState.Label == "" {
+		t.Fatalf("schedule-derived live state disappeared: %#v", detail.LiveState)
+	}
+	// 2) 没有来源的部分必须是 nil。
+	if detail.LiveState.CapacityPct != nil {
+		t.Fatalf("CapacityPct is back (value=%d) with no data source — see business.scene_supply_snapshots", *detail.LiveState.CapacityPct)
+	}
+	if detail.LiveState.FreshUntil != nil {
+		t.Fatal("FreshUntil is back: it asserts freshness for a value that has no source, which is worse than the value itself")
+	}
+	// 3) 结构体上是 nil ≠ JSON 里没有 key —— 两边都要钉（这个坑踩过一次）。
+	body, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		LiveState map[string]any `json:"liveState"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.LiveState == nil {
+		t.Fatal("liveState missing from serialized detail — the client reads this object")
+	}
+	for _, key := range []string{"capacityPct", "freshUntil"} {
+		if v, ok := decoded.LiveState[key]; ok {
+			t.Fatalf("liveState.%s is back in JSON (value=%v) with no data source", key, v)
+		}
+	}
+	// 4) 占位候选必须自报家门。
+	if len(detail.Humans) == 0 {
+		t.Fatal("no humans returned — the pins below would pass vacuously")
+	}
+	for _, human := range detail.Humans {
+		// 钉字面量而非 SourceFixture 常量：拿生产者的常量去比对生产者的输出
+		// 是恒真的空断言（改常量两边一起变）。客户端判断的就是 "FIXTURE" 这个
+		// 字符串，所以它才是契约。
+		if human.Source != "FIXTURE" {
+			t.Fatalf("human %s does not declare source=\"FIXTURE\" (got %q): the client cannot tell it is a placeholder", human.ID, human.Source)
+		}
+		if human.SceneFit != nil {
+			t.Fatalf("human %s carries sceneFit=%d with no scoring source", human.ID, *human.SceneFit)
+		}
+		// 正向钉：占位理由必须**自报**是占位。原先这里用子串黑名单
+		// （"内容经验" 等），结果连诚实文案"无真实内容经验来源"也被判红 ——
+		// 黑名单拦不住改写，正向要求才拦得住。
+		if !strings.Contains(human.FitReason, "占位") {
+			t.Fatalf("human %s FitReason does not identify itself as placeholder data: %q", human.ID, human.FitReason)
+		}
+		// 旧的那三句原话不许回来（它们是精确的历史字符串，可精确钉）。
+		for _, falseClaim := range []string{"同类 Scene 有真实完成记录", "出片与到访转化稳定", "相关 SKU 内容经验"} {
+			if strings.Contains(human.FitReason, falseClaim) {
+				t.Fatalf("human %s FitReason asserts something with no record behind it: %q", human.ID, human.FitReason)
+			}
+		}
+	}
+	// 5) 客户端读的是 JSON，不是结构体 —— source 必须在序列化结果里。
+	humansJSON, err := json.Marshal(detail.Humans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(humansJSON), `"source":"FIXTURE"`) {
+		t.Fatalf("human source missing from JSON — the client can never render the placeholder marker: %s", humansJSON)
+	}
+	// 注意：这里**故意不**用反射去钉 capacityFor 是否回来 —— 它是包级函数不是
+	// 方法，reflect.MethodByName 永远找不到，那样的断言是空钉（永远绿）。
+	// "编造容量的函数不许回来"由 scripts/check-regression-contracts.sh 的静态
+	// grep 钉，并且已验证过它会变红。
 }

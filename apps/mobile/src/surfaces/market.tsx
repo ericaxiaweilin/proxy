@@ -55,15 +55,30 @@ import { resolveAuthorDisplayName } from "../feed-author";
 import { ReportSheet } from "../components/report-sheet";
 import { opportunityReportTarget, type ModerationClient, type ReportTarget } from "../moderation-client";
 
-// “热门探索点” = 可以是河内市中心的著名地点 (西湖、还剑湖)，
-// 不过是真实经纬度，作为"探索"显示的独立 marker (PURPLE_HOT)。
-// 这些不是“用户附近”，是“运营推广点”。如果 server 返回了
-// 真实推荐点，该结构被覆盖。
-const EXPLORER_SPOTS: ReadonlyArray<{ id: string; name: string; lat: number; lng: number; tag: "HOT" | "EXPLORE" }> = [
+// GEO-HONEST-001: 地图上的三个静态种子探索点（西湖 / 还剑湖 / 老城区）。
+//
+// 坐标是真实经纬度，作为"探索"显示的独立 marker (PURPLE_HOT)。
+// 这些不是“用户附近”，是“运营推广点”—— 但**没有运营后台在下发它们**，
+// 也没有热度数据，就是三个人工写死的 marker。所以不叫"热门"。
+// GEO-HONEST-001: 原先这里写着"如果 server 返回了真实推荐点，该结构被覆盖"——
+// 实测**没有这段覆盖代码**。全仓 SEEDED_EXPLORER_SPOTS 有三处引用：定义、聚合输入 pinInputs、渲染处，
+// 渲染是无条件的。注释描述了一个不存在的分支，下一个读代码的人会以为这些点
+// 已经接了后端。该说法已删除。
+//
+// 另外"热门"是个没有来源的判断：没有热度数据、没有曝光计数、没有运营配置表，
+// 就是三个人工写死的 marker。所以改名为 SEEDED_ 前缀，并在渲染时明说它是种子点。
+// 接真实 POI（含真实热度）属于 GEO-POI-001。
+const SEEDED_EXPLORER_SPOTS: ReadonlyArray<{ id: string; name: string; lat: number; lng: number; tag: "HOT" | "EXPLORE" }> = [
   { id: "spot_westlake", name: "西湖", lat: 21.057, lng: 105.821, tag: "HOT" },
   { id: "spot_hoankiem", name: "还剑湖", lat: 21.0285, lng: 105.8524, tag: "EXPLORE" },
   { id: "spot_oldquarter", name: "老城区", lat: 21.034, lng: 105.847, tag: "EXPLORE" }
 ];
+
+// GEO-HONEST-001: 没有任何机会坐标、也没拿到 GPS 时的地图视口中心。
+//
+// 它是**视口兜底**，不是"用户位置"、也不是任何一条订单的坐标。原先写成内联
+// 字面量 `21.0285, 105.8542`，和真实坐标在代码里长得一样。提成具名常量。
+const HANOI_VIEWPORT_FALLBACK = { latitude: 21.0285, longitude: 105.8542 } as const;
 
 export type MarketViewMode = "LIST" | "MAP";
 type OpportunityStatusFilter = "ALL" | "APPLIED" | "CREATED" | "EXECUTING";
@@ -1827,7 +1842,7 @@ function MarketMap({
       ...(tab === "OPPORTUNITY"
         ? opportunityPins.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, title: p.title, kind: "opp" as const }))
         : []),
-      ...EXPLORER_SPOTS.map((spot) => ({ id: `spot:${spot.id}`, lat: spot.lat, lng: spot.lng, title: spot.name, kind: "spot" as const, tag: spot.tag })),
+      ...SEEDED_EXPLORER_SPOTS.map((spot) => ({ id: `spot:${spot.id}`, lat: spot.lat, lng: spot.lng, title: spot.name, kind: "spot" as const, tag: spot.tag })),
     ],
     [opportunityPins, tab]
   );
@@ -1838,7 +1853,7 @@ function MarketMap({
       return { latitude: userCenter.lat, longitude: userCenter.lng, latitudeDelta: 0.08, longitudeDelta: 0.08 };
     }
     if (opportunityPins.length === 0) {
-      return { latitude: 21.0285, longitude: 105.8542, latitudeDelta: 0.12, longitudeDelta: 0.12 };
+      return { latitude: HANOI_VIEWPORT_FALLBACK.latitude, longitude: HANOI_VIEWPORT_FALLBACK.longitude, latitudeDelta: 0.12, longitudeDelta: 0.12 };
     }
     const avgLat = opportunityPins.reduce((s, p) => s + p.lat, 0) / opportunityPins.length;
     const avgLng = opportunityPins.reduce((s, p) => s + p.lng, 0) / opportunityPins.length;
@@ -2002,8 +2017,9 @@ function MarketMap({
               key={m.id}
               coordinate={{ latitude: m.lat, longitude: m.lng }}
               title={m.title}
-              description={m.tag === "HOT" ? "热门探索点" : "探索点"}
+              description={m.tag === "HOT" ? "种子探索点 · 非实时热度" : "种子探索点"}
               pinColor={m.tag === "HOT" ? "#7A2DC7" : "#9A8AB5"}
+              opacity={0.85}
             />
           );
         })}
@@ -2093,13 +2109,6 @@ function MarketMap({
       ) : null}
     </View>
   );
-}
-
-function mapConfig(): { _removed: true } {
-  // R15.x: 旧 mapConfig 被 MarketMap 内的 useMemo + state 取代。
-  // 保留一个 stub 以免外部遗留调用导致编译失败（defensive — 当前
-  // 文件内未发现额外调用方）。如闲置超过 1 个 release 可删除。
-  return { _removed: true };
 }
 
 const styles = StyleSheet.create({
