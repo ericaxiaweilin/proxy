@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -1123,6 +1124,34 @@ func (r *EngagementRepository) ListRepliesByPost(ctx context.Context, postID str
 		out[i], out[j] = out[j], out[i]
 	}
 	return out, rows.Err()
+}
+
+// ListPostIDsWithMatchingReply 见 engagement.Repository 上的注释
+// （SEARCH-CORPUS-003）：feed 搜索的「评论语料」由 engagement 持有，所以
+// 判定写在这里而不是让 localnet 去猜。
+//
+// 用 strpos 而不是 LIKE：查询串是**字面**子串，用户敲的 "%" 就该匹配百分号
+// 本身（PROFILE-SEARCH-001）。
+func (r *EngagementRepository) ListPostIDsWithMatchingReply(ctx context.Context, postIDs []string, loweredQuery string) (map[string]bool, error) {
+	hits := make(map[string]bool)
+	if len(postIDs) == 0 || strings.TrimSpace(loweredQuery) == "" {
+		return hits, nil
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT DISTINCT post_id FROM engagement.replies
+		WHERE post_id = ANY($1) AND strpos(lower(body), $2) > 0`, postIDs, strings.ToLower(loweredQuery))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var postID string
+		if err := rows.Scan(&postID); err != nil {
+			return nil, err
+		}
+		hits[postID] = true
+	}
+	return hits, rows.Err()
 }
 
 func (r *EngagementRepository) AddRepost(ctx context.Context, re engagement.Repost) error {

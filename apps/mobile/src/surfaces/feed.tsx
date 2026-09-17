@@ -33,7 +33,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { avatarFileName, createProfileStore } from "../profile-store";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { readFeedDiskCache, writeFeedDiskCache } from "../feed-disk-cache";
-import { normalizeFeedSearchQuery, postMatchesFeedSearch } from "../feed-search";
+import { normalizeFeedSearchQuery } from "../feed-search";
 import { mergePostEngagement, mergeReactedPostIds } from "../post-engagement-model";
 
 // Re-export v2 组件，保持其他 surface （me.tsx 等）从 ./feed 导入的兼容性。
@@ -54,7 +54,7 @@ import type { FeedScope } from "../feed-scope-filter";
 import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
 import { isOwnAuthorId, isOwnPost as isOwnPostById, resolveAuthorDisplayName, resolveReplyAuthorDisplayName } from "../feed-author";
-import { hiddenReplyCount, shouldOfferReplyToggle, visibleReplies } from "../reply-preview";
+import { hiddenReplyCount, repliesMatchingFirst, shouldOfferReplyToggle, visibleReplies } from "../reply-preview";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
 type FeedSection = "POSTS" | "STATUS" | "COMMUNITY";
@@ -1001,11 +1001,19 @@ export function FeedSurface({
         if (!customFeedTokens.some((token) => haystack.includes(token))) return false;
       }
     }
-    // SEARCH-CORPUS-001: 改用 ./feed-search 的唯一实现，字段集与 server 的
-    // postMatchesSearch 逐字对应（正文 / 作者展示名 / 城市；派生 contextRefs 不算）。
-    // 服务端已经按同一份语义过滤过，这里只是本地兜底 —— 之前两边的字段集不一致，
-    // 客户端这一层只会把服务端已认可的帖子再丢掉一遍。
-    if (!postMatchesFeedSearch(post, normalizeFeedSearchQuery(searchQuery))) return false;
+    // SEARCH-CORPUS-003: 搜索结果**由服务端判定**，本地不再重跑谓词。
+    //
+    // 这里以前会用 ./feed-search 的共享谓词再滤一遍（SEARCH-CORPUS-001）。那在
+    // 「搜索字段只有正文 / 作者名 / 城市」时是成立的：这些字段客户端全都看得到，
+    // 两端语义可以严格一致，本地那一遍只是兜底。
+    //
+    // 评论进搜索之后就不成立了：客户端一次只拉到前 20 条评论，服务端看的是全部。
+    // 本地再滤一遍只会**比服务端更窄** —— 靠第 21 条评论命中的帖子会被客户端
+    // 丢掉，表现就是「服务端明明匹配了，列表里却没有」，正是 SEARCH-CORPUS-001
+    // 修的那个病换了个地方复发。
+    //
+    // 所以搜索态下不再本地过滤。谓词的唯一实现仍在 ./feed-search
+    // （个人主页那一屏数据全在本地，用它），这里只是不再拿它去覆盖服务端。
     return true;
   });
   // 偏好-权重：只重排不隐藏。类别按帖子属性归一后取权重分，
@@ -1233,7 +1241,13 @@ export function FeedSurface({
 		  // FEED-REPLY-002: 评论默认展开前 5 条，超出才折叠；不再「全折叠」。
 		  const replies = postReplies[post.postId] ?? [];
 		  const repliesExpanded = expandedReplies.has(post.postId);
-		  const shownReplies = visibleReplies(replies, repliesExpanded);
+		  // SEARCH-CORPUS-003: 搜索时把命中的评论排到前面，否则「这条为什么在
+		  // 结果里」没有答案 —— 命中的那条可能正好在被折叠的第 17 条。
+		  const replyQuery = normalizeFeedSearchQuery(searchQuery);
+		  const orderedReplies = replyQuery === ""
+		    ? replies
+		    : repliesMatchingFirst(replies, (reply) => reply.body.toLowerCase().includes(replyQuery));
+		  const shownReplies = visibleReplies(orderedReplies, repliesExpanded);
 		  const collapsedReplies = hiddenReplyCount(replies.length);
 		  const offerReplyToggle = shouldOfferReplyToggle(replies.length);
           const chips = post.contextRefs.filter((entry) => entry.contextType !== "QUOTE_POST");

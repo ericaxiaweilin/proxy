@@ -26,6 +26,29 @@ export function hiddenReplyCount(total: number, limit: number = REPLY_PREVIEW_LI
   return Math.max(0, total - Math.max(0, limit));
 }
 
+/**
+ * SEARCH-CORPUS-003：搜索态下把**命中的评论**排到最前面。
+ *
+ * 为什么需要：评论现在参与动态搜索，但卡片默认只显示前 5 条。一条帖子完全可能
+ * 是因为第 17 条评论才出现在结果里的，用户把可见的几条看完也找不到自己搜的那个
+ * 词 ——「这条为什么在这儿」没有答案，和搜不到一样让人不信任搜索。
+ *
+ * 只**重排**、不增删：命中与否不改变评论集合，一条都不会少。
+ * 一条都没命中时原样返回（不做无意义的拷贝顺序变化）。
+ */
+export function repliesMatchingFirst<T>(
+  all: readonly T[],
+  matches: (reply: T) => boolean
+): T[] {
+  if (all.length <= 1) return [...all];
+  const hit: T[] = [];
+  const rest: T[] = [];
+  for (const reply of all) {
+    if (matches(reply)) hit.push(reply); else rest.push(reply);
+  }
+  return hit.length === 0 ? [...all] : [...hit, ...rest];
+}
+
 /** 是否值得渲染展开/收起控件：只有超出预览条数时才值得。 */
 export function shouldOfferReplyToggle(
   total: number,

@@ -158,6 +158,13 @@ func NewServerWithRuntime(identityService *identity.Service, demandService *dema
 	if idempotencyStore == nil {
 		idempotencyStore = command.NewMemoryIdempotencyStore()
 	}
+	// SEARCH-CORPUS-003: feed 搜索要能命中评论，而评论只存在 engagement 里
+	// （Post 上一条都没有）。接在这里而不是 main.go：所有 NewServer* 变体和
+	// 全部测试都从这一个函数过，不存在「某条构造路径忘了接线、于是搜索悄悄
+	// 不搜评论」的分支 —— 那正是这类可选端口最容易烂掉的方式。
+	if localNetService != nil && engagementService != nil {
+		localNetService.SetReplySearch(engagementService)
+	}
 	readyMode := "local_memory"
 	if readyCheck != nil {
 		readyMode = "configured"

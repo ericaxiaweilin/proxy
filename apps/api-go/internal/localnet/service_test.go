@@ -369,6 +369,83 @@ func TestListFeedPosts_SearchMatchesAuthorNameAndCity(t *testing.T) {
 	}
 }
 
+// SEARCH-CORPUS-003：feed 搜索必须命中**评论**。
+//
+// 回归背景：评论就显示在动态卡片里，是这个界面数据域的一部分，但搜索只认
+// 正文 / 作者名 / 城市 —— 一条「正文没写、全在评论里」的帖永远搜不到。
+// 难点在于评论根本不在 Post 上（存在 engagement 里），所以判定必须由外部端口
+// 给进来；这个测试同时钉住「端口被真的调用了」和「没接线时不假装能搜」。
+type stubReplySearch struct {
+	calls     int
+	lastQuery string
+	// matchAll 时把**所有候选**都算命中，用来证明 listFeed 真的把结果用上了。
+	matchAll bool
+}
+
+func (s *stubReplySearch) ListPostIDsWithMatchingReply(_ context.Context, postIDs []string, loweredQuery string) (map[string]bool, error) {
+	s.calls++
+	s.lastQuery = loweredQuery
+	if !s.matchAll {
+		return map[string]bool{}, nil
+	}
+	out := make(map[string]bool, len(postIDs))
+	for _, id := range postIDs {
+		out[id] = true
+	}
+	return out, nil
+}
+
+func TestListFeedPosts_SearchMatchesReplyBodies(t *testing.T) {
+	s := New()
+	create := func(payload map[string]any) {
+		t.Helper()
+		if r := s.Handle(envelopeFor("", "CreatePost", payload)); r.Outcome != "ACCEPTED" {
+			t.Fatalf("create post %+v: %+v", payload, r.Error)
+		}
+	}
+	// 两条正文都不含「只在评论里」—— 只有评论能命中。
+	create(map[string]any{"body": "西湖昨天夕阳", "visibility": "PUBLIC"})
+	create(map[string]any{"body": "河内夜市美食", "visibility": "PUBLIC"})
+
+	count := func(query string) int {
+		t.Helper()
+		r := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"search": query}))
+		if r.Outcome != "ACCEPTED" {
+			t.Fatalf("list feed search %q: %+v", query, r.Error)
+		}
+		var payload struct {
+			Posts []map[string]any `json:"posts"`
+		}
+		if err := json.Unmarshal([]byte(r.OperationRef), &payload); err != nil {
+			t.Fatalf("unmarshal payload for %q: %v", query, err)
+		}
+		return len(payload.Posts)
+	}
+
+	// 没接线时：评论不参与搜索，搜不到就是搜不到 —— 不许假装能搜。
+	if got := count("只在评论里"); got != 0 {
+		t.Fatalf("unwired reply search: want 0, got %d", got)
+	}
+
+	lookup := &stubReplySearch{matchAll: true}
+	s.SetReplySearch(lookup)
+
+	if got := count("只在评论里"); got != 2 {
+		t.Fatalf("reply search '只在评论里': want 2, got %d", got)
+	}
+	if lookup.calls == 0 {
+		t.Fatal("listFeed 根本没去问评论 —— 评论进搜索这件事又变成死通道了")
+	}
+	if lookup.lastQuery != "只在评论里" {
+		t.Fatalf("reply lookup got query %q, want the normalized query", lookup.lastQuery)
+	}
+	// 评论没命中时必须仍然是 0 —— 防止被写成「有查询就恒真」。
+	lookup.matchAll = false
+	if got := count("不存在的关键词"); got != 0 {
+		t.Fatalf("reply miss: want 0, got %d", got)
+	}
+}
+
 // postMatchesSearch 的字段边界：正文 / 作者名 / 城市命中，
 // 但**派生**的 ContextRefs 不参与 —— 否则搜索会返回用户根本没写过的词。
 func TestPostMatchesSearch_ExcludesDerivedContextRefs(t *testing.T) {
@@ -393,9 +470,25 @@ func TestPostMatchesSearch_ExcludesDerivedContextRefs(t *testing.T) {
 		{"河内", false},      // 谁都不含
 	}
 	for _, c := range cases {
-		if got := postMatchesSearch(post, strings.ToLower(c.query)); got != c.want {
+		if got := postMatchesSearch(post, strings.ToLower(c.query), false); got != c.want {
 			t.Fatalf("postMatchesSearch(%q) = %v, want %v", c.query, got, c.want)
 		}
+	}
+}
+
+// SEARCH-CORPUS-003：评论命中时帖子必须出现在结果里 —— 哪怕正文、作者名、
+// 城市一个都不含。评论就显示在动态卡片上，搜不到等于对这一屏的数据域撒谎。
+func TestPostMatchesSearch_MatchesReplyHit(t *testing.T) {
+	post := Post{ID: "post_1", Body: "西湖昨天夕阳", AuthorDisplayName: "晴晴", CityScope: "岘港"}
+	if postMatchesSearch(post, "评论里才有的词", false) {
+		t.Fatal("没有评论命中时不该匹配")
+	}
+	if !postMatchesSearch(post, "评论里才有的词", true) {
+		t.Fatal("评论命中时必须匹配，否则评论里的词永远搜不到")
+	}
+	// 空查询恒 true —— 不搜索即不过滤，评论命中与否都不影响。
+	if !postMatchesSearch(post, "", false) {
+		t.Fatal("空查询必须不过滤")
 	}
 }
 

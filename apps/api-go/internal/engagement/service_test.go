@@ -154,6 +154,52 @@ func TestPostCommentVisibilityRefreshesListAndCount(t *testing.T) {
 	}
 }
 
+// SEARCH-CORPUS-003：feed 搜索问「这些帖子里谁有命中的评论」。
+//
+// 这个判定归 engagement，因为评论只存在这里 —— localnet 的 Post 上一条都没有。
+// 顺带钉住「字面子串」语义：传进来的 % 就是个百分号，不是通配符
+// （PROFILE-SEARCH-001 在 profile 搜索上已经为同一个坑付过一次学费）。
+func TestListPostIDsWithMatchingReplyIsLiteralSubstring(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	_ = repo.AddReply(ctx, Reply{ID: "r1", PostID: "post_a", ActorID: "u1", Body: "这家的河粉真的好吃"})
+	_ = repo.AddReply(ctx, Reply{ID: "r2", PostID: "post_b", ActorID: "u2", Body: "西湖昨天夕阳很美"})
+	_ = repo.AddReply(ctx, Reply{ID: "r3", PostID: "post_c", ActorID: "u3", Body: "折扣 50% off"})
+
+	hits, err := repo.ListPostIDsWithMatchingReply(ctx, []string{"post_a", "post_b", "post_c"}, "河粉")
+	if err != nil {
+		t.Fatalf("reply search: %v", err)
+	}
+	if !hits["post_a"] || hits["post_b"] || hits["post_c"] {
+		t.Fatalf("reply search '河粉': %+v", hits)
+	}
+	// 只问候选：不在 postIDs 里的帖子即使命中也不该出现（feed 只关心这一页）。
+	scoped, err := repo.ListPostIDsWithMatchingReply(ctx, []string{"post_b"}, "河粉")
+	if err != nil {
+		t.Fatalf("scoped reply search: %v", err)
+	}
+	if len(scoped) != 0 {
+		t.Fatalf("scoped reply search must stay within the candidates: %+v", scoped)
+	}
+	// 空查询 / 空候选：不命中任何东西，也不报错。
+	empty, err := repo.ListPostIDsWithMatchingReply(ctx, []string{"post_a"}, "")
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty query must return no hits: %+v %v", empty, err)
+	}
+	// "%" 是字面量：LIKE 语义下它会吃掉所有行。
+	wildcard, err := repo.ListPostIDsWithMatchingReply(ctx, []string{"post_a", "post_c"}, "%")
+	if err != nil {
+		t.Fatalf("wildcard reply search: %v", err)
+	}
+	if !wildcard["post_c"] || wildcard["post_a"] {
+		t.Fatalf("'%%' must be a literal, not a wildcard: %+v", wildcard)
+	}
+	// Service 层直通：localnet 调的就是这个（api.NewServer 把 Service 接给 localnet）。
+	if got, err := NewWithRepository(repo).ListPostIDsWithMatchingReply(ctx, []string{"post_b"}, "夕阳"); err != nil || !got["post_b"] {
+		t.Fatalf("service-level reply search: %+v %v", got, err)
+	}
+}
+
 func TestFeedPreferenceAndReportAreDurableCommands(t *testing.T) {
 	s := New()
 	preference := s.Handle(envelopeFor("RecordFeedPreference", map[string]any{"postId": "post_1", "authorId": "author_1", "action": "REDUCE_AUTHOR"}, "post_1"))
@@ -874,6 +920,9 @@ func (p *postNotFoundRepo) SetReaction(ctx context.Context, r Reaction, active b
 }
 func (p *postNotFoundRepo) ListRepliesByPost(ctx context.Context, postID string, limit int) ([]Reply, error) {
 	return p.inner.ListRepliesByPost(ctx, postID, limit)
+}
+func (p *postNotFoundRepo) ListPostIDsWithMatchingReply(ctx context.Context, postIDs []string, loweredQuery string) (map[string]bool, error) {
+	return p.inner.ListPostIDsWithMatchingReply(ctx, postIDs, loweredQuery)
 }
 func (p *postNotFoundRepo) AddReply(ctx context.Context, r Reply) error       { return ErrPostNotFound }
 func (p *postNotFoundRepo) AddRepost(ctx context.Context, r Repost) error     { return ErrPostNotFound }

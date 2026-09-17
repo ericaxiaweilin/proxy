@@ -2696,7 +2696,7 @@ require_test "SEARCH-CORPUS-001" "./internal/localnet" \
 require_test "SEARCH-CORPUS-001" "./internal/localnet" \
   "TestPostMatchesSearch_ExcludesDerivedContextRefs" \
   "apps/api-go/internal/localnet/service_test.go" || exit $?
-if ! grep -qF 'func postMatchesSearch(p Post, loweredQuery string) bool {' apps/api-go/internal/localnet/service.go; then
+if ! grep -qF 'func postMatchesSearch(p Post, loweredQuery string, replyHit bool) bool {' apps/api-go/internal/localnet/service.go; then
   echo "  FAIL [SEARCH-CORPUS-001]: the single search predicate is gone from the server," >&2
   echo "        so the matched field set can drift again." >&2
   exit 1
@@ -2710,7 +2710,7 @@ if ! grep -qF 'if p.CityScope != "" && strings.Contains(strings.ToLower(p.CitySc
   echo "  FAIL [SEARCH-CORPUS-001]: server search no longer matches the city scope." >&2
   exit 1
 fi
-if ! grep -qF 'if !postMatchesSearch(p, search) {' apps/api-go/internal/localnet/service.go; then
+if ! grep -qF 'if !postMatchesSearch(p, search, replyHits[p.ID]) {' apps/api-go/internal/localnet/service.go; then
   echo "  FAIL [SEARCH-CORPUS-001]: listFeed no longer routes through postMatchesSearch." >&2
   exit 1
 fi
@@ -2743,10 +2743,20 @@ if ! grep -qF 'const timer = setTimeout(() => void loadFeed(query), query === ""
   echo "        so the search box only filters whatever is already loaded." >&2
   exit 1
 fi
-if ! grep -qF 'if (!postMatchesFeedSearch(post, normalizeFeedSearchQuery(searchQuery))) return false;' apps/mobile/src/surfaces/feed.tsx; then
-  echo "  FAIL [SEARCH-CORPUS-001]: the feed surface re-implements its own search" >&2
-  echo "        haystack instead of using the shared predicate, so the two field sets" >&2
-  echo "        can drift and the client silently drops rows the server matched." >&2
+# SEARCH-CORPUS-003 把评论接进了搜索，这一条必须**反过来**钉：
+# 客户端一次只拉到前 20 条评论，服务端看的是全部，所以搜索态下本地再跑一遍
+# 谓词只会比服务端更窄 —— 靠第 21 条评论命中的帖子会被客户端丢掉，正是
+# SEARCH-CORPUS-001 修的那个病换了个地方复发。搜索结果由服务端单独判定。
+if grep -qF 'if (!postMatchesFeedSearch(post, normalizeFeedSearchQuery(searchQuery))) return false;' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the feed surface re-filters locally again while" >&2
+  echo "        searching. The client only holds the first 20 replies while the server" >&2
+  echo "        sees all of them, so a local pass is strictly narrower and silently" >&2
+  echo "        drops posts the server matched through reply #21." >&2
+  exit 1
+fi
+if ! grep -qF '// SEARCH-CORPUS-003: 搜索结果**由服务端判定**，本地不再重跑谓词。' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-003]: the comment explaining why the feed must NOT" >&2
+  echo "        re-filter locally is gone, so the next person will put it back." >&2
   exit 1
 fi
 # 两处都要有：backgroundRefresh 的「新动态」合并 + showLatest 的刷入。
@@ -2830,6 +2840,88 @@ if grep -qF 'profilePosts.filter((post) => post.body.toLowerCase().includes(q))'
   exit 1
 fi
 echo "    SEARCH-CORPUS-002: PASS (profile search covers posts by body/author/city + replies)"
+
+# SEARCH-CORPUS-003：**动态流**这一屏的搜索也要覆盖评论。
+#
+# 同一个原则（每个模块有什么数据域就搜什么）在动态流上的那一半。评论就显示在
+# 动态卡片里，是这一屏数据域的一部分 —— 只看正文 / 作者名 / 城市，等于
+# 「评论里明明有这个词，搜索却说没有」。
+#
+# 难点（也是这次真正容易做假的地方）：**评论根本不在 Post 上**。它存在
+# engagement 里（engagement.replies），localnet 的 Repository 一条评论都没有。
+# 所以要么服务端真的能读到评论，要么客户端加了也是白加 —— 服务端先把帖子丢掉，
+# 客户端再怎么 OR 评论都永远匹配不到东西，正是 SEARCH-CORPUS-001 那个病。
+#
+# 所以钉的是「评论语料真的接进了服务端的判定」：
+#   - engagement 侧给出判定（只有它持有评论）
+#   - localnet 侧真的去问，并把结果喂给唯一谓词
+#   - NewServer 真的把两边接起来（接在 NewServerWithRuntime 里，所有构造路径都过）
+# 客户端这一侧则反过来：不能再本地重跑谓词，因为它只看得到前 20 条评论。
+require_test "SEARCH-CORPUS-003" "./internal/localnet" \
+  "TestListFeedPosts_SearchMatchesReplyBodies" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "SEARCH-CORPUS-003" "./internal/localnet" \
+  "TestPostMatchesSearch_MatchesReplyHit" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "SEARCH-CORPUS-003" "./internal/engagement" \
+  "TestListPostIDsWithMatchingReplyIsLiteralSubstring" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+# 判定必须长在持有评论的那一侧。放进 localnet.Repository 会逼着每个实现去编一份
+# 自己没有的评论数据 —— 结果就是「接口上有、实际恒空」的静默降级。
+if ! grep -qF 'ListPostIDsWithMatchingReply(ctx context.Context, postIDs []string, loweredQuery string) (map[string]bool, error)' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-003]: the reply-corpus predicate is gone from engagement." >&2
+  echo "        It is the only side that actually holds replies, so feed search would" >&2
+  echo "        silently stop matching comments." >&2
+  exit 1
+fi
+if ! grep -qF 'func (s *Service) ListPostIDsWithMatchingReply(ctx context.Context, postIDs []string, loweredQuery string) (map[string]bool, error) {' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-003]: engagement no longer exposes the reply corpus to" >&2
+  echo "        other services, so localnet cannot ask it anything." >&2
+  exit 1
+fi
+# PG 分支：strpos 而不是 LIKE —— 查询串是字面子串（PROFILE-SEARCH-001 的教训）。
+if ! grep -qF 'SELECT DISTINCT post_id FROM engagement.replies' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [SEARCH-CORPUS-003]: the PostgreSQL reply search is gone, so production" >&2
+  echo "        feed search never matches a comment (memory-only feature)." >&2
+  exit 1
+fi
+# localnet 侧：真的去问，而不是把端口供起来。
+if ! grep -qF 's.replySearch.ListPostIDsWithMatchingReply(ctx, candidates, search)' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-003]: listFeed no longer asks for reply hits, so the" >&2
+  echo "        reply corpus is wired but unread — the dead-channel bug again." >&2
+  exit 1
+fi
+if ! grep -qF 'if replyHit {' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-003]: the single search predicate no longer takes the" >&2
+  echo "        reply hit into account, so comments are searched nowhere." >&2
+  exit 1
+fi
+# 接线：接在 NewServerWithRuntime 里，所有 NewServer* 变体和测试都从这一个函数过，
+# 不存在「某条路径忘了接线」的分支。
+if ! grep -qF 'localNetService.SetReplySearch(engagementService)' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [SEARCH-CORPUS-003]: nothing wires the reply corpus into the localnet" >&2
+  echo "        service, so feed search degrades back to body/author/city only —" >&2
+  echo "        silently, because the port is optional." >&2
+  exit 1
+fi
+# 客户端：命中的评论要排到前面，否则「这条为什么在结果里」没有答案。
+if ! grep -qF 'repliesMatchingFirst(replies,' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-003]: search results no longer surface the matching" >&2
+  echo "        comment first, so a post matched by reply #17 looks like a wrong result." >&2
+  exit 1
+fi
+# 反向 pin：评论不参与的旧谓词不许回来。
+if grep -qF 'func postMatchesSearch(p Post, loweredQuery string) bool {' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-003]: postMatchesSearch lost its reply-hit argument, so" >&2
+  echo "        feed search is body/author/city only again." >&2
+  exit 1
+fi
+if ! grep -qF 'SEARCH-CORPUS-003' apps/mobile/src/reply-preview.test.ts; then
+  echo "  FAIL [SEARCH-CORPUS-003]: the regression ID or its mobile test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/reply-preview.test.ts || exit $?
+echo "    SEARCH-CORPUS-003: PASS (feed search reaches the reply corpus on the server)"
 
 # MUTE-REVERSIBLE-001: 屏蔽必须是「能进也能出」的。
 #

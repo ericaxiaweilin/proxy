@@ -173,6 +173,18 @@ type Repository interface {
 	SetReaction(ctx context.Context, r Reaction, active bool) (bool, error)
 	AddReply(ctx context.Context, r Reply) error
 	ListRepliesByPost(ctx context.Context, postID string, limit int) ([]Reply, error)
+	// SEARCH-CORPUS-003：feed 搜索要能命中**评论**。
+	//
+	// 评论只存在 engagement 里，localnet 的 Post 结构里一条都没有 —— 所以这个
+	// 判定只能由持有评论的这一侧给出，localnet 自己算不出来。
+	//
+	// 传进来的 postIDs 是**候选**（当前这一页），返回其中「至少有一条评论正文
+	// 包含 loweredQuery」的那些。刻意只回 postID 集合而不是命中的 reply：
+	// feed 要问的是「这条帖该不该出现在结果里」，不是「哪条评论命中了」。
+	//
+	// loweredQuery 是**字面**子串（strpos 语义），不是 LIKE 模式 —— 传进来的
+	// "%" 就只是个百分号。PROFILE-SEARCH-001 已经为同一个坑付过一次学费。
+	ListPostIDsWithMatchingReply(ctx context.Context, postIDs []string, loweredQuery string) (map[string]bool, error)
 	AddRepost(ctx context.Context, r Repost) error
 	AddBookmark(ctx context.Context, b Bookmark) error
 	// R15.61 / R15.62 — 反查 user 的 reply / bookmark 列表 (profile 5-tab)
@@ -426,6 +438,29 @@ func (r *MemoryRepository) ListRepliesByPost(_ context.Context, postID string, l
 	return out, nil
 }
 
+// ListPostIDsWithMatchingReply 见 Repository 上的注释（SEARCH-CORPUS-003）。
+func (r *MemoryRepository) ListPostIDsWithMatchingReply(_ context.Context, postIDs []string, loweredQuery string) (map[string]bool, error) {
+	hits := make(map[string]bool)
+	if len(postIDs) == 0 || strings.TrimSpace(loweredQuery) == "" {
+		return hits, nil
+	}
+	want := make(map[string]bool, len(postIDs))
+	for _, id := range postIDs {
+		want[id] = true
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, reply := range r.replies {
+		if hits[reply.PostID] || !want[reply.PostID] {
+			continue
+		}
+		if strings.Contains(strings.ToLower(reply.Body), loweredQuery) {
+			hits[reply.PostID] = true
+		}
+	}
+	return hits, nil
+}
+
 func (r *MemoryRepository) AddRepost(_ context.Context, re Repost) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -562,6 +597,16 @@ func (s *Service) SetAuthorNameResolver(resolver authorNameResolver) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.authorNames = resolver
+}
+
+// ListPostIDsWithMatchingReply 是 localnet 读评论做 feed 搜索的入口
+// （SEARCH-CORPUS-003）。localnet 通过它把「评论语料」接进搜索判定 ——
+// 评论不落在 Post 上，除了问 engagement 没有别的办法知道。
+func (s *Service) ListPostIDsWithMatchingReply(ctx context.Context, postIDs []string, loweredQuery string) (map[string]bool, error) {
+	if len(postIDs) == 0 || strings.TrimSpace(loweredQuery) == "" {
+		return map[string]bool{}, nil
+	}
+	return s.repository.ListPostIDsWithMatchingReply(ctx, postIDs, loweredQuery)
 }
 
 func New() *Service {

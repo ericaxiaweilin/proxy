@@ -732,6 +732,29 @@ type Service struct {
 	// account profile (PROFILE-READ-001). Nil = legacy unwired behaviour
 	// (client-supplied echo); production wiring always sets it.
 	authorNames authorNameResolver
+	// replySearch 让评论进 feed 搜索（SEARCH-CORPUS-003）。nil = 不搜评论。
+	replySearch ReplySearchLookup
+}
+
+// ReplySearchLookup 是 feed 搜索读**评论**的窄口（SEARCH-CORPUS-003）。
+//
+// 为什么必须是个外部端口：评论（engagement.replies）根本不在 Post 上，
+// localnet 的 Repository 里一条评论都没有。想在搜索里命中评论，只能问持有
+// 评论的那一侧。刻意不做成本包的 Repository 方法 —— 那会逼着每个实现
+// 去编一份自己没有的评论数据，结果就是「接口上有、实际恒空」的静默降级
+// （POLL-VOTE-001 已经警告过这个形状）。
+//
+// 由 api.NewServer 接线，生产与测试走同一条路，不存在「忘了接线」的分支。
+type ReplySearchLookup interface {
+	ListPostIDsWithMatchingReply(ctx context.Context, postIDs []string, loweredQuery string) (map[string]bool, error)
+}
+
+// SetReplySearch wires the reply corpus into feed search (SEARCH-CORPUS-003).
+// nil = 评论不参与搜索（只剩正文 / 作者名 / 城市）。
+func (s *Service) SetReplySearch(lookup ReplySearchLookup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.replySearch = lookup
 }
 
 // authorNameResolver is the narrow consumer-side contract so localnet does
@@ -1616,16 +1639,30 @@ func (s *Service) hydratePostMedia(ctx context.Context, feed []Post) map[string]
 // 实际搜不到」：server 先把正文不含关键词的帖子全部丢掉，客户端那两段
 // 再怎么 OR authorDisplayName 都永远匹配不到东西。
 //
-// 现在匹配「用户能看见的东西」：正文、作者展示名、城市。
+// 现在匹配「用户能看见的东西」：正文、作者展示名、城市，以及**评论**
+// （SEARCH-CORPUS-003：评论就显示在动态卡片里，是这一屏数据域的一部分 ——
+// 只看正文等于「评论里明明有这个词，搜索却说没有」）。
+//
 // 刻意**不含** ContextRefs —— 它是 classifyPostFallback 从正文派生的
 // （见 createPost），让搜索命中派生标签会返回用户根本没写过的词，
 // 那是噪音不是功能。
 //
-// 语义与 apps/mobile/src/localnet-client.ts 的 searchFieldsOf 保持一致：
+// replyHit 由调用方给出：评论不落在 Post 上，只有 engagement 知道
+// （见 ReplySearchLookup）。传 false 表示这条帖没有命中的评论。
+//
+// 已知上限：这里只判定**已经取回来的那一页**。PG 分支 ListFeedPage 一页
+// 最多 51 条，所以搜索扫的是最近的 51 条而不是全库 —— 存量 25 条时看不出来，
+// 数据涨上去就会变成「老帖搜不到」。要真正覆盖全语料得把谓词下推到 SQL，
+// 那属于另一件事，这里先不假装已经解决。
+//
+// 语义与 apps/mobile/src/feed-search.ts 的 postMatchesFeedSearch 保持一致：
 // 两边不一致时，客户端 filter 只会把 server 已认可的帖子再丢掉一遍，
 // 表现为「服务端明明匹配了，列表里却没有」。
-func postMatchesSearch(p Post, loweredQuery string) bool {
+func postMatchesSearch(p Post, loweredQuery string, replyHit bool) bool {
 	if loweredQuery == "" {
+		return true
+	}
+	if replyHit {
 		return true
 	}
 	if strings.Contains(strings.ToLower(p.Body), loweredQuery) {
@@ -1682,6 +1719,20 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 	if err != nil {
 		return command.Rejected(e, "FEED_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.feed_read_failed", nil)
 	}
+	// SEARCH-CORPUS-003: 带查询时先问一次「这批候选里谁有命中的评论」。
+	// 评论不在 Post 上，只能问 engagement —— 而且只查这一页的候选，
+	// 不查全库，代价随页大小而不是随评论总量增长。
+	var replyHits map[string]bool
+	if search != "" && s.replySearch != nil {
+		candidates := make([]string, 0, len(posts))
+		for _, p := range posts {
+			candidates = append(candidates, p.ID)
+		}
+		// 评论读失败不该让整条 feed 500：宁可这一屏搜不到评论，也别搜不到东西。
+		if hits, err := s.replySearch.ListPostIDsWithMatchingReply(ctx, candidates, search); err == nil {
+			replyHits = hits
+		}
+	}
 	// ALL 是全局公开时间流；LocationContext 不参与 eligibility。
 	feed := make([]Post, 0, len(posts))
 	for _, p := range posts {
@@ -1691,8 +1742,9 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
 			continue
 		}
-		// SEARCH-CORPUS-001: 匹配字段见 postMatchesSearch（正文 / 作者展示名 / 城市）。
-		if !postMatchesSearch(p, search) {
+		// SEARCH-CORPUS-001: 匹配字段见 postMatchesSearch
+		// （正文 / 作者展示名 / 城市；SEARCH-CORPUS-003 起再加上评论）。
+		if !postMatchesSearch(p, search, replyHits[p.ID]) {
 			continue
 		}
 		// GHOST-24H-001: 到期的临时动态不再出现在 feed 里。
