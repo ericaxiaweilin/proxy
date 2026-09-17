@@ -257,6 +257,8 @@ commands:
     domain: Engagement
   - command: ListMyActivities
     domain: Activity
+  - command: ListMyBadges
+    domain: RealityScene
   - command: ListMyBusinessAccounts
     domain: Business
   - command: ListMyConvos

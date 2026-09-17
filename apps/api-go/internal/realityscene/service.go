@@ -203,6 +203,9 @@ type Repository interface {
 	// 本人当前还在有效期内的 check-in（scene id 列表）—— 客户端重开 app 时
 	// 要靠它把"我在这里"按钮的选中态恢复回来，不能只靠本地内存。
 	ListMyCheckIns(context.Context, string, time.Time) ([]string, error)
+	// SCENE-BADGE-001：已获得徽章（append-only）。
+	EarnBadge(context.Context, string, EarnedBadge) error
+	ListMyEarnedBadges(context.Context, string) ([]EarnedBadge, error)
 	// SCENE-CONTRIB-001
 	ProposeScene(context.Context, Proposal, time.Time) error
 	ConfirmSceneProposal(context.Context, string, string, time.Time) (int, error)
@@ -225,10 +228,12 @@ type memoryRepository struct {
 	scenes    []Scene
 	checkins  map[string]sceneCheckin
 	proposals []Proposal
+	// SCENE-BADGE-001：已获得徽章（append-only，按 actor 存）。
+	earnedBadges map[string][]EarnedBadge
 }
 
 func newMemoryRepository() *memoryRepository {
-	return &memoryRepository{m: map[string]UserState{}, scenes: launchScenes(), checkins: map[string]sceneCheckin{}}
+	return &memoryRepository{m: map[string]UserState{}, scenes: launchScenes(), checkins: map[string]sceneCheckin{}, earnedBadges: map[string][]EarnedBadge{}}
 }
 
 type proposalNotFound struct{ id string }
@@ -315,6 +320,19 @@ func (r *memoryRepository) ListMyCheckIns(_ context.Context, actorID string, now
 // 提交者不能确认自己的提案 —— 这条规则放在**服务层**（HandleContext）拒绝，
 // 不放这里：这里只负责存。放在存储层只会变成"写进去了但查询时要记得过滤"，
 // 那种约束早晚会有人忘记。
+func (r *memoryRepository) EarnBadge(_ context.Context, actorID string, badge EarnedBadge) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.earnedBadges[actorID] = append(r.earnedBadges[actorID], badge)
+	return nil
+}
+
+func (r *memoryRepository) ListMyEarnedBadges(_ context.Context, actorID string) ([]EarnedBadge, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]EarnedBadge(nil), r.earnedBadges[actorID]...), nil
+}
+
 func (r *memoryRepository) ProposeScene(_ context.Context, p Proposal, now time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -694,7 +712,7 @@ func humansFor(variant string) []Human {
 	return []Human{{ID: "creator_mai", Name: "Mai", Role: role, Availability: availability, FitReason: "同类 Scene 有真实完成记录", SceneFit: 96, IsAI: false, AvatarURL: mockidentity.AvatarPathForFacetKey("mai")}, {ID: "creator_linh", Name: "Linh", Role: "Photo / Lifestyle", Availability: "近期可约", FitReason: "出片与到访转化稳定", SceneFit: 92, IsAI: false, AvatarURL: mockidentity.AvatarPathForFacetKey("linh")}, {ID: "creator_trang", Name: "Trang", Role: "Food / UGC", Availability: "周末可约", FitReason: "相关 SKU 内容经验", SceneFit: 88, IsAI: false, AvatarURL: mockidentity.AvatarPathForFacetKey("trang")}}
 }
 func (s *Service) Supports(t string) bool {
-	return t == "ListMyRealitySceneState" || t == "SetRealitySceneSaved" || t == "SetRealityScenePlanned" || t == "SetPrivateRealitySceneVisited" || t == "SetRealitySceneCheckIn" || t == "ProposeRealityScene" || t == "ConfirmRealitySceneProposal" || t == "ListRealitySceneProposals"
+	return t == "ListMyBadges" || t == "ListMyRealitySceneState" || t == "SetRealitySceneSaved" || t == "SetRealityScenePlanned" || t == "SetPrivateRealitySceneVisited" || t == "SetRealitySceneCheckIn" || t == "ProposeRealityScene" || t == "ConfirmRealitySceneProposal" || t == "ListRealitySceneProposals"
 }
 func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
@@ -716,6 +734,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.confirmProposal(ctx, e)
 	case "ListRealitySceneProposals":
 		return s.listProposals(ctx, e)
+	case "ListMyBadges":
+		return s.listMyBadges(ctx, e)
 	case "ListMyRealitySceneState":
 		return s.listMyState(ctx, e)
 	}
@@ -743,6 +763,21 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.setUserStateField(ctx, e, sceneID, "private_visited", enabled)
 	}
 	return command.Rejected(e, "REALITY_SCENE_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "reality_scene.command_unsupported", nil)
+}
+
+// listMyBadges 回本人已获得的全部徽章（按获得时间序）。
+func (s *Service) listMyBadges(ctx context.Context, e command.Envelope) command.Result {
+	badges, err := s.repo.ListMyEarnedBadges(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "REALITY_SCENE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.read_failed", nil)
+	}
+	// 目录一并带回去，客户端不用内置一份 —— 改名/换图标在服务端改。
+	cat := make([]SceneBadge, len(SceneBadges))
+	copy(cat, SceneBadges)
+	r := command.Accepted(e, "RealitySceneBadgeCollection", e.Actor.ID, 1, "READY", nil)
+	raw, _ := json.Marshal(map[string]any{"badges": badges, "catalog": cat})
+	r.OperationRef = string(raw)
+	return r
 }
 
 // listMyState 回本人对每个场景的 saved / planned / private_visited 状态。
@@ -774,12 +809,15 @@ func (s *Service) setCheckIn(ctx context.Context, e command.Envelope, sceneID st
 		if err := s.repo.CancelCheckIn(ctx, e.Actor.ID, sceneID); err != nil {
 			return command.Rejected(e, "REALITY_SCENE_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.write_failed", nil)
 		}
-		return s.checkInResult(e, sceneID, false, nil)
+		return s.checkInResult(e, sceneID, false, nil, nil)
 	}
 	if err := s.repo.CheckInScene(ctx, e.Actor.ID, sceneID, distance, time.Now()); err != nil {
 		return command.Rejected(e, "REALITY_SCENE_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.write_failed", nil)
 	}
-	return s.checkInResult(e, sceneID, true, distance)
+	// SCENE-BADGE-001：打卡成功后按规则判定徽章，新获得的 append-only 记录，
+	// 并随响应返回给客户端（打卡页弹「恭喜获得徽章」）。
+	newly := s.evaluateAndEarnBadges(ctx, e.Actor.ID, sceneID)
+	return s.checkInResult(e, sceneID, true, distance, newly)
 }
 
 // setUserStateField 处理 saved / planned / private_visited 三个布尔列。
@@ -879,14 +917,49 @@ func proposalIDFor(actorID, name string, lat, lng float64) string {
 // verified 只在**带了距离**且距离很近时才为 true，含义是"设备自报就在附近"，
 // **不是**"已核实本人在场" —— 没有任何现场核销（订单/核销码/商家确认）参与，
 // 所以文案里一个字都不许暗示已核实。
-func (s *Service) checkInResult(e command.Envelope, sceneID string, enabled bool, distance *int) command.Result {
+func (s *Service) checkInResult(e command.Envelope, sceneID string, enabled bool, distance *int, newlyEarned []string) command.Result {
 	r := command.Accepted(e, "RealitySceneCheckIn", sceneID, 1, "READY", nil)
 	payload := map[string]any{"sceneId": sceneID, "field": "checkin", "enabled": enabled, "expiresInMinutes": int(CheckinTTL.Minutes())}
 	if distance != nil {
 		payload["distanceMeters"] = *distance
 		payload["nearby"] = *distance <= 500
 	}
+	if len(newlyEarned) > 0 {
+		payload["newlyEarnedBadges"] = newlyEarned
+	}
 	raw, _ := json.Marshal(payload)
 	r.OperationRef = string(raw)
 	return r
+}
+
+// evaluateAndEarnBadges 判定并落库新获得的徽章，返回新获得 id 列表。
+func (s *Service) evaluateAndEarnBadges(ctx context.Context, actorID, sceneID string) []string {
+	checkIns, err := s.repo.ListMyCheckIns(ctx, actorID, time.Now())
+	if err != nil {
+		return nil
+	}
+	states, err := s.repo.ListUserStates(ctx, actorID)
+	if err != nil {
+		return nil
+	}
+	visitedIds := make([]string, 0, len(states))
+	for _, st := range states {
+		if st.PrivateVisited {
+			visitedIds = append(visitedIds, st.SceneID)
+		}
+	}
+	shouldHave := EvaluateSceneBadges(checkIns, visitedIds)
+	already, err := s.repo.ListMyEarnedBadges(ctx, actorID)
+	if err != nil {
+		return nil
+	}
+	haveIds := make([]string, 0, len(already))
+	for _, b := range already {
+		haveIds = append(haveIds, b.BadgeID)
+	}
+	newly := NewlyEarnedBadges(shouldHave, haveIds)
+	for _, id := range newly {
+		_ = s.repo.EarnBadge(ctx, actorID, EarnedBadge{BadgeID: id, EarnedAt: time.Now().UTC().Format(time.RFC3339), SceneID: sceneID})
+	}
+	return newly
 }

@@ -6255,6 +6255,39 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-checkin.test.ts || exit $?
 echo "    SCENE-CHECKIN-100M-001: PASS (check-in gated by 100m GPS truth)"
 
+# SCENE-BADGE-001: 打卡徽章。打卡不是终点 —— 打卡景点/集类别/留足迹要有
+# 看得见的回报，才有人愿意真的走到现场。本条锁死：规则只在
+# realityscene/badges.go（与 mobile scene-badges.ts 对齐）；打卡成功后服务端
+# 必须判定并把新获得的徽章随响应返回（客户端弹「恭喜获得徽章」）；已获得
+# 徽章 append-only 记录 + ListMyBadges 可读；PG 仓储与迁移 093 必须存在。
+require_test "SCENE-BADGE-001" "./internal/realityscene" \
+  "TestEvaluateSceneBadgesFirstCheckin" \
+  "apps/api-go/internal/realityscene/badges_test.go" || exit $?
+require_test "SCENE-BADGE-001" "./internal/realityscene" \
+  "TestEvaluateSceneBadgesSetsAndXiaomei" \
+  "apps/api-go/internal/realityscene/badges_test.go" || exit $?
+if ! grep -qF 'case "ListMyBadges"' apps/api-go/internal/realityscene/service.go; then
+  echo "  FAIL [SCENE-BADGE-001]: ListMyBadges is no longer dispatched" >&2
+  exit 1
+fi
+if ! grep -qF 'newlyEarnedBadges' apps/api-go/internal/realityscene/service.go; then
+  echo "  FAIL [SCENE-BADGE-001]: check-in response no longer carries new badges" >&2
+  exit 1
+fi
+if ! grep -qF 'func (r *RealitySceneRepository) EarnBadge' apps/api-go/internal/platform/postgres/reality_scene.go; then
+  echo "  FAIL [SCENE-BADGE-001]: the Postgres badge repository is missing," >&2
+  exit 1
+fi
+if [ ! -f apps/api-go/migrations/093_reality_scene_badges.sql ]; then
+  echo "  FAIL [SCENE-BADGE-001]: migration 093_reality_scene_badges.sql is missing." >&2
+  exit 1
+fi
+if ! grep -qF 'SCENE_BADGES' apps/mobile/src/scene-badges.ts; then
+  echo "  FAIL [SCENE-BADGE-001]: the mobile badge catalog is missing." >&2
+  exit 1
+fi
+echo "    SCENE-BADGE-001: PASS (badge rules are single-sourced, earned badges are append-only and readable)"
+
 # ADD-FRIEND-NEXT-001: 发出的请求必须可查，“已发送”不是终点。
 #
 # 根因：reload() 只把 INCOMING 投影到请求列表，OUTGOING 没有任何渲染面 ——

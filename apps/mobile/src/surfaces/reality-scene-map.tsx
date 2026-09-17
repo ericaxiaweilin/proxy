@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Circle, Marker } from "react-native-maps";
@@ -8,6 +8,7 @@ import { getCurrentFix } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
 import { sceneAddressLine, sceneCountsLine, sceneHeatScore, sceneSignalLine, sceneSourceSuffix } from "../reality-scene-address";
 import { checkinEligibility, checkinHint } from "../scene-checkin";
+import { SCENE_BADGES, SCENE_BADGE_REQUIREMENTS, sceneBadgeById } from "../scene-badges";
 // SCENE-NAV-001: 主页里的导航出口走 MEETUP-NAV-001 同一套系统地图深链，
 // 不手拼 URL、不自写导航引擎 —— 坐标校验与双端 scheme 都在那一边钉着。
 import { meetupDirectionsUrls } from "../meetup-share";
@@ -129,6 +130,29 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const [activityMsg, setActivityMsg] = useState<string>();
   // 收藏/去过/去这里三态的操作反馈：未登录提示、同步失败回滚+提示。
   const [triStateMsg, setTriStateMsg] = useState<string | undefined>(undefined);
+  // SCENE-BADGE-001：打卡获得的徽章提示（自动消失）。
+  const [badgeNotice, setBadgeNotice] = useState<string | undefined>(undefined);
+  // SCENE-BADGE-001：徽章墙（ListMyBadges → 已获得/未获得）。
+  const [badgesOpen, setBadgesOpen] = useState(false);
+  const [earnedBadges, setEarnedBadges] = useState<ReadonlySet<string>>(new Set());
+  const [badgesError, setBadgesError] = useState<string | undefined>(undefined);
+  const openBadges = (): void => {
+    if (!session?.principal) {
+      setBadgesError("请先登录，徽章才会同步。");
+      setBadgesOpen(true);
+      return;
+    }
+    setBadgesError(undefined);
+    void sendSceneCommand(authClient, session, "ListMyBadges", "me", {})
+      .then((result) => {
+        const list = Array.isArray(result.badges) ? (result.badges as Array<{ badgeId?: string }>) : [];
+        setEarnedBadges(new Set(list.map((b) => b.badgeId ?? "")));
+        setBadgesOpen(true);
+      })
+      .catch(() => setBadgesError("徽章加载失败，请重试。"));
+  };
+  // SCENE-BADGE-001：小美绑定场景（与她同框）—— 打卡这类场景有专属徽章。
+  const isXiaomeiScene = (id: string): boolean => (SCENE_BADGE_REQUIREMENTS.xiaomei_company ?? []).includes(id);
   const [scenes, setScenes] = useState<ReadonlyArray<RealityScene>>([]);
   const [session, setSession] = useState<AuthenticatedStoredSession>();
   const [origin, setOrigin] = useState<{ latitude: number; longitude: number } | undefined>(initialOrigin);
@@ -426,7 +450,14 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
     const distance = origin ? metersBetween(origin, scene) : undefined;
     if (distance !== undefined) payload.distanceMeters = distance;
     void sendSceneCommand(authClient, session, "SetRealitySceneCheckIn", scene.id, payload)
-      .then(() => setTriStateMsg(enabled ? "已打卡，90 分钟后自动结束。" : undefined))
+      .then((result) => {
+        // SCENE-BADGE-001：打卡成功的响应里带 newlyEarnedBadges，弹「恭喜获得徽章」。
+        const newly = Array.isArray(result.newlyEarnedBadges) ? (result.newlyEarnedBadges as string[]) : [];
+        if (newly.length > 0) {
+          setBadgeNotice(newly.map((id) => sceneBadgeById(id)?.name ?? id).join("、"));
+        }
+        setTriStateMsg(enabled ? "已打卡，90 分钟后自动结束。" : undefined);
+      })
       .catch(() => {
         setHere(here);
         setTriStateMsg("同步失败，已恢复之前的状态，请重试。");
@@ -574,6 +605,9 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
               <Text style={styles.checkInHint}>{checkinHint(here.has(selected.id), origin ? metersBetween(origin, selected) : undefined)}</Text>
             </View>
             {triStateMsg ? <Text style={styles.nearbyError}>{triStateMsg}</Text> : null}
+            {isXiaomeiScene(selected.id) ? (
+              <Text style={styles.xiaomeiSceneHint}>✨ 这是小美的绑定场景 —— 在这里打卡可获得「与小美同框」徽章。</Text>
+            ) : null}
             {/* SCENE-EVENT-SIGNUP-001: 只能"发起"的详情页等于只能喊话 —— 看
                 不到这个场景上已经有什么局，也没法报名。这里列出来 + 直接报名。 */}
             <Text style={styles.sectionTitle}>这里的活动</Text>
@@ -635,7 +669,13 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         {([['ALL','全部'], ['UNSEEN','没去过'], ['ACTIVE','开放中'], ['SAVED','收藏'], ['VISITED','足迹']] as const).map(([id, label]) => (
           <Pressable key={id} onPress={() => setFilter(id)} style={[styles.filter, filter === id && styles.filterActive]}><Text style={[styles.filterText, filter === id && styles.filterTextActive]}>{label}</Text></Pressable>
         ))}
+        <Pressable onPress={openBadges} style={[styles.filter, styles.filterActive]}><Text style={[styles.filterText, styles.filterTextActive]}>🏅 徽章</Text></Pressable>
       </ScrollView>
+      {badgeNotice ? (
+        <View style={styles.badgeNotice}>
+          <Text style={styles.badgeNoticeText}>🎉 恭喜获得徽章：{badgeNotice}</Text>
+        </View>
+      ) : null}
       {/* SCENE-CONTRIB-001: 社区提交。用户提的场景默认不进目录，要别的
           用户确认"这地方真的存在"才上架 —— 坐标是用户随手点的，不是查过的。 */}
       <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>社区提交</Text><Pressable onPress={() => setContribOpen((open) => !open)}><Text style={styles.sectionLink}>{contribOpen ? "收起" : "提交新场景"}</Text></Pressable></View>
@@ -696,6 +736,31 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         </ScrollView>
       )}
       {detailBody ? <View style={styles.detailOverlay}>{detailBody}</View> : null}
+      {/* SCENE-BADGE-001：徽章墙。 */}
+      <Modal animationType="fade" onRequestClose={() => setBadgesOpen(false)} transparent visible={badgesOpen}>
+        <Pressable onPress={() => setBadgesOpen(false)} style={styles.badgeScrim}>
+          <View style={styles.badgeCard}>
+            <Text style={styles.badgeTitle}>打卡徽章</Text>
+            <Text style={styles.badgeSub}>走到现场、集类别、留足迹 —— 每一样都算数。</Text>
+            {badgesError ? <Text style={styles.nearbyError}>{badgesError}</Text> : null}
+            <ScrollView style={styles.badgeList}>
+              {SCENE_BADGES.map((badge) => {
+                const earned = earnedBadges.has(badge.id);
+                return (
+                  <View key={badge.id} style={[styles.badgeRow, earned && styles.badgeRowEarned]}>
+                    <Text style={styles.badgeIcon}>{badge.icon}</Text>
+                    <View style={styles.badgeCopy}>
+                      <Text style={[styles.badgeName, !earned && styles.badgeNameLocked]}>{badge.name}{earned ? " ✓" : ""}</Text>
+                      <Text style={styles.badgeDesc}>{badge.desc}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </ScrollView>
+            <Pressable onPress={() => setBadgesOpen(false)} style={styles.badgeClose}><Text style={styles.badgeCloseText}>关闭</Text></Pressable>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -822,5 +887,22 @@ const styles = StyleSheet.create({
   humanRail: { gap: 9, paddingRight: 16 }, humanCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, padding: 13, width: 150 }, humanCardSelected: { borderColor: color.violet, borderWidth: 2 }, humanAvatar: { backgroundColor: color.proxyPurpleSoft, borderRadius: 22, height: 44, width: 44 }, humanAvatarText: { color: color.violet, fontSize: 19, fontWeight: "900" }, humanName: { color: color.ink, fontSize: 16, fontWeight: "900", marginTop: 9 }, humanAvailability: { color: color.ink, fontSize: 11, marginTop: 3 },
   sectionTitleRow: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between" }, sectionLink: { color: "#735700", fontSize: 11, fontWeight: "700", marginBottom: 9 }, menuRail: { gap: 10, paddingRight: 16 }, menuCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, overflow: "hidden", paddingBottom: 10, width: 154 }, menuCardSelected: { borderColor: "#D7A600", borderWidth: 2 }, menuImage: { height: 104, width: "100%" }, menuName: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 9, paddingHorizontal: 10 }, menuFit: { color: color.muted, fontSize: 11, marginTop: 3, paddingHorizontal: 10 }, menuPrice: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 7, paddingHorizontal: 10 },
   executionCard: { flexDirection: "row", gap: 7 }, executionAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 15, flex: 1, minHeight: 68, justifyContent: "center", paddingHorizontal: 5 }, executionActionSelected: { backgroundColor: color.violet }, executionLabel: { color: color.white, fontSize: 12, fontWeight: "900", textAlign: "center" }, executionState: { color: color.muted, fontSize: 11, marginTop: 5 }, boundaryCard: { backgroundColor: color.proxyPurpleSoft, borderRadius: 16, marginTop: 9, padding: 13 }, boundaryStrong: { color: color.ink, fontSize: 12, fontWeight: "800", lineHeight: 18 }, boundaryText: { color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 6 }, inviteAmountLabel: { color: color.ink, fontSize: 12, fontWeight: "800", marginTop: 12 }, inviteAmountRow: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 7 }, inviteAmountInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 11, borderWidth: 1, color: color.ink, flex: 1, fontSize: 15, fontWeight: "900", minHeight: 44, paddingHorizontal: 12 }, inviteCurrency: { color: color.ink, fontSize: 12, fontWeight: "900" }, confirmAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, marginTop: 12, paddingVertical: 11 }, confirmActionText: { color: color.white, fontSize: 13, fontWeight: "900" }, actionResult: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 18, marginTop: 10 }, loadingDetail: { color: color.muted, fontSize: 12, paddingVertical: 22, textAlign: "center" }, activityEmpty: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 6 }, activityRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 8, paddingHorizontal: 12, paddingVertical: 11 }, activityInfo: { flex: 1 }, activityTitle: { color: color.ink, fontSize: 13, fontWeight: "800", lineHeight: 18 }, activityMeta: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 3 }, activityJoin: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 9 }, activityJoinDisabled: { backgroundColor: color.line }, activityJoinText: { color: color.white, fontSize: 12, fontWeight: "900" },
-  sectionTitle: { color: color.ink, fontSize: 18, fontWeight: "900", marginBottom: 8, marginTop: 20 }, dataCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14 }, dataRow: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingVertical: 14 }, dataRowLast: { borderBottomWidth: 0 }, dataLabel: { color: color.ink, fontSize: 13, fontWeight: "700" }, dataValue: { color: color.muted, fontSize: 13 }, memoryCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, padding: 14 }, memoryTitle: { color: color.ink, fontSize: 14, fontWeight: "900" }, memoryText: { color: color.muted, fontSize: 11, lineHeight: 18, marginTop: 7 }
+  sectionTitle: { color: color.ink, fontSize: 18, fontWeight: "900", marginBottom: 8, marginTop: 20 }, dataCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14 }, dataRow: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingVertical: 14 }, dataRowLast: { borderBottomWidth: 0 }, dataLabel: { color: color.ink, fontSize: 13, fontWeight: "700" }, dataValue: { color: color.muted, fontSize: 13 }, memoryCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, padding: 14 }, memoryTitle: { color: color.ink, fontSize: 14, fontWeight: "900" }, memoryText: { color: color.muted, fontSize: 11, lineHeight: 18, marginTop: 7 },
+  badgeNotice: { backgroundColor: "#FFF4E0", borderRadius: 12, marginHorizontal: 14, marginTop: 8, padding: 10 },
+  badgeNoticeText: { color: "#7A4E0F", fontSize: 12, fontWeight: "700" },
+  xiaomeiSceneHint: { color: "#5B3FA3", fontSize: 12, marginTop: 6 },
+  badgeScrim: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.45)", flex: 1, justifyContent: "center", padding: 22 },
+  badgeCard: { backgroundColor: "#FFFFFF", borderRadius: 18, maxHeight: "82%", padding: 18, width: "100%" },
+  badgeTitle: { color: "#17131F", fontSize: 18, fontWeight: "900" },
+  badgeSub: { color: "#77726B", fontSize: 12, lineHeight: 17, marginTop: 4 },
+  badgeList: { marginTop: 10 },
+  badgeRow: { alignItems: "center", borderBottomColor: "rgba(20,18,31,0.06)", borderBottomWidth: 1, flexDirection: "row", gap: 12, paddingVertical: 10 },
+  badgeRowEarned: { backgroundColor: "#FFF8EC" },
+  badgeIcon: { fontSize: 24 },
+  badgeCopy: { flex: 1 },
+  badgeName: { color: "#17131F", fontSize: 14, fontWeight: "800" },
+  badgeNameLocked: { color: "#77726B", fontWeight: "700" },
+  badgeDesc: { color: "#77726B", fontSize: 11, lineHeight: 15, marginTop: 2 },
+  badgeClose: { alignItems: "center", backgroundColor: "#17131F", borderRadius: 999, marginTop: 12, paddingVertical: 11 },
+  badgeCloseText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" }
 });
