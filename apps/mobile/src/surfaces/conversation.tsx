@@ -4,12 +4,16 @@
 // R36.1 Lotus 对话视觉：cluster 气泡 / 对象基线 / 安全条 / 表情包 Drawer。
 // 设计引用：docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Image, Keyboard, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, AppState, FlatList, Image, Keyboard, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
-import * as ImagePicker from "expo-image-picker";
-// CONVO-ATTACH-001: v57 顶层 getAssetsAsync 是只会 throw 的占位实现
-//（见 image-export.ts 开头，真机验证过）—— 列表走新 API Query/Asset。
-import { AssetField, MediaType, Query, requestPermissionsAsync } from "expo-media-library";
+import { CameraView, useCameraPermissions } from "expo-camera";
+// AUDIT-CONVO-ALBUM-003: 相机图标直进"相机位 + 全量相册网格"这一屏——这是
+// WhatsApp/Instagram/Snapchat 通用做法（第一格是已经打开的实时取景，后面
+// 是完整相册原生滚动），不是简化成两个独立系统弹窗。相册这块用
+// expo-media-library 的 Query/Asset（顶层 getAssetsAsync 在当前 Expo 版本
+// 只会 throw），拍照这块用 expo-camera 的 CameraView（friend-crm.tsx 扫码
+// 已经在用同一个库，这里是同一套权限/组件模式，不是另起一个）。
+import { Asset, AssetField, MediaType, Query, requestPermissionsAsync } from "expo-media-library";
 import { ProxySwitch, ProxyLoading } from "../components/proxy-foundation";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { createAudioPlayer, type AudioPlayer } from "expo-audio";
@@ -184,11 +188,20 @@ export function ConversationSurface({
   const [secureSheetOpen, setSecureSheetOpen] = useState(false);
   const [stickerOpen, setStickerOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
-  // CONVO-ATTACH-001: 自建相册（Lotus 式）—— 点相机图标直进，首格拍摄，
-  // 后面是最新照片。系统相册一次只能做一件事（选图 XOR 拍照），合并不了，
-  // 所以这里自己摆一排缩略图 + 复用 chooseImage("CAMERA") 那条真链路。
+  // AUDIT-CONVO-ALBUM-003: 相机图标打开的这一屏——首格是实时取景（拍即发），
+  // 后面是完整相册网格，静默向下翻页（FlatList onEndReached），不放"加载
+  // 更多"这种额外按钮。ALBUM_PAGE_SIZE 只是每次翻页取多少条，不是总量上限。
+  const ALBUM_PAGE_SIZE = 60;
   const [albumOpen, setAlbumOpen] = useState(false);
-  const [albumAssets, setAlbumAssets] = useState<Array<{ uri: string; width: number; height: number }>>([]);
+  const [albumAssets, setAlbumAssets] = useState<Array<{ id: string; width: number; height: number; mediaType: MediaType; durationMs?: number }>>([]);
+  const [albumOffset, setAlbumOffset] = useState(0);
+  const [albumHasMore, setAlbumHasMore] = useState(true);
+  const [albumLoading, setAlbumLoading] = useState(false);
+  const [albumLoadingMore, setAlbumLoadingMore] = useState(false);
+  const [albumResolvingId, setAlbumResolvingId] = useState<string | undefined>(undefined);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [capturing, setCapturing] = useState(false);
+  const cameraRef = useRef<CameraView>(null);
   const [menuMessage, setMenuMessage] = useState<Message | null>(null);
   // COMP-REPORT-002: 举报「这条消息」。招嫖揽客 / 人身威胁 / 涉未成年人
   // 都发生在聊天里，用户必须能在这里报上来。
@@ -607,28 +620,47 @@ export function ConversationSurface({
     await send(item.emoji, undefined, item);
   }
 
-  async function chooseImage(source: "CAMERA" | "LIBRARY"): Promise<void> {
-    setAttachOpen(false);
-    setError(undefined);
-    const permission = source === "CAMERA"
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setError(source === "CAMERA" ? "请允许 Proxy 使用相机" : "请允许 Proxy 读取照片");
-      return;
-    }
-    const result = source === "CAMERA"
-      ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.85 })
-      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85, selectionLimit: 1 });
-    const asset = result.canceled ? undefined : result.assets[0];
-    if (!asset) return;
-    setSelectedImage({ uri: asset.uri, width: asset.width, height: asset.height, ...(asset.fileName ? { fileName: asset.fileName } : {}), ...(asset.mimeType ? { mimeType: asset.mimeType } : {}) });
-    setSelectedVideo(undefined);
+  // AUDIT-CONVO-ALBUM-004: 缩略图不逐张调用 a.getUri()——那条内部走的是
+  // PHContentEditingInput.fullSizeImageURL，为了拿"可编辑的原始文件"会强制
+  // 触发 iCloud 下载原图，60 张缩略图等于排队做 60 次网络请求，是"选完要等
+  // 好几秒才回输入框"的根因（实际卡在网格加载，不是点击那一下）。缩略图改用
+  // id 本身（经 expo-image 直接渲染本地已缓存的预览图，不碰网络）；真正的
+  // 原图 URI 延后到用户点选那一张时才单独 resolve（见 selectAlbumAsset），
+  // 从"60 次"降到"最多 1 次"。
+  //
+  // AUDIT-CONVO-ALBUM-005：iOS 上 Asset.id 本身已经是 "ph://<uuid>/L0/001"
+  // 格式（expo-media-library 原生源码 Asset.swift：
+  // self.id = "ph://\(localIdentifier)"），Android 上 id 映射的是
+  // contentUri，同样已经是完整可用地址——两边都不需要再拼协议前缀。
+  function thumbnailSource(id: string): { uri: string } {
+    return { uri: id };
   }
 
-  // CONVO-ATTACH-001: 点相机图标直进相册。最近 24 张 + 首格拍摄 —— 选图进
-  // 已有的预览＋发送链（setSelectedImage → sendImage），拍摄复用 chooseImage
-  // 的真链路（权限/取图/报错都在那一边）。空相册也开，开着给拍第一张。
+  // 每页取 ALBUM_PAGE_SIZE 条，图片+视频一起查，按创建时间倒序——这是分页
+  // 大小，不是"最多能看这么多"的硬上限，FlatList 滚到底会静默取下一页。
+  async function fetchAlbumPage(offset: number): Promise<Array<{ id: string; width: number; height: number; mediaType: MediaType; durationMs?: number }>> {
+    const found = await new Query()
+      .within(AssetField.MEDIA_TYPE, [MediaType.IMAGE, MediaType.VIDEO])
+      .orderBy({ key: AssetField.CREATION_TIME, ascending: false })
+      .offset(offset)
+      .limit(ALBUM_PAGE_SIZE)
+      .exe();
+    const thumbs = await Promise.all(found.map(async (a) => {
+      try {
+        const [shape, mediaType] = await Promise.all([a.getShape(), a.getMediaType()]);
+        const durationMs = mediaType === MediaType.VIDEO ? (await a.getDuration().catch(() => null)) ?? undefined : undefined;
+        return { id: a.id, width: shape?.width ?? 0, height: shape?.height ?? 0, mediaType, ...(durationMs != null ? { durationMs } : {}) };
+      } catch {
+        return undefined; // 元数据读不出来的不占位，有几个摆几个
+      }
+    }));
+    return thumbs.filter((t): t is { id: string; width: number; height: number; mediaType: MediaType; durationMs?: number } => t !== undefined);
+  }
+
+  // AUDIT-CONVO-ALBUM-003: 点相机图标开这一屏——同一屏里第一格是实时取景
+  // （见下方 JSX 的 CameraView），后面是完整相册网格。相机权限在这一屏里
+  // 单独请求/展示（跟 friend-crm.tsx 扫码同一套 useCameraPermissions 模式），
+  // 相册权限没给才整屏报错，不因为相机权限没给就连相册也打不开。
   async function openAlbum(): Promise<void> {
     setStickerOpen(false);
     setAttachOpen(false);
@@ -638,41 +670,101 @@ export function ConversationSurface({
       setError("请允许 Proxy 读取照片");
       return;
     }
+    setAlbumLoading(true);
     try {
-      const found = await new Query()
-        .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
-        .orderBy({ key: AssetField.CREATION_TIME, ascending: false })
-        .limit(24)
-        .exe();
-      const thumbs = await Promise.all(found.map(async (a) => {
-        try {
-          const [uri, shape] = await Promise.all([a.getUri(), a.getShape()]);
-          if (!uri) return undefined;
-          return { uri, width: shape?.width ?? 0, height: shape?.height ?? 0 };
-        } catch {
-          return undefined; // 云端没下好的图不占位，有几张摆几张
-        }
-      }));
-      setAlbumAssets(thumbs.filter((t): t is { uri: string; width: number; height: number } => t !== undefined));
+      const page = await fetchAlbumPage(0);
+      setAlbumAssets(page);
+      setAlbumOffset(page.length);
+      setAlbumHasMore(page.length === ALBUM_PAGE_SIZE);
       setAlbumOpen(true);
     } catch {
       setError("相册打不开，请重试");
+    } finally {
+      setAlbumLoading(false);
     }
   }
 
-  async function chooseVideo(): Promise<void> {
-    setAttachOpen(false);
-    setError(undefined);
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setError("请允许 Proxy 读取视频");
-      return;
+  // FlatList onEndReached 触发，静默翻页——没有"加载更多"按钮，滚到底自动接上，
+  // 跟系统相册的原生滚动手感一致。
+  async function loadMoreAlbumSilently(): Promise<void> {
+    if (albumLoadingMore || !albumHasMore) return;
+    setAlbumLoadingMore(true);
+    try {
+      const page = await fetchAlbumPage(albumOffset);
+      setAlbumAssets((prev) => [...prev, ...page]);
+      setAlbumOffset((prev) => prev + page.length);
+      setAlbumHasMore(page.length === ALBUM_PAGE_SIZE);
+    } catch {
+      // 静默失败：翻页失败不打断浏览，用户再往下滚会重新触发一次
+    } finally {
+      setAlbumLoadingMore(false);
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"], quality: 0.8, selectionLimit: 1 });
-    const asset = result.canceled ? undefined : result.assets[0];
-    if (!asset) return;
-    setSelectedVideo({ uri: asset.uri, width: asset.width, height: asset.height, ...(asset.duration != null ? { durationMs: asset.duration } : {}), ...(asset.fileName ? { fileName: asset.fileName } : {}), ...(asset.mimeType ? { mimeType: asset.mimeType } : {}) });
-    setSelectedImage(undefined);
+  }
+
+  // 文件名后缀 → MIME：album 网格给的只有 id/尺寸，没有原图格式。iPhone 拍
+  // 的照片默认是 HEIC，如果不带 mimeType 上传时会被 uploadImage 的
+  // defaultMime "image/jpeg" 顶上去，跟服务端按检测到的字节内容做的 MIME
+  // 校验对不上，直接被拒——这是"选完发不出去"的根因，不是网络问题。
+  function mimeFromFilename(filename: string | undefined): string | undefined {
+    const ext = filename?.split(".").pop()?.toLowerCase();
+    switch (ext) {
+      case "heic": return "image/heic";
+      case "heif": return "image/heif";
+      case "jpg": case "jpeg": return "image/jpeg";
+      case "png": return "image/png";
+      case "gif": return "image/gif";
+      case "webp": return "image/webp";
+      case "mov": return "video/quicktime";
+      case "mp4": case "m4v": return "video/mp4";
+      default: return undefined;
+    }
+  }
+
+  // 点选那一张才真正 resolve 原图 URI + 真实 MIME（getUri() 触发一次
+  // iCloud 下载是这一步唯一逃不掉的等待，跟系统相册选一张 iCloud 图片的
+  // 体验一致，不是本地做的比人家差）。
+  async function selectAlbumAsset(thumb: { id: string; width: number; height: number; mediaType: MediaType; durationMs?: number }): Promise<void> {
+    if (albumResolvingId) return;
+    setAlbumResolvingId(thumb.id);
+    setError(undefined);
+    try {
+      const asset = new Asset(thumb.id);
+      const [uri, filename] = await Promise.all([asset.getUri(), asset.getFilename().catch(() => undefined)]);
+      if (!uri) { setError("这张照片/视频读取失败，请重试或换一张"); return; }
+      const mimeType = mimeFromFilename(filename);
+      if (thumb.mediaType === MediaType.VIDEO) {
+        setSelectedVideo({ uri, width: thumb.width, height: thumb.height, ...(thumb.durationMs != null ? { durationMs: thumb.durationMs } : {}), ...(filename ? { fileName: filename } : {}), ...(mimeType ? { mimeType } : {}) });
+        setSelectedImage(undefined);
+      } else {
+        setSelectedImage({ uri, width: thumb.width, height: thumb.height, ...(filename ? { fileName: filename } : {}), ...(mimeType ? { mimeType } : {}) });
+        setSelectedVideo(undefined);
+      }
+      setAlbumOpen(false);
+    } catch {
+      setError("这张照片/视频读取失败，请重试或换一张");
+    } finally {
+      setAlbumResolvingId(undefined);
+    }
+  }
+
+  // 相机位是实时取景，不是"点了再跳去系统相机"——按快门直接拍、直接进
+  // 发送预览，跟 WhatsApp/Instagram 这类成熟 App 的相机位行为一致。
+  async function capturePhoto(): Promise<void> {
+    if (capturing || !cameraRef.current) return;
+    setCapturing(true);
+    setError(undefined);
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.85 });
+      if (photo?.uri) {
+        setSelectedImage({ uri: photo.uri, width: photo.width, height: photo.height });
+        setSelectedVideo(undefined);
+        setAlbumOpen(false);
+      }
+    } catch {
+      setError("拍照失败，请重试");
+    } finally {
+      setCapturing(false);
+    }
   }
 
   async function sendImage(): Promise<void> {
@@ -1152,40 +1244,83 @@ export function ConversationSurface({
         </View>
       </View>
 
-      {/* 附件 sheet：名片 / 视频 / 活动 / 位置。
-          CONVO-ATTACH-001：照片和拍照**都不在这里** —— 都在输入框的相机图标上，
-          点图标直进相册（首格就是拍摄）。以前＋ 弹出来要点两次才到照片。 */}
+      {/* 附件 sheet：名片 / 活动 / 位置。拍照/选图/选视频都在相机图标上
+          （openAlbum），这里不重复放。 */}
       {attachOpen ? (
         <Pressable accessibilityLabel="关闭附件选择" onPress={() => setAttachOpen(false)} style={styles.scrim}>
           <Pressable onPress={() => undefined} style={styles.bottomSheet}>
             <View style={styles.sheetGrab} />
             <Pressable accessibilityLabel="发送名片" onPress={() => { setAttachOpen(false); setCardPickerOpen(true); }} style={styles.sheetItem}><Text style={styles.sheetItemText}>名片</Text></Pressable>
-            <Pressable onPress={() => void chooseVideo()} style={styles.sheetItem}><Text style={styles.sheetItemText}>视频</Text></Pressable>
             {!aiAccount ? <Pressable onPress={() => void openActivityPicker()} style={styles.sheetItem}><Text style={styles.sheetItemText}>Proxy 活动</Text></Pressable> : null}
             {!aiAccount ? <Pressable accessibilityLabel="发送位置" onPress={() => { setAttachOpen(false); setLocationSheetOpen(true); }} style={styles.sheetItem}><Text style={styles.sheetItemText}>📍 位置</Text></Pressable> : null}
           </Pressable>
         </Pressable>
       ) : null}
 
-      {/* CONVO-ATTACH-001: 自建相册 —— 首格拍摄，后面最新照片。选图进已有
-          的预览＋发送链，拍摄复用 chooseImage("CAMERA")。空相册也开，
-          开着给拍第一张；关掉走 scrim，和别的 sheet 一个手势。 */}
+      {/* AUDIT-CONVO-ALBUM-003: 相机位（实时取景，按快门直接拍）是网格第一格，
+          跟后面的相册缩略图同一行同一尺寸——不是单独一条 header 横幅。后面是
+          完整相册网格（FlatList，onEndReached 静默翻页，无"加载更多"按钮）。
+          跟 WhatsApp/Instagram 这类成熟 App 的相机图标行为一致。 */}
       {albumOpen ? (
         <Pressable accessibilityLabel="关闭相册选择" onPress={() => setAlbumOpen(false)} style={styles.scrim}>
-          <Pressable onPress={() => undefined} style={styles.bottomSheet}>
+          <Pressable onPress={() => undefined} style={[styles.bottomSheet, styles.albumSheet]}>
             <View style={styles.sheetGrab} />
-            <ScrollView contentContainerStyle={styles.albumGrid}>
-              <Pressable accessibilityLabel="拍摄" onPress={() => { setAlbumOpen(false); void chooseImage("CAMERA"); }} style={styles.albumTile}>
-                <ProxyIcon color={lotus.ink} name="camera" size={26} />
-                <Text style={styles.albumTileText}>拍摄</Text>
-              </Pressable>
-              {albumAssets.map((a) => (
-                <Pressable key={a.uri} accessibilityLabel="选择这张照片" onPress={() => { setSelectedImage({ uri: a.uri, width: a.width, height: a.height }); setSelectedVideo(undefined); setAlbumOpen(false); }} style={styles.albumTile}>
-                  <ExpoImage accessibilityLabel="相册照片" cachePolicy="memory-disk" contentFit="cover" recyclingKey={`album:${a.uri}`} source={{ uri: a.uri }} style={styles.albumThumb} transition={0} />
-                </Pressable>
-              ))}
-            </ScrollView>
-            {albumAssets.length === 0 ? <Text style={styles.albumEmpty}>相册是空的，先拍一张吧</Text> : null}
+            {albumLoading ? <ProxyLoading tone="brand" /> : (
+              <FlatList
+                data={[{ kind: "camera" as const }, ...albumAssets.map((asset) => ({ kind: "asset" as const, asset }))]}
+                keyExtractor={(item) => (item.kind === "camera" ? "camera" : item.asset.id)}
+                numColumns={4}
+                columnWrapperStyle={styles.albumRow}
+                contentContainerStyle={styles.albumGrid}
+                onEndReachedThreshold={0.4}
+                onEndReached={() => void loadMoreAlbumSilently()}
+                renderItem={({ item }) => {
+                  if (item.kind === "camera") {
+                    return cameraPermission?.granted ? (
+                      <View style={styles.albumTile}>
+                        <CameraView ref={cameraRef} style={styles.albumThumb} facing="back" />
+                        <Pressable accessibilityLabel="拍照并发送" disabled={capturing} onPress={() => void capturePhoto()} style={styles.albumShutter}>
+                          <View style={styles.albumShutterInner} />
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <Pressable accessibilityLabel="允许使用相机" onPress={() => void requestCameraPermission()} style={[styles.albumTile, styles.albumCameraPermTile]}>
+                        <ProxyIcon color={lotus.ink} name="camera" size={22} />
+                        <Text style={styles.albumTileText}>{cameraPermission ? "允许相机" : "相机权限"}</Text>
+                      </Pressable>
+                    );
+                  }
+                  const a = item.asset;
+                  const isVideo = a.mediaType === MediaType.VIDEO;
+                  const resolving = albumResolvingId === a.id;
+                  return (
+                    <Pressable
+                      accessibilityLabel={isVideo ? "选择这段视频" : "选择这张照片"}
+                      disabled={Boolean(albumResolvingId)}
+                      onPress={() => void selectAlbumAsset(a)}
+                      style={styles.albumTile}
+                    >
+                      <ExpoImage accessibilityLabel={isVideo ? "相册视频" : "相册照片"} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`album:${a.id}`} source={thumbnailSource(a.id)} style={styles.albumThumb} transition={0} />
+                      {isVideo && !resolving ? (
+                        <View pointerEvents="none" style={styles.albumVideoBadge}>
+                          <Text style={styles.albumVideoBadgeText}>▶{a.durationMs != null ? ` ${Math.round(a.durationMs / 1000)}s` : ""}</Text>
+                        </View>
+                      ) : null}
+                      {resolving ? (
+                        <View pointerEvents="none" style={styles.albumResolvingOverlay}>
+                          <ActivityIndicator color="#ffffff" />
+                        </View>
+                      ) : null}
+                    </Pressable>
+                  );
+                }}
+                ListFooterComponent={
+                  albumLoadingMore ? <ActivityIndicator color={lotus.ink} style={styles.albumFooterSpinner} />
+                    : albumAssets.length === 0 ? <Text style={styles.albumEmpty}>相册是空的，先拍一张吧</Text>
+                    : null
+                }
+              />
+            )}
           </Pressable>
         </Pressable>
       ) : null}
@@ -1640,7 +1775,18 @@ const styles = StyleSheet.create({
   bottomSheet: { backgroundColor: lotus.paper, borderColor: lotus.line, borderTopLeftRadius: 14, borderTopRightRadius: 14, borderWidth: 1, margin: 8, paddingBottom: 12, paddingHorizontal: 11, paddingTop: 10 },
   sheetGrab: { alignSelf: "center", backgroundColor: "#d5d0c8", borderRadius: 2, height: 3, marginBottom: 9, width: 32 },
   sheetItem: { alignItems: "center", borderTopColor: lotus.line, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", minHeight: 44, paddingVertical: 6 },
-  albumGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingBottom: 4, paddingTop: 2 }, albumTile: { alignItems: "center", aspectRatio: 1, backgroundColor: lotus.soft, borderRadius: 10, justifyContent: "center", width: "23%" }, albumTileText: { color: lotus.muted, fontSize: 11, fontWeight: "700", marginTop: 4 }, albumThumb: { borderRadius: 10, height: "100%", width: "100%" }, albumEmpty: { color: lotus.muted, fontSize: 12, marginTop: 8, textAlign: "center" },
+  albumSheet: { maxHeight: "72%" },
+  albumGrid: { paddingBottom: 4, paddingTop: 2 }, albumRow: { gap: 8, justifyContent: "flex-start" },
+  albumTile: { alignItems: "center", aspectRatio: 1, backgroundColor: lotus.soft, borderRadius: 10, flex: 1, justifyContent: "center", marginBottom: 8, maxWidth: "23.5%", overflow: "hidden" },
+  albumTileText: { color: lotus.muted, fontSize: 11, fontWeight: "700", marginTop: 4 },
+  albumThumb: { borderRadius: 10, height: "100%", width: "100%" },
+  albumCameraPermTile: { borderColor: lotus.line, borderStyle: "dashed", borderWidth: 1 },
+  albumShutter: { alignItems: "center", borderColor: "rgba(255,255,255,0.85)", borderRadius: 999, borderWidth: 2, bottom: 5, height: 26, justifyContent: "center", position: "absolute", width: 26 },
+  albumShutterInner: { backgroundColor: "#ffffff", borderRadius: 999, height: 16, width: 16 },
+  albumVideoBadge: { position: "absolute", bottom: 5, right: 5, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 999, paddingHorizontal: 6, paddingVertical: 2 }, albumVideoBadgeText: { color: "#ffffff", fontSize: 11, fontWeight: "700" },
+  albumResolvingOverlay: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.35)", bottom: 0, justifyContent: "center", left: 0, position: "absolute", right: 0, top: 0 },
+  albumFooterSpinner: { marginVertical: 10 },
+  albumEmpty: { color: lotus.muted, fontSize: 12, marginTop: 8, textAlign: "center" },
   sheetItemText: { color: lotus.ink, fontSize: 12, fontWeight: "700" },
   sheetItemHint: { color: "#888888", fontSize: 11 },
   sheetItemDisabled: { color: "#b8b3ab" },
