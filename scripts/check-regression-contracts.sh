@@ -6332,3 +6332,29 @@ if ! grep -q 'onPress={() => { setSelectedId(scene.id); }}' apps/mobile/src/surf
 fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-nav.test.ts || exit $?
 echo "    SCENE-NAV-001: PASS (scene homepage navigates via system maps)"
+
+# SCENE-HUMANS-001: 场景详情“一起玩的人”只露圆头像 + 名字 + 可约状态。
+#
+# 之前是方形信息块（role / fit% / fitReason 全摊），而详情都在个人主页。
+# 点按仍是“选中邀约对象”（DIRECT_INVITE 靠 selectedHumanId 找人）——
+# 改成跳个人主页就断链，所以只动展示不动交互。
+if ! grep -q '<CircularAvatarImage' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'human.availability' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'SCENE-HUMANS-001' apps/mobile/src/scene-humans.test.ts; then
+  echo "  FAIL [SCENE-HUMANS-001]: 一起玩的人又变回方形信息块 ——" >&2
+  exit 1
+fi
+# 反向钉：role / fit% 不许再渲染（类型字段和发包标签是另一回事，不许碰）。
+if grep -q '{human.role}' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   grep -q 'Scene fit {human.sceneFit}' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-HUMANS-001]: role / fit% 又摊回这一屏 ——" >&2
+  echo "        详情在个人主页看。" >&2
+  exit 1
+fi
+# 反向钉：选中链不许断（DIRECT_INVITE 找不到人只会报“请先选择”）。
+if ! grep -q 'onPress={() => setSelectedHumanId(human.id)}' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-HUMANS-001]: 点按选中邀约对象的链路被动了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/scene-humans.test.ts || exit $?
+echo "    SCENE-HUMANS-001: PASS (round avatar, name and order availability only)"
