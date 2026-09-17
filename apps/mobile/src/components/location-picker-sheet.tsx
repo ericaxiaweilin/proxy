@@ -37,6 +37,7 @@ import {
   saveCustomLocation
 } from "./location-store";
 import type { DeviceLocationState } from "../device-location";
+import { ProxyEmptyState } from "./proxy-foundation";
 
 export { DEFAULT_LOCATION, LOCATION_OPTIONS };
 export type { Location, CustomLocation, PresetLocation, AnyLocation, CustomLocationFields, ReverseGeocodeShape };
@@ -461,12 +462,7 @@ export function LocationPickerSheet({
           ) : (
             <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
               {history.length === 0 ? (
-                <View style={styles.emptyHistory}>
-                  <Text style={styles.emptyTitle}>还没有保存过地图位置</Text>
-                  <Text style={styles.emptySub}>
-                    切到“地图选点”放置一个 pin，选择覆盖范围并命名后，这里会保留记录方便复用。
-                  </Text>
-                </View>
+                <ProxyEmptyState title="还没有保存过地图位置" sub="切到“地图选点”放置一个 pin，选择覆盖范围并命名后，这里会保留记录方便复用。" />
               ) : (
                 history.map((entry) => {
                   const active = current.kind === "CUSTOM" && current.id === entry.id;
@@ -585,7 +581,7 @@ const styles = StyleSheet.create({
     minHeight: 72,
     padding: 12
   },
-  optActive: { backgroundColor: "#FAF8FB", borderColor: "#17131F", borderWidth: 1.5 },
+  optActive: { backgroundColor: "color.domainActiveBg", borderColor: "color.ink", borderWidth: 1.5 },
   optIcon: {
     alignItems: "center",
     backgroundColor: "#F2EDF5",
@@ -594,7 +590,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 44
   },
-  optIconActive: { backgroundColor: "#17131F" },
+  optIconActive: { backgroundColor: "color.ink" },
   optCopy: { flex: 1 },
   optTitle: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
   optDesc: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
@@ -659,7 +655,7 @@ const styles = StyleSheet.create({
   radiusChipText: { color: color.ink, fontSize: 13, fontWeight: "800" },
   radiusChipTextActive: { color: color.white },
   input: {
-    backgroundColor: "#FCFBFD",
+    backgroundColor: "color.homeIntentInputBg",
     borderColor: "#DDD5E3",
     borderRadius: 13,
     borderWidth: 1,
@@ -690,10 +686,6 @@ const styles = StyleSheet.create({
     borderTopColor: color.line,
     borderTopWidth: 0.5
   },
-  emptyHistory: {
-    paddingVertical: 30,
-    paddingHorizontal: 10
-  },
-  emptyTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
-  emptySub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 4 }
+
+
 });

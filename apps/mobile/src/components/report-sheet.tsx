@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { REPORT_REASONS, type ModerationClient, type ReportReason, type ReportTargetType } from "../moderation-client";
 import { color } from "../theme";
+import { ProxyLoading } from "./proxy-foundation";
 
 // COMP-REPORT-002: 举报原因选择弹层（各举报入口共用）。
 //
@@ -67,7 +68,7 @@ export function ReportSheet({
             <Text style={styles.itemText}>{item.label}</Text>
           </Pressable>
         ))}
-        {busy ? <ActivityIndicator style={{ marginVertical: 12 }} /> : null}
+        {busy ? <ProxyLoading tone="muted" style={{ marginVertical: 12 }} /> : null}
         <Pressable accessibilityLabel="取消举报" disabled={busy} onPress={onClose} style={styles.item}>
           <Text style={[styles.itemText, styles.cancel]}>取消</Text>
         </Pressable>

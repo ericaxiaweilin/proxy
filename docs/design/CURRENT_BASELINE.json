@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 224,
+  "baselineRevision": 225,
   "updatedAt": "2026-09-17",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
@@ -68,12 +68,6 @@
       "status": "ACTIVE_SCREEN_REFERENCE"
     },
     {
-      "scope": "chat-lotus-aligned",
-      "version": "CHAT_ALIGNED_WITH_LOTUS_V0_1_MEDIA_R1",
-      "file": "docs/design/references/Proxy_Chat_Aligned_With_LotusChat_v0.1.md",
-      "status": "SUPERSEDED_BY_R36_1_MESSAGING"
-    },
-    {
       "scope": "conversation-r36-secure-stickers",
       "version": "MESSAGING_R36_1_SECURE_STICKERS",
       "file": "docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html",
@@ -107,6 +101,11 @@
   "legacy": [
     "Proxy_App_Design_Tokens_R2.json",
     "docs/design/archive/icon-masters/Proxy_Module_Logo_Master_R1.html",
-    "docs/design/archive/prototypes/"
+    "docs/design/archive/prototypes/",
+    {
+      "scope": "chat-lotus-aligned",
+      "supersededBy": "SUPERSEDED_BY_R36_1_MESSAGING",
+      "movedToArchiveAtRevision": 225
+    }
   ]
 }

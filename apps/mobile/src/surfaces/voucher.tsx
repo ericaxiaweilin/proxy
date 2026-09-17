@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { color, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
 import type { Voucher, VoucherFamily, VoucherRedemption, VoucherSettlementState } from "../voucher-client";
 import { VoucherClient } from "../voucher-client";
 import { defaultVoucherValidity } from "../voucher-validity";
 import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
+import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
 
 type Screen = "LIST" | "DETAIL" | "REDEEM" | "SETTLEMENT" | "SUCCESS" | "CREATE";
 type VoucherTab = "AVAILABLE" | "USED" | "EXPIRED";
@@ -54,17 +55,14 @@ function VoucherListPage({ vouchers, busy, error, tab, onOpen }: { vouchers: Vou
   const visible = vouchers.filter((voucher) => (tab === "AVAILABLE" ? voucher.status === "AVAILABLE" : tab === "USED" ? voucher.status === "REDEEMED" || voucher.status === "SETTLED" : voucher.status === "EXPIRED"));
   return (
     <ScrollView contentContainerStyle={styles.content}>
-      {busy ? <ActivityIndicator color={color.magenta} style={styles.spinner} /> : null}
+      {busy ? <ProxyLoading tone="brand" style={styles.spinner} /> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <View style={styles.cards}>
         {visible.map((voucher) => (
           <VoucherCard key={voucher.voucherId} voucher={voucher} onPress={() => onOpen(voucher)} />
         ))}
         {!busy && visible.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>{tab === "AVAILABLE" ? "暂无可用礼品券" : "这里还没有记录"}</Text>
-            <Text style={styles.emptyText}>礼品券的邀请来源与 CRM 归因留在消息和后台，不挤进券面。</Text>
-          </View>
+          <ProxyEmptyState title={tab === "AVAILABLE" ? "暂无可用礼品券" : "这里还没有记录"} sub="礼品券的邀请来源与 CRM 归因留在消息和后台，不挤进券面。" />
         ) : null}
       </View>
     </ScrollView>
@@ -107,7 +105,7 @@ export function VoucherSurface({ client, context, onBack }: { client: VoucherCli
   if (screen === "REDEEM" && selected && redemption) { const seconds = Math.max(0, Math.ceil((Date.parse(redemption.expiresAt) - now) / 1000)); return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><Back label="礼券详情" onPress={() => setScreen("DETAIL")} /><Text style={styles.pageTitle}>使用礼券</Text><Text style={styles.pageSub}>动态核销凭证。出示核销码不等于结算。</Text><View style={styles.redeem}><View style={styles.codeBox}><Text style={styles.codeBig}>{redemption.dynamicCode}</Text><Text style={styles.codeHint}>出示此码给商家核销</Text></View><Text style={styles.timer}>{seconds > 0 ? `动态码 · ${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")} 后刷新` : "动态码已失效"}</Text><View style={styles.ticketLine}><View><Text style={styles.ticketTitle}>{FAMILY[selected.family].tag} · {money(selected.displayValue)} VND</Text><Text style={styles.ticketSub}>{selected.scopeName} · 有效期 {dateText(selected.validUntil)}</Text></View><View style={styles.activeTag}><Text style={styles.activeTagText}>{seconds > 0 ? "ACTIVE" : "EXPIRED"}</Text></View></View><Pressable disabled={seconds === 0 || busy} onPress={() => void confirmRedeem()} style={[styles.primary, (seconds === 0 || busy) && styles.primaryDisabled]}><Text style={styles.primaryText}>{busy ? "处理中…" : "模拟商家确认核销"}</Text></Pressable><Text style={styles.p0Note}>仅限本地 P0 测试：不会创建支付、余额或真实商家账本。</Text><Pressable onPress={() => setScreen("DETAIL")} style={styles.subtle}><Text style={styles.subtleText}>取消</Text></Pressable></View>{error ? <Text style={styles.error}>{error}</Text> : null}</ScrollView></View>; }
 
   if (screen === "SETTLEMENT" && selected) { // 服务端没有返回状态时不许预填：以前会给一张没核销过的券显示「已核销 · 完成」。
-    const states = settlement; return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><Back label="礼券详情" onPress={() => setScreen("DETAIL")} /><Text style={styles.pageTitle}>核销与结算</Text><Text style={styles.pageSub}>核销、风控和结算是三个不同事实。</Text>{states.length ? <View style={styles.stateList}>{states.map((item) => <View key={item.name} style={styles.stateRow}><View><Text style={styles.stateName}>{item.name}</Text><Text style={styles.stateDesc}>{item.name === "REDEEMED" ? "商家已确认真实消费" : item.name === "RISK_CHECK" ? "平台正在核验规则与证据" : "通过 Gate 后才进入商家账本"}</Text></View><View style={[styles.stateBadge, item.status === "COMPLETED" || item.status === "PASSED" || item.status === "SETTLED" ? styles.stateGood : styles.stateWait]}><Text style={styles.stateBadgeText}>{item.status === "COMPLETED" ? "完成" : item.status === "CHECKING" ? "检查中" : item.status === "PENDING" ? "待结算" : item.status}</Text></View></View>)}</View> : <View style={styles.empty}><Text style={styles.emptyTitle}>还没有核销与结算记录</Text><Text style={styles.emptyText}>服务端没有返回这一张礼券的核销 / 风控 / 结算状态。这里只显示真实记录，不预填。</Text></View>}<View style={styles.policy}><Text style={styles.policyTitle}>结算 Gate</Text><Text style={styles.policyText}>异常模式会使结算暂缓，但不会在消费者页面暴露内部风控分数或原因。</Text></View>{selected.status === "REDEEMED" ? <Pressable disabled={busy} onPress={() => void settle()} style={[styles.primary, busy && styles.primaryDisabled]}><Text style={styles.primaryText}>{busy ? "处理中…" : "模拟风控通过并结算"}</Text></Pressable> : selected.status === "SETTLED" ? <Pressable onPress={() => setScreen("SUCCESS")} style={styles.primary}><Text style={styles.primaryText}>查看核销结果</Text></Pressable> : <View style={styles.empty}><Text style={styles.emptyTitle}>这张礼券没有核销结果</Text><Text style={styles.emptyText}>券当前状态：{stateLabel(selected.status)}。只有真实核销并结算过的礼券才有结果可看。</Text></View>}{error ? <Text style={styles.error}>{error}</Text> : null}</ScrollView></View>; }
+    const states = settlement; return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><Back label="礼券详情" onPress={() => setScreen("DETAIL")} /><Text style={styles.pageTitle}>核销与结算</Text><Text style={styles.pageSub}>核销、风控和结算是三个不同事实。</Text>{states.length ? <View style={styles.stateList}>{states.map((item) => <View key={item.name} style={styles.stateRow}><View><Text style={styles.stateName}>{item.name}</Text><Text style={styles.stateDesc}>{item.name === "REDEEMED" ? "商家已确认真实消费" : item.name === "RISK_CHECK" ? "平台正在核验规则与证据" : "通过 Gate 后才进入商家账本"}</Text></View><View style={[styles.stateBadge, item.status === "COMPLETED" || item.status === "PASSED" || item.status === "SETTLED" ? styles.stateGood : styles.stateWait]}><Text style={styles.stateBadgeText}>{item.status === "COMPLETED" ? "完成" : item.status === "CHECKING" ? "检查中" : item.status === "PENDING" ? "待结算" : item.status}</Text></View></View>)}</View> : <View style={styles.empty}><Text style={styles.emptyTitle}>还没有核销与结算记录</Text><Text style={styles.emptyText}>服务端没有返回这一张礼券的核销 / 风控 / 结算状态。这里只显示真实记录，不预填。</Text></View>}<View style={styles.policy}><Text style={styles.policyTitle}>结算 Gate</Text><Text style={styles.policyText}>异常模式会使结算暂缓，但不会在消费者页面暴露内部风控分数或原因。</Text></View>{selected.status === "REDEEMED" ? <Pressable disabled={busy} onPress={() => void settle()} style={[styles.primary, busy && styles.primaryDisabled]}><Text style={styles.primaryText}>{busy ? "处理中…" : "模拟风控通过并结算"}</Text></Pressable> : selected.status === "SETTLED" ? <Pressable onPress={() => setScreen("SUCCESS")} style={styles.primary}><Text style={styles.primaryText}>查看核销结果</Text></Pressable> : <ProxyEmptyState title="这张礼券没有核销结果" sub={`券当前状态：${stateLabel(selected.status)}。只有真实核销并结算过的礼券才有结果可看。`} />}{error ? <Text style={styles.error}>{error}</Text> : null}</ScrollView></View>; }
 
   if (screen === "SUCCESS" && selected) return <View style={styles.root}><ScrollView contentContainerStyle={styles.success}><View style={styles.check}><Text style={styles.checkText}>✓</Text></View><Text style={styles.successTitle}>核销成功</Text><Text style={styles.successText}>礼券已经完成核销并通过结算 Gate。资金拆分留在账本，不会变成可提现余额。</Text><View style={styles.receipt}><Text style={styles.receiptTitle}>{FAMILY[selected.family].tag} · {money(selected.displayValue)} VND</Text><Text style={styles.receiptText}>{selected.scopeName}</Text><Text style={styles.receiptText}>结算状态 · SETTLED</Text></View><Pressable onPress={() => { setScreen("LIST"); setTab("USED"); }} style={styles.primary}><Text style={styles.primaryText}>完成</Text></Pressable></ScrollView></View>;
 

@@ -139,7 +139,7 @@ export function ActivityDetail({
   return (
     <>
       {/* 基线 .detailhero：深色渐变 + originbadge + 价格 */}
-      <Gradient from="#17131F" to="#342446" style={styles.detailHero}>
+      <Gradient from="color.ink" to="#342446" style={styles.detailHero}>
         <View style={styles.detailTopLine}>
           <View style={[styles.originBadge, { backgroundColor: origin.bg }]}>
             <Text style={[styles.originBadgeText, { color: origin.fg }]}>{origin.label}</Text>
@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
   linkLine: { marginTop: 6 },
   linkLineText: { color: "#81788A", fontSize: 11 },
 
-  // 基线 .detailhero：gradient(#17131F→#342446) radius 20 padding 14 margin 8 0。
+  // 基线 .detailhero：gradient(color.ink→#342446) radius 20 padding 14 margin 8 0。
   detailHero: { borderRadius: 20, marginVertical: 8, padding: 14 },
   detailTopLine: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   detailPrice: { alignItems: "flex-end" },
@@ -394,10 +394,10 @@ const styles = StyleSheet.create({
   detailAIPersonaDisclaimer: { color: "#D8D1DF", fontSize: 11, marginTop: 1 },
   aiPersonaDisclaimerFooter: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 8, paddingHorizontal: 4 },
 
-  // 基线 .sceneanchor：#17131F radius 16 padding 10 gap 9 margin 8 0。
+  // 基线 .sceneanchor：color.ink radius 16 padding 10 gap 9 margin 8 0。
   sceneAnchor: {
     alignItems: "center",
-    backgroundColor: "#17131F",
+    backgroundColor: "color.ink",
     borderRadius: 16,
     flexDirection: "row",
     gap: 9,
@@ -418,9 +418,9 @@ const styles = StyleSheet.create({
   sceneNote: { color: "#D4CDDA", fontSize: 11, lineHeight: 15, marginTop: 2 },
   sceneTag: { color: color.lime, fontSize: 11, fontWeight: "900" },
 
-  // 基线 .benefitbox：#FBFFE9 border #DBED94 radius 11 padding 8。
+  // 基线 .benefitbox：color.inspireSavedBg border #DBED94 radius 11 padding 8。
   benefitBox: {
-    backgroundColor: "#FBFFE9",
+    backgroundColor: "color.inspireSavedBg",
     borderColor: "#DBED94",
     borderRadius: 11,
     borderWidth: 1,
@@ -473,7 +473,7 @@ const styles = StyleSheet.create({
   },
   reviewHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   reviewTitle: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  reviewBadge: { color: "#176F60", fontSize: 11, backgroundColor: "#EAF8F4", borderRadius: 999, paddingHorizontal: 6, paddingVertical: 4, fontWeight: "900" },
+  reviewBadge: { color: "color.activityOriginUserFg", fontSize: 11, backgroundColor: "color.activityOriginUserBg", borderRadius: 999, paddingHorizontal: 6, paddingVertical: 4, fontWeight: "900" },
   reviewText: { color: "#4A4250", fontSize: 11, lineHeight: 15, marginTop: 7 },
 
   // 基线 .joinstate：#F4FFD5 border #D1E778 radius 15 padding 10。
@@ -503,7 +503,7 @@ const styles = StyleSheet.create({
   },
   ctaLightText: { color: color.ink, fontSize: 12, fontWeight: "800" },
 
-  // 基线 .taskaction：gradient(#17131F→#332642)，radius 20 padding 14；h3 18 / p 9。
+  // 基线 .taskaction：gradient(color.ink→#332642)，radius 20 padding 14；h3 18 / p 9。
   taskAction: { borderRadius: 20, marginVertical: 9, padding: 14 },
   taskActionTitle: { color: color.white, fontSize: 18, fontWeight: "700" },
   taskActionBody: { color: "#D9D2DF", fontSize: 11, lineHeight: 15, marginTop: 4 },
@@ -541,7 +541,7 @@ const styles = StyleSheet.create({
   exampleTitle: { flex: 1, minWidth: 0 },
   originBadge: {
     alignSelf: "flex-start",
-    backgroundColor: "#FFF0F6",
+    backgroundColor: "color.bottomActiveBg",
     borderRadius: 999,
     paddingHorizontal: 7,
     paddingVertical: 4
@@ -550,7 +550,7 @@ const styles = StyleSheet.create({
   exampleName: { color: color.ink, fontSize: 11, fontWeight: "700", marginTop: 5 },
   exampleMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
   // R15.x+: AI 数字人发起的活动 — 列表卡上在 title 上方加一行 "X 发起" 标识
-  exampleAIPersona: { color: "#3949AB", fontSize: 11, fontWeight: "700", marginTop: 5 },
+  exampleAIPersona: { color: "color.aiActivityBadgeFg", fontSize: 11, fontWeight: "700", marginTop: 5 },
   // R17.x: AI persona 圆形 token. photo 资产是 SVG
   // (apps/mobile/assets/ai-personas/), 这里 surface 仅画
   // 圆形色 + emoji 表情 — 未来 expo-image SVG 支持 上线后

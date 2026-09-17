@@ -11,7 +11,7 @@
 // surfaces (e.g. the feed composer when the user first attaches
 // a location).
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { color } from "../theme";
 import {
   ALLOWED_DURATION_SECONDS,
@@ -21,6 +21,7 @@ import {
   type LocationConsent,
   type ToggleLocale,
 } from "./precise-location-toggle-helpers";
+import { ProxyLoading } from "./proxy-foundation";
 
 export type PreciseLocationToggleProps = {
   // The current consent state. null = loading or unknown.
@@ -112,7 +113,7 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
           <Text style={styles.subtitle}>{summary}</Text>
         </View>
         {busy ? (
-          <ActivityIndicator color={color.ink} />
+          <ProxyLoading tone="onLight" />
         ) : (
           <Switch
             accessibilityLabel="Bật hoặc tắt vị trí chính xác"
@@ -136,7 +137,7 @@ function _unusedLocaleRef(locale: ToggleLocale): ToggleLocale { return locale; }
 const styles = StyleSheet.create({
   card: {
     padding: 16,
-    backgroundColor: color.surface ?? "#FFFFFF",
+    backgroundColor: color.surface ?? "color.white",
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.line ?? "#E5E5E5",
@@ -158,7 +159,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.line ?? "#E5E5E5",
     alignItems: "center",
-    backgroundColor: color.surface ?? "#FFFFFF",
+    backgroundColor: color.surface ?? "color.white",
   },
   choicePressed: { opacity: 0.6 },
   choiceText: { fontSize: 15, color: color.ink ?? "#111111" },

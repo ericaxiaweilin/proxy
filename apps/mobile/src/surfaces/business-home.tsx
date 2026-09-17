@@ -10,7 +10,7 @@
 // 取待处理 / 经营数字.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
@@ -22,6 +22,7 @@ import type { ActivityClient } from "../activity-client";
 import type { SupplyClient } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
 import { MerchantCreatorRecommendations } from "./merchant-creator-recommendations";
+import { ProxyLoading } from "../components/proxy-foundation";
 
 type OperatingSceneCard = { id: string; title: string; sub: string; tag: string; coverImageUrl?: string };
 
@@ -288,7 +289,7 @@ export function BusinessHome({
         <Text style={styles.sectionTitle}>高价值场景</Text>
         <Text style={styles.sectionHint}>Scene Package</Text>
       </View>
-      {showLoading ? <ActivityIndicator /> : null}
+      {showLoading ? <ProxyLoading tone="muted" /> : null}
       {scenePackages.length === 0 && !showLoading ? (
         <Pressable onPress={() => onOpenMarket("OPPORTUNITY")} style={styles.actionCard}>
           <View style={styles.actionIcon}><ProxyIcon color={color.ink} name="storefront" size={20} /></View>

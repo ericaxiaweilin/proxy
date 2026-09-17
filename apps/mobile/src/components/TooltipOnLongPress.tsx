@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Animated, Pressable, StyleSheet, Text } from "react-native";
+import { color } from "../theme";
 
 type Props = {
   label: string;
@@ -106,7 +107,7 @@ const TIP_MAX_WIDTH = 180;
 const styles = StyleSheet.create({
   wrap: { position: "relative" },
   tip: {
-    backgroundColor: "#17131F",
+    backgroundColor: "color.ink",
     borderRadius: 10,
     bottom: 46,
     maxWidth: TIP_MAX_WIDTH,

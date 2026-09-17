@@ -12,7 +12,7 @@
 // instead of the bogus '12.6tr VND' / '148 订单' fallbacks.
 
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { color, Gradient, shadows } from "../theme";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import type { BusinessClient } from "../business-client";
@@ -23,6 +23,7 @@ import { MerchantCreatorRecommendations } from "./merchant-creator-recommendatio
 import { localApiBaseUrl } from "../native-clients";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
+import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
 
 type MerchantPage =
   | "root"
@@ -343,7 +344,7 @@ export function MerchantMeR21Replacement({
           <SimpleRows onPress={setPage} rows={[["券管理", "创建、上下架与有效期"], ["核销记录", "扫码核销 · 订单留痕"], ["客户归因", "领取、到店与复购"], ["活动关联", `${activityItems.length} 个开放活动`, "activity"]]} />
           {sectionHead("经营人员", `${members.length} 人`)}
           {members.length === 0 ? (
-            <View style={styles.emptyCard}><Text style={styles.emptyTitle}>暂无经营人员</Text><Text style={styles.empty}>添加成员后会显示角色、状态与加入时间。</Text></View>
+            <ProxyEmptyState title="暂无经营人员" sub="添加成员后会显示角色、状态与加入时间。" />
           ) : null}
           {members.map((m) => (
             <View key={m.userId} style={styles.card}>
@@ -365,7 +366,7 @@ export function MerchantMeR21Replacement({
           {summary({ title: "活动导流", meta: `${activityItems.length} 个开放活动`, stats: [[activityItems.length.toString(), "档期"], ["—", "已报名"], ["—", "缺口"], ["—", "到店"]] })}
           {sectionHead("活动列表", `${activityItems.length} 个开放活动`) }
           {activityItems.length === 0 ? (
-            <View style={styles.emptyCard}><Text style={styles.emptyTitle}>暂无开放活动</Text><Text style={styles.empty}>创建的活动会在这里进入报名、执行与复盘流程。</Text></View>
+            <ProxyEmptyState title="暂无开放活动" sub="创建的活动会在这里进入报名、执行与复盘流程。" />
           ) : null}
           {activityItems.map((a) => (
             <Pressable
@@ -605,7 +606,7 @@ export function MerchantMeR21Replacement({
           <View style={styles.merchantTag}><Text style={styles.merchantTagText}>商家</Text></View>
         </View>
 
-        {accounts === undefined && !error ? <ActivityIndicator /> : null}
+        {accounts === undefined && !error ? <ProxyLoading tone="muted" /> : null}
         {error ? <View style={styles.card}><Text style={styles.empty}>加载失败：{error}</Text></View> : null}
 
         <Pressable onPress={() => setPage("store")} style={styles.identity}>

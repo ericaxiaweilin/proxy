@@ -4,6 +4,23 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 225 — 2026-09-17
+
+- DESIGN-CLEANUP-001（token 纪律第一批＋共享原语）：65 处硬编码 hex 换成
+  值完全相等的 color token（零视觉差，逐个验值，见门禁）；`proxy-foundation`
+  新增 `ProxyLoading`（tone 必传：brand/onDark/onLight/violet/muted）与
+  `ProxyEmptyState`（icon/title/sub/cta），替换 21 处原生 ActivityIndicator
+  （conversation 3 处 lotus 金先跳过，等 B 档定值）与 7 文件 12 处手写空态。
+  - 有意为之的近似：原来不传色的 13 处吃系统默认灰，收敛到 muted（差一个色阶，
+    统一比精确值钱）；`ProxyEmptyState` 的 CTA 走既有 `ProxyButton`，不再各写一套。
+  - 删 `assets/order-type-logos/` 4 张死 PNG（无 import，测试早就不让引了）；
+    `chat-lotus-aligned` 的 SUPERSEDED 引用从 screenReferences 挪进 legacy 数组。
+  - **基线敏感文件**：`surfaces/ProfileTabs.tsx`、`surfaces/merchant-storefront.tsx`、
+    `surfaces/merchant-me-r21-replacement.tsx`（空态迁移）。foundation 本体不在
+    敏感名单，但三屏在，同提交认领。
+  - B 档（lotus 近黑收敛）、C 档（Tailwind 系返工）、行内提示是否要 ProxyEmptyLine
+    都没动，等设计拍板。
+
 ## Revision 224 — 2026-09-17
 
 - CONVO-ATTACH-001（相机图标直进相册）：会话窗输入框的相机图标以前和 ＋

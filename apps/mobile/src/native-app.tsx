@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from "react-native";
+import { Image, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import * as Google from "expo-auth-session/providers/google";
 import Svg, { Path } from "react-native-svg";
@@ -41,6 +41,7 @@ import { color, Gradient, shadows } from "./theme";
 import { sessionAuthClient, localApiBaseUrl, nativeSecureSessionStore } from "./native-clients";
 import { SECURE_SESSION_STORAGE_KEY } from "./secure-session";
 import { getOrCreateDeviceIdentity, rotateDeviceIdentity, INSTALLATION_DEVICE_ID_KEY } from "./device-credential";
+import { ProxyLoading } from "./components/proxy-foundation";
 
 const APP_VERSION = "1.0.0";
 
@@ -291,7 +292,7 @@ function BootScreen(): React.JSX.Element {
   return (
     <View style={styles.screen}>
       <BrandMark large />
-      <ActivityIndicator color={color.magenta} style={styles.spinner} />
+      <ProxyLoading tone="brand" style={styles.spinner} />
       <Text style={styles.secondary}>让时间遇见需要。</Text>
     </View>
   );
@@ -344,7 +345,7 @@ function LegalDocViewer({ kind, onClose }: { kind: LegalDocKind; onClose: () => 
           <Pressable disabled={busy} onPress={onClose} style={styles.legalCloseBtn}><Text style={styles.legalCloseBtnText}>关闭</Text></Pressable>
         </View>
         {busy ? (
-          <View style={styles.legalBusy}><ActivityIndicator color={color.violet} /><Text style={styles.legalBusyText}>加载中…</Text></View>
+          <View style={styles.legalBusy}><ProxyLoading tone="violet" label="加载中…" /></View>
         ) : error ? (
           <View style={styles.legalErrorBlock}>
             <Text style={styles.legalErrorTitle}>无法加载条款</Text>

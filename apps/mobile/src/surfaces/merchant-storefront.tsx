@@ -2,7 +2,7 @@
 // 之前 43 行只列账号；现在拉 account + store + photo album + lines +
 // spend_daily + member_directory, 全部 server-authoritative.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Image, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
 import { captureRef } from "react-native-view-shot";
@@ -16,6 +16,7 @@ import type { BusinessClient, StoreProduct } from "../business-client";
 import { MediaClient } from "../media-client";
 import { localApiBaseUrl, nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { ProxyIcon } from "../components/proxy-icon";
+import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
 
 // 和 native-app 共用同一份 Keychain 会话：相册/菜单照片走媒体管线上传，
 // 拿到 mediaAssetId 后以 thumb URL 远端展示，不再只存本地路径。
@@ -466,14 +467,11 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
     <>
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
       {header}
-      {accounts === undefined && !error ? <ActivityIndicator /> : null}
+      {accounts === undefined && !error ? <ProxyLoading tone="muted" /> : null}
       {error ? <View style={styles.card}><Text style={styles.errorText}>加载失败：{error}</Text></View> : null}
       {accounts !== undefined && accounts.length === 0 ? (
         <View style={styles.card}>
-          <View style={styles.emptyIcon}><ProxyIcon color={color.ink} name="storefront" size={30} /></View>
-          <Text style={styles.createTitle}>还没有线上店铺</Text>
-          <Text style={styles.empty}>你不需要手工搭页面。把店门、菜单、产品照片或已有文件交给企业运营助手，它会先生成店铺草稿，再由你确认发布。</Text>
-          <Pressable disabled={!onStartStoreSetup} onPress={onStartStoreSetup} style={styles.createBtn}><Text style={styles.createBtnText}>让企业运营助手帮我创建</Text></Pressable>
+          <ProxyEmptyState icon="storefront" title="还没有线上店铺" sub="你不需要手工搭页面。把店门、菜单、产品照片或已有文件交给企业运营助手，它会先生成店铺草稿，再由你确认发布。" cta={{ label: "让企业运营助手帮我创建", onPress: () => onStartStoreSetup?.(), disabled: !onStartStoreSetup }} />
         </View>
       ) : null}
       {accounts?.map((a) => {
@@ -486,8 +484,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
             <View style={styles.accountHead}><Text style={styles.accountName}>管理别人看到你的店</Text><Text style={styles.accountMeta}>{a.name} · {aStores.length} 家门店</Text></View>
             {aStores.length === 0 ? (
               <View style={styles.card}>
-                <Text style={styles.createTitle}>尚未建立经营门店</Text><Text style={styles.empty}>把门店照片、菜单或文件交给企业运营助手，先生成草稿再确认，不需要从空白表单开始。</Text>
-                <Pressable disabled={!onStartStoreSetup} onPress={onStartStoreSetup} style={styles.createBtn}><Text style={styles.createBtnText}>交给企业运营助手</Text></Pressable>
+                <ProxyEmptyState title="尚未建立经营门店" sub="把门店照片、菜单或文件交给企业运营助手，先生成草稿再确认，不需要从空白表单开始。" cta={{ label: "交给企业运营助手", onPress: () => onStartStoreSetup?.(), disabled: !onStartStoreSetup }} />
               </View>
             ) : null}
             {aStores.map((s) => {
@@ -900,8 +897,6 @@ const styles = StyleSheet.create({
   spendLabel: { color: color.muted, fontSize: 11 },
   empty: { color: color.muted, fontSize: 12, paddingVertical: 4 },
   errorText: { color: "#a32020", fontSize: 12 },
-  createTitle: { color: color.ink, fontSize: 15, fontWeight: "800", marginBottom: 4 },
-  emptyIcon: { alignItems: "center", backgroundColor: color.lime, borderRadius: 18, height: 58, justifyContent: "center", marginBottom: 8, width: 58 },
   creationSheet: { borderTopColor: color.line, borderTopWidth: 1, marginTop: 12, paddingTop: 4 },
   storeHero: { alignItems: "center", flexDirection: "row", gap: 11 },
   storeLogo: { alignItems: "center", backgroundColor: color.ink, borderRadius: 18, height: 58, justifyContent: "center", width: 58 },

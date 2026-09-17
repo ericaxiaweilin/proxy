@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { color } from "../theme";
 import { styles } from "./me-styles";
 import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { StoreOnboardingClient, type StoreRecommendation } from "../storeonboarding-client";
+import { ProxyLoading } from "../components/proxy-foundation";
 
 // STORE-REC-007: 「我推荐的店」—— 推荐人看见自己那条的进展。
 //
@@ -59,7 +60,7 @@ export function MyStoreRecommendations(): React.JSX.Element {
 
       {busy && rows === null ? (
         <View style={{ paddingVertical: 18, alignItems: "center" }}>
-          <ActivityIndicator />
+          <ProxyLoading tone="muted" />
         </View>
       ) : null}
 

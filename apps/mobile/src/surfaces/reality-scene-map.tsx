@@ -940,17 +940,17 @@ const styles = StyleSheet.create({
   badgeNoticeText: { color: "#7A4E0F", fontSize: 12, fontWeight: "700" },
   xiaomeiSceneHint: { color: "#5B3FA3", fontSize: 12, marginTop: 6 },
   badgeScrim: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.45)", flex: 1, justifyContent: "center", padding: 22 },
-  badgeCard: { backgroundColor: "#FFFFFF", borderRadius: 18, maxHeight: "82%", padding: 18, width: "100%" },
-  badgeTitle: { color: "#17131F", fontSize: 18, fontWeight: "900" },
+  badgeCard: { backgroundColor: "color.white", borderRadius: 18, maxHeight: "82%", padding: 18, width: "100%" },
+  badgeTitle: { color: "color.ink", fontSize: 18, fontWeight: "900" },
   badgeSub: { color: "#77726B", fontSize: 12, lineHeight: 17, marginTop: 4 },
   badgeList: { marginTop: 10 },
   badgeRow: { alignItems: "center", borderBottomColor: "rgba(20,18,31,0.06)", borderBottomWidth: 1, flexDirection: "row", gap: 12, paddingVertical: 10 },
   badgeRowEarned: { backgroundColor: "#FFF8EC" },
   badgeIcon: { fontSize: 24 },
   badgeCopy: { flex: 1 },
-  badgeName: { color: "#17131F", fontSize: 14, fontWeight: "800" },
+  badgeName: { color: "color.ink", fontSize: 14, fontWeight: "800" },
   badgeNameLocked: { color: "#77726B", fontWeight: "700" },
   badgeDesc: { color: "#77726B", fontSize: 11, lineHeight: 15, marginTop: 2 },
-  badgeClose: { alignItems: "center", backgroundColor: "#17131F", borderRadius: 999, marginTop: 12, paddingVertical: 11 },
-  badgeCloseText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" }
+  badgeClose: { alignItems: "center", backgroundColor: "color.ink", borderRadius: 999, marginTop: 12, paddingVertical: 11 },
+  badgeCloseText: { color: "color.white", fontSize: 13, fontWeight: "800" }
 });

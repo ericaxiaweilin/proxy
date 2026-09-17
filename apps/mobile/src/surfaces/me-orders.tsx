@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import type { Activity } from "@proxy/contracts";
 import { ActivityClient, ActivityCommandRejectedError } from "../activity-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
@@ -9,6 +9,7 @@ import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { color } from "../theme";
 import { ActivityDetailSurface } from "./activity-detail";
 import { styles } from "./me-styles";
+import { ProxyLoading } from "../components/proxy-foundation";
 
 type OrderFilter = "all" | "published" | "joined" | "done" | "cancelled";
 
@@ -167,7 +168,7 @@ export function MyOrdersSurface({ client, moderation, onBack }: {
             </Pressable>
           ))}
         </ScrollView>
-        {phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}
+        {phase === "LOADING" ? <ProxyLoading tone="brand" /> : null}
         {phase === "ERROR" ? <Text style={styles.personalEmpty}>订单服务暂时不可用，请稍后重试。</Text> : null}
         {phase === "READY" && visible.length === 0 ? <Text style={styles.personalEmpty}>当前分类还没有订单。</Text> : null}
         {cancelError ? <Text style={styles.orderNotice}>{cancelError}</Text> : null}
@@ -309,7 +310,7 @@ export function MyActivitiesSurface({ onBack, moderation }: { onBack: () => void
         </View>
         {notice ? <Text style={styles.savedMeta}>{notice}</Text> : null}
         {!authed ? <Text style={styles.savedMeta}>登录后才能查看 “已参加” / “我发起的”。</Text> : null}
-        {phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}
+        {phase === "LOADING" ? <ProxyLoading tone="brand" /> : null}
         {phase === "ERROR" ? (
           <View>
             <Text style={styles.personalEmpty}>活动加载失败，请检查连接后重试。</Text>
@@ -419,7 +420,7 @@ export function MerchantCampaignSurface({ onBack, moderation }: { onBack: () => 
           <Text style={styles.detailTitle}>活动导流</Text>
         </View>
         {notice ? <Text style={styles.savedMeta}>{notice}</Text> : null}
-        {phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}
+        {phase === "LOADING" ? <ProxyLoading tone="brand" /> : null}
         {phase === "ERROR" ? (
           <View>
             <Text style={styles.personalEmpty}>活动加载失败，请检查连接后重试。</Text>

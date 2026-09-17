@@ -15,7 +15,9 @@ describe("Proxy UI Foundation v1 adoption", () => {
 
   it("keeps market tabs on the shared accessible control", () => {
     const source = readFileSync(join(root, "surfaces", "market.tsx"), "utf8");
-    expect(source).toContain('import { ProxyTabs } from "../components/proxy-foundation"');
+    // DESIGN-CLEANUP-001 起 import 行里多了 ProxyLoading——钉只认“用了共享
+    // ProxyTabs”，不认 import 的完整名单，否则以后每加一个共享组件就误报一次。
+    expect(source).toMatch(/import \{[^}]*ProxyTabs[^}]*\} from "\.\.\/components\/proxy-foundation"/);
     expect(source).toContain("<ProxyTabs");
     expect(source).not.toMatch(/styles\.(?:tabOn|tabTextOn)/);
   });

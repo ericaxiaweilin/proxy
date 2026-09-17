@@ -21,6 +21,7 @@
  */
 import { Image as ExpoImage } from "expo-image";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { color } from "../theme";
 import type { FeedMediaItem } from "@proxy/contracts";
 
 const FALLBACK_BG = "#EEE";
@@ -124,5 +125,5 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0
   },
-  moreMediaText: { color: "#FFFFFF", fontSize: 22, fontWeight: "700" }
+  moreMediaText: { color: "color.white", fontSize: 22, fontWeight: "700" }
 });

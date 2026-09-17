@@ -6512,3 +6512,20 @@ if grep -q '>照片</Text>' apps/mobile/src/surfaces/conversation.tsx; then
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/convo-attach.test.ts || exit $?
 echo "    CONVO-ATTACH-001: PASS (camera icon opens the album with capture first)"
+
+# DESIGN-CLEANUP-001: token 纪律第一批 + 共享原语（ProxyLoading/ProxyEmptyState）
+# + 死 PNG 删除 + 僵尸引用归档。A 档 23 组映射逐个验值（零视觉差）才允许进；
+# B 档（lotus 定值）/C 档（Tailwind 返工）/ProxyEmptyLine 不在本轮。
+if ! grep -q 'export function ProxyLoading' apps/mobile/src/components/proxy-foundation.tsx ||
+   ! grep -q 'export function ProxyEmptyState' apps/mobile/src/components/proxy-foundation.tsx ||
+   ! grep -q 'DESIGN-CLEANUP-001' apps/mobile/src/design-system-r3.test.ts; then
+  echo "  FAIL [DESIGN-CLEANUP-001]: 共享原语或纪律钉丢了 ——" >&2
+  exit 1
+fi
+# 反向钉：tone 必须显式传 —— 默认蒙混会把灰点染成品牌色。
+if ! grep -q 'tone: LoadingTone;' apps/mobile/src/components/proxy-foundation.tsx; then
+  echo "  FAIL [DESIGN-CLEANUP-001]: ProxyLoading 的 tone 不再强制 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/design-system-r3.test.ts || exit $?
+echo "    DESIGN-CLEANUP-001: PASS (token discipline batch one, shared loading/empty)"

@@ -5,7 +5,7 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, AppState, Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Animated, AppState, Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
@@ -55,6 +55,7 @@ import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
 import { isOwnAuthorId, isOwnPost as isOwnPostById, resolveAuthorDisplayName, resolveReplyAuthorDisplayName } from "../feed-author";
 import { hiddenReplyCount, repliesMatchingFirst, shouldOfferReplyToggle, visibleReplies } from "../reply-preview";
+import { ProxyLoading } from "../components/proxy-foundation";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
 type FeedSection = "POSTS" | "STATUS" | "COMMUNITY";
@@ -1203,7 +1204,7 @@ export function FeedSurface({
       {engagementNotice ? <Text style={styles.engagementNotice}>{engagementNotice}</Text> : null}
       {phase === "LOADING" ? (
         <View style={styles.feedEmpty}>
-          <ActivityIndicator color={color.magenta} />
+          <ProxyLoading tone="brand" />
           <Text style={styles.feedEmptyText}>正在读取本地动态（ListFeedPosts）…</Text>
         </View>
       ) : phase === "ERROR" ? (
@@ -1494,7 +1495,7 @@ export function FeedSurface({
         })}
         {loadingMore ? (
           <View style={styles.feedEmpty}>
-            <ActivityIndicator color={color.magenta} />
+            <ProxyLoading tone="brand" />
           </View>
         ) : null}
         </>
@@ -1927,7 +1928,7 @@ const styles = StyleSheet.create({
     top: 6
   },
   socialMediaFrame: {
-    backgroundColor: "#17131F",
+    backgroundColor: "color.ink",
     borderRadius: 14,
     height: "100%",
     overflow: "hidden",
@@ -1944,7 +1945,7 @@ const styles = StyleSheet.create({
   socialMediaAsset: { height: "100%", width: "100%" },
   singleMediaStage: {
     alignItems: "center",
-    backgroundColor: "#17131F",
+    backgroundColor: "color.ink",
     borderRadius: 14,
     justifyContent: "center",
     marginVertical: 8,
@@ -2004,9 +2005,9 @@ const styles = StyleSheet.create({
   pollBar: { backgroundColor: "rgba(133,51,245,0.14)", bottom: 0, left: 0, position: "absolute", top: 0 },
   pollOptionRow: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "space-between" },
   pollOptionLabel: { color: color.ink, flexShrink: 1, fontSize: 14 },
-  pollOptionLabelMine: { color: "#5B2CB5", fontWeight: "700" },
+  pollOptionLabelMine: { color: "color.factInferredFg", fontWeight: "700" },
   pollOptionCount: { color: color.muted, fontSize: 12 },
-  pollOptionCountMine: { color: "#5B2CB5", fontWeight: "700" },
+  pollOptionCountMine: { color: "color.factInferredFg", fontWeight: "700" },
   pollMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
 
   quoteHead: { alignItems: "center", flexDirection: "row", gap: 5 },
@@ -2025,7 +2026,7 @@ const styles = StyleSheet.create({
   quoteMediaLabel: { color: color.muted, fontSize: 11, marginTop: 4 },
 
   postUtility: {
-    backgroundColor: "#FBFFE9",
+    backgroundColor: "color.inspireSavedBg",
     borderColor: "#DEEDA9",
     borderRadius: 10,
     borderWidth: 1,
@@ -2105,8 +2106,8 @@ const styles = StyleSheet.create({
     fontWeight: "700"
   },
 
-  // 全屏媒体查看器：深色底 #17131F。
-  viewerRoot: { backgroundColor: "#17131F", flex: 1 },
+  // 全屏媒体查看器：深色底 color.ink。
+  viewerRoot: { backgroundColor: "color.ink", flex: 1 },
   viewerTop: {
     alignItems: "center",
     flexDirection: "row",

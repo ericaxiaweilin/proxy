@@ -34,6 +34,7 @@ import {
   type ProfileMediaEntry,
   type ProfileTabKey
 } from "./profile-tabs-model";
+import { ProxyEmptyState } from "../components/proxy-foundation";
 export type { ProfileMediaEntry, ProfileTabKey } from "./profile-tabs-model";
 
 // ---------- 类型 ----------
@@ -321,7 +322,7 @@ function PostsTab(props: {
           </View>
         </View>
         {allMediaEntries.length === 0 ? (
-          <EmptyState title="还没有图片" sub="发布带图的帖子后会出现在这里" />
+          <ProxyEmptyState title="还没有图片" sub="发布带图的帖子后会出现在这里" />
         ) : (
           <View style={styles.photoGrid}>
             {allMediaEntries.map((entry) => (
@@ -379,7 +380,7 @@ function PostsTab(props: {
       ) : null}
 
       {props.posts.length === 0 && !props.pinnedPost ? (
-        <EmptyState title="还没有动态" sub="发布的第一条帖子会出现在这里" />
+        <ProxyEmptyState title="还没有动态" sub="发布的第一条帖子会出现在这里" />
       ) : (
         props.posts.map((post) => (
           <PostCard
@@ -488,10 +489,10 @@ function RepliesTab(props: {
 }): React.JSX.Element {
   // PROFILE-TAB-LOAD-FAILED-001: 失败要单独一句，不能落进下面那条空态文案。
   if (props.failed) {
-    return <EmptyState title="回复没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />;
+    return <ProxyEmptyState title="回复没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />;
   }
   if (props.replies.length === 0) {
-    return <EmptyState title="还没有回复" sub="你在其他帖子下面的回复会出现在这里" />;
+    return <ProxyEmptyState title="还没有回复" sub="你在其他帖子下面的回复会出现在这里" />;
   }
   return (
     <View>
@@ -535,10 +536,10 @@ function SavedTab(props: {
 }): React.JSX.Element {
   // PROFILE-TAB-LOAD-FAILED-001: 收藏读失败却显示空态文案，等于告诉用户收藏丢了。
   if (props.failed) {
-    return <EmptyState title="收藏没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />;
+    return <ProxyEmptyState title="收藏没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />;
   }
   if (props.saved.length === 0) {
-    return <EmptyState title="还没有收藏" sub="点击帖子右下角的 🔖 可以加入收藏" />;
+    return <ProxyEmptyState title="还没有收藏" sub="点击帖子右下角的 🔖 可以加入收藏" />;
   }
   // 3-列网格 — 复用 IG 收藏页布局
   const all = selectPostMedia(props.saved, props.mediaByPost);
@@ -578,10 +579,10 @@ function TaggedTab(props: {
 }): React.JSX.Element {
   // PROFILE-TAB-LOAD-FAILED-001: 同 SavedTab —— 读失败 ≠ 没人 @ 过你。
   if (props.failed) {
-    return <EmptyState title="被标记没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />;
+    return <ProxyEmptyState title="被标记没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />;
   }
   if (props.tagged.length === 0) {
-    return <EmptyState title="还没有被标记" sub="其他人在帖子里 @ 你时会出现在这里" />;
+    return <ProxyEmptyState title="还没有被标记" sub="其他人在帖子里 @ 你时会出现在这里" />;
   }
   const all = selectPostMedia(props.tagged, props.mediaByPost);
   return (
@@ -635,14 +636,6 @@ function AboutTab(props: {
   );
 }
 
-function EmptyState(props: { title: string; sub: string }): React.JSX.Element {
-  return (
-    <View style={styles.empty}>
-      <Text style={styles.emptyTitle}>{props.title}</Text>
-      <Text style={styles.emptySub}>{props.sub}</Text>
-    </View>
-  );
-}
 
 // ---------- Styles ----------
 
@@ -739,7 +732,4 @@ const styles = StyleSheet.create({
   aboutStatBigLabel: { fontSize: 11, color: "#64748b" },
   aboutStatBigValue: { fontSize: 18, fontWeight: "800", color: "#0f172a", marginTop: 4 },
   // Empty
-  empty: { paddingHorizontal: 32, paddingVertical: 48, alignItems: "center" },
-  emptyTitle: { fontSize: 15, color: "#0f172a", fontWeight: "700", marginBottom: 4 },
-  emptySub: { fontSize: 12, color: "#94a3b8", textAlign: "center" }
 });
