@@ -6280,8 +6280,8 @@ if ! grep -qF 'func (r *RealitySceneRepository) EarnBadge' apps/api-go/internal/
   echo "  FAIL [SCENE-BADGE-001]: the Postgres badge repository is missing," >&2
   exit 1
 fi
-if [ ! -f apps/api-go/migrations/093_reality_scene_badges.sql ]; then
-  echo "  FAIL [SCENE-BADGE-001]: migration 093_reality_scene_badges.sql is missing." >&2
+if [ ! -f apps/api-go/migrations/099_reality_scene_badges.sql ]; then
+  echo "  FAIL [SCENE-BADGE-001]: migration 099_reality_scene_badges.sql is missing." >&2
   exit 1
 fi
 if ! grep -qF 'SCENE_BADGES' apps/mobile/src/scene-badges.ts; then
