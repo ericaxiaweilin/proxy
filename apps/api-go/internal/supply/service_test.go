@@ -3,12 +3,15 @@ package supply
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/geo"
 )
 
 // COMP-SELLER-001：测试里的「已实名」必须由人显式放行，不能是默认状态。
@@ -431,6 +434,67 @@ func TestLocationPrecisionRedaction(t *testing.T) {
 			t.Fatalf("passport missing marketId redaction")
 		}
 	}
+
+	// GEO-PRECISION-001：精度声明必须是类型化契约，而不是散文。
+	// Passport 是无任务浏览上下文，R8:98-101 把全局上下文封顶在 CITY，所以
+	// 读者拿到的精度必须正好是 geo.PrecisionCity。改 GlobalContextCap 会让这里变红。
+	var full map[string]any
+	if err := json.Unmarshal([]byte(r2.OperationRef), &full); err != nil {
+		t.Fatalf("passport is not a JSON object: %v", err)
+	}
+	got, ok := full["locationPrecision"]
+	if !ok {
+		t.Fatalf("passport must declare locationPrecision; got keys %v", sortedKeys(full))
+	}
+	if got != string(geo.PrecisionCity) {
+		t.Fatalf("passport locationPrecision = %v, want %q (R8 Gate E caps global context at CITY)", got, geo.PrecisionCity)
+	}
+
+	// 递归扫全量 key：任何一层出现坐标类字段即泄露。只查 key 不查 value——
+	// redactions 里那句给人看的散文含 "coordinates"，不该被误判。
+	if path := firstCoordinateKey(full, "passport"); path != "" {
+		t.Fatalf("passport leaked a coordinate field at %s", path)
+	}
+}
+
+// coordinateKeys 是坐标类字段名。命中任意一个即视为泄露精确位置。
+var coordinateKeys = map[string]bool{
+	"lat": true, "lng": true, "lon": true,
+	"latitude": true, "longitude": true,
+	"coordinate": true, "coordinates": true,
+	"geohash": true, "gps": true,
+	"preciselocation": true, "exactlocation": true,
+}
+
+// firstCoordinateKey 深度遍历任意 JSON 结构，返回第一个坐标类字段的路径。
+func firstCoordinateKey(v any, path string) string {
+	switch node := v.(type) {
+	case map[string]any:
+		for k, child := range node {
+			if coordinateKeys[strings.ToLower(k)] {
+				return path + "." + k
+			}
+			if found := firstCoordinateKey(child, path+"."+k); found != "" {
+				return found
+			}
+		}
+	case []any:
+		for i, child := range node {
+			if found := firstCoordinateKey(child, fmt.Sprintf("%s[%d]", path, i)); found != "" {
+				return found
+			}
+		}
+	}
+	return ""
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func contains(s, substr string) bool {

@@ -13,6 +13,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/clock"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
+	"github.com/proxy-app/proxy-api/internal/geo"
 )
 
 // Supply 真源（R14 Canonical Data Model §6 + B 完成标准）。
@@ -663,6 +664,14 @@ func (s *Service) getAgentPassport(ctx context.Context, e command.Envelope) comm
 		}
 	}
 	// Availability: only future AVAILABLE windows, precise location redacted to marketId
+	//
+	// 为什么是 marketId 而不是场馆坐标：Agent Passport 是「无任务浏览」上下文，
+	// 读者只持有全局 Local Context。R8:98-101 把全局上下文封顶在
+	// CITY / COARSE_AREA，所以即使 Agent 本身有场馆级位置，读者也只能拿到降级结果。
+	// 这里用 geo 表达这个降级，而不是只写一句散文：下面这一行既是声明，也是
+	// 返回值的实际来源。改 GlobalContextCap 会同时改变行为和这里的声明。
+	passportLocationPrecision := geo.PrecisionVenue.AtMost(geo.GlobalContextCap)
+
 	activeWindows := []map[string]any{}
 	for _, w := range windows {
 		if w.Status == "AVAILABLE" && w.EndAt.After(now) {
@@ -696,7 +705,10 @@ func (s *Service) getAgentPassport(ctx context.Context, e command.Envelope) comm
 		},
 		"activeWindows":  activeWindows,
 		"passportStatus": passportStatus,
-		"redactions":     []string{"profile.photos precise EXIF removed", "location precise coordinates redacted to marketId"},
+		// locationPrecision 是类型化的精度声明，取值来自 geo 的唯一真源。
+		// redactions 是给人看的散文；locationPrecision 是给机器验的契约。
+		"locationPrecision": string(passportLocationPrecision),
+		"redactions":        []string{"profile.photos precise EXIF removed", "location precise coordinates redacted to marketId"},
 	}, nil)
 }
 

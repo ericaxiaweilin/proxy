@@ -148,6 +148,32 @@ require_test "UI-SCENE-MAP-001" "./internal/realityscene" \
 require_test "UI-SCENE-MAP-001" "./internal/api" \
   "TestNearbyRealityScenesRequiresConsentAndUsesLocationRanking" \
   "apps/api-go/internal/api/reality_scene_test.go" || exit $?
+
+# GEO-PRECISION-001: 定位精度只能有一套词表，且「够不够精确」必须能在代码里回答。
+# 曾经同时存在四套互不兼容的精度枚举——Ch17 的 L0_AGGREGATE..L4_EXECUTION_PRECISE、
+# Ch17 的 precision_level、R15 的 GeoPrecision、R8 的 CITY|COARSE_AREA——而没有任何
+# 映射表，于是每个调用点只能各自猜，且猜得不一样。所有隐私门（R8 Gate E、INV-SEC-06、
+# AC-MAP-32/33）都是关于精度的判断，地基裂了它们就都是空话。
+# 现在唯一真源是 apps/api-go/internal/geo。映射表被刻意钉住：改 L1/L2 那一行
+# 必须同时改 precision_test.go 里的 pin 与 precision.go 的 DECISION 注释，
+# 不允许静默漂移。删掉 TestMappingTableIsPinned 或让 AtMost 反向升精度都会红。
+require_test "GEO-PRECISION-001" "./internal/geo" \
+  "TestMappingTableIsPinned" \
+  "apps/api-go/internal/geo/precision_test.go" || exit $?
+require_test "GEO-PRECISION-001" "./internal/geo" \
+  "TestAtMostNeverEscalates" \
+  "apps/api-go/internal/geo/precision_test.go" || exit $?
+require_test "GEO-PRECISION-001" "./internal/geo" \
+  "TestPrecisionVocabularyIsClosed" \
+  "apps/api-go/internal/geo/precision_test.go" || exit $?
+require_test "GEO-PRECISION-001" "./internal/geo" \
+  "TestUnlockLadderMatchesChapter17" \
+  "apps/api-go/internal/geo/precision_test.go" || exit $?
+require_test "GEO-PRECISION-001" "./internal/supply" \
+  "TestLocationPrecisionRedaction" \
+  "apps/api-go/internal/supply/service_test.go" || exit $?
+echo "    GEO-PRECISION-001: PASS (one precision vocabulary; mapping pinned; global context capped at CITY)"
+
 require_test "UI-SOCIAL-002" "./internal/identity" \
   "TestAccountPreferencesRejectsAnonymousActorAndOversizedContact" \
   "apps/api-go/internal/identity/account_preferences_test.go" || exit $?
