@@ -6584,3 +6584,20 @@ if grep -q '收藏 {isSaved ? 1 : 0}' apps/mobile/src/surfaces/feed.tsx; then
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/feed-saved-count.test.ts || exit $?
 echo "    FEED-SAVED-COUNT-001: PASS (saved shows state, never a fabricated aggregate)"
+
+# MAIN-WIRING-SPLIT-001: cmd/api/main.go 曾是 1387 行的单文件接线根，
+# 多 worktree 并行时 merge 冲突概率最高的单点。已按域拆成 wire_*.go
+# （main 只留 main 函数），回潮就红。
+if grep -q '^func seedPostgres\|^func configured\|^func newSupplyBatchCreator\|^func wireIdentity\|^func parseSMTPPortOrZero\|^func buildSMSProvider' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [MAIN-WIRING-SPLIT-001]: 接线 helper 又堆回 main.go ——" >&2
+  echo "        按域放 wire_*.go。" >&2
+  exit 1
+fi
+if ! grep -q '^func configuredModelStack' apps/api-go/cmd/api/wire_providers.go ||
+   ! grep -q '^func seedPostgresIdentity' apps/api-go/cmd/api/wire_seed.go ||
+   ! grep -q '^func seedPostgresSupply' apps/api-go/cmd/api/wire_supply.go ||
+   ! grep -q 'EnsureInvitationOrder' apps/api-go/cmd/api/wire_fulfillment.go; then
+  echo "  FAIL [MAIN-WIRING-SPLIT-001]: wire_*.go 里少文件 ——" >&2
+  exit 1
+fi
+echo "    MAIN-WIRING-SPLIT-001: PASS (api wiring stays split by domain)"
