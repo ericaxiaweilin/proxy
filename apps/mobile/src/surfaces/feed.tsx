@@ -1393,7 +1393,7 @@ export function FeedSurface({
                   <Text style={styles.postActionText}>引用</Text>
                 </Pressable>
                 <Pressable disabled={isSaved || engagementBusy.has(`bookmark:${post.postId}`)} onPress={() => void commitEngagement(`bookmark:${post.postId}`, post.postId, () => engagement.bookmarkPost(post.postId), setBookmarked, bookmarked)} style={styles.postAction}>
-                  <Text style={[styles.postActionText, isSaved && styles.postActionOn]}>收藏 {isSaved ? 1 : 0}</Text>
+                  <Text style={[styles.postActionText, isSaved && styles.postActionOn]}>{isSaved ? "已收藏" : "收藏"}</Text>
                 </Pressable>
                 <Pressable onPress={() => void Share.share({ message: `${post.body}\n\nProxy · ${name}` })} style={styles.postAction}>
                   <Text style={styles.postActionText}>分享</Text>
