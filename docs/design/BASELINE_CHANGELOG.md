@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 233 — 2026-09-17
+
+- SHEET-ICONS-001（＋ 面板文字行换图标块）：名片 / Proxy 活动 / 位置三个入口
+  改成 56px 图标块＋小字（`user` / `ticket` / 新增 `pin` 形），处理函数一个没动；
+  相机媒体不进 ＋ 面板（都在相机图标的相册里）。`pin` 形走 registry 既有
+  24 格线形语言。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/conversation.tsx`（面板条目展示）、
+    `apps/mobile/src/components/proxy-icon.tsx`（新增 `pin` 形）。无主题 token 改动
+    （图标块用 lotus 现有墨/纸/灰）。
+
 ## Revision 228 — 2026-09-17
 
 - CONVO-ATTACH-002（相机图标合并为相机位+全量相册网格，替换 CONVO-ATTACH-001
