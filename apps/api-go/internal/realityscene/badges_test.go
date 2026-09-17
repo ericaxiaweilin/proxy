@@ -3,6 +3,7 @@ package realityscene
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestEvaluateSceneBadgesFirstCheckin(t *testing.T) {
@@ -93,5 +94,44 @@ func TestAIVisitsForBoundScene(t *testing.T) {
 	}
 	if len(aiVisitsFor("nguyenphilan")) != 0 {
 		t.Fatal("unbound scene must have no AI visits")
+	}
+}
+
+// BADGE-WALL-001: 打卡史不过期过滤 —— 徽章进度（还差几家）要看全部去过的地方，
+// 不能只看 90 分钟有效期内的。取消打卡删行，所以剩下的都是真去过。
+// 和 ListMyCheckIns（只看有效期内，给按钮选中态恢复用）不是一回事。
+func TestCheckinHistoryIgnoresExpiryButNotCancel(t *testing.T) {
+	s := New()
+	ctx := t.Context()
+	now := time.Now()
+	old := now.Add(-3 * time.Hour)
+	if err := s.repo.CheckInScene(ctx, "u1", "hoankiem", nil, old); err != nil {
+		t.Fatalf("CheckInScene old: %v", err)
+	}
+	if err := s.repo.CheckInScene(ctx, "u1", "tranquoc", nil, now); err != nil {
+		t.Fatalf("CheckInScene fresh: %v", err)
+	}
+	if err := s.repo.CheckInScene(ctx, "u1", "vanmieu", nil, now); err != nil {
+		t.Fatalf("CheckInScene: %v", err)
+	}
+	if err := s.repo.CancelCheckIn(ctx, "u1", "vanmieu"); err != nil {
+		t.Fatalf("CancelCheckIn: %v", err)
+	}
+	history, err := s.repo.ListMyCheckinHistory(ctx, "u1")
+	if err != nil {
+		t.Fatalf("ListMyCheckinHistory: %v", err)
+	}
+	got := map[string]bool{}
+	for _, id := range history {
+		got[id] = true
+	}
+	if !got["hoankiem"] || !got["tranquoc"] {
+		t.Fatalf("history must include expired-but-not-cancelled: %v", history)
+	}
+	if got["vanmieu"] {
+		t.Fatalf("cancelled check-in must not count: %v", history)
+	}
+	if _, err := s.repo.ListMyCheckinHistory(ctx, "nobody"); err != nil {
+		t.Fatalf("unknown actor must return empty, not error: %v", err)
 	}
 }

@@ -63,7 +63,9 @@ import { filterPostsByFeedSearch, normalizeFeedSearchQuery } from "../feed-searc
 import { meOwnedRouteForLabel } from "../me-owned-routes";
 import { color, Gradient, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
-import type { MyScene, MySceneInvitation, SceneClient } from "../scene-client";
+import { SceneClient } from "../scene-client";
+import type { MyScene, MySceneInvitation } from "../scene-client";
+import { SCENE_BADGES, badgeProgress } from "../scene-badges";
 import type { BusinessClient } from "../business-client";
 import type { ActivityClient } from "../activity-client";
 import type { ProfileClient } from "../profile-client";
@@ -576,6 +578,28 @@ export function MeSurface({
   // 可重试的提示。reload 计数只为让下面的 effect 能重跑。
   const [profilePostsState, setProfilePostsState] = useState<"loading" | "ready" | "failed">("loading");
   const [profilePostsReload, setProfilePostsReload] = useState(0);
+  // BADGE-WALL-001: 个人墙数据（已得徽章 id＋打卡史）。进 personalhub 才拉；
+  // earned undefined = 还没拉到，failed = 拉失败（可重试），[]/空集 = 真没有。
+  // 合成两个必然把“没拉到”画成“一块徽章都没有”。
+  const [badgeWallClient] = useState(() => scene ?? new SceneClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore }));
+  const [badgeEarnedIds, setBadgeEarnedIds] = useState<ReadonlyArray<string> | undefined>(undefined);
+  const [badgeHistoryIds, setBadgeHistoryIds] = useState<ReadonlyArray<string>>([]);
+  const [badgeWallFailed, setBadgeWallFailed] = useState(false);
+  const [badgeWallNonce, setBadgeWallNonce] = useState(0);
+  useEffect(() => {
+    if (subPage?.route !== "personalhub") return;
+    let cancelled = false;
+    setBadgeWallFailed(false);
+    void (async () => {
+      try {
+        const [earned, history] = await Promise.all([badgeWallClient.listMyBadges(), badgeWallClient.listMyCheckinHistory()]);
+        if (!cancelled) { setBadgeEarnedIds(earned); setBadgeHistoryIds(history); }
+      } catch {
+        if (!cancelled) setBadgeWallFailed(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [subPage?.route, badgeWallClient, badgeWallNonce]);
   const [profileMedia, setProfileMedia] = useState<Record<string, FeedMediaItem[]>>({});
   const [profileMediaPositions, setProfileMediaPositions] = useState<Record<string, number>>({});
   const [profileViewer, setProfileViewer] = useState<{ postId: string; index: number }>();
@@ -1909,6 +1933,36 @@ export function MeSurface({
                 </Pressable>
               </View>
             ) : null}
+
+            {/* BADGE-WALL-001: 徽章墙 —— 得过的点亮，没得过的置灰并给出来条件
+                （desc 就是条件原文）。计数/集合类给进度（还差几家），hasAny 和
+                足迹类没有进度概念，只给条件。失败可重试，空墙是“还没开始玩”。 */}
+            <View style={styles.badgeWall}>
+              <Text style={styles.badgeWallTitle}>场景徽章 · {badgeEarnedIds ? SCENE_BADGES.filter((b) => badgeEarnedIds.includes(b.id)).length : "—"}/{SCENE_BADGES.length}</Text>
+              {badgeWallFailed ? (
+                <View style={styles.badgeWallFailed}>
+                  <Text style={styles.badgeWallFailedText}>徽章没拉到 —— 不是没有徽章。</Text>
+                  <Pressable onPress={() => setBadgeWallNonce((n) => n + 1)} accessibilityLabel="重新拉取徽章" style={styles.badgeWallRetry}><Text style={styles.badgeWallRetryText}>重试</Text></Pressable>
+                </View>
+              ) : badgeEarnedIds === undefined ? (
+                <Text style={styles.badgeWallLoading}>正在加载徽章…</Text>
+              ) : (
+                <View style={styles.badgeGrid}>
+                  {SCENE_BADGES.map((badge) => {
+                    const earned = badgeEarnedIds.includes(badge.id);
+                    const progress = badgeProgress(badge.id, badgeHistoryIds);
+                    return (
+                      <View key={badge.id} style={[styles.badgeTile, !earned && styles.badgeTileLocked]} accessibilityLabel={earned ? `已获得${badge.name}` : badge.name}>
+                        <Text style={styles.badgeIcon}>{badge.icon}</Text>
+                        <Text style={styles.badgeName}>{badge.name}</Text>
+                        {!earned ? <Text style={styles.badgeDesc}>{badge.desc}</Text> : null}
+                        {!earned && progress !== undefined && progress.done < progress.total ? <Text style={styles.badgeProgress}>还差 {progress.total - progress.done} 家</Text> : null}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
 
             <ProfileTabs
               profileDraft={profileDraft}

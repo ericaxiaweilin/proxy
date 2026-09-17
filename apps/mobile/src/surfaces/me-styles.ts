@@ -1189,5 +1189,20 @@ export const styles = StyleSheet.create({
     ...shadows.card
   },
   offerTitle: { color: color.ink, fontSize: 11, fontWeight: "800" },
-  offerMeta: { color: color.muted, fontSize: 11, marginTop: 3 }
+  offerMeta: { color: color.muted, fontSize: 11, marginTop: 3 },
+  // BADGE-WALL-001: 徽章墙。得过的正常显示，没得过的整块降透明度 + 给出来条件。
+  badgeWall: { marginTop: 14, paddingHorizontal: 18 },
+  badgeWallTitle: { color: color.ink, fontSize: 14, fontWeight: "900" },
+  badgeWallLoading: { color: color.muted, fontSize: 12, marginTop: 8 },
+  badgeWallFailed: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 8, padding: 12 },
+  badgeWallFailedText: { color: color.error, flex: 1, fontSize: 12, fontWeight: "700" },
+  badgeWallRetry: { backgroundColor: color.ink, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 7 },
+  badgeWallRetryText: { color: color.white, fontSize: 11, fontWeight: "800" },
+  badgeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
+  badgeTile: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, paddingVertical: 10, width: "31%" },
+  badgeTileLocked: { opacity: 0.55 },
+  badgeIcon: { fontSize: 24 },
+  badgeName: { color: color.ink, fontSize: 11, fontWeight: "800", marginTop: 4, textAlign: "center" },
+  badgeDesc: { color: color.muted, fontSize: 11, lineHeight: 14, marginTop: 3, textAlign: "center" },
+  badgeProgress: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 3 },
 });

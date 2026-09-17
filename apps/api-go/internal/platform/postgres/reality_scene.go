@@ -92,6 +92,25 @@ func (r *RealitySceneRepository) ListMyCheckIns(ctx context.Context, actorID str
 	return out, rows.Err()
 }
 
+// BADGE-WALL-001: 去过的 scene id（去重，不过期过滤 —— 取消即删行）。
+// 空返回 [] 不是 null。
+func (r *RealitySceneRepository) ListMyCheckinHistory(ctx context.Context, actorID string) ([]string, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `SELECT DISTINCT scene_id FROM reality.scene_checkins WHERE actor_id=$1 ORDER BY scene_id`, actorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var sceneID string
+		if err := rows.Scan(&sceneID); err != nil {
+			return nil, err
+		}
+		out = append(out, sceneID)
+	}
+	return out, rows.Err()
+}
+
 // SCENE-CONTRIB-001: 社区提交。
 //
 // 坐标是**用户填的**，这里不做任何反查也不做核实 —— 存进去就是 PENDING +

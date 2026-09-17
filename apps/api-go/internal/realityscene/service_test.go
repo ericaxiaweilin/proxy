@@ -952,3 +952,34 @@ func TestSceneDetailCarriesMerchantLogoURL(t *testing.T) {
 		t.Fatal("unknown scene must not have a detail to hang a logo on")
 	}
 }
+
+// BADGE-WALL-001: ListMyCheckinHistory 命令接线 —— 空返回 [] 不是错误，
+// 未登录（空 actor）拒绝。
+func TestListMyCheckinHistoryCommand(t *testing.T) {
+	s := New()
+	ctx := t.Context()
+	now := time.Now()
+	if err := s.repo.CheckInScene(ctx, "u1", "hoankiem", nil, now); err != nil {
+		t.Fatalf("CheckInScene: %v", err)
+	}
+	e := envelope("ListMyCheckinHistory", map[string]any{})
+	e.Actor.ID, e.Principal.ID = "u1", "u1"
+	r := s.HandleContext(ctx, e)
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("ListMyCheckinHistory: got %s (%+v)", r.Outcome, r.Error)
+	}
+	var view struct {
+		SceneIds []string `json:"sceneIds"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	if len(view.SceneIds) != 1 || view.SceneIds[0] != "hoankiem" {
+		t.Fatalf("sceneIds = %v, want [hoankiem]", view.SceneIds)
+	}
+	// 陌生用户：空列表，不是错误。
+	e2 := envelope("ListMyCheckinHistory", map[string]any{})
+	e2.Actor.ID, e2.Principal.ID = "nobody", "nobody"
+	r2 := s.HandleContext(ctx, e2)
+	if r2.Outcome != "ACCEPTED" {
+		t.Fatalf("empty history must be accepted: got %s", r2.Outcome)
+	}
+}
