@@ -4,6 +4,23 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 223 — 2026-09-17
+
+- CONTACT-CARD-001（会话里发名片）：`＋` 面板多「名片」入口 —— 第一张永远是
+  「我的名片」，下面是服务端好友里能解析出 handle 的那些，点一张发出去，
+  点开能再画成码给第三个人扫（复用 `QrZoomOverlay`）。
+  - 收发同一串：body 就是 `buildContactCard()` 的 vCard（和二维码里编的同一串），
+    渲染时 `parseContactCard` 解码；解不出就不带 contact，body 留原文（和 LOCATION
+    解不出时同一个口径）。空 body 本地先挡（`sendContactMessage` 抛错），不发
+    无法解释的空白气泡。
+  - 服务端保护默认值和位置**反着来**：名片的意义就是被转出去，所以可转发、
+    可复制、无查看次数上限、不警告截图，30 天过期与其他消息一致（位置默认是
+    看一次、一小时消失 —— 照抄会让名片能发、不能转、一小时后变空白卡）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/conversation.tsx`（名片气泡、
+    名片选择器、二维码放大）、`apps/mobile/src/conversation-client.ts`
+    （`sendContactMessage`，CONTACT 类型）。选择器沿用既有 bottomSheet 语言，
+    无主题 token 改动、无列表结构改动。
+
 ## Revision 221 — 2026-09-16
 
 - PROFILE-QR-002（码里到底编什么）：**链接 → 标准 vCard 名片**。

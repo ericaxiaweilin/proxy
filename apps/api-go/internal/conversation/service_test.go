@@ -332,6 +332,67 @@ func TestSendMessageAndList(t *testing.T) {
 	}
 }
 
+// CONTACT-CARD-001：对话里能发**名片**。
+//
+// 以前消息类型白名单里没有 CONTACT，客户端就算画出了「发名片」的入口，服务端
+// 也会回 INVALID_MESSAGE_TYPE —— 又是一个「UI 有、服务端没有」的静默降级。
+//
+// 这里钉三件事：
+//   1. CONTACT 能被接受（不是被白名单挡掉）；
+//   2. 空名片必须被拒 —— 渲染侧认不出就不画卡，会变成一条无法解释的空白气泡；
+//   3. 默认保护是**可转发**：名片的意义就是被转给第三个人，照抄 LOCATION
+//      （1 次查看 / 1 小时）会让它自相矛盾。
+func TestSendMessageContactCardIsAcceptedAndForwardable(t *testing.T) {
+	s := New()
+	created := s.Handle(envelopeFor("StartConversation", map[string]any{
+		"originType": "PROFILE", "originId": "profile_card", "participantId": "user_card",
+	}, ""))
+	var createdView struct {
+		ConversationID string `json:"conversationId"`
+	}
+	_ = json.Unmarshal([]byte(created.OperationRef), &createdView)
+	convID := createdView.ConversationID
+
+	vcard := "BEGIN:VCARD\r\nVERSION:3.0\r\nN:晴晴;;;;\r\nFN:晴晴\r\nNICKNAME:@qingqing\r\nX-PROXY-HANDLE:qingqing\r\nEND:VCARD"
+	sent := s.Handle(envelopeFor("SendMessage", map[string]any{"messageType": "CONTACT", "body": vcard}, convID))
+	if sent.Outcome != "ACCEPTED" {
+		t.Fatalf("contact card message: got %s (%+v)", sent.Outcome, sent.Error)
+	}
+
+	empty := s.Handle(envelopeFor("SendMessage", map[string]any{"messageType": "CONTACT", "body": "   "}, convID))
+	if empty.Outcome == "ACCEPTED" {
+		t.Fatal("empty contact card must be rejected — it renders as an unexplainable blank bubble")
+	}
+
+	listed := s.Handle(envelopeFor("ListConversationMessages", map[string]any{}, convID))
+	if listed.Outcome != "ACCEPTED" {
+		t.Fatalf("list messages: %s", listed.Outcome)
+	}
+	var listView struct {
+		Messages []Message `json:"messages"`
+	}
+	_ = json.Unmarshal([]byte(listed.OperationRef), &listView)
+	if len(listView.Messages) != 1 {
+		t.Fatalf("want 1 message (the empty one rejected), got %d", len(listView.Messages))
+	}
+	got := listView.Messages[0]
+	if got.MessageType != "CONTACT" {
+		t.Fatalf("messageType = %q, want CONTACT", got.MessageType)
+	}
+	if got.Kind != "contact" {
+		t.Fatalf("kind = %q, want contact — the client switches on kind to draw the card", got.Kind)
+	}
+	if !got.Protection.Forwardable {
+		t.Fatal("a contact card must be forwardable by default: passing someone's card on is the whole point")
+	}
+	if got.Protection.ViewLimit != 0 {
+		t.Fatalf("viewLimit = %d, want 0 (unlimited) — a card you may look at once is not a card", got.Protection.ViewLimit)
+	}
+	if got.Protection.ExpiresAt == nil {
+		t.Fatal("a contact card must still expire (30d like every other message), not live forever")
+	}
+}
+
 func TestListConversationsReturnsOnlyActorInboxWithLatestMessage(t *testing.T) {
 	s := New()
 	created := s.Handle(envelopeFor("StartConversation", map[string]any{

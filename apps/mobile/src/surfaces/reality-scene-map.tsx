@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Circle, Marker } from "react-native-maps";
@@ -7,6 +7,7 @@ import * as Location from "expo-location";
 import { getCurrentFix } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
 import { sceneAddressLine, sceneCountsLine, sceneHeatScore, sceneSignalLine, sceneSourceSuffix } from "../reality-scene-address";
+import { captureRef } from "react-native-view-shot";
 import { checkinEligibility, checkinHint } from "../scene-checkin";
 import { SCENE_BADGES, SCENE_BADGE_REQUIREMENTS, sceneBadgeById } from "../scene-badges";
 // SCENE-NAV-001: 主页里的导航出口走 MEETUP-NAV-001 同一套系统地图深链，
@@ -155,6 +156,22 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   };
   // SCENE-BADGE-001：小美绑定场景（与她同框）—— 打卡这类场景有专属徽章。
   const isXiaomeiScene = (id: string): boolean => (SCENE_BADGE_REQUIREMENTS.xiaomei_company ?? []).includes(id);
+  // SCENE-BADGE-002：分享徽章卡 —— 把已获得的徽章截成图，走系统分享。
+  const badgeShareRef = useRef<View>(null);
+  const [badgeShareNotice, setBadgeShareNotice] = useState<string | undefined>(undefined);
+  async function shareBadgeCard(): Promise<void> {
+    try {
+      const uri = await captureRef(badgeShareRef, { format: "png", quality: 0.9 });
+      const earnedNames = SCENE_BADGES.filter((b) => earnedBadges.has(b.id)).map((b) => b.name);
+      await Share.share({
+        url: uri,
+        message: `我在 Proxy 集齐了 ${earnedNames.length} 枚打卡徽章${earnedNames.length > 0 ? `：${earnedNames.join("、")}` : ""}。来一起打卡吧！`,
+      });
+      setBadgeShareNotice(undefined);
+    } catch {
+      setBadgeShareNotice("分享失败，请重试。");
+    }
+  }
   const [scenes, setScenes] = useState<ReadonlyArray<RealityScene>>([]);
   const [session, setSession] = useState<AuthenticatedStoredSession>();
   const [origin, setOrigin] = useState<{ latitude: number; longitude: number } | undefined>(initialOrigin);

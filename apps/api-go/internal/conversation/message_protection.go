@@ -208,6 +208,22 @@ func DefaultProtectionFor(messageType, conversationType string) MessageProtectio
 			ExpiresAt:           &in1h,
 			EndToEndEncrypted: false,
 		}
+	case "CONTACT":
+		// CONTACT-CARD-001：名片和位置正好相反 —— 位置的默认值是「看一次、一小时后
+		// 消失」，因为坐标是此刻的隐私；**名片的意义就是被转出去**（把 B 推荐给 C
+		// 是这个功能的全部）。照抄 LOCATION 会让它自相矛盾：能发、不能转、一小时
+		// 后变成一张空白卡。
+		//
+		// 所以：可转发、可复制、无查看次数上限、不警告截图（名片就是要给人看的），
+		// 30 天过期与其它消息一致。DM 与 GROUP 同规则 —— 名片在两种会话里都是
+		// 「拿去用」而不是「只能你看」。
+		return MessageProtection{
+			Forwardable:       true,
+			Copyable:          true,
+			ScreenshotWarn:    false,
+			ExpiresAt:         &in30d,
+			EndToEndEncrypted: false,
+		}
 	case "SYSTEM_CONTEXT", "STRUCTURED_SUGGESTION":
 		// Server-generated. Always forwardable, never expires.
 		return MessageProtection{

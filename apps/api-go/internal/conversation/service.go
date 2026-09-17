@@ -471,6 +471,8 @@ func messageTypeToKind(t string) string {
 		return "audio"
 	case "LOCATION":
 		return "location"
+	case "CONTACT":
+		return "contact"
 	default:
 		return "text"
 	}
@@ -1064,13 +1066,27 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if p.MessageType == "" {
 		p.MessageType = "TEXT"
 	}
-	validTypes := map[string]bool{"TEXT": true, "IMAGE": true, "VIDEO": true, "AUDIO": true, "LOCATION": true, "SYSTEM_CONTEXT": true, "STRUCTURED_SUGGESTION": true}
+	// CONTACT-CARD-001：名片消息。body 里装的是标准 vCard 名片文本
+	// （X-PROXY-HANDLE / X-PROXY-STORE 标识），和二维码里编的是**同一串** ——
+	// 一份载荷通吃「扫到 / 发出 / 点开再画成码」。
+	//
+	// 刻意不在服务端解析 vCard：解析规则（哪些字段算、转义怎么还原）在
+	// apps/mobile/src/profile-qr.ts 里有一份实现，再在 Go 抄一份就会漂移。
+	// 服务端只保证「非空」，内容合法性由客户端 fail-closed —— 认不出的名片
+	// 就不渲染成卡片（见 parseContactCard 只认带 Proxy 标识的）。
+	validTypes := map[string]bool{"TEXT": true, "IMAGE": true, "VIDEO": true, "AUDIO": true, "LOCATION": true, "SYSTEM_CONTEXT": true, "STRUCTURED_SUGGESTION": true, "CONTACT": true}
 	if !validTypes[p.MessageType] {
 		return command.Rejected(e, "INVALID_MESSAGE_TYPE", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_message_type", map[string]any{"messageType": p.MessageType})
 	}
 	// 文本消息 Body 不能为空；图片消息允许空文本但必须带 MediaRef（上层已对纯图补 " " 占位）
 	if p.MessageType == "TEXT" && strings.TrimSpace(p.Body) == "" {
 		return command.Rejected(e, "EMPTY_MESSAGE", "VALIDATION", "AFTER_USER_ACTION", "conversation.empty_message", nil)
+	}
+	// CONTACT-CARD-001：空名片必须拒。渲染侧 fail-closed 只保证「认不出就不画卡」，
+	// 但一条 body 为空的 CONTACT 会变成一条**什么都没有的气泡**，收件人连
+	// 「这是一张名片」都看不出来 —— 那是无法解释的空白，不是降级。
+	if p.MessageType == "CONTACT" && strings.TrimSpace(p.Body) == "" {
+		return command.Rejected(e, "EMPTY_MESSAGE", "VALIDATION", "AFTER_USER_ACTION", "conversation.empty_message", map[string]any{"messageType": p.MessageType})
 	}
 	if p.MessageType == "IMAGE" && strings.TrimSpace(p.Body) == "" && strings.TrimSpace(p.MediaRef) == "" {
 		return command.Rejected(e, "EMPTY_MESSAGE", "VALIDATION", "AFTER_USER_ACTION", "conversation.empty_message", nil)

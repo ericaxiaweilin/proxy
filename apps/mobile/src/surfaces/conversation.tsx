@@ -22,6 +22,12 @@ import { attachScreenshotReporter } from "../lib/screenshot-protection";
 import { useKeyboardSafeInset } from "../components/use-keyboard-safe-inset";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
 import { decodeMeetupLocation, meetupDirectionsUrls, meetupMapsUrls, meetupPointFromLocation, type DecodedMeetup, type MeetupPoint } from "../meetup-share";
+// CONTACT-CARD-001: 名片解析用 profile-qr 那份**唯一实现** —— 二维码和消息里
+// 的名片是同一串 vCard，绝不允许这里再写一份解析器。
+import { buildContactCard, parseContactCard, type ParsedContactCard } from "../profile-qr";
+import { QrZoomOverlay } from "../components/qr-zoom-overlay";
+import type { ProfileClient } from "../profile-client";
+import type { RelationshipClient } from "../relationship-client";
 import { LocationPickerSheet, type AnyLocation, DEFAULT_LOCATION } from "../components/location-picker-sheet";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
@@ -85,6 +91,13 @@ interface Message {
   audioUri?: string;
   // MEETUP-SHARE-001: LOCATION 消息解出的坐标（解不出就不带，冒泡原文）。
   location?: DecodedMeetup;
+  // CONTACT-CARD-001: CONTACT 消息解出的名片。body 里装的是标准 vCard，
+  // 和二维码里编的是**同一串** —— 所以相机扫到的和对话里收到的走同一个解析器。
+  // 解不出（不是 Proxy 名片 / 内容损坏）就不带，body 留原文：不猜不藏，
+  // 与 LOCATION 解不出时同一个口径。
+  contact?: ParsedContactCard;
+  /** 名片原文（vCard）。气泡只显示「人能读的那一行」，但放大成码要靠这一串。 */
+  contactVcard?: string;
   v1?: MessageV1;
   stickerCode?: string;
   stickerName?: string;
@@ -101,6 +114,21 @@ interface Cluster {
   sender: string;
   messages: Message[];
 }
+
+/**
+ * CONTACT-CARD-001：名片面板里可选的一张卡。
+ *
+ * `vcard` 是**编码后的整串**（`buildContactCard` 的产物），消息里发的、放大层画成
+ * 码的都是这一串 —— 不另外传 name/handle 让各层自己拼，拼就会拼歪。
+ */
+export type ContactCardOption = {
+  key: string;
+  /** 卡片标题：我的名片 / 好友的展示名。 */
+  name: string;
+  /** 卡片副标题：@handle（个人）或店名（店铺）。App 搜得到的就是这一串。 */
+  caption: string;
+  vcard: string;
+};
 
 export function ConversationSurface({
   author,
@@ -133,6 +161,11 @@ export function ConversationSurface({
   // Lotus v1 Convo 分支模式：只读/只写该分支，seed 置顶展示。
   convoId?: string | undefined;
   convoTitle?: string | undefined;
+  // CONTACT-CARD-001：发名片要两样东西 —— 我自己的名片（profile），
+  // 以及「把某个好友的名片发出去」时的好友列表（relationship）。
+  // 两个都可选：接不进来只是发不了名片，其它功能照常（不是整屏降级）。
+  profileClient?: ProfileClient | undefined;
+  relationship?: RelationshipClient | undefined;
 }): React.JSX.Element {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState(initialDraft ?? "");
@@ -187,6 +220,13 @@ export function ConversationSurface({
   // MEETUP-SHARE-001 seg4: 会话内发位置直接复用 LocationPickerSheet（成熟组件：
   // 真地图 MapCanvas + 拖拽限 3KM + 复制/Google 打开 + 历史收藏），不再自写确认页。
   const [locationSheetOpen, setLocationSheetOpen] = useState(false);
+  // CONTACT-CARD-001: 名片选择面板（＋ 面板第一项）+ 收到/发出的名片点开看码。
+  // 放大层直接复用全 App 共用的 QrZoomOverlay —— 不再自己搭一个 Modal。
+  const [cardPickerOpen, setCardPickerOpen] = useState(false);
+  const [cardOptions, setCardOptions] = useState<ContactCardOption[] | undefined>(undefined);
+  const [cardPickerError, setCardPickerError] = useState<string | undefined>(undefined);
+  const [cardBusy, setCardBusy] = useState(false);
+  const [contactZoom, setContactZoom] = useState<{ vcard: string; caption: string; title: string } | undefined>(undefined);
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   // Keep live-sync hydration from replacing an optimistic bubble while the
@@ -275,12 +315,16 @@ export function ConversationSurface({
     setMessages(rows.map((row) => {
       // MEETUP-SHARE-001: LOCATION 行解坐标。解得出 → body 只留标签（卡片另 shows 坐标），
       // 解不出 → body 留原文（不猜不藏，收到什么看什么）。
-      const rawBody = String(row.body ?? (row.messageType === "IMAGE" ? "[图片]" : row.messageType === "VIDEO" ? "[视频]" : row.messageType === "LOCATION" ? "[位置]" : ""));
+      const rawBody = String(row.body ?? (row.messageType === "IMAGE" ? "[图片]" : row.messageType === "VIDEO" ? "[视频]" : row.messageType === "LOCATION" ? "[位置]" : row.messageType === "CONTACT" ? "[名片]" : ""));
       const location = row.messageType === "LOCATION" && typeof row.body === "string" ? decodeMeetupLocation(row.body) : undefined;
+      // CONTACT-CARD-001: 认得出 → 画卡片；认不出 → body 留原文（不猜不藏）。
+      const contact = row.messageType === "CONTACT" && typeof row.body === "string" ? parseContactCard(row.body) : undefined;
       return {
         id: String(row.messageId ?? `message_${Date.now()}`),
         sender: row.senderId === actorId ? "你" : String((row.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? aiAccount?.displayName ?? "对方"),
-        body: location ? (location.label ?? "") : rawBody,
+        // 名片的 body 只留「人能读的那一行」（@handle 或店名），vCard 原文不进气泡 ——
+        // 那串 BEGIN:VCARD 是给机器看的，塞进气泡就是噪音。
+        body: location ? (location.label ?? "") : contact ? (contact.handle ? `@${contact.handle}` : contact.name) : rawBody,
         time: new Date(String(row.createdAt ?? Date.now())).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
         isOwn: row.senderId === actorId,
         isAI: Boolean(aiAccount && row.senderId !== actorId),
@@ -295,6 +339,7 @@ export function ConversationSurface({
           ? { audioUri: `${conversationClient.baseUrl}/v1/media/play/${encodeURIComponent(row.mediaRef)}` }
           : {}),
         ...(location ? { location } : {}),
+        ...(contact ? { contact, contactVcard: String(row.body ?? "") } : {}),
       };
     }));
     setError(undefined);
@@ -634,6 +679,26 @@ export function ConversationSurface({
     }
   }
 
+  // CONTACT-CARD-001: 把 picker 里选中的名片发出去。走 conversationClient
+  // 现成的 sendContactMessage（CONTACT 类型，空 body 本地先挡），本地气泡复用
+  // 收到 CONTACT 时同一套解码（parseContactCard → contact/contactVcard）。
+  async function sendContactCard(option: ContactCardOption): Promise<void> {
+    if (cardBusy || !convId || blocked) return;
+    setCardBusy(true);
+    setError(undefined);
+    try {
+      const contact = parseContactCard(option.vcard);
+      await conversationClient.sendContactMessage(convId, option.vcard, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
+      const secureMeta = secureMetaForSend();
+      setMessages((current) => [...current, { id: `contact_${Date.now()}`, sender: "你", body: contact ? (contact.handle ? `@${contact.handle}` : contact.name) : option.name, time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }), isOwn: true, ...(contact ? { contact, contactVcard: option.vcard } : {}), ...(secureMeta ? { secureMeta } : {}) }]);
+      setCardPickerOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "名片发送失败，请重试");
+    } finally {
+      setCardBusy(false);
+    }
+  }
+
   async function sendAudio(): Promise<void> {
     if (!selectedAudio || !convId || sending) return;
     setSending(true);
@@ -727,8 +792,8 @@ export function ConversationSurface({
     // 贴纸：单 emoji 文本按大表情渲染（OpenMoji 字形直出，离线可用）。
     const stickerEmoji = message.stickerCode
       ? (STICKERS.find((s) => s.code === message.stickerCode)?.emoji ?? message.body)
-      : (!message.imageUri && !message.videoUri && !message.audioUri && !message.location && isSingleEmoji(message.body) ? message.body : undefined);
-    if (stickerEmoji && !message.imageUri && !message.videoUri && !message.audioUri && !message.location) {
+      : (!message.imageUri && !message.videoUri && !message.audioUri && !message.location && !message.contact && isSingleEmoji(message.body) ? message.body : undefined);
+    if (stickerEmoji && !message.imageUri && !message.videoUri && !message.audioUri && !message.location && !message.contact) {
       return (
         <View style={styles.stickerMessage}>
           <Text style={styles.stickerGlyph}>{stickerEmoji}</Text>
@@ -787,6 +852,35 @@ export function ConversationSurface({
               </Pressable>
             </View>
           </View>
+        ) : null}
+        {message.contact ? (
+          <Pressable
+            accessibilityLabel={`名片 ${message.contact.name}`}
+            onPress={() => {
+              // 收不到原文就不放大：画一张空码比不弹更糟（用户会以为扫不出来是自己的问题）。
+              if (!message.contactVcard) {
+                setError("这张名片内容不完整，无法展示二维码");
+                return;
+              }
+              setContactZoom({
+                vcard: message.contactVcard,
+                caption: message.contact?.handle ? `@${message.contact.handle}` : (message.contact?.name ?? ""),
+                title: `${message.contact?.name ?? ""} 的名片`,
+              });
+            }}
+            style={styles.contactCard}
+          >
+            <View style={styles.contactBadge}>
+              <Text style={styles.contactBadgeText}>{message.contact.name.slice(0, 1)}</Text>
+            </View>
+            <View style={styles.contactCopy}>
+              <Text numberOfLines={1} style={styles.contactName}>{message.contact.name}</Text>
+              <Text numberOfLines={1} style={styles.contactHandle}>
+                {message.contact.handle ? `@${message.contact.handle}` : "店铺名片"}
+              </Text>
+            </View>
+            <Text style={styles.contactCta}>二维码 ›</Text>
+          </Pressable>
         ) : null}
         {message.body.trim() ? <Text style={styles.bubbleText}>{message.body}</Text> : null}
         <View style={styles.bubbleMetaRow}>
@@ -992,7 +1086,10 @@ export function ConversationSurface({
               <Pressable accessibilityLabel="表情包" onPress={() => { setAttachOpen(false); setStickerOpen((open) => !open); }} disabled={sending || !convId} style={styles.inlineTool}>
                 <Text style={styles.inlineToolText}>☺</Text>
               </Pressable>
-              <Pressable accessibilityLabel="相机" onPress={() => { setStickerOpen(false); setAttachOpen((open) => !open); }} disabled={sending || !convId} style={styles.inlineTool}>
+              {/* CONTACT-CARD-001：相机图标以前和 ＋ 调的是**同一个** setAttachOpen ——
+                  两个按钮弹出同一张 sheet，图标等于装饰。现在相机图标直接拍照
+                  （权限/取图/错误提示都走 chooseImage），＋ 才是「其它」面板。 */}
+              <Pressable accessibilityLabel="拍照" onPress={() => { setStickerOpen(false); setAttachOpen(false); void chooseImage("CAMERA"); }} disabled={sending || !convId} style={styles.inlineTool}>
                 <ProxyIcon color={lotus.ink} name="camera" size={24} />
               </Pressable>
             </View>
@@ -1014,12 +1111,14 @@ export function ConversationSurface({
         </View>
       </View>
 
-      {/* 附件 sheet：拍照 / 照片 / 视频 / 活动 */}
+      {/* 附件 sheet：名片 / 照片 / 视频 / 活动 / 位置。
+          CONTACT-CARD-001：拍照**不在这里** —— 它在输入框里的相机图标上。
+          以前两者重复，＋ 弹出来的第一项是拍照，等于图标白画了。 */}
       {attachOpen ? (
         <Pressable accessibilityLabel="关闭附件选择" onPress={() => setAttachOpen(false)} style={styles.scrim}>
           <Pressable onPress={() => undefined} style={styles.bottomSheet}>
             <View style={styles.sheetGrab} />
-            <Pressable onPress={() => void chooseImage("CAMERA")} style={styles.sheetItem}><Text style={styles.sheetItemText}>拍照</Text></Pressable>
+            <Pressable accessibilityLabel="发送名片" onPress={() => { setAttachOpen(false); setCardPickerOpen(true); }} style={styles.sheetItem}><Text style={styles.sheetItemText}>名片</Text></Pressable>
             <Pressable onPress={() => void chooseImage("LIBRARY")} style={styles.sheetItem}><Text style={styles.sheetItemText}>照片</Text></Pressable>
             <Pressable onPress={() => void chooseVideo()} style={styles.sheetItem}><Text style={styles.sheetItemText}>视频</Text></Pressable>
             {!aiAccount ? <Pressable onPress={() => void openActivityPicker()} style={styles.sheetItem}><Text style={styles.sheetItemText}>Proxy 活动</Text></Pressable> : null}
@@ -1063,6 +1162,47 @@ export function ConversationSurface({
           baseUrl={conversationClient.baseUrl}
           onSelect={(next) => void sendLocationFromPicker(next)}
           onClose={() => setLocationSheetOpen(false)}
+        />
+      ) : null}
+
+      {/* CONTACT-CARD-001: 选一张名片发进对话。
+          第一张永远是「我的名片」，下面是服务端好友里**能解析出 handle** 的那些 ——
+          handle 不在好友列表里时宁可不列（见 loadCardOptions），绝不发一张扫了
+          落不到人的卡。 */}
+      {cardPickerOpen ? (
+        <Pressable accessibilityLabel="关闭名片选择" onPress={() => setCardPickerOpen(false)} style={styles.scrim}>
+          <Pressable onPress={() => undefined} style={styles.bottomSheet}>
+            <View style={styles.sheetGrab} />
+            <Text style={styles.pickerTitle}>发一张名片</Text>
+            <Text style={styles.pickerSub}>对方可以直接存下，也可以点开用相机扫</Text>
+            {cardPickerError ? <Text style={styles.pickerError}>{cardPickerError}</Text> : null}
+            {cardOptions === undefined ? <ActivityIndicator color={lotus.goldtext} /> : cardOptions.length === 0 ? <Text style={styles.pickerSub}>还没有可用的名片。</Text> : (
+              <ScrollView style={styles.pickerList}>
+                {cardOptions.map((option) => (
+                  <Pressable key={option.key} accessibilityLabel={`发送 ${option.name} 的名片`} disabled={cardBusy} onPress={() => void sendContactCard(option)} style={styles.pickerItem}>
+                    <Text style={styles.pickerItemTitle}>{option.name}</Text>
+                    <Text style={styles.pickerItemSub}>{option.caption}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+            <Pressable onPress={() => setCardPickerOpen(false)} style={styles.pickerCancel}>
+              <Text style={styles.pickerCancelText}>取消</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      ) : null}
+
+      {/* CONTACT-CARD-001: 名片点开就是一张码。复用全 App 共用的 QrZoomOverlay
+          （进层拉满亮度、退出还原都现成），不自己再搭一个 Modal。 */}
+      {contactZoom ? (
+        <QrZoomOverlay
+          visible
+          onClose={() => setContactZoom(undefined)}
+          value={contactZoom.vcard}
+          caption={contactZoom.caption}
+          title={contactZoom.title}
+          hint="把屏幕朝向对方即可扫描；也可以存成图片转发给第三个人。"
         />
       ) : null}
 
@@ -1354,6 +1494,16 @@ const styles = StyleSheet.create({
   messageImage: { borderRadius: 9, height: 180, marginBottom: 6, width: 220 },
   messageVideo: { borderRadius: 9, height: 180, marginBottom: 6, width: 220 },
   // MEETUP-SHARE-001: 位置卡（label + 坐标 + 外链入口，与图片同宽）。
+  // CONTACT-CARD-001: 名片气泡。宽度和位置卡对齐（220），点开是二维码 ——
+  // 收到别人转来的名片，第一件事往往是「把这个人也给第三个人」，所以那张码
+  // 必须一点就出来，而不是让用户另找入口。
+  contactCard: { alignItems: "center", backgroundColor: "#fff", borderColor: lotus.line, borderRadius: 10, borderWidth: 1, flexDirection: "row", gap: 9, marginBottom: 6, padding: 10, width: 220 },
+  contactBadge: { alignItems: "center", backgroundColor: lotus.soft, borderRadius: 16, height: 32, justifyContent: "center", width: 32 },
+  contactBadgeText: { color: lotus.goldtext, fontSize: 14, fontWeight: "700" },
+  contactCopy: { flex: 1 },
+  contactName: { color: lotus.ink, fontSize: 13, fontWeight: "700", lineHeight: 18 },
+  contactHandle: { color: lotus.muted, fontSize: 11, marginTop: 1 },
+  contactCta: { color: lotus.goldtext, fontSize: 11, fontWeight: "700" },
   locationCard: { backgroundColor: "#f6f3ee", borderRadius: 9, marginBottom: 6, padding: 10, width: 220 },
   locationTitle: { color: lotus.ink, fontSize: 13, fontWeight: "800", lineHeight: 18 },
   locationCoord: { color: lotus.muted, fontSize: 11, marginTop: 2 },

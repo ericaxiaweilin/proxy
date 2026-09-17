@@ -73,7 +73,7 @@ export class ConversationClient {
     temporaryUIResponseId?: string,
     mediaRef?: string,
     protectionOverride?: ProtectionOverride,
-    messageType?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "LOCATION" | "SYSTEM_CONTEXT" | "STRUCTURED_SUGGESTION",
+    messageType?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "LOCATION" | "SYSTEM_CONTEXT" | "STRUCTURED_SUGGESTION" | "CONTACT",
     proxyObject?: { objectType: "invitation" | "activity" | "opportunity" | "voucher" | "post" | "order"; objectId: string; snapshot: Record<string, unknown>; liveState?: Record<string, unknown> },
     convoId?: string
   ): Promise<Record<string, unknown>> {
@@ -117,6 +117,19 @@ export class ConversationClient {
     const body = encodeMeetupLocation(point);
     if (!body) throw new Error("invalid location: lat must be -90..90, lng -180..180, both finite");
     return this.sendMessage(conversationId, body, assistantMode, undefined, undefined, protectionOverride, "LOCATION", undefined, convoId);
+  }
+
+  // CONTACT-CARD-001: 发名片。body 就是 `buildContactCard()` 那串 vCard ——
+  // 和二维码里编的**同一串**：相机扫到的是它，对话里发出去的也是它，点开还能
+  // 再画成一张码给第三个人扫。和 LOCATION 完全同一个形状（编码 → body → 渲染时解码）。
+  //
+  // 空串本地就抛错：服务端也会拒（CONTACT 不允许空 body），但客户端先挡一次 ——
+  // 一条 body 为空的 CONTACT 在收件人那里是一个**无法解释的空白气泡**，
+  // 不是「降级」，是噪音。
+  public async sendContactMessage(conversationId: string, vcard: string, protectionOverride?: ProtectionOverride, assistantMode?: string, convoId?: string): Promise<Record<string, unknown>> {
+    const trimmed = vcard.trim();
+    if (!trimmed) throw new Error("empty contact card: refusing to send a blank bubble");
+    return this.sendMessage(conversationId, trimmed, assistantMode, undefined, undefined, protectionOverride, "CONTACT", undefined, convoId);
   }
 
   public async listMessages(conversationId: string, convoId?: string): Promise<Record<string, unknown>> {

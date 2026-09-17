@@ -97,6 +97,50 @@ func (r *RealitySceneRepository) ListMyCheckIns(ctx context.Context, actorID str
 // 坐标是**用户填的**，这里不做任何反查也不做核实 —— 存进去就是 PENDING +
 // Source=COMMUNITY，等别人确认。反查了再存反而更危险：反查得到的地址会被当成
 // "我们核实过"，而坐标本身还是用户随手点的。
+// SCENE-BADGE-001: 徽章获得记录（append-only）。
+func (r *RealitySceneRepository) EarnBadge(ctx context.Context, actorID string, badge realityscene.EarnedBadge) error {
+	if r == nil || r.pool == nil {
+		return fmt.Errorf("reality scene repository unavailable")
+	}
+	// 主键用「场景|徽章|时间」组合生成：同一人同一场景同秒重复打卡不产生
+	// 重复行，但不同时刻的再获得仍是新证据（append-only 口径）。
+	id := fmt.Sprintf("%s|%s|%s", badge.SceneID, badge.BadgeID, badge.EarnedAt)
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx,
+		`INSERT INTO reality.scene_badges(id, badge_id, actor_id, scene_id, earned_at)
+		 VALUES($1,$2,$3,$4,$5)
+		 ON CONFLICT (id) DO NOTHING`,
+		id, badge.BadgeID, actorID, badge.SceneID, badge.EarnedAt)
+	return err
+}
+
+func (r *RealitySceneRepository) ListMyEarnedBadges(ctx context.Context, actorID string) ([]realityscene.EarnedBadge, error) {
+	if r == nil || r.pool == nil {
+		return []realityscene.EarnedBadge{}, fmt.Errorf("reality scene repository unavailable")
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx,
+		`SELECT badge_id, scene_id, earned_at FROM reality.scene_badges
+		  WHERE actor_id=$1 ORDER BY earned_at ASC`, actorID)
+	if err != nil {
+		return []realityscene.EarnedBadge{}, err
+	}
+	defer rows.Close()
+	out := make([]realityscene.EarnedBadge, 0)
+	for rows.Next() {
+		var b realityscene.EarnedBadge
+		var earned time.Time
+		if err := rows.Scan(&b.BadgeID, &b.SceneID, &earned); err != nil {
+			return []realityscene.EarnedBadge{}, err
+		}
+		b.EarnedAt = earned.Format(time.RFC3339)
+		out = append(out, b)
+	}
+	if err := rows.Err(); err != nil {
+		return []realityscene.EarnedBadge{}, err
+	}
+	return out, nil
+}
+
+
 func (r *RealitySceneRepository) ProposeScene(ctx context.Context, p realityscene.Proposal, now time.Time) error {
 	if p.Best == "" {
 		p.Best = "以现场公告为准"
