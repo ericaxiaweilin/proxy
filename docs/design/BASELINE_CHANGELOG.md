@@ -4,6 +4,24 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 228 — 2026-09-17
+
+- CONVO-ATTACH-002（相机图标合并为相机位+全量相册网格，替换 CONVO-ATTACH-001
+  遗留问题）：001 的首格是"点了跳系统相机"的按钮、相册只查图片且硬编码
+  24 张上限、缩略图逐张调用 `getUri()`（触发 iCloud 下载，是选完等 3 秒
+  的根因）、没带 mimeType（iPhone 默认 HEIC 声明成 JPEG，被服务端
+  `mediaMimeAllowed` 拒收，是"选好照片发不出去"的根因）、视频要另外去
+  ＋ 面板找。
+  - 首格换成 `CameraView` 实时取景 + 快门直接拍；下面是图片+视频全量
+    网格（`.within(AssetField.MEDIA_TYPE, [IMAGE, VIDEO])`，FlatList
+    `onEndReached` 静默分页，无可见"加载更多"按钮）。
+  - 缩略图改用 asset id 直接渲染（不碰网络），`getUri()` 只在点选那一张
+    时才调用一次，按文件名推 mimeType 再发送。＋ 面板去掉重复的
+    "照片"/"视频"两行。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/conversation.tsx`（相册
+    sheet 交互与相机位）。复用既有 bottomSheet 语言与图标，无主题 token
+    改动、无外部视觉参考变更。
+
 ## Revision 227 — 2026-09-17
 
 - MAIN-WIRING-SPLIT-001（`cmd/api/main.go` 按域拆分）：1387 行的单文件接线根
