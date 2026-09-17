@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 227 — 2026-09-17
+
+- MAIN-WIRING-SPLIT-001（`cmd/api/main.go` 按域拆分）：1387 行的单文件接线根
+  拆成 `wire_providers.go` / `wire_seed.go` / `wire_supply.go` /
+  `wire_fulfillment.go`，`main.go` 只留 `main` 函数。纯文件搬运，零行为变更
+  （函数清单 diff 为空，`go build`＋包单测全过）。多 worktree 并行时它是
+  merge 冲突概率最高的单点，拆完各域改各域的文件。
+  - **基线敏感文件**：`apps/api-go/cmd/api/main.go`（集成接线面）。
+    无接线语义改动、无新增依赖、无主题改动。
+
 ## Revision 226 — 2026-09-17
 
 - NOTIF-INVITE-OFFER-001（邀请卡片删“询问”按钮）：点它只是把邀请状态从
