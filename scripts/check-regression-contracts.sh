@@ -6358,3 +6358,30 @@ if ! grep -q 'onPress={() => setSelectedHumanId(human.id)}' apps/mobile/src/surf
 fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-humans.test.ts || exit $?
 echo "    SCENE-HUMANS-001: PASS (round avatar, name and order availability only)"
+
+# MERCHANT-LOGO-001: 商家详情页必须有商家 logo，现在没有。
+#
+# 现状：场景链只有 venue 大图；logo 只活在商家自己的管理面
+#（store_lines.logo_asset_path），且场景↔店铺没有关联键。
+# 本轮：Detail.logoUrl（omitempty）+ 映射点 logoFor + 详情页标题旁小圆标；
+# 没有回字母块（管理面同款），不编占位图。logo 文件本身要商户给 ——
+# 全仓现在没有任何一家上传过，空着比编诚实。
+require_test "MERCHANT-LOGO-001" "./internal/realityscene" \
+  "TestSceneDetailCarriesMerchantLogoURL" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+if ! grep -q 'json:"logoUrl,omitempty"' apps/api-go/internal/realityscene/service.go ||
+   ! grep -q 'logoFor(scene.ID)' apps/api-go/internal/realityscene/service.go ||
+   ! grep -q 'detail?.logoUrl' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'MERCHANT-LOGO-001' apps/mobile/src/scene-merchant-logo.test.ts; then
+  echo "  FAIL [MERCHANT-LOGO-001]: 商家 logo 链路断了 ——" >&2
+  echo "        详情页又只剩 venue 大图。" >&2
+  exit 1
+fi
+# 反向钉：映射点不许编 URL —— 商户没给资产之前，空表就是真相。
+if grep -q 'sceneLogos = map\[string\]string{[^}]' apps/api-go/internal/realityscene/service.go; then
+  echo "  FAIL [MERCHANT-LOGO-001]: logo 映射表里出现了手写 URL ——" >&2
+  echo "        商户没给资产，空着。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/scene-merchant-logo.test.ts || exit $?
+echo "    MERCHANT-LOGO-001: PASS (merchant logo on scene detail, letter fallback)"
