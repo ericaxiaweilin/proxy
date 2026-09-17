@@ -6818,3 +6818,9 @@ if grep -q 'styles.online' apps/mobile/src/surfaces/messages.tsx; then
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/messages-unread.test.ts || exit $?
 echo "    UNREAD-PIPELINE-001: PASS (unread badge has real data, online dot removed)"
+# 反向钉：相机媒体不许回流到 ＋ 面板（跟相机图标里的相册打架）。
+if grep -q '>视频</Text>' apps/mobile/src/surfaces/conversation.tsx ||
+   grep -q '>照片</Text>' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [SHEET-ICONS-001]: 相机媒体又在 ＋ 里单开了入口 ——" >&2
+  exit 1
+fi

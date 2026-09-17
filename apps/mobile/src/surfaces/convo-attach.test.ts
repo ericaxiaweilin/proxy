@@ -102,4 +102,11 @@ describe("SHEET-ICONS-001 attach sheet entries are icon tiles, not text rows", (
     expect(convoCode).toContain("void openActivityPicker()");
     expect(convoCode).toContain('setLocationSheetOpen(true)');
   });
+
+  it("keeps camera media out of the attach sheet entirely", () => {
+    // 拍照/选图/选视频都在相机图标的相册里 —— ＋ 里留任何一个都是第二条路。
+    // （CONVO-ATTACH-001 已钉死照片行，这里把视频行一起钉死。）
+    expect(convoCode).not.toContain(">视频</Text>");
+    expect(convoCode).not.toContain(">照片</Text>");
+  });
 });
