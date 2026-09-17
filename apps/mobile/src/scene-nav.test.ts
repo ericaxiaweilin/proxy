@@ -36,4 +36,10 @@ describe("SCENE-NAV-001 the scene homepage navigates there", () => {
     expect(mapCode).not.toContain("maps.apple.com");
     expect(mapCode).not.toContain("google.com/maps");
   });
+
+  it("treats null-island as missing coordinates, not a destination", () => {
+    // (0,0) 在数值上“合法”（有限数、在 ±90/±180 内），但它在大西洋正中间 ——
+    // 上游拿它当“没填”时，导航过去等于把人往海里导。必须和非法坐标同出口。
+    expect(mapCode).toContain("scene.latitude === 0 && scene.longitude === 0");
+  });
 });

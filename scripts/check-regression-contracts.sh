@@ -6312,6 +6312,7 @@ echo "    ADD-FRIEND-SEND-BUSY-001: PASS (sending locks the button with a busy l
 if ! grep -q 'meetupDirectionsUrls' apps/mobile/src/surfaces/reality-scene-map.tsx ||
    ! grep -q 'Linking.openURL' apps/mobile/src/surfaces/reality-scene-map.tsx ||
    ! grep -q '导航去这里' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'scene.latitude === 0 && scene.longitude === 0' apps/mobile/src/surfaces/reality-scene-map.tsx ||
    ! grep -q 'SCENE-NAV-001' apps/mobile/src/scene-nav.test.ts; then
   echo "  FAIL [SCENE-NAV-001]: 场景主页的导航出口断了 ——" >&2
   echo "        看得到去不了。" >&2

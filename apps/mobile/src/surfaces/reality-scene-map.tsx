@@ -433,7 +433,9 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   // 默认步行，进系统应用后可切方式）；坐标非法 fail-closed，不编点。
   const openSceneNavigation = (scene: RealityScene): void => {
     const urls = meetupDirectionsUrls({ lat: scene.latitude, lng: scene.longitude });
-    if (!urls) {
+    // (0,0) 落在大西洋正中间（Null Island）：上游拿它当“没填坐标”时，
+    // 不能把人往海里导 —— 和非法坐标走同一个诚实出口。
+    if (!urls || (scene.latitude === 0 && scene.longitude === 0)) {
       setNavError("这个场景没有可用坐标，打不开导航");
       return;
     }
