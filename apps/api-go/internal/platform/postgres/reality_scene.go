@@ -101,7 +101,7 @@ func (r *RealitySceneRepository) ProposeScene(ctx context.Context, p realityscen
 	if p.Best == "" {
 		p.Best = "以现场公告为准"
 	}
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `INSERT INTO reality.scene_proposals(id,proposed_by,name,area,type,address,latitude,longitude,description,best,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'PENDING',$11) ON CONFLICT(id) DO NOTHING`, p.ID, p.ProposedBy, p.Name, p.Area, p.Type, p.Address, p.Latitude, p.Longitude, p.Description, p.Best, now.UTC())
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `INSERT INTO reality.scene_proposals(id,proposed_by,name,area,type,category,address,latitude,longitude,description,best,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'PENDING',$12) ON CONFLICT(id) DO NOTHING`, p.ID, p.ProposedBy, p.Name, p.Area, p.Type, p.Category, p.Address, p.Latitude, p.Longitude, p.Description, p.Best, now.UTC())
 	return err
 }
 func (r *RealitySceneRepository) ConfirmSceneProposal(ctx context.Context, proposalID, actorID string, now time.Time) (int, error) {
@@ -130,7 +130,7 @@ func (r *RealitySceneRepository) ConfirmSceneProposal(ctx context.Context, propo
 	return count, nil
 }
 func (r *RealitySceneRepository) ListProposals(ctx context.Context, actorID string) ([]realityscene.Proposal, error) {
-	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `SELECT p.id,p.proposed_by,p.name,p.area,p.type,p.address,p.latitude,p.longitude,p.description,p.best,p.status, COUNT(c.actor_id) AS confirmations, EXISTS(SELECT 1 FROM reality.scene_proposal_confirmations x WHERE x.proposal_id=p.id AND x.actor_id=$1) AS confirmed FROM reality.scene_proposals p LEFT JOIN reality.scene_proposal_confirmations c ON c.proposal_id=p.id GROUP BY p.id ORDER BY p.created_at DESC`, actorID)
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `SELECT p.id,p.proposed_by,p.name,p.area,p.type,p.category,p.address,p.latitude,p.longitude,p.description,p.best,p.status, COUNT(c.actor_id) AS confirmations, EXISTS(SELECT 1 FROM reality.scene_proposal_confirmations x WHERE x.proposal_id=p.id AND x.actor_id=$1) AS confirmed FROM reality.scene_proposals p LEFT JOIN reality.scene_proposal_confirmations c ON c.proposal_id=p.id GROUP BY p.id ORDER BY p.created_at DESC`, actorID)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +139,7 @@ func (r *RealitySceneRepository) ListProposals(ctx context.Context, actorID stri
 	for rows.Next() {
 		var p realityscene.Proposal
 		var proposedBy string
-		if err := rows.Scan(&p.ID, &proposedBy, &p.Name, &p.Area, &p.Type, &p.Address, &p.Latitude, &p.Longitude, &p.Description, &p.Best, &p.Status, &p.Confirmations, &p.Confirmed); err != nil {
+		if err := rows.Scan(&p.ID, &proposedBy, &p.Name, &p.Area, &p.Type, &p.Category, &p.Address, &p.Latitude, &p.Longitude, &p.Description, &p.Best, &p.Status, &p.Confirmations, &p.Confirmed); err != nil {
 			return nil, err
 		}
 		p.Own = proposedBy == actorID
@@ -152,7 +152,7 @@ func (r *RealitySceneRepository) ListProposals(ctx context.Context, actorID stri
 // ListApprovedCommunityScenes 只返回确认数够了的提案。它们以 Source=COMMUNITY
 // 进目录 —— 少了这个标记，用户就分不清哪些坐标是查过的、哪些是别人随手点的。
 func (r *RealitySceneRepository) ListApprovedCommunityScenes(ctx context.Context) ([]realityscene.Scene, error) {
-	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `SELECT id,name,area,type,address,latitude,longitude,description,best FROM reality.scene_proposals WHERE status='APPROVED' ORDER BY decided_at DESC`)
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `SELECT id,name,area,type,category,address,latitude,longitude,description,best FROM reality.scene_proposals WHERE status='APPROVED' ORDER BY decided_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func (r *RealitySceneRepository) ListApprovedCommunityScenes(ctx context.Context
 	out := []realityscene.Scene{}
 	for rows.Next() {
 		var s realityscene.Scene
-		if err := rows.Scan(&s.ID, &s.Name, &s.Area, &s.Type, &s.Address, &s.Latitude, &s.Longitude, &s.Description, &s.Best); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Area, &s.Type, &s.Category, &s.Address, &s.Latitude, &s.Longitude, &s.Description, &s.Best); err != nil {
 			return nil, err
 		}
 		s.Source = realityscene.SourceCommunity
@@ -195,7 +195,7 @@ func (r *RealitySceneRepository) listScenes(ctx context.Context, suffix string, 
 	// quality 是手写的质量分。它们拿去算"推荐度"等于用编的数字排序。
 	// 现在 ranking 只剩真实信号：用户行为计数 + 距离，与内存版
 	// recommendationScore() 完全一致。
-	query := `WITH ranked AS (SELECT id,name,area,type,address,latitude,longitude,best,active,description, CASE WHEN $1::double precision IS NULL THEN 0 ELSE 6371000*2*asin(sqrt(power(sin(radians(latitude-$1)/2),2)+cos(radians($1))*cos(radians(latitude))*power(sin(radians(longitude-$2)/2),2))) END AS distance_m FROM reality.scenes WHERE status='ACTIVE'), tally AS (SELECT scene_id, COUNT(*) FILTER (WHERE saved) AS saved_count, COUNT(*) FILTER (WHERE private_visited) AS visited_count, COUNT(*) FILTER (WHERE planned) AS planned_count FROM reality.user_scene_states GROUP BY scene_id) SELECT id,name,area,type,address,latitude,longitude,best,active,description,distance_m,COALESCE(tally.saved_count,0),COALESCE(tally.visited_count,0),COALESCE(tally.planned_count,0),(ln(1+COALESCE(tally.saved_count,0)+2*COALESCE(tally.visited_count,0)+2*COALESCE(tally.planned_count,0))*8 - distance_m/1000*2.5) AS recommendation_score FROM ranked LEFT JOIN tally ON tally.scene_id = ranked.id ` + suffix
+	query := `WITH ranked AS (SELECT id,name,area,type,category,address,latitude,longitude,best,active,description, CASE WHEN $1::double precision IS NULL THEN 0 ELSE 6371000*2*asin(sqrt(power(sin(radians(latitude-$1)/2),2)+cos(radians($1))*cos(radians(latitude))*power(sin(radians(longitude-$2)/2),2))) END AS distance_m FROM reality.scenes WHERE status='ACTIVE'), tally AS (SELECT scene_id, COUNT(*) FILTER (WHERE saved) AS saved_count, COUNT(*) FILTER (WHERE private_visited) AS visited_count, COUNT(*) FILTER (WHERE planned) AS planned_count FROM reality.user_scene_states GROUP BY scene_id) SELECT id,name,area,type,category,address,latitude,longitude,best,active,description,distance_m,COALESCE(tally.saved_count,0),COALESCE(tally.visited_count,0),COALESCE(tally.planned_count,0),(ln(1+COALESCE(tally.saved_count,0)+2*COALESCE(tally.visited_count,0)+2*COALESCE(tally.planned_count,0))*8 - distance_m/1000*2.5) AS recommendation_score FROM ranked LEFT JOIN tally ON tally.scene_id = ranked.id ` + suffix
 	if args == nil {
 		args = []any{nil, nil}
 	}
@@ -207,7 +207,7 @@ func (r *RealitySceneRepository) listScenes(ctx context.Context, suffix string, 
 	out := []realityscene.Scene{}
 	for rows.Next() {
 		var s realityscene.Scene
-		if err := rows.Scan(&s.ID, &s.Name, &s.Area, &s.Type, &s.Address, &s.Latitude, &s.Longitude, &s.Best, &s.Active, &s.Description, &s.DistanceMeters, &s.SavedCount, &s.VisitedCount, &s.PlannedCount, &s.RecommendationScore); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Area, &s.Type, &s.Category, &s.Address, &s.Latitude, &s.Longitude, &s.Best, &s.Active, &s.Description, &s.DistanceMeters, &s.SavedCount, &s.VisitedCount, &s.PlannedCount, &s.RecommendationScore); err != nil {
 			return nil, err
 		}
 		out = append(out, s)

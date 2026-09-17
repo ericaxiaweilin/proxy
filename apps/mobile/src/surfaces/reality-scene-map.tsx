@@ -43,6 +43,9 @@ import { aiAccountPhoto } from "../ai-persona-presentation";
 
 type SceneFilter = "ALL" | "UNSEEN" | "ACTIVE" | "SAVED" | "VISITED";
 type SceneView = "MAP" | "LIST";
+// SCENE-CATEGORY-001: 场景顶类，封闭三态。前端只认这三个 —— picker 三选一，
+// 标记颜色和徽标都按它 key；后端细分（咖啡店/湖/海滩…）继续走 type。
+type SceneCategory = "商家" | "景点" | "其他";
 type AuthenticatedStoredSession = StoredSession & { principal: NonNullable<StoredSession["principal"]> };
 
 type RealityScene = {
@@ -50,6 +53,9 @@ type RealityScene = {
   name: string;
   area: string;
   type: string;
+  // SCENE-CATEGORY-001: 顶类（封闭三态，服务端 098 迁移回填 + 校验）。
+  // 缺失或不在三态里 = 脏数据，按现有规矩整单报错，不猜。
+  category: SceneCategory;
   // SCENE-ADDRESS-001: 门牌/街道级地址。可选 —— 老数据没有这个字段，
   // 没有就是没有，不许拿 area（区名）冒充。渲染时走 sceneAddress() 回退。
   address?: string;
@@ -78,7 +84,7 @@ type RealityScene = {
 };
 
 // SCENE-CONTRIB-001: 用户提交的新场景（上架前只是提案）。
-type SceneProposal = { id: string; name: string; area: string; type: string; status: string; confirmations: number; own: boolean; confirmed: boolean };
+type SceneProposal = { id: string; name: string; area: string; type: string; category: SceneCategory; status: string; confirmations: number; own: boolean; confirmed: boolean };
 
 type DynamicSceneAction = { type: "DIRECT_INVITE" | "OPEN_TASK" | "PUBLIC_ACTIVITY"; label: string; state: string; moneyMeaning: string };
 type SceneDetail = {
@@ -120,7 +126,9 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const [contribOpen, setContribOpen] = useState(false);
   const [contribBusy, setContribBusy] = useState(false);
   const [contribMsg, setContribMsg] = useState<string | undefined>(undefined);
-  const [draft, setDraft] = useState({ name: "", area: "", type: "咖啡", description: "" });
+  // SCENE-CATEGORY-001: 分类三选一，不预设 —— 预设等于替用户选，错了就是
+  // 我们编的。空着提交会被拦（"请先选择分类"），和邀约选人一个规矩。
+  const [draft, setDraft] = useState<{ name: string; area: string; category: SceneCategory | ""; description: string }>({ name: "", area: "", category: "", description: "" });
   // SCENE-EVENT-SIGNUP-001: 这个场景上已发布的活动。列表状态单独存 —— "没有
   // 活动" / "取不到" / "没登录" 是三件不同的事，不能都显示成一句"暂无"。
   const [sceneActivities, setSceneActivities] = useState<ReadonlyArray<SceneActivity>>([]);
@@ -288,7 +296,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const filtered = useMemo(() => {
     const matching = scenes.filter((scene) => {
     const term = query.trim().toLocaleLowerCase();
-    if (term && !`${scene.name} ${scene.area} ${scene.type}`.toLocaleLowerCase().includes(term)) return false;
+    if (term && !`${scene.name} ${scene.area} ${scene.type} ${scene.category}`.toLocaleLowerCase().includes(term)) return false;
     if (filter === "ACTIVE") return scene.active;
     if (filter === "SAVED") return saved.has(scene.id);
     if (filter === "VISITED") return visited.has(scene.id);
@@ -377,17 +385,18 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const submitProposal = (): void => {
     if (!session?.principal) { setContribMsg("请先登录，才能提交新场景。"); return; }
     if (draft.name.trim() === "" || draft.area.trim() === "") { setContribMsg("名称和区域不能为空。"); return; }
+    if (draft.category === "") { setContribMsg("请先选择分类：商家 / 景点 / 其他。"); return; }
     // 坐标只能来自**当前位置**：让用户手填经纬度，填出来的坐标一定不准，
     // 而且会让人以为是自己核实过的。
     if (!origin) { setContribMsg("需要当前位置才能提交新场景 —— 先按下面的按钮定位。"); return; }
     setContribBusy(true);
     setContribMsg(undefined);
     void sendSceneCommand(authClient, session, "ProposeRealityScene", "new_scene", {
-      name: draft.name.trim(), area: draft.area.trim(), type: draft.type.trim(),
+      name: draft.name.trim(), area: draft.area.trim(), type: "", category: draft.category,
       latitude: origin.latitude, longitude: origin.longitude, description: draft.description.trim(),
     })
       .then((payload) => {
-        setDraft({ name: "", area: "", type: "咖啡", description: "" });
+        setDraft({ name: "", area: "", category: "", description: "" });
         setContribOpen(false);
         setContribMsg(typeof payload.note === "string" ? payload.note : "已提交，等待其他用户确认。");
         if (session) loadProposals(session);
@@ -526,7 +535,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const activeVariant = selected ? detail?.variants.find((item) => item.id === detail.selectedVariant) : undefined;
   const detailBody = selected ? (
       <ScrollView style={[styles.root, rootPad]} contentContainerStyle={styles.detailContent}>
-        <View style={styles.detailTop}><Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.backButton}><Text style={styles.backText}>‹</Text></Pressable><View style={styles.detailTopCopy}><Text style={styles.detailTopTitle}>{detail?.venueName ?? selected.name}</Text><Text style={styles.detailTopSub}>{activeVariant?.name ?? selected.area} · {selected.area}</Text></View><View style={styles.topSpacer} /></View>
+        <View style={styles.detailTop}><Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.backButton}><Text style={styles.backText}>‹</Text></Pressable><View style={styles.detailTopCopy}><Text style={styles.detailTopTitle}>{detail?.venueName ?? selected.name}</Text><Text style={styles.detailTopSub}>{activeVariant?.name ?? selected.area} · {selected.area}</Text>{/* SCENE-CATEGORY-001: 顶类徽标 —— 去过/未开放照样显示分类（置灰的是标记，不是身份）。 */}<View style={styles.categoryBadge}><Text style={styles.categoryBadgeText}>{selected.category}</Text></View></View><View style={styles.topSpacer} /></View>
         <View style={styles.hero}>
           {detail?.heroImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.heroMap} transition={0} /> : <MapView initialRegion={{ latitude: selected.latitude, longitude: selected.longitude, latitudeDelta: 0.025, longitudeDelta: 0.025 }} pointerEvents="none" style={styles.heroMap}><Marker coordinate={{ latitude: selected.latitude, longitude: selected.longitude }} pinColor={selected.active ? color.magenta : color.violet} /></MapView>}
           <Text style={styles.eyebrow}>LIVE SCENE · {detail?.venueName ?? selected.name}</Text>
@@ -644,7 +653,15 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
           <Text style={styles.contribHint}>坐标会取你**当前所在的位置**，不能手填 —— 手填出来的坐标一定不准，还会让人误以为核实过。</Text>
           <TextInput onChangeText={(text) => setDraft((d) => ({ ...d, name: text }))} placeholder="场景名称" placeholderTextColor={color.muted} style={styles.contribInput} value={draft.name} />
           <TextInput onChangeText={(text) => setDraft((d) => ({ ...d, area: text }))} placeholder="区域，例如 Bắc Ninh" placeholderTextColor={color.muted} style={styles.contribInput} value={draft.area} />
-          <TextInput onChangeText={(text) => setDraft((d) => ({ ...d, type: text }))} placeholder="类型，例如 咖啡 / 公园" placeholderTextColor={color.muted} style={styles.contribInput} value={draft.type} />
+          {/* SCENE-CATEGORY-001: 分类三选一 picker —— 自由文本框已撤：填什么词
+              都是无界词表，后期按分类做的东西全断。细分由后端定，前端只选顶类。 */}
+          <View style={styles.categoryPicker}>
+            {(["商家", "景点", "其他"] as const).map((c) => (
+              <Pressable key={c} accessibilityLabel={`分类${c}`} onPress={() => setDraft((d) => ({ ...d, category: c }))} style={[styles.filter, draft.category === c && styles.filterActive]}>
+                <Text style={[styles.filterText, draft.category === c && styles.filterTextActive]}>{c}</Text>
+              </Pressable>
+            ))}
+          </View>
           <TextInput onChangeText={(text) => setDraft((d) => ({ ...d, description: text }))} placeholder="一句话说明（可选）" placeholderTextColor={color.muted} style={styles.contribInput} value={draft.description} />
           <Pressable disabled={contribBusy} onPress={submitProposal} style={styles.confirmAction}><Text style={styles.confirmActionText}>{contribBusy ? "提交中…" : "提交，等别人确认"}</Text></Pressable>
         </View>
@@ -653,7 +670,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         <View key={proposal.id} style={styles.contribRow}>
           <View style={styles.sceneCopy}>
             <Text style={styles.sceneName}>{proposal.name}</Text>
-            <Text style={styles.sceneMeta}>{proposal.area} · {proposal.type} · {proposal.confirmations}/{confirmationsNeeded} 人确认{sceneSourceSuffix("COMMUNITY")}</Text>
+            <Text style={styles.sceneMeta}>{proposal.area} · {proposal.category} · {proposal.confirmations}/{confirmationsNeeded} 人确认{sceneSourceSuffix("COMMUNITY")}</Text>
           </View>
           {proposal.own ? <Text style={styles.contribTag}>你提交的 · 等别人确认</Text> : proposal.confirmed ? <Text style={styles.contribTag}>✓ 已确认</Text> : <Pressable disabled={contribBusy} onPress={() => confirmProposal(proposal.id)} style={styles.contribButton}><Text style={styles.contribButtonText}>确认它存在</Text></Pressable>}
         </View>
@@ -677,7 +694,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
                     />
                   );
                 })
-              : filtered.map((scene) => <Marker key={scene.id} coordinate={{ latitude: scene.latitude, longitude: scene.longitude }} onPress={() => { setSelectedId(scene.id); }} pinColor={scene.active ? color.magenta : visited.has(scene.id) ? color.muted : color.violet} title={scene.name} description={sceneAddressLine(scene)} />)}
+              : filtered.map((scene) => <Marker key={scene.id} coordinate={{ latitude: scene.latitude, longitude: scene.longitude }} onPress={() => { setSelectedId(scene.id); }} pinColor={visited.has(scene.id) || !scene.active ? color.muted : scene.category === "商家" ? color.magenta : scene.category === "景点" ? color.violet : color.muted} title={scene.name} description={sceneAddressLine(scene)} />)}
           </MapView>
           <Pressable
             style={[styles.heatToggle, heat && styles.heatToggleOn]}
@@ -713,7 +730,7 @@ function isRealityScene(value: unknown): value is RealityScene {
   // activities / invites —— 它们已经从服务端删掉了。要是哪天有人加回来，
   // 这个校验会放行（宽松），但 TestSceneHasNoFabricatedNumbers 和
   // scripts/check-regression-contracts.sh 的 SCENE-NO-FABRICATED-001 会红。
-  return typeof scene.id === "string" && typeof scene.name === "string" && typeof scene.area === "string" && typeof scene.type === "string" && typeof scene.latitude === "number" && Number.isFinite(scene.latitude) && typeof scene.longitude === "number" && Number.isFinite(scene.longitude) && typeof scene.best === "string" && typeof scene.active === "boolean" && typeof scene.description === "string" && (scene.distanceMeters === undefined || typeof scene.distanceMeters === "number") && (scene.address === undefined || typeof scene.address === "string") && (scene.savedCount === undefined || typeof scene.savedCount === "number") && (scene.visitedCount === undefined || typeof scene.visitedCount === "number") && (scene.plannedCount === undefined || typeof scene.plannedCount === "number") && (scene.hereCount === undefined || typeof scene.hereCount === "number") && (scene.source === undefined || typeof scene.source === "string");
+  return typeof scene.id === "string" && typeof scene.name === "string" && typeof scene.area === "string" && typeof scene.type === "string" && typeof scene.latitude === "number" && Number.isFinite(scene.latitude) && typeof scene.longitude === "number" && Number.isFinite(scene.longitude) && typeof scene.best === "string" && typeof scene.active === "boolean" && typeof scene.description === "string" && (scene.distanceMeters === undefined || typeof scene.distanceMeters === "number") && (scene.address === undefined || typeof scene.address === "string") && (scene.savedCount === undefined || typeof scene.savedCount === "number") && (scene.visitedCount === undefined || typeof scene.visitedCount === "number") && (scene.plannedCount === undefined || typeof scene.plannedCount === "number") && (scene.hereCount === undefined || typeof scene.hereCount === "number") && (scene.source === undefined || typeof scene.source === "string") && (scene.category === "商家" || scene.category === "景点" || scene.category === "其他");
 }
 
 // 地址行的回退逻辑在 reality-scene-address.ts（纯 .ts，可单测）——
@@ -724,7 +741,8 @@ function isSceneProposal(value: unknown): value is SceneProposal {
   const item = value as Partial<SceneProposal>;
   return typeof item.id === "string" && typeof item.name === "string" && typeof item.area === "string" &&
     typeof item.type === "string" && typeof item.status === "string" && typeof item.confirmations === "number" &&
-    typeof item.own === "boolean" && typeof item.confirmed === "boolean";
+    typeof item.own === "boolean" && typeof item.confirmed === "boolean" &&
+    (item.category === "商家" || item.category === "景点" || item.category === "其他");
 }
 
 function isUserSceneState(value: unknown): value is { sceneId: string; saved: boolean; planned: boolean; privateVisited: boolean; visitedAt?: string } {
@@ -807,9 +825,9 @@ const styles = StyleSheet.create({
   // SCENE-MAP-GESTURE-001: 详情盖层（不透明盖住整页，地图在下面常驻）。
   detailOverlay: { backgroundColor: color.offWhite, bottom: 0, left: 0, position: "absolute", right: 0, top: 0, zIndex: 10 },
   list: { gap: 9, paddingBottom: 24, paddingHorizontal: 16 }, checkInHint: { color: color.muted, flex: 1, fontSize: 11, lineHeight: 16 },
-  contribCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 8, marginHorizontal: 16, padding: 14 }, contribHint: { color: color.muted, fontSize: 11, lineHeight: 16 }, contribInput: { borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 14, paddingHorizontal: 12, paddingVertical: 9 }, contribRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginHorizontal: 16, marginTop: 8, padding: 12 }, contribTag: { color: color.muted, fontSize: 11 }, contribButton: { backgroundColor: color.violet, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 }, contribButtonText: { color: color.white, fontSize: 12, fontWeight: "700" },
+  contribCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 8, marginHorizontal: 16, padding: 14 }, contribHint: { color: color.muted, fontSize: 11, lineHeight: 16 }, contribInput: { borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 14, paddingHorizontal: 12, paddingVertical: 9 }, categoryPicker: { flexDirection: "row", gap: 8 }, contribRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginHorizontal: 16, marginTop: 8, padding: 12 }, contribTag: { color: color.muted, fontSize: 11 }, contribButton: { backgroundColor: color.violet, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 }, contribButtonText: { color: color.white, fontSize: 12, fontWeight: "700" },
   sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, minHeight: 82, padding: 14 }, sceneDot: { backgroundColor: color.violet, borderRadius: 9, height: 18, width: 18 }, sceneDotActive: { backgroundColor: color.magenta }, sceneDotVisited: { backgroundColor: color.muted }, sceneCopy: { flex: 1 }, sceneName: { color: color.ink, fontSize: 16, fontWeight: "800" }, sceneMeta: { color: color.muted, fontSize: 12, marginTop: 3 }, sceneSignal: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 5 }, empty: { color: color.muted, paddingTop: 40, textAlign: "center" },
-  detailContent: { paddingBottom: 36, paddingHorizontal: 13 }, detailTop: { alignItems: "center", flexDirection: "row", minHeight: 56 }, backButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 }, detailTopCopy: { flex: 1 }, detailTopTitle: { color: color.ink, fontSize: 17, fontWeight: "900" }, detailTopSub: { color: color.muted, fontSize: 11, marginTop: 2 },   topSpacer: { width: 38 }, backText: { color: color.ink, fontSize: 24, fontWeight: "800", lineHeight: 28 }, hero: { backgroundColor: "#F6F2E9", borderColor: color.line, borderRadius: 20, borderWidth: 1, overflow: "hidden", padding: 15, paddingTop: 242 }, heroMap: { height: 226, left: 0, position: "absolute", right: 0, top: 0 }, statePill: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 14, marginTop: 4, paddingHorizontal: 10, paddingVertical: 6 }, statePillActive: { backgroundColor: color.attentionBg }, stateText: { color: color.muted, fontSize: 11, fontWeight: "800" }, stateTextActive: { color: color.error }, eyebrow: { color: "#8B6000", fontSize: 11, fontWeight: "900", letterSpacing: 0.8, marginTop: 12 }, detailTitle: { color: color.ink, fontSize: 28, fontWeight: "900", lineHeight: 31, marginTop: 5 }, detailDescription: { color: color.muted, fontSize: 13, lineHeight: 20, marginTop: 7 }, sceneAddress: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 18, marginTop: 6 }, sceneCounts: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  detailContent: { paddingBottom: 36, paddingHorizontal: 13 }, detailTop: { alignItems: "center", flexDirection: "row", minHeight: 56 }, backButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 }, detailTopCopy: { flex: 1 }, detailTopTitle: { color: color.ink, fontSize: 17, fontWeight: "900" }, detailTopSub: { color: color.muted, fontSize: 11, marginTop: 2 }, categoryBadge: { alignSelf: "flex-start", backgroundColor: color.violetSoftBg, borderRadius: 999, marginTop: 5, paddingHorizontal: 9, paddingVertical: 3 }, categoryBadgeText: { color: color.violet, fontSize: 11, fontWeight: "800" },   topSpacer: { width: 38 }, backText: { color: color.ink, fontSize: 24, fontWeight: "800", lineHeight: 28 }, hero: { backgroundColor: "#F6F2E9", borderColor: color.line, borderRadius: 20, borderWidth: 1, overflow: "hidden", padding: 15, paddingTop: 242 }, heroMap: { height: 226, left: 0, position: "absolute", right: 0, top: 0 }, statePill: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 14, marginTop: 4, paddingHorizontal: 10, paddingVertical: 6 }, statePillActive: { backgroundColor: color.attentionBg }, stateText: { color: color.muted, fontSize: 11, fontWeight: "800" }, stateTextActive: { color: color.error }, eyebrow: { color: "#8B6000", fontSize: 11, fontWeight: "900", letterSpacing: 0.8, marginTop: 12 }, detailTitle: { color: color.ink, fontSize: 28, fontWeight: "900", lineHeight: 31, marginTop: 5 }, detailDescription: { color: color.muted, fontSize: 13, lineHeight: 20, marginTop: 7 }, sceneAddress: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 18, marginTop: 6 }, sceneCounts: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
   heroFacets: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 12 }, heroFacet: { backgroundColor: "#FFF3CB", borderColor: "#E4C35B", borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 6 }, heroFacetText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   aiBindingCard: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderColor: color.violet, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 13 }, aiBindingAvatar: { borderRadius: 30, height: 60, width: 60 }, aiBindingCopy: { flex: 1 }, aiBindingEyebrow: { color: color.violet, fontSize: 11, fontWeight: "900", letterSpacing: 0.6 }, aiBindingTitle: { color: color.ink, fontSize: 14, fontWeight: "900", marginTop: 4 }, aiBindingText: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 5 }, aiProfileButton: { alignSelf: "flex-start", backgroundColor: color.ink, borderRadius: 12, marginTop: 9, paddingHorizontal: 12, paddingVertical: 8 }, aiProfileButtonText: { color: color.white, fontSize: 11, fontWeight: "900" },
   humanBindingCard: { alignItems: "center", backgroundColor: "#FFF8E3", borderColor: "#E4C35B", borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 13 }, humanBindingEyebrow: { color: "#735700", fontSize: 11, fontWeight: "900", letterSpacing: 0.6 },
