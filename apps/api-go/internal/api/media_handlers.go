@@ -184,6 +184,12 @@ func (s *Server) mediaFile(w http.ResponseWriter, r *http.Request) {
 	}
 	path, err := s.Media.ResolveServingPath(r.Context(), id, kind)
 	if err != nil {
+		// MEDIA-RENDER-RACE-001: 404 默认可被 HTTP 缓存（RFC 7231 §6.1 把 404
+		// 列进"cacheable by default"），这里之前没显式 Cache-Control。刚发送
+		// 的媒体在 worker 处理完之前打这个接口必然先吃一次 404 —— 客户端的
+		// URLCache 会把这次 404 缓存下来，资产几秒后转 READY 也不会再发起网络
+		// 请求，图/视频永久空白。显式 no-store，禁止缓存这个瞬时状态。
+		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_not_available"})
 		return
 	}

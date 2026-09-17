@@ -112,6 +112,7 @@ interface Message {
   replyBody?: string;
   secureMeta?: string;
   isDivider?: boolean;
+  debugRaw?: string;
 }
 
 interface Cluster {
@@ -361,6 +362,7 @@ export function ConversationSurface({
           : {}),
         ...(location ? { location } : {}),
         ...(contact ? { contact, contactVcard: String(row.body ?? "") } : {}),
+        ...(row.messageType === "IMAGE" ? { debugRaw: `mediaRef=${JSON.stringify(row.mediaRef)} type=${JSON.stringify(row.messageType)}` } : {}),
       };
     }));
     setError(undefined);
@@ -943,7 +945,8 @@ export function ConversationSurface({
             <Text numberOfLines={2} style={styles.replyInsideBody}>{message.replyBody ?? ""}</Text>
           </View>
         ) : null}
-        {message.imageUri || message.imageSource ? <ExpoImage accessibilityLabel="聊天图片" cachePolicy="memory-disk" contentFit="cover" recyclingKey={`chat:image:${message.id}`} source={message.imageSource ?? { uri:message.imageUri ?? "" }} style={styles.messageImage} transition={0} /> : null}
+        {message.imageUri || message.imageSource ? <ChatImage messageId={message.id} source={message.imageSource ?? { uri:message.imageUri ?? "" }} /> : null}
+        {message.debugRaw ? <Text style={{ color: "red", fontSize: 9 }}>[DBG] {message.debugRaw}</Text> : null}
         {message.videoUri ? <ChatVideo uri={message.videoUri} /> : null}
         {message.audioUri ? <ChatAudio uri={message.audioUri} /> : null}
         {message.location ? (
@@ -1577,6 +1580,39 @@ export function ConversationSurface({
         </View>
       ) : null}
     </SwipeBackShell>
+  );
+}
+
+// MEDIA-RENDER-RACE-001: 发出去的图片消息 3s 轮询很快会用服务端 thumb URL
+// 覆盖本地预览，这时资产大概率还在 PROCESSING（worker 异步处理，不是即时
+// 转 READY）——第一次拉图很可能 404。ExpoImage 对同一个 URL 不会自己重试，
+// 于是图永久空白，哪怕几秒后资产早就 READY 了。带指数退避重试几次。
+function ChatImage({ messageId, source }: { messageId: string; source: number | { uri: string } }): React.JSX.Element {
+  const [attempt, setAttempt] = useState(0);
+  const baseUri = typeof source === "object" ? source.uri : undefined;
+  const resolvedSource = baseUri
+    ? { uri: attempt === 0 ? baseUri : `${baseUri}${baseUri.includes("?") ? "&" : "?"}retry=${attempt}` }
+    : source;
+  return (
+    <ExpoImage
+      accessibilityLabel="聊天图片"
+      // MEDIA-RENDER-RACE-001 续: "memory-disk" 会对首次失败的 URL 留一份带
+      // ETag 的磁盘缓存记录；下次同 URL 请求带 If-None-Match 拿到 304，但
+      // 本地根本没有可用的已解码图（第一次就没解码成功），ExpoImage 直接判
+      // "invalid response status code" 而不是当新图处理。聊天图片改
+      // "none"：始终走一次干净的网络请求，不吃这层脏缓存。
+      cachePolicy="none"
+      contentFit="cover"
+      onError={() => {
+        if (!baseUri || attempt >= 4) return;
+        const delay = Math.min(2000 * 2 ** attempt, 15000);
+        setTimeout(() => setAttempt((value) => value + 1), delay);
+      }}
+      recyclingKey={`chat:image:${messageId}:${attempt}`}
+      source={resolvedSource}
+      style={styles.messageImage}
+      transition={0}
+    />
   );
 }
 

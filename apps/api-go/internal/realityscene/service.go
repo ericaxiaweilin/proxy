@@ -242,6 +242,10 @@ type Repository interface {
 	// 本人当前还在有效期内的 check-in（scene id 列表）—— 客户端重开 app 时
 	// 要靠它把"我在这里"按钮的选中态恢复回来，不能只靠本地内存。
 	ListMyCheckIns(context.Context, string, time.Time) ([]string, error)
+	// BADGE-WALL-001: 本人去过的所有 scene id（不过期过滤 —— 取消即删行，
+	// 剩下的都是真去过）。给徽章进度用（还差几家），和只看有效期的
+	// ListMyCheckIns 不是一回事。空返回 [] 不是 null。
+	ListMyCheckinHistory(context.Context, string) ([]string, error)
 	// SCENE-BADGE-001：已获得徽章（append-only）。
 	EarnBadge(context.Context, string, EarnedBadge) error
 	ListMyEarnedBadges(context.Context, string) ([]EarnedBadge, error)
@@ -348,6 +352,22 @@ func (r *memoryRepository) ListMyCheckIns(_ context.Context, actorID string, now
 	out := []string{}
 	for _, c := range r.checkins {
 		if c.actorID == actorID && c.expiresAt.After(now.UTC()) {
+			out = append(out, c.sceneID)
+		}
+	}
+	return out, nil
+}
+
+// BADGE-WALL-001: 不限有效期（取消即删行，剩下的都是去过）。空集合返回 []，
+// 不是 null —— 空是答案（“一个都没去过”），和“查失败了”是两回事。
+func (r *memoryRepository) ListMyCheckinHistory(_ context.Context, actorID string) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	seen := map[string]bool{}
+	out := []string{}
+	for _, c := range r.checkins {
+		if c.actorID == actorID && !seen[c.sceneID] {
+			seen[c.sceneID] = true
 			out = append(out, c.sceneID)
 		}
 	}
@@ -775,7 +795,7 @@ func humansFor(variant string) []Human {
 	return []Human{{ID: "creator_mai", Name: "Mai", Role: role, Availability: availability, FitReason: "同类 Scene 有真实完成记录", SceneFit: 96, IsAI: false, AvatarURL: mockidentity.AvatarPathForFacetKey("mai")}, {ID: "creator_linh", Name: "Linh", Role: "Photo / Lifestyle", Availability: "近期可约", FitReason: "出片与到访转化稳定", SceneFit: 92, IsAI: false, AvatarURL: mockidentity.AvatarPathForFacetKey("linh")}, {ID: "creator_trang", Name: "Trang", Role: "Food / UGC", Availability: "周末可约", FitReason: "相关 SKU 内容经验", SceneFit: 88, IsAI: false, AvatarURL: mockidentity.AvatarPathForFacetKey("trang")}}
 }
 func (s *Service) Supports(t string) bool {
-	return t == "ListMyBadges" || t == "ListMyRealitySceneState" || t == "SetRealitySceneSaved" || t == "SetRealityScenePlanned" || t == "SetPrivateRealitySceneVisited" || t == "SetRealitySceneCheckIn" || t == "ProposeRealityScene" || t == "ConfirmRealitySceneProposal" || t == "ListRealitySceneProposals"
+	return t == "ListMyBadges" || t == "ListMyRealitySceneState" || t == "ListMyCheckinHistory" || t == "SetRealitySceneSaved" || t == "SetRealityScenePlanned" || t == "SetPrivateRealitySceneVisited" || t == "SetRealitySceneCheckIn" || t == "ProposeRealityScene" || t == "ConfirmRealitySceneProposal" || t == "ListRealitySceneProposals"
 }
 func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
@@ -799,6 +819,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listProposals(ctx, e)
 	case "ListMyBadges":
 		return s.listMyBadges(ctx, e)
+	case "ListMyCheckinHistory":
+		return s.listMyCheckinHistory(ctx, e)
 	case "ListMyRealitySceneState":
 		return s.listMyState(ctx, e)
 	}
@@ -839,6 +861,23 @@ func (s *Service) listMyBadges(ctx context.Context, e command.Envelope) command.
 	copy(cat, SceneBadges)
 	r := command.Accepted(e, "RealitySceneBadgeCollection", e.Actor.ID, 1, "READY", nil)
 	raw, _ := json.Marshal(map[string]any{"badges": badges, "catalog": cat})
+	r.OperationRef = string(raw)
+	return r
+}
+
+// BADGE-WALL-001: 本人去过的 scene id 清单（给徽章进度用：还差几家）。
+// 和 ListMyCheckIns 不是一回事 —— 那个只看有效期内的（按钮选中态恢复用），
+// 这个不过期过滤。空返回 []，不是错误。
+func (s *Service) listMyCheckinHistory(ctx context.Context, e command.Envelope) command.Result {
+	history, err := s.repo.ListMyCheckinHistory(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "REALITY_SCENE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.read_failed", nil)
+	}
+	if history == nil {
+		history = []string{}
+	}
+	r := command.Accepted(e, "RealitySceneCheckinHistory", e.Actor.ID, 1, "READY", nil)
+	raw, _ := json.Marshal(map[string]any{"sceneIds": history})
 	r.OperationRef = string(raw)
 	return r
 }

@@ -118,3 +118,29 @@ export function newlyEarnedBadges(
   const have = new Set(alreadyEarned);
   return shouldHave.filter((id) => !have.has(id));
 }
+
+/** 集合类徽章（要求全集 —— hasAny 的 landmark / 小美同框不算进度，只看得没得）。 */
+const SET_PROGRESS_BADGES: ReadonlyArray<string> = ["lake_trio", "coffee_hunter", "oldtown_walk"];
+/** 计数类徽章：去重打卡数门槛（footprint_10 除外 —— 它要的是足迹数，不在打卡史里）。 */
+const COUNT_PROGRESS_BADGES: Record<string, number> = { first_checkin: 1, checkin_3: 3, checkin_5: 5, checkin_10: 10 };
+
+// BADGE-WALL-001: 单枚徽章的进度（给个人墙和场景主页用）。规则与
+// evaluateSceneBadges 同构 —— 改规则必须两边一起改，测试钉住配对。
+// 返回 undefined = 这枚没有进度概念（hasAny / 足迹类）：缺数据源就别算，
+// 别拿打卡史去套足迹的门槛，那是两本账。
+export function badgeProgress(badgeId: string, checkedInSceneIds: ReadonlyArray<string>): { total: number; done: number } | undefined {
+  const checked = new Set(checkedInSceneIds);
+  const threshold = COUNT_PROGRESS_BADGES[badgeId];
+  if (threshold !== undefined) return { total: threshold, done: Math.min(checked.size, threshold) };
+  if (!(SET_PROGRESS_BADGES as ReadonlyArray<string>).includes(badgeId)) return undefined;
+  const needed = SCENE_BADGE_REQUIREMENTS[badgeId] ?? [];
+  return { total: needed.length, done: needed.filter((id) => checked.has(id)).length };
+}
+
+// BADGE-WALL-001: 还缺哪几个场景 id（场景主页用来点名）。目录里没有的 id
+// 不返回 —— 叫不上名字的店不点名，只计个数。
+export function badgeMissingIds(badgeId: string, checkedInSceneIds: ReadonlyArray<string>, knownIds: ReadonlySet<string>): ReadonlyArray<string> {
+  if (badgeProgress(badgeId, checkedInSceneIds) === undefined) return [];
+  const checked = new Set(checkedInSceneIds);
+  return (SCENE_BADGE_REQUIREMENTS[badgeId] ?? []).filter((id) => !checked.has(id) && knownIds.has(id));
+}

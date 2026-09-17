@@ -6659,3 +6659,26 @@ if grep -q 'pxy.app/huyen/social' apps/mobile/src/surfaces/me.tsx ||
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/me-audit-batch3.test.ts || exit $?
 echo "    AUDIT-BATCH3-001: PASS (share link, favorites, legal banner, analytics copy, follower faces)"
+# BADGE-WALL-001: 个人徽章墙 + 场景进度。10 枚成就只管“得没得”，墙和进度
+# 要的是“还差几家”—— 打卡史（all-time，取消即删）是唯一诚实来源，有效期
+# 内的 here 集合不行（过期就缩水）。新命令 ListMyCheckinHistory 不做迁移
+# （查的现成表），openapi 重生成。
+require_test "BADGE-WALL-001" "./internal/realityscene" \
+  "TestCheckinHistoryIgnoresExpiryButNotCancel" \
+  "apps/api-go/internal/realityscene/badges_test.go" || exit $?
+require_test "BADGE-WALL-001" "./internal/realityscene" \
+  "TestListMyCheckinHistoryCommand" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "BADGE-WALL-001" "./internal/platform/postgres" \
+  "TestCheckinHistoryPostgresRoundTrip" \
+  "apps/api-go/internal/platform/postgres/reality_history_integration_test.go" || exit $?
+if ! grep -q 'ListMyCheckinHistory' apps/api-go/internal/platform/postgres/reality_scene.go ||
+   ! grep -q 'listMyCheckinHistory()' apps/mobile/src/scene-client.ts ||
+   ! grep -q 'badgeProgress(' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'badgeGrid' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -q 'BADGE-WALL-001' apps/mobile/src/surfaces/scene-badge-wall.test.ts; then
+  echo "  FAIL [BADGE-WALL-001]: 徽章墙/进度链路断了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/scene-badge-wall.test.ts || exit $?
+echo "    BADGE-WALL-001: PASS (wall on personal hub, progress on scene pages)"

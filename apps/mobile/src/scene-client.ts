@@ -125,6 +125,25 @@ export class SceneClient {
     return Array.isArray(ref.invitations) ? ref.invitations : [];
   }
 
+  // BADGE-WALL-001: 已获得的徽章 id + 去过的所有场景 id。失败必须抛 ——
+  // 调用方要分清“失败”和“空”（空墙和拉失败长得不一样），吞成 [] 就是撒谎。
+  async listMyBadges(): Promise<string[]> {
+    const s = await this.requireSession();
+    const result = await this.send(s, "ListMyBadges", { type: "Scene", id: "mine" }, {});
+    if (!result.operationRef) throw new Error("badges response malformed");
+    const ref = JSON.parse(result.operationRef) as { badges?: Array<{ badgeId?: string }> };
+    if (!Array.isArray(ref.badges)) throw new Error("badges response malformed");
+    return ref.badges.map((b) => b.badgeId).filter((id): id is string => typeof id === "string" && id.length > 0);
+  }
+  async listMyCheckinHistory(): Promise<string[]> {
+    const s = await this.requireSession();
+    const result = await this.send(s, "ListMyCheckinHistory", { type: "Scene", id: "mine" }, {});
+    if (!result.operationRef) throw new Error("checkin history response malformed");
+    const ref = JSON.parse(result.operationRef) as { sceneIds?: string[] };
+    if (!Array.isArray(ref.sceneIds)) throw new Error("checkin history response malformed");
+    return ref.sceneIds.filter((id): id is string => typeof id === "string" && id.length > 0);
+  }
+
   // ── R15.13 P2: Memory domain (post-outcome audit trail) ──────────
 
   /**

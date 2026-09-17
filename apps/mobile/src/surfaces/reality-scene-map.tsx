@@ -9,7 +9,7 @@ import { expoLocationApi } from "../device-location-native";
 import { sceneAddressLine, sceneCountsLine, sceneHeatScore, sceneSignalLine, sceneSourceSuffix } from "../reality-scene-address";
 import { captureRef } from "react-native-view-shot";
 import { checkinEligibility, checkinHint } from "../scene-checkin";
-import { SCENE_BADGES, SCENE_BADGE_REQUIREMENTS, sceneBadgeById } from "../scene-badges";
+import { SCENE_BADGES, SCENE_BADGE_REQUIREMENTS, sceneBadgeById, badgeProgress, badgeMissingIds } from "../scene-badges";
 // SCENE-NAV-001: 主页里的导航出口走 MEETUP-NAV-001 同一套系统地图深链，
 // 不手拼 URL、不自写导航引擎 —— 坐标校验与双端 scheme 都在那一边钉着。
 import { meetupDirectionsUrls } from "../meetup-share";
@@ -127,6 +127,9 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   // SCENE-CHECKIN-001: 本人当前有效的「我在这里」。从服务端拉回来，不能只存在
   // 本地内存 —— 否则重开 app 按钮就显示成"没在这里"，而服务端其实还记着。
   const [here, setHere] = useState<ReadonlySet<string>>(new Set());
+  // BADGE-WALL-001: 本人去过的所有场景（all-time）。undefined = 还没拉到，
+  // 进度块直接不画 —— 空数组是“一家没去过”，undefined 是“不知道”，两回事。
+  const [badgeHistoryIds, setBadgeHistoryIds] = useState<ReadonlyArray<string> | undefined>(undefined);
   // SCENE-CONTRIB-001: 社区提交的新场景 + 确认队列。
   const [proposals, setProposals] = useState<ReadonlyArray<SceneProposal>>([]);
   const [confirmationsNeeded, setConfirmationsNeeded] = useState(2);
@@ -252,6 +255,15 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       setVisitedAt(new Map(states.filter((item) => isUserSceneState(item) && item.privateVisited && typeof item.visitedAt === "string").map((item) => [item.sceneId, item.visitedAt as string])));
       const checkIns = Array.isArray(payload.checkIns) ? payload.checkIns : [];
       setHere(new Set(checkIns.filter((item): item is string => typeof item === "string")));
+      // BADGE-WALL-001: 打卡史（all-time，不过期过滤）给徽章进度用。失败就
+      // 保持 undefined，进度块直接不画 —— 拿空集去算会把“没拉到”画成“一家没去”。
+      try {
+        const historyPayload = await sendSceneCommand(authClient, authenticated, "ListMyCheckinHistory", "me", {});
+        const ids = Array.isArray(historyPayload.sceneIds) ? historyPayload.sceneIds : undefined;
+        if (!cancelled) setBadgeHistoryIds(ids?.filter((id): id is string => typeof id === "string"));
+      } catch {
+        if (!cancelled) setBadgeHistoryIds(undefined);
+      }
       void loadProposals(authenticated);
     }).catch(() => undefined);
     return () => { cancelled = true; };
@@ -339,6 +351,26 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   };
 
   const selected = scenes.find((scene) => scene.id === selectedId);
+  // BADGE-WALL-001: 本店徽章进度 —— 这家能点亮哪些徽章、还差几家（打卡史实时
+  // 算）。history 没拉到时返回 undefined，调用方直接不画 —— 拿空集去算会把
+  // “没拉到”画成“一家没去”，比不画坏得多。
+  const sceneBadgeRows = useMemo(() => {
+    if (!selected || badgeHistoryIds === undefined) return undefined;
+    const knownIds = new Set(scenes.map((s) => s.id));
+    const nameOf = (id: string): string | undefined => {
+      const found = scenes.find((s) => s.id === id)?.name;
+      return typeof found === "string" && found.length > 0 ? found : undefined;
+    };
+    return SCENE_BADGES
+      .filter((b) => (SCENE_BADGE_REQUIREMENTS[b.id] ?? []).includes(selected.id))
+      .map((b) => {
+        const progress = badgeProgress(b.id, badgeHistoryIds);
+        const missingNames = badgeMissingIds(b.id, badgeHistoryIds, knownIds)
+          .map((id) => nameOf(id))
+          .filter((n): n is string => n !== undefined);
+        return { badge: b, progress, missingNames, visited: badgeHistoryIds.includes(selected.id) };
+      });
+  }, [selected, badgeHistoryIds, scenes]);
   const filtered = useMemo(() => {
     const matching = scenes.filter((scene) => {
     const term = query.trim().toLocaleLowerCase();
@@ -639,6 +671,27 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             <View style={styles.actions}>
               <Text style={styles.checkInHint}>{checkinHint(here.has(selected.id), origin ? metersBetween(origin, selected) : undefined)}</Text>
             </View>
+            {/* BADGE-WALL-001: 本店徽章进度 —— 这家能点亮哪些、还差几家点谁的名。
+                到访印记（去过/没去过）来自打卡史，不是有效期内的 here 集合。 */}
+            {sceneBadgeRows !== undefined && sceneBadgeRows.length > 0 ? (
+              <View style={styles.badgeProgressBox}>
+                <Text style={styles.badgeProgressTitle}>
+                  {sceneBadgeRows[0]?.visited ? "✓ 本店已打卡" : "本店未打卡"} · 可点亮
+                </Text>
+                {sceneBadgeRows.map((row) => (
+                  <View key={row.badge.id} style={styles.badgeProgressRow}>
+                    <Text style={styles.badgeProgressName}>{row.badge.icon} {row.badge.name}</Text>
+                    {row.progress !== undefined ? (
+                      <Text style={styles.badgeProgressText}>
+                        {row.progress.done}/{row.progress.total}{row.missingNames.length > 0 ? ` · 还差${row.missingNames.join("、")}` : ""}
+                      </Text>
+                    ) : (
+                      <Text style={styles.badgeProgressText}>{row.badge.desc}</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            ) : null}
             {triStateMsg ? <Text style={styles.nearbyError}>{triStateMsg}</Text> : null}
             {(detail?.aiVisits && detail.aiVisits.length > 0) || isXiaomeiScene(selected.id) ? (
               <Text style={styles.xiaomeiSceneHint}>
@@ -920,6 +973,11 @@ const styles = StyleSheet.create({
   // SCENE-MAP-GESTURE-001: 详情盖层（不透明盖住整页，地图在下面常驻）。
   detailOverlay: { backgroundColor: color.offWhite, bottom: 0, left: 0, position: "absolute", right: 0, top: 0, zIndex: 10 },
   list: { gap: 9, paddingBottom: 24, paddingHorizontal: 16 }, checkInHint: { color: color.muted, flex: 1, fontSize: 11, lineHeight: 16 },
+  badgeProgressBox: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 10, padding: 12 },
+  badgeProgressTitle: { color: color.ink, fontSize: 12, fontWeight: "900" },
+  badgeProgressRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 8 },
+  badgeProgressName: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  badgeProgressText: { color: color.muted, fontSize: 11, marginTop: 2 },
   contribCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 8, marginHorizontal: 16, padding: 14 }, contribHint: { color: color.muted, fontSize: 11, lineHeight: 16 }, contribInput: { borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 14, paddingHorizontal: 12, paddingVertical: 9 }, categoryPicker: { flexDirection: "row", gap: 8 }, contribRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginHorizontal: 16, marginTop: 8, padding: 12 }, contribTag: { color: color.muted, fontSize: 11 }, contribButton: { backgroundColor: color.violet, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 }, contribButtonText: { color: color.white, fontSize: 12, fontWeight: "700" },
   sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, minHeight: 82, padding: 14 }, sceneDot: { backgroundColor: color.violet, borderRadius: 9, height: 18, width: 18 }, sceneDotActive: { backgroundColor: color.magenta }, sceneDotVisited: { backgroundColor: color.muted }, sceneCopy: { flex: 1 }, sceneName: { color: color.ink, fontSize: 16, fontWeight: "800" }, sceneMeta: { color: color.muted, fontSize: 12, marginTop: 3 }, sceneSignal: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 5 }, empty: { color: color.muted, paddingTop: 40, textAlign: "center" },
   detailContent: { paddingBottom: 36, paddingHorizontal: 13 }, detailTop: { alignItems: "center", flexDirection: "row", minHeight: 56 }, backButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 }, detailTopCopy: { flex: 1 }, venueRow: { alignItems: "center", flexDirection: "row", gap: 10 }, venueLogo: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, height: 46, justifyContent: "center", width: 46 }, venueLogoText: { color: color.white, fontSize: 20, fontWeight: "900" }, venueCopy: { flex: 1 }, detailTopTitle: { color: color.ink, fontSize: 17, fontWeight: "900" }, detailTopSub: { color: color.muted, fontSize: 11, marginTop: 2 }, categoryBadge: { alignSelf: "flex-start", backgroundColor: color.violetSoftBg, borderRadius: 999, marginTop: 5, paddingHorizontal: 9, paddingVertical: 3 }, categoryBadgeText: { color: color.violet, fontSize: 11, fontWeight: "800" },   topSpacer: { width: 38 }, backText: { color: color.ink, fontSize: 24, fontWeight: "800", lineHeight: 28 }, hero: { backgroundColor: "#F6F2E9", borderColor: color.line, borderRadius: 20, borderWidth: 1, overflow: "hidden", padding: 15, paddingTop: 242 }, heroMap: { height: 226, left: 0, position: "absolute", right: 0, top: 0 }, statePill: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 14, marginTop: 4, paddingHorizontal: 10, paddingVertical: 6 }, statePillActive: { backgroundColor: color.attentionBg }, stateText: { color: color.muted, fontSize: 11, fontWeight: "800" }, stateTextActive: { color: color.error }, eyebrow: { color: "#8B6000", fontSize: 11, fontWeight: "900", letterSpacing: 0.8, marginTop: 12 }, detailTitle: { color: color.ink, fontSize: 28, fontWeight: "900", lineHeight: 31, marginTop: 5 }, detailDescription: { color: color.muted, fontSize: 13, lineHeight: 20, marginTop: 7 }, sceneAddress: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 18, marginTop: 6 }, sceneCounts: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },

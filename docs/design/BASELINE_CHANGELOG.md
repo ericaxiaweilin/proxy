@@ -49,6 +49,16 @@ same commit. Do not record routine business logic changes here.
   粉丝假脸删除只留真数字。
   - **基线敏感文件**：`apps/mobile/src/surfaces/me.tsx`（分享链接、漏斗文案、
     粉丝区）。无主题 token 改动（删的恰好是三处 Tailwind 外来色）。
+## Revision 231 — 2026-09-17
+
+- BADGE-WALL-001（个人徽章墙＋场景进度）：10 枚成就只管“得没得”，墙和进度
+  要“还差几家”—— 个人主页加徽章墙（得过点亮、未得置灰给条件、失败可重试），
+  场景主页加本店进度（能点亮哪些、还差几家点谁的名）。数据源是新增的
+  `ListMyCheckinHistory`（all-time 打卡史，取消即删；有效期内的 here 集合
+  会过期缩水，不能用）。计数/集合类给进度，hasAny 与足迹类没有进度概念。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/me.tsx`（个人墙新区段）、
+    `apps/mobile/src/surfaces/reality-scene-map.tsx`（场景进度块）。
+    复用既有卡片语言与徽章 emoji，无主题 token 改动。
 
 ## Revision 226 — 2026-09-17
 
