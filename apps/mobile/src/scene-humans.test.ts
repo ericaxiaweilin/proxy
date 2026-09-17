@@ -30,8 +30,19 @@ describe("SCENE-HUMANS-001 scene people show a round avatar, name and order avai
   it("keeps tap-to-select for the invite chain", () => {
     // 点按＝选中邀约对象：DIRECT_INVITE 找不到人会报“请先选择要邀请的真人”。
     // 改成跳个人主页就断了这条链，所以选中态（边框＋✓ 已选择）必须留。
-    expect(mapCode).toContain("onPress={() => setSelectedHumanId(human.id)}");
+    // SCENE-HUMANS-003 起点按是 toggle（选中→取消），表达式以 toggle 为准。
+    expect(mapCode).toContain("setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))");
     expect(mapCode).toContain("✓ 已选择");
     expect(mapCode).toContain("humanCardSelected");
+  });
+});
+
+describe("SCENE-HUMANS-003 tapping the selected person deselects", () => {
+  it("toggles selection instead of sticking on the first tap", () => {
+    // 操作逻辑 bug：点一下选中，再点同一个没有任何反应 —— 选错人只能去选
+    // 别人顶掉，取消不掉。同一头像点两次 = 选中→取消。
+    expect(mapCode).toContain("setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))");
+    // 没选中时邀约照样拦（"请先选择要邀请的真人"），不断链。
+    expect(mapCode).toContain("请先选择要邀请的真人");
   });
 });

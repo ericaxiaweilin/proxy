@@ -6352,12 +6352,21 @@ if grep -q '{human.role}' apps/mobile/src/surfaces/reality-scene-map.tsx ||
   exit 1
 fi
 # 反向钉：选中链不许断（DIRECT_INVITE 找不到人只会报“请先选择”）。
-if ! grep -q 'onPress={() => setSelectedHumanId(human.id)}' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+# SCENE-HUMANS-003 起点按是 toggle（选中→取消），不断链只断“粘住”。
+if ! grep -q 'setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))' apps/mobile/src/surfaces/reality-scene-map.tsx; then
   echo "  FAIL [SCENE-HUMANS-001]: 点按选中邀约对象的链路被动了 ——" >&2
   exit 1
 fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-humans.test.ts || exit $?
 echo "    SCENE-HUMANS-001: PASS (round avatar, name and order availability only)"
+
+# SCENE-HUMANS-003: 同一头像点两次 = 选中→取消。之前只有选中没有取消，
+# 选错人只能去选别人顶掉，取消不掉。
+if ! grep -q 'SCENE-HUMANS-003' apps/mobile/src/scene-humans.test.ts; then
+  echo "  FAIL [SCENE-HUMANS-003]: 取消选中的测试不见了" >&2
+  exit 1
+fi
+echo "    SCENE-HUMANS-003: PASS (tapping the selected person deselects)"
 
 # MERCHANT-LOGO-001: 商家详情页必须有商家 logo，现在没有。
 #
