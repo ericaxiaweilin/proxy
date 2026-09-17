@@ -7,6 +7,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, AppState, Image, Keyboard, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+// CONVO-ATTACH-001: v57 顶层 getAssetsAsync 是只会 throw 的占位实现
+//（见 image-export.ts 开头，真机验证过）—— 列表走新 API Query/Asset。
+import { AssetField, MediaType, Query, requestPermissionsAsync } from "expo-media-library";
 import { ProxySwitch } from "../components/proxy-foundation";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { createAudioPlayer, type AudioPlayer } from "expo-audio";
@@ -181,6 +184,11 @@ export function ConversationSurface({
   const [secureSheetOpen, setSecureSheetOpen] = useState(false);
   const [stickerOpen, setStickerOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  // CONVO-ATTACH-001: 自建相册（Lotus 式）—— 点相机图标直进，首格拍摄，
+  // 后面是最新照片。系统相册一次只能做一件事（选图 XOR 拍照），合并不了，
+  // 所以这里自己摆一排缩略图 + 复用 chooseImage("CAMERA") 那条真链路。
+  const [albumOpen, setAlbumOpen] = useState(false);
+  const [albumAssets, setAlbumAssets] = useState<Array<{ uri: string; width: number; height: number }>>([]);
   const [menuMessage, setMenuMessage] = useState<Message | null>(null);
   // COMP-REPORT-002: 举报「这条消息」。招嫖揽客 / 人身威胁 / 涉未成年人
   // 都发生在聊天里，用户必须能在这里报上来。
@@ -616,6 +624,40 @@ export function ConversationSurface({
     if (!asset) return;
     setSelectedImage({ uri: asset.uri, width: asset.width, height: asset.height, ...(asset.fileName ? { fileName: asset.fileName } : {}), ...(asset.mimeType ? { mimeType: asset.mimeType } : {}) });
     setSelectedVideo(undefined);
+  }
+
+  // CONVO-ATTACH-001: 点相机图标直进相册。最近 24 张 + 首格拍摄 —— 选图进
+  // 已有的预览＋发送链（setSelectedImage → sendImage），拍摄复用 chooseImage
+  // 的真链路（权限/取图/报错都在那一边）。空相册也开，开着给拍第一张。
+  async function openAlbum(): Promise<void> {
+    setStickerOpen(false);
+    setAttachOpen(false);
+    setError(undefined);
+    const permission = await requestPermissionsAsync();
+    if (!permission.granted) {
+      setError("请允许 Proxy 读取照片");
+      return;
+    }
+    try {
+      const found = await new Query()
+        .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
+        .orderBy({ key: AssetField.CREATION_TIME, ascending: false })
+        .limit(24)
+        .exe();
+      const thumbs = await Promise.all(found.map(async (a) => {
+        try {
+          const [uri, shape] = await Promise.all([a.getUri(), a.getShape()]);
+          if (!uri) return undefined;
+          return { uri, width: shape?.width ?? 0, height: shape?.height ?? 0 };
+        } catch {
+          return undefined; // 云端没下好的图不占位，有几张摆几张
+        }
+      }));
+      setAlbumAssets(thumbs.filter((t): t is { uri: string; width: number; height: number } => t !== undefined));
+      setAlbumOpen(true);
+    } catch {
+      setError("相册打不开，请重试");
+    }
   }
 
   async function chooseVideo(): Promise<void> {
@@ -1086,10 +1128,9 @@ export function ConversationSurface({
               <Pressable accessibilityLabel="表情包" onPress={() => { setAttachOpen(false); setStickerOpen((open) => !open); }} disabled={sending || !convId} style={styles.inlineTool}>
                 <Text style={styles.inlineToolText}>☺</Text>
               </Pressable>
-              {/* CONTACT-CARD-001：相机图标以前和 ＋ 调的是**同一个** setAttachOpen ——
-                  两个按钮弹出同一张 sheet，图标等于装饰。现在相机图标直接拍照
-                  （权限/取图/错误提示都走 chooseImage），＋ 才是「其它」面板。 */}
-              <Pressable accessibilityLabel="拍照" onPress={() => { setStickerOpen(false); setAttachOpen(false); void chooseImage("CAMERA"); }} disabled={sending || !convId} style={styles.inlineTool}>
+              {/* CONVO-ATTACH-001: 相机图标点下去直接就是相册（Lotus 式）—— 首格拍摄，
+                  后面是最新照片。拍照也不经＋面板：相册首格就是拍摄。 */}
+              <Pressable accessibilityLabel="相册" onPress={() => void openAlbum()} disabled={sending || !convId} style={styles.inlineTool}>
                 <ProxyIcon color={lotus.ink} name="camera" size={24} />
               </Pressable>
             </View>
@@ -1111,18 +1152,40 @@ export function ConversationSurface({
         </View>
       </View>
 
-      {/* 附件 sheet：名片 / 照片 / 视频 / 活动 / 位置。
-          CONTACT-CARD-001：拍照**不在这里** —— 它在输入框里的相机图标上。
-          以前两者重复，＋ 弹出来的第一项是拍照，等于图标白画了。 */}
+      {/* 附件 sheet：名片 / 视频 / 活动 / 位置。
+          CONVO-ATTACH-001：照片和拍照**都不在这里** —— 都在输入框的相机图标上，
+          点图标直进相册（首格就是拍摄）。以前＋ 弹出来要点两次才到照片。 */}
       {attachOpen ? (
         <Pressable accessibilityLabel="关闭附件选择" onPress={() => setAttachOpen(false)} style={styles.scrim}>
           <Pressable onPress={() => undefined} style={styles.bottomSheet}>
             <View style={styles.sheetGrab} />
             <Pressable accessibilityLabel="发送名片" onPress={() => { setAttachOpen(false); setCardPickerOpen(true); }} style={styles.sheetItem}><Text style={styles.sheetItemText}>名片</Text></Pressable>
-            <Pressable onPress={() => void chooseImage("LIBRARY")} style={styles.sheetItem}><Text style={styles.sheetItemText}>照片</Text></Pressable>
             <Pressable onPress={() => void chooseVideo()} style={styles.sheetItem}><Text style={styles.sheetItemText}>视频</Text></Pressable>
             {!aiAccount ? <Pressable onPress={() => void openActivityPicker()} style={styles.sheetItem}><Text style={styles.sheetItemText}>Proxy 活动</Text></Pressable> : null}
             {!aiAccount ? <Pressable accessibilityLabel="发送位置" onPress={() => { setAttachOpen(false); setLocationSheetOpen(true); }} style={styles.sheetItem}><Text style={styles.sheetItemText}>📍 位置</Text></Pressable> : null}
+          </Pressable>
+        </Pressable>
+      ) : null}
+
+      {/* CONVO-ATTACH-001: 自建相册 —— 首格拍摄，后面最新照片。选图进已有
+          的预览＋发送链，拍摄复用 chooseImage("CAMERA")。空相册也开，
+          开着给拍第一张；关掉走 scrim，和别的 sheet 一个手势。 */}
+      {albumOpen ? (
+        <Pressable accessibilityLabel="关闭相册选择" onPress={() => setAlbumOpen(false)} style={styles.scrim}>
+          <Pressable onPress={() => undefined} style={styles.bottomSheet}>
+            <View style={styles.sheetGrab} />
+            <ScrollView contentContainerStyle={styles.albumGrid}>
+              <Pressable accessibilityLabel="拍摄" onPress={() => { setAlbumOpen(false); void chooseImage("CAMERA"); }} style={styles.albumTile}>
+                <ProxyIcon color={lotus.ink} name="camera" size={26} />
+                <Text style={styles.albumTileText}>拍摄</Text>
+              </Pressable>
+              {albumAssets.map((a) => (
+                <Pressable key={a.uri} accessibilityLabel="选择这张照片" onPress={() => { setSelectedImage({ uri: a.uri, width: a.width, height: a.height }); setSelectedVideo(undefined); setAlbumOpen(false); }} style={styles.albumTile}>
+                  <ExpoImage accessibilityLabel="相册照片" cachePolicy="memory-disk" contentFit="cover" recyclingKey={`album:${a.uri}`} source={{ uri: a.uri }} style={styles.albumThumb} transition={0} />
+                </Pressable>
+              ))}
+            </ScrollView>
+            {albumAssets.length === 0 ? <Text style={styles.albumEmpty}>相册是空的，先拍一张吧</Text> : null}
           </Pressable>
         </Pressable>
       ) : null}
@@ -1577,6 +1640,7 @@ const styles = StyleSheet.create({
   bottomSheet: { backgroundColor: lotus.paper, borderColor: lotus.line, borderTopLeftRadius: 14, borderTopRightRadius: 14, borderWidth: 1, margin: 8, paddingBottom: 12, paddingHorizontal: 11, paddingTop: 10 },
   sheetGrab: { alignSelf: "center", backgroundColor: "#d5d0c8", borderRadius: 2, height: 3, marginBottom: 9, width: 32 },
   sheetItem: { alignItems: "center", borderTopColor: lotus.line, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", minHeight: 44, paddingVertical: 6 },
+  albumGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingBottom: 4, paddingTop: 2 }, albumTile: { alignItems: "center", aspectRatio: 1, backgroundColor: lotus.soft, borderRadius: 10, justifyContent: "center", width: "23%" }, albumTileText: { color: lotus.muted, fontSize: 11, fontWeight: "700", marginTop: 4 }, albumThumb: { borderRadius: 10, height: "100%", width: "100%" }, albumEmpty: { color: lotus.muted, fontSize: 12, marginTop: 8, textAlign: "center" },
   sheetItemText: { color: lotus.ink, fontSize: 12, fontWeight: "700" },
   sheetItemHint: { color: "#888888", fontSize: 11 },
   sheetItemDisabled: { color: "#b8b3ab" },

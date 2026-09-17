@@ -6486,3 +6486,29 @@ if grep -q 'sceneLogos = map\[string\]string{[^}]' apps/api-go/internal/realitys
 fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-merchant-logo.test.ts || exit $?
 echo "    MERCHANT-LOGO-001: PASS (merchant logo on scene detail, letter fallback)"
+# CONVO-ATTACH-001: 会话窗的相机图标太弱 —— 点它和 ＋ 弹同一张 sheet，
+# 进相册要点两次。Lotus 式：点图标直进自建相册，首格拍摄，后面最新照片。
+# 系统相册一次只能做一件事（选图 XOR 拍照），合并不了，所以缩略图自己摆，
+# 拍摄复用 chooseImage("CAMERA") 的真链路，选图进已有的发送链。
+if ! grep -q 'new Query()' apps/mobile/src/surfaces/conversation.tsx ||
+   ! grep -q 'void openAlbum()' apps/mobile/src/surfaces/conversation.tsx ||
+   ! grep -q 'CONVO-ATTACH-001' apps/mobile/src/surfaces/convo-attach.test.ts; then
+  echo "  FAIL [CONVO-ATTACH-001]: 相机图标又退回两次点击 ——" >&2
+  echo "        点图标和 ＋ 弹同一张 sheet。" >&2
+  exit 1
+fi
+# 反向钉：v57 顶层 getAssetsAsync 只会 throw（见 image-export.ts 开头），
+# 谁把它请回来，相册在真机上就是死的。
+if grep -q 'MediaLibrary.getAssetsAsync' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [CONVO-ATTACH-001]: 请回了只会抛异常的旧相册入口 ——" >&2
+  echo "        真机上一点就抛，见 image-export.ts 开头。" >&2
+  exit 1
+fi
+# 反向钉：照片入口搬走后，＋ 里不许再留一条进相册的路。
+if grep -q '>照片</Text>' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [CONVO-ATTACH-001]: ＋ 里又冒出照片入口 ——" >&2
+  echo "        两条路进同一个相册。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/convo-attach.test.ts || exit $?
+echo "    CONVO-ATTACH-001: PASS (camera icon opens the album with capture first)"
