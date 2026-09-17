@@ -36,6 +36,24 @@ const (
 	SourceCommunity SceneSource = "COMMUNITY" // 用户提交，坐标未经核实
 )
 
+// SCENE-CATEGORY-001: 场景顶类，封闭三态。前端只认这三个（picker 三选一，
+// 标记颜色和徽标都按它 key）；后端细分（咖啡店/湖/海滩…）继续放在 Type 里。
+// 自由文本的 type 当分类用等于没有分类 —— 词表无界，后期按分类做的东西全断。
+const (
+	SceneCategoryMerchant   = "商家"
+	SceneCategoryAttraction = "景点"
+	SceneCategoryOther      = "其他"
+)
+
+// ValidSceneCategory 只认封闭三态。未知的一律 false，调用方按“其他”落袋或
+// 直接拒绝 —— 不许在这里猜（"咖啡"像商家这种映射只许出现在一次性的数据
+// 迁移里，白纸黑字可审计；运行时猜就是编）。
+func ValidSceneCategory(category string) bool {
+	return category == SceneCategoryMerchant ||
+		category == SceneCategoryAttraction ||
+		category == SceneCategoryOther
+}
+
 // ProposalConfirmationsNeeded 是一条社区提案要几个**其他人**确认才上架。
 const ProposalConfirmationsNeeded = 2
 
@@ -44,10 +62,13 @@ type Proposal struct {
 	ID string `json:"id"`
 	// ProposedBy 不出现在 JSON 里：客户端只需要 own/confirmed 两个布尔，
 	// 把提交者的 id 发出去等于把"谁在现场/谁提的"这种名单信息开了一个口子。
-	ProposedBy  string      `json:"-"`
-	Name        string      `json:"name"`
-	Area        string      `json:"area"`
-	Type        string      `json:"type"`
+	ProposedBy string `json:"-"`
+	Name       string `json:"name"`
+	Area       string `json:"area"`
+	Type       string `json:"type"`
+	// SCENE-CATEGORY-001: 社区提交的顶类。提交时三选一（picker），服务端再验
+	// 一道 —— 客户端说什么都可能是假的，枚举只能信服务端这一道。
+	Category    string      `json:"category"`
 	Address     string      `json:"address,omitempty"`
 	Latitude    float64     `json:"latitude"`
 	Longitude   float64     `json:"longitude"`
@@ -67,6 +88,8 @@ type Proposal struct {
 
 type Scene struct {
 	ID, Name, Area, Type, Best, Description string
+	// SCENE-CATEGORY-001: 顶类（商家/景点/其他，封闭）。细分继续放 Type。
+	Category string `json:"category"`
 	// SCENE-CONTRIB-001: 数据来源（OSM 已核实 / 社区提交未核实）。
 	// 客户端必须把它显示出来 —— 不标来源等于默认"已核实"。
 	Source SceneSource
@@ -171,6 +194,9 @@ func (s Scene) MarshalJSON() ([]byte, error) {
 		Name string `json:"name"`
 		Area string `json:"area"`
 		Type string `json:"type"`
+		// SCENE-CATEGORY-001: MarshalJSON 才是接口真正的形状 —— 结构体的
+		// Category 不写进来，客户端永远读不到（同 SCENE-ADDRESS-001 的教训）。
+		Category string `json:"category"`
 		// SCENE-ADDRESS-001: 这里漏了 address，客户端就永远读不到 ——
 		// 结构体上有字段没用，MarshalJSON 才是接口真正的形状。
 		Address   string  `json:"address,omitempty"`
@@ -191,7 +217,7 @@ func (s Scene) MarshalJSON() ([]byte, error) {
 		PlannedCount int `json:"plannedCount"`
 		// SCENE-CHECKIN-001
 		HereCount int `json:"hereCount"`
-	}{s.ID, s.Name, s.Area, s.Type, s.Address, s.Latitude, s.Longitude, s.Best, s.Active, string(s.Source), s.Description, s.DistanceMeters, s.RecommendationScore, s.ImageURL, s.SavedCount, s.VisitedCount, s.PlannedCount, s.HereCount})
+	}{s.ID, s.Name, s.Area, s.Type, s.Category, s.Address, s.Latitude, s.Longitude, s.Best, s.Active, string(s.Source), s.Description, s.DistanceMeters, s.RecommendationScore, s.ImageURL, s.SavedCount, s.VisitedCount, s.PlannedCount, s.HereCount})
 }
 
 // CheckinTTL 是一次「我在这里」活多久。
@@ -413,7 +439,7 @@ func (r *memoryRepository) ListApprovedCommunityScenes(_ context.Context) ([]Sce
 			continue
 		}
 		out = append(out, Scene{
-			ID: p.ID, Name: p.Name, Area: p.Area, Type: p.Type, Address: p.Address,
+			ID: p.ID, Name: p.Name, Area: p.Area, Type: p.Type, Category: p.Category, Address: p.Address,
 			Latitude: p.Latitude, Longitude: p.Longitude, Best: p.Best, Active: false,
 			Description: p.Description, Source: SourceCommunity,
 		})
@@ -514,27 +540,27 @@ func recommendationScore(s Scene) float64 {
 func launchScenes() []Scene {
 	scenes := []Scene{
 		// ——— 河内 · 公共景点（户外、无门禁）———
-		{ID: "hoankiem", Name: "Hồ Hoàn Kiếm", Area: "Hoàn Kiếm", Type: "公共景点 · 湖边", Address: "Hồ Hoàn Kiếm, Phường Hoàn Kiếm, Hà Nội", Latitude: 21.0288313, Longitude: 105.8525357, Best: "全天开放", Active: true, Description: "河内老城中心的公共湖景：清晨太极与跑步、白天环湖、周末步行街。"},
-		{ID: "trucbach", Name: "Hồ Trúc Bạch", Area: "Ba Đình", Type: "公共景点 · 湖边", Address: "Hồ Trúc Bạch, Phường Ba Đình, Hà Nội", Latitude: 21.0463247, Longitude: 105.8384008, Best: "全天开放", Active: true, Description: "老城边的小型湖，环湖步道适合散步和傍晚停留。"},
-		{ID: "phunghung", Name: "Phùng Hưng Mural Street", Area: "Hoàn Kiếm", Type: "公共景点 · 街区", Address: "Phố Phùng Hưng, Phố Cổ, Hoàn Kiếm, Hà Nội", Latitude: 21.0360490, Longitude: 105.8460019, Best: "全天开放", Active: true, Description: "老城骑楼下的壁画街，适合街拍和散步。"},
-		{ID: "longbien", Name: "Cầu Long Biên", Area: "Hồng Hà", Type: "公共景点 · 桥", Address: "Cầu Long Biên, Phường Hồng Hà, Hà Nội", Latitude: 21.0431405, Longitude: 105.8581747, Best: "全天开放", Active: true, Description: "横跨红河的百年铁桥，步行道可过河，日落与火车经过时人最多。"},
+		{ID: "hoankiem", Name: "Hồ Hoàn Kiếm", Area: "Hoàn Kiếm", Type: "公共景点 · 湖边", Address: "Hồ Hoàn Kiếm, Phường Hoàn Kiếm, Hà Nội", Latitude: 21.0288313, Longitude: 105.8525357, Best: "全天开放", Active: true, Description: "河内老城中心的公共湖景：清晨太极与跑步、白天环湖、周末步行街。", Category: "景点"},
+		{ID: "trucbach", Name: "Hồ Trúc Bạch", Area: "Ba Đình", Type: "公共景点 · 湖边", Address: "Hồ Trúc Bạch, Phường Ba Đình, Hà Nội", Latitude: 21.0463247, Longitude: 105.8384008, Best: "全天开放", Active: true, Description: "老城边的小型湖，环湖步道适合散步和傍晚停留。", Category: "景点"},
+		{ID: "phunghung", Name: "Phùng Hưng Mural Street", Area: "Hoàn Kiếm", Type: "公共景点 · 街区", Address: "Phố Phùng Hưng, Phố Cổ, Hoàn Kiếm, Hà Nội", Latitude: 21.0360490, Longitude: 105.8460019, Best: "全天开放", Active: true, Description: "老城骑楼下的壁画街，适合街拍和散步。", Category: "景点"},
+		{ID: "longbien", Name: "Cầu Long Biên", Area: "Hồng Hà", Type: "公共景点 · 桥", Address: "Cầu Long Biên, Phường Hồng Hà, Hà Nội", Latitude: 21.0431405, Longitude: 105.8581747, Best: "全天开放", Active: true, Description: "横跨红河的百年铁桥，步行道可过河，日落与火车经过时人最多。", Category: "景点"},
 		// ——— 河内 · 有门禁 / 按场次开放（Active=false：详情页显示"近期适合"）———
 		// train street 经常因管制封闭，能否进要看当天通告 —— 这不是我们该猜的。
-		{ID: "train", Name: "Hanoi Train Street", Area: "Hoàn Kiếm", Type: "公共景点 · 街区", Address: "Hanoi Train Street, Phố Hà Trung, Phố Cổ, Hoàn Kiếm, Hà Nội", Latitude: 21.0295823, Longitude: 105.8433206, Best: "以现场公告为准", Active: false, Description: "贴着居民区的铁路窄巷，能否进入取决于当日管制通告。"},
-		{ID: "vanmieu", Name: "Văn Miếu – Quốc Tử Giám", Area: "Văn Miếu", Type: "公共景点 · 古迹", Address: "Văn Miếu - Quốc Tử Giám, Hà Nội", Latitude: 21.0287903, Longitude: 105.8359533, Best: "08:00–17:00 · 售票", Active: false, Description: "越南第一所国子监，售票参观的老城古迹。"},
-		{ID: "tranquoc", Name: "Chùa Trấn Quốc · Hồ Tây", Area: "Tây Hồ", Type: "公共景点 · 寺庙", Address: "Chùa Trấn Quốc, Đường Thanh Niên, Yên Phụ, Tây Hồ, Hà Nội", Latitude: 21.0478837, Longitude: 105.8368375, Best: "以现场公告为准", Active: false, Description: "西湖东岸半岛上的古寺，是西湖日落最常去的观景点。"},
-		{ID: "manzi", Name: "Manzi Art Space", Area: "Ba Đình", Type: "艺术 · 展览", Address: "14 Phan Huy Ích, Ba Đình, Hà Nội", Latitude: 21.0414885, Longitude: 105.8455896, Best: "以现场公告为准", Active: false, Description: "老别墅改的独立展览空间，按展期开放。"},
+		{ID: "train", Name: "Hanoi Train Street", Area: "Hoàn Kiếm", Type: "公共景点 · 街区", Address: "Hanoi Train Street, Phố Hà Trung, Phố Cổ, Hoàn Kiếm, Hà Nội", Latitude: 21.0295823, Longitude: 105.8433206, Best: "以现场公告为准", Active: false, Description: "贴着居民区的铁路窄巷，能否进入取决于当日管制通告。", Category: "景点"},
+		{ID: "vanmieu", Name: "Văn Miếu – Quốc Tử Giám", Area: "Văn Miếu", Type: "公共景点 · 古迹", Address: "Văn Miếu - Quốc Tử Giám, Hà Nội", Latitude: 21.0287903, Longitude: 105.8359533, Best: "08:00–17:00 · 售票", Active: false, Description: "越南第一所国子监，售票参观的老城古迹。", Category: "景点"},
+		{ID: "tranquoc", Name: "Chùa Trấn Quốc · Hồ Tây", Area: "Tây Hồ", Type: "公共景点 · 寺庙", Address: "Chùa Trấn Quốc, Đường Thanh Niên, Yên Phụ, Tây Hồ, Hà Nội", Latitude: 21.0478837, Longitude: 105.8368375, Best: "以现场公告为准", Active: false, Description: "西湖东岸半岛上的古寺，是西湖日落最常去的观景点。", Category: "景点"},
+		{ID: "manzi", Name: "Manzi Art Space", Area: "Ba Đình", Type: "艺术 · 展览", Address: "14 Phan Huy Ích, Ba Đình, Hà Nội", Latitude: 21.0414885, Longitude: 105.8455896, Best: "以现场公告为准", Active: false, Description: "老别墅改的独立展览空间，按展期开放。", Category: "其他"},
 		// ——— 商家：Three Beans（有照片、有菜单，是本 app 目前唯一的真实商家）———
-		{ID: "threebeans", Name: "Three Beans · Cầu Giấy", Area: "Cầu Giấy", Type: "咖啡 · 动态场景", Address: "Đường Cầu Giấy, Dịch Vọng, Cầu Giấy, Hà Nội", Latitude: 21.0359, Longitude: 105.7906, Best: "以门店公告为准", Active: true, Description: "同一门店按时间切换咖啡、出片、下班社交与周末活动场景。"},
+		{ID: "threebeans", Name: "Three Beans · Cầu Giấy", Area: "Cầu Giấy", Type: "咖啡 · 动态场景", Address: "Đường Cầu Giấy, Dịch Vọng, Cầu Giấy, Hà Nội", Latitude: 21.0359, Longitude: 105.7906, Best: "以门店公告为准", Active: true, Description: "同一门店按时间切换咖啡、出片、下班社交与周末活动场景。", Category: "商家"},
 		// SCENE-ADDRESS-001: 目录里第一条非河内场景。Bắc Ninh 用户此前打
 		// 开场景地图一个场景都搜不到（nearby 半径内没有任何记录）。
 		// 坐标 21.1861,106.0707 反查得到 Suối Hoa, TP Bắc Ninh —— 与仓库
 		// 自己的反查夹具（geocode_test.go）解析结果一致。
-		{ID: "threebeans_bn", Name: "Three Beans · Bắc Ninh", Area: "Bắc Ninh", Type: "咖啡 · 动态场景", Address: "Lê Văn Thịnh, Suối Hoa, TP Bắc Ninh", Latitude: 21.1861, Longitude: 106.0707, Best: "以门店公告为准", Active: true, Description: "Bắc Ninh 市中心的咖啡场景：早班咖啡、下午办公与周末小型活动。"},
+		{ID: "threebeans_bn", Name: "Three Beans · Bắc Ninh", Area: "Bắc Ninh", Type: "咖啡 · 动态场景", Address: "Lê Văn Thịnh, Suối Hoa, TP Bắc Ninh", Latitude: 21.1861, Longitude: 106.0707, Best: "以门店公告为准", Active: true, Description: "Bắc Ninh 市中心的咖啡场景：早班咖啡、下午办公与周末小型活动。", Category: "商家"},
 		// Nominatim: Nguyen Phi Y Lan Park, Kinh Bac Ward, Bắc Ninh City
 		// 21.1861461,106.0742127 —— 与 threebeans_bn 相距约 350 m，两个场景
 		// 同时落在 Bắc Ninh 市中心步行范围内。
-		{ID: "nguyenphilan", Name: "Công viên Nguyên Phi Ỷ Lan", Area: "Bắc Ninh", Type: "公共景点 · 公园", Address: "Công viên Nguyên Phi Ỷ Lan, Phường Kinh Bắc, TP Bắc Ninh", Latitude: 21.1861461, Longitude: 106.0742127, Best: "全天开放", Active: true, Description: "Bắc Ninh 市中心的公共公园，傍晚人最多。"},
+		{ID: "nguyenphilan", Name: "Công viên Nguyên Phi Ỷ Lan", Area: "Bắc Ninh", Type: "公共景点 · 公园", Address: "Công viên Nguyên Phi Ỷ Lan, Phường Kinh Bắc, TP Bắc Ninh", Latitude: 21.1861461, Longitude: 106.0742127, Best: "全天开放", Active: true, Description: "Bắc Ninh 市中心的公共公园，傍晚人最多。", Category: "景点"},
 	}
 	// 这张表里的每一条坐标/地址都是查过的 —— 统一标 OSM，而不是留空让客户端
 	// 猜。用户提交的场景走另一条路（Source=COMMUNITY），不会混进这张表。
@@ -862,9 +888,12 @@ func (s *Service) proposeScene(ctx context.Context, e command.Envelope) command.
 	name, _ := e.Payload["name"].(string)
 	area, _ := e.Payload["area"].(string)
 	sceneType, _ := e.Payload["type"].(string)
+	// SCENE-CATEGORY-001: 顶类三选一，服务端再验一道 —— 客户端 picker 只是
+	// 方便，枚举只能信这一道。细分继续放 type（社区提交可以没有，不强求）。
+	category, _ := e.Payload["category"].(string)
 	lat, latOK := e.Payload["latitude"].(float64)
 	lng, lngOK := e.Payload["longitude"].(float64)
-	if name == "" || area == "" || sceneType == "" || !latOK || !lngOK ||
+	if name == "" || area == "" || !ValidSceneCategory(category) || !latOK || !lngOK ||
 		lat < -90 || lat > 90 || lng < -180 || lng > 180 {
 		return command.Rejected(e, "REALITY_SCENE_INPUT_INVALID", "VALIDATION", "AFTER_USER_ACTION", "reality_scene.input_invalid", nil)
 	}
@@ -877,7 +906,7 @@ func (s *Service) proposeScene(ctx context.Context, e command.Envelope) command.
 	}
 	proposal := Proposal{
 		ID: "scn_" + proposalIDFor(e.Actor.ID, name, lat, lng), ProposedBy: e.Actor.ID,
-		Name: name, Area: area, Type: sceneType, Address: address,
+		Name: name, Area: area, Type: sceneType, Category: category, Address: address,
 		Latitude: lat, Longitude: lng, Description: description, Best: best,
 	}
 	if err := s.repo.ProposeScene(ctx, proposal, time.Now()); err != nil {

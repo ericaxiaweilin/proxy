@@ -4767,7 +4767,9 @@ require_test "SCENE-ADDRESS-001" "./internal/realityscene" \
 # 于是地址在 CTE 里算了、最终却没选出来（负向注入实测：删一份仍绿）。
 # 用 -o 数**出现次数**而不是 grep -c（它数的是行数 —— 这两处在同一行 SQL 上，
 # grep -c 永远返回 1，钉就形同虚设）。
-ADDRESS_SELECTS=$(grep -oF 'type,address,latitude' apps/api-go/internal/platform/postgres/reality_scene.go | wc -l | tr -d ' ')
+# SCENE-CATEGORY-001 在 type 与 address 中间接了 category 列，针跟进去
+# （`type,category,address,latitude`，命中结构和原来完全一致：CTE＋外层＋INSERT…）。
+ADDRESS_SELECTS=$(grep -oF 'type,category,address,latitude' apps/api-go/internal/platform/postgres/reality_scene.go | wc -l | tr -d ' ')
 if ! grep -qF 'ADD COLUMN IF NOT EXISTS address' apps/api-go/migrations/094_scene_address_bacninh.sql ||
    ! grep -qF '&s.Address' apps/api-go/internal/platform/postgres/reality_scene.go ||
    [ "$ADDRESS_SELECTS" -lt 2 ]; then
@@ -6412,3 +6414,40 @@ if grep -q 'styles.humanCard' apps/mobile/src/surfaces/reality-scene-map.tsx; th
 fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-humans.test.ts || exit $?
 echo "    SCENE-HUMANS-002: PASS (bare big round heads, ring selection, no card)"
+# SCENE-CATEGORY-001: 场景顶类封闭三态（商家/景点/其他），前端只认这三个。
+#
+# 之前 type 是自由文本，词表无界 —— 后期按分类做的标记颜色、徽标、筛选全都
+# 无从 key。细分（咖啡店/湖/海滩…）继续走 type 由后端定，前端不碰。
+# 服务端：ValidSceneCategory + proposeScene 校验 + 098 迁移回填（口径见迁移文件）。
+require_test "SCENE-CATEGORY-001" "./internal/realityscene" \
+  "TestSceneCategoryValidation" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "SCENE-CATEGORY-001" "./internal/realityscene" \
+  "TestLaunchScenesCarryClosedCategory" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "SCENE-CATEGORY-001" "./internal/realityscene" \
+  "TestApprovedProposalCarriesCategoryIntoCatalog" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+if [ ! -f apps/api-go/migrations/098_scene_category.sql ] ||
+   ! grep -q "WHEN type LIKE '公共景点%'" apps/api-go/migrations/098_scene_category.sql ||
+   ! grep -q 'ValidSceneCategory' apps/api-go/internal/realityscene/service.go ||
+   ! grep -q 'type SceneCategory = "商家" | "景点" | "其他"' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'SCENE-CATEGORY-001' apps/mobile/src/scene-category.test.ts; then
+  echo "  FAIL [SCENE-CATEGORY-001]: 场景分类链路断了 ——" >&2
+  echo "        自由文本 type 又回来了，或顶类没落到库/端。" >&2
+  exit 1
+fi
+# 反向钉：提交框的自由文本类型不许回来（picker 三选一是唯一的入口）。
+if grep -q '类型，例如 咖啡 / 公园' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-CATEGORY-001]: 提交框又退回自由文本类型 ——" >&2
+  echo "        词表无界，分类标记无从 key。" >&2
+  exit 1
+fi
+# 反向钉：标记色必须按分类走，去过/未开放才置灰 —— 回到纯状态染色，
+# 等于分类白收了，后期标记无从下手。
+if ! grep -q 'scene.category === "商家" ? color.magenta' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-CATEGORY-001]: 标记色又退回纯状态染色 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/scene-category.test.ts || exit $?
+echo "    SCENE-CATEGORY-001: PASS (closed merchant/attraction/other end to end)"

@@ -720,7 +720,7 @@ func TestCommunityProposalNeedsOtherPeoplesConfirmation(t *testing.T) {
 	propose := func(actor string) command.Result {
 		t.Helper()
 		e := envelope("ProposeRealityScene", map[string]any{
-			"name": "Cà phê Bệt", "area": "Hoàn Kiếm", "type": "咖啡 · 户外",
+			"name": "Cà phê Bệt", "area": "Hoàn Kiếm", "type": "咖啡 · 户外", "category": "商家",
 			"latitude": float64(21.0290), "longitude": float64(105.8530), "description": "湖边草地上的露天咖啡摊。",
 		})
 		e.Actor.ID, e.Principal.ID = actor, actor
@@ -861,5 +861,77 @@ func TestRecommendationScoreUsesOnlyRealSignals(t *testing.T) {
 	// 没人碰过的场景，分差只来自距离 —— 不存在"天生高分"。
 	if recommendationScore(base) != -2.5 {
 		t.Fatalf("untouched scene score must be distance-only, got %v", recommendationScore(base))
+	}
+}
+
+func TestSceneCategoryValidation(t *testing.T) {
+	s := New()
+	ctx := t.Context()
+	propose := func(category string) command.Result {
+		t.Helper()
+		e := envelope("ProposeRealityScene", map[string]any{
+			"name": "测试场景", "area": "Hoàn Kiếm", "type": "咖啡 · 户外",
+			"category": category,
+			"latitude": float64(21.0290), "longitude": float64(105.8530),
+		})
+		e.Actor.ID, e.Principal.ID = "u-category", "u-category"
+		return s.HandleContext(ctx, e)
+	}
+	// 封闭三态全收。
+	for _, c := range []string{"商家", "景点", "其他"} {
+		if r := propose(c); r.Outcome != "ACCEPTED" {
+			t.Fatalf("category %q rejected: %+v", c, r.Error)
+		}
+	}
+	// 空的、旧自由文本、英文代码一律拒绝 —— 运行时不猜。
+	for _, c := range []string{"", "咖啡", "公园", "MERCHANT", " merchant", "商家 "} {
+		if r := propose(c); r.Outcome != "REJECTED" {
+			t.Fatalf("category %q must be rejected, got %q", c, r.Outcome)
+		}
+	}
+}
+
+func TestLaunchScenesCarryClosedCategory(t *testing.T) {
+	for _, sc := range launchScenes() {
+		if !ValidSceneCategory(sc.Category) {
+			t.Fatalf("seed %q carries open category %q", sc.ID, sc.Category)
+		}
+	}
+	byID := map[string]Scene{}
+	for _, sc := range launchScenes() {
+		byID[sc.ID] = sc
+	}
+	// 归类口径和 098 迁移里的回填 CASE 一致，白纸黑字在这里。
+	for id, want := range map[string]string{
+		"hoankiem": "景点", "trucbach": "景点", "phunghung": "景点", "longbien": "景点",
+		"train": "景点", "vanmieu": "景点", "tranquoc": "景点",
+		"manzi":      "其他",
+		"threebeans": "商家", "threebeans_bn": "商家", "nguyenphilan": "景点",
+	} {
+		if got := byID[id].Category; got != want {
+			t.Fatalf("seed %q category = %q, want %q", id, got, want)
+		}
+	}
+}
+
+func TestApprovedProposalCarriesCategoryIntoCatalog(t *testing.T) {
+	s := New()
+	ctx := t.Context()
+	e := envelope("ProposeRealityScene", map[string]any{
+		"name": "分类测试店", "area": "Cầu Giấy", "type": "", "category": "商家",
+		"latitude": float64(21.0359), "longitude": float64(105.7906),
+	})
+	e.Actor.ID, e.Principal.ID = "u-cat-1", "u-cat-1"
+	if r := s.HandleContext(ctx, e); r.Outcome != "ACCEPTED" {
+		t.Fatalf("propose rejected: %+v", r.Error)
+	}
+	// 社区提交可以没有细分（type 空），顶类必须有 —— 空 type 照样收。
+	var proposals []Proposal
+	proposals, err := s.repo.ListProposals(ctx, "u-cat-2")
+	if err != nil || len(proposals) != 1 {
+		t.Fatalf("ListProposals: %v n=%d", err, len(proposals))
+	}
+	if proposals[0].Category != "商家" {
+		t.Fatalf("proposal category = %q, want 商家", proposals[0].Category)
 	}
 }
