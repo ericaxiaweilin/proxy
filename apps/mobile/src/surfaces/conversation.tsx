@@ -1159,10 +1159,13 @@ export function ConversationSurface({
         <Pressable accessibilityLabel="关闭附件选择" onPress={() => setAttachOpen(false)} style={styles.scrim}>
           <Pressable onPress={() => undefined} style={styles.bottomSheet}>
             <View style={styles.sheetGrab} />
-            <Pressable accessibilityLabel="发送名片" onPress={() => { setAttachOpen(false); setCardPickerOpen(true); }} style={styles.sheetItem}><Text style={styles.sheetItemText}>名片</Text></Pressable>
-            <Pressable onPress={() => void chooseVideo()} style={styles.sheetItem}><Text style={styles.sheetItemText}>视频</Text></Pressable>
-            {!aiAccount ? <Pressable onPress={() => void openActivityPicker()} style={styles.sheetItem}><Text style={styles.sheetItemText}>Proxy 活动</Text></Pressable> : null}
-            {!aiAccount ? <Pressable accessibilityLabel="发送位置" onPress={() => { setAttachOpen(false); setLocationSheetOpen(true); }} style={styles.sheetItem}><Text style={styles.sheetItemText}>📍 位置</Text></Pressable> : null}
+            {/* SHEET-ICONS-001: 三个入口是图标块（名片/活动/位置），不是文字行。
+                拍照/选图/选视频都在相机图标的相册里，这里不留第二条路。 */}
+            <View style={styles.sheetTiles}>
+              <Pressable accessibilityLabel="发送名片" onPress={() => { setAttachOpen(false); setCardPickerOpen(true); }} style={styles.sheetTile}><View style={styles.sheetTileIcon}><ProxyIcon color={lotus.paper} name="user" size={24} /></View><Text style={styles.sheetTileText}>名片</Text></Pressable>
+              {!aiAccount ? <Pressable onPress={() => void openActivityPicker()} style={styles.sheetTile}><View style={styles.sheetTileIcon}><ProxyIcon color={lotus.paper} name="ticket" size={24} /></View><Text style={styles.sheetTileText}>Proxy 活动</Text></Pressable> : null}
+              {!aiAccount ? <Pressable accessibilityLabel="发送位置" onPress={() => { setAttachOpen(false); setLocationSheetOpen(true); }} style={styles.sheetTile}><View style={styles.sheetTileIcon}><ProxyIcon color={lotus.paper} name="pin" size={24} /></View><Text style={styles.sheetTileText}>位置</Text></Pressable> : null}
+            </View>
           </Pressable>
         </Pressable>
       ) : null}
@@ -1640,6 +1643,10 @@ const styles = StyleSheet.create({
   bottomSheet: { backgroundColor: lotus.paper, borderColor: lotus.line, borderTopLeftRadius: 14, borderTopRightRadius: 14, borderWidth: 1, margin: 8, paddingBottom: 12, paddingHorizontal: 11, paddingTop: 10 },
   sheetGrab: { alignSelf: "center", backgroundColor: "#d5d0c8", borderRadius: 2, height: 3, marginBottom: 9, width: 32 },
   sheetItem: { alignItems: "center", borderTopColor: lotus.line, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", minHeight: 44, paddingVertical: 6 },
+  sheetTiles: { flexDirection: "row", gap: 26, paddingHorizontal: 13, paddingVertical: 14 },
+  sheetTile: { alignItems: "center", gap: 10, width: 56 },
+  sheetTileIcon: { alignItems: "center", backgroundColor: lotus.ink, borderRadius: 18, height: 56, justifyContent: "center", width: 56 },
+  sheetTileText: { color: lotus.muted, fontSize: 11, fontWeight: "700" },
   albumGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingBottom: 4, paddingTop: 2 }, albumTile: { alignItems: "center", aspectRatio: 1, backgroundColor: lotus.soft, borderRadius: 10, justifyContent: "center", width: "23%" }, albumTileText: { color: lotus.muted, fontSize: 11, fontWeight: "700", marginTop: 4 }, albumThumb: { borderRadius: 10, height: "100%", width: "100%" }, albumEmpty: { color: lotus.muted, fontSize: 12, marginTop: 8, textAlign: "center" },
   sheetItemText: { color: lotus.ink, fontSize: 12, fontWeight: "700" },
   sheetItemHint: { color: "#888888", fontSize: 11 },

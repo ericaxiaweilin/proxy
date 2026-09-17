@@ -6627,3 +6627,20 @@ if [ -n "$(echo "$DUP_PREFIXES" | tr -d ' ')" ]; then
   exit 1
 fi
 echo "    ORPHAN-SWEEP-001: PASS (no throwaway cmds, no orphan packages, no new migration collisions)"
+
+# SHEET-ICONS-001: ＋ 面板的三个入口是图标块（名片/活动/位置），不是文字行。
+# 拍照/选图/选视频都在相机图标的相册里 —— ＋ 里留任何一个都是第二条路。
+if ! grep -q '| "pin"' apps/mobile/src/components/proxy-icon.tsx ||
+   ! grep -q 'name="ticket"' apps/mobile/src/surfaces/conversation.tsx ||
+   ! grep -q 'SHEET-ICONS-001' apps/mobile/src/surfaces/convo-attach.test.ts; then
+  echo "  FAIL [SHEET-ICONS-001]: 附件入口又退回纯文字行 ——" >&2
+  exit 1
+fi
+# 反向钉：相机媒体不许回流到 ＋ 面板（跟相机图标里的相册打架）。
+if grep -q '>视频</Text>' apps/mobile/src/surfaces/conversation.tsx ||
+   grep -q '>照片</Text>' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [SHEET-ICONS-001]: 相机媒体又在 ＋ 里单开了入口 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/convo-attach.test.ts || exit $?
+echo "    SHEET-ICONS-001: PASS (attach entries are icon tiles; camera media stays in the album)"
