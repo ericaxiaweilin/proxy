@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 225,
+  "baselineRevision": 226,
   "updatedAt": "2026-09-17",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
@@ -59,7 +59,8 @@
       "scope": "personal-profile",
       "version": "PERSONAL_PROFILE_ARCHITECTURE_V5_THREADS",
       "file": "docs/design/references/proxy_personal_profile_architecture_v5_threads.html",
-      "status": "ACTIVE_SCREEN_REFERENCE"
+      "status": "ACTIVE_SCREEN_REFERENCE",
+      "implementationStatus": "INVITE_ASK_BUTTON_REMOVED_ACCEPT_DECLINE_WIRED"
     },
     {
       "scope": "social-contact-collaboration",

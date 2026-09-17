@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 226 — 2026-09-17
+
+- NOTIF-INVITE-OFFER-001（邀请卡片删“询问”按钮）：点它只是把邀请状态从
+  PENDING 改成 ASK，用户没有地方输入问题，跟拒绝没有实质区别 —— 按死按钮
+  纪律删掉，不是藏起来。接受/拒绝保持接线；服务端仍接受 ASK（不断旧链）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/me.tsx`（个人主页邀请卡片
+    少一个按钮）。无主题 token 改动、无列表结构改动。
+
 ## Revision 225 — 2026-09-17
 
 - DESIGN-CLEANUP-001（token 纪律第一批＋共享原语）：65 处硬编码 hex 换成
@@ -20,7 +28,6 @@ same commit. Do not record routine business logic changes here.
     敏感名单，但三屏在，同提交认领。
   - B 档（lotus 近黑收敛）、C 档（Tailwind 系返工）、行内提示是否要 ProxyEmptyLine
     都没动，等设计拍板。
-
 ## Revision 224 — 2026-09-17
 
 - CONVO-ATTACH-001（相机图标直进相册）：会话窗输入框的相机图标以前和 ＋

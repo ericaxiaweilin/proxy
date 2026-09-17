@@ -6529,3 +6529,40 @@ if ! grep -q 'tone: LoadingTone;' apps/mobile/src/components/proxy-foundation.ts
 fi
 pnpm --filter @proxy/mobile exec vitest run src/design-system-r3.test.ts || exit $?
 echo "    DESIGN-CLEANUP-001: PASS (token discipline batch one, shared loading/empty)"
+# NOTIF-INVITE-OFFER-001: 邀约/offer 的通知以前到不了该到的人。
+#
+# 两处真洞：1）SlotOfferCreated 按 PrincipalID 投递 —— 发起方是 requester，
+# 5 分钟内必须行动的是 agent，等于把信送给了发信人自己，现在按 payload.agentId
+# 投；2）InvitationCreated / InvitationResponded 根本不在 worker 的 switch 里，
+# 被邀方和邀约方都收不到任何东西，现在按 inviteeId / hostId 投（hostId 是
+# 随本次一起补进事件 payload 的，原来就没有）。
+# 其余分支与原来一字不差；未知事件继续安静跳过（worker best-effort 语义不变）。
+# 移动端一半：邀请卡片的“询问”按钮是个空壳（点它只改状态串，没地方输入问题），
+# 按死按钮纪律删掉；接受/拒绝保持接线。
+require_test "NOTIF-INVITE-OFFER-001" "./cmd/worker" \
+  "TestInboxForEventRoutesOfferToAgent" \
+  "apps/api-go/cmd/worker/main_test.go" || exit $?
+require_test "NOTIF-INVITE-OFFER-001" "./cmd/worker" \
+  "TestInboxForEventRoutesInvitations" \
+  "apps/api-go/cmd/worker/main_test.go" || exit $?
+require_test "NOTIF-INVITE-OFFER-001" "./cmd/worker" \
+  "TestInboxForEventFallsBackWhenAgentMissing" \
+  "apps/api-go/cmd/worker/main_test.go" || exit $?
+require_test "NOTIF-INVITE-OFFER-001" "./cmd/worker" \
+  "TestInboxForEventSkipsUnknown" \
+  "apps/api-go/cmd/worker/main_test.go" || exit $?
+if ! grep -q '"hostId": inv.HostID' apps/api-go/internal/scene/service.go ||
+   ! grep -q 'payloadString("agentId")' apps/api-go/cmd/worker/main.go ||
+   ! grep -q 'payloadString("inviteeId")' apps/api-go/cmd/worker/main.go ||
+   ! grep -q 'NOTIF-INVITE-OFFER-001' apps/mobile/src/surfaces/me-invite-actions.test.ts; then
+  echo "  FAIL [NOTIF-INVITE-OFFER-001]: 通知路由又断了 ——" >&2
+  echo "        offer 投给发信人自己，或邀请继续零触达。" >&2
+  exit 1
+fi
+# 反向钉：空壳询问按钮不许回来（没输入框的询问 = 换皮的拒绝）。
+if grep -q 'respond(row.invitationId, "ASK")' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [NOTIF-INVITE-OFFER-001]: 空壳询问按钮又回来了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/me-invite-actions.test.ts || exit $?
+echo "    NOTIF-INVITE-OFFER-001: PASS (offer and invitations reach the one who must act)"
