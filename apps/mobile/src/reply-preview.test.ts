@@ -57,9 +57,9 @@ describe("SEARCH-CORPUS-003 repliesMatchingFirst", () => {
 
   it("puts the matching comment first so the preview explains the hit", () => {
     const ordered = repliesMatchingFirst(comments, (c) => c.body.includes("河粉"));
-    expect(ordered[0].body).toBe("这家河粉好吃");
+    expect(ordered[0]!.body).toBe("这家河粉好吃");
     // 关键：命中会导致帖子出现在搜索结果里，但被折叠在第 6 条 —— 排上来才看得见。
-    expect(visibleReplies(ordered, false)[0].body).toBe("这家河粉好吃");
+    expect(visibleReplies(ordered, false)[0]!.body).toBe("这家河粉好吃");
   });
 
   it("only reorders — never drops or duplicates a comment", () => {

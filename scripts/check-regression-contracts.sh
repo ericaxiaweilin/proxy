@@ -2378,12 +2378,15 @@ echo "    FEED-REPLY-001: PASS (comment authors are named from the profile, neve
 # FEED-REPLY-002: 评论不能被全部折叠 —— 默认显示前 5 条，超出才折叠。
 # 之前不点「回复 N」就一条评论都看不到（全折叠），点开了又把全部评论一次性
 # 铺开。Threads 的做法是首屏固定给几条，剩下的收进「查看全部」。
+# SEARCH-CORPUS-003 之后调用点改名（replies → orderedReplies，搜索命中排前），
+# 函数和语义没变 —— 钉只认函数 + 展开态，不认局部变量名，否则重构必误报
+# （同 HANDLE-LOOKUP-001 那颗 lookupScannedHandle 钉的教训）。
 if ! grep -qF 'REPLY_PREVIEW_LIMIT = 5' apps/mobile/src/reply-preview.ts; then
   echo "  FAIL [FEED-REPLY-002]: the comment preview limit is no longer 5," >&2
   echo "        so comments are either fully collapsed or fully expanded again." >&2
   exit 1
 fi
-if ! grep -qF 'visibleReplies(replies, repliesExpanded)' apps/mobile/src/surfaces/feed.tsx; then
+if ! grep -qF 'visibleReplies(orderedReplies, repliesExpanded)' apps/mobile/src/surfaces/feed.tsx; then
   echo "  FAIL [FEED-REPLY-002]: the feed no longer renders the comment preview," >&2
   echo "        so comments collapse entirely until the reader taps through." >&2
   exit 1
@@ -6285,3 +6288,46 @@ if grep -q '暂无待处理请求，你还没' apps/mobile/src/surfaces/friend-c
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
 echo "    ADD-FRIEND-NEXT-001: PASS (outgoing requests stay visible with a next step)"
+# ADD-FRIEND-SEND-BUSY-001: 点添加在弱网下长时间没反应，还能重复点。
+#
+# 根因：addScannedPerson 在途无忙态（按钮一直是可点的“添加”）、无登录态
+# 直接静默 return。修法：在途锁 + “发送中…”文案 + 失败 finally 解锁，
+# 没登录态给 toast 不静默。
+if ! grep -q 'scanAddBusy' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q '发送中' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'if (scanAddBusy || scanAddSent) return;' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'ADD-FRIEND-SEND-BUSY-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [ADD-FRIEND-SEND-BUSY-001]: 添加按钮又回到无忙态 ——" >&2
+  echo "        弱网下点下去像没反应，还能重复发送。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
+echo "    ADD-FRIEND-SEND-BUSY-001: PASS (sending locks the button with a busy label)"
+
+# SCENE-NAV-001: 场景标记点进去是主页，但去不了 —— 缺导航出口。
+#
+# 决定（A 方案）：tap 进主页不动，导航是主页操作行第三颗按钮，走
+# MEETUP-NAV-001 同一套系统地图深链（iOS Apple Maps / Android Google Maps）。
+# 长按方案否掉：Marker 长按版本支持不一、发现不了、和拖拽冲突、无障碍差。
+if ! grep -q 'meetupDirectionsUrls' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'Linking.openURL' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q '导航去这里' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'SCENE-NAV-001' apps/mobile/src/scene-nav.test.ts; then
+  echo "  FAIL [SCENE-NAV-001]: 场景主页的导航出口断了 ——" >&2
+  echo "        看得到去不了。" >&2
+  exit 1
+fi
+# 反向钉：不许绕过 validated builder 手拼地图 URL（q= 只能看不能走）。
+if grep -q 'maps.apple.com' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   grep -q 'google.com/maps' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-NAV-001]: 主页手拼了地图 URL ——" >&2
+  echo "        绕过坐标校验，拼错就是编点。" >&2
+  exit 1
+fi
+# 反向钉：tap 进主页的老链路不许改道（那是 B 方案，加塞最高频动作）。
+if ! grep -q 'onPress={() => { setSelectedId(scene.id); }}' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-NAV-001]: 点标记进主页的链路被动了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/scene-nav.test.ts || exit $?
+echo "    SCENE-NAV-001: PASS (scene homepage navigates via system maps)"

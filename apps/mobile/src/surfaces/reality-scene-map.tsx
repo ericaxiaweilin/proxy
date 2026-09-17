@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Circle, Marker } from "react-native-maps";
@@ -8,6 +8,9 @@ import { getCurrentFix } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
 import { sceneAddressLine, sceneCountsLine, sceneHeatScore, sceneSignalLine, sceneSourceSuffix } from "../reality-scene-address";
 import { checkinEligibility, checkinHint } from "../scene-checkin";
+// SCENE-NAV-001: 主页里的导航出口走 MEETUP-NAV-001 同一套系统地图深链，
+// 不手拼 URL、不自写导航引擎 —— 坐标校验与双端 scheme 都在那一边钉着。
+import { meetupDirectionsUrls } from "../meetup-share";
 // SCENE-EVENT-SIGNUP-001: 场景上的活动列表 + 报名。复用现成的 ActivityClient，
 // 不新造一套报名机制 —— 活动域（名额 / participants / 事务）本来就是真的。
 import { ActivityClient } from "../activity-client";
@@ -135,6 +138,8 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const [nearbyError, setNearbyError] = useState<string>();
   const [detail, setDetail] = useState<SceneDetail>();
   const [detailError, setDetailError] = useState<string>();
+  // SCENE-NAV-001: 导航失败的行内错（坐标无效 / 调不起地图应用），两种说法分开。
+  const [navError, setNavError] = useState<string>();
   const [actionExplanation, setActionExplanation] = useState<string>();
   const [selectedAction, setSelectedAction] = useState<DynamicSceneAction>();
   const [selectedHumanId, setSelectedHumanId] = useState<string>();
@@ -197,7 +202,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   useEffect(() => {
     let cancelled = false;
     if (!selectedId) { setDetail(undefined); setDetailError(undefined); return; }
-    setDetail(undefined); setDetailError(undefined); setActionExplanation(undefined); setSelectedAction(undefined); setActionResult(undefined); setFullMenuOpen(false); setWhyOpen(false);
+    setDetail(undefined); setDetailError(undefined); setNavError(undefined); setActionExplanation(undefined); setSelectedAction(undefined); setActionResult(undefined); setFullMenuOpen(false); setWhyOpen(false);
     const variant = featuredAIAccount?.boundSceneId === selectedId ? featuredAIAccount.boundSceneVariant : undefined;
     const suffix = variant ? `?variant=${encodeURIComponent(variant)}` : "";
     void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}${suffix}`, { headers: { Accept: "application/json" } })
@@ -423,6 +428,19 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         setTriStateMsg("同步失败，已恢复之前的状态，请重试。");
       });
   };
+  // SCENE-NAV-001: 主页里的导航出口 —— tap 进主页的习惯不动，导航是第三颗按钮。
+  // 走 MEETUP-NAV-001 同一套系统地图深链（iOS Apple Maps / Android Google Maps，
+  // 默认步行，进系统应用后可切方式）；坐标非法 fail-closed，不编点。
+  const openSceneNavigation = (scene: RealityScene): void => {
+    const urls = meetupDirectionsUrls({ lat: scene.latitude, lng: scene.longitude });
+    if (!urls) {
+      setNavError("这个场景没有可用坐标，打不开导航");
+      return;
+    }
+    setNavError(undefined);
+    const url = Platform.OS === "ios" ? urls.apple : urls.google;
+    void Linking.openURL(url).catch(() => setNavError("打不开导航，请重试"));
+  };
   const persistVisited = (id: string): void => {
     if (!session?.principal) {
       setTriStateMsg("请先登录，足迹才会同步。");
@@ -539,7 +557,10 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             <View style={styles.actions}>
               <Pressable onPress={() => persistToggle(saved, selected.id, setSaved, "SetRealitySceneSaved")} style={[styles.action, saved.has(selected.id) && styles.actionSelected]}><Text style={styles.actionText}>{saved.has(selected.id) ? "★ 已收藏" : "☆ 收藏"}</Text></Pressable>
               <Pressable accessibilityLabel={here.has(selected.id) ? "取消打卡" : "打卡"} onPress={() => persistCheckIn(selected)} style={here.has(selected.id) ? [styles.action, styles.actionSelected] : styles.primaryAction}><Text style={here.has(selected.id) ? styles.actionText : styles.primaryActionText}>{here.has(selected.id) ? "✓ 已打卡" : "打卡"}</Text></Pressable>
+              {/* SCENE-NAV-001: 第三颗按钮只管送人过去，不碰收藏/打卡的门禁链。 */}
+              <Pressable accessibilityLabel="导航去这里" onPress={() => openSceneNavigation(selected)} style={styles.action}><Text style={styles.actionText}>导航去这里 ›</Text></Pressable>
             </View>
+            {navError ? <Text style={styles.nearbyError}>{navError}</Text> : null}
             <View style={styles.actions}>
               <Text style={styles.checkInHint}>{checkinHint(here.has(selected.id), origin ? metersBetween(origin, selected) : undefined)}</Text>
             </View>

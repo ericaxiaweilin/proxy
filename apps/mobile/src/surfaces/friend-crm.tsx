@@ -165,6 +165,9 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   // 相机每帧可能触发多次 barcode 事件：ref 锁住重复解析（state 更新是异步的）。
   const scanBusyRef = useRef(false);
   const [scanAddSent, setScanAddSent] = useState(false);
+  // ADD-FRIEND-SEND-BUSY-001: 发送请求没有忙态时，弱网下点添加会长时间停在
+  // “添加”上 —— 看起来像没反应，还能重复点造成重复发送。用锁 + 文案盖住全程。
+  const [scanAddBusy, setScanAddBusy] = useState(false);
 
   const reload = useCallback(async () => {
     if (!relationship) return;
@@ -443,6 +446,7 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
     setScanMatch(undefined);
     setScanLookup(undefined);
     setScanAddSent(false);
+    setScanAddBusy(false);
     if (parsed.kind === "store") {
       setScanLookup("store");
       return;
@@ -467,14 +471,25 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   }
 
   // 扫到人之后走真实的好友请求，不假装「已添加」。
+  // ADD-FRIEND-SEND-BUSY-001: 三个无响应缺口一起补 —— 在途锁住防重发、
+  // 按钮给“发送中…”忙态、没登录态直说不静默。失败走 finally 解锁，
+  // 成功由 scanAddSent 接管禁用，锁不会卡死。
   async function addScannedPerson(): Promise<void> {
-    if (!relationship || !scanMatch) return;
+    if (!scanMatch) return;
+    if (!relationship) {
+      showToast("登录后才能发送好友请求。");
+      return;
+    }
+    if (scanAddBusy || scanAddSent) return;
+    setScanAddBusy(true);
     try {
       await relationship.sendFriendRequest(scanMatch.userAccountId);
       setScanAddSent(true);
       void reload();
     } catch (error) {
       showToast(requestErrorMessage(error, "好友请求没有发送成功，请稍后重试。"));
+    } finally {
+      setScanAddBusy(false);
     }
   }
 
@@ -624,7 +639,7 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
                 <View style={styles.scanPerson}>
                   <View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{(scanMatch.name || "?").slice(0, 1)}</Text></View>
                   <View style={styles.personCopy}><Text style={styles.personName}>{scanMatch.name}</Text><Text style={styles.personSub}>@{scanMatch.handle}{scanMatch.city ? ` · ${scanMatch.city}` : ""}</Text></View>
-                  <Pressable disabled={scanAddSent || !relationship} onPress={() => void addScannedPerson()} style={[styles.addBtn, scanAddSent && styles.addBtnSent]}><Text style={[styles.addBtnText, scanAddSent && styles.addBtnTextSent]}>{scanAddSent ? "已发送" : "添加"}</Text></Pressable>
+                  <Pressable disabled={scanAddSent || scanAddBusy || !relationship} onPress={() => void addScannedPerson()} style={[styles.addBtn, (scanAddSent || scanAddBusy) && styles.addBtnSent]}><Text style={[styles.addBtnText, (scanAddSent || scanAddBusy) && styles.addBtnTextSent]}>{scanAddSent ? "已发送" : scanAddBusy ? "发送中…" : "添加"}</Text></Pressable>
                 </View>
               ) : null}
               {/* ADD-FRIEND-NEXT-001: “已发送”不是终点。对方通过后出现在好友列表走

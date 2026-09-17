@@ -940,3 +940,20 @@ describe("ADD-FRIEND-NEXT-001 an outgoing request stays visible with a next step
     expect(crmCode).not.toContain("暂无待处理请求，你还没");
   });
 });
+
+describe("ADD-FRIEND-SEND-BUSY-001 tapping add never looks dead", () => {
+  it("locks the button with a busy label while the request is in flight", () => {
+    // 弱网下点添加会长时间停在“添加”上 —— 看起来像没反应，还能重复点
+    // 造成重复发送。在途必须锁住 + 给文案，成功由 scanAddSent 接管。
+    expect(crmCode).toContain("scanAddBusy");
+    expect(crmCode).toContain("发送中…");
+    expect(crmCode).toContain("disabled={scanAddSent || scanAddBusy || !relationship}");
+    expect(crmCode).toContain("if (scanAddBusy || scanAddSent) return;");
+  });
+
+  it("says so instead of silently returning without a relationship", () => {
+    // 没登录态时旧代码直接 return，点下去什么都不发生，和“没这个人”
+    // 长得一样。现在必须说出来。
+    expect(crmCode).toContain('showToast("登录后才能发送好友请求。")');
+  });
+});
