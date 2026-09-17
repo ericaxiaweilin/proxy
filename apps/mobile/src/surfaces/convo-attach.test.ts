@@ -90,3 +90,16 @@ describe("CONVO-ATTACH-002 camera slot is a live viewfinder, not a jump-away but
     expect(convoCode).not.toContain("async function chooseVideo(): Promise<void>");
   });
 });
+
+describe("SHEET-ICONS-001 attach sheet entries are icon tiles, not text rows", () => {
+  it("renders card, event and location as icon tiles with their handlers intact", () => {
+    // 原型定的三个块：名片(user)/活动(ticket)/位置(pin)。处理函数一个没动，
+    // 只换皮 —— 卡片选择器、活动选择器、位置 sheet 照旧。
+    expect(convoCode).toContain('name="user"');
+    expect(convoCode).toContain('name="ticket"');
+    expect(convoCode).toContain('name="pin"');
+    expect(convoCode).toContain("setCardPickerOpen(true)");
+    expect(convoCode).toContain("void openActivityPicker()");
+    expect(convoCode).toContain('setLocationSheetOpen(true)');
+  });
+});
