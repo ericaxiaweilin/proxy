@@ -982,6 +982,7 @@ func TestListMyCheckinHistoryCommand(t *testing.T) {
 	if r2.Outcome != "ACCEPTED" {
 		t.Fatalf("empty history must be accepted: got %s", r2.Outcome)
 	}
+}
 // GEO-HONEST-001: 场景详情不许再有"没有来源、却长得像实测"的字段。
 //
 // 修之前这里是：
