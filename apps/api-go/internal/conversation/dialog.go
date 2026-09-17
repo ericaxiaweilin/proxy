@@ -64,6 +64,10 @@ type ReadCursor struct {
 	UserID      string `json:"userId"`
 	DialogID    string `json:"dialogId"`
 	LastReadSeq int64  `json:"lastReadSeq"`
+	// UNREAD-PIPELINE-001: 最后已读时间。Seq 在 PG 落库时不持久化（messages
+	// 表没有 seq 列），全零 Seq 的消息只能按时间判定 —— 没有这个字段，
+	// PG 上的未读数永远算不对。
+	LastReadAt time.Time `json:"lastReadAt"`
 }
 
 type ConvoReadCursor struct {

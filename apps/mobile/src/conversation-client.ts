@@ -26,6 +26,8 @@ export type ConversationInboxItem = {
   latestMessage?: { messageId: string; senderId: string; body?: string; messageType: string; createdAt: string; senderSnapshot?: { displayName?: string; avatarRef?: string } };
   counterpartyId?: string;
   counterpartySnapshot?: { displayName?: string; avatarRef?: string };
+  // UNREAD-PIPELINE-001: 未读数。缺席 = 老服务端没算，不画徽标（不把“不知道”画成 0）。
+  unreadCount?: number;
 };
 
 export type ConvoSummary = {
@@ -181,6 +183,12 @@ export class ConversationClient {
   public async markMessageRead(messageId: string): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
     return this.sendCommand(session, "MarkMessageRead", { type: "Message", id: messageId }, { messageId });
+  }
+  // UNREAD-PIPELINE-001: 打开会话标已读（dialog 级）。和单条的 MarkMessageRead
+  // 不是一回事 —— 那个是阅览计数，这个清未读徽标。
+  public async markDialogRead(conversationId: string): Promise<Record<string, unknown>> {
+    const session = await this.requireSession();
+    return this.sendCommand(session, "MarkDialogRead", { type: "Conversation", id: conversationId }, { conversationId });
   }
   public async deleteMessage(messageId: string): Promise<Record<string, unknown>> {
     const session = await this.requireSession();

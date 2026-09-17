@@ -509,11 +509,40 @@ type Service struct {
 	clock         clock.Clock
 	modelStack    modelstack.Port
 	mediaStoreDir string
+	// UNREAD-PIPELINE-001: 阅读位仓。默认内存版（和消息仓同 durability 口径 ——
+	// 会话消息本身今天就没有 PG 持久化，cursor 不单独要求更强）。
+	// 生产接线在 cmd/api 起服务时换成 PG 版。
+	dialogs DialogRepository
 }
 
 // SweepExpiredMessages hard-deletes messages past protection.ExpiresAt.
 // Lotus RFC §5 (30d default, per-type). Worker calls this hourly; unit
 // tests call PurgeExpiredMessages directly with a controllable clock.
+// dialogRepo 取阅读位仓。构造器都会填默认内存版，这里只防历史直构。
+func (s *Service) dialogRepo() DialogRepository {
+	if s.dialogs == nil {
+		s.dialogs = NewMemoryDialogRepository()
+	}
+	return s.dialogs
+}
+
+// countUnread 数未读：对方发的、没删的、且（序号超前，或序号缺失但比最后已读新）。
+//
+// 两条或缺一不可：Seq>0 的走序号（内存版）；PG 落库不存 seq，读回来全是 0，
+// 全靠时间兜底。cursor 双零（从没标过）= 全量计入 —— 上线亮一次，点开即灭，
+// 不把“从来没标过”悄悄当成“全读过”。
+func countUnread(messages []Message, actorID string, cursor ReadCursor) int {
+	n := 0
+	for _, m := range messages {
+		if m.SenderID == actorID || m.DeletedAt != nil {
+			continue
+		}
+		if m.Seq > cursor.LastReadSeq || (m.Seq == 0 && !m.CreatedAt.Before(cursor.LastReadAt)) {
+			n++
+		}
+	}
+	return n
+}
 func (s *Service) SweepExpiredMessages(ctx context.Context) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -538,7 +567,7 @@ func NewWithRepositoryAndClock(repository Repository, clk clock.Clock) *Service 
 	if clk == nil {
 		clk = clock.System{}
 	}
-	return &Service{repository: repository, clock: clk, modelStack: modelstack.Unconfigured{}}
+	return &Service{repository: repository, clock: clk, modelStack: modelstack.Unconfigured{}, dialogs: NewMemoryDialogRepository()}
 }
 
 func NewWithModelStack(repository Repository, ms modelstack.Port) *Service {
@@ -548,7 +577,15 @@ func NewWithModelStack(repository Repository, ms modelstack.Port) *Service {
 	if ms == nil {
 		ms = modelstack.Unconfigured{}
 	}
-	return &Service{repository: repository, clock: clock.System{}, modelStack: ms}
+	return &Service{repository: repository, clock: clock.System{}, modelStack: ms, dialogs: NewMemoryDialogRepository()}
+}
+
+// WithDialogs 换阅读位仓（生产换 PG 版）。构造后、起服务前调一次。
+func (s *Service) WithDialogs(r DialogRepository) *Service {
+	if r != nil {
+		s.dialogs = r
+	}
+	return s
 }
 
 // SetMediaStoreDir wires the same object-store root used by the API and media
@@ -559,7 +596,7 @@ func (s *Service) SetMediaStoreDir(dir string) {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "StartConversation", "SendMessage", "ListConversations", "ListConversationMessages", "MarkMessageRead", "DeleteMessage", "SetConversationBlocked", "RecordScreenshot", "ForwardMessage",
+	case "StartConversation", "SendMessage", "ListConversations", "ListConversationMessages", "MarkMessageRead", "MarkDialogRead", "DeleteMessage", "SetConversationBlocked", "RecordScreenshot", "ForwardMessage",
 		"CreateNeedDraft", "ConfirmNeedDraft",
 		"CreateConvo", "ListMyConvos":
 		return true
@@ -586,6 +623,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listMessages(ctx, e)
 	case "MarkMessageRead":
 		return s.markMessageRead(ctx, e)
+	case "MarkDialogRead":
+		return s.markDialogRead(ctx, e)
 	case "DeleteMessage":
 		return s.deleteMessage(ctx, e)
 	case "SetConversationBlocked":
@@ -741,6 +780,9 @@ type ConversationSummary struct {
 	LatestMessage        *Message          `json:"latestMessage,omitempty"`
 	CounterpartyID       string            `json:"counterpartyId,omitempty"`
 	CounterpartySnapshot *IdentitySnapshot `json:"counterpartySnapshot,omitempty"`
+	// UNREAD-PIPELINE-001: 未读数。0 直接省略 —— 客户端把缺席当“没有徽标”，
+	// 不把 0 画出来凑数。
+	UnreadCount int `json:"unreadCount,omitempty"`
 }
 
 func (s *Service) listConversations(ctx context.Context, e command.Envelope) command.Result {
@@ -775,6 +817,13 @@ func (s *Service) listConversations(ctx context.Context, e command.Envelope) com
 				}
 			}
 		}
+		// UNREAD-PIPELINE-001: 每个 dialog 带未读数。cursor 缺席（从没标过）=
+		// 全量计入 —— 上线亮一次，点开即灭，不把“从来没标过”悄悄当成全读过。
+		cursor, cursorErr := s.dialogRepo().GetReadCursor(ctx, e.Actor.ID, conv.ID)
+		if cursorErr != nil {
+			return command.Rejected(e, "CONVERSATION_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
+		}
+		summary.UnreadCount = countUnread(messages, e.Actor.ID, cursor)
 		summaries = append(summaries, summary)
 	}
 	sort.SliceStable(summaries, func(i, j int) bool {
@@ -1683,6 +1732,48 @@ func (s *Service) markMessageRead(ctx context.Context, e command.Envelope) comma
 		"viewLimit": msg.Protection.ViewLimit,
 		"consumed":  consumed,
 	}, domainEvents)
+}
+
+// ---------- MarkDialogRead ----------
+// UNREAD-PIPELINE-001: 把整个 dialog 标已读（打开会话时调一次）。
+// 和 MarkMessageRead 不是一回事：那个是单条消息的阅览计数（阅后即焚用），
+// 这个是 dialog 级阅读位。cursor 直接记到当前最大 Seq + 现在 ——
+// 不接受客户端报 seq：报小的漏数，报大的把没看过的也灭了，服务端说了算。
+func (s *Service) markDialogRead(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		ConversationID string `json:"conversationId"`
+	}
+	if !decode(e.Payload, &p) || p.ConversationID == "" {
+		return command.Rejected(e, "INVALID_READ", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_read", nil)
+	}
+	conv, err := s.repository.GetConversation(ctx, p.ConversationID)
+	if errors.Is(err, ErrConversationNotFound) {
+		return command.Rejected(e, "CONVERSATION_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "CONVERSATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.read_failed", nil)
+	}
+	if !isParticipant(conv, e.Actor.ID) {
+		return command.Rejected(e, "NOT_CONVERSATION_PARTICIPANT", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.not_participant", nil)
+	}
+	messages, err := s.repository.Messages(ctx, conv.ID)
+	if err != nil {
+		return command.Rejected(e, "MESSAGE_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
+	}
+	var maxSeq int64
+	for _, m := range messages {
+		if m.Seq > maxSeq {
+			maxSeq = m.Seq
+		}
+	}
+	now := s.clock.Now().UTC()
+	if err := s.dialogRepo().UpsertReadCursor(ctx, ReadCursor{UserID: e.Actor.ID, DialogID: conv.ID, LastReadSeq: maxSeq, LastReadAt: now}); err != nil {
+		return command.Rejected(e, "CONVERSATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.read_failed", nil)
+	}
+	return acceptedWithPayload(e, "DialogRead", conv.ID, 1, "READ", map[string]any{
+		"conversationId": conv.ID,
+		"unreadCount":    0,
+	}, nil)
 }
 
 // ---------- RecordScreenshot ----------

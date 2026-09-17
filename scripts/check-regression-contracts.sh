@@ -6584,3 +6584,39 @@ if grep -q '收藏 {isSaved ? 1 : 0}' apps/mobile/src/surfaces/feed.tsx; then
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/feed-saved-count.test.ts || exit $?
 echo "    FEED-SAVED-COUNT-001: PASS (saved shows state, never a fabricated aggregate)"
+
+# UNREAD-PIPELINE-001: 未读徽标和在线圆点在真实数据流里永远不亮。
+#
+# 根因三段：阅读位存储早就有（ReadCursor＋表）但零写入零聚合；
+# toDialog 不赋值；打开会话不上报。修法：MarkDialogRead 命令（打开标一次，
+# 不跟轮询）＋ list 下发未读数 ＋ 端上映射。在线圆点没有数据源，直接删掉，
+# 不编 presence —— 那是另立项的事。
+# 两个诚实细节：PG 落库不存 seq，全零 Seq 靠时间兜底；从没标过全量计入一次。
+require_test "UNREAD-PIPELINE-001" "./internal/conversation" \
+  "TestMarkDialogReadFlow" \
+  "apps/api-go/internal/conversation/unread_test.go" || exit $?
+require_test "UNREAD-PIPELINE-001" "./internal/conversation" \
+  "TestMarkDialogReadRejectsOutsider" \
+  "apps/api-go/internal/conversation/unread_test.go" || exit $?
+require_test "UNREAD-PIPELINE-001" "./internal/conversation" \
+  "TestCountUnreadEdges" \
+  "apps/api-go/internal/conversation/unread_test.go" || exit $?
+require_test "UNREAD-PIPELINE-001" "./internal/platform/postgres" \
+  "TestDialogReadCursorPostgresRoundTrip" \
+  "apps/api-go/internal/platform/postgres/dialog_cursor_integration_test.go" || exit $?
+if ! grep -q 'WithDialogs(postgres.NewDialogRepository(pool))' apps/api-go/cmd/api/main.go ||
+   ! grep -q 'case "MarkDialogRead":' apps/api-go/internal/conversation/service.go ||
+   ! grep -q 'markDialogRead(convId)' apps/mobile/src/surfaces/conversation.tsx ||
+   ! grep -q 'UNREAD-PIPELINE-001' apps/mobile/src/surfaces/messages-unread.test.ts; then
+  echo "  FAIL [UNREAD-PIPELINE-001]: 未读链路又断了 ——" >&2
+  echo "        徽标没数据，或打开不上报。" >&2
+  exit 1
+fi
+# 反向钉：在途曾经有在线圆点但全仓无数据源，删了就别回来。
+if grep -q 'styles.online' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [UNREAD-PIPELINE-001]: 在线圆点又回来了 ——" >&2
+  echo "        先建 presence 系统再画点。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/messages-unread.test.ts || exit $?
+echo "    UNREAD-PIPELINE-001: PASS (unread badge has real data, online dot removed)"

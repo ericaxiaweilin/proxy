@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -183,21 +184,25 @@ func (r *DialogRepository) UpdateFolder(ctx context.Context, f conversation.Fold
 
 func (r *DialogRepository) UpsertReadCursor(ctx context.Context, cur conversation.ReadCursor) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO conversation.read_cursors (user_id, dialog_id, last_read_seq)
-		VALUES ($1,$2,$3) ON CONFLICT (user_id, dialog_id) DO UPDATE SET last_read_seq=EXCLUDED.last_read_seq`,
-		cur.UserID, cur.DialogID, cur.LastReadSeq,
+		INSERT INTO conversation.read_cursors (user_id, dialog_id, last_read_seq, last_read_at)
+		VALUES ($1,$2,$3,$4) ON CONFLICT (user_id, dialog_id) DO UPDATE SET last_read_seq=EXCLUDED.last_read_seq, last_read_at=EXCLUDED.last_read_at`,
+		cur.UserID, cur.DialogID, cur.LastReadSeq, cur.LastReadAt,
 	)
 	return err
 }
 
 func (r *DialogRepository) GetReadCursor(ctx context.Context, userID, dialogID string) (conversation.ReadCursor, error) {
 	var cur conversation.ReadCursor
+	var readAt *time.Time
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT user_id, dialog_id, last_read_seq FROM conversation.read_cursors WHERE user_id=$1 AND dialog_id=$2`, userID, dialogID).Scan(
-		&cur.UserID, &cur.DialogID, &cur.LastReadSeq,
+		SELECT user_id, dialog_id, last_read_seq, last_read_at FROM conversation.read_cursors WHERE user_id=$1 AND dialog_id=$2`, userID, dialogID).Scan(
+		&cur.UserID, &cur.DialogID, &cur.LastReadSeq, &readAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return conversation.ReadCursor{UserID: userID, DialogID: dialogID, LastReadSeq: 0}, nil
+	}
+	if readAt != nil {
+		cur.LastReadAt = *readAt
 	}
 	return cur, err
 }

@@ -238,6 +238,8 @@ func main() {
 		demandService = demand.NewWithRepository(admissionGate, fundingGate, postgres.NewDemandRepositoryWithOutbox(pool, outboxRepository))
 		localContextService = localcontext.NewWithRepository(postgres.NewLocalContextRepository(pool))
 		conversationService = conversation.NewWithModelStack(postgres.NewConversationRepository(pool), modelStack)
+		// UNREAD-PIPELINE-001: 阅读位走 PG（和消息同 durability 口径）。
+		conversationService.WithDialogs(postgres.NewDialogRepository(pool))
 		conversationService.SetMediaStoreDir(mediaStoreDir)
 		engagementService = engagement.NewWithRepository(postgres.NewEngagementRepository(pool))
 		fulfillmentService = fulfillment.NewWithRepository(postgres.NewFulfillmentRepositoryWithOutbox(pool, outboxRepository))

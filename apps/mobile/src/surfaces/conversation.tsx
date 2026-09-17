@@ -367,6 +367,10 @@ export function ConversationSurface({
       try {
         const result = await conversationClient.listMessages(convId, activeConvo?.id);
         if (!cancelled) hydrateMessages(result);
+        // UNREAD-PIPELINE-001: 首次拉成功后标已读（只标一次，不跟着 3 秒轮询
+        // 一起写 —— 轮询里写等于每个用户每 3 秒写一次 cursor，而且用户正看着
+        // 进来的新消息会被立刻灭掉。失败静默，下次打开重试。
+        if (firstLoad) void conversationClient.markDialogRead(convId).catch(() => undefined);
       } catch {
         if (!cancelled && firstLoad) setError("历史消息加载失败，请重试");
       } finally {

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 226,
+  "baselineRevision": 230,
   "updatedAt": "2026-09-17",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
@@ -74,7 +74,7 @@
       "file": "docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html",
       "status": "ACTIVE_SCREEN_REFERENCE",
       "implementationBaseline": "docs/design/CURRENT_BASELINE.json",
-      "implementationStatus": "CLUSTER_BUBBLES_SECURE_STRIP_SHEET_STICKER_DRAWER_WIRED_OBJECT_LANE_VIA_MESSAGE_RENDERER_UNCHANGED_CONTACT_CARD_PICKER_SEND_ZOOM_WIRED_ATTACH_ALBUM_FIRST_WIRING"
+      "implementationStatus": "CLUSTER_BUBBLES_SECURE_STRIP_SHEET_STICKER_DRAWER_WIRED_OBJECT_LANE_VIA_MESSAGE_RENDERER_UNCHANGED_CONTACT_CARD_PICKER_SEND_ZOOM_WIRED_ATTACH_ALBUM_FIRST_WIRING_UNREAD_BADGE_WIRED_ONLINE_DOT_REMOVED"
     },
     {
       "scope": "market",

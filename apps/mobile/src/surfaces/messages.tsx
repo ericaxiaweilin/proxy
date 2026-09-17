@@ -27,7 +27,7 @@ type Folder = "all" | "friends" | "activity" | "invite";
 
 // v8 原型 mock 已删除（R36.x MOCK-001）：Dialog 只走 server
 // listConversations()，空收件箱显示诚实空态，不再展示假会话。
-type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
+type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; folder: Folder; type?: string };
 // R15.74: CONVOS 走 server GROUP | SUPPORT filter（DM 在 dialogs tab）。
 
 const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友", activity: "活动", invite: "邀约" };
@@ -712,7 +712,6 @@ export function MessagesSurface({
                   <Pressable onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource)} style={styles.dialog}>
                     {d.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:dialog:${d.conversationId ?? d.id}`} source={d.avatarSource} style={styles.avatar} transition={0} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                       <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
-                      {(d as Dialog).online ? <View style={styles.online} /> : null}
                     </View>}
                     <View style={styles.dialogMain}>
                       <View style={styles.dialogTop}>
@@ -1035,6 +1034,9 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
     preview,
     time,
     badge: item.conversation.originType,
+    // UNREAD-PIPELINE-001: 未读徽标终于有真数据。>0 才挂 —— 0 和缺席都不画，
+    // 不把“没有”画成“0 条未读”凑数。
+    ...(item.unreadCount !== undefined && item.unreadCount > 0 ? { unread: String(item.unreadCount) } : {}),
     // R15.74: 透出 conversationType 给 Convo tab filter (GROUP/SUPPORT)
     type: item.conversation.conversationType,
     folder: item.conversation.originType === "ACTIVITY" ? "activity" : item.conversation.originType === "PROFILE" ? "friends" : "all",
@@ -1090,7 +1092,6 @@ const styles = StyleSheet.create({
   avatarDark: { backgroundColor: "#181715" },
   avatarText: { fontSize: 14, fontWeight: "700", color: "#11110f" },
   avatarTextDark: { color: "#fff" },
-  online: { position: "absolute", right: 1, bottom: 1, width: 11, height: 11, borderRadius: 5.5, backgroundColor: "#111", borderWidth: 2, borderColor: "#fffdf8" },
   dialogMain: { flex: 1, minWidth: 0 },
   dialogTop: { flexDirection: "row", alignItems: "center", gap: 6 },
   dialogName: { fontSize: 14.5, fontWeight: "700", color: "#11110f" },
