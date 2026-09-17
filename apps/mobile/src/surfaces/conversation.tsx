@@ -10,7 +10,7 @@ import * as ImagePicker from "expo-image-picker";
 // CONVO-ATTACH-001: v57 顶层 getAssetsAsync 是只会 throw 的占位实现
 //（见 image-export.ts 开头，真机验证过）—— 列表走新 API Query/Asset。
 import { AssetField, MediaType, Query, requestPermissionsAsync } from "expo-media-library";
-import { ProxySwitch } from "../components/proxy-foundation";
+import { ProxySwitch, ProxyLoading } from "../components/proxy-foundation";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -1369,7 +1369,7 @@ export function ConversationSurface({
             <View style={styles.sheetGrab} />
             <Text style={styles.sheetItemText}>转发给…</Text>
             <Text style={styles.sheetItemHint} numberOfLines={1}>{forwardFor.body.slice(0, 40)}</Text>
-            {forwardInbox === undefined && !forwardError ? <ActivityIndicator style={{ marginVertical: 12 }} /> : null}
+            {forwardInbox === undefined && !forwardError ? <ProxyLoading tone="muted" style={{ marginVertical: 12 }} /> : null}
             {forwardError ? <Text style={styles.menuDanger}>{forwardError}</Text> : null}
             {(forwardInbox ?? []).map((item) => {
               const targetId = item.conversation.conversationId;

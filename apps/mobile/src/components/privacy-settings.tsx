@@ -15,7 +15,7 @@
 // Errors are surfaced inline so the user can retry without leaving
 // the page; the parent surface does not need to handle them.
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, Share, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, Share, StyleSheet, Text, View } from "react-native";
 import { documentDirectory, writeAsStringAsync } from "expo-file-system/legacy";
 import { color } from "../theme";
 import type {
@@ -24,6 +24,7 @@ import type {
   PrivacyRequest
 } from "../privacy-client";
 import { activeRequestOf, exportCopyFileName, formatDate, kindLabel, sessionStatusLabel, statusLabel, truncateId } from "./privacy-settings-helpers";
+import { ProxyLoading } from "./proxy-foundation";
 
 export type PrivacySettingsProps = {
   client: PrivacyClient;
@@ -169,7 +170,7 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
             style={[styles.cta, busy !== null && styles.ctaDisabled]}
           >
             {busy === "export" ? (
-              <ActivityIndicator color={color.white} />
+              <ProxyLoading tone="onDark" />
             ) : (
               <Text style={styles.ctaText}>生成我的数据副本</Text>
             )}
@@ -256,7 +257,7 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
               style={[styles.ctaSecondary, busy !== null && styles.ctaDisabled]}
             >
               {busy === "cancel:" + activeDelete.id ? (
-                <ActivityIndicator color={color.ink} />
+                <ProxyLoading tone="onLight" />
               ) : (
                 <Text style={styles.ctaSecondaryText}>撤回删除请求</Text>
               )}
@@ -270,7 +271,7 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
             style={[styles.ctaDanger, busy !== null && styles.ctaDisabled]}
           >
             {busy === "delete" ? (
-              <ActivityIndicator color={color.white} />
+              <ProxyLoading tone="onDark" />
             ) : (
               <Text style={styles.ctaDangerText}>提交删除请求</Text>
             )}

@@ -6,12 +6,13 @@
 // Phase 1.5 在 Phase 1 基础上补齐：真实 logo、ProxyIcon、重试/下拉刷新、对象预览与 LIBRARY/OBJECTS/OPS 子页.
 
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { extractShownCount } from "./extract-shown-count";
 import type { FacetConfig, FacetObject, FacetSideSpacePost, ListFacetObjectsPayload, SideSpaceCatalogPost } from "@proxy/contracts";
 import { FacetClient, FacetProtocolError } from "../facet-client";
 import { ProxyIcon } from "../components/proxy-icon";
 import { Gradient, color, shadows } from "../theme";
+import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
@@ -520,7 +521,7 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
         ) : null}
 
         {phase === "LOADING" ? (
-          <View style={styles.stateBlock}><ActivityIndicator color={color.magenta} /></View>
+          <View style={styles.stateBlock}><ProxyLoading tone="brand" /></View>
         ) : null}
         {phase === "ERROR" ? (
           <View style={styles.stateBlock}>
@@ -550,7 +551,7 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
             <Text style={styles.sectionNote}>FACET 当前为每个对象独立判断展示方向</Text>
             <View style={styles.objectsList}>
               {payload.objects.length === 0 ? (
-                <View style={styles.emptyCard}><Text style={styles.emptyText}>还没有对象</Text><Text style={styles.emptyHint}>创建首个对象后，这里会显示关系与缺口</Text></View>
+                <ProxyEmptyState title="还没有对象" sub="创建首个对象后，这里会显示关系与缺口" />
               ) : payload.objects.map((obj: FacetObject) => (
                 <ObjectCard
                   key={obj.id}
@@ -682,9 +683,6 @@ const styles = StyleSheet.create({
   sectionTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   sectionNote: { color: color.muted, fontSize: 10, marginTop: 3 },
   objectsList: { gap: 8, marginTop: 10 },
-  emptyCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, padding: 18 },
-  emptyText: { color: color.ink, fontSize: 13, fontWeight: "800" },
-  emptyHint: { color: color.muted, fontSize: 11, marginTop: 4 },
 
   objectCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, padding: 11, ...shadows.card },
   objectHead: { alignItems: "center", flexDirection: "row", gap: 10 },

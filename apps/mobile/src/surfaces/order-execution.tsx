@@ -3,10 +3,11 @@
 // 接线：直接复用 fulfillment 域已有的 ListMyOrders 真实读模型，
 // 不再经 ComingSoon 占位。访客可见空态，已登录用户看到真实订单。
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { color, shadows } from "../theme";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import { SwipeBackShell } from "../architecture/swipe-back";
+import { ProxyLoading } from "../components/proxy-foundation";
 
 function orderStatus(order: FulfillmentOrder): string {
   const m = { OFFERED: "待确认", CONFIRMED: "已确认", EXECUTING: "进行中", COMPLETED: "已完成", CANCELLED: "已取消" } as const;
@@ -65,7 +66,7 @@ export function OrderExecutionSurface({ client, onBack }: { client: FulfillmentC
       {onBack ? <Pressable onPress={onBack} style={styles.back}><Text style={styles.backText}>‹ 返回</Text></Pressable> : null}
       <Text style={styles.title}>订单执行</Text>
       <Text style={styles.sub}>执行 / 打卡 / 证据 / 完成 — 来自 fulfillment 真实读模型（非占位）</Text>
-      {orders === undefined && !error ? <ActivityIndicator style={styles.loader} /> : null}
+      {orders === undefined && !error ? <ProxyLoading tone="muted" style={styles.loader} /> : null}
       {error ? <View style={styles.empty}><Text style={styles.emptyText}>加载失败：{error}</Text></View> : null}
       {orders !== undefined && orders.length === 0 && !error ? <View style={styles.empty}><Text style={styles.emptyText}>暂无订单 — 去市场接一个或去首页发布需求</Text></View> : null}
       {orders !== undefined && orders.length > 0 ? (

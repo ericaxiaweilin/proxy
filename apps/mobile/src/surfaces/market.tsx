@@ -8,7 +8,7 @@
 //   - “热门地点” = MARKER 显式声明的探索点 (VENDOR_SPOT) — 重要但仅是探索，不会被默认高亮
 //   - “快速真实地址” = showUserLocation 蓝点 + “用我当前位置”按钮
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import MapView, { Circle, Marker, type Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useModuleBackHandler } from "../components/module-back";
@@ -36,7 +36,7 @@ import {  OPPORTUNITY_LENS_LABEL,
 import { gridToLatLng } from "../components/location-options";
 import { clusterPins } from "../cluster-pins";
 import { ProxyIcon } from "../components/proxy-icon";
-import { ProxyTabs } from "../components/proxy-foundation";
+import { ProxyTabs, ProxyLoading } from "../components/proxy-foundation";
 import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 import { color, shadows } from "../theme";
 import { R37OpportunityCard, SAMPLE_SCENE_IMAGE, TYPE_LABEL, type OpportunityType, inferOpportunityTypeForFilter } from "./r37-opportunity-card";
@@ -481,7 +481,7 @@ export function MarketSurface({
         ) : (
           <>
             {opportunityError ? <Text style={styles.marketError}>{opportunityError}</Text> : null}
-            {opportunityPhase === "LOADING" ? <ActivityIndicator color={color.magenta} style={{ marginVertical: 8 }} /> : null}
+            {opportunityPhase === "LOADING" ? <ProxyLoading tone="brand" style={{ marginVertical: 8 }} /> : null}
             <OpportunityTab items={opportunityItems} marketLabel={effectiveMarketLabel} onOpen={(o) => setOppDetail(o)} onDismiss={(id) => void dismissOpportunity(id)} />
           </>
         )
@@ -506,7 +506,7 @@ export function MarketSurface({
           </View>
           {activityPhase === "LOADING" && activityItems.length === 0 ? (
             <View style={styles.emptyBox}>
-              <ActivityIndicator color={color.magenta} />
+              <ProxyLoading tone="brand" />
               <Text style={styles.emptyText}>正在读取活动读模型（ListActivities）…</Text>
             </View>
           ) : activityPhase === "ERROR" ? (
@@ -1015,7 +1015,7 @@ function PublishActivityForm({ activities, marketplace, venueOptions, onBack, on
       <View style={styles.detailHead}><Pressable onPress={onBack}><Text style={styles.detailBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>创建活动</Text></View>
       <Text style={styles.activityPublishTitle}>想组织什么？</Text>
       <Text style={styles.publishFlowSub}>活动强调多人参与；先选一个完整玩法，也可以直接自定义。</Text>
-      {presetPhase === "LOADING" ? <ActivityIndicator style={{ marginTop: 24 }} /> : null}
+      {presetPhase === "LOADING" ? <ProxyLoading tone="muted" style={{ marginTop: 24 }} /> : null}
       {presetPhase === "ERROR" ? <Text style={styles.marketError}>活动目录加载失败，可直接自定义填写。</Text> : null}
       {presetPhase === "READY" ? <View style={styles.publishTemplateGrid}>
         {presets.map((p) => (
@@ -1131,7 +1131,7 @@ function PublishTemplatePicker({ marketplace, onBack, onPicked, onCustom }: { ma
          { id: "more", label: "更多", hint: "长尾场景", items: templates.filter((t) => t.group === "MORE") }];
   const active = rail.find((c) => c.id === activeCategory) ?? rail[0];
   const pickedTemplate = templates.find((t) => t.id === pickedId);
-  if (!active) return <ActivityIndicator style={{ marginTop: 24 }} />; // rail is never empty: engine payload or fallback
+  if (!active) return <ProxyLoading tone="muted" style={{ marginTop: 24 }} />; // rail is never empty: engine payload or fallback
 
   return <View>
     <View style={styles.detailHead}>
@@ -1157,7 +1157,7 @@ function PublishTemplatePicker({ marketplace, onBack, onPicked, onCustom }: { ma
       </Pressable>
     </View>
     {suggestError ? <Text style={styles.marketError}>{suggestError}</Text> : null}
-    {phase === "LOADING" ? <ActivityIndicator style={{ marginTop: 24 }} /> : null}
+    {phase === "LOADING" ? <ProxyLoading tone="muted" style={{ marginTop: 24 }} /> : null}
     {phase === "ERROR" ? <View style={styles.r4Card}>
       <Text style={styles.marketError}>场景目录加载失败，可直接自定义发布。</Text>
       <Pressable onPress={onCustom} style={[styles.r4ActionPrimary, { marginTop: 12 }]}><Text style={styles.r4ActionPrimaryText}>自定义发布</Text></Pressable>
@@ -1535,7 +1535,7 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
               </Pressable>
             ) : null
           ) : null}
-          {candidatesPhase === "LOADING" ? <ActivityIndicator style={{ marginTop: 8 }} /> : null}
+          {candidatesPhase === "LOADING" ? <ProxyLoading tone="muted" style={{ marginTop: 8 }} /> : null}
           {candidatesPhase === "ERROR" ? (
             <View style={styles.publishFlowRow}>
               <Text style={styles.marketError}>候选加载失败。</Text>
@@ -1728,7 +1728,7 @@ function SelectWorkbench({ marketplace, fulfillment, profileClient, opportunity,
         <Text style={styles.aiTitle}>申请制，不把任何人直接上架</Text>
         <Text style={styles.aiCheck}>这里只展示真人主动提交的本次报价与范围。没有可靠履约数据时，不伪造推荐排名。</Text>
       </View>
-      {phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}
+      {phase === "LOADING" ? <ProxyLoading tone="brand" /> : null}
       {error ? <Text style={styles.marketError}>{error}</Text> : null}
       {phase === "READY" && candidates.length === 0 ? <Text style={styles.detailHint}>还没有人报名。候选人不会由平台或 AI 自动补位。</Text> : null}
       {phase === "READY" && candidates.length > 0 ? (
@@ -2025,7 +2025,7 @@ function MarketMap({
           accessibilityLabel={locGranted ? "已使用我的位置" : "用我当前位置"}
         >
           {locBusy ? (
-            <ActivityIndicator color={locGranted ? color.white : color.ink} size="small" />
+            <ProxyLoading tone={locGranted ? "onDark" : "onLight"} size="small" />
           ) : (
             <ProxyIcon color={locGranted ? color.white : color.ink} name="route" size={14} />
           )}
@@ -2184,7 +2184,7 @@ const styles = StyleSheet.create({
   contextTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
   contextSub: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
   contextBadge: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
-  contextBadgeText: { color: "#5B2CB5", fontSize: 11, fontWeight: "800" },
+  contextBadgeText: { color: "color.factInferredFg", fontSize: 11, fontWeight: "800" },
   r4Card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, marginVertical: 5, padding: 12, ...shadows.card },
   r4CardFlat: { backgroundColor: "transparent", borderBottomColor: "rgba(35,28,42,0.09)", borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12, paddingHorizontal: 12, marginVertical: 0 },
   r4Top: { alignItems: "flex-start", flexDirection: "row", gap: 8, justifyContent: "space-between" },
@@ -2241,17 +2241,17 @@ const styles = StyleSheet.create({
   r4Meta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },
   r4PriceStrip: { flexDirection: "row", gap: 6, marginTop: 8 },
   r4PriceCell: { backgroundColor: color.surface, borderRadius: 10, flex: 1, padding: 8 },
-  r4PriceCellHot: { backgroundColor: "#FFF2C7" },
+  r4PriceCellHot: { backgroundColor: "color.warn" },
   r4PriceLabel: { color: color.muted, fontSize: 11 },
   r4PriceValue: { color: color.ink, fontSize: 11, fontWeight: "800", marginTop: 2 },
   r4Tags: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 8 },
   r4Tag: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
-  r4TagHot: { backgroundColor: "#FFF0F6" },
+  r4TagHot: { backgroundColor: "color.bottomActiveBg" },
   r4TagText: { color: "#5E5665", fontSize: 11 },
   r4TagTextHot: { color: "#B91451", fontWeight: "800" },
   r4Match: { alignItems: "center", borderTopColor: "#F1EDF3", borderTopWidth: 1, flexDirection: "row", gap: 8, justifyContent: "space-between", marginTop: 9, paddingTop: 8 },
   r4MatchText: { color: color.muted, flex: 1, fontSize: 11, lineHeight: 15 },
-  r4FitBadge: { backgroundColor: "#FFF0F6", borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
+  r4FitBadge: { backgroundColor: "color.bottomActiveBg", borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
   r4FitText: { color: "#B91451", fontSize: 11, fontWeight: "800" },
   r4Actions: { flexDirection: "row", gap: 7, marginTop: 9 },
   r4ActionGhost: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, flex: 1, justifyContent: "center", minHeight: 40 },
@@ -2271,8 +2271,8 @@ const styles = StyleSheet.create({
   valueBox: { backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, marginTop: 10, padding: 10 },
   valueHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   valueTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  valueBadge: { backgroundColor: "#FFF2C7", borderRadius: 999, color: "#7A5B00", fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 7, paddingVertical: 4 },
-  valueBar: { backgroundColor: "#EEEAF1", borderRadius: 999, height: 8, marginVertical: 7, overflow: "hidden" },
+  valueBadge: { backgroundColor: "color.warn", borderRadius: 999, color: "color.factUnknownFg", fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 7, paddingVertical: 4 },
+  valueBar: { backgroundColor: "color.appBg", borderRadius: 999, height: 8, marginVertical: 7, overflow: "hidden" },
   valueFill: { backgroundColor: color.magenta, borderRadius: 999, height: "100%" },
   valueText: { color: color.muted, fontSize: 11, lineHeight: 15 },
   factGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
@@ -2282,15 +2282,15 @@ const styles = StyleSheet.create({
   fact: { backgroundColor: color.surface, borderRadius: 10, flexBasis: "48%", flexGrow: 1, padding: 8 },
   factLabel: { color: color.muted, fontSize: 11 },
   factValue: { color: color.ink, fontSize: 11, fontWeight: "700", marginTop: 2 },
-  aiBox: { backgroundColor: "#F1EAFE", borderColor: "#E6DBF8", borderRadius: 15, borderWidth: 1, marginTop: 10, padding: 10 },
+  aiBox: { backgroundColor: "color.factInferredBg", borderColor: "#E6DBF8", borderRadius: 15, borderWidth: 1, marginTop: 10, padding: 10 },
   aiHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   aiTitle: { color: color.ink, fontSize: 11, fontWeight: "800" },
-  aiStrong: { color: "#5B2CB5", fontSize: 11, fontWeight: "800" },
+  aiStrong: { color: "color.factInferredFg", fontSize: 11, fontWeight: "800" },
   aiChecks: { gap: 4, marginTop: 7 },
   aiCheck: { color: "#3E2E5A", fontSize: 11, lineHeight: 15 },
   quoteGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 10 },
   quoteOption: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flexBasis: "48%", flexGrow: 1, padding: 9 },
-  quoteOptionOn: { backgroundColor: "#FFF0F6", borderColor: color.magenta },
+  quoteOptionOn: { backgroundColor: "color.bottomActiveBg", borderColor: color.magenta },
   quotePrice: { color: color.ink, fontSize: 12, fontWeight: "800" },
   quoteSub: { color: color.muted, fontSize: 11, marginTop: 2 },
   detailHint: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 10, textAlign: "center" },
@@ -2342,7 +2342,7 @@ const styles = StyleSheet.create({
   heatToggleText: { color: color.ink, fontSize: 14, fontWeight: "900" },
   heatToggleTextOn: { color: color.white, fontSize: 14, fontWeight: "900" },
   geoLocateError: { backgroundColor: "rgba(255,255,255,0.92)", borderColor: "#E6B100", borderRadius: 10, borderWidth: 1, left: 10, paddingHorizontal: 10, paddingVertical: 6, position: "absolute", right: 10, top: 10 },
-  geoLocateErrorText: { color: "#7A5B00", fontSize: 11, fontWeight: "700" },
+  geoLocateErrorText: { color: "color.factUnknownFg", fontSize: 11, fontWeight: "700" },
   mapRemote: { backgroundColor: "#F7F4FA", borderColor: "#D8CFDE", borderRadius: 13, borderStyle: "dashed", borderWidth: 1, marginTop: 8, padding: 10 },
   mapRemoteText: { color: color.muted, fontSize: 11, lineHeight: 15 },
   mapResult: { backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, marginTop: 8, padding: 10 },

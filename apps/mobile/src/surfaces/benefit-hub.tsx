@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { styles } from "./me-styles";
 import { sessionAuthClient } from "../native-clients";
 import { BenefitClient, BenefitError, type Campaign } from "../benefit-client";
 import { BenefitClaimScreen } from "./BenefitClaimScreen";
+import { ProxyLoading } from "../components/proxy-foundation";
 
 // BENEFIT-WIRE-001: 把已经写好但没人调用的权益链路接进 App。
 //
@@ -78,7 +79,7 @@ export function BenefitHubSurface({ onBack }: { onBack: () => void }): React.JSX
 
       {busy && campaigns === null ? (
         <View style={{ paddingVertical: 18, alignItems: "center" }}>
-          <ActivityIndicator />
+          <ProxyLoading tone="muted" />
         </View>
       ) : null}
 

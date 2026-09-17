@@ -2,9 +2,10 @@
 // PRD Chapter21D：ObservationSet → Delta → Learning
 // 接线：OutcomeClient 真实命令链（CreateSet / Record / Finalize / Compare / Confirm），非 ComingSoon 占位
 import { useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { color, shadows } from "../theme";
 import type { OutcomeClient } from "../outcome-client";
+import { ProxyLoading } from "../components/proxy-foundation";
 
 export function OutcomeSurface({ client }: { client: OutcomeClient }): React.JSX.Element {
   // 三个 ID 必须手填真实值：之前默认 target_demo / tpl_v1 / venue_001，
@@ -59,7 +60,7 @@ export function OutcomeSurface({ client }: { client: OutcomeClient }): React.JSX
         <Text style={styles.logTitle}>执行日志</Text>
         {log.length === 0 ? <Text style={styles.empty}>点上方按钮触发 CreateSet → Finalize → Compare</Text> : null}
         {log.map((l, i) => <Text key={i} style={styles.logLine}>• {l}</Text>)}
-        {busy ? <ActivityIndicator style={{ marginTop: 8 }} /> : null}
+        {busy ? <ProxyLoading tone="muted" style={{ marginTop: 8 }} /> : null}
       </View>
       <Text style={styles.hint}>说明：Outcome 域已 PG 化（apps/api-go/internal/outcome + postgres/outcome.go），本页直接复用 List/Compare 真实命令，失败会以 REJECTED 抛错展示。</Text>
     </ScrollView>

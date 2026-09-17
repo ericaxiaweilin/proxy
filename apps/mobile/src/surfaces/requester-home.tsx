@@ -1297,7 +1297,7 @@ const styles = StyleSheet.create({
   gridImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 18, height: "100%", justifyContent: "center", width: "100%" },
   gridGlyph: { color: color.muted, fontSize: 30 },
   gridOverlay: { bottom: 0, gap: 1, left: 0, padding: 10, position: "absolute", right: 0 },
-  gridLabel: { color: "#ffffff", fontSize: 13, fontWeight: "800", textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 5 },
+  gridLabel: { color: "color.white", fontSize: 13, fontWeight: "800", textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 5 },
   gridLabelDark: { color: color.ink, textShadowColor: "transparent" },
   gridSub: { color: "rgba(255,255,255,0.85)", fontSize: 11, textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 5 },
   gridSubDark: { color: color.muted, textShadowColor: "transparent" },

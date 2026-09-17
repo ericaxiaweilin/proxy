@@ -148,3 +148,42 @@ describe("Proxy Design System R3 typography", () => {
     }
   });
 });
+
+describe("DESIGN-CLEANUP-001 token discipline and shared primitives", () => {
+  const readSrc = (rel: string): string => readFileSync(join(sourceRoot, rel), "utf8");
+
+  it("exports ProxyLoading and ProxyEmptyState from the foundation", () => {
+    const foundation = readSrc("components/proxy-foundation.tsx");
+    expect(foundation).toContain("export function ProxyLoading");
+    expect(foundation).toContain("export function ProxyEmptyState");
+    // tone 必须显式传 —— 默认蒙混会把灰点染成品牌色。
+    expect(foundation).toContain('tone: LoadingTone;');
+    expect(foundation).toContain('"brand" | "onDark" | "onLight" | "violet" | "muted"');
+  });
+
+  it("keeps fully-migrated files free of hardcoded hex", () => {
+    // 这 4 个文件已清零：再出现硬编码就是新欠账。其他文件仍有 B/C 档调色板，
+    // 等设计拍板后再收，不在这里一刀切。
+    for (const rel of [
+      "components/registry.tsx",
+      "components/TooltipOnLongPress.tsx",
+      "surfaces/order-execution.tsx",
+      "surfaces/outcome.tsx",
+    ]) {
+      const source = readSrc(rel).replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+      expect(source, `${rel} 又出现硬编码 hex`).not.toMatch(/#[0-9a-fA-F]{6}\b/);
+    }
+  });
+
+  it("keeps the dead order-type-logos assets deleted", () => {
+    expect(statSync(join(sourceRoot, "assets", "order-type-logos"), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it("keeps superseded references out of the active baseline", () => {
+    const baseline = JSON.parse(readFileSync(join(sourceRoot, "..", "..", "..", "docs", "design", "CURRENT_BASELINE.json"), "utf8")) as {
+      screenReferences: Array<{ scope: string; status: string }>;
+    };
+    const zombies = baseline.screenReferences.filter((s) => s.status.startsWith("SUPERSEDED"));
+    expect(zombies.map((s) => s.scope)).toEqual([]);
+  });
+});

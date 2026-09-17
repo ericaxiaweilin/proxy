@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, Text, TextInput, View } from "react-native";
 import { color } from "../theme";
 import { styles } from "./me-styles";
 import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
@@ -11,6 +11,7 @@ import {
   type StoreRecommendationOrigin,
   type StoreRecommendationQueueStatus
 } from "../storeonboarding-client";
+import { ProxyLoading } from "../components/proxy-foundation";
 
 // STORE-REC-002/004: 运营评估队列（App 内）。
 //
@@ -240,7 +241,7 @@ export function StoreRecommendationQueue(): React.JSX.Element {
 
       {busy && rows === null ? (
         <View style={{ paddingVertical: 18, alignItems: "center" }}>
-          <ActivityIndicator />
+          <ProxyLoading tone="muted" />
         </View>
       ) : null}
 

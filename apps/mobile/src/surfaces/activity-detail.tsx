@@ -1,7 +1,7 @@
 // ACTIVITY_DETAIL — 活动详情去占位化
 // 接线：ActivityClient.listActivities 真实列表 + ToggleInterest / Join
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { color, shadows } from "../theme";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
@@ -9,6 +9,7 @@ import { activityAIDisclosure, activityMoneySummary } from "./activity-detail-mo
 // COMP-REPORT-002: 活动与（商家主办的）主办商家都要可举报。
 import { ReportSheet } from "../components/report-sheet";
 import { activityReportTargets, type ModerationClient, type ReportTarget } from "../moderation-client";
+import { ProxyLoading } from "../components/proxy-foundation";
 
 // R17.x persona 色：与 tasks.tsx personaColorStyle 同源（ai_001=紫/002=粉/
 // 003=绿/004=橙/005=金）。tasks 侧为 canonical；这里仅为明细页封面
@@ -110,7 +111,7 @@ export function ActivityDetailSurface({ client, moderation, initialActivityId, o
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
       <Text style={styles.title}>活动详情</Text>
       <Text style={styles.sub}>来自 Activity 真实读模型，非占位。</Text>
-      {items === undefined && !error ? <ActivityIndicator /> : null}
+      {items === undefined && !error ? <ProxyLoading tone="muted" /> : null}
       {error ? <View style={styles.card}><Text style={styles.empty}>加载失败：{error}</Text></View> : null}
       {items?.map((a) => (
         <Pressable key={a.activityId} onPress={() => setSelected(a)} style={styles.card}>

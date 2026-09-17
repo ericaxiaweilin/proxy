@@ -1,10 +1,11 @@
 // BenefitRedeemScreen — merchant/staff scan and confirm benefit redemption.
 // R0: Simple scan → verify → confirm flow.
 import { useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { color } from "../theme";
 import type { Redemption } from "../benefit-client";
 import { BenefitClient } from "../benefit-client";
+import { ProxyLoading } from "../components/proxy-foundation";
 
 type Screen = "SCAN" | "CONFIRM" | "SUCCESS" | "ERROR";
 
@@ -93,7 +94,7 @@ export function BenefitRedeemScreen({
         />
       </View>
 
-      {busy ? <ActivityIndicator color={color.magenta} style={styles.spinner} /> : null}
+      {busy ? <ProxyLoading tone="brand" style={styles.spinner} /> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <Pressable

@@ -28,10 +28,11 @@
 import MapView, { Circle, Marker, type LatLng, type Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { CITY_BOUNDS, GRID_W, GRID_H, type GridCoord, gridToLatLng } from "./location-options";
 import { ProxyIcon } from "./proxy-icon";
 import { color } from "../theme";
+import { ProxyLoading } from "./proxy-foundation";
 
 export interface MapCanvasProps {
   // 初始 pin 位置（grid coord）。0,0 = 城市西北角；
@@ -311,7 +312,7 @@ export function MapCanvas({
           style={({ pressed }) => [styles.locButton, pressed && styles.locButtonPressed, locBusy && styles.locButtonBusy]}
         >
           {locBusy ? (
-            <ActivityIndicator color={color.ink} size="small" />
+            <ProxyLoading tone="onLight" size="small" />
           ) : (
             <ProxyIcon color={color.ink} name="route" size={14} />
           )}

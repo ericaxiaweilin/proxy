@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import {
+  ActivityIndicator,
   Image,
   Pressable,
   StyleSheet,
@@ -10,7 +11,8 @@ import {
   type TextStyle,
   type ViewStyle
 } from "react-native";
-import { foundation } from "../theme";
+import { color, foundation } from "../theme";
+import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
 
 type ButtonTone = "primary" | "secondary" | "ghost" | "danger";
 
@@ -147,6 +149,78 @@ export function ProxySwitch({
   );
 }
 
+// DESIGN-CLEANUP-001: 全 App 唯一的加载指示。之前 25 个文件各自直接调 RN
+// ActivityIndicator，颜色尺寸全凭手感 —— 9 处传 magenta 是事实默认色，
+// 其余 ink/white/violet/默认灰各写各的。
+//
+// tone 语义（迁移时必须显式传，不许靠默认蒙混过关）：
+//   brand  = color.magenta（原来就传 magenta 的那些，原样）
+//   onDark = color.white（原来传 white 的）
+//   onLight = color.ink（原来传 ink 的）
+//   violet = color.violet（只有 native-app 法务忙态一处，原样保留）
+//   muted  = color.muted（原来**不传色**吃系统默认灰的那些 —— 系统灰和 muted
+//            差一个色阶，统一比精确值钱，这里白纸黑字写出来）
+// size 默认 small：RN 的 ActivityIndicator 默认就是 small，原来 40 处里只有
+// 2 处显式 small、0 处 large —— 默认值必须和小的一致，否则全屏一起变大。
+// label 只有一处在用（native-app 法务“加载中…”），样式照抄它那份，一字不差。
+export type LoadingTone = "brand" | "onDark" | "onLight" | "violet" | "muted";
+const loadingToneColor: Record<LoadingTone, string> = {
+  brand: color.magenta,
+  onDark: color.white,
+  onLight: color.ink,
+  violet: color.violet,
+  muted: color.muted,
+};
+export function ProxyLoading({
+  size = "small",
+  tone,
+  label,
+  style
+}: {
+  size?: "small" | "large";
+  tone: LoadingTone;
+  label?: string;
+  style?: StyleProp<ViewStyle>;
+}): React.JSX.Element {
+  const indicator = <ActivityIndicator color={loadingToneColor[tone]} size={size} style={style} />;
+  if (label === undefined) return indicator;
+  return (
+    <View style={styles.loadingLabelWrap}>
+      {indicator}
+      <Text style={styles.loadingLabel}>{label}</Text>
+    </View>
+  );
+}
+
+// DESIGN-CLEANUP-001: 全 App 唯一的整块空态。原型是 ProfileTabs 自己的
+// EmptyState({title, sub})（用了 8 处），但它把颜色写成了 Tailwind 外来色
+//（#0f172a/#94a3b8），提升时换成 ink/muted —— 不许原样复制。
+// icon/cta 可选：7 个迁移点里只有 merchant-storefront 用到，别的别传。
+export function ProxyEmptyState({
+  icon,
+  title,
+  sub,
+  cta
+}: {
+  icon?: ProxyIconName;
+  title: string;
+  sub?: string;
+  cta?: { label: string; onPress: () => void; disabled?: boolean };
+}): React.JSX.Element {
+  return (
+    <View style={styles.empty}>
+      {icon !== undefined ? <ProxyIcon color={foundation.muted} name={icon} size={28} /> : null}
+      <Text style={styles.emptyTitle}>{title}</Text>
+      {sub !== undefined ? <Text style={styles.emptySub}>{sub}</Text> : null}
+      {cta !== undefined ? (
+        <View style={styles.emptyCta}>
+          <ProxyButton disabled={cta.disabled ?? false} onPress={cta.onPress}>{cta.label}</ProxyButton>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   avatar: { alignItems: "center", backgroundColor: foundation.surfaceSecondary, borderColor: foundation.line, borderRadius: foundation.radius.full, borderWidth: 1, justifyContent: "center", overflow: "hidden" },
   avatarFallback: { color: foundation.ink, fontSize: foundation.text.sm, fontWeight: "800" },
@@ -169,5 +243,11 @@ const styles = StyleSheet.create({
   switch: { backgroundColor: foundation.surfaceSecondary, borderColor: foundation.line, borderRadius: foundation.radius.full, borderWidth: 1, height: 28, justifyContent: "center", padding: 3, width: 46 },
   switchOn: { backgroundColor: foundation.ink, borderColor: foundation.ink },
   switchKnob: { backgroundColor: foundation.surface, borderColor: foundation.line, borderRadius: foundation.radius.full, borderWidth: 1, height: 20, width: 20 },
-  switchKnobOn: { transform: [{ translateX: 18 }] }
+  switchKnobOn: { transform: [{ translateX: 18 }] },
+  loadingLabelWrap: { alignItems: "center" },
+  loadingLabel: { color: color.muted, fontSize: 13, marginTop: 8 },
+  empty: { alignItems: "center", paddingHorizontal: 32, paddingVertical: 48 },
+  emptyTitle: { color: foundation.ink, fontSize: 15, fontWeight: "700", marginBottom: 4, textAlign: "center" },
+  emptySub: { color: foundation.muted, fontSize: 12, textAlign: "center" },
+  emptyCta: { marginTop: 12 }
 });

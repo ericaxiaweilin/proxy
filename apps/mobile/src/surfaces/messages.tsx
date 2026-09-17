@@ -1124,7 +1124,7 @@ const styles = StyleSheet.create({
   convoPreview: { marginTop: 9, fontSize: 12.5, lineHeight: 18, color: "#68645e" },
   convoFoot: { flexDirection: "row", alignItems: "center", marginTop: 9 },
   convoFootText: { flex: 1, fontSize: 11, color: "#99958d" },
-  convoFolderAction: { fontSize: 11, fontWeight: "800", color: "#5B2CB5" },
+  convoFolderAction: { fontSize: 11, fontWeight: "800", color: "color.factInferredFg" },
   convoFootTime: { fontSize: 11, fontWeight: "700", color: "#54514b" },
   topbar: { height: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "rgba(255,253,248,0.98)" },
   centerTitle: { flex: 1, alignItems: "center" },

@@ -1,16 +1,17 @@
 // BenefitClaimScreen — shows available benefits and handles claiming.
 // R0: Simple claim flow — view benefit → claim → show QR token for merchant scan.
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { color } from "../theme";
 import type { Campaign, BenefitDefinition, Claim } from "../benefit-client";
 import { BenefitClient } from "../benefit-client";
+import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
 
 type Screen = "LIST" | "DETAIL" | "CLAIMED" | "ERROR";
 
 const CAMPAIGN_LABELS: Record<string, { label: string; color: string }> = {
   SCENE_IGNITION: { label: "场景点火", color: "#E85D3A" },
-  CREATOR_SEED: { label: "创作者种子", color: "#7C3AED" },
+  CREATOR_SEED: { label: "创作者种子", color: "color.proxyPurple" },
   NEW_TO_SCENE: { label: "新客到店", color: "#059669" },
   REACTIVATION: { label: "召回沉默", color: "#D97706" },
   NEWCOMER: { label: "新城市", color: "#2563EB" },
@@ -176,7 +177,7 @@ export function BenefitClaimScreen({
         <Text style={styles.title}>可用权益</Text>
       </View>
 
-      {busy ? <ActivityIndicator color={color.magenta} style={styles.spinner} /> : null}
+      {busy ? <ProxyLoading tone="brand" style={styles.spinner} /> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {campaign ? (
@@ -198,13 +199,7 @@ export function BenefitClaimScreen({
       ))}
 
       {!busy && benefits.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>暂无可用权益</Text>
-          <Text style={styles.emptyText}>该活动暂无面向您的权益（权益目录 R1 接入）</Text>
-          <Pressable onPress={() => void loadCampaign()} style={styles.retryButton}>
-            <Text style={styles.retryText}>重新加载</Text>
-          </Pressable>
-        </View>
+        <ProxyEmptyState title="暂无可用权益" sub="该活动暂无面向您的权益（权益目录 R1 接入）" cta={{ label: "重新加载", onPress: () => void loadCampaign() }} />
       ) : null}
 
       {myClaims.length > 0 ? (
@@ -275,8 +270,6 @@ const styles = StyleSheet.create({
   empty: { alignItems: "center", paddingVertical: 48 },
   emptyTitle: { fontSize: 16, fontWeight: "600", color: color.ink, marginBottom: 8 },
   emptyText: { fontSize: 13, color: "#9CA3AF" },
-  retryButton: { backgroundColor: color.magenta, borderRadius: 8, marginTop: 12, paddingHorizontal: 20, paddingVertical: 10 },
-  retryText: { color: "#FFF", fontSize: 14, fontWeight: "600" },
   sectionTitle: { fontSize: 14, fontWeight: "700", color: color.ink, marginBottom: 8, marginTop: 8 },
   claimRow: { backgroundColor: "#FFF", borderRadius: 10, marginBottom: 8, padding: 12 },
   claimRowTitle: { fontSize: 13, fontWeight: "700", color: color.ink },
