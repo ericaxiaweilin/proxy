@@ -29,9 +29,19 @@ describe("SCENE-HUMANS-001 scene people show a round avatar, name and order avai
 
   it("keeps tap-to-select for the invite chain", () => {
     // 点按＝选中邀约对象：DIRECT_INVITE 找不到人会报“请先选择要邀请的真人”。
-    // 改成跳个人主页就断了这条链，所以选中态（边框＋✓ 已选择）必须留。
+    // 改成跳个人主页就断了这条链，所以选中态（紫环＋✓ 已选择）必须留。
     expect(mapCode).toContain("onPress={() => setSelectedHumanId(human.id)}");
     expect(mapCode).toContain("✓ 已选择");
-    expect(mapCode).toContain("humanCardSelected");
+    expect(mapCode).toContain("humanRingSelected");
+  });
+});
+
+describe("SCENE-HUMANS-002 people are bare round heads, no white card", () => {
+  it("drops the card wrapper and enlarges the circle", () => {
+    // 白卡片（humanCard）整个拿掉：纯圆头 64＋名字＋可约状态居中。
+    // 卡片回来就等于把方形块又套回来了。
+    expect(mapCode).not.toContain("styles.humanCard");
+    expect(mapCode).toContain("size={64}");
+    expect(mapCode).toContain("styles.humanPlain");
   });
 });

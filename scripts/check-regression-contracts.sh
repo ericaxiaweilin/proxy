@@ -6395,3 +6395,20 @@ if ! grep -q 'onPress={() => setSelectedHumanId(human.id)}' apps/mobile/src/surf
 fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-humans.test.ts || exit $?
 echo "    SCENE-HUMANS-001: PASS (round avatar, name and order availability only)"
+
+# SCENE-HUMANS-002: 纯圆头 rail，不要白卡片 —— 圆头放大到 64，名字 + 可约居中，
+# 选中态改走头像外圈紫环（卡片删了，边框无处可画）。
+if ! grep -q 'size={64}' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'humanRingSelected' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'SCENE-HUMANS-002' apps/mobile/src/scene-humans.test.ts; then
+  echo "  FAIL [SCENE-HUMANS-002]: 圆头被改小或选中环丢了 ——" >&2
+  exit 1
+fi
+# 反向钉：白卡片不许回来（humanCard 一出现就等于把方形块又套回去了）。
+if grep -q 'styles.humanCard' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-HUMANS-002]: 白卡片又套回来了 ——" >&2
+  echo "        只要纯圆头。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/scene-humans.test.ts || exit $?
+echo "    SCENE-HUMANS-002: PASS (bare big round heads, ring selection, no card)"
