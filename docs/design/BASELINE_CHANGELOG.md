@@ -60,6 +60,16 @@ same commit. Do not record routine business logic changes here.
     `apps/mobile/src/surfaces/reality-scene-map.tsx`（场景进度块）。
     复用既有卡片语言与徽章 emoji，无主题 token 改动。
 
+## Revision 230 — 2026-09-17
+
+- UNREAD-PIPELINE-001（未读徽标真管线＋删在线圆点）：会话列表的未读徽标
+  以前永远不亮（没映射），在线圆点全仓无数据源。现服务端按阅读位算未读数
+  下发，打开会话标一次已读；在线圆点直接删除（presence 系统另立项）。
+  - **基线敏感文件**：`cmd/api/main.go`（阅读位仓接线，一行）、
+    `conversation-client.ts`（`markDialogRead` 方法）、`conversation.tsx`
+    （首次加载后上报）。`messages.tsx` 的改动是同文件徽标映射与删圆点。
+    无主题 token 改动、无列表结构改动（徽标是既有样式）。
+
 ## Revision 226 — 2026-09-17
 
 - NOTIF-INVITE-OFFER-001（邀请卡片删“询问”按钮）：点它只是把邀请状态从
