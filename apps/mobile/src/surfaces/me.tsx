@@ -1897,7 +1897,6 @@ export function MeSurface({
                   <ProxyIcon color={color.violet} name="route" size={20} />
                   <View style={styles.personalSceneCopy}>
                     <Text style={styles.personalSceneTitle}>场景足迹</Text>
-                    <Text style={styles.personalSceneSub}>历史公开记录与私人计划 · 非实时位置</Text>
                   </View>
                   <Text style={styles.personalSceneChevron}>›</Text>
                 </Pressable>

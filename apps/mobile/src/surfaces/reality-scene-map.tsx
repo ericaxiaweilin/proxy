@@ -743,7 +743,6 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
           <DataRow label="开放时间" value={selected.best} />
           <DataRow label="场景动态" value={sceneCountsLine(selected)} />
           {visitedAt.get(selected.id) ? <DataRow label="最近足迹" value={new Date(visitedAt.get(selected.id)!).toLocaleString()} /> : null}
-          <DataRow label="隐私" value="历史公开记录 · 非实时位置" last />
         </View>
         <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>Reality Evidence · Scene Memory</Text></View>
         <View style={styles.memoryCard}><Text style={styles.memoryTitle}>{visited.has(selected.id) ? "已私人标记去过" : "暂无已核验现实记录"}</Text><Text style={styles.memoryText}>{visited.has(selected.id) ? "这只是你的私人足迹标记；完成订单、现场核销或上传并通过审核的证据，才会写入 Scene Memory。" : "完成订单、现场核销或上传并通过审核的证据后，这里才会沉淀同行人、消费项目、内容与关系变化。"}</Text></View>
@@ -852,7 +851,6 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         <Pressable onPress={() => setBadgesOpen(false)} style={styles.badgeScrim}>
           <View style={styles.badgeCard}>
             <Text style={styles.badgeTitle}>打卡徽章</Text>
-            <Text style={styles.badgeSub}>走到现场、集类别、留足迹 —— 每一样都算数。</Text>
             {badgesError ? <Text style={styles.nearbyError}>{badgesError}</Text> : null}
             {/* SCENE-BADGE-002：可分享的徽章卡摘要（截图目标）。 */}
             <View ref={badgeShareRef} collapsable={false} style={styles.badgeShareCard}>
