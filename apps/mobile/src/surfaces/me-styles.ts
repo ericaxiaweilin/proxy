@@ -2,8 +2,8 @@ import { StyleSheet } from "react-native";
 import { color, shadows } from "../theme";
 
 export const styles = StyleSheet.create({
-  personalSceneEntry: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderRadius: 16, flexDirection: "row", gap: 10, marginTop: 10, paddingHorizontal: 13, paddingVertical: 12 },
-  personalSceneCopy: { flex: 1 },
+  personalSceneEntry: { alignItems: "center", alignSelf: "flex-start", backgroundColor: color.proxyPurpleSoft, borderRadius: 16, flexDirection: "row", gap: 10, marginTop: 10, paddingHorizontal: 13, paddingVertical: 12 },
+  personalSceneCopy: { flexDirection: "row", alignItems: "center", gap: 10 },
   personalSceneTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
   personalSceneSub: { color: color.muted, fontSize: 11, marginTop: 2 },
   personalSceneChevron: { color: color.muted, fontSize: 23 },
