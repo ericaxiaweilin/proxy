@@ -854,6 +854,17 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             <Text style={styles.badgeTitle}>打卡徽章</Text>
             <Text style={styles.badgeSub}>走到现场、集类别、留足迹 —— 每一样都算数。</Text>
             {badgesError ? <Text style={styles.nearbyError}>{badgesError}</Text> : null}
+            {/* SCENE-BADGE-002：可分享的徽章卡摘要（截图目标）。 */}
+            <View ref={badgeShareRef} collapsable={false} style={styles.badgeShareCard}>
+              <Text style={styles.badgeShareBrand}>Proxy · 场景打卡</Text>
+              <Text style={styles.badgeShareCount}>已获得 {earnedBadges.size} / {SCENE_BADGES.length} 枚徽章</Text>
+              <View style={styles.badgeShareIcons}>
+                {SCENE_BADGES.map((b) => (
+                  <Text key={b.id} style={[styles.badgeShareIcon, !earnedBadges.has(b.id) && styles.badgeShareIconLocked]}>{earnedBadges.has(b.id) ? b.icon : "🔒"}</Text>
+                ))}
+              </View>
+            </View>
+            {badgeShareNotice ? <Text style={styles.nearbyError}>{badgeShareNotice}</Text> : null}
             <ScrollView style={styles.badgeList}>
               {SCENE_BADGES.map((badge) => {
                 const earned = earnedBadges.has(badge.id);
@@ -868,6 +879,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
                 );
               })}
             </ScrollView>
+            <Pressable onPress={() => void shareBadgeCard()} style={styles.badgeShareBtn}><Text style={styles.badgeShareBtnText}>分享徽章卡</Text></Pressable>
             <Pressable onPress={() => setBadgesOpen(false)} style={styles.badgeClose}><Text style={styles.badgeCloseText}>关闭</Text></Pressable>
           </View>
         </Pressable>
@@ -1020,6 +1032,14 @@ const styles = StyleSheet.create({
   badgeName: { color: "color.ink", fontSize: 14, fontWeight: "800" },
   badgeNameLocked: { color: "#77726B", fontWeight: "700" },
   badgeDesc: { color: "#77726B", fontSize: 11, lineHeight: 15, marginTop: 2 },
+  badgeShareCard: { backgroundColor: "#FFF8EC", borderColor: "#F0DFC0", borderRadius: 14, borderWidth: 1, marginTop: 10, padding: 12 },
+  badgeShareBrand: { color: "#7A4E0F", fontSize: 11, fontWeight: "900", letterSpacing: 0.5 },
+  badgeShareCount: { color: "#17131F", fontSize: 15, fontWeight: "900", marginTop: 3 },
+  badgeShareIcons: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  badgeShareIcon: { fontSize: 22 },
+  badgeShareIconLocked: { opacity: 0.28 },
+  badgeShareBtn: { alignItems: "center", backgroundColor: "#F4F0FF", borderColor: "#E5DCF5", borderRadius: 999, borderWidth: 1, marginTop: 10, paddingVertical: 10 },
+  badgeShareBtnText: { color: "#5B3FA3", fontSize: 13, fontWeight: "800" },
   badgeClose: { alignItems: "center", backgroundColor: "color.ink", borderRadius: 999, marginTop: 12, paddingVertical: 11 },
   badgeCloseText: { color: "color.white", fontSize: 13, fontWeight: "800" }
 });
