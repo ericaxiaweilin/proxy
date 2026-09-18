@@ -854,7 +854,6 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             {badgesError ? <Text style={styles.nearbyError}>{badgesError}</Text> : null}
             {/* SCENE-BADGE-002：可分享的徽章卡摘要（截图目标）。 */}
             <View ref={badgeShareRef} collapsable={false} style={styles.badgeShareCard}>
-              <Text style={styles.badgeShareBrand}>Proxy · 场景打卡</Text>
               <Text style={styles.badgeShareCount}>已获得 {earnedBadges.size} / {SCENE_BADGES.length} 枚徽章</Text>
               <View style={styles.badgeShareIcons}>
                 {SCENE_BADGES.map((b) => (
@@ -871,7 +870,6 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
                     <Text style={styles.badgeIcon}>{badge.icon}</Text>
                     <View style={styles.badgeCopy}>
                       <Text style={[styles.badgeName, !earned && styles.badgeNameLocked]}>{badge.name}{earned ? " ✓" : ""}</Text>
-                      <Text style={styles.badgeDesc}>{badge.desc}</Text>
                     </View>
                   </View>
                 );
