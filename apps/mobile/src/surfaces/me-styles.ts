@@ -875,8 +875,8 @@ export const styles = StyleSheet.create({
   personalTopbarTools: { flexDirection: "row", gap: 5 },
   personalTopbarIconBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
 
-  personalHead: { flexDirection: "column", alignItems: "flex-start", gap: 10, paddingHorizontal: 18, paddingTop: 7 },
-  personalNameBlock: { minWidth: 0 },
+  personalHead: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 16, paddingHorizontal: 18, paddingTop: 7 },
+  personalNameBlock: { flex: 1, minWidth: 0 },
   personalName: { color: color.ink, fontSize: 24, fontWeight: "800", letterSpacing: -0.96, lineHeight: 28 },
   personalHandleSub: { color: "#444", fontSize: 11, marginTop: 4 },
   personalAvaWrap: { position: "relative", width: 82, height: 82, justifyContent: "flex-end" },
@@ -888,6 +888,8 @@ export const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center"
   },
 
+  personalIntroRow: { alignItems: "center", flexDirection: "row", gap: 12, paddingHorizontal: 18, paddingTop: 10 },
+  personalIntroText: { color: color.ink, flex: 1, fontSize: 11, lineHeight: 16 },
   personalBio: { paddingHorizontal: 18, marginTop: 13 },
   personalBioText: { color: color.ink, fontSize: 11, lineHeight: 16 },
   personalLinkRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 8 },
@@ -897,11 +899,10 @@ export const styles = StyleSheet.create({
   personalTopicPill: { borderWidth: 1, borderColor: "#e1e1e1", backgroundColor: "#fff", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   personalTopicText: { color: "#333", fontSize: 11, fontWeight: "600" },
 
-  personalStat: { marginTop: 12, paddingHorizontal: 18 },
+  personalStatRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 15, marginTop: 12 },
   personalStatText: { color: "#8c8c8c", fontSize: 11 },
   personalStatValue: { color: "#111", fontWeight: "800" },
 
-  personalFollowersRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 11, paddingHorizontal: 18, marginBottom: 15 },
   personalFollowersCount: { color: "#7f7f7f", fontSize: 11 },
   personalFollowersValue: { color: "#111", fontWeight: "800" },
   personalActions: { flexDirection: "row", gap: 8, marginTop: 16 },

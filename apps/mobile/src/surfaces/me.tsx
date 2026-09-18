@@ -1868,10 +1868,10 @@ export function MeSurface({
               <Text numberOfLines={1} style={styles.personalTopbarHandle}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
               <View style={styles.personalTopbarTools}>
                 <Pressable accessibilityLabel="分析" style={styles.personalTopbarIconBtn} onPress={() => setInsightsSheetOpen(true)}>
-                  <ProxyIcon name="ring" color={color.ink} size={20} />
+                  <ProxyIcon name="chart" color={color.ink} size={20} />
                 </Pressable>
                 <Pressable accessibilityLabel="搜索" style={styles.personalTopbarIconBtn} onPress={() => { setSearchQuery(""); setProfileSearchResults(undefined); setSearchSheetOpen(true); }}>
-                  <ProxyIcon name="crosshair" color={color.ink} size={20} />
+                  <ProxyIcon name="search" color={color.ink} size={20} />
                 </Pressable>
                 <Pressable accessibilityLabel="更多" style={styles.personalTopbarIconBtn} onPress={() => setSettingsSheetOpen(true)}>
                   <ProxyIcon name="settings" color={color.ink} size={20} />
@@ -1894,18 +1894,20 @@ export function MeSurface({
                 </Pressable>
               </View>
             </View>
-            {onOpenRealitySceneMap ? (
-              <Pressable onPress={onOpenRealitySceneMap} style={[styles.personalSceneEntry, { marginHorizontal: 18 }]}>
-                <ProxyIcon color={color.violet} name="route" size={20} />
-                <View style={styles.personalSceneCopy}>
-                  <Text style={styles.personalSceneTitle}>场景足迹</Text>
-                </View>
-                <Text style={styles.personalSceneChevron}>›</Text>
-              </Pressable>
-            ) : null}
+            <View style={styles.personalIntroRow}>
+              {onOpenRealitySceneMap ? (
+                <Pressable onPress={onOpenRealitySceneMap} style={styles.personalSceneEntry}>
+                  <ProxyIcon color={color.violet} name="route" size={20} />
+                  <View style={styles.personalSceneCopy}>
+                    <Text style={styles.personalSceneTitle}>场景足迹</Text>
+                  </View>
+                  <Text style={styles.personalSceneChevron}>›</Text>
+                </Pressable>
+              ) : null}
+              <Text numberOfLines={2} style={styles.personalIntroText}>{profileDraft.bio || "介绍一下自己吧"}</Text>
+            </View>
 
             <View style={styles.personalBio}>
-              <Text style={styles.personalBioText}>{profileDraft.bio || "介绍一下自己吧"}</Text>
               <View style={styles.personalLinkRow}>
                 <ProxyIcon name="arrowUpRight" color="#666" size={12} />
                 <Text style={styles.personalLinkText}>{profileDraft.handle.startsWith("@") ? profileDraft.handle.slice(1) : profileDraft.handle}</Text>
@@ -1918,12 +1920,10 @@ export function MeSurface({
                   ));
                 })()}
               </View>
-              <View style={styles.personalStat}>
+              <View style={styles.personalStatRow}>
                 <Text style={styles.personalStatText}>
                   <Text style={styles.personalStatValue}>—</Text> 次浏览 · 最近 30 天 ›
                 </Text>
-              </View>
-              <View style={styles.personalFollowersRow}>
                 {/* FOLLOWER-FACES-001: 以前这里是三个写死的字母头像（M/A/L），不管谁
                     关注都长一个样 —— 数字是真的，脸是假的。最近关注者列表接口还没
                     有（只有计数），先把假脸拿掉只留真数字，不拿装饰冒充真人预览。 */}
