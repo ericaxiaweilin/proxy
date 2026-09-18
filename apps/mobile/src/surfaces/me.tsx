@@ -1880,10 +1880,6 @@ export function MeSurface({
             </View>
 
             <View style={styles.personalHead}>
-              <View style={styles.personalNameBlock}>
-                <Text numberOfLines={1} style={styles.personalName}>{profileDraft.name}</Text>
-                <Text numberOfLines={1} style={styles.personalHandleSub}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
-              </View>
               <View style={styles.personalAvaWrap}>
                 <View style={styles.personalAva}>
                   {profileAvatarUri ? <CircularAvatarImage accessibilityLabel={`${profileDraft.name}头像`} size={82} uri={profileAvatarUri} /> : <Text style={styles.personalAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
@@ -1891,6 +1887,10 @@ export function MeSurface({
                 <Pressable accessibilityLabel="更换头像" onPress={() => void chooseProfileAvatar()} style={styles.personalAvaAdd}>
                   <ProxyIcon name="plus" color="#333" size={15} />
                 </Pressable>
+              </View>
+              <View style={styles.personalNameBlock}>
+                <Text numberOfLines={1} style={styles.personalName}>{profileDraft.name}</Text>
+                <Text numberOfLines={1} style={styles.personalHandleSub}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
               </View>
               {onOpenRealitySceneMap ? (
                 <Pressable onPress={onOpenRealitySceneMap} style={styles.personalSceneEntry}>

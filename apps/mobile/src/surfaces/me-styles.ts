@@ -875,8 +875,8 @@ export const styles = StyleSheet.create({
   personalTopbarTools: { flexDirection: "row", gap: 5 },
   personalTopbarIconBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
 
-  personalHead: { flexDirection: "row", alignItems: "flex-start", gap: 16, paddingHorizontal: 18, paddingTop: 7 },
-  personalNameBlock: { flex: 1, minWidth: 0 },
+  personalHead: { flexDirection: "column", alignItems: "flex-start", gap: 10, paddingHorizontal: 18, paddingTop: 7 },
+  personalNameBlock: { minWidth: 0 },
   personalName: { color: color.ink, fontSize: 24, fontWeight: "800", letterSpacing: -0.96, lineHeight: 28 },
   personalHandleSub: { color: "#444", fontSize: 11, marginTop: 4 },
   personalAvaWrap: { position: "relative", width: 82, height: 82, justifyContent: "flex-end" },
