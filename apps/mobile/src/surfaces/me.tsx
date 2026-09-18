@@ -1879,29 +1879,30 @@ export function MeSurface({
               </View>
             </View>
 
+            {/* PERSONAL-PROFILE-PARITY-001: 参考稿 (Threads R2 本人视角) 是
+                名字在左、头像在右的一行；场景徽章功能本身参考稿里不存在，
+                场景足迹入口不该挤进这一行跟头像/名字抢位置——拆成头像行
+                下面单独一块，跟参考稿的头部密度对齐。 */}
             <View style={styles.personalHead}>
-              <View style={styles.personalAvaWrap}>
-                <View style={styles.personalAva}>
-                  {profileAvatarUri ? <CircularAvatarImage accessibilityLabel={`${profileDraft.name}头像`} size={82} uri={profileAvatarUri} /> : <Text style={styles.personalAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
-                </View>
-                <Pressable accessibilityLabel="更换头像" onPress={() => void chooseProfileAvatar()} style={styles.personalAvaAdd}>
-                  <ProxyIcon name="plus" color="#333" size={15} />
-                </Pressable>
-              </View>
               <View style={styles.personalNameBlock}>
                 <Text numberOfLines={1} style={styles.personalName}>{profileDraft.name}</Text>
                 <Text numberOfLines={1} style={styles.personalHandleSub}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
               </View>
-              {onOpenRealitySceneMap ? (
-                <Pressable onPress={onOpenRealitySceneMap} style={styles.personalSceneEntry}>
-                  <ProxyIcon color={color.violet} name="route" size={20} />
-                  <View style={styles.personalSceneCopy}>
-                    <Text style={styles.personalSceneTitle}>场景足迹</Text>
-                  </View>
-                  <Text style={styles.personalSceneChevron}>›</Text>
+              <View style={styles.personalAvaWrap}>
+                <Pressable accessibilityLabel="更换头像" onPress={() => void chooseProfileAvatar()} style={styles.personalAva}>
+                  {profileAvatarUri ? <CircularAvatarImage accessibilityLabel={`${profileDraft.name}头像`} size={82} uri={profileAvatarUri} /> : <Text style={styles.personalAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
                 </Pressable>
-              ) : null}
+              </View>
             </View>
+            {onOpenRealitySceneMap ? (
+              <Pressable onPress={onOpenRealitySceneMap} style={[styles.personalSceneEntry, { marginHorizontal: 18 }]}>
+                <ProxyIcon color={color.violet} name="route" size={20} />
+                <View style={styles.personalSceneCopy}>
+                  <Text style={styles.personalSceneTitle}>场景足迹</Text>
+                </View>
+                <Text style={styles.personalSceneChevron}>›</Text>
+              </Pressable>
+            ) : null}
 
             <View style={styles.personalBio}>
               <Text style={styles.personalBioText}>{profileDraft.bio || "介绍一下自己吧"}</Text>
