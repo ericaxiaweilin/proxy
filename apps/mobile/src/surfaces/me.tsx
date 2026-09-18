@@ -2037,7 +2037,7 @@ export function MeSurface({
           </Modal>
 
           <Modal animationType="slide" onRequestClose={() => setSearchSheetOpen(false)} transparent visible={searchSheetOpen}>
-            <View style={styles.sheetOverlay}>
+            <View style={styles.sheetOverlayTop}>
               <View style={styles.sheetCard}>
                 <Text style={styles.sheetTitle}>搜索主页</Text>
                 {/* 这一屏**有什么数据域就搜什么**：动态（正文 / 作者 / 城市）+ 我的回复。

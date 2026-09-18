@@ -964,6 +964,7 @@ export const styles = StyleSheet.create({
   profileEditorInput: { color: color.ink, fontSize: 14, paddingHorizontal: 0, paddingVertical: 7 },
 
   sheetOverlay: { backgroundColor: "rgba(20,18,31,0.42)", flex: 1, justifyContent: "flex-end", padding: 12 },
+  sheetOverlayTop: { backgroundColor: "rgba(20,18,31,0.42)", flex: 1, justifyContent: "flex-start", padding: 12 },
   sheetCard: { backgroundColor: color.white, borderRadius: 22, maxHeight: "72%", padding: 17 },
   sheetTitle: { color: color.ink, fontSize: 15, fontWeight: "800", marginBottom: 4 },
   sheetSub: { color: color.muted, fontSize: 11, marginBottom: 12 },
