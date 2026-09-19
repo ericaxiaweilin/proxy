@@ -51,6 +51,7 @@ type Message struct {
 	ConversationID string             `json:"conversationId"`     // legacy; 同义 dialog_id
 	DialogID       string             `json:"dialogId,omitempty"` // v1 正式；与 ConversationID 同值过渡期双写
 	ConvoID        *string            `json:"convoId,omitempty"`  // v1: 所属 Convo 分支
+	ReplyTo        *string            `json:"replyTo,omitempty"`    // QUOTE-REPLY-001: 引用的消息 ID（同会话内）；客户端按 ID 解析引用块
 	SenderID       string             `json:"senderId"`
 	SenderSnapshot *IdentitySnapshot  `json:"senderSnapshot,omitempty"` // v1: 发送时固化的 displayName/avatar/username
 	MessageType    string             `json:"messageType"`              // v0: TEXT | IMAGE | VIDEO | LOCATION | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
@@ -847,19 +848,38 @@ func (s *Service) listConversations(ctx context.Context, e command.Envelope) com
 	})
 	// One inbox row per DM counterparty. Historical duplicate conversations stay
 	// auditable, but only the newest thread is presented to the user.
+	//
+	// ASSISTANT-THREAD-001: AI 助手有且仅有一个。proxy_ai（首页助手）和
+	// user_proxy_ai（任务/帖子上下文助手）是同一个助手的不同入口 ——
+	// ai_account_*（AI 小美等用户自选的陪伴）与真人一样是「用户」，不在此列。
+	// 归一按 canonical key 收敛，行身份永远是 proxy_ai / AI助手；
+	// 旧串保留可读（按 id 直达不受影响），只是不再列出。
 	deduped := make([]ConversationSummary, 0, len(summaries))
 	seenDM := map[string]bool{}
 	for _, summary := range summaries {
 		if summary.Conversation.Type == "DM" && summary.CounterpartyID != "" {
-			if seenDM[summary.CounterpartyID] {
+			key := summary.CounterpartyID
+			if isAssistantCounterparty(key) {
+				key = canonicalAssistantCounterparty
+				summary.CounterpartyID = canonicalAssistantCounterparty
+				summary.CounterpartySnapshot = &IdentitySnapshot{DisplayName: "AI助手"}
+			}
+			if seenDM[key] {
 				continue
 			}
-			seenDM[summary.CounterpartyID] = true
+			seenDM[key] = true
 		}
 		deduped = append(deduped, summary)
 	}
 	return acceptedWithPayload(e, "ConversationInbox", e.Actor.ID, 1, "READY", map[string]any{"conversations": deduped}, nil)
 }
+
+// ASSISTANT-THREAD-001 配套定义见 listConversations 处注释。
+const canonicalAssistantCounterparty = "proxy_ai"
+
+var assistantCounterparties = map[string]bool{"proxy_ai": true, "user_proxy_ai": true}
+
+func isAssistantCounterparty(id string) bool { return assistantCounterparties[id] }
 
 // ---------- StartConversation ----------
 // Gate C：Post → Profile → Conversation；origin_type/origin_id 必存；
@@ -985,7 +1005,14 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 	}
 	reusedConversation := false
 	if p.ConversationType == "DM" {
-		if existing, ok := s.latestDirectConversation(ctx, e.Actor.ID, p.ParticipantID); ok {
+		if isAssistantCounterparty(p.ParticipantID) {
+			// ASSISTANT-THREAD-001: 助手入口再多，串只有一个 —— 复用该用户
+			// 最新的助手串（不管它当初是哪个入口建的）。
+			if existing, ok := s.latestAssistantConversation(ctx, e.Actor.ID); ok {
+				conv = existing
+				reusedConversation = true
+			}
+		} else if existing, ok := s.latestDirectConversation(ctx, e.Actor.ID, p.ParticipantID); ok {
 			conv = existing
 			reusedConversation = true
 		}
@@ -1002,11 +1029,21 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 	}
 	existingMessages, _ := s.repository.Messages(ctx, conv.ID)
 	nextSeq := int64(len(existingMessages) + 1)
-	if reusedConversation && p.OriginType == "HOME" && len(existingMessages) > 0 && strings.TrimSpace(p.FirstMessage) != "" {
-		separator := Message{ID: newID("msg_"), ConversationID: conv.ID, DialogID: conv.ID, SenderID: "SYSTEM", MessageType: "SYSTEM_CONTEXT", Kind: "system_event", Body: "新的 Home 对话", CreatedAt: s.clock.Now().UTC(), Protection: DefaultProtectionFor("SYSTEM_CONTEXT", conv.Type), Delivery: &MessageDelivery{State: "sent"}, Seq: nextSeq}
-		separator.SecurityV1 = protectionToSecurityV1(separator.Protection)
-		_ = s.repository.AppendMessage(ctx, separator)
-		nextSeq++
+	if reusedConversation && len(existingMessages) > 0 && strings.TrimSpace(p.FirstMessage) != "" {
+		separatorBody := ""
+		if p.OriginType == "HOME" {
+			separatorBody = "新的 Home 对话"
+		} else if isAssistantCounterparty(p.ParticipantID) {
+			// ASSISTANT-THREAD-001: 跨入口复用助手串时留分隔 —— 后面看记录
+			// 才分得清哪段是任务咨询、哪段是帖子咨询。
+			separatorBody = "新的助手对话"
+		}
+		if separatorBody != "" {
+			separator := Message{ID: newID("msg_"), ConversationID: conv.ID, DialogID: conv.ID, SenderID: "SYSTEM", MessageType: "SYSTEM_CONTEXT", Kind: "system_event", Body: separatorBody, CreatedAt: s.clock.Now().UTC(), Protection: DefaultProtectionFor("SYSTEM_CONTEXT", conv.Type), Delivery: &MessageDelivery{State: "sent"}, Seq: nextSeq}
+			separator.SecurityV1 = protectionToSecurityV1(separator.Protection)
+			_ = s.repository.AppendMessage(ctx, separator)
+			nextSeq++
+		}
 	}
 	// 首条消息（如果有）— v1 双写 DialogID/Kind/Security/Delivery/Seq
 	if p.FirstMessage != "" {
@@ -1068,7 +1105,9 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		if temporaryUI != nil {
 			aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
 		} else if s.modelStack != nil && s.modelStack.Available() {
-			aiReply = s.generateAIReply(ctx, conv, e, p.FirstMessage, p.AssistantMode, nil)
+			aiReply = s.withModelUnlocked(func() *Message {
+				return s.generateAIReply(ctx, conv, e, p.FirstMessage, p.AssistantMode, nil, nil)
+			})
 		}
 		if aiReply != nil {
 			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
@@ -1104,6 +1143,37 @@ func (s *Service) latestDirectConversation(ctx context.Context, actorID, counter
 	return latest, found
 }
 
+// latestAssistantConversation 找该用户最新的助手串 —— 不管当初是哪个入口
+//（proxy_ai / user_proxy_ai）建的。ASSISTANT-THREAD-001 建会话复用就靠它。
+func (s *Service) latestAssistantConversation(ctx context.Context, actorID string) (Conversation, bool) {
+	conversations, err := s.repository.Snapshot(ctx)
+	if err != nil {
+		return Conversation{}, false
+	}
+	var latest Conversation
+	found := false
+	for _, conv := range conversations {
+		if conv.Type != "DM" || conv.State != "ACTIVE" || !isParticipant(conv, actorID) {
+			continue
+		}
+		assistant := false
+		for _, participantID := range conv.Participants {
+			if participantID != actorID && isAssistantCounterparty(participantID) {
+				assistant = true
+				break
+			}
+		}
+		if !assistant {
+			continue
+		}
+		if !found || conv.LastMessageAt.After(latest.LastMessageAt) {
+			latest = conv
+			found = true
+		}
+	}
+	return latest, found
+}
+
 // ---------- SendMessage ----------
 // Gate K：实时 IM 最小；ordinary chat 不修改 Need/Order。
 
@@ -1116,6 +1186,10 @@ type sendMessagePayload struct {
 	// ConvoID 可选：发到某条分支里。分支必须存在且属于目标会话，
 	// 调用者已是会话成员（上面已校验）。分支内不触发 AI 回复。
 	ConvoID string `json:"convoId"`
+	// QUOTE-REPLY-001: 引用的消息 ID（可选）。必须指向本会话内已存在的
+	// 消息 —— 跨会话引用会把别处的消息内容带进来（越权读），不存在的引用
+	// 会让客户端画一个永远解析不出来的引用块。两种都直接拒绝。
+	ReplyToMessageID string `json:"replyToMessageId"`
 	// ProtectionOverride is the user-controlled layer on top of the
 	// per-type default (see message_protection.go). All fields are
 	// optional; only set fields override.
@@ -1227,6 +1301,22 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 		id := convo.ID
 		convoID = &id
 	}
+	// QUOTE-REPLY-001: 引用目标校验（见 payload 注释）。被引消息的正文和
+	// 发送人顺手留下来，后面 AI 回复要拿它当上下文（用户引了哪条，模型得知道）。
+	var quoted *Message
+	if strings.TrimSpace(p.ReplyToMessageID) != "" {
+		found, err := s.repository.GetMessage(ctx, strings.TrimSpace(p.ReplyToMessageID))
+		if errors.Is(err, ErrMessageNotFound) {
+			return command.Rejected(e, "REPLY_TARGET_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.reply_target_not_found", nil)
+		}
+		if err != nil {
+			return command.Rejected(e, "CONVERSATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.read_failed", nil)
+		}
+		if found.ConversationID != conv.ID {
+			return command.Rejected(e, "REPLY_TARGET_FOREIGN", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.reply_target_foreign", nil)
+		}
+		quoted = &found
+	}
 	// CONVO-MEDIA-VISIBILITY-001: 上传落库时资产默认 OWNER_ONLY；serving 路由
 	// 只放行 PUBLIC 且不查会话成员身份。这里必须先转 PUBLIC 再落消息 ——
 	// 顺序照抄 localnet 发帖：先授权、授权失败就整条拒绝，不落一条图看不到的消息。
@@ -1252,6 +1342,11 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 		Delivery:       &MessageDelivery{State: "sent"},
 		Seq:            int64(len(existing) + 1),
 	}
+	// QUOTE-REPLY-001: 引用关系落库（校验已在上面做完）。quoted 为空 = 没引用。
+	if quoted != nil {
+		id := quoted.ID
+		msg.ReplyTo = &id
+	}
 	domainEvents := []event.DomainEvent{event.New("MessageSent", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, msg.CreatedAt, map[string]any{
 		"messageId":   msg.ID,
 		"messageType": msg.MessageType,
@@ -1275,7 +1370,21 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	} else if p.TemporaryUIResponseID != "" && convoID == nil {
 		aiReply = s.serverFormResponseReply(ctx, conv)
 	} else if s.modelStack != nil && s.modelStack.Available() && hasContent && convoID == nil {
-		aiReply = s.generateAIReply(ctx, conv, e, p.Body, p.AssistantMode, nil)
+		// QUOTE-REPLY-001: 把被引消息的快照喂给模型 —— 用户引了哪条，回复就
+		// 针对哪条。quoted 为空 = 没引用，走原来的上下文。
+		var quote *ReplyQuote
+		if quoted != nil {
+			sender := "对方"
+			if quoted.SenderID == e.Actor.ID {
+				sender = "用户自己"
+			} else if quoted.SenderSnapshot != nil && strings.TrimSpace(quoted.SenderSnapshot.DisplayName) != "" {
+				sender = quoted.SenderSnapshot.DisplayName
+			}
+			quote = &ReplyQuote{Sender: sender, Body: quoteBodyTruncated(quoted.Body)}
+		}
+		aiReply = s.withModelUnlocked(func() *Message {
+			return s.generateAIReply(ctx, conv, e, p.Body, p.AssistantMode, nil, quote)
+		})
 		if aiReply != nil {
 			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
 				"messageId": aiReply.ID,
@@ -1347,9 +1456,44 @@ func (s *Service) serverFormResponseReply(ctx context.Context, conv Conversation
 	return &aiMsg
 }
 
+// withModelUnlocked 在模型调用期间松开服务互斥锁。
+//
+// 背景（CONVO-LIST-BLOCKED-001）：HandleContext 对整条命令持有 s.mu，而模型
+// 一次生成要几秒 —— 不松开的话，生成期间该用户（及同进程其他用户）的
+// ListConversations 等所有会话读写全被堵住，客户端列表一直转圈直到 AI 回复
+// 出来。用户看到的就是"AI 没回复之前，对话列表都是加载中"。
+//
+// generateAIReply 只读仓储快照（memory 仓自带锁，PG 走连接池）+ 调模型底座
+//（自带细粒度锁），不碰服务的可变状态，所以解锁是安全的。用户消息与分隔符
+// 的落库仍在锁内串行，Seq 不会撞；AI 回复本来就不带 Seq。
+//
+// defer 写法保证 panic 时也能重新上锁 —— 否则 HandleContext 的 defer Unlock
+// 会解一把没上锁的 mutex，直接 fatal（sync: unlock of unlocked mutex）。
+func (s *Service) withModelUnlocked(generate func() *Message) (reply *Message) {
+	s.mu.Unlock()
+	defer func() { s.mu.Lock() }()
+	return generate()
+}
+
 // generateAIReply 调用模型底座生成 AI 回复。fail-closed：任何错误静默跳过，不阻塞用户消息。
 // 多模态：若历史或当前消息含图片，则尝试以 vision 任务路由，底座会将其转给支持图像的模型。
-func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e command.Envelope, userText string, assistantMode string, temporaryUI *TemporaryUI) *Message {
+// QUOTE-REPLY-001: 用户引用某条消息提问时，被引消息的快照 —— 模型得知道
+// 用户在针对哪条说话，否则"就这个多少钱"这类引用问全是空话。
+type ReplyQuote struct {
+	Sender string
+	Body   string
+}
+
+func quoteBodyTruncated(body string) string {
+	const maxRunes = 200
+	runes := []rune(strings.TrimSpace(body))
+	if len(runes) <= maxRunes {
+		return string(runes)
+	}
+	return string(runes[:maxRunes]) + "…"
+}
+
+func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e command.Envelope, userText string, assistantMode string, temporaryUI *TemporaryUI, quote *ReplyQuote) *Message {
 	// 1. 构建对话历史（最近 20 条）
 	history, err := s.repository.Messages(ctx, conv.ID)
 	if err != nil {
@@ -1366,6 +1510,11 @@ func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e comm
 	}
 	if temporaryUI != nil {
 		systemPrompt += " 当前服务器已附带「" + temporaryUI.Title + "」短表单。不要重复列出字段、不要编号追问，只需简短说明用户可直接点选或填写后继续。"
+	}
+	// QUOTE-REPLY-001: 用户这条消息是在引用回复某条历史消息 —— 把被引内容
+	// 直接告诉模型，否则"就这个呢""那多少钱"这类引用问只能靠猜。
+	if quote != nil && strings.TrimSpace(quote.Body) != "" {
+		systemPrompt += " 用户这条消息是在引用回复" + quote.Sender + "的「" + quoteBodyTruncated(quote.Body) + "」：请针对被引用的内容作答，不要答非所问。"
 	}
 	// 取最近 20 条构建上下文
 	start := 0
@@ -1791,6 +1940,26 @@ func (s *Service) markDialogRead(ctx context.Context, e command.Envelope) comman
 		}
 	}
 	now := s.clock.Now().UTC()
+	// UNREAD-PIPELINE-001 续: read_cursors.dialog_id 外键指向 conversation.dialogs，
+	// 但 v0 StartConversation/SendMessage 走的是 conversation.conversations，从没写过
+	// 一行 dialogs —— 226 条真实会话对 17 行 dialogs，ID 命名空间都不是一回事
+	// （dlg_pg_... vs conv_...）。这里的 UpsertReadCursor 之前每次都撞外键违反，
+	// PG 事务直接 abort，用户的已读位永远写不进去。lazily 用 conv.ID 兜一行
+	// dialogs（v0/v1 过渡期两个模型共用同一个 ID），不是迁移，只是让这条外键
+	// 从今天起真的能满足。
+	if _, derr := s.dialogRepo().GetDialog(ctx, conv.ID); errors.Is(derr, ErrDialogNotFound) {
+		dialogType := "dm"
+		switch conv.Type {
+		case "GROUP":
+			dialogType = "group"
+		case "SUPPORT":
+			dialogType = "official"
+		}
+		_ = s.dialogRepo().CreateDialog(ctx, Dialog{
+			ID: conv.ID, Type: dialogType, Title: conv.ID, MemberIDs: conv.Participants,
+			CreatedAt: conv.CreatedAt, UpdatedAt: now,
+		})
+	}
 	if err := s.dialogRepo().UpsertReadCursor(ctx, ReadCursor{UserID: e.Actor.ID, DialogID: conv.ID, LastReadSeq: maxSeq, LastReadAt: now}); err != nil {
 		return command.Rejected(e, "CONVERSATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.read_failed", nil)
 	}

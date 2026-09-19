@@ -55,7 +55,11 @@ export class ConversationClient {
   public async startConversation(params: {
     originType: string;
     originId: string;
-    participantId: string;
+    // participantId 是既有单聊写法；建群走 participantIds（复数），
+    // 见服务端 resolveStartParticipants —— 两种写法都认，合并去重。
+    participantId?: string;
+    participantIds?: string[];
+    conversationType?: "DM" | "GROUP" | "SUPPORT";
     firstMessage: string;
     assistantMode?: string;
     mediaRef?: string;
@@ -77,7 +81,10 @@ export class ConversationClient {
     protectionOverride?: ProtectionOverride,
     messageType?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "LOCATION" | "SYSTEM_CONTEXT" | "STRUCTURED_SUGGESTION" | "CONTACT",
     proxyObject?: { objectType: "invitation" | "activity" | "opportunity" | "voucher" | "post" | "order"; objectId: string; snapshot: Record<string, unknown>; liveState?: Record<string, unknown> },
-    convoId?: string
+    convoId?: string,
+    // QUOTE-REPLY-001: 引用的消息 ID（同会话）。服务端校验归属并落库 reply_to，
+    // 列表透出后各端按 ID 解析引用块 —— 不再靠文字快照对。
+    replyToMessageId?: string
   ): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
     const isImage = Boolean(mediaRef);
@@ -90,7 +97,8 @@ export class ConversationClient {
       ...(temporaryUIResponseId ? { temporaryUIResponseId } : {}),
       ...(protectionOverride ? { protectionOverride } : {}),
       ...(proxyObject ? { proxyObject } : {}),
-      ...(convoId ? { convoId } : {})
+      ...(convoId ? { convoId } : {}),
+      ...(replyToMessageId ? { replyToMessageId } : {})
     });
     return result;
   }

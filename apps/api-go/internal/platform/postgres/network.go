@@ -444,9 +444,9 @@ func (r *LocalNetRepository) SaveNeedFromPost(ctx context.Context, record localn
 
 func (r *LocalNetRepository) AppendInteractionEvent(ctx context.Context, ie localnet.InteractionEvent) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, need_id, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		ie.EventID, ie.EventType, ie.ActorID, ie.TargetType, ie.TargetID, ie.NeedID, ie.CreatedAt,
+		INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, need_id, watch_ms, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		ie.EventID, ie.EventType, ie.ActorID, ie.TargetType, ie.TargetID, ie.NeedID, ie.WatchMs, ie.CreatedAt,
 	)
 	return err
 }
@@ -473,6 +473,143 @@ func (r *LocalNetRepository) ListInteractionEvents(ctx context.Context, actorID 
 			ie.NeedID = *needID
 		}
 		result = append(result, ie)
+	}
+	return result, rows.Err()
+}
+
+func (r *LocalNetRepository) ListPostImpressionStats(ctx context.Context, authorID string, limit int) ([]localnet.PostImpressionStats, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT p.id,
+			COUNT(ev.event_id) AS impressions,
+			COUNT(DISTINCT ev.actor_id) AS viewers,
+			COALESCE(SUM(ev.watch_ms), 0) AS total_watch_ms
+		FROM (
+			SELECT id, created_at FROM localnet.posts
+			WHERE author_id = $1
+			ORDER BY created_at DESC, id DESC
+			LIMIT $2
+		) p
+		LEFT JOIN localnet.interaction_events ev
+			ON ev.target_type = 'POST' AND ev.target_id = p.id AND ev.event_type = 'POST_IMPRESSION'
+		GROUP BY p.id, p.created_at
+		ORDER BY p.created_at DESC, p.id DESC`, authorID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []localnet.PostImpressionStats{}
+	for rows.Next() {
+		var stat localnet.PostImpressionStats
+		if err := rows.Scan(&stat.PostID, &stat.Impressions, &stat.Viewers, &stat.TotalWatchMs); err != nil {
+			return nil, err
+		}
+		result = append(result, stat)
+	}
+	return result, rows.Err()
+}
+
+func (r *LocalNetRepository) ListMediaImpressionStats(ctx context.Context, authorID string, limit int) ([]localnet.MediaImpressionStats, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT p.id,
+			m.media_asset_id,
+			COUNT(ev.event_id) AS impressions,
+			COUNT(DISTINCT ev.actor_id) AS viewers,
+			COALESCE(SUM(ev.watch_ms), 0) AS total_watch_ms
+		FROM (
+			SELECT id, created_at, media_refs FROM localnet.posts
+			WHERE author_id = $1
+			ORDER BY created_at DESC, id DESC
+			LIMIT $2
+		) p
+		CROSS JOIN LATERAL (
+			SELECT (item->>'mediaAssetId') AS media_asset_id, (item->>'sortOrder')::int AS sort_order
+			FROM jsonb_array_elements(p.media_refs) AS item
+		) m
+		LEFT JOIN localnet.interaction_events ev
+			ON ev.target_type = 'MEDIA' AND ev.target_id = m.media_asset_id AND ev.event_type = 'MEDIA_IMPRESSION'
+		GROUP BY p.id, p.created_at, m.media_asset_id, m.sort_order
+		ORDER BY p.created_at DESC, p.id DESC, m.sort_order ASC`, authorID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []localnet.MediaImpressionStats{}
+	for rows.Next() {
+		var stat localnet.MediaImpressionStats
+		if err := rows.Scan(&stat.PostID, &stat.MediaAssetID, &stat.Impressions, &stat.Viewers, &stat.TotalWatchMs); err != nil {
+			return nil, err
+		}
+		result = append(result, stat)
+	}
+	return result, rows.Err()
+}
+
+func (r *LocalNetRepository) ListMediaActivityForViewer(ctx context.Context, authorID string, viewerActorID string, limit int) ([]localnet.ViewerMediaActivity, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT p.id,
+			m.media_asset_id,
+			COUNT(ev.event_id) AS opens,
+			COALESCE(SUM(ev.watch_ms), 0) AS total_watch_ms,
+			MAX(ev.created_at) AS last_opened_at
+		FROM localnet.posts p
+		CROSS JOIN LATERAL (
+			SELECT (item->>'mediaAssetId') AS media_asset_id
+			FROM jsonb_array_elements(p.media_refs) AS item
+		) m
+		JOIN localnet.interaction_events ev
+			ON ev.target_type = 'MEDIA' AND ev.target_id = m.media_asset_id
+			AND ev.event_type = 'MEDIA_IMPRESSION' AND ev.actor_id = $2
+		WHERE p.author_id = $1
+		GROUP BY p.id, m.media_asset_id
+		ORDER BY last_opened_at DESC
+		LIMIT $3`, authorID, viewerActorID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []localnet.ViewerMediaActivity{}
+	for rows.Next() {
+		var activity localnet.ViewerMediaActivity
+		if err := rows.Scan(&activity.PostID, &activity.MediaAssetID, &activity.Opens, &activity.TotalWatchMs, &activity.LastOpenedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, activity)
+	}
+	return result, rows.Err()
+}
+
+func (r *LocalNetRepository) ListProfileViewStats(ctx context.Context, ownerID string) (localnet.ProfileViewStats, error) {
+	var stat localnet.ProfileViewStats
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT COUNT(event_id), COUNT(DISTINCT actor_id)
+		FROM localnet.interaction_events
+		WHERE target_type = 'PROFILE' AND target_id = $1 AND event_type = 'PROFILE_OPEN'`, ownerID).
+		Scan(&stat.Opens, &stat.UniqueViewers)
+	if err != nil {
+		return localnet.ProfileViewStats{}, err
+	}
+	return stat, nil
+}
+
+func (r *LocalNetRepository) ListProfileViewers(ctx context.Context, ownerID string, limit int) ([]localnet.ProfileViewerStat, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT actor_id, COUNT(event_id) AS opens, MAX(created_at) AS last_opened_at
+		FROM localnet.interaction_events
+		WHERE target_type = 'PROFILE' AND target_id = $1 AND event_type = 'PROFILE_OPEN'
+		GROUP BY actor_id
+		ORDER BY last_opened_at DESC, actor_id ASC
+		LIMIT $2`, ownerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []localnet.ProfileViewerStat{}
+	for rows.Next() {
+		var stat localnet.ProfileViewerStat
+		if err := rows.Scan(&stat.ActorID, &stat.Opens, &stat.LastOpenedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, stat)
 	}
 	return result, rows.Err()
 }
@@ -636,9 +773,9 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, m conversati
 		return fmt.Errorf("encode protection: %w", err)
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		m.ID, m.ConversationID, m.SenderID, m.MessageType, m.Body, m.MediaRef, m.CreatedAt, protectionJSON, m.Protection.ViewCount, m.ConvoID,
+		INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id, reply_to)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		m.ID, m.ConversationID, m.SenderID, m.MessageType, m.Body, m.MediaRef, m.CreatedAt, protectionJSON, m.Protection.ViewCount, m.ConvoID, m.ReplyTo,
 	)
 	if err != nil {
 		return err
@@ -652,7 +789,7 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, m conversati
 
 func (r *ConversationRepository) Messages(ctx context.Context, conversationID string) ([]conversation.Message, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id
+		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id, reply_to
 		FROM conversation.messages WHERE conversation_id = $1 ORDER BY created_at`, conversationID)
 	if err != nil {
 		return nil, err
@@ -683,7 +820,7 @@ func (r *ConversationRepository) Messages(ctx context.Context, conversationID st
 // would mask the fact that the seed path skipped protection.
 func (r *ConversationRepository) GetMessage(ctx context.Context, id string) (conversation.Message, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id
+		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id, reply_to
 		FROM conversation.messages WHERE id = $1`, id)
 	if err != nil {
 		return conversation.Message{}, err
@@ -741,7 +878,7 @@ func scanConversationMessage(rows pgx.Rows) (conversation.Message, error) {
 	if err := rows.Scan(
 		&m.ID, &m.ConversationID, &m.SenderID, &m.MessageType,
 		&m.Body, &m.MediaRef, &m.CreatedAt, &protection, &m.Protection.ViewCount,
-		&convoID,
+		&convoID, &m.ReplyTo,
 	); err != nil {
 		return conversation.Message{}, err
 	}

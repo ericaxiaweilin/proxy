@@ -1161,3 +1161,166 @@ func TestCancelOrderNotFound(t *testing.T) {
 		t.Fatalf("missing order: %s / %+v", r.Outcome, r.Error)
 	}
 }
+
+// TOPIC-INVITE-001: 原型"加入 · 邀请她"按主题邀约 —— 没有 task/slot/金额，
+// 与档位 Offer 共用生命周期，TTL 默认 60s（原型 60 秒倒计时）。
+func TestCreateTopicInviteDefaultsSixtySeconds(t *testing.T) {
+	s := New()
+	before := s.clock.Now().UTC()
+	result := s.Handle(envelopeFor("CreateTopicInvite", map[string]any{
+		"agentId": "agent_mia", "topicKey": "work", "note": "一起喝杯咖啡",
+	}, ""))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("create invite: %+v", result.Error)
+	}
+	var view struct {
+		OfferID   string `json:"offerId"`
+		TopicKey  string `json:"topicKey"`
+		ExpiresAt string `json:"expiresAt"`
+	}
+	_ = json.Unmarshal([]byte(result.OperationRef), &view)
+	if view.OfferID == "" || view.TopicKey != "work" {
+		t.Fatalf("invite ref = %s", result.OperationRef)
+	}
+	expires, err := time.Parse(time.RFC3339, view.ExpiresAt)
+	if err != nil {
+		t.Fatalf("expiresAt unparsable: %s", view.ExpiresAt)
+	}
+	if lifetime := expires.Sub(before); lifetime < 55*time.Second || lifetime > 65*time.Second {
+		t.Fatalf("default invite TTL = %v, want ~60s", lifetime)
+	}
+}
+
+func TestCreateTopicInviteValidatesAndClampsTTL(t *testing.T) {
+	s := New()
+	bad := []map[string]any{
+		{"agentId": "", "topicKey": "work"},
+		{"agentId": "agent_mia", "topicKey": ""},
+		{"agentId": "user_001", "topicKey": "work"},
+	}
+	for i, payload := range bad {
+		result := s.Handle(envelopeFor("CreateTopicInvite", payload, ""))
+		if result.Outcome != "REJECTED" {
+			t.Fatalf("case %d: want REJECTED, got %s", i, result.Outcome)
+		}
+	}
+	before := s.clock.Now().UTC()
+	short := s.Handle(envelopeFor("CreateTopicInvite", map[string]any{
+		"agentId": "agent_mia", "topicKey": "work", "ttlSeconds": 5,
+	}, ""))
+	var shortView struct {
+		ExpiresAt string `json:"expiresAt"`
+	}
+	_ = json.Unmarshal([]byte(short.OperationRef), &shortView)
+	shortExp, _ := time.Parse(time.RFC3339, shortView.ExpiresAt)
+	if lifetime := shortExp.Sub(before); lifetime < 25*time.Second || lifetime > 35*time.Second {
+		t.Fatalf("ttlSeconds=5 must clamp to 30s, got %v", lifetime)
+	}
+}
+
+func TestSlotOfferKeepsFiveMinuteDefault(t *testing.T) {
+	s := New()
+	before := s.clock.Now().UTC()
+	result := s.Handle(envelopeFor("CreateSlotOffer", map[string]any{
+		"taskId": "task_1", "slotId": "slot_1", "agentId": "agent_1",
+		"agreedCompensation": 1200000, "currency": "VND",
+	}, ""))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("create slot offer: %+v", result.Error)
+	}
+	var view struct {
+		ExpiresAt string `json:"expiresAt"`
+	}
+	_ = json.Unmarshal([]byte(result.OperationRef), &view)
+	expires, _ := time.Parse(time.RFC3339, view.ExpiresAt)
+	if lifetime := expires.Sub(before); lifetime < 295*time.Second || lifetime > 305*time.Second {
+		t.Fatalf("slot default TTL changed: %v, want ~300s", lifetime)
+	}
+}
+
+func inviteAs(agentID, offerID string, accept bool) command.Envelope {
+	return command.Envelope{
+		CommandID: "cmd_resp_" + offerID, CommandType: "RespondTopicInvite", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: agentID}, Principal: command.Principal{Type: "INDIVIDUAL", ID: agentID},
+		Target: command.Target{Type: "Offer", ID: offerID}, IdempotencyKey: "idem_resp_" + offerID,
+		AuthContext: map[string]any{"session": "s1"}, Purpose: "test", CorrelationID: "corr_resp",
+		RequestedAt: "2026-08-16T00:00:00Z",
+		Payload: map[string]any{"offerId": offerID, "accept": accept},
+	}
+}
+
+func TestRespondTopicInviteAcceptDeclineAndExpiry(t *testing.T) {
+	s := New()
+	mkInvite := func(agent, topic string) string {
+		result := s.Handle(envelopeFor("CreateTopicInvite", map[string]any{"agentId": agent, "topicKey": topic}, ""))
+		if result.Outcome != "ACCEPTED" {
+			t.Fatalf("create invite: %+v", result.Error)
+		}
+		var view struct {
+			OfferID string `json:"offerId"`
+		}
+		_ = json.Unmarshal([]byte(result.OperationRef), &view)
+		return view.OfferID
+	}
+	// 接受 → 落单。
+	acceptID := mkInvite("agent_mia", "work")
+	accepted := s.Handle(inviteAs("agent_mia", acceptID, true))
+	if accepted.Outcome != "ACCEPTED" {
+		t.Fatalf("accept: %+v", accepted.Error)
+	}
+	var orderView struct {
+		OrderID string `json:"orderId"`
+	}
+	_ = json.Unmarshal([]byte(accepted.OperationRef), &orderView)
+	if orderView.OrderID == "" {
+		t.Fatalf("accept must create an order: %s", accepted.OperationRef)
+	}
+	// 再接一次 → 已不在 OFFERED。
+	again := s.Handle(inviteAs("agent_mia", acceptID, true))
+	if again.Outcome != "REJECTED" {
+		t.Fatalf("second accept: got %s, want REJECTED", again.Outcome)
+	}
+	// 拒绝 → REJECTED（不是 CANCELLED —— 取消是需求方的动作）。
+	declineID := mkInvite("agent_mia", "coffee")
+	declined := s.Handle(inviteAs("agent_mia", declineID, false))
+	if declined.Outcome != "ACCEPTED" {
+		t.Fatalf("decline: %+v", declined.Error)
+	}
+	stored, err := s.repository.GetOffer(nil, declineID)
+	if err != nil || stored.Status != "REJECTED" {
+		t.Fatalf("declined offer status = %+v err = %v, want REJECTED", stored.Status, err)
+	}
+	// 拒了就不能再接。
+	afterDecline := s.Handle(inviteAs("agent_mia", declineID, true))
+	if afterDecline.Outcome != "REJECTED" {
+		t.Fatalf("accept-after-decline: got %s, want REJECTED", afterDecline.Outcome)
+	}
+	// 外人不能替女孩接。
+	stranger := s.Handle(inviteAs("user_stranger", mkInvite("agent_mia", "lang"), true))
+	if stranger.Outcome != "REJECTED" {
+		t.Fatalf("stranger accept: got %s, want REJECTED", stranger.Outcome)
+	}
+	// 过期不能接。
+	now := s.clock.Now().UTC()
+	expiredID := "off_topic_expired"
+	_ = s.repository.CreateOffer(nil, Offer{ID: expiredID, RequesterID: "user_001", AgentID: "agent_mia", TopicKey: "walk", Status: "OFFERED", ExpiresAt: now.Add(-time.Minute), Version: 1, CreatedAt: now, UpdatedAt: now})
+	expired := s.Handle(inviteAs("agent_mia", expiredID, true))
+	if expired.Outcome != "REJECTED" {
+		t.Fatalf("expired accept: got %s, want REJECTED", expired.Outcome)
+	}
+}
+
+func TestTwoTopicOrdersDoNotTripSlotUniqueness(t *testing.T) {
+	s := New()
+	for _, topic := range []string{"work", "coffee"} {
+		result := s.Handle(envelopeFor("CreateTopicInvite", map[string]any{"agentId": "agent_mia", "topicKey": topic}, ""))
+		var view struct {
+			OfferID string `json:"offerId"`
+		}
+		_ = json.Unmarshal([]byte(result.OperationRef), &view)
+		accepted := s.Handle(inviteAs("agent_mia", view.OfferID, true))
+		if accepted.Outcome != "ACCEPTED" {
+			t.Fatalf("topic %s accept: %+v", topic, accepted.Error)
+		}
+	}
+}

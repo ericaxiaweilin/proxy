@@ -720,3 +720,117 @@ func TestStartConversationStillAcceptsLegacySingleParticipant(t *testing.T) {
 		t.Fatalf("expected 2-person DM, got %s %v", conv.Type, conv.Participants)
 	}
 }
+
+// ASSISTANT-THREAD-001: 助手入口再多（首页/任务/帖子），串只有一个；
+// 收件箱只露最新的一行，身份永远是 proxy_ai / AI助手。
+// ai_account_*（AI 小美等用户自选陪伴）与真人一样是「用户」，不受影响。
+func TestAssistantConversationsUnifyIntoOneThread(t *testing.T) {
+	s := New()
+	start := func(originType, originID, participant, text string) string {
+		result := s.Handle(envelopeFor("StartConversation", map[string]any{
+			"conversationType": "DM", "originType": originType, "originId": originID,
+			"participantId": participant, "firstMessage": text,
+		}, ""))
+		if result.Outcome != "ACCEPTED" {
+			t.Fatalf("start %s/%s: %+v", originType, participant, result.Error)
+		}
+		var view struct {
+			ConversationID string `json:"conversationId"`
+		}
+		_ = json.Unmarshal([]byte(result.OperationRef), &view)
+		return view.ConversationID
+	}
+	proxyID := start("HOME", "proxy_ai_home", "proxy_ai", "你好")
+	taskID := start("TASK", "goal_1", "user_proxy_ai", "排个计划")
+	if proxyID != taskID {
+		t.Fatalf("assistant entries must reuse one thread: %s != %s", proxyID, taskID)
+	}
+	humanID := start("PROFILE", "user_9", "user_9", "你好")
+	if humanID == proxyID {
+		t.Fatalf("human DM must not merge into the assistant thread")
+	}
+	companionID := start("PROFILE", "ai_account_001", "ai_account_001", "嗨")
+	if companionID == proxyID {
+		t.Fatalf("companion chats are users, must not merge into the assistant thread")
+	}
+
+	result := s.Handle(envelopeFor("ListConversations", map[string]any{}, "user_001"))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("list conversations: %s", result.Outcome)
+	}
+	var view struct {
+		Conversations []ConversationSummary `json:"conversations"`
+	}
+	_ = json.Unmarshal([]byte(result.OperationRef), &view)
+	assistantRows := 0
+	for _, summary := range view.Conversations {
+		if summary.CounterpartyID == "proxy_ai" {
+			assistantRows++
+			if summary.CounterpartySnapshot == nil || summary.CounterpartySnapshot.DisplayName != "AI助手" {
+				t.Fatalf("assistant row identity = %+v, want proxy_ai/AI助手", summary.CounterpartySnapshot)
+			}
+		}
+		if summary.CounterpartyID == "user_proxy_ai" {
+			t.Fatalf("legacy assistant id must not surface in the inbox: %+v", summary.CounterpartyID)
+		}
+	}
+	if assistantRows != 1 {
+		t.Fatalf("want exactly 1 assistant row, got %d (total %d)", assistantRows, len(view.Conversations))
+	}
+	if len(view.Conversations) != 3 {
+		t.Fatalf("want 3 rows (assistant + human + companion), got %d", len(view.Conversations))
+	}
+}
+
+// CONVO-LIST-BLOCKED-001: 模型生成期间列表不能被堵住。
+//
+// 根因：HandleContext 对整条命令持有 s.mu，而 start/send 里的 generateAIReply
+// 一次要几秒 —— 生成期间 ListConversations 也在排队，客户端列表一直"加载中"
+// 直到 AI 回复出来。用一个门控 modelStack 复现：生成不放行，列表必须先返回。
+type gateModelStack struct {
+	release chan struct{}
+}
+
+func (gateModelStack) Available() bool { return true }
+
+func (g gateModelStack) Complete(ctx context.Context, _ string, _ []modelstack.ChatMessage) (modelstack.Completion, error) {
+	select {
+	case <-g.release:
+		return modelstack.Completion{Content: "好的"}, nil
+	case <-ctx.Done():
+		return modelstack.Completion{}, ctx.Err()
+	}
+}
+
+func TestListConversationsNotBlockedByModelGeneration(t *testing.T) {
+	s := NewWithModelStack(nil, gateModelStack{release: make(chan struct{})})
+	startDone := make(chan command.Result, 1)
+	go func() {
+		startDone <- s.Handle(envelopeFor("StartConversation", map[string]any{
+			"conversationType": "DM", "originType": "HOME", "originId": "proxy_ai_home",
+			"participantId": "proxy_ai", "firstMessage": "你好",
+		}, ""))
+	}()
+	// 给 start 一点时间走到模型调用里（内存仓极快，50ms 足够）。
+	time.Sleep(50 * time.Millisecond)
+
+	listDone := make(chan command.Result, 1)
+	go func() {
+		listDone <- s.Handle(envelopeFor("ListConversations", map[string]any{}, "user_001"))
+	}()
+	select {
+	case result := <-listDone:
+		if result.Outcome != "ACCEPTED" {
+			t.Fatalf("list during generation: %s", result.Outcome)
+		}
+		var view struct {
+			Conversations []ConversationSummary `json:"conversations"`
+		}
+		_ = json.Unmarshal([]byte(result.OperationRef), &view)
+		if len(view.Conversations) != 1 {
+			t.Fatalf("user message must already be listed while AI generates, got %d rows", len(view.Conversations))
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("ListConversations blocked behind model generation")
+	}
+}

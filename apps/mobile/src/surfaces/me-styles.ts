@@ -862,16 +862,20 @@ export const styles = StyleSheet.create({
   trustStripLabel: { color: color.muted, fontSize: 11, marginTop: 2 },
 
   personalHubContent: { paddingBottom: 0 },
+  // PERSONAL-TOPBAR-NO-TITLE-001: 参考稿 (Threads R2) 顶栏只有图标按钮，没有
+  // 标题文字——名字/handle 只在下面的头部块里出现一次。之前顶栏中间又摆了一遍
+  // handle，跟紧接着的 personalName/personalHandleSub 挤在一起，同一个身份连续
+  // 报两遍，这才是真正的"名字太多"，不是没居中的问题。顶栏对齐参考稿删掉。
   personalTopbar: {
     alignItems: "center",
     flexDirection: "row",
+    justifyContent: "space-between",
     height: 46,
     paddingHorizontal: 18,
     paddingTop: 7
   },
   personalTopbarButton: { alignItems: "center", height: 34, justifyContent: "center", width: 34 },
   personalTopbarIcon: { color: color.ink, fontSize: 21, fontWeight: "300", lineHeight: 24 },
-  personalTopbarHandle: { color: color.ink, flex: 1, fontSize: 15, fontWeight: "700", overflow: "hidden", textAlign: "left", marginLeft: 4 },
   personalTopbarTools: { flexDirection: "row", gap: 5 },
   personalTopbarIconBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
 
@@ -892,8 +896,6 @@ export const styles = StyleSheet.create({
   personalIntroText: { color: color.ink, flex: 1, fontSize: 11, lineHeight: 16 },
   personalBio: { paddingHorizontal: 18, marginTop: 13 },
   personalBioText: { color: color.ink, fontSize: 11, lineHeight: 16 },
-  personalLinkRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 8 },
-  personalLinkText: { color: "#333", fontSize: 11, fontWeight: "600" },
 
   personalTopics: { flexDirection: "row", gap: 6, flexWrap: "wrap", marginTop: 11 },
   personalTopicPill: { borderWidth: 1, borderColor: "#e1e1e1", backgroundColor: "#fff", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
@@ -972,10 +974,60 @@ export const styles = StyleSheet.create({
   sheetFieldLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
   sheetFieldValue: { color: color.ink, fontSize: 15, fontWeight: "800", marginTop: 4 },
   sheetFieldInput: { color: color.ink, fontSize: 11, marginTop: 4, padding: 0 },
-  sheetWideBtn: { alignItems: "center", backgroundColor: color.white, borderColor: "#ddd", borderRadius: 11, borderWidth: 1, height: 38, justifyContent: "center", marginTop: 7, width: "100%" },
+  sheetWideBtn: { alignItems: "center", backgroundColor: color.white, borderColor: "#ddd", borderRadius: 11, borderWidth: 1, height: 38, justifyContent: "center", marginTop: 7, paddingHorizontal: 14, width: "100%" },
   sheetWideBtnDark: { backgroundColor: "#111", borderColor: "#111" },
+  // 主页设置弹窗按钮：图标贴左、文字贴右；整体收至 75% 宽居中。
+  sheetWideBtnRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", width: "100%" },
+  sheetWideBtnNarrow: { alignSelf: "center", width: "75%" },
   sheetWideBtnText: { color: color.ink, fontSize: 11, fontWeight: "800" },
   sheetWideBtnTextDark: { color: color.white, fontSize: 11, fontWeight: "800" },
+  // 个人主页搜索浮条：Home 搜索条同款（去相机/语音/AI），顶栏图标下方弹出。
+  profileSearchOverlay: { flex: 1 },
+  profileSearchFloat: {
+    backgroundColor: color.white,
+    borderColor: color.line,
+    borderRadius: 27,
+    borderWidth: 1,
+    marginHorizontal: 12,
+    overflow: "hidden",
+    ...shadows.card
+  },
+  profileSearchDockRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 4,
+    height: 54,
+    paddingLeft: 18,
+    paddingRight: 7
+  },
+  profileSearchDockInput: {
+    color: color.ink,
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "500",
+    height: "100%",
+    paddingVertical: 0
+  },
+  profileSearchClear: { alignItems: "center", height: 38, justifyContent: "center", width: 30 },
+  profileSearchClearText: { color: color.muted, fontSize: 18 },
+  profileSearchGo: {
+    alignItems: "center",
+    backgroundColor: "#141414",
+    borderRadius: 17,
+    height: 34,
+    justifyContent: "center",
+    width: 34
+  },
+  profileSearchGoGlyph: { color: color.white, fontSize: 15, fontWeight: "800" },
+  profileSearchHits: {
+    borderTopColor: color.line,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingBottom: 8,
+    paddingHorizontal: 18
+  },
+  profileSearchEmpty: { color: color.muted, fontSize: 13, paddingVertical: 10, textAlign: "center" },
+  profileSearchHit: { borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 10 },
+  profileSearchHitText: { color: color.ink, fontSize: 14, lineHeight: 20 },
 
   abilitySheetHead: { alignItems: "center", flexDirection: "row", gap: 9, marginBottom: 6 },
   abilityHead: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 6 },

@@ -5,9 +5,10 @@
 // (不引 react-native-maps，避免 prebuild / pod install 阻塞)，但
 // 给了真实 grid 坐标 + 半径 + 城市名 — 这三件对"feed 怎么用
 // location" 已经够。
-import { useEffect, useMemo, useState } from "react";
-import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
+import * as ExpoLocation from "expo-location";
 import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
 import { MapCanvas } from "./map-canvas";
 import type { GridCoord } from "./location-options";
@@ -37,6 +38,7 @@ import {
   saveCustomLocation
 } from "./location-store";
 import type { DeviceLocationState } from "../device-location";
+import { fetchNearbySpots, formatSpotDistance, type NearbySpot } from "../nearby-spots";
 import { ProxyEmptyState } from "./proxy-foundation";
 
 export { DEFAULT_LOCATION, LOCATION_OPTIONS };
@@ -109,6 +111,67 @@ export function LocationPickerSheet({
   const [tab, setTab] = useState<Tab>(current.kind === "CUSTOM" ? "CUSTOM" : "PRESET");
   const [history, setHistory] = useState<CustomLocation[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  // NEARBY-SPOTS-001: 3km 热门地点（见下方 loadNearbySpots）。
+  const [nearbySpots, setNearbySpots] = useState<NearbySpot[] | undefined>(undefined);
+  const [nearbyBusy, setNearbyBusy] = useState(false);
+  const [nearbyError, setNearbyError] = useState<string | undefined>(undefined);
+  const nearbyLoadingRef = useRef(false);
+
+  async function loadNearbySpots(): Promise<void> {
+    if (nearbyLoadingRef.current) return;
+    nearbyLoadingRef.current = true;
+    setNearbyBusy(true);
+    setNearbyError(undefined);
+    try {
+      // LOC-FIX-001 同款：先看现状再申请，拒绝过的不再静默重试。
+      const existing = await ExpoLocation.getForegroundPermissionsAsync();
+      let status = existing.status;
+      if (status !== "granted") {
+        const request = await ExpoLocation.requestForegroundPermissionsAsync();
+        status = request.status;
+      }
+      if (status !== "granted") throw new Error("系统定位未授权 — 去 iOS 设置 → Proxy → 位置，允许“使用 App 期间”");
+      // 注意不用 getCurrentFix：它 10 秒超时 + 先读缓存，室内 GPS 一慢就
+      // 直接判死；而地图 tab 的无超时 Balanced 单次定位是能回来的。这里跟
+      // 地图同口径（Balanced），冷启动慢就自动多等一轮（见下面重试）。
+      const locate = async (): Promise<{ latitude: number; longitude: number } | undefined> => {
+        try {
+          const pos = await Promise.race([
+            ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.Balanced }),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("fix timeout")), 30_000)),
+          ]);
+          return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+        } catch {
+          return undefined;
+        }
+      };
+      let fix = await locate();
+      // 首次冷启动 GPS 经常第一次拿不到、紧接着第二次就好 —— 只自动重试一次，
+      // 拒权限不重试（尊重用户选择），成功一次后面都直接读缓存。
+      if (!fix) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        fix = await locate();
+      }
+      if (!fix) throw new Error("定位超时（GPS 信号弱）— 请到开阔处重试，或用“地图选点”");
+      const result = await fetchNearbySpots(baseUrl ?? "", fix.latitude, fix.longitude, 3000);
+      setNearbySpots(result.spots);
+      if (result.spots.length === 0) {
+        setNearbyError(result.source === "offline" ? "附近地点暂时不可用（网络或上游服务）— 可用“地图选点”" : "附近暂时没有地点");
+      }
+    } catch (error) {
+      setNearbyError(error instanceof Error && error.message !== "fix timeout" ? error.message : "定位超时（GPS 信号弱）— 请到开阔处重试，或用“地图选点”");
+    } finally {
+      setNearbyBusy(false);
+      nearbyLoadingRef.current = false;
+    }
+  }
+
+  // NEARBY-SPOTS-001: 打开默认加载，不要点按钮。只在推荐 tab 默认时触发
+  // （带着自定义坐标进来的是看 CUSTOM tab 的，不浪费一次 GPS）。
+  useEffect(() => {
+    if (open && current.kind !== "CUSTOM") void loadNearbySpots();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open ]);
   // CUSTOM tab state
   // R15.33: customCity 仍存在但仅作离线 fallback — 线上时
   // reverse.city 才是真相。原来默认 "河内" 会误导全球用户
@@ -286,8 +349,7 @@ export function LocationPickerSheet({
     onClose();
   }
 
-  const presetActive = current.kind === "PRESET" && current.id !== undefined;
-  const presetCurrentId = current.kind === "PRESET" ? current.id : undefined;
+  // (城市预设已移除：NEARBY-SPOTS-001 起推荐地点只给 3km 真数据。)
   const customActive = current.kind === "CUSTOM";
 
   return (
@@ -330,29 +392,58 @@ export function LocationPickerSheet({
                   <Text style={styles.optAction}>{deviceRow.action}</Text>
                 </Pressable>
               ) : null}
-              {LOCATION_OPTIONS.map((option) => {
-                const active = presetCurrentId === option.id;
-                return (
-                  <Pressable
-                    key={option.id}
-                    onPress={() => {
-                      const next: PresetLocation = { id: option.id, city: option.city, area: option.area, kind: "PRESET" };
-                      onSelect(next);
-                      onClose();
-                    }}
-                    style={[styles.opt, active && styles.optActive]}
-                  >
-                    <View style={[styles.optIcon, active && styles.optIconActive]}>
-                      <ProxyIcon color={active ? color.white : color.ink} name={option.icon as ProxyIconName} size={24} />
-                    </View>
-                    <View style={styles.optCopy}>
-                      <Text style={styles.optTitle}>{option.city} · {option.area}</Text>
-                      <Text style={styles.optDesc}>{option.desc}</Text>
-                    </View>
-                    <Text style={styles.optAction}>{active ? "当前" : "切换"}</Text>
-                  </Pressable>
-                );
-              })}
+              {/* NEARBY-SPOTS-001: 3km 热门地点（真坐标，点了能直接发）。
+                  以前这里只有 4 个硬编码城市预设，点的全是"还剑湖附近"这种
+                  没坐标的条目 —— 发不出去，还冒充"热门"。现在默认先给城市
+                  预设（兼容无定位），点了按钮才定位拉真数据。 */}
+              <Text style={styles.fieldLabel}>附近地点</Text>
+              {nearbySpots === undefined && !nearbyBusy && !nearbyError ? (
+                <Pressable accessibilityLabel="显示附近地点" onPress={() => void loadNearbySpots()} style={styles.opt}>
+                  <View style={styles.optIcon}>
+                    <ProxyIcon color={color.ink} name="crosshair" size={24} />
+                  </View>
+                  <View style={styles.optCopy}>
+                    <Text style={styles.optTitle}>显示附近地点</Text>
+                  </View>
+                </Pressable>
+              ) : null}
+              {nearbyBusy ? (
+                <View style={styles.opt}>
+                  <ActivityIndicator color={color.ink} size="small" />
+                  <View style={styles.optCopy}>
+                    <Text style={styles.optTitle}>正在定位…</Text>
+                  </View>
+                </View>
+              ) : null}
+              {nearbyError ? (
+                <View style={styles.opt}>
+                  <View style={styles.optCopy}>
+                    <Text style={styles.optTitle}>附近地点不可用</Text>
+                    <Text style={styles.optDesc}>{nearbyError}</Text>
+                  </View>
+                  <Text style={styles.optAction} onPress={() => void loadNearbySpots()}>重试</Text>
+                </View>
+              ) : null}
+              {(nearbySpots ?? []).map((spot) => (
+                <Pressable
+                  key={spot.id}
+                  onPress={() => {
+                    const next: CustomLocation = { id: `spot:${spot.id}`, city: "", area: spot.name, kind: "CUSTOM", custom: { gridX: 0, gridY: 0, radiusMeters: 3000, lat: spot.lat, lng: spot.lng } };
+                    onSelect(next);
+                    onClose();
+                  }}
+                  style={styles.opt}
+                >
+                  <View style={styles.optIcon}>
+                    <ProxyIcon color={color.ink} name="pin" size={24} />
+                  </View>
+                  <View style={styles.optCopy}>
+                    <Text style={styles.optTitle}>{spot.name}</Text>
+                    {formatSpotDistance(spot.distanceMeters) ? <Text style={styles.optDesc}>{formatSpotDistance(spot.distanceMeters)}</Text> : null}
+                  </View>
+                  <Text style={styles.optAction}>发送</Text>
+                </Pressable>
+              ))}
             </ScrollView>
           ) : tab === "CUSTOM" ? (
             <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -63,6 +64,34 @@ func (s *Server) createPersona(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
+}
+
+// GET /v1/ai/personas?ownerId=
+// Lists the owner's personas newest-first. ownerId is required.
+// The wire returns [] (never null) when the owner has none —
+// "no twins" and "failed to load" must not look the same.
+func (s *Server) listPersonas(w http.ResponseWriter, r *http.Request) {
+	if !methodGuard(w, r, http.MethodGet) {
+		return
+	}
+	if s.AIPersona == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "aipersona_unavailable"})
+		return
+	}
+	ownerID := strings.TrimSpace(r.URL.Query().Get("ownerId"))
+	if ownerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_ownerId"})
+		return
+	}
+	rows, err := s.AIPersona.ListPersonas(r.Context(), ownerID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup_failed", "reason": err.Error()})
+		return
+	}
+	if rows == nil {
+		rows = []aipersona.Persona{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"personas": rows})
 }
 
 // GET /v1/ai/personas/{id}
@@ -138,6 +167,45 @@ func (s *Server) grantConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, c)
+}
+
+// POST /v1/ai/personas/{id}/consents/revoke
+// Body: { subjectId }
+// Revokes the live consent for the (persona, subject, current
+// terms) tuple and returns the revoked row (audit trail kept).
+// 404 no_live_consent when there is nothing live to revoke —
+// revoking what was never granted must not read as success.
+func (s *Server) revokeConsent(w http.ResponseWriter, r *http.Request) {
+	if !methodGuard(w, r, http.MethodPost) {
+		return
+	}
+	if s.AIPersona == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "aipersona_unavailable"})
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/ai/personas/")
+	parts := strings.Split(rest, "/")
+	if len(parts) != 3 || parts[0] == "" || parts[1] != "consents" || parts[2] != "revoke" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_path"})
+		return
+	}
+	var body struct {
+		SubjectID string `json:"subjectId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+		return
+	}
+	c, err := s.AIPersona.RevokeLiveConsent(r.Context(), parts[0], strings.TrimSpace(body.SubjectID))
+	if err != nil {
+		if errors.Is(err, aipersona.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no_live_consent"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "revoke_failed", "reason": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
 }
 
 // GET /v1/ai/personas/{id}/consents?subjectId=&

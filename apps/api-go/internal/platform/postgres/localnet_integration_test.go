@@ -220,6 +220,162 @@ func cleanupLocalNetPG(t *testing.T, pool *pgxpool.Pool, ids []string) {
 	}
 }
 
+// TestProfileViewersPostgresRoundTrip: PROFILE-VIEWERS-001's query is a
+// GROUP BY actor_id + MAX(created_at) ordered by recency — not exercised by
+// the memory-repo test (TestProfileViewersRoundTrip only pins MemoryRepository).
+// Pins the real SQL: two viewers, one of them opens twice, counts and
+// last-opened-at must be per person, not per event.
+func TestProfileViewersPostgresRoundTrip(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewLocalNetRepository(pool)
+	svc := localnet.NewWithMediaLookupAndModelStack(repo, nil, nil)
+
+	run := time.Now().UnixNano()
+	ownerID := "user_viewers_pg_" + itoa(run)
+	viewer1 := "viewer_1_pg_" + itoa(run)
+	viewer2 := "viewer_2_pg_" + itoa(run)
+
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM localnet.interaction_events WHERE target_type='PROFILE' AND target_id=$1`, ownerID)
+	})
+
+	open := func(actor string) {
+		res := svc.HandleContext(ctx, lnEnvelope("RecordProfileOpen", map[string]any{
+			"targetId": ownerID,
+		}, actor))
+		if res.Outcome != "ACCEPTED" {
+			t.Fatalf("RecordProfileOpen(%s): %+v", actor, res.Error)
+		}
+	}
+	open(viewer1)
+	open(viewer2)
+	open(viewer1)
+
+	viewers, err := repo.ListProfileViewers(ctx, ownerID, 50)
+	if err != nil {
+		t.Fatalf("ListProfileViewers: %v", err)
+	}
+	byActor := map[string]localnet.ProfileViewerStat{}
+	for _, v := range viewers {
+		byActor[v.ActorID] = v
+	}
+	if len(byActor) != 2 {
+		t.Fatalf("viewers = %d, want 2 (one row per person), got %+v", len(byActor), viewers)
+	}
+	if byActor[viewer1].Opens != 2 {
+		t.Fatalf("%s opens = %d, want 2", viewer1, byActor[viewer1].Opens)
+	}
+	if byActor[viewer2].Opens != 1 {
+		t.Fatalf("%s opens = %d, want 1", viewer2, byActor[viewer2].Opens)
+	}
+}
+
+// TestMediaImpressionStatsPostgresRoundTrip: MEDIA-DWELL-001's real risk is
+// the SQL, not the Go — jsonb_array_elements + LATERAL join over media_refs
+// is new syntax nothing else in this codebase exercises, and a placeholder/
+// join bug there is invisible to the in-memory test (TestMediaImpressionStats-
+// RoundTrip in the localnet package only exercises MemoryRepository). This
+// pins the actual query against real PostgreSQL: two photos in one post,
+// different viewers/watch time, must aggregate per photo, not per post.
+func TestMediaImpressionStatsPostgresRoundTrip(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewLocalNetRepository(pool)
+	svc := localnet.NewWithMediaLookupAndModelStack(repo, nil, nil)
+
+	run := time.Now().UnixNano()
+	authorID := "user_media_pg_" + itoa(run)
+	mediaA := "ma_pg_a_" + itoa(run)
+	mediaB := "ma_pg_b_" + itoa(run)
+
+	r := svc.HandleContext(ctx, lnEnvelope("CreatePost", map[string]any{
+		"authorType": "USER", "body": "西湖两张照片", "visibility": "PUBLIC", "cityScope": "hn",
+		"mediaRefs": []any{
+			map[string]any{"mediaAssetId": mediaA, "sortOrder": 0},
+			map[string]any{"mediaAssetId": mediaB, "sortOrder": 1},
+		},
+	}, authorID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("CreatePost: %+v", r.Error)
+	}
+	postID := r.Aggregate.ID
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM localnet.interaction_events WHERE target_type='MEDIA' AND target_id IN ($1,$2)`, mediaA, mediaB)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM localnet.posts WHERE id=$1`, postID)
+	})
+
+	impress := func(actor, mediaAssetID string, watchMs int64) {
+		res := svc.HandleContext(ctx, lnEnvelope("RecordMediaImpression", map[string]any{
+			"targetId": mediaAssetID, "watchMs": watchMs,
+		}, actor))
+		if res.Outcome != "ACCEPTED" {
+			t.Fatalf("RecordMediaImpression(%s, %s): %+v", actor, mediaAssetID, res.Error)
+		}
+	}
+	impress("viewer_1_"+itoa(run), mediaA, 900)
+	impress("viewer_1_"+itoa(run), mediaB, 7000)
+	impress("viewer_2_"+itoa(run), mediaB, 3000)
+
+	stats, err := repo.ListMediaImpressionStats(ctx, authorID, 20)
+	if err != nil {
+		t.Fatalf("ListMediaImpressionStats: %v", err)
+	}
+	byMedia := map[string]localnet.MediaImpressionStats{}
+	for _, row := range stats {
+		if row.PostID != postID {
+			t.Fatalf("row %+v has wrong postID, want %s", row, postID)
+		}
+		byMedia[row.MediaAssetID] = row
+	}
+	if len(byMedia) != 2 {
+		t.Fatalf("stats rows = %d, want 2 (one per photo), got %+v", len(byMedia), stats)
+	}
+	a, b := byMedia[mediaA], byMedia[mediaB]
+	if a.Impressions != 1 || a.Viewers != 1 || a.TotalWatchMs != 900 {
+		t.Fatalf("media_a = %+v, want {1 impression, 1 viewer, 900ms}", a)
+	}
+	if b.Impressions != 2 || b.Viewers != 2 || b.TotalWatchMs != 10000 {
+		t.Fatalf("media_b = %+v, want {2 impressions, 2 viewers, 10000ms}", b)
+	}
+
+	// VIEWER-ACTIVITY-001: the actual risk here is the INNER JOIN with an
+	// extra actor_id predicate — viewer_1's activity must show both photos
+	// with their own watch times, viewer_2's must show only mediaB.
+	viewer1Activity, err := repo.ListMediaActivityForViewer(ctx, authorID, "viewer_1_"+itoa(run), 20)
+	if err != nil {
+		t.Fatalf("ListMediaActivityForViewer(viewer_1): %v", err)
+	}
+	byMediaV1 := map[string]localnet.ViewerMediaActivity{}
+	for _, row := range viewer1Activity {
+		if row.PostID != postID {
+			t.Fatalf("row %+v has wrong postID, want %s", row, postID)
+		}
+		byMediaV1[row.MediaAssetID] = row
+	}
+	if len(byMediaV1) != 2 {
+		t.Fatalf("viewer_1 activity rows = %d, want 2, got %+v", len(byMediaV1), viewer1Activity)
+	}
+	if byMediaV1[mediaA].Opens != 1 || byMediaV1[mediaA].TotalWatchMs != 900 {
+		t.Fatalf("viewer_1 on mediaA = %+v, want {1 open, 900ms}", byMediaV1[mediaA])
+	}
+	if byMediaV1[mediaB].Opens != 1 || byMediaV1[mediaB].TotalWatchMs != 7000 {
+		t.Fatalf("viewer_1 on mediaB = %+v, want {1 open, 7000ms}", byMediaV1[mediaB])
+	}
+
+	viewer2Activity, err := repo.ListMediaActivityForViewer(ctx, authorID, "viewer_2_"+itoa(run), 20)
+	if err != nil {
+		t.Fatalf("ListMediaActivityForViewer(viewer_2): %v", err)
+	}
+	if len(viewer2Activity) != 1 || viewer2Activity[0].MediaAssetID != mediaB {
+		t.Fatalf("viewer_2 activity = %+v, want exactly [mediaB]", viewer2Activity)
+	}
+}
+
 func lnEnvelope(commandType string, payload map[string]any, actorID string, targetID ...string) command.Envelope {
 	envelope := command.Envelope{
 		CommandID:      "cmd_ln_pg_" + commandType,

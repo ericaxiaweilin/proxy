@@ -122,17 +122,22 @@ type RepeatRelationship struct {
 }
 
 type Offer struct {
-	ID          string    `json:"offerId"`
-	TaskID      string    `json:"taskId"`
-	SlotID      string    `json:"slotId"`
-	RequesterID string    `json:"requesterId"`
-	AgentID     string    `json:"agentId"`
-	BatchID     string    `json:"batchId,omitempty"`
-	Status      string    `json:"status"` // OFFERED | ACCEPTED | EXPIRED | CANCELLED
-	ExpiresAt   time.Time `json:"expiresAt"`
-	Version     int       `json:"version"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          string `json:"offerId"`
+	TaskID      string `json:"taskId"`
+	SlotID      string `json:"slotId"`
+	RequesterID string `json:"requesterId"`
+	AgentID     string `json:"agentId"`
+	BatchID     string `json:"batchId,omitempty"`
+	Status      string `json:"status"` // OFFERED | ACCEPTED | EXPIRED | CANCELLED
+	// TOPIC-INVITE-001: 主题邀约字段。档位 Offer 这两项为空；主题邀约的
+	// task/slot 为空（无任务可挂）。注意 orders.slot_id 必须存 NULL 而不是 ""，
+	// 否则 uq_orders_slot_active 唯一索引会把所有主题订单卡成只能成交一单。
+	TopicKey  string    `json:"topicKey,omitempty"`
+	Note      string    `json:"note,omitempty"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Version   int       `json:"version"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type Repository interface {
@@ -356,10 +361,14 @@ func (r *MemoryRepository) AcceptOfferAndCreateOrder(_ context.Context, offer Of
 			// We store slot association in order.Snapshot.Scope? Use simple check: same TaskID+AgentID already ordered is not allowed? For now use slot
 		}
 	}
-	// Check duplicate slot via offers already accepted for same slot
-	for _, o := range r.offers {
-		if o.SlotID == offer.SlotID && o.Status == "ACCEPTED" && o.ID != offer.ID {
-			return ErrOfferNotAvailable
+	// Check duplicate slot via offers already accepted for same slot.
+	// 空 slot（主题邀约）跳过 —— 对应 PG 那边 uq_orders_slot_active 的
+	// WHERE slot_id IS NOT NULL。空串也判重的话，第二个主题订单永远成交不了。
+	if offer.SlotID != "" {
+		for _, o := range r.offers {
+			if o.SlotID == offer.SlotID && o.Status == "ACCEPTED" && o.ID != offer.ID {
+				return ErrOfferNotAvailable
+			}
 		}
 	}
 	// update offer
@@ -518,7 +527,7 @@ func (s *Service) resolveRequesterJurisdiction(ctx context.Context, requesterID 
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "CreateOffer", "CreateSlotOffer", "AcceptSlotOffer", "GetOffer", "ListAgentOffers",
+	case "CreateOffer", "CreateSlotOffer", "AcceptSlotOffer", "CreateTopicInvite", "RespondTopicInvite", "GetOffer", "ListAgentOffers",
 		"ListMyOrders",
 		"CheckInOrder", "SubmitEvidence",
 		"ConfirmCooperation", "StartExecution", "RecordDirectSettlement",
@@ -544,6 +553,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.createSlotOffer(ctx, e)
 	case "AcceptSlotOffer":
 		return s.acceptSlotOffer(ctx, e)
+	case "CreateTopicInvite":
+		return s.createTopicInvite(ctx, e)
+	case "RespondTopicInvite":
+		return s.respondTopicInvite(ctx, e)
 	case "GetOffer":
 		return s.getOffer(ctx, e)
 	case "ListAgentOffers":
@@ -685,6 +698,21 @@ func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.R
 	}, domainEvents)
 }
 
+// offerTTLSeconds 归一化 TTL：缺省 fallback；上下限 30s..1800s。
+// 下限防"0 秒过期"的必拒单，上限防长挂单占着列表。调用方传秒数。
+func offerTTLSeconds(requested int64, fallback time.Duration) time.Duration {
+	if requested <= 0 {
+		return fallback
+	}
+	if requested < 30 {
+		return 30 * time.Second
+	}
+	if requested > 1800 {
+		return 1800 * time.Second
+	}
+	return time.Duration(requested) * time.Second
+}
+
 // ---------- CreateSlotOffer (M4 wave) ----------
 type slotOfferPayload struct {
 	TaskID             string `json:"taskId"`
@@ -693,6 +721,8 @@ type slotOfferPayload struct {
 	BatchID            string `json:"batchId"`
 	AgreedCompensation int64  `json:"agreedCompensation"`
 	Currency           string `json:"currency"`
+	// TOPIC-INVITE-001: 可选 TTL 秒数（缺省 300s，保持现状）。
+	TTLSeconds int64 `json:"ttlSeconds"`
 }
 
 func (s *Service) createSlotOffer(ctx context.Context, e command.Envelope) command.Result {
@@ -719,7 +749,7 @@ func (s *Service) createSlotOffer(ctx context.Context, e command.Envelope) comma
 		AgentID:     p.AgentID,
 		BatchID:     p.BatchID,
 		Status:      "OFFERED",
-		ExpiresAt:   now.Add(5 * time.Minute),
+		ExpiresAt:   now.Add(offerTTLSeconds(p.TTLSeconds, 5*time.Minute)),
 		Version:     1,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -767,6 +797,13 @@ func (s *Service) acceptSlotOffer(ctx context.Context, e command.Envelope) comma
 	if offer.AgentID != e.Actor.ID && offer.AgentID != e.Principal.ID {
 		return command.Rejected(e, "OFFER_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.offer_not_owned", nil)
 	}
+	return s.acceptOfferAsOrder(ctx, e, offer, now)
+}
+
+// acceptOfferAsOrder 把一个已校验的 OFFERED offer 落成订单。档位与主题共用 ——
+// 差异只在校验段（档位查 slot，主题查 topic），落库走同一条
+// AcceptOfferAndCreateOrder（主题订单的 task/slot 存 NULL，不触发档位唯一索引）。
+func (s *Service) acceptOfferAsOrder(ctx context.Context, e command.Envelope, offer Offer, now time.Time) command.Result {
 	// Build Order snapshot from Offer
 	snapshot := OrderSnapshot{
 		Requester:          offer.RequesterID,
@@ -810,6 +847,110 @@ func (s *Service) acceptSlotOffer(ctx context.Context, e command.Envelope) comma
 	return acceptedWithPayload(e, "Order", order.ID, 1, order.Lifecycle, map[string]any{
 		"orderId": order.ID, "offerId": offer.ID, "slotId": offer.SlotID,
 	}, domainEvents)
+}
+
+// ---------- CreateTopicInvite (TOPIC-INVITE-001) ----------
+// 原型"加入 · 邀请她"按主题邀约：没有 task/slot/金额，只有 agent + 主题 (+一句话)。
+// 与档位 Offer 共用一张表、同一套过期/接受语义 —— 差异只有 topic/note 两列和
+// TTL 默认值（邀约 60s，原型 60 秒倒计时）。接受同样落单（task/slot 存 NULL）。
+type topicInvitePayload struct {
+	AgentID    string `json:"agentId"`
+	TopicKey   string `json:"topicKey"`
+	Note       string `json:"note"`
+	TTLSeconds int64  `json:"ttlSeconds"`
+}
+
+func (s *Service) createTopicInvite(ctx context.Context, e command.Envelope) command.Result {
+	var p topicInvitePayload
+	if !decode(e.Payload, &p) {
+		return command.Rejected(e, "INVALID_TOPIC_INVITE", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_topic_invite", nil)
+	}
+	agentID := strings.TrimSpace(p.AgentID)
+	topicKey := strings.TrimSpace(p.TopicKey)
+	note := strings.TrimSpace(p.Note)
+	if agentID == "" || topicKey == "" {
+		return command.Rejected(e, "INVALID_TOPIC_INVITE", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_topic_invite", nil)
+	}
+	if len([]rune(topicKey)) > 32 || len([]rune(note)) > 280 {
+		return command.Rejected(e, "INVALID_TOPIC_INVITE", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_topic_invite", nil)
+	}
+	// 只有需求方能邀，不能给自己发，也不能替别人发。
+	if e.Actor.Type != "USER" || e.Actor.ID == "" || e.Actor.ID == agentID {
+		return command.Rejected(e, "TOPIC_INVITE_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.topic_invite_not_allowed", nil)
+	}
+	now := s.clock.Now().UTC()
+	offer := Offer{
+		ID:          newID("off_"),
+		TaskID:      "",
+		SlotID:      "",
+		RequesterID: e.Actor.ID,
+		AgentID:     agentID,
+		Status:      "OFFERED",
+		TopicKey:    topicKey,
+		Note:        note,
+		ExpiresAt:   now.Add(offerTTLSeconds(p.TTLSeconds, 60*time.Second)),
+		Version:     1,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	domainEvents := []event.DomainEvent{event.New("TopicInviteCreated", "Offer", offer.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"agentId": offer.AgentID, "topicKey": offer.TopicKey, "expiresAt": offer.ExpiresAt.Format(time.RFC3339),
+	})}
+	if err := s.repository.CreateOfferAndPublish(ctx, offer, domainEvents); err != nil {
+		return command.Rejected(e, "TOPIC_INVITE_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.topic_invite_failed", nil)
+	}
+	return acceptedWithPayload(e, "Offer", offer.ID, 1, offer.Status, map[string]any{
+		"offerId": offer.ID, "topicKey": offer.TopicKey, "expiresAt": offer.ExpiresAt.Format(time.RFC3339),
+	}, domainEvents)
+}
+
+// ---------- RespondTopicInvite (TOPIC-INVITE-001) ----------
+// 女孩接/拒。接受走共用落单；拒绝记 REJECTED（schema 原生支持，不是 CANCELLED ——
+// 取消是需求方的动作，拒绝是女孩的动作，审计要分得清）。只能本人操作自己的邀约。
+type respondTopicInvitePayload struct {
+	OfferID string `json:"offerId"`
+	Accept  bool   `json:"accept"`
+}
+
+func (s *Service) respondTopicInvite(ctx context.Context, e command.Envelope) command.Result {
+	var p respondTopicInvitePayload
+	// 注意：这里故意不用 target 兜 offerId —— 体解析失败时 Accept 是零值 false，
+	// 兜了就会把一次坏请求误判成"拒绝"，把别人的邀约拒掉。解析失败直接拒掉重发。
+	if !decode(e.Payload, &p) || p.OfferID == "" {
+		return command.Rejected(e, "INVALID_RESPOND_INVITE", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_respond_invite", nil)
+	}
+	offer, err := s.repository.GetOffer(ctx, p.OfferID)
+	if errors.Is(err, ErrOfferNotFound) {
+		return command.Rejected(e, "OFFER_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.offer_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "OFFER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.offer_read_failed", nil)
+	}
+	if offer.Status != "OFFERED" {
+		return command.Rejected(e, "OFFER_NOT_AVAILABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.offer_not_available", map[string]any{"status": offer.Status})
+	}
+	now := s.clock.Now().UTC()
+	if now.After(offer.ExpiresAt) {
+		return command.Rejected(e, "OFFER_EXPIRED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.offer_expired", map[string]any{"expiresAt": offer.ExpiresAt.Format(time.RFC3339)})
+	}
+	if offer.AgentID != e.Actor.ID && offer.AgentID != e.Principal.ID {
+		return command.Rejected(e, "OFFER_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.offer_not_owned", nil)
+	}
+	if !p.Accept {
+		offer.Status = "REJECTED"
+		offer.Version++
+		offer.UpdatedAt = now
+		if err := s.repository.UpdateOffer(ctx, offer, offer.Version-1); err != nil {
+			if errors.Is(err, ErrVersionConflict) {
+				return command.Rejected(e, "OFFER_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "fulfillment.offer_version_conflict", nil)
+			}
+			return command.Rejected(e, "RESPOND_INVITE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.respond_invite_failed", nil)
+		}
+		return acceptedWithPayload(e, "Offer", offer.ID, offer.Version, offer.Status, map[string]any{
+			"offerId": offer.ID, "status": offer.Status,
+		}, nil)
+	}
+	return s.acceptOfferAsOrder(ctx, e, offer, now)
 }
 
 func (s *Service) getOffer(ctx context.Context, e command.Envelope) command.Result {

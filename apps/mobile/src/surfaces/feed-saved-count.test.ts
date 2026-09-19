@@ -14,15 +14,18 @@ const feedCode = stripComments(feed);
 
 describe("FEED-SAVED-COUNT-001 saved count never invents an aggregate", () => {
   it("shows only the viewer state, not a fabricated number", () => {
-    expect(feedCode).toContain('{isSaved ? "已收藏" : "收藏"}');
+    // FEED-ACTION-ICONS-001: 收藏从文字态("收藏"/"已收藏")换成图标实心/
+    // 描边态，语义没变——filled 跟着 isSaved 走，还是只反映"我收没收藏"，
+    // 图标旁边没有数字，不会被拿来冒充"多少人收藏"这个真值。
+    expect(feedCode).toContain('filled={isSaved} name="bookmark"');
     expect(feedCode).not.toContain("收藏 {isSaved ? 1 : 0}");
   });
 
   it("keeps the two media systems in their own lanes", () => {
     // #18 订正：这不是“两套重复系统”——feed 多图轨＋X 式视频自动播只能用
     // AdaptiveMediaCollection（ThreadsPostMedia 没有 autoplay/position，
-    // 也只取前 4 张）；个人主页照片墙才用 ThreadsPostMedia 网格。
-    // 把 feed 迁到网格等于把审计自己夸过的自动播给砍了。谁再提“合并”，
+    // 也只取前 4 张）；个人主页照片墙才用 ThreadsPostMedia 单行铺开。
+    // 把 feed 迁到单行等于把审计自己夸过的自动播给砍了。谁再提“合并”，
     // 先回答 autoplay 和第 5 张以后怎么办。
     expect(feedCode).toContain("<AdaptiveMediaCollection");
     expect(feedCode).toContain("activeVideoKey");

@@ -227,8 +227,8 @@ func (r *BusinessRepository) GetStorePhoto(ctx context.Context, storeID, photoID
 
 func (r *BusinessRepository) UpsertStoreLines(ctx context.Context, l business.StoreLines) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO business.store_lines (store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, updated_by, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		INSERT INTO business.store_lines (store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, updated_by, updated_at, wifi, smoking, ac_temp_c, power, quiet, seating)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		ON CONFLICT (store_id) DO UPDATE SET
 			logo_asset_path=EXCLUDED.logo_asset_path,
 			description=EXCLUDED.description,
@@ -236,17 +236,25 @@ func (r *BusinessRepository) UpsertStoreLines(ctx context.Context, l business.St
 			contact_phone=EXCLUDED.contact_phone,
 			contact_email=EXCLUDED.contact_email,
 			updated_by=EXCLUDED.updated_by,
-			updated_at=EXCLUDED.updated_at`,
-		l.StoreID, l.BusinessID, l.LogoAssetPath, l.Description, l.HoursJSON, l.ContactPhone, l.ContactEmail, l.UpdatedBy, l.UpdatedAt)
+			updated_at=EXCLUDED.updated_at,
+			wifi=EXCLUDED.wifi,
+			smoking=EXCLUDED.smoking,
+			ac_temp_c=EXCLUDED.ac_temp_c,
+			power=EXCLUDED.power,
+			quiet=EXCLUDED.quiet,
+			seating=EXCLUDED.seating`,
+		l.StoreID, l.BusinessID, l.LogoAssetPath, l.Description, l.HoursJSON, l.ContactPhone, l.ContactEmail, l.UpdatedBy, l.UpdatedAt,
+		l.Wifi, l.Smoking, l.AcTempC, l.Power, l.Quiet, l.Seating)
 	return err
 }
 
 func (r *BusinessRepository) GetStoreLines(ctx context.Context, storeID string) (business.StoreLines, error) {
 	var l business.StoreLines
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, updated_by, updated_at
+		SELECT store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, updated_by, updated_at, wifi, smoking, ac_temp_c, power, quiet, seating
 		FROM business.store_lines WHERE store_id=$1`, storeID).Scan(
 		&l.StoreID, &l.BusinessID, &l.LogoAssetPath, &l.Description, &l.HoursJSON, &l.ContactPhone, &l.ContactEmail, &l.UpdatedBy, &l.UpdatedAt,
+		&l.Wifi, &l.Smoking, &l.AcTempC, &l.Power, &l.Quiet, &l.Seating,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return business.StoreLines{StoreID: storeID}, nil

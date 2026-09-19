@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
 import type { EngagementClient } from "../engagement-client";
@@ -10,6 +10,7 @@ import { color } from "../theme";
 import { ProfileTabs, type ProfileMediaEntry } from "./ProfileTabs";
 import { MediaViewer } from "../media/AdaptiveMediaCollection";
 import { mapFollowError } from "./feed-error-map";
+import { beginMediaView, beginPostView, endMediaView, endPostView } from "../post-impression";
 import {
   parentPostIdsForReplies,
   replyEntriesFromReplies,
@@ -62,6 +63,34 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
   // 与我的主页同款 MediaViewer，可左右切、可关。
   const [viewer, setViewer] = useState<{ postId: string; index: number } | undefined>(undefined);
   const viewedItems = viewer ? resolvedMedia[viewer.postId] ?? [] : [];
+  // TWIN-SIGNALS-001: 看别人的帖子 = 一次曝光，按帖子记一次停留——只在
+  // 换到不同帖子时才 flush，同一个帖子里划着看好几张照片不重复计。依赖数组
+  // 用 viewer?.postId（字符串），不是 viewer（对象引用），是这条区别的关键：
+  // 划照片只改 index，postId 字符串没变，effect 不会重跑。
+  const postViewStartRef = useRef(0);
+  useEffect(() => {
+    if (!viewer) return;
+    postViewStartRef.current = beginPostView();
+    const postId = viewer.postId;
+    return () => { void endPostView(localNet, postId, postViewStartRef.current); };
+  }, [viewer?.postId, localNet]);
+  // MEDIA-DWELL-001: 同一个帖子里的每张照片单独计时——划到下一张就 flush
+  // 上一张，不是整段查看会话关闭才报一次（那样多张照片的时间会全记在
+  // postId 一个数字里，参考稿里"每张照片都有追溯"要的正是这个粒度）。
+  // 依赖数组用 viewer（对象引用），每次 index 变都要重跑。
+  const mediaViewStartRef = useRef(0);
+  useEffect(() => {
+    if (!viewer) return;
+    mediaViewStartRef.current = beginMediaView();
+    const mediaAssetId = resolvedMedia[viewer.postId]?.[viewer.index]?.mediaAssetId;
+    return () => { if (mediaAssetId) void endMediaView(localNet, mediaAssetId, mediaViewStartRef.current); };
+  }, [viewer, localNet, resolvedMedia]);
+  // PROFILE-VISIT-001: 打开别人的主页 = 一次访问，喂给对方的"主页访问"战绩
+  // （见 friend-crm.tsx 的 Advanced Insight / me.tsx 的访问与转化）。失败静默，
+  // 埋点从不影响主渲染路径；recordProfileOpen 内部已经排除"自己看自己"。
+  useEffect(() => {
+    void localNet.recordProfileOpen(target.userId);
+  }, [target.userId, localNet]);
   const photos = useMemo<ProfileMediaEntry[]>(() => resolvedPosts.flatMap((post) => (resolvedMedia[post.postId] ?? []).map((item, index) => ({ item, index, postId: post.postId }))), [resolvedPosts, resolvedMedia]);
   useEffect(() => {
     setResolvedPosts(target.posts);

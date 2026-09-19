@@ -25,6 +25,7 @@ import type { ExperienceClient } from "../experience-client";
 import type { AIAccountClient, PlatformAIAccount } from "../ai-account-client";
 import type { RelationshipClient } from "../relationship-client";
 import type { ProfileClient, ProfileWire } from "../profile-client";
+import { localApiBaseUrl } from "../native-clients";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { type SceneToolId } from "@proxy/contracts";
@@ -220,10 +221,19 @@ export function RequesterHome({
   function profileWireToPerson(wire: ProfileWire): RecommendPerson {
     const name = wire.name || wire.handle || wire.userAccountId;
     const first = [...name.trim()][0] ?? "?";
+    // 服务端搜出来的人自带 avatarPath（assets/<id>），转成 thumb 直出 ——
+    // 之前这里直接丢掉，全站真人清一色灰首字母。不可见/失效的由卡片
+    // onError 回落首字母（markAvatarBroken），不猜不编。
+    const avatarAssetId = wire.avatarPath.startsWith("assets/")
+      ? wire.avatarPath.slice("assets/".length).trim()
+      : "";
     return {
       id: wire.userAccountId,
       name,
       initials: first.toUpperCase(),
+      ...(avatarAssetId !== "" && !avatarAssetId.startsWith("avatar-")
+        ? { photoUri: `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(avatarAssetId)}` }
+        : {}),
       bio: [wire.handle ? `@${wire.handle.replace(/^@+/, "")}` : "", wire.city].filter(Boolean).join(" · "),
       tags: [],
       // PERSON-DISTANCE-ZERO-001: 不填距离。服务端没有这个人的坐标，
@@ -750,7 +760,7 @@ export function RequesterHome({
         <FilterChipRail
           items={RECOMMEND_MODE_ORDER.map((modeId) => {
             const feed = SCENE_RECOMMEND[modeId];
-            const actionIconId = modeId === "PHOTO" ? "photo" : modeId === "COMPANION" ? "city-walk" : modeId === "COFFEE_MEAL" ? "dining" : modeId === "ACTIVITY" ? "music" : modeId === "TRIP" ? "travel" : modeId === "CREATOR" ? "explore-store" : modeId === "TRANSLATE" || modeId === "HOSPITAL" ? "translation" : "city-walk";
+            const actionIconId = modeId === "PHOTO" ? "photo" : modeId === "COMPANION" ? "city-walk" : modeId === "COFFEE_MEAL" ? "dining" : modeId === "ACTIVITY" ? "music" : modeId === "TRIP" ? "travel" : modeId === "CREATOR" ? "explore-store" : modeId === "TRANSLATE" || modeId === "HOSPITAL" ? "translation" : modeId === "MEDICAL" ? "urban-support" : "city-walk";
             return {
               id: modeId,
               assetIcon: SCENE_ACTIONS.find((action) => action.id === actionIconId)!.icon,

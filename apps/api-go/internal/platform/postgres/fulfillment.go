@@ -176,9 +176,9 @@ func (r *FulfillmentRepository) UpdateOrderAndPublish(ctx context.Context, order
 
 func (r *FulfillmentRepository) CreateOffer(ctx context.Context, o fulfillment.Offer) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO fulfillment.offers (id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		o.ID, o.TaskID, o.SlotID, o.RequesterID, o.AgentID, nullableText(o.BatchID), o.Status, o.ExpiresAt, o.Version, o.CreatedAt, o.UpdatedAt,
+		INSERT INTO fulfillment.offers (id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at, topic_key, note)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		o.ID, o.TaskID, o.SlotID, o.RequesterID, o.AgentID, nullableText(o.BatchID), o.Status, o.ExpiresAt, o.Version, o.CreatedAt, o.UpdatedAt, o.TopicKey, o.Note,
 	)
 	return err
 }
@@ -208,9 +208,9 @@ func (r *FulfillmentRepository) GetOffer(ctx context.Context, id string) (fulfil
 	var o fulfillment.Offer
 	var batchID *string
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at
+		SELECT id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at, topic_key, note
 		FROM fulfillment.offers WHERE id=$1`, id).Scan(
-		&o.ID, &o.TaskID, &o.SlotID, &o.RequesterID, &o.AgentID, &batchID, &o.Status, &o.ExpiresAt, &o.Version, &o.CreatedAt, &o.UpdatedAt,
+		&o.ID, &o.TaskID, &o.SlotID, &o.RequesterID, &o.AgentID, &batchID, &o.Status, &o.ExpiresAt, &o.Version, &o.CreatedAt, &o.UpdatedAt, &o.TopicKey, &o.Note,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fulfillment.Offer{}, fulfillment.ErrOfferNotFound
@@ -241,7 +241,7 @@ func (r *FulfillmentRepository) UpdateOffer(ctx context.Context, o fulfillment.O
 
 func (r *FulfillmentRepository) ListOffersByAgent(ctx context.Context, agentID string) ([]fulfillment.Offer, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at
+		SELECT id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at, topic_key, note
 		FROM fulfillment.offers WHERE agent_id=$1 ORDER BY created_at DESC`, agentID)
 	if err != nil {
 		return nil, err
@@ -251,7 +251,7 @@ func (r *FulfillmentRepository) ListOffersByAgent(ctx context.Context, agentID s
 	for rows.Next() {
 		var o fulfillment.Offer
 		var batchID *string
-		if err := rows.Scan(&o.ID, &o.TaskID, &o.SlotID, &o.RequesterID, &o.AgentID, &batchID, &o.Status, &o.ExpiresAt, &o.Version, &o.CreatedAt, &o.UpdatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.TaskID, &o.SlotID, &o.RequesterID, &o.AgentID, &batchID, &o.Status, &o.ExpiresAt, &o.Version, &o.CreatedAt, &o.UpdatedAt, &o.TopicKey, &o.Note); err != nil {
 			return nil, err
 		}
 		if batchID != nil {
@@ -299,10 +299,13 @@ func (r *FulfillmentRepository) AcceptOfferAndCreateOrder(ctx context.Context, o
 			return err
 		}
 		// Use slot/task columns if available
+		// TOPIC-INVITE-001: 主题订单没有 task/slot —— 必须存 NULL 而不是 ""，
+		// 否则 uq_orders_slot_active（WHERE slot_id IS NOT NULL）会把第二个
+		// 主题订单当成"同一个档位卖两次"拒掉。档位订单恒有非空 slot，行为不变。
 		if _, err := tx.Exec(txCtx, `
 			INSERT INTO fulfillment.orders (id, requester_id, agent_id, need_id, lifecycle, version, snapshot, amendments, settlement, outcome, created_at, updated_at, task_id, slot_id, offer_id)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-			order.ID, order.RequesterID, order.AgentID, order.NeedID, order.Lifecycle, order.Version, snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, offer.TaskID, offer.SlotID, offer.ID,
+			order.ID, order.RequesterID, order.AgentID, order.NeedID, order.Lifecycle, order.Version, snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, nullableText(offer.TaskID), nullableText(offer.SlotID), offer.ID,
 		); err != nil {
 			// unique violation on slot -> slot unavailable
 			if isUniqueViolation(err) {

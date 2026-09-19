@@ -11,6 +11,7 @@ const TYPES: { key: OpportunityType; label: string }[] = [
   { key: "coffee_chinese", label: "咖啡加中文交流" },
   { key: "bilingual_store", label: "看店加双语服务" },
   { key: "event_photo", label: "活动加拍照" },
+  { key: "other", label: "其他未分类" },
 ];
 
 export function R37TypePalette({ active, onChange }: { active: OpportunityType | "all"; onChange: (next: OpportunityType | "all") => void }): React.JSX.Element {

@@ -1408,3 +1408,314 @@ func TestPostIsExpiredBoundaries(t *testing.T) {
 		t.Error("a future expiry must not count as expired")
 	}
 }
+
+// TWIN-SIGNALS-001: 曝光带停留毫秒入库（负数按 0 计），战绩读侧按作者聚合
+// （impressions / viewers / totalWatchMs），只能查自己的帖子。
+func TestPostImpressionStatsRoundTrip(t *testing.T) {
+	s := New()
+	create := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "USER", "body": "今晚西湖夜跑，有人一起吗", "visibility": "PUBLIC", "cityScope": "河内",
+	}))
+	if create.Outcome != "ACCEPTED" {
+		t.Fatalf("create post: got %s (%+v)", create.Outcome, create.Error)
+	}
+	posts, err := s.repository.Snapshot(context.Background())
+	if err != nil || len(posts) != 1 {
+		t.Fatalf("snapshot = %d posts, err = %v", len(posts), err)
+	}
+	postID := posts[0].ID
+
+	impress := func(actor string, watchMs int64) command.Result {
+		e := envelopeFor("", "RecordPostImpression", map[string]any{"targetId": postID, "watchMs": watchMs})
+		e.Actor = command.Actor{Type: "USER", ID: actor}
+		return s.Handle(e)
+	}
+	if res := impress("viewer_9", 5200); res.Outcome != "ACCEPTED" {
+		t.Fatalf("impression: got %s (%+v)", res.Outcome, res.Error)
+	}
+	// 负停留按 0 计，不拒绝整条事件。
+	if res := impress("viewer_7", -5); res.Outcome != "ACCEPTED" {
+		t.Fatalf("negative watch impression: got %s (%+v)", res.Outcome, res.Error)
+	}
+
+	statsRes := s.Handle(envelopeFor("", "ListPostImpressionStats", map[string]any{}))
+	if statsRes.Outcome != "ACCEPTED" {
+		t.Fatalf("stats: got %s (%+v)", statsRes.Outcome, statsRes.Error)
+	}
+	var payload struct {
+		Stats []PostImpressionStats `json:"stats"`
+	}
+	if err := json.Unmarshal([]byte(statsRes.OperationRef), &payload); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	if len(payload.Stats) != 1 {
+		t.Fatalf("stats rows = %d, want 1", len(payload.Stats))
+	}
+	row := payload.Stats[0]
+	if row.PostID != postID || row.Impressions != 2 || row.Viewers != 2 || row.TotalWatchMs != 5200 {
+		t.Fatalf("row = %+v, want {post, 2 impressions, 2 viewers, 5200ms}", row)
+	}
+
+	// 别人的帖子数据不暴露。
+	forbidden := s.Handle(envelopeFor("", "ListPostImpressionStats", map[string]any{"authorId": "user_other"}))
+	if forbidden.Outcome != "REJECTED" {
+		t.Fatalf("other author stats: got %s, want REJECTED (STATS_FORBIDDEN)", forbidden.Outcome)
+	}
+
+	// 没帖子的作者拿 []，不是 null。
+	empty := envelopeFor("", "ListPostImpressionStats", map[string]any{})
+	empty.Actor = command.Actor{Type: "USER", ID: "user_nothing"}
+	emptyRes := s.Handle(empty)
+	if emptyRes.Outcome != "ACCEPTED" {
+		t.Fatalf("empty stats: got %s", emptyRes.Outcome)
+	}
+	if !strings.Contains(emptyRes.OperationRef, `"stats":[]`) {
+		t.Fatalf("ref = %s, want empty stats array, never null", emptyRes.OperationRef)
+	}
+}
+
+// TestProfileViewStatsRoundTrip: PROFILE-VISIT-001 —— 打开了多少次、多少个
+//不同的人打开过；只能查自己的，别人的主页数据不暴露。
+func TestProfileViewStatsRoundTrip(t *testing.T) {
+	s := New()
+	open := func(actor, ownerID string) command.Result {
+		e := envelopeFor("", "RecordProfileOpen", map[string]any{"targetId": ownerID})
+		e.Actor = command.Actor{Type: "USER", ID: actor}
+		return s.Handle(e)
+	}
+	if res := open("viewer_1", "user_001"); res.Outcome != "ACCEPTED" {
+		t.Fatalf("open 1: got %s (%+v)", res.Outcome, res.Error)
+	}
+	if res := open("viewer_2", "user_001"); res.Outcome != "ACCEPTED" {
+		t.Fatalf("open 2: got %s (%+v)", res.Outcome, res.Error)
+	}
+	// 同一个人再看一次：opens 累加，uniqueViewers 不变。
+	if res := open("viewer_1", "user_001"); res.Outcome != "ACCEPTED" {
+		t.Fatalf("open 3 (repeat viewer): got %s (%+v)", res.Outcome, res.Error)
+	}
+
+	statsRes := s.Handle(envelopeFor("", "ListProfileViewStats", map[string]any{}))
+	if statsRes.Outcome != "ACCEPTED" {
+		t.Fatalf("stats: got %s (%+v)", statsRes.Outcome, statsRes.Error)
+	}
+	var payload struct {
+		Opens         int64 `json:"opens"`
+		UniqueViewers int64 `json:"uniqueViewers"`
+	}
+	if err := json.Unmarshal([]byte(statsRes.OperationRef), &payload); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	if payload.Opens != 3 || payload.UniqueViewers != 2 {
+		t.Fatalf("stats = %+v, want {opens: 3, uniqueViewers: 2}", payload)
+	}
+
+	// 别人的主页数据不暴露。
+	forbidden := s.Handle(envelopeFor("", "ListProfileViewStats", map[string]any{"ownerId": "user_other"}))
+	if forbidden.Outcome != "REJECTED" {
+		t.Fatalf("other owner stats: got %s, want REJECTED (STATS_FORBIDDEN)", forbidden.Outcome)
+	}
+
+	// 没人看过的主页拿 {0, 0}，不是拒绝。
+	nothing := envelopeFor("", "ListProfileViewStats", map[string]any{})
+	nothing.Actor = command.Actor{Type: "USER", ID: "user_nobody_viewed"}
+	nothingRes := s.Handle(nothing)
+	if nothingRes.Outcome != "ACCEPTED" {
+		t.Fatalf("empty stats: got %s", nothingRes.Outcome)
+	}
+	if !strings.Contains(nothingRes.OperationRef, `"opens":0`) || !strings.Contains(nothingRes.OperationRef, `"uniqueViewers":0`) {
+		t.Fatalf("ref = %s, want opens=0 uniqueViewers=0", nothingRes.OperationRef)
+	}
+}
+
+// TestProfileViewersRoundTrip: PROFILE-VIEWERS-001 —— 汇总数字("3 次访问")
+// 回答不了"是谁"；这条测试锁住按人分组的明细：谁看了几次、最近一次是什么
+// 时候，按最近访问时间倒序。
+func TestProfileViewersRoundTrip(t *testing.T) {
+	s := New()
+	open := func(actor, ownerID string) command.Result {
+		e := envelopeFor("", "RecordProfileOpen", map[string]any{"targetId": ownerID})
+		e.Actor = command.Actor{Type: "USER", ID: actor}
+		return s.Handle(e)
+	}
+	if res := open("viewer_1", "user_001"); res.Outcome != "ACCEPTED" {
+		t.Fatalf("open by viewer_1: got %s (%+v)", res.Outcome, res.Error)
+	}
+	if res := open("viewer_2", "user_001"); res.Outcome != "ACCEPTED" {
+		t.Fatalf("open by viewer_2: got %s (%+v)", res.Outcome, res.Error)
+	}
+	// viewer_1 看了两次——次数要按人累加，不是按事件平铺。
+	if res := open("viewer_1", "user_001"); res.Outcome != "ACCEPTED" {
+		t.Fatalf("open by viewer_1 (2nd): got %s (%+v)", res.Outcome, res.Error)
+	}
+
+	viewersRes := s.Handle(envelopeFor("", "ListProfileViewers", map[string]any{}))
+	if viewersRes.Outcome != "ACCEPTED" {
+		t.Fatalf("viewers: got %s (%+v)", viewersRes.Outcome, viewersRes.Error)
+	}
+	var payload struct {
+		Viewers []ProfileViewerStat `json:"viewers"`
+	}
+	if err := json.Unmarshal([]byte(viewersRes.OperationRef), &payload); err != nil {
+		t.Fatalf("decode viewers: %v", err)
+	}
+	if len(payload.Viewers) != 2 {
+		t.Fatalf("viewers = %d, want 2 (one row per person, not per event)", len(payload.Viewers))
+	}
+	byActor := map[string]ProfileViewerStat{}
+	for _, v := range payload.Viewers {
+		byActor[v.ActorID] = v
+	}
+	if byActor["viewer_1"].Opens != 2 {
+		t.Fatalf("viewer_1 opens = %d, want 2", byActor["viewer_1"].Opens)
+	}
+	if byActor["viewer_2"].Opens != 1 {
+		t.Fatalf("viewer_2 opens = %d, want 1", byActor["viewer_2"].Opens)
+	}
+
+	// 别人的主页访客明细不暴露。
+	forbidden := s.Handle(envelopeFor("", "ListProfileViewers", map[string]any{"ownerId": "user_other"}))
+	if forbidden.Outcome != "REJECTED" {
+		t.Fatalf("other owner viewers: got %s, want REJECTED (STATS_FORBIDDEN)", forbidden.Outcome)
+	}
+
+	// 没人看过的主页拿 []，不是拒绝。
+	nothing := envelopeFor("", "ListProfileViewers", map[string]any{})
+	nothing.Actor = command.Actor{Type: "USER", ID: "user_nobody_viewed_2"}
+	nothingRes := s.Handle(nothing)
+	if nothingRes.Outcome != "ACCEPTED" {
+		t.Fatalf("empty viewers: got %s", nothingRes.Outcome)
+	}
+	if !strings.Contains(nothingRes.OperationRef, `"viewers":[]`) {
+		t.Fatalf("ref = %s, want empty viewers array, never null", nothingRes.OperationRef)
+	}
+}
+
+// TestMediaImpressionStatsRoundTrip: MEDIA-DWELL-001 —— 同一个帖子里的两张
+// 照片，曝光数字必须能分开，不能都记成帖子一个总数。
+func TestMediaImpressionStatsRoundTrip(t *testing.T) {
+	s := New()
+	create := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "USER", "body": "西湖两张照片", "visibility": "PUBLIC", "cityScope": "河内",
+		"mediaRefs": []map[string]any{
+			{"mediaAssetId": "media_a", "mediaType": "IMAGE", "sortOrder": 0},
+			{"mediaAssetId": "media_b", "mediaType": "IMAGE", "sortOrder": 1},
+		},
+	}))
+	if create.Outcome != "ACCEPTED" {
+		t.Fatalf("create post: got %s (%+v)", create.Outcome, create.Error)
+	}
+	posts, err := s.repository.Snapshot(context.Background())
+	if err != nil || len(posts) != 1 {
+		t.Fatalf("snapshot = %d posts, err = %v", len(posts), err)
+	}
+	postID := posts[0].ID
+
+	impress := func(actor, mediaAssetID string, watchMs int64) command.Result {
+		e := envelopeFor("", "RecordMediaImpression", map[string]any{"targetId": mediaAssetID, "watchMs": watchMs})
+		e.Actor = command.Actor{Type: "USER", ID: actor}
+		return s.Handle(e)
+	}
+	// media_a: 划过去，1 秒都没到。media_b: 停留久，两个人看过。
+	if res := impress("viewer_1", "media_a", 800); res.Outcome != "ACCEPTED" {
+		t.Fatalf("impress media_a: got %s (%+v)", res.Outcome, res.Error)
+	}
+	if res := impress("viewer_1", "media_b", 6500); res.Outcome != "ACCEPTED" {
+		t.Fatalf("impress media_b (1): got %s (%+v)", res.Outcome, res.Error)
+	}
+	if res := impress("viewer_2", "media_b", 4200); res.Outcome != "ACCEPTED" {
+		t.Fatalf("impress media_b (2): got %s (%+v)", res.Outcome, res.Error)
+	}
+
+	statsRes := s.Handle(envelopeFor("", "ListMediaImpressionStats", map[string]any{}))
+	if statsRes.Outcome != "ACCEPTED" {
+		t.Fatalf("stats: got %s (%+v)", statsRes.Outcome, statsRes.Error)
+	}
+	var payload struct {
+		Stats []MediaImpressionStats `json:"stats"`
+	}
+	if err := json.Unmarshal([]byte(statsRes.OperationRef), &payload); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	if len(payload.Stats) != 2 {
+		t.Fatalf("stats rows = %d, want 2 (one per photo)", len(payload.Stats))
+	}
+	byMedia := map[string]MediaImpressionStats{}
+	for _, row := range payload.Stats {
+		if row.PostID != postID {
+			t.Fatalf("row %+v has wrong postID, want %s", row, postID)
+		}
+		byMedia[row.MediaAssetID] = row
+	}
+	a, b := byMedia["media_a"], byMedia["media_b"]
+	if a.Impressions != 1 || a.Viewers != 1 || a.TotalWatchMs != 800 {
+		t.Fatalf("media_a = %+v, want {1 impression, 1 viewer, 800ms}", a)
+	}
+	if b.Impressions != 2 || b.Viewers != 2 || b.TotalWatchMs != 10700 {
+		t.Fatalf("media_b = %+v, want {2 impressions, 2 viewers, 10700ms}", b)
+	}
+
+	// 别人帖子里的媒体数据不暴露。
+	forbidden := s.Handle(envelopeFor("", "ListMediaImpressionStats", map[string]any{"authorId": "user_other"}))
+	if forbidden.Outcome != "REJECTED" {
+		t.Fatalf("other author stats: got %s, want REJECTED (STATS_FORBIDDEN)", forbidden.Outcome)
+	}
+
+	// VIEWER-ACTIVITY-001: viewer_1 看了两张（media_a 划过去 800ms，media_b
+	// 停留 6500ms）——这个查询接的就是"这个人具体看了什么"，两张都要出现，
+	// 各自的时长要对得上，不能混到一起。viewer_2 只看了 media_b，media_a
+	// 完全不该出现在 viewer_2 的活动里。
+	viewer1Activity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"viewerActorId": "viewer_1"}))
+	if viewer1Activity.Outcome != "ACCEPTED" {
+		t.Fatalf("viewer_1 activity: got %s (%+v)", viewer1Activity.Outcome, viewer1Activity.Error)
+	}
+	var activityPayload struct {
+		Activity []ViewerMediaActivity `json:"activity"`
+	}
+	if err := json.Unmarshal([]byte(viewer1Activity.OperationRef), &activityPayload); err != nil {
+		t.Fatalf("decode activity: %v", err)
+	}
+	if len(activityPayload.Activity) != 2 {
+		t.Fatalf("viewer_1 activity rows = %d, want 2 (media_a + media_b)", len(activityPayload.Activity))
+	}
+	byMediaV1 := map[string]ViewerMediaActivity{}
+	for _, row := range activityPayload.Activity {
+		if row.PostID != postID {
+			t.Fatalf("row %+v has wrong postID, want %s", row, postID)
+		}
+		byMediaV1[row.MediaAssetID] = row
+	}
+	if byMediaV1["media_a"].Opens != 1 || byMediaV1["media_a"].TotalWatchMs != 800 {
+		t.Fatalf("viewer_1 on media_a = %+v, want {1 open, 800ms}", byMediaV1["media_a"])
+	}
+	if byMediaV1["media_b"].Opens != 1 || byMediaV1["media_b"].TotalWatchMs != 6500 {
+		t.Fatalf("viewer_1 on media_b = %+v, want {1 open, 6500ms}", byMediaV1["media_b"])
+	}
+
+	// viewer_2 只看过 media_b，活动列表里不该出现 media_a。
+	viewer2Activity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"viewerActorId": "viewer_2"}))
+	if viewer2Activity.Outcome != "ACCEPTED" {
+		t.Fatalf("viewer_2 activity: got %s (%+v)", viewer2Activity.Outcome, viewer2Activity.Error)
+	}
+	var v2Payload struct {
+		Activity []ViewerMediaActivity `json:"activity"`
+	}
+	if err := json.Unmarshal([]byte(viewer2Activity.OperationRef), &v2Payload); err != nil {
+		t.Fatalf("decode activity: %v", err)
+	}
+	if len(v2Payload.Activity) != 1 || v2Payload.Activity[0].MediaAssetID != "media_b" {
+		t.Fatalf("viewer_2 activity = %+v, want exactly [media_b]", v2Payload.Activity)
+	}
+
+	// viewerActorId 缺失必须拒绝——这个接口存在的意义就是"查这个人"，没
+	// 给人就没有查询目标。
+	missingViewer := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{}))
+	if missingViewer.Outcome != "REJECTED" {
+		t.Fatalf("missing viewerActorId: got %s, want REJECTED (INVALID_VIEWER_ACTOR_ID)", missingViewer.Outcome)
+	}
+
+	// 别人帖子上的访客活动不暴露。
+	forbiddenActivity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"authorId": "user_other", "viewerActorId": "viewer_1"}))
+	if forbiddenActivity.Outcome != "REJECTED" {
+		t.Fatalf("other author activity: got %s, want REJECTED (STATS_FORBIDDEN)", forbiddenActivity.Outcome)
+	}
+}

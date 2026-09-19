@@ -19,7 +19,7 @@ describe("two-account conversation live sync", () => {
 
   it("never lets polling erase a message while its AI reply is pending", () => {
     const source = readFileSync(join(root, "surfaces", "conversation.tsx"), "utf8");
-    expect(source).toContain("if (!foreground || sendingRef.current) return");
+    expect(source).toContain("if (!foreground || syncPausedRef.current) return");
     expect(source).toContain("await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))");
     expect(source).toContain("正在回复…");
   });

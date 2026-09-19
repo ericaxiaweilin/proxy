@@ -1,4 +1,7 @@
 // AIIdentityShowcaseSurface — R1 AI Identity System (R1 HTML frontstage) 1:1 抄
+// + TWIN-CENTER-004 真分身中心：Twin 段改为服务端真数据（我的分身列表、
+// 从模板创建、形象授权开关接 /v1/ai/personas），其余 R1 合规展示段保持
+// 静态 showcase（commander Phase 2 接线前不动）。
 //
 // R15.77: 3 个 phone preview (Human / AI Native / Twin) + 顶部 mini identity cards
 // R15.78: + R1 audit 段 (审计日志) 5 列 table + 5 过滤
@@ -14,9 +17,14 @@
 // 这是静态 design showcase (我域), 不接 server. commander 域 R1 full wiring
 // (R1 reality gate + Twin consent + audit log) 是 Phase 2.
 
-import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { color } from "../theme";
+import { AiPersonaClient, TwinNoAgeEvidenceError, TwinNoLiveConsentError, type TwinConsent, type TwinConsentKind, type TwinPersona } from "../ai-persona-client";
+import type { TransportResponse } from "../auth-client";
+import { formatDateOfBirthInput } from "../date-of-birth-input";
+import type { FeedPost } from "@proxy/contracts";
+import type { LocalNetClient, MediaImpressionStats, PostImpressionStats } from "../localnet-client";
 
 type IdentityKind = "HUMAN" | "AI_NATIVE" | "AI_TWIN";
 
@@ -161,14 +169,24 @@ function ProfilePreview({ kind }: { kind: PreviewKind }): React.JSX.Element {
   );
 }
 
-export function AIIdentityShowcaseSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
+export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient, localNet, myPosts, onOpenFacet }: {
+  onBack: () => void;
+  viewerAccountId: string | undefined;
+  authClient: { request(path: string, init: { method: "GET" | "POST"; body?: unknown }): Promise<TransportResponse> };
+  localNet: LocalNetClient;
+  myPosts: FeedPost[];
+  /** AI-FACET-CLUSTER-001: 分身生成的素材由 FACET 负责按关系对象分发——
+   * 这条链路的下一步，给一条明显的路过去，不用退回「我的」根页再找。 */
+  onOpenFacet?: () => void;
+}): React.JSX.Element {
   const [archOpen, setArchOpen] = useState(false);
+  const personaClient = useMemo(() => new AiPersonaClient({ authClient }), [authClient]);
   return (
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.pageHead}>
           <Text onPress={onBack} style={styles.back}>‹</Text>
-          <Text style={styles.title}>AI 身份中心</Text>
+          <Text style={styles.title}>AI分身中心</Text>
           <View style={{ flex: 1 }} />
           <Pressable
             onPress={() => setArchOpen(true)}
@@ -178,7 +196,21 @@ export function AIIdentityShowcaseSurface({ onBack }: { onBack: () => void }): R
             <Text style={styles.archBtnText}>数据模型</Text>
           </Pressable>
         </View>
-        <Text style={styles.subtitle}>R1 透明度义务 · Vietnam AI Law 134/2025</Text>
+        <Text style={styles.subtitle}>我的数字分身 · 邀约与发布由真人确认</Text>
+
+        {/* TWIN-CENTER-004: 真分身段 —— 服务端真列表 + 从模板创建 + 形象授权
+            开关。不再是写死的 Linh/Mai。 */}
+        <TwinSection client={personaClient} ownerId={viewerAccountId} localNet={localNet} myPosts={myPosts} />
+
+        {onOpenFacet ? (
+          <Pressable onPress={onOpenFacet} style={styles.facetLinkCard} accessibilityLabel="去 FACET 管理素材怎么分发">
+            <View style={styles.facetLinkCopy}>
+              <Text style={styles.facetLinkTitle}>内容投给谁看？</Text>
+              <Text style={styles.facetLinkSub}>去 FACET 按关系对象投放，不是所有人都看一样的内容。</Text>
+            </View>
+            <Text style={styles.facetLinkChevron}>›</Text>
+          </Pressable>
+        ) : null}
 
         {/* R15.84: R1 overview 段 — hero + 3 边界 + 4 KPI + 3 identity cards + 3 flow */}
         <OverviewHero />
@@ -201,9 +233,6 @@ export function AIIdentityShowcaseSurface({ onBack }: { onBack: () => void }): R
 
         {/* R15.82: R1 native 段 — 3 AI Persona 列表 + 冷启动 4 toggles + 2 强守门 rule */}
         <NativeSection />
-
-        {/* R15.83: R1 twin 段 — 2 Twin + 8 授权 toggles + Human Confirm Gate 3 flow */}
-        <TwinSection />
 
         <Text style={styles.sectionTitle}>前台身份与内容标识</Text>
         <Text style={styles.sectionSub}>用户第一眼就知道谁是真人、谁是 AI、谁是谁的 Twin。</Text>
@@ -473,6 +502,45 @@ const styles = StyleSheet.create({
   personaCreateBtn: { paddingVertical: 8, borderRadius: 8, alignItems: "center", borderWidth: 1 },
   personaCreateBtnAi: { backgroundColor: "#6d28d9", borderColor: "#6d28d9" },
   personaCreateBtnText: { fontSize: 10, fontWeight: "800", color: color.white },
+
+  // TWIN-CENTER-004: 真分身段样式。新增文字字号全部 >= 11pt，不进 R2 装饰白名单。
+  twinHint: { fontSize: 12, color: color.muted, lineHeight: 17, marginBottom: 8 },
+  twinNotice: { flexDirection: "row", alignItems: "center", backgroundColor: color.appBg, borderRadius: 12, padding: 10, marginBottom: 8, gap: 8 },
+  twinNoticeText: { flex: 1, fontSize: 12, color: color.ink, fontWeight: "700" },
+  twinRetry: { paddingHorizontal: 10, paddingVertical: 6 },
+  twinRetryText: { fontSize: 12, fontWeight: "800", color: color.ink },
+  twinError: { fontSize: 11, color: "#b91c1c", lineHeight: 15, marginTop: 4 },
+  twinForm: { marginTop: 8, gap: 8 },
+  twinTemplate: { flexDirection: "row", alignItems: "center", backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, padding: 10, gap: 8 },
+  twinTemplateOn: { borderColor: "#6d28d9", borderWidth: 1.5 },
+  twinTemplateCopy: { flex: 1 },
+  twinTemplateName: { fontSize: 13, fontWeight: "800", color: color.ink },
+  twinTemplateDesc: { fontSize: 11, color: color.muted, marginTop: 2, lineHeight: 15 },
+  twinTemplateTag: { fontSize: 11, fontWeight: "700", color: "#6d28d9" },
+  twinInput: { backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, fontSize: 14, color: color.ink, paddingHorizontal: 12, paddingVertical: 10 },
+  twinSubmit: { backgroundColor: color.ink, borderRadius: 12, paddingVertical: 12, alignItems: "center" },
+  twinSubmitBusy: { opacity: 0.5 },
+  twinSubmitText: { fontSize: 14, fontWeight: "800", color: color.white },
+  twinBackfillRow: { flexDirection: "row", gap: 8 },
+  twinBackfillInput: { flex: 1 },
+  twinBackfillBtn: { backgroundColor: color.ink, borderRadius: 12, paddingHorizontal: 14, justifyContent: "center" },
+  twinBackfillBtnText: { fontSize: 13, fontWeight: "800", color: color.white },
+  twinStatRow: { backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, padding: 10, marginBottom: 6 },
+  twinStatBody: { fontSize: 13, color: color.ink, marginBottom: 4 },
+  twinStatNums: { fontSize: 11, color: color.muted },
+  // MEDIA-DWELL-001: 逐张照片战绩——同一个帖子里的照片曝光可能天差地别
+  // （划过去的第一张 vs 停留很久的第三张），这条缩进列表把差异摆出来。
+  twinMediaBreakdown: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: color.cardBorder, gap: 4 },
+  twinMediaRow: { flexDirection: "row", justifyContent: "space-between", paddingLeft: 8 },
+  twinMediaLabel: { fontSize: 11, fontWeight: "700", color: color.ink },
+  twinMediaNums: { fontSize: 11, color: color.muted },
+
+  // AI-FACET-CLUSTER-001: 生成 (这一屏) → 分发 (FACET) 的跨屏入口。
+  facetLinkCard: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#f3e8ff", borderWidth: 1, borderColor: "#e4d2fb", borderRadius: 14, padding: 12, marginTop: 14 },
+  facetLinkCopy: { flex: 1 },
+  facetLinkTitle: { fontSize: 13, fontWeight: "800", color: "#6d28d9" },
+  facetLinkSub: { fontSize: 11, color: "#5b21b6", marginTop: 3, lineHeight: 15 },
+  facetLinkChevron: { fontSize: 20, color: "#6d28d9" },
 
   coldCard: { flex: 1, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, padding: 10 },
   coldCardTitle: { fontSize: 12, fontWeight: "800", color: color.ink, marginBottom: 4 },
@@ -1200,127 +1268,399 @@ function NativeSection(): React.JSX.Element {
   );
 }
 
-// R15.83: R1 twin 段 1:1 抄 — 2 Twin 列表 (1:1 抄 R1 S.twins) + 8 授权 toggles + Human Confirm 3 flow
-const AI_TWINS: ReadonlyArray<{ name: string; owner: string; scope: string; state: string }> = [
-  { name: "Linh", owner: "@linh.hn", scope: "照片 · 公开回复 · 邀约收集", state: "运行中" },
-  { name: "Mai", owner: "@mai.hanoi", scope: "照片 · 视频 · 公开回复", state: "草稿" }
+// TWIN-CENTER-004: 真分身段 —— 服务端真列表 + 从模板创建 + 形象授权开关。
+// 后端 consent 只有 VISUAL / VOICE / VISUAL_AND_VOICE 三种，且查 live 只
+// 返回最新一条，所以开关只有一档「形象与声音」：开 = 授予
+// VISUAL_AND_VOICE，关 = 收回当前生效授权。R1 原型里 7 个用途开关在
+// 服务端没有对应物，不画假开关。
+const DEFAULT_TWIN_TEMPLATE = { id: "greeter", name: "公开互动助手", desc: "在你的公开动态下帮你互动，不私聊、不接单。", consent: true };
+const TWIN_TEMPLATES: ReadonlyArray<{ id: string; name: string; desc: string; consent: boolean }> = [
+  DEFAULT_TWIN_TEMPLATE,
+  { id: "collector", name: "邀约收集助手", desc: "把邀约整理成待确认清单，真人确认才生效。", consent: false },
+  { id: "likeness", name: "形象出镜助手", desc: "用你的授权形象生成照片与短视频。", consent: true },
 ];
 
-const TWIN_CONSENT_TOGGLES: ReadonlyArray<{ title: string; defaultOn: boolean; disabled?: boolean; blockedHint?: string }> = [
-  { title: "用本人照片生成新图片", defaultOn: true },
-  { title: "生成本人 AI 视频", defaultOn: true },
-  { title: "声音克隆", defaultOn: false },
-  { title: "自动回复公开评论", defaultOn: true },
-  { title: "自动回复私信", defaultOn: false },
-  { title: "收集 / 整理邀约", defaultOn: true },
-  { title: "自动接受邀约", defaultOn: false, disabled: true, blockedHint: "必须真人确认, 不可授权给 Twin" },
-  { title: "广告投放使用 likeness", defaultOn: false }
-];
+type TwinRowState = { persona: TwinPersona; live: TwinConsent | null; liveOk: boolean };
 
-function TwinConsentToggle({ t }: { t: typeof TWIN_CONSENT_TOGGLES[number] }): React.JSX.Element {
-  const [on, setOn] = useState(t.defaultOn);
-  return (
-    <View style={[styles.coldRow, t.disabled ? styles.coldRowBlocked : undefined]}>
-      <View style={styles.coldRowCopy}>
-        <Text style={styles.coldRowTitle}>{t.title}</Text>
-        {t.blockedHint ? <Text style={styles.coldRowSub}>{t.blockedHint}</Text> : null}
-      </View>
-      {t.disabled ? (
-        <View style={[styles.toggle, styles.toggleDisabled]}>
-          <View style={styles.toggleKnob} />
-        </View>
-      ) : (
-        <Pressable
-          onPress={() => setOn(!on)}
-          style={[styles.toggle, on ? styles.toggleOn : undefined, styles.toggleAi]}
-          accessibilityLabel={`${t.title} 开关`}
-        >
-          <View style={[styles.toggleKnob, on ? styles.toggleKnobOn : undefined]} />
-        </Pressable>
-      )}
-    </View>
-  );
+function consentScopeLabel(kind: TwinConsentKind): string {
+  if (kind === "VISUAL") return "形象";
+  if (kind === "VOICE") return "声音";
+  return "形象与声音";
 }
 
-function TwinSection(): React.JSX.Element {
+// 秒 → “X秒” / “X分X秒”，战绩行用。
+function formatWatchMs(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds}秒`;
+  return `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
+}
+
+function TwinSection({ client, ownerId, localNet, myPosts }: {
+  client: AiPersonaClient;
+  ownerId: string | undefined;
+  localNet: LocalNetClient;
+  myPosts: FeedPost[];
+}): React.JSX.Element {
+  const [rows, setRows] = useState<TwinRowState[] | undefined>(undefined);
+  const [loadState, setLoadState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const [busyId, setBusyId] = useState<string>();
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const [createOpen, setCreateOpen] = useState(false);
+  const [templateId, setTemplateId] = useState<string>(DEFAULT_TWIN_TEMPLATE.id);
+  const [draftName, setDraftName] = useState("");
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState<string>();
+  // AGE-BACKFILL-001: 创建被「无年龄记录」拦下时，在表单里直接补出生日期，
+  // 补完自动重试创建，不让用户跳出去找入口。
+  const [needsAgeBackfill, setNeedsAgeBackfill] = useState(false);
+  const [dobInput, setDobInput] = useState("");
+  // TWIN-SIGNALS-001: 战绩（我的动态谁看了、看了多久）。分身以后发的动态
+  // 同样记在这里 —— 同一个帖子 ID 流，不用换口径。
+  const [postStats, setPostStats] = useState<Record<string, PostImpressionStats>>({});
+  const [statsState, setStatsState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+  // MEDIA-DWELL-001: 同一条帖子里每张照片单独的战绩——跟 postStats 同一次
+  // 请求周期拉，键从 postId 换成 mediaAssetId，粒度更细。
+  const [mediaStats, setMediaStats] = useState<Record<string, MediaImpressionStats>>({});
+
+  useEffect(() => {
+    if (!ownerId) return;
+    let cancelled = false;
+    setLoadState("loading");
+    void (async () => {
+      try {
+        const personas = await client.listMine(ownerId);
+        const states = await Promise.all(personas.map(async (persona): Promise<TwinRowState> => {
+          try {
+            const live = await client.getLiveConsent(persona.id, ownerId);
+            return { persona, live: live ?? null, liveOk: true };
+          } catch {
+            return { persona, live: null, liveOk: false };
+          }
+        }));
+        if (!cancelled) { setRows(states); setLoadState("ready"); }
+      } catch {
+        if (!cancelled) { setRows(undefined); setLoadState("failed"); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [client, ownerId, reloadNonce]);
+
+  useEffect(() => {
+    if (!ownerId) return;
+    let cancelled = false;
+    setStatsState("loading");
+    void (async () => {
+      try {
+        const [stats, mediaStatsList] = await Promise.all([
+          localNet.listPostImpressionStats(),
+          // 媒体战绩没读到不影响帖子战绩——各自独立的失败态，媒体这边悄悄
+          // 空着就好（帖子行照样显示总数，只是没有逐张照片的细分）。
+          localNet.listMediaImpressionStats().catch(() => [] as MediaImpressionStats[])
+        ]);
+        if (cancelled) return;
+        const map: Record<string, PostImpressionStats> = {};
+        for (const stat of stats) map[stat.postId] = stat;
+        setPostStats(map);
+        const mediaMap: Record<string, MediaImpressionStats> = {};
+        for (const stat of mediaStatsList) mediaMap[stat.mediaAssetId] = stat;
+        setMediaStats(mediaMap);
+        setStatsState("ready");
+      } catch {
+        if (!cancelled) setStatsState("failed");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [localNet, ownerId, reloadNonce]);
+
+  async function toggleConsent(personaId: string): Promise<void> {
+    if (!ownerId || busyId) return;
+    const row = rows?.find((entry) => entry.persona.id === personaId);
+    if (!row) return;
+    setBusyId(personaId);
+    setRowErrors((prev) => {
+      if (!prev[personaId]) return prev;
+      const next = { ...prev };
+      delete next[personaId];
+      return next;
+    });
+    try {
+      if (row.live) {
+        await client.revokeConsent(personaId, ownerId);
+        setRows((prev) => prev?.map((entry) => entry.persona.id === personaId ? { ...entry, live: null, liveOk: true } : entry));
+      } else {
+        const live = await client.grantConsent(personaId, ownerId, "VISUAL_AND_VOICE");
+        setRows((prev) => prev?.map((entry) => entry.persona.id === personaId ? { ...entry, live, liveOk: true } : entry));
+      }
+    } catch (err) {
+      // 收回时服务端已没有生效授权（别的设备先收了）：这本身就是想要的
+      // 终态，直接标成未授权，不吓人。
+      if (err instanceof TwinNoLiveConsentError) {
+        setRows((prev) => prev?.map((entry) => entry.persona.id === personaId ? { ...entry, live: null, liveOk: true } : entry));
+      } else {
+        setRowErrors((prev) => ({ ...prev, [personaId]: err instanceof Error ? err.message : "操作失败，请稍后重试。" }));
+      }
+    } finally {
+      setBusyId(undefined);
+    }
+  }
+
+  async function submitCreate(): Promise<void> {
+    if (!ownerId || createBusy) return;
+    setCreateBusy(true);
+    setCreateError(undefined);
+    try {
+      await doCreate();
+    } finally {
+      setCreateBusy(false);
+    }
+  }
+
+  async function doCreate(): Promise<void> {
+    if (!ownerId) return;
+    const template = TWIN_TEMPLATES.find((entry) => entry.id === templateId) ?? DEFAULT_TWIN_TEMPLATE;
+    try {
+      const persona = await client.createTwin({ ownerId, displayName: draftName.trim() || template.name, description: template.desc });
+      if (template.consent) {
+        try {
+          await client.grantConsent(persona.id, ownerId, "VISUAL_AND_VOICE");
+        } catch (consentErr) {
+          // 分身已建成，只是授权没加上：留在表单里说清楚，不吞掉；
+          // 列表照样刷新，去行里单独开开关也行。
+          setReloadNonce((n) => n + 1);
+          setCreateError(`分身已创建，但形象授权没加上（${consentErr instanceof Error ? consentErr.message : "请稍后重试"}），可以在列表里单独打开。`);
+          return;
+        }
+      }
+      setCreateOpen(false);
+      setDraftName("");
+      setDobInput("");
+      setNeedsAgeBackfill(false);
+      setTemplateId(DEFAULT_TWIN_TEMPLATE.id);
+      setReloadNonce((n) => n + 1);
+    } catch (err) {
+      if (err instanceof TwinNoAgeEvidenceError) setNeedsAgeBackfill(true);
+      setCreateError(err instanceof Error ? err.message : "创建失败，请稍后重试。");
+    }
+  }
+
+  // 补完出生日期直接重试刚才那次创建 —— 补录本身不是目的，建成才是。
+  async function backfillAgeAndRetry(): Promise<void> {
+    if (!ownerId || createBusy) return;
+    setCreateBusy(true);
+    setCreateError(undefined);
+    try {
+      await client.recordAgeAssertion(dobInput);
+      setNeedsAgeBackfill(false);
+      await doCreate();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "补录失败，请稍后重试。");
+    } finally {
+      setCreateBusy(false);
+    }
+  }
+
   return (
     <View style={{ marginTop: 18 }}>
-      <Text style={styles.sectionTitle}>Creator AI Twin</Text>
-      <Text style={styles.sectionSub}>一位真人最多绑定一个官方 Twin。</Text>
-      <View style={styles.nativeGrid}>
+      <Text style={styles.sectionTitle}>我的分身</Text>
+      <Text style={styles.sectionSub}>形象授权随时可收回，收回记录保留可查。</Text>
+      {!ownerId ? (
+        <Text style={styles.twinHint}>登录后管理你的数字分身。</Text>
+      ) : loadState === "failed" ? (
+        <View style={styles.twinNotice}>
+          <Text style={styles.twinNoticeText}>分身没读出来，不是没有分身。</Text>
+          <Pressable onPress={() => setReloadNonce((n) => n + 1)} accessibilityLabel="重新读取分身" style={styles.twinRetry}>
+            <Text style={styles.twinRetryText}>重试</Text>
+          </Pressable>
+        </View>
+      ) : loadState === "loading" || rows === undefined ? (
+        <Text style={styles.twinHint}>正在读取分身…</Text>
+      ) : (
         <View>
-          {AI_TWINS.map((t) => (
-            <View key={t.name} style={styles.personaRow}>
-              <View style={styles.personaAvatar}>
-                <Text style={styles.personaAvatarText}>{t.name.charAt(0)}</Text>
+          {rows.length === 0 ? <Text style={styles.twinHint}>还没有分身，从下面的模板创建一个。</Text> : null}
+          {rows.map(({ persona, live, liveOk }) => {
+            const rowError = rowErrors[persona.id];
+            return (
+            <View key={persona.id} style={styles.personaRow}>
+              <View style={[styles.personaAvatar, styles.personaAvatarAi]}>
+                <Text style={styles.personaAvatarText}>{persona.displayName.charAt(0)}</Text>
               </View>
               <View style={styles.personaCopy}>
                 <View style={styles.personaNameRow}>
-                  <Text style={styles.personaName}>{t.name} AI</Text>
+                  <Text style={styles.personaName}>{persona.displayName}</Text>
                   <View style={[styles.personaBadge, styles.personaBadgeAi]}><Text style={styles.personaBadgeText}>AI TWIN</Text></View>
                 </View>
-                <Text style={styles.personaRole}>Owner {t.owner}</Text>
-                <Text style={styles.personaOwner}>{t.scope}</Text>
+                <Text style={styles.personaRole}>
+                  {live ? `已授权 · ${consentScopeLabel(live.consentKind)}` : liveOk ? "未授权形象" : "授权状态没读出来"}
+                </Text>
+                {persona.description ? <Text style={styles.personaOwner}>{persona.description}</Text> : null}
+                {rowError ? <Text style={styles.twinError}>{rowError}</Text> : null}
               </View>
               <View style={styles.personaActions}>
-                <Text style={styles.personaState}>{t.state}</Text>
-                <Pressable
-                  onPress={() => { /* R15.83: 静态展示 (R1 模拟 twinPolicy) */ }}
-                  style={styles.personaPolicyBtn}
-                  accessibilityLabel={`${t.name} 授权`}
-                >
-                  <Text style={styles.personaPolicyBtnText}>授权</Text>
-                </Pressable>
+                <Text style={styles.personaState}>形象授权</Text>
+                {busyId === persona.id ? (
+                  <Text style={styles.personaState}>处理中…</Text>
+                ) : (
+                  <Pressable
+                    onPress={() => void toggleConsent(persona.id)}
+                    style={[styles.toggle, live ? styles.toggleOn : undefined, styles.toggleAi]}
+                    accessibilityLabel={`${persona.displayName}形象授权开关`}
+                  >
+                    <View style={[styles.toggleKnob, live ? styles.toggleKnobOn : undefined]} />
+                  </Pressable>
+                )}
               </View>
             </View>
-          ))}
-          <Pressable
-            onPress={() => { /* R15.83: 静态展示 (R1 模拟 openTwinModal) */ }}
-            style={styles.personaCreateBtn}
-            accessibilityLabel="创建 Creator AI Twin"
-          >
-            <Text style={[styles.personaCreateBtnText, { color: color.ink }]}>＋ 创建 Creator AI Twin</Text>
-          </Pressable>
+            );
+          })}
         </View>
-        <View style={styles.coldCard}>
-          <Text style={styles.coldCardTitle}>Human Confirm Gate</Text>
-          <Text style={styles.coldCardSub}>AI Twin 可以把大量聊天、问题和邀约压缩成真人需要做的少数决策, 但现实承诺不能自动完成。</Text>
-          <View style={styles.confirmFlow}>
-            <View style={styles.confirmBox}>
-              <Text style={styles.confirmBoxTitle}>用户提出需求</Text>
-              <Text style={styles.confirmBoxSub}>时间 / Scene / 预算 / 场景</Text>
+      )}
+      {ownerId ? (
+        <View>
+          <Pressable
+            onPress={() => { setCreateOpen((open) => !open); setCreateError(undefined); }}
+            style={[styles.personaCreateBtn, styles.personaCreateBtnAi]}
+            accessibilityLabel="从模板创建分身"
+          >
+            <Text style={styles.personaCreateBtnText}>{createOpen ? "× 收起创建" : "＋ 从模板创建分身"}</Text>
+          </Pressable>
+          {createOpen ? (
+            <View style={styles.twinForm}>
+              {TWIN_TEMPLATES.map((template) => (
+                <Pressable
+                  key={template.id}
+                  onPress={() => setTemplateId(template.id)}
+                  style={[styles.twinTemplate, template.id === templateId ? styles.twinTemplateOn : undefined]}
+                  accessibilityLabel={`模板${template.name}`}
+                >
+                  <View style={styles.twinTemplateCopy}>
+                    <Text style={styles.twinTemplateName}>{template.name}</Text>
+                    <Text style={styles.twinTemplateDesc}>{template.desc}</Text>
+                  </View>
+                  <Text style={styles.twinTemplateTag}>{template.consent ? "含形象授权" : "不需形象授权"}</Text>
+                </Pressable>
+              ))}
+              <TextInput
+                value={draftName}
+                onChangeText={setDraftName}
+                placeholder="给分身起个名字（默认用模板名）"
+                placeholderTextColor={color.muted}
+                style={styles.twinInput}
+                maxLength={24}
+              />
+              {createError ? <Text style={styles.twinError}>{createError}</Text> : null}
+              {needsAgeBackfill ? (
+                <View style={styles.twinBackfillRow}>
+                  <TextInput
+                    value={dobInput}
+                    onChangeText={(value) => setDobInput(formatDateOfBirthInput(value))}
+                    placeholder="出生日期 YYYY-MM-DD"
+                    placeholderTextColor={color.muted}
+                    keyboardType="number-pad"
+                    maxLength={10}
+                    style={[styles.twinInput, styles.twinBackfillInput]}
+                    accessibilityLabel="补出生日期"
+                  />
+                  <Pressable
+                    onPress={() => void backfillAgeAndRetry()}
+                    disabled={createBusy || dobInput.length !== 10}
+                    style={[styles.twinBackfillBtn, (createBusy || dobInput.length !== 10) ? styles.twinSubmitBusy : undefined]}
+                    accessibilityLabel="补录并继续创建"
+                  >
+                    <Text style={styles.twinBackfillBtnText}>补录并继续</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+              <Pressable
+                onPress={() => void submitCreate()}
+                disabled={createBusy}
+                style={[styles.twinSubmit, createBusy ? styles.twinSubmitBusy : undefined]}
+                accessibilityLabel="创建分身"
+              >
+                <Text style={styles.twinSubmitText}>{createBusy ? "创建中…" : "创建分身"}</Text>
+              </Pressable>
             </View>
-            <Text style={styles.confirmArrow}>→</Text>
-            <View style={styles.confirmBox}>
-              <Text style={styles.confirmBoxTitle}>AI Twin 整理</Text>
-              <Text style={styles.confirmBoxSub}>检查 Facet、Availability、边界</Text>
+          ) : null}
+        </View>
+      ) : null}
+      {ownerId ? (
+        <View style={{ marginTop: 18 }}>
+          <Text style={styles.sectionTitle}>动态数据</Text>
+          <Text style={styles.sectionSub}>谁看了你的动态、看了多久。分身以后发的动态同样记在这里。</Text>
+          {statsState === "failed" ? (
+            <View style={styles.twinNotice}>
+              <Text style={styles.twinNoticeText}>战绩没读出来，不是没人看。</Text>
+              <Pressable onPress={() => setReloadNonce((n) => n + 1)} accessibilityLabel="重新读取战绩" style={styles.twinRetry}>
+                <Text style={styles.twinRetryText}>重试</Text>
+              </Pressable>
             </View>
-            <Text style={styles.confirmArrow}>→</Text>
-            <View style={[styles.confirmBox, styles.confirmBoxOn]}>
-              <Text style={[styles.confirmBoxTitle, { color: "#15803d" }]}>真人确认</Text>
-              <Text style={styles.confirmBoxSub}>Accept / Decline / Modify</Text>
+          ) : statsState === "loading" ? (
+            <Text style={styles.twinHint}>正在读战绩…</Text>
+          ) : myPosts.length === 0 ? (
+            <Text style={styles.twinHint}>还没有动态，先去发一条。</Text>
+          ) : (
+            myPosts.map((post) => {
+              const stat = postStats[post.postId];
+              // MEDIA-DWELL-001: 只有多于 1 张媒体的帖子才值得看逐张细分——
+              // 只有 1 张时，逐张数字等于帖子总数，摆出来是纯重复。
+              const mediaRefs = post.mediaRefs.length > 1
+                ? [...post.mediaRefs].sort((a, b) => a.sortOrder - b.sortOrder)
+                : [];
+              return (
+                <View key={post.postId} style={styles.twinStatRow}>
+                  <Text numberOfLines={1} style={styles.twinStatBody}>{post.body}</Text>
+                  <Text style={styles.twinStatNums}>
+                    {stat ? `浏览 ${stat.impressions} · ${stat.viewers}人 · 共${formatWatchMs(stat.totalWatchMs)}` : "暂无浏览"}
+                  </Text>
+                  {mediaRefs.length > 0 ? (
+                    <View style={styles.twinMediaBreakdown}>
+                      {mediaRefs.map((ref, i) => {
+                        const mstat = mediaStats[ref.mediaAssetId];
+                        return (
+                          <View key={ref.mediaAssetId} style={styles.twinMediaRow}>
+                            <Text style={styles.twinMediaLabel}>第 {i + 1} 张</Text>
+                            <Text style={styles.twinMediaNums}>
+                              {mstat ? `浏览 ${mstat.impressions} · ${mstat.viewers}人 · 共${formatWatchMs(mstat.totalWatchMs)}` : "暂无浏览"}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })
+          )}
+        </View>
+      ) : null}
+      {/* Human Confirm Gate 说明（政策解释，无假控件） */}
+      <View style={styles.coldCard}>
+        <Text style={styles.coldCardTitle}>Human Confirm Gate</Text>
+        <Text style={styles.coldCardSub}>AI Twin 可以把大量聊天、问题和邀约压缩成真人需要做的少数决策, 但现实承诺不能自动完成。</Text>
+        <View style={styles.confirmFlow}>
+          <View style={styles.confirmBox}>
+            <Text style={styles.confirmBoxTitle}>用户提出需求</Text>
+            <Text style={styles.confirmBoxSub}>时间 / Scene / 预算 / 场景</Text>
+          </View>
+          <Text style={styles.confirmArrow}>→</Text>
+          <View style={styles.confirmBox}>
+            <Text style={styles.confirmBoxTitle}>AI Twin 整理</Text>
+            <Text style={styles.confirmBoxSub}>检查 Facet、Availability、边界</Text>
+          </View>
+          <Text style={styles.confirmArrow}>→</Text>
+          <View style={[styles.confirmBox, styles.confirmBoxOn]}>
+            <Text style={[styles.confirmBoxTitle, { color: "#15803d" }]}>真人确认</Text>
+            <Text style={styles.confirmBoxSub}>Accept / Decline / Modify</Text>
+          </View>
+        </View>
+        <View style={[styles.ruleCard, { marginTop: 8 }]}>
+          <View style={styles.ruleTop}>
+            <Text style={styles.ruleTitle}>Owner 撤销权</Text>
+            <View style={[styles.ruleActionPill, { backgroundColor: "#dcfce7" }]}>
+              <Text style={[styles.ruleActionText, { color: "#15803d" }]}>必需</Text>
             </View>
           </View>
-          <View style={[styles.ruleCard, { marginTop: 8 }]}>
-            <View style={styles.ruleTop}>
-              <Text style={styles.ruleTitle}>Owner 撤销权</Text>
-              <View style={[styles.ruleActionPill, { backgroundColor: "#dcfce7" }]}>
-                <Text style={[styles.ruleActionText, { color: "#15803d" }]}>必需</Text>
-              </View>
-            </View>
-            <Text style={styles.ruleReason}>Creator 可以一键暂停 Twin、撤销某项授权、删除视觉模型或关闭对话能力。</Text>
-          </View>
-          <View style={styles.ruleCard}>
-            <View style={styles.ruleTop}>
-              <Text style={styles.ruleTitle}>授权按用途拆分</Text>
-              <View style={[styles.ruleActionPill, { backgroundColor: "#fde68a" }]}>
-                <Text style={[styles.ruleActionText, { color: "#b45309" }]}>重要</Text>
-              </View>
-            </View>
-            <Text style={styles.ruleReason}>照片生成、视频生成、声音、公开回复、私信、广告使用不能合并成一个 \"全部同意\"。</Text>
-          </View>
-          <Text style={[styles.coldRowTitle, { marginTop: 10, marginBottom: 4 }]}>授权范围</Text>
-          {TWIN_CONSENT_TOGGLES.map((t) => <TwinConsentToggle key={t.title} t={t} />)}
+          <Text style={styles.ruleReason}>真人随时可以用上面的开关收回形象授权，收回记录保留可查。</Text>
         </View>
       </View>
     </View>

@@ -29,10 +29,9 @@ function block(src: string, from: string, to: string): string {
 }
 
 describe("SYNC-FS-001 local persistence reads must await File.json()", () => {
-  it("messages.tsx: folders and hidden chats read via await + parse layer", () => {
-    const folders = block(messages, "export async function readFoldersAsync", "export function MessagesSurface");
-    expect(folders).toContain("await foldersFile.json()");
-    expect(folders).toContain("parseFolders");
+  it("messages.tsx: hidden chats read via await + parse layer (folders removed)", () => {
+    // MSG-GROUPS-TAB-001: 自建文件夹已摘，readFoldersAsync 跟着消失 ——
+    // 隐藏会话是唯一剩下的本机落盘读入口，不断言已删除的东西。
     const hidden = block(messages, "export async function readHiddenChatIdsAsync", "export function MessagesSurface");
     expect(hidden).toContain("await hiddenChatsFile.json()");
     expect(hidden).toContain("parseHiddenChatIds");

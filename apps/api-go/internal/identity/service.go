@@ -415,6 +415,36 @@ func (s *Service) RecordAgeAssertionDetached(ctx context.Context, userID, dateOf
 	return nil
 }
 
+// RecordAgeAssertionBackfill 给 COMP-AGE-001 之前注册的老账号补一条年龄断言。
+// 那些账号注册时没填出生日期，服务端零年龄证据，AI 伴侣 / 分身门禁
+//（COMP-AI-MINOR-001）会 fail-closed 拒绝 —— 补上这条就能用。
+//
+// Append-only：和注册断言一样只追加不覆盖，写错重交一行新的即可纠正
+//（AgeAt 取最新一行）。来源 SELF_DECLARED_BACKFILL 与注册时的
+// SELF_DECLARED_AT_SIGNUP 区分开，举证时说得清。
+//
+// 任何能解析的过去日期都如实记录 —— 包括未成年。成年与否由各门禁判定，
+// 这里不判（判了就等于替用户决定他是谁，不诚实）。
+func (s *Service) RecordAgeAssertionBackfill(ctx context.Context, userID, dateOfBirth, ip, userAgent string) error {
+	dob := strings.TrimSpace(dateOfBirth)
+	if _, err := time.Parse("2006-01-02", dob); err != nil {
+		return errors.New("identity: date of birth must be YYYY-MM-DD")
+	}
+	if dob > s.clock.Now().UTC().Format("2006-01-02") {
+		return errors.New("identity: date of birth cannot be in the future")
+	}
+	if s.repository == nil {
+		return errors.New("identity: repository unavailable")
+	}
+	recorder, ok := s.repository.(interface {
+		RecordAgeAssertion(ctx context.Context, userID, dateOfBirth, source, ip, userAgent string) error
+	})
+	if !ok {
+		return errors.New("identity: age assertion store unavailable")
+	}
+	return recorder.RecordAgeAssertion(ctx, userID, dob, "SELF_DECLARED_BACKFILL", ip, userAgent)
+}
+
 // RecordLegalConsentsDetached writes the Terms / Privacy consent
 // rows for a user who just signed up, using a fresh, post-commit
 // context. This is the post-commit variant of recordLegalConsents,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCreatorSnapshot, parseFolders, parseHiddenChatIds } from "./local-snapshot";
+import { parseCreatorSnapshot, parseFolders, parseHiddenChatIds, parseHiddenChatTimes, shouldResurfaceHidden } from "./local-snapshot";
 
 describe("SYNC-FS-001 local snapshot parsers", () => {
   it("parses hidden chat ids, dropping non-strings", () => {
@@ -10,6 +10,23 @@ describe("SYNC-FS-001 local snapshot parsers", () => {
     // Regression: an un-awaited File.json() yields a Promise, which must
     // parse to empty (never crash, never leak).
     expect(parseHiddenChatIds(Promise.resolve(["a"]))).toEqual([]);
+  });
+
+  it("parses hidden chat times, migrating legacy id arrays to 0", () => {
+    expect(parseHiddenChatTimes(["a", "b"])).toEqual({ a: 0, b: 0 });
+    expect(parseHiddenChatTimes([{ id: "a", at: 100 }, { id: "b", at: -5 }, "c"])).toEqual({ a: 100, c: 0 });
+    expect(parseHiddenChatTimes({ a: 100, b: "x", c: -1 })).toEqual({ a: 100 });
+    expect(parseHiddenChatTimes({})).toEqual({});
+    expect(parseHiddenChatTimes(undefined)).toEqual({});
+    expect(parseHiddenChatTimes(Promise.resolve(["a"]))).toEqual({});
+  });
+
+  it("resurfaces hidden threads only on strictly newer activity", () => {
+    expect(shouldResurfaceHidden(undefined, 999)).toBe(false);
+    expect(shouldResurfaceHidden(100, 100)).toBe(false);
+    expect(shouldResurfaceHidden(100, 99)).toBe(false);
+    expect(shouldResurfaceHidden(100, 101)).toBe(true);
+    expect(shouldResurfaceHidden(0, 1)).toBe(true);
   });
 
   it("parses folders, dropping malformed entries", () => {

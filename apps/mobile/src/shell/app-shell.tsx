@@ -26,6 +26,7 @@ import {
   type PresetLocation
 } from "../components/location-picker-sheet";
 import { loadActiveCustomId, loadCustomHistory, loadFollowDevice, saveFollowDevice } from "../components/location-store";
+import { PeerFollowPromptSheet } from "../components/peer-follow-prompt";
 import { LegalStatusBanner } from "../components/legal-status-banner";
 import type { LegalStatus, LegalStatusClient } from "../legal-status-client";
 import { makeDeviceLocation } from "../components/location-options";
@@ -70,6 +71,7 @@ import { MessagesSurface } from "../surfaces/messages";
 import { meSubPage } from "../surfaces/me-sub-pages";
 import type { MeSubPage } from "../surfaces/me-types";
 import { RequesterHome, type RequesterGoal } from "../surfaces/requester-home";
+import { resolveHomePersonAccountId } from "../recommend-fixtures";
 import { AIAccountProfileSurface } from "../surfaces/ai-account-profile";
 import { OtherProfileSurface, type OtherProfileTarget } from "../surfaces/other-profile";
 import { RealitySceneMapSurface } from "../surfaces/reality-scene-map";
@@ -87,19 +89,20 @@ const OTTER_LOGO = require("../../assets/otter-logo.png");
 
 // R15.12.7 冻结：第二 Tab = 市场，对全部身份固定为「市场」。
 type RootTab = "HOME" | "MARKET" | "FEED" | "MESSAGES" | "ME";
-// R15.22 子页序列：horizontal swipe 跨 9 page (HOME, MARKET_OPP, MARKET_ACT, FEED_POSTS, FEED_STATUS, FEED_COMMUNITY, MSG_CHAT, MSG_FRIENDS, ME)
-// R15.23 改：FEED tab 内部 3 个 section (动态/状态/社区) 各自独立成 page — 横向 swipe 必须先走完 section 才到 MESSAGES，避免 "动态 → 直接消息" 的跳页。
-type PageId = "HOME" | "MARKET_OPP" | "MARKET_ACT" | "FEED_POSTS" | "FEED_STATUS" | "FEED_COMMUNITY" | "MSG_CHAT" | "MSG_FRIENDS" | "ME";
-const PAGE_SEQUENCE: ReadonlyArray<PageId> = ["HOME", "MARKET_OPP", "MARKET_ACT", "FEED_POSTS", "FEED_STATUS", "FEED_COMMUNITY", "MSG_CHAT", "MSG_FRIENDS", "ME"];
+// R15.22 子页序列：horizontal swipe 跨 8 page (HOME, MARKET_OPP, MARKET_ACT, FEED_POSTS, FEED_CAFE, MSG_CHAT, MSG_FRIENDS, ME)
+// R15.23 改：FEED tab 内部 section (动态/状态/社区) 各自独立成 page — 横向 swipe 必须先走完 section 才到 MESSAGES，避免 "动态 → 直接消息" 的跳页。
+// CAFE-SCENE-001: 状态+社区合并成一个「咖啡场景」section/page，9 page 变 8 page。
+type PageId = "HOME" | "MARKET_OPP" | "MARKET_ACT" | "FEED_POSTS" | "FEED_CAFE" | "MSG_CHAT" | "MSG_FRIENDS" | "ME";
+const PAGE_SEQUENCE: ReadonlyArray<PageId> = ["HOME", "MARKET_OPP", "MARKET_ACT", "FEED_POSTS", "FEED_CAFE", "MSG_CHAT", "MSG_FRIENDS", "ME"];
 const PAGE_TO_ROOT: Record<PageId, RootTab> = {
   HOME: "HOME", MARKET_OPP: "MARKET", MARKET_ACT: "MARKET",
-  FEED_POSTS: "FEED", FEED_STATUS: "FEED", FEED_COMMUNITY: "FEED",
+  FEED_POSTS: "FEED", FEED_CAFE: "FEED",
   MSG_CHAT: "MESSAGES", MSG_FRIENDS: "MESSAGES",
   ME: "ME"
 };
 // R15.33: 撤了 MAP tab。这里原本是 6 tab 跳页表，现在变回 5 tab。
-const PAGE_TO_FEED_SECTION: Partial<Record<PageId, "POSTS" | "STATUS" | "COMMUNITY">> = {
-  FEED_POSTS: "POSTS", FEED_STATUS: "STATUS", FEED_COMMUNITY: "COMMUNITY"
+const PAGE_TO_FEED_SECTION: Partial<Record<PageId, "POSTS" | "CAFE">> = {
+  FEED_POSTS: "POSTS", FEED_CAFE: "CAFE"
 };
 const ROOT_TO_FIRST_PAGE: Record<RootTab, PageId> = {
   HOME: "HOME", MARKET: "MARKET_OPP", FEED: "FEED_POSTS",
@@ -200,13 +203,19 @@ export function AppShell({
   const [context, setContext] = useState<ActiveContext>("REQUESTER");
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget>();
   const [feedChatAuthor, setFeedChatAuthor] = useState<string>();
-  // CONVO-OPEN-001: convoId = 消息支线。支线是**主线 DM 里的一个分支**，所以两个 id
-  // 要一起带：conversationId 是父母会话（ConvoSummary.convo.parentDialogId），
-  // convoId 是分支本身。少了 convoId，ConversationSurface 只会打开主线 —— 而入口上
-  // 写着「打开 Convo」。
-  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initialDraft?: string; convoId?: string; convoTitle?: string }>();
+  // MSG-GROUPS-TAB-001: convoId/convoTitle（打开一条已有消息支线）已经摘掉——
+  // 唯一入口是消息模块的 Convo 列表页，那张列表已经不存在了（见 messages.tsx）。
+  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initialDraft?: string; peerUserId?: string }>();
   const [openAIProfile, setOpenAIProfile] = useState<PlatformAIAccount>();
   const [openHumanProfile, setOpenHumanProfile] = useState<OtherProfileTarget>();
+  // CONVO-AVATAR-PROFILE-001: 点对话头像进主页时，非关注才弹关注 sheet。
+  // 关注成功后主页背后那张关注按钮是旧状态，用 key 逼它重挂重查。
+  const [followPrompt, setFollowPrompt] = useState<{ userId: string; name: string }>();
+  const [profileFollowBump, setProfileFollowBump] = useState(0);
+  // BRAND-CHROME-L1-001: 「我的」子页（个人主页等）跟 openAIProfile/openHumanProfile
+  // 一样是盖住整个 body 的目的地，只是写入方在 MeSurface 内部而不是这一层
+  // —— 品牌 logo/字标和底部 tab bar 只属于 1 级模块，子页必须收起来。
+  const [meSubPageOpen, setMeSubPageOpen] = useState(false);
   const [viewerAccountId, setViewerAccountId] = useState<string>();
   useEffect(() => {
     let cancelled = false;
@@ -214,6 +223,38 @@ export function AppShell({
     return () => { cancelled = true; };
   }, [secureSessionStore]);
   const messageChatAuthor = messageChat?.author;
+  // CONVO-AVATAR-PROFILE-001: 对话窗口点头像进对方主页。AI 进 AI 主页；
+  // 真人：有 id 直接进，没有 id 靠名字精确匹配（有且仅有一个才进，
+  // 0 个或多个都明说不瞎进）。进主页的同时查关注态 —— 没关注才弹关注
+  // sheet，已关注直接进（主页里本来就有那张按钮）。关系读失败不拦进主页。
+  async function openPeerProfile(peer: { userId?: string; name: string; aiAccount?: PlatformAIAccount }): Promise<void> {
+    if (peer.aiAccount) {
+      setOpenAIProfile(peer.aiAccount);
+      return;
+    }
+    let userId = resolveHomePersonAccountId((peer.userId ?? "").trim());
+    const name = (peer.name ?? "").trim();
+    if (!userId) {
+      if (name.length < 2 || name === "对方" || name === "对话") throw new Error("对方信息不全，打不开主页。");
+      const normalized = name.replace(/^@+/, "").toLowerCase();
+      const found = await profile.searchProfiles(name, 10);
+      const exact = found.filter((candidate) => {
+        const handle = (candidate.handle ?? "").replace(/^@+/, "").toLowerCase();
+        return handle === normalized || (candidate.name ?? "") === name;
+      });
+      if (exact.length !== 1 || !exact[0]) throw new Error("没找到对方的主页。");
+      userId = exact[0].userAccountId;
+    }
+    const displayName = name || userId;
+    setOpenHumanProfile({ userId, name: displayName, posts: [], mediaByPost: {} });
+    try {
+      if (viewerAccountId && !(await engagement.isFollowing(viewerAccountId, userId))) {
+        setFollowPrompt({ userId, name: displayName });
+      }
+    } catch {
+      // 关系读失败不拦进主页 —— 弹不出提示而已，主页里还有关注按钮。
+    }
+  }
   const [marketEntry, setMarketEntry] = useState<{
     tab: MarketTab;
     viewMode: MarketViewMode;
@@ -226,16 +267,15 @@ export function AppShell({
   // 下次正常进「我的」不会又弹回添加好友。
   const [meOpenSubPage, setMeOpenSubPage] = useState<MeSubPage>();
   const clearMeOpenSubPage = useCallback((): void => setMeOpenSubPage(undefined), []);
-  // R15.23: feedSection 是 FEED tab 内部的 section 状态 (动态/状态/社区)。
+  // R15.23: feedSection 是 FEED tab 内部的 section 状态 (动态/咖啡场景)。
   // 跨 page 切到 FEED_* 时同步设过来；swipe 切到 next/prev page 时也同步更新。
-  const [feedSection, setFeedSection] = useState<"POSTS" | "STATUS" | "COMMUNITY">("POSTS");
+  const [feedSection, setFeedSection] = useState<"POSTS" | "CAFE">("POSTS");
   const currentPage: PageId = pageOverride ?? ((): PageId => {
     if (tab === "HOME") return "HOME";
     if (tab === "MARKET") return marketEntry.tab === "ACTIVITY" ? "MARKET_ACT" : "MARKET_OPP";
     if (tab === "FEED") {
       // R15.23: 跟随 feedSection 而非写死 FEED_REC
-      if (feedSection === "STATUS") return "FEED_STATUS";
-      if (feedSection === "COMMUNITY") return "FEED_COMMUNITY";
+      if (feedSection === "CAFE") return "FEED_CAFE";
       return "FEED_POSTS";
     }
     if (tab === "MESSAGES") return "MSG_FRIENDS";
@@ -546,7 +586,7 @@ export function AppShell({
   // body 的目的地」，不是某个 tab 的子页面 —— 所以也要一起收掉导航 chrome。
   // 否则从动态点进他人主页后底栏还在，用户切个 tab 就会被留在一个没人负责关闭的
   // 主页上（它的写入方不在那个 tab，返回键也回不到正确的来源）。
-  const isNavVisible = !realitySceneOpen && !openAIProfile && !openHumanProfile && selectShellChromeVisible({
+  const isNavVisible = !realitySceneOpen && !openAIProfile && !openHumanProfile && !meSubPageOpen && selectShellChromeVisible({
     tab,
     feedChromeVisible,
     homeChromeVisible,
@@ -574,7 +614,11 @@ export function AppShell({
         <StatusBar animated={false} backgroundColor={color.offWhite} barStyle="dark-content" translucent={false} />
         {/* LEGAL-BANNER-001: 有 kill 才显示（组件内部判空），置顶。 */}
         {legalStatusState && !legalDismissed ? <LegalStatusBanner status={legalStatusState} onDismiss={() => setLegalDismissed(true)} /> : null}
-        {isNavVisible ? <Header compact={compactWidth} /> : null}
+        {/* HEADER-HOME-ONLY-001: 市场/动态/消息/我的各自顶部已经有自己的标题
+            （"市场"/"动态"/"消息"/"我的"），品牌 logo+字标再叠一遍是纯重复——
+            5 个 tab 里有 4 个顶部堆两层标题。品牌头只在首页留（首页没有自己的
+            标题行，需要它标识"这是 Proxy"）。*/}
+        {isNavVisible && tab === "HOME" ? <Header compact={compactWidth} /> : null}
         {/* 首页的本地范围说明属于 root Chrome 且只在首页出现 —— 消息页不再重复
             （MSG-LOCATION-DUPE-001：入口只在 Home 留一个）；“我的”根页由 Me Surface
             自己渲染，避免泄漏到其详情页。 */}
@@ -654,6 +698,7 @@ export function AppShell({
           />
         ) : openHumanProfile ? (
           <OtherProfileSurface
+            key={`${openHumanProfile.userId}:${profileFollowBump}`}
             target={openHumanProfile}
             engagement={engagement}
             localNet={localNet}
@@ -758,7 +803,7 @@ export function AppShell({
                 setRealitySceneOpen(true);
               }}
               onOpenHumanProfile={(person) => setOpenHumanProfile({
-                userId: person.id,
+                userId: resolveHomePersonAccountId(person.id),
                 name: person.name,
                 city: person.bio,
                 avatarUri: person.photoUri,
@@ -766,7 +811,7 @@ export function AppShell({
                 mediaByPost: {},
               })}
               onMessageHuman={(person) => {
-                setMessageChat({ author: person.name, ...(person.photoUri ? { avatarSource: { uri: person.photoUri } } : {}) });
+                setMessageChat({ author: person.name, ...(person.photoUri ? { avatarSource: { uri: person.photoUri } } : {}), peerUserId: resolveHomePersonAccountId(person.id) });
                 setPageOverride("MSG_CHAT");
                 setTab("MESSAGES");
               }}
@@ -814,6 +859,7 @@ export function AppShell({
               mediaClient={media}
               moderationClient={moderation}
               onBack={() => setFeedChatAuthor(undefined)}
+              onOpenPeerProfile={openPeerProfile}
             />
           ) : feedPrefsOpen ? (
             <FeedPrefsSurface onBack={() => setFeedPrefsOpen(false)} />
@@ -852,18 +898,18 @@ export function AppShell({
               {...(messageChat?.conversationId ? { conversationId: messageChat.conversationId } : {})}
               {...(messageChat?.aiAccount ? { aiAccount: messageChat.aiAccount } : {})}
               {...(messageChat?.avatarSource ? { peerAvatarSource: messageChat.avatarSource } : {})}
+              {...(messageChat?.peerUserId ? { peerUserId: messageChat.peerUserId } : {})}
               {...(messageChat?.initialDraft ? { initialDraft: messageChat.initialDraft } : {})}
-              {...(messageChat?.convoId ? { convoId: messageChat.convoId } : {})}
-              {...(messageChat?.convoTitle ? { convoTitle: messageChat.convoTitle } : {})}
               {...(ensureConversationSession ? { ensureSession: ensureConversationSession } : {})}
               conversationClient={conversation}
               activityClient={activities}
               mediaClient={media}
               moderationClient={moderation}
               onBack={() => setMessageChat(undefined)}
+              onOpenPeerProfile={openPeerProfile}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} relationship={relationship} onOpenAddFriend={() => { /* ADD-FRIEND-FROM-MESSAGES-001: 添加好友已内嵌消息模块（扫码/搜索/邀请），不再跳去「我的」。 */ }} onOpenConversation={(author, conversationId, aiAccount, avatarSource) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}) } : { author })} onOpenConvo={(author, conversationId, convoId, convoTitle) => setMessageChat({ author, conversationId, convoId, convoTitle })} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
+            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} relationship={relationship} onOpenConversation={(author, conversationId, aiAccount, avatarSource, peerUserId) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}), ...(peerUserId ? { peerUserId } : {}) } : { author, ...(peerUserId ? { peerUserId } : {}) })} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>
@@ -902,11 +948,12 @@ export function AppShell({
               onOpenVouchers={() => setVoucherOpen(true)}
               onOpenRealitySceneMap={() => { setRealitySceneSelection(undefined); setRealitySceneOpen(true); }}
               onExperienceAction={executeExperienceAction}
-              onOpenConversation={(author) => {
-                setMessageChat({ author });
+              onOpenConversation={(author, peerUserId) => {
+                setMessageChat({ author, ...(peerUserId ? { peerUserId } : {}) });
                 setTab("MESSAGES");
               }}
               onSignOut={onSignOut}
+              onSubPageOpenChange={setMeSubPageOpen}
               bottomNavVisible={isNavVisible}
               {...(scene ? { scene } : {})}
             />
@@ -943,6 +990,15 @@ export function AppShell({
           }}
           open={locationSheetOpen}
         />
+        {/* CONVO-AVATAR-PROFILE-001: 非关注进主页时弹的关注 sheet，盖在主页上面。 */}
+        {followPrompt ? (
+          <PeerFollowPromptSheet
+            target={followPrompt}
+            engagement={engagement}
+            onClose={() => setFollowPrompt(undefined)}
+            onFollowed={() => { setFollowPrompt(undefined); setProfileFollowBump((n) => n + 1); }}
+          />
+        ) : null}
       </View>
       </SafeAreaView>
     </>

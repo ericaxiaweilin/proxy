@@ -9,7 +9,7 @@ describe("MARKET-PIN-PARITY-001", () => {
   const market = readFileSync(fileURLToPath(new URL("./surfaces/market.tsx", import.meta.url)), "utf8");
 
   it("renders explorer spots at full strength like order pins", () => {
-    expect(market).toContain("EXPLORER_SPOTS.map((spot) => (");
+    expect(market).toContain("SEEDED_EXPLORER_SPOTS");
     expect(market).not.toContain("opacity={0.85}");
     // 颜色语义保留：订单靛青，探索紫（聚合后变量改名，语义不变）。
     expect(market).toContain('pinColor="#0B7A73"');

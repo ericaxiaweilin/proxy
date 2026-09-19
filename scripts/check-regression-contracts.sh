@@ -364,10 +364,52 @@ if grep -rq 'randomuser.me' apps/api-go --include='*.go'; then
   exit 1
 fi
 if grep -q 'images.unsplash.com' apps/mobile/src/recommend-fixtures.ts; then
-  echo "  FAIL [IDENTITY-ID-001]: home fixtures must not ship their own portraits" >&2
+  # R34 放宽（OVERRIDE-UNSplash-001，commander 决定 2026-09-18）：mock 期不许灰
+  # 头像，无真人账户的 fixture 允许用 stock 占位 —— 但必须同时满足三条，
+  # 缺一条就还是按违规处理：
+  # ① 所有 unsplash URL 只能出现在 R34_HUMAN_PORTRAITS 注册表内（不许散落各处）；
+  # ② 有账户的一律走写真 thumb（ACCOUNT_AVATAR_ASSET 分支），不许走 R34；
+  # ③ 服务端人物 feed 落地后整段删除，回到有账号才有头像（到期人工执行）。
+  R34_START=$(grep -n 'const R34_HUMAN_PORTRAITS' apps/mobile/src/recommend-fixtures.ts | cut -d: -f1)
+  R34_END=$(awk -v s="$R34_START" 'NR>s && /^\] as const/ {print NR; exit}' apps/mobile/src/recommend-fixtures.ts)
+  R34_OK=true
+  while IFS= read -r ln; do
+    n=${ln%%:*}
+    if [ -z "$R34_START" ] || [ -z "$R34_END" ] || [ "$n" -lt "$R34_START" ] || [ "$n" -gt "$R34_END" ]; then
+      R34_OK=false
+    fi
+  done <<-LINES
+	$(grep -n 'images.unsplash.com' apps/mobile/src/recommend-fixtures.ts)
+	LINES
+  if [ "$R34_OK" != "true" ]; then
+    echo "  FAIL [IDENTITY-ID-001]: unsplash portrait outside the R34 registry ——" >&2
+    echo "        stock 脸只能住在 R34_HUMAN_PORTRAITS 里，不许散落。" >&2
+    exit 1
+  fi
+  if ! grep -q 'ACCOUNT_AVATAR_ASSET\[person.id\] !== undefined' apps/mobile/src/recommend-fixtures.ts ||
+     ! grep -q 'R34_HUMAN_PORTRAITS\[portraitIndexForPerson(person.id)\]' apps/mobile/src/recommend-fixtures.ts; then
+    echo "  FAIL [IDENTITY-ID-001]: wired accounts must use portrait assets, R34 is fallback only ——" >&2
+    echo "        有账号走写真 thumb，无账号才按 id 哈希落 R34。" >&2
+    exit 1
+  fi
+  echo "    IDENTITY-ID-001: PASS with R34 fallback (registry-confined stock, wired accounts on portraits)"
+else
+  echo "    IDENTITY-ID-001: PASS (single source of truth for mock identity)"
+fi
+
+# CREATOR-HANA-NAM-001: Hana / Nam 转正 —— facet 键、写真资产、identity 行、
+# 首页映射四件齐，否则首页回落 stock / 关注落到幽灵 id。
+require_test "CREATOR-HANA-NAM-001" "./internal/mockidentity" \
+  "TestHanaNamKeysResolveDistinctIdentity" \
+  "apps/api-go/internal/mockidentity/identity_test.go" || exit $?
+if ! grep -q "'hana'), ('nam')" apps/api-go/scripts/seed_creator_portraits.sql ||
+   ! grep -q 'u_hana: "ma_creator_hana_portrait_v1"' apps/mobile/src/recommend-fixtures.ts ||
+   ! grep -q 'u_nam: "ma_creator_nam_portrait_v1"' apps/mobile/src/recommend-fixtures.ts; then
+  echo "  FAIL [CREATOR-HANA-NAM-001]: Hana/Nam wiring incomplete ——" >&2
+  echo "        seed、facet 键、首页映射缺一不可。" >&2
   exit 1
 fi
-echo "    IDENTITY-ID-001: PASS (single source of truth for mock identity)"
+echo "    CREATOR-HANA-NAM-001: PASS (Hana/Nam are real accounts with real faces)"
 
 # IDENTITY-ID-001 附加：不得再按「显示名」匹配人。用户名可编辑、可重复，按名字找人在
 # 改名或同名用户存在时会串人（requester-home 曾用 p.name.includes("linh") 选人）。
@@ -1107,12 +1149,29 @@ if ! grep -q 'PLACEHOLDER-015' apps/mobile/src/surfaces/placeholder-honest-actio
 fi
 echo "    PLACEHOLDER-015: PASS (tripwire present; covered by the vitest run above)"
 
-# PLACEHOLDER-016: 页签与文件夹同一横滑行。
-if ! grep -q 'PLACEHOLDER-016' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
-  echo "  FAIL [PLACEHOLDER-016]: tab-folder-row tripwire is missing" >&2
+# MSG-GROUPS-TAB-001: 消息模块只有对话/群组两页（自建文件夹与 Convo 列表页
+# 已摘，聊天 app 不是办公软件）。旧 PLACEHOLDER-016/018（文件夹媒体墙 +
+# 行内新建）钉的是已删除的东西，整段替换。
+if ! grep -q 'MSG-GROUPS-TAB-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [MSG-GROUPS-TAB-001]: dialogs-plus-groups tripwire is missing" >&2
   exit 1
 fi
-echo "    PLACEHOLDER-016: PASS (tripwire present; covered by the vitest run above)"
+if ! grep -q 'setPanel("groups")' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -q 'name="group"' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -q 'case "group"' apps/mobile/src/components/proxy-icon.tsx; then
+  echo "  FAIL [MSG-GROUPS-TAB-001]: groups tab or group logo missing ——" >&2
+  echo "        对话/群组两页 + 群组 logo 缺一不可。" >&2
+  exit 1
+fi
+if grep -q 'setPanel("folders")' apps/mobile/src/surfaces/messages.tsx ||
+   grep -q 'setPanel("convos")' apps/mobile/src/surfaces/messages.tsx ||
+   [ -f apps/mobile/src/components/folder-manager.tsx ]; then
+  echo "  FAIL [MSG-GROUPS-TAB-001]: folders/convos remnants back ——" >&2
+  echo "        文件夹与 Convo 列表页不许回来。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
+echo "    MSG-GROUPS-TAB-001: PASS (dialogs plus real groups, group logo)"
 
 # PLACEHOLDER-017: 筛选只在对话页，文件夹页有归档统计。
 if ! grep -q 'PLACEHOLDER-017' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
@@ -1121,12 +1180,8 @@ if ! grep -q 'PLACEHOLDER-017' apps/mobile/src/surfaces/placeholder-honest-actio
 fi
 echo "    PLACEHOLDER-017: PASS (tripwire present; covered by the vitest run above)"
 
-# PLACEHOLDER-018: 新建按钮在类型行内。
-if ! grep -q 'PLACEHOLDER-018' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
-  echo "  FAIL [PLACEHOLDER-018]: newbtn tripwire is missing" >&2
-  exit 1
-fi
-echo "    PLACEHOLDER-018: PASS (tripwire present; covered by the vitest run above)"
+# PLACEHOLDER-018: 新建按钮在类型行内 —— 已摘（文件夹功能整体移除，
+# 见 MSG-GROUPS-TAB-001），此门禁退役，不再要求该 tripwire 存在。
 
 # HUB-PROFILE-001: '我的' top profile card + identity card used
 # to render the hardcoded persona.name ('Huyen' / 'Bonsaidon')
@@ -1382,8 +1437,10 @@ if ! grep -q 'await hiddenChatsFile.json()' apps/mobile/src/surfaces/messages.ts
   echo "  FAIL [SYNC-FS-001]: hidden chats read must await json()" >&2
   exit 1
 fi
-if ! grep -q 'await foldersFile.json()' apps/mobile/src/surfaces/messages.tsx; then
-  echo "  FAIL [SYNC-FS-001]: folders read must await json()" >&2
+# MSG-GROUPS-TAB-001: foldersFile 读入口已随自建文件夹一起摘掉 ——
+# 不再要求它存在（剩下的读入口照旧全 await）。
+if grep -q 'foldersFile' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [SYNC-FS-001]: folders persistence remnants back" >&2
   exit 1
 fi
 if ! grep -q 'await creatorFile.json()' apps/mobile/src/surfaces/creator-application.tsx; then
@@ -2837,11 +2894,13 @@ if ! grep -qF 'search === "" ? { cursor, limit } : { cursor, limit, search },' a
   echo "        query, so logged-in search only filters one page locally." >&2
   exit 1
 fi
-if ! grep -qF 'const read = await localNet.listFeedPosts(undefined, searching ? 50 : 25, searching ? search : undefined);' apps/mobile/src/surfaces/feed.tsx; then
+if ! grep -qF 'const read = await localNet.listFeedPosts(undefined, searching ? 50 : 25, searching ? search : undefined' apps/mobile/src/surfaces/feed.tsx; then
   echo "  FAIL [SEARCH-CORPUS-001]: the feed surface stopped passing its query to the" >&2
   echo "        server — this is the exact dead-parameter bug that was fixed." >&2
   exit 1
 fi
+# FEED-FRESH-001 在后面多带了一个 fresh 穿透参数（发布后重载清 HTTP 缓存），
+# query 照传不误 —— 上面不断言右括号和分号，免得加参就红。要钉的是传 query 本身。
 if ! grep -qF 'const timer = setTimeout(() => void loadFeed(query), query === "" ? 0 : 250);' apps/mobile/src/surfaces/feed.tsx; then
   echo "  FAIL [SEARCH-CORPUS-001]: nothing re-runs the feed load when the query changes," >&2
   echo "        so the search box only filters whatever is already loaded." >&2
@@ -4227,24 +4286,30 @@ if grep -q 'uniqueness is per-tenant' apps/api-go/internal/identity/profile.go; 
 fi
 echo "    HANDLE-UNIQUE-001: PASS (handle unique case-insensitively; registration resolves a free handle)"
 
-# ADD-FRIEND-ENTRY-001: 整个 ADD_FRIEND 表面曾不可达。me.tsx 只在
-# subPage.route === "addfriend" 时渲染它，而全仓库没有一处 setSubPage 到那个
-# route；friend-crm 内部也从没调用过 setView("ADD_FRIEND")（view 只在挂载时
-# 取 initialView）。于是 5 种加好友方式 + 好友请求 + 扫码全都没有入口 ——
-# 一个建好却没有调用方的通道。
+# ADD-FRIEND-ENTRY-001: 整个 ADD_FRIEND 表面曾不可达 —— 一个建好却没有调用方的
+# 通道。旧形态是 me.tsx 只在 subPage.route === "addfriend" 时渲染它，而全仓库
+# 没有一处 setSubPage 到那个 route；当时的修法是在 friend-crm 的 LIST 视图里
+# 加一个 setView("ADD_FRIEND") 按钮当入口。
 #
-# 证据就在 friend-crm 自己的返回处理器里：它按 initialView === "ADD_FRIEND"
-# 分支，否则 setView("LIST")。那条 LIST 回退分支只能为「从 LIST 进 ADD_FRIEND」
-# 而写，入口缺失时它就是死代码 —— 同时也是入口缺失的证据。
-if ! grep -qF 'onPress={() => setView("ADD_FRIEND")}' apps/mobile/src/surfaces/friend-crm.tsx ||
-   ! grep -qF 'accessibilityLabel="添加好友"' apps/mobile/src/surfaces/friend-crm.tsx ||
-   ! grep -qF 'else setView("LIST")' apps/mobile/src/surfaces/friend-crm.tsx ||
+# ADD-FRIEND-ENTRY-002 之后入口换了地方：那个按钮和消息模块顶栏扫码
+# （MSG-SCAN-SHORTCUT-001）、首页点头像三个入口做同一件事，被摘掉了。
+# 摘掉不等于通道没了 —— 现在由两处调用方以 initialView="ADD_FRIEND" 挂载进入：
+#   - me.tsx:1706        我的 → 添加好友
+#   - messages.tsx:394   顶栏扫码（MSG-SCAN-SHORTCUT-001）
+# friend-crm.tsx 用 `const directEntry = initialView === "ADD_FRIEND";` 接住这条路径。
+#
+# 所以这条钉守住的是不变量本身 —— ADD_FRIEND 必须有调用方挂载，入口可以换，
+# 不能没有。守住旧按钮形态会和 002 直接打架（它明令不许加回来）。
+if ! grep -q 'initialView="ADD_FRIEND"' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -q 'initialView="ADD_FRIEND"' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'const directEntry = initialView === "ADD_FRIEND";' apps/mobile/src/surfaces/friend-crm.tsx ||
    ! grep -q 'ADD-FRIEND-ENTRY-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
   echo "  FAIL [ADD-FRIEND-ENTRY-001]: 加好友入口断了 ——" >&2
-  echo "        ADD_FRIEND 表面（扫码/邀请/通讯录/社媒/搜索/请求）又变成不可达。" >&2
+  echo "        ADD_FRIEND 表面不可达：没有调用方以 initialView=\"ADD_FRIEND\" 挂载它。" >&2
+  echo "        摘掉 LIST 里那个重复按钮（002）可以，但必须留下别的入口。" >&2
   exit 1
 fi
-echo "    ADD-FRIEND-ENTRY-001: PASS (LIST pushes ADD_FRIEND; the whole surface is reachable)"
+echo "    ADD-FRIEND-ENTRY-001: PASS (me.tsx + messages.tsx mount ADD_FRIEND via initialView)"
 
 # ADD-FRIEND-DEAD-BRANCH: me.tsx 里曾有两处 route === "friendcrm" —— line 848 的
 # guard（在 `if (subPage)` 之前，无条件 return）和 `if (subPage)` 块内一份更旧的
@@ -4281,11 +4346,16 @@ echo "    ADD-FRIEND-DEAD-BRANCH: PASS (exactly one friendcrm branch, and it is 
 # 2026-09-16 改线：添加好友不再跳「我的」—— 调用方传了 relationship，就在
 # 消息模块内嵌 FriendCrmSurface（扫码/搜索/邀请全在本页）。门禁跟着改线：
 # shell 必须透传 relationship，表面必须用调用方给的返回标签。
-if ! grep -qF 'onOpenAddFriend' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF 'accessibilityLabel="添加好友"' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF 'if (!onOpenAddFriend) return false;' apps/mobile/src/surfaces/messages.tsx; then
+# 2026-09-19 再改线：MSG-SCAN-SHORTCUT-001 把「+」号方式选择页（邀请/通讯录/
+# 社媒/搜索那一整页）从消息模块摘掉了 —— 有二维码就不需要到处都能申请加好友。
+# 入口改名换形：onOpenAddFriend / setShowAddFriend 那一套没了，变成顶栏「扫码」
+# 直接进相机（scanShortcut），内嵌的还是同一个 FriendCrmSurface。
+# 这条钉守的不变量没变：信息模块必须能加好友 —— 入口可以换，不能没有。
+if ! grep -qF 'const [scanShortcut, setScanShortcut] = useState(false);' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'accessibilityLabel="扫码"' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'onPress={() => setScanShortcut(true)}' apps/mobile/src/surfaces/messages.tsx; then
   echo "  FAIL [ADD-FRIEND-FROM-MESSAGES-001]: 信息模块的加好友入口断了 ——" >&2
-  echo "        「新聊天」里只剩收件箱里的人，找不出还没聊过的人。" >&2
+  echo "        顶栏「扫码」入口（MSG-SCAN-SHORTCUT-001）不在了：又只剩收件箱里的人，找不出还没聊过的人。" >&2
   exit 1
 fi
 if ! grep -qF 'relationship={relationship}' apps/mobile/src/shell/app-shell.tsx ||
@@ -4293,7 +4363,9 @@ if ! grep -qF 'relationship={relationship}' apps/mobile/src/shell/app-shell.tsx 
    ! grep -qF '<FriendCrmSurface' apps/mobile/src/surfaces/messages.tsx ||
    ! grep -qF 'initialView="ADD_FRIEND"' apps/mobile/src/surfaces/messages.tsx ||
    ! grep -qF 'addFriendBackLabel="‹ 返回"' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF 'setShowAddFriend(false)' apps/mobile/src/surfaces/messages.tsx; then
+   # MSG-SCAN-SHORTCUT-001 改名：关闭这个表面现在是 setScanShortcut(false)
+   # （原 setShowAddFriend(false)）。守的是「能退出去」，不是那个旧名字。
+   ! grep -qF 'onBack={() => setScanShortcut(false)}' apps/mobile/src/surfaces/messages.tsx; then
   echo "  FAIL [ADD-FRIEND-FROM-MESSAGES-001]: shell 没接这个入口 ——" >&2
   echo "        入口在、回调不在 = 点下去什么都不发生（或者停在信息页）。" >&2
   exit 1
@@ -4548,47 +4620,9 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/home-search-intent.test.ts src/requester-home-discovery-contract.test.ts || exit $?
 echo "    HOME-PEOPLE-SEARCH-001: PASS (home person search falls through to server profiles)"
 
-# CONVO-LIST-001: ConversationClient.listMyConvos 是「建好了没人调」—— 服务端有
-# ListMyConvos，客户端有方法也有单测，但 App 里从来没有调用方。结果是
-# conversation.tsx 能把一条消息分叉成支线（createConvo 已接线），分叉完却
-# **永远看不到它**。同一页还有第二个毛病：Convo 页列的是 GROUP/SUPPORT 会话，
-# 而那些在「对话」页已经出现过一遍；真正的支线一条都没有 —— 标题和内容对不上。
-if ! grep -qF 'conversationClient.listMyConvos()' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF 'const [myConvos, setMyConvos] = useState<ConvoSummary[] | undefined>(undefined);' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF 'setMyConvosFailed(true)' apps/mobile/src/surfaces/messages.tsx; then
-  echo "  FAIL [CONVO-LIST-001]: 支线列表没接上，或者三态被合并了 ——" >&2
-  echo "        把「拉失败」画成「一条都没有」，用户会以为自己从没开过支线。" >&2
-  exit 1
-fi
-if ! grep -qF 'setMyConvosNonce((n) => n + 1)' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF 'myConvosNonce]' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF 'Convo 加载失败' apps/mobile/src/surfaces/messages.tsx; then
-  echo "  FAIL [CONVO-LIST-001]: 失败提示或重试不见了 ——" >&2
-  echo "        重试必须真的能重跑 effect（reload 计数在依赖数组里）。" >&2
-  exit 1
-fi
-if ! grep -qF 'function convoTimeText' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF 'if (!Number.isFinite(ms) || ms <= 0) return "—";' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF '我的 Convo' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF '群组对话' apps/mobile/src/surfaces/messages.tsx; then
-  echo "  FAIL [CONVO-LIST-001]: Convo 标题或时间口径不见了" >&2
-  echo "        解析不出的时间要显示 —，不能留空（未知和「就是现在」不许一样）。" >&2
-  exit 1
-fi
-# 反向钉：把群组会话叫成 Convo 的旧标题不许回来。注意这个 token 不许出现在
-# messages.tsx 的**任何地方**（含注释）—— raw grep 认全文，注释里留一个
-# 就等于让这条钉永远红。
-if grep -qF '关注的 Convo' apps/mobile/src/surfaces/messages.tsx; then
-  echo "  FAIL [CONVO-LIST-001]: Convo 页又在拿群组会话冒充 Convo ——" >&2
-  echo "        群组会话在「对话」页已经有了；这一页该列真的支线。" >&2
-  exit 1
-fi
-if ! grep -q 'CONVO-LIST-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
-  echo "  FAIL [CONVO-LIST-001]: 测试不见了" >&2
-  exit 1
-fi
-pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
-echo "    CONVO-LIST-001: PASS (my convos are listed with three honest states; group chats are no longer labelled Convo)"
+# CONVO-LIST-001: 已退役（见 MSG-GROUPS-TAB-001）—— Convo 列表页已摘，
+# myConvos 拉取/三态/重试整套跟着消失。listMyConvos 客户端方法保留
+# （服务端契约），messages 表面不再调用，不再要求列表存在.
 
 # CONTACT-SEARCH-COPY-001: 「新聊天」联系人页的副标题承诺了它那个搜索框做不到的事。
 #
@@ -4659,49 +4693,9 @@ if ! grep -q 'ADD-FRIEND-PHONE-COPY-001' apps/mobile/src/surfaces/placeholder-ho
 fi
 echo "    ADD-FRIEND-PHONE-COPY-001: PASS (add-friend surface does not advertise a phone search that does not exist)"
 
-# CONVO-OPEN-001: Convo 列表点进去必须打开那条支线，而不是主线。
-#
-# 支线（Convo）是主线 DM 的一个分支：conversation.tsx 用 convId（父母会话）
-# + activeConvo.id 去 listMessages，两者缺一不可。列表里点一条 Convo，以前只交出
-# parentDialogId —— shell 于是按普通 DM 打开，入口写着「打开 Convo」，点开却是主线，
-# 支线内容一条都看不到。要害是 convoId 必须一路带到 ConversationSurface
-# （它认的 prop 名是 convoId / convoTitle）。
-# 钉**整个调用**而不是光钉 s.convo.id：那个 token 在 key={s.convo.id} 里也有一份，
-# 光钉它会漏判（把 convoId 从调用里删掉、key 还在，钉照样绿）。
-if ! grep -qF 'onOpenConvo' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF 'openConvo(' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF 'openConvo(parentName, s.convo.parentDialogId, s.convo.id,' apps/mobile/src/surfaces/messages.tsx; then
-  echo "  FAIL [CONVO-OPEN-001]: Convo 列表没把 convoId 交出去 ——" >&2
-  echo "        少了它，点开的会是主线 DM，支线内容一条都看不到。" >&2
-  exit 1
-fi
-if ! grep -qF 'onOpenConvo={' apps/mobile/src/shell/app-shell.tsx ||
-   ! grep -qF '{...(messageChat?.convoId ? { convoId: messageChat.convoId } : {})}' apps/mobile/src/shell/app-shell.tsx ||
-   ! grep -qF '{...(messageChat?.convoTitle ? { convoTitle: messageChat.convoTitle } : {})}' apps/mobile/src/shell/app-shell.tsx; then
-  echo "  FAIL [CONVO-OPEN-001]: shell 没把 convoId / convoTitle 传给 ConversationSurface ——" >&2
-  echo "        ConversationSurface 认的 prop 名就是这两个。" >&2
-  exit 1
-fi
-# 反向钉：旧接线只带 parentDialogId 调 onOpenConversation，只能打开主线。
-# 注意这个 token 不许出现在 messages.tsx 的**任何地方**（含注释）—— raw grep 认全文，
-# 注释里留一个就等于让这条钉永远红。
-if grep -qF 'onPress={() => onOpenConversation(parentName, s.convo.parentDialogId)}' apps/mobile/src/surfaces/messages.tsx; then
-  echo "  FAIL [CONVO-OPEN-001]: Convo 行又在只带 parentDialogId 打开主线 ——" >&2
-  echo "        那打开的是主线 DM，不是这一行承诺的支线。" >&2
-  exit 1
-fi
-# 没人接的时候不许静默：静默的死按钮和「这条支线不存在」长得一样。
-if ! grep -qF 'if (!onOpenConvo) return false;' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF '支线入口还没接通' apps/mobile/src/surfaces/messages.tsx; then
-  echo "  FAIL [CONVO-OPEN-001]: 支线入口没接通时不说话了 ——" >&2
-  echo "        静默的死按钮和「这条支线不存在」长得一样。" >&2
-  exit 1
-fi
-if ! grep -q 'CONVO-OPEN-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
-  echo "  FAIL [CONVO-OPEN-001]: 测试不见了" >&2
-  exit 1
-fi
-echo "    CONVO-OPEN-001: PASS (tapping a Convo opens the branch, not the mainline)"
+# CONVO-OPEN-001: 已退役（见 MSG-GROUPS-TAB-001）—— 外部 Convo 列表页已摘，
+# onOpenConvo 整条接线跟着消失。支线只在对话里长按消息创建（屏内 state），
+# 不再要求外部接线存在.
 
 # GROUP-CREATE-001: 群组从来就没真正建起来过 —— StartConversation 的参与者恒为
 # {创建者, participantId} 两个，所以一个「GROUP」最多也就两个人。
@@ -4884,11 +4878,19 @@ if ! grep -qF 'json:"address,omitempty"' apps/api-go/internal/realityscene/servi
   echo "        Scene 有自定义 MarshalJSON，只改结构体字段不会进 JSON。" >&2
   exit 1
 fi
-# Bắc Ninh 那家店：id + 真实地址都要在（地址是反查得到的，不是编的）。
+# Bắc Ninh 那家店：id + 街道级地址都要在（地址是反查得到的，不是编的）。
+#
+# 2026-09-19：不再把街道名写进钉里。threebeans_bn 的地址在 2026-09-18 真机实测后
+# 被更正过一次（Lê Văn Thịnh → 109 Lý Chiêu Hoàng，用户在店内上报定位），钉死街道
+# 名只会让「改对了」也被判红。改成钉住形状：这一条目录项必须自带 Address，且是
+# 街道级（带城市 `TP Bắc Ninh`），而不是拿 Area（"Bắc Ninh"）冒充 —— 后者正是
+# 这条钉当初要治的病。
+BN_ENTRY=$(grep -F '"threebeans_bn"' apps/api-go/internal/realityscene/service.go | head -1)
 if ! grep -qF '"threebeans_bn"' apps/api-go/internal/realityscene/service.go ||
-   ! grep -qF 'Lê Văn Thịnh, Suối Hoa, TP Bắc Ninh' apps/api-go/internal/realityscene/service.go; then
+   ! printf '%s' "$BN_ENTRY" | grep -qF 'Address: "' ||
+   ! printf '%s' "$BN_ENTRY" | grep -qF 'TP Bắc Ninh'; then
   echo "  FAIL [SCENE-ADDRESS-001]: Bắc Ninh 的 Three Beans 不在场景目录里 ——" >&2
-  echo "        缺了它，Bắc Ninh 用户打开场景地图是空的。" >&2
+  echo "        缺了它（或缺了它的街道级地址），Bắc Ninh 用户打开场景地图是空的。" >&2
   exit 1
 fi
 # 客户端：marker 的描述要走 sceneAddressLine（有地址用地址，没有退回区名+类型）。
@@ -5126,11 +5128,11 @@ if ! grep -qF 'json:"source"' apps/api-go/internal/realityscene/service.go ||
   echo "        没有来源标记，用户就分不清哪些坐标是查过的、哪些是别人随手点的。" >&2
   exit 1
 fi
-# 客户端必须真的能提交，而且必须把来源显示出来。
-if ! grep -qF '"ProposeRealityScene"' apps/mobile/src/surfaces/reality-scene-map.tsx ||
-   ! grep -qF 'sceneSourceSuffix(scene.source)' apps/mobile/src/surfaces/reality-scene-map.tsx; then
-  echo "  FAIL [SCENE-CONTRIB-001]: 客户端没有提交入口或没有显示来源 ——" >&2
-  echo "        不显示来源 = 把"用户填的"当成"我们核实过的"。" >&2
+# 客户端提交入口暂撤（commander 重做社区提交 UI，管线不动）：移动端不再有
+# ProposeRealityScene 调用，但来源后缀显示必须保留 —— 社区来源的店行照样标出。
+if ! grep -qF '{sceneSourceSuffix(scene.source)}' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-CONTRIB-001]: 社区来源标记显示不见了 ——" >&2
+  echo "        没有来源标记，用户就分不清哪些坐标是查过的、哪些是别人随手点的。" >&2
   exit 1
 fi
 echo "    SCENE-CONTRIB-001: PASS (community proposals need peer confirmation and stay labelled as unverified)"
@@ -6444,11 +6446,10 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
 echo "    ADD-FRIEND-SEND-BUSY-001: PASS (sending locks the button with a busy label)"
 
-# SCENE-NAV-001: 场景标记点进去是主页，但去不了 —— 缺导航出口。
-#
-# 决定（A 方案）：tap 进主页不动，导航是主页操作行第三颗按钮，走
-# MEETUP-NAV-001 同一套系统地图深链（iOS Apple Maps / Android Google Maps）。
-# 长按方案否掉：Marker 长按版本支持不一、发现不了、和拖拽冲突、无障碍差。
+# SCENE-NAV-001: 场景有点可去 —— 导航走 MEETUP-NAV-001 同一套系统地图深链。
+# SCENE-NAV-PIN-001（2026-09-19 反转旧决定）：旧门禁曾否掉 B 方案（点图钉改道），
+# 但导航埋详情里用户找不到 —— 点图钉改弹快打卡（导航/详情二选一）。详情页内
+# 导航按钮保留，同一条深链。
 if ! grep -q 'meetupDirectionsUrls' apps/mobile/src/surfaces/reality-scene-map.tsx ||
    ! grep -q 'Linking.openURL' apps/mobile/src/surfaces/reality-scene-map.tsx ||
    ! grep -q '导航去这里' apps/mobile/src/surfaces/reality-scene-map.tsx ||
@@ -6465,13 +6466,17 @@ if grep -q 'maps.apple.com' apps/mobile/src/surfaces/reality-scene-map.tsx ||
   echo "        绕过坐标校验，拼错就是编点。" >&2
   exit 1
 fi
-# 反向钉：tap 进主页的老链路不许改道（那是 B 方案，加塞最高频动作）。
-if ! grep -q 'onPress={() => { setSelectedId(scene.id); }}' apps/mobile/src/surfaces/reality-scene-map.tsx; then
-  echo "  FAIL [SCENE-NAV-001]: 点标记进主页的链路被动了 ——" >&2
+# 正向钉：点图钉弹快打卡，看详情才进主页老链（B 方案，2026-09-19 生效）。
+if ! grep -q 'setPinSheetId(scene.id)' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'setSelectedId(pinScene.id)' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'openSceneNavigation(pinScene)' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-NAV-PIN-001]: 图钉快打卡链被动了 ——" >&2
+  echo "        点钉必须先选导航/详情，不许直通详情把导航藏回去。" >&2
   exit 1
 fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-nav.test.ts || exit $?
 echo "    SCENE-NAV-001: PASS (scene homepage navigates via system maps)"
+echo "    SCENE-NAV-PIN-001: PASS (pin pops navigation-or-detail sheet)"
 
 # SCENE-HUMANS-001: 场景详情“一起玩的人”只露圆头像 + 名字 + 可约状态。
 #
@@ -6516,6 +6521,33 @@ if grep -q 'styles.humanCard' apps/mobile/src/surfaces/reality-scene-map.tsx; th
 fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-humans.test.ts || exit $?
 echo "    SCENE-HUMANS-002: PASS (bare big round heads, ring selection, no card)"
+# SCENE-HUMANS-004: “适合一起的人” rail 只挂载一遍 detail.humans.map。
+#
+# 之前同一行 map 并排出现两次 —— 进场景主页每个人出现两遍，各带各的选中态。
+if ! grep -q 'SCENE-HUMANS-004' apps/mobile/src/scene-humans.test.ts; then
+  echo "  FAIL [SCENE-HUMANS-004]: 去重测试不见了 ——" >&2
+  echo "        同一个人又会并排出现两次。" >&2
+  exit 1
+fi
+if [ "$(grep -o 'detail\.humans\.map' apps/mobile/src/surfaces/reality-scene-map.tsx | wc -l | tr -d ' ')" != "1" ]; then
+  echo "  FAIL [SCENE-HUMANS-004]: humans rail 又渲染了不止一遍 ——" >&2
+  echo "        一个人只许出现一次。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/scene-humans.test.ts || exit $?
+echo "    SCENE-HUMANS-004: PASS (people rail mounts exactly once)"
+# SCENE-STUDIO-001: 场景 Studio 出图 —— 时段场景 × 点中菜单 × 绑定小美，
+# 三元素拼一张卡走系统分享。选什么出什么：缺元素按钮 disabled + 明说，
+# 不许拿默认替身凑数。
+if ! grep -q 'SCENE-STUDIO-001' apps/mobile/src/scene-studio.test.ts ||
+   ! grep -q 'ref={studioShareRef}' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'disabled={!studioReady}' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-STUDIO-001]: Studio 出图链被动了 ——" >&2
+  echo "        场景×菜单×小美缺一不可，缺了必须明说。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/scene-studio.test.ts || exit $?
+echo "    SCENE-STUDIO-001: PASS (scene x menu x xiaomei studio card)"
 # SCENE-CATEGORY-001: 场景顶类封闭三态（商家/景点/其他），前端只认这三个。
 #
 # 之前 type 是自由文本，词表无界 —— 后期按分类做的标记颜色、徽标、筛选全都
@@ -6673,7 +6705,10 @@ echo "    NOTIF-INVITE-OFFER-001: PASS (offer and invitations reach the one who 
 # 同案只此一处：点赞/回复都是真值＋0 兜底。另：#18“两套图片系统”是误读 ——
 # feed 多图轨＋X 式自动播只能用 Adaptive，个人主页照片墙才用 Threads 网格，
 # 迁过去等于把自动播砍了，两边各守各的 lane，门禁钉住。
-if ! grep -q '{isSaved ? "已收藏" : "收藏"}' apps/mobile/src/surfaces/feed.tsx ||
+# FEED-ACTION-ICONS-001 之后收藏从文字态（"收藏"/"已收藏"）换成图标实心/描边态，
+# 语义没变：filled 只跟 isSaved 走，旁边没有数字。钉跟着认图标态 —— 钉的是
+# "不显示编出来的聚合数"，不是那两个字。
+if ! grep -q 'filled={isSaved} name="bookmark"' apps/mobile/src/surfaces/feed.tsx ||
    ! grep -q 'FEED-SAVED-COUNT-001' apps/mobile/src/surfaces/feed-saved-count.test.ts; then
   echo "  FAIL [FEED-SAVED-COUNT-001]: 收藏数又开始编聚合了 ——" >&2
   exit 1
@@ -6739,6 +6774,56 @@ if ! grep -q '| "pin"' apps/mobile/src/components/proxy-icon.tsx ||
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/convo-attach.test.ts || exit $?
 echo "    SHEET-ICONS-001: PASS (attach entries are icon tiles, camera media stays in the album)"
+# CONTACT-CARD-001: 名片 picker 曾经只有 UI 壳（setCardOptions 零调用，打开
+# 永远转圈）。首项必须是"我自己的名片"，好友逐个解 handle、解不出的不列。
+if ! grep -q 'setCardOptions(options)' apps/mobile/src/surfaces/conversation.tsx ||
+   ! grep -q 'CONTACT-CARD-001' apps/mobile/src/surfaces/contact-card.test.ts; then
+  echo "  FAIL [CONTACT-CARD-001]: 名片 picker 又没数据源了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/contact-card.test.ts || exit $?
+echo "    CONTACT-CARD-001: PASS (picker backed by profile + friendships, fail-closed)"
+# SEND-NONBLOCK-001: 发出去就放行 composer，不等 AI 回复。回退（canSend 里
+# 再出现 !sending 之类）会让"发完位置必须等回复"重现。
+if grep -q '!sending' apps/mobile/src/surfaces/conversation.tsx ||
+   ! grep -q 'pendingReplies > 0 && aiAccount' apps/mobile/src/surfaces/conversation.tsx ||
+   ! grep -q 'SEND-NONBLOCK-001' apps/mobile/src/surfaces/send-nonblock.test.ts; then
+  echo "  FAIL [SEND-NONBLOCK-001]: composer 又被在途请求按住了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/send-nonblock.test.ts || exit $?
+echo "    SEND-NONBLOCK-001: PASS (composer released on paint, reply counter drives typing)"
+# QUOTE-REPLY-001: 引用靠消息 ID，不靠文字快照。回退（只传快照不传 ID、
+# 或 hydrate 不解析）会让对方收到孤立消息、AI 拿不到引用上下文。
+if ! grep -q 'replyToMessageId' apps/mobile/src/conversation-client.ts ||
+   ! grep -q 'byId.get(m.replyToMessageId)' apps/mobile/src/surfaces/conversation.tsx ||
+   ! grep -q 'QUOTE-REPLY-001' apps/mobile/src/surfaces/quote-reply.test.ts ||
+   ! grep -q 'reply_to' apps/api-go/migrations/101_message_reply_to.sql; then
+  echo "  FAIL [QUOTE-REPLY-001]: 引用又退回本地快照了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/quote-reply.test.ts || exit $?
+echo "    QUOTE-REPLY-001: PASS (quotes by ID end to end, foreign/missing rejected)"
+# NEARBY-SPOTS-001: 推荐地点必须是 3km 真数据。回退（路由没挂/客户端不用/
+# 又写死景点）会让"推荐发不出去"重现。
+if ! grep -q '"/v1/places/nearby", s.nearbyPlaces' apps/api-go/internal/api/server.go ||
+   ! grep -q 'fetchNearbySpots(baseUrl' apps/mobile/src/components/location-picker-sheet.tsx ||
+   ! grep -q 'NEARBY-SPOTS-001' apps/mobile/src/nearby-spots.test.ts; then
+  echo "  FAIL [NEARBY-SPOTS-001]: 推荐地点又退回硬编码了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/nearby-spots.test.ts || exit $?
+echo "    NEARBY-SPOTS-001: PASS (3km live spots, hardcoded presets are fallback only)"
+# FEED-FRESH-001: 自己刚发的帖子在动态看不到。回退（发布后重载不穿缓存、
+# "展示最新"替换时间线）会让发帖人当场找不到自己的帖子。
+if ! grep -q 'await loadFeed(undefined, true)' apps/mobile/src/surfaces/feed.tsx ||
+   ! grep -q 'setPosts(cachedPosts)' apps/mobile/src/surfaces/feed.tsx ||
+   ! grep -q 'FEED-FRESH-001' apps/mobile/src/feed-fresh.test.ts; then
+  echo "  FAIL [FEED-FRESH-001]: 新帖又在动态里隐身了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/feed-fresh.test.ts || exit $?
+echo "    FEED-FRESH-001: PASS (post-publish reload bypasses cache, pill merges)"
 # AUDIT-BATCH3-001: 第五~九轮 P0 小项合集（纯移动端，无后端变更）。
 # SHARE-LINK-001 分享链接写死测试账号 / FAVORITES-REAL-001 收藏两条假记录 /
 # LEGAL-BANNER-001 法律横幅从没挂载 / ANALYTICS-HONEST-001 漏斗文案自相矛盾 /
@@ -6746,7 +6831,11 @@ echo "    SHEET-ICONS-001: PASS (attach entries are icon tiles, camera media sta
 if ! grep -q 'pxy.app/${shareHandle}/social' apps/mobile/src/surfaces/me.tsx ||
    ! grep -q '还没有收藏列表' apps/mobile/src/surfaces/me-orders.tsx ||
    ! grep -q '<LegalStatusBanner' apps/mobile/src/shell/app-shell.tsx ||
-   ! grep -q '示例数据 · 真实统计即将上线' apps/mobile/src/surfaces/me.tsx ||
+   # PROFILE-VISIT-001 之后「主页访问」接了 ListProfileViewStats，不再纯示例，
+   # 副标题改成区分「这一步真实 / 其余仍是示例」的措辞，不再是笼统的
+   # "示例数据 · 真实统计即将上线"。钉的是"不许自相矛盾地宣称只看真数据"，
+   # 不是那句旧文案。
+   ! grep -q '主页访问是真实数据；往后每一步和下方渠道来源仍是示例' apps/mobile/src/surfaces/me.tsx ||
    ! grep -q 'AUDIT-BATCH3-00' apps/mobile/src/surfaces/me-audit-batch3.test.ts; then
   echo "  FAIL [AUDIT-BATCH3-001]: 审计小项修复丢了 ——" >&2
   exit 1
@@ -6824,3 +6913,286 @@ if grep -q '>视频</Text>' apps/mobile/src/surfaces/conversation.tsx ||
   echo "  FAIL [SHEET-ICONS-001]: 相机媒体又在 ＋ 里单开了入口 ——" >&2
   exit 1
 fi
+# CONVO-AVATAR-PROFILE-001: 对话窗口点头像必须进对方个人主页，非关注弹关注。
+#
+# 根因三段：toDialog 把 counterpartyId 丢了（Dialog 类型里就没有 userId，
+# 进了对话窗口只剩一个名字）；ConversationSurface 的头像是纯展示（气泡和
+# 顶栏都没有 Pressable）；even 名字都解析不了 —— Message 只有 sender 显示名。
+# 修法：counterpartyId 从 inbox 一路透到 ConversationSurface（peerUserId），
+# 气泡头像 + 顶栏头像都可点；没 id 的靠名字精确匹配（有且仅有一个才进，
+# 否则明说）；进主页同时查 isFollowing，非关注才弹关注 sheet。
+# 钉整条调用链：任何一段断了，现象都是"点了没反应"，和断的是哪段无关。
+if ! grep -qF 'peerUserId' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'peerUserId: item.counterpartyId' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'peerUserId?: string' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'onOpenPeerProfile={openPeerProfile}' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'onOpenPeerProfile' apps/mobile/src/surfaces/conversation.tsx ||
+   ! grep -qF 'setOpenHumanProfile' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [CONVO-AVATAR-PROFILE-001]: 对话头像进主页链路断了 ——" >&2
+  echo "        现象永远是点了没反应，查三段（透传/入口/开主页）即可定位。" >&2
+  exit 1
+fi
+# 反向钉：非关注必须弹 sheet，已关注不弹 —— 两个分支都要在，不能只留一个。
+if ! grep -qF 'PeerFollowPromptSheet' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'isFollowing' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [CONVO-AVATAR-PROFILE-001]: 陌生人关注弹窗不见了 ——" >&2
+  echo "        非关注进主页必须弹一次关注 sheet。" >&2
+  exit 1
+fi
+echo "    CONVO-AVATAR-PROFILE-001: PASS (conversation avatar opens profile, strangers get follow prompt)"
+# 有真人 id 就建真人 DM —— 挂载 fallback 再敢用 user_proxy_ai，真人对话又会被
+# 吞进助手串（Hana 事件）。问助手类入口（没 id）才允许走 fallback。
+if ! grep -qF 'originId: peerUserId, participantId: peerUserId' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [CONVO-AVATAR-PROFILE-001]: 真人建会话又 fallback 到 user_proxy_ai ——" >&2
+  echo "        Hana 会再次变成 AI助手。" >&2
+  exit 1
+fi
+# ASSISTANT-THREAD-001: AI 助手有且仅有一个，对话列表只露一行（proxy_ai/AI助手）。
+#
+# 根因：proxy_ai（首页助手）和 user_proxy_ai（任务/帖子上下文助手）是同一个
+# 助手的两个入口，但建会话与列收件箱都按 counterparty 原样处理 —— 每换一个
+# 入口就多一行，收件箱里出现 ai_001/user_proxy_ai/proxy_ai 三个"助手"。
+# ai_account_*（AI 小美等用户自选陪伴）与真人一样是「用户」，不在归一范围；
+# 真人会话（哪怕 AI 接管）更不能动。
+# 修法：建会话时助手入口复用该用户最新的助手串（分隔符留痕）；列表按
+# canonical key 收敛，行身份永远是 proxy_ai / AI助手；旧串保留可读，
+# 只是不再列出。客户端助手行挂 logo、不可点（没有主页）。
+require_test "ASSISTANT-THREAD-001" "./internal/conversation" \
+  "TestAssistantConversationsUnifyIntoOneThread" \
+  "apps/api-go/internal/conversation/service_test.go" || exit $?
+if ! grep -qF 'isAssistantCounterparty' apps/api-go/internal/conversation/service.go ||
+   ! grep -qF 'canonicalAssistantCounterparty' apps/api-go/internal/conversation/service.go ||
+   ! grep -qF 'latestAssistantConversation' apps/api-go/internal/conversation/service.go; then
+  echo "  FAIL [ASSISTANT-THREAD-001]: 助手归一逻辑不见了 ——" >&2
+  echo "        收件箱会重新冒出多个助手行。" >&2
+  exit 1
+fi
+if ! grep -qF 'ASSISTANT_LOGO' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'peerIsAssistant' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [ASSISTANT-THREAD-001]: 助手行 logo / 不可点不见了 ——" >&2
+  echo "        助手头像必须是 logo，且没有主页可点。" >&2
+  exit 1
+fi
+echo "    ASSISTANT-THREAD-001: PASS (one assistant thread, logo avatar, companions and humans untouched)"
+# CONVO-LIST-BLOCKED-001: 模型生成期间列表不能被堵住。
+#
+# 根因：HandleContext 对整条命令持有 s.mu，而 start/send 里的 generateAIReply
+# 一次要几秒 —— 生成期间 ListConversations 也在排队，客户端列表一直"加载中"
+# 直到 AI 回复出来。修法不是去锁（Seq 分配还要串行），而是只在模型调用期间
+# 松开（withModelUnlocked，defer 配平防 panic 后 fatal）。
+# 反向验证过：只解开一起始 site，门控测试 3.5s 红。
+require_test "CONVO-LIST-BLOCKED-001" "./internal/conversation" \
+  "TestListConversationsNotBlockedByModelGeneration" \
+  "apps/api-go/internal/conversation/service_test.go" || exit $?
+if ! grep -qF 'withModelUnlocked(func() *Message {' apps/api-go/internal/conversation/service.go ||
+   ! grep -qF 's.mu.Unlock()' apps/api-go/internal/conversation/service.go; then
+  echo "  FAIL [CONVO-LIST-BLOCKED-001]: 模型调用又抱着全局锁跑了 ——" >&2
+  echo "        AI 生成几秒，列表就转圈几秒。" >&2
+  exit 1
+fi
+echo "    CONVO-LIST-BLOCKED-001: PASS (list stays responsive during model generation)"
+# TWIN-CENTER-001/002: 分身列表与收回授权。分身中心之前是纯静态 showcase，
+# Twin 列表写死 Linh/Mai、「创建」按钮 onPress 是空函数。后端其实早有
+# CreatePersona/GrantConsent，只是缺列表与收回两个口子，移动端零接线。
+require_test "TWIN-CENTER-001" "./internal/api" \
+  "TestListPersonasNewestFirst" \
+  "apps/api-go/internal/api/aipersona_personas_test.go" || exit $?
+require_test "TWIN-CENTER-002" "./internal/api" \
+  "TestGrantRevokeConsentRoundTrip" \
+  "apps/api-go/internal/api/aipersona_personas_test.go" || exit $?
+if ! grep -qF 'func (s *Server) listPersonas' apps/api-go/internal/api/aipersona_handlers.go ||
+   ! grep -qF 'func (s *Server) revokeConsent' apps/api-go/internal/api/aipersona_handlers.go ||
+   ! grep -qF 'func (s *Service) RevokeLiveConsent' apps/api-go/internal/aipersona/personas.go ||
+   ! grep -qF 'class AiPersonaClient' apps/mobile/src/ai-persona-client.ts ||
+   ! grep -qF 'listMine' apps/mobile/src/surfaces/AIIdentityShowcaseSurface.tsx; then
+  echo "  FAIL [TWIN-CENTER]: 分身真接线不见了 ——" >&2
+  echo "        列表/收回接口、client、分身段真列表，少一段就回到假数据。" >&2
+  exit 1
+fi
+echo "    TWIN-CENTER: PASS (persona list + revoke wired end to end)"
+# AGE-BACKFILL-001: 老账号补年龄断言。COMP-AGE-001 之前注册的号零年龄证据，
+# 分身门禁 fail-closed 全拒，而注册只收一次出生日期 —— 没有这个口，
+# 老号永远建不了分身，且只能看到英文原文。
+require_test "AGE-BACKFILL-001" "./internal/identity" \
+  "TestBackfillRecordsWithBackfillSource" \
+  "apps/api-go/internal/identity/age_assertion_backfill_test.go" || exit $?
+require_test "AGE-BACKFILL-001" "./internal/api" \
+  "TestRecordAgeAssertionRequiresToken" \
+  "apps/api-go/internal/api/age_assertion_test.go" || exit $?
+if ! grep -qF 'SELF_DECLARED_BACKFILL' apps/api-go/internal/identity/service.go ||
+   ! grep -qF 'recordAgeAssertion' apps/mobile/src/ai-persona-client.ts ||
+   ! grep -qF 'TwinNoAgeEvidenceError' apps/mobile/src/ai-persona-client.ts; then
+  echo "  FAIL [AGE-BACKFILL-001]: 补年龄断言链路不见了 ——" >&2
+  echo "        老号又会卡在英文 no age evidence 上。" >&2
+  exit 1
+fi
+echo "    AGE-BACKFILL-001: PASS (old accounts can backfill age assertion)"
+# TWIN-SIGNALS-001: 曝光带停留入库 + 战绩读侧。interaction_events 表早有
+# watch_ms 列但服务端从不写、移动端从不上报 —— "看了几次看多久"没有数据源。
+require_test "TWIN-SIGNALS-001" "./internal/localnet" \
+  "TestPostImpressionStatsRoundTrip" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+if ! grep -qF 'WatchMs' apps/api-go/internal/localnet/service.go ||
+   ! grep -qF 'ListPostImpressionStats' apps/api-go/internal/localnet/service.go ||
+   ! grep -qF 'recordPostImpression' apps/mobile/src/localnet-client.ts ||
+   ! grep -qF 'endPostView' apps/mobile/src/post-impression.ts; then
+  echo "  FAIL [TWIN-SIGNALS-001]: 曝光停留链路不见了 ——" >&2
+  echo "        战绩页又会回到没有数据源。" >&2
+  exit 1
+fi
+echo "    TWIN-SIGNALS-001: PASS (impression watch time stored and readable)"
+# MODAL-HANDOFF-001: 关一个 Modal 同一 tick 再开另一个，后开的被 iOS
+# present 冲突吃掉（点了没反应）。统一走 openModalAfterClose 错峰 350ms。
+if ! grep -qF 'openModalAfterClose' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'pendingModalTimer' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [MODAL-HANDOFF-001]: Modal 错峰 helper 不见了 ——" >&2
+  echo "        同 tick 一关一开又会点不开。" >&2
+  exit 1
+fi
+echo "    MODAL-HANDOFF-001: PASS (sequential modals staggered)"
+# AVATAR-RESOLUTION-001: fixture id（u_linh）不能直接当账号用。
+# 首页 fixture id 与服务端真账号（user_mockcreator_linh）是两套 id，
+# 拿 fixture id 建会话/开主页/查资料会落到幽灵 id：头像 404 空白、关注落空、
+# 动态扫不到。入口统一先 resolveHomePersonAccountId；裸 ai_001 认成对应伴侣；
+# 坏图三处（列表/联系人/对话窗）回落首字母，永不空白。
+if ! grep -qF 'resolveHomePersonAccountId' apps/mobile/src/recommend-fixtures.ts ||
+   ! grep -qF 'resolveHomePersonAccountId' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'account.personaId === item.counterpartyId' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'resolveAvatarSource(avatarRef' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'markAvatarBroken' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'brokenPeerAvatar' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [AVATAR-RESOLUTION-001]: 头像解析链路不见了 ——" >&2
+  echo "        幽灵 id 空白头像会回来。" >&2
+  exit 1
+fi
+echo "    AVATAR-RESOLUTION-001: PASS (fixture ids resolve to real accounts, broken images fall back)"
+# HIDE-RESURFACE-001: 滑删 = dismiss 当前视图，来新动态即回；block 才彻底。
+# 左滑隐藏没有恢复口、藏了连新消息都不浮出来，等于"对方发消息我永远看不到"
+# （Linh 行消失事件）。隐藏集记时刻（id → 藏起毫秒），行最后动态晚于藏起
+# 时刻就浮出来；v1 纯 id 老文件按升级时刻迁移。不另做恢复口 —— 有新动态自回，
+# 没新动态就继续藏着。
+if ! grep -qF 'shouldResurfaceHidden' apps/mobile/src/local-snapshot.ts ||
+   ! grep -qF 'parseHiddenChatTimes' apps/mobile/src/local-snapshot.ts ||
+   ! grep -qF 'shouldResurfaceHidden(hiddenIds[d.id], d.lastActivityMs)' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [HIDE-RESURFACE-001]: 隐藏会话又不浮出来了 ——" >&2
+  echo "        新消息进隐藏串等于石沉大海。" >&2
+  exit 1
+fi
+echo "    HIDE-RESURFACE-001: PASS (hidden threads resurface on new activity)"
+# SCENE-CHECKIN-FRESH-001: 定位有保质期，过期不打。
+#
+# 根因：origin 落定就冻住 —— 离店不更新，90 分钟打卡过期后重进详情，
+# 又按旧坐标自动打一次（在家给店打卡，重复幽灵打卡）。修法：每次落定位
+# 打时间戳，超过 10 分钟门禁不再认（自动和手动同一口径）；详情打开时过期
+# 就后台静默重取（不申请权限），久坐的无感续上，离店的拿回真坐标被拒。
+if ! grep -qF 'ORIGIN_FRESH_MS' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -qF 'originFresh()' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -qF 'setOriginAt(Date.now())' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-CHECKIN-FRESH-001]: 定位新鲜度门禁不见了 ——" >&2
+  echo "        冻住的旧坐标又能自动打卡。" >&2
+  exit 1
+fi
+echo "    SCENE-CHECKIN-FRESH-001: PASS (stale fixes cannot check in)"
+# TOPIC-INVITE-001: 原型"加入 · 邀请她"按主题邀约 —— 没有 task/slot/金额，
+# 与档位 Offer 共用生命周期，TTL 默认 60s（原型 60 秒倒计时）。
+# 坑有三处，钉死：① 主题订单 task/slot 存 NULL（不是 ""），否则唯一索引
+# 把第二个主题订单当"同一个档位卖两次"拒掉（memory 仓同规则）；
+# ② 拒绝记 REJECTED 不是 CANCELLED（取消是需求方的动作）；
+# ③ 体解析失败不许按默认拒绝处理（会把坏请求误判成拒单）。
+require_test "TOPIC-INVITE-001" "./internal/fulfillment" \
+  "TestCreateTopicInviteDefaultsSixtySeconds" \
+  "apps/api-go/internal/fulfillment/service_test.go" || exit $?
+require_test "TOPIC-INVITE-001" "./internal/fulfillment" \
+  "TestRespondTopicInviteAcceptDeclineAndExpiry" \
+  "apps/api-go/internal/fulfillment/service_test.go" || exit $?
+require_test "TOPIC-INVITE-001" "./internal/fulfillment" \
+  "TestTwoTopicOrdersDoNotTripSlotUniqueness" \
+  "apps/api-go/internal/fulfillment/service_test.go" || exit $?
+if ! grep -qF 'CreateTopicInvite' apps/api-go/internal/fulfillment/service.go ||
+   ! grep -qF 'RespondTopicInvite' apps/api-go/internal/fulfillment/service.go ||
+   ! grep -qF 'offerTTLSeconds' apps/api-go/internal/fulfillment/service.go; then
+  echo "  FAIL [TOPIC-INVITE-001]: 主题邀约命令不见了 ——" >&2
+  echo "        原型邀请链又只能走档位 Offer。" >&2
+  exit 1
+fi
+echo "    TOPIC-INVITE-001: PASS (topic invites reuse the offer lifecycle)"
+# STORE-AMENITIES-001: 门店设施属性商家自填（网速/吸烟/空调/插座/噪音/座位）。
+# 原型标记的数据源必须是商家自己填的，不能是平台编的。空=没填（不显示不筛选）；
+# 封闭词表外整单拒绝（不静默丢字段）；空调 16..30 度整数，0=没填。
+require_test "STORE-AMENITIES-001" "./internal/business" \
+  "TestStoreLinesAmenitiesRoundTrip" \
+  "apps/api-go/internal/business/service_test.go" || exit $?
+# 2026-09-19：中间那条原来是 `grep -qF '104_store_amenities' .../104_store_amenities.sql`
+# —— 让文件 grep 自己的文件名。全仓 121 个迁移文件没有一个自报名字，这个条件
+# 恒假，也就是说这条钉从被写出来起就没绿过（门禁每次都在更前面就退出了）。
+# 改成钉真东西：迁移文件在、字段是幂等新增的、客户端类型在。
+if ! grep -qF 'allowedStoreWifi' apps/api-go/internal/business/service.go ||
+   ! [ -f apps/api-go/migrations/104_store_amenities.sql ] ||
+   ! grep -qF 'ADD COLUMN IF NOT EXISTS wifi' apps/api-go/migrations/104_store_amenities.sql ||
+   ! grep -qF 'ADD COLUMN IF NOT EXISTS ac_temp_c' apps/api-go/migrations/104_store_amenities.sql ||
+   ! grep -qF 'StoreAmenities' apps/mobile/src/business-client.ts; then
+  echo "  FAIL [STORE-AMENITIES-001]: 设施属性字段不见了 ——" >&2
+  echo "        原型标记又会回到没有数据源。" >&2
+  exit 1
+fi
+echo "    STORE-AMENITIES-001: PASS (merchant-entered shop amenities)"
+
+# MARKET-DEAD-MORE-001: 头部「•••」是死按钮 —— 长成按钮，没有 Pressable、没有
+# onPress。四处 header（订单详情 / 发布需求模板页 / 发布需求表单 / 选人工作台）
+# 各挂一个。删掉而不是留着：一个按不动的按钮在承诺一个不存在的菜单。
+# （2026-09-19 重建：第一版连同代码一起被别人的 index-only 提交扫掉了。）
+if ! grep -q 'MARKET-DEAD-MORE-001' apps/mobile/src/surfaces/market-publish-honest.test.ts; then
+  echo "  FAIL [MARKET-DEAD-MORE-001]: 死按钮的钉子不见了 ——" >&2
+  exit 1
+fi
+if grep -qF '•••' apps/mobile/src/surfaces/market.tsx ||
+   grep -qF 'detailMore' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-DEAD-MORE-001]: 死掉的「更多」按钮又回来了 ——" >&2
+  echo "        要么接上真菜单，要么别画这个按钮。" >&2
+  exit 1
+fi
+# PUBLISH-NO-FAKE-DEFAULT-001: 发布表单预填"看起来真实的"内容 —— 用户不改直接
+# 发布，就产出一条自己没写过的假需求（时间/地点/价格全是编的）。从空开始，
+# 示例走 placeholder；选模板/预设时才回填真值。
+if ! grep -q 'PUBLISH-NO-FAKE-DEFAULT-001' apps/mobile/src/surfaces/market-publish-honest.test.ts; then
+  echo "  FAIL [PUBLISH-NO-FAKE-DEFAULT-001]: 预填假需求的钉子不见了 ——" >&2
+  exit 1
+fi
+if grep -qE 'useState\("(周六|河内|10:00|[0-9],)' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [PUBLISH-NO-FAKE-DEFAULT-001]: 发布表单又开始预填了 ——" >&2
+  echo "        示例放 placeholder，别放进 state 初始值。" >&2
+  exit 1
+fi
+if ! grep -qF 'const [title, setTitle] = useState("");' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -qF 'const [time, setTime] = useState("");' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -qF 'const [location, setLocation] = useState("");' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -qF 'const [priceMin, setPriceMin] = useState("");' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [PUBLISH-NO-FAKE-DEFAULT-001]: 发布字段不再从空开始 ——" >&2
+  exit 1
+fi
+# OPP-TYPE-OTHER-001: 关键词一个都不中时归未分类，不再硬塞 coffee_photo ——
+# 那会把「咖啡 + 拍照」稀释成垃圾桶，筛选也会把无关机会算进来。
+if ! grep -q 'OPP-TYPE-OTHER-001' apps/mobile/src/surfaces/market-publish-honest.test.ts; then
+  echo "  FAIL [OPP-TYPE-OTHER-001]: 未分类兜底的钉子不见了 ——" >&2
+  exit 1
+fi
+if grep -qF 'return "coffee_photo";' apps/mobile/src/surfaces/r37-opportunity-card.tsx; then
+  echo "  FAIL [OPP-TYPE-OTHER-001]: 未分类又被硬归成咖啡 + 拍照了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/market-publish-honest.test.ts || exit $?
+echo "    MARKET-DEAD-MORE-001: PASS (no dead more button anywhere in market)"
+echo "    PUBLISH-NO-FAKE-DEFAULT-001: PASS (publish form starts empty, examples are placeholders)"
+echo "    OPP-TYPE-OTHER-001: PASS (unknown opportunity type is uncategorised, not coffee+photo)"
+
+# SCENE-HUMANS-EMPTY-001: 选人是付费决策点 —— 没有人时必须说出"没有人"，不能
+# 只留标题和一个空横滑（那会被读成"还在加载"）。SCENE-HUMANS-004 只做了去重，
+# 空态是另一件事。
+if ! grep -q 'detail.humans.length > 0 ?' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'SCENE-HUMANS-EMPTY-001' apps/mobile/src/scene-humans.test.ts; then
+  echo "  FAIL [SCENE-HUMANS-EMPTY-001]: 人选空态不见了 ——" >&2
+  echo "        用户正准备付钱，这块空着会被读成「加载中」。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/scene-humans.test.ts || exit $?
+echo "    SCENE-HUMANS-EMPTY-001: PASS (no people is stated, not left blank)"

@@ -110,9 +110,12 @@ interface Message {
   stickerName?: string;
   replySender?: string;
   replyBody?: string;
+  // QUOTE-REPLY-001: 引用的消息 ID（服务端 reply_to）。引用块优先按 ID 解析
+  // （hydrate 里找被引原消息）；replySender/replyBody 只剩两个作用：乐观气泡
+  // 的即时显示 + 被引消息已删时的降级。服务端从不信任快照，只认 ID。
+  replyToMessageId?: string;
   secureMeta?: string;
   isDivider?: boolean;
-  debugRaw?: string;
 }
 
 interface Cluster {
@@ -147,11 +150,13 @@ export function ConversationSurface({
   conversationId: initialConvId,
   aiAccount,
   peerAvatarSource,
+  peerUserId,
+  onOpenPeerProfile,
   initialDraft,
   ensureSession,
   onBack,
-  convoId: initialConvoId,
-  convoTitle,
+  profileClient,
+  relationship,
 }: {
   author: string;
   conversationClient: ConversationClient;
@@ -163,12 +168,13 @@ export function ConversationSurface({
   conversationId?: string;
   aiAccount?: PlatformAIAccount;
   peerAvatarSource?: number | { uri: string };
+  // CONVO-AVATAR-PROFILE-001: 对方 userId（1:1 对话由消息列表带入；群聊没有，
+  // 靠名字精确匹配解析，解不出就明说不瞎进）。头像可点进对方个人主页。
+  peerUserId?: string | undefined;
+  onOpenPeerProfile?: ((peer: { userId?: string; name: string; aiAccount?: PlatformAIAccount }) => Promise<void>) | undefined;
   initialDraft?: string;
   ensureSession?: () => Promise<void>;
   onBack: () => void;
-  // Lotus v1 Convo 分支模式：只读/只写该分支，seed 置顶展示。
-  convoId?: string | undefined;
-  convoTitle?: string | undefined;
   // CONTACT-CARD-001：发名片要两样东西 —— 我自己的名片（profile），
   // 以及「把某个好友的名片发出去」时的好友列表（relationship）。
   // 两个都可选：接不进来只是发不了名片，其它功能照常（不是整屏降级）。
@@ -177,7 +183,12 @@ export function ConversationSurface({
 }): React.JSX.Element {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState(initialDraft ?? "");
-  const [sending, setSending] = useState(false);
+  // SEND-NONBLOCK-001: composer 只管"发出去"，不等 AI 回复。sending 旧语义
+  // 把输入框按住直到长轮询返回（含 AI 生成），发完位置/图片必须等回复才能
+  // 继续说话 —— 错的。拆成两个东西：syncPausedRef（3s 轮询暂停，保护乐观
+  // 气泡不被全量 hydrate 闪掉，失败撤回才找得到它）+ pendingReplies（在途
+  // 回复计数，只驱动"正在回复…"指示）。
+  const [pendingReplies, setPendingReplies] = useState(0);
   const [convId, setConvId] = useState<string | undefined>(initialConvId);
   const [connectAttempt, setConnectAttempt] = useState(0);
   const [loading, setLoading] = useState(!initialConvId);
@@ -207,10 +218,12 @@ export function ConversationSurface({
   // COMP-REPORT-002: 举报「这条消息」。招嫖揽客 / 人身威胁 / 涉未成年人
   // 都发生在聊天里，用户必须能在这里报上来。
   const [reportFor, setReportFor] = useState<Message | null>(null);
-  // 当前分支：props 带进来（从 Convo 页打开）或屏内创建。null = 主线。
-  const [activeConvo, setActiveConvo] = useState<{ id: string; title: string } | null>(
-    initialConvoId ? { id: initialConvoId, title: convoTitle ?? "支线" } : null
-  );
+  // 当前分支：屏内创建（长按消息→创建 Convo）。null = 主线。
+  // MSG-GROUPS-TAB-001: 以前还能从外部 Convo 列表页直接带 convoId/convoTitle
+  // props 跳进某条已有支线——那张列表页已经从消息模块摘掉，这两个 prop
+  // 没有别的调用方了（全仓库唯一来源是 app-shell 的 onOpenConvo，已删），
+  // 分支状态改成纯屏内 state，不再接受外部初始值。
+  const [activeConvo, setActiveConvo] = useState<{ id: string; title: string } | null>(null);
   // 分支 seed 上下文卡（服务端随分支列表下发，不混入气泡流）。
   const [seedMsg, setSeedMsg] = useState<{ sender: string; body: string } | null>(null);
   const [creatingConvo, setCreatingConvo] = useState(false);
@@ -253,7 +266,7 @@ export function ConversationSurface({
   const scrollRef = useRef<ScrollView>(null);
   // Keep live-sync hydration from replacing an optimistic bubble while the
   // command is waiting on an AI completion in the same HTTP response.
-  const sendingRef = useRef(false);
+  const syncPausedRef = useRef(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const visibleMessages = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
@@ -285,6 +298,39 @@ export function ConversationSurface({
     toastTimer.current = setTimeout(() => setToast(null), 1200);
   }, []);
 
+  // CONVO-AVATAR-PROFILE-001: 点头像进对方主页。1:1 用透传的 peerUserId；
+  // 群聊没有按人透传的 id，靠名字精确匹配（外壳负责，解不出会抛错）；
+  // "对方"/空名这种占位名直接拦，不拿去搜 —— 搜出来也是错的人。
+  const openPeerProfile = useCallback(async (senderName: string, isAICluster: boolean): Promise<void> => {
+    if (!onOpenPeerProfile) return;
+    const name = (senderName || author || "").trim();
+    try {
+      await onOpenPeerProfile({
+        ...(!isAICluster && peerUserId ? { userId: peerUserId } : {}),
+        name,
+        ...(isAICluster && aiAccount ? { aiAccount } : {}),
+      });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "对方主页打不开，请稍后重试。");
+    }
+  }, [onOpenPeerProfile, peerUserId, author, aiAccount, showToast]);
+
+  // ASSISTANT-THREAD-001: 助手有且仅有一个，没有主页 —— 头像纯展示，不可点。
+  const peerIsAssistant = peerUserId === "proxy_ai" || peerUserId === "user_proxy_ai";
+
+  // 坏图回落：对方换头像/资产不可见时 thumb 404，expo Image 只会画空白。
+  // 脏标记跟会话走（换会话重置），坏了就地回落首字母，永不空白。
+  const [brokenPeerAvatar, setBrokenPeerAvatar] = useState(false);
+  useEffect(() => { setBrokenPeerAvatar(false); }, [peerUserId, author, aiAccount]);
+
+  // 顶栏头像闪烁根因：aiAccountPhoto() 每次调用返回新的 {uri} 对象，
+  // 3 秒轮询每次重渲染都换 source 身份，expo-image 当新图重载就闪一下。
+  // 这里 memo 住 —— 账号不变 source 身份不变，不重载就不闪。
+  const aiPhotoSource = useMemo(
+    () => (aiAccount ? aiAccountPhoto(aiAccount) : undefined),
+    [aiAccount]
+  );
+
   const closeSheets = useCallback(() => {
     setMenuMessage(null);
     setSecureSheetOpen(false);
@@ -310,6 +356,56 @@ export function ConversationSurface({
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: false }));
     }
   }, [keyboardInset]);
+
+  // CONTACT-CARD-001: 名片 picker 数据源 —— 首项是"我自己的名片"（profile），
+  // 后面是好友（relationship）。两边独立拉，挂一边不影响另一边；拼不出合法
+  // vcard（没 handle）的条目直接跳过（fail-closed，见 buildContactCard），
+  // 绝不发一张扫了落不到人的卡。
+  useEffect(() => {
+    if (!cardPickerOpen) {
+      setCardOptions(undefined);
+      return;
+    }
+    let cancelled = false;
+    void (async (): Promise<void> => {
+      const options: ContactCardOption[] = [];
+      const failures: string[] = [];
+      if (profileClient) {
+        try {
+          const self = await profileClient.getProfile();
+          const vcard = buildContactCard({ name: self.name, handle: self.handle });
+          if (vcard) {
+            options.push({ key: `self:${self.userAccountId}`, name: "我的名片", caption: `@${self.handle.replace(/^@+/, "")}`, vcard });
+          }
+        } catch {
+          failures.push("我的名片读取失败");
+        }
+      }
+      if (relationship) {
+        try {
+          const friendships = await relationship.listMyFriendships();
+          const friends = friendships.active.filter((f) => f.state === "FRIEND");
+          const settled = await Promise.allSettled(friends.map((f) => profileClient?.getProfile(f.userId)));
+          settled.forEach((result, index) => {
+            const profile = result.status === "fulfilled" ? result.value : undefined;
+            const vcard = profile ? buildContactCard({ name: profile.name || friends[index]!.displayName, handle: profile.handle }) : null;
+            if (profile && vcard) {
+              options.push({ key: `friend:${profile.userAccountId}`, name: profile.name, caption: `@${profile.handle.replace(/^@+/, "")}`, vcard });
+            }
+          });
+        } catch {
+          failures.push("好友列表拉取失败");
+        }
+      }
+      if (!cancelled) {
+        setCardOptions(options);
+        setCardPickerError(failures.length > 0 ? failures.join("；") : undefined);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cardPickerOpen, profileClient, relationship]);
 
   // 解析命令结果中的 operationRef
   const parseOperationRef = useCallback((result: Record<string, unknown>): Record<string, unknown> | undefined => {
@@ -362,9 +458,22 @@ export function ConversationSurface({
           : {}),
         ...(location ? { location } : {}),
         ...(contact ? { contact, contactVcard: String(row.body ?? "") } : {}),
-        ...(row.messageType === "IMAGE" ? { debugRaw: `mediaRef=${JSON.stringify(row.mediaRef)} type=${JSON.stringify(row.messageType)}` } : {}),
+        // QUOTE-REPLY-001: 服务端只给引用 ID —— 下面第二遍按 ID 解析引用块。
+        ...(typeof row.replyTo === "string" && row.replyTo ? { replyToMessageId: row.replyTo } : {}),
       };
     }));
+    // QUOTE-REPLY-001: 第二遍 —— 被引消息就在同一批 rows 里（列表是全量），
+    // 按 ID 找到谁说了什么；找不到（被删/窗口外）就保持 undefined，引用块
+    // 直接不画 —— 不猜不藏。自己的乐观气泡自带快照，不受影响。
+    setMessages((prev) => {
+      const byId = new Map(prev.map((m) => [m.id, m]));
+      return prev.map((m) => {
+        if (!m.replyToMessageId || m.replySender) return m;
+        const quoted = byId.get(m.replyToMessageId);
+        if (!quoted) return m;
+        return { ...m, replySender: quoted.sender, replyBody: quoted.body };
+      });
+    });
     setError(undefined);
   }, [aiAccount, conversationClient.baseUrl, parseOperationRef]);
 
@@ -378,7 +487,7 @@ export function ConversationSurface({
     let foreground = AppState.currentState === "active";
     let firstLoad = true;
     const refresh = async (): Promise<void> => {
-      if (!foreground || sendingRef.current) return;
+      if (!foreground || syncPausedRef.current) return;
       try {
         const result = await conversationClient.listMessages(convId, activeConvo?.id);
         if (!cancelled) hydrateMessages(result);
@@ -404,6 +513,9 @@ export function ConversationSurface({
   }, [convId, activeConvo, conversationClient, hydrateMessages]);
 
   // 挂载时创建会话
+  // ASSISTANT-THREAD-001: 有真人 id 就建真人 DM（PROFILE 源，不塞假开场白）——
+  // 以前没 id 才 fallback 到 user_proxy_ai。现在没 id 的只剩"问助手"这类入口，
+  // fallback 留给它们；真人入口必须把 peerUserId 带进来（调用方漏传就是 bug）。
   useEffect(() => {
     if (convId) { setLoading(false); return; }
     let cancelled = false;
@@ -413,6 +525,9 @@ export function ConversationSurface({
         const result = await conversationClient.startConversation(aiAccount ? {
           originType: "PROFILE", originId: aiAccount.accountId, participantId: aiAccount.accountId,
           firstMessage: "", assistantMode: `AI_PERSONA:${aiAccount.personaId}`
+        } : peerUserId && peerUserId !== "proxy_ai" && peerUserId !== "user_proxy_ai" ? {
+          originType: "PROFILE", originId: peerUserId, participantId: peerUserId,
+          firstMessage: "",
         } : {
           originType: "POST", originId: "feed_post_001", participantId: "user_proxy_ai",
           firstMessage: `你好！我想了解关于「${author}」的更多信息。`
@@ -444,7 +559,7 @@ export function ConversationSurface({
       }
     })();
     return () => { cancelled = true; };
-  }, [convId, author, aiAccount, conversationClient, ensureSession, parseOperationRef, connectAttempt]);
+  }, [convId, author, aiAccount, peerUserId, conversationClient, ensureSession, parseOperationRef, connectAttempt]);
 
   const buildProtection = useCallback((): ProtectionOverride | undefined => {
     if (burn === "off" && noForward) return undefined;
@@ -467,7 +582,7 @@ export function ConversationSurface({
   // 编码 "act_westlake" 是不存在的活动, “我的活动”页也不能
   // 看到这个活动.)
   async function openActivityPicker(): Promise<void> {
-    if (sending || !convId) return;
+    if (!convId) return;
     setActivityPickerError(undefined);
     setAttachOpen(false);
     setActivityPickerOpen(true);
@@ -485,14 +600,13 @@ export function ConversationSurface({
   }
 
   async function sendActivityProxy(activityId: string): Promise<void> {
-    if (sending || !convId) return;
+    if (!convId) return;
     const picked = activityOptions?.find((option) => option.id === activityId);
     if (!picked) {
       setError("选中的活动不可用");
       setActivityPickerOpen(false);
       return;
     }
-    setSending(true);
     setActivityPickerOpen(false);
     const snapshot = { title: picked.title, time: picked.subtitle };
     const proxyForService = { objectType: "activity" as const, objectId: picked.id, snapshot, liveState: { state: "选自开放活动" } };
@@ -507,6 +621,8 @@ export function ConversationSurface({
       v1,
     };
     setMessages((prev) => [...prev, userMsg]);
+    syncPausedRef.current = true;
+    setPendingReplies((n) => n + 1);
     try {
       await conversationClient.sendProxyObject(convId, proxyForService, activeConvo?.id);
     } catch (e: unknown) {
@@ -514,7 +630,8 @@ export function ConversationSurface({
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setError(e instanceof Error ? e.message : "发送活动卡片失败");
     } finally {
-      setSending(false);
+      syncPausedRef.current = false;
+      setPendingReplies((n) => Math.max(0, n - 1));
     }
   }
 
@@ -532,8 +649,7 @@ export function ConversationSurface({
   // MEETUP-SHARE-001 seg3: 发位置。乐观气泡 + 失败撤回（与活动卡片同口径，
   // 不留假成功）。非法坐标由 sendLocationMessage 抛错，同样走撤回。
   async function sendLocation(point: MeetupPoint): Promise<void> {
-    if (sending || !convId) return;
-    setSending(true);
+    if (!convId) return;
     setLocationSheetOpen(false);
     const userMsg: Message = {
       id: `msg_${Date.now()}`,
@@ -544,21 +660,22 @@ export function ConversationSurface({
       location: { lat: point.lat, lng: point.lng, ...(point.label ? { label: point.label } : {}) },
     };
     setMessages((prev) => [...prev, userMsg]);
+    syncPausedRef.current = true;
+    setPendingReplies((n) => n + 1);
     try {
       await conversationClient.sendLocationMessage(convId, point, buildProtection(), undefined, activeConvo?.id);
     } catch (e: unknown) {
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setError(e instanceof Error ? e.message : "发送位置失败");
     } finally {
-      setSending(false);
+      syncPausedRef.current = false;
+      setPendingReplies((n) => Math.max(0, n - 1));
     }
   }
 
   async function send(preparedText?: string, temporaryUIResponseId?: string, sticker?: { code: string; emoji: string; name: string }): Promise<void> {
     const text = (preparedText ?? draft).trim();
-    if (!text || sending || !convId) return;
-    sendingRef.current = true;
-    setSending(true);
+    if (!text || !convId) return;
     const secureMeta = secureMetaForSend();
     const userMsg: Message = {
       id: `msg_${Date.now()}`,
@@ -567,7 +684,8 @@ export function ConversationSurface({
       time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
       isOwn: true,
       ...(sticker ? { stickerCode: sticker.code, stickerName: sticker.name } : {}),
-      ...(replyTo ? { replySender: replyTo.sender, replyBody: replyTo.body } : {}),
+      // QUOTE-REPLY-001: 快照随身带（乐观显示+降级），ID 才是契约。
+      ...(replyTo ? { replyToMessageId: replyTo.id, replySender: replyTo.sender, replyBody: replyTo.body } : {}),
       ...(secureMeta ? { secureMeta } : {}),
     };
     const userText = text;
@@ -576,12 +694,16 @@ export function ConversationSurface({
     setReplyTo(null);
     setStickerOpen(false);
     setTemporaryUI(undefined);
+    // SEND-NONBLOCK-001: 乐观气泡已上屏、输入已清空 —— composer 在这里就放行，
+    // 不等长轮询（含 AI 生成）回来。轮询暂停保留到 settle，hydrate 才不会闪掉气泡。
+    syncPausedRef.current = true;
+    setPendingReplies((n) => n + 1);
 
     try {
       // Yield one frame before starting the potentially slow model request so
       // the user's own message is painted immediately on the device.
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const result = await conversationClient.sendMessage(convId, userText, aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, temporaryUIResponseId, undefined, buildProtection(), undefined, undefined, activeConvo?.id);
+      const result = await conversationClient.sendMessage(convId, userText, aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, temporaryUIResponseId, undefined, buildProtection(), undefined, undefined, activeConvo?.id, replyTo ? replyTo.id : undefined);
       // 解析 AI 回复
       const payload = parseOperationRef(result);
       setTemporaryUI(readServerTemporaryUI(payload?.temporaryUI));
@@ -611,18 +733,22 @@ export function ConversationSurface({
       if (payload?.assistantStatus === "FAILED") setError("模型服务暂时不可用，消息已保留");
       if (payload?.assistantStatus === "UNAVAILABLE") setError("模型服务未配置，消息已保留");
     } catch (e: unknown) {
-      // 发送失败：撤回乐观气泡、恢复草稿并提示，不留假成功。
+      // 发送失败：撤回乐观气泡、恢复草稿和引用并提示，不留假成功。
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setDraft(userText);
-      setError(e instanceof Error ? e.message : "发送失败，请重试");
+      if (replyTo) setReplyTo(replyTo);
+      // QUOTE-REPLY-001: 引用的那条可能还没落库（刚发出去就引它）或不在本会话 ——
+      // 服务端会点名拒绝，这里翻译成人话。
+      const rawError = e instanceof Error ? e.message : "发送失败，请重试";
+      setError(/reply_target_not_found/i.test(rawError) ? "引用的那条消息还没同步，稍后重试" : /reply_target_foreign/i.test(rawError) ? "只能引用本会话里的消息" : rawError);
     } finally {
-      sendingRef.current = false;
-      setSending(false);
+      syncPausedRef.current = false;
+      setPendingReplies((n) => Math.max(0, n - 1));
     }
   }
 
   async function sendSticker(item: { code: string; emoji: string; name: string }): Promise<void> {
-    if (sending || !convId || blocked) return;
+    if (!convId || blocked) return;
     await send(item.emoji, undefined, item);
   }
 
@@ -774,48 +900,65 @@ export function ConversationSurface({
   }
 
   async function sendImage(): Promise<void> {
-    if (!selectedImage || !convId || sending) return;
-    setSending(true);
+    if (!selectedImage || !convId) return;
+    // SEND-NONBLOCK-001: 本地 uri 直接画乐观气泡，不等上传+AI 回来；失败撤回
+    // 并恢复选中（重试口径不变），成功不靠服务端回显。
+    const picked = selectedImage;
+    const caption = draft.trim();
+    const secureMeta = secureMetaForSend();
+    const userMsg: Message = { id:`image_${Date.now()}`, sender:"你", body:caption, time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, imageUri:picked.uri, ...(secureMeta ? { secureMeta } : {}) };
+    setMessages((current) => [...current, userMsg]);
+    setDraft("");
+    setSelectedImage(undefined);
     setError(undefined);
     setUploadProgress(0);
+    syncPausedRef.current = true;
+    setPendingReplies((n) => n + 1);
     try {
-      const uploaded = await mediaClient.uploadImage(selectedImage, { onProgress: setUploadProgress });
-      const result = await conversationClient.sendImageMessage(convId, uploaded.mediaAssetId, draft, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
-      const secureMeta = secureMetaForSend();
-      setMessages((current) => [...current, { id:`image_${Date.now()}`, sender:"你", body:draft.trim(), time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, imageUri:selectedImage.uri, ...(secureMeta ? { secureMeta } : {}) }]);
+      const uploaded = await mediaClient.uploadImage(picked, { onProgress: setUploadProgress });
+      const result = await conversationClient.sendImageMessage(convId, uploaded.mediaAssetId, caption, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
       const payload = parseOperationRef(result);
       const aiMsg = payload?.aiMessage as Record<string, unknown> | undefined;
       if (aiMsg) setMessages((current) => [...current, { id: String(aiMsg.messageId ?? `ai_${Date.now()}`), sender: aiAccount?.displayName ?? "Proxy AI", body: String(aiMsg.body ?? ""), time: new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:false, isAI:true }]);
-      setDraft("");
-      setSelectedImage(undefined);
     } catch (cause) {
+      setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+      setSelectedImage(picked);
       setError(cause instanceof Error ? cause.message : "图片发送失败，请重试");
     } finally {
       setUploadProgress(undefined);
-      setSending(false);
+      syncPausedRef.current = false;
+      setPendingReplies((n) => Math.max(0, n - 1));
     }
   }
 
   async function sendVideo(): Promise<void> {
-    if (!selectedVideo || !convId || sending) return;
-    setSending(true);
+    if (!selectedVideo || !convId) return;
+    // SEND-NONBLOCK-001: 同 sendImage —— 乐观气泡先行，失败撤回并恢复选中。
+    const picked = selectedVideo;
+    const caption = draft.trim();
+    const secureMeta = secureMetaForSend();
+    const userMsg: Message = { id:`video_${Date.now()}`, sender:"你", body:caption, time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, videoUri:picked.uri, ...(secureMeta ? { secureMeta } : {}) };
+    setMessages((current) => [...current, userMsg]);
+    setDraft("");
+    setSelectedVideo(undefined);
     setError(undefined);
     setUploadProgress(0);
+    syncPausedRef.current = true;
+    setPendingReplies((n) => n + 1);
     try {
-      const uploaded = await mediaClient.uploadMedia({ ...selectedVideo, mediaType:"VIDEO", defaultMime:"video/mp4" }, { onProgress:setUploadProgress });
-      const result = await conversationClient.sendVideoMessage(convId, uploaded.mediaAssetId, draft, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
-      const secureMeta = secureMetaForSend();
-      setMessages((current) => [...current, { id:`video_${Date.now()}`, sender:"你", body:draft.trim(), time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, videoUri:selectedVideo.uri, ...(secureMeta ? { secureMeta } : {}) }]);
+      const uploaded = await mediaClient.uploadMedia({ ...picked, mediaType:"VIDEO", defaultMime:"video/mp4" }, { onProgress:setUploadProgress });
+      const result = await conversationClient.sendVideoMessage(convId, uploaded.mediaAssetId, caption, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
       const payload = parseOperationRef(result);
       const aiMsg = payload?.aiMessage as Record<string, unknown> | undefined;
       if (aiMsg) setMessages((current) => [...current, { id:String(aiMsg.messageId ?? `ai_${Date.now()}`), sender:aiAccount?.displayName ?? "Proxy AI", body:String(aiMsg.body ?? ""), time: new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:false, isAI:true }]);
-      setDraft("");
-      setSelectedVideo(undefined);
     } catch (cause) {
+      setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+      setSelectedVideo(picked);
       setError(cause instanceof Error ? cause.message : "视频发送失败，请重试");
     } finally {
       setUploadProgress(undefined);
-      setSending(false);
+      syncPausedRef.current = false;
+      setPendingReplies((n) => Math.max(0, n - 1));
     }
   }
 
@@ -840,21 +983,28 @@ export function ConversationSurface({
   }
 
   async function sendAudio(): Promise<void> {
-    if (!selectedAudio || !convId || sending) return;
-    setSending(true);
+    if (!selectedAudio || !convId) return;
+    // SEND-NONBLOCK-001: 同 sendImage —— 乐观气泡先行，失败撤回并恢复选中。
+    const picked = selectedAudio;
+    const secureMeta = secureMetaForSend();
+    const userMsg: Message = { id:`audio_${Date.now()}`, sender:"你", body:"", time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, audioUri:picked.uri, ...(secureMeta ? { secureMeta } : {}) };
+    setMessages((current) => [...current, userMsg]);
+    setSelectedAudio(undefined);
     setError(undefined);
     setUploadProgress(0);
+    syncPausedRef.current = true;
+    setPendingReplies((n) => n + 1);
     try {
-      const uploaded = await mediaClient.uploadMedia({ uri:selectedAudio.uri, width:0, height:0, durationMs:selectedAudio.durationMs, mediaType:"AUDIO", defaultMime:"audio/m4a" }, { onProgress:setUploadProgress });
+      const uploaded = await mediaClient.uploadMedia({ uri:picked.uri, width:0, height:0, durationMs:picked.durationMs, mediaType:"AUDIO", defaultMime:"audio/m4a" }, { onProgress:setUploadProgress });
       await conversationClient.sendAudioMessage(convId, uploaded.mediaAssetId, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
-      const secureMeta = secureMetaForSend();
-      setMessages((current) => [...current, { id:`audio_${Date.now()}`, sender:"你", body:"", time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, audioUri:selectedAudio.uri, ...(secureMeta ? { secureMeta } : {}) }]);
-      setSelectedAudio(undefined);
     } catch (cause) {
+      setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+      setSelectedAudio(picked);
       setError(cause instanceof Error ? cause.message : "语音发送失败，请重试");
     } finally {
       setUploadProgress(undefined);
-      setSending(false);
+      syncPausedRef.current = false;
+      setPendingReplies((n) => Math.max(0, n - 1));
     }
   }
 
@@ -910,14 +1060,14 @@ export function ConversationSurface({
   const menuMsg = menuMessage;
   const menuReactions = menuMsg ? reactions[menuMsg.id] ?? [] : [];
   const secureOn = burn !== "off";
-  const canSend = (!!draft.trim() || !!selectedImage || !!selectedVideo || !!selectedAudio) && !sending && !!convId && !blocked;
+  const canSend = (!!draft.trim() || !!selectedImage || !!selectedVideo || !!selectedAudio) && !!convId && !blocked;
 
   function peerAvatar(message: Message): React.JSX.Element | null {
     if (message.isOwn) return null;
-    if (aiAccount) {
-      return <ExpoImage accessibilityLabel={`${aiAccount.displayName}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:ai:${aiAccount.accountId ?? aiAccount.displayName}`} source={aiAccountPhoto(aiAccount)} style={styles.avatarMini} transition={0} />;
+    if (aiAccount && !brokenPeerAvatar) {
+      return <ExpoImage accessibilityLabel={`${aiAccount.displayName}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:ai:${aiAccount.accountId ?? aiAccount.displayName}`} source={aiPhotoSource!} style={styles.avatarMini} transition={0} onError={() => setBrokenPeerAvatar(true)} />;
     }
-    if (peerAvatarSource) return <ExpoImage accessibilityLabel={`${author}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:peer:${convId ?? author}`} source={peerAvatarSource} style={styles.avatarMini} transition={0} />;
+    if (peerAvatarSource && !brokenPeerAvatar) return <ExpoImage accessibilityLabel={`${author}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:peer:${author}`} source={peerAvatarSource} style={styles.avatarMini} transition={0} onError={() => setBrokenPeerAvatar(true)} />;
     return (
       <View style={styles.avatarFallback}>
         <Text style={styles.avatarFallbackText}>{(message.sender || author || "对").slice(0, 1)}</Text>
@@ -950,7 +1100,6 @@ export function ConversationSurface({
           </View>
         ) : null}
         {message.imageUri || message.imageSource ? <ChatImage messageId={message.id} source={message.imageSource ?? { uri:message.imageUri ?? "" }} /> : null}
-        {message.debugRaw ? <Text style={{ color: "red", fontSize: 9 }}>[DBG] {message.debugRaw}</Text> : null}
         {message.videoUri ? <ChatVideo uri={message.videoUri} /> : null}
         {message.audioUri ? <ChatAudio uri={message.audioUri} /> : null}
         {message.location ? (
@@ -1056,11 +1205,43 @@ export function ConversationSurface({
             <Text style={[styles.secureBtnText, secureOn && styles.secureBtnTextActive]}>🛡</Text>
           </Pressable>
           {aiAccount || peerAvatarSource ? (
-            <ExpoImage accessibilityLabel={`${aiAccount?.displayName ?? author}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:top:${aiAccount?.accountId ?? convId ?? author}`} source={aiAccount ? aiAccountPhoto(aiAccount) : peerAvatarSource!} style={styles.topAvatar} transition={0} />
+            onOpenPeerProfile && !peerIsAssistant ? (
+              <Pressable
+                accessibilityLabel={`查看${aiAccount?.displayName ?? author}的主页`}
+                accessibilityRole="button"
+                onPress={() => void openPeerProfile(aiAccount?.displayName ?? author, Boolean(aiAccount))}
+              >
+                {!brokenPeerAvatar ? (
+                  <ExpoImage accessibilityLabel={`${aiAccount?.displayName ?? author}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:top:${aiAccount?.accountId ?? author}`} source={aiAccount ? aiPhotoSource! : peerAvatarSource!} style={styles.topAvatar} transition={0} onError={() => setBrokenPeerAvatar(true)} />
+                ) : (
+                  <View style={styles.topAvatarFallback}>
+                    <Text style={styles.topAvatarFallbackText}>{(aiAccount?.displayName ?? author ?? "对").slice(0, 1)}</Text>
+                  </View>
+                )}
+              </Pressable>
+            ) : !brokenPeerAvatar ? (
+              <ExpoImage accessibilityLabel={`${aiAccount?.displayName ?? author}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:top:${aiAccount?.accountId ?? author}`} source={aiAccount ? aiPhotoSource! : peerAvatarSource!} style={styles.topAvatar} transition={0} onError={() => setBrokenPeerAvatar(true)} />
+            ) : (
+              <View style={styles.topAvatarFallback}>
+                <Text style={styles.topAvatarFallbackText}>{(aiAccount?.displayName ?? author ?? "对").slice(0, 1)}</Text>
+              </View>
+            )
           ) : (
-            <View style={styles.topAvatarFallback}>
-              <Text style={styles.topAvatarFallbackText}>{(author || "对").slice(0, 1)}</Text>
-            </View>
+            onOpenPeerProfile && !peerIsAssistant ? (
+              <Pressable
+                accessibilityLabel={`查看${author}的主页`}
+                accessibilityRole="button"
+                onPress={() => void openPeerProfile(author, false)}
+              >
+                <View style={styles.topAvatarFallback}>
+                  <Text style={styles.topAvatarFallbackText}>{(author || "对").slice(0, 1)}</Text>
+                </View>
+              </Pressable>
+            ) : (
+              <View style={styles.topAvatarFallback}>
+                <Text style={styles.topAvatarFallbackText}>{(author || "对").slice(0, 1)}</Text>
+              </View>
+            )
           )}
           <Pressable accessibilityLabel="会话设置" onPress={() => setConversationMenuOpen((value) => !value)} style={styles.headerAction}>
             <Text style={styles.headerActionText}>•••</Text>
@@ -1132,7 +1313,22 @@ export function ConversationSurface({
                   return (
                     <View key={msg.id} style={[styles.msgRow, msg.isOwn ? styles.msgRowMe : styles.msgRowPeer]}>
                       {!msg.isOwn ? (
-                        <View style={styles.avatarSlot}>{isLast ? peerAvatar(msg) : null}</View>
+                        <View style={styles.avatarSlot}>
+                          {isLast ? (
+                            onOpenPeerProfile && !peerIsAssistant ? (
+                              <Pressable
+                                accessibilityLabel={`查看${cluster.sender}的主页`}
+                                accessibilityRole="button"
+                                hitSlop={8}
+                                onPress={() => void openPeerProfile(cluster.sender, cluster.isAI)}
+                              >
+                                {peerAvatar(msg)}
+                              </Pressable>
+                            ) : (
+                              peerAvatar(msg)
+                            )
+                          ) : null}
+                        </View>
                       ) : null}
                       <View style={[styles.stack, msg.isOwn && styles.stackMe]}>
                         {!msg.isOwn && isFirst ? <Text style={styles.clusterSender}>{cluster.sender}</Text> : null}
@@ -1161,8 +1357,8 @@ export function ConversationSurface({
               </View>
             );
           })}
-          {sending && aiAccount ? <View style={styles.aiTypingRow}><ActivityIndicator color={lotus.goldtext} size="small" /><Text style={styles.aiTypingText}>{aiAccount.displayName} 正在回复…</Text></View> : null}
-          {temporaryUI ? <ServerTemporaryForm disabled={sending} onSubmit={(summary) => void send(`我的补充信息：${summary}`, temporaryUI.id)} spec={temporaryUI} /> : null}
+          {pendingReplies > 0 && aiAccount ? <View style={styles.aiTypingRow}><ActivityIndicator color={lotus.goldtext} size="small" /><Text style={styles.aiTypingText}>{aiAccount.displayName} 正在回复…</Text></View> : null}
+          {temporaryUI ? <ServerTemporaryForm disabled={!convId} onSubmit={(summary) => void send(`我的补充信息：${summary}`, temporaryUI.id)} spec={temporaryUI} /> : null}
         </ScrollView>
 
         {/* R36.1 安全条：burn 开启时显示 */}
@@ -1195,7 +1391,7 @@ export function ConversationSurface({
             </View>
             <View style={styles.stickerGrid}>
               {STICKERS.map((item) => (
-                <Pressable key={item.code} accessibilityLabel={`发送表情 ${item.name}`} disabled={sending || !convId || blocked} onPress={() => void sendSticker(item)} style={styles.stickerItem}>
+                <Pressable key={item.code} accessibilityLabel={`发送表情 ${item.name}`} disabled={!convId || blocked} onPress={() => void sendSticker(item)} style={styles.stickerItem}>
                   <Text style={styles.stickerItemGlyph}>{item.emoji}</Text>
                 </Pressable>
               ))}
@@ -1209,9 +1405,18 @@ export function ConversationSurface({
           {selectedImage ? <View style={styles.imagePreviewRow}><Image source={{uri:selectedImage.uri}} style={styles.imagePreview} /><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedImage.fileName ?? "已选择图片") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除图片" onPress={() => setSelectedImage(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
           {selectedVideo ? <View style={styles.imagePreviewRow}><Text style={styles.videoPreviewIcon}>▶</Text><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedVideo.fileName ?? "已选择视频") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除视频" onPress={() => setSelectedVideo(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
           {selectedAudio ? <View style={styles.imagePreviewRow}><Text style={styles.videoPreviewIcon}>♪</Text><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? `语音 ${Math.max(1, Math.round(selectedAudio.durationMs / 1000))} 秒` : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除语音" onPress={() => setSelectedAudio(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
+          {/* SHEET-ICONS-001: ＋ 只弹 3 个小 logo（名片 user / 活动 ticket / 位置 pin），
+              无文字、紧贴输入框上方。相机媒体走相机图标，不在这里。 */}
+          {attachOpen ? (
+            <View style={styles.attachMiniBar}>
+              <Pressable accessibilityLabel="发送名片" onPress={() => { setAttachOpen(false); setCardPickerOpen(true); }} disabled={!convId} style={styles.attachMiniBtn}><View style={styles.attachMiniIcon}><ProxyIcon color={lotus.paper} name="user" size={20} /></View></Pressable>
+              {!aiAccount ? <Pressable accessibilityLabel="选择活动" onPress={() => { setAttachOpen(false); void openActivityPicker(); }} disabled={!convId} style={styles.attachMiniBtn}><View style={styles.attachMiniIcon}><ProxyIcon color={lotus.paper} name="ticket" size={20} /></View></Pressable> : null}
+              {!aiAccount ? <Pressable accessibilityLabel="发送位置" onPress={() => { setAttachOpen(false); setLocationSheetOpen(true); }} disabled={!convId} style={styles.attachMiniBtn}><View style={styles.attachMiniIcon}><ProxyIcon color={lotus.paper} name="pin" size={20} /></View></Pressable> : null}
+            </View>
+          ) : null}
           {/* Composer — R36.1：+ / 输入 pill（贴纸·相机内置）/ mic-or-send */}
           <View style={styles.composer}>
-            <Pressable accessibilityLabel="添加附件" onPress={() => { setStickerOpen(false); setAttachOpen((open) => !open); }} disabled={sending || !convId} style={styles.attachBtn}>
+            <Pressable accessibilityLabel="添加附件" onPress={() => { setStickerOpen(false); setAttachOpen((open) => !open); }} disabled={!convId} style={styles.attachBtn}>
               <Text style={styles.attachBtnText}>＋</Text>
             </Pressable>
             <View style={styles.inputWrap}>
@@ -1222,52 +1427,34 @@ export function ConversationSurface({
                 placeholderTextColor={lotus.muted}
                 style={styles.composerInput}
                 multiline
-                editable={!!convId && !sending}
+                editable={!!convId}
               />
-              <Pressable accessibilityLabel="表情包" onPress={() => { setAttachOpen(false); setStickerOpen((open) => !open); }} disabled={sending || !convId} style={styles.inlineTool}>
+              <Pressable accessibilityLabel="表情包" onPress={() => { setAttachOpen(false); setStickerOpen((open) => !open); }} disabled={!convId} style={styles.inlineTool}>
                 <Text style={styles.inlineToolText}>☺</Text>
               </Pressable>
               {/* CONVO-ATTACH-001: 相机图标点下去直接就是相册（Lotus 式）—— 首格拍摄，
                   后面是最新照片。拍照也不经＋面板：相册首格就是拍摄。 */}
-              <Pressable accessibilityLabel="相册" onPress={() => void openAlbum()} disabled={sending || !convId} style={styles.inlineTool}>
+              <Pressable accessibilityLabel="相册" onPress={() => void openAlbum()} disabled={!convId} style={styles.inlineTool}>
                 <ProxyIcon color={lotus.ink} name="camera" size={24} />
               </Pressable>
             </View>
-            {canSend || sending ? (
+            {canSend ? (
               <Pressable
                 accessibilityLabel="发送"
                 disabled={!canSend}
                 onPress={() => void (selectedAudio ? sendAudio() : selectedVideo ? sendVideo() : selectedImage ? sendImage() : send())}
                 style={[styles.sendCircle, !canSend && styles.sendCircleDisabled]}
               >
-                <Text style={styles.sendCircleText}>{sending ? "…" : "↑"}</Text>
+                <Text style={styles.sendCircleText}>↑</Text>
               </Pressable>
             ) : (
               <View style={styles.micSlot}>
-                <VoiceToolButton disabled={sending || !convId || blocked} onDone={(recording) => { setSelectedAudio(recording); setSelectedImage(undefined); setSelectedVideo(undefined); }} />
+                <VoiceToolButton disabled={!convId || blocked} onDone={(recording) => { setSelectedAudio(recording); setSelectedImage(undefined); setSelectedVideo(undefined); }} />
               </View>
             )}
           </View>
         </View>
       </View>
-
-      {/* 附件 sheet：名片 / 活动 / 位置。拍照/选图/选视频都在相机图标上
-          （openAlbum），这里不重复放。 */}
-      {attachOpen ? (
-        <Pressable accessibilityLabel="关闭附件选择" onPress={() => setAttachOpen(false)} style={styles.scrim}>
-          <Pressable onPress={() => undefined} style={styles.bottomSheet}>
-            <View style={styles.sheetGrab} />
-            {/* SHEET-ICONS-001: 三个入口是图标块（名片/活动/位置），不是文字行。
-                处理函数一个没动，只换皮。
-                拍照/选图/选视频都在相机图标的相册里，这里不留第二条路。 */}
-            <View style={styles.sheetTiles}>
-              <Pressable accessibilityLabel="发送名片" onPress={() => { setAttachOpen(false); setCardPickerOpen(true); }} style={styles.sheetTile}><View style={styles.sheetTileIcon}><ProxyIcon color={lotus.paper} name="user" size={24} /></View><Text style={styles.sheetTileText}>名片</Text></Pressable>
-              {!aiAccount ? <Pressable onPress={() => void openActivityPicker()} style={styles.sheetTile}><View style={styles.sheetTileIcon}><ProxyIcon color={lotus.paper} name="ticket" size={24} /></View><Text style={styles.sheetTileText}>Proxy 活动</Text></Pressable> : null}
-              {!aiAccount ? <Pressable accessibilityLabel="发送位置" onPress={() => { setAttachOpen(false); setLocationSheetOpen(true); }} style={styles.sheetTile}><View style={styles.sheetTileIcon}><ProxyIcon color={lotus.paper} name="pin" size={24} /></View><Text style={styles.sheetTileText}>位置</Text></Pressable> : null}
-            </View>
-          </Pressable>
-        </Pressable>
-      ) : null}
 
       {/* AUDIT-CONVO-ALBUM-003: 相机位（实时取景，按快门直接拍）是网格第一格，
           跟后面的相册缩略图同一行同一尺寸——不是单独一条 header 横幅。后面是
@@ -1819,10 +2006,9 @@ const styles = StyleSheet.create({
   scrim: { backgroundColor: "rgba(17,17,15,0.16)", bottom: 0, justifyContent: "flex-end", left: 0, position: "absolute", right: 0, top: 0 },
   bottomSheet: { backgroundColor: lotus.paper, borderColor: lotus.line, borderTopLeftRadius: 14, borderTopRightRadius: 14, borderWidth: 1, margin: 8, paddingBottom: 12, paddingHorizontal: 11, paddingTop: 10 },
   sheetGrab: { alignSelf: "center", backgroundColor: "#d5d0c8", borderRadius: 2, height: 3, marginBottom: 9, width: 32 },
-  sheetTiles: { flexDirection: "row", gap: 26, paddingHorizontal: 13, paddingVertical: 14 },
-  sheetTile: { alignItems: "center", gap: 10, width: 56 },
-  sheetTileIcon: { alignItems: "center", backgroundColor: lotus.ink, borderRadius: 18, height: 56, justifyContent: "center", width: 56 },
-  sheetTileText: { color: lotus.muted, fontSize: 11, fontWeight: "700" },
+  attachMiniBar: { flexDirection: "row", gap: 2, paddingBottom: 6, paddingLeft: 2 },
+  attachMiniBtn: { alignItems: "center", height: 48, justifyContent: "center", width: 48 },
+  attachMiniIcon: { alignItems: "center", backgroundColor: lotus.ink, borderRadius: 20, height: 40, justifyContent: "center", width: 40 },
   sheetItem: { alignItems: "center", borderTopColor: lotus.line, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", minHeight: 44, paddingVertical: 6 },
   albumSheet: { maxHeight: "72%" },
   albumGrid: { paddingBottom: 4, paddingTop: 2 }, albumRow: { gap: 8, justifyContent: "flex-start" },

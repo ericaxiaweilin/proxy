@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Image, Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useModuleBackHandler } from "../components/module-back";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { ProfileTabs } from "./ProfileTabs";
@@ -78,6 +79,7 @@ import { FacetHomeSurface } from "../facet/FacetHomeSurface";
 import { FacetClient } from "../facet-client";
 import { sessionAuthClient, localApiBaseUrl, nativeSecureSessionStore, nativeTransport } from "../native-clients";
 import { createSocialSettingsStore } from "../social-settings-store";
+import { createBehaviorAnalyticsStore } from "../behavior-analytics-settings";
 
 // Extracted modules
 import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSection, PersonalHubTab, SocialVisibility, SocialAccount, AbilityType, AbilityInstance, AvailabilityRule, AvOverride } from "./me-types";
@@ -92,6 +94,7 @@ const OTTER_LOGO = require("../../assets/otter-logo.png");
 
 const lastSignInStore = createLastSignInStore(nativeSecureStorageDriver);
 const socialSettingsStore = createSocialSettingsStore(nativeSecureStorageDriver);
+const behaviorAnalyticsStore = createBehaviorAnalyticsStore(nativeSecureStorageDriver);
 
 const PROFILE_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
 function avatarScope(accountId?: string): string {
@@ -185,14 +188,6 @@ const REQUESTER_ME: PersonaConfig = {
       ]
     },
     {
-      id: "relationships",
-      title: "关系",
-      hint: "真人网络 · 个人轻 CRM 关系图",
-      rows: [
-        { icon: "target", label: "好友与关系", desc: "关系图 · 轻 CRM · 标签、备注、来源与互动记录", grad: true, route: "friendcrm" }
-      ]
-    },
-    {
       id: "my_market",
       title: "我的市场",
       hint: "个人资产",
@@ -227,12 +222,22 @@ const REQUESTER_ME: PersonaConfig = {
         { icon: "gear", label: "设置与隐私", desc: "安全、推荐、通知与隐私（含数据下载/删除）", route: "appbehavior" }
       ]
     },
+    // AI-FACET-CLUSTER-001: 好友与关系（谁）→ AI 分身（生成照片/视频素材）→
+    // FACET（把同一份素材按关系对象重新组织、决定谁看到什么）是一条链路——
+    // FACET 的"对象"本来就是关系图里的人，以前三个入口分散在三处（关系单独
+    // 一段、AI 分身埋在"个人主页 → 更多 → 主页设置"三层深、FACET 单独一段），
+    // 互相不知道对方存在。合并成一段，按链路顺序排。
+    // 闭环三段式，各管各的、别越界：AI 分身出内容（照片/视频），FACET
+    // 只管投放（同一份内容投给谁），好友与关系管运营（关系图、标签、互动
+    // 记录 —— 决定下一轮该给谁投什么）。三段顺序按闭环走：运营 → 生成 → 投放。
     {
-      id: "facet",
-      title: "对象化运营",
-      hint: "FACET · 同一份真实素材，按对象重新组织",
+      id: "identity_content",
+      title: "关系与内容",
+      hint: "好友与关系管运营 · AI 分身出内容 · FACET 管投放",
       rows: [
-        { icon: "spark", label: "FACET", desc: "对象列表 · 关系目标 · 缺口判定", grad: true, route: "facet" }
+        { icon: "target", label: "好友与关系", desc: "运营关系图 · 标签、备注、来源与互动记录", grad: true, route: "friendcrm" },
+        { icon: "aiPersona", label: "AI分身", desc: "用你授权的形象生成照片、视频内容", route: "aiidentity" },
+        { icon: "facet-logo", label: "FACET", desc: "同一份内容，按关系对象投放给谁看", route: "facet" }
       ]
     }
   ]
@@ -323,6 +328,7 @@ export function MeSurface({
   onOpenConversation,
   onSignOut,
   onChromeVisibilityChange,
+  onSubPageOpenChange,
   bottomNavVisible,
   scene,
   business,
@@ -352,9 +358,14 @@ export function MeSurface({
   onOpenVouchers: () => void;
   onOpenRealitySceneMap?: (() => void) | undefined;
   onExperienceAction: (action: ExperienceAction) => void;
-  onOpenConversation?: (author: string) => void;
+  onOpenConversation?: (author: string, peerUserId?: string) => void;
   onSignOut: () => void;
   onChromeVisibilityChange?: (visible: boolean) => void;
+  /** BRAND-CHROME-L1-001: 子页（个人主页等）是盖住整个 body 的目的地，不是
+   * 「我的」根页的一部分 —— 品牌 logo/字标和底部 tab bar 只属于 1 级模块，
+   * 子页打开时必须通知外壳收起，否则子页自己的返回箭头 + 顶栏跟外壳的品牌
+   * 顶栏重叠。见 subPage 的 useEffect。 */
+  onSubPageOpenChange?: (open: boolean) => void;
   bottomNavVisible?: boolean;
   scene?: SceneClient;
   business?: BusinessClient;
@@ -386,6 +397,12 @@ export function MeSurface({
     [viewerAccountId]
   );
   const [subPage, setSubPage] = useState<MeSubPage>();
+  // BRAND-CHROME-L1-001: 子页打开/关闭都要让外壳知道 —— 卸载时（切走 tab）
+  // 也要把标记还原，否则外壳收着品牌顶栏走到别的 tab。
+  useEffect(() => {
+    onSubPageOpenChange?.(subPage !== undefined);
+    return () => onSubPageOpenChange?.(false);
+  }, [subPage, onSubPageOpenChange]);
   // 消费外部请求。MeSurface 在切走 tab 时会被卸载，所以这里用「请求 + 消费」
   // 而不是「初始值」：消费后调用方清空请求，下次重进 Me 不会又弹回子页。
   useEffect(() => {
@@ -500,6 +517,57 @@ export function MeSurface({
   const [insightsSheetOpen, setInsightsSheetOpen] = useState(false);
   const [searchSheetOpen, setSearchSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  // 搜索浮条定位：顶栏高 46 + 上内边距 7，浮条贴在顶栏下方 8px 处。
+  const searchInsets = useSafeAreaInsets();
+  const profileSearchInputRef = useRef<TextInput>(null);
+  // 个人资料编辑器是 render 函数（不是组件）：personalmanage / personalhub /
+  // 根页三个分支是 early return，Modal 只放在根分支里等于总管理页和主页里
+  // 点开也没挂载 —— 点了没反应的根因。三处都调这一份。
+  function renderProfileEditor(): React.JSX.Element {
+    return (
+      <Modal animationType="slide" onRequestClose={() => setProfileEditorOpen(false)} transparent visible={profileEditorOpen}>
+        <View style={styles.profileEditorOverlay}>
+          <View style={styles.profileEditorSheet}>
+            <View style={styles.profileEditorHead}><Text style={styles.profileEditorTitle}>编辑主页</Text><Pressable onPress={() => void saveProfile()}><Text style={styles.profileEditorDone}>完成</Text></Pressable></View>
+            {profileSaveError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{profileSaveError}</Text> : null}
+            <Pressable onPress={() => void chooseProfileAvatar()} style={styles.profileEditorAvatarRow}>
+              <Image source={profileAvatarUri ? { uri: profileAvatarUri } : OTTER_LOGO} style={styles.profileEditorAvatar} />
+              <View><Text style={styles.profileEditorAvatarTitle}>更换头像</Text><Text style={styles.profileEditorAvatarHint}>从之前发布或手机相册选择</Text></View>
+            </Pressable>
+            {([['name', '显示名称'], ['handle', '用户名'], ['bio', '一句话介绍'], ['city', '城市']] as const).map(([key, label]) => (
+              <View key={key} style={styles.profileEditorField}><Text style={styles.profileEditorLabel}>{label}</Text><TextInput onChangeText={(value) => setProfileDraft((current) => ({ ...current, [key]: value }))} style={styles.profileEditorInput} value={profileDraft[key]} /></View>
+            ))}
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+  function closeProfileSearch(): void {
+    setSearchSheetOpen(false);
+    setSearchQuery("");
+    setProfileSearchResults(undefined);
+  }
+  // MODAL-HANDOFF-001: 关一个 Modal 的同一 tick 再开另一个，后开的会被吃掉
+  // （iOS present 冲突），表现就是"点了没反应"。统一走这个 helper：先关，
+  // 等关闭动画走完（~350ms）再开。调用处不要自己再 set 开。
+  const pendingModalTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => {
+    if (pendingModalTimer.current) clearTimeout(pendingModalTimer.current);
+  }, []);
+  function cancelPendingModal(): void {
+    if (pendingModalTimer.current) {
+      clearTimeout(pendingModalTimer.current);
+      pendingModalTimer.current = undefined;
+    }
+  }
+  function openModalAfterClose(close: () => void, open: () => void): void {
+    close();
+    cancelPendingModal();
+    pendingModalTimer.current = setTimeout(() => {
+      pendingModalTimer.current = undefined;
+      open();
+    }, 350);
+  }
   // SEARCH-CORPUS-002：这一屏**有什么数据域就搜什么** —— 个人主页的数据域是
   // 「我的动态」（正文 / 作者展示名 / 城市）+「我的回复」（正文 / 被回复那条的作者）。
   //
@@ -510,7 +578,11 @@ export function MeSurface({
   const [profileSearchResults, setProfileSearchResults] = useState<ProfileSearchHit[] | undefined>(undefined);
   function runProfileSearch(query: string): void {
     const q = normalizeFeedSearchQuery(query);
-    if (!q) return;
+    // 极简搜索：空查询 = 无结果态（不保留上一次的结果）。
+    if (!q) {
+      setProfileSearchResults(undefined);
+      return;
+    }
     const posts: ProfileSearchHit[] = filterPostsByFeedSearch(profilePosts, q).map((post) => ({
       kind: "post",
       postId: post.postId,
@@ -533,10 +605,10 @@ export function MeSurface({
     const parentName = personalReplyTargets[reply.parentPostId]?.authorDisplayName;
     return Boolean(parentName && parentName.toLowerCase().includes(loweredQuery));
   }
-  const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
-  const [aiIdentityOpen, setAiIdentityOpen] = useState(false);
   // REPLY-TARGET-001: 回复有自己的形状（replyId 才是稳定 key），不再伪装成
   // FeedPost；被回复的父帖另放一张表，查不到就是缺项。
+  // 主页设置弹窗：编辑/分享入口（主页本体 tabs 上方不再重复摆）。
+  const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
   const [personalReplyEntries, setPersonalReplyEntries] = useState<ReplyEntry[]>([]);
   const [personalReplyTargets, setPersonalReplyTargets] = useState<Record<string, ReplyTarget>>({});
   const [personalSavedPosts, setPersonalSavedPosts] = useState<FeedPost[]>([]);
@@ -564,6 +636,17 @@ export function MeSurface({
   // 未知画 "—" 不画 0：浏览/互动暂无服务端口径（绝不拿公式现编），
   // 关注数没拉到之前也是未知不是零。
   const dash = (n: number | undefined): string => (n === undefined ? "—" : String(n));
+  // PROFILE-VISIT-001: 访问与转化页的"主页访问"是真数字了（其余漏斗环节
+  // 仍是示例，见 ANALYTICS-HONEST-001）。只在真的打开这一屏时拉，不常驻后台。
+  const [socialAnalyticsOpens, setSocialAnalyticsOpens] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (subPage?.route !== "socialanalytics") return;
+    let cancelled = false;
+    localNet.listProfileViewStats()
+      .then((stats) => { if (!cancelled) setSocialAnalyticsOpens(stats.opens); })
+      .catch(() => { if (!cancelled) setSocialAnalyticsOpens(undefined); });
+    return () => { cancelled = true; };
+  }, [subPage?.route, localNet]);
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   // 资料保存失败必须留编辑器内提示，不静默吞掉（本地写失败/服务端同步失败都一样）。
   const [profileSaveError, setProfileSaveError] = useState<string | undefined>(undefined);
@@ -755,6 +838,26 @@ export function MeSurface({
   useEffect(() => { if (!socialSettingsHydrated.current) return; const value = { accounts: socialAccounts, ...socialSettings, collaborationEnabled: collaboration.enabled, collaborationTypes: collaboration.types, collaborationRate: collaboration.rate, collaborationContact: collaboration.contact }; void socialSettingsStore.write(value); if (!socialSettingsClient) return; const timer = setTimeout(() => { void socialSettingsClient.write(value).catch(() => undefined); }, 250); return () => clearTimeout(timer); }, [socialAccounts, socialSettings, collaboration, socialSettingsClient]);
   const [securityRetention, setSecurityRetention] = useState<7 | 30 | 90 | 365>(30);
   const [screenshotWarn, setScreenshotWarn] = useState(true);
+  // TWIN-SIGNALS-001: 动态浏览统计总闸（默认开）。本机存取，读不到按开处理
+  // （见 behavior-analytics-settings），开关关掉后上报直接短路。
+  const [behaviorAnalytics, setBehaviorAnalytics] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const stored = await behaviorAnalyticsStore.read();
+        if (!cancelled && stored !== undefined) setBehaviorAnalytics(stored);
+      } catch { /* 读不到保持默认开 */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  function toggleBehaviorAnalytics(): void {
+    setBehaviorAnalytics((current) => {
+      const next = !current;
+      void behaviorAnalyticsStore.write(next).catch(() => undefined);
+      return next;
+    });
+  }
   const [profileDraft, setProfileDraft] = useState({
     name: NEUTRAL_PROFILE.name,
     handle: NEUTRAL_PROFILE.handle,
@@ -1022,7 +1125,7 @@ export function MeSurface({
   const onScroll = useScrollChrome(onChromeVisibilityChange);
 
   if (subPage?.route === "friendcrm") {
-    return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} profileClient={profileClient} initialView="LIST" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onOpenVouchers={onOpenVouchers} onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} profileClient={profileClient} initialView="LIST" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onOpenVouchers={onOpenVouchers} onBack={() => setSubPage(undefined)} onOpenConversation={(author, peerUserId) => { setSubPage(undefined); onOpenConversation?.(author, peerUserId); }} onOpenFacet={() => openSubPage("facet")} localNet={localNet} /></SwipeBackShell>;
   }
   if (context === "BUSINESS") {
     return (
@@ -1280,7 +1383,12 @@ export function MeSurface({
     if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "facet") {
       const facetClient = new FacetClient({ requester: sessionAuthClient, baseUrl: localApiBaseUrl });
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FacetHomeSurface client={facetClient} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+      // AI-FACET-CLUSTER-001: AI 分身与 FACET 是"生成 → 分发"同一条链路，
+      // 两边互相有一条回去对方的路，不用退回「我的」根页再点一次。
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FacetHomeSurface client={facetClient} onBack={() => setSubPage(undefined)} onOpenAiIdentity={() => openSubPage("aiidentity")} /></SwipeBackShell>;
+    }
+    if (subPage.route === "aiidentity") {
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} localNet={localNet} myPosts={profilePosts} onOpenFacet={() => openSubPage("facet")} /></SwipeBackShell>;
     }
     if (subPage.route === "myscenes") {
       async function respond(invitationId: string, decision: "ACCEPTED" | "DECLINED" | "ASK"): Promise<void> {
@@ -1397,6 +1505,25 @@ export function MeSurface({
             <Text style={styles.appBehaviorCardDesc}>
               如需联系 DPO (数据保护官) 或申诉数据处理问题, 请发邮件至 privacy@proxy.vn (最终地址以《服务协议》§53 为准)。依据 PDP 91/2025/QH15 Art. 13, Proxy 已指定 DPO 负责监管个人数据处理活动及处理用户申诉。
             </Text>
+            {/* TWIN-SIGNALS-001 / MEDIA-DWELL-001: 动态浏览统计总闸。默认开
+                （分身偏好靠它），一句话说清记什么、用来干什么，一键可关。
+                这个开关现在也管着"看了哪张照片多久"的更细粒度记录——粒度
+                变细了，说明文案要跟着说清楚，不能让文案还停在"哪条动态"。 */}
+            <View style={styles.socialSettingRow}>
+              <View style={styles.socialAccountCopy}>
+                <Text style={styles.socialSettingName}>动态浏览统计</Text>
+                <Text style={styles.socialSettingDesc}>记录你看过哪些动态、多图动态里具体看了哪张照片多久，用于给你推更对味的内容。关掉后不再记录。</Text>
+              </View>
+              <Pressable
+                accessibilityRole="switch"
+                accessibilityState={{ checked: behaviorAnalytics }}
+                accessibilityLabel="动态浏览统计开关"
+                onPress={toggleBehaviorAnalytics}
+                style={[styles.socialSwitch, behaviorAnalytics ? styles.socialSwitchOn : null]}
+              >
+                <View style={[styles.socialSwitchDot, behaviorAnalytics ? styles.socialSwitchDotOn : null]} />
+              </Pressable>
+            </View>
             <PrivacySettings
               client={resolvePrivacyRequestClient({ authClient: sessionAuthClient })}
             />
@@ -1535,7 +1662,10 @@ export function MeSurface({
     }
 
     if (subPage.route === "socialanalytics") {
-      const funnel = [["主页访问", "100%", "1,284"], ["合格聊天", "54%", "47"], ["机会", "34%", "18"], ["订单", "22%", "9"], ["复购", "11%", "4"]] as const;
+      // PROFILE-VISIT-001: "主页访问"接了 ListProfileViewStats，是真数字；
+      // 后面几步（合格聊天/机会/订单/复购）没有对应的事件类型，仍是示例——
+      // 漏斗的宽度条基于示例比例画，不是从真实主页访问数折算出来的。
+      const funnel = [["主页访问", "100%", dash(socialAnalyticsOpens)], ["合格聊天", "54%", "47"], ["机会", "34%", "18"], ["订单", "22%", "9"], ["复购", "11%", "4"]] as const;
       const sources = [["Proxy 市场", "612", "26", "5"], ["TikTok", "338", "11", "2"], ["Zalo QR", "214", "8", "2"], ["Instagram", "120", "2", "0"]];
       return contentWrapper(
         <View style={styles.root}>
@@ -1544,10 +1674,10 @@ export function MeSurface({
               <Text style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text style={styles.detailTitle}>访问与转化</Text>
-            {/* ANALYTICS-HONEST-001: 下面漏斗和渠道数字目前是示例占位（真实统计
-                管线还没建），以前副标题却写着“只看真实下一步”—— 文案和内容互相
-                矛盾，比空白更容易误导经营决策。先把话说老实，管线建好再换真数。 */}
-            <Text style={styles.detailSub}>示例数据 · 真实统计即将上线，做经营决策前请以实际到账和到店为准。</Text>
+            {/* ANALYTICS-HONEST-001 / PROFILE-VISIT-001: "主页访问"这一步已经
+                是真数字；合格聊天往后 4 步和下面的渠道来源表仍是示例占位
+                （没有聊天资格判定、机会、订单、渠道归因的事件类型）。 */}
+            <Text style={styles.detailSub}>主页访问是真实数据；往后每一步和下方渠道来源仍是示例，做经营决策前请以实际到账和到店为准。</Text>
             <View style={styles.funnelCard}>
               {funnel.map(([label, width, value]) => (
                 <View key={label} style={styles.funnelRow}>
@@ -1573,7 +1703,7 @@ export function MeSurface({
     }
 
     if (subPage.route === "addfriend") {
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} profileClient={profileClient} initialView="ADD_FRIEND" addFriendBackLabel="‹ 返回我的" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} profileClient={profileClient} initialView="ADD_FRIEND" addFriendBackLabel="‹ 返回我的" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onBack={() => setSubPage(undefined)} onOpenConversation={(author, peerUserId) => { setSubPage(undefined); onOpenConversation?.(author, peerUserId); }} /></SwipeBackShell>;
     }
 
     if (subPage.route === "available") {
@@ -1835,6 +1965,7 @@ export function MeSurface({
       return (
         <>
           {managePage}
+          {renderProfileEditor()}
           {manageQrPayload ? (
             <QrZoomOverlay
               actions={[
@@ -1865,7 +1996,6 @@ export function MeSurface({
               <Pressable accessibilityLabel="返回" onPress={() => setSubPage(undefined)} style={styles.personalTopbarButton}>
                 <Text style={styles.personalTopbarIcon}>‹</Text>
               </Pressable>
-              <Text numberOfLines={1} style={styles.personalTopbarHandle}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
               <View style={styles.personalTopbarTools}>
                 <Pressable accessibilityLabel="分析" style={styles.personalTopbarIconBtn} onPress={() => setInsightsSheetOpen(true)}>
                   <ProxyIcon name="chart" color={color.ink} size={20} />
@@ -1873,8 +2003,8 @@ export function MeSurface({
                 <Pressable accessibilityLabel="搜索" style={styles.personalTopbarIconBtn} onPress={() => { setSearchQuery(""); setProfileSearchResults(undefined); setSearchSheetOpen(true); }}>
                   <ProxyIcon name="search" color={color.ink} size={20} />
                 </Pressable>
-                <Pressable accessibilityLabel="更多" style={styles.personalTopbarIconBtn} onPress={() => setSettingsSheetOpen(true)}>
-                  <ProxyIcon name="settings" color={color.ink} size={20} />
+                <Pressable accessibilityLabel="更多" style={styles.personalTopbarIconBtn} onPress={() => { cancelPendingModal(); setSettingsSheetOpen(true); }}>
+                  <ProxyIcon name="ellipsis" color={color.ink} size={20} />
                 </Pressable>
               </View>
             </View>
@@ -1908,10 +2038,11 @@ export function MeSurface({
             </View>
 
             <View style={styles.personalBio}>
-              <View style={styles.personalLinkRow}>
-                <ProxyIcon name="arrowUpRight" color="#666" size={12} />
-                <Text style={styles.personalLinkText}>{profileDraft.handle.startsWith("@") ? profileDraft.handle.slice(1) : profileDraft.handle}</Text>
-              </View>
+              {/* PERSONAL-IDENTITY-DEDUPE-001: 这里以前有一行"链接"，图标是外链箭头，
+                  文字却是 profileDraft.handle —— 跟上面 personalHandleSub 是同一个
+                  handle，不是外部社媒链接（profileDraft 压根没有那个字段），也没有
+                  onPress。参考稿的 .link 行放的是真实外链（instagram.com/...），这里
+                  没有对应数据源，硬摆一遍自己的 handle 就是纯重复，删掉。 */}
               <View style={styles.personalTopics}>
                 {(() => {
                   const topics = profileDraft.city ? [profileDraft.city] : [];
@@ -1996,16 +2127,6 @@ export function MeSurface({
                   console.debug(`[profile] scene chip context: ${sceneId}`);
                 }
               }}
-              onEditProfile={() => setProfileEditorOpen(true)}
-              onShareProfile={() => {
-                // 分享的是**搜得到的那串**（@handle），不再是拼出来的主页链接 ——
-                // 那个域名不是我们的（挂在 Spaceship 上待售），而且 App 自己的搜索按
-                // handle 字面匹配，把链接粘进搜索框谁也对不上（用户报的就是这个）。
-                // 真域名 + Universal Link 是 T-15，还没做；在那之前只分享 handle 才是诚实的。
-                // （域名不写在这里，原因见上面 copyQrText 的注释。）
-                const shareHandle = profileDraft.handle.replace(/^@+/, "");
-                void Share.share({ message: shareHandle ? `查看 ${profileDraft.name} 的 Proxy 主页：在 App 里搜 @${shareHandle}` : `${profileDraft.name} 的 Proxy 主页` });
-              }}
               onLikePost={engagement ? (postId) => { void engagement.reactToPost(postId, "LIKE", true).then(() => setLikeError(undefined)).catch(() => setLikeError("点赞没有提交成功，请检查连接后重试。")); } : undefined}
               viewerMode={isSelfProfile ? "SELF" : "OTHER"}
               viewerAccountId={viewerAccountId}
@@ -2036,57 +2157,59 @@ export function MeSurface({
             </View>
           </Modal>
 
-          <Modal animationType="slide" onRequestClose={() => setSearchSheetOpen(false)} transparent visible={searchSheetOpen}>
-            <View style={styles.sheetOverlayTop}>
-              <View style={styles.sheetCard}>
-                <Text style={styles.sheetTitle}>搜索主页</Text>
-                {/* 这一屏**有什么数据域就搜什么**：动态（正文 / 作者 / 城市）+ 我的回复。
-                    搜**人**要走「加好友 → 搜索 Proxy」（服务端 SearchProfiles）—— 那不是
-                    这一屏的数据域，混进来等于用一个模块的搜索去承诺另一个模块的能力。 */}
-                <Text style={styles.sheetSub}>搜自己主页的动态（正文 / 作者 / 城市）和我的回复，点结果直接打开。</Text>
-                <View style={styles.sheetField}>
+          {/* 个人主页搜索：Home 搜索条同款浮条（去相机/语音/AI，只留输入框 + →），
+              在顶栏搜索图标下方弹出。透明底无大白卡，点外部关闭；输入即搜。 */}
+          <Modal animationType="fade" onRequestClose={closeProfileSearch} transparent visible={searchSheetOpen}>
+            <View style={styles.profileSearchOverlay}>
+              <Pressable
+                accessibilityLabel="关闭搜索"
+                onPress={closeProfileSearch}
+                style={StyleSheet.absoluteFill}
+              />
+              <View style={[styles.profileSearchFloat, { marginTop: searchInsets.top + 61 }]}>
+                <View style={styles.profileSearchDockRow}>
                   <TextInput
+                    ref={profileSearchInputRef}
                     autoFocus
-                    placeholder="搜索动态、作者、城市、回复"
-                    placeholderTextColor="#999"
+                    accessibilityLabel="搜索"
+                    placeholder="搜索"
+                    placeholderTextColor="#8C867E"
                     value={searchQuery}
-                    onChangeText={setSearchQuery}
-                    onSubmitEditing={() => {
-                      const q = searchQuery.trim();
-                      if (q.length > 0) runProfileSearch(q);
-                    }}
+                    onChangeText={(v) => { setSearchQuery(v); runProfileSearch(v); }}
+                    onSubmitEditing={() => runProfileSearch(searchQuery)}
                     returnKeyType="search"
-                    style={styles.sheetFieldInput}
+                    style={styles.profileSearchDockInput}
                   />
+                  {searchQuery ? (
+                    <Pressable accessibilityLabel="清空搜索" onPress={() => { setSearchQuery(""); setProfileSearchResults(undefined); }} style={styles.profileSearchClear}>
+                      <Text style={styles.profileSearchClearText}>×</Text>
+                    </Pressable>
+                  ) : null}
+                  <Pressable
+                    accessibilityLabel="搜索"
+                    onPress={() => { runProfileSearch(searchQuery); profileSearchInputRef.current?.blur(); }}
+                    style={styles.profileSearchGo}
+                  >
+                    <Text style={styles.profileSearchGoGlyph}>→</Text>
+                  </Pressable>
                 </View>
                 {profileSearchResults !== undefined ? (
-                  profileSearchResults.length === 0 ? (
-                    <Text style={styles.sheetSub}>没有匹配的主页内容</Text>
-                  ) : (
-                    profileSearchResults.slice(0, 5).map((hit) => (
-                      <Pressable
-                        key={`${hit.kind}:${hit.postId}:${hit.body.slice(0, 12)}`}
-                        onPress={() => { setSearchSheetOpen(false); setSearchQuery(""); setProfileSearchResults(undefined); setProfileViewer({ postId: hit.postId, index: 0 }); }}
-                        style={styles.sheetWideBtn}
-                      >
-                        {/* 命中项有两种东西，必须说清是哪一种 —— 把回复显示成帖子
-                            用户点进去会发现「这上面没我搜的那句话」。 */}
-                        <Text style={styles.sheetSub}>{hit.kind === "reply" ? "我的回复" : "动态"}</Text>
-                        <Text numberOfLines={2} style={styles.sheetWideBtnText}>{hit.body.slice(0, 60)}</Text>
-                      </Pressable>
-                    ))
-                  )
+                  <View style={styles.profileSearchHits}>
+                    {profileSearchResults.length === 0 ? (
+                      <Text style={styles.profileSearchEmpty}>无结果</Text>
+                    ) : (
+                      profileSearchResults.slice(0, 5).map((hit) => (
+                        <Pressable
+                          key={`${hit.kind}:${hit.postId}:${hit.body.slice(0, 12)}`}
+                          onPress={() => { const postId = hit.postId; openModalAfterClose(closeProfileSearch, () => setProfileViewer({ postId, index: 0 })); }}
+                          style={styles.profileSearchHit}
+                        >
+                          <Text numberOfLines={2} style={styles.profileSearchHitText}>{hit.body.slice(0, 60)}</Text>
+                        </Pressable>
+                      ))
+                    )}
+                  </View>
                 ) : null}
-                <Pressable
-                  onPress={() => {
-                    const q = searchQuery.trim();
-                    if (q.length > 0) runProfileSearch(q);
-                  }}
-                  disabled={searchQuery.trim().length === 0}
-                  style={[styles.sheetWideBtn, styles.sheetWideBtnDark, searchQuery.trim().length === 0 ? { opacity: 0.5 } : undefined]}
-                >
-                  <Text style={styles.sheetWideBtnTextDark}>搜索</Text>
-                </Pressable>
               </View>
             </View>
           </Modal>
@@ -2095,26 +2218,26 @@ export function MeSurface({
             <View style={styles.sheetOverlay}>
               <View style={styles.sheetCard}>
                 <Text style={styles.sheetTitle}>主页设置</Text>
-                <Text style={styles.sheetSub}>管理主页、隐私和设置。</Text>
-                <Pressable onPress={() => { setSettingsSheetOpen(false); setProfileEditorOpen(true); }} style={styles.sheetWideBtn}>
-                  <Text style={styles.sheetWideBtnText}>编辑个人资料</Text>
+                <Pressable onPress={() => openModalAfterClose(() => setSettingsSheetOpen(false), () => setProfileEditorOpen(true))} style={[styles.sheetWideBtn, styles.sheetWideBtnNarrow]}>
+                  <View style={styles.sheetWideBtnRow}>
+                    <ProxyIcon name="editProfile" color={color.ink} size={18} />
+                    <Text style={styles.sheetWideBtnText}>编辑个人资料</Text>
+                  </View>
                 </Pressable>
-                <Pressable onPress={() => { setSettingsSheetOpen(false); void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页` }); }} style={styles.sheetWideBtn}>
-                  <Text style={styles.sheetWideBtnText}>分享主页</Text>
+                <Pressable onPress={() => { setSettingsSheetOpen(false); const shareHandle = profileDraft.handle.replace(/^@+/, ""); void Share.share({ message: shareHandle ? `查看 ${profileDraft.name} 的 Proxy 主页：在 App 里搜 @${shareHandle}` : `${profileDraft.name} 的 Proxy 主页` }); }} style={[styles.sheetWideBtn, styles.sheetWideBtnNarrow]}>
+                  <View style={styles.sheetWideBtnRow}>
+                    <ProxyIcon name="shareUp" color={color.ink} size={18} />
+                    <Text style={styles.sheetWideBtnText}>分享主页</Text>
+                  </View>
                 </Pressable>
-                <Pressable onPress={() => { setSettingsSheetOpen(false); setAiIdentityOpen(true); }} style={styles.sheetWideBtn}>
-                  <Text style={styles.sheetWideBtnText}>AI 身份中心</Text>
-                </Pressable>
-                <Pressable onPress={() => setSettingsSheetOpen(false)} style={[styles.sheetWideBtn, styles.sheetWideBtnDark]}>
+                <Pressable onPress={() => setSettingsSheetOpen(false)} style={[styles.sheetWideBtn, styles.sheetWideBtnDark, styles.sheetWideBtnNarrow]}>
                   <Text style={styles.sheetWideBtnTextDark}>完成</Text>
                 </Pressable>
               </View>
             </View>
           </Modal>
-          <Modal animationType="slide" onRequestClose={() => setAiIdentityOpen(false)} visible={aiIdentityOpen}>
-            <AIIdentityShowcaseSurface onBack={() => setAiIdentityOpen(false)} />
-          </Modal>
           {profileViewer && viewedItems.length > 0 ? <MediaViewer items={viewedItems} index={profileViewer.index} author={profileDraft.name} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onNavigate={(index) => setProfileViewer((current) => current ? { ...current, index } : current)} onClose={() => setProfileViewer(undefined)} /> : null}
+          {renderProfileEditor()}
         </View>
       );
     }
@@ -2806,22 +2929,8 @@ export function MeSurface({
           <Text style={styles.signOutText}>退出登录</Text>
         </Pressable>
       </ScrollView>
-      {/* 个人资料编辑器放根：个人总管理 / 个人主页都能开（原来只在个人主页分支里，总管理页打不开）。 */}
-      <Modal animationType="slide" onRequestClose={() => setProfileEditorOpen(false)} transparent visible={profileEditorOpen}>
-        <View style={styles.profileEditorOverlay}>
-          <View style={styles.profileEditorSheet}>
-            <View style={styles.profileEditorHead}><Text style={styles.profileEditorTitle}>编辑主页</Text><Pressable onPress={() => void saveProfile()}><Text style={styles.profileEditorDone}>完成</Text></Pressable></View>
-            {profileSaveError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{profileSaveError}</Text> : null}
-            <Pressable onPress={() => void chooseProfileAvatar()} style={styles.profileEditorAvatarRow}>
-              <Image source={profileAvatarUri ? { uri: profileAvatarUri } : OTTER_LOGO} style={styles.profileEditorAvatar} />
-              <View><Text style={styles.profileEditorAvatarTitle}>更换头像</Text><Text style={styles.profileEditorAvatarHint}>从之前发布或手机相册选择</Text></View>
-            </Pressable>
-            {([['name', '显示名称'], ['handle', '用户名'], ['bio', '一句话介绍'], ['city', '城市']] as const).map(([key, label]) => (
-              <View key={key} style={styles.profileEditorField}><Text style={styles.profileEditorLabel}>{label}</Text><TextInput onChangeText={(value) => setProfileDraft((current) => ({ ...current, [key]: value }))} style={styles.profileEditorInput} value={profileDraft[key]} /></View>
-            ))}
-          </View>
-        </View>
-      </Modal>
+      {/* 个人资料编辑器三处分支各挂一份（见 renderProfileEditor 注释）。 */}
+      {renderProfileEditor()}
       {/* 状态规则表放根：hub 头像旁状态点也能打开（原来只在 available 子页挂载）。 */}
       <AvRuleSheet onClose={() => setAvRuleSheetOpen(false)} onSave={setAvRule} open={avRuleSheetOpen} rule={avRule} />
     </View>

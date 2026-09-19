@@ -62,15 +62,58 @@ const ACCOUNT_AVATAR_ASSET: Record<string, string> = {
   u_an: "ma_creator_an_portrait_v1",
   u_minh: "ma_creator_minh_portrait_v1",
   u_trang: "ma_creator_trang_portrait_v1",
+  // hana / nam（2026-09-19）：F组单人正脸转正，u_ fixture 进体系 —— 进了这个
+  // 表就等于宣称服务端有账号有写真（resolveHomePersonAccountId 会映射到
+  // user_mockcreator_ 前缀），seed_creator_portraits.sql 里两者必须同时存在。
+  u_hana: "ma_creator_hana_portrait_v1",
+  u_nam: "ma_creator_nam_portrait_v1",
 };
 
+// OVERRIDE-UNSplash-001（commander 决定，2026-09-18）：mock 期真人不许出现灰色
+// 空头像，之前那 5 张 R34 原型肖像全部用上。注意这是在**放宽** IDENTITY-ID-001 ——
+// 代价写清楚：① 这 5 张是 stock 素材，脸上的人不是卡片上这个名字，纯占位；
+// ② 5 张图要盖 ~30 个人，撞脸不可避免；③ 服务端人物 feed 落地后必须删掉这一段，
+// 回到"有账号才有头像"。不接受这三条就不要合这个改动。
+// 和当年被删的版本有一个关键区别：当年按列表下标轮转，同一个人换个列表就换脸；
+// 现在按 person.id 哈希固定 —— 同一个人任何页面永远同一张图，不同的人可能撞脸，
+// 但绝不会一个人长两张脸。
+const R34_HUMAN_PORTRAITS = [
+  "https://images.unsplash.com/photo-1616325629936-99a9013c29c6?auto=format&fit=crop&w=320&q=82",
+  "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=320&q=82",
+  "https://images.unsplash.com/photo-1511081692775-05d0f180a065?auto=format&fit=crop&w=320&q=82",
+  "https://images.unsplash.com/photo-1509030450996-dd1a26dda07a?auto=format&fit=crop&w=320&q=82",
+  "https://images.unsplash.com/photo-1559314809-0d155014e29e?auto=format&fit=crop&w=320&q=82",
+] as const;
+
+function portraitIndexForPerson(id: string): number {
+  let hash = 0;
+  for (let i = 0; i < id.length; i += 1) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return hash % R34_HUMAN_PORTRAITS.length;
+}
+
+// fixture id（u_linh）→ 服务端真账号（user_mockcreator_linh）。
+// 首页推荐是本地 fixture，id 是 u_ 前缀；服务端 mock Creator 的账号是
+// user_mockcreator_ 前缀（见 mockidentity.CreatorFacetKeys）。拿 fixture id
+// 直接建会话/开主页/查资料会落到一个不存在的幽灵 id 上 —— 头像 404 空白、
+// 关注落到空账号、动态 backfill 扫不到帖子。
+// 只有 ACCOUNT_AVATAR_ASSET 里出现的 5 个才映射（他们在服务端真有账号和
+// 写真资产）；其他 fixture 人物没有服务端账号，原样返回，调用方按无账号处理。
+export function resolveHomePersonAccountId(id: string): string {
+  if (!id.startsWith("u_")) return id;
+  const key = id.slice("u_".length);
+  if (!key || ACCOUNT_AVATAR_ASSET[id] === undefined) return id;
+  return `user_mockcreator_${key}`;
+}
+
 function withR34Portraits(people: RecommendPerson[], offset: number): RecommendPerson[] {
-  return people.map((person, index) => ({
+  void offset;
+  return people.map((person) => ({
     ...person,
-    // 有账号才有头像（见 ACCOUNT_AVATAR_ASSET）；没有就不设该字段，卡片回落首字母。
-    ...(ACCOUNT_AVATAR_ASSET[person.id] !== undefined
-      ? { photoUri: `${localApiBaseUrl}/v1/media/thumb/${ACCOUNT_AVATAR_ASSET[person.id]}` }
-      : {}),
+    // 真账号走媒体资产（identity.profiles.avatar_path 同一张）；其余人按 id
+    // 哈希固定一张原型图（OVERRIDE-UNSplash-001，mock 期不许灰头像）。
+    photoUri: ACCOUNT_AVATAR_ASSET[person.id] !== undefined
+      ? `${localApiBaseUrl}/v1/media/thumb/${ACCOUNT_AVATAR_ASSET[person.id]}`
+      : R34_HUMAN_PORTRAITS[portraitIndexForPerson(person.id)]!,
     // RECOMMEND-REPUTATION-FABRICATED-001: 评价类字段一律不再由下标算出来。
     //
     // 这里曾经用 `(index + offset) % n` 给每个人生成星级、好评百分比、

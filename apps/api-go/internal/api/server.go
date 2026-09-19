@@ -259,6 +259,9 @@ func (s *Server) Handler() http.Handler {
 	// updates go through a separate operator-only endpoint
 	// (TODO: when ops tooling lands).
 	mux.HandleFunc("/v1/identity/jurisdiction", s.routeJurisdiction)
+	// AGE-BACKFILL-001: 老账号补年龄断言（SELF_DECLARED_BACKFILL），给
+	// COMP-AGE-001 之前注册、零年龄证据的账号一条出路。本人只能给自己补。
+	mux.HandleFunc("/v1/identity/age-assertion", s.recordAgeAssertion)
 	// R15.25 FACET — object-oriented content operation (Phase 1 = list only).
 	// 匿名 GET endpoint, 返回 mock 3 个对象 (Ken / Linh / ABC Spa) 跟 prototype
 	// 一致. Phase 1 没有持久化, 也不需要 auth — 跟 prototype HTML demo 同形.
@@ -277,6 +280,10 @@ func (s *Server) Handler() http.Handler {
 	// observability (one log line per call) and lets us add caching
 	// later without touching the mobile code path.
 	mux.HandleFunc("/v1/geocode/reverse", s.reverseGeocode)
+	// NEARBY-SPOTS-001: 3km 热门地点。nearbyPlaces 早就实现了（Overpass 景点/
+	// 公园/市集，按距离排序），但一直没挂路由 —— 客户端只能用硬编码
+	// 的 4 个城市预设。与 reverse 同口径：公开 GET，失败 fail-closed 给空列表。
+	mux.HandleFunc("/v1/places/nearby", s.nearbyPlaces)
 	return s.recoverMiddleware(s.versionMiddleware(mux))
 }
 

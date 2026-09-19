@@ -6,8 +6,7 @@ import { color, Gradient } from "../theme";
 import type { AbilityType, AvailabilityRule, AvailabilityState, AvOverride, MenuRow } from "./me-types";
 import { ABILITY_SCHEMAS, AVAILABILITY_OPTIONS, avFmt, AV_DAY_NAMES, avStateFor } from "./me-types";
 import { styles } from "./me-styles";
-
-const OTTER_LOGO = require("../../assets/otter-logo.png");
+import { FACET_LOGO, OTTER_LOGO } from "../media/asset-sources";
 
 export function availabilityLabel(value: AvailabilityState): string {
   return AVAILABILITY_OPTIONS.find((option) => option.id === value)?.title ?? "可接单";
@@ -424,6 +423,10 @@ function VoucherMenuGlyph({ color: tint }: { color: string }): React.JSX.Element
 function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): React.JSX.Element {
   const icon = row.icon === "P" ? (
     <Image accessibilityLabel="Proxy" resizeMode="contain" source={OTTER_LOGO} style={styles.serviceLogo} />
+  ) : row.icon === "facet-logo" ? (
+    // FACET-LOGO-001: 参考稿 Proxy_COMPLETE_FiveRoot_FACET_v11.html 的真牌标
+    // （黄黑对半分、白圆+四角星），不是随手指一个通用图标顶替。
+    <Image accessibilityLabel="FACET" resizeMode="contain" source={FACET_LOGO} style={styles.serviceLogo} />
   ) : row.icon === "voucher" ? (
     <ProxyIcon color={row.grad ? color.white : color.ink} name="cup" size={26} />
   ) : (

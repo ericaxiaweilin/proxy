@@ -44,7 +44,10 @@ describe("AUDIT-BATCH3-003 legal kill switch is visible in the shell", () => {
 describe("AUDIT-BATCH3-004 analytics page stops contradicting itself", () => {
   it("labels the funnel as sample data until the real pipeline exists", () => {
     // ANALYTICS-HONEST-001：数字是示例，副标题却写“只看真实下一步”。
-    expect(meCode).toContain("示例数据 · 真实统计即将上线");
+    // PROFILE-VISIT-001: "主页访问"接了 ListProfileViewStats 之后不再是纯
+    // 示例——副标题换成了区分"这一步真实/其余仍是示例"的措辞，不是笼统的
+    // "示例数据"，断言跟着改。
+    expect(meCode).toContain("主页访问是真实数据；往后每一步和下方渠道来源仍是示例");
     expect(meCode).not.toContain("只看真实下一步，不追虚荣指标");
   });
 });

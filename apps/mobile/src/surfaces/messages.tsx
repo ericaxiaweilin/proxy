@@ -1,17 +1,16 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, AppState, Modal, NativeScrollEvent, NativeSyntheticEvent, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
+import { Animated, AppState, NativeScrollEvent, NativeSyntheticEvent, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
 import { Image } from "expo-image";
 import { Directory, File, Paths } from "expo-file-system";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { IdentitySwitcher } from "../components/identity-switcher";
-import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { parseCommandResult } from "../login-client";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
-import type { ConversationClient, ConversationInboxItem, ConvoSummary } from "../conversation-client";
+import type { ConversationClient, ConversationInboxItem } from "../conversation-client";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { dedupeInboxDialogs } from "../conversation-inbox-model";
@@ -20,72 +19,35 @@ import type { RelationshipClient } from "../relationship-client";
 import { FriendCrmSurface } from "./friend-crm";
 import { meetupPreview } from "../meetup-share";
 import { aiAccountPhoto } from "../ai-persona-presentation";
-import { parseFolders, parseHiddenChatIds } from "../local-snapshot";
+import { parseHiddenChatIds, parseHiddenChatTimes, shouldResurfaceHidden } from "../local-snapshot";
+import { OTTER_LOGO } from "../media/asset-sources";
 
-type HomePanel = "dialogs" | "convos" | "folders";
+// MSG-GROUPS-TAB-001: 第二个页签以前叫"Convo"（消息支线/message branch，见
+// conversation.tsx 的"创建 Convo"长按项），列的却是 GROUP/SUPPORT 会话——
+// 名字和内容对不上，而且"Convo"这个词本身就是办公协作software的说法，这是
+// 聊天 app 不是办公软件。现在这一页只做一件事：群组对话，如实叫"群组"。
+type HomePanel = "dialogs" | "groups";
 type Folder = "all" | "friends" | "activity" | "invite";
 
 // v8 原型 mock 已删除（R36.x MOCK-001）：Dialog 只走 server
 // listConversations()，空收件箱显示诚实空态，不再展示假会话。
-type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; folder: Folder; type?: string };
-// R15.74: CONVOS 走 server GROUP | SUPPORT filter（DM 在 dialogs tab）。
+type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; folder: Folder; type?: string; peerUserId?: string; lastActivityMs: number };
 
+const ASSISTANT_LOGO = OTTER_LOGO;
+
+// 收件箱 5 秒轮询每次重跑 toDialog，aiAccountPhoto() 和手拼的 {uri} 每次
+// 都是新对象 —— 行头像当新图重载，肉眼就是 AI 行每几秒闪一下。
+// 按账号缓存 source 身份，换头像版本才换身份。
+const aiAvatarSourceCache = new Map<string, number | { uri: string }>();
+function cachedAiAccountPhoto(account: PlatformAIAccount): number | { uri: string } {
+  const key = `${account.accountId}:${account.avatarVersion ?? 1}:${account.avatarPath}:${account.avatarMediaAssetId ?? ""}`;
+  const hit = aiAvatarSourceCache.get(key);
+  if (hit !== undefined) return hit;
+  const source = aiAccountPhoto(account);
+  aiAvatarSourceCache.set(key, source);
+  return source;
+}
 const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友", activity: "活动", invite: "邀约" };
-
-// 自建文件夹落盘（新建/移入移出），切模块重进不丢失。
-const foldersDir = new Directory(Paths.document, "proxy-folders");
-const foldersFile = new File(foldersDir, "folders-v1.json");
-/**
- * SYNC-FS-001: File.json() 是异步的，同步读永远拿到 Promise。
- * 本函数为唯一读入口（await）。解析见 local-snapshot（单测覆盖）。
- */
-export async function readFoldersAsync(): Promise<FolderV1[]> {
-  try {
-    if (!foldersFile.exists) return [];
-    return parseFolders(await foldersFile.json());
-  } catch {
-    return [];
-  }
-}
-function writeFolders(folders: FolderV1[]): void {
-  try {
-    foldersDir.create({ idempotent: true, intermediates: true });
-    foldersFile.write(JSON.stringify(folders));
-  } catch {
-    // 持久化失败不打断本次会话内的文件夹操作。
-  }
-}
-
-// 文件夹媒体浏览器（微信式）：照片/视频格子 + 发送人，按日期分组。
-// 数据来自各会话真实消息体（IMAGE/VIDEO + mediaRef），不是会话列表。
-// 文件暂无协议类型，不设假入口。
-export type FolderMediaKind = "IMAGE" | "VIDEO";
-export interface FolderMediaItem {
-  id: string;
-  kind: FolderMediaKind;
-  uri: string;
-  sender: string;
-  conversationId: string;
-  conversationName: string;
-  timestampMs: number;
-  timeText: string;
-}
-// CONVO-LIST-001: Convo 的时间戳。解析不出来显示 —，不留空、不显示 0 ——
-// 未知和「就是现在」不能长得一样。
-function convoTimeText(iso: string): string {
-  const ms = new Date(iso).getTime();
-  if (!Number.isFinite(ms) || ms <= 0) return "—";
-  return new Date(ms).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function dayBucket(timestampMs: number): "今天" | "昨天" | "更早" {
-  if (!timestampMs) return "更早";
-  const now = new Date();
-  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  if (timestampMs >= startToday) return "今天";
-  if (timestampMs >= startToday - 86_400_000) return "昨天";
-  return "更早";
-}
 
 // 本机隐藏的会话（左滑删除）：服务端没有删会话接口，删除 = 本机可见性，
 // 服务端保留审计（与“清空本机显示”同口径）。落盘持久化，重进/重启不回来。
@@ -103,83 +65,88 @@ export async function readHiddenChatIdsAsync(): Promise<string[]> {
     return [];
   }
 }
-function writeHiddenChatIds(ids: ReadonlyArray<string>): void {
+function writeHiddenChatIds(record: Record<string, number>): void {
   try {
     hiddenChatsDir.create({ idempotent: true, intermediates: true });
-    hiddenChatsFile.write(JSON.stringify(ids));
+    hiddenChatsFile.write(JSON.stringify(record));
   } catch {
     // 持久化失败不打断删除（本会话内照样隐藏）。
   }
 }
 
 const SWIPE_DELETE_W = 84;
-const SWIPE_CONFIRM_W = 168;
 // 松手/被抢走时的结算阈值：轻滑 24px 即展开，不必过半，更不会中途收回。
 const SWIPE_OPEN_DX = 24;
 
 // 左滑删除行：无手势库，用 PanResponder 实现。横滑 dx 主导才接管，
-// 竖滑留给列表；点按（无位移）不受影响。删除两段确认，防误触。
+// 竖滑留给列表；点按（无位移）不受影响。
+// SWIPE-DELETE-SIMPLIFY-001: 以前这里是两段确认——滑开先看到删除按钮，
+// 点一下变宽成"取消"和第二个动作按钮，还要再点一次才真的触发。防的是
+// "误触"，但滑动本身
+// 已经要求横向拖动超过 SWIPE_OPEN_DX 才会展开，这已经是一次刻意动作；而
+// hideDialog 本来就不是真删除（见 visibleDialogs 那条注释："dismiss 当前
+// 视图，来新动态即回"），把它当成需要二次确认的破坏性操作，比它实际的
+// 可逆程度更谨慎。滑开这一下已经是唯一必要的确认；不想删就照常右滑收起
+// 或点别处收起——两条路都还在，不需要专门一个"取消"按钮来做同一件事。
+// SWIPE-CRASH-001: 拖动这一段本来想让 base+dragX 都走 useNativeDriver:true，
+// 靠原生侧直接接手逐帧更新，不经 JS bridge。实测不成立——PanResponder.js
+// 内部对 onPanResponderMove 就是直接 config.onPanResponderMove(event, gs)
+// 当函数调用；useNativeDriver:true 时 Animated.event(...) 返回的不是函数，
+// 是 AnimatedEvent 实例本身（专门给 onScroll 这类原生 prop 用，靠 UIManager
+// 识别对象类型走原生直连），PanResponder 认不出这个对象，一滑就抛
+// "Object is not a function"。项目没装 react-native-gesture-handler/
+// reanimated，PanResponder 的手势识别和逐帧回调本身就在 JS 线程，绕不开——
+// 只能退回 useNativeDriver:false，让 Animated.event 返回真正可调用的
+// handler；这一路径下的 setValue 仍比手算 clamp 再赋值轻（不触发 React
+// re-render），先保证不崩、再谈顺不顺。
 function SwipeableRow({ onDelete, children }: { onDelete: () => void; children: React.ReactNode }): React.JSX.Element {
-  const tx = useRef(new Animated.Value(0)).current;
-  const startX = useRef(0);
-  const lastDx = useRef(0);
+  const base = useRef(new Animated.Value(0)).current;
+  const dragX = useRef(new Animated.Value(0)).current;
+  const combined = useRef(Animated.add(base, dragX)).current;
+  const clampedX = useMemo(
+    () => combined.interpolate({ inputRange: [-SWIPE_DELETE_W, 0], outputRange: [-SWIPE_DELETE_W, 0], extrapolate: "clamp" }),
+    [combined]
+  );
   const openW = useRef(0);
   const [open, setOpen] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const confirmingRef = useRef(false);
-  confirmingRef.current = confirming;
   const snapTo = useCallback((w: number) => {
     openW.current = w;
     setOpen(w > 0);
-    Animated.spring(tx, { toValue: -w, useNativeDriver: true, tension: 320, friction: 32 }).start();
-  }, [tx]);
-  const close = useCallback(() => { setConfirming(false); snapTo(0); }, [snapTo]);
-  useEffect(() => {
-    // 确认态切换时按钮区变宽，已展开就跟到新宽度。
-    if (open) snapTo(confirmingRef.current ? SWIPE_CONFIRM_W : SWIPE_DELETE_W);
-  }, [confirming, open, snapTo]);
+    dragX.setValue(0);
+    Animated.spring(base, { toValue: -w, useNativeDriver: false, tension: 320, friction: 32 }).start();
+  }, [base, dragX]);
+  const close = useCallback(() => snapTo(0), [snapTo]);
   function settle(dx: number, vx: number): void {
-    const w = confirmingRef.current ? SWIPE_CONFIRM_W : SWIPE_DELETE_W;
     const wasOpen = openW.current > 0;
     let target = 0;
-    if (!wasOpen && (dx < -SWIPE_OPEN_DX || vx < -0.4)) target = w;
+    if (!wasOpen && (dx < -SWIPE_OPEN_DX || vx < -0.4)) target = SWIPE_DELETE_W;
     else if (wasOpen && (dx > SWIPE_OPEN_DX || vx > 0.4)) target = 0;
-    else if (wasOpen) target = w;
-    if (target === 0) setConfirming(false);
+    else if (wasOpen) target = SWIPE_DELETE_W;
     snapTo(target);
   }
+  const panMove = useRef(Animated.event([null, { dx: dragX }], { useNativeDriver: false })).current;
   const pan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > 8,
-    onPanResponderGrant: () => { startX.current = -openW.current; lastDx.current = 0; },
-    onPanResponderMove: (_, gs) => {
-      lastDx.current = gs.dx;
-      const w = confirmingRef.current ? SWIPE_CONFIRM_W : SWIPE_DELETE_W;
-      tx.setValue(Math.min(0, Math.max(-w, startX.current + gs.dx)));
+    onPanResponderGrant: () => {
+      // 抓手瞬间把"静止位置"钉在当前展开状态，这次手势的位移从 0 起算——
+      // 这一步是 setValue，只在抓手那一刻发生一次，不是逐帧成本。
+      base.setValue(-openW.current);
+      dragX.setValue(0);
     },
+    onPanResponderMove: panMove,
     onPanResponderRelease: (_, gs) => settle(gs.dx, gs.vx),
     // 被父列表抢走手势（竖飘）也不中途收回：按最后位移同样结算。
-    onPanResponderTerminate: () => settle(lastDx.current, 0),
+    onPanResponderTerminate: (_, gs) => settle(gs.dx, 0),
   })).current;
   return (
     <View>
-      <View style={[styles.swipeBehind, { width: confirming ? SWIPE_CONFIRM_W : SWIPE_DELETE_W }]}>
-        {!confirming ? (
-          <Pressable onPress={() => setConfirming(true)} style={styles.swipeDelete} accessibilityLabel="删除对话">
-            <Text style={styles.swipeDeleteText}>删除</Text>
-          </Pressable>
-        ) : (
-          <>
-            <Pressable onPress={close} style={styles.swipeCancel} accessibilityLabel="取消删除">
-              <Text style={styles.swipeCancelText}>取消</Text>
-            </Pressable>
-            <Pressable onPress={onDelete} style={styles.swipeDelete} accessibilityLabel="确认删除对话">
-              <Text style={styles.swipeDeleteText}>确认删除</Text>
-            </Pressable>
-          </>
-        )}
+      <View style={[styles.swipeBehind, { width: SWIPE_DELETE_W }]}>
+        <Pressable onPress={onDelete} style={styles.swipeDelete} accessibilityLabel="删除对话">
+          <Text style={styles.swipeDeleteText}>删除</Text>
+        </Pressable>
       </View>
-      <Animated.View {...pan.panHandlers} style={{ transform: [{ translateX: tx }] }}>
+      <Animated.View {...pan.panHandlers} style={{ transform: [{ translateX: clampedX }] }}>
         {open ? <Pressable accessibilityLabel="收起删除" onPress={close} style={StyleSheet.absoluteFill} /> : null}
         {children}
       </Animated.View>
@@ -189,10 +156,7 @@ function SwipeableRow({ onDelete, children }: { onDelete: () => void; children: 
 
 export function MessagesSurface({
   onOpenConversation,
-  onOpenRequests,
   onOpenContacts,
-  onOpenAddFriend,
-  onOpenConvo,
   onChromeVisibilityChange,
   bottomNavVisible,
   displayIdentityClient,
@@ -204,25 +168,18 @@ export function MessagesSurface({
   relationship,
   viewer,
 }: {
-  onOpenConversation: (author: string, conversationId?: string, aiAccount?: PlatformAIAccount, avatarSource?: number | { uri: string }) => void;
-  onOpenRequests?: () => void;
+  onOpenConversation: (author: string, conversationId?: string, aiAccount?: PlatformAIAccount, avatarSource?: number | { uri: string }, peerUserId?: string) => void;
   onOpenContacts?: () => void;
-  // ADD-FRIEND-FROM-MESSAGES-001: 「新聊天」里找还没聊过的人。没有它就只能
-  // 在本机收件箱里找人 —— 那是「找人聊天」，不是「加好友」。
-  onOpenAddFriend?: (() => void) | undefined;
-  // 添加好友的完整 UI（扫码/搜索/邀请）内嵌在消息模块 —— 不再跳去「我的」。
-  // 调用方（app-shell）传入 relationship + viewer 后本组件自渲染；
-  // 未传时回退到 onOpenAddFriend（诚实提示，不静默）。
+  // MSG-SCAN-SHORTCUT-001: 消息模块加好友现在只剩顶栏"扫码"这一条路——
+  // "+"号连着的方式选择页（邀请/通讯录/社媒/搜索）已经摘掉，本人的二维码
+  // 已经够用，不需要到处都能申请加好友。relationship 仍要传：扫码识别出人
+  // 之后真的发好友请求要靠它。
   relationship?: RelationshipClient | undefined;
   viewer?: { name: string; handle: string } | undefined;
-  // CONVO-OPEN-001: 从 Convo 列表打开一条**支线**。它比 onOpenConversation 多带
-  // convoId + convoTitle —— 少了 convoId，shell 只会按普通 DM 打开主线，而这一行的
-  // 无障碍标签写着「打开 Convo」。列表里能看见支线、点开却落在主线，等于没接线。
-  onOpenConvo?: ((author: string, conversationId: string, convoId: string, convoTitle: string) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
   // 这里曾声明过一个 "CHAT" | "FRIENDS" 的初始 tab：app-shell 一直在传，本组件
-  // 从来没读过。而且它的词表和本页的 panel 模型（对话 / Convo / 文件夹）对不上 ——
+  // 从来没读过。而且它的词表和本页的 panel 模型（对话 / 群组）对不上 ——
   // 不是「没接」，是「接不上」，所以删掉而不是补线。真正区分「在聊天里 / 在消息
   // 列表」的是 shell 的 messageChat 状态（它会换成 ConversationSurface 渲染），
   // 不是这个 prop。已删。
@@ -236,99 +193,33 @@ export function MessagesSurface({
   const [panel, setPanel] = useState<HomePanel>("dialogs");
   const [folder, setFolder] = useState<Folder>("all");
   const [search, setSearch] = useState("");
+  // MSG-HEADER-SLIM-001: 搜索平时不占地方，点了图标才展开输入框——跟动态
+  // tab 的搜索交互（feed.tsx 的 searchOpen）是同一套模式。
+  const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
-  const [subView, setSubView] = useState<"home" | "requests" | "contacts" | "person">("home");
+  const [subView, setSubView] = useState<"home" | "contacts" | "person" | "newGroup">("home");
   const [personName, setPersonName] = useState("");
   const [contactSearch, setContactSearch] = useState("");
-  // ADD-FRIEND-FROM-MESSAGES-001: 加好友入口没接通时把话说出来，
-  // 不能点下去什么都不发生 —— 静默的死按钮和「没这个人」长得一样。
-  const [addFriendNotice, setAddFriendNotice] = useState("");
-  // ADD-FRIEND-FROM-MESSAGES-001: 消息模块内嵌「添加好友」表面（扫码/搜索/邀请）。
-  const [showAddFriend, setShowAddFriend] = useState(false);
-  // CONVO-OPEN-001: 支线入口没接通时把话说出来 —— 同 addFriendNotice，
-  // 静默的死按钮和「这条支线不存在」长得一样。
-  const [convoNotice, setConvoNotice] = useState("");
-  // 文件夹页类型筛选：全部/照片/视频。
-  const [folderKind, setFolderKind] = useState<"all" | FolderMediaKind>("all");
-  // chips 行内新建：展开输入行，创建后收起并选中新文件夹。
-  const [folderCreateOpen, setFolderCreateOpen] = useState(false);
-  const [folderCreateName, setFolderCreateName] = useState("");
-  // 自建文件夹：选中过滤成员，移入移出落盘。
-  const [folders, setFolders] = useState<FolderV1[]>([]);
-  // CONVO-LIST-001: 我的 Convo（消息支线）。ConversationClient.listMyConvos 一直是
-  // 「建好了没人调」—— createConvo 能从一条消息分叉出支线，但分叉完**永远看不到它**。
-  // 三态分开：undefined 还没拉 / [] 真的一条都没有 / failed 拉失败。三者不许长得一样。
-  const [myConvos, setMyConvos] = useState<ConvoSummary[] | undefined>(undefined);
-  const [myConvosFailed, setMyConvosFailed] = useState(false);
-  const [myConvosNonce, setMyConvosNonce] = useState(0);
-  useEffect(() => {
-    let cancelled = false;
-    void readFoldersAsync().then((stored) => {
-      if (cancelled || stored.length === 0) return;
-      setFolders((prev) => {
-        if (prev.length === 0) return stored;
-        const ids = new Set(prev.map((f) => f.id));
-        const missing = stored.filter((f) => !ids.has(f.id));
-        return missing.length === 0 ? prev : [...prev, ...missing];
-      });
-    }).catch(() => undefined);
-    return () => { cancelled = true; };
-  }, []);
-  // CONVO-LIST-001: 进 Convo 页时拉我的支线。失败必须自己说出来 ——
-  // 把拉取失败画成空列表，用户会以为自己从没开过支线（和「还没有」是两回事）。
-  useEffect(() => {
-    if (panel !== "convos" || !conversationClient) return;
-    let cancelled = false;
-    setMyConvos(undefined);
-    setMyConvosFailed(false);
-    void (async () => {
-      try {
-        const rows = await conversationClient.listMyConvos();
-        if (!cancelled) setMyConvos(rows);
-      } catch {
-        if (!cancelled) setMyConvosFailed(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [panel, conversationClient, myConvosNonce]);
-
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
-  function persistFolders(next: FolderV1[]): void {
-    setFolders(next);
-    writeFolders(next);
-    if (selectedFolderId && !next.some((f) => f.id === selectedFolderId)) setSelectedFolderId(null);
-  }
-  function createFolder(name: string): void {
-    persistFolders([...folders, { id: `f_${Date.now()}`, name, dialogIds: [] }]);
-  }
-  // chips 行内新建提交：创建后收起输入并选中新文件夹，直接可用。
-  function submitFolderCreate(): void {
-    const name = folderCreateName.trim();
-    if (!name) return;
-    const id = `f_${Date.now()}`;
-    persistFolders([...folders, { id, name, dialogIds: [] }]);
-    setFolderCreateName("");
-    setFolderCreateOpen(false);
-    setSelectedFolderId(id);
-  }
-  function toggleFolderMember(folderId: string, dialogId: string): void {
-    persistFolders(folders.map((f) => {
-      if (f.id !== folderId) return f;
-      const has = f.dialogIds.includes(dialogId);
-      return { ...f, dialogIds: has ? f.dialogIds.filter((id) => id !== dialogId) : [...f.dialogIds, dialogId] };
-    }));
-  }
-  // 文件夹媒体：首次进文件夹页时扫描各会话消息体；失败整页重试。
-  const [folderMedia, setFolderMedia] = useState<FolderMediaItem[] | undefined>(undefined);
-  const [folderMediaError, setFolderMediaError] = useState(false);
-  const [folderMediaNonce, setFolderMediaNonce] = useState(0);
-  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
-  const folderScannedRef = useRef(false);
-  const visibleDialogsRef = useRef<Dialog[]>([]);
+  // MSG-SCAN-SHORTCUT-001: 顶栏"扫码"直接进相机，内嵌同一个 FriendCrmSurface，
+  // 只带一个 scanOnly 初始 sheet——"+"号方式选择页已经从消息模块摘掉。
+  const [scanShortcut, setScanShortcut] = useState(false);
+  // GROUP-CREATE-001: 建群候选人跟「新聊天」同一个诚实数据源（收件箱里
+  // 真聊过天的人），排除 AI（AI 小美/助手拉进群没有语义）。选中的是对方
+  // userId（后端 participantIds 要的就是这个），不是 conversationId。
+  const [groupSelected, setGroupSelected] = useState<ReadonlySet<string>>(new Set());
+  const [groupMessage, setGroupMessage] = useState("");
+  const [groupBusy, setGroupBusy] = useState(false);
+  const [groupError, setGroupError] = useState("");
 
 
   const [serverDialogs, setServerDialogs] = useState<Dialog[]>();
   const [inboxError, setInboxError] = useState(false);
+  // 坏图回落：thumb 404（幽灵 id 拼出来的 user_ 地址、不可见头像）时 expo Image
+  // 只会画空白 —— 必须回落首字母，行头像永远不能空白。
+  const [brokenAvatarIds, setBrokenAvatarIds] = useState<ReadonlySet<string>>(new Set());
+  function markAvatarBroken(id: string): void {
+    setBrokenAvatarIds((current) => (current.has(id) ? current : new Set(current).add(id)));
+  }
 
   // 与动态 / 首页 / 市场同一套滑动显隐（上滑藏、下滑/回顶显，阈值 -18/+28）。
   // SCROLL-CHROME-001: 改用共享控制器。原先这里的本地副本会和自己造成的布局变化
@@ -336,26 +227,41 @@ export function MessagesSurface({
   // 钳制，钳制又产生负 delta 事件，于是 chrome 再次显示……列表滑到底部被弹回、
   // logo 一显一隐闪循环。控制器在状态切换后短暂忽略滚动事件来打断这个回路。
   const onInboxScroll = useScrollChrome(onChromeVisibilityChange);
-  // 左滑删除的本机隐藏集：落盘，服务端刷新回来也照样过滤。
+  // 左滑删除 = dismiss 当前视图，来新动态即回（block 才彻底删除）。
+  // 隐藏集记时刻（id → 藏起毫秒）：某行的最后动态晚于藏起时刻就不再藏。
+  // v1 老文件是纯 id 数组，读到就按升级时刻迁移（之前藏的、之后没新动态的
+  // 继续藏着；有新动态的浮出来 —— 升级前藏的其动态全是旧的，不会炸出一堆）。
   // SYNC-FS-001: 读盘异步，mount 时 hydration 并与会话内状态合并。
-  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(new Set());
+  const [hiddenIds, setHiddenIds] = useState<Record<string, number>>({});
   useEffect(() => {
     let cancelled = false;
-    void readHiddenChatIdsAsync().then((ids) => {
-      if (cancelled || ids.length === 0) return;
+    void (async () => {
+      let record: Record<string, number> = {};
+      try {
+        if (!hiddenChatsFile.exists) return;
+        const raw = await hiddenChatsFile.json();
+        // 纯数组 = v1 老形状：整体按现在迁移。
+        if (Array.isArray(raw)) {
+          const now = Date.now();
+          for (const id of parseHiddenChatIds(raw)) record[id] = now;
+          if (Object.keys(record).length > 0) writeHiddenChatIds(record);
+        } else {
+          record = parseHiddenChatTimes(raw);
+        }
+      } catch { return; }
+      if (cancelled || Object.keys(record).length === 0) return;
       setHiddenIds((prev) => {
-        if (ids.every((id) => prev.has(id))) return prev;
-        return new Set([...prev, ...ids]);
+        const merged = { ...record, ...prev };
+        return Object.keys(merged).length === Object.keys(prev).length ? prev : merged;
       });
-    }).catch(() => undefined);
+    })();
     return () => { cancelled = true; };
   }, []);
   const hideDialog = useCallback((id: string) => {
     setHiddenIds((prev) => {
-      if (prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.add(id);
-      writeHiddenChatIds([...next]);
+      if (prev[id] !== undefined) return prev;
+      const next = { ...prev, [id]: Date.now() };
+      writeHiddenChatIds(next);
       return next;
     });
   }, []);
@@ -392,103 +298,83 @@ export function MessagesSurface({
 
   const inboxLoaded = serverDialogs !== undefined || inboxError;
   const visibleDialogs = useMemo(
-    () => (serverDialogs ?? []).filter((d) => !hiddenIds.has(d.id)),
+    // 滑删只 dismiss 藏起时刻之前的东西：该行最后动态晚于藏起时刻（对方又说话了，
+    // 包括自己这边发出去的）就浮出来。block 才彻底，见 setConversationBlocked。
+    () => (serverDialogs ?? []).filter((d) => hiddenIds[d.id] === undefined || shouldResurfaceHidden(hiddenIds[d.id], d.lastActivityMs)),
     [serverDialogs, hiddenIds]
   );
-  visibleDialogsRef.current = visibleDialogs;
-  const pinnedSource: Dialog[] = [];
+  // PIN-DEAD-CODE-001: 之前这里有一段"置顶"UI 和一个永远是 [] 的
+  // pinnedSource，从来没有任何地方能把一条对话标成置顶——没有 pin/unpin
+  // 操作、没有真人可触发的入口。conversation 包里确实有 IsPinned 字段和
+  // 一个 Pin 结构体，但那是内部用来挂 read cursor 的 Dialog 记录，没有
+  // CRUD 方法、没有接进任何 command，跟这里想要的"用户置顶会话"完全是
+  // 两回事。真正做置顶需要新的后端能力（谁能置顶、限几条、怎么持久化），
+  // 不是这个函数能顺手编出来的；先把这段永远不会渲染的死 UI 删掉，
+  // 不留一个看起来存在、实际打不开的入口。
   const recentSource = visibleDialogs;
-  // R15.74: Convo tab (panel="convos") — 从 serverDialogs 拿 GROUP/SUPPORT conversation
-  //   之前 (Phase 1) 走写死 CONVOS mock — 跟 server listConversations 不接.
+  // MSG-GROUPS-TAB-001: 第二个页签只展示真的 GROUP/SUPPORT 会话（toDialog
+  // 已把 conversation.conversationType 透出到 type 字段），没 type 字段时
+  // fallback 视为 DM 不显示。
   const groupDialogs = useMemo(
     () => visibleDialogs.filter((d) => {
-      // 上一行 toDialog 已把 conversation.conversationType 透出到 type 字段 (见下).
-      // 没 type 字段时 fallback 视为 DM 不显示在 Convo 标签.
       const t = (d as unknown as { type?: string }).type;
       return t === "GROUP" || t === "SUPPORT";
     }),
     [visibleDialogs]
   );
-  useEffect(() => {
-    if (panel !== "folders" || !conversationClient || folderScannedRef.current) return;
-    if (!inboxLoaded) return;
-    folderScannedRef.current = true;
-    let cancelled = false;
-    setFolderMedia(undefined);
-    setFolderMediaError(false);
-    void (async () => {
-      const settled = await Promise.allSettled(visibleDialogsRef.current.map(async (dialog) => {
-        if (!dialog.conversationId) return [];
-        const raw = await conversationClient.listMessages(dialog.conversationId);
-        const parsed = parseCommandResult(raw);
-        const body = parsed?.operationRef ? JSON.parse(parsed.operationRef) as { messages?: Array<Record<string, unknown>>; actorId?: string } : undefined;
-        const rows = Array.isArray(body?.messages) ? body.messages : [];
-        const out: FolderMediaItem[] = [];
-        for (const row of rows) {
-          const kind = row.messageType === "IMAGE" ? "IMAGE" : row.messageType === "VIDEO" ? "VIDEO" : undefined;
-          if (!kind || typeof row.mediaRef !== "string" || !row.mediaRef) continue;
-          const created = new Date(String(row.createdAt ?? Date.now())).getTime();
-          const timestampMs = Number.isFinite(created) ? created : 0;
-          const senderSnapshot = row.senderSnapshot as { displayName?: string } | undefined;
-          out.push({
-            id: String(row.messageId ?? `${dialog.id}-${out.length}`),
-            kind,
-            uri: `${conversationClient.baseUrl}/v1/media/${kind === "IMAGE" ? "thumb" : "play"}/${encodeURIComponent(row.mediaRef)}`,
-            sender: row.senderId === body?.actorId ? "你" : (senderSnapshot?.displayName || dialog.name),
-            conversationId: dialog.id,
-            conversationName: dialog.name,
-            timestampMs,
-            timeText: timestampMs ? new Date(timestampMs).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "",
-          });
-        }
-        return out;
-      }));
-      if (cancelled) return;
-      const failed = settled.filter((r) => r.status === "rejected").length;
-      const items = settled.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
-      items.sort((a, b) => b.timestampMs - a.timestampMs);
-      // 全部会话都失败才算失败；部分失败只展示拉到的（图片墙不因个别会话空白）。
-      if (items.length === 0 && failed > 0) setFolderMediaError(true);
-      else setFolderMedia(items);
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panel, conversationClient, inboxLoaded, folderMediaNonce]);
 
-  const filteredPinned = useMemo(() => filterByFolder(pinnedSource, folder, search), [pinnedSource, folder, search]);
   const filteredRecent = useMemo(() => filterByFolder(recentSource, folder, search), [recentSource, folder, search]);
 
-  const openRequests = () => {
-    if (onOpenRequests) onOpenRequests();
-    else setSubView("requests");
-  };
   const openContacts = () => {
     if (onOpenContacts) onOpenContacts();
     else setSubView("contacts");
   };
-  // ADD-FRIEND-FROM-MESSAGES-001: 加好友表面住在 Me 模块（relationship +
-  // profileClient + 本人身份都在那边齐了），所以这里只负责把请求交出去；
-  // 没有人接的时候不静默 —— 返回 false 让按钮自己说清楚。
-  // 现在改为：调用方传了 relationship 就在**消息模块内嵌** FriendCrmSurface
-  // （扫码/搜索/邀请全在本页），不再跳去「我的」；只有没传时才回退到
-  // onOpenAddFriend（旧行为，也保持诚实）。
-  const openAddFriend = (): boolean => {
-    if (relationship) {
-      setShowAddFriend(true);
-      return true;
+  // GROUP-CREATE-001: 候选人 = 收件箱里聊过天的真人，去掉 AI（小美是「用户」但
+  // 拉真人群没有语义，助手更不该在群里）。跟「contacts」用同一个诚实数据源。
+  const groupCandidates = useMemo(
+    () => visibleDialogs.filter((d) => !d.aiAccount && d.peerUserId && d.peerUserId !== "proxy_ai" && d.peerUserId !== "user_proxy_ai"),
+    [visibleDialogs]
+  );
+  const toggleGroupMember = (id: string): void => {
+    setGroupSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  // GROUP-CREATE-001: 后端 resolveStartParticipants 要求 GROUP ≥3 人（含创建者），
+  // 所以这里至少选 2 个人；首条消息必填 —— 不生一个空对话出来，跟真开一次聊天
+  // 同口径（发第一条消息才算「开始」）。
+  const canCreateGroup = groupSelected.size >= 2 && groupMessage.trim() !== "" && !groupBusy;
+  const createGroup = async (): Promise<void> => {
+    if (!conversationClient || !canCreateGroup) return;
+    setGroupBusy(true);
+    setGroupError("");
+    try {
+      const result = await conversationClient.startConversation({
+        originType: "HOME",
+        originId: "group",
+        conversationType: "GROUP",
+        participantIds: Array.from(groupSelected),
+        firstMessage: groupMessage.trim(),
+      });
+      const parsed = parseCommandResult(result);
+      const body = parsed?.operationRef ? JSON.parse(parsed.operationRef) as { conversationId?: string } : undefined;
+      if (typeof body?.conversationId !== "string") throw new Error("create group response malformed");
+      const memberNames = groupCandidates.filter((c) => groupSelected.has(c.peerUserId as string)).map((c) => c.name);
+      const groupName = `群聊 · ${[viewer?.name, ...memberNames].filter(Boolean).join("、")}`;
+      void refreshInbox();
+      setSubView("home");
+      setGroupSelected(new Set());
+      setGroupMessage("");
+      onOpenConversation(groupName, body.conversationId);
+    } catch (error) {
+      setGroupError(error instanceof Error && /authenticated principal|real sign-in|signed out/i.test(error.message) ? "建群失败：请登录后重试" : "建群失败，请稍后重试");
+    } finally {
+      setGroupBusy(false);
     }
-    if (!onOpenAddFriend) return false;
-    onOpenAddFriend();
-    return true;
   };
-  // CONVO-OPEN-001: 打开一条支线。必须把 convoId 一起交出去 —— 只带 parentDialogId
-  // 的话 shell 会按普通 DM 打开，用户点「打开 Convo」却落在主线，支线内容一条都看不到。
-  // 同 openAddFriend：没人接的时候不静默，返回 false 让调用点自己说清楚。
-  const openConvo = (author: string, conversationId: string, convoId: string, convoTitle: string): boolean => {
-    if (!onOpenConvo) return false;
-    onOpenConvo(author, conversationId, convoId, convoTitle);
-    return true;
-  };
+
   // 联系人详情带上会话上下文：名字 + 最近消息 + 会话 id，
   // “消息”按钮直达该会话，不断链；在线/username/手机号之前是现编的，已去掉。
   const [personCtx, setPersonCtx] = useState<{ name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string } }>({ name: "" });
@@ -498,38 +384,70 @@ export function MessagesSurface({
     setSubView("person");
   };
 
-  // 添加好友完整表面：从主界面「＋」或新聊天入口都可直达，不依赖 subView。
-  if (showAddFriend) {
+  // MSG-SCAN-SHORTCUT-001: 顶栏"扫码"直接进相机，不经过方式选择页——
+  // scanOnly=true 让扫码 sheet 一关就直接退出本表面，绝不落在方式选择页上。
+  if (scanShortcut) {
     return (
       <FriendCrmSurface
         relationship={relationship}
         profileClient={profileClient}
         initialView="ADD_FRIEND"
+        initialSheet="SCAN"
+        scanOnly
         addFriendBackLabel="‹ 返回"
         viewer={viewer}
-        onBack={() => { setShowAddFriend(false); setAddFriendNotice(""); }}
-        onOpenConversation={(author) => { setShowAddFriend(false); onOpenConversation(author); }}
+        onBack={() => setScanShortcut(false)}
+        onOpenConversation={(author) => { setScanShortcut(false); onOpenConversation(author); }}
       />
     );
   }
-  if (subView === "requests") {
+
+  if (subView === "newGroup") {
     return (
       <SwipeBackShell onExit={() => setSubView("home")}>
         <View style={styles.app}>
           <View style={styles.safe} />
           <View style={styles.topbar}>
             <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
-            <View style={styles.centerTitle}><Text style={styles.centerMain}>陌生消息</Text><Text style={styles.centerSub}>Mặc Kệ</Text></View>
-            <View style={{ width: 38 }} />
+            <View style={styles.centerTitle}><Text style={styles.centerMain}>建群</Text><Text style={styles.centerSub}>选至少 2 人 · 收件箱里聊过天的人</Text></View>
+            <View style={styles.icon} />
           </View>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-            <Text style={styles.requestIntro}>陌生人的消息自动进入 Mặc Kệ，不打扰正常 Dialog。回复或移到关注后，才进入正常消息流。</Text>
-            <View style={styles.mackeBanner}>
-              <Text style={styles.mackeIcon}>💬</Text>
-              <View style={{ flex: 1 }}><Text style={styles.mackeTitle}>默认静音</Text><Text style={styles.mackeMeta}>这里的消息不推送通知。你可以回复、移到关注，或把普通 Dialog 反向移进来。</Text></View>
-            </View>
-            <Text style={styles.empty}>暂无陌生消息</Text>
+          <ScrollView style={{ flex: 1 }}>
+            <Text style={styles.contactSection}>{groupCandidates.length === 0 ? "还没有可建群的联系人" : `选择成员 · 已选 ${groupSelected.size}`}</Text>
+            {groupCandidates.length === 0 ? <Text style={styles.empty}>先在「新聊天」里跟人聊上，才能把他们拉进群</Text> : null}
+            {groupCandidates.map((c) => {
+              const id = c.peerUserId as string;
+              const on = groupSelected.has(id);
+              return (
+                <Pressable key={id} onPress={() => toggleGroupMember(id)} style={styles.contactRow}>
+                  {c.avatarSource && !brokenAvatarIds.has(c.id) ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:group:${c.id}`} source={c.avatarSource} style={styles.avatar} transition={0} onError={() => markAvatarBroken(c.id)} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text></View>}
+                  <View style={{ flex: 1 }}><Text style={styles.contactName}>{c.name}</Text></View>
+                  <View style={[styles.groupCheck, on && styles.groupCheckOn]}>{on ? <Text style={styles.groupCheckMark}>✓</Text> : null}</View>
+                </Pressable>
+              );
+            })}
           </ScrollView>
+          <View style={styles.groupComposeBar}>
+            {groupError ? <Text style={styles.groupError}>{groupError}</Text> : null}
+            <View style={styles.groupComposeRow}>
+              <TextInput
+                value={groupMessage}
+                onChangeText={setGroupMessage}
+                placeholder="群聊的第一条消息"
+                placeholderTextColor="#9a968f"
+                style={styles.groupComposeInput}
+                multiline
+              />
+              <Pressable
+                accessibilityLabel="创建群聊"
+                disabled={!canCreateGroup}
+                onPress={() => void createGroup()}
+                style={[styles.groupCreateBtn, !canCreateGroup && styles.groupCreateBtnOff]}
+              >
+                <Text style={styles.groupCreateBtnText}>{groupBusy ? "创建中…" : "创建"}</Text>
+              </Pressable>
+            </View>
+          </View>
         </View>
       </SwipeBackShell>
     );
@@ -557,7 +475,7 @@ export function MessagesSurface({
             {/* CONTACT-SEARCH-COPY-001: 副标题正压在这个搜索框上方，必须和它搜得到的东西一致。
                 这一页只搜「姓名 + 最近一条消息」（见下方 filtered），CONTACTS 里根本没有 username
                 —— 见本段开头注释「不编造 username」。写「/ Username」等于让用户在框里输 @handle
-                却永远搜不到。要找没聊过的人走下面的「添加好友」入口，不在这条搜索里。 */}
+                却永远搜不到。找还没聊过的人走顶栏"扫码"，这一页只搜已经在收件箱里的人。 */}
             <View style={styles.centerTitle}><Text style={styles.centerMain}>新聊天</Text><Text style={styles.centerSub}>联系人 · 姓名或最近消息</Text></View>
             <View style={styles.icon} />
           </View>
@@ -566,24 +484,11 @@ export function MessagesSurface({
             <TextInput value={contactSearch} onChangeText={setContactSearch} placeholder="姓名或最近消息" placeholderTextColor="#9a968f" style={styles.contactInput} />
           </View>
           <ScrollView style={{ flex: 1 }}>
-            <Pressable
-              accessibilityLabel="添加好友"
-              onPress={() => setAddFriendNotice(openAddFriend() ? "" : "加好友入口还没接通：调用方没有传 onOpenAddFriend。")}
-              style={styles.addFriendRow}
-            >
-              <View style={styles.addFriendIcon}><Text style={styles.addFriendIconText}>＋</Text></View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.contactName}>添加好友</Text>
-                <Text style={styles.contactMeta}>搜索 Proxy、扫码或邀请 —— 找还没聊过的人</Text>
-              </View>
-              <Text style={styles.contactAction}>去添加 ›</Text>
-            </Pressable>
-            {addFriendNotice ? <Text style={styles.empty}>{addFriendNotice}</Text> : null}
             <Text style={styles.contactSection}>已在 Proxy · 来自你的收件箱</Text>
             {filtered.length === 0 ? <Text style={styles.empty}>{serverDialogs === undefined ? "加载中…" : "暂无联系人"}</Text> : null}
             {filtered.map((c) => (
               <Pressable key={`${c.name}-${c.conversationId ?? ""}`} onPress={() => openPerson(c)} style={styles.contactRow}>
-                {c.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:contact:${c.conversationId ?? c.name}`} source={c.avatarSource} style={styles.avatar} transition={0} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text></View>}
+                {c.avatarSource && !brokenAvatarIds.has(c.conversationId ?? c.name) ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:contact:${c.conversationId ?? c.name}`} source={c.avatarSource} style={styles.avatar} transition={0} onError={() => markAvatarBroken(c.conversationId ?? c.name)} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text></View>}
                 <View style={{ flex: 1 }}><Text style={styles.contactName}>{c.name}</Text><Text style={styles.contactMeta}>{c.preview}</Text><Text style={styles.contactMeta}>{c.time}</Text></View>
                 <Text style={styles.contactAction}>聊天 ›</Text>
               </Pressable>
@@ -605,7 +510,7 @@ export function MessagesSurface({
             <View style={styles.icon} />
           </View>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-          <View style={styles.personHero}>{personCtx.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:person:${personCtx.conversationId ?? personName}`} source={personCtx.avatarSource} style={[styles.avatar, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]} transition={0} /> : <View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View>}<Text style={styles.personName}>{personName}</Text><Text style={styles.personUser}>{personCtx.time ? `最近消息 · ${personCtx.time}` : "Proxy 联系人"}</Text></View>
+          <View style={styles.personHero}>{personCtx.avatarSource && !brokenAvatarIds.has(personCtx.conversationId ?? personName) ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:person:${personCtx.conversationId ?? personName}`} source={personCtx.avatarSource} style={[styles.avatar, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]} transition={0} onError={() => markAvatarBroken(personCtx.conversationId ?? personName)} /> : <View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View>}<Text style={styles.personName}>{personName}</Text><Text style={styles.personUser}>{personCtx.time ? `最近消息 · ${personCtx.time}` : "Proxy 联系人"}</Text></View>
           <View style={styles.personActions}>
             <Pressable onPress={() => onOpenConversation(personName, personCtx.conversationId, personCtx.aiAccount, personCtx.avatarSource)} style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="chat" size={18} /></View><Text style={styles.personActionText}>消息</Text></Pressable>
             <Pressable onPress={() => void Share.share({ message: `Proxy 联系人：${personName}（本地通讯录）` })} style={styles.personAction} accessibilityLabel="分享联系人"><View style={styles.personActionIcon}><Text style={{ fontSize: 12 }}>🔗</Text></View><Text style={styles.personActionText}>分享</Text></Pressable>
@@ -635,36 +540,61 @@ export function MessagesSurface({
         <View style={styles.homeTitle}>
           <Text style={styles.homeTitleText}>信息</Text>
           <View style={styles.homeActions}>
-            <Pressable accessibilityLabel="搜索" onPress={() => searchInputRef.current?.focus()} style={styles.icon}>
+            {/* MSG-HEADER-SLIM-001: 顶栏按钮太多——"消息请求"指向一个从没接过
+                真数据的死屏幕（陌生消息=Mặc Kệ，唯一状态是"暂无陌生消息"，
+                也没有真的"陌生人"标记字段），直接删掉这个死入口；搜索从
+                "常驻图标+常驻输入框"两件东西收成一个可展开的图标，跟动态 tab
+                同一套交互；换来的位置放三个真需求：群组、扫码、新聊天。
+                GROUP-CREATE-001: "群组"入口——后端 StartConversation 早就支持
+                conversationType=GROUP + participantIds（≥3 人），之前光有列表
+                没有创建入口，点不出一个新群。
+                MSG-SCAN-SHORTCUT-001: "+"号（连着邀请/通讯录/社媒/搜索那一整页
+                方式选择）已经摘掉——本人的二维码已经够用，不需要到处都能
+                申请加好友；"扫码"是消息模块唯一保留的加好友路径。 */}
+            <Pressable
+              accessibilityLabel={searchOpen ? "关闭搜索" : "搜索"}
+              onPress={() => {
+                // 关闭时把搜索词也清掉——不然框收起来了，列表还按着旧词过滤，
+                // 用户看不出"为什么少了几条"。
+                if (searchOpen) { setSearchOpen(false); setSearch(""); } else setSearchOpen(true);
+              }}
+              style={styles.icon}
+            >
               <ProxyIcon color={color.ink} name="search" size={20} />
             </Pressable>
-              <Pressable accessibilityLabel="添加好友" onPress={() => setAddFriendNotice(openAddFriend() ? "" : "加好友入口还没接通：调用方没有传 onOpenAddFriend。")} style={styles.iconPlus}>
-              <ProxyIcon color={color.ink} name="plus" size={20} />
+            <Pressable accessibilityLabel="建群" onPress={() => setSubView("newGroup")} style={styles.icon}>
+              <ProxyIcon color={color.ink} name="group" size={20} />
             </Pressable>
-            <Pressable accessibilityLabel="消息请求" onPress={openRequests} style={styles.iconBell}>
-                <ProxyIcon color={color.ink} name="mail" size={20} />
-              </Pressable>
+            <Pressable accessibilityLabel="扫码" onPress={() => setScanShortcut(true)} style={styles.icon}>
+              <ProxyIcon color={color.ink} name="scan" size={20} />
+            </Pressable>
             <Pressable accessibilityLabel="新聊天" onPress={openContacts} style={styles.icon}>
               <ProxyIcon color={color.ink} name="chat" size={20} />
             </Pressable>
           </View>
         </View>
 
-        <View style={styles.searchBox}>
-          <ProxyIcon color="#9a968f" name="search" size={17} />
-          <TextInput
-            ref={searchInputRef}
-            value={search}
-            onChangeText={setSearch}
-            placeholder="搜索聊天名称和最近消息"
-            placeholderTextColor="#9a968f"
-            returnKeyType="search"
-            style={styles.searchInput}
-          />
-          {search ? <Pressable accessibilityLabel="清除搜索" onPress={() => setSearch("")}><Text style={styles.inlineClearText}>清除</Text></Pressable> : null}
-        </View>
+        {searchOpen ? (
+          <View style={styles.searchBox}>
+            <ProxyIcon color="#9a968f" name="search" size={17} />
+            <TextInput
+              autoFocus
+              ref={searchInputRef}
+              value={search}
+              onChangeText={setSearch}
+              placeholder="搜索聊天名称和最近消息"
+              placeholderTextColor="#9a968f"
+              returnKeyType="search"
+              style={styles.searchInput}
+            />
+            {search ? <Pressable accessibilityLabel="清除搜索" onPress={() => setSearch("")}><Text style={styles.inlineClearText}>清除</Text></Pressable> : null}
+          </View>
+        ) : null}
 
-        {/* 对话/Convo/文件夹三页签并列 */}
+        {/* 对话/群组两页签并列。MSG-GROUPS-TAB-001: 摘掉了"文件夹"（自建
+            文件夹 + 媒体墙，没意义的组织负担）和"Convo"这个名字（消息支线，
+            办公协作software的说法，这是聊天 app 不是办公软件）——第二个
+            页签现在如实叫"群组"，只列真的群聊。 */}
         <View style={styles.homeTabs}>
           <Pressable onPress={() => setPanel("dialogs")} style={[styles.homeTab, panel === "dialogs" && styles.homeTabActive]}>
             <Text style={[styles.homeTabText, panel === "dialogs" && styles.homeTabTextActive]}>对话</Text>
@@ -672,22 +602,16 @@ export function MessagesSurface({
               <Text style={styles.countBadgeText}>{filteredRecent.length}</Text>
             </View>
           </Pressable>
-          <Pressable onPress={() => setPanel("convos")} style={[styles.homeTab, panel === "convos" && styles.homeTabActive]}>
-            <Text style={[styles.homeTabText, panel === "convos" && styles.homeTabTextActive]}>Convo</Text>
-            <View style={[styles.countBadge, panel !== "convos" && styles.countBadgeMuted]}>
+          <Pressable onPress={() => setPanel("groups")} style={[styles.homeTab, panel === "groups" && styles.homeTabActive]}>
+            <Text style={[styles.homeTabText, panel === "groups" && styles.homeTabTextActive]}>群组</Text>
+            <View style={[styles.countBadge, panel !== "groups" && styles.countBadgeMuted]}>
               <Text style={styles.countBadgeText}>{groupDialogs.length}</Text>
-            </View>
-          </Pressable>
-          <Pressable onPress={() => setPanel("folders")} style={[styles.homeTab, panel === "folders" && styles.homeTabActive]} accessibilityLabel="文件夹">
-            <Text style={[styles.homeTabText, panel === "folders" && styles.homeTabTextActive]}>文件夹</Text>
-            <View style={[styles.countBadge, panel !== "folders" && styles.countBadgeMuted]}>
-              <Text style={styles.countBadgeText}>{visibleDialogs.length}</Text>
             </View>
           </Pressable>
         </View>
       </View>
 
-      {/* 系统筛选 chips：只对对话列表有意义，Convo/文件夹页不展示 */}
+      {/* 系统筛选 chips：只对对话列表有意义，群组页不展示 */}
       {panel === "dialogs" ? (
       <View style={styles.folderRowWrap}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderRow}>
@@ -704,39 +628,13 @@ export function MessagesSurface({
       <ScrollView style={styles.homeBody} contentContainerStyle={{ paddingBottom: bottomNavVisible === false ? 16 : 96 }} onScroll={onInboxScroll} scrollEventThrottle={16}>
         {panel === "dialogs" ? (
           <>
-            {filteredPinned.length > 0 ? (
-              <>
-                <Text style={styles.sectionLabel}>置顶</Text>
-                {filteredPinned.map((d) => (
-                  <SwipeableRow key={d.id} onDelete={() => hideDialog(d.id)}>
-                  <Pressable onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource)} style={styles.dialog}>
-                    {d.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:dialog:${d.conversationId ?? d.id}`} source={d.avatarSource} style={styles.avatar} transition={0} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
-                      <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
-                    </View>}
-                    <View style={styles.dialogMain}>
-                      <View style={styles.dialogTop}>
-                        <Text style={styles.dialogName} numberOfLines={1}>{d.name}</Text>
-                        {d.badge ? <View style={styles.badge}><Text style={styles.badgeText}>{d.badge}</Text></View> : null}
-                      </View>
-                      <Text style={styles.preview} numberOfLines={1}>{d.preview}</Text>
-                    </View>
-                    <View style={styles.dialogSide}>
-                      <Text style={styles.time}>{d.time}</Text>
-                      {d.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{d.unread}</Text></View> : null}
-                    </View>
-                  </Pressable>
-                  </SwipeableRow>
-                ))}
-              </>
-            ) : null}
-
             {!inboxLoaded ? (
               <Text style={styles.empty}>加载中…</Text>
             ) : filteredRecent.length > 0 ? (
               filteredRecent.map((d) => (
                 <SwipeableRow key={d.id} onDelete={() => hideDialog(d.id)}>
-                <Pressable onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource)} style={styles.dialog}>
-                  {d.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:recent:${d.conversationId ?? d.id}`} source={d.avatarSource} style={styles.avatar} transition={0} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
+                <Pressable onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource, d.peerUserId)} style={styles.dialog}>
+                  {d.avatarSource && !brokenAvatarIds.has(d.id) ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:recent:${d.conversationId ?? d.id}`} source={d.avatarSource} style={styles.avatar} transition={0} onError={() => markAvatarBroken(d.id)} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                     <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
                   </View>}
                   <View style={styles.dialogMain}>
@@ -758,242 +656,34 @@ export function MessagesSurface({
               <Text style={styles.empty}>还没有对话 — 从动态或市场开始聊一下</Text>
             )}
           </>
-        ) : panel === "convos" ? (
+        ) : panel === "groups" ? (
           <>
-            {/* CONVO-LIST-001: 这一页以前挂着 Convo 的名字，列出来的却是 GROUP/SUPPORT 会话 ——
-                那些在「对话」页里已经出现过一遍，而真正的 Convo（消息支线）一条都看不到。
-                现在两件事分开：上面是**真的** Convo，下面是群组对话（它带着「＋文件夹」
-                这个唯一入口，所以留着，但如实叫它群组对话）。 */}
-            <Text style={styles.sectionLabel}>我的 Convo</Text>
-            {myConvosFailed ? (
-              <>
-                <Text style={styles.empty}>Convo 加载失败，请检查连接后重试</Text>
-                <Pressable
-                  onPress={() => setMyConvosNonce((n) => n + 1)}
-                  style={[styles.folderChip, { alignSelf: "center", marginTop: 8 }]}
-                  accessibilityLabel="重新加载 Convo"
-                >
-                  <Text style={styles.folderChipText}>重试</Text>
-                </Pressable>
-              </>
-            ) : myConvos === undefined ? (
-              <Text style={styles.empty}>正在加载 Convo…</Text>
-            ) : myConvos.length === 0 ? (
-              <Text style={styles.preview}>还没有 Convo —— 在对话里对一条消息开一条支线，这里就会出现</Text>
-            ) : (
-              myConvos.map((s) => {
-                const parent = visibleDialogs.find((d) => d.conversationId === s.convo.parentDialogId);
-                const parentName = parent?.name ?? "原对话";
-                return (
-                  <Pressable
-                    key={s.convo.id}
-                    onPress={() => setConvoNotice(openConvo(parentName, s.convo.parentDialogId, s.convo.id, s.convo.title || "未命名支线") ? "" : "支线入口还没接通：调用方没有传 onOpenConvo。")}
-                    style={styles.convoCard}
-                    accessibilityLabel={`打开 Convo ${s.convo.title || "未命名支线"}`}
-                  >
-                    <View style={styles.convoHead}>
-                      <View style={styles.convoMark}><ProxyIcon color="#fff" name="chat" size={16} /></View>
-                      <View style={styles.convoCopy}>
-                        <Text style={styles.convoName}>{s.convo.title || "未命名支线"}</Text>
-                        <Text style={styles.convoParent}>在「{parentName}」里 · {s.messageCount} 条</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.convoPreview} numberOfLines={1}>{s.latestBody || s.seedPreview}</Text>
-                    <View style={styles.convoFoot}>
-                      <Text style={styles.convoFootText}>{convoTimeText(s.latestAt || s.convo.createdAt)}</Text>
-                    </View>
-                  </Pressable>
-                );
-              })
-            )}
-            {convoNotice ? <Text style={styles.empty}>{convoNotice}</Text> : null}
-
-            <Text style={styles.sectionLabel}>群组对话</Text>
+            {/* MSG-GROUPS-TAB-001: 群组页 —— 只列服务端真群聊（GROUP/SUPPORT），
+                点行直接进群聊会话。以前这里叫 Convo 又列支线又列群组，
+                还拿「＋ 文件夹」当组织负担；现在支线只在对话里长按消息开。 */}
             {groupDialogs.length === 0 ? (
-              <Text style={styles.preview}>还没有群组对话</Text>
+              <Text style={styles.preview}>还没有群组对话 —— 建群后会出现在这里</Text>
             ) : null}
-            {groupDialogs.map((c) => {
-              const selected = folders.find((f) => f.id === selectedFolderId);
-              const inSelected = selected?.dialogIds.includes(c.id) ?? false;
-              return (
-                <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
-                <Pressable onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard}>
-                  <View style={styles.convoHead}>
-                    <View style={styles.convoMark}><ProxyIcon color="#fff" name="chat" size={16} /></View>
-                    <View style={styles.convoCopy}>
-                      <Text style={styles.convoName}>{c.name}</Text>
-                      <Text style={styles.convoParent}>{c.badge ?? "群组"}</Text>
-                    </View>
-                    {c.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{c.unread}</Text></View> : null}
+            {groupDialogs.map((c) => (
+              <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
+              <Pressable onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard} accessibilityLabel={`打开群组 ${c.name}`}>
+                <View style={styles.convoHead}>
+                  <View style={styles.convoMark}><ProxyIcon color="#fff" name="group" size={18} /></View>
+                  <View style={styles.convoCopy}>
+                    <Text style={styles.convoName}>{c.name}</Text>
+                    <Text style={styles.convoParent}>{c.badge ?? "群组"}</Text>
                   </View>
-                  <Text style={styles.convoPreview} numberOfLines={1}>{c.preview}</Text>
-                  <View style={styles.convoFoot}>
-                    <Text style={styles.convoFootText}>{c.time}</Text>
-                    {selected ? (
-                      <Pressable onPress={(event) => { event.stopPropagation(); toggleFolderMember(selected.id, c.id); }} accessibilityLabel={inSelected ? `把${c.name}移出${selected.name}` : `把${c.name}加入${selected.name}`}>
-                        <Text style={styles.convoFolderAction}>{inSelected ? "－ 移出" : "＋ 文件夹"}</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
-                </Pressable>
-                </SwipeableRow>
-              );
-            })}
-          </>
-        ) : (
-          <>
-            {/* 类型筛选 + 新建：全部/照片/视频/＋新建同一排 */}
-            <View style={styles.folderRowWrap}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderRow}>
-                {([["all", "全部"], ["IMAGE", "照片"], ["VIDEO", "视频"]] as const).map(([id, label]) => (
-                  <Pressable key={id} onPress={() => { setFolderKind(id); setViewerIndex(null); }} style={[styles.folderChip, folderKind === id && styles.folderChipActive]} accessibilityLabel={`只看${label}`}>
-                    <Text style={[styles.folderChipText, folderKind === id && styles.folderChipTextActive]}>{label}</Text>
-                  </Pressable>
-                ))}
-                <Pressable onPress={() => setFolderCreateOpen((v) => !v)} style={styles.folderChip} accessibilityLabel="新建文件夹">
-                  <Text style={styles.folderChipText}>＋ 新建</Text>
-                </Pressable>
-              </ScrollView>
-            </View>
-            {folderCreateOpen ? (
-              <View style={styles.folderCreateRow}>
-                <TextInput value={folderCreateName} onChangeText={setFolderCreateName} placeholder="文件夹名称" placeholderTextColor="#9a968f" style={styles.folderCreateInput} returnKeyType="done" onSubmitEditing={() => submitFolderCreate()} />
-                <Pressable onPress={() => submitFolderCreate()} style={styles.folderCreateBtn} accessibilityLabel="创建文件夹">
-                  <Text style={styles.folderCreateBtnText}>创建</Text>
-                </Pressable>
-              </View>
-            ) : null}
-            {(() => {
-              if (folderMedia === undefined && !folderMediaError) {
-                return <Text style={styles.empty}>正在整理照片和视频…</Text>;
-              }
-              if (folderMediaError || folderMedia === undefined) {
-                return (
-                  <>
-                    <Text style={styles.empty}>媒体加载失败，请检查连接后重试</Text>
-                    <Pressable
-                      onPress={() => { folderScannedRef.current = false; setFolderMediaError(false); setFolderMediaNonce((n) => n + 1); }}
-                      style={[styles.folderChip, { alignSelf: "center", marginTop: 8 }]}
-                      accessibilityLabel="重新整理"
-                    >
-                      <Text style={styles.folderChipText}>重新整理</Text>
-                    </Pressable>
-                  </>
-                );
-              }
-              const typed = folderKind === "all" ? folderMedia : folderMedia.filter((m) => m.kind === folderKind);
-              const kindLabel = folderKind === "IMAGE" ? "照片" : folderKind === "VIDEO" ? "视频" : "照片和视频";
-              if (typed.length === 0) {
-                return <Text style={styles.empty}>{folderMedia.length === 0 ? "会话里还没有照片和视频" : `没有${kindLabel}，看看其他类型`}</Text>;
-              }
-              const buckets: Array<{ title: "今天" | "昨天" | "更早"; items: FolderMediaItem[] }> = (["今天", "昨天", "更早"] as const)
-                .map((title) => ({ title, items: typed.filter((m) => dayBucket(m.timestampMs) === title) }))
-                .filter((g) => g.items.length > 0);
-              const photos = typed.filter((m) => m.kind === "IMAGE");
-              const viewing = viewerIndex !== null ? photos[viewerIndex] : undefined;
-              return (
-                <>
-                  {buckets.map((group) => (
-                    <View key={group.title}>
-                      <Text style={styles.sectionLabel}>{group.title}</Text>
-                      <View style={styles.mediaGrid}>
-                        {group.items.map((m) => (
-                          <View key={m.id} style={styles.mediaCell}>
-                            {m.kind === "IMAGE" ? (
-                              <Pressable
-                                onPress={() => {
-                                  const at = photos.findIndex((p) => p.id === m.id);
-                                  if (at >= 0) setViewerIndex(at);
-                                }}
-                                accessibilityLabel={`查看${m.sender}的照片`}
-                              >
-                                <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`media:${m.id}`} source={{ uri: m.uri }} style={styles.mediaThumb} transition={0} />
-                              </Pressable>
-                            ) : (
-                              <Pressable
-                                onPress={() => onOpenConversation(m.conversationName, m.conversationId)}
-                                style={styles.mediaVideo}
-                                accessibilityLabel={`去看${m.sender}的视频`}
-                              >
-                                <Text style={styles.mediaPlay}>▶</Text>
-                              </Pressable>
-                            )}
-                            <Text style={styles.mediaSender} numberOfLines={1}>{m.sender}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </View>
-                  ))}
-                  {viewing ? (
-                    <Modal transparent animationType="fade" visible onRequestClose={() => setViewerIndex(null)}>
-                      <View style={styles.viewerRoot}>
-                        <Image cachePolicy="memory-disk" contentFit="contain" recyclingKey={`media:viewer:${viewing.id}`} source={{ uri: viewing.uri }} style={styles.viewerImage} transition={0} />
-                        <Text style={styles.viewerCaption} numberOfLines={1}>{viewing.sender} · {viewing.conversationName} · {viewing.timeText}</Text>
-                        <View style={styles.viewerBar}>
-                          <Pressable
-                            disabled={viewerIndex === 0}
-                            onPress={() => setViewerIndex((i) => (i !== null && i > 0 ? i - 1 : i))}
-                            style={styles.viewerNav}
-                            accessibilityLabel="上一张"
-                          >
-                            <Text style={styles.viewerNavText}>‹</Text>
-                          </Pressable>
-                          <Pressable onPress={() => setViewerIndex(null)} style={styles.viewerNav} accessibilityLabel="关闭查看">
-                            <Text style={styles.viewerNavText}>×</Text>
-                          </Pressable>
-                          <Pressable
-                            disabled={viewerIndex === null || viewerIndex >= photos.length - 1}
-                            onPress={() => setViewerIndex((i) => (i !== null && i < photos.length - 1 ? i + 1 : i))}
-                            style={styles.viewerNav}
-                            accessibilityLabel="下一张"
-                          >
-                            <Text style={styles.viewerNavText}>›</Text>
-                          </Pressable>
-                        </View>
-                      </View>
-                    </Modal>
-                  ) : null}
-                </>
-              );
-            })()}
-            <FolderManager
-              folders={folders}
-              onCreate={createFolder}
-              selectedId={selectedFolderId}
-              onSelect={setSelectedFolderId}
-            />
-            {(() => {
-              const selected = folders.find((f) => f.id === selectedFolderId);
-              if (!selected) return null;
-              const members = visibleDialogs.filter((c) => selected.dialogIds.includes(c.id));
-              return (
-                <View key={selected.id}>
-                  <Text style={styles.sectionLabel}>{selected.name} · {members.length} 个会话</Text>
-                  {members.length === 0 ? (
-                    <Text style={styles.preview}>还没有会话。去 Convo 卡片点「＋ 文件夹」移入。</Text>
-                  ) : null}
-                  {members.map((c) => (
-                    <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
-                    <Pressable onPress={() => onOpenConversation(c.name, c.conversationId, c.aiAccount, c.avatarSource)} style={styles.dialog}>
-                      {c.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:foldermember:${c.conversationId ?? c.id}`} source={c.avatarSource} style={styles.avatar} transition={0} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{c.initial}</Text></View>}
-                      <View style={styles.dialogMain}>
-                        <View style={styles.dialogTop}><Text style={styles.dialogName} numberOfLines={1}>{c.name}</Text></View>
-                        <Text style={styles.preview} numberOfLines={1}>{c.preview}</Text>
-                      </View>
-                      <View style={styles.dialogSide}>
-                        <Text style={styles.time}>{c.time}</Text>
-                        <Pressable onPress={(event) => { event.stopPropagation(); toggleFolderMember(selected.id, c.id); }} accessibilityLabel={`把${c.name}移出${selected.name}`}>
-                          <Text style={styles.convoFolderAction}>－ 移出</Text>
-                        </Pressable>
-                      </View>
-                    </Pressable>
-                    </SwipeableRow>
-                  ))}
+                  {c.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{c.unread}</Text></View> : null}
                 </View>
-              );
-            })()}
+                <Text style={styles.convoPreview} numberOfLines={1}>{c.preview}</Text>
+                <View style={styles.convoFoot}>
+                  <Text style={styles.convoFootText}>{c.time}</Text>
+                </View>
+              </Pressable>
+              </SwipeableRow>
+            ))}
           </>
-        )}
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -1013,10 +703,23 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
   const snapshotName = item.counterpartySnapshot?.displayName?.trim();
   const aiAccountNumber = item.counterpartyId?.match(/^ai_account_0*(\d+)$/)?.[1];
   const aiAccount = BUNDLED_AI_COMPANIONS.find((account) => account.accountId === item.counterpartyId
+    || account.personaId === item.counterpartyId
     || (aiAccountNumber !== undefined && account.accountId.match(/^ai_account_0*(\d+)$/)?.[1] === aiAccountNumber));
-  const name = aiAccount?.displayName || snapshotName || (item.counterpartyId === "proxy_ai" ? "Proxy AI" : item.counterpartyId) || "对话";
+  // ASSISTANT-THREAD-001: 助手有且仅有一个（proxy_ai canonical，服务端归一；
+  // 老 user_proxy_ai 串本地也认成同一个）。ai 小美是用户，不在这里。
+  const isAssistantPeer = item.counterpartyId === "proxy_ai" || item.counterpartyId === "user_proxy_ai";
+  // GROUP-CREATE-001: GROUP 的 counterpartyId/Snapshot 只是"某一个非本人成员"
+  // （服务端 listConversations 里第一个匹配到的，会随最新发言人变化），拿来
+  // 当群名字等于把一个 3 人群显示成跟其中一个人的私聊。参与者总数是诚实的，
+  // 名字用它拼，不编成员名单（客户端这里没有其他成员的 displayName）。
+  const isGroup = item.conversation.conversationType === "GROUP";
+  const name = isGroup ? `群聊 · ${item.conversation.participants.length} 人` : aiAccount?.displayName || snapshotName || (isAssistantPeer ? "AI助手" : item.counterpartyId) || "对话";
   const avatarRef = item.counterpartySnapshot?.avatarRef?.trim();
-  const avatarSource = aiAccount ? aiAccountPhoto(aiAccount) : (avatarRef ? { uri: avatarRef.startsWith("/") ? `${apiBaseUrl ?? ""}${avatarRef}` : avatarRef } : (item.counterpartyId ? { uri: `${apiBaseUrl ?? ""}/v1/media/thumb/${encodeURIComponent("user_" + item.counterpartyId)}` } : undefined));
+  // ASSISTANT-THREAD-001: 助手有且仅有一个（服务端已归一），行头像就是 logo。
+  // 真人没解析出可用地址就不设 —— 以前兜底拼 user_<id> 的 thumb 全是 404，
+  // 每行白发一个坏请求不说，expo 还只画空白。未知直接首字母。
+  // 群头像同理：不拿"某个成员的照片"充当群像，宁可回落首字母。
+  const avatarSource = isGroup ? undefined : aiAccount ? cachedAiAccountPhoto(aiAccount) : isAssistantPeer ? ASSISTANT_LOGO : resolveAvatarSource(avatarRef ?? "", apiBaseUrl);
   // MEETUP-SHARE-001: LOCATION 预览显示 [位置]（解不出才回落原文，不猜）。
   const preview = latest
     ? latest.messageType === "IMAGE" ? "[图片]" : latest.messageType === "VIDEO" ? "[视频]" : latest.messageType === "LOCATION" ? ((meetupPreview(latest.body ?? "") ?? latest.body?.trim()) || "新消息") : latest.body?.trim() || "新消息"
@@ -1024,16 +727,24 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
   const timestamp = latest?.createdAt || item.conversation.lastMessageAt;
   const parsed = new Date(timestamp);
   const time = Number.isNaN(parsed.getTime()) ? "" : parsed.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  // 滑删对比用：最后动态毫秒（解不出按 0 计 —— 证不出有新动态就继续藏着，
+  // 不把"不知道"当成"有更新"）。
+  const lastActivity = new Date(item.conversation.lastMessageAt ?? 0);
+  const lastActivityMs = Number.isNaN(lastActivity.getTime()) ? 0 : lastActivity.getTime();
   return {
     id: item.conversation.conversationId,
     conversationId: item.conversation.conversationId,
     ...(aiAccount ? { aiAccount } : {}),
     ...(avatarSource ? { avatarSource } : {}),
+    // CONVO-AVATAR-PROFILE-001: 对方 userId 透给对话窗口，头像可点进主页。
+    // AI 账号走 AI 主页入口；助手也透 id（窗口里认出 id 就不可点，因为没有主页）。
+    ...(item.counterpartyId && !aiAccount && !isGroup ? { peerUserId: item.counterpartyId } : {}),
     initial: name.slice(0, 2).toUpperCase(),
     name,
     preview,
+    lastActivityMs,
     time,
-    badge: item.conversation.originType,
+    badge: isGroup ? "群组" : item.conversation.originType,
     // UNREAD-PIPELINE-001: 未读徽标终于有真数据。>0 才挂 —— 0 和缺席都不画，
     // 不把“没有”画成“0 条未读”凑数。
     ...(item.unreadCount !== undefined && item.unreadCount > 0 ? { unread: String(item.unreadCount) } : {}),
@@ -1043,10 +754,18 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
   };
 }
 
-function resolveAvatarSource(ref: string, apiBaseUrl?: string): { uri: string } {
-  if (/^(?:https?:|file:)/.test(ref)) return { uri: ref };
-  if (ref.startsWith("/")) return { uri: `${apiBaseUrl ?? ""}${ref}` };
-  return { uri: `${apiBaseUrl ?? ""}/v1/media/thumb/${encodeURIComponent(ref)}` };
+// 服务端头像引用归一：http(s)/file 原样用；/ 开头拼 base；assets/<id>
+// （profile avatar_path、AI persona 写真）转 thumb 真地址；avatar- 开头是
+// 本机副本文件名、空串及其他格式认不出 —— 返回 undefined 交给首字母回落，
+// 绝不拼个 404 出来（之前裸 assets/ 直接当 URL，Linh/Minh 行永远空白）。
+function resolveAvatarSource(ref: string, apiBaseUrl?: string): { uri: string } | undefined {
+  const trimmed = ref.trim();
+  if (!trimmed) return undefined;
+  if (/^(?:https?:|file:)/.test(trimmed)) return { uri: trimmed };
+  if (trimmed.startsWith("/")) return { uri: `${apiBaseUrl ?? ""}${trimmed}` };
+  const assetId = trimmed.startsWith("assets/") ? trimmed.slice("assets/".length).trim() : "";
+  if (!assetId || assetId.startsWith("avatar-")) return undefined;
+  return { uri: `${apiBaseUrl ?? ""}/v1/media/thumb/${encodeURIComponent(assetId)}` };
 }
 
 const styles = StyleSheet.create({
@@ -1071,10 +790,6 @@ const styles = StyleSheet.create({
   countBadgeText: { fontSize: 11, fontWeight: "700", color: "#fff" },
   folderRowWrap: { borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "#fffefa" },
   folderRow: { flexDirection: "row", gap: 7, paddingHorizontal: 16, paddingVertical: 10, alignItems: "center" },
-  folderCreateRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 10, alignItems: "center" },
-  folderCreateInput: { flex: 1, height: 36, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, backgroundColor: "#fff", paddingHorizontal: 11, fontSize: 13, color: "#11110f" },
-  folderCreateBtn: { backgroundColor: "#11110f", borderRadius: 12, paddingHorizontal: 16, height: 36, justifyContent: "center" },
-  folderCreateBtnText: { color: "#fff", fontSize: 12, fontWeight: "800" },
   folderChip: { height: 29, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 15, paddingHorizontal: 11, justifyContent: "center", backgroundColor: "transparent" },
   folderChipActive: { backgroundColor: "#11110f", borderColor: "#11110f" },
   folderChipText: { fontSize: 11, fontWeight: "600", color: "#77736c" },
@@ -1103,19 +818,6 @@ const styles = StyleSheet.create({
   unread: { marginTop: 7, minWidth: 19, height: 19, borderRadius: 10, paddingHorizontal: 5, backgroundColor: "#11110f", alignItems: "center", justifyContent: "center" },
   unreadText: { fontSize: 11, fontWeight: "700", color: "#fff" },
   empty: { textAlign: "center", paddingVertical: 24, fontSize: 12, color: "#aaa69e" },
-  // 文件夹媒体墙：3 列照片格 + 发送人 + 日期分组 + 全屏查看。
-  mediaGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 16, paddingBottom: 4 },
-  mediaCell: { width: "31%", marginBottom: 10 },
-  mediaThumb: { aspectRatio: 1, borderRadius: 12, width: "100%", backgroundColor: "#f1eee8" },
-  mediaVideo: { aspectRatio: 1, borderRadius: 12, width: "100%", backgroundColor: "#11110f", alignItems: "center", justifyContent: "center" },
-  mediaPlay: { color: "#fff", fontSize: 22, fontWeight: "800" },
-  mediaSender: { fontSize: 11, color: "#77736c", marginTop: 4 },
-  viewerRoot: { flex: 1, backgroundColor: "rgba(10,9,12,0.96)", justifyContent: "center", paddingHorizontal: 12 },
-  viewerImage: { width: "100%", height: "70%" },
-  viewerCaption: { color: "#d8d4cf", fontSize: 12, marginTop: 10, textAlign: "center" },
-  viewerBar: { flexDirection: "row", justifyContent: "space-around", marginTop: 14 },
-  viewerNav: { paddingHorizontal: 22, paddingVertical: 10 },
-  viewerNavText: { color: "#fff", fontSize: 26, fontWeight: "800" },
   convoCard: { marginHorizontal: 14, marginTop: 10, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 15, padding: 12, backgroundColor: "#fffefa" },
   convoHead: { flexDirection: "row", alignItems: "center", gap: 9 },
   convoMark: { width: 36, height: 36, borderRadius: 11, backgroundColor: "#11110f", alignItems: "center", justifyContent: "center" },
@@ -1125,7 +827,6 @@ const styles = StyleSheet.create({
   convoPreview: { marginTop: 9, fontSize: 12.5, lineHeight: 18, color: "#68645e" },
   convoFoot: { flexDirection: "row", alignItems: "center", marginTop: 9 },
   convoFootText: { flex: 1, fontSize: 11, color: "#99958d" },
-  convoFolderAction: { fontSize: 11, fontWeight: "800", color: "color.factInferredFg" },
   convoFootTime: { fontSize: 11, fontWeight: "700", color: "#54514b" },
   topbar: { height: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "rgba(255,253,248,0.98)" },
   centerTitle: { flex: 1, alignItems: "center" },
@@ -1146,24 +847,27 @@ const styles = StyleSheet.create({
   btnPrimaryText: { fontSize: 11.5, fontWeight: "700", color: "#fff", textAlign: "center" },
   btnText: { fontSize: 11.5, fontWeight: "700", color: "#11110f", textAlign: "center" },
   contactHeadSearch: { marginHorizontal: 14, marginTop: 8, height: 39, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, backgroundColor: "#f6f3ee", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 11 },
-  iconPlus: { alignItems: "center", backgroundColor: "#F4F0FF", borderColor: "#E5DCF5", borderRadius: 11, borderWidth: 1, height: 32, justifyContent: "center", width: 32 },
   contactInput: { flex: 1, fontSize: 12.5, color: "#11110f" },
   contactSection: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, fontSize: 11, fontWeight: "700", color: "#9b978f", letterSpacing: 0.3 },
   contactRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 15, paddingVertical: 12, borderTopWidth: 1, borderTopColor: "#e8e3da", backgroundColor: "#fffdf8" },
-  // ADD-FRIEND-FROM-MESSAGES-001: 加好友排在收件箱联系人之前 —— 「找新人」
-  // 比「找聊过的人」更常是用户打开这一页的目的。
-  addFriendRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 15, paddingVertical: 13, borderTopWidth: 1, borderTopColor: "#e8e3da", backgroundColor: "#fffdf8" },
-  addFriendIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: "#efe9ff" },
-  addFriendIconText: { fontSize: 18, fontWeight: "700", color: "#6b4fd8" },
   contactName: { fontSize: 13, fontWeight: "700", color: "#11110f" },
   contactMeta: { fontSize: 11, color: "#aaa69e", marginTop: 2 },
   // 左滑删除：behind 贴右全高，front 滑开露出；两段确认防误触。
   swipeBehind: { alignItems: "stretch", bottom: 0, flexDirection: "row", justifyContent: "flex-end", position: "absolute", right: 0, top: 0 },
   swipeDelete: { alignItems: "center", backgroundColor: "#D93B3B", justifyContent: "center", paddingHorizontal: 16 },
   swipeDeleteText: { color: "#fff", fontSize: 13, fontWeight: "800" },
-  swipeCancel: { alignItems: "center", backgroundColor: "#8d8981", justifyContent: "center", paddingHorizontal: 14 },
-  swipeCancelText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   contactAction: { fontSize: 11, fontWeight: "700", color: "#6e6962" },
+  // GROUP-CREATE-001
+  groupCheck: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: "#d8d2c6", alignItems: "center", justifyContent: "center" },
+  groupCheckOn: { backgroundColor: "#11110f", borderColor: "#11110f" },
+  groupCheckMark: { color: "#fffdf8", fontSize: 12, fontWeight: "700" },
+  groupComposeBar: { borderTopWidth: 1, borderTopColor: "#e8e3da", backgroundColor: "#fffdf8", paddingHorizontal: 14, paddingTop: 8, paddingBottom: 16 },
+  groupError: { fontSize: 11, color: "#c0392b", marginBottom: 6 },
+  groupComposeRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
+  groupComposeInput: { flex: 1, maxHeight: 90, fontSize: 13, color: "#11110f", borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: "#f6f3ee" },
+  groupCreateBtn: { height: 38, paddingHorizontal: 16, borderRadius: 12, backgroundColor: "#11110f", alignItems: "center", justifyContent: "center" },
+  groupCreateBtnOff: { backgroundColor: "#d8d2c6" },
+  groupCreateBtnText: { color: "#fffdf8", fontSize: 12.5, fontWeight: "700" },
   personHero: { alignItems: "center", paddingTop: 18, paddingBottom: 12 },
   personName: { fontSize: 17, fontWeight: "700", color: "#11110f", marginTop: 9 },
   personUser: { fontSize: 11, color: "#8f8b83", marginTop: 3 },

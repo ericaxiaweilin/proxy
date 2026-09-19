@@ -14,7 +14,7 @@
 //
 // 数据层:
 //   - body / media / quote / place / topic: 走 CreatePost 命令（与旧 composer 同一链路）
-//   - gif / poll / longText / 24h / threadNext: 纯本地状态，发布时序列化进 body
+//   - gif / poll / longText / 24h: 纯本地状态，发布时序列化进 body
 //   - 草稿持久化: 复用 expo-composer-draft-store（只存 body + media + quote + city + visibility，
 //     视觉装饰项不持久化，重启后丢失。GIF/投票作为内容提示已被写入 body，重启后保留）
 //
@@ -75,12 +75,14 @@ import { nativeSecureStorageDriver } from "../native-secure-storage";
 // 在 composer 未选地点时给 location-picker-sheet 一个 fallback
 const DEFAULT_LOCATION_FALLBACK: AnyLocation = DEFAULT_LOCATION as AnyLocation;
 
-const COMPOSER_MEDIA_ITEM_SPAN = 130;
+// MEDIA-STRIP-001: Threads 风格单行缩略图条，见 renderMediaGrid/ComposerMediaCard 注释。
+const COMPOSER_MEDIA_THUMB = 84;
+const COMPOSER_MEDIA_GAP = 8;
+const COMPOSER_MEDIA_ITEM_SPAN = COMPOSER_MEDIA_THUMB + COMPOSER_MEDIA_GAP;
 const MAX_BODY_LENGTH = 500;
 const MAX_MEDIA = 6;
 const MAX_POLL_OPTIONS = 4;
 // 串帖跟帖上限：主帖 + 8 条跟帖，发布时按 “2/ …”“3/ …” 拼进正文。
-const MAX_THREAD_ENTRIES = 8;
 
 const GIF_WORDS = ["YES!", "LOL", "WOW", "OK", "♥", "HEART", "HI", "?", "??", "👀", "👋", "👍"] as const;
 const POLL_DURATIONS = ["1 天", "3 天", "7 天", "1 小时", "30 分钟"] as const;
@@ -178,8 +180,6 @@ export function ComposerV2Screen({
   const [quotePerm, setQuotePerm] = useState<QuotePermission>("所有人");
   const [longTextOpen, setLongTextOpen] = useState(false);
   const [longTextDraft, setLongTextDraft] = useState("");
-  // 串帖跟帖：纯本地状态，发布时按编号拼进正文（见 threadedBody）。
-  const [threadEntries, setThreadEntries] = useState<string[]>([]);
 
   // —— Sheet 显隐 ——
   const [openSheet, setOpenSheet] = useState<null | "reply" | "quote" | "gif" | "topic" | "more" | "location" | "quotePicker" | "pollDuration">(null);
@@ -212,16 +212,10 @@ export function ComposerV2Screen({
     }
   }, [quoteId, quoteTarget]);
 
-  // 串帖正文：主帖 + 非空跟帖（2/ 3/ …编号），装饰计数与发布都以它为准。
-  const threadedBody = useMemo(() => {
-    const extras = threadEntries.map((t) => t.trim()).filter((t) => t.length > 0);
-    if (extras.length === 0) return body;
-    return [body.trim(), ...extras.map((t, i) => `${i + 2}/ ${t}`)].filter(Boolean).join("\n\n");
-  }, [body, threadEntries]);
 
   // 估计最终 body 文本长度（装饰前缀计入）。这样用户在字符超限前可以准备截断。
   const effectiveBodyLength = estimateAssembledBodyLength({
-    body: threadedBody,
+    body,
     gifWord,
     poll,
     place: place ? { area: place.area } : null,
@@ -233,7 +227,6 @@ export function ComposerV2Screen({
   });
   const hasAnyContent = !!(
     body.trim() ||
-    threadEntries.some((t) => t.trim()) ||
     media.length > 0 ||
     gifWord ||
     shouldSerializePoll(poll) ||
@@ -499,7 +492,7 @@ export function ComposerV2Screen({
         return;
       }
       const finalBody = assembleComposerBody({
-        body: threadedBody,
+        body,
         gifWord,
         poll,
         place,
@@ -515,7 +508,7 @@ export function ComposerV2Screen({
       const profileName = (await composerProfileStore.read().catch(() => undefined))?.name?.trim();
       const payload = buildCreatePostPayload(
         {
-          body: threadedBody,
+          body,
           media,
           visibility,
           includeCity,
@@ -537,7 +530,6 @@ export function ComposerV2Screen({
       await localNet.createPost(payload, idempotencyRef.current);
       // 重置
       setBody("");
-      setThreadEntries([]);
       setMedia([]);
       setQuoteId(null);
       setPlace(null);
@@ -582,53 +574,47 @@ export function ComposerV2Screen({
   // 拿不到 start/end 以外的精细状态。
   const [selection, setSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
   // 当 `body` 被程序改写（如 @提及 / 长文追加）时，同步选中点。
+  // MEDIA-STRIP-001: 原来是 2 列网格，最多显示 4 张，第 5/6 张（MAX_MEDIA=6）
+  // 被切掉藏在一个 "+N" 角标后面——角标本身不可点，第 5/6 张连删除/重排都碰不到，
+  // 这是个真 bug，不只是"啰嗦"。改成横向单行滚动条（对齐 Threads 的选图预览），
+  // 6 张全部可见可滚动，不再需要"溢出角标"这层。
   function renderMediaGrid(): React.JSX.Element {
-    // 预览里最多 4 个槽位；超过 4 时在第 4 个上叠 +N 角标
-    // （用户需要从前面删除才能看到后面）。
-    const visible = media.slice(0, 4);
-    const hidden = Math.max(0, media.length - visible.length);
-    const cls = media.length === 1 ? "one" : media.length === 2 ? "two" : "many";
+    if (media.length === 0) return <></>;
     return (
-      <View style={[styles.mediaGrid, cls === "one" ? styles.mediaGridOne : cls === "two" ? styles.mediaGridTwo : styles.mediaGridMany]}>
-        {visible.map((item, index) => (
-          <View key={item.localId} style={[styles.mediaCellWrap, cls === "one" ? styles.mediaCellWrapOne : null]}>
-            <ComposerMediaCard
-              index={index}
-              item={item}
-              itemCount={visible.length}
-              onAltText={(alt) => {
-                invalidatePublishAttempt();
-                setMedia((current) => current.map((c) => c.localId === item.localId ? { ...c, altText: alt } : c));
-              }}
-              onCancel={() => {
-                uploadActionsRef.current.set(item.localId, "CANCEL");
-                uploadControllersRef.current.get(item.localId)?.abort();
-                invalidatePublishAttempt();
-                setMedia((current) => current.filter((c) => c.localId !== item.localId));
-              }}
-              onMove={(from, to) => {
-                invalidatePublishAttempt();
-                setMedia((current) => moveDraftMedia(current, from, to));
-              }}
-              onPause={() => {
-                uploadActionsRef.current.set(item.localId, "PAUSE");
-                uploadControllersRef.current.get(item.localId)?.abort();
-              }}
-              onRemove={() => {
-                invalidatePublishAttempt();
-                setMedia((current) => current.filter((c) => c.localId !== item.localId));
-              }}
-              onReplace={() => void replaceImage(item.localId)}
-              publishing={publishing}
-            />
-            {hidden > 0 && index === visible.length - 1 ? (
-              <View style={styles.mediaOverflowBadge}>
-                <Text style={styles.mediaOverflowText}>+{hidden}</Text>
-              </View>
-            ) : null}
-          </View>
+      <ScrollView contentContainerStyle={styles.mediaStripContent} horizontal showsHorizontalScrollIndicator={false} style={styles.mediaStrip}>
+        {media.map((item, index) => (
+          <ComposerMediaCard
+            key={item.localId}
+            index={index}
+            item={item}
+            itemCount={media.length}
+            onAltText={(alt) => {
+              invalidatePublishAttempt();
+              setMedia((current) => current.map((c) => c.localId === item.localId ? { ...c, altText: alt } : c));
+            }}
+            onCancel={() => {
+              uploadActionsRef.current.set(item.localId, "CANCEL");
+              uploadControllersRef.current.get(item.localId)?.abort();
+              invalidatePublishAttempt();
+              setMedia((current) => current.filter((c) => c.localId !== item.localId));
+            }}
+            onMove={(from, to) => {
+              invalidatePublishAttempt();
+              setMedia((current) => moveDraftMedia(current, from, to));
+            }}
+            onPause={() => {
+              uploadActionsRef.current.set(item.localId, "PAUSE");
+              uploadControllersRef.current.get(item.localId)?.abort();
+            }}
+            onRemove={() => {
+              invalidatePublishAttempt();
+              setMedia((current) => current.filter((c) => c.localId !== item.localId));
+            }}
+            onReplace={() => void replaceImage(item.localId)}
+            publishing={publishing}
+          />
         ))}
-      </View>
+      </ScrollView>
     );
   }
 
@@ -812,48 +798,6 @@ export function ComposerV2Screen({
             </View>
           </View>
 
-          {threadEntries.map((entry, idx) => (
-            <View key={idx} style={styles.threadRow}>
-              <Text style={styles.threadIndex}>{idx + 2}/</Text>
-              <TextInput
-                maxLength={MAX_BODY_LENGTH}
-                onChangeText={(v) => {
-                  invalidatePublishAttempt();
-                  setThreadEntries((prev) => prev.map((t, i) => (i === idx ? v : t)));
-                }}
-                placeholder={`第 ${idx + 2} 条…`}
-                placeholderTextColor={color.muted}
-                style={styles.threadInput}
-                value={entry}
-                multiline
-              />
-              <Pressable
-                accessibilityLabel={`删除第 ${idx + 2} 条`}
-                onPress={() => { invalidatePublishAttempt(); setThreadEntries((prev) => prev.filter((_, i) => i !== idx)); }}
-                style={styles.threadX}
-              >
-                <Text style={styles.threadXText}>×</Text>
-              </Pressable>
-            </View>
-          ))}
-          <Pressable
-            disabled={threadEntries.length >= MAX_THREAD_ENTRIES}
-            onPress={() => {
-              if (threadEntries.length >= MAX_THREAD_ENTRIES) {
-                showToast(`最多 ${MAX_THREAD_ENTRIES} 条跟帖`);
-                return;
-              }
-              invalidatePublishAttempt();
-              setThreadEntries((prev) => [...prev, ""]);
-              showToast("已添加下一条");
-            }}
-            style={styles.threadNext}
-          >
-            <View style={styles.threadPlus}>
-              <ProxyIcon name="plus" size={13} color={color.muted} />
-            </View>
-            <Text style={styles.threadNextText}>添加下一条{threadEntries.length > 0 ? `（${threadEntries.length}/${MAX_THREAD_ENTRIES}）` : ""}</Text>
-          </Pressable>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
         </ScrollView>
@@ -1158,8 +1102,18 @@ export function ComposerV2Screen({
   );
 }
 
-// —— 子组件：媒体卡（保留原 ComposerMediaCard 全部能力 + 适配 2 列宫格尺寸） ——
-
+// —— 子组件：媒体卡 ——
+// MEDIA-STRIP-001: 原来每张图下面挂一整块文字操作区——拖动手柄行("第 N 张"+"≡")、
+// 状态行、常驻的描述输入框、"前移/后移/替换/暂停/取消/移除" 最多 4 个文字按钮、
+// 错误行——最多 6 行чром 围着一张缩略图，这才是"废话很多"的根源。
+// Threads 的选图预览是直接操作：长按缩略图本身拖动排序，右上角一个小 "×" 删除，
+// 没有单独的"前移/后移"按钮（拖动已经是唯一排序方式）。这里改成同样的模式：
+// - 拖动手势直接挂在整张缩略图上（不再要单独一行手柄），前移/后移文字按钮整个删掉；
+// - "移除"变成缩略图右上角的圆形 "×" 角标（上传中时同一个角标改语义为"取消"）；
+// - "替换"变成点一下缩略图本身（非拖动、非上传中时）；
+// - 描述（alt text）平时不占地方，缩略图左下角一个小 "ALT" 角标，点一下才展开输入框；
+// - 状态文字只在"需要注意"时才出现（上传中/暂停/失败），已就绪/待上传不再单独写一行——
+//   平时啥都不用管，跟 Threads 选完图就是干净缩略图一致。
 function ComposerMediaCard({
   item,
   index,
@@ -1185,9 +1139,16 @@ function ComposerMediaCard({
 }): React.JSX.Element {
   const dragX = useRef(new Animated.Value(0)).current;
   const [dragging, setDragging] = useState(false);
+  const [altOpen, setAltOpen] = useState(false);
+  const uploading = item.status === "UPLOADING";
+  const failed = item.status === "FAILED";
+  const paused = item.status === "PAUSED";
   const dragResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => !publishing,
-    onMoveShouldSetPanResponder: (_e, g) => !publishing && Math.abs(g.dx) > 4,
+    // 起手不认领（让缩略图/角标的 onPress 先有机会响应）；横向位移过阈值才认领，
+    // 这样单点是点击，拖一段才是排序——跟原来"手柄行"用的判定逻辑一样，只是
+    // 判定范围从一行小手柄换成整张缩略图。
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_e, g) => !publishing && Math.abs(g.dx) > 4 && Math.abs(g.dx) > Math.abs(g.dy),
     onPanResponderTerminationRequest: () => false,
     onShouldBlockNativeResponder: () => true,
     onPanResponderGrant: () => setDragging(true),
@@ -1202,50 +1163,65 @@ function ComposerMediaCard({
   }), [dragX, index, itemCount, onMove, publishing]);
 
   return (
-    <Animated.View style={[styles.mediaCard, dragging ? styles.mediaCardDragging : null, { transform: [{ translateX: dragX }] }]}>
-      <View accessibilityLabel={`拖动第 ${index + 1} 张照片排序`} style={styles.mediaCardHandle} {...dragResponder.panHandlers}>
-        <Text style={styles.mediaCardDragText}>第 {index + 1} 张</Text>
-        <Text style={styles.mediaCardDragGlyph}>≡</Text>
-      </View>
-      <Image resizeMode="cover" source={{ uri: item.image.uri }} style={styles.mediaCardThumb} />
-      <Text style={[styles.mediaCardStatus, item.status === "FAILED" ? styles.mediaCardStatusFailed : null]}>
-        {mediaStatusLabel(item)}
-      </Text>
-      <TextInput
-        editable={!publishing}
-        maxLength={MAX_ALT_LENGTH}
-        onChangeText={onAltText}
-        placeholder="描述（可选）"
-        placeholderTextColor={color.muted}
-        style={styles.mediaCardAlt}
-        value={item.altText}
-      />
-      <View style={styles.mediaCardActions}>
-        <Pressable disabled={publishing || index === 0} onPress={() => onMove(index, index - 1)}>
-          <Text style={[styles.mediaCardAction, index === 0 ? styles.actionDisabled : null]}>前移</Text>
+    <Animated.View
+      {...dragResponder.panHandlers}
+      accessibilityLabel={`第 ${index + 1} 张照片 · 长按拖动排序`}
+      style={[styles.mediaCard, dragging ? styles.mediaCardDragging : null, { transform: [{ translateX: dragX }] }]}
+    >
+      {/* MEDIA-STRIP-001: ×/暂停/ALT 角标要钉死在缩略图这块正方形上，跟
+          altOpen 展开后是否多出一个输入框无关——所以角标的定位锚点是
+          mediaCardThumbBox（固定 THUMB×THUMB），不是整张 mediaCard；
+          否则输入框一展开、mediaCard 变高，"bottom:6" 就漂到输入框底下去了。 */}
+      <View style={styles.mediaCardThumbBox}>
+        <Pressable disabled={publishing || uploading} onPress={onReplace} style={styles.mediaCardThumbWrap}>
+          <Image resizeMode="cover" source={{ uri: item.image.uri }} style={[styles.mediaCardThumb, failed ? styles.mediaCardThumbFailed : null]} />
+          {uploading || paused ? (
+            <View style={styles.mediaCardOverlay}>
+              <Text style={styles.mediaCardOverlayText}>{mediaStatusLabel(item)}</Text>
+            </View>
+          ) : null}
         </Pressable>
-        <Pressable disabled={publishing || index === itemCount - 1} onPress={() => onMove(index, index + 1)}>
-          <Text style={[styles.mediaCardAction, index === itemCount - 1 ? styles.actionDisabled : null]}>后移</Text>
+
+        <Pressable
+          accessibilityLabel={uploading ? "取消上传" : "移除照片"}
+          disabled={publishing}
+          onPress={uploading ? onCancel : onRemove}
+          style={styles.mediaCardRemoveBadge}
+        >
+          <Text style={styles.mediaCardRemoveBadgeText}>×</Text>
         </Pressable>
-        {item.status === "UPLOADING" ? (
-          <>
-            <Pressable onPress={onPause}>
-              <Text style={styles.mediaCardAction}>暂停</Text>
-            </Pressable>
-            <Pressable onPress={onCancel}>
-              <Text style={styles.mediaCardRemove}>取消</Text>
-            </Pressable>
-          </>
+
+        {uploading ? (
+          <Pressable accessibilityLabel="暂停上传" onPress={onPause} style={styles.mediaCardPauseBadge}>
+            <Text style={styles.mediaCardPauseBadgeText}>⏸</Text>
+          </Pressable>
         ) : (
-          <Pressable disabled={publishing} onPress={onReplace}>
-            <Text style={styles.mediaCardAction}>替换</Text>
+          <Pressable
+            accessibilityLabel={item.altText ? "编辑图片描述" : "添加图片描述"}
+            disabled={publishing}
+            onPress={() => setAltOpen((v) => !v)}
+            style={[styles.mediaCardAltBadge, item.altText ? styles.mediaCardAltBadgeOn : null]}
+          >
+            <Text style={[styles.mediaCardAltBadgeText, item.altText ? styles.mediaCardAltBadgeTextOn : null]}>ALT</Text>
           </Pressable>
         )}
-        <Pressable disabled={publishing} onPress={onRemove}>
-          <Text style={styles.mediaCardRemove}>移除</Text>
-        </Pressable>
       </View>
-      {item.error ? <Text numberOfLines={2} style={styles.mediaCardError}>{item.error}</Text> : null}
+
+      {altOpen ? (
+        <TextInput
+          autoFocus
+          editable={!publishing}
+          maxLength={MAX_ALT_LENGTH}
+          onBlur={() => setAltOpen(false)}
+          onChangeText={onAltText}
+          placeholder="描述这张照片…"
+          placeholderTextColor={color.muted}
+          style={styles.mediaCardAltInput}
+          value={item.altText}
+        />
+      ) : null}
+
+      {failed && item.error ? <Text numberOfLines={2} style={styles.mediaCardError}>{item.error}</Text> : null}
     </Animated.View>
   );
 }
@@ -1518,60 +1494,38 @@ const styles = StyleSheet.create({
   chipActiveText: { color: color.ink, fontSize: 12.5, fontWeight: "600" },
   chipX: { color: color.muted, fontSize: 12, opacity: 0.7 },
   chipHash: { color: color.ink, fontSize: 13, fontWeight: "800" },
-  // media grid
-  mediaGrid: { gap: 4 },
-  mediaGridOne: { flexDirection: "column" },
-  mediaGridTwo: { flexDirection: "row" },
-  mediaGridMany: { flexDirection: "row", flexWrap: "wrap" },
-  // 媒体卡 (2 列布局下, 单卡约 49% 宽；1 张图时取满宽)
-  mediaCellWrap: { position: "relative", width: "49%" },
-  mediaCellWrapOne: { width: "100%" },
-  mediaOverflowBadge: {
-    alignItems: "center",
-    backgroundColor: "rgba(17,17,15,0.62)",
-    borderRadius: 12,
-    bottom: 8,
-    justifyContent: "center",
-    left: 0,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    position: "absolute",
-    right: 0
-  },
-  mediaOverflowText: { color: "#fff", fontSize: 11, fontWeight: "800" },
-  mediaCard: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 13,
-    borderWidth: 1,
-    marginBottom: 8,
-    padding: 8,
-    width: "100%"
-  },
+  // MEDIA-STRIP-001: 横向单行缩略图条，见 renderMediaGrid/ComposerMediaCard 注释。
+  mediaStrip: { marginTop: 6 },
+  mediaStripContent: { alignItems: "flex-start", gap: COMPOSER_MEDIA_GAP, paddingRight: 4 },
+  mediaCard: { width: COMPOSER_MEDIA_THUMB },
   mediaCardDragging: { elevation: 8, opacity: 0.94, zIndex: 20 },
-  mediaCardHandle: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 24 },
-  mediaCardDragText: { color: color.muted, fontSize: 11, fontWeight: "700" },
-  mediaCardDragGlyph: { color: color.ink, fontSize: 16, fontWeight: "800" },
-  mediaCardThumb: { backgroundColor: color.surface, borderRadius: 9, height: 96, marginTop: 4, width: "100%" },
-  mediaCardStatus: { color: "#4F6840", fontSize: 11, fontWeight: "700", marginTop: 4 },
-  mediaCardStatusFailed: { color: color.error },
-  mediaCardAlt: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 8,
-    borderWidth: 1,
-    color: color.ink,
-    fontSize: 11,
-    marginTop: 4,
-    minHeight: 30,
-    paddingHorizontal: 8,
-    paddingVertical: 4
+  // ×/暂停/ALT 角标的定位锚点，固定 THUMB×THUMB，不随下面 altOpen 输入框的
+  // 出现而变高（否则角标会跟着 mediaCard 的新底边一起往下漂，见上面注释）。
+  mediaCardThumbBox: { height: COMPOSER_MEDIA_THUMB, position: "relative", width: COMPOSER_MEDIA_THUMB },
+  mediaCardThumbWrap: { borderRadius: 14, height: COMPOSER_MEDIA_THUMB, overflow: "hidden", width: COMPOSER_MEDIA_THUMB },
+  mediaCardThumb: { backgroundColor: color.surface, height: "100%", width: "100%" },
+  mediaCardThumbFailed: { borderColor: color.error, borderWidth: 2 },
+  mediaCardOverlay: { alignItems: "center", backgroundColor: "rgba(17,17,15,0.55)", bottom: 0, justifyContent: "center", left: 0, padding: 4, position: "absolute", right: 0, top: 0 },
+  mediaCardOverlayText: { color: "#fff", fontSize: 11, fontWeight: "700", textAlign: "center" },
+  mediaCardRemoveBadge: {
+    alignItems: "center", backgroundColor: "rgba(17,17,15,0.72)", borderRadius: 11,
+    height: 22, justifyContent: "center", position: "absolute", right: -6, top: -6, width: 22
   },
-  mediaCardActions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 4 },
-  mediaCardAction: { color: color.violet, fontSize: 11, fontWeight: "700" },
-  mediaCardRemove: { color: color.error, fontSize: 11, fontWeight: "700" },
-  actionDisabled: { opacity: 0.4 },
-  mediaCardError: { color: color.error, fontSize: 11, lineHeight: 14, marginTop: 2 },
+  mediaCardRemoveBadgeText: { color: "#fff", fontSize: 14, fontWeight: "800", lineHeight: 16 },
+  mediaCardPauseBadge: {
+    alignItems: "center", backgroundColor: "rgba(17,17,15,0.55)", borderRadius: 10,
+    bottom: 6, height: 20, justifyContent: "center", left: 6, position: "absolute", width: 20
+  },
+  mediaCardPauseBadgeText: { color: "#fff", fontSize: 11 },
+  mediaCardAltBadge: { backgroundColor: "rgba(17,17,15,0.55)", borderRadius: 8, bottom: 6, left: 6, paddingHorizontal: 6, paddingVertical: 2, position: "absolute" },
+  mediaCardAltBadgeOn: { backgroundColor: color.violet },
+  mediaCardAltBadgeText: { color: "#fff", fontSize: 11, fontWeight: "800", letterSpacing: 0.3 },
+  mediaCardAltBadgeTextOn: { color: "#fff" },
+  mediaCardAltInput: {
+    backgroundColor: color.white, borderColor: color.line, borderRadius: 8, borderWidth: 1,
+    color: color.ink, fontSize: 11, marginTop: 6, minHeight: 28, paddingHorizontal: 8, paddingVertical: 4, width: COMPOSER_MEDIA_THUMB
+  },
+  mediaCardError: { color: color.error, fontSize: 11, lineHeight: 14, marginTop: 4, width: COMPOSER_MEDIA_THUMB },
   // GIF 卡
   gifCard: {
     aspectRatio: 16 / 9,
@@ -1652,43 +1606,6 @@ const styles = StyleSheet.create({
   quoteRemoveText: { color: color.error, fontSize: 11, fontWeight: "700" },
   quoteText: { color: color.ink, fontSize: 14, lineHeight: 20, marginTop: 9 },
   quoteMeta: { color: color.muted, fontSize: 11.5, marginTop: 8 },
-  // 串帖
-  threadNext: {
-    alignItems: "center",
-    color: color.muted,
-    flexDirection: "row",
-    fontSize: 13,
-    gap: 10,
-    marginLeft: 56,
-    marginTop: 14,
-    minHeight: 42
-  },
-  threadPlus: {
-    alignItems: "center",
-    borderColor: color.line,
-    borderRadius: 13,
-    borderWidth: 1,
-    height: 26,
-    justifyContent: "center",
-    width: 26
-  },
-  threadNextText: { color: color.muted, fontSize: 13 },
-  threadRow: { alignItems: "flex-start", flexDirection: "row", gap: 8, marginLeft: 56, marginTop: 10 },
-  threadIndex: { color: color.muted, fontSize: 12, fontWeight: "800", marginTop: 12 },
-  threadInput: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 12,
-    borderWidth: 1,
-    color: color.ink,
-    flex: 1,
-    fontSize: 14,
-    minHeight: 40,
-    paddingHorizontal: 10,
-    paddingVertical: 8
-  },
-  threadX: { paddingHorizontal: 6, paddingVertical: 10 },
-  threadXText: { color: color.muted, fontSize: 16, fontWeight: "700" },
   // 错误
   error: { color: color.error, fontSize: 12, marginTop: 8 },
   // 底部

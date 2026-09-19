@@ -45,20 +45,21 @@ const POST_REPORT_REASONS = ["SPAM", "HARASSMENT", "UNSAFE", "OTHER"] as const;
 export type PostReportReason = (typeof POST_REPORT_REASONS)[number];
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
-import { CommunityHub } from "./community";
+import { CoffeeScenesHub } from "./coffee-scenes";
 import { CustomFeedHub, type CustomFeed } from "./custom-feed";
 import { readCustomFeedsAsync } from "../expo-custom-feed-store";
 import { defaultFeedPrefs, readFeedPrefsAsync, writeFeedPrefs } from "../expo-feed-prefs-store";
 import { feedScopeLabel, isFeedScopeActive, isPostWithinScope } from "../feed-scope-filter";
 import type { FeedScope } from "../feed-scope-filter";
-import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
 import { isOwnAuthorId, isOwnPost as isOwnPostById, resolveAuthorDisplayName, resolveReplyAuthorDisplayName } from "../feed-author";
 import { hiddenReplyCount, repliesMatchingFirst, shouldOfferReplyToggle, visibleReplies } from "../reply-preview";
 import { ProxyLoading } from "../components/proxy-foundation";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
-type FeedSection = "POSTS" | "STATUS" | "COMMUNITY";
+// CAFE-SCENE-001: 原来是 "POSTS" | "STATUS" | "COMMUNITY"——用「咖啡场景」
+// (CoffeeScenesHub) 替换掉「状态」+「社区」两个 tab，见 coffee-scenes.tsx。
+type FeedSection = "POSTS" | "CAFE";
 type FilterKey = "ALL" | "人/关系" | "机会/需求" | "活动/团体" | "情报/行业信息" | "附近";
 
 // 模块级缓存：组件卸载/重载时保留数据，避免闪烁
@@ -125,8 +126,7 @@ const TABS: ReadonlyArray<{ id: FeedTab; label: string }> = [
 
 const SECTIONS: ReadonlyArray<{ id: FeedSection; label: string; icon: ProxyIconName }> = [
   { id: "POSTS", label: "动态", icon: "target" },
-  { id: "STATUS", label: "状态", icon: "clock" },
-  { id: "COMMUNITY", label: "社区", icon: "user" }
+  { id: "CAFE", label: "咖啡场景", icon: "cup" }
 ];
 
 const FILTERS: ReadonlyArray<{ id: FilterKey; label: string }> = [
@@ -399,6 +399,11 @@ export function FeedSurface({
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingPosts, setPendingPosts] = useState<FeedPost[]>([]);
   const [pendingMedia, setPendingMedia] = useState<Record<string, FeedMediaItem[]>>({});
+  // FEED-FRESH-001: pill 点下去之后翻页要接着新页走 —— 旧代码不更新 cursor，
+  // loadMore 会拿过期游标重复拉第一页；postIds 只记新帖会导致老帖被反复
+  // 认成"新动态"，pill 阴魂不散。
+  const [pendingCursor, setPendingCursor] = useState<string | undefined>(undefined);
+  const [pendingHasMore, setPendingHasMore] = useState(true);
   const scrollRef = useRef<ScrollView>(null);
   // (scroll-chrome state now lives in useScrollChrome — see shell/scroll-chrome.ts)
   const postIdsRef = useRef<Set<string>>(cachedPostIds);
@@ -478,7 +483,7 @@ export function FeedSurface({
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
   }
 
-  const loadFeed = useCallback(async (rawQuery?: string): Promise<void> => {
+  const loadFeed = useCallback(async (rawQuery?: string, fresh = false): Promise<void> => {
     // 动态帖文与地址解绑：帖文不按 viewingCity 过滤，地址仅作 Status/社区等筛选项
     //
     // SEARCH-CORPUS-001: 带查询时走**服务端**搜索（server listFeed 接 search 字段），
@@ -491,7 +496,8 @@ export function FeedSurface({
       setPhase("LOADING");
     }
     try {
-      const read = await localNet.listFeedPosts(undefined, searching ? 50 : 25, searching ? search : undefined);
+      // FEED-FRESH-001: 发布后重载带 fresh 穿透 HTTP 缓存（见 localnet-client）。
+      const read = await localNet.listFeedPosts(undefined, searching ? 50 : 25, searching ? search : undefined, fresh);
       // 搜索结果不是 feed 本身：写回模块级缓存会让退出搜索后（以及冷启动读盘时）
       // 看到的是上次的搜索结果，所以只在非搜索加载时更新缓存与磁盘缓存。
       if (!searching) {
@@ -574,6 +580,8 @@ export function FeedSurface({
         setPendingCount(newPosts.length);
         setPendingPosts(read.posts);
         setPendingMedia(read.media);
+        setPendingCursor(read.nextCursor);
+        setPendingHasMore(read.hasMore);
       }
     } catch {
       // 静默失败
@@ -589,6 +597,15 @@ export function FeedSurface({
 
   // 首屏先读手机磁盘，再静默刷新服务器。App 重启、API 短暂离线时
   // 仍能立即显示上次成功同步的完整时间线。
+  // FEED-FRESH-002: 这一次刷新必须 fresh=true。/v1/feed 的响应头是
+  // `max-age=15, stale-while-revalidate=120, stale-if-error=86400`——
+  // 首屏这次请求如果不带 _fresh，一旦请求过程中有任何瞬时网络问题，
+  // stale-if-error 允许网络层（NSURLCache 等）直接吐一份最多 24 小时前的
+  // 缓存当正常 200 返回，JS 这边完全看不出区别（不进 catch，也不报错），
+  // 就会一直卡在旧数据——实测复现：发新帖后几次重启 app，"动态" 首屏
+  // 永远停在很多天前的帖子，个人主页（走另一个不受这条缓存影响的调用）
+  // 却看得到新帖。发帖后的重载已经用 fresh=true 绕过这条缓存，首屏这次
+  // 之前漏了，补上。
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -602,22 +619,24 @@ export function FeedSurface({
         setMedia(disk.media);
         setPhase("READY");
       }
-      if (!cancelled) await loadFeed();
+      if (!cancelled) await loadFeed(undefined, true);
     })();
     return () => { cancelled = true; };
   }, [loadFeed]);
 
   // P0 availability: recover without requiring the user to kill/reopen the app.
+  // FEED-FRESH-002: 恢复路径同样要 fresh=true——不然重试撞上的还是那条
+  // stale-if-error=86400 缓存，看着像重试了，拿到的其实是同一份旧数据。
   useEffect(() => {
     if (phase !== "ERROR") return;
     const delay = Math.min(8_000, 1_000 * 2 ** Math.min(feedRetryAttemptRef.current, 3));
-    const timer = setTimeout(() => void loadFeed(), delay);
+    const timer = setTimeout(() => void loadFeed(undefined, true), delay);
     return () => clearTimeout(timer);
   }, [phase, loadFeed]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active" && (phase === "ERROR" || cachedPosts.length === 0)) void loadFeed();
+      if (state === "active" && (phase === "ERROR" || cachedPosts.length === 0)) void loadFeed(undefined, true);
       if (state === "active") void readFeedPrefsAsync().then(setFeedPrefs).catch(() => undefined);
     });
     return () => subscription.remove();
@@ -639,16 +658,22 @@ export function FeedSurface({
     // SEARCH-CORPUS-001: 搜索中不存在「展示最新」—— pendingPosts 是未过滤的全量，
     // 合并进来等于静默退出搜索，而且会把搜索结果写进 feed 缓存。
     if (lastSearchRef.current !== "") return;
+    // FEED-FRESH-001: 按并集合并 —— 新帖置顶、老帖保留；ids 取并集（只记新帖
+    // 会让老帖下次又被认成新的）；游标跟新页走（不更新就重复拉第一页）。
     const pendingIDs = new Set(pendingPosts.map((post) => post.postId));
     cachedPosts = [...pendingPosts, ...posts.filter((post) => !pendingIDs.has(post.postId))];
     cachedMedia = { ...media, ...pendingMedia };
-    cachedPostIds = new Set(pendingPosts.map((p) => p.postId));
+    cachedPostIds = new Set([...pendingPosts.map((p) => p.postId), ...postIdsRef.current]);
     postIdsRef.current = cachedPostIds;
-    setPosts(pendingPosts);
-    setMedia(pendingMedia);
+    setPosts(cachedPosts);
+    setMedia(cachedMedia);
+    setNextCursor(pendingCursor);
+    setHasMore(pendingHasMore);
     setPendingCount(0);
     setPendingPosts([]);
     setPendingMedia({});
+    setPendingCursor(undefined);
+    setPendingHasMore(true);
     writeFeedDiskCache(cachedPosts, cachedMedia);
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   }
@@ -927,7 +952,19 @@ export function FeedSurface({
   }
 
   // 偏好权重归一：帖子→偏好类别→权重分（缺省 50）。只用于排序。
+  // OWN-POST-TOP-001: 自己刚发的帖子不吃这套类目权重。这套权重是"我想少看/
+  // 多看哪类内容"的本地个人偏好，套在自己发的帖子上会出现荒谬结果——比如
+  // 只发了张照片被自动归类成 people(60)，同一屏里 9 天前一条带了
+  // "AVAILABILITY" 语境的老帖被归类成 opportunity(70)，于是自己发的新帖在
+  // 自己的屏幕上被自己的偏好设置压到看不见，作者刷自己主页都找不到刚发的
+  // 东西。发帖满足感（作者自己看得到）跟这条帖子该不该被推给别人看，是两件
+  // 独立的事：这层权重只在本地算、每个用户各自一份，本来就不影响别人刷到
+  // 你的概率——所以把自己的帖子摘出来给全类目最高分 +1（稳赢，不管权重被
+  // 调成什么样），彼此之间再按时间新旧比，不影响其它帖子之间的排序逻辑。
   function feedWeightFor(post: FeedPost): number {
+    if (isOwnPost(post)) {
+      return Math.max(50, ...Object.values(feedPrefs.weights)) + 1;
+    }
     const ctxTypes = new Set(post.contextRefs.map((r) => r.contextType));
     let category = "lifestyle";
     if (isOpportunityPost(post)) category = "opportunity";
@@ -1103,10 +1140,8 @@ export function FeedSurface({
         </View>
       ) : null}
 
-      {section === "STATUS" ? (
-        <StatusFeed client={socialSpace} onReply={onOpenChat} viewerAccountId={viewerAccountId} />
-      ) : section === "COMMUNITY" ? (
-        <CommunityHub client={socialSpace} />
+      {section === "CAFE" ? (
+        <CoffeeScenesHub />
       ) : (
       <>
       {selectedCustomFeed ? (
@@ -1195,7 +1230,7 @@ export function FeedSurface({
         secureSessionStore={secureSessionStore}
         viewerAccountId={viewerAccountId}
         onClose={() => { setComposerOpen(false); setComposerQuoteId(null); }}
-        onPublished={async () => { setComposerOpen(false); setComposerQuoteId(null); await loadFeed(); }}
+        onPublished={async () => { setComposerOpen(false); setComposerQuoteId(null); await loadFeed(undefined, true); }}
         posts={posts}
         visible={composerOpen}
       />
@@ -1211,7 +1246,7 @@ export function FeedSurface({
         <View style={styles.feedEmpty}>
           <Text style={styles.feedEmptyText}>读模型暂时不可用（本地 API 未连接？）。</Text>
           {lastFeedError ? <Text style={[styles.feedEmptyText, { marginTop: 8, color: color.error }]}>{lastFeedError}</Text> : null}
-          <Pressable onPress={() => void loadFeed()} style={styles.retryBtn}>
+          <Pressable onPress={() => void loadFeed(undefined, true)} style={styles.retryBtn}>
             <Text style={styles.retryBtnText}>重试</Text>
           </Pressable>
         </View>
@@ -1315,20 +1350,26 @@ export function FeedSurface({
                 <Text style={styles.postCopy}>{post.body}</Text>
 
               {/* 服务端媒体（READY Hydrate）：多图横滑轨 / 单图全宽 / 视频内联自动播放（X 式，滑近中心播、滑出停，带声音） */}
+              {/* MEDIA-EDGE-BLEED-001: 只有多图轮播（能横滑）才破到屏幕左边缘——
+                  单图没有滑动这个动作，应该跟文字一样停在缩进线上，不能也套
+                  负 marginLeft，否则单图在默认态就贴边，跟文字对不齐（上一版
+                  的错误：把两种情况都套了 postMediaBleed）。 */}
               {items.length > 1 ? (
-                <AdaptiveMediaCollection
-                  items={items}
-                  currentIndex={mediaPositions[post.postId] ?? 0}
-                  resolveUrl={(path) => localNet.resolveMediaUrl(path)}
-                  onIndexChange={(index) => setMediaPositions((current) => ({ ...current, [post.postId]: index }))}
-                  onOpen={(index) => {
-                    setMediaPositions((current) => ({ ...current, [post.postId]: index }));
-                    setViewer({ postId: post.postId, index });
-                  }}
-                  activeVideoKey={activeVideoId}
-                  onVideoFrame={onVideoFrame}
-                  collectionKey={post.postId}
-                />
+                <View style={styles.postMediaBleed}>
+                  <AdaptiveMediaCollection
+                    items={items}
+                    currentIndex={mediaPositions[post.postId] ?? 0}
+                    resolveUrl={(path) => localNet.resolveMediaUrl(path)}
+                    onIndexChange={(index) => setMediaPositions((current) => ({ ...current, [post.postId]: index }))}
+                    onOpen={(index) => {
+                      setMediaPositions((current) => ({ ...current, [post.postId]: index }));
+                      setViewer({ postId: post.postId, index });
+                    }}
+                    activeVideoKey={activeVideoId}
+                    onVideoFrame={onVideoFrame}
+                    collectionKey={post.postId}
+                  />
+                </View>
               ) : items.length === 1 && items[0] ? (
                 <AdaptiveMediaCollection
                   items={items}
@@ -1380,24 +1421,28 @@ export function FeedSurface({
                 />
               ) : null}
 
-              {/* postactions：♡ / 回复 / 引用 / 收藏 / 分享 / ···(更多) */}
+              {/* FEED-ACTION-ICONS-001: 喜欢/回复/引用/收藏/分享以前全是纯文字
+                  （"回复 3"/"引用"/"分享"），喜欢那颗心也只是 ♥/♡ 两个字符塞进
+                  Text——不是图标，字重跟着字号变形，且比同一屏其它按钮的图标
+                  风格不统一。换成 ProxyIcon，跟真实社交 App 的操作行一致：
+                  喜欢/回复带数字，引用/收藏/分享/更多只是图标，不用文字解释。 */}
               <View style={styles.postActions}>
-			<Pressable disabled={engagementBusy.has(`like:${post.postId}`)} onPress={() => void toggleLike(post.postId)} style={styles.postAction}>
-			  <Text style={[styles.postActionText, isLiked && styles.postActionOn]}>
-				{isLiked ? "♥" : "♡"} {truth?.reactions ?? 0}
-			  </Text>
-			</Pressable>
-			<Pressable onPress={() => void openReplies(post.postId)} style={styles.postAction}>
-			  <Text style={styles.postActionText}>回复 {truth?.replies ?? 0}</Text>
+                <Pressable disabled={engagementBusy.has(`like:${post.postId}`)} onPress={() => void toggleLike(post.postId)} style={styles.postAction}>
+                  <ProxyIcon color={isLiked ? color.magenta : color.ink} filled={isLiked} name="heart" size={19} />
+                  <Text style={[styles.postActionCount, isLiked && styles.postActionOn]}>{truth?.reactions ?? 0}</Text>
+                </Pressable>
+                <Pressable onPress={() => void openReplies(post.postId)} style={styles.postAction}>
+                  <ProxyIcon color={color.ink} name="chat" size={18} />
+                  <Text style={styles.postActionCount}>{truth?.replies ?? 0}</Text>
                 </Pressable>
                 <Pressable onPress={() => openComposerFor(post.postId)} style={styles.postAction}>
-                  <Text style={styles.postActionText}>引用</Text>
+                  <ProxyIcon color={color.ink} name="remix" size={18} />
                 </Pressable>
                 <Pressable disabled={isSaved || engagementBusy.has(`bookmark:${post.postId}`)} onPress={() => void commitEngagement(`bookmark:${post.postId}`, post.postId, () => engagement.bookmarkPost(post.postId), setBookmarked, bookmarked)} style={styles.postAction}>
-                  <Text style={[styles.postActionText, isSaved && styles.postActionOn]}>{isSaved ? "已收藏" : "收藏"}</Text>
+                  <ProxyIcon color={isSaved ? color.violet : color.ink} filled={isSaved} name="bookmark" size={18} />
                 </Pressable>
                 <Pressable onPress={() => void Share.share({ message: `${post.body}\n\nProxy · ${name}` })} style={styles.postAction}>
-                  <Text style={styles.postActionText}>分享</Text>
+                  <ProxyIcon color={color.ink} name="shareUp" size={18} />
                 </Pressable>
                 <Pressable
                   accessibilityLabel="更多帖子操作"
@@ -1406,7 +1451,7 @@ export function FeedSurface({
                 >
                   <Text style={styles.postActionText}>···</Text>
                 </Pressable>
-		  </View>
+              </View>
 		  {shownReplies.length > 0 ? (
 			<View style={styles.postReplies}>
 			  {shownReplies.map((reply) => (
@@ -1889,6 +1934,10 @@ const styles = StyleSheet.create({
   // 44pt avatar + 10pt gap: body aligns with the identity while the row's
   // right edge remains flush with the screen.
   postBody: { marginTop: -12, paddingLeft: 54 },
+  // MEDIA-EDGE-BLEED-001: 抵消 postCard.paddingLeft(14) + postBody.paddingLeft(54)，
+  // 让图片滑到真正的屏幕左边缘，不再停在缩进线上；右边缘本来就是通到底的
+  // （postCard 早已 marginHorizontal:-18 破出去），不用再单独处理。
+  postMediaBleed: { marginLeft: -68 },
   postReason: { color: "#81788A", fontSize: 11, marginTop: 5 },
   // R15.23: post-text 严格规范 fontSize 14 lineHeight 1.48 ≈ 20.72 → 21
   postCopy: { color: color.ink, fontSize: 14, lineHeight: 21, marginTop: 5 },
@@ -2042,7 +2091,7 @@ const styles = StyleSheet.create({
     gap: 20,
     marginTop: 12
   },
-  postAction: { alignItems: "center", flex: 1, paddingVertical: 5 },
+  postAction: { alignItems: "center", flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", paddingVertical: 5 },
 	postReplies: { borderTopColor: color.line, borderTopWidth: StyleSheet.hairlineWidth, gap: 8, paddingHorizontal: 4, paddingVertical: 10 },
 	postReply: { flexDirection: "row", gap: 8 },
 	postReplyAuthor: { color: color.ink, fontSize: 12, fontWeight: "800" },
@@ -2050,6 +2099,7 @@ const styles = StyleSheet.create({
 	// FEED-REPLY-002: 展开/收起控件。
 	postRepliesMore: { color: color.muted, fontSize: 12, fontWeight: "700", paddingTop: 2 },
   postActionText: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  postActionCount: { color: color.ink, fontSize: 12, fontWeight: "700" },
   postActionOn: { color: "#6C36C8" },
 
   postIntent: { flexDirection: "row", gap: 6, marginTop: 8 },

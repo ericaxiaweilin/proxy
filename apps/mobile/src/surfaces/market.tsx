@@ -722,7 +722,6 @@ function OpportunityDetail({
           <Text style={styles.detailBackText}>‹</Text>
         </Pressable>
         <Text style={styles.detailTitle}>订单详情</Text>
-        <Text style={styles.detailMore}>•••</Text>
       </View>
 
       <View style={styles.detailHero}>
@@ -1152,7 +1151,6 @@ function PublishTemplatePicker({ marketplace, onBack, onPicked, onCustom }: { ma
     <View style={styles.detailHead}>
       <Pressable onPress={onBack} style={styles.detailBack}><Text style={styles.detailBackText}>‹</Text></Pressable>
       <Text style={styles.detailTitle}>发布需求</Text>
-      <Text style={styles.detailMore}>•••</Text>
     </View>
     <View style={styles.detailHero}>
       <Text style={styles.detailHeroKicker}>CREATE DEMAND</Text>
@@ -1232,13 +1230,16 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
   const [candidates, setCandidates] = useState<SupplierCandidate[]>([]);
   const [candidatesPhase, setCandidatesPhase] = useState<"HIDDEN" | "LOADING" | "READY" | "ERROR">("HIDDEN");
   const [targetAgent, setTargetAgent] = useState<SupplierCandidate>();
-  const [title, setTitle] = useState("周六城市同行 + 拍照");
-  const [time, setTime] = useState("10:00–18:00");
-  const [location, setLocation] = useState("河内 · 西湖 / 老城区");
+  // PUBLISH-NO-FAKE-DEFAULT-001: 四个字段一律从空开始 —— 预填看起来真实的内容，
+  // 用户不改直接发布就会产出一条自己没写过的假需求（时间/地点/价格全是编的）。
+  // 示例写在 placeholder 里，不写在 state 里。选模板/预设时才回填真值。
+  const [title, setTitle] = useState("");
+  const [time, setTime] = useState("");
+  const [location, setLocation] = useState("");
   // 价格区间两框：最低必填（EARN/PAY），最高可选，只填一边即单价。
   // wire 上仍走 price 自由字符串（composePriceRange 合成），server 侧
   // 校验/normalize 不用改。
-  const [priceMin, setPriceMin] = useState("1,500,000₫");
+  const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
   const [moneyFlow, setMoneyFlow] = useState<PublishMoneyFlow>("EARN");
   const [publishing, setPublishing] = useState(false);
@@ -1409,7 +1410,6 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
           <Text style={styles.detailBackText}>‹</Text>
         </Pressable>
         <Text style={styles.detailTitle}>发布需求</Text>
-        <Text style={styles.detailMore}>•••</Text>
       </View>
       {pickedTemplate && pickedTemplate.id ? (
         <View style={styles.publishTemplateSummary}>
@@ -1483,7 +1483,7 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
       ) : null}
       <View style={styles.detailHero}>
         <Text style={styles.detailHeroKicker}>CREATE DEMAND</Text>
-        <TextInput onChangeText={setTitle} style={[styles.detailHeroTitle, styles.publishInput]} value={title} />
+        <TextInput onChangeText={setTitle} placeholder="例如：周六想找人一起逛西湖" placeholderTextColor="#D8D4CA" style={[styles.detailHeroTitle, styles.publishInput]} value={title} />
         <Text style={styles.detailHeroSub}>Proxy 在发布前就告诉客户合理价格，避免把需求故意压成低价再让真人竞价。</Text>
       </View>
       <View style={styles.r4Card}>
@@ -1491,11 +1491,11 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
         <View style={styles.factGrid}>
           <View style={styles.fact}>
             <Text style={styles.factLabel}>时间</Text>
-            <TextInput onChangeText={setTime} style={styles.publishFactInput} value={time} />
+            <TextInput onChangeText={setTime} placeholder="例如 10:00–18:00" placeholderTextColor="#A9A2B0" style={styles.publishFactInput} value={time} />
           </View>
           <View style={styles.fact}>
             <Text style={styles.factLabel}>地点</Text>
-            <TextInput onChangeText={setLocation} style={styles.publishFactInput} value={location} />
+            <TextInput onChangeText={setLocation} placeholder="例如 河内 · 西湖" placeholderTextColor="#A9A2B0" style={styles.publishFactInput} value={location} />
           </View>
         </View>
         <View style={[styles.r4PriceCellHot, { borderRadius: 11, marginTop: 8, padding: 10 }]}>
@@ -1722,7 +1722,6 @@ function SelectWorkbench({ marketplace, fulfillment, profileClient, opportunity,
           <Text style={styles.detailBackText}>‹</Text>
         </Pressable>
         <Text style={styles.detailTitle}>选人工作台</Text>
-        <Text style={styles.detailMore}>•••</Text>
       </View>
       <View style={styles.detailHero}>
         <Text style={styles.detailHeroKicker}>报名明细 · 仅发布者可见</Text>
@@ -2019,7 +2018,6 @@ function MarketMap({
               title={m.title}
               description={m.tag === "HOT" ? "种子探索点 · 非实时热度" : "种子探索点"}
               pinColor={m.tag === "HOT" ? "#7A2DC7" : "#9A8AB5"}
-              opacity={0.85}
             />
           );
         })}
@@ -2272,7 +2270,6 @@ const styles = StyleSheet.create({
   detailBack: { paddingHorizontal: 6, paddingVertical: 4 },
   detailBackText: { color: color.ink, fontSize: 22, fontWeight: "700" },
   detailTitle: { color: color.ink, flex: 1, fontSize: 16, fontWeight: "800" },
-  detailMore: { color: color.muted, fontSize: 16 },
   detailHero: { backgroundColor: color.ink, borderRadius: 18, marginBottom: 10, padding: 14 }, detailHeroTypeRow: { alignItems: "center", flexDirection: "row", gap: 10, marginBottom: 10 }, detailHeroTypeMeta: { flex: 1, minWidth: 0 }, detailHeroTypeTitle: { color: color.white, fontSize: 14, fontWeight: "800", lineHeight: 18, marginTop: 2 },
   detailHeroKicker: { color: "#CDC8BF", fontSize: 11, fontWeight: "800" },
   detailHeroTitle: { color: color.white, fontSize: 18, fontWeight: "800", lineHeight: 24, marginTop: 4 },

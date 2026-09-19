@@ -214,6 +214,16 @@ func (s *Service) GetPersona(ctx context.Context, id string) (*Persona, error) {
 	return s.repo.GetPersona(ctx, id)
 }
 
+// ListPersonas returns the owner's personas newest-first. An owner
+// with none gets an empty slice, never nil — the wire layer must
+// not render "no twins" as "failed to load".
+func (s *Service) ListPersonas(ctx context.Context, ownerID string) ([]Persona, error) {
+	if strings.TrimSpace(ownerID) == "" {
+		return nil, errors.New("aipersona: owner id is required")
+	}
+	return s.repo.ListPersonasByOwner(ctx, ownerID)
+}
+
 // GrantConsent writes a new consent row. The (persona, subject,
 // terms, kind) tuple is unique at the database level; a repeat
 // grant is a no-op (the existing id is returned).
@@ -255,6 +265,31 @@ func (s *Service) GrantConsent(ctx context.Context, personaID, subjectID string,
 // will skip it from now on.
 func (s *Service) RevokeConsent(ctx context.Context, id string) error {
 	return s.repo.RevokeConsent(ctx, id, s.now())
+}
+
+// RevokeLiveConsent revokes the live consent row for the (persona,
+// subject, current terms) tuple and returns the revoked row. It
+// returns ErrNotFound when there is no live consent to revoke —
+// revoking something never granted (or already revoked / expired)
+// is a caller error, not a silent no-op.
+func (s *Service) RevokeLiveConsent(ctx context.Context, personaID, subjectID string) (*LikenessConsent, error) {
+	if strings.TrimSpace(personaID) == "" || strings.TrimSpace(subjectID) == "" {
+		return nil, errors.New("aipersona: persona id and subject id are required")
+	}
+	c, err := s.repo.LatestConsent(ctx, personaID, subjectID, s.termsVersion, s.now())
+	if err != nil {
+		return nil, err
+	}
+	if c == nil || !c.IsLive(s.now()) {
+		return nil, ErrNotFound
+	}
+	if err := s.repo.RevokeConsent(ctx, c.ID, s.now()); err != nil {
+		return nil, err
+	}
+	revoked := *c
+	now := s.now().UTC()
+	revoked.RevokedAt = &now
+	return &revoked, nil
 }
 
 // HasLiveConsent returns the live consent row for the (persona,

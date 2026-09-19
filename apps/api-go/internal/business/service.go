@@ -71,8 +71,36 @@ type StoreLines struct {
 	HoursJSON     string    `json:"hoursJson"`
 	ContactPhone  string    `json:"contactPhone"`
 	ContactEmail  string    `json:"contactEmail"`
-	UpdatedBy     string    `json:"updatedBy"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	// STORE-AMENITIES-001: 门店设施属性（商家自填：网速/吸烟/空调/插座/噪音/
+	// 座位）。空=没填，没填的不显示不筛选，绝不用默认值冒充。空调存摄氏度
+	// 整数，0=没填。
+	Wifi     string    `json:"wifi,omitempty"`
+	Smoking  string    `json:"smoking,omitempty"`
+	AcTempC  int       `json:"acTempC,omitempty"`
+	Power    string    `json:"power,omitempty"`
+	Quiet    string    `json:"quiet,omitempty"`
+	Seating  string    `json:"seating,omitempty"`
+	UpdatedBy string    `json:"updatedBy"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// 设施属性封闭词表。空串=没填（合法）；非空必须落在表里，否则整单拒绝 ——
+// 自由文本进来，"A+"和"A＋"（全角）这种就会变成两个世界，筛选全断。
+var allowedStoreWifi = map[string]bool{"A_PLUS": true, "A": true, "B": true, "C": true}
+var allowedStoreSmoking = map[string]bool{"NONE": true, "OUTDOOR": true, "INDOOR": true}
+var allowedStorePower = map[string]bool{"FULL": true, "PARTIAL": true, "NONE": true}
+var allowedStoreQuiet = map[string]bool{"QUIET": true, "MODERATE": true, "LIVELY": true}
+var allowedStoreSeating = map[string]bool{"SOFA": true, "HARD_CHAIR": true, "MIXED": true}
+
+func normalizeStoreAmenity(value string, allowed map[string]bool) (string, bool) {
+	upper := strings.ToUpper(strings.TrimSpace(value))
+	if upper == "" {
+		return "", true
+	}
+	if !allowed[upper] {
+		return "", false
+	}
+	return upper, true
 }
 
 // MemberDirectory entry carries a display_name projection so the mobile
@@ -887,12 +915,28 @@ func (s *Service) upsertStoreLines(ctx context.Context, e command.Envelope) comm
 		HoursJSON     string `json:"hoursJson"`
 		ContactPhone  string `json:"contactPhone"`
 		ContactEmail  string `json:"contactEmail"`
+		Wifi          string `json:"wifi"`
+		Smoking       string `json:"smoking"`
+		AcTempC       int    `json:"acTempC"`
+		Power         string `json:"power"`
+		Quiet         string `json:"quiet"`
+		Seating       string `json:"seating"`
 	}
 	if !decode(e.Payload, &p) || p.StoreID == "" {
 		return command.Rejected(e, "INVALID_STORE_LINES", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_store_lines", nil)
 	}
 	if p.LogoAssetPath != "" && !isValidAssetPath(p.LogoAssetPath) {
 		return command.Rejected(e, "INVALID_ASSET_PATH", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_asset_path", nil)
+	}
+	// STORE-AMENITIES-001: 设施属性封闭词表 + 空调温度范围。有一项非法整单拒绝，
+	// 不静默丢字段（丢了商家以为存上了，展示却没有）。
+	wifi, ok := normalizeStoreAmenity(p.Wifi, allowedStoreWifi)
+	smoking, ok2 := normalizeStoreAmenity(p.Smoking, allowedStoreSmoking)
+	power, ok3 := normalizeStoreAmenity(p.Power, allowedStorePower)
+	quiet, ok4 := normalizeStoreAmenity(p.Quiet, allowedStoreQuiet)
+	seating, ok5 := normalizeStoreAmenity(p.Seating, allowedStoreSeating)
+	if !ok || !ok2 || !ok3 || !ok4 || !ok5 || (p.AcTempC != 0 && (p.AcTempC < 16 || p.AcTempC > 30)) {
+		return command.Rejected(e, "INVALID_STORE_AMENITIES", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_store_amenities", nil)
 	}
 	store, err := s.repo.GetStore(ctx, p.StoreID)
 	if err != nil {
@@ -902,7 +946,7 @@ func (s *Service) upsertStoreLines(ctx context.Context, e command.Envelope) comm
 		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
 	}
 	now := s.clock.Now().UTC()
-	lines := StoreLines{StoreID: p.StoreID, BusinessID: store.BusinessID, LogoAssetPath: p.LogoAssetPath, Description: p.Description, HoursJSON: p.HoursJSON, ContactPhone: p.ContactPhone, ContactEmail: p.ContactEmail, UpdatedBy: e.Actor.ID, UpdatedAt: now}
+	lines := StoreLines{StoreID: p.StoreID, BusinessID: store.BusinessID, LogoAssetPath: p.LogoAssetPath, Description: p.Description, HoursJSON: p.HoursJSON, ContactPhone: p.ContactPhone, ContactEmail: p.ContactEmail, Wifi: wifi, Smoking: smoking, AcTempC: p.AcTempC, Power: power, Quiet: quiet, Seating: seating, UpdatedBy: e.Actor.ID, UpdatedAt: now}
 	if err := s.repo.UpsertStoreLines(ctx, lines); err != nil {
 		return command.Rejected(e, "STORE_LINES_UPSERT_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_lines_upsert_failed", nil)
 	}

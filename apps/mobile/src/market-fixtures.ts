@@ -150,7 +150,7 @@ export interface MarketOpportunity {
   // R37.4 redesign: standard order type (one of 5 approved logos).
   // Optional — fixtures without this fall back to heuristic inference
   // from theme/skills/title in R37OpportunityCard.inferType().
-  opportunityType?: "coffee_photo" | "walk_photo" | "coffee_chinese" | "bilingual_store" | "event_photo";
+  opportunityType?: "coffee_photo" | "walk_photo" | "coffee_chinese" | "bilingual_store" | "event_photo" | "other";
   // Scene/operator media pipeline URL. Generated samples are a visual fallback
   // only; server-provided real-scene media always wins when present.
   sceneImageUrl?: string;

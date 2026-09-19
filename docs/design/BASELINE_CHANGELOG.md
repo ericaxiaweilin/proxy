@@ -4,6 +4,90 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 237 — 2026-09-19
+
+- 审计第三轮/第四轮残留四项（2026-09-17 那批被 index-only 提交扫掉后重建）：
+  - MARKET-DEAD-MORE-001：删 `market.tsx` 四处头部「•••」死按钮（订单详情 /
+    发布需求模板页 / 发布需求表单 / 选人工作台）+ 零引用的 `styles.detailMore`。
+    不给它接空壳菜单 —— 按不动的按钮是在承诺一个不存在的菜单。
+  - PUBLISH-NO-FAKE-DEFAULT-001：发布表单 title/time/location/priceMin 从空开始。
+    以前预填"周六城市同行 + 拍照"／"河内 · 西湖 / 老城区"／具体金额，用户不改
+    直接发布就产出一条自己没写过的假需求。示例改走 placeholder
+    （标题 `#D8D4CA`，其余 `#A9A2B0`）。选模板/预设时才回填真值。
+  - OPP-TYPE-OTHER-001：机会类型新增 `other`（其他 · 未分类）。关键词一个都不中
+    时不再 return `coffee_photo`（那把「咖啡 + 拍照」稀释成垃圾桶）；未分类不给
+    活动图标（给咖啡杯/相机都是编语义），渲染中性 `⋯` 占位；筛选面板补一个入口。
+    样张复用咖啡那张 —— 没有新写 require（media 管线 R1 禁止 media/ 之外新增）。
+  - SCENE-HUMANS-EMPTY-001：场景详情"适合一起的人"为空时补空态。SCENE-HUMANS-004
+    只做了去重，空态是另一件事；这里用户正准备付钱，空白会被读成"加载中"。
+    文案明说不是加载失败，也不承诺"再等等就会有人"。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/market.tsx`、
+    `apps/mobile/src/surfaces/reality-scene-map.tsx`。
+    无主题 token 改动；`other` 只多一个筛选 pill 和一个中性占位字形。
+  - ADD-FRIEND-ENTRY-001 重写（不改产品行为，只改钉的形态）：好友与关系页那个
+    重复的「添加好友」按钮被 ADD-FRIEND-ENTRY-002 摘掉后，旧钉仍要求
+    `setView("ADD_FRIEND")` 按钮存在，与 002 直接矛盾、门禁恒红。
+    已核实 ADD_FRIEND 仍由两处调用方以 `initialView="ADD_FRIEND"` 挂载进入
+    （`me.tsx` 我的 → 添加好友、`messages.tsx` 顶栏扫码 MSG-SCAN-SHORTCUT-001），
+    `friend-crm.tsx` 用 `directEntry` 接住这条路径 —— 通道没断，只是换了入口。
+    钉改为守住不变量本身：必须有调用方挂载，入口可以换，不能没有；并补了 3 个
+    真测试（原来那条只靠注释里的字符串偶然满足）。
+    已做反向注入验证（改坏 `directEntry` → 红，恢复 → 绿）。
+  - ADD-FRIEND-FROM-MESSAGES-001 同步改名（同样不改产品行为）：MSG-SCAN-SHORTCUT-001
+    把消息模块「+」号方式选择页摘掉后，`onOpenAddFriend` / `setShowAddFriend` 那套
+    入口名字没了，钉的 6 个条件里 4 个恒假、门禁恒红。已核实能力还在 —— 顶栏「扫码」
+    → `scanShortcut` → 内嵌同一个 `FriendCrmSurface initialView="ADD_FRIEND"
+    initialSheet="SCAN" scanOnly`，退出走 `setScanShortcut(false)`。
+    钉改为守住「入口在 + 能退出去」，两处都做了反向注入（各见红一次）。
+  - SCENE-ADDRESS-001 不再把街道名钉死：threebeans_bn 的地址在 2026-09-18 真机
+    实测后更正过一次（Lê Văn Thịnh → 109 Lý Chiêu Hoàng，用户在店内上报定位），
+    而钉里写死了旧街道名，于是「改对了」也被判红、门禁过不去。改成钉形状 —— 这条
+    目录项必须自带 Address 且是街道级（带 `TP Bắc Ninh`），不许拿 Area（"Bắc Ninh"）
+    冒充。三种注入都见红：删 Address / 地址退化成区名 / 删整条目录项。
+  - FEED-SAVED-COUNT-001 / AUDIT-BATCH3-001 同样只是换针、不动产品代码：
+    收藏在 FEED-ACTION-ICONS-001 之后从文字态（"收藏"/"已收藏"）变成图标态
+    （`filled={isSaved} name="bookmark"`），漏斗副标题在 PROFILE-VISIT-001 接上真实
+    主页访问数后改成「主页访问是真实数据；往后每一步和下方渠道来源仍是示例」。
+    两处的测试文件都已跟着升级并通过（7 个），红的是 shell 钉里那两个旧字符串。
+    针都换成当前形态，各自反向注入见红。
+  - STORE-AMENITIES-001 原本**写错了**：它让 `104_store_amenities.sql` 去 grep 自己的
+    文件名，而全仓 121 个迁移文件没有一个自报名字 —— 条件恒假，这条钉从写出来起就
+    没绿过（门禁每次都在更前面退出，没人看见）。改成钉真东西：迁移文件存在、wifi 与
+    空调温度是 `ADD COLUMN IF NOT EXISTS` 幂等新增、客户端 `StoreAmenities` 类型在。
+    两种注入见红（各删一个字段）。
+
+## Revision 236 — 2026-09-19
+
+- CREATOR-HANA-NAM-001（Hana / Nam 转正为真人账户）：首页真人推荐里的 Hana、
+  Nam 一直用 stock 占位；测试账号在动态里发来两人单人正脸（F组拆分，已验
+  非同一人），转正为真人账户（facet 键＋写真资产＋identity 行＋首页映射）。
+  - **基线敏感文件**：`apps/mobile/src/recommend-fixtures.ts`（首页映射）。
+
+## Revision 235 — 2026-09-19
+
+- SCENE-HUMANS-004（场景主页“适合一起的人”去重）：同一行 `detail.humans.map`
+  并排挂了两次，每个人出现两遍。删掉第二遍，rail 只渲染一遍。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/reality-scene-map.tsx`（详情 humans rail）。
+- SCENE-NAV-PIN-001（图钉快打卡）：点地图图钉不再直通详情，弹快打卡
+  （导航去这里 / 看详情二选一）；导航走 MEETUP-NAV-001 同一套系统地图深链，
+  看详情才进老链。详情页内导航按钮保留。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/reality-scene-map.tsx`（地图快打卡）。
+- SCENE-STUDIO-001（场景 Studio 出图）：详情新增“场景 Studio”区，选中的时段
+  场景 × 点中的菜单 × 绑定本场景的小美拼一张卡，截屏走系统分享；缺元素按钮
+  disabled 并明说，不拿默认替身凑数。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/reality-scene-map.tsx`（详情 Studio 区）。
+
+## Revision 234 — 2026-09-18
+
+- PROFILE-SEARCH-DOCK-001（个人主页搜索换 Home 搜索条同款浮条）：删标题
+  「搜索主页」、说明文案、底部「搜索」按钮与结果类型小标签；浮条白底圆角
+  27、高 54，只留输入框＋→（去相机/语音/AI），在顶栏搜索图标下方弹出，
+  透明底点外部关闭；输入即搜，点结果直达。搜索语料不变（动态正文/作者/
+  城市＋我的回复）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/me.tsx`（搜索弹层）、
+    `apps/mobile/src/surfaces/me-styles.ts`（浮条样式）。复用 Home 搜索条
+    既有圆角/阴影语言，无主题 token 改动、无外部视觉参考变更。
+
 ## Revision 233 — 2026-09-17
 
 - SHEET-ICONS-001（＋ 面板文字行换图标块）：名片 / Proxy 活动 / 位置三个入口

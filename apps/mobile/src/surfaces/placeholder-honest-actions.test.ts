@@ -164,14 +164,15 @@ describe("PLACEHOLDER-001 wallet/income shows unknown instead of invented money"
   });
 });
 
-describe("PLACEHOLDER-001 composer thread is real local state, not a toast", () => {
-  it("adds/edits/removes entries and serializes them into the published body", () => {
-    expect(composer).not.toContain("原型功能");
-    expect(composer).toContain("threadEntries");
-    expect(composer).toContain("setThreadEntries");
-    expect(composer).toContain("MAX_THREAD_ENTRIES");
-    expect(composer).toContain("threadedBody");
-    expect(composer).toContain("threadInput");
+describe("PLACEHOLDER-001 composer has no thread mode", () => {
+  it("posts one thing at a time: thread entries, numbering and add-next UI are gone", () => {
+    // 对齐 Threads：简单个人发帖不需要长篇大论，串帖已整体移除 ——
+    // 状态/拼接/计数/UI/样式一个不留，防止有人悄悄加回来。
+    expect(composer).not.toContain("threadEntries");
+    expect(composer).not.toContain("threadedBody");
+    expect(composer).not.toContain("MAX_THREAD_ENTRIES");
+    expect(composer).not.toContain("添加下一条");
+    expect(composer).not.toContain("threadInput");
   });
 });
 
@@ -464,9 +465,16 @@ describe("PLACEHOLDER-012 ai three glass actions", () => {
 describe("PLACEHOLDER-013 swipe to delete dialogs", () => {
   const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
 
-  it("reveals a two-step delete that hides locally and persists", () => {
+  // SWIPE-DELETE-SIMPLIFY-001: was a two-step confirm ("删除" then "确认删除"
+  // with a separate "取消" button). hideDialog isn't a destructive delete —
+  // it dismisses the row until new activity resurfaces it — so the swipe
+  // gesture itself (a deliberate horizontal drag past SWIPE_OPEN_DX) is the
+  // only confirmation this needs; swiping back or tapping elsewhere already
+  // cancels it. Assertions updated to match the single-step flow, not to
+  // route around it.
+  it("reveals a one-tap delete that hides locally and persists", () => {
     expect(messages).toContain("SwipeableRow");
-    expect(messages).toContain("确认删除");
+    expect(messages).not.toContain("确认删除");
     expect(messages).toContain("hideDialog");
     expect(messages).toContain("proxy-hidden-chats");
     expect(messages).toContain("visibleDialogs");
@@ -474,7 +482,7 @@ describe("PLACEHOLDER-013 swipe to delete dialogs", () => {
 
   it("settles forgivingly: light swipe opens, termination settles too", () => {
     expect(messages).toContain("SWIPE_OPEN_DX");
-    expect(messages).toContain("onPanResponderTerminate: () => settle(");
+    expect(messages).toContain("onPanResponderTerminate: (_, gs) => settle(gs.dx, 0)");
   });
 });
 
@@ -496,25 +504,32 @@ describe("PLACEHOLDER-015 no redundant recent header", () => {
   });
 });
 
-describe("PLACEHOLDER-016 folders are a media browser plus custom folders", () => {
-  const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
-  const folders = readFileSync(fileURLToPath(new URL("../components/folder-manager.tsx", import.meta.url)), "utf8");
+describe("MSG-GROUPS-TAB-001 messages is dialogs plus real groups, no folders", () => {
+  // 缺席断言必须剥注释：注释里解释历史时会写到同一个词（见文件头注释）。
+  const stripped = stripComments(readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8"));
 
-  it("renders 对话/Convo/文件夹 side by side with media grid and custom folders", () => {
-    expect(messages).toContain('setPanel("folders")');
-    expect(messages).toContain(">文件夹</Text>");
-    expect(messages).toContain("styles.homeTabs");
-    expect(messages).toContain("styles.folderRowWrap");
-    expect(messages).not.toContain("tabFolderRow");
-    expect(messages).toContain("FolderMediaItem");
-    expect(messages).toContain("listMessages");
-    expect(messages).toContain("mediaSender");
-    expect(messages).toContain("mediaGrid");
-    expect(messages).toContain("proxy-folders");
-    expect(messages).toContain("toggleFolderMember");
-    expect(messages).toContain("自建文件夹");
-    expect(folders).toContain("onSelect");
-    expect(folders).not.toContain("onMove");
+  it("renders 对话/群组 side by side with real group chats", () => {
+    // 自建文件夹（整理负担）与 Convo 列表页（办公协作的叫法）已摘 ——
+    // 这是聊天 app，消息模块只有对话（DM）与群组（真群聊）两页。
+    expect(stripped).toContain('setPanel("groups")');
+    expect(stripped).toContain(">群组</Text>");
+    expect(stripped).not.toContain('setPanel("folders")');
+    expect(stripped).not.toContain(">文件夹</Text>");
+    expect(stripped).not.toContain('setPanel("convos")');
+    expect(stripped).not.toContain(">Convo</Text>");
+    expect(stripped).not.toContain("FolderManager");
+    expect(stripped).not.toContain("readFoldersAsync");
+    expect(stripped).not.toContain("FolderMediaItem");
+    expect(stripped).not.toContain("toggleFolderMember");
+    expect(stripped).not.toContain("submitFolderCreate");
+  });
+
+  it("lists only real group chats with the group logo", () => {
+    // 群组页只认服务端 GROUP/SUPPORT，DM 不许混进来；行首是群组 logo
+    // （两个人头），不再拿单聊气泡冒充。
+    expect(stripped).toContain('t === "GROUP" || t === "SUPPORT"');
+    expect(stripped).toContain('name="group"');
+    expect(stripped).toContain("打开群组");
   });
 });
 
@@ -527,63 +542,71 @@ describe("PLACEHOLDER-017 folder scope without archive talk", () => {
   });
 });
 
-describe("PLACEHOLDER-018 new folder chip in type row", () => {
-  const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
+describe("ADD-FRIEND-ENTRY-001 the ADD_FRIEND surface stays reachable by a real caller", () => {
+  const messagesCode = stripComments(readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8"));
 
-  it("creates folders inline from the chips row", () => {
-    expect(messages).toContain("＋ 新建");
-    expect(messages).toContain("submitFolderCreate");
-    expect(messages).toContain("folderCreateInput");
+  it("mounts ADD_FRIEND from 我的 (me.tsx) via initialView", () => {
+    // 这条钉守的是不变量：ADD_FRIEND 必须有调用方挂载 —— 入口可以换，不能没有。
+    // 旧形态是 friend-crm 的 LIST 视图里一个 setView("ADD_FRIEND") 按钮；002 之后
+    // 那个按钮作为第三个重复入口被摘掉，入口换成 me.tsx 这里直接以
+    // initialView="ADD_FRIEND" 挂载。别把这条钉写成「按钮必须回来」，那样会和
+    // 002 直接打架。
+    expect(meCode).toContain('initialView="ADD_FRIEND"');
+  });
+
+  it("mounts ADD_FRIEND from the messages scan shortcut (MSG-SCAN-SHORTCUT-001)", () => {
+    expect(messagesCode).toContain('initialView="ADD_FRIEND"');
+  });
+
+  it("keeps friend-crm able to receive the direct entry", () => {
+    // 挂载了也要组件认这个 initialView 才进得去 —— directEntry 就是那条分支。
+    expect(crmCode).toContain('const directEntry = initialView === "ADD_FRIEND";');
   });
 });
 
-describe("ADD-FRIEND-ENTRY-001 the add-friend surface is actually reachable", () => {
-  it("pushes ADD_FRIEND from the LIST view, not from inside ADD_FRIEND", () => {
-    // 逃掉的 bug：整个 ADD_FRIEND 表面（5 种加好友方式 + 好友请求 + 扫码）
-    // 不可达。me.tsx 只在 subPage.route === "addfriend" 时渲染它，而全仓库
-    // 没有一处 setSubPage 到那个 route；friend-crm 内部也从没调用过
-    // setView("ADD_FRIEND") —— view 只在挂载时取 initialView。
-    //
-    // 断言的不只是「字符串在」，而是「这个 push 发生在 LIST 视图里」：
-    // 如果它落在 ADD_FRIEND 自己的分支里，就是自己推自己，等于没接。
-    const listHeader = crmCode.indexOf("好友关系");
-    const push = crmCode.indexOf('onPress={() => setView("ADD_FRIEND")}');
-    expect(listHeader).toBeGreaterThan(-1);
-    expect(push).toBeGreaterThan(listHeader);
-    expect(crmCode).toContain('accessibilityLabel="添加好友"');
+describe("ADD-FRIEND-ENTRY-002 LIST view doesn't duplicate the add-friend entry", () => {
+  it("has no push to ADD_FRIEND from inside the LIST view", () => {
+    // ADD-FRIEND-ENTRY-001（旧）：曾经整个 ADD_FRIEND 表面不可达，所以 LIST
+    // 视图里加了一个 setView("ADD_FRIEND") 按钮当入口。ADD-FRIEND-ENTRY-002：
+    // 现在消息模块顶栏有扫码入口（MSG-SCAN-SHORTCUT-001），首页点头像也能
+    // 加好友，好友与关系页再放一个同样的按钮就是三个入口做同一件事——摘掉
+    // 了。这条锁住"别加回来"，不是锁住"要存在"。
+    expect(crmCode).not.toContain('onPress={() => setView("ADD_FRIEND")}');
   });
 
-  it("keeps the LIST back-path alive", () => {
-    // setView("LIST") 这条回退分支本来就是为「从 LIST 进 ADD_FRIEND」写的。
-    // 入口缺失时它是死代码 —— 它同时也是入口缺失的证据，别把它一起删了。
+  it("keeps the LIST back-path alive for the surviving entry (messages -> initialView)", () => {
+    // setView("LIST") 这条回退分支现在是给 messages 模块那条路用的：
+    // FriendCrmSurface 以 initialView="ADD_FRIEND" 挂载，onBack 时不能回退到
+    // 一个从没进过的 LIST 视图——但组件内部逻辑仍然是先看 initialView。
     expect(crmCode).toContain('else setView("LIST")');
   });
 });
 
-describe("ADD-FRIEND-FROM-MESSAGES-001 Messages reaches add-friend, and the back label tells the truth", () => {
-  it("offers the entry from the new-chat sheet, not from the inbox", () => {
-    // friend-crm 的返回分支早就写着「当从 Messages 进入时…」，但信息模块里
-    // 从来没有这个入口：全仓库 grep addfriend 只有渲染分支和内容条目两处命中。
-    // 入口挂在「新聊天」的联系人视图里 —— 那一页的目的就是「找人聊天」，
-    // 而收件箱里只有已经聊过的人，找不出新人。
-    expect(messages).toContain('accessibilityLabel="添加好友"');
-    expect(messages).toContain("onOpenAddFriend");
+describe("MSG-SCAN-SHORTCUT-001 messages module only adds friends via scan, not a method grid", () => {
+  it("has no '+' add-friend entry point or its dead wiring left in messages.tsx", () => {
+    // 用户反馈：有二维码就不需要到处都能申请加好友。"+"号（连着邀请/通讯录/
+    // 社媒/搜索那一整页方式选择）和联系人页里重复的「添加好友」行都摘掉了，
+    // 消息模块现在只剩顶栏"扫码"一条加好友的路。这条锁住"别加回来"。
+    expect(messages).not.toContain('accessibilityLabel="添加好友"');
+    expect(messages).not.toContain("onOpenAddFriend");
+    expect(messages).not.toContain("openAddFriend");
+    expect(messages).not.toContain("showAddFriend");
+    expect(messages).not.toContain("addFriendNotice");
   });
 
-  it("hands the request to the shell instead of doing nothing", () => {
-    // 没有 onOpenAddFriend 时不能静默：点下去什么都不发生，和「没这个人」
-    // 长得一模一样。openAddFriend 返回 false，调用点把话写出来。
-    expect(messages).toContain("const openAddFriend = (): boolean => {");
-    expect(messages).toContain("if (!onOpenAddFriend) return false;");
-    expect(messages).toContain('setAddFriendNotice(openAddFriend() ? "" :');
+  it("keeps the scan entry, wired scanOnly so cancelling it never lands on the method grid", () => {
+    expect(messages).toContain('accessibilityLabel="扫码"');
+    expect(messages).toContain('initialSheet="SCAN"');
+    expect(messages).toMatch(/<FriendCrmSurface[^>]*\bscanOnly\b/);
   });
 
-  it("the shell hands the relationship to MessagesSurface and no longer jumps to Me", () => {
-    // 用户要求：添加好友（扫码/搜索/邀请）内嵌在消息模块，不再跳去「我的」。
+  it("the shell hands the relationship to MessagesSurface and no longer jumps to Me, nor passes the removed onOpenAddFriend prop", () => {
+    // 用户要求：加好友（现在只剩扫码）内嵌在消息模块，不再跳去「我的」；
     // shell 必须把 relationship 传给 MessagesSurface（FriendCrmSurface 由
-    // MessagesSurface 自渲染）；不得再 setMeOpenSubPage/goToPage("ME")。
+    // MessagesSurface 自渲染）；不得再 setMeOpenSubPage/goToPage("ME")，
+    // 也不该再传一个组件已经不认的 onOpenAddFriend。
     expect(appShellCode).toContain("relationship={relationship}");
-    expect(appShellCode).toContain("onOpenAddFriend={() =>");
+    expect(appShellCode).not.toContain("onOpenAddFriend");
     expect(appShellCode).not.toContain('setMeOpenSubPage(meSubPage("addfriend"))');
     expect(appShellCode).not.toContain('goToPage("ME")');
   });
@@ -668,8 +691,8 @@ describe("CONTACT-SEARCH-COPY-001 the contacts-sheet subtitle matches its search
     // `${c.name}${c.preview}`。副标题原写「联系人 / Username」，等于让用户
     // 在框里输 @handle 却永远搜不到；同一个框的 placeholder 早就写着
     // 「姓名或最近消息」。副标题对齐它。
-    // 找没聊过的人不走这条搜索，走下面的「添加好友」入口
-    // （ADD-FRIEND-FROM-MESSAGES-001），那是另一条线。
+    // 找没聊过的人不走这条搜索，走顶栏"扫码"（MSG-SCAN-SHORTCUT-001），
+    // 那是另一条线。
     expect(messages).toContain("联系人 · 姓名或最近消息");
     expect(messages).not.toContain("联系人 / Username");
     // 副标题里的「最近消息」得有匹配器兜着：匹配范围一旦收窄到只剩 name，
@@ -700,34 +723,25 @@ describe("ADD-FRIEND-PHONE-COPY-001 the add-friend list does not advertise phone
   });
 });
 
-describe("CONVO-OPEN-001 tapping a Convo opens the branch, not the mainline", () => {
-  it("passes the convo id all the way to ConversationSurface", () => {
-    // 支线（Convo）是主线 DM 的一个分支：conversation.tsx 用 convId（父母会话）
-    // + activeConvo.id 去 listMessages，两者缺一不可。列表里点一条 Convo，以前只交出
-    // parentDialogId —— shell 于是按普通 DM 打开，入口写着「打开 Convo」，
-    // 点开却是主线，支线内容一条都看不到。
-    expect(messages).toContain("onOpenConvo");
-    expect(messages).toContain("openConvo(");
-    // 少了 convoId 就还是打开主线 —— 这一句是整条接线的要害。钉**整个调用**而不是光钉
-    // "s.convo.id"：那个 token 在 key={s.convo.id} 里也有，光钉它会漏判。
-    expect(messages).toContain("openConvo(parentName, s.convo.parentDialogId, s.convo.id,");
-    // shell 必须真的把它传到 ConversationSurface（它认的 prop 名是 convoId / convoTitle）。
-    expect(appShellCode).toContain("onOpenConvo={");
-    expect(appShellCode).toContain("{...(messageChat?.convoId ? { convoId: messageChat.convoId } : {})}");
-    expect(appShellCode).toContain("{...(messageChat?.convoTitle ? { convoTitle: messageChat.convoTitle } : {})}");
+describe("CONVO-OPEN-001 branches live inside the conversation, not in a list page", () => {
+  // MSG-GROUPS-TAB-001 反转旧决定：外部 Convo 列表页已摘（办公协作的叫法），
+  // onOpenConvo 整条接线跟着消失 —— 支线只在对话里长按消息创建（屏内 state，
+  // 见 conversation.tsx 的 activeConvo）。旧断言钉的是已删除的接线，整段重写。
+  // 缺席断言剥注释（见文件头注释）。
+  const strippedMessages = stripComments(readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8"));
+  const strippedConvo = stripComments(readFileSync(fileURLToPath(new URL("./conversation.tsx", import.meta.url)), "utf8"));
+
+  it("has no external convo list wiring", () => {
+    expect(strippedMessages).not.toContain("onOpenConvo");
+    expect(strippedMessages).not.toContain("openConvo(");
+    expect(strippedMessages).not.toContain("myConvos");
+    expect(appShellCode).not.toContain("onOpenConvo={");
+    expect(appShellCode).not.toContain("convoId: messageChat.convoId");
   });
 
-  it("says so when nobody hands it a convo opener", () => {
-    // 同 ADD-FRIEND-FROM-MESSAGES-001：没人接的入口不能静默 —— 静默的死按钮
-    // 和「这条支线不存在」长得一样。
-    expect(messages).toContain("if (!onOpenConvo) return false;");
-    expect(messages).toContain("支线入口还没接通");
-    expect(messages).toContain("{convoNotice ?");
-  });
-
-  it("no longer opens the parent dialog as a plain DM", () => {
-    // 旧接线：只带 parentDialogId 调 onOpenConversation —— 那只能打开主线。
-    expect(messages).not.toContain("onPress={() => onOpenConversation(parentName, s.convo.parentDialogId)}");
+  it("conversation keeps in-screen branch state without external props", () => {
+    expect(strippedConvo).not.toContain("convoId: initialConvoId");
+    expect(strippedConvo).toContain("useState<{ id: string; title: string } | null>(null)");
   });
 });
 
@@ -864,45 +878,20 @@ describe("PROFILE-SEARCH-001 the search box actually searches the site", () => {
   });
 });
 
-describe("CONVO-LIST-001 my convos are listed, not just creatable", () => {
-  // 这条盯的是一个「建好了没人调」的半截接线。ConversationClient.listMyConvos
-  // 一直在（服务端 ListMyConvos 也在，客户端单测也在），但 App 里从来没有调用方 ——
-  // 于是 conversation.tsx 能把一条消息分叉成支线，分叉完却**永远看不到它**。
-  //
-  // 同一个页面还有第二个毛病：Convo 页当时列的是 GROUP/SUPPORT 会话，而那些在
-  // 「对话」页已经出现过一遍；真正的 Convo 一条都没有 —— 标题和内容对不上。
+describe("CONVO-LIST-001 branches are created in-conversation, not listed on a page", () => {
+  // MSG-GROUPS-TAB-001 反转旧决定：Convo 列表页已摘（办公协作的叫法），
+  // myConvos 拉取/三态/重试整套跟着消失 —— 支线只在对话里长按消息创建
+  // （屏内 state）。listMyConvos 客户端方法保留（服务端契约），只是
+  // messages 表面不再调用。旧断言钉的是已删除的列表，整段重写。
+  // 缺席断言剥注释（见文件头注释）。
+  const strippedMessages = stripComments(readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8"));
 
-  it("actually calls listMyConvos from the messages surface", () => {
-    expect(messages).toContain("conversationClient.listMyConvos()");
-    expect(messages).toContain("ConvoSummary");
-  });
-
-  it("keeps loading / empty / failed as three different things", () => {
-    // undefined = 还没拉，[] = 真的没有，failed = 拉失败。合成两个，
-    // 就必然把「没拉到」画成「一条都没有」—— 用户会以为自己从没开过支线。
-    expect(messages).toContain("const [myConvos, setMyConvos] = useState<ConvoSummary[] | undefined>(undefined);");
-    expect(messages).toContain("setMyConvos(rows)");
-    expect(messages).toContain("setMyConvosFailed(true)");
-  });
-
-  it("offers a retry that actually re-runs the fetch", () => {
-    expect(messages).toContain("setMyConvosNonce((n) => n + 1)");
-    // reload 计数必须在依赖数组里，否则「重试」点下去不会重跑 effect。
-    expect(messages).toContain("myConvosNonce]");
-    expect(messages).toContain("Convo 加载失败");
-  });
-
-  it("stops labelling a list of group conversations as Convo", () => {
-    // 旧标题下面列的是 GROUP/SUPPORT 会话 —— 名字和内容对不上。
-    expect(messages).not.toContain("关注的 Convo");
-    expect(messages).toContain("我的 Convo");
-    // 群组那一段保留（「＋文件夹」是它独有的入口），但如实叫它群组对话。
-    expect(messages).toContain("群组对话");
-  });
-
-  it("shows an unparseable convo timestamp as a dash, never as blank", () => {
-    expect(messages).toContain("function convoTimeText");
-    expect(messages).toContain('if (!Number.isFinite(ms) || ms <= 0) return "—";');
+  it("no longer lists convos from the messages surface", () => {
+    expect(strippedMessages).not.toContain("conversationClient.listMyConvos()");
+    expect(strippedMessages).not.toContain("ConvoSummary");
+    expect(strippedMessages).not.toContain("myConvos");
+    expect(strippedMessages).not.toContain("convoTimeText");
+    expect(strippedMessages).not.toContain("我的 Convo");
   });
 });
 

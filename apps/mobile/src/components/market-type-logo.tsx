@@ -1,18 +1,23 @@
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { Image, type ImageSource } from "expo-image";
 import { color } from "../theme";
 import { SCENE_ACTIONS } from "./scene-activity-discovery";
 
-export type MarketOpportunityType = "coffee_photo" | "walk_photo" | "coffee_chinese" | "bilingual_store" | "event_photo";
+// OPP-TYPE-OTHER-001: 识别不出来的机会归 "other"，不再硬塞进 coffee_photo。
+// 关键词一个都不中时以前一律返回 coffee_photo —— 等于把「咖啡 + 拍照」当成
+// 垃圾桶，自定义发布（大多不带类型字段）全掉进去，筛选也被稀释。
+// 未分类不给活动图标（给哪个都是编造语义），渲染中性占位字形。
+export type MarketOpportunityType = "coffee_photo" | "walk_photo" | "coffee_chinese" | "bilingual_store" | "event_photo" | "other";
 export type MarketTypeLogoSize = "FILTER" | "CARD";
 
 const actionIcon = (id: string): ImageSource => SCENE_ACTIONS.find((item) => item.id === id)!.icon;
-const MASTER: Record<MarketOpportunityType, ImageSource> = {
+const MASTER: Record<MarketOpportunityType, ImageSource | undefined> = {
   coffee_photo: actionIcon("photo"),
   coffee_chinese: actionIcon("coffee"),
   walk_photo: actionIcon("city-walk"),
   bilingual_store: actionIcon("translation"),
   event_photo: actionIcon("music"),
+  other: undefined,
 };
 
 const SIZE = { FILTER: 42, CARD: 30 } as const;
@@ -20,8 +25,9 @@ const SIZE = { FILTER: 42, CARD: 30 } as const;
 /** Canonical renderer for approved market order-type logos. */
 export function MarketTypeLogo({ type, size, selected = false }: { type: MarketOpportunityType; size: MarketTypeLogoSize; selected?: boolean }): React.JSX.Element {
   const pixels = SIZE[size];
+  const icon = MASTER[type];
   return <View style={[styles.frame, selected && styles.frameSelected, { borderRadius: Math.round(pixels * 0.27), height: pixels, width: pixels }]}>
-    <Image contentFit="contain" source={MASTER[type]} style={[styles.icon, selected && styles.iconSelected, { height: Math.round(pixels * 0.72), width: Math.round(pixels * 0.72) }]} />
+    {icon ? <Image contentFit="contain" source={icon} style={[styles.icon, selected && styles.iconSelected, { height: Math.round(pixels * 0.72), width: Math.round(pixels * 0.72) }]} /> : <Text style={[styles.otherGlyph, selected && styles.otherGlyphSelected, { fontSize: Math.round(pixels * 0.6) }]}>⋯</Text>}
   </View>;
 }
 
@@ -30,4 +36,7 @@ const styles = StyleSheet.create({
   frameSelected: { backgroundColor: color.ink, borderColor: color.ink },
   icon: { tintColor: color.ink },
   iconSelected: { tintColor: color.white },
+  // 未分类的中性占位：不给活动图标，避免把"没识别出来"画成"咖啡/拍照"。
+  otherGlyph: { color: color.ink, fontWeight: "900" },
+  otherGlyphSelected: { color: color.white },
 });

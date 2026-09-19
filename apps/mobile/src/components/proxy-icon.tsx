@@ -42,7 +42,14 @@ export type ProxyIconName =
   | "qrGrid"
   | "ellipsis"
   | "search"
-  | "remix";
+  | "chart"
+  | "remix"
+  | "editProfile"
+  | "shareUp"
+  | "aiPersona"
+  | "bookmark"
+  | "group"
+  | "scan";
 
 const symbolMap: Partial<Record<string, ProxyIconName>> = {
   "home": "home",
@@ -63,6 +70,7 @@ const symbolMap: Partial<Record<string, ProxyIconName>> = {
   "ticket": "ticket",
   "store-lines": "storeLines",
   "spark": "spark",
+  "aiPersona": "aiPersona",
   "○": "ring",
   "◉": "target",
   "◎": "target",
@@ -87,13 +95,31 @@ const symbolMap: Partial<Record<string, ProxyIconName>> = {
   "P": "profileRing"
 };
 
-function MasterModuleIcon({ name, size, color }: { name: ProxyIconName; size: number; color: string }): React.JSX.Element | null {
+function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; size: number; color: string; filled?: boolean | undefined }): React.JSX.Element | null {
   const common = { fill: "none", stroke: color, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, strokeWidth: 2.2 };
+  const filledCommon = { fill: color, stroke: color, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, strokeWidth: 1.4 };
   const canvas = (children: React.ReactNode): React.JSX.Element => (
     <Svg height={size} viewBox="0 0 24 24" width={size}>{children}</Svg>
   );
 
   switch (name) {
+    // FEED-ACTION-ICONS-001: 帖文操作行以前是纯文字（"回复 3"/"引用"/"分享"），
+    // 喜欢那颗心也只是 ♥/♡ 两个字符往 Text 里塞——不是真图标，字号一改字重
+    // 就跟着变形。喜欢/收藏都要支持已点亮的实心态，跟点赞按钮切换的语义对上。
+    case "heart":
+      return canvas(<Path {...(filled ? filledCommon : common)} d="M12 20.2c-.3 0-.6-.1-.8-.3C7.7 17.1 4 13.8 4 9.9 4 7 6.2 4.8 9 4.8c1.3 0 2.5.6 3.3 1.6.8-1 2-1.6 3.3-1.6 2.8 0 5 2.2 5 5.1 0 3.9-3.7 7.2-7.2 10-.2.2-.5.3-.8.3z"/>);
+    case "bookmark":
+      return canvas(<Path {...(filled ? filledCommon : common)} d="M6.5 4h11a1 1 0 0 1 1 1v15l-6.5-4.3L5.5 20V5a1 1 0 0 1 1-1z"/>);
+    // GROUP-CREATE-001: 消息模块顶栏「建群」入口——两个人形叠一起，
+    // 跟 aiPersona/profileRing 的单人形状拉开区分。
+    case "group":
+      return canvas(<><Circle {...common} cx="9" cy="8.3" r="3"/><Path {...common} d="M3.8 19c1-2.7 3-4.2 5.2-4.2s4.2 1.5 5.2 4.2"/><Path {...common} d="M14.5 5.3c1.4.3 2.4 1.5 2.4 3s-1 2.7-2.4 3"/><Path {...common} d="M16.3 14.9c2 .5 3.4 1.9 4 4"/></>);
+    // MSG-SCAN-ICON-001: 之前用 qrGrid（QR 码本身的静态图标）顶替"扫一扫"这个
+    // 动作按钮的图标，跟原型（取景框四角+扫描线）不是一个东西，看起来是错的。
+    // qrGrid 留给"这是一个 QR 码"的场景（qr-zoom-overlay 的展示徽标），
+    // "去扫码"这个动作统一换成这个取景框图标，抠图路径照抄原型 SVG。
+    case "scan":
+      return canvas(<><Path {...common} d="M3 8V5a2 2 0 0 1 2-2h3"/><Path {...common} d="M16 3h3a2 2 0 0 1 2 2v3"/><Path {...common} d="M21 16v3a2 2 0 0 1-2 2h-3"/><Path {...common} d="M8 21H5a2 2 0 0 1-2-2v-3"/><Path {...common} d="M3 12h18"/></>);
     case "home":
       return canvas(<><Path {...common} d="M4 10.5 12 4l8 6.5"/><Path {...common} d="M6.5 10v9h11v-9"/></>);
     case "diamond":
@@ -119,6 +145,22 @@ function MasterModuleIcon({ name, size, color }: { name: ProxyIconName; size: nu
       return canvas(<><Path {...common} d="M12 21s-6.5-5.8-6.5-10.5A6.5 6.5 0 0 1 12 4a6.5 6.5 0 0 1 6.5 6.5C18.5 15.2 12 21 12 21z"/><Circle {...common} cx="12" cy="10.3" r="2.3"/></>);
     case "remix":
       return canvas(<><Path {...common} d="M5 7h3.2c2.2 0 3.4 1.2 4.5 3.2l1.1 2C14.9 14.2 16 17 19 17"/><Path {...common} d="m16 14 3 3-3 3"/><Path {...common} d="M5 17h3.2c1.8 0 2.9-.8 3.8-2.3l2-3.4C15.1 9.4 16.2 7 19 7"/><Path {...common} d="m16 4 3 3-3 3"/></>);
+    // PERSONAL-PROFILE-PARITY-001: "search" 早就在类型里声明了，但从没在这个
+    // switch 里实现过——个人主页的"搜索"按钮传的是 name="search"，落进
+    // default 分支渲染 null，按钮位置上什么都看不见。补一个真正的放大镜。
+    case "search":
+      return canvas(<><Circle {...common} cx="11" cy="11" r="6.5"/><Path {...common} d="m20 20-4.3-4.3"/></>);
+    // "分析"按钮之前用的是 name="ring"（一个空心圆），跟"数据分析"没有任何
+    // 视觉关联。补一个简单的柱状图，跟本页其它按钮一样走矢量图标而不是
+    // 随手抓一个几何图形顶替。
+    case "chart":
+      return canvas(<><Path {...common} d="M5 20V10"/><Path {...common} d="M12 20V4"/><Path {...common} d="M19 20v-7"/></>);
+    // PERSONAL-PROFILE-PARITY-001: "crosshair" 跟 search 一样，声明了类型
+    // 但从没实现过——全仓 4 处用它（个人主页/位置选择器/场景地图定位/
+    // me-profile-components），全都是"按当前位置定位"的语义，一个都没
+    // 真正显示过图标。补一个标准的 GPS 定位符号（圆环+十字准星）。
+    case "crosshair":
+      return canvas(<><Circle {...common} cx="12" cy="12" r="7"/><Path {...common} d="M12 2v3M12 19v3M2 12h3M19 12h3"/></>);
     case "plus":
       return canvas(<Path {...common} d="M12 5v14M5 12h14"/>);
     case "clock":
@@ -143,6 +185,16 @@ function MasterModuleIcon({ name, size, color }: { name: ProxyIconName; size: nu
       return canvas(<><Path {...common} d="M12 4a3 3 0 0 1 3 3v4a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3z"/><Path {...common} d="M6.5 11.5v.5a5.5 5.5 0 0 0 11 0v-.5"/><Path {...common} d="M12 17.5V20"/><Path {...common} d="M9.5 20h5"/></>);
     case "arrowUp":
       return canvas(<><Path {...common} d="M12 19V5"/><Path {...common} d="M7.5 9.5 12 5l4.5 4.5"/></>);
+    // ME-SHEET-ICONS-001: 主页设置弹窗的三个按钮（编辑个人资料/分享主页/
+    // AI分身中心）以前是纯文字，跟同一个 sheet 里其它纯文字按钮长一样，
+    // 三个入口通到完全不同的地方（编辑表单/系统分享面板/AI 分身模块）却没
+    // 有任何视觉区分。补三个专属图标，形状按提供的参考稿描摹。
+    case "editProfile":
+      return canvas(<><Circle {...common} cx="10" cy="8" r="3.2"/><Path {...common} d="M4.8 18.4c1.1-2.8 3.3-4.4 5.9-4.4 1.1 0 2.1.3 3 .8"/><Path {...common} d="M16.2 13.4l4.1-4.1a1.6 1.6 0 0 0-2.3-2.3l-4.1 4.1-.6 2.9 2.9-.6z"/></>);
+    case "shareUp":
+      return canvas(<><Path {...common} d="M12 3v12"/><Path {...common} d="M8.2 6.8 12 3l3.8 3.8"/><Path {...common} d="M5 12v6.8A2.2 2.2 0 0 0 7.2 21h9.6a2.2 2.2 0 0 0 2.2-2.2V12"/></>);
+    case "aiPersona":
+      return canvas(<><Circle {...common} cx="10" cy="8.5" r="3.2"/><Path {...common} d="M4.6 19.4c1.1-3 3.4-4.8 6.2-4.8 1.5 0 2.9.5 4 1.3"/><Path {...common} d="M18 4.5l.7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7.7-2.1z"/></>);
     default:
       return null;
   }
@@ -193,16 +245,21 @@ export function ProxyIcon({
   name,
   size,
   color,
-  style
+  style,
+  filled
 }: {
   name: ProxyIconName;
   size: number;
   color: string;
   style?: StyleProp<ViewStyle>;
+  // FEED-ACTION-ICONS-001: heart/bookmark 的"已点亮"实心态，跟 isLiked/isSaved
+  // 的语义对齐——不加这个就只能靠 color 变化表达状态，比原来的 ♥/♡ 字符切换
+  // 还弱（描边心形不管什么颜色都不像"已喜欢"）。
+  filled?: boolean;
 }): React.JSX.Element {
   const stroke = Math.max(1.6, size * 0.11);
   const frame = [styles.frame, { height: size, width: size }, style];
-  const masterIcon = MasterModuleIcon({ name, size, color });
+  const masterIcon = MasterModuleIcon({ name, size, color, filled });
   if (masterIcon) {
     return <View pointerEvents="none" style={frame}>{masterIcon}</View>;
   }

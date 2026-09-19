@@ -139,6 +139,8 @@ commands:
     domain: Business
   - command: CreateTaskDraft
     domain: Demand
+  - command: CreateTopicInvite
+    domain: Fulfillment
   - command: CreateVoucher
     domain: Voucher
   - command: DecideStoreRecommendation
@@ -247,8 +249,12 @@ commands:
     domain: Marketplace
   - command: ListMarketOpportunities
     domain: Marketplace
+  - command: ListMediaActivityForViewer
+    domain: LocalNet
   - command: ListMediaAssets
     domain: Media
+  - command: ListMediaImpressionStats
+    domain: LocalNet
   - command: ListMediaReviewDecisions
     domain: Media
   - command: ListMemberDirectory
@@ -261,6 +267,8 @@ commands:
     domain: RealityScene
   - command: ListMyBusinessAccounts
     domain: Business
+  - command: ListMyCheckinHistory
+    domain: RealityScene
   - command: ListMyConvos
     domain: Conversation
   - command: ListMyFriendships
@@ -285,6 +293,8 @@ commands:
     domain: Marketplace
   - command: ListPinnedPosts
     domain: Engagement
+  - command: ListPostImpressionStats
+    domain: LocalNet
   - command: ListPostReplies
     domain: Engagement
   - command: ListPostsByIds
@@ -293,6 +303,10 @@ commands:
     domain: LocalNet
   - command: ListPrivacyRequests
     domain: Identity
+  - command: ListProfileViewStats
+    domain: LocalNet
+  - command: ListProfileViewers
+    domain: LocalNet
   - command: ListRealitySceneProposals
     domain: RealityScene
   - command: ListRequesterHomeItems
@@ -315,6 +329,8 @@ commands:
     domain: Voucher
   - command: LookupPasswordlessIdentity
     domain: Identity
+  - command: MarkDialogRead
+    domain: Conversation
   - command: MarkInboxRead
     domain: Notification
   - command: MarkMediaReady
@@ -377,6 +393,8 @@ commands:
     domain: Fulfillment
   - command: RecordMaterialRouteChange
     domain: CityCompanion
+  - command: RecordMediaImpression
+    domain: LocalNet
   - command: RecordOutcome
     domain: Fulfillment
   - command: RecordOutcomeObservation
@@ -427,6 +445,8 @@ commands:
     domain: Notification
   - command: RespondInvitation
     domain: Scene
+  - command: RespondTopicInvite
+    domain: Fulfillment
   - command: ResumeTrustedDeviceSession
     domain: Identity
   - command: ReviewAccess

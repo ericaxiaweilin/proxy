@@ -61,6 +61,25 @@ export function merchantAvatarUri(pointer: string | undefined, baseUrl: string):
   return undefined;
 }
 
+export type StoreAmenities = {
+  wifi?: string;
+  smoking?: string;
+  acTempC?: number;
+  power?: string;
+  quiet?: string;
+  seating?: string;
+};
+
+export type StoreLinesWire = {
+  storeId: string;
+  logoAssetPath: string;
+  description: string;
+  hoursJson: string;
+  contactPhone: string;
+  contactEmail: string;
+  updatedAt: string;
+} & StoreAmenities;
+
 export class BusinessClient {
   private sequence = 0;
   public constructor(
@@ -141,6 +160,9 @@ export class BusinessClient {
     await this.command("DeleteStorePhoto", { type: "Store", id: storeId }, { storeId, photoId });
   }
 
+  // STORE-AMENITIES-001: 门店设施属性（商家自填）。与服务端 StoreLines 对齐：
+  // 空=没填；wifi/smoking/power/quiet/seating 走封闭词表，acTempC 是整数温度
+  // （0=没填）。读出来缺字段的老数据按没填处理，不编默认值。
   public async upsertStoreLines(input: {
     storeId: string;
     logoAssetPath?: string;
@@ -148,7 +170,13 @@ export class BusinessClient {
     hoursJson?: string;
     contactPhone?: string;
     contactEmail?: string;
-  }): Promise<{ storeId: string; logoAssetPath: string; description: string; hoursJson: string; contactPhone: string; contactEmail: string; updatedAt: string }> {
+    wifi?: string;
+    smoking?: string;
+    acTempC?: number;
+    power?: string;
+    quiet?: string;
+    seating?: string;
+  }): Promise<StoreLinesWire> {
     const body = this.body(await this.command("UpsertStoreLines", { type: "Store", id: input.storeId }, {
       storeId: input.storeId,
       logoAssetPath: input.logoAssetPath ?? "",
@@ -156,15 +184,21 @@ export class BusinessClient {
       hoursJson: input.hoursJson ?? "{}",
       contactPhone: input.contactPhone ?? "",
       contactEmail: input.contactEmail ?? "",
+      wifi: input.wifi ?? "",
+      smoking: input.smoking ?? "",
+      acTempC: input.acTempC ?? 0,
+      power: input.power ?? "",
+      quiet: input.quiet ?? "",
+      seating: input.seating ?? "",
     }));
-    const lines = body.lines as { storeId: string; logoAssetPath: string; description: string; hoursJson: string; contactPhone: string; contactEmail: string; updatedAt: string };
+    const lines = body.lines as StoreLinesWire;
     if (!lines?.storeId) throw new Error("store lines upsert response malformed");
     return lines;
   }
 
-  public async getStoreLines(storeId: string): Promise<{ storeId: string; logoAssetPath: string; description: string; hoursJson: string; contactPhone: string; contactEmail: string; updatedAt: string }> {
+  public async getStoreLines(storeId: string): Promise<StoreLinesWire> {
     const body = this.body(await this.command("GetStoreLines", { type: "Store", id: storeId }, { storeId }));
-    return body.lines as { storeId: string; logoAssetPath: string; description: string; hoursJson: string; contactPhone: string; contactEmail: string; updatedAt: string };
+    return body.lines as StoreLinesWire;
   }
 
   public async createProduct(input: {

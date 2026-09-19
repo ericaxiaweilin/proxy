@@ -92,9 +92,6 @@ type RealityScene = {
   recommendationScore?: number;
 };
 
-// SCENE-CONTRIB-001: 用户提交的新场景（上架前只是提案）。
-type SceneProposal = { id: string; name: string; area: string; type: string; category: SceneCategory; status: string; confirmations: number; own: boolean; confirmed: boolean };
-
 type DynamicSceneAction = { type: "DIRECT_INVITE" | "OPEN_TASK" | "PUBLIC_ACTIVITY"; label: string; state: string; moneyMeaning: string };
 type SceneDetail = {
   sceneId: string;
@@ -130,7 +127,13 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   // Circle 本体不可点（该版本 react-native-maps 无 onPress），详情走列表行。
   const [heat, setHeat] = useState(false);
   const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | undefined>(initialSceneId);
+  // SCENE-NAV-PIN-001: 图钉快打卡 —— 点图钉不再直通详情（导航埋在详情第三颗
+  // 按钮里太深，用户找不到），而是先弹快打卡：导航去这里 / 看详情二选一。
+  // 看详情才进 selectedId 老链（自动足迹/打卡门禁照旧）；导航直接走
+  // openSceneNavigation 同一条系统地图深链。热力圈不可点，不受影响。
+  const [pinSheetId, setPinSheetId] = useState<string>();
   const [saved, setSaved] = useState<ReadonlySet<string>>(new Set());
   const [visited, setVisited] = useState<ReadonlySet<string>>(new Set());
   const [visitedAt, setVisitedAt] = useState<ReadonlyMap<string, string>>(new Map());
@@ -141,15 +144,6 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   // BADGE-WALL-001: 本人去过的所有场景（all-time）。undefined = 还没拉到，
   // 进度块直接不画 —— 空数组是“一家没去过”，undefined 是“不知道”，两回事。
   const [badgeHistoryIds, setBadgeHistoryIds] = useState<ReadonlyArray<string> | undefined>(undefined);
-  // SCENE-CONTRIB-001: 社区提交的新场景 + 确认队列。
-  const [proposals, setProposals] = useState<ReadonlyArray<SceneProposal>>([]);
-  const [confirmationsNeeded, setConfirmationsNeeded] = useState(2);
-  const [contribOpen, setContribOpen] = useState(false);
-  const [contribBusy, setContribBusy] = useState(false);
-  const [contribMsg, setContribMsg] = useState<string | undefined>(undefined);
-  // SCENE-CATEGORY-001: 分类三选一，不预设 —— 预设等于替用户选，错了就是
-  // 我们编的。空着提交会被拦（"请先选择分类"），和邀约选人一个规矩。
-  const [draft, setDraft] = useState<{ name: string; area: string; category: SceneCategory | ""; description: string }>({ name: "", area: "", category: "", description: "" });
   // SCENE-EVENT-SIGNUP-001: 这个场景上已发布的活动。列表状态单独存 —— "没有
   // 活动" / "取不到" / "没登录" 是三件不同的事，不能都显示成一句"暂无"。
   const [sceneActivities, setSceneActivities] = useState<ReadonlyArray<SceneActivity>>([]);
@@ -200,11 +194,18 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const [scenes, setScenes] = useState<ReadonlyArray<RealityScene>>([]);
   const [session, setSession] = useState<AuthenticatedStoredSession>();
   const [origin, setOrigin] = useState<{ latitude: number; longitude: number } | undefined>(initialOrigin);
+  // SCENE-CHECKIN-FRESH-001: 定位有保质期。origin 以前一旦落定就冻住 —— 离店
+  // 不更新，90 分钟打卡过期后重进详情，又按旧坐标自动打一次（在家给店打卡）。
+  // 每次落定位都打时间戳；超过 10 分钟算过期，打卡门禁不再认它。
+  const [originAt, setOriginAt] = useState<number | undefined>(() => (initialOrigin ? Date.now() : undefined));
+  const [locating, setLocating] = useState(false);
   // SCENE-MAP-LOCATION-001: 壳透传进来的起点（设备实时位置优先）。面每次挂载
   // state 都重置，只在 origin 还没值时接 —— 用户亲手点的定位和地图内状态不抢。
   // 之前这里永远从 undefined 开始，关掉再进就回到河内默认（21.036, 105.842）。
   useEffect(() => {
-    if (initialOrigin) setOrigin((prev) => prev ?? initialOrigin);
+    if (!initialOrigin) return;
+    setOrigin((prev) => prev ?? initialOrigin);
+    setOriginAt((prev) => prev ?? Date.now());
   }, [initialOrigin]);
   const [nearbyBusy, setNearbyBusy] = useState(false);
   const [nearbyError, setNearbyError] = useState<string>();
@@ -221,15 +222,38 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const [actionBusy, setActionBusy] = useState(false);
   const [actionResult, setActionResult] = useState<string>();
   const [inviteAmountText, setInviteAmountText] = useState("150,000");
+  // SCENE-STUDIO-001: 场景 Studio 出图 —— 选中的时段场景 × 点中的菜单 ×
+  // 绑定本场景的小美，三元素原样拼一张卡，截屏走系统分享（徽章卡同一条
+  // captureRef 链）。选什么出什么：菜单没选 / 本场景没绑定小美，按钮直接
+  // disabled 并明说缺什么，绝不拿默认替身凑数。
+  const studioShareRef = useRef<View>(null);
+  const [studioShareNotice, setStudioShareNotice] = useState<string | undefined>(undefined);
+  const studioXiaomei = featuredAIAccount?.boundSceneId === detail?.sceneId ? featuredAIAccount : undefined;
+  const studioMenu = detail?.menu.find((item) => item.id === selectedMenuId) ?? detail?.fullMenu.find((item) => item.id === selectedMenuId);
+  const studioReady = studioMenu !== undefined && studioXiaomei !== undefined;
+  async function shareStudioCard(): Promise<void> {
+    if (!studioReady || !detail || !studioMenu || !studioXiaomei) return;
+    try {
+      const uri = await captureRef(studioShareRef, { format: "png", quality: 0.9 });
+      await Share.share({
+        url: uri,
+        message: `${detail.venueName} · ${studioMenu.name} × ${studioXiaomei.displayName} —— 在 Proxy 约一场现实见面吧！`,
+      });
+      setStudioShareNotice(undefined);
+    } catch {
+      setStudioShareNotice("分享失败，请重试。");
+    }
+  }
 
-  // 全页无 shell chrome，必须自己留安全区，否则顶栏顶进状态栏
-  // （标题被时间盖住、返回键落进系统手势区点不了）。
+  // 本页挂在 app-shell 的 SafeAreaView（edges top）里面，状态栏已经让出，
+  // 这里再加 insets.top 就是双计（59+49 的大空白）。只留内容间距 8。
   const insets = useSafeAreaInsets();
-  // 顶栏刚好让出状态栏时间即可，多了显空：安全区只取到时间行下方。
-  const rootPad = { paddingTop: Math.max(insets.top - 10, 8), paddingBottom: Math.max(insets.bottom, 0) };
+  const rootPad = { paddingTop: 0, paddingBottom: Math.max(insets.bottom, 0) };
   // §4/§13：系统返回逐层收起——详情→列表→关闭（与屏上 ‹ 同序，后注册先消费，详情优先）。
   useModuleBackHandler(() => { onBack(); return true; });
   useModuleBackHandler(selectedId && selectedId !== initialSceneId ? () => { setSelectedId(undefined); return true; } : undefined);
+  // SCENE-NAV-PIN-001: 系统返回先收快打卡（后注册先消费，详情之前）。
+  useModuleBackHandler(pinSheetId ? () => { setPinSheetId(undefined); return true; } : undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -275,7 +299,6 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       } catch {
         if (!cancelled) setBadgeHistoryIds(undefined);
       }
-      void loadProposals(authenticated);
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [authClient, secureSessionStore]);
@@ -395,6 +418,9 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
     if (filter === "VISITED") matching.sort((a, b) => Date.parse(visitedAt.get(b.id) ?? "") - Date.parse(visitedAt.get(a.id) ?? ""));
     return matching;
   }, [filter, query, saved, scenes, visited, visitedAt]);
+  // SCENE-NAV-PIN-001: 快打卡认的人和图钉同一份（filtered 当前视野）——
+  // 筛选/搜索把这家筛没了，卡自动收，不留灵异卡片。
+  const pinScene = pinSheetId ? filtered.find((scene) => scene.id === pinSheetId) : undefined;
 
   const toggle = (source: ReadonlySet<string>, id: string, commit: (next: ReadonlySet<string>) => void): void => {
     const next = new Set(source);
@@ -422,15 +448,8 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   // 只是没有距离佐证。反过来也不会因为没有位置就拦住用户，那等于逼人交位置。
   // SCENE-CONTRIB-001: 拉社区提案列表。自己提交的不给"确认"按钮 —— 服务端也会拒，
   // 但按钮先置灰才不会让人点了才知道白点。
-  const loadProposals = (authenticated: AuthenticatedStoredSession): void => {
-    void sendSceneCommand(authClient, authenticated, "ListRealitySceneProposals", "me", {})
-      .then((payload) => {
-        const list = Array.isArray(payload.proposals) ? payload.proposals : [];
-        setProposals(list.filter(isSceneProposal));
-        if (typeof payload.confirmationsNeeded === "number") setConfirmationsNeeded(payload.confirmationsNeeded);
-      })
-      .catch(() => undefined);
-  };
+  // SCENE-CONTRIB-001: 社区提交 UI 已整段撤下（commander 重做设计中），
+  // 相关 state 与函数一并删除 —— 后端提案管线不动，等新 UI 直接接。
   // SCENE-EVENT-SIGNUP-001: 拉这个场景的活动。ListActivities 是公开的
   // （匿名可读），所以没登录也能看；报名那一步才要 session。
   const loadSceneActivities = (sceneId: string): void => {
@@ -471,36 +490,6 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       })
       .finally(() => setActivityBusyId(undefined));
   };
-  const submitProposal = (): void => {
-    if (!session?.principal) { setContribMsg("请先登录，才能提交新场景。"); return; }
-    if (draft.name.trim() === "" || draft.area.trim() === "") { setContribMsg("名称和区域不能为空。"); return; }
-    if (draft.category === "") { setContribMsg("请先选择分类：商家 / 景点 / 其他。"); return; }
-    // 坐标只能来自**当前位置**：让用户手填经纬度，填出来的坐标一定不准，
-    // 而且会让人以为是自己核实过的。
-    if (!origin) { setContribMsg("需要当前位置才能提交新场景 —— 先按下面的按钮定位。"); return; }
-    setContribBusy(true);
-    setContribMsg(undefined);
-    void sendSceneCommand(authClient, session, "ProposeRealityScene", "new_scene", {
-      name: draft.name.trim(), area: draft.area.trim(), type: "", category: draft.category,
-      latitude: origin.latitude, longitude: origin.longitude, description: draft.description.trim(),
-    })
-      .then((payload) => {
-        setDraft({ name: "", area: "", category: "", description: "" });
-        setContribOpen(false);
-        setContribMsg(typeof payload.note === "string" ? payload.note : "已提交，等待其他用户确认。");
-        if (session) loadProposals(session);
-      })
-      .catch(() => setContribMsg("提交失败，请重试。"))
-      .finally(() => setContribBusy(false));
-  };
-  const confirmProposal = (proposalId: string): void => {
-    if (!session?.principal) { setContribMsg("请先登录，才能确认。"); return; }
-    setContribBusy(true);
-    void sendSceneCommand(authClient, session, "ConfirmRealitySceneProposal", proposalId, { proposalId })
-      .then(() => { if (session) loadProposals(session); })
-      .catch(() => setContribMsg("确认失败 —— 自己提交的不能自己确认。"))
-      .finally(() => setContribBusy(false));
-  };
   // SCENE-CHECKIN-100M-001: 打卡只认 GPS 真值。100 米内可打（含自动打卡），
   // 之外拒绝并明说距离；没定位（origin 未知）= 没证据 = 不能打。
   // 取消（enabled=false）不设门 —— 随时可撤自己的声明。
@@ -510,6 +499,16 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       return;
     }
     setTriStateMsg(undefined);
+    // SCENE-CHECKIN-FRESH-001: 手动打卡同样不认过期定位 —— 冻住的旧坐标在
+    // 家也能"进圈"，点下去就是一张幽灵打卡。定位中稍等，过期了指去地图刷新。
+    if (locating) {
+      setTriStateMsg("正在重新定位，稍等几秒再打卡。");
+      return;
+    }
+    if (origin !== undefined && !originFresh()) {
+      setTriStateMsg("定位超过10分钟了：点地图右上角的定位图标刷新后，再回来打卡。");
+      return;
+    }
     const enabled = !here.has(scene.id);
     if (enabled) {
       const distance = origin ? metersBetween(origin, scene) : undefined;
@@ -567,24 +566,50 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       setTriStateMsg("同步失败，已恢复之前的状态，请重试。");
     });
   };
+  // SCENE-CHECKIN-FRESH-001: 门禁认的位置必须是 10 分钟内的真值 —— 冻住的
+  // 旧坐标等于"人在店里"的假证据（离店后重进详情会按旧坐标自动打卡）。
+  const ORIGIN_FRESH_MS = 10 * 60 * 1000;
+  function originFresh(): boolean {
+    return origin !== undefined && originAt !== undefined && Date.now() - originAt < ORIGIN_FRESH_MS;
+  }
   // SCENE-FOOTPRINT-AUTO-001: 近场自动足迹。打开场景详情时，若设备位置在
   // 300m 内且已登录，记一次私人足迹（走同一 persistVisited 审计链）。
   // 只认实时距离 + 当面打开的详情，不编到访；每场景一次，失败静默。
   const autoFootprintDone = useRef<ReadonlySet<string>>(new Set());
   useEffect(() => {
-    if (!selected || !session?.principal || !origin) return;
+    if (!selected || !session?.principal || !origin || !originFresh()) return;
     if (visited.has(selected.id) || autoFootprintDone.current.has(selected.id)) return;
     if (metersBetween(origin, selected) > 300) return;
     autoFootprintDone.current = new Set(autoFootprintDone.current).add(selected.id);
     persistVisited(selected.id);
     setTriStateMsg("已按你的当前位置自动标记足迹。");
-  }, [selected, session, origin, visited]);
+  }, [selected, session, origin, originAt, visited]);
+  // 详情打开时定位过期，后台静默重取（不申请权限，拒绝/超时都静默）。
+  // 久坐店里的人无感续上；离店的人拿回真坐标，门禁自然拒绝 —— 两边都不打扰。
+  // 重取落地后下面的自动打卡/足迹 effect 会重跑，用新坐标重新判定。
+  useEffect(() => {
+    if (!selected || !session?.principal) return;
+    if (origin !== undefined && originAt !== undefined && Date.now() - originAt < ORIGIN_FRESH_MS) return;
+    let cancelled = false;
+    setLocating(true);
+    void (async () => {
+      try {
+        const fix = await getCurrentFix(expoLocationApi, { requestPermission: false });
+        if (!fix || cancelled) return;
+        setOrigin({ latitude: fix.latitude, longitude: fix.longitude });
+        setOriginAt(Date.now());
+      } catch { /* 没定位就保持原样，门禁用过期口径处理 */ } finally {
+        if (!cancelled) setLocating(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selected, session]);
   // SCENE-CHECKIN-100M-001: 进圈自动打卡。打开场景详情时设备位置在 100m 内且
   // 已登录，自动记一次打卡（走同一 persistCheckIn 门禁链，圈外/无定位直接不打，
   // 不弹失败 —— 没证据不是失败）。每场景一次，失败静默（门禁内已判过 eligible）。
   const autoCheckinDone = useRef<ReadonlySet<string>>(new Set());
   useEffect(() => {
-    if (!selected || !session?.principal || !origin) return;
+    if (!selected || !session?.principal || !origin || !originFresh()) return;
     if (here.has(selected.id) || autoCheckinDone.current.has(selected.id)) return;
     if (!checkinEligibility(metersBetween(origin, selected)).eligible) return;
     autoCheckinDone.current = new Set(autoCheckinDone.current).add(selected.id);
@@ -592,7 +617,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
     setTriStateMsg("已按你的当前位置自动打卡。");
     // 只认进圈那一刻的 here/menu 状态 —— 与自动足迹同口径，guard 靠 ref。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, session, origin, here]);
+  }, [selected, session, origin, originAt, here]);
   const recommendNearby = async (): Promise<void> => {
     if (nearbyBusy || !session) return;
     setNearbyBusy(true); setNearbyError(undefined);
@@ -620,7 +645,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       if (response.status < 200 || response.status >= 300 || !Array.isArray(body.scenes)) throw new Error("附近场景暂时不可用");
       const valid = body.scenes.filter(isRealityScene);
       if (valid.length !== body.scenes.length) throw new Error("附近场景数据异常");
-      setScenes(valid); setOrigin({ latitude, longitude }); setFilter("ALL"); setView("MAP");
+      setScenes(valid); setOrigin({ latitude, longitude }); setOriginAt(Date.now()); setFilter("ALL"); setView("MAP");
     } catch (error) { setNearbyError(error instanceof Error ? error.message : "无法获取附近场景"); }
     finally { setNearbyBusy(false); }
   };
@@ -631,20 +656,18 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const activeVariant = selected ? detail?.variants.find((item) => item.id === detail.selectedVariant) : undefined;
   const detailBody = selected ? (
       <ScrollView style={[styles.root, rootPad]} contentContainerStyle={styles.detailContent}>
-        <View style={styles.detailTop}><Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.backButton}><Text style={styles.backText}>‹</Text></Pressable><View style={styles.detailTopCopy}>{/* MERCHANT-LOGO-001: 商家标志 —— 有 logo 上图，没有回字母块（和线上店铺管理面同款），不编占位图。 */}<View style={styles.venueRow}>{detail?.logoUrl ? <Image accessibilityLabel={`${detail?.venueName ?? selected.name}商家标志`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-logo:${detail.sceneId}`} source={{ uri: detail.logoUrl }} style={styles.venueLogo} transition={0} /> : <View style={styles.venueLogo}><Text style={styles.venueLogoText}>{(detail?.venueName ?? selected.name).slice(0, 1).toUpperCase()}</Text></View>}<View style={styles.venueCopy}><Text style={styles.detailTopTitle}>{detail?.venueName ?? selected.name}</Text><Text style={styles.detailTopSub}>{activeVariant?.name ?? selected.area} · {selected.area}</Text>{/* SCENE-CATEGORY-001: 顶类徽标 —— 去过/未开放照样显示分类（置灰的是标记，不是身份）。 */}<View style={styles.categoryBadge}><Text style={styles.categoryBadgeText}>{selected.category}</Text></View></View></View></View><View style={styles.topSpacer} /></View>
+        <View style={styles.detailTop}><Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.backButton}><Text style={styles.backText}>‹</Text></Pressable><View style={styles.detailTopCopy}>{/* MERCHANT-LOGO-001: 商家标志 —— 有 logo 上图，没有回字母块（和线上店铺管理面同款），不编占位图。 */}<View style={styles.venueRow}>{detail?.logoUrl ? <Image accessibilityLabel={`${detail?.venueName ?? selected.name}商家标志`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-logo:${detail.sceneId}`} source={{ uri: detail.logoUrl }} style={styles.venueLogo} transition={0} /> : <View style={styles.venueLogo}><Text style={styles.venueLogoText}>{(detail?.venueName ?? selected.name).slice(0, 1).toUpperCase()}</Text></View>}<View style={styles.venueCopy}><Text style={styles.detailTopTitle}>{detail?.venueName ?? selected.name}</Text><Text style={styles.detailTopSub}>{activeVariant ? `${activeVariant.name} · ${selected.area}` : `${selected.type} · ${selected.area}`}</Text>{/* SCENE-CATEGORY-001: 顶类徽标 —— 去过/未开放照样显示分类（置灰的是标记，不是身份）。 */}<View style={styles.categoryBadge}><Text style={styles.categoryBadgeText}>{selected.category}</Text></View></View></View></View><View style={styles.topSpacer} /></View>
         <View style={styles.hero}>
           {detail?.heroImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.heroMap} transition={0} /> : <MapView initialRegion={{ latitude: selected.latitude, longitude: selected.longitude, latitudeDelta: 0.025, longitudeDelta: 0.025 }} pointerEvents="none" style={styles.heroMap}><Marker coordinate={{ latitude: selected.latitude, longitude: selected.longitude }} pinColor={selected.active ? color.magenta : color.violet} /></MapView>}
-          <Text style={styles.eyebrow}>LIVE SCENE · {detail?.venueName ?? selected.name}</Text>
-          <Text style={styles.detailTitle}>{activeVariant?.name ?? selected.name}</Text>
-          <Text style={styles.detailDescription}>{activeVariant ? `${activeVariant.window} · ${activeVariant.bestFor}` : selected.description}</Text>
-          {/* SCENE-ADDRESS-001: 地址行。没记录地址时回退成「区 · 类型」，
-              绝不显示空白行 —— 空白会被读成"地址加载中/加载失败"。 */}
-          <Text style={styles.sceneAddress}>📍 {sceneAddressLine(selected)}</Text>
-          {/* SCENE-REAL-COUNTS-001: 真实计数。人少就如实写"还没有人…" ——
-              不许显示写死的假数字，也不许 0 和有数长得一样。 */}
-          <Text style={styles.sceneCounts}>{sceneCountsLine(selected)}</Text>
-          {activeVariant ? <View style={styles.heroFacets}>{activeVariant.facets.map((facet) => <View key={facet} style={styles.heroFacet}><Text style={styles.heroFacetText}>{facet}</Text></View>)}</View> : null}
+          {/* 封面只留：硬件优点（facets，没开 variant 时回落类型）+ 真实计数。
+              地址不在主页写 —— 地图上有，重复写就是废话。名字只在上面出现一次，
+              这里不再重复标题。 */}
+          <View style={styles.heroFacets}>{(activeVariant ? activeVariant.facets : [selected.type]).map((facet) => <View key={facet} style={styles.heroFacet}><Text style={styles.heroFacetText}>{facet}</Text></View>)}</View>
+          {/* 评分数据源还没有（唯一诚实的是收藏/去过/在场计数）—— 有评分管线
+              之前拿计数当"评价"，绝不编分。 */}
+          <Text style={styles.sceneCounts} selectable>{sceneCountsLine(selected)}</Text>
         </View>
+        <Text style={styles.venueIntro} selectable>{activeVariant ? `${activeVariant.window} · ${activeVariant.bestFor}` : selected.description}</Text>
         {detail ? (
           <>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.variantRail}>
@@ -656,6 +679,10 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             <View style={styles.bestGrid}><View style={styles.bestCard}><Text style={styles.bestTitle}>{activeVariant?.bestFor}</Text><Text style={styles.bestSub}>按当前时段、现场状态和可用资源推荐。</Text></View><View style={styles.bestCard}><Text style={styles.bestTitle}>{detail.liveState.state.replaceAll("_", " ")}</Text>{/* GEO-HONEST-001: 没有容量来源时明说"未知"，绝不回落到一个数字。 */}<Text style={styles.bestSub}>{detail.liveState.bestWindow}{detail.liveState.capacityPct === undefined ? " · 容量未知" : ` · 容量 ${detail.liveState.capacityPct}%`}</Text></View></View>
             {whyOpen ? <View style={styles.whyCard}><Text style={styles.whyTitle}>推荐依据</Text><Text style={styles.whyText}>当前时段：{activeVariant?.window}</Text><Text style={styles.whyText}>场景标签：{activeVariant?.facets.join(" · ")}</Text>{/* GEO-HONEST-001: 时效声明只在对数据真有来源时才出现 —— 给编造的数字配一个"有效至"时间戳，比数字本身更误导。 */}<Text style={styles.whyText}>现场状态：{detail.liveState.label}{detail.liveState.freshUntil === undefined ? "（容量数据未接入，故无时效）" : `，数据有效至 ${new Date(detail.liveState.freshUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}</Text><Text style={styles.whyBoundary}>这是场景推荐，不代表真人在场，也不生成到访、订单或履约证明。</Text></View> : null}
             <Text style={styles.sectionTitle}>适合一起的人</Text>
+            {/* SCENE-HUMANS-EMPTY-001: 选人是付费决策点 —— 没有人时必须说出"没有人"，
+                不能只留标题和一个空横滑（那会被读成"还在加载"）。文案说明它不是一个
+                失败状态，也不是"再等等就会有人"的承诺。 */}
+            {detail.humans.length > 0 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.humanRail}>
               {/* SCENE-HUMANS-002: 纯圆头 rail，不要白卡片 —— 和首页同款圆头像放大
                   （64），名字 + 可约状态居中跟在下面。选中态改用头像外圈紫环
@@ -663,9 +690,13 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
               {detail.humans.map((human) => <Pressable key={human.id} accessibilityLabel={`选择${human.name}`} onPress={() => setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))} style={styles.humanPlain}><View style={[styles.humanRing, selectedHumanId === human.id && styles.humanRingSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <CircularAvatarImage accessibilityLabel={`${human.name}头像`} size={64} uri={humanAvatarUri(human.avatarUrl)!} /> : <View style={styles.humanAvatarFallback}><Text style={styles.humanAvatarText}>{human.name.slice(0, 1).toUpperCase()}</Text></View>}</View><Text style={styles.humanPlainName}>{human.name}</Text><Text style={styles.humanPlainSub}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}{human.source === "FIXTURE" ? " · 占位候选" : ""}</Text></Pressable>)}
               {/* SCENE-HUMANS-001: 只露圆头像 + 名字 + 可约状态。点按仍是“选中邀约对象”
                   （DIRECT_INVITE 靠 selectedHumanId 找人，链不断）；role 与 fit% 删掉，
-                  可约原文（本周可约/上午可约…）是服务端真值，原样展示不改写。 */}
-              {detail.humans.map((human) => <Pressable key={human.id} accessibilityLabel={`选择${human.name}`} onPress={() => setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))} style={styles.humanPlain}><View style={[styles.humanRing, selectedHumanId === human.id && styles.humanRingSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <CircularAvatarImage accessibilityLabel={`${human.name}头像`} size={64} uri={humanAvatarUri(human.avatarUrl)!} /> : <View style={styles.humanAvatarFallback}><Text style={styles.humanAvatarText}>{human.name.slice(0, 1).toUpperCase()}</Text></View>}</View><Text style={styles.humanPlainName}>{human.name}</Text><Text style={styles.humanPlainSub}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}{human.source === "FIXTURE" ? " · 占位候选" : ""}</Text></Pressable>)}
+                  可约原文（本周可约/上午可约…）是服务端真值，原样展示不改写。
+                  SCENE-HUMANS-004: rail 只渲染一遍 —— 上面那一行 map 就是全部，
+                  这里不许再挂第二遍（曾经两遍 identical 并排，每个人出现两次）。 */}
             </ScrollView>
+            ) : (
+              <Text style={styles.humanEmpty}>这个场景现在还没有挂出可约时间的人 —— 这不是加载失败，也不是「再等等就会有人」的承诺。可以先收藏这个场景。</Text>
+            )}
             <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>{fullMenuOpen ? `${detail.venueName} · 完整菜单` : "这个 Scene 喝什么"}</Text><Pressable onPress={() => setFullMenuOpen((open) => !open)}><Text style={styles.sectionLink}>{fullMenuOpen ? "只看当前 Scene" : "完整菜单"}</Text></Pressable></View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>{(fullMenuOpen ? detail.fullMenu : detail.menu).map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</ScrollView>
             {/* SCENE-CHECKIN-100M-001: 详情只留两个动作 —— 收藏（意愿）与打卡
@@ -680,7 +711,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             </View>
             {navError ? <Text style={styles.nearbyError}>{navError}</Text> : null}
             <View style={styles.actions}>
-              <Text style={styles.checkInHint}>{checkinHint(here.has(selected.id), origin ? metersBetween(origin, selected) : undefined)}</Text>
+              <Text style={styles.checkInHint}>{checkinHint(here.has(selected.id), origin && originFresh() ? metersBetween(origin, selected) : undefined)}</Text>
             </View>
             {/* BADGE-WALL-001: 本店徽章进度 —— 这家能点亮哪些、还差几家点谁的名。
                 到访印记（去过/没去过）来自打卡史，不是有效期内的 here 集合。 */}
@@ -736,6 +767,32 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
               {detail.actions.map((action) => <Pressable key={action.type} onPress={() => { setSelectedAction(action); setActionResult(undefined); setActionExplanation(`${action.label}：${action.moneyMeaning}`); }} style={[styles.executionAction, selectedAction?.type === action.type && styles.executionActionSelected]}><Text style={styles.executionLabel}>{action.label}</Text><Text style={styles.executionState}>{action.type === "DIRECT_INVITE" ? "需本人接受" : action.type === "OPEN_TASK" ? "候选人申请" : "公开报名"}</Text></Pressable>)}
             </View>
             {actionExplanation ? <View style={styles.boundaryCard}><Text style={styles.boundaryStrong}>{actionExplanation}</Text><Text style={styles.boundaryText}>{detail.truthBoundary}</Text>{selectedAction?.type === "DIRECT_INVITE" ? <View><Text style={styles.inviteAmountLabel}>给真人小美的报酬（VND）</Text><View style={styles.inviteAmountRow}><TextInput keyboardType="number-pad" onChangeText={setInviteAmountText} placeholder="150,000" style={styles.inviteAmountInput} value={inviteAmountText} /><Text style={styles.inviteCurrency}>VND</Text></View><Text style={styles.boundaryText}>对方接受前会看到该金额；接受后冻结进订单。</Text></View> : null}{selectedAction ? <Pressable disabled={actionBusy} onPress={() => { void commitSceneAction(); }} style={styles.confirmAction}><Text style={styles.confirmActionText}>{actionBusy ? "处理中…" : `确认${selectedAction.label}`}</Text></Pressable> : null}{actionResult ? <Text style={styles.actionResult}>{actionResult}</Text> : null}</View> : null}
+            {/* SCENE-STUDIO-001: 三元素出图卡。场景 hero + 文案来自已选时段，
+                菜单来自点中的那一款，小美来自绑定本场景的账号 —— 缺哪个，
+                卡上就明写缺哪个，按钮同步 disabled，进分享链的永远是卡上
+                摆出来的同一份，不存在"图上一个样、文案另一个样"。 */}
+            <Text style={styles.sectionTitle}>场景 Studio</Text>
+            <View ref={studioShareRef} collapsable={false} style={styles.badgeShareCard}>
+              <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-studio:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.heroMap} transition={0} />
+              <Text style={styles.studioName}>{detail.venueName} · {activeVariant?.name ?? selected.type}</Text>
+              <Text style={styles.studioSub}>{activeVariant ? `${activeVariant.window} · ${activeVariant.bestFor}` : selected.description}</Text>
+              <View style={styles.studioRow}>
+                {studioMenu ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-studio-sku:${studioMenu.id}`} source={{ uri: studioMenu.imageUrl }} style={styles.studioThumb} transition={0} /> : null}
+                <View style={styles.studioCopy}>
+                  <Text style={styles.studioName}>{studioMenu ? `${studioMenu.name} · ${studioMenu.priceLabel}` : "还没选菜单"}</Text>
+                  <Text style={styles.studioSub}>{studioMenu ? "你亲手点的那一款" : "去上面点一款，选什么出什么"}</Text>
+                </View>
+              </View>
+              <View style={styles.studioRow}>
+                {studioXiaomei ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-studio-ai:${studioXiaomei.accountId}:${studioXiaomei.avatarVersion ?? 1}`} source={aiAccountPhoto(studioXiaomei)} style={styles.aiBindingAvatar} transition={0} /> : null}
+                <View style={styles.studioCopy}>
+                  <Text style={styles.studioName}>{studioXiaomei ? studioXiaomei.displayName : "还没有绑定的小美"}</Text>
+                  <Text style={styles.studioSub}>{studioXiaomei ? studioXiaomei.boundActivityTitle : "等小美绑定这个场景再出图"}</Text>
+                </View>
+              </View>
+            </View>
+            <Pressable accessibilityLabel={studioReady ? "生成 Studio 照" : studioMenu === undefined ? "先选一款菜单再出图" : "等小美绑定这个场景再出图"} disabled={!studioReady} onPress={() => void shareStudioCard()} style={[styles.badgeShareBtn, !studioReady && styles.studioBtnDisabled]}><Text style={styles.badgeShareBtnText}>{studioReady ? "生成 Studio 照" : studioMenu === undefined ? "先选一款菜单再出图" : "等小美绑定这个场景再出图"}</Text></Pressable>
+            {studioShareNotice ? <Text style={styles.nearbyError}>{studioShareNotice}</Text> : null}
           </>
         ) : detailError ? <Text style={styles.nearbyError}>{detailError}</Text> : <Text style={styles.loadingDetail}>正在加载当前时段的人、菜单与活动方式…</Text>}
         <Text style={styles.sectionTitle}>场景数据</Text>
@@ -753,20 +810,25 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
     <View style={[styles.root, rootPad]}>
       <View style={styles.topBar}>
         <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.roundButton}><Text style={styles.backText}>‹</Text></Pressable>
-        <View style={styles.topCopy}><Text style={styles.title}>场景地图</Text><Text style={styles.subtitle}>{origin ? `当前位置附近 · ${scenes.length} 个场景` : `场景目录 · ${scenes.length} 个场景`}</Text></View>
+              <View style={styles.topCopy}><Text style={styles.title}>场景地图</Text><Text style={styles.subtitle}>场景目录 · {scenes.length} 个场景</Text></View>
         <Pressable accessibilityLabel={view === "MAP" ? "切换列表" : "切换地图"} onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={styles.roundButton}><ProxyIcon color={color.ink} name={view === "MAP" ? "storeLines" : "crosshair"} size={21} /></Pressable>
+        <Pressable accessibilityLabel={searchOpen ? "关闭搜索" : "搜索场景"} onPress={() => { if (searchOpen) setQuery(""); setSearchOpen((open) => !open); }} style={styles.roundButton}><ProxyIcon color={color.ink} name="search" size={21} /></Pressable>
       </View>
-      <Pressable disabled={nearbyBusy || !session} onPress={() => { void recommendNearby(); }} style={styles.nearbyButton}><ProxyIcon color={color.white} name="crosshair" size={18} /><Text style={styles.nearbyButtonText}>{nearbyBusy ? "正在定位和计算…" : !session ? "登录后可用当前位置推荐" : "按当前位置找附近的场景"}</Text></Pressable>
       {nearbyError ? <Text style={styles.nearbyError}>{nearbyError}</Text> : null}
       <View style={styles.stats}>
         <Stat value={Math.max(0, scenes.filter((scene) => !visited.has(scene.id)).length)} label="未探索" onPress={() => setFilter("UNSEEN")} />
-        {/* SCENE-NO-FABRICATED-001: 这里以前写「此刻现场有活动」—— 数的是 seed
-            里 active=true 的行数，跟此刻现场有没有人毫无关系。改成「开放中」：
-            它如实描述的是"这个场所现在对外开放、可直接去"。 */}
-        <Stat value={scenes.filter((scene) => scene.active).length} label="开放中" onPress={() => setFilter("ACTIVE")} />
+        {/* 「开放中」计数删掉：读的是 seed 静态布尔值，不是实时营业状态，
+            摆出来就是假数据。过滤 chips 里那枚「开放中」保留 —— 按目录静态
+            属性筛没问题，有问题的是把它当实时计数展示。 */}
         <Stat value={visited.size} label="我的足迹" onPress={() => setFilter("VISITED")} />
       </View>
-      <View style={styles.searchBox}><ProxyIcon color={color.muted} name="search" size={19} /><TextInput value={query} onChangeText={setQuery} placeholder="搜场景、区域、主题" placeholderTextColor={color.muted} style={styles.searchInput} /></View>
+      {searchOpen ? (
+        <View style={styles.searchBox}>
+          <ProxyIcon color={color.muted} name="search" size={19} />
+          <TextInput autoFocus value={query} onChangeText={setQuery} placeholder="搜场景、区域、主题" placeholderTextColor={color.muted} style={styles.searchInput} />
+          <Pressable accessibilityLabel="关闭搜索" onPress={() => { setQuery(""); setSearchOpen(false); }}><Text style={styles.searchClose}>×</Text></Pressable>
+        </View>
+      ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRail} contentContainerStyle={styles.filters}>
         {([['ALL','全部'], ['UNSEEN','没去过'], ['ACTIVE','开放中'], ['SAVED','收藏'], ['VISITED','足迹']] as const).map(([id, label]) => (
           <Pressable key={id} onPress={() => setFilter(id)} style={[styles.filter, filter === id && styles.filterActive]}><Text style={[styles.filterText, filter === id && styles.filterTextActive]}>{label}</Text></Pressable>
@@ -778,41 +840,13 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
           <Text style={styles.badgeNoticeText}>🎉 恭喜获得徽章：{badgeNotice}</Text>
         </View>
       ) : null}
-      {/* SCENE-CONTRIB-001: 社区提交。用户提的场景默认不进目录，要别的
-          用户确认"这地方真的存在"才上架 —— 坐标是用户随手点的，不是查过的。 */}
-      <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>社区提交</Text><Pressable onPress={() => setContribOpen((open) => !open)}><Text style={styles.sectionLink}>{contribOpen ? "收起" : "提交新场景"}</Text></Pressable></View>
-      {contribOpen ? (
-        <View style={styles.contribCard}>
-          <Text style={styles.contribHint}>坐标会取你**当前所在的位置**，不能手填 —— 手填出来的坐标一定不准，还会让人误以为核实过。</Text>
-          <TextInput onChangeText={(text) => setDraft((d) => ({ ...d, name: text }))} placeholder="场景名称" placeholderTextColor={color.muted} style={styles.contribInput} value={draft.name} />
-          <TextInput onChangeText={(text) => setDraft((d) => ({ ...d, area: text }))} placeholder="区域，例如 Bắc Ninh" placeholderTextColor={color.muted} style={styles.contribInput} value={draft.area} />
-          {/* SCENE-CATEGORY-001: 分类三选一 picker —— 自由文本框已撤：填什么词
-              都是无界词表，后期按分类做的东西全断。细分由后端定，前端只选顶类。 */}
-          <View style={styles.categoryPicker}>
-            {(["商家", "景点", "其他"] as const).map((c) => (
-              <Pressable key={c} accessibilityLabel={`分类${c}`} onPress={() => setDraft((d) => ({ ...d, category: c }))} style={[styles.filter, draft.category === c && styles.filterActive]}>
-                <Text style={[styles.filterText, draft.category === c && styles.filterTextActive]}>{c}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <TextInput onChangeText={(text) => setDraft((d) => ({ ...d, description: text }))} placeholder="一句话说明（可选）" placeholderTextColor={color.muted} style={styles.contribInput} value={draft.description} />
-          <Pressable disabled={contribBusy} onPress={submitProposal} style={styles.confirmAction}><Text style={styles.confirmActionText}>{contribBusy ? "提交中…" : "提交，等别人确认"}</Text></Pressable>
-        </View>
-      ) : null}
-      {proposals.filter((proposal) => proposal.status !== "REJECTED").map((proposal) => (
-        <View key={proposal.id} style={styles.contribRow}>
-          <View style={styles.sceneCopy}>
-            <Text style={styles.sceneName}>{proposal.name}</Text>
-            <Text style={styles.sceneMeta}>{proposal.area} · {proposal.category} · {proposal.confirmations}/{confirmationsNeeded} 人确认{sceneSourceSuffix("COMMUNITY")}</Text>
-          </View>
-          {proposal.own ? <Text style={styles.contribTag}>你提交的 · 等别人确认</Text> : proposal.confirmed ? <Text style={styles.contribTag}>✓ 已确认</Text> : <Pressable disabled={contribBusy} onPress={() => confirmProposal(proposal.id)} style={styles.contribButton}><Text style={styles.contribButtonText}>确认它存在</Text></Pressable>}
-        </View>
-      ))}
-      {contribMsg ? <Text style={styles.nearbyError}>{contribMsg}</Text> : null}
+      {/* SCENE-CONTRIB-001: 社区提交 UI 已整段撤下（commander 重做设计中）。
+          后端提案管线（提案/确认/Source=COMMUNITY）原样保留，等新 UI 直接接。
+          下面直接进地图/列表。 */}
       {view === "MAP" ? (
         <View style={styles.mapWrap}>
           {/* 人位晚到时 remount 一次吃新 initialRegion（origin 只接第一次，后续不变）。 */}
-          <MapView key={origin ? `${origin.latitude}:${origin.longitude}` : "catalog"} initialRegion={{ latitude: origin?.latitude ?? HANOI_CENTER_FALLBACK.latitude, longitude: origin?.longitude ?? HANOI_CENTER_FALLBACK.longitude, latitudeDelta: origin ? 0.12 : 0.115, longitudeDelta: origin ? 0.12 : 0.115 }} showsUserLocation={!!origin} style={StyleSheet.absoluteFill}>
+          <MapView key={origin ? `${origin.latitude}:${origin.longitude}` : "catalog"} initialRegion={{ latitude: origin?.latitude ?? HANOI_CENTER_FALLBACK.latitude, longitude: origin?.longitude ?? HANOI_CENTER_FALLBACK.longitude, latitudeDelta: origin ? 0.12 : 0.115, longitudeDelta: origin ? 0.12 : 0.115 }} onPress={() => setPinSheetId(undefined)} showsUserLocation={!!origin} style={StyleSheet.absoluteFill}>
             {heat
               ? filtered.map((scene) => {
                   const score = sceneHeatScore(scene);
@@ -827,7 +861,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
                     />
                   );
                 })
-              : filtered.map((scene) => <Marker key={scene.id} coordinate={{ latitude: scene.latitude, longitude: scene.longitude }} onPress={() => { setSelectedId(scene.id); }} pinColor={visited.has(scene.id) || !scene.active ? color.muted : scene.category === "商家" ? color.magenta : scene.category === "景点" ? color.violet : color.muted} title={scene.name} description={sceneAddressLine(scene)} />)}
+              : filtered.map((scene) => <Marker key={scene.id} coordinate={{ latitude: scene.latitude, longitude: scene.longitude }} onPress={() => { setPinSheetId(scene.id); }} pinColor={!scene.active ? color.muted : visited.has(scene.id) ? (scene.category === "商家" ? color.magenta : scene.category === "景点" ? color.violet : color.muted) : color.muted} title={scene.name} description={sceneAddressLine(scene)} />)}
           </MapView>
           <Pressable
             style={[styles.heatToggle, heat && styles.heatToggleOn]}
@@ -837,10 +871,37 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
           >
             <Text style={heat ? styles.heatToggleTextOn : styles.heatToggleText}>◉</Text>
           </Pressable>
+          {/* 定位按钮：地图右上单图标（原来那条整宽文字按钮已撤）。 */}
+          <Pressable
+            disabled={nearbyBusy || !session}
+            onPress={() => { void recommendNearby(); }}
+            style={[styles.locateBtn, (nearbyBusy || !session) ? styles.locateBtnDisabled : undefined]}
+            accessibilityLabel={nearbyBusy ? "正在定位" : "定位到我"}
+          >
+            <ProxyIcon color={nearbyBusy || !session ? color.muted : color.ink} name="crosshair" size={21} />
+          </Pressable>
           <View pointerEvents="none" style={styles.privacyPill}><Text style={styles.privacyText}>公开足迹 · 非实时位置</Text></View>
+          {/* SCENE-NAV-PIN-001: 图钉快打卡 —— 名字 + 地址 + 导航/详情二选一，
+              悬在地图底部隐私条上方。导航和详情页里第三颗按钮是同一条深链；
+              看详情才进 selectedId（自动足迹/打卡门禁照旧），点地图空白、
+              × 或系统返回收卡。 */}
+          {pinScene ? (
+            <View style={styles.pinSheet}>
+              <View style={styles.pinSheetCopy}>
+                <Text style={styles.sceneName}>{pinScene.name}</Text>
+                <Text style={styles.sceneMeta}>{sceneAddressLine(pinScene)}</Text>
+              </View>
+              <Pressable accessibilityLabel="关闭快打卡" onPress={() => setPinSheetId(undefined)} style={styles.pinSheetClose}><Text style={styles.pinSheetCloseText}>×</Text></Pressable>
+              <View style={styles.pinSheetRow}>
+                <Pressable accessibilityLabel="导航去这里" onPress={() => openSceneNavigation(pinScene)} style={styles.primaryAction}><Text style={styles.primaryActionText}>导航去这里 ›</Text></Pressable>
+                <Pressable accessibilityLabel="看场景详情" onPress={() => { setPinSheetId(undefined); setSelectedId(pinScene.id); }} style={styles.action}><Text style={styles.actionText}>看详情 ›</Text></Pressable>
+              </View>
+              {navError ? <Text style={styles.nearbyError}>{navError}</Text> : null}
+            </View>
+          ) : null}
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.list}>
+        <ScrollView contentContainerStyle={styles.list} style={styles.listScroll}>
           {filtered.map((scene) => <SceneRow key={scene.id} scene={scene} visited={visited.has(scene.id)} saved={saved.has(scene.id)} planned={planned.has(scene.id)} onPress={() => setSelectedId(scene.id)} />)}
           {!filtered.length ? <Text style={styles.empty}>没有符合条件的场景</Text> : null}
         </ScrollView>
@@ -903,15 +964,6 @@ function isRealityScene(value: unknown): value is RealityScene {
 // 地址行的回退逻辑在 reality-scene-address.ts（纯 .ts，可单测）——
 // 本文件 import react-native-maps，vitest 进不来，逻辑不能留在这里。
 
-function isSceneProposal(value: unknown): value is SceneProposal {
-  if (!value || typeof value !== "object") return false;
-  const item = value as Partial<SceneProposal>;
-  return typeof item.id === "string" && typeof item.name === "string" && typeof item.area === "string" &&
-    typeof item.type === "string" && typeof item.status === "string" && typeof item.confirmations === "number" &&
-    typeof item.own === "boolean" && typeof item.confirmed === "boolean" &&
-    (item.category === "商家" || item.category === "景点" || item.category === "其他");
-}
-
 function isUserSceneState(value: unknown): value is { sceneId: string; saved: boolean; planned: boolean; privateVisited: boolean; visitedAt?: string } {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
@@ -950,7 +1002,7 @@ function Stat({ value, label, onPress }: { value: number; label: string; onPress
 //   · 那个质量分（84..96）是迁移里手写死的整数，全仓没有任何评分来源。
 // 现在只说我们知道的事 —— 用户自己的标记，或真实聚合的计数。
 function SceneRow({ scene, visited, saved, planned, onPress }: { scene: RealityScene; visited: boolean; saved: boolean; planned: boolean; onPress: () => void }): React.JSX.Element {
-  return <Pressable onPress={onPress} style={styles.sceneRow}><View style={[styles.sceneDot, scene.active && styles.sceneDotActive, visited && styles.sceneDotVisited]} /><View style={styles.sceneCopy}><Text style={styles.sceneName}>{scene.name}</Text><Text style={styles.sceneMeta}>{scene.area} · {scene.type}{scene.distanceMeters !== undefined ? ` · ${formatDistance(scene.distanceMeters)}` : ""}{sceneSourceSuffix(scene.source)}</Text><Text style={styles.sceneSignal}>{sceneSignalLine({ savedCount: scene.savedCount, visitedCount: scene.visitedCount, plannedCount: scene.plannedCount, visited, saved, planned })}</Text></View><ProxyIcon color={color.muted} name="arrowUpRight" size={19} /></Pressable>;
+  return <Pressable onPress={onPress} style={styles.sceneRow}><View style={[styles.sceneDot, scene.active && styles.sceneDotActive, (!scene.active || !visited) && styles.sceneDotMuted]} /><View style={styles.sceneCopy}><Text style={styles.sceneName} selectable>{scene.name}</Text><Text style={styles.sceneMeta} selectable>{scene.area} · {scene.type}{scene.distanceMeters !== undefined ? ` · ${formatDistance(scene.distanceMeters)}` : ""}{sceneSourceSuffix(scene.source)}</Text><Text style={styles.sceneSignal}>{sceneSignalLine({ savedCount: scene.savedCount, visitedCount: scene.visitedCount, plannedCount: scene.plannedCount, visited, saved, planned })}</Text></View><ProxyIcon color={color.muted} name="arrowUpRight" size={19} /></Pressable>;
 }
 function formatDistance(meters: number): string { return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`; }
 
@@ -975,31 +1027,35 @@ const styles = StyleSheet.create({
   topCopy: { flex: 1 }, title: { color: color.ink, fontSize: 27, fontWeight: "900", lineHeight: 34 }, subtitle: { color: color.muted, fontSize: 12, marginTop: 1 },
   roundButton: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 22, borderWidth: 1, height: 44, justifyContent: "center", width: 44 },
   stats: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 10 }, stat: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, paddingVertical: 9 }, statValue: { color: color.ink, fontSize: 19, fontWeight: "900" }, statLabel: { color: color.muted, fontSize: 11, marginTop: 2 },
-  nearbyButton: { alignItems: "center", alignSelf: "stretch", backgroundColor: color.ink, borderRadius: 15, flexDirection: "row", gap: 8, justifyContent: "center", marginBottom: 8, marginHorizontal: 16, paddingVertical: 12 }, nearbyButtonText: { color: color.white, fontSize: 13, fontWeight: "800" }, nearbyError: { color: color.error, fontSize: 12, marginBottom: 8, marginHorizontal: 16 },
-  searchBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, flexDirection: "row", gap: 8, marginHorizontal: 16, paddingHorizontal: 13 }, searchInput: { color: color.ink, flex: 1, fontSize: 15, height: 46 },
+  nearbyError: { color: color.error, fontSize: 12, marginBottom: 8, marginHorizontal: 16 },
+  searchBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, flexDirection: "row", gap: 8, marginHorizontal: 16, paddingHorizontal: 13 }, searchInput: { color: color.ink, flex: 1, fontSize: 15, height: 46 }, searchClose: { color: color.muted, fontSize: 20, paddingHorizontal: 4 },
   filterRail: { flexGrow: 0, height: 54, maxHeight: 54, minHeight: 54 },
   filters: { alignItems: "center", gap: 8, height: 54, paddingHorizontal: 16 }, filter: { alignItems: "center", alignSelf: "center", backgroundColor: color.surface, borderRadius: 18, height: 34, justifyContent: "center", paddingHorizontal: 15 }, filterActive: { backgroundColor: color.ink }, filterText: { color: color.muted, fontSize: 13, fontWeight: "700", lineHeight: 18 }, filterTextActive: { color: color.white },
   // MAP-CONTAINER-PARITY-001: 跟 Market 内联地图同容器语言 —— 底 offWhite、
   // 边框 line、圆角 22（foundation.radius.lg），横向顶边无间隙（无 marginHorizontal，
   // 跟 Market 地图视图一致；页内顶栏/统计/搜索保持 16 缩进）。全屏页保留 flex:1
   // 吃剩余高度，minHeight:330 保底与内联卡等高；position:relative 承接 privacyPill 悬浮。
-  mapWrap: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 22, borderWidth: 1, flex: 1, marginBottom: 14, minHeight: 330, overflow: "hidden", position: "relative" }, privacyPill: { alignSelf: "center", backgroundColor: "rgba(23,19,31,0.84)", borderRadius: 14, bottom: 12, paddingHorizontal: 12, paddingVertical: 7, position: "absolute" }, privacyText: { color: color.white, fontSize: 11, fontWeight: "700" },
+  mapWrap: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 22, borderWidth: 1, flex: 1, minHeight: 330, overflow: "hidden", position: "relative" }, privacyPill: { alignSelf: "center", backgroundColor: "rgba(23,19,31,0.84)", borderRadius: 14, bottom: 12, paddingHorizontal: 12, paddingVertical: 7, position: "absolute" }, privacyText: { color: color.white, fontSize: 11, fontWeight: "700" },
+  pinSheet: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, bottom: 48, left: 12, padding: 12, position: "absolute", right: 12 }, pinSheetCopy: { paddingRight: 30 }, pinSheetClose: { alignItems: "center", height: 30, justifyContent: "center", position: "absolute", right: 6, top: 6, width: 30 }, pinSheetCloseText: { color: color.muted, fontSize: 20, fontWeight: "700" }, pinSheetRow: { flexDirection: "row", gap: 8, marginTop: 10 },
   // 供热开关：左上白 pill，生效反转为 ink 底（跟市场定位钮同语言）。
   heatToggle: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, height: 34, justifyContent: "center", left: 10, position: "absolute", top: 10, width: 34 },
   heatToggleOn: { backgroundColor: color.ink, borderColor: color.ink },
+  locateBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 22, borderWidth: 1, height: 44, justifyContent: "center", position: "absolute", right: 10, top: 10, width: 44 },
+  locateBtnDisabled: { opacity: 0.45 },
   heatToggleText: { color: color.ink, fontSize: 14, fontWeight: "900" },
   heatToggleTextOn: { color: color.white, fontSize: 14, fontWeight: "900" },
   // SCENE-MAP-GESTURE-001: 详情盖层（不透明盖住整页，地图在下面常驻）。
   detailOverlay: { backgroundColor: color.offWhite, bottom: 0, left: 0, position: "absolute", right: 0, top: 0, zIndex: 10 },
-  list: { gap: 9, paddingBottom: 24, paddingHorizontal: 16 }, checkInHint: { color: color.muted, flex: 1, fontSize: 11, lineHeight: 16 },
+  list: { flexGrow: 1, gap: 9, paddingBottom: 24, paddingHorizontal: 16 },
+  listScroll: { flex: 1 }, checkInHint: { color: color.muted, flex: 1, fontSize: 11, lineHeight: 16 },
   badgeProgressBox: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 10, padding: 12 },
   badgeProgressTitle: { color: color.ink, fontSize: 12, fontWeight: "900" },
   badgeProgressRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 8 },
   badgeProgressName: { color: color.ink, fontSize: 12, fontWeight: "700" },
   badgeProgressText: { color: color.muted, fontSize: 11, marginTop: 2 },
-  contribCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 8, marginHorizontal: 16, padding: 14 }, contribHint: { color: color.muted, fontSize: 11, lineHeight: 16 }, contribInput: { borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 14, paddingHorizontal: 12, paddingVertical: 9 }, categoryPicker: { flexDirection: "row", gap: 8 }, contribRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginHorizontal: 16, marginTop: 8, padding: 12 }, contribTag: { color: color.muted, fontSize: 11 }, contribButton: { backgroundColor: color.violet, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 }, contribButtonText: { color: color.white, fontSize: 12, fontWeight: "700" },
-  sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, minHeight: 82, padding: 14 }, sceneDot: { backgroundColor: color.violet, borderRadius: 9, height: 18, width: 18 }, sceneDotActive: { backgroundColor: color.magenta }, sceneDotVisited: { backgroundColor: color.muted }, sceneCopy: { flex: 1 }, sceneName: { color: color.ink, fontSize: 16, fontWeight: "800" }, sceneMeta: { color: color.muted, fontSize: 12, marginTop: 3 }, sceneSignal: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 5 }, empty: { color: color.muted, paddingTop: 40, textAlign: "center" },
-  detailContent: { paddingBottom: 36, paddingHorizontal: 13 }, detailTop: { alignItems: "center", flexDirection: "row", minHeight: 56 }, backButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 }, detailTopCopy: { flex: 1 }, venueRow: { alignItems: "center", flexDirection: "row", gap: 10 }, venueLogo: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, height: 46, justifyContent: "center", width: 46 }, venueLogoText: { color: color.white, fontSize: 20, fontWeight: "900" }, venueCopy: { flex: 1 }, detailTopTitle: { color: color.ink, fontSize: 17, fontWeight: "900" }, detailTopSub: { color: color.muted, fontSize: 11, marginTop: 2 }, categoryBadge: { alignSelf: "flex-start", backgroundColor: color.violetSoftBg, borderRadius: 999, marginTop: 5, paddingHorizontal: 9, paddingVertical: 3 }, categoryBadgeText: { color: color.violet, fontSize: 11, fontWeight: "800" },   topSpacer: { width: 38 }, backText: { color: color.ink, fontSize: 24, fontWeight: "800", lineHeight: 28 }, hero: { backgroundColor: "#F6F2E9", borderColor: color.line, borderRadius: 20, borderWidth: 1, overflow: "hidden", padding: 15, paddingTop: 242 }, heroMap: { height: 226, left: 0, position: "absolute", right: 0, top: 0 }, statePill: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 14, marginTop: 4, paddingHorizontal: 10, paddingVertical: 6 }, statePillActive: { backgroundColor: color.attentionBg }, stateText: { color: color.muted, fontSize: 11, fontWeight: "800" }, stateTextActive: { color: color.error }, eyebrow: { color: "#8B6000", fontSize: 11, fontWeight: "900", letterSpacing: 0.8, marginTop: 12 }, detailTitle: { color: color.ink, fontSize: 28, fontWeight: "900", lineHeight: 31, marginTop: 5 }, detailDescription: { color: color.muted, fontSize: 13, lineHeight: 20, marginTop: 7 }, sceneAddress: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 18, marginTop: 6 }, sceneCounts: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  // (社区提交样式已随 UI 整段撤下，commander 重做设计中。)
+  sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, minHeight: 82, padding: 14 }, sceneDot: { backgroundColor: color.violet, borderRadius: 9, height: 18, width: 18 }, sceneDotActive: { backgroundColor: color.magenta }, sceneDotMuted: { backgroundColor: color.muted }, sceneCopy: { flex: 1 }, sceneName: { color: color.ink, fontSize: 16, fontWeight: "800" }, sceneMeta: { color: color.muted, fontSize: 12, marginTop: 3 }, sceneSignal: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 5 }, empty: { color: color.muted, paddingTop: 40, textAlign: "center" },
+  detailContent: { paddingBottom: 36, paddingHorizontal: 13 }, detailTop: { alignItems: "center", flexDirection: "row", minHeight: 56 }, backButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 }, detailTopCopy: { flex: 1 }, venueRow: { alignItems: "center", flexDirection: "row", gap: 10 }, venueLogo: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, height: 46, justifyContent: "center", width: 46 }, venueLogoText: { color: color.white, fontSize: 20, fontWeight: "900" }, venueCopy: { flex: 1 }, detailTopTitle: { color: color.ink, fontSize: 17, fontWeight: "900" }, detailTopSub: { color: color.muted, fontSize: 11, marginTop: 2 }, categoryBadge: { alignSelf: "flex-start", backgroundColor: color.violetSoftBg, borderRadius: 999, marginTop: 5, paddingHorizontal: 9, paddingVertical: 3 }, categoryBadgeText: { color: color.violet, fontSize: 11, fontWeight: "800" },   topSpacer: { width: 38 }, backText: { color: color.ink, fontSize: 24, fontWeight: "800", lineHeight: 28 }, hero: { backgroundColor: "#F6F2E9", borderColor: color.line, borderRadius: 20, borderWidth: 1, overflow: "hidden", padding: 15, paddingTop: 242 }, heroMap: { height: 226, left: 0, position: "absolute", right: 0, top: 0 }, statePill: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 14, marginTop: 4, paddingHorizontal: 10, paddingVertical: 6 }, statePillActive: { backgroundColor: color.attentionBg }, stateText: { color: color.muted, fontSize: 11, fontWeight: "800" }, stateTextActive: { color: color.error }, venueIntro: { color: color.muted, fontSize: 13, lineHeight: 20, marginTop: 8, paddingHorizontal: 2 }, sceneCounts: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 10 },
   heroFacets: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 12 }, heroFacet: { backgroundColor: "#FFF3CB", borderColor: "#E4C35B", borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 6 }, heroFacetText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   aiBindingCard: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderColor: color.violet, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 13 }, aiBindingAvatar: { borderRadius: 30, height: 60, width: 60 }, aiBindingCopy: { flex: 1 }, aiBindingEyebrow: { color: color.violet, fontSize: 11, fontWeight: "900", letterSpacing: 0.6 }, aiBindingTitle: { color: color.ink, fontSize: 14, fontWeight: "900", marginTop: 4 }, aiBindingText: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 5 }, aiProfileButton: { alignSelf: "flex-start", backgroundColor: color.ink, borderRadius: 12, marginTop: 9, paddingHorizontal: 12, paddingVertical: 8 }, aiProfileButtonText: { color: color.white, fontSize: 11, fontWeight: "900" },
   humanBindingCard: { alignItems: "center", backgroundColor: "#FFF8E3", borderColor: "#E4C35B", borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 13 }, humanBindingEyebrow: { color: "#735700", fontSize: 11, fontWeight: "900", letterSpacing: 0.6 },
@@ -1009,7 +1065,7 @@ const styles = StyleSheet.create({
   variantRail: { gap: 9, paddingRight: 16 }, variantCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, minHeight: 116, padding: 13, width: 178 }, variantCardSelected: { backgroundColor: color.ink, borderColor: color.ink }, variantName: { color: color.ink, fontSize: 15, fontWeight: "900" }, variantNameSelected: { color: color.white }, variantWindow: { color: color.violet, fontSize: 12, fontWeight: "800", marginTop: 5 }, variantBest: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 8 },
   variantPill: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 13, paddingVertical: 9 }, variantPillSelected: { backgroundColor: color.ink, borderColor: color.ink }, variantPillText: { color: color.ink, fontSize: 12, fontWeight: "700" }, variantPillTextSelected: { color: color.white }, bestGrid: { flexDirection: "row", gap: 9 }, bestCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, minHeight: 105, padding: 13 }, bestTitle: { color: color.ink, fontSize: 14, fontWeight: "900", lineHeight: 19 }, bestSub: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 7 },
   whyCard: { backgroundColor: "#FFF8E3", borderColor: "#E4C35B", borderRadius: 16, borderWidth: 1, marginTop: 9, padding: 13 }, whyTitle: { color: color.ink, fontSize: 13, fontWeight: "900" }, whyText: { color: color.ink, fontSize: 11, lineHeight: 17, marginTop: 5 }, whyBoundary: { borderTopColor: "#E8D99D", borderTopWidth: 1, color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 9, paddingTop: 8 },
-  humanRail: { gap: 9, paddingRight: 16 }, humanPlain: { alignItems: "center", width: 84 }, humanRing: { borderColor: "transparent", borderRadius: 36, borderWidth: 2, padding: 2 }, humanRingSelected: { borderColor: color.violet }, humanAvatarFallback: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderRadius: 32, height: 64, justifyContent: "center", width: 64 }, humanAvatarText: { color: color.violet, fontSize: 22, fontWeight: "900" }, humanPlainName: { color: color.ink, fontSize: 13, fontWeight: "800", marginTop: 6, textAlign: "center" }, humanPlainSub: { color: color.ink, fontSize: 11, marginTop: 2, textAlign: "center" },
+  humanRail: { gap: 9, paddingRight: 16 }, humanPlain: { alignItems: "center", width: 84 }, humanRing: { borderColor: "transparent", borderRadius: 36, borderWidth: 2, padding: 2 }, humanRingSelected: { borderColor: color.violet }, humanAvatarFallback: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderRadius: 32, height: 64, justifyContent: "center", width: 64 }, humanAvatarText: { color: color.violet, fontSize: 22, fontWeight: "900" }, humanPlainName: { color: color.ink, fontSize: 13, fontWeight: "800", marginTop: 6, textAlign: "center" }, humanPlainSub: { color: color.ink, fontSize: 11, marginTop: 2, textAlign: "center" }, humanEmpty: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 2, paddingRight: 16 },
   sectionTitleRow: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between" }, sectionLink: { color: "#735700", fontSize: 11, fontWeight: "700", marginBottom: 9 }, menuRail: { gap: 10, paddingRight: 16 }, menuCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, overflow: "hidden", paddingBottom: 10, width: 154 }, menuCardSelected: { borderColor: "#D7A600", borderWidth: 2 }, menuImage: { height: 104, width: "100%" }, menuName: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 9, paddingHorizontal: 10 }, menuFit: { color: color.muted, fontSize: 11, marginTop: 3, paddingHorizontal: 10 }, menuPrice: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 7, paddingHorizontal: 10 },
   executionCard: { flexDirection: "row", gap: 7 }, executionAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 15, flex: 1, minHeight: 68, justifyContent: "center", paddingHorizontal: 5 }, executionActionSelected: { backgroundColor: color.violet }, executionLabel: { color: color.white, fontSize: 12, fontWeight: "900", textAlign: "center" }, executionState: { color: color.muted, fontSize: 11, marginTop: 5 }, boundaryCard: { backgroundColor: color.proxyPurpleSoft, borderRadius: 16, marginTop: 9, padding: 13 }, boundaryStrong: { color: color.ink, fontSize: 12, fontWeight: "800", lineHeight: 18 }, boundaryText: { color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 6 }, inviteAmountLabel: { color: color.ink, fontSize: 12, fontWeight: "800", marginTop: 12 }, inviteAmountRow: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 7 }, inviteAmountInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 11, borderWidth: 1, color: color.ink, flex: 1, fontSize: 15, fontWeight: "900", minHeight: 44, paddingHorizontal: 12 }, inviteCurrency: { color: color.ink, fontSize: 12, fontWeight: "900" }, confirmAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, marginTop: 12, paddingVertical: 11 }, confirmActionText: { color: color.white, fontSize: 13, fontWeight: "900" }, actionResult: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 18, marginTop: 10 }, loadingDetail: { color: color.muted, fontSize: 12, paddingVertical: 22, textAlign: "center" }, activityEmpty: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 6 }, activityRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 8, paddingHorizontal: 12, paddingVertical: 11 }, activityInfo: { flex: 1 }, activityTitle: { color: color.ink, fontSize: 13, fontWeight: "800", lineHeight: 18 }, activityMeta: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 3 }, activityJoin: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 9 }, activityJoinDisabled: { backgroundColor: color.line }, activityJoinText: { color: color.white, fontSize: 12, fontWeight: "900" },
   sectionTitle: { color: color.ink, fontSize: 18, fontWeight: "900", marginBottom: 8, marginTop: 20 }, dataCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14 }, dataRow: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingVertical: 14 }, dataRowLast: { borderBottomWidth: 0 }, dataLabel: { color: color.ink, fontSize: 13, fontWeight: "700" }, dataValue: { color: color.muted, fontSize: 13 }, memoryCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, padding: 14 }, memoryTitle: { color: color.ink, fontSize: 14, fontWeight: "900" }, memoryText: { color: color.muted, fontSize: 11, lineHeight: 18, marginTop: 7 },
@@ -1036,6 +1092,7 @@ const styles = StyleSheet.create({
   badgeShareIconLocked: { opacity: 0.28 },
   badgeShareBtn: { alignItems: "center", backgroundColor: "#F4F0FF", borderColor: "#E5DCF5", borderRadius: 999, borderWidth: 1, marginTop: 10, paddingVertical: 10 },
   badgeShareBtnText: { color: "#5B3FA3", fontSize: 13, fontWeight: "800" },
+  studioRow: { alignItems: "center", flexDirection: "row", gap: 10, marginTop: 10 }, studioThumb: { borderRadius: 12, height: 56, width: 56 }, studioCopy: { flex: 1 }, studioName: { color: color.ink, fontSize: 13, fontWeight: "900", lineHeight: 18 }, studioSub: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 3 }, studioBtnDisabled: { backgroundColor: color.line, borderColor: color.line },
   badgeClose: { alignItems: "center", backgroundColor: "color.ink", borderRadius: 999, marginTop: 12, paddingVertical: 11 },
   badgeCloseText: { color: "color.white", fontSize: 13, fontWeight: "800" }
 });

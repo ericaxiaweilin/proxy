@@ -46,7 +46,6 @@ describe("SCENE-HUMANS-002 people are bare round heads, no white card", () => {
     expect(mapCode).toContain("styles.humanPlain");
   });
 });
-
 describe("SCENE-HUMANS-003 tapping the selected person deselects", () => {
   it("toggles selection instead of sticking on the first tap", () => {
     // 操作逻辑 bug：点一下选中，再点同一个没有任何反应 —— 选错人只能去选
@@ -54,5 +53,32 @@ describe("SCENE-HUMANS-003 tapping the selected person deselects", () => {
     expect(mapCode).toContain("setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))");
     // 没选中时邀约照样拦（"请先选择要邀请的真人"），不断链。
     expect(mapCode).toContain("请先选择要邀请的真人");
+  });
+});
+
+describe("SCENE-HUMANS-004 people rail renders exactly once", () => {
+  it("mounts a single humans map in the detail rail", () => {
+    // 渲染 bug：humanRail 里同一行 detail.humans.map 并排出现两次 ——
+    // 点进场景主页，每个人（头像/名字/可约态）都出现两遍，还各带各的选中态。
+    // 数代码里 map 的挂载点：有且仅有一个，多一个少一个都是错。
+    const mounts = mapCode.split("detail.humans.map").length - 1;
+    expect(mounts).toBe(1);
+  });
+});
+
+// SCENE-HUMANS-EMPTY-001: 选人是付费决策点 —— 没有人时必须说出"没有人"。
+// 以前 detail.humans 为空时这一块只剩标题和一个空横滑，读起来像"还在加载"，
+// 而用户此刻正准备付钱。
+describe("SCENE-HUMANS-EMPTY-001 an empty people list says so", () => {
+  it("branches on the list instead of rendering an empty rail", () => {
+    expect(mapCode).toContain("detail.humans.length > 0 ?");
+    expect(mapCode).toContain("styles.humanEmpty");
+  });
+
+  it("does not promise that waiting will produce someone", () => {
+    // 文案必须说明这不是加载失败，也不等于"再等等就会有人"。
+    const empty = mapCode.slice(mapCode.indexOf("styles.humanEmpty"));
+    expect(empty).toContain("还没有挂出可约时间的人");
+    expect(empty).toContain("不是加载失败");
   });
 });

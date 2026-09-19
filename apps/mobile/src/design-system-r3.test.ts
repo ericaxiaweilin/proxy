@@ -111,9 +111,12 @@ describe("Proxy Design System R3 typography", () => {
     expect(violations).toEqual([]);
   });
 
-  // R15.67: R2 必含守卫 — 个人主页 (me.tsx) 必须有 R2 设计关键元素:
-  // - 1fr 头网格 + 86px 头 (Threads R2 .head grid 1fr 86px)
-  // - 1px 边框 actions (R2 .actions button border 1px + 圆角 10)
+  // R15.67 → PERSONAL-PROFILE-PARITY-001 订正：commit 8404d51 把头部从
+  // row 改回 column，理由是"原始设计头像在左名字在下"——实测参考稿
+  // (proxy_personal_profile_architecture_v5_threads.html，本人视角) 头部
+  // 是名字在左、头像在右的一行，8404d51 的假设是错的，是它自己才是
+  // regression。这条断言按参考稿钉回 row + gap 16，场景足迹入口挪出这一行
+  // （参考稿本来就没有这个功能，不该跟头像/名字抢位置）。
   it("keeps Threads R2 personal profile header layout", () => {
     const mePath = join(sourceRoot, "surfaces", "me.tsx");
     const stylesPath = join(sourceRoot, "surfaces", "me-styles.ts");

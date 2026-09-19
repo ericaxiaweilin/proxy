@@ -600,16 +600,19 @@ func launchScenes() []Scene {
 		{ID: "vanmieu", Name: "Văn Miếu – Quốc Tử Giám", Area: "Văn Miếu", Type: "公共景点 · 古迹", Address: "Văn Miếu - Quốc Tử Giám, Hà Nội", Latitude: 21.0287903, Longitude: 105.8359533, Best: "08:00–17:00 · 售票", Active: false, Description: "越南第一所国子监，售票参观的老城古迹。", Category: "景点"},
 		{ID: "tranquoc", Name: "Chùa Trấn Quốc · Hồ Tây", Area: "Tây Hồ", Type: "公共景点 · 寺庙", Address: "Chùa Trấn Quốc, Đường Thanh Niên, Yên Phụ, Tây Hồ, Hà Nội", Latitude: 21.0478837, Longitude: 105.8368375, Best: "以现场公告为准", Active: false, Description: "西湖东岸半岛上的古寺，是西湖日落最常去的观景点。", Category: "景点"},
 		{ID: "manzi", Name: "Manzi Art Space", Area: "Ba Đình", Type: "艺术 · 展览", Address: "14 Phan Huy Ích, Ba Đình, Hà Nội", Latitude: 21.0414885, Longitude: 105.8455896, Best: "以现场公告为准", Active: false, Description: "老别墅改的独立展览空间，按展期开放。", Category: "其他"},
-		// ——— 商家：Three Beans（有照片、有菜单，是本 app 目前唯一的真实商家）———
-		{ID: "threebeans", Name: "Three Beans · Cầu Giấy", Area: "Cầu Giấy", Type: "咖啡 · 动态场景", Address: "Đường Cầu Giấy, Dịch Vọng, Cầu Giấy, Hà Nội", Latitude: 21.0359, Longitude: 105.7906, Best: "以门店公告为准", Active: true, Description: "同一门店按时间切换咖啡、出片、下班社交与周末活动场景。", Category: "商家"},
-		// SCENE-ADDRESS-001: 目录里第一条非河内场景。Bắc Ninh 用户此前打
-		// 开场景地图一个场景都搜不到（nearby 半径内没有任何记录）。
-		// 坐标 21.1861,106.0707 反查得到 Suối Hoa, TP Bắc Ninh —— 与仓库
-		// 自己的反查夹具（geocode_test.go）解析结果一致。
-		{ID: "threebeans_bn", Name: "Three Beans · Bắc Ninh", Area: "Bắc Ninh", Type: "咖啡 · 动态场景", Address: "Lê Văn Thịnh, Suối Hoa, TP Bắc Ninh", Latitude: 21.1861, Longitude: 106.0707, Best: "以门店公告为准", Active: true, Description: "Bắc Ninh 市中心的咖啡场景：早班咖啡、下午办公与周末小型活动。", Category: "商家"},
-		// Nominatim: Nguyen Phi Y Lan Park, Kinh Bac Ward, Bắc Ninh City
-		// 21.1861461,106.0742127 —— 与 threebeans_bn 相距约 350 m，两个场景
-		// 同时落在 Bắc Ninh 市中心步行范围内。
+	// ——— 商家：Three Beans（有照片、有菜单，是本 app 目前唯一的真实商家）———
+	// 注意：河内 Cầu Giấy 这家坐标仍是 mock（落在街上，不是实测店址），不要
+	// 当已核验对待；北宁店 2026-09-18 已真机实测替换（见下）。
+	{ID: "threebeans", Name: "Three Beans · Cầu Giấy", Area: "Cầu Giấy", Type: "咖啡 · 动态场景", Address: "Đường Cầu Giấy, Dịch Vọng, Cầu Giấy, Hà Nội", Latitude: 21.0359, Longitude: 105.7906, Best: "以门店公告为准", Active: true, Description: "同一门店按时间切换咖啡、出片、下班社交与周末活动场景。", Category: "商家"},
+	// SCENE-ADDRESS-001: 目录里第一条非河内场景。Bắc Ninh 用户此前打
+	// 开场景地图一个场景都搜不到（nearby 半径内没有任何记录）。
+	// threebeans_bn 2026-09-18 真机实测：用户在店内上报定位
+	// 21.1823358,106.0705292，逆编码命中 109 Lý Chiêu Hoàng 独栋，
+	// 与上报点相距约 10m。坐标取该建筑中心（地图锚定，不用单次 GPS 采样）。
+	{ID: "threebeans_bn", Name: "Three Beans · Bắc Ninh", Area: "Bắc Ninh", Type: "咖啡 · 动态场景", Address: "109 Lý Chiêu Hoàng, Suối Hoa, TP Bắc Ninh", Latitude: 21.1824108, Longitude: 106.0705999, Best: "以门店公告为准", Active: true, Description: "Bắc Ninh 市中心的咖啡场景：早班咖啡、下午办公与周末小型活动。", Category: "商家"},
+	// Nominatim: Nguyen Phi Y Lan Park, Kinh Bac Ward, Bắc Ninh City
+	// 21.1861461,106.0742127 —— 与 threebeans_bn 相距约 560 m，两个场景
+	// 同时落在 Bắc Ninh 市中心步行范围内。
 		{ID: "nguyenphilan", Name: "Công viên Nguyên Phi Ỷ Lan", Area: "Bắc Ninh", Type: "公共景点 · 公园", Address: "Công viên Nguyên Phi Ỷ Lan, Phường Kinh Bắc, TP Bắc Ninh", Latitude: 21.1861461, Longitude: 106.0742127, Best: "全天开放", Active: true, Description: "Bắc Ninh 市中心的公共公园，傍晚人最多。", Category: "景点"},
 	}
 	// 这张表里的每一条坐标/地址都是查过的 —— 统一标 OSM，而不是留空让客户端

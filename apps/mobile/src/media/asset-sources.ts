@@ -96,6 +96,34 @@ export function avatarPathToInput(input: {
 // missing asset must degrade to a fallback, never crash a surface.
 // New bundled assets go here; check-media-pipeline.mjs forbids asset
 // require() tables anywhere else.
+// MEDIA-PIPELINE-001: 新代码统一从这里 require 打包 logo，不再在各个
+// surface 里各开一行——check-media-pipeline.mjs 只放行存量（HEAD 已有的
+// 行），新增的裸 require() 会被拦。跟 getBundledPhoto 一样包 try/catch：
+// 这俩现在被 asset-sources.test.ts 传递 import 到，单测跑在纯 node 环境，
+// 裸的顶层 require(png) 在这里会被测试环境的转译器当成语法错误炸掉整个
+// 测试文件（之前 me-profile-components.tsx 里的同款裸 require 从没被任何
+// 测试 import 到，所以这个坑一直没露出来）。
+function loadOtterLogo(): AssetImageSource | undefined {
+  try {
+    return require("../../assets/otter-logo.png") as AssetImageSource;
+  } catch {
+    return undefined;
+  }
+}
+export const OTTER_LOGO = loadOtterLogo();
+
+// FACET-LOGO-001: 参考稿 docs/design/references/Proxy_COMPLETE_FiveRoot_FACET_v11.html
+// 的 .facetEntryLogo（黄黑对半分、中间白圆+四角星的正牌 FACET 标）——之前
+// me.tsx 的 FACET 行用的是通用 "spark" 图标，跟原始设计的专属标不是一个东西。
+function loadFacetLogo(): AssetImageSource | undefined {
+  try {
+    return require("../../assets/facet-logo.png") as AssetImageSource;
+  } catch {
+    return undefined;
+  }
+}
+export const FACET_LOGO = loadFacetLogo();
+
 function getBundledPhoto(key: string): AssetImageSource | undefined {
   try {
     switch (key) {

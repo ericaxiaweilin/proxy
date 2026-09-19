@@ -100,10 +100,17 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     // 真人头像右下 + 徽标走真实好友申请，点头像本身仍走 Scene。
     expect(source).toContain("handleHomeFriend(p.id, p.name)");
     expect(source).toContain("styles.addBadge");
-    // IDENTITY-ID-001: 头像不再是客户端自带的原型肖像（按下标轮转，与身份无关），
-    // 而是按 id 取账号的媒体资产 —— 同一个人在任何页面都是同一张图。
-    expect(fixtures).not.toContain("R34_HUMAN_PORTRAITS");
-    expect(fixtures).not.toContain("images.unsplash.com");
+    // OVERRIDE-UNSplash-001（commander 决定 2026-09-18，覆盖 IDENTITY-ID-001
+    // 的"无账号就灰头像"）：mock 期真人不许出现灰色空头像，之前 5 张 R34 原型
+    // 肖像全部用上。钉死新约定的三条：① 真账号永远走媒体资产（原型图不许覆盖
+    // 真照片）；② 没账号的按 id 哈希固定一张（同一个人任何页面同一张脸，绝不
+    // 按列表下标轮转）；③ 代价（stock 素材≠本人、会撞脸、服务端 feed 落地后删）
+    // 写在 fixtures 注释里，不许静默。
+    expect(fixtures).toContain("R34_HUMAN_PORTRAITS");
+    expect(fixtures).toContain("images.unsplash.com");
+    expect(fixtures).toContain("portraitIndexForPerson");
+    expect(fixtures).toContain("ACCOUNT_AVATAR_ASSET[person.id] !== undefined");
+    expect(fixtures).toContain("OVERRIDE-UNSplash-001");
     expect(fixtures).toContain("ACCOUNT_AVATAR_ASSET");
     expect(fixtures).toContain("/v1/media/thumb/");
     expect(fixtures).toContain("withR34Portraits");

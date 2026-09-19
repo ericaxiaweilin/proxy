@@ -28,6 +28,91 @@ export type FeedReadModel = {
   hasMore: boolean;
 };
 
+// TWIN-SIGNALS-001: 单条帖子曝光聚合（战绩页读模型）。数字含义：
+// impressions 看了几次 / viewers 多少人看过 / totalWatchMs 累计看了多久。
+export type PostImpressionStats = {
+  postId: string;
+  impressions: number;
+  viewers: number;
+  totalWatchMs: number;
+};
+
+function isPostImpressionStats(value: unknown): value is PostImpressionStats {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.postId === "string" && item.postId !== ""
+    && typeof item.impressions === "number" && typeof item.viewers === "number"
+    && typeof item.totalWatchMs === "number";
+}
+
+// PROFILE-VISIT-001: 主页访问聚合。opens 打开了多少次，uniqueViewers 多少个
+// 不同的人打开过——一个人一份主页，不像帖子那样按 id 分组。
+export type ProfileViewStats = {
+  opens: number;
+  uniqueViewers: number;
+};
+
+function isProfileViewStats(value: unknown): value is ProfileViewStats {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.opens === "number" && typeof item.uniqueViewers === "number";
+}
+
+// PROFILE-VIEWERS-001: 按人分组的主页访问明细——"3 次访问"回答不了"是谁"，
+// 这个才回答。actorId 是谁由调用方自己对着已经有的好友列表查真名，
+// localnet 不认识"好友"这个概念。
+export type ProfileViewerStat = {
+  actorId: string;
+  opens: number;
+  lastOpenedAt: string;
+};
+
+function isProfileViewerStat(value: unknown): value is ProfileViewerStat {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.actorId === "string" && item.actorId !== ""
+    && typeof item.opens === "number" && typeof item.lastOpenedAt === "string";
+}
+
+// MEDIA-DWELL-001: 一张照片/视频的曝光聚合——同一个帖子里的多张照片分开算，
+// 不再全记在帖子一个 watchMs 里。
+export type MediaImpressionStats = {
+  postId: string;
+  mediaAssetId: string;
+  impressions: number;
+  viewers: number;
+  totalWatchMs: number;
+};
+
+function isMediaImpressionStats(value: unknown): value is MediaImpressionStats {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.postId === "string" && item.postId !== ""
+    && typeof item.mediaAssetId === "string" && item.mediaAssetId !== ""
+    && typeof item.impressions === "number" && typeof item.viewers === "number"
+    && typeof item.totalWatchMs === "number";
+}
+
+// VIEWER-ACTIVITY-001: 某个访客在"我的"媒体上的活动明细——把"谁看了主页"
+// 和"哪张照片被看了多久"接起来，回答"这个人具体看了什么"，不是两条互相
+// 独立的事实。只列这个人真的看过的媒体，没看过的不摆出来。
+export type ViewerMediaActivity = {
+  postId: string;
+  mediaAssetId: string;
+  opens: number;
+  totalWatchMs: number;
+  lastOpenedAt: string;
+};
+
+function isViewerMediaActivity(value: unknown): value is ViewerMediaActivity {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.postId === "string" && item.postId !== ""
+    && typeof item.mediaAssetId === "string" && item.mediaAssetId !== ""
+    && typeof item.opens === "number" && typeof item.totalWatchMs === "number"
+    && typeof item.lastOpenedAt === "string";
+}
+
 export class LocalNetProtocolError extends Error {
   public constructor(message: string) {
     super(message);
@@ -58,7 +143,7 @@ export class LocalNetClient {
     return `${baseUrl}${path}`;
   }
 
-  public async listFeedPosts(cursor?: string, limit = 25, searchQuery?: string): Promise<FeedReadModel> {
+  public async listFeedPosts(cursor?: string, limit = 25, searchQuery?: string, fresh = false): Promise<FeedReadModel> {
     // 动态 ALL 固定读取全局公开时间流。地址只用于用户显式选择的
     // 二级筛选，不能进入服务端 ListFeedPosts payload。
     //
@@ -75,6 +160,10 @@ export class LocalNetClient {
       if (search !== "") {
         query.push(`search=${encodeURIComponent(search)}`);
       }
+      // FEED-FRESH-001: 发布后立刻重载必须穿透 /v1/feed 的 15s HTTP 缓存，
+      // 否则刚发的帖子大概率撞上发帖前缓存的那一页、用户当场看不到。
+      // _fresh 只换 cache key，服务端忽略该参数。平时不带，缓存照常省流量。
+      if (fresh) query.push(`_fresh=${Date.now()}`);
       const response = await this.input.authClient.requestPublic(`/v1/feed?${query.join("&")}`, { method: "GET" });
       if (response.status < 200 || response.status >= 300) {
         throw new LocalNetProtocolError(`动态服务暂时不可用（${response.status}），请稍后重试`);
@@ -210,6 +299,157 @@ export class LocalNetClient {
       nextCursor: undefined,
       hasMore: payload.hasMore ?? false
     };
+  }
+
+  /**
+   * TWIN-SIGNALS-001 — 曝光上报（analytics，失败静默）。
+   *
+   * 这条链路不影响任何业务状态：没登录（访客）直接跳过不发；发送失败
+   * 不抛错、不重试 —— 重试只会制造重复曝光。调用方（埋点处）用
+   * `void` 触发，不用等。
+   */
+  public async recordPostImpression(postId: string, watchMs: number): Promise<void> {
+    try {
+      if (!postId) return;
+      const session = await this.optionalSession();
+      if (!session) return;
+      await this.sendCommand(
+        session,
+        "RecordPostImpression",
+        { type: "Post", id: postId },
+        { targetType: "POST", targetId: postId, watchMs: Math.max(0, Math.floor(watchMs)) }
+      );
+    } catch {
+      // 埋点失败静默，见方法注释。
+    }
+  }
+
+  /**
+   * TWIN-SIGNALS-001 — 战绩读侧：只查自己的帖子。
+   *
+   * 空数组是真答案（"没人看过"），只有缺数组才是协议异常 ——
+   * 「没人看」和「没读出来」在战绩页是两种长相，必须分开。
+   */
+  public async listPostImpressionStats(): Promise<PostImpressionStats[]> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(
+      session,
+      "ListPostImpressionStats",
+      { type: "Post", id: "impression_stats" },
+      {}
+    );
+    const body = this.decodeOperationRef(result) as { stats?: unknown };
+    if (!Array.isArray(body.stats)) throw new LocalNetProtocolError("战绩响应缺少 stats 数组");
+    return body.stats.filter(isPostImpressionStats);
+  }
+
+  // PROFILE-VISIT-001: 有人打开了我的主页——埋点失败静默，同 recordPostImpression。
+  public async recordProfileOpen(ownerId: string): Promise<void> {
+    try {
+      if (!ownerId) return;
+      const session = await this.optionalSession();
+      if (!session) return;
+      // 自己打开自己的主页不算"被看"——个人主页管理页也走这条渲染路径，
+      // 不加这行的话每次自己进个人主页都会给自己 +1 次访问。
+      if (session.userAccountId === ownerId) return;
+      await this.sendCommand(
+        session,
+        "RecordProfileOpen",
+        { type: "Profile", id: ownerId },
+        { targetType: "PROFILE", targetId: ownerId }
+      );
+    } catch {
+      // 埋点失败静默，见方法注释。
+    }
+  }
+
+  /**
+   * PROFILE-VISIT-001 — 主页访问战绩：只查自己的主页。
+   * 没人看过是真答案（{opens:0, uniqueViewers:0}），不是协议异常。
+   */
+  public async listProfileViewStats(): Promise<ProfileViewStats> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(
+      session,
+      "ListProfileViewStats",
+      { type: "Profile", id: "view_stats" },
+      {}
+    );
+    const body = this.decodeOperationRef(result);
+    if (!isProfileViewStats(body)) throw new LocalNetProtocolError("主页访问战绩响应格式不对");
+    return body;
+  }
+
+  /**
+   * PROFILE-VIEWERS-001 — 按人分组的主页访问明细：只查自己的。空数组是
+   * 真答案（没人看过），只有缺数组才是协议异常。名字/头像不在这里解析——
+   * 调用方对着自己已有的好友列表去认，这里只给 actorId。
+   */
+  public async listProfileViewers(): Promise<ProfileViewerStat[]> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(
+      session,
+      "ListProfileViewers",
+      { type: "Profile", id: "viewers" },
+      {}
+    );
+    const body = this.decodeOperationRef(result) as { viewers?: unknown };
+    if (!Array.isArray(body.viewers)) throw new LocalNetProtocolError("主页访客明细响应缺少 viewers 数组");
+    return body.viewers.filter(isProfileViewerStat);
+  }
+
+  // MEDIA-DWELL-001: 一段照片停留——每次划到下一张都要 flush 上一张，不是
+  // 整个查看会话关闭才报一次（那样多张照片的时间会全记在一个数字里，见
+  // MediaViewer 里的分段逻辑）。埋点失败静默，同 recordPostImpression。
+  public async recordMediaImpression(mediaAssetId: string, watchMs: number): Promise<void> {
+    try {
+      if (!mediaAssetId) return;
+      const session = await this.optionalSession();
+      if (!session) return;
+      await this.sendCommand(
+        session,
+        "RecordMediaImpression",
+        { type: "Media", id: mediaAssetId },
+        { targetType: "MEDIA", targetId: mediaAssetId, watchMs: Math.max(0, Math.floor(watchMs)) }
+      );
+    } catch {
+      // 埋点失败静默，见方法注释。
+    }
+  }
+
+  /**
+   * MEDIA-DWELL-001 — 单张媒体战绩读侧：只查自己帖子里的媒体。
+   * 空数组是真答案，只有缺数组才是协议异常，同 listPostImpressionStats。
+   */
+  public async listMediaImpressionStats(): Promise<MediaImpressionStats[]> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(
+      session,
+      "ListMediaImpressionStats",
+      { type: "Post", id: "media_impression_stats" },
+      {}
+    );
+    const body = this.decodeOperationRef(result) as { stats?: unknown };
+    if (!Array.isArray(body.stats)) throw new LocalNetProtocolError("媒体战绩响应缺少 stats 数组");
+    return body.stats.filter(isMediaImpressionStats);
+  }
+
+  /**
+   * VIEWER-ACTIVITY-001 — 某个访客在"我的"媒体上的活动明细：只能查自己
+   * 内容上的活动，viewerActorId 必填。空数组是真答案（这个人没看过任何
+   * 一张），只有缺数组才是协议异常。
+   */
+  public async listMediaActivityForViewer(viewerActorId: string): Promise<ViewerMediaActivity[]> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(
+      session,
+      "ListMediaActivityForViewer",
+      { type: "Post", id: "viewer_media_activity" },
+      { viewerActorId }
+    );
+    const body = this.decodeOperationRef(result) as { activity?: unknown };
+    if (!Array.isArray(body.activity)) throw new LocalNetProtocolError("访客活动响应缺少 activity 数组");
+    return body.activity.filter(isViewerMediaActivity);
   }
 
   public async createPost(payload: CreatePostPayload, idempotencyKey?: string): Promise<string> {

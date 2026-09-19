@@ -256,6 +256,18 @@ type Repository interface {
 	SnapshotNeeds(ctx context.Context) ([]NeedFromPost, error)
 	AppendInteractionEvent(ctx context.Context, ie InteractionEvent) error
 	ListInteractionEvents(ctx context.Context, actorID string, limit int) ([]InteractionEvent, error)
+	// TWIN-SIGNALS-001: 战绩读侧。按作者聚合自己帖子的曝光 —— 必需接口，
+	// 两个实现（memory + postgres）都必须接上，编译期保证。
+	ListPostImpressionStats(ctx context.Context, authorID string, limit int) ([]PostImpressionStats, error)
+	// PROFILE-VISIT-001: 主页访问聚合，同样是必需接口——理由跟上面一致，
+	// 别让"有 UI 没后端"的静默降级又发生一次。
+	ListProfileViewStats(ctx context.Context, ownerID string) (ProfileViewStats, error)
+	// PROFILE-VIEWERS-001: 按 actor 分组的主页访问明细，同样是必需接口。
+	ListProfileViewers(ctx context.Context, ownerID string, limit int) ([]ProfileViewerStat, error)
+	// MEDIA-DWELL-001: 单张媒体曝光聚合，同样是必需接口。
+	ListMediaImpressionStats(ctx context.Context, authorID string, limit int) ([]MediaImpressionStats, error)
+	// VIEWER-ACTIVITY-001: 指定某个访客在"我的"媒体上的活动明细，同样是必需接口。
+	ListMediaActivityForViewer(ctx context.Context, authorID string, viewerActorID string, limit int) ([]ViewerMediaActivity, error)
 	// POLL-VOTE-001：投票。刻意放进**必需**的 Repository 而不是另开一个可选
 	// 接口 —— 可选接口一旦没人实现，投票就又变成"UI 有、服务端没有"的静默
 	// 降级，正是这次要修的病。宁可编译期就逼着每个实现把投票接上。
@@ -292,7 +304,67 @@ type InteractionEvent struct {
 	TargetType string    `json:"targetType"` // PROFILE | POST | CANDIDATE | AGENT
 	TargetID   string    `json:"targetId"`
 	NeedID     string    `json:"needId,omitempty"`
+	// TWIN-SIGNALS-001: 停留毫秒。曝光是「看到了」，watchMs 是「看了多久」——
+	// 分身偏好 Ingredient 里两者缺一不可（只曝光不看 = 标题党， proven by
+	// completion_rate 为空的老帖）。客户端离开视口时上报，0 = 一划而过。
+	WatchMs int64 `json:"watchMs,omitempty"`
 	CreatedAt  time.Time `json:"createdAt"`
+}
+
+// PostImpressionStats 是一条帖子的曝光聚合：看了多少次、多少人看过、
+// 累计看了多久。战绩页（分身中心）只读这个，不读原始事件流 ——
+// 原始行为流是隐私数据，不下发客户端。
+type PostImpressionStats struct {
+	PostID        string `json:"postId"`
+	Impressions   int64  `json:"impressions"`
+	Viewers       int64  `json:"viewers"`
+	TotalWatchMs  int64  `json:"totalWatchMs"`
+}
+
+// MEDIA-DWELL-001: 单张照片/视频的曝光聚合——跟 PostImpressionStats 同一个
+// 口径（看了几次/多少人看过/累计看了多久），只是粒度从"帖子"细到"这条帖子
+// 里的第几张媒体"。同一个帖子里的多张照片曝光数字会不一样：用户可能只划过
+// 第一张、在第三张停了很久，这个差异之前完全丢失（全记在帖子一个 watchMs
+// 里）。只能查自己帖子里的媒体。
+type MediaImpressionStats struct {
+	PostID        string `json:"postId"`
+	MediaAssetID  string `json:"mediaAssetId"`
+	Impressions   int64  `json:"impressions"`
+	Viewers       int64  `json:"viewers"`
+	TotalWatchMs  int64  `json:"totalWatchMs"`
+}
+
+// VIEWER-ACTIVITY-001: 把 PROFILE-VIEWERS-001（谁看了主页）和 MEDIA-DWELL-001
+// （哪张照片被看了多久）接起来——不只是"某人看了你的主页"和"某张照片被看
+// 了 8 秒"两条互相独立的事实，而是"这个人在这张照片停了 8 秒"。这才是能
+// 支撑"要不要联系这个人"判断的关系洞察，两条独立事实拼不出来。
+// 只能查自己帖子里、指定某个 actor 的活动——不能反过来查"这个 actor 都
+// 看过谁"，那是另一个人的隐私边界，不归这个查询管。
+type ViewerMediaActivity struct {
+	PostID       string    `json:"postId"`
+	MediaAssetID string    `json:"mediaAssetId"`
+	Opens        int64     `json:"opens"`
+	TotalWatchMs int64     `json:"totalWatchMs"`
+	LastOpenedAt time.Time `json:"lastOpenedAt"`
+}
+
+// PROFILE-VISIT-001: 主页访问聚合——打开了多少次、多少个不同的人打开过。
+// 一个人一个主页，不像帖子那样按 id 分组；只能查自己的（见 listProfileViewStats）。
+type ProfileViewStats struct {
+	Opens         int64 `json:"opens"`
+	UniqueViewers int64 `json:"uniqueViewers"`
+}
+
+// PROFILE-VIEWERS-001: 谁看了我的主页，每个人看了几次、最近一次是什么时候——
+// ProfileViewStats 那两个汇总数字够不了"关系洞察"这种用途（"有人看了 5 次"
+// 不能回答"要不要联系一下这个人"，"是哪个人看了 5 次"才能）。这里只给
+// actorId + 次数 + 最近时间，真人名字/头像由调用方自己对着好友列表查——
+// localnet 不认识"好友"这个概念，也不该认识，跨域名字解析放在客户端做。
+// 只能查自己的（见 listProfileViewers），跟 ProfileViewStats 一样。
+type ProfileViewerStat struct {
+	ActorID      string    `json:"actorId"`
+	Opens        int64     `json:"opens"`
+	LastOpenedAt time.Time `json:"lastOpenedAt"`
 }
 
 var (
@@ -710,6 +782,185 @@ func (r *MemoryRepository) ListInteractionEvents(_ context.Context, actorID stri
 	return result, nil
 }
 
+func (r *MemoryRepository) ListPostImpressionStats(_ context.Context, authorID string, limit int) ([]PostImpressionStats, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// 自己的帖子按创建时间倒序取前 N。
+	owned := make([]Post, 0)
+	for _, post := range r.posts {
+		if post.AuthorID == authorID {
+			owned = append(owned, post)
+		}
+	}
+	sort.Slice(owned, func(i, j int) bool {
+		if owned[i].CreatedAt.Equal(owned[j].CreatedAt) {
+			return owned[i].ID > owned[j].ID
+		}
+		return owned[i].CreatedAt.After(owned[j].CreatedAt)
+	})
+	if limit > 0 && len(owned) > limit {
+		owned = owned[:limit]
+	}
+	result := make([]PostImpressionStats, 0, len(owned))
+	for _, post := range owned {
+		stat := PostImpressionStats{PostID: post.ID}
+		viewers := make(map[string]bool)
+		for _, ie := range r.interactionEvents {
+			if ie.EventType != "POST_IMPRESSION" || ie.TargetType != "POST" || ie.TargetID != post.ID {
+				continue
+			}
+			stat.Impressions++
+			stat.TotalWatchMs += ie.WatchMs
+			viewers[ie.ActorID] = true
+		}
+		stat.Viewers = int64(len(viewers))
+		result = append(result, stat)
+	}
+	return result, nil
+}
+
+func (r *MemoryRepository) ListProfileViewStats(_ context.Context, ownerID string) (ProfileViewStats, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var stat ProfileViewStats
+	viewers := make(map[string]bool)
+	for _, ie := range r.interactionEvents {
+		if ie.EventType != "PROFILE_OPEN" || ie.TargetType != "PROFILE" || ie.TargetID != ownerID {
+			continue
+		}
+		stat.Opens++
+		viewers[ie.ActorID] = true
+	}
+	stat.UniqueViewers = int64(len(viewers))
+	return stat, nil
+}
+
+func (r *MemoryRepository) ListProfileViewers(_ context.Context, ownerID string, limit int) ([]ProfileViewerStat, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	byActor := make(map[string]*ProfileViewerStat)
+	for _, ie := range r.interactionEvents {
+		if ie.EventType != "PROFILE_OPEN" || ie.TargetType != "PROFILE" || ie.TargetID != ownerID {
+			continue
+		}
+		stat, ok := byActor[ie.ActorID]
+		if !ok {
+			stat = &ProfileViewerStat{ActorID: ie.ActorID}
+			byActor[ie.ActorID] = stat
+		}
+		stat.Opens++
+		if ie.CreatedAt.After(stat.LastOpenedAt) {
+			stat.LastOpenedAt = ie.CreatedAt
+		}
+	}
+	result := make([]ProfileViewerStat, 0, len(byActor))
+	for _, stat := range byActor {
+		result = append(result, *stat)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if !result[i].LastOpenedAt.Equal(result[j].LastOpenedAt) {
+			return result[i].LastOpenedAt.After(result[j].LastOpenedAt)
+		}
+		return result[i].ActorID < result[j].ActorID
+	})
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+func (r *MemoryRepository) ListMediaImpressionStats(_ context.Context, authorID string, limit int) ([]MediaImpressionStats, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// 自己的帖子按创建时间倒序取前 N，跟 ListPostImpressionStats 同一个截取
+	// 口径——媒体战绩不该比帖子战绩多看到更早的历史。
+	owned := make([]Post, 0)
+	for _, post := range r.posts {
+		if post.AuthorID == authorID {
+			owned = append(owned, post)
+		}
+	}
+	sort.Slice(owned, func(i, j int) bool {
+		if owned[i].CreatedAt.Equal(owned[j].CreatedAt) {
+			return owned[i].ID > owned[j].ID
+		}
+		return owned[i].CreatedAt.After(owned[j].CreatedAt)
+	})
+	if limit > 0 && len(owned) > limit {
+		owned = owned[:limit]
+	}
+	result := []MediaImpressionStats{}
+	for _, post := range owned {
+		refs := append([]PostMediaRef(nil), post.MediaRefs...)
+		sort.Slice(refs, func(i, j int) bool { return refs[i].SortOrder < refs[j].SortOrder })
+		for _, ref := range refs {
+			stat := MediaImpressionStats{PostID: post.ID, MediaAssetID: ref.MediaAssetID}
+			viewers := make(map[string]bool)
+			for _, ie := range r.interactionEvents {
+				if ie.EventType != "MEDIA_IMPRESSION" || ie.TargetType != "MEDIA" || ie.TargetID != ref.MediaAssetID {
+					continue
+				}
+				stat.Impressions++
+				stat.TotalWatchMs += ie.WatchMs
+				viewers[ie.ActorID] = true
+			}
+			stat.Viewers = int64(len(viewers))
+			result = append(result, stat)
+		}
+	}
+	return result, nil
+}
+
+func (r *MemoryRepository) ListMediaActivityForViewer(_ context.Context, authorID string, viewerActorID string, limit int) ([]ViewerMediaActivity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	owned := make([]Post, 0)
+	for _, post := range r.posts {
+		if post.AuthorID == authorID {
+			owned = append(owned, post)
+		}
+	}
+	sort.Slice(owned, func(i, j int) bool {
+		if owned[i].CreatedAt.Equal(owned[j].CreatedAt) {
+			return owned[i].ID > owned[j].ID
+		}
+		return owned[i].CreatedAt.After(owned[j].CreatedAt)
+	})
+	result := []ViewerMediaActivity{}
+	for _, post := range owned {
+		refs := append([]PostMediaRef(nil), post.MediaRefs...)
+		sort.Slice(refs, func(i, j int) bool { return refs[i].SortOrder < refs[j].SortOrder })
+		for _, ref := range refs {
+			var activity ViewerMediaActivity
+			found := false
+			for _, ie := range r.interactionEvents {
+				if ie.EventType != "MEDIA_IMPRESSION" || ie.TargetType != "MEDIA" || ie.TargetID != ref.MediaAssetID || ie.ActorID != viewerActorID {
+					continue
+				}
+				found = true
+				activity.Opens++
+				activity.TotalWatchMs += ie.WatchMs
+				if ie.CreatedAt.After(activity.LastOpenedAt) {
+					activity.LastOpenedAt = ie.CreatedAt
+				}
+			}
+			// 这个人没看过这张就不摆出来——大部分照片大部分人都没点开过，
+			// 逐张列出一堆 0 只会淹没真正有活动的那几张。
+			if !found {
+				continue
+			}
+			activity.PostID = post.ID
+			activity.MediaAssetID = ref.MediaAssetID
+			result = append(result, activity)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].LastOpenedAt.After(result[j].LastOpenedAt) })
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
 func clonePost(post Post) Post {
 	post.MediaRefs = append([]PostMediaRef(nil), post.MediaRefs...)
 	post.ContextRefs = append([]ContextRef(nil), post.ContextRefs...)
@@ -834,8 +1085,8 @@ func NewWithRepositoryAndClock(repository Repository, domainClock clock.Clock) *
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "CreatePost", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "CreateNeedFromPost", "RecordAttribution",
-		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed",
-		"ShortlistAgent", "ListInteractionEvents", "VotePostPoll":
+		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed", "RecordMediaImpression",
+		"ShortlistAgent", "ListInteractionEvents", "ListPostImpressionStats", "ListProfileViewStats", "ListProfileViewers", "ListMediaImpressionStats", "ListMediaActivityForViewer", "VotePostPoll":
 		return true
 	default:
 		return false
@@ -868,10 +1119,22 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.recordPostImpression(ctx, e)
 	case "RecordCandidateViewed":
 		return s.recordCandidateViewed(ctx, e)
+	case "RecordMediaImpression":
+		return s.recordMediaImpression(ctx, e)
 	case "ShortlistAgent":
 		return s.shortlistAgent(ctx, e)
 	case "ListInteractionEvents":
 		return s.listInteractionEvents(ctx, e)
+	case "ListPostImpressionStats":
+		return s.listPostImpressionStats(ctx, e)
+	case "ListProfileViewStats":
+		return s.listProfileViewStats(ctx, e)
+	case "ListProfileViewers":
+		return s.listProfileViewers(ctx, e)
+	case "ListMediaImpressionStats":
+		return s.listMediaImpressionStats(ctx, e)
+	case "ListMediaActivityForViewer":
+		return s.listMediaActivityForViewer(ctx, e)
 	case "VotePostPoll":
 		return s.votePostPoll(ctx, e)
 	default:
@@ -1908,6 +2171,9 @@ type interactionPayload struct {
 	TargetType string `json:"targetType"` // PROFILE | POST | CANDIDATE | AGENT
 	TargetID   string `json:"targetId"`
 	NeedID     string `json:"needId"`
+	// TWIN-SIGNALS-001: 停留毫秒（客户端离开视口时上报）。负数/缺失按 0 计，
+	// 不拒绝整条事件 —— 曝光本身比停留更重要，analytics 失败不能影响主链。
+	WatchMs int64 `json:"watchMs"`
 }
 
 func (s *Service) recordProfileOpen(ctx context.Context, e command.Envelope) command.Result {
@@ -1920,6 +2186,12 @@ func (s *Service) recordPostImpression(ctx context.Context, e command.Envelope) 
 
 func (s *Service) recordCandidateViewed(ctx context.Context, e command.Envelope) command.Result {
 	return s.appendInteraction(ctx, e, "CANDIDATE_VIEWED", "CANDIDATE")
+}
+
+// MEDIA-DWELL-001: 一张照片/视频的一段停留——viewer 每次划到下一张媒体
+// 都要 flush 上一张的这一段，不是整个帖子看完才报一次。
+func (s *Service) recordMediaImpression(ctx context.Context, e command.Envelope) command.Result {
+	return s.appendInteraction(ctx, e, "MEDIA_IMPRESSION", "MEDIA")
 }
 
 func (s *Service) shortlistAgent(ctx context.Context, e command.Envelope) command.Result {
@@ -1943,7 +2215,11 @@ func (s *Service) appendInteraction(ctx context.Context, e command.Envelope, eve
 		TargetType: targetType,
 		TargetID:   p.TargetID,
 		NeedID:     p.NeedID,
+		WatchMs:    p.WatchMs,
 		CreatedAt:  now,
+	}
+	if ie.WatchMs < 0 {
+		ie.WatchMs = 0
 	}
 	domainEvents := []event.DomainEvent{event.New(eventType, "InteractionEvent", ie.EventID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"actorId":    ie.ActorID,
@@ -1979,6 +2255,167 @@ func (s *Service) listInteractionEvents(ctx context.Context, e command.Envelope)
 		"actorId": actorID,
 		"events":  events,
 		"note":    "事件流：订单是怎么来的，从这里可回放",
+	}, nil)
+}
+
+// ListPostImpressionStats：战绩读侧（TWIN-SIGNALS-001）。按作者聚合自己帖子
+// 的曝光：每条 impressions（看了几次）/ viewers（多少人看过）/
+// totalWatchMs（累计看了多久）。只能查自己的 —— 别人的帖子数据不暴露，
+// 传别人的 authorId 直接拒绝。空列表返回 []，不是 null。
+func (s *Service) listPostImpressionStats(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		AuthorID string `json:"authorId"`
+		Limit    int    `json:"limit"`
+	}
+	_ = decode(e.Payload, &p)
+	authorID := p.AuthorID
+	if authorID == "" {
+		authorID = e.Actor.ID
+	}
+	if authorID != e.Actor.ID {
+		return command.Rejected(e, "STATS_FORBIDDEN", "VALIDATION", "AFTER_USER_ACTION", "localnet.stats_forbidden", nil)
+	}
+	if p.Limit <= 0 || p.Limit > 50 {
+		p.Limit = 20
+	}
+	stats, err := s.repository.ListPostImpressionStats(ctx, authorID, p.Limit)
+	if err != nil {
+		return command.Rejected(e, "STATS_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.stats_list_failed", nil)
+	}
+	if stats == nil {
+		stats = []PostImpressionStats{}
+	}
+	return acceptedWithPayload(e, "PostImpressionStats", "", 0, "LIST", map[string]any{
+		"authorId": authorID,
+		"stats":    stats,
+	}, nil)
+}
+
+// ListProfileViewStats：主页访问战绩读侧（PROFILE-VISIT-001）。只能查自己的
+// 主页——不暴露"谁在看谁"，ownerId 不传按自己算，传别人的直接拒绝。
+func (s *Service) listProfileViewStats(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		OwnerID string `json:"ownerId"`
+	}
+	_ = decode(e.Payload, &p)
+	ownerID := p.OwnerID
+	if ownerID == "" {
+		ownerID = e.Actor.ID
+	}
+	if ownerID != e.Actor.ID {
+		return command.Rejected(e, "STATS_FORBIDDEN", "VALIDATION", "AFTER_USER_ACTION", "localnet.stats_forbidden", nil)
+	}
+	stats, err := s.repository.ListProfileViewStats(ctx, ownerID)
+	if err != nil {
+		return command.Rejected(e, "STATS_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.stats_list_failed", nil)
+	}
+	return acceptedWithPayload(e, "ProfileViewStats", "", 0, "LIST", map[string]any{
+		"ownerId":       ownerID,
+		"opens":         stats.Opens,
+		"uniqueViewers": stats.UniqueViewers,
+	}, nil)
+}
+
+// listProfileViewers：按人分组的主页访问明细（PROFILE-VIEWERS-001）。只能
+// 查自己的——不暴露"谁在看谁"给第三方，ownerId 不传按自己算，传别人的拒绝。
+// 真人名字/头像不在这里解析：localnet 不认识"好友"这个概念，跨域名字解析
+// 留给客户端对着自己已经有的好友列表做。
+func (s *Service) listProfileViewers(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		OwnerID string `json:"ownerId"`
+		Limit   int    `json:"limit"`
+	}
+	_ = decode(e.Payload, &p)
+	ownerID := p.OwnerID
+	if ownerID == "" {
+		ownerID = e.Actor.ID
+	}
+	if ownerID != e.Actor.ID {
+		return command.Rejected(e, "STATS_FORBIDDEN", "VALIDATION", "AFTER_USER_ACTION", "localnet.stats_forbidden", nil)
+	}
+	if p.Limit <= 0 || p.Limit > 100 {
+		p.Limit = 50
+	}
+	viewers, err := s.repository.ListProfileViewers(ctx, ownerID, p.Limit)
+	if err != nil {
+		return command.Rejected(e, "STATS_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.stats_list_failed", nil)
+	}
+	if viewers == nil {
+		viewers = []ProfileViewerStat{}
+	}
+	return acceptedWithPayload(e, "ProfileViewers", "", 0, "LIST", map[string]any{
+		"ownerId": ownerID,
+		"viewers": viewers,
+	}, nil)
+}
+
+// ListMediaImpressionStats：单张媒体的曝光战绩（MEDIA-DWELL-001）。只能查
+// 自己帖子里的媒体——别人的帖子数据不暴露，口径跟 listPostImpressionStats
+// 完全一样，只是从"帖子"细到"帖子里的第几张"。
+func (s *Service) listMediaImpressionStats(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		AuthorID string `json:"authorId"`
+		Limit    int    `json:"limit"`
+	}
+	_ = decode(e.Payload, &p)
+	authorID := p.AuthorID
+	if authorID == "" {
+		authorID = e.Actor.ID
+	}
+	if authorID != e.Actor.ID {
+		return command.Rejected(e, "STATS_FORBIDDEN", "VALIDATION", "AFTER_USER_ACTION", "localnet.stats_forbidden", nil)
+	}
+	if p.Limit <= 0 || p.Limit > 50 {
+		p.Limit = 20
+	}
+	stats, err := s.repository.ListMediaImpressionStats(ctx, authorID, p.Limit)
+	if err != nil {
+		return command.Rejected(e, "STATS_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.stats_list_failed", nil)
+	}
+	if stats == nil {
+		stats = []MediaImpressionStats{}
+	}
+	return acceptedWithPayload(e, "MediaImpressionStats", "", 0, "LIST", map[string]any{
+		"authorId": authorID,
+		"stats":    stats,
+	}, nil)
+}
+
+// listMediaActivityForViewer：某个访客在"我的"媒体上的活动明细
+// （VIEWER-ACTIVITY-001）。authorId 不传按自己算、传别人的拒绝——跟其余
+// 战绩接口一致，只能查自己内容上的活动。viewerActorId 必填：这个接口存在
+// 的意义就是"这个人具体看了什么"，不给就没有查询目标。
+func (s *Service) listMediaActivityForViewer(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		AuthorID      string `json:"authorId"`
+		ViewerActorID string `json:"viewerActorId"`
+		Limit         int    `json:"limit"`
+	}
+	_ = decode(e.Payload, &p)
+	authorID := p.AuthorID
+	if authorID == "" {
+		authorID = e.Actor.ID
+	}
+	if authorID != e.Actor.ID {
+		return command.Rejected(e, "STATS_FORBIDDEN", "VALIDATION", "AFTER_USER_ACTION", "localnet.stats_forbidden", nil)
+	}
+	if p.ViewerActorID == "" {
+		return command.Rejected(e, "INVALID_VIEWER_ACTOR_ID", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_viewer_actor_id", nil)
+	}
+	if p.Limit <= 0 || p.Limit > 50 {
+		p.Limit = 20
+	}
+	activity, err := s.repository.ListMediaActivityForViewer(ctx, authorID, p.ViewerActorID, p.Limit)
+	if err != nil {
+		return command.Rejected(e, "STATS_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.stats_list_failed", nil)
+	}
+	if activity == nil {
+		activity = []ViewerMediaActivity{}
+	}
+	return acceptedWithPayload(e, "ViewerMediaActivity", "", 0, "LIST", map[string]any{
+		"authorId":      authorID,
+		"viewerActorId": p.ViewerActorID,
+		"activity":      activity,
 	}, nil)
 }
 

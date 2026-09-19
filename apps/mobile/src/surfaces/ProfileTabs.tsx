@@ -99,8 +99,7 @@ export interface ProfileTabsProps {
     white: string;
     violet: string;
   };
-  onShareProfile?: (() => void) | undefined;
-  onEditProfile?: (() => void) | undefined;
+  // SELF 主页的操作入口收拢到顶栏「更多 → 主页设置」，徽章墙下面只留 tabs。
   // R15.55: 关注图谱 — 区分自己/他人 profile 行为
   viewerMode?: "SELF" | "OTHER" | undefined;  // 决定 "编辑主页" vs "关注/已关注"
   isFollowing?: boolean | undefined;          // viewerMode=OTHER 时显示状态
@@ -146,10 +145,10 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
 
   return (
     <View>
-      {/* 2-col 行动按钮 (Threads R2: 边框 + 10px 圆角 + 9px 字)
-         — 自己 profile = 编辑/分享 / 他人 profile = 关注/消息 (R15.55) */}
-      <View style={styles.actionsRow}>
-        {props.viewerMode === "OTHER" ? (
+      {/* 行动按钮只给他人主页（关注/消息）。自己主页的操作入口在顶栏
+          「更多 → 主页设置」，徽章墙下面不再重复摆编辑/分享。 */}
+      {props.viewerMode === "OTHER" ? (
+        <View style={styles.actionsRow}>
           <>
             <Pressable
               accessibilityLabel={props.isFollowing ? "已关注" : "关注"}
@@ -173,30 +172,8 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
               <Text style={styles.actionSecondaryText}>💬 消息</Text>
             </Pressable>
           </>
-        ) : (
-          <>
-            <Pressable
-              accessibilityLabel="编辑主页"
-              onPress={() => {
-                if (props.onEditProfile) props.onEditProfile();
-              }}
-              style={[styles.actionBtn, styles.actionPrimary]}
-            >
-              <Text style={styles.actionPrimaryText}>编辑主页</Text>
-            </Pressable>
-            <Pressable
-              accessibilityLabel="分享主页"
-              onPress={() => {
-                if (props.onShareProfile) props.onShareProfile();
-                else void Share.share({ message: `查看 ${props.profileDraft.name} 的 Proxy 主页` });
-              }}
-              style={[styles.actionBtn, styles.actionLime]}
-            >
-              <Text style={styles.actionLimeText}>分享主页</Text>
-            </Pressable>
-          </>
-        )}
-      </View>
+        </View>
+      ) : null}
 
       {/* Tabs N 选 1 — IG/Threads 风: 顶部小 icon + 中文 label, active 黑下划线 2px。
           PROFILE-TABS-001: 列表走 visibleProfileTabs，SAVED 只给本人。 */}

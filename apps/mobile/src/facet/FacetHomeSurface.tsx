@@ -52,9 +52,12 @@ type FacetHomeSurfaceProps = {
   client: FacetClient;
   onBack: () => void;
   onComingSoon?: (label: string) => void;
+  /** AI-FACET-CLUSTER-001: 素材由 AI 分身生成，FACET 只负责按对象分发——
+   * 给一条明显的路去生成新素材，不用退回「我的」根页再找。 */
+  onOpenAiIdentity?: () => void;
 };
 
-export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurfaceProps): React.JSX.Element {
+export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentity }: FacetHomeSurfaceProps): React.JSX.Element {
   const [phase, setPhase] = useState<Phase>("LOADING");
   const [payload, setPayload] = useState<ListFacetObjectsPayload | undefined>();
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
@@ -431,7 +434,9 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
     const titles: Record<string, { title: string; desc: string }> = {
       LIBRARY: { title: "内容库", desc: "已展示 / 草稿 / 备选 · 同一份素材按对象复用" },
       OBJECTS: { title: "对象列表", desc: "按关系分组 · 每个对象独立的展示策略" },
-      OPS: { title: "运营", desc: "边界 / 规则 / 高级生成 · 后续版本开放" },
+      // AI-FACET-CLUSTER-001: "高级生成" 从这条描述删掉——生成新素材是 AI 分身的
+      // 职责，FACET 只管素材生成之后怎么分发，两边不重叠。
+      OPS: { title: "运营", desc: "边界 / 规则 · 生成新素材去 AI 分身" },
     };
     const metaVal = titles[view as "LIBRARY" | "OBJECTS" | "OPS"] ?? titles.LIBRARY;
     return (
@@ -511,6 +516,16 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
           </Text>
         </View>
 
+        {onOpenAiIdentity ? (
+          <Pressable onPress={onOpenAiIdentity} style={styles.aiLinkCard} accessibilityLabel="去 AI 分身生成新素材">
+            <View style={styles.aiLinkCopy}>
+              <Text style={styles.aiLinkTitle}>素材不够用？</Text>
+              <Text style={styles.aiLinkSub}>去 AI 分身用你授权的形象生成新照片、新视频。</Text>
+            </View>
+            <Text style={styles.aiLinkChevron}>›</Text>
+          </Pressable>
+        ) : null}
+
         {/* Stats */}
         {phase === "READY" && payload ? (
           <View style={styles.stats}>
@@ -541,7 +556,7 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
           <View style={styles.navGrid}>
             <NavCard label="内容库" sub="已展示 / 草稿 / 备选" iconName="image" onPress={() => handleNav("内容库", "LIBRARY")} />
             <NavCard label="对象列表" sub="按关系分组" iconName="target" onPress={() => handleNav("对象列表", "OBJECTS")} />
-            <NavCard label="运营" sub="边界 / 规则 / 高级生成" iconName="settings" onPress={() => handleNav("运营", "OPS")} />
+            <NavCard label="运营" sub="边界 / 规则" iconName="settings" onPress={() => handleNav("运营", "OPS")} />
           </View>
         ) : null}
 
@@ -659,6 +674,13 @@ const styles = StyleSheet.create({
   heroTag: { color: color.muted, fontSize: 10, fontWeight: "700", letterSpacing: 0.5, marginTop: 4 },
   heroLead: { color: color.ink, fontSize: 14, fontWeight: "700", lineHeight: 21, marginTop: 14, paddingHorizontal: 2 },
   heroLeadSmall: { color: color.muted, fontSize: 10, fontWeight: "500", marginTop: 4 },
+
+  // AI-FACET-CLUSTER-001: 分发 (这一屏) → 生成 (AI 分身) 的跨屏入口。
+  aiLinkCard: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: color.violetSoftBg, borderWidth: 1, borderColor: color.line, borderRadius: 14, padding: 12, marginTop: 12 },
+  aiLinkCopy: { flex: 1 },
+  aiLinkTitle: { fontSize: 13, fontWeight: "800", color: color.violet },
+  aiLinkSub: { fontSize: 11, color: color.ink, marginTop: 3, lineHeight: 15 },
+  aiLinkChevron: { fontSize: 20, color: color.violet },
 
   stats: { flexDirection: "row", gap: 7, marginTop: 10 },
   statBlock: { backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, flex: 1, padding: 10, ...shadows.card },

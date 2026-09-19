@@ -28,6 +28,8 @@ export const TYPE_LABEL: Record<OpportunityType, { label: string; sub: string }>
   coffee_chinese: { label: "咖啡 + 中文", sub: "Talk" },
   bilingual_store: { label: "看店 + 双语", sub: "Language" },
   event_photo: { label: "活动 + 拍照", sub: "Event" },
+  // OPP-TYPE-OTHER-001: 识别不出来就是未分类，不假装知道它是咖啡 + 拍照。
+  other: { label: "其他 · 未分类", sub: "Other" },
 };
 
 // MARKET-QUOTE-SHEET-001: 详情 hero 兜底图与卡片共用这一张（同 TYPE_LABEL
@@ -38,7 +40,11 @@ export const SAMPLE_SCENE_IMAGE: Record<OpportunityType, number> = {
   walk_photo: require("../../assets/market-scene-samples/city-walk-photo-v1.jpg"),
   bilingual_store: require("../../assets/market-scene-samples/bilingual-store-v1.jpg"),
   event_photo: require("../../assets/market-scene-samples/event-photo-v1.jpg"),
+  other: 0,
 };
+// 未分类没有自己的样张：复用咖啡那张（hero 上本来就带「AI 样张」标记）。
+// 没有新写一行 require —— media 管线 R1 禁止在 media/ 之外新增 assets require。
+SAMPLE_SCENE_IMAGE.other = SAMPLE_SCENE_IMAGE.coffee_photo;
 
 export function inferOpportunityTypeForFilter(opportunity: { opportunityType?: OpportunityType; theme?: string; skills?: string; title?: string }): OpportunityType {
   if (opportunity.opportunityType) return opportunity.opportunityType;
@@ -49,7 +55,10 @@ export function inferOpportunityTypeForFilter(opportunity: { opportunityType?: O
   if (theme.includes("双语") || skills.includes("双语") || skills.includes("bilingual")) return "bilingual_store";
   if (theme.includes("活动") || skills.includes("活动") || title.includes("活动") || title.includes("event")) return "event_photo";
   if (theme.includes("中文") || skills.includes("中文") || skills.includes("chinese")) return "coffee_chinese";
-  return "coffee_photo";
+  // OPP-TYPE-OTHER-001: 一个关键词都不中时归未分类。以前这里返回 coffee_photo，
+  // 于是自定义发布（大多不带 opportunityType）全掉进「咖啡 + 拍照」—— 这个类目
+  // 被稀释成垃圾桶，筛选时也会把无关机会算进来。
+  return "other";
 }
 
 function inferType(opportunity: MarketOpportunity): OpportunityType {

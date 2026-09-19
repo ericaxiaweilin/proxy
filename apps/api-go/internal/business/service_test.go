@@ -373,3 +373,52 @@ func TestMerchantPublishIdentity(t *testing.T) {
 		t.Fatal("OPERATOR must not publish as shop")
 	}
 }
+
+// STORE-AMENITIES-001: 门店设施属性商家自填（网速/吸烟/空调/插座/噪音/座位）。
+// 空=没填；封闭词表外的值整单拒绝（不静默丢字段）；空调 16..30 度，0=没填。
+func TestStoreLinesAmenitiesRoundTrip(t *testing.T) {
+	service := New()
+	created := service.Handle(businessEnvelope("owner", "CreateBusinessAccount", "new", map[string]any{"name": "Bonsaidon"}))
+	var body map[string]any
+	_ = json.Unmarshal([]byte(created.OperationRef), &body)
+	businessID := body["businessId"].(string)
+	store := service.Handle(businessEnvelope("owner", "CreateBusinessStore", "new", map[string]any{
+		"businessId": businessID, "name": "West Lake", "address": "Tay Ho",
+	}))
+	var storeBody map[string]any
+	_ = json.Unmarshal([]byte(store.OperationRef), &storeBody)
+	storeID := storeBody["storeId"].(string)
+
+	upsert := service.Handle(businessEnvelope("owner", "UpsertStoreLines", storeID, map[string]any{
+		"storeId": storeID, "wifi": "a", "smoking": "none", "acTempC": 24,
+		"power": "FULL", "quiet": "quiet", "seating": "sofa",
+	}))
+	if upsert.Outcome != "ACCEPTED" {
+		t.Fatalf("amenities upsert failed: %+v", upsert)
+	}
+	read := service.Handle(businessEnvelope("owner", "GetStoreLines", storeID, map[string]any{"storeId": storeID}))
+	var readBody map[string]any
+	_ = json.Unmarshal([]byte(read.OperationRef), &readBody)
+	lines := readBody["lines"].(map[string]any)
+	// 大小写归一（商家填小写也认），值原样落库。
+	if lines["wifi"] != "A" || lines["smoking"] != "NONE" || lines["power"] != "FULL" ||
+		lines["quiet"] != "QUIET" || lines["seating"] != "SOFA" {
+		t.Fatalf("amenities mismatch: %v", lines)
+	}
+	if lines["acTempC"] != float64(24) {
+		t.Fatalf("acTempC mismatch: %v", lines["acTempC"])
+	}
+
+	bad := []map[string]any{
+		{"storeId": storeID, "wifi": "Z"},
+		{"storeId": storeID, "smoking": "随便"},
+		{"storeId": storeID, "acTempC": 40},
+		{"storeId": storeID, "power": "时有时无"},
+	}
+	for i, payload := range bad {
+		result := service.Handle(businessEnvelope("owner", "UpsertStoreLines", storeID, payload))
+		if result.Outcome != "REJECTED" || result.Error == nil || result.Error.ErrorCode != "INVALID_STORE_AMENITIES" {
+			t.Fatalf("case %d: want INVALID_STORE_AMENITIES, got %+v", i, result)
+		}
+	}
+}
