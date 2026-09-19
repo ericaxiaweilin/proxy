@@ -42,8 +42,9 @@
 | 项 | 现状 | 判断 |
 |---|---|---|
 | 35 通知中心 | **五层建了四层，用户可见度 0%**：①生产者——outbox worker 按事件写 `notification.inbox_items`（订单成立 / offer / 邀请），`NOTIF-INVITE-OFFER-001` 钉住路由给对了人；②读接口——`ListInbox` / `MarkInboxRead` / `ResolveDeepLink`，`NOTIF-INBOX-GATE-001` 钉住写走 operator 门、读保持开放；③移动端 SDK——`notification-client.ts` 有类型化 `InboxItem` 与三个方法；④文案——`me-sub-pages.ts:248` 的「通知中心」带用途说明（「系统事件与真人聊天分开，避免订单、时间、安全和好友请求淹没 Conversation」）。**缺的是⑤：入口 + 页面 + 路由**。`surfaces/` 下没有任何 notification/inbox 文件；`"notifications"` 这个 key 全仓只有它自己那一处，没有任何 `openSubPage("notifications")` / `route: "notifications"`；而 `NotificationClient` 在 `native-app.tsx:162` 实例化、`:269` 传进 `AppShell`，`app-shell.tsx:136` 解构出来后再无引用（无 spread 转发）——**通道接了一跳就断了** | 后端与 SDK 已就绪，缺的纯粹是 UI。**入口形态（Me 子页行 / 顶栏铃铛）与列表形态是产品承诺，我不单方面定**。若走 Me 子页，注意本仓已有测试钉住的不变量 `SUBPAGE-GENERIC-FABRICATED-001`：菜单可达 + 无专属分支 ⇒ 不许带 `sections`，兜底渲染诚实的「正在准备这个工作区」——别为了让它「看起来有内容」而配一张假表 |
-| 30 结算记录 | `me-orders.tsx`、`order-execution.tsx`、`voucher.tsx` 均有 settlement 相关代码 | 需逐项辨真伪（真数据 vs 壳），未逐条核 |
-| 32–34 商家模块 | `business-home.tsx`、`merchant-storefront.tsx`、`merchant-me-r21.tsx`、`my-store-recommendations.tsx`、`store-recommendation-queue.tsx` 均已存在 | 同上，需逐项辨真伪 |
+| 30 结算 / 订单 | **一半可达、一半不可达**。可达：`me-orders.tsx`（462 行，导出 MyOrders / MyActivities / Favorites / MerchantCampaign 四个表面）被 `me.tsx` 引用；`voucher.tsx` 真渲染 voucher 字段。**不可达**：`order-execution.tsx` 的 `OrderExecutionSurface` 真接 `FulfillmentClient`（`coming-soon.tsx:29` 注释写明「已去占位化，接 fulfillment 真实读模型」），但它**只被 `coming-soon.tsx` 引用，而 `coming-soon.tsx` 全仓零 import** | 真实现，但用户到不了。见下「三个不可达表面」 |
+| 32–34 商家模块 | **旧 mock 已真替换**：`merchant-me-r21.tsx` 现在只是 re-export shim，注释自述「previous 1250-line hardcoded mock（Linh / Bao / Khoa creator tuples、假 `12.6tr VND`、`Bonsaidon`、`48 张相册`、不可点的 `manageCard`）已由 MerchantMeR21Replacement 取代」；真实现 `merchant-me-r21-replacement.tsx` 真调 `business.*`（accounts/stores/photos/members/spend）+ `supply.querySuppliers`，并渲染 `<MerchantCreatorRecommendations>`。`business-home.tsx` 真调 `getMerchantOperatingHome` / `listStores` / `listProducts` / `listSpendDaily` / `listMemberDirectory` / `listMyAccounts`。`merchant-storefront.tsx`、`my-store-recommendations.tsx`、`store-recommendation-queue.tsx` 均被 `me.tsx` 直接引用 → 可达 | 与旧审计描述相反：这几块**已经是真数据**，不是壳。剩下的问题不是「假」，见下条 |
+| **三个不可达表面**（新发现） | `order-execution.tsx`（订单执行）、`outcome.tsx`（结果）、`skill-workspace.tsx`（Enterprise 运营 Skill 工作区）**只被 `coming-soon.tsx` 引用**；而 `coming-soon.tsx` 被 0 个模块 import（`grep -rn "coming-soon" apps/mobile/src` 无命中）。它是个分发器：给了 client 就渲染真表面，否则渲染「STABLE SURFACE · 已登记」占位卡 —— **这个分发器从来没有被挂载过**。对照：`activity-detail` / `merchant-storefront` 另有直连调用方（`me-orders.tsx` / `me.tsx`），所以它们可达 | 三个表面是真实现却**用户完全到不了**，属于「建好了没入口」的另一形态（不是缺调用方，是缺挂载点）。修法要定入口（从订单列表进执行详情？从哪进结果页？），**属产品判断，我没动**。另注：`ComingSoonSurface` 自己也已成死代码，删或挂都需要同一个判断 |
 | 37 OTP 重发冷却 | **服务端有、客户端没显示**：`OTP-THROTTLE-001` 已在（`identity/service.go:506-509` 1/min、10/hour 滑窗，拒绝时 `OTP_THROTTLED` + `safeDetails.retryAfterSeconds: 60`，`service_test.go:645` 钉住）。客户端 `native-app.tsx:756` 的「重新发送」只按 `busy` 置灰，**不读 `retryAfterSeconds`、没有倒计时**——用户点下去只会拿到一句「无法重新发送验证码：…」。契约里 `ErrorEnvelope.safeDetails` 是 `Record<string, unknown>`，值已经到客户端了，**纯客户端可修** | 缺口是「UI 不反映服务端状态」，与刚处理的合规那条同源（UI 承诺一件服务端会拒的事）。修起来自洽、无产品形态问题，是剩余项里最该先做的一条 |
 | 39 内部 QA 清单 | **未发现残留**：生产设置相关 surface 与全仓搜 `checklist` / `自检` / `上线前` / `验收清单` / `通知中心` 均无命中；仅两处无关引用（`privacy-settings.test.ts:7` 注释指向 `docs/compliance/`、`placeholder-honest-actions.test.ts:346` 的 `PLACEHOLDER-006 checklist walk gaps` 测试名） | 判定已清掉 |
 | A 级 token 缺口 | `DESIGN-CLEANUP-001` 的注释写明只做了「token 纪律**第一批**」，且 **B 档（lotus 定值）/ C 档（Tailwind 返工）/ ProxyEmptyLine 明确「不在本轮」**。`me-styles.ts` 仍有 175 处硬编码 hex（含大量刻意的色调变体） | 剩余是**已声明的延后批次**，不是漏做；纯样式、零语义。优先级低于 37 |
@@ -64,6 +65,37 @@
 **另有一条是钉本身写错**：`STORE-AMENITIES-001` 让 `104_store_amenities.sql` 去 grep 自己的
 文件名，而全仓 121 个迁移文件没有一个自报名字 —— 条件恒假，这条钉从写出来起就没绿过
 （门禁每次都在更前面退出，从没轮到它）。已改为钉「文件存在 + 幂等新增 + 客户端类型在」。
+
+## 本轮另修的一条「空钉」：MERCHANT-CREATOR-001（绿在空处）
+
+旧条件第二臂是：
+
+```bash
+! grep -q 'MerchantCreatorRecommendations' apps/mobile/src/surfaces/merchant-me-r21.tsx
+```
+
+而 `merchant-me-r21.tsx` 是兼容 shim，这个名字只出现在它的**注释**和一个死常量里：
+
+```ts
+const _tripwireMarker = "MerchantCreatorRecommendations";
+void _tripwireMarker;
+```
+
+真链路在别处：`merchant-me-r21-replacement.tsx:629` 渲染 `<MerchantCreatorRecommendations …>`
+→ `merchant-creator-recommendations.tsx:27` 调 `supply.querySuppliers`。
+
+**这条钉绿在空处**：把真数据调用换成 `Promise.resolve([])`，旧条件依然 PASS（已实测）。
+更糟的是那个文件此前被**0 条钉**引用，`querySuppliers` 在全脚本里也只出现在注释里 ——
+真正干活的那次调用**没有任何覆盖**。
+
+已改为钉真链路（`merchant-creator-recommendations.tsx` 必须真调 `supply.querySuppliers`），
+并加反向钉禁止 marker 常量回来；shim 里的死常量与那句「keeps the tripwire happy」注释一并清掉
+（它自己承认是为了喂 grep 而存在）。
+
+反向钉要**先剥 `//` 注释行再 grep**：历史说明里就写着这个常量名，不剥的话钉会被自己的文档喂红
+（我第一次写就踩了，钉立刻红，是假阳性）。
+
+注入验证：换掉真调用 → 红；marker 常量回来 → 红；还原后两文件 sha 逐字节一致、基线绿。
 
 ## 一条方法论
 

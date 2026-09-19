@@ -107,9 +107,27 @@ if ! grep -q 'MEDIA-PIPELINE-001' apps/mobile/src/media/asset-sources.test.ts ||
 fi
 pnpm --filter @proxy/mobile exec vitest run src/media/asset-sources.test.ts src/media/author-avatar.test.ts || exit $?
 echo "    MEDIA-PIPELINE-001: PASS (unified asset resolution + author avatars, feed on pipeline)"
+# 第二臂以前 grep 的是 merchant-me-r21.tsx（兼容 shim）里的组件名 —— 而那个名字
+# 只出现在该文件的注释和一个死常量 `_tripwireMarker` 里。后果：把真链路
+# （replacement 渲染 <MerchantCreatorRecommendations> → merchant-creator-
+# recommendations.tsx 调 supply.querySuppliers）整段删掉，这条钉照样绿 ——
+# 典型的"绿在空处"。渲染那一环已由 MERCHANT-ME-VISUAL-001 覆盖；这里补上
+# **此前被 0 条钉引用的数据调用**（那个文件名在钉脚本里查无一处，
+# querySuppliers 也只出现在注释里）。
 if ! grep -q 'MERCHANT-CREATOR-001' apps/mobile/src/supply-client.test.ts ||
-   ! grep -q 'MerchantCreatorRecommendations' apps/mobile/src/surfaces/merchant-me-r21.tsx; then
-  echo "  FAIL [MERCHANT-CREATOR-001]: merchant Creator recommendation pipeline or tripwire is missing" >&2
+   ! grep -q 'supply.querySuppliers' apps/mobile/src/surfaces/merchant-creator-recommendations.tsx; then
+  echo "  FAIL [MERCHANT-CREATOR-001]: merchant Creator 推荐的真实供给调用断了 ——" >&2
+  echo "        merchant-creator-recommendations.tsx 必须真的调 supply.querySuppliers；" >&2
+  echo "        只有组件名 / 注释 / 常量不算接线。" >&2
+  exit 1
+fi
+# 反向钉：shim 里那个"让 grep 满意"的 marker 常量不许回来。
+# 先剥掉 `//` 注释行再 grep —— 上面那段历史说明里就写着这个常量名，
+# 不剥注释的话钉会被自己的文档喂红（这个仓里踩过同型的坑：
+# 注释里重复一个 token，钉就永远红或者永远绿）。
+if grep -vE '^[[:space:]]*//' apps/mobile/src/surfaces/merchant-me-r21.tsx | grep -q '_tripwireMarker'; then
+  echo "  FAIL [MERCHANT-CREATOR-001]: shim 又用 marker 常量喂钉了 ——" >&2
+  echo "        钉要钉真链路，不要钉一个只为 grep 存在的字符串。" >&2
   exit 1
 fi
 pnpm --filter @proxy/mobile test --run src/supply-client.test.ts || exit $?
