@@ -7196,3 +7196,33 @@ if ! grep -q 'detail.humans.length > 0 ?' apps/mobile/src/surfaces/reality-scene
 fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-humans.test.ts || exit $?
 echo "    SCENE-HUMANS-EMPTY-001: PASS (no people is stated, not left blank)"
+
+# COMP-EPHEMERAL-001（合规约束，不得回退）：阅后即焚 / 查看上限 / 防截屏在
+# **付费会话**（OriginType TASK / SERVICE / ACTIVITY / NEED / OFFER / ORDER）
+# 必须被禁用 —— 服务端强制，客户端不可覆盖。
+# 出处：docs/design/references/Proxy_Chat_Aligned_With_LotusChat_v0.1.md
+#   「功能层面的硬性约束（不得回退）」第 1 条。
+#
+# 2026-09-19 实录：我曾把收件人侧的阅览次数消耗接上（让「看一次就销毁」真的烧），
+# 经确认该功能法务未过 —— 同文档 Review Checklist 里
+#   「法务 review：防截屏 / 阅后即焚 / BURNER 在越南 / 东南亚的法律风险」
+# 至今未勾选。**已撤回**，本钉守住撤回后的状态：
+#   1) 服务端对付费来源走 TransactionLinkedProtection() + 空策略（ErrEphemeralNotAllowed）；
+#   2) 客户端不得自行消耗阅览次数（那会让阅后即焚在社交会话里真的烧起来）。
+if ! grep -qF 'func PolicyForOrigin(originType string)' apps/api-go/internal/conversation/message_protection.go ||
+   ! grep -qF 'if IsTransactionLinkedOrigin(originType) {' apps/api-go/internal/conversation/message_protection.go ||
+   ! grep -qF 'if IsTransactionLinkedOrigin(conv.OriginType) {' apps/api-go/internal/conversation/service.go ||
+   ! grep -qF 'base = TransactionLinkedProtection()' apps/api-go/internal/conversation/service.go ||
+   ! grep -qF 'ApplyWithPolicy(base, *p.ProtectionOverride' apps/api-go/internal/conversation/service.go; then
+  echo "  FAIL [COMP-EPHEMERAL-001]: 付费会话的阅后即焚闸门被拆了 ——" >&2
+  echo "        付费来源必须走 TransactionLinkedProtection + 空策略，服务端强制、客户端不可覆盖。" >&2
+  exit 1
+fi
+# 反向钉：客户端不许自己消耗阅览次数。
+# 阅后即焚法务未过（RFC Review Checklist 未勾），不许在客户端把它点起来。
+if grep -qF 'markMessageRead(' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-EPHEMERAL-001]: 客户端又在消耗阅览次数 ——" >&2
+  echo "        那会让「看一次就销毁」真的烧起来，而法务 review 未过。" >&2
+  exit 1
+fi
+echo "    COMP-EPHEMERAL-001: PASS (paid conversations reject ephemerality; client does not consume views)"

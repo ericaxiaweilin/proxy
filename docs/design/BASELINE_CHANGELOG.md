@@ -4,6 +4,29 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 238 — 2026-09-19
+
+- **阅后即焚：撤回接线，并把它钉成合规闸（COMP-EPHEMERAL-001）**。
+  起因：`conversation.tsx` 里 `markMessageRead` 是零调用方，收件人侧从不消耗阅览
+  次数 —— 看起来是「半截接线」，我一度把这条消耗接上了。
+  **经确认这是合规问题，不是漏接线**：`docs/design/references/Proxy_Chat_Aligned_With_LotusChat_v0.1.md`
+  的「功能层面的硬性约束（不得回退）」第 1 条要求付费会话（OriginType TASK /
+  SERVICE / ACTIVITY / NEED / OFFER / ORDER）**禁用阅后即焚、查看上限、防截屏**，
+  服务端强制；同文档 Review Checklist 里
+  「法务 review：防截屏 / 阅后即焚 / BURNER 在越南 / 东南亚的法律风险」**至今未勾**。
+  **改动已全部撤回**（`conversation.tsx` 与 HEAD 逐字节一致，新增的测试文件已删）。
+  撤回来的这条通道改成合规钉：守住服务端对付费来源走
+  `TransactionLinkedProtection()` + 空策略（`ErrEphemeralNotAllowed`），并**禁止
+  客户端自行消耗阅览次数**（那会让阅后即焚在社交会话里真的烧起来）。两种注入见红：
+  拆掉服务端付费闸 / 客户端又去消耗次数。
+  - 无基线敏感实现改动（`conversation.tsx` 未变）；本条目记录的是撤回与约束入闸。
+  - **遗留（未处理，需产品/法务定）**：客户端「安全对话」面板里的
+    「阅后即焚」6 档开关**没有按来源关闭**，付费会话里也能开，而服务端会拒
+    （`ErrEphemeralNotAllowed`）。即：UI 仍在承诺一件服务端不允许、法务未过的事。
+- 重建审计台账：原 `Backend_Frontend_Architecture_Audit_2026-09-17.md` 已丢失
+  （从未被 git 跟踪，删了无痕），重建为 `architecture/Audit_Item_Status_2026-09-19.md`
+  并入库 —— 记每项的状态、证据与待定，避免再次丢失后从头核。
+
 ## Revision 237 — 2026-09-19
 
 - 审计第三轮/第四轮残留四项（2026-09-17 那批被 index-only 提交扫掉后重建）：
