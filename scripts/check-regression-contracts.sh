@@ -7278,3 +7278,27 @@ if grep -qF 'markMessageRead(' apps/mobile/src/surfaces/conversation.tsx; then
   exit 1
 fi
 echo "    COMP-EPHEMERAL-001: PASS (paid conversations reject ephemerality; client does not consume views)"
+# AGENT-CLAIM-NUMBER-001: 接单编号（技师号）。注册时按顺序分配（1 起、无跳号，
+# 上限 10000000）；个人管理→编辑资料里只读展示，且仅可接单（AVAILABLE）时可见，
+# 不接单整行隐藏、无手动开关。
+# 正向：迁移/分配/读取三段都在，缺一段就是“有号无来源”或“有来源无号”。
+if ! grep -qF 'identity.agent_claim_numbers' apps/api-go/migrations/105_agent_claim_number.sql ||
+   ! grep -qF 'allocateAgentClaimNumber(ctx, transaction, userID)' apps/api-go/internal/platform/postgres/identity.go ||
+   ! grep -qF 'FOR UPDATE' apps/api-go/internal/platform/postgres/identity.go ||
+   ! grep -qF 'ClaimNumber int `json:"claimNumber"`' apps/api-go/internal/identity/profile.go ||
+   ! grep -qF 'COALESCE(c.claim_number, 0)' apps/api-go/internal/platform/postgres/identity.go ||
+   ! grep -qF 'formatClaimNumber(claimNumber)' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'availability === "AVAILABLE" && formatClaimNumber(claimNumber)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [AGENT-CLAIM-NUMBER-001]: 接单编号链路断了 ——" >&2
+  echo "        注册分配 / profile 携带 / 编辑资料展示三段必须都在。" >&2
+  exit 1
+fi
+# 反向钉：编号不可编辑（系统分配），展示至少 3 位零填充。
+if ! grep -qF 'padStart(3, "0")' apps/mobile/src/claim-number.ts; then
+  echo "  FAIL [AGENT-CLAIM-NUMBER-001]: 编号展示口径丢了 ——" >&2
+  echo "        至少 3 位零填充（001），未分配返回空串由调用方隐藏整行。" >&2
+  exit 1
+fi
+go -C apps/api-go test ./internal/platform/postgres/ -run TestAgentClaimNumberSequential -count=1 || exit $?
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/me-claim-number.test.ts || exit $?
+echo "    AGENT-CLAIM-NUMBER-001: PASS (claim numbers sequential, read-only, AVAILABLE-only)"

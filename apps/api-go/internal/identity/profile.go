@@ -104,6 +104,9 @@ type Profile struct {
 	AvatarPath    string    `json:"avatarPath"`
 	Version       int       `json:"version"`
 	UpdatedAt     time.Time `json:"updatedAt"`
+	// AGENT-CLAIM-NUMBER-001: 接单编号。注册时按顺序分配（1 起、无跳号），
+	// 0 = 未分配（内存仓/老数据过渡态，客户端按“无编号”处理，不展示）。
+	ClaimNumber int `json:"claimNumber"`
 }
 
 func (p Profile) validate() error {

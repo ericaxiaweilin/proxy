@@ -93,6 +93,11 @@ func (r *IdentityRepository) EnsurePasswordlessIdentity(ctx context.Context, cha
 				return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
 			}
 		}
+		// AGENT-CLAIM-NUMBER-001: 注册同事务分配接单编号。升级路径（账户已存在）
+		// 若缺号也补，函数内部按“已有号不动”处理。
+		if err = allocateAgentClaimNumber(ctx, transaction, userID); err != nil {
+			return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
+		}
 		login = identity.LoginIdentity{ID: loginID, UserAccountID: userID, Channel: channel, Identifier: identifier, Verified: true, Status: "ACTIVE"}
 		created = true
 	} else if err != nil {
@@ -123,6 +128,29 @@ func (r *IdentityRepository) EnsurePasswordlessIdentity(ctx context.Context, cha
 		return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
 	}
 	return login, device, created, nil
+}
+
+// AGENT-CLAIM-NUMBER-001: 注册同事务分配接单编号（1 起、无跳号）。
+// 计数器行 SELECT … FOR UPDATE，同事务回滚则号码一并作废——不存在“占了号但
+// 账户没建成”的空洞。已有号（升级/重试）直接返回，不消耗新号。
+func allocateAgentClaimNumber(ctx context.Context, tx pgx.Tx, userAccountID string) error {
+	var existing int
+	err := tx.QueryRow(ctx, `SELECT claim_number FROM identity.agent_claim_numbers WHERE user_account_id = $1`, userAccountID).Scan(&existing)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	var next int
+	if err := tx.QueryRow(ctx, `SELECT next_number FROM identity.agent_claim_number_counter WHERE id = 1 FOR UPDATE`).Scan(&next); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO identity.agent_claim_numbers (user_account_id, claim_number) VALUES ($1, $2) ON CONFLICT (user_account_id) DO NOTHING`, userAccountID, next); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE identity.agent_claim_number_counter SET next_number = next_number + 1 WHERE id = 1`)
+	return err
 }
 
 func reassignDevice(ctx context.Context, execer sqlExecer, device identity.DeviceRegistration) error {
@@ -1241,9 +1269,13 @@ var _ identity.ProfileRepository = (*IdentityRepository)(nil)
 func (r *IdentityRepository) GetProfile(ctx context.Context, userAccountID string) (identity.Profile, error) {
 	var p identity.Profile
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT user_account_id, name, handle, bio, city, avatar_path, version, updated_at
-		FROM identity.profiles WHERE user_account_id=$1`, userAccountID).Scan(
+		SELECT p.user_account_id, p.name, p.handle, p.bio, p.city, p.avatar_path, p.version, p.updated_at,
+			COALESCE(c.claim_number, 0)
+		FROM identity.profiles p
+		LEFT JOIN identity.agent_claim_numbers c ON c.user_account_id = p.user_account_id
+		WHERE p.user_account_id=$1`, userAccountID).Scan(
 		&p.UserAccountID, &p.Name, &p.Handle, &p.Bio, &p.City, &p.AvatarPath, &p.Version, &p.UpdatedAt,
+		&p.ClaimNumber,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.Profile{}, identity.ErrProfileNotFound
@@ -1264,9 +1296,13 @@ func (r *IdentityRepository) GetProfileByHandle(ctx context.Context, handle stri
 	}
 	var p identity.Profile
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT user_account_id, name, handle, bio, city, avatar_path, version, updated_at
-		FROM identity.profiles WHERE lower(ltrim(handle, '@')) = $1`, want).Scan(
+		SELECT p.user_account_id, p.name, p.handle, p.bio, p.city, p.avatar_path, p.version, p.updated_at,
+			COALESCE(c.claim_number, 0)
+		FROM identity.profiles p
+		LEFT JOIN identity.agent_claim_numbers c ON c.user_account_id = p.user_account_id
+		WHERE lower(ltrim(p.handle, '@')) = $1`, want).Scan(
 		&p.UserAccountID, &p.Name, &p.Handle, &p.Bio, &p.City, &p.AvatarPath, &p.Version, &p.UpdatedAt,
+		&p.ClaimNumber,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.Profile{}, identity.ErrProfileNotFound
@@ -1300,11 +1336,13 @@ func (r *IdentityRepository) SearchProfiles(ctx context.Context, query string, l
 	// carry a NUL byte at all (SQLSTATE 22021, invalid byte sequence for
 	// encoding "UTF8").
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT user_account_id, name, handle, bio, city, avatar_path, version, updated_at
-		FROM identity.profiles
-		WHERE ($1 <> '' AND strpos(lower(ltrim(handle, '@')), $1) > 0)
-		   OR strpos(lower(name), $2) > 0
-		ORDER BY lower(ltrim(handle, '@'))
+		SELECT p.user_account_id, p.name, p.handle, p.bio, p.city, p.avatar_path, p.version, p.updated_at,
+			COALESCE(c.claim_number, 0)
+		FROM identity.profiles p
+		LEFT JOIN identity.agent_claim_numbers c ON c.user_account_id = p.user_account_id
+		WHERE ($1 <> '' AND strpos(lower(ltrim(p.handle, '@')), $1) > 0)
+		   OR strpos(lower(p.name), $2) > 0
+		ORDER BY lower(ltrim(p.handle, '@'))
 		LIMIT $3`, handleNeedle, needle, limit)
 	if err != nil {
 		return nil, err
@@ -1315,6 +1353,7 @@ func (r *IdentityRepository) SearchProfiles(ctx context.Context, query string, l
 		var p identity.Profile
 		if err := rows.Scan(
 			&p.UserAccountID, &p.Name, &p.Handle, &p.Bio, &p.City, &p.AvatarPath, &p.Version, &p.UpdatedAt,
+			&p.ClaimNumber,
 		); err != nil {
 			return nil, err
 		}
@@ -1329,20 +1368,26 @@ func (r *IdentityRepository) SearchProfiles(ctx context.Context, query string, l
 // increasing versions.
 func (r *IdentityRepository) UpsertProfile(ctx context.Context, p identity.Profile) (identity.Profile, error) {
 	row := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		INSERT INTO identity.profiles (user_account_id, name, handle, bio, city, avatar_path, version, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,1,$7)
-		ON CONFLICT (user_account_id) DO UPDATE SET
-			name=EXCLUDED.name,
-			handle=EXCLUDED.handle,
-			bio=EXCLUDED.bio,
-			city=EXCLUDED.city,
-			avatar_path=EXCLUDED.avatar_path,
-			version=identity.profiles.version + 1,
-			updated_at=EXCLUDED.updated_at
-		RETURNING user_account_id, name, handle, bio, city, avatar_path, version, updated_at`,
+		WITH up AS (
+			INSERT INTO identity.profiles (user_account_id, name, handle, bio, city, avatar_path, version, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,1,$7)
+			ON CONFLICT (user_account_id) DO UPDATE SET
+				name=EXCLUDED.name,
+				handle=EXCLUDED.handle,
+				bio=EXCLUDED.bio,
+				city=EXCLUDED.city,
+				avatar_path=EXCLUDED.avatar_path,
+				version=identity.profiles.version + 1,
+				updated_at=EXCLUDED.updated_at
+			RETURNING user_account_id, name, handle, bio, city, avatar_path, version, updated_at
+		)
+		SELECT up.user_account_id, up.name, up.handle, up.bio, up.city, up.avatar_path, up.version, up.updated_at,
+			COALESCE(c.claim_number, 0)
+		FROM up
+		LEFT JOIN identity.agent_claim_numbers c ON c.user_account_id = up.user_account_id`,
 		p.UserAccountID, p.Name, p.Handle, p.Bio, p.City, p.AvatarPath, p.UpdatedAt)
 	var out identity.Profile
-	if err := row.Scan(&out.UserAccountID, &out.Name, &out.Handle, &out.Bio, &out.City, &out.AvatarPath, &out.Version, &out.UpdatedAt); err != nil {
+	if err := row.Scan(&out.UserAccountID, &out.Name, &out.Handle, &out.Bio, &out.City, &out.AvatarPath, &out.Version, &out.UpdatedAt, &out.ClaimNumber); err != nil {
 		// HANDLE-UNIQUE-001: the ON CONFLICT clause above only covers
 		// user_account_id. A collision on the handle unique index arrives
 		// here as a 23505, and it must be reported as "that handle is taken"

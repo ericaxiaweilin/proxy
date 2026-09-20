@@ -23,6 +23,9 @@ export type ProfileWire = {
   avatarPath: string;
   version: number;
   updatedAt: string;
+  // AGENT-CLAIM-NUMBER-001: 接单编号（服务端注册时顺序分配）。缺席/0 = 未分配，
+  // 客户端按无编号处理（整行隐藏）。
+  claimNumber?: number | undefined;
 };
 
 export class ProfileClient {

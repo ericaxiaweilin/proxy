@@ -964,6 +964,8 @@ export const styles = StyleSheet.create({
   profileEditorField: { borderBottomColor: "#ECE8EF", borderBottomWidth: 1, paddingVertical: 10 },
   profileEditorLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
   profileEditorInput: { color: color.ink, fontSize: 14, paddingHorizontal: 0, paddingVertical: 7 },
+  // AGENT-CLAIM-NUMBER-001: 接单编号只读行——系统分配，不可编辑，字宽字重接近店内工牌。
+  profileEditorClaimNumber: { color: color.ink, fontSize: 16, fontWeight: "800", letterSpacing: 2, paddingVertical: 7 },
 
   sheetOverlay: { backgroundColor: "rgba(20,18,31,0.42)", flex: 1, justifyContent: "flex-end", padding: 12 },
   sheetOverlayTop: { backgroundColor: "rgba(20,18,31,0.42)", flex: 1, justifyContent: "flex-start", padding: 12 },

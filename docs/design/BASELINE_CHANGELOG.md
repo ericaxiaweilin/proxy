@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 240 — 2026-09-20
+
+- **「个人总管理」改名「个人管理」**。只是标签文案，路由（`personalmanage`）、
+  页面结构、二维码与状态管理都不变。
+- **接单编号（AGENT-CLAIM-NUMBER-001）**：个人管理→编辑资料新增只读行。
+  编号由服务端注册时按顺序分配（1 起、无跳号，上限 10000000），展示至少 3 位
+  零填充（001）；仅状态为可接单（AVAILABLE）时展示，不接单整行隐藏，无手动开关。
+- 影响文件：`apps/mobile/src/surfaces/me.tsx`、`me-styles.ts`
+  （新样式 `profileEditorClaimNumber`）、`me-profile-components.tsx`（转出
+  `formatClaimNumber`）、`me-sub-pages.ts`（改名）。
+
 ## Revision 239 — 2026-09-20
 
 - **个人主页搜索命中项：把「我的回复 / 动态」前缀补回来（修复 55ccbd4 造成的恒红钉）**。

@@ -12,6 +12,10 @@ export function availabilityLabel(value: AvailabilityState): string {
   return AVAILABILITY_OPTIONS.find((option) => option.id === value)?.title ?? "可接单";
 }
 
+// AGENT-CLAIM-NUMBER-001: 接单编号展示口径实现在无依赖模块（可单测），这里
+// 转出口令编辑页的 import 路径保持不变。
+export { formatClaimNumber } from "../claim-number";
+
 function AbilitySheet({
   sheet,
   initialFields,

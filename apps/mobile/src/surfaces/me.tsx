@@ -84,7 +84,7 @@ import { createBehaviorAnalyticsStore } from "../behavior-analytics-settings";
 // Extracted modules
 import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSection, PersonalHubTab, SocialVisibility, SocialAccount, AbilityType, AbilityInstance, AvailabilityRule, AvOverride } from "./me-types";
 import { ABILITY_SCHEMAS, DEFAULT_ABILITIES, AVAILABILITY_OPTIONS, AV_DAY_NAMES, avKeyOf, avFmt, describeAvRule, avStateFor, nextDays, INITIAL_SOCIAL_ACCOUNTS, resolveHubProfile, resolveHubSocials } from "./me-types";
-import { AbilitySheet, AvRuleSheet, AvDaySheet, FakeQr, QrCard, SocialRow, AvailabilitySheet, MeLocationContext, VoucherMenuGlyph, ServiceRow, availabilityLabel } from "./me-profile-components";
+import { AbilitySheet, AvRuleSheet, AvDaySheet, FakeQr, QrCard, SocialRow, AvailabilitySheet, MeLocationContext, VoucherMenuGlyph, ServiceRow, availabilityLabel, formatClaimNumber } from "./me-profile-components";
 import { MyOrdersSurface, MyActivitiesSurface, FavoritesSurface, MerchantCampaignSurface } from "./me-orders";
 import { SUB_PAGE_CONTENT, meSubPage } from "./me-sub-pages";
 import { useMerchantIdentity } from "../use-merchant-identity";
@@ -178,10 +178,10 @@ const REQUESTER_ME: PersonaConfig = {
   sections: [
     {
       id: "personal_profile",
-      title: "个人总管理",
+      title: "个人管理",
       hint: "基本信息、二维码、状态管理在一个页里",
       rows: [
-        { icon: "profile-ring", label: "个人总管理", desc: "基本信息 · 二维码 · 状态管理 (可接单)", grad: true, route: "personalmanage" },
+        { icon: "profile-ring", label: "个人管理", desc: "基本信息 · 二维码 · 状态管理 (可接单)", grad: true, route: "personalmanage" },
         { icon: "profile-ring", label: "个人主页", desc: "对外展示 · Threads R2 · 名片、动态、能力、可用时间", route: "personalhub" },
         { icon: "arrow-up-right", label: "社媒与联系", desc: "TikTok、Zalo、Instagram 与可见范围", route: "socialidentity" },
         { icon: "route", label: "访问与转化", desc: "渠道 → 主页 → 聊天 → 订单", route: "socialanalytics" }
@@ -412,7 +412,7 @@ export function MeSurface({
   }, [requestedSubPage, onRequestedSubPageConsumed]);
   // PROFILE-QR-005：关闭子页这件事以前在 20 多个地方各写一遍
   // `setSubPage(undefined)` —— 一律甩回「我的」根页。二维码页可以从
-  // 「个人总管理」或「我的企业/店铺」进来，返回就得回到那一页，不然
+  // 「个人管理」或「我的企业/店铺」进来，返回就得回到那一页，不然
   // 点进去再返回等于被人踢回主页。没有 backRoute 的行为完全不变。
   function closeSubPage(): void {
     const parent = subPage?.backRoute ? meSubPage(subPage.backRoute) : undefined;
@@ -537,6 +537,14 @@ export function MeSurface({
             {([['name', '显示名称'], ['handle', '用户名'], ['bio', '一句话介绍'], ['city', '城市']] as const).map(([key, label]) => (
               <View key={key} style={styles.profileEditorField}><Text style={styles.profileEditorLabel}>{label}</Text><TextInput onChangeText={(value) => setProfileDraft((current) => ({ ...current, [key]: value }))} style={styles.profileEditorInput} value={profileDraft[key]} /></View>
             ))}
+            {/* AGENT-CLAIM-NUMBER-001: 接单编号——系统按注册顺序分配，只读；
+                仅可接单（AVAILABLE）时展示，不接单整行隐藏，无手动开关。 */}
+            {availability === "AVAILABLE" && formatClaimNumber(claimNumber) !== "" ? (
+              <View style={styles.profileEditorField}>
+                <Text style={styles.profileEditorLabel}>接单编号</Text>
+                <Text style={styles.profileEditorClaimNumber}>{formatClaimNumber(claimNumber)}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -713,7 +721,7 @@ export function MeSurface({
   // 两个能开放大层的分支（personalmanage / personalqr）互斥，所以这一个锚点够用；
   // 谁改了「同屏两个放大层」的假设，这里就得拆成两个。
   const qrZoomShotRef = useRef<View>(null);
-  // PROFILE-QR-004：个人总管理的小卡也有自己的截图锚点。同一次渲染里只会挂载
+  // PROFILE-QR-004：个人管理的小卡也有自己的截图锚点。同一次渲染里只会挂载
   // 其中一个（子页与卡片互斥），所以锚点必须由调用方传进来，不许写死一个。
   const qrCardShotRef = useRef<View>(null);
   // PROFILE-QR-008：出示码的那两屏把屏幕拉满 —— 微信、支付宝出示码那一屏的做法。
@@ -867,6 +875,8 @@ export function MeSurface({
   const profileHydratedRef = useRef(false);
   const profileHydratedForRef = useRef<string | undefined>(undefined);
   const profileTouchedRef = useRef(false);
+  // AGENT-CLAIM-NUMBER-001: 接单编号（服务端分配，本地只读）。0 = 未分配。
+  const [claimNumber, setClaimNumber] = useState(0);
   useEffect(() => {
     // PROFILE-READ-001 hydration order (first writer wins per account):
     // 1. server profile (source of truth once the user has saved);
@@ -880,6 +890,7 @@ export function MeSurface({
     profileHydratedRef.current = false;
     profileHydratedForRef.current = viewerAccountId;
     setProfileDraft({ ...NEUTRAL_PROFILE });
+    setClaimNumber(0);
     setProfileAvatarUri(undefined);
     setProfileRemoteAvatarPath(undefined);
     let cancelled = false;
@@ -930,6 +941,7 @@ export function MeSurface({
           const record: ProfileRecord = mergeRemoteProfile(remote, existingRecord);
           await profileStore.write(record).catch(() => undefined);
           applyRecord(record);
+          setClaimNumber(typeof remote.claimNumber === "number" ? remote.claimNumber : 0);
           if (!hydrateAvatar(record.avatarPath)) hydrateRemoteAvatar(remote.avatarPath);
           return;
         } catch {
@@ -1899,7 +1911,7 @@ export function MeSurface({
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <Text style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.subPageTitle}>个人总管理</Text>
+            <Text style={styles.subPageTitle}>个人管理</Text>
             <Text style={styles.subPageSub}>基本信息、二维码、状态管理都集中在这里。</Text>
 
             <Text style={styles.customSectionTitle}>基本信息</Text>

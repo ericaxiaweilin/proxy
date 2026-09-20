@@ -39,7 +39,7 @@ export type AvailabilityState = "AVAILABLE" | "BUSY" | "PAUSED" | "HIDDEN";
 //     the user has not set one yet.
 //
 // Centralising the resolver here means the hub card,
-// the identity card, and the future 个人总管理 /
+// the identity card, and the future 个人管理 /
 // 个人主页 cards all use the same precedence and
 // we can tripwire the "real profile reaches the hub"
 // property with one small vitest.

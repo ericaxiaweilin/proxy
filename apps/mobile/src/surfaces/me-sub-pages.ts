@@ -201,7 +201,7 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
     icon: "✓"
   },
   personalmanage: {
-    title: "个人总管理",
+    title: "个人管理",
     desc: "基本信息、二维码、状态管理。个人主页走 Threads R2 对外展示。",
     icon: "profile-ring",
   },
