@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 242 — 2026-09-20
+
+- **访客首页不再弹"好友状态暂时无法加载"**（GUEST-RELATIONSHIP-001）：
+  首页关系链 effect 先认 `isGuest` 再拉 `listMyFriendships`，访客直接跳过；
+  切到访客时清掉上一手的失败提示。点 + 号仍走"登录后可添加好友"，行为不变。
+- 影响文件：`apps/mobile/src/surfaces/requester-home.tsx`、
+  `apps/mobile/src/shell/app-shell.tsx`（透 `isGuest`，1 行）。
+
 ## Revision 241 — 2026-09-20
 
 - **benefit 做正本（按决议；018 暂不动）**：`DATABASE_URL` 分支改用

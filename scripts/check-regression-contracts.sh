@@ -54,6 +54,29 @@ if ! grep -q 'AUTH-DOB-FORMAT-001' apps/mobile/src/date-of-birth-input.test.ts |
 fi
 pnpm --filter @proxy/mobile exec vitest run src/date-of-birth-input.test.ts || exit $?
 echo "    AUTH-DOB-FORMAT-001: PASS (year/month/day separators + deletion)"
+
+# AUTH-DOB-BOUNDS-001: 出生日期的月份/日期边界必须**自己判**，不能交给 Date。
+# 报障原文：注册页输入 1999-99-99 判通过并发了验证码。根因是越界 ISO 串在不同
+# JS 引擎上结果不一致（Node/V8 判 Invalid Date，真机 Hermes 滚月成合法日期），
+# 所以边界判定不能依赖 Date。两处（注册页 gate / login-client）必须同源。
+#
+# 正向钉必须**先剥注释再 grep**：本文件的注释里就写着 1999-99-99 / 1999-02-31
+# 这些例子，不剥的话把实现整段删掉、注释留着，钉照样 PASS。
+auth_dob_bounds_code=$(grep -vE '^[[:space:]]*(//|\{/\*)' apps/mobile/src/date-of-birth-input.ts)
+if ! printf '%s\n' "$auth_dob_bounds_code" | grep -qF 'month < 1 || month > 12' ||
+   ! printf '%s\n' "$auth_dob_bounds_code" | grep -qF 'day < 1 || day > 31' ||
+   ! printf '%s\n' "$auth_dob_bounds_code" | grep -qF 'parseDateOfBirthParts'; then
+  echo "  FAIL [AUTH-DOB-BOUNDS-001]: 出生日期的月份/日期边界判定不见了 ——" >&2
+  echo "        月 1-12、日 1-31 必须自己判（再用 UTC 回读确认这一天存在），" >&2
+  echo "        不能只靠 new Date()：越界 ISO 串在不同 JS 引擎上行为不一致。" >&2
+  exit 1
+fi
+if ! grep -qF 'parseDateOfBirthParts' apps/mobile/src/login-client.ts; then
+  echo "  FAIL [AUTH-DOB-BOUNDS-001]: login-client 又自己写了一份出生日期判定 ——" >&2
+  echo "        它必须跟注册页共用 parseDateOfBirthParts，否则一处拦一处放。" >&2
+  exit 1
+fi
+echo "    AUTH-DOB-BOUNDS-001: PASS (month/day bounds judged without relying on Date; both gates share one parser)"
 if ! grep -q 'FEED-OWN-001' apps/mobile/src/feed-author.test.ts ||
    ! grep -q 'resolveAuthorDisplayName' apps/mobile/src/surfaces/feed.tsx; then
   echo "  FAIL [FEED-OWN-001]: viewer-relative author label or its test is missing" >&2
@@ -7350,3 +7373,14 @@ require_test "BENEFIT-REDEEM-002" "./internal/benefit" \
 require_test "BENEFIT-REDEEM-002" "./internal/benefit" \
   "TestRedeemFailsClosedWithoutMerchantVerifierConfigured" \
   "apps/api-go/internal/benefit/service_test.go" || exit $?
+# GUEST-RELATIONSHIP-001: 访客首页曾弹"好友状态暂时无法加载"。
+# 根因：早退只认 viewerAccountId，而访客可能带着已失效的老 session
+#（PUBLIC 但 secure store 还有 userAccountId），拉关系链必失败。
+# 修法：isGuest 直接透进首页，访客不拉链、失败提示也不留。
+if ! grep -qF 'if (isGuest)' apps/mobile/src/surfaces/requester-home.tsx ||
+   ! grep -qF '{...(isGuest ? { isGuest } : {})}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [GUEST-RELATIONSHIP-001]: 访客关系链守卫丢了 ——" >&2
+  echo "        首页 effect 必须先认 isGuest，app-shell 必须把 isGuest 透下去。" >&2
+  exit 1
+fi
+echo "    GUEST-RELATIONSHIP-001: PASS (guest home skips friendships, no stray notice)"

@@ -99,6 +99,7 @@ export function RequesterHome({
   onOpenHumanProfile,
   onMessageHuman,
   viewerAccountId,
+  isGuest,
   onCreateScene,
   onOpenSceneMap,
   sceneApiBaseUrl,
@@ -133,6 +134,10 @@ export function RequesterHome({
   onOpenHumanProfile?: (person: RecommendPerson) => void;
   onMessageHuman?: (person: RecommendPerson) => void;
   viewerAccountId?: string;
+  isGuest?: boolean;
+  // 访客模式：不拉关系链、不弹关系失败提示。访客点 + 号走 handleHomeFriend
+  // 里的"登录后可添加好友"，徽标无意义；且访客可能带着已失效的老 session
+  //（PUBLIC 但 secure store 还有 userAccountId），此时拉必失败，弹了纯属噪音。
   onCreateScene?: ((tool: SceneToolId) => void) | undefined;
   onOpenSceneMap?: ((sceneId?: string) => void) | undefined;
   sceneApiBaseUrl?: string | undefined;
@@ -203,6 +208,14 @@ export function RequesterHome({
   }, [searchQuery]);
 
   useEffect(() => {
+    // GUEST-RELATIONSHIP-001: 访客不拉关系链。上面的 isGuest 注释解释了
+    // 为什么：访客要么没 viewerAccountId（早退已拦），要么带着已失效的老
+    // session（早退拦不住，拉必失败）。两种都不该弹"好友状态暂时无法加载"。
+    // 切到访客时顺手清掉上一手的失败提示（同值 setState 不会重渲染）。
+    if (isGuest) {
+      setRelationshipMsg(undefined);
+      return;
+    }
     if (!relationship || !viewerAccountId) return;    let cancelled = false;
     void relationship.listMyFriendships().then((payload) => {
       if (cancelled) return;
@@ -214,7 +227,7 @@ export function RequesterHome({
       if (!cancelled) setRelationshipMsg("好友状态暂时无法加载");
     });
     return () => { cancelled = true; };
-  }, [relationship, viewerAccountId]);
+  }, [relationship, viewerAccountId, isGuest]);
 
   // HOME-PEOPLE-SEARCH-001: 服务端用户转本地人物卡形状，供主页入口复用。
   // 主页按 userId 拉服务端数据，这里只传身份目标，不传业务断言。

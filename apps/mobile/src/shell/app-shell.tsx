@@ -783,6 +783,7 @@ export function AppShell({
               experiences={experience}
               aiAccounts={aiAccounts}
               relationship={relationship}
+              {...(isGuest ? { isGuest } : {})}
               // HOME-PEOPLE-SEARCH-001: 首页人名搜全站，没有它新注册用户搜不到。
               profileClient={profile}
               {...(viewerAccountId ? { viewerAccountId } : {})}
