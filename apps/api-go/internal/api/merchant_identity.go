@@ -21,6 +21,9 @@ const (
 var merchantPublishCommands = map[string]bool{
 	"PublishMarketOpportunity": true,
 	"PublishActivity":          true,
+	// VOUCHER-ISSUE-001: 商户发行券定义。merchant_id 只从标注取，
+	// 见 voucher.issueDefinition；伪造 payload 到不了 service。
+	"IssueVoucherDefinition": true,
 }
 
 // resolveMerchantPublish verifies an optional payload merchantId for

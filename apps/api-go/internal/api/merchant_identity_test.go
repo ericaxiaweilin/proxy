@@ -23,6 +23,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/supply"
+	"github.com/proxy-app/proxy-api/internal/voucher"
 )
 
 // MERCHANT-PUBLISH-001 dispatch-side tripwire: payload merchantId claims
@@ -202,5 +203,58 @@ func TestMerchantPublishWithoutMerchantStaysPersonal(t *testing.T) {
 	}
 	if parsed.Opportunity.OwnerType != "PERSON" {
 		t.Fatalf("personal path must stay PERSON, got %+v", parsed.Opportunity)
+	}
+}
+
+// VOUCHER-ISSUE-001: 商户发行券定义。owner 带店声明 → 200，定义归属为验过的店；
+/// stranger 冒用 → 403 到不了 service；owner 不带声明 → 409（发行定义无商户无意义）。
+func validDefinitionPayload(bizID string) map[string]any {
+	p := map[string]any{
+		"family": "COFFEE", "faceValueMinor": 50000, "scopeName": "木光咖啡",
+		"validFrom": "2026-09-20", "validUntil": "2026-12-31",
+		"perPersonLimit": 1, "merchantUnitCostMinor": 30000,
+	}
+	if bizID != "" {
+		p["merchantId"] = bizID
+	}
+	return p
+}
+
+func TestMerchantIssueVoucherDefinitionStampsShop(t *testing.T) {
+	srv, bizID := newMerchantTestServer(t)
+	srv.Voucher = voucher.New()
+	code, decoded := postMerchantCommand(srv, "valid_access_001", "IssueVoucherDefinition", validDefinitionPayload(bizID))
+	if code != http.StatusOK || decoded.Outcome != "ACCEPTED" {
+		t.Fatalf("owner issue as shop: expected 200 ACCEPTED, got %d %+v", code, decoded)
+	}
+	var parsed struct {
+		Definition struct {
+			MerchantID   string `json:"merchantId"`
+			MerchantName string `json:"merchantName"`
+		} `json:"definition"`
+	}
+	if err := json.Unmarshal([]byte(decoded.OperationRef), &parsed); err != nil {
+		t.Fatalf("definition payload malformed: %v", err)
+	}
+	if parsed.Definition.MerchantID != bizID || parsed.Definition.MerchantName != "木光咖啡" {
+		t.Fatalf("definition must carry the verified shop, got %+v", parsed.Definition)
+	}
+}
+
+func TestMerchantIssueVoucherDefinitionForgedForbidden(t *testing.T) {
+	srv, bizID := newMerchantTestServer(t)
+	srv.Voucher = voucher.New()
+	code, decoded := postMerchantCommand(srv, "valid_access_002", "IssueVoucherDefinition", validDefinitionPayload(bizID))
+	if code != http.StatusForbidden || decoded.Error == nil || decoded.Error.ErrorCode != "MERCHANT_FORBIDDEN" {
+		t.Fatalf("non-member issue: expected 403 MERCHANT_FORBIDDEN, got %d %+v", code, decoded)
+	}
+}
+
+func TestMerchantIssueVoucherDefinitionRequiresClaim(t *testing.T) {
+	srv, _ := newMerchantTestServer(t)
+	srv.Voucher = voucher.New()
+	code, decoded := postMerchantCommand(srv, "valid_access_001", "IssueVoucherDefinition", validDefinitionPayload(""))
+	if code != http.StatusConflict || decoded.Outcome != "REJECTED" || decoded.Error == nil || decoded.Error.ErrorCode != "VOUCHER_MERCHANT_REQUIRED" {
+		t.Fatalf("claimless issue: expected 409 VOUCHER_MERCHANT_REQUIRED, got %d %+v", code, decoded)
 	}
 }

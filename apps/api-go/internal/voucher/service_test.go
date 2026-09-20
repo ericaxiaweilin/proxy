@@ -193,3 +193,73 @@ func TestCreateVoucherAcceptsSaneBatchAndLimit(t *testing.T) {
 		t.Fatalf("expected ACCEPTED at the boundary, got %#v", result)
 	}
 }
+
+func stampedIssueEnvelope(merchantID, merchantName string, payload map[string]any) command.Envelope {
+	e := envelope("IssueVoucherDefinition", payload)
+	if merchantID != "" {
+		e.AuthContext = map[string]any{"merchantID": merchantID, "merchantName": merchantName}
+	}
+	return e
+}
+
+func validDefinitionPayload() map[string]any {
+	return map[string]any{
+		"family": "COFFEE", "faceValueMinor": 50000, "scopeName": "木光咖啡",
+		"validFrom": "2026-09-20", "validUntil": "2026-12-31",
+		"perPersonLimit": 1, "merchantUnitCostMinor": 30000,
+	}
+}
+
+// VOUCHER-ISSUE-001: 无服务端标注 = 没验过商户成员 → fail-closed。
+// 注意 payload 里就算带了 merchantId 也必须被无视（service 根本不读它）。
+func TestIssueDefinitionRequiresMerchantAnnotation(t *testing.T) {
+	s := New()
+	result := s.Handle(stampedIssueEnvelope("", "", map[string]any{
+		"merchantId": "biz_forged", "family": "COFFEE", "faceValueMinor": 50000,
+		"scopeName": "木光咖啡", "validFrom": "2026-09-20", "validUntil": "2026-12-31",
+		"perPersonLimit": 1, "merchantUnitCostMinor": 30000,
+	}))
+	if result.Error == nil || result.Error.ErrorCode != "VOUCHER_MERCHANT_REQUIRED" {
+		t.Fatalf("expected VOUCHER_MERCHANT_REQUIRED, got %#v", result)
+	}
+}
+
+// VOUCHER-ISSUE-001: 归属只认标注。payload 谎称另一家商户，定义必须落在
+// 验过的那家 —— 这就是 B-5 冒名洞的终态修法。
+func TestIssueDefinitionStampsMerchantFromAnnotationOnly(t *testing.T) {
+	s := New()
+	s.clock = func() time.Time { return time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC) }
+	p := validDefinitionPayload()
+	p["merchantId"] = "biz_forged"
+	result := s.Handle(stampedIssueEnvelope("biz_real", "木光咖啡", p))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %#v", result)
+	}
+	def, _ := payload(t, result)["definition"].(map[string]any)
+	if def["merchantId"] != "biz_real" || def["merchantName"] != "木光咖啡" {
+		t.Fatalf("definition must carry the verified merchant, got %#v", def)
+	}
+	if len(s.definitions) != 1 {
+		t.Fatalf("expected 1 stored definition, got %d", len(s.definitions))
+	}
+}
+
+// VOUCHER-ISSUE-001: 非法发行参数全部拒绝（枚举/金额/日期倒置/限额）。
+func TestIssueDefinitionRejectsInvalidPayload(t *testing.T) {
+	cases := []map[string]any{
+		{"family": "TEA", "faceValueMinor": 50000, "scopeName": "木光", "validFrom": "2026-09-20", "validUntil": "2026-12-31", "perPersonLimit": 1, "merchantUnitCostMinor": 0},
+		{"family": "COFFEE", "faceValueMinor": 0, "scopeName": "木光", "validFrom": "2026-09-20", "validUntil": "2026-12-31", "perPersonLimit": 1, "merchantUnitCostMinor": 0},
+		{"family": "COFFEE", "faceValueMinor": 50000, "scopeName": "木光", "validFrom": "2026-12-31", "validUntil": "2026-09-20", "perPersonLimit": 1, "merchantUnitCostMinor": 0},
+		{"family": "COFFEE", "faceValueMinor": 50000, "scopeName": "", "validFrom": "2026-09-20", "validUntil": "2026-12-31", "perPersonLimit": 0, "merchantUnitCostMinor": -1},
+	}
+	for i, p := range cases {
+		s := New()
+		result := s.Handle(stampedIssueEnvelope("biz_real", "木光咖啡", p))
+		if result.Error == nil || result.Error.ErrorCode != "INVALID_DEFINITION" {
+			t.Fatalf("case %d: expected INVALID_DEFINITION, got %#v", i, result)
+		}
+		if len(s.definitions) != 0 {
+			t.Fatalf("case %d: rejected definition must not be stored", i)
+		}
+	}
+}

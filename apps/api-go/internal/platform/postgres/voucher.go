@@ -134,3 +134,20 @@ func (r *VoucherRepository) CreateSettlement(ctx context.Context, s voucher.Sett
 		s.ID, s.VoucherID, s.ActorID, s.Amount, s.Currency, s.CreatedAt)
 	return err
 }
+
+// CreateDefinition persists a merchant-issued voucher definition
+// (VOUCHER-ISSUE-001). merchant_id is server-verified upstream
+// (merchantPublishCommands); the FK to business.accounts is the second lock.
+func (r *VoucherRepository) CreateDefinition(ctx context.Context, d voucher.Definition) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO voucher.definitions (
+			definition_id, merchant_id, store_id, family, face_value_minor, currency,
+			scope_name, valid_from, valid_until, per_person_limit,
+			merchant_unit_cost_minor, status, version
+		) VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		ON CONFLICT (definition_id) DO NOTHING`,
+		d.ID, d.MerchantID, d.StoreID, string(d.Family), d.FaceValueMinor, d.Currency,
+		d.ScopeName, d.ValidFrom, d.ValidUntil, d.PerPersonLimit,
+		d.MerchantUnitCostMinor, d.Status, d.Version)
+	return err
+}

@@ -219,6 +219,8 @@ commands:
     domain: Relationship
   - command: IsFollowing
     domain: Engagement
+  - command: IssueVoucherDefinition
+    domain: Voucher
   - command: JoinActivity
     domain: Activity
   - command: ListActivities

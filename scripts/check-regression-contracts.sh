@@ -7384,3 +7384,31 @@ if ! grep -qF 'if (isGuest)' apps/mobile/src/surfaces/requester-home.tsx ||
   exit 1
 fi
 echo "    GUEST-RELATIONSHIP-001: PASS (guest home skips friendships, no stray notice)"
+# VOUCHER-ISSUE-001: 商户发行券定义必须验主体成员。归属只认服务端标注
+#（merchantStamp），payload.merchantId 伪造在 api 层即 403，不带声明直调
+# service 即 VOUCHER_MERCHANT_REQUIRED；定义行 FK business.accounts。
+require_test "VOUCHER-ISSUE-001" "./internal/voucher" \
+  "TestIssueDefinitionRequiresMerchantAnnotation" \
+  "apps/api-go/internal/voucher/service_test.go" || exit $?
+require_test "VOUCHER-ISSUE-001" "./internal/voucher" \
+  "TestIssueDefinitionStampsMerchantFromAnnotationOnly" \
+  "apps/api-go/internal/voucher/service_test.go" || exit $?
+require_test "VOUCHER-ISSUE-001" "./internal/voucher" \
+  "TestIssueDefinitionRejectsInvalidPayload" \
+  "apps/api-go/internal/voucher/service_test.go" || exit $?
+require_test "VOUCHER-ISSUE-001" "./internal/api" \
+  "TestMerchantIssueVoucherDefinitionStampsShop" \
+  "apps/api-go/internal/api/merchant_identity_test.go" || exit $?
+require_test "VOUCHER-ISSUE-001" "./internal/api" \
+  "TestMerchantIssueVoucherDefinitionForgedForbidden" \
+  "apps/api-go/internal/api/merchant_identity_test.go" || exit $?
+require_test "VOUCHER-ISSUE-001" "./internal/api" \
+  "TestMerchantIssueVoucherDefinitionRequiresClaim" \
+  "apps/api-go/internal/api/merchant_identity_test.go" || exit $?
+if ! grep -qF '"IssueVoucherDefinition": true' apps/api-go/internal/api/merchant_identity.go; then
+  echo "  FAIL [VOUCHER-ISSUE-001]: IssueVoucherDefinition 掉出 merchantPublishCommands ——" >&2
+  echo "        离开成员校验等于回到 payload 自认商户，B-5 冒名洞重开。" >&2
+  exit 1
+fi
+go -C apps/api-go test ./internal/platform/postgres/ -run TestVoucherDefinitionPostgresRoundTrip -count=1 || exit $?
+echo "    VOUCHER-ISSUE-001: PASS (merchant-stamped definitions, forged claims rejected, PG persisted)"

@@ -81,6 +81,9 @@ type Repository interface {
 	GetRedemption(ctx context.Context, redemptionID string) (*Redemption, bool, error)
 	UpdateRedemption(ctx context.Context, r Redemption) error
 	CreateSettlement(ctx context.Context, s Settlement) error
+	// VOUCHER-ISSUE-001: definitions are merchant-issued (step 1 of the
+	// voucher-as-canon chain); reads arrive with step 2 (purchases/instances).
+	CreateDefinition(ctx context.Context, d Definition) error
 }
 
 // Service is currently an in-memory P0 adapter. Its command contract is
@@ -106,6 +109,7 @@ type Service struct {
 	repo              Repository
 	settlementCreator SettlementCreator
 	benefitBridge     BenefitBridge
+	definitions       map[string]*Definition // VOUCHER-ISSUE-001: in-memory fallback, mirrored to repo
 }
 
 func New() *Service {
@@ -126,7 +130,7 @@ func (s *Service) SetBenefitBridge(b BenefitBridge) { s.benefitBridge = b }
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "ListVouchers", "GetVoucher", "OpenVoucherRedemption", "ConfirmVoucherRedemption", "GetVoucherSettlement", "SettleVoucher", "CreateVoucher":
+	case "ListVouchers", "GetVoucher", "OpenVoucherRedemption", "ConfirmVoucherRedemption", "GetVoucherSettlement", "SettleVoucher", "CreateVoucher", "IssueVoucherDefinition":
 		return true
 	default:
 		return false
@@ -160,6 +164,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.settle(ctx, e)
 	case "CreateVoucher":
 		return s.create(ctx, e)
+	case "IssueVoucherDefinition":
+		return s.issueDefinition(ctx, e)
 	default:
 		return command.Rejected(e, "VOUCHER_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "voucher.unsupported_command", nil)
 	}

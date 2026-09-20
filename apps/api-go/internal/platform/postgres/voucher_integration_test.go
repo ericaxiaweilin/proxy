@@ -1,9 +1,11 @@
 package postgres
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/voucher"
@@ -90,5 +92,71 @@ func voucherEnvelope(typ string, payload map[string]any, actorID string) command
 		Actor: command.Actor{Type: "USER", ID: actorID}, Principal: command.Principal{Type: "INDIVIDUAL", ID: actorID},
 		Target: command.Target{Type: "Voucher", ID: "test"}, IdempotencyKey: "k_" + typ + "_" + actorID,
 		Purpose: "test", CorrelationID: "corr", RequestedAt: "2026-08-21T00:00:00Z", Payload: payload, AuthContext: map[string]any{},
+	}
+}
+
+// TestVoucherDefinitionPostgresRoundTrip proves migration 107 is live and
+// the repository persists merchant-issued definitions (VOUCHER-ISSUE-001):
+// a real business.accounts row accepts the insert, and the FK rejects a
+// definition for a nonexistent merchant. Run-scoped rows only, cleaned up.
+func TestVoucherDefinitionPostgresRoundTrip(t *testing.T) {
+	pool := testPool(t)
+	repo := NewVoucherRepository(pool)
+	svc := voucher.NewWithRepository(repo)
+	ctx := t.Context()
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+	merchantID := "biz_def_pg_" + suffix
+	actorID := "user_def_pg_" + suffix
+
+	seedBusinessUsersPG(t, pool, []string{actorID})
+	t.Cleanup(func() { cleanupBusinessUsersPG(t, pool, []string{actorID}) })
+	if _, err := pool.Exec(ctx, `INSERT INTO business.accounts (id, owner_user_id, name, status, created_at) VALUES ($1,$2,'PG Def Cafe','ACTIVE',now())`, merchantID, actorID); err != nil {
+		t.Fatalf("seed business account: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM voucher.definitions WHERE merchant_id=$1`, merchantID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM business.accounts WHERE id=$1`, merchantID)
+	})
+
+	env := voucherEnvelope("IssueVoucherDefinition", map[string]any{
+		"family": "COFFEE", "faceValueMinor": 45000, "scopeName": "PG Def Cafe",
+		"validFrom": "2026-09-20", "validUntil": "2026-12-31",
+		"perPersonLimit": 2, "merchantUnitCostMinor": 30000,
+	}, actorID)
+	env.AuthContext = map[string]any{"merchantID": merchantID, "merchantName": "PG Def Cafe"}
+	r := svc.HandleContext(ctx, env)
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("issue: %v", r.Error)
+	}
+	var row struct {
+		MerchantID string `json:"merchant_id"`
+		Status     string `json:"status"`
+	}
+	var created struct {
+		Definition struct {
+			ID string `json:"definitionId"`
+		} `json:"definition"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &created)
+	if created.Definition.ID == "" {
+		t.Fatal("definitionId missing after issue")
+	}
+	if err := pool.QueryRow(ctx, `SELECT merchant_id, status FROM voucher.definitions WHERE definition_id=$1`, created.Definition.ID).Scan(&row.MerchantID, &row.Status); err != nil {
+		t.Fatalf("definition row missing: %v", err)
+	}
+	if row.MerchantID != merchantID || row.Status != "DRAFT" {
+		t.Fatalf("unexpected row: %+v", row)
+	}
+
+	// FK second lock: unknown merchant cannot hold a definition.
+	env2 := voucherEnvelope("IssueVoucherDefinition", map[string]any{
+		"family": "COFFEE", "faceValueMinor": 45000, "scopeName": "Ghost",
+		"validFrom": "2026-09-20", "validUntil": "2026-12-31",
+		"perPersonLimit": 1, "merchantUnitCostMinor": 0,
+	}, actorID)
+	env2.AuthContext = map[string]any{"merchantID": "biz_nope_" + suffix, "merchantName": "Ghost"}
+	r2 := svc.HandleContext(ctx, env2)
+	if r2.Error == nil || r2.Error.ErrorCode != "VOUCHER_STORAGE_FAILED" {
+		t.Fatalf("expected VOUCHER_STORAGE_FAILED on FK violation, got %#v", r2)
 	}
 }
