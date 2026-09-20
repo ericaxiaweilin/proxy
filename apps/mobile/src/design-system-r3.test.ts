@@ -58,8 +58,9 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "pActionText", "pActionDarkText", "pTabText", "pTabOnText",
   "pAvatarText", "pAvatarTextAi", "postAvaText", "postAvaTextAi",
   "postName", "postTime", "postText", "pOrigin", "postActions",
-  // R15.78: R1 audit 段 (table + filter) — 装饰 8-10pt (R1 1:1 抄原版).
-  "auditFilterText", "auditHeaderCell", "auditCell",
+  // R15.78 的 audit 段已按 AI-CLUSTER-BOUNDARY-001 从 AIIdentityShowcaseSurface
+  //   摘走（活动日志不归 AI 分身），对应的 auditFilterText / auditHeaderCell /
+  //   auditCell 白名单条目一并删除——留着白名单就是给已删的样式留后门。
   // R15.79: R1 provenance 段 (pipeline + detection sample + signals) — 装饰 8-12pt.
   "pipeNumText", "pipeStepTitle", "pipeStepSub",
   "sampleVisualText", "sampleVisualTextAi", "sampleTitle", "sampleSub",

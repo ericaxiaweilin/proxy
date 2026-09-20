@@ -4,7 +4,6 @@
 // 静态 showcase（commander Phase 2 接线前不动）。
 //
 // R15.77: 3 个 phone preview (Human / AI Native / Twin) + 顶部 mini identity cards
-// R15.78: + R1 audit 段 (审计日志) 5 列 table + 5 过滤
 // R15.79: + R1 provenance 段 (Content Provenance Pipeline + 3 sample + 4 维度评分)
 // R15.80: + R1 risk 段 (3 风险卡 + 5 规则 + 推荐/指标 6 toggles)
 // R15.81: + R1 identity 段 (Account≠ContentProvenance + 权限矩阵 8 行 + 注册链路 + 数据模型 modal)
@@ -12,10 +11,19 @@
 // R15.83: + R1 twin 段 (2 Twin + 8 授权 toggles + Human Confirm Gate 3 flow)
 // R15.84: + R1 overview 段 (hero + 3 边界 + 4 KPI + 3 identity cards + 3 flow)
 //
+// AI-CLUSTER-BOUNDARY-001: 这一屏只负责「分身的数字资产」（形象授权 + 授权后能
+// 生成的照片/视频）。曾经挂在这里的两块已摘走：
+//   * R15.78 的「审计日志」(R1 audit 静态 mock) —— 内容是 AI 生成/授权/策略事件，
+//     不是本屏该管的资产，也不是关系屏的互动记录，等 R1 reality gate 接线后归合规面。
+//   * TWIN-SIGNALS-001 / MEDIA-DWELL-001 的「动态数据」(谁看了你的动态、看了多久)
+//     —— 那是关系运营数据，归「好友与关系」(friend-crm)。同一份 MEDIA-DWELL-001
+//     数据曾经在两屏各画一遍。
+// 边界见 me.tsx 的 AI-FACET-CLUSTER-001：好友与关系管运营 · AI 分身出内容 · FACET 管投放。
+//
 // 设计: 1:1 抄 R1 HTML 视觉, 不自创.
 //
 // 这是静态 design showcase (我域), 不接 server. commander 域 R1 full wiring
-// (R1 reality gate + Twin consent + audit log) 是 Phase 2.
+// (R1 reality gate + Twin consent) 是 Phase 2.
 
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
@@ -23,8 +31,6 @@ import { color } from "../theme";
 import { AiPersonaClient, TwinNoAgeEvidenceError, TwinNoLiveConsentError, type TwinConsent, type TwinConsentKind, type TwinPersona } from "../ai-persona-client";
 import type { TransportResponse } from "../auth-client";
 import { formatDateOfBirthInput } from "../date-of-birth-input";
-import type { FeedPost } from "@proxy/contracts";
-import type { LocalNetClient, MediaImpressionStats, PostImpressionStats } from "../localnet-client";
 
 type IdentityKind = "HUMAN" | "AI_NATIVE" | "AI_TWIN";
 
@@ -169,12 +175,10 @@ function ProfilePreview({ kind }: { kind: PreviewKind }): React.JSX.Element {
   );
 }
 
-export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient, localNet, myPosts, onOpenFacet }: {
+export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient, onOpenFacet }: {
   onBack: () => void;
   viewerAccountId: string | undefined;
   authClient: { request(path: string, init: { method: "GET" | "POST"; body?: unknown }): Promise<TransportResponse> };
-  localNet: LocalNetClient;
-  myPosts: FeedPost[];
   /** AI-FACET-CLUSTER-001: 分身生成的素材由 FACET 负责按关系对象分发——
    * 这条链路的下一步，给一条明显的路过去，不用退回「我的」根页再找。 */
   onOpenFacet?: () => void;
@@ -199,8 +203,11 @@ export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient,
         <Text style={styles.subtitle}>我的数字分身 · 邀约与发布由真人确认</Text>
 
         {/* TWIN-CENTER-004: 真分身段 —— 服务端真列表 + 从模板创建 + 形象授权
-            开关。不再是写死的 Linh/Mai。 */}
-        <TwinSection client={personaClient} ownerId={viewerAccountId} localNet={localNet} myPosts={myPosts} />
+            开关。不再是写死的 Linh/Mai。
+            AI-CLUSTER-BOUNDARY-001: 这一屏只管「分身的数字资产」——
+            谁看了、看了多久（访问战绩）和活动日志都在「好友与关系」里，
+            不在这里再渲染一遍（同一份 MEDIA-DWELL-001 数据曾经两屏各画一次）。 */}
+        <TwinSection client={personaClient} ownerId={viewerAccountId} />
 
         {onOpenFacet ? (
           <Pressable onPress={onOpenFacet} style={styles.facetLinkCard} accessibilityLabel="去 FACET 管理素材怎么分发">
@@ -242,9 +249,11 @@ export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient,
           <ProfilePreview kind="twin" />
         </View>
 
-        <Text style={styles.sectionTitle}>审计日志</Text>
-        <Text style={styles.sectionSub}>所有 AI 生成、授权、策略拦截都可追溯。</Text>
-        <AuditTable />
+        {/* AI-CLUSTER-BOUNDARY-001: 「审计日志」（R15.78 的 R1 audit 段）已从本屏
+            摘掉。它是 1:1 抄 R1 HTML 的静态 mock，内容全是 AI 生成/授权/策略事件，
+            既不是本屏该管的「数字资产」，也不是「好友与关系」的互动记录 ——
+            搬到关系屏只会把假数据摊到另一个真模块里。真实审计要等 R1 reality gate
+            接线，届时归合规/运营面，不归这两屏。 */}
 
         {/* R15.79: R1 provenance 段 — 5 步 pipeline + 3 sample + 4 维度评分 */}
         <Text style={styles.sectionTitle}>Content Provenance Pipeline</Text>
@@ -340,25 +349,6 @@ const styles = StyleSheet.create({
   pOrigin: { fontSize: 9, color: color.muted, marginTop: 2 },
   pOriginAi: { color: "#6d28d9", fontWeight: "700" },
   postActions: { fontSize: 9, color: color.muted, marginTop: 3 },
-
-  // R15.78: R1 审计日志 (5 列 table + 5 过滤). 1:1 抄 R1 HTML 视觉.
-  auditFilters: { flexDirection: "row", gap: 6, marginBottom: 10, flexWrap: "wrap" },
-  auditFilterBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: color.cardBorder, backgroundColor: color.white },
-  auditFilterBtnOn: { backgroundColor: color.ink, borderColor: color.ink },
-  auditFilterText: { fontSize: 10, fontWeight: "700", color: color.ink },
-  auditFilterTextOn: { color: color.white },
-  tableWrap: { borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, backgroundColor: color.white, overflow: "hidden" },
-  auditTable: { width: "100%" },
-  auditHeaderRow: { flexDirection: "row", backgroundColor: color.appBg, paddingVertical: 6, paddingHorizontal: 8 },
-  auditHeaderCell: { flex: 1, fontSize: 9, fontWeight: "800", color: color.ink },
-  auditRow: { flexDirection: "row", paddingVertical: 6, paddingHorizontal: 8, borderTopWidth: 1, borderTopColor: color.cardBorder },
-  auditCell: { flex: 1, fontSize: 9, color: color.ink, paddingRight: 4 },
-  auditCellActor: { fontWeight: "800" },
-  auditCellIdentityNative: { color: "#6d28d9", fontWeight: "700" },
-  auditCellIdentityTwin: { color: "#6d28d9", fontWeight: "700" },
-  auditCellIdentityHuman: { color: color.ink, fontWeight: "700" },
-  auditCellPolicy: { color: color.muted, fontStyle: "italic" },
-  auditCellResultReview: { color: "#b45309", fontWeight: "700" },
 
   // R15.79: R1 provenance pipeline (5 步)
   pipelineRow: { flexDirection: "row", gap: 6, marginBottom: 14 },
@@ -525,15 +515,6 @@ const styles = StyleSheet.create({
   twinBackfillInput: { flex: 1 },
   twinBackfillBtn: { backgroundColor: color.ink, borderRadius: 12, paddingHorizontal: 14, justifyContent: "center" },
   twinBackfillBtnText: { fontSize: 13, fontWeight: "800", color: color.white },
-  twinStatRow: { backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, padding: 10, marginBottom: 6 },
-  twinStatBody: { fontSize: 13, color: color.ink, marginBottom: 4 },
-  twinStatNums: { fontSize: 11, color: color.muted },
-  // MEDIA-DWELL-001: 逐张照片战绩——同一个帖子里的照片曝光可能天差地别
-  // （划过去的第一张 vs 停留很久的第三张），这条缩进列表把差异摆出来。
-  twinMediaBreakdown: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: color.cardBorder, gap: 4 },
-  twinMediaRow: { flexDirection: "row", justifyContent: "space-between", paddingLeft: 8 },
-  twinMediaLabel: { fontSize: 11, fontWeight: "700", color: color.ink },
-  twinMediaNums: { fontSize: 11, color: color.muted },
 
   // AI-FACET-CLUSTER-001: 生成 (这一屏) → 分发 (FACET) 的跨屏入口。
   facetLinkCard: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#f3e8ff", borderWidth: 1, borderColor: "#e4d2fb", borderRadius: 14, padding: 12, marginTop: 14 },
@@ -607,82 +588,6 @@ const styles = StyleSheet.create({
   coreFlowSub: { fontSize: 9, color: color.muted, textAlign: "center", lineHeight: 11 },
   coreFlowArrow: { fontSize: 16, color: color.muted, paddingHorizontal: 2 }
 });
-
-// R15.78: R1 HTML audit mock data (5 笔) — 1:1 抄 R1 audits[] 数组.
-const AUDIT_ROWS: ReadonlyArray<{
-  time: string; actor: string; identity: "HUMAN" | "AI_NATIVE" | "AI_TWIN" | "PLATFORM";
-  event: string; policy: string; result: string;
-}> = [
-  { time: "23:41", actor: "Mia", identity: "AI_NATIVE", event: "POST_CREATED", policy: "AI_DISCLOSURE_REQUIRED", result: "Allowed + labeled" },
-  { time: "23:38", actor: "Linh AI", identity: "AI_TWIN", event: "INVITE_DRAFTED", policy: "HUMAN_CONFIRM_REQUIRED", result: "Owner notified" },
-  { time: "23:30", actor: "user_4281", identity: "HUMAN", event: "CONTENT_UPLOAD", policy: "PROVENANCE_CONFLICT", result: "Manual review" },
-  { time: "23:18", actor: "Proxy", identity: "PLATFORM", event: "TWIN_CONSENT_UPDATED", policy: "CONSENT_SCOPE", result: "Video revoked" },
-  { time: "22:59", actor: "Nari → Mia", identity: "AI_NATIVE", event: "LIKE_EVENT", policy: "SYNTHETIC_SIGNAL_DROP", result: "Excluded" }
-];
-
-const AUDIT_FILTERS = ["ALL", "HUMAN", "AI_NATIVE", "AI_TWIN", "REVIEW"] as const;
-type AuditFilter = typeof AUDIT_FILTERS[number];
-
-function matchesFilter(row: typeof AUDIT_ROWS[number], filter: AuditFilter): boolean {
-  if (filter === "ALL") return true;
-  if (filter === "REVIEW") return /review/i.test(row.result);
-  return row.identity === filter;
-}
-
-function identityTint(identity: typeof AUDIT_ROWS[number]["identity"]): string {
-  if (identity === "AI_NATIVE") return styles.auditCellIdentityNative.color ?? "#6d28d9";
-  if (identity === "AI_TWIN") return styles.auditCellIdentityTwin.color ?? "#6d28d9";
-  if (identity === "HUMAN") return styles.auditCellIdentityHuman.color ?? color.ink;
-  return color.muted;
-}
-
-function AuditTable(): React.JSX.Element {
-  const [filter, setFilter] = useState<AuditFilter>("ALL");
-  const visible = AUDIT_ROWS.filter((row) => matchesFilter(row, filter));
-  return (
-    <View>
-      <View style={styles.auditFilters}>
-        {AUDIT_FILTERS.map((f) => (
-          <Pressable
-            key={f}
-            onPress={() => setFilter(f)}
-            style={[styles.auditFilterBtn, filter === f ? styles.auditFilterBtnOn : undefined]}
-            accessibilityLabel={`过滤 ${f}`}
-          >
-            <Text style={[styles.auditFilterText, filter === f ? styles.auditFilterTextOn : undefined]}>{f}</Text>
-          </Pressable>
-        ))}
-      </View>
-      <View style={styles.tableWrap}>
-        <View style={styles.auditTable}>
-          <View style={styles.auditHeaderRow}>
-            <Text style={[styles.auditHeaderCell, { flex: 0.7 }]}>时间</Text>
-            <Text style={styles.auditHeaderCell}>Actor</Text>
-            <Text style={styles.auditHeaderCell}>Identity</Text>
-            <Text style={styles.auditHeaderCell}>Event</Text>
-            <Text style={styles.auditHeaderCell}>Policy</Text>
-            <Text style={styles.auditHeaderCell}>Result</Text>
-          </View>
-          {visible.length === 0 ? (
-            <View style={styles.auditRow}>
-              <Text style={[styles.auditCell, { flex: 6, textAlign: "center", paddingVertical: 8 }]}>该过滤下没有记录</Text>
-            </View>
-          ) : null}
-          {visible.map((row) => (
-            <View key={`${row.time}-${row.actor}-${row.event}`} style={styles.auditRow}>
-              <Text style={[styles.auditCell, { flex: 0.7 }]}>{row.time}</Text>
-              <Text style={[styles.auditCell, styles.auditCellActor]}>{row.actor}</Text>
-              <Text style={[styles.auditCell, { color: identityTint(row.identity), fontWeight: "700" }]}>{row.identity}</Text>
-              <Text style={styles.auditCell}>{row.event}</Text>
-              <Text style={[styles.auditCell, styles.auditCellPolicy]}>{row.policy}</Text>
-              <Text style={[styles.auditCell, /review/i.test(row.result) ? styles.auditCellResultReview : undefined]}>{row.result}</Text>
-            </View>
-          ))}
-        </View>
-      </View>
-    </View>
-  );
-}
 
 // R15.79: R1 HTML provenance 段 (1:1 抄) — 5 步 pipeline
 const PIPELINE_STEPS: ReadonlyArray<{ num: number; title: string; sub: string; ai?: boolean }> = [
@@ -1288,18 +1193,9 @@ function consentScopeLabel(kind: TwinConsentKind): string {
   return "形象与声音";
 }
 
-// 秒 → “X秒” / “X分X秒”，战绩行用。
-function formatWatchMs(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  if (seconds < 60) return `${seconds}秒`;
-  return `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
-}
-
-function TwinSection({ client, ownerId, localNet, myPosts }: {
+function TwinSection({ client, ownerId }: {
   client: AiPersonaClient;
   ownerId: string | undefined;
-  localNet: LocalNetClient;
-  myPosts: FeedPost[];
 }): React.JSX.Element {
   const [rows, setRows] = useState<TwinRowState[] | undefined>(undefined);
   const [loadState, setLoadState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
@@ -1315,13 +1211,6 @@ function TwinSection({ client, ownerId, localNet, myPosts }: {
   // 补完自动重试创建，不让用户跳出去找入口。
   const [needsAgeBackfill, setNeedsAgeBackfill] = useState(false);
   const [dobInput, setDobInput] = useState("");
-  // TWIN-SIGNALS-001: 战绩（我的动态谁看了、看了多久）。分身以后发的动态
-  // 同样记在这里 —— 同一个帖子 ID 流，不用换口径。
-  const [postStats, setPostStats] = useState<Record<string, PostImpressionStats>>({});
-  const [statsState, setStatsState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
-  // MEDIA-DWELL-001: 同一条帖子里每张照片单独的战绩——跟 postStats 同一次
-  // 请求周期拉，键从 postId 换成 mediaAssetId，粒度更细。
-  const [mediaStats, setMediaStats] = useState<Record<string, MediaImpressionStats>>({});
 
   useEffect(() => {
     if (!ownerId) return;
@@ -1345,33 +1234,6 @@ function TwinSection({ client, ownerId, localNet, myPosts }: {
     })();
     return () => { cancelled = true; };
   }, [client, ownerId, reloadNonce]);
-
-  useEffect(() => {
-    if (!ownerId) return;
-    let cancelled = false;
-    setStatsState("loading");
-    void (async () => {
-      try {
-        const [stats, mediaStatsList] = await Promise.all([
-          localNet.listPostImpressionStats(),
-          // 媒体战绩没读到不影响帖子战绩——各自独立的失败态，媒体这边悄悄
-          // 空着就好（帖子行照样显示总数，只是没有逐张照片的细分）。
-          localNet.listMediaImpressionStats().catch(() => [] as MediaImpressionStats[])
-        ]);
-        if (cancelled) return;
-        const map: Record<string, PostImpressionStats> = {};
-        for (const stat of stats) map[stat.postId] = stat;
-        setPostStats(map);
-        const mediaMap: Record<string, MediaImpressionStats> = {};
-        for (const stat of mediaStatsList) mediaMap[stat.mediaAssetId] = stat;
-        setMediaStats(mediaMap);
-        setStatsState("ready");
-      } catch {
-        if (!cancelled) setStatsState("failed");
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [localNet, ownerId, reloadNonce]);
 
   async function toggleConsent(personaId: string): Promise<void> {
     if (!ownerId || busyId) return;
@@ -1581,56 +1443,6 @@ function TwinSection({ client, ownerId, localNet, myPosts }: {
               </Pressable>
             </View>
           ) : null}
-        </View>
-      ) : null}
-      {ownerId ? (
-        <View style={{ marginTop: 18 }}>
-          <Text style={styles.sectionTitle}>动态数据</Text>
-          <Text style={styles.sectionSub}>谁看了你的动态、看了多久。分身以后发的动态同样记在这里。</Text>
-          {statsState === "failed" ? (
-            <View style={styles.twinNotice}>
-              <Text style={styles.twinNoticeText}>战绩没读出来，不是没人看。</Text>
-              <Pressable onPress={() => setReloadNonce((n) => n + 1)} accessibilityLabel="重新读取战绩" style={styles.twinRetry}>
-                <Text style={styles.twinRetryText}>重试</Text>
-              </Pressable>
-            </View>
-          ) : statsState === "loading" ? (
-            <Text style={styles.twinHint}>正在读战绩…</Text>
-          ) : myPosts.length === 0 ? (
-            <Text style={styles.twinHint}>还没有动态，先去发一条。</Text>
-          ) : (
-            myPosts.map((post) => {
-              const stat = postStats[post.postId];
-              // MEDIA-DWELL-001: 只有多于 1 张媒体的帖子才值得看逐张细分——
-              // 只有 1 张时，逐张数字等于帖子总数，摆出来是纯重复。
-              const mediaRefs = post.mediaRefs.length > 1
-                ? [...post.mediaRefs].sort((a, b) => a.sortOrder - b.sortOrder)
-                : [];
-              return (
-                <View key={post.postId} style={styles.twinStatRow}>
-                  <Text numberOfLines={1} style={styles.twinStatBody}>{post.body}</Text>
-                  <Text style={styles.twinStatNums}>
-                    {stat ? `浏览 ${stat.impressions} · ${stat.viewers}人 · 共${formatWatchMs(stat.totalWatchMs)}` : "暂无浏览"}
-                  </Text>
-                  {mediaRefs.length > 0 ? (
-                    <View style={styles.twinMediaBreakdown}>
-                      {mediaRefs.map((ref, i) => {
-                        const mstat = mediaStats[ref.mediaAssetId];
-                        return (
-                          <View key={ref.mediaAssetId} style={styles.twinMediaRow}>
-                            <Text style={styles.twinMediaLabel}>第 {i + 1} 张</Text>
-                            <Text style={styles.twinMediaNums}>
-                              {mstat ? `浏览 ${mstat.impressions} · ${mstat.viewers}人 · 共${formatWatchMs(mstat.totalWatchMs)}` : "暂无浏览"}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  ) : null}
-                </View>
-              );
-            })
-          )}
         </View>
       ) : null}
       {/* Human Confirm Gate 说明（政策解释，无假控件） */}

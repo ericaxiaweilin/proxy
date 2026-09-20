@@ -14,7 +14,8 @@ import { describeError, saveImageToAlbum } from "../image-export";
 import { ProxyIcon } from "../components/proxy-icon";
 import type { ProfileClient, ProfileWire } from "../profile-client";
 import type { FriendView, RelationshipClient } from "../relationship-client";
-import type { LocalNetClient, ProfileViewerStat, ViewerMediaActivity } from "../localnet-client";
+import type { LocalNetClient, MediaImpressionStats, PostImpressionStats, ProfileViewerStat, ViewerMediaActivity } from "../localnet-client";
+import type { FeedPost } from "@proxy/contracts";
 import { color, shadows } from "../theme";
 
 type FriendSource = "QR" | "INVITE" | "CONTACTS" | "SOCIAL" | "SEARCH";
@@ -120,7 +121,7 @@ function formatWatchMs(ms: number): string {
   return `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
 }
 
-export function FriendCrmSurface({ relationship, onOpenConversation, onBack, initialView = "LIST", initialSheet, viewer, onOpenVouchers, profileClient, addFriendBackLabel, scanOnly, onOpenFacet, localNet }: {
+export function FriendCrmSurface({ relationship, onOpenConversation, onBack, initialView = "LIST", initialSheet, viewer, onOpenVouchers, profileClient, addFriendBackLabel, scanOnly, onOpenFacet, localNet, myPosts }: {
   relationship?: RelationshipClient | undefined;
   onOpenConversation: (author: string, peerUserId?: string) => void;
   onBack: () => void;
@@ -149,6 +150,11 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   /** PROFILE-VISIT-001: 主页访问/回访人数的真实数字来源。没传就保持
    * "即将上线"——不拿假数字顶替一个没接线的调用方。 */
   localNet?: LocalNetClient | undefined;
+  /** AI-CLUSTER-BOUNDARY-001: 我自己的动态列表。TWIN-SIGNALS-001 /
+   * MEDIA-DWELL-001 的「谁看了我的动态、看了多久」是关系运营数据，
+   * 归这一屏（以前挂在 AI 分身中心，同一份数据两屏各画一遍）。
+   * 没传就不渲染这张卡——不拿假数字顶替。 */
+  myPosts?: FeedPost[] | undefined;
 }): React.JSX.Element {
   const [view, setView] = useState<CrmView>(initialView);
   const [sheet, setSheet] = useState<AddFriendSheet>(initialSheet);
@@ -201,6 +207,40 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
       .catch(() => { if (!cancelled) setProfileViewers(null); });
     return () => { cancelled = true; };
   }, [localNet]);
+  // AI-CLUSTER-BOUNDARY-001 / TWIN-SIGNALS-001: 动态浏览战绩——我的每条动态
+  // 被看了多少次、多少人、共停留多久。以前挂在 AI 分身中心，那是错的分区：
+  // 「谁看了我的内容」是关系运营数据，跟「谁看了我的主页」同一族。
+  // MEDIA-DWELL-001: 同一条帖子里每张照片单独算——划过去的第一张和停留很久
+  // 的第三张差得很远，只有多于 1 张媒体时才值得摆出逐张细分。
+  const [postStats, setPostStats] = useState<Record<string, PostImpressionStats>>({});
+  const [mediaStats, setMediaStats] = useState<Record<string, MediaImpressionStats>>({});
+  const [statsState, setStatsState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+  useEffect(() => {
+    if (!localNet || !myPosts) return;
+    let cancelled = false;
+    setStatsState("loading");
+    void (async () => {
+      try {
+        const [stats, mediaStatsList] = await Promise.all([
+          localNet.listPostImpressionStats(),
+          // 媒体战绩没读到不影响帖子战绩——各自独立的失败态，媒体这边悄悄
+          // 空着就好（帖子行照样显示总数，只是没有逐张照片的细分）。
+          localNet.listMediaImpressionStats().catch(() => [] as MediaImpressionStats[])
+        ]);
+        if (cancelled) return;
+        const map: Record<string, PostImpressionStats> = {};
+        for (const stat of stats) map[stat.postId] = stat;
+        setPostStats(map);
+        const mediaMap: Record<string, MediaImpressionStats> = {};
+        for (const stat of mediaStatsList) mediaMap[stat.mediaAssetId] = stat;
+        setMediaStats(mediaMap);
+        setStatsState("ready");
+      } catch {
+        if (!cancelled) setStatsState("failed");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [localNet, myPosts]);
   const friendNameByUserId = useMemo(() => {
     const map: Record<string, { name: string; city: string }> = {};
     for (const f of serverFriends.active) map[f.userId] = { name: f.displayName || f.userId, city: f.city };
@@ -931,6 +971,55 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
         </View>
       ) : null}
 
+      {/* AI-CLUSTER-BOUNDARY-001 / TWIN-SIGNALS-001: 动态浏览——每条动态被看了
+          多少次、多少人、共停留多久。从 AI 分身中心搬过来：那是"我的内容被谁看"
+          的关系运营数据，跟上面的"谁看了你的主页"同一族。AI 分身那边只管生成。 */}
+      {localNet && myPosts ? (
+        <View style={styles.viewersCard}>
+          <View style={styles.insightHead}><Text style={styles.insightTitle}>动态浏览</Text></View>
+          <Text style={styles.viewersFootnote}>每条动态被看了多少次、多少人、共停留多久（只统计公开动态）</Text>
+          {statsState === "failed" ? (
+            <Text style={styles.viewersHint}>战绩没读出来，不是没人看</Text>
+          ) : statsState === "loading" ? (
+            <Text style={styles.viewersHint}>正在读取…</Text>
+          ) : myPosts.length === 0 ? (
+            <Text style={styles.viewersHint}>还没有动态，先去发一条</Text>
+          ) : (
+            myPosts.map((post, idx) => {
+              const stat = postStats[post.postId];
+              // MEDIA-DWELL-001: 只有多于 1 张媒体的帖子才值得看逐张细分——
+              // 只有 1 张时，逐张数字等于帖子总数，摆出来是纯重复。
+              const mediaRefs = post.mediaRefs.length > 1
+                ? [...post.mediaRefs].sort((a, b) => a.sortOrder - b.sortOrder)
+                : [];
+              return (
+                <View key={post.postId} style={[styles.postStatRow, idx > 0 && styles.friendRowLine]}>
+                  <Text numberOfLines={1} style={styles.postStatBody}>{post.body}</Text>
+                  <Text style={styles.postStatNums}>
+                    {stat ? `浏览 ${stat.impressions} · ${stat.viewers}人 · 共${formatWatchMs(stat.totalWatchMs)}` : "暂无浏览"}
+                  </Text>
+                  {mediaRefs.length > 0 ? (
+                    <View style={styles.postStatMedia}>
+                      {mediaRefs.map((ref, i) => {
+                        const mstat = mediaStats[ref.mediaAssetId];
+                        return (
+                          <View key={ref.mediaAssetId} style={styles.postStatMediaRow}>
+                            <Text style={styles.postStatMediaLabel}>第 {i + 1} 张</Text>
+                            <Text style={styles.postStatMediaNums}>
+                              {mstat ? `浏览 ${mstat.impressions} · ${mstat.viewers}人 · 共${formatWatchMs(mstat.totalWatchMs)}` : "暂无浏览"}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })
+          )}
+        </View>
+      ) : null}
+
       {/* CRM-HONEST-001: 推荐动作以前是纯装饰——没有本地好友时用字面量 "Mai"
           兜底，理由文案（"最近已回复，且过去7天有持续互动"）是写死的一句话，
           跟实际显示的是谁完全无关（换一个人，理由照抄不误）。现在没有本地
@@ -1286,6 +1375,14 @@ const styles = StyleSheet.create({
   viewerCount: { color: color.ink, fontSize: 12, fontWeight: "800" },
   viewersFootnote: { color: color.muted, fontSize: 11, marginTop: 8, lineHeight: 15 },
   viewersHint: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 8 },
+  // AI-CLUSTER-BOUNDARY-001: 动态浏览行（从 AI 分身中心搬来的战绩样式）。
+  postStatRow: { paddingVertical: 8 },
+  postStatBody: { color: color.ink, fontSize: 13 },
+  postStatNums: { color: color.muted, fontSize: 11, marginTop: 2 },
+  postStatMedia: { borderTopColor: color.line, borderTopWidth: 1, gap: 4, marginTop: 8, paddingTop: 8 },
+  postStatMediaRow: { flexDirection: "row", justifyContent: "space-between", paddingLeft: 8 },
+  postStatMediaLabel: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  postStatMediaNums: { color: color.muted, fontSize: 11 },
   insightHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   insightTitle: { color: color.ink, fontSize: 13, fontWeight: "900" },
   insightBadge: { backgroundColor: "#F1E8FF", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },

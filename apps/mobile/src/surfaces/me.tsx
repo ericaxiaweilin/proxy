@@ -1137,7 +1137,7 @@ export function MeSurface({
   const onScroll = useScrollChrome(onChromeVisibilityChange);
 
   if (subPage?.route === "friendcrm") {
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} profileClient={profileClient} initialView="LIST" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onOpenVouchers={onOpenVouchers} onBack={() => setSubPage(undefined)} onOpenConversation={(author, peerUserId) => { setSubPage(undefined); onOpenConversation?.(author, peerUserId); }} onOpenFacet={() => openSubPage("facet")} localNet={localNet} /></SwipeBackShell>;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} profileClient={profileClient} initialView="LIST" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onOpenVouchers={onOpenVouchers} onBack={() => setSubPage(undefined)} onOpenConversation={(author, peerUserId) => { setSubPage(undefined); onOpenConversation?.(author, peerUserId); }} onOpenFacet={() => openSubPage("facet")} localNet={localNet} myPosts={profilePosts} /></SwipeBackShell>;
   }
   if (context === "BUSINESS") {
     return (
@@ -1400,7 +1400,9 @@ export function MeSurface({
       return <SwipeBackShell onExit={() => setSubPage(undefined)}><FacetHomeSurface client={facetClient} onBack={() => setSubPage(undefined)} onOpenAiIdentity={() => openSubPage("aiidentity")} /></SwipeBackShell>;
     }
     if (subPage.route === "aiidentity") {
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} localNet={localNet} myPosts={profilePosts} onOpenFacet={() => openSubPage("facet")} /></SwipeBackShell>;
+      // AI-CLUSTER-BOUNDARY-001: 这一屏只拿分身自己的东西（列表/授权/创建）。
+      // 访问战绩（谁看了我的动态、看了多久）归「好友与关系」，不从这里传进去。
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} onOpenFacet={() => openSubPage("facet")} /></SwipeBackShell>;
     }
     if (subPage.route === "myscenes") {
       async function respond(invitationId: string, decision: "ACCEPTED" | "DECLINED" | "ASK"): Promise<void> {

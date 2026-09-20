@@ -7120,6 +7120,32 @@ if ! grep -qF 'func (s *Server) listPersonas' apps/api-go/internal/api/aipersona
   exit 1
 fi
 echo "    TWIN-CENTER: PASS (persona list + revoke wired end to end)"
+# AI-CLUSTER-BOUNDARY-001: AI 分身中心只管「分身的数字资产」（形象授权 + 授权后
+# 生成的照片/视频）。访问战绩与活动日志归「好友与关系」。
+#
+# 这一屏曾经同时挂着两块不属于它的东西：TWIN-SIGNALS-001 / MEDIA-DWELL-001 的
+# 「动态数据」（谁看了你的动态、看了多久、逐张照片停留）和 R15.78 的「审计日志」
+# 静态 mock。前者跟好友与关系屏的 PROFILE-VIEWERS-001 / VIEWER-ACTIVITY-001 是
+# 同一份 MEDIA-DWELL-001 数据，两屏各画了一遍。边界写在 me.tsx 的
+# AI-FACET-CLUSTER-001：好友与关系管运营 · AI 分身出内容 · FACET 管投放。
+#
+# 两向都要钉：只钉「摘掉」会把数据删掉（摘了没人接），只钉「接住」会让越界悄悄回来。
+# 正向钉必须**先剥注释再 grep** —— 这两个文件自己的注释里就写着「审计日志」
+# 「动态数据」「动态浏览」（说明为什么搬走），不剥的话钉会被自己的注释喂绿。
+ai_cluster_ai=$(grep -vE '^[[:space:]]*(//|\{/\*)' apps/mobile/src/surfaces/AIIdentityShowcaseSurface.tsx)
+if printf '%s\n' "$ai_cluster_ai" | grep -qE 'listPostImpressionStats|listMediaImpressionStats|AUDIT_ROWS|AuditTable|styles\.twinStatRow|styles\.twinMediaRow'; then
+  echo "  FAIL [AI-CLUSTER-BOUNDARY-001]: AI 分身中心又长回了访问战绩 / 活动日志 ——" >&2
+  echo "        那一屏只该管分身的数字资产；谁看了我的动态、看了多久归「好友与关系」。" >&2
+  exit 1
+fi
+ai_cluster_crm=$(grep -vE '^[[:space:]]*(//|\{/\*)' apps/mobile/src/surfaces/friend-crm.tsx)
+if ! printf '%s\n' "$ai_cluster_crm" | grep -qF 'listPostImpressionStats' ||
+   ! printf '%s\n' "$ai_cluster_crm" | grep -qF '动态浏览'; then
+  echo "  FAIL [AI-CLUSTER-BOUNDARY-001]: 动态浏览战绩没落在「好友与关系」里 ——" >&2
+  echo "        从 AI 分身摘掉却没人接住，等于把 TWIN-SIGNALS-001 / MEDIA-DWELL-001 的数据删了。" >&2
+  exit 1
+fi
+echo "    AI-CLUSTER-BOUNDARY-001: PASS (AI 分身只管资产；动态浏览归好友与关系)"
 # AGE-BACKFILL-001: 老账号补年龄断言。COMP-AGE-001 之前注册的号零年龄证据，
 # 分身门禁 fail-closed 全拒，而注册只收一次出生日期 —— 没有这个口，
 # 老号永远建不了分身，且只能看到英文原文。
