@@ -6,6 +6,7 @@ import type {
 } from "@proxy/contracts";
 import { parseSessionAuthTokens, SecureSessionStore, type StoredSession } from "./secure-session";
 import type { Transport, TransportRequest, TransportResponse } from "./auth-client";
+import { parseDateOfBirthParts } from "./date-of-birth-input";
 
 export type LoginChallengeChannel = "EMAIL" | "SMS";
 
@@ -154,11 +155,25 @@ export class LoginClient {
       throw new LoginProtocolError("terms and privacy consent are required to create an account");
     }
     const dateOfBirth = signup?.dateOfBirth;
-    if (!dateOfBirth || !/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) {
+    if (!dateOfBirth) {
       throw new LoginProtocolError("date of birth in YYYY-MM-DD is required to create an account");
     }
-    const dob = new Date(`${dateOfBirth}T00:00:00.000Z`);
-    if (Number.isNaN(dob.getTime())) {
+    // AUTH-DOB-BOUNDS-001：跟注册页共用同一套边界判定（月 1-12、日 1-31，
+    // 且这一天真实存在）。以前这里自己 `new Date(...)` 判合法性，跟注册页一样
+    // 会被越界 ISO 串的滚月行为放过去 —— 两处必须同源，否则一个拦一个放。
+    const parts = parseDateOfBirthParts(dateOfBirth);
+    if (!parts) {
+      throw new LoginProtocolError("date of birth in YYYY-MM-DD is required to create an account");
+    }
+    const dob = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+    if (
+      parts.month < 1 || parts.month > 12 ||
+      parts.day < 1 || parts.day > 31 ||
+      Number.isNaN(dob.getTime()) ||
+      dob.getUTCFullYear() !== parts.year ||
+      dob.getUTCMonth() !== parts.month - 1 ||
+      dob.getUTCDate() !== parts.day
+    ) {
       throw new LoginProtocolError("date of birth is not a valid calendar date");
     }
     const now = signup?.now ?? this.input.now ?? (() => new Date());
