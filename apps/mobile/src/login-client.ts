@@ -53,6 +53,25 @@ export class LoginCommandRejectedError extends Error {
   }
 }
 
+/**
+ * OTP-RESEND-COOLDOWN-001: 服务端 OTP-THROTTLE-001 对同一 identifier 限流
+ * （1/min、10/hour），拒绝时把还要等多久放在 `safeDetails.retryAfterSeconds`。
+ *
+ * 客户端必须把这个数字**读出来**：不读的话，界面就一直摆着一个按下去必然失败的
+ * 「重新发送」，用户只能拿到一句错误。秒数一律以服务端为准，客户端不写死窗口 ——
+ * 写死等于把服务端常量抄一份，改一边就漂。
+ *
+ * 只认 `OTP_THROTTLED`；其它拒绝原因没有冷却语义，返回 undefined。
+ */
+export function otpRetryAfterSeconds(error: unknown): number | undefined {
+  if (!(error instanceof LoginCommandRejectedError)) return undefined;
+  if (error.result.error?.errorCode !== "OTP_THROTTLED") return undefined;
+  const raw = error.result.error?.safeDetails?.retryAfterSeconds;
+  const seconds = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+  return Math.ceil(seconds);
+}
+
 export class LoginProtocolError extends Error {
   public constructor(message: string) {
     super(message);

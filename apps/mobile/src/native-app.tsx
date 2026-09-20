@@ -7,7 +7,7 @@ import { restoreAppShell, resolveInitialRoute, type AppShellState } from "./app-
 import { type Transport, SessionAuthClient } from "./auth-client";
 import { ConversationClient } from "./conversation-client";
 import { DemandClient } from "./demand-client";
-import { LoginClient, LoginCommandRejectedError } from "./login-client";
+import { LoginClient, LoginCommandRejectedError, otpRetryAfterSeconds } from "./login-client";
 import { LegalDocClient, type LegalDoc, type LegalDocKind } from "./legal-doc";
 import { LegalDocRenderer } from "./legal-doc-render";
 import { LegalStatusClient } from "./legal-status-client";
@@ -382,6 +382,14 @@ function loginChallengeErrorMessage(error: unknown, channel: "SMS" | "EMAIL"): s
   if (code === "LOGIN_CHALLENGE_REQUEST_FAILED") {
     return "验证码发送服务拒绝了请求，请稍后重试（错误码：LOGIN_CHALLENGE_REQUEST_FAILED）。";
   }
+  // OTP-RESEND-COOLDOWN-001: 限流不是"发送失败"，是"还在冷却"。把服务端给的
+  // 秒数直接说出来，否则用户只会反复点、反复看到同一句无信息量的错误。
+  if (code === "OTP_THROTTLED") {
+    const wait = otpRetryAfterSeconds(error);
+    return wait
+      ? `验证码发送过于频繁，请 ${wait} 秒后重试。`
+      : "验证码发送过于频繁，请稍后重试。";
+  }
   return channel === "EMAIL"
     ? "暂时无法发送邮箱验证码，请稍后重试或改用手机号。"
     : "暂时无法发送验证码，请检查手机号后重试。";
@@ -411,6 +419,18 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
   // session 仍然有效 (记忆者还可以 “返回上号”)。
   const [lastSignIn, setLastSignIn] = useState<LastSignIn | undefined>(undefined);
   const [lastSignInDismissed, setLastSignInDismissed] = useState(false);
+  // OTP-RESEND-COOLDOWN-001: 服务端限流的剩余秒数。>0 时「重新发送」置灰并显示
+  // 倒计时 —— 否则界面摆着一个按下去必然失败的按钮。秒数只从服务端的
+  // safeDetails.retryAfterSeconds 来，客户端不写死窗口。
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const resendCoolingDown = resendCooldown > 0;
+
+  // 每秒走一格。依赖用布尔而非秒数 —— 否则每次 tick 都会重建 interval。
+  useEffect(() => {
+    if (!resendCoolingDown) return undefined;
+    const timer = setInterval(() => setResendCooldown((left) => (left <= 1 ? 0 : left - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [resendCoolingDown]);
 
   useEffect(() => {
     let cancelled = false;
@@ -465,10 +485,22 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
       });
       setChallengeId(result.challengeId);
     } catch (err) {
-      setError(`无法重新发送验证码：${err instanceof Error ? err.message : String(err)}`.slice(0, 240));
+      // OTP-RESEND-COOLDOWN-001: 这条路径（「继续上次登录」）也会发验证码，限流同样
+      // 要记冷却并说清秒数 —— 否则从这里撞上限流后，重发按钮依然可点。顺带把它从
+      // 裸 messageKey 换成与主路径同一套映射文案。
+      reportChallengeFailure(err, entry.channel);
     } finally {
       setBusy(false);
     }
+  }
+
+  // OTP-RESEND-COOLDOWN-001: 挑战请求失败统一走这里 —— 限流要**同时**把冷却记下来，
+  // 否则界面只会重复给同一句错误、按钮仍然可点。首次失败与轮换重试失败共用这一个
+  // 出口，避免只改一处。
+  function reportChallengeFailure(err: unknown, channel: "SMS" | "EMAIL"): void {
+    const wait = otpRetryAfterSeconds(err);
+    if (wait !== undefined) setResendCooldown(wait);
+    setError(loginChallengeErrorMessage(err, channel));
   }
 
   async function requestChallenge(channelOverride?: "SMS" | "EMAIL"): Promise<void> {
@@ -593,9 +625,9 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
             // eslint-disable-next-line no-console
             console.log("[proxy.login] retry after rotate FAILED:", retryErr instanceof Error ? `${retryErr.name}: ${retryErr.message}` : String(retryErr));
           }
-          if (!retrySucceeded) setError(loginChallengeErrorMessage(err, channel));
+          if (!retrySucceeded) reportChallengeFailure(err, channel);
         } else {
-          setError(loginChallengeErrorMessage(err, channel));
+          reportChallengeFailure(err, channel);
         }
       } finally {
         setBusy(false);
@@ -752,8 +784,8 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
               </Pressable>
             </View>
             <View style={styles.inlineActions}>
-              <Pressable disabled={busy} onPress={() => { setChallengeId(undefined); setCode(""); }}><Text style={styles.linkText}>{authChannel === "EMAIL" ? "更换邮箱" : "更换手机号"}</Text></Pressable>
-              <Pressable disabled={busy} onPress={() => void requestChallenge()}><Text style={styles.linkText}>重新发送</Text></Pressable>
+              <Pressable disabled={busy} onPress={() => { setChallengeId(undefined); setCode(""); setResendCooldown(0); }}><Text style={styles.linkText}>{authChannel === "EMAIL" ? "更换邮箱" : "更换手机号"}</Text></Pressable>
+              <Pressable disabled={busy || resendCoolingDown} onPress={() => void requestChallenge()}><Text style={styles.linkText}>{resendCoolingDown ? `重新发送（${resendCooldown}s）` : "重新发送"}</Text></Pressable>
             </View>
           </>
         ) : (

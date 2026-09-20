@@ -24,6 +24,7 @@
 | 38 假关注者脸 | 已摘（真数字保留，装饰脸移除） | AUDIT-BATCH3-005 |
 | 40 法律横幅 | 已挂载 + 开机拉一次 + 回前台刷新 | AUDIT-BATCH3-003 |
 | 31 收藏真实数据 | 真接线，不是空态：`me.tsx:1093` 调 `engagement.listUserBookmarks(viewerAccountId, 60)` → `localNet.listPostsByIds` 直取（PROFILE-SAVED-001 已修掉「拿默认 25 条动态过滤」导致收藏被吞的旧洞）；失败走 `setPersonalSavedFailed`，与「空收藏」是两个态 | `apps/mobile/src/surfaces/me.tsx:1093`、`engagement-client.ts:244`、`engagement-client.test.ts:588` |
+| 37 OTP 重发冷却 | **已闭环**：协议层加 `otpRetryAfterSeconds()`（只认 `OTP_THROTTLED`，读 `safeDetails.retryAfterSeconds`，数字/数字串都收，向上取整，缺失/0/负数/非数字一律 undefined 不猜）；界面层加 `resendCooldown` 状态 + 每秒倒计时，冷却期内「重新发送」置灰并显示 `重新发送（Ns）`，文案改成「验证码发送过于频繁，请 N 秒后重试。」；两条发码路径（首次 + 「继续上次登录」）统一走同一个出口；「更换手机号/邮箱」重置冷却（限流是按 identifier 计的）。**秒数只从服务端来，客户端不写死** | 钉 `OTP-RESEND-COOLDOWN-001`（4 正向臂 + 2 反向臂，逐臂注入见红）；测试 `login-client.test.ts` 新增 5 例；`native-app.tsx`、`login-client.ts` |
 
 ## 明确不做（合规约束，不得回退）
 
@@ -45,7 +46,6 @@
 | 30 结算 / 订单 | **一半可达、一半不可达**。可达：`me-orders.tsx`（462 行，导出 MyOrders / MyActivities / Favorites / MerchantCampaign 四个表面）被 `me.tsx` 引用；`voucher.tsx` 真渲染 voucher 字段。**不可达**：`order-execution.tsx` 的 `OrderExecutionSurface` 真接 `FulfillmentClient`（`coming-soon.tsx:29` 注释写明「已去占位化，接 fulfillment 真实读模型」），但它**只被 `coming-soon.tsx` 引用，而 `coming-soon.tsx` 全仓零 import** | 真实现，但用户到不了。见下「三个不可达表面」 |
 | 32–34 商家模块 | **旧 mock 已真替换**：`merchant-me-r21.tsx` 现在只是 re-export shim，注释自述「previous 1250-line hardcoded mock（Linh / Bao / Khoa creator tuples、假 `12.6tr VND`、`Bonsaidon`、`48 张相册`、不可点的 `manageCard`）已由 MerchantMeR21Replacement 取代」；真实现 `merchant-me-r21-replacement.tsx` 真调 `business.*`（accounts/stores/photos/members/spend）+ `supply.querySuppliers`，并渲染 `<MerchantCreatorRecommendations>`。`business-home.tsx` 真调 `getMerchantOperatingHome` / `listStores` / `listProducts` / `listSpendDaily` / `listMemberDirectory` / `listMyAccounts`。`merchant-storefront.tsx`、`my-store-recommendations.tsx`、`store-recommendation-queue.tsx` 均被 `me.tsx` 直接引用 → 可达 | 与旧审计描述相反：这几块**已经是真数据**，不是壳。剩下的问题不是「假」，见下条 |
 | **三个不可达表面**（新发现） | `order-execution.tsx`（订单执行）、`outcome.tsx`（结果）、`skill-workspace.tsx`（Enterprise 运营 Skill 工作区）**只被 `coming-soon.tsx` 引用**；而 `coming-soon.tsx` 被 0 个模块 import（`grep -rn "coming-soon" apps/mobile/src` 无命中）。它是个分发器：给了 client 就渲染真表面，否则渲染「STABLE SURFACE · 已登记」占位卡 —— **这个分发器从来没有被挂载过**。对照：`activity-detail` / `merchant-storefront` 另有直连调用方（`me-orders.tsx` / `me.tsx`），所以它们可达 | 三个表面是真实现却**用户完全到不了**，属于「建好了没入口」的另一形态（不是缺调用方，是缺挂载点）。修法要定入口（从订单列表进执行详情？从哪进结果页？），**属产品判断，我没动**。另注：`ComingSoonSurface` 自己也已成死代码，删或挂都需要同一个判断 |
-| 37 OTP 重发冷却 | **服务端有、客户端没显示**：`OTP-THROTTLE-001` 已在（`identity/service.go:506-509` 1/min、10/hour 滑窗，拒绝时 `OTP_THROTTLED` + `safeDetails.retryAfterSeconds: 60`，`service_test.go:645` 钉住）。客户端 `native-app.tsx:756` 的「重新发送」只按 `busy` 置灰，**不读 `retryAfterSeconds`、没有倒计时**——用户点下去只会拿到一句「无法重新发送验证码：…」。契约里 `ErrorEnvelope.safeDetails` 是 `Record<string, unknown>`，值已经到客户端了，**纯客户端可修** | 缺口是「UI 不反映服务端状态」，与刚处理的合规那条同源（UI 承诺一件服务端会拒的事）。修起来自洽、无产品形态问题，是剩余项里最该先做的一条 |
 | 39 内部 QA 清单 | **未发现残留**：生产设置相关 surface 与全仓搜 `checklist` / `自检` / `上线前` / `验收清单` / `通知中心` 均无命中；仅两处无关引用（`privacy-settings.test.ts:7` 注释指向 `docs/compliance/`、`placeholder-honest-actions.test.ts:346` 的 `PLACEHOLDER-006 checklist walk gaps` 测试名） | 判定已清掉 |
 | A 级 token 缺口 | `DESIGN-CLEANUP-001` 的注释写明只做了「token 纪律**第一批**」，且 **B 档（lotus 定值）/ C 档（Tailwind 返工）/ ProxyEmptyLine 明确「不在本轮」**。`me-styles.ts` 仍有 175 处硬编码 hex（含大量刻意的色调变体） | 剩余是**已声明的延后批次**，不是漏做；纯样式、零语义。优先级低于 37 |
 
@@ -96,6 +96,34 @@ void _tripwireMarker;
 （我第一次写就踩了，钉立刻红，是假阳性）。
 
 注入验证：换掉真调用 → 红；marker 常量回来 → 红；还原后两文件 sha 逐字节一致、基线绿。
+
+## 本轮修掉 37：OTP 重发冷却（界面不读服务端状态）
+
+服务端早就有 `OTP-THROTTLE-001`（1/min、10/hour 滑窗，拒绝时 `OTP_THROTTLED` +
+`safeDetails.retryAfterSeconds`）。客户端完全不读：`native-app.tsx` 的「重新发送」只按
+`busy` 置灰，点下去拿到一句错误、按钮立刻又能点 —— 冷却期内反复点、反复错。
+**这不是「功能没做」，是界面在承诺一件服务端会拒的事**（与合规那条同源）。
+
+改法：协议层 `otpRetryAfterSeconds()` 只认 `OTP_THROTTLED`，读
+`safeDetails.retryAfterSeconds`（数字/数字串都收、向上取整；缺失 / 0 / 负数 / 非数字
+一律 `undefined`，不猜）；界面层按它倒计时并置灰，两条发码路径（首次 + 「继续上次
+登录」）统一走一个出口；「更换手机号/邮箱」重置冷却（限流按 identifier 计）。
+**秒数只从服务端来，不写死。**
+
+钉 `OTP-RESEND-COOLDOWN-001` 有 4 条正向臂（测试 ID、导出、**调用点**、按钮禁用）+
+2 条反向臂（字面量直传 / 先赋变量再传）。**每条臂单独注入见红** —— 第一版只
+`grep otpRetryAfterSeconds` 会被 import 行喂绿，第一版反向钉只匹配 `setResendCooldown(60)`
+抓不到「先赋给变量」，第二版又用 `[0-9]` 误伤了合法的重置 `setResendCooldown(0)`。
+
+### 顺带发现的契约漂移：`ErrorCategory` 少了 `RESOURCE`
+
+写测试时类型检查报错：服务端在 3 处把 category 写成 `"RESOURCE"`
+（`identity/service.go:576` 的 `OTP_THROTTLED`、`api/command_dispatch.go:48,87` 的
+`RATE_LIMITED`），而 `packages/contracts` 的 `ErrorCategorySchema` 枚举里**没有**它。
+Go 侧 category 是裸 string、没有枚举约束，所以两边漂了很久没人发现。
+
+危害是潜伏的：`ErrorCategorySchema` 目前**零调用方**，一旦有人拿它去 parse 响应，
+限流会被判成「响应格式错误」。已在枚举里补上 `RESOURCE`（宽化联合，向后兼容）。
 
 ## 一条方法论
 

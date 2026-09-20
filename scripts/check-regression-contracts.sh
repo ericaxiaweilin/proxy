@@ -1670,6 +1670,40 @@ require_test "OTP-THROTTLE-001" "./internal/platform/postgres" \
   "TestLoginChallengeRequestThrottle" \
   "apps/api-go/internal/platform/postgres/otp_protection_integration_test.go" || exit $?
 
+# OTP-RESEND-COOLDOWN-001: 服务端限流了，客户端却还摆着一个按下去必然失败的按钮。
+#
+# OTP-THROTTLE-001 只管服务端（1/min、10/hour），拒绝时把还要等多久放在
+# safeDetails.retryAfterSeconds。客户端此前完全不读它：native-app.tsx 的「重新发送」
+# 只按 busy 置灰，用户点下去拿到一句错误，按钮立刻又能点 —— 冷却期内反复点、反复错。
+#
+# 这里钉四件事：协议层真的解析了 safeDetails、界面层**真的调了**解析函数（不是只
+# import 了它）、解析结果真的喂给了冷却状态、以及重发按钮真的被冷却禁用。
+# 另外反向钉禁止把秒数写死 —— 写死等于把服务端常量抄一份，改一边就漂。
+#
+# 钉调用点而不是函数名：只 `grep otpRetryAfterSeconds` 会被 import 行喂绿
+# （第一版就这么写的，注入删掉调用点后照样绿）。
+if ! grep -q 'OTP-RESEND-COOLDOWN-001' apps/mobile/src/login-client.test.ts ||
+   ! grep -q 'export function otpRetryAfterSeconds' apps/mobile/src/login-client.ts ||
+   ! grep -q 'otpRetryAfterSeconds(err)' apps/mobile/src/native-app.tsx ||
+   ! grep -q 'setResendCooldown(wait)' apps/mobile/src/native-app.tsx ||
+   ! grep -q 'disabled={busy || resendCoolingDown}' apps/mobile/src/native-app.tsx; then
+  echo "  FAIL [OTP-RESEND-COOLDOWN-001]: OTP 重发冷却没接上 ——" >&2
+  echo "        服务端限流拒绝后，客户端必须按 safeDetails.retryAfterSeconds 倒计时并禁用重发。" >&2
+  exit 1
+fi
+# 反向钉：不许把服务端的限流窗口抄进客户端。匹配"直接传字面量"和"先赋给变量再传"
+# 两种写法 —— 只匹配前者的话，把解析换成 `const wait = 60;` 就能绕过（第一版实测漏了）。
+# 用 [1-9] 而不是 [0-9]：「更换手机号/邮箱」里那句重置是合法的 setResendCooldown(0)，
+# 写成 [0-9] 会把它一起误伤（第二版实测基线直接红了）。
+if grep -qE 'setResendCooldown\([1-9]' apps/mobile/src/native-app.tsx ||
+   grep -qE '(const|let) wait = [1-9]' apps/mobile/src/native-app.tsx; then
+  echo "  FAIL [OTP-RESEND-COOLDOWN-001]: 冷却秒数被写死在客户端 ——" >&2
+  echo "        要读 safeDetails.retryAfterSeconds，别抄一份服务端常量。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/login-client.test.ts || exit $?
+echo "    OTP-RESEND-COOLDOWN-001: PASS (client honours the server's retryAfterSeconds instead of leaving a dead resend button)"
+
 # DEVICE-METROHOST-001: a `MetroHost` key committed into the *versioned*
 # apps/mobile/ios/Proxy/Info.plist pins every device to one LAN IP and
 # COMPLETELY bypasses AppDelegate.bundleURL()'s Bonjour fallback — so the next

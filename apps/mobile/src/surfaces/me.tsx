@@ -2204,7 +2204,7 @@ export function MeSurface({
                           onPress={() => { const postId = hit.postId; openModalAfterClose(closeProfileSearch, () => setProfileViewer({ postId, index: 0 })); }}
                           style={styles.profileSearchHit}
                         >
-                          <Text numberOfLines={2} style={styles.profileSearchHitText}>{hit.body.slice(0, 60)}</Text>
+                          <Text numberOfLines={2} style={styles.profileSearchHitText}>{hit.kind === "reply" ? "我的回复" : "动态"} · {hit.body.slice(0, 60)}</Text>
                         </Pressable>
                       ))
                     )}

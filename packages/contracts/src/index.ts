@@ -40,6 +40,13 @@ export const ErrorCategorySchema = z.enum([
   "CONSENT_PERMISSION",
   "PAYMENT",
   "CONCURRENCY",
+  // RESOURCE: 服务端实际在发这个值 —— OTP_THROTTLED
+  // (internal/identity/service.go:576) 与 RATE_LIMITED
+  // (internal/api/command_dispatch.go:48,87) 都把 category 写成 "RESOURCE"，
+  // 而枚举里一直没有它。Go 侧的 category 是裸 string，没有枚举约束，所以两边
+  // 漂了很久没人发现：这个 schema 目前**没有任何调用方**，一旦有人拿它去 parse
+  // 响应，限流会被判成"响应格式错误"。宽化联合是向后兼容的。
+  "RESOURCE",
   "PROVIDER",
   "PRIVACY",
   "INTERNAL"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LoginClient, LoginCommandRejectedError, LoginProtocolError, type TransportRequest, type TransportResponse } from "./login-client";
+import { LoginClient, LoginCommandRejectedError, LoginProtocolError, otpRetryAfterSeconds, type TransportRequest, type TransportResponse } from "./login-client";
 import type { Transport } from "./auth-client";
 import { InMemorySecureStorageDriver, SecureSessionStore } from "./secure-session";
 
@@ -241,5 +241,54 @@ describe("AUTH-LOGIN-HINT-001 login existence probe", () => {
       error: { errorCode: "RATE_LIMITED", category: "RESOURCE", retryability: "SAFE_RETRY", messageKey: "command.rate_limited", safeDetails: {}, correlationId: "corr_lookup" }
     });
     await expect(client.lookupPasswordlessIdentity({ channel: "EMAIL", identifier: "a@example.com" })).rejects.toBeInstanceOf(LoginCommandRejectedError);
+  });
+});
+
+// OTP-RESEND-COOLDOWN-001
+//
+// 服务端 OTP-THROTTLE-001 对同一 identifier 限流（1/min、10/hour），拒绝时把还要
+// 等多久放进 `safeDetails.retryAfterSeconds`。客户端必须把那个数字读出来，界面才
+// 知道该把「重新发送」禁用多久 —— 不读的话，按钮会一直摆在那里、按下去必然失败，
+// 用户只能反复看到同一句错误。秒数一律以服务端为准，客户端不写死窗口。
+describe("OTP resend cooldown (OTP-RESEND-COOLDOWN-001)", () => {
+  const rejected = (errorCode: string, safeDetails: Record<string, unknown>): LoginCommandRejectedError =>
+    new LoginCommandRejectedError({
+      commandId: "cmd_otp",
+      outcome: "REJECTED",
+      eventRefs: [],
+      correlationId: "corr_otp",
+      error: {
+        errorCode,
+        category: "RESOURCE",
+        retryability: "SAFE_RETRY",
+        messageKey: "identity.otp_throttled",
+        safeDetails,
+        correlationId: "corr_otp"
+      }
+    });
+
+  it("reads the server's retryAfterSeconds for OTP_THROTTLED", () => {
+    expect(otpRetryAfterSeconds(rejected("OTP_THROTTLED", { retryAfterSeconds: 60 }))).toBe(60);
+  });
+
+  it("accepts a numeric string and rounds up, so the countdown never undercuts the server", () => {
+    expect(otpRetryAfterSeconds(rejected("OTP_THROTTLED", { retryAfterSeconds: "45.2" }))).toBe(46);
+  });
+
+  it("only OTP_THROTTLED means cooling down — other rejections must not invent a wait", () => {
+    for (const errorCode of ["LOGIN_PROVIDER_NOT_CONFIGURED", "LOGIN_CHALLENGE_REQUEST_FAILED", "OTP_INVALID", "RATE_LIMITED"]) {
+      expect(otpRetryAfterSeconds(rejected(errorCode, { retryAfterSeconds: 60 }))).toBeUndefined();
+    }
+  });
+
+  it("returns undefined when the server gives no usable number, instead of guessing", () => {
+    for (const safeDetails of [{}, { retryAfterSeconds: 0 }, { retryAfterSeconds: -5 }, { retryAfterSeconds: "soon" }, { retryAfterSeconds: null }]) {
+      expect(otpRetryAfterSeconds(rejected("OTP_THROTTLED", safeDetails))).toBeUndefined();
+    }
+  });
+
+  it("does not mistake a plain Error that merely mentions the throttle for a throttle", () => {
+    expect(otpRetryAfterSeconds(new Error("identity.otp_throttled"))).toBeUndefined();
+    expect(otpRetryAfterSeconds(undefined)).toBeUndefined();
   });
 });

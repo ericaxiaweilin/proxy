@@ -4,6 +4,19 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 239 — 2026-09-20
+
+- **个人主页搜索命中项：把「我的回复 / 动态」前缀补回来（修复 55ccbd4 造成的恒红钉）**。
+  起因：`SEARCH-CORPUS-002` 第 3 臂要求 `me.tsx` 的命中项标明命中类型
+  （`hit.kind === "reply" ? "我的回复" : "动态"`），理由是命中项可能是动态也可能是回复，
+  不区分会让用户点进去发现「这上面没我搜的那句话」。9be8ae9 立了这条钉，
+  **55ccbd4 把命中项渲染从底部弹层改成顶部浮层时没把这行带过去** —— 钉还在，实现没了，
+  并且 55ccbd4 顺手把「没有这行」的状态记进了 Rev238。
+  **改动的性质**：这是把 Rev238 里记录错的状态改回钉所要求的样子，不是新增设计。
+  恢复后该臂转绿（改前红、改后绿，单独验证过）。
+- 影响文件：`apps/mobile/src/surfaces/me.tsx`（1 行，命中项文案前缀）。
+  搜索链路（`filterPostsByFeedSearch` / `replyMatchesProfileSearch`）与命中的数据域不变。
+
 ## Revision 238 — 2026-09-19
 
 - **阅后即焚：撤回接线，并把它钉成合规闸（COMP-EPHEMERAL-001）**。
