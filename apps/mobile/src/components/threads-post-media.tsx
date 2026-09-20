@@ -1,17 +1,24 @@
 /**
- * ThreadsPostMedia — me.tsx personalhub 帖子的图片区，不替换 AdaptiveMediaCollection。
+ * ThreadsPostMedia — me.tsx personalhub 帖子的图片区（也被 ProfileTabs/PostCard
+ * 复用，覆盖个人主页和他人主页两处）。
  *
- * MEDIA-ROW-001: 原来 1:1 抄 proxy_personal_profile_architecture_v5_threads.html
- * 的 .post-media，3/4 张图是 2x2 网格（第一格跨两行）。改成不管几张图都单行
- * 铺开、每格 flex:1 等分——原因见下面 ThreadsPostMedia 函数里的注释（网格
- * 版本会漏渲染第 4 张图）。单张图仍是整行大图（variant "one"）。
+ * MEDIA-ROW-HARDEN-001 (2026-09-20): 2+ 张图跟主 Feed（AdaptiveMediaCollection）
+ * 同一套规则——横滑，默认一屏露完整 2 张，卡片宽度固定 = (容器宽 - gap) / 2，
+ * 高度按黄金比例（1:1.618），不看任何一张照片自己的 sourceAspect。之前是
+ * 单行 flex:1 等分（不滑动），3/4 张图会被硬挤成又窄又长的条状，完全不可读——
+ * 这正是真机上传真实套图时露出来的问题。单张图（variant "one"）不变。
  */
+import { useState } from "react";
 import { Image as ExpoImage } from "expo-image";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { color } from "../theme";
 import type { FeedMediaItem } from "@proxy/contracts";
 
 const FALLBACK_BG = "#EEE";
+// MEDIA-ROW-HARDEN-001: 跟 media-presentation.ts 的 MEDIA_ROW_GOLDEN_RATIO
+// 保持同一个数字——两处都是"2 张一排"卡片的同一条规则，数字必须对得上。
+const GOLDEN_RATIO = 1.618;
+const ROW_GAP = 6;
 
 type Props = {
   items: FeedMediaItem[];
@@ -19,9 +26,9 @@ type Props = {
   onOpen: (index: number) => void;
 };
 
-function MediaCell({ item, resolveUrl, onPress, moreCount, big }: { item: FeedMediaItem; resolveUrl: (path: string) => string; onPress: () => void; moreCount?: number | undefined; big?: boolean }): React.JSX.Element {
+function MediaCell({ item, resolveUrl, onPress, big, cellSize }: { item: FeedMediaItem; resolveUrl: (path: string) => string; onPress: () => void; big?: boolean; cellSize?: { width: number; height: number } }): React.JSX.Element {
   return (
-    <Pressable onPress={onPress} style={[styles.mediaCell, big ? styles.mediaCellBig : null]}>
+    <Pressable onPress={onPress} style={[styles.mediaCell, big ? styles.mediaCellBig : null, cellSize ?? null]}>
       <ExpoImage
         accessibilityLabel={item.feedUrl ?? item.thumbnailUrl ?? "媒体"}
         contentFit="cover"
@@ -29,24 +36,15 @@ function MediaCell({ item, resolveUrl, onPress, moreCount, big }: { item: FeedMe
         style={StyleSheet.absoluteFill}
         transition={120}
       />
-      {typeof moreCount === "number" && moreCount > 0 ? (
-        <View style={styles.moreMedia}><Text style={styles.moreMediaText}>+{moreCount}</Text></View>
-      ) : null}
     </Pressable>
   );
 }
 
-// MEDIA-ROW-001: 不管几张图都单行铺开，不做二行网格——旧的 three/four
-// 分支是 2x2 网格、第一格跨两行，实际只塞得下 3 个格子，第 4 张图直接被
-// slice(1,3) 漏掉，连"+N"角标都没有（i 只会是 0/1，i===2 的判断永远假）。
-// 改成单行后每张图都是平等的 flex:1 格子，shown 里有几张就渲染几个格子，
-// 角标钉在最后一格，不会再漏图。
 export function ThreadsPostMedia({ items, resolveUrl, onOpen }: Props): React.JSX.Element {
+  const [rowWidth, setRowWidth] = useState(0);
   if (items.length === 0) return <></>;
-  const shown = items.slice(0, 4);
-  const moreCount = items.length - shown.length;
-  if (shown.length === 1) {
-    const only = shown[0];
+  if (items.length === 1) {
+    const only = items[0];
     if (!only) return <></>;
     return (
       <View style={[styles.postMedia, styles.one]}>
@@ -54,25 +52,29 @@ export function ThreadsPostMedia({ items, resolveUrl, onOpen }: Props): React.JS
       </View>
     );
   }
+  const cardWidth = rowWidth > 0 ? (rowWidth - ROW_GAP) / 2 : 0;
+  const cardHeight = cardWidth * GOLDEN_RATIO;
   return (
-    <View style={[styles.postMedia, styles.row]}>
-      {shown.map((item, i) => (
-        <MediaCell
-          key={`${item.mediaAssetId}-${i}`}
-          item={item}
-          resolveUrl={resolveUrl}
-          onPress={() => onOpen(i)}
-          {...(i === shown.length - 1 ? { moreCount } : {})}
-        />
-      ))}
+    <View onLayout={(event) => setRowWidth(event.nativeEvent.layout.width)} style={styles.postMediaRowWrap}>
+      {cardWidth > 0 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rowContent}>
+          {items.map((item, i) => (
+            <MediaCell
+              key={`${item.mediaAssetId}-${i}`}
+              item={item}
+              resolveUrl={resolveUrl}
+              onPress={() => onOpen(i)}
+              cellSize={{ width: cardWidth, height: cardHeight }}
+            />
+          ))}
+        </ScrollView>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  // MEDIA-GAP-001: 参考稿 .post-media 写的 gap 2px，实机量过 x=64/155.67 +
-  // x=221.67/155.33——两格确实是并排的，不是重叠，但 2px 缝在 #F2F2F2 底色上
-  // 几乎看不出来，两张照片连着看就像一张。分隔要看得出来，缝宽到 6px。
+  // 单张图（variant "one"）：不变——整行大图，容器自己就是圆角裁切边框。
   postMedia: {
     backgroundColor: "#F2F2F2",
     borderRadius: 12,
@@ -81,31 +83,22 @@ const styles = StyleSheet.create({
     marginTop: 11,
     overflow: "hidden"
   },
-  // .one: grid 1fr
   one: { flexDirection: "column" },
-  // MEDIA-ROW-001: 2/3/4 张图统一单行，每格 flex:1 等分宽度
-  row: { flexDirection: "row", minHeight: 210 },
-  // .media-cell: border 0 p 0 bg #eee min-h 190 overflow hidden position relative
+  // MEDIA-ROW-HARDEN-001: 2+ 张图的外壳只管上边距——圆角/裁切挪到每张卡片
+  // 自己身上（见 mediaCell），因为现在是横滑，容器本身不再是"一整块"。
+  postMediaRowWrap: { marginTop: 11 },
+  rowContent: { gap: ROW_GAP },
+  // .media-cell: bg #eee overflow hidden position relative
   mediaCell: {
     backgroundColor: FALLBACK_BG,
-    flex: 1,
-    minHeight: 190,
+    borderRadius: 12,
     overflow: "hidden",
     padding: 0,
     position: "relative"
   },
-  // 单图（variant "one"）沿用原 .two 的 min-h 210
-  mediaCellBig: { minHeight: 210 },
-  // .more-media: pos abs inset 0 bg rgba(0,0,0,.34) color #fff grid place center font 22 weight 650
-  moreMedia: {
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,.34)",
-    bottom: 0,
-    justifyContent: "center",
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: 0
-  },
-  moreMediaText: { color: "color.white", fontSize: 22, fontWeight: "700" }
+  // 单图专属：flex:1 撑满 postMedia 容器宽度 + min-h 210（沿用原 .two 高度）。
+  // 只用在 variant "one"——多图横滑卡片靠 cellSize 给的固定宽高，套 flex:1
+  // 会跟 ScrollView 内容区的自动宽度打架（flexBasis:0% 在不定宽容器里
+  // 算不出真实尺寸，宽度会跌成 0 或不可预期）。
+  mediaCellBig: { flex: 1, minHeight: 210 }
 });

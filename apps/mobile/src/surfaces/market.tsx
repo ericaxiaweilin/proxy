@@ -111,6 +111,11 @@ function normalizeTab(tab: MarketTab): "OPPORTUNITY" | "ACTIVITY" {
   return "OPPORTUNITY";
 }
 
+// TAB-SWITCH-JANK-001: 模块级缓存——切 tab 是 remount，有缓存就同步渲染（毫秒级），
+// 后台照常刷新但不再闪 LOADING；冷启动才走 LOADING。失败不清缓存（只影响新鲜度）。
+let cachedMarketActivities: Activity[] = [];
+let cachedMarketOpportunities: MarketOpportunity[] = [];
+
 export function MarketSurface({
   activities,
   marketplace,
@@ -154,10 +159,10 @@ export function MarketSurface({
   const [lens, setLens] = useState<OpportunityLens>("NOW");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("RECOMMENDED");
   const [search, setSearch] = useState("");
-  const [activityPhase, setActivityPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
-  const [activityItems, setActivityItems] = useState<Activity[]>([]);
-  const [opportunityPhase, setOpportunityPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
-  const [opportunityItems, setOpportunityItems] = useState<MarketOpportunity[]>([]);
+  const [activityPhase, setActivityPhase] = useState<"LOADING" | "READY" | "ERROR">(cachedMarketActivities.length > 0 ? "READY" : "LOADING");
+  const [activityItems, setActivityItems] = useState<Activity[]>(cachedMarketActivities);
+  const [opportunityPhase, setOpportunityPhase] = useState<"LOADING" | "READY" | "ERROR">(cachedMarketOpportunities.length > 0 ? "READY" : "LOADING");
+  const [opportunityItems, setOpportunityItems] = useState<MarketOpportunity[]>(cachedMarketOpportunities);
   const [opportunityError, setOpportunityError] = useState<string>();
   // R15.x: a foreground-location fix shared between the LIST
   // and MAP views. The map's "用我的位置" button sets it; the
@@ -214,9 +219,11 @@ export function MarketSurface({
   });
 
   const loadActivities = useCallback(async (): Promise<void> => {
-    setActivityPhase("LOADING");
+    // TAB-SWITCH-JANK-001: 有缓存就不闪 LOADING——后台刷新落盘后再换上去。
+    if (cachedMarketActivities.length === 0) setActivityPhase("LOADING");
     try {
       const read = await activities.listActivities();
+      cachedMarketActivities = read;
       setActivityItems(read);
       setActivityPhase("READY");
     } catch (e) {
@@ -224,8 +231,14 @@ export function MarketSurface({
       // “活动数据空” / “schema 不接受” / “server down” 三类问题。
       const msg = e instanceof Error ? e.message : String(e);
       console.warn("[market] listActivities failed", msg);
-      setActivityItems([]);
-      setActivityPhase("ERROR");
+      // TAB-SWITCH-JANK-001: 失败不清缓存——只影响新鲜度，不闪空屏/报错屏。
+      // 无缓存（冷启动）才走原来的空列表 + ERROR + 重试。
+      if (cachedMarketActivities.length === 0) {
+        setActivityItems([]);
+        setActivityPhase("ERROR");
+      } else {
+        setActivityPhase("READY");
+      }
     }
   }, [activities]);
 
@@ -242,13 +255,20 @@ export function MarketSurface({
       // path) 用它重算 Travel minutes + 标 travelSource="user_
       // distance". 不传时 server 走 seeded Travel + "seeded".
       // userFix 在 useEffect 依赖里 — 授权后列表会自动重排。
-      setOpportunityItems(await marketplace.list(userFix));
+      const read = await marketplace.list(userFix);
+      cachedMarketOpportunities = read;
+      setOpportunityItems(read);
       setOpportunityError(undefined);
       setOpportunityPhase("READY");
     } catch {
-      setOpportunityItems([]);
+      // TAB-SWITCH-JANK-001: 失败不清缓存——列表照旧，错误行照常提示新鲜度问题。
       setOpportunityError("订单服务暂时不可用，请检查连接后重试。");
-      setOpportunityPhase("ERROR");
+      if (cachedMarketOpportunities.length === 0) {
+        setOpportunityItems([]);
+        setOpportunityPhase("ERROR");
+      } else {
+        setOpportunityPhase("READY");
+      }
     }
   }, [marketplace, userFix]);
 

@@ -1,19 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  MEDIA_ROW_GOLDEN_RATIO,
   mediaCollectionMode,
-  mediaRailMetrics,
+  mediaRowMetrics,
   nearestRailIndex,
-  portraitRailLayout,
   shouldPreserveWholeSubject,
   deriveMediaKind,
   shouldAutoPlayVideo,
-  formatCarouselCounter,
-  wallCellAspect
+  formatCarouselCounter
 } from "./media-presentation";
 import type { FeedMediaItem } from "@proxy/contracts";
 
 // 11 fixture-aspect inputs (from architecture/fixtures/social-media/matrix/manifest.json)
-const FIXTURE_ASPECTS: ReadonlyArray<{ id: string; w: number; h: number; expectedMode: "SINGLE" | "RAIL" | "WALL" }> = [
+const FIXTURE_ASPECTS: ReadonlyArray<{ id: string; w: number; h: number; expectedMode: "SINGLE" | "RAIL" }> = [
   { id: "single-portrait-half-4x5",     w: 1200, h: 1500, expectedMode: "SINGLE" },
   { id: "single-portrait-full-9x16",    w: 900,  h: 1600, expectedMode: "SINGLE" },
   { id: "single-landscape-half-4x3",    w: 1600, h: 1200, expectedMode: "SINGLE" },
@@ -26,21 +25,14 @@ const FIXTURE_ASPECTS: ReadonlyArray<{ id: string; w: number; h: number; expecte
   { id: "ad-banner-text-heavy-16x9",    w: 1920, h: 1080, expectedMode: "SINGLE" },
   { id: "screenshot-ui-9x19.5",         w: 1170, h: 2532, expectedMode: "SINGLE" },
 ];
-describe("portrait social media presentation", () => {
-  it("uses a large single, rails for 2/3/5, and walls for 4/6", () => {
+describe("MEDIA-ROW-HARDEN-001 portrait social media presentation", () => {
+  it("uses a large single for 1, a fixed-size row for everything 2+", () => {
+    // 4/6 张以前单独走 WALL（两列，按每张自己的 sourceAspect 算格高）——
+    // 跟旧 RAIL 一样"按这张照片自己的比例撑格子"，真机真实照片比例跟种子图
+    // 差很多时会撑出偏大的格子。现在数量只分单图/多图两档。
     expect([1, 2, 3, 4, 5, 6].map(mediaCollectionMode)).toEqual([
-      "SINGLE", "RAIL", "RAIL", "WALL", "RAIL", "WALL"
+      "SINGLE", "RAIL", "RAIL", "RAIL", "RAIL", "RAIL"
     ]);
-  });
-  it("gives half-body and full-body photos one stable 4:5-like rail", () => {
-    const layout = portraitRailLayout([
-      { aspectRatio: 4 / 5, width: 2400, height: 3000 },
-      { aspectRatio: 9 / 16, width: 2160, height: 3840 }
-    ], 360);
-    expect(layout.portraitSet).toBe(true);
-    expect(layout.railHeight).toBe(378);
-    expect(layout.portraitCardWidth).toBeCloseTo(302.4);
-    expect(layout.portraitCardWidth / layout.railHeight).toBeCloseTo(0.8);
   });
 
   it("preserves both half-body and full-body photos instead of guessing a crop from aspect", () => {
@@ -48,22 +40,67 @@ describe("portrait social media presentation", () => {
     expect(shouldPreserveWholeSubject(9 / 16, 4 / 5)).toBe(true);
   });
 
-  it("keeps the rail responsive without becoming unbounded", () => {
-    const small = portraitRailLayout([{ aspectRatio: 0.75, width: 3, height: 4 }], 240);
-    const large = portraitRailLayout([{ aspectRatio: 0.75, width: 3, height: 4 }], 1024);
-    expect(small.railHeight).toBe(294);
-    expect(large.railHeight).toBe(440);
+  it("sizes every card the same — half the screen wide, golden-ratio tall, regardless of source aspect", () => {
+    // 卡片尺寸完全不看 items 内容（3 张 9:16 全身照跟 3 张 21:9 banner
+    // 算出来的 metrics 必须一样）——这是这次要堵死的那类 bug 的核心断言。
+    const metrics = mediaRowMetrics(3, 360, 10);
+    expect(metrics.cardWidth).toBeCloseTo((360 - 10) / 2, 3);
+    expect(metrics.cardHeight).toBeCloseTo(metrics.cardWidth * MEDIA_ROW_GOLDEN_RATIO, 3);
+    expect(metrics.cardWidth / metrics.cardHeight).toBeCloseTo(1 / MEDIA_ROW_GOLDEN_RATIO, 3);
+  });
+
+  it("keeps the row responsive without collapsing below a usable minimum", () => {
+    const small = mediaRowMetrics(3, 100, 10);
+    const large = mediaRowMetrics(3, 1024, 10);
+    // contentWidth 被 clamp 到至少 280 再算格宽——避免极窄容器把卡片挤没。
+    expect(small.cardWidth).toBeCloseTo((280 - 10) / 2, 3);
+    expect(large.cardWidth).toBeCloseTo((1024 - 10) / 2, 3);
   });
 
   it("produces stable snap offsets and restores the closest media index", () => {
-    const metrics = mediaRailMetrics([
-      { aspectRatio: 4 / 5, width: 2400, height: 3000 },
-      { aspectRatio: 9 / 16, width: 2160, height: 3840 },
-      { aspectRatio: 3 / 4, width: 2250, height: 3000 }
-    ], 360);
-    expect(metrics.offsets).toEqual([0, 312.4, 535.025]);
-    expect(nearestRailIndex(metrics.offsets, 330)).toBe(1);
-    expect(nearestRailIndex(metrics.offsets, 610)).toBe(2);
+    const metrics = mediaRowMetrics(3, 360, 10);
+    const cardStep = metrics.cardWidth + 10;
+    expect(metrics.offsets).toEqual([0, cardStep, cardStep * 2]);
+    expect(nearestRailIndex(metrics.offsets, cardStep - 20)).toBe(1);
+    expect(nearestRailIndex(metrics.offsets, cardStep * 2 - 5)).toBe(2);
+  });
+
+  it("offsets length always matches item count, including 0", () => {
+    expect(mediaRowMetrics(0, 360).offsets).toEqual([]);
+    expect(mediaRowMetrics(6, 360).offsets).toHaveLength(6);
+  });
+});
+
+// MEDIA-EDGE-BLEED-002: 静止态（第 1 张）要跟文字缩进对齐，留一段左边空白；
+// 横滑到第 2 张起，卡片要能贴到屏幕真正左边缘——不能像 offsets[0] 那样永远
+// 留一段固定的空白，那等于滑到哪张都还是贴着缩进线，滑不到边缘。
+describe("MEDIA-EDGE-BLEED-002 leadingInset keeps rest-state indent but lets scroll reach the true edge", () => {
+  it("only inset[0] carries the leading gap; offset[1+] drop straight to the bled container's own edge", () => {
+    const inset = 68;
+    const metrics = mediaRowMetrics(3, 393, 10, inset);
+    const cardStep = metrics.cardWidth + 10;
+    // 静止态：scrollX=0，卡片 1 渲染在屏幕上的位置 = leadingInset - 0 = 68，
+    // 跟文字缩进对齐（feed.tsx 传的正是这个数字）。
+    expect(metrics.offsets[0]).toBe(0);
+    // 滑到卡片 2：scrollX = leadingInset + 1*cardStep，卡片 2 在（已经破出屏幕
+    // 的）容器里的内容位置正好等于这个 scrollX，渲染在屏幕 x=0——真正的左边缘。
+    expect(metrics.offsets[1]).toBeCloseTo(inset + cardStep, 3);
+    expect(metrics.offsets[2]).toBeCloseTo(inset + cardStep * 2, 3);
+  });
+
+  it("card width is computed from the space after the inset, not the full bled container width", () => {
+    // contentWidth 是破出去之后测量到的宽度（比默认态视觉宽度多 68pt）；
+    // 卡片可用宽度要先扣掉 leadingInset，否则默认态两张卡片会比预期更宽。
+    const withInset = mediaRowMetrics(3, 393, 10, 68);
+    const withoutBleed = mediaRowMetrics(3, 393 - 68, 10, 0);
+    expect(withInset.cardWidth).toBeCloseTo(withoutBleed.cardWidth, 3);
+  });
+
+  it("defaults to 0 (no inset, no bleed) so callers that don't pass it keep the old flush-from-zero offsets", () => {
+    const withDefault = mediaRowMetrics(3, 360, 10);
+    const explicitZero = mediaRowMetrics(3, 360, 10, 0);
+    expect(withDefault.offsets).toEqual(explicitZero.offsets);
+    expect(withDefault.offsets[1]).toBe(withDefault.cardWidth + 10);
   });
 });
 
@@ -229,113 +266,30 @@ describe("Gate H · formatCarouselCounter", () => {
   });
 });
 
-describe("wallCellAspect (R15.16 P1) — wall 2列 row 高度门", () => {
-  it("portrait 4:5 保持 0.8 (不被压成横条)", () => {
-    expect(wallCellAspect(4 / 5)).toBeCloseTo(0.8, 3);
-  });
-
-  it("portrait 9:16 上升至 4:5 最低 (0.8) (wall cell 隱含 cover)", () => {
-    // 9:16 全身在 Pinterest-style wall 会被 cell 上下裁一些 —
-    // 这是 wall 设计隐含, RAIL/SINGLE 才是保留全身的路径。
-    // tripwire 钉明: wall cellAspect 最低 0.8。
-    expect(wallCellAspect(9 / 16)).toBeCloseTo(4 / 5, 3);
-  });
-
-  it("portrait 0.4 (极端长 portrait) 上升至 4:5 最低 (0.8)", () => {
-    // 1:2.5 这种超长不会发生于手机, 但 cellHeight = cellWidth / 0.4
-    // 会使 cell 变 2.5 倍 cellWidth — Pinterest 体验上不能接受。
-    // clamp 到 4:5, image 走 cover 填 cell 上下边。
-    expect(wallCellAspect(0.4)).toBeCloseTo(4 / 5, 3);
-  });
-
-  it("landscape 1:1 (9 宫图) 保持 1.0", () => {
-    expect(wallCellAspect(1)).toBe(1);
-  });
-
-  it("landscape 4:3 (1.33) 保持 1.33 (原比例)", () => {
-    expect(wallCellAspect(4 / 3)).toBeCloseTo(4 / 3, 3);
-  });
-
-  it("landscape 16:9 (1.78) 保持 1.78", () => {
-    expect(wallCellAspect(16 / 9)).toBeCloseTo(16 / 9, 3);
-  });
-
-  it("landscape 21:9 cinema (2.33) clamp 到 1.91 (不超长 cell 高)", () => {
-    // 21:9 banner 在 cell 高度 = cellWidth / 2.33 = 0.43 cellW
-    // 是矮 cell — wall 会留下很多黑边。clamp 到 1.91 (16:9 上限)
-    // 使 cellHeight 变 0.52 cellW, 仍能 cover + 不会过净。
-    expect(wallCellAspect(21 / 9)).toBeCloseTo(1.91, 3);
-  });
-
-  it("landscape 3:1 (超长 banner) clamp 到 1.91", () => {
-    expect(wallCellAspect(3)).toBeCloseTo(1.91, 3);
-  });
-
-  it("非正值 (0 / 负数) 返 1 (square fallback)", () => {
-    expect(wallCellAspect(0)).toBe(1);
-    expect(wallCellAspect(-1)).toBe(1);
-  });
-});
-
-describe("R15.16 P2 — 11 fixture 走 mediaCollectionMode/wallCellAspect 门", () => {
+describe("R15.16 P2 — 11 fixture 走 mediaCollectionMode 门", () => {
   for (const fix of FIXTURE_ASPECTS) {
-    it(`${fix.id} (${fix.w}x${fix.h}) SINGLE 模式 + wallCellAspect 不越界`, () => {
-      // 1. 单个 fixture 走 SINGLE 模式 — 6 个 PORTRAIT 主体都是
-      //    SINGLE (不管 portrait/landscape 比例, SINGLE 只看
-      //    item count = 1)。
+    it(`${fix.id} (${fix.w}x${fix.h}) SINGLE 模式`, () => {
+      // 单个 fixture 走 SINGLE 模式 — 不管 portrait/landscape 比例，
+      // SINGLE 只看 item count = 1。
       expect(mediaCollectionMode(1)).toBe(fix.expectedMode);
-      // 2. aspect 提取走 mediaAspect() — aspectRatio 字段优先。
-      const item: FeedMediaItem = {
-        mediaAssetId: `mock_${fix.id}`,
-        mediaType: "IMAGE",
-        aspectRatio: fix.w / fix.h
-      } as FeedMediaItem;
-      const ar = item.aspectRatio;
-      // wallCellAspect 永远 >= 0.8 且 <= 1.91 (除非 raw aspect 已在
-      // 范围内) — tripwire 钉所有 fixture 都能安全走 wall。
-      const wc = wallCellAspect(ar);
-      expect(wc).toBeGreaterThanOrEqual(0.8);
-      expect(wc).toBeLessThanOrEqual(1.91);
     });
   }
 
-  it("2 / 3 / 5 个 fixture 走 RAIL (竖 portrait 主导)", () => {
+  it("2 / 3 / 4 / 5 / 6 个 fixture 都走 RAIL（数量只分单图/多图两档）", () => {
     expect(mediaCollectionMode(2)).toBe("RAIL");
     expect(mediaCollectionMode(3)).toBe("RAIL");
+    expect(mediaCollectionMode(4)).toBe("RAIL");
     expect(mediaCollectionMode(5)).toBe("RAIL");
+    expect(mediaCollectionMode(6)).toBe("RAIL");
   });
 
-  it("4 / 6 个 fixture 走 WALL (双列)", () => {
-    expect(mediaCollectionMode(4)).toBe("WALL");
-    expect(mediaCollectionMode(6)).toBe("WALL");
-  });
-
-  it("rail 对 11 个 fixture aspect 都不超过 maxWidth", () => {
-    // RAIL 走 portraitSet — portraitSet 是 portrait 计数 >= items/2。
-    // 11 fixture 中只有 ad-banner (1.778) 和 single-landscape-full-3x1 (3.0)
-    // 算 landscape — 不在 portraitSet。剩下 9 个 portrait 主导。
-    const items = FIXTURE_ASPECTS.map((fix) => ({
-      mediaAssetId: `mock_${fix.id}`,
-      mediaType: "IMAGE" as const,
-      aspectRatio: fix.w / fix.h,
-      width: fix.w,
-      height: fix.h
-    }));
-    const layout = portraitRailLayout(items, 360);
-    // railHeight 在 [190, 440] (portraitSet false 时最小 190,
-    // portraitSet true 时上限 440)
-    expect(layout.railHeight).toBeGreaterThanOrEqual(190);
-    expect(layout.railHeight).toBeLessThanOrEqual(440);
-    const maxWidth = Math.max(244, 360 * 0.92); // 331.2
-    const metrics = mediaRailMetrics(items, 360);
-    for (let i = 0; i < metrics.cardWidths.length; i++) {
-      const w = metrics.cardWidths[i]!;
-      // card width 必须 <= maxWidth (防越界)
-      expect(w).toBeLessThanOrEqual(maxWidth);
-      // card height = width / aspect
-      const h = metrics.cardHeights[i]!;
-      const expectedH = w / items[i]!.aspectRatio!;
-      expect(h).toBeCloseTo(expectedH, 1);
-    }
+  it("row 对 11 个 fixture 都给同一个固定卡片尺寸（不看任何一张的 aspect）", () => {
+    // MEDIA-ROW-HARDEN-001: 卡片尺寸只看 items.length 和 contentWidth，
+    // 跟 FIXTURE_ASPECTS 里每一条自己的宽高比无关——11 条 fixture 混进
+    // 同一个 collection，算出来的 cardWidth/cardHeight 必须完全相同。
+    const metrics = mediaRowMetrics(FIXTURE_ASPECTS.length, 360, 10);
+    expect(metrics.cardWidth).toBeCloseTo((360 - 10) / 2, 3);
+    expect(new Set(metrics.offsets.map((_, i) => metrics.cardWidth)).size).toBe(1);
+    expect(metrics.offsets).toHaveLength(FIXTURE_ASPECTS.length);
   });
 });

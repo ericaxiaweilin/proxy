@@ -4,6 +4,31 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 241 — 2026-09-20
+
+- **benefit 做正本（按决议；018 暂不动）**：`DATABASE_URL` 分支改用
+  `postgres.NewBenefitRepository`，内存仅回退；商户归属活动核销必须验成员
+  （OWNER/ADMIN/OPERATOR，无 verifier fail-closed，BENEFIT-REDEEM-002）；
+  voucher 钱包只读桥接 `bft_` 到 benefit claims，不再自发免费券
+  （VOUCHER-DEFAULTS-001）；核销回执去伪 `MERCHANT_CONFIRMED` 改
+  `SELF_REPORTED_NO_MERCHANT_VERIFICATION`（VOUCHER-CONFIRM-001）。
+- **对话点头像直达主页**：去掉中间「关注/进入主页看看」sheet
+  （`peer-follow-prompt.tsx` 删除），意图明确不再多一步确认；
+  头像透传（AVATAR-CARRY-001），主页不再画首字母圆圈。
+  回归钉 CONVO-AVATAR-PROFILE-001 反向钉同步退役（改守直达+禁加回中间
+  sheet），关注走他人主页自己的按钮（`toggleFollow` 真接口）。
+- **1:1 消息发送者名诚实**（SENDER-NAME-HONEST-001）：1:1 非自己发的消息
+  气泡用顶栏真名，不再落到字面“对方”；群聊仍保留“对方”。
+- **注册页单验证码按钮**：对齐 `Proxy_Auth_Standard_UI_v7`，渠道由填了
+  邮箱还是手机决定，不再分两个按钮。
+- **切 tab 防抖**（TAB-SWITCH-JANK-001）：市场/动态 remount 有缓存同步渲染，
+  后台 30s 节流刷新，评论注水合并一批一次 setState。
+- 影响文件：`apps/api-go/cmd/api/main.go`、
+  `apps/api-go/internal/business/service.go`、
+  `apps/mobile/src/shell/app-shell.tsx`、
+  `apps/mobile/src/surfaces/conversation.tsx`、
+  `apps/mobile/src/surfaces/market.tsx`（另有非敏感：feed/媒体/native-app）。
+
 ## Revision 240 — 2026-09-20
 
 - **「个人总管理」改名「个人管理」**。只是标签文案，路由（`personalmanage`）、

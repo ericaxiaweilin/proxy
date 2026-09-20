@@ -26,7 +26,6 @@ import {
   type PresetLocation
 } from "../components/location-picker-sheet";
 import { loadActiveCustomId, loadCustomHistory, loadFollowDevice, saveFollowDevice } from "../components/location-store";
-import { PeerFollowPromptSheet } from "../components/peer-follow-prompt";
 import { LegalStatusBanner } from "../components/legal-status-banner";
 import type { LegalStatus, LegalStatusClient } from "../legal-status-client";
 import { makeDeviceLocation } from "../components/location-options";
@@ -208,10 +207,6 @@ export function AppShell({
   const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initialDraft?: string; peerUserId?: string }>();
   const [openAIProfile, setOpenAIProfile] = useState<PlatformAIAccount>();
   const [openHumanProfile, setOpenHumanProfile] = useState<OtherProfileTarget>();
-  // CONVO-AVATAR-PROFILE-001: 点对话头像进主页时，非关注才弹关注 sheet。
-  // 关注成功后主页背后那张关注按钮是旧状态，用 key 逼它重挂重查。
-  const [followPrompt, setFollowPrompt] = useState<{ userId: string; name: string }>();
-  const [profileFollowBump, setProfileFollowBump] = useState(0);
   // BRAND-CHROME-L1-001: 「我的」子页（个人主页等）跟 openAIProfile/openHumanProfile
   // 一样是盖住整个 body 的目的地，只是写入方在 MeSurface 内部而不是这一层
   // —— 品牌 logo/字标和底部 tab bar 只属于 1 级模块，子页必须收起来。
@@ -223,11 +218,12 @@ export function AppShell({
     return () => { cancelled = true; };
   }, [secureSessionStore]);
   const messageChatAuthor = messageChat?.author;
-  // CONVO-AVATAR-PROFILE-001: 对话窗口点头像进对方主页。AI 进 AI 主页；
+  // CONVO-AVATAR-PROFILE-001: 对话窗口点头像直接进对方主页。AI 进 AI 主页；
   // 真人：有 id 直接进，没有 id 靠名字精确匹配（有且仅有一个才进，
-  // 0 个或多个都明说不瞎进）。进主页的同时查关注态 —— 没关注才弹关注
-  // sheet，已关注直接进（主页里本来就有那张按钮）。关系读失败不拦进主页。
-  async function openPeerProfile(peer: { userId?: string; name: string; aiAccount?: PlatformAIAccount }): Promise<void> {
+  // 0 个或多个都明说不瞎进）。以前这里点头像会先弹一张"关注/进入主页看看"
+  // 选择 sheet 挡在主页前面——多一步不必要的确认，点头像的意图已经很清楚
+  // 是"进去看看"，关注留给主页自己那颗关注按钮。
+  async function openPeerProfile(peer: { userId?: string; name: string; aiAccount?: PlatformAIAccount; avatarUri?: string }): Promise<void> {
     if (peer.aiAccount) {
       setOpenAIProfile(peer.aiAccount);
       return;
@@ -246,14 +242,9 @@ export function AppShell({
       userId = exact[0].userAccountId;
     }
     const displayName = name || userId;
-    setOpenHumanProfile({ userId, name: displayName, posts: [], mediaByPost: {} });
-    try {
-      if (viewerAccountId && !(await engagement.isFollowing(viewerAccountId, userId))) {
-        setFollowPrompt({ userId, name: displayName });
-      }
-    } catch {
-      // 关系读失败不拦进主页 —— 弹不出提示而已，主页里还有关注按钮。
-    }
+    // AVATAR-CARRY-001: 对话窗口已经有对方真头像（peerAvatarSource），带过来
+    // 直接用——不然主页只能画首字母圆圈，跟聊天里看到的真人照片对不上。
+    setOpenHumanProfile({ userId, name: displayName, ...(peer.avatarUri ? { avatarUri: peer.avatarUri } : {}), posts: [], mediaByPost: {} });
   }
   const [marketEntry, setMarketEntry] = useState<{
     tab: MarketTab;
@@ -698,7 +689,7 @@ export function AppShell({
           />
         ) : openHumanProfile ? (
           <OtherProfileSurface
-            key={`${openHumanProfile.userId}:${profileFollowBump}`}
+            key={openHumanProfile.userId}
             target={openHumanProfile}
             engagement={engagement}
             localNet={localNet}
@@ -990,15 +981,6 @@ export function AppShell({
           }}
           open={locationSheetOpen}
         />
-        {/* CONVO-AVATAR-PROFILE-001: 非关注进主页时弹的关注 sheet，盖在主页上面。 */}
-        {followPrompt ? (
-          <PeerFollowPromptSheet
-            target={followPrompt}
-            engagement={engagement}
-            onClose={() => setFollowPrompt(undefined)}
-            onFollowed={() => { setFollowPrompt(undefined); setProfileFollowBump((n) => n + 1); }}
-          />
-        ) : null}
       </View>
       </SafeAreaView>
     </>

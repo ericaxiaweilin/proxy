@@ -82,7 +82,15 @@ fi
 
 proxy_ios_team="${PROXY_IOS_DEVELOPMENT_TEAM:-}"
 if [[ -z "${proxy_ios_team}" ]]; then
+  # pbxproj quotes this value (DEVELOPMENT_TEAM = "C4673FY8U7";) — the old
+  # capture group [^;]* grabbed the quotes along with it, so DEVELOPMENT_TEAM
+  # and the derived bundle id both ended up with literal " characters baked
+  # in, which xcodebuild then treated as part of the team ID / bundle id
+  # (visibly broken: PRODUCT_BUNDLE_IDENTIFIER=com.proxy.creator.dev."c467…").
+  # Strip a leading/trailing " if the pbxproj happens to quote the value.
   proxy_ios_team="$(sed -n 's/.*DEVELOPMENT_TEAM = \([^;]*\);/\1/p' "${proxy_ios_project}" | head -n 1)"
+  proxy_ios_team="${proxy_ios_team%\"}"
+  proxy_ios_team="${proxy_ios_team#\"}"
 fi
 
 if [[ -z "${proxy_ios_team}" ]]; then

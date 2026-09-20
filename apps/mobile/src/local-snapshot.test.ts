@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCreatorSnapshot, parseFolders, parseHiddenChatIds, parseHiddenChatTimes, shouldResurfaceHidden } from "./local-snapshot";
+import { parseCreatorSnapshot, parseHiddenChatIds, parseHiddenChatTimes, shouldResurfaceHidden } from "./local-snapshot";
 
 describe("SYNC-FS-001 local snapshot parsers", () => {
   it("parses hidden chat ids, dropping non-strings", () => {
@@ -27,15 +27,6 @@ describe("SYNC-FS-001 local snapshot parsers", () => {
     expect(shouldResurfaceHidden(100, 99)).toBe(false);
     expect(shouldResurfaceHidden(100, 101)).toBe(true);
     expect(shouldResurfaceHidden(0, 1)).toBe(true);
-  });
-
-  it("parses folders, dropping malformed entries", () => {
-    expect(parseFolders([
-      { id: "f1", name: "朋友", dialogIds: ["a", 1, "b"] },
-      { id: 2, name: "坏" },
-      "nope"
-    ])).toEqual([{ id: "f1", name: "朋友", dialogIds: ["a", "b"] }]);
-    expect(parseFolders(undefined)).toEqual([]);
   });
 
   it("parses creator snapshots with safe defaults", () => {

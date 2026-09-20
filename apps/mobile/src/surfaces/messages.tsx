@@ -99,7 +99,7 @@ const SWIPE_OPEN_DX = 24;
 // 只能退回 useNativeDriver:false，让 Animated.event 返回真正可调用的
 // handler；这一路径下的 setValue 仍比手算 clamp 再赋值轻（不触发 React
 // re-render），先保证不崩、再谈顺不顺。
-function SwipeableRow({ onDelete, children }: { onDelete: () => void; children: React.ReactNode }): React.JSX.Element {
+function SwipeableRow({ onDelete, children, edgeInset = 0, topInset = 0, cornerRadius = 0 }: { onDelete: () => void; children: React.ReactNode; edgeInset?: number; topInset?: number; cornerRadius?: number }): React.JSX.Element {
   const base = useRef(new Animated.Value(0)).current;
   const dragX = useRef(new Animated.Value(0)).current;
   const combined = useRef(Animated.add(base, dragX)).current;
@@ -141,8 +141,16 @@ function SwipeableRow({ onDelete, children }: { onDelete: () => void; children: 
   })).current;
   return (
     <View>
-      <View style={[styles.swipeBehind, { width: SWIPE_DELETE_W }]}>
-        <Pressable onPress={onDelete} style={styles.swipeDelete} accessibilityLabel="删除对话">
+      {/* SWIPE-EDGE-INSET-001: 这块红底是绝对定位、贴着最外层容器右边+顶到顶——
+          对 styles.dialog（无 margin/圆角，撑满行宽）没问题，但 styles.convoCard
+          有 marginHorizontal:14/marginTop:10/borderRadius:15：只挪 right 还留两个
+          洞——(1) 卡片顶部往下缩进 10px 才开始画，缩进区没被卡片盖住红底就露出来；
+          (2) 卡片圆角处红底是直角，圆角切掉的那一小块三角形也会露出来。
+          topInset 补第一个洞，cornerRadius 补第二个——两个都跟卡片抄同一组数字。 */}
+      <View style={[styles.swipeBehind, { width: SWIPE_DELETE_W, right: edgeInset, top: topInset }]}>
+        {/* 圆角要画在真正有背景色的按钮上——外层 swipeBehind 是透明定位壳，
+            没有背景，给它加圆角什么都不会发生（没东西可裁）。 */}
+        <Pressable onPress={onDelete} style={[styles.swipeDelete, { borderTopRightRadius: cornerRadius, borderBottomRightRadius: cornerRadius }]} accessibilityLabel="删除对话">
           <Text style={styles.swipeDeleteText}>删除</Text>
         </Pressable>
       </View>
@@ -153,6 +161,10 @@ function SwipeableRow({ onDelete, children }: { onDelete: () => void; children: 
     </View>
   );
 }
+
+// TAB-SWITCH-JANK-001: 模块级缓存——切 tab 是 remount，有缓存就同步渲染（毫秒级），
+// 后台 5s 刷新照常；冷启动（undefined）才显示“加载中…”。
+let cachedServerDialogs: Dialog[] | undefined;
 
 export function MessagesSurface({
   onOpenConversation,
@@ -212,7 +224,7 @@ export function MessagesSurface({
   const [groupError, setGroupError] = useState("");
 
 
-  const [serverDialogs, setServerDialogs] = useState<Dialog[]>();
+  const [serverDialogs, setServerDialogs] = useState<Dialog[] | undefined>(cachedServerDialogs);
   const [inboxError, setInboxError] = useState(false);
   // 坏图回落：thumb 404（幽灵 id 拼出来的 user_ 地址、不可见头像）时 expo Image
   // 只会画空白 —— 必须回落首字母，行头像永远不能空白。
@@ -665,7 +677,7 @@ export function MessagesSurface({
               <Text style={styles.preview}>还没有群组对话 —— 建群后会出现在这里</Text>
             ) : null}
             {groupDialogs.map((c) => (
-              <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
+              <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)} edgeInset={14} topInset={10} cornerRadius={15}>
               <Pressable onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard} accessibilityLabel={`打开群组 ${c.name}`}>
                 <View style={styles.convoHead}>
                   <View style={styles.convoMark}><ProxyIcon color="#fff" name="group" size={18} /></View>

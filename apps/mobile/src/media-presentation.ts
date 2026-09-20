@@ -1,51 +1,34 @@
 import type { FeedMediaItem } from "@proxy/contracts";
 
 export type MediaDimensions = Pick<FeedMediaItem, "aspectRatio" | "width" | "height">;
-export type MediaCollectionMode = "SINGLE" | "RAIL" | "WALL";
+export type MediaCollectionMode = "SINGLE" | "RAIL";
 
 /**
- * Proxy Social Media Pipeline §5.2 / §5.2.1 — collection mode 决策。
+ * MEDIA-ROW-HARDEN-001 (2026-09-20)：collection mode 决策。
  *
  * 决策表：
- *   1   张 → SINGLE（独立卡片 + 原比例）
- *   2/3/5 张 → RAIL（可滑）
- *   4/6   张 → WALL（两列网格 + 按 sourceAspect 高度）
+ *   1     张 → SINGLE（独立卡片 + 原比例）
+ *   2+    张 → RAIL（横滑，默认一屏露 2 张整图，见 mediaRowMetrics）
+ *
+ * 之前 4/6 张单独走 WALL（两列 Pinterest 网格，格高按每张自己的
+ * sourceAspect 算）——真机上传的真实照片宽高比跟模拟器种子图差很多，
+ * WALL 和旧 RAIL 都会按 source aspect 撑出偏大的格子/卡片（"每张都很大"，
+ * 模拟器种子图凑巧比例温和才没露出来）。现在数量只决定"单图还是多图"，
+ * 2 张以上一律走同一条固定尺寸的横滑规则，不再有两套并行的多图形态。
  *
  * 不变量：
  *   1. 数量 = 0 → SINGLE（防止 surface feed 被打孔）
  *   2. 数量 > 6 → 裁到 6 + RAIL（见发布器 Gate 4）
  *   3. VIDEO 不影响 collection mode 决策——R2 5.2.1 同套骨架
- *   4. 混合 IMAGE + VIDEO 走同一形态（不进 VIDEO-ONLY 形态，避免分支爆炸）
  */
 export function mediaCollectionMode(itemCount: number): MediaCollectionMode {
-  if (itemCount <= 1) return "SINGLE";
-  if (itemCount === 4 || itemCount === 6) return "WALL";
-  return "RAIL";
+  return itemCount <= 1 ? "SINGLE" : "RAIL";
 }
 
 export function mediaAspect(item: MediaDimensions, fallback = 4 / 5): number {
   if (item.aspectRatio > 0) return item.aspectRatio;
   if (item.width > 0 && item.height > 0) return item.width / item.height;
   return fallback;
-}
-
-/**
- * Wall cell aspect：用于 2 列 Pinterest wall 的 height 推导。
- * 6 个闸口:
- *  1. portrait (aspect<1) 限 4:5 最低  — 9:16 全身、 4:5 半
- *     身都保全, 不被压成横条
- *  2. landscape (aspect>=1) 限 1:1 最低 — 1:1 9 宫图不被压
- *     肨
- *  3. landscape 上限 1.91 (16:9 上限)  — 21:9 电影院广告 / 横
- *     幅不被 cell 撑爆 row 高
- *  4. 1.91 = 16:9 (经典)  — 大于此的 banner 都 cover 填
- *  5. 不改原图比例 — 跟 R14 §5.2.2 业务闸一致
- *  6. 都是 0.01 为粒度 — 浮点防止 cell 高度产生 1px 漂移
- */
-export function wallCellAspect(aspect: number): number {
-  if (aspect <= 0) return 1;
-  if (aspect >= 1) return Math.min(1.91, Math.max(1, aspect));
-  return Math.max(4 / 5, aspect);
 }
 
 /**
@@ -104,49 +87,44 @@ export function formatCarouselCounter(index: number, total: number): string {
   return `${index + 1}/${total}`;
 }
 
-export function portraitRailLayout(items: readonly MediaDimensions[], contentWidth: number): {
-  portraitSet: boolean;
-  railHeight: number;
-  portraitCardWidth: number;
-} {
-  const safeWidth = Math.max(280, contentWidth);
-  const portraitCount = items.filter((item) => mediaAspect(item) < 1).length;
-  const portraitSet = portraitCount >= Math.ceil(items.length / 2);
-  return {
-    portraitSet,
-    railHeight: portraitSet
-      ? Math.max(280, Math.min(440, safeWidth * 1.05))
-      : Math.max(190, Math.min(320, safeWidth * 0.62)),
-    portraitCardWidth: Math.max(244, safeWidth * 0.84)
-  };
-}
+// MEDIA-ROW-HARDEN-001: 黄金比例，瘦高卡片（宽:高 = 1:1.618）。2 张横排时
+// 每张卡片宽度定死为半屏，不再看每张照片自己的 sourceAspect——旧算法
+// (railHeight 固定、宽度 = railHeight × sourceAspect) 对一张真实横幅照片能
+// 算出接近整屏宽的卡片，这正是"每张都很大"的病根。真实照片裁到这个比例走
+// SocialMediaFrame 已有的 cover/contain 策略，不会拉伸变形。
+export const MEDIA_ROW_GOLDEN_RATIO = 1.618;
 
-export function mediaRailMetrics(items: readonly MediaDimensions[], contentWidth: number, gap = 10): {
-  cardWidths: number[];
-  cardHeights: number[];
+/**
+ * 2+ 张图统一的横滑行尺寸：卡片宽度固定 = (屏宽 - 间距) / 2，一屏正好露出
+ * 完整 2 张，第 3 张起横滑翻出。高度按黄金比例算，所有卡片同宽同高——
+ * 不再有"这张图比那张图宽"的变量。
+ *
+ * MEDIA-EDGE-BLEED-002（2026-09-20）：leadingInset 是调用方（feed.tsx）为了
+ * "默认态跟文字缩进对齐，但横滑之后能滑到屏幕真正左边缘" 这条要求，把外层
+ * 容器往左破出屏幕缩进（marginLeft: -leadingInset）之后，需要在内容区第一
+ * 张卡片前补回的等量留白——不然卡片会贴着破出去的容器边缘，比文字还靠左。
+ * 这段留白只在 offsets[0]（静止态）生效；offsets[1] 及以后不再叠加它，
+ * 所以横滑到第 2/3... 张时，那张卡片能贴到（已经破出去的）容器左边缘，
+ * 也就是屏幕真正的左边缘——静止态有缩进、滑动后能到边缘，两条要求都满足。
+ * leadingInset 默认 0，其余调用方（目前没有）行为不变。
+ */
+export function mediaRowMetrics(itemCount: number, contentWidth: number, gap = 10, leadingInset = 0): {
+  cardWidth: number;
+  cardHeight: number;
   offsets: number[];
-  railHeight: number;
 } {
-  const layout = portraitRailLayout(items, contentWidth);
-  const maxWidth = Math.max(244, contentWidth * 0.92);
-  // 浮点精度门: 0.8 * 378 在 IEEE 754 返 302.40000000000003,
-  // 重复累加到 cursor 返 312.40000000000003 — 粉碎测试期望
-  // [0, 312.4, 535.025]。为保证不裁切 / 不留黑边, 以 0.001pt
-  // 为粒度 round; 1px 以下偏差在 react-native 渲染 里不可见。
+  // contentWidth 是（已经破出屏幕缩进的）容器测量宽度，卡片可用宽度要先
+  // 扣掉 leadingInset，否则会算出比默认态视觉尺寸更宽的卡片。
+  const safeWidth = Math.max(280, contentWidth - leadingInset);
+  // 浮点精度门（同旧 mediaRailMetrics）：0.001pt 粒度 round，
+  // 1px 以下偏差在 RN 渲染里不可见，但能防止 offsets 累加漂移。
   const r3 = (n: number): number => Math.round(n * 1000) / 1000;
-  let cursor = 0;
-  const offsets: number[] = [];
-  const cardHeights: number[] = [];
-  const cardWidths = items.map((item) => {
-    const aspect = mediaAspect(item);
-    const naturalWidth = r3(layout.railHeight * aspect);
-    const width = r3(Math.min(maxWidth, naturalWidth));
-    cardHeights.push(r3(width / aspect));
-    offsets.push(r3(cursor));
-    cursor += width + gap;
-    return width;
-  });
-  return { cardWidths, cardHeights, offsets, railHeight: layout.railHeight };
+  const cardWidth = r3((safeWidth - gap) / 2);
+  const cardHeight = r3(cardWidth * MEDIA_ROW_GOLDEN_RATIO);
+  const count = Math.max(0, itemCount);
+  const offsets = Array.from({ length: count }, (_, index) =>
+    r3(index === 0 ? 0 : leadingInset + index * (cardWidth + gap)));
+  return { cardWidth, cardHeight, offsets };
 }
 
 export function nearestRailIndex(offsets: readonly number[], scrollX: number): number {

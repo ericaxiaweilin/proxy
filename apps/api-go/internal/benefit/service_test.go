@@ -14,6 +14,27 @@ type testClock struct {
 
 func (c *testClock) Now() time.Time { return c.now }
 
+// allowAllMerchantVerifier is a test-only MerchantVerifier stand-in for
+// tests that aren't exercising BENEFIT-REDEEM-002 itself — it always
+// confirms the caller's membership, so existing redemption-flow assertions
+// keep testing what they were written to test instead of tripping over
+// the new fail-closed identity gate.
+type allowAllMerchantVerifier struct{}
+
+func (allowAllMerchantVerifier) MerchantRedemptionIdentity(ctx context.Context, businessID, userID string) (string, bool) {
+	return "verified", true
+}
+
+// denyMerchantVerifier is a test-only MerchantVerifier that rejects every
+// caller — used to prove the fail-closed path (BENEFIT-REDEEM-002) actually
+// blocks a caller who has no real role at the merchant, even when they
+// supply the merchant's real, correct ID.
+type denyMerchantVerifier struct{}
+
+func (denyMerchantVerifier) MerchantRedemptionIdentity(ctx context.Context, businessID, userID string) (string, bool) {
+	return "", false
+}
+
 func TestCreateCampaign(t *testing.T) {
 	repo := NewMemoryRepository()
 	clock := &testClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}
@@ -48,6 +69,7 @@ func TestClaimAndRedeemBenefit(t *testing.T) {
 	repo := NewMemoryRepository()
 	clock := &testClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}
 	svc := NewServiceWithClock(repo, clock)
+	svc.WithMerchantVerifier(allowAllMerchantVerifier{})
 	ctx := context.Background()
 
 	// Create campaign
@@ -154,6 +176,7 @@ func TestMaxRedemptionsIsEnforcedThroughTheService(t *testing.T) {
 	repo := NewMemoryRepository()
 	clock := &testClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}
 	svc := NewServiceWithClock(repo, clock)
+	svc.WithMerchantVerifier(allowAllMerchantVerifier{})
 	ctx := context.Background()
 
 	campResult := svc.HandleCreateCampaign(ctx, command.Envelope{
@@ -223,6 +246,7 @@ func TestRedeemRequiresTheCampaignOwner(t *testing.T) {
 	repo := NewMemoryRepository()
 	clock := &testClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}
 	svc := NewServiceWithClock(repo, clock)
+	svc.WithMerchantVerifier(allowAllMerchantVerifier{})
 	ctx := context.Background()
 
 	campResult := svc.HandleCreateCampaign(ctx, command.Envelope{
@@ -280,6 +304,108 @@ func TestRedeemRequiresTheCampaignOwner(t *testing.T) {
 	}
 	if intruder.Error == nil || intruder.Error.ErrorCode != "MERCHANT_NOT_CAMPAIGN_OWNER" {
 		t.Fatalf("expected MERCHANT_NOT_CAMPAIGN_OWNER, got %v", intruder.Error)
+	}
+}
+
+// BENEFIT-REDEEM-002: the MERCHANT_NOT_CAMPAIGN_OWNER check above only
+// catches a merchantId that doesn't belong to this campaign. It never
+// verified that the caller (e.Actor.ID) actually holds a role at the
+// merchant they claim to be acting for — a consumer who knows the real,
+// correct merchantId (it's not a secret; it's on every claim) could
+// self-confirm their own redemption by supplying it. This test proves
+// the fix: a caller with no real membership at the campaign's own
+// merchant is rejected even though the merchantId they supplied is
+// genuinely correct.
+func TestRedeemRejectsCallerWithoutMerchantMembership(t *testing.T) {
+	repo := NewMemoryRepository()
+	clock := &testClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}
+	svc := NewServiceWithClock(repo, clock)
+	svc.WithMerchantVerifier(denyMerchantVerifier{})
+	ctx := context.Background()
+
+	campResult := svc.HandleCreateCampaign(ctx, command.Envelope{
+		Actor: command.Actor{Type: "MERCHANT", ID: "owner_1"},
+		Payload: map[string]any{
+			"type": "SCENE_IGNITION", "ownerType": "merchant", "ownerId": "owner_1",
+			"budgetMinor": 100000, "currency": "VND",
+			"startAt": "2026-09-03T00:00:00Z", "endAt": "2026-09-30T23:59:59Z",
+		},
+	})
+	campaignID := campResult.Aggregate.ID
+	_ = repo.CreateBenefitDefinition(ctx, &BenefitDefinition{ID: "b1", CampaignID: campaignID, Kind: FreeDrink, Label: "Coffee", RetailValueMinor: 45000, UserPayMinor: 0, Currency: "VND", CreatedAt: clock.Now()})
+	_ = repo.UpsertCapacityPool(ctx, &CapacityPool{ID: "p1", CampaignID: campaignID, TotalCapacity: 10, CreatedAt: clock.Now(), UpdatedAt: clock.Now(), Version: 1})
+	_ = svc.HandleActivateCampaign(ctx, command.Envelope{Actor: command.Actor{Type: "MERCHANT", ID: "owner_1"}, Payload: map[string]any{"campaignId": campaignID}})
+
+	claim := svc.HandleClaimBenefit(ctx, command.Envelope{
+		Actor:   command.Actor{Type: "INDIVIDUAL", ID: "u1"},
+		Payload: map[string]any{"campaignId": campaignID, "benefitId": "b1"},
+	})
+	if claim.Outcome != "ACCEPTED" {
+		t.Fatalf("claim should succeed, got %s: %v", claim.Outcome, claim.Error)
+	}
+	token := claim.Body["claimToken"].(string)
+
+	// The consumer supplies the campaign's real, correct merchantId
+	// ("owner_1") but is not actually a member of that business.
+	forbidden := svc.HandleRedeemBenefit(ctx, command.Envelope{
+		Actor: command.Actor{Type: "INDIVIDUAL", ID: "u1"},
+		Payload: map[string]any{
+			"claimToken": token, "merchantId": "owner_1", "staffId": "u1",
+			"evidenceType": "MERCHANT_SCAN", "idempotencyKey": "idem_self_confirm",
+		},
+	})
+	if forbidden.Outcome != "REJECTED" {
+		t.Fatalf("caller with no merchant membership must not self-confirm redemption, got %s", forbidden.Outcome)
+	}
+	if forbidden.Error == nil || forbidden.Error.ErrorCode != "MERCHANT_FORBIDDEN" {
+		t.Fatalf("expected MERCHANT_FORBIDDEN, got %v", forbidden.Error)
+	}
+}
+
+// BENEFIT-REDEEM-002: fail closed, not open. A merchant-owned campaign's
+// redemption must be rejected — never silently allowed — if the service
+// was never wired with a MerchantVerifier at all (a deploy/config bug),
+// so a missing verifier can't quietly degrade into "anyone can redeem."
+func TestRedeemFailsClosedWithoutMerchantVerifierConfigured(t *testing.T) {
+	repo := NewMemoryRepository()
+	clock := &testClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}
+	svc := NewServiceWithClock(repo, clock) // no WithMerchantVerifier call
+	ctx := context.Background()
+
+	campResult := svc.HandleCreateCampaign(ctx, command.Envelope{
+		Actor: command.Actor{Type: "MERCHANT", ID: "owner_1"},
+		Payload: map[string]any{
+			"type": "SCENE_IGNITION", "ownerType": "merchant", "ownerId": "owner_1",
+			"budgetMinor": 100000, "currency": "VND",
+			"startAt": "2026-09-03T00:00:00Z", "endAt": "2026-09-30T23:59:59Z",
+		},
+	})
+	campaignID := campResult.Aggregate.ID
+	_ = repo.CreateBenefitDefinition(ctx, &BenefitDefinition{ID: "b1", CampaignID: campaignID, Kind: FreeDrink, Label: "Coffee", RetailValueMinor: 45000, UserPayMinor: 0, Currency: "VND", CreatedAt: clock.Now()})
+	_ = repo.UpsertCapacityPool(ctx, &CapacityPool{ID: "p1", CampaignID: campaignID, TotalCapacity: 10, CreatedAt: clock.Now(), UpdatedAt: clock.Now(), Version: 1})
+	_ = svc.HandleActivateCampaign(ctx, command.Envelope{Actor: command.Actor{Type: "MERCHANT", ID: "owner_1"}, Payload: map[string]any{"campaignId": campaignID}})
+
+	claim := svc.HandleClaimBenefit(ctx, command.Envelope{
+		Actor:   command.Actor{Type: "INDIVIDUAL", ID: "u1"},
+		Payload: map[string]any{"campaignId": campaignID, "benefitId": "b1"},
+	})
+	if claim.Outcome != "ACCEPTED" {
+		t.Fatalf("claim should succeed, got %s: %v", claim.Outcome, claim.Error)
+	}
+	token := claim.Body["claimToken"].(string)
+
+	unavailable := svc.HandleRedeemBenefit(ctx, command.Envelope{
+		Actor: command.Actor{Type: "MERCHANT_STAFF", ID: "staff_1"},
+		Payload: map[string]any{
+			"claimToken": token, "merchantId": "owner_1", "staffId": "staff_1",
+			"evidenceType": "MERCHANT_SCAN", "idempotencyKey": "idem_no_verifier",
+		},
+	})
+	if unavailable.Outcome != "REJECTED" {
+		t.Fatalf("redemption must fail closed with no verifier configured, got %s", unavailable.Outcome)
+	}
+	if unavailable.Error == nil || unavailable.Error.ErrorCode != "MERCHANT_VERIFIER_UNAVAILABLE" {
+		t.Fatalf("expected MERCHANT_VERIFIER_UNAVAILABLE, got %v", unavailable.Error)
 	}
 }
 
@@ -454,6 +580,7 @@ func TestEligibilityEngineWiredInRedeemPath(t *testing.T) {
 	repo := NewMemoryRepository()
 	clock := &testClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}
 	svc := NewServiceWithClock(repo, clock)
+	svc.WithMerchantVerifier(allowAllMerchantVerifier{})
 	ctx := context.Background()
 
 	// Build + claim a benefit (default engine is open-campaign).

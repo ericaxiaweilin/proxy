@@ -1704,6 +1704,39 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/login-client.test.ts || exit $?
 echo "    OTP-RESEND-COOLDOWN-001: PASS (client honours the server's retryAfterSeconds instead of leaving a dead resend button)"
 
+# AUTH-CODE-LABEL-001: 验证码按钮文案只有「获取验证码」一种。
+#
+# 注册页此前按渠道拆成两个按钮（「获取邮箱验证码」+「获取手机验证码」），登录页的
+# EMAIL 分支也单独叫「获取邮箱验证码」。设计标准
+# docs/design/references/Proxy_Auth_Standard_UI_v7.html 里只有「获取验证码」一种叫法。
+# 按渠道拆开会让同一个动作在界面上有两个名字，也把「到底该按哪个」变成用户要自己
+# 判断的事 —— 而渠道本来就该由「填了哪个标识」决定。
+#
+# 现在三处（注册 / 登录邮箱 / 登录手机）统一为一个叫法；注册页邮箱与手机之间用
+# OR 分隔，两栏都可以填，都填了以邮箱为准。
+#
+# 钉两件事：正向钉「按钮和 OR 分隔都还在」，反向钉「不许再出现按渠道分开的叫法」。
+# 反向钉只扫 apps/mobile/src —— 不能扫全仓，否则本文件自己就是一处命中（自喂红）。
+#
+# 正向钉必须**先剥注释再 grep**。native-app.tsx 的注释里就有「获取验证码」四个字
+# （说明设计标准那段），不剥的话正向钉是空的：实测把三处按钮文案全换成「继续」，
+# 钉照样 PASS，因为注释里还剩 3 处命中。剥两类注释：`//` 整行 与 JSX 的 `{/* */}` 整行。
+auth_code_label_code=$(grep -vE '^[[:space:]]*(//|\{/\*)' apps/mobile/src/native-app.tsx)
+if ! printf '%s\n' "$auth_code_label_code" | grep -qF '获取验证码' ||
+   ! printf '%s\n' "$auth_code_label_code" | grep -qF 'styles.orRow'; then
+  echo "  FAIL [AUTH-CODE-LABEL-001]: 认证页的「获取验证码」按钮或 OR 分隔不见了 ——" >&2
+  echo "        注册页邮箱/手机共用一个按钮、中间用 OR 分隔（见 Proxy_Auth_Standard_UI_v7）。" >&2
+  exit 1
+fi
+auth_code_label_offenders=$(grep -rnE '获取邮箱验证码|获取手机验证码' apps/mobile/src 2>/dev/null || true)
+if [ -n "$auth_code_label_offenders" ]; then
+  echo "  FAIL [AUTH-CODE-LABEL-001]: 又出现了按渠道分开的验证码按钮叫法 ——" >&2
+  echo "$auth_code_label_offenders" | sed 's/^/    - /' >&2
+  echo "        设计标准里只有「获取验证码」一种；渠道由填了哪个标识决定，不要拆成两个按钮。" >&2
+  exit 1
+fi
+echo "    AUTH-CODE-LABEL-001: PASS (single code-button label; channel decided by which identifier is filled)"
+
 # DEVICE-METROHOST-001: a `MetroHost` key committed into the *versioned*
 # apps/mobile/ios/Proxy/Info.plist pins every device to one LAN IP and
 # COMPLETELY bypasses AppDelegate.bundleURL()'s Bonjour fallback — so the next
@@ -6965,14 +6998,15 @@ if grep -q '>视频</Text>' apps/mobile/src/surfaces/conversation.tsx ||
   echo "  FAIL [SHEET-ICONS-001]: 相机媒体又在 ＋ 里单开了入口 ——" >&2
   exit 1
 fi
-# CONVO-AVATAR-PROFILE-001: 对话窗口点头像必须进对方个人主页，非关注弹关注。
+# CONVO-AVATAR-PROFILE-001: 对话窗口点头像必须直达对方个人主页。
 #
 # 根因三段：toDialog 把 counterpartyId 丢了（Dialog 类型里就没有 userId，
 # 进了对话窗口只剩一个名字）；ConversationSurface 的头像是纯展示（气泡和
 # 顶栏都没有 Pressable）；even 名字都解析不了 —— Message 只有 sender 显示名。
 # 修法：counterpartyId 从 inbox 一路透到 ConversationSurface（peerUserId），
 # 气泡头像 + 顶栏头像都可点；没 id 的靠名字精确匹配（有且仅有一个才进，
-# 否则明说）；进主页同时查 isFollowing，非关注才弹关注 sheet。
+# 否则明说）；点头像直达主页（Rev241 之前是弹中间关注 sheet，已退役 ——
+# 他人主页自带关注按钮，少一次挡路确认）。
 # 钉整条调用链：任何一段断了，现象都是"点了没反应"，和断的是哪段无关。
 if ! grep -qF 'peerUserId' apps/mobile/src/surfaces/messages.tsx ||
    ! grep -qF 'peerUserId: item.counterpartyId' apps/mobile/src/surfaces/messages.tsx ||
@@ -6984,14 +7018,15 @@ if ! grep -qF 'peerUserId' apps/mobile/src/surfaces/messages.tsx ||
   echo "        现象永远是点了没反应，查三段（透传/入口/开主页）即可定位。" >&2
   exit 1
 fi
-# 反向钉：非关注必须弹 sheet，已关注不弹 —— 两个分支都要在，不能只留一个。
-if ! grep -qF 'PeerFollowPromptSheet' apps/mobile/src/shell/app-shell.tsx ||
-   ! grep -qF 'isFollowing' apps/mobile/src/shell/app-shell.tsx; then
-  echo "  FAIL [CONVO-AVATAR-PROFILE-001]: 陌生人关注弹窗不见了 ——" >&2
-  echo "        非关注进主页必须弹一次关注 sheet。" >&2
+# Rev241 退役反向钉：点头像直达主页，不再弹中间 sheet —— 他人主页自带
+# 关注/取关按钮（other-profile.tsx toggleFollow + isFollowing），关注链不断，
+# 只少一次挡路确认。钉改为守新行为：不许悄悄加回盖在主页上的中间 sheet。
+if grep -qF 'PeerFollowPromptSheet' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [CONVO-AVATAR-PROFILE-001]: 中间关注 sheet 又被加回来了 ——" >&2
+  echo "        Rev241 已定点头像直达主页，关注走他人主页自己的按钮。" >&2
   exit 1
 fi
-echo "    CONVO-AVATAR-PROFILE-001: PASS (conversation avatar opens profile, strangers get follow prompt)"
+echo "    CONVO-AVATAR-PROFILE-001: PASS (conversation avatar opens profile directly, no blocking sheet)"
 # 有真人 id 就建真人 DM —— 挂载 fallback 再敢用 user_proxy_ai，真人对话又会被
 # 吞进助手串（Hana 事件）。问助手类入口（没 id）才允许走 fallback。
 if ! grep -qF 'originId: peerUserId, participantId: peerUserId' apps/mobile/src/surfaces/conversation.tsx; then
@@ -7302,3 +7337,16 @@ fi
 go -C apps/api-go test ./internal/platform/postgres/ -run TestAgentClaimNumberSequential -count=1 || exit $?
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/me-claim-number.test.ts || exit $?
 echo "    AGENT-CLAIM-NUMBER-001: PASS (claim numbers sequential, read-only, AVAILABLE-only)"
+# VOUCHER-CONFIRM-001: 消费者自证核销，回执曾谎称 MERCHANT_CONFIRMED。
+# 确认路径无商家参与时回执必须诚实标注，不得伪造商家举证。
+require_test "VOUCHER-CONFIRM-001" "./internal/voucher" \
+  "TestConfirmRedemptionReceiptDoesNotClaimMerchantConfirmation" \
+  "apps/api-go/internal/voucher/service_test.go" || exit $?
+# BENEFIT-REDEEM-002: RedeemBenefit 曾只比对 payload 商家串，
+# 未校验调用方本人是否在该商家有身份。商户归属活动核销必须验成员。
+require_test "BENEFIT-REDEEM-002" "./internal/benefit" \
+  "TestRedeemRejectsCallerWithoutMerchantMembership" \
+  "apps/api-go/internal/benefit/service_test.go" || exit $?
+require_test "BENEFIT-REDEEM-002" "./internal/benefit" \
+  "TestRedeemFailsClosedWithoutMerchantVerifierConfigured" \
+  "apps/api-go/internal/benefit/service_test.go" || exit $?

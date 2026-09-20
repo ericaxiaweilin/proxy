@@ -56,7 +56,6 @@ describe("SYNC-FS-001 local persistence reads must await File.json()", () => {
     // The pure parse layer is the single place malformed/promise input
     // collapses to safe defaults; local-snapshot.test.ts pins its behavior.
     expect(snapshot).toContain("export function parseHiddenChatIds");
-    expect(snapshot).toContain("export function parseFolders");
     expect(snapshot).toContain("export function parseCreatorSnapshot");
   });
 

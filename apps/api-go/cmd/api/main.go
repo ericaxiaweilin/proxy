@@ -137,6 +137,13 @@ func main() {
 	experienceService := experience.New()
 	voucherService := voucher.New()
 	voucherService.SetSettlementCreator(voucher.LogSettlementCreator{})
+	// R0 / R16.7-P1-H: Benefit Routing Network. Defaults to the in-memory
+	// repo; the DATABASE_URL branch below swaps in postgres.NewBenefitRepository
+	// so /v1/commands/{CreateCampaign,ClaimBenefit,RedeemBenefit,...} persists
+	// across restarts. BENEFIT-REDEEM-002 merchant verifier is wired near the
+	// bottom of this function, once businessService has its final (memory or
+	// Postgres) form.
+	benefitService := benefit.NewService(benefit.NewMemoryRepository())
 	demandService.SetBatchCreator(newSupplyBatchCreator(supplyService))
 	authenticator = identityService
 	var transactions api.TransactionRunner
@@ -280,6 +287,7 @@ func main() {
 		experienceService = experience.NewWithRepository(postgres.NewExperienceRepository(pool))
 		voucherService = voucher.NewWithRepository(postgres.NewVoucherRepository(pool))
 		voucherService.SetSettlementCreator(voucher.LogSettlementCreator{})
+		benefitService = benefit.NewService(postgres.NewBenefitRepository(pool))
 		demandService.SetBatchCreator(newSupplyBatchCreator(supplyService))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
@@ -455,15 +463,19 @@ func main() {
 	// (one-way dependency: api -> both).
 	fulfillmentService.WithJurisdictionResolver(jurisdictionAdapter{svc: jurisdictionSvc})
 	server.Jurisdiction = jurisdictionSvc
-	// R0 / R16.7-P1-H prep: Benefit Routing Network. No Postgres
-	// repo is shipped yet (memory_repo.go is the only implementation);
-	// we use the memory repo in both pool and no-pool paths so
-	// /v1/commands/{CreateCampaign,ClaimBenefit,RedeemBenefit,...}
-	// is reachable end-to-end. The eligibility engine is wired
-	// inside NewService and fires on every Claim / Redeem.
-	benefitRepo := benefit.NewMemoryRepository()
-	benefitService := benefit.NewService(benefitRepo)
+	// BENEFIT-REDEEM-002: RedeemBenefit for a merchant-owned campaign now
+	// fails closed (MERCHANT_VERIFIER_UNAVAILABLE) unless a MerchantVerifier
+	// is wired — without this call every such redemption would be rejected.
+	// businessService's role check (hasRole OWNER/ADMIN/OPERATOR) is the
+	// same verified-identity pattern MerchantPublishIdentity already uses.
+	benefitService.WithMerchantVerifier(businessService)
 	server.Benefit = benefitService
+	// VOUCHER-DEFAULTS-001: the voucher wallet no longer mints free vouchers
+	// (see voucher.Service.ensureDefaults) — this is how a user's real,
+	// merchant-funded benefit.Claim rows show up in that same wallet
+	// UI/protocol instead. Read-only; see voucher.BenefitBridgePrefix's doc
+	// comment for why redemption itself isn't bridged yet.
+	voucherService.SetBenefitBridge(voucher.NewBenefitBridge(benefitService))
 	// Operator 门禁白名单（env PROXY_OPERATOR_PRINCIPALS，逗号分隔 principal id）。
 	// 未配置时 fail-closed：特权命令（审核/发奖/能力核验/媒体就绪覆盖）一律拒绝。
 	if operatorPrincipals := os.Getenv("PROXY_OPERATOR_PRINCIPALS"); operatorPrincipals != "" {

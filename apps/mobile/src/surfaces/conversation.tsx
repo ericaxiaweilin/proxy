@@ -171,7 +171,7 @@ export function ConversationSurface({
   // CONVO-AVATAR-PROFILE-001: 对方 userId（1:1 对话由消息列表带入；群聊没有，
   // 靠名字精确匹配解析，解不出就明说不瞎进）。头像可点进对方个人主页。
   peerUserId?: string | undefined;
-  onOpenPeerProfile?: ((peer: { userId?: string; name: string; aiAccount?: PlatformAIAccount }) => Promise<void>) | undefined;
+  onOpenPeerProfile?: ((peer: { userId?: string; name: string; aiAccount?: PlatformAIAccount; avatarUri?: string }) => Promise<void>) | undefined;
   initialDraft?: string;
   ensureSession?: () => Promise<void>;
   onBack: () => void;
@@ -301,19 +301,28 @@ export function ConversationSurface({
   // CONVO-AVATAR-PROFILE-001: 点头像进对方主页。1:1 用透传的 peerUserId；
   // 群聊没有按人透传的 id，靠名字精确匹配（外壳负责，解不出会抛错）；
   // "对方"/空名这种占位名直接拦，不拿去搜 —— 搜出来也是错的人。
+  // AVATAR-CARRY-001: 头像跟 userId 一起带过去——对话窗口这里早就有对方的
+  // 真头像（peerAvatarSource，顶栏画的就是它），以前只透传 name/userId，
+  // 主页那边拿不到图只能画一个首字母圆圈，跟聊天里明明看到的真人照片对不上。
+  // 只在 peerUserId 认得出、且头像是远程图（{uri}，不是本地打包 number）时带，
+  // 跟 userId 同一个 gate，语义对齐：两个都是"1:1 且确认是这个人"才给。
   const openPeerProfile = useCallback(async (senderName: string, isAICluster: boolean): Promise<void> => {
     if (!onOpenPeerProfile) return;
     const name = (senderName || author || "").trim();
+    const avatarUri = !isAICluster && peerUserId && peerAvatarSource && typeof peerAvatarSource === "object"
+      ? peerAvatarSource.uri
+      : undefined;
     try {
       await onOpenPeerProfile({
         ...(!isAICluster && peerUserId ? { userId: peerUserId } : {}),
         name,
         ...(isAICluster && aiAccount ? { aiAccount } : {}),
+        ...(avatarUri ? { avatarUri } : {}),
       });
     } catch (err) {
       showToast(err instanceof Error ? err.message : "对方主页打不开，请稍后重试。");
     }
-  }, [onOpenPeerProfile, peerUserId, author, aiAccount, showToast]);
+  }, [onOpenPeerProfile, peerUserId, peerAvatarSource, author, aiAccount, showToast]);
 
   // ASSISTANT-THREAD-001: 助手有且仅有一个，没有主页 —— 头像纯展示，不可点。
   const peerIsAssistant = peerUserId === "proxy_ai" || peerUserId === "user_proxy_ai";
@@ -418,6 +427,19 @@ export function ConversationSurface({
     }
   }, []);
 
+  // SENDER-NAME-HONEST-001: senderSnapshot 缺失时，之前直接落到字面"对方"——
+  // 1:1 对话里 author/peerUserId 明明知道对方是谁（顶栏就写着名字），消息
+  // 气泡上方却显示一个毫无信息量的"对方"，跟顶栏的真名对不上。群聊没有
+  // 单一对方（peerUserId 传不进来），这时才是真的不知道，"对方"留着诚实。
+  // 不按 senderId === peerUserId 精确匹配——种子/模拟消息的 senderId 不一定
+  // 跟对话列表给的 counterpartyId 字面一致，但 1:1 对话数学上只有两边，
+  // 非自己发的就必然是对方，不需要 id 对上才敢用那个名字。
+  const resolveSenderFallback = useCallback((): string => {
+    if (aiAccount) return aiAccount.displayName;
+    if (peerUserId) return author;
+    return "对方";
+  }, [aiAccount, peerUserId, author]);
+
   const hydrateMessages = useCallback((result: Record<string, unknown>): void => {
     const payload = parseOperationRef(result);
     const rows = Array.isArray(payload?.messages) ? payload.messages as Array<Record<string, unknown>> : [];
@@ -425,7 +447,7 @@ export function ConversationSurface({
     const seed = payload?.seed as Record<string, unknown> | undefined;
     if (seed && typeof seed === "object") {
       const seedBody = String(seed.body ?? (seed.messageType === "IMAGE" ? "[图片]" : seed.messageType === "VIDEO" ? "[视频]" : seed.messageType === "LOCATION" ? "[位置]" : ""));
-      const seedSender = seed.senderId === actorId ? "你" : String((seed.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? aiAccount?.displayName ?? "对方");
+      const seedSender = seed.senderId === actorId ? "你" : String((seed.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? resolveSenderFallback());
       setSeedMsg(seedBody ? { sender: seedSender, body: seedBody } : null);
     } else {
       setSeedMsg(null);
@@ -439,7 +461,7 @@ export function ConversationSurface({
       const contact = row.messageType === "CONTACT" && typeof row.body === "string" ? parseContactCard(row.body) : undefined;
       return {
         id: String(row.messageId ?? `message_${Date.now()}`),
-        sender: row.senderId === actorId ? "你" : String((row.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? aiAccount?.displayName ?? "对方"),
+        sender: row.senderId === actorId ? "你" : String((row.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? resolveSenderFallback()),
         // 名片的 body 只留「人能读的那一行」（@handle 或店名），vCard 原文不进气泡 ——
         // 那串 BEGIN:VCARD 是给机器看的，塞进气泡就是噪音。
         body: location ? (location.label ?? "") : contact ? (contact.handle ? `@${contact.handle}` : contact.name) : rawBody,
@@ -475,7 +497,7 @@ export function ConversationSurface({
       });
     });
     setError(undefined);
-  }, [aiAccount, conversationClient.baseUrl, parseOperationRef]);
+  }, [conversationClient.baseUrl, parseOperationRef, resolveSenderFallback]);
 
   // Human-to-human DM live sync. The API remains the source of truth; while
   // this screen is foregrounded we refresh every 3s, pause in background, and

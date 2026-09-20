@@ -1,15 +1,20 @@
 /**
- * AdaptiveMediaCollection v2 — Proxy Social Media Pipeline §5.2 / §5.2.1 / §5.2.2
+ * AdaptiveMediaCollection v3 — Proxy Social Media Pipeline §5.2 / §5.2.1 / §5.2.2
+ * MEDIA-ROW-HARDEN-001 (2026-09-20): 两种形态：
+ *   1 张：SINGLE → 内容宽度铺满、原比例（clamp 4:5 ~ 1.91:1）
+ *   2+ 张：RAIL  → 固定尺寸横滑，默认一屏露完整 2 张，第 3 张起滑出；
+ *                  每张卡片宽度 = (W - gap) / 2，高度按黄金比例（1:1.618）
  *
- * 三种形态：
- *   1 张：SINGLE  → 内容宽度铺满、原比例（clamp 4:5 ~ 1.91:1）
- *   2/3/5：RAIL   → 稳定高度 clamp(W*1.05, 280, 440)；下张露 12-18%
- *   4/6：WALL    → 两列照片墙；格子宽 = (W - gap) / 2；高度按 sourceAspect
+ * 之前 2/3/5 走 RAIL（按每张 sourceAspect 算宽度）、4/6 单独走 WALL（两列
+ * 网格按 sourceAspect 算高度）——两套并行算法都拿"这张照片自己的宽高比"
+ * 撑格子，真机上传的真实照片比例跟模拟器种子图差很多时，格子/卡片会被
+ * 撑得比预期大很多（模拟器凑巧没露出来）。现在数量只决定"单图还是多图"，
+ * 卡片尺寸固定，不再看任何一张照片自己的比例——这整类 bug 不会再发生。
  *
  * 关键不变量：
- *   - 数量只决定"形态"，主体类型由服务端 compositionHint 决定每个格子怎么填
- *   - WALL 不再使用 1:1 强制 cover（旧的"灰边 / 显示不全"主因）
- *   - WALL 格子是固定宽，**高度按单图 sourceAspect**，contain 优先
+ *   - 数量只决定"单图/多图"，主体类型由服务端 compositionHint 决定每个
+ *     格子怎么填（cover/contain 走 SocialMediaFrame 已有策略）
+ *   - RAIL 格子固定尺寸，不做"下张露一点"的暗示——横滑边界很清楚
  *   - 删除/重试一个媒体不改变其他媒体 ID 和顺序
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -34,17 +39,15 @@ import { color } from "../theme";
 import {
   mediaAspect,
   mediaCollectionMode,
-  mediaRailMetrics,
+  mediaRowMetrics,
   nearestRailIndex,
-  shouldAutoPlayVideo,
-  wallCellAspect
+  shouldAutoPlayVideo
 } from "../media-presentation";
 import { SocialMediaFrame } from "./SocialMediaFrame";
 import { AudioStage } from "./audio-stage";
 import { isMediaUnavailable, UnavailableMedia, useMediaLoadState } from "./media-fallback";
 import {
   SOCIAL_MEDIA_BADGE_INSET,
-  SOCIAL_MEDIA_GRID_GAP,
   SOCIAL_MEDIA_RADIUS,
   SOCIAL_MEDIA_RAIL_GAP,
   SOCIAL_MEDIA_RAIL_TRAILING_SPACE
@@ -80,10 +83,14 @@ type Props = {
   onVideoFrame?: (videoKey: string, frame: { y: number; height: number }) => void;
   /** collection 归属的 postId，用于拼 videoKey 格式 "postId:index:mediaAssetId" */
   collectionKey?: string;
+  // MEDIA-EDGE-BLEED-002: 多图 RAIL 静止态要跟文字缩进对齐、横滑后要能到
+  // 屏幕真正左边缘——调用方（feed.tsx）把外层容器往左破出这么多再传进来，
+  // 见 media-presentation.ts 的 mediaRowMetrics 用法。默认 0（不破出/无缩进，
+  // 其余调用方行为不变）。
+  leadingInset?: number;
 };
 
 const CARD_GAP = SOCIAL_MEDIA_RAIL_GAP;
-const WALL_GAP = SOCIAL_MEDIA_GRID_GAP;
 const RAIL_HORIZONTAL_PADDING = SOCIAL_MEDIA_RAIL_TRAILING_SPACE;
 
 /**
@@ -137,7 +144,6 @@ function renderKindAwareStage(
 
 export function AdaptiveMediaCollection(props: Props): React.JSX.Element {
   const mode = mediaCollectionMode(props.items.length);
-  if (mode === "WALL") return <MediaWall {...props} />;
   if (mode === "RAIL") return <AdaptiveMediaRail {...props} />;
   return <SinglePostCollection {...props} />;
 }
@@ -618,41 +624,43 @@ function MediaBackdrop({ item, uri }: { item: ItemWithHint; uri: string }): Reac
   );
 }
 
-function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onOpen, activeVideoKey, onVideoFrame, collectionKey }: Props): React.JSX.Element {
+function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onOpen, activeVideoKey, onVideoFrame, collectionKey, leadingInset = 0 }: Props): React.JSX.Element {
   const [contentWidth, setContentWidth] = useState(320);
   const railRef = useRef<ScrollView>(null);
-  const metrics = useMemo(() => mediaRailMetrics(items, contentWidth), [items, contentWidth]);
+  // MEDIA-ROW-HARDEN-001: 固定卡片尺寸，不再按每张照片自己的 sourceAspect
+  // 算宽度——所有卡片同宽同高，一屏正好露 2 张整图。
+  // MEDIA-EDGE-BLEED-002: leadingInset 见 mediaRowMetrics 的文档注释。
+  const metrics = useMemo(() => mediaRowMetrics(items.length, contentWidth, CARD_GAP, leadingInset), [items.length, contentWidth, leadingInset]);
   useEffect(() => {
     const target = metrics.offsets[Math.max(0, Math.min(currentIndex, metrics.offsets.length - 1))] ?? 0;
     railRef.current?.scrollTo({ x: target, animated: false });
   }, [currentIndex, metrics.offsets]);
+  const frameAspect = metrics.cardWidth / metrics.cardHeight;
   return (
     <View onLayout={(event) => setContentWidth(event.nativeEvent.layout.width)}>
-      {/* R15.34.2: 多图横滑。 HorizontalSwipeRail 隔离 iOS 系统 tab 切换 / Android PAGE_SEQUENCE
-         切页手势, onTouchStart stopPropagation() 在 iOS 上不够 (系统级手势不走 React TouchEvent 冒泡)。
-         snap behavior + onMomentumScrollEnd 保留。 */}
+      {/* R15.34.2: 多图横滑。HorizontalSwipeRail 隔离 iOS 系统 tab 切换 / Android
+         PAGE_SEQUENCE 切页手势, onTouchStart stopPropagation() 在 iOS 上不够
+         (系统级手势不走 React TouchEvent 冒泡)。
+         MEDIA-RAIL-NEST-001: 这里以前在 HorizontalSwipeRail 里面又套了一个
+         独立的 <ScrollView>——两层横滑 ScrollView 嵌在一起，PanResponder 驱动
+         的是外层，snapToOffsets/onMomentumScrollEnd 挂在从没被手势真正驱动过
+         的内层，量出的可用宽度也不可靠。帖子多图轮播因此整个不显示。
+         现在只有一个真实 ScrollView（HorizontalSwipeRail 内部），把 ref/snap/
+         decel/onMomentumScrollEnd 都转发给它。 */}
       <HorizontalSwipeRail
-        contentContainerStyle={{ paddingLeft: 0, paddingRight: RAIL_HORIZONTAL_PADDING }}
+        contentContainerStyle={{ paddingLeft: leadingInset, paddingRight: RAIL_HORIZONTAL_PADDING }}
+        decelerationRate="fast"
+        onMomentumScrollEnd={(event) => onIndexChange(nearestRailIndex(metrics.offsets, event.nativeEvent.contentOffset.x))}
+        ref={railRef}
+        snapToOffsets={metrics.offsets}
+        snapToAlignment="start"
         style={styles.rail}
       >
-        <ScrollView
-          contentContainerStyle={{ paddingLeft: 0, paddingRight: RAIL_HORIZONTAL_PADDING }}
-          decelerationRate="fast"
-          horizontal
-          onMomentumScrollEnd={(event) => onIndexChange(nearestRailIndex(metrics.offsets, event.nativeEvent.contentOffset.x))}
-          ref={railRef}
-          snapToOffsets={metrics.offsets}
-          snapToAlignment="start"
-          showsHorizontalScrollIndicator={false}
-          style={styles.rail}
-        >
         {items.map((item, index) => {
-          const cardWidth = metrics.cardWidths[index] ?? contentWidth * 0.84;
-          const cardHeight = metrics.cardHeights[index] ?? metrics.railHeight;
           const isVideo = item.mediaType === "VIDEO";
           const cardUri = isVideo
             ? resolveUrl(selectVideoPlaybackUrl(item) ?? item.playbackUrl ?? "")
-            : resolveUrl(selectVariantForViewport(item, contentWidth).url ?? "");
+            : resolveUrl(selectVariantForViewport(item, metrics.cardWidth).url ?? "");
           const videoKey = isVideo ? `${collectionKey ?? "0"}:${index}:${item.mediaAssetId}` : null;
           // 【fix 2026-08-26】X 风格 active VIDEO：只有 “父级算出的 activeVideoKey”
           // 且 index === currentIndex（RAIL 水平焦点） 才走 ActiveVideoStage 真播。
@@ -666,7 +674,7 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
               accessibilityLabel={`查看第 ${index + 1} 张媒体`}
               key={item.mediaAssetId}
               onPress={() => onOpen(index)}
-              style={{ alignSelf: "center", height: cardHeight, marginRight: CARD_GAP, width: cardWidth }}
+              style={{ alignSelf: "center", height: metrics.cardHeight, marginRight: CARD_GAP, width: metrics.cardWidth }}
             >
               {isVideo ? (
                 <VideoStage
@@ -675,91 +683,18 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
                   autoPlay={shouldAutoPlayVideo(item) && index === currentIndex}
                   isActive={isActive}
                   onPress={() => onOpen(index)}
-                  frameAspect={cardWidth / cardHeight}
+                  frameAspect={frameAspect}
                   resolveUrl={resolveUrl}
                   {...(onFrame ? { onFrame } : {})}
                 />
               ) : (
-                <SocialMediaFrame item={item as ItemWithHint} frameAspect={cardWidth / cardHeight} resolveUrl={resolveUrl} />
+                <SocialMediaFrame item={item as ItemWithHint} frameAspect={frameAspect} resolveUrl={resolveUrl} />
               )}
               <View style={styles.railBadge}><Text style={styles.railBadgeText}>{index + 1}/{items.length}</Text></View>
             </Pressable>
           );
         })}
-        </ScrollView>
       </HorizontalSwipeRail>
-    </View>
-  );
-}
-
-function MediaWall({ items, resolveUrl, onOpen, activeVideoKey, onVideoFrame, collectionKey }: Props): React.JSX.Element {
-  const [contentWidth, setContentWidth] = useState(320);
-  const cellWidth = (contentWidth - WALL_GAP) / 2;
-  const columns = [
-    items.map((item, index) => ({ item, index })).filter(({ index }) => index % 2 === 0),
-    items.map((item, index) => ({ item, index })).filter(({ index }) => index % 2 === 1)
-  ];
-  return (
-    <View onLayout={(event) => setContentWidth(event.nativeEvent.layout.width)}>
-      <View style={styles.wall}>
-        {columns.map((column, columnIndex) => (
-          <View key={`wall-column-${columnIndex}`} style={[styles.wallColumn, columnIndex === 0 ? { marginRight: WALL_GAP } : null]}>
-            {column.map(({ item, index }) => {
-              // Wall cell aspect: portrait 走 4:5 最低 (不被压
-              // 成横条)，landscape 走 1:1 最高 (不超长到撑爆 row)。
-              // 9:16 (0.56) portrait → 0.56  (原比例)
-              // 4:5 (0.8) portrait   → 0.8
-              // 1:1 (1.0) square     → 1.0
-              // 4:3 (1.33) landscape  → 1.33
-              // 16:9 (1.78) landscape → 1.78
-              // 21:9 (2.33) cinema   → 1.91 (clamp, cover 模式)
-              // Tripwire 在 media-presentation.test.ts: wallCellAspect
-              // 跑 6 个 boundary。
-              const aspect = mediaAspect(item, 1);
-              const cellAspect = aspect >= 1 ? Math.min(1.91, Math.max(1, aspect)) : Math.max(4 / 5, aspect);
-              const isVideo = item.mediaType === "VIDEO";
-              const cardUri = isVideo
-                ? resolveUrl(selectVideoPlaybackUrl(item) ?? item.playbackUrl ?? "")
-                : resolveUrl(selectVariantForViewport(item, cellWidth).url ?? "");
-              const videoKey = isVideo ? `${collectionKey ?? "0"}:${index}:${item.mediaAssetId}` : null;
-              const isActive = isVideo && activeVideoKey === videoKey && index === 0;
-              const onFrame = isVideo && onVideoFrame && videoKey
-                ? (frame: { y: number; height: number }) => onVideoFrame(videoKey, frame)
-                : undefined;
-              return (
-            <Pressable
-              accessibilityLabel={`查看第 ${index + 1} 张媒体`}
-              key={item.mediaAssetId}
-              onPress={() => onOpen(index)}
-              style={[
-                styles.wallCell,
-                {
-                  height: cellWidth / cellAspect,
-                  width: cellWidth
-                }
-              ]}
-            >
-              {isVideo ? (
-                <VideoStage
-                  item={item as ItemWithHint}
-                  uri={cardUri}
-                  autoPlay={shouldAutoPlayVideo(item) && index === 0}
-                  isActive={isActive}
-                  onPress={() => onOpen(index)}
-                  frameAspect={cellAspect}
-                  resolveUrl={resolveUrl}
-                  {...(onFrame ? { onFrame } : {})}
-                />
-              ) : (
-                <SocialMediaFrame item={item as ItemWithHint} frameAspect={cellAspect} resolveUrl={resolveUrl} />
-              )}
-              <View style={styles.railBadge}><Text style={styles.railBadgeText}>{index + 1}/{items.length}</Text></View>
-            </Pressable>
-              );
-            })}
-          </View>
-        ))}
-      </View>
     </View>
   );
 }
@@ -848,19 +783,6 @@ const styles = StyleSheet.create({
     color: color.white,
     fontSize: 11,
     fontWeight: "700"
-  },
-  // Wall
-  wall: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "flex-start"
-  },
-  wallColumn: { flex: 1 },
-  wallCell: {
-    backgroundColor: FRAME_BACKGROUND_HEX,
-    borderRadius: SOCIAL_MEDIA_RADIUS,
-    marginBottom: WALL_GAP,
-    overflow: "hidden"
   },
   mediaBackdrop: {
     height: "112%",

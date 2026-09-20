@@ -27,8 +27,8 @@
 //     切页先反应过来)。
 //   - 垂直手势 (|dy| > |dx|) 不拦 — 父级 ScrollView 仍能正常滚。
 
-import { useRef, type ReactNode } from "react";
-import { PanResponder, ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { forwardRef, useImperativeHandle, useRef, type ReactNode } from "react";
+import { PanResponder, ScrollView, StyleSheet, View, type NativeSyntheticEvent, type NativeScrollEvent, type StyleProp, type ViewStyle } from "react-native";
 
 export interface HorizontalSwipeRailProps {
   children: ReactNode;
@@ -42,17 +42,30 @@ export interface HorizontalSwipeRailProps {
   threshold?: number;
   // 轨道内有按钮时，轻点必须交给子项；只有真正横移后才接管。
   preserveChildPresses?: boolean;
+  // MEDIA-RAIL-NEST-001: 以下三个是给"需要吸附对齐"的调用方（目前只有
+  // AdaptiveMediaRail）用的可选透传——本组件内部已经有一个真实 ScrollView，
+  // 调用方不应该再在 children 外面套第二个 ScrollView（那会导致两层横滑
+  // 手势/滚动位置打架，帖子多图轮播曾经因此整个不显示）。
+  onMomentumScrollEnd?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  snapToOffsets?: number[];
+  snapToAlignment?: "start" | "center" | "end";
+  decelerationRate?: "fast" | "normal" | number;
 }
 
-export function HorizontalSwipeRail({
+export const HorizontalSwipeRail = forwardRef<ScrollView, HorizontalSwipeRailProps>(function HorizontalSwipeRail({
   children,
   style,
   contentContainerStyle,
   showScrollIndicator = false,
   threshold = 6,
-  preserveChildPresses = false
-}: HorizontalSwipeRailProps): React.JSX.Element {
+  preserveChildPresses = false,
+  onMomentumScrollEnd,
+  snapToOffsets,
+  snapToAlignment,
+  decelerationRate
+}, forwardedRef) {
   const railRef = useRef<ScrollView>(null);
+  useImperativeHandle(forwardedRef, () => railRef.current as ScrollView);
   const railScrollXRef = useRef(0);
   // 手指 1:1 基准：grant 瞬间快照当前偏移，整个手势内都用
   // “快照 - 手指累计位移”。之前误用持续更新的 railScrollXRef
@@ -101,12 +114,16 @@ export function HorizontalSwipeRail({
           railScrollXRef.current = e.nativeEvent.contentOffset.x;
         }}
         scrollEventThrottle={16}
+        {...(onMomentumScrollEnd ? { onMomentumScrollEnd } : {})}
+        {...(snapToOffsets ? { snapToOffsets } : {})}
+        {...(snapToAlignment ? { snapToAlignment } : {})}
+        {...(decelerationRate !== undefined ? { decelerationRate } : {})}
       >
         {children}
       </ScrollView>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   // R15.34.2: 外层 capture — 仅承担 PanResponder 拦截, 无视觉

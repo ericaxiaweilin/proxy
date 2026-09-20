@@ -36,6 +36,26 @@ type Service struct {
 	repo    Repository
 	clock   Clock
 	eligibility Evaluator
+	merchantVerifier MerchantVerifier
+}
+
+// MerchantVerifier checks that userID really holds an authorized role
+// (owner/admin/operator) at businessID, instead of the redemption handler
+// trusting a client-supplied merchantId string outright.
+//
+// BENEFIT-REDEEM-002: p.MerchantID in RedeemBenefit used to go straight
+// into the Redemption record — the only check was "does this string equal
+// campaign.OwnerID" (BENEFIT-REDEEM-001, still in place, still needed: it
+// stops merchant A claiming merchant B's redemption). It never checked
+// that the *caller* (e.Actor.ID) is actually someone at that business.
+// A consumer's own authenticated session could submit RedeemBenefit with
+// their own claim token and the real merchant's ID, and the server would
+// record — and pay out settlement against — a redemption nobody at the
+// merchant ever confirmed. business.Service.MerchantRedemptionIdentity
+// satisfies this interface; it is the same "trust membership, not the
+// client's claim" contract already used for MERCHANT-PUBLISH-001.
+type MerchantVerifier interface {
+	MerchantRedemptionIdentity(ctx context.Context, businessID, userID string) (string, bool)
 }
 
 type Clock interface {
@@ -56,6 +76,27 @@ func NewService(repo Repository) *Service {
 func (s *Service) WithEligibility(engine Evaluator) *Service {
 	s.eligibility = engine
 	return s
+}
+
+// WithMerchantVerifier wires the real membership check for RedeemBenefit
+// (see MerchantVerifier). Production callers must call this with the live
+// business.Service — without it, HandleRedeemBenefit fails closed on any
+// merchant-owned campaign (see the nil check there) rather than silently
+// trusting the payload.
+func (s *Service) WithMerchantVerifier(verifier MerchantVerifier) *Service {
+	s.merchantVerifier = verifier
+	return s
+}
+
+// Repo exposes the underlying Repository for read-only cross-package
+// composition (see voucher.BenefitBridge, which projects a user's real
+// benefit.Claim rows into the voucher wallet's Voucher shape — voucher
+// package no longer mints its own free vouchers, VOUCHER-DEFAULTS-001).
+// It is intentionally the only public seam: writes still go through the
+// command surface (HandleClaimBenefit / HandleRedeemBenefit / ...), which
+// is where eligibility and merchant-identity checks live.
+func (s *Service) Repo() Repository {
+	return s.repo
 }
 
 // countRedemptions 统计某用户在某活动下**已核销**的次数（BENEFIT-ELIG-001）。
@@ -430,6 +471,21 @@ func (s *Service) HandleRedeemBenefit(ctx context.Context, e command.Envelope) c
 	// 但那种情况本来就没有商家可冒充，风险不同。
 	if campaign.OwnerType == "merchant" && campaign.OwnerID != "" && campaign.OwnerID != p.MerchantID {
 		return command.Rejected(e, "MERCHANT_NOT_CAMPAIGN_OWNER", "AUTHORIZATION", "AFTER_USER_ACTION", "benefit.merchant_not_campaign_owner", nil)
+	}
+	// BENEFIT-REDEEM-002: 上面那道门只挡得住「商家 A 冒领商家 B 的核销」——
+	// 双方 merchantId 都是调用方自己填的，没人校验过调用方本人（e.Actor.ID）
+	// 真的在 p.MerchantID 这家店有身份。消费者用自己的登录态、自己的 claimToken、
+	// 填真商家的 merchantId 直接调 RedeemBenefit，一样能通过上面那道门——因为
+	// 他填的商家确实是归属商家，只是「他自己不是那家商家的人」这件事完全没查。
+	// 这里补上：调用方必须在归属商家有 OWNER/ADMIN/OPERATOR 身份才能核销。
+	// 没配 verifier 时 fail closed（拒绝，不是放行）——见 WithMerchantVerifier。
+	if campaign.OwnerType == "merchant" {
+		if s.merchantVerifier == nil {
+			return command.Rejected(e, "MERCHANT_VERIFIER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "benefit.merchant_verifier_unavailable", nil)
+		}
+		if _, ok := s.merchantVerifier.MerchantRedemptionIdentity(ctx, p.MerchantID, e.Actor.ID); !ok {
+			return command.Rejected(e, "MERCHANT_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "benefit.merchant_forbidden", nil)
+		}
 	}
 	// R16.7-P1-H prep: eligibility re-check at redemption. A claim
 	// that was eligible at claim time may have aged out (max

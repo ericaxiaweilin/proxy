@@ -24,7 +24,6 @@ import { FilterChipRail } from "../components/filter-chip-rail";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { isOpportunityPost } from "../feed-content";
-import { mediaAspect, mediaCollectionMode, mediaRailMetrics, nearestRailIndex, shouldPreserveWholeSubject } from "../media-presentation";
 // v2 重构：深紫黑底 + compositionHint 驱动 fill。Sprint C 替换完成。
 // 旧 AdaptiveMediaCollection / AdaptiveMediaRail / SocialMediaFrame / SinglePostImage
 // 已从本文件迁出 → apps/mobile/src/media/
@@ -66,6 +65,10 @@ type FilterKey = "ALL" | "人/关系" | "机会/需求" | "活动/团体" | "情
 let cachedPosts: FeedPost[] = [];
 let cachedMedia: Record<string, FeedMediaItem[]> = {};
 let cachedPostIds: Set<string> = new Set();
+// TAB-SWITCH-JANK-001: 本 session 是否做过一次网络 fresh 加载。切 tab 是 remount
+// 不是冷启动——remount 有缓存就同步渲染（毫秒级），不再每次 fresh 重拉；冷启动
+// （两级缓存都空）仍走 fresh（FEED-FRESH-002 那条 stale 缓存的教训保留）。
+let feedNetworkLoadedThisSession = false;
 // AVATAR-FLASH-001: 上次解析出的本人头像 URI（带所属账户）。首帧同步初值用它，
 // 切 tab 再回来不闪；effect 照常异步重验，不一致就纠正（换头像后最多闪一帧旧图，
 // 不闪黑）。按账户 key，切换账号不串。
@@ -232,6 +235,11 @@ export function FeedSurface({
 	const [expandedReplies, setExpandedReplies] = useState<ReadonlySet<string>>(new Set());
 	// FEED-REPLY-002: 已经拉过评论的帖子，翻页回来不再重复拉。
 	const requestedRepliesRef = useRef<Set<string>>(new Set());
+	// TAB-SWITCH-JANK-001: 同一波注水里攒批的帖子 id（见 hydrateReplyPreviews）。
+	const replyCoalesceRef = useRef<Set<string>>(new Set());
+	const replyFlushScheduledRef = useRef(false);
+	// TAB-SWITCH-JANK-001: 切进切出抖 tab 时后台刷新节流（见 backgroundRefresh）。
+	const lastBackgroundRefreshAtRef = useRef(0);
   const [bookmarked, setBookmarked] = useState<ReadonlySet<string>>(new Set());
   const [engagementBusy, setEngagementBusy] = useState<ReadonlySet<string>>(new Set());
   const [engagementError, setEngagementError] = useState<string>();
@@ -505,6 +513,7 @@ export function FeedSurface({
         cachedMedia = read.media;
         cachedPostIds = new Set(read.posts.map((p) => p.postId));
         postIdsRef.current = cachedPostIds;
+        feedNetworkLoadedThisSession = true;
         writeFeedDiskCache(read.posts, read.media);
       }
       setPosts(read.posts);
@@ -571,6 +580,11 @@ export function FeedSurface({
     // SEARCH-CORPUS-001: 搜索中不做「N 条新动态」合并 —— 它拿的是**未过滤**的首屏，
     // 合并进来会让搜索结果凭空多出无关帖（点「展示最新」更是直接退出搜索）。
     if (lastSearchRef.current !== "") return;
+    // TAB-SWITCH-JANK-001: 切进切出抖一下 tab 就重拉+重注水整屏——30s 内只刷一次。
+    // banner 照常工作，只是抖 tab 不会反复触发； genuinely 有新帖时点 banner 照进。
+    const now = Date.now();
+    if (now - lastBackgroundRefreshAtRef.current < 30_000) return;
+    lastBackgroundRefreshAtRef.current = now;
     try {
       const read = await localNet.listFeedPosts();
       if (read.posts.length === 0) return;
@@ -609,6 +623,10 @@ export function FeedSurface({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      // TAB-SWITCH-JANK-001: remount（切 tab 回来）有缓存就同步渲染，不再 fresh
+      // 重拉——新帖由节流后的后台刷新发现并经 banner 合并。只有本 session 还没做过
+      // 网络加载（冷启动）才走 fresh，FEED-FRESH-002 的 stale 教训保留。
+      if (feedNetworkLoadedThisSession) return;
       const disk = await readFeedDiskCache();
       if (!cancelled && disk && cachedPosts.length === 0) {
         cachedPosts = disk.posts;
@@ -720,12 +738,33 @@ export function FeedSurface({
 	async function hydrateReplyPreviews(postId: string): Promise<void> {
 	  if (requestedRepliesRef.current.has(postId)) return;
 	  requestedRepliesRef.current.add(postId);
+	  // TAB-SWITCH-JANK-001: 同一波 hydration 里 N 个帖子同时调进来——以前每个
+	  // 都独立 fetch + 独立 setPostReplies，全列表过滤排序重算重渲染 N 次。
+	  // 改成合并：同一 tick 进来的 id 攒一批，一次拉完、一次 setState 刷入。
+	  // 调用点 `hydrateReplyPreviews(item.postId)` 保持原样（FEED-REPLY-002 钉着它）。
+	  replyCoalesceRef.current.add(postId);
+	  if (replyFlushScheduledRef.current) return;
+	  replyFlushScheduledRef.current = true;
+	  await Promise.resolve();
+	  const batch = [...replyCoalesceRef.current];
+	  replyCoalesceRef.current.clear();
+	  replyFlushScheduledRef.current = false;
+	  if (batch.length === 0) return;
 	  try {
-		const listed = await engagement.listPostReplies(postId);
-		setPostReplies((previous) => ({ ...previous, [postId]: listed.replies }));
+		const listed = await Promise.all(batch.map(async (id) => {
+		  try { return { id, replies: (await engagement.listPostReplies(id)).replies }; }
+		  catch {
+			// 单条拉不到就允许下次再试，但不要因为一条评论炸掉整屏。
+			requestedRepliesRef.current.delete(id);
+			return undefined;
+		  }
+		}));
+		const merged: Record<string, PostReply[]> = {};
+		for (const entry of listed) if (entry) merged[entry.id] = entry.replies;
+		if (Object.keys(merged).length > 0) setPostReplies((previous) => ({ ...previous, ...merged }));
 	  } catch {
-		// 拉不到就允许下次再试，但不要因为一条评论炸掉整屏。
-		requestedRepliesRef.current.delete(postId);
+		// 整批失败就允许下次再试，但不要因为评论炸掉整屏。
+		for (const id of batch) requestedRepliesRef.current.delete(id);
 	  }
 	}
 
@@ -1056,16 +1095,23 @@ export function FeedSurface({
   });
   // 偏好-权重：只重排不隐藏。类别按帖子属性归一后取权重分，
   // V8 sort 稳定，同分保持服务端顺序。
-  const unranked = getVisibleForTab(tab);
-  const scored = unranked.map((post, index) => ({ post, index, score: feedWeightFor(post) }));
-  scored.sort((a, b) => b.score - a.score || a.index - b.index);
-  const visible = scored.map((entry) => entry.post);
+  // TAB-SWITCH-JANK-001: 过滤+权重+排序是纯派生——以前每次 setState（注水每条
+  // 评论都 set 一次）全量重跑。用 useMemo 钉死输入，注水只重渲染行，不重算。
+  const { visible, scopeHiddenCount } = useMemo(() => {
+    const unranked = getVisibleForTab(tab);
+    const scored = unranked.map((post, index) => ({ post, index, score: feedWeightFor(post) }));
+    scored.sort((a, b) => b.score - a.score || a.index - b.index);
+    return {
+      visible: scored.map((entry) => entry.post),
+      scopeHiddenCount: isFeedScopeActive(feedPrefs.scope)
+        ? getVisibleForTab(tab, "PERSISTENT").length - unranked.length
+        : 0,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posts, tab, feedPrefs, hiddenPosts, following, feedFilter, selectedCustomFeed, customFeedTokens, viewerAccountId]);
   // FEED-SCOPE-001: 时间范围是相对 Date.now() 滚动的，帖文会一天天无声消失 ——
   // 实测默认 7D 隐藏了 62% 的帖文，而时间线上没有任何提示，看起来就是「数据丢了」。
   // 生效时把「正在筛选」和「藏了多少」摆出来，并给一个一键看全部的出口。
-  const scopeHiddenCount = isFeedScopeActive(feedPrefs.scope)
-    ? getVisibleForTab(tab, "PERSISTENT").length - unranked.length
-    : 0;
   const clearScopeFilter = useCallback(() => {
     const next = { ...feedPrefs, scope: "PERSISTENT" as const };
     setFeedPrefs(next);
@@ -1350,10 +1396,15 @@ export function FeedSurface({
                 <Text style={styles.postCopy}>{post.body}</Text>
 
               {/* 服务端媒体（READY Hydrate）：多图横滑轨 / 单图全宽 / 视频内联自动播放（X 式，滑近中心播、滑出停，带声音） */}
-              {/* MEDIA-EDGE-BLEED-001: 只有多图轮播（能横滑）才破到屏幕左边缘——
-                  单图没有滑动这个动作，应该跟文字一样停在缩进线上，不能也套
-                  负 marginLeft，否则单图在默认态就贴边，跟文字对不齐（上一版
-                  的错误：把两种情况都套了 postMediaBleed）。 */}
+              {/* MEDIA-EDGE-BLEED-002（2026-09-20）：静止态要跟文字缩进对齐，
+                  但横滑之后要能滑到屏幕真正左边缘——单靠"不破出屏幕"做不到，
+                  因为 ScrollView 的可视区本身也会被限制在缩进内，滑多远都露不出
+                  缩进线以外的像素。所以这里恢复 postMediaBleed 破出去（可视区
+                  撑到真正的屏幕左边缘），但把等量的留白（68 = postCard.paddingLeft
+                  14 + postBody.paddingLeft 54）转移到 AdaptiveMediaCollection 内部
+                  的 leadingInset —— 只在静止态（第 1 张）生效，横滑到第 2 张起就
+                  不再补这段留白，卡片能贴到破出去的容器左边缘。单图没有横滑这个
+                  动作，不套 bleed，跟文字一样停在缩进线上。 */}
               {items.length > 1 ? (
                 <View style={styles.postMediaBleed}>
                   <AdaptiveMediaCollection
@@ -1368,6 +1419,7 @@ export function FeedSurface({
                     activeVideoKey={activeVideoId}
                     onVideoFrame={onVideoFrame}
                     collectionKey={post.postId}
+                    leadingInset={68}
                   />
                 </View>
               ) : items.length === 1 && items[0] ? (
@@ -1934,9 +1986,9 @@ const styles = StyleSheet.create({
   // 44pt avatar + 10pt gap: body aligns with the identity while the row's
   // right edge remains flush with the screen.
   postBody: { marginTop: -12, paddingLeft: 54 },
-  // MEDIA-EDGE-BLEED-001: 抵消 postCard.paddingLeft(14) + postBody.paddingLeft(54)，
-  // 让图片滑到真正的屏幕左边缘，不再停在缩进线上；右边缘本来就是通到底的
-  // （postCard 早已 marginHorizontal:-18 破出去），不用再单独处理。
+  // MEDIA-EDGE-BLEED-002: 抵消 postCard.paddingLeft(14) + postBody.paddingLeft(54)，
+  // 让多图轮播的可视区（不是内容留白）撑到真正的屏幕左边缘——留白本身通过
+  // AdaptiveMediaCollection 的 leadingInset={68} 在内容侧补回，只在静止态生效。
   postMediaBleed: { marginLeft: -68 },
   postReason: { color: "#81788A", fontSize: 11, marginTop: 5 },
   // R15.23: post-text 严格规范 fontSize 14 lineHeight 1.48 ≈ 20.72 → 21

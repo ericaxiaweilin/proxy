@@ -1123,6 +1123,31 @@ func (s *Service) MerchantPublishIdentity(ctx context.Context, businessID, userI
 	return account.Name, true
 }
 
+// MerchantRedemptionIdentity verifies that userID may confirm a benefit/
+// voucher redemption on behalf of businessID, and returns the merchant
+// display name.
+//
+// BENEFIT-REDEEM-002: mirrors MerchantPublishIdentity's "trust membership,
+// never the client-supplied businessId" contract (see that doc comment),
+// but with a wider role bar. Publishing a listing is an owner/admin action;
+// confirming a redemption is a daily point-of-sale action that the front
+// counter (OPERATOR) does dozens of times a shift — requiring OWNER/ADMIN
+// for every redemption would make the compliant flow unusable in practice
+// and push real usage back toward unverified shortcuts.
+func (s *Service) MerchantRedemptionIdentity(ctx context.Context, businessID, userID string) (string, bool) {
+	if businessID == "" || userID == "" {
+		return "", false
+	}
+	account, err := s.repo.GetAccount(ctx, businessID)
+	if err != nil || account.Status != "ACTIVE" || account.Name == "" {
+		return "", false
+	}
+	if !s.hasRole(ctx, businessID, userID, "OWNER", "ADMIN", "OPERATOR") {
+		return "", false
+	}
+	return account.Name, true
+}
+
 // R16.10-P1-F / Master PRD v1.4 §12: 合规场景分类强制（Category Policy 门禁）
 // 防止业务绕合规：付费一对一私人陪伴/喝酒/亲密陪伴等不能因为换文案进入 Opportunity/Invite。
 var forbiddenOpportunityCategories = map[string]bool{

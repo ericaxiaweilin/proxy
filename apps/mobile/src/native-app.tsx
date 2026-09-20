@@ -701,6 +701,22 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
     ? getDateOfBirthError(dateOfBirth)
     : undefined;
 
+  // 注册页只有一个「获取验证码」按钮（对齐 docs/design/references/
+  // Proxy_Auth_Standard_UI_v7.html —— 该参考文档里验证码按钮文案只有
+  // 「获取验证码」一种，没有按渠道分开的两种叫法）。
+  // 渠道由用户填了哪个标识决定，而不是由按了哪个按钮决定：
+  //   * 邮箱可用 → EMAIL（也覆盖「邮箱手机都填了」时以邮箱为准）
+  //   * 邮箱没填、手机填了 → SMS
+  //   * 邮箱填了但格式还不对、手机空着 → 仍走 EMAIL，好让 requestChallenge
+  //     里的邮箱格式校验给出提示，而不是按钮静默无反应
+  //   * 两个都空 → 按钮置灰
+  const registerEmailFilled = googleEmail.trim().length > 0;
+  const registerPhoneFilled = phone.trim().length > 0;
+  const registerEmailReady = normalizeLoginEmail(googleEmail) !== undefined;
+  const registerChannel: "SMS" | "EMAIL" =
+    registerEmailReady || (registerEmailFilled && !registerPhoneFilled) ? "EMAIL" : "SMS";
+  const registerCodeDisabled = busy || !!dobInlineError || (!registerEmailFilled && !registerPhoneFilled);
+
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.screenAvoid}>
       <ScrollView contentContainerStyle={styles.screenScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -809,7 +825,7 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
             </View>
             {authMode === "register" ? (
               <View style={styles.dobBlock}>
-                <Text style={styles.dobLabel}>出生日期（年 / 月 / 日）· 需年满 18 岁</Text>
+                <Text style={styles.dobLabel}>出生日期 · 需年满 18 岁</Text>
                 <TextInput
                   blurOnSubmit
                   keyboardType="number-pad"
@@ -828,18 +844,17 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
             {authMode === "register" ? (
               <>
                 <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" blurOnSubmit keyboardType="email-address" maxLength={MAX_LOGIN_EMAIL_LENGTH} onChangeText={setGoogleEmail} onSubmitEditing={() => Keyboard.dismiss()} placeholder="用户名或完整邮箱（最多 50 字符）" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={googleEmail} /></View>
-                <View style={[styles.button, busy || googleEmail.trim().length === 0 || dobInlineError ? styles.disabled : null]}>
-                  <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
-                  <Pressable disabled={busy || googleEmail.trim().length === 0 || !!dobInlineError} onPress={() => void requestChallenge("EMAIL")} style={styles.buttonPressable}>
-                    <Text style={styles.buttonText}>{busy ? "发送中…" : "获取邮箱验证码"}</Text>
-                  </Pressable>
+                <View style={styles.orRow}>
+                  <View style={styles.orLine} />
+                  <Text style={styles.orText}>OR</Text>
+                  <View style={styles.orLine} />
                 </View>
-                <Text style={styles.divider}>或使用越南手机号（可输 09… / +84… / 0084…）</Text>
                 <View style={styles.phoneRow}><Text style={styles.countryCode}>+84</Text><TextInput blurOnSubmit keyboardType="phone-pad" onChangeText={setPhone} onSubmitEditing={() => Keyboard.dismiss()} placeholder="0912345678 或粘贴 +84 号码" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={phone} /></View>
-                <View style={[styles.button, busy || !vietnamesePhoneReady(phone) || dobInlineError ? styles.disabled : null]}>
+                {/* 邮箱与手机共用一个「获取验证码」：渠道由上面填了哪个标识决定。 */}
+                <View style={[styles.button, registerCodeDisabled ? styles.disabled : null]}>
                   <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
-                  <Pressable disabled={busy || !vietnamesePhoneReady(phone) || !!dobInlineError} onPress={() => void requestChallenge("SMS")} style={styles.buttonPressable}>
-                    <Text style={styles.buttonText}>{busy ? "发送中…" : "获取手机验证码"}</Text>
+                  <Pressable disabled={registerCodeDisabled} onPress={() => void requestChallenge(registerChannel)} style={styles.buttonPressable}>
+                    <Text style={styles.buttonText}>{busy ? "发送中…" : "获取验证码"}</Text>
                   </Pressable>
                 </View>
                 <View style={styles.consentBlock}>
@@ -859,13 +874,12 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
                 <View style={[styles.button, busy || googleEmail.trim().length === 0 ? styles.disabled : null]}>
                   <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
                   <Pressable disabled={busy || googleEmail.trim().length === 0} onPress={() => void requestChallenge()} style={styles.buttonPressable}>
-                    <Text style={styles.buttonText}>{busy ? "发送中…" : "获取邮箱验证码"}</Text>
+                    <Text style={styles.buttonText}>{busy ? "发送中…" : "获取验证码"}</Text>
                   </Pressable>
                 </View>
               </>
             ) : (
               <>
-                <Text style={styles.divider}>或使用越南手机号（可输 09… / +84… / 0084…）</Text>
                 <View style={styles.phoneRow}><Text style={styles.countryCode}>+84</Text><TextInput blurOnSubmit keyboardType="phone-pad" onChangeText={setPhone} onSubmitEditing={() => Keyboard.dismiss()} placeholder="0912345678 或粘贴 +84 号码" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={phone} /></View>
                 <View style={[styles.button, busy || !vietnamesePhoneReady(phone) ? styles.disabled : null]}>
                   <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
@@ -875,7 +889,6 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
                 </View>
               </>
             )}
-            <Text style={styles.oauthHint}>可用 Google 或手机号继续；访客模式可在上方直接进入。</Text>
             <Pressable onPress={() => { setAuthMode(authMode === "login" ? "register" : "login"); setError(undefined); }} style={styles.switchAuthRow}>
               <Text style={styles.switchAuthText}>{authMode === "login" ? "没有账号？去注册" : "已有账号？去登录"}</Text>
             </Pressable>
@@ -1112,7 +1125,12 @@ const styles = StyleSheet.create({
   googleButtonActive: { borderColor: color.violet, backgroundColor: "#F0EBF5" },
   googleButtonSmall: { flex: 0.4 },
   googleLabel: { color: color.ink, fontSize: 15, fontWeight: "800" },
-  divider: { color: color.muted, fontSize: 12, marginTop: 20 },
+  // 邮箱 / 手机二选一的分隔标记。用「横线 + OR + 横线」这个通行写法，
+  // 取代原来那行独立的号码格式说明文字 —— 号码格式 placeholder 里
+  // 已经写了，再解释一遍是噪音。
+  orRow: { alignItems: "center", flexDirection: "row", marginTop: 18, width: "100%" },
+  orLine: { backgroundColor: color.line, flex: 1, height: 1 },
+  orText: { color: color.muted, fontSize: 12, fontWeight: "700", marginHorizontal: 12 },
   phoneRow: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", marginTop: 10, minHeight: 52, paddingHorizontal: 16, width: "100%" },
   countryCode: { color: color.ink, fontSize: 16, fontWeight: "800", marginRight: 12 },
   phoneInput: { color: color.ink, flex: 1, fontSize: 16, paddingVertical: 12 },
@@ -1185,7 +1203,6 @@ const styles = StyleSheet.create({
   guestDescription: { color: color.muted, fontSize: 14, lineHeight: 21, marginTop: 10, textAlign: "center" },
   inlineActions: { flexDirection: "row", gap: 28, justifyContent: "center", marginTop: 18 },
   linkText: { color: color.violet, fontSize: 13, fontWeight: "700" },
-  oauthHint: { color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 18, textAlign: "center" },
   button: {
     alignItems: "center",
     borderRadius: 14,

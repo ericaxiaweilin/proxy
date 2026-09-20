@@ -4,11 +4,6 @@
 // Array.isArray 恒为 false——之前五个读盘点全部静默回退（删掉的会话
 // 重进就回来、偏好/频道/草稿永不恢复）。解析逻辑收归此处做单测，
 // 异步读取留在各归属模块（await 后调这里）。
-// MSG-GROUPS-TAB-001: 自建文件夹 UI 已摘（folder-manager.tsx 已删），
-// FolderV1 类型收归此处 —— 落盘文件还在用户手机上，parseFolders 留着做
-// 向后兼容解析（读出来不用），删了它旧文件就变成不可解析的死数据。
-export type FolderV1 = { id: string; name: string; dialogIds: string[] };
-
 /** 本机隐藏会话 id 列表（v1 形状，时间戳由调用方补升级时刻）。 */
 export function parseHiddenChatIds(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
@@ -42,20 +37,6 @@ export function parseHiddenChatTimes(raw: unknown): Record<string, number> {
  * 隐藏时刻之后有动态（lastActivityMs > hiddenAt）就不再藏。 */
 export function shouldResurfaceHidden(hiddenAt: number | undefined, lastActivityMs: number): boolean {
   return hiddenAt !== undefined && lastActivityMs > hiddenAt;
-}
-
-/** 自建文件夹。 */
-export function parseFolders(raw: unknown): FolderV1[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((x): x is FolderV1 =>
-    typeof x === "object" && x !== null &&
-    typeof (x as { id?: unknown }).id === "string" &&
-    typeof (x as { name?: unknown }).name === "string" &&
-    Array.isArray((x as { dialogIds?: unknown }).dialogIds)).map((x) => ({
-    id: x.id as string,
-    name: x.name as string,
-    dialogIds: (x.dialogIds as unknown[]).filter((d): d is string => typeof d === "string"),
-  }));
 }
 
 export type CreatorSnapshot = {

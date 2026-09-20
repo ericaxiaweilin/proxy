@@ -21,10 +21,33 @@ func payload(t *testing.T, result command.Result) map[string]any {
 	return value
 }
 
+// seedTestVoucher inserts a single AVAILABLE voucher directly into the
+// service's in-memory store. VOUCHER-DEFAULTS-001 (2026-09-20): ensureDefaults
+// used to hand every actor these same 3 vouchers unconditionally and for
+// free — no merchant agreement, no campaign, no eligibility check. That
+// unconditional grant was itself the compliance problem, so ensureDefaults
+// is now a no-op (see service.go) and tests seed the voucher they need
+// directly, the same way a real merchant-authorized benefit claim would
+// populate the wallet in production.
+func seedTestVoucher(s *Service, actorID string, v Voucher) {
+	s.vouchers[s.key(actorID, v.ID)] = &v
+}
+
+func testCoffeeVoucher() Voucher {
+	return Voucher{
+		ID: "CV2508210001", Family: Coffee, DisplayValue: 50000, Currency: "VND",
+		ScopeName: "Cafe A", ScopeDetail: "Bắc Ninh", ValidFrom: "2026-08-21", ValidUntil: "2026-08-31",
+		RedeemTimeWindow: "14:00 – 18:00", MinimumSpend: "无", PerPersonLimit: 1,
+		Status: "AVAILABLE", IssuerLabel: "Cafe A", SettlementValue: 30000,
+		Funding: Funding{Proxy: 10000, Creator: 10000, Merchant: 10000}, Version: 1,
+	}
+}
+
 func TestRedemptionAndSettlementAreSeparateFacts(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC)
 	s.clock = func() time.Time { return now }
+	seedTestVoucher(s, "u1", testCoffeeVoucher())
 	list := s.Handle(envelope("ListVouchers", map[string]any{}))
 	if list.Outcome != "ACCEPTED" {
 		t.Fatalf("list: %#v", list)
@@ -49,6 +72,7 @@ func TestDynamicRedemptionCodeExpires(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC)
 	s.clock = func() time.Time { return now }
+	seedTestVoucher(s, "u1", testCoffeeVoucher())
 	opened := s.Handle(envelope("OpenVoucherRedemption", map[string]any{"voucherId": "CV2508210001"}))
 	redemption := payload(t, opened)["redemption"].(map[string]any)
 	now = now.Add(61 * time.Second)
@@ -61,6 +85,7 @@ func TestDynamicRedemptionCodeExpires(t *testing.T) {
 func TestRedemptionIsNotReplayable(t *testing.T) {
 	s := New()
 	s.clock = func() time.Time { return time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC) }
+	seedTestVoucher(s, "u1", testCoffeeVoucher())
 	opened := s.Handle(envelope("OpenVoucherRedemption", map[string]any{"voucherId": "CV2508210001"}))
 	if opened.Outcome != "ACCEPTED" {
 		t.Fatalf("open must succeed, got %#v Error=%+v", opened, opened.Error)
@@ -85,5 +110,86 @@ func TestRedemptionIsNotReplayable(t *testing.T) {
 	settled := s.Handle(envelope("SettleVoucher", map[string]any{"voucherId": "CV2508210001"}))
 	if settled.Outcome != "ACCEPTED" {
 		t.Fatalf("settle after first confirm must succeed, got %#v", settled)
+	}
+}
+
+// VOUCHER-CONFIRM-001: the redemption receipt used to claim
+// "evidenceStatus": "MERCHANT_CONFIRMED" even though this command is called
+// by the same consumer actor who opened the redemption — no merchant ever
+// verifies anything. This test locks in the honest label so a real
+// merchant-verified evidenceStatus can never be silently reintroduced as a
+// false claim.
+func TestConfirmRedemptionReceiptDoesNotClaimMerchantConfirmation(t *testing.T) {
+	s := New()
+	s.clock = func() time.Time { return time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC) }
+	seedTestVoucher(s, "u1", testCoffeeVoucher())
+	opened := s.Handle(envelope("OpenVoucherRedemption", map[string]any{"voucherId": "CV2508210001"}))
+	redemption := payload(t, opened)["redemption"].(map[string]any)
+	confirmed := s.Handle(envelope("ConfirmVoucherRedemption", map[string]any{"redemptionId": redemption["redemptionId"]}))
+	receipt, ok := payload(t, confirmed)["receipt"].(map[string]any)
+	if !ok {
+		t.Fatalf("receipt missing in payload: %s", confirmed.OperationRef)
+	}
+	if receipt["evidenceStatus"] == "MERCHANT_CONFIRMED" {
+		t.Fatalf("receipt must not falsely claim merchant confirmation, got %#v", receipt)
+	}
+	if receipt["evidenceStatus"] != "SELF_REPORTED_NO_MERCHANT_VERIFICATION" {
+		t.Fatalf("expected an honest self-reported evidenceStatus, got %#v", receipt["evidenceStatus"])
+	}
+}
+
+// VOUCHER-FRAUD-001: MaxPerPerson/IsFraudBatch (fraud.go) were declared and
+// never called anywhere, so neither guard actually did anything. These tests
+// prove CreateVoucher now enforces both.
+func TestCreateVoucherRejectsFraudulentBatchSize(t *testing.T) {
+	s := New()
+	s.clock = func() time.Time { return time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC) }
+	result := s.Handle(envelope("CreateVoucher", map[string]any{
+		"family": "COFFEE", "displayValue": 50000, "quantity": MaxBatchClaim + 1,
+		"scopeName": "Cafe A", "validFrom": "2026-08-21", "validUntil": "2026-08-31",
+	}))
+	if result.Error == nil || result.Error.ErrorCode != "VOUCHER_BATCH_TOO_LARGE" {
+		t.Fatalf("expected VOUCHER_BATCH_TOO_LARGE, got %#v", result)
+	}
+}
+
+func TestCreateVoucherRejectsExcessivePerPersonLimit(t *testing.T) {
+	s := New()
+	s.clock = func() time.Time { return time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC) }
+	result := s.Handle(envelope("CreateVoucher", map[string]any{
+		"family": "COFFEE", "displayValue": 50000, "quantity": 5, "perPersonLimit": MaxPerPerson + 1,
+		"scopeName": "Cafe A", "validFrom": "2026-08-21", "validUntil": "2026-08-31",
+	}))
+	if result.Error == nil || result.Error.ErrorCode != "VOUCHER_PER_PERSON_LIMIT_TOO_HIGH" {
+		t.Fatalf("expected VOUCHER_PER_PERSON_LIMIT_TOO_HIGH, got %#v", result)
+	}
+}
+
+// VOUCHER-DEFAULTS-001: a brand-new actor's wallet must come back empty,
+// not pre-loaded with 3 free vouchers nobody funded. This is the regression
+// test for the compliance fix — see the doc comment on ensureDefaults.
+func TestNewActorWalletStartsEmpty(t *testing.T) {
+	s := New()
+	s.clock = func() time.Time { return time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC) }
+	list := s.Handle(envelope("ListVouchers", map[string]any{}))
+	if list.Outcome != "ACCEPTED" {
+		t.Fatalf("list: %#v", list)
+	}
+	body := payload(t, list)
+	vouchers, _ := body["vouchers"].([]any)
+	if len(vouchers) != 0 {
+		t.Fatalf("expected an empty wallet for a never-seen actor, got %#v", vouchers)
+	}
+}
+
+func TestCreateVoucherAcceptsSaneBatchAndLimit(t *testing.T) {
+	s := New()
+	s.clock = func() time.Time { return time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC) }
+	result := s.Handle(envelope("CreateVoucher", map[string]any{
+		"family": "COFFEE", "displayValue": 50000, "quantity": MaxBatchClaim, "perPersonLimit": MaxPerPerson,
+		"scopeName": "Cafe A", "validFrom": "2026-08-21", "validUntil": "2026-08-31",
+	}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED at the boundary, got %#v", result)
 	}
 }

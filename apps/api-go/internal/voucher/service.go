@@ -105,6 +105,7 @@ type Service struct {
 	sequence          int
 	repo              Repository
 	settlementCreator SettlementCreator
+	benefitBridge     BenefitBridge
 }
 
 func New() *Service {
@@ -116,6 +117,12 @@ func NewWithRepository(repo Repository) *Service {
 }
 
 func (s *Service) SetSettlementCreator(c SettlementCreator) { s.settlementCreator = c }
+
+// SetBenefitBridge wires the read-only view onto a user's real,
+// merchant-funded benefit.Claim rows (see BenefitBridge). Without this the
+// wallet only ever shows whatever this package's own Repository holds,
+// which — since VOUCHER-DEFAULTS-001 — is nothing for a brand-new actor.
+func (s *Service) SetBenefitBridge(b BenefitBridge) { s.benefitBridge = b }
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
@@ -183,6 +190,14 @@ func (s *Service) list(ctx context.Context, e command.Envelope) command.Result {
 		log.Printf("voucher storage: list %s: %v", e.Actor.ID, err)
 		return reject(e, "VOUCHER_STORAGE_FAILED", "voucher.storage_failed")
 	}
+	if s.benefitBridge != nil {
+		bridged, err := s.benefitBridge.ListWallet(ctx, e.Actor.ID)
+		if err != nil {
+			log.Printf("voucher benefit bridge: list %s: %v", e.Actor.ID, err)
+		} else {
+			items = append(items, bridged...)
+		}
+	}
 	// Product order is intentional: the P0 wallet introduces the common
 	// Coffee → Experience → Activity families in the same order as the frozen
 	// prototype, rather than leaking internal voucher IDs into presentation.
@@ -204,6 +219,20 @@ func (s *Service) get(ctx context.Context, e command.Envelope) command.Result {
 	if !decode(e.Payload, &p) || p.VoucherID == "" {
 		return reject(e, "INVALID_VOUCHER_REF", "voucher.invalid_ref")
 	}
+	if isBenefitBridgeID(p.VoucherID) {
+		if s.benefitBridge == nil {
+			return reject(e, "VOUCHER_NOT_FOUND", "voucher.not_found")
+		}
+		v, ok, err := s.benefitBridge.GetWallet(ctx, e.Actor.ID, p.VoucherID)
+		if err != nil {
+			log.Printf("voucher benefit bridge: get %s/%s: %v", e.Actor.ID, p.VoucherID, err)
+			return reject(e, "VOUCHER_STORAGE_FAILED", "voucher.storage_failed")
+		}
+		if !ok {
+			return reject(e, "VOUCHER_NOT_FOUND", "voucher.not_found")
+		}
+		return accepted(e, "Voucher", v.ID, v.Status, map[string]any{"voucher": *v})
+	}
 	v, ok, err := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
 	if err != nil {
 		log.Printf("voucher storage: get %s/%s: %v", e.Actor.ID, p.VoucherID, err)
@@ -219,6 +248,11 @@ func (s *Service) openRedemption(ctx context.Context, e command.Envelope) comman
 	var p voucherRef
 	if !decode(e.Payload, &p) || p.VoucherID == "" {
 		return reject(e, "INVALID_VOUCHER_REF", "voucher.invalid_ref")
+	}
+	if isBenefitBridgeID(p.VoucherID) {
+		// See BenefitBridge's doc comment: redemption needs a real merchant
+		// party in the loop, which this consumer-self-tap flow does not have.
+		return reject(e, "VOUCHER_MERCHANT_ENTRY_NOT_AVAILABLE", "voucher.merchant_entry_not_available")
 	}
 	v, ok, err := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
 	if err != nil {
@@ -288,9 +322,22 @@ func (s *Service) confirmRedemption(ctx context.Context, e command.Envelope) com
 	}
 	v.Status, v.Version = "REDEEMED", v.Version+1
 	s.upsertWithContext(ctx, e.Actor.ID, *v)
+	// VOUCHER-CONFIRM-001: this command is called by the same consumer actor
+	// that opened the redemption (see the r.ActorID != e.Actor.ID check
+	// above) — no merchant party is ever involved in this call, which is
+	// also why the mobile client itself labels the button "模拟商家确认核销"
+	// and shows a P0-only disclaimer. The receipt used to claim
+	// "evidenceStatus": "MERCHANT_CONFIRMED" anyway, which is false: no
+	// merchant identity (see business.Service / benefit.MerchantVerifier
+	// for the real pattern) ever confirmed anything here. If this
+	// evidenceStatus is ever read by a real settlement/ledger process, a
+	// false "MERCHANT_CONFIRMED" could justify a payout nothing merchant-side
+	// actually verified. Label it for what it truthfully is until a real
+	// merchant-facing confirm surface exists.
 	return accepted(e, "Voucher", v.ID, "REDEEMED", map[string]any{
 		"voucher": *v,
-		"receipt": map[string]any{"redemptionId": r.ID, "redeemedAt": s.clock().Format(time.RFC3339), "evidenceStatus": "MERCHANT_CONFIRMED"},
+		"receipt": map[string]any{"redemptionId": r.ID, "redeemedAt": s.clock().Format(time.RFC3339), "evidenceStatus": "SELF_REPORTED_NO_MERCHANT_VERIFICATION"},
+		"notice":  "P0 模拟核销：本次确认由用户本人发起，未经任何商家身份核实。",
 	})
 }
 
@@ -299,7 +346,24 @@ func (s *Service) settlement(ctx context.Context, e command.Envelope) command.Re
 	if !decode(e.Payload, &p) || p.VoucherID == "" {
 		return reject(e, "INVALID_VOUCHER_REF", "voucher.invalid_ref")
 	}
-	v, ok, _ := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
+	var v *Voucher
+	var ok bool
+	if isBenefitBridgeID(p.VoucherID) {
+		// Pure status read, not a self-tap action — safe to bridge. A
+		// benefit claim is already either AVAILABLE or SETTLED (see
+		// BenefitBridge.project), so this just reports that truthfully.
+		if s.benefitBridge == nil {
+			return reject(e, "VOUCHER_NOT_FOUND", "voucher.not_found")
+		}
+		var err error
+		v, ok, err = s.benefitBridge.GetWallet(ctx, e.Actor.ID, p.VoucherID)
+		if err != nil {
+			log.Printf("voucher benefit bridge: settlement %s/%s: %v", e.Actor.ID, p.VoucherID, err)
+			return reject(e, "VOUCHER_STORAGE_FAILED", "voucher.storage_failed")
+		}
+	} else {
+		v, ok, _ = s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
+	}
 	if !ok {
 		return reject(e, "VOUCHER_NOT_FOUND", "voucher.not_found")
 	}
@@ -318,6 +382,13 @@ func (s *Service) settle(ctx context.Context, e command.Envelope) command.Result
 	var p voucherRef
 	if !decode(e.Payload, &p) || p.VoucherID == "" {
 		return reject(e, "INVALID_VOUCHER_REF", "voucher.invalid_ref")
+	}
+	if isBenefitBridgeID(p.VoucherID) {
+		// Same self-tap-with-no-merchant concern as openRedemption: benefit
+		// already settles atomically inside RedeemBenefit, so there is
+		// nothing for this consumer action to do — and it must not report
+		// success for something it didn't perform.
+		return reject(e, "VOUCHER_MERCHANT_ENTRY_NOT_AVAILABLE", "voucher.merchant_entry_not_available")
 	}
 	v, ok, _ := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
 	if !ok {
@@ -344,8 +415,18 @@ func (s *Service) create(ctx context.Context, e command.Envelope) command.Result
 	if !decode(e.Payload, &p) || !validFamily(p.Family) || p.DisplayValue <= 0 || p.Quantity <= 0 || p.ScopeName == "" || p.ValidFrom == "" || p.ValidUntil == "" {
 		return reject(e, "INVALID_VOUCHER_CREATE", "voucher.invalid_create")
 	}
+	// VOUCHER-FRAUD-001: MaxPerPerson/IsFraudBatch (fraud.go) used to be
+	// declared and never called anywhere — a single CreateVoucher call could
+	// mint an unbounded batch, and a business could set an arbitrarily high
+	// "per person" limit that defeats the point of having one.
+	if IsFraudBatch(p.Quantity) {
+		return reject(e, "VOUCHER_BATCH_TOO_LARGE", "voucher.batch_too_large")
+	}
 	if p.PerPersonLimit <= 0 {
 		p.PerPersonLimit = 1
+	}
+	if p.PerPersonLimit > MaxPerPerson {
+		return reject(e, "VOUCHER_PER_PERSON_LIMIT_TOO_HIGH", "voucher.per_person_limit_too_high")
 	}
 	s.sequence++
 	id := fmt.Sprintf("issued_%s_%d", strings.ToLower(string(p.Family)), s.sequence)
@@ -354,20 +435,21 @@ func (s *Service) create(ctx context.Context, e command.Envelope) command.Result
 	return accepted(e, "VoucherIssue", id, "ISSUED", map[string]any{"voucher": *v, "issuedQuantity": p.Quantity, "estimatedBudget": p.DisplayValue * p.Quantity, "policy": map[string]bool{"cashConvertible": false, "withdrawable": false, "changeGiven": false, "canBuyVoucher": false, "transferable": false, "resaleAllowed": false}})
 }
 
-func (s *Service) ensureDefaults(actorID string) {
-	if _, ok := s.vouchers[s.key(actorID, "CV2508210001")]; ok {
-		return
-	}
-	defaults := []Voucher{
-		{ID: "CV2508210001", Family: Coffee, DisplayValue: 50000, Currency: "VND", ScopeName: "Cafe A", ScopeDetail: "Bắc Ninh", ValidFrom: "2026-08-21", ValidUntil: "2026-08-31", RedeemTimeWindow: "14:00 – 18:00", MinimumSpend: "无", PerPersonLimit: 1, Status: "AVAILABLE", IssuerLabel: "Cafe A", SettlementValue: 30000, Funding: Funding{Proxy: 10000, Creator: 10000, Merchant: 10000}, Version: 1},
-		{ID: "EV2508210001", Family: Experience, DisplayValue: 299000, Currency: "VND", ScopeName: "Rooftop Photo Walk", ScopeDetail: "Hanoi · 60 min", ValidFrom: "2026-08-21", ValidUntil: "2026-09-15", RedeemTimeWindow: "预约后使用", MinimumSpend: "无", PerPersonLimit: 1, Status: "AVAILABLE", IssuerLabel: "Proxy Experience", SettlementValue: 180000, Funding: Funding{Proxy: 59000, Creator: 60000, Merchant: 60000}, ReservationNeeded: true, Version: 1},
-		{ID: "AV2508210001", Family: Activity, DisplayValue: 120000, Currency: "VND", ScopeName: "Sunset Yoga", ScopeDetail: "West Lake · Hanoi", ValidFrom: "2026-08-21", ValidUntil: "2026-09-10", RedeemTimeWindow: "活动开始前预约", MinimumSpend: "无", PerPersonLimit: 1, Status: "AVAILABLE", IssuerLabel: "West Lake Studio", SettlementValue: 72000, Funding: Funding{Proxy: 24000, Creator: 24000, Merchant: 24000}, ReservationNeeded: true, Version: 1},
-	}
-	for i := range defaults {
-		copy := defaults[i]
-		s.vouchers[s.key(actorID, copy.ID)] = &copy
-	}
-}
+// VOUCHER-DEFAULTS-001 (2026-09-20): this used to unconditionally hand every
+// actor 3 free vouchers (coffee/experience/activity) the first time they
+// were seen — no merchant ever agreed to fund them, no campaign, no
+// eligibility check, no budget. That is exactly the "platform gives away
+// merchant-funded value without a Merchant Benefit Agreement" pattern
+// flagged in the compliance review (Vietnam Nghị định 239/2026, Luật
+// Thương mại điện tử 122/2025). Real issuance belongs to the benefit
+// package (Campaign -> Claim -> Redemption -> Settlement, already wired to
+// Postgres — see cmd/api/main.go); wiring this package's wallet to that
+// pipeline is a separate, deliberately deferred task. This is intentionally
+// a no-op in the meantime — not dead code to be deleted, but the documented
+// boundary of what this package is still allowed to grant on its own.
+// Existing already-issued rows are left untouched; only the unconditional
+// future grant is turned off.
+func (s *Service) ensureDefaults(_ string) {}
 
 func (s *Service) expire(actorID string) {
 	today := s.clock().Format("2006-01-02")
