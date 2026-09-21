@@ -12,6 +12,7 @@ import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, Text
 import type { Activity } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { color, Gradient, shadows } from "../theme";
+import { activityAIPersonaName } from "./activity-detail-model";
 
 // origin 徽标 — 指“发布人身份”（平台 / 商家 / 用户 / TEST）。
 // AI 状态在 aiStatus / aiActorKind / aiPersona* 表达，origin
@@ -48,7 +49,7 @@ export function ActivityFeedCard({ item, onPress }: { item: Activity; onPress: (
           <View style={[styles.originBadge, { backgroundColor: origin.bg }]}>
             <Text style={[styles.originBadgeText, { color: origin.fg }]}>{origin.label}</Text>
           </View>
-          {item.aiStatus !== "NONE" && item.aiPersonaName ? (
+          {item.aiStatus !== "NONE" ? (
             // R17.x: 平台 AI 角色 photo 资产。三件 (id / name / photo)
             // 总是同时下发. mobile 优先用 personaPhotoColor (从
             // persona id 推出: ai_001=紫/ai_002=粉/...) 在 32x32
@@ -63,7 +64,7 @@ export function ActivityFeedCard({ item, onPress }: { item: Activity; onPress: (
               </View>
               <View>
                 <Text style={styles.exampleAIPersona}>
-                  {item.aiPersonaName} · {item.aiStatus === "AI_GENERATED" ? "AI 生成，平台审核发布" : "AI 辅助"}
+                  {activityAIPersonaName(item)} · {item.aiStatus === "AI_GENERATED" ? "AI 生成，平台审核发布" : "AI 辅助"}
                 </Text>
                 <Text style={styles.exampleAIPersonaBadge}>AI 虚拟形象</Text>
               </View>
@@ -149,13 +150,13 @@ export function ActivityDetail({
             <Text style={styles.detailPriceSmall}>{item.priceLabel}</Text>
           </View>
         </View>
-        {item.aiStatus !== "NONE" && item.aiPersonaName ? (
+        {item.aiStatus !== "NONE" ? (
           <View style={styles.detailAIPersonaRow}>
             <View style={[styles.detailAIPersonaAvatarCircle, personaColorStyle(item.aiPersonaId ?? "")]}>
               <Text style={styles.detailAIPersonaAvatarEmoji}>{item.aiPersonaAvatar ?? "🤖"}</Text>
             </View>
             <View style={styles.detailAIPersonaTextCol}>
-              <Text style={styles.detailAIPersonaName}>{item.aiPersonaName}</Text>
+              <Text style={styles.detailAIPersonaName}>{activityAIPersonaName(item)}</Text>
               <Text style={styles.detailAIPersonaDisclaimer}>{item.aiStatus === "AI_GENERATED" ? "AI 生成冷启动内容 · 由 Proxy 审核并作为发布方 · AI 不能报名或收款" : "AI 辅助整理 · 发布方承担责任"}</Text>
             </View>
           </View>
@@ -279,8 +280,8 @@ export function ActivityDetail({
           {item.aiStatus === "AI_GENERATED" && item.aiActorKind === "PLATFORM_AI"
             ? `本活动由平台 AI 小美生成 · 由 Proxy 审核并作为发布方。AI 不能报名、不能收款。如不适请在详情页点“向平台反馈”。`
             : item.aiStatus === "AI_GENERATED" && item.aiActorKind === "USER_TWIN"
-              ? `本活动由“${item.aiPersonaName ?? "用户分身"}”数字分身起草 · 真人为本人发布。如不适请在详情页点“向平台反馈”。`
-              : `本活动由 AI 助理协助起草 · “${item.aiPersonaName ?? "AI 助理"}”不是活动主办方，发布方本人承担责任。`}
+              ? `本活动由“${activityAIPersonaName(item)}”数字分身起草 · 真人为本人发布。如不适请在详情页点“向平台反馈”。`
+              : `本活动由 AI 助理协助起草 · “${activityAIPersonaName(item)}”不是活动主办方，发布方本人承担责任。`}
         </Text>
       ) : null}
       {item.realitySceneId && onOpenRealityScene ? (

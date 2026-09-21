@@ -5,7 +5,7 @@ import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import { color, shadows } from "../theme";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
-import { activityAIDisclosure, activityMoneySummary } from "./activity-detail-model";
+import { activityAIDisclosure, activityAIPersonaName, activityMoneySummary } from "./activity-detail-model";
 // COMP-REPORT-002: 活动与（商家主办的）主办商家都要可举报。
 import { ReportSheet } from "../components/report-sheet";
 import { activityReportTargets, type ModerationClient, type ReportTarget } from "../moderation-client";
@@ -63,7 +63,7 @@ export function ActivityDetailSurface({ client, moderation, initialActivityId, o
               <View style={[styles.personaToken, { backgroundColor: personaColor(selected.aiPersonaId) }]}>
                 <Text style={styles.personaTokenText}>{selected.aiPersonaAvatar ?? "🤖"}</Text>
               </View>
-              <Text style={styles.coverNote}>{selected.aiPersonaName ?? "平台 AI"} · 真人照片待上传</Text>
+              <Text style={styles.coverNote}>{activityAIPersonaName(selected)} · 真人照片待上传</Text>
             </View>
           ) : (
             <View style={styles.coverPlaceholder}>

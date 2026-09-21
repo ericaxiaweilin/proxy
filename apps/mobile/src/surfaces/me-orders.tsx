@@ -8,6 +8,7 @@ import { ReportSheet } from "../components/report-sheet";
 import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { color } from "../theme";
 import { ActivityDetailSurface } from "./activity-detail";
+import { activityAIPersonaName } from "./activity-detail-model";
 import { styles } from "./me-styles";
 import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
 
@@ -331,7 +332,7 @@ export function MyActivitiesSurface({ onBack, moderation }: { onBack: () => void
               <Text style={styles.orderTitle}>{item.title}</Text>
               <Text style={styles.savedMeta}>{item.time} · {item.venueIcon} {item.venueName}</Text>
               <Text style={styles.savedMeta}>{item.priceLabel}{item.price ? ` · ${item.price}` : ""} · 感兴趣 {item.interested} · 已报名 {item.joined}{capacity > 0 ? `/${capacity}` : ""}</Text>
-              {item.aiStatus !== "NONE" && item.aiPersonaName ? <Text style={styles.savedMeta}>AI 虚拟 · {item.aiPersonaName}</Text> : null}
+              {item.aiStatus !== "NONE" ? <Text style={styles.savedMeta}>AI 虚拟 · {activityAIPersonaName(item)}</Text> : null}
               <Text style={styles.savedMeta}>查看明细 ›</Text>
               </Pressable>
               {tab === "open" ? (

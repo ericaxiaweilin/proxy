@@ -2300,6 +2300,54 @@ require_test "LC-06" "./internal/localnet" "TestListFeedPosts_PropagatesAIGenera
 pnpm --dir apps/mobile exec vitest run src/media/ai-media-label.test.ts || exit $?
 echo "    LC-06-display: PASS (per-asset AI provenance reaches the client; AI-generated media is labelled)"
 
+# AI-DISCLOSURE-001：activity 面上的 AI 标注**不能**挂在 persona 名字上。
+#
+# 契约（packages/contracts/src/index.ts 的 ActivitySchema 注释）承诺的是
+#   「aiStatus != NONE 时客户端**必**显示 AI 标注 + persona 头像 + 名字」。
+# 注意主语：必显示的是**标注**；persona 名字是补充信息 —— schema 里是
+# `z.string().min(1).optional()`，服务端 `omitempty`，wire 允许缺名字。
+#
+# 2026-09-21 修之前的三个列表渲染点写的是
+#   {item.aiStatus !== "NONE" && item.aiPersonaName ? (…) : null}
+# 名字一缺，标注**整块消失** —— 界面把 AI 生成的活动当成人做的呈现。
+#
+# 这是漏接线，不是产品决定，证据在同一个文件里：tasks.tsx 的 footer
+# 免责声明（aiPersonaDisclaimerFooter，grep 得到）当时**已经**是无条件标注
+#   aiStatus === "AI_GENERATED" || aiStatus === "AI_ASSISTED"
+# 并且自己写了 `?? "用户分身"` / `?? "AI 助理"` 兜底。同一份数据、两种口径，
+# 同一个文件内自相矛盾 —— 所以判定为 bug。
+#
+# 现在归属名的兜底只有一处：activityAIPersonaName()（activity-detail-model.ts），
+# 只做**事实级**归因，不编造 persona：
+#   PLATFORM_AI → 「平台 AI 小美」（平台 AI 角色，assets/ai-personas/INDEX.md）
+#   USER_TWIN   → 「用户分身」（是**本人**的分身，不是平台的人）
+#   其余/未知    → 「AI 助理」（中性，不指认任何具体角色）
+#
+# 为什么钉在 mobile 而不是服务端：服务端**不能**替客户端编名字。`AIActorKind`
+# 有 USER_TWIN / USER_ASSISTANT 两档，给它们回填「平台 AI 小美」是把发布者
+# 说成平台 —— 那是比漏标更糟的假陈述。所以服务端的责任是「该带的带出来」，
+# 客户端必须有「名字缺失也照样标」的路径。
+if ! grep -qE 'export function activityAIPersonaName\(' apps/mobile/src/surfaces/activity-detail-model.ts; then
+  echo "  FAIL [AI-DISCLOSURE-001]: the shared persona-name fallback is gone." >&2
+  echo "        Without it every surface re-invents its own fallback and they drift." >&2
+  exit 1
+fi
+# 反回归 ①：任何 surface 再把标注挂回名字上 → 名字一缺标注就消失。
+if grep -rnE 'aiStatus !== "NONE"[[:space:]]*&&[[:space:]]*[A-Za-z_]+\.aiPersonaName' apps/mobile/src/surfaces/; then
+  echo "  FAIL [AI-DISCLOSURE-001]: an AI label is gated on aiPersonaName again." >&2
+  echo "        aiStatus != NONE must disclose on its own; the name is supplementary." >&2
+  echo "        名字一缺，标注就整块消失 —— 界面把 AI 生成的内容当成人做的。" >&2
+  exit 1
+fi
+# 反回归 ②：绕过共享助手自己写兜底 → 两套口径迟早漂移。
+if grep -rnE 'aiPersonaName[[:space:]]*\?\?' apps/mobile/src/surfaces/; then
+  echo "  FAIL [AI-DISCLOSURE-001]: a surface hand-rolls its own persona-name fallback." >&2
+  echo "        Use activityAIPersonaName() from ./activity-detail-model instead." >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/surfaces/activity-detail.test.ts || exit $?
+echo "    AI-DISCLOSURE-001: PASS (AI activity content discloses on aiStatus alone; a missing persona name never hides the label)"
+
 # LC-07 活动侧：PRD 与 activity/service.go 的注释都声称
 #   「USER_TWIN 角色 photo 必须先有 LikenessConsent LIVE 才会下发」
 # 但 activity 包里除了那行注释没有任何 consent 判定（grep HasLiveConsent/Likeness
