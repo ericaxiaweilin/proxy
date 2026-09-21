@@ -63,7 +63,7 @@ export function resolveAssetSource(
 
 /**
  * 服务端/账号下发的 avatarPath 字符串归一化为解析输入。
- * 优先级：服务端媒体资产 > 绝对 URL > / 开头服务端路径 > 打包注册表。
+ * 优先级：服务端媒体资产 > 绝对 URL > / 开头服务端路径 > assets/ 资产指针 > 打包注册表。
  * 注意：不以 / 开头的相对路径（如 ai-personas/…）是打包 key 材料，
  * 按旧行为走注册表，绝不拼成服务端 URL（会 404）。
  */
@@ -79,6 +79,18 @@ export function avatarPathToInput(input: {
   if (path !== "") {
     if (/^https?:\/\//.test(path)) return { kind: "remote", url: path };
     if (path.startsWith("/")) return { kind: "serverPath", path };
+    // AVATAR-OTHER-HUMAN-002 (2026-09-21): identity.profiles.avatar_path 的**真实**
+    // 存储格式是 `assets/<mediaAssetId>` —— 见 migrations/039_profile.sql:18 的 CHECK
+    // （`avatar_path ~ '^ai-personas/|^assets/|^store/|^photo_'`）。
+    // 旧实现只认 mediaId / http(s) / 前导 `/`，所以这个格式会掉到下面的 personaId
+    // 分支再落到 undefined —— 也就是说**即使把真实 profile 塞进来，这个函数也转不出
+    // URL**。feed.tsx 的 thumbOf()（本人头像路径）一直是对的，这里补上同一套解析。
+    // 其余两个合法前缀 store/ 与 photo_ 目前没有任何消费方，语义未知 ——
+    // 不猜、不拼 URL，保持落回 fallback（拼一个必 404 的图比首字更糟）。
+    if (path.startsWith("assets/")) {
+      const id = path.slice("assets/".length).trim();
+      if (id !== "") return { kind: "mediaId", id, version: input.avatarVersion ?? 1 };
+    }
   }
   if (input.personaId) {
     return { kind: "bundled", key: input.personaId };

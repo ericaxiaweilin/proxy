@@ -14,7 +14,7 @@ import { type LocalNetClient } from "../localnet-client";
 import { type SecureSessionStore, OfflineFallbackSessionError } from "../secure-session";
 import { type AIAccountClient } from "../ai-account-client";
 import { localApiBaseUrl } from "../native-clients";
-import { resolveAuthorAvatar, type AvatarAccount } from "../media/author-avatar";
+import { resolveAuthorAvatar, type AvatarAccount, type AvatarHumanAccount } from "../media/author-avatar";
 import { mapEngagementError, mapFollowError } from "./feed-error-map";
 import { type EngagementClient } from "../engagement-client";
 import type { ProfileClient } from "../profile-client";
@@ -73,6 +73,35 @@ let feedNetworkLoadedThisSession = false;
 // 切 tab 再回来不闪；effect 照常异步重验，不一致就纠正（换头像后最多闪一帧旧图，
 // 不闪黑）。按账户 key，切换账号不串。
 let cachedViewerAvatar: { accountId: string; uri: string } | undefined;
+
+// AVATAR-OTHER-HUMAN-002 (2026-09-21): 其他真人作者的头像缓存。
+//
+// 背景：`FeedPostSchema` 没有头像字段，服务端 feed 查询也不 JOIN
+// `identity.profiles`，所以「非本人、非 AI」的作者在动态里一律只能画首字黑圈。
+// 本地库实测：69 条 PUBLISHED 里 46 条（67%）如此，其中 23 条的作者在服务端
+// **真有**头像资产（`identity.profiles.avatar_path = assets/<mediaAssetId>`）。
+// AI 账号有 listRecommended 批量接口，真人没有 —— 只能按 accountId 逐个
+// getProfile，所以这里必须做会话级缓存，否则每次 remount 都是请求风暴。
+//
+// 值是 `null` 表示「查过了，但没有头像」—— 与「没查过」区分开，避免反复重查
+// 那些注定没有头像的账号。
+let humanAvatarCache: Map<string, AvatarHumanAccount | null> = new Map();
+// 在飞去重：同一个 accountId 并发只查一次。
+const humanAvatarInFlight = new Set<string>();
+// 并发上限：首屏最多同时挂 6 个 getProfile，失败静默（渲染走首字兜底）。
+const AUTHOR_AVATAR_FETCH_CONCURRENCY = 6;
+// 不进这个管线的 authorType：AGENT / AI_NATIVE 各有自己的解析路径（AI 账号表、
+// 打包人像），PLATFORM_SPECIAL 是平台内容、没有对应账号。其余（USER / MERCHANT
+// 以及以后新增的真人类型）都去查真实 profile。
+const AUTHOR_AVATAR_SKIP_TYPES: ReadonlySet<string> = new Set(["AGENT", "AI_NATIVE", "PLATFORM_SPECIAL"]);
+
+function snapshotHumanAvatars(): ReadonlyMap<string, AvatarHumanAccount> {
+  const out = new Map<string, AvatarHumanAccount>();
+  for (const [accountId, account] of humanAvatarCache) {
+    if (account) out.set(accountId, account);
+  }
+  return out;
+}
 
 // 本人头像：与“我的→个人总管理”同源（profileStore 本地记录 + document
 // 目录重锚 + 存在性校验，AVATAR-001 同款逻辑）。动态之前写死黑底圆圈，
@@ -356,6 +385,49 @@ export function FeedSurface({
   }, [feedProfileStore, aiAccountsClient, profileClient, viewerAccountId]);
   // MEDIA-PIPELINE-001: AI 账号目录已在上方并行初始化（启动优化），此处仅保留状态。
   const [aiAccountsById, setAiAccountsById] = useState<ReadonlyMap<string, AvatarAccount>>(new Map());
+
+  // AVATAR-OTHER-HUMAN-002: 真人作者头像。
+  // 真相源是模块级 humanAvatarCache（跨 remount 存活）；这个计数器只是让缓存
+  // 增长后能触发一次重算 —— 不另存一份 state，就不会出现「缓存有了、state 还是
+  // 旧的」这种两处状态互相追不上的 bug。
+  const [humanAvatarVersion, setHumanAvatarVersion] = useState(0);
+  const humanAvatarsById = useMemo(() => snapshotHumanAvatars(), [humanAvatarVersion]);
+  useEffect(() => {
+    if (!profileClient) return;
+    let cancelled = false;
+    const wanted: string[] = [];
+    for (const post of posts) {
+      const authorId = post.authorId;
+      if (authorId === viewerAccountId) continue; // 本人走本地文件优先那条路
+      if (AUTHOR_AVATAR_SKIP_TYPES.has(post.authorType)) continue;
+      if (humanAvatarCache.has(authorId) || humanAvatarInFlight.has(authorId)) continue;
+      if (!wanted.includes(authorId)) wanted.push(authorId);
+    }
+    if (wanted.length === 0) return;
+    void (async () => {
+      for (let i = 0; i < wanted.length; i += AUTHOR_AVATAR_FETCH_CONCURRENCY) {
+        if (cancelled) return;
+        const chunk = wanted.slice(i, i + AUTHOR_AVATAR_FETCH_CONCURRENCY);
+        for (const accountId of chunk) humanAvatarInFlight.add(accountId);
+        await Promise.all(chunk.map(async (accountId) => {
+          try {
+            const profile = await profileClient.getProfile(accountId);
+            const path = (profile?.avatarPath ?? "").trim();
+            // 没有头像也记下来（null），否则每次 remount 都会重查这些注定空的账号。
+            humanAvatarCache.set(accountId, path === "" ? null : { avatarPath: path, avatarVersion: profile.version });
+          } catch {
+            // 查不到就当作没有头像：动态渲染走首字兜底，绝不因为头像失败影响内容。
+            humanAvatarCache.set(accountId, null);
+          } finally {
+            humanAvatarInFlight.delete(accountId);
+          }
+        }));
+        if (cancelled) return;
+        setHumanAvatarVersion((version) => version + 1);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [posts, profileClient, viewerAccountId]);
   function isOwnPost(post: FeedPost): boolean {
     // FEED-OWN-001: strict author-id check only. Unknown viewer is
     // fail-closed (never own); display-name matching is forbidden.
@@ -1313,7 +1385,7 @@ export function FeedSurface({
           // MEDIA-PIPELINE-001: 头像走统一管线（本人/AI 账号/AI 人像/首字）。
           const avatar = resolveAuthorAvatar(
             { authorType: post.authorType, authorId: post.authorId },
-            { baseUrl: localApiBaseUrl, viewerAccountId, viewerAvatarUri: isOwnPost(post) ? viewerAvatarUri : undefined, avatarSource: isOwnPost(post) ? viewerAvatarUri ? { uri: viewerAvatarUri } : undefined : undefined, aiAccountsById, displayName: name }
+            { baseUrl: localApiBaseUrl, viewerAccountId, viewerAvatarUri: isOwnPost(post) ? viewerAvatarUri : undefined, avatarSource: isOwnPost(post) ? viewerAvatarUri ? { uri: viewerAvatarUri } : undefined : undefined, aiAccountsById, humanAvatarsById, displayName: name }
           );
           const meta = AUTHOR_TYPE_META[post.authorType];
           const isFollow = following.has(post.authorId);

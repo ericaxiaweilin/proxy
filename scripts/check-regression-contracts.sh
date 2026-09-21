@@ -130,6 +130,53 @@ if ! grep -q 'MEDIA-PIPELINE-001' apps/mobile/src/media/asset-sources.test.ts ||
 fi
 pnpm --filter @proxy/mobile exec vitest run src/media/asset-sources.test.ts src/media/author-avatar.test.ts || exit $?
 echo "    MEDIA-PIPELINE-001: PASS (unified asset resolution + author avatars, feed on pipeline)"
+
+# AVATAR-OTHER-HUMAN-002 (2026-09-21): 真实账号的服务端头像。
+#
+# 这条钉子的由来是一个**已经逃到真机**的 bug：动态页里「非本人、非 AI」的作者
+# 一律画首字黑圈。本地库实测 69 条 PUBLISHED 里 46 条（67%）如此，其中 23 条的
+# 作者在服务端**真有** avatar_path。用户原话：「怎么头像还特意保护成无头像
+# 还是程序架构缺陷」。
+#
+# 为什么上面 MEDIA-PIPELINE-001 那条钉抓不到它：那条钉跑的两个测试文件里，
+# author-avatar.test.ts 的旧断言 `falls back to initials for users without photo
+# assets` 用 user_b 断言首字 —— 它把 bug 当成了**正确行为**，证明的只是「没有
+# 数据源时首字」，从没覆盖「有数据源时能不能出图」。
+#
+# 为什么这里不再跑一次 vitest：上面第 131 行已经跑过这两个文件，重复跑只是浪费
+# 门禁时间。这里负责的是**接线**，而接线是测试看不见的 —— 新测试都自己显式传
+# humanAvatarsById，所以「feed.tsx 忘了传」它们照样全绿。形状和 LC-16
+# 「调用点被删掉、测试依然全绿」一模一样。
+if ! grep -q 'AVATAR-OTHER-HUMAN-002' apps/mobile/src/media/author-avatar.test.ts ||
+   ! grep -q 'AVATAR-OTHER-HUMAN-002' apps/mobile/src/media/asset-sources.test.ts; then
+  echo "  FAIL [AVATAR-OTHER-HUMAN-002]: the real-human avatar tests are missing" >&2
+  exit 1
+fi
+# 1) 渲染点必须真的把这张表交给 resolveAuthorAvatar。
+#    钉的是整段实参序列，不是 'humanAvatarsById' 子串 —— 只钉子串的话，
+#    声明一个同名变量、或传个永远为空的 Map，都能让这条钉绿而动态照样全黑。
+if ! grep -qF 'aiAccountsById, humanAvatarsById, displayName: name' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [AVATAR-OTHER-HUMAN-002]: feed.tsx no longer passes humanAvatarsById into resolveAuthorAvatar." >&2
+  exit 1
+fi
+# 2) 这张表必须真的被填过：feed.tsx 要按 accountId 去查真实 profile。
+#    少了这一条，把加载逻辑删掉、只留一个永远为空的 Map，第 1 条依然绿 ——
+#    这正是「绿在空处」。
+if ! grep -qF 'profileClient.getProfile(accountId)' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [AVATAR-OTHER-HUMAN-002]: feed.tsx no longer loads real author profiles." >&2
+  echo "        humanAvatarsById would be permanently empty and every non-self," >&2
+  echo "        non-AI author would go back to a black initial circle." >&2
+  exit 1
+fi
+# 3) 反方向：'assets/<mediaId>' 是 identity.profiles.avatar_path 的真实存储格式
+#    （migrations/039_profile.sql:18 的 CHECK）。解析器丢了这一支，上面两条
+#    静态钉和所有测试都会绿，而真机上一张图都出不来。
+if ! grep -qF 'path.startsWith("assets/")' apps/mobile/src/media/asset-sources.ts; then
+  echo "  FAIL [AVATAR-OTHER-HUMAN-002]: avatarPathToInput no longer understands the server's assets/ format." >&2
+  echo "        Every real profile's avatar_path would resolve to undefined." >&2
+  exit 1
+fi
+echo "    AVATAR-OTHER-HUMAN-002: PASS (real author profiles reach the feed avatar pipeline)"
 # 第二臂以前 grep 的是 merchant-me-r21.tsx（兼容 shim）里的组件名 —— 而那个名字
 # 只出现在该文件的注释和一个死常量 `_tripwireMarker` 里。后果：把真链路
 # （replacement 渲染 <MerchantCreatorRecommendations> → merchant-creator-

@@ -43,6 +43,20 @@ export type AvatarAccount = {
   avatarVersion?: number | undefined;
 };
 
+// AVATAR-OTHER-HUMAN-002 (2026-09-21): 其他**真人**作者的真实账号。
+//
+// 为什么不能复用 AvatarAccount：那个类型的 personaId 是必填的（AI 账号靠它取
+// 打包人像），真人没有 personaId，塞一个空串当哨兵会让「AI 账号」这个语义糊掉。
+//
+// 数据来自 ProfileClient.getProfile(accountId)（identity.profiles.avatar_path，
+// 真实格式 `assets/<mediaAssetId>`）。服务端契约 FeedPostSchema 没有头像字段，
+// 所以只能客户端按 accountId 补查 —— 长期方向是服务端直接把 authorAvatar 下发。
+// 不重复存 accountId：Map 的 key 就是账号 id。
+export type AvatarHumanAccount = {
+  avatarPath: string;
+  avatarVersion?: number | undefined;
+};
+
 export type AuthorAvatar =
   | { kind: "image"; source: AssetImageSource }
   | { kind: "initial"; letter: string };
@@ -55,6 +69,8 @@ export type AuthorAvatarOptions = {
   avatarSource?: number | { uri: string } | undefined;
   /** AI 账号表（accountId → 账号），动态按需加载后传入。 */
   aiAccountsById?: ReadonlyMap<string, AvatarAccount> | undefined;
+  /** 真人作者表（accountId → 账号），动态按需加载后传入。优先级高于写死的 mock creator 表。 */
+  humanAvatarsById?: ReadonlyMap<string, AvatarHumanAccount> | undefined;
   /** 首字 fallback 用名（已解析的展示名）。 */
   displayName: string;
 };
@@ -79,6 +95,19 @@ export function resolveAuthorAvatar(author: AvatarAuthor, opts: AuthorAvatarOpti
   if (author.authorType === "AI_NATIVE") {
     const bundled = aiPersonaBundledPhoto(author.authorId);
     if (bundled !== undefined) return { kind: "image", source: bundled };
+  }
+  // AVATAR-OTHER-HUMAN-002: 其他真人作者的真实头像（identity.profiles.avatar_path）。
+  // 放在写死的 mock creator 表**之前** —— 服务端数据比客户端猜的准，而且那张表
+  // 已经漂移过一次（客户端有 `trang`，服务端没有这一行 profile）。
+  if (opts.humanAvatarsById) {
+    const human = opts.humanAvatarsById.get(author.authorId);
+    if (human) {
+      const input = avatarPathToInput({ avatarPath: human.avatarPath, avatarVersion: human.avatarVersion });
+      if (input) {
+        const source = resolveAssetSource(input, { baseUrl: opts.baseUrl });
+        if (source !== undefined) return { kind: "image", source };
+      }
+    }
   }
   // AVATAR-OTHER-HUMAN-001: mock creator 真人账号（Linh 等）发的帖，用该账号
   // 在服务端真实存在的头像资产——不是本人、不是 AI，但也不该落到首字兜底。
