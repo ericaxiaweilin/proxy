@@ -2234,11 +2234,12 @@ else
   echo "    LC-06 / LC-07: SKIP (no postgres cluster found — the round-trip tests did NOT run; install postgresql@15 or set DATABASE_URL)" >&2
 fi
 
-# LC-06 的**显示侧**缺口（2026-09-21）—— 上面所有 LC-06 钉都只钉存储侧。
+# LC-06 的**显示侧**（2026-09-21 产品决定：补上）。
 #
-# 上面那几条钉证明的是：溯源列在 migration / SELECT / INSERT / UPDATE 里活着，
+# 上面那几条钉证明的是存储侧：溯源列在 migration / SELECT / INSERT / UPDATE 里活着，
 # 两道闸门（markReady + worker）都开火，真实 schema 上 7 条往返测试全过。
-# **但「溯源有没有到用户眼前」没有任何一条钉管**，而这一层今天是空的：
+#
+# 在这条钉最初写下的时候（2026-09-21 早些时候），显示侧是**空的**，当时的读数是：
 #
 #   grep -c  "aiGenerationSource" packages/contracts/src/index.ts            # → 0
 #   grep -rn "aiGenerationSource" apps/api-go/internal/api/ --include=*.go   # → 0
@@ -2246,36 +2247,58 @@ fi
 #        apps/api-go/internal/platform/postgres/network.go                   # → 0（feed 四条查询都不选）
 #   grep -rn "aiBadge: true" apps/mobile/src/surfaces/feed.tsx               # → 1（只有 AI_NATIVE）
 #
-# 也就是说：**按资产**的 AI 溯源（LC-06 的交付物本体）对任何用户都不可见；
-# 作者级的 AI 标注只覆盖 AI_NATIVE（小美）一档，而 AGENT（城市同行）的帖子没有
-# AI 徽标 —— 尽管 AGENT 的头像就是走 AI 账号表解析的
-# （media/author-avatar.ts 的 `authorType === "AGENT" && opts.aiAccountsById`）。
+# 即：**按资产**的 AI 溯源（LC-06 的交付物本体）对任何用户都不可见。
+# 当时这条钉钉的是「缺口」，不是「决定」——它不判定该不该显示，只逼出那个决定。
 #
-# 顺带纠正一条我自己写错过的风险描述：`MODEL_API` 这个枚举值**没有任何生产者** ——
-# 全仓非测试代码里只有校验白名单、注释和 normalize 的透传（三处），没有哪条管线
-# 会写它。所以「平台的 MODEL_API 资产被 USER 作者发布、界面无标注」这个形状
-# **不存在**；真正成立的是上面那句「按资产的溯源根本没有到客户端的路」。
+# 同一天用户定了口径（原话）：「ai做的 就标注 法规要求要满足」。
+# 于是缺口被补上，链变成四跳，每一跳都有钉：
 #
-# 这条钉**不判定该不该显示**。134/2025/QH15 第 12 条要求的是「记录」还是
-# 「向终端用户显示」，需要法务确认 —— docs/design/references/ 那份对齐文档里
-# 「法务 review」至今未勾选，所以不要替法务下结论。
+#   media_assets.ai_generation_source          （migration 108，存储侧，已有）
+#     → GetAssets 选列 + 扫进 MediaAsset        （已有，未改动）
+#     → mediaAssetInfo() 带出 media 包          ← 第①跳，曾缺
+#     → hydratePostMedia() 放进 PostMediaItem   ← 第②跳，曾缺
+#     → FeedMediaItemSchema.aiGenerationSource  ← 第③跳，曾缺
+#     → AdaptiveMediaCollection 画「AI 生成」    ← 第④跳，曾缺
 #
-# 它只钉住**现状**：任何一侧变化（契约加字段 / 加徽标 / 改元数据表）都必须显式
-# 改这条钉，逼出那个决定，而不是让「我们标了」悄悄成立。
-# 形状同 d849b76（钉住 LC-07 在活动侧的缺口）——钉住缺口，不假装它已经补上。
-if grep -qE 'aiGenerationSource' packages/contracts/src/index.ts; then
-  echo "  FAIL [LC-06-display]: contracts now carry per-asset AI provenance." >&2
-  echo "        That is progress — this pin documents the gap, so update it deliberately:" >&2
-  echo "        re-verify which surfaces now show the label before editing this check." >&2
+# 任何一跳掉了都是「标注静默消失」且编译不报错，所以四跳各有各的钉：
+#   ① TestPostMediaLookup_PropagatesAIGenerationSource      (internal/media)
+#   ② TestListFeedPosts_PropagatesAIGenerationSourceToMediaWire (internal/localnet)
+#   ③④ 下面这条契约钉 + mobile 的 ai-media-label.test.ts
+#
+# **仍然没有被判定的事**：134/2025/QH15 第 12 条要求的是「记录」还是「向终端用户
+# 显示」，需要法务确认 —— docs/design/references/ 那份对齐文档里「法务 review」
+# 至今未勾选。我们选的是**更严的那一边**（显示），所以这个未决项不构成合规风险，
+# 但也别把「法务已确认」写进任何文档：那是我们主动多做的，不是法务签过字的。
+#
+# 另外，`MODEL_API` 这个枚举值仍然**没有任何生产者** —— 全仓非测试代码里只有校验
+# 白名单、注释和 normalize 的透传，没有哪条管线会写它。所以「平台的 MODEL_API 资产
+# 被 USER 作者发布、界面无标注」这个形状**不存在**；客户端对它的处理属于预先接线，
+# 不是当前在跑的行为。
+if ! grep -qE 'aiGenerationSource' packages/contracts/src/index.ts; then
+  echo "  FAIL [LC-06-display]: contracts no longer carry per-asset AI provenance." >&2
+  echo "        Without this field the client cannot label AI-generated media." >&2
+  echo "        产品决定 2026-09-21：「AI 做的就标注」。撤字段 = 撤标注，请显式面对。" >&2
   exit 1
 fi
+# 只钉契约不够：字段在 wire 上、渲染那一行被删掉，照样「没有标注」。
+if ! grep -qE 'aiMediaLabel' apps/mobile/src/media/AdaptiveMediaCollection.tsx; then
+  echo "  FAIL [LC-06-display]: feed media no longer renders the AI label." >&2
+  echo "        The field reaches the client but nothing draws it — still invisible." >&2
+  exit 1
+fi
+# 作者级徽标仍只覆盖 AI_NATIVE（小美）一档 —— 那是 feed **身份轴**上唯一的 AI 作者。
+# AGENT / MERCHANT / USER 的帖若带 AI 生成的图，现在由上面的**资产轴**标注覆盖，
+# 所以这里保持 1 是自洽的，不是漏标。
 if [ "$(grep -c 'aiBadge: true' apps/mobile/src/surfaces/feed.tsx)" != "1" ]; then
   echo "  FAIL [LC-06-display]: the set of author types that render an AI badge changed." >&2
   echo "        Today exactly one does (AI_NATIVE / 小美). If AGENT or another type was added," >&2
   echo "        that is a labelling decision — confirm it, then update this pin." >&2
   exit 1
 fi
-echo "    LC-06-display: GAP PINNED (per-asset AI provenance reaches no client; only AI_NATIVE authors are badged)"
+require_test "LC-06" "./internal/media" "TestPostMediaLookup_PropagatesAIGenerationSource" "apps/api-go/internal/media/postmedia_lookup_test.go" || exit $?
+require_test "LC-06" "./internal/localnet" "TestListFeedPosts_PropagatesAIGenerationSourceToMediaWire" "apps/api-go/internal/localnet/service_test.go" || exit $?
+pnpm --dir apps/mobile exec vitest run src/media/ai-media-label.test.ts || exit $?
+echo "    LC-06-display: PASS (per-asset AI provenance reaches the client; AI-generated media is labelled)"
 
 # LC-07 活动侧：PRD 与 activity/service.go 的注释都声称
 #   「USER_TWIN 角色 photo 必须先有 LikenessConsent LIVE 才会下发」

@@ -59,6 +59,39 @@ func TestPostMediaLookup_PropagatesDominantColorHex(t *testing.T) {
 	}
 }
 
+// LC-06 显示侧（2026-09-21 产品决定「AI 做的就标注，法规要求要满足」）：
+// PostMediaLookup 是把 MediaAsset.AIGenerationSource 带进 Feed read model 的那座桥。
+// 跟 DominantColorHex 同构 —— 也是一行代码，重构时最容易静默消失：消失了编译照样过，
+// 只是客户端再也拿不到「这张图是 AI 生成的」，标注就无声无息地没了。
+func TestPostMediaLookup_PropagatesAIGenerationSource(t *testing.T) {
+	repository := NewMemoryRepository()
+	s := NewWithDependencies(repository, nil)
+	ctx := context.Background()
+	if err := repository.CreateAsset(ctx, MediaAsset{
+		MediaAssetID:       "media_ai_prov_001",
+		MediaType:          "IMAGE",
+		OwnerPrincipalID:   "user_001",
+		ProcessingStatus:   "READY",
+		ModerationStatus:   "APPROVED",
+		VisibilityClass:    "PUBLIC",
+		AIGenerationSource: "AI_PERSONA",
+	}); err != nil {
+		t.Fatalf("seed asset: %v", err)
+	}
+	lookup := NewPostMediaLookup(s)
+	got, err := lookup.LookupMediaAssets(ctx, []string{"media_ai_prov_001"})
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	info, ok := got["media_ai_prov_001"]
+	if !ok {
+		t.Fatalf("expected info for media_ai_prov_001, got %+v", got)
+	}
+	if info.AIGenerationSource != "AI_PERSONA" {
+		t.Fatalf("AIGenerationSource not propagated: want AI_PERSONA, got %q", info.AIGenerationSource)
+	}
+}
+
 func TestPostMediaLookup_MissingAsset_SkipsSilently(t *testing.T) {
 	// The Feed must NOT fail when a referenced asset is missing; the
 	// lookup skips unknown ids and the Feed simply omits the media

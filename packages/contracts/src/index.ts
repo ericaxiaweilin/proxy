@@ -459,7 +459,19 @@ export const FeedMediaItemSchema = z.object({
   ]),
   sortOrder: z.number().int().nonnegative(),
   // 服务端 composition hint（§5.2.2）。可选；缺时前端走启发式。
-  compositionHint: MediaCompositionHintSchema.optional()
+  compositionHint: MediaCompositionHintSchema.optional(),
+  // LC-06：资产级 AI 生成溯源。闭集与 media_assets.ai_generation_source 的 DB
+  // 约束一致（migration 108，那份迁移自称「单一事实来源」），所以这里不另造词汇。
+  //
+  // 服务端对 feed media 恒下发（库里 NOT NULL DEFAULT 'USER_UPLOADED'）；这里标
+  // optional 只是为了向后兼容 —— 遵循本 schema 既有约定「缺字段 → undefined」，
+  // 不给客户端制造解析硬失败。防「服务端悄悄丢掉它」由 Go 侧测试钉住，不靠 zod。
+  //
+  // 客户端规则（2026-09-21 产品决定：「AI 做的就标注，法规要求要满足」）：
+  //   AI_PERSONA / MODEL_API → 必须显示「AI 生成」标注
+  //   USER_UPLOADED / 缺省   → 不显示（手机直传，没有 AI 参与）
+  // UNKNOWN 到不了客户端：MarkMediaReady 对它 fail-closed，READY 资产不可能是它。
+  aiGenerationSource: z.enum(["USER_UPLOADED", "AI_PERSONA", "MODEL_API", "UNKNOWN"]).optional()
 });
 export type FeedMediaItem = z.infer<typeof FeedMediaItemSchema>;
 

@@ -25,6 +25,7 @@ import ImageViewing from "react-native-image-viewing";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import { claimVideoPlayback, releaseVideoPlayback } from "./video-playback-registry";
+import { aiMediaLabel } from "./ai-media-label";
 import type { FeedMediaItem } from "@proxy/contracts";
 import type { MediaCompositionHint } from "@proxy/contracts";
 import {
@@ -130,6 +131,9 @@ function renderKindAwareStage(
     // §5.2.3 AUDIO：语音播放卡（无画面），playbackUrl 即原文件；不进图片查看器。
     return <AudioStage item={item} uri={resolveUrl(item.playbackUrl ?? "")} />;
   }
+  // LC-06 显示侧（2026-09-21 产品决定「AI 做的就标注」）：AI 生成的图必须带标注。
+  // 判定口径只有一处（ai-media-label.ts），这里只负责画。
+  const aiLabel = aiMediaLabel(item.aiGenerationSource);
   return (
     <View style={styles.singleInset}>
       <SinglePostImage
@@ -138,6 +142,12 @@ function renderKindAwareStage(
         resolveUrl={resolveUrl}
         onPress={onPress}
       />
+      {aiLabel ? (
+        // pointerEvents="none"：标注是覆盖层，不能吃掉「点开原图」的手势。
+        <View pointerEvents="none" style={styles.aiMediaBadge}>
+          <Text style={styles.aiMediaBadgeText}>{aiLabel}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -780,6 +790,24 @@ const styles = StyleSheet.create({
     top: SOCIAL_MEDIA_BADGE_INSET
   },
   videoBadgeText: {
+    color: color.white,
+    fontSize: 11,
+    fontWeight: "700"
+  },
+  // LC-06 显示侧：AI 生成标注。跟 videoBadge 同一套视觉，但挂右上角 ——
+  // 视频角标占左上，两者将来同框也不会打架。
+  aiMediaBadge: {
+    alignItems: "center",
+    backgroundColor: "rgba(14,10,20,0.55)",
+    borderRadius: 999,
+    flexDirection: "row",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    position: "absolute",
+    right: SOCIAL_MEDIA_BADGE_INSET,
+    top: SOCIAL_MEDIA_BADGE_INSET
+  },
+  aiMediaBadgeText: {
     color: color.white,
     fontSize: 11,
     fontWeight: "700"

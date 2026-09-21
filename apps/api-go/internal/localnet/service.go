@@ -142,6 +142,15 @@ type PostMediaItem struct {
 	// 同 (cityScope, sceneType) 已完成场景中 Memory.aestheticAssets
 	// dominant 色的众数。为空时前端继续走默认 FRAME_BACKGROUND_HEX。
 	SceneAestheticBackdrop string `json:"sceneAestheticBackdrop,omitempty"`
+	// AIGenerationSource：LC-06 的溯源第一次走到客户端（2026-09-21 产品决定
+	// 「AI 做的就标注，法规要求要满足」）。闭集与 migration 108 的 DB 约束一致：
+	// USER_UPLOADED | AI_PERSONA | MODEL_API | UNKNOWN。
+	//
+	// 不加 omitempty：这一列在库里是 NOT NULL DEFAULT 'USER_UPLOADED'，值永远已知，
+	// 省掉它等于让「我们不知道」和「手机直传」在 wire 上长得一样 —— 而这两者对
+	// 客户端是相反的处理（前者不该沉默，后者本就不需要标注）。UNKNOWN 到不了
+	// 这里：MarkMediaReady 对 UNKNOWN fail-closed，READY 资产不可能是 UNKNOWN。
+	AIGenerationSource string `json:"aiGenerationSource"`
 }
 
 // MediaCompositionHintDTO 是给前端的 wire 形状（与 @proxy/contracts 一致）。
@@ -218,6 +227,11 @@ type MediaAssetInfo struct {
 	VisibilityClass   string
 	// CompositionHint：来自 media_assets.composition_hint。
 	CompositionHint *MediaCompositionHintDTO
+	// AIGenerationSource：来自 media_assets.ai_generation_source（migration 108，
+	// LC-06 的单一事实来源）。闭集 USER_UPLOADED | AI_PERSONA | MODEL_API | UNKNOWN。
+	// 以前这一列只在存储侧活着，没有任何读路径把它带走 —— 所以「按资产的 AI 溯源」
+	// 对任何用户都不可见。这里接上第一跳，见 PostMediaItem 同名 json 字段。
+	AIGenerationSource string
 }
 
 // ContextRef 是 Post 的结构化上下文关联（PRD §4 PostContextRef）。
@@ -1876,6 +1890,8 @@ func (s *Service) hydratePostMedia(ctx context.Context, feed []Post) map[string]
 					ModerationStatus:  info.ModerationStatus,
 					SortOrder:         ref.SortOrder,
 					CompositionHint:   info.CompositionHint,
+					// LC-06 溯源透出：资产级「谁生成的」随 feed media 一起下发。
+					AIGenerationSource: info.AIGenerationSource,
 				})
 				// R15.15 P1: 按 (post.CityScope, post.SceneType) 取
 				// 背景 — 不同场景类型的帖背景会不一样。相同 (city,

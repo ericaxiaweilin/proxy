@@ -549,6 +549,85 @@ func TestListFeedPosts_PropagatesDominantColorHex(t *testing.T) {
 	}
 }
 
+// LC-06 显示侧（2026-09-21 产品决定「AI 做的就标注，法规要求要满足」）：
+// 资产级 AI 溯源必须真的走到 feed wire。
+//
+// 这一跳以前是缺的 —— media_assets.ai_generation_source 在库里活着（migration 108），
+// 但 mediaAssetInfo() 不拷它、PostMediaItem 也没这个字段，于是「按资产的 AI 溯源」
+// 对任何用户都不可见。只断言「结构体里有这个字段」证明不了这件事：真正会坏的是
+// hydrate 那一跳被删掉，而那种改动不会让编译失败，只会让标注静默消失。
+func TestListFeedPosts_PropagatesAIGenerationSourceToMediaWire(t *testing.T) {
+	stub := &stubMediaLookup{assets: map[string]MediaAssetInfo{
+		"media_ai": {
+			MediaAssetID:       "media_ai",
+			MediaType:          "IMAGE",
+			Width:              1080,
+			Height:             1440,
+			ProcessingStatus:   "READY",
+			ModerationStatus:   "APPROVED",
+			VisibilityClass:    "PUBLIC",
+			AIGenerationSource: "AI_PERSONA",
+		},
+		"media_human": {
+			MediaAssetID:       "media_human",
+			MediaType:          "IMAGE",
+			Width:              1080,
+			Height:             1440,
+			ProcessingStatus:   "READY",
+			ModerationStatus:   "APPROVED",
+			VisibilityClass:    "PUBLIC",
+			AIGenerationSource: "USER_UPLOADED",
+		},
+	}}
+	s := NewWithMediaLookup(NewMemoryRepository(), stub)
+	for _, id := range []string{"media_ai", "media_human"} {
+		post := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+			"authorType": "AGENT",
+			"body":       id,
+			"visibility": "PUBLIC",
+			"mediaRefs":  []map[string]any{{"mediaAssetId": id, "mediaType": "IMAGE", "sortOrder": 0}},
+		}))
+		if post.Outcome != "ACCEPTED" {
+			t.Fatalf("create post %s: %s (%+v)", id, post.Outcome, post.Error)
+		}
+	}
+
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	if list.Outcome != "ACCEPTED" {
+		t.Fatalf("list feed: %s (%+v)", list.Outcome, list.Error)
+	}
+	var view struct {
+		Posts []Post                      `json:"posts"`
+		Media map[string][]map[string]any `json:"media"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatalf("parse feed: %v\n%s", err, list.OperationRef)
+	}
+	// 用 body（就是 mediaAssetId）找回来，不依赖 feed 排序。
+	got := map[string]string{}
+	for _, p := range view.Posts {
+		items := view.Media[p.ID]
+		if len(items) != 1 {
+			t.Fatalf("post %s: want 1 hydrated media item, got %d", p.ID, len(items))
+		}
+		raw, ok := items[0]["aiGenerationSource"]
+		if !ok {
+			t.Fatalf("post %s: aiGenerationSource 没上 wire —— 客户端无从判定该不该标注", p.ID)
+		}
+		str, ok := raw.(string)
+		if !ok {
+			t.Fatalf("post %s: aiGenerationSource 不是字符串: %T", p.ID, raw)
+		}
+		got[p.Body] = str
+	}
+	if v := got["media_ai"]; v != "AI_PERSONA" {
+		t.Fatalf("AI_PERSONA 资产的溯源在 hydrate 那一跳丢了: got %q", v)
+	}
+	if v := got["media_human"]; v != "USER_UPLOADED" {
+		t.Fatalf("USER_UPLOADED 资产被误报: got %q", v)
+	}
+}
+
 func TestListFeedPosts_EmptyDominantColorHex_Omitted(t *testing.T) {
 	// omitempty contract: an empty DominantColorHex must NOT appear in
 	// the JSON (otherwise clients see "#" or "" and may render a white
