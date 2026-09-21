@@ -2235,6 +2235,49 @@ else
   echo "    LC-06 / LC-07: SKIP (no postgres cluster found — the round-trip tests did NOT run; install postgresql@15 or set DATABASE_URL)" >&2
 fi
 
+# LC-06 的**显示侧**缺口（2026-09-21）—— 上面所有 LC-06 钉都只钉存储侧。
+#
+# 上面那几条钉证明的是：溯源列在 migration / SELECT / INSERT / UPDATE 里活着，
+# 两道闸门（markReady + worker）都开火，真实 schema 上 7 条往返测试全过。
+# **但「溯源有没有到用户眼前」没有任何一条钉管**，而这一层今天是空的：
+#
+#   grep -c  "aiGenerationSource" packages/contracts/src/index.ts            # → 0
+#   grep -rn "aiGenerationSource" apps/api-go/internal/api/ --include=*.go   # → 0
+#   grep -c  "ai_generation_source\|ai_generated" \
+#        apps/api-go/internal/platform/postgres/network.go                   # → 0（feed 四条查询都不选）
+#   grep -rn "aiBadge: true" apps/mobile/src/surfaces/feed.tsx               # → 1（只有 AI_NATIVE）
+#
+# 也就是说：**按资产**的 AI 溯源（LC-06 的交付物本体）对任何用户都不可见；
+# 作者级的 AI 标注只覆盖 AI_NATIVE（小美）一档，而 AGENT（城市同行）的帖子没有
+# AI 徽标 —— 尽管 AGENT 的头像就是走 AI 账号表解析的
+# （media/author-avatar.ts 的 `authorType === "AGENT" && opts.aiAccountsById`）。
+#
+# 顺带纠正一条我自己写错过的风险描述：`MODEL_API` 这个枚举值**没有任何生产者** ——
+# 全仓非测试代码里只有校验白名单、注释和 normalize 的透传（三处），没有哪条管线
+# 会写它。所以「平台的 MODEL_API 资产被 USER 作者发布、界面无标注」这个形状
+# **不存在**；真正成立的是上面那句「按资产的溯源根本没有到客户端的路」。
+#
+# 这条钉**不判定该不该显示**。134/2025/QH15 第 12 条要求的是「记录」还是
+# 「向终端用户显示」，需要法务确认 —— docs/design/references/ 那份对齐文档里
+# 「法务 review」至今未勾选，所以不要替法务下结论。
+#
+# 它只钉住**现状**：任何一侧变化（契约加字段 / 加徽标 / 改元数据表）都必须显式
+# 改这条钉，逼出那个决定，而不是让「我们标了」悄悄成立。
+# 形状同 d849b76（钉住 LC-07 在活动侧的缺口）——钉住缺口，不假装它已经补上。
+if grep -qE 'aiGenerationSource' packages/contracts/src/index.ts; then
+  echo "  FAIL [LC-06-display]: contracts now carry per-asset AI provenance." >&2
+  echo "        That is progress — this pin documents the gap, so update it deliberately:" >&2
+  echo "        re-verify which surfaces now show the label before editing this check." >&2
+  exit 1
+fi
+if [ "$(grep -c 'aiBadge: true' apps/mobile/src/surfaces/feed.tsx)" != "1" ]; then
+  echo "  FAIL [LC-06-display]: the set of author types that render an AI badge changed." >&2
+  echo "        Today exactly one does (AI_NATIVE / 小美). If AGENT or another type was added," >&2
+  echo "        that is a labelling decision — confirm it, then update this pin." >&2
+  exit 1
+fi
+echo "    LC-06-display: GAP PINNED (per-asset AI provenance reaches no client; only AI_NATIVE authors are badged)"
+
 # LC-07 活动侧：PRD 与 activity/service.go 的注释都声称
 #   「USER_TWIN 角色 photo 必须先有 LikenessConsent LIVE 才会下发」
 # 但 activity 包里除了那行注释没有任何 consent 判定（grep HasLiveConsent/Likeness
