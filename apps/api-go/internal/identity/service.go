@@ -2165,6 +2165,10 @@ type PrivacySweepOutcome struct {
 	UserID    string
 	Action    PrivacySweepAction
 	Erased    ErasedPersonalData
+	// External is the receipt for the cross-aggregate half (display
+	// names on authored content, the avatar asset, push tokens). Zero
+	// on an ACKNOWLEDGED outcome — nothing is erased at that milestone.
+	External ErasedCrossAggregate
 }
 
 // SweepPrivacyDeletions runs one pass of the LC-15 erasure executor.
@@ -2198,6 +2202,10 @@ func (s *Service) SweepPrivacyDeletions(ctx context.Context, now time.Time) ([]P
 	if eraser == nil {
 		return nil, ErrPersonalDataEraserUnavailable
 	}
+	crossEraser := s.crossAggregateEraser()
+	if crossEraser == nil {
+		return nil, ErrCrossAggregateEraserUnavailable
+	}
 	due, err := repo.ListDuePrivacyDeletions(ctx, now.Add(-PrivacyDeleteInProgressDelay))
 	if err != nil {
 		return nil, err
@@ -2205,7 +2213,7 @@ func (s *Service) SweepPrivacyDeletions(ctx context.Context, now time.Time) ([]P
 	outcomes := make([]PrivacySweepOutcome, 0, len(due))
 	var firstErr error
 	for _, req := range due {
-		outcome, err := s.advancePrivacyDeletion(ctx, repo, eraser, req, now)
+		outcome, err := s.advancePrivacyDeletion(ctx, repo, crossEraser, eraser, req, now)
 		if err != nil {
 			log.Printf("privacy sweep failed request=%s user=%s err=%v", req.ID, req.UserID, err)
 			if firstErr == nil {
@@ -2225,6 +2233,7 @@ func (s *Service) SweepPrivacyDeletions(ctx context.Context, now time.Time) ([]P
 func (s *Service) advancePrivacyDeletion(
 	ctx context.Context,
 	repo PrivacyRequestRepository,
+	cross CrossAggregateEraser,
 	eraser PersonalDataEraser,
 	req PrivacyRequest,
 	now time.Time,
@@ -2250,6 +2259,17 @@ func (s *Service) advancePrivacyDeletion(
 	// re-runs an idempotent erasure. The reverse order could mark a
 	// request completed whose data was never erased — the one failure
 	// mode that would make the product lie.
+	//
+	// Cross-aggregate BEFORE identity, and that order is forced rather
+	// than a preference: the avatar asset is identifiable only through
+	// identity.profiles.avatar_path, so erasing the identity aggregate
+	// first would make the avatar unreachable to this executor while
+	// leaving it publicly servable. Both halves are idempotent, so a
+	// crash between them simply replays.
+	external, err := cross.EraseCrossAggregateIdentity(ctx, req.UserID)
+	if err != nil {
+		return nil, err
+	}
 	erased, err := eraser.ErasePersonalData(ctx, req.UserID)
 	if err != nil {
 		return nil, err
@@ -2263,8 +2283,12 @@ func (s *Service) advancePrivacyDeletion(
 	if err := repo.UpdatePrivacyRequest(ctx, req, req.Version-1); err != nil {
 		return nil, err
 	}
-	s.recordPrivacyEvent(ctx, req, previous, "erased: "+erased.Summary()+" | retained: "+RetainedOnErasure)
-	return &PrivacySweepOutcome{RequestID: req.ID, UserID: req.UserID, Action: PrivacySweepErased, Erased: erased}, nil
+	s.recordPrivacyEvent(ctx, req, previous, "erased: "+erased.Summary()+" | "+external.Summary()+
+		" | retained: "+RetainedOnErasure+" | boundary: "+CrossAggregateErasureBoundary)
+	return &PrivacySweepOutcome{
+		RequestID: req.ID, UserID: req.UserID,
+		Action: PrivacySweepErased, Erased: erased, External: external,
+	}, nil
 }
 
 // recordPrivacyEvent appends the audit row for a sweep transition.
@@ -2371,6 +2395,19 @@ func (s *Service) privacyRepo() PrivacyRequestRepository {
 // requests completed without erasing anything.
 func (s *Service) personalDataEraser() PersonalDataEraser {
 	if e, ok := s.repository.(PersonalDataEraser); ok {
+		return e
+	}
+	return nil
+}
+
+// crossAggregateEraser is the third adapter, for the copies of the
+// user's display identity that live outside the identity aggregate.
+// Required, not optional: a deployment that can erase the identity
+// rows but not the display names would report "completed" while the
+// user's name is still on their posts, which is the same lie the
+// identity-side check exists to prevent.
+func (s *Service) crossAggregateEraser() CrossAggregateEraser {
+	if e, ok := s.repository.(CrossAggregateEraser); ok {
 		return e
 	}
 	return nil

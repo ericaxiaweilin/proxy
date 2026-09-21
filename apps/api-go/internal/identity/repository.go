@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -195,6 +196,121 @@ const RetainedOnErasure = "account_row (anonymised to status=ERASED: " +
 // silently pretending to have erased is the one outcome that must
 // never happen.
 var ErrPersonalDataEraserUnavailable = errors.New("personal data eraser is not configured")
+
+// CrossAggregateEraser is the second half of LC-15: the copies of a
+// user's display identity that were written into aggregates other
+// than Identity.
+//
+// PersonalDataEraser removes the authoritative rows. It cannot remove
+// what other aggregates snapshotted at write time, and they all do:
+//
+//   - localnet.posts.author_display_name and
+//     socialspace.statuses.author_display_name hold the profile name
+//     as it was when the post was published.
+//   - marketplace.opportunities keeps the publisher's display name
+//     inside its payload, next to the authoritative owner_id.
+//   - business.member_directory keeps one for the same reason.
+//   - identity.profiles.avatar_path points at a media asset that
+//     /v1/media/play/<id> serves over a public, unauthenticated URL.
+//
+// Deleting the profile row leaves every one of those behind, which is
+// what would make the shipped copy 「头像会被永久删除」 false.
+//
+// The contract matches PersonalDataEraser: idempotent (a second pass
+// reports zero rows) and every counter is a row actually touched.
+//
+// ORDERING — this runs BEFORE PersonalDataEraser, and the order is
+// load-bearing rather than cosmetic. media.media_assets has no
+// "purpose" column, so the avatar is identifiable only through
+// identity.profiles.avatar_path. Once the profile row is gone the
+// avatar cannot be told apart from the user's ordinary post media and
+// the reference is unrecoverable — the avatar would stay publicly
+// servable forever. Service.advancePrivacyDeletion enforces the order.
+type CrossAggregateEraser interface {
+	EraseCrossAggregateIdentity(ctx context.Context, userID string) (ErasedCrossAggregate, error)
+}
+
+// ErasedCrossAggregate is the receipt of one cross-aggregate pass.
+// The counters are of two different kinds and the difference matters
+// when reading the audit trail:
+//
+//   - the name counters are UPDATEs that blanked a snapshot column.
+//     The authored row itself survives, de-attributed.
+//   - AvatarAssetsUnserved and PushTokens are rows whose
+//     reachability was removed: the avatar stops being publicly
+//     deliverable, the push token stops existing.
+type ErasedCrossAggregate struct {
+	PostDisplayNames       int `json:"postDisplayNames"`
+	StatusDisplayNames     int `json:"statusDisplayNames"`
+	OpportunityOwners      int `json:"opportunityOwners"`
+	BusinessDirectoryNames int `json:"businessDirectoryNames"`
+	// ConversationSnapshots counts conversation.messages rows whose
+	// sender_snapshot was cleared. The column is defined by migration
+	// 039 and no writer populates it yet; the statement is here so the
+	// first writer to land cannot create a leak that the erasure does
+	// not cover. The counter reads zero until then.
+	ConversationSnapshots int `json:"conversationSnapshots"`
+	AvatarAssetsUnserved  int `json:"avatarAssetsUnserved"`
+	PushTokens            int `json:"pushTokens"`
+}
+
+// Total is the number of rows the pass scrubbed or un-served.
+func (e ErasedCrossAggregate) Total() int {
+	return e.PostDisplayNames + e.StatusDisplayNames + e.OpportunityOwners +
+		e.BusinessDirectoryNames + e.ConversationSnapshots +
+		e.AvatarAssetsUnserved + e.PushTokens
+}
+
+// Summary renders the receipt for the privacy_request_events audit
+// trail, alongside ErasedPersonalData.Summary().
+func (e ErasedCrossAggregate) Summary() string {
+	return fmt.Sprintf(
+		"external: post_names=%d status_names=%d opportunity_owners=%d business_directory_names=%d conversation_snapshots=%d avatar_assets_unserved=%d push_tokens=%d",
+		e.PostDisplayNames, e.StatusDisplayNames, e.OpportunityOwners,
+		e.BusinessDirectoryNames, e.ConversationSnapshots,
+		e.AvatarAssetsUnserved, e.PushTokens,
+	)
+}
+
+// CrossAggregateErasureBoundary names what the cross-aggregate pass
+// leaves behind. It is the companion of RetainedOnErasure: that one
+// covers the identity aggregate, this one covers everywhere else the
+// user's identity was copied to.
+//
+// Two different kinds of reason appear here and they must not be
+// conflated — one is a deliberate retention, the other is a
+// capability this build does not have:
+//
+//   - statutory / product retention: the row is a record the platform
+//     is required to keep, so it survives with the name blanked.
+//   - missing capability: the avatar's stored object bytes are not
+//     purged. The media package has no object-delete path (every
+//     os.Remove in it is temp-file cleanup during upload or
+//     processing), so the asset row is demoted to
+//     visibility_class=OWNER_ONLY instead — which is exactly what
+//     makes ResolveServingPath refuse it, because that method
+//     requires PUBLIC. The public URL stops resolving; the blob
+//     stays on disk.
+const CrossAggregateErasureBoundary = "authored content rows (localnet.posts, " +
+	"socialspace.statuses, marketplace.opportunities) are KEPT with the display name " +
+	"blanked rather than deleted: other users' replies / bookmarks / reposts reference " +
+	"them, and the request was for erasure of personal data, not withdrawal of content; " +
+	"business.member_directory rows are KEPT (the membership is a commercial record) with " +
+	"the name blanked; " +
+	"ai.ai_personas KEPT (a separate entity the user created; owner_id now points at an " +
+	"anonymised account), " +
+	"supply.agent_profiles + supply.seller_real_name_verifications KEPT (real-name / KYC " +
+	"evidence, Decree 248/2026 §23), " +
+	"fulfillment.* and payment.* ledgers KEPT (statutory window); " +
+	"LIMITATION (not a retention): the avatar's stored object bytes are NOT purged — this " +
+	"build has no object-delete path, so the asset row is demoted to " +
+	"visibility_class=OWNER_ONLY and the blob remains on disk"
+
+// ErrCrossAggregateEraserUnavailable is returned when a repository does
+// not implement CrossAggregateEraser. Like its identity-side sibling
+// the service refuses to sweep rather than mark a request completed
+// while the user's name is still on their posts.
+var ErrCrossAggregateEraserUnavailable = errors.New("cross-aggregate eraser is not configured")
 
 // Repository is the canonical persistence boundary for Identity aggregates.
 // Session updates must enforce expectedVersion atomically.
@@ -1040,3 +1156,22 @@ func (r *MemoryRepository) ListLegalConsents(_ context.Context, userID string) (
 
 var _ PrivacyRequestRepository = (*MemoryRepository)(nil)
 var _ PersonalDataEraser = (*MemoryRepository)(nil)
+
+// EraseCrossAggregateIdentity is the in-memory counterpart of the
+// Postgres cross-aggregate eraser.
+//
+// It reports zero for every counter, and that is the correct answer
+// rather than a stub: this repository holds the identity aggregate
+// only, so it contains no posts, statuses, opportunities, media
+// assets, business directory rows or push tokens to scrub. The
+// behaviour of the pass is pinned against a real database by
+// TestEraseCrossAggregateIdentityScrubsEveryCopy, because a memory
+// implementation cannot exercise SQL it does not run.
+func (r *MemoryRepository) EraseCrossAggregateIdentity(_ context.Context, userID string) (ErasedCrossAggregate, error) {
+	if strings.TrimSpace(userID) == "" {
+		return ErasedCrossAggregate{}, errors.New("erase cross-aggregate identity: empty user id")
+	}
+	return ErasedCrossAggregate{}, nil
+}
+
+var _ CrossAggregateEraser = (*MemoryRepository)(nil)

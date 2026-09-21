@@ -2303,6 +2303,119 @@ if ! grep -qF 'var _ identity.PersonalDataEraser = (*IdentityRepository)(nil)' a
 fi
 echo "    LC-15: PASS (erasure executor runs on a timer; account becomes unauthenticatable)"
 
+# LC-15-CROSS: 擦除必须擦到**别的聚合里去**，而不只是 identity 自己。
+#
+# 上面那组钉子证明 identity 聚合被清空了。但用户的显示身份早就被复制到了
+# 别处 —— 而且都是写时快照，不是活连接：
+#
+#   localnet.posts.author_display_name      发布时把 profile.name 抄了一份
+#   socialspace.statuses.author_display_name  同上
+#   marketplace.opportunities.payload.owner  同上（权威 id 在 owner_id）
+#   business.member_directory.display_name   同上
+#   identity.profiles.avatar_path -> media.media_assets 的一个资产，
+#     而 /v1/media/play/<id> 是**公开无鉴权**的（见 media_handlers.go 的注释）
+#
+# 删掉 identity.profiles 这一行，上面每一样都原地不动。于是 app 里写着
+# 「头像会被永久删除」，而那张脸还能被任何人按 id 拉走。这就是这组钉子要
+# 守住的东西：**收据说擦了，就得真擦了。**
+#
+# 2026-09-21 取证（对着活库读的，不是推断）：
+#   SELECT author_type, author_id, author_display_name FROM localnet.posts
+#   # -> USER 行带着真名（'Mai' / 'Hana' / ...）
+#   SELECT owner_principal_type, owner_principal_id, visibility_class
+#     FROM media.media_assets WHERE media_asset_id = 'ma_9b85...'
+#   # -> INDIVIDUAL / user_5fbe... / PUBLIC，playback_url=/v1/media/play/<id>
+#   SELECT pg_get_constraintdef(oid) FROM pg_constraint
+#     WHERE conrelid='media.media_assets'::regclass AND contype='c'
+#   # -> visibility_class IN (OWNER_ONLY, PUBLIC, FOLLOWERS, AGENT_ONLY)
+#      => 把头像降级成 OWNER_ONLY 即可让 ResolveServingPath 拒绝它
+#         （该方法显式要求 PUBLIC），不必删行、不必发明新枚举值。
+require_test "LC-15-CROSS" "./internal/platform/postgres" \
+  "TestEraseCrossAggregateIdentityScrubsEveryCopy" \
+  "apps/api-go/internal/platform/postgres/privacy_cross_aggregate_integration_test.go" || exit $?
+# 媒体那一半必须按**真实下发路径**验证，而不是读回列值：要紧的不是
+# visibility_class 变了，而是 /v1/media/play/<id> 不再能解析。同一个测试里
+# 还有反向断言 —— 同属主、但只是普通帖子配图的那个资产必须**继续可下发**，
+# 这条专门打「用 owner_principal_id 找头像」的实现（media_assets 没有
+# purpose 列，按属主找会把用户的全部媒体一起扫进去）。
+require_test "LC-15-CROSS" "./internal/platform/postgres" \
+  "TestEraseCrossAggregateIdentityUnservesTheAvatar" \
+  "apps/api-go/internal/platform/postgres/privacy_cross_aggregate_integration_test.go" || exit $?
+# 顺序不是风格问题：头像是**只能**通过 identity.profiles.avatar_path 认出来的
+# （media_assets 没有 purpose 列），所以先跑 identity 擦除就会永久销毁这个
+# 引用，让头像公开可下发到天荒地老。这条测试故意用错顺序，把后果钉出来。
+require_test "LC-15-CROSS" "./internal/platform/postgres" \
+  "TestAvatarUnservingRequiresTheProfileRowToStillExist" \
+  "apps/api-go/internal/platform/postgres/privacy_cross_aggregate_integration_test.go" || exit $?
+# 上面那条钉的是后果，这条钉的是**服务端真的按那个顺序调**。少了它，一次
+# 重构把两个调用对调，后果测试照样绿（它自己调 eraser，不经过 service）。
+require_test "LC-15-CROSS" "./internal/identity" \
+  "TestSweepErasesCrossAggregateBeforeIdentity" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+# 缺了跨聚合擦除能力时必须**拒绝清扫**，而不是照常标 completed：那会让用户
+# 的名字继续挂在他的帖子上，而 app 告诉他数据已经没了。和 identity 侧那条
+# ErrPersonalDataEraserUnavailable 是同一个形状。
+require_test "LC-15-CROSS" "./internal/identity" \
+  "TestSweepRefusesToEraseWithoutACrossAggregateEraser" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+
+lc15c_impl="apps/api-go/internal/platform/postgres/privacy_cross_aggregate.go"
+if ! grep -qF 'var _ identity.CrossAggregateEraser = (*IdentityRepository)(nil)' "$lc15c_impl"; then
+  echo "  FAIL [LC-15-CROSS]: postgres IdentityRepository no longer implements CrossAggregateEraser." >&2
+  echo "        Without it the sweep refuses to run at all, so this shows up as an outage" >&2
+  echo "        rather than as silently-retained names — but the pin is here because the" >&2
+  echo "        assertion is one line and its absence is invisible in review." >&2
+  exit 1
+fi
+# 头像必须降级成 OWNER_ONLY（服务端拒绝下发的那个值），并且必须是**按
+# avatar_path 关联**出来的。两条一起钉，因为改掉任何一条都能让上面那条
+# 集成测试从「精确擦一个资产」退化成「把用户的媒体全扫了」。
+if ! grep -qF "SET visibility_class = 'OWNER_ONLY'" "$lc15c_impl"; then
+  echo "  FAIL [LC-15-CROSS]: the avatar is no longer demoted to visibility_class='OWNER_ONLY'." >&2
+  echo "        That value is what makes ResolveServingPath refuse it (/v1/media/play/<id>" >&2
+  echo "        requires PUBLIC). Removing the demotion leaves the photo publicly fetchable." >&2
+  exit 1
+fi
+if ! grep -qF "AND profile.avatar_path = 'assets/' || asset.media_asset_id" "$lc15c_impl"; then
+  echo "  FAIL [LC-15-CROSS]: the avatar is no longer identified through identity.profiles.avatar_path." >&2
+  echo "        media.media_assets has no purpose/kind column, so any other join (by owner," >&2
+  echo "        by media_type) sweeps in the user's ordinary post media as well." >&2
+  exit 1
+fi
+# 顺序的静态兜底：行为钉在 identity 包里，这里再按行号确认一次调用次序。
+# 行号比较很脆，所以它只作为**额外**一层，不是唯一证据。
+lc15c_cross_line="$(grep -nF 'cross.EraseCrossAggregateIdentity(ctx, req.UserID)' apps/api-go/internal/identity/service.go | head -1 | sed 's/:.*//')"
+lc15c_identity_line="$(grep -nF 'eraser.ErasePersonalData(ctx, req.UserID)' apps/api-go/internal/identity/service.go | head -1 | sed 's/:.*//')"
+if [ -z "$lc15c_cross_line" ] || [ -z "$lc15c_identity_line" ]; then
+  echo "  FAIL [LC-15-CROSS]: service.go no longer calls both erasers from the sweep." >&2
+  echo "        cross=${lc15c_cross_line:-<missing>} identity=${lc15c_identity_line:-<missing>}" >&2
+  exit 1
+fi
+if [ "$lc15c_cross_line" -ge "$lc15c_identity_line" ]; then
+  echo "  FAIL [LC-15-CROSS]: the identity erasure is called first (line $lc15c_identity_line) and the" >&2
+  echo "        cross-aggregate one second (line $lc15c_cross_line). The avatar is only" >&2
+  echo "        identifiable while identity.profiles exists, so this order strands it." >&2
+  exit 1
+fi
+# 反向钉：这一轮刻意**不删内容**。用户的帖子和他的普通配图都不是这次擦除的
+# 对象 —— 擦的是个人数据，不是撤回内容；别人对他的回复/收藏还挂着这些行。
+# 谁要是把 SET ... = '' 换成 DELETE，这几条会先响。
+for lc15c_forbidden in \
+  'DELETE FROM localnet.posts' \
+  'DELETE FROM socialspace.statuses' \
+  'DELETE FROM marketplace.opportunities' \
+  'DELETE FROM media.media_assets'; do
+  if grep -qF "$lc15c_forbidden" "$lc15c_impl"; then
+    echo "  FAIL [LC-15-CROSS]: '$lc15c_forbidden' found in $lc15c_impl." >&2
+    echo "        This pass de-attributes content; it does not delete it. The rows are" >&2
+    echo "        referenced by other users' replies/bookmarks, and the request was for" >&2
+    echo "        erasure of personal data — not withdrawal of content." >&2
+    echo "        For the avatar specifically the chosen shape is the OWNER_ONLY demotion." >&2
+    exit 1
+  fi
+done
+echo "    LC-15-CROSS: PASS (display-name snapshots scrubbed; avatar un-served before the profile row goes)"
+
 # TEST-ABSDATE-001: 测试里写死绝对日期 = 定时炸弹。
 # 2026-09-13 全仓库 g2 变红：business/service_test.go 把 bucketDate 写成
 # "2026-09-06"，7 天滚动窗口一过就查不到它，OrderCount 恒为 0，测试自己

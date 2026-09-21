@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -338,6 +339,132 @@ func TestErasureReceiptReachesTheAuditTrail(t *testing.T) {
 	if !strings.Contains(completed.Notes, "retained:") || !strings.Contains(completed.Notes, "legal_consent_records") {
 		t.Errorf("the completed event must record what was retained and why, got notes %q", completed.Notes)
 	}
+	// The cross-aggregate half. The memory repository holds no posts,
+	// media or push tokens, so every counter here is legitimately zero
+	// — but the section itself has to be on the record. An auditor
+	// reading one row must be able to see that the display-name scrub
+	// ran, and that the request was not silently marked completed by an
+	// older build that only erased the identity aggregate.
+	if !strings.Contains(completed.Notes, "external:") {
+		t.Errorf("the completed event must record the cross-aggregate receipt, got notes %q", completed.Notes)
+	}
+	// And its boundary — including the one entry that is a limitation
+	// rather than a lawful retention. 「头像会被永久删除」 is only honest if
+	// the row that says so also says the blob was not purged.
+	if !strings.Contains(completed.Notes, "boundary:") || !strings.Contains(completed.Notes, "LIMITATION") {
+		t.Errorf("the completed event must disclose the cross-aggregate boundary, got notes %q", completed.Notes)
+	}
+}
+
+// recordingEraser wraps the memory repository to record the order in
+// which the two erasers are invoked. Embedding the pointer promotes
+// every Repository method, so the service still sees a Repository.
+type recordingEraser struct {
+	*MemoryRepository
+	calls *[]string
+}
+
+func (r recordingEraser) EraseCrossAggregateIdentity(ctx context.Context, userID string) (ErasedCrossAggregate, error) {
+	*r.calls = append(*r.calls, "cross")
+	return r.MemoryRepository.EraseCrossAggregateIdentity(ctx, userID)
+}
+
+func (r recordingEraser) ErasePersonalData(ctx context.Context, userID string) (ErasedPersonalData, error) {
+	*r.calls = append(*r.calls, "identity")
+	return r.MemoryRepository.ErasePersonalData(ctx, userID)
+}
+
+// TestSweepErasesCrossAggregateBeforeIdentity pins the ordering that
+// makes the avatar reachable at all.
+//
+// The avatar asset is identifiable only through
+// identity.profiles.avatar_path, so the identity erasure must not run
+// first. The consequence is demonstrated against a real database by
+// TestAvatarUnservingRequiresTheProfileRowToStillExist; what this test
+// adds is that the *service* is the thing enforcing it, so a later
+// refactor that reorders the two calls fails here rather than quietly
+// reintroducing a permanently public avatar.
+func TestSweepErasesCrossAggregateBeforeIdentity(t *testing.T) {
+	requestedAt := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	var calls []string
+	repo := recordingEraser{MemoryRepository: NewMemoryRepository(nil), calls: &calls}
+	svc := NewWithRepositoryAndClockAndChallengeProvider(repo, clock.NewFixed(requestedAt), testLoginChallengeProvider{})
+	ctx := context.Background()
+
+	userID := anonUserID(t, svc, "dev_erase_order", "0123456789012345678901234567890123456789")
+	privacyDeleteRequest(t, svc, ctx, userID)
+
+	if _, err := svc.SweepPrivacyDeletions(ctx, requestedAt.Add(31*24*time.Hour)); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(calls) != 2 || calls[0] != "cross" || calls[1] != "identity" {
+		t.Fatalf("expected the cross-aggregate erasure to run before the identity erasure, got %v", calls)
+	}
+}
+
+// TestSweepRefusesToEraseWithoutACrossAggregateEraser is the mirror of
+// the identity-side guard. A deployment whose repository cannot scrub
+// the display names must refuse to sweep: marking the request completed
+// anyway would leave the user's name on their posts while the app says
+// their data is gone.
+func TestSweepRefusesToEraseWithoutACrossAggregateEraser(t *testing.T) {
+	requestedAt := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	memory := NewMemoryRepository(nil)
+	// Seed the due request directly instead of through the signup path.
+	// The signup path needs optional repository interfaces (session
+	// tokens among them) that identityOnlyEraser deliberately does not
+	// carry, and the subject of this test is the guard, not signup.
+	requestID := "preq_no_cross"
+	memory.privacyRequests[requestID] = PrivacyRequest{
+		ID:          requestID,
+		UserID:      "user_no_cross",
+		Kind:        PrivacyRequestKindDelete,
+		Status:      PrivacyRequestStatusReceived,
+		RequestedAt: requestedAt,
+		Version:     1,
+	}
+	svc := NewWithRepositoryAndClockAndChallengeProvider(
+		identityOnlyEraser{Repository: memory, PrivacyRequestRepository: memory},
+		clock.NewFixed(requestedAt),
+		testLoginChallengeProvider{},
+	)
+
+	_, err := svc.SweepPrivacyDeletions(context.Background(), requestedAt.Add(31*24*time.Hour))
+	if err == nil {
+		t.Fatalf("a repository that cannot erase cross-aggregate data must not be allowed to sweep")
+	}
+	if !errors.Is(err, ErrCrossAggregateEraserUnavailable) {
+		t.Fatalf("expected ErrCrossAggregateEraserUnavailable, got %v", err)
+	}
+	// The refusal has to come before anything is erased, not after: a
+	// sweep that half-erased and then complained would be worse than one
+	// that did nothing.
+	if n := len(memory.privacyEvents); n != 0 {
+		t.Errorf("a refused sweep must not bookkeep anything, got %d event(s)", n)
+	}
+	if got := memory.privacyRequests[requestID]; got.Status != PrivacyRequestStatusReceived {
+		t.Errorf("a refused sweep must leave the request untouched, got status %s", got.Status)
+	}
+}
+
+// identityOnlyEraser implements every interface the sweep needs except
+// CrossAggregateEraser: it stands in for a deployment built before the
+// cross-aggregate half existed.
+//
+// It embeds interfaces rather than *MemoryRepository on purpose.
+// Embedding the concrete type would promote
+// EraseCrossAggregateIdentity as well and the type would satisfy the
+// very interface this test needs it to be missing. The embedded set is
+// exactly what advancePrivacyDeletion reaches for — PrivacyRequestRepository
+// (else the sweep returns before the guard, and the test would pass for
+// the wrong reason) and PersonalDataEraser.
+type identityOnlyEraser struct {
+	Repository
+	PrivacyRequestRepository
+}
+
+func (r identityOnlyEraser) ErasePersonalData(ctx context.Context, userID string) (ErasedPersonalData, error) {
+	return r.Repository.(PersonalDataEraser).ErasePersonalData(ctx, userID)
 }
 
 func privacyRequestByID(t *testing.T, svc *Service, ctx context.Context, userID, requestID string) PrivacyRequest {

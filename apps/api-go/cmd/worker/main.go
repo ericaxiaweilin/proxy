@@ -253,7 +253,8 @@ func sweepPrivacyDeletions(ctx context.Context, svc *identity.Service) {
 		case identity.PrivacySweepAcknowledged:
 			log.Printf("privacy deletion acknowledged: request=%s user=%s", outcome.RequestID, outcome.UserID)
 		case identity.PrivacySweepErased:
-			log.Printf("privacy deletion erased: request=%s user=%s rows=%d", outcome.RequestID, outcome.UserID, outcome.Erased.Total())
+			log.Printf("privacy deletion erased: request=%s user=%s rows=%d external=%s",
+				outcome.RequestID, outcome.UserID, outcome.Erased.Total(), outcome.External.Summary())
 		}
 	}
 }
