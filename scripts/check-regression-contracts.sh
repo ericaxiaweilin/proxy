@@ -2050,6 +2050,108 @@ if [ -n "${DATABASE_URL:-}" ] || command -v pg_ctl >/dev/null 2>&1; then
 fi
 echo "    COMP-ID-002: PASS (burner guard reads the real payment tables, both stub directions pinned)"
 
+# LC-06 / LC-07: AI 生成溯源必须真的落库 —— 否则 MarkMediaReady 上那两道
+# fail-closed 合规闸门是死代码。
+#
+# 2026-09-21 发现：闸门本身早就写好了（internal/media/service.go）：
+#   aiGenerationSource == "UNKNOWN"                 → AI_LABEL_MISSING
+#   AI_PERSONA 查不到活体 likeness 同意             → AI_LIKENESS_CONSENT_MISSING
+# 但 media.media_assets 当时没有这 5 列，platform/postgres/media.go 的
+# INSERT / SELECT / UPDATE 也从来没提过它们。后果是双向的：
+# 写入侧静默丢弃，读取侧永远是 Go 零值 ""，而闸门比的是字面量 "UNKNOWN" ——
+# "" 比不过，直接放行。越南 AI 法 134/2025/QH15 第 12 条要求的
+# 「AI 生成内容必须可标注、无法标注则不得发布」在生产上没有任何数据在支撑。
+#
+# 为什么之前没被抓住（两个盲区叠加，缺一个都会更早暴露）：
+#   - media/lc06_lc07_test.go 用的是 MemoryRepository（整个结构体存 map），
+#     内存路径一直是绿的；
+#   - g3 的 scripts/lc06-ai-media-e2e.sh 在第 1 步就挂了（fixture 给
+#     CreatePersona 编了一个没有年龄断言的 owner），走不到闸门，
+#     而它的注释还声称覆盖了这两条。
+#
+# 所以这里钉三层，少一层洞就会回来：
+#   1. 静态：三个 SQL 写点（SELECT / INSERT / UPDATE）都带这些列 ——
+#      不需要数据库，任何一次重构都会被立刻拦下。
+#   2. 静态：迁移必须真的 ADD COLUMN。列不存在，代码写得再对也存不进去。
+#   3. 动态：真库上的往返 + 两道闸门的红→绿用例。
+lc06_repo_file=apps/api-go/internal/platform/postgres/media.go
+# 先剥行首注释再断言：这个文件里有一行注释正好把这几个列名列了一遍，
+# 不剥的话「SELECT/INSERT 把列删了」也能被那行注释喂绿。
+lc06_repo_code=$(grep -vE '^[[:space:]]*//' "$lc06_repo_file")
+# SELECT：mediaAssetColumns 常量，GetAsset / GetAssets / Snapshot 三条读路径共用。
+# 用 COALESCE 那一行做判据 —— 它是 SELECT 独有的，不会和 INSERT 撞。
+if ! printf '%s\n' "$lc06_repo_code" | grep -qF "COALESCE(persona_id,''), COALESCE(subject_id,''), COALESCE(likeness_consent_id,'')"; then
+  echo "  FAIL [LC-06]: the SELECT column list dropped the AI provenance columns." >&2
+  echo "        Read paths would hand back empty provenance, so the MarkMediaReady gate fails open." >&2
+  exit 1
+fi
+# INSERT：CreateAsset。用完整的 5 列名做判据，它是 INSERT 独有的。
+if ! printf '%s\n' "$lc06_repo_code" | grep -qF 'ai_generation_source, ai_generated, persona_id, subject_id, likeness_consent_id,'; then
+  echo "  FAIL [LC-06]: the INSERT column list dropped the AI provenance columns." >&2
+  echo "        createAsset computes the AI label correctly and the write path throws it away." >&2
+  exit 1
+fi
+# UPDATE：MarkMediaReady 在这里给 likeness consent 盖章。
+if ! printf '%s\n' "$lc06_repo_code" | grep -qF 'likeness_consent_id=$'; then
+  echo "  FAIL [LC-07]: UpdateAsset no longer persists likeness_consent_id." >&2
+  echo "        MarkMediaReady stamps the consent id and the UPDATE drops it, so the audit trail is empty." >&2
+  exit 1
+fi
+# 迁移：列必须真的加进 schema。
+lc06_migration=apps/api-go/migrations/108_media_ai_provenance.sql
+if [ ! -f "$lc06_migration" ]; then
+  echo "  FAIL [LC-06]: $lc06_migration is missing." >&2
+  echo "        Without the columns the repository code above cannot store anything." >&2
+  exit 1
+fi
+for lc06_col in ai_generation_source ai_generated persona_id subject_id likeness_consent_id; do
+  if ! grep -qF "ADD COLUMN IF NOT EXISTS $lc06_col" "$lc06_migration"; then
+    echo "  FAIL [LC-06]: $lc06_migration no longer adds $lc06_col." >&2
+    exit 1
+  fi
+done
+# g3 的 e2e fixture：persona 的 owner 必须是那个带年龄断言的会话账号。
+# 编一个假 id 会让 CreatePersona 撞上 COMP-AI-MINOR-001 守卫并 fail-closed
+# （"no age evidence on file for this account"），脚本挂在第 1 步，
+# 后面所有用例都跑不到 —— 这正是这个洞能藏住的原因之一。
+if grep -qE 'envelope_create_persona "user_\$\{TS\}' scripts/lc06-ai-media-e2e.sh; then
+  echo "  FAIL [LC-06]: lc06-ai-media-e2e.sh fabricates a persona owner id again." >&2
+  echo "        CreatePersona looks up user_age_assertions for OwnerID and refuses accounts it cannot find." >&2
+  exit 1
+fi
+echo "    LC-06 / LC-07: PASS (provenance columns present in SELECT / INSERT / UPDATE / migration)"
+# 动态层：真库往返。这里不用 require_test —— 每个 require_test 都是一次独立的
+# go test 进程（各自起一个一次性集群），7 条就是 7 次 initdb；而且它无法区分
+# 「跑了并通过」和「被 SKIP 了」，后者会让钉在没验过任何东西的情况下报 PASS。
+# 一次跑完 + 数 PASS 条数，SKIP 也数得出来。
+lc06_pg_dir=""
+for lc06_p in /opt/homebrew/opt/postgresql@15/bin /opt/homebrew/opt/postgresql@16/bin /opt/homebrew/opt/postgresql/bin \
+               /usr/local/opt/postgresql@15/bin /usr/local/opt/postgresql@16/bin \
+               /usr/lib/postgresql/15/bin /usr/lib/postgresql/16/bin; do
+  if [ -x "$lc06_p/pg_ctl" ]; then lc06_pg_dir="$lc06_p"; break; fi
+done
+if [ -n "${DATABASE_URL:-}" ] || [ -n "$lc06_pg_dir" ] || command -v pg_ctl >/dev/null 2>&1; then
+  lc06_pg_re='^(TestMediaProvenanceAIPersonaRoundTrip|TestMediaProvenanceBatchReadKeepsPersonaAndSubjectApart|TestMediaProvenanceUserUploadedIsLabelledAndPublishes|TestMediaUnknownProvenanceFailsClosedAtMarkReady|TestMediaAIPersonaWithoutLiveConsentFailsClosedAtMarkReady|TestMediaAIPersonaWithLiveConsentStampsConsentID|TestMediaCreativePersonaPublishesWithoutConsent)$'
+  lc06_pg_out=$(go -C apps/api-go test -count=1 -v -run "$lc06_pg_re" ./internal/platform/postgres 2>&1)
+  lc06_pg_rc=$?
+  if [ "$lc06_pg_rc" -ne 0 ]; then
+    printf '%s\n' "$lc06_pg_out" | grep -E -- '--- FAIL|_test\.go:[0-9]+:' >&2
+    echo "  FAIL [LC-06/LC-07]: the AI-provenance round-trip tests failed." >&2
+    echo "        These are the only tests that prove the fail-closed gates fire on the real schema." >&2
+    exit 1
+  fi
+  lc06_pg_pass=$(printf '%s\n' "$lc06_pg_out" | grep -c -- '^--- PASS' || true)
+  if [ "$lc06_pg_pass" -ne 7 ]; then
+    lc06_pg_skip=$(printf '%s\n' "$lc06_pg_out" | grep -c -- '^--- SKIP' || true)
+    echo "  FAIL [LC-06/LC-07]: expected 7 passing round-trip tests, got $lc06_pg_pass (skipped=$lc06_pg_skip)." >&2
+    echo "        A skipped test proves nothing — LC-06/LC-07 must be verified against a real schema." >&2
+    exit 1
+  fi
+  echo "    LC-06 / LC-07: PASS (real-schema round-trip: label + persona + consent survive, both gates fire closed)"
+else
+  echo "    LC-06 / LC-07: SKIP (no postgres cluster found — the round-trip tests did NOT run; install postgresql@15 or set DATABASE_URL)" >&2
+fi
+
 # TEST-ABSDATE-001: 测试里写死绝对日期 = 定时炸弹。
 # 2026-09-13 全仓库 g2 变红：business/service_test.go 把 bucketDate 写成
 # "2026-09-06"，7 天滚动窗口一过就查不到它，OrderCount 恒为 0，测试自己
