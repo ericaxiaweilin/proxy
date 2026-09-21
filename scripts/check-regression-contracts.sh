@@ -2120,6 +2120,39 @@ if grep -qE 'envelope_create_persona "user_\$\{TS\}' scripts/lc06-ai-media-e2e.s
   exit 1
 fi
 echo "    LC-06 / LC-07: PASS (provenance columns present in SELECT / INSERT / UPDATE / migration)"
+# 闸门必须挡在「实际跑的那条路」上（2026-09-21，同一类问题的第二处）。
+#
+# 上面那几层钉的是「溯源有没有落库」；这一层钉的是「判定有没有被调用」。
+# LC-06 / LC-07 原先只写在 markReady 里，而 markReady 是 operator 专属命令
+# （API 边界限定；PROXY_OPERATOR_PRINCIPALS 未配置时整条被拒）。真正把资产
+# 推到 READY 的是 worker 的 ProcessAssetNow —— 它从不调用那段判定。
+# 实测（真库 + 真 repository）：挂了 USER_TWIN 分身、没有任何 likeness 同意的
+# AI_PERSONA 资产走完 worker 之后 status=READY、moderationStatus=APPROVED，
+# consent 全程为空。也就是说闸门在「实际跑的那条路」上不存在。
+#
+# 这三个用例跑 MemoryRepository，不依赖数据库 —— 不存在 SKIP 冒充 PASS 的问题。
+require_test "LC-06" "./internal/media" \
+  "TestLC06WorkerPathRefusesUnknownLabel" \
+  "apps/api-go/internal/media/worker_publish_gate_test.go" || exit $?
+require_test "LC-07" "./internal/media" \
+  "TestLC07WorkerPathRefusesAIPersonaWithoutConsent" \
+  "apps/api-go/internal/media/worker_publish_gate_test.go" || exit $?
+require_test "LC-06" "./internal/media" \
+  "TestWorkerPathStillPublishesPlainUploadAndCreativePersona" \
+  "apps/api-go/internal/media/worker_publish_gate_test.go" || exit $?
+# 两条发布路径必须共用同一份判定，否则又会漂移成「一条有闸门、一条没有」——
+# 这正是这次出问题的形状。任何一条掉了就红。
+for lc06_publish_path in \
+  apps/api-go/internal/media/worker.go \
+  apps/api-go/internal/media/service.go; do
+  if ! grep -qF 's.enforceAIPublishGates(ctx, &asset)' "$lc06_publish_path"; then
+    echo "  FAIL [LC-06/LC-07]: $lc06_publish_path no longer runs the AI publish gates." >&2
+    echo "        markReady is operator-only; the worker is what actually promotes assets to READY." >&2
+    echo "        Both publish paths must share enforceAIPublishGates or they drift apart again." >&2
+    exit 1
+  fi
+done
+echo "    LC-06 / LC-07: PASS (gates run on BOTH publish paths: markReady + worker)"
 # 动态层：真库往返。这里不用 require_test —— 每个 require_test 都是一次独立的
 # go test 进程（各自起一个一次性集群），7 条就是 7 次 initdb；而且它无法区分
 # 「跑了并通过」和「被 SKIP 了」，后者会让钉在没验过任何东西的情况下报 PASS。

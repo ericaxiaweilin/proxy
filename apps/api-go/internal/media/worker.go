@@ -216,6 +216,33 @@ func (s *Service) ProcessAssetNow(ctx context.Context, mediaAssetID string) erro
 	if asset.ProcessingStatus != "PROCESSING" {
 		return fmt.Errorf("asset %s is %s: %w", mediaAssetID, asset.ProcessingStatus, ErrStatusTransition)
 	}
+	// LC-06 / LC-07 必须挡在「实际跑的那条路」上（2026-09-21）。
+	//
+	// 这两道判定原先只写在 markReady 里，而 markReady 是 operator 专属命令
+	// （PROXY_OPERATOR_PRINCIPALS 未配置时整条被拒）。把资产推到 READY 的
+	// 真实路径是这里 —— 它从不调用那段判定。实测：挂了 USER_TWIN 分身、
+	// 没有任何 likeness 同意的 AI_PERSONA 资产走
+	// CreateMediaAsset → CompleteMediaUpload → ProcessAssetNow 之后
+	// status=READY、moderationStatus=APPROVED，consent 全程为空。
+	// 现在和 MarkMediaReady 共用 enforceAIPublishGates 这一份实现。
+	if v := s.enforceAIPublishGates(ctx, &asset); v != nil {
+		asset.LastError = v.ErrorCode
+		asset.UpdatedAt = s.clock.Now().UTC()
+		if v.Retryability == "SAFE_RETRY" {
+			// 暂时查不到（同意表抖动等）：不落 FAILED，交给 worker 重试。
+			return fmt.Errorf("media %s blocked by %s", mediaAssetID, v.ErrorCode)
+		}
+		// 确定性拒绝：落 FAILED，不进重试循环（与 processAudioAsset 同一处置）。
+		//
+		// moderation_status 保持创建时的 QUARANTINED，不改成 REJECTED_TECHNICAL：
+		// 这是一次策略/合规拒绝，不是技术故障；而该列的 CHECK 是闭集
+		// （PENDING / QUARANTINED / APPROVED / REJECTED_TECHNICAL /
+		// REJECTED_CONTENT_*），没有能表达「策略拒绝」的取值。
+		// 精确原因在 LastError（客户端会展示），processing_status=FAILED
+		// 加上 QUARANTINED 已经保证它永远进不了发布（发布要 READY + APPROVED）。
+		asset.ProcessingStatus = "FAILED"
+		return s.repository.UpdateAsset(ctx, asset, "PROCESSING")
+	}
 	originalPath := filepath.Join(s.storeDir, asset.OriginalStorageKey)
 	if err := s.verifyOriginalIntegrity(originalPath, asset); err != nil {
 		asset.ProcessingStatus = "FAILED"
