@@ -40,7 +40,7 @@
 |------|-----------|-------------|----------------------------|----------|
 | 提交删除请求 | 用户在 App 提交 → 30 天宽限期（可撤回） | 同上（30 天） | client.requestDelete() 提交 → 30 天宽限（status: received → in_progress → completed） | 符合 |
 | 立即隐藏（状态变化） | 删除请求提交后，用户内容（帖子、评论、订单历史）立即对外不可见（visibility = hidden），但 DB 数据保留（审计+法律要求） | 同上：内容标记 is_deleted = true，查询时过滤，不直接 DELETE 行 | 代码已修：post 数据不直接删除（AGENTS.md 数据规则：状态变化，不删 DB 数据） | 符合 |
-| 30 天后永久删除 | 30 天后，自动执行 hard_delete（DB 行删除，审计表保留 user_id + deleted_at + content_ids 引用，不保留内容本身） | 30 天后执行 permanent_erase，审计保留 erase_log | 代码待实现：需要 scheduled_erase 机制（可在后续 commit 完成，本次先确认规则一致） | 规则已对齐，执行待后续 |
+| 30 天后永久删除 | 30 天后，自动执行 hard_delete（DB 行删除，审计表保留 user_id + deleted_at + content_ids 引用，不保留内容本身） | 30 天后执行 permanent_erase，审计保留 erase_log | 代码已实现：worker 每小时跑 `Service.SweepPrivacyDeletions`（24h 转 in_progress，30d 擦除 + 写 erased_at）。擦除范围 = identity 聚合（登录标识 / 资料 / 显示身份 / 偏好 / 会员关系 / 归属地 / 设备 / 会话与令牌 / 登录挑战），账号行匿名化为 status=ERASED（`business.accounts.owner_user_id` 是 ON DELETE RESTRICT，交易台账要引用它）。未覆盖：帖子 / 媒体等跨聚合内容仍以 user_id 引用保留 | 已实现（identity 聚合） |
 | 审计保留（法律要求保存记录） | 交易/税务/安全记录保留 ≥ 5 年（越南电商法） | 同上 | 规则已记录（security_audit_log 保留 12 个月为最低，税务记录需单独 ≥ 5 年表） | 安全日志已规划，税务日志需单独设计 |
 
 ## C. 电子商务平台角色判断（参考 Grab/Shopee 平台登记要求 → Proxy 适用判断）

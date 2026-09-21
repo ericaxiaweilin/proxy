@@ -867,6 +867,22 @@ func (s *Service) createSession(ctx context.Context, e command.Envelope) command
 	return result
 }
 
+// AccountStatusErased is the terminal state of a user account whose
+// LC-15 erasure has run. The row itself survives, and that is
+// deliberate: business.accounts.owner_user_id is ON DELETE RESTRICT
+// and the payment / order ledgers reference the account for the
+// statutory retention window (Decree 248/2026 §23, >= 12 months), so
+// hard-deleting the row would either fail or destroy legally-required
+// records. What makes the erasure real rather than cosmetic is that
+// canHoldSession refuses this status: the account cannot authenticate,
+// so no session, no device and no login identifier can ever be
+// reattached to it.
+const AccountStatusErased = "ERASED"
+
+// canHoldSession reports whether an account status may hold a session.
+// AccountStatusErased is deliberately ABSENT from this list — that
+// absence is the enforcement point for LC-15 erasure, not an
+// oversight. Adding it back would silently resurrect erased accounts.
 func canHoldSession(status string) bool {
 	return status == "ACTIVE" || status == "ANONYMOUS" || status == "REGISTERED" || status == "VERIFIED" || status == "COMMERCIAL_VERIFIED"
 }
@@ -1835,6 +1851,15 @@ func firstString(payload map[string]any, key string) string {
 // request.
 const PrivacyDeleteGracePeriod = 30 * 24 * time.Hour
 
+// PrivacyDeleteInProgressDelay is when the LC-15 executor flips a
+// delete request from 'received' to 'in_progress'. The operating terms
+// supplement §B fixes the acknowledgement SLA at 24h (「删除请求处理：
+// 一般 24 小时」), so the request stops looking un-handled at exactly
+// the moment the platform is contractually required to have picked it
+// up. It is deliberately shorter than the grace period: the status
+// change acknowledges the request, it does not action it.
+const PrivacyDeleteInProgressDelay = 24 * time.Hour
+
 // PrivacyExportRetention is how long the export snapshot URL stays
 // downloadable. After this window the platform purges the snapshot
 // (it is the user's responsibility to download it within the window).
@@ -2121,6 +2146,144 @@ func (s *Service) listPrivacyRequests(ctx context.Context, e command.Envelope) c
 	return result
 }
 
+// PrivacySweepAction is what one sweep pass did to one request.
+type PrivacySweepAction string
+
+const (
+	// PrivacySweepAcknowledged: received -> in_progress. The platform has
+	// picked the request up; the grace window is still open.
+	PrivacySweepAcknowledged PrivacySweepAction = "ACKNOWLEDGED"
+	// PrivacySweepErased: the personal data is gone and the request is
+	// completed with erased_at set.
+	PrivacySweepErased PrivacySweepAction = "ERASED"
+)
+
+// PrivacySweepOutcome is the per-request result of a sweep pass. The
+// worker logs these; the tests assert on them.
+type PrivacySweepOutcome struct {
+	RequestID string
+	UserID    string
+	Action    PrivacySweepAction
+	Erased    ErasedPersonalData
+}
+
+// SweepPrivacyDeletions runs one pass of the LC-15 erasure executor.
+//
+// This is the code the privacy-settings screen has been promising since
+// R16.10: requestPrivacyDelete only writes a 'received' row, and until
+// this method existed nothing ever moved it. It is invoked by the
+// worker on a timer, which is what makes the promise "30 天后你的个人
+// 数据将被永久删除" a statement about the system rather than about a
+// form submission.
+//
+// Two milestones, both derived from requested_at so a worker outage
+// cannot stretch the window:
+//
+//   - requested_at + PrivacyDeleteInProgressDelay (24h) -> in_progress
+//   - requested_at + PrivacyDeleteGracePeriod   (30d) -> erased + completed
+//
+// A request that is already past the grace period goes straight from
+// 'received' to 'completed'; the 24h acknowledgement is a courtesy to
+// the user, not a precondition for erasing.
+//
+// Errors are per-request: one bad row must not stall the backlog. The
+// first error is returned alongside whatever did succeed, so the
+// worker can log it without losing the rest of the pass.
+func (s *Service) SweepPrivacyDeletions(ctx context.Context, now time.Time) ([]PrivacySweepOutcome, error) {
+	repo := s.privacyRepo()
+	if repo == nil {
+		return nil, nil
+	}
+	eraser := s.personalDataEraser()
+	if eraser == nil {
+		return nil, ErrPersonalDataEraserUnavailable
+	}
+	due, err := repo.ListDuePrivacyDeletions(ctx, now.Add(-PrivacyDeleteInProgressDelay))
+	if err != nil {
+		return nil, err
+	}
+	outcomes := make([]PrivacySweepOutcome, 0, len(due))
+	var firstErr error
+	for _, req := range due {
+		outcome, err := s.advancePrivacyDeletion(ctx, repo, eraser, req, now)
+		if err != nil {
+			log.Printf("privacy sweep failed request=%s user=%s err=%v", req.ID, req.UserID, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if outcome != nil {
+			outcomes = append(outcomes, *outcome)
+		}
+	}
+	return outcomes, firstErr
+}
+
+// advancePrivacyDeletion applies the correct milestone for one request
+// and returns what it did (nil when there is nothing to do yet).
+func (s *Service) advancePrivacyDeletion(
+	ctx context.Context,
+	repo PrivacyRequestRepository,
+	eraser PersonalDataEraser,
+	req PrivacyRequest,
+	now time.Time,
+) (*PrivacySweepOutcome, error) {
+	eraseDue := req.RequestedAt.Add(PrivacyDeleteGracePeriod)
+
+	if now.Before(eraseDue) {
+		if req.Status != PrivacyRequestStatusReceived {
+			return nil, nil
+		}
+		previous := req.Status
+		req.Status = PrivacyRequestStatusInProgress
+		req.Version++
+		if err := repo.UpdatePrivacyRequest(ctx, req, req.Version-1); err != nil {
+			return nil, err
+		}
+		s.recordPrivacyEvent(ctx, req, previous, "grace window open; erasure scheduled for "+eraseDue.UTC().Format(time.RFC3339))
+		return &PrivacySweepOutcome{RequestID: req.ID, UserID: req.UserID, Action: PrivacySweepAcknowledged}, nil
+	}
+
+	// Past the grace window. Erase first, bookkeep second, on purpose:
+	// if the erasure succeeds and the update fails, the next pass
+	// re-runs an idempotent erasure. The reverse order could mark a
+	// request completed whose data was never erased — the one failure
+	// mode that would make the product lie.
+	erased, err := eraser.ErasePersonalData(ctx, req.UserID)
+	if err != nil {
+		return nil, err
+	}
+	previous := req.Status
+	completedAt := now.UTC()
+	req.Status = PrivacyRequestStatusCompleted
+	req.CompletedAt = &completedAt
+	req.ErasedAt = &completedAt
+	req.Version++
+	if err := repo.UpdatePrivacyRequest(ctx, req, req.Version-1); err != nil {
+		return nil, err
+	}
+	s.recordPrivacyEvent(ctx, req, previous, "erased: "+erased.Summary()+" | retained: "+RetainedOnErasure)
+	return &PrivacySweepOutcome{RequestID: req.ID, UserID: req.UserID, Action: PrivacySweepErased, Erased: erased}, nil
+}
+
+// recordPrivacyEvent appends the audit row for a sweep transition.
+// Best-effort, matching the rest of the privacy surface: a missing
+// audit row is worse than nothing but must never roll back an erasure
+// that already happened.
+func (s *Service) recordPrivacyEvent(ctx context.Context, req PrivacyRequest, from PrivacyRequestStatus, notes string) {
+	if err := s.privacyRepo().AppendPrivacyRequestEvent(ctx, PrivacyRequestEvent{
+		RequestID:  req.ID,
+		FromStatus: string(from),
+		ToStatus:   string(req.Status),
+		OccurredAt: s.clock.Now().UTC(),
+		Actor:      "system",
+		Notes:      notes,
+	}); err != nil {
+		log.Printf("privacy request event write failed request=%s err=%v", req.ID, err)
+	}
+}
+
 // generatePrivacyExportData assembles the PrivacyDataExport payload.
 // This is the synchronous counterpart of an 'export' request; in
 // production the same code runs in the background job that flips
@@ -2196,6 +2359,19 @@ func (s *Service) GeneratePrivacyExportData(ctx context.Context, userID string) 
 func (s *Service) privacyRepo() PrivacyRequestRepository {
 	if r, ok := s.repository.(PrivacyRequestRepository); ok {
 		return r
+	}
+	return nil
+}
+
+// personalDataEraser is the sibling adapter for the destructive half
+// of LC-15. Kept separate from privacyRepo so the executor's
+// dependency is visible in one place: a deployment whose repository
+// cannot erase refuses to sweep (SweepPrivacyDeletions returns
+// ErrPersonalDataEraserUnavailable) rather than silently marking
+// requests completed without erasing anything.
+func (s *Service) personalDataEraser() PersonalDataEraser {
+	if e, ok := s.repository.(PersonalDataEraser); ok {
+		return e
 	}
 	return nil
 }

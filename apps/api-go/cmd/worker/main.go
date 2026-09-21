@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/event"
+	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/outbox"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
@@ -179,6 +180,12 @@ func main() {
 	// idx_display_identities_expires; cheap even with large tables.
 	conversationRepository := postgres.NewConversationRepository(pool)
 	displayIdentityRepository := postgres.NewDisplayIdentityRepository(pool)
+	// LC-15 (Vietnam PDP 91/2025/QH15 Art. 32): the erasure executor.
+	// Until this wiring existed, POST /v1/privacy/delete wrote a
+	// 'received' row that nothing ever acted on, while the app promised
+	// permanent deletion in 30 days. The same hourly tick now drives
+	// received -> in_progress (24h) -> erased (30d).
+	privacyService := identity.NewWithRepositoryAndClock(postgres.NewIdentityRepository(pool), nil)
 	sweeperTicker := time.NewTicker(time.Hour)
 	defer sweeperTicker.Stop()
 	// Run once on startup so dev restarts immediately clean up stale fixtures.
@@ -192,6 +199,7 @@ func main() {
 	} else if n > 0 {
 		log.Printf("burner sweep startup burned: count=%d", n)
 	}
+	sweepPrivacyDeletions(ctx, privacyService)
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -226,6 +234,26 @@ func main() {
 			} else if n > 0 {
 				log.Printf("burner sweep burned: count=%d", n)
 			}
+			sweepPrivacyDeletions(ctx, privacyService)
+		}
+	}
+}
+
+// sweepPrivacyDeletions runs one LC-15 pass and logs what it did. Kept
+// out of the select body so the startup pass and the hourly pass share
+// exactly one code path — a startup-only or tick-only regression would
+// otherwise be invisible.
+func sweepPrivacyDeletions(ctx context.Context, svc *identity.Service) {
+	outcomes, err := svc.SweepPrivacyDeletions(ctx, time.Now().UTC())
+	if err != nil {
+		log.Printf("privacy deletion sweep failed: %v", err)
+	}
+	for _, outcome := range outcomes {
+		switch outcome.Action {
+		case identity.PrivacySweepAcknowledged:
+			log.Printf("privacy deletion acknowledged: request=%s user=%s", outcome.RequestID, outcome.UserID)
+		case identity.PrivacySweepErased:
+			log.Printf("privacy deletion erased: request=%s user=%s rows=%d", outcome.RequestID, outcome.UserID, outcome.Erased.Total())
 		}
 	}
 }

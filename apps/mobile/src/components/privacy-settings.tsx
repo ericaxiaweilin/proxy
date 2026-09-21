@@ -90,7 +90,7 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
   const onDelete = useCallback(() => {
     Alert.alert(
       "请求删除账号?",
-      "依据《个人数据保护法》91/2025/QH15 第 32 条, 你有 30 天宽限期撤回请求. 30 天后, 你的个人数据将被永久删除 (法律要求保存的记录除外).",
+      "依据《个人数据保护法》91/2025/QH15 第 32 条, 你有 30 天宽限期撤回请求. 30 天后, 你的账号资料与登录信息会被永久删除, 账号被匿名化 —— 你将无法再登录。交易 / 税务 / 安全 / 同意记录按法律要求继续保留。",
       [
         { text: "取消", style: "cancel" },
         {
@@ -245,7 +245,7 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>🗑️ 请求删除账号</Text>
-        <Text style={styles.cardDesc}>30 天宽限期内你可以随时撤回。30 天后, 你的个人数据将被永久删除 (法律要求保存的交易 / 安全 / 税务记录除外)。</Text>
+        <Text style={styles.cardDesc}>30 天宽限期内你可以随时撤回。30 天后, 你的账号资料 (姓名 / 简介 / 头像 / 登录手机或邮箱 / 设备与登录会话) 会被永久删除, 账号被匿名化且无法再登录。交易 / 税务 / 安全 / 同意记录按法律要求保留。</Text>
         {activeDelete ? (
           <View>
             <Text style={styles.badge}>删除请求已提交 · {statusLabel(activeDelete.status)}</Text>

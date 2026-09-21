@@ -2241,6 +2241,68 @@ if ! grep -qF 'if blocked, blockedStatus := s.enforceKillSwitch(envelope); block
 fi
 echo "    LC-16: PASS (armed switch blocks its commands; call site still wired)"
 
+# LC-15 (R16.7-P1-F) 个人数据擦除的**执行者**。
+#
+# 这条钉子的由来是一个"定义了但没人调用"的 P0，形状和 LC-16 一模一样：
+#
+#   POST /v1/privacy/delete  ->  requestPrivacyDelete 写一行 status='received'
+#   ...然后什么都没有。没有东西把它推到 in_progress，更没有东西执行擦除。
+#   而 apps/mobile/src/components/privacy-settings.tsx 明着承诺
+#   「30 天后，你的个人数据将被永久删除」。
+#
+# 证据链（2026-09-21）：
+#   grep -rn 'PrivacyRequestStatusCompleted' apps/api-go --include=*.go
+#   # -> 只有常量定义那一处，没有任何写入点
+#   grep -rn 'ErasedAt *=' apps/api-go --include=*.go
+#   # -> 服务端零赋值（只有 struct 字段和 scan）
+#   grep -rn 'privacy' apps/api-go/cmd/worker/main.go
+#   # -> 零命中：worker 的 sweep 只清消息和 burner，从来没有 privacy
+#
+# 所以下面三条 require_test 只证明"决策逻辑对"，证明不了"有人跑它" ——
+# 这正是当初那个 bug 的形状（代码在，接线不在）。因此必须补一条静态钉钉住
+# worker 的调用点，而且钉的是**调用次数 >= 2**：只在启动时扫一次、把 ticker
+# 里的那次删掉，用户等 30 天也等不到擦除，但钉调用点存在的话照样绿。
+require_test "LC-15" "./internal/identity" \
+  "TestPrivacyDeleteErasureExecutorRunsTheFullLifecycle" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+require_test "LC-15" "./internal/identity" \
+  "TestPrivacyDeleteErasureSkipsCancelledRequests" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+require_test "LC-15" "./internal/identity" \
+  "TestErasedStatusIsNotSessionCapable" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+# 这一条才是「数据真的没了」对**正在运行的客户端**的含义：擦除前签发的
+# access token 必须失效。只删行不够 —— 旧 token 是个 bearer 凭据，它要是
+# 还能用，用户就还在一个资料/设备/登录标识都已不存在的账号里，而
+# canHoldSession 只在**新建**会话时被查，根本拦不到它。
+require_test "LC-15" "./internal/identity" \
+  "TestErasureInvalidatesOutstandingAccessTokens" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+# 收据必须落到审计流水里（privacy_request_events.notes），否则「擦了哪些、留了哪些、
+# 依据是什么」只能靠再查一遍库反推 —— 合规流程要的恰恰是一行可读的凭证。
+require_test "LC-15" "./internal/identity" \
+  "TestErasureReceiptReachesTheAuditTrail" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+
+lc15_worker_calls="$(grep -cF 'sweepPrivacyDeletions(ctx, privacyService)' apps/api-go/cmd/worker/main.go || true)"
+if [ "${lc15_worker_calls:-0}" -lt 2 ]; then
+  echo "  FAIL [LC-15]: cmd/worker/main.go runs the erasure executor ${lc15_worker_calls:-0} time(s), expected >= 2 (startup + hourly ticker)." >&2
+  echo "        The executor can be perfectly correct and still never run — that IS the" >&2
+  echo "        original bug: the delete request was recorded and nothing actioned it." >&2
+  echo "        只在启动时扫一次不够：30 天宽限期到点时进程早就重启过了。" >&2
+  exit 1
+fi
+# 擦除必须走 PersonalDataEraser 这条边界，而不是在 service 里手写 DELETE。
+# 没有这条，把 ErasePersonalData 换成一句 return 就能让上面三条测试里的
+# 「收据非零」断言失去意义（memory 仓的实现在测试里）。
+if ! grep -qF 'var _ identity.PersonalDataEraser = (*IdentityRepository)(nil)' apps/api-go/internal/platform/postgres/identity.go; then
+  echo "  FAIL [LC-15]: postgres IdentityRepository no longer implements PersonalDataEraser." >&2
+  echo "        A deployment whose repository cannot erase must refuse to sweep" >&2
+  echo "        (ErrPersonalDataEraserUnavailable), never mark requests completed without erasing." >&2
+  exit 1
+fi
+echo "    LC-15: PASS (erasure executor runs on a timer; account becomes unauthenticatable)"
+
 # TEST-ABSDATE-001: 测试里写死绝对日期 = 定时炸弹。
 # 2026-09-13 全仓库 g2 变红：business/service_test.go 把 bucketDate 写成
 # "2026-09-06"，7 天滚动窗口一过就查不到它，OrderCount 恒为 0，测试自己

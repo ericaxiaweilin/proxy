@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -98,9 +99,102 @@ type PrivacyRequestRepository interface {
 	GetActivePrivacyRequest(ctx context.Context, userID string, kind PrivacyRequestKind) (PrivacyRequest, error)
 	GetPrivacyRequest(ctx context.Context, id string) (PrivacyRequest, error)
 	ListPrivacyRequestsByUser(ctx context.Context, userID string) ([]PrivacyRequest, error)
+	// ListDuePrivacyDeletions returns the delete requests the LC-15
+	// erasure executor still has to act on: kind='delete', status in
+	// ('received','in_progress'), requested_at <= receivedBefore.
+	// The caller passes now - PrivacyDeleteInProgressDelay, so this is
+	// "requests the platform is contractually late on". The executor
+	// then decides between the in_progress flip and the real erasure.
+	ListDuePrivacyDeletions(ctx context.Context, receivedBefore time.Time) ([]PrivacyRequest, error)
 	UpdatePrivacyRequest(ctx context.Context, req PrivacyRequest, expectedVersion int) error
 	AppendPrivacyRequestEvent(ctx context.Context, evt PrivacyRequestEvent) error
 }
+
+// PersonalDataEraser is the persistence boundary for the destructive
+// half of LC-15 (Vietnam PDP 91/2025/QH15 Art. 32 erasure). It is a
+// separate interface from PrivacyRequestRepository because the two
+// concerns are genuinely different: the request centre records an
+// intention, this one carries it out. Keeping them apart means the
+// executor can be handed exactly one dependency, and it keeps the
+// "did anything actually get erased?" question answerable by looking
+// at one method body.
+//
+// The contract is idempotent: running it twice for the same user must
+// be safe and must report zero rows the second time. The executor
+// relies on that — it erases before it bookkeeps, so a crash between
+// the two steps simply replays the erasure.
+type PersonalDataEraser interface {
+	ErasePersonalData(ctx context.Context, userID string) (ErasedPersonalData, error)
+}
+
+// ErasedPersonalData is the machine-readable receipt of one erasure
+// pass. Every counter is a table the executor physically deleted rows
+// from; every counter being zero on a second pass is how the
+// idempotency contract above is verified. What the executor
+// deliberately does NOT delete is spelled out in RetainedOnErasure,
+// because "个人数据将被永久删除" is only an honest promise together
+// with its exceptions.
+type ErasedPersonalData struct {
+	LoginIdentities    int `json:"loginIdentities"`
+	LoginChallenges    int `json:"loginChallenges"`
+	Sessions           int `json:"sessions"`
+	SessionTokens      int `json:"sessionTokens"`
+	Devices            int `json:"devices"`
+	Profiles           int `json:"profiles"`
+	AccountPreferences int `json:"accountPreferences"`
+	DisplayIdentities  int `json:"displayIdentities"`
+	Memberships        int `json:"memberships"`
+	Jurisdictions      int `json:"jurisdictions"`
+	// AgeAssertionsWiped counts age-assertion rows whose client
+	// metadata (ip / user_agent) was cleared. The date_of_birth itself
+	// is retained — see RetainedOnErasure.
+	AgeAssertionsWiped int `json:"ageAssertionsWiped"`
+	// AccountAnonymised is true when the identity.user_accounts row was
+	// flipped to status='ERASED'. The row survives; the account does not.
+	AccountAnonymised bool `json:"accountAnonymised"`
+}
+
+// Total is the number of rows the erasure physically removed or
+// scrubbed. Used by the sweep log line and by tests asserting that an
+// erasure was not a no-op.
+func (e ErasedPersonalData) Total() int {
+	return e.LoginIdentities + e.LoginChallenges + e.Sessions + e.SessionTokens +
+		e.Devices + e.Profiles + e.AccountPreferences + e.DisplayIdentities +
+		e.Memberships + e.Jurisdictions + e.AgeAssertionsWiped
+}
+
+// Summary renders the receipt for the privacy_request_events audit
+// trail, so an auditor reading one row can see what was removed
+// without re-deriving it from the database.
+func (e ErasedPersonalData) Summary() string {
+	return fmt.Sprintf(
+		"login_identities=%d login_challenges=%d sessions=%d session_tokens=%d devices=%d profiles=%d preferences=%d display_identities=%d memberships=%d jurisdictions=%d age_assertion_metadata=%d account_anonymised=%t",
+		e.LoginIdentities, e.LoginChallenges, e.Sessions, e.SessionTokens,
+		e.Devices, e.Profiles, e.AccountPreferences, e.DisplayIdentities,
+		e.Memberships, e.Jurisdictions, e.AgeAssertionsWiped, e.AccountAnonymised,
+	)
+}
+
+// RetainedOnErasure names the categories the erasure executor keeps,
+// each with the reason it survives. It exists as a value (not only a
+// comment) so the audit event and the regression pins can assert on
+// it: the user-facing promise is "永久删除（法律要求保存的记录除外）",
+// and this constant is the "除外".
+const RetainedOnErasure = "account_row (anonymised to status=ERASED: " +
+	"business.accounts.owner_user_id is ON DELETE RESTRICT and the payment/order " +
+	"ledgers reference it for the statutory window), " +
+	"agent_claim_number (no-gap numbering audit), " +
+	"age_assertion date_of_birth (COMP-AGE-001 minor-protection evidence; ip/user_agent wiped), " +
+	"legal_consent_records (proof the processing was lawful), " +
+	"payment/order/business rows (Decree 248/2026 §23, >=12 months), " +
+	"privacy_requests + privacy_request_events (this audit trail)"
+
+// ErrPersonalDataEraserUnavailable is returned when a repository does
+// not implement PersonalDataEraser. The service treats it as
+// "erasure not configured" and refuses to mark a request completed —
+// silently pretending to have erased is the one outcome that must
+// never happen.
+var ErrPersonalDataEraserUnavailable = errors.New("personal data eraser is not configured")
 
 // Repository is the canonical persistence boundary for Identity aggregates.
 // Session updates must enforce expectedVersion atomically.
@@ -822,6 +916,110 @@ func (r *MemoryRepository) AppendPrivacyRequestEvent(_ context.Context, evt Priv
 	return nil
 }
 
+// ListDuePrivacyDeletions mirrors the postgres query: delete requests
+// whose grace-window acknowledgement deadline has passed, oldest
+// first so a long backlog is drained in submission order.
+func (r *MemoryRepository) ListDuePrivacyDeletions(_ context.Context, receivedBefore time.Time) ([]PrivacyRequest, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]PrivacyRequest, 0)
+	for _, req := range r.privacyRequests {
+		if req.Kind != PrivacyRequestKindDelete {
+			continue
+		}
+		if req.Status != PrivacyRequestStatusReceived && req.Status != PrivacyRequestStatusInProgress {
+			continue
+		}
+		if req.RequestedAt.After(receivedBefore) {
+			continue
+		}
+		result = append(result, req)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].RequestedAt.Before(result[j].RequestedAt) })
+	return result, nil
+}
+
+// ErasePersonalData is the in-memory counterpart of the postgres
+// erasure. The memory repository only owns part of the identity
+// aggregate — it has no profile / display-identity / jurisdiction /
+// age-assertion storage — so the counters it reports are the subset it
+// actually holds. The full-wipe assertions live in the postgres
+// integration test; this implementation exists so the service-level
+// sweep logic can be exercised hermetically, with no DB and no
+// goroutines.
+//
+// Idempotency is structural: every loop deletes by key, so a second
+// call finds nothing and reports zeroes.
+func (r *MemoryRepository) ErasePersonalData(_ context.Context, userID string) (ErasedPersonalData, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var receipt ErasedPersonalData
+
+	// Login identities first, so the challenges that hang off them can
+	// be matched by identity id as well as by user id (mirrors the
+	// postgres order).
+	erasedIdentityIDs := make(map[string]struct{})
+	for id, li := range r.loginIdentities {
+		if li.UserAccountID == userID {
+			erasedIdentityIDs[id] = struct{}{}
+			delete(r.loginIdentities, id)
+			receipt.LoginIdentities++
+		}
+	}
+	for id, c := range r.challenges {
+		_, identityErased := erasedIdentityIDs[c.LoginIdentityID]
+		if c.UserAccountID != userID && !identityErased {
+			continue
+		}
+		delete(r.challenges, id)
+		receipt.LoginChallenges++
+	}
+	// Sessions before devices, matching identity_sessions_device_fk
+	// (ON DELETE RESTRICT) in postgres.
+	erasedSessionIDs := make(map[string]struct{})
+	for id, s := range r.sessions {
+		if s.UserAccountID != userID {
+			continue
+		}
+		erasedSessionIDs[id] = struct{}{}
+		delete(r.sessions, id)
+		receipt.Sessions++
+	}
+	for sessionID := range r.tokens {
+		if _, ok := erasedSessionIDs[sessionID]; !ok {
+			continue
+		}
+		delete(r.tokens, sessionID)
+		receipt.SessionTokens++
+	}
+	for id, d := range r.devices {
+		if d.UserAccountID != userID {
+			continue
+		}
+		delete(r.devices, id)
+		receipt.Devices++
+	}
+	kept := r.memberships[:0]
+	for _, m := range r.memberships {
+		if m.UserAccountID == userID {
+			receipt.Memberships++
+			continue
+		}
+		kept = append(kept, m)
+	}
+	r.memberships = kept
+	if _, ok := r.accountPreferences[userID]; ok {
+		delete(r.accountPreferences, userID)
+		receipt.AccountPreferences++
+	}
+	if user, ok := r.users[userID]; ok {
+		user.Status = AccountStatusErased
+		r.users[userID] = user
+		receipt.AccountAnonymised = true
+	}
+	return receipt, nil
+}
+
 // ListLegalConsents returns the legal-consent rows the user has
 // recorded, for inclusion in a PrivacyDataExport payload. The in-memory
 // repository is consulted by the service's type-assertion in
@@ -841,3 +1039,4 @@ func (r *MemoryRepository) ListLegalConsents(_ context.Context, userID string) (
 }
 
 var _ PrivacyRequestRepository = (*MemoryRepository)(nil)
+var _ PersonalDataEraser = (*MemoryRepository)(nil)

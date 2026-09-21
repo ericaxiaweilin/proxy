@@ -1099,7 +1099,7 @@ func (r *IdentityRepository) GetActivePrivacyRequest(ctx context.Context, userID
 		SELECT id, user_id, kind, status, requested_at, completed_at, erased_at,
 			export_snapshot_url, export_sha256, export_retention_until,
 			legal_basis, COALESCE(host(client_ip), ''), COALESCE(user_agent, ''), COALESCE(rejection_reason, ''),
-			1
+			version
 		FROM privacy.privacy_requests
 		WHERE user_id = $1 AND kind = $2 AND status IN ('received','in_progress')
 		ORDER BY requested_at DESC
@@ -1115,7 +1115,7 @@ func (r *IdentityRepository) GetPrivacyRequest(ctx context.Context, id string) (
 		SELECT id, user_id, kind, status, requested_at, completed_at, erased_at,
 			export_snapshot_url, export_sha256, export_retention_until,
 			legal_basis, COALESCE(host(client_ip), ''), COALESCE(user_agent, ''), COALESCE(rejection_reason, ''),
-			1
+			version
 		FROM privacy.privacy_requests
 		WHERE id = $1
 	`, id)
@@ -1130,7 +1130,7 @@ func (r *IdentityRepository) ListPrivacyRequestsByUser(ctx context.Context, user
 		SELECT id, user_id, kind, status, requested_at, completed_at, erased_at,
 			export_snapshot_url, export_sha256, export_retention_until,
 			legal_basis, COALESCE(host(client_ip), ''), COALESCE(user_agent, ''), COALESCE(rejection_reason, ''),
-			1
+			version
 		FROM privacy.privacy_requests
 		WHERE user_id = $1
 		ORDER BY requested_at DESC
@@ -1203,6 +1203,14 @@ func (r *IdentityRepository) AppendPrivacyRequestEvent(ctx context.Context, evt 
 // scanPrivacyRequest reads a single privacy_requests row from either a
 // QueryRow or a Rows iterator. The two surfaces accept the same Scan
 // signature, so the same scan helper works for both.
+//
+// The version column is read for real (it used to be a literal 1 in
+// every SELECT, which capped each request at exactly one transition:
+// the second UPDATE would pass expectedVersion=1 against a row already
+// at 2 and match nothing). The LC-15 erasure executor needs two
+// transitions per request — received -> in_progress -> completed — so
+// the literal had to go. migration 061 added the column for exactly
+// this reason; it was the reads that never caught up.
 func scanPrivacyRequest(scanner interface {
 	Scan(dest ...any) error
 }) (identity.PrivacyRequest, error) {
@@ -1258,8 +1266,170 @@ func derefTime(t *time.Time) any {
 	return *t
 }
 
+// ListDuePrivacyDeletions returns the delete requests the LC-15
+// erasure executor still has to act on. 'kind = delete' is compared
+// as a literal rather than a parameter because the CHECK constraint
+// pins the value to the same closed set the Go enum uses.
+func (r *IdentityRepository) ListDuePrivacyDeletions(ctx context.Context, receivedBefore time.Time) ([]identity.PrivacyRequest, error) {
+	q := queryerForContext(ctx, r.pool)
+	rows, err := q.Query(ctx, `
+		SELECT id, user_id, kind, status, requested_at, completed_at, erased_at,
+			export_snapshot_url, export_sha256, export_retention_until,
+			legal_basis, COALESCE(host(client_ip), ''), COALESCE(user_agent, ''), COALESCE(rejection_reason, ''),
+			version
+		FROM privacy.privacy_requests
+		WHERE kind = 'delete'
+			AND status IN ('received','in_progress')
+			AND requested_at <= $1
+		ORDER BY requested_at
+	`, receivedBefore)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]identity.PrivacyRequest, 0)
+	for rows.Next() {
+		req, err := scanPrivacyRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, req)
+	}
+	return out, rows.Err()
+}
+
+// ErasePersonalData carries out the destructive half of LC-15
+// (Vietnam PDP 91/2025/QH15 Art. 32) for one user.
+//
+// Everything runs in ONE transaction, so a partial erasure is not a
+// reachable state: either the user's directly-identifying rows are
+// gone and the account is marked ERASED, or nothing changed and the
+// sweeper retries on the next pass.
+//
+// Two ordering constraints come from migration 049's foreign keys and
+// are load-bearing:
+//
+//   - identity_sessions_device_fk is ON DELETE RESTRICT, so sessions
+//     must go before the devices they point at.
+//   - business_owner_user_fk (business.accounts.owner_user_id) is also
+//     ON DELETE RESTRICT, which is the reason the user_accounts row is
+//     anonymised instead of deleted. Hard-deleting it would either
+//     fail outright or, worse, cascade away financial records the
+//     platform is required to keep.
+//
+// What is NOT touched is listed in identity.RetainedOnErasure; the
+// short version is that ledgers, consent records, the agent claim
+// number and the privacy audit trail survive, and the age assertion
+// keeps its date_of_birth (COMP-AGE-001 minor-protection evidence)
+// while losing the ip / user_agent that identify the client.
+func (r *IdentityRepository) ErasePersonalData(ctx context.Context, userID string) (identity.ErasedPersonalData, error) {
+	var receipt identity.ErasedPersonalData
+	if userID == "" {
+		return receipt, errors.New("erase personal data: empty user id")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return receipt, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Each statement is its own count: the receipt has to be able to
+	// answer "which table did you actually empty?".
+	exec := func(query string, args ...any) (int64, error) {
+		tag, err := tx.Exec(ctx, query, args...)
+		if err != nil {
+			return 0, err
+		}
+		return tag.RowsAffected(), nil
+	}
+	step := func(dest *int, query string, args ...any) error {
+		n, err := exec(query, args...)
+		if err != nil {
+			return err
+		}
+		*dest += int(n)
+		return nil
+	}
+
+	// 1. Sessions before devices (identity_sessions_device_fk RESTRICT).
+	//    session_tokens is keyed by session_id, not user_account_id.
+	if err := step(&receipt.SessionTokens, `
+		DELETE FROM identity.session_tokens
+		WHERE session_id IN (SELECT id FROM identity.sessions WHERE user_account_id = $1)
+	`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+	if err := step(&receipt.Sessions, `DELETE FROM identity.sessions WHERE user_account_id = $1`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+	if err := step(&receipt.Devices, `DELETE FROM identity.device_registrations WHERE user_account_id = $1`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+
+	// 2. Login surface. Challenges are matched by user id OR by the
+	//    identity they belong to, because login_challenges.user_account_id
+	//    is nullable (an anonymous-device challenge has no account yet).
+	if err := step(&receipt.LoginChallenges, `
+		DELETE FROM identity.login_challenges
+		WHERE user_account_id = $1
+		   OR login_identity_id IN (SELECT id FROM identity.login_identities WHERE user_account_id = $1)
+	`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+	if err := step(&receipt.LoginIdentities, `DELETE FROM identity.login_identities WHERE user_account_id = $1`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+
+	// 3. Profile-shaped data: name / handle / bio / city / avatar, the
+	//    social accounts and collaboration contact, the display
+	//    identities (alias + display name), the membership edges, and
+	//    the coarse jurisdiction inference.
+	if err := step(&receipt.Profiles, `DELETE FROM identity.profiles WHERE user_account_id = $1`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+	if err := step(&receipt.AccountPreferences, `DELETE FROM identity.account_preferences WHERE user_account_id = $1`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+	if err := step(&receipt.DisplayIdentities, `DELETE FROM identity.display_identities WHERE owner_id = $1`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+	if err := step(&receipt.Memberships, `DELETE FROM identity.memberships WHERE user_account_id = $1`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+	if err := step(&receipt.Jurisdictions, `DELETE FROM identity.user_jurisdiction WHERE user_id = $1`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+
+	// 4. Age assertions: keep the DOB (it is the evidence that the 18+
+	//    gate was applied — COMP-AGE-001), drop the client metadata.
+	if err := step(&receipt.AgeAssertionsWiped, `
+		UPDATE identity.user_age_assertions
+		SET ip = NULL, user_agent = NULL
+		WHERE user_account_id = $1 AND (ip IS NOT NULL OR user_agent IS NOT NULL)
+	`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+
+	// 5. Anonymise the account row. Kept: see identity.RetainedOnErasure.
+	//    Flipping the status is what makes the account unable to
+	//    authenticate (identity.canHoldSession excludes ERASED).
+	tag, err := tx.Exec(ctx, `
+		UPDATE identity.user_accounts SET status = $2, updated_at = now() WHERE id = $1
+	`, userID, identity.AccountStatusErased)
+	if err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+	receipt.AccountAnonymised = tag.RowsAffected() > 0
+
+	if err := tx.Commit(ctx); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+	return receipt, nil
+}
+
 var _ identity.Repository = (*IdentityRepository)(nil)
 var _ identity.PrivacyRequestRepository = (*IdentityRepository)(nil)
+var _ identity.PersonalDataEraser = (*IdentityRepository)(nil)
 var _ identity.TransactionalRepository = (*IdentityRepository)(nil)
 var _ identity.TokenRepository = (*IdentityRepository)(nil)
 var _ identity.ProfileRepository = (*IdentityRepository)(nil)
