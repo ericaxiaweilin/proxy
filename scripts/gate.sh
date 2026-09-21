@@ -251,15 +251,19 @@ gate_g4_drift() {
   fi
   echo "  semantic fixtures: OK (no fake map regressions, no non-AI activity origins)"
 
-  # Pin hygiene: a vitest invocation whose exit code is not enforced makes the
-  # block above it decorative. scripts/check-regression-contracts.sh runs with
+  # Pin hygiene: an invocation whose exit code is not enforced makes the block
+  # above it decorative. scripts/check-regression-contracts.sh runs with
   # `set -u` only (no `set -e`) and its last statement is an `echo`, so an
   # unguarded failing command neither stops the script nor changes its exit
   # code -- the block above still prints PASS. Measured 2026-09-21: 14
   # invocations across 13 blocks were unguarded, and 4 of those used
   # `test -- --run <file>`, which swallows the file argument and runs the whole
   # suite (149 files / 1381 tests) instead of the one file it names.
-  echo "  pin hygiene: checking every vitest invocation enforces its exit code..."
+  #
+  # Covers BOTH carriers, not just vitest: the 387 semantic pins ride on
+  # `require_test`, and a swallowed `require_test` failure is the same defect.
+  # Swept 2026-09-21: 446 guarded invocations, 0 whose failure was swallowed.
+  echo "  pin hygiene: checking every invocation enforces its exit code..."
   local pin_script="scripts/check-regression-contracts.sh"
   # Fail loudly if it is missing: a grep against a nonexistent path also
   # produces "no unguarded lines", i.e. a vacuous pass. Never let "the check
@@ -280,19 +284,21 @@ gate_g4_drift() {
       if (buf == "") start = NR
       buf = buf $0
       if ($0 ~ /\\$/) { buf = buf " "; next }
-      if (buf !~ /^[[:space:]]*#/ && buf ~ /pnpm/ && buf ~ /(exec vitest run|test --run|test -- --run)/ && buf !~ /\|\|[[:space:]]*exit/) {
+      is_inv = (buf ~ /^[[:space:]]*require_test[[:space:]]/) || (buf ~ /pnpm/ && buf ~ /(exec vitest run|test --run|test -- --run)/)
+      if (buf !~ /^[[:space:]]*#/ && is_inv && buf !~ /\|\|[[:space:]]*exit/) {
         printf "%d: %s\n", start, buf
       }
       buf = ""
     }
     END {
-      if (buf != "" && buf !~ /^[[:space:]]*#/ && buf ~ /pnpm/ && buf ~ /(exec vitest run|test --run|test -- --run)/ && buf !~ /\|\|[[:space:]]*exit/) {
+      is_inv = (buf ~ /^[[:space:]]*require_test[[:space:]]/) || (buf ~ /pnpm/ && buf ~ /(exec vitest run|test --run|test -- --run)/)
+      if (buf != "" && buf !~ /^[[:space:]]*#/ && is_inv && buf !~ /\|\|[[:space:]]*exit/) {
         printf "%d: %s\n", NR, buf
       }
     }
   ' "$pin_script")
   if [ -n "$unguarded" ]; then
-    echo "  FAIL: vitest invocation whose result is not enforced (append '|| exit \$?'):" >&2
+    echo "  FAIL: invocation whose result is not enforced (append '|| exit \$?'):" >&2
     echo "$unguarded" | sed 's/^/    - /' >&2
     return 1
   fi
@@ -307,7 +313,7 @@ gate_g4_drift() {
     echo "$swallow" | sed 's/^/    - /' >&2
     return 1
   fi
-  echo "  pin hygiene: OK (every vitest invocation enforces its exit code)"
+  echo "  pin hygiene: OK (every invocation enforces its exit code)"
 
   bash scripts/check-regression-contracts.sh || return $?
 }
