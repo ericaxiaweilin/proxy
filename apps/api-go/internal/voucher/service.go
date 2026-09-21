@@ -84,6 +84,12 @@ type Repository interface {
 	// VOUCHER-ISSUE-001: definitions are merchant-issued (step 1 of the
 	// voucher-as-canon chain); reads arrive with step 2 (purchases/instances).
 	CreateDefinition(ctx context.Context, d Definition) error
+	// VOUCHER-PURCHASE-001: reads arrive with step 2 (order validates the
+	// definition, confirm mints atomically).
+	GetDefinition(ctx context.Context, id string) (*Definition, bool, error)
+	CreatePurchase(ctx context.Context, p Purchase) error
+	GetPurchase(ctx context.Context, id string) (*Purchase, bool, error)
+	ConfirmPurchaseWithMint(ctx context.Context, purchaseID string, instances []Instance) error
 }
 
 // Service is currently an in-memory P0 adapter. Its command contract is
@@ -110,6 +116,8 @@ type Service struct {
 	settlementCreator SettlementCreator
 	benefitBridge     BenefitBridge
 	definitions       map[string]*Definition // VOUCHER-ISSUE-001: in-memory fallback, mirrored to repo
+	purchases         map[string]*Purchase   // VOUCHER-PURCHASE-001: same pattern
+	instances         map[string]*Instance   // VOUCHER-PURCHASE-001: minted at confirm
 }
 
 func New() *Service {
@@ -130,7 +138,7 @@ func (s *Service) SetBenefitBridge(b BenefitBridge) { s.benefitBridge = b }
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "ListVouchers", "GetVoucher", "OpenVoucherRedemption", "ConfirmVoucherRedemption", "GetVoucherSettlement", "SettleVoucher", "CreateVoucher", "IssueVoucherDefinition":
+	case "ListVouchers", "GetVoucher", "OpenVoucherRedemption", "ConfirmVoucherRedemption", "GetVoucherSettlement", "SettleVoucher", "CreateVoucher", "IssueVoucherDefinition", "OrderVoucherPurchase", "ConfirmVoucherPurchase":
 		return true
 	default:
 		return false
@@ -166,6 +174,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.create(ctx, e)
 	case "IssueVoucherDefinition":
 		return s.issueDefinition(ctx, e)
+	case "OrderVoucherPurchase":
+		return s.orderPurchase(ctx, e)
+	case "ConfirmVoucherPurchase":
+		return s.confirmPurchase(ctx, e)
 	default:
 		return command.Rejected(e, "VOUCHER_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "voucher.unsupported_command", nil)
 	}

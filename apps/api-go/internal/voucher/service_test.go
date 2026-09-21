@@ -263,3 +263,114 @@ func TestIssueDefinitionRejectsInvalidPayload(t *testing.T) {
 		}
 	}
 }
+
+// 下面的采购测试共用：先发一个定义，返回其 ID。
+func seedDefinition(t *testing.T, s *Service, merchantID string) string {
+	t.Helper()
+	issued := s.Handle(stampedIssueEnvelope(merchantID, "木光咖啡", validDefinitionPayload()))
+	if issued.Outcome != "ACCEPTED" {
+		t.Fatalf("seed definition: %#v", issued)
+	}
+	def, _ := payload(t, issued)["definition"].(map[string]any)
+	id, _ := def["definitionId"].(string)
+	if id == "" {
+		t.Fatal("seed definition: missing definitionId")
+	}
+	return id
+}
+
+// VOUCHER-PURCHASE-001: 金额永远服务端算。客户端谎报 total（少报一半），
+// 入库的必须是 quantity * unitCost —— 109 的 CHECK 是第二道锁。
+func TestOrderPurchaseComputesTotalServerSide(t *testing.T) {
+	s := New()
+	defID := seedDefinition(t, s, "biz_real")
+	ordered := s.Handle(envelope("OrderVoucherPurchase", map[string]any{
+		"definitionId": defID, "quantity": 100, "unitCostMinor": 30000,
+		"totalMinor": 1500000, "contractRef": "CT-001",
+	}))
+	if ordered.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %#v", ordered)
+	}
+	pur, _ := payload(t, ordered)["purchase"].(map[string]any)
+	if pur["totalMinor"] != float64(3000000) {
+		t.Fatalf("total must be 100*30000=3000000, got %#v", pur["totalMinor"])
+	}
+	if pur["merchantId"] != "biz_real" || pur["status"] != "ORDERED" || pur["orderedBy"] != "u1" {
+		t.Fatalf("unexpected purchase: %#v", pur)
+	}
+}
+
+// VOUCHER-PURCHASE-001: 不存在的定义 / 已退役的定义都开不了采购单。
+func TestOrderPurchaseRejectsUnknownOrRetiredDefinition(t *testing.T) {
+	s := New()
+	missing := s.Handle(envelope("OrderVoucherPurchase", map[string]any{
+		"definitionId": "vd_nope", "quantity": 10, "unitCostMinor": 1000,
+	}))
+	if missing.Error == nil || missing.Error.ErrorCode != "DEFINITION_NOT_FOUND" {
+		t.Fatalf("expected DEFINITION_NOT_FOUND, got %#v", missing)
+	}
+	defID := seedDefinition(t, s, "biz_real")
+	s.definitions[defID].Status = "RETIRED"
+	retired := s.Handle(envelope("OrderVoucherPurchase", map[string]any{
+		"definitionId": defID, "quantity": 10, "unitCostMinor": 1000,
+	}))
+	if retired.Error == nil || retired.Error.ErrorCode != "DEFINITION_RETIRED" {
+		t.Fatalf("expected DEFINITION_RETIRED, got %#v", retired)
+	}
+}
+
+// VOUCHER-PURCHASE-001: 数量非法（0 / 超上限）直接拒，不进库。
+func TestOrderPurchaseRejectsBadQuantity(t *testing.T) {
+	for _, qty := range []int{0, -5, 10001} {
+		s := New()
+		defID := seedDefinition(t, s, "biz_real")
+		result := s.Handle(envelope("OrderVoucherPurchase", map[string]any{
+			"definitionId": defID, "quantity": qty, "unitCostMinor": 1000,
+		}))
+		if result.Error == nil || result.Error.ErrorCode != "INVALID_PURCHASE" {
+			t.Fatalf("qty %d: expected INVALID_PURCHASE, got %#v", qty, result)
+		}
+		if len(s.purchases) != 0 {
+			t.Fatalf("qty %d: rejected purchase must not be stored", qty)
+		}
+	}
+}
+
+// VOUCHER-PURCHASE-001: 确认即按量铸券；重放确认必须明确拒绝，不能双铸。
+func TestConfirmPurchaseMintsInstancesAndRejectsReplay(t *testing.T) {
+	s := New()
+	defID := seedDefinition(t, s, "biz_real")
+	ordered := s.Handle(envelope("OrderVoucherPurchase", map[string]any{
+		"definitionId": defID, "quantity": 3, "unitCostMinor": 30000,
+	}))
+	pur, _ := payload(t, ordered)["purchase"].(map[string]any)
+	purchaseID, _ := pur["purchaseId"].(string)
+	confirmed := s.Handle(envelope("ConfirmVoucherPurchase", map[string]any{"purchaseId": purchaseID}))
+	if confirmed.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %#v", confirmed)
+	}
+	body := payload(t, confirmed)
+	if body["minted"] != float64(3) {
+		t.Fatalf("expected minted=3, got %#v", body["minted"])
+	}
+	if len(s.instances) != 3 {
+		t.Fatalf("expected 3 stored instances, got %d", len(s.instances))
+	}
+	seen := map[string]bool{}
+	for _, in := range s.instances {
+		if in.PurchaseID != purchaseID || in.MerchantID != "biz_real" || in.Status != "MINTED" {
+			t.Fatalf("bad instance: %#v", in)
+		}
+		if in.Code == "" || seen[in.Code] {
+			t.Fatalf("codes must be unique non-empty, got %q", in.Code)
+		}
+		seen[in.Code] = true
+	}
+	replay := s.Handle(envelope("ConfirmVoucherPurchase", map[string]any{"purchaseId": purchaseID}))
+	if replay.Error == nil || replay.Error.ErrorCode != "PURCHASE_NOT_ORDERABLE" {
+		t.Fatalf("expected PURCHASE_NOT_ORDERABLE on replay, got %#v", replay)
+	}
+	if len(s.instances) != 3 {
+		t.Fatalf("replay must not double-mint, got %d", len(s.instances))
+	}
+}

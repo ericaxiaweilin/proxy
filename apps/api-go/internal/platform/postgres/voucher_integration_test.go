@@ -160,3 +160,96 @@ func TestVoucherDefinitionPostgresRoundTrip(t *testing.T) {
 		t.Fatalf("expected VOUCHER_STORAGE_FAILED on FK violation, got %#v", r2)
 	}
 }
+
+// TestVoucherPurchasePostgresRoundTrip drives definition → order → confirm
+// against real Postgres (VOUCHER-PURCHASE-001, migration 109): the confirm
+// mints exactly quantity instances, and the traceability join
+// instance → purchase → (merchant, contract, invoice, MST) walks in one go.
+// Run-scoped rows only, cleaned up.
+func TestVoucherPurchasePostgresRoundTrip(t *testing.T) {
+	pool := testPool(t)
+	repo := NewVoucherRepository(pool)
+	svc := voucher.NewWithRepository(repo)
+	ctx := t.Context()
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+	merchantID := "biz_pur_pg_" + suffix
+	actorID := "user_pur_pg_" + suffix
+
+	seedBusinessUsersPG(t, pool, []string{actorID})
+	t.Cleanup(func() { cleanupBusinessUsersPG(t, pool, []string{actorID}) })
+	if _, err := pool.Exec(ctx, `INSERT INTO business.accounts (id, owner_user_id, name, status, created_at) VALUES ($1,$2,'PG Pur Cafe','ACTIVE',now())`, merchantID, actorID); err != nil {
+		t.Fatalf("seed business account: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM voucher.instances WHERE merchant_id=$1`, merchantID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM voucher.purchases WHERE merchant_id=$1`, merchantID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM voucher.definitions WHERE merchant_id=$1`, merchantID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM business.accounts WHERE id=$1`, merchantID)
+	})
+
+	issueEnv := voucherEnvelope("IssueVoucherDefinition", map[string]any{
+		"family": "COFFEE", "faceValueMinor": 45000, "scopeName": "PG Pur Cafe",
+		"validFrom": "2026-09-20", "validUntil": "2026-12-31",
+		"perPersonLimit": 1, "merchantUnitCostMinor": 30000,
+	}, actorID)
+	issueEnv.AuthContext = map[string]any{"merchantID": merchantID, "merchantName": "PG Pur Cafe"}
+	issued := svc.HandleContext(ctx, issueEnv)
+	if issued.Outcome != "ACCEPTED" {
+		t.Fatalf("issue: %v", issued.Error)
+	}
+	var issuedBody struct {
+		Definition struct {
+			ID string `json:"definitionId"`
+		} `json:"definition"`
+	}
+	_ = json.Unmarshal([]byte(issued.OperationRef), &issuedBody)
+
+	ordered := svc.HandleContext(ctx, voucherEnvelope("OrderVoucherPurchase", map[string]any{
+		"definitionId": issuedBody.Definition.ID, "quantity": 5, "unitCostMinor": 30000,
+		"totalMinor": 1, "contractRef": "CT-PG-1", "invoiceRef": "INV-PG-1", "taxCodeSnapshot": "MST-PG-1",
+	}, actorID))
+	if ordered.Outcome != "ACCEPTED" {
+		t.Fatalf("order: %v", ordered.Error)
+	}
+	var orderedBody struct {
+		Purchase struct {
+			ID    string `json:"purchaseId"`
+			Total int    `json:"totalMinor"`
+		} `json:"purchase"`
+	}
+	_ = json.Unmarshal([]byte(ordered.OperationRef), &orderedBody)
+	if orderedBody.Purchase.Total != 150000 {
+		t.Fatalf("total must be server-computed 5*30000, got %d", orderedBody.Purchase.Total)
+	}
+
+	confirmed := svc.HandleContext(ctx, voucherEnvelope("ConfirmVoucherPurchase", map[string]any{
+		"purchaseId": orderedBody.Purchase.ID,
+	}, actorID))
+	if confirmed.Outcome != "ACCEPTED" {
+		t.Fatalf("confirm: %v", confirmed.Error)
+	}
+	var trace struct {
+		InstanceMerchant string `json:"merchant_id"`
+		PurchaseTotal    int    `json:"total_minor"`
+		Contract         string `json:"contract_ref"`
+		Invoice          string `json:"invoice_ref"`
+		MST              string `json:"tax_code_snapshot"`
+		InstanceCount    int    `json:"n"`
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT i.merchant_id, p.total_minor, p.contract_ref, p.invoice_ref, p.tax_code_snapshot, COUNT(*) OVER ()
+		FROM voucher.instances i JOIN voucher.purchases p ON p.purchase_id = i.purchase_id
+		WHERE i.purchase_id = $1 LIMIT 1`,
+		orderedBody.Purchase.ID).Scan(
+		&trace.InstanceMerchant, &trace.PurchaseTotal, &trace.Contract, &trace.Invoice, &trace.MST, &trace.InstanceCount); err != nil {
+		t.Fatalf("traceability join failed: %v", err)
+	}
+	if trace.InstanceMerchant != merchantID || trace.PurchaseTotal != 150000 ||
+		trace.Contract != "CT-PG-1" || trace.Invoice != "INV-PG-1" || trace.MST != "MST-PG-1" {
+		t.Fatalf("broken traceability chain: %+v", trace)
+	}
+	var minted int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM voucher.instances WHERE purchase_id=$1`, orderedBody.Purchase.ID).Scan(&minted); err != nil || minted != 5 {
+		t.Fatalf("expected 5 minted instances, got %d (%v)", minted, err)
+	}
+}

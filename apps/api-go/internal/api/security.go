@@ -73,6 +73,11 @@ var operatorCommandTypes = map[string]bool{
 	"ReleasePayout":        true,
 	"CreateVoucher":        true,
 	"SettleVoucher":        true,
+	// VOUCHER-PURCHASE-001: 平台向商户采购是平台侧动作（运营下单/确认），
+	// 普通用户与商户都不能自己给自己开采购单。确认即铸券， arithmetic 由
+	// 服务端算、109 迁移 CHECK 闭合，但入口仍收进 operator 门。
+	"OrderVoucherPurchase":   true,
+	"ConfirmVoucherPurchase": true,
 	// COMP-REPORT-003: 举报处置（接手 / 升级 / 处置 / 判定不成立 / 重开）。
 	// 这是「平台处理过举报」的唯一留痕入口，绝不能让普通用户自己写 ——
 	// 否则处置记录就成了谁都能伪造的东西，举证价值归零。

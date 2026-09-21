@@ -3,6 +3,9 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -150,4 +153,99 @@ func (r *VoucherRepository) CreateDefinition(ctx context.Context, d voucher.Defi
 		d.ScopeName, d.ValidFrom, d.ValidUntil, d.PerPersonLimit,
 		d.MerchantUnitCostMinor, d.Status, d.Version)
 	return err
+}
+
+// GetDefinition reads a definition by ID (VOUCHER-PURCHASE-001: order
+// validates the definition exists and is not retired).
+func (r *VoucherRepository) GetDefinition(ctx context.Context, id string) (*voucher.Definition, bool, error) {
+	var d voucher.Definition
+	var family string
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT definition_id, merchant_id, COALESCE(store_id,''), family, face_value_minor, currency,
+			scope_name, valid_from::TEXT, valid_until::TEXT, per_person_limit,
+			merchant_unit_cost_minor, status, version
+		FROM voucher.definitions WHERE definition_id=$1`, id).Scan(
+		&d.ID, &d.MerchantID, &d.StoreID, &family, &d.FaceValueMinor, &d.Currency,
+		&d.ScopeName, &d.ValidFrom, &d.ValidUntil, &d.PerPersonLimit,
+		&d.MerchantUnitCostMinor, &d.Status, &d.Version)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	d.Family = voucher.Family(family)
+	return &d, true, nil
+}
+
+// CreatePurchase persists an ORDERED purchase (VOUCHER-PURCHASE-001).
+// Amounts are already server-computed; the 109 CHECK is the second lock.
+func (r *VoucherRepository) CreatePurchase(ctx context.Context, p voucher.Purchase) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO voucher.purchases (
+			purchase_id, definition_id, merchant_id, quantity, unit_cost_minor, total_minor,
+			currency, contract_ref, invoice_ref, tax_code_snapshot, status, ordered_by, version
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),$11,$12,$13)
+		ON CONFLICT (purchase_id) DO NOTHING`,
+		p.ID, p.DefinitionID, p.MerchantID, p.Quantity, p.UnitCostMinor, p.TotalMinor,
+		p.Currency, p.ContractRef, p.InvoiceRef, p.TaxCodeSnapshot, p.Status, p.OrderedBy, p.Version)
+	return err
+}
+
+// GetPurchase reads a purchase by ID (VOUCHER-PURCHASE-001).
+func (r *VoucherRepository) GetPurchase(ctx context.Context, id string) (*voucher.Purchase, bool, error) {
+	var p voucher.Purchase
+	var confirmedAt *time.Time
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT purchase_id, definition_id, merchant_id, quantity, unit_cost_minor, total_minor,
+			currency, COALESCE(contract_ref,''), COALESCE(invoice_ref,''), COALESCE(tax_code_snapshot,''),
+			status, ordered_by, ordered_at, confirmed_at, version
+		FROM voucher.purchases WHERE purchase_id=$1`, id).Scan(
+		&p.ID, &p.DefinitionID, &p.MerchantID, &p.Quantity, &p.UnitCostMinor, &p.TotalMinor,
+		&p.Currency, &p.ContractRef, &p.InvoiceRef, &p.TaxCodeSnapshot,
+		&p.Status, &p.OrderedBy, &p.OrderedAt, &confirmedAt, &p.Version)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if confirmedAt != nil {
+		p.ConfirmedAt = confirmedAt.Format(time.RFC3339)
+	}
+	return &p, true, nil
+}
+
+// ConfirmPurchaseWithMint flips ORDERED → CONFIRMED and inserts every
+// minted instance in ONE transaction (VOUCHER-PURCHASE-001). The status
+// flip is a CAS on ORDERED: a concurrent or replayed confirm finds zero
+// rows and gets ErrPurchaseNotOrderable instead of double-minting.
+func (r *VoucherRepository) ConfirmPurchaseWithMint(ctx context.Context, purchaseID string, instances []voucher.Instance) error {
+	return runInTransaction(ctx, r.pool, func(txctx context.Context, _ pgx.Tx) error {
+		q := queryerForContext(txctx, r.pool)
+		tag, err := q.Exec(txctx, `UPDATE voucher.purchases SET status='CONFIRMED', confirmed_at=now(), version=version+1 WHERE purchase_id=$1 AND status='ORDERED'`, purchaseID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return voucher.ErrPurchaseNotOrderable
+		}
+		if len(instances) == 0 {
+			return nil
+		}
+		var sb strings.Builder
+		args := make([]any, 0, len(instances)*7)
+		sb.WriteString(`INSERT INTO voucher.instances (instance_id, purchase_id, definition_id, merchant_id, code, status, version) VALUES `)
+		for i, in := range instances {
+			if i > 0 {
+				sb.WriteString(`,`)
+			}
+			base := i*7 + 1
+			fmt.Fprintf(&sb, `($%d,$%d,$%d,$%d,$%d,$%d,$%d)`, base, base+1, base+2, base+3, base+4, base+5, base+6)
+			args = append(args, in.ID, in.PurchaseID, in.DefinitionID, in.MerchantID, in.Code, in.Status, 1)
+		}
+		sb.WriteString(` ON CONFLICT (instance_id) DO NOTHING`)
+		_, err = q.Exec(txctx, sb.String(), args...)
+		return err
+	})
 }

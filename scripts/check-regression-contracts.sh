@@ -7438,3 +7438,25 @@ if ! grep -qF '"IssueVoucherDefinition": true' apps/api-go/internal/api/merchant
 fi
 go -C apps/api-go test ./internal/platform/postgres/ -run TestVoucherDefinitionPostgresRoundTrip -count=1 || exit $?
 echo "    VOUCHER-ISSUE-001: PASS (merchant-stamped definitions, forged claims rejected, PG persisted)"
+# VOUCHER-PURCHASE-001: 平台采购（operator 下单/确认），金额服务端算、
+# 确认原子铸券（CAS 守 ORDERED，重放不双铸），109 CHECK 闭合算术。
+require_test "VOUCHER-PURCHASE-001" "./internal/voucher" \
+  "TestOrderPurchaseComputesTotalServerSide" \
+  "apps/api-go/internal/voucher/service_test.go" || exit $?
+require_test "VOUCHER-PURCHASE-001" "./internal/voucher" \
+  "TestOrderPurchaseRejectsUnknownOrRetiredDefinition" \
+  "apps/api-go/internal/voucher/service_test.go" || exit $?
+require_test "VOUCHER-PURCHASE-001" "./internal/voucher" \
+  "TestOrderPurchaseRejectsBadQuantity" \
+  "apps/api-go/internal/voucher/service_test.go" || exit $?
+require_test "VOUCHER-PURCHASE-001" "./internal/voucher" \
+  "TestConfirmPurchaseMintsInstancesAndRejectsReplay" \
+  "apps/api-go/internal/voucher/service_test.go" || exit $?
+if ! grep -qF '"OrderVoucherPurchase":' apps/api-go/internal/api/security.go ||
+   ! grep -qF '"ConfirmVoucherPurchase":' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [VOUCHER-PURCHASE-001]: 采购命令掉出 operator 门 ——" >&2
+  echo "        任何人能给自己开采购单等于自己印券，必须收进 operator 门。" >&2
+  exit 1
+fi
+go -C apps/api-go test ./internal/platform/postgres/ -run TestVoucherPurchasePostgresRoundTrip -count=1 || exit $?
+echo "    VOUCHER-PURCHASE-001: PASS (server-computed totals, atomic mint, PG traceability join)"
