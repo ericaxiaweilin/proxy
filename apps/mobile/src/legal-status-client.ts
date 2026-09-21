@@ -118,8 +118,11 @@ export function resolveLegalStatusClient(input: {
 }
 
 // isCategoryKilled reports whether a specific category is
-// currently in the killed map. The mobile subpages use this
-// to decide whether to render a "service paused" card.
+// currently in the killed map. Its only production caller is
+// LegalStatusBanner. (This comment used to say "the mobile
+// subpages use this to decide whether to render a 'service
+// paused' card" -- no subpage does, and no such card exists
+// anywhere in apps/mobile/src.)
 export function isCategoryKilled(
   status: LegalStatus | null | undefined,
   category: LegalStatusCategory,

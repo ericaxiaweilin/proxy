@@ -107,3 +107,84 @@ func TestKillSwitchLeavesUnrelatedCommandsAlone(t *testing.T) {
 		}
 	}
 }
+
+// LC-16 (2026-09-21) —— 「可拨的类别」和「真的会拦的类别」必须是同一个集合。
+//
+// 这条钉子的由来：AllowedCategories 有 5 个类别，但 commandKillSwitchCategory
+// 只给 2 个类别接上了执行点。运营拨下 GLOBAL / LOCATION_CONSENT / PAYMENTS 时，
+// HTTP 返回 201、审计表写一行、然后没有任何命令被拦 —— 一条假的合规记录，
+// 比「没有这个开关」更糟。
+//
+// 这里断言的是结构不变量：EnforceableCategories 里的每一个类别，都必须至少
+// 有一条命令映射到它。反向（有没有命令映射到一个没被声明为 enforceable 的
+// 类别）由门禁里的静态钉负责，因为那个方向需要看到 commandKillSwitchCategory
+// 的整个函数体，而 Go 测试做不到。
+func TestEveryEnforceableCategoryHasAnEnforcementPoint(t *testing.T) {
+	// 探针命令集：commandKillSwitchCategory 认识的命令。
+	// 它不是「全部命令」—— 全仓没有命令类型注册表（dispatch 是各域
+	// service.go 里的 switch），所以这里只能探已知的；漏掉的命令由
+	// 门禁静态钉兜底。
+	probes := []string{
+		"CreateOrder", "SubmitPayment", "ConfirmOrder",
+		"PublishAIPost", "GenerateAIContent",
+	}
+
+	reached := map[string][]string{}
+	for _, cmd := range probes {
+		if cat := commandKillSwitchCategory(cmd); cat != "" {
+			reached[cat] = append(reached[cat], cmd)
+		}
+	}
+
+	for _, c := range compliance.EnforceableCategories {
+		if len(reached[string(c)]) == 0 {
+			t.Errorf("compliance.EnforceableCategories lists %s, but no command maps to it in commandKillSwitchCategory -- arming it would block nothing", c)
+		}
+	}
+
+	// 反向配重：能被拨的类别不能比声明的多。否则 EnforceableCategories 少声明了
+	// 一个「真的会拦」的类别，operator 的响应会把一个有效的开关报成 enforced=false。
+	for cat := range reached {
+		if !compliance.IsEnforceable(compliance.Category(cat)) {
+			t.Errorf("commandKillSwitchCategory maps commands to %s, but compliance.EnforceableCategories does not list it -- the operator response would report enforced=false for a switch that does block commands", cat)
+		}
+	}
+}
+
+// LC-16 (2026-09-21) —— 拨一个没有执行点的类别，响应体必须自报「不拦任何东西」。
+//
+// 我们刻意**不**拒绝这种调用（宣布事件、留审计记录是合理用途，见
+// operatorKillSwitchKill 的注释），所以「运营以为关掉了」这个风险只能靠
+// 响应体自己说清楚来消除。这条测试钉的就是那句自报。
+func TestUnenforcedCategoryIsReportedAsUnenforced(t *testing.T) {
+	for _, c := range compliance.AllowedCategories {
+		raw := killSwitchResponse(&compliance.KillSwitch{
+			ID:       "ks_" + string(c),
+			Category: c,
+			Status:   compliance.StatusKilled,
+			Reason:   "regulator order",
+			SetBy:    "operator_1",
+			SetAt:    time.Now().UTC(),
+		})
+		got, ok := raw["enforced"].(bool)
+		if !ok {
+			t.Fatalf("%s: killSwitchResponse must carry an explicit bool \"enforced\" field, got %#v", c, raw["enforced"])
+		}
+		if want := compliance.IsEnforceable(c); got != want {
+			t.Errorf("%s: enforced=%v, want %v", c, got, want)
+		}
+	}
+
+	// 反向配重：上面那圈在「一律报 false」时也会绿，所以必须确认至少有一个
+	// 类别真的报 true —— 否则这个字段是写死的 false，而不是从
+	// EnforceableCategories 推出来的。
+	anyEnforced := false
+	for _, c := range compliance.AllowedCategories {
+		if v, _ := killSwitchResponse(&compliance.KillSwitch{Category: c})["enforced"].(bool); v {
+			anyEnforced = true
+		}
+	}
+	if !anyEnforced {
+		t.Error("no category reports enforced=true -- the field is hardcoded false, not derived from compliance.EnforceableCategories")
+	}
+}

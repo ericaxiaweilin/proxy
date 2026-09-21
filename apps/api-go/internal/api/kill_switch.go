@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -79,7 +80,21 @@ func (s *Server) operatorKillSwitchKill(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kill_failed", "reason": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusCreated, killSwitchResponse(row))
+	out := killSwitchResponse(row)
+	// LC-16 (2026-09-21): arming a category with no enforcement
+	// point writes an audit row and blocks nothing. We do NOT
+	// refuse the call -- declaring an incident is a legitimate
+	// use of the switch even when the actual mitigation happens
+	// elsewhere (a load balancer, a feature flag). But we must
+	// not let the operator walk away believing traffic stopped,
+	// so the response and the log say so at the moment the false
+	// belief would otherwise form.
+	if !compliance.IsEnforceable(category) {
+		out["warning"] = "category " + string(category) + " has no enforcement point: the decision is recorded, but no command is blocked"
+		log.Printf("kill-switch: armed %s with NO enforcement point (operator=%q) -- nothing is blocked; see compliance.EnforceableCategories",
+			category, r.Header.Get("X-Operator-Id"))
+	}
+	writeJSON(w, http.StatusCreated, out)
 }
 
 // operatorKillSwitchRearm handles DELETE
@@ -180,6 +195,12 @@ func killSwitchResponse(k *compliance.KillSwitch) map[string]any {
 		"reason": k.Reason,
 		"setBy": k.SetBy,
 		"setAt": k.SetAt.UTC().Format(time.RFC3339),
+		// LC-16 (2026-09-21): whether this row actually blocks
+		// anything. A false here means the switch is a record of
+		// the operator's decision, not a mitigation. The audit
+		// list carries it too, so a post-incident review can see
+		// which switches were no-ops without re-reading the code.
+		"enforced": compliance.IsEnforceable(k.Category),
 	}
 	if k.ExpiresAt != nil {
 		out["expiresAt"] = k.ExpiresAt.UTC().Format(time.RFC3339)

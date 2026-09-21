@@ -2241,6 +2241,68 @@ if ! grep -qF 'if blocked, blockedStatus := s.enforceKillSwitch(envelope); block
 fi
 echo "    LC-16: PASS (armed switch blocks its commands; call site still wired)"
 
+# LC-16 (2026-09-21) —— 「可拨的类别」和「真的会拦的类别」必须是同一个集合。
+#
+# 这条钉子的由来：AllowedCategories 有 5 个类别（GLOBAL / AI_MEDIA / MARKETPLACE /
+# LOCATION_CONSENT / PAYMENTS，与 migration 064 的 CHECK 一致），但
+# commandKillSwitchCategory 只给 2 个类别接上了执行点。运营拨下另外三个时：
+#
+#   POST /v1/operator/legal/kill-switch {"category":"PAYMENTS", ...}
+#   -> 201 Created，审计表写一行，然后**没有任何命令被拦**
+#
+# 一条假的合规记录比「没有这个开关」更糟 —— 运营以为自己已经止住了，
+# 事故复盘时会照着这行记录说「我们已经关掉了」。
+#
+# 处置方式刻意选了「说出来」而不是「拒绝」：宣布事件、留审计记录本身是
+# kill switch 的正当用途（真正的缓解可能在负载均衡或别处），所以 Kill 照常成功，
+# 但响应体必须自报 enforced=false。下面四条钉分别守四个点。
+#
+# 为什么这里需要静态钉、而不是只靠 Go 测试：Go 测试只能探针「已知的命令」——
+# 全仓没有命令类型注册表（dispatch 是各域 service.go 里的 switch），所以
+# 「有人给一条新命令接上了一个从没声明过的类别」它看不见。静态钉看的是函数体。
+if sed -n '/^func commandKillSwitchCategory/,/^}/p' apps/api-go/internal/api/command_dispatch.go \
+     | grep -qE '"(GLOBAL|LOCATION_CONSENT|PAYMENTS)"'; then
+  echo "  FAIL [LC-16]: commandKillSwitchCategory now returns a category with no declared enforcement point." >&2
+  echo "        If you really wired it, add it to compliance.EnforceableCategories and extend" >&2
+  echo "        TestEveryEnforceableCategoryHasAnEnforcementPoint. If you did not, drop the mapping." >&2
+  exit 1
+fi
+
+# EnforceableCategories 必须**恰好**是那两个真的会拦的类别。operator 响应里的
+# enforced 字段读的就是它，所以它被改宽 = 把空转的开关报成有效。
+ENFORCEABLE_BLOCK=$(sed -n '/^var EnforceableCategories = \[\]Category{/,/^}/p' apps/api-go/internal/compliance/killswitch.go)
+if ! printf '%s' "$ENFORCEABLE_BLOCK" | grep -qF 'CategoryAIMedia,'; then
+  echo "  FAIL [LC-16]: compliance.EnforceableCategories no longer lists CategoryAIMedia." >&2
+  exit 1
+fi
+if ! printf '%s' "$ENFORCEABLE_BLOCK" | grep -qF 'CategoryMarketplace,'; then
+  echo "  FAIL [LC-16]: compliance.EnforceableCategories no longer lists CategoryMarketplace." >&2
+  exit 1
+fi
+if printf '%s' "$ENFORCEABLE_BLOCK" | grep -qE 'CategoryGlobal|CategoryLocationConsent|CategoryPayments'; then
+  echo "  FAIL [LC-16]: compliance.EnforceableCategories gained a category." >&2
+  echo "        GLOBAL / LOCATION_CONSENT / PAYMENTS have no enforcement point, so the operator" >&2
+  echo "        response would report enforced=true for a switch that blocks nothing." >&2
+  echo "        Wire the enforcement point first (see the note above EnforceableCategories)." >&2
+  exit 1
+fi
+
+# 唯一消除「运营以为自己关掉了」这个误解的地方：响应体里的 enforced 字段。
+# 只钉子串，不钉整个 map 字面量，免得别人加个字段就要改钉。
+if ! grep -qF '"enforced": compliance.IsEnforceable(k.Category),' apps/api-go/internal/api/kill_switch.go; then
+  echo "  FAIL [LC-16]: the operator kill-switch response no longer reports whether the switch is enforced." >&2
+  echo "        Without it, arming GLOBAL/LOCATION_CONSENT/PAYMENTS silently returns 201 and blocks nothing." >&2
+  exit 1
+fi
+
+require_test "LC-16" "./internal/api" \
+  "TestEveryEnforceableCategoryHasAnEnforcementPoint" \
+  "apps/api-go/internal/api/kill_switch_dispatch_test.go" || exit $?
+require_test "LC-16" "./internal/api" \
+  "TestUnenforcedCategoryIsReportedAsUnenforced" \
+  "apps/api-go/internal/api/kill_switch_dispatch_test.go" || exit $?
+echo "    LC-16: PASS (enforceable set == wired set; unenforced categories self-report)"
+
 # LC-15 (R16.7-P1-F) 个人数据擦除的**执行者**。
 #
 # 这条钉子的由来是一个"定义了但没人调用"的 P0，形状和 LC-16 一模一样：
