@@ -994,4 +994,8 @@ export * from "./engagement";
 // AI-ASSIST-001: 平台 AI 助手公开目录（首页 5 小美推荐）wire 契约。
 export * from "./ai-assistants";
 
+// TWIN-INSIGHT-001: AI 分身 · 好友洞察 wire 契约（原型见
+// docs/design/references/proxy_ai_twin_insight_v1.html）。
+export * from "./twin-insight";
+
 // R15.33: map contracts 撤了 — 独立 map tab 已删。

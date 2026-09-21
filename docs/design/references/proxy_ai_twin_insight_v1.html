@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 分身 · 好友洞察</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #ffffff; --surface: #fafafa; --surface-2: #f5f5f5;
+    --text: #0a0a0a; --text-2: #737373; --text-3: #a8a8a8;
+    --line: #efefef; --accent: #0a0a0a; --caramel: #e07b39;
+    --green: #4caf7d; --blue: #007aff; --red: #e5484d; --amber: #f0b400;
+  }
+  body {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 30px 20px; background: #16100d;
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .phone {
+    width: 390px; height: 844px; background: var(--bg);
+    border-radius: 54px; overflow: hidden; position: relative;
+    display: flex; flex-direction: column;
+    box-shadow: 0 0 0 12px #1a1a1a, 0 0 0 14px #2a2a2a, 0 50px 100px -30px rgba(0,0,0,.9);
+  }
+  .phone::before {
+    content: ''; position: absolute; top: 10px; left: 50%;
+    transform: translateX(-50%); width: 120px; height: 34px;
+    background: #000; border-radius: 22px; z-index: 100;
+  }
+  .status-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 32px 6px; font-size: 15px; font-weight: 600;
+    color: var(--text); position: relative; z-index: 50; flex: 0 0 auto;
+  }
+  .status-bar .right { display: flex; align-items: center; gap: 5px; }
+  .status-bar .right svg { width: 17px; height: 11px; }
+
+  .header {
+    padding: 6px 20px 12px; display: flex; align-items: center;
+    gap: 10px; flex: 0 0 auto;
+  }
+  .back-btn {
+    width: 32px; height: 32px; border: none; background: transparent;
+    display: grid; place-items: center; color: var(--text);
+    cursor: pointer; border-radius: 50%; margin-left: -8px; flex: 0 0 auto;
+  }
+  .back-btn svg { width: 22px; height: 22px; }
+  .title-wrap { flex: 1; }
+  .title-wrap h1 { font-size: 20px; font-weight: 800; letter-spacing: -.4px; color: var(--text); margin-bottom: 2px; }
+  .title-wrap p { font-size: 12.5px; color: var(--text-3); }
+
+  .switch {
+    position: relative; width: 44px; height: 26px; border-radius: 13px;
+    background: #d0d0d0; cursor: pointer; transition: background .25s; flex: 0 0 auto;
+  }
+  .switch.on { background: var(--accent); }
+  .switch::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 20px; height: 20px; border-radius: 50%; background: #fff;
+    transition: transform .25s cubic-bezier(.34,1.4,.64,1);
+  }
+  .switch.on::after { transform: translateX(18px); }
+
+  .content { flex: 1; overflow-y: auto; scrollbar-width: none; }
+  .content::-webkit-scrollbar { display: none; }
+
+  /* 好友横滑 */
+  .target-scroll {
+    display: flex; gap: 12px; overflow-x: auto;
+    padding: 0 20px 14px; scrollbar-width: none;
+  }
+  .target-scroll::-webkit-scrollbar { display: none; }
+  .target {
+    flex: 0 0 auto; display: flex; flex-direction: column;
+    align-items: center; gap: 6px; cursor: pointer;
+    transition: transform .18s; position: relative;
+  }
+  .target:active { transform: scale(.94); }
+
+  .target-avatar {
+    position: relative; width: 58px; height: 58px; border-radius: 50%;
+    display: grid; place-items: center; font-size: 20px; font-weight: 700;
+    color: #fff; border: 2.5px solid transparent; transition: border-color .2s;
+  }
+  .target.selected .target-avatar { border-color: var(--accent); }
+  .target-avatar.a1 { background: linear-gradient(145deg, #6a9cff, #3b6fe0); }
+  .target-avatar.a2 { background: linear-gradient(145deg, #c8a888, #8a6e5c); }
+  .target-avatar.a3 { background: linear-gradient(145deg, #d0a8e8, #8a5ca8); }
+  .target-avatar.a4 { background: linear-gradient(145deg, #a3c8a9, #5a8a5f); }
+  .target-avatar.a5 { background: linear-gradient(145deg, #f0b8b8, #b85c5c); }
+  .target-avatar.a6 { background: linear-gradient(145deg, #9bb8c8, #4a6a7a); }
+
+  .target-avatar .signal {
+    position: absolute; top: -2px; right: -2px;
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 2.5px solid #fff;
+  }
+  .signal.hot    { background: var(--red); }
+  .signal.warm   { background: var(--caramel); }
+  .signal.cold   { background: #d0d0d0; }
+  .signal.new    { background: var(--blue); }
+
+  .target-avatar .check {
+    position: absolute; right: -2px; bottom: -2px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #fff; border: 1.5px solid #e5e5e5;
+    display: grid; place-items: center; color: transparent; transition: all .2s;
+  }
+  .target-avatar .check svg { width: 11px; height: 11px; }
+  .target.selected .target-avatar .check {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  .target-name {
+    font-size: 11.5px; font-weight: 600; color: var(--text-2);
+    max-width: 64px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; transition: color .2s;
+  }
+  .target.selected .target-name { color: var(--text); font-weight: 800; }
+
+  /* ===== 折叠卡片 ===== */
+  .insight-card {
+    margin: 0 20px 18px;
+    border-radius: 20px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    overflow: hidden;
+    transition: border-color .25s, box-shadow .25s;
+  }
+  .insight-card:not(.collapsed) {
+    border-color: #e0e0e0;
+    box-shadow: 0 8px 24px -12px rgba(0,0,0,.12);
+  }
+
+  /* 折叠状态：紧凑一行 + 数字摘要 */
+  .insight-summary {
+    padding: 14px 16px;
+    cursor: pointer;
+    user-select: none;
+    transition: background .15s;
+  }
+  .insight-summary:hover { background: #fcfcfc; }
+
+  .is-top {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .is-avatar {
+    width: 44px; height: 44px; border-radius: 50%;
+    display: grid; place-items: center;
+    font-size: 17px; font-weight: 700; color: #fff;
+    background: linear-gradient(145deg, #6a9cff, #3b6fe0);
+    flex: 0 0 auto; position: relative;
+  }
+  .is-avatar .signal {
+    position: absolute; top: -2px; right: -2px;
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 2.5px solid #fff;
+  }
+  .is-info { flex: 1; min-width: 0; }
+  .is-info h4 {
+    font-size: 14.5px; font-weight: 800; color: var(--text);
+    letter-spacing: -.2px;
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 3px;
+  }
+  .verdict-chip {
+    padding: 2px 7px; border-radius: 7px;
+    font-size: 10px; font-weight: 800; letter-spacing: .2px;
+  }
+  .verdict-chip.worth { background: #eef7f0; color: #3d7a4e; }
+  .verdict-chip.watch { background: #fff8e6; color: #a06a2c; }
+  .verdict-chip.skip  { background: var(--surface-2); color: var(--text-3); }
+  .verdict-chip.new   { background: #e3edf7; color: #3a6b9c; }
+
+  .is-info .is-hint {
+    font-size: 11.5px; color: var(--text-3);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .is-right {
+    display: flex; align-items: center; gap: 8px;
+    flex: 0 0 auto;
+  }
+  .is-score {
+    font-size: 18px; font-weight: 800;
+    color: var(--caramel);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.4px;
+    line-height: 1;
+  }
+  .is-score small {
+    font-size: 10px; font-weight: 700;
+    opacity: .6;
+    margin-left: 1px;
+  }
+  .is-arrow {
+    color: var(--text-3);
+    transition: transform .3s;
+    display: grid; place-items: center;
+  }
+  .is-arrow svg { width: 16px; height: 16px; }
+  .insight-card:not(.collapsed) .is-arrow { transform: rotate(180deg); }
+
+  /* 折叠时的迷你信号行 */
+  .is-signals {
+    display: flex;
+    gap: 14px;
+    margin-top: 11px;
+    padding-top: 11px;
+    border-top: 1px solid var(--line);
+    padding-left: 56px;
+  }
+  .insight-card:not(.collapsed) .is-signals { display: none; }
+  .is-signals .sg {
+    display: flex; align-items: baseline; gap: 4px;
+    font-size: 11.5px;
+    color: var(--text-3);
+    font-weight: 600;
+  }
+  .is-signals .sg .v {
+    font-size: 13px; font-weight: 800;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.2px;
+  }
+  .is-signals .sg.hot .v { color: var(--red); }
+  .is-signals .sg.warm .v { color: var(--caramel); }
+  .is-signals .sg.good .v { color: var(--green); }
+
+  /* 展开详情 */
+  .insight-detail {
+    display: none;
+    padding: 0 16px 18px;
+  }
+  .insight-card:not(.collapsed) .insight-detail { display: block; }
+
+  .id-divider {
+    height: 1px; background: var(--line);
+    margin-bottom: 16px;
+  }
+
+  .signal-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 8px; margin-bottom: 18px;
+  }
+  .signal-cell {
+    text-align: center; padding: 12px 4px;
+    border-radius: 12px; background: var(--surface);
+  }
+  .signal-cell .sc-icon {
+    font-size: 16px; margin-bottom: 5px;
+    display: block; opacity: .7;
+  }
+  .signal-cell .sc-val {
+    font-size: 17px; font-weight: 800;
+    color: var(--text); letter-spacing: -.4px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1; margin-bottom: 3px;
+  }
+  .signal-cell .sc-val small { font-size: 11px; font-weight: 600; color: var(--text-3); margin-left: 1px; }
+  .signal-cell .sc-key { font-size: 10px; color: var(--text-3); font-weight: 600; letter-spacing: .2px; }
+  .signal-cell.hot .sc-val { color: var(--red); }
+  .signal-cell.warm .sc-val { color: var(--caramel); }
+  .signal-cell.good .sc-val { color: var(--green); }
+
+  .score-block {
+    padding: 14px 16px; border-radius: 14px;
+    background: linear-gradient(135deg, #fff8f0, #faf6f1);
+    border: 1px solid #f0e4d4;
+    margin-bottom: 18px;
+  }
+  .score-head {
+    display: flex; align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .score-head .sh-label {
+    font-size: 11.5px; font-weight: 700;
+    letter-spacing: .5px; color: #a06a2c;
+    text-transform: uppercase;
+  }
+  .score-head .sh-num {
+    font-size: 22px; font-weight: 800;
+    color: var(--caramel); letter-spacing: -.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .score-head .sh-num small { font-size: 12px; font-weight: 700; color: #a06a2c; opacity: .6; }
+  .score-bar {
+    height: 8px; border-radius: 4px;
+    background: rgba(0,0,0,.05);
+    overflow: hidden; position: relative;
+  }
+  .score-fill {
+    height: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, #e07b39, #f0a35c);
+    transition: width .6s cubic-bezier(.34,1.4,.64,1);
+  }
+  .score-threshold {
+    position: absolute; top: -2px; bottom: -2px;
+    width: 2px; background: var(--text); opacity: .3;
+  }
+  .score-hint {
+    font-size: 11.5px; color: #a06a2c;
+    margin-top: 9px; line-height: 1.5; font-weight: 500;
+  }
+  .score-hint strong { color: var(--text); font-weight: 800; }
+
+  .advice-block { margin-bottom: 18px; }
+  .advice-block .ab-title {
+    font-size: 11.5px; font-weight: 700;
+    letter-spacing: .5px; color: var(--text-3);
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  .advice-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 11px 12px; border-radius: 12px;
+    background: var(--surface); margin-bottom: 6px;
+  }
+  .advice-item .ai-mark {
+    width: 20px; height: 20px; border-radius: 7px;
+    display: grid; place-items: center;
+    flex: 0 0 auto; font-size: 11px; margin-top: 1px;
+  }
+  .advice-item.good .ai-mark { background: #eef7f0; color: var(--green); }
+  .advice-item.warn .ai-mark { background: #fff8e6; color: var(--caramel); }
+  .advice-item.info .ai-mark { background: #e3edf7; color: var(--blue); }
+  .advice-item .ai-text {
+    flex: 1; font-size: 12.5px;
+    color: var(--text); line-height: 1.5;
+    letter-spacing: -.1px;
+  }
+  .advice-item .ai-text strong { font-weight: 800; }
+
+  .summary-block { margin-bottom: 18px; }
+  .summary-block .sb-title {
+    font-size: 11.5px; font-weight: 700;
+    letter-spacing: .5px; color: var(--text-3);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .summary-block .sb-title .sb-action {
+    color: var(--caramel); font-weight: 700;
+    letter-spacing: 0; text-transform: none;
+    cursor: pointer; font-size: 11px;
+  }
+  .summary-text {
+    padding: 13px 14px; border-radius: 12px;
+    background: var(--surface);
+    font-size: 12.5px; color: var(--text-2);
+    line-height: 1.6; border-left: 2.5px solid var(--caramel);
+  }
+  .summary-text strong { color: var(--text); font-weight: 700; }
+
+  .timeline { margin-bottom: 18px; }
+  .timeline .tl-title {
+    font-size: 11.5px; font-weight: 700;
+    letter-spacing: .5px; color: var(--text-3);
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .tl-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 8px 0; position: relative;
+  }
+  .tl-item .tl-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--caramel); flex: 0 0 auto;
+    margin-top: 6px; position: relative; z-index: 1;
+  }
+  .tl-item .tl-dot.gray { background: #d0d0d0; }
+  .tl-item:not(:last-child)::before {
+    content: ''; position: absolute;
+    left: 3.5px; top: 14px; bottom: -2px;
+    width: 1px; background: var(--line);
+  }
+  .tl-item .tl-info { flex: 1; }
+  .tl-item .tl-info .tli-text {
+    font-size: 12.5px; color: var(--text);
+    line-height: 1.45; margin-bottom: 2px;
+  }
+  .tl-item .tl-info .tli-time { font-size: 11px; color: var(--text-3); }
+
+  .insight-actions {
+    display: flex; gap: 8px;
+    padding-top: 14px; border-top: 1px solid var(--line);
+  }
+  .insight-actions button {
+    flex: 1; padding: 12px; border-radius: 12px;
+    border: none; font-family: inherit;
+    font-size: 13px; font-weight: 700;
+    cursor: pointer; transition: all .2s;
+    letter-spacing: -.1px;
+  }
+  .insight-actions .ia-secondary { background: var(--surface-2); color: var(--text); }
+  .insight-actions .ia-primary { background: var(--accent); color: #fff; }
+  .insight-actions button:active { transform: scale(.97); }
+
+  .section { padding: 0 20px 18px; }
+
+  .toast {
+    position: absolute; bottom: 120px; left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    padding: 12px 22px; background: #000; color: #fff;
+    border-radius: 14px; font-size: 13.5px; font-weight: 700;
+    opacity: 0; pointer-events: none;
+    transition: all .3s cubic-bezier(.34,1.4,.64,1);
+    z-index: 300; white-space: nowrap;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .tab-bar {
+    display: flex; align-items: center; justify-content: space-around;
+    padding: 9px 0 24px; border-top: 1px solid var(--line);
+    background: var(--bg); flex: 0 0 auto;
+  }
+  .tab-item {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 3px; padding: 4px 14px; cursor: pointer; color: #a8a8a8;
+  }
+  .tab-item.active { color: #000; }
+  .tab-item svg { width: 22px; height: 22px; }
+  .tab-item span { font-size: 10px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="phone">
+
+  <div class="status-bar">
+    <span>8:11</span>
+    <span class="right">
+      <svg viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg>
+      <svg viewBox="0 0 16 12" fill="currentColor" style="margin-left:4px"><path d="M8 10.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/><path d="M4.2 7.3a5.5 5.5 0 0 1 7.6 0l-1 1a4 4 0 0 0-5.6 0z"/><path d="M1 4a9.5 9.5 0 0 1 14 0l-1 1a8 8 0 0 0-12 0z"/></svg>
+      <svg viewBox="0 0 26 12" fill="none" style="margin-left:4px"><rect x="0.5" y="0.5" width="22" height="11" rx="3" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="19" height="8" rx="2" fill="currentColor"/><path d="M24.5 4v4a2 2 0 0 0 0-4z" fill="currentColor" opacity="0.5"/></svg>
+    </span>
+  </div>
+
+  <div class="header">
+    <button class="back-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M15 18l-6-6 6-6"/>
+      </svg>
+    </button>
+    <div class="title-wrap">
+      <h1>AI 分身</h1>
+      <p>谁值得运营 · 谁只是路人</p>
+    </div>
+    <div class="switch on"></div>
+  </div>
+
+  <div class="content">
+
+    <!-- 好友横滑 -->
+    <div class="target-scroll" id="targetScroll">
+      <div class="target selected" data-target="Alex">
+        <div class="target-avatar a1">A
+          <span class="signal hot"></span>
+          <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+        </div>
+        <div class="target-name">Alex</div>
+      </div>
+      <div class="target" data-target="Tom">
+        <div class="target-avatar a2">T
+          <span class="signal warm"></span>
+          <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+        </div>
+        <div class="target-name">Tom</div>
+      </div>
+      <div class="target" data-target="陈先生">
+        <div class="target-avatar a3">陈
+          <span class="signal cold"></span>
+          <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+        </div>
+        <div class="target-name">陈先生</div>
+      </div>
+      <div class="target" data-target="Minh">
+        <div class="target-avatar a4">M
+          <span class="signal new"></span>
+          <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+        </div>
+        <div class="target-name">Minh</div>
+      </div>
+      <div class="target" data-target="Brandon">
+        <div class="target-avatar a5">B
+          <span class="signal warm"></span>
+          <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+        </div>
+        <div class="target-name">Brandon</div>
+      </div>
+      <div class="target" data-target="王老板">
+        <div class="target-avatar a6">王
+          <span class="signal cold"></span>
+          <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+        </div>
+        <div class="target-name">王老板</div>
+      </div>
+    </div>
+
+    <!-- 好友洞察面板 -->
+    <div class="insight-card collapsed" id="insightCard">
+
+      <!-- 折叠摘要 -->
+      <div class="insight-summary" id="insightSummary">
+        <div class="is-top">
+          <div class="is-avatar a1" id="insightAvatar">
+            A
+            <span class="signal hot"></span>
+          </div>
+          <div class="is-info">
+            <h4>
+              <span id="insightName">Alex</span>
+              <span class="verdict-chip worth" id="verdictChip">值得运营</span>
+            </h4>
+            <div class="is-hint" id="insightSummaryText">7 天访问 12 次 · 互动深</div>
+          </div>
+          <div class="is-right">
+            <div class="is-score" id="insightScore">82<small>/100</small></div>
+            <div class="is-arrow">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- 折叠时显示的迷你信号 -->
+        <div class="is-signals" id="miniSignals">
+          <div class="sg hot"><span class="v">12</span>访问</div>
+          <div class="sg good"><span class="v">48</span>对话</div>
+          <div class="sg warm"><span class="v">9</span>点赞</div>
+        </div>
+      </div>
+
+      <!-- 展开详情 -->
+      <div class="insight-detail">
+        <div class="id-divider"></div>
+
+        <div class="signal-grid">
+          <div class="signal-cell hot">
+            <span class="sc-icon">👁</span>
+            <div class="sc-val">12<small>次</small></div>
+            <div class="sc-key">7天访问</div>
+          </div>
+          <div class="signal-cell good">
+            <span class="sc-icon">💬</span>
+            <div class="sc-val">48<small>条</small></div>
+            <div class="sc-key">对话消息</div>
+          </div>
+          <div class="signal-cell warm">
+            <span class="sc-icon">⏱</span>
+            <div class="sc-val">3<small>分</small></div>
+            <div class="sc-key">平均停留</div>
+          </div>
+          <div class="signal-cell">
+            <span class="sc-icon">❤️</span>
+            <div class="sc-val">9<small>次</small></div>
+            <div class="sc-key">点赞/收藏</div>
+          </div>
+        </div>
+
+        <div class="score-block">
+          <div class="score-head">
+            <span class="sh-label">运营价值评分</span>
+            <span class="sh-num">82<small>/100</small></span>
+          </div>
+          <div class="score-bar">
+            <div class="score-fill" style="width: 82%;"></div>
+            <div class="score-threshold" style="left: 60%;"></div>
+          </div>
+          <div class="score-hint">
+            <strong>超过 60 分阈值</strong> · 建议开启单独运营
+          </div>
+        </div>
+
+        <div class="advice-block">
+          <div class="ab-title">AI 建议</div>
+          <div class="advice-item good">
+            <div class="ai-mark">✓</div>
+            <div class="ai-text">他主动看过你主页 <strong>12 次</strong>，其中 <strong>4 次</strong>停留超过 5 分钟，兴趣明确。</div>
+          </div>
+          <div class="advice-item info">
+            <div class="ai-mark">i</div>
+            <div class="ai-text">你们的对话以<strong>咖啡馆、办公</strong>为主，主题稳定。适合按「咖啡馆」调性生成。</div>
+          </div>
+          <div class="advice-item warn">
+            <div class="ai-mark">!</div>
+            <div class="ai-text">已经 <strong>3 天</strong>没有主动发消息，建议今天发一条轻度问候。</div>
+          </div>
+        </div>
+
+        <div class="summary-block">
+          <div class="sb-title">
+            <span>对话摘要</span>
+            <span class="sb-action" id="refreshSummary">重新总结</span>
+          </div>
+          <div class="summary-text">
+            你们在 <strong>3 天内聊过 2 次</strong>。第一次他提到自己<strong>刚搬到北宁</strong>，在找可以安静工作的地方。第二次你推荐了 Proxy Coffee，他说<strong>周末会去试试</strong>。整体语气轻松，他会主动开玩笑，也常发咖啡店照片。
+          </div>
+        </div>
+
+        <div class="timeline">
+          <div class="tl-title">最近互动</div>
+          <div class="tl-item">
+            <div class="tl-dot"></div>
+            <div class="tl-info">
+              <div class="tli-text">访问了你的主页</div>
+              <div class="tli-time">2 小时前</div>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot"></div>
+            <div class="tl-info">
+              <div class="tli-text">回复了你的「咖啡馆」主题消息</div>
+              <div class="tli-time">昨天 21:30</div>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot gray"></div>
+            <div class="tl-info">
+              <div class="tli-text">你发了一条 AI 分身帖文，他未读</div>
+              <div class="tli-time">3 天前</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="insight-actions">
+          <button class="ia-secondary" id="markWatch">先观察</button>
+          <button class="ia-primary" id="startOps">开启单独运营</button>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <div class="tab-bar">
+    <div class="tab-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg>
+      <span>发现</span>
+    </div>
+    <div class="tab-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>消息</span>
+    </div>
+    <div class="tab-item active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8 5.8 21.3l2.4-7.4L2 9.4h7.6z"/></svg>
+      <span>AI 分身</span>
+    </div>
+    <div class="tab-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>我的</span>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+</div>
+
+<script>
+  const toast = document.getElementById('toast');
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1600);
+  }
+
+  const friends = {
+    'Alex': {
+      avatarClass: 'a1', initial: 'A', signal: 'hot',
+      verdict: 'worth', verdictText: '值得运营',
+      summary: '7 天访问 12 次 · 互动深',
+      mini: { views: 12, messages: 48, likes: 9 },
+      signals: { views: 12, messages: 48, stay: '3分', likes: 9 },
+      score: 82,
+      advices: [
+        { type: 'good', mark: '✓', text: '他主动看过你主页 <strong>12 次</strong>，其中 <strong>4 次</strong>停留超过 5 分钟，兴趣明确。' },
+        { type: 'info', mark: 'i', text: '你们的对话以<strong>咖啡馆、办公</strong>为主，主题稳定。适合按「咖啡馆」调性生成。' },
+        { type: 'warn', mark: '!', text: '已经 <strong>3 天</strong>没有主动发消息，建议今天发一条轻度问候。' }
+      ],
+      summaryText: '你们在 <strong>3 天内聊过 2 次</strong>。第一次他提到自己<strong>刚搬到北宁</strong>，在找可以安静工作的地方。第二次你推荐了 Proxy Coffee，他说<strong>周末会去试试</strong>。整体语气轻松，他会主动开玩笑，也常发咖啡店照片。',
+      timeline: [
+        { text: '访问了你的主页', time: '2 小时前', gray: false },
+        { text: '回复了你的「咖啡馆」主题消息', time: '昨天 21:30', gray: false },
+        { text: '你发了一条 AI 分身帖文，他未读', time: '3 天前', gray: true }
+      ]
+    },
+    'Tom': {
+      avatarClass: 'a2', initial: 'T', signal: 'warm',
+      verdict: 'watch', verdictText: '可以培养',
+      summary: '7 天访问 5 次 · 互动中等',
+      mini: { views: 5, messages: 22, likes: 4 },
+      signals: { views: 5, messages: 22, stay: '2分', likes: 4 },
+      score: 58,
+      advices: [
+        { type: 'info', mark: 'i', text: '访问 <strong>5 次</strong>，有一定的兴趣，但还没到你主页常客的程度。' },
+        { type: 'warn', mark: '!', text: '对话偏<strong>短促</strong>，大多是单向回复。建议多发一条有共鸣的内容测一下反应。' }
+      ],
+      summaryText: '你们在 <strong>一周内聊过 1 次</strong>。他回复过你发的咖啡馆帖文，说「下次也想去」。但之后互动较少，没有再主动发起对话。',
+      timeline: [
+        { text: '点赞了你的帖文', time: '1 天前', gray: false },
+        { text: '回复了一条消息', time: '3 天前', gray: false },
+        { text: '访问了你的主页', time: '5 天前', gray: true }
+      ]
+    },
+    '陈先生': {
+      avatarClass: 'a3', initial: '陈', signal: 'cold',
+      verdict: 'skip', verdictText: '暂不推荐',
+      summary: '7 天访问 1 次 · 无对话',
+      mini: { views: 1, messages: 0, likes: 0 },
+      signals: { views: 1, messages: 0, stay: '30秒', likes: 0 },
+      score: 22,
+      advices: [
+        { type: 'warn', mark: '!', text: '只访问过主页 <strong>1 次</strong>，停留极短，无互动。' },
+        { type: 'info', mark: 'i', text: '不建议为此人单独运营，浪费你的时间和 API 成本。' }
+      ],
+      summaryText: '过去 7 天<strong>没有有效互动</strong>。他可能只是路过或对你有过一次好奇，不建议投入运营精力。',
+      timeline: [
+        { text: '访问了你的主页', time: '6 天前', gray: true }
+      ]
+    },
+    'Minh': {
+      avatarClass: 'a4', initial: 'M', signal: 'new',
+      verdict: 'new', verdictText: '新好友',
+      summary: '刚加好友 · 数据积累中',
+      mini: { views: 3, messages: 8, likes: 2 },
+      signals: { views: 3, messages: 8, stay: '4分', likes: 2 },
+      score: 46,
+      advices: [
+        { type: 'info', mark: 'i', text: '刚加好友 <strong>2 天</strong>，互动频率不错，但数据还不够充分。' },
+        { type: 'good', mark: '✓', text: '平均停留 <strong>4 分钟</strong>，说明对你主页内容有兴趣。' }
+      ],
+      summaryText: '你们 <strong>2 天前刚加好友</strong>。他主动发过一次消息，问你常去的咖啡馆。目前观察中有潜力。',
+      timeline: [
+        { text: '发了一条消息给你', time: '昨天', gray: false },
+        { text: '访问了你的主页 3 次', time: '2 天前', gray: false }
+      ]
+    },
+    'Brandon': {
+      avatarClass: 'a5', initial: 'B', signal: 'warm',
+      verdict: 'watch', verdictText: '可以培养',
+      summary: '7 天访问 6 次 · 对话偏商务',
+      mini: { views: 6, messages: 18, likes: 3 },
+      signals: { views: 6, messages: 18, stay: '2分', likes: 3 },
+      score: 55,
+      advices: [
+        { type: 'info', mark: 'i', text: '访问频次不错，但对话内容偏<strong>商务</strong>，不像在找约会。' },
+        { type: 'warn', mark: '!', text: '需要观察他是否有<strong>见面意图</strong>，否则运营价值有限。' }
+      ],
+      summaryText: '你们聊过 <strong>2 次</strong>，都是他主动。第一次问了工作相关，第二次问了咖啡馆推荐。目前看不出明确的约会意图。',
+      timeline: [
+        { text: '问了一家咖啡馆的地址', time: '2 天前', gray: false },
+        { text: '访问了你的主页', time: '4 天前', gray: true }
+      ]
+    },
+    '王老板': {
+      avatarClass: 'a6', initial: '王', signal: 'cold',
+      verdict: 'skip', verdictText: '暂不推荐',
+      summary: '7 天访问 2 次 · 无对话',
+      mini: { views: 2, messages: 0, likes: 0 },
+      signals: { views: 2, messages: 0, stay: '45秒', likes: 0 },
+      score: 18,
+      advices: [
+        { type: 'warn', mark: '!', text: '访问极短，无任何互动信号，可能是随手点进来的。' },
+        { type: 'info', mark: 'i', text: '暂不需要为此人单独运营。' }
+      ],
+      summaryText: '过去 7 天<strong>无实质互动</strong>。建议先不投入精力，让他自然沉淀。',
+      timeline: [
+        { text: '访问了你的主页', time: '3 天前', gray: true }
+      ]
+    }
+  };
+
+  const insightCard = document.getElementById('insightCard');
+  const insightSummary = document.getElementById('insightSummary');
+
+  document.querySelectorAll('.target').forEach(target => {
+    target.addEventListener('click', () => {
+      document.querySelectorAll('.target').forEach(t => t.classList.remove('selected'));
+      target.classList.add('selected');
+
+      const name = target.dataset.target;
+      const data = friends[name];
+      if (!data) return;
+
+      // 头像
+      const avatarEl = document.getElementById('insightAvatar');
+      avatarEl.className = 'is-avatar ' + data.avatarClass;
+      avatarEl.innerHTML = data.initial + `<span class="signal ${data.signal}"></span>`;
+
+      // 名字 + chip
+      document.getElementById('insightName').textContent = name;
+      const chip = document.getElementById('verdictChip');
+      chip.className = 'verdict-chip ' + data.verdict;
+      chip.textContent = data.verdictText;
+      document.getElementById('insightSummaryText').textContent = data.summary;
+
+      // 折叠条右侧的分数
+      document.getElementById('insightScore').innerHTML = `${data.score}<small>/100</small>`;
+
+      // 折叠时的迷你信号
+      const mini = document.getElementById('miniSignals');
+      mini.innerHTML = `
+        <div class="sg hot"><span class="v">${data.mini.views}</span>访问</div>
+        <div class="sg good"><span class="v">${data.mini.messages}</span>对话</div>
+        <div class="sg warm"><span class="v">${data.mini.likes}</span>点赞</div>
+      `;
+
+      // 完整信号格
+      const grid = document.querySelector('.signal-grid');
+      const sig = data.signals;
+      grid.innerHTML = `
+        <div class="signal-cell hot">
+          <span class="sc-icon">👁</span>
+          <div class="sc-val">${sig.views}<small>次</small></div>
+          <div class="sc-key">7天访问</div>
+        </div>
+        <div class="signal-cell good">
+          <span class="sc-icon">💬</span>
+          <div class="sc-val">${sig.messages}<small>条</small></div>
+          <div class="sc-key">对话消息</div>
+        </div>
+        <div class="signal-cell warm">
+          <span class="sc-icon">⏱</span>
+          <div class="sc-val">${sig.stay}</div>
+          <div class="sc-key">平均停留</div>
+        </div>
+        <div class="signal-cell">
+          <span class="sc-icon">❤️</span>
+          <div class="sc-val">${sig.likes}<small>次</small></div>
+          <div class="sc-key">点赞/收藏</div>
+        </div>
+      `;
+
+      // 评分
+      document.querySelector('.sh-num').innerHTML = `${data.score}<small>/100</small>`;
+      document.querySelector('.score-fill').style.width = data.score + '%';
+
+      const hint = document.querySelector('.score-hint');
+      if (data.score >= 60) {
+        hint.innerHTML = `<strong>超过 60 分阈值</strong> · 建议开启单独运营`;
+      } else if (data.score >= 40) {
+        hint.innerHTML = `<strong>未到 60 分阈值</strong> · 建议再观察一段时间`;
+      } else {
+        hint.innerHTML = `<strong>低于 40 分</strong> · 不建议投入运营精力`;
+      }
+
+      // 建议
+      const adviceBlock = document.querySelector('.advice-block');
+      adviceBlock.innerHTML = `<div class="ab-title">AI 建议</div>` +
+        data.advices.map(a => `
+          <div class="advice-item ${a.type}">
+            <div class="ai-mark">${a.mark}</div>
+            <div class="ai-text">${a.text}</div>
+          </div>
+        `).join('');
+
+      // 摘要
+      document.querySelector('.summary-text').innerHTML = data.summaryText;
+
+      // 时间线
+      const timeline = document.querySelector('.timeline');
+      timeline.innerHTML = `<div class="tl-title">最近互动</div>` +
+        data.timeline.map(t => `
+          <div class="tl-item">
+            <div class="tl-dot${t.gray ? ' gray' : ''}"></div>
+            <div class="tl-info">
+              <div class="tli-text">${t.text}</div>
+              <div class="tli-time">${t.time}</div>
+            </div>
+          </div>
+        `).join('');
+
+      // 切换好友后自动折叠（保持干净的默认状态）
+      insightCard.classList.add('collapsed');
+    });
+  });
+
+  // 点击折叠条 → 展开/收起
+  insightSummary.addEventListener('click', () => {
+    insightCard.classList.toggle('collapsed');
+  });
+
+  document.getElementById('refreshSummary').addEventListener('click', (e) => {
+    e.stopPropagation();
+    showToast('已重新总结');
+  });
+
+  document.getElementById('markWatch').addEventListener('click', (e) => {
+    e.stopPropagation();
+    showToast('已标记为观察');
+  });
+
+  document.getElementById('startOps').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const name = document.getElementById('insightName').textContent;
+    showToast(`已开启对 ${name} 的单独运营`);
+  });
+
+  // 注意：默认就是 collapsed（HTML 里已经有 collapsed 类）
+  // 不再自动展开
+</script>
+
+</body>
+</html>
