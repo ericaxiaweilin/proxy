@@ -2145,7 +2145,10 @@ require_test "LC-06" "./internal/media" \
 for lc06_publish_path in \
   apps/api-go/internal/media/worker.go \
   apps/api-go/internal/media/service.go; do
-  if ! grep -qF 's.enforceAIPublishGates(ctx, &asset)' "$lc06_publish_path"; then
+  # 钉**整条守卫**（含 v != nil 条件），不是子串。只钉子串的话，
+  # 把条件改成 'false && v != nil' 就能让闸门失效而钉照样绿 ——
+  # 2026-09-21 在 LC-16 的同类钉上实测踩到过这个洞，两处一起收紧。
+  if ! grep -qF 'if v := s.enforceAIPublishGates(ctx, &asset); v != nil {' "$lc06_publish_path"; then
     echo "  FAIL [LC-06/LC-07]: $lc06_publish_path no longer runs the AI publish gates." >&2
     echo "        markReady is operator-only; the worker is what actually promotes assets to READY." >&2
     echo "        Both publish paths must share enforceAIPublishGates or they drift apart again." >&2
@@ -2205,6 +2208,38 @@ fi
 require_test "LC-07" "./internal/activity" \
   "TestLC07ActivityNeverServesUserTwinPersonaPhoto" \
   "apps/api-go/internal/activity/lc07_activity_photo_gate_test.go" || exit $?
+
+# LC-16 (R16.7-P1-G) 远程法律 kill switch 的**执行路径**。
+#
+# `Server.enforceKillSwitch` 是唯一真正拦住命令的地方（command_dispatch.go 在鉴权
+# 之后、业务分发之前调用它），但在这条钉之前它**一个测试都没有**：
+#
+#   grep -rn 'SERVICE_DISABLED\|enforceKillSwitch' apps/api-go --include=*.go
+#   # → 只有定义本身和那一处调用点，没有任何 _test.go 引用
+#
+# 而 internal/compliance 的 13 个测试全都只测 Service 自己（Kill/Rearm/IsEnabled/
+# GlobalStatus），没有一个穿过 dispatch 那一层。「拨下开关 -> 命令真的被 503 拦掉」
+# 这条不变量从来没被验证过：它今天是对的，但没有任何东西阻止它变成错的。
+#
+# 两条测试都带反向配重（Rearm 后必须重新放行、不相关命令必须不受影响），
+# 否则「一律拒绝」这种最省事的改法会让它们假绿。
+require_test "LC-16" "./internal/api" \
+  "TestKillSwitchBlocksTheCommandsItsCategoriesCover" \
+  "apps/api-go/internal/api/kill_switch_dispatch_test.go" || exit $?
+require_test "LC-16" "./internal/api" \
+  "TestKillSwitchLeavesUnrelatedCommandsAlone" \
+  "apps/api-go/internal/api/kill_switch_dispatch_test.go" || exit $?
+# 上面两条直接调 enforceKillSwitch，所以「调用点被删掉」它们抓不到 —— 补一条静态钉。
+# 没有这一条，把 dispatch 里那两行删掉、闸门彻底不接线，上面两条依然全绿。
+if ! grep -qF 'if blocked, blockedStatus := s.enforceKillSwitch(envelope); blocked != nil {' apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [LC-16]: command_dispatch.go no longer calls enforceKillSwitch." >&2
+  echo "        The kill switch would be dead code: operator can arm it, the client shows" >&2
+  echo "        '服务暂停', and nothing is actually blocked." >&2
+  echo "        注意这里钉的是**整条守卫**（含 blocked != nil 条件），不是子串 ——" >&2
+  echo "        只钉子串的话，把条件改成 'false && blocked != nil' 就能让闸门失效而钉照样绿。" >&2
+  exit 1
+fi
+echo "    LC-16: PASS (armed switch blocks its commands; call site still wired)"
 
 # TEST-ABSDATE-001: 测试里写死绝对日期 = 定时炸弹。
 # 2026-09-13 全仓库 g2 变红：business/service_test.go 把 bucketDate 写成
