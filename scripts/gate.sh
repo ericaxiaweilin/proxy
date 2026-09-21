@@ -269,15 +269,42 @@ gate_g4_drift() {
     return 1
   fi
   local unguarded
-  unguarded=$(grep -nE 'pnpm .*(exec vitest run|test --run|test -- --run)' "$pin_script" \
-    | grep -v 'exit' || true)
+  # Join backslash continuations BEFORE matching. A guard written on the
+  # continuation line is still a guard; matching line-by-line would red a
+  # correct invocation (this file used exactly that shape before the fix
+  # above), and a check that reddens on correct code is one people learn to
+  # bypass. Comment lines are skipped for the same reason: documenting the
+  # bug must not trip the check that guards against it.
+  unguarded=$(awk '
+    {
+      if (buf == "") start = NR
+      buf = buf $0
+      if ($0 ~ /\\$/) { buf = buf " "; next }
+      if (buf !~ /^[[:space:]]*#/ && buf ~ /pnpm/ && buf ~ /(exec vitest run|test --run|test -- --run)/ && buf !~ /\|\|[[:space:]]*exit/) {
+        printf "%d: %s\n", start, buf
+      }
+      buf = ""
+    }
+    END {
+      if (buf != "" && buf !~ /^[[:space:]]*#/ && buf ~ /pnpm/ && buf ~ /(exec vitest run|test --run|test -- --run)/ && buf !~ /\|\|[[:space:]]*exit/) {
+        printf "%d: %s\n", NR, buf
+      }
+    }
+  ' "$pin_script")
   if [ -n "$unguarded" ]; then
     echo "  FAIL: vitest invocation whose result is not enforced (append '|| exit \$?'):" >&2
     echo "$unguarded" | sed 's/^/    - /' >&2
     return 1
   fi
-  if grep -qE 'test -- --run' "$pin_script"; then
-    echo "  FAIL: 'test -- --run <file>' swallows the file argument and runs the whole suite" >&2
+  local swallow
+  swallow=$(awk '
+    { line = $0 }
+    line ~ /^[[:space:]]*#/ { next }
+    line ~ /test -- --run/ { printf "%d: %s\n", NR, line }
+  ' "$pin_script")
+  if [ -n "$swallow" ]; then
+    echo "  FAIL: 'test -- --run <file>' swallows the file argument and runs the whole suite:" >&2
+    echo "$swallow" | sed 's/^/    - /' >&2
     return 1
   fi
   echo "  pin hygiene: OK (every vitest invocation enforces its exit code)"
