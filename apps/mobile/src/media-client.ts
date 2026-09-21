@@ -11,12 +11,16 @@ import { isRestartableUploadSessionStatus, uploadOriginalWithRetry } from "./med
 import {
   isAnimatedImageMime,
   mediaTypeForMime,
+  parseOwnReadyPhotos,
+  parseTwinPhotoResult,
+  type OwnReadyPhoto,
   type ResumableMediaUploadSession,
+  type TwinPhotoResult,
   type UploadMediaType,
   type UploadableImage
 } from "./media-classify";
 export { isAnimatedImageMime, mediaTypeForMime } from "./media-classify";
-export type { ResumableMediaUploadSession, UploadMediaType, UploadableImage } from "./media-classify";
+export type { OwnReadyPhoto, ResumableMediaUploadSession, TwinPhotoResult, UploadMediaType, UploadableImage } from "./media-classify";
 
 export type MediaUploadOptions = {
   onProgress?: (progress: number) => void;
@@ -185,6 +189,24 @@ export class MediaClient {
     await this.command("ProcessMediaAsset", { type: "MediaAsset", id: session.mediaAssetId }, { originalPath: "" });
     await this.waitUntilReady(session.mediaAssetId, options.signal);
     return { mediaAssetId: session.mediaAssetId, storageKey: session.storageKey };
+  }
+
+  // TWIN-PHOTO-SIM-001: 分身仿真写真客户端。listOwnReadyPhotos 只收调用者名下
+  // READY 的照片（服务端已按 principal 过滤，解析层再按 IMAGE+READY 收紧）；
+  // requestTwinPhoto 调 RequestTwinPhoto 命令，返回的资产即 READY 可播。
+  // 解析逻辑在零依赖的 media-classify.ts（直测不拖原生依赖），这里只薄封装。
+  public async listOwnReadyPhotos(): Promise<OwnReadyPhoto[]> {
+    const result = await this.command("ListMediaAssets", { type: "MediaAsset", id: "list" }, {});
+    return parseOwnReadyPhotos(result);
+  }
+
+  public async requestTwinPhoto(input: { twinPersonaId: string; sourceAssetId: string; template: "portrait" | "square" }): Promise<TwinPhotoResult> {
+    const result = await this.command("RequestTwinPhoto", { type: "MediaAsset", id: "new" }, {
+      twinPersonaId: input.twinPersonaId, sourceAssetId: input.sourceAssetId, template: input.template,
+    });
+    const parsed = parseTwinPhotoResult(result);
+    if (!parsed) throw new Error("分身写真返回数据无效");
+    return parsed;
   }
 
   private async queryUploadOffset(uploadEndpoint: string, accessToken: string, signal?: AbortSignal): Promise<number> {

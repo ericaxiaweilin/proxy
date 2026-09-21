@@ -30,6 +30,7 @@ const mediaAssetColumns = `
 	COALESCE(dominant_color_hex,''),
 	ai_generation_source, ai_generated,
 	COALESCE(persona_id,''), COALESCE(subject_id,''), COALESCE(likeness_consent_id,''),
+	COALESCE(twin_persona_id,''), COALESCE(twin_source_asset_ids,'{}'), COALESCE(twin_simulated,false),
 	created_at, updated_at
 `
 
@@ -37,6 +38,12 @@ func (r *MediaRepository) CreateAsset(ctx context.Context, a media.MediaAsset) e
 	hintJSON, hintErr := encodeCompositionHint(a.CompositionHint)
 	if hintErr != nil {
 		return hintErr
+	}
+	// TWIN-PHOTO-SIM-001: nil 切片显式传参会写 NULL，打穿 twin_source_asset_ids
+	// 的 NOT NULL —— 空在这里就归一化（DEFAULT 只在完全不提该列时生效）。
+	twinSources := a.TwinSourceAssetIDs
+	if twinSources == nil {
+		twinSources = []string{}
 	}
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO media.media_assets (
@@ -48,8 +55,9 @@ func (r *MediaRepository) CreateAsset(ctx context.Context, a media.MediaAsset) e
 			composition_hint, composition_recipe_version, composition_computed_at, composition_confidence,
 			dominant_color_hex,
 			ai_generation_source, ai_generated, persona_id, subject_id, likeness_consent_id,
+			twin_persona_id, twin_source_asset_ids, twin_simulated,
 			created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)`,
+		) 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38)`,
 		a.MediaAssetID, a.OwnerPrincipalType, a.OwnerPrincipalID, a.MediaType,
 		a.OriginalStorageKey, a.PlaybackStorageKey, a.ThumbnailStorageKey,
 		a.MimeType, a.Width, a.Height, a.DurationMs, a.Codec,
@@ -58,6 +66,7 @@ func (r *MediaRepository) CreateAsset(ctx context.Context, a media.MediaAsset) e
 		hintJSON, a.CompositionRecipeVersion, a.CompositionComputedAt, a.CompositionConfidence,
 		a.DominantColorHex,
 		aiGenerationSource(a), a.AIGenerated, a.PersonaID, a.SubjectID, a.LikenessConsentID,
+		a.TwinPersonaID, twinSources, a.TwinSimulated,
 		a.CreatedAt, a.UpdatedAt,
 	)
 	return err
@@ -98,6 +107,7 @@ func (r *MediaRepository) GetAsset(ctx context.Context, id string) (media.MediaA
 		&a.DominantColorHex,
 		&a.AIGenerationSource, &a.AIGenerated,
 		&a.PersonaID, &a.SubjectID, &a.LikenessConsentID,
+		&a.TwinPersonaID, &a.TwinSourceAssetIDs, &a.TwinSimulated,
 		&a.CreatedAt, &a.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -145,6 +155,7 @@ func (r *MediaRepository) GetAssets(ctx context.Context, ids []string) ([]media.
 			&a.DominantColorHex,
 			&a.AIGenerationSource, &a.AIGenerated,
 			&a.PersonaID, &a.SubjectID, &a.LikenessConsentID,
+			&a.TwinPersonaID, &a.TwinSourceAssetIDs, &a.TwinSimulated,
 			&a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -262,6 +273,9 @@ func (r *MediaRepository) Snapshot(ctx context.Context) ([]media.MediaAsset, err
 			&a.Orientation, &a.ColorSpace, &a.HasAlpha, &a.Animated, &a.ModerationStatus, &a.VisibilityClass,
 			&hintJSON, &a.CompositionRecipeVersion, &computedAt, &a.CompositionConfidence,
 			&a.DominantColorHex,
+			&a.AIGenerationSource, &a.AIGenerated,
+			&a.PersonaID, &a.SubjectID, &a.LikenessConsentID,
+			&a.TwinPersonaID, &a.TwinSourceAssetIDs, &a.TwinSimulated,
 			&a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
 			return nil, err

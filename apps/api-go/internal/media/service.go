@@ -108,6 +108,13 @@ type MediaAsset struct {
 	// a regulator can recover 'this asset was published
 	// under consent X'. Empty for non-AI / CREATIVE assets.
 	LikenessConsentID string `json:"likenessConsentId,omitempty"`
+	// TWIN-PHOTO-SIM-001: 本地仿真出图的诚实标记。仿真是确定性本地合成
+	//（无模型参与），来源仍是 USER_UPLOADED，不配 AI 生成徽；分身归属与
+	// 来源图另记这三列，UI 据此显示「分身仿真 · 非AI生成」。真模型接入后
+	// 走 AI_PERSONA / MODEL_API。
+	TwinPersonaID      string   `json:"twinPersonaId,omitempty"`
+	TwinSourceAssetIDs []string `json:"twinSourceAssetIds,omitempty"`
+	TwinSimulated      bool     `json:"twinSimulated,omitempty"`
 }
 
 // MediaVariant is an immutable, recipe-versioned representation for one UI purpose.
@@ -820,6 +827,8 @@ func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "CreateMediaAsset", "CompleteMediaUpload", "ProcessMediaAsset",
 		"MarkMediaReady", "GetMediaAsset", "ListMediaAssets",
+		// TWIN-PHOTO-SIM-001: 分身仿真写真（用户本人照片 → 本地合成）。
+		"RequestTwinPhoto",
 		// R15.17: admin review command — media 域接手 dispatch。
 		"ReviewMediaAsset":
 		return true
@@ -848,6 +857,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.getAsset(ctx, e)
 	case "ListMediaAssets":
 		return s.listAssets(ctx, e)
+	case "RequestTwinPhoto":
+		return s.requestTwinPhoto(ctx, e)
 	// R15.17: admin 手动 content review 路径。仅 operator (PROXY_OPERATOR_PRINCIPALS)
 	// 可调用。ReviewMediaAsset 只能把 asset 从 QUARANTINED/APPROVED
 	// 过渡到 REJECTED_CONTENT_NUDITY / _POLITICS / _VIOLENCE, 或

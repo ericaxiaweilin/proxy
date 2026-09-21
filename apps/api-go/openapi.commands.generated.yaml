@@ -443,6 +443,8 @@ commands:
     domain: Identity
   - command: RequestPrivacyExport
     domain: Identity
+  - command: RequestTwinPhoto
+    domain: Media
   - command: ResolveDeepLink
     domain: Notification
   - command: RespondInvitation

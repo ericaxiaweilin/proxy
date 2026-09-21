@@ -27,8 +27,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image } from "expo-image";
 import { color } from "../theme";
 import { AiPersonaClient, TwinNoAgeEvidenceError, TwinNoLiveConsentError, type TwinConsent, type TwinConsentKind, type TwinPersona } from "../ai-persona-client";
+import type { MediaClient, OwnReadyPhoto } from "../media-client";
 import type { TransportResponse } from "../auth-client";
 import { formatDateOfBirthInput } from "../date-of-birth-input";
 
@@ -175,13 +177,20 @@ function ProfilePreview({ kind }: { kind: PreviewKind }): React.JSX.Element {
   );
 }
 
-export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient, onOpenFacet }: {
+export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient, onOpenFacet, mediaClient, previewPhotoUrl, onPublishTwinPhoto }: {
   onBack: () => void;
   viewerAccountId: string | undefined;
-  authClient: { request(path: string, init: { method: "GET" | "POST"; body?: unknown }): Promise<TransportResponse> };
+  authClient: {
+    request(path: string, init: { method: "GET" | "POST"; body?: unknown }): Promise<TransportResponse>;
+    requestPublic(path: string, init?: { method: "GET" }): Promise<TransportResponse>;
+  };
   /** AI-FACET-CLUSTER-001: 分身生成的素材由 FACET 负责按关系对象分发——
    * 这条链路的下一步，给一条明显的路过去，不用退回「我的」根页再找。 */
   onOpenFacet?: () => void;
+  // TWIN-PHOTO-SIM-001: 写真三件套透传给 TwinSection（见 TwinSection 注释）。
+  mediaClient?: MediaClient | undefined;
+  previewPhotoUrl?: ((assetId: string) => string) | undefined;
+  onPublishTwinPhoto?: ((assetId: string, caption: string) => Promise<string>) | undefined;
 }): React.JSX.Element {
   const [archOpen, setArchOpen] = useState(false);
   const personaClient = useMemo(() => new AiPersonaClient({ authClient }), [authClient]);
@@ -207,7 +216,13 @@ export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient,
             AI-CLUSTER-BOUNDARY-001: 这一屏只管「分身的数字资产」——
             谁看了、看了多久（访问战绩）和活动日志都在「好友与关系」里，
             不在这里再渲染一遍（同一份 MEDIA-DWELL-001 数据曾经两屏各画一次）。 */}
-        <TwinSection client={personaClient} ownerId={viewerAccountId} />
+        <TwinSection
+          client={personaClient}
+          ownerId={viewerAccountId}
+          {...(mediaClient ? { mediaClient } : {})}
+          {...(previewPhotoUrl ? { previewPhotoUrl } : {})}
+          {...(onPublishTwinPhoto ? { onPublishTwinPhoto } : {})}
+        />
 
         {onOpenFacet ? (
           <Pressable onPress={onOpenFacet} style={styles.facetLinkCard} accessibilityLabel="去 FACET 管理素材怎么分发">
@@ -515,6 +530,14 @@ const styles = StyleSheet.create({
   twinBackfillInput: { flex: 1 },
   twinBackfillBtn: { backgroundColor: color.ink, borderRadius: 12, paddingHorizontal: 14, justifyContent: "center" },
   twinBackfillBtnText: { fontSize: 13, fontWeight: "800", color: color.white },
+  // TWIN-PHOTO-SIM-001: 仿真写真面板样式。无新增小字号文本（复用 twinHint /
+  // twinNotice / twinTemplate 字样），不进 R2 装饰白名单。
+  simGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  simThumb: { width: 72, height: 72, borderRadius: 10, overflow: "hidden", borderWidth: 2, borderColor: "transparent" },
+  simThumbOn: { borderColor: "#6d28d9" },
+  simThumbImg: { width: "100%", height: "100%" },
+  simTemplateRow: { gap: 8 },
+  simPreview: { width: "100%", aspectRatio: 3 / 4, borderRadius: 12 },
 
   // AI-FACET-CLUSTER-001: 生成 (这一屏) → 分发 (FACET) 的跨屏入口。
   facetLinkCard: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#f3e8ff", borderWidth: 1, borderColor: "#e4d2fb", borderRadius: 14, padding: 12, marginTop: 14 },
@@ -1182,7 +1205,7 @@ const DEFAULT_TWIN_TEMPLATE = { id: "greeter", name: "公开互动助手", desc:
 const TWIN_TEMPLATES: ReadonlyArray<{ id: string; name: string; desc: string; consent: boolean }> = [
   DEFAULT_TWIN_TEMPLATE,
   { id: "collector", name: "邀约收集助手", desc: "把邀约整理成待确认清单，真人确认才生效。", consent: false },
-  { id: "likeness", name: "形象出镜助手", desc: "用你的授权形象生成照片与短视频。", consent: true },
+  { id: "likeness", name: "形象出镜助手", desc: "用你的照片出仿真写真（本地合成，非AI生成）；短视频待模型通道。", consent: true },
 ];
 
 type TwinRowState = { persona: TwinPersona; live: TwinConsent | null; liveOk: boolean };
@@ -1193,9 +1216,191 @@ function consentScopeLabel(kind: TwinConsentKind): string {
   return "形象与声音";
 }
 
-function TwinSection({ client, ownerId }: {
+// TWIN-PHOTO-SIM-001: 单个分身的仿真写真面板（有活体授权才挂载）。
+// 选自己媒体库里的 1 张 READY 照片 → 选竖/方构图 → 服务端本地合成 →
+// 预览 → 发布到动态。全程人话报错；视频不开入口（本地做不了，不摆死按钮）。
+function SimPhotoPanel({ twinId, twinName, mediaClient, previewPhotoUrl, onPublishTwinPhoto }: {
+  twinId: string;
+  twinName: string;
+  mediaClient: MediaClient;
+  previewPhotoUrl: (assetId: string) => string;
+  onPublishTwinPhoto: (assetId: string, caption: string) => Promise<string>;
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [photos, setPhotos] = useState<ReadonlyArray<OwnReadyPhoto> | undefined>(undefined);
+  const [photosFailed, setPhotosFailed] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
+  const [template, setTemplate] = useState<"portrait" | "square">("portrait");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [resultId, setResultId] = useState<string | undefined>(undefined);
+  const [caption, setCaption] = useState("");
+  const [publishBusy, setPublishBusy] = useState(false);
+  const [publishMsg, setPublishMsg] = useState<string | undefined>(undefined);
+
+  async function loadPhotos(): Promise<void> {
+    setPhotosFailed(false);
+    try {
+      const listed = await mediaClient.listOwnReadyPhotos();
+      setPhotos(listed);
+      if (listed.length > 0 && !listed.some((photo) => photo.mediaAssetId === selectedId)) {
+        setSelectedId(listed[0]!.mediaAssetId);
+      }
+    } catch {
+      setPhotos(undefined);
+      setPhotosFailed(true);
+    }
+  }
+
+  function simErrorMessage(raw: unknown): string {
+    const text = raw instanceof Error ? raw.message : "";
+    if (text.includes("TWIN_PHOTO_FORBIDDEN")) return "分身授权不在了，先重新打开形象授权再试。";
+    if (text.includes("TWIN_SOURCE_INVALID")) return "这张照片不可用（换一张媒体库里的照片）。";
+    if (text.includes("TWIN_SIM_UNAVAILABLE")) return "合成通道暂时不可用，稍后重试。";
+    return text || "生成失败，请重试。";
+  }
+
+  async function generate(): Promise<void> {
+    if (busy || !selectedId) return;
+    setBusy(true);
+    setError(undefined);
+    setPublishMsg(undefined);
+    try {
+      const produced = await mediaClient.requestTwinPhoto({ twinPersonaId: twinId, sourceAssetId: selectedId, template });
+      setResultId(produced.mediaAssetId);
+      setCaption(`我的分身仿真写真 · ${twinName}`);
+    } catch (err) {
+      setError(simErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publish(): Promise<void> {
+    if (publishBusy || !resultId) return;
+    setPublishBusy(true);
+    setPublishMsg(undefined);
+    try {
+      setPublishMsg(await onPublishTwinPhoto(resultId, caption.trim()));
+    } catch (err) {
+      setPublishMsg(err instanceof Error ? err.message : "发布失败，请重试。");
+    } finally {
+      setPublishBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <Pressable
+        onPress={() => { setOpen(true); void loadPhotos(); }}
+        style={styles.personaCreateBtn}
+        accessibilityLabel={`${twinName}生成仿真写真`}
+      >
+        <Text style={styles.personaCreateBtnText}>＋ 用我的照片生成写真</Text>
+      </Pressable>
+    );
+  }
+  return (
+    <View style={styles.twinForm}>
+      <Text style={styles.twinHint}>分身仿真 · 本地合成，非AI生成。视频待模型通道，当前只出照片。</Text>
+      {photos === undefined ? (
+        <View style={styles.twinNotice}>
+          <Text style={styles.twinNoticeText}>{photosFailed ? "照片没读出来，不是没有照片。" : "正在读取我的照片…"}</Text>
+          {photosFailed ? (
+            <Pressable onPress={() => void loadPhotos()} accessibilityLabel="重新读取照片" style={styles.twinRetry}>
+              <Text style={styles.twinRetryText}>重试</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : photos.length === 0 ? (
+        <Text style={styles.twinHint}>媒体库还没有可用照片，先去动态发一张照片再来。</Text>
+      ) : (
+        <View style={styles.simGrid}>
+          {photos.map((photo) => (
+            <Pressable
+              key={photo.mediaAssetId}
+              onPress={() => setSelectedId(photo.mediaAssetId)}
+              style={[styles.simThumb, photo.mediaAssetId === selectedId ? styles.simThumbOn : undefined]}
+              accessibilityLabel={photo.mediaAssetId === selectedId ? "已选这张" : "选这张出写真"}
+            >
+              <Image
+                cachePolicy="memory-disk"
+                contentFit="cover"
+                recyclingKey={`twin-src:${photo.mediaAssetId}`}
+                source={{ uri: previewPhotoUrl(photo.mediaAssetId) }}
+                style={styles.simThumbImg}
+                transition={0}
+              />
+            </Pressable>
+          ))}
+        </View>
+      )}
+      <View style={styles.simTemplateRow}>
+        {(["portrait", "square"] as const).map((kind) => (
+          <Pressable
+            key={kind}
+            onPress={() => setTemplate(kind)}
+            style={[styles.twinTemplate, kind === template ? styles.twinTemplateOn : undefined]}
+            accessibilityLabel={`构图${kind === "portrait" ? "竖构图" : "方构图"}`}
+          >
+            <View style={styles.twinTemplateCopy}>
+              <Text style={styles.twinTemplateName}>{kind === "portrait" ? "竖构图 3:4" : "方构图 1:1"}</Text>
+              <Text style={styles.twinTemplateDesc}>{kind === "portrait" ? "适合动态信息流" : "适合头像与分享"}</Text>
+            </View>
+          </Pressable>
+        ))}
+      </View>
+      <Pressable
+        onPress={() => void generate()}
+        disabled={busy || !selectedId}
+        style={[styles.twinSubmit, (busy || !selectedId) ? styles.twinSubmitBusy : undefined]}
+        accessibilityLabel="生成仿真写真"
+      >
+        <Text style={styles.twinSubmitText}>{busy ? "合成中…" : "生成写真"}</Text>
+      </Pressable>
+      {error ? <Text style={styles.twinError}>{error}</Text> : null}
+      {resultId ? (
+        <View style={{ marginTop: 8, gap: 8 }}>
+          <Image
+            cachePolicy="memory-disk"
+            contentFit="cover"
+            recyclingKey={`twin-sim:${resultId}`}
+            source={{ uri: previewPhotoUrl(resultId) }}
+            style={styles.simPreview}
+            transition={0}
+          />
+          <Text style={styles.twinHint}>分身仿真 · 非AI生成（本地合成）。</Text>
+          <TextInput
+            value={caption}
+            onChangeText={setCaption}
+            placeholder="给这张写真配一句话"
+            placeholderTextColor={color.muted}
+            style={styles.twinInput}
+          />
+          <Pressable
+            onPress={() => void publish()}
+            disabled={publishBusy}
+            style={[styles.twinSubmit, publishBusy ? styles.twinSubmitBusy : undefined]}
+            accessibilityLabel="发布写真到动态"
+          >
+            <Text style={styles.twinSubmitText}>{publishBusy ? "发布中…" : "发布到动态"}</Text>
+          </Pressable>
+          {publishMsg ? <Text style={styles.twinHint}>{publishMsg}</Text> : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function TwinSection({ client, ownerId, mediaClient, previewPhotoUrl, onPublishTwinPhoto }: {
   client: AiPersonaClient;
   ownerId: string | undefined;
+  // TWIN-PHOTO-SIM-001: 仿真写真三件套（都可选，缺一个就不渲染写真入口，
+  // 不摆点了没反应的按钮）。previewPhotoUrl 把资产 ID 变成可看的图 URL；
+  // onPublishTwinPhoto 把仿真产物发到动态，返回一句人话结果。
+  mediaClient?: MediaClient | undefined;
+  previewPhotoUrl?: ((assetId: string) => string) | undefined;
+  onPublishTwinPhoto?: ((assetId: string, caption: string) => Promise<string>) | undefined;
 }): React.JSX.Element {
   const [rows, setRows] = useState<TwinRowState[] | undefined>(undefined);
   const [loadState, setLoadState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
@@ -1343,6 +1548,7 @@ function TwinSection({ client, ownerId }: {
           {rows.map(({ persona, live, liveOk }) => {
             const rowError = rowErrors[persona.id];
             return (
+            <>
             <View key={persona.id} style={styles.personaRow}>
               <View style={[styles.personaAvatar, styles.personaAvatarAi]}>
                 <Text style={styles.personaAvatarText}>{persona.displayName.charAt(0)}</Text>
@@ -1373,6 +1579,16 @@ function TwinSection({ client, ownerId }: {
                 )}
               </View>
             </View>
+            {live && mediaClient && previewPhotoUrl && onPublishTwinPhoto ? (
+              <SimPhotoPanel
+                twinId={persona.id}
+                twinName={persona.displayName}
+                mediaClient={mediaClient}
+                previewPhotoUrl={previewPhotoUrl}
+                onPublishTwinPhoto={onPublishTwinPhoto}
+              />
+            ) : null}
+            </>
             );
           })}
         </View>
