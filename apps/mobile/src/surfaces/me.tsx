@@ -21,7 +21,6 @@ import { QrZoomOverlay } from "../components/qr-zoom-overlay";
 import { captureRef } from "react-native-view-shot";
 import { Directory, File, Paths } from "expo-file-system";
 import { buildContactCard } from "../profile-qr";
-import { buildCreatePostPayload, newPublishIdempotencyKey } from "../composer-publish";
 import { useScreenBrightness } from "../lib/screen-brightness";
 import { saveImageToAlbum, toFileUrl } from "../image-export";
 import { createProfileStore, avatarFileName, mergeRemoteProfile, type ProfileRecord } from "../profile-store";
@@ -1403,23 +1402,7 @@ export function MeSurface({
     if (subPage.route === "aiidentity") {
       // AI-CLUSTER-BOUNDARY-001: 这一屏只拿分身自己的东西（列表/授权/创建）。
       // 访问战绩（谁看了我的动态、看了多久）归「好友与关系」，不从这里传进去。
-      // TWIN-PHOTO-SIM-001: 写真三件套——mediaClient 选自己的 READY 照片，
-      // previewPhotoUrl 预览仿真产物（thumb 缺失服务端回落 playback），
-      // onPublishTwinPhoto 把产物发到动态（mediaRefs 直挂资产 ID，已 READY 不重传）。
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} onOpenFacet={() => openSubPage("facet")} {...(mediaClient ? { mediaClient } : {})} previewPhotoUrl={(assetId) => localNet.resolveMediaUrl(`/v1/media/thumb/${assetId}`)} onPublishTwinPhoto={async (assetId, caption) => {
-        const body = caption.trim() || "我的分身仿真写真";
-        try {
-          await localNet.createPost(buildCreatePostPayload({
-            body, media: [], visibility: "PUBLIC", includeCity: false, quoteTargetId: null,
-            place: null, topic: null, gifWord: null, poll: { open: false, options: ["", ""], durationLabel: "1 天" }, isGhost24h: false,
-          }, undefined, { mediaRefs: [{ mediaAssetId: assetId, sortOrder: 0 }] }), newPublishIdempotencyKey());
-          return "已发布到动态，去动态看效果。";
-        } catch (error) {
-          const raw = error instanceof Error ? error.message : "";
-          if (/principal|signed|sign in|auth|session|401|403|INVALID_ACCESS_TOKEN|登录/i.test(raw)) return "请先登录后再发布。";
-          return raw || "发布失败，请重试。";
-        }
-      }} /></SwipeBackShell>;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} onOpenFacet={() => openSubPage("facet")} /></SwipeBackShell>;
     }
     if (subPage.route === "myscenes") {
       async function respond(invitationId: string, decision: "ACCEPTED" | "DECLINED" | "ASK"): Promise<void> {

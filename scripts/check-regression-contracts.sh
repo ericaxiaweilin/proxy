@@ -7594,32 +7594,3 @@ if ! grep -qF '"IssueVoucherDefinition": true' apps/api-go/internal/api/merchant
 fi
 go -C apps/api-go test ./internal/platform/postgres/ -run TestVoucherDefinitionPostgresRoundTrip -count=1 || exit $?
 echo "    VOUCHER-ISSUE-001: PASS (merchant-stamped definitions, forged claims rejected, PG persisted)"
-# TWIN-PHOTO-SIM-001: 分身仿真写真。五道门（存在/类型/归属/活体同意/年龄）+ 来源
-# 图三不收（别人的/没READY/非照片）+ 合成无模型（来源 USER_UPLOADED，不配 AI 徽，
-# 归属另记 twin 三列）+ ffmpeg 缺席明确不可用。客户端解析层同步设防。
-require_test "TWIN-PHOTO-SIM-001" "./internal/aipersona" \
-  "TestAuthorizeTwinPhotoAllowsOwnerWithLiveConsent" \
-  "apps/api-go/internal/aipersona/twin_photo_auth_test.go" || exit $?
-require_test "TWIN-PHOTO-SIM-001" "./internal/aipersona" \
-  "TestAuthorizeTwinPhotoRejectsStrangerUnknownAndNonTwin" \
-  "apps/api-go/internal/aipersona/twin_photo_auth_test.go" || exit $?
-require_test "TWIN-PHOTO-SIM-001" "./internal/aipersona" \
-  "TestAuthorizeTwinPhotoFailsClosedOnRevokeAndMinor" \
-  "apps/api-go/internal/aipersona/twin_photo_auth_test.go" || exit $?
-require_test "TWIN-PHOTO-SIM-001" "./internal/media" \
-  "TestRequestTwinPhotoSimHappyPath" \
-  "apps/api-go/internal/media/twin_photo_test.go" || exit $?
-require_test "TWIN-PHOTO-SIM-001" "./internal/media" \
-  "TestRequestTwinPhotoForbiddenPaths" \
-  "apps/api-go/internal/media/twin_photo_test.go" || exit $?
-require_test "TWIN-PHOTO-SIM-001" "./internal/media" \
-  "TestRequestTwinPhotoRejectsBadSourceAndTemplate" \
-  "apps/api-go/internal/media/twin_photo_test.go" || exit $?
-if ! grep -qF '"RequestTwinPhoto"' apps/api-go/internal/media/service.go; then
-  echo "  FAIL [TWIN-PHOTO-SIM-001]: 仿真写真命令掉出 media 分发 ——" >&2
-  echo "        Twin 段的生成按钮会打到不支持的命令上。" >&2
-  exit 1
-fi
-go -C apps/api-go test ./internal/platform/postgres/ -run TestMediaTwinSimProvenanceRoundTrip -count=1 || exit $?
-pnpm --filter @proxy/mobile exec vitest run src/media-client.test.ts || exit $?
-echo "    TWIN-PHOTO-SIM-001: PASS (twin-gated sim photos, honest provenance, client parsers)"
