@@ -25,7 +25,7 @@ import ImageViewing from "react-native-image-viewing";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import { claimVideoPlayback, releaseVideoPlayback } from "./video-playback-registry";
-import { aiMediaLabel } from "./ai-media-label";
+import { AIMediaBadge } from "./ai-media-badge";
 import type { FeedMediaItem } from "@proxy/contracts";
 import type { MediaCompositionHint } from "@proxy/contracts";
 import {
@@ -124,6 +124,9 @@ function renderKindAwareStage(
     return (
       <View style={styles.singleInset}>
         <VideoStage item={item} uri={playbackUri} autoPlay={shouldAutoPlayVideo(item)} {...(isActive === undefined ? {} : { isActive })} onPress={onPress} frameAspect={aspect} resolveUrl={resolveUrl} {...(onFrame ? { onFrame } : {})} />
+        {/* LC-06 显示侧：VIDEO 分支在图片分支**之前** return —— 标注必须单独挂，
+            否则 AI 生成的视频会成为唯一没有标注的媒体形状。 */}
+        <AIMediaBadge item={item} />
       </View>
     );
   }
@@ -131,9 +134,8 @@ function renderKindAwareStage(
     // §5.2.3 AUDIO：语音播放卡（无画面），playbackUrl 即原文件；不进图片查看器。
     return <AudioStage item={item} uri={resolveUrl(item.playbackUrl ?? "")} />;
   }
-  // LC-06 显示侧（2026-09-21 产品决定「AI 做的就标注」）：AI 生成的图必须带标注。
-  // 判定口径只有一处（ai-media-label.ts），这里只负责画。
-  const aiLabel = aiMediaLabel(item.aiGenerationSource);
+  // 图片分支的标注由 SinglePostImage 在**叶子层**自己挂（ai-media-badge.tsx），
+  // 这里不再重复画 —— 否则同一张图会出现两个「AI 生成」。
   return (
     <View style={styles.singleInset}>
       <SinglePostImage
@@ -142,12 +144,6 @@ function renderKindAwareStage(
         resolveUrl={resolveUrl}
         onPress={onPress}
       />
-      {aiLabel ? (
-        // pointerEvents="none"：标注是覆盖层，不能吃掉「点开原图」的手势。
-        <View pointerEvents="none" style={styles.aiMediaBadge}>
-          <Text style={styles.aiMediaBadgeText}>{aiLabel}</Text>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -363,6 +359,9 @@ export function SinglePostImage({ item, aspect, resolveUrl, onPress }: {
               />
             </View>
           )}
+          {/* LC-06 显示侧：AI 生成的图必须带标注。挂在**叶子**上 —— 单图帖、
+              个人主页（me.tsx / other-profile.tsx 直接调本组件）都从这里经过。 */}
+          <AIMediaBadge item={item} />
         </Pressable>
       ) : null}
     </View>
@@ -700,6 +699,9 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
               ) : (
                 <SocialMediaFrame item={item as ItemWithHint} frameAspect={frameAspect} resolveUrl={resolveUrl} />
               )}
+              {/* LC-06：多图帖里 AI 生成的那一张也必须标注。图片卡的标注由
+                  SocialMediaFrame（叶子）自己挂；VIDEO 卡没有叶子挂点，这里补。 */}
+              {isVideo ? <AIMediaBadge item={item} /> : null}
               <View style={styles.railBadge}><Text style={styles.railBadgeText}>{index + 1}/{items.length}</Text></View>
             </Pressable>
           );
@@ -790,24 +792,6 @@ const styles = StyleSheet.create({
     top: SOCIAL_MEDIA_BADGE_INSET
   },
   videoBadgeText: {
-    color: color.white,
-    fontSize: 11,
-    fontWeight: "700"
-  },
-  // LC-06 显示侧：AI 生成标注。跟 videoBadge 同一套视觉，但挂右上角 ——
-  // 视频角标占左上，两者将来同框也不会打架。
-  aiMediaBadge: {
-    alignItems: "center",
-    backgroundColor: "rgba(14,10,20,0.55)",
-    borderRadius: 999,
-    flexDirection: "row",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    position: "absolute",
-    right: SOCIAL_MEDIA_BADGE_INSET,
-    top: SOCIAL_MEDIA_BADGE_INSET
-  },
-  aiMediaBadgeText: {
     color: color.white,
     fontSize: 11,
     fontWeight: "700"

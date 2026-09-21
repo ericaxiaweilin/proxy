@@ -29,6 +29,7 @@ import { mediaAspect } from "../media-presentation";
 import { color } from "../theme";
 import { isMediaUnavailable, UnavailableMedia, useMediaLoadState } from "./media-fallback";
 import { SOCIAL_MEDIA_RADIUS } from "./social-media-aesthetics";
+import { AIMediaBadge } from "./ai-media-badge";
 
 type FeedItemWithHint = FeedMediaItem & { compositionHint?: MediaCompositionHint };
 
@@ -102,6 +103,10 @@ export function SocialMediaFrame({ item, frameAspect, resolveUrl }: Props): Reac
           />
         </>
       )}
+      {/* LC-06 显示侧：多图帖（AdaptiveMediaRail）里每张卡都走本组件 —— 标注挂在
+          这里，AI 生成的那一张才不会被漏掉。`frame` 是 overflow:hidden 的圆角容器，
+          绝对定位的角标会被裁在卡内，正是想要的。 */}
+      <AIMediaBadge item={item} />
     </View>
   );
 }

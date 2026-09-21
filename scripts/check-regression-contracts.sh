@@ -2251,19 +2251,21 @@ fi
 # 当时这条钉钉的是「缺口」，不是「决定」——它不判定该不该显示，只逼出那个决定。
 #
 # 同一天用户定了口径（原话）：「ai做的 就标注 法规要求要满足」。
-# 于是缺口被补上，链变成四跳，每一跳都有钉：
+# 于是缺口被补上，链变成五跳，每一跳都有钉：
 #
 #   media_assets.ai_generation_source          （migration 108，存储侧，已有）
 #     → GetAssets 选列 + 扫进 MediaAsset        （已有，未改动）
 #     → mediaAssetInfo() 带出 media 包          ← 第①跳，曾缺
 #     → hydratePostMedia() 放进 PostMediaItem   ← 第②跳，曾缺
 #     → FeedMediaItemSchema.aiGenerationSource  ← 第③跳，曾缺
-#     → AdaptiveMediaCollection 画「AI 生成」    ← 第④跳，曾缺
+#     → AIMediaBadge 画「AI 生成」               ← 第④跳，曾缺
+#     → **每一种媒体形状都挂了它**                ← 第⑤跳，曾缺（见下面的更正）
 #
-# 任何一跳掉了都是「标注静默消失」且编译不报错，所以四跳各有各的钉：
+# 任何一跳掉了都是「标注静默消失」且编译不报错，所以五跳各有各的钉：
 #   ① TestPostMediaLookup_PropagatesAIGenerationSource      (internal/media)
 #   ② TestListFeedPosts_PropagatesAIGenerationSourceToMediaWire (internal/localnet)
-#   ③④ 下面这条契约钉 + mobile 的 ai-media-label.test.ts
+#   ③ 下面这条契约钉
+#   ④⑤ mobile 的 ai-media-label.test.ts + 下面的挂点覆盖钉
 #
 # **仍然没有被判定的事**：134/2025/QH15 第 12 条要求的是「记录」还是「向终端用户
 # 显示」，需要法务确认 —— docs/design/references/ 那份对齐文档里「法务 review」
@@ -2281,9 +2283,44 @@ if ! grep -qE 'aiGenerationSource' packages/contracts/src/index.ts; then
   exit 1
 fi
 # 只钉契约不够：字段在 wire 上、渲染那一行被删掉，照样「没有标注」。
-if ! grep -qE 'aiMediaLabel' apps/mobile/src/media/AdaptiveMediaCollection.tsx; then
-  echo "  FAIL [LC-06-display]: feed media no longer renders the AI label." >&2
-  echo "        The field reaches the client but nothing draws it — still invisible." >&2
+#
+# ⚠️ 2026-09-21 更正（第一次的钉**绿着**却漏了三条路）：
+# 原来这里钉的是「AdaptiveMediaCollection.tsx 里出现 aiMediaLabel」。它一直是绿的，
+# 因为标注确实被内联进了那个文件的**单图分支** —— 于是这些形状全都没标注：
+#   - 多图帖：mediaCollectionMode() 判成 RAIL → AdaptiveMediaRail → SocialMediaFrame
+#     （根本不经过单图分支）
+#   - AI 视频：renderKindAwareStage 的 VIDEO 分支在算 aiLabel **之前**就 return 了
+#   - 个人主页 / 他人主页：直接调 SinglePostImage / ThreadsPostMedia
+# 教训：**钉「某行代码在某个文件里」会漏掉"这条渲染路径根本没走到那里"。**
+# 现在钉的是**覆盖**：每个「画媒体」的形状都必须挂 AIMediaBadge，
+# 而且判定口径只允许一条链（renderer → ai-media-badge → ai-media-label）。
+if ! grep -qE 'export function aiMediaLabel\(' apps/mobile/src/media/ai-media-label.ts; then
+  echo "  FAIL [LC-06-display]: the single AI-label rule is gone." >&2
+  exit 1
+fi
+if ! grep -qE 'from "\./ai-media-label"' apps/mobile/src/media/ai-media-badge.tsx; then
+  echo "  FAIL [LC-06-display]: the badge no longer asks the single rule." >&2
+  echo "        A second copy of the rule will drift from ai-media-label.ts." >&2
+  exit 1
+fi
+# 每种媒体形状的挂点。少一个 = 那一类 AI 媒体对用户可见但没标注。
+if ! grep -qE '<AIMediaBadge' apps/mobile/src/media/AdaptiveMediaCollection.tsx; then
+  echo "  FAIL [LC-06-display]: single-image / single-video posts lost the AI label." >&2
+  exit 1
+fi
+if ! grep -qE '<AIMediaBadge' apps/mobile/src/media/SocialMediaFrame.tsx; then
+  echo "  FAIL [LC-06-display]: multi-image posts (RAIL cards) lost the AI label." >&2
+  echo "        A post with 2+ images renders through SocialMediaFrame, not the single branch." >&2
+  exit 1
+fi
+if ! grep -qE '<AIMediaBadge' apps/mobile/src/components/threads-post-media.tsx; then
+  echo "  FAIL [LC-06-display]: profile post media lost the AI label." >&2
+  exit 1
+fi
+# 渲染分支不许自己判来源 —— 把判定内联进某一个分支，正是第一次漏掉三条路的原因。
+if grep -rnE 'aiGenerationSource' apps/mobile/src/media/AdaptiveMediaCollection.tsx apps/mobile/src/media/SocialMediaFrame.tsx apps/mobile/src/components/threads-post-media.tsx; then
+  echo "  FAIL [LC-06-display]: a renderer judges AI provenance itself instead of mounting the badge." >&2
+  echo "        Inlining the decision into one branch is exactly how 3 shapes got missed." >&2
   exit 1
 fi
 # 作者级徽标仍只覆盖 AI_NATIVE（小美）一档 —— 那是 feed **身份轴**上唯一的 AI 作者。
@@ -2298,7 +2335,7 @@ fi
 require_test "LC-06" "./internal/media" "TestPostMediaLookup_PropagatesAIGenerationSource" "apps/api-go/internal/media/postmedia_lookup_test.go" || exit $?
 require_test "LC-06" "./internal/localnet" "TestListFeedPosts_PropagatesAIGenerationSourceToMediaWire" "apps/api-go/internal/localnet/service_test.go" || exit $?
 pnpm --dir apps/mobile exec vitest run src/media/ai-media-label.test.ts || exit $?
-echo "    LC-06-display: PASS (per-asset AI provenance reaches the client; AI-generated media is labelled)"
+echo "    LC-06-display: PASS (per-asset AI provenance reaches the client; every media shape — single image, single video, RAIL card, profile cell — is labelled)"
 
 # AI-DISCLOSURE-001：activity 面上的 AI 标注**不能**挂在 persona 名字上。
 #

@@ -13,6 +13,7 @@ import { Image as ExpoImage } from "expo-image";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { color } from "../theme";
 import type { FeedMediaItem } from "@proxy/contracts";
+import { AIMediaBadge } from "../media/ai-media-badge";
 
 const FALLBACK_BG = "#EEE";
 // MEDIA-ROW-HARDEN-001: 跟 media-presentation.ts 的 MEDIA_ROW_GOLDEN_RATIO
@@ -36,6 +37,10 @@ function MediaCell({ item, resolveUrl, onPress, big, cellSize }: { item: FeedMed
         style={StyleSheet.absoluteFill}
         transition={120}
       />
+      {/* LC-06 显示侧：本组件覆盖个人主页 / 他人主页的帖子图片区（单图 + 多图），
+          是"公共空间"里 AI 生成的图能被看到的另一条路。mediaCell 已经是
+          position:relative + overflow:hidden，角标会被裁在圆角卡内。 */}
+      <AIMediaBadge item={item} />
     </Pressable>
   );
 }
