@@ -2185,6 +2185,27 @@ else
   echo "    LC-06 / LC-07: SKIP (no postgres cluster found — the round-trip tests did NOT run; install postgresql@15 or set DATABASE_URL)" >&2
 fi
 
+# LC-07 活动侧：PRD 与 activity/service.go 的注释都声称
+#   「USER_TWIN 角色 photo 必须先有 LikenessConsent LIVE 才会下发」
+# 但 activity 包里除了那行注释没有任何 consent 判定（grep HasLiveConsent/Likeness
+# → 只有注释本身），服务也没注入 persona/consent 依赖。也就是说这句承诺**无法被执行**。
+#
+# 它今天不是线上风险，只因为 USER_TWIN 活动压根不存在：AIPersonaPhoto 只在
+# SeedDefaults 里被写成 PLATFORM_AI 的打包资源路径，没有任何命令能写这个字段。
+# 而 media 侧那道 LC-07 闸门覆盖不到这里 —— 它只管 media.media_assets 行，
+# aiPersonaPhoto 是打包资源路径而不是 mediaAssetId。
+#
+# 所以这条钉子的作用不是「禁止这个功能」，而是「不许悄悄把路打通」：
+# 一旦有人让活动带上 USER_TWIN 的 photo，测试立刻红，逼出「先接 consent 还是
+# 先下线该字段」的决定。测试同时拒绝空转 —— 如果 aiPersonaPhoto 整个字段被丢掉，
+# 它会报「观测不到任何带 photo 的活动」而不是空跑一遍算通过。
+#
+# 用 require_test 是因为这个用例跑 MemoryRepository（New()），不碰数据库，
+# 因此不存在 SKIP 冒充 PASS 的问题。
+require_test "LC-07" "./internal/activity" \
+  "TestLC07ActivityNeverServesUserTwinPersonaPhoto" \
+  "apps/api-go/internal/activity/lc07_activity_photo_gate_test.go" || exit $?
+
 # TEST-ABSDATE-001: 测试里写死绝对日期 = 定时炸弹。
 # 2026-09-13 全仓库 g2 变红：business/service_test.go 把 bucketDate 写成
 # "2026-09-06"，7 天滚动窗口一过就查不到它，OrderCount 恒为 0，测试自己
