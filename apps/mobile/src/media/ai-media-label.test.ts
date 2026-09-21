@@ -71,6 +71,13 @@ describe("LC-06 显示侧：每个「画媒体」的形状都挂上了标注", (
     expect((code.match(/<AIMediaBadge item=\{item\} \/>/g) ?? []).length).toBe(3);
   });
 
+  it("全屏查看器（MediaViewer）挂了标注", () => {
+    // 点开原图放大看时也必须带标注 —— 跟 feed 里是同一张图，放大了反而没标注，
+    // 用户就会当成真人拍的。用行内变体：顶栏是 flex row，绝对定位会压住关闭按钮。
+    const code = read("./AdaptiveMediaCollection.tsx");
+    expect(code).toContain("<AIMediaBadge item={current} inline />");
+  });
+
   it("多图帖的每张图（SocialMediaFrame）挂了标注", () => {
     expect(read("./SocialMediaFrame.tsx")).toContain("<AIMediaBadge item={item} />");
   });

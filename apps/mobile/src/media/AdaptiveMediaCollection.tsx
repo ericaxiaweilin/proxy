@@ -177,6 +177,10 @@ export function MediaViewer({
   const header = (
     <View pointerEvents="box-none" style={viewerStyles.top}>
       <Text style={viewerStyles.counter}>{safeIndex + 1}/{items.length} · {author}</Text>
+      {/* LC-06 显示侧：全屏查看器里 AI 生成的图也必须带标注 —— 它跟 feed 里
+          是同一张图，放大了反而没标注 = 用户以为是人拍的。顶栏已经覆盖在图片上，
+          用行内变体（绝对定位会压住右上角关闭按钮）。 */}
+      <AIMediaBadge item={current} inline />
       <Pressable
         accessibilityLabel="关闭原图"
         accessibilityRole="button"
@@ -193,6 +197,8 @@ export function MediaViewer({
   // 不需在 MediaViewer 里自己造 Modal + VideoView (用开源 native fullscreen 代替重复造轮子)。
   // fullscreen 状态由 expo-video 内部管理 (enterFullscreen / exitFullscreen)，
   // 这里返回 null — VideoStage 的 onPress() 已经调 videoViewRef.current.enterFullscreen()。
+  // ⇒ VIDEO 的全屏态是**原生播放器**，没有 React 挂点，标注只能挂在进入全屏之前的
+  //   视频卡上（本文件挂点 ②③）。别试图在这里"补"一个 —— 补不上去。
   if (current.mediaType === "VIDEO") {
     return null as unknown as React.JSX.Element;
   }

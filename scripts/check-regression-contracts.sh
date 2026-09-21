@@ -2317,6 +2317,15 @@ if ! grep -qE '<AIMediaBadge' apps/mobile/src/components/threads-post-media.tsx;
   echo "  FAIL [LC-06-display]: profile post media lost the AI label." >&2
   exit 1
 fi
+# 全屏查看器（点开原图）：跟 feed 里是同一张图，放大了反而没标注 = 用户当成真人拍的。
+# 它用**行内**变体（顶栏是 flex row，absolute 会压住关闭按钮），所以钉的是带 inline
+# 的那一处 —— 文件级 `grep '<AIMediaBadge'` 对这一处被删是无感的。
+# 注：VIDEO 的全屏态是原生播放器，没有 React 挂点，标注只挂在进入全屏之前的视频卡上。
+if ! grep -qF '<AIMediaBadge item={current} inline />' apps/mobile/src/media/AdaptiveMediaCollection.tsx; then
+  echo "  FAIL [LC-06-display]: the fullscreen viewer (MediaViewer) lost the AI label." >&2
+  echo "        Opening an AI image full-screen must still label it — same image, bigger." >&2
+  exit 1
+fi
 # 渲染分支不许自己判来源 —— 把判定内联进某一个分支，正是第一次漏掉三条路的原因。
 if grep -rnE 'aiGenerationSource' apps/mobile/src/media/AdaptiveMediaCollection.tsx apps/mobile/src/media/SocialMediaFrame.tsx apps/mobile/src/components/threads-post-media.tsx; then
   echo "  FAIL [LC-06-display]: a renderer judges AI provenance itself instead of mounting the badge." >&2

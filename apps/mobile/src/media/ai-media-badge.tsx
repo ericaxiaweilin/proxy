@@ -30,16 +30,23 @@ import { color } from "../theme";
 import { SOCIAL_MEDIA_BADGE_INSET } from "./social-media-aesthetics";
 
 export function AIMediaBadge({
-  item
+  item,
+  inline
 }: {
   item: Pick<FeedMediaItem, "aiGenerationSource">;
+  /**
+   * 行内变体（全屏查看器 MediaViewer 的顶栏用）。
+   * 顶栏本身是 `position:absolute` 的 flex row，标注在里面不能再 absolute ——
+   * 否则会盖住右上角的关闭按钮。行内时由父级 row 负责居中。
+   */
+  inline?: boolean;
 }): React.JSX.Element | null {
   const label = aiMediaLabel(item.aiGenerationSource);
   if (!label) return null;
   return (
     // pointerEvents="none"：标注是覆盖层，不能吃掉「点开原图」的手势 ——
     // 那比不显示标注更糟（用户点不开图）。
-    <View pointerEvents="none" style={styles.badge}>
+    <View pointerEvents="none" style={inline ? styles.badgeInline : styles.badge}>
       <Text style={styles.badgeText}>{label}</Text>
     </View>
   );
@@ -58,6 +65,15 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: SOCIAL_MEDIA_BADGE_INSET,
     top: SOCIAL_MEDIA_BADGE_INSET
+  },
+  // 行内变体：跟 badge 同一套视觉，只是不定位（由父级 flex row 摆放）。
+  badgeInline: {
+    alignItems: "center",
+    backgroundColor: "rgba(14,10,20,0.55)",
+    borderRadius: 999,
+    flexDirection: "row",
+    paddingHorizontal: 8,
+    paddingVertical: 3
   },
   // 11pt：design-system-r3 的「UI 文案不小于 11pt」下限。别往下调。
   badgeText: { color: color.white, fontSize: 11, fontWeight: "700" }
