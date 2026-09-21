@@ -712,7 +712,7 @@ require_test "ACT-PUBLISH-001" "./internal/activity" \
 require_test "ACT-PUBLISH-001" "./internal/activity" \
   "TestPublishActivityRejectsAIAndInvalidVenueBoundary" \
   "apps/api-go/internal/activity/service_test.go" || exit $?
-pnpm --dir apps/mobile test -- --run src/activity-client.test.ts
+pnpm --dir apps/mobile exec vitest run src/activity-client.test.ts || exit $?
 echo "    ACT-PUBLISH-001: PASS (mobile publish + offline write guard)"
 
 # ACT-MY-ACTIVITIES-001: “我的活动” 物化路径。ListMyActivities
@@ -726,7 +726,7 @@ require_test "ACT-MY-ACTIVITIES-001" "./internal/activity" \
 require_test "ACT-MY-ACTIVITIES-002" "./internal/platform/postgres" \
   "TestActivityPostgresListByOwnerAndParticipant" \
   "apps/api-go/internal/platform/postgres/activity_facet_integration_test.go" || exit $?
-pnpm --dir packages/contracts test -- --run src/activity.test.ts
+pnpm --dir packages/contracts exec vitest run src/activity.test.ts || exit $?
 echo "    ACT-MY-ACTIVITIES-001: PASS (mobile wire schema round-trip)"
 
 # AI-PERSONA-PHOTO-001: 平台 AI 5 角色 (ai_001-ai_005) 冷启动
@@ -736,14 +736,14 @@ echo "    ACT-MY-ACTIVITIES-001: PASS (mobile wire schema round-trip)"
 require_test "AI-PERSONA-PHOTO-001" "./internal/activity" \
   "TestPlatformAIPersonaPhotoRequiredOnColdStart" \
   "apps/api-go/internal/activity/service_test.go" || exit $?
-pnpm --dir packages/contracts test -- --run src/activity.test.ts
+pnpm --dir packages/contracts exec vitest run src/activity.test.ts || exit $?
 echo "    AI-PERSONA-PHOTO-001: PASS (mobile wire schema round-trip)"
 
 # CHAT-PROXY-ACTIVITY-001: conversation sendProxyObject 必须
 # 使用 server 真 activityId, 不允许 hardcoded "act_westlake"
 # 等不存在的 ID. 防 "聊天发活动 ≠ 我的活动页有活动" 的两路径
 # 不对齐. mobile test 拒绝任何隐性 fallback 到 hardcoded ID.
-pnpm --dir apps/mobile test -- --run src/conversation-client.test.ts
+pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts || exit $?
 echo "    CHAT-PROXY-ACTIVITY-001: PASS (real activityId round-trip)"
 
 # PERF-001: ListConversationMessages 必须封顶（200 条，尾部保留，
@@ -893,7 +893,7 @@ require_test "PRODUCT-001" "./internal/platform/postgres" \
 # BusinessClient (不是 hardcoded '48 张')。'me.tsx > merchantstorefront'
 # route 之前是 Bonsaidon 假数据, 现在路由到 MerchantStorefrontSurface
 # + 真接 BusinessClient. tripwire 验证 client 能 round-trip photos。
-pnpm --dir apps/mobile exec vitest run src/business-client.test.ts
+pnpm --dir apps/mobile exec vitest run src/business-client.test.ts || exit $?
 if ! grep -q 'MerchantStorefrontSurface' apps/mobile/src/surfaces/me.tsx; then
   echo "  FAIL [STORE-PHOTO-001 mobile]: me.tsx lost the MerchantStorefrontSurface wire" >&2
   exit 1
@@ -1011,7 +1011,7 @@ if ! grep -q 'supply={supply}' apps/mobile/src/shell/app-shell.tsx; then
   echo "  FAIL [R35-OPERATING-HOME-001]: merchant Home lost eligible Creator supply" >&2
   exit 1
 fi
-pnpm --dir apps/mobile exec vitest run src/business-client.test.ts
+pnpm --dir apps/mobile exec vitest run src/business-client.test.ts || exit $?
 echo "    R35-OPERATING-HOME-001: PASS (real outcome; unknown demand/forecast; conservative NO_ACTION)"
 
 # R35-HOME-BOUNDARY-001: Operating Home belongs only to the BUSINESS Home tab.
@@ -1041,7 +1041,7 @@ if ! grep -q 'profileClient\.updateProfile\|profileClient\.getProfile' apps/mobi
   echo "  FAIL [PROFILE-001 mobile]: me.tsx saveProfile never calls profileClient.updateProfile" >&2
   exit 1
 fi
-pnpm --dir apps/mobile exec vitest run src/profile-client.test.ts
+pnpm --dir apps/mobile exec vitest run src/profile-client.test.ts || exit $?
 echo "    PROFILE-001: PASS (server + mobile half wired to UpdateProfile / GetProfile)"
 
 # CANCEL-001: Order lifecycle enum included CANCELLED, but no
@@ -1064,7 +1064,7 @@ require_test "CANCEL-001" "./internal/fulfillment" \
 require_test "CANCEL-001" "./internal/fulfillment" \
   "TestCancelOrderNotFound" \
   "apps/api-go/internal/fulfillment/service_test.go" || exit $?
-pnpm --dir apps/mobile exec vitest run src/fulfillment-client.test.ts >/dev/null
+pnpm --dir apps/mobile exec vitest run src/fulfillment-client.test.ts >/dev/null || exit $?
 if ! grep -q 'cancelOrder' apps/mobile/src/surfaces/me-orders.tsx; then
   echo "  FAIL [CANCEL-001 mobile]: me-orders surface never calls client.cancelOrder" >&2
   exit 1
@@ -1087,7 +1087,7 @@ if ! grep -q 'client.upsertStoreLines' apps/mobile/src/surfaces/merchant-storefr
   echo "  FAIL [LINES-EDITOR-001]: saveLines never calls client.upsertStoreLines" >&2
   exit 1
 fi
-pnpm --dir apps/mobile exec vitest run src/business-client.test.ts >/dev/null
+pnpm --dir apps/mobile exec vitest run src/business-client.test.ts >/dev/null || exit $?
 echo "    LINES-EDITOR-001: PASS (inline edit form wires to UpsertStoreLines)"
 
 # FRIEND-001: 我的 → 好友与关系 之前是 4 行 hardcoded CRM_FRIENDS
@@ -1113,7 +1113,7 @@ require_test "FRIEND-001" "./internal/relationship" \
 require_test "FRIEND-001" "./internal/relationship" \
   "TestSendFriendRequestRejectsSelf" \
   "apps/api-go/internal/relationship/service_test.go" || exit $?
-pnpm --dir apps/mobile exec vitest run src/relationship-client.test.ts >/dev/null
+pnpm --dir apps/mobile exec vitest run src/relationship-client.test.ts >/dev/null || exit $?
 if ! grep -q 'relationship\.listMyFriendships\|relationship\.acceptFriendRequest' apps/mobile/src/surfaces/friend-crm.tsx; then
   echo "  FAIL [FRIEND-001 mobile]: friend-crm surface never calls RelationshipClient" >&2
   exit 1
@@ -1130,7 +1130,7 @@ if ! grep -q 'PLACEHOLDER-001' apps/mobile/src/surfaces/placeholder-honest-actio
   echo "  FAIL [PLACEHOLDER-001]: placeholder tripwire test file is missing" >&2
   exit 1
 fi
-pnpm --dir apps/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts >/dev/null
+pnpm --dir apps/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts >/dev/null || exit $?
 echo "    PLACEHOLDER-001: PASS (no placeholder buttons / invented fields)"
 
 # PLACEHOLDER-002: 每条交互链必须走完（出图分享之后不断线）。
@@ -1278,7 +1278,7 @@ echo "    PLACEHOLDER-017: PASS (tripwire present; covered by the vitest run abo
 # avatar onto both cards. The me.tsx render path is the
 # canonical consumer — confirm it uses hubProfile, not the
 # raw persona name.
-pnpm --dir apps/mobile exec vitest run src/surfaces/hub-profile.test.ts >/dev/null
+pnpm --dir apps/mobile exec vitest run src/surfaces/hub-profile.test.ts >/dev/null || exit $?
 if ! grep -q 'resolveHubProfile' apps/mobile/src/surfaces/me.tsx; then
   echo "  FAIL [HUB-PROFILE-001]: me.tsx never resolves the live profile for the hub card" >&2
   exit 1
@@ -1301,7 +1301,7 @@ echo "    HUB-PROFILE-001: PASS (hub card + identity card both read live profile
 # the me.tsx render path uses it. Tripwire: the helper is
 # imported, the render path uses it, and the old hardcoded
 # "TT" "Z" "IG" "in" array literal is gone.
-pnpm --dir apps/mobile exec vitest run src/surfaces/hub-profile.test.ts >/dev/null
+pnpm --dir apps/mobile exec vitest run src/surfaces/hub-profile.test.ts >/dev/null || exit $?
 if ! grep -q 'resolveHubSocials' apps/mobile/src/surfaces/me.tsx; then
   echo "  FAIL [HUB-SOCIAL-001]: me.tsx never resolves the live social accounts for the hub card" >&2
   exit 1
@@ -1349,7 +1349,7 @@ echo "    DEAD-SUBPAGE-001: PASS (messages / requestermemory / businessdiagnosti
 
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。
-pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts
+pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts || exit $?
 if ! grep -q 'Math.max(insets.bottom, 16)' apps/mobile/src/surfaces/conversation.tsx; then
   echo "  FAIL [UI-CHAT-001]: conversation composer lost bottom safe-area spacing" >&2
   exit 1
@@ -1519,8 +1519,7 @@ fi
 # 修复 = 全部读入口 await 化 + 纯解析层 local-snapshot.ts（单测覆盖）+
 # mock 如实模拟 async 形态。supersedes HIDDEN-CHATS-001（同一 bug 的
 # 全类收网版；hidden-chats 分支只修了 hidden 一点且已被本修复覆盖）。
-pnpm --dir apps/mobile exec vitest run src/local-snapshot.test.ts \
-  src/sync-fs-persist.test.ts || exit $?
+pnpm --dir apps/mobile exec vitest run src/local-snapshot.test.ts src/sync-fs-persist.test.ts || exit $?
 if ! grep -q 'await hiddenChatsFile.json()' apps/mobile/src/surfaces/messages.tsx; then
   echo "  FAIL [SYNC-FS-001]: hidden chats read must await json()" >&2
   exit 1

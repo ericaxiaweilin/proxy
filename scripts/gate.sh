@@ -251,6 +251,37 @@ gate_g4_drift() {
   fi
   echo "  semantic fixtures: OK (no fake map regressions, no non-AI activity origins)"
 
+  # Pin hygiene: a vitest invocation whose exit code is not enforced makes the
+  # block above it decorative. scripts/check-regression-contracts.sh runs with
+  # `set -u` only (no `set -e`) and its last statement is an `echo`, so an
+  # unguarded failing command neither stops the script nor changes its exit
+  # code -- the block above still prints PASS. Measured 2026-09-21: 14
+  # invocations across 13 blocks were unguarded, and 4 of those used
+  # `test -- --run <file>`, which swallows the file argument and runs the whole
+  # suite (149 files / 1381 tests) instead of the one file it names.
+  echo "  pin hygiene: checking every vitest invocation enforces its exit code..."
+  local pin_script="scripts/check-regression-contracts.sh"
+  # Fail loudly if it is missing: a grep against a nonexistent path also
+  # produces "no unguarded lines", i.e. a vacuous pass. Never let "the check
+  # could not run" read the same as "the check passed".
+  if [ ! -f "$pin_script" ]; then
+    echo "  FAIL: $pin_script not found; pin hygiene cannot be verified" >&2
+    return 1
+  fi
+  local unguarded
+  unguarded=$(grep -nE 'pnpm .*(exec vitest run|test --run|test -- --run)' "$pin_script" \
+    | grep -v 'exit' || true)
+  if [ -n "$unguarded" ]; then
+    echo "  FAIL: vitest invocation whose result is not enforced (append '|| exit \$?'):" >&2
+    echo "$unguarded" | sed 's/^/    - /' >&2
+    return 1
+  fi
+  if grep -qE 'test -- --run' "$pin_script"; then
+    echo "  FAIL: 'test -- --run <file>' swallows the file argument and runs the whole suite" >&2
+    return 1
+  fi
+  echo "  pin hygiene: OK (every vitest invocation enforces its exit code)"
+
   bash scripts/check-regression-contracts.sh || return $?
 }
 
