@@ -30,6 +30,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-
 import { color } from "../theme";
 import { AiPersonaClient, TwinNoAgeEvidenceError, TwinNoLiveConsentError, type TwinConsent, type TwinConsentKind, type TwinPersona } from "../ai-persona-client";
 import type { TransportResponse } from "../auth-client";
+import { TwinInsightSection } from "../components/twin-insight-section";
 import { formatDateOfBirthInput } from "../date-of-birth-input";
 
 type IdentityKind = "HUMAN" | "AI_NATIVE" | "AI_TWIN";
@@ -208,6 +209,12 @@ export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient,
             谁看了、看了多久（访问战绩）和活动日志都在「好友与关系」里，
             不在这里再渲染一遍（同一份 MEDIA-DWELL-001 数据曾经两屏各画一次）。 */}
         <TwinSection client={personaClient} ownerId={viewerAccountId} />
+
+        {/* TWIN-INSIGHT-001: 好友洞察段（用户 2026-09-21 原型落位：AI 分身页）。
+            AI-CLUSTER-BOUNDARY-001 的本意是同一份 MEDIA-DWELL 明细不两屏各画
+            一遍；本段走独立的 TwinInsight wire（服务端算好的洞察），未登录/
+            未接线时用明示的本机演示数据，好友页的明细不动。 */}
+        <TwinInsightSection authClient={authClient} ownerId={viewerAccountId} />
 
         {onOpenFacet ? (
           <Pressable onPress={onOpenFacet} style={styles.facetLinkCard} accessibilityLabel="去 FACET 管理素材怎么分发">
