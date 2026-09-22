@@ -2344,7 +2344,7 @@ fi
 require_test "LC-06" "./internal/media" "TestPostMediaLookup_PropagatesAIGenerationSource" "apps/api-go/internal/media/postmedia_lookup_test.go" || exit $?
 require_test "LC-06" "./internal/localnet" "TestListFeedPosts_PropagatesAIGenerationSourceToMediaWire" "apps/api-go/internal/localnet/service_test.go" || exit $?
 pnpm --dir apps/mobile exec vitest run src/media/ai-media-label.test.ts || exit $?
-echo "    LC-06-display: PASS (per-asset AI provenance reaches the client; every media shape — single image, single video, RAIL card, profile cell — is labelled)"
+echo "    LC-06-display: PASS (per-asset AI provenance reaches the client; every media shape — single image, single video, RAIL card, profile cell, fullscreen viewer — is labelled)"
 
 # AI-DISCLOSURE-001：activity 面上的 AI 标注**不能**挂在 persona 名字上。
 #
