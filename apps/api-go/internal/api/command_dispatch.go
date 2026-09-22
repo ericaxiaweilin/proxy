@@ -75,7 +75,11 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		// Privileged commands (capability verification, contribution review /
 		// reward, media readiness override) require operator rights. Fail closed.
 		if requiresOperator(envelope.CommandType) {
-			if s.Operator == nil || !s.Operator.IsOperator(envelope.Actor, envelope.Principal, envelope.AuthContext) {
+			isOp := s.Operator != nil && s.Operator.IsOperator(envelope.Actor, envelope.Principal, envelope.AuthContext)
+			// OPS-SCOPE-001: IsOperator 之后再验 scope。今天白名单内恒全 scope，
+			// 与现行放行逐条一致（parity 测试钉住）；per-principal scope 配置
+			// 落地后只改 ScopesForPrincipal，这里零改动。
+			if !isOp || !AuthorizeOperatorCommand(envelope.CommandType, ScopesForPrincipal(isOp)) {
 				result := command.Rejected(envelope, "OPERATOR_PRIVILEGE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "command.operator_privilege_required", nil)
 				writeResult(w, http.StatusForbidden, result)
 				return
