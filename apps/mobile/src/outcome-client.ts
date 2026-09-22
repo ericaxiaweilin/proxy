@@ -2,6 +2,7 @@ import type { CommandResult } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export class OutcomeClient {
   private sequence = 0;
@@ -51,7 +52,7 @@ export class OutcomeClient {
     const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
     if (!result) throw new Error("outcome command malformed");
-    if (result.outcome === "REJECTED") throw new Error(result.error?.messageKey ?? result.error?.errorCode ?? "outcome rejected");
+    if (result.outcome === "REJECTED") throw new Error(commandErrorMessage(result.error, "outcome rejected"));
     if (response.status < 200 || response.status >= 300) throw new Error(`unexpected outcome status: ${response.status}`);
     return result;
   }

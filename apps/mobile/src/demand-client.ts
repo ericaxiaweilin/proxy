@@ -3,6 +3,7 @@ import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type AuthenticatedCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
@@ -16,7 +17,7 @@ export type DemandClientOptions = {
 
 export class DemandCommandRejectedError extends Error {
   public constructor(public readonly result: CommandResult) {
-    super(result.error?.messageKey ?? "demand command rejected");
+    super(commandErrorMessage(result.error, "demand command rejected"));
     this.name = "DemandCommandRejectedError";
   }
 }

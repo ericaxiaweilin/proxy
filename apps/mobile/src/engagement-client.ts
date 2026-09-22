@@ -14,6 +14,7 @@ import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type EngagementCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
@@ -28,7 +29,7 @@ export class EngagementProtocolError extends Error {
 
 export class EngagementCommandRejectedError extends Error {
   public constructor(public readonly result: CommandResult) {
-    super(result.error?.messageKey ?? "engagement command rejected");
+    super(commandErrorMessage(result.error, "engagement command rejected"));
     this.name = "EngagementCommandRejectedError";
   }
 }

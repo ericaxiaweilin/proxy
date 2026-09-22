@@ -3,6 +3,7 @@ import type { AuthenticatedCommandTransport } from "./demand-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 // ── R15.13 P2: Memory envelope shape returned by api-go ────────────
 // The server wraps each list/get response in a JSON object inside
@@ -60,7 +61,7 @@ export class SceneClient {
   private async send(session: StoredSession & {principal: NonNullable<StoredSession["principal"]>}, type:string, target:{type:string;id:string}, payload:Record<string,unknown>, ver?:number){
     const envelope={ commandId:this.nextId("cmd"), commandType:type, commandVersion:1, actor:{type:"USER",id:session.userAccountId}, principal:session.principal, target, idempotencyKey:this.nextId("idem"), ...(ver!==undefined?{expectedAggregateVersion:ver}:{}), authContext:{sessionId:session.auth.sessionId}, purpose:"scene_value_exchange", correlationId:this.nextId("corr"), requestedAt:(this.input.now?.()??new Date()).toISOString(), payload };
     const res=await this.input.authClient.request(`/v1/commands/${type}`,{method:"POST", body:envelope});
-    const result=parseCommandResult(await res.json()); if(!result) throw new Error("malformed"); if(result.outcome==="REJECTED") throw Object.assign(new Error(result.error?.messageKey||"rejected"),{result}); return result;
+    const result=parseCommandResult(await res.json()); if(!result) throw new Error("malformed"); if(result.outcome==="REJECTED") throw Object.assign(new Error(commandErrorMessage(result.error,"rejected")),{result}); return result;
   }
 
   /**

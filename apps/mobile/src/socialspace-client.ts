@@ -4,6 +4,7 @@ import type { AuthenticatedCommandTransport } from "./localnet-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 const StatusSchema = z.object({
   id: z.string(),
@@ -37,7 +38,7 @@ export class SocialSpaceProtocolError extends Error {
 
 export class SocialSpaceCommandRejectedError extends Error {
   public constructor(public readonly result: CommandResult) {
-    super(result.error?.messageKey ?? "social space command rejected");
+    super(commandErrorMessage(result.error, "social space command rejected"));
     this.name = "SocialSpaceCommandRejectedError";
   }
 }

@@ -7,6 +7,7 @@ import type {
 import { parseSessionAuthTokens, SecureSessionStore, type StoredSession } from "./secure-session";
 import type { Transport, TransportRequest, TransportResponse } from "./auth-client";
 import { parseDateOfBirthParts } from "./date-of-birth-input";
+import { commandErrorMessage } from "./command-error-message";
 
 export type LoginChallengeChannel = "EMAIL" | "SMS";
 
@@ -49,7 +50,7 @@ export type CreateSessionInput = {
 
 export class LoginCommandRejectedError extends Error {
   public constructor(public readonly result: CommandResult) {
-    super(result.error?.messageKey ?? "login command rejected");
+    super(commandErrorMessage(result.error, "login command rejected"));
     this.name = "LoginCommandRejectedError";
   }
 }
@@ -205,7 +206,7 @@ export class LoginClient {
       platform,
       deviceCredential: this.input.deviceCredential
     });
-    if (result.outcome !== "ACCEPTED") throw new LoginProtocolError(result.error?.messageKey ?? "Google authentication rejected");
+    if (result.outcome !== "ACCEPTED") throw new LoginProtocolError(commandErrorMessage(result.error, "Google authentication rejected"));
     const auth = parseSessionAuthTokens(result.auth);
     if (!auth) throw new LoginProtocolError("Google authentication did not return valid auth tokens");
     const session: StoredSession = { userAccountId: auth.userAccountId, auth, principal: auth.principal };

@@ -14,6 +14,7 @@ import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type FriendshipState = "PENDING" | "FRIEND" | "BLOCKED";
 
@@ -96,7 +97,7 @@ export class RelationshipClient {
     const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
     if (!result) throw new Error("relationship command malformed");
-    if (result.outcome === "REJECTED") throw new Error(result.error?.messageKey ?? result.error?.errorCode ?? "relationship rejected");
+    if (result.outcome === "REJECTED") throw new Error(commandErrorMessage(result.error, "relationship rejected"));
     if (response.status < 200 || response.status >= 300) throw new Error(`unexpected relationship status: ${response.status}`);
     return result;
   }

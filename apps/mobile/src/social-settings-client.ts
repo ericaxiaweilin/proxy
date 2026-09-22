@@ -3,6 +3,7 @@ import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import type { SocialSettingsRecord } from "./social-settings-store";
+import { commandErrorMessage } from "./command-error-message";
 
 export class SocialSettingsClient {
   private sequence = 0;
@@ -42,7 +43,7 @@ export class SocialSettingsClient {
     const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
     if (!result) throw new Error("account preferences response malformed");
-    if (result.outcome === "REJECTED") throw new Error(result.error?.messageKey ?? result.error?.errorCode ?? "account preferences rejected");
+    if (result.outcome === "REJECTED") throw new Error(commandErrorMessage(result.error, "account preferences rejected"));
     if (response.status < 200 || response.status >= 300) throw new Error(`unexpected account preferences status: ${response.status}`);
     return result;
   }

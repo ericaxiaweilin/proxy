@@ -3,6 +3,7 @@ import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type InboxItem = {
   id: string;
@@ -64,7 +65,7 @@ export class NotificationClient {
     const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
     if (!result) throw new Error("notification command malformed");
-    if (result.outcome === "REJECTED") throw new Error(result.error?.messageKey ?? result.error?.errorCode ?? "notification rejected");
+    if (result.outcome === "REJECTED") throw new Error(commandErrorMessage(result.error, "notification rejected"));
     if (response.status < 200 || response.status >= 300) throw new Error(`unexpected notification status: ${response.status}`);
     return result;
   }

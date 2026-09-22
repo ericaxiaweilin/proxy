@@ -16,6 +16,7 @@ import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type SessionWire = {
   id: string;
@@ -75,7 +76,7 @@ export class SessionClient {
     const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
     if (!result) throw new Error("session command malformed");
-    if (result.outcome === "REJECTED") throw new Error(result.error?.messageKey ?? result.error?.errorCode ?? "session rejected");
+    if (result.outcome === "REJECTED") throw new Error(commandErrorMessage(result.error, "session rejected"));
     if (response.status < 200 || response.status >= 300) throw new Error(`unexpected session status: ${response.status}`);
     return result;
   }

@@ -8,6 +8,7 @@ import { filterPostsByFeedSearch, normalizeFeedSearchQuery } from "./feed-search
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type AuthenticatedCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
@@ -122,7 +123,7 @@ export class LocalNetProtocolError extends Error {
 
 export class LocalNetCommandRejectedError extends Error {
   public constructor(public readonly result: CommandResult) {
-    super(result.error?.messageKey ?? "localnet command rejected");
+    super(commandErrorMessage(result.error, "localnet command rejected"));
     this.name = "LocalNetCommandRejectedError";
   }
 }

@@ -11,6 +11,7 @@ import {
 import type { TransportResponse } from "../auth-client";
 import { parseCommandResult } from "../login-client";
 import type { SecureSessionStore, StoredSession } from "../secure-session";
+import { commandErrorMessage } from "../command-error-message";
 
 export type RuntimeTransport = {
   request(path: string, init: { method: "GET" | "POST"; body?: unknown; headers?: Record<string,string> }): Promise<TransportResponse>;
@@ -68,7 +69,7 @@ export class ExperienceRuntimeClient {
     if (result.outcome === "REJECTED") {
       // §18.2 fallback — surface fallback_plan_id in error details
       const fb = (result.error?.safeDetails as Record<string, unknown> | undefined)?.["fallback_plan_id"];
-      throw new ExperienceRuntimeError(result.error?.messageKey ?? "compile_rejected", { fallbackPlanId: fb, result });
+      throw new ExperienceRuntimeError(commandErrorMessage(result.error, "compile_rejected"), { fallbackPlanId: fb, result });
     }
     if (result.outcome === "ACCEPTED" && result.aggregate?.state === "NO_UI_CHANGE") {
       // §18.4 valid legal result

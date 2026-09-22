@@ -8072,3 +8072,44 @@ if ! grep -qF '"IssueVoucherDefinition": true' apps/api-go/internal/api/merchant
 fi
 go -C apps/api-go test ./internal/platform/postgres/ -run TestVoucherDefinitionPostgresRoundTrip -count=1 || exit $?
 echo "    VOUCHER-ISSUE-001: PASS (merchant-stamped definitions, forged claims rejected, PG persisted)"
+
+# SERVICE-DISABLED-MSG-001：运营拨下 kill switch 后，命令被拒时用户看到的是**句子**，
+# 不是英文机器串。
+#
+# 服务端拒绝时给的是
+#   code       = "SERVICE_DISABLED"
+#   messageKey = "compliance.service_disabled"     ← 机器串，不是句子
+# （apps/api-go/internal/api/command_dispatch.go:171；签名见 command/model.go:102）
+# 而各 *-client.ts 原本一律
+#   throw new Error(result.error?.messageKey ?? result.error?.errorCode ?? fallback)
+# ⇒ 那个英文机器串直接进了 Error.message，也就是直接给用户看了。
+# 全仓原本没有任何 messageKey → 人话的翻译表。
+#
+# 这不是文案取舍，是漏翻译。仓库里已经修过同一类：native-app.tsx 的
+# loginChallengeErrorMessage()（注释「裸 messageKey 换成与主路径同一套映射文案」），
+# 并且刻意**把原始错误码留在括号里**便于排查 —— 这里照同一形状做。
+#
+# 钉的形状跟 LC-06 那条教训一致：**逐个出口**钉。第一版只接了 7 个 commerce
+# client，grep 一查还有 18 处同样的漏翻译（其中 marketplace-client 正是
+# 「MARKETPLACE 被停、用户点下单」那条路）。文件级 grep 抓不到「这一处没接」。
+if ! grep -qE 'export function commandErrorMessage\(' apps/mobile/src/command-error-message.ts; then
+  echo "  FAIL [SERVICE-DISABLED-MSG-001]: the command-error translator is gone." >&2
+  exit 1
+fi
+for f in payment-client fulfillment-client supply-client voucher-client social-settings-client \
+         socialspace-client benefit-client login-client relationship-client profile-client \
+         engagement-client experience-client moderation-client activity-client marketplace-client \
+         session-client demand-client notification-client outcome-client business-client \
+         localnet-client storeonboarding-client scene-client media-client; do
+  if ! grep -qF 'commandErrorMessage(' "apps/mobile/src/$f.ts"; then
+    echo "  FAIL [SERVICE-DISABLED-MSG-001]: $f still throws the raw messageKey at the user." >&2
+    echo "        A killed service returns messageKey=compliance.service_disabled — not a sentence." >&2
+    exit 1
+  fi
+done
+if ! grep -qF 'commandErrorMessage(' apps/mobile/src/experience-runtime/client.ts; then
+  echo "  FAIL [SERVICE-DISABLED-MSG-001]: experience-runtime/client still throws the raw messageKey." >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/command-error-message.test.ts || exit $?
+echo "    SERVICE-DISABLED-MSG-001: PASS (a killed service says 服务已暂停, not compliance.service_disabled)"

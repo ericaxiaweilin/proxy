@@ -6,6 +6,7 @@ import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type { MarketApplication } from "@proxy/contracts";
 
@@ -140,7 +141,7 @@ export class MarketplaceClient {
     const response = await request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
     if (!result) throw new Error("market command response was malformed");
-    if (result.outcome === "REJECTED") throw new Error(result.error?.messageKey ?? "market command rejected");
+    if (result.outcome === "REJECTED") throw new Error(commandErrorMessage(result.error, "market command rejected"));
     if (response.status < 200 || response.status >= 300) throw new Error(`unexpected market command status: ${response.status}`);
     return result;
   }
