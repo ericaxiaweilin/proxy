@@ -6,6 +6,7 @@ import MapView, { Circle, Marker } from "react-native-maps";
 import * as Location from "expo-location";
 import { getCurrentFix } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
+import { commandErrorMessage } from "../command-error-message";
 import { sceneAddressLine, sceneCountsLine, sceneHeatScore, sceneSignalLine, sceneSourceSuffix } from "../reality-scene-address";
 import { captureRef } from "react-native-view-shot";
 import { checkinEligibility, checkinHint } from "../scene-checkin";
@@ -980,7 +981,7 @@ async function sendSceneCommand(authClient: SessionAuthClient, session: Authenti
     correlationId: `scene_corr_${nonce}`, requestedAt: new Date().toISOString(), payload
   }});
   const result = parseCommandResult(await response.json());
-  if (!result || response.status < 200 || response.status >= 300 || result.outcome === "REJECTED") throw new Error(result?.error?.messageKey ?? "reality scene command failed");
+  if (!result || response.status < 200 || response.status >= 300 || result.outcome === "REJECTED") throw new Error(commandErrorMessage(result?.error, "reality scene command failed"));
   let decoded: Record<string, unknown> = {};
   if (result.operationRef) {
     const value = JSON.parse(result.operationRef) as unknown;

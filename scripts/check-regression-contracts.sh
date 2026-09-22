@@ -8111,5 +8111,25 @@ if ! grep -qF 'commandErrorMessage(' apps/mobile/src/experience-runtime/client.t
   echo "  FAIL [SERVICE-DISABLED-MSG-001]: experience-runtime/client still throws the raw messageKey." >&2
   exit 1
 fi
+# 唯一一处**不在 *-client.ts 里**的出口：现实行动的命令被拒时自己 throw。
+# 它下面还有一层 sceneActionErrorMessage() 会把纯机器串兜成「操作失败，请稍后重试」，
+# 所以原本看不到裸码 —— 但接上映射后能说得更准（「服务已暂停」而非泛泛的「操作失败」）。
+if ! grep -qF 'commandErrorMessage(' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SERVICE-DISABLED-MSG-001]: reality-scene-map still throws the raw messageKey." >&2
+  exit 1
+fi
+# ⚠️ 已知未接（2026-09-22），**故意没钉成 FAIL**：
+#   apps/mobile/src/shell/app-shell.tsx:1038
+#     setError(e?.result?.error?.messageKey ?? e?.message ?? "创建失败")
+#   仍然把 messageKey 直接上屏（GLOBAL 开关拨下时用户会看到
+#   "compliance.service_disabled"）。
+#   但该文件当时是**别人的在制文件**，动不得；而为它加一条"从写出来就红"的钉，
+#   会挡住所有人提交 —— 那是拿门禁替别人做决定。所以这里只记录，不拦。
+#   等文件空闲了：接上 commandErrorMessage，并把下面这段注掉的臂打开。
+#
+# if grep -qF 'error?.messageKey ?? e?.message' apps/mobile/src/shell/app-shell.tsx; then
+#   echo "  FAIL [SERVICE-DISABLED-MSG-001]: app-shell still puts the raw messageKey on screen." >&2
+#   exit 1
+# fi
 pnpm --dir apps/mobile exec vitest run src/command-error-message.test.ts || exit $?
 echo "    SERVICE-DISABLED-MSG-001: PASS (a killed service says 服务已暂停, not compliance.service_disabled)"

@@ -66,6 +66,7 @@ describe("SERVICE-DISABLED-MSG-001: 被拒的命令说人话，不说机器串",
       "./scene-client.ts",
       "./media-client.ts",
       "./experience-runtime/client.ts",
+      "./surfaces/reality-scene-map.tsx",
     ];
     for (const rel of wired) {
       const code = read(rel);
