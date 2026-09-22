@@ -341,7 +341,7 @@ func main() {
 	server.Business = businessService
 	// RELATIONSHIP-DISPLAYNAME-001（2026-09-22 修）：SetDisplayNameResolver 定义了
 	// 却从没被任何生产代码调用过 —— relationship/service.go 的兜底于是把
-	// DisplayName 写成原始账号 id，好友列表显示成 "user_mockcreator_mai"
+	// DisplayName 写成原始账号 id，好友列表里显示的是那一长串 id 而不是「Mai」
 	// （friend-crm 渲染 displayName || userId）。
 	//
 	// 名字的事实源是 identity.profiles，identity 服务已经为内容发布方（localnet /
