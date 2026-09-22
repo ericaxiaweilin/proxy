@@ -12,6 +12,10 @@ import (
 // readiness override). Fail-closed: a nil gate denies everything.
 type OperatorGate interface {
 	IsOperator(actor command.Actor, principal command.Principal, authContext map[string]any) bool
+	// OPS-SCOPE-002: scopes held by this caller (see operator_scopes.go).
+	// Empty = none. Call only after IsOperator passes; non-operators get
+	// an empty set either way.
+	ScopesFor(actor command.Actor, principal command.Principal, authContext map[string]any) map[OperatorScope]bool
 }
 
 // StaticOperatorGate grants operator rights to an explicit principal allowlist
@@ -19,6 +23,10 @@ type OperatorGate interface {
 // their server-issued auth context.
 type StaticOperatorGate struct {
 	principalIDs map[string]bool
+	// OPS-SCOPE-002: optional per-principal scopes (env
+	// PROXY_OPERATOR_SCOPES, see ParsePrincipalScopes). Nil = every
+	// allowlisted caller holds the full scope set (pre-scope behavior).
+	scoped map[string]map[OperatorScope]bool
 }
 
 func NewStaticOperatorGate(principalIDs []string) *StaticOperatorGate {

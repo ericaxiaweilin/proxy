@@ -76,10 +76,13 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		// reward, media readiness override) require operator rights. Fail closed.
 		if requiresOperator(envelope.CommandType) {
 			isOp := s.Operator != nil && s.Operator.IsOperator(envelope.Actor, envelope.Principal, envelope.AuthContext)
-			// OPS-SCOPE-001: IsOperator 之后再验 scope。今天白名单内恒全 scope，
-			// 与现行放行逐条一致（parity 测试钉住）；per-principal scope 配置
-			// 落地后只改 ScopesForPrincipal，这里零改动。
-			if !isOp || !AuthorizeOperatorCommand(envelope.CommandType, ScopesForPrincipal(isOp)) {
+			// OPS-SCOPE-002: scope 从 gate 来（per-principal 配置；无配置=白名单内全
+			// scope，即今天的行为）。s.Operator 非空是 isOp 的前件，走不到空指针。
+			scopes := ScopesForPrincipal(false)
+			if isOp {
+				scopes = s.Operator.ScopesFor(envelope.Actor, envelope.Principal, envelope.AuthContext)
+			}
+			if !isOp || !AuthorizeOperatorCommand(envelope.CommandType, scopes) {
 				result := command.Rejected(envelope, "OPERATOR_PRIVILEGE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "command.operator_privilege_required", nil)
 				writeResult(w, http.StatusForbidden, result)
 				return

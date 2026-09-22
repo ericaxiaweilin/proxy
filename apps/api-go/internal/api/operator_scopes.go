@@ -1,5 +1,12 @@
 package api
 
+import (
+	"strconv"
+	"strings"
+
+	"github.com/proxy-app/proxy-api/internal/command"
+)
+
 // OPS-SCOPE-001: operator 最小权限的第一步 —— 把"是不是 operator"（二值）
 // 拆成"这个 operator 有哪几个域的 scope"。
 //
@@ -86,11 +93,11 @@ var requiredOperatorScope = map[string]OperatorScope{
 	// MEDIA
 	"MarkMediaReady": ScopeMedia,
 	// MODERATION
-	"ReviewMediaAsset":        ScopeModeration,
+	"ReviewMediaAsset":         ScopeModeration,
 	"ListMediaReviewDecisions": ScopeModeration,
 	"AmendMediaReviewDecision": ScopeModeration,
-	"RecordReportDisposition": ScopeModeration,
-	"RecordAppealDecision":    ScopeModeration,
+	"RecordReportDisposition":  ScopeModeration,
+	"RecordAppealDecision":     ScopeModeration,
 	// PAYMENTS
 	"ConfirmPaymentIntent": ScopePayments,
 	"RefundPaymentIntent":  ScopePayments,
@@ -130,14 +137,11 @@ func RequiredOperatorScope(commandType string) (OperatorScope, bool) {
 	return scope, ok
 }
 
-// ScopesForPrincipal 返回某 principal 持有的 scope 集合。
+// ScopesForPrincipal 返回某 principal 持有的 scope 集合（无配置时的后备）。
 //
-// 今天：allowlisted（= IsOperator 通过，含白名单与 role=OPERATOR 会话）= 全
-// scope —— 与现行放行完全一致，零行为变更。allowlisted=false = 空集。
-//
-// 下一步（不在本 slice）：env 按人配 scope（例如
-// PROXY_OPERATOR_SCOPES="alice:PAYMENTS,MARKETPLACE"），到时只改这个函数，
-// dispatch 与各 service 零改动。
+// allowlisted（= IsOperator 通过，含白名单与 role=OPERATOR 会话）= 全 scope ——
+// 与 scope 配置落地前的放行完全一致；allowlisted=false = 空集。
+// 有 per-principal 配置时走 StaticOperatorGate.ScopesFor，本函数仍是它的后备。
 func ScopesForPrincipal(allowlisted bool) map[OperatorScope]bool {
 	scopes := make(map[OperatorScope]bool, len(allOperatorScopes))
 	if !allowlisted {
@@ -147,6 +151,93 @@ func ScopesForPrincipal(allowlisted bool) map[OperatorScope]bool {
 		scopes[scope] = true
 	}
 	return scopes
+}
+
+// OPS-SCOPE-002: per-principal scope 配置。
+//
+// Env 格式（PROXY_OPERATOR_SCOPES）：
+// :
+//
+//		"op_alice:PAYMENTS,MARKETPLACE;op_bob:*"
+//
+//	  - 分号分条，条内 `principal_id:scope 逗号表`；`id` 与 scope 名两侧空白忽略；
+//	  - principal id 不得含 `:` / `;`（现有 id 都是 slug，无此字符）；
+//	  - `*` = 全部 scope；未知 scope 名整项跳过 + 警告（往小了给，fail-closed）；
+//	  - 格式坏掉的条目整条跳过 + 警告；同一 id 出现多次以后者为准；
+//	  - 某 id 配成了空集（如全是未知名）= 明确拒绝其一切门命令（fail-closed）；
+//	  - env 为空/未配 = 今天的行为（白名单内全 scope），零行为变更。
+func ParsePrincipalScopes(env string) (map[string]map[OperatorScope]bool, []string) {
+	parsed := make(map[string]map[OperatorScope]bool)
+	var warnings []string
+	valid := make(map[OperatorScope]bool, len(allOperatorScopes))
+	for _, scope := range allOperatorScopes {
+		valid[scope] = true
+	}
+	for _, entry := range strings.Split(env, ";") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		id, scopesStr, ok := strings.Cut(entry, ":")
+		id = strings.TrimSpace(id)
+		scopesStr = strings.TrimSpace(scopesStr)
+		if !ok || id == "" || scopesStr == "" {
+			warnings = append(warnings, "ignoring malformed operator scope entry: "+strconv.Quote(entry))
+			continue
+		}
+		set := make(map[OperatorScope]bool)
+		for _, name := range strings.Split(scopesStr, ",") {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			if name == "*" {
+				for _, scope := range allOperatorScopes {
+					set[scope] = true
+				}
+				continue
+			}
+			scope := OperatorScope(name)
+			if !valid[scope] {
+				warnings = append(warnings, "ignoring unknown operator scope "+strconv.Quote(name)+" for "+strconv.Quote(id))
+				continue
+			}
+			set[scope] = true
+		}
+		parsed[id] = set
+	}
+	return parsed, warnings
+}
+
+// WithPrincipalScopes 给 gate 装上 per-principal scope 配置。接线（读
+// PROXY_OPERATOR_SCOPES env → Parse → 本函数）落在 cmd/api/main.go，那是
+// market 合同下的基线敏感文件，由 commander 随本包附带的 wiring patch 一起
+// 落盘（含 design acknowledgement 判断）。返回 g 自身以便链式；nil 接收者直接返回。
+func (g *StaticOperatorGate) WithPrincipalScopes(scoped map[string]map[OperatorScope]bool) *StaticOperatorGate {
+	if g == nil {
+		return g
+	}
+	g.scoped = scoped
+	return g
+}
+
+// ScopesFor 实现 OperatorGate：先过 IsOperator（不过=空集），再看有没有给
+// 这个 principal 配 scope —— 配了就按配的来（含配成空集=全拒）；没配（白名单
+// 内老条目、role=OPERATOR 会话）= 全 scope，即今天的行为。
+func (g *StaticOperatorGate) ScopesFor(actor command.Actor, principal command.Principal, authContext map[string]any) map[OperatorScope]bool {
+	if g == nil || !g.IsOperator(actor, principal, authContext) {
+		return map[OperatorScope]bool{}
+	}
+	if g.scoped != nil {
+		if scopes, ok := g.scoped[principal.ID]; ok {
+			out := make(map[OperatorScope]bool, len(scopes))
+			for scope := range scopes {
+				out[scope] = true
+			}
+			return out
+		}
+	}
+	return ScopesForPrincipal(true)
 }
 
 // AuthorizeOperatorCommand 在 IsOperator 通过之后再验一道 scope。
