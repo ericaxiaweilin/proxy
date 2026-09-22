@@ -13,6 +13,7 @@ import { HomeSearchDock } from "../components/home-search-dock";
 import { buildHomeSearchIndex, matchHomeSearchIntent, shouldSearchServerPeople, type HomeSearchSuggestion } from "../home-search-intent";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
+import { resolveHomePersonAccountId } from "../recommend-fixtures";
 import { color, shadows } from "../theme";
 import type { HardDemandCategory } from "../uiplan/types";
 import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from "../demand-client";
@@ -75,6 +76,21 @@ function projectTask(t: RequesterHomeTaskItem): ContinueCard {
     title: t.sourceInput,
     sub: `已发布 · 等待匹配`
   };
+}
+
+// HOME-FRIEND-ID-001（2026-09-22 修）：首页真人卡用的是本地 fixture id
+// （u_linh），服务端账号是 user_mockcreator_linh；而关系链状态表是按服务端
+// 账号 id 建的（见本文件 listMyFriendships 那段：next.set(item.userId, …)）。
+// 两边对不上，于是两个症状同时存在：
+//   ① 点 + 把 fixture id 当 targetUserId 发出去 → 申请落在**不存在的账号**上，
+//      没有真人能收到同意入口（库里攒了 12 条无人可同意的 PENDING）；
+//   ② 即使对方同意了，卡片也永远显示「+ 添加」，因为按 u_linh 查不到状态。
+// resolveHomePersonAccountId 是唯一的事实源映射（recommend-fixtures）。
+// 没进 ACCOUNT_AVATAR_ASSET 的 fixture 人服务端没有账号 —— 按「无账号」处理：
+// 不发申请，也不读关系链状态（返回 undefined）。
+function relationshipKeyFor(id: string): string | undefined {
+  const resolved = resolveHomePersonAccountId(id);
+  return resolved.startsWith("u_") ? undefined : resolved;
 }
 
 export function RequesterHome({
@@ -289,23 +305,42 @@ export function RequesterHome({
     }
   }
 
+  // 关系链状态表按服务端账号 id 建；调用点给的多半是 fixture id（u_linh）。
+  // 这两个包装把「界面用的 id」翻成「账号 id」再查，调用点不必各自记住这件事。
+  function relationshipStateFor(id: string): HomeRelationshipState {
+    const key = relationshipKeyFor(id);
+    return key === undefined ? "NONE" : relationshipStates.get(key) ?? "NONE";
+  }
+
+  function relationshipBusyFor(id: string): boolean {
+    const key = relationshipKeyFor(id);
+    return key !== undefined && relationshipBusyId === key;
+  }
+
   async function handleHomeFriend(id: string, name: string): Promise<void> {
     if (!relationship || !viewerAccountId) {
       setRelationshipMsg("登录后可添加好友");
       return;
     }
     if (relationshipBusyId !== undefined) return;
-    const current = relationshipStates.get(id) ?? "NONE";
+    const key = relationshipKeyFor(id);
+    if (key === undefined) {
+      // 这个人只存在于本地 fixture，服务端没有账号。以前这里会把 fixture id
+      // 当 targetUserId 发出去，落成一条永远没人能同意的申请。不发，说清楚。
+      setRelationshipMsg(`${name} 还没有账号，暂时加不了好友`);
+      return;
+    }
+    const current = relationshipStateFor(key);
     if (current === "OUTGOING" || current === "FRIEND") return;
-    setRelationshipBusyId(id);
+    setRelationshipBusyId(key);
     setRelationshipMsg(undefined);
     try {
       const nextState: HomeRelationshipState = current === "INCOMING" ? "FRIEND" : "OUTGOING";
-      if (current === "INCOMING") await relationship.acceptFriendRequest(id);
-      else await relationship.sendFriendRequest(id);
+      if (current === "INCOMING") await relationship.acceptFriendRequest(key);
+      else await relationship.sendFriendRequest(key);
       setRelationshipStates((prev) => {
         const next = new Map(prev);
-        next.set(id, nextState);
+        next.set(key, nextState);
         return next;
       });
       setRelationshipMsg(current === "INCOMING" ? `已成为好友 · ${name}` : `好友申请已发送 · ${name}`);
@@ -322,8 +357,8 @@ export function RequesterHome({
   }
 
   function relationshipGlyph(id: string): string {
-    if (relationshipBusyId === id) return "…";
-    const state = relationshipStates.get(id) ?? "NONE";
+    if (relationshipBusyFor(id)) return "…";
+    const state = relationshipStateFor(id);
     if (state === "FRIEND") return "✓";
     if (state === "OUTGOING") return "↗";
     if (state === "INCOMING") return "!";
@@ -331,7 +366,7 @@ export function RequesterHome({
   }
 
   function relationshipLabel(id: string, name: string): string {
-    const state = relationshipStates.get(id) ?? "NONE";
+    const state = relationshipStateFor(id);
     if (state === "FRIEND") return `已是好友 ${name}`;
     if (state === "OUTGOING") return `已申请好友 ${name}`;
     if (state === "INCOMING") return `接受 ${name} 的好友申请`;
@@ -824,8 +859,8 @@ export function RequesterHome({
               {p.online ? <View style={styles.onlineDot} /> : null}
               <Pressable
                 onPress={() => void handleHomeFriend(p.id, p.name)}
-                disabled={relationshipBusyId === p.id || relationshipStates.get(p.id) === "OUTGOING" || relationshipStates.get(p.id) === "FRIEND"}
-                style={[styles.addBadge, relationshipStates.get(p.id) === "FRIEND" && styles.addBadgeDone, relationshipStates.get(p.id) === "OUTGOING" && styles.addBadgePending]}
+                disabled={relationshipBusyFor(p.id) || relationshipStateFor(p.id) === "OUTGOING" || relationshipStateFor(p.id) === "FRIEND"}
+                style={[styles.addBadge, relationshipStateFor(p.id) === "FRIEND" && styles.addBadgeDone, relationshipStateFor(p.id) === "OUTGOING" && styles.addBadgePending]}
                 accessibilityLabel={relationshipLabel(p.id, p.name)}
               >
                 <Text style={styles.addBadgeText}>{relationshipGlyph(p.id)}</Text>
@@ -1179,7 +1214,7 @@ export function RequesterHome({
                 </View>
               </View>
               <View style={styles.humanSceneActionsTop}>
-                <Pressable accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)} disabled={relationshipBusyId === humanScenePreview.person.id || relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" || relationshipStates.get(humanScenePreview.person.id) === "FRIEND"} onPress={() => void handleHomeFriend(humanScenePreview.person.id, humanScenePreview.person.name)} style={[styles.humanSceneTopAction, styles.humanSceneTopActionPrimary, (relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" || relationshipStates.get(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDone]}><Text style={styles.humanSceneTopActionPrimaryText}>{relationshipBusyId === humanScenePreview.person.id ? "添加中…" : relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" ? "添加中" : relationshipStates.get(humanScenePreview.person.id) === "FRIEND" ? "✓ 已添加" : relationshipStates.get(humanScenePreview.person.id) === "INCOMING" ? "接受添加" : "+ 添加"}</Text></Pressable>
+                <Pressable accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)} disabled={relationshipBusyFor(humanScenePreview.person.id) || relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND"} onPress={() => void handleHomeFriend(humanScenePreview.person.id, humanScenePreview.person.name)} style={[styles.humanSceneTopAction, styles.humanSceneTopActionPrimary, (relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDone]}><Text style={styles.humanSceneTopActionPrimaryText}>{relationshipBusyFor(humanScenePreview.person.id) ? "添加中…" : relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" ? "添加中" : relationshipStateFor(humanScenePreview.person.id) === "FRIEND" ? "✓ 已添加" : relationshipStateFor(humanScenePreview.person.id) === "INCOMING" ? "接受添加" : "+ 添加"}</Text></Pressable>
                 <Pressable accessibilityLabel="查看主页" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanProfile?.(person); }} style={styles.humanSceneTopAction}><Text style={styles.humanSceneTopActionText}>主页</Text></Pressable>
                 <Pressable accessibilityLabel="发消息" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onMessageHuman?.(person); }} style={styles.humanSceneTopAction}><Text style={styles.humanSceneTopActionText}>发消息</Text></Pressable>
               </View>

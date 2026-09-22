@@ -339,6 +339,23 @@ func main() {
 	server := api.NewServerWithRuntime(identityService, demandService, cityCompanionService, localNetService, localContextService, conversationService, engagementService, fulfillmentService, supplyService, mediaService, contributionService, idempotencyStore, readyCheck, authenticator, transactions)
 	server.SocialSpace = socialSpaceService
 	server.Business = businessService
+	// RELATIONSHIP-DISPLAYNAME-001（2026-09-22 修）：SetDisplayNameResolver 定义了
+	// 却从没被任何生产代码调用过 —— relationship/service.go 的兜底于是把
+	// DisplayName 写成原始账号 id，好友列表显示成 "user_mockcreator_mai"
+	// （friend-crm 渲染 displayName || userId）。
+	//
+	// 名字的事实源是 identity.profiles，identity 服务已经为内容发布方（localnet /
+	// socialspace / marketplace）暴露了同一个解析器 AuthorNameResolver，这里直接复用
+	// —— 不再另开一条读名片的路径。（注意 profile.Repository 读的是
+	// profile.user_profiles，那是 Profile 域自己的表，本地库里是空的；
+	// 真人名字都在 identity.profiles，别读错。）复用上面 PROFILE-READ-001 那个实例。
+	relationshipService.SetDisplayNameResolver(func(ctx context.Context, userID string) (relationship.DisplayNameHint, bool) {
+		name, ok := authorNames.ResolveAuthorDisplayName(ctx, userID)
+		if !ok {
+			return relationship.DisplayNameHint{}, false
+		}
+		return relationship.DisplayNameHint{UserID: userID, DisplayName: name}, true
+	})
 	server.Relationship = relationshipService
 	server.Payment = paymentService
 	server.Notification = notificationService

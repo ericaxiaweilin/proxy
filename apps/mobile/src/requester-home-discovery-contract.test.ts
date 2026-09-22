@@ -160,8 +160,11 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).not.toContain("setSelectedAIAccount");
     expect(source).not.toContain("onPress={() => onOpenAIScene?.(account)}");
     // Owner 决议：AI 也是可寻址账户，使用同一套好友关系；发消息仍从主页进入。
-    expect(source).toContain("relationship.sendFriendRequest(id)");
-    expect(source).toContain("relationship.acceptFriendRequest(id)");
+    // HOME-FRIEND-ID-001（2026-09-22）：调用点传的是解析后的账号 id（key），
+    // 不是本地 fixture id —— 这里跟着改参数名，契约本身（同一套好友关系、
+    // 不走 engagement.followProfile）没变。
+    expect(source).toContain("relationship.sendFriendRequest(key)");
+    expect(source).toContain("relationship.acceptFriendRequest(key)");
     expect(source).toContain("relationship.listMyFriendships()");
     expect(source).toContain("好友申请已发送");
     expect(source).not.toContain("engagement.followProfile");
