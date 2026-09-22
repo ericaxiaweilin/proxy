@@ -653,6 +653,46 @@ require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
 require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
   "TestFacetPostgresLifecycle" \
   "apps/api-go/internal/platform/postgres/activity_facet_integration_test.go" || exit $?
+# 第 4 个：这个 fixture 造 2 个媒体资产 + 4 条审核决定，而 media_review_decisions
+# 是故意 append-only 的审计链，DELETE 自清会跟合规设计对撞。它改用 ctx 事务回滚，
+# 并在回滚后**断言**共享库里没有残留（不是"我相信 t.Cleanup 写对了"）。
+require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
+  "TestMediaReviewDecisionPostgresLifecycle" \
+  "apps/api-go/internal/platform/postgres/marketplace_media_integration_test.go" || exit $?
+
+# RLS-DRIFT-001: 库里出现过一类极难发现的漂移 —— 表被开了 ENABLE + FORCE
+# ROW LEVEL SECURITY 却**零 policy**（scene.scenes / scene.invitations /
+# contribution.contributions，与 065 修掉的 supply 两表同一类；032 则只给
+# media.media_review_decisions 建了 SELECT policy、漏了 INSERT）。FORCE 下连表属主
+# 也要过 policy ⇒ SELECT **静默返回 0 行**（"没数据"和"没权限"长得一样），
+# 写入报 row-level security policy 错误，而 media/service.go 把审计写入做成软失败，
+# 所以线上只表现为"审计链永远为空"。
+#
+# 这三个测试在临时集群里是**真空绿**的（testdb_test.go 用 `initdb -U proxy`，
+# 那里的 proxy 是超级用户、绕过 RLS），所以它们断言的是**结构**（privilege +
+# pg_policy），不是"插一行试试"。要在真实权限模型下验，得带 DATABASE_URL 跑。
+require_test "RLS-DRIFT-001" "./internal/platform/postgres" \
+  "TestNoTableHasUnusableRowLevelSecurity" \
+  "apps/api-go/internal/platform/postgres/media_review_decisions_rls_test.go" || exit $?
+require_test "RLS-DRIFT-001" "./internal/platform/postgres" \
+  "TestMediaReviewDecisionAuditTrailIsAppendOnlyForAppRole" \
+  "apps/api-go/internal/platform/postgres/media_review_decisions_rls_test.go" || exit $?
+require_test "MEDIA-REVIEW-PARTITION-001" "./internal/platform/postgres" \
+  "TestMediaReviewDecisionPartitionWindowCoversNow" \
+  "apps/api-go/internal/platform/postgres/media_review_decisions_rls_test.go" || exit $?
+# 反向：修复必须留在迁移集里，不能再靠手工 DDL（这两处漂移当年就是这么来的）。
+# 042 声称建了 p2026_08..p2027_07 而实际一行没建，就是因为修法没有落在会执行的地方。
+for migration in \
+  111_rls_drift_off_scene_contribution \
+  112_media_review_decisions_app_role_access \
+  113_media_review_decisions_forward_partitions; do
+  if [ ! -f "apps/api-go/migrations/${migration}.sql" ]; then
+    echo "  FAIL [RLS-DRIFT-001]: apps/api-go/migrations/${migration}.sql 不见了。" >&2
+    echo "        它是把 RLS 漂移 / 审计表写路径 / 分区窗口收归迁移管理的那条迁移；" >&2
+    echo "        删掉它等于把修复退回成「手工改过就算」的状态。" >&2
+    exit 1
+  fi
+done
 
 # AIBOUND-001: DismissMarketOpportunity 曾经无 aiboundary 落点（AI 可调），
 # market 写曾经无 USER 主体检查（与 activity 不对称）。现 Dismiss 进 gate，

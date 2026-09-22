@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
 )
@@ -306,10 +307,26 @@ func TestMarketplacePostgresJSONBRoundTripPreservesMoneyFlow(t *testing.T) {
 	t.Fatalf("seeded opportunity not visible in List")
 }
 
+// errRollbackFixture forces the fixture transaction in
+// TestMediaReviewDecisionPostgresLifecycle to roll back. It never escapes the test.
+var errRollbackFixture = errors.New("rollback fixture transaction (expected)")
+
 // TestMediaReviewDecisionPostgresLifecycle pins the append-only review
 // decision log: Append + server-clock default (ReviewedAt COALESCE),
 // duplicate decision_id rejection, List filter + DESC order + limit
 // clamping, Get not-found mapping, restart persistence.
+//
+// TEST-HYGIENE-001: 这个测试连的是共享库（DATABASE_URL 优先，见 testdb_test.go），
+// 而它要造 2 个媒体资产 + 4 条审核决定。media.media_review_decisions 是**故意
+// append-only 的防篡改审计链**（032:6 / 042:114 / 033:16），所以不能靠 DELETE
+// 自清 —— 那是跟合规设计对撞。改用仓库自己的 ctx 事务原语（pool.go 的
+// runInTransaction + queryerForContext，仓库方法会认 ctx 上的事务）：所有写进
+// 同一个事务，跑完主动回滚，共享库里一行都不留。
+//
+// 代价（明说）：末尾「restart persistence」一节现在证明的是「同一事务里换一个
+// repository 实例仍能读回」，不再是「跨连接持久化」—— 但用同一个 pool 跑时本来
+// 也证不了后者。而留脏行的代价是实打实的：之前每跑一次就往真机库里塞 2 个
+// READY 却没有字节的资产（本地库累计 28 个），把 MEDIA-FILE-001 的 live 检查弄红。
 func TestMediaReviewDecisionPostgresLifecycle(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
@@ -319,107 +336,155 @@ func TestMediaReviewDecisionPostgresLifecycle(t *testing.T) {
 	mediaRepo := NewMediaRepository(pool)
 	assetID := "media_asset_dlg_" + itoa(run)
 	asset2 := "media_asset_other_" + itoa(run)
-	for _, id := range []string{assetID, asset2} {
-		if err := mediaRepo.CreateAsset(ctx, media.MediaAsset{
-			MediaAssetID:       id,
-			OwnerPrincipalType: "INDIVIDUAL",
-			OwnerPrincipalID:   "user_media_owner_" + itoa(run),
-			MediaType:          "IMAGE",
-			OriginalStorageKey: "test://" + id + "/original.jpg",
-			ProcessingStatus:   "READY",
-			ModerationStatus:   "QUARANTINED",
-			VisibilityClass:    "OWNER_ONLY",
-			CreatedAt:          time.Now().UTC(),
-			UpdatedAt:          time.Now().UTC(),
-		}); err != nil {
-			t.Fatalf("CreateAsset %s: %v", id, err)
+
+	err := runInTransaction(ctx, pool, func(txCtx context.Context, tx pgx.Tx) error {
+		for _, id := range []string{assetID, asset2} {
+			if err := mediaRepo.CreateAsset(txCtx, media.MediaAsset{
+				MediaAssetID:       id,
+				OwnerPrincipalType: "INDIVIDUAL",
+				OwnerPrincipalID:   "user_media_owner_" + itoa(run),
+				MediaType:          "IMAGE",
+				OriginalStorageKey: "test://" + id + "/original.jpg",
+				ProcessingStatus:   "READY",
+				ModerationStatus:   "QUARANTINED",
+				VisibilityClass:    "OWNER_ONLY",
+				CreatedAt:          time.Now().UTC(),
+				UpdatedAt:          time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("CreateAsset %s: %v", id, err)
+			}
 		}
+
+		repo := NewMediaReviewDecisionRepository(pool)
+
+		// 1. Append with explicit timestamp.
+		//
+		// 显式时间取「2 分钟前」而不是「刚刚」：整个测试现在跑在**一个事务**里，
+		// 而 PostgreSQL 的 now() 是**事务开始时刻**（不是语句时刻）。若 d1 用
+		// time.Now()（晚于 BEGIN），它就会排在 d2 的 COALESCE(now()) 之后，
+		// DESC 断言会以 d3,d1,d2 失败 —— 那是事务语义，不是 bug。
+		d1 := media.MediaReviewDecision{
+			DecisionID: "mrd_pg_" + itoa(run) + "_1", MediaAssetID: assetID,
+			FromStatus: "QUARANTINED", ToStatus: "APPROVED",
+			Reason: "APPROVE", Note: "ok", OperatorID: "opr_admin_1",
+			ReviewedAt: time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Microsecond),
+		}
+		if err := repo.AppendReviewDecision(txCtx, d1); err != nil {
+			t.Fatalf("Append d1: %v", err)
+		}
+		// 显式时间必须原样存下（不能只靠后面的排序断言间接证明）。
+		if d1Stored, err := repo.GetReviewDecision(txCtx, d1.DecisionID); err != nil {
+			t.Fatalf("Get d1: %v", err)
+		} else if !d1Stored.ReviewedAt.Equal(d1.ReviewedAt) {
+			t.Fatalf("explicit ReviewedAt must round-trip: sent %v got %v", d1.ReviewedAt, d1Stored.ReviewedAt)
+		}
+
+		// 2. Append without timestamp: server clock fills ReviewedAt.
+		d2 := media.MediaReviewDecision{
+			DecisionID: "mrd_pg_" + itoa(run) + "_2", MediaAssetID: assetID,
+			FromStatus: "QUARANTINED", ToStatus: "REJECTED_CONTENT_NUDITY",
+			Reason: "REJECT_NUDITY", OperatorID: "opr_admin_2",
+		}
+		if err := repo.AppendReviewDecision(txCtx, d2); err != nil {
+			t.Fatalf("Append d2: %v", err)
+		}
+		if d2Reviewed, err := repo.GetReviewDecision(txCtx, d2.DecisionID); err != nil {
+			t.Fatalf("Get d2: %v", err)
+		} else if d2Reviewed.ReviewedAt.IsZero() {
+			t.Fatalf("COALESCE(now()) must fill ReviewedAt, got zero")
+		}
+
+		// 3. Duplicate decision_id is rejected. The unique violation aborts the
+		// surrounding transaction, so wrap it in a savepoint — otherwise every
+		// statement after this point fails with "current transaction is aborted"
+		// and the rest of the test silently proves nothing.
+		dup := d1
+		dup.Reason = "APPROVE (retry)"
+		savepoint, spErr := tx.Begin(txCtx)
+		if spErr != nil {
+			t.Fatalf("savepoint: %v", spErr)
+		}
+		if err := repo.AppendReviewDecision(txCtx, dup); err == nil {
+			t.Fatalf("duplicate decision_id must be rejected")
+		}
+		if err := savepoint.Rollback(txCtx); err != nil {
+			t.Fatalf("savepoint rollback: %v", err)
+		}
+
+		// 4. List: filter by asset, DESC order by reviewed_at.
+		d3 := media.MediaReviewDecision{
+			DecisionID: "mrd_pg_" + itoa(run) + "_3", MediaAssetID: assetID,
+			FromStatus: "APPROVED", ToStatus: "REJECTED_CONTENT_POLITICS",
+			Reason: "REJECT_POLITICS", Note: "escalated", OperatorID: "opr_admin_1",
+			ReviewedAt: time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond),
+		}
+		if err := repo.AppendReviewDecision(txCtx, d3); err != nil {
+			t.Fatalf("Append d3: %v", err)
+		}
+		dOther := media.MediaReviewDecision{
+			DecisionID: "mrd_pg_" + itoa(run) + "_4", MediaAssetID: asset2,
+			FromStatus: "QUARANTINED", ToStatus: "APPROVED",
+			Reason: "APPROVE", OperatorID: "opr_admin_1",
+			ReviewedAt: time.Now().UTC().Truncate(time.Microsecond),
+		}
+		if err := repo.AppendReviewDecision(txCtx, dOther); err != nil {
+			t.Fatalf("Append dOther: %v", err)
+		}
+
+		list, err := repo.ListReviewDecisions(txCtx, assetID, 0)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(list) != 3 {
+			t.Fatalf("asset filter must return exactly 3 decisions, got %d", len(list))
+		}
+		if list[0].DecisionID != d3.DecisionID || list[1].DecisionID != d2.DecisionID || list[2].DecisionID != d1.DecisionID {
+			t.Fatalf("List must be DESC by reviewed_at: %v %v %v", list[0].DecisionID, list[1].DecisionID, list[2].DecisionID)
+		}
+
+		// 5. Get not-found mapping.
+		if _, err := repo.GetReviewDecision(txCtx, "mrd_pg_never_"+itoa(run)); err != media.ErrReviewDecisionNotFound {
+			t.Fatalf("Get missing must be ErrReviewDecisionNotFound, got %v", err)
+		}
+
+		// 6. Validation guards (rejected before the DB, so no tx abort).
+		empty := media.MediaReviewDecision{MediaAssetID: assetID, OperatorID: "opr_x"}
+		if err := repo.AppendReviewDecision(txCtx, empty); err == nil {
+			t.Fatalf("empty DecisionID must be rejected")
+		}
+
+		// 7. Simulated restart: append-only log survives.
+		repo2 := NewMediaReviewDecisionRepository(pool)
+		after, err := repo2.ListReviewDecisions(txCtx, assetID, 0)
+		if err != nil {
+			t.Fatalf("List after restart: %v", err)
+		}
+		if len(after) != 3 || after[0].DecisionID != d3.DecisionID {
+			t.Fatalf("restart lost append-only log: %+v", after)
+		}
+
+		// 让上面所有写操作回滚：见函数头 TEST-HYGIENE-001。
+		return errRollbackFixture
+	})
+	if !errors.Is(err, errRollbackFixture) {
+		t.Fatalf("fixture transaction must roll back, got %v", err)
 	}
 
-	repo := NewMediaReviewDecisionRepository(pool)
-
-	// 1. Append with explicit timestamp.
-	d1 := media.MediaReviewDecision{
-		DecisionID: "mrd_pg_" + itoa(run) + "_1", MediaAssetID: assetID,
-		FromStatus: "QUARANTINED", ToStatus: "APPROVED",
-		Reason: "APPROVE", Note: "ok", OperatorID: "opr_admin_1",
-		ReviewedAt: time.Now().UTC().Truncate(time.Microsecond),
+	// 回滚之后共享库里不应留下任何痕迹 —— 这条断言才是 TEST-HYGIENE-001 的实质，
+	// 而不是"我相信 t.Cleanup 写对了"。
+	var leftAssets, leftDecisions int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM media.media_assets WHERE media_asset_id IN ($1,$2)`, assetID, asset2).Scan(&leftAssets); err != nil {
+		t.Fatalf("count leftover assets: %v", err)
 	}
-	if err := repo.AppendReviewDecision(ctx, d1); err != nil {
-		t.Fatalf("Append d1: %v", err)
+	if leftAssets != 0 {
+		t.Fatalf("TEST-HYGIENE-001: %d fixture assets survived the rollback", leftAssets)
 	}
-
-	// 2. Append without timestamp: server clock fills ReviewedAt.
-	d2 := media.MediaReviewDecision{
-		DecisionID: "mrd_pg_" + itoa(run) + "_2", MediaAssetID: assetID,
-		FromStatus: "QUARANTINED", ToStatus: "REJECTED_CONTENT_NUDITY",
-		Reason: "REJECT_NUDITY", OperatorID: "opr_admin_2",
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM media.media_review_decisions WHERE media_asset_id IN ($1,$2)`, assetID, asset2).Scan(&leftDecisions); err != nil {
+		t.Fatalf("count leftover decisions: %v", err)
 	}
-	if err := repo.AppendReviewDecision(ctx, d2); err != nil {
-		t.Fatalf("Append d2: %v", err)
-	}
-	if d2Reviewed, err := repo.GetReviewDecision(ctx, d2.DecisionID); err != nil {
-		t.Fatalf("Get d2: %v", err)
-	} else if d2Reviewed.ReviewedAt.IsZero() {
-		t.Fatalf("COALESCE(now()) must fill ReviewedAt, got zero")
-	}
-
-	// 3. Duplicate decision_id is rejected.
-	dup := d1
-	dup.Reason = "APPROVE (retry)"
-	if err := repo.AppendReviewDecision(ctx, dup); err == nil {
-		t.Fatalf("duplicate decision_id must be rejected")
-	}
-
-	// 4. List: filter by asset, DESC order by reviewed_at.
-	d3 := media.MediaReviewDecision{
-		DecisionID: "mrd_pg_" + itoa(run) + "_3", MediaAssetID: assetID,
-		FromStatus: "APPROVED", ToStatus: "REJECTED_CONTENT_POLITICS",
-		Reason: "REJECT_POLITICS", Note: "escalated", OperatorID: "opr_admin_1",
-		ReviewedAt: time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond),
-	}
-	if err := repo.AppendReviewDecision(ctx, d3); err != nil {
-		t.Fatalf("Append d3: %v", err)
-	}
-	dOther := media.MediaReviewDecision{
-		DecisionID: "mrd_pg_" + itoa(run) + "_4", MediaAssetID: asset2,
-		FromStatus: "QUARANTINED", ToStatus: "APPROVED",
-		Reason: "APPROVE", OperatorID: "opr_admin_1",
-		ReviewedAt: time.Now().UTC().Truncate(time.Microsecond),
-	}
-	if err := repo.AppendReviewDecision(ctx, dOther); err != nil {
-		t.Fatalf("Append dOther: %v", err)
-	}
-
-	list, err := repo.ListReviewDecisions(ctx, assetID, 0)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(list) != 3 {
-		t.Fatalf("asset filter must return exactly 3 decisions, got %d", len(list))
-	}
-	if list[0].DecisionID != d3.DecisionID || list[1].DecisionID != d2.DecisionID || list[2].DecisionID != d1.DecisionID {
-		t.Fatalf("List must be DESC by reviewed_at: %v %v %v", list[0].DecisionID, list[1].DecisionID, list[2].DecisionID)
-	}
-
-	// 5. Get not-found mapping.
-	if _, err := repo.GetReviewDecision(ctx, "mrd_pg_never_"+itoa(run)); err != media.ErrReviewDecisionNotFound {
-		t.Fatalf("Get missing must be ErrReviewDecisionNotFound, got %v", err)
-	}
-
-	// 6. Validation guards.
-	empty := media.MediaReviewDecision{MediaAssetID: assetID, OperatorID: "opr_x"}
-	if err := repo.AppendReviewDecision(ctx, empty); err == nil {
-		t.Fatalf("empty DecisionID must be rejected")
-	}
-
-	// 7. Simulated restart: append-only log survives.
-	repo2 := NewMediaReviewDecisionRepository(pool)
-	after, err := repo2.ListReviewDecisions(ctx, assetID, 0)
-	if err != nil {
-		t.Fatalf("List after restart: %v", err)
-	}
-	if len(after) != 3 || after[0].DecisionID != d3.DecisionID {
-		t.Fatalf("restart lost append-only log: %+v", after)
+	if leftDecisions != 0 {
+		t.Fatalf("TEST-HYGIENE-001: %d fixture decisions survived the rollback", leftDecisions)
 	}
 }
