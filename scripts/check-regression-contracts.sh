@@ -659,6 +659,32 @@ require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
 require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
   "TestMediaReviewDecisionPostgresLifecycle" \
   "apps/api-go/internal/platform/postgres/marketplace_media_integration_test.go" || exit $?
+# 第 5 个：payment 那条用**固定**的 providerEventId（字面量 evt_pay_pg_1 / _2）打共享库。
+# payment.provider_events 是 webhook 去重表，而 confirmIntent 的第一步就是
+# ProviderEventExists ⇒ 命中就返回 ALREADY_PROCESSED、**一行 ledger 都不写**。
+# 第一次跑留下 evt_pay_pg_1（库里那行是 2026-09-03 的），之后每次跑都被它短路；
+# 而 step 3 只断言 Outcome=="ACCEPTED"（短路也满足）⇒ 红在很后面的
+# "ledger len must be 2, got 0"，完全指不到真因。临时集群每次全新，所以看不见。
+require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
+  "TestPaymentPostgresRoundTrip" \
+  "apps/api-go/internal/platform/postgres/payment_integration_test.go" || exit $?
+
+# PAYMENT-DEDUPE-FIXTURE-001（反向）：不许再把固定的 providerEventId 写回 fixture。
+# 这是上面那条红的**唯一**根因，而正向钉（测试存在且过）挡不住它 —— 只有共享库脏了才红。
+if grep -qE '"evt_pay_pg_[0-9]+"' \
+    apps/api-go/internal/platform/postgres/payment_integration_test.go; then
+  echo "  FAIL [PAYMENT-DEDUPE-FIXTURE-001]: payment fixture 又用了固定的 providerEventId 字面量。" >&2
+  echo "        provider_events 是共享库里的去重表：固定 id 会让第二次跑被上一次的残留短路，" >&2
+  echo "        Outcome 仍是 ACCEPTED 但 ledger 不写，于是红在 ledger len 断言上，指不到真因。" >&2
+  echo "        事件 id 要按 run 派生（见该测试开头的 TEST-HYGIENE-001 注释）。" >&2
+  exit 1
+fi
+if ! grep -q 'DELETE FROM payment.provider_events' \
+    apps/api-go/internal/platform/postgres/payment_integration_test.go; then
+  echo "  FAIL [PAYMENT-DEDUPE-FIXTURE-001]: cleanup 不再删 payment.provider_events。" >&2
+  echo "        那是这条测试唯一会跨 run 残留的表（intents / ledger / payout_holds 本来就删）。" >&2
+  exit 1
+fi
 
 # RLS-DRIFT-001: 库里出现过一类极难发现的漂移 —— 表被开了 ENABLE + FORCE
 # ROW LEVEL SECURITY 却**零 policy**（scene.scenes / scene.invitations /
