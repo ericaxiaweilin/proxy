@@ -4,6 +4,36 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 246 — 2026-09-23
+
+- **卖家实名核验补上受控写入口**（COMP-SELLER-001）：读侧（撮合/收款按「已实名且
+  未过期」放行）一直是通的，但「已实名」这个状态**没有来源** ——
+  `INSERT INTO supply.seller_real_name_verifications` 全仓零命中，库里那 6 行只能靠
+  手写 SQL，同时违反 084 自己的三条承诺（`legal_name='TEST-ONLY …'`、
+  `id_number_hash` 是字面量而非哈希、`verified_by` 是会话标签而非运营主体），
+  而读侧又把 `expires_at IS NULL` 读成「永不过期」⇒ **6 个卖家在无人核验的情况下
+  通过了实名闸，而 5 条钉全绿**（「没数据」与「没权限」在这里长得一样）。
+  现在：新增命令 `AttestSellerRealName`（operator 门 + 新增 `IDENTITY` scope；明文
+  证件号在命令边界就地 sha256，领域事件载荷不带姓名/证件号）、迁移 118 加两条
+  DB 级 CHECK、读侧谓词收紧为 `expires_at > NOW()`，dev 种子改走真实写入口。
+- **simulated + Postgres 起不来**（SEED-IDENTITY-CHANNEL-001）：开发身份种子往
+  `identity.login_identities` 写 `channel='PHONE'`，而 049 的 CHECK 只认 `EMAIL`/`SMS`
+  —— 049 比这条 INSERT 晚三周上线，之后启动必然 `log.Fatalf`，**排在后面的
+  supply / home-rail / media 三个种子一个都跑不到**（上一批实名行只能手写 SQL 的
+  根因）。改为与内存种子 `localIdentityService` 对齐：不写 channel/identifier。
+- 影响文件：`apps/api-go/internal/supply/seller_identity.go`、
+  `apps/api-go/internal/supply/service.go`、
+  `apps/api-go/internal/platform/postgres/supply.go`、
+  `apps/api-go/internal/platform/postgres/seller_identity.go`、
+  `apps/api-go/internal/api/security.go`、
+  `apps/api-go/internal/api/operator_scopes.go`、
+  `apps/api-go/cmd/api/wire_seed.go`、`apps/api-go/cmd/api/wire_supply.go`、
+  `apps/api-go/migrations/118_seller_real_name_attestation_guards.sql`、
+  `scripts/check-regression-contracts.sh`（另有新增测试：
+  `internal/supply/seller_real_name_attestation_test.go`、
+  `internal/platform/postgres/seller_real_name_attestation_integration_test.go`、
+  `cmd/api/dev_identity_seed_test.go`）。
+
 ## Revision 245 — 2026-09-23
 
 - **开房 / 进房不再闪回首页**（HOME-MORE-ROOMS-002）：用户反馈「点击聊天房卡片
