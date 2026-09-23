@@ -317,6 +317,8 @@ commands:
     domain: LocalNet
   - command: ListRealitySceneProposals
     domain: RealityScene
+  - command: ListReportQueue
+    domain: Moderation
   - command: ListRequesterHomeItems
     domain: Demand
   - command: ListSpendDaily

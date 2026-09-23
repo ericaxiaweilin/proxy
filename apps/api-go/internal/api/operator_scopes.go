@@ -96,7 +96,10 @@ var requiredOperatorScope = map[string]OperatorScope{
 	"ReviewMediaAsset":         ScopeModeration,
 	"ListMediaReviewDecisions": ScopeModeration,
 	"AmendMediaReviewDecision": ScopeModeration,
-	"RecordReportDisposition":  ScopeModeration,
+	// COMP-REPORT-005: 举报队列与 COMP-REPORT-003 的处置入口共用 MODERATION
+	// ——「看得见该处理什么」与「记录处理了什么」是同一件治理动作的两半。
+	"ListReportQueue":         ScopeModeration,
+	"RecordReportDisposition": ScopeModeration,
 	"RecordAppealDecision":     ScopeModeration,
 	// PAYMENTS
 	"ConfirmPaymentIntent": ScopePayments,

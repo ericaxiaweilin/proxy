@@ -81,6 +81,12 @@ var operatorCommandTypes = map[string]bool{
 	"ReleasePayout":        true,
 	"CreateVoucher":        true,
 	"SettleVoucher":        true,
+	// COMP-REPORT-005: 举报队列（列表）。队列里含举报人 id 与被举报目标 id，
+	// 属于个人信息 —— 普通用户绝不能枚举别人举报了什么、谁举报的。
+	// 与 COMP-REPORT-003 是同一件事的两半：没有这条读出口，处置入口就没有
+	// 入口可言（举报收得下，却没人能发现它存在）。
+	// 同走 PROXY_OPERATOR_PRINCIPALS 白名单，未设 = 拒。
+	"ListReportQueue": true,
 	// COMP-REPORT-003: 举报处置（接手 / 升级 / 处置 / 判定不成立 / 重开）。
 	// 这是「平台处理过举报」的唯一留痕入口，绝不能让普通用户自己写 ——
 	// 否则处置记录就成了谁都能伪造的东西，举证价值归零。

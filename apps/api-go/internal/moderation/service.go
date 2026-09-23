@@ -88,6 +88,9 @@ var (
 	ErrReportTargetRequired = errors.New("moderation report requires a target type and target id")
 	ErrReportReasonRequired = errors.New("moderation report requires a supported reason")
 	ErrReportRepositoryDown = errors.New("moderation report repository is unavailable")
+	// COMP-REPORT-005：举报必须带处置截止时刻。算不出时限的举报 = 平台证明
+	// 不了自己按时处理过，正是本笔要消灭的状态（DB 侧 due_at 是 NOT NULL）。
+	ErrReportDueAtRequired = errors.New("moderation report requires a disposition due time")
 )
 
 // Report 是一条举报受理记录。
@@ -100,6 +103,11 @@ type Report struct {
 	Note       string    `json:"note,omitempty"`
 	State      string    `json:"state"`
 	CreatedAt  time.Time `json:"createdAt"`
+	// DueAt（COMP-REPORT-005）是处置截止时刻 = CreatedAt + 该理由的法定时限
+	// （紧急 6h / 一般 24h，服务条款 §58 + Decree 328/2026 §4）。受理时由
+	// ReportDueAt 推导后固定写入，不在读时重算 —— 理由见 queue.go 的说明。
+	// 与 089 的 authority_requests.deadline_at 同口径。
+	DueAt time.Time `json:"dueAt"`
 }
 
 // Repository 是举报记录的写入口。故意只暴露 Add / Find：举报与申诉都是
@@ -113,6 +121,12 @@ type Repository interface {
 	AddReport(ctx context.Context, report Report) error
 	AddDisposition(ctx context.Context, disposition Disposition) error
 	FindReport(ctx context.Context, reportID string) (Report, bool)
+	// ListReportQueue（COMP-REPORT-005）是举报**唯一**的读出口。在此之前
+	// Repository 只有 AddReport / FindReport，而 FindReport 只被写入口当作
+	// 「对象是否存在」的校验用 —— 于是处置链在实践上不可达（收得下举报，
+	// 却没有任何路径把举报交到人手上）。返回的每一行都带处置链摘要，
+	// 让「这条现在到哪一步」不必再查一次（避免 N+1）。
+	ListReportQueue(ctx context.Context) ([]ReportQueueEntry, error)
 	AddAppeal(ctx context.Context, appeal Appeal) error
 	FindAppeal(ctx context.Context, appealID string) (Appeal, bool)
 	AddAppealDecision(ctx context.Context, decision AppealDecision) error
@@ -147,6 +161,9 @@ func NewWithRepository(repository Repository) *Service {
 func (s *Service) Supports(commandType string) bool {
 	return commandType == "ReportTarget" ||
 		commandType == "RecordReportDisposition" ||
+		// COMP-REPORT-005: 举报队列。operator-only（见 security.go 的
+		// operatorCommandTypes）—— 队列含举报人 id 与被举报目标 id。
+		commandType == "ListReportQueue" ||
 		// COMP-REPORT-004: 申诉渠道。FileAppeal 是普通已登录用户可用的申诉提交；
 		// RecordAppealDecision 是 operator-only 的复核（见 security.go）。
 		commandType == "FileAppeal" ||
@@ -172,6 +189,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	// 在命令边界就被拒，走不到这里。
 	case "RecordReportDisposition":
 		return s.recordDisposition(ctx, e)
+	// COMP-REPORT-005: 举报队列（operator-only）。这是举报唯一的读出口 ——
+	// 在此之前整条处置链在实践上不可达：举报收得下，却没人能列出它。
+	case "ListReportQueue":
+		return s.listReportQueue(ctx, e)
 	// COMP-REPORT-004: 申诉渠道。
 	//   - FileAppeal：普通已登录用户提交申诉（鉴权在命令边界，这里再兜一道）。
 	//   - RecordAppealDecision：operator-only，白名单见 security.go 的
@@ -213,6 +234,17 @@ func (s *Service) reportTarget(ctx context.Context, e command.Envelope) command.
 	if e.Actor.ID == "" {
 		return command.Rejected(e, "REPORT_REQUIRES_AUTHENTICATED_ACTOR", "AUTHORIZATION", "AFTER_USER_ACTION", "moderation.report_requires_actor", nil)
 	}
+	// COMP-REPORT-005: 受理时就把处置截止时刻固定下来（紧急 6h / 一般 24h）。
+	// 固定而非读时重算，是为了让历史举报按「受理当时生效的时限」举证。
+	createdAt := s.clock.Now().UTC()
+	dueAt, ok := ReportDueAt(p.Reason, createdAt)
+	if !ok {
+		// 理由已经过 ReportableReasons() 校验，所以这条分支不可达 ——
+		// TestEverySupportedReasonHasAnSLA 把它钉住。留 fail-closed 兜底：
+		// 一条算不出时限的举报，正是本笔要消灭的状态；宁可拒收（REPORT_FAILED
+		// 同类），也不写进一条平台证明不了按时处理的记录。
+		return command.Rejected(e, "REPORT_SLA_UNRESOLVED", "INTERNAL", "SAFE_RETRY", "moderation.report_sla_unresolved", nil)
+	}
 	report := Report{
 		ID:         newReportID(),
 		ReporterID: e.Actor.ID,
@@ -221,7 +253,8 @@ func (s *Service) reportTarget(ctx context.Context, e command.Envelope) command.
 		Reason:     p.Reason,
 		Note:       p.Note,
 		State:      ReportStateSubmitted,
-		CreatedAt:  s.clock.Now().UTC(),
+		CreatedAt:  createdAt,
+		DueAt:      dueAt,
 	}
 	if s.repository == nil {
 		return command.Rejected(e, "REPORT_FAILED", "INTERNAL", "SAFE_RETRY", "moderation.report_failed", nil)

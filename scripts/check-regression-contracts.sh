@@ -3490,6 +3490,104 @@ if [ ! -f apps/api-go/migrations/088_moderation_appeals.sql ]; then
 fi
 echo "    COMP-REPORT-004: PASS (the appeal channel exists, is attributable, and is operator-reviewed)"
 
+# COMP-REPORT-005: 举报的处置时限 + **读出口**。
+#
+# 001/002 解决了「收得到」，003 解决了「处置留痕」—— 但 003 只做了写侧：
+# Repository 只有 AddReport / FindReport，而 FindReport 只被写入口当作
+# 「对象是否存在」的校验用。**没有任何一条查询能列出举报**。087 甚至替
+# 「运营队列」建好了 idx_moderation_dispositions_action 索引，那条查询从来
+# 没被写出来 —— 实现存在 ≠ 生效。
+#
+# 结果：举报只进不出。平台收得下举报，却没有任何路径把它交到人手上。
+# 实测证据：库里唯一一条举报 reason='SOLICITATION'（2026-09-15 18:59 受理）
+# 到 2026-09-22 已 7 天、处置记录 0 条 —— 不是没人处理，是没人能发现它存在。
+# 而 SOLICITATION 恰是刑法 327 条（介绍卖淫）那类风险所在。
+#
+# 同时补上时限：服务条款 §58 承诺「建立举报、核查、限制传播、纠正、移除和
+# 账号处置流程」，Decree 328/2026 §4 把时限钉成「一般 24h、紧急 6h」
+# （口径见 docs/legal/vietnam/Proxy_Operating_Terms_Supplement_2026-08-31.md）。
+# 没有截止时刻，平台既做不到、也证明不了自己按时处理过。
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestEverySupportedReasonHasAnSLA" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestReportSLAUrgentClassCoversMinorAndSolicitation" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestAcceptedReportCarriesAFixedDueAt" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestReportQueueSurfacesTheStaleSolicitation" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestReportQueueFailsClosedWhenRepositoryIsDown" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+# 超时判定的对象是「有没有在时限内处理完」，不是「现在是否晚于截止时刻」——
+# 后者会把按时处置完的举报在几天后显示成超时（假警报），而假警报会让人
+# 整体忽略这个字段，真超时的那条也跟着被忽略。
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestReportQueueDoesNotCallAPromptResolutionOverdue" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestReportQueueFlagsALateResolution" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+# 迁移里的 SQL CASE 与 Go 的时限表必须一致 —— 两边各写一遍，改一边不改另一边
+# 会把历史举报的时限算错。
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestMigrationBackfillMatchesGoMapping" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+# 队列与处置必须走 operator 门。这条独立钉的必要性：operator_scopes_test.go
+# 的 completeness 只保证两张表**互相**一致 —— 同时删掉一条命令时它依然绿，
+# 而命令就此对所有人敞开。
+require_test "COMP-REPORT-005" "./internal/api" \
+  "TestModerationReportCommandsRequireOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+# 真库往返：单测跑的是内存仓储，证明不了 SQL（两个 LEFT JOIN LATERAL、
+# 「没有处置时 last_disposition_at 是 NULL」、以及 outcome 空串撞 CHECK）。
+require_test "COMP-REPORT-005" "./internal/platform/postgres" \
+  "TestModerationReportQueueRoundTrip" \
+  "apps/api-go/internal/platform/postgres/moderation_integration_test.go" || exit $?
+# 反向：队列命令必须真被 moderation 服务受理，否则命令面写了也走不到（501）。
+if ! grep -qF 'case "ListReportQueue"' apps/api-go/internal/moderation/service.go; then
+  echo "  FAIL [COMP-REPORT-005]: ListReportQueue is no longer handled by the" >&2
+  echo "        moderation service, so the report queue would 501 and reports" >&2
+  echo "        would go back to being write-only." >&2
+  exit 1
+fi
+if ! grep -qF '"ListReportQueue": true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [COMP-REPORT-005]: ListReportQueue is no longer operator-only, so" >&2
+  echo "        any logged-in user could enumerate who reported whom." >&2
+  exit 1
+fi
+# 反向：dispositions 的 outcome 必须走 NULLIF。空串撞
+# dispositions_outcome_check 会让五种处置动作里四种
+# （TRIAGE / ESCALATE / DISMISS / REOPEN）在生产路径上全部失败，而内存仓储
+# 不校验 outcome，单测照样全绿 —— 典型的「内存绿、生产红」。
+if ! grep -qF "NULLIF(\$4, '')" apps/api-go/internal/platform/postgres/moderation.go; then
+  echo "  FAIL [COMP-REPORT-005]: the dispositions INSERT no longer nulls an empty" >&2
+  echo "        outcome. Postgres then rejects every disposition without an outcome" >&2
+  echo "        (TRIAGE/ESCALATE/DISMISS/REOPEN) with dispositions_outcome_check." >&2
+  exit 1
+fi
+# 反向：举报必须带处置截止时刻，且截止列必须是 NOT NULL —— 一条没有时限的
+# 举报正是本笔要消灭的状态。
+if ! grep -qF 'due_at' apps/api-go/internal/platform/postgres/moderation.go; then
+  echo "  FAIL [COMP-REPORT-005]: AddReport no longer writes due_at, so new reports" >&2
+  echo "        would have no disposition deadline." >&2
+  exit 1
+fi
+if [ ! -f apps/api-go/migrations/117_moderation_reports_due_at.sql ]; then
+  echo "  FAIL [COMP-REPORT-005]: migration 117_moderation_reports_due_at.sql is missing." >&2
+  exit 1
+fi
+if ! grep -qF 'ALTER COLUMN due_at SET NOT NULL' \
+     apps/api-go/migrations/117_moderation_reports_due_at.sql; then
+  echo "  FAIL [COMP-REPORT-005]: 117 no longer makes due_at NOT NULL, so a report" >&2
+  echo "        without a deadline could be written again." >&2
+  exit 1
+fi
+echo "    COMP-REPORT-005: PASS (reports carry a statutory deadline and are actually reachable)"
+
 # COMP-AUTHORITY-001: 有权机关请求的受理留痕与响应时限（§55 + 网安法
 # 116/2025 + 333/2026/NĐ-CP）。代码里 REFERRED_TO_AUTHORITY 曾是 087 里
 # 一个从未被写入路径使用的枚举值 —— 平台证明不了自己在法定时限内响应过，
