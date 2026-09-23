@@ -4,6 +4,18 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 257 — 2026-09-23
+
+- **生成场景换成照片样片、扩到 12 个**（AI-MANAGE-005）：用户反馈「图片生成场景 目前的 logo 有点难看
+  场景有点少 这是做的场景资产样板 你也同步更新代替目前 6 个 增加场景 代替 logo」。场景卡改用
+  `proxy_scene_photo_assets` 的 12 张样片做封面（底部压暗 + 白字名称 / 描述，选中黑框 + ✓），
+  不再是 emoji + 渐变色块。场景：暖调咖啡厅、高级餐厅、海边度假、花园漫步、自然光 Brunch、城市天台、
+  文青甜品店、夜色露台、老街灯笼、书店咖啡、江边日落、度假泳池；新场景各配视觉要素、提示词与 6 个姿态。
+  旧场景 id（restaurant / izakaya / night）映射到新场景。照片打包在 `assets/ai-scenes/`，经
+  `media/asset-sources.ts` 的 `getAiScenePhoto` 取。
+- 影响文件：`apps/mobile/src/surfaces/ai-management.tsx`、`apps/mobile/src/surfaces/ai-management-data.ts`、
+  `apps/mobile/src/media/asset-sources.ts`。
+
 ## Revision 256 — 2026-09-23
 
 - **AI 管理的三张管理卡换用户给的图标**（AI-MANAGE-004）：用户反馈「把这 3 个 logo 换一下 目前的 ai 管理

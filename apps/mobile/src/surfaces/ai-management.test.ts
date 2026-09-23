@@ -7,9 +7,11 @@ vi.mock("react-native-svg", () => ({ Circle: "Circle", Defs: "Defs", Line: "Line
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock("../ai-engine-client", () => ({ AiEngineClient: class {} }));
 vi.mock("../composer-body", () => ({ formatRelativeTime: () => "" }));
+vi.mock("expo-image", () => ({ Image: "Image" }));
+vi.mock("../media/asset-sources", () => ({ getAiScenePhoto: () => undefined }));
 
 import { decodePromptHistory, encodePromptHistoryEntry, formatTokens, promptForScene } from "./ai-management";
-import { AI_CAMERA_ICONS, AI_CAMERA_MOVES, AI_MANAGE_ICONS, AI_POSES, AI_POSE_ICONS, AI_SCENES, AI_VENDORS } from "./ai-management-data";
+import { AI_CAMERA_ICONS, AI_CAMERA_MOVES, AI_MANAGE_ICONS, AI_SCENE_ALIASES, AI_POSES, AI_POSE_ICONS, AI_SCENES, AI_VENDORS } from "./ai-management-data";
 
 // AI-MANAGE-003（2026-09-23，用户：「原型给了 干的一坨屎 logo 也不对 功能也不对」）：
 // 整页按原型 deepseek_html_20260923_83b40b (1).html 重做。钉住：
@@ -40,7 +42,14 @@ describe("AI management entry (AI-MANAGE-001/003)", () => {
 
 describe("AI management surface (AI-MANAGE-003)", () => {
   it("keeps every catalogue entry from the prototype", () => {
-    expect(AI_SCENES.map((s) => s.id)).toEqual(["cafe", "restaurant", "dessert", "izakaya", "brunch", "night"]);
+    // AI-MANAGE-005：场景按用户样片扩到 12 个，每个都有打包的封面照片。
+    expect(AI_SCENES.map((s) => s.id)).toEqual(["cafe", "fine_dining", "beach", "garden", "brunch", "rooftop_city", "dessert", "night_lounge", "old_street", "bookstore_cafe", "riverside_sunset", "resort_pool"]);
+    const assets = read("../media/asset-sources.ts");
+    for (const scene of AI_SCENES) {
+      expect(assets).toContain(`case "${scene.id}":`);
+      expect(assets).toContain(`assets/ai-scenes/${scene.id}.jpg`);
+    }
+    expect(AI_SCENE_ALIASES).toEqual({ restaurant: "fine_dining", izakaya: "night_lounge", night: "rooftop_city" });
     for (const scene of AI_SCENES) {
       expect(scene.elements.length).toBeGreaterThanOrEqual(6);
       expect(scene.prompt.length).toBeGreaterThan(40);
@@ -62,6 +71,7 @@ describe("AI management surface (AI-MANAGE-003)", () => {
     expect(surface).toContain("<ManageCard iconXml={AI_MANAGE_ICONS.image}");
     expect(surface).toContain("<ManageCard iconXml={AI_MANAGE_ICONS.post}");
     expect(surface).not.toContain('icon="🖼️"');
+    expect(surface).toContain("<Image source={getAiScenePhoto(item.id) ?? null}");
   });
 
   it("saves every choice to the server optimistically and reverts on failure", () => {

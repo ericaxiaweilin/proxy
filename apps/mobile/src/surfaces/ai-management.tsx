@@ -5,6 +5,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AiEngineClient, type AiEngineSettings, type AiPermission, type SecureSessionStoreLike } from "../ai-engine-client";
 import type { TransportRequest, TransportResponse } from "../auth-client";
 import { formatRelativeTime } from "../composer-body";
+import { Image } from "expo-image";
+import { getAiScenePhoto } from "../media/asset-sources";
 import {
   AI_CAMERA_ICONS,
   AI_CAMERA_MOVES,
@@ -12,6 +14,7 @@ import {
   AI_POSES,
   AI_POSE_ICONS,
   AI_SCENES,
+  AI_SCENE_ALIASES,
   AI_VENDORS,
   type AiScene,
   type AiVendor,
@@ -107,7 +110,8 @@ export function formatTokens(total: number): string {
 }
 
 function sceneById(id: string): AiScene {
-  return AI_SCENES.find((scene) => scene.id === id) ?? AI_SCENES[0]!;
+  const resolved = AI_SCENE_ALIASES[id] ?? id;
+  return AI_SCENES.find((scene) => scene.id === resolved) ?? AI_SCENES[0]!;
 }
 
 function vendorById(id: string): AiVendor {
@@ -665,12 +669,23 @@ function ImageSheet({ toast, visible, tab, onTab, settings, patch, showToast, im
               {AI_SCENES.map((item) => {
                 const selected = item.id === scene.id;
                 return (
-                  <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => selectScene(item.id)} style={[styles.sceneTile, selected && styles.sceneTileSelected]}>
-                    <GradientFill id={`scene-${item.id}`} from={item.colors[0]} to={item.colors[1]} radius={12} />
+                  <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`${item.name}，${item.desc}`} accessibilityState={{ selected }} onPress={() => selectScene(item.id)} style={[styles.sceneTile, selected && styles.sceneTileSelected]}>
+                    {/* AI-MANAGE-005：场景封面 = 用户的场景样片，底部压暗放名字，不再是 emoji + 色块。 */}
+                    <Image source={getAiScenePhoto(item.id) ?? null} contentFit="cover" style={StyleSheet.absoluteFill} transition={0} />
+                    <Svg pointerEvents="none" style={StyleSheet.absoluteFill}>
+                      <Defs>
+                        <LinearGradient id={`sceneShade-${item.id}`} x1="0" y1="0" x2="0" y2="1">
+                          <Stop offset="0.4" stopColor="#000" stopOpacity={0} />
+                          <Stop offset="1" stopColor="#000" stopOpacity={0.72} />
+                        </LinearGradient>
+                      </Defs>
+                      <Rect x="0" y="0" width="100%" height="100%" fill={`url(#sceneShade-${item.id})`} />
+                    </Svg>
                     {selected ? <View style={styles.sceneCheck}><Text style={styles.sceneCheckText}>✓</Text></View> : null}
-                    <Text style={styles.sceneIcon}>{item.icon}</Text>
-                    <Text numberOfLines={2} style={[styles.sceneName, isDark(item.colors[0]) && styles.sceneNameDark]}>{item.name}</Text>
-                    <Text numberOfLines={2} style={[styles.sceneDesc, isDark(item.colors[0]) && styles.sceneDescDark]}>{item.desc}</Text>
+                    <View style={styles.sceneCaption}>
+                      <Text numberOfLines={1} style={styles.sceneName}>{item.name}</Text>
+                      <Text numberOfLines={1} style={styles.sceneDesc}>{item.desc}</Text>
+                    </View>
                   </Pressable>
                 );
               })}
@@ -787,14 +802,6 @@ function ImageSheet({ toast, visible, tab, onTab, settings, patch, showToast, im
   );
 }
 
-function isDark(hex: string): boolean {
-  const value = hex.replace("#", "");
-  const full = value.length === 3 ? value.split("").map((c) => c + c).join("") : value;
-  const r = parseInt(full.slice(0, 2), 16);
-  const g = parseInt(full.slice(2, 4), 16);
-  const b = parseInt(full.slice(4, 6), 16);
-  return (r * 299 + g * 587 + b * 114) / 1000 < 110;
-}
 
 // ---------------------------------------------------------------- 动态管理
 
@@ -944,15 +951,13 @@ const styles = StyleSheet.create({
   priceNoticeText: { color: "#a06a2c", flex: 1, fontSize: 11, fontWeight: "600", lineHeight: 16 },
   grid3: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   grid2: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  sceneTile: { alignItems: "center", aspectRatio: 1, borderColor: "transparent", borderRadius: 14, borderWidth: 2, gap: 6, justifyContent: "center", overflow: "hidden", padding: 8, width: "31.5%" },
+  sceneTile: { aspectRatio: 0.82, backgroundColor: "#eee", borderColor: "transparent", borderRadius: 14, borderWidth: 2, justifyContent: "flex-end", overflow: "hidden", width: "31.5%" },
   sceneTileSelected: { borderColor: INK },
-  sceneCheck: { alignItems: "center", backgroundColor: INK, borderRadius: 9, height: 18, justifyContent: "center", position: "absolute", right: 6, top: 6, width: 18 },
+  sceneCheck: { alignItems: "center", backgroundColor: INK, borderColor: "#fff", borderWidth: 1.5, zIndex: 1, borderRadius: 9, height: 18, justifyContent: "center", position: "absolute", right: 6, top: 6, width: 18 },
   sceneCheckText: { color: "#fff", fontSize: 11 },
-  sceneIcon: { fontSize: 26 },
-  sceneName: { color: INK, fontSize: 11, fontWeight: "800", letterSpacing: -0.2, textAlign: "center" },
-  sceneNameDark: { color: "#fff" },
-  sceneDesc: { color: "#999", fontSize: 11, fontWeight: "600", textAlign: "center" },
-  sceneDescDark: { color: "rgba(255,255,255,0.7)" },
+  sceneCaption: { paddingBottom: 8, paddingHorizontal: 8 },
+  sceneName: { color: "#fff", fontSize: 12, fontWeight: "800", letterSpacing: -0.2 },
+  sceneDesc: { color: "rgba(255,255,255,0.8)", fontSize: 11, fontWeight: "600", marginTop: 1 },
   poseTile: { alignItems: "center", backgroundColor: "#fafafa", borderColor: "transparent", borderRadius: 12, borderWidth: 1.5, gap: 5, paddingHorizontal: 8, paddingVertical: 10, width: "31.5%" },
   poseTileSelected: { backgroundColor: "#fff", borderColor: INK },
   poseIcon: { alignItems: "center", backgroundColor: "#f5f5f5", borderRadius: 10, height: 44, justifyContent: "center", marginBottom: 2, width: 44 },

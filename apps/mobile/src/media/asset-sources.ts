@@ -154,3 +154,27 @@ function getBundledPhoto(key: string): AssetImageSource | undefined {
 export function aiPersonaBundledPhoto(personaId: string): AssetImageSource | undefined {
   return getBundledPhoto(personaId) ?? getBundledPhoto("ai_001");
 }
+
+// AI-MANAGE-005（2026-09-23）：AI 管理 → 图片管理 → 生成场景的场景样片（用户给的
+// proxy_scene_photo_assets，12 张），代替原来的 emoji + 渐变色块。同样静态表 + try/catch。
+export function getAiScenePhoto(sceneId: string): AssetImageSource | undefined {
+  try {
+    switch (sceneId) {
+      case "cafe": return require("../../assets/ai-scenes/cafe.jpg") as AssetImageSource;
+      case "fine_dining": return require("../../assets/ai-scenes/fine_dining.jpg") as AssetImageSource;
+      case "beach": return require("../../assets/ai-scenes/beach.jpg") as AssetImageSource;
+      case "garden": return require("../../assets/ai-scenes/garden.jpg") as AssetImageSource;
+      case "brunch": return require("../../assets/ai-scenes/brunch.jpg") as AssetImageSource;
+      case "rooftop_city": return require("../../assets/ai-scenes/rooftop_city.jpg") as AssetImageSource;
+      case "dessert": return require("../../assets/ai-scenes/dessert.jpg") as AssetImageSource;
+      case "night_lounge": return require("../../assets/ai-scenes/night_lounge.jpg") as AssetImageSource;
+      case "old_street": return require("../../assets/ai-scenes/old_street.jpg") as AssetImageSource;
+      case "bookstore_cafe": return require("../../assets/ai-scenes/bookstore_cafe.jpg") as AssetImageSource;
+      case "riverside_sunset": return require("../../assets/ai-scenes/riverside_sunset.jpg") as AssetImageSource;
+      case "resort_pool": return require("../../assets/ai-scenes/resort_pool.jpg") as AssetImageSource;
+      default: return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+}

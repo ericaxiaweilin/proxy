@@ -4,15 +4,28 @@
 // 价格、厂商、模型名都是原型给的展示信息；实际扣费以各厂商官方计费为准（页面上有同样提示）。
 // 这里只存「偏好 id」，出图由平台路由，客户端不直绑 provider。
 
-export type AiScene = { id: string; name: string; icon: string; colors: [string, string]; desc: string; elements: ReadonlyArray<string>; prompt: string };
+// AI-MANAGE-005（2026-09-23，用户：「图片生成场景 目前的 logo 有点难看 场景有点少 这是做的场景资产样板
+// 你也同步更新代替目前 6 个 增加场景 代替 logo」）：场景从原型的 6 个扩到用户样片的 12 个，
+// 每个场景用样片照片做封面（media/asset-sources.ts 的 getAiScenePhoto），不再是 emoji + 渐变。
+// 暖调咖啡厅 / 高级餐厅 / 文青甜品店 / 自然光 Brunch 沿用原型的文案与姿态；其余 8 个按样片新写。
+export type AiScene = { id: string; name: string; desc: string; elements: ReadonlyArray<string>; prompt: string };
 export const AI_SCENES: ReadonlyArray<AiScene> = [
-  { id: "cafe", name: "暖调咖啡厅", icon: "🌅", colors: ["#fff5e6", "#ffe0b8"], desc: "暖黄灯光 · 木质桌面", elements: ["暖黄灯光", "木质桌面", "咖啡蒸汽", "浅景深", "胶片质感", "午后光线"], prompt: "专业美食摄影，一位{年龄}的{性别}坐在靠窗的木质桌边，手中握着一杯{咖啡种类}。暖黄色午后阳光透过玻璃窗斜射在桌面，形成柔和的光影对比。咖啡杯上方有淡淡的蒸汽。背景虚化的咖啡馆环境，浅景深。35mm胶片质感，温暖的色调，柯达Portra 400色彩，生活感。构图：3:4人像，半身，人物位于右侧三分线，左下方留白放置咖啡杯" },
-  { id: "restaurant", name: "高级餐厅", icon: "🍽️", colors: ["#f5f0e8", "#e0d0b0"], desc: "柔和环境光 · 精致摆盘", elements: ["柔和环境光", "精致摆盘", "浅景深", "高级质感", "暖色调", "干净背景"], prompt: "高端餐饮商业摄影，{人物}正在品尝{菜品}。柔和的暖色环境光从侧上方投射，在餐具上形成细腻的高光。精致的骨瓷餐具与摆盘，干净的背景虚化。浅景深，焦点集中在菜品与人物手部。高端杂志摄影风格，色调温暖但不失高级感。构图：3:4，菜品位于前景虚化，人物位于中景" },
-  { id: "dessert", name: "文青甜品店", icon: "🍰", colors: ["#fff0f5", "#ffdce8"], desc: "奶油白 · 自然日光", elements: ["明亮奶油白", "自然日光", "清新色调", "ins风", "大窗户", "浅木色"], prompt: "{人物}在明亮的甜品店中，面前摆着{甜品}。奶油白与浅木色的空间，大窗户透进柔和的自然光。清新温柔的色调，明亮的日光摄影风格，Instagram风格。生活感十足。构图：3:4，甜品位于前景，人物位于中景，背景有绿植点缀" },
-  { id: "izakaya", name: "深夜居酒屋", icon: "🏮", colors: ["#3a2e28", "#6b4a32"], desc: "暗调 · 暖色灯笼光", elements: ["暗调", "暖色灯笼光", "电影感", "烟火气", "木质吧台", "浅景深"], prompt: "深夜居酒屋氛围摄影，暖色灯笼映照着{人物}的侧脸。木质吧台上摆着{酒或食物}，暗调环境，灯光形成强烈的明暗对比。电影感光影，浅景深，背景有模糊的灯笼光斑。烟火气，氛围浓郁。构图：3:4，人物位于画面右侧，左侧留出吧台与食物" },
-  { id: "brunch", name: "自然光 Brunch", icon: "🥑", colors: ["#f0f7e8", "#d8e8c0"], desc: "大窗户 · 明亮自然光", elements: ["明亮自然光", "大窗户", "色彩鲜艳", "健康生活", "清新", "通透"], prompt: "{人物}在洒满晨光的餐厅享用Brunch，桌上是色彩鲜艳的{食物}。大窗户自然光从侧面照射，形成明亮的通透感。健康生活方式风格，清新的色调，食物色彩鲜艳诱人。构图：3:4，俯拍或45度角，食物与人物同时入镜，窗外绿植作为背景点缀" },
-  { id: "night", name: "城市夜景", icon: "🌃", colors: ["#1a1a2e", "#2d2d4e"], desc: "霓虹灯光 · 都市氛围", elements: ["霓虹灯光", "城市背景", "冷暖对比", "电影感", "虚化光斑", "夜景"], prompt: "城市夜景人像摄影，{人物}站在霓虹灯牌前，城市灯光形成彩色虚化光斑。冷暖色调对比，电影感光影。构图：3:4，人物位于画面左侧，右侧留出城市夜景" }
+  { id: "cafe", name: "暖调咖啡厅", desc: "暖黄灯光 · 木质桌面", elements: ["暖黄灯光", "木质桌面", "咖啡蒸汽", "浅景深", "胶片质感", "午后光线"], prompt: "专业美食摄影，一位{年龄}的{性别}坐在靠窗的木质桌边，手中握着一杯{咖啡种类}。暖黄色午后阳光透过玻璃窗斜射在桌面，形成柔和的光影对比。咖啡杯上方有淡淡的蒸汽。背景虚化的咖啡馆环境，浅景深。35mm胶片质感，温暖的色调，柯达Portra 400色彩，生活感。构图：3:4人像，半身，人物位于右侧三分线，左下方留白放置咖啡杯" },
+  { id: "fine_dining", name: "高级餐厅", desc: "柔和环境光 · 精致摆盘", elements: ["柔和环境光", "精致摆盘", "浅景深", "高级质感", "暖色调", "干净背景"], prompt: "高端餐饮商业摄影，{人物}正在品尝{菜品}。柔和的暖色环境光从侧上方投射，在餐具上形成细腻的高光。精致的骨瓷餐具与摆盘，干净的背景虚化。浅景深，焦点集中在菜品与人物手部。高端杂志摄影风格，色调温暖但不失高级感。构图：3:4，菜品位于前景虚化，人物位于中景" },
+  { id: "beach", name: "海边度假", desc: "碧海蓝天 · 阳光沙滩", elements: ["碧海蓝天", "白沙滩", "椰树", "强烈日光", "清透肤色", "度假感"], prompt: "海边度假人像摄影，{人物}站在白色沙滩上，身后是碧蓝的海水和远处的岛屿，椰树叶在画面上方垂下。正午日光明亮，天空通透湛蓝，皮肤清透自然。轻松愉悦的度假氛围。构图：3:4，半身，人物位于画面中央偏左，右侧留出海面" },
+  { id: "garden", name: "花园漫步", desc: "繁花绿植 · 柔和自然光", elements: ["繁花", "绿植", "草帽", "柔和散射光", "清新", "浅景深"], prompt: "{人物}戴着草帽站在开满花的花园里，粉色花朵与绿叶在前景虚化。柔和的散射自然光，画面清新明亮，皮肤通透。闭眼微笑感受阳光，惬意放松。构图：3:4，半身，人物位于右侧三分线，左侧前景花朵虚化" },
+  { id: "brunch", name: "自然光 Brunch", desc: "大窗户 · 明亮自然光", elements: ["明亮自然光", "大窗户", "色彩鲜艳", "健康生活", "清新", "通透"], prompt: "{人物}在洒满晨光的餐厅享用Brunch，桌上是色彩鲜艳的{食物}。大窗户自然光从侧面照射，形成明亮的通透感。健康生活方式风格，清新的色调，食物色彩鲜艳诱人。构图：3:4，俯拍或45度角，食物与人物同时入镜，窗外绿植作为背景点缀" },
+  { id: "rooftop_city", name: "城市天台", desc: "城市天际线 · 黄昏霓虹", elements: ["城市天际线", "黄昏天空", "霓虹灯光", "鸡尾酒", "烛光", "冷暖对比"], prompt: "城市天台酒吧人像，{人物}坐在天台栏杆边托腮微笑，手边是一杯{饮品}和烛光。身后是紫粉色黄昏天空与亮起灯光的城市天际线。冷暖色调对比，电影感光影，浅景深。构图：3:4，人物位于画面左侧，右侧留出城市夜景" },
+  { id: "dessert", name: "文青甜品店", desc: "奶油白 · 自然日光", elements: ["明亮奶油白", "自然日光", "清新色调", "ins风", "大窗户", "浅木色"], prompt: "{人物}在明亮的甜品店中，面前摆着{甜品}。奶油白与浅木色的空间，大窗户透进柔和的自然光。清新温柔的色调，明亮的日光摄影风格，Instagram风格。生活感十足。构图：3:4，甜品位于前景，人物位于中景，背景有绿植点缀" },
+  { id: "night_lounge", name: "夜色露台", desc: "灯笼烛光 · 海边夜景", elements: ["暖色灯笼", "烛光", "远处灯火", "热带氛围", "鸡尾酒", "暗调"], prompt: "夜晚露台人像，{人物}坐在露台桌边托腮微笑，桌上一盏烛灯和一杯{鸡尾酒}。头顶挂着暖色灯笼，远处是海边城市的点点灯火。暗调环境，暖光映在脸上，氛围浪漫。构图：3:4，人物位于画面中央偏右，前景烛灯虚化" },
+  { id: "old_street", name: "老街灯笼", desc: "古巷灯笼 · 傍晚暖光", elements: ["红灯笼", "古街巷", "三角梅", "傍晚蓝调", "暖黄灯光", "怀旧"], prompt: "古镇老街人像，{人物}走在挂满红灯笼的古巷里回头微笑，墙边开着三角梅。傍晚蓝调天空与暖黄灯笼光形成冷暖对比，怀旧氛围。构图：3:4，人物位于画面左侧，右侧留出延伸的街巷与灯笼" },
+  { id: "bookstore_cafe", name: "书店咖啡", desc: "书墙暖灯 · 安静阅读", elements: ["整面书墙", "暖色台灯", "咖啡", "毛衣", "安静", "文艺"], prompt: "书店咖啡馆人像，{人物}坐在木桌前托腮微笑，手边一摞书和一杯{咖啡}。身后是整面书墙，暖色台灯光线柔和，画面安静文艺。浅景深，书墙虚化。构图：3:4，半身，人物位于画面中央，前景书本" },
+  { id: "riverside_sunset", name: "江边日落", desc: "落日余晖 · 江景天际线", elements: ["落日", "金色逆光", "江面倒影", "城市剪影", "暖橙色调", "温柔"], prompt: "江边日落人像，{人物}倚在江边栏杆旁回头微笑。落日在江面上拉出金色倒影，远处是城市剪影。金色逆光勾勒发丝，暖橙色调，温柔浪漫。构图：3:4，人物位于画面左侧，右侧留出落日与江面" },
+  { id: "resort_pool", name: "度假泳池", desc: "无边泳池 · 黄昏棕榈", elements: ["无边泳池", "棕榈树", "黄昏天空", "水面反光", "远山", "度假感"], prompt: "度假酒店无边泳池人像，{人物}在泳池边缘托腮微笑，身后是黄昏天空、远山与棕榈树。水面反射柔和的暮光，度假氛围慵懒放松。构图：3:4，人物位于画面中央偏左，右侧留出泳池与远景" }
 ];
+
+// 原型时代存下的旧场景 id → 现在的场景（服务端 imageScene 里可能还是旧值）。
+export const AI_SCENE_ALIASES: Readonly<Record<string, string>> = { restaurant: "fine_dining", izakaya: "night_lounge", night: "rooftop_city" };
 
 export type AiPose = { id: string; name: string; hint: string };
 export const AI_POSES: Readonly<Record<string, ReadonlyArray<AiPose>>> = {
@@ -24,7 +37,7 @@ export const AI_POSES: Readonly<Record<string, ReadonlyArray<AiPose>>> = {
     { id: "cross_arm", name: "X交叉", hint: "脚尖10点钟，眼神2点钟" },
     { id: "laugh", name: "低头笑", hint: "自然笑，不看镜头" }
   ],
-  "restaurant": [
+  "fine_dining": [
     { id: "cheers", name: "举杯", hint: "举杯看向镜头或侧方" },
     { id: "taste", name: "品尝", hint: "叉子送嘴边，眼神看食物" },
     { id: "lean_back", name: "靠椅背", hint: "放松靠椅，侧脸微仰" },
@@ -32,21 +45,21 @@ export const AI_POSES: Readonly<Record<string, ReadonlyArray<AiPose>>> = {
     { id: "look_menu", name: "看菜单", hint: "低头看菜单，抓拍" },
     { id: "napkin", name: "整理餐巾", hint: "手部动作特写" }
   ],
-  "dessert": [
-    { id: "bite", name: "咬甜品", hint: "叉子叉甜品送嘴边" },
-    { id: "hold_plate", name: "端盘展示", hint: "双手端盘，正视镜头" },
-    { id: "point", name: "手指甜品", hint: "指向甜品，表情惊喜" },
-    { id: "window", name: "窗边侧坐", hint: "侧坐窗边，光线打脸" },
-    { id: "straw", name: "咬吸管", hint: "自然咬吸管看镜头" },
-    { id: "selfie", name: "举手机自拍", hint: "举手机拍镜子或甜品" }
+  "beach": [
+    { id: "sun_face", name: "挥手遮阳", hint: "单手举到额前，眨眼笑" },
+    { id: "walk_in", name: "沙滩漫步", hint: "沿海岸线走，抓拍动态" },
+    { id: "look_away", name: "眺望海面", hint: "侧身看向远处海平线" },
+    { id: "laugh", name: "迎风大笑", hint: "头发被风吹起，自然笑" },
+    { id: "back_view", name: "回眸", hint: "背对大海回头看镜头" },
+    { id: "selfie", name: "举手机自拍", hint: "对着海景自拍" }
   ],
-  "izakaya": [
-    { id: "side_face", name: "侧脸对灯笼", hint: "灯笼光映侧脸" },
-    { id: "raise_cup", name: "举杯畅饮", hint: "举杯对着镜头" },
-    { id: "elbow_bar", name: "手肘撑吧台", hint: "手肘撑吧台侧身" },
-    { id: "look_down", name: "低头看杯", hint: "低头看酒杯，抓拍" },
-    { id: "back_view", name: "回头", hint: "背对镜头回头" },
-    { id: "laugh_close", name: "大笑特写", hint: "大笑侧脸特写" }
+  "garden": [
+    { id: "sun_face", name: "迎光闭眼", hint: "仰头闭眼感受阳光" },
+    { id: "hand_face", name: "手扶帽檐", hint: "单手扶草帽，微笑" },
+    { id: "look_away", name: "侧脸赏花", hint: "侧身看向花丛" },
+    { id: "walk_street", name: "花间漫步", hint: "沿花径行走抓拍" },
+    { id: "back_view", name: "回眸", hint: "背对花丛回头" },
+    { id: "laugh", name: "低头笑", hint: "自然笑，不看镜头" }
   ],
   "brunch": [
     { id: "fork_food", name: "叉食物", hint: "叉子叉食物举镜头前" },
@@ -56,13 +69,61 @@ export const AI_POSES: Readonly<Record<string, ReadonlyArray<AiPose>>> = {
     { id: "hands_up", name: "双手举食物", hint: "双手举起食物展示" },
     { id: "walk_in", name: "走进画面", hint: "从画面外走入，抓拍" }
   ],
-  "night": [
-    { id: "neon_side", name: "霓虹侧脸", hint: "霓虹光打侧脸" },
-    { id: "look_up", name: "抬头看灯", hint: "抬头看霓虹灯牌" },
-    { id: "walk_street", name: "街头行走", hint: "抓拍行走动态" },
-    { id: "back_neon", name: "背对霓虹", hint: "背对霓虹回头" },
-    { id: "sit_step", name: "坐台阶", hint: "坐台阶上，手撑膝盖" },
-    { id: "umbrella", name: "撑伞", hint: "撑伞站霓虹下" }
+  "rooftop_city": [
+    { id: "hand_face", name: "托腮微笑", hint: "手托脸，看向镜头" },
+    { id: "raise_cup", name: "举杯", hint: "举杯对着镜头" },
+    { id: "look_away", name: "眺望城市", hint: "侧身看向天际线" },
+    { id: "neon_side", name: "霓虹侧脸", hint: "城市灯光打侧脸" },
+    { id: "back_view", name: "回头", hint: "背对城市回头" },
+    { id: "cross_leg", name: "翘腿侧坐", hint: "放松侧坐栏杆边" }
+  ],
+  "dessert": [
+    { id: "bite", name: "咬甜品", hint: "叉子叉甜品送嘴边" },
+    { id: "hold_plate", name: "端盘展示", hint: "双手端盘，正视镜头" },
+    { id: "point", name: "手指甜品", hint: "指向甜品，表情惊喜" },
+    { id: "window", name: "窗边侧坐", hint: "侧坐窗边，光线打脸" },
+    { id: "straw", name: "咬吸管", hint: "自然咬吸管看镜头" },
+    { id: "selfie", name: "举手机自拍", hint: "举手机拍镜子或甜品" }
+  ],
+  "night_lounge": [
+    { id: "hand_face", name: "托腮", hint: "手托脸，眼神看镜头" },
+    { id: "side_face", name: "侧脸对灯笼", hint: "灯笼光映侧脸" },
+    { id: "raise_cup", name: "举杯", hint: "举杯对着镜头" },
+    { id: "straw", name: "咬吸管", hint: "自然咬吸管看镜头" },
+    { id: "look_down", name: "低头看杯", hint: "低头看酒杯，抓拍" },
+    { id: "laugh_close", name: "大笑特写", hint: "大笑侧脸特写" }
+  ],
+  "old_street": [
+    { id: "back_view", name: "回眸", hint: "边走边回头微笑" },
+    { id: "walk_street", name: "街巷漫步", hint: "沿老街行走抓拍" },
+    { id: "look_up", name: "抬头看灯笼", hint: "仰头看头顶灯笼" },
+    { id: "side_face", name: "灯笼侧脸", hint: "灯笼光映侧脸" },
+    { id: "point", name: "指向灯笼", hint: "指向街边灯笼，表情惊喜" },
+    { id: "sit_step", name: "坐台阶", hint: "坐在门前台阶上" }
+  ],
+  "bookstore_cafe": [
+    { id: "hand_face", name: "手托脸", hint: "头微侧，手轻托脸颊" },
+    { id: "look_menu", name: "低头看书", hint: "低头翻书，抓拍" },
+    { id: "coffee_hold", name: "手托咖啡", hint: "双手捧咖啡杯" },
+    { id: "laugh", name: "低头笑", hint: "自然笑，不看镜头" },
+    { id: "window", name: "窗边侧坐", hint: "侧坐窗边，光线打脸" },
+    { id: "lean_forward", name: "前倾靠桌", hint: "身体微前倾，肘部撑桌" }
+  ],
+  "riverside_sunset": [
+    { id: "back_view", name: "回眸", hint: "背对落日回头" },
+    { id: "sun_face", name: "迎光", hint: "面向夕阳，闭眼微笑" },
+    { id: "look_away", name: "望向江面", hint: "侧身看向江面" },
+    { id: "elbow_bar", name: "倚栏杆", hint: "手肘搭栏杆侧身" },
+    { id: "hand_face", name: "手托脸", hint: "手托脸，看向镜头" },
+    { id: "walk_street", name: "江边漫步", hint: "沿江边行走抓拍" }
+  ],
+  "resort_pool": [
+    { id: "hand_face", name: "托腮", hint: "趴在池边托腮" },
+    { id: "lean_forward", name: "趴池边", hint: "双臂搭池边，身体前倾" },
+    { id: "look_away", name: "眺望远方", hint: "侧身看向远山" },
+    { id: "laugh", name: "低头笑", hint: "自然笑，不看镜头" },
+    { id: "back_view", name: "回眸", hint: "背对镜头回头" },
+    { id: "sun_face", name: "迎光闭眼", hint: "面向暮光，闭眼微笑" }
   ]
 };
 
