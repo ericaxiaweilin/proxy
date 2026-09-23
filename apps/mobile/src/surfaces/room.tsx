@@ -49,14 +49,17 @@ const QUICK_REPLIES: ReadonlyArray<{ label: string; text: string }> = [
   { label: "📍 在哪碰头？", text: "在哪碰头？" },
 ];
 
-export function RoomSurface({ conversationId, conversationClient, mediaClient, profileClient, visible, onClose }: {
+export function RoomSurface({ conversationId, conversationClient, mediaClient, profileClient, presentation = "modal", visible, onClose }: {
+  // HOME-MORE-ROOMS-002: 从「更多 → 聊天房」进房时叠在「更多」整页 Modal 里（overlay）；
+  // 从消息页进房仍是独立 Modal。
+  presentation?: "modal" | "overlay";
   conversationId: string;
   conversationClient: ConversationClient;
   mediaClient: MediaClient;
   profileClient: ProfileClient;
   visible: boolean;
   onClose: () => void;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const safeArea = useSafeAreaInsets();
   const [conv, setConv] = useState<ConversationInboxItem>();
   const [messages, setMessages] = useState<WireMessage[]>([]);
@@ -234,159 +237,164 @@ export function RoomSurface({ conversationId, conversationClient, mediaClient, p
   const roomScene = conv?.conversation.roomScene;
   const roomName = roomScene?.roomName || "群聊";
 
+  const body = (
+    <View style={[styles.root, presentation === "overlay" && styles.overlay, { paddingTop: safeArea.top }]}>
+      <View style={styles.header}>
+        <Pressable accessibilityLabel="返回" hitSlop={12} onPress={onClose} style={styles.headerBack}>
+          <Text style={styles.headerBackText}>‹</Text>
+        </Pressable>
+        <View style={styles.headerInfo}>
+          <Text style={styles.headerName} numberOfLines={1}>{roomName}</Text>
+          <Text style={styles.headerSub}>{participants.length} 人</Text>
+        </View>
+      </View>
+
+      {loading ? (
+        <View style={styles.centerFill}><ActivityIndicator color={color.muted} /></View>
+      ) : (
+        <>
+          {roomScene ? (
+            <View style={styles.sceneBanner}>
+              <Text style={styles.sceneBannerEmoji}>{roomScene.emoji}</Text>
+              <View style={styles.sceneBannerInfo}>
+                <Text style={styles.sceneBannerTitle}>{roomScene.sceneName}</Text>
+                <Text style={styles.sceneBannerDetail}>{roomScene.sceneDesc}</Text>
+              </View>
+            </View>
+          ) : null}
+
+          {meetup ? <MeetStatusBar busy={meetBusy} meetup={meetup} onArrive={() => void arriveActiveMeetup(meetup.meetupId)} onComplete={() => void completeActiveMeetup(meetup.meetupId)} onNudge={() => void nudgeActiveMeetup(meetup.meetupId)} selfIsProposer={meetup.proposerId === actorId} /> : null}
+
+          <ScrollView contentContainerStyle={styles.membersStripContent} horizontal showsHorizontalScrollIndicator={false} style={styles.membersStrip}>
+            {participants.map((id) => {
+              const uri = avatarUri(id);
+              return (
+                <View key={id} style={styles.memberItem}>
+                  {uri ? <Image source={{ uri }} style={styles.memberAvatar} /> : (
+                    <View style={styles.memberAvatarFallback}><Text style={styles.memberAvatarFallbackText}>{displayName(id).slice(0, 1)}</Text></View>
+                  )}
+                  <Text numberOfLines={1} style={styles.memberName}>{displayName(id)}</Text>
+                </View>
+              );
+            })}
+          </ScrollView>
+
+          <ScrollView
+            contentContainerStyle={styles.chatContent}
+            onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+            ref={scrollRef}
+            style={styles.chat}
+          >
+            {messages.map((m) => (
+              <MessageRow
+                key={m.messageId}
+                isOwn={m.senderId === actorId}
+                meetup={meetup}
+                message={m}
+                onAccept={() => void acceptActiveMeetup(m.proxyObject?.objectId ?? "")}
+                senderName={displayName(m.senderId)}
+                meetupActionsBusy={meetBusy}
+                baseUrl={conversationClient.baseUrl}
+                selfId={actorId}
+              />
+            ))}
+          </ScrollView>
+
+          <ScrollView contentContainerStyle={styles.quickReplies} horizontal showsHorizontalScrollIndicator={false}>
+            {!meetup ? (
+              <Pressable accessibilityLabel="发起见面" onPress={openMeetSheet} style={[styles.qrBtn, styles.qrBtnMeet]}>
+                <Text style={styles.qrBtnMeetText}>📍 发起见面</Text>
+              </Pressable>
+            ) : null}
+            {QUICK_REPLIES.map((qr) => (
+              <Pressable accessibilityLabel={qr.label} key={qr.text} onPress={() => void sendText(qr.text)} style={styles.qrBtn}>
+                <Text style={styles.qrBtnText}>{qr.label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+
+          <View style={styles.inputBar}>
+            <Pressable accessibilityLabel="发送图片" disabled={sending} onPress={() => void sendPhoto()} style={styles.inputIconBtn}>
+              <ProxyIcon color={foundation.ink} name="camera" size={22} />
+            </Pressable>
+            <TextInput
+              accessibilityLabel="消息"
+              onChangeText={setDraft}
+              placeholder="消息"
+              placeholderTextColor={color.muted}
+              style={styles.textInput}
+              value={draft}
+            />
+            {draft.trim() ? (
+              <Pressable accessibilityLabel="发送" disabled={sending} onPress={() => void sendText(draft)} style={styles.sendBtn}>
+                <Text style={styles.sendBtnText}>发送</Text>
+              </Pressable>
+            ) : (
+              <VoiceToolButton disabled={sending} onDone={(recording) => void sendVoice(recording)} />
+            )}
+          </View>
+        </>
+      )}
+
+      {meetSheetOpen ? (
+        <Pressable accessibilityLabel="关闭发起见面" onPress={() => setMeetSheetOpen(false)} style={styles.sheetBackdrop}>
+          <View onStartShouldSetResponder={() => true} style={[styles.meetSheet, { paddingBottom: safeArea.bottom + 16 }]}>
+            <View style={styles.sheetGrab} />
+            <Text style={styles.sheetTitle}>发起线下见面</Text>
+            <Text style={styles.sheetSub}>房间成员会收到邀请，全部同意后生效</Text>
+
+            <Text style={styles.sheetLabel}>选场景</Text>
+            <View style={styles.meetSceneGrid}>
+              {MEET_SCENE_OPTIONS.map((option, index) => (
+                <Pressable
+                  accessibilityLabel={`选择场景 ${option.sceneName}`}
+                  key={option.sceneName}
+                  onPress={() => { setMeetSceneIndex(index); setMeetPlace(option.place); }}
+                  style={[styles.meetSceneOpt, index === meetSceneIndex && styles.meetSceneOptSelected]}
+                >
+                  <Text style={styles.meetSceneEmoji}>{option.emoji}</Text>
+                  <Text style={styles.meetSceneName}>{option.sceneName}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.sheetLabel}>选时间</Text>
+            <View style={styles.meetTimeChips}>
+              {MEET_TIME_OPTIONS.map((option, index) => (
+                <Pressable
+                  accessibilityLabel={`选择时间 ${option}`}
+                  key={option}
+                  onPress={() => setMeetTimeIndex(index)}
+                  style={[styles.meetTimeChip, index === meetTimeIndex && styles.meetTimeChipSelected]}
+                >
+                  <Text style={[styles.meetTimeChipText, index === meetTimeIndex && styles.meetTimeChipTextSelected]}>{option}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.sheetLabel}>碰头地点</Text>
+            <TextInput accessibilityLabel="碰头地点" onChangeText={setMeetPlace} style={styles.meetPlaceInput} value={meetPlace} />
+
+            <View style={styles.meetSheetFooter}>
+              <Pressable accessibilityLabel="取消" onPress={() => setMeetSheetOpen(false)} style={[styles.meetFooterBtn, styles.meetFooterBtnSecondary]}>
+                <Text style={styles.meetFooterBtnSecondaryText}>取消</Text>
+              </Pressable>
+              <Pressable accessibilityLabel="发到房间" disabled={meetBusy} onPress={() => void sendMeetInvite()} style={[styles.meetFooterBtn, styles.meetFooterBtnPrimary]}>
+                <Text style={styles.meetFooterBtnPrimaryText}>{meetBusy ? "发送中…" : "发到房间"}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+
+  if (presentation === "overlay") return visible ? body : null;
   return (
     <Modal animationType="slide" onRequestClose={onClose} visible={visible}>
-      <View style={[styles.root, { paddingTop: safeArea.top }]}>
-        <View style={styles.header}>
-          <Pressable accessibilityLabel="返回" hitSlop={12} onPress={onClose} style={styles.headerBack}>
-            <Text style={styles.headerBackText}>‹</Text>
-          </Pressable>
-          <View style={styles.headerInfo}>
-            <Text style={styles.headerName} numberOfLines={1}>{roomName}</Text>
-            <Text style={styles.headerSub}>{participants.length} 人</Text>
-          </View>
-        </View>
-
-        {loading ? (
-          <View style={styles.centerFill}><ActivityIndicator color={color.muted} /></View>
-        ) : (
-          <>
-            {roomScene ? (
-              <View style={styles.sceneBanner}>
-                <Text style={styles.sceneBannerEmoji}>{roomScene.emoji}</Text>
-                <View style={styles.sceneBannerInfo}>
-                  <Text style={styles.sceneBannerTitle}>{roomScene.sceneName}</Text>
-                  <Text style={styles.sceneBannerDetail}>{roomScene.sceneDesc}</Text>
-                </View>
-              </View>
-            ) : null}
-
-            {meetup ? <MeetStatusBar busy={meetBusy} meetup={meetup} onArrive={() => void arriveActiveMeetup(meetup.meetupId)} onComplete={() => void completeActiveMeetup(meetup.meetupId)} onNudge={() => void nudgeActiveMeetup(meetup.meetupId)} selfIsProposer={meetup.proposerId === actorId} /> : null}
-
-            <ScrollView contentContainerStyle={styles.membersStripContent} horizontal showsHorizontalScrollIndicator={false} style={styles.membersStrip}>
-              {participants.map((id) => {
-                const uri = avatarUri(id);
-                return (
-                  <View key={id} style={styles.memberItem}>
-                    {uri ? <Image source={{ uri }} style={styles.memberAvatar} /> : (
-                      <View style={styles.memberAvatarFallback}><Text style={styles.memberAvatarFallbackText}>{displayName(id).slice(0, 1)}</Text></View>
-                    )}
-                    <Text numberOfLines={1} style={styles.memberName}>{displayName(id)}</Text>
-                  </View>
-                );
-              })}
-            </ScrollView>
-
-            <ScrollView
-              contentContainerStyle={styles.chatContent}
-              onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
-              ref={scrollRef}
-              style={styles.chat}
-            >
-              {messages.map((m) => (
-                <MessageRow
-                  key={m.messageId}
-                  isOwn={m.senderId === actorId}
-                  meetup={meetup}
-                  message={m}
-                  onAccept={() => void acceptActiveMeetup(m.proxyObject?.objectId ?? "")}
-                  senderName={displayName(m.senderId)}
-                  meetupActionsBusy={meetBusy}
-                  baseUrl={conversationClient.baseUrl}
-                  selfId={actorId}
-                />
-              ))}
-            </ScrollView>
-
-            <ScrollView contentContainerStyle={styles.quickReplies} horizontal showsHorizontalScrollIndicator={false}>
-              {!meetup ? (
-                <Pressable accessibilityLabel="发起见面" onPress={openMeetSheet} style={[styles.qrBtn, styles.qrBtnMeet]}>
-                  <Text style={styles.qrBtnMeetText}>📍 发起见面</Text>
-                </Pressable>
-              ) : null}
-              {QUICK_REPLIES.map((qr) => (
-                <Pressable accessibilityLabel={qr.label} key={qr.text} onPress={() => void sendText(qr.text)} style={styles.qrBtn}>
-                  <Text style={styles.qrBtnText}>{qr.label}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-
-            <View style={styles.inputBar}>
-              <Pressable accessibilityLabel="发送图片" disabled={sending} onPress={() => void sendPhoto()} style={styles.inputIconBtn}>
-                <ProxyIcon color={foundation.ink} name="camera" size={22} />
-              </Pressable>
-              <TextInput
-                accessibilityLabel="消息"
-                onChangeText={setDraft}
-                placeholder="消息"
-                placeholderTextColor={color.muted}
-                style={styles.textInput}
-                value={draft}
-              />
-              {draft.trim() ? (
-                <Pressable accessibilityLabel="发送" disabled={sending} onPress={() => void sendText(draft)} style={styles.sendBtn}>
-                  <Text style={styles.sendBtnText}>发送</Text>
-                </Pressable>
-              ) : (
-                <VoiceToolButton disabled={sending} onDone={(recording) => void sendVoice(recording)} />
-              )}
-            </View>
-          </>
-        )}
-
-        {meetSheetOpen ? (
-          <Pressable accessibilityLabel="关闭发起见面" onPress={() => setMeetSheetOpen(false)} style={styles.sheetBackdrop}>
-            <View onStartShouldSetResponder={() => true} style={[styles.meetSheet, { paddingBottom: safeArea.bottom + 16 }]}>
-              <View style={styles.sheetGrab} />
-              <Text style={styles.sheetTitle}>发起线下见面</Text>
-              <Text style={styles.sheetSub}>房间成员会收到邀请，全部同意后生效</Text>
-
-              <Text style={styles.sheetLabel}>选场景</Text>
-              <View style={styles.meetSceneGrid}>
-                {MEET_SCENE_OPTIONS.map((option, index) => (
-                  <Pressable
-                    accessibilityLabel={`选择场景 ${option.sceneName}`}
-                    key={option.sceneName}
-                    onPress={() => { setMeetSceneIndex(index); setMeetPlace(option.place); }}
-                    style={[styles.meetSceneOpt, index === meetSceneIndex && styles.meetSceneOptSelected]}
-                  >
-                    <Text style={styles.meetSceneEmoji}>{option.emoji}</Text>
-                    <Text style={styles.meetSceneName}>{option.sceneName}</Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <Text style={styles.sheetLabel}>选时间</Text>
-              <View style={styles.meetTimeChips}>
-                {MEET_TIME_OPTIONS.map((option, index) => (
-                  <Pressable
-                    accessibilityLabel={`选择时间 ${option}`}
-                    key={option}
-                    onPress={() => setMeetTimeIndex(index)}
-                    style={[styles.meetTimeChip, index === meetTimeIndex && styles.meetTimeChipSelected]}
-                  >
-                    <Text style={[styles.meetTimeChipText, index === meetTimeIndex && styles.meetTimeChipTextSelected]}>{option}</Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <Text style={styles.sheetLabel}>碰头地点</Text>
-              <TextInput accessibilityLabel="碰头地点" onChangeText={setMeetPlace} style={styles.meetPlaceInput} value={meetPlace} />
-
-              <View style={styles.meetSheetFooter}>
-                <Pressable accessibilityLabel="取消" onPress={() => setMeetSheetOpen(false)} style={[styles.meetFooterBtn, styles.meetFooterBtnSecondary]}>
-                  <Text style={styles.meetFooterBtnSecondaryText}>取消</Text>
-                </Pressable>
-                <Pressable accessibilityLabel="发到房间" disabled={meetBusy} onPress={() => void sendMeetInvite()} style={[styles.meetFooterBtn, styles.meetFooterBtnPrimary]}>
-                  <Text style={styles.meetFooterBtnPrimaryText}>{meetBusy ? "发送中…" : "发到房间"}</Text>
-                </Pressable>
-              </View>
-            </View>
-          </Pressable>
-        ) : null}
-      </View>
+      {body}
     </Modal>
   );
 }
@@ -518,6 +526,7 @@ function ChatAudio({ uri }: { uri: string }): React.JSX.Element {
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.white, flex: 1 },
+  overlay: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   header: { alignItems: "center", borderBottomColor: color.cardBorder, borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 12 },
   headerBack: { alignItems: "center", height: 30, justifyContent: "center", width: 26 },
   headerBackText: { color: foundation.ink, fontSize: 24, fontWeight: "600" },

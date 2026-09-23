@@ -140,6 +140,8 @@ export function RequesterHome({
   onOpenRoomCreate,
   loadRooms,
   onOpenRoom,
+  moreRoomLayer,
+  moreRoomLayerOpen,
   viewerAccountId,
   isGuest,
   onCreateScene,
@@ -186,6 +188,10 @@ export function RequesterHome({
   // 点一行进房。没接（老调用方 / 测试）就不显示聊天房 chip。
   loadRooms?: () => Promise<ConversationInboxItem[]>;
   onOpenRoom?: (conversationId: string) => void;
+  // HOME-MORE-ROOMS-002: 调用方渲染好的创建页 / 房间（overlay 形态），叠在「更多」整页
+  // Modal 里面 —— 开房 / 进房不用先关「更多」，也就不会中间闪回首页。
+  moreRoomLayer?: ReactNode;
+  moreRoomLayerOpen?: boolean;
   viewerAccountId?: string;
   isGuest?: boolean;
   // 访客模式：不拉关系链、不弹关系失败提示。访客点 + 号走 handleHomeFriend
@@ -259,6 +265,15 @@ export function RequesterHome({
 
   // HOME-MORE-ROOMS-001: 读「我已有的房」。只认服务端真实的 GROUP 会话且带 roomScene ——
   // 没有公开可加入的房间目录（那需要独立的房间域），所以不画别人的房、不画假「加入」。
+  // HOME-MORE-ROOMS-002: 创建页 / 房间关掉、回到聊天房列表时重读一次 —— 刚建的房、
+  // 刚看过的未读数要跟着变。
+  const roomLayerWasOpen = useRef(false);
+  useEffect(() => {
+    if (roomLayerWasOpen.current && !moreRoomLayerOpen && filterSheetOpen && moreMode === "rooms") refreshRooms();
+    roomLayerWasOpen.current = moreRoomLayerOpen === true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moreRoomLayerOpen]);
+
   function refreshRooms(): void {
     if (!loadRooms || isGuest) return;
     setRooms((prev) => ({ status: "loading", items: prev.items }));
@@ -1522,11 +1537,11 @@ export function RequesterHome({
             {moreMode === "rooms" ? (
               <ScrollView style={styles.moreList} contentContainerStyle={styles.moreListContent} showsVerticalScrollIndicator={false}>
                 {/* HOME-MORE-ROOMS-001：开房大卡（原型 .create-room-card）。整卡 = 默认场景开房，
-                    4 个场景 chip = 带着该场景开房。开创建页前先关掉本页 Modal（iOS 只呈现一个）。 */}
+                    4 个场景 chip = 带着该场景开房。创建页叠在本页里（moreRoomLayer），不关本页。 */}
                 <Pressable
                   accessibilityLabel={t("createRoomA11y")}
                   disabled={!onOpenRoomCreate || isGuest}
-                  onPress={() => { setFilterSheetOpen(false); onOpenRoomCreate?.(filteredPeople); }}
+                  onPress={() => onOpenRoomCreate?.(filteredPeople)}
                   style={({ pressed }) => [styles.roomCreateCard, pressed && styles.roomCreateCardPressed]}
                 >
                   <View style={styles.roomCreateTop}>
@@ -1542,7 +1557,7 @@ export function RequesterHome({
                         key={`room-scene:${scene.roomName}`}
                         accessibilityLabel={`${t("createRoomA11y")} · ${scene.title}`}
                         disabled={!onOpenRoomCreate || isGuest}
-                        onPress={() => { setFilterSheetOpen(false); onOpenRoomCreate?.(filteredPeople, index); }}
+                        onPress={() => onOpenRoomCreate?.(filteredPeople, index)}
                         style={styles.roomCreateScene}
                       >
                         <Text style={styles.roomCreateSceneEmoji}>{scene.emoji}</Text>
@@ -1569,9 +1584,7 @@ export function RequesterHome({
                   const meetup = item.activeMeetup;
                   const meta = meetup ? `${meetup.place} · ${meetup.timeLabel}` : scene.sceneDesc;
                   const enter = (): void => {
-                    if (!onOpenRoom) return;
-                    setFilterSheetOpen(false);
-                    onOpenRoom(item.conversation.conversationId);
+                    onOpenRoom?.(item.conversation.conversationId);
                   };
                   return (
                     <Pressable
@@ -1682,6 +1695,8 @@ export function RequesterHome({
             ) : null}
             {/* HOME-I18N-002：语言面板叠在本页 Modal 里面（overlay，不是第二个 Modal）。 */}
             <LanguageSheet presentation="overlay" visible={languageSheetOpen} onClose={() => setLanguageSheetOpen(false)} />
+            {/* HOME-MORE-ROOMS-002：创建页 / 房间叠在最上层（overlay），返回就回到聊天房列表。 */}
+            {moreRoomLayer}
           </View>
         </Modal>
       ) : null}

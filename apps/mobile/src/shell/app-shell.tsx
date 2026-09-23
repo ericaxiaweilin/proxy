@@ -214,6 +214,11 @@ export function AppShell({
   // HOME-MORE-ROOMS-001: 开房大卡上点的场景（SCENE_OPTIONS 下标）。
   const [roomCreateSceneIndex, setRoomCreateSceneIndex] = useState<number>(0);
   const [roomChatId, setRoomChatId] = useState<string>();
+  // HOME-MORE-ROOMS-002（2026-09-23，用户：「点击聊天房卡片创建 先弹回 home 再进入创建
+  // 这个多此一举」）：从「更多 → 聊天房」开的创建页 / 房间，叠在「更多」整页 Modal
+  // **里面**（overlay），不先关「更多」再开新 Modal —— 之前那样中间会闪一下首页。
+  // 从消息页进房不在任何 Modal 里，仍走下面的独立 Modal。
+  const [roomLayerInMore, setRoomLayerInMore] = useState<boolean>(false);
   const [openAIProfile, setOpenAIProfile] = useState<PlatformAIAccount>();
   const [openHumanProfile, setOpenHumanProfile] = useState<OtherProfileTarget>();
   // BRAND-CHROME-L1-001: 「我的」子页（个人主页等）跟 openAIProfile/openHumanProfile
@@ -607,6 +612,34 @@ export function AppShell({
         ? { latitude: currentLocation.custom.lat, longitude: currentLocation.custom.lng }
         : undefined;
 
+  // HOME-MORE-ROOMS-002: 同一对创建页 / 房间，按入口决定是独立 Modal 还是叠在「更多」里。
+  // 两处都挂着，但同一时刻只有入口那一处 visible。
+  function renderRoomLayers(presentation: "modal" | "overlay"): React.JSX.Element {
+    const here = presentation === "overlay" ? roomLayerInMore : !roomLayerInMore;
+    return (
+      <>
+        <RoomCreateSurface
+          candidates={roomCreateCandidates ?? []}
+          initialSceneIndex={roomCreateSceneIndex}
+          conversationClient={conversation}
+          onClose={() => setRoomCreateCandidates(undefined)}
+          onCreated={(conversationId) => { setRoomCreateCandidates(undefined); setRoomChatId(conversationId); }}
+          presentation={presentation}
+          visible={here && roomCreateCandidates !== undefined}
+        />
+        <RoomSurface
+          conversationClient={conversation}
+          conversationId={roomChatId ?? ""}
+          mediaClient={media}
+          onClose={() => setRoomChatId(undefined)}
+          presentation={presentation}
+          profileClient={profile}
+          visible={here && roomChatId !== undefined}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <SafeAreaView edges={["top"]} style={styles.safeArea}>
@@ -820,9 +853,11 @@ export function AppShell({
                 setPageOverride("MSG_CHAT");
                 setTab("MESSAGES");
               }}
-              onOpenRoomCreate={(candidates, sceneIndex) => { setRoomCreateSceneIndex(sceneIndex ?? 0); setRoomCreateCandidates(candidates); }}
+              onOpenRoomCreate={(candidates, sceneIndex) => { setRoomLayerInMore(true); setRoomCreateSceneIndex(sceneIndex ?? 0); setRoomCreateCandidates(candidates); }}
               loadRooms={() => conversation.listConversations()}
-              onOpenRoom={setRoomChatId}
+              onOpenRoom={(conversationId) => { setRoomLayerInMore(true); setRoomChatId(conversationId); }}
+              moreRoomLayer={roomLayerInMore ? renderRoomLayers("overlay") : null}
+              moreRoomLayerOpen={roomLayerInMore && (roomCreateCandidates !== undefined || roomChatId !== undefined)}
               onCreateScene={setSceneComposerTool}
               // SCENE-MAP-DEFAULT-001（2026-09-20）：无参数时以前硬编码跳
               // "threebeans"，把"打开附近场景地图"这个入口悄悄变成"直达
@@ -916,7 +951,7 @@ export function AppShell({
               onOpenPeerProfile={openPeerProfile}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} relationship={relationship} onOpenConversation={(author, conversationId, aiAccount, avatarSource, peerUserId) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}), ...(peerUserId ? { peerUserId } : {}) } : { author, ...(peerUserId ? { peerUserId } : {}) })} onOpenRoom={setRoomChatId} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
+            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} relationship={relationship} onOpenConversation={(author, conversationId, aiAccount, avatarSource, peerUserId) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}), ...(peerUserId ? { peerUserId } : {}) } : { author, ...(peerUserId ? { peerUserId } : {}) })} onOpenRoom={(conversationId) => { setRoomLayerInMore(false); setRoomChatId(conversationId); }} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>
@@ -997,22 +1032,7 @@ export function AppShell({
           }}
           open={locationSheetOpen}
         />
-        <RoomCreateSurface
-          candidates={roomCreateCandidates ?? []}
-          initialSceneIndex={roomCreateSceneIndex}
-          conversationClient={conversation}
-          onClose={() => setRoomCreateCandidates(undefined)}
-          onCreated={(conversationId) => { setRoomCreateCandidates(undefined); setRoomChatId(conversationId); }}
-          visible={roomCreateCandidates !== undefined}
-        />
-        <RoomSurface
-          conversationClient={conversation}
-          conversationId={roomChatId ?? ""}
-          mediaClient={media}
-          onClose={() => setRoomChatId(undefined)}
-          profileClient={profile}
-          visible={roomChatId !== undefined}
-        />
+        {renderRoomLayers("modal")}
       </View>
       </SafeAreaView>
     </>

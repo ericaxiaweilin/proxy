@@ -29,7 +29,9 @@ export const SCENE_OPTIONS: ReadonlyArray<{ emoji: string; sceneName: string; sc
   { emoji: "💬", sceneName: "随便聊聊", sceneDesc: "无固定活动", roomName: "随便聊聊", title: "随便聊聊", subtitle: "无固定活动" },
 ];
 
-export function RoomCreateSurface({ candidates, conversationClient, initialSceneIndex = 0, visible, onClose, onCreated }: {
+export function RoomCreateSurface({ candidates, conversationClient, initialSceneIndex = 0, presentation = "modal", visible, onClose, onCreated }: {
+  // HOME-MORE-ROOMS-002: "overlay" = 不包 Modal，直接叠在调用方所在的 Modal 里（「更多」整页）。
+  presentation?: "modal" | "overlay";
   candidates: ReadonlyArray<RecommendPerson>;
   // 从开房大卡的场景 chip 进来时预选的场景（SCENE_OPTIONS 下标）。
   initialSceneIndex?: number;
@@ -37,7 +39,7 @@ export function RoomCreateSurface({ candidates, conversationClient, initialScene
   visible: boolean;
   onClose: () => void;
   onCreated: (conversationId: string) => void;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const safeArea = useSafeAreaInsets();
   const [sceneIndex, setSceneIndex] = useState(0);
   const [roomName, setRoomName] = useState(SCENE_OPTIONS[0]!.roomName);
@@ -113,105 +115,111 @@ export function RoomCreateSurface({ candidates, conversationClient, initialScene
     }
   }
 
-  return (
-    <Modal animationType="slide" onRequestClose={onClose} visible={visible}>
-      <View style={[styles.root, { paddingTop: safeArea.top }]}>
-        <View style={styles.navBar}>
-          <Pressable accessibilityLabel="返回" hitSlop={12} onPress={() => { reset(); onClose(); }} style={styles.navBack}>
-            <Text style={styles.navBackText}>‹</Text>
-          </Pressable>
-          <Text style={styles.navTitle}>创建房间</Text>
-          <Pressable
-            accessibilityLabel="创建"
-            disabled={selected.size === 0 || creating}
-            onPress={() => void create()}
-            style={[styles.navAction, selected.size > 0 && !creating && styles.navActionReady]}
-          >
-            <Text style={[styles.navActionText, selected.size > 0 && !creating && styles.navActionTextReady]}>{creating ? "创建中…" : "创建"}</Text>
-          </Pressable>
+  const body = (
+    <View style={[styles.root, presentation === "overlay" && styles.overlay, { paddingTop: safeArea.top }]}>
+      <View style={styles.navBar}>
+        <Pressable accessibilityLabel="返回" hitSlop={12} onPress={() => { reset(); onClose(); }} style={styles.navBack}>
+          <Text style={styles.navBackText}>‹</Text>
+        </Pressable>
+        <Text style={styles.navTitle}>创建房间</Text>
+        <Pressable
+          accessibilityLabel="创建"
+          disabled={selected.size === 0 || creating}
+          onPress={() => void create()}
+          style={[styles.navAction, selected.size > 0 && !creating && styles.navActionReady]}
+        >
+          <Text style={[styles.navActionText, selected.size > 0 && !creating && styles.navActionTextReady]}>{creating ? "创建中…" : "创建"}</Text>
+        </Pressable>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <View style={styles.preview}>
+          <View style={styles.previewTop}>
+            <Text style={styles.previewEmoji}>{scene.emoji}</Text>
+            <View style={styles.previewInfo}>
+              <Text style={styles.previewTitle}>{roomName.trim() || scene.roomName}</Text>
+              <Text style={styles.previewSub}>{scene.sceneName} · {scene.sceneDesc}</Text>
+            </View>
+          </View>
+          <View style={styles.previewMembers}>
+            <Text style={styles.previewCount}>{selected.size === 0 ? "还没有邀请人" : `${selected.size} 人已选`}</Text>
+          </View>
         </View>
 
-        <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-          <View style={styles.preview}>
-            <View style={styles.previewTop}>
-              <Text style={styles.previewEmoji}>{scene.emoji}</Text>
-              <View style={styles.previewInfo}>
-                <Text style={styles.previewTitle}>{roomName.trim() || scene.roomName}</Text>
-                <Text style={styles.previewSub}>{scene.sceneName} · {scene.sceneDesc}</Text>
+        <Text style={styles.sectionTitle}>选择场景</Text>
+        <View style={styles.sceneGrid}>
+          {SCENE_OPTIONS.map((option, index) => (
+            <Pressable
+              key={option.roomName}
+              accessibilityLabel={`选择场景 ${option.title}`}
+              onPress={() => pickScene(index)}
+              style={[styles.sceneOpt, index === sceneIndex && styles.sceneOptSelected]}
+            >
+              <Text style={styles.sceneOptEmoji}>{option.emoji}</Text>
+              <View style={styles.sceneOptInfo}>
+                <Text style={styles.sceneOptTitle}>{option.title}</Text>
+                <Text style={styles.sceneOptSub}>{option.subtitle}</Text>
               </View>
-            </View>
-            <View style={styles.previewMembers}>
-              <Text style={styles.previewCount}>{selected.size === 0 ? "还没有邀请人" : `${selected.size} 人已选`}</Text>
-            </View>
-          </View>
+            </Pressable>
+          ))}
+        </View>
 
-          <Text style={styles.sectionTitle}>选择场景</Text>
-          <View style={styles.sceneGrid}>
-            {SCENE_OPTIONS.map((option, index) => (
+        <Text style={styles.sectionTitle}>房间名</Text>
+        <View style={styles.roomNameWrap}>
+          <TextInput
+            accessibilityLabel="房间名"
+            onChangeText={onRoomNameInput}
+            style={styles.roomNameInput}
+            value={roomName}
+          />
+          <View style={[styles.roomNameBadge, roomNameEdited && styles.roomNameBadgeEdited]}>
+            <Text style={[styles.roomNameBadgeText, roomNameEdited && styles.roomNameBadgeTextEdited]}>{roomNameEdited ? "已修改" : "自动"}</Text>
+          </View>
+        </View>
+
+        <Text style={styles.sectionTitle}>邀请谁进来</Text>
+        {invitable.length === 0 ? (
+          <Text style={styles.empty}>暂时没有可邀请的人。</Text>
+        ) : (
+          invitable.map((p) => {
+            const on = selected.has(p.id);
+            return (
               <Pressable
-                key={option.roomName}
-                accessibilityLabel={`选择场景 ${option.title}`}
-                onPress={() => pickScene(index)}
-                style={[styles.sceneOpt, index === sceneIndex && styles.sceneOptSelected]}
+                key={p.id}
+                accessibilityLabel={`邀请 ${p.name}${on ? "，已选中" : ""}`}
+                onPress={() => toggleInvite(p.id)}
+                style={[styles.inviteItem, on && styles.inviteItemSelected]}
               >
-                <Text style={styles.sceneOptEmoji}>{option.emoji}</Text>
-                <View style={styles.sceneOptInfo}>
-                  <Text style={styles.sceneOptTitle}>{option.title}</Text>
-                  <Text style={styles.sceneOptSub}>{option.subtitle}</Text>
+                {p.photoUri ? <Image source={{ uri: p.photoUri }} style={styles.inviteAvatar} /> : (
+                  <View style={styles.inviteAvatarFallback}><Text style={styles.inviteAvatarFallbackText}>{p.initials}</Text></View>
+                )}
+                <View style={styles.inviteInfo}>
+                  <Text style={styles.inviteName}>{p.name}</Text>
+                  <Text style={styles.inviteDesc} numberOfLines={1}>{p.bio}</Text>
+                </View>
+                <View style={[styles.inviteCheck, on && styles.inviteCheckOn]}>
+                  {on ? <Text style={styles.inviteCheckMark}>✓</Text> : null}
                 </View>
               </Pressable>
-            ))}
-          </View>
+            );
+          })
+        )}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+      </ScrollView>
+    </View>
+  );
 
-          <Text style={styles.sectionTitle}>房间名</Text>
-          <View style={styles.roomNameWrap}>
-            <TextInput
-              accessibilityLabel="房间名"
-              onChangeText={onRoomNameInput}
-              style={styles.roomNameInput}
-              value={roomName}
-            />
-            <View style={[styles.roomNameBadge, roomNameEdited && styles.roomNameBadgeEdited]}>
-              <Text style={[styles.roomNameBadgeText, roomNameEdited && styles.roomNameBadgeTextEdited]}>{roomNameEdited ? "已修改" : "自动"}</Text>
-            </View>
-          </View>
-
-          <Text style={styles.sectionTitle}>邀请谁进来</Text>
-          {invitable.length === 0 ? (
-            <Text style={styles.empty}>暂时没有可邀请的人。</Text>
-          ) : (
-            invitable.map((p) => {
-              const on = selected.has(p.id);
-              return (
-                <Pressable
-                  key={p.id}
-                  accessibilityLabel={`邀请 ${p.name}${on ? "，已选中" : ""}`}
-                  onPress={() => toggleInvite(p.id)}
-                  style={[styles.inviteItem, on && styles.inviteItemSelected]}
-                >
-                  {p.photoUri ? <Image source={{ uri: p.photoUri }} style={styles.inviteAvatar} /> : (
-                    <View style={styles.inviteAvatarFallback}><Text style={styles.inviteAvatarFallbackText}>{p.initials}</Text></View>
-                  )}
-                  <View style={styles.inviteInfo}>
-                    <Text style={styles.inviteName}>{p.name}</Text>
-                    <Text style={styles.inviteDesc} numberOfLines={1}>{p.bio}</Text>
-                  </View>
-                  <View style={[styles.inviteCheck, on && styles.inviteCheckOn]}>
-                    {on ? <Text style={styles.inviteCheckMark}>✓</Text> : null}
-                  </View>
-                </Pressable>
-              );
-            })
-          )}
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-        </ScrollView>
-      </View>
+  if (presentation === "overlay") return visible ? body : null;
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} visible={visible}>
+      {body}
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.white, flex: 1 },
+  overlay: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   navBar: { alignItems: "center", borderBottomColor: color.cardBorder, borderBottomWidth: 1, flexDirection: "row", gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
   navBack: { alignItems: "center", height: 28, justifyContent: "center", width: 24 },
   navBackText: { color: foundation.ink, fontSize: 24, fontWeight: "600" },

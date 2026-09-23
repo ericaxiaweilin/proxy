@@ -8870,13 +8870,33 @@ if ! grep -qF 't("roomsLoadFailed")' "$ROOMS_HOME" || ! grep -qF 't("roomsEmpty"
   echo "  FAIL [HOME-MORE-ROOMS-001]: 读失败和没有房不再分开说。" >&2
   exit 1
 fi
-if ! grep -qF 'setFilterSheetOpen(false);
-                    onOpenRoom(item.conversation.conversationId);' "$ROOMS_HOME"; then
-  echo "  FAIL [HOME-MORE-ROOMS-001]: 进房前没先关「更多」Modal —— 房间 Modal 会被无声吞掉。" >&2
+# HOME-MORE-ROOMS-002（2026-09-23，用户：「点击聊天房卡片创建 先弹回 home 再进入创建
+# 这个多此一举」）：开房 / 进房不关「更多」，创建页和房间以 overlay 叠在「更多」Modal 里。
+if grep -qF 'setFilterSheetOpen(false); onOpenRoomCreate' "$ROOMS_HOME" ||
+   awk '/const enter = \(\): void => \{/{f=1} f&&/setFilterSheetOpen\(false\)/{print; exit} f&&/^                  \};/{exit}' "$ROOMS_HOME" | grep -q .; then
+  echo "  FAIL [HOME-MORE-ROOMS-002]: 开房 / 进房又先关了「更多」—— 中间会闪回首页。" >&2
   exit 1
 fi
-if ! grep -qF 'loadRooms={() => conversation.listConversations()}' "$ROOMS_SHELL" || ! grep -qF 'onOpenRoom={setRoomChatId}' "$ROOMS_SHELL"; then
+more_open=$(grep -nF 'visible={filterSheetOpen}' "$ROOMS_HOME" | head -1 | cut -d: -f1)
+layer_line=$(grep -nF '{moreRoomLayer}' "$ROOMS_HOME" | head -1 | cut -d: -f1)
+if [ -z "$more_open" ] || [ -z "$layer_line" ] || [ "$more_open" -ge "$layer_line" ] ||
+   awk -v a="$more_open" -v b="$layer_line" 'NR>a && NR<b' "$ROOMS_HOME" | grep -qF '</Modal>'; then
+  echo "  FAIL [HOME-MORE-ROOMS-002]: 创建页 / 房间没有叠在「更多」整页 Modal 里面。" >&2
+  exit 1
+fi
+if ! grep -qF 'moreRoomLayer={roomLayerInMore ? renderRoomLayers("overlay") : null}' "$ROOMS_SHELL" ||
+   ! grep -qF 'const here = presentation === "overlay" ? roomLayerInMore : !roomLayerInMore;' "$ROOMS_SHELL"; then
+  echo "  FAIL [HOME-MORE-ROOMS-002]: app-shell 不再按入口区分 overlay / Modal —— 两份同时 visible 会被 iOS 吞掉一份。" >&2
+  exit 1
+fi
+for f in apps/mobile/src/surfaces/room-create.tsx apps/mobile/src/surfaces/room.tsx; do
+  if ! grep -qF 'if (presentation === "overlay") return visible ? body : null;' "$f"; then
+    echo "  FAIL [HOME-MORE-ROOMS-002]: $f 的 overlay 形态又包回了 Modal。" >&2
+    exit 1
+  fi
+done
+if ! grep -qF 'loadRooms={() => conversation.listConversations()}' "$ROOMS_SHELL" || ! grep -qF 'onOpenRoom={(conversationId) => { setRoomLayerInMore(true); setRoomChatId(conversationId); }}' "$ROOMS_SHELL"; then
   echo "  FAIL [HOME-MORE-ROOMS-001]: app-shell 没把房间读取 / 进房接进首页。" >&2
   exit 1
 fi
-echo "    HOME-MORE-ROOMS-001: PASS (聊天房 shows the create card and my real rooms; entering a room closes the more page first)"
+echo "    HOME-MORE-ROOMS-001/002: PASS (聊天房 shows the create card and my real rooms; create/enter stack on top of the more page)"

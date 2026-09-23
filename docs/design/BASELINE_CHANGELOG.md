@@ -4,6 +4,18 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 245 — 2026-09-23
+
+- **开房 / 进房不再闪回首页**（HOME-MORE-ROOMS-002）：用户反馈「点击聊天房卡片
+  创建 先弹回 home 再进入创建 这个多此一举」。根因是「更多」整页是全屏 Modal，
+  创建页 / 房间是 app-shell 里另外的 Modal，iOS 只能呈现一个，只好先关「更多」。
+  现在 `RoomCreateSurface` / `RoomSurface` 新增 `presentation="overlay"`，从
+  「更多 → 聊天房」进来时叠在「更多」Modal 里面；返回回到聊天房列表（并重读列表）。
+  从消息页进房仍走原来的独立 Modal（app-shell 按入口区分，同一时刻只有一份 visible）。
+- 影响文件：`apps/mobile/src/shell/app-shell.tsx`、
+  `apps/mobile/src/surfaces/requester-home.tsx`、
+  `apps/mobile/src/surfaces/room-create.tsx`、`apps/mobile/src/surfaces/room.tsx`。
+
 ## Revision 244 — 2026-09-23
 
 - **「更多 → 聊天房」改成列表视图**（HOME-MORE-ROOMS-001）：照原型
