@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Circle, Defs, Line, LinearGradient, Path, RadialGradient, Rect, Stop, Svg, SvgXml } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AiEngineClient, type AiEngineSettings, type AiPermission, type SecureSessionStoreLike } from "../ai-engine-client";
@@ -8,6 +8,7 @@ import { formatRelativeTime } from "../composer-body";
 import { Image } from "expo-image";
 import { getAiScenePhoto } from "../media/asset-sources";
 import { fetchAiCatalog, sortCatalogVendors, type AiCatalog } from "../ai-catalog-client";
+import { AiPersonaClient, type TwinConsent } from "../ai-persona-client";
 import {
   AI_CAMERA_ICONS,
   AI_CAMERA_MOVES,
@@ -351,6 +352,66 @@ export function AIManagementSurface({
   }, [authClient]);
   useEffect(() => { loadCatalog(); }, [loadCatalog]);
 
+  // AI-MANAGE-009（2026-09-23，用户：「模型提示要有本人授权 否则很容易侵犯肖像权 所以这个 ai 管理还要有
+  // 授权按钮 读取个人主页的图库 不然模型访问不了个人公共相册」）：形象授权 = 本人对自己 AI 分身的
+  // LC-07 likeness consent（VISUAL）。没授权，服务端给模型的读图入口一张都不给（likenessReferencePhotos）。
+  const personaClient = useMemo(() => new AiPersonaClient({ authClient }), [authClient]);
+  const [likeness, setLikeness] = useState<{ status: "loading" | "none" | "granted" | "error"; personaId?: string; consent?: TwinConsent; busy?: boolean }>({ status: "loading" });
+  const loadLikeness = useCallback(() => {
+    if (!viewerAccountId) { setLikeness({ status: "error" }); return; }
+    setLikeness((prev) => ({ ...prev, status: "loading" }));
+    void (async () => {
+      try {
+        const twin = await personaClient.ensurePersonalTwin(viewerAccountId);
+        const consent = await personaClient.getLiveConsent(twin.id, viewerAccountId);
+        const granted = consent && (consent.consentKind === "VISUAL" || consent.consentKind === "VISUAL_AND_VOICE");
+        setLikeness(granted ? { status: "granted", personaId: twin.id, consent } : { status: "none", personaId: twin.id });
+      } catch {
+        setLikeness({ status: "error" });
+      }
+    })();
+  }, [personaClient, viewerAccountId]);
+  useEffect(() => { loadLikeness(); }, [loadLikeness]);
+
+  const askGrantLikeness = useCallback(() => {
+    const personaId = likeness.personaId;
+    if (!personaId || !viewerAccountId) return;
+    Alert.alert(
+      "授权 AI 使用你的形象",
+      "同意后，AI 可以读取你个人主页图库里你自己上传的照片，用来生成你的形象图。只用于你自己的 AI 分身，可以随时在这里撤回。",
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "同意授权",
+          onPress: () => {
+            setLikeness((prev) => ({ ...prev, busy: true }));
+            personaClient.grantConsent(personaId, viewerAccountId, "VISUAL")
+              .then((consent) => { setLikeness({ status: "granted", personaId, consent }); showToast("已授权"); })
+              .catch(() => { setLikeness((prev) => ({ ...prev, busy: false })); showToast("授权没成功，请稍后再试"); });
+          },
+        },
+      ],
+    );
+  }, [likeness.personaId, personaClient, showToast, viewerAccountId]);
+
+  const askRevokeLikeness = useCallback(() => {
+    const personaId = likeness.personaId;
+    if (!personaId || !viewerAccountId) return;
+    Alert.alert("撤回形象授权", "撤回后，AI 不能再读取你的照片来生成你的形象图。", [
+      { text: "取消", style: "cancel" },
+      {
+        text: "撤回",
+        style: "destructive",
+        onPress: () => {
+          setLikeness((prev) => ({ ...prev, busy: true }));
+          personaClient.revokeConsent(personaId, viewerAccountId)
+            .then(() => { setLikeness({ status: "none", personaId }); showToast("已撤回授权"); })
+            .catch(() => { setLikeness((prev) => ({ ...prev, busy: false })); showToast("撤回没成功，请稍后再试"); });
+        },
+      },
+    ]);
+  }, [likeness.personaId, personaClient, showToast, viewerAccountId]);
+
   const load = useCallback(() => {
     if (!viewerAccountId) {
       setSettings(undefined);
@@ -467,6 +528,8 @@ export function AIManagementSurface({
           </View>
         </View>
 
+        <LikenessCard likeness={likeness} onGrant={askGrantLikeness} onRevoke={askRevokeLikeness} onRetry={loadLikeness} />
+
         <Text style={styles.sectionTitle}>管理项</Text>
         <View style={styles.manageList}>
           <ManageCard iconXml={AI_MANAGE_ICONS.chat} name="对话管理" badge={chatBadge} activity={chatActivity} paused={paused} disabled={!ready} onPress={() => { setChatTab("style"); setSheet("chat"); }} />
@@ -484,11 +547,39 @@ export function AIManagementSurface({
       {settings ? (
         <>
           <ChatSheet toast={toast} visible={sheet === "chat"} tab={chatTab} onTab={setChatTab} settings={settings} patch={patch} onClose={() => setSheet(undefined)} />
-          <ImageSheet toast={toast} catalog={catalog} catalogError={catalogError} onRetryCatalog={loadCatalog} visible={sheet === "image"} tab={imageTab} onTab={setImageTab} settings={settings} patch={patch} showToast={showToast} imageCount={imageCount} onOpenImageIdentity={onOpenImageIdentity ? () => { setSheet(undefined); onOpenImageIdentity(); } : undefined} onClose={() => setSheet(undefined)} />
+          <ImageSheet toast={toast} likenessGranted={likeness.status === "granted"} onGrantLikeness={() => { setSheet(undefined); askGrantLikeness(); }} catalog={catalog} catalogError={catalogError} onRetryCatalog={loadCatalog} visible={sheet === "image"} tab={imageTab} onTab={setImageTab} settings={settings} patch={patch} showToast={showToast} imageCount={imageCount} onOpenImageIdentity={onOpenImageIdentity ? () => { setSheet(undefined); onOpenImageIdentity(); } : undefined} onClose={() => setSheet(undefined)} />
           <PostSheet toast={toast} visible={sheet === "post"} settings={settings} patch={patch} onClose={() => setSheet(undefined)} />
         </>
       ) : null}
       {sheet ? null : toast}
+    </View>
+  );
+}
+
+function LikenessCard({ likeness, onGrant, onRevoke, onRetry }: {
+  likeness: { status: "loading" | "none" | "granted" | "error"; consent?: TwinConsent; busy?: boolean };
+  onGrant: () => void; onRevoke: () => void; onRetry: () => void;
+}): React.JSX.Element {
+  const granted = likeness.status === "granted";
+  const grantedOn = likeness.consent?.grantedAt ? new Date(likeness.consent.grantedAt) : undefined;
+  const body = likeness.status === "loading" ? "读取授权状态…"
+    : likeness.status === "error" ? "授权状态没读出来"
+    : granted ? `AI 可以读取你个人主页图库里的照片，生成你的形象图${grantedOn && !Number.isNaN(grantedOn.getTime()) ? `（${grantedOn.getMonth() + 1} 月 ${grantedOn.getDate()} 日授权）` : ""}。`
+    : "AI 生成你的照片前需要你授权。不授权，模型读不到你的个人相册。";
+  return (
+    <View style={[styles.likenessCard, granted && styles.likenessCardOn]}>
+      <View style={styles.likenessHead}>
+        <Text style={styles.likenessTitle}>形象授权</Text>
+        <Text style={[styles.badge, granted ? styles.badgeRunning : styles.badgeOff]}>{granted ? "已授权" : likeness.status === "none" ? "未授权" : "…"}</Text>
+      </View>
+      <Text style={styles.likenessBody}>{body}</Text>
+      {likeness.status === "error" ? (
+        <Pressable accessibilityRole="button" onPress={onRetry} style={[styles.likenessBtn, styles.likenessBtnGhost]}><Text style={styles.likenessBtnGhostText}>重新读取</Text></Pressable>
+      ) : likeness.status === "none" ? (
+        <Pressable accessibilityRole="button" disabled={likeness.busy} onPress={onGrant} style={[styles.likenessBtn, likeness.busy && { opacity: 0.5 }]}><Text style={styles.likenessBtnText}>授权</Text></Pressable>
+      ) : granted ? (
+        <Pressable accessibilityRole="button" disabled={likeness.busy} onPress={onRevoke} style={[styles.likenessBtn, styles.likenessBtnGhost, likeness.busy && { opacity: 0.5 }]}><Text style={styles.likenessBtnGhostText}>撤回授权</Text></Pressable>
+      ) : null}
     </View>
   );
 }
@@ -554,8 +645,8 @@ function ChatSheet({ toast, visible, tab, onTab, settings, patch, onClose }: { t
 
 // ---------------------------------------------------------------- 图片管理
 
-function ImageSheet({ toast, catalog, catalogError, onRetryCatalog, visible, tab, onTab, settings, patch, showToast, imageCount, onOpenImageIdentity, onClose }: {
-  toast: React.ReactNode; catalog: AiCatalog | undefined; catalogError: string | undefined; onRetryCatalog: () => void; visible: boolean; tab: ImageTab; onTab: (tab: ImageTab) => void; settings: AiEngineSettings; patch: PatchFn; showToast: (message: string) => void;
+function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogError, onRetryCatalog, visible, tab, onTab, settings, patch, showToast, imageCount, onOpenImageIdentity, onClose }: {
+  toast: React.ReactNode; likenessGranted: boolean; onGrantLikeness: () => void; catalog: AiCatalog | undefined; catalogError: string | undefined; onRetryCatalog: () => void; visible: boolean; tab: ImageTab; onTab: (tab: ImageTab) => void; settings: AiEngineSettings; patch: PatchFn; showToast: (message: string) => void;
   imageCount: number; onOpenImageIdentity?: (() => void) | undefined; onClose: () => void;
 }): React.JSX.Element {
   const [query, setQuery] = useState("");
@@ -792,12 +883,13 @@ function ImageSheet({ toast, catalog, catalogError, onRetryCatalog, visible, tab
             <View style={styles.chipsWrap}>{QUALITIES.map((item) => <Chip key={item.id} label={item.name} selected={settings.imageQuality === item.id} onPress={() => patch({ imageQuality: item.id })} />)}</View>
             <GroupTitle title="形象绑定" />
             <View style={styles.optionList}>
+              {/* AI-MANAGE-009：形象绑定 = 本人形象授权（不是「有没有照片」）。没授权就点这里去授权。 */}
               <OptionItem
                 icon="👤"
-                name={imageCount > 0 ? "已绑定你的形象" : "还没有绑定形象"}
-                desc={imageCount > 0 ? "用你的授权照片生成" : "去 AI 分身上传授权照片"}
-                selected={imageCount > 0}
-                onPress={() => { if (onOpenImageIdentity) onOpenImageIdentity(); else showToast("形象库"); }}
+                name={likenessGranted ? "已授权使用你的形象" : "还没有授权形象"}
+                desc={likenessGranted ? `AI 可读取你图库里的照片生成（${imageCount} 张）` : "授权后 AI 才能读取你的图库生成你的照片"}
+                selected={likenessGranted}
+                onPress={() => { if (!likenessGranted) onGrantLikeness(); else if (onOpenImageIdentity) onOpenImageIdentity(); }}
               />
             </View>
             <View style={styles.paramPreview}>
@@ -920,6 +1012,15 @@ const styles = StyleSheet.create({
   statusNum: { flex: 1, minWidth: 0 },
   snVal: { color: "#fff", fontSize: 22, fontWeight: "800", letterSpacing: -0.5, marginBottom: 6 },
   snLabel: { color: "rgba(255,255,255,0.55)", fontSize: 11, fontWeight: "600" },
+  likenessCard: { backgroundColor: "#fff8e6", borderColor: "#f5e3b8", borderRadius: 16, borderWidth: 1.5, marginBottom: 22, paddingHorizontal: 16, paddingVertical: 14 },
+  likenessCardOn: { backgroundColor: "#eef7f0", borderColor: "#cfe8d6" },
+  likenessHead: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 6 },
+  likenessTitle: { color: INK, fontSize: 14.5, fontWeight: "800" },
+  likenessBody: { color: "#666", fontSize: 12, fontWeight: "500", lineHeight: 17 },
+  likenessBtn: { alignSelf: "flex-start", backgroundColor: INK, borderRadius: 14, marginTop: 10, paddingHorizontal: 16, paddingVertical: 8 },
+  likenessBtnText: { color: "#fff", fontSize: 12.5, fontWeight: "800" },
+  likenessBtnGhost: { backgroundColor: "transparent", borderColor: "#ccc", borderWidth: 1 },
+  likenessBtnGhostText: { color: "#666", fontSize: 12.5, fontWeight: "700" },
   sectionTitle: { color: INK, fontSize: 13, fontWeight: "800", letterSpacing: -0.1, marginBottom: 10, paddingLeft: 2 },
   manageList: { gap: 8, marginBottom: 22 },
   manageCard: { alignItems: "center", backgroundColor: "#fff", borderColor: "#f0f0f0", borderRadius: 16, borderWidth: 1.5, flexDirection: "row", gap: 14, paddingHorizontal: 16, paddingVertical: 14 },

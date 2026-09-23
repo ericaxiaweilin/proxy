@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 259 — 2026-09-23
+
+- **AI 管理加「形象授权」**（AI-MANAGE-009）：用户要求「模型提示要有本人授权 否则很容易侵犯肖像权 所以这个
+  ai 管理还要有授权按钮 读取个人主页的图库 不然模型访问不了个人公共相册」。主页新增形象授权卡：未授权说明
+  「不授权，模型读不到你的个人相册」+「授权」；已授权显示日期 +「撤回授权」；授权 / 撤回都要系统弹窗二次确认。
+  授权即本人对自己 AI 分身的 LC-07 likeness consent（VISUAL，走已有的 /v1/ai/personas/{id}/consents）。
+  服务端新增唯一的模型读图入口 `likenessReferencePhotos`：没有生效授权一张不给，撤回后立刻失效，只给本人上传的原图。
+  图片管理 → 参数「形象绑定」改为反映授权状态（原来只看有没有照片）。
+- 影响文件：`apps/mobile/src/surfaces/ai-management.tsx`。
+
 ## Revision 258 — 2026-09-23
 
 - **AI 目录外置：价格 / logo / 免费额度不再写在代码里**（AI-MANAGE-007）：用户要求「价格 logo 数字…

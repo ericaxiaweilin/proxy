@@ -8,6 +8,7 @@ vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ t
 vi.mock("../ai-engine-client", () => ({ AiEngineClient: class {} }));
 vi.mock("../composer-body", () => ({ formatRelativeTime: () => "" }));
 vi.mock("expo-image", () => ({ Image: "Image" }));
+vi.mock("../ai-persona-client", () => ({ AiPersonaClient: class {} }));
 vi.mock("../media/asset-sources", () => ({ getAiScenePhoto: () => undefined }));
 
 import { decodePromptHistory, encodePromptHistoryEntry, formatTokens, promptForScene } from "./ai-management";
@@ -88,6 +89,16 @@ describe("AI management surface (AI-MANAGE-003)", () => {
     for (const kind of ["push", "pull", "pan", "track", "crane"]) expect(surface).toMatch(new RegExp(`\\n  ${kind}: \\{ x: `));
     expect(surface).toContain("<MotionBar kind={item.id} selected={selected} />");
     expect(surface).toContain("Animated.loop(Animated.sequence([");
+  });
+
+  it("asks for likeness authorisation before AI may use the owner's photos (AI-MANAGE-009)", () => {
+    // 形象授权 = 本人对自己 AI 分身的 VISUAL likeness consent；授权 / 撤回都要本人二次确认。
+    expect(surface).toContain("<LikenessCard likeness={likeness} onGrant={askGrantLikeness} onRevoke={askRevokeLikeness} onRetry={loadLikeness} />");
+    expect(surface).toContain('personaClient.grantConsent(personaId, viewerAccountId, "VISUAL")');
+    expect(surface).toContain("personaClient.revokeConsent(personaId, viewerAccountId)");
+    expect(surface).toContain('Alert.alert(\n      "授权 AI 使用你的形象"');
+    expect(surface).toContain("不授权，模型读不到你的个人相册");
+    expect(surface).toContain('name={likenessGranted ? "已授权使用你的形象" : "还没有授权形象"}');
   });
 
   it("saves every choice to the server optimistically and reverts on failure", () => {
