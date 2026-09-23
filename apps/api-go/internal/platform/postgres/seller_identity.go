@@ -61,5 +61,35 @@ func (r *SellerRealNameRepository) RealNameVerified(ctx context.Context, agentID
 	return verified, nil
 }
 
+// TWIN-INSIGHT-ENTITLEMENT-001：按用户账号查实名 —— 洞察工具的使用权发给
+// "已实名绑定的创作者本人"（account id），而核验行挂在 agent_id 下。
+// 经 supply.agent_profiles 的 user_account_id 映射过去，不直接读核验行的
+// user_account_id 列（那列 operator 手写行时经常空着，读它等于"有行也认
+// 不出来"，fail-closed 会变成 fail-always）。
+const sellerRealNameVerifiedForAccountSQL = `
+SELECT EXISTS (
+    SELECT 1
+    FROM supply.seller_real_name_verifications v
+    JOIN supply.agent_profiles a ON a.agent_id = v.agent_id
+    WHERE a.user_account_id = $1
+      AND v.status = 'VERIFIED'
+      AND v.expires_at > NOW()
+)`
+
+func (r *SellerRealNameRepository) RealNameVerifiedForAccount(ctx context.Context, accountID string) (bool, error) {
+	id := strings.TrimSpace(accountID)
+	if id == "" {
+		return false, supply.ErrSellerIdentityAgentRequired
+	}
+	if r == nil || r.pool == nil {
+		return false, ErrSellerRealNameUnavailable
+	}
+	var verified bool
+	if err := queryerForContext(ctx, r.pool).QueryRow(ctx, sellerRealNameVerifiedForAccountSQL, id).Scan(&verified); err != nil {
+		return false, err
+	}
+	return verified, nil
+}
+
 // 契约漂移必须在编译期炸，而不是在运行期静默放行。
 var _ supply.SellerIdentityLookup = (*SellerRealNameRepository)(nil)

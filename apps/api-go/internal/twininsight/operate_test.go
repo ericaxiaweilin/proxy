@@ -26,6 +26,8 @@ func newOperateFixture() (*Service, *MemoryFriendSource, *MemoryActionLog) {
 	svc.SetActionLog(log)
 	// 门禁默认放行，让每条用例自己决定要不要放行。
 	svc.SetCompanionGate(func(context.Context, string) error { return nil })
+	// 使用权门禁同样默认放行；拒绝路径由 TestRecordOperate*Entitlement* 钉。
+	svc.SetViewerGate(func(context.Context, string) error { return nil })
 	return svc, friends, log
 }
 
@@ -33,9 +35,11 @@ func TestRecordOperateFailsClosedWithoutActionLog(t *testing.T) {
 	repo := NewMemoryRepository()
 	friends := NewMemoryFriendSource()
 	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
-	// 故意不 SetActionLog / SetCompanionGate。
-	if _, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "friend_1", ActionOperate); err == nil {
-		t.Fatal("RecordOperate must refuse when the audit log is not wired")
+	// 只缺审计：使用权和未成年门禁都放行，拒绝必须精确指向审计未接。
+	svc.SetViewerGate(func(context.Context, string) error { return nil })
+	svc.SetCompanionGate(func(context.Context, string) error { return nil })
+	if _, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "friend_1", ActionOperate); !errors.Is(err, ErrActionLogUnavailable) {
+		t.Fatalf("want ErrActionLogUnavailable, got %v", err)
 	}
 }
 
@@ -44,7 +48,8 @@ func TestRecordOperateFailsClosedWithoutCompanionGate(t *testing.T) {
 	friends := NewMemoryFriendSource()
 	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
 	svc.SetActionLog(NewMemoryActionLog())
-	// 只接审计、不接门禁 → 必须拒绝（宁可关动作，不对未成年人开放）。
+	svc.SetViewerGate(func(context.Context, string) error { return nil })
+	// 只接审计和使用权、不接未成年门禁 → 必须拒绝（宁可关动作，不对未成年人开放）。
 	_, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "friend_1", ActionOperate)
 	if !errors.Is(err, ErrCompanionGateUnavailable) {
 		t.Fatalf("want ErrCompanionGateUnavailable, got %v", err)
@@ -143,5 +148,33 @@ func TestGetInsightReturnsFriendWithZeroSignal(t *testing.T) {
 	}
 	if insight.Score != 0 {
 		t.Errorf("no facts must mean score 0, got %d", insight.Score)
+	}
+}
+
+// TWIN-INSIGHT-ENTITLEMENT-001（写侧）：没使用权的账号，写动作在第一道闸
+// 就被拒绝 —— 不验证动作合法性、不读好友集、不留审计行。
+func TestRecordOperateDeniedWithoutViewerGate(t *testing.T) {
+	repo := NewMemoryRepository()
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{
+		{UserID: "friend_1", DisplayName: "Linh", Since: time.Now().Add(-30 * 24 * time.Hour)},
+	})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetActionLog(NewMemoryActionLog())
+	svc.SetCompanionGate(func(context.Context, string) error { return nil })
+	// 故意不 SetViewerGate：其他全接好也必须拒绝。
+	if _, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "friend_1", ActionOperate); !errors.Is(err, ErrInsightViewerForbidden) {
+		t.Fatalf("want ErrInsightViewerForbidden, got %v", err)
+	}
+}
+
+func TestRecordOperateDeniedWhenViewerGateRefuses(t *testing.T) {
+	svc, _, log := newOperateFixture()
+	svc.SetViewerGate(func(context.Context, string) error { return ErrInsightViewerForbidden })
+	if _, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "friend_1", ActionOperate); !errors.Is(err, ErrInsightViewerForbidden) {
+		t.Fatalf("want ErrInsightViewerForbidden, got %v", err)
+	}
+	if len(log.All()) != 0 {
+		t.Errorf("an entitlement-rejected action must not be recorded, got %d rows", len(log.All()))
 	}
 }

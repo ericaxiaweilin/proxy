@@ -843,6 +843,46 @@ if ! grep -q '"/v1/ai/twins/"' apps/api-go/internal/api/server.go; then
   exit 1
 fi
 
+# ── TWIN-INSIGHT-TARGETS-001 ────────────────────────────────────────────────
+# 目标集 = 好友 ∪ 有过互动的陌生人。之前只迭代 friends，facts 里聊过天 /
+# 看过主页的陌生 actor 被直接丢掉 —— 明明刚说过话，洞察页却显示"还没有洞察"。
+require_test "TWIN-INSIGHT-TARGETS-001" "./internal/twininsight" \
+  "TestNonFriendChatterAppearsInInsights" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-TARGETS-001" "./internal/twininsight" \
+  "TestNonFriendViewerAppearsInInsights" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-TARGETS-001" "./internal/twininsight" \
+  "TestStrangerAppearingAsFriendAndActorIsListedOnce" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-TARGETS-001" "./internal/twininsight" \
+  "TestStrangerDisplayNameResolvesOrFallsBackToID" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+
+# ── TWIN-INSIGHT-ENTITLEMENT-001 ────────────────────────────────────────────
+# 洞察是卖小美合法时间的精准投流工具，只向实名创作者发放。
+# 凭证 = 实名核验 VERIFIED 行（空有效期不算，见 889c1e6），三入口第一道闸。
+require_test "TWIN-INSIGHT-ENTITLEMENT-001" "./internal/twininsight" \
+  "TestListInsightsDeniedWithoutViewerGate" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-ENTITLEMENT-001" "./internal/twininsight" \
+  "TestRecordOperateDeniedWithoutViewerGate" \
+  "apps/api-go/internal/twininsight/operate_test.go" || exit $?
+require_test "TWIN-INSIGHT-ENTITLEMENT-001" "./internal/platform/postgres" \
+  "TestSellerRealNameVerifiedForAccount" \
+  "apps/api-go/internal/platform/postgres/seller_identity_integration_test.go" || exit $?
+require_test "TWIN-INSIGHT-ENTITLEMENT-001" "./internal/api" \
+  "TestTwinInsightsListDeniedWithoutEntitlement" \
+  "apps/api-go/internal/api/twin_insight_handlers_test.go" || exit $?
+require_test "TWIN-INSIGHT-ENTITLEMENT-001" "./internal/api" \
+  "TestTwinInsightOperateDeniedWithoutEntitlement" \
+  "apps/api-go/internal/api/twin_insight_handlers_test.go" || exit $?
+if ! grep -q 'SetViewerGate(newTwinInsightViewerGate(pool))' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [TWIN-INSIGHT-ENTITLEMENT-001]: 使用权门禁没接线 ——" >&2
+  echo "        Service 有闸、main.go 不挂，等于没修。" >&2
+  exit 1
+fi
+
 # AIBOUND-001: DismissMarketOpportunity 曾经无 aiboundary 落点（AI 可调），
 # market 写曾经无 USER 主体检查（与 activity 不对称）。现 Dismiss 进 gate，
 # Publish/Apply/Dismiss 必须 USER；PublishActivity 保留位仍 fail-closed。

@@ -130,6 +130,9 @@ func startsTag(runes []rune, i int) bool {
 // 失败一律返回 ErrSummaryUnavailable —— 调用方不得把"没生成"当成
 // "生成了一段空话"，也不得沿用旧摘要然后告诉用户已重新总结。
 func (s *Service) RefreshSummary(ctx context.Context, twinID, ownerID, targetID string) (Insight, error) {
+	if err := s.viewerAllowed(ctx, ownerID); err != nil {
+		return Insight{}, err
+	}
 	if s.summaries == nil || !s.summaries.Available() {
 		return Insight{}, ErrSummaryUnavailable
 	}

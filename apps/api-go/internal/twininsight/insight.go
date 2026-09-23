@@ -193,6 +193,26 @@ type FriendSource interface {
 // ThresholdSource 由 facet config 提供（见 Thresholds 的注释）。
 type ThresholdSource func(ctx context.Context) (Thresholds, error)
 
+// DisplayNameSource 把账号 id 解析成展示名，给**非好友**目标用 ——
+// 好友的名字由 FriendSource 自带，只有 facts 里冒出来的陌生互动者才需要现查。
+// nil = 没接 = 显示名回落成账号 id（buildInsight 的既有兜底，契约要求
+// displayName min 1，不断整屏）。生产接线见 cmd/api/main.go。
+type DisplayNameSource func(ctx context.Context, userID string) (string, bool)
+
+// ViewerGate 判定某账号能不能用好友洞察这套工具。
+//
+// 这不是"有没有分身"（那是各段自己的解析），也不是"成年没有"（那是
+// companionGate）—— 这是"后端有没有给你发这个功能"。洞察是撮合小美/小帅、
+// 卖小美合法时间的精准投流工具，只向已实名绑定的创作者开放；普通用户
+// 调这个接口没有任何意义。nil = 没接 = 一律拒绝（fail-closed），
+// 生产接线见 cmd/api/main.go（实名核验 VERIFIED 行就是发放凭证）。
+type ViewerGate func(ctx context.Context, ownerID string) error
+
+// ErrInsightViewerForbidden 表示这个账号没有洞察工具的使用权。
+// 翻成 403 + 可区分的 code，客户端照实说"仅向认证创作者开放"，
+// 不许折叠成"服务坏了"（重试永远没用）或"未成年"（那是另一道门）。
+var ErrInsightViewerForbidden = fmt.Errorf("twininsight: insight tool is not granted to this account")
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -202,6 +222,11 @@ type Service struct {
 	friends    FriendSource
 	thresholds ThresholdSource
 	now        func() time.Time
+	names      DisplayNameSource
+	// viewerGate 是洞察工具的使用权门禁（TWIN-INSIGHT-ENTITLEMENT-001）。
+	// nil = 没接 = 读和写一律拒绝。注意它跟 companionGate 是两道门：
+	// companionGate 回答"成年没有"，viewerGate 回答"有没有发你这个工具"。
+	viewerGate ViewerGate
 	// actions 是运营动作的审计落点。nil = 没接 = 写路径一律拒绝 ——
 	// 一个"点了按钮但没留痕"的运营动作，事后无法回答"谁在什么时候
 	// 对谁开了单独运营"，那正是 PRD §1 第 6 条要求必须能答的。
@@ -230,6 +255,27 @@ func (s *Service) SetCompanionGate(gate CompanionGate) { s.companionGate = gate 
 // SetSummaryGenerator 接上模型底座。不接则 summary:refresh 一律 503。
 func (s *Service) SetSummaryGenerator(g SummaryGenerator) { s.summaries = g }
 
+// SetDisplayNameSource 接上非好友目标的展示名解析。不接则陌生互动者显示
+// 账号 id（不断屏）。与 relationship 的 resolveNameCtx 同一事实源，不另写。
+func (s *Service) SetDisplayNameSource(src DisplayNameSource) { s.names = src }
+
+// SetViewerGate 接上洞察工具使用权门禁。不接则 ListInsights / GetInsight /
+// RecordOperate / RefreshSummary 一律拒绝 —— 没发工具的账号连读都不许读，
+// 读出来的是第三方行为数据，不是公开目录。
+func (s *Service) SetViewerGate(gate ViewerGate) { s.viewerGate = gate }
+
+// viewerAllowed 是三个入口共用的第一道闸。顺序在最前：没使用权的账号，
+// 连"参数对不对"这种信息都不该拿到（省得拿报错做 oracle 探接口形状）。
+func (s *Service) viewerAllowed(ctx context.Context, ownerID string) error {
+	if s == nil || s.viewerGate == nil {
+		return ErrInsightViewerForbidden
+	}
+	if err := s.viewerGate(ctx, ownerID); err != nil {
+		return ErrInsightViewerForbidden
+	}
+	return nil
+}
+
 func (s *Service) clockNow() time.Time {
 	if s.now == nil {
 		return time.Now().UTC()
@@ -242,6 +288,9 @@ func (s *Service) clockNow() time.Time {
 // ownerID 必须是**已认证**的账号 id（由调用点从会话里取）。本方法不做鉴权，
 // 也不该做 —— 鉴权在 HTTP 层，这里只负责合成。
 func (s *Service) ListInsights(ctx context.Context, twinID, ownerID string) (Payload, error) {
+	if err := s.viewerAllowed(ctx, ownerID); err != nil {
+		return Payload{}, err
+	}
 	thresholds, err := s.thresholdsFor(ctx)
 	if err != nil {
 		return Payload{}, err
@@ -266,6 +315,43 @@ func (s *Service) ListInsights(ctx context.Context, twinID, ownerID string) (Pay
 	insights := make([]Insight, 0, len(friends))
 	for _, friend := range friends {
 		insights = append(insights, buildInsight(friend, byActor[friend.UserID], eventsByActor[friend.UserID], thresholds, now))
+	}
+	// TWIN-INSIGHT-TARGETS-001：目标集 = 好友 ∪ 有过互动的陌生人。
+	//
+	// 只认好友会漏掉用户真正想看的人 —— 聊过天 / 来看过主页但还没加好友的，
+	// 在好友页确实没有，在洞察页必须有（"谁值得运营"首先是"谁在找我"）。
+	// facts 的 actor 本来就不限好友（PG 的 actors CTE 取四路事件的并集），
+	// 之前是这里用 friends 集合把它们又筛掉了。
+	//
+	// 陌生目标的 Since 留零值：VerdictOf 的"新好友"宽限只认非零 Since，
+	// 零值 + 零信号走分数分支判 skip，不会伪造"新好友"，也不会让"聊过但
+	// 7 天无数据"的人混进 new。
+	seen := map[string]bool{}
+	for _, friend := range friends {
+		seen[friend.UserID] = true
+	}
+	strangers := make([]string, 0)
+	for actor := range byActor {
+		if !seen[actor] {
+			seen[actor] = true
+			strangers = append(strangers, actor)
+		}
+	}
+	for actor := range eventsByActor {
+		if !seen[actor] {
+			seen[actor] = true
+			strangers = append(strangers, actor)
+		}
+	}
+	sort.Strings(strangers)
+	for _, actor := range strangers {
+		name := ""
+		if s.names != nil {
+			if resolved, ok := s.names(ctx, actor); ok {
+				name = resolved
+			}
+		}
+		insights = append(insights, buildInsight(Friend{UserID: actor, DisplayName: name}, byActor[actor], eventsByActor[actor], thresholds, now))
 	}
 	// 值得运营的排前面；同分按"最近有动静"排（刚互动过的人更该被看到），
 	// 再按 id 兜底，保证顺序完全确定 —— 不稳定的顺序会让「第一个人是谁」

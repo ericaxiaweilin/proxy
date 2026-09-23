@@ -78,6 +78,9 @@ var (
 // targetID 必须是 owner 的**活跃好友**：不加这条，任何人可以对任意账号
 // 开"单独运营"，审计表会变成一张可以随便往别人身上写的表。
 func (s *Service) RecordOperate(ctx context.Context, twinID, ownerID, targetID string, action OperateAction) (OperateResult, error) {
+	if err := s.viewerAllowed(ctx, ownerID); err != nil {
+		return OperateResult{}, err
+	}
 	if !action.Valid() {
 		return OperateResult{}, ErrActionInvalid
 	}

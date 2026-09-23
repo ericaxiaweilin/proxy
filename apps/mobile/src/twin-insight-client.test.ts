@@ -90,3 +90,37 @@ describe("TwinInsightClient (TWIN-INSIGHT-001)", () => {
     expect(out.action).toBe("operate");
   });
 });
+
+describe("TwinInsightClient 403 mapping (TWIN-INSIGHT-ENTITLEMENT-001)", () => {
+  function forbidden(code: string): TransportResponse {
+    return { status: 403, json: async () => ({ error: code }) };
+  }
+
+  it("list says creator-only for insight_viewer_forbidden", async () => {
+    const client = new TwinInsightClient({
+      requester: makeRequester(() => forbidden("insight_viewer_forbidden")),
+      baseUrl: "http://localhost:3000",
+    });
+    await expect(client.listInsights("twin_01")).rejects.toThrowError(/仅向认证创作者开放/);
+  });
+
+  it("list keeps the age message for unknown 403 codes", async () => {
+    const client = new TwinInsightClient({
+      requester: makeRequester(() => forbidden("companion_minor_forbidden")),
+      baseUrl: "http://localhost:3000",
+    });
+    await expect(client.listInsights("twin_01")).rejects.toThrowError(/确认账号年龄信息/);
+  });
+
+  it("operate says creator-only for insight_viewer_forbidden", async () => {
+    const authed = {
+      request: async () => forbidden("insight_viewer_forbidden") as TransportResponse,
+    };
+    const client = new TwinInsightClient({
+      requester: makeRequester(() => ok({})),
+      baseUrl: "http://localhost:3000",
+      authedRequester: authed,
+    });
+    await expect(client.operate("twin_01", "alex", "operate")).rejects.toThrowError(/仅向认证创作者开放/);
+  });
+});

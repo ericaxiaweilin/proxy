@@ -514,6 +514,14 @@ func main() {
 	// 任何单一域上（见 internal/twininsight 的包注释）。接线细节与
 	// fail-closed 规则见 wire_twininsight.go。
 	server.TwinInsight = newTwinInsightService(pool, relationshipService, facetService, modelStack)
+	// TWIN-INSIGHT-TARGETS-001：陌生互动者的展示名用同一套作者名解析
+	//（relationship 的 resolveNameCtx 也是它）。nil-safe：解析不到就显示
+	// 账号 id，不断屏。
+	server.TwinInsight.SetDisplayNameSource(authorNames.ResolveAuthorDisplayName)
+	// TWIN-INSIGHT-ENTITLEMENT-001：洞察工具只向实名创作者发放。
+	// 凭证 = 实名核验 VERIFIED 行（见 wire_twininsight.go），没行/过期/坏池
+	// 一律拒绝。main.go 只挂载，不写判定。
+	server.TwinInsight.SetViewerGate(newTwinInsightViewerGate(pool))
 	// R16.7-P1-E: Jurisdiction Policy Engine. The
 	// jurisdiction service looks up the requester's
 	// (country, region) for the policy decision; the

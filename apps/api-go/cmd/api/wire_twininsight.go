@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -63,8 +64,31 @@ func facetThresholdSource(svc *facet.Service) twininsight.ThresholdSource {
 	}
 }
 
-// newTwinInsightService 组装好友洞察读模型。
+// errTwinInsightViewerNotEntitled 是使用权门禁的拒绝原因。Service 层会把它
+// 归一成 twininsight.ErrInsightViewerForbidden（HTTP 403 + 可区分 code），
+// 这里只负责"放行 / 不放行"这个二值判定，不编面向用户的文案。
+var errTwinInsightViewerNotEntitled = errors.New("twininsight: insight viewer is not entitled (no VERIFIED seller identity)")
+
+// newTwinInsightViewerGate 组装洞察工具使用权门禁（TWIN-INSIGHT-ENTITLEMENT-001）。
 //
+// 发放凭证 = supply.seller_real_name_verifications 的未过期 VERIFIED 行，
+// 经 agent_profiles.user_account_id 映射到本人 —— operator 写行即发放，
+// 删行/过期即回收，不需要发版也不需要改配置。
+//
+// pool 为 nil（无库环境）时判定一律失败：门禁保持 fail-closed，
+// 无库环境本来就没有创作者可服务，关掉比"谁都能看"对。
+func newTwinInsightViewerGate(pool *pgxpool.Pool) twininsight.ViewerGate {
+	repo := postgres.NewSellerRealNameRepository(pool)
+	return func(ctx context.Context, ownerID string) error {
+		ok, err := repo.RealNameVerifiedForAccount(ctx, ownerID)
+		if err != nil || !ok {
+			return errTwinInsightViewerNotEntitled
+		}
+		return nil
+	}
+}
+
+// newTwinInsightService 组装好友洞察读模型。
 // 三个依赖都是「不接就 fail-closed」的，这里一个都不缺省：
 //   - 好友集：relationship（pool 为 nil 时它自己返回空，不是错误）；
 //   - 阈值：facet config（读不到时 twininsight 内部有 DefaultThresholds 兜底，

@@ -65,6 +65,8 @@ func newTwinInsightFixture(t *testing.T) twinInsightFixture {
 	actionLog := twininsight.NewMemoryActionLog()
 	svc.SetActionLog(actionLog)
 	svc.SetCompanionGate(func(context.Context, string) error { return nil })
+	// 使用权门禁默认放行；拒绝路径由 TestTwinInsights*DeniedWithoutEntitlement 钉。
+	svc.SetViewerGate(func(context.Context, string) error { return nil })
 
 	server := &Server{
 		AIPersona:   personaSvc,
@@ -134,7 +136,9 @@ func TestTwinInsightsListReturnsRealFriends(t *testing.T) {
 	if payload.TwinID != fx.twinID {
 		t.Errorf("twinId = %q, want %q", payload.TwinID, fx.twinID)
 	}
-	// 只有好友出现在列表里 —— 非好友 actor（repo 里可能算出来）不许出现。
+	// 两个 actor 都是好友：Linh 有 14 条真实消息，Mai 无信号。
+	//（TWIN-INSIGHT-TARGETS-001 之后，有信号的陌生人也会出现 —— 这里不断言
+	// "非好友不许出现"，只断言好友都在且数字是真的；陌生人由 service 层钉。）
 	if len(payload.Insights) != 2 {
 		t.Fatalf("expected the 2 real friends, got %d", len(payload.Insights))
 	}
@@ -235,10 +239,11 @@ func TestTwinInsightOperateRejectsNonFriendTarget(t *testing.T) {
 // 绝不留"点了按钮但没留痕"的口子。
 func TestTwinInsightOperateFailsClosedWhenLogUnwired(t *testing.T) {
 	fx := newTwinInsightFixture(t)
-	// 换成一个没接审计的 service。
+	// 换成一个没接审计的 service（使用权照常放行：这里只缺审计）。
 	bare := twininsight.New(twininsight.NewMemoryRepository(), fx.friends,
 		func(context.Context) (twininsight.Thresholds, error) { return twininsight.DefaultThresholds(), nil })
 	bare.SetCompanionGate(func(context.Context, string) error { return nil })
+	bare.SetViewerGate(func(context.Context, string) error { return nil })
 	fx.server.TwinInsight = bare
 	recorder := httptest.NewRecorder()
 	path := "/v1/ai/twins/" + fx.twinID + "/targets/friend_linh/operate"
@@ -266,5 +271,43 @@ func TestTwinInsightUnknownSubPathIsNotFound(t *testing.T) {
 	fx.server.routeTwinInsight(recorder, twinInsightRequest(http.MethodGet, "/v1/ai/twins/"+fx.twinID+"/nonsense", fx.ownerToken, ""))
 	if recorder.Code != http.StatusNotFound {
 		t.Errorf("unknown sub-path must be 404, got %d", recorder.Code)
+	}
+}
+
+// TWIN-INSIGHT-ENTITLEMENT-001 —— HTTP 层：没使用权的账号读和写都是 403，
+// 且 body code 可区分（客户端照实说"仅向认证创作者开放"，不许折叠成
+// 未成年或服务故障）。
+func TestTwinInsightsListDeniedWithoutEntitlement(t *testing.T) {
+	fx := newTwinInsightFixture(t)
+	fx.server.TwinInsight.SetViewerGate(func(context.Context, string) error {
+		return twininsight.ErrInsightViewerForbidden
+	})
+	recorder := httptest.NewRecorder()
+	fx.server.routeTwinInsight(recorder, twinInsightRequest(http.MethodGet, "/v1/ai/twins/"+fx.twinID+"/insights", fx.ownerToken, ""))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("unentitled read must be 403, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("403 body must be valid JSON: %v", err)
+	}
+	if body["error"] != "insight_viewer_forbidden" {
+		t.Errorf("403 code must be insight_viewer_forbidden, got %q", body["error"])
+	}
+}
+
+func TestTwinInsightOperateDeniedWithoutEntitlement(t *testing.T) {
+	fx := newTwinInsightFixture(t)
+	fx.server.TwinInsight.SetViewerGate(func(context.Context, string) error {
+		return twininsight.ErrInsightViewerForbidden
+	})
+	recorder := httptest.NewRecorder()
+	path := "/v1/ai/twins/" + fx.twinID + "/targets/friend_linh/operate"
+	fx.server.routeTwinInsight(recorder, twinInsightRequest(http.MethodPost, path, fx.ownerToken, `{"action":"operate"}`))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("unentitled operate must be 403, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if len(fx.actionLog.All()) != 0 {
+		t.Errorf("entitlement-rejected action must not be recorded, got %d rows", len(fx.actionLog.All()))
 	}
 }

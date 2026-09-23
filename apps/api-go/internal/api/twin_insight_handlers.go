@@ -127,6 +127,12 @@ func (s *Server) twinInsightsList(w http.ResponseWriter, r *http.Request, twinID
 	}
 	payload, err := s.TwinInsight.ListInsights(r.Context(), twinID, ownerID)
 	if err != nil {
+		// 已知域错误走统一映射（使用权拒绝翻 403）；未知错误才 500，
+		// 不把"没获权"说成"服务端坏了"。
+		if errors.Is(err, twininsight.ErrInsightViewerForbidden) {
+			writeTwinInsightError(w, err)
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "twin_insights_failed", "reason": err.Error()})
 		return
 	}
@@ -189,6 +195,11 @@ func writeTwinInsightError(w http.ResponseWriter, err error) {
 		// 不是"查不到"，是"不在你能看的目标集里" —— 两者都翻 404，
 		// 不泄漏对方是否存在。
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "target_not_found"})
+	case errors.Is(err, twininsight.ErrInsightViewerForbidden):
+		// TWIN-INSIGHT-ENTITLEMENT-001：没有使用权。403 + 可区分的 code ——
+		// 客户端照实说"仅向认证创作者开放"，不许折叠成未成年（另一道门）
+		// 或服务故障（重试永远没用）。
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insight_viewer_forbidden"})
 	case errors.Is(err, twininsight.ErrActionInvalid):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_action"})
 	case errors.Is(err, aipersona.ErrMinorForbidden):

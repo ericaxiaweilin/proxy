@@ -27,6 +27,9 @@ import { TwinInsightCard, TwinTargetRail } from "./twin-insight-card";
 //    endpoint 一 404 就静默降级成假数据，屏幕上还挂一个演示角标，
 //    看起来像功能做完了。（本文件刻意不再出现那个角标的文案，
 //    twin-insight-section.test.ts 反向钉住它。）
+//  - 分身就地激活（TWIN-SUBSPACE-ACTIVATE-001）：读之前先 ensure ——
+//    有分身直接用，没有就建一个个人副空间。激活失败（年龄门禁/断网）
+//    走错误态；空态只留给"分身在但没目标"。
 //  - 三种结果必须分开显示，不许互相冒充：
 //       insights: []  = 真的没有洞察（空态）
 //       请求失败      = 读不出来（错误态 + 重试）
@@ -80,14 +83,11 @@ export function TwinInsightSection({ authClient, ownerId }: {
     setError(undefined);
     void (async () => {
       try {
-        const personas = await personaClient.listMine(ownerId);
-        const twinId = personas[0]?.id;
-        // 没有分身 = 真的没有洞察，不是失败 —— 走空态，不进错误态。
-        if (!twinId) {
-          if (!cancelled) setPayload(undefined);
-          return;
-        }
-        const data = await insightClient.listInsights(twinId);
+        // TWIN-SUBSPACE-ACTIVATE-001：分身是个人副空间，进页面就地激活 ——
+        // 有就用，没有就建。建失败（年龄门禁/断网）进错误态，不进空态：
+        // 空态只留给"分身在但没目标"（见下面 ProxyEmptyState）。
+        const twin = await personaClient.ensurePersonalTwin(ownerId);
+        const data = await insightClient.listInsights(twin.id);
         if (!cancelled) {
           setPayload(data);
           setSelectedId(data.insights[0]?.targetId);
@@ -156,7 +156,7 @@ export function TwinInsightSection({ authClient, ownerId }: {
       ) : loading && !payload ? (
         <Text style={styles.stateText}>正在读取好友洞察…</Text>
       ) : insights.length === 0 ? (
-        <ProxyEmptyState title="还没有好友洞察" sub="创建分身并加好友后，这里会告诉你谁值得运营" />
+        <ProxyEmptyState title="还没有好友洞察" sub="有人找你聊天或来看过主页后，这里会告诉你谁值得运营" />
       ) : (
         <View style={styles.body}>
           <TwinTargetRail

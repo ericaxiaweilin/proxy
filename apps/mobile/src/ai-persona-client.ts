@@ -166,6 +166,16 @@ export class AiPersonaClient {
     return payload;
   }
 
+  // 个人副空间激活（TWIN-SUBSPACE-ACTIVATE-001）：分身是个人主页的副空间，
+  // 不是要授权才开的功能 —— 进页面就要有个空间可用。有就直接用第一个，
+  // 没有就地建一个（默认名，用户可在别处改）。建失败（年龄门禁/断网）
+  // 直接抛调用方，由调用方走错误态 —— 不吞错、不静默。
+  public async ensurePersonalTwin(ownerId: string): Promise<TwinPersona> {
+    const existing = await this.listMine(ownerId);
+    if (existing[0]) return existing[0];
+    return this.createTwin({ ownerId, displayName: "我的AI分身" });
+  }
+
   // 没有生效授权时返回 undefined（服务端 204），不是抛错 ——
 // 调用方据此渲染「未授权」而不是「加载失败」。
   public async getLiveConsent(personaId: string, subjectId: string): Promise<TwinConsent | undefined> {

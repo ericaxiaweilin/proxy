@@ -4,6 +4,21 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 247 — 2026-09-23
+
+- **好友洞察目标集扩大**（TWIN-INSIGHT-TARGETS-001）：只认好友会漏掉聊过天/
+  看过主页的陌生人，rail 上出现"刚说过话却没有洞察"。目标=好友∪互动者，
+  陌生人显示账号名或解析到的真名；无目标时空态文案改为"有人找你聊天或
+  来看过主页后…"。
+- **洞察工具仅向实名创作者发放**（TWIN-INSIGHT-ENTITLEMENT-001）：无使用权的
+  账号读/写一律 403（`insight_viewer_forbidden`），客户端照实说"仅向认证
+  创作者开放"，不折叠成未成年或故障。
+- **分身副空间就地激活**（TWIN-SUBSPACE-ACTIVATE-001）：进 AI 分身页无分身则
+  建一个（默认名，可改），不再停在"还没有洞察"死胡同；建失败走错误态。
+- 影响文件：`apps/api-go/cmd/api/main.go`、
+  `apps/mobile/src/twin-insight-client.ts`、
+  `apps/mobile/src/components/twin-insight-section.tsx`。
+
 ## Revision 246 — 2026-09-23
 
 - **卖家实名核验补上受控写入口**（COMP-SELLER-001）：读侧（撮合/收款按「已实名且

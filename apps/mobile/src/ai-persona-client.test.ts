@@ -115,3 +115,46 @@ describe("AiPersonaClient", () => {
     expect(seen).toHaveLength(1);
   });
 });
+
+describe("AiPersonaClient.ensurePersonalTwin (TWIN-SUBSPACE-ACTIVATE-001)", () => {
+  const twin = { id: "aip_1", ownerId: "acct_1", displayName: "我的分身", personaType: "USER_TWIN", createdAt: "2026-09-18T00:00:00Z" };
+
+  it("有分身直接用，不发创建请求", async () => {
+    const seen: Array<{ path: string; body: unknown }> = [];
+    const client = new AiPersonaClient({
+      authClient: stubTransport((path: string, body: unknown) => {
+        seen.push({ path, body });
+        return { status: 200, payload: { personas: [twin] } };
+      }),
+    });
+    await expect(client.ensurePersonalTwin("acct_1")).resolves.toEqual(twin);
+    expect(seen).toEqual([{ path: "/v1/ai/personas?ownerId=acct_1", body: undefined }]);
+  });
+
+  it("没分身就地建一个个人副空间", async () => {
+    const seen: Array<{ path: string; body: unknown }> = [];
+    const client = new AiPersonaClient({
+      authClient: stubTransport((path: string, body: unknown) => {
+        seen.push({ path, body });
+        if (path.startsWith("/v1/ai/personas?")) return { status: 200, payload: { personas: [] } };
+        return { status: 201, payload: { ...twin, id: "aip_new", displayName: "我的AI分身" } };
+      }),
+    });
+    const out = await client.ensurePersonalTwin("acct_1");
+    expect(out.id).toBe("aip_new");
+    expect(seen[1]).toEqual({
+      path: "/v1/ai/personas",
+      body: { ownerId: "acct_1", displayName: "我的AI分身", personaType: "USER_TWIN", description: "" },
+    });
+  });
+
+  it("建失败直接抛，不吞错（年龄门禁能透出来）", async () => {
+    const client = new AiPersonaClient({
+      authClient: stubTransport((path: string) => {
+        if (path.startsWith("/v1/ai/personas?")) return { status: 200, payload: { personas: [] } };
+        return { status: 400, payload: { error: "create_failed", reason: "no age evidence on file for this account" } };
+      }),
+    });
+    await expect(client.ensurePersonalTwin("acct_1")).rejects.toBeInstanceOf(TwinNoAgeEvidenceError);
+  });
+});

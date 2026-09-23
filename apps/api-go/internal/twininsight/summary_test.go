@@ -41,6 +41,8 @@ func newSummaryFixture() *Service {
 		{UserID: "friend_1", DisplayName: "Linh", Since: time.Now().Add(-30 * 24 * time.Hour)},
 	})
 	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	// 使用权默认放行：这里钉的是摘要底座，不是发放门（发放由 entitlement 测试钉）。
+	svc.SetViewerGate(func(context.Context, string) error { return nil })
 	return svc
 }
 

@@ -53,18 +53,39 @@ export class TwinInsightClient {
     return this.input.requester.requestPublic(path, init);
   }
 
+  private static async readErrorCode(response: TransportResponse): Promise<string | undefined> {
+    try {
+      const body = (await response.json()) as { error?: unknown };
+      return typeof body?.error === "string" ? body.error : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // 403 翻译（TWIN-INSIGHT-ENTITLEMENT-001 之后有两种门：未成年门和
+  // 使用权门）。必须按 body code 区分着说 —— 把"没获权"说成"去补年龄"，
+  // 用户会去做一件永远没用的事；把"未成年"说成"没获权"则指错路。
+  // 未知 code 落回通用文案，不猜。
+  private static async throwIfForbidden(response: TransportResponse, op: string): Promise<void> {
+    if (response.status !== 403) return;
+    const code = await TwinInsightClient.readErrorCode(response);
+    // 403 = 未成年门禁（COMP-AI-MINOR-001）。必须翻译成人话并区分两种：
+    // 「确认未成年」和「没有年龄证据，去补一条」—— 合起来说"操作失败"
+    // 等于把一条可修复的阻塞说成永久拒绝。
+    if (code === "insight_viewer_forbidden") {
+      throw new TwinInsightProtocolError(
+        `twin-insight ${op} forbidden (403): 该功能仅向认证创作者开放；刚获权或稍后请重试`,
+      );
+    }
+    throw new TwinInsightProtocolError(`twin-insight ${op} forbidden (403): 该操作暂不可用，请确认账号年龄信息`);
+  }
+
   private static throwIfWriteRejected(response: TransportResponse, op: string): void {
     if (response.status === 401) {
       throw new TwinInsightProtocolError(`twin-insight ${op} requires sign-in (401): 请登录后重试`);
     }
     if (response.status === 429) {
       throw new TwinInsightProtocolError(`twin-insight ${op} rate limited (429): 操作太频繁，请稍后重试`);
-    }
-    // 403 = 未成年门禁（COMP-AI-MINOR-001）。必须翻译成人话并区分两种：
-    // 「确认未成年」和「没有年龄证据，去补一条」—— 合起来说"操作失败"
-    // 等于把一条可修复的阻塞说成永久拒绝。
-    if (response.status === 403) {
-      throw new TwinInsightProtocolError(`twin-insight ${op} forbidden (403): 该操作暂不可用，请确认账号年龄信息`);
     }
     // 503 = 依赖没接（模型底座未配置 / 审计表未接入 / 门禁未接）。
     // 服务端是 fail-closed 的，这里也绝不把它当成"成功了"。
@@ -77,6 +98,7 @@ export class TwinInsightClient {
   public async listInsights(twinId: string): Promise<ListTwinInsightsPayload> {
     const path = `/v1/ai/twins/${encodeURIComponent(twinId)}/insights?window=7d`;
     const response = await this.input.requester.requestPublic(path, { method: "GET" });
+    await TwinInsightClient.throwIfForbidden(response, "listInsights");
     if (response.status < 200 || response.status >= 300) {
       throw new TwinInsightProtocolError(`twin-insight listInsights unexpected status: ${response.status}`);
     }
@@ -87,6 +109,7 @@ export class TwinInsightClient {
   public async getInsight(twinId: string, targetId: string): Promise<TwinInsight> {
     const path = `/v1/ai/twins/${encodeURIComponent(twinId)}/insights/${encodeURIComponent(targetId)}`;
     const response = await this.input.requester.requestPublic(path, { method: "GET" });
+    await TwinInsightClient.throwIfForbidden(response, "getInsight");
     if (response.status < 200 || response.status >= 300) {
       throw new TwinInsightProtocolError(`twin-insight getInsight unexpected status: ${response.status}`);
     }
@@ -100,6 +123,7 @@ export class TwinInsightClient {
   public async operate(twinId: string, targetId: string, action: TwinOperateAction): Promise<TwinOperateResult> {
     const path = `/v1/ai/twins/${encodeURIComponent(twinId)}/targets/${encodeURIComponent(targetId)}/operate`;
     const response = await this.write(path, { method: "POST", body: { action } });
+    await TwinInsightClient.throwIfForbidden(response, "operate");
     TwinInsightClient.throwIfWriteRejected(response, "operate");
     if (response.status < 200 || response.status >= 300) {
       throw new TwinInsightProtocolError(`twin-insight operate unexpected status: ${response.status}`);
@@ -114,6 +138,7 @@ export class TwinInsightClient {
   public async refreshSummary(twinId: string, targetId: string): Promise<TwinInsight> {
     const path = `/v1/ai/twins/${encodeURIComponent(twinId)}/insights/${encodeURIComponent(targetId)}/summary:refresh`;
     const response = await this.write(path, { method: "POST", body: {} });
+    await TwinInsightClient.throwIfForbidden(response, "refreshSummary");
     TwinInsightClient.throwIfWriteRejected(response, "refreshSummary");
     if (response.status < 200 || response.status >= 300) {
       throw new TwinInsightProtocolError(`twin-insight refreshSummary unexpected status: ${response.status}`);

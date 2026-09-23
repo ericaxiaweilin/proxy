@@ -17,6 +17,11 @@ func fixedTime() time.Time {
 	return time.Date(2026, 9, 22, 9, 0, 0, 0, time.UTC)
 }
 
+// allowAllViewers 是测试里给使用权门禁的放行桩（TWIN-INSIGHT-ENTITLEMENT-001
+// 之后 ListInsights 默认拒绝，没接这行就进不去）。门禁本身的拒绝路径
+// 由下面的 TestListInsights*Entitlement* 专门钉，这里只放行。
+func allowAllViewers(context.Context, string) error { return nil }
+
 func TestScoreIsDeterministicAndBounded(t *testing.T) {
 	// 全零 = 0 分，不是"没有分数"。
 	if got := ScoreOf(Signals{}); got != 0 {
@@ -175,6 +180,7 @@ func TestEveryInsightSurvivesContractValidation(t *testing.T) {
 	friends.Set("owner_1", []Friend{{UserID: "friend_1", DisplayName: "", Since: now.Add(-48 * time.Hour)}})
 
 	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetViewerGate(allowAllViewers)
 	svc.SetClock(fixedTime)
 	payload, err := svc.ListInsights(context.Background(), "twin_1", "owner_1")
 	if err != nil {
@@ -210,8 +216,8 @@ func TestInitialIsRuneSafeForVietnamese(t *testing.T) {
 	cases := map[string]int{
 		"Nguyễn": 1,
 		"陈先生":    1,
-		"Ánh":   1,
-		"A":     1,
+		"Ánh":    1,
+		"A":      1,
 	}
 	for input, want := range cases {
 		got := InitialOf(input)
@@ -289,6 +295,7 @@ func TestFriendsWithNoFactsStillAppearWithZeros(t *testing.T) {
 		{UserID: "quiet_friend", DisplayName: "Mai", Since: now.Add(-90 * 24 * time.Hour)},
 	})
 	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetViewerGate(allowAllViewers)
 	svc.SetClock(fixedTime)
 	payload, err := svc.ListInsights(context.Background(), "twin_1", "owner_1")
 	if err != nil {
@@ -328,6 +335,7 @@ func TestListInsightsSortsByScoreThenRecency(t *testing.T) {
 		{UserID: "tie_b", DisplayName: "TieB", Since: now.Add(-90 * 24 * time.Hour)},
 	})
 	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetViewerGate(allowAllViewers)
 	svc.SetClock(fixedTime)
 	payload, err := svc.ListInsights(context.Background(), "twin_1", "owner_1")
 	if err != nil {
@@ -338,5 +346,193 @@ func TestListInsightsSortsByScoreThenRecency(t *testing.T) {
 		if payload.Insights[i].TargetID != id {
 			t.Fatalf("order = %v, want %v", payload.Insights, want)
 		}
+	}
+}
+
+// TWIN-INSIGHT-TARGETS-001：目标集 = 好友 ∪ 有过互动的陌生人。
+//
+// 用户原话："是所有聊天、查看过主页的人，并不是说只有添加好友的人"。
+// 之前 ListInsights 只迭代 friends，facts 里聊过天 / 看过主页的陌生 actor
+// 被直接丢掉 —— 明明刚跟这个人说过话，洞察页却显示"还没有好友洞察"。
+// 以下四条钉住：聊过天的陌生人出现、只看过主页的陌生人出现、
+// 陌生人不重不漏（已是好友的不重复）、名字解析接上/没接上都不坏屏。
+func TestNonFriendChatterAppearsInInsights(t *testing.T) {
+	now := fixedTime()
+	repo := NewMemoryRepository()
+	repo.Seed("owner_1", Facts{
+		Signals: []SignalFact{
+			{ActorID: "chatter", Messages7d: 12, LastSignalAt: now.Add(-time.Hour)},
+		},
+		Events: []RecentEvent{
+			{ActorID: "chatter", Kind: EventMessage, At: now.Add(-time.Hour)},
+		},
+	})
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{
+		{UserID: "quiet_friend", DisplayName: "Mai", Since: now.Add(-90 * 24 * time.Hour)},
+	})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetViewerGate(allowAllViewers)
+	svc.SetClock(fixedTime)
+	payload, err := svc.ListInsights(context.Background(), "twin_1", "owner_1")
+	if err != nil {
+		t.Fatalf("ListInsights: %v", err)
+	}
+	if len(payload.Insights) != 2 || payload.TotalTargets != 2 {
+		t.Fatalf("chatter must be listed alongside the friend, got %d insights", len(payload.Insights))
+	}
+	byID := map[string]Insight{}
+	for _, in := range payload.Insights {
+		byID[in.TargetID] = in
+	}
+	got, ok := byID["chatter"]
+	if !ok {
+		t.Fatalf("non-friend chatter is missing from insights: %v", payload.Insights)
+	}
+	if got.Signals.Messages7d != 12 {
+		t.Errorf("chatter messages = %d, want 12", got.Signals.Messages7d)
+	}
+	if got.Score <= 0 {
+		t.Errorf("12 messages must score above 0, got %d", got.Score)
+	}
+	if len(got.Timeline) != 1 || got.Timeline[0].Text != "发了一条消息" {
+		t.Errorf("chatter timeline = %+v, want one sent-message item", got.Timeline)
+	}
+}
+
+func TestNonFriendViewerAppearsInInsights(t *testing.T) {
+	now := fixedTime()
+	repo := NewMemoryRepository()
+	repo.Seed("owner_1", Facts{
+		Signals: []SignalFact{
+			{ActorID: "viewer", Views7d: 5, LastSignalAt: now.Add(-2 * time.Hour)},
+		},
+	})
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetViewerGate(allowAllViewers)
+	svc.SetClock(fixedTime)
+	payload, err := svc.ListInsights(context.Background(), "twin_1", "owner_1")
+	if err != nil {
+		t.Fatalf("ListInsights: %v", err)
+	}
+	if len(payload.Insights) != 1 || payload.Insights[0].TargetID != "viewer" {
+		t.Fatalf("profile viewer without friendship must be listed, got %v", payload.Insights)
+	}
+	if payload.Insights[0].Signals.Views7d != 5 {
+		t.Errorf("viewer views = %d, want 5", payload.Insights[0].Signals.Views7d)
+	}
+}
+
+func TestStrangerAppearingAsFriendAndActorIsListedOnce(t *testing.T) {
+	now := fixedTime()
+	repo := NewMemoryRepository()
+	repo.Seed("owner_1", Facts{
+		Signals: []SignalFact{
+			{ActorID: "both", Messages7d: 4, LastSignalAt: now.Add(-time.Hour)},
+		},
+	})
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{
+		{UserID: "both", DisplayName: "Both", Since: now.Add(-90 * 24 * time.Hour)},
+	})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetViewerGate(allowAllViewers)
+	svc.SetClock(fixedTime)
+	payload, err := svc.ListInsights(context.Background(), "twin_1", "owner_1")
+	if err != nil {
+		t.Fatalf("ListInsights: %v", err)
+	}
+	if len(payload.Insights) != 1 {
+		t.Fatalf("friend who also chatted must appear exactly once, got %d", len(payload.Insights))
+	}
+	if payload.Insights[0].DisplayName != "Both" {
+		t.Errorf("friend identity must win over stranger fallback, got %q", payload.Insights[0].DisplayName)
+	}
+}
+
+func TestStrangerDisplayNameResolvesOrFallsBackToID(t *testing.T) {
+	now := fixedTime()
+	seed := Facts{
+		Signals: []SignalFact{
+			{ActorID: "stranger", Messages7d: 6, LastSignalAt: now.Add(-time.Hour)},
+		},
+	}
+	newSvc := func() (*Service, *MemoryFriendSource) {
+		repo := NewMemoryRepository()
+		repo.Seed("owner_1", seed)
+		friends := NewMemoryFriendSource()
+		friends.Set("owner_1", []Friend{})
+		svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+		svc.SetViewerGate(allowAllViewers)
+		svc.SetClock(fixedTime)
+		return svc, friends
+	}
+	// 没接名字源：回落成账号 id，不断屏（契约 displayName min 1）。
+	svc, _ := newSvc()
+	payload, err := svc.ListInsights(context.Background(), "twin_1", "owner_1")
+	if err != nil {
+		t.Fatalf("ListInsights: %v", err)
+	}
+	if len(payload.Insights) != 1 || payload.Insights[0].DisplayName != "stranger" {
+		t.Fatalf("without name source DisplayName must fall back to id, got %v", payload.Insights)
+	}
+	// 接上名字源：显示真名。
+	svc, _ = newSvc()
+	svc.SetDisplayNameSource(func(context.Context, string) (string, bool) { return "Linh", true })
+	payload, err = svc.ListInsights(context.Background(), "twin_1", "owner_1")
+	if err != nil {
+		t.Fatalf("ListInsights: %v", err)
+	}
+	if len(payload.Insights) != 1 || payload.Insights[0].DisplayName != "Linh" {
+		t.Fatalf("with name source DisplayName must resolve, got %v", payload.Insights)
+	}
+	// 名字源解析失败：同样回落 id，不坏屏。
+	svc, _ = newSvc()
+	svc.SetDisplayNameSource(func(context.Context, string) (string, bool) { return "", false })
+	payload, err = svc.ListInsights(context.Background(), "twin_1", "owner_1")
+	if err != nil {
+		t.Fatalf("ListInsights: %v", err)
+	}
+	if len(payload.Insights) != 1 || payload.Insights[0].DisplayName != "stranger" {
+		t.Fatalf("failed resolution must fall back to id, got %v", payload.Insights)
+	}
+}
+
+// TWIN-INSIGHT-ENTITLEMENT-001：洞察工具只向后端发放了使用权的账号开放。
+//
+// 这是撮合小美/小帅、卖小美合法时间的精准投流工具，不是人人可见的公开页。
+// 发放凭证 = 实名核验 VERIFIED 行（operator 写行即发放，见 main.go 接线）。
+// 三条：没接门禁拒绝、明确拒绝、放行才给数。顺序在最前 —— 没使用权的账号
+// 连"参数对不对"的信息都不该拿到。
+func TestListInsightsDeniedWithoutViewerGate(t *testing.T) {
+	repo := NewMemoryRepository()
+	friends := NewMemoryFriendSource()
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetClock(fixedTime)
+	// 故意不 SetViewerGate。
+	if _, err := svc.ListInsights(context.Background(), "twin_1", "owner_1"); err != ErrInsightViewerForbidden {
+		t.Fatalf("ListInsights without viewer gate must refuse with ErrInsightViewerForbidden, got %v", err)
+	}
+}
+
+func TestListInsightsDeniedWhenViewerGateRefuses(t *testing.T) {
+	now := fixedTime()
+	repo := NewMemoryRepository()
+	repo.Seed("owner_1", Facts{
+		Signals: []SignalFact{
+			{ActorID: "chatter", Messages7d: 12, LastSignalAt: now.Add(-time.Hour)},
+		},
+	})
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{
+		{UserID: "chatter", DisplayName: "Chatter", Since: now.Add(-90 * 24 * time.Hour)},
+	})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetClock(fixedTime)
+	svc.SetViewerGate(func(context.Context, string) error { return ErrInsightViewerForbidden })
+	if _, err := svc.ListInsights(context.Background(), "twin_1", "owner_1"); err != ErrInsightViewerForbidden {
+		t.Fatalf("refused viewer must get ErrInsightViewerForbidden even with friends and facts, got %v", err)
 	}
 }
