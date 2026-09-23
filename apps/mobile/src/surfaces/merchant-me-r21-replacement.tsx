@@ -84,9 +84,9 @@ function detailHead({ onBack, title }: { onBack: () => void; title: string }): R
   return (
     <View style={styles.detailHead}>
       <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.subPageBack}>
-        <Text style={styles.subPageBackText}>‹ 返回</Text>
+        <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
       </Pressable>
-      <Text style={styles.detailTitle}>{title}</Text>
+      <Text selectable style={styles.detailTitle}>{title}</Text>
     </View>
   );
 }
@@ -94,8 +94,8 @@ function detailHead({ onBack, title }: { onBack: () => void; title: string }): R
 function sectionHead(title: string, hint?: string): React.JSX.Element {
   return (
     <View style={styles.sectionHead}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {hint ? <Text style={styles.sectionHint}>{hint}</Text> : null}
+      <Text selectable style={styles.sectionTitle}>{title}</Text>
+      {hint ? <Text selectable style={styles.sectionHint}>{hint}</Text> : null}
     </View>
   );
 }
@@ -103,13 +103,13 @@ function sectionHead(title: string, hint?: string): React.JSX.Element {
 function summary({ title, meta, stats }: { title: string; meta: string; stats: Array<[string, string]> }): React.JSX.Element {
   return (
     <View style={styles.summary}>
-      <Text style={styles.cardTitleWhite}>{title}</Text>
-      <Text style={styles.summaryMeta}>{meta}</Text>
+      <Text selectable style={styles.cardTitleWhite}>{title}</Text>
+      <Text selectable style={styles.summaryMeta}>{meta}</Text>
       <View style={styles.summaryStats}>
         {stats.map(([value, label]) => (
           <View key={label} style={styles.summaryStatItem}>
-            <Text style={styles.summaryStatValue}>{value}</Text>
-            <Text style={styles.summaryStatLabel}>{label}</Text>
+            <Text selectable style={styles.summaryStatValue}>{value}</Text>
+            <Text selectable style={styles.summaryStatLabel}>{label}</Text>
           </View>
         ))}
       </View>
@@ -117,7 +117,7 @@ function summary({ title, meta, stats }: { title: string; meta: string; stats: A
   );
 }
 
-function SimpleRows({ rows, onPress }: { rows: Array<[string, string, MerchantPage?]>; onPress?: (page: MerchantPage) => void }): React.JSX.Element {  return <View style={styles.rowList}>{rows.map(([title, meta, destination]) => <Pressable key={title} disabled={!destination} onPress={() => destination && onPress?.(destination)} style={styles.row}><View style={styles.rowCopy}><Text style={styles.objectTitle}>{title}</Text><Text style={styles.meta}>{meta}</Text></View>{destination ? <Text style={styles.chev}>›</Text> : null}</Pressable>)}</View>;
+function SimpleRows({ rows, onPress }: { rows: Array<[string, string, MerchantPage?]>; onPress?: (page: MerchantPage) => void }): React.JSX.Element {  return <View style={styles.rowList}>{rows.map(([title, meta, destination]) => <Pressable key={title} disabled={!destination} onPress={() => destination && onPress?.(destination)} style={styles.row}><View style={styles.rowCopy}><Text selectable style={styles.objectTitle}>{title}</Text><Text selectable style={styles.meta}>{meta}</Text></View>{destination ? <Text selectable style={styles.chev}>›</Text> : null}</Pressable>)}</View>;
 }
 
 export function MerchantMeR21Replacement({
@@ -276,14 +276,14 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "Creator 经营" })}
-          <Text style={styles.pageSub}>围绕真实经营目标匹配、邀请，并追踪到店与消费结果。</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>{([['MATCH','智能匹配'],['CREATORS','Creator'],['COLLABS','合作'],['RESULTS','结果']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setCreatorView(id)} style={[styles.tab, creatorView === id && styles.tabOn]}><Text style={[styles.tabText, creatorView === id && styles.tabTextOn]}>{label}</Text></Pressable>)}</ScrollView>
-          {creatorView === "MATCH" ? <><View style={styles.goalGrid}>{([['storefront','带来到店新客','到店、带客、核销'],['target','生产内容','探店、短视频、UGC'],['arrowUpRight','扩大本地曝光','覆盖与互动'],['ticket','推广券与活动','领取、预约、核销']] as const).map(([icon,title,hint]) => <View key={title} style={styles.goalCard}><View style={styles.goalIcon}><ProxyIcon color={color.ink} name={icon} size={23} /></View><Text style={styles.cardTitle}>{title}</Text><Text style={styles.caption}>{hint}</Text></View>)}</View>{sectionHead("最佳匹配", `${creators.length} 位符合条件`)}</> : null}
+          <Text selectable style={styles.pageSub}>围绕真实经营目标匹配、邀请，并追踪到店与消费结果。</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>{([['MATCH','智能匹配'],['CREATORS','Creator'],['COLLABS','合作'],['RESULTS','结果']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setCreatorView(id)} style={[styles.tab, creatorView === id && styles.tabOn]}><Text selectable style={[styles.tabText, creatorView === id && styles.tabTextOn]}>{label}</Text></Pressable>)}</ScrollView>
+          {creatorView === "MATCH" ? <><View style={styles.goalGrid}>{([['storefront','带来到店新客','到店、带客、核销'],['target','生产内容','探店、短视频、UGC'],['arrowUpRight','扩大本地曝光','覆盖与互动'],['ticket','推广券与活动','领取、预约、核销']] as const).map(([icon,title,hint]) => <View key={title} style={styles.goalCard}><View style={styles.goalIcon}><ProxyIcon color={color.ink} name={icon} size={23} /></View><Text selectable style={styles.cardTitle}>{title}</Text><Text selectable style={styles.caption}>{hint}</Text></View>)}</View>{sectionHead("最佳匹配", `${creators.length} 位符合条件`)}</> : null}
           {creatorView === "CREATORS" ? <><View style={styles.search}><ProxyIcon color={color.muted} name="search" size={18} /><TextInput onChangeText={setCreatorQuery} placeholder="搜索 Creator、能力或语言" placeholderTextColor={color.muted} style={styles.searchInput} value={creatorQuery} /></View>{sectionHead("Creator 人才库", `${visibleCreators.length} 位`)}</> : null}
           {creatorView === "COLLABS" ? <>{sectionHead("合作状态", "来自真实邀请与合作记录")}<SimpleRows rows={[["待回复", "等待合作邀请数据"], ["进行中", "等待履约数据"], ["已完成", "等待完成记录"]]} /></> : null}
           {creatorView === "RESULTS" ? <>{summary({ title: "Creator 贡献", meta: "近 30 天 · 真实归因", stats: [["—","归因收入"],["—","券核销"],["—","新客"],["—","完成合作"]] })}</> : null}
           {(creatorView === "MATCH" || creatorView === "CREATORS") && visibleCreators.length === 0 ? (
-            <View style={styles.emptyCard}><Text style={styles.emptyTitle}>暂时没有匹配的 Creator</Text><Text style={styles.empty}>工作台仍可使用；待供给数据进入后，候选会显示在这里。</Text></View>
+            <View style={styles.emptyCard}><Text selectable style={styles.emptyTitle}>暂时没有匹配的 Creator</Text><Text selectable style={styles.empty}>工作台仍可使用；待供给数据进入后，候选会显示在这里。</Text></View>
           ) : null}
           {(creatorView === "MATCH" || creatorView === "CREATORS") ? visibleCreators.map((creator) => (
             <Pressable
@@ -291,12 +291,12 @@ export function MerchantMeR21Replacement({
               onPress={() => { setSelectedCreator(creator); setPage("creatorDetail"); }}
               style={styles.card}
             >
-              <Text style={styles.cardTitle}>{creator.name}</Text>
-              <Text style={styles.meta}>
+              <Text selectable style={styles.cardTitle}>{creator.name}</Text>
+              <Text selectable style={styles.meta}>
                 {creator.serviceType} · {creator.languages.join(" / ") || "—"} ·{" "}
                 {creator.eligibility.eligible ? "✓ 可邀请" : "✗ 不符合资格"}
               </Text>
-              <Text style={styles.meta}>
+              <Text selectable style={styles.meta}>
                 {creator.referencePrice} {creator.currency} · 到店 {creator.photos.length} 媒体
               </Text>
             </Pressable>
@@ -325,8 +325,8 @@ export function MerchantMeR21Replacement({
           <View style={styles.actions}>
             {/* 诚实文案：这里只是进活动列表看报名，真定向邀请（指定 Creator
                 进指定场次）需要房主场景 + 邀请命令，链路未接前不挂邀请字样。 */}
-            <Pressable onPress={() => setPage("activity")} style={styles.primary} accessibilityLabel="查看活动报名"><Text style={styles.primaryText}>查看活动报名</Text></Pressable>
-            <Pressable onPress={() => { setCreatorView("COLLABS"); setPage("creator"); }} style={styles.secondary}><Text style={styles.secondaryText}>查看记录</Text></Pressable>
+            <Pressable onPress={() => setPage("activity")} style={styles.primary} accessibilityLabel="查看活动报名"><Text selectable style={styles.primaryText}>查看活动报名</Text></Pressable>
+            <Pressable onPress={() => { setCreatorView("COLLABS"); setPage("creator"); }} style={styles.secondary}><Text selectable style={styles.secondaryText}>查看记录</Text></Pressable>
           </View>
         </ScrollView>
       </View>
@@ -340,7 +340,7 @@ export function MerchantMeR21Replacement({
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "券 / 客户" })}
           {summary({ title: `${accounts?.[0]?.name ?? "商家"} · 权益`, meta: "可核验、可追溯", stats: [["—", "进行中"], ["—", "已领取"], ["—", "已核销"], ["—", "到店"]] })}
-          <View style={styles.actions}><Pressable onPress={onOpenVouchers} style={styles.primary}><Text style={styles.primaryText}>打开券中心</Text></Pressable><Pressable onPress={() => setPage("activity")} style={styles.secondary}><Text style={styles.secondaryText}>查看关联活动</Text></Pressable></View>
+          <View style={styles.actions}><Pressable onPress={onOpenVouchers} style={styles.primary}><Text selectable style={styles.primaryText}>打开券中心</Text></Pressable><Pressable onPress={() => setPage("activity")} style={styles.secondary}><Text selectable style={styles.secondaryText}>查看关联活动</Text></Pressable></View>
           <SimpleRows onPress={setPage} rows={[["券管理", "创建、上下架与有效期"], ["核销记录", "扫码核销 · 订单留痕"], ["客户归因", "领取、到店与复购"], ["活动关联", `${activityItems.length} 个开放活动`, "activity"]]} />
           {sectionHead("经营人员", `${members.length} 人`)}
           {members.length === 0 ? (
@@ -348,11 +348,11 @@ export function MerchantMeR21Replacement({
           ) : null}
           {members.map((m) => (
             <View key={m.userId} style={styles.card}>
-              <Text style={styles.cardTitle}>{m.displayName || m.userId}</Text>
-              <Text style={styles.meta}>{m.role} · {m.status}</Text>
+              <Text selectable style={styles.cardTitle}>{m.displayName || m.userId}</Text>
+              <Text selectable style={styles.meta}>{m.role} · {m.status}</Text>
             </View>
           ))}
-          <Text style={styles.meta}>OWNER {ownerCount} · {members.length - ownerCount} 其他</Text>
+          <Text selectable style={styles.meta}>OWNER {ownerCount} · {members.length - ownerCount} 其他</Text>
         </ScrollView>
       </View>
     );
@@ -374,9 +374,9 @@ export function MerchantMeR21Replacement({
               onPress={() => { setSelectedActivity(a); setPage("activityDetail"); }}
               style={styles.activityCard}
             >
-              <View style={styles.activityTop}><View style={styles.rowCopy}><Text style={styles.objectTitle}>{a.title}</Text><Text style={styles.meta}>{a.time} · {a.venueName}</Text></View><IconBox icon="spark" /></View>
+              <View style={styles.activityTop}><View style={styles.rowCopy}><Text selectable style={styles.objectTitle}>{a.title}</Text><Text selectable style={styles.meta}>{a.time} · {a.venueName}</Text></View><IconBox icon="spark" /></View>
               {a.capacity ? <View style={styles.progress}><View style={[styles.progressFill, { width: `${Math.min(100, (a.joined / a.capacity) * 100)}%` }]} /></View> : null}
-              <View style={styles.chips}><View style={styles.chip}><Text style={styles.chipText}>报名 {a.joined}{a.capacity ? `/${a.capacity}` : ""}</Text></View><View style={styles.chip}><Text style={styles.chipText}>{a.priceLabel}</Text></View><View style={styles.chip}><Text style={styles.chipText}>{a.status ?? "已发布"}</Text></View></View>
+              <View style={styles.chips}><View style={styles.chip}><Text selectable style={styles.chipText}>报名 {a.joined}{a.capacity ? `/${a.capacity}` : ""}</Text></View><View style={styles.chip}><Text selectable style={styles.chipText}>{a.priceLabel}</Text></View><View style={styles.chip}><Text selectable style={styles.chipText}>{a.status ?? "已发布"}</Text></View></View>
             </Pressable>
           ))}
         </ScrollView>
@@ -401,8 +401,8 @@ export function MerchantMeR21Replacement({
           })}
           <SimpleRows onPress={setPage} rows={[["已锁定 Creator", `${creators.length} 位当前可匹配`, "creator"], ["定向券", "查看活动关联权益", "voucher"], ["结果", "等待真实归因数据", "sales"]]} />
           <View style={styles.actions}>
-            <Pressable onPress={() => setPage("creator")} style={styles.primary}><Text style={styles.primaryText}>继续补位</Text></Pressable>
-            <Pressable onPress={() => setPage("sales")} style={styles.secondary}><Text style={styles.secondaryText}>查看结果</Text></Pressable>
+            <Pressable onPress={() => setPage("creator")} style={styles.primary}><Text selectable style={styles.primaryText}>继续补位</Text></Pressable>
+            <Pressable onPress={() => setPage("sales")} style={styles.secondary}><Text selectable style={styles.secondaryText}>查看结果</Text></Pressable>
           </View>
         </ScrollView>
       </View>
@@ -414,7 +414,7 @@ export function MerchantMeR21Replacement({
       return (
         <View style={styles.root}>
           {detailHead({ onBack: () => setPage("root"), title: "线上店铺" })}
-          <View style={styles.card}><Text style={styles.empty}>请登录后查看</Text></View>
+          <View style={styles.card}><Text selectable style={styles.empty}>请登录后查看</Text></View>
         </View>
       );
     }
@@ -443,7 +443,7 @@ export function MerchantMeR21Replacement({
           })}
           <SimpleRows onPress={setPage} rows={[["Creator", `${creators.length} 位当前可匹配`, "creator"], ["券", "查看权益与核销", "voucher"], ["活动导流", `${activityItems.length} 个开放活动`, "activity"], ["自然到店", "等待真实归因数据"]]} />
           {spendDays.length === 0 ? (
-            <View style={styles.card}><Text style={styles.empty}>暂无销售数据 — server 列表为空</Text></View>
+            <View style={styles.card}><Text selectable style={styles.empty}>暂无销售数据 — server 列表为空</Text></View>
           ) : null}
         </ScrollView>
       </View>
@@ -458,12 +458,12 @@ export function MerchantMeR21Replacement({
           <SimpleRows onPress={setPage} rows={[["Creator 待跟进", `${creators.length} 位当前可匹配`, "creator"], ["活动待处理", `${activityItems.length} 个开放活动`, "activity"], ["券与核销", "查看权益与核销状态", "voucher"], ["销售结果", `${spendTotal.totalOrders} 个订单`, "sales"]]} />
           {sectionHead("经营人员", `member_directory · ${members.length}`)}
           {members.length === 0 ? (
-            <View style={styles.card}><Text style={styles.empty}>暂无成员</Text></View>
+            <View style={styles.card}><Text selectable style={styles.empty}>暂无成员</Text></View>
           ) : null}
           {members.map((m) => (
             <View key={m.userId} style={styles.card}>
-              <Text style={styles.cardTitle}>{m.displayName || m.userId}</Text>
-              <Text style={styles.meta}>{m.role} · {m.status}</Text>
+              <Text selectable style={styles.cardTitle}>{m.displayName || m.userId}</Text>
+              <Text selectable style={styles.meta}>{m.role} · {m.status}</Text>
             </View>
           ))}
         </ScrollView>
@@ -491,22 +491,22 @@ export function MerchantMeR21Replacement({
           <SimpleRows onPress={setPage} rows={[["活动导流", `${sceneActs.length} 个本场景活动`, "activity"], ["菜单与价格", "进线上店铺管理", "store"], ["销售结果", `${spendTotal.totalOrders} 个订单`, "sales"]]} />
           {sectionHead("本场景活动", "realitySceneId = threebeans")}
           {sceneActs.length === 0 ? (
-            <View style={styles.card}><Text style={styles.empty}>本场景暂无活动 — 去活动页创建一个</Text></View>
+            <View style={styles.card}><Text selectable style={styles.empty}>本场景暂无活动 — 去活动页创建一个</Text></View>
           ) : null}
           {sceneActs.map((a) => (
             <View key={a.activityId} style={styles.card}>
-              <Text style={styles.cardTitle}>{a.title}</Text>
-              <Text style={styles.meta}>{a.time} · {a.joined} 人已参加{(a.capacity ?? 0) > 0 ? ` / 限 ${a.capacity} 人` : ""}</Text>
+              <Text selectable style={styles.cardTitle}>{a.title}</Text>
+              <Text selectable style={styles.meta}>{a.time} · {a.joined} 人已参加{(a.capacity ?? 0) > 0 ? ` / 限 ${a.capacity} 人` : ""}</Text>
             </View>
           ))}
           {sectionHead("场景真人", "scene projection")}
           {(sceneDetail?.humans ?? []).length === 0 ? (
-            <View style={styles.card}><Text style={styles.empty}>暂无关联真人</Text></View>
+            <View style={styles.card}><Text selectable style={styles.empty}>暂无关联真人</Text></View>
           ) : null}
           {(sceneDetail?.humans ?? []).map((h) => (
             <View key={h.id} style={styles.card}>
-              <Text style={styles.cardTitle}>{h.name}</Text>
-              <Text style={styles.meta}>{h.role} · {h.availability}</Text>
+              <Text selectable style={styles.cardTitle}>{h.name}</Text>
+              <Text selectable style={styles.meta}>{h.role} · {h.availability}</Text>
             </View>
           ))}
         </ScrollView>
@@ -519,9 +519,9 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("proxy"), title: "平台通知" })}
-          <Text style={styles.cardTitle}>未读通知：暂无数据接入</Text>
-          <Text style={styles.empty}>订单状态变更 · 活动报名确认 · 系统维护预告。通知内容来自真实业务流，不使用占位数据。</Text>
-          <Text style={styles.meta}>依据：网络安全响应要求（24 小时一般 / 6 小时紧急）；通知记录保留 ≥ 12 个月。</Text>
+          <Text selectable style={styles.cardTitle}>未读通知：暂无数据接入</Text>
+          <Text selectable style={styles.empty}>订单状态变更 · 活动报名确认 · 系统维护预告。通知内容来自真实业务流，不使用占位数据。</Text>
+          <Text selectable style={styles.meta}>依据：网络安全响应要求（24 小时一般 / 6 小时紧急）；通知记录保留 ≥ 12 个月。</Text>
         </ScrollView>
       </View>
     );
@@ -532,20 +532,20 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("proxy"), title: "政策与规则" })}
-          <Text style={styles.empty}>平台角色判断依据实际功能（订单撮合、支付处理、商家入驻审核、交易数据控制）而非平台自我命名。适用时履行电子商务平台登记（Decree 248/2026 §3）、卖家/商家身份验证（§11）、商品/服务信息披露、禁止假冒商品及违法服务治理、消费者投诉与争议处理、交易/商家/平台运营数据保存（≥ 12 个月）、与主管机关依法配合、其他电子商务平台义务（§545-546）。</Text>
-          <Text style={styles.sectionTitle}>§30 订单（交易主体、价格、税费、取消与退款规则）</Text>
-          <Text style={styles.empty}>订单页面应尽可能明确：交易主体；商品或服务；数量；价格；费用；税费（如有）；履约时间与地点；取消规则；退款规则（§620-629）。订单可作为电子交易记录的一部分（§565）。</Text>
-          <Text style={styles.sectionTitle}>§32 支付（第三方支付机构处理）</Text>
-          <Text style={styles.empty}>由银行或依法提供支付服务的第三方支付机构完成实际支付处理（§593）。Proxy 仅提供支付入口，不自动成为银行、电子钱包、支付机构或用户资金托管机构（§595-600、§605-615）。用户可能还需要接受实际支付服务提供商的相关条款（§602）。</Text>
-          <Text style={styles.sectionTitle}>§28 商家信息（真实、准确、完整、不误导）</Text>
-          <Text style={styles.empty}>商家应保证信息真实、准确、完整、不具有误导性（§502-507），包括：企业或经营主体、店铺名称、地址、商品、服务、价格、许可证、优惠、礼品券、联系方式（§509-520）。需要行业资质的业务必须依法取得相应许可（§522）。</Text>
-          <Text style={styles.sectionTitle}>§19 禁止内容 + §21 活动（真实必要信息与平台角色）</Text>
-          <Text style={styles.empty}>活动创建者应提供真实且必要的信息：活动性质、时间、地点、参与条件、人数、价格、取消规则、必要安全信息（§384-394、§390-394）。除非活动页面明确说明 Proxy 为实际组织者，否则 Proxy 通常仅提供技术、发现、报名和通信工具，不承担活动组织责任（§395-396）。</Text>
-          <Text style={styles.sectionTitle}>§36 诈骗及账号欺诈 + §37 内容审核（治理规则）</Text>
-          <Text style={styles.empty}>禁止恋爱诈骗、投资诈骗、假商家、假客服、礼品券诈骗、支付诈骗、骗取验证码、冒充 Proxy、其他欺骗行为（§651-664）。内容审核措施（提醒、降低传播、限制消息、删除内容、暂停功能、冻结交易、暂停/永久封禁账号）依据严重程度、重复违规、现实风险、法律要求执行（§670-689）。</Text>
-          <Text style={styles.sectionTitle}>法律依据（越南 2026 生效规则）</Text>
-          <Text style={styles.empty}>Decree 248/2026/ND-CP §3（平台登记判断）、§11（卖家验证）、§23（数据保存）；PDP Law 91/2025/QH15 Art.31（明示同意）、Art.32（删除请求、数据保护影响评估、跨境评估）；Decree 328/2026/NĐ-CP §4（假新闻与虚假信息处置：一般 24 小时，国家安全紧急 6 小时）；电子商务平台登记/通知责任在适用时执行（§534-547）。</Text>
-          <Text style={styles.meta}>缺失内容已在 docs/legal/vietnam/Proxy_Operating_Terms_Supplement_2026-08-31.md 补齐（法人信息、法律分类、电商登记、DPIA、跨境数据影响评估、DPO/数据保护部门、真实数据流与第三方处理方清单、越南语正式法律版本、越南执业律师最终审阅）。</Text>
+          <Text selectable style={styles.empty}>平台角色判断依据实际功能（订单撮合、支付处理、商家入驻审核、交易数据控制）而非平台自我命名。适用时履行电子商务平台登记（Decree 248/2026 §3）、卖家/商家身份验证（§11）、商品/服务信息披露、禁止假冒商品及违法服务治理、消费者投诉与争议处理、交易/商家/平台运营数据保存（≥ 12 个月）、与主管机关依法配合、其他电子商务平台义务（§545-546）。</Text>
+          <Text selectable style={styles.sectionTitle}>§30 订单（交易主体、价格、税费、取消与退款规则）</Text>
+          <Text selectable style={styles.empty}>订单页面应尽可能明确：交易主体；商品或服务；数量；价格；费用；税费（如有）；履约时间与地点；取消规则；退款规则（§620-629）。订单可作为电子交易记录的一部分（§565）。</Text>
+          <Text selectable style={styles.sectionTitle}>§32 支付（第三方支付机构处理）</Text>
+          <Text selectable style={styles.empty}>由银行或依法提供支付服务的第三方支付机构完成实际支付处理（§593）。Proxy 仅提供支付入口，不自动成为银行、电子钱包、支付机构或用户资金托管机构（§595-600、§605-615）。用户可能还需要接受实际支付服务提供商的相关条款（§602）。</Text>
+          <Text selectable style={styles.sectionTitle}>§28 商家信息（真实、准确、完整、不误导）</Text>
+          <Text selectable style={styles.empty}>商家应保证信息真实、准确、完整、不具有误导性（§502-507），包括：企业或经营主体、店铺名称、地址、商品、服务、价格、许可证、优惠、礼品券、联系方式（§509-520）。需要行业资质的业务必须依法取得相应许可（§522）。</Text>
+          <Text selectable style={styles.sectionTitle}>§19 禁止内容 + §21 活动（真实必要信息与平台角色）</Text>
+          <Text selectable style={styles.empty}>活动创建者应提供真实且必要的信息：活动性质、时间、地点、参与条件、人数、价格、取消规则、必要安全信息（§384-394、§390-394）。除非活动页面明确说明 Proxy 为实际组织者，否则 Proxy 通常仅提供技术、发现、报名和通信工具，不承担活动组织责任（§395-396）。</Text>
+          <Text selectable style={styles.sectionTitle}>§36 诈骗及账号欺诈 + §37 内容审核（治理规则）</Text>
+          <Text selectable style={styles.empty}>禁止恋爱诈骗、投资诈骗、假商家、假客服、礼品券诈骗、支付诈骗、骗取验证码、冒充 Proxy、其他欺骗行为（§651-664）。内容审核措施（提醒、降低传播、限制消息、删除内容、暂停功能、冻结交易、暂停/永久封禁账号）依据严重程度、重复违规、现实风险、法律要求执行（§670-689）。</Text>
+          <Text selectable style={styles.sectionTitle}>法律依据（越南 2026 生效规则）</Text>
+          <Text selectable style={styles.empty}>Decree 248/2026/ND-CP §3（平台登记判断）、§11（卖家验证）、§23（数据保存）；PDP Law 91/2025/QH15 Art.31（明示同意）、Art.32（删除请求、数据保护影响评估、跨境评估）；Decree 328/2026/NĐ-CP §4（假新闻与虚假信息处置：一般 24 小时，国家安全紧急 6 小时）；电子商务平台登记/通知责任在适用时执行（§534-547）。</Text>
+          <Text selectable style={styles.meta}>缺失内容已在 docs/legal/vietnam/Proxy_Operating_Terms_Supplement_2026-08-31.md 补齐（法人信息、法律分类、电商登记、DPIA、跨境数据影响评估、DPO/数据保护部门、真实数据流与第三方处理方清单、越南语正式法律版本、越南执业律师最终审阅）。</Text>
         </ScrollView>
       </View>
     );
@@ -556,9 +556,9 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("proxy"), title: "认证与资格" })}
-          <Text style={styles.cardTitle}>状态：{accounts?.[0]?.status ?? "待获取"}</Text>
-          <Text style={styles.empty}>商家验证：需要提交营业执照、食品安全证书（F&B）、税号。平台角色判断依据 Decree 248/2026 §3：提供交易撮合 + 支付处理 + 商家入驻审核 = 电子商务平台，须完成平台登记（platform_registration_number）。</Text>
-          <Text style={styles.meta}>缺失：platform_registration 字段 + e-commerce_platform_notice UI 提示（已记录在运营条款补充文档）。</Text>
+          <Text selectable style={styles.cardTitle}>状态：{accounts?.[0]?.status ?? "待获取"}</Text>
+          <Text selectable style={styles.empty}>商家验证：需要提交营业执照、食品安全证书（F&B）、税号。平台角色判断依据 Decree 248/2026 §3：提供交易撮合 + 支付处理 + 商家入驻审核 = 电子商务平台，须完成平台登记（platform_registration_number）。</Text>
+          <Text selectable style={styles.meta}>缺失：platform_registration 字段 + e-commerce_platform_notice UI 提示（已记录在运营条款补充文档）。</Text>
         </ScrollView>
       </View>
     );
@@ -569,9 +569,9 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("proxy"), title: "支持与申诉" })}
-          <Text style={styles.cardTitle}>处理中问题：0 个</Text>
-          <Text style={styles.empty}>申诉流程：提交 → 平台审核（一般 24 小时，国家安全紧急 6 小时）→ 结果通知 → 如不接受可向外部律师/监管机构申诉。申诉记录写入 content_governance 表（内容 ID、举报类型、处置动作、响应时间、法律依据）。</Text>
-          <Text style={styles.meta}>依据：Proxy_Legal_Update_Notes v1.1（2026-08-31）§2 网络安全响应；条款文件已在 docs/legal/vietnam/ 补齐。</Text>
+          <Text selectable style={styles.cardTitle}>处理中问题：0 个</Text>
+          <Text selectable style={styles.empty}>申诉流程：提交 → 平台审核（一般 24 小时，国家安全紧急 6 小时）→ 结果通知 → 如不接受可向外部律师/监管机构申诉。申诉记录写入 content_governance 表（内容 ID、举报类型、处置动作、响应时间、法律依据）。</Text>
+          <Text selectable style={styles.meta}>依据：Proxy_Legal_Update_Notes v1.1（2026-08-31）§2 网络安全响应；条款文件已在 docs/legal/vietnam/ 补齐。</Text>
         </ScrollView>
       </View>
     );
@@ -585,12 +585,12 @@ export function MerchantMeR21Replacement({
           <SimpleRows onPress={setPage} rows={[["平台通知", "订单、活动与系统消息", "proxy-notices"], ["政策与规则", "Creator · 券 · 活动 · 内容", "proxy-policy"], ["认证与资格", accounts?.[0]?.status ?? "待获取", "proxy-verify"], ["成员与权限", `${members.length} 位成员`, "ops"], ["平台结算", "合作、券成本与活动支出", "sales"], ["接入与连接", "店铺 · QR · 核销 · 数据同步", "store"], ["支持与申诉", "查看处理中问题", "proxy-support"]]} />
           {sectionHead("业务健康度", "spend_daily · server 实际")}
           {spendDays.length === 0 ? (
-            <View style={styles.card}><Text style={styles.empty}>暂无数据 — server 列表为空</Text></View>
+            <View style={styles.card}><Text selectable style={styles.empty}>暂无数据 — server 列表为空</Text></View>
           ) : null}
           {spendDays.map((d) => (
             <View key={d.bucketDate} style={styles.card}>
-              <Text style={styles.cardTitle}>{d.bucketDate}</Text>
-              <Text style={styles.meta}>{d.orderCount} 单 · {formatVnd(d.grossMinor)} · 新 {d.newCustomerCount} / 复 {d.returningCustomerCount}</Text>
+              <Text selectable style={styles.cardTitle}>{d.bucketDate}</Text>
+              <Text selectable style={styles.meta}>{d.orderCount} 单 · {formatVnd(d.grossMinor)} · 新 {d.newCustomerCount} / 复 {d.returningCustomerCount}</Text>
             </View>
           ))}
         </ScrollView>
@@ -602,27 +602,27 @@ export function MerchantMeR21Replacement({
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.topline}>
-          <Text style={styles.h1}>我的</Text>
-          <View style={styles.merchantTag}><Text style={styles.merchantTagText}>商家</Text></View>
+          <Text selectable style={styles.h1}>我的</Text>
+          <View style={styles.merchantTag}><Text selectable style={styles.merchantTagText}>商家</Text></View>
         </View>
 
         {accounts === undefined && !error ? <ProxyLoading tone="muted" /> : null}
-        {error ? <View style={styles.card}><Text style={styles.empty}>加载失败：{error}</Text></View> : null}
+        {error ? <View style={styles.card}><Text selectable style={styles.empty}>加载失败：{error}</Text></View> : null}
 
         <Pressable onPress={() => setPage("store")} style={styles.identity}>
           {merchantAvatarUri(accounts?.[0]?.avatarPath, localApiBaseUrl) ? (
             <Image source={{ uri: merchantAvatarUri(accounts?.[0]?.avatarPath, localApiBaseUrl)! }} style={styles.bizAvatar} />
           ) : (
             <Gradient from="#45208A" to="#8033F0" style={styles.bizAvatar}>
-              <Text style={styles.bizAvatarText}>B</Text>
+              <Text selectable style={styles.bizAvatarText}>B</Text>
             </Gradient>
           )}
           <View style={styles.rowCopy}>
-            <Text style={styles.cardTitle}>{accounts?.[0]?.name ?? "还没有店铺"}</Text>
-            <Text style={styles.meta}>{accounts?.[0] ? `${accounts?.[0]?.status ?? ""} · ${members.length} 经营人员` : "创建后解锁相册 · 信息 · 成员 · 数据"}</Text>
+            <Text selectable style={styles.cardTitle}>{accounts?.[0]?.name ?? "还没有店铺"}</Text>
+            <Text selectable style={styles.meta}>{accounts?.[0] ? `${accounts?.[0]?.status ?? ""} · ${members.length} 经营人员` : "创建后解锁相册 · 信息 · 成员 · 数据"}</Text>
           </View>
           <View style={styles.storeButton}>
-            <Text style={styles.storeButtonText}>{accounts?.[0] ? "查看店铺" : "创建店铺"}</Text>
+            <Text selectable style={styles.storeButtonText}>{accounts?.[0] ? "查看店铺" : "创建店铺"}</Text>
           </View>
         </Pressable>
 
@@ -630,8 +630,8 @@ export function MerchantMeR21Replacement({
 
         <View style={styles.today}>
           <View style={styles.todayHead}>
-            <Text style={styles.cardTitleWhite}>今天需要处理</Text>
-            <Text style={styles.todayHint}>{activityItems.length + creators.length} 项</Text>
+            <Text selectable style={styles.cardTitleWhite}>今天需要处理</Text>
+            <Text selectable style={styles.todayHint}>{activityItems.length + creators.length} 项</Text>
           </View>
           {([
             ["spark", `${activityItems.length} 个开放活动待跟进`, "活动导流", "activity"],
@@ -640,8 +640,8 @@ export function MerchantMeR21Replacement({
           ] as const).map(([icon, title, meta, destination]) => (
             <Pressable key={meta} onPress={() => setPage(destination)} style={styles.todo}>
               <View style={styles.todoIcon}><ProxyIcon color={color.lime} name={icon} size={22} /></View>
-              <View style={styles.rowCopy}><Text style={styles.todoTitle}>{title}</Text><Text style={styles.todoMeta}>{meta}</Text></View>
-              <Text style={styles.todoChev}>›</Text>
+              <View style={styles.rowCopy}><Text selectable style={styles.todoTitle}>{title}</Text><Text selectable style={styles.todoMeta}>{meta}</Text></View>
+              <Text selectable style={styles.todoChev}>›</Text>
             </Pressable>
           ))}
         </View>
@@ -654,7 +654,7 @@ export function MerchantMeR21Replacement({
             [activityItems.length.toString(), "开放活动", "activity"],
           ] as const).map(([value, label, destination]) => (
             <Pressable key={label} onPress={() => setPage(destination)} style={styles.kpi}>
-              <Text numberOfLines={1} style={styles.kpiValue}>{value}</Text><Text style={styles.caption}>{label}</Text>
+              <Text selectable numberOfLines={1} style={styles.kpiValue}>{value}</Text><Text selectable style={styles.caption}>{label}</Text>
             </Pressable>
           ))}
         </View>
@@ -670,8 +670,8 @@ export function MerchantMeR21Replacement({
           ] as const).map(([icon, title, meta, brand, destination]) => (
             <Pressable key={title} onPress={() => setPage(destination)} style={styles.module}>
               <IconBox brand={brand} icon={icon} />
-              <Text style={styles.cardTitle}>{title}</Text>
-              <Text numberOfLines={1} style={styles.moduleMeta}>{meta}</Text>
+              <Text selectable style={styles.cardTitle}>{title}</Text>
+              <Text selectable numberOfLines={1} style={styles.moduleMeta}>{meta}</Text>
             </Pressable>
           ))}
         </View>
@@ -684,8 +684,8 @@ export function MerchantMeR21Replacement({
           ] as const).map(([icon, title, meta, destination]) => (
             <Pressable key={title} onPress={() => setPage(destination)} style={styles.module}>
               <IconBox icon={icon} />
-              <Text style={styles.cardTitle}>{title}</Text>
-              <Text numberOfLines={1} style={styles.moduleMeta}>{meta}</Text>
+              <Text selectable style={styles.cardTitle}>{title}</Text>
+              <Text selectable numberOfLines={1} style={styles.moduleMeta}>{meta}</Text>
             </Pressable>
           ))}
         </View>
@@ -693,14 +693,14 @@ export function MerchantMeR21Replacement({
         <Pressable onPress={() => setPage("proxy")} style={styles.proxyWide}>
           <Image source={OTTER_LOGO} style={styles.proxyLogo} />
           <View style={styles.rowCopy}>
-            <Text style={styles.cardTitle}>Proxy 中心</Text>
-            <Text style={styles.meta}>{spendDays.length} 日真实经营数据 · 权限与工作区</Text>
+            <Text selectable style={styles.cardTitle}>Proxy 中心</Text>
+            <Text selectable style={styles.meta}>{spendDays.length} 日真实经营数据 · 权限与工作区</Text>
           </View>
-          <Text style={styles.chev}>›</Text>
+          <Text selectable style={styles.chev}>›</Text>
         </Pressable>
 
-        <Pressable onPress={onOpenSwitcher} style={styles.subtleButton}><Text style={styles.subtleButtonText}>切换身份</Text></Pressable>
-        <Pressable onPress={onSignOut} style={styles.subtleButtonDanger}><Text style={styles.subtleButtonDangerText}>退出登录</Text></Pressable>
+        <Pressable onPress={onOpenSwitcher} style={styles.subtleButton}><Text selectable style={styles.subtleButtonText}>切换身份</Text></Pressable>
+        <Pressable onPress={onSignOut} style={styles.subtleButtonDanger}><Text selectable style={styles.subtleButtonDangerText}>退出登录</Text></Pressable>
       </ScrollView>
     </View>
   );

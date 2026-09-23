@@ -163,27 +163,27 @@ export function TwinInsightSection({ authClient, ownerId, resolveMediaUrl }: {
 
   return (
     <View style={styles.section}>
-      <Text style={styles.title}>好友洞察</Text>
-      <Text style={styles.sub}>谁值得运营 · 谁只是路人</Text>
+      <Text selectable style={styles.title}>好友洞察</Text>
+      <Text selectable style={styles.sub}>谁值得运营 · 谁只是路人</Text>
 
       {error ? (
         <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{error}</Text>
+          <Text selectable style={styles.errorText}>{error}</Text>
           <Pressable
             accessibilityLabel="重试读取好友洞察"
             onPress={() => setAttempt((prev) => prev + 1)}
             style={styles.retryButton}
           >
-            <Text style={styles.retryText}>重试</Text>
+            <Text selectable style={styles.retryText}>重试</Text>
           </Pressable>
         </View>
       ) : loading && !payload ? (
-        <Text style={styles.stateText}>正在读取好友洞察…</Text>
+        <Text selectable style={styles.stateText}>正在读取好友洞察…</Text>
       ) : needsLikeness ? (
         <View style={styles.errorBox}>
-          <Text style={styles.errorText}>还没有 AI 分身：授权 AI 使用你的形象后才会开启。</Text>
+          <Text selectable style={styles.errorText}>还没有 AI 分身：授权 AI 使用你的形象后才会开启。</Text>
           <Pressable accessibilityLabel="授权形象，开启 AI 分身" onPress={() => promptLikenessConsent(grantAndReload)} style={styles.retryButton}>
-            <Text style={styles.retryText}>授权形象</Text>
+            <Text selectable style={styles.retryText}>授权形象</Text>
           </Pressable>
         </View>
       ) : insights.length === 0 ? (
@@ -213,7 +213,7 @@ export function TwinInsightSection({ authClient, ownerId, resolveMediaUrl }: {
               onRefreshSummary={() => void refreshSummary()}
             />
           ) : null}
-          {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+          {notice ? <Text selectable style={styles.notice}>{notice}</Text> : null}
         </View>
       )}
     </View>

@@ -357,8 +357,8 @@ export function LocationPickerSheet({
       <Pressable onPress={onClose} style={styles.overlay}>
         <Pressable onPress={() => undefined} style={styles.sheet}>
           <View style={styles.head}>
-            <Text style={styles.headTitle}>切换本地范围</Text>
-            <Text style={styles.headSub}>
+            <Text selectable style={styles.headTitle}>切换本地范围</Text>
+            <Text selectable style={styles.headSub}>
               影响首页、动态、推荐与机会的本地筛选 · 仅城市/区域，位置只用于本机筛选
             </Text>
           </View>
@@ -386,24 +386,24 @@ export function LocationPickerSheet({
                     <ProxyIcon color={followDevice === true ? color.white : color.ink} name="route" size={24} />
                   </View>
                   <View style={styles.optCopy}>
-                    <Text style={styles.optTitle}>{deviceRow.title}</Text>
-                    <Text style={styles.optDesc}>{deviceRow.desc}</Text>
+                    <Text selectable style={styles.optTitle}>{deviceRow.title}</Text>
+                    <Text selectable style={styles.optDesc}>{deviceRow.desc}</Text>
                   </View>
-                  <Text style={styles.optAction}>{deviceRow.action}</Text>
+                  <Text selectable style={styles.optAction}>{deviceRow.action}</Text>
                 </Pressable>
               ) : null}
               {/* NEARBY-SPOTS-001: 3km 热门地点（真坐标，点了能直接发）。
                   以前这里只有 4 个硬编码城市预设，点的全是"还剑湖附近"这种
                   没坐标的条目 —— 发不出去，还冒充"热门"。现在默认先给城市
                   预设（兼容无定位），点了按钮才定位拉真数据。 */}
-              <Text style={styles.fieldLabel}>附近地点</Text>
+              <Text selectable style={styles.fieldLabel}>附近地点</Text>
               {nearbySpots === undefined && !nearbyBusy && !nearbyError ? (
                 <Pressable accessibilityLabel="显示附近地点" onPress={() => void loadNearbySpots()} style={styles.opt}>
                   <View style={styles.optIcon}>
                     <ProxyIcon color={color.ink} name="crosshair" size={24} />
                   </View>
                   <View style={styles.optCopy}>
-                    <Text style={styles.optTitle}>显示附近地点</Text>
+                    <Text selectable style={styles.optTitle}>显示附近地点</Text>
                   </View>
                 </Pressable>
               ) : null}
@@ -411,17 +411,17 @@ export function LocationPickerSheet({
                 <View style={styles.opt}>
                   <ActivityIndicator color={color.ink} size="small" />
                   <View style={styles.optCopy}>
-                    <Text style={styles.optTitle}>正在定位…</Text>
+                    <Text selectable style={styles.optTitle}>正在定位…</Text>
                   </View>
                 </View>
               ) : null}
               {nearbyError ? (
                 <View style={styles.opt}>
                   <View style={styles.optCopy}>
-                    <Text style={styles.optTitle}>附近地点不可用</Text>
-                    <Text style={styles.optDesc}>{nearbyError}</Text>
+                    <Text selectable style={styles.optTitle}>附近地点不可用</Text>
+                    <Text selectable style={styles.optDesc}>{nearbyError}</Text>
                   </View>
-                  <Text style={styles.optAction} onPress={() => void loadNearbySpots()}>重试</Text>
+                  <Text selectable style={styles.optAction} onPress={() => void loadNearbySpots()}>重试</Text>
                 </View>
               ) : null}
               {(nearbySpots ?? []).map((spot) => (
@@ -438,10 +438,10 @@ export function LocationPickerSheet({
                     <ProxyIcon color={color.ink} name="pin" size={24} />
                   </View>
                   <View style={styles.optCopy}>
-                    <Text style={styles.optTitle}>{spot.name}</Text>
-                    {formatSpotDistance(spot.distanceMeters) ? <Text style={styles.optDesc}>{formatSpotDistance(spot.distanceMeters)}</Text> : null}
+                    <Text selectable style={styles.optTitle}>{spot.name}</Text>
+                    {formatSpotDistance(spot.distanceMeters) ? <Text selectable style={styles.optDesc}>{formatSpotDistance(spot.distanceMeters)}</Text> : null}
                   </View>
-                  <Text style={styles.optAction}>发送</Text>
+                  <Text selectable style={styles.optAction}>发送</Text>
                 </Pressable>
               ))}
             </ScrollView>
@@ -456,12 +456,12 @@ export function LocationPickerSheet({
               {/* R15.33: 地址作为标题显眼 — MapCanvas 下面
                   “点击地图” 提示。中间是主地图。 */}
               <View style={styles.addressHeader}>
-                <Text style={styles.addressLabel}>当前位置</Text>
-                <Text style={styles.addressText} numberOfLines={2}>
+                <Text selectable style={styles.addressLabel}>当前位置</Text>
+                <Text selectable style={styles.addressText} numberOfLines={2}>
                   {reverse?.source === "offline-grid" ? "已选择地图位置" : reverse?.displayName || "正在识别地址…"}
                 </Text>
                 {reverse?.source === "offline-grid" && (
-                  <Text style={styles.addressHint}>
+                  <Text selectable style={styles.addressHint}>
                     离线估算 · 点地图重新定位
                   </Text>
                 )}
@@ -469,13 +469,13 @@ export function LocationPickerSheet({
               {/* LOC-SHARE-001: 对当前点操作 —— 复制地址 / Google 地图打开。 */}
               <View style={styles.shareRow}>
                 <Pressable accessibilityLabel="复制地址" onPress={() => void copyPickedAddress()} style={styles.shareBtn}>
-                  <Text style={styles.shareBtnText}>复制地址</Text>
+                  <Text selectable style={styles.shareBtnText}>复制地址</Text>
                 </Pressable>
                 <Pressable accessibilityLabel="用 Google 地图打开" onPress={openPickedInGoogleMaps} style={styles.shareBtn}>
-                  <Text style={styles.shareBtnText}>Google地图</Text>
+                  <Text selectable style={styles.shareBtnText}>Google地图</Text>
                 </Pressable>
               </View>
-              {shareMsg ? <Text style={styles.shareMsg}>{shareMsg}</Text> : null}
+              {shareMsg ? <Text selectable style={styles.shareMsg}>{shareMsg}</Text> : null}
 
               {/* Map — the dominant element in CUSTOM tab.
                   R15.33: 高度从 aspectRatio:1 调到 300 (路牌习惯的
@@ -510,13 +510,13 @@ export function LocationPickerSheet({
                   testID="location-picker-map"
                 />
               </View>
-              <Text style={styles.mapHint}>
+              <Text selectable style={styles.mapHint}>
                 点地图或拖动 pin 重新定位
               </Text>
-              {pinNotice ? <Text style={styles.pinNotice}>{pinNotice}</Text> : null}
+              {pinNotice ? <Text selectable style={styles.pinNotice}>{pinNotice}</Text> : null}
 
               {/* Radius selector */}
-              <Text style={styles.fieldLabel}>覆盖半径</Text>
+              <Text selectable style={styles.fieldLabel}>覆盖半径</Text>
               <View style={styles.radiusRow}>
                 {([1000, 3000, 5000] as const).map((r) => {
                   const active = r === radius;
@@ -526,7 +526,7 @@ export function LocationPickerSheet({
                       onPress={() => setRadius(r)}
                       style={[styles.radiusChip, active && styles.radiusChipActive]}
                     >
-                      <Text style={[styles.radiusChipText, active && styles.radiusChipTextActive]}>
+                      <Text selectable style={[styles.radiusChipText, active && styles.radiusChipTextActive]}>
                         {formatRadius(r)}
                       </Text>
                     </Pressable>
@@ -535,7 +535,7 @@ export function LocationPickerSheet({
               </View>
 
               {/* Label input */}
-              <Text style={styles.fieldLabel}>地点名（可选）</Text>
+              <Text selectable style={styles.fieldLabel}>地点名（可选）</Text>
               <TextInput
                 maxLength={24}
                 onChangeText={setLabel}
@@ -570,10 +570,10 @@ export function LocationPickerSheet({
                         <ProxyIcon color={active ? color.white : color.ink} name="route" size={24} />
                       </View>
                       <View style={styles.optCopy}>
-                        <Text style={styles.optTitle}>{formatLocationTitle(entry)}</Text>
-                        <Text style={styles.optDesc}>覆盖范围 {formatRadius(entry.custom.radiusMeters)}</Text>
+                        <Text selectable style={styles.optTitle}>{formatLocationTitle(entry)}</Text>
+                        <Text selectable style={styles.optDesc}>覆盖范围 {formatRadius(entry.custom.radiusMeters)}</Text>
                       </View>
-                      <Text style={styles.optAction}>{active ? "当前" : "切换"}</Text>
+                      <Text selectable style={styles.optAction}>{active ? "当前" : "切换"}</Text>
                     </Pressable>
                   );
                 })
@@ -592,10 +592,10 @@ export function LocationPickerSheet({
                 onPress={() => void commitCustom()}
                 style={({ pressed }) => [styles.confirm, pressed && styles.confirmPressed]}
               >
-                <Text style={styles.confirmText} numberOfLines={1}>
+                <Text selectable style={styles.confirmText} numberOfLines={1}>
                   ✓ {finalCommit.header} · {finalCommit.area} · {formatRadius(radius)}
                 </Text>
-                <Text style={styles.confirmSubText} numberOfLines={1}>
+                <Text selectable style={styles.confirmSubText} numberOfLines={1}>
                   {finalCommit.city || "所选区域"}
                   {reverse?.source === "offline-grid" ? " · 离线估算" : ""}
                 </Text>
@@ -616,7 +616,7 @@ function TabButton({ active, label, onPress }: { active: boolean; label: string;
       onPress={onPress}
       style={[styles.tab, active && styles.tabActive]}
     >
-      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+      <Text selectable style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
     </Pressable>
   );
 }

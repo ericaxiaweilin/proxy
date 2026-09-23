@@ -119,34 +119,34 @@ export function RoomCreateSurface({ candidates, conversationClient, initialScene
     <View style={[styles.root, presentation === "overlay" && styles.overlay, { paddingTop: safeArea.top }]}>
       <View style={styles.navBar}>
         <Pressable accessibilityLabel="返回" hitSlop={12} onPress={() => { reset(); onClose(); }} style={styles.navBack}>
-          <Text style={styles.navBackText}>‹</Text>
+          <Text selectable style={styles.navBackText}>‹</Text>
         </Pressable>
-        <Text style={styles.navTitle}>创建房间</Text>
+        <Text selectable style={styles.navTitle}>创建房间</Text>
         <Pressable
           accessibilityLabel="创建"
           disabled={selected.size === 0 || creating}
           onPress={() => void create()}
           style={[styles.navAction, selected.size > 0 && !creating && styles.navActionReady]}
         >
-          <Text style={[styles.navActionText, selected.size > 0 && !creating && styles.navActionTextReady]}>{creating ? "创建中…" : "创建"}</Text>
+          <Text selectable style={[styles.navActionText, selected.size > 0 && !creating && styles.navActionTextReady]}>{creating ? "创建中…" : "创建"}</Text>
         </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <View style={styles.preview}>
           <View style={styles.previewTop}>
-            <Text style={styles.previewEmoji}>{scene.emoji}</Text>
+            <Text selectable style={styles.previewEmoji}>{scene.emoji}</Text>
             <View style={styles.previewInfo}>
-              <Text style={styles.previewTitle}>{roomName.trim() || scene.roomName}</Text>
-              <Text style={styles.previewSub}>{scene.sceneName} · {scene.sceneDesc}</Text>
+              <Text selectable style={styles.previewTitle}>{roomName.trim() || scene.roomName}</Text>
+              <Text selectable style={styles.previewSub}>{scene.sceneName} · {scene.sceneDesc}</Text>
             </View>
           </View>
           <View style={styles.previewMembers}>
-            <Text style={styles.previewCount}>{selected.size === 0 ? "还没有邀请人" : `${selected.size} 人已选`}</Text>
+            <Text selectable style={styles.previewCount}>{selected.size === 0 ? "还没有邀请人" : `${selected.size} 人已选`}</Text>
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>选择场景</Text>
+        <Text selectable style={styles.sectionTitle}>选择场景</Text>
         <View style={styles.sceneGrid}>
           {SCENE_OPTIONS.map((option, index) => (
             <Pressable
@@ -155,16 +155,16 @@ export function RoomCreateSurface({ candidates, conversationClient, initialScene
               onPress={() => pickScene(index)}
               style={[styles.sceneOpt, index === sceneIndex && styles.sceneOptSelected]}
             >
-              <Text style={styles.sceneOptEmoji}>{option.emoji}</Text>
+              <Text selectable style={styles.sceneOptEmoji}>{option.emoji}</Text>
               <View style={styles.sceneOptInfo}>
-                <Text style={styles.sceneOptTitle}>{option.title}</Text>
-                <Text style={styles.sceneOptSub}>{option.subtitle}</Text>
+                <Text selectable style={styles.sceneOptTitle}>{option.title}</Text>
+                <Text selectable style={styles.sceneOptSub}>{option.subtitle}</Text>
               </View>
             </Pressable>
           ))}
         </View>
 
-        <Text style={styles.sectionTitle}>房间名</Text>
+        <Text selectable style={styles.sectionTitle}>房间名</Text>
         <View style={styles.roomNameWrap}>
           <TextInput
             accessibilityLabel="房间名"
@@ -173,13 +173,13 @@ export function RoomCreateSurface({ candidates, conversationClient, initialScene
             value={roomName}
           />
           <View style={[styles.roomNameBadge, roomNameEdited && styles.roomNameBadgeEdited]}>
-            <Text style={[styles.roomNameBadgeText, roomNameEdited && styles.roomNameBadgeTextEdited]}>{roomNameEdited ? "已修改" : "自动"}</Text>
+            <Text selectable style={[styles.roomNameBadgeText, roomNameEdited && styles.roomNameBadgeTextEdited]}>{roomNameEdited ? "已修改" : "自动"}</Text>
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>邀请谁进来</Text>
+        <Text selectable style={styles.sectionTitle}>邀请谁进来</Text>
         {invitable.length === 0 ? (
-          <Text style={styles.empty}>暂时没有可邀请的人。</Text>
+          <Text selectable style={styles.empty}>暂时没有可邀请的人。</Text>
         ) : (
           invitable.map((p) => {
             const on = selected.has(p.id);
@@ -191,20 +191,20 @@ export function RoomCreateSurface({ candidates, conversationClient, initialScene
                 style={[styles.inviteItem, on && styles.inviteItemSelected]}
               >
                 {p.photoUri ? <Image source={{ uri: p.photoUri }} style={styles.inviteAvatar} /> : (
-                  <View style={styles.inviteAvatarFallback}><Text style={styles.inviteAvatarFallbackText}>{p.initials}</Text></View>
+                  <View style={styles.inviteAvatarFallback}><Text selectable style={styles.inviteAvatarFallbackText}>{p.initials}</Text></View>
                 )}
                 <View style={styles.inviteInfo}>
-                  <Text style={styles.inviteName}>{p.name}</Text>
-                  <Text style={styles.inviteDesc} numberOfLines={1}>{p.bio}</Text>
+                  <Text selectable style={styles.inviteName}>{p.name}</Text>
+                  <Text selectable style={styles.inviteDesc} numberOfLines={1}>{p.bio}</Text>
                 </View>
                 <View style={[styles.inviteCheck, on && styles.inviteCheckOn]}>
-                  {on ? <Text style={styles.inviteCheckMark}>✓</Text> : null}
+                  {on ? <Text selectable style={styles.inviteCheckMark}>✓</Text> : null}
                 </View>
               </Pressable>
             );
           })
         )}
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <Text selectable style={styles.error}>{error}</Text> : null}
       </ScrollView>
     </View>
   );

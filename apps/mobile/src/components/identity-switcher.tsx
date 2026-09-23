@@ -34,13 +34,13 @@ export function IdentitySwitcher({
   return (
     <View>
       <Pressable onPress={() => setOpen(true)} style={styles.trigger} accessibilityLabel="切换身份">
-        <Text style={styles.triggerText}>💼 {active ? `${active.alias} (${active.displayName})` : "选择身份"} ▾</Text>
+        <Text selectable style={styles.triggerText}>💼 {active ? `${active.alias} (${active.displayName})` : "选择身份"} ▾</Text>
       </Pressable>
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
         <View style={styles.sheet}>
-          <Text style={styles.title}>切换身份</Text>
-          {loading ? <Text style={styles.hint}>加载中…</Text> : null}
+          <Text selectable style={styles.title}>切换身份</Text>
+          {loading ? <Text selectable style={styles.hint}>加载中…</Text> : null}
           {items.map((it) => {
             const isActive = it.id === active?.id;
             const burnerHint = it.type === "BURNER" && it.expiresAt ? ` · ${Math.ceil((new Date(it.expiresAt).getTime() - Date.now()) / 86400000)}天后销毁` : "";
@@ -53,14 +53,14 @@ export function IdentitySwitcher({
                 }}
                 style={[styles.row, isActive && styles.rowActive]}
               >
-                <Text style={styles.alias}>{it.alias} ({it.displayName}){burnerHint}</Text>
-                <Text style={styles.type}>{it.type}</Text>
+                <Text selectable style={styles.alias}>{it.alias} ({it.displayName}){burnerHint}</Text>
+                <Text selectable style={styles.type}>{it.type}</Text>
               </Pressable>
             );
           })}
-          {!loading && items.length === 0 ? <Text style={styles.hint}>暂无身份，请先创建工作号</Text> : null}
+          {!loading && items.length === 0 ? <Text selectable style={styles.hint}>暂无身份，请先创建工作号</Text> : null}
           <Pressable onPress={() => setOpen(false)} style={styles.close}>
-            <Text style={styles.closeText}>关闭</Text>
+            <Text selectable style={styles.closeText}>关闭</Text>
           </Pressable>
         </View>
       </Modal>

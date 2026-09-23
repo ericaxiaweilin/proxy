@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 266 — 2026-09-23
+
+- **全页面内容长按可复制**（SELECTABLE-TEXT-001）：用户「现在我先复制给你都不行」。
+  全仓 RN `<Text>` 统一加 `selectable`（codemod，约 3100 处）；例外：会话气泡
+  （长按出管理菜单，复制走菜单新增的「复制」项，经 expo-clipboard）与
+  `TooltipOnLongPress` 包裹的工具栏按钮（长按出 tooltip）。回归钉
+  `selectable-text.test.ts`。
+- 影响文件：`apps/mobile/src` 下 81 个 tsx（纯加 `selectable`）、
+  `apps/mobile/src/surfaces/conversation.tsx`（菜单复制项）、
+  `apps/mobile/src/selectable-text.test.ts`（新建）。
+
 ## Revision 265 — 2026-09-23
 
 - **对话权限「每次确认」真正可用：AI 替你起草，你确认后以你的身份发出**（AI-MANAGE-013）：用户规则「代回复…应该是代真人的回复」。

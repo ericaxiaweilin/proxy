@@ -167,21 +167,21 @@ export function FulfillmentWorkspace({
     <View style={styles.root}>
       <View style={styles.topBar}>
         <Pressable onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backText}>‹</Text>
+          <Text selectable style={styles.backText}>‹</Text>
         </Pressable>
-        <Text numberOfLines={1} style={styles.title}>
+        <Text selectable numberOfLines={1} style={styles.title}>
           {plan.title}
         </Text>
       </View>
       <View style={styles.flowRow}>
         <View style={styles.flowPill}>
           <View style={styles.flowDot} />
-          <Text style={styles.flowPillText}>履约进行中 · {plan.taskArchetype ?? plan.demandCategory}</Text>
+          <Text selectable style={styles.flowPillText}>履约进行中 · {plan.taskArchetype ?? plan.demandCategory}</Text>
         </View>
       </View>
       <View style={styles.stageRail}>
         {STAGES.map((stage) => (
-          <Text key={stage} style={[styles.stage, stage === "匹配" && styles.stageActive]}>
+          <Text selectable key={stage} style={[styles.stage, stage === "匹配" && styles.stageActive]}>
             {stage}
           </Text>
         ))}
@@ -190,8 +190,8 @@ export function FulfillmentWorkspace({
       {/* Plan 讨论区 */}
       <View style={styles.chatSection}>
         <View style={styles.chatHeader}>
-          <Text style={styles.chatTitle}>Plan 讨论</Text>
-          <Text style={styles.chatHint}>和 AI 讨论调整计划</Text>
+          <Text selectable style={styles.chatTitle}>Plan 讨论</Text>
+          <Text selectable style={styles.chatHint}>和 AI 讨论调整计划</Text>
         </View>
         <ScrollView
           ref={scrollRef}
@@ -200,14 +200,14 @@ export function FulfillmentWorkspace({
         >
           {chatMessages.length === 0 && (
             <View style={styles.chatEmpty}>
-              <Text style={styles.chatEmptyText}>有任何问题或调整想法，直接告诉 AI</Text>
+              <Text selectable style={styles.chatEmptyText}>有任何问题或调整想法，直接告诉 AI</Text>
             </View>
           )}
           {chatMessages.map((msg) => (
             <View key={msg.id} style={[styles.chatBubble, msg.isOwn ? styles.chatBubbleOwn : msg.isAI ? styles.chatBubbleAI : styles.chatBubbleOther]}>
-              {!msg.isOwn && <Text style={styles.chatSender}>{msg.sender}</Text>}
-              <Text style={[styles.chatBody, msg.isOwn && styles.chatBodyOwn]}>{msg.body}</Text>
-              <Text style={[styles.chatTime, msg.isOwn && styles.chatTimeOwn]}>{msg.time}</Text>
+              {!msg.isOwn && <Text selectable style={styles.chatSender}>{msg.sender}</Text>}
+              <Text selectable style={[styles.chatBody, msg.isOwn && styles.chatBodyOwn]}>{msg.body}</Text>
+              <Text selectable style={[styles.chatTime, msg.isOwn && styles.chatTimeOwn]}>{msg.time}</Text>
             </View>
           ))}
         </ScrollView>
@@ -226,13 +226,13 @@ export function FulfillmentWorkspace({
             onPress={() => void sendPlanMessage()}
             style={[styles.chatSendBtn, (!draft.trim() || sending) && styles.chatSendBtnDisabled]}
           >
-            <Text style={styles.chatSendText}>{sending ? "..." : "发送"}</Text>
+            <Text selectable style={styles.chatSendText}>{sending ? "..." : "发送"}</Text>
           </Pressable>
         </View>
       </View>
 
       <ScrollView ref={contentScrollRef} contentContainerStyle={styles.content}>
-        {target.goal !== "" ? <Text style={styles.goalEcho}>你的目标：{target.goal}</Text> : null}
+        {target.goal !== "" ? <Text selectable style={styles.goalEcho}>你的目标：{target.goal}</Text> : null}
         <UIPlanRenderer
           spec={spec}
           state={{ critical_answer: "" }}
@@ -277,24 +277,24 @@ export function FulfillmentWorkspace({
         />
         {actionNote ? (
           <View style={styles.actionNoteRow}>
-            <Text style={styles.actionNote}>{actionNote}</Text>
+            <Text selectable style={styles.actionNote}>{actionNote}</Text>
             {actionNote.includes("失败") ? (
               <Pressable onPress={() => {
                 setActionNote(undefined);
                 setDraftId(undefined);
               }} style={styles.retryBtn}>
-                <Text style={styles.retryBtnText}>重试</Text>
+                <Text selectable style={styles.retryBtnText}>重试</Text>
               </Pressable>
             ) : null}
           </View>
         ) : null}
         {selectedCandidateId && !actionNote ? (
           <View style={styles.actionNoteRow}>
-            <Text style={styles.actionNote}>已选候选（{selectedCandidateId}）</Text>
+            <Text selectable style={styles.actionNote}>已选候选（{selectedCandidateId}）</Text>
           </View>
         ) : null}
         {observability ? (
-          <Text style={styles.obs}>
+          <Text selectable style={styles.obs}>
             UIPlan {observability.uiPlanId} · 请求 {observability.requestedComponents} / 渲染 {observability.renderedComponents} / 拒绝{" "}
             {observability.rejectedComponents.length}
             {observability.fallbackUsed ? " · fallback" : ""}

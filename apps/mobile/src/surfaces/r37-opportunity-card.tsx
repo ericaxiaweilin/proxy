@@ -106,38 +106,38 @@ export function R37OpportunityCard({ opportunity, onOpen, onDismiss }: { opportu
       <Pressable onPress={onOpen} style={styles.thumbWrap}>
         <View style={styles.thumb}>
           <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`market-scene:${opportunity.id}`} source={opportunity.sceneImageUrl ? { uri: opportunity.sceneImageUrl } : SAMPLE_SCENE_IMAGE[type]} style={StyleSheet.absoluteFill} transition={0} />
-          {!opportunity.sceneImageUrl ? <View style={styles.sampleTag}><Text style={styles.sampleTagText}>AI 样张</Text></View> : null}
+          {!opportunity.sceneImageUrl ? <View style={styles.sampleTag}><Text selectable style={styles.sampleTagText}>AI 样张</Text></View> : null}
         </View>
       </Pressable>
       <View style={styles.body}>
         <View style={styles.typeRow}>
           <MarketTypeLogo type={type} size="CARD" />
           <View style={styles.typeMeta}>
-            <Text style={styles.typeMetaLabel}>标准订单类型</Text>
-            <Text style={styles.typeMetaTitle} numberOfLines={1}>{typeLabel.label}</Text>
+            <Text selectable style={styles.typeMetaLabel}>标准订单类型</Text>
+            <Text selectable style={styles.typeMetaTitle} numberOfLines={1}>{typeLabel.label}</Text>
           </View>
           {fit !== "" ? <View style={styles.fitTag}>
             <View style={[styles.fitDot, isHot && styles.fitDotHot]} />
-            <Text style={styles.fitTagText}>{fit} 匹配</Text>
+            <Text selectable style={styles.fitTagText}>{fit} 匹配</Text>
           </View> : null}
         </View>
-        <Text style={styles.oppTitle} numberOfLines={1}>{opportunity.title}</Text>
+        <Text selectable style={styles.oppTitle} numberOfLines={1}>{opportunity.title}</Text>
         <View style={styles.metaLine}>
-          {opportunity.date ? <Text style={styles.metaText}>{opportunity.date} {opportunity.time}</Text> : null}
+          {opportunity.date ? <Text selectable style={styles.metaText}>{opportunity.date} {opportunity.time}</Text> : null}
           {opportunity.date ? <View style={styles.dot} /> : null}
-          {opportunity.location ? <Text style={styles.metaText}>{opportunity.location}</Text> : null}
+          {opportunity.location ? <Text selectable style={styles.metaText}>{opportunity.location}</Text> : null}
         </View>
-        {why ? <Text style={styles.why} numberOfLines={1}>{why}</Text> : null}
+        {why ? <Text selectable style={styles.why} numberOfLines={1}>{why}</Text> : null}
         <View style={styles.cardFoot}>
           <View style={styles.price}>
-            <Text style={styles.priceLabel}>{range.label}</Text>
+            <Text selectable style={styles.priceLabel}>{range.label}</Text>
             <View style={styles.priceValueRow}>
-              <Text style={styles.priceValue}>{range.value}</Text>
-              {range.negotiable ? <Text style={styles.priceNegotiable}>可协商</Text> : null}
+              <Text selectable style={styles.priceValue}>{range.value}</Text>
+              {range.negotiable ? <Text selectable style={styles.priceNegotiable}>可协商</Text> : null}
             </View>
           </View>
           <Pressable onPress={onOpen} style={styles.takeBtn}>
-            <Text style={styles.takeBtnText}>我想接</Text>
+            <Text selectable style={styles.takeBtnText}>我想接</Text>
           </Pressable>
         </View>
       </View>

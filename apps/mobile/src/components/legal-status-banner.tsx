@@ -60,12 +60,12 @@ export function LegalStatusBanner({ status, onDismiss }: LegalStatusBannerProps)
   return (
     <View style={styles.banner}>
       <View style={styles.text}>
-        <Text style={styles.title}>服务暂停 · {labelFor(killed)}</Text>
-        <Text style={styles.body}>{status?.killed[killed]?.reason ?? ""}</Text>
+        <Text selectable style={styles.title}>服务暂停 · {labelFor(killed)}</Text>
+        <Text selectable style={styles.body}>{status?.killed[killed]?.reason ?? ""}</Text>
       </View>
       {onDismiss ? (
         <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.closeBtn}>
-          <Text style={styles.closeText}>×</Text>
+          <Text selectable style={styles.closeText}>×</Text>
         </Pressable>
       ) : null}
     </View>

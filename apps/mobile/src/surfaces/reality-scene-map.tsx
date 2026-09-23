@@ -657,13 +657,13 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const activeVariant = selected ? detail?.variants.find((item) => item.id === detail.selectedVariant) : undefined;
   const detailBody = selected ? (
       <ScrollView style={[styles.root, rootPad]} contentContainerStyle={styles.detailContent}>
-        <View style={styles.detailTop}><Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.backButton}><Text style={styles.backText}>‹</Text></Pressable><View style={styles.detailTopCopy}>{/* MERCHANT-LOGO-001: 商家标志 —— 有 logo 上图，没有回字母块（和线上店铺管理面同款），不编占位图。 */}<View style={styles.venueRow}>{detail?.logoUrl ? <Image accessibilityLabel={`${detail?.venueName ?? selected.name}商家标志`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-logo:${detail.sceneId}`} source={{ uri: detail.logoUrl }} style={styles.venueLogo} transition={0} /> : <View style={styles.venueLogo}><Text style={styles.venueLogoText}>{(detail?.venueName ?? selected.name).slice(0, 1).toUpperCase()}</Text></View>}<View style={styles.venueCopy}><Text style={styles.detailTopTitle}>{detail?.venueName ?? selected.name}</Text><Text style={styles.detailTopSub}>{activeVariant ? `${activeVariant.name} · ${selected.area}` : `${selected.type} · ${selected.area}`}</Text>{/* SCENE-CATEGORY-001: 顶类徽标 —— 去过/未开放照样显示分类（置灰的是标记，不是身份）。 */}<View style={styles.categoryBadge}><Text style={styles.categoryBadgeText}>{selected.category}</Text></View></View></View></View><View style={styles.topSpacer} /></View>
+        <View style={styles.detailTop}><Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.backButton}><Text selectable style={styles.backText}>‹</Text></Pressable><View style={styles.detailTopCopy}>{/* MERCHANT-LOGO-001: 商家标志 —— 有 logo 上图，没有回字母块（和线上店铺管理面同款），不编占位图。 */}<View style={styles.venueRow}>{detail?.logoUrl ? <Image accessibilityLabel={`${detail?.venueName ?? selected.name}商家标志`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-logo:${detail.sceneId}`} source={{ uri: detail.logoUrl }} style={styles.venueLogo} transition={0} /> : <View style={styles.venueLogo}><Text selectable style={styles.venueLogoText}>{(detail?.venueName ?? selected.name).slice(0, 1).toUpperCase()}</Text></View>}<View style={styles.venueCopy}><Text selectable style={styles.detailTopTitle}>{detail?.venueName ?? selected.name}</Text><Text selectable style={styles.detailTopSub}>{activeVariant ? `${activeVariant.name} · ${selected.area}` : `${selected.type} · ${selected.area}`}</Text>{/* SCENE-CATEGORY-001: 顶类徽标 —— 去过/未开放照样显示分类（置灰的是标记，不是身份）。 */}<View style={styles.categoryBadge}><Text selectable style={styles.categoryBadgeText}>{selected.category}</Text></View></View></View></View><View style={styles.topSpacer} /></View>
         <View style={styles.hero}>
           {detail?.heroImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.heroMap} transition={0} /> : <MapView initialRegion={{ latitude: selected.latitude, longitude: selected.longitude, latitudeDelta: 0.025, longitudeDelta: 0.025 }} pointerEvents="none" style={styles.heroMap}><Marker coordinate={{ latitude: selected.latitude, longitude: selected.longitude }} pinColor={selected.active ? color.magenta : color.violet} /></MapView>}
           {/* 封面只留：硬件优点（facets，没开 variant 时回落类型）+ 真实计数。
               地址不在主页写 —— 地图上有，重复写就是废话。名字只在上面出现一次，
               这里不再重复标题。 */}
-          <View style={styles.heroFacets}>{(activeVariant ? activeVariant.facets : [selected.type]).map((facet) => <View key={facet} style={styles.heroFacet}><Text style={styles.heroFacetText}>{facet}</Text></View>)}</View>
+          <View style={styles.heroFacets}>{(activeVariant ? activeVariant.facets : [selected.type]).map((facet) => <View key={facet} style={styles.heroFacet}><Text selectable style={styles.heroFacetText}>{facet}</Text></View>)}</View>
           {/* 评分数据源还没有（唯一诚实的是收藏/去过/在场计数）—— 有评分管线
               之前拿计数当"评价"，绝不编分。 */}
           <Text style={styles.sceneCounts} selectable>{sceneCountsLine(selected)}</Text>
@@ -672,14 +672,14 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         {detail ? (
           <>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.variantRail}>
-              {detail.variants.map((variant) => <Pressable key={variant.id} onPress={() => selectVariant(variant.id)} style={[styles.variantPill, detail.selectedVariant === variant.id && styles.variantPillSelected]}><Text style={[styles.variantPillText, detail.selectedVariant === variant.id && styles.variantPillTextSelected]}>{variant.name.replace(" Coffee", "").replace(" Social", "")}</Text></Pressable>)}
+              {detail.variants.map((variant) => <Pressable key={variant.id} onPress={() => selectVariant(variant.id)} style={[styles.variantPill, detail.selectedVariant === variant.id && styles.variantPillSelected]}><Text selectable style={[styles.variantPillText, detail.selectedVariant === variant.id && styles.variantPillTextSelected]}>{variant.name.replace(" Coffee", "").replace(" Social", "")}</Text></Pressable>)}
             </ScrollView>
-            {featuredAIAccount?.boundSceneId === detail.sceneId ? <View testID="ai-scene-binding" style={styles.aiBindingCard}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-ai:${featuredAIAccount.accountId}:${featuredAIAccount.avatarVersion ?? 1}`} source={aiAccountPhoto(featuredAIAccount)} style={styles.aiBindingAvatar} transition={0} /><View style={styles.aiBindingCopy}><Text style={styles.aiBindingEyebrow}>AI 小美 × 当前 Scene</Text><Text style={styles.aiBindingTitle}>{featuredAIAccount.displayName} · {featuredAIAccount.boundActivityTitle}</Text><Text style={styles.aiBindingText}>{featuredAIAccount.role}，可围绕这个场景聊天、陪伴和生成 UGC 灵感；不能到场、接单或报名活动。</Text><Pressable accessibilityLabel={`查看${featuredAIAccount.displayName}主页`} onPress={() => onOpenAIProfile?.(featuredAIAccount)} style={styles.aiProfileButton}><Text style={styles.aiProfileButtonText}>查看小美主页</Text></Pressable></View></View> : null}
-            {featuredHuman ? <View testID="human-scene-binding" style={styles.humanBindingCard}>{featuredHuman.avatarUri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-person:${featuredHuman.userId}`} source={{ uri: featuredHuman.avatarUri }} style={styles.aiBindingAvatar} transition={0} /> : null}<View style={styles.aiBindingCopy}><Text style={styles.humanBindingEyebrow}>真人 × 当前 Scene</Text><Text style={styles.aiBindingTitle}>{featuredHuman.name}适合这个场景</Text><Text style={styles.aiBindingText}>这是基于场景的真人推荐，尚未代表本人到场或接受邀请。可进入主页了解后，再发起好友或现实活动邀请。</Text><Pressable accessibilityLabel={`查看${featuredHuman.name}主页`} onPress={() => onOpenHumanProfile?.(featuredHuman)} style={styles.aiProfileButton}><Text style={styles.aiProfileButtonText}>查看真人主页</Text></Pressable></View></View> : null}
-            <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>现在最适合</Text><Pressable onPress={() => setWhyOpen((open) => !open)}><Text style={styles.sectionLink}>{whyOpen ? "收起依据" : "为什么"}</Text></Pressable></View>
-            <View style={styles.bestGrid}><View style={styles.bestCard}><Text style={styles.bestTitle}>{activeVariant?.bestFor}</Text><Text style={styles.bestSub}>按当前时段、现场状态和可用资源推荐。</Text></View><View style={styles.bestCard}><Text style={styles.bestTitle}>{detail.liveState.state.replaceAll("_", " ")}</Text>{/* GEO-HONEST-001: 没有容量来源时明说"未知"，绝不回落到一个数字。 */}<Text style={styles.bestSub}>{detail.liveState.bestWindow}{detail.liveState.capacityPct === undefined ? " · 容量未知" : ` · 容量 ${detail.liveState.capacityPct}%`}</Text></View></View>
-            {whyOpen ? <View style={styles.whyCard}><Text style={styles.whyTitle}>推荐依据</Text><Text style={styles.whyText}>当前时段：{activeVariant?.window}</Text><Text style={styles.whyText}>场景标签：{activeVariant?.facets.join(" · ")}</Text>{/* GEO-HONEST-001: 时效声明只在对数据真有来源时才出现 —— 给编造的数字配一个"有效至"时间戳，比数字本身更误导。 */}<Text style={styles.whyText}>现场状态：{detail.liveState.label}{detail.liveState.freshUntil === undefined ? "（容量数据未接入，故无时效）" : `，数据有效至 ${new Date(detail.liveState.freshUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}</Text><Text style={styles.whyBoundary}>这是场景推荐，不代表真人在场，也不生成到访、订单或履约证明。</Text></View> : null}
-            <Text style={styles.sectionTitle}>适合一起的人</Text>
+            {featuredAIAccount?.boundSceneId === detail.sceneId ? <View testID="ai-scene-binding" style={styles.aiBindingCard}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-ai:${featuredAIAccount.accountId}:${featuredAIAccount.avatarVersion ?? 1}`} source={aiAccountPhoto(featuredAIAccount)} style={styles.aiBindingAvatar} transition={0} /><View style={styles.aiBindingCopy}><Text selectable style={styles.aiBindingEyebrow}>AI 小美 × 当前 Scene</Text><Text selectable style={styles.aiBindingTitle}>{featuredAIAccount.displayName} · {featuredAIAccount.boundActivityTitle}</Text><Text selectable style={styles.aiBindingText}>{featuredAIAccount.role}，可围绕这个场景聊天、陪伴和生成 UGC 灵感；不能到场、接单或报名活动。</Text><Pressable accessibilityLabel={`查看${featuredAIAccount.displayName}主页`} onPress={() => onOpenAIProfile?.(featuredAIAccount)} style={styles.aiProfileButton}><Text selectable style={styles.aiProfileButtonText}>查看小美主页</Text></Pressable></View></View> : null}
+            {featuredHuman ? <View testID="human-scene-binding" style={styles.humanBindingCard}>{featuredHuman.avatarUri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-person:${featuredHuman.userId}`} source={{ uri: featuredHuman.avatarUri }} style={styles.aiBindingAvatar} transition={0} /> : null}<View style={styles.aiBindingCopy}><Text selectable style={styles.humanBindingEyebrow}>真人 × 当前 Scene</Text><Text selectable style={styles.aiBindingTitle}>{featuredHuman.name}适合这个场景</Text><Text selectable style={styles.aiBindingText}>这是基于场景的真人推荐，尚未代表本人到场或接受邀请。可进入主页了解后，再发起好友或现实活动邀请。</Text><Pressable accessibilityLabel={`查看${featuredHuman.name}主页`} onPress={() => onOpenHumanProfile?.(featuredHuman)} style={styles.aiProfileButton}><Text selectable style={styles.aiProfileButtonText}>查看真人主页</Text></Pressable></View></View> : null}
+            <View style={styles.sectionTitleRow}><Text selectable style={styles.sectionTitle}>现在最适合</Text><Pressable onPress={() => setWhyOpen((open) => !open)}><Text selectable style={styles.sectionLink}>{whyOpen ? "收起依据" : "为什么"}</Text></Pressable></View>
+            <View style={styles.bestGrid}><View style={styles.bestCard}><Text selectable style={styles.bestTitle}>{activeVariant?.bestFor}</Text><Text selectable style={styles.bestSub}>按当前时段、现场状态和可用资源推荐。</Text></View><View style={styles.bestCard}><Text selectable style={styles.bestTitle}>{detail.liveState.state.replaceAll("_", " ")}</Text>{/* GEO-HONEST-001: 没有容量来源时明说"未知"，绝不回落到一个数字。 */}<Text selectable style={styles.bestSub}>{detail.liveState.bestWindow}{detail.liveState.capacityPct === undefined ? " · 容量未知" : ` · 容量 ${detail.liveState.capacityPct}%`}</Text></View></View>
+            {whyOpen ? <View style={styles.whyCard}><Text selectable style={styles.whyTitle}>推荐依据</Text><Text selectable style={styles.whyText}>当前时段：{activeVariant?.window}</Text><Text selectable style={styles.whyText}>场景标签：{activeVariant?.facets.join(" · ")}</Text>{/* GEO-HONEST-001: 时效声明只在对数据真有来源时才出现 —— 给编造的数字配一个"有效至"时间戳，比数字本身更误导。 */}<Text selectable style={styles.whyText}>现场状态：{detail.liveState.label}{detail.liveState.freshUntil === undefined ? "（容量数据未接入，故无时效）" : `，数据有效至 ${new Date(detail.liveState.freshUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}</Text><Text selectable style={styles.whyBoundary}>这是场景推荐，不代表真人在场，也不生成到访、订单或履约证明。</Text></View> : null}
+            <Text selectable style={styles.sectionTitle}>适合一起的人</Text>
             {/* SCENE-HUMANS-EMPTY-001: 选人是付费决策点 —— 没有人时必须说出"没有人"，
                 不能只留标题和一个空横滑（那会被读成"还在加载"）。文案说明它不是一个
                 失败状态，也不是"再等等就会有人"的承诺。 */}
@@ -688,7 +688,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
               {/* SCENE-HUMANS-002: 纯圆头 rail，不要白卡片 —— 和首页同款圆头像放大
                   （64），名字 + 可约状态居中跟在下面。选中态改用头像外圈紫环
                   （卡片删了，边框无处可画）；点按仍是“选中邀约对象”，链不断。 */}
-              {detail.humans.map((human) => <Pressable key={human.id} accessibilityLabel={`选择${human.name}`} onPress={() => setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))} style={styles.humanPlain}><View style={[styles.humanRing, selectedHumanId === human.id && styles.humanRingSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <CircularAvatarImage accessibilityLabel={`${human.name}头像`} size={64} uri={humanAvatarUri(human.avatarUrl)!} /> : <View style={styles.humanAvatarFallback}><Text style={styles.humanAvatarText}>{human.name.slice(0, 1).toUpperCase()}</Text></View>}</View><Text style={styles.humanPlainName}>{human.name}</Text><Text style={styles.humanPlainSub}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}{human.source === "FIXTURE" ? " · 占位候选" : ""}</Text></Pressable>)}
+              {detail.humans.map((human) => <Pressable key={human.id} accessibilityLabel={`选择${human.name}`} onPress={() => setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))} style={styles.humanPlain}><View style={[styles.humanRing, selectedHumanId === human.id && styles.humanRingSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <CircularAvatarImage accessibilityLabel={`${human.name}头像`} size={64} uri={humanAvatarUri(human.avatarUrl)!} /> : <View style={styles.humanAvatarFallback}><Text selectable style={styles.humanAvatarText}>{human.name.slice(0, 1).toUpperCase()}</Text></View>}</View><Text selectable style={styles.humanPlainName}>{human.name}</Text><Text selectable style={styles.humanPlainSub}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}{human.source === "FIXTURE" ? " · 占位候选" : ""}</Text></Pressable>)}
               {/* SCENE-HUMANS-001: 只露圆头像 + 名字 + 可约状态。点按仍是“选中邀约对象”
                   （DIRECT_INVITE 靠 selectedHumanId 找人，链不断）；role 与 fit% 删掉，
                   可约原文（本周可约/上午可约…）是服务端真值，原样展示不改写。
@@ -696,48 +696,48 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
                   这里不许再挂第二遍（曾经两遍 identical 并排，每个人出现两次）。 */}
             </ScrollView>
             ) : (
-              <Text style={styles.humanEmpty}>这个场景现在还没有挂出可约时间的人 —— 这不是加载失败，也不是「再等等就会有人」的承诺。可以先收藏这个场景。</Text>
+              <Text selectable style={styles.humanEmpty}>这个场景现在还没有挂出可约时间的人 —— 这不是加载失败，也不是「再等等就会有人」的承诺。可以先收藏这个场景。</Text>
             )}
-            <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>{fullMenuOpen ? `${detail.venueName} · 完整菜单` : "这个 Scene 喝什么"}</Text><Pressable onPress={() => setFullMenuOpen((open) => !open)}><Text style={styles.sectionLink}>{fullMenuOpen ? "只看当前 Scene" : "完整菜单"}</Text></Pressable></View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>{(fullMenuOpen ? detail.fullMenu : detail.menu).map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</ScrollView>
+            <View style={styles.sectionTitleRow}><Text selectable style={styles.sectionTitle}>{fullMenuOpen ? `${detail.venueName} · 完整菜单` : "这个 Scene 喝什么"}</Text><Pressable onPress={() => setFullMenuOpen((open) => !open)}><Text selectable style={styles.sectionLink}>{fullMenuOpen ? "只看当前 Scene" : "完整菜单"}</Text></Pressable></View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>{(fullMenuOpen ? detail.fullMenu : detail.menu).map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text selectable numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text selectable style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text selectable style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</ScrollView>
             {/* SCENE-CHECKIN-100M-001: 详情只留两个动作 —— 收藏（意愿）与打卡
                 （到场证明，100m 门禁）。「标记去过 / 去这里 / 我在这里」三个人工
                 声明入口已撤：无验证的手点不产生到场事实；去过由 300m 自动足迹记，
                 计划走活动报名。底层 planned/visited 数据照常加载展示，不断历史。 */}
             <View style={styles.actions}>
-              <Pressable onPress={() => persistToggle(saved, selected.id, setSaved, "SetRealitySceneSaved")} style={[styles.action, saved.has(selected.id) && styles.actionSelected]}><Text style={styles.actionText}>{saved.has(selected.id) ? "★ 已收藏" : "☆ 收藏"}</Text></Pressable>
-              <Pressable accessibilityLabel={here.has(selected.id) ? "取消打卡" : "打卡"} onPress={() => persistCheckIn(selected)} style={here.has(selected.id) ? [styles.action, styles.actionSelected] : styles.primaryAction}><Text style={here.has(selected.id) ? styles.actionText : styles.primaryActionText}>{here.has(selected.id) ? "✓ 已打卡" : "打卡"}</Text></Pressable>
+              <Pressable onPress={() => persistToggle(saved, selected.id, setSaved, "SetRealitySceneSaved")} style={[styles.action, saved.has(selected.id) && styles.actionSelected]}><Text selectable style={styles.actionText}>{saved.has(selected.id) ? "★ 已收藏" : "☆ 收藏"}</Text></Pressable>
+              <Pressable accessibilityLabel={here.has(selected.id) ? "取消打卡" : "打卡"} onPress={() => persistCheckIn(selected)} style={here.has(selected.id) ? [styles.action, styles.actionSelected] : styles.primaryAction}><Text selectable style={here.has(selected.id) ? styles.actionText : styles.primaryActionText}>{here.has(selected.id) ? "✓ 已打卡" : "打卡"}</Text></Pressable>
               {/* SCENE-NAV-001: 第三颗按钮只管送人过去，不碰收藏/打卡的门禁链。 */}
-              <Pressable accessibilityLabel="导航去这里" onPress={() => openSceneNavigation(selected)} style={styles.action}><Text style={styles.actionText}>导航去这里 ›</Text></Pressable>
+              <Pressable accessibilityLabel="导航去这里" onPress={() => openSceneNavigation(selected)} style={styles.action}><Text selectable style={styles.actionText}>导航去这里 ›</Text></Pressable>
             </View>
-            {navError ? <Text style={styles.nearbyError}>{navError}</Text> : null}
+            {navError ? <Text selectable style={styles.nearbyError}>{navError}</Text> : null}
             <View style={styles.actions}>
-              <Text style={styles.checkInHint}>{checkinHint(here.has(selected.id), origin && originFresh() ? metersBetween(origin, selected) : undefined)}</Text>
+              <Text selectable style={styles.checkInHint}>{checkinHint(here.has(selected.id), origin && originFresh() ? metersBetween(origin, selected) : undefined)}</Text>
             </View>
             {/* BADGE-WALL-001: 本店徽章进度 —— 这家能点亮哪些、还差几家点谁的名。
                 到访印记（去过/没去过）来自打卡史，不是有效期内的 here 集合。 */}
             {sceneBadgeRows !== undefined && sceneBadgeRows.length > 0 ? (
               <View style={styles.badgeProgressBox}>
-                <Text style={styles.badgeProgressTitle}>
+                <Text selectable style={styles.badgeProgressTitle}>
                   {sceneBadgeRows[0]?.visited ? "✓ 本店已打卡" : "本店未打卡"} · 可点亮
                 </Text>
                 {sceneBadgeRows.map((row) => (
                   <View key={row.badge.id} style={styles.badgeProgressRow}>
-                    <Text style={styles.badgeProgressName}>{row.badge.icon} {row.badge.name}</Text>
+                    <Text selectable style={styles.badgeProgressName}>{row.badge.icon} {row.badge.name}</Text>
                     {row.progress !== undefined ? (
-                      <Text style={styles.badgeProgressText}>
+                      <Text selectable style={styles.badgeProgressText}>
                         {row.progress.done}/{row.progress.total}{row.missingNames.length > 0 ? ` · 还差${row.missingNames.join("、")}` : ""}
                       </Text>
                     ) : (
-                      <Text style={styles.badgeProgressText}>{row.badge.desc}</Text>
+                      <Text selectable style={styles.badgeProgressText}>{row.badge.desc}</Text>
                     )}
                   </View>
                 ))}
               </View>
             ) : null}
-            {triStateMsg ? <Text style={styles.nearbyError}>{triStateMsg}</Text> : null}
+            {triStateMsg ? <Text selectable style={styles.nearbyError}>{triStateMsg}</Text> : null}
             {(detail?.aiVisits && detail.aiVisits.length > 0) || isXiaomeiScene(selected.id) ? (
-              <Text style={styles.xiaomeiSceneHint}>
+              <Text selectable style={styles.xiaomeiSceneHint}>
                 ✨ {detail?.aiVisits && detail.aiVisits.length > 0
                   ? `小美「${detail.aiVisits.map((v) => v.displayName).join("、")}」常来这里 —— 在这里打卡可获得「与小美同框」徽章。`
                   : "这是小美的绑定场景 —— 在这里打卡可获得「与小美同框」徽章。"}
@@ -745,77 +745,77 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             ) : null}
             {/* SCENE-EVENT-SIGNUP-001: 只能"发起"的详情页等于只能喊话 —— 看
                 不到这个场景上已经有什么局，也没法报名。这里列出来 + 直接报名。 */}
-            <Text style={styles.sectionTitle}>这里的活动</Text>
-            {sceneActivityFeedText(activityFeed) !== "" ? <Text style={styles.activityEmpty}>{sceneActivityFeedText(activityFeed)}</Text> : null}
+            <Text selectable style={styles.sectionTitle}>这里的活动</Text>
+            {sceneActivityFeedText(activityFeed) !== "" ? <Text selectable style={styles.activityEmpty}>{sceneActivityFeedText(activityFeed)}</Text> : null}
             {activityFeed.items.map((item) => (
               <View key={item.activityId} style={styles.activityRow}>
                 <View style={styles.activityInfo}>
-                  <Text style={styles.activityTitle}>{item.title}</Text>
-                  <Text style={styles.activityMeta}>{item.time} · {activitySignupLabel(item)}</Text>
+                  <Text selectable style={styles.activityTitle}>{item.title}</Text>
+                  <Text selectable style={styles.activityMeta}>{item.time} · {activitySignupLabel(item)}</Text>
                 </View>
                 <Pressable
                   disabled={!canSignUp(item) || activityBusyId === item.activityId}
                   onPress={() => joinSceneActivity(item.activityId)}
                   style={[styles.activityJoin, !canSignUp(item) && styles.activityJoinDisabled]}
                 >
-                  <Text style={styles.activityJoinText}>{activityBusyId === item.activityId ? "报名中…" : canSignUp(item) ? "报名" : "已满"}</Text>
+                  <Text selectable style={styles.activityJoinText}>{activityBusyId === item.activityId ? "报名中…" : canSignUp(item) ? "报名" : "已满"}</Text>
                 </Pressable>
               </View>
             ))}
-            {activityMsg ? <Text style={styles.nearbyError}>{activityMsg}</Text> : null}
-            <Text style={styles.sectionTitle}>怎么组织这次现实行动</Text>
+            {activityMsg ? <Text selectable style={styles.nearbyError}>{activityMsg}</Text> : null}
+            <Text selectable style={styles.sectionTitle}>怎么组织这次现实行动</Text>
             <View style={styles.executionCard}>
-              {detail.actions.map((action) => <Pressable key={action.type} onPress={() => { setSelectedAction(action); setActionResult(undefined); setActionExplanation(`${action.label}：${action.moneyMeaning}`); }} style={[styles.executionAction, selectedAction?.type === action.type && styles.executionActionSelected]}><Text style={styles.executionLabel}>{action.label}</Text><Text style={styles.executionState}>{action.type === "DIRECT_INVITE" ? "需本人接受" : action.type === "OPEN_TASK" ? "候选人申请" : "公开报名"}</Text></Pressable>)}
+              {detail.actions.map((action) => <Pressable key={action.type} onPress={() => { setSelectedAction(action); setActionResult(undefined); setActionExplanation(`${action.label}：${action.moneyMeaning}`); }} style={[styles.executionAction, selectedAction?.type === action.type && styles.executionActionSelected]}><Text selectable style={styles.executionLabel}>{action.label}</Text><Text selectable style={styles.executionState}>{action.type === "DIRECT_INVITE" ? "需本人接受" : action.type === "OPEN_TASK" ? "候选人申请" : "公开报名"}</Text></Pressable>)}
             </View>
-            {actionExplanation ? <View style={styles.boundaryCard}><Text style={styles.boundaryStrong}>{actionExplanation}</Text><Text style={styles.boundaryText}>{detail.truthBoundary}</Text>{selectedAction?.type === "DIRECT_INVITE" ? <View><Text style={styles.inviteAmountLabel}>给真人小美的报酬（VND）</Text><View style={styles.inviteAmountRow}><TextInput keyboardType="number-pad" onChangeText={setInviteAmountText} placeholder="150,000" style={styles.inviteAmountInput} value={inviteAmountText} /><Text style={styles.inviteCurrency}>VND</Text></View><Text style={styles.boundaryText}>对方接受前会看到该金额；接受后冻结进订单。</Text></View> : null}{selectedAction ? <Pressable disabled={actionBusy} onPress={() => { void commitSceneAction(); }} style={styles.confirmAction}><Text style={styles.confirmActionText}>{actionBusy ? "处理中…" : `确认${selectedAction.label}`}</Text></Pressable> : null}{actionResult ? <Text style={styles.actionResult}>{actionResult}</Text> : null}</View> : null}
+            {actionExplanation ? <View style={styles.boundaryCard}><Text selectable style={styles.boundaryStrong}>{actionExplanation}</Text><Text selectable style={styles.boundaryText}>{detail.truthBoundary}</Text>{selectedAction?.type === "DIRECT_INVITE" ? <View><Text selectable style={styles.inviteAmountLabel}>给真人小美的报酬（VND）</Text><View style={styles.inviteAmountRow}><TextInput keyboardType="number-pad" onChangeText={setInviteAmountText} placeholder="150,000" style={styles.inviteAmountInput} value={inviteAmountText} /><Text selectable style={styles.inviteCurrency}>VND</Text></View><Text selectable style={styles.boundaryText}>对方接受前会看到该金额；接受后冻结进订单。</Text></View> : null}{selectedAction ? <Pressable disabled={actionBusy} onPress={() => { void commitSceneAction(); }} style={styles.confirmAction}><Text selectable style={styles.confirmActionText}>{actionBusy ? "处理中…" : `确认${selectedAction.label}`}</Text></Pressable> : null}{actionResult ? <Text selectable style={styles.actionResult}>{actionResult}</Text> : null}</View> : null}
             {/* SCENE-STUDIO-001: 三元素出图卡。场景 hero + 文案来自已选时段，
                 菜单来自点中的那一款，小美来自绑定本场景的账号 —— 缺哪个，
                 卡上就明写缺哪个，按钮同步 disabled，进分享链的永远是卡上
                 摆出来的同一份，不存在"图上一个样、文案另一个样"。 */}
-            <Text style={styles.sectionTitle}>场景 Studio</Text>
+            <Text selectable style={styles.sectionTitle}>场景 Studio</Text>
             <View ref={studioShareRef} collapsable={false} style={styles.badgeShareCard}>
               <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-studio:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.heroMap} transition={0} />
-              <Text style={styles.studioName}>{detail.venueName} · {activeVariant?.name ?? selected.type}</Text>
-              <Text style={styles.studioSub}>{activeVariant ? `${activeVariant.window} · ${activeVariant.bestFor}` : selected.description}</Text>
+              <Text selectable style={styles.studioName}>{detail.venueName} · {activeVariant?.name ?? selected.type}</Text>
+              <Text selectable style={styles.studioSub}>{activeVariant ? `${activeVariant.window} · ${activeVariant.bestFor}` : selected.description}</Text>
               <View style={styles.studioRow}>
                 {studioMenu ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-studio-sku:${studioMenu.id}`} source={{ uri: studioMenu.imageUrl }} style={styles.studioThumb} transition={0} /> : null}
                 <View style={styles.studioCopy}>
-                  <Text style={styles.studioName}>{studioMenu ? `${studioMenu.name} · ${studioMenu.priceLabel}` : "还没选菜单"}</Text>
-                  <Text style={styles.studioSub}>{studioMenu ? "你亲手点的那一款" : "去上面点一款，选什么出什么"}</Text>
+                  <Text selectable style={styles.studioName}>{studioMenu ? `${studioMenu.name} · ${studioMenu.priceLabel}` : "还没选菜单"}</Text>
+                  <Text selectable style={styles.studioSub}>{studioMenu ? "你亲手点的那一款" : "去上面点一款，选什么出什么"}</Text>
                 </View>
               </View>
               <View style={styles.studioRow}>
                 {studioXiaomei ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-studio-ai:${studioXiaomei.accountId}:${studioXiaomei.avatarVersion ?? 1}`} source={aiAccountPhoto(studioXiaomei)} style={styles.aiBindingAvatar} transition={0} /> : null}
                 <View style={styles.studioCopy}>
-                  <Text style={styles.studioName}>{studioXiaomei ? studioXiaomei.displayName : "还没有绑定的小美"}</Text>
-                  <Text style={styles.studioSub}>{studioXiaomei ? studioXiaomei.boundActivityTitle : "等小美绑定这个场景再出图"}</Text>
+                  <Text selectable style={styles.studioName}>{studioXiaomei ? studioXiaomei.displayName : "还没有绑定的小美"}</Text>
+                  <Text selectable style={styles.studioSub}>{studioXiaomei ? studioXiaomei.boundActivityTitle : "等小美绑定这个场景再出图"}</Text>
                 </View>
               </View>
             </View>
-            <Pressable accessibilityLabel={studioReady ? "生成 Studio 照" : studioMenu === undefined ? "先选一款菜单再出图" : "等小美绑定这个场景再出图"} disabled={!studioReady} onPress={() => void shareStudioCard()} style={[styles.badgeShareBtn, !studioReady && styles.studioBtnDisabled]}><Text style={styles.badgeShareBtnText}>{studioReady ? "生成 Studio 照" : studioMenu === undefined ? "先选一款菜单再出图" : "等小美绑定这个场景再出图"}</Text></Pressable>
-            {studioShareNotice ? <Text style={styles.nearbyError}>{studioShareNotice}</Text> : null}
+            <Pressable accessibilityLabel={studioReady ? "生成 Studio 照" : studioMenu === undefined ? "先选一款菜单再出图" : "等小美绑定这个场景再出图"} disabled={!studioReady} onPress={() => void shareStudioCard()} style={[styles.badgeShareBtn, !studioReady && styles.studioBtnDisabled]}><Text selectable style={styles.badgeShareBtnText}>{studioReady ? "生成 Studio 照" : studioMenu === undefined ? "先选一款菜单再出图" : "等小美绑定这个场景再出图"}</Text></Pressable>
+            {studioShareNotice ? <Text selectable style={styles.nearbyError}>{studioShareNotice}</Text> : null}
           </>
-        ) : detailError ? <Text style={styles.nearbyError}>{detailError}</Text> : <Text style={styles.loadingDetail}>正在加载当前时段的人、菜单与活动方式…</Text>}
-        <Text style={styles.sectionTitle}>场景数据</Text>
+        ) : detailError ? <Text selectable style={styles.nearbyError}>{detailError}</Text> : <Text selectable style={styles.loadingDetail}>正在加载当前时段的人、菜单与活动方式…</Text>}
+        <Text selectable style={styles.sectionTitle}>场景数据</Text>
         <View style={styles.dataCard}>
           <DataRow label="开放时间" value={selected.best} />
           <DataRow label="场景动态" value={sceneCountsLine(selected)} />
           {visitedAt.get(selected.id) ? <DataRow label="最近足迹" value={new Date(visitedAt.get(selected.id)!).toLocaleString()} /> : null}
         </View>
-        <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>Reality Evidence · Scene Memory</Text></View>
-        <View style={styles.memoryCard}><Text style={styles.memoryTitle}>{visited.has(selected.id) ? "已私人标记去过" : "暂无已核验现实记录"}</Text><Text style={styles.memoryText}>{visited.has(selected.id) ? "这只是你的私人足迹标记；完成订单、现场核销或上传并通过审核的证据，才会写入 Scene Memory。" : "完成订单、现场核销或上传并通过审核的证据后，这里才会沉淀同行人、消费项目、内容与关系变化。"}</Text></View>
+        <View style={styles.sectionTitleRow}><Text selectable style={styles.sectionTitle}>Reality Evidence · Scene Memory</Text></View>
+        <View style={styles.memoryCard}><Text selectable style={styles.memoryTitle}>{visited.has(selected.id) ? "已私人标记去过" : "暂无已核验现实记录"}</Text><Text selectable style={styles.memoryText}>{visited.has(selected.id) ? "这只是你的私人足迹标记；完成订单、现场核销或上传并通过审核的证据，才会写入 Scene Memory。" : "完成订单、现场核销或上传并通过审核的证据后，这里才会沉淀同行人、消费项目、内容与关系变化。"}</Text></View>
       </ScrollView>
   ) : null;
 
   return (
     <View style={[styles.root, rootPad]}>
       <View style={styles.topBar}>
-        <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.roundButton}><Text style={styles.backText}>‹</Text></Pressable>
-              <View style={styles.topCopy}><Text style={styles.title}>场景地图</Text><Text style={styles.subtitle}>场景目录 · {scenes.length} 个场景</Text></View>
+        <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.roundButton}><Text selectable style={styles.backText}>‹</Text></Pressable>
+              <View style={styles.topCopy}><Text selectable style={styles.title}>场景地图</Text><Text selectable style={styles.subtitle}>场景目录 · {scenes.length} 个场景</Text></View>
         <Pressable accessibilityLabel={view === "MAP" ? "切换列表" : "切换地图"} onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={styles.roundButton}><ProxyIcon color={color.ink} name={view === "MAP" ? "storeLines" : "crosshair"} size={21} /></Pressable>
         <Pressable accessibilityLabel={searchOpen ? "关闭搜索" : "搜索场景"} onPress={() => { if (searchOpen) setQuery(""); setSearchOpen((open) => !open); }} style={styles.roundButton}><ProxyIcon color={color.ink} name="search" size={21} /></Pressable>
       </View>
-      {nearbyError ? <Text style={styles.nearbyError}>{nearbyError}</Text> : null}
+      {nearbyError ? <Text selectable style={styles.nearbyError}>{nearbyError}</Text> : null}
       <View style={styles.stats}>
         <Stat value={Math.max(0, scenes.filter((scene) => !visited.has(scene.id)).length)} label="未探索" onPress={() => setFilter("UNSEEN")} />
         {/* 「开放中」计数删掉：读的是 seed 静态布尔值，不是实时营业状态，
@@ -827,18 +827,18 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         <View style={styles.searchBox}>
           <ProxyIcon color={color.muted} name="search" size={19} />
           <TextInput autoFocus value={query} onChangeText={setQuery} placeholder="搜场景、区域、主题" placeholderTextColor={color.muted} style={styles.searchInput} />
-          <Pressable accessibilityLabel="关闭搜索" onPress={() => { setQuery(""); setSearchOpen(false); }}><Text style={styles.searchClose}>×</Text></Pressable>
+          <Pressable accessibilityLabel="关闭搜索" onPress={() => { setQuery(""); setSearchOpen(false); }}><Text selectable style={styles.searchClose}>×</Text></Pressable>
         </View>
       ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRail} contentContainerStyle={styles.filters}>
         {([['ALL','全部'], ['UNSEEN','没去过'], ['ACTIVE','开放中'], ['SAVED','收藏'], ['VISITED','足迹']] as const).map(([id, label]) => (
-          <Pressable key={id} onPress={() => setFilter(id)} style={[styles.filter, filter === id && styles.filterActive]}><Text style={[styles.filterText, filter === id && styles.filterTextActive]}>{label}</Text></Pressable>
+          <Pressable key={id} onPress={() => setFilter(id)} style={[styles.filter, filter === id && styles.filterActive]}><Text selectable style={[styles.filterText, filter === id && styles.filterTextActive]}>{label}</Text></Pressable>
         ))}
-        <Pressable onPress={openBadges} style={[styles.filter, styles.filterActive]}><Text style={[styles.filterText, styles.filterTextActive]}>🏅 徽章</Text></Pressable>
+        <Pressable onPress={openBadges} style={[styles.filter, styles.filterActive]}><Text selectable style={[styles.filterText, styles.filterTextActive]}>🏅 徽章</Text></Pressable>
       </ScrollView>
       {badgeNotice ? (
         <View style={styles.badgeNotice}>
-          <Text style={styles.badgeNoticeText}>🎉 恭喜获得徽章：{badgeNotice}</Text>
+          <Text selectable style={styles.badgeNoticeText}>🎉 恭喜获得徽章：{badgeNotice}</Text>
         </View>
       ) : null}
       {/* SCENE-CONTRIB-001: 社区提交 UI 已整段撤下（commander 重做设计中）。
@@ -870,7 +870,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             testID="scene-map-heat"
             accessibilityLabel="热力图"
           >
-            <Text style={heat ? styles.heatToggleTextOn : styles.heatToggleText}>◉</Text>
+            <Text selectable style={heat ? styles.heatToggleTextOn : styles.heatToggleText}>◉</Text>
           </Pressable>
           {/* 定位按钮：地图右上单图标（原来那条整宽文字按钮已撤）。 */}
           <Pressable
@@ -881,7 +881,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
           >
             <ProxyIcon color={nearbyBusy || !session ? color.muted : color.ink} name="crosshair" size={21} />
           </Pressable>
-          <View pointerEvents="none" style={styles.privacyPill}><Text style={styles.privacyText}>公开足迹 · 非实时位置</Text></View>
+          <View pointerEvents="none" style={styles.privacyPill}><Text selectable style={styles.privacyText}>公开足迹 · 非实时位置</Text></View>
           {/* SCENE-NAV-PIN-001: 图钉快打卡 —— 名字 + 地址 + 导航/详情二选一，
               悬在地图底部隐私条上方。导航和详情页里第三颗按钮是同一条深链；
               看详情才进 selectedId（自动足迹/打卡门禁照旧），点地图空白、
@@ -889,22 +889,22 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
           {pinScene ? (
             <View style={styles.pinSheet}>
               <View style={styles.pinSheetCopy}>
-                <Text style={styles.sceneName}>{pinScene.name}</Text>
-                <Text style={styles.sceneMeta}>{sceneAddressLine(pinScene)}</Text>
+                <Text selectable style={styles.sceneName}>{pinScene.name}</Text>
+                <Text selectable style={styles.sceneMeta}>{sceneAddressLine(pinScene)}</Text>
               </View>
-              <Pressable accessibilityLabel="关闭快打卡" onPress={() => setPinSheetId(undefined)} style={styles.pinSheetClose}><Text style={styles.pinSheetCloseText}>×</Text></Pressable>
+              <Pressable accessibilityLabel="关闭快打卡" onPress={() => setPinSheetId(undefined)} style={styles.pinSheetClose}><Text selectable style={styles.pinSheetCloseText}>×</Text></Pressable>
               <View style={styles.pinSheetRow}>
-                <Pressable accessibilityLabel="导航去这里" onPress={() => openSceneNavigation(pinScene)} style={styles.primaryAction}><Text style={styles.primaryActionText}>导航去这里 ›</Text></Pressable>
-                <Pressable accessibilityLabel="看场景详情" onPress={() => { setPinSheetId(undefined); setSelectedId(pinScene.id); }} style={styles.action}><Text style={styles.actionText}>看详情 ›</Text></Pressable>
+                <Pressable accessibilityLabel="导航去这里" onPress={() => openSceneNavigation(pinScene)} style={styles.primaryAction}><Text selectable style={styles.primaryActionText}>导航去这里 ›</Text></Pressable>
+                <Pressable accessibilityLabel="看场景详情" onPress={() => { setPinSheetId(undefined); setSelectedId(pinScene.id); }} style={styles.action}><Text selectable style={styles.actionText}>看详情 ›</Text></Pressable>
               </View>
-              {navError ? <Text style={styles.nearbyError}>{navError}</Text> : null}
+              {navError ? <Text selectable style={styles.nearbyError}>{navError}</Text> : null}
             </View>
           ) : null}
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.list} style={styles.listScroll}>
           {filtered.map((scene) => <SceneRow key={scene.id} scene={scene} visited={visited.has(scene.id)} saved={saved.has(scene.id)} planned={planned.has(scene.id)} onPress={() => setSelectedId(scene.id)} />)}
-          {!filtered.length ? <Text style={styles.empty}>没有符合条件的场景</Text> : null}
+          {!filtered.length ? <Text selectable style={styles.empty}>没有符合条件的场景</Text> : null}
         </ScrollView>
       )}
       {detailBody ? <View style={styles.detailOverlay}>{detailBody}</View> : null}
@@ -912,33 +912,33 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       <Modal animationType="fade" onRequestClose={() => setBadgesOpen(false)} transparent visible={badgesOpen}>
         <Pressable onPress={() => setBadgesOpen(false)} style={styles.badgeScrim}>
           <View style={styles.badgeCard}>
-            <Text style={styles.badgeTitle}>打卡徽章</Text>
-            {badgesError ? <Text style={styles.nearbyError}>{badgesError}</Text> : null}
+            <Text selectable style={styles.badgeTitle}>打卡徽章</Text>
+            {badgesError ? <Text selectable style={styles.nearbyError}>{badgesError}</Text> : null}
             {/* SCENE-BADGE-002：可分享的徽章卡摘要（截图目标）。 */}
             <View ref={badgeShareRef} collapsable={false} style={styles.badgeShareCard}>
-              <Text style={styles.badgeShareCount}>已获得 {earnedBadges.size} / {SCENE_BADGES.length} 枚徽章</Text>
+              <Text selectable style={styles.badgeShareCount}>已获得 {earnedBadges.size} / {SCENE_BADGES.length} 枚徽章</Text>
               <View style={styles.badgeShareIcons}>
                 {SCENE_BADGES.map((b) => (
-                  <Text key={b.id} style={[styles.badgeShareIcon, !earnedBadges.has(b.id) && styles.badgeShareIconLocked]}>{earnedBadges.has(b.id) ? b.icon : "🔒"}</Text>
+                  <Text selectable key={b.id} style={[styles.badgeShareIcon, !earnedBadges.has(b.id) && styles.badgeShareIconLocked]}>{earnedBadges.has(b.id) ? b.icon : "🔒"}</Text>
                 ))}
               </View>
             </View>
-            {badgeShareNotice ? <Text style={styles.nearbyError}>{badgeShareNotice}</Text> : null}
+            {badgeShareNotice ? <Text selectable style={styles.nearbyError}>{badgeShareNotice}</Text> : null}
             <ScrollView style={styles.badgeList}>
               {SCENE_BADGES.map((badge) => {
                 const earned = earnedBadges.has(badge.id);
                 return (
                   <View key={badge.id} style={[styles.badgeRow, earned && styles.badgeRowEarned]}>
-                    <Text style={styles.badgeIcon}>{badge.icon}</Text>
+                    <Text selectable style={styles.badgeIcon}>{badge.icon}</Text>
                     <View style={styles.badgeCopy}>
-                      <Text style={[styles.badgeName, !earned && styles.badgeNameLocked]}>{badge.name}{earned ? " ✓" : ""}</Text>
+                      <Text selectable style={[styles.badgeName, !earned && styles.badgeNameLocked]}>{badge.name}{earned ? " ✓" : ""}</Text>
                     </View>
                   </View>
                 );
               })}
             </ScrollView>
-            <Pressable onPress={() => void shareBadgeCard()} style={styles.badgeShareBtn}><Text style={styles.badgeShareBtnText}>分享徽章卡</Text></Pressable>
-            <Pressable onPress={() => setBadgesOpen(false)} style={styles.badgeClose}><Text style={styles.badgeCloseText}>关闭</Text></Pressable>
+            <Pressable onPress={() => void shareBadgeCard()} style={styles.badgeShareBtn}><Text selectable style={styles.badgeShareBtnText}>分享徽章卡</Text></Pressable>
+            <Pressable onPress={() => setBadgesOpen(false)} style={styles.badgeClose}><Text selectable style={styles.badgeCloseText}>关闭</Text></Pressable>
           </View>
         </Pressable>
       </Modal>
@@ -992,7 +992,7 @@ async function sendSceneCommand(authClient: SessionAuthClient, session: Authenti
 }
 
 function Stat({ value, label, onPress }: { value: number; label: string; onPress: () => void }): React.JSX.Element {
-  return <Pressable onPress={onPress} style={styles.stat}><Text style={styles.statValue}>{value}</Text><Text style={styles.statLabel}>{label}</Text></Pressable>;
+  return <Pressable onPress={onPress} style={styles.stat}><Text selectable style={styles.statValue}>{value}</Text><Text selectable style={styles.statLabel}>{label}</Text></Pressable>;
 }
 
 // SCENE-NO-FABRICATED-001: 这一行以前是
@@ -1003,7 +1003,7 @@ function Stat({ value, label, onPress }: { value: number; label: string; onPress
 //   · 那个质量分（84..96）是迁移里手写死的整数，全仓没有任何评分来源。
 // 现在只说我们知道的事 —— 用户自己的标记，或真实聚合的计数。
 function SceneRow({ scene, visited, saved, planned, onPress }: { scene: RealityScene; visited: boolean; saved: boolean; planned: boolean; onPress: () => void }): React.JSX.Element {
-  return <Pressable onPress={onPress} style={styles.sceneRow}><View style={[styles.sceneDot, scene.active && styles.sceneDotActive, (!scene.active || !visited) && styles.sceneDotMuted]} /><View style={styles.sceneCopy}><Text style={styles.sceneName} selectable>{scene.name}</Text><Text style={styles.sceneMeta} selectable>{scene.area} · {scene.type}{scene.distanceMeters !== undefined ? ` · ${formatDistance(scene.distanceMeters)}` : ""}{sceneSourceSuffix(scene.source)}</Text><Text style={styles.sceneSignal}>{sceneSignalLine({ savedCount: scene.savedCount, visitedCount: scene.visitedCount, plannedCount: scene.plannedCount, visited, saved, planned })}</Text></View><ProxyIcon color={color.muted} name="arrowUpRight" size={19} /></Pressable>;
+  return <Pressable onPress={onPress} style={styles.sceneRow}><View style={[styles.sceneDot, scene.active && styles.sceneDotActive, (!scene.active || !visited) && styles.sceneDotMuted]} /><View style={styles.sceneCopy}><Text style={styles.sceneName} selectable>{scene.name}</Text><Text style={styles.sceneMeta} selectable>{scene.area} · {scene.type}{scene.distanceMeters !== undefined ? ` · ${formatDistance(scene.distanceMeters)}` : ""}{sceneSourceSuffix(scene.source)}</Text><Text selectable style={styles.sceneSignal}>{sceneSignalLine({ savedCount: scene.savedCount, visitedCount: scene.visitedCount, plannedCount: scene.plannedCount, visited, saved, planned })}</Text></View><ProxyIcon color={color.muted} name="arrowUpRight" size={19} /></Pressable>;
 }
 function formatDistance(meters: number): string { return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`; }
 
@@ -1019,7 +1019,7 @@ function metersBetween(origin: { latitude: number; longitude: number }, scene: {
 }
 
 function DataRow({ label, value, last = false }: { label: string; value: string; last?: boolean }): React.JSX.Element {
-  return <View style={[styles.dataRow, last && styles.dataRowLast]}><Text style={styles.dataLabel}>{label}</Text><Text style={styles.dataValue}>{value}</Text></View>;
+  return <View style={[styles.dataRow, last && styles.dataRowLast]}><Text selectable style={styles.dataLabel}>{label}</Text><Text selectable style={styles.dataValue}>{value}</Text></View>;
 }
 
 const styles = StyleSheet.create({

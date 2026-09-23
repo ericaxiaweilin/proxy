@@ -323,24 +323,24 @@ export function MapCanvas({
           when the user retries (or pans / drags the pin). */}
       {locError ? (
         <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>{locError}</Text>
+          <Text selectable style={styles.errorText}>{locError}</Text>
           <Pressable
             accessibilityLabel="关闭错误提示"
             onPress={() => setLocError(null)}
             style={styles.errorClose}
           >
-            <Text style={styles.errorCloseText}>×</Text>
+            <Text selectable style={styles.errorCloseText}>×</Text>
           </Pressable>
         </View>
       ) : null}
 
       {/* HUD 角标：城市（未知不写死） + 当前 grid + 半径 */}
       <View pointerEvents="none" style={styles.hud}>
-        <Text style={styles.hudCity}>{hudCityText}</Text>
-        <Text style={styles.hudCoord}>
+        <Text selectable style={styles.hudCity}>{hudCityText}</Text>
+        <Text selectable style={styles.hudCoord}>
           ({pin.x}, {pin.y}) · 半径 {radiusMeters / 1000} km
         </Text>
-        <Text style={styles.hudHint}>拖 pin / 点地图 / 📍用我位置</Text>
+        <Text selectable style={styles.hudHint}>拖 pin / 点地图 / 📍用我位置</Text>
       </View>
     </View>
   );
@@ -362,13 +362,13 @@ function FallbackNotice({
 }): React.JSX.Element {
   return (
     <View style={[styles.canvas, styles.androidFallback]}>
-      <Text style={styles.androidTitle}>地图仅在 iOS 可用</Text>
-      <Text style={styles.androidBody}>
+      <Text selectable style={styles.androidTitle}>地图仅在 iOS 可用</Text>
+      <Text selectable style={styles.androidBody}>
         R15.29 已接 Apple Maps (MapKit)。Android 端需要 Google Maps key
         (R15.30+)。当前覆盖范围：{radiusMeters / 1000} km
       </Text>
       <View style={{ display: "none" }} onTouchEnd={() => onChange(pin)} />
-      <Text style={styles.androidHint}>{cityHint}</Text>
+      <Text selectable style={styles.androidHint}>{cityHint}</Text>
     </View>
   );
 }

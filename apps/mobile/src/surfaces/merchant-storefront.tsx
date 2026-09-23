@@ -468,7 +468,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
       {header}
       {accounts === undefined && !error ? <ProxyLoading tone="muted" /> : null}
-      {error ? <View style={styles.card}><Text style={styles.errorText}>加载失败：{error}</Text></View> : null}
+      {error ? <View style={styles.card}><Text selectable style={styles.errorText}>加载失败：{error}</Text></View> : null}
       {accounts !== undefined && accounts.length === 0 ? (
         <View style={styles.card}>
           <ProxyEmptyState icon="storefront" title="还没有线上店铺" sub="你不需要手工搭页面。把店门、菜单、产品照片或已有文件交给企业运营助手，它会先生成店铺草稿，再由你确认发布。" cta={{ label: "让企业运营助手帮我创建", onPress: () => onStartStoreSetup?.(), disabled: !onStartStoreSetup }} />
@@ -481,7 +481,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
         const returningCustomers = aSpend?.days.reduce((sum, day) => sum + day.returningCustomerCount, 0) ?? 0;
         return (
           <View key={a.id} style={styles.accountCard}>
-            <View style={styles.accountHead}><Text style={styles.accountName}>管理别人看到你的店</Text><Text style={styles.accountMeta}>{a.name} · {aStores.length} 家门店</Text></View>
+            <View style={styles.accountHead}><Text selectable style={styles.accountName}>管理别人看到你的店</Text><Text selectable style={styles.accountMeta}>{a.name} · {aStores.length} 家门店</Text></View>
             {aStores.length === 0 ? (
               <View style={styles.card}>
                 <ProxyEmptyState title="尚未建立经营门店" sub="把门店照片、菜单或文件交给企业运营助手，先生成草稿再确认，不需要从空白表单开始。" cta={{ label: "交给企业运营助手", onPress: () => onStartStoreSetup?.(), disabled: !onStartStoreSetup }} />
@@ -501,15 +501,15 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                       const coverUri = cover ? thumbUrlFor(cover.mediaAssetId) : undefined;
                       return coverUri
                         ? <Image source={{ uri: coverUri }} style={styles.storeCover} />
-                        : <View style={styles.storeLogo}><Text style={styles.storeLogoText}>{s.name.slice(0, 1).toUpperCase()}</Text></View>;
+                        : <View style={styles.storeLogo}><Text selectable style={styles.storeLogoText}>{s.name.slice(0, 1).toUpperCase()}</Text></View>;
                     })()}
-                    <View style={styles.storeHeroCopy}><Text style={styles.storeName}>{s.name} · Proxy 店铺</Text><Text style={styles.storeMeta}>{s.address || "地址待完善"} · {s.status}</Text></View>
+                    <View style={styles.storeHeroCopy}><Text selectable style={styles.storeName}>{s.name} · Proxy 店铺</Text><Text selectable style={styles.storeMeta}>{s.address || "地址待完善"} · {s.status}</Text></View>
                   </View>
                   {/* PROFILE-QR-002：这里原来是「公开主页」+「分享店铺」两个按钮，前者分享
                       拼出来的店铺主页链接。没有域名/公开页之后它就只剩一个卖域名的落地页可分享，
                       所以撤掉，只留「分享店铺」——分享的是**搜得到的店名**。
                       （域名不写在这里，原因见上面 copyStoreName 的注释。） */}
-                  <View style={styles.heroActions}><Pressable onPress={() => void Share.share({ message: `${s.name} · 在 Proxy 里搜这家店就能找到。` })} style={styles.shareButton} accessibilityLabel="分享店铺"><Text style={styles.shareButtonText}>分享店铺</Text></Pressable></View>
+                  <View style={styles.heroActions}><Pressable onPress={() => void Share.share({ message: `${s.name} · 在 Proxy 里搜这家店就能找到。` })} style={styles.shareButton} accessibilityLabel="分享店铺"><Text selectable style={styles.shareButtonText}>分享店铺</Text></Pressable></View>
                   <View style={styles.qrCard}>
                     <View ref={storeQrRefFor(s.id)} collapsable={false} style={styles.qrShot}>
                       <Pressable accessibilityLabel="放大店铺二维码" accessibilityRole="button" onPress={() => setZoomedStore({ id: s.id, name: s.name })}>
@@ -517,45 +517,45 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                       </Pressable>
                     </View>
                     <View style={styles.storeHeroCopy}>
-                      <Text style={styles.photoHeadTitle}>店铺二维码</Text>
-                      <Text style={styles.storeMeta}>扫这张码会把「{s.name}」存成联系人（标准 vCard 名片），任何手机的相机都能扫。可用于店内桌牌、海报和 Creator 分享。</Text>
+                      <Text selectable style={styles.photoHeadTitle}>店铺二维码</Text>
+                      <Text selectable style={styles.storeMeta}>扫这张码会把「{s.name}」存成联系人（标准 vCard 名片），任何手机的相机都能扫。可用于店内桌牌、海报和 Creator 分享。</Text>
                       <View style={styles.qrActions}>
-                        <Pressable onPress={() => void copyStoreName(s.id, s.name)} style={styles.previewButton} accessibilityLabel="复制店名"><Text style={styles.previewButtonText}>复制店名</Text></Pressable>
-                        <Pressable onPress={() => void saveStoreQrToAlbum(s.id)} style={styles.shareButton} accessibilityLabel="保存店铺二维码到相册"><Text style={styles.shareButtonText}>保存到相册</Text></Pressable>
+                        <Pressable onPress={() => void copyStoreName(s.id, s.name)} style={styles.previewButton} accessibilityLabel="复制店名"><Text selectable style={styles.previewButtonText}>复制店名</Text></Pressable>
+                        <Pressable onPress={() => void saveStoreQrToAlbum(s.id)} style={styles.shareButton} accessibilityLabel="保存店铺二维码到相册"><Text selectable style={styles.shareButtonText}>保存到相册</Text></Pressable>
                       </View>
-                      {storeQrNotice?.storeId === s.id ? <Text style={styles.storeQrNotice}>{storeQrNotice.text}</Text> : null}
+                      {storeQrNotice?.storeId === s.id ? <Text selectable style={styles.storeQrNotice}>{storeQrNotice.text}</Text> : null}
                     </View>
                   </View>
 
-                  <View style={styles.metricStrip}>{[[(aSpend?.totalOrders ?? 0).toString(), "近7天订单"], [aSpend ? formatVnd(aSpend.totalGrossMinor) : "—", "成交额"], [newCustomers.toString(), "新客"], [returningCustomers.toString(), "复购"]].map(([value, label]) => <View key={label} style={styles.metricItem}><Text numberOfLines={1} style={styles.metricValue}>{value}</Text><Text style={styles.metricLabel}>{label}</Text></View>)}</View>
+                  <View style={styles.metricStrip}>{[[(aSpend?.totalOrders ?? 0).toString(), "近7天订单"], [aSpend ? formatVnd(aSpend.totalGrossMinor) : "—", "成交额"], [newCustomers.toString(), "新客"], [returningCustomers.toString(), "复购"]].map(([value, label]) => <View key={label} style={styles.metricItem}><Text selectable numberOfLines={1} style={styles.metricValue}>{value}</Text><Text selectable style={styles.metricLabel}>{label}</Text></View>)}</View>
 
                   {currentPage === "root" ? <View style={styles.assetSection}>
-                    <Text style={styles.assetSectionTitle}>店铺资产</Text>
-                    <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "menu" })} style={styles.assetRow}><View style={styles.assetIcon}><Text style={styles.assetIconText}>菜</Text></View><View style={styles.photoRowMain}><Text style={styles.assetTitle}>菜单与价格</Text><Text style={styles.assetMeta}>{sProducts.length} 个项目 · 在售 {sAvailable.length}</Text></View><Text style={styles.assetChevron}>›</Text></Pressable>
-                    <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "photos" })} style={styles.assetRow}><View style={styles.assetIcon}><Text style={styles.assetIconText}>图</Text></View><View style={styles.photoRowMain}><Text style={styles.assetTitle}>照片与内容</Text><Text style={styles.assetMeta}>{sPhotos.length} 张店铺照片</Text></View><Text style={styles.assetChevron}>›</Text></Pressable>
-                    <Pressable disabled={!onOpenVouchers} onPress={onOpenVouchers} style={styles.assetRow}><View style={styles.assetIcon}><Text style={styles.assetIconText}>券</Text></View><View style={styles.photoRowMain}><Text style={styles.assetTitle}>当前礼券</Text><Text style={styles.assetMeta}>查看发行、领取与核销状态</Text></View><Text style={styles.assetChevron}>›</Text></Pressable>
-                    <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "details" })} style={styles.assetRow}><View style={styles.assetIcon}><Text style={styles.assetIconText}>店</Text></View><View style={styles.photoRowMain}><Text style={styles.assetTitle}>店铺照片与经营资料</Text><Text style={styles.assetMeta}>门店环境、营业时间、地址与联系方式</Text></View><Text style={styles.assetChevron}>›</Text></Pressable>
-                  </View> : <Pressable onPress={() => setAssetPage(undefined)} style={styles.assetBack}><Text style={styles.assetBackText}>‹ 返回店铺资产</Text></Pressable>}
+                    <Text selectable style={styles.assetSectionTitle}>店铺资产</Text>
+                    <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "menu" })} style={styles.assetRow}><View style={styles.assetIcon}><Text selectable style={styles.assetIconText}>菜</Text></View><View style={styles.photoRowMain}><Text selectable style={styles.assetTitle}>菜单与价格</Text><Text selectable style={styles.assetMeta}>{sProducts.length} 个项目 · 在售 {sAvailable.length}</Text></View><Text selectable style={styles.assetChevron}>›</Text></Pressable>
+                    <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "photos" })} style={styles.assetRow}><View style={styles.assetIcon}><Text selectable style={styles.assetIconText}>图</Text></View><View style={styles.photoRowMain}><Text selectable style={styles.assetTitle}>照片与内容</Text><Text selectable style={styles.assetMeta}>{sPhotos.length} 张店铺照片</Text></View><Text selectable style={styles.assetChevron}>›</Text></Pressable>
+                    <Pressable disabled={!onOpenVouchers} onPress={onOpenVouchers} style={styles.assetRow}><View style={styles.assetIcon}><Text selectable style={styles.assetIconText}>券</Text></View><View style={styles.photoRowMain}><Text selectable style={styles.assetTitle}>当前礼券</Text><Text selectable style={styles.assetMeta}>查看发行、领取与核销状态</Text></View><Text selectable style={styles.assetChevron}>›</Text></Pressable>
+                    <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "details" })} style={styles.assetRow}><View style={styles.assetIcon}><Text selectable style={styles.assetIconText}>店</Text></View><View style={styles.photoRowMain}><Text selectable style={styles.assetTitle}>店铺照片与经营资料</Text><Text selectable style={styles.assetMeta}>门店环境、营业时间、地址与联系方式</Text></View><Text selectable style={styles.assetChevron}>›</Text></Pressable>
+                  </View> : <Pressable onPress={() => setAssetPage(undefined)} style={styles.assetBack}><Text selectable style={styles.assetBackText}>‹ 返回店铺资产</Text></Pressable>}
 
                   {currentPage === "menu" ? <>
                   <View style={styles.managerPanel}><View style={styles.photoHead}>
-                    <Text style={styles.photoHeadTitle}>菜单 / 服务</Text>
-                    <Text style={styles.photoHeadMeta}>{sProducts.length} 项 · 在售 {sAvailable.length}</Text>
+                    <Text selectable style={styles.photoHeadTitle}>菜单 / 服务</Text>
+                    <Text selectable style={styles.photoHeadMeta}>{sProducts.length} 项 · 在售 {sAvailable.length}</Text>
                   </View>
                   {/* 以前这里写「顾客在公开主页看到的菜单与服务」—— App 里**没有**给顾客看的
                       店铺页（全仓库只有「我的 › 线上店铺」这一个商家自己的管理面），
                       对外店铺页属于后续的 Web 管理范围。先说实话。 */}
-                  <Text style={styles.empty}>{sProducts.length ? "菜单与服务维护在这里；对外的顾客展示页还没做。" : "还没有菜单或服务"}</Text>
-                  <Pressable onPress={() => startEditProduct(s.id, undefined)} style={styles.uploadButton}><Text style={styles.uploadButtonText}>+ 添加菜单 / 服务</Text></Pressable>
+                  <Text selectable style={styles.empty}>{sProducts.length ? "菜单与服务维护在这里；对外的顾客展示页还没做。" : "还没有菜单或服务"}</Text>
+                  <Pressable onPress={() => startEditProduct(s.id, undefined)} style={styles.uploadButton}><Text selectable style={styles.uploadButtonText}>+ 添加菜单 / 服务</Text></Pressable>
                   {sAvailable.length > 0 ? <>
-                    <Text style={styles.catalogTitle}>值得先看的 SKU</Text>
+                    <Text selectable style={styles.catalogTitle}>值得先看的 SKU</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.worthRow}>
                       {sAvailable.slice(0, 6).map((p) => (
                         <Pressable key={p.id} onPress={() => setSelectedProductByStore((prev) => ({ ...prev, [s.id]: p.id }))} style={styles.worthCard}>
                           {thumbUrlFor(p.mediaAssetId) ? <Image source={{ uri: thumbUrlFor(p.mediaAssetId) }} style={styles.worthImage} /> : <View style={styles.worthImageMissing}><ProxyIcon color={color.muted} name="storefront" size={24} /></View>}
-                          <Text style={styles.worthName} numberOfLines={1}>{p.name}</Text>
-                          <Text style={styles.priceRed}>{formatVnd(p.priceMinor)}</Text>
-                          {p.scene ? <Text style={styles.scenePill} numberOfLines={1}>{p.scene}</Text> : null}
+                          <Text selectable style={styles.worthName} numberOfLines={1}>{p.name}</Text>
+                          <Text selectable style={styles.priceRed}>{formatVnd(p.priceMinor)}</Text>
+                          {p.scene ? <Text selectable style={styles.scenePill} numberOfLines={1}>{p.scene}</Text> : null}
                         </Pressable>
                       ))}
                     </ScrollView>
@@ -571,23 +571,23 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                     const open = catalogOpenByStore[s.id] ?? false;
                     return (<>
                       <Pressable onPress={() => setCatalogOpenByStore((prev) => ({ ...prev, [s.id]: !open }))} style={styles.catalogHead}>
-                        <Text style={styles.catalogTitle}>完整结构化菜单</Text>
-                        <Text style={styles.rowActionText}>{open ? "收起" : "展开"}</Text>
+                        <Text selectable style={styles.catalogTitle}>完整结构化菜单</Text>
+                        <Text selectable style={styles.rowActionText}>{open ? "收起" : "展开"}</Text>
                       </Pressable>
                       {open ? [...groups.entries()].map(([cat, list]) => (
                         <View key={cat}>
-                          <Text style={styles.catalogCat}>{cat}</Text>
+                          <Text selectable style={styles.catalogCat}>{cat}</Text>
                           {list.map((p) => (
                             <Pressable key={p.id} onPress={() => setSelectedProductByStore((prev) => ({ ...prev, [s.id]: p.id }))} style={styles.menuLine}>
                               <View style={styles.photoRowMain}>
-                                <Text style={styles.productName}>{p.name}{p.available ? "" : " · 已下架"}</Text>
-                                {p.scene ? <Text style={styles.photoMeta}>{p.scene}</Text> : null}
+                                <Text selectable style={styles.productName}>{p.name}{p.available ? "" : " · 已下架"}</Text>
+                                {p.scene ? <Text selectable style={styles.photoMeta}>{p.scene}</Text> : null}
                               </View>
-                              <Text style={styles.priceRed}>{formatVnd(p.priceMinor)}</Text>
+                              <Text selectable style={styles.priceRed}>{formatVnd(p.priceMinor)}</Text>
                             </Pressable>
                           ))}
                         </View>
-                      )) : sProducts.map((p) => <View key={p.id} style={styles.photoRow}>{thumbUrlFor(p.mediaAssetId) ? <Image source={{ uri: thumbUrlFor(p.mediaAssetId) }} style={styles.productThumb} /> : <View style={styles.productThumb}><ProxyIcon color={color.ink} name="storefront" size={20} /></View>}<View style={styles.photoRowMain}><Text style={styles.productName}>{p.name}{p.available ? "" : " · 已下架"}</Text><Text style={styles.photoMeta}>{formatVnd(p.priceMinor)}{p.description ? ` · ${p.description}` : ""}</Text></View><Pressable onPress={() => startEditProduct(s.id, p)} style={styles.rowAction}><Text style={styles.rowActionText}>编辑</Text></Pressable></View>)}
+                      )) : sProducts.map((p) => <View key={p.id} style={styles.photoRow}>{thumbUrlFor(p.mediaAssetId) ? <Image source={{ uri: thumbUrlFor(p.mediaAssetId) }} style={styles.productThumb} /> : <View style={styles.productThumb}><ProxyIcon color={color.ink} name="storefront" size={20} /></View>}<View style={styles.photoRowMain}><Text selectable style={styles.productName}>{p.name}{p.available ? "" : " · 已下架"}</Text><Text selectable style={styles.photoMeta}>{formatVnd(p.priceMinor)}{p.description ? ` · ${p.description}` : ""}</Text></View><Pressable onPress={() => startEditProduct(s.id, p)} style={styles.rowAction}><Text selectable style={styles.rowActionText}>编辑</Text></Pressable></View>)}
                     </>);
                   })()}
                   {(() => {
@@ -596,28 +596,28 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                     return (
                       <View style={styles.managerPanel}>
                         <View style={styles.photoHead}>
-                          <Text style={styles.photoHeadTitle}>SKU 详情</Text>
-                          <Pressable onPress={() => setSelectedProductByStore((prev) => ({ ...prev, [s.id]: undefined }))}><Text style={styles.rowActionText}>关闭</Text></Pressable>
+                          <Text selectable style={styles.photoHeadTitle}>SKU 详情</Text>
+                          <Pressable onPress={() => setSelectedProductByStore((prev) => ({ ...prev, [s.id]: undefined }))}><Text selectable style={styles.rowActionText}>关闭</Text></Pressable>
                         </View>
                         {thumbUrlFor(selected.mediaAssetId) ? <Image source={{ uri: thumbUrlFor(selected.mediaAssetId) }} style={styles.skuHero} /> : null}
                         <View style={styles.photoHead}>
                           <View style={styles.photoRowMain}>
-                            <Text style={styles.productName}>{selected.name}</Text>
-                            {selected.description ? <Text style={styles.photoMeta}>{selected.description}</Text> : null}
+                            <Text selectable style={styles.productName}>{selected.name}</Text>
+                            {selected.description ? <Text selectable style={styles.photoMeta}>{selected.description}</Text> : null}
                           </View>
-                          <Text style={styles.skuPrice}>{formatVnd(selected.priceMinor)}</Text>
+                          <Text selectable style={styles.skuPrice}>{formatVnd(selected.priceMinor)}</Text>
                         </View>
                         <View style={styles.pillRow}>
-                          {selected.scene ? <Text style={styles.scenePill}>{selected.scene}</Text> : null}
-                          {selected.category ? <Text style={styles.metaPill}>{selected.category}</Text> : null}
-                          <Text style={styles.metaPill}>{selected.available ? "在售" : "已下架"}</Text>
+                          {selected.scene ? <Text selectable style={styles.scenePill}>{selected.scene}</Text> : null}
+                          {selected.category ? <Text selectable style={styles.metaPill}>{selected.category}</Text> : null}
+                          <Text selectable style={styles.metaPill}>{selected.available ? "在售" : "已下架"}</Text>
                         </View>
                         <View style={styles.linesEditActions}>
                           <Pressable onPress={() => startEditProduct(s.id, selected)} style={[styles.createBtn, styles.linesEditCancel]}>
-                            <Text style={styles.createBtnText}>编辑</Text>
+                            <Text selectable style={styles.createBtnText}>编辑</Text>
                           </Pressable>
                           <Pressable onPress={() => void toggleProduct(s.id, selected)} style={styles.createBtn}>
-                            <Text style={styles.createBtnText}>{selected.available ? "下架" : "上架"}</Text>
+                            <Text selectable style={styles.createBtnText}>{selected.available ? "下架" : "上架"}</Text>
                           </Pressable>
                         </View>
                       </View>
@@ -627,25 +627,25 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                   {/* Product editor remains contextual, never the default storefront. */}
                   {editingProductFor === s.id && editingProductId !== undefined ? (
                     <View style={styles.linesEditForm}>
-                      <Text style={styles.linesEditLabel}>名称</Text><TextInput value={editingProductName} onChangeText={setEditingProductName} placeholder="菜品或服务名称" placeholderTextColor={color.muted} style={styles.createInput} />
-                      <Text style={styles.linesEditLabel}>价格</Text><TextInput value={editingProductPrice} onChangeText={setEditingProductPrice} placeholder="价格" placeholderTextColor={color.muted} keyboardType="number-pad" style={styles.createInput} />
-                      <Text style={styles.linesEditLabel}>介绍</Text><TextInput value={editingProductDesc} onChangeText={setEditingProductDesc} placeholder="一句话介绍" placeholderTextColor={color.muted} style={styles.createInput} />
-                      <Text style={styles.linesEditLabel}>分类</Text><TextInput value={editingProductCategory} onChangeText={setEditingProductCategory} placeholder="例如 Trà sữa đậm vị" placeholderTextColor={color.muted} style={styles.createInput} />
-                      <Text style={styles.linesEditLabel}>适合场景</Text><TextInput value={editingProductScene} onChangeText={setEditingProductScene} placeholder="例如 阳光桌面 · 出片" placeholderTextColor={color.muted} style={styles.createInput} />
-                      <Text style={styles.linesEditLabel}>菜品照片</Text>
+                      <Text selectable style={styles.linesEditLabel}>名称</Text><TextInput value={editingProductName} onChangeText={setEditingProductName} placeholder="菜品或服务名称" placeholderTextColor={color.muted} style={styles.createInput} />
+                      <Text selectable style={styles.linesEditLabel}>价格</Text><TextInput value={editingProductPrice} onChangeText={setEditingProductPrice} placeholder="价格" placeholderTextColor={color.muted} keyboardType="number-pad" style={styles.createInput} />
+                      <Text selectable style={styles.linesEditLabel}>介绍</Text><TextInput value={editingProductDesc} onChangeText={setEditingProductDesc} placeholder="一句话介绍" placeholderTextColor={color.muted} style={styles.createInput} />
+                      <Text selectable style={styles.linesEditLabel}>分类</Text><TextInput value={editingProductCategory} onChangeText={setEditingProductCategory} placeholder="例如 Trà sữa đậm vị" placeholderTextColor={color.muted} style={styles.createInput} />
+                      <Text selectable style={styles.linesEditLabel}>适合场景</Text><TextInput value={editingProductScene} onChangeText={setEditingProductScene} placeholder="例如 阳光桌面 · 出片" placeholderTextColor={color.muted} style={styles.createInput} />
+                      <Text selectable style={styles.linesEditLabel}>菜品照片</Text>
                       {editingProductPhoto && thumbUrlFor(editingProductPhoto) ? <Image source={{ uri: thumbUrlFor(editingProductPhoto) }} style={styles.productThumb} /> : null}
                       <Pressable onPress={() => void pickProductPhoto()} disabled={savingProduct} style={[styles.uploadButton, savingProduct ? styles.uploadButtonBusy : null]}>
-                        <Text style={styles.uploadButtonText}>{editingProductPhoto ? "换一张" : "+ 上传照片"}</Text>
+                        <Text selectable style={styles.uploadButtonText}>{editingProductPhoto ? "换一张" : "+ 上传照片"}</Text>
                       </Pressable>
-                      {productError ? <Text style={styles.errorText}>{productError}</Text> : null}
-                      <View style={styles.linesEditActions}><Pressable onPress={() => { setEditingProductFor(undefined); setEditingProductId(undefined); }} style={[styles.createBtn, styles.linesEditCancel]}><Text style={styles.createBtnText}>取消</Text></Pressable><Pressable disabled={savingProduct} onPress={() => void saveProduct(s.id)} style={styles.createBtn}><Text style={styles.createBtnText}>{savingProduct ? "保存中…" : "保存"}</Text></Pressable></View>
+                      {productError ? <Text selectable style={styles.errorText}>{productError}</Text> : null}
+                      <View style={styles.linesEditActions}><Pressable onPress={() => { setEditingProductFor(undefined); setEditingProductId(undefined); }} style={[styles.createBtn, styles.linesEditCancel]}><Text selectable style={styles.createBtnText}>取消</Text></Pressable><Pressable disabled={savingProduct} onPress={() => void saveProduct(s.id)} style={styles.createBtn}><Text selectable style={styles.createBtnText}>{savingProduct ? "保存中…" : "保存"}</Text></Pressable></View>
                     </View>
                   ) : null}</View></> : null}
 
                   {/* Store details editor is contextual, never the default storefront. */}
                   {currentPage === "details" && editingLinesFor === s.id ? (
                     <View style={styles.linesEditForm}>
-                      <Text style={styles.linesEditLabel}>店铺简介</Text>
+                      <Text selectable style={styles.linesEditLabel}>店铺简介</Text>
                       <TextInput
                         value={editingDescription}
                         onChangeText={setEditingDescription}
@@ -654,7 +654,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         multiline
                         style={[styles.createInput, styles.linesEditTextarea]}
                       />
-                      <Text style={styles.linesEditLabel}>联系手机</Text>
+                      <Text selectable style={styles.linesEditLabel}>联系手机</Text>
                       <TextInput
                         value={editingContactPhone}
                         onChangeText={setEditingContactPhone}
@@ -663,7 +663,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         keyboardType="phone-pad"
                         style={styles.createInput}
                       />
-                      <Text style={styles.linesEditLabel}>联系邮箱</Text>
+                      <Text selectable style={styles.linesEditLabel}>联系邮箱</Text>
                       <TextInput
                         value={editingContactEmail}
                         onChangeText={setEditingContactEmail}
@@ -673,7 +673,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         autoCapitalize="none"
                         style={styles.createInput}
                       />
-                      <Text style={styles.linesEditLabel}>营业时间</Text>
+                      <Text selectable style={styles.linesEditLabel}>营业时间</Text>
                       <TextInput
                         value={editingHoursJson}
                         onChangeText={setEditingHoursJson}
@@ -682,7 +682,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         autoCapitalize="none"
                         style={styles.createInput}
                       />
-                      {linesError ? <Text style={styles.errorText}>{linesError}</Text> : null}
+                      {linesError ? <Text selectable style={styles.errorText}>{linesError}</Text> : null}
                       <View style={styles.linesEditActions}>
                         <Pressable
                           disabled={savingLinesFor === s.id}
@@ -692,14 +692,14 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                           }}
                           style={[styles.createBtn, styles.linesEditCancel]}
                         >
-                          <Text style={styles.createBtnText}>取消</Text>
+                          <Text selectable style={styles.createBtnText}>取消</Text>
                         </Pressable>
                         <Pressable
                           disabled={savingLinesFor === s.id}
                           onPress={() => void saveLines(s.id)}
                           style={[styles.createBtn, savingLinesFor === s.id && styles.createBtnBusy]}
                         >
-                          <Text style={styles.createBtnText}>
+                          <Text selectable style={styles.createBtnText}>
                             {savingLinesFor === s.id ? "保存中…" : "保存"}
                           </Text>
                         </Pressable>
@@ -710,7 +710,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                       onPress={() => startEditLines(s.id, sLines)}
                       style={styles.linesEditToggle}
                     >
-                      <Text style={styles.linesEditToggleText}>
+                      <Text selectable style={styles.linesEditToggleText}>
                         {sLines ? "编辑主页 / 联系方式 / 营业时间" : "填写主页 / 联系方式 / 营业时间"}
                       </Text>
                     </Pressable>
@@ -718,54 +718,54 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
 
                   {currentPage === "photos" ?
                   <View style={styles.managerPanel}><View style={styles.photoHead}>
-                    <Text style={styles.photoHeadTitle}>照片与视频</Text>
-                    <Text style={styles.photoHeadMeta}>环境 · 菜品 · 活动 · {sPhotos.length} 张</Text>
+                    <Text selectable style={styles.photoHeadTitle}>照片与视频</Text>
+                    <Text selectable style={styles.photoHeadMeta}>环境 · 菜品 · 活动 · {sPhotos.length} 张</Text>
                   </View>
                   <Pressable
                     onPress={() => pickAndUploadPhoto(s.id)}
                     disabled={uploadingStoreId === s.id}
                     style={[styles.uploadButton, uploadingStoreId === s.id ? styles.uploadButtonBusy : null]}
                   >
-                    <Text style={styles.uploadButtonText}>
+                    <Text selectable style={styles.uploadButtonText}>
                       {uploadingStoreId === s.id ? "上传中…" : "+ 上传照片"}
                     </Text>
                   </Pressable>
                   {sPhotos.length === 0 ? (
-                    <Text style={styles.empty}>暂无照片 — 点上面按钮上传第一张</Text>
+                    <Text selectable style={styles.empty}>暂无照片 — 点上面按钮上传第一张</Text>
                   ) : null}
                   {sPhotos.map((p) => (
                     <View key={p.id} style={styles.photoRow}>
                       {thumbUrlFor(p.mediaAssetId) ? <Image source={{ uri: thumbUrlFor(p.mediaAssetId) }} style={styles.photoThumb} /> : storePhotoUri(p.assetPath) ? <Image source={{ uri: storePhotoUri(p.assetPath) }} style={styles.photoThumb} /> : <View style={styles.photoPlaceholder}><ProxyIcon color={color.muted} name="image" size={20} /></View>}
                       <View style={styles.photoRowMain}>
-                        <Text style={styles.productName} numberOfLines={1}>{p.caption || "店铺照片"}</Text>
-                        <Text style={styles.photoMeta}>
+                        <Text selectable style={styles.productName} numberOfLines={1}>{p.caption || "店铺照片"}</Text>
+                        <Text selectable style={styles.photoMeta}>
                           {new Date(p.createdAt).toLocaleDateString()}
                         </Text>
                       </View>
                       {viewerAccountId && viewerAccountId === p.uploadedBy ? (
                         <Pressable onPress={() => deletePhoto(s.id, p.id)} style={styles.deleteButton}>
-                          <Text style={styles.deleteButtonText}>删除</Text>
+                          <Text selectable style={styles.deleteButtonText}>删除</Text>
                         </Pressable>
                       ) : null}
                     </View>
                   ))}</View> : null}
 
                   {currentPage === "root" ? <><View style={styles.managerPanel}><View style={styles.photoHead}>
-                    <Text style={styles.photoHeadTitle}>活动 / Offer</Text>
-                    <Text style={styles.photoHeadMeta}>{showcaseActivities?.length ?? 0} 个关联活动</Text>
+                    <Text selectable style={styles.photoHeadTitle}>活动 / Offer</Text>
+                    <Text selectable style={styles.photoHeadMeta}>{showcaseActivities?.length ?? 0} 个关联活动</Text>
                   </View>
                   {!showcaseActivities || showcaseActivities.length === 0 ? (
-                    <Text style={styles.empty}>暂无关联活动 — 在活动页创建后会自动出现在这里</Text>
+                    <Text selectable style={styles.empty}>暂无关联活动 — 在活动页创建后会自动出现在这里</Text>
                   ) : showcaseActivities.map((a) => (
                     <View key={a.id} style={styles.photoRow}>
                       <View style={styles.photoRowMain}>
-                        <Text style={styles.photoAssetPath} numberOfLines={1}>{a.title}</Text>
+                        <Text selectable style={styles.photoAssetPath} numberOfLines={1}>{a.title}</Text>
                       </View>
                     </View>
                   ))}</View>
-                  <View style={styles.managerPanel}><View style={styles.photoHead}><Text style={styles.photoHeadTitle}>Creator 权益</Text><Text style={styles.photoHeadMeta}>联营与内容合作</Text></View><Text style={styles.empty}>设置 Creator 到店体验、内容合作与专属权益；对外的展示页还没做，配好之后暂时只有你自己看得到。</Text></View></> : null}
-                  {currentPage === "details" ? <View style={styles.managerPanel}><View style={styles.photoHead}><Text style={styles.photoHeadTitle}>营业资料</Text><Text style={styles.photoHeadMeta}>公开展示</Text></View>{sLines ? <View style={styles.linesBlock}><Text style={styles.linesDescription}>{sLines.description || "店铺简介待完善"}</Text><Text style={styles.linesContact}>{[sLines.contactPhone, sLines.contactEmail].filter(Boolean).join(" · ") || "联系方式待完善"}</Text><Text style={styles.linesHours}>{Object.entries(linesAsHoursObject(sLines.hoursJson)).map(([k, v]) => k === "营业时间" ? v : `${k} ${v}`).join(" · ") || "营业时间待完善"}</Text></View> : <Text style={styles.empty}>店铺简介、联系方式和营业时间待完善</Text>}</View> : null}
-                  <View style={styles.scopeNote}><Text style={styles.scopeNoteText}>线上店铺只负责对外展示。订单、客户、退款和经营分析分别进入对应经营模块，不在这里重复做后台。</Text></View>
+                  <View style={styles.managerPanel}><View style={styles.photoHead}><Text selectable style={styles.photoHeadTitle}>Creator 权益</Text><Text selectable style={styles.photoHeadMeta}>联营与内容合作</Text></View><Text selectable style={styles.empty}>设置 Creator 到店体验、内容合作与专属权益；对外的展示页还没做，配好之后暂时只有你自己看得到。</Text></View></> : null}
+                  {currentPage === "details" ? <View style={styles.managerPanel}><View style={styles.photoHead}><Text selectable style={styles.photoHeadTitle}>营业资料</Text><Text selectable style={styles.photoHeadMeta}>公开展示</Text></View>{sLines ? <View style={styles.linesBlock}><Text selectable style={styles.linesDescription}>{sLines.description || "店铺简介待完善"}</Text><Text selectable style={styles.linesContact}>{[sLines.contactPhone, sLines.contactEmail].filter(Boolean).join(" · ") || "联系方式待完善"}</Text><Text selectable style={styles.linesHours}>{Object.entries(linesAsHoursObject(sLines.hoursJson)).map(([k, v]) => k === "营业时间" ? v : `${k} ${v}`).join(" · ") || "营业时间待完善"}</Text></View> : <Text selectable style={styles.empty}>店铺简介、联系方式和营业时间待完善</Text>}</View> : null}
+                  <View style={styles.scopeNote}><Text selectable style={styles.scopeNoteText}>线上店铺只负责对外展示。订单、客户、退款和经营分析分别进入对应经营模块，不在这里重复做后台。</Text></View>
                 </View>
               );
             })}

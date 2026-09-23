@@ -127,48 +127,48 @@ export function AIAssistantsRow({ baseUrl = localApiBaseUrl }: { baseUrl?: strin
     return (
       <View>
         <Pressable onPress={() => { setSelectedId(undefined); setNotice(undefined); }} style={styles.backButton}>
-          <Text style={styles.backText}>‹ 小美们</Text>
+          <Text selectable style={styles.backText}>‹ 小美们</Text>
         </Pressable>
         {broken.has(selected.id) ? (
           <View style={[styles.homeToken, { backgroundColor: selected.color }]}>
-            <Text style={styles.homeTokenText}>{selected.avatar}</Text>
+            <Text selectable style={styles.homeTokenText}>{selected.avatar}</Text>
           </View>
         ) : (
           <Image source={{ uri: photoUri(selected.id) }} style={styles.homePortrait} onError={() => markBroken(selected.id)} />
         )}
-        <Text style={styles.homeName}>{selected.name}</Text>
-        <Text style={styles.homeBadge}>{selected.aiBadge}</Text>
-        <Text style={styles.homeTagline}>{selected.tagline}</Text>
+        <Text selectable style={styles.homeName}>{selected.name}</Text>
+        <Text selectable style={styles.homeBadge}>{selected.aiBadge}</Text>
+        <Text selectable style={styles.homeTagline}>{selected.tagline}</Text>
         <View style={styles.homeActions}>
           <Pressable disabled={acting} onPress={() => void toggleFollow(selected)} style={[styles.homeBtn, styles.homeBtnPrimary]}>
-            <Text style={styles.homeBtnPrimaryText}>{acting ? "请稍候…" : following.has(selected.id) ? "取消关注" : "关注"}</Text>
+            <Text selectable style={styles.homeBtnPrimaryText}>{acting ? "请稍候…" : following.has(selected.id) ? "取消关注" : "关注"}</Text>
           </Pressable>
           <Pressable onPress={() => void message(selected)} style={[styles.homeBtn, styles.homeBtnGhost]}>
-            <Text style={styles.homeBtnGhostText}>发消息</Text>
+            <Text selectable style={styles.homeBtnGhostText}>发消息</Text>
           </Pressable>
         </View>
-        {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+        {notice ? <Text selectable style={styles.notice}>{notice}</Text> : null}
       </View>
     );
   }
   return (
     <View>
       <View style={styles.rowHead}>
-        <Text style={styles.rowTitle}>小美们</Text>
-        <Text style={styles.rowGen}>AI生成</Text>
+        <Text selectable style={styles.rowTitle}>小美们</Text>
+        <Text selectable style={styles.rowGen}>AI生成</Text>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
         {items.map((item) => (
           <Pressable key={item.id} onPress={() => { setSelectedId(item.id); setNotice(undefined); }} style={styles.story}>
             {broken.has(item.id) ? (
               <View style={[styles.storyToken, { backgroundColor: item.color }]}>
-                <Text style={styles.storyTokenText}>{item.avatar}</Text>
+                <Text selectable style={styles.storyTokenText}>{item.avatar}</Text>
               </View>
             ) : (
               <Image source={{ uri: photoUri(item.id) }} style={styles.storyPortrait} onError={() => markBroken(item.id)} />
             )}
-            <Text style={styles.storyName} numberOfLines={1}>{item.role}</Text>
-            {following.has(item.id) ? <Text style={styles.followed}>已关注</Text> : null}
+            <Text selectable style={styles.storyName} numberOfLines={1}>{item.role}</Text>
+            {following.has(item.id) ? <Text selectable style={styles.followed}>已关注</Text> : null}
           </Pressable>
         ))}
       </ScrollView>

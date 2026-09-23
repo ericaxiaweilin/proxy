@@ -49,13 +49,13 @@ export function OrderExecutionSurface({ client, onBack }: { client: FulfillmentC
     return (
       <SwipeBackShell onExit={() => setDetail(undefined)}>
         <ScrollView style={styles.root} contentContainerStyle={styles.detailContainer}>
-          {onBack ? <Pressable onPress={onBack} style={styles.back}><Text style={styles.backText}>‹ 返回</Text></Pressable> : null}
-          <Text style={styles.title}>订单 {detail.orderId.slice(0, 8)}</Text>
-          <Text style={styles.orderMeta}>{orderStatus(detail)} · {orderMoney(detail)}</Text>
+          {onBack ? <Pressable onPress={onBack} style={styles.back}><Text selectable style={styles.backText}>‹ 返回</Text></Pressable> : null}
+          <Text selectable style={styles.title}>订单 {detail.orderId.slice(0, 8)}</Text>
+          <Text selectable style={styles.orderMeta}>{orderStatus(detail)} · {orderMoney(detail)}</Text>
           <View style={styles.card}>
-            {fields.map(([k, v]) => <View key={k} style={styles.row}><Text style={styles.k}>{k}</Text><Text style={styles.v}>{v}</Text></View>)}
+            {fields.map(([k, v]) => <View key={k} style={styles.row}><Text selectable style={styles.k}>{k}</Text><Text selectable style={styles.v}>{v}</Text></View>)}
           </View>
-          <Pressable onPress={() => setDetail(undefined)} style={styles.cta}><Text style={styles.ctaText}>返回列表</Text></Pressable>
+          <Pressable onPress={() => setDetail(undefined)} style={styles.cta}><Text selectable style={styles.ctaText}>返回列表</Text></Pressable>
         </ScrollView>
       </SwipeBackShell>
     );
@@ -63,19 +63,19 @@ export function OrderExecutionSurface({ client, onBack }: { client: FulfillmentC
 
   return (
     <View style={styles.root}>
-      {onBack ? <Pressable onPress={onBack} style={styles.back}><Text style={styles.backText}>‹ 返回</Text></Pressable> : null}
-      <Text style={styles.title}>订单执行</Text>
-      <Text style={styles.sub}>执行 / 打卡 / 证据 / 完成 — 来自 fulfillment 真实读模型（非占位）</Text>
+      {onBack ? <Pressable onPress={onBack} style={styles.back}><Text selectable style={styles.backText}>‹ 返回</Text></Pressable> : null}
+      <Text selectable style={styles.title}>订单执行</Text>
+      <Text selectable style={styles.sub}>执行 / 打卡 / 证据 / 完成 — 来自 fulfillment 真实读模型（非占位）</Text>
       {orders === undefined && !error ? <ProxyLoading tone="muted" style={styles.loader} /> : null}
-      {error ? <View style={styles.empty}><Text style={styles.emptyText}>加载失败：{error}</Text></View> : null}
-      {orders !== undefined && orders.length === 0 && !error ? <View style={styles.empty}><Text style={styles.emptyText}>暂无订单 — 去市场接一个或去首页发布需求</Text></View> : null}
+      {error ? <View style={styles.empty}><Text selectable style={styles.emptyText}>加载失败：{error}</Text></View> : null}
+      {orders !== undefined && orders.length === 0 && !error ? <View style={styles.empty}><Text selectable style={styles.emptyText}>暂无订单 — 去市场接一个或去首页发布需求</Text></View> : null}
       {orders !== undefined && orders.length > 0 ? (
         <ScrollView contentContainerStyle={styles.list}>
           {orders.map((o) => (
             <Pressable key={o.orderId} onPress={() => setDetail(o)} style={styles.orderCard}>
-              <Text style={styles.orderTitle}>{o.snapshot.serviceSku || o.needId}</Text>
-              <Text style={styles.orderMeta}>{orderStatus(o)} · {orderMoney(o)}</Text>
-              <Text style={styles.orderMeta}>{o.snapshot.startTime || "时间待确认"} · {o.snapshot.meetingContext || "地点待确认"}</Text>
+              <Text selectable style={styles.orderTitle}>{o.snapshot.serviceSku || o.needId}</Text>
+              <Text selectable style={styles.orderMeta}>{orderStatus(o)} · {orderMoney(o)}</Text>
+              <Text selectable style={styles.orderMeta}>{o.snapshot.startTime || "时间待确认"} · {o.snapshot.meetingContext || "地点待确认"}</Text>
             </Pressable>
           ))}
         </ScrollView>

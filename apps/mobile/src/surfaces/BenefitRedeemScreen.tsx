@@ -55,8 +55,8 @@ export function BenefitRedeemScreen({
     return (
       <View style={styles.container}>
         <View style={styles.successBox}>
-          <Text style={styles.successIcon}>✓</Text>
-          <Text style={styles.successTitle}>核销成功</Text>
+          <Text selectable style={styles.successIcon}>✓</Text>
+          <Text selectable style={styles.successTitle}>核销成功</Text>
           <View style={styles.receiptBox}>
             <ReceiptRow label="核销 ID" value={redemption.redemptionId} />
             <ReceiptRow label="应收金额" value={`${redemption.userPayMinor}₫`} bold />
@@ -65,7 +65,7 @@ export function BenefitRedeemScreen({
             <ReceiptRow label="时间" value={new Date(redemption.redeemedAt).toLocaleString("zh-CN")} />
           </View>
           <Pressable onPress={onBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>完成</Text>
+            <Text selectable style={styles.backButtonText}>完成</Text>
           </Pressable>
         </View>
       </View>
@@ -76,13 +76,13 @@ export function BenefitRedeemScreen({
     <View style={styles.container}>
       <View style={styles.header}>
         <Pressable onPress={onBack} style={styles.backArrow}>
-          <Text style={styles.backArrowText}>‹</Text>
+          <Text selectable style={styles.backArrowText}>‹</Text>
         </Pressable>
-        <Text style={styles.title}>扫描核销</Text>
+        <Text selectable style={styles.title}>扫描核销</Text>
       </View>
 
       <View style={styles.scanBox}>
-        <Text style={styles.scanHint}>请输入用户出示的验证码</Text>
+        <Text selectable style={styles.scanHint}>请输入用户出示的验证码</Text>
         <TextInput
           style={styles.input}
           value={claimToken}
@@ -95,14 +95,14 @@ export function BenefitRedeemScreen({
       </View>
 
       {busy ? <ProxyLoading tone="brand" style={styles.spinner} /> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <Text selectable style={styles.error}>{error}</Text> : null}
 
       <Pressable
         onPress={handleRedeem}
         disabled={busy || !claimToken.trim()}
         style={[styles.redeemButton, (!claimToken.trim() || busy) && styles.redeemButtonDisabled]}
       >
-        <Text style={styles.redeemButtonText}>{busy ? "核销中..." : "确认核销"}</Text>
+        <Text selectable style={styles.redeemButtonText}>{busy ? "核销中..." : "确认核销"}</Text>
       </Pressable>
     </View>
   );
@@ -111,8 +111,8 @@ export function BenefitRedeemScreen({
 function ReceiptRow({ label, value, bold }: { label: string; value: string; bold?: boolean }): React.JSX.Element {
   return (
     <View style={styles.receiptRow}>
-      <Text style={styles.receiptLabel}>{label}</Text>
-      <Text style={[styles.receiptValue, bold && styles.receiptValueBold]}>{value}</Text>
+      <Text selectable style={styles.receiptLabel}>{label}</Text>
+      <Text selectable style={[styles.receiptValue, bold && styles.receiptValueBold]}>{value}</Text>
     </View>
   );
 }

@@ -941,7 +941,7 @@ export function RequesterHome({
           新注册用户只会出现在这里。点主页进对方主页，+ 直接加好友。 */}
       {serverPeople !== undefined && serverPeople.length > 0 ? (
         <View>
-          <Text style={styles.serverPeopleTitle}>{t("serverPeopleTitle", { n: serverPeople.length })}</Text>
+          <Text selectable style={styles.serverPeopleTitle}>{t("serverPeopleTitle", { n: serverPeople.length })}</Text>
           {serverPeople.map((person) => {
             const isSelf = !!viewerAccountId && person.userAccountId === viewerAccountId;
             const displayName = person.name || person.handle || person.userAccountId;
@@ -951,19 +951,19 @@ export function RequesterHome({
             return (
               <View key={`server-person:${person.userAccountId}`} style={styles.serverPeopleRow}>
                 <View style={styles.serverPeopleCopy}>
-                  <Text style={styles.serverPeopleName}>{displayName}</Text>
-                  {sub ? <Text style={styles.serverPeopleSub}>{sub}</Text> : null}
+                  <Text selectable style={styles.serverPeopleName}>{displayName}</Text>
+                  {sub ? <Text selectable style={styles.serverPeopleSub}>{sub}</Text> : null}
                 </View>
                 <Pressable accessibilityLabel={`${displayName} · ${t("viewProfile")}`} onPress={() => onOpenHumanProfile?.(profileWireToPerson(person))}>
-                  <Text style={styles.serverPeopleAction}>{t("home")}</Text>
+                  <Text selectable style={styles.serverPeopleAction}>{t("home")}</Text>
                 </Pressable>
-                {isSelf ? <Text style={styles.serverPeopleSub}>{t("thisIsYou")}</Text> : (
+                {isSelf ? <Text selectable style={styles.serverPeopleSub}>{t("thisIsYou")}</Text> : (
                   <Pressable
                     accessibilityLabel={`${displayName} · ${t("addFriend")}`}
                     disabled={busy || state === "OUTGOING" || state === "FRIEND"}
                     onPress={() => void handleHomeFriend(person.userAccountId, displayName)}
                   >
-                    <Text style={styles.serverPeopleAction}>{state === "FRIEND" ? t("alreadyFriend") : state === "OUTGOING" ? t("requestSent") : t("addFriend")}</Text>
+                    <Text selectable style={styles.serverPeopleAction}>{state === "FRIEND" ? t("alreadyFriend") : state === "OUTGOING" ? t("requestSent") : t("addFriend")}</Text>
                   </Pressable>
                 )}
               </View>
@@ -973,12 +973,12 @@ export function RequesterHome({
       ) : null}
       {serverPeopleState === "failed" ? (
         <View style={styles.serverPeopleRow}>
-          <Text style={styles.serverPeopleSub}>{t("serverSearchFailed")}</Text>
+          <Text selectable style={styles.serverPeopleSub}>{t("serverSearchFailed")}</Text>
           <Pressable
             accessibilityLabel={t("retryServerSearch")}
             onPress={() => { if (serverPeopleQuery) void runServerPeopleSearch(serverPeopleQuery, true); }}
           >
-            <Text style={styles.serverPeopleAction}>{t("retry")}</Text>
+            <Text selectable style={styles.serverPeopleAction}>{t("retry")}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -1019,12 +1019,12 @@ export function RequesterHome({
           tag)，cards 是 165×220 portrait card (大首字母 + 距离 + 2 tag)。 */}
       <View style={styles.peopleHead}>
         <View style={{ flex: 1 }}>
-          <View style={styles.peopleTitleRow}><Text style={styles.peopleTitle}>{t("title")}</Text><View style={styles.humanBadge}><Text style={styles.humanBadgeText}>{t("humanBadge")}</Text></View></View>
+          <View style={styles.peopleTitleRow}><Text selectable style={styles.peopleTitle}>{t("title")}</Text><View style={styles.humanBadge}><Text selectable style={styles.humanBadgeText}>{t("humanBadge")}</Text></View></View>
         </View>
         {/* HOME-I18N-002（2026-09-23）：语言入口不在首页页头，挪到「更多」整页的
             「中文」chip（见下方 filterChips）。 */}
         <Pressable onPress={() => setFilterSheetOpen(true)} style={styles.filterTrigger} accessibilityLabel={t("more")}>
-          <Text style={styles.filterTriggerText}>{t("more")}</Text>
+          <Text selectable style={styles.filterTriggerText}>{t("more")}</Text>
         </Pressable>
       </View>
 
@@ -1046,7 +1046,7 @@ export function RequesterHome({
           >
             <View style={styles.avatar}>
               <View style={styles.avatarInner}>
-                {p.photoUri && !brokenAvatarIds.has(p.id) ? <Image source={{ uri: p.photoUri }} style={styles.avatarPhoto} onError={() => markAvatarBroken(p.id)} /> : <Text style={styles.avatarInitials}>{p.initials}</Text>}
+                {p.photoUri && !brokenAvatarIds.has(p.id) ? <Image source={{ uri: p.photoUri }} style={styles.avatarPhoto} onError={() => markAvatarBroken(p.id)} /> : <Text selectable style={styles.avatarInitials}>{p.initials}</Text>}
               </View>
               {p.online ? <View style={styles.onlineDot} /> : null}
               <Pressable
@@ -1055,16 +1055,16 @@ export function RequesterHome({
                 style={[styles.addBadge, relationshipStateFor(p.id) === "FRIEND" && styles.addBadgeDone, relationshipStateFor(p.id) === "OUTGOING" && styles.addBadgePending]}
                 accessibilityLabel={relationshipLabel(p.id, p.name)}
               >
-                <Text style={styles.addBadgeText}>{relationshipGlyph(p.id)}</Text>
+                <Text selectable style={styles.addBadgeText}>{relationshipGlyph(p.id)}</Text>
               </Pressable>
             </View>
-            <Text style={styles.storyName} numberOfLines={1}>{p.name}</Text>
+            <Text selectable style={styles.storyName} numberOfLines={1}>{p.name}</Text>
           </Pressable>
         ))}
       </HorizontalSwipeRail>
 
       {relationshipMsg ? (
-        <Text style={styles.followMsg}>{relationshipMsg}</Text>
+        <Text selectable style={styles.followMsg}>{relationshipMsg}</Text>
       ) : null}
 
       {/* AI-ROW-DUPE-001: 首页只保留一行 AI 推荐。曾经在这上面还挂了一条
@@ -1073,8 +1073,8 @@ export function RequesterHome({
           留下下面这条带「AI 生成」徽标的「AI 推荐」。再挂回去会被门禁挡下。 */}
       {recommendedAI.length > 0 ? <View style={styles.aiSection}>
         <View style={styles.aiSectionHead}>
-          <View><Text style={styles.aiTitle}>{t("aiRecommend")}</Text><Text style={styles.aiSub}>{t("aiRecommendSub")}</Text></View>
-          <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>{t("aiGenerated")}</Text></View>
+          <View><Text selectable style={styles.aiTitle}>{t("aiRecommend")}</Text><Text selectable style={styles.aiSub}>{t("aiRecommendSub")}</Text></View>
+          <View style={styles.aiBadge}><Text selectable style={styles.aiBadgeText}>{t("aiGenerated")}</Text></View>
         </View>
         <HorizontalSwipeRail style={styles.aiRail} contentContainerStyle={styles.aiRailContent}>
           {recommendedAI.map((account) => (
@@ -1098,11 +1098,11 @@ export function RequesterHome({
                   style={styles.addBadge}
                   accessibilityLabel={t("messageToA11y", { name: account.displayName })}
                 >
-                  <Text style={styles.addBadgeText}>↗</Text>
+                  <Text selectable style={styles.addBadgeText}>↗</Text>
                 </Pressable>
               </View>
-              <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
-              <Text style={styles.aiHandle} numberOfLines={1}>{t("aiGenerated")}</Text>
+              <Text selectable style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
+              <Text selectable style={styles.aiHandle} numberOfLines={1}>{t("aiGenerated")}</Text>
             </Pressable>
           ))}
         </HorizontalSwipeRail>
@@ -1134,18 +1134,18 @@ export function RequesterHome({
               <View>
                 <View style={styles.forYouHead}>
                   <View style={{ flex: 1 }}>
-                    <View style={styles.peopleTitleRow}><Text style={styles.peopleTitle}>{t("combo")}</Text><View style={styles.forYouBadge}><Text style={styles.forYouBadgeText}>For You</Text></View></View>
-                    <Text style={styles.peopleSub}>{t("gridSub")}</Text>
+                    <View style={styles.peopleTitleRow}><Text selectable style={styles.peopleTitle}>{t("combo")}</Text><View style={styles.forYouBadge}><Text selectable style={styles.forYouBadgeText}>For You</Text></View></View>
+                    <Text selectable style={styles.peopleSub}>{t("gridSub")}</Text>
                   </View>
                 </View>
                 <View style={styles.gridStage}>
                   <View style={styles.grid4}>
                     {tiles.map((t) => t ? (
                       <Pressable key={t.key} onPress={() => setChooser(t.slot)} style={styles.gridTile}>
-                        {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.gridImage} /> : <View style={styles.gridImageMissing}><Text style={styles.gridGlyph}>{t.glyph}</Text></View>}
+                        {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.gridImage} /> : <View style={styles.gridImageMissing}><Text selectable style={styles.gridGlyph}>{t.glyph}</Text></View>}
                         <View style={styles.gridOverlay}>
-                          <Text style={[styles.gridLabel, !t.imageUri && styles.gridLabelDark]} numberOfLines={1}>{t.label}</Text>
-                          <Text style={[styles.gridSub, !t.imageUri && styles.gridSubDark]} numberOfLines={1}>{t.sub}</Text>
+                          <Text selectable style={[styles.gridLabel, !t.imageUri && styles.gridLabelDark]} numberOfLines={1}>{t.label}</Text>
+                          <Text selectable style={[styles.gridSub, !t.imageUri && styles.gridSubDark]} numberOfLines={1}>{t.sub}</Text>
                         </View>
                       </Pressable>
                     ) : null)}
@@ -1163,28 +1163,28 @@ export function RequesterHome({
                 </View>
                 {composed ? (
                   <View>
-                    <Text style={styles.chainHint}>{t("chainHint")}</Text>
+                    <Text selectable style={styles.chainHint}>{t("chainHint")}</Text>
                     <View style={styles.gridCtaRow}>
                     <Pressable onPress={() => { setMomentMsg(undefined); setMomentOpen(true); }} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel={t("makeImageA11y")}>
-                      <Text style={styles.gridCtaTextSmall}>{t("makeImage")}</Text>
+                      <Text selectable style={styles.gridCtaTextSmall}>{t("makeImage")}</Text>
                     </Pressable>
                     <Pressable disabled={joinBusy} onPress={() => void joinSelected(gridActivity?.activityId)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel={t("joinCtaA11y")}>
-                      <Text style={styles.gridCtaTextSmall}>{joinBusy ? t("joinInProgress") : t("joinCta")}</Text>
+                      <Text selectable style={styles.gridCtaTextSmall}>{joinBusy ? t("joinInProgress") : t("joinCta")}</Text>
                     </Pressable>
                     <Pressable onPress={() => onOpenMarket?.("OPPORTUNITY")} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel={t("publishDemandA11y")}>
-                      <Text style={styles.gridCtaTextSmall}>{t("publishDemand")}</Text>
+                      <Text selectable style={styles.gridCtaTextSmall}>{t("publishDemand")}</Text>
                     </Pressable>
                     </View>
                   </View>
                 ) : null}
-                {joinMsg ? <Text style={styles.joinMsg}>{joinMsg}</Text> : null}
-                {momentMsg && !momentOpen ? <Text style={styles.joinMsg}>{momentMsg}</Text> : null}
+                {joinMsg ? <Text selectable style={styles.joinMsg}>{joinMsg}</Text> : null}
+                {momentMsg && !momentOpen ? <Text selectable style={styles.joinMsg}>{momentMsg}</Text> : null}
                 {chooser ? (
                   <Modal transparent animationType="fade" visible onRequestClose={() => setChooser(null)}>
                     <Pressable onPress={() => setChooser(null)} style={styles.sheetBackdrop}>
                       <View style={styles.sheet} onStartShouldSetResponder={() => true}>
                         <View style={styles.sheetGrab} />
-                        <Text style={styles.sheetTitle}>{chooser === "person" ? t("choosePerson") : chooser === "time" ? t("chooseTime") : chooser === "activity" ? t("chooseActivity") : t("choosePlace")}</Text>
+                        <Text selectable style={styles.sheetTitle}>{chooser === "person" ? t("choosePerson") : chooser === "time" ? t("chooseTime") : chooser === "activity" ? t("chooseActivity") : t("choosePlace")}</Text>
                         {chooser === "person" ? (
                           <HorizontalSwipeRail contentContainerStyle={styles.personChooserRail}>
                             {filteredPeople.map((p, i) => {
@@ -1199,11 +1199,11 @@ export function RequesterHome({
                                   {p.photoUri && !brokenAvatarIds.has(p.id) ? (
                                     <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: p.photoUri }} style={styles.personChooserPhoto} transition={0} onError={() => markAvatarBroken(p.id)} />
                                   ) : (
-                                    <View style={[styles.personChooserPhoto, styles.personChooserFallback]}><Text style={styles.personChooserInitials}>{p.initials}</Text></View>
+                                    <View style={[styles.personChooserPhoto, styles.personChooserFallback]}><Text selectable style={styles.personChooserInitials}>{p.initials}</Text></View>
                                   )}
                                   <View style={styles.personChooserCopy}>
-                                    <Text numberOfLines={1} style={styles.personChooserName}>{p.name}</Text>
-                                    <Text numberOfLines={1} style={styles.personChooserBio}>{p.bio}</Text>
+                                    <Text selectable numberOfLines={1} style={styles.personChooserName}>{p.name}</Text>
+                                    <Text selectable numberOfLines={1} style={styles.personChooserBio}>{p.bio}</Text>
                                   </View>
                                   {selected ? <View style={styles.personChooserSelectedBadge}><ProxyIcon color={color.white} name="check" size={13} /></View> : null}
                                 </Pressable>
@@ -1217,8 +1217,8 @@ export function RequesterHome({
                               return (
                                 <Pressable key={slot} onPress={() => { setTimeIndex(i); setChooser(null); }} style={[styles.timeChooserCard, selected && styles.timeChooserCardSelected]}>
                                   <ProxyIcon color={selected ? color.white : color.ink} name="clock" size={22} />
-                                  <Text numberOfLines={2} style={[styles.timeChooserValue, selected && styles.timeChooserValueSelected]}>{slot}</Text>
-                                  <Text style={[styles.timeChooserHint, selected && styles.timeChooserHintSelected]}>{selected ? t("currentChoice") : t("chooseSlot")}</Text>
+                                  <Text selectable numberOfLines={2} style={[styles.timeChooserValue, selected && styles.timeChooserValueSelected]}>{slot}</Text>
+                                  <Text selectable style={[styles.timeChooserHint, selected && styles.timeChooserHintSelected]}>{selected ? t("currentChoice") : t("chooseSlot")}</Text>
                                 </Pressable>
                               );
                             })}
@@ -1233,8 +1233,8 @@ export function RequesterHome({
                                 <Pressable key={a.activityId} onPress={() => { setActivityIndex(i); setChooser(null); }} style={[styles.photoChooserCard, selected && styles.photoChooserCardSelected]}>
                                   {photo ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: photo }} style={styles.photoChooserImage} transition={0} /> : <View style={[styles.photoChooserImage, styles.photoChooserFallback]}><ProxyIcon color={color.muted} name="cup" size={30} /></View>}
                                   <View style={styles.photoChooserCopy}>
-                                    <Text numberOfLines={1} style={styles.photoChooserName}>{a.title}</Text>
-                                    <Text numberOfLines={1} style={styles.photoChooserMeta}>{a.venueName}{a.time ? ` · ${a.time}` : ""}</Text>
+                                    <Text selectable numberOfLines={1} style={styles.photoChooserName}>{a.title}</Text>
+                                    <Text selectable numberOfLines={1} style={styles.photoChooserMeta}>{a.venueName}{a.time ? ` · ${a.time}` : ""}</Text>
                                   </View>
                                   {selected ? <View style={styles.photoChooserSelectedBadge}><ProxyIcon color={color.white} name="check" size={13} /></View> : null}
                                 </Pressable>
@@ -1249,8 +1249,8 @@ export function RequesterHome({
                                 <Pressable key={s.id} onPress={() => { setPlaceIndex(i); setChooser(null); }} style={[styles.photoChooserCard, selected && styles.photoChooserCardSelected]}>
                                   {s.imageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: s.imageUrl }} style={styles.photoChooserImage} transition={0} /> : <View style={[styles.photoChooserImage, styles.photoChooserFallback]}><ProxyIcon color={color.muted} name="storefront" size={30} /></View>}
                                   <View style={styles.photoChooserCopy}>
-                                    <Text numberOfLines={1} style={styles.photoChooserName}>{s.name}</Text>
-                                    <Text numberOfLines={1} style={styles.photoChooserMeta}>{s.area}{s.type ? ` · ${s.type}` : ""}</Text>
+                                    <Text selectable numberOfLines={1} style={styles.photoChooserName}>{s.name}</Text>
+                                    <Text selectable numberOfLines={1} style={styles.photoChooserMeta}>{s.area}{s.type ? ` · ${s.type}` : ""}</Text>
                                   </View>
                                   {selected ? <View style={styles.photoChooserSelectedBadge}><ProxyIcon color={color.white} name="check" size={13} /></View> : null}
                                 </Pressable>
@@ -1267,17 +1267,17 @@ export function RequesterHome({
                     <Pressable onPress={() => setMomentOpen(false)} style={styles.sheetBackdrop}>
                       <View style={styles.sheet} onStartShouldSetResponder={() => true}>
                         <View style={styles.sheetGrab} />
-                        <Text style={styles.sheetTitle}>{t("inviteMoment")}</Text>
+                        <Text selectable style={styles.sheetTitle}>{t("inviteMoment")}</Text>
                         <View style={styles.momentGrid}>
                           {tiles.map((t) => t ? (
                             <View key={`m:${t.key}`} style={styles.momentCell}>
-                              {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.momentImage} /> : <View style={styles.momentImageMissing}><Text style={styles.gridGlyph}>{t.glyph}</Text></View>}
-                              <Text style={styles.momentLabel} numberOfLines={1}>{t.label}</Text>
+                              {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.momentImage} /> : <View style={styles.momentImageMissing}><Text selectable style={styles.gridGlyph}>{t.glyph}</Text></View>}
+                              <Text selectable style={styles.momentLabel} numberOfLines={1}>{t.label}</Text>
                             </View>
                           ) : null)}
                         </View>
-                        <Text style={styles.momentCopy} numberOfLines={2}>{composed}</Text>
-                        {momentMsg && momentOpen ? <Text style={styles.joinMsg}>{momentMsg}</Text> : null}
+                        <Text selectable style={styles.momentCopy} numberOfLines={2}>{composed}</Text>
+                        {momentMsg && momentOpen ? <Text selectable style={styles.joinMsg}>{momentMsg}</Text> : null}
                         {localNet ? (
                           <Pressable
                             disabled={momentBusy}
@@ -1317,7 +1317,7 @@ export function RequesterHome({
                             style={[styles.gridCta, { marginTop: 10 }]}
                             accessibilityLabel={t("postToFeed")}
                           >
-                            <Text style={styles.gridCtaText}>{momentBusy ? t("posting") : t("postToFeed")}</Text>
+                            <Text selectable style={styles.gridCtaText}>{momentBusy ? t("posting") : t("postToFeed")}</Text>
                           </Pressable>
                         ) : null}
                         <Pressable
@@ -1338,7 +1338,7 @@ export function RequesterHome({
                           style={[styles.gridCta, { marginTop: 10 }]}
                           accessibilityLabel={t("shareInvite")}
                         >
-                          <Text style={styles.gridCtaText}>{momentBusy ? t("sharing") : t("shareInviteCta")}</Text>
+                          <Text selectable style={styles.gridCtaText}>{momentBusy ? t("sharing") : t("shareInviteCta")}</Text>
                         </Pressable>
                       </View>
                     </Pressable>
@@ -1354,8 +1354,8 @@ export function RequesterHome({
           订单状态时才出现；0、匿名、初始加载和首次失败均不占首页空间。 */}
       {continueItems.length > 0 ? <View>
         <View style={styles.sectionHead}>
-          <Text style={styles.sectionTitle}>{t("continueSection")}</Text>
-          <Text style={styles.sectionHint}>{t("itemsCount", { n: continueItems.length })}</Text>
+          <Text selectable style={styles.sectionTitle}>{t("continueSection")}</Text>
+          <Text selectable style={styles.sectionHint}>{t("itemsCount", { n: continueItems.length })}</Text>
         </View>
         {continueItems.map((item) => (
           <Pressable
@@ -1365,23 +1365,23 @@ export function RequesterHome({
             accessibilityLabel={`${t("continueSection")} ${item.title}`}
           >
             <View style={styles.continueThumb}>
-              <Text style={styles.continueThumbText}>{(item.title[0] ?? "?").toUpperCase()}</Text>
+              <Text selectable style={styles.continueThumbText}>{(item.title[0] ?? "?").toUpperCase()}</Text>
             </View>
             <View style={styles.continueCopy}>
-              <Text style={styles.continueTitle} numberOfLines={1}>{item.title}</Text>
+              <Text selectable style={styles.continueTitle} numberOfLines={1}>{item.title}</Text>
               {/* HOME-I18N-001：渲染时才翻译 —— 卡片存的是 key，切语言这里跟着变。 */}
-              <Text style={styles.continueSub} numberOfLines={1}>{t(item.subKey, item.subVars)}</Text>
+              <Text selectable style={styles.continueSub} numberOfLines={1}>{t(item.subKey, item.subVars)}</Text>
             </View>
             {item.progress !== undefined ? (
               <View style={styles.actionTag}>
-                <Text style={styles.actionTagText}>{item.progress}</Text>
+                <Text selectable style={styles.actionTagText}>{item.progress}</Text>
               </View>
             ) : item.headcount !== undefined ? (
               <View style={styles.actionTag}>
-                <Text style={styles.actionTagText}>{item.headcount}</Text>
+                <Text selectable style={styles.actionTagText}>{item.headcount}</Text>
               </View>
             ) : (
-              <Text style={styles.continueChevron}>›</Text>
+              <Text selectable style={styles.continueChevron}>›</Text>
             )}
           </Pressable>
         ))}
@@ -1390,9 +1390,9 @@ export function RequesterHome({
       {/* Scene/Activity 是撮合完成后的见面道具，不抢人物发现首屏。
           放在进行中链路之后，并替代旧的重复“场景”横栏。 */}
       <View style={styles.sectionHead}>
-        <Text style={styles.peopleTitle}>{t("nearbyScenes")}</Text>
+        <Text selectable style={styles.peopleTitle}>{t("nearbyScenes")}</Text>
         <Pressable accessibilityLabel={t("nearbyScenes")} onPress={() => onOpenSceneMap?.()}>
-          <Text style={styles.filterTriggerText}>{t("map")}</Text>
+          <Text selectable style={styles.filterTriggerText}>{t("map")}</Text>
         </Pressable>
       </View>
       <SceneActivityDiscovery
@@ -1404,55 +1404,55 @@ export function RequesterHome({
 
       {humanScenePreview ? <Modal animationType="slide" onRequestClose={() => setHumanScenePreview(undefined)} visible>
         <View style={styles.humanScenePage}>
-          <View style={[styles.humanSceneHeader, { height: 54 + safeArea.top, paddingTop: safeArea.top }]}><Pressable accessibilityLabel={t("backHome")} hitSlop={12} onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBack}><Text style={styles.humanSceneBackText}>{t("backShort")}</Text></Pressable><Text style={styles.humanSceneHeaderTitle}>{t("humanProfile")}</Text><View style={styles.humanSceneHeaderSpacer} /></View>
+          <View style={[styles.humanSceneHeader, { height: 54 + safeArea.top, paddingTop: safeArea.top }]}><Pressable accessibilityLabel={t("backHome")} hitSlop={12} onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBack}><Text selectable style={styles.humanSceneBackText}>{t("backShort")}</Text></Pressable><Text selectable style={styles.humanSceneHeaderTitle}>{t("humanProfile")}</Text><View style={styles.humanSceneHeaderSpacer} /></View>
             <ScrollView contentContainerStyle={styles.humanSceneContent} showsVerticalScrollIndicator={false}>
               <View style={styles.humanSceneTop}>
-                <Text style={styles.humanSceneEyebrow}>{humanScenePreview.person.online ? t("nearbyNowVisible") : t("nearbyRecommend")}</Text>
+                <Text selectable style={styles.humanSceneEyebrow}>{humanScenePreview.person.online ? t("nearbyNowVisible") : t("nearbyRecommend")}</Text>
               </View>
               <View style={styles.humanScenePerson}>
-                <View style={styles.humanSceneAvatarRing}>{humanScenePreview.person.photoUri && !brokenAvatarIds.has(humanScenePreview.person.id) ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: humanScenePreview.person.photoUri }} style={styles.humanSceneAvatar} transition={0} onError={() => markAvatarBroken(humanScenePreview.person.id)} /> : <Text style={styles.humanSceneInitials}>{humanScenePreview.person.initials}</Text>}</View>
+                <View style={styles.humanSceneAvatarRing}>{humanScenePreview.person.photoUri && !brokenAvatarIds.has(humanScenePreview.person.id) ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: humanScenePreview.person.photoUri }} style={styles.humanSceneAvatar} transition={0} onError={() => markAvatarBroken(humanScenePreview.person.id)} /> : <Text selectable style={styles.humanSceneInitials}>{humanScenePreview.person.initials}</Text>}</View>
                 <View style={styles.humanScenePersonCopy}>
-                  <Text style={styles.humanSceneName}>{humanScenePreview.person.name}</Text>
-                  <Text style={styles.humanSceneBio}>{humanScenePreview.person.bio}</Text>
-                  {humanScenePreview.person.rating !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text style={styles.humanSceneRating}>★ {humanScenePreview.person.rating.toFixed(1)} · {t("activityCount", { n: humanScenePreview.person.completedActivities })}</Text> : null}
+                  <Text selectable style={styles.humanSceneName}>{humanScenePreview.person.name}</Text>
+                  <Text selectable style={styles.humanSceneBio}>{humanScenePreview.person.bio}</Text>
+                  {humanScenePreview.person.rating !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text selectable style={styles.humanSceneRating}>★ {humanScenePreview.person.rating.toFixed(1)} · {t("activityCount", { n: humanScenePreview.person.completedActivities })}</Text> : null}
                 </View>
               </View>
               <View style={styles.humanSceneActionsTop}>
-                <Pressable accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)} disabled={relationshipBusyFor(humanScenePreview.person.id) || relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND"} onPress={() => void handleHomeFriend(humanScenePreview.person.id, humanScenePreview.person.name)} style={[styles.humanSceneTopAction, styles.humanSceneTopActionPrimary, (relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDone]}><Text style={styles.humanSceneTopActionPrimaryText}>{relationshipBusyFor(humanScenePreview.person.id) ? t("adding") : relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" ? t("addingShort") : relationshipStateFor(humanScenePreview.person.id) === "FRIEND" ? t("added") : relationshipStateFor(humanScenePreview.person.id) === "INCOMING" ? t("acceptAdd") : t("addAction")}</Text></Pressable>
-                <Pressable accessibilityLabel={t("viewProfile")} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanProfile?.(person); }} style={styles.humanSceneTopAction}><Text style={styles.humanSceneTopActionText}>{t("home")}</Text></Pressable>
-                <Pressable accessibilityLabel={t("messageAction")} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onMessageHuman?.(person); }} style={styles.humanSceneTopAction}><Text style={styles.humanSceneTopActionText}>{t("messageAction")}</Text></Pressable>
+                <Pressable accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)} disabled={relationshipBusyFor(humanScenePreview.person.id) || relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND"} onPress={() => void handleHomeFriend(humanScenePreview.person.id, humanScenePreview.person.name)} style={[styles.humanSceneTopAction, styles.humanSceneTopActionPrimary, (relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDone]}><Text selectable style={styles.humanSceneTopActionPrimaryText}>{relationshipBusyFor(humanScenePreview.person.id) ? t("adding") : relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" ? t("addingShort") : relationshipStateFor(humanScenePreview.person.id) === "FRIEND" ? t("added") : relationshipStateFor(humanScenePreview.person.id) === "INCOMING" ? t("acceptAdd") : t("addAction")}</Text></Pressable>
+                <Pressable accessibilityLabel={t("viewProfile")} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanProfile?.(person); }} style={styles.humanSceneTopAction}><Text selectable style={styles.humanSceneTopActionText}>{t("home")}</Text></Pressable>
+                <Pressable accessibilityLabel={t("messageAction")} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onMessageHuman?.(person); }} style={styles.humanSceneTopAction}><Text selectable style={styles.humanSceneTopActionText}>{t("messageAction")}</Text></Pressable>
               </View>
-              {relationshipMsg ? <Text style={styles.humanSceneNotice}>{relationshipMsg}</Text> : null}
+              {relationshipMsg ? <Text selectable style={styles.humanSceneNotice}>{relationshipMsg}</Text> : null}
               <View style={styles.humanSceneFacts}>
-                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="clock" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.availabilityText ?? t("availabilityUnknown")}</Text></View>
-                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="route" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.distanceM === undefined ? t("distanceUnknown") : humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`}</Text></View>
-                <Pressable accessibilityLabel={t("viewPublicHistory")} onPress={() => setPublicHistoryOpen((open) => !open)} style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="check" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.completedActivities !== undefined ? t("historyCount", { n: humanScenePreview.person.completedActivities }) : t("noPublicPosts")}</Text></Pressable>
+                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="clock" size={18} /><Text selectable style={styles.humanSceneFactValue}>{humanScenePreview.person.availabilityText ?? t("availabilityUnknown")}</Text></View>
+                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="route" size={18} /><Text selectable style={styles.humanSceneFactValue}>{humanScenePreview.person.distanceM === undefined ? t("distanceUnknown") : humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`}</Text></View>
+                <Pressable accessibilityLabel={t("viewPublicHistory")} onPress={() => setPublicHistoryOpen((open) => !open)} style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="check" size={18} /><Text selectable style={styles.humanSceneFactValue}>{humanScenePreview.person.completedActivities !== undefined ? t("historyCount", { n: humanScenePreview.person.completedActivities }) : t("noPublicPosts")}</Text></Pressable>
               </View>
-              {publicHistoryOpen ? <View style={styles.humanSceneHistory}><View style={styles.humanSceneHistoryHead}><Text style={styles.humanSceneHistoryTitle}>{t("publicActivity")}</Text><Text style={styles.humanSceneHistoryPrivacy}>{t("privateHidden")}</Text></View>{humanScenePreview.person.publicActivityHistory?.length ? humanScenePreview.person.publicActivityHistory.map((item) => <View key={item.id} style={styles.humanSceneHistoryRow}><View style={styles.humanSceneHistoryCopy}><Text style={styles.humanSceneHistoryName}>{item.title}</Text><Text style={styles.humanSceneHistoryMeta}>{item.scene} · {item.dateLabel}</Text></View><Text style={styles.humanSceneHistoryRating}>★ {item.rating.toFixed(1)}</Text></View>) : <Text style={styles.humanSceneHistoryEmpty}>{t("noActivity")}</Text>}</View> : null}
-              <Text style={styles.humanSceneSectionTitle}>{t("whatSheCanDo")}</Text>
-              <View style={styles.humanScenePills}>{humanScenePreview.person.capabilities?.map((item) => <View key={item} style={styles.humanScenePill}><Text style={styles.humanScenePillText}>{item}</Text></View>)}</View>
-              <Text style={styles.humanSceneSectionTitle}>{t("relatedToRecommend")}</Text>
+              {publicHistoryOpen ? <View style={styles.humanSceneHistory}><View style={styles.humanSceneHistoryHead}><Text selectable style={styles.humanSceneHistoryTitle}>{t("publicActivity")}</Text><Text selectable style={styles.humanSceneHistoryPrivacy}>{t("privateHidden")}</Text></View>{humanScenePreview.person.publicActivityHistory?.length ? humanScenePreview.person.publicActivityHistory.map((item) => <View key={item.id} style={styles.humanSceneHistoryRow}><View style={styles.humanSceneHistoryCopy}><Text selectable style={styles.humanSceneHistoryName}>{item.title}</Text><Text selectable style={styles.humanSceneHistoryMeta}>{item.scene} · {item.dateLabel}</Text></View><Text selectable style={styles.humanSceneHistoryRating}>★ {item.rating.toFixed(1)}</Text></View>) : <Text selectable style={styles.humanSceneHistoryEmpty}>{t("noActivity")}</Text>}</View> : null}
+              <Text selectable style={styles.humanSceneSectionTitle}>{t("whatSheCanDo")}</Text>
+              <View style={styles.humanScenePills}>{humanScenePreview.person.capabilities?.map((item) => <View key={item} style={styles.humanScenePill}><Text selectable style={styles.humanScenePillText}>{item}</Text></View>)}</View>
+              <Text selectable style={styles.humanSceneSectionTitle}>{t("relatedToRecommend")}</Text>
               <View style={styles.humanSceneLinkRow}>
-                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>{t("currentAction")}</Text><Text style={styles.humanSceneLinkValue}>{recommendActionLabel}</Text></View>
+                <View style={styles.humanSceneLinkChip}><Text selectable style={styles.humanSceneLinkLabel}>{t("currentAction")}</Text><Text selectable style={styles.humanSceneLinkValue}>{recommendActionLabel}</Text></View>
                 <Pressable accessibilityLabel={t("viewFullScene")} onPress={() => { const current = humanScenePreview; setHumanScenePreview(undefined); onOpenHumanScene?.(current.person, current.sceneId); }} style={styles.humanSceneLinkCard}>
                   {previewSceneImage ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: previewSceneImage }} style={StyleSheet.absoluteFill} transition={0} /> : null}
                   <View style={styles.humanSceneLinkShade} />
-                  <Text style={styles.humanSceneLinkLabelLight}>{t("currentScene")}</Text><Text style={styles.humanSceneLinkValueLight}>{previewScene?.name ?? humanScenePreview.person.sceneNames?.[0] ?? t("viewSceneFallback")} ›</Text>
+                  <Text selectable style={styles.humanSceneLinkLabelLight}>{t("currentScene")}</Text><Text selectable style={styles.humanSceneLinkValueLight}>{previewScene?.name ?? humanScenePreview.person.sceneNames?.[0] ?? t("viewSceneFallback")} ›</Text>
                 </Pressable>
-                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>{t("currentTheme")}</Text><Text style={styles.humanSceneLinkValue}>{humanScenePreview.person.themes?.slice(0, 2).join(" · ") || recommendFeed.sceneTag}</Text></View>
+                <View style={styles.humanSceneLinkChip}><Text selectable style={styles.humanSceneLinkLabel}>{t("currentTheme")}</Text><Text selectable style={styles.humanSceneLinkValue}>{humanScenePreview.person.themes?.slice(0, 2).join(" · ") || recommendFeed.sceneTag}</Text></View>
               </View>
-              <View style={styles.humanSceneDetailCard}><Text style={styles.humanSceneDetailTitle}>{t("relatedTheme")}</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.themes?.join(" · ") || recommendFeed.sceneTag}</Text><Text style={styles.humanSceneDetailTitle}>{t("suitableScenes")}</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.sceneNames?.join(" · ") || previewScene?.name || t("sceneTagFallback")}</Text><Text style={styles.humanSceneDetailTitle}>{t("language")}</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.languages?.join(" · ") || t("languageFromProfile")}</Text></View>
-              <View style={styles.humanSceneDetailCard}><Text style={styles.humanSceneDetailTitle}>{t("reputation")}</Text>{humanScenePreview.person.rating !== undefined && humanScenePreview.person.positiveRate !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text style={styles.humanSceneTrust}>{t("trustLine", { rating: humanScenePreview.person.rating.toFixed(1), rate: humanScenePreview.person.positiveRate, n: humanScenePreview.person.completedActivities })}</Text> : null}<Text style={styles.humanSceneDetailText}>{humanScenePreview.person.reviewSummary ?? t("reviewSummaryEmpty")}</Text></View>
+              <View style={styles.humanSceneDetailCard}><Text selectable style={styles.humanSceneDetailTitle}>{t("relatedTheme")}</Text><Text selectable style={styles.humanSceneDetailText}>{humanScenePreview.person.themes?.join(" · ") || recommendFeed.sceneTag}</Text><Text selectable style={styles.humanSceneDetailTitle}>{t("suitableScenes")}</Text><Text selectable style={styles.humanSceneDetailText}>{humanScenePreview.person.sceneNames?.join(" · ") || previewScene?.name || t("sceneTagFallback")}</Text><Text selectable style={styles.humanSceneDetailTitle}>{t("language")}</Text><Text selectable style={styles.humanSceneDetailText}>{humanScenePreview.person.languages?.join(" · ") || t("languageFromProfile")}</Text></View>
+              <View style={styles.humanSceneDetailCard}><Text selectable style={styles.humanSceneDetailTitle}>{t("reputation")}</Text>{humanScenePreview.person.rating !== undefined && humanScenePreview.person.positiveRate !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text selectable style={styles.humanSceneTrust}>{t("trustLine", { rating: humanScenePreview.person.rating.toFixed(1), rate: humanScenePreview.person.positiveRate, n: humanScenePreview.person.completedActivities })}</Text> : null}<Text selectable style={styles.humanSceneDetailText}>{humanScenePreview.person.reviewSummary ?? t("reviewSummaryEmpty")}</Text></View>
               {previewSceneOptions.length > 0 ? <>
-                <View style={styles.humanSceneSceneHead}><Text style={styles.humanSceneSectionTitle}>{t("canGoTogether")}</Text><Text style={styles.humanSceneSceneHint}>{t("sceneSuggestions")}</Text></View>
+                <View style={styles.humanSceneSceneHead}><Text selectable style={styles.humanSceneSectionTitle}>{t("canGoTogether")}</Text><Text selectable style={styles.humanSceneSceneHint}>{t("sceneSuggestions")}</Text></View>
                 <View style={styles.humanSceneSceneRow}>{previewSceneOptions.map((scene) => {
                   const uri = /^https?:\/\//i.test(scene.imageUrl) ? scene.imageUrl : sceneApiBaseUrl ? `${sceneApiBaseUrl.replace(/\/$/, "")}/${scene.imageUrl.replace(/^\//, "")}` : undefined;
                   return <Pressable accessibilityLabel={t("viewSceneA11y", { name: scene.name })} key={scene.id} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanScene?.(person, scene.id); }} style={styles.humanSceneSceneCard}>
-                    {uri ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri }} style={StyleSheet.absoluteFill} transition={0} /> : null}<View style={styles.humanSceneSceneShade} /><Text numberOfLines={1} style={styles.humanSceneSceneName}>{scene.name}</Text><Text numberOfLines={1} style={styles.humanSceneSceneMeta}>{scene.area || scene.best || t("nearbySceneFallback")}</Text>
+                    {uri ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri }} style={StyleSheet.absoluteFill} transition={0} /> : null}<View style={styles.humanSceneSceneShade} /><Text selectable numberOfLines={1} style={styles.humanSceneSceneName}>{scene.name}</Text><Text selectable numberOfLines={1} style={styles.humanSceneSceneMeta}>{scene.area || scene.best || t("nearbySceneFallback")}</Text>
                   </Pressable>;
                 })}</View>
               </> : null}
-              <Text style={styles.humanSceneReason}>{t("sceneReason")}</Text>
+              <Text selectable style={styles.humanSceneReason}>{t("sceneReason")}</Text>
             </ScrollView>
         </View>
       </Modal> : null}
@@ -1483,7 +1483,7 @@ export function RequesterHome({
                 返回箭头直接并进筛选 chip 那一行，排在"附近"前面。 */}
             <View style={styles.filterChips}>
               <Pressable accessibilityLabel={t("back")} hitSlop={12} onPress={() => setFilterSheetOpen(false)} style={styles.morePageBackInline}>
-                <Text style={styles.morePageBackIcon}>‹</Text>
+                <Text selectable style={styles.morePageBackIcon}>‹</Text>
               </Pressable>
               {/* HOME-MORE-ROOMS-001：chip 行照原型 .filter-chips —— 单行横滑，返回箭头和
                   搜索固定在两端。之前 flexWrap 换行：语言 chip 显示「Tiếng Việt」这类长名、
@@ -1502,8 +1502,8 @@ export function RequesterHome({
                   {/* 数字 + kmUnit 分开拼，跟原型 renderDistanceChip 同一条规则：
                       zh 的 kmUnit 是 "km 内"，vi/en 是 "km"，ko 是 "km 이내"，
                       所以不能把 "km 内" 写死在 JSX 里。 */}
-                  <Text style={styles.distanceChipText}>📍 {moreDistanceKm}{t("kmUnit")}</Text>
-                  <Text style={[styles.distanceChipArrow, moreDistanceOpen && styles.distanceChipArrowOpen]}>▾</Text>
+                  <Text selectable style={styles.distanceChipText}>📍 {moreDistanceKm}{t("kmUnit")}</Text>
+                  <Text selectable style={[styles.distanceChipArrow, moreDistanceOpen && styles.distanceChipArrowOpen]}>▾</Text>
                 </Pressable>
                 {RECOMMEND_FILTER_CHIPS.map((chip: RecommendFilter) => {
                   // HOME-I18N-002（2026-09-23，用户：「多语言筛选按钮做在 home 这个不对
@@ -1519,7 +1519,7 @@ export function RequesterHome({
                         onPress={() => setLanguageSheetOpen(true)}
                         style={styles.filterChip}
                       >
-                        <Text style={styles.filterChipText}>{appLangOption.name}</Text>
+                        <Text selectable style={styles.filterChipText}>{appLangOption.name}</Text>
                       </Pressable>
                     );
                   }
@@ -1536,7 +1536,7 @@ export function RequesterHome({
                       style={[styles.filterChip, on && styles.filterChipOn]}
                       accessibilityLabel={`${t("filterChipA11y", { label: labelKey ? t(labelKey) : chip.label })}${on ? t("selectedSuffix") : ""}`}
                     >
-                      <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>{labelKey ? t(labelKey) : chip.label}</Text>
+                      <Text selectable style={[styles.filterChipText, on && styles.filterChipTextOn]}>{labelKey ? t(labelKey) : chip.label}</Text>
                     </Pressable>
                   );
                 })}
@@ -1554,7 +1554,7 @@ export function RequesterHome({
                     }}
                     style={[styles.filterChip, moreMode === "rooms" && styles.filterChipOn]}
                   >
-                    <Text style={[styles.filterChipText, moreMode === "rooms" && styles.filterChipTextOn]}>{t("chipChatRoom")}</Text>
+                    <Text selectable style={[styles.filterChipText, moreMode === "rooms" && styles.filterChipTextOn]}>{t("chipChatRoom")}</Text>
                   </Pressable>
                 ) : null}
               </ScrollView>
@@ -1574,9 +1574,9 @@ export function RequesterHome({
             {moreDistanceOpen ? (
               <View style={styles.distancePanel}>
                 <View style={styles.distancePanelHead}>
-                  <Text style={styles.distancePanelNum}>{moreDistanceKm}</Text>
-                  <Text style={styles.distancePanelUnit}>{t("kmUnit")}</Text>
-                  <Text style={styles.distancePanelHint}>{t("ridePrefix")}{rideTimes[moreDistanceIndex] ?? ""}</Text>
+                  <Text selectable style={styles.distancePanelNum}>{moreDistanceKm}</Text>
+                  <Text selectable style={styles.distancePanelUnit}>{t("kmUnit")}</Text>
+                  <Text selectable style={styles.distancePanelHint}>{t("ridePrefix")}{rideTimes[moreDistanceIndex] ?? ""}</Text>
                 </View>
                 <View style={styles.distanceTrack}>
                   {MORE_DISTANCE_KM.map((km, index) => (
@@ -1621,10 +1621,10 @@ export function RequesterHome({
                   style={({ pressed }) => [styles.roomCreateCard, pressed && styles.roomCreateCardPressed]}
                 >
                   <View style={styles.roomCreateTop}>
-                    <View style={styles.roomCreateIcon}><Text style={styles.roomCreateIconText}>✨</Text></View>
+                    <View style={styles.roomCreateIcon}><Text selectable style={styles.roomCreateIconText}>✨</Text></View>
                     <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={styles.roomCreateTitle}>{t("roomsCreateTitle")}</Text>
-                      <Text style={styles.roomCreateDesc}>{isGuest ? t("roomsLoginFirst") : t("roomsCreateDesc")}</Text>
+                      <Text selectable style={styles.roomCreateTitle}>{t("roomsCreateTitle")}</Text>
+                      <Text selectable style={styles.roomCreateDesc}>{isGuest ? t("roomsLoginFirst") : t("roomsCreateDesc")}</Text>
                     </View>
                   </View>
                   <View style={styles.roomCreateRow}>
@@ -1636,25 +1636,25 @@ export function RequesterHome({
                         onPress={() => onOpenRoomCreate?.(filteredPeople, index)}
                         style={styles.roomCreateScene}
                       >
-                        <Text style={styles.roomCreateSceneEmoji}>{scene.emoji}</Text>
-                        <Text numberOfLines={1} style={styles.roomCreateSceneLabel}>{scene.title}</Text>
+                        <Text selectable style={styles.roomCreateSceneEmoji}>{scene.emoji}</Text>
+                        <Text selectable numberOfLines={1} style={styles.roomCreateSceneLabel}>{scene.title}</Text>
                       </Pressable>
                     ))}
                   </View>
                 </Pressable>
 
                 <View style={styles.roomSectionHead}>
-                  <Text style={styles.roomSectionTitle}>{t("roomsOngoing")}</Text>
-                  {rooms.status === "ready" ? <Text style={styles.roomSectionCount}>{rooms.items.length}</Text> : null}
+                  <Text selectable style={styles.roomSectionTitle}>{t("roomsOngoing")}</Text>
+                  {rooms.status === "ready" ? <Text selectable style={styles.roomSectionCount}>{rooms.items.length}</Text> : null}
                 </View>
-                {isGuest ? <Text style={styles.moreEmpty}>{t("roomsLoginFirst")}</Text> : null}
-                {!isGuest && rooms.status === "loading" && rooms.items.length === 0 ? <Text style={styles.moreEmpty}>{t("roomsLoading")}</Text> : null}
+                {isGuest ? <Text selectable style={styles.moreEmpty}>{t("roomsLoginFirst")}</Text> : null}
+                {!isGuest && rooms.status === "loading" && rooms.items.length === 0 ? <Text selectable style={styles.moreEmpty}>{t("roomsLoading")}</Text> : null}
                 {!isGuest && rooms.status === "failed" ? (
                   <Pressable accessibilityLabel={t("roomsLoadFailed")} onPress={refreshRooms}>
-                    <Text style={styles.moreEmpty}>{t("roomsLoadFailed")}</Text>
+                    <Text selectable style={styles.moreEmpty}>{t("roomsLoadFailed")}</Text>
                   </Pressable>
                 ) : null}
-                {!isGuest && rooms.status === "ready" && rooms.items.length === 0 ? <Text style={styles.moreEmpty}>{t("roomsEmpty")}</Text> : null}
+                {!isGuest && rooms.status === "ready" && rooms.items.length === 0 ? <Text selectable style={styles.moreEmpty}>{t("roomsEmpty")}</Text> : null}
                 {rooms.items.map((item) => {
                   const scene = item.conversation.roomScene!;
                   const meetup = item.activeMeetup;
@@ -1669,17 +1669,17 @@ export function RequesterHome({
                       onPress={enter}
                       style={({ pressed }) => [styles.roomCard, pressed && styles.roomCardPressed]}
                     >
-                      <View style={styles.roomCover}><Text style={styles.roomCoverEmoji}>{scene.emoji}</Text></View>
+                      <View style={styles.roomCover}><Text selectable style={styles.roomCoverEmoji}>{scene.emoji}</Text></View>
                       <View style={styles.roomBody}>
                         <View style={styles.roomTop}>
-                          <Text numberOfLines={1} style={styles.roomName}>{scene.roomName}</Text>
-                          {item.unreadCount ? <Text style={styles.roomUnread}>{item.unreadCount > 99 ? "99+" : item.unreadCount}</Text> : null}
+                          <Text selectable numberOfLines={1} style={styles.roomName}>{scene.roomName}</Text>
+                          {item.unreadCount ? <Text selectable style={styles.roomUnread}>{item.unreadCount > 99 ? "99+" : item.unreadCount}</Text> : null}
                         </View>
-                        <Text numberOfLines={1} style={styles.roomMeta}>{meta}</Text>
-                        {item.latestMessage?.body ? <Text numberOfLines={1} style={styles.roomLatest}>{item.latestMessage.body}</Text> : null}
+                        <Text selectable numberOfLines={1} style={styles.roomMeta}>{meta}</Text>
+                        {item.latestMessage?.body ? <Text selectable numberOfLines={1} style={styles.roomLatest}>{item.latestMessage.body}</Text> : null}
                         <View style={styles.roomFooter}>
-                          <Text style={styles.roomMembersText}>{t("roomMembers", { n: item.conversation.participants.length })}</Text>
-                          <View style={styles.roomEnterBtn}><Text style={styles.roomEnterBtnText}>{t("roomEnter")}</Text></View>
+                          <Text selectable style={styles.roomMembersText}>{t("roomMembers", { n: item.conversation.participants.length })}</Text>
+                          <View style={styles.roomEnterBtn}><Text selectable style={styles.roomEnterBtnText}>{t("roomEnter")}</Text></View>
                         </View>
                       </View>
                     </Pressable>
@@ -1688,8 +1688,8 @@ export function RequesterHome({
               </ScrollView>
             ) : (
               <>
-              {relationshipMsg ? <Text style={styles.followMsg}>{relationshipMsg}</Text> : null}
-              {greetMsg ? <Text style={styles.followMsg}>{greetMsg}</Text> : null}
+              {relationshipMsg ? <Text selectable style={styles.followMsg}>{relationshipMsg}</Text> : null}
+              {greetMsg ? <Text selectable style={styles.followMsg}>{greetMsg}</Text> : null}
               <ScrollView refreshControl={<RefreshControl refreshing={homeRefreshing} onRefresh={onHomeRefresh} />} style={styles.moreList} contentContainerStyle={styles.moreListContent} showsVerticalScrollIndicator={false}>
                 {filteredPeople.map((p) => {
                   const distance = p.distanceM === undefined ? t("distanceUnknown") : p.distanceM < 1000 ? `${p.distanceM} m` : `${(p.distanceM / 1000).toFixed(1)} km`;
@@ -1708,18 +1708,18 @@ export function RequesterHome({
                   return (
                     <View key={`more:${p.id}`} style={styles.moreRow}>
                       <Pressable onPress={openPreview} accessibilityLabel={t("viewHumanProfileA11y", { name: p.name })} style={styles.moreAvatarWrap}>
-                        {p.photoUri && !brokenAvatarIds.has(p.id) ? <Image source={{ uri: p.photoUri }} style={styles.moreAvatar} onError={() => markAvatarBroken(p.id)} /> : <View style={styles.moreAvatarFallback}><Text style={styles.moreAvatarInitials}>{p.initials}</Text></View>}
+                        {p.photoUri && !brokenAvatarIds.has(p.id) ? <Image source={{ uri: p.photoUri }} style={styles.moreAvatar} onError={() => markAvatarBroken(p.id)} /> : <View style={styles.moreAvatarFallback}><Text selectable style={styles.moreAvatarInitials}>{p.initials}</Text></View>}
                         {p.online ? <View style={styles.moreOnlineDot} /> : null}
                       </Pressable>
                       <Pressable onPress={openPreview} style={styles.moreInfo} accessibilityLabel={t("viewHumanProfileA11y", { name: p.name })}>
-                        <View style={styles.moreNameRow}><Text style={styles.moreName} numberOfLines={1}>{p.name}</Text><Text style={styles.moreMeta}>{distance}</Text></View>
-                        {p.bio ? <Text style={styles.moreBio} numberOfLines={1}>{p.bio}</Text> : null}
+                        <View style={styles.moreNameRow}><Text selectable style={styles.moreName} numberOfLines={1}>{p.name}</Text><Text selectable style={styles.moreMeta}>{distance}</Text></View>
+                        {p.bio ? <Text selectable style={styles.moreBio} numberOfLines={1}>{p.bio}</Text> : null}
                         {/* HOME-MORE-SHEET-007（2026-09-22，用户反馈"共同好友
                             移除，最多保持 2 个标签"）：去掉共同好友数，标签本来
                             就 slice(0,2) 封顶，维持不变。 */}
                         <View style={styles.moreTags}>
-                          {p.online ? <Text style={styles.moreTagLive}>{t("chipOnline")}</Text> : null}
-                          {p.tags.slice(0, 2).map((t) => <Text key={`${t.kind}:${t.text}`} style={styles.moreTag}>{t.text}</Text>)}
+                          {p.online ? <Text selectable style={styles.moreTagLive}>{t("chipOnline")}</Text> : null}
+                          {p.tags.slice(0, 2).map((t) => <Text selectable key={`${t.kind}:${t.text}`} style={styles.moreTag}>{t.text}</Text>)}
                         </View>
                       </Pressable>
                       <Pressable
@@ -1729,12 +1729,12 @@ export function RequesterHome({
                       >
                         {/* HOME-MORE-GREET-002：邀约 = 气泡（打个招呼），已邀约 = ✓。拼桌不带图标。 */}
                         {sameScene ? null : <ProxyIcon color={invited ? color.muted : color.ink} name={invited ? "check" : "chat"} size={13} />}
-                        <Text style={[styles.moreActionBtnText, invited && styles.moreActionBtnTextDone]}>{actionLabel}</Text>
+                        <Text selectable style={[styles.moreActionBtnText, invited && styles.moreActionBtnTextDone]}>{actionLabel}</Text>
                       </Pressable>
                     </View>
                   );
                 })}
-                {filteredPeople.length === 0 ? <Text style={styles.moreEmpty}>{t("emptyFiltered")}</Text> : null}
+                {filteredPeople.length === 0 ? <Text selectable style={styles.moreEmpty}>{t("emptyFiltered")}</Text> : null}
               </ScrollView>
               </>
             )}
@@ -1750,8 +1750,8 @@ export function RequesterHome({
                 <View style={styles.sheet} onStartShouldSetResponder={() => true}>
                   <View style={styles.sheetGrab} />
                   <View style={styles.icebreakerHead}>
-                    <Text style={styles.sheetTitle}>{t("icebreakerTitle", { name: icebreakerTarget.name, action: t("actionTable") })}</Text>
-                    <Pressable accessibilityLabel={t("close")} onPress={() => setIcebreakerTarget(undefined)}><Text style={styles.icebreakerClose}>✕</Text></Pressable>
+                    <Text selectable style={styles.sheetTitle}>{t("icebreakerTitle", { name: icebreakerTarget.name, action: t("actionTable") })}</Text>
+                    <Pressable accessibilityLabel={t("close")} onPress={() => setIcebreakerTarget(undefined)}><Text selectable style={styles.icebreakerClose}>✕</Text></Pressable>
                   </View>
                   {icebreakerLines.map((line) => (
                     <Pressable
@@ -1765,8 +1765,8 @@ export function RequesterHome({
                       }}
                       style={styles.icebreakerItem}
                     >
-                      <Text style={styles.icebreakerItemText}>{line}</Text>
-                      <Text style={styles.icebreakerItemArrow}>→</Text>
+                      <Text selectable style={styles.icebreakerItemText}>{line}</Text>
+                      <Text selectable style={styles.icebreakerItemArrow}>→</Text>
                     </Pressable>
                   ))}
                 </View>

@@ -72,16 +72,16 @@ export function AIAccountProfileSurface({ account, engagement, secureSessionStor
 
 
   return <View style={styles.root}>
-    <View style={styles.header}><Pressable onPress={onBack} style={styles.back}><Text style={styles.backText}>‹ 返回</Text></Pressable><Text style={styles.headerTitle}>AI 主页</Text><View style={styles.spacer} /></View>
+    <View style={styles.header}><Pressable onPress={onBack} style={styles.back}><Text selectable style={styles.backText}>‹ 返回</Text></Pressable><Text selectable style={styles.headerTitle}>AI 主页</Text><View style={styles.spacer} /></View>
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.hero}>
         <View style={styles.avatarRing}>
           <Image accessibilityLabel={`${account.displayName}的 AI 虚拟头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`ai-avatar:${account.accountId}:${account.avatarVersion ?? 1}`} source={aiAccountPhoto(account)} style={styles.photo} transition={0} />
         </View>
         <View style={styles.heroCopy}>
-          <View style={styles.nameRow}><Text style={styles.name}>{account.displayName}</Text><View style={styles.aiPill}><Text style={styles.aiPillText}>AI 生成</Text></View></View>
-          <Text style={styles.handle}>@{account.handle}</Text>
-          <Text style={styles.role}>{account.role}</Text>
+          <View style={styles.nameRow}><Text selectable style={styles.name}>{account.displayName}</Text><View style={styles.aiPill}><Text selectable style={styles.aiPillText}>AI 生成</Text></View></View>
+          <Text selectable style={styles.handle}>@{account.handle}</Text>
+          <Text selectable style={styles.role}>{account.role}</Text>
         </View>
       </View>
       {/* 与动态帖文头像菜单共用 clear GlassView 水滴口径：单层、半透明。 */}
@@ -90,16 +90,16 @@ export function AIAccountProfileSurface({ account, engagement, secureSessionStor
               「发消息」是可达、会响应、有真实结果的动作；「主页」看她公开动态。
               关注（engagement.followProfile）保留为内容订阅，不冒充双向好友。 */}
           <LiquidGlassAction accessibilityLabel={following ? "取消关注" : "关注 AI 动态"} disabled={busy} onPress={() => void toggleFollow()}>
-            <Text style={[styles.glassText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已关注" : "+ 关注"}</Text>
+            <Text selectable style={[styles.glassText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已关注" : "+ 关注"}</Text>
           </LiquidGlassAction>
-          <LiquidGlassAction accessibilityLabel="查看个人主页" disabled={!onViewPosts} onPress={() => onViewPosts?.(account)}><Text style={styles.glassText}>主页</Text></LiquidGlassAction>
-          <LiquidGlassAction accessibilityLabel="发消息" onPress={() => onMessage(account)}><Text style={styles.glassText}>发消息</Text></LiquidGlassAction>
+          <LiquidGlassAction accessibilityLabel="查看个人主页" disabled={!onViewPosts} onPress={() => onViewPosts?.(account)}><Text selectable style={styles.glassText}>主页</Text></LiquidGlassAction>
+          <LiquidGlassAction accessibilityLabel="发消息" onPress={() => onMessage(account)}><Text selectable style={styles.glassText}>发消息</Text></LiquidGlassAction>
       </GlassContainer>
-      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-      <View style={styles.card}><Text style={styles.cardTitle}>关于她</Text><Text style={styles.body}>{account.description}</Text><Text style={styles.personality}>{account.personality}</Text></View>
-      <View style={styles.card}><Text style={styles.cardTitle}>她的动态</Text>{account.ugcSamples.map((post) => <View key={post} style={styles.ugcPost}><Text style={styles.ugcText}>{post}</Text><Text style={styles.ugcMeta}>AI 生成内容 · 刚刚</Text></View>)}</View>
-      <View style={styles.card}><Text style={styles.cardTitle}>可以直接这样问</Text>{account.suggestedPrompts.map((prompt) => <Pressable key={prompt} onPress={() => onMessage(account, prompt)} style={styles.prompt}><Text style={styles.promptText}>{prompt}</Text><Text style={styles.promptArrow}>›</Text></Pressable>)}</View>
-      <View style={styles.boundary}><Text style={styles.boundaryTitle}>她是 AI 虚拟女孩</Text><Text style={styles.boundaryText}>可以聊天、陪伴和创作 UGC，但没有现实身体与线下经历，也不负责平台助手、接单、活动报名、发布业务或交易确认。</Text></View>
+      {notice ? <Text selectable style={styles.notice}>{notice}</Text> : null}
+      <View style={styles.card}><Text selectable style={styles.cardTitle}>关于她</Text><Text selectable style={styles.body}>{account.description}</Text><Text selectable style={styles.personality}>{account.personality}</Text></View>
+      <View style={styles.card}><Text selectable style={styles.cardTitle}>她的动态</Text>{account.ugcSamples.map((post) => <View key={post} style={styles.ugcPost}><Text selectable style={styles.ugcText}>{post}</Text><Text selectable style={styles.ugcMeta}>AI 生成内容 · 刚刚</Text></View>)}</View>
+      <View style={styles.card}><Text selectable style={styles.cardTitle}>可以直接这样问</Text>{account.suggestedPrompts.map((prompt) => <Pressable key={prompt} onPress={() => onMessage(account, prompt)} style={styles.prompt}><Text selectable style={styles.promptText}>{prompt}</Text><Text selectable style={styles.promptArrow}>›</Text></Pressable>)}</View>
+      <View style={styles.boundary}><Text selectable style={styles.boundaryTitle}>她是 AI 虚拟女孩</Text><Text selectable style={styles.boundaryText}>可以聊天、陪伴和创作 UGC，但没有现实身体与线下经历，也不负责平台助手、接单、活动报名、发布业务或交易确认。</Text></View>
     </ScrollView>
   </View>;
 }

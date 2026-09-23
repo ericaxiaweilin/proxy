@@ -93,7 +93,7 @@ export function TwinTargetRail({
               />
               <View style={[styles.signalDot, { backgroundColor: TWIN_SIGNAL_DOT[item.signal] }]} />
             </View>
-            <Text style={[styles.targetName, selected && styles.targetNameSelected]} numberOfLines={1}>
+            <Text selectable style={[styles.targetName, selected && styles.targetNameSelected]} numberOfLines={1}>
               {item.displayName}
             </Text>
           </Pressable>
@@ -147,32 +147,32 @@ export function TwinInsightCard({
           </View>
           <View style={styles.info}>
             <View style={styles.nameRow}>
-              <Text style={styles.name}>{insight.displayName}</Text>
+              <Text selectable style={styles.name}>{insight.displayName}</Text>
               <View style={[styles.chip, { backgroundColor: verdict.bg }]}>
-                <Text style={[styles.chipText, { color: verdict.fg }]}>{insight.verdictLabel}</Text>
+                <Text selectable style={[styles.chipText, { color: verdict.fg }]}>{insight.verdictLabel}</Text>
               </View>
             </View>
-            <Text style={styles.hint} numberOfLines={1}>
+            <Text selectable style={styles.hint} numberOfLines={1}>
               {insight.summaryHint}
             </Text>
           </View>
           <View style={styles.right}>
-            <Text style={styles.score}>
+            <Text selectable style={styles.score}>
               {insight.score}
-              <Text style={styles.scoreUnit}>/100</Text>
+              <Text selectable style={styles.scoreUnit}>/100</Text>
             </Text>
           </View>
         </View>
         {!expanded ? (
           <View style={styles.miniRow}>
-            <Text style={styles.mini}>
-              <Text style={styles.miniVal}>{insight.signals.views7d}</Text>访问
+            <Text selectable style={styles.mini}>
+              <Text selectable style={styles.miniVal}>{insight.signals.views7d}</Text>访问
             </Text>
-            <Text style={styles.mini}>
-              <Text style={styles.miniVal}>{insight.signals.messages7d}</Text>对话
+            <Text selectable style={styles.mini}>
+              <Text selectable style={styles.miniVal}>{insight.signals.messages7d}</Text>对话
             </Text>
-            <Text style={styles.mini}>
-              <Text style={styles.miniVal}>{insight.signals.likes7d}</Text>点赞
+            <Text selectable style={styles.mini}>
+              <Text selectable style={styles.miniVal}>{insight.signals.likes7d}</Text>点赞
             </Text>
           </View>
         ) : null}
@@ -190,41 +190,41 @@ export function TwinInsightCard({
 
           <View style={styles.scoreBlock}>
             <View style={styles.scoreHead}>
-              <Text style={styles.scoreLabel}>运营价值评分</Text>
-              <Text style={styles.scoreBig}>
+              <Text selectable style={styles.scoreLabel}>运营价值评分</Text>
+              <Text selectable style={styles.scoreBig}>
                 {insight.score}
-                <Text style={styles.scoreBigUnit}>/100</Text>
+                <Text selectable style={styles.scoreBigUnit}>/100</Text>
               </Text>
             </View>
             <View style={styles.bar}>
               <View style={[styles.fill, { width: `${insight.score}%` }]} />
             </View>
-            <Text style={styles.scoreHint}>{twinScoreHint(insight.score, thresholds)}</Text>
+            <Text selectable style={styles.scoreHint}>{twinScoreHint(insight.score, thresholds)}</Text>
           </View>
 
-          <Text style={styles.blockTitle}>AI 建议</Text>
+          <Text selectable style={styles.blockTitle}>AI 建议</Text>
           {insight.advices.map((advice, index) => (
             <View key={`${advice.type}-${index}`} style={styles.advice}>
               <ProxyIcon name={twinAdviceIcon(advice.type)} size={16} color={foundation.ink} />
-              <Text style={styles.adviceText}>{advice.text}</Text>
+              <Text selectable style={styles.adviceText}>{advice.text}</Text>
             </View>
           ))}
 
           <View style={styles.summaryHead}>
-            <Text style={styles.blockTitle}>对话摘要</Text>
+            <Text selectable style={styles.blockTitle}>对话摘要</Text>
             <Pressable accessibilityRole="button" accessibilityLabel="重新总结" onPress={onRefreshSummary}>
-              <Text style={styles.refresh}>重新总结</Text>
+              <Text selectable style={styles.refresh}>重新总结</Text>
             </Pressable>
           </View>
-          <Text style={styles.summaryText}>{insight.summaryText}</Text>
+          <Text selectable style={styles.summaryText}>{insight.summaryText}</Text>
 
-          <Text style={styles.blockTitle}>最近互动</Text>
+          <Text selectable style={styles.blockTitle}>最近互动</Text>
           {insight.timeline.map((item, index) => (
             <View key={`${item.time}-${index}`} style={styles.timelineRow}>
               <View style={[styles.dot, item.gray && styles.dotGray]} />
               <View style={styles.timelineInfo}>
-                <Text style={styles.timelineText}>{item.text}</Text>
-                <Text style={styles.timelineTime}>{item.time}</Text>
+                <Text selectable style={styles.timelineText}>{item.text}</Text>
+                <Text selectable style={styles.timelineTime}>{item.time}</Text>
               </View>
             </View>
           ))}
@@ -247,8 +247,8 @@ function SignalCell({ icon, value, label }: { icon: ProxyIconName; value: string
   return (
     <View style={styles.cell}>
       <ProxyIcon name={icon} size={18} color={foundation.muted} />
-      <Text style={styles.cellVal}>{value}</Text>
-      <Text style={styles.cellKey}>{label}</Text>
+      <Text selectable style={styles.cellVal}>{value}</Text>
+      <Text selectable style={styles.cellKey}>{label}</Text>
     </View>
   );
 }

@@ -50,7 +50,7 @@ export function UnavailableMedia({ label = "图片暂时无法显示" }: { label
       testID="media-unavailable-v1"
     >
       <ProxyIcon color={color.muted} name="image" size={26} />
-      <Text style={styles.label}>{label}</Text>
+      <Text selectable style={styles.label}>{label}</Text>
     </View>
   );
 }

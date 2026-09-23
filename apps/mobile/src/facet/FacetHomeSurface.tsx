@@ -276,36 +276,36 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           <Pressable onPress={() => setView("HOME")} style={styles.backRow}>
-            <Text style={styles.backText}>‹ 返回 FACET</Text>
+            <Text selectable style={styles.backText}>‹ 返回 FACET</Text>
           </Pressable>
           <View style={styles.previewHead}>
-            <View style={styles.previewAvatar}><Text style={styles.previewAvatarText}>{previewObject.displayName.charAt(0)}</Text></View>
+            <View style={styles.previewAvatar}><Text selectable style={styles.previewAvatarText}>{previewObject.displayName.charAt(0)}</Text></View>
             <View style={styles.previewCopy}>
               <View style={styles.objectNameRow}>
-                <Text style={styles.objectName}>{previewObject.displayName}</Text>
-                <View style={styles.objectPill}><Text style={styles.objectPillText}>{RELATION_PILL[previewObject.relation]}</Text></View>
+                <Text selectable style={styles.objectName}>{previewObject.displayName}</Text>
+                <View style={styles.objectPill}><Text selectable style={styles.objectPillText}>{RELATION_PILL[previewObject.relation]}</Text></View>
               </View>
-              <Text style={styles.previewSub}>{previewObject.currentState}</Text>
+              <Text selectable style={styles.previewSub}>{previewObject.currentState}</Text>
             </View>
           </View>
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionCardTitle}>关系目标</Text>
-            <Text style={styles.sectionCardBody}>{previewObject.goal}</Text>
+            <Text selectable style={styles.sectionCardTitle}>关系目标</Text>
+            <Text selectable style={styles.sectionCardBody}>{previewObject.goal}</Text>
           </View>
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionCardTitle}>当前缺口</Text>
-            <Text style={styles.sectionCardBody}>{previewObject.gap.summary}</Text>
-            <Text style={styles.sectionCardAccent}>下一次：{previewObject.gap.nextShowAt}</Text>
+            <Text selectable style={styles.sectionCardTitle}>当前缺口</Text>
+            <Text selectable style={styles.sectionCardBody}>{previewObject.gap.summary}</Text>
+            <Text selectable style={styles.sectionCardAccent}>下一次：{previewObject.gap.nextShowAt}</Text>
           </View>
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionCardTitle}>TA 将看到的你</Text>
-            <Text style={styles.sectionCardHint}>同一份真实素材，按对象重新组织 · 人没有变，只是最相关的一面被优先呈现</Text>
+            <Text selectable style={styles.sectionCardTitle}>TA 将看到的你</Text>
+            <Text selectable style={styles.sectionCardHint}>同一份真实素材，按对象重新组织 · 人没有变，只是最相关的一面被优先呈现</Text>
             <View style={styles.previewFeed}>
               {/* R15.50: 预览 feed 从 server 字段生成 (不再 hardcode) */}
               {/* 1) 下一次推荐 — 来自 AI recommendedKind + gap */}
               <View style={styles.previewFeedItem}>
-                <Text style={styles.previewFeedLabel}>优先 · {KIND_LABEL[previewObject.recommendedKind] ?? "未推荐"}</Text>
-                <Text style={styles.previewFeedText}>
+                <Text selectable style={styles.previewFeedLabel}>优先 · {KIND_LABEL[previewObject.recommendedKind] ?? "未推荐"}</Text>
+                <Text selectable style={styles.previewFeedText}>
                   {previewObject.gap.summary} · 下次“{previewObject.gap.nextShowAt}”补 1 条
                 </Text>
               </View>
@@ -314,8 +314,8 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
                 const shown = extractShownCount(previewObject.currentState);
                 return (
                   <View style={styles.previewFeedItem}>
-                    <Text style={styles.previewFeedLabel}>已展示</Text>
-                    <Text style={styles.previewFeedText}>
+                    <Text selectable style={styles.previewFeedLabel}>已展示</Text>
+                    <Text selectable style={styles.previewFeedText}>
                       {shown !== null ? `已展示 ${shown} 条` : previewObject.currentState}
                     </Text>
                   </View>
@@ -324,8 +324,8 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
               {/* 3) 副空间补充 — 仅合作方 (CREATOR_COLLAB) 显示, 拿 sideSpacePosts.length */}
               {previewObject.relation === "CREATOR_COLLAB" ? (
                 <View style={styles.previewFeedItem}>
-                  <Text style={styles.previewFeedLabel}>副空间 · 合作方可见</Text>
-                  <Text style={styles.previewFeedText}>
+                  <Text selectable style={styles.previewFeedLabel}>副空间 · 合作方可见</Text>
+                  <Text selectable style={styles.previewFeedText}>
                     {previewObject.sideSpaceFulfilled
                       ? `已补 ${previewObject.sideSpacePosts.length} 条 · 足够`
                       : previewObject.sideSpacePosts.length > 0
@@ -340,66 +340,66 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
           {previewObject.relation === "CREATOR_COLLAB" ? (
             <View style={styles.sectionCard}>
               <View style={styles.sideSpaceHeaderRow}>
-                <Text style={styles.sectionCardTitle}>副空间</Text>
+                <Text selectable style={styles.sectionCardTitle}>副空间</Text>
                 <View style={styles.sideSpaceHeaderRight}>
                   {previewObject.sideSpaceFulfilled ? (
                     <View style={styles.sideSpaceFulfilledChip}>
-                      <Text style={styles.sideSpaceFulfilledChipText}>✓ 已足够</Text>
+                      <Text selectable style={styles.sideSpaceFulfilledChipText}>✓ 已足够</Text>
                     </View>
                   ) : null}
                   <View style={styles.sideSpaceCountChip}>
-                    <Text style={styles.sideSpaceCountChipText}>{previewObject.sideSpacePosts.length} 条</Text>
+                    <Text selectable style={styles.sideSpaceCountChipText}>{previewObject.sideSpacePosts.length} 条</Text>
                   </View>
                 </View>
               </View>
               {previewObject.sideSpaceGap ? (
                 <View style={[styles.sideSpaceGapBlock, previewObject.sideSpaceFulfilled ? styles.sideSpaceGapBlockFulfilled : null]}>
-                  <Text style={styles.sideSpaceGapLabel}>{previewObject.sideSpaceFulfilled ? "AI 副空间已足够" : "AI 副空间缺口"}</Text>
-                  <Text style={styles.sideSpaceGapText}>{previewObject.sideSpaceGap}</Text>
+                  <Text selectable style={styles.sideSpaceGapLabel}>{previewObject.sideSpaceFulfilled ? "AI 副空间已足够" : "AI 副空间缺口"}</Text>
+                  <Text selectable style={styles.sideSpaceGapText}>{previewObject.sideSpaceGap}</Text>
                 </View>
               ) : null}
               <View style={styles.sideSpaceList}>
                 {previewObject.sideSpacePosts.length === 0 ? (
-                  <Text style={styles.sideSpaceEmpty}>副空间还空，添加内容后只对{previewObject.displayName}可见</Text>
+                  <Text selectable style={styles.sideSpaceEmpty}>副空间还空，添加内容后只对{previewObject.displayName}可见</Text>
                 ) : (
                   previewObject.sideSpacePosts.map((post) => (
                     <View key={post.id} style={styles.sideSpaceRow}>
-                      <View style={styles.sideSpaceImagePlaceholder}><Text style={styles.sideSpaceImagePlaceholderText}>图</Text></View>
+                      <View style={styles.sideSpaceImagePlaceholder}><Text selectable style={styles.sideSpaceImagePlaceholderText}>图</Text></View>
                       <View style={styles.sideSpaceRowCopy}>
-                        <Text style={styles.sideSpaceRowTitle}>{post.title}</Text>
-                        <Text style={styles.sideSpaceRowMeta}>{kindLabel(post.kind)} · {formatAddedAt(post.addedAt)}</Text>
+                        <Text selectable style={styles.sideSpaceRowTitle}>{post.title}</Text>
+                        <Text selectable style={styles.sideSpaceRowMeta}>{kindLabel(post.kind)} · {formatAddedAt(post.addedAt)}</Text>
                       </View>
                       <Pressable
                         onPress={() => { void handleRemoveSideSpacePost(post.id); }}
                         disabled={sideSpaceBusy}
                         style={styles.sideSpaceRemoveBtn}
                       >
-                        <Text style={styles.sideSpaceRemoveBtnText}>移除</Text>
+                        <Text selectable style={styles.sideSpaceRemoveBtnText}>移除</Text>
                       </Pressable>
                     </View>
                   ))
                 )}
               </View>
-              {sideSpaceError ? <Text style={styles.sideSpaceError}>{sideSpaceError}</Text> : null}
+              {sideSpaceError ? <Text selectable style={styles.sideSpaceError}>{sideSpaceError}</Text> : null}
               {/* R15.52: 推送 banner — 显示 server 推卸的 1-N 个 post, 点一下加进副空间 */}
               {!previewObject.sideSpaceFulfilled && pushSuggestions.length > 0 ? (
                 <View style={styles.sideSpacePushBanner}>
                   <View style={styles.sideSpacePushHeader}>
-                    <Text style={styles.sideSpacePushHeaderLabel}>✨ 为你推荐</Text>
-                    <Text style={styles.sideSpacePushHeaderHint}>AI 判断, 匹配缺口</Text>
+                    <Text selectable style={styles.sideSpacePushHeaderLabel}>✨ 为你推荐</Text>
+                    <Text selectable style={styles.sideSpacePushHeaderHint}>AI 判断, 匹配缺口</Text>
                   </View>
                   {pushSuggestions.map((s) => (
                     <View key={s.post.id} style={styles.sideSpacePushRow}>
                       <View style={styles.sideSpacePushCopy}>
-                        <Text style={styles.sideSpacePushTitle}>{s.post.title}</Text>
-                        <Text style={styles.sideSpacePushReason}>{s.reason}</Text>
+                        <Text selectable style={styles.sideSpacePushTitle}>{s.post.title}</Text>
+                        <Text selectable style={styles.sideSpacePushReason}>{s.reason}</Text>
                       </View>
                       <Pressable
                         onPress={() => { void handleAcceptPush(s.post.id); }}
                         disabled={sideSpaceBusy}
                         style={styles.sideSpacePushAccept}
                       >
-                        <Text style={styles.sideSpacePushAcceptText}>采纳</Text>
+                        <Text selectable style={styles.sideSpacePushAcceptText}>采纳</Text>
                       </Pressable>
                     </View>
                   ))}
@@ -410,12 +410,12 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
                 disabled={sideSpaceBusy}
                 style={styles.sideSpaceAddBtn}
               >
-                <Text style={styles.sideSpaceAddBtnText}>+ 添加到副空间</Text>
+                <Text selectable style={styles.sideSpaceAddBtnText}>+ 添加到副空间</Text>
               </Pressable>
-              <Text style={styles.sectionCardHint}>仅 {previewObject.displayName} 在“合作方副空间”看到这个池子，不会进入主空间 feed</Text>
+              <Text selectable style={styles.sectionCardHint}>仅 {previewObject.displayName} 在“合作方副空间”看到这个池子，不会进入主空间 feed</Text>
             </View>
           ) : null}
-          <Text style={styles.previewFoot}>Phase 1.5：预览为本地组织逻辑演示，后续接入真实素材分发</Text>
+          <Text selectable style={styles.previewFoot}>Phase 1.5：预览为本地组织逻辑演示，后续接入真实素材分发</Text>
         </ScrollView>
       </View>
       <SideSpaceAddModal
@@ -443,17 +443,17 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           <Pressable onPress={() => setView("HOME")} style={styles.backRow}>
-            <Text style={styles.backText}>‹ 返回 FACET</Text>
+            <Text selectable style={styles.backText}>‹ 返回 FACET</Text>
           </Pressable>
-          <Text style={styles.subPageTitle}>{metaVal!.title}</Text>
-          <Text style={styles.subPageDesc}>{metaVal!.desc}</Text>
+          <Text selectable style={styles.subPageTitle}>{metaVal!.title}</Text>
+          <Text selectable style={styles.subPageDesc}>{metaVal!.desc}</Text>
           {view === "LIBRARY" && payload ? (
             <View style={styles.subPageCard}>
               <SubRow label="已展示" value={`${payload.shownAssets} 条`} />
               <SubRow label="新鲜素材" value={`${payload.freshAssets} 个`} />
               <SubRow label="草稿" value="— · 本地上传待后续版本" />
               <SubRow label="备选" value="— · 审核队列待后续版本" />
-              <Text style={styles.subPageHint}>Phase 1.5：内容库为统计视图，上传与审核在后续版本</Text>
+              <Text selectable style={styles.subPageHint}>Phase 1.5：内容库为统计视图，上传与审核在后续版本</Text>
             </View>
           ) : null}
           {view === "OBJECTS" && payload ? (
@@ -463,12 +463,12 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
                 if (group.length === 0) return null;
                 return (
                   <View key={rel} style={styles.groupBlock}>
-                    <Text style={styles.groupTitle}>{RELATION_PILL[rel]} · {group.length}</Text>
+                    <Text selectable style={styles.groupTitle}>{RELATION_PILL[rel]} · {group.length}</Text>
                     {group.map((o: FacetObject) => (
                       <Pressable key={o.id} onPress={() => openPreview(o)} style={styles.groupRow}>
-                        <View style={styles.groupAvatar}><Text style={styles.groupAvatarText}>{o.displayName.charAt(0)}</Text></View>
-                        <View style={styles.groupCopy}><Text style={styles.groupName}>{o.displayName}</Text><Text style={styles.groupState}>{o.currentState}</Text></View>
-                        <Text style={styles.groupChevron}>›</Text>
+                        <View style={styles.groupAvatar}><Text selectable style={styles.groupAvatarText}>{o.displayName.charAt(0)}</Text></View>
+                        <View style={styles.groupCopy}><Text selectable style={styles.groupName}>{o.displayName}</Text><Text selectable style={styles.groupState}>{o.currentState}</Text></View>
+                        <Text selectable style={styles.groupChevron}>›</Text>
                       </Pressable>
                     ))}
                   </View>
@@ -494,7 +494,7 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={color.magenta} />}
       >
         <Pressable onPress={onBack} style={styles.backRow}>
-          <Text style={styles.backText}>‹ 返回</Text>
+          <Text selectable style={styles.backText}>‹ 返回</Text>
         </Pressable>
 
         {/* Hero — 使用真实 otter-logo.png + 渐变圆背景 */}
@@ -504,25 +504,25 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
               <Image accessibilityLabel="Proxy" source={OTTER_LOGO} style={styles.heroOtterImage} resizeMode="contain" />
             </Gradient>
             <View style={styles.heroWordWrap}>
-              <Text style={styles.heroWord}>
-                F<Text style={styles.heroAccent}>A</Text>CET
+              <Text selectable style={styles.heroWord}>
+                F<Text selectable style={styles.heroAccent}>A</Text>CET
               </Text>
-              <Text style={styles.heroTag}>对象化内容运营</Text>
+              <Text selectable style={styles.heroTag}>对象化内容运营</Text>
             </View>
           </View>
-          <Text style={styles.heroLead}>
+          <Text selectable style={styles.heroLead}>
             同一份真实素材，针对不同对象重新组织呈现方式。
-            <Text style={styles.heroLeadSmall}>人没有变，只是最相关的一面被优先呈现。</Text>
+            <Text selectable style={styles.heroLeadSmall}>人没有变，只是最相关的一面被优先呈现。</Text>
           </Text>
         </View>
 
         {onOpenAiIdentity ? (
           <Pressable onPress={onOpenAiIdentity} style={styles.aiLinkCard} accessibilityLabel="去 AI 分身生成新素材">
             <View style={styles.aiLinkCopy}>
-              <Text style={styles.aiLinkTitle}>素材不够用？</Text>
-              <Text style={styles.aiLinkSub}>去 AI 分身用你授权的形象生成新照片、新视频。</Text>
+              <Text selectable style={styles.aiLinkTitle}>素材不够用？</Text>
+              <Text selectable style={styles.aiLinkSub}>去 AI 分身用你授权的形象生成新照片、新视频。</Text>
             </View>
-            <Text style={styles.aiLinkChevron}>›</Text>
+            <Text selectable style={styles.aiLinkChevron}>›</Text>
           </Pressable>
         ) : null}
 
@@ -540,13 +540,13 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
         ) : null}
         {phase === "ERROR" ? (
           <View style={styles.stateBlock}>
-            <Text style={styles.errorText}>FACET 服务暂时不可用</Text>
-            <Text style={styles.errorHint}>{errorMessage ?? "请稍后重试"}</Text>
+            <Text selectable style={styles.errorText}>FACET 服务暂时不可用</Text>
+            <Text selectable style={styles.errorHint}>{errorMessage ?? "请稍后重试"}</Text>
             <Pressable onPress={handleRetry} style={styles.retryBtn}>
-              <Text style={styles.retryBtnText}>重试</Text>
+              <Text selectable style={styles.retryBtnText}>重试</Text>
             </Pressable>
             <Pressable onPress={onRefresh} style={styles.retrySubBtn}>
-              <Text style={styles.retrySubText}>下拉也可刷新</Text>
+              <Text selectable style={styles.retrySubText}>下拉也可刷新</Text>
             </Pressable>
           </View>
         ) : null}
@@ -562,8 +562,8 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
 
         {phase === "READY" && payload ? (
           <View style={styles.objectsSection}>
-            <Text style={styles.sectionTitle}>对象</Text>
-            <Text style={styles.sectionNote}>FACET 当前为每个对象独立判断展示方向</Text>
+            <Text selectable style={styles.sectionTitle}>对象</Text>
+            <Text selectable style={styles.sectionNote}>FACET 当前为每个对象独立判断展示方向</Text>
             <View style={styles.objectsList}>
               {payload.objects.length === 0 ? (
                 <ProxyEmptyState title="还没有对象" sub="创建首个对象后，这里会显示关系与缺口" />
@@ -581,7 +581,7 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
         ) : null}
 
         <View style={styles.scopeFooter}>
-          <Text style={styles.scopeFooterText}>
+          <Text selectable style={styles.scopeFooterText}>
             Phase 1.5：列表 + 预览 + 内容库/分组/运营视图。真实图片与规则引擎在后续版本。
           </Text>
         </View>
@@ -593,8 +593,8 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
 function StatBlock({ value, label }: { value: number; label: string }): React.JSX.Element {
   return (
     <View style={styles.statBlock}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+      <Text selectable style={styles.statValue}>{value}</Text>
+      <Text selectable style={styles.statLabel}>{label}</Text>
     </View>
   );
 }
@@ -603,8 +603,8 @@ function NavCard({ label, sub, iconName, onPress }: { label: string; sub: string
   return (
     <Pressable onPress={onPress} style={styles.navCard}>
       <View style={styles.navIcon}><ProxyIcon color={color.ink} name={iconName} size={18} /></View>
-      <Text style={styles.navLabel}>{label}</Text>
-      <Text style={styles.navSub}>{sub}</Text>
+      <Text selectable style={styles.navLabel}>{label}</Text>
+      <Text selectable style={styles.navSub}>{sub}</Text>
     </Pressable>
   );
 }
@@ -614,17 +614,17 @@ function ObjectCard({ object: obj, expanded, onToggle, onPreview }: { object: Fa
   return (
     <Pressable onPress={onToggle} style={styles.objectCard}>
       <View style={styles.objectHead}>
-        <View style={styles.objectAvatar}><Text style={styles.objectAvatarText}>{initial}</Text></View>
+        <View style={styles.objectAvatar}><Text selectable style={styles.objectAvatarText}>{initial}</Text></View>
         <View style={styles.objectHeadCopy}>
           <View style={styles.objectNameRow}>
-            <Text style={styles.objectName}>{obj.displayName}</Text>
-            <View style={styles.objectPill}><Text style={styles.objectPillText}>{RELATION_PILL[obj.relation]}</Text></View>
+            <Text selectable style={styles.objectName}>{obj.displayName}</Text>
+            <View style={styles.objectPill}><Text selectable style={styles.objectPillText}>{RELATION_PILL[obj.relation]}</Text></View>
           </View>
-          <Text style={styles.objectState} numberOfLines={expanded ? undefined : 2}>
+          <Text selectable style={styles.objectState} numberOfLines={expanded ? undefined : 2}>
             {obj.currentState}
           </Text>
         </View>
-        <Text style={styles.objectChevron}>{expanded ? "▾" : "›"}</Text>
+        <Text selectable style={styles.objectChevron}>{expanded ? "▾" : "›"}</Text>
       </View>
       {expanded ? (
         <View style={styles.objectDetail}>
@@ -632,7 +632,7 @@ function ObjectCard({ object: obj, expanded, onToggle, onPreview }: { object: Fa
           <DetailRow label="当前缺口" value={obj.gap.summary} />
           <DetailRow label="下一次展示" value={obj.gap.nextShowAt} accent />
           <Pressable onPress={onPreview} style={styles.objectDetailBtn}>
-            <Text style={styles.objectDetailBtnText}>查看 {obj.displayName} 看到的我</Text>
+            <Text selectable style={styles.objectDetailBtnText}>查看 {obj.displayName} 看到的我</Text>
           </Pressable>
         </View>
       ) : null}
@@ -643,8 +643,8 @@ function ObjectCard({ object: obj, expanded, onToggle, onPreview }: { object: Fa
 function DetailRow({ label, value, accent }: { label: string; value: string; accent?: boolean }): React.JSX.Element {
   return (
     <View style={styles.detailRow}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={[styles.detailValue, accent ? styles.detailValueAccent : null]}>{value}</Text>
+      <Text selectable style={styles.detailLabel}>{label}</Text>
+      <Text selectable style={[styles.detailValue, accent ? styles.detailValueAccent : null]}>{value}</Text>
     </View>
   );
 }
@@ -652,8 +652,8 @@ function DetailRow({ label, value, accent }: { label: string; value: string; acc
 function SubRow({ label, value }: { label: string; value: string }): React.JSX.Element {
   return (
     <View style={styles.subRow}>
-      <Text style={styles.subRowLabel}>{label}</Text>
-      <Text style={styles.subRowValue}>{value}</Text>
+      <Text selectable style={styles.subRowLabel}>{label}</Text>
+      <Text selectable style={styles.subRowValue}>{value}</Text>
     </View>
   );
 }
@@ -854,34 +854,34 @@ function SideSpaceAddModal({ open, catalog, existing, busy, onClose, onAdd }: Si
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.sideSpaceModalRoot}>
         <View style={styles.sideSpaceModalSheet}>
-          <Text style={styles.sideSpaceModalTitle}>添加到副空间</Text>
-          <Text style={styles.sideSpaceModalDesc}>
+          <Text selectable style={styles.sideSpaceModalTitle}>添加到副空间</Text>
+          <Text selectable style={styles.sideSpaceModalDesc}>
             从内容池选择一条内容，只对你正在运营的合作方可见，不进入你的主空间 feed。
           </Text>
           {available.length === 0 ? (
-            <Text style={styles.sideSpaceEmpty}>所有内容都已在副空间里</Text>
+            <Text selectable style={styles.sideSpaceEmpty}>所有内容都已在副空间里</Text>
           ) : (
             <ScrollView style={{ maxHeight: 360 }}>
               {available.map((p) => (
                 <View key={p.id} style={styles.sideSpaceCatalogRow}>
-                  <View style={styles.sideSpaceCatalogImage}><Text style={styles.sideSpaceCatalogImageText}>图</Text></View>
+                  <View style={styles.sideSpaceCatalogImage}><Text selectable style={styles.sideSpaceCatalogImageText}>图</Text></View>
                   <View style={styles.sideSpaceCatalogCopy}>
-                    <Text style={styles.sideSpaceCatalogTitle}>{p.title}</Text>
-                    <Text style={styles.sideSpaceCatalogMeta}>{kindLabel(p.kind)}</Text>
+                    <Text selectable style={styles.sideSpaceCatalogTitle}>{p.title}</Text>
+                    <Text selectable style={styles.sideSpaceCatalogMeta}>{kindLabel(p.kind)}</Text>
                   </View>
                   <Pressable
                     onPress={() => onAdd(p.id)}
                     disabled={busy}
                     style={styles.sideSpaceCatalogAddBtn}
                   >
-                    <Text style={styles.sideSpaceCatalogAddBtnText}>{busy ? "…" : "添加"}</Text>
+                    <Text selectable style={styles.sideSpaceCatalogAddBtnText}>{busy ? "…" : "添加"}</Text>
                   </Pressable>
                 </View>
               ))}
             </ScrollView>
           )}
           <Pressable onPress={onClose} style={styles.sideSpaceModalClose}>
-            <Text style={styles.sideSpaceModalCloseText}>关闭</Text>
+            <Text selectable style={styles.sideSpaceModalCloseText}>关闭</Text>
           </Pressable>
         </View>
       </View>
@@ -958,15 +958,15 @@ function OpsConfigPanel({ client, onClose }: OpsConfigPanelProps): React.JSX.Ele
   if (loading) {
     return (
       <View style={styles.subPageCard}>
-        <Text style={styles.opsTitle}>加载中…</Text>
+        <Text selectable style={styles.opsTitle}>加载中…</Text>
       </View>
     );
   }
   if (!draft || !config) {
     return (
       <View style={styles.subPageCard}>
-        <Text style={styles.opsTitle}>加载失败</Text>
-        {error ? <Text style={styles.opsError}>{error}</Text> : null}
+        <Text selectable style={styles.opsTitle}>加载失败</Text>
+        {error ? <Text selectable style={styles.opsError}>{error}</Text> : null}
       </View>
     );
   }
@@ -975,8 +975,8 @@ function OpsConfigPanel({ client, onClose }: OpsConfigPanelProps): React.JSX.Ele
 
   return (
     <View style={styles.subPageCard}>
-      <Text style={styles.opsTitle}>运营阈值</Text>
-      <Text style={styles.opsBody}>改动后点保存 — 乐观锁, 并发更新会被拒绝 (409)</Text>
+      <Text selectable style={styles.opsTitle}>运营阈值</Text>
+      <Text selectable style={styles.opsBody}>改动后点保存 — 乐观锁, 并发更新会被拒绝 (409)</Text>
 
       <SliderRow
         label="副空间 高意向阈值 (portfolio/capability)"
@@ -1015,22 +1015,22 @@ function OpsConfigPanel({ client, onClose }: OpsConfigPanelProps): React.JSX.Ele
       />
 
       <View style={styles.opsConfigFooter}>
-        <Text style={styles.opsConfigVersion}>Version: {config.version} (期望匹配才会保存)</Text>
-        {error ? <Text style={styles.opsError}>{error}</Text> : null}
+        <Text selectable style={styles.opsConfigVersion}>Version: {config.version} (期望匹配才会保存)</Text>
+        {error ? <Text selectable style={styles.opsError}>{error}</Text> : null}
         <View style={styles.opsConfigActions}>
           <Pressable
             onPress={() => { setDraft(config); setError(undefined); }}
             style={styles.opsConfigCancel}
             disabled={!dirty || saving}
           >
-            <Text style={styles.opsConfigCancelText}>重置</Text>
+            <Text selectable style={styles.opsConfigCancelText}>重置</Text>
           </Pressable>
           <Pressable
             onPress={() => void handleSave()}
             style={[styles.opsConfigSave, (!dirty || saving) ? styles.opsConfigSaveDisabled : null]}
             disabled={!dirty || saving}
           >
-            <Text style={styles.opsConfigSaveText}>{saving ? "保存中…" : "保存"}</Text>
+            <Text selectable style={styles.opsConfigSaveText}>{saving ? "保存中…" : "保存"}</Text>
           </Pressable>
         </View>
       </View>
@@ -1052,10 +1052,10 @@ function SliderRow({ label, value, min, max, step, hint, onChange }: SliderRowPr
   return (
     <View style={styles.opsSliderRow}>
       <View style={styles.opsSliderHeader}>
-        <Text style={styles.opsSliderLabel}>{label}</Text>
-        <Text style={styles.opsSliderValue}>{value}</Text>
+        <Text selectable style={styles.opsSliderLabel}>{label}</Text>
+        <Text selectable style={styles.opsSliderValue}>{value}</Text>
       </View>
-      <Text style={styles.opsSliderHint}>{hint}</Text>
+      <Text selectable style={styles.opsSliderHint}>{hint}</Text>
       {/* Phase 1.5: 用 +/- 按钮组代替 Slider (避免引入 react-native-community/slider 依赖) */}
       <View style={styles.opsSliderControls}>
         <Pressable
@@ -1063,7 +1063,7 @@ function SliderRow({ label, value, min, max, step, hint, onChange }: SliderRowPr
           onPress={() => onChange(Math.max(min, value - step))}
           style={styles.opsSliderBtn}
         >
-          <Text style={styles.opsSliderBtnText}>−</Text>
+          <Text selectable style={styles.opsSliderBtnText}>−</Text>
         </Pressable>
         <View style={styles.opsSliderBar}>
           {Array.from({ length: Math.floor((max - min) / step) + 1 }, (_, i) => {
@@ -1082,7 +1082,7 @@ function SliderRow({ label, value, min, max, step, hint, onChange }: SliderRowPr
           onPress={() => onChange(Math.min(max, value + step))}
           style={styles.opsSliderBtn}
         >
-          <Text style={styles.opsSliderBtnText}>＋</Text>
+          <Text selectable style={styles.opsSliderBtnText}>＋</Text>
         </Pressable>
       </View>
     </View>

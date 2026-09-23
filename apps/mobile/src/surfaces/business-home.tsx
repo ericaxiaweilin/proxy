@@ -184,8 +184,8 @@ export function BusinessHome({
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       <View style={styles.homeTop}>
         <View style={styles.homeTopCopy}>
-          <Text style={styles.homeTopTitle}>{homeTitle}</Text>
-          <Text style={styles.homeTopLoc}>
+          <Text selectable style={styles.homeTopTitle}>{homeTitle}</Text>
+          <Text selectable style={styles.homeTopLoc}>
             {loadError ? `加载失败：${loadError}` : storeCount > 0 ? `${storeCount} 个门店 · ${spendSummary.totalOrders} 单` : "暂无门店 — 在「我的 › 商家」创建"}
           </Text>
         </View>
@@ -199,14 +199,14 @@ export function BusinessHome({
             return dishUri
               ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: dishUri }} style={styles.identityPhoto} transition={0} />
               : <View style={styles.identityAvatar}>
-                <Text style={styles.identityAvatarText}>{firstStore.name.slice(0, 1).toUpperCase()}</Text>
+                <Text selectable style={styles.identityAvatarText}>{firstStore.name.slice(0, 1).toUpperCase()}</Text>
               </View>;
           })()}
           <View style={styles.identityCopy}>
-            <Text style={styles.identityName}>{firstStore.name}</Text>
-            <Text style={styles.identityMeta}>{firstStore.address || "地址待完善"} · {firstStore.status} · {memberCount} 经营人员</Text>
+            <Text selectable style={styles.identityName}>{firstStore.name}</Text>
+            <Text selectable style={styles.identityMeta}>{firstStore.address || "地址待完善"} · {firstStore.status} · {memberCount} 经营人员</Text>
           </View>
-          <Text style={styles.identityChev}>›</Text>
+          <Text selectable style={styles.identityChev}>›</Text>
         </Pressable>
       ) : null}
 
@@ -223,122 +223,122 @@ export function BusinessHome({
       ) : null}
 
       <View style={styles.controlPlane} testID="merchant-control-plane">
-        <View style={styles.controlCell}><Text style={styles.controlLabel}>现在</Text><Text style={styles.controlValue}>{operatingHome?.sceneSupply ? `${operatingHome.sceneSupply.currentCapacityPct}%` : operatingHome?.operatingPulse.state === "ACTIVE" ? "经营中" : "待接入"}</Text></View>
-        <View style={styles.controlCell}><Text style={styles.controlLabel}>预测</Text><Text style={styles.controlValue}>{operatingHome?.sceneSupply ? `${operatingHome.sceneSupply.forecastCapacityPct}%` : "不可用"}</Text></View>
-        <View style={styles.controlCell}><Text style={styles.controlLabel}>决策</Text><Text numberOfLines={1} style={styles.controlValue}>{operatingHome?.bestNextDecision.kind ?? "NO_ACTION"}</Text></View>
-        <View style={styles.controlCell}><Text style={styles.controlLabel}>预期</Text><Text style={styles.controlValue}>{operatingHome?.forecast.status === "AVAILABLE" ? `V${operatingHome.forecast.version}` : "待建立"}</Text></View>
+        <View style={styles.controlCell}><Text selectable style={styles.controlLabel}>现在</Text><Text selectable style={styles.controlValue}>{operatingHome?.sceneSupply ? `${operatingHome.sceneSupply.currentCapacityPct}%` : operatingHome?.operatingPulse.state === "ACTIVE" ? "经营中" : "待接入"}</Text></View>
+        <View style={styles.controlCell}><Text selectable style={styles.controlLabel}>预测</Text><Text selectable style={styles.controlValue}>{operatingHome?.sceneSupply ? `${operatingHome.sceneSupply.forecastCapacityPct}%` : "不可用"}</Text></View>
+        <View style={styles.controlCell}><Text selectable style={styles.controlLabel}>决策</Text><Text selectable numberOfLines={1} style={styles.controlValue}>{operatingHome?.bestNextDecision.kind ?? "NO_ACTION"}</Text></View>
+        <View style={styles.controlCell}><Text selectable style={styles.controlLabel}>预期</Text><Text selectable style={styles.controlValue}>{operatingHome?.forecast.status === "AVAILABLE" ? `V${operatingHome.forecast.version}` : "待建立"}</Text></View>
       </View>
 
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>经营结果</Text>
-        <Text style={styles.sectionHint}>{operatingHome ? `近 ${operatingHome.outcome.windowDays} 天` : "加载中"}</Text>
+        <Text selectable style={styles.sectionTitle}>经营结果</Text>
+        <Text selectable style={styles.sectionHint}>{operatingHome ? `近 ${operatingHome.outcome.windowDays} 天` : "加载中"}</Text>
       </View>
       <View style={styles.outcomeGrid} testID="merchant-business-outcome">
-        <View style={styles.metric}><Text style={styles.metricValue}>{operatingHome?.outcome.orderCount ?? "—"}</Text><Text style={styles.metricLabel}>订单</Text></View>
-        <View style={styles.metric}><Text style={styles.metricValue}>{operatingHome ? formatVnd(operatingHome.outcome.grossMinor) : "—"}</Text><Text style={styles.metricLabel}>成交</Text></View>
-        <View style={styles.metric}><Text style={styles.metricValue}>{operatingHome?.outcome.returningCustomers ?? "—"}</Text><Text style={styles.metricLabel}>复访客户</Text></View>
+        <View style={styles.metric}><Text selectable style={styles.metricValue}>{operatingHome?.outcome.orderCount ?? "—"}</Text><Text selectable style={styles.metricLabel}>订单</Text></View>
+        <View style={styles.metric}><Text selectable style={styles.metricValue}>{operatingHome ? formatVnd(operatingHome.outcome.grossMinor) : "—"}</Text><Text selectable style={styles.metricLabel}>成交</Text></View>
+        <View style={styles.metric}><Text selectable style={styles.metricValue}>{operatingHome?.outcome.returningCustomers ?? "—"}</Text><Text selectable style={styles.metricLabel}>复访客户</Text></View>
       </View>
 
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>经营脉搏</Text>
-        <Text style={styles.sectionHint}>实时状态 → 未来状态</Text>
+        <Text selectable style={styles.sectionTitle}>经营脉搏</Text>
+        <Text selectable style={styles.sectionHint}>实时状态 → 未来状态</Text>
       </View>
       <View style={styles.balanceCard} testID="merchant-demand-supply">
-        <View style={styles.balanceHead}><Text style={styles.balanceTitle}>需求 × 供给</Text><Text style={styles.unknownPill}>{operatingHome?.demandSupply.state ?? "信号不足"}</Text></View>
+        <View style={styles.balanceHead}><Text selectable style={styles.balanceTitle}>需求 × 供给</Text><Text selectable style={styles.unknownPill}>{operatingHome?.demandSupply.state ?? "信号不足"}</Text></View>
         {operatingHome?.aggregatedDemand && operatingHome.sceneSupply ? <>
-          <View style={styles.signalRow}><View style={styles.signalCell}><Text style={styles.signalLabel}>聚合需求</Text><Text style={styles.signalValue}>{operatingHome.aggregatedDemand.totalMatchingDemand}</Text><Text style={styles.signalSub}>确认 {operatingHome.aggregatedDemand.confirmedArrivals} · 高概率 {operatingHome.aggregatedDemand.highProbabilityArrivals}</Text></View><View style={styles.signalCell}><Text style={styles.signalLabel}>Scene Supply</Text><Text style={styles.signalValue}>{operatingHome.sceneSupply.forecastCapacityPct}%</Text><Text style={styles.signalSub}>当前 {operatingHome.sceneSupply.currentCapacityPct}% · {operatingHome.sceneSupply.acceptingTraffic ? "可承接" : "停止引流"}</Text></View></View>
-          <Text style={styles.balanceBody}>Proxy 判断：{operatingHome.demandSupply.reason}</Text>
-        </> : <Text style={styles.balanceBody}>尚未获得通过隐私阈值的聚合需求与 Scene 容量数据。</Text>}
-        <Text style={styles.balanceMeta}>{operatingHome?.demandSupply.privacyThresholdPassed ? `置信度 ${Math.round(operatingHome.demandSupply.confidence * 100)}% · 仅展示隐私聚合信号` : "不会用历史销售冒充附近客流，也不会生成虚假精确预测。"}</Text>
-        {operatingHome ? <Text style={styles.balanceMeta}>门店 {operatingHome.operatingPulse.storeCount} · 成员 {operatingHome.operatingPulse.memberCount} · {operatingHome.operatingPulse.freshness}</Text> : null}
+          <View style={styles.signalRow}><View style={styles.signalCell}><Text selectable style={styles.signalLabel}>聚合需求</Text><Text selectable style={styles.signalValue}>{operatingHome.aggregatedDemand.totalMatchingDemand}</Text><Text selectable style={styles.signalSub}>确认 {operatingHome.aggregatedDemand.confirmedArrivals} · 高概率 {operatingHome.aggregatedDemand.highProbabilityArrivals}</Text></View><View style={styles.signalCell}><Text selectable style={styles.signalLabel}>Scene Supply</Text><Text selectable style={styles.signalValue}>{operatingHome.sceneSupply.forecastCapacityPct}%</Text><Text selectable style={styles.signalSub}>当前 {operatingHome.sceneSupply.currentCapacityPct}% · {operatingHome.sceneSupply.acceptingTraffic ? "可承接" : "停止引流"}</Text></View></View>
+          <Text selectable style={styles.balanceBody}>Proxy 判断：{operatingHome.demandSupply.reason}</Text>
+        </> : <Text selectable style={styles.balanceBody}>尚未获得通过隐私阈值的聚合需求与 Scene 容量数据。</Text>}
+        <Text selectable style={styles.balanceMeta}>{operatingHome?.demandSupply.privacyThresholdPassed ? `置信度 ${Math.round(operatingHome.demandSupply.confidence * 100)}% · 仅展示隐私聚合信号` : "不会用历史销售冒充附近客流，也不会生成虚假精确预测。"}</Text>
+        {operatingHome ? <Text selectable style={styles.balanceMeta}>门店 {operatingHome.operatingPulse.storeCount} · 成员 {operatingHome.operatingPulse.memberCount} · {operatingHome.operatingPulse.freshness}</Text> : null}
       </View>
 
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>最佳下一步</Text>
-        <Text style={styles.sectionHint}>低置信策略</Text>
+        <Text selectable style={styles.sectionTitle}>最佳下一步</Text>
+        <Text selectable style={styles.sectionHint}>低置信策略</Text>
       </View>
       <View style={styles.decisionCard} testID="merchant-best-next-decision">
-        <View style={styles.decisionKind}><Text style={styles.decisionKindText}>{operatingHome?.bestNextDecision.kind ?? "NO_ACTION"}</Text></View>
-        <Text style={styles.decisionTitle}>{operatingHome?.bestNextDecision.title ?? "等待经营信号"}</Text>
-        <Text style={styles.decisionBody}>{operatingHome?.bestNextDecision.reason ?? "数据加载完成前不建议执行动作"}</Text>
-        {operatingHome?.bestNextDecision.requiresApproval ? <Pressable onPress={() => { setPlanOpen((open) => !open); setPlanResult(undefined); }} style={styles.decisionAction}><Text style={styles.decisionActionText}>{planOpen ? "收起方案" : "看方案并确认商业条件"}</Text></Pressable> : <Text style={styles.noActionNote}>无需老板处理 · 信号变化时再提醒</Text>}
+        <View style={styles.decisionKind}><Text selectable style={styles.decisionKindText}>{operatingHome?.bestNextDecision.kind ?? "NO_ACTION"}</Text></View>
+        <Text selectable style={styles.decisionTitle}>{operatingHome?.bestNextDecision.title ?? "等待经营信号"}</Text>
+        <Text selectable style={styles.decisionBody}>{operatingHome?.bestNextDecision.reason ?? "数据加载完成前不建议执行动作"}</Text>
+        {operatingHome?.bestNextDecision.requiresApproval ? <Pressable onPress={() => { setPlanOpen((open) => !open); setPlanResult(undefined); }} style={styles.decisionAction}><Text selectable style={styles.decisionActionText}>{planOpen ? "收起方案" : "看方案并确认商业条件"}</Text></Pressable> : <Text selectable style={styles.noActionNote}>无需老板处理 · 信号变化时再提醒</Text>}
       </View>
       {planOpen && operatingHome ? <View style={styles.inlinePlan} testID="merchant-inline-operating-plan">
-        <Text style={styles.inlinePlanEyebrow}>OPERATING PLAN · 发布前确认</Text>
-        <Text style={styles.inlinePlanTitle}>{operatingHome.bestNextDecision.title}</Text>
+        <Text selectable style={styles.inlinePlanEyebrow}>OPERATING PLAN · 发布前确认</Text>
+        <Text selectable style={styles.inlinePlanTitle}>{operatingHome.bestNextDecision.title}</Text>
         <PlanRow label="目标" value={operatingHome.bestNextDecision.kind === "LOW_PEAK_FILL" ? "填补低峰" : operatingHome.bestNextDecision.kind === "STOP_TRAFFIC" ? "保护现场体验" : "经营调整"} />
         <PlanRow label="Scene" value={operatingHome.sceneSupply?.sceneId ?? "待选择"} />
         <PlanRow label="SKU" value={menuItems.find((item) => item.available)?.name ?? "不指定"} />
         <PlanRow label="参与方" value="本店执行 · Creator / Partner 按需补位" />
         <PlanRow label="商业条件" value={operatingHome.bestNextDecision.kind === "STOP_TRAFFIC" ? "不加预算 · 停止新增流量" : "顾客各自消费 · 容量上限 12"} />
-        <Text style={styles.inlinePlanBoundary}>确认只授权当前商业条件。预算增加、合作条件变化或对外重大邀请仍需再次确认。</Text>
-        <Pressable disabled={planBusy || !activities || !firstStore} onPress={() => { void prepareOperatingAction(); }} style={[styles.prepareButton, (planBusy || !activities || !firstStore) && styles.prepareButtonDisabled]}><Text style={styles.prepareButtonText}>{planBusy ? "正在准备…" : operatingHome.bestNextDecision.kind === "STOP_TRAFFIC" ? "确认处置边界" : "确认并开始准备"}</Text></Pressable>
-        {planResult ? <Text style={styles.planResult}>{planResult}</Text> : null}
+        <Text selectable style={styles.inlinePlanBoundary}>确认只授权当前商业条件。预算增加、合作条件变化或对外重大邀请仍需再次确认。</Text>
+        <Pressable disabled={planBusy || !activities || !firstStore} onPress={() => { void prepareOperatingAction(); }} style={[styles.prepareButton, (planBusy || !activities || !firstStore) && styles.prepareButtonDisabled]}><Text selectable style={styles.prepareButtonText}>{planBusy ? "正在准备…" : operatingHome.bestNextDecision.kind === "STOP_TRAFFIC" ? "确认处置边界" : "确认并开始准备"}</Text></Pressable>
+        {planResult ? <Text selectable style={styles.planResult}>{planResult}</Text> : null}
       </View> : null}
 
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>未来需求</Text>
-        <Text style={styles.sectionHint}>Forecast</Text>
+        <Text selectable style={styles.sectionTitle}>未来需求</Text>
+        <Text selectable style={styles.sectionHint}>Forecast</Text>
       </View>
       <View style={styles.forecastEmpty} testID="merchant-future-demand">
-        <Text style={styles.forecastTitle}>{operatingHome?.forecast.status === "AVAILABLE" ? `未来容量 ${operatingHome.sceneSupply?.forecastCapacityPct ?? "—"}%` : "预测暂不可用"}</Text>
-        <Text style={styles.forecastBody}>{operatingHome?.aggregatedDemand ? `未来到店：已确认 ${operatingHome.aggregatedDemand.confirmedArrivals} · 高概率 ${operatingHome.aggregatedDemand.highProbabilityArrivals}。预测 V${operatingHome.forecast.version}，历史预期不会被覆盖。` : "接入聚合需求、预计到店、离店速度和活动占用后，才会显示未来容量。"}</Text>
+        <Text selectable style={styles.forecastTitle}>{operatingHome?.forecast.status === "AVAILABLE" ? `未来容量 ${operatingHome.sceneSupply?.forecastCapacityPct ?? "—"}%` : "预测暂不可用"}</Text>
+        <Text selectable style={styles.forecastBody}>{operatingHome?.aggregatedDemand ? `未来到店：已确认 ${operatingHome.aggregatedDemand.confirmedArrivals} · 高概率 ${operatingHome.aggregatedDemand.highProbabilityArrivals}。预测 V${operatingHome.forecast.version}，历史预期不会被覆盖。` : "接入聚合需求、预计到店、离店速度和活动占用后，才会显示未来容量。"}</Text>
       </View>
 
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>高价值场景</Text>
-        <Text style={styles.sectionHint}>Scene Package</Text>
+        <Text selectable style={styles.sectionTitle}>高价值场景</Text>
+        <Text selectable style={styles.sectionHint}>Scene Package</Text>
       </View>
       {showLoading ? <ProxyLoading tone="muted" /> : null}
       {scenePackages.length === 0 && !showLoading ? (
         <Pressable onPress={() => onOpenMarket("OPPORTUNITY")} style={styles.actionCard}>
           <View style={styles.actionIcon}><ProxyIcon color={color.ink} name="storefront" size={20} /></View>
-          <View style={styles.actionCopy}><Text style={styles.actionTitle}>暂无开放场景 — server 列表为空</Text></View>
+          <View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>暂无开放场景 — server 列表为空</Text></View>
         </Pressable>
       ) : null}
       {scenePackages.map((pkg) => (
         <Pressable key={pkg.id} onPress={() => onOpenMarket("OPPORTUNITY")} style={styles.scenePackageCard}>
           {pkg.coverImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-scene:${pkg.id}`} source={{ uri: pkg.coverImageUrl }} style={styles.scenePackageImage} transition={0} /> : <View style={styles.scenePackageFallback}><ProxyIcon color={color.muted} name="cup" size={24} /></View>}
-          <View style={styles.scenePackageBody}><View style={styles.actionCopy}><Text style={styles.actionTitle}>{pkg.title}</Text><Text style={styles.subtle}>{pkg.sub}</Text></View><View style={styles.actionMetricTag}><Text style={styles.actionMetricTagText}>{pkg.tag}</Text></View></View>
+          <View style={styles.scenePackageBody}><View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>{pkg.title}</Text><Text selectable style={styles.subtle}>{pkg.sub}</Text></View><View style={styles.actionMetricTag}><Text selectable style={styles.actionMetricTagText}>{pkg.tag}</Text></View></View>
         </Pressable>
       ))}
 
       <MerchantCreatorRecommendations supply={supply} onOpenAll={() => onOpenMarket("OPPORTUNITY")} />
 
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>招牌与在售</Text>
-        <Text style={styles.sectionHint}>HOT / COOL menu</Text>
+        <Text selectable style={styles.sectionTitle}>招牌与在售</Text>
+        <Text selectable style={styles.sectionHint}>HOT / COOL menu</Text>
       </View>
       {menuItems.length === 0 ? (
         <Pressable onPress={() => onOpenMe()} style={styles.actionCard}>
           <View style={styles.actionIcon}><ProxyIcon color={color.ink} name="storefront" size={20} /></View>
-          <View style={styles.actionCopy}><Text style={styles.actionTitle}>还没有菜单</Text><Text style={styles.subtle}>去线上店铺加第一道菜</Text></View>
+          <View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>还没有菜单</Text><Text selectable style={styles.subtle}>去线上店铺加第一道菜</Text></View>
         </Pressable>
       ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>
           {menuItems.filter((m) => m.available).slice(0, 6).map((m) => (
             <Pressable key={m.id} onPress={() => onOpenMe()} style={styles.menuCard}>
               {m.mediaAssetId ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-sku:${m.id}`} source={{ uri: `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(m.mediaAssetId)}` }} style={styles.menuImage} transition={0} /> : <View style={styles.menuImageMissing}><ProxyIcon color={color.muted} name="storefront" size={22} /></View>}
-              <Text style={styles.menuName} numberOfLines={1}>{m.name}</Text>
-              <Text style={styles.menuPrice}>{formatVnd(m.priceMinor)}</Text>
+              <Text selectable style={styles.menuName} numberOfLines={1}>{m.name}</Text>
+              <Text selectable style={styles.menuPrice}>{formatVnd(m.priceMinor)}</Text>
             </Pressable>
           ))}
         </ScrollView>
       )}
 
       {inProgress.length ? <>
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>正在进行</Text><Text style={styles.sectionHint}>只显示本商家动作</Text></View>
-        {inProgress.map((item) => <Pressable key={item.id} onPress={() => onOpenMarket("ACTIVITY")} style={styles.progressCard}><View style={styles.progressDot} /><View style={styles.actionCopy}><Text style={styles.actionTitle}>{item.title}</Text><Text style={styles.subtle}>{item.sub} · 报名不等于到场</Text></View><Text style={styles.progressState}>{item.tag}</Text></Pressable>)}
+        <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>正在进行</Text><Text selectable style={styles.sectionHint}>只显示本商家动作</Text></View>
+        {inProgress.map((item) => <Pressable key={item.id} onPress={() => onOpenMarket("ACTIVITY")} style={styles.progressCard}><View style={styles.progressDot} /><View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>{item.title}</Text><Text selectable style={styles.subtle}>{item.sub} · 报名不等于到场</Text></View><Text selectable style={styles.progressState}>{item.tag}</Text></Pressable>)}
       </> : null}
 
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>待处理</Text>
-        <Text style={styles.sectionHint}>今天</Text>
+        <Text selectable style={styles.sectionTitle}>待处理</Text>
+        <Text selectable style={styles.sectionHint}>今天</Text>
       </View>
       {pendingItems.length === 0 && !showLoading ? (
         <Pressable onPress={() => onOpenMe()} style={styles.actionCard}>
           <View style={styles.actionIcon}><ProxyIcon color={color.ink} name="check" size={20} /></View>
-          <View style={styles.actionCopy}><Text style={styles.actionTitle}>暂无待处理事项</Text></View>
+          <View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>暂无待处理事项</Text></View>
         </Pressable>
       ) : null}
       {pendingItems.map((item) => (
@@ -347,25 +347,25 @@ export function BusinessHome({
             <ProxyIcon color={color.ink} name={item.icon} size={20} />
           </View>
           <View style={styles.actionCopy}>
-            <Text style={styles.actionTitle}>{item.title}</Text>
-            {item.meta ? <Text style={styles.subtle}>{item.meta}</Text> : null}
+            <Text selectable style={styles.actionTitle}>{item.title}</Text>
+            {item.meta ? <Text selectable style={styles.subtle}>{item.meta}</Text> : null}
           </View>
         </Pressable>
       ))}
 
       <View style={styles.resultCard}>
-        <Text style={styles.resultTitle}>场景结果</Text>
-        <Text style={styles.resultSub}>
+        <Text selectable style={styles.resultTitle}>场景结果</Text>
+        <Text selectable style={styles.resultSub}>
           {spendSummary.totalOrders > 0
             ? `近 7 天 ${spendSummary.totalOrders} 单 · ${formatVnd(spendSummary.totalGrossMinor)}`
             : "暂无成交 — server 列表为空"}
         </Text>
-        <Text style={styles.resultHint}>哪种 Scene 真正带来增量消费和复访？</Text>
+        <Text selectable style={styles.resultHint}>哪种 Scene 真正带来增量消费和复访？</Text>
       </View>
 
       <Pressable onPress={onOpenMe} style={styles.resume}>
-        <Text style={styles.resumeTitle}>经营</Text>
-        <Text style={styles.resumeHint}>更多在「我的」›</Text>
+        <Text selectable style={styles.resumeTitle}>经营</Text>
+        <Text selectable style={styles.resumeHint}>更多在「我的」›</Text>
       </Pressable>
 
       <View style={styles.quickRow}>
@@ -378,7 +378,7 @@ export function BusinessHome({
             <View style={styles.quickIcon}>
               <ProxyIcon color={color.muted} name={entry.icon} size={20} />
             </View>
-            <Text style={styles.quickLabel}>{entry.label}</Text>
+            <Text selectable style={styles.quickLabel}>{entry.label}</Text>
           </Pressable>
         ))}
       </View>
@@ -387,7 +387,7 @@ export function BusinessHome({
 }
 
 function PlanRow({ label, value }: { label: string; value: string }): React.JSX.Element {
-  return <View style={styles.planRow}><Text style={styles.planLabel}>{label}</Text><Text style={styles.planValue}>{value}</Text></View>;
+  return <View style={styles.planRow}><Text selectable style={styles.planLabel}>{label}</Text><Text selectable style={styles.planValue}>{value}</Text></View>;
 }
 
 const styles = StyleSheet.create({

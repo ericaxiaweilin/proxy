@@ -204,10 +204,10 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
   }
 
   return <View style={styles.root}>
-    <View style={styles.header}><Pressable onPress={onBack} style={styles.back}><Text style={styles.backText}>‹ 返回</Text></Pressable><Text style={styles.headerTitle}>{target.name}</Text><Pressable onPress={() => setReporting(true)} style={styles.headerAction} accessibilityLabel="举报这个账号"><Text style={styles.headerActionText}>举报</Text></Pressable></View>
+    <View style={styles.header}><Pressable onPress={onBack} style={styles.back}><Text selectable style={styles.backText}>‹ 返回</Text></Pressable><Text selectable style={styles.headerTitle}>{target.name}</Text><Pressable onPress={() => setReporting(true)} style={styles.headerAction} accessibilityLabel="举报这个账号"><Text selectable style={styles.headerActionText}>举报</Text></Pressable></View>
     <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.identity}><View style={styles.avatar}>{target.avatarUri ? <Image source={{ uri: target.avatarUri }} style={styles.avatarPhoto} /> : <Text style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text>}</View><View style={styles.identityCopy}><Text style={styles.name}>{target.name}</Text><Text style={styles.handle}>@{target.userId}</Text><Text style={styles.bio}>{target.city ?? "公开主页"}</Text></View></View>
-      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+      <View style={styles.identity}><View style={styles.avatar}>{target.avatarUri ? <Image source={{ uri: target.avatarUri }} style={styles.avatarPhoto} /> : <Text selectable style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text>}</View><View style={styles.identityCopy}><Text selectable style={styles.name}>{target.name}</Text><Text selectable style={styles.handle}>@{target.userId}</Text><Text selectable style={styles.bio}>{target.city ?? "公开主页"}</Text></View></View>
+      {notice ? <Text selectable style={styles.notice}>{notice}</Text> : null}
       {/* AVATAR-CARRY-001: profileAvatarUri 之前没传——ProfileTabs 内部这根线
           (PostsTab → PostCard.avatarUri) 本来就是通的，帖子头像栏一直画着，
           只是没人喂真图给它，所以每条帖子都落回首字母。不是另一套管线要修，

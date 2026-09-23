@@ -241,11 +241,11 @@ export function RoomSurface({ conversationId, conversationClient, mediaClient, p
     <View style={[styles.root, presentation === "overlay" && styles.overlay, { paddingTop: safeArea.top }]}>
       <View style={styles.header}>
         <Pressable accessibilityLabel="返回" hitSlop={12} onPress={onClose} style={styles.headerBack}>
-          <Text style={styles.headerBackText}>‹</Text>
+          <Text selectable style={styles.headerBackText}>‹</Text>
         </Pressable>
         <View style={styles.headerInfo}>
-          <Text style={styles.headerName} numberOfLines={1}>{roomName}</Text>
-          <Text style={styles.headerSub}>{participants.length} 人</Text>
+          <Text selectable style={styles.headerName} numberOfLines={1}>{roomName}</Text>
+          <Text selectable style={styles.headerSub}>{participants.length} 人</Text>
         </View>
       </View>
 
@@ -255,10 +255,10 @@ export function RoomSurface({ conversationId, conversationClient, mediaClient, p
         <>
           {roomScene ? (
             <View style={styles.sceneBanner}>
-              <Text style={styles.sceneBannerEmoji}>{roomScene.emoji}</Text>
+              <Text selectable style={styles.sceneBannerEmoji}>{roomScene.emoji}</Text>
               <View style={styles.sceneBannerInfo}>
-                <Text style={styles.sceneBannerTitle}>{roomScene.sceneName}</Text>
-                <Text style={styles.sceneBannerDetail}>{roomScene.sceneDesc}</Text>
+                <Text selectable style={styles.sceneBannerTitle}>{roomScene.sceneName}</Text>
+                <Text selectable style={styles.sceneBannerDetail}>{roomScene.sceneDesc}</Text>
               </View>
             </View>
           ) : null}
@@ -271,9 +271,9 @@ export function RoomSurface({ conversationId, conversationClient, mediaClient, p
               return (
                 <View key={id} style={styles.memberItem}>
                   {uri ? <Image source={{ uri }} style={styles.memberAvatar} /> : (
-                    <View style={styles.memberAvatarFallback}><Text style={styles.memberAvatarFallbackText}>{displayName(id).slice(0, 1)}</Text></View>
+                    <View style={styles.memberAvatarFallback}><Text selectable style={styles.memberAvatarFallbackText}>{displayName(id).slice(0, 1)}</Text></View>
                   )}
-                  <Text numberOfLines={1} style={styles.memberName}>{displayName(id)}</Text>
+                  <Text selectable numberOfLines={1} style={styles.memberName}>{displayName(id)}</Text>
                 </View>
               );
             })}
@@ -303,17 +303,17 @@ export function RoomSurface({ conversationId, conversationClient, mediaClient, p
           <ScrollView contentContainerStyle={styles.quickReplies} horizontal showsHorizontalScrollIndicator={false}>
             {!meetup ? (
               <Pressable accessibilityLabel="发起见面" onPress={openMeetSheet} style={[styles.qrBtn, styles.qrBtnMeet]}>
-                <Text style={styles.qrBtnMeetText}>📍 发起见面</Text>
+                <Text selectable style={styles.qrBtnMeetText}>📍 发起见面</Text>
               </Pressable>
             ) : null}
             {QUICK_REPLIES.map((qr) => (
               <Pressable accessibilityLabel={qr.label} key={qr.text} onPress={() => void sendText(qr.text)} style={styles.qrBtn}>
-                <Text style={styles.qrBtnText}>{qr.label}</Text>
+                <Text selectable style={styles.qrBtnText}>{qr.label}</Text>
               </Pressable>
             ))}
           </ScrollView>
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text selectable style={styles.error}>{error}</Text> : null}
 
           <View style={styles.inputBar}>
             <Pressable accessibilityLabel="发送图片" disabled={sending} onPress={() => void sendPhoto()} style={styles.inputIconBtn}>
@@ -329,7 +329,7 @@ export function RoomSurface({ conversationId, conversationClient, mediaClient, p
             />
             {draft.trim() ? (
               <Pressable accessibilityLabel="发送" disabled={sending} onPress={() => void sendText(draft)} style={styles.sendBtn}>
-                <Text style={styles.sendBtnText}>发送</Text>
+                <Text selectable style={styles.sendBtnText}>发送</Text>
               </Pressable>
             ) : (
               <VoiceToolButton disabled={sending} onDone={(recording) => void sendVoice(recording)} />
@@ -342,10 +342,10 @@ export function RoomSurface({ conversationId, conversationClient, mediaClient, p
         <Pressable accessibilityLabel="关闭发起见面" onPress={() => setMeetSheetOpen(false)} style={styles.sheetBackdrop}>
           <View onStartShouldSetResponder={() => true} style={[styles.meetSheet, { paddingBottom: safeArea.bottom + 16 }]}>
             <View style={styles.sheetGrab} />
-            <Text style={styles.sheetTitle}>发起线下见面</Text>
-            <Text style={styles.sheetSub}>房间成员会收到邀请，全部同意后生效</Text>
+            <Text selectable style={styles.sheetTitle}>发起线下见面</Text>
+            <Text selectable style={styles.sheetSub}>房间成员会收到邀请，全部同意后生效</Text>
 
-            <Text style={styles.sheetLabel}>选场景</Text>
+            <Text selectable style={styles.sheetLabel}>选场景</Text>
             <View style={styles.meetSceneGrid}>
               {MEET_SCENE_OPTIONS.map((option, index) => (
                 <Pressable
@@ -354,13 +354,13 @@ export function RoomSurface({ conversationId, conversationClient, mediaClient, p
                   onPress={() => { setMeetSceneIndex(index); setMeetPlace(option.place); }}
                   style={[styles.meetSceneOpt, index === meetSceneIndex && styles.meetSceneOptSelected]}
                 >
-                  <Text style={styles.meetSceneEmoji}>{option.emoji}</Text>
-                  <Text style={styles.meetSceneName}>{option.sceneName}</Text>
+                  <Text selectable style={styles.meetSceneEmoji}>{option.emoji}</Text>
+                  <Text selectable style={styles.meetSceneName}>{option.sceneName}</Text>
                 </Pressable>
               ))}
             </View>
 
-            <Text style={styles.sheetLabel}>选时间</Text>
+            <Text selectable style={styles.sheetLabel}>选时间</Text>
             <View style={styles.meetTimeChips}>
               {MEET_TIME_OPTIONS.map((option, index) => (
                 <Pressable
@@ -369,20 +369,20 @@ export function RoomSurface({ conversationId, conversationClient, mediaClient, p
                   onPress={() => setMeetTimeIndex(index)}
                   style={[styles.meetTimeChip, index === meetTimeIndex && styles.meetTimeChipSelected]}
                 >
-                  <Text style={[styles.meetTimeChipText, index === meetTimeIndex && styles.meetTimeChipTextSelected]}>{option}</Text>
+                  <Text selectable style={[styles.meetTimeChipText, index === meetTimeIndex && styles.meetTimeChipTextSelected]}>{option}</Text>
                 </Pressable>
               ))}
             </View>
 
-            <Text style={styles.sheetLabel}>碰头地点</Text>
+            <Text selectable style={styles.sheetLabel}>碰头地点</Text>
             <TextInput accessibilityLabel="碰头地点" onChangeText={setMeetPlace} style={styles.meetPlaceInput} value={meetPlace} />
 
             <View style={styles.meetSheetFooter}>
               <Pressable accessibilityLabel="取消" onPress={() => setMeetSheetOpen(false)} style={[styles.meetFooterBtn, styles.meetFooterBtnSecondary]}>
-                <Text style={styles.meetFooterBtnSecondaryText}>取消</Text>
+                <Text selectable style={styles.meetFooterBtnSecondaryText}>取消</Text>
               </Pressable>
               <Pressable accessibilityLabel="发到房间" disabled={meetBusy} onPress={() => void sendMeetInvite()} style={[styles.meetFooterBtn, styles.meetFooterBtnPrimary]}>
-                <Text style={styles.meetFooterBtnPrimaryText}>{meetBusy ? "发送中…" : "发到房间"}</Text>
+                <Text selectable style={styles.meetFooterBtnPrimaryText}>{meetBusy ? "发送中…" : "发到房间"}</Text>
               </Pressable>
             </View>
           </View>
@@ -406,14 +406,14 @@ function MeetStatusBar({ meetup, selfIsProposer, busy, onNudge, onArrive, onComp
   if (meetup.status === "PENDING") {
     return (
       <View style={[styles.meetStatusBar, styles.meetStatusBarPending]}>
-        <Text style={styles.meetStatusIcon}>⏰</Text>
+        <Text selectable style={styles.meetStatusIcon}>⏰</Text>
         <View style={styles.meetStatusInfo}>
-          <Text style={styles.meetStatusTitle}>等待成员接受见面</Text>
-          <Text style={styles.meetStatusDesc}>{meetup.timeLabel} · {meetup.place}</Text>
+          <Text selectable style={styles.meetStatusTitle}>等待成员接受见面</Text>
+          <Text selectable style={styles.meetStatusDesc}>{meetup.timeLabel} · {meetup.place}</Text>
         </View>
         {selfIsProposer ? (
           <Pressable accessibilityLabel="催一下" disabled={busy} onPress={onNudge} style={styles.meetStatusActionOutline}>
-            <Text style={styles.meetStatusActionOutlineText}>催一下</Text>
+            <Text selectable style={styles.meetStatusActionOutlineText}>催一下</Text>
           </Pressable>
         ) : null}
       </View>
@@ -422,26 +422,26 @@ function MeetStatusBar({ meetup, selfIsProposer, busy, onNudge, onArrive, onComp
   if (meetup.status === "CONFIRMED") {
     return (
       <View style={[styles.meetStatusBar, styles.meetStatusBarConfirmed]}>
-        <Text style={styles.meetStatusIcon}>✅</Text>
+        <Text selectable style={styles.meetStatusIcon}>✅</Text>
         <View style={styles.meetStatusInfo}>
-          <Text style={styles.meetStatusTitle}>已约定 · 记得准时</Text>
-          <Text style={styles.meetStatusDesc}>{meetup.timeLabel} · {meetup.place}</Text>
+          <Text selectable style={styles.meetStatusTitle}>已约定 · 记得准时</Text>
+          <Text selectable style={styles.meetStatusDesc}>{meetup.timeLabel} · {meetup.place}</Text>
         </View>
         <Pressable accessibilityLabel="我已到达" disabled={busy} onPress={onArrive} style={styles.meetStatusActionGreen}>
-          <Text style={styles.meetStatusActionGreenText}>📍 我已到达</Text>
+          <Text selectable style={styles.meetStatusActionGreenText}>📍 我已到达</Text>
         </Pressable>
       </View>
     );
   }
   return (
     <View style={[styles.meetStatusBar, styles.meetStatusBarOngoing]}>
-      <Text style={styles.meetStatusIcon}>🟢</Text>
+      <Text selectable style={styles.meetStatusIcon}>🟢</Text>
       <View style={styles.meetStatusInfo}>
-        <Text style={[styles.meetStatusTitle, styles.meetStatusTitleOngoing]}>进行中 · 已见面</Text>
-        <Text style={[styles.meetStatusDesc, styles.meetStatusDescOngoing]}>{meetup.timeLabel} · {meetup.place}</Text>
+        <Text selectable style={[styles.meetStatusTitle, styles.meetStatusTitleOngoing]}>进行中 · 已见面</Text>
+        <Text selectable style={[styles.meetStatusDesc, styles.meetStatusDescOngoing]}>{meetup.timeLabel} · {meetup.place}</Text>
       </View>
       <Pressable accessibilityLabel="结束见面" disabled={busy} onPress={onComplete} style={styles.meetStatusActionDark}>
-        <Text style={styles.meetStatusActionDarkText}>✅ 结束</Text>
+        <Text selectable style={styles.meetStatusActionDarkText}>✅ 结束</Text>
       </Pressable>
     </View>
   );
@@ -452,7 +452,7 @@ function MessageRow({ message, isOwn, senderName, meetup, meetupActionsBusy, onA
   meetupActionsBusy: boolean; onAccept: () => void; baseUrl: string; selfId: string | undefined;
 }): React.JSX.Element {
   if (message.messageType === "SYSTEM_CONTEXT") {
-    return <View style={styles.sysMsgWrap}><Text style={styles.sysMsg}>{message.body}</Text></View>;
+    return <View style={styles.sysMsgWrap}><Text selectable style={styles.sysMsg}>{message.body}</Text></View>;
   }
   if (message.messageType === "STRUCTURED_SUGGESTION" && message.proxyObject?.objectType === "invitation") {
     const snapshot = message.proxyObject.snapshot ?? {};
@@ -462,16 +462,16 @@ function MessageRow({ message, isOwn, senderName, meetup, meetupActionsBusy, onA
     return (
       <View style={[styles.msgRow, isOwn && styles.msgRowMe]}>
         <View style={styles.meetInviteCard}>
-          <Text style={styles.meetInviteBadge}>📍 见面邀约</Text>
-          <Text style={styles.meetInviteTitle}>{String(snapshot.sceneEmoji ?? "")} {String(snapshot.sceneName ?? "")}</Text>
-          <View style={styles.meetInviteRow}><Text style={styles.meetInviteLabel}>时间</Text><Text style={styles.meetInviteValue}>{String(snapshot.timeLabel ?? "")}</Text></View>
-          <View style={styles.meetInviteRow}><Text style={styles.meetInviteLabel}>地点</Text><Text style={styles.meetInviteValue}>{String(snapshot.place ?? "")}</Text></View>
+          <Text selectable style={styles.meetInviteBadge}>📍 见面邀约</Text>
+          <Text selectable style={styles.meetInviteTitle}>{String(snapshot.sceneEmoji ?? "")} {String(snapshot.sceneName ?? "")}</Text>
+          <View style={styles.meetInviteRow}><Text selectable style={styles.meetInviteLabel}>时间</Text><Text selectable style={styles.meetInviteValue}>{String(snapshot.timeLabel ?? "")}</Text></View>
+          <View style={styles.meetInviteRow}><Text selectable style={styles.meetInviteLabel}>地点</Text><Text selectable style={styles.meetInviteValue}>{String(snapshot.place ?? "")}</Text></View>
           {isLive && status === "PENDING" && !isOwn && !alreadyAccepted ? (
             <Pressable accessibilityLabel="接受见面邀约" disabled={meetupActionsBusy} onPress={onAccept} style={styles.meetInviteAcceptBtn}>
-              <Text style={styles.meetInviteAcceptText}>接受</Text>
+              <Text selectable style={styles.meetInviteAcceptText}>接受</Text>
             </Pressable>
           ) : (
-            <Text style={styles.meetInviteStatusText}>{status === "PENDING" ? "等待接受" : status === "CONFIRMED" ? "✓ 已约定" : status === "ONGOING" ? "进行中" : "已结束"}</Text>
+            <Text selectable style={styles.meetInviteStatusText}>{status === "PENDING" ? "等待接受" : status === "CONFIRMED" ? "✓ 已约定" : status === "ONGOING" ? "进行中" : "已结束"}</Text>
           )}
         </View>
       </View>
@@ -480,7 +480,7 @@ function MessageRow({ message, isOwn, senderName, meetup, meetupActionsBusy, onA
   if (message.messageType === "IMAGE" && message.mediaRef) {
     return (
       <View style={[styles.msgRow, isOwn && styles.msgRowMe]}>
-        {!isOwn ? <Text style={styles.msgName}>{senderName}</Text> : null}
+        {!isOwn ? <Text selectable style={styles.msgName}>{senderName}</Text> : null}
         <Image contentFit="cover" source={{ uri: `${baseUrl}/v1/media/thumb/${encodeURIComponent(message.mediaRef)}` }} style={styles.msgImage} />
       </View>
     );
@@ -488,16 +488,16 @@ function MessageRow({ message, isOwn, senderName, meetup, meetupActionsBusy, onA
   if (message.messageType === "AUDIO" && message.mediaRef) {
     return (
       <View style={[styles.msgRow, isOwn && styles.msgRowMe]}>
-        {!isOwn ? <Text style={styles.msgName}>{senderName}</Text> : null}
+        {!isOwn ? <Text selectable style={styles.msgName}>{senderName}</Text> : null}
         <ChatAudio uri={`${baseUrl}/v1/media/play/${encodeURIComponent(message.mediaRef)}`} />
       </View>
     );
   }
   return (
     <View style={[styles.msgRow, isOwn && styles.msgRowMe]}>
-      {!isOwn ? <Text style={styles.msgName}>{senderName}</Text> : null}
+      {!isOwn ? <Text selectable style={styles.msgName}>{senderName}</Text> : null}
       <View style={[styles.msgBubble, isOwn && styles.msgBubbleMe]}>
-        <Text style={[styles.msgBubbleText, isOwn && styles.msgBubbleTextMe]}>{message.body}</Text>
+        <Text selectable style={[styles.msgBubbleText, isOwn && styles.msgBubbleTextMe]}>{message.body}</Text>
       </View>
     </View>
   );
@@ -518,8 +518,8 @@ function ChatAudio({ uri }: { uri: string }): React.JSX.Element {
       onPress={() => { const player = playerRef.current; if (!player) return; if (playing) player.pause(); else player.play(); setPlaying(!playing); }}
       style={styles.audioBubble}
     >
-      <Text style={styles.audioBubbleGlyph}>{playing ? "❚❚" : "▶"}</Text>
-      <Text style={styles.audioBubbleLabel}>语音</Text>
+      <Text selectable style={styles.audioBubbleGlyph}>{playing ? "❚❚" : "▶"}</Text>
+      <Text selectable style={styles.audioBubbleLabel}>语音</Text>
     </Pressable>
   );
 }

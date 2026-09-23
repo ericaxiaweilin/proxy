@@ -47,7 +47,7 @@ export function AIMediaBadge({
     // pointerEvents="none"：标注是覆盖层，不能吃掉「点开原图」的手势 ——
     // 那比不显示标注更糟（用户点不开图）。
     <View pointerEvents="none" style={inline ? styles.badgeInline : styles.badge}>
-      <Text style={styles.badgeText}>{label}</Text>
+      <Text selectable style={styles.badgeText}>{label}</Text>
     </View>
   );
 }

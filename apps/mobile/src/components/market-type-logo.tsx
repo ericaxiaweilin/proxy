@@ -27,7 +27,7 @@ export function MarketTypeLogo({ type, size, selected = false }: { type: MarketO
   const pixels = SIZE[size];
   const icon = MASTER[type];
   return <View style={[styles.frame, selected && styles.frameSelected, { borderRadius: Math.round(pixels * 0.27), height: pixels, width: pixels }]}>
-    {icon ? <Image contentFit="contain" source={icon} style={[styles.icon, selected && styles.iconSelected, { height: Math.round(pixels * 0.72), width: Math.round(pixels * 0.72) }]} /> : <Text style={[styles.otherGlyph, selected && styles.otherGlyphSelected, { fontSize: Math.round(pixels * 0.6) }]}>⋯</Text>}
+    {icon ? <Image contentFit="contain" source={icon} style={[styles.icon, selected && styles.iconSelected, { height: Math.round(pixels * 0.72), width: Math.round(pixels * 0.72) }]} /> : <Text selectable style={[styles.otherGlyph, selected && styles.otherGlyphSelected, { fontSize: Math.round(pixels * 0.6) }]}>⋯</Text>}
   </View>;
 }
 

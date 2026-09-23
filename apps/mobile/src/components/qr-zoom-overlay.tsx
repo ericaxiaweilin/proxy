@@ -79,11 +79,11 @@ export function QrZoomOverlay({
           <View style={styles.badge}>
             <ProxyIcon color={color.white} name="qrGrid" size={20} />
           </View>
-          <Text numberOfLines={2} style={styles.title}>
+          <Text selectable numberOfLines={2} style={styles.title}>
             {title}
           </Text>
           <Pressable accessibilityLabel="关闭" accessibilityRole="button" onPress={onClose} style={styles.close}>
-            <Text style={styles.closeText}>✕</Text>
+            <Text selectable style={styles.closeText}>✕</Text>
           </Pressable>
         </View>
 
@@ -100,7 +100,7 @@ export function QrZoomOverlay({
           </Text>
         </ScrollView>
 
-        <Text style={styles.hint}>{hint}</Text>
+        <Text selectable style={styles.hint}>{hint}</Text>
 
         {actions && actions.length > 0 ? (
           <View style={styles.actions}>
@@ -112,13 +112,13 @@ export function QrZoomOverlay({
                 onPress={a.onPress}
                 style={[styles.btn, a.primary ? styles.btnPrimary : styles.btnGhost]}
               >
-                <Text style={a.primary ? styles.btnPrimaryText : styles.btnGhostText}>{a.label}</Text>
+                <Text selectable style={a.primary ? styles.btnPrimaryText : styles.btnGhostText}>{a.label}</Text>
               </Pressable>
             ))}
           </View>
         ) : null}
 
-        {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+        {notice ? <Text selectable style={styles.notice}>{notice}</Text> : null}
 
         <View style={{ height: insets.bottom + 16 }} />
       </View>

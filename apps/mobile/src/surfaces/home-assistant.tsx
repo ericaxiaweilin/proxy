@@ -201,20 +201,20 @@ export function HomeAssistantSurface({
     <View style={[styles.root, embedded && styles.embeddedRoot, keyboardInset > 0 && { paddingBottom: keyboardInset }]}>
       {!embedded ? <View style={styles.header}>
         <Pressable accessibilityLabel="返回 Home" onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backText}>‹</Text>
+          <Text selectable style={styles.backText}>‹</Text>
         </Pressable>
         <View style={styles.headerCopy}>
-          <Text style={styles.headerTitle}>Proxy</Text>
+          <Text selectable style={styles.headerTitle}>Proxy</Text>
         </View>
-        <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>
+        <View style={styles.aiBadge}><Text selectable style={styles.aiBadgeText}>AI</Text></View>
       </View> : (
         <View style={styles.embeddedHeader}>
           <View>
-            <Text style={styles.embeddedTitle}>Proxy</Text>
+            <Text selectable style={styles.embeddedTitle}>Proxy</Text>
           </View>
           <View style={styles.embeddedActions}>
             <Pressable accessibilityLabel="收起 Home 对话" onPress={() => { Keyboard.dismiss(); onBack(); }} style={styles.embeddedClose}>
-              <Text style={styles.embeddedCloseText}>收起</Text>
+              <Text selectable style={styles.embeddedCloseText}>收起</Text>
             </Pressable>
           </View>
         </View>
@@ -226,13 +226,13 @@ export function HomeAssistantSurface({
 
       <ScrollView ref={scrollRef} style={styles.messages} contentContainerStyle={styles.messageContent} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
         {messages.map((message) => message.isDivider ? (
-          <View key={message.id} style={styles.timelineDivider}><View style={styles.timelineLine} /><Text style={styles.timelineText}>{message.body}</Text><View style={styles.timelineLine} /></View>
+          <View key={message.id} style={styles.timelineDivider}><View style={styles.timelineLine} /><Text selectable style={styles.timelineText}>{message.body}</Text><View style={styles.timelineLine} /></View>
         ) : (
           <View key={message.id} style={[styles.bubble, message.isOwn ? styles.userBubble : styles.aiBubble]}>
             {message.attachmentUri ? <Image accessibilityLabel="会话照片" source={{ uri: message.attachmentUri }} style={styles.messageImage} /> : null}
-            {!message.isOwn ? <Text style={styles.sender}>Proxy AI</Text> : null}
-            <Text style={[styles.body, message.isOwn && styles.userBody]}>{message.body}</Text>
-            <Text style={[styles.time, message.isOwn && styles.userTime]}>{message.time}</Text>
+            {!message.isOwn ? <Text selectable style={styles.sender}>Proxy AI</Text> : null}
+            <Text selectable style={[styles.body, message.isOwn && styles.userBody]}>{message.body}</Text>
+            <Text selectable style={[styles.time, message.isOwn && styles.userTime]}>{message.time}</Text>
           </View>
         ))}
         {temporaryUI ? <ServerTemporaryForm disabled={sending} onSubmit={(summary) => void send(`我的补充信息：${summary}`, temporaryUI.id)} spec={temporaryUI} /> : null}
@@ -244,23 +244,23 @@ export function HomeAssistantSurface({
               // 只关窗口、进不了市场（调用方 onOpenXiaomei 仅关闭）。
               // 都没有 handler 则收起建议条，不留死按钮。
               <Pressable key={a.label} onPress={() => { if (a.isFeed && onOpenFeed) onOpenFeed(); else if (a.tab && onOpenMarket) onOpenMarket(a.tab); else if (a.label.includes("小美") && onOpenXiaomei) onOpenXiaomei(); else setSuggestedActions([]); }} style={styles.suggestedPill}>
-                <Text style={styles.suggestedText}>{a.label}</Text>
+                <Text selectable style={styles.suggestedText}>{a.label}</Text>
               </Pressable>
             ))}
             <Pressable onPress={() => setSuggestedActions([])} style={[styles.suggestedPill, styles.suggestedGhost]}>
-              <Text style={[styles.suggestedText, styles.suggestedGhostText]}>留在对话</Text>
+              <Text selectable style={[styles.suggestedText, styles.suggestedGhostText]}>留在对话</Text>
             </Pressable>
           </View>
         ) : null}
-        {loading ? <View style={styles.systemPill}><Text style={styles.systemText}>正在理解你的意图…</Text></View> : null}
-        {status ? <View style={styles.statusBox}><Text style={styles.statusText}>{status}</Text></View> : null}
+        {loading ? <View style={styles.systemPill}><Text selectable style={styles.systemText}>正在理解你的意图…</Text></View> : null}
+        {status ? <View style={styles.statusBox}><Text selectable style={styles.statusText}>{status}</Text></View> : null}
         {startFailed && !conversationId && !loading ? (
           <Pressable
             onPress={() => { setStartFailed(false); setLoading(true); setRetryNonce((n) => n + 1); }}
             style={[styles.suggestedPill]}
             accessibilityLabel="重试连接"
           >
-            <Text style={styles.suggestedText}>↻ 重试连接</Text>
+            <Text selectable style={styles.suggestedText}>↻ 重试连接</Text>
           </Pressable>
         ) : null}
       </ScrollView>
@@ -277,7 +277,7 @@ export function HomeAssistantSurface({
           value={draft}
         />
         <Pressable disabled={!draft.trim() || !conversationId || sending} onPress={() => void send()} style={[styles.sendButton, (!draft.trim() || !conversationId || sending) && styles.disabled]}>
-          <Text style={styles.sendText}>{sending ? "…" : "↑"}</Text>
+          <Text selectable style={styles.sendText}>{sending ? "…" : "↑"}</Text>
         </Pressable>
       </View> : null}
     </View>

@@ -131,7 +131,7 @@ describe("Proxy Design System R3 typography", () => {
   it("keeps the prototype footprint logo on the personal scene entry", () => {
     const mePath = join(sourceRoot, "surfaces", "me.tsx");
     const source = readFileSync(mePath, "utf8");
-    const entry = source.match(/personalSceneEntry[\s\S]*?<Text style=\{styles\.personalSceneChevron\}>/)?.[0] ?? "";
+    const entry = source.match(/personalSceneEntry[\s\S]*?<Text selectable style=\{styles\.personalSceneChevron\}>/)?.[0] ?? "";
     expect(entry, "personalSceneEntry should exist").not.toBe("");
     expect(entry).toContain('name="footprint"');
     expect(entry).not.toContain('name="route"');

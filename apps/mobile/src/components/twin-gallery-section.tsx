@@ -110,31 +110,31 @@ export function TwinGallerySection({ rawGalleryItems, mediaClient, authClient, o
   return (
     <View style={styles.section}>
       <View style={styles.head}>
-        <Text style={styles.title}>图库 <Text style={styles.countBadge}>{items.length} 张</Text></Text>
+        <Text selectable style={styles.title}>图库 <Text selectable style={styles.countBadge}>{items.length} 张</Text></Text>
         <Pressable accessibilityLabel={expanded ? "收起图库" : "展开图库"} onPress={() => setExpanded((prev) => !prev)}>
-          <Text style={styles.expandBtn}>{expanded ? "收起" : "展开"}</Text>
+          <Text selectable style={styles.expandBtn}>{expanded ? "收起" : "展开"}</Text>
         </Pressable>
       </View>
 
       <View style={styles.sourceRow}>
         {([["public", "公共图库", "输入 · 个人主页照片"], ["ai", "AI 生成图库", "输出 · AI 生成的照片"]] as const).map(([id, label, sub]) => (
           <Pressable key={id} accessibilityRole="button" accessibilityState={{ selected: source === id }} onPress={() => setSource(id)} style={[styles.sourceBtn, source === id && styles.sourceBtnOn]}>
-            <Text style={[styles.sourceLabel, source === id && styles.sourceLabelOn]}>{label}</Text>
-            <Text style={[styles.sourceSub, source === id && styles.sourceSubOn]}>{sub}</Text>
+            <Text selectable style={[styles.sourceLabel, source === id && styles.sourceLabelOn]}>{label}</Text>
+            <Text selectable style={[styles.sourceSub, source === id && styles.sourceSubOn]}>{sub}</Text>
           </Pressable>
         ))}
       </View>
 
       {source === "ai" ? (
         aiState.status === "loading" || aiState.status === "idle" ? (
-          <Text style={styles.aiState}>读取 AI 生成图库…</Text>
+          <Text selectable style={styles.aiState}>读取 AI 生成图库…</Text>
         ) : aiState.status === "unauthorized" ? (
           <View style={styles.aiStateBox}>
-            <Text style={styles.aiState}>还没有 AI 分身：授权 AI 使用你的形象后，AI 生成的照片会出现在这里。</Text>
-            <Pressable accessibilityRole="button" onPress={() => promptLikenessConsent(grantAndReload)} style={styles.aiStateBtn}><Text style={styles.aiStateBtnText}>授权形象</Text></Pressable>
+            <Text selectable style={styles.aiState}>还没有 AI 分身：授权 AI 使用你的形象后，AI 生成的照片会出现在这里。</Text>
+            <Pressable accessibilityRole="button" onPress={() => promptLikenessConsent(grantAndReload)} style={styles.aiStateBtn}><Text selectable style={styles.aiStateBtnText}>授权形象</Text></Pressable>
           </View>
         ) : aiState.status === "error" ? (
-          <Pressable accessibilityRole="button" onPress={() => setAiAttempt((n) => n + 1)}><Text style={styles.aiState}>AI 生成图库没读出来，点这里重试</Text></Pressable>
+          <Pressable accessibilityRole="button" onPress={() => setAiAttempt((n) => n + 1)}><Text selectable style={styles.aiState}>AI 生成图库没读出来，点这里重试</Text></Pressable>
         ) : items.length === 0 ? (
           <ProxyEmptyState sub="出图任务接上后，AI 用你公共图库里的照片生成的形象图会出现在这里" title="还没有 AI 生成的照片" />
         ) : expanded ? (
@@ -155,7 +155,7 @@ export function TwinGallerySection({ rawGalleryItems, mediaClient, authClient, o
           {items.map((item) => <GalleryThumb item={item} key={item.id} onPress={() => setPreview(item)} style={styles.trackThumb} />)}
         </ScrollView>
       )}
-      {uploadError ? <Text style={styles.errorText}>{uploadError}</Text> : null}
+      {uploadError ? <Text selectable style={styles.errorText}>{uploadError}</Text> : null}
 
       <Modal animationType="fade" onRequestClose={() => setPreview(undefined)} transparent visible={preview !== undefined}>
         <Pressable onPress={() => setPreview(undefined)} style={styles.previewBackdrop}>
@@ -178,7 +178,7 @@ function UploadTile({ disabled, onPress, style, uploading }: { disabled: boolean
       {uploading ? <ActivityIndicator color={color.muted} /> : (
         <>
           <ProxyIcon color={color.muted} name="plus" size={20} />
-          <Text style={styles.uploadTileText}>{disabled ? "暂不可用" : "导入"}</Text>
+          <Text selectable style={styles.uploadTileText}>{disabled ? "暂不可用" : "导入"}</Text>
         </>
       )}
     </Pressable>

@@ -246,7 +246,7 @@ export function ProxySymbolIcon({
   const glyphScale = symbol === "♡" ? 0.86 : symbol === "⌁" ? 0.9 : 1;
   return (
     <View pointerEvents="none" style={[styles.frame, { height: size, width: size }, style]}>
-      <Text
+      <Text selectable
         allowFontScaling={false}
         style={[
           styles.prototypeGlyph,

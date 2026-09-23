@@ -92,12 +92,12 @@ export function TwinPostComposerSection({ posts, mediaByPost, galleryItems, rela
   return (
     <View style={styles.section}>
       <View style={styles.head}>
-        <Text style={styles.title}>帖文编排</Text>
+        <Text selectable style={styles.title}>帖文编排</Text>
         <Pressable accessibilityLabel="发新帖" onPress={() => setComposerOpen(true)}>
-          <Text style={styles.newPostBtn}>＋ 新帖</Text>
+          <Text selectable style={styles.newPostBtn}>＋ 新帖</Text>
         </Pressable>
       </View>
-      <Text style={styles.sectionSub}>私密副空间，不在你的主页上——只有你按开关选中的人能看到。</Text>
+      <Text selectable style={styles.sectionSub}>私密副空间，不在你的主页上——只有你按开关选中的人能看到。</Text>
 
       {myPosts.length === 0 ? (
         <ProxyEmptyState sub="点右上角「＋ 新帖」，选指定好友后发布" title="这里还没有帖子" />
@@ -172,13 +172,13 @@ function PostCard({ post, media, friendNameById, resolveMediaUrl, onEditAudience
         onPress={onEditAudience}
         style={[styles.audienceBar, isTargeted ? styles.audienceBarTargeted : undefined]}
       >
-        <Text style={styles.audienceIcon}>{isTargeted ? "🎯" : "🌐"}</Text>
-        <Text style={[styles.audienceText, isTargeted ? styles.audienceTextTargeted : undefined]} numberOfLines={1}>{audienceLabel}</Text>
-        {canEdit ? <Text style={styles.audienceChevron}>›</Text> : null}
+        <Text selectable style={styles.audienceIcon}>{isTargeted ? "🎯" : "🌐"}</Text>
+        <Text selectable style={[styles.audienceText, isTargeted ? styles.audienceTextTargeted : undefined]} numberOfLines={1}>{audienceLabel}</Text>
+        {canEdit ? <Text selectable style={styles.audienceChevron}>›</Text> : null}
       </Pressable>
       <View style={styles.postMeta}>
-        <Text style={styles.postName} numberOfLines={1}>{post.authorDisplayName || "我"}</Text>
-        <Text style={styles.postTime}>{relativeTimeLabel(post.createdAt)}</Text>
+        <Text selectable style={styles.postName} numberOfLines={1}>{post.authorDisplayName || "我"}</Text>
+        <Text selectable style={styles.postTime}>{relativeTimeLabel(post.createdAt)}</Text>
       </View>
       {media.length > 0 ? (
         <View style={styles.postImages}>
@@ -188,7 +188,7 @@ function PostCard({ post, media, friendNameById, resolveMediaUrl, onEditAudience
           })}
         </View>
       ) : null}
-      {post.body ? <Text numberOfLines={4} style={styles.postCaption}>{post.body}</Text> : null}
+      {post.body ? <Text selectable numberOfLines={4} style={styles.postCaption}>{post.body}</Text> : null}
     </View>
   );
 }
@@ -246,7 +246,7 @@ function ComposerSheet({ galleryItems, friends, viewerAccountId, createPost, onC
         <Pressable onPress={(e) => e.stopPropagation()} style={styles.sheet}>
           <View style={styles.sheetHandle} />
           <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sheetTitle}>新帖</Text>
+            <Text selectable style={styles.sheetTitle}>新帖</Text>
 
             <TextInput
               multiline
@@ -259,7 +259,7 @@ function ComposerSheet({ galleryItems, friends, viewerAccountId, createPost, onC
 
             {galleryItems.length > 0 ? (
               <>
-                <Text style={styles.fieldLabel}>选图库照片（最多 6 张）</Text>
+                <Text selectable style={styles.fieldLabel}>选图库照片（最多 6 张）</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaPicker}>
                   {galleryItems.map((item) => {
                     const selected = selectedMediaIds.includes(item.id);
@@ -274,7 +274,7 @@ function ComposerSheet({ galleryItems, friends, viewerAccountId, createPost, onC
               </>
             ) : null}
 
-            <Text style={styles.fieldLabel}>谁能看到</Text>
+            <Text selectable style={styles.fieldLabel}>谁能看到</Text>
             <AudiencePicker
               audienceMode={audienceMode}
               friends={friends}
@@ -284,18 +284,18 @@ function ComposerSheet({ galleryItems, friends, viewerAccountId, createPost, onC
               toggleFriend={toggleFriend}
             />
 
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            {error ? <Text selectable style={styles.errorText}>{error}</Text> : null}
 
             <View style={styles.sheetFooter}>
               <Pressable onPress={onClose} style={styles.sheetCancelBtn}>
-                <Text style={styles.sheetCancelText}>取消</Text>
+                <Text selectable style={styles.sheetCancelText}>取消</Text>
               </Pressable>
               <Pressable
                 disabled={!canPublish || busy}
                 onPress={() => void publish()}
                 style={[styles.sheetPublishBtn, (!canPublish || busy) && styles.sheetPublishBtnDisabled]}
               >
-                <Text style={styles.sheetPublishText}>{busy ? "发布中…" : "发布"}</Text>
+                <Text selectable style={styles.sheetPublishText}>{busy ? "发布中…" : "发布"}</Text>
               </Pressable>
             </View>
           </ScrollView>
@@ -322,13 +322,13 @@ function AudiencePicker({ audienceMode, setAudienceMode, friends, resolveMediaUr
           onPress={() => setAudienceMode("public")}
           style={[styles.audienceSwitchBtn, audienceMode === "public" && styles.audienceSwitchBtnActive]}
         >
-          <Text style={[styles.audienceSwitchText, audienceMode === "public" && styles.audienceSwitchTextActive]}>🌐 公开</Text>
+          <Text selectable style={[styles.audienceSwitchText, audienceMode === "public" && styles.audienceSwitchTextActive]}>🌐 公开</Text>
         </Pressable>
         <Pressable
           onPress={() => setAudienceMode("targeted")}
           style={[styles.audienceSwitchBtn, audienceMode === "targeted" && styles.audienceSwitchBtnActive]}
         >
-          <Text style={[styles.audienceSwitchText, audienceMode === "targeted" && styles.audienceSwitchTextActive]}>🎯 指定好友</Text>
+          <Text selectable style={[styles.audienceSwitchText, audienceMode === "targeted" && styles.audienceSwitchTextActive]}>🎯 指定好友</Text>
         </Pressable>
       </View>
 
@@ -336,7 +336,7 @@ function AudiencePicker({ audienceMode, setAudienceMode, friends, resolveMediaUr
         friends === undefined ? (
           <ActivityIndicator color={color.muted} style={{ marginVertical: 12 }} />
         ) : friends.length === 0 ? (
-          <Text style={styles.friendsEmpty}>还没有好友，先去加几个好友才能指定受众。</Text>
+          <Text selectable style={styles.friendsEmpty}>还没有好友，先去加几个好友才能指定受众。</Text>
         ) : (
           <View style={styles.friendList}>
             {friends.map((friend) => {
@@ -356,7 +356,7 @@ function AudiencePicker({ audienceMode, setAudienceMode, friends, resolveMediaUr
                       size={32}
                       {...(avatarSource ? { source: avatarSource } : {})}
                     />
-                    <Text numberOfLines={1} style={styles.friendName}>{friend.displayName}</Text>
+                    <Text selectable numberOfLines={1} style={styles.friendName}>{friend.displayName}</Text>
                   </View>
                   <View style={[styles.friendCheck, selected && styles.friendCheckOn]}>
                     {selected ? <ProxyIcon color={color.white} name="check" size={12} /> : null}
@@ -415,8 +415,8 @@ function AudienceEditSheet({ post, friends, updatePostAudience, onClose, onSaved
         <Pressable onPress={(e) => e.stopPropagation()} style={styles.sheet}>
           <View style={styles.sheetHandle} />
           <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sheetTitle}>谁能看到这条帖子</Text>
-            <Text style={styles.sheetSub}>AI 分身按这个开关决定这条帖子出现在谁的信息流里——看不到的人，就不会出现在他们的信息流里。</Text>
+            <Text selectable style={styles.sheetTitle}>谁能看到这条帖子</Text>
+            <Text selectable style={styles.sheetSub}>AI 分身按这个开关决定这条帖子出现在谁的信息流里——看不到的人，就不会出现在他们的信息流里。</Text>
 
             <AudiencePicker
               audienceMode={audienceMode}
@@ -427,18 +427,18 @@ function AudienceEditSheet({ post, friends, updatePostAudience, onClose, onSaved
               toggleFriend={toggleFriend}
             />
 
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            {error ? <Text selectable style={styles.errorText}>{error}</Text> : null}
 
             <View style={styles.sheetFooter}>
               <Pressable onPress={onClose} style={styles.sheetCancelBtn}>
-                <Text style={styles.sheetCancelText}>取消</Text>
+                <Text selectable style={styles.sheetCancelText}>取消</Text>
               </Pressable>
               <Pressable
                 disabled={!canSave || busy}
                 onPress={() => void save()}
                 style={[styles.sheetPublishBtn, (!canSave || busy) && styles.sheetPublishBtnDisabled]}
               >
-                <Text style={styles.sheetPublishText}>{busy ? "保存中…" : "保存"}</Text>
+                <Text selectable style={styles.sheetPublishText}>{busy ? "保存中…" : "保存"}</Text>
               </Pressable>
             </View>
           </ScrollView>

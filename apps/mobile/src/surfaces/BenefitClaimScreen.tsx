@@ -49,16 +49,16 @@ function BenefitCard({
   return (
     <Pressable onPress={onPress} style={[styles.card, { borderLeftColor: campaignStyle.color }]}>
       <View style={styles.cardHeader}>
-        <Text style={[styles.campaignTag, { color: campaignStyle.color }]}>{campaignStyle.label}</Text>
-        <Text style={styles.benefitIcon}>{BENEFIT_ICONS[benefit.kind] ?? "•"}</Text>
+        <Text selectable style={[styles.campaignTag, { color: campaignStyle.color }]}>{campaignStyle.label}</Text>
+        <Text selectable style={styles.benefitIcon}>{BENEFIT_ICONS[benefit.kind] ?? "•"}</Text>
       </View>
-      <Text style={styles.benefitLabel}>{benefit.label}</Text>
-      {benefit.description ? <Text style={styles.benefitDesc}>{benefit.description}</Text> : null}
+      <Text selectable style={styles.benefitLabel}>{benefit.label}</Text>
+      {benefit.description ? <Text selectable style={styles.benefitDesc}>{benefit.description}</Text> : null}
       <View style={styles.cardFooter}>
-        <Text style={styles.value}>
+        <Text selectable style={styles.value}>
           {benefit.userPayMinor === 0 ? "免费" : `${formatMoney(benefit.userPayMinor)}₫`}
         </Text>
-        <Text style={styles.retailValue}>原价 {formatMoney(benefit.retailValueMinor)}₫</Text>
+        <Text selectable style={styles.retailValue}>原价 {formatMoney(benefit.retailValueMinor)}₫</Text>
       </View>
     </Pressable>
   );
@@ -149,19 +149,19 @@ export function BenefitClaimScreen({
     return (
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.successBox}>
-          <Text style={styles.successIcon}>✓</Text>
-          <Text style={styles.successTitle}>领取成功</Text>
-          <Text style={styles.successText}>
+          <Text selectable style={styles.successIcon}>✓</Text>
+          <Text selectable style={styles.successTitle}>领取成功</Text>
+          <Text selectable style={styles.successText}>
             请出示以下验证码给店员扫描
           </Text>
           <View style={styles.tokenBox}>
-            <Text style={styles.tokenText}>{claimToken}</Text>
+            <Text selectable style={styles.tokenText}>{claimToken}</Text>
           </View>
-          <Text style={styles.successHint}>
+          <Text selectable style={styles.successHint}>
             验证码有效期为 5 分钟，请尽快使用
           </Text>
           <Pressable onPress={onBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>返回</Text>
+            <Text selectable style={styles.backButtonText}>返回</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -172,18 +172,18 @@ export function BenefitClaimScreen({
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <Pressable onPress={onBack} style={styles.backArrow}>
-          <Text style={styles.backArrowText}>‹</Text>
+          <Text selectable style={styles.backArrowText}>‹</Text>
         </Pressable>
-        <Text style={styles.title}>可用权益</Text>
+        <Text selectable style={styles.title}>可用权益</Text>
       </View>
 
       {busy ? <ProxyLoading tone="brand" style={styles.spinner} /> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <Text selectable style={styles.error}>{error}</Text> : null}
 
       {campaign ? (
         <View style={styles.campaignInfo}>
-          <Text style={styles.campaignGoal}>{campaign.goal}</Text>
-          <Text style={styles.campaignBudget}>
+          <Text selectable style={styles.campaignGoal}>{campaign.goal}</Text>
+          <Text selectable style={styles.campaignBudget}>
             预算: {formatMoney(campaign.budgetMinor)}₫
           </Text>
         </View>
@@ -204,15 +204,15 @@ export function BenefitClaimScreen({
 
       {myClaims.length > 0 ? (
         <View>
-          <Text style={styles.sectionTitle}>我已领取 · {myClaims.length}</Text>
+          <Text selectable style={styles.sectionTitle}>我已领取 · {myClaims.length}</Text>
           {myClaims.map((claim) => (
             <Pressable
               key={claim.claimId}
               onPress={() => onClaimed(claim, claim.claimToken)}
               style={styles.claimRow}
             >
-              <Text style={styles.claimRowTitle}>{claim.benefitId}</Text>
-              <Text style={styles.claimRowMeta}>{claim.status} · {new Date(claim.createdAt).toLocaleString()} ›</Text>
+              <Text selectable style={styles.claimRowTitle}>{claim.benefitId}</Text>
+              <Text selectable style={styles.claimRowMeta}>{claim.status} · {new Date(claim.createdAt).toLocaleString()} ›</Text>
             </Pressable>
           ))}
         </View>

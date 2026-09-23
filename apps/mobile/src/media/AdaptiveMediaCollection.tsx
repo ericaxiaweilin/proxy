@@ -176,7 +176,7 @@ export function MediaViewer({
   if (!current) return <View />;
   const header = (
     <View pointerEvents="box-none" style={viewerStyles.top}>
-      <Text style={viewerStyles.counter}>{safeIndex + 1}/{items.length} · {author}</Text>
+      <Text selectable style={viewerStyles.counter}>{safeIndex + 1}/{items.length} · {author}</Text>
       {/* LC-06 显示侧：全屏查看器里 AI 生成的图也必须带标注 —— 它跟 feed 里
           是同一张图，放大了反而没标注 = 用户以为是人拍的。顶栏已经覆盖在图片上，
           用行内变体（绝对定位会压住右上角关闭按钮）。 */}
@@ -189,7 +189,7 @@ export function MediaViewer({
         onPressIn={onClose}
         style={viewerStyles.close}
       >
-        <Text style={viewerStyles.closeText}>×</Text>
+        <Text selectable style={viewerStyles.closeText}>×</Text>
       </Pressable>
     </View>
   );
@@ -470,8 +470,8 @@ function VideoStage({
           />
         )}
         <View pointerEvents="none" style={styles.videoBadge}>
-          <Text style={styles.videoBadgeText}>视频</Text>
-          {item.durationMs ? <Text style={styles.videoBadgeText}>· {Math.round(item.durationMs / 1000)}s</Text> : null}
+          <Text selectable style={styles.videoBadgeText}>视频</Text>
+          {item.durationMs ? <Text selectable style={styles.videoBadgeText}>· {Math.round(item.durationMs / 1000)}s</Text> : null}
         </View>
       </Pressable>
     );
@@ -617,8 +617,8 @@ function ActiveVideoStage({
         />
       ) : null}
       <View pointerEvents="none" style={styles.videoBadge}>
-        <Text style={styles.videoBadgeText}>视频</Text>
-        {item.durationMs ? <Text style={styles.videoBadgeText}>· {Math.round(item.durationMs / 1000)}s</Text> : null}
+        <Text selectable style={styles.videoBadgeText}>视频</Text>
+        {item.durationMs ? <Text selectable style={styles.videoBadgeText}>· {Math.round(item.durationMs / 1000)}s</Text> : null}
       </View>
     </Pressable>
   );
@@ -708,7 +708,7 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
               {/* LC-06：多图帖里 AI 生成的那一张也必须标注。图片卡的标注由
                   SocialMediaFrame（叶子）自己挂；VIDEO 卡没有叶子挂点，这里补。 */}
               {isVideo ? <AIMediaBadge item={item} /> : null}
-              <View style={styles.railBadge}><Text style={styles.railBadgeText}>{index + 1}/{items.length}</Text></View>
+              <View style={styles.railBadge}><Text selectable style={styles.railBadgeText}>{index + 1}/{items.length}</Text></View>
             </Pressable>
           );
         })}

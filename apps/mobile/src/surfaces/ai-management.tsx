@@ -225,7 +225,7 @@ function Chip({ label, selected, onPress, static: isStatic }: { label: string; s
       onPress={onPress}
       style={[styles.chip, selected && styles.chipSelected]}
     >
-      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
+      <Text selectable style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
     </Pressable>
   );
 }
@@ -233,21 +233,21 @@ function Chip({ label, selected, onPress, static: isStatic }: { label: string; s
 function OptionItem({ icon, name, desc, selected, onPress }: { icon: string; name: string; desc?: string; selected: boolean; onPress: () => void }): React.JSX.Element {
   return (
     <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={onPress} style={[styles.option, selected && styles.optionSelected]}>
-      <Text style={styles.optionIcon}>{icon}</Text>
+      <Text selectable style={styles.optionIcon}>{icon}</Text>
       <View style={styles.optionInfo}>
-        <Text style={styles.optionName}>{name}</Text>
-        {desc ? <Text style={styles.optionDesc}>{desc}</Text> : null}
+        <Text selectable style={styles.optionName}>{name}</Text>
+        {desc ? <Text selectable style={styles.optionDesc}>{desc}</Text> : null}
       </View>
-      <View style={[styles.check, selected && styles.checkOn]}>{selected ? <Text style={styles.checkMark}>✓</Text> : null}</View>
+      <View style={[styles.check, selected && styles.checkOn]}>{selected ? <Text selectable style={styles.checkMark}>✓</Text> : null}</View>
     </Pressable>
   );
 }
 
 function GroupTitle({ title, hint, first }: { title: string; hint?: string; first?: boolean }): React.JSX.Element {
   return (
-    <Text style={[styles.groupTitle, !first && styles.groupTitleGap]}>
+    <Text selectable style={[styles.groupTitle, !first && styles.groupTitleGap]}>
       {title}
-      {hint ? <Text style={styles.groupHint}>{`  · ${hint}`}</Text> : null}
+      {hint ? <Text selectable style={styles.groupHint}>{`  · ${hint}`}</Text> : null}
     </Text>
   );
 }
@@ -260,7 +260,7 @@ function SheetTabs<T extends string>({ tabs, value, onChange }: { tabs: Readonly
           const active = tab.id === value;
           return (
             <Pressable key={tab.id} accessibilityRole="tab" accessibilityState={{ selected: active }} onPress={() => onChange(tab.id)} style={styles.tab}>
-              <Text style={[styles.tabText, active && styles.tabTextActive]}>{tab.name}</Text>
+              <Text selectable style={[styles.tabText, active && styles.tabTextActive]}>{tab.name}</Text>
               {active ? <View style={styles.tabBar} /> : null}
             </Pressable>
           );
@@ -279,8 +279,8 @@ function Sheet({ visible, title, subtitle, onClose, toast, children }: { visible
         <View style={[styles.sheet, { paddingBottom: 20 + safeArea.bottom }]}>
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>{title}</Text>
-            <Text style={styles.sheetSub}>{subtitle}</Text>
+            <Text selectable style={styles.sheetTitle}>{title}</Text>
+            <Text selectable style={styles.sheetSub}>{subtitle}</Text>
           </View>
           {children}
         </View>
@@ -306,7 +306,7 @@ function useToast(): { toast: React.JSX.Element | null; show: (message: string) 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   const toast = message ? (
     <Animated.View pointerEvents="none" style={[styles.toast, { opacity }]}>
-      <Text style={styles.toastText}>{message}</Text>
+      <Text selectable style={styles.toastText}>{message}</Text>
     </Animated.View>
   ) : null;
   return { toast, show };
@@ -480,15 +480,15 @@ export function AIManagementSurface({
     <View style={styles.root}>
       <View style={styles.nav}>
         <Pressable accessibilityLabel="返回" hitSlop={12} onPress={onBack} style={styles.navBack}>
-          <Text style={styles.navBackText}>←</Text>
+          <Text selectable style={styles.navBackText}>←</Text>
         </Pressable>
         <AILogo active={ready && !paused} />
-        <Text style={styles.navTitle}>AI 管理</Text>
+        <Text selectable style={styles.navTitle}>AI 管理</Text>
         <PauseButton paused={paused} disabled={!ready} onPress={togglePause} />
       </View>
       <View style={styles.subtitle}>
         <View style={[styles.subtitleDot, (paused || !ready) && styles.dotOff]} />
-        <Text style={[styles.subtitleText, paused && styles.subtitleTextPaused]}>{!ready ? (loadError ?? "读取中…") : paused ? "AI 已暂停" : "AI 正在替你工作"}</Text>
+        <Text selectable style={[styles.subtitleText, paused && styles.subtitleTextPaused]}>{!ready ? (loadError ?? "读取中…") : paused ? "AI 已暂停" : "AI 正在替你工作"}</Text>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.scrollContent, { paddingBottom: 30 + safeArea.bottom }]} showsVerticalScrollIndicator={false}>
@@ -507,28 +507,28 @@ export function AIManagementSurface({
           ) : null}
           <View style={styles.statusHead}>
             <View style={[styles.statusDot, (paused || !ready) && styles.dotOff]} />
-            <Text style={styles.statusLabel}>{statusLabel}</Text>
-            <Text style={styles.statusTime}>{statusTime}</Text>
+            <Text selectable style={styles.statusLabel}>{statusLabel}</Text>
+            <Text selectable style={styles.statusTime}>{statusTime}</Text>
           </View>
           <View style={styles.statusNums}>
             <View style={styles.statusNum}>
-              <Text style={styles.snVal}>{ready ? formatTokens(tokenTotal) : "—"}</Text>
-              <Text style={styles.snLabel}>本月 Token</Text>
+              <Text selectable style={styles.snVal}>{ready ? formatTokens(tokenTotal) : "—"}</Text>
+              <Text selectable style={styles.snLabel}>本月 Token</Text>
             </View>
             <View style={styles.statusNum}>
-              <Text style={styles.snVal}>{imageCount}</Text>
-              <Text style={styles.snLabel}>图片总数</Text>
+              <Text selectable style={styles.snVal}>{imageCount}</Text>
+              <Text selectable style={styles.snLabel}>图片总数</Text>
             </View>
             <View style={styles.statusNum}>
-              <Text style={styles.snVal}>{videoCount}</Text>
-              <Text style={styles.snLabel}>视频总数</Text>
+              <Text selectable style={styles.snVal}>{videoCount}</Text>
+              <Text selectable style={styles.snLabel}>视频总数</Text>
             </View>
           </View>
         </View>
 
         <LikenessCard likeness={likeness} onGrant={askGrantLikeness} onRevoke={askRevokeLikeness} onRetry={loadLikeness} />
 
-        <Text style={styles.sectionTitle}>管理项</Text>
+        <Text selectable style={styles.sectionTitle}>管理项</Text>
         <View style={styles.manageList}>
           <ManageCard iconXml={AI_MANAGE_ICONS.chat} name="对话管理" badge={chatBadge} activity={chatActivity} paused={paused} disabled={!ready} onPress={() => { setChatTab("style"); setSheet("chat"); }} />
           <ManageCard iconXml={AI_MANAGE_ICONS.image} name="图片管理" badge={imageBadge} activity={imageActivity} paused={paused} disabled={!ready} onPress={() => { setImageTab("model"); setSheet("image"); }} />
@@ -536,10 +536,10 @@ export function AIManagementSurface({
         </View>
         {loadError && ready === false ? (
           <Pressable accessibilityRole="button" onPress={() => { setLoadError(undefined); load(); }} style={styles.retry}>
-            <Text style={styles.retryText}>重新读取</Text>
+            <Text selectable style={styles.retryText}>重新读取</Text>
           </Pressable>
         ) : null}
-        <Text style={styles.version}>AI Engine v2.4 · 平台托管</Text>
+        <Text selectable style={styles.version}>AI Engine v2.4 · 平台托管</Text>
       </ScrollView>
 
       {settings ? (
@@ -567,16 +567,16 @@ function LikenessCard({ likeness, onGrant, onRevoke, onRetry }: {
   return (
     <View style={[styles.likenessCard, granted && styles.likenessCardOn]}>
       <View style={styles.likenessHead}>
-        <Text style={styles.likenessTitle}>形象授权</Text>
-        <Text style={[styles.badge, granted ? styles.badgeRunning : styles.badgeOff]}>{granted ? "已授权" : likeness.status === "none" ? "未授权" : "…"}</Text>
+        <Text selectable style={styles.likenessTitle}>形象授权</Text>
+        <Text selectable style={[styles.badge, granted ? styles.badgeRunning : styles.badgeOff]}>{granted ? "已授权" : likeness.status === "none" ? "未授权" : "…"}</Text>
       </View>
-      <Text style={styles.likenessBody}>{body}</Text>
+      <Text selectable style={styles.likenessBody}>{body}</Text>
       {likeness.status === "error" ? (
-        <Pressable accessibilityRole="button" onPress={onRetry} style={[styles.likenessBtn, styles.likenessBtnGhost]}><Text style={styles.likenessBtnGhostText}>重新读取</Text></Pressable>
+        <Pressable accessibilityRole="button" onPress={onRetry} style={[styles.likenessBtn, styles.likenessBtnGhost]}><Text selectable style={styles.likenessBtnGhostText}>重新读取</Text></Pressable>
       ) : likeness.status === "none" ? (
-        <Pressable accessibilityRole="button" disabled={likeness.busy} onPress={onGrant} style={[styles.likenessBtn, likeness.busy && { opacity: 0.5 }]}><Text style={styles.likenessBtnText}>授权</Text></Pressable>
+        <Pressable accessibilityRole="button" disabled={likeness.busy} onPress={onGrant} style={[styles.likenessBtn, likeness.busy && { opacity: 0.5 }]}><Text selectable style={styles.likenessBtnText}>授权</Text></Pressable>
       ) : granted ? (
-        <Pressable accessibilityRole="button" disabled={likeness.busy} onPress={onRevoke} style={[styles.likenessBtn, styles.likenessBtnGhost, likeness.busy && { opacity: 0.5 }]}><Text style={styles.likenessBtnGhostText}>撤回授权</Text></Pressable>
+        <Pressable accessibilityRole="button" disabled={likeness.busy} onPress={onRevoke} style={[styles.likenessBtn, styles.likenessBtnGhost, likeness.busy && { opacity: 0.5 }]}><Text selectable style={styles.likenessBtnGhostText}>撤回授权</Text></Pressable>
       ) : null}
     </View>
   );
@@ -599,12 +599,12 @@ function ManageCard({ iconXml, name, badge, activity, paused, disabled, onPress 
       </View>
       <View style={styles.manageInfo}>
         <View style={styles.manageNameRow}>
-          <Text style={styles.manageName}>{name}</Text>
-          <Text style={[styles.badge, paused ? styles.badgePaused : badge.kind === "running" ? styles.badgeRunning : badge.kind === "confirm" ? styles.badgeConfirm : styles.badgeOff]}>{badge.text}</Text>
+          <Text selectable style={styles.manageName}>{name}</Text>
+          <Text selectable style={[styles.badge, paused ? styles.badgePaused : badge.kind === "running" ? styles.badgeRunning : badge.kind === "confirm" ? styles.badgeConfirm : styles.badgeOff]}>{badge.text}</Text>
         </View>
-        <Text numberOfLines={1} style={styles.manageActivity}>{activity}</Text>
+        <Text selectable numberOfLines={1} style={styles.manageActivity}>{activity}</Text>
       </View>
-      <Text style={styles.manageArrow}>›</Text>
+      <Text selectable style={styles.manageArrow}>›</Text>
     </Pressable>
   );
 }
@@ -670,7 +670,7 @@ function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogE
 
   return (
     <Sheet toast={toast} visible={visible} title="图片管理" subtitle="场景 · 姿态 · 模型 · 提示词" onClose={onClose}>
-      <Text style={styles.notWired}>出图任务还没接上这些设置，现在只保存你的偏好。</Text>
+      <Text selectable style={styles.notWired}>出图任务还没接上这些设置，现在只保存你的偏好。</Text>
       <SheetTabs
         tabs={[{ id: "model", name: "模型" }, { id: "scene", name: "生成场景" }, { id: "pose", name: "人物姿态" }, { id: "prompt", name: "提示词" }, { id: "param", name: "参数" }]}
         value={tab}
@@ -686,14 +686,14 @@ function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogE
               </Svg>
               <TextInput value={query} onChangeText={setQuery} placeholder="搜索厂商或模型..." placeholderTextColor="#aaa" style={styles.searchInput} />
               {query ? (
-                <Pressable accessibilityLabel="清除搜索" onPress={() => setQuery("")} style={styles.searchClear}><Text style={styles.searchClearText}>✕</Text></Pressable>
+                <Pressable accessibilityLabel="清除搜索" onPress={() => setQuery("")} style={styles.searchClear}><Text selectable style={styles.searchClearText}>✕</Text></Pressable>
               ) : null}
             </View>
             <View style={styles.sortBar}>
-              <Text style={styles.sortLabel}>排序</Text>
+              <Text selectable style={styles.sortLabel}>排序</Text>
               {([["quality", "质量", "↓"], ["price", "价格", "↑"], ["popular", "热门", "↓"]] as const).map(([id, label, arrow]) => (
                 <Pressable key={id} accessibilityRole="button" accessibilityState={{ selected: sort === id }} onPress={() => setSort(id)} style={[styles.sortChip, sort === id && styles.sortChipActive]}>
-                  <Text style={[styles.sortChipText, sort === id && styles.sortChipTextActive]}>{label} <Text style={styles.sortArrow}>{arrow}</Text></Text>
+                  <Text selectable style={[styles.sortChipText, sort === id && styles.sortChipTextActive]}>{label} <Text selectable style={styles.sortArrow}>{arrow}</Text></Text>
                 </Pressable>
               ))}
             </View>
@@ -714,15 +714,15 @@ function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogE
                     </View>
                     <View style={styles.vendorInfo}>
                       <View style={styles.vendorNameRow}>
-                        <Text style={styles.vendorName}>{item.name}</Text>
-                        {item.recommend ? <Text style={styles.recommendBadge}>推荐</Text> : null}
+                        <Text selectable style={styles.vendorName}>{item.name}</Text>
+                        {item.recommend ? <Text selectable style={styles.recommendBadge}>推荐</Text> : null}
                       </View>
-                      <Text style={styles.vendorDesc}>{item.desc}</Text>
+                      <Text selectable style={styles.vendorDesc}>{item.desc}</Text>
                     </View>
-                    <View style={[styles.check, selectedVendor && styles.checkOn]}>{selectedVendor ? <Text style={styles.checkMark}>✓</Text> : null}</View>
+                    <View style={[styles.check, selectedVendor && styles.checkOn]}>{selectedVendor ? <Text selectable style={styles.checkMark}>✓</Text> : null}</View>
                   </Pressable>
                   {!item.pinned ? (
-                    <Text style={[styles.rank, index === 1 ? styles.rank1 : index === 2 ? styles.rank2 : index === 3 ? styles.rank3 : null]}>#{index}</Text>
+                    <Text selectable style={[styles.rank, index === 1 ? styles.rank1 : index === 2 ? styles.rank2 : index === 3 ? styles.rank3 : null]}>#{index}</Text>
                   ) : null}
                   {item.models.length > 0 ? (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modelRow} contentContainerStyle={styles.modelRowContent}>
@@ -737,10 +737,10 @@ function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogE
                             style={[styles.modelChip, selectedModel && styles.modelChipSelected]}
                           >
                             <View style={styles.modelChipNameRow}>
-                              <Text numberOfLines={1} style={styles.modelChipName}>{model.name}</Text>
-                              {model.tag ? <Text style={styles.modelTag}>{model.tag}</Text> : null}
+                              <Text selectable numberOfLines={1} style={styles.modelChipName}>{model.name}</Text>
+                              {model.tag ? <Text selectable style={styles.modelTag}>{model.tag}</Text> : null}
                             </View>
-                            <Text numberOfLines={1} style={[styles.modelPrice, model.subscription && styles.modelPriceSub]}>{model.price.label}</Text>
+                            <Text selectable numberOfLines={1} style={[styles.modelPrice, model.subscription && styles.modelPriceSub]}>{model.price.label}</Text>
                           </Pressable>
                         );
                       })}
@@ -751,14 +751,14 @@ function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogE
             })}
             {!catalog && catalogError ? (
               <Pressable accessibilityRole="button" onPress={onRetryCatalog}>
-                <Text style={styles.empty}>{`${catalogError}，点这里重试`}</Text>
+                <Text selectable style={styles.empty}>{`${catalogError}，点这里重试`}</Text>
               </Pressable>
             ) : !catalog ? (
-              <Text style={styles.empty}>模型目录读取中…</Text>
-            ) : visibleVendors.length === 0 ? <Text style={styles.empty}>没有找到匹配的厂商或模型</Text> : null}
+              <Text selectable style={styles.empty}>模型目录读取中…</Text>
+            ) : visibleVendors.length === 0 ? <Text selectable style={styles.empty}>没有找到匹配的厂商或模型</Text> : null}
             <View style={styles.priceNotice}>
-              <Text style={styles.priceNoticeIcon}>💡</Text>
-              <Text style={styles.priceNoticeText}>
+              <Text selectable style={styles.priceNoticeIcon}>💡</Text>
+              <Text selectable style={styles.priceNoticeText}>
                 {catalog ? `每月免费 ${catalog.imageBilling.freeImagesPerMonth} 张（${catalog.vendors.find((v) => v.id === catalog.imageBilling.freeVendor)?.name ?? "平台默认"}）。${catalog.imageBilling.priceNotice}` : "价格与免费额度读取中…"}
               </Text>
             </View>
@@ -782,10 +782,10 @@ function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogE
                       </Defs>
                       <Rect x="0" y="0" width="100%" height="100%" fill={`url(#sceneShade-${item.id})`} />
                     </Svg>
-                    {selected ? <View style={styles.sceneCheck}><Text style={styles.sceneCheckText}>✓</Text></View> : null}
+                    {selected ? <View style={styles.sceneCheck}><Text selectable style={styles.sceneCheckText}>✓</Text></View> : null}
                     <View style={styles.sceneCaption}>
-                      <Text numberOfLines={1} style={styles.sceneName}>{item.name}</Text>
-                      <Text numberOfLines={1} style={styles.sceneDesc}>{item.desc}</Text>
+                      <Text selectable numberOfLines={1} style={styles.sceneName}>{item.name}</Text>
+                      <Text selectable numberOfLines={1} style={styles.sceneDesc}>{item.desc}</Text>
                     </View>
                   </Pressable>
                 );
@@ -811,8 +811,8 @@ function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogE
                     <View style={[styles.poseIcon, selected && styles.poseIconSelected]}>
                       <SvgXml xml={AI_POSE_ICONS[item.id] ?? AI_POSE_ICONS.hand_face!} width={26} height={26} color={selected ? "#ffffff" : "#888888"} />
                     </View>
-                    <Text style={styles.poseName}>{item.name}</Text>
-                    <Text style={[styles.poseHint, selected && styles.poseHintSelected]}>{item.hint}</Text>
+                    <Text selectable style={styles.poseName}>{item.name}</Text>
+                    <Text selectable style={[styles.poseHint, selected && styles.poseHintSelected]}>{item.hint}</Text>
                   </Pressable>
                 );
               })}
@@ -827,8 +827,8 @@ function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogE
                       <SvgXml xml={AI_CAMERA_ICONS[item.id]!} width={20} height={20} color={selected ? "#ffffff" : "#888888"} />
                     </View>
                     <View style={styles.cameraInfo}>
-                      <Text style={styles.cameraName}>{item.name}</Text>
-                      <Text style={[styles.cameraDesc, selected && styles.cameraDescSelected]}>{item.desc}</Text>
+                      <Text selectable style={styles.cameraName}>{item.name}</Text>
+                      <Text selectable style={[styles.cameraDesc, selected && styles.cameraDescSelected]}>{item.desc}</Text>
                     </View>
                     <MotionBar kind={item.id} selected={selected} />
                   </Pressable>
@@ -843,7 +843,7 @@ function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogE
               <TextInput multiline value={promptDraft} onChangeText={setPromptDraft} placeholder="输入提示词模板..." placeholderTextColor="#aaa" style={styles.promptInput} textAlignVertical="top" />
               <View style={styles.promptActions}>
                 <Pressable accessibilityRole="button" onPress={() => { setPromptDraft(scene.prompt); patch({ imagePrompt: "" }, "已重置为默认提示词"); }} style={[styles.promptBtn, styles.promptBtnReset]}>
-                  <Text style={styles.promptBtnResetText}>重置默认</Text>
+                  <Text selectable style={styles.promptBtnResetText}>重置默认</Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
@@ -854,20 +854,20 @@ function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogE
                   }}
                   style={[styles.promptBtn, styles.promptBtnSave, !promptDraft.trim() && { opacity: 0.4 }]}
                 >
-                  <Text style={styles.promptBtnSaveText}>保存并使用</Text>
+                  <Text selectable style={styles.promptBtnSaveText}>保存并使用</Text>
                 </Pressable>
               </View>
-              <Text style={styles.promptHint}>💡 用 <Text style={styles.promptCode}>{"{变量}"}</Text> 让 AI 自动填充人物、饮品、菜品等</Text>
+              <Text selectable style={styles.promptHint}>💡 用 <Text selectable style={styles.promptCode}>{"{变量}"}</Text> 让 AI 自动填充人物、饮品、菜品等</Text>
             </View>
             <GroupTitle title="历史版本" hint="点击可恢复" />
             {history.length === 0 ? (
-              <Text style={styles.historyEmpty}>暂无历史记录</Text>
+              <Text selectable style={styles.historyEmpty}>暂无历史记录</Text>
             ) : (
               <View style={styles.historyList}>
                 {history.slice(0, 10).map((entry, index) => (
                   <Pressable key={`${entry.at}-${index}`} accessibilityRole="button" onPress={() => { setPromptDraft(entry.text); patch({ imagePrompt: entry.text }, "已恢复历史版本"); }} style={styles.historyItem}>
-                    <Text style={styles.historyTime}>{historyTime(entry.at)}</Text>
-                    <Text numberOfLines={2} style={styles.historyText}>{entry.text}</Text>
+                    <Text selectable style={styles.historyTime}>{historyTime(entry.at)}</Text>
+                    <Text selectable numberOfLines={2} style={styles.historyText}>{entry.text}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -891,11 +891,11 @@ function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogE
               />
             </View>
             <View style={styles.paramPreview}>
-              <Text style={styles.paramItem}>📐 <Text style={styles.paramStrong}>{ASPECTS.find((a) => a.id === settings.imageAspect)?.name ?? "—"}</Text></Text>
-              <Text style={styles.paramItem}>🎯 <Text style={styles.paramStrong}>{QUALITIES.find((a) => a.id === settings.imageQuality)?.name ?? "—"}</Text></Text>
-              <Text style={styles.paramItem}>🎬 <Text style={styles.paramStrong}>{scene.name}</Text></Text>
-              <Text style={styles.paramItem}>🧍 <Text style={styles.paramStrong}>{pose?.name ?? "—"}</Text></Text>
-              <Text style={styles.paramItem}>🎥 <Text style={styles.paramStrong}>{camera?.name ?? "—"}</Text></Text>
+              <Text selectable style={styles.paramItem}>📐 <Text selectable style={styles.paramStrong}>{ASPECTS.find((a) => a.id === settings.imageAspect)?.name ?? "—"}</Text></Text>
+              <Text selectable style={styles.paramItem}>🎯 <Text selectable style={styles.paramStrong}>{QUALITIES.find((a) => a.id === settings.imageQuality)?.name ?? "—"}</Text></Text>
+              <Text selectable style={styles.paramItem}>🎬 <Text selectable style={styles.paramStrong}>{scene.name}</Text></Text>
+              <Text selectable style={styles.paramItem}>🧍 <Text selectable style={styles.paramStrong}>{pose?.name ?? "—"}</Text></Text>
+              <Text selectable style={styles.paramItem}>🎥 <Text selectable style={styles.paramStrong}>{camera?.name ?? "—"}</Text></Text>
             </View>
           </>
         )}
@@ -974,7 +974,7 @@ function PostSheet({ toast, visible, settings, patch, onClose }: { toast: React.
         <View style={styles.optionList}>
           {POST_PERMISSIONS.map((item) => <OptionItem key={item.id} icon={item.icon} name={item.name} selected={settings.postPermission === item.id} onPress={() => patch({ postPermission: item.id }, "已保存")} />)}
         </View>
-        <Text style={[styles.notWired, styles.notWiredInline]}>自动发帖任务尚未上线：现在只保存你的偏好，不会替你发帖。</Text>
+        <Text selectable style={[styles.notWired, styles.notWiredInline]}>自动发帖任务尚未上线：现在只保存你的偏好，不会替你发帖。</Text>
       </ScrollView>
     </Sheet>
   );

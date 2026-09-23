@@ -18,22 +18,22 @@ const SKILLS: Array<{ id: string; label: string; group: string; desc: string }> 
 export function SkillWorkspaceSurface(): React.JSX.Element {
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Skill 工作区</Text>
-      <Text style={styles.sub}>Enterprise 运营技能目录 — 静态 catalog（P0），能力核验走 supply.verified，审核由运营后台完成。</Text>
+      <Text selectable style={styles.title}>Skill 工作区</Text>
+      <Text selectable style={styles.sub}>Enterprise 运营技能目录 — 静态 catalog（P0），能力核验走 supply.verified，审核由运营后台完成。</Text>
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>能力组 · 8 项（示例）</Text>
-        <Text style={styles.cardSub}>来源：Proxy Agent Capability Graph（Chapter07）。P0 仅展示，不在此页直接发证。</Text>
+        <Text selectable style={styles.cardTitle}>能力组 · 8 项（示例）</Text>
+        <Text selectable style={styles.cardSub}>来源：Proxy Agent Capability Graph（Chapter07）。P0 仅展示，不在此页直接发证。</Text>
       </View>
       {SKILLS.map((s) => (
         <View key={s.id} style={styles.row}>
-          <View style={styles.badge}><Text style={styles.badgeText}>{s.group}</Text></View>
+          <View style={styles.badge}><Text selectable style={styles.badgeText}>{s.group}</Text></View>
           <View style={styles.copy}>
-            <Text style={styles.name}>{s.label} · {s.id}</Text>
-            <Text style={styles.desc}>{s.desc}</Text>
+            <Text selectable style={styles.name}>{s.label} · {s.id}</Text>
+            <Text selectable style={styles.desc}>{s.desc}</Text>
           </View>
         </View>
       ))}
-      <Text style={styles.hint}>说明：真实供给的“已核验”状态在 supply.capabilities.verified，核验命令需 operator 白名单（PROXY_OPERATOR_PRINCIPALS）。本页为运营只读目录，后续可接 ListVerifiedCapabilities。</Text>
+      <Text selectable style={styles.hint}>说明：真实供给的“已核验”状态在 supply.capabilities.verified，核验命令需 operator 白名单（PROXY_OPERATOR_PRINCIPALS）。本页为运营只读目录，后续可接 ListVerifiedCapabilities。</Text>
     </ScrollView>
   );
 }

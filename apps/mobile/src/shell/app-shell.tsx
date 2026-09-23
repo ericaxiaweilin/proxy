@@ -985,9 +985,9 @@ export function AppShell({
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>
-            <Text style={styles.guestMeTitle}>需要登录</Text>
-            <Text style={styles.guestMeSub}>访客可浏览首页/市场/动态，个人资料、关系与订单需登录后查看</Text>
-            <Pressable onPress={onSignOut} style={styles.guestMeCTA}><Text style={styles.guestMeCTAText}>去登录 / 注册</Text></Pressable>
+            <Text selectable style={styles.guestMeTitle}>需要登录</Text>
+            <Text selectable style={styles.guestMeSub}>访客可浏览首页/市场/动态，个人资料、关系与订单需登录后查看</Text>
+            <Pressable onPress={onSignOut} style={styles.guestMeCTA}><Text selectable style={styles.guestMeCTAText}>去登录 / 注册</Text></Pressable>
           </View>
         ) : voucherOpen ? (
             <VoucherSurface client={vouchers} context={context} onBack={() => setVoucherOpen(false)} />
@@ -1083,7 +1083,7 @@ function Header({ compact }: { compact: boolean }): React.JSX.Element {
     <View style={[styles.header, compact && styles.headerCompact]}>
       <View style={styles.headerBrand}>
         <Image resizeMode="contain" source={OTTER_LOGO} style={[styles.headerLogo, compact && styles.headerLogoCompact]} />
-        <Text style={[styles.headerName, compact && styles.headerNameCompact]}>Proxy</Text>
+        <Text selectable style={[styles.headerName, compact && styles.headerNameCompact]}>Proxy</Text>
       </View>
     </View>
   );
@@ -1116,16 +1116,16 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
   }
   return (
     <View style={styles.composerRoot}>
-      <Pressable onPress={onBack} style={styles.composerBack}><Text style={styles.composerBackText}>‹ 返回</Text></Pressable>
-      <Text style={styles.composerTitle}>{meta?.label ?? tool} · Scene Composer</Text>
-      <Text style={styles.composerSub}>P0: 把意图变成可邀请的 Scene — 预算进场景而非买人</Text>
-      <View style={styles.composerField}><Text style={styles.composerLabel}>意图</Text><View style={styles.composerInput}><Text style={styles.composerInputText}>例如：周六下午想在西湖拍照 · 2–4人</Text></View></View>
-      <View style={styles.composerRow}><Pressable onPress={() => setParticipation("OPEN_SIGNUP")} style={[styles.composerChip, participation==="OPEN_SIGNUP"&&styles.composerChipActive]}><Text style={[styles.composerChipText, participation==="OPEN_SIGNUP"&&styles.composerChipTextActive]}>公开报名</Text></Pressable><Pressable onPress={() => setParticipation("PRIVATE_INVITE")} style={[styles.composerChip, participation==="PRIVATE_INVITE"&&styles.composerChipActive]}><Text style={[styles.composerChipText, participation==="PRIVATE_INVITE"&&styles.composerChipTextActive]}>私邀关系</Text></Pressable><Pressable onPress={() => setParticipation("HYBRID")} style={[styles.composerChip, participation==="HYBRID"&&styles.composerChipActive]}><Text style={[styles.composerChipText, participation==="HYBRID"&&styles.composerChipTextActive]}>混合</Text></Pressable></View>
-      <View style={styles.composerRow}><Pressable onPress={() => setCost("HOST_SPONSORED")} style={[styles.composerChip, cost==="HOST_SPONSORED"&&styles.composerChipActive]}><Text style={[styles.composerChipText, cost==="HOST_SPONSORED"&&styles.composerChipTextActive]}>Host Sponsored</Text></Pressable><Pressable onPress={() => setCost("AA")} style={[styles.composerChip, cost==="AA"&&styles.composerChipActive]}><Text style={[styles.composerChipText, cost==="AA"&&styles.composerChipTextActive]}>AA</Text></Pressable><Pressable onPress={() => setCost("MERCHANT_SPONSORED")} style={[styles.composerChip, cost==="MERCHANT_SPONSORED"&&styles.composerChipActive]}><Text style={[styles.composerChipText, cost==="MERCHANT_SPONSORED"&&styles.composerChipTextActive]}>商家权益</Text></Pressable></View>
-      {guard!=="GOOD_FIT" ? <View style={styles.guardWarn}><Text style={styles.guardWarnText}>Guard: 交易感过重 — 建议加场景权益而非直付</Text></View> : <View style={styles.guardOk}><Text style={styles.guardOkText}>Guard: GOOD_FIT · 拿掉目标人仍成立</Text></View>}
-      <View style={styles.invitePreview}><Text style={styles.invitePreviewTitle}>对方将看到</Text><Text style={styles.invitePreviewBody}>{previewBody}</Text><Text style={styles.invitePreviewHint}>独立同意 · 可婉拒</Text></View>
-      {error ? <Text style={styles.guardWarnText}>{error}</Text> : null}
-      <Pressable onPress={handleCreate} style={[styles.composerCTA, busy && {opacity:0.6}]} disabled={busy}><Text style={styles.composerCTAText}>{busy ? "创建中…" : "创建 Scene 草稿"}</Text></Pressable>
+      <Pressable onPress={onBack} style={styles.composerBack}><Text selectable style={styles.composerBackText}>‹ 返回</Text></Pressable>
+      <Text selectable style={styles.composerTitle}>{meta?.label ?? tool} · Scene Composer</Text>
+      <Text selectable style={styles.composerSub}>P0: 把意图变成可邀请的 Scene — 预算进场景而非买人</Text>
+      <View style={styles.composerField}><Text selectable style={styles.composerLabel}>意图</Text><View style={styles.composerInput}><Text selectable style={styles.composerInputText}>例如：周六下午想在西湖拍照 · 2–4人</Text></View></View>
+      <View style={styles.composerRow}><Pressable onPress={() => setParticipation("OPEN_SIGNUP")} style={[styles.composerChip, participation==="OPEN_SIGNUP"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, participation==="OPEN_SIGNUP"&&styles.composerChipTextActive]}>公开报名</Text></Pressable><Pressable onPress={() => setParticipation("PRIVATE_INVITE")} style={[styles.composerChip, participation==="PRIVATE_INVITE"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, participation==="PRIVATE_INVITE"&&styles.composerChipTextActive]}>私邀关系</Text></Pressable><Pressable onPress={() => setParticipation("HYBRID")} style={[styles.composerChip, participation==="HYBRID"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, participation==="HYBRID"&&styles.composerChipTextActive]}>混合</Text></Pressable></View>
+      <View style={styles.composerRow}><Pressable onPress={() => setCost("HOST_SPONSORED")} style={[styles.composerChip, cost==="HOST_SPONSORED"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, cost==="HOST_SPONSORED"&&styles.composerChipTextActive]}>Host Sponsored</Text></Pressable><Pressable onPress={() => setCost("AA")} style={[styles.composerChip, cost==="AA"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, cost==="AA"&&styles.composerChipTextActive]}>AA</Text></Pressable><Pressable onPress={() => setCost("MERCHANT_SPONSORED")} style={[styles.composerChip, cost==="MERCHANT_SPONSORED"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, cost==="MERCHANT_SPONSORED"&&styles.composerChipTextActive]}>商家权益</Text></Pressable></View>
+      {guard!=="GOOD_FIT" ? <View style={styles.guardWarn}><Text selectable style={styles.guardWarnText}>Guard: 交易感过重 — 建议加场景权益而非直付</Text></View> : <View style={styles.guardOk}><Text selectable style={styles.guardOkText}>Guard: GOOD_FIT · 拿掉目标人仍成立</Text></View>}
+      <View style={styles.invitePreview}><Text selectable style={styles.invitePreviewTitle}>对方将看到</Text><Text selectable style={styles.invitePreviewBody}>{previewBody}</Text><Text selectable style={styles.invitePreviewHint}>独立同意 · 可婉拒</Text></View>
+      {error ? <Text selectable style={styles.guardWarnText}>{error}</Text> : null}
+      <Pressable onPress={handleCreate} style={[styles.composerCTA, busy && {opacity:0.6}]} disabled={busy}><Text selectable style={styles.composerCTAText}>{busy ? "创建中…" : "创建 Scene 草稿"}</Text></Pressable>
     </View>
   );
 }
@@ -1169,13 +1169,13 @@ function LocationContext({
         <ProxyIcon color={color.ink} name="mapFold" size={21} />
       </View>
       <View style={styles.locationCopy}>
-        <Text numberOfLines={2} style={styles.locationCity}>{formatLocationTitle(location)}</Text>
-        <Text numberOfLines={1} style={styles.locationSub}>
+        <Text selectable numberOfLines={2} style={styles.locationCity}>{formatLocationTitle(location)}</Text>
+        <Text selectable numberOfLines={1} style={styles.locationSub}>
           {sub}
         </Text>
       </View>
     </Pressable>
-      <Pressable accessibilityLabel="切换本地范围" accessibilityRole="button" onPress={onSwitchLocation} style={styles.locationSwitchButton}><Text style={styles.locationSwitch}>切换⌄</Text></Pressable>
+      <Pressable accessibilityLabel="切换本地范围" accessibilityRole="button" onPress={onSwitchLocation} style={styles.locationSwitchButton}><Text selectable style={styles.locationSwitch}>切换⌄</Text></Pressable>
     </View>
   );
 }
@@ -1500,7 +1500,7 @@ function RootNav({
                     <ProxyIcon color={isActiveVisual ? accent : "#8d8d92"} name={entry.icon} size={22} />
                     {entry.badge ? <View style={styles.navBadgeDot} /> : null}
                   </View>
-                  <Text
+                  <Text selectable
                     numberOfLines={1}
                     style={[
                       styles.navLabel,

@@ -43,7 +43,7 @@ export function ProxyButton({
       onPress={onPress}
       style={[styles.button, styles[`button_${tone}`], disabled && styles.disabled, style]}
     >
-      {typeof children === "string" ? <Text style={[styles.buttonText, textTone[tone]]}>{children}</Text> : children}
+      {typeof children === "string" ? <Text selectable style={[styles.buttonText, textTone[tone]]}>{children}</Text> : children}
     </Pressable>
   );
 }
@@ -100,7 +100,7 @@ export function ProxyAvatar({
   const showImage = source !== undefined && !failed;
   return (
     <View accessibilityLabel={accessibilityLabel} style={[styles.avatar, { height: size, width: size }]}>
-      <Text style={styles.avatarFallback}>{fallback.slice(0, 1)}</Text>
+      <Text selectable style={styles.avatarFallback}>{fallback.slice(0, 1)}</Text>
       {showImage ? (
         <Image source={source} style={styles.avatarImageAbsolute} onError={() => setFailed(true)} />
       ) : null}
@@ -131,7 +131,7 @@ export function ProxyTabs<T extends string>({
             onPress={() => onChange(item.id)}
             style={styles.tab}
           >
-            <Text style={[styles.tabText, active && styles.tabTextActive]}>{item.label}</Text>
+            <Text selectable style={[styles.tabText, active && styles.tabTextActive]}>{item.label}</Text>
             {active ? <View style={styles.tabUnderline} /> : null}
           </Pressable>
         );
@@ -200,7 +200,7 @@ export function ProxyLoading({
   return (
     <View style={styles.loadingLabelWrap}>
       {indicator}
-      <Text style={styles.loadingLabel}>{label}</Text>
+      <Text selectable style={styles.loadingLabel}>{label}</Text>
     </View>
   );
 }
@@ -223,8 +223,8 @@ export function ProxyEmptyState({
   return (
     <View style={styles.empty}>
       {icon !== undefined ? <ProxyIcon color={foundation.muted} name={icon} size={28} /> : null}
-      <Text style={styles.emptyTitle}>{title}</Text>
-      {sub !== undefined ? <Text style={styles.emptySub}>{sub}</Text> : null}
+      <Text selectable style={styles.emptyTitle}>{title}</Text>
+      {sub !== undefined ? <Text selectable style={styles.emptySub}>{sub}</Text> : null}
       {cta !== undefined ? (
         <View style={styles.emptyCta}>
           <ProxyButton disabled={cta.disabled ?? false} onPress={cta.onPress}>{cta.label}</ProxyButton>

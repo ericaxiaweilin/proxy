@@ -126,7 +126,7 @@ export function VoiceToolButton({ disabled, onDone }: Props): React.JSX.Element 
               <View style={styles.waveArea}>
                 <View style={styles.waveHeader}>
                   <PulsingDot />
-                  <Text style={styles.timer}>{formatVoiceElapsed(voice.elapsedMs)}</Text>
+                  <Text selectable style={styles.timer}>{formatVoiceElapsed(voice.elapsedMs)}</Text>
                 </View>
                 <View style={styles.wave}>
                   {Array.from({ length: WAVE_BAR_COUNT }).map((_, index) => {
@@ -146,7 +146,7 @@ export function VoiceToolButton({ disabled, onDone }: Props): React.JSX.Element 
           {voice.phase === "PROCESSING" ? (
             <View style={styles.row}>
               <PulsingDot />
-              <Text style={styles.processingText}>处理中…</Text>
+              <Text selectable style={styles.processingText}>处理中…</Text>
             </View>
           ) : null}
 
@@ -157,7 +157,7 @@ export function VoiceToolButton({ disabled, onDone }: Props): React.JSX.Element 
               </Pressable>
               <View style={styles.doneInfo}>
                 <ProxyIcon color={color.violet} name="microphone" size={16} />
-                <Text style={styles.doneText}>已录制 {Math.round(voice.result.durationMs / 1000)} 秒</Text>
+                <Text selectable style={styles.doneText}>已录制 {Math.round(voice.result.durationMs / 1000)} 秒</Text>
               </View>
               <Pressable
                 accessibilityLabel="保留这段录音"
@@ -173,7 +173,7 @@ export function VoiceToolButton({ disabled, onDone }: Props): React.JSX.Element 
             </View>
           ) : null}
 
-          {voice.error ? <Text style={styles.error}>{voice.error}</Text> : null}
+          {voice.error ? <Text selectable style={styles.error}>{voice.error}</Text> : null}
         </View>
       </View>
     </Modal>

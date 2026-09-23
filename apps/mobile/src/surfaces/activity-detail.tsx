@@ -55,43 +55,43 @@ export function ActivityDetailSurface({ client, moderation, initialActivityId, o
     return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.container}>
-          <Pressable onPress={() => { if (onBack) onBack(); else setSelected(undefined); }}><Text style={styles.back}>‹ 返回</Text></Pressable>
+          <Pressable onPress={() => { if (onBack) onBack(); else setSelected(undefined); }}><Text selectable style={styles.back}>‹ 返回</Text></Pressable>
           {selected.coverImageUrl ? (
             <Image source={{ uri: selected.coverImageUrl }} style={styles.cover} />
           ) : showPersona ? (
             <View style={styles.coverPlaceholder}>
               <View style={[styles.personaToken, { backgroundColor: personaColor(selected.aiPersonaId) }]}>
-                <Text style={styles.personaTokenText}>{selected.aiPersonaAvatar ?? "🤖"}</Text>
+                <Text selectable style={styles.personaTokenText}>{selected.aiPersonaAvatar ?? "🤖"}</Text>
               </View>
-              <Text style={styles.coverNote}>{activityAIPersonaName(selected)} · 真人照片待上传</Text>
+              <Text selectable style={styles.coverNote}>{activityAIPersonaName(selected)} · 真人照片待上传</Text>
             </View>
           ) : (
             <View style={styles.coverPlaceholder}>
-              <Text style={styles.coverIcon}>{selected.venueIcon || "◎"}</Text>
-              <Text style={styles.coverNote}>活动照片待商家 / 发起人上传</Text>
+              <Text selectable style={styles.coverIcon}>{selected.venueIcon || "◎"}</Text>
+              <Text selectable style={styles.coverNote}>活动照片待商家 / 发起人上传</Text>
             </View>
           )}
-          <Text style={styles.title}>{selected.title}</Text>
-          <Text style={styles.meta}>{selected.venueName} · {selected.time}</Text>
+          <Text selectable style={styles.title}>{selected.title}</Text>
+          <Text selectable style={styles.meta}>{selected.venueName} · {selected.time}</Text>
           <View style={styles.card}>
-            <Text style={styles.body}>{selected.desc}</Text>
-            <Text style={styles.meta}>感兴趣 {selected.interested} · 参加 {selected.joined} · 提问 {selected.qaCount}</Text>
-            <Text style={styles.money}>{activityMoneySummary(selected)}</Text>
-            <Text style={styles.meta}>{selected.people} · {selected.consumption}</Text>
-            {aiDisclosure ? <Text style={styles.aiDisclosure}>🤖 {aiDisclosure}</Text> : null}
+            <Text selectable style={styles.body}>{selected.desc}</Text>
+            <Text selectable style={styles.meta}>感兴趣 {selected.interested} · 参加 {selected.joined} · 提问 {selected.qaCount}</Text>
+            <Text selectable style={styles.money}>{activityMoneySummary(selected)}</Text>
+            <Text selectable style={styles.meta}>{selected.people} · {selected.consumption}</Text>
+            {aiDisclosure ? <Text selectable style={styles.aiDisclosure}>🤖 {aiDisclosure}</Text> : null}
           </View>
-          <Pressable onPress={async () => { try { await client.toggleInterest(selected.activityId); const list = await client.listActivities(); setItems(list); const upd = list.find((x) => x.activityId === selected.activityId); if (upd) setSelected(upd); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.cta}><Text style={styles.ctaText}>感兴趣 / 取消</Text></Pressable>
-          <Pressable onPress={async () => { try { await client.join(selected.activityId); const list = await client.listActivities(); setItems(list); const upd = list.find((x) => x.activityId === selected.activityId); if (upd) setSelected(upd); setNotice("报名成功"); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.ctaSecondary}><Text style={styles.ctaSecondaryText}>报名参加</Text></Pressable>
-          {notice ? <Text style={styles.meta}>{notice}</Text> : null}
+          <Pressable onPress={async () => { try { await client.toggleInterest(selected.activityId); const list = await client.listActivities(); setItems(list); const upd = list.find((x) => x.activityId === selected.activityId); if (upd) setSelected(upd); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.cta}><Text selectable style={styles.ctaText}>感兴趣 / 取消</Text></Pressable>
+          <Pressable onPress={async () => { try { await client.join(selected.activityId); const list = await client.listActivities(); setItems(list); const upd = list.find((x) => x.activityId === selected.activityId); if (upd) setSelected(upd); setNotice("报名成功"); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.ctaSecondary}><Text selectable style={styles.ctaSecondaryText}>报名参加</Text></Pressable>
+          {notice ? <Text selectable style={styles.meta}>{notice}</Text> : null}
           <View style={styles.reportRow}>
             {activityReportTargets(selected).map((target) => (
               <Pressable key={target.targetType + target.targetId} onPress={() => { setReportDone(undefined); setReporting(target); }} style={styles.reportButton} accessibilityLabel={target.label}>
-                <Text style={styles.reportButtonText}>⚑ {target.label}</Text>
+                <Text selectable style={styles.reportButtonText}>⚑ {target.label}</Text>
               </Pressable>
             ))}
           </View>
-          {reportDone ? <Text style={styles.meta}>{reportDone}</Text> : null}
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {reportDone ? <Text selectable style={styles.meta}>{reportDone}</Text> : null}
+          {error ? <Text selectable style={styles.error}>{error}</Text> : null}
         </ScrollView>
         {reporting ? (
           <ReportSheet
@@ -109,17 +109,17 @@ export function ActivityDetailSurface({ client, moderation, initialActivityId, o
   }
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>活动详情</Text>
-      <Text style={styles.sub}>来自 Activity 真实读模型，非占位。</Text>
+      <Text selectable style={styles.title}>活动详情</Text>
+      <Text selectable style={styles.sub}>来自 Activity 真实读模型，非占位。</Text>
       {items === undefined && !error ? <ProxyLoading tone="muted" /> : null}
-      {error ? <View style={styles.card}><Text style={styles.empty}>加载失败：{error}</Text></View> : null}
+      {error ? <View style={styles.card}><Text selectable style={styles.empty}>加载失败：{error}</Text></View> : null}
       {items?.map((a) => (
         <Pressable key={a.activityId} onPress={() => setSelected(a)} style={styles.card}>
-          <Text style={styles.name}>{a.title}</Text>
-          <Text style={styles.meta}>{a.venueName} · {a.time} · 感兴趣 {a.interested}</Text>
+          <Text selectable style={styles.name}>{a.title}</Text>
+          <Text selectable style={styles.meta}>{a.venueName} · {a.time} · 感兴趣 {a.interested}</Text>
         </Pressable>
       ))}
-      {items && items.length === 0 ? <View style={styles.card}><Text style={styles.empty}>暂无活动</Text></View> : null}
+      {items && items.length === 0 ? <View style={styles.card}><Text selectable style={styles.empty}>暂无活动</Text></View> : null}
     </ScrollView>
   );
 }

@@ -63,10 +63,10 @@ export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient,
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.pageHead}>
-          <Text onPress={onBack} style={styles.back}>‹</Text>
-          <Text style={styles.title}>AI分身中心</Text>
+          <Text selectable onPress={onBack} style={styles.back}>‹</Text>
+          <Text selectable style={styles.title}>AI分身中心</Text>
         </View>
-        <Text style={styles.subtitle}>图库 · 帖文编排 · 好友运营</Text>
+        <Text selectable style={styles.subtitle}>图库 · 帖文编排 · 好友运营</Text>
 
         {/* AI-TWIN-GALLERY-001: 图库段（原型：小美 · AI 分身受众调度版）。 */}
         <TwinGallerySection authClient={authClient} mediaClient={mediaClient} ownerId={viewerAccountId} rawGalleryItems={rawGalleryItems} resolveMediaUrl={resolveMediaUrl} />

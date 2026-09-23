@@ -63,7 +63,7 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect((source.match(/styles\.aiSection\b/g) ?? [])).toHaveLength(1);
     // 「AI 生成」只作为徽标 / 卡片副标题出现，不再是一条独立行的标题。
     expect((source.match(/t\("aiGenerated"\)/g) ?? [])).toHaveLength(2);
-    expect(source).toContain('<Text style={styles.aiTitle}>{t("aiRecommend")}</Text>');
+    expect(source).toContain('<Text selectable style={styles.aiTitle}>{t("aiRecommend")}</Text>');
     expect(source).toContain('styles.aiBadgeText}>{t("aiGenerated")}');
     expect(source).toContain("styles.aiHandle}");
   });

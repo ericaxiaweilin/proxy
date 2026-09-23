@@ -165,7 +165,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
               disabled={props.followBusy}
               style={[styles.actionBtn, props.isFollowing ? styles.actionSecondary : styles.actionPrimary]}
             >
-              <Text style={props.isFollowing ? styles.actionSecondaryText : styles.actionPrimaryText}>
+              <Text selectable style={props.isFollowing ? styles.actionSecondaryText : styles.actionPrimaryText}>
                 {props.followBusy ? "处理中…" : props.isFollowing ? "✓ 已关注" : "+ 关注"}
               </Text>
             </Pressable>
@@ -174,7 +174,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
               onPress={props.onSendMessage}
               style={[styles.actionBtn, styles.actionSecondary]}
             >
-              <Text style={styles.actionSecondaryText}>💬 消息</Text>
+              <Text selectable style={styles.actionSecondaryText}>💬 消息</Text>
             </Pressable>
           </>
         </View>
@@ -191,7 +191,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
             style={styles.tabBtn}
           >
             <ProxyIcon name={PROFILE_TAB_ICON[key]} color={activeTab === key ? props.color.ink : props.color.muted} size={20} />
-            <Text style={[styles.tabLabel, activeTab === key && styles.tabLabelActive]}>{PROFILE_TAB_LABEL[key]}</Text>
+            <Text selectable style={[styles.tabLabel, activeTab === key && styles.tabLabelActive]}>{PROFILE_TAB_LABEL[key]}</Text>
             {activeTab === key ? <View style={styles.tabUnderline} /> : null}
           </Pressable>
         ))}
@@ -300,10 +300,10 @@ function PostsTab(props: {
         <View style={styles.viewToggleRow}>
           <View style={styles.viewToggle}>
             <Pressable onPress={() => setView("LIST")} style={styles.viewToggleBtn}>
-              <Text style={[styles.viewToggleIcon, styles.viewToggleIconInactive]}>≡</Text>
+              <Text selectable style={[styles.viewToggleIcon, styles.viewToggleIconInactive]}>≡</Text>
             </Pressable>
             <Pressable onPress={() => setView("GRID")} style={[styles.viewToggleBtn, styles.viewToggleBtnActive]}>
-              <Text style={[styles.viewToggleIcon, styles.viewToggleIconActive]}>▦</Text>
+              <Text selectable style={[styles.viewToggleIcon, styles.viewToggleIconActive]}>▦</Text>
             </Pressable>
           </View>
         </View>
@@ -337,10 +337,10 @@ function PostsTab(props: {
       <View style={styles.viewToggleRow}>
         <View style={styles.viewToggle}>
           <Pressable onPress={() => setView("LIST")} style={[styles.viewToggleBtn, styles.viewToggleBtnActive]}>
-            <Text style={[styles.viewToggleIcon, styles.viewToggleIconActive]}>≡</Text>
+            <Text selectable style={[styles.viewToggleIcon, styles.viewToggleIconActive]}>≡</Text>
           </Pressable>
           <Pressable onPress={() => setView("GRID")} style={styles.viewToggleBtn}>
-            <Text style={[styles.viewToggleIcon, styles.viewToggleIconInactive]}>▦</Text>
+            <Text selectable style={[styles.viewToggleIcon, styles.viewToggleIconInactive]}>▦</Text>
           </Pressable>
         </View>
       </View>
@@ -350,8 +350,8 @@ function PostsTab(props: {
       {hasRealPin && props.pinnedPost ? (
         <View style={styles.pinnedCard}>
           <View style={styles.pinnedHeader}>
-            <Text style={styles.pinnedBadge}>📌 置顶</Text>
-            <Text style={styles.pinnedTime}>· {new Date(props.pinnedPost.createdAt).toLocaleDateString()}</Text>
+            <Text selectable style={styles.pinnedBadge}>📌 置顶</Text>
+            <Text selectable style={styles.pinnedTime}>· {new Date(props.pinnedPost.createdAt).toLocaleDateString()}</Text>
           </View>
           <PostCard
             post={props.pinnedPost}
@@ -414,19 +414,19 @@ function PostCard(props: {
           {props.avatarUri ? (
             <CircularAvatarImage accessibilityLabel={`${props.name}头像`} size={38} uri={props.avatarUri} />
           ) : (
-            <Text style={styles.postAvatarText}>{(props.name || "?").charAt(0).toUpperCase()}</Text>
+            <Text selectable style={styles.postAvatarText}>{(props.name || "?").charAt(0).toUpperCase()}</Text>
           )}
         </View>
         <View style={styles.postHeadBody}>
-          <Text style={styles.postName} numberOfLines={1}>{props.name}</Text>
-          <Text style={styles.postTime} numberOfLines={1}>· {new Date(props.post.createdAt).toLocaleDateString()}</Text>
+          <Text selectable style={styles.postName} numberOfLines={1}>{props.name}</Text>
+          <Text selectable style={styles.postTime} numberOfLines={1}>· {new Date(props.post.createdAt).toLocaleDateString()}</Text>
         </View>
         <Pressable accessibilityLabel="更多" onPress={sharePost} style={styles.postMore}>
-          <Text style={styles.postMoreText}>⋯</Text>
+          <Text selectable style={styles.postMoreText}>⋯</Text>
         </Pressable>
       </View>
       <View style={styles.postBody}>
-        <Text style={styles.postText}>{props.post.body}</Text>
+        <Text selectable style={styles.postText}>{props.post.body}</Text>
         {props.post.contextRefs.length > 0 ? (
           <View style={styles.postContextRow}>
             {props.post.contextRefs.map((entry) => (
@@ -435,7 +435,7 @@ function PostCard(props: {
                 onPress={() => props.onOpenScene?.(entry.contextId)}
                 style={styles.postContextChip}
               >
-                <Text style={styles.postContextText}>{entry.contextId}</Text>
+                <Text selectable style={styles.postContextText}>{entry.contextId}</Text>
               </Pressable>
             ))}
           </View>
@@ -450,16 +450,16 @@ function PostCard(props: {
         <View style={styles.postActions}>
           {props.onLikePost ? (
             <Pressable onPress={() => props.onLikePost?.(props.post.postId)} style={styles.postAction} accessibilityLabel="喜欢">
-              <Text style={styles.postActionText}>♡ 喜欢</Text>
+              <Text selectable style={styles.postActionText}>♡ 喜欢</Text>
             </Pressable>
           ) : null}
           {props.onReplyPost ? (
             <Pressable onPress={() => props.onReplyPost?.(props.post.postId)} style={styles.postAction} accessibilityLabel="回复">
-              <Text style={styles.postActionText}>💬 回复</Text>
+              <Text selectable style={styles.postActionText}>💬 回复</Text>
             </Pressable>
           ) : null}
           <Pressable onPress={sharePost} style={styles.postAction} accessibilityLabel="分享帖子">
-            <Text style={styles.postActionText}>↗ 分享</Text>
+            <Text selectable style={styles.postActionText}>↗ 分享</Text>
           </Pressable>
         </View>
       </View>
@@ -494,17 +494,17 @@ function RepliesTab(props: {
           // key 用 replyId：同一条帖子可以被同一个人回复多次，用父帖 id 会撞。
           <View key={reply.replyId} style={styles.replyCard}>
             <View style={styles.replyMeta}>
-              <Text style={styles.replyTarget}>
+              <Text selectable style={styles.replyTarget}>
                 {replyTargetLabel(props.viewerMode, target, props.viewerAccountId)}
               </Text>
-              <Text style={styles.replyTime}>· {replyTimestampLabel(reply.createdAt)}</Text>
+              <Text selectable style={styles.replyTime}>· {replyTimestampLabel(reply.createdAt)}</Text>
             </View>
-            <Text style={styles.replyText}>{reply.body}</Text>
+            <Text selectable style={styles.replyText}>{reply.body}</Text>
             {/* 引用块：让「回复了谁」这条信息能落到实处 —— 看到原帖才知道
                 说的是哪件事（Threads 的做法）。 */}
             {target && target.excerpt !== "" ? (
               <View style={styles.replyQuote}>
-                <Text numberOfLines={2} style={styles.replyQuoteText}>{target.excerpt}</Text>
+                <Text selectable numberOfLines={2} style={styles.replyQuoteText}>{target.excerpt}</Text>
               </View>
             ) : null}
           </View>
@@ -536,7 +536,7 @@ function SavedTab(props: {
   return (
     <View>
       <View style={styles.savedHint}>
-        <Text style={styles.savedHintText}>仅自己可见 · {all.length} 项</Text>
+        <Text selectable style={styles.savedHintText}>仅自己可见 · {all.length} 项</Text>
       </View>
       <View style={styles.photoGrid}>
         {all.map((entry) => (
@@ -589,7 +589,7 @@ function TaggedTab(props: {
             style={styles.photoImage}
           />
           <View style={styles.taggedOverlay}>
-            <Text style={styles.taggedOverlayText}>@{entry.postId.slice(0, 6)}</Text>
+            <Text selectable style={styles.taggedOverlayText}>@{entry.postId.slice(0, 6)}</Text>
           </View>
         </Pressable>
       ))}
@@ -606,19 +606,19 @@ function AboutTab(props: {
 }): React.JSX.Element {
   return (
     <View style={styles.aboutCard}>
-      <Text style={styles.aboutBio}>{props.profileDraft.bio}</Text>
+      <Text selectable style={styles.aboutBio}>{props.profileDraft.bio}</Text>
       <View style={styles.aboutMetaRow}>
-        <Text style={styles.aboutMetaLabel}>📍</Text>
-        <Text style={styles.aboutMetaValue}>{props.profileDraft.city}</Text>
+        <Text selectable style={styles.aboutMetaLabel}>📍</Text>
+        <Text selectable style={styles.aboutMetaValue}>{props.profileDraft.city}</Text>
       </View>
       <View style={styles.aboutMetaRow}>
-        <Text style={styles.aboutMetaLabel}>🆔</Text>
-        <Text style={styles.aboutMetaValue}>@{props.profileDraft.handle}</Text>
+        <Text selectable style={styles.aboutMetaLabel}>🆔</Text>
+        <Text selectable style={styles.aboutMetaValue}>@{props.profileDraft.handle}</Text>
       </View>
       <View style={styles.aboutDivider} />
       <View style={styles.aboutStatBig}>
-        <Text style={styles.aboutStatBigLabel}>粉丝 / 关注 / 帖子</Text>
-        <Text style={styles.aboutStatBigValue}>
+        <Text selectable style={styles.aboutStatBigLabel}>粉丝 / 关注 / 帖子</Text>
+        <Text selectable style={styles.aboutStatBigValue}>
           {props.stats.followers ?? "—"} · {props.stats.following ?? "—"} · {props.stats.posts ?? "—"}
         </Text>
       </View>

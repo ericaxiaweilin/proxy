@@ -89,31 +89,31 @@ export function OpportunityQuoteSheet(props: OpportunityQuoteSheetProps): React.
       <View style={styles.root}>
         <View style={styles.head}>
           <Pressable onPress={onClose} style={styles.back}>
-            <Text style={styles.backText}>‹</Text>
+            <Text selectable style={styles.backText}>‹</Text>
           </Pressable>
-          <Text style={styles.headTitle}>你的报价</Text>
+          <Text selectable style={styles.headTitle}>你的报价</Text>
           <View style={styles.headSpacer} />
         </View>
 
         <View style={styles.body}>
-          <Text style={styles.kicker}>{typeLabel.sub.toUpperCase()} · {hasRange ? `${fairLowK}–${fairHighK}K` : "费用待面谈"}</Text>
-          <Text style={styles.title}>为这一类订单提交你的报价</Text>
+          <Text selectable style={styles.kicker}>{typeLabel.sub.toUpperCase()} · {hasRange ? `${fairLowK}–${fairHighK}K` : "费用待面谈"}</Text>
+          <Text selectable style={styles.title}>为这一类订单提交你的报价</Text>
           <View style={styles.divider} />
 
           <View style={styles.typeRow}>
             <MarketTypeLogo type={type} size="FILTER" />
             <View style={styles.typeMeta}>
-              <Text style={styles.typeMetaLabel}>订单类型</Text>
-              <Text style={styles.typeMetaTitle}>{typeLabel.label}</Text>
+              <Text selectable style={styles.typeMetaLabel}>订单类型</Text>
+              <Text selectable style={styles.typeMetaTitle}>{typeLabel.label}</Text>
             </View>
           </View>
 
-          {contextLine ? <Text style={styles.context}>{contextLine}</Text> : null}
+          {contextLine ? <Text selectable style={styles.context}>{contextLine}</Text> : null}
 
           <View style={styles.rangeRow}>
-            <Text style={styles.rangeLabel}>当前参考区间</Text>
-            <Text style={styles.rangeValue}>{hasRange ? `${fairLowK}–${fairHighK}K` : "—"}</Text>
-            {hasRange ? <Text style={styles.rangeNote}>可协商</Text> : null}
+            <Text selectable style={styles.rangeLabel}>当前参考区间</Text>
+            <Text selectable style={styles.rangeValue}>{hasRange ? `${fairLowK}–${fairHighK}K` : "—"}</Text>
+            {hasRange ? <Text selectable style={styles.rangeNote}>可协商</Text> : null}
           </View>
 
           <View style={[styles.bigInput, error && styles.bigInputError]}>
@@ -131,27 +131,27 @@ export function OpportunityQuoteSheet(props: OpportunityQuoteSheetProps): React.
               style={styles.bigInputField}
               value={value > 0 ? String(value) : ""}
             />
-            <Text style={styles.bigInputUnit}>K VND</Text>
+            <Text selectable style={styles.bigInputUnit}>K VND</Text>
           </View>
-          <Text style={styles.private}>你的报价是私密的 · 客户可接受或继续协商</Text>
+          <Text selectable style={styles.private}>你的报价是私密的 · 客户可接受或继续协商</Text>
 
           {presets.length === 3 ? (
             <View style={styles.presetRow}>
               {presets.map((preset) => (
                 <Pressable key={preset} onPress={() => { setValue(preset); setError(undefined); }} style={[styles.preset, value === preset && styles.presetOn]}>
-                  <Text style={[styles.presetText, value === preset && styles.presetTextOn]}>{preset}K</Text>
+                  <Text selectable style={[styles.presetText, value === preset && styles.presetTextOn]}>{preset}K</Text>
                 </Pressable>
               ))}
             </View>
           ) : null}
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text selectable style={styles.error}>{error}</Text> : null}
 
           <Pressable disabled={busy} onPress={submit} style={[styles.submit, busy && styles.submitBusy]}>
-            <Text style={styles.submitText}>{busy ? "提交中…" : "提交报名"}</Text>
+            <Text selectable style={styles.submitText}>{busy ? "提交中…" : "提交报名"}</Text>
           </Pressable>
 
-          <Text style={styles.foot}>参考区间只供你锚定, 不是固定价格, 你可以在合理范围内自行报价, Proxy 只在后台做极异常筛查(异常报价)。</Text>
+          <Text selectable style={styles.foot}>参考区间只供你锚定, 不是固定价格, 你可以在合理范围内自行报价, Proxy 只在后台做极异常筛查(异常报价)。</Text>
         </View>
       </View>
     </Modal>

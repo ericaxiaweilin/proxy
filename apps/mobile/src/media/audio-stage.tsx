@@ -64,7 +64,7 @@ export function AudioStage({ item, uri }: { item: FeedMediaItem; uri: string }):
     >
       <View style={[styles.audioCard, playing && styles.audioCardPlaying]}>
         <View style={styles.playBadge}>
-          <Text style={styles.playGlyph}>{playing ? "❚❚" : "▶"}</Text>
+          <Text selectable style={styles.playGlyph}>{playing ? "❚❚" : "▶"}</Text>
         </View>
         <View style={styles.waveWrap}>
           <View style={styles.waveRow}>
@@ -75,7 +75,7 @@ export function AudioStage({ item, uri }: { item: FeedMediaItem; uri: string }):
               />
             ))}
           </View>
-          <Text style={styles.audioMeta}>语音 · {durationLabel}</Text>
+          <Text selectable style={styles.audioMeta}>语音 · {durationLabel}</Text>
         </View>
       </View>
     </Pressable>

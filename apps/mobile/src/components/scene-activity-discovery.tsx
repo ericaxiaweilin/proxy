@@ -313,12 +313,12 @@ export function SceneActivityDiscovery({
           const active = action.id === actionMatchId(actionId);
           return <Pressable accessibilityLabel={`动作 ${action.label}`} key={action.id} onPress={() => setActionId(active ? undefined : action.id)} style={styles.actionOption}>
             <View style={[styles.actionGlyph, active && styles.actionGlyphActive]}><Image contentFit="contain" source={action.icon} style={styles.actionIcon} /></View>
-            <Text numberOfLines={1} style={styles.actionLabel}>{action.label}</Text>
+            <Text selectable numberOfLines={1} style={styles.actionLabel}>{action.label}</Text>
           </Pressable>;
         })}
       </HorizontalSwipeRail>
 
-      {(actionId || occasionId || timeId || priceId) ? <View style={styles.filterState}><Text style={styles.filterStateText}>{[selectedAction(actionId)?.label ?? "", simpleLabel(PRICE_OPTIONS, priceId), simpleLabel(TIME_OPTIONS, timeId), simpleLabel(OCCASION_OPTIONS, occasionId)].filter(Boolean).join(" × ")}</Text><Pressable onPress={resetAll}><Text style={styles.clear}>重置</Text></Pressable></View> : null}
+      {(actionId || occasionId || timeId || priceId) ? <View style={styles.filterState}><Text selectable style={styles.filterStateText}>{[selectedAction(actionId)?.label ?? "", simpleLabel(PRICE_OPTIONS, priceId), simpleLabel(TIME_OPTIONS, timeId), simpleLabel(OCCASION_OPTIONS, occasionId)].filter(Boolean).join(" × ")}</Text><Pressable onPress={resetAll}><Text selectable style={styles.clear}>重置</Text></Pressable></View> : null}
 
       {/* SCENE-CARD-STACK-005（2026-09-21，用户带参考图）：原来是 2 列并排
           的小卡片网格（每张 194 高，标题+3 个标签挤在一起）。改成参考图那
@@ -350,22 +350,22 @@ export function SceneActivityDiscovery({
           </Svg>
           <Pressable accessibilityLabel={saved.includes(moment.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => setSaved((items) => items.includes(moment.id) ? items.filter((id) => id !== moment.id) : [...items, moment.id])} style={styles.sceneFavorite}><ProxyIcon color={saved.includes(moment.id) ? color.magenta : color.white} filled={saved.includes(moment.id)} name="heart" size={20} /></Pressable>
           <View style={styles.sceneCardContent}>
-            <Text style={styles.sceneCardTitle}>{moment.title}</Text>
+            <Text selectable style={styles.sceneCardTitle}>{moment.title}</Text>
             <View style={styles.sceneTagsRow}>
               <Tag icon={action.icon} label={action.label} />
               <Tag icon={scene.icon} label={scene.label} />
               {expanded ? <>
                 {extraThemes.map((t) => <Tag icon={t.icon} key={t.id} label={t.label} />)}
-                <View style={styles.sceneMetaTag}><Text style={styles.sceneMetaTagText}>🕐 {simpleLabel(TIME_OPTIONS, moment.time)}</Text></View>
-                <View style={styles.sceneMetaTag}><Text style={styles.sceneMetaTagText}>💰 {simpleLabel(PRICE_OPTIONS, moment.price)}</Text></View>
+                <View style={styles.sceneMetaTag}><Text selectable style={styles.sceneMetaTagText}>🕐 {simpleLabel(TIME_OPTIONS, moment.time)}</Text></View>
+                <View style={styles.sceneMetaTag}><Text selectable style={styles.sceneMetaTagText}>💰 {simpleLabel(PRICE_OPTIONS, moment.price)}</Text></View>
               </> : null}
               <Pressable accessibilityLabel={expanded ? "收起标签" : `展开剩余 ${hiddenCount} 个标签`} hitSlop={6} onPress={() => setExpandedMomentId(expanded ? undefined : moment.id)} style={styles.sceneTagMore}>
-                <Text style={styles.sceneTagMoreText}>{expanded ? "收起" : `+${hiddenCount}`}</Text>
+                <Text selectable style={styles.sceneTagMoreText}>{expanded ? "收起" : `+${hiddenCount}`}</Text>
               </Pressable>
             </View>
           </View>
         </Pressable>;
-      })}</View> : <View style={styles.empty}><Text style={styles.emptyTitle}>暂时没有完全匹配的 Moment</Text><Text style={styles.emptyText}>减少一个筛选条件，看看更多组合。</Text></View>}
+      })}</View> : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>暂时没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个筛选条件，看看更多组合。</Text></View>}
 
       {/* SCENE-PICKER-WAIMAI-001（2026-09-20）：以前是 动作/场景/主题 三张平铺
           网格竖向堆叠，30+ 个可点目标一次性摆给用户，AND 组合筛选却只过滤
@@ -385,9 +385,9 @@ export function SceneActivityDiscovery({
         <View style={[styles.pickerPage, { paddingTop: safeArea.top }]}>
           <View style={styles.pickerHead}>
             <Pressable accessibilityLabel="返回" hitSlop={8} onPress={() => setPickerOpen(false)} style={styles.pickerBack}>
-              <Text style={styles.pickerBackText}>‹ 返回</Text>
+              <Text selectable style={styles.pickerBackText}>‹ 返回</Text>
             </Pressable>
-            <View style={styles.pickerHeadCopy}><Text style={styles.pickerTitle}>动作分类</Text><Text style={styles.pickerHint}>先选一类，再用金额/时间/场合细筛</Text></View>
+            <View style={styles.pickerHeadCopy}><Text selectable style={styles.pickerTitle}>动作分类</Text><Text selectable style={styles.pickerHint}>先选一类，再用金额/时间/场合细筛</Text></View>
           </View>
 
             {openFilter ? <Pressable accessibilityLabel="关闭筛选" onPress={() => setOpenFilter(undefined)} style={styles.filterDropdownScrim} /> : null}
@@ -412,34 +412,34 @@ export function SceneActivityDiscovery({
                 // 外面盖一层可点的透明 scrim 用来点击外部收起。
                 return <View key={f.dim} style={styles.filterBarBtnWrap}>
                   <Pressable accessibilityLabel={`筛选 ${f.label}`} onPress={() => setOpenFilter(open ? undefined : f.dim)} style={[styles.filterBarBtn, active && styles.filterBarBtnActive]}>
-                    <Text style={styles.filterBarGlyph}>{f.glyph}</Text>
-                    <Text numberOfLines={1} style={[styles.filterBarLabel, active && styles.filterBarLabelActive]}>{currentLabel || f.label}</Text>
-                    <Text style={[styles.filterBarCaret, active && styles.filterBarCaretActive]}>{open ? "▴" : "▾"}</Text>
+                    <Text selectable style={styles.filterBarGlyph}>{f.glyph}</Text>
+                    <Text selectable numberOfLines={1} style={[styles.filterBarLabel, active && styles.filterBarLabelActive]}>{currentLabel || f.label}</Text>
+                    <Text selectable style={[styles.filterBarCaret, active && styles.filterBarCaretActive]}>{open ? "▴" : "▾"}</Text>
                   </Pressable>
                   {open ? <View style={[styles.filterDropdown, index === 2 ? styles.filterDropdownRight : styles.filterDropdownLeft]}>
                     <ScrollView style={styles.filterDropdownList}>
                       {f.dim === "price" ? <>
                         <Pressable accessibilityLabel="金额 不限" onPress={() => { setPriceId(undefined); setOpenFilter(undefined); }} style={styles.filterDropdownOption}>
-                          <Text style={styles.filterDropdownOptionText}>不限</Text>{priceId === undefined ? <Text style={styles.filterDropdownCheck}>✓</Text> : null}
+                          <Text selectable style={styles.filterDropdownOptionText}>不限</Text>{priceId === undefined ? <Text selectable style={styles.filterDropdownCheck}>✓</Text> : null}
                         </Pressable>
                         {PRICE_OPTIONS.map((opt) => <Pressable accessibilityLabel={`金额 ${opt.label}`} key={opt.id} onPress={() => { setPriceId(opt.id); setOpenFilter(undefined); }} style={styles.filterDropdownOption}>
-                          <Text style={styles.filterDropdownOptionText}>{opt.glyph} {opt.label}</Text>{priceId === opt.id ? <Text style={styles.filterDropdownCheck}>✓</Text> : null}
+                          <Text selectable style={styles.filterDropdownOptionText}>{opt.glyph} {opt.label}</Text>{priceId === opt.id ? <Text selectable style={styles.filterDropdownCheck}>✓</Text> : null}
                         </Pressable>)}
                       </> : null}
                       {f.dim === "time" ? <>
                         <Pressable accessibilityLabel="时间 不限" onPress={() => { setTimeId(undefined); setOpenFilter(undefined); }} style={styles.filterDropdownOption}>
-                          <Text style={styles.filterDropdownOptionText}>不限</Text>{timeId === undefined ? <Text style={styles.filterDropdownCheck}>✓</Text> : null}
+                          <Text selectable style={styles.filterDropdownOptionText}>不限</Text>{timeId === undefined ? <Text selectable style={styles.filterDropdownCheck}>✓</Text> : null}
                         </Pressable>
                         {TIME_OPTIONS.map((opt) => <Pressable accessibilityLabel={`时间 ${opt.label}`} key={opt.id} onPress={() => { setTimeId(opt.id); setOpenFilter(undefined); }} style={styles.filterDropdownOption}>
-                          <Text style={styles.filterDropdownOptionText}>{opt.glyph} {opt.label}</Text>{timeId === opt.id ? <Text style={styles.filterDropdownCheck}>✓</Text> : null}
+                          <Text selectable style={styles.filterDropdownOptionText}>{opt.glyph} {opt.label}</Text>{timeId === opt.id ? <Text selectable style={styles.filterDropdownCheck}>✓</Text> : null}
                         </Pressable>)}
                       </> : null}
                       {f.dim === "occasion" ? <>
                         <Pressable accessibilityLabel="场合 不限" onPress={() => { setOccasionId(undefined); setOpenFilter(undefined); }} style={styles.filterDropdownOption}>
-                          <Text style={styles.filterDropdownOptionText}>不限</Text>{occasionId === undefined ? <Text style={styles.filterDropdownCheck}>✓</Text> : null}
+                          <Text selectable style={styles.filterDropdownOptionText}>不限</Text>{occasionId === undefined ? <Text selectable style={styles.filterDropdownCheck}>✓</Text> : null}
                         </Pressable>
                         {OCCASION_OPTIONS.map((opt) => <Pressable accessibilityLabel={`场合 ${opt.label}`} key={opt.id} onPress={() => { setOccasionId(opt.id); setOpenFilter(undefined); }} style={styles.filterDropdownOption}>
-                          <Text style={styles.filterDropdownOptionText}>{opt.glyph} {opt.label}</Text>{occasionId === opt.id ? <Text style={styles.filterDropdownCheck}>✓</Text> : null}
+                          <Text selectable style={styles.filterDropdownOptionText}>{opt.glyph} {opt.label}</Text>{occasionId === opt.id ? <Text selectable style={styles.filterDropdownCheck}>✓</Text> : null}
                         </Pressable>)}
                       </> : null}
                     </ScrollView>
@@ -451,31 +451,31 @@ export function SceneActivityDiscovery({
             <View style={styles.waimaiRow}>
               <ScrollView showsVerticalScrollIndicator={false} style={styles.waimaiRail}>
                 <Pressable accessibilityLabel="全部动作" onPress={() => setActionId(undefined)} style={[styles.waimaiRailItem, actionId === undefined && styles.waimaiRailItemActive]}>
-                  <Text style={[styles.waimaiRailLabel, actionId === undefined && styles.waimaiRailLabelActive]}>全部</Text>
-                  <Text style={styles.waimaiRailCount}>{MOMENTS.filter(matchesRefine).length}</Text>
+                  <Text selectable style={[styles.waimaiRailLabel, actionId === undefined && styles.waimaiRailLabelActive]}>全部</Text>
+                  <Text selectable style={styles.waimaiRailCount}>{MOMENTS.filter(matchesRefine).length}</Text>
                 </Pressable>
                 {ACTIONS.map((action) => {
                   const active = actionMatchId(actionId) === action.id;
                   const count = MOMENTS.filter((m) => m.action === action.id && matchesRefine(m)).length;
                   return <Pressable accessibilityLabel={`动作 ${action.label}`} key={action.id} onPress={() => setActionId(active ? undefined : action.id)} style={[styles.waimaiRailItem, active && styles.waimaiRailItemActive]}>
                     <Image contentFit="contain" source={action.icon} style={styles.waimaiRailIcon} />
-                    <Text numberOfLines={1} style={[styles.waimaiRailLabel, active && styles.waimaiRailLabelActive]}>{action.label}</Text>
-                    {count > 0 ? <Text style={styles.waimaiRailCount}>{count}</Text> : null}
+                    <Text selectable numberOfLines={1} style={[styles.waimaiRailLabel, active && styles.waimaiRailLabelActive]}>{action.label}</Text>
+                    {count > 0 ? <Text selectable style={styles.waimaiRailCount}>{count}</Text> : null}
                   </Pressable>;
                 })}
               </ScrollView>
 
               <ScrollView showsVerticalScrollIndicator={false} style={styles.waimaiList}>
                 {actionFamily(actionId) ? <View style={styles.detailGroup}>
-                  <Text style={styles.detailGroupTitle}>{ACTION_FAMILY_LABELS[actionFamily(actionId)!]}</Text>
+                  <Text selectable style={styles.detailGroupTitle}>{ACTION_FAMILY_LABELS[actionFamily(actionId)!]}</Text>
                   <View style={styles.detailChipGrid}>{ACTION_DETAILS.filter((detailAction) => detailAction.familyId === actionFamily(actionId)).map((detailAction) => {
                     const active = actionId === detailAction.id;
                     return <Pressable accessibilityLabel={`${ACTION_FAMILY_LABELS[detailAction.familyId]} ${detailAction.label}`} key={detailAction.id} onPress={() => setActionId(active ? detailAction.familyId : detailAction.id)} style={[styles.detailChip, active && styles.detailChipActive]}>
-                      <Text style={[styles.detailChipText, active && styles.detailChipTextActive]}>{detailAction.label}</Text>
+                      <Text selectable style={[styles.detailChipText, active && styles.detailChipTextActive]}>{detailAction.label}</Text>
                     </Pressable>;
                   })}</View>
-                  {actionMatchId(actionId) === "translation" ? <Text style={styles.medicalBoundary}>仅提供语言支持、流程协助与非医疗陪同；不提供诊断、治疗、护理或急救服务。</Text> : null}
-                  {actionMatchId(actionId) === "urban-support" ? <Text style={styles.medicalBoundary}>仅提供陪同、翻译和流程协助；不代办资质，不提供法律、金融或政府审批承诺。</Text> : null}
+                  {actionMatchId(actionId) === "translation" ? <Text selectable style={styles.medicalBoundary}>仅提供语言支持、流程协助与非医疗陪同；不提供诊断、治疗、护理或急救服务。</Text> : null}
+                  {actionMatchId(actionId) === "urban-support" ? <Text selectable style={styles.medicalBoundary}>仅提供陪同、翻译和流程协助；不代办资质，不提供法律、金融或政府审批承诺。</Text> : null}
                 </View> : null}
 
                 {filtered.length > 0 ? filtered.map((moment) => {
@@ -486,15 +486,15 @@ export function SceneActivityDiscovery({
                   return <Pressable accessibilityLabel={`Moment ${moment.title}`} key={moment.id} onPress={() => { setDetail(moment); setPickerOpen(false); }} style={styles.waimaiMomentRow}>
                     {photo ? <Image contentFit="cover" source={photo} style={styles.waimaiMomentPhoto} /> : <View style={[styles.photoPending, styles.waimaiMomentPhoto]} />}
                     <View style={styles.waimaiMomentCopy}>
-                      <Text numberOfLines={1} style={styles.waimaiMomentTitle}>{moment.title}</Text>
+                      <Text selectable numberOfLines={1} style={styles.waimaiMomentTitle}>{moment.title}</Text>
                       <View style={styles.tagRow}><Tag icon={action.icon} label={action.label} /><Tag icon={scene.icon} label={scene.label} /></View>
                     </View>
                   </Pressable>;
-                }) : <View style={styles.empty}><Text style={styles.emptyTitle}>这类还没有完全匹配的 Moment</Text><Text style={styles.emptyText}>减少一个金额/时间/场合筛选，看看更多组合。</Text></View>}
+                }) : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>这类还没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个金额/时间/场合筛选，看看更多组合。</Text></View>}
               </ScrollView>
             </View>
 
-          <View style={[styles.pickerActions, { paddingBottom: Math.max(12, safeArea.bottom) }]}><Pressable onPress={resetAll} style={styles.pickerReset}><Text style={styles.pickerResetText}>重置</Text></Pressable><Pressable onPress={() => setPickerOpen(false)} style={styles.pickerDone}><Text style={styles.pickerDoneText}>完成</Text></Pressable></View>
+          <View style={[styles.pickerActions, { paddingBottom: Math.max(12, safeArea.bottom) }]}><Pressable onPress={resetAll} style={styles.pickerReset}><Text selectable style={styles.pickerResetText}>重置</Text></Pressable><Pressable onPress={() => setPickerOpen(false)} style={styles.pickerDone}><Text selectable style={styles.pickerDoneText}>完成</Text></Pressable></View>
         </View>
       </Modal>
 
@@ -502,9 +502,9 @@ export function SceneActivityDiscovery({
         <Pressable onPress={() => setDetail(undefined)} style={styles.backdrop}>
           {detail ? <View onStartShouldSetResponder={() => true} style={styles.sheet}>
             <View style={styles.grab} />{absoluteNetworkURL(apiBaseUrl ?? "", liveSceneFor(detail.scene)?.imageUrl) || networkSource("moments", detail.id) ? <Image contentFit="cover" source={(absoluteNetworkURL(apiBaseUrl ?? "", liveSceneFor(detail.scene)?.imageUrl) ? { uri: absoluteNetworkURL(apiBaseUrl ?? "", liveSceneFor(detail.scene)!.imageUrl)! } : networkSource("moments", detail.id))!} style={styles.detailPhoto} /> : <View style={[styles.photoPending, styles.detailPhoto]} />}
-            <Text style={styles.detailTitle}>{detail.title}</Text>
+            <Text selectable style={styles.detailTitle}>{detail.title}</Text>
             <View style={styles.detailLayers}><DetailLayer icon={taxon(ACTIONS, detail.action).icon} label="动作" value={taxon(ACTIONS, detail.action).label} /><DetailLayer icon={taxon(SCENES, detail.scene).icon} label="场景" value={taxon(SCENES, detail.scene).label} /><DetailLayer icon={taxon(THEMES, detail.themes[0]!).icon} label="主题" value={detail.themes.map((id) => taxon(THEMES, id).label).join("、")} /></View>
-            <View style={styles.detailActions}><Pressable onPress={() => { onCompose?.(`配一个类似的：${detail.title}`); setDetail(undefined); }} style={styles.secondaryButton}><Text style={styles.secondaryText}>配一个类似的</Text></Pressable><Pressable onPress={() => { const target = liveSceneFor(detail.scene); if (target) onOpenScene?.(target.id); setDetail(undefined); }} style={[styles.primaryButton, !liveSceneFor(detail.scene) && styles.disabled]} disabled={!liveSceneFor(detail.scene)}><Text style={styles.primaryText}>{liveSceneFor(detail.scene) ? "查看真实场景" : "场景数据接入中"}</Text></Pressable></View>
+            <View style={styles.detailActions}><Pressable onPress={() => { onCompose?.(`配一个类似的：${detail.title}`); setDetail(undefined); }} style={styles.secondaryButton}><Text selectable style={styles.secondaryText}>配一个类似的</Text></Pressable><Pressable onPress={() => { const target = liveSceneFor(detail.scene); if (target) onOpenScene?.(target.id); setDetail(undefined); }} style={[styles.primaryButton, !liveSceneFor(detail.scene) && styles.disabled]} disabled={!liveSceneFor(detail.scene)}><Text selectable style={styles.primaryText}>{liveSceneFor(detail.scene) ? "查看真实场景" : "场景数据接入中"}</Text></Pressable></View>
           </View> : null}
         </Pressable>
       </Modal>
@@ -513,15 +513,15 @@ export function SceneActivityDiscovery({
 }
 
 function SectionHead({ label, onAll }: { label: string; onAll: () => void }): React.JSX.Element {
-  return <View style={styles.sectionHead}><Text style={styles.sectionTitle}>{label}</Text><Pressable accessibilityLabel="查看全部动作场景主题" hitSlop={8} onPress={onAll}><Text style={styles.all}>全部 〉</Text></Pressable></View>;
+  return <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>{label}</Text><Pressable accessibilityLabel="查看全部动作场景主题" hitSlop={8} onPress={onAll}><Text selectable style={styles.all}>全部 〉</Text></Pressable></View>;
 }
 
 function Tag({ icon, label }: { icon: ImageSource; label: string }): React.JSX.Element {
-  return <View style={styles.tag}><Image contentFit="contain" source={icon} style={styles.tagIcon} /><Text numberOfLines={1} style={styles.tagText}>{label}</Text></View>;
+  return <View style={styles.tag}><Image contentFit="contain" source={icon} style={styles.tagIcon} /><Text selectable numberOfLines={1} style={styles.tagText}>{label}</Text></View>;
 }
 
 function DetailLayer({ icon, label, value }: { icon: ImageSource; label: string; value: string }): React.JSX.Element {
-  return <View style={styles.detailLayer}><Image contentFit="contain" source={icon} style={styles.detailIcon} /><Text style={styles.detailLabel}>{label}</Text><Text numberOfLines={1} style={styles.detailValue}>{value}</Text></View>;
+  return <View style={styles.detailLayer}><Image contentFit="contain" source={icon} style={styles.detailIcon} /><Text selectable style={styles.detailLabel}>{label}</Text><Text selectable numberOfLines={1} style={styles.detailValue}>{value}</Text></View>;
 }
 
 const styles = StyleSheet.create({

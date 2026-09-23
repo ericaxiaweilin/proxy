@@ -33,8 +33,8 @@ export function ContextSwitcherSheet({
       <Pressable onPress={onClose} style={styles.overlay}>
         <Pressable onPress={() => undefined} style={styles.sheet}>
           <View style={styles.head}>
-            <Text style={styles.headTitle}>切换身份</Text>
-            <Text style={styles.headSub}>
+            <Text selectable style={styles.headTitle}>切换身份</Text>
+            <Text selectable style={styles.headSub}>
               Proxy 只保留用户与商家。找人、接机会、开放能力、发活动都是行为，不是另一种身份。
             </Text>
           </View>
@@ -53,19 +53,19 @@ export function ContextSwitcherSheet({
                   <ProxyIcon color={active ? color.white : color.ink} name={option.icon} size={24} />
                 </View>
                 <View style={styles.optCopy}>
-                  <Text style={styles.optTitle}>{option.title}</Text>
-                  <Text style={styles.optDesc}>{option.desc}</Text>
+                  <Text selectable style={styles.optTitle}>{option.title}</Text>
+                  <Text selectable style={styles.optDesc}>{option.desc}</Text>
                 </View>
-                <Text style={styles.optAction}>{active ? "当前" : "切换"}</Text>
+                <Text selectable style={styles.optAction}>{active ? "当前" : "切换"}</Text>
               </Pressable>
             );
           })}
           <Pressable onPress={onManageBusiness} style={styles.manage}>
             <View style={styles.manageTitleRow}>
               <ProxyIcon color={color.ink} name="plus" size={20} />
-              <Text style={styles.manageTitle}>管理商家主体</Text>
+              <Text selectable style={styles.manageTitle}>管理商家主体</Text>
             </View>
-            <Text style={styles.manageDesc}>拥有企业 / 店铺权限时，在这里管理主体。</Text>
+            <Text selectable style={styles.manageDesc}>拥有企业 / 店铺权限时，在这里管理主体。</Text>
           </Pressable>
         </Pressable>
       </Pressable>

@@ -49,7 +49,7 @@ export function LanguageSheet({
       <View onStartShouldSetResponder={() => true} style={styles.sheet}>
         <View style={styles.grab} />
         <View style={styles.header}>
-          <Text style={styles.title}>{t("selectLanguage")}</Text>
+          <Text selectable style={styles.title}>{t("selectLanguage")}</Text>
         </View>
         <View style={styles.list}>
           {LANGUAGES.map((option) => {
@@ -62,12 +62,12 @@ export function LanguageSheet({
                 onPress={() => choose(option.code)}
                 style={[styles.item, on && styles.itemOn]}
               >
-                <Text style={styles.flag}>{option.flag}</Text>
+                <Text selectable style={styles.flag}>{option.flag}</Text>
                 <View style={styles.info}>
-                  <Text style={styles.name}>{option.name}</Text>
-                  <Text style={styles.native}>{option.english}</Text>
+                  <Text selectable style={styles.name}>{option.name}</Text>
+                  <Text selectable style={styles.native}>{option.english}</Text>
                 </View>
-                {on ? <Text style={styles.check}>✓</Text> : null}
+                {on ? <Text selectable style={styles.check}>✓</Text> : null}
               </Pressable>
             );
           })}

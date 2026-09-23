@@ -297,7 +297,7 @@ function BootScreen(): React.JSX.Element {
     <View style={styles.screen}>
       <BrandMark large />
       <ProxyLoading tone="brand" style={styles.spinner} />
-      <Text style={styles.secondary}>让时间遇见需要。</Text>
+      <Text selectable style={styles.secondary}>让时间遇见需要。</Text>
     </View>
   );
 }
@@ -306,8 +306,8 @@ function BrandMark({ large = false, showSlogan = true }: { large?: boolean; show
   return (
     <View style={styles.brandBlock}>
       <Image accessibilityLabel="Proxy" source={require("../assets/otter-logo.png")} style={[styles.otterLogo, large && styles.otterLogoLarge]} />
-      <Text style={[styles.brandName, large && styles.brandNameLarge]}>Proxy</Text>
-      {showSlogan ? <><Text style={styles.brandSlogan}>让时间遇见需要。</Text><Text style={styles.brandSloganEn}>Where time meets need.</Text></> : null}
+      <Text selectable style={[styles.brandName, large && styles.brandNameLarge]}>Proxy</Text>
+      {showSlogan ? <><Text selectable style={styles.brandSlogan}>让时间遇见需要。</Text><Text selectable style={styles.brandSloganEn}>Where time meets need.</Text></> : null}
     </View>
   );
 }
@@ -345,25 +345,25 @@ function LegalDocViewer({ kind, onClose }: { kind: LegalDocKind; onClose: () => 
     <Modal animationType="slide" onRequestClose={onClose} transparent={false} visible>
       <View style={styles.legalScreen}>
         <View style={styles.legalHeader}>
-          <Text style={styles.legalHeaderTitle}>{kind === "terms" ? "服务使用协议" : "隐私政策"} (v{doc?.version ?? "1.1"})</Text>
-          <Pressable disabled={busy} onPress={onClose} style={styles.legalCloseBtn}><Text style={styles.legalCloseBtnText}>关闭</Text></Pressable>
+          <Text selectable style={styles.legalHeaderTitle}>{kind === "terms" ? "服务使用协议" : "隐私政策"} (v{doc?.version ?? "1.1"})</Text>
+          <Pressable disabled={busy} onPress={onClose} style={styles.legalCloseBtn}><Text selectable style={styles.legalCloseBtnText}>关闭</Text></Pressable>
         </View>
         {busy ? (
           <View style={styles.legalBusy}><ProxyLoading tone="violet" label="加载中…" /></View>
         ) : error ? (
           <View style={styles.legalErrorBlock}>
-            <Text style={styles.legalErrorTitle}>无法加载条款</Text>
-            <Text style={styles.legalErrorBody}>{error}</Text>
-            <Text style={styles.legalErrorHint}>请检查网络或稍后再试。条款未成功加载前，不能勾选同意。</Text>
+            <Text selectable style={styles.legalErrorTitle}>无法加载条款</Text>
+            <Text selectable style={styles.legalErrorBody}>{error}</Text>
+            <Text selectable style={styles.legalErrorHint}>请检查网络或稍后再试。条款未成功加载前，不能勾选同意。</Text>
           </View>
         ) : doc ? (
           <ScrollView contentContainerStyle={styles.legalScroll}>
-            <Text style={styles.legalTitle}>{doc.title}</Text>
-            <Text style={styles.legalMeta}>适用地区：{doc.locale} · 更新日期：{doc.updatedAt.slice(0, 10)}</Text>
+            <Text selectable style={styles.legalTitle}>{doc.title}</Text>
+            <Text selectable style={styles.legalMeta}>适用地区：{doc.locale} · 更新日期：{doc.updatedAt.slice(0, 10)}</Text>
             {/* R15.x+: 用 LegalDocRenderer 替换平铺 Text — 渲染 serif
                 + 15pt + 1.6 lineHeight + heading + 列表 + TOC。 */}
             <LegalDocRenderer content={doc.content} />
-            <Text style={styles.legalFooter}>本版本仍属于产品法律草案。正式发布前，应由当地执业律师依据实际法人、许可证/登记状态、技术架构、支付模式和数据流进行最终法律审阅。</Text>
+            <Text selectable style={styles.legalFooter}>本版本仍属于产品法律草案。正式发布前，应由当地执业律师依据实际法人、许可证/登记状态、技术架构、支付模式和数据流进行最终法律审阅。</Text>
           </ScrollView>
         ) : null}
       </View>
@@ -727,13 +727,13 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
         {authMode === "login" && lastSignIn && !lastSignInDismissed ? (
           <View style={styles.rememberedCard}>
             <View style={styles.rememberedAvatar}>
-              <Text style={styles.rememberedAvatarText}>
+              <Text selectable style={styles.rememberedAvatarText}>
                 {avatarLetterFor(lastSignIn.channel, lastSignIn.identifier)}
               </Text>
             </View>
             <View style={styles.rememberedAcct}>
-              <Text style={styles.rememberedLabel}>继续使用</Text>
-              <Text style={styles.rememberedIdentifier} numberOfLines={1}>
+              <Text selectable style={styles.rememberedLabel}>继续使用</Text>
+              <Text selectable style={styles.rememberedIdentifier} numberOfLines={1}>
                 {maskIdentifier(lastSignIn.channel, lastSignIn.identifier)}
               </Text>
             </View>
@@ -742,7 +742,7 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
               style={styles.rememberedContinue}
               accessibilityLabel="继续上次的账号"
             >
-              <Text style={styles.rememberedContinueText}>继续</Text>
+              <Text selectable style={styles.rememberedContinueText}>继续</Text>
             </Pressable>
             <Pressable
               onPress={() => {
@@ -752,34 +752,34 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
               style={styles.rememberedSwitch}
               accessibilityLabel="切换其他账号"
             >
-              <Text style={styles.rememberedSwitchText}>换号</Text>
+              <Text selectable style={styles.rememberedSwitchText}>换号</Text>
             </Pressable>
           </View>
         ) : null}
         <View style={styles.authTabs}>
           <Pressable onPress={() => { setAuthMode("login"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, authMode === "login" && styles.authTabActive]}>
-            <Text style={[styles.authTabText, authMode === "login" && styles.authTabTextActive]}>登录</Text>
+            <Text selectable style={[styles.authTabText, authMode === "login" && styles.authTabTextActive]}>登录</Text>
           </Pressable>
           <Pressable onPress={() => { setAuthMode("register"); setAuthChannel("SMS"); setChallengeId(undefined); setCode(""); setError(undefined); setDateOfBirth(""); setTermsAccepted(false); setPrivacyAccepted(false); }} style={[styles.authTab, authMode === "register" && styles.authTabActive]}>
-            <Text style={[styles.authTabText, authMode === "register" && styles.authTabTextActive]}>注册</Text>
+            <Text selectable style={[styles.authTabText, authMode === "register" && styles.authTabTextActive]}>注册</Text>
           </Pressable>
           <Pressable onPress={() => { setAuthMode("guest"); setChallengeId(undefined); setCode(""); setError(undefined); setTermsAccepted(false); setPrivacyAccepted(false); }} style={[styles.authTab, styles.authGuestTab, authMode === "guest" && styles.authTabActive]}>
-            <Text style={[styles.authTabText, authMode === "guest" && styles.authTabTextActive]}>访客</Text>
+            <Text selectable style={[styles.authTabText, authMode === "guest" && styles.authTabTextActive]}>访客</Text>
           </Pressable>
         </View>
         {authMode === "guest" ? (
           <View style={styles.guestPanel}>
-            <Text style={styles.guestTitle}>先逛逛 Proxy</Text>
-            <Text style={styles.guestDescription}>可浏览首页、市场和动态；发布、互动、交易与长期保存时再登录。</Text>
+            <Text selectable style={styles.guestTitle}>先逛逛 Proxy</Text>
+            <Text selectable style={styles.guestDescription}>可浏览首页、市场和动态；发布、互动、交易与长期保存时再登录。</Text>
             <Pressable onPress={() => setPrivacyAccepted((v) => !v)} style={styles.consentRow}>
-              <View style={[styles.consentBox, privacyAccepted && styles.consentBoxOn]}><Text style={styles.consentBoxMark}>{privacyAccepted ? "✓" : ""}</Text></View>
-              <Text style={styles.consentText}>我已阅读并同意{"\n"}<Text style={styles.consentLink} onPress={() => openLegalDoc("privacy")}>《隐私政策》</Text> (v1.1, 越南)</Text>
+              <View style={[styles.consentBox, privacyAccepted && styles.consentBoxOn]}><Text selectable style={styles.consentBoxMark}>{privacyAccepted ? "✓" : ""}</Text></View>
+              <Text selectable style={styles.consentText}>我已阅读并同意{"\n"}<Text selectable style={styles.consentLink} onPress={() => openLegalDoc("privacy")}>《隐私政策》</Text> (v1.1, 越南)</Text>
             </Pressable>
-            <View style={[styles.button, busy || !privacyAccepted ? styles.disabled : null]}><Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} /><Pressable disabled={busy || !privacyAccepted} onPress={() => void continueAsGuest()} style={styles.buttonPressable}><Text style={styles.buttonText}>{busy ? "进入中…" : "以访客身份进入"}</Text></Pressable></View>
+            <View style={[styles.button, busy || !privacyAccepted ? styles.disabled : null]}><Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} /><Pressable disabled={busy || !privacyAccepted} onPress={() => void continueAsGuest()} style={styles.buttonPressable}><Text selectable style={styles.buttonText}>{busy ? "进入中…" : "以访客身份进入"}</Text></Pressable></View>
           </View>
         ) : challengeId ? (
           <>
-            <Text style={styles.helper}>验证码已发送至 {authChannel === "EMAIL" ? googleEmail.trim().toLowerCase() : formatVietnamesePhoneForDisplay(normalizeVietnamesePhone(phone))}</Text>
+            <Text selectable style={styles.helper}>验证码已发送至 {authChannel === "EMAIL" ? googleEmail.trim().toLowerCase() : formatVietnamesePhoneForDisplay(normalizeVietnamesePhone(phone))}</Text>
             <TextInput
               autoFocus
               blurOnSubmit
@@ -796,12 +796,12 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
             <View style={[styles.button, busy || code.trim() === "" ? styles.disabled : null]}>
               <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
               <Pressable disabled={busy || code.trim() === ""} onPress={() => void completeLogin()} style={styles.buttonPressable}>
-                <Text style={styles.buttonText}>{busy ? "验证中…" : "继续"}</Text>
+                <Text selectable style={styles.buttonText}>{busy ? "验证中…" : "继续"}</Text>
               </Pressable>
             </View>
             <View style={styles.inlineActions}>
-              <Pressable disabled={busy} onPress={() => { setChallengeId(undefined); setCode(""); setResendCooldown(0); }}><Text style={styles.linkText}>{authChannel === "EMAIL" ? "更换邮箱" : "更换手机号"}</Text></Pressable>
-              <Pressable disabled={busy || resendCoolingDown} onPress={() => void requestChallenge()}><Text style={styles.linkText}>{resendCoolingDown ? `重新发送（${resendCooldown}s）` : "重新发送"}</Text></Pressable>
+              <Pressable disabled={busy} onPress={() => { setChallengeId(undefined); setCode(""); setResendCooldown(0); }}><Text selectable style={styles.linkText}>{authChannel === "EMAIL" ? "更换邮箱" : "更换手机号"}</Text></Pressable>
+              <Pressable disabled={busy || resendCoolingDown} onPress={() => void requestChallenge()}><Text selectable style={styles.linkText}>{resendCoolingDown ? `重新发送（${resendCooldown}s）` : "重新发送"}</Text></Pressable>
             </View>
           </>
         ) : (
@@ -819,13 +819,13 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
                   so the SMS/EMAIL toggle is login-only. */}
               {authMode === "register" ? null : (
               <Pressable onPress={() => { setAuthChannel("SMS"); setError(undefined); }} style={[styles.googleButton, authChannel === "SMS" && styles.googleButtonActive, styles.googleButtonSmall]}>
-                <Text style={styles.googleLabel}>手机</Text>
+                <Text selectable style={styles.googleLabel}>手机</Text>
               </Pressable>
               )}
             </View>
             {authMode === "register" ? (
               <View style={styles.dobBlock}>
-                <Text style={styles.dobLabel}>出生日期 · 需年满 18 岁</Text>
+                <Text selectable style={styles.dobLabel}>出生日期 · 需年满 18 岁</Text>
                 <TextInput
                   blurOnSubmit
                   keyboardType="number-pad"
@@ -838,63 +838,63 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
                   style={styles.dobInput}
                   value={dateOfBirth}
                 />
-                {dobInlineError ? <Text style={styles.dobError}>{dobInlineError}</Text> : null}
+                {dobInlineError ? <Text selectable style={styles.dobError}>{dobInlineError}</Text> : null}
               </View>
             ) : null}
             {authMode === "register" ? (
               <>
-                <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" blurOnSubmit keyboardType="email-address" maxLength={MAX_LOGIN_EMAIL_LENGTH} onChangeText={setGoogleEmail} onSubmitEditing={() => Keyboard.dismiss()} placeholder="用户名或完整邮箱（最多 50 字符）" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={googleEmail} /></View>
+                <View style={styles.phoneRow}><Text selectable style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" blurOnSubmit keyboardType="email-address" maxLength={MAX_LOGIN_EMAIL_LENGTH} onChangeText={setGoogleEmail} onSubmitEditing={() => Keyboard.dismiss()} placeholder="用户名或完整邮箱（最多 50 字符）" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={googleEmail} /></View>
                 <View style={styles.orRow}>
                   <View style={styles.orLine} />
-                  <Text style={styles.orText}>OR</Text>
+                  <Text selectable style={styles.orText}>OR</Text>
                   <View style={styles.orLine} />
                 </View>
-                <View style={styles.phoneRow}><Text style={styles.countryCode}>+84</Text><TextInput blurOnSubmit keyboardType="phone-pad" onChangeText={setPhone} onSubmitEditing={() => Keyboard.dismiss()} placeholder="0912345678 或粘贴 +84 号码" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={phone} /></View>
+                <View style={styles.phoneRow}><Text selectable style={styles.countryCode}>+84</Text><TextInput blurOnSubmit keyboardType="phone-pad" onChangeText={setPhone} onSubmitEditing={() => Keyboard.dismiss()} placeholder="0912345678 或粘贴 +84 号码" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={phone} /></View>
                 {/* 邮箱与手机共用一个「获取验证码」：渠道由上面填了哪个标识决定。 */}
                 <View style={[styles.button, registerCodeDisabled ? styles.disabled : null]}>
                   <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
                   <Pressable disabled={registerCodeDisabled} onPress={() => void requestChallenge(registerChannel)} style={styles.buttonPressable}>
-                    <Text style={styles.buttonText}>{busy ? "发送中…" : "获取验证码"}</Text>
+                    <Text selectable style={styles.buttonText}>{busy ? "发送中…" : "获取验证码"}</Text>
                   </Pressable>
                 </View>
                 <View style={styles.consentBlock}>
                   <Pressable onPress={() => setTermsAccepted((v) => !v)} style={styles.consentRow}>
-                    <View style={[styles.consentBox, termsAccepted && styles.consentBoxOn]}><Text style={styles.consentBoxMark}>{termsAccepted ? "✓" : ""}</Text></View>
-                    <Text style={styles.consentText}>我已阅读并同意{"\n"}<Text style={styles.consentLink} onPress={() => openLegalDoc("terms")}>《服务使用协议》</Text> (v1.1, 越南)</Text>
+                    <View style={[styles.consentBox, termsAccepted && styles.consentBoxOn]}><Text selectable style={styles.consentBoxMark}>{termsAccepted ? "✓" : ""}</Text></View>
+                    <Text selectable style={styles.consentText}>我已阅读并同意{"\n"}<Text selectable style={styles.consentLink} onPress={() => openLegalDoc("terms")}>《服务使用协议》</Text> (v1.1, 越南)</Text>
                   </Pressable>
                   <Pressable onPress={() => setPrivacyAccepted((v) => !v)} style={styles.consentRow}>
-                    <View style={[styles.consentBox, privacyAccepted && styles.consentBoxOn]}><Text style={styles.consentBoxMark}>{privacyAccepted ? "✓" : ""}</Text></View>
-                    <Text style={styles.consentText}>我已阅读并同意{"\n"}<Text style={styles.consentLink} onPress={() => openLegalDoc("privacy")}>《隐私政策》</Text> (v1.1, 越南)</Text>
+                    <View style={[styles.consentBox, privacyAccepted && styles.consentBoxOn]}><Text selectable style={styles.consentBoxMark}>{privacyAccepted ? "✓" : ""}</Text></View>
+                    <Text selectable style={styles.consentText}>我已阅读并同意{"\n"}<Text selectable style={styles.consentLink} onPress={() => openLegalDoc("privacy")}>《隐私政策》</Text> (v1.1, 越南)</Text>
                   </Pressable>
                 </View>
               </>
             ) : authChannel === "EMAIL" ? (
               <>
-                <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" blurOnSubmit keyboardType="email-address" maxLength={MAX_LOGIN_EMAIL_LENGTH} onChangeText={setGoogleEmail} onSubmitEditing={() => Keyboard.dismiss()} placeholder="用户名或完整邮箱（最多 50 字符）" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={googleEmail} /></View>
+                <View style={styles.phoneRow}><Text selectable style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" blurOnSubmit keyboardType="email-address" maxLength={MAX_LOGIN_EMAIL_LENGTH} onChangeText={setGoogleEmail} onSubmitEditing={() => Keyboard.dismiss()} placeholder="用户名或完整邮箱（最多 50 字符）" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={googleEmail} /></View>
                 <View style={[styles.button, busy || googleEmail.trim().length === 0 ? styles.disabled : null]}>
                   <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
                   <Pressable disabled={busy || googleEmail.trim().length === 0} onPress={() => void requestChallenge()} style={styles.buttonPressable}>
-                    <Text style={styles.buttonText}>{busy ? "发送中…" : "获取验证码"}</Text>
+                    <Text selectable style={styles.buttonText}>{busy ? "发送中…" : "获取验证码"}</Text>
                   </Pressable>
                 </View>
               </>
             ) : (
               <>
-                <View style={styles.phoneRow}><Text style={styles.countryCode}>+84</Text><TextInput blurOnSubmit keyboardType="phone-pad" onChangeText={setPhone} onSubmitEditing={() => Keyboard.dismiss()} placeholder="0912345678 或粘贴 +84 号码" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={phone} /></View>
+                <View style={styles.phoneRow}><Text selectable style={styles.countryCode}>+84</Text><TextInput blurOnSubmit keyboardType="phone-pad" onChangeText={setPhone} onSubmitEditing={() => Keyboard.dismiss()} placeholder="0912345678 或粘贴 +84 号码" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={phone} /></View>
                 <View style={[styles.button, busy || !vietnamesePhoneReady(phone) ? styles.disabled : null]}>
                   <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
                   <Pressable disabled={busy || !vietnamesePhoneReady(phone)} onPress={() => void requestChallenge()} style={styles.buttonPressable}>
-                    <Text style={styles.buttonText}>{busy ? "发送中…" : "获取验证码"}</Text>
+                    <Text selectable style={styles.buttonText}>{busy ? "发送中…" : "获取验证码"}</Text>
                   </Pressable>
                 </View>
               </>
             )}
             <Pressable onPress={() => { setAuthMode(authMode === "login" ? "register" : "login"); setError(undefined); }} style={styles.switchAuthRow}>
-              <Text style={styles.switchAuthText}>{authMode === "login" ? "没有账号？去注册" : "已有账号？去登录"}</Text>
+              <Text selectable style={styles.switchAuthText}>{authMode === "login" ? "没有账号？去注册" : "已有账号？去登录"}</Text>
             </Pressable>
           </>
         )}
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <Text selectable style={styles.error}>{error}</Text> : null}
             </View>
           </View>
         </TouchableWithoutFeedback>
@@ -998,7 +998,7 @@ function ConfiguredGoogleSignIn(props: GoogleSignInProps): React.JSX.Element {
       }}
       style={[styles.googleButton, props.active && styles.googleButtonActive, (props.busy || !request) && styles.disabled]}
     >
-      <GoogleMark /><Text style={styles.googleLabel}>使用 Google 继续</Text>
+      <GoogleMark /><Text selectable style={styles.googleLabel}>使用 Google 继续</Text>
     </Pressable>
   );
 }
@@ -1016,7 +1016,7 @@ function GoogleEmailFallback(props: GoogleSignInProps): React.JSX.Element {
       }}
       style={[styles.googleButton, props.active && styles.googleButtonActive, props.busy && styles.disabled]}
     >
-      <GoogleMark /><Text style={styles.googleLabel}>使用 Google 邮箱</Text>
+      <GoogleMark /><Text selectable style={styles.googleLabel}>使用 Google 邮箱</Text>
     </Pressable>
   );
 }

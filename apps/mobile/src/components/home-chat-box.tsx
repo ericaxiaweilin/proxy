@@ -230,9 +230,9 @@ export function HomeChatBox({
               onPress={() => onApplySuggestion?.(s)}
               style={styles.searchChip}
             >
-              <Text style={styles.searchChipSlot}>{SLOT_LABEL[s.slot]}</Text>
-              <Text numberOfLines={1} style={styles.searchChipLabel}>{s.label}</Text>
-              {s.detail ? <Text numberOfLines={1} style={styles.searchChipDetail}>{s.detail}</Text> : null}
+              <Text selectable style={styles.searchChipSlot}>{SLOT_LABEL[s.slot]}</Text>
+              <Text selectable numberOfLines={1} style={styles.searchChipLabel}>{s.label}</Text>
+              {s.detail ? <Text selectable numberOfLines={1} style={styles.searchChipDetail}>{s.detail}</Text> : null}
             </Pressable>
           ))}
         </View>
@@ -242,30 +242,30 @@ export function HomeChatBox({
         <View style={styles.photoPreviewRow}>
           <Image accessibilityLabel="已选择的照片" source={{ uri: photo.uri }} style={styles.photoPreview} />
           <View style={styles.photoPreviewCopy}>
-            <Text numberOfLines={1} style={styles.photoMenuTitle}>{photo.fileName || "已选择照片"}</Text>
-            <Text style={styles.photoMenuSub}>发送时将安全上传到当前会话</Text>
+            <Text selectable numberOfLines={1} style={styles.photoMenuTitle}>{photo.fileName || "已选择照片"}</Text>
+            <Text selectable style={styles.photoMenuSub}>发送时将安全上传到当前会话</Text>
           </View>
           <Pressable accessibilityLabel="移除照片" onPress={() => setPhoto(undefined)} style={styles.photoRemoveButton}>
-            <Text style={styles.photoMenuRemove}>×</Text>
+            <Text selectable style={styles.photoMenuRemove}>×</Text>
           </Pressable>
         </View>
       ) : null}
 
-      {toolError ? <Text accessibilityLiveRegion="polite" style={styles.toolError}>{toolError}</Text> : null}
+      {toolError ? <Text selectable accessibilityLiveRegion="polite" style={styles.toolError}>{toolError}</Text> : null}
       {photoMenuOpen ? (
         <View style={styles.photoMenu}>
           <Pressable accessibilityLabel="拍照" onPress={() => void choosePhoto("CAMERA")} style={styles.photoMenuItem}>
             <CameraIcon color={color.ink} />
             <View>
-              <Text style={styles.photoMenuTitle}>拍照</Text>
-              <Text style={styles.photoMenuSub}>加入当前输入，不会自动发布</Text>
+              <Text selectable style={styles.photoMenuTitle}>拍照</Text>
+              <Text selectable style={styles.photoMenuSub}>加入当前输入，不会自动发布</Text>
             </View>
           </Pressable>
           <Pressable accessibilityLabel="从相册选择" onPress={() => void choosePhoto("LIBRARY")} style={styles.photoMenuItem}>
             <PhotoIcon color={color.ink} />
             <View>
-              <Text style={styles.photoMenuTitle}>选择照片</Text>
-              <Text style={styles.photoMenuSub}>从系统相册选择一张照片</Text>
+              <Text selectable style={styles.photoMenuTitle}>选择照片</Text>
+              <Text selectable style={styles.photoMenuSub}>从系统相册选择一张照片</Text>
             </View>
           </Pressable>
         </View>

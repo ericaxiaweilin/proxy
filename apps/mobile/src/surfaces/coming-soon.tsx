@@ -46,10 +46,10 @@ export function ComingSoonSurface({ surface, fulfillment, outcome, business, act
       <View style={styles.card}>
         <View style={styles.badge}>
           <View style={styles.badgeDot} />
-          <Text style={styles.badgeText}>STABLE SURFACE · 已登记</Text>
+          <Text selectable style={styles.badgeText}>STABLE SURFACE · 已登记</Text>
         </View>
-        <Text style={styles.title}>{SURFACE_LABEL[surface] ?? surface}</Text>
-        <Text style={styles.body}>
+        <Text selectable style={styles.title}>{SURFACE_LABEL[surface] ?? surface}</Text>
+        <Text selectable style={styles.body}>
           {surface} 属于 R15 冻结的稳定 Surface 名单，能力将按组件注册表排期实现；在此之前保持占位，不新增页面路由。
         </Text>
       </View>
