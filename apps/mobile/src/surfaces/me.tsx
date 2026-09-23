@@ -1399,7 +1399,7 @@ export function MeSurface({
     if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} moderation={moderation} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "myactivities") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyActivitiesSurface onBack={() => setSubPage(undefined)} moderation={moderation} /></SwipeBackShell>;
     if (subPage.route === "merchantcampaign") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MerchantCampaignSurface onBack={() => setSubPage(undefined)} moderation={moderation} /></SwipeBackShell>;
-    if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} /></SwipeBackShell>;
     if (subPage.route === "facet") {
       const facetClient = new FacetClient({ requester: sessionAuthClient, baseUrl: localApiBaseUrl });
       // AI-FACET-CLUSTER-001: AI 分身与 FACET 是"生成 → 分发"同一条链路，

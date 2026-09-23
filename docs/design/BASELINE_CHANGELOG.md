@@ -4,6 +4,19 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 270 — 2026-09-23
+
+- **场景收藏断线接上**（SCENE-FAVORITE-001）：用户「home 场景卡片点 🤍 但我的
+  收藏没有更新」。心形按钮只翻本地 `useState`，退出重进就丢，更到不了收藏。
+  hearts 按账号落本机 SecureStore（新 `scene-favorites.ts`），「我的 → 收藏」
+  读盘后用静态目录回查标题展示；动态区仍是诚实空态。顺带审计：动态 🔖、
+  喜欢、编排提交、偏好/屏蔽、隐私导出全链路真连接；friend-crm 标签是 demo
+  数据纯内存（toast 标了仅本机），未动。
+- 影响文件：`apps/mobile/src/scene-favorites.ts`（新建）、
+  `apps/mobile/src/components/scene-activity-discovery.tsx`、
+  `apps/mobile/src/surfaces/me-orders.tsx`、`apps/mobile/src/surfaces/me.tsx`、
+  `apps/mobile/src/surfaces/requester-home.tsx`。
+
 ## Revision 269 — 2026-09-23
 
 - **用户建模：「亚洲人特征锁定」改为「本人特征锁定」，新增 AI 识别的「面部特征」**（AI-MANAGE-016）：用户：「核心是模型读取小美的照片

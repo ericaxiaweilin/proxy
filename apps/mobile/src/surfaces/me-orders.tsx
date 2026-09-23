@@ -6,11 +6,14 @@ import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client"
 import type { ModerationClient } from "../moderation-client";
 import { ReportSheet } from "../components/report-sheet";
 import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
+import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { color } from "../theme";
 import { ActivityDetailSurface } from "./activity-detail";
 import { activityAIPersonaName } from "./activity-detail-model";
 import { styles } from "./me-styles";
 import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
+import { createSceneFavoritesStore } from "../scene-favorites";
+import { sceneMomentById, sceneMomentLabels, type MomentSeed } from "../components/scene-activity-discovery";
 
 type OrderFilter = "all" | "published" | "joined" | "done" | "cancelled";
 
@@ -356,8 +359,32 @@ export function MyActivitiesSurface({ onBack, moderation }: { onBack: () => void
 
 type FavoriteTab = "all" | "merchant" | "creator" | "post" | "activity";
 
-export function FavoritesSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
+export function FavoritesSurface({ onBack, viewerAccountId }: { onBack: () => void; viewerAccountId?: string | undefined }): React.JSX.Element {
   const [tab, setTab] = useState<FavoriteTab>("all");
+  // SCENE-FAVORITE-001：home 场景卡片的 🤍 落盘到本机（按账号），这里读出来
+  // 用静态目录回查标题 —— 标题来自 MOMENTS 真目录，hearts 是用户自己的，
+  // 两边都是真数据。目录里查不到的 id 直接丢弃，不画幽灵卡。
+  const [savedScenes, setSavedScenes] = useState<readonly MomentSeed[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!viewerAccountId) {
+      setSavedScenes([]);
+      return;
+    }
+    void createSceneFavoritesStore(nativeSecureStorageDriver, viewerAccountId)
+      .read()
+      .then((ids) => {
+        if (cancelled) return;
+        const resolved: MomentSeed[] = [];
+        for (const id of ids) {
+          const moment = sceneMomentById(id);
+          if (moment && !resolved.some((m) => m.id === moment.id)) resolved.push(moment);
+        }
+        setSavedScenes(resolved);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [viewerAccountId]);
   // FAVORITES-REAL-001: 以前这里是两条写死的假记录，所有用户看到同一份，
   // 所有用户看到同一份，跟本人收藏无关。后端有 bookmarkPost 写入和
   // ListUserBookmarks 读 ID 的能力，但 ID 没有批量解标题的接口 ——
@@ -365,7 +392,11 @@ export function FavoritesSurface({ onBack }: { onBack: () => void }): React.JSX.
   // 这里只放诚实空态，不放示例数据冒充。
   const visible: Array<{ type: string; title: string; meta: string }> = [];
   const shown = tab === "all" ? visible : visible.filter((item) => item.type === tab);
-  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text selectable style={styles.orderBackText}>‹</Text></Pressable><Text selectable style={styles.detailTitle}>收藏</Text></View><Text selectable style={styles.savedIntro}>很轻的个人备忘夹。以后还想找到，就放这里。</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['merchant','商家'],['creator','Creator'],['post','动态'],['activity','活动']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setTab(id)} style={[styles.orderTab, tab === id && styles.orderTabOn]}><Text selectable style={[styles.orderTabText, tab === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{shown.length ? shown.map((item) => <View key={item.title} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text selectable style={styles.savedThumbText}>☆</Text></View><View><Text selectable style={styles.orderTitle}>{item.title}</Text><Text selectable style={styles.savedMeta}>{item.meta}</Text></View></View>) : <ProxyEmptyState title="还没有收藏列表" sub="动态收藏正在接入，这里不放示例数据。" />}</ScrollView></View>;
+  // SCENE-FAVORITE-001：场景区只画读盘回查到的真目录条目，只在「全部」出现
+  // （场景灵感不属于商家/Creator/动态/活动任一页签，不冒充）；动态区仍是诚实空态
+  // （服务端收藏读 ID 的能力有了，但批量解标题接口还没接，见注释）。
+  const showSceneSection = savedScenes.length > 0 && tab === "all";
+  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text selectable style={styles.orderBackText}>‹</Text></Pressable><Text selectable style={styles.detailTitle}>收藏</Text></View><Text selectable style={styles.savedIntro}>很轻的个人备忘夹。以后还想找到，就放这里。</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['merchant','商家'],['creator','Creator'],['post','动态'],['activity','活动']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setTab(id)} style={[styles.orderTab, tab === id && styles.orderTabOn]}><Text selectable style={[styles.orderTabText, tab === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{showSceneSection ? <View><Text selectable style={styles.savedMeta}>场景灵感 · 来自首页收藏</Text>{savedScenes.map((moment) => { const labels = sceneMomentLabels(moment); return <View key={moment.id} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text selectable style={styles.savedThumbText}>☆</Text></View><View><Text selectable style={styles.orderTitle}>{moment.title}</Text><Text selectable style={styles.savedMeta}>{`${labels.actionLabel} · ${labels.sceneLabel}`}</Text></View></View>; })}</View> : null}{shown.length ? shown.map((item) => <View key={item.title} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text selectable style={styles.savedThumbText}>☆</Text></View><View><Text selectable style={styles.orderTitle}>{item.title}</Text><Text selectable style={styles.savedMeta}>{item.meta}</Text></View></View>) : (showSceneSection ? null : <ProxyEmptyState title="还没有收藏列表" sub="动态收藏正在接入，这里不放示例数据。" />)}</ScrollView></View>;
 }
 
 // 商家活动导流：只列 Origin=MERCHANT 的开放活动（种子 + 商家实发），匿名

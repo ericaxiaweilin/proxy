@@ -6,6 +6,8 @@ import { Image, type ImageSource } from "expo-image";
 import { ProxyIcon } from "./proxy-icon";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
 import { HorizontalSwipeRail } from "./horizontal-swipe-rail";
+import { nativeSecureStorageDriver } from "../native-secure-storage";
+import { createSceneFavoritesStore } from "../scene-favorites";
 
 export type SceneDiscoveryBrief = {
   id: string;
@@ -23,7 +25,7 @@ type SceneAssetCatalog = {
   themes: Record<string, string>;
   moments: Record<string, string>;
 };
-type MomentSeed = {
+export type MomentSeed = {
   id: string;
   title: string;
   action: string;
@@ -196,6 +198,17 @@ const MOMENTS: readonly MomentSeed[] = [
   { id: "local-city-support", title: "本地城市协助", action: "urban-support", scene: "old-town", themes: ["local"], time: "afternoon", price: "mid", occasion: "business" },
 ] as const;
 
+/** SCENE-FAVORITE-001：收藏页按 id 回查静态目录。目录里没有的一律 undefined，
+    调用方跳过 —— 绝不拿 id 当标题显示，也不用 taxon() 的首项回退糊弄。 */
+export function sceneMomentById(id: string): MomentSeed | undefined {
+  return MOMENTS.find((moment) => moment.id === id);
+}
+
+/** SCENE-FAVORITE-001：收藏卡副标题 —— 静态目录的真实动作/场景标签（跟卡片上显示的一致）。 */
+export function sceneMomentLabels(moment: MomentSeed): { actionLabel: string; sceneLabel: string } {
+  return { actionLabel: taxon(ACTIONS, moment.action).label, sceneLabel: taxon(SCENES, moment.scene).label };
+}
+
 function absoluteNetworkURL(apiBaseUrl: string, value?: string): string | undefined {
   if (!value) return undefined;
   if (/^https?:\/\//i.test(value)) return value;
@@ -246,11 +259,14 @@ function sceneMatches(brief: SceneDiscoveryBrief, sceneId: string): boolean {
 export function SceneActivityDiscovery({
   scenes,
   apiBaseUrl,
+  viewerAccountId,
   onOpenScene,
   onCompose,
 }: {
   scenes: readonly SceneDiscoveryBrief[];
   apiBaseUrl: string | undefined;
+  /** SCENE-FAVORITE-001：收藏按账号落盘，没有它 hearts 只活在 useState 里。 */
+  viewerAccountId?: string | undefined;
   onOpenScene?: (sceneId: string) => void;
   onCompose?: (prompt: string) => void;
 }): React.JSX.Element {
@@ -265,6 +281,36 @@ export function SceneActivityDiscovery({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [assets, setAssets] = useState<SceneAssetCatalog>();
   const safeArea = useSafeAreaInsets();
+
+  // SCENE-FAVORITE-001：hearts 按账号读盘。写失败回滚到写之前（setSaved 的
+  // 函数式更新拿不到"之前"，先快照再写）。
+  useEffect(() => {
+    let cancelled = false;
+    if (!viewerAccountId) {
+      setSaved([]);
+      return;
+    }
+    void createSceneFavoritesStore(nativeSecureStorageDriver, viewerAccountId)
+      .read()
+      .then((ids) => { if (!cancelled) setSaved(ids); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [viewerAccountId]);
+
+  function toggleSavedMoment(momentId: string): void {
+    setSaved((previous) => {
+      const next = previous.includes(momentId)
+        ? previous.filter((id) => id !== momentId)
+        : [...previous, momentId];
+      if (viewerAccountId) {
+        const snapshot = previous;
+        void createSceneFavoritesStore(nativeSecureStorageDriver, viewerAccountId)
+          .write(next)
+          .catch(() => setSaved(snapshot));
+      }
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!apiBaseUrl) return;
@@ -348,7 +394,7 @@ export function SceneActivityDiscovery({
             </Defs>
             <Rect fill={`url(#sceneShade-${moment.id})`} height="100%" width="100%" x="0" y="0" />
           </Svg>
-          <Pressable accessibilityLabel={saved.includes(moment.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => setSaved((items) => items.includes(moment.id) ? items.filter((id) => id !== moment.id) : [...items, moment.id])} style={styles.sceneFavorite}><ProxyIcon color={saved.includes(moment.id) ? color.magenta : color.white} filled={saved.includes(moment.id)} name="heart" size={20} /></Pressable>
+          <Pressable accessibilityLabel={saved.includes(moment.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => toggleSavedMoment(moment.id)} style={styles.sceneFavorite}><ProxyIcon color={saved.includes(moment.id) ? color.magenta : color.white} filled={saved.includes(moment.id)} name="heart" size={20} /></Pressable>
           <View style={styles.sceneCardContent}>
             <Text selectable style={styles.sceneCardTitle}>{moment.title}</Text>
             <View style={styles.sceneTagsRow}>

@@ -1398,6 +1398,7 @@ export function RequesterHome({
       <SceneActivityDiscovery
         apiBaseUrl={sceneApiBaseUrl}
         scenes={sceneBriefs}
+        viewerAccountId={viewerAccountId}
         onOpenScene={(sceneId) => onOpenSceneMap?.(sceneId)}
         onCompose={(prompt) => handleExecuteHomeQuery(prompt)}
       />
