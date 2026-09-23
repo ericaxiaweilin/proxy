@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 248 — 2026-09-23
+
+- **我的 → 账户新增 AI 管理入口**（AI-MANAGE-001）：原型
+  deepseek_html_20260923_83b40b 落地诚实切片 —— 状态卡只画真数（分身
+  listMine 真查 + 照片/视频/动态现算），管理项只保留有真实去处的两条
+  （出图 → AI 分身页，动态 → 个人主页）。Token 用量/暂停/三设置 sheet
+  无后端，不做。
+- 影响文件：`apps/mobile/src/surfaces/me.tsx`（账户组加行 + `aimanage`
+  路由，新文件 `ai-management.tsx` 不在契约实现清单内）。
+
 ## Revision 247 — 2026-09-23
 
 - **好友洞察目标集扩大**（TWIN-INSIGHT-TARGETS-001）：只认好友会漏掉聊过天/

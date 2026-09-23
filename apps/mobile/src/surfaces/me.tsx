@@ -14,6 +14,7 @@ import { SwipeBackShell } from "../architecture/swipe-back";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { ProfileTabs } from "./ProfileTabs";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
+import { AIManagementSurface } from "./ai-management";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
 import { ProxyQrCode } from "../components/proxy-qr-code";
@@ -220,6 +221,7 @@ const REQUESTER_ME: PersonaConfig = {
       hint: "安全与结算",
       rows: [
         { icon: "coin", label: "钱包与结算", desc: "付款、收入、退款与记录", route: "wallet" },
+        { icon: "aiPersona", label: "AI 管理", desc: "分身状态 · 照片与动态盘点", route: "aimanage" },
         { icon: "gear", label: "设置与隐私", desc: "安全、推荐、通知与隐私（含数据下载/删除）", route: "appbehavior" }
       ]
     },
@@ -1403,6 +1405,17 @@ export function MeSurface({
       // AI-FACET-CLUSTER-001: AI 分身与 FACET 是"生成 → 分发"同一条链路，
       // 两边互相有一条回去对方的路，不用退回「我的」根页再点一次。
       return <SwipeBackShell onExit={() => setSubPage(undefined)}><FacetHomeSurface client={facetClient} onBack={() => setSubPage(undefined)} onOpenAiIdentity={() => openSubPage("aiidentity")} /></SwipeBackShell>;
+    }
+    if (subPage.route === "aimanage") {
+      // AI-MANAGE-001：我的 → 账户 → AI 管理。状态卡三格全是真数 ——
+      // 照片/视频从 profileMedia 按 mediaType 现算（跟 AI 分身页同一份源），
+      // 动态数 = profilePosts 全集计数；分身状态由 AIManagementSurface 内部
+      // listMine 真查。原型里的 Token 用量 / 暂停按钮 / 三个设置 sheet 没有
+      // 任何后端，不做（暂停是服务端能力，本地开关撒谎；模型直连违反架构约束）。
+      const allMedia = Object.values(profileMedia).flat();
+      const imageCount = allMedia.filter((item) => item.mediaType === "IMAGE").length;
+      const videoCount = allMedia.filter((item) => item.mediaType === "VIDEO").length;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIManagementSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} imageCount={imageCount} videoCount={videoCount} postCount={profilePosts.length} onOpenImageManage={() => openSubPage("aiidentity")} onOpenPostManage={() => openSubPage("personalhub")} /></SwipeBackShell>;
     }
     if (subPage.route === "aiidentity") {
       // AI-TWIN-POST-AUDIENCE-004（2026-09-22，用户纠正："帖文编排拿的是
