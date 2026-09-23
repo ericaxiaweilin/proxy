@@ -17,7 +17,7 @@ import { resolveHomePersonAccountId } from "../recommend-fixtures";
 import { color, shadows } from "../theme";
 // HOME-I18N-001：语言选择。i18n 是模块级 store（不需要 Provider，不动
 // app-shell），preferences 负责落盘，LanguageSheet 是原型那个选择面板。
-import { ICEBREAKER_LINES, useI18n, type MessageKey, type MessageVars } from "../i18n";
+import { GREETING_LINES, ICEBREAKER_LINES, useI18n, type MessageKey, type MessageVars } from "../i18n";
 import { loadPreferences } from "../preferences";
 import { LanguageSheet } from "../components/language-sheet";
 import { SCENE_OPTIONS } from "./room-create";
@@ -137,6 +137,7 @@ export function RequesterHome({
   onOpenHumanScene,
   onOpenHumanProfile,
   onMessageHuman,
+  onGreetHuman,
   onOpenRoomCreate,
   loadRooms,
   onOpenRoom,
@@ -180,6 +181,9 @@ export function RequesterHome({
   // 进对话——initialDraft 是这句话，真的会出现在聊天输入框里（不是原型
   // 那种"假装已发送"的静态动画），用户还能改了再发，不是替他点了发送。
   onMessageHuman?: (person: RecommendPerson, initialDraft?: string) => void;
+  // HOME-MORE-GREET-001: 「邀约」= 直接发一句招呼（不进聊天页、不弹面板）。调用方负责真发
+  // （PROFILE 源 DM，已有会话就续在里面），失败要 reject，这边才能说"没发出去"。
+  onGreetHuman?: (person: RecommendPerson, line: string) => Promise<void>;
   // ROOM-CREATE-001: "创建房间"入口——把当前"更多"页可见的候选人交给调用方，
   // 由它打开创建房间流程（真实 GROUP conversation，见 room-create.tsx）。
   // HOME-MORE-ROOMS-001: sceneIndex = 开房大卡上点的场景 chip（SCENE_OPTIONS 下标），缺省 = 默认场景。
@@ -297,6 +301,33 @@ export function RequesterHome({
   // HOME-MORE-SHEET-003: "更多真人"列表每行的破冰邀请——原型叫它 拼桌/邀约，
   // 不是加好友。选中的开场白进 initialDraft，真的带到聊天输入框里。
   const [icebreakerTarget, setIcebreakerTarget] = useState<RecommendPerson | undefined>(undefined);
+  // HOME-MORE-GREET-001: 每个人的招呼状态 + 顶部一行反馈。sent 之后按钮变「已打招呼」，
+  // 不让连点刷屏；lastGreetLine 保证同一个人连着两次不会收到同一句。
+  const [greetState, setGreetState] = useState<Record<string, "sending" | "sent">>({});
+  const [greetMsg, setGreetMsg] = useState<string>("");
+  const lastGreetLine = useRef<Record<string, string>>({});
+
+  function greet(person: RecommendPerson): void {
+    if (greetState[person.id]) return;
+    if (isGuest) { setGreetMsg(t("greetLoginFirst")); return; }
+    // 没有服务端账号的人发不出去（HOME-RAIL-ACCOUNT-001 之后 rail 人都应该有账号）——
+    // 如实说，不假装发出去了。
+    if (!onGreetHuman || resolveHomePersonAccountId(person.id) === person.id) { setGreetMsg(t("greetNoAccount", { name: person.name })); return; }
+    const lines = GREETING_LINES[lang] ?? GREETING_LINES.zh;
+    const pool = lines.filter((line) => line !== lastGreetLine.current[person.id]);
+    const line = pool[Math.floor(Math.random() * pool.length)] ?? lines[0]!;
+    lastGreetLine.current[person.id] = line;
+    setGreetState((prev) => ({ ...prev, [person.id]: "sending" }));
+    onGreetHuman(person, line)
+      .then(() => {
+        setGreetState((prev) => ({ ...prev, [person.id]: "sent" }));
+        setGreetMsg(t("greetSent", { name: person.name, line }));
+      })
+      .catch(() => {
+        setGreetState((prev) => { const next = { ...prev }; delete next[person.id]; return next; });
+        setGreetMsg(t("greetFailed"));
+      });
+  }
   const [publicHistoryOpen, setPublicHistoryOpen] = useState(false);
 
   useEffect(() => {
@@ -1613,6 +1644,7 @@ export function RequesterHome({
             ) : (
               <>
               {relationshipMsg ? <Text style={styles.followMsg}>{relationshipMsg}</Text> : null}
+              {greetMsg ? <Text style={styles.followMsg}>{greetMsg}</Text> : null}
               <ScrollView style={styles.moreList} contentContainerStyle={styles.moreListContent} showsVerticalScrollIndicator={false}>
                 {filteredPeople.map((p) => {
                   const distance = p.distanceM === undefined ? t("distanceUnknown") : p.distanceM < 1000 ? `${p.distanceM} m` : `${(p.distanceM / 1000).toFixed(1)} km`;
@@ -1621,13 +1653,13 @@ export function RequesterHome({
                     setPublicHistoryOpen(false);
                     setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId });
                   };
-                  // HOME-MORE-SHEET-003（2026-09-22，用户反馈"原型是邀约/拼桌/
-                  // 房间，没有主页邀约，UI 也不对，还有斜箭头——那个只有 home
-                  // 才有，进入更多就没有了"）：加好友的斜箭头徽标（relationshipGlyph）
-                  // 跟"主页"链接都是首页那条快捷推荐横排用的，原型里"更多"整页
-                  // 列表每行只有一个动作——在线的人是"拼桌"，其余是"邀约"，两个
-                  // 都开同一个破冰面板，不是加好友。
-                  const actionLabel = p.online ? t("actionTable") : t("actionInvite");
+                  // HOME-MORE-SHEET-003：原型列表每行只有一个动作 —— 拼桌 / 邀约，不是加好友。
+                  // HOME-MORE-GREET-001（2026-09-23）：两个动作按「是不是同一窗景」分，不按在线分：
+                  //   - 同一窗景（已知距离 ≤ SAME_SCENE_RADIUS_M）→「拼桌」，弹破冰面板约见面；
+                  //   - 其余（更远 / 距离未知）→「邀约」= 纯打招呼，点一下直接发一句，不弹面板。
+                  const sameScene = isSameScene(p);
+                  const greet_ = greetState[p.id];
+                  const actionLabel = sameScene ? t("actionTable") : greet_ === "sent" ? t("greetSentBtn") : greet_ === "sending" ? t("greetSending") : t("actionInvite");
                   return (
                     <View key={`more:${p.id}`} style={styles.moreRow}>
                       <Pressable onPress={openPreview} accessibilityLabel={t("viewHumanProfileA11y", { name: p.name })} style={styles.moreAvatarWrap}>
@@ -1646,11 +1678,13 @@ export function RequesterHome({
                         </View>
                       </Pressable>
                       <Pressable
-                        onPress={() => setIcebreakerTarget(p)}
-                        style={styles.moreActionBtn}
-                        accessibilityLabel={t("icebreakerTitle", { name: p.name, action: actionLabel })}
+                        disabled={!sameScene && greet_ !== undefined}
+                        onPress={() => { if (sameScene) setIcebreakerTarget(p); else greet(p); }}
+                        style={[styles.moreActionBtn, !sameScene && greet_ === "sent" && styles.moreActionBtnDone]}
+                        accessibilityLabel={sameScene ? t("icebreakerTitle", { name: p.name, action: actionLabel }) : t("greetA11y", { name: p.name })}
+                        accessibilityState={{ disabled: !sameScene && greet_ !== undefined }}
                       >
-                        <Text style={styles.moreActionBtnText}>{actionLabel}</Text>
+                        <Text style={[styles.moreActionBtnText, !sameScene && greet_ === "sent" && styles.moreActionBtnTextDone]}>{actionLabel}</Text>
                       </Pressable>
                     </View>
                   );
@@ -1671,7 +1705,7 @@ export function RequesterHome({
                 <View style={styles.sheet} onStartShouldSetResponder={() => true}>
                   <View style={styles.sheetGrab} />
                   <View style={styles.icebreakerHead}>
-                    <Text style={styles.sheetTitle}>{t("icebreakerTitle", { name: icebreakerTarget.name, action: icebreakerTarget.online ? t("actionTable") : t("actionInvite") })}</Text>
+                    <Text style={styles.sheetTitle}>{t("icebreakerTitle", { name: icebreakerTarget.name, action: t("actionTable") })}</Text>
                     <Pressable accessibilityLabel={t("close")} onPress={() => setIcebreakerTarget(undefined)}><Text style={styles.icebreakerClose}>✕</Text></Pressable>
                   </View>
                   {icebreakerLines.map((line) => (
@@ -1711,6 +1745,14 @@ export function RequesterHome({
 // 默认 10km 跟原型一致 —— 本仓 fixture 的距离全在 240m~1.6km，所以默认半径下
 // 一个人都不会被这个控件挡掉；放宽/收紧是用户主动做的。
 const MORE_DISTANCE_KM: ReadonlyArray<number> = [1, 3, 5, 10, 20, 50, 100];
+
+// HOME-MORE-GREET-001（2026-09-23，用户：「线下很近的 2 个人 比如 200m 以内 我们认为处于
+// 同一个窗景」）：同一窗景 = 已知距离 ≤ 200m。距离未知的人不算（跟 PERSON-DISTANCE-ZERO-001
+// 同一条规则：不知道就不能当成"就在旁边"）。
+const SAME_SCENE_RADIUS_M = 200;
+function isSameScene(person: RecommendPerson): boolean {
+  return person.distanceM !== undefined && person.distanceM <= SAME_SCENE_RADIUS_M;
+}
 const MORE_DISTANCE_DEFAULT_INDEX = 3; // = 10km
 
 // HOME-I18N-001：骑行时间原来写死在这（中文），现在跟着语言走 —— 取 i18n 的
@@ -2100,6 +2142,8 @@ const styles = StyleSheet.create({
   // HOME-MORE-SHEET-003: 每行唯一的动作按钮（拼桌/邀约），照原型 li-action-btn。
   moreActionBtn: { borderColor: color.ink, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 7 },
   moreActionBtnText: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  moreActionBtnDone: { backgroundColor: color.offWhite, borderColor: color.line },
+  moreActionBtnTextDone: { color: color.muted },
   moreEmpty: { color: color.muted, fontSize: 12, paddingVertical: 16, textAlign: "center" },
   // HOME-MORE-ROOMS-001：照 deepseek_html_20260923_2308b7.html 的 .create-room-card /
   // .room-card。原型 10px 的小字统一抬到 11（design-system-r3 下限）。

@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LANGUAGE,
+  GREETING_LINES,
   I18N,
   ICEBREAKER_LINES,
   LANGUAGES,
@@ -126,6 +127,23 @@ describe("HOME-I18N-001 dictionary completeness", () => {
     // 顺序固定：换顺序等于换了用户看到的推荐次序。
     expect(ICEBREAKER_LINES.en[0]).toBe(translate("en", "icebreakerLine1"));
     expect(ICEBREAKER_LINES.en[1]).toBe(translate("en", "icebreakerLine2"));
+  });
+
+  it("offers several distinct greeting lines per language for a one-tap hi", () => {
+    // HOME-MORE-GREET-001：「邀约」一点就随机发一句 —— 用户明确要"不要只有一个 多写几句"。
+    // 少于 2 句就没法随机、也没法保证同一个人连续两次不收到同一句。
+    for (const code of CODES) {
+      const lines = GREETING_LINES[code];
+      expect(lines.length, `GREETING_LINES.${code}`).toBeGreaterThanOrEqual(6);
+      expect(new Set(lines).size, `GREETING_LINES.${code} has duplicates`).toBe(lines.length);
+      for (const line of lines) expect(line.trim()).not.toBe("");
+    }
+    for (const code of CODES) {
+      if (code === "zh") continue;
+      for (const [index, line] of GREETING_LINES[code].entries()) {
+        expect(line, `GREETING_LINES.${code}[${index}] is still the Chinese line`).not.toBe(GREETING_LINES.zh[index]);
+      }
+    }
   });
 });
 

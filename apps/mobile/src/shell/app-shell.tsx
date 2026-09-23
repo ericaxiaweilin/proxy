@@ -848,6 +848,16 @@ export function AppShell({
                 setPageOverride("MSG_CHAT");
                 setTab("MESSAGES");
               }}
+              onGreetHuman={async (person, line) => {
+                // HOME-MORE-GREET-001: 「邀约」直接发一句招呼。PROFILE 源 DM —— 同一对账号
+                // 服务端复用同一个会话，这句话续在已有聊天里，不另开一条。
+                const peerUserId = resolveHomePersonAccountId(person.id);
+                // 被拒（REJECTED）时 client 会抛，首页据此显示"没发出去"。
+                await conversation.startConversation({
+                  originType: "PROFILE", originId: peerUserId, participantId: peerUserId,
+                  conversationType: "DM", firstMessage: line,
+                });
+              }}
               onMessageAI={(account) => {
                 setMessageChat({ author: account.displayName, aiAccount: account });
                 setPageOverride("MSG_CHAT");

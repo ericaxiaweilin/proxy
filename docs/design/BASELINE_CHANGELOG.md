@@ -4,6 +4,19 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 249 — 2026-09-23
+
+- **「更多」列表：拼桌 / 邀约按同一窗景分，邀约 = 一点就打招呼**（HOME-MORE-GREET-001）：
+  用户反馈「点击邀约 弹出了底部提示 和拼桌一样 这个要改」。以前按在线状态分拼桌 / 邀约，
+  两个都弹同一个破冰面板。现在：
+  - 已知距离 ≤ 200m（同一窗景）→「拼桌」，仍弹破冰面板约见面；
+  - 更远或距离未知 →「邀约」= 纯打招呼：点一下直接从 8 句预制招呼里随机挑一句，
+    经 PROFILE 源 DM 真发出去（已有会话就续在里面），按钮变「已打招呼」，列表顶部
+    一行显示发了哪句；同一个人连着两次不会收到同一句。发失败说没发出去，访客提示登录，
+    没账号的人如实说发不了。招呼句 6 种语言各 8 句（`GREETING_LINES`）。
+- 影响文件：`apps/mobile/src/i18n.ts`、`apps/mobile/src/shell/app-shell.tsx`、
+  `apps/mobile/src/surfaces/requester-home.tsx`。
+
 ## Revision 248 — 2026-09-23
 
 - **我的 → 账户新增 AI 管理入口**（AI-MANAGE-001）：原型
@@ -11,6 +24,7 @@ same commit. Do not record routine business logic changes here.
   listMine 真查 + 照片/视频/动态现算），管理项只保留有真实去处的两条
   （出图 → AI 分身页，动态 → 个人主页）。Token 用量/暂停/三设置 sheet
   无后端，不做。
+- 入口行图标用 `sparkle`（AI 分身行是 `aiPersona` 半身像，两行不再撞脸）。
 - 影响文件：`apps/mobile/src/surfaces/me.tsx`（账户组加行 + `aimanage`
   路由，新文件 `ai-management.tsx` 不在契约实现清单内）。
 

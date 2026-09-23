@@ -9025,3 +9025,35 @@ if ! grep -qF 'loadRooms={() => conversation.listConversations()}' "$ROOMS_SHELL
   exit 1
 fi
 echo "    HOME-MORE-ROOMS-001/002: PASS (聊天房 shows the create card and my real rooms; create/enter stack on top of the more page)"
+
+# HOME-MORE-GREET-001（2026-09-23，用户：「邀约一般就是打招呼 … 线下很近的 2 个人 比如 200m
+# 以内 我们认为处于同一个窗景 这个提示就比较正常的逻辑 但是超出了 … 就是 hi 的行为 点击就
+# 发出默认预制的招呼话语 不要只有一个 多写几句」）：
+#   - 拼桌 / 邀约按「同一窗景」（已知距离 ≤ 200m）分，不按在线分；
+#   - 邀约 = 一点就真发一句招呼（PROFILE DM），不弹破冰面板；句子池 ≥ 6 句，随机挑；
+#   - 发失败要说没发出去，没账号的人不假装发出去。
+GREET_HOME=apps/mobile/src/surfaces/requester-home.tsx
+GREET_SHELL=apps/mobile/src/shell/app-shell.tsx
+if ! grep -qF 'const SAME_SCENE_RADIUS_M = 200;' "$GREET_HOME" ||
+   ! grep -qF 'return person.distanceM !== undefined && person.distanceM <= SAME_SCENE_RADIUS_M;' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-001]: 同一窗景不再是「已知距离 ≤ 200m」。" >&2
+  exit 1
+fi
+if grep -qF 'const actionLabel = p.online ? t("actionTable")' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-001]: 拼桌 / 邀约又按在线状态分了。" >&2
+  exit 1
+fi
+if ! grep -qF 'onPress={() => { if (sameScene) setIcebreakerTarget(p); else greet(p); }}' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-001]: 邀约又弹了破冰面板（应该一点就发招呼）。" >&2
+  exit 1
+fi
+if ! grep -qF 'setGreetMsg(t("greetFailed"));' "$GREET_HOME" || ! grep -qF 't("greetNoAccount", { name: person.name })' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-001]: 发失败 / 没账号不再如实说。" >&2
+  exit 1
+fi
+if ! grep -qF 'conversationType: "DM", firstMessage: line,' "$GREET_SHELL"; then
+  echo "  FAIL [HOME-MORE-GREET-001]: app-shell 的招呼不再真发到 DM。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/i18n.test.ts -t "several distinct greeting lines" || exit $?
+echo "    HOME-MORE-GREET-001: PASS (邀约 sends a real one-tap hi from a pool of lines; 拼桌 is only for the same scene ≤200m)"

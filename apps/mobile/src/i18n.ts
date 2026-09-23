@@ -235,6 +235,21 @@ export interface Messages {
   sendLineA11y: string;
   icebreakerLine1: string;
   icebreakerLine2: string;
+  greetLine1: string;
+  greetLine2: string;
+  greetLine3: string;
+  greetLine4: string;
+  greetLine5: string;
+  greetLine6: string;
+  greetLine7: string;
+  greetLine8: string;
+  greetA11y: string;
+  greetSent: string;
+  greetSentBtn: string;
+  greetSending: string;
+  greetFailed: string;
+  greetLoginFirst: string;
+  greetNoAccount: string;
   recombo: string;
   recomboSub: string;
   swapPerson: string;
@@ -436,6 +451,21 @@ const ZH: Messages = {
   sendLineA11y: "发送：“{line}”",
   icebreakerLine1: "我也在附近，一起拼个桌？",
   icebreakerLine2: "刚好路过，要一起坐坐吗？",
+  greetLine1: "嗨～刷到你了，打个招呼 👋",
+  greetLine2: "Hi！看你的主页挺有意思的，认识一下？",
+  greetLine3: "你好呀，同城的朋友，交个朋友吧～",
+  greetLine4: "嗨，对你分享的内容挺好奇的，聊聊？",
+  greetLine5: "路过你的主页，留个招呼 😊",
+  greetLine6: "Hi～有空的话可以聊聊天",
+  greetLine7: "你好，想认识一下新朋友",
+  greetLine8: "嗨！今天过得怎么样？",
+  greetA11y: "向 {name} 打招呼",
+  greetSent: "已向 {name} 打招呼：{line}",
+  greetSentBtn: "已打招呼",
+  greetSending: "发送中…",
+  greetFailed: "招呼没发出去，再点一次试试",
+  greetLoginFirst: "登录后才能打招呼",
+  greetNoAccount: "{name} 还没有账号，暂时发不了招呼",
   recombo: "重新配了一套",
   recomboSub: "根据当前时间和附近可用 Scene 重新组合。",
   swapPerson: "换个人",
@@ -637,6 +667,21 @@ const VI: Messages = {
   sendLineA11y: "Gửi: “{line}”",
   icebreakerLine1: "Tôi cũng ở gần đây, ghép bàn không?",
   icebreakerLine2: "Tình cờ đi ngang, ngồi cùng chút không?",
+  greetLine1: "Hi~ thấy bạn nên ghé chào một tiếng 👋",
+  greetLine2: "Chào bạn! Trang cá nhân của bạn thú vị ghê, làm quen nhé?",
+  greetLine3: "Chào bạn cùng thành phố, kết bạn nhé~",
+  greetLine4: "Hi, mình tò mò về những gì bạn chia sẻ, trò chuyện chút không?",
+  greetLine5: "Ghé qua trang của bạn, để lại lời chào 😊",
+  greetLine6: "Hi~ rảnh thì mình nói chuyện nhé",
+  greetLine7: "Chào bạn, mình muốn làm quen bạn mới",
+  greetLine8: "Hi! Hôm nay của bạn thế nào?",
+  greetA11y: "Chào {name}",
+  greetSent: "Đã chào {name}: {line}",
+  greetSentBtn: "Đã chào",
+  greetSending: "Đang gửi…",
+  greetFailed: "Chưa gửi được lời chào, thử lại nhé",
+  greetLoginFirst: "Đăng nhập để gửi lời chào",
+  greetNoAccount: "{name} chưa có tài khoản, tạm thời chưa chào được",
   recombo: "Đã ghép lại một bộ mới",
   recomboSub: "Ghép lại theo giờ hiện tại và các Scene có sẵn gần đây.",
   swapPerson: "Đổi người",
@@ -838,6 +883,21 @@ const EN: Messages = {
   sendLineA11y: "Send: “{line}”",
   icebreakerLine1: "I'm nearby too — share a table?",
   icebreakerLine2: "Just passing by — want to sit together?",
+  greetLine1: "Hi~ came across you, just saying hello 👋",
+  greetLine2: "Hi! Your profile looks interesting — want to connect?",
+  greetLine3: "Hey, fellow local! Let's be friends~",
+  greetLine4: "Hi, curious about what you share — up for a chat?",
+  greetLine5: "Passing by your profile, leaving a hello 😊",
+  greetLine6: "Hi~ happy to chat whenever you're free",
+  greetLine7: "Hello, I'd love to meet new friends",
+  greetLine8: "Hi! How's your day going?",
+  greetA11y: "Say hi to {name}",
+  greetSent: "Said hi to {name}: {line}",
+  greetSentBtn: "Said hi",
+  greetSending: "Sending…",
+  greetFailed: "Couldn't send your hi — tap to try again",
+  greetLoginFirst: "Log in to say hi",
+  greetNoAccount: "{name} has no account yet, so a hi can't be sent",
   recombo: "Put together a new set",
   recomboSub: "Recombined from the current time and the Scenes available nearby.",
   swapPerson: "Swapped the person",
@@ -1039,6 +1099,21 @@ const LO: Messages = {
   sendLineA11y: "ສົ່ງ: “{line}”",
   icebreakerLine1: "ຂ້ອຍກໍຢູ່ໃກ້ໆ ນັ່ງໂຕະນຳກັນບໍ?",
   icebreakerLine2: "ບັງເອີນຜ່ານມາ ນັ່ງນຳກັນບໍ?",
+  greetLine1: "ສະບາຍດີ~ ເຫັນເຈົ້າເລີຍມາທັກທາຍ 👋",
+  greetLine2: "ສະບາຍດີ! ໜ້າໂປຣໄຟລ໌ຂອງເຈົ້າໜ້າສົນໃຈຫຼາຍ, ຮູ້ຈັກກັນບໍ່?",
+  greetLine3: "ສະບາຍດີ ຄົນເມືອງດຽວກັນ, ເປັນໝູ່ກັນເດີ~",
+  greetLine4: "ສະບາຍດີ, ສົນໃຈສິ່ງທີ່ເຈົ້າແບ່ງປັນ, ລົມກັນບໍ່?",
+  greetLine5: "ຜ່ານມາເຫັນໜ້າຂອງເຈົ້າ, ຂໍທັກທາຍແດ່ 😊",
+  greetLine6: "ສະບາຍດີ~ ຫວ່າງເມື່ອໃດລົມກັນໄດ້ເດີ",
+  greetLine7: "ສະບາຍດີ, ຢາກຮູ້ຈັກໝູ່ໃໝ່",
+  greetLine8: "ສະບາຍດີ! ມື້ນີ້ເປັນແນວໃດແດ່?",
+  greetA11y: "ທັກທາຍ {name}",
+  greetSent: "ທັກທາຍ {name} ແລ້ວ: {line}",
+  greetSentBtn: "ທັກແລ້ວ",
+  greetSending: "ກຳລັງສົ່ງ…",
+  greetFailed: "ສົ່ງຄຳທັກທາຍບໍ່ໄດ້, ລອງໃໝ່ອີກຄັ້ງ",
+  greetLoginFirst: "ເຂົ້າສູ່ລະບົບເພື່ອທັກທາຍ",
+  greetNoAccount: "{name} ຍັງບໍ່ມີບັນຊີ, ຍັງທັກທາຍບໍ່ໄດ້",
   recombo: "ຈັບຄູ່ຊຸດໃໝ່ແລ້ວ",
   recomboSub: "ຈັບຄູ່ໃໝ່ຕາມເວລາປັດຈຸບັນ ແລະ Scene ທີ່ມີໃກ້ໆ",
   swapPerson: "ປ່ຽນຄົນ",
@@ -1240,6 +1315,21 @@ const KO: Messages = {
   sendLineA11y: "보내기: “{line}”",
   icebreakerLine1: "저도 근처예요. 같이 앉을까요?",
   icebreakerLine2: "지나가던 길이에요. 같이 앉을래요?",
+  greetLine1: "안녕하세요~ 보여서 인사드려요 👋",
+  greetLine2: "안녕하세요! 프로필이 흥미로워요, 알고 지낼래요?",
+  greetLine3: "같은 동네 친구, 친하게 지내요~",
+  greetLine4: "안녕하세요, 올리신 게 궁금해요. 얘기 나눌래요?",
+  greetLine5: "프로필 지나가다 인사 남겨요 😊",
+  greetLine6: "안녕~ 시간 될 때 얘기해요",
+  greetLine7: "안녕하세요, 새 친구를 사귀고 싶어요",
+  greetLine8: "안녕하세요! 오늘 하루 어때요?",
+  greetA11y: "{name}에게 인사하기",
+  greetSent: "{name}에게 인사했어요: {line}",
+  greetSentBtn: "인사함",
+  greetSending: "보내는 중…",
+  greetFailed: "인사를 보내지 못했어요. 다시 눌러 주세요",
+  greetLoginFirst: "로그인하면 인사할 수 있어요",
+  greetNoAccount: "{name}님은 아직 계정이 없어 인사를 보낼 수 없어요",
   recombo: "새로 조합했어요",
   recomboSub: "현재 시간과 근처에서 가능한 Scene을 기준으로 다시 조합했어요.",
   swapPerson: "사람을 바꿨어요",
@@ -1441,6 +1531,21 @@ const JA: Messages = {
   sendLineA11y: "送信：“{line}”",
   icebreakerLine1: "私も近くにいます。相席しませんか？",
   icebreakerLine2: "たまたま通りかかりました。一緒にどうですか？",
+  greetLine1: "こんにちは〜見かけたのでご挨拶です 👋",
+  greetLine2: "こんにちは！プロフィールが面白そう、仲良くなりませんか？",
+  greetLine3: "同じ街の方ですね、よろしくお願いします〜",
+  greetLine4: "こんにちは、シェアしている内容が気になります。少し話しませんか？",
+  greetLine5: "プロフィールを通りかかったので挨拶を残します 😊",
+  greetLine6: "こんにちは〜暇なときにお話ししましょう",
+  greetLine7: "こんにちは、新しい友達を作りたいです",
+  greetLine8: "こんにちは！今日はどんな一日ですか？",
+  greetA11y: "{name} に挨拶",
+  greetSent: "{name} に挨拶しました：{line}",
+  greetSentBtn: "挨拶済み",
+  greetSending: "送信中…",
+  greetFailed: "挨拶を送れませんでした。もう一度タップしてください",
+  greetLoginFirst: "ログインすると挨拶できます",
+  greetNoAccount: "{name} さんはまだアカウントがないため挨拶できません",
   recombo: "新しい組み合わせを作りました",
   recomboSub: "現在の時間と近くで使える Scene で組み直しました。",
   swapPerson: "相手を変えました",
@@ -1560,4 +1665,19 @@ export const ICEBREAKER_LINES: Record<Language, ReadonlyArray<string>> = {
   lo: [translate("lo", "icebreakerLine1"), translate("lo", "icebreakerLine2")],
   ko: [translate("ko", "icebreakerLine1"), translate("ko", "icebreakerLine2")],
   ja: [translate("ja", "icebreakerLine1"), translate("ja", "icebreakerLine2")]
+};
+
+// HOME-MORE-GREET-001（2026-09-23，用户：「超出了 没见面暂时 就是纯粹的打招呼好奇 就不用
+// 弹出了 就是 hi 的行为 点击就发出默认预制的招呼话语 不要只有一个 多写几句」）：
+// 「更多」列表里不在同一窗景（> SAME_SCENE_RADIUS_M）的人，按钮是「邀约」= 打招呼：
+// 点一下直接从这里随机挑一句发出去，不弹面板。句子只是 hi / 好奇，不约见面 ——
+// 约见面是同一窗景里「拼桌」的破冰面板（ICEBREAKER_LINES）的事。
+const GREETING_KEYS = ["greetLine1", "greetLine2", "greetLine3", "greetLine4", "greetLine5", "greetLine6", "greetLine7", "greetLine8"] as const;
+export const GREETING_LINES: Record<Language, ReadonlyArray<string>> = {
+  zh: GREETING_KEYS.map((key) => translate("zh", key)),
+  vi: GREETING_KEYS.map((key) => translate("vi", key)),
+  en: GREETING_KEYS.map((key) => translate("en", key)),
+  lo: GREETING_KEYS.map((key) => translate("lo", key)),
+  ko: GREETING_KEYS.map((key) => translate("ko", key)),
+  ja: GREETING_KEYS.map((key) => translate("ja", key))
 };
