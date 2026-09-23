@@ -24,6 +24,10 @@ const cardSource = readFileSync(
   fileURLToPath(new URL("./twin-insight-card.tsx", import.meta.url)),
   "utf8",
 );
+const foundationSource = readFileSync(
+  fileURLToPath(new URL("./proxy-foundation.tsx", import.meta.url)),
+  "utf8",
+);
 
 describe("TwinInsight no longer ships fabricated data (TWIN-INSIGHT-002)", () => {
   it("the demo module is gone", () => {
@@ -174,5 +178,16 @@ describe("TwinInsight avatar source (TWIN-INSIGHT-AVATAR-001)", () => {
 
   it("the section threads resolveMediaUrl into rail and card", () => {
     expect(sectionSource).toContain("resolveMediaUrl={resolveMediaUrl}");
+  });
+
+  it("ProxyAvatar keeps the initial under the image (gray circle never blanks)", () => {
+    // 有 source 时不能把 Text 顶掉：加载中/坏 URI 若 onError 未触发，
+    // 会变成“连灰头像都没有”。字垫底，图 absolute 盖上去，失败撤图。
+    expect(foundationSource).toContain("styles.avatarFallback");
+    expect(foundationSource).toContain("avatarImageAbsolute");
+    expect(foundationSource).toContain('position: "absolute"');
+    expect(foundationSource).toContain("onError");
+    // 不能回到「二选一渲染」—— Text 和 Image 必须同时在返回树里（条件只包 Image）
+    expect(foundationSource).not.toMatch(/\{showImage \? \([\s\S]*?avatarFallback[\s\S]*?\) : \(/);
   });
 });

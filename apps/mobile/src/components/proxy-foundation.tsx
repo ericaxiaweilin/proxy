@@ -88,9 +88,10 @@ export function ProxyAvatar({
   size?: 32 | 44 | 60;
   source?: ImageSourcePropType;
 }): React.JSX.Element {
-  // TWIN-INSIGHT-AVATAR-001: 坏 URI（404/离网/解码失败）必须落回首字 ——
-  // 否则 <Image> 留一块透明圆，看起来像“头像空白”。uri 变了要重置，
-  // 免得换人后还挂着上一张的失败态。
+  // TWIN-INSIGHT-AVATAR-001: 首字永远垫在底下 —— 图在加载/404/解码失败时
+  // 绝不能把灰圈+字藏掉（之前 Image 顶掉 Text，坏 URI 时 onError 没来得及
+  // 或不触发就成了“连灰头像都没有”）。图成功后盖住字；失败撤掉图露出字。
+  // uri 变了重置失败态，免得换人后还挂着上一张的失败。
   const uri = typeof source === "object" && source !== null && "uri" in source ? source.uri : undefined;
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -99,11 +100,10 @@ export function ProxyAvatar({
   const showImage = source !== undefined && !failed;
   return (
     <View accessibilityLabel={accessibilityLabel} style={[styles.avatar, { height: size, width: size }]}>
+      <Text style={styles.avatarFallback}>{fallback.slice(0, 1)}</Text>
       {showImage ? (
-        <Image source={source} style={styles.avatarImage} onError={() => setFailed(true)} />
-      ) : (
-        <Text style={styles.avatarFallback}>{fallback.slice(0, 1)}</Text>
-      )}
+        <Image source={source} style={styles.avatarImageAbsolute} onError={() => setFailed(true)} />
+      ) : null}
     </View>
   );
 }
@@ -238,6 +238,7 @@ const styles = StyleSheet.create({
   avatar: { alignItems: "center", backgroundColor: foundation.surfaceSecondary, borderColor: foundation.line, borderRadius: foundation.radius.full, borderWidth: 1, justifyContent: "center", overflow: "hidden" },
   avatarFallback: { color: foundation.ink, fontSize: foundation.text.sm, fontWeight: "800" },
   avatarImage: { height: "100%", width: "100%" },
+  avatarImageAbsolute: { height: "100%", left: 0, position: "absolute", top: 0, width: "100%" },
   button: { alignItems: "center", borderRadius: foundation.radius.sm, borderWidth: 1, flexDirection: "row", gap: foundation.space.two, justifyContent: "center", minHeight: foundation.control.md, paddingHorizontal: 14 },
   button_primary: { backgroundColor: foundation.ink, borderColor: foundation.ink },
   button_secondary: { backgroundColor: foundation.surface, borderColor: foundation.line },
