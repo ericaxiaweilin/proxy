@@ -4,6 +4,27 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 244 — 2026-09-23
+
+- **「更多 → 聊天房」改成列表视图**（HOME-MORE-ROOMS-001）：照原型
+  `deepseek_html_20260923_2308b7.html`，「聊天房」chip 不再直接跳创建页，
+  而是把本页列表切成「开房大卡 + 正在进行的房间」。大卡整卡 = 默认场景开房，
+  4 个场景 chip（City Walk / 咖啡 / 看展 / 桌游，复用 `room-create.tsx` 的
+  `SCENE_OPTIONS`）= 带着该场景打开创建页。房间列表只列服务端真实的 GROUP
+  会话（带 `roomScene`），点一行进房；读失败与没有房分开显示，访客提示登录。
+  没有公开可加入的房间目录，所以不画别人的房、不画假「加入」。
+- **语言入口挪到「更多」的「中文」chip**（HOME-I18N-002）：首页页头的「中」
+  按钮去掉；「中文」chip 显示当前语言本名（中文 / Tiếng Việt / English …），
+  点开选择语言面板。面板新增 `presentation="overlay"`，叠在「更多」整页 Modal
+  里面，不嵌第二个 Modal。原「会中文」筛选随之让位给语言入口。
+- **「更多」chip 行改为单行横滑**：返回箭头、搜索固定两端，chip 在中间横滑
+  （原型 `.filter-chips { overflow-x: auto }`）。之前 flexWrap 换行时「聊天房」
+  会被挤到第二行，落进返回箭头的 hitSlop。
+- 影响文件：`apps/mobile/src/components/language-sheet.tsx`、
+  `apps/mobile/src/i18n.ts`、`apps/mobile/src/shell/app-shell.tsx`、
+  `apps/mobile/src/surfaces/requester-home.tsx`、
+  `apps/mobile/src/surfaces/room-create.tsx`。
+
 ## Revision 243 — 2026-09-22
 
 - **房间见面进壳**（ROOM-CREATE-001）：`app-shell` 新增创建房间面板 +

@@ -20,6 +20,8 @@ import { color, shadows } from "../theme";
 import { ICEBREAKER_LINES, useI18n, type MessageKey, type MessageVars } from "../i18n";
 import { loadPreferences } from "../preferences";
 import { LanguageSheet } from "../components/language-sheet";
+import { SCENE_OPTIONS } from "./room-create";
+import type { ConversationInboxItem } from "../conversation-client";
 import type { HardDemandCategory } from "../uiplan/types";
 import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from "../demand-client";
 import type { LocalNetClient } from "../localnet-client";
@@ -136,6 +138,8 @@ export function RequesterHome({
   onOpenHumanProfile,
   onMessageHuman,
   onOpenRoomCreate,
+  loadRooms,
+  onOpenRoom,
   viewerAccountId,
   isGuest,
   onCreateScene,
@@ -176,7 +180,12 @@ export function RequesterHome({
   onMessageHuman?: (person: RecommendPerson, initialDraft?: string) => void;
   // ROOM-CREATE-001: "创建房间"入口——把当前"更多"页可见的候选人交给调用方，
   // 由它打开创建房间流程（真实 GROUP conversation，见 room-create.tsx）。
-  onOpenRoomCreate?: (candidates: ReadonlyArray<RecommendPerson>) => void;
+  // HOME-MORE-ROOMS-001: sceneIndex = 开房大卡上点的场景 chip（SCENE_OPTIONS 下标），缺省 = 默认场景。
+  onOpenRoomCreate?: (candidates: ReadonlyArray<RecommendPerson>, sceneIndex?: number) => void;
+  // HOME-MORE-ROOMS-001: 「更多 → 聊天房」列表 —— 读我已有的房（GROUP + roomScene 的会话），
+  // 点一行进房。没接（老调用方 / 测试）就不显示聊天房 chip。
+  loadRooms?: () => Promise<ConversationInboxItem[]>;
+  onOpenRoom?: (conversationId: string) => void;
   viewerAccountId?: string;
   isGuest?: boolean;
   // 访客模式：不拉关系链、不弹关系失败提示。访客点 + 号走 handleHomeFriend
@@ -228,6 +237,11 @@ export function RequesterHome({
   const [recommendMode, setRecommendMode] = useState<string>(RECOMMEND_MODE_ORDER[0]!);
   // R15.34: 筛选 sheet 开 / 关 + 已选 chip。空数组 = "全部"。
   const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
+  // HOME-MORE-ROOMS-001（2026-09-23，原型 deepseek_html_20260923_2308b7.html）：
+  // 「更多」整页的「聊天房」chip 不再直接跳创建页，而是把下面的列表切成
+  // 「开房大卡 + 正在进行的房间」。rooms 只在切进来时读，失败/空态分开显示。
+  const [moreMode, setMoreMode] = useState<"people" | "rooms">("people");
+  const [rooms, setRooms] = useState<{ status: "idle" | "loading" | "ready" | "failed"; items: ConversationInboxItem[] }>({ status: "idle", items: [] });
   const [activeFilters, setActiveFilters] = useState<ReadonlyArray<string>>([]);
   // HOME-MORE-SEARCH-001（2026-09-22，用户反馈"漏了一个搜索按钮 点击弹出框"）：
   // 跟 messages.tsx/feed.tsx 同一套图标切换 + 内联搜索框模式，本地按名字/简介
@@ -242,6 +256,21 @@ export function RequesterHome({
   // 冷启动时用落盘值覆盖一次（见下面的 effect），默认 zh。
   const { t, lang, option: appLangOption, rideTimes, setLanguage: applyLanguage } = useI18n();
   const [languageSheetOpen, setLanguageSheetOpen] = useState<boolean>(false);
+
+  // HOME-MORE-ROOMS-001: 读「我已有的房」。只认服务端真实的 GROUP 会话且带 roomScene ——
+  // 没有公开可加入的房间目录（那需要独立的房间域），所以不画别人的房、不画假「加入」。
+  function refreshRooms(): void {
+    if (!loadRooms || isGuest) return;
+    setRooms((prev) => ({ status: "loading", items: prev.items }));
+    loadRooms()
+      .then((items) => {
+        const mine = items
+          .filter((item) => item.conversation.conversationType === "GROUP" && item.conversation.roomScene !== undefined)
+          .sort((a, b) => b.conversation.lastMessageAt.localeCompare(a.conversation.lastMessageAt));
+        setRooms({ status: "ready", items: mine });
+      })
+      .catch(() => setRooms((prev) => ({ status: "failed", items: prev.items })));
+  }
   // 破冰开场白跟着语言走（原来写死在模块级数组里，切语言不跟着变）。
   const icebreakerLines = ICEBREAKER_LINES[lang] ?? ICEBREAKER_LINES.zh;
   const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>(BUNDLED_AI_COMPANIONS);
@@ -901,17 +930,8 @@ export function RequesterHome({
         <View style={{ flex: 1 }}>
           <View style={styles.peopleTitleRow}><Text style={styles.peopleTitle}>{t("title")}</Text><View style={styles.humanBadge}><Text style={styles.humanBadgeText}>{t("humanBadge")}</Text></View></View>
         </View>
-        {/* HOME-I18N-001：原型页头 header-actions 的第一个按钮（原型是「中」，
-            切语言后显示当前语言短标 VI/EN/LO/KO/JA）。它跟右边「更多」并排，
-            位置跟原型一致 —— 都在标题右侧。 */}
-        <Pressable
-          accessibilityLabel={t("language")}
-          accessibilityState={{ expanded: languageSheetOpen }}
-          onPress={() => setLanguageSheetOpen(true)}
-          style={styles.langBtn}
-        >
-          <Text style={styles.langBtnText}>{appLangOption.short}</Text>
-        </Pressable>
+        {/* HOME-I18N-002（2026-09-23）：语言入口不在首页页头，挪到「更多」整页的
+            「中文」chip（见下方 filterChips）。 */}
         <Pressable onPress={() => setFilterSheetOpen(true)} style={styles.filterTrigger} accessibilityLabel={t("more")}>
           <Text style={styles.filterTriggerText}>{t("more")}</Text>
         </Pressable>
@@ -1374,56 +1394,79 @@ export function RequesterHome({
               <Pressable accessibilityLabel={t("back")} hitSlop={12} onPress={() => setFilterSheetOpen(false)} style={styles.morePageBackInline}>
                 <Text style={styles.morePageBackIcon}>‹</Text>
               </Pressable>
-              {/* HOME-MORE-DIST-001（2026-09-22，照 deepseek_html_20260922_1c2e2c.html
-                  的 distance-chip）：「附近」不再是一个写死 1km 的开关，而是原型的
-                  距离控件 —— 深色药丸 + 📍 + 当前半径 + ▾。点它是展开滑杆
-                  （1/3/5/10/20/50/100 km，默认 10km），不是开关：半径是**设置**，
-                  恒生效。▾ 只在面板打开时翻转（跟原型同一条规则）。 */}
-              <Pressable
-                accessibilityLabel={t("distanceChipA11y", { km: moreDistanceKm })}
-                onPress={() => setMoreDistanceOpen((open) => !open)}
-                style={[styles.filterChip, styles.distanceChip]}
-              >
-                {/* 数字 + kmUnit 分开拼，跟原型 renderDistanceChip 同一条规则：
-                    zh 的 kmUnit 是 "km 内"，vi/en 是 "km"，ko 是 "km 이내"，
-                    所以不能把 "km 内" 写死在 JSX 里。 */}
-                <Text style={styles.distanceChipText}>📍 {moreDistanceKm}{t("kmUnit")}</Text>
-                <Text style={[styles.distanceChipArrow, moreDistanceOpen && styles.distanceChipArrowOpen]}>▾</Text>
-              </Pressable>
-              {RECOMMEND_FILTER_CHIPS.map((chip: RecommendFilter) => {
-                const on = activeFilters.includes(chip.id);
-                const labelKey = CHIP_LABEL_KEY[chip.id];
-                return (
-                  <Pressable
-                    key={chip.id}
-                    onPress={() => {
-                      setActiveFilters((prev) =>
-                        prev.includes(chip.id) ? prev.filter((c) => c !== chip.id) : [...prev, chip.id]
-                      );
-                    }}
-                    style={[styles.filterChip, on && styles.filterChipOn]}
-                    accessibilityLabel={`${t("filterChipA11y", { label: labelKey ? t(labelKey) : chip.label })}${on ? t("selectedSuffix") : ""}`}
-                  >
-                    <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>{labelKey ? t(labelKey) : chip.label}</Text>
-                  </Pressable>
-                );
-              })}
-              {onOpenRoomCreate ? (
+              {/* HOME-MORE-ROOMS-001：chip 行照原型 .filter-chips —— 单行横滑，返回箭头和
+                  搜索固定在两端。之前 flexWrap 换行：语言 chip 显示「Tiếng Việt」这类长名、
+                  或距离选到 100km 时，「聊天房」被挤到第二行，正好落进返回箭头的 hitSlop。 */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterChipScroll} contentContainerStyle={styles.filterChipScrollContent}>
+                {/* HOME-MORE-DIST-001（2026-09-22，照 deepseek_html_20260922_1c2e2c.html
+                    的 distance-chip）：「附近」不再是一个写死 1km 的开关，而是原型的
+                    距离控件 —— 深色药丸 + 📍 + 当前半径 + ▾。点它是展开滑杆
+                    （1/3/5/10/20/50/100 km，默认 10km），不是开关：半径是**设置**，
+                    恒生效。▾ 只在面板打开时翻转（跟原型同一条规则）。 */}
                 <Pressable
-                  accessibilityLabel={t("createRoomA11y")}
-                  onPress={() => {
-                    // ROOM-CREATE-001：跟 icebreaker 面板同一个教训（HOME-MORE-SHEET-004）——
-                    // "更多"整页本身是一个 Modal，RoomCreateSurface 也是自己的 Modal，
-                    // iOS 一次只能呈现一个，两个同时 visible 时后一个会被无声吞掉。
-                    // 开新 Modal 前必须先关掉这一层。
-                    setFilterSheetOpen(false);
-                    onOpenRoomCreate(filteredPeople);
-                  }}
-                  style={styles.createRoomBtn}
+                  accessibilityLabel={t("distanceChipA11y", { km: moreDistanceKm })}
+                  onPress={() => setMoreDistanceOpen((open) => !open)}
+                  style={[styles.filterChip, styles.distanceChip]}
                 >
-                  <Text style={styles.createRoomBtnText}>{t("chipChatRoom")}</Text>
+                  {/* 数字 + kmUnit 分开拼，跟原型 renderDistanceChip 同一条规则：
+                      zh 的 kmUnit 是 "km 内"，vi/en 是 "km"，ko 是 "km 이내"，
+                      所以不能把 "km 内" 写死在 JSX 里。 */}
+                  <Text style={styles.distanceChipText}>📍 {moreDistanceKm}{t("kmUnit")}</Text>
+                  <Text style={[styles.distanceChipArrow, moreDistanceOpen && styles.distanceChipArrowOpen]}>▾</Text>
                 </Pressable>
-              ) : null}
+                {RECOMMEND_FILTER_CHIPS.map((chip: RecommendFilter) => {
+                  // HOME-I18N-002（2026-09-23，用户：「多语言筛选按钮做在 home 这个不对
+                  // 应该做在已有的更多-中文按钮」）：「中文」chip 就是语言入口 ——
+                  // 显示当前语言的本名（中文 / Tiếng Việt / English …），点开选择语言
+                  // 面板。面板用 overlay 形态叠在本页 Modal 里，不嵌第二个 Modal。
+                  if (chip.id === "lang_zh") {
+                    return (
+                      <Pressable
+                        key={chip.id}
+                        accessibilityLabel={t("languageChipA11y", { name: appLangOption.name })}
+                        accessibilityState={{ expanded: languageSheetOpen }}
+                        onPress={() => setLanguageSheetOpen(true)}
+                        style={styles.filterChip}
+                      >
+                        <Text style={styles.filterChipText}>{appLangOption.name}</Text>
+                      </Pressable>
+                    );
+                  }
+                  const on = activeFilters.includes(chip.id);
+                  const labelKey = CHIP_LABEL_KEY[chip.id];
+                  return (
+                    <Pressable
+                      key={chip.id}
+                      onPress={() => {
+                        setActiveFilters((prev) =>
+                          prev.includes(chip.id) ? prev.filter((c) => c !== chip.id) : [...prev, chip.id]
+                        );
+                      }}
+                      style={[styles.filterChip, on && styles.filterChipOn]}
+                      accessibilityLabel={`${t("filterChipA11y", { label: labelKey ? t(labelKey) : chip.label })}${on ? t("selectedSuffix") : ""}`}
+                    >
+                      <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>{labelKey ? t(labelKey) : chip.label}</Text>
+                    </Pressable>
+                  );
+                })}
+                {loadRooms ? (
+                  // HOME-MORE-ROOMS-001：「聊天房」是本页的一个视图切换（原型 chip.active），
+                  // 不是直接跳创建页 —— 切进来先看到开房大卡 + 已有的房。
+                  <Pressable
+                    accessibilityLabel={t("chipChatRoom")}
+                    accessibilityState={{ selected: moreMode === "rooms" }}
+                    onPress={() => {
+                      if (moreMode === "rooms") { setMoreMode("people"); return; }
+                      setMoreMode("rooms");
+                      setMoreDistanceOpen(false);
+                      refreshRooms();
+                    }}
+                    style={[styles.filterChip, moreMode === "rooms" && styles.filterChipOn]}
+                  >
+                    <Text style={[styles.filterChipText, moreMode === "rooms" && styles.filterChipTextOn]}>{t("chipChatRoom")}</Text>
+                  </Pressable>
+                ) : null}
+              </ScrollView>
               <Pressable
                 accessibilityLabel={moreSearchOpen ? t("closeSearch") : t("search")}
                 onPress={() => { if (moreSearchOpen) { setMoreSearchOpen(false); setMoreSearchQuery(""); } else setMoreSearchOpen(true); }}
@@ -1476,51 +1519,133 @@ export function RequesterHome({
                 ) : null}
               </View>
             ) : null}
-            {relationshipMsg ? <Text style={styles.followMsg}>{relationshipMsg}</Text> : null}
-            <ScrollView style={styles.moreList} contentContainerStyle={styles.moreListContent} showsVerticalScrollIndicator={false}>
-              {filteredPeople.map((p) => {
-                const distance = p.distanceM === undefined ? t("distanceUnknown") : p.distanceM < 1000 ? `${p.distanceM} m` : `${(p.distanceM / 1000).toFixed(1)} km`;
-                const openPreview = (): void => {
-                  setFilterSheetOpen(false);
-                  setPublicHistoryOpen(false);
-                  setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId });
-                };
-                // HOME-MORE-SHEET-003（2026-09-22，用户反馈"原型是邀约/拼桌/
-                // 房间，没有主页邀约，UI 也不对，还有斜箭头——那个只有 home
-                // 才有，进入更多就没有了"）：加好友的斜箭头徽标（relationshipGlyph）
-                // 跟"主页"链接都是首页那条快捷推荐横排用的，原型里"更多"整页
-                // 列表每行只有一个动作——在线的人是"拼桌"，其余是"邀约"，两个
-                // 都开同一个破冰面板，不是加好友。
-                const actionLabel = p.online ? t("actionTable") : t("actionInvite");
-                return (
-                  <View key={`more:${p.id}`} style={styles.moreRow}>
-                    <Pressable onPress={openPreview} accessibilityLabel={t("viewHumanProfileA11y", { name: p.name })} style={styles.moreAvatarWrap}>
-                      {p.photoUri && !brokenAvatarIds.has(p.id) ? <Image source={{ uri: p.photoUri }} style={styles.moreAvatar} onError={() => markAvatarBroken(p.id)} /> : <View style={styles.moreAvatarFallback}><Text style={styles.moreAvatarInitials}>{p.initials}</Text></View>}
-                      {p.online ? <View style={styles.moreOnlineDot} /> : null}
-                    </Pressable>
-                    <Pressable onPress={openPreview} style={styles.moreInfo} accessibilityLabel={t("viewHumanProfileA11y", { name: p.name })}>
-                      <View style={styles.moreNameRow}><Text style={styles.moreName} numberOfLines={1}>{p.name}</Text><Text style={styles.moreMeta}>{distance}</Text></View>
-                      {p.bio ? <Text style={styles.moreBio} numberOfLines={1}>{p.bio}</Text> : null}
-                      {/* HOME-MORE-SHEET-007（2026-09-22，用户反馈"共同好友
-                          移除，最多保持 2 个标签"）：去掉共同好友数，标签本来
-                          就 slice(0,2) 封顶，维持不变。 */}
-                      <View style={styles.moreTags}>
-                        {p.online ? <Text style={styles.moreTagLive}>{t("chipOnline")}</Text> : null}
-                        {p.tags.slice(0, 2).map((t) => <Text key={`${t.kind}:${t.text}`} style={styles.moreTag}>{t.text}</Text>)}
+            {moreMode === "rooms" ? (
+              <ScrollView style={styles.moreList} contentContainerStyle={styles.moreListContent} showsVerticalScrollIndicator={false}>
+                {/* HOME-MORE-ROOMS-001：开房大卡（原型 .create-room-card）。整卡 = 默认场景开房，
+                    4 个场景 chip = 带着该场景开房。开创建页前先关掉本页 Modal（iOS 只呈现一个）。 */}
+                <Pressable
+                  accessibilityLabel={t("createRoomA11y")}
+                  disabled={!onOpenRoomCreate || isGuest}
+                  onPress={() => { setFilterSheetOpen(false); onOpenRoomCreate?.(filteredPeople); }}
+                  style={({ pressed }) => [styles.roomCreateCard, pressed && styles.roomCreateCardPressed]}
+                >
+                  <View style={styles.roomCreateTop}>
+                    <View style={styles.roomCreateIcon}><Text style={styles.roomCreateIconText}>✨</Text></View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.roomCreateTitle}>{t("roomsCreateTitle")}</Text>
+                      <Text style={styles.roomCreateDesc}>{isGuest ? t("roomsLoginFirst") : t("roomsCreateDesc")}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.roomCreateRow}>
+                    {SCENE_OPTIONS.slice(0, 4).map((scene, index) => (
+                      <Pressable
+                        key={`room-scene:${scene.roomName}`}
+                        accessibilityLabel={`${t("createRoomA11y")} · ${scene.title}`}
+                        disabled={!onOpenRoomCreate || isGuest}
+                        onPress={() => { setFilterSheetOpen(false); onOpenRoomCreate?.(filteredPeople, index); }}
+                        style={styles.roomCreateScene}
+                      >
+                        <Text style={styles.roomCreateSceneEmoji}>{scene.emoji}</Text>
+                        <Text numberOfLines={1} style={styles.roomCreateSceneLabel}>{scene.title}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </Pressable>
+
+                <View style={styles.roomSectionHead}>
+                  <Text style={styles.roomSectionTitle}>{t("roomsOngoing")}</Text>
+                  {rooms.status === "ready" ? <Text style={styles.roomSectionCount}>{rooms.items.length}</Text> : null}
+                </View>
+                {isGuest ? <Text style={styles.moreEmpty}>{t("roomsLoginFirst")}</Text> : null}
+                {!isGuest && rooms.status === "loading" && rooms.items.length === 0 ? <Text style={styles.moreEmpty}>{t("roomsLoading")}</Text> : null}
+                {!isGuest && rooms.status === "failed" ? (
+                  <Pressable accessibilityLabel={t("roomsLoadFailed")} onPress={refreshRooms}>
+                    <Text style={styles.moreEmpty}>{t("roomsLoadFailed")}</Text>
+                  </Pressable>
+                ) : null}
+                {!isGuest && rooms.status === "ready" && rooms.items.length === 0 ? <Text style={styles.moreEmpty}>{t("roomsEmpty")}</Text> : null}
+                {rooms.items.map((item) => {
+                  const scene = item.conversation.roomScene!;
+                  const meetup = item.activeMeetup;
+                  const meta = meetup ? `${meetup.place} · ${meetup.timeLabel}` : scene.sceneDesc;
+                  const enter = (): void => {
+                    if (!onOpenRoom) return;
+                    setFilterSheetOpen(false);
+                    onOpenRoom(item.conversation.conversationId);
+                  };
+                  return (
+                    <Pressable
+                      key={`room:${item.conversation.conversationId}`}
+                      accessibilityLabel={t("roomOpenA11y", { name: scene.roomName })}
+                      onPress={enter}
+                      style={({ pressed }) => [styles.roomCard, pressed && styles.roomCardPressed]}
+                    >
+                      <View style={styles.roomCover}><Text style={styles.roomCoverEmoji}>{scene.emoji}</Text></View>
+                      <View style={styles.roomBody}>
+                        <View style={styles.roomTop}>
+                          <Text numberOfLines={1} style={styles.roomName}>{scene.roomName}</Text>
+                          {item.unreadCount ? <Text style={styles.roomUnread}>{item.unreadCount > 99 ? "99+" : item.unreadCount}</Text> : null}
+                        </View>
+                        <Text numberOfLines={1} style={styles.roomMeta}>{meta}</Text>
+                        {item.latestMessage?.body ? <Text numberOfLines={1} style={styles.roomLatest}>{item.latestMessage.body}</Text> : null}
+                        <View style={styles.roomFooter}>
+                          <Text style={styles.roomMembersText}>{t("roomMembers", { n: item.conversation.participants.length })}</Text>
+                          <View style={styles.roomEnterBtn}><Text style={styles.roomEnterBtnText}>{t("roomEnter")}</Text></View>
+                        </View>
                       </View>
                     </Pressable>
-                    <Pressable
-                      onPress={() => setIcebreakerTarget(p)}
-                      style={styles.moreActionBtn}
-                      accessibilityLabel={t("icebreakerTitle", { name: p.name, action: actionLabel })}
-                    >
-                      <Text style={styles.moreActionBtnText}>{actionLabel}</Text>
-                    </Pressable>
-                  </View>
-                );
-              })}
-              {filteredPeople.length === 0 ? <Text style={styles.moreEmpty}>{t("emptyFiltered")}</Text> : null}
-            </ScrollView>
+                  );
+                })}
+              </ScrollView>
+            ) : (
+              <>
+              {relationshipMsg ? <Text style={styles.followMsg}>{relationshipMsg}</Text> : null}
+              <ScrollView style={styles.moreList} contentContainerStyle={styles.moreListContent} showsVerticalScrollIndicator={false}>
+                {filteredPeople.map((p) => {
+                  const distance = p.distanceM === undefined ? t("distanceUnknown") : p.distanceM < 1000 ? `${p.distanceM} m` : `${(p.distanceM / 1000).toFixed(1)} km`;
+                  const openPreview = (): void => {
+                    setFilterSheetOpen(false);
+                    setPublicHistoryOpen(false);
+                    setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId });
+                  };
+                  // HOME-MORE-SHEET-003（2026-09-22，用户反馈"原型是邀约/拼桌/
+                  // 房间，没有主页邀约，UI 也不对，还有斜箭头——那个只有 home
+                  // 才有，进入更多就没有了"）：加好友的斜箭头徽标（relationshipGlyph）
+                  // 跟"主页"链接都是首页那条快捷推荐横排用的，原型里"更多"整页
+                  // 列表每行只有一个动作——在线的人是"拼桌"，其余是"邀约"，两个
+                  // 都开同一个破冰面板，不是加好友。
+                  const actionLabel = p.online ? t("actionTable") : t("actionInvite");
+                  return (
+                    <View key={`more:${p.id}`} style={styles.moreRow}>
+                      <Pressable onPress={openPreview} accessibilityLabel={t("viewHumanProfileA11y", { name: p.name })} style={styles.moreAvatarWrap}>
+                        {p.photoUri && !brokenAvatarIds.has(p.id) ? <Image source={{ uri: p.photoUri }} style={styles.moreAvatar} onError={() => markAvatarBroken(p.id)} /> : <View style={styles.moreAvatarFallback}><Text style={styles.moreAvatarInitials}>{p.initials}</Text></View>}
+                        {p.online ? <View style={styles.moreOnlineDot} /> : null}
+                      </Pressable>
+                      <Pressable onPress={openPreview} style={styles.moreInfo} accessibilityLabel={t("viewHumanProfileA11y", { name: p.name })}>
+                        <View style={styles.moreNameRow}><Text style={styles.moreName} numberOfLines={1}>{p.name}</Text><Text style={styles.moreMeta}>{distance}</Text></View>
+                        {p.bio ? <Text style={styles.moreBio} numberOfLines={1}>{p.bio}</Text> : null}
+                        {/* HOME-MORE-SHEET-007（2026-09-22，用户反馈"共同好友
+                            移除，最多保持 2 个标签"）：去掉共同好友数，标签本来
+                            就 slice(0,2) 封顶，维持不变。 */}
+                        <View style={styles.moreTags}>
+                          {p.online ? <Text style={styles.moreTagLive}>{t("chipOnline")}</Text> : null}
+                          {p.tags.slice(0, 2).map((t) => <Text key={`${t.kind}:${t.text}`} style={styles.moreTag}>{t.text}</Text>)}
+                        </View>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setIcebreakerTarget(p)}
+                        style={styles.moreActionBtn}
+                        accessibilityLabel={t("icebreakerTitle", { name: p.name, action: actionLabel })}
+                      >
+                        <Text style={styles.moreActionBtnText}>{actionLabel}</Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+                {filteredPeople.length === 0 ? <Text style={styles.moreEmpty}>{t("emptyFiltered")}</Text> : null}
+              </ScrollView>
+              </>
+            )}
 
             {/* HOME-MORE-SHEET-004（2026-09-22，用户反馈"拼桌/邀约点击没反应"）：
                 根因是这个面板之前用了第二个 <Modal>，跟外层"更多"整页的 Modal
@@ -1555,15 +1680,12 @@ export function RequesterHome({
                 </View>
               </Pressable>
             ) : null}
+            {/* HOME-I18N-002：语言面板叠在本页 Modal 里面（overlay，不是第二个 Modal）。 */}
+            <LanguageSheet presentation="overlay" visible={languageSheetOpen} onClose={() => setLanguageSheetOpen(false)} />
           </View>
         </Modal>
       ) : null}
 
-      {/* HOME-I18N-001：语言选择面板。挂在首页最外层 —— 这里**不在**任何
-          Modal 内部，所以用 Modal 是安全的。别把它挪进「更多」整页那个 Modal
-          里面：iOS 一次只呈现一个 Modal，第二个会被无声吞掉，state 变了但
-          面板不弹（HOME-MORE-SHEET-004 踩过同一个坑）。 */}
-      <LanguageSheet visible={languageSheetOpen} onClose={() => setLanguageSheetOpen(false)} />
     </ScrollView>
   );
 }
@@ -1798,18 +1920,6 @@ const styles = StyleSheet.create({
   peopleSub: { color: color.muted, fontSize: 12, lineHeight: 16, marginTop: 4 },
   filterTrigger: { paddingHorizontal: 4, paddingVertical: 4 },
   filterTriggerText: { color: color.muted, fontSize: 13, fontWeight: "600" },
-  // HOME-I18N-001：原型 .icon-btn-header 是个 40×40 的圆、#f5f5f5 底、无描边、
-  // 字 14/800。这里底色走 token color.offWhite（跟筛选 chip 同一个底）。
-  langBtn: {
-    alignItems: "center",
-    backgroundColor: color.offWhite,
-    borderRadius: 999,
-    height: 40,
-    justifyContent: "center",
-    marginRight: 8,
-    width: 40
-  },
-  langBtnText: { color: color.ink, fontSize: 14, fontWeight: "800" },
 
   // R15.34: stories 横滑
   stories: { marginHorizontal: -16 },
@@ -1919,7 +2029,9 @@ const styles = StyleSheet.create({
   // 的样子 —— 无边框、#f5f5f5 底、13px/600，选中转**深色**（#1a1a1a + 白字），
   // 不再是之前的 lime 高亮 + 可见描边。原型里 4 个 chip 共用同一条规则，
   // 所以这里改的是整行，不是单独某一个 —— 否则一行里两种 chip 长相会显得坏掉。
-  filterChips: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  filterChips: { alignItems: "center", flexDirection: "row", gap: 8 },
+  filterChipScroll: { flex: 1 },
+  filterChipScrollContent: { alignItems: "center", gap: 8 },
   filterChip: { backgroundColor: color.offWhite, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 },
   filterChipOn: { backgroundColor: color.ink },
   filterChipText: { color: color.ink, fontSize: 13, fontWeight: "600" },
@@ -1940,8 +2052,6 @@ const styles = StyleSheet.create({
   distanceTrack: { flexDirection: "row", gap: 4, marginTop: 10 },
   distanceSeg: { backgroundColor: color.line, borderRadius: 999, flex: 1, height: 6 },
   distanceSegOn: { backgroundColor: color.ink },
-  createRoomBtn: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9 },
-  createRoomBtnText: { color: color.white, fontSize: 13, fontWeight: "800" },
   // HOME-MORE-BTN-TAP-001（2026-09-22 教训）：这一行是 flexWrap 容器，之前
   // "创建房间"按钮用 marginLeft:"auto" 撞过一次点击不生效（真根因后来查出来是
   // 两个 Modal 同时 visible，但没验证过 auto margin 是否也有份）——保险起见，
@@ -1976,6 +2086,36 @@ const styles = StyleSheet.create({
   moreActionBtn: { borderColor: color.ink, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 7 },
   moreActionBtnText: { color: color.ink, fontSize: 12, fontWeight: "700" },
   moreEmpty: { color: color.muted, fontSize: 12, paddingVertical: 16, textAlign: "center" },
+  // HOME-MORE-ROOMS-001：照 deepseek_html_20260923_2308b7.html 的 .create-room-card /
+  // .room-card。原型 10px 的小字统一抬到 11（design-system-r3 下限）。
+  roomCreateCard: { backgroundColor: color.ink, borderRadius: 20, marginBottom: 20, marginTop: 4, overflow: "hidden", padding: 20 },
+  roomCreateCardPressed: { transform: [{ scale: 0.985 }] },
+  roomCreateTop: { alignItems: "center", flexDirection: "row", gap: 12, marginBottom: 16 },
+  roomCreateIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderColor: "rgba(255,255,255,0.15)", borderRadius: 14, borderWidth: 1, height: 44, justifyContent: "center", width: 44 },
+  roomCreateIconText: { fontSize: 22 },
+  roomCreateTitle: { color: color.white, fontSize: 16, fontWeight: "800", letterSpacing: -0.2, marginBottom: 3 },
+  roomCreateDesc: { color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: "500" },
+  roomCreateRow: { flexDirection: "row", gap: 8 },
+  roomCreateScene: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.1)", borderRadius: 12, borderWidth: 1, flex: 1, gap: 4, paddingHorizontal: 6, paddingVertical: 12 },
+  roomCreateSceneEmoji: { fontSize: 18 },
+  roomCreateSceneLabel: { color: "rgba(255,255,255,0.75)", fontSize: 11, fontWeight: "600" },
+  roomSectionHead: { alignItems: "center", flexDirection: "row", gap: 6, marginBottom: 12 },
+  roomSectionTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  roomSectionCount: { backgroundColor: color.offWhite, borderRadius: 8, color: color.muted, fontSize: 11, fontWeight: "700", overflow: "hidden", paddingHorizontal: 7, paddingVertical: 2 },
+  roomCard: { alignItems: "flex-start", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginBottom: 12, padding: 14 },
+  roomCardPressed: { backgroundColor: color.offWhite },
+  roomCover: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 16, height: 60, justifyContent: "center", width: 60 },
+  roomCoverEmoji: { fontSize: 28 },
+  roomBody: { flex: 1, gap: 5, minWidth: 0 },
+  roomTop: { alignItems: "center", flexDirection: "row", gap: 8 },
+  roomName: { color: color.ink, flex: 1, fontSize: 14.5, fontWeight: "800", letterSpacing: -0.2, minWidth: 0 },
+  roomUnread: { backgroundColor: color.ink, borderRadius: 8, color: color.white, fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 7, paddingVertical: 2 },
+  roomMeta: { color: color.muted, fontSize: 12, fontWeight: "500" },
+  roomLatest: { color: color.ink, fontSize: 12, fontWeight: "500" },
+  roomFooter: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 2 },
+  roomMembersText: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  roomEnterBtn: { backgroundColor: color.ink, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 7 },
+  roomEnterBtnText: { color: color.white, fontSize: 12, fontWeight: "800" },
   icebreakerHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 14 },
   icebreakerClose: { color: color.muted, fontSize: 18, paddingHorizontal: 6 },
   icebreakerItem: { alignItems: "center", backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 12, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginBottom: 10, padding: 14 },

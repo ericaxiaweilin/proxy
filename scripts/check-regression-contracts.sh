@@ -8597,12 +8597,13 @@ pnpm --dir apps/mobile exec vitest run src/person-distance-zero.test.ts || exit 
 echo "    HOME-MORE-DIST-001: PASS (distance is a real selectable radius, and an unknown distance is still not 'nearby')"
 
 # HOME-I18N-001（2026-09-22，用户：「原型是给你参考的 你肯定要改好 语言要支持选择」）：
-# 首页真人推荐页头那个「中」按钮 + 选择语言面板。
+# 「更多」整页的「中文」chip（原在首页页头，HOME-I18N-002 挪过去）+ 选择语言面板。
 #
 # 这条钉的不是"有没有那个按钮"，是**按钮按下去语言真的换、而且换完还在**：
-#   ① 按钮显示的是**当前**语言的短标（写死「中」= 换完不更新，按钮在骗人）；
-#   ② 面板挂在首页最外层，不在「更多」那个全屏 Modal 里（iOS 一次只呈现一个
-#      Modal，嵌进去会被无声吞掉，点了不弹 —— HOME-MORE-SHEET-004 的同一个坑）；
+#   ① chip 显示的是**当前**语言的本名（写死「中文」= 换完不更新，chip 在骗人）；
+#   ② 入口是「更多」整页的「中文」chip（HOME-I18N-002），面板以 overlay 叠在
+#      那个全屏 Modal 里（iOS 一次只呈现一个 Modal，嵌第二个会被无声吞掉，点了不弹
+#      —— HOME-MORE-SHEET-004 的同一个坑）；
 #   ③ 选择要落盘（pref_language）、冷启动要读回来（loadPreferences），
 #      否则"选了老挝语、重启回中文"—— 看着能选，其实没生效；
 #   ④ 校验器必须是白名单（isLanguage），不能退回只认字面量 "vi"/"en"：
@@ -8615,40 +8616,46 @@ I18N_SHEET=apps/mobile/src/components/language-sheet.tsx
 I18N_PREFS=apps/mobile/src/preferences.ts
 I18N_SRC=apps/mobile/src/i18n.ts
 
-# ① 页头按钮：存在、显示当前语言短标、且排在「更多」前面（跟原型同位置）。
-if ! grep -qF 'accessibilityLabel={t("language")}' "$I18N_HOME"; then
-  echo "  FAIL [HOME-I18N-001]: 页头没有语言按钮（或没接 t(\"language\")）。" >&2
+# ① 入口在「更多」整页的「中文」chip，不在首页页头（HOME-I18N-002，2026-09-23 用户：
+#    「多语言筛选按钮做在 home 这个不对 应该做在已有的更多-中文按钮」）。
+if grep -qF 'accessibilityLabel={t("language")}' "$I18N_HOME" || grep -qF '{appLangOption.short}' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-002]: 首页页头又长出了语言按钮 —— 入口只在「更多」的「中文」chip。" >&2
   exit 1
 fi
-if ! grep -qF '{appLangOption.short}' "$I18N_HOME"; then
-  echo "  FAIL [HOME-I18N-001]: 按钮不显示当前语言短标 —— 写死「中」的话，" >&2
-  echo "        切到 VI/EN 之后按钮还在说「中」，是按钮在骗人。" >&2
+lang_chip=$(grep -nF 'if (chip.id === "lang_zh") {' "$I18N_HOME" | head -1 | cut -d: -f1)
+if [ -z "$lang_chip" ]; then
+  echo "  FAIL [HOME-I18N-002]: 「更多」里的「中文」chip 不再是语言入口。" >&2
   exit 1
 fi
-lang_line=$(grep -nF 'accessibilityLabel={t("language")}' "$I18N_HOME" | head -1 | cut -d: -f1)
-more_line=$(grep -nF 'accessibilityLabel={t("more")}' "$I18N_HOME" | head -1 | cut -d: -f1)
-if [ -z "$lang_line" ] || [ -z "$more_line" ] || [ "$lang_line" -ge "$more_line" ]; then
-  echo "  FAIL [HOME-I18N-001]: 语言按钮不在「更多」前面（原型是标题右侧并排）。" >&2
+lang_chip_body=$(sed -n "${lang_chip},$((lang_chip + 14))p" "$I18N_HOME")
+if ! grep -qF 'onPress={() => setLanguageSheetOpen(true)}' <<<"$lang_chip_body" ||
+   ! grep -qF '{appLangOption.name}' <<<"$lang_chip_body"; then
+  echo "  FAIL [HOME-I18N-002]: 「中文」chip 没有打开语言面板，或没显示**当前**语言本名 ——" >&2
+  echo "        写死「中文」的话，切到 Tiếng Việt 之后 chip 还在说「中文」，是 chip 在骗人。" >&2
   exit 1
 fi
 
-# ② 面板挂载在首页最外层：从「更多」Modal 打开到 LanguageSheet 之间必须已经
-#    出现 </Modal>，否则就是被嵌进了「更多」里面 —— 点了不会弹。
-if ! grep -qF '<LanguageSheet visible={languageSheetOpen}' "$I18N_HOME"; then
-  echo "  FAIL [HOME-I18N-001]: 首页没有挂载 LanguageSheet。" >&2
+# ② 面板在「更多」整页 Modal **里面**，而且必须是 overlay 形态：iOS 一次只呈现一个
+#    Modal，嵌第二个会被无声吞掉（HOME-MORE-SHEET-004 的同一个坑）。
+if ! grep -qF '<LanguageSheet presentation="overlay" visible={languageSheetOpen}' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-002]: 「更多」页里没有以 overlay 形态挂 LanguageSheet。" >&2
+  exit 1
+fi
+if grep -F '<LanguageSheet ' "$I18N_HOME" | grep -vqF 'presentation="overlay"'; then
+  echo "  FAIL [HOME-I18N-002]: 首页还有一个 Modal 形态的 LanguageSheet —— 它跟「更多」" >&2
+  echo "        整页 Modal 同时 present 会被吞，入口也应该只有一个。" >&2
   exit 1
 fi
 more_open=$(grep -nF 'visible={filterSheetOpen}' "$I18N_HOME" | head -1 | cut -d: -f1)
-sheet_mount=$(grep -nF '<LanguageSheet visible={languageSheetOpen}' "$I18N_HOME" | head -1 | cut -d: -f1)
-if [ -z "$more_open" ] || [ -z "$sheet_mount" ] || [ "$more_open" -ge "$sheet_mount" ]; then
-  echo "  FAIL [HOME-I18N-001]: LanguageSheet 的位置跟「更多」Modal 对不上，" >&2
-  echo "        无法确认它是顶层挂载（可能被挪进 Modal 里了）。" >&2
+sheet_mount=$(grep -nF '<LanguageSheet presentation="overlay"' "$I18N_HOME" | head -1 | cut -d: -f1)
+if [ -z "$more_open" ] || [ -z "$sheet_mount" ] || [ "$more_open" -ge "$sheet_mount" ] ||
+   awk -v a="$more_open" -v b="$sheet_mount" 'NR>a && NR<b' "$I18N_HOME" | grep -qF '</Modal>'; then
+  echo "  FAIL [HOME-I18N-002]: overlay 面板不在「更多」整页 Modal 内部 —— 在外面的话" >&2
+  echo "        它会被全屏 Modal 盖住，点 chip 看不到面板。" >&2
   exit 1
 fi
-if ! awk -v a="$more_open" -v b="$sheet_mount" 'NR>a && NR<b' "$I18N_HOME" | grep -qF '</Modal>'; then
-  echo "  FAIL [HOME-I18N-001]: LanguageSheet 被嵌进了「更多」整页 Modal 内部 ——" >&2
-  echo "        iOS 一次只呈现一个 Modal，第二个会被无声吞掉（点按钮不弹）。" >&2
-  echo "        要放进去必须先改成普通 View 覆盖层（见 HOME-MORE-SHEET-004）。" >&2
+if ! grep -qF 'if (presentation === "overlay") return visible ? body : null;' "$I18N_SHEET"; then
+  echo "  FAIL [HOME-I18N-002]: LanguageSheet 的 overlay 形态又包回了 Modal。" >&2
   exit 1
 fi
 
@@ -8740,3 +8747,38 @@ echo "    HOME-I18N-001: PASS (every language round-trips through pref_language)
 # 首页的文案契约跟着一起验 —— 那些断言是按 t() 键钉的，键名漂了会红。
 pnpm --dir apps/mobile exec vitest run src/requester-home-discovery-contract.test.ts || exit $?
 echo "    HOME-I18N-001: PASS (home copy still resolves through the same keys)"
+
+# HOME-MORE-ROOMS-001（2026-09-23，原型 deepseek_html_20260923_2308b7.html，用户：
+# 「聊天房点击 list 直接弹出已有的房和创建房卡片 目前的不对」）：
+# 「更多」整页的「聊天房」chip 是本页的视图切换 —— 列表换成「开房大卡 + 正在进行的房间」，
+# 不是直接跳创建页。房间只认服务端真实的 GROUP 会话（带 roomScene），读失败和
+# 没有房分开说；开创建页 / 进房前先关掉「更多」Modal（iOS 只呈现一个 Modal）。
+ROOMS_HOME=apps/mobile/src/surfaces/requester-home.tsx
+ROOMS_SHELL=apps/mobile/src/shell/app-shell.tsx
+if ! grep -qF 'setMoreMode("rooms");' "$ROOMS_HOME" || ! grep -qF '{moreMode === "rooms" ? (' "$ROOMS_HOME"; then
+  echo "  FAIL [HOME-MORE-ROOMS-001]: 「聊天房」chip 不再切到房间列表视图。" >&2
+  exit 1
+fi
+chip_line=$(grep -nF 'accessibilityLabel={t("chipChatRoom")}' "$ROOMS_HOME" | head -1 | cut -d: -f1)
+if [ -z "$chip_line" ] || sed -n "${chip_line},$((chip_line + 10))p" "$ROOMS_HOME" | grep -qF 'onOpenRoomCreate'; then
+  echo "  FAIL [HOME-MORE-ROOMS-001]: 「聊天房」chip 又直接跳创建页了 —— 原型是先看到已有的房 + 开房大卡。" >&2
+  exit 1
+fi
+if ! grep -qF 'item.conversation.conversationType === "GROUP" && item.conversation.roomScene !== undefined' "$ROOMS_HOME"; then
+  echo "  FAIL [HOME-MORE-ROOMS-001]: 房间列表不再只认真实的 GROUP + roomScene 会话。" >&2
+  exit 1
+fi
+if ! grep -qF 't("roomsLoadFailed")' "$ROOMS_HOME" || ! grep -qF 't("roomsEmpty")' "$ROOMS_HOME"; then
+  echo "  FAIL [HOME-MORE-ROOMS-001]: 读失败和没有房不再分开说。" >&2
+  exit 1
+fi
+if ! grep -qF 'setFilterSheetOpen(false);
+                    onOpenRoom(item.conversation.conversationId);' "$ROOMS_HOME"; then
+  echo "  FAIL [HOME-MORE-ROOMS-001]: 进房前没先关「更多」Modal —— 房间 Modal 会被无声吞掉。" >&2
+  exit 1
+fi
+if ! grep -qF 'loadRooms={() => conversation.listConversations()}' "$ROOMS_SHELL" || ! grep -qF 'onOpenRoom={setRoomChatId}' "$ROOMS_SHELL"; then
+  echo "  FAIL [HOME-MORE-ROOMS-001]: app-shell 没把房间读取 / 进房接进首页。" >&2
+  exit 1
+fi
+echo "    HOME-MORE-ROOMS-001: PASS (聊天房 shows the create card and my real rooms; entering a room closes the more page first)"

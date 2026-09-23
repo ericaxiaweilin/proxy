@@ -211,6 +211,8 @@ export function AppShell({
   // messageChat（房间是 GROUP + 场景，跟 1:1 对话的展示/交互不是一回事，
   // 见 room-create.tsx / room.tsx 顶部注释）。
   const [roomCreateCandidates, setRoomCreateCandidates] = useState<ReadonlyArray<RecommendPerson>>();
+  // HOME-MORE-ROOMS-001: 开房大卡上点的场景（SCENE_OPTIONS 下标）。
+  const [roomCreateSceneIndex, setRoomCreateSceneIndex] = useState<number>(0);
   const [roomChatId, setRoomChatId] = useState<string>();
   const [openAIProfile, setOpenAIProfile] = useState<PlatformAIAccount>();
   const [openHumanProfile, setOpenHumanProfile] = useState<OtherProfileTarget>();
@@ -818,7 +820,9 @@ export function AppShell({
                 setPageOverride("MSG_CHAT");
                 setTab("MESSAGES");
               }}
-              onOpenRoomCreate={setRoomCreateCandidates}
+              onOpenRoomCreate={(candidates, sceneIndex) => { setRoomCreateSceneIndex(sceneIndex ?? 0); setRoomCreateCandidates(candidates); }}
+              loadRooms={() => conversation.listConversations()}
+              onOpenRoom={setRoomChatId}
               onCreateScene={setSceneComposerTool}
               // SCENE-MAP-DEFAULT-001（2026-09-20）：无参数时以前硬编码跳
               // "threebeans"，把"打开附近场景地图"这个入口悄悄变成"直达
@@ -995,6 +999,7 @@ export function AppShell({
         />
         <RoomCreateSurface
           candidates={roomCreateCandidates ?? []}
+          initialSceneIndex={roomCreateSceneIndex}
           conversationClient={conversation}
           onClose={() => setRoomCreateCandidates(undefined)}
           onCreated={(conversationId) => { setRoomCreateCandidates(undefined); setRoomChatId(conversationId); }}

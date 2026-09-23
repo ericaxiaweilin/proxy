@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,7 +18,10 @@ import { color, foundation } from "../theme";
 //
 // 没有 AI 场控员（原型里的"小助手"）——那需要真实 AI agent 编排，本轮不做。
 
-const SCENE_OPTIONS: ReadonlyArray<{ emoji: string; sceneName: string; sceneDesc: string; roomName: string; title: string; subtitle: string }> = [
+// HOME-MORE-ROOMS-001：首页「更多 → 聊天房」的开房大卡直接复用这张表的前 4 项
+// 做场景快捷入口（原型 deepseek_html_20260923_2308b7.html 的 create-scene-chip），
+// 点哪个就带着哪个场景打开本页 —— 两边共用一张表，场景不会对不上。
+export const SCENE_OPTIONS: ReadonlyArray<{ emoji: string; sceneName: string; sceneDesc: string; roomName: string; title: string; subtitle: string }> = [
   { emoji: "📷", sceneName: "City Walk + 拍照", sceneDesc: "老城区", roomName: "City Walk 拍照局", title: "City Walk", subtitle: "+ 拍照" },
   { emoji: "☕", sceneName: "咖啡 + 聊天", sceneDesc: "咖啡店", roomName: "咖啡聊天局", title: "咖啡", subtitle: "+ 聊天" },
   { emoji: "🖼️", sceneName: "一起看展", sceneDesc: "美术馆", roomName: "一起看展", title: "看展", subtitle: "+ 讲解" },
@@ -26,8 +29,10 @@ const SCENE_OPTIONS: ReadonlyArray<{ emoji: string; sceneName: string; sceneDesc
   { emoji: "💬", sceneName: "随便聊聊", sceneDesc: "无固定活动", roomName: "随便聊聊", title: "随便聊聊", subtitle: "无固定活动" },
 ];
 
-export function RoomCreateSurface({ candidates, conversationClient, visible, onClose, onCreated }: {
+export function RoomCreateSurface({ candidates, conversationClient, initialSceneIndex = 0, visible, onClose, onCreated }: {
   candidates: ReadonlyArray<RecommendPerson>;
+  // 从开房大卡的场景 chip 进来时预选的场景（SCENE_OPTIONS 下标）。
+  initialSceneIndex?: number;
   conversationClient: ConversationClient;
   visible: boolean;
   onClose: () => void;
@@ -40,6 +45,12 @@ export function RoomCreateSurface({ candidates, conversationClient, visible, onC
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string>();
+
+  // 每次打开都按入口预选场景；用户已经改过房名就不覆盖（pickScene 的同一条规则）。
+  useEffect(() => {
+    if (visible && SCENE_OPTIONS[initialSceneIndex]) pickScene(initialSceneIndex);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, initialSceneIndex]);
 
   const scene = SCENE_OPTIONS[sceneIndex]!;
   // 只留有服务端账号的候选人（见文件头注释）；同 id 去重（不同场景 feed 可能重复出现同一个人）。

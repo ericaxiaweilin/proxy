@@ -12,10 +12,12 @@
 // 2. **选中底用的是 token `color.stateInfoBg`（#F1F7FF）**，不是原型的字面
 //    量 #f0f4ff —— 两者几乎同色，但走 token 才跟主题一起变。
 //
-// 这是一个 **Modal**，不是内嵌覆盖层：它挂在首页（不在任何 Modal 里），
-// 所以没有「更多」整页那种 iOS 嵌套 Modal 被吞的问题（见 requester-home.tsx
-// 的 HOME-MORE-SHEET-004）。如果以后要把它挂进「更多」页内部，必须先改成
-// 普通 View 覆盖层，否则点了不会弹。
+// HOME-I18N-002（2026-09-23，用户：「多语言筛选按钮做在 home 这个不对 应该做在
+// 已有的更多-中文按钮」）：入口从首页页头挪到「更多」整页那个「中文」chip。
+// 「更多」整页本身是一个全屏 Modal，iOS 一次只呈现一个 Modal，嵌第二个会被
+// 无声吞掉（HOME-MORE-SHEET-004 踩过的坑）—— 所以这里多一个
+// `presentation="overlay"`：不包 Modal，直接渲染一层 absolute 铺满的 View，
+// 叠在调用方所在的 Modal 里面。默认仍是 "modal"，给不在任何 Modal 里的调用方用。
 
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { color } from "../theme";
@@ -24,11 +26,13 @@ import { saveLanguage } from "../preferences";
 
 export function LanguageSheet({
   visible,
-  onClose
+  onClose,
+  presentation = "modal"
 }: {
   visible: boolean;
   onClose: () => void;
-}): React.JSX.Element {
+  presentation?: "modal" | "overlay";
+}): React.JSX.Element | null {
   const { lang, t, setLanguage } = useI18n();
 
   function choose(code: Language): void {
@@ -39,38 +43,43 @@ export function LanguageSheet({
     onClose();
   }
 
+  const body = (
+    <Pressable accessibilityLabel={t("cancel")} onPress={onClose} style={styles.backdrop}>
+      {/* onStartShouldSetResponder 挡住"点面板本身也关掉"的冒泡 */}
+      <View onStartShouldSetResponder={() => true} style={styles.sheet}>
+        <View style={styles.grab} />
+        <View style={styles.header}>
+          <Text style={styles.title}>{t("selectLanguage")}</Text>
+        </View>
+        <View style={styles.list}>
+          {LANGUAGES.map((option) => {
+            const on = option.code === lang;
+            return (
+              <Pressable
+                key={option.code}
+                accessibilityLabel={`${option.name} / ${option.english}${on ? t("selectedSuffix") : ""}`}
+                accessibilityState={{ selected: on }}
+                onPress={() => choose(option.code)}
+                style={[styles.item, on && styles.itemOn]}
+              >
+                <Text style={styles.flag}>{option.flag}</Text>
+                <View style={styles.info}>
+                  <Text style={styles.name}>{option.name}</Text>
+                  <Text style={styles.native}>{option.english}</Text>
+                </View>
+                {on ? <Text style={styles.check}>✓</Text> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    </Pressable>
+  );
+
+  if (presentation === "overlay") return visible ? body : null;
   return (
     <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
-      <Pressable accessibilityLabel={t("cancel")} onPress={onClose} style={styles.backdrop}>
-        {/* onStartShouldSetResponder 挡住"点面板本身也关掉"的冒泡 */}
-        <View onStartShouldSetResponder={() => true} style={styles.sheet}>
-          <View style={styles.grab} />
-          <View style={styles.header}>
-            <Text style={styles.title}>{t("selectLanguage")}</Text>
-          </View>
-          <View style={styles.list}>
-            {LANGUAGES.map((option) => {
-              const on = option.code === lang;
-              return (
-                <Pressable
-                  key={option.code}
-                  accessibilityLabel={`${option.name} / ${option.english}${on ? t("selectedSuffix") : ""}`}
-                  accessibilityState={{ selected: on }}
-                  onPress={() => choose(option.code)}
-                  style={[styles.item, on && styles.itemOn]}
-                >
-                  <Text style={styles.flag}>{option.flag}</Text>
-                  <View style={styles.info}>
-                    <Text style={styles.name}>{option.name}</Text>
-                    <Text style={styles.native}>{option.english}</Text>
-                  </View>
-                  {on ? <Text style={styles.check}>✓</Text> : null}
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      </Pressable>
+      {body}
     </Modal>
   );
 }
