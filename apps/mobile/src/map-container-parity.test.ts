@@ -52,8 +52,8 @@ describe("MAP-CONTAINER-PARITY-001", () => {
     // MAP-FOOTPRINT-LOGO-001：市场头部去地图的切换按钮用原型折叠地图，
     // 不再用通用 route；定位按钮（map-canvas 内）保持 route 不动。
     expect(market).toContain('name={view === "MAP" ? "storeLines" : "mapFold"}');
-    // 48 栅格原画显小一圈：mapFold 用 22 跟旁边的 + 号（18）视觉对齐。
-    expect(market).toContain('size={view === "MAP" ? 18 : 22}');
+    // 48 栅格原画显小一圈：mapFold 用 26，比旁边的 + 号（18）大一圈。
+    expect(market).toContain('size={view === "MAP" ? 18 : 26}');
     expect(canvas).toContain('name="route"');
     const icon = readFileSync(
       fileURLToPath(new URL("./components/proxy-icon.tsx", import.meta.url)),

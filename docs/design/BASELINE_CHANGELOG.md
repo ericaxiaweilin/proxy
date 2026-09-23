@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 264 — 2026-09-23
+
+- **折叠地图 logo 放大 + 首页入口同步**（MAP-FOOTPRINT-LOGO-001 跟进）：用户：
+  「把地图 logo 做大一点」「home 首页的地图 logo 也要换这个」。
+  - 市场切换按钮 `mapFold` 用到 26，比 + 号（18）大一圈。
+  - 首页 `LocationContext`「打开场景地图」入口同步换 `mapFold`（27 小格里
+    用 21，等效原来 route 17 的分量）。
+- 影响文件：`apps/mobile/src/surfaces/market.tsx`、`apps/mobile/src/shell/app-shell.tsx`。
+
 ## Revision 263 — 2026-09-23
 
 - **折叠地图 logo 视觉对齐**（MAP-FOOTPRINT-LOGO-001 跟进）：48 栅格原画占盒

@@ -52,6 +52,14 @@ describe("app shell guest path", () => {
     expect(handler).toContain("setRealitySceneSelection(sceneId);");
     expect(handler).not.toContain("threebeans");
   });
+
+  it("MAP-FOOTPRINT-LOGO-001: home scene-map entry uses the 折叠地图 logo", () => {
+    const source = readFileSync(new URL("./app-shell.tsx", import.meta.url), "utf8");
+    const pin = source.match(/<View style=\{styles\.locationPin\}>[\s\S]*?<\/View>/)?.[0] ?? "";
+    expect(pin, "locationPin should exist").not.toBe("");
+    expect(pin).toContain('name="mapFold"');
+    expect(pin).not.toContain('name="route"');
+  });
 });
 
 describe("app shell scroll chrome ownership", () => {

@@ -1164,7 +1164,9 @@ function LocationContext({
       style={({ pressed }) => [styles.locationMain, pressed && styles.locationRowPressed]}
     >
       <View style={styles.locationPin}>
-        <ProxyIcon color={color.ink} name="route" size={17} />
+        {/* MAP-FOOTPRINT-LOGO-001：首页场景地图入口用原型「折叠地图」logo。
+            27 小格里用 21（48 栅格原画显小一圈，等效原来 route 17 的分量）。 */}
+        <ProxyIcon color={color.ink} name="mapFold" size={21} />
       </View>
       <View style={styles.locationCopy}>
         <Text numberOfLines={2} style={styles.locationCity}>{formatLocationTitle(location)}</Text>
