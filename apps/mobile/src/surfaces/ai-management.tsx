@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Circle, Defs, Line, LinearGradient, Path, RadialGradient, Rect, Stop, Svg, SvgXml } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AiEngineClient, type AiEngineSettings, type AiPermission, type SecureSessionStoreLike } from "../ai-engine-client";
@@ -729,7 +729,7 @@ function ImageSheet({ toast, visible, tab, onTab, settings, patch, showToast, im
                       <Text style={styles.cameraName}>{item.name}</Text>
                       <Text style={[styles.cameraDesc, selected && styles.cameraDescSelected]}>{item.desc}</Text>
                     </View>
-                    <View style={[styles.motionBar, (selected || item.id === "static") && styles.motionBarOn]} />
+                    <MotionBar kind={item.id} selected={selected} />
                   </Pressable>
                 );
               })}
@@ -802,6 +802,55 @@ function ImageSheet({ toast, visible, tab, onTab, settings, patch, showToast, im
   );
 }
 
+
+// 原型 .camera-motion-bar：运镜卡底部 3px 的方向条，按运镜类型循环动画（2s ease-in-out，
+// 0%/100% ↔ 50% 两个关键帧）。static 是一条不动的深色条；选中的卡条变深色。
+//   push  translateX(-100%) scaleX(.3) ↔ translateX(100%) scaleX(1)   —— 从左推到右、越推越长
+//   pull  translateX(100%)  scaleX(.3) ↔ translateX(-100%) scaleX(1)  —— 反向
+//   pan   translateX(-50%)  scaleX(.5) ↔ translateX(50%)  scaleX(.5)  —— 左右平扫
+//   track translateX(-30%)  scaleX(.4) ↔ translateX(30%)  scaleX(.4)  —— 小幅跟随
+//   crane translateY(0)     scaleY(1)  ↔ translateY(-4)   scaleY(.5)  —— 上下升降
+// 百分比是相对条本身的宽度，所以要先量出宽度（onLayout）。
+type MotionFrames = { x: [number, number]; sx: [number, number]; y: [number, number]; sy: [number, number] };
+const MOTION_FRAMES: Readonly<Record<string, MotionFrames>> = {
+  push: { x: [-1, 1], sx: [0.3, 1], y: [0, 0], sy: [1, 1] },
+  pull: { x: [1, -1], sx: [0.3, 1], y: [0, 0], sy: [1, 1] },
+  pan: { x: [-0.5, 0.5], sx: [0.5, 0.5], y: [0, 0], sy: [1, 1] },
+  track: { x: [-0.3, 0.3], sx: [0.4, 0.4], y: [0, 0], sy: [1, 1] },
+  crane: { x: [0, 0], sx: [1, 1], y: [0, -4], sy: [1, 0.5] },
+};
+
+function MotionBar({ kind, selected }: { kind: string; selected: boolean }): React.JSX.Element {
+  const frames = MOTION_FRAMES[kind];
+  const progress = useRef(new Animated.Value(0)).current;
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!frames) return undefined;
+    const half = { duration: 1000, easing: Easing.inOut(Easing.ease), useNativeDriver: true };
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(progress, { ...half, toValue: 1 }),
+      Animated.timing(progress, { ...half, toValue: 0 }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [frames, progress]);
+  const dark = selected || kind === "static";
+  if (!frames) return <View style={[styles.motionBar, dark && styles.motionBarOn]} />;
+  const range = (pair: [number, number], scale = 1) => progress.interpolate({ inputRange: [0, 1], outputRange: [pair[0] * scale, pair[1] * scale] });
+  return (
+    <Animated.View
+      onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
+      style={[styles.motionBar, dark && styles.motionBarOn, {
+        transform: [
+          { translateX: range(frames.x, width) },
+          { translateY: range(frames.y) },
+          { scaleX: range(frames.sx) },
+          { scaleY: range(frames.sy) },
+        ],
+      }]}
+    />
+  );
+}
 
 // ---------------------------------------------------------------- 动态管理
 

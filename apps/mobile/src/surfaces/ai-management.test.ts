@@ -74,6 +74,13 @@ describe("AI management surface (AI-MANAGE-003)", () => {
     expect(surface).toContain("<Image source={getAiScenePhoto(item.id) ?? null}");
   });
 
+  it("animates the camera-move bars like the prototype (AI-MANAGE-006)", () => {
+    // 原型 .camera-motion-bar：push / pull / pan / track / crane 循环动画，static 静止深色。
+    for (const kind of ["push", "pull", "pan", "track", "crane"]) expect(surface).toMatch(new RegExp(`\\n  ${kind}: \\{ x: `));
+    expect(surface).toContain("<MotionBar kind={item.id} selected={selected} />");
+    expect(surface).toContain("Animated.loop(Animated.sequence([");
+  });
+
   it("saves every choice to the server optimistically and reverts on failure", () => {
     expect(surface).toContain("engineClient.write(next).catch(");
     expect(surface).toContain('showToast("没保存成功，已恢复")');
