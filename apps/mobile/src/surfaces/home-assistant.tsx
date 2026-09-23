@@ -10,6 +10,9 @@ import { color, shadows } from "../theme";
 import type { MarketTab } from "../market-fixtures";
 import { ExperienceSurfaceBanner } from "../experience-runtime/ExperienceSurfaceBanner";
 import type { SurfacePlan, UISchema } from "@proxy/contracts";
+// COMP-AI-MINOR-001（聊天侧）：assistantStatus 的联合类型在 contracts 里 ——
+// GATED 必须有自己的文案，不能落进下面的 return undefined 变成沉默。
+import { parseAssistantStatus } from "@proxy/contracts";
 import { useKeyboardSafeInset } from "../components/use-keyboard-safe-inset";
 
 interface AssistantMessage {
@@ -334,8 +337,12 @@ function appendAIReply(payload: Record<string, unknown> | undefined, setMessages
 }
 
 function statusMessage(value: unknown): string | undefined {
-  if (value === "UNAVAILABLE") return "已收到消息，但本地模型服务尚未配置。";
-  if (value === "FAILED") return "已收到消息，但当前模型服务配置或额度不可用；消息已保留，可稍后重试。";
+  const status = parseAssistantStatus(value);
+  if (status === "UNAVAILABLE") return "已收到消息，但本地模型服务尚未配置。";
+  if (status === "FAILED") return "已收到消息，但当前模型服务配置或额度不可用；消息已保留，可稍后重试。";
+  // COMP-AI-MINOR-001（聊天侧）："按规则不提供"和"服务坏了"是两件事。
+  // 说成后者会让用户一直重试一个永远不会成功的东西。
+  if (status === "GATED") return "已收到消息，但 AI 伴侣暂不对该账号开放；重试无效。";
   return undefined;
 }
 

@@ -465,6 +465,17 @@ export class LocalNetClient {
     return result.aggregate.id;
   }
 
+  // AI-TWIN-POST-AUDIENCE-003: 帖文编排的"编辑"就是切这个开关（公开 ⇄
+  // 指定好友），不是重新发一条帖子。服务端只允许作者本人切、只在
+  // PUBLIC/TARGETED 之间切（见 apps/api-go 的 updatePostAudience）。
+  public async updatePostAudience(postId: string, visibility: "PUBLIC" | "TARGETED", audienceTargetIds: string[]): Promise<void> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "UpdatePostAudience", { type: "Post", id: postId }, { postId, visibility, audienceTargetIds });
+    if (result.outcome !== "ACCEPTED") {
+      throw new LocalNetProtocolError(commandErrorMessage(result.error, "受众没改成，请稍后重试。"));
+    }
+  }
+
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
     const session = await this.input.secureSessionStore.read();
     if (!session?.principal) throw new LocalNetProtocolError("an authenticated principal is required");

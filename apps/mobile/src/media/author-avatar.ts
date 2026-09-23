@@ -14,14 +14,24 @@ import { aiPersonaBundledPhoto, avatarPathToInput, resolveAssetSource, type Asse
 // 包），动态这条管线完全没查过它，任何非本人/非 AI 的作者一律落到首字兜底。
 //
 // 这份表是 apps/api-go/internal/mockidentity/identity.go 里
-// CreatorFacetKeys/AccountIDForFacetKey/AvatarAssetIDForFacetKey 三个函数的
-// 客户端镜像（服务端目前没有把作者头像放进 FeedPostSchema，这是短期在客户端
+// CreatorFacetKeys / HomeRailPeople / AccountIDForFacetKey / AvatarAssetIDForFacetKey
+// 的客户端镜像（服务端目前没有把作者头像放进 FeedPostSchema，这是短期在客户端
 // 补的对照表，长期应该是服务端直接把 authorAvatar 下发，不用客户端猜）。
 // recommend-fixtures.ts 的 ACCOUNT_AVATAR_ASSET 是同一份数据的另一份镜像
-// （用首页 fixture id `u_linh` 当 key，覆盖的人也少两个）——真正的账号 id
-// 前缀是 `user_mockcreator_`，跟这里保持一致才能覆盖"这人在动态里发帖"这条路。
+//（用首页 fixture id `u_<key>` 当 key）——真正的账号 id 前缀是 `user_mockcreator_`，
+// 跟这里保持一致才能覆盖"这人在动态里发帖"这条路。
+//
+// HOME-RAIL-ACCOUNT-001（2026-09-23）：rail 上 28 个人现在全部是真实账号，
+// 所以这份表从 9 个键扩到 30 个（Creator 9 + rail 28，去重后 30）。漏一个的
+// 症状就是 AVATAR-OTHER-HUMAN-002 那个老毛病：首页有脸、动态里黑底首字。
+// 三份表（本文件、recommend-fixtures、Go 侧 mockidentity）的一致性由 Go 侧的
+// TestHomeRailFixturePeopleAllHaveServerAccounts 逐条比对钉住。
 const MOCK_CREATOR_ACCOUNT_PREFIX = "user_mockcreator_";
-const MOCK_CREATOR_FACET_KEYS = new Set(["linh", "mai", "an", "thao", "yen", "minh", "trang", "hana", "nam"]);
+const MOCK_CREATOR_FACET_KEYS = new Set([
+  "an", "duc", "duy_khang", "hai", "hana", "hong_anh", "huy", "kien", "khoa", "lan",
+  "linh", "long", "ly", "mai", "minh", "my", "nam", "ngoc", "nhi", "phuong",
+  "phuong_thanh", "quynh_anh", "son", "thao", "thao_nhi", "thu_trang", "trang", "tu", "vy", "yen",
+]);
 
 function mockCreatorAvatarAssetId(authorId: string): string | undefined {
   if (!authorId.startsWith(MOCK_CREATOR_ACCOUNT_PREFIX)) return undefined;

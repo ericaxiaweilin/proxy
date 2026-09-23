@@ -50,6 +50,15 @@ func (s *Server) routePersonaItem(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if strings.HasSuffix(path, "/media") {
+		switch r.Method {
+		case http.MethodGet:
+			s.listPersonaGallery(w, r)
+		default:
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		}
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		s.getPersona(w, r)

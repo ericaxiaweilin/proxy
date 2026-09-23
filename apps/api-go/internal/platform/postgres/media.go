@@ -279,6 +279,69 @@ func (r *MediaRepository) Snapshot(ctx context.Context) ([]media.MediaAsset, err
 	return result, rows.Err()
 }
 
+// AI-TWIN-GALLERY-001: 图库两个 tab 各自的真实查询，SELECT 用 GetAssets 那
+// 一套完整 scan（含 AI 溯源 5 列），不是 Snapshot 那套少 scan 的旧写法。
+func (r *MediaRepository) ListByPersona(ctx context.Context, personaID string) ([]media.MediaAsset, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT `+mediaAssetColumns+`
+		FROM media.media_assets
+		WHERE persona_id = $1 AND processing_status = 'READY'
+		ORDER BY created_at DESC
+		LIMIT 60`, personaID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMediaAssetRows(rows)
+}
+
+func (r *MediaRepository) ListByOwner(ctx context.Context, ownerPrincipalID string) ([]media.MediaAsset, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT `+mediaAssetColumns+`
+		FROM media.media_assets
+		WHERE owner_principal_id = $1 AND processing_status = 'READY'
+		ORDER BY created_at DESC
+		LIMIT 60`, ownerPrincipalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMediaAssetRows(rows)
+}
+
+func scanMediaAssetRows(rows pgx.Rows) ([]media.MediaAsset, error) {
+	result := []media.MediaAsset{}
+	for rows.Next() {
+		var a media.MediaAsset
+		var hintJSON []byte
+		var computedAt *time.Time
+		if err := rows.Scan(
+			&a.MediaAssetID, &a.OwnerPrincipalType, &a.OwnerPrincipalID, &a.MediaType,
+			&a.OriginalStorageKey, &a.PlaybackStorageKey, &a.ThumbnailStorageKey,
+			&a.MimeType, &a.Width, &a.Height, &a.DurationMs, &a.Codec,
+			&a.ProcessingStatus, &a.PlaybackURL, &a.ThumbnailURL, &a.SourceBytes, &a.ChecksumSHA256,
+			&a.Orientation, &a.ColorSpace, &a.HasAlpha, &a.Animated, &a.ModerationStatus, &a.VisibilityClass,
+			&hintJSON, &a.CompositionRecipeVersion, &computedAt, &a.CompositionConfidence,
+			&a.DominantColorHex,
+			&a.AIGenerationSource, &a.AIGenerated,
+			&a.PersonaID, &a.SubjectID, &a.LikenessConsentID,
+			&a.CreatedAt, &a.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		a.CompositionComputedAt = computedAt
+		if len(hintJSON) > 0 {
+			hint, hintErr := decodeCompositionHint(hintJSON)
+			if hintErr != nil {
+				return nil, hintErr
+			}
+			a.CompositionHint = hint
+		}
+		result = append(result, a)
+	}
+	return result, rows.Err()
+}
+
 func (r *MediaRepository) UpsertVariant(ctx context.Context, variant media.MediaVariant) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO media.media_variants (

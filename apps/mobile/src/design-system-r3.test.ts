@@ -52,44 +52,40 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "pillLabel",
   "pillLabelActive",
   "pillSub",
-  // R15.77: R1 HTML 1:1 抄 — AIIdentityShowcaseSurface 是静态 design showcase (3 phone preview,
-  //   mini identity cards), 小屏 8-10pt 是 R1 原版. 跟 personalAvaLetter 同类装饰.
-  "miniPillText", "pTopHandle", "pBadgeText", "pNoticeTitle", "pNoticeBody",
-  "pActionText", "pActionDarkText", "pTabText", "pTabOnText",
-  "pAvatarText", "pAvatarTextAi", "postAvaText", "postAvaTextAi",
-  "postName", "postTime", "postText", "pOrigin", "postActions",
-  // R15.78 的 audit 段已按 AI-CLUSTER-BOUNDARY-001 从 AIIdentityShowcaseSurface
-  //   摘走（活动日志不归 AI 分身），对应的 auditFilterText / auditHeaderCell /
-  //   auditCell 白名单条目一并删除——留着白名单就是给已删的样式留后门。
-  // R15.79: R1 provenance 段 (pipeline + detection sample + signals) — 装饰 8-12pt.
-  "pipeNumText", "pipeStepTitle", "pipeStepSub",
-  "sampleVisualText", "sampleVisualTextAi", "sampleTitle", "sampleSub",
-  "detectResultTitle", "detectResultSub",
-  "signalLabel", "signalHint", "signalValue",
-  "decisionTitle", "decisionSub", "riskPillText",
-  // R15.80: R1 risk 段 (3 risk cards + 5 rules + 6 toggles + reco card).
-  "riskCardTitle", "riskCardSub",
-  "ruleTitle", "ruleReason", "ruleActionText", "ruleOpBtnText",
-  "recoCardTitle", "toggleRowTitle", "toggleRowSub",
-  // R15.81: R1 identity 段 (Account≠Content + 权限矩阵 + 注册链路 + 数据模型 modal).
-  "archBtnText", "identityCardTitle", "identityCardSub", "contentBadgeText",
-  "permHeaderCell", "permCellCap", "permCellText", "permPolicy",
-  "signupBoxKind", "signupBoxSteps",
-  "archTitle", "archSub", "archCode", "archCloseBtnText",
-  // R15.82: R1 native 段 (3 persona + 冷启动 4 toggles + 2 强守门).
-  "personaName", "personaRole", "personaOwner", "personaState",
-  "personaPolicyBtnText", "personaCreateBtnText", "personaAvatarText",
-  "personaBadgeText",
-  "coldCardTitle", "coldCardSub", "coldRowTitle", "coldRowSub",
-  // R15.83: R1 twin 段 (2 Twin + 8 授权 toggles + Human Confirm 3 flow).
-  "confirmBoxTitle", "confirmBoxSub",
-  // R15.84: R1 overview 段 (hero + 4 KPI + 3 identity cards + 3 flow).
-  "heroKickerText", "heroTitle", "heroSub", "heroRulePillText",
-  "heroSideLabel", "heroSideTitle", "heroBoundaryText",
-  "kpiValue", "kpiLabel",
-  "identityBigPillText", "identityBigTitle", "identityBigDesc",
-  "identityBigRowLabel", "identityBigRowValue",
-  "coreFlowTitle", "coreFlowSub"
+  // AI-TWIN-SHOWCASE-STRIP-001（2026-09-21）删过一轮 R1 静态 showcase；
+  // AI-TWIN-SHOWCASE-STRIP-002（2026-09-22，用户对照原型复盘："这些都是
+  // 后端的，并不是做到 app 里的"）删掉了 STRIP-001 留下的「我的分身」
+  // 列表/创建表单/「数据模型」弹层/Human Confirm Gate 说明——原型
+  // （小美 · AI 分身受众调度版）这屏只有图库/帖文编排/好友运营三段，
+  // 没有分身管理或架构说明。对应的 ruleActionText/ruleReason/archSub/
+  // archCode/persona*/coldCardSub/confirmBox* 白名单条目随样式一起删除，
+  // 不留死条目。
+  //
+  // AI-TWIN-SHOWCASE-STRIP-002 裁剪的订正（2026-09-22）：
+  //
+  // 上面那轮按「样式删了就把白名单条目一起删」清掉 86 条 —— 其中 76 条确实是
+  // 死条目（那些删除保留），但另有 5 处 10pt 装饰原本是「蹭」邻近死条目的豁免：
+  // 条目一删就露出来，于是 3 个**本轮完全没碰过**的文件冒出 5 处假红
+  // （business-home ×3 / feed / merchant-me-r21-replacement）。
+  //
+  // 这里不把死条目加回来（那会让白名单里重新出现「为什么它在这」的条目），
+  // 改成**按样式自己的键名列** —— 豁免从此是明写的，也不怕这几个 style 块
+  // 换顺序。逐条对应它豁免的那处 10pt：
+  //   signalLabel           business-home.tsx 信号卡标签
+  //   signalSub             business-home.tsx 信号卡副标签
+  //   inlinePlanEyebrow     business-home.tsx 方案眉标（与 sceneMapEyebrow 同类）
+  //   aiBadge               feed.tsx「AI 生成」徽标（与 aiAuthorBadgeText 同类）
+  //   caption               merchant-me-r21-replacement.tsx —— 见下
+  //
+  // ⚠️ caption 是这 5 条里唯一存疑的：它只有 2 个文件定义成样式，但全仓有 13 个
+  // 文件出现过这个子串（本套豁免是「按名字全局匹配 + 800 字符回看窗口」），
+  // 而且它是个 lineHeight 15 的正文型 caption，不像纯装饰。这里先按「恢复 HEAD
+  // 的绿」列上，但它应该由设计侧复核一次：要么提到 11pt，要么确认它就是装饰。
+  "signalLabel",
+  "signalSub",
+  "inlinePlanEyebrow",
+  "aiBadge",
+  "caption"
 ];
 
 describe("Proxy Design System R3 typography", () => {

@@ -28,6 +28,19 @@ export interface TwinPersona {
   archivedAt?: string;
 }
 
+// AI-TWIN-GALLERY-001: 图库两个 tab 的真实来源——ai 是这个分身生成过的
+// 资产（persona_id 范围），raw 是这个人自己上传、还没被标成 AI 来源的
+// 原始素材（owner 范围，见 GET /v1/ai/personas/{id}/media?source=）。
+export type PersonaGallerySource = "ai" | "raw";
+
+export interface PersonaGalleryItem {
+  id: string;
+  thumbnailUrl: string;
+  playbackUrl?: string;
+  aiGenerationSource: string;
+  createdAt: string;
+}
+
 export type TwinConsentKind = "VISUAL" | "VOICE" | "VISUAL_AND_VOICE";
 
 export interface TwinConsent {
@@ -80,6 +93,15 @@ function isTwinPersona(value: unknown): value is TwinPersona {
     && typeof item.createdAt === "string" && item.createdAt !== "";
 }
 
+function isPersonaGalleryItem(value: unknown): value is PersonaGalleryItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.id === "string" && item.id !== ""
+    && typeof item.thumbnailUrl === "string" && item.thumbnailUrl !== ""
+    && typeof item.aiGenerationSource === "string" && item.aiGenerationSource !== ""
+    && typeof item.createdAt === "string" && item.createdAt !== "";
+}
+
 function isTwinConsent(value: unknown): value is TwinConsent {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
@@ -100,6 +122,25 @@ export class AiPersonaClient {
     const personas = (payload as { personas?: unknown }).personas;
     if (!Array.isArray(personas)) throw new Error("分身列表响应缺少 personas 数组");
     return personas.filter(isTwinPersona);
+  }
+
+  // AI-TWIN-GALLERY-001: 服务端要求登录（跟这个 client 其余大部分方法不
+  // 同——分身列表/consents 目前对未登录也开放，见 aipersona_handlers.go
+  // 的注释）。401/403 翻译成人话，不是让调用方自己猜状态码。
+  public async listGallery(personaId: string, source: PersonaGallerySource): Promise<PersonaGalleryItem[]> {
+    const response = await this.input.authClient.request(
+      `/v1/ai/personas/${encodeURIComponent(personaId)}/media?source=${source}`,
+      { method: "GET" },
+    );
+    const payload = await this.readJson(response, "图库");
+    if (response.status === 401) throw new Error("登录已失效，请重新登录后查看图库。");
+    if (response.status === 403) throw new Error("这个分身不属于当前账号，看不到它的图库。");
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`图库没读出来（${response.status}），请稍后重试。`);
+    }
+    const items = (payload as { items?: unknown }).items;
+    if (!Array.isArray(items)) throw new Error("图库响应缺少 items 数组");
+    return items.filter(isPersonaGalleryItem);
   }
 
   public async createTwin(input: { ownerId: string; displayName: string; description?: string }): Promise<TwinPersona> {

@@ -28,6 +28,7 @@ import { deriveProfileFromIdentifier, NEUTRAL_PROFILE } from "../profile-identit
 import { createLastSignInStore } from "../last-signin-store";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, Memory, RegisteredExperienceRoute } from "@proxy/contracts";
+import type { PersonaGalleryItem } from "../ai-persona-client";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { MerchantMeR21Replacement } from "./merchant-me-r21-replacement";
@@ -591,7 +592,11 @@ export function MeSurface({
       setProfileSearchResults(undefined);
       return;
     }
-    const posts: ProfileSearchHit[] = filterPostsByFeedSearch(profilePosts, q).map((post) => ({
+    // AI-TWIN-POST-AUDIENCE-004: 主页搜索只搜主页展示的帖子，不搜「帖文
+    // 编排」私密副空间的 TARGETED 帖子——否则搜索结果会泄露主页列表里
+    // 看不到的私密帖子存在。
+    const searchablePosts = profilePosts.filter((post) => post.visibility !== "TARGETED");
+    const posts: ProfileSearchHit[] = filterPostsByFeedSearch(searchablePosts, q).map((post) => ({
       kind: "post",
       postId: post.postId,
       body: post.body
@@ -1400,9 +1405,39 @@ export function MeSurface({
       return <SwipeBackShell onExit={() => setSubPage(undefined)}><FacetHomeSurface client={facetClient} onBack={() => setSubPage(undefined)} onOpenAiIdentity={() => openSubPage("aiidentity")} /></SwipeBackShell>;
     }
     if (subPage.route === "aiidentity") {
-      // AI-CLUSTER-BOUNDARY-001: 这一屏只拿分身自己的东西（列表/授权/创建）。
-      // 访问战绩（谁看了我的动态、看了多久）归「好友与关系」，不从这里传进去。
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} onOpenFacet={() => openSubPage("facet")} /></SwipeBackShell>;
+      // AI-TWIN-POST-AUDIENCE-004（2026-09-22，用户纠正："帖文编排拿的是
+      // 公共主页的帖文，没理解对。只能拿主页的图片/视频做原型给 AI 用，
+      // 但不能跟主页的帖文重合"）：profilePosts 混着两类帖子——公开发在
+      // 主页上的、和只想给特定人看的 TARGETED。图库拿这个人公开主页的
+      // 图片/视频当原始素材（rawGalleryItems 只取非 TARGETED 帖子的媒体，
+      // TARGETED 帖子本来就是"私密副空间"的产物，不是主页素材池的一部分）；
+      // 帖文编排管理的是 TARGETED 这一份——跟主页帖子列表（personalhub
+      // 分支的 ProfileTabs）完全不重叠：主页只显示非 TARGETED，帖文编排
+      // 只显示 TARGETED，两边加起来才是 profilePosts 的全集，任何一条
+      // 帖子只会出现在其中一边。
+      const publicHomepagePosts = profilePosts.filter((post) => post.visibility !== "TARGETED");
+      const targetedSpacePosts = profilePosts.filter((post) => post.visibility === "TARGETED");
+      // AI-TWIN-GALLERY-004（2026-09-22，用户反馈"图库没有图"）：服务端
+      // thumbnailUrl/feedUrl/... 都是相对路径，ProfileTabs 全靠
+      // localNet.resolveMediaUrl 拼上服务器地址才能显示——这里漏了这一步，
+      // <Image> 拿着相对路径请求，静默加载失败。
+      const rawGalleryItems: PersonaGalleryItem[] = publicHomepagePosts.flatMap((post) =>
+        (profileMedia[post.postId] ?? [])
+          .filter((item) => item.mediaType === "IMAGE")
+          .map((item): PersonaGalleryItem | undefined => {
+            const rawThumbnailUrl = item.thumbnailUrl ?? item.feedUrl ?? item.galleryUrl ?? item.placeholderUrl;
+            if (!rawThumbnailUrl) return undefined;
+            return {
+              id: item.mediaAssetId,
+              thumbnailUrl: localNet.resolveMediaUrl(rawThumbnailUrl),
+              ...(item.playbackUrl !== undefined ? { playbackUrl: localNet.resolveMediaUrl(item.playbackUrl) } : {}),
+              aiGenerationSource: item.aiGenerationSource ?? "USER_UPLOADED",
+              createdAt: post.createdAt,
+            };
+          })
+          .filter((entry): entry is PersonaGalleryItem => entry !== undefined)
+      );
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} rawGalleryItems={rawGalleryItems} mediaClient={mediaClient} posts={targetedSpacePosts} mediaByPost={profileMedia} relationshipClient={relationshipClient} createPost={(payload) => localNet.createPost(payload)} updatePostAudience={(postId, visibility, audienceTargetIds) => localNet.updatePostAudience(postId, visibility, audienceTargetIds)} onPostPublished={() => setProfilePostsReload((n) => n + 1)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} /></SwipeBackShell>;
     }
     if (subPage.route === "myscenes") {
       async function respond(invitationId: string, decision: "ACCEPTED" | "DECLINED" | "ASK"): Promise<void> {
@@ -2001,7 +2036,12 @@ export function MeSurface({
     }
 
     if (subPage.route === "personalhub") {
-      const personalPhotos = profilePosts.flatMap((post) => (profileMedia[post.postId] ?? []).map((item, index) => ({ item, index, postId: post.postId }))).filter((entry) => entry.item.mediaType === "IMAGE");
+      // AI-TWIN-POST-AUDIENCE-004（2026-09-22）：TARGETED 帖子是「AI 分身 →
+      // 帖文编排」私密副空间的内容，不是这个人公开主页的一部分——主页
+      // （个人主页/ProfileTabs）只显示非 TARGETED 帖子，跟 aiidentity 分支
+      // 的 targetedSpacePosts 互斥，两边不重叠。
+      const personalHubPosts = profilePosts.filter((post) => post.visibility !== "TARGETED");
+      const personalPhotos = personalHubPosts.flatMap((post) => (profileMedia[post.postId] ?? []).map((item, index) => ({ item, index, postId: post.postId }))).filter((entry) => entry.item.mediaType === "IMAGE");
       const viewedItems = profileViewer ? profileMedia[profileViewer.postId] ?? [] : [];
       return contentWrapper(
         <View style={styles.root}>
@@ -2122,7 +2162,7 @@ export function MeSurface({
               profileDraft={profileDraft}
               profileAvatarUri={profileAvatarUri}
               pinnedIds={personalPinnedIds}
-              posts={profilePosts}
+              posts={personalHubPosts}
               mediaByPost={profileMedia}
               photos={personalPhotos}
               replies={personalReplyEntries}
@@ -2132,7 +2172,12 @@ export function MeSurface({
               savedFailed={personalSavedFailed}
               repliesFailed={personalRepliesFailed}
               taggedFailed={personalTaggedFailed}
-              stats={{ posts: profilePostsState === "failed" ? undefined : profilePosts.length, followers: personalFollowCounts?.followers, following: personalFollowCounts?.following }}
+              // PROFILE-POSTS-FAILURE-001: 上面那条横幅只解决了「条数别显示 0」；
+              // 帖子列表本身还是空数组，空态照样写着「还没有动态」—— 同一屏上
+              // 一个说没拉到、一个说你没发过。把失败态也传下去，让它渲染成
+              // 「动态没读出来」而不是「还没有动态」。
+              postsFailed={profilePostsState === "failed"}
+              stats={{ posts: profilePostsState === "failed" ? undefined : personalHubPosts.length, followers: personalFollowCounts?.followers, following: personalFollowCounts?.following }}
               onOpenMedia={(entry) => setProfileViewer(entry)}
               onOpenRealitySceneMap={onOpenRealitySceneMap}
               onOpenScene={(sceneId) => {

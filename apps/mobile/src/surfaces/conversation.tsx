@@ -28,6 +28,9 @@ import { ReportSheet } from "../components/report-sheet";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
 import { useKeyboardSafeInset } from "../components/use-keyboard-safe-inset";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
+// COMP-AI-MINOR-001（聊天侧）：assistantStatus 的联合类型在 contracts 里，
+// 这里不再自己写字符串字面量 —— 服务端加状态时两端一起红，而不是客户端静默漏掉。
+import { parseAssistantStatus } from "@proxy/contracts";
 import { decodeMeetupLocation, meetupDirectionsUrls, meetupMapsUrls, meetupPointFromLocation, type DecodedMeetup, type MeetupPoint } from "../meetup-share";
 // CONTACT-CARD-001: 名片解析用 profile-qr 那份**唯一实现** —— 二维码和消息里
 // 的名片是同一串 vCard，绝不允许这里再写一份解析器。
@@ -141,6 +144,40 @@ export type ContactCardOption = {
   vcard: string;
 };
 
+type AssistantNotice = { text: string; persistent: boolean };
+
+/**
+ * COMP-AI-MINOR-001（聊天侧）：把服务端回的 assistantStatus 翻成人话，
+ * 并说明这条话该放进哪个槽。
+ *
+ * 三种「AI 没回」必须说成三件不同的事，因为它们对用户意味着三种不同的下一步：
+ *   UNAVAILABLE 环境没配好   —— 重试没用，得有人去配
+ *   FAILED      这次调用失败 —— 重试有用
+ *   GATED       按规则不向该账号提供 —— 重试永远没用
+ *
+ * GATED 落进沉默是最坏的一种：用户以为对方只是没理他，于是反复重试一个
+ * 永远不会成功的东西。把 GATED 并进 FAILED 同样错 —— 那是把「不提供」
+ * 说成「服务坏了」。
+ *
+ * persistent 是给「放哪个槽」用的，不是修辞：这个页面每 3 秒轮询一次消息
+ * （见下面那个 setInterval），而 hydrateMessages 结尾有一句
+ * `setError(undefined)` —— 那是给「这次请求失败了」这种瞬时态收尾用的。
+ * 门禁是**账号级状态**（"重试无效"），塞进那个槽的后果是提示闪一下就被
+ * 轮询擦掉，用户回到一个空会话，跟没提示一模一样。所以 persistent=true
+ * 的必须走自己的 state，只有服务端明确说 RESPONDED（真拿到 AI 回复）才撤。
+ *
+ * 未知值返回 undefined：服务端将来加状态时老客户端保持现状（沉默），
+ * 而不是猜成故障然后提示一句错的。
+ */
+function assistantStatusNotice(value: unknown, messageKept: boolean): AssistantNotice | undefined {
+  const status = parseAssistantStatus(value);
+  const kept = messageKept ? "，消息已保留" : "";
+  if (status === "FAILED") return { text: `模型服务暂时不可用${kept}`, persistent: false };
+  if (status === "UNAVAILABLE") return { text: `模型服务未配置${kept}`, persistent: false };
+  if (status === "GATED") return { text: `AI 伴侣暂不对该账号开放，重试无效${kept}`, persistent: true };
+  return undefined;
+}
+
 export function ConversationSurface({
   author,
   conversationClient,
@@ -193,6 +230,11 @@ export function ConversationSurface({
   const [connectAttempt, setConnectAttempt] = useState(0);
   const [loading, setLoading] = useState(!initialConvId);
   const [error, setError] = useState<string | undefined>();
+  // COMP-AI-MINOR-001（聊天侧）：门禁提示有自己的槽，不走 error。
+  // error 会被下面 3 秒轮询的 hydrateMessages 清掉（那行 setError(undefined)
+  // 是给瞬时失败收尾的），而 GATED 是账号级状态、重试无效 —— 放进 error 就是
+  // 「闪一下就没」。只有服务端说 RESPONDED 才撤。
+  const [companionGatedNotice, setCompanionGatedNotice] = useState<string | undefined>();
   const [temporaryUI, setTemporaryUI] = useState<ServerTemporaryUI>();
   // R36.1 安全会话：burn 计时 + 禁止转发。默认保持既有保护姿态（禁止转发开）。
   const [burn, setBurn] = useState<Burn>("off");
@@ -427,6 +469,22 @@ export function ConversationSurface({
     }
   }, []);
 
+  // COMP-AI-MINOR-001（聊天侧）：把服务端状态分派到两个槽。
+  //   persistent（GATED）→ companionGatedNotice，轮询碰不到它。
+  //   瞬时（FAILED / UNAVAILABLE）→ error，刷新时自生自灭。
+  //   RESPONDED → 撤掉门禁横幅（真的能聊了）。
+  //   NOT_REQUESTED / 未知 → 什么都不动：这条消息本来就没问 AI，
+  //   不该把上一条留下的门禁横幅擦掉。
+  const applyAssistantNotice = useCallback((value: unknown, messageKept: boolean): void => {
+    const notice = assistantStatusNotice(value, messageKept);
+    if (notice?.persistent) {
+      setCompanionGatedNotice(notice.text);
+      return;
+    }
+    if (parseAssistantStatus(value) === "RESPONDED") setCompanionGatedNotice(undefined);
+    if (notice) setError(notice.text);
+  }, []);
+
   // SENDER-NAME-HONEST-001: senderSnapshot 缺失时，之前直接落到字面"对方"——
   // 1:1 对话里 author/peerUserId 明明知道对方是谁（顶栏就写着名字），消息
   // 气泡上方却显示一个毫无信息量的"对方"，跟顶栏的真名对不上。群聊没有
@@ -573,6 +631,11 @@ export function ConversationSurface({
             isOwn: false,
             isAI: true
           }]);
+        } else {
+          // COMP-AI-MINOR-001（聊天侧）：被门禁拦下时服务端回 GATED 且不带 aiMessage。
+          // 不处理的话这里就是一个空会话 —— 用户以为 AI 马上会开口，一直在等。
+          // 这一屏还没发出任何消息，所以不带"消息已保留"。
+          applyAssistantNotice(payload?.assistantStatus, false);
         }
       } catch (e) {
         if (!cancelled) setError("无法创建会话，请重试");
@@ -581,7 +644,7 @@ export function ConversationSurface({
       }
     })();
     return () => { cancelled = true; };
-  }, [convId, author, aiAccount, peerUserId, conversationClient, ensureSession, parseOperationRef, connectAttempt]);
+  }, [convId, author, aiAccount, peerUserId, conversationClient, ensureSession, parseOperationRef, applyAssistantNotice, connectAttempt]);
 
   const buildProtection = useCallback((): ProtectionOverride | undefined => {
     if (burn === "off" && noForward) return undefined;
@@ -752,8 +815,10 @@ export function ConversationSurface({
           imageSource: aiAccountPhoto(aiAccount),
         }]);
       }
-      if (payload?.assistantStatus === "FAILED") setError("模型服务暂时不可用，消息已保留");
-      if (payload?.assistantStatus === "UNAVAILABLE") setError("模型服务未配置，消息已保留");
+      // COMP-AI-MINOR-001（聊天侧）：消息已经落库了（服务端先存后生成），
+      // 所以三种"AI 没回"都带"消息已保留"。之前只认 FAILED/UNAVAILABLE，
+      // GATED 落到什么都不说 —— 用户看到的是沉默。
+      applyAssistantNotice(payload?.assistantStatus, true);
     } catch (e: unknown) {
       // 发送失败：撤回乐观气泡、恢复草稿和引用并提示，不留假成功。
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
@@ -941,7 +1006,12 @@ export function ConversationSurface({
       const result = await conversationClient.sendImageMessage(convId, uploaded.mediaAssetId, caption, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
       const payload = parseOperationRef(result);
       const aiMsg = payload?.aiMessage as Record<string, unknown> | undefined;
-      if (aiMsg) setMessages((current) => [...current, { id: String(aiMsg.messageId ?? `ai_${Date.now()}`), sender: aiAccount?.displayName ?? "Proxy AI", body: String(aiMsg.body ?? ""), time: new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:false, isAI:true }]);
+      if (aiMsg) {
+        setMessages((current) => [...current, { id: String(aiMsg.messageId ?? `ai_${Date.now()}`), sender: aiAccount?.displayName ?? "Proxy AI", body: String(aiMsg.body ?? ""), time: new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:false, isAI:true }]);
+      } else {
+        // COMP-AI-MINOR-001（聊天侧）：图片已经发出去了，所以带"消息已保留"。
+        applyAssistantNotice(payload?.assistantStatus, true);
+      }
     } catch (cause) {
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setSelectedImage(picked);
@@ -972,7 +1042,12 @@ export function ConversationSurface({
       const result = await conversationClient.sendVideoMessage(convId, uploaded.mediaAssetId, caption, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
       const payload = parseOperationRef(result);
       const aiMsg = payload?.aiMessage as Record<string, unknown> | undefined;
-      if (aiMsg) setMessages((current) => [...current, { id:String(aiMsg.messageId ?? `ai_${Date.now()}`), sender:aiAccount?.displayName ?? "Proxy AI", body:String(aiMsg.body ?? ""), time: new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:false, isAI:true }]);
+      if (aiMsg) {
+        setMessages((current) => [...current, { id:String(aiMsg.messageId ?? `ai_${Date.now()}`), sender:aiAccount?.displayName ?? "Proxy AI", body:String(aiMsg.body ?? ""), time: new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:false, isAI:true }]);
+      } else {
+        // COMP-AI-MINOR-001（聊天侧）：视频已经发出去了，所以带"消息已保留"。
+        applyAssistantNotice(payload?.assistantStatus, true);
+      }
     } catch (cause) {
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setSelectedVideo(picked);
@@ -993,10 +1068,16 @@ export function ConversationSurface({
     setError(undefined);
     try {
       const contact = parseContactCard(option.vcard);
-      await conversationClient.sendContactMessage(convId, option.vcard, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
+      const result = await conversationClient.sendContactMessage(convId, option.vcard, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
       const secureMeta = secureMetaForSend();
       setMessages((current) => [...current, { id: `contact_${Date.now()}`, sender: "你", body: contact ? (contact.handle ? `@${contact.handle}` : contact.name) : option.name, time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }), isOwn: true, ...(contact ? { contact, contactVcard: option.vcard } : {}), ...(secureMeta ? { secureMeta } : {}) }]);
       setCardPickerOpen(false);
+      // COMP-AI-MINOR-001（聊天侧）：名片也带 AI_PERSONA，服务端照样会回 GATED。
+      // GATED 只活在**这条回包**里（不落库、下次刷新拿不到），所以每个伴侣入口
+      // 都必须自己消费一次 —— 漏一个，那条路上的「依法不提供」就是彻底沉默。
+      // 名片已经发出去了，所以带"消息已保留"。
+      const payload = parseOperationRef(result);
+      applyAssistantNotice(payload?.assistantStatus, true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "名片发送失败，请重试");
     } finally {
@@ -1018,7 +1099,11 @@ export function ConversationSurface({
     setPendingReplies((n) => n + 1);
     try {
       const uploaded = await mediaClient.uploadMedia({ uri:picked.uri, width:0, height:0, durationMs:picked.durationMs, mediaType:"AUDIO", defaultMime:"audio/m4a" }, { onProgress:setUploadProgress });
-      await conversationClient.sendAudioMessage(convId, uploaded.mediaAssetId, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
+      const result = await conversationClient.sendAudioMessage(convId, uploaded.mediaAssetId, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
+      // COMP-AI-MINOR-001（聊天侧）：语音同样带 AI_PERSONA，同样要消费回包 —— 见
+      // sendContactCard 的说明。语音已经发出去了，所以带"消息已保留"。
+      const payload = parseOperationRef(result);
+      applyAssistantNotice(payload?.assistantStatus, true);
     } catch (cause) {
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setSelectedAudio(picked);
@@ -1312,6 +1397,10 @@ export function ConversationSurface({
             </View>
           ) : null}
           {blocked ? <Text style={styles.systemEvent}>此会话已在本机屏蔽，可从右上角解除。</Text> : null}
+          {/* COMP-AI-MINOR-001（聊天侧）：门禁是账号级持久态，跟"屏蔽"一样是这一屏的
+              状态而不是一次失败，所以它跟 error 分开渲染 —— 上面那个 error 块每 3 秒
+              会被轮询清一次，这条不会。 */}
+          {companionGatedNotice ? <Text style={styles.systemEvent}>{companionGatedNotice}</Text> : null}
           {visibleMessages.length > 0 ? <Text style={styles.dayDivider}>今天</Text> : null}
           {blocked ? null : clusters.map((cluster) => {
             const first = cluster.messages[0];

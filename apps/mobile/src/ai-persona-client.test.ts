@@ -77,6 +77,30 @@ describe("AiPersonaClient", () => {
     expect(calls).toBe(0);
   });
 
+  it("图库：正常列表按 source 发对路径，缺 items 数组才抛错", async () => {
+    const seen: string[] = [];
+    const item = { id: "ma_1", thumbnailUrl: "/v1/media/thumb/ma_1", aiGenerationSource: "AI_PERSONA", createdAt: "2026-09-21T00:00:00Z" };
+    const client = new AiPersonaClient({
+      authClient: stubTransport((path: string) => {
+        seen.push(path);
+        return { status: 200, payload: { items: [item] } };
+      }),
+    });
+    await expect(client.listGallery("aip_1", "ai")).resolves.toEqual([item]);
+    expect(seen).toEqual(["/v1/ai/personas/aip_1/media?source=ai"]);
+
+    const broken = new AiPersonaClient({ authClient: stubTransport(() => ({ status: 200, payload: {} })) });
+    await expect(broken.listGallery("aip_1", "raw")).rejects.toThrow("缺少 items 数组");
+  });
+
+  it("图库：401/403 翻译成人话，不是裸状态码", async () => {
+    const unauthed = new AiPersonaClient({ authClient: stubTransport(() => ({ status: 401, payload: {} })) });
+    await expect(unauthed.listGallery("aip_1", "ai")).rejects.toThrow("重新登录");
+
+    const forbidden = new AiPersonaClient({ authClient: stubTransport(() => ({ status: 403, payload: {} })) });
+    await expect(forbidden.listGallery("aip_1", "raw")).rejects.toThrow("不属于当前账号");
+  });
+
   it("补年龄断言发对路径，格式不对本地拦", async () => {
     const seen: Array<{ path: string; body: unknown }> = [];
     const client = new AiPersonaClient({

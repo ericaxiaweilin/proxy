@@ -5,7 +5,6 @@ import { GlassContainer, GlassView } from "expo-glass-effect";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import type { EngagementClient } from "../engagement-client";
-import type { RelationshipClient } from "../relationship-client";
 import type { SecureSessionStore } from "../secure-session";
 import { mapFollowError } from "./feed-error-map";
 import { color, shadows } from "../theme";
@@ -13,11 +12,11 @@ import { color, shadows } from "../theme";
 // An AI profile is a real addressable account surface, but never masquerades
 // as a person or claims the marketplace actions humans can take.
 //
-// 添加状态机（与首页 + 号同源）：好友关系是真相来源——NONE 可添加，
-// OUTGOING（已申请、等对方同意）显示“添加中”，FRIEND 显示已添加。
-// 只看 engagement 二进制会把“已申请”误判成“没添加”，这正是之前
-// 首页点了 +、主页还显示旧文案的原因。
-export type AiFriendState = "NONE" | "OUTGOING" | "FRIEND";
+// AI-FRIEND-DEAD-PENDING-001（按钮级合规审计 2026-09-22）：
+// 平台 AI 账号不会 accept 好友申请。AI 主页原来的「+ 添加」走
+// RelationshipClient.SendFriendRequest，结果是一条永远 PENDING 的死记录；
+// 用户看到「添加中」，对方永远不回。这不是好友关系，只是一个有反应但
+// 没有意义的按钮。现在 AI 主页只保留两个诚实动作：看主页、发消息。
 
 function LiquidGlassAction({ accessibilityLabel, children, disabled = false, onPress }: {
   accessibilityLabel: string;
@@ -34,11 +33,9 @@ function LiquidGlassAction({ accessibilityLabel, children, disabled = false, onP
   );
 }
 
-export function AIAccountProfileSurface({ account, engagement, relationship, initialFriendState, secureSessionStore, onBack, onMessage, onViewPosts }: {
+export function AIAccountProfileSurface({ account, engagement, secureSessionStore, onBack, onMessage, onViewPosts }: {
   account: PlatformAIAccount;
   engagement: EngagementClient;
-  relationship?: RelationshipClient | undefined;
-  initialFriendState?: AiFriendState | undefined;
   secureSessionStore?: SecureSessionStore | undefined;
   onBack: () => void;
   onMessage: (account: PlatformAIAccount, initialDraft?: string) => void;
@@ -48,12 +45,8 @@ export function AIAccountProfileSurface({ account, engagement, relationship, ini
   const [following, setFollowing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
-  const useFriendFlow = Boolean(relationship);
-  const [friendState, setFriendState] = useState<AiFriendState>(initialFriendState ?? "NONE");
-  const [friendBusy, setFriendBusy] = useState(false);
 
   useEffect(() => {
-    if (useFriendFlow) return;
     let cancelled = false;
     void secureSessionStore?.read().then(async (session) => {
       if (!session?.userAccountId) return;
@@ -61,21 +54,7 @@ export function AIAccountProfileSurface({ account, engagement, relationship, ini
       if (!cancelled) setFollowing(state);
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [account.accountId, engagement, secureSessionStore, useFriendFlow]);
-
-  // 好友关系真相：进主页即读一次，首页 + 过的账号直接显示“添加中”，
-  // 不再顶着旧文案等人点。
-  useEffect(() => {
-    if (!relationship) return;
-    let cancelled = false;
-    void relationship.listMyFriendships().then((payload) => {
-      if (cancelled) return;
-      if (payload.active.some((item) => item.userId === account.accountId)) setFriendState("FRIEND");
-      else if (payload.pending.some((item) => item.userId === account.accountId && item.direction !== "INCOMING")) setFriendState("OUTGOING");
-      else if (!initialFriendState) setFriendState("NONE");
-    }).catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [account.accountId, relationship, initialFriendState]);
+  }, [account.accountId, engagement, secureSessionStore]);
 
   async function toggleFollow(): Promise<void> {
     if (busy) return;
@@ -91,23 +70,6 @@ export function AIAccountProfileSurface({ account, engagement, relationship, ini
     finally { setBusy(false); }
   }
 
-  // 添加走好友申请（与首页 + 号同一条链）：发出后即 OUTGOING，
-  // 对方同意前按钮锁定为“添加中”，不再挂添加前的文案。
-  async function sendFriendAdd(): Promise<void> {
-    if (!relationship || friendBusy || friendState !== "NONE") return;
-    setFriendBusy(true); setNotice(undefined);
-    try {
-      await relationship.sendFriendRequest(account.accountId);
-      setFriendState("OUTGOING");
-    } catch (e) {
-      const reason = e instanceof Error ? e.message : "";
-      setNotice(/principal|session|signed|sign in|auth|401|403/i.test(reason)
-        ? "请先登录后再添加。"
-        : mapFollowError(e, "follow"));
-    } finally {
-      setFriendBusy(false);
-    }
-  }
 
   return <View style={styles.root}>
     <View style={styles.header}><Pressable onPress={onBack} style={styles.back}><Text style={styles.backText}>‹ 返回</Text></Pressable><Text style={styles.headerTitle}>AI 主页</Text><View style={styles.spacer} /></View>
@@ -124,12 +86,11 @@ export function AIAccountProfileSurface({ account, engagement, relationship, ini
       </View>
       {/* 与动态帖文头像菜单共用 clear GlassView 水滴口径：单层、半透明。 */}
       <GlassContainer spacing={8} style={styles.glassRow}>
-          <LiquidGlassAction accessibilityLabel={friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "已添加" : "添加到我的小美"} disabled={useFriendFlow && (friendState !== "NONE" || friendBusy)} onPress={() => { if (useFriendFlow) void sendFriendAdd(); else void toggleFollow(); }}>
-            {useFriendFlow ? (
-              <Text style={[styles.glassText, friendState === "FRIEND" && styles.followedText, friendState === "OUTGOING" && styles.pendingText]}>{friendBusy ? "处理中…" : friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "✓ 已添加" : "+ 添加"}</Text>
-            ) : (
-              <Text style={[styles.glassText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已添加" : "+ 添加"}</Text>
-            )}
+          {/* 平台 AI 不是会接受申请的真人账号：不再给一个永远 PENDING 的好友按钮。
+              「发消息」是可达、会响应、有真实结果的动作；「主页」看她公开动态。
+              关注（engagement.followProfile）保留为内容订阅，不冒充双向好友。 */}
+          <LiquidGlassAction accessibilityLabel={following ? "取消关注" : "关注 AI 动态"} disabled={busy} onPress={() => void toggleFollow()}>
+            <Text style={[styles.glassText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已关注" : "+ 关注"}</Text>
           </LiquidGlassAction>
           <LiquidGlassAction accessibilityLabel="查看个人主页" disabled={!onViewPosts} onPress={() => onViewPosts?.(account)}><Text style={styles.glassText}>主页</Text></LiquidGlassAction>
           <LiquidGlassAction accessibilityLabel="发消息" onPress={() => onMessage(account)}><Text style={styles.glassText}>发消息</Text></LiquidGlassAction>
@@ -159,7 +120,7 @@ const styles = StyleSheet.create({
   glassBtnDisabled: { opacity: 0.55 },
   glassPress: { alignItems: "center", height: "100%", justifyContent: "center", paddingHorizontal: 12, width: "100%" },
   glassText: { color: color.ink, fontSize: 13, fontWeight: "900" },
-  followedText: { color: color.violet }, pendingText: { color: color.muted }, notice: { color: color.error, fontSize: 12, marginHorizontal: 18, marginTop: 8 },
+  followedText: { color: color.violet }, notice: { color: color.error, fontSize: 12, marginHorizontal: 18, marginTop: 8 },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, marginHorizontal: 18, marginTop: 14, padding: 15, ...shadows.card }, cardTitle: { color: color.ink, fontSize: 15, fontWeight: "900" }, body: { color: color.ink, fontSize: 13, lineHeight: 20, marginTop: 8 }, personality: { color: color.violet, fontSize: 12, lineHeight: 18, marginTop: 9 },
   prompt: { alignItems: "center", borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", marginTop: 10, paddingTop: 10 }, promptText: { color: color.ink, flex: 1, fontSize: 13, fontWeight: "700" }, promptArrow: { color: color.violet, fontSize: 23 },
   ugcPost: { borderTopColor: color.line, borderTopWidth: 1, marginTop: 10, paddingTop: 10 }, ugcText: { color: color.ink, fontSize: 13, lineHeight: 20 }, ugcMeta: { color: color.muted, fontSize: 11, marginTop: 6 },

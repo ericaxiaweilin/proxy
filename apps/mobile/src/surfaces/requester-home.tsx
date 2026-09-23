@@ -4,7 +4,7 @@
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html（rhome，HTML 5197-5203）。
 // Experience Runtime 插槽：top_context banner 由 SurfacePlan 驱动（§10 Slots），本地态不被 Delta 覆盖（§15.1）。
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
+import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useScrollChrome } from "../shell/scroll-chrome";
@@ -15,6 +15,11 @@ import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
 import { resolveHomePersonAccountId } from "../recommend-fixtures";
 import { color, shadows } from "../theme";
+// HOME-I18N-001：语言选择。i18n 是模块级 store（不需要 Provider，不动
+// app-shell），preferences 负责落盘，LanguageSheet 是原型那个选择面板。
+import { ICEBREAKER_LINES, useI18n, type MessageKey, type MessageVars } from "../i18n";
+import { loadPreferences } from "../preferences";
+import { LanguageSheet } from "../components/language-sheet";
 import type { HardDemandCategory } from "../uiplan/types";
 import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from "../demand-client";
 import type { LocalNetClient } from "../localnet-client";
@@ -50,11 +55,21 @@ export interface RequesterGoal {
 // Server-backed read-model items get projected to this card-shape
 // so the existing card UI stays untouched. kind=DRAFT shows a
 // progress tag; kind=TASK shows no tag (the matching is in flight).
+// 卡片**不存翻译好的字符串**，只存"哪个键 + 什么变量"，渲染时才 t()。
+//
+// 为什么：这两张卡是在一个只依赖 demandClient 的 effect 里从服务端数据投影出来的
+// （见下面 continueItems 那个 useEffect）。如果在这里就把文案翻译好存进 state，
+// 那么切语言时 **effect 不会重跑**（依赖没变），卡片会一直停在旧语言 ——
+// 页面其余部分都换过去了，就这两张卡还留着上一次的语言。
+//
+// 另一个选项是给 effect 加 lang 依赖 —— 那会为了改两句文案去重新拉一次
+// listHomeItems（一次网络往返）。存键不存串，就不需要那次请求。
 type ContinueCard = {
   key: string;
   icon: ProxyIconName;
   title: string;
-  sub: string;
+  subKey: MessageKey;
+  subVars?: MessageVars;
   progress?: string;
   headcount?: string;
 };
@@ -64,17 +79,18 @@ function projectDraft(d: RequesterHomeDraftItem): ContinueCard {
     key: `draft:${d.id}`,
     icon: "diamond",
     title: d.sourceInput,
-    sub: `草稿 · 已填 ${d.draftProgress}%`,
+    subKey: "draftProgress",
+    subVars: { p: d.draftProgress },
     progress: `${d.draftProgress}%`
   };
 }
 
-function projectTask(t: RequesterHomeTaskItem): ContinueCard {
+function projectTask(item: RequesterHomeTaskItem): ContinueCard {
   return {
-    key: `task:${t.id}`,
+    key: `task:${item.id}`,
     icon: "circle",
-    title: t.sourceInput,
-    sub: `已发布 · 等待匹配`
+    title: item.sourceInput,
+    subKey: "publishedWaiting"
   };
 }
 
@@ -86,8 +102,13 @@ function projectTask(t: RequesterHomeTaskItem): ContinueCard {
 //      没有真人能收到同意入口（库里攒了 12 条无人可同意的 PENDING）；
 //   ② 即使对方同意了，卡片也永远显示「+ 添加」，因为按 u_linh 查不到状态。
 // resolveHomePersonAccountId 是唯一的事实源映射（recommend-fixtures）。
-// 没进 ACCOUNT_AVATAR_ASSET 的 fixture 人服务端没有账号 —— 按「无账号」处理：
-// 不发申请，也不读关系链状态（返回 undefined）。
+//
+// HOME-RAIL-ACCOUNT-001（2026-09-23，用户报 P0）：上一版在这里把「没账号的 fixture
+// 人」当成正常情况处理 —— 不发申请、不读状态，只回一句「还没有账号，暂时加不了
+// 好友」。那只是把错误说得更礼貌：列表顶着「真人」徽标，点进去却不能加。
+// 现在 rail 上 28 个人全部有服务端账号，relationshipKeyFor 不再返回 undefined；
+// 这条早退分支保留为最后一道闸（fixture 与服务端再次漂移时仍然不发幽灵申请，
+// 并会被 requester-home-friend-id.test.ts 的「accountless 必须为空」钉红）。
 function relationshipKeyFor(id: string): string | undefined {
   const resolved = resolveHomePersonAccountId(id);
   return resolved.startsWith("u_") ? undefined : resolved;
@@ -114,6 +135,7 @@ export function RequesterHome({
   onOpenHumanScene,
   onOpenHumanProfile,
   onMessageHuman,
+  onOpenRoomCreate,
   viewerAccountId,
   isGuest,
   onCreateScene,
@@ -148,7 +170,13 @@ export function RequesterHome({
   onOpenAIProfile?: (account: PlatformAIAccount) => void;
   onOpenHumanScene?: (person: RecommendPerson, sceneId: string) => void;
   onOpenHumanProfile?: (person: RecommendPerson) => void;
-  onMessageHuman?: (person: RecommendPerson) => void;
+  // HOME-MORE-SHEET-003: 原型的"拼桌/邀约"是先选一句破冰开场白，再带着它
+  // 进对话——initialDraft 是这句话，真的会出现在聊天输入框里（不是原型
+  // 那种"假装已发送"的静态动画），用户还能改了再发，不是替他点了发送。
+  onMessageHuman?: (person: RecommendPerson, initialDraft?: string) => void;
+  // ROOM-CREATE-001: "创建房间"入口——把当前"更多"页可见的候选人交给调用方，
+  // 由它打开创建房间流程（真实 GROUP conversation，见 room-create.tsx）。
+  onOpenRoomCreate?: (candidates: ReadonlyArray<RecommendPerson>) => void;
   viewerAccountId?: string;
   isGuest?: boolean;
   // 访客模式：不拉关系链、不弹关系失败提示。访客点 + 号走 handleHomeFriend
@@ -201,12 +229,30 @@ export function RequesterHome({
   // R15.34: 筛选 sheet 开 / 关 + 已选 chip。空数组 = "全部"。
   const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
   const [activeFilters, setActiveFilters] = useState<ReadonlyArray<string>>([]);
+  // HOME-MORE-SEARCH-001（2026-09-22，用户反馈"漏了一个搜索按钮 点击弹出框"）：
+  // 跟 messages.tsx/feed.tsx 同一套图标切换 + 内联搜索框模式，本地按名字/简介
+  // 过滤——"更多"页本来就是本地 fixture 预览，没有单独的服务端搜索可接。
+  const [moreSearchOpen, setMoreSearchOpen] = useState<boolean>(false);
+  const [moreSearchQuery, setMoreSearchQuery] = useState<string>("");
+  // HOME-MORE-DIST-001：距离半径 + 距离面板。半径是**设置**（不是开关）——
+  // 原型的 distance-chip 恒为深色、没有 off 态，点它是展开滑杆而不是开关。
+  const [moreDistanceIndex, setMoreDistanceIndex] = useState<number>(MORE_DISTANCE_DEFAULT_INDEX);
+  const [moreDistanceOpen, setMoreDistanceOpen] = useState<boolean>(false);
+  // HOME-I18N-001：语言。i18n 是模块级 store，这里只是它的一个消费者。
+  // 冷启动时用落盘值覆盖一次（见下面的 effect），默认 zh。
+  const { t, lang, option: appLangOption, rideTimes, setLanguage: applyLanguage } = useI18n();
+  const [languageSheetOpen, setLanguageSheetOpen] = useState<boolean>(false);
+  // 破冰开场白跟着语言走（原来写死在模块级数组里，切语言不跟着变）。
+  const icebreakerLines = ICEBREAKER_LINES[lang] ?? ICEBREAKER_LINES.zh;
   const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>(BUNDLED_AI_COMPANIONS);
   type HomeRelationshipState = "NONE" | "OUTGOING" | "INCOMING" | "FRIEND";
   const [relationshipStates, setRelationshipStates] = useState<ReadonlyMap<string, HomeRelationshipState>>(() => new Map());
   const [relationshipBusyId, setRelationshipBusyId] = useState<string | undefined>(undefined);
   const [relationshipMsg, setRelationshipMsg] = useState<string | undefined>(undefined);
   const [humanScenePreview, setHumanScenePreview] = useState<{ person: RecommendPerson; sceneId: string } | undefined>(undefined);
+  // HOME-MORE-SHEET-003: "更多真人"列表每行的破冰邀请——原型叫它 拼桌/邀约，
+  // 不是加好友。选中的开场白进 initialDraft，真的带到聊天输入框里。
+  const [icebreakerTarget, setIcebreakerTarget] = useState<RecommendPerson | undefined>(undefined);
   const [publicHistoryOpen, setPublicHistoryOpen] = useState(false);
 
   useEffect(() => {
@@ -215,6 +261,13 @@ export function RequesterHome({
       if (chooser !== null) onChooserVisibilityChange?.(false);
     };
   }, [chooser, onChooserVisibilityChange]);
+
+  // HOME-I18N-001：冷启动读一次落盘语言。放在 effect 里而不是模块顶层 ——
+  // 模块顶层就 await 会让 i18n 反过来依赖 SecureStore，测试里就没法直接
+  // import 它了（见 i18n.ts 文件头约束 1）。
+  useEffect(() => {
+    void loadPreferences().then((prefs) => applyLanguage(prefs.language));
+  }, [applyLanguage]);
 
   // 查询一改，全站结果即过期：不清掉会把上一个词的人挂在新查询下面。
   useEffect(() => {
@@ -240,7 +293,7 @@ export function RequesterHome({
       payload.pending.forEach((item) => next.set(item.userId, item.direction === "INCOMING" ? "INCOMING" : "OUTGOING"));
       setRelationshipStates(next);
     }).catch(() => {
-      if (!cancelled) setRelationshipMsg("好友状态暂时无法加载");
+      if (!cancelled) setRelationshipMsg(t("relationshipLoadFailed"));
     });
     return () => { cancelled = true; };
   }, [relationship, viewerAccountId, isGuest]);
@@ -286,11 +339,11 @@ export function RequesterHome({
       if (speak) {
         setClarifyChoices(undefined);
         if (found.length > 0) {
-          showResponse(`找到 ${found.length} 位真人`, "点主页查看，+ 直接加好友。");
+          showResponse(t("foundPeople", { n: found.length }), t("foundPeopleSub"));
         } else {
           showResponse(
-            `没有找到“${query}”`,
-            "本地推荐和全站都没命中。换个关键词，或去加好友页用 handle 精确找。"
+            t("notFoundQuery", { q: query }),
+            t("notFoundQuerySub")
           );
         }
       }
@@ -300,7 +353,7 @@ export function RequesterHome({
       setServerPeopleState("failed");
       if (speak) {
         setClarifyChoices(undefined);
-        showResponse("全站搜索失败", "网络可能有问题，点下面的重试，或换个关键词。");
+        showResponse(t("serverSearchFailedTitle"), t("serverSearchFailedSub"));
       }
     }
   }
@@ -319,7 +372,7 @@ export function RequesterHome({
 
   async function handleHomeFriend(id: string, name: string): Promise<void> {
     if (!relationship || !viewerAccountId) {
-      setRelationshipMsg("登录后可添加好友");
+      setRelationshipMsg(t("loginToAddFriend"));
       return;
     }
     if (relationshipBusyId !== undefined) return;
@@ -327,7 +380,7 @@ export function RequesterHome({
     if (key === undefined) {
       // 这个人只存在于本地 fixture，服务端没有账号。以前这里会把 fixture id
       // 当 targetUserId 发出去，落成一条永远没人能同意的申请。不发，说清楚。
-      setRelationshipMsg(`${name} 还没有账号，暂时加不了好友`);
+      setRelationshipMsg(t("noAccountYet", { name }));
       return;
     }
     const current = relationshipStateFor(key);
@@ -343,13 +396,13 @@ export function RequesterHome({
         next.set(key, nextState);
         return next;
       });
-      setRelationshipMsg(current === "INCOMING" ? `已成为好友 · ${name}` : `好友申请已发送 · ${name}`);
+      setRelationshipMsg(current === "INCOMING" ? t("becameFriends", { name }) : t("friendRequestSent", { name }));
     } catch (error) {
       const reason = error instanceof Error ? error.message : "";
       setRelationshipMsg(
-        reason.includes("self_forbidden") ? "不能添加自己"
-          : reason.includes("authenticated") || reason.includes("sign-in") ? "登录后可添加好友"
-            : "好友操作失败，请稍后重试"
+        reason.includes("self_forbidden") ? t("cannotAddSelf")
+          : reason.includes("authenticated") || reason.includes("sign-in") ? t("loginToAddFriend")
+            : t("friendActionFailed")
       );
     } finally {
       setRelationshipBusyId(undefined);
@@ -367,10 +420,10 @@ export function RequesterHome({
 
   function relationshipLabel(id: string, name: string): string {
     const state = relationshipStateFor(id);
-    if (state === "FRIEND") return `已是好友 ${name}`;
-    if (state === "OUTGOING") return `已申请好友 ${name}`;
-    if (state === "INCOMING") return `接受 ${name} 的好友申请`;
-    return `添加好友 ${name}`;
+    if (state === "FRIEND") return t("friendLabelFriend", { name });
+    if (state === "OUTGOING") return t("friendLabelOutgoing", { name });
+    if (state === "INCOMING") return t("friendLabelIncoming", { name });
+    return t("friendLabelAdd", { name });
   }
 
   useEffect(() => {
@@ -385,17 +438,31 @@ export function RequesterHome({
   //   - "会中文" 过滤：要求 person.tags 里有 "会中文" lang tag
   //   - "共同好友" 过滤：要求 mutualFriends >= 1
   //   - "最近活跃" 过滤：要求 person.tags 里有 "最近活跃" social tag
-  //   - "附近" 过滤：要求 distanceM < 1000
+  //   - 距离：半径来自「距离」控件（HOME-MORE-DIST-001），不再是写死的 1km
   // server 端接上后，filter 逻辑移过去；这里只负责本地预览。
   const recommendFeed: RecommendFeed = SCENE_RECOMMEND[recommendMode] ?? SCENE_RECOMMEND[RECOMMEND_MODE_ORDER[0]!]!;
-  const recommendActionLabel = ({ PHOTO: "拍照", COMPANION: "同行", COFFEE_MEAL: "咖啡 / 用餐", ACTIVITY: "活动同行", TRIP: "周边出行", CREATOR: "内容创作", TRANSLATE: "翻译", MEDICAL: "陪诊" } as Record<string, string>)[recommendMode] ?? recommendFeed.title;
+  const recommendActionLabel = ({
+    PHOTO: t("modePhoto"),
+    COMPANION: t("modeCompanion"),
+    COFFEE_MEAL: t("actionCoffeeMeal"),
+    ACTIVITY: t("actionActivityTogether"),
+    TRIP: t("actionTrip"),
+    CREATOR: t("actionCreator"),
+    TRANSLATE: t("modeTranslate"),
+    MEDICAL: t("modeMedical")
+  } as Record<string, string>)[recommendMode] ?? recommendFeed.title;
+  const moreDistanceKm = MORE_DISTANCE_KM[moreDistanceIndex] ?? 10;
   const filteredPeople: ReadonlyArray<RecommendPerson> = recommendFeed.people.filter((p) => {
     if (activeFilters.includes("online") && !p.online) return false;
     if (activeFilters.includes("lang_zh") && !p.tags.some((t) => t.text === "会中文" && t.kind === "lang")) return false;
-    if (activeFilters.includes("active") && !p.tags.some((t) => t.text === "最近活跃" && t.kind === "social")) return false;
     // PERSON-DISTANCE-ZERO-001: 没有坐标的人不算「附近」—— 以前 distanceM 恒为 0，
     // 于是每个服务端真人都能通过 <1000m 的附近筛选。
-    if (activeFilters.includes("near") && (p.distanceM === undefined || p.distanceM >= 1000)) return false;
+    // HOME-MORE-DIST-001：半径改成用户可选（1~100km，默认 10km），但
+    // 「距离未知 ≠ 很近」这条不变 —— 任何半径都排除 undefined。
+    if (p.distanceM === undefined || p.distanceM >= moreDistanceKm * 1000) return false;
+    // HOME-MORE-SEARCH-001: 按名字/简介本地过滤。
+    const q = moreSearchQuery.trim().toLowerCase();
+    if (q && !p.name.toLowerCase().includes(q) && !p.bio.toLowerCase().includes(q)) return false;
     return true;
   });
 
@@ -465,7 +532,7 @@ export function RequesterHome({
     if (distinctTimes.length > 1) setTimeIndex((current) => (current + 1) % distinctTimes.length);
     if (storeActivities.length > 1) setActivityIndex((current) => (current + 1) % storeActivities.length);
     if (sceneBriefs.length > 1) setPlaceIndex((current) => (current + 1) % sceneBriefs.length);
-    showResponse("重新配了一套", "根据当前时间和附近可用 Scene 重新组合。");
+    showResponse(t("recombo"), t("recomboSub"));
     setSearchQuery("");
     setClarifyChoices(undefined);
   }
@@ -475,13 +542,13 @@ export function RequesterHome({
     setClarifyChoices(undefined);
     setChooser(slot);
     if (slot === "person") {
-      showResponse("换个人", "其他三格保持不动。");
+      showResponse(t("swapPerson"), t("othersUnchanged"));
     } else if (slot === "place") {
-      showResponse("换场景", "其他三格保持不动。");
+      showResponse(t("swapScene"), t("othersUnchanged"));
     } else if (slot === "time") {
-      showResponse("换时间", "其他三格保持不动。");
+      showResponse(t("swapTime"), t("othersUnchanged"));
     } else {
-      showResponse("换活动", "其他三格保持不动。");
+      showResponse(t("swapActivity"), t("othersUnchanged"));
     }
   }
 
@@ -492,9 +559,9 @@ export function RequesterHome({
 
     // 1. 周末 -> 澄清问询
     if (q === "周末" || q.includes("周末有空")) {
-      setClarifyQuestion("下午还是晚上？");
-      setClarifyChoices(["下午", "晚上"]);
-      showResponse("还差一个时间条件", "确认后我直接更新，不会进入聊天页。");
+      setClarifyQuestion(t("clarifyTimeQuestion"));
+      setClarifyChoices([t("afternoon"), t("evening")]);
+      showResponse(t("needTimeCondition"), t("needTimeConditionSub"));
       return;
     }
 
@@ -517,7 +584,7 @@ export function RequesterHome({
       setClarifyChoices(undefined);
       const eveningIdx = distinctTimes.findIndex((t) => t.includes("晚"));
       if (eveningIdx >= 0) setTimeIndex(eveningIdx);
-      showResponse("时间改成今晚", "其他 3 格保持不动。");
+      showResponse(t("timeToTonight"), t("othersUnchanged"));
       return;
     }
 
@@ -526,7 +593,7 @@ export function RequesterHome({
       setClarifyChoices(undefined);
       const walkIdx = storeActivities.findIndex((a) => a.title.includes("散步") || a.title.includes("Walk"));
       if (walkIdx >= 0) setActivityIndex(walkIdx);
-      showResponse("活动改成散步 / City Walk", "其余 3 格保持不动。");
+      showResponse(t("activityToWalk"), t("othersUnchanged"));
       return;
     }
 
@@ -541,7 +608,7 @@ export function RequesterHome({
       if (coffeeActIdx >= 0) setActivityIndex(coffeeActIdx);
       const beanSceneIdx = sceneBriefs.findIndex((s) => s.name.toLowerCase().includes("bean"));
       if (beanSceneIdx >= 0) setPlaceIndex(beanSceneIdx);
-      showResponse("已配好 · Three Beans 更适合聊天", "你提到咖啡和轻松聊天，所以优先选择更安静、有窗位的场景。");
+      showResponse(t("coffeeCombo"), t("coffeeComboSub"));
       return;
     }
 
@@ -563,7 +630,7 @@ export function RequesterHome({
     if (shouldSearchServerPeople(q, !!profileClient)) {
       if (!consumedLocal) {
         setClarifyChoices(undefined);
-        showResponse(`正在全站找“${q}”…`, "本地推荐没有命中，正在问服务端。");
+        showResponse(t("searchingServer", { q }), t("searchingServerSub"));
       }
       void runServerPeopleSearch(q, !consumedLocal);
       return;
@@ -573,8 +640,8 @@ export function RequesterHome({
     if (!consumedLocal) {
       setClarifyChoices(undefined);
       showResponse(
-        attachment ? "图片需要在 Proxy AI 对话中发送" : `没有找到“${q}”`,
-        "换个关键词继续搜索，或点左侧 AI 标识进入模型对话。"
+        attachment ? t("imageNeedsChat") : t("notFoundQuery", { q }),
+        t("notFoundQuerySub2")
       );
     }
   }
@@ -634,44 +701,44 @@ export function RequesterHome({
     if (error instanceof ActivityCommandRejectedError) {
       switch (error.result.error?.errorCode) {
         case "ACTIVITY_ALREADY_JOINED":
-          return "你已报过名，不用重复点";
+          return t("joinAlready");
         case "ACTIVITY_FULL":
-          return "名额已满，下次早点来";
+          return t("joinFull");
         case "ACTIVITY_NOT_FOUND":
-          return "该活动不存在或已结束";
+          return t("joinGone");
         case "ACTIVITY_ACTOR_REQUIRED":
         case "AI_ACTION_FORBIDDEN":
-          return "登录已过期，请重新登录";
+          return t("sessionExpired");
         default:
-          return "报名失败，请稍后重试";
+          return t("joinFailed");
       }
     }
     if (error instanceof ActivityProtocolError) {
       // 本地就没有可用登录（principal 缺失/离线 fallback/已登出）才提登录；
       // 畸形响应走稍后重试。requireSession 把原错包了一层，只剩 message 可认。
       if (/principal is required|offline fallback|signed out|re-authenticate|sign in/i.test(error.message)) {
-        return "登录后可报名";
+        return t("loginToJoin");
       }
-      return "报名失败，请稍后重试";
+      return t("joinFailed");
     }
-    return "网络异常，请检查连接后重试";
+    return t("networkError");
   }
 
   async function joinSelected(activityId: string | undefined): Promise<void> {
     setJoinMsg(undefined);
     if (!activityId) {
-      setJoinMsg("先选一个活动");
+      setJoinMsg(t("pickActivityFirst"));
       return;
     }
     if (!activities) {
-      setJoinMsg("登录后可报名");
+      setJoinMsg(t("loginToJoin"));
       return;
     }
     setJoinBusy(true);
     try {
       const result = await activities.join(activityId);
       setStoreActivities((prev) => prev.map((a) => (a.activityId === activityId ? { ...a, joined: result.activity.joined } : a)));
-      setJoinMsg(`已报名 · ${result.activity.joined} 人参加`);
+      setJoinMsg(t("joinedWithCount", { n: result.activity.joined }));
     } catch (e) {
       setJoinMsg(joinErrorMessage(e));
     } finally {
@@ -707,7 +774,7 @@ export function RequesterHome({
         if (cancelled) return;
         const cards: ContinueCard[] = [];
         for (const d of home.drafts) cards.push(projectDraft(d));
-        for (const t of home.tasks) cards.push(projectTask(t));
+        for (const task of home.tasks) cards.push(projectTask(task));
         setContinueItems(cards);
       } catch {
         // Fail closed. Retain a previously loaded projection if one exists,
@@ -754,7 +821,7 @@ export function RequesterHome({
           新注册用户只会出现在这里。点主页进对方主页，+ 直接加好友。 */}
       {serverPeople !== undefined && serverPeople.length > 0 ? (
         <View>
-          <Text style={styles.serverPeopleTitle}>全站真人 · {serverPeople.length} 位</Text>
+          <Text style={styles.serverPeopleTitle}>{t("serverPeopleTitle", { n: serverPeople.length })}</Text>
           {serverPeople.map((person) => {
             const isSelf = !!viewerAccountId && person.userAccountId === viewerAccountId;
             const displayName = person.name || person.handle || person.userAccountId;
@@ -767,16 +834,16 @@ export function RequesterHome({
                   <Text style={styles.serverPeopleName}>{displayName}</Text>
                   {sub ? <Text style={styles.serverPeopleSub}>{sub}</Text> : null}
                 </View>
-                <Pressable accessibilityLabel={`查看${displayName}主页`} onPress={() => onOpenHumanProfile?.(profileWireToPerson(person))}>
-                  <Text style={styles.serverPeopleAction}>主页</Text>
+                <Pressable accessibilityLabel={`${displayName} · ${t("viewProfile")}`} onPress={() => onOpenHumanProfile?.(profileWireToPerson(person))}>
+                  <Text style={styles.serverPeopleAction}>{t("home")}</Text>
                 </Pressable>
-                {isSelf ? <Text style={styles.serverPeopleSub}>这是你</Text> : (
+                {isSelf ? <Text style={styles.serverPeopleSub}>{t("thisIsYou")}</Text> : (
                   <Pressable
-                    accessibilityLabel={`加${displayName}为好友`}
+                    accessibilityLabel={`${displayName} · ${t("addFriend")}`}
                     disabled={busy || state === "OUTGOING" || state === "FRIEND"}
                     onPress={() => void handleHomeFriend(person.userAccountId, displayName)}
                   >
-                    <Text style={styles.serverPeopleAction}>{state === "FRIEND" ? "已是好友" : state === "OUTGOING" ? "已发送" : "+ 加好友"}</Text>
+                    <Text style={styles.serverPeopleAction}>{state === "FRIEND" ? t("alreadyFriend") : state === "OUTGOING" ? t("requestSent") : t("addFriend")}</Text>
                   </Pressable>
                 )}
               </View>
@@ -786,12 +853,12 @@ export function RequesterHome({
       ) : null}
       {serverPeopleState === "failed" ? (
         <View style={styles.serverPeopleRow}>
-          <Text style={styles.serverPeopleSub}>全站搜索失败，请稍后重试。</Text>
+          <Text style={styles.serverPeopleSub}>{t("serverSearchFailed")}</Text>
           <Pressable
-            accessibilityLabel="重试全站搜索"
+            accessibilityLabel={t("retryServerSearch")}
             onPress={() => { if (serverPeopleQuery) void runServerPeopleSearch(serverPeopleQuery, true); }}
           >
-            <Text style={styles.serverPeopleAction}>重试</Text>
+            <Text style={styles.serverPeopleAction}>{t("retry")}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -813,7 +880,7 @@ export function RequesterHome({
               id: modeId,
               assetIcon: SCENE_ACTIONS.find((action) => action.id === actionIconId)!.icon,
               label: feed ? (
-                modeId === "PHOTO" ? "拍照" : modeId === "COMPANION" ? "同行" : modeId === "COFFEE_MEAL" ? "吃饭" : modeId === "ACTIVITY" ? "活动" : modeId === "TRIP" ? "出去玩" : modeId === "CREATOR" ? "创作" : modeId === "TRANSLATE" ? "翻译" : "陪诊"
+                modeId === "PHOTO" ? t("modePhoto") : modeId === "COMPANION" ? t("modeCompanion") : modeId === "COFFEE_MEAL" ? t("modeMeal") : modeId === "ACTIVITY" ? t("modeActivity") : modeId === "TRIP" ? t("modeTrip") : modeId === "CREATOR" ? t("modeCreator") : modeId === "TRANSLATE" ? t("modeTranslate") : t("modeMedical")
               ) : modeId
             };
           })}
@@ -832,10 +899,21 @@ export function RequesterHome({
           tag)，cards 是 165×220 portrait card (大首字母 + 距离 + 2 tag)。 */}
       <View style={styles.peopleHead}>
         <View style={{ flex: 1 }}>
-          <View style={styles.peopleTitleRow}><Text style={styles.peopleTitle}>真人推荐</Text><View style={styles.humanBadge}><Text style={styles.humanBadgeText}>真人</Text></View></View>
+          <View style={styles.peopleTitleRow}><Text style={styles.peopleTitle}>{t("title")}</Text><View style={styles.humanBadge}><Text style={styles.humanBadgeText}>{t("humanBadge")}</Text></View></View>
         </View>
-        <Pressable onPress={() => setFilterSheetOpen(true)} style={styles.filterTrigger}>
-          <Text style={styles.filterTriggerText}>筛选 〉</Text>
+        {/* HOME-I18N-001：原型页头 header-actions 的第一个按钮（原型是「中」，
+            切语言后显示当前语言短标 VI/EN/LO/KO/JA）。它跟右边「更多」并排，
+            位置跟原型一致 —— 都在标题右侧。 */}
+        <Pressable
+          accessibilityLabel={t("language")}
+          accessibilityState={{ expanded: languageSheetOpen }}
+          onPress={() => setLanguageSheetOpen(true)}
+          style={styles.langBtn}
+        >
+          <Text style={styles.langBtnText}>{appLangOption.short}</Text>
+        </Pressable>
+        <Pressable onPress={() => setFilterSheetOpen(true)} style={styles.filterTrigger} accessibilityLabel={t("more")}>
+          <Text style={styles.filterTriggerText}>{t("more")}</Text>
         </Pressable>
       </View>
 
@@ -850,7 +928,10 @@ export function RequesterHome({
             key={`story:${p.id}`}
             onPress={() => { setPublicHistoryOpen(false); setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId }); }}
             style={styles.story}
-            accessibilityLabel={`推荐人 ${p.name}，${p.online ? "在线" : "离线"}`}
+            // 用 chipOnline 而不是另立一个 online 键：原型里这两个键
+            // （online / chipOnline）6 种语言的取值**完全相同**，留两份只会
+            // 以后改一处漏一处。
+            accessibilityLabel={`${p.name} · ${p.online ? t("chipOnline") : t("offline")}`}
           >
             <View style={styles.avatar}>
               <View style={styles.avatarInner}>
@@ -881,25 +962,36 @@ export function RequesterHome({
           留下下面这条带「AI 生成」徽标的「AI 推荐」。再挂回去会被门禁挡下。 */}
       {recommendedAI.length > 0 ? <View style={styles.aiSection}>
         <View style={styles.aiSectionHead}>
-          <View><Text style={styles.aiTitle}>AI 推荐</Text><Text style={styles.aiSub}>先看她为什么适合当前场景</Text></View>
-          <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI 生成</Text></View>
+          <View><Text style={styles.aiTitle}>{t("aiRecommend")}</Text><Text style={styles.aiSub}>{t("aiRecommendSub")}</Text></View>
+          <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>{t("aiGenerated")}</Text></View>
         </View>
         <HorizontalSwipeRail style={styles.aiRail} contentContainerStyle={styles.aiRailContent}>
           {recommendedAI.map((account) => (
-            <Pressable key={account.accountId} accessibilityLabel={`查看${account.displayName}主页`} onPress={() => onOpenAIProfile?.(account)} style={styles.aiCard}>
+            <Pressable key={account.accountId} accessibilityLabel={t("viewProfileA11y", { name: account.displayName })} onPress={() => onOpenAIProfile?.(account)} style={styles.aiCard}>
               <View style={styles.aiAvatarWrap}>
                 <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`ai-avatar:${account.accountId}:${account.avatarVersion ?? 1}`} source={aiAccountPhoto(account)} style={styles.aiAvatar} transition={0} />
+                {/* AI-FRIEND-DEAD-PENDING-001（按钮级合规审计 2026-09-22）：
+                    平台 AI 账号不会 accept 好友申请。旧的 + 号却走真人同一套
+                    SendFriendRequest，于是生成一条永远卡在 PENDING 的死记录，
+                    UI 还诚实地告诉用户「好友申请已发送」。
+
+                    这个位置用户的真实意图是「接触她」；AI 已有完整发消息链，
+                    所以 + 改成消息箭头，直接进对话。不是隐藏按钮，也不是弹一句
+                    "AI 不接受"后什么都不做 —— 后者仍是死动作。
+
+                    服务端 relationship 另有 AI 账号拒绝守卫（AI-FRIEND-REQUEST-001），
+                    防 curl / 老客户端继续造 PENDING；这里解决当前产品语义。 */}
                 <Pressable
-                  onPress={() => void handleHomeFriend(account.accountId, account.displayName)}
-                  disabled={relationshipBusyId === account.accountId || relationshipStates.get(account.accountId) === "OUTGOING" || relationshipStates.get(account.accountId) === "FRIEND"}
-                  style={[styles.addBadge, relationshipStates.get(account.accountId) === "FRIEND" && styles.addBadgeDone, relationshipStates.get(account.accountId) === "OUTGOING" && styles.addBadgePending]}
-                  accessibilityLabel={relationshipLabel(account.accountId, account.displayName)}
+                  onPress={(event) => { event.stopPropagation(); onMessageAI?.(account); }}
+                  disabled={!onMessageAI}
+                  style={styles.addBadge}
+                  accessibilityLabel={t("messageToA11y", { name: account.displayName })}
                 >
-                  <Text style={styles.addBadgeText}>{relationshipGlyph(account.accountId)}</Text>
+                  <Text style={styles.addBadgeText}>↗</Text>
                 </Pressable>
               </View>
               <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
-              <Text style={styles.aiHandle} numberOfLines={1}>AI 生成</Text>
+              <Text style={styles.aiHandle} numberOfLines={1}>{t("aiGenerated")}</Text>
             </Pressable>
           ))}
         </HorizontalSwipeRail>
@@ -920,19 +1012,19 @@ export function RequesterHome({
               if (storeActivities.length > 1) setActivityIndex((current) => (current + 1) % storeActivities.length);
               if (sceneBriefs.length > 1) setPlaceIndex((current) => (current + 1) % sceneBriefs.length);
             };
-            const composed = [gridPerson ? `和${gridPerson.name}` : "", gridTime ?? "", gridActivity ? gridActivity.title : "", gridPlace ? `@${gridPlace.name}` : ""].filter(Boolean).join(" ");
+            const composed = [gridPerson ? t("withPerson", { name: gridPerson.name }) : "", gridTime ?? "", gridActivity ? gridActivity.title : "", gridPlace ? `@${gridPlace.name}` : ""].filter(Boolean).join(" ");
             const tiles = [
-              gridPerson ? { key: `person:${gridPerson.id}`, slot: "person" as const, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: "一起的人 · 点更换" } : undefined,
-              gridTime ? { key: `time:${gridTime}`, slot: "time" as const, imageUri: gridPlace?.imageUrl, glyph: "◷", label: gridTime, sub: gridPlace ? gridPlace.name : "时间" } : undefined,
+              gridPerson ? { key: `person:${gridPerson.id}`, slot: "person" as const, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: t("tilePersonSub") } : undefined,
+              gridTime ? { key: `time:${gridTime}`, slot: "time" as const, imageUri: gridPlace?.imageUrl, glyph: "◷", label: gridTime, sub: gridPlace ? gridPlace.name : t("tileTime") } : undefined,
               gridActivity ? { key: `act:${gridActivity.activityId}`, slot: "activity" as const, imageUri: gridPlace?.imageUrl, glyph: "☕", label: gridActivity.title, sub: gridActivity.venueName } : undefined,
-              gridPlace ? { key: `place:${gridPlace.id}`, slot: "place" as const, imageUri: gridPlace.imageUrl, glyph: "●", label: gridPlace.name, sub: "地点" } : undefined,
+              gridPlace ? { key: `place:${gridPlace.id}`, slot: "place" as const, imageUri: gridPlace.imageUrl, glyph: "●", label: gridPlace.name, sub: t("tilePlace") } : undefined,
             ];
             return (
               <View>
                 <View style={styles.forYouHead}>
                   <View style={{ flex: 1 }}>
-                    <View style={styles.peopleTitleRow}><Text style={styles.peopleTitle}>为你组合</Text><View style={styles.forYouBadge}><Text style={styles.forYouBadgeText}>For You</Text></View></View>
-                    <Text style={styles.peopleSub}>选人 · 定时间 · 配活动场景，一键出图或邀约</Text>
+                    <View style={styles.peopleTitleRow}><Text style={styles.peopleTitle}>{t("combo")}</Text><View style={styles.forYouBadge}><Text style={styles.forYouBadgeText}>For You</Text></View></View>
+                    <Text style={styles.peopleSub}>{t("gridSub")}</Text>
                   </View>
                 </View>
                 <View style={styles.gridStage}>
@@ -948,8 +1040,8 @@ export function RequesterHome({
                     ) : null)}
                   </View>
                   <Pressable
-                    accessibilityHint="同时更换人物、时间、活动和地点"
-                    accessibilityLabel="整组换一组"
+                    accessibilityHint={t("changeAllHint")}
+                    accessibilityLabel={t("changeAllLabel")}
                     accessibilityRole="button"
                     hitSlop={8}
                     onPress={remixAll}
@@ -960,16 +1052,16 @@ export function RequesterHome({
                 </View>
                 {composed ? (
                   <View>
-                    <Text style={styles.chainHint}>直接约她：点头像进 Scene 主页聊 · 想等人来：发布需求等小美接单</Text>
+                    <Text style={styles.chainHint}>{t("chainHint")}</Text>
                     <View style={styles.gridCtaRow}>
-                    <Pressable onPress={() => { setMomentMsg(undefined); setMomentOpen(true); }} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="出图">
-                      <Text style={styles.gridCtaTextSmall}>✦ 出图</Text>
+                    <Pressable onPress={() => { setMomentMsg(undefined); setMomentOpen(true); }} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel={t("makeImageA11y")}>
+                      <Text style={styles.gridCtaTextSmall}>{t("makeImage")}</Text>
                     </Pressable>
-                    <Pressable disabled={joinBusy} onPress={() => void joinSelected(gridActivity?.activityId)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="报名参加活动">
-                      <Text style={styles.gridCtaTextSmall}>{joinBusy ? "报名中…" : "报名 →"}</Text>
+                    <Pressable disabled={joinBusy} onPress={() => void joinSelected(gridActivity?.activityId)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel={t("joinCtaA11y")}>
+                      <Text style={styles.gridCtaTextSmall}>{joinBusy ? t("joinInProgress") : t("joinCta")}</Text>
                     </Pressable>
-                    <Pressable onPress={() => onOpenMarket?.("OPPORTUNITY")} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="发布需求等小美报名">
-                      <Text style={styles.gridCtaTextSmall}>发布需求</Text>
+                    <Pressable onPress={() => onOpenMarket?.("OPPORTUNITY")} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel={t("publishDemandA11y")}>
+                      <Text style={styles.gridCtaTextSmall}>{t("publishDemand")}</Text>
                     </Pressable>
                     </View>
                   </View>
@@ -981,14 +1073,14 @@ export function RequesterHome({
                     <Pressable onPress={() => setChooser(null)} style={styles.sheetBackdrop}>
                       <View style={styles.sheet} onStartShouldSetResponder={() => true}>
                         <View style={styles.sheetGrab} />
-                        <Text style={styles.sheetTitle}>{chooser === "person" ? "选一起的人" : chooser === "time" ? "选时间" : chooser === "activity" ? "选活动" : "选地点"}</Text>
+                        <Text style={styles.sheetTitle}>{chooser === "person" ? t("choosePerson") : chooser === "time" ? t("chooseTime") : chooser === "activity" ? t("chooseActivity") : t("choosePlace")}</Text>
                         {chooser === "person" ? (
                           <HorizontalSwipeRail contentContainerStyle={styles.personChooserRail}>
                             {filteredPeople.map((p, i) => {
                               const selected = i === personIndex % filteredPeople.length;
                               return (
                                 <Pressable
-                                  accessibilityLabel={`选择 ${p.name}`}
+                                  accessibilityLabel={t("chooseA11y", { name: p.name })}
                                   key={p.id}
                                   onPress={() => { setPersonIndex(i); setChooser(null); }}
                                   style={[styles.personChooserCard, selected && styles.personChooserCardSelected]}
@@ -1009,13 +1101,13 @@ export function RequesterHome({
                           </HorizontalSwipeRail>
                         ) : chooser === "time" ? (
                           <HorizontalSwipeRail contentContainerStyle={styles.timeChooserRail}>
-                            {distinctTimes.map((t, i) => {
+                            {distinctTimes.map((slot, i) => {
                               const selected = i === timeIndex % distinctTimes.length;
                               return (
-                                <Pressable key={t} onPress={() => { setTimeIndex(i); setChooser(null); }} style={[styles.timeChooserCard, selected && styles.timeChooserCardSelected]}>
+                                <Pressable key={slot} onPress={() => { setTimeIndex(i); setChooser(null); }} style={[styles.timeChooserCard, selected && styles.timeChooserCardSelected]}>
                                   <ProxyIcon color={selected ? color.white : color.ink} name="clock" size={22} />
-                                  <Text numberOfLines={2} style={[styles.timeChooserValue, selected && styles.timeChooserValueSelected]}>{t}</Text>
-                                  <Text style={[styles.timeChooserHint, selected && styles.timeChooserHintSelected]}>{selected ? "当前选择" : "选择时段"}</Text>
+                                  <Text numberOfLines={2} style={[styles.timeChooserValue, selected && styles.timeChooserValueSelected]}>{slot}</Text>
+                                  <Text style={[styles.timeChooserHint, selected && styles.timeChooserHintSelected]}>{selected ? t("currentChoice") : t("chooseSlot")}</Text>
                                 </Pressable>
                               );
                             })}
@@ -1064,7 +1156,7 @@ export function RequesterHome({
                     <Pressable onPress={() => setMomentOpen(false)} style={styles.sheetBackdrop}>
                       <View style={styles.sheet} onStartShouldSetResponder={() => true}>
                         <View style={styles.sheetGrab} />
-                        <Text style={styles.sheetTitle}>邀约 Moment</Text>
+                        <Text style={styles.sheetTitle}>{t("inviteMoment")}</Text>
                         <View style={styles.momentGrid}>
                           {tiles.map((t) => t ? (
                             <View key={`m:${t.key}`} style={styles.momentCell}>
@@ -1091,12 +1183,12 @@ export function RequesterHome({
                                 place: null,
                                 topic: null,
                                 gifWord: null,
-                                poll: { open: false, options: ["", ""], durationLabel: "1 天" },
+                                poll: { open: false, options: ["", ""], durationLabel: t("oneDay") },
                                 isGhost24h: false,
                               });
                               void localNet.createPost(payload, newPublishIdempotencyKey()).then(() => {
                                 setMomentOpen(false);
-                                setMomentMsg("已发布到动态");
+                                setMomentMsg(t("postedToFeed"));
                                 // 发完直达动态：Tab 切换重挂 FeedSurface 即重新拉取，
                                 // 新帖出现在最上面。之前停在首页，用户看不到结果。
                                 onOpenFeed?.();
@@ -1105,16 +1197,16 @@ export function RequesterHome({
                                 // 游客/掉登录直接报英文原错等于没说，映射成人话。
                                 const raw = error instanceof Error ? error.message : "";
                                 if (/principal|signed|sign in|auth|session|401|403|INVALID_ACCESS_TOKEN|登录/i.test(raw)) {
-                                  setMomentMsg("请先登录后再发布（游客身份不能发动态）。");
+                                  setMomentMsg(t("loginToPost"));
                                 } else {
-                                  setMomentMsg(raw || "发布失败，请重试。");
+                                  setMomentMsg(raw || t("postFailed"));
                                 }
                               }).finally(() => setMomentBusy(false));
                             }}
                             style={[styles.gridCta, { marginTop: 10 }]}
-                            accessibilityLabel="发布到动态"
+                            accessibilityLabel={t("postToFeed")}
                           >
-                            <Text style={styles.gridCtaText}>{momentBusy ? "发布中…" : "发布到动态"}</Text>
+                            <Text style={styles.gridCtaText}>{momentBusy ? t("posting") : t("postToFeed")}</Text>
                           </Pressable>
                         ) : null}
                         <Pressable
@@ -1126,16 +1218,16 @@ export function RequesterHome({
                             void Share.share({ message: composed }).then((result) => {
                               // 用户取消分享：静默关 sheet，不报“已分享”。
                               setMomentOpen(false);
-                              if (!result || result.action === Share.sharedAction) setMomentMsg("邀请已分享");
+                              if (!result || result.action === Share.sharedAction) setMomentMsg(t("inviteShared"));
                             }).catch(() => {
                               // 调起失败：sheet 保持打开并给重试机会，不吞错。
-                              setMomentMsg("分享没有调起，请重试。");
+                              setMomentMsg(t("shareFailed"));
                             }).finally(() => setMomentBusy(false));
                           }}
                           style={[styles.gridCta, { marginTop: 10 }]}
-                          accessibilityLabel="分享邀约"
+                          accessibilityLabel={t("shareInvite")}
                         >
-                          <Text style={styles.gridCtaText}>{momentBusy ? "分享中…" : "分享邀请 →"}</Text>
+                          <Text style={styles.gridCtaText}>{momentBusy ? t("sharing") : t("shareInviteCta")}</Text>
                         </Pressable>
                       </View>
                     </Pressable>
@@ -1151,22 +1243,23 @@ export function RequesterHome({
           订单状态时才出现；0、匿名、初始加载和首次失败均不占首页空间。 */}
       {continueItems.length > 0 ? <View>
         <View style={styles.sectionHead}>
-          <Text style={styles.sectionTitle}>继续进行</Text>
-          <Text style={styles.sectionHint}>{continueItems.length} 项</Text>
+          <Text style={styles.sectionTitle}>{t("continueSection")}</Text>
+          <Text style={styles.sectionHint}>{t("itemsCount", { n: continueItems.length })}</Text>
         </View>
         {continueItems.map((item) => (
           <Pressable
             key={item.key}
             onPress={() => onOpenMarket?.("OPPORTUNITY")}
             style={styles.continueCard}
-            accessibilityLabel={`继续进行 ${item.title}`}
+            accessibilityLabel={`${t("continueSection")} ${item.title}`}
           >
             <View style={styles.continueThumb}>
               <Text style={styles.continueThumbText}>{(item.title[0] ?? "?").toUpperCase()}</Text>
             </View>
             <View style={styles.continueCopy}>
               <Text style={styles.continueTitle} numberOfLines={1}>{item.title}</Text>
-              <Text style={styles.continueSub} numberOfLines={1}>{item.sub}</Text>
+              {/* HOME-I18N-001：渲染时才翻译 —— 卡片存的是 key，切语言这里跟着变。 */}
+              <Text style={styles.continueSub} numberOfLines={1}>{t(item.subKey, item.subVars)}</Text>
             </View>
             {item.progress !== undefined ? (
               <View style={styles.actionTag}>
@@ -1186,9 +1279,9 @@ export function RequesterHome({
       {/* Scene/Activity 是撮合完成后的见面道具，不抢人物发现首屏。
           放在进行中链路之后，并替代旧的重复“场景”横栏。 */}
       <View style={styles.sectionHead}>
-        <Text style={styles.peopleTitle}>附近场景</Text>
-        <Pressable accessibilityLabel="打开附近场景地图" onPress={() => onOpenSceneMap?.()}>
-          <Text style={styles.filterTriggerText}>地图 〉</Text>
+        <Text style={styles.peopleTitle}>{t("nearbyScenes")}</Text>
+        <Pressable accessibilityLabel={t("nearbyScenes")} onPress={() => onOpenSceneMap?.()}>
+          <Text style={styles.filterTriggerText}>{t("map")}</Text>
         </Pressable>
       </View>
       <SceneActivityDiscovery
@@ -1200,75 +1293,106 @@ export function RequesterHome({
 
       {humanScenePreview ? <Modal animationType="slide" onRequestClose={() => setHumanScenePreview(undefined)} visible>
         <View style={styles.humanScenePage}>
-          <View style={[styles.humanSceneHeader, { height: 54 + safeArea.top, paddingTop: safeArea.top }]}><Pressable accessibilityLabel="返回Home" hitSlop={12} onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBack}><Text style={styles.humanSceneBackText}>‹ 返回</Text></Pressable><Text style={styles.humanSceneHeaderTitle}>真人主页</Text><View style={styles.humanSceneHeaderSpacer} /></View>
+          <View style={[styles.humanSceneHeader, { height: 54 + safeArea.top, paddingTop: safeArea.top }]}><Pressable accessibilityLabel={t("backHome")} hitSlop={12} onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBack}><Text style={styles.humanSceneBackText}>{t("backShort")}</Text></Pressable><Text style={styles.humanSceneHeaderTitle}>{t("humanProfile")}</Text><View style={styles.humanSceneHeaderSpacer} /></View>
             <ScrollView contentContainerStyle={styles.humanSceneContent} showsVerticalScrollIndicator={false}>
               <View style={styles.humanSceneTop}>
-                <Text style={styles.humanSceneEyebrow}>{humanScenePreview.person.online ? "附近 · 现在可见" : "附近推荐"}</Text>
+                <Text style={styles.humanSceneEyebrow}>{humanScenePreview.person.online ? t("nearbyNowVisible") : t("nearbyRecommend")}</Text>
               </View>
               <View style={styles.humanScenePerson}>
                 <View style={styles.humanSceneAvatarRing}>{humanScenePreview.person.photoUri && !brokenAvatarIds.has(humanScenePreview.person.id) ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: humanScenePreview.person.photoUri }} style={styles.humanSceneAvatar} transition={0} onError={() => markAvatarBroken(humanScenePreview.person.id)} /> : <Text style={styles.humanSceneInitials}>{humanScenePreview.person.initials}</Text>}</View>
                 <View style={styles.humanScenePersonCopy}>
                   <Text style={styles.humanSceneName}>{humanScenePreview.person.name}</Text>
                   <Text style={styles.humanSceneBio}>{humanScenePreview.person.bio}</Text>
-                  {humanScenePreview.person.rating !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text style={styles.humanSceneRating}>★ {humanScenePreview.person.rating.toFixed(1)} · {humanScenePreview.person.completedActivities} 次活动记录</Text> : null}
+                  {humanScenePreview.person.rating !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text style={styles.humanSceneRating}>★ {humanScenePreview.person.rating.toFixed(1)} · {t("activityCount", { n: humanScenePreview.person.completedActivities })}</Text> : null}
                 </View>
               </View>
               <View style={styles.humanSceneActionsTop}>
-                <Pressable accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)} disabled={relationshipBusyFor(humanScenePreview.person.id) || relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND"} onPress={() => void handleHomeFriend(humanScenePreview.person.id, humanScenePreview.person.name)} style={[styles.humanSceneTopAction, styles.humanSceneTopActionPrimary, (relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDone]}><Text style={styles.humanSceneTopActionPrimaryText}>{relationshipBusyFor(humanScenePreview.person.id) ? "添加中…" : relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" ? "添加中" : relationshipStateFor(humanScenePreview.person.id) === "FRIEND" ? "✓ 已添加" : relationshipStateFor(humanScenePreview.person.id) === "INCOMING" ? "接受添加" : "+ 添加"}</Text></Pressable>
-                <Pressable accessibilityLabel="查看主页" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanProfile?.(person); }} style={styles.humanSceneTopAction}><Text style={styles.humanSceneTopActionText}>主页</Text></Pressable>
-                <Pressable accessibilityLabel="发消息" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onMessageHuman?.(person); }} style={styles.humanSceneTopAction}><Text style={styles.humanSceneTopActionText}>发消息</Text></Pressable>
+                <Pressable accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)} disabled={relationshipBusyFor(humanScenePreview.person.id) || relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND"} onPress={() => void handleHomeFriend(humanScenePreview.person.id, humanScenePreview.person.name)} style={[styles.humanSceneTopAction, styles.humanSceneTopActionPrimary, (relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDone]}><Text style={styles.humanSceneTopActionPrimaryText}>{relationshipBusyFor(humanScenePreview.person.id) ? t("adding") : relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" ? t("addingShort") : relationshipStateFor(humanScenePreview.person.id) === "FRIEND" ? t("added") : relationshipStateFor(humanScenePreview.person.id) === "INCOMING" ? t("acceptAdd") : t("addAction")}</Text></Pressable>
+                <Pressable accessibilityLabel={t("viewProfile")} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanProfile?.(person); }} style={styles.humanSceneTopAction}><Text style={styles.humanSceneTopActionText}>{t("home")}</Text></Pressable>
+                <Pressable accessibilityLabel={t("messageAction")} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onMessageHuman?.(person); }} style={styles.humanSceneTopAction}><Text style={styles.humanSceneTopActionText}>{t("messageAction")}</Text></Pressable>
               </View>
               {relationshipMsg ? <Text style={styles.humanSceneNotice}>{relationshipMsg}</Text> : null}
               <View style={styles.humanSceneFacts}>
-                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="clock" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.availabilityText ?? "查看可用时间"}</Text></View>
-                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="route" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.distanceM === undefined ? "距离未知" : humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`}</Text></View>
-                <Pressable accessibilityLabel="查看公开历史活动" onPress={() => setPublicHistoryOpen((open) => !open)} style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="check" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.completedActivities !== undefined ? `${humanScenePreview.person.completedActivities} 次历史活动 ›` : "暂无公开记录"}</Text></Pressable>
+                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="clock" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.availabilityText ?? t("availabilityUnknown")}</Text></View>
+                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="route" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.distanceM === undefined ? t("distanceUnknown") : humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`}</Text></View>
+                <Pressable accessibilityLabel={t("viewPublicHistory")} onPress={() => setPublicHistoryOpen((open) => !open)} style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="check" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.completedActivities !== undefined ? t("historyCount", { n: humanScenePreview.person.completedActivities }) : t("noPublicPosts")}</Text></Pressable>
               </View>
-              {publicHistoryOpen ? <View style={styles.humanSceneHistory}><View style={styles.humanSceneHistoryHead}><Text style={styles.humanSceneHistoryTitle}>本人公开的活动记录</Text><Text style={styles.humanSceneHistoryPrivacy}>非公开记录不展示</Text></View>{humanScenePreview.person.publicActivityHistory?.length ? humanScenePreview.person.publicActivityHistory.map((item) => <View key={item.id} style={styles.humanSceneHistoryRow}><View style={styles.humanSceneHistoryCopy}><Text style={styles.humanSceneHistoryName}>{item.title}</Text><Text style={styles.humanSceneHistoryMeta}>{item.scene} · {item.dateLabel}</Text></View><Text style={styles.humanSceneHistoryRating}>★ {item.rating.toFixed(1)}</Text></View>) : <Text style={styles.humanSceneHistoryEmpty}>还没有可展示的活动记录</Text>}</View> : null}
-              <Text style={styles.humanSceneSectionTitle}>她可以做什么</Text>
+              {publicHistoryOpen ? <View style={styles.humanSceneHistory}><View style={styles.humanSceneHistoryHead}><Text style={styles.humanSceneHistoryTitle}>{t("publicActivity")}</Text><Text style={styles.humanSceneHistoryPrivacy}>{t("privateHidden")}</Text></View>{humanScenePreview.person.publicActivityHistory?.length ? humanScenePreview.person.publicActivityHistory.map((item) => <View key={item.id} style={styles.humanSceneHistoryRow}><View style={styles.humanSceneHistoryCopy}><Text style={styles.humanSceneHistoryName}>{item.title}</Text><Text style={styles.humanSceneHistoryMeta}>{item.scene} · {item.dateLabel}</Text></View><Text style={styles.humanSceneHistoryRating}>★ {item.rating.toFixed(1)}</Text></View>) : <Text style={styles.humanSceneHistoryEmpty}>{t("noActivity")}</Text>}</View> : null}
+              <Text style={styles.humanSceneSectionTitle}>{t("whatSheCanDo")}</Text>
               <View style={styles.humanScenePills}>{humanScenePreview.person.capabilities?.map((item) => <View key={item} style={styles.humanScenePill}><Text style={styles.humanScenePillText}>{item}</Text></View>)}</View>
-              <Text style={styles.humanSceneSectionTitle}>与当前推荐的关联</Text>
+              <Text style={styles.humanSceneSectionTitle}>{t("relatedToRecommend")}</Text>
               <View style={styles.humanSceneLinkRow}>
-                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>当前动作</Text><Text style={styles.humanSceneLinkValue}>{recommendActionLabel}</Text></View>
-                <Pressable accessibilityLabel="查看完整场景" onPress={() => { const current = humanScenePreview; setHumanScenePreview(undefined); onOpenHumanScene?.(current.person, current.sceneId); }} style={styles.humanSceneLinkCard}>
+                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>{t("currentAction")}</Text><Text style={styles.humanSceneLinkValue}>{recommendActionLabel}</Text></View>
+                <Pressable accessibilityLabel={t("viewFullScene")} onPress={() => { const current = humanScenePreview; setHumanScenePreview(undefined); onOpenHumanScene?.(current.person, current.sceneId); }} style={styles.humanSceneLinkCard}>
                   {previewSceneImage ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: previewSceneImage }} style={StyleSheet.absoluteFill} transition={0} /> : null}
                   <View style={styles.humanSceneLinkShade} />
-                  <Text style={styles.humanSceneLinkLabelLight}>当前 Scene</Text><Text style={styles.humanSceneLinkValueLight}>{previewScene?.name ?? humanScenePreview.person.sceneNames?.[0] ?? "查看场景"} ›</Text>
+                  <Text style={styles.humanSceneLinkLabelLight}>{t("currentScene")}</Text><Text style={styles.humanSceneLinkValueLight}>{previewScene?.name ?? humanScenePreview.person.sceneNames?.[0] ?? t("viewSceneFallback")} ›</Text>
                 </Pressable>
-                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>当前主题</Text><Text style={styles.humanSceneLinkValue}>{humanScenePreview.person.themes?.slice(0, 2).join(" · ") || recommendFeed.sceneTag}</Text></View>
+                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>{t("currentTheme")}</Text><Text style={styles.humanSceneLinkValue}>{humanScenePreview.person.themes?.slice(0, 2).join(" · ") || recommendFeed.sceneTag}</Text></View>
               </View>
-              <View style={styles.humanSceneDetailCard}><Text style={styles.humanSceneDetailTitle}>关联主题</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.themes?.join(" · ") || recommendFeed.sceneTag}</Text><Text style={styles.humanSceneDetailTitle}>适合场景</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.sceneNames?.join(" · ") || previewScene?.name || "附近都市场景"}</Text><Text style={styles.humanSceneDetailTitle}>语言</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.languages?.join(" · ") || "以主页资料为准"}</Text></View>
-              <View style={styles.humanSceneDetailCard}><Text style={styles.humanSceneDetailTitle}>历史信誉与评价</Text>{humanScenePreview.person.rating !== undefined && humanScenePreview.person.positiveRate !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text style={styles.humanSceneTrust}>★ {humanScenePreview.person.rating.toFixed(1)} · 好评 {humanScenePreview.person.positiveRate}% · {humanScenePreview.person.completedActivities} 次活动</Text> : null}<Text style={styles.humanSceneDetailText}>{humanScenePreview.person.reviewSummary ?? "暂无公开评价摘要"}</Text></View>
+              <View style={styles.humanSceneDetailCard}><Text style={styles.humanSceneDetailTitle}>{t("relatedTheme")}</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.themes?.join(" · ") || recommendFeed.sceneTag}</Text><Text style={styles.humanSceneDetailTitle}>{t("suitableScenes")}</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.sceneNames?.join(" · ") || previewScene?.name || t("sceneTagFallback")}</Text><Text style={styles.humanSceneDetailTitle}>{t("language")}</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.languages?.join(" · ") || t("languageFromProfile")}</Text></View>
+              <View style={styles.humanSceneDetailCard}><Text style={styles.humanSceneDetailTitle}>{t("reputation")}</Text>{humanScenePreview.person.rating !== undefined && humanScenePreview.person.positiveRate !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text style={styles.humanSceneTrust}>{t("trustLine", { rating: humanScenePreview.person.rating.toFixed(1), rate: humanScenePreview.person.positiveRate, n: humanScenePreview.person.completedActivities })}</Text> : null}<Text style={styles.humanSceneDetailText}>{humanScenePreview.person.reviewSummary ?? t("reviewSummaryEmpty")}</Text></View>
               {previewSceneOptions.length > 0 ? <>
-                <View style={styles.humanSceneSceneHead}><Text style={styles.humanSceneSectionTitle}>当前可一起去</Text><Text style={styles.humanSceneSceneHint}>场景建议</Text></View>
+                <View style={styles.humanSceneSceneHead}><Text style={styles.humanSceneSectionTitle}>{t("canGoTogether")}</Text><Text style={styles.humanSceneSceneHint}>{t("sceneSuggestions")}</Text></View>
                 <View style={styles.humanSceneSceneRow}>{previewSceneOptions.map((scene) => {
                   const uri = /^https?:\/\//i.test(scene.imageUrl) ? scene.imageUrl : sceneApiBaseUrl ? `${sceneApiBaseUrl.replace(/\/$/, "")}/${scene.imageUrl.replace(/^\//, "")}` : undefined;
-                  return <Pressable accessibilityLabel={`查看${scene.name}`} key={scene.id} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanScene?.(person, scene.id); }} style={styles.humanSceneSceneCard}>
-                    {uri ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri }} style={StyleSheet.absoluteFill} transition={0} /> : null}<View style={styles.humanSceneSceneShade} /><Text numberOfLines={1} style={styles.humanSceneSceneName}>{scene.name}</Text><Text numberOfLines={1} style={styles.humanSceneSceneMeta}>{scene.area || scene.best || "附近场景"}</Text>
+                  return <Pressable accessibilityLabel={t("viewSceneA11y", { name: scene.name })} key={scene.id} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanScene?.(person, scene.id); }} style={styles.humanSceneSceneCard}>
+                    {uri ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri }} style={StyleSheet.absoluteFill} transition={0} /> : null}<View style={styles.humanSceneSceneShade} /><Text numberOfLines={1} style={styles.humanSceneSceneName}>{scene.name}</Text><Text numberOfLines={1} style={styles.humanSceneSceneMeta}>{scene.area || scene.best || t("nearbySceneFallback")}</Text>
                   </Pressable>;
                 })}</View>
               </> : null}
-              <Text style={styles.humanSceneReason}>时间可配、距离较近，动作与主题匹配；场景只是见面建议，是否参加仍由双方确认。</Text>
+              <Text style={styles.humanSceneReason}>{t("sceneReason")}</Text>
             </ScrollView>
         </View>
       </Modal> : null}
 
-      {/* R15.34: 推荐筛选 sheet — 5 个 chip 叠加过滤 (多选)，Modal 模态。
-          之前是 ScrollView 内的 absolute 定位，bottom 落在滚动内容最底下，
-          打开后 sheet 在屏外、筛选点不了。现在走 Modal，与选人/出图弹窗一致。 */}
+      {/* HOME-MORE-SHEET-001: 真人行右上角由“筛选”改为“更多”，底部弹出改为
+          最新原型（deepseek 20260921 page-people/list-item）：顶部保留 4 个筛选
+          chips（附近/最近活跃/会中文/在线，即时生效）+ 下方全员列表。行点头像/
+          信息进 Scene 预览，右下 + 走真实好友申请，主页直达对方主页。 */}
       {filterSheetOpen ? (
-        <Modal transparent animationType="fade" visible={filterSheetOpen} onRequestClose={() => setFilterSheetOpen(false)}>
-        <Pressable
-          style={styles.sheetBackdrop}
-          onPress={() => setFilterSheetOpen(false)}
-          accessibilityLabel="关闭筛选"
-        >
-          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
-            <View style={styles.sheetGrab} />
-            <Text style={styles.sheetTitle}>推荐筛选</Text>
+        // HOME-MORE-SHEET-002（2026-09-22，用户反馈"为什么显示半页 不是整页"，
+        // 照 deepseek_html_20260921_3970cc.html 的 page-people 重做）：原型里
+        // 点"查看全部"进的是一个独立整页（page-nav 返回箭头 + 标题 + 筛选 chips
+        // + 全屏列表），不是从底部弹起、盖住 85% 屏幕的 sheet。这里改成同一套
+        // 全屏 Modal（跟下面 humanScenePreview 用的 animationType="slide" 一致），
+        // 顶部换成真正的返回箭头 + 标题，列表占满剩余高度，去掉底部多余的
+        // "完成"按钮——筛选即时生效，退出这页就是点返回，不需要再"应用"一次。
+        <Modal animationType="slide" visible={filterSheetOpen} onRequestClose={() => setFilterSheetOpen(false)}>
+          {/* HOME-MORE-SHEET-005（2026-09-22，用户反馈"更多 点返回没反应"）：
+              这个整页 Modal 漏了顶部安全区。morePage 的 paddingTop 只有 8，
+              而它是**非 transparent 的全屏 Modal**，内容从 y=0 起算 ⇒ 返回箭头
+              落在状态栏/刘海那一条（现代 iPhone 是 47~59pt）里，那一条的触摸
+              由系统状态栏接管，所以点上去"无响应"——不是 handler 没接。
+              同文件的 humanSceneHeader（:1209）、scene-activity-discovery 的
+              pickerPage、qr-zoom-overlay 的 header 都加了 inset，只有这里漏了。 */}
+          <View style={[styles.morePage, { paddingTop: safeArea.top + 8 }]}>
+            {/* HOME-MORE-SHEET-006（2026-09-22，用户反馈"真人推荐·N位的废话
+                不要了，返回按钮放在附近筛选按钮旁边"）：去掉单独一行的标题栏，
+                返回箭头直接并进筛选 chip 那一行，排在"附近"前面。 */}
             <View style={styles.filterChips}>
+              <Pressable accessibilityLabel={t("back")} hitSlop={12} onPress={() => setFilterSheetOpen(false)} style={styles.morePageBackInline}>
+                <Text style={styles.morePageBackIcon}>‹</Text>
+              </Pressable>
+              {/* HOME-MORE-DIST-001（2026-09-22，照 deepseek_html_20260922_1c2e2c.html
+                  的 distance-chip）：「附近」不再是一个写死 1km 的开关，而是原型的
+                  距离控件 —— 深色药丸 + 📍 + 当前半径 + ▾。点它是展开滑杆
+                  （1/3/5/10/20/50/100 km，默认 10km），不是开关：半径是**设置**，
+                  恒生效。▾ 只在面板打开时翻转（跟原型同一条规则）。 */}
+              <Pressable
+                accessibilityLabel={t("distanceChipA11y", { km: moreDistanceKm })}
+                onPress={() => setMoreDistanceOpen((open) => !open)}
+                style={[styles.filterChip, styles.distanceChip]}
+              >
+                {/* 数字 + kmUnit 分开拼，跟原型 renderDistanceChip 同一条规则：
+                    zh 的 kmUnit 是 "km 内"，vi/en 是 "km"，ko 是 "km 이내"，
+                    所以不能把 "km 内" 写死在 JSX 里。 */}
+                <Text style={styles.distanceChipText}>📍 {moreDistanceKm}{t("kmUnit")}</Text>
+                <Text style={[styles.distanceChipArrow, moreDistanceOpen && styles.distanceChipArrowOpen]}>▾</Text>
+              </Pressable>
               {RECOMMEND_FILTER_CHIPS.map((chip: RecommendFilter) => {
                 const on = activeFilters.includes(chip.id);
+                const labelKey = CHIP_LABEL_KEY[chip.id];
                 return (
                   <Pressable
                     key={chip.id}
@@ -1278,27 +1402,190 @@ export function RequesterHome({
                       );
                     }}
                     style={[styles.filterChip, on && styles.filterChipOn]}
-                    accessibilityLabel={`筛选 ${chip.label}${on ? "，已选" : ""}`}
+                    accessibilityLabel={`${t("filterChipA11y", { label: labelKey ? t(labelKey) : chip.label })}${on ? t("selectedSuffix") : ""}`}
                   >
-                    <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>{chip.label}</Text>
+                    <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>{labelKey ? t(labelKey) : chip.label}</Text>
                   </Pressable>
                 );
               })}
+              {onOpenRoomCreate ? (
+                <Pressable
+                  accessibilityLabel={t("createRoomA11y")}
+                  onPress={() => {
+                    // ROOM-CREATE-001：跟 icebreaker 面板同一个教训（HOME-MORE-SHEET-004）——
+                    // "更多"整页本身是一个 Modal，RoomCreateSurface 也是自己的 Modal，
+                    // iOS 一次只能呈现一个，两个同时 visible 时后一个会被无声吞掉。
+                    // 开新 Modal 前必须先关掉这一层。
+                    setFilterSheetOpen(false);
+                    onOpenRoomCreate(filteredPeople);
+                  }}
+                  style={styles.createRoomBtn}
+                >
+                  <Text style={styles.createRoomBtnText}>{t("chipChatRoom")}</Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                accessibilityLabel={moreSearchOpen ? t("closeSearch") : t("search")}
+                onPress={() => { if (moreSearchOpen) { setMoreSearchOpen(false); setMoreSearchQuery(""); } else setMoreSearchOpen(true); }}
+                style={styles.moreSearchIconBtn}
+              >
+                <ProxyIcon color={color.ink} name="search" size={18} />
+              </Pressable>
             </View>
-            <Pressable
-              onPress={() => setFilterSheetOpen(false)}
-              style={styles.sheetApplyBtn}
-              accessibilityLabel="应用筛选"
-            >
-              <Text style={styles.sheetApplyText}>应用</Text>
-            </Pressable>
+            {/* HOME-MORE-DIST-001：距离滑杆面板。7 档（1/3/5/10/20/50/100 km），
+                每一档是一个可点的段 —— 没有滑杆依赖，也不需要拖动精度：
+                段本身就是无障碍元素（每档一个 label），点一下就选中。
+                当前档位同时用数字（大号）+ 骑行时间提示说清楚，避免"滑到哪了"
+                只能靠颜色猜。 */}
+            {moreDistanceOpen ? (
+              <View style={styles.distancePanel}>
+                <View style={styles.distancePanelHead}>
+                  <Text style={styles.distancePanelNum}>{moreDistanceKm}</Text>
+                  <Text style={styles.distancePanelUnit}>{t("kmUnit")}</Text>
+                  <Text style={styles.distancePanelHint}>{t("ridePrefix")}{rideTimes[moreDistanceIndex] ?? ""}</Text>
+                </View>
+                <View style={styles.distanceTrack}>
+                  {MORE_DISTANCE_KM.map((km, index) => (
+                    <Pressable
+                      key={`more-distance:${km}`}
+                      accessibilityLabel={`${t("distanceTierA11y", { km })}${index === moreDistanceIndex ? t("selectedSuffix") : ""}`}
+                      hitSlop={8}
+                      onPress={() => setMoreDistanceIndex(index)}
+                      style={[styles.distanceSeg, index <= moreDistanceIndex && styles.distanceSegOn]}
+                    />
+                  ))}
+                </View>
+              </View>
+            ) : null}
+            {moreSearchOpen ? (
+              <View style={styles.moreSearchBox}>
+                <ProxyIcon color={color.muted} name="search" size={15} />
+                <TextInput
+                  accessibilityLabel={t("searchPeople")}
+                  autoFocus
+                  onChangeText={setMoreSearchQuery}
+                  placeholder={t("searchPlaceholder")}
+                  placeholderTextColor={color.muted}
+                  style={styles.moreSearchInput}
+                  value={moreSearchQuery}
+                />
+                {moreSearchQuery ? (
+                  <Pressable accessibilityLabel={t("clearSearch")} onPress={() => setMoreSearchQuery("")}>
+                    <ProxyIcon color={color.muted} name="close" size={15} />
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+            {relationshipMsg ? <Text style={styles.followMsg}>{relationshipMsg}</Text> : null}
+            <ScrollView style={styles.moreList} contentContainerStyle={styles.moreListContent} showsVerticalScrollIndicator={false}>
+              {filteredPeople.map((p) => {
+                const distance = p.distanceM === undefined ? t("distanceUnknown") : p.distanceM < 1000 ? `${p.distanceM} m` : `${(p.distanceM / 1000).toFixed(1)} km`;
+                const openPreview = (): void => {
+                  setFilterSheetOpen(false);
+                  setPublicHistoryOpen(false);
+                  setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId });
+                };
+                // HOME-MORE-SHEET-003（2026-09-22，用户反馈"原型是邀约/拼桌/
+                // 房间，没有主页邀约，UI 也不对，还有斜箭头——那个只有 home
+                // 才有，进入更多就没有了"）：加好友的斜箭头徽标（relationshipGlyph）
+                // 跟"主页"链接都是首页那条快捷推荐横排用的，原型里"更多"整页
+                // 列表每行只有一个动作——在线的人是"拼桌"，其余是"邀约"，两个
+                // 都开同一个破冰面板，不是加好友。
+                const actionLabel = p.online ? t("actionTable") : t("actionInvite");
+                return (
+                  <View key={`more:${p.id}`} style={styles.moreRow}>
+                    <Pressable onPress={openPreview} accessibilityLabel={t("viewHumanProfileA11y", { name: p.name })} style={styles.moreAvatarWrap}>
+                      {p.photoUri && !brokenAvatarIds.has(p.id) ? <Image source={{ uri: p.photoUri }} style={styles.moreAvatar} onError={() => markAvatarBroken(p.id)} /> : <View style={styles.moreAvatarFallback}><Text style={styles.moreAvatarInitials}>{p.initials}</Text></View>}
+                      {p.online ? <View style={styles.moreOnlineDot} /> : null}
+                    </Pressable>
+                    <Pressable onPress={openPreview} style={styles.moreInfo} accessibilityLabel={t("viewHumanProfileA11y", { name: p.name })}>
+                      <View style={styles.moreNameRow}><Text style={styles.moreName} numberOfLines={1}>{p.name}</Text><Text style={styles.moreMeta}>{distance}</Text></View>
+                      {p.bio ? <Text style={styles.moreBio} numberOfLines={1}>{p.bio}</Text> : null}
+                      {/* HOME-MORE-SHEET-007（2026-09-22，用户反馈"共同好友
+                          移除，最多保持 2 个标签"）：去掉共同好友数，标签本来
+                          就 slice(0,2) 封顶，维持不变。 */}
+                      <View style={styles.moreTags}>
+                        {p.online ? <Text style={styles.moreTagLive}>{t("chipOnline")}</Text> : null}
+                        {p.tags.slice(0, 2).map((t) => <Text key={`${t.kind}:${t.text}`} style={styles.moreTag}>{t.text}</Text>)}
+                      </View>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setIcebreakerTarget(p)}
+                      style={styles.moreActionBtn}
+                      accessibilityLabel={t("icebreakerTitle", { name: p.name, action: actionLabel })}
+                    >
+                      <Text style={styles.moreActionBtnText}>{actionLabel}</Text>
+                    </Pressable>
+                  </View>
+                );
+              })}
+              {filteredPeople.length === 0 ? <Text style={styles.moreEmpty}>{t("emptyFiltered")}</Text> : null}
+            </ScrollView>
+
+            {/* HOME-MORE-SHEET-004（2026-09-22，用户反馈"拼桌/邀约点击没反应"）：
+                根因是这个面板之前用了第二个 <Modal>，跟外层"更多"整页的 Modal
+                同时存在——iOS 一次只能呈现一个 Modal，第二个 present 请求被
+                无声吞掉，state 其实改了（setIcebreakerTarget 生效），只是
+                UI 没弹出来。改成普通 View 叠在同一个 Modal 内部（sheetBackdrop
+                本来就是 position:absolute 铺满整屏），不再嵌套 Modal。 */}
+            {icebreakerTarget ? (
+              <Pressable style={styles.sheetBackdrop} onPress={() => setIcebreakerTarget(undefined)} accessibilityLabel={t("closeIcebreaker")}>
+                <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+                  <View style={styles.sheetGrab} />
+                  <View style={styles.icebreakerHead}>
+                    <Text style={styles.sheetTitle}>{t("icebreakerTitle", { name: icebreakerTarget.name, action: icebreakerTarget.online ? t("actionTable") : t("actionInvite") })}</Text>
+                    <Pressable accessibilityLabel={t("close")} onPress={() => setIcebreakerTarget(undefined)}><Text style={styles.icebreakerClose}>✕</Text></Pressable>
+                  </View>
+                  {icebreakerLines.map((line) => (
+                    <Pressable
+                      key={line}
+                      accessibilityLabel={t("sendLineA11y", { line })}
+                      onPress={() => {
+                        const target = icebreakerTarget;
+                        setIcebreakerTarget(undefined);
+                        setFilterSheetOpen(false);
+                        onMessageHuman?.(target, line);
+                      }}
+                      style={styles.icebreakerItem}
+                    >
+                      <Text style={styles.icebreakerItemText}>{line}</Text>
+                      <Text style={styles.icebreakerItemArrow}>→</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </Pressable>
+            ) : null}
           </View>
-        </Pressable>
         </Modal>
       ) : null}
+
+      {/* HOME-I18N-001：语言选择面板。挂在首页最外层 —— 这里**不在**任何
+          Modal 内部，所以用 Modal 是安全的。别把它挪进「更多」整页那个 Modal
+          里面：iOS 一次只呈现一个 Modal，第二个会被无声吞掉，state 变了但
+          面板不弹（HOME-MORE-SHEET-004 踩过同一个坑）。 */}
+      <LanguageSheet visible={languageSheetOpen} onClose={() => setLanguageSheetOpen(false)} />
     </ScrollView>
   );
 }
+
+
+// HOME-MORE-DIST-001（2026-09-22，照 deepseek_html_20260922_1c2e2c.html 的
+// distance-chip / DISTANCES / rideTimes）：距离半径是可选值，不是写死的 1km。
+// 默认 10km 跟原型一致 —— 本仓 fixture 的距离全在 240m~1.6km，所以默认半径下
+// 一个人都不会被这个控件挡掉；放宽/收紧是用户主动做的。
+const MORE_DISTANCE_KM: ReadonlyArray<number> = [1, 3, 5, 10, 20, 50, 100];
+const MORE_DISTANCE_DEFAULT_INDEX = 3; // = 10km
+
+// HOME-I18N-001：骑行时间原来写死在这（中文），现在跟着语言走 —— 取 i18n 的
+// rideTimes（原型 I18N 里那 7 档，6 种语言都齐）。
+//
+// 筛选 chip 的可见文案同理：fixture 里存的是中文 label，展示时按 **id** 换成
+// 当前语言的键。用 id 而不是中文串当查找键 —— 拿中文当键的话，文案改一个字
+// 整行就会静默回落到中文，而且只有那一种语言坏掉，很难发现。
+const CHIP_LABEL_KEY: Record<string, MessageKey> = {
+  online: "chipOnline",
+  lang_zh: "chipChinese"
+};
 
 const styles = StyleSheet.create({
   aiSection: { marginTop: 8 },
@@ -1511,6 +1798,18 @@ const styles = StyleSheet.create({
   peopleSub: { color: color.muted, fontSize: 12, lineHeight: 16, marginTop: 4 },
   filterTrigger: { paddingHorizontal: 4, paddingVertical: 4 },
   filterTriggerText: { color: color.muted, fontSize: 13, fontWeight: "600" },
+  // HOME-I18N-001：原型 .icon-btn-header 是个 40×40 的圆、#f5f5f5 底、无描边、
+  // 字 14/800。这里底色走 token color.offWhite（跟筛选 chip 同一个底）。
+  langBtn: {
+    alignItems: "center",
+    backgroundColor: color.offWhite,
+    borderRadius: 999,
+    height: 40,
+    justifyContent: "center",
+    marginRight: 8,
+    width: 40
+  },
+  langBtnText: { color: color.ink, fontSize: 14, fontWeight: "800" },
 
   // R15.34: stories 横滑
   stories: { marginHorizontal: -16 },
@@ -1608,6 +1907,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     bottom: 0,
     left: 0,
+    maxHeight: "85%",
     padding: 18,
     paddingBottom: 32,
     position: "absolute",
@@ -1615,11 +1915,70 @@ const styles = StyleSheet.create({
   },
   sheetGrab: { alignSelf: "center", backgroundColor: "#DDD", borderRadius: 4, height: 4, marginBottom: 14, width: 42 },
   sheetTitle: { color: color.ink, fontSize: 20, fontWeight: "800", marginBottom: 12 },
-  filterChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  filterChip: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9 },
-  filterChipOn: { backgroundColor: color.lime, borderColor: color.lime },
+  // HOME-MORE-DIST-001（2026-09-22，照原型 .chip / .chip.active）：chip 换成原型
+  // 的样子 —— 无边框、#f5f5f5 底、13px/600，选中转**深色**（#1a1a1a + 白字），
+  // 不再是之前的 lime 高亮 + 可见描边。原型里 4 个 chip 共用同一条规则，
+  // 所以这里改的是整行，不是单独某一个 —— 否则一行里两种 chip 长相会显得坏掉。
+  filterChips: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  filterChip: { backgroundColor: color.offWhite, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 },
+  filterChipOn: { backgroundColor: color.ink },
   filterChipText: { color: color.ink, fontSize: 13, fontWeight: "600" },
-  filterChipTextOn: { color: color.ink, fontWeight: "800" },
-  sheetApplyBtn: { backgroundColor: color.ink, borderRadius: 16, marginTop: 18, padding: 13 },
-  sheetApplyText: { color: color.white, fontSize: 14, fontWeight: "800", textAlign: "center" },
+  filterChipTextOn: { color: color.white, fontWeight: "800" },
+  // HOME-MORE-DIST-001：距离控件 = 原型的 .chip.distance-chip —— 恒深色，
+  // 📍 + 当前半径 + ▾。
+  distanceChip: { alignItems: "center", backgroundColor: color.ink, flexDirection: "row", gap: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  distanceChipText: { color: color.white, fontSize: 13, fontWeight: "800" },
+  // 原型这里是 font-size:10px，但本仓 design-system-r3 要求 UI 文本 >= 11pt
+  //（可读性门禁，不是建议），所以取 11。视觉上跟 10 没差，规则不破。
+  distanceChipArrow: { color: color.white, fontSize: 11, opacity: 0.7 },
+  distanceChipArrowOpen: { transform: [{ rotate: "180deg" }] },
+  distancePanel: { paddingBottom: 12, paddingHorizontal: 8, paddingTop: 4 },
+  distancePanelHead: { alignItems: "baseline", flexDirection: "row", gap: 6 },
+  distancePanelNum: { color: color.ink, fontSize: 24, fontWeight: "800" },
+  distancePanelUnit: { color: color.ink, fontSize: 13, fontWeight: "600" },
+  distancePanelHint: { color: color.muted, fontSize: 12, marginLeft: "auto" },
+  distanceTrack: { flexDirection: "row", gap: 4, marginTop: 10 },
+  distanceSeg: { backgroundColor: color.line, borderRadius: 999, flex: 1, height: 6 },
+  distanceSegOn: { backgroundColor: color.ink },
+  createRoomBtn: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9 },
+  createRoomBtnText: { color: color.white, fontSize: 13, fontWeight: "800" },
+  // HOME-MORE-BTN-TAP-001（2026-09-22 教训）：这一行是 flexWrap 容器，之前
+  // "创建房间"按钮用 marginLeft:"auto" 撞过一次点击不生效（真根因后来查出来是
+  // 两个 Modal 同时 visible，但没验证过 auto margin 是否也有份）——保险起见，
+  // 搜索图标不再用 auto margin 撑到最右，就按 JSX 顺序自然排在"聊天房"后面。
+  moreSearchIconBtn: { alignItems: "center", height: 34, justifyContent: "center", width: 30 },
+  moreSearchBox: { alignItems: "center", backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 8, marginTop: 8, paddingHorizontal: 12, paddingVertical: 9 },
+  moreSearchInput: { color: color.ink, flex: 1, fontSize: 14, padding: 0 },
+  // HOME-MORE-SHEET-002: 整页版"更多真人"——独立页头（返回箭头 + 标题），
+  // 不是底部弹窗。
+  morePage: { backgroundColor: color.white, flex: 1, paddingHorizontal: 16, paddingTop: 8 },
+  // HOME-MORE-SHEET-006: 返回箭头并进筛选 chip 行，不再单独占一行标题。
+  morePageBackInline: { alignItems: "center", height: 34, justifyContent: "center", width: 28 },
+  morePageBackIcon: { color: color.ink, fontSize: 26, fontWeight: "600" },
+  // HOME-MORE-SHEET-001: 更多真人列表行（照原型 list-item）。
+  moreList: { flex: 1, marginTop: 8 },
+  moreListContent: { gap: 4, paddingBottom: 4 },
+  moreRow: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 12, paddingVertical: 12 },
+  moreAvatarWrap: { height: 52, position: "relative", width: 52 },
+  moreAvatar: { borderRadius: 999, height: "100%", width: "100%" },
+  moreAvatarFallback: { alignItems: "center", backgroundColor: "#F0ECE8", borderRadius: 999, height: "100%", justifyContent: "center", width: "100%" },
+  moreAvatarInitials: { color: color.ink, fontSize: 18, fontWeight: "800" },
+  moreOnlineDot: { backgroundColor: color.lime, borderColor: color.white, borderRadius: 999, borderWidth: 2, bottom: 2, height: 12, position: "absolute", right: 2, width: 12 },
+  moreInfo: { flex: 1, gap: 4, minWidth: 0 },
+  moreNameRow: { alignItems: "baseline", flexDirection: "row", gap: 8 },
+  moreName: { color: color.ink, flexShrink: 1, fontSize: 15, fontWeight: "700" },
+  moreMeta: { color: color.muted, fontSize: 12 },
+  moreBio: { color: color.ink, fontSize: 12 },
+  moreTags: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  moreTagLive: { backgroundColor: color.ink, borderRadius: 4, color: color.white, fontSize: 11, fontWeight: "700", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 3 },
+  moreTag: { backgroundColor: color.offWhite, borderRadius: 4, color: color.muted, fontSize: 11, overflow: "hidden", paddingHorizontal: 6, paddingVertical: 3 },
+  // HOME-MORE-SHEET-003: 每行唯一的动作按钮（拼桌/邀约），照原型 li-action-btn。
+  moreActionBtn: { borderColor: color.ink, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 7 },
+  moreActionBtnText: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  moreEmpty: { color: color.muted, fontSize: 12, paddingVertical: 16, textAlign: "center" },
+  icebreakerHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 14 },
+  icebreakerClose: { color: color.muted, fontSize: 18, paddingHorizontal: 6 },
+  icebreakerItem: { alignItems: "center", backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 12, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginBottom: 10, padding: 14 },
+  icebreakerItemText: { color: color.ink, flex: 1, fontSize: 14, fontWeight: "600" },
+  icebreakerItemArrow: { color: color.muted, fontSize: 16, marginLeft: 8 },
 });

@@ -60,6 +60,17 @@ export class TwinInsightClient {
     if (response.status === 429) {
       throw new TwinInsightProtocolError(`twin-insight ${op} rate limited (429): 操作太频繁，请稍后重试`);
     }
+    // 403 = 未成年门禁（COMP-AI-MINOR-001）。必须翻译成人话并区分两种：
+    // 「确认未成年」和「没有年龄证据，去补一条」—— 合起来说"操作失败"
+    // 等于把一条可修复的阻塞说成永久拒绝。
+    if (response.status === 403) {
+      throw new TwinInsightProtocolError(`twin-insight ${op} forbidden (403): 该操作暂不可用，请确认账号年龄信息`);
+    }
+    // 503 = 依赖没接（模型底座未配置 / 审计表未接入 / 门禁未接）。
+    // 服务端是 fail-closed 的，这里也绝不把它当成"成功了"。
+    if (response.status === 503) {
+      throw new TwinInsightProtocolError(`twin-insight ${op} unavailable (503): 服务暂不可用，请稍后重试`);
+    }
   }
 
   /** 列出某分身的好友洞察（7 天窗口，服务端聚合）。 */

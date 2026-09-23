@@ -161,6 +161,11 @@ func TestStartConversationKeepsOrigin(t *testing.T) {
 // welcome message owned by that specific account, not the generic proxy_ai id.
 func TestPlatformAIPersonaConversationGetsAccountBoundWelcome(t *testing.T) {
 	s := New()
+	// COMP-AI-MINOR-001（聊天侧）：门禁没接 = 一律拒绝，所以生产里必须接。
+	// 这条测的是"开场白属于哪个账号"，不是门禁本身 —— 所以这里接一个
+	// 放行门禁（等价于一个年龄证据齐全的成年账号），否则测的是门禁而不是
+	// 开场白。门禁自身的四个方向见 companion_gate_test.go。
+	s.SetCompanionGate(func(context.Context, string) error { return nil })
 	result := s.Handle(envelopeFor("StartConversation", map[string]any{
 		"conversationType": "DM",
 		"originType":       "PROFILE",

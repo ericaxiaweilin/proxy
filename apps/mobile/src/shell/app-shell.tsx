@@ -70,7 +70,9 @@ import { MessagesSurface } from "../surfaces/messages";
 import { meSubPage } from "../surfaces/me-sub-pages";
 import type { MeSubPage } from "../surfaces/me-types";
 import { RequesterHome, type RequesterGoal } from "../surfaces/requester-home";
-import { resolveHomePersonAccountId } from "../recommend-fixtures";
+import { resolveHomePersonAccountId, type RecommendPerson } from "../recommend-fixtures";
+import { RoomCreateSurface } from "../surfaces/room-create";
+import { RoomSurface } from "../surfaces/room";
 import { AIAccountProfileSurface } from "../surfaces/ai-account-profile";
 import { OtherProfileSurface, type OtherProfileTarget } from "../surfaces/other-profile";
 import { RealitySceneMapSurface } from "../surfaces/reality-scene-map";
@@ -205,6 +207,11 @@ export function AppShell({
   // MSG-GROUPS-TAB-001: convoId/convoTitle（打开一条已有消息支线）已经摘掉——
   // 唯一入口是消息模块的 Convo 列表页，那张列表已经不存在了（见 messages.tsx）。
   const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initialDraft?: string; peerUserId?: string }>();
+  // ROOM-CREATE-001: "创建房间"面板 + 建好之后的房间聊天页，各自独立于
+  // messageChat（房间是 GROUP + 场景，跟 1:1 对话的展示/交互不是一回事，
+  // 见 room-create.tsx / room.tsx 顶部注释）。
+  const [roomCreateCandidates, setRoomCreateCandidates] = useState<ReadonlyArray<RecommendPerson>>();
+  const [roomChatId, setRoomChatId] = useState<string>();
   const [openAIProfile, setOpenAIProfile] = useState<PlatformAIAccount>();
   const [openHumanProfile, setOpenHumanProfile] = useState<OtherProfileTarget>();
   // BRAND-CHROME-L1-001: 「我的」子页（个人主页等）跟 openAIProfile/openHumanProfile
@@ -670,7 +677,6 @@ export function AppShell({
           <AIAccountProfileSurface
             account={openAIProfile}
             engagement={engagement}
-            relationship={relationship}
             {...(secureSessionStore ? { secureSessionStore } : {})}
             onBack={() => { setOpenAIProfile(undefined); if (aiProfileReturnToScene) { setAIProfileReturnToScene(false); setRealitySceneOpen(true); } }}
             onViewPosts={(account) => {
@@ -802,8 +808,8 @@ export function AppShell({
                 posts: [],
                 mediaByPost: {},
               })}
-              onMessageHuman={(person) => {
-                setMessageChat({ author: person.name, ...(person.photoUri ? { avatarSource: { uri: person.photoUri } } : {}), peerUserId: resolveHomePersonAccountId(person.id) });
+              onMessageHuman={(person, initialDraft) => {
+                setMessageChat({ author: person.name, ...(person.photoUri ? { avatarSource: { uri: person.photoUri } } : {}), peerUserId: resolveHomePersonAccountId(person.id), ...(initialDraft ? { initialDraft } : {}) });
                 setPageOverride("MSG_CHAT");
                 setTab("MESSAGES");
               }}
@@ -812,14 +818,19 @@ export function AppShell({
                 setPageOverride("MSG_CHAT");
                 setTab("MESSAGES");
               }}
+              onOpenRoomCreate={setRoomCreateCandidates}
               onCreateScene={setSceneComposerTool}
+              // SCENE-MAP-DEFAULT-001（2026-09-20）：无参数时以前硬编码跳
+              // "threebeans"，把"打开附近场景地图"这个入口悄悄变成"直达
+              // 某一家咖啡馆的详情页"——点哪个都是同一个结果，跟没有地图
+              // 一样。RealitySceneMapSurface 本来就支持 initialSceneId
+              // 缺省显示地图/列表总览（reality-scene-map.tsx 的 selectedId
+              // 初值就是 initialSceneId，undefined 时渲染总览，不是详情）；
+              // 带 sceneId（场景推荐卡点进来）才应该直达该场景详情。
               onOpenSceneMap={(sceneId) => {
-                // 带 sceneId（场景推荐卡）则直达该场景详情；无参数时保持
-                // 原行为：打开 R27 推荐的 threebeans 动态 venue/time 详情。
                 setRealitySceneAI(undefined);
                 setRealitySceneHuman(undefined);
-                if (sceneId) setRealitySceneSelection(sceneId);
-                else setRealitySceneSelection("threebeans");
+                setRealitySceneSelection(sceneId);
                 setRealitySceneOpen(true);
               }}
               sceneApiBaseUrl={localApiBaseUrl}
@@ -901,7 +912,7 @@ export function AppShell({
               onOpenPeerProfile={openPeerProfile}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} relationship={relationship} onOpenConversation={(author, conversationId, aiAccount, avatarSource, peerUserId) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}), ...(peerUserId ? { peerUserId } : {}) } : { author, ...(peerUserId ? { peerUserId } : {}) })} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
+            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} relationship={relationship} onOpenConversation={(author, conversationId, aiAccount, avatarSource, peerUserId) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}), ...(peerUserId ? { peerUserId } : {}) } : { author, ...(peerUserId ? { peerUserId } : {}) })} onOpenRoom={setRoomChatId} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>
@@ -981,6 +992,21 @@ export function AppShell({
             setCurrentLocation(next);
           }}
           open={locationSheetOpen}
+        />
+        <RoomCreateSurface
+          candidates={roomCreateCandidates ?? []}
+          conversationClient={conversation}
+          onClose={() => setRoomCreateCandidates(undefined)}
+          onCreated={(conversationId) => { setRoomCreateCandidates(undefined); setRoomChatId(conversationId); }}
+          visible={roomCreateCandidates !== undefined}
+        />
+        <RoomSurface
+          conversationClient={conversation}
+          conversationId={roomChatId ?? ""}
+          mediaClient={media}
+          onClose={() => setRoomChatId(undefined)}
+          profileClient={profile}
+          visible={roomChatId !== undefined}
         />
       </View>
       </SafeAreaView>

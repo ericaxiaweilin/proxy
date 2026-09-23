@@ -40,6 +40,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/storeonboarding"
 	"github.com/proxy-app/proxy-api/internal/supply"
+	"github.com/proxy-app/proxy-api/internal/twininsight"
 	"github.com/proxy-app/proxy-api/internal/voucher"
 )
 
@@ -103,6 +104,11 @@ type Server struct {
 	// persona asset lacks a live consent. Wired from
 	// cmd/api/main.go.
 	AIPersona *aipersona.Service
+	// TwinInsight 是 AI 分身「好友洞察」的读模型（TWIN-INSIGHT-002）。
+	// 它是一个独立的读模型包而不是挂在 localnet / relationship 上：
+	// 这条洞察跨四个域（好友关系 / 行为事件 / 对话 / 点赞），没有任何
+	// 一个域拥有"这个好友值不值得运营"这个问题。见 internal/twininsight。
+	TwinInsight *twininsight.Service
 	// Jurisdiction is the R16.7-P1-E lookup. The
 	// fulfillment service consumes it through a bridge to
 	// pick the right policy decision (LC-28 / LC-30). The
@@ -248,6 +254,10 @@ func (s *Server) Handler() http.Handler {
 	// lookups.
 	mux.HandleFunc("/v1/ai/personas", s.routePersonaCollection)
 	mux.HandleFunc("/v1/ai/personas/", s.routePersonaItem)
+	// TWIN-INSIGHT-002: AI 分身「好友洞察」。四端点全在 /v1/ai/twins/ 下，
+	// 走**会话 + 分身归属**校验（不是 PRD 写的匿名读 —— 理由见
+	// twin_insight_handlers.go 顶部那段偏离说明）。
+	mux.HandleFunc("/v1/ai/twins/", s.routeTwinInsight)
 	mux.HandleFunc("/v1/ai/accounts", s.listPlatformAIAccounts)
 	// AI-ASSIST-001: 平台 AI 助手公开目录（首页推荐），匿名可读。
 	mux.HandleFunc("/v1/ai/assistants", s.listAIAssistants)

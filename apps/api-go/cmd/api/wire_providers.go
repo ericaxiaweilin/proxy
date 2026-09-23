@@ -42,8 +42,27 @@ func configuredLoginChallengeProvider() (identity.LoginChallengeProvider, bool) 
 			log.Fatalf("PROXY_LOGIN_PROVIDER=production but neither PROXY_SMTP_HOST nor PROXY_SMS_URL is set; configure one before starting the API.")
 		}
 		return configuredProductionLoginChallengeProvider(mode)
+	// LOGIN-PROVIDER-BOOT-001: this used to silently fall through to
+	// UnconfiguredLoginChallengeProvider — every OTP request then rejects
+	// with LOGIN_PROVIDER_NOT_CONFIGURED, but nothing at boot time said so
+	// loudly. bootenv.Warnings() logs one easy-to-miss line, and its own
+	// wording ("PROXY_LOGIN_PROVIDER=\"simulated\" is dev-only") actively
+	// implies login still works in a fake-but-functional way — it does not;
+	// this is the fail-closed path, not the simulated one. The recurring
+	// "验证码服务尚未配置" reports were never a code bug in the login flow
+	// itself: PROXY_LOGIN_PROVIDER just wasn't in the process's environment
+	// (scripts/dev-api.sh only sources .env "if it exists"; a process
+	// started any other way — a bare `go run`, a packaging/deploy step that
+	// doesn't carry .env — gets here with mode == ""). The three explicit
+	// modes above already refuse to boot on a matching misconfiguration;
+	// treat "nothing set at all" the same way instead of the one case that
+	// silently degrades.
+	case "":
+		log.Fatalf("PROXY_LOGIN_PROVIDER is empty; refusing to start with a fail-closed login provider that would reject every OTP request. Set it explicitly: \"simulated\" (dev/QA, PROXY_SIMULATED_OTP_CODE optional), \"smtp\" (+ PROXY_SMTP_HOST), \"sms\" (+ PROXY_SMS_URL), or \"production\" (either). If this is meant to run via scripts/dev-api.sh, confirm .env exists at the repo root and defines PROXY_LOGIN_PROVIDER.")
+		return identity.UnconfiguredLoginChallengeProvider{}, false // unreachable; log.Fatalf exits.
 	default:
-		return identity.UnconfiguredLoginChallengeProvider{}, false
+		log.Fatalf("PROXY_LOGIN_PROVIDER=%q is not a recognized mode (want \"simulated\", \"smtp\", \"sms\", or \"production\"); refusing to start with a fail-closed login provider.", mode)
+		return identity.UnconfiguredLoginChallengeProvider{}, false // unreachable; log.Fatalf exits.
 	}
 }
 
@@ -336,8 +355,14 @@ func configuredProductionLoginChallengeProvider(mode string) (identity.LoginChal
 	}
 	router := identity.NewChannelRouter(emailProvider, smsProviderIface)
 	if smtpProvider == nil && smsProvider == nil && smtpMultiProvider == nil {
-		log.Printf("PROXY_LOGIN_PROVIDER=%s but no SMTP/SMS env set; login provider fail-closed", mode)
-		return identity.UnconfiguredLoginChallengeProvider{}, false
+		// LOGIN-PROVIDER-BOOT-001: the caller already required PROXY_SMTP_HOST
+		// or PROXY_SMS_URL to be non-empty for this mode — reaching here with
+		// no provider actually constructed means the declared config still
+		// didn't produce a working wiring (not "operator forgot .env", but
+		// "operator's .env doesn't do what they think it does"). That is a
+		// worse surprise than the plain missing-env case, so it gets the same
+		// fail-loud treatment instead of a Printf nobody reads at 3am.
+		log.Fatalf("PROXY_LOGIN_PROVIDER=%s declared SMTP/SMS env but no provider was actually constructed; login provider would be fail-closed. Check PROXY_SMTP_*/PROXY_SMS_* for a value that failed validation.", mode)
 	}
 	routesActive := 0
 	if smtpMultiProvider != nil {

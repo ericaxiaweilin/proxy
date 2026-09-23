@@ -31,7 +31,7 @@ type Folder = "all" | "friends" | "activity" | "invite";
 
 // v8 原型 mock 已删除（R36.x MOCK-001）：Dialog 只走 server
 // listConversations()，空收件箱显示诚实空态，不再展示假会话。
-type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; folder: Folder; type?: string; peerUserId?: string; lastActivityMs: number };
+type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; folder: Folder; type?: string; peerUserId?: string; lastActivityMs: number; isRoom?: boolean };
 
 const ASSISTANT_LOGO = OTTER_LOGO;
 
@@ -168,6 +168,7 @@ let cachedServerDialogs: Dialog[] | undefined;
 
 export function MessagesSurface({
   onOpenConversation,
+  onOpenRoom,
   onOpenContacts,
   onChromeVisibilityChange,
   bottomNavVisible,
@@ -181,6 +182,10 @@ export function MessagesSurface({
   viewer,
 }: {
   onOpenConversation: (author: string, conversationId?: string, aiAccount?: PlatformAIAccount, avatarSource?: number | { uri: string }, peerUserId?: string) => void;
+  // ROOM-CREATE-001: 房间（GROUP + roomScene）走专门的房间聊天页（场景banner/
+  // 成员条/见面邀约），不是通用 ConversationSurface——那边不认识见面邀约卡片，
+  // 会把它画成一个空气泡。
+  onOpenRoom?: (conversationId: string) => void;
   onOpenContacts?: () => void;
   // MSG-SCAN-SHORTCUT-001: 消息模块加好友现在只剩顶栏"扫码"这一条路——
   // "+"号连着的方式选择页（邀请/通讯录/社媒/搜索）已经摘掉，本人的二维码
@@ -645,7 +650,7 @@ export function MessagesSurface({
             ) : filteredRecent.length > 0 ? (
               filteredRecent.map((d) => (
                 <SwipeableRow key={d.id} onDelete={() => hideDialog(d.id)}>
-                <Pressable onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource, d.peerUserId)} style={styles.dialog}>
+                <Pressable onPress={() => { if (d.isRoom && d.conversationId && onOpenRoom) onOpenRoom(d.conversationId); else onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource, d.peerUserId); }} style={styles.dialog}>
                   {d.avatarSource && !brokenAvatarIds.has(d.id) ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:recent:${d.conversationId ?? d.id}`} source={d.avatarSource} style={styles.avatar} transition={0} onError={() => markAvatarBroken(d.id)} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                     <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
                   </View>}
@@ -678,7 +683,7 @@ export function MessagesSurface({
             ) : null}
             {groupDialogs.map((c) => (
               <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)} edgeInset={14} topInset={10} cornerRadius={15}>
-              <Pressable onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard} accessibilityLabel={`打开群组 ${c.name}`}>
+              <Pressable onPress={() => { if (c.isRoom && c.conversationId && onOpenRoom) onOpenRoom(c.conversationId); else onOpenConversation(c.name, c.conversationId); }} style={styles.convoCard} accessibilityLabel={`打开群组 ${c.name}`}>
                 <View style={styles.convoHead}>
                   <View style={styles.convoMark}><ProxyIcon color="#fff" name="group" size={18} /></View>
                   <View style={styles.convoCopy}>
@@ -725,7 +730,11 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
   // 当群名字等于把一个 3 人群显示成跟其中一个人的私聊。参与者总数是诚实的，
   // 名字用它拼，不编成员名单（客户端这里没有其他成员的 displayName）。
   const isGroup = item.conversation.conversationType === "GROUP";
-  const name = isGroup ? `群聊 · ${item.conversation.participants.length} 人` : aiAccount?.displayName || snapshotName || (isAssistantPeer ? "AI助手" : item.counterpartyId) || "对话";
+  // ROOM-CREATE-001: 有 roomScene 就是「创建房间」建的房间，用房间名而不是
+  // 泛泛的「群聊 · N 人」——列表里能认出哪个是哪个房间。
+  const roomName = item.conversation.roomScene?.roomName?.trim();
+  const isRoom = roomName !== undefined && roomName !== "";
+  const name = isRoom ? roomName : isGroup ? `群聊 · ${item.conversation.participants.length} 人` : aiAccount?.displayName || snapshotName || (isAssistantPeer ? "AI助手" : item.counterpartyId) || "对话";
   const avatarRef = item.counterpartySnapshot?.avatarRef?.trim();
   // ASSISTANT-THREAD-001: 助手有且仅有一个（服务端已归一），行头像就是 logo。
   // 真人没解析出可用地址就不设 —— 以前兜底拼 user_<id> 的 thumb 全是 404，
@@ -762,6 +771,7 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
     ...(item.unreadCount !== undefined && item.unreadCount > 0 ? { unread: String(item.unreadCount) } : {}),
     // R15.74: 透出 conversationType 给 Convo tab filter (GROUP/SUPPORT)
     type: item.conversation.conversationType,
+    ...(isRoom ? { isRoom: true } : {}),
     folder: item.conversation.originType === "ACTIVITY" ? "activity" : item.conversation.originType === "PROFILE" ? "friends" : "all",
   };
 }

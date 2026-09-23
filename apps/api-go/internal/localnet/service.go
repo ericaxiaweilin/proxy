@@ -104,6 +104,12 @@ type Post struct {
 	// (ctx, post.CityScope, post.SceneType) 而不只是全局一个色 —
 	// 不同场景类型的帖背景都不一样。
 	SceneType string `json:"sceneType,omitempty"`
+	// AI-TWIN-POST-AUDIENCE-001: Visibility=="TARGETED" 时的可见者白名单。
+	// 跟 Poll 一样是**读时**拼上去的，不落进 posts 表——见 attachAudienceTargets。
+	// 只在作者本人读自己的帖子时才会被填充；其他读者永远看到 nil，防止一个
+	// 被投放到的人从这个字段里看到"还有谁也被投放了"（同一批人之间互相
+	// 暴露名单不是这个功能的本意）。
+	AudienceTargetIDs []string `json:"audienceTargetIds,omitempty"`
 }
 
 // PostMediaRef 是 Post 的媒体引用（R14 §16.5：sort_order = 作者确认的展示顺序）。
@@ -288,6 +294,15 @@ type Repository interface {
 	SavePostPoll(ctx context.Context, poll PostPoll) error
 	RecordPollVote(ctx context.Context, postID, optionID, voterID string) error
 	ListPollsForPosts(ctx context.Context, postIDs []string, viewerID string) (map[string]PostPollTally, error)
+	// AI-TWIN-POST-AUDIENCE-001：TARGETED 帖子的受众白名单。跟 SavePostPoll
+	// 同一个理由放进必需接口——可选接口没人实现，TARGETED 就会变成
+	// "UI 有、服务端没有" 的静默降级：要么谁都看不到（过度收紧），要么谁都
+	// 能看到（安全洞），两者都不该靠"忘了实现"决定。
+	SavePostAudienceTargets(ctx context.Context, postID string, targetAccountIDs []string) error
+	// ListPostAudienceTargets 批量取一批帖子各自的受众白名单，postID 不在
+	// 返回的 map 里 = 没有白名单（PUBLIC/FOLLOWERS 帖子，或查询失败时的
+	// fail-closed 结果——调用方把"查不到"当"没人在名单里"处理，不是当"公开"）。
+	ListPostAudienceTargets(ctx context.Context, postIDs []string) (map[string][]string, error)
 }
 
 type FeedPageRepository interface {
@@ -398,13 +413,16 @@ type MemoryRepository struct {
 	// POLL-VOTE-001
 	polls map[string]PostPoll          // postID -> poll
 	votes map[string]map[string]string // postID -> voterID -> optionID
+	// AI-TWIN-POST-AUDIENCE-001
+	audienceTargets map[string][]string // postID -> target account IDs
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		posts: make(map[string]Post),
-		polls: make(map[string]PostPoll),
-		votes: make(map[string]map[string]string),
+		posts:           make(map[string]Post),
+		polls:           make(map[string]PostPoll),
+		votes:           make(map[string]map[string]string),
+		audienceTargets: make(map[string][]string),
 	}
 }
 
@@ -463,6 +481,25 @@ func (r *MemoryRepository) ListPollsForPosts(_ context.Context, postIDs []string
 			}
 		}
 		out[postID] = PostPollTally{Poll: poll, Counts: counts, VotedOptionID: voted}
+	}
+	return out, nil
+}
+
+func (r *MemoryRepository) SavePostAudienceTargets(_ context.Context, postID string, targetAccountIDs []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.audienceTargets[postID] = append([]string(nil), targetAccountIDs...)
+	return nil
+}
+
+func (r *MemoryRepository) ListPostAudienceTargets(_ context.Context, postIDs []string) (map[string][]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string][]string, len(postIDs))
+	for _, postID := range postIDs {
+		if targets, ok := r.audienceTargets[postID]; ok {
+			out[postID] = append([]string(nil), targets...)
+		}
 	}
 	return out, nil
 }
@@ -1098,7 +1135,7 @@ func NewWithRepositoryAndClock(repository Repository, domainClock clock.Clock) *
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "CreatePost", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "CreateNeedFromPost", "RecordAttribution",
+	case "CreatePost", "UpdatePostAudience", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "CreateNeedFromPost", "RecordAttribution",
 		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed", "RecordMediaImpression",
 		"ShortlistAgent", "ListInteractionEvents", "ListPostImpressionStats", "ListProfileViewStats", "ListProfileViewers", "ListMediaImpressionStats", "ListMediaActivityForViewer", "VotePostPoll":
 		return true
@@ -1117,6 +1154,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	switch e.CommandType {
 	case "CreatePost":
 		return s.createPost(ctx, e)
+	case "UpdatePostAudience":
+		return s.updatePostAudience(ctx, e)
 	case "ListFeedPosts":
 		return s.listFeed(ctx, e)
 	case "ListPostsByIds":
@@ -1198,6 +1237,9 @@ type createPostPayload struct {
 	EphemeralUntil *time.Time `json:"ephemeralUntil"`
 	// POLL-VOTE-001：帖内投票。不传 / null = 普通帖子。
 	Poll *createPostPollPayload `json:"poll"`
+	// AI-TWIN-POST-AUDIENCE-001：visibility=="TARGETED" 时必填，且必须非空——
+	// 只在这个档位才读取，别的档位传了也会被拒绝（见下方校验），不是静默忽略。
+	AudienceTargetIDs []string `json:"audienceTargetIds"`
 }
 
 // createPostPollPayload 是建帖时随帖提交的投票。
@@ -1233,6 +1275,81 @@ func postIsExpired(p Post, now time.Time) bool {
 		return false
 	}
 	return !p.EphemeralUntil.After(now)
+}
+
+// postVisibleTo is the single source of truth for "can viewerID see this
+// post" across listFeed / listPostsByIds / listPostsMentioning and their
+// Postgres SQL mirrors in platform/postgres/network.go. AI-TWIN-POST-
+// AUDIENCE-001 added the TARGETED branch; every other branch is unchanged
+// from before. Centralizing this (instead of the same two-line check
+// copy-pasted per call site, which is how it looked before) is deliberate:
+// the surrounding comments in this file repeatedly warn about a post
+// invisible on one path "从后门复活"（reappearing through a back door) on
+// another when the copies drift — one function makes drift impossible.
+// AGENT_ONLY is deliberately absent: no caller in this set serves
+// agent-only content today, matching the pre-existing behavior.
+func postVisibleTo(p Post, viewerID string, audience map[string][]string) bool {
+	switch p.Visibility {
+	case "PUBLIC":
+		return true
+	case "FOLLOWERS":
+		// Follow-graph authorization is not implemented yet. Fail closed
+		// instead of treating FOLLOWERS as public; authors may still see
+		// their own post.
+		return p.AuthorID == viewerID
+	case "TARGETED":
+		if p.AuthorID == viewerID {
+			return true
+		}
+		for _, id := range audience[p.ID] {
+			if id == viewerID {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// loadTargetedAudience batch-fetches the audience allowlist for every
+// TARGETED post among candidates — one query for the whole page, not N+1.
+// A repository error fails closed: the returned map simply won't have
+// entries for those post IDs, and postVisibleTo treats a missing entry as
+// "nobody is targeted" (so the post drops out for every non-author viewer),
+// never as "everybody can see it".
+func (s *Service) loadTargetedAudience(ctx context.Context, posts []Post) map[string][]string {
+	var targetedIDs []string
+	for _, p := range posts {
+		if p.Visibility == "TARGETED" {
+			targetedIDs = append(targetedIDs, p.ID)
+		}
+	}
+	if len(targetedIDs) == 0 {
+		return nil
+	}
+	audience, err := s.repository.ListPostAudienceTargets(ctx, targetedIDs)
+	if err != nil {
+		return nil
+	}
+	return audience
+}
+
+// attachAudienceTargets hydrates Post.AudienceTargetIDs for the AUTHOR's own
+// posts only (mirrors attachPolls' shape). A non-author viewer never gets
+// the roster back, even for a TARGETED post they were let through by
+// postVisibleTo — seeing the post is not the same as seeing who else it
+// was shared with.
+func attachAudienceTargets(posts []Post, viewerID string, audience map[string][]string) []Post {
+	if len(audience) == 0 {
+		return posts
+	}
+	for i := range posts {
+		if posts[i].Visibility == "TARGETED" && posts[i].AuthorID == viewerID {
+			posts[i].AudienceTargetIDs = audience[posts[i].ID]
+		}
+	}
+	return posts
 }
 
 // allowedSceneTypes 是 Post.SceneType 的允许集。需要保持与
@@ -1295,8 +1412,36 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	if p.Visibility == "" {
 		p.Visibility = "PUBLIC"
 	}
-	if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" && p.Visibility != "AGENT_ONLY" {
+	if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" && p.Visibility != "AGENT_ONLY" && p.Visibility != "TARGETED" {
 		return command.Rejected(e, "INVALID_POST_VISIBILITY", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_visibility", nil)
+	}
+	// AI-TWIN-POST-AUDIENCE-001: TARGETED 必须带非空白名单——targeting nobody
+	// 没有意义，静默当成"没有受众"发布会让作者以为发给了谁、实际谁都看不到。
+	// 反过来，非 TARGETED 档位带了 audienceTargetIds 说明客户端状态和它以为
+	// 发的可见度对不上，同样拒绝而不是悄悄丢弃这份列表。
+	var audienceTargets []string
+	if p.Visibility == "TARGETED" {
+		const maxAudienceTargets = 200
+		seenTarget := make(map[string]struct{}, len(p.AudienceTargetIDs))
+		for _, raw := range p.AudienceTargetIDs {
+			id := strings.TrimSpace(raw)
+			if id == "" || id == e.Actor.ID {
+				continue // 作者本人隐式可见，不需要出现在白名单里
+			}
+			if _, dup := seenTarget[id]; dup {
+				continue
+			}
+			seenTarget[id] = struct{}{}
+			audienceTargets = append(audienceTargets, id)
+		}
+		if len(audienceTargets) == 0 {
+			return command.Rejected(e, "POST_AUDIENCE_EMPTY", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_audience_empty", nil)
+		}
+		if len(audienceTargets) > maxAudienceTargets {
+			return command.Rejected(e, "POST_AUDIENCE_LIMIT_EXCEEDED", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_audience_limit", map[string]any{"max": maxAudienceTargets, "got": len(audienceTargets)})
+		}
+	} else if len(p.AudienceTargetIDs) > 0 {
+		return command.Rejected(e, "POST_AUDIENCE_REQUIRES_TARGETED", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_audience_requires_targeted", nil)
 	}
 	if p.AuthorType != "USER" && p.AuthorType != "AGENT" && p.AuthorType != "MERCHANT" && p.AuthorType != "PLATFORM_SPECIAL" {
 		return command.Rejected(e, "INVALID_AUTHOR_TYPE", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_author_type", nil)
@@ -1433,6 +1578,15 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 			return command.Rejected(e, "POST_POLL_SAVE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.poll_save_failed", nil)
 		}
 	}
+	// AI-TWIN-POST-AUDIENCE-001：同 POLL-VOTE-001 的理由——白名单必须真的落库，
+	// 失败要报失败。宁可让客户端看到失败去重发，也不要发出一条自称
+	// "只给这几个人看"、实际白名单是空的帖子（等于悄悄变成谁都看不到，因为
+	// postVisibleTo 对没查到白名单的 TARGETED 帖子是 fail-closed）。
+	if len(audienceTargets) > 0 {
+		if err := s.repository.SavePostAudienceTargets(ctx, post.ID, audienceTargets); err != nil {
+			return command.Rejected(e, "POST_AUDIENCE_SAVE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.post_audience_save_failed", nil)
+		}
+	}
 	go s.enrichPostClassification(post)
 	return command.Accepted(e, "Post", post.ID, 1, post.Status, eventRefs(domainEvents))
 }
@@ -1541,6 +1695,98 @@ func (s *Service) votePostPoll(ctx context.Context, e command.Envelope) command.
 	}, domainEvents)
 }
 
+// ---------- UpdatePostAudience ----------
+
+// AI-TWIN-POST-AUDIENCE-003（2026-09-22，用户反馈"帖文编辑本质就是一个
+// 开关，决定对哪个人展开"）：原型里受众条是可以在已发布帖子上直接点开
+// 重新设置的——不是只在发帖那一刻定死。AI-TWIN-POST-AUDIENCE-001 只做了
+// CreatePost 时写白名单，这里补上编辑已发布帖子受众的路径，复用同一套
+// 校验和同一张 post_audience_targets 表，不是另起一份数据模型。
+//
+// 只改 visibility + 受众白名单，不碰帖子其余字段——避免变成一个「什么都能
+// 改」的通用 UpdatePost 命令（那类命令的校验面会随时间失控）。
+type updatePostAudiencePayload struct {
+	PostID            string   `json:"postId"`
+	Visibility        string   `json:"visibility"`
+	AudienceTargetIDs []string `json:"audienceTargetIds"`
+}
+
+func (s *Service) updatePostAudience(ctx context.Context, e command.Envelope) command.Result {
+	var p updatePostAudiencePayload
+	if !decode(e.Payload, &p) || p.PostID == "" {
+		return command.Rejected(e, "INVALID_UPDATE_POST_AUDIENCE", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_update_post_audience", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "POST_AUDIENCE_UPDATE_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "localnet.post_audience_update_not_allowed", nil)
+	}
+	if p.Visibility != "PUBLIC" && p.Visibility != "TARGETED" {
+		// 这个开关只在"公开"和"指定好友"之间切——FOLLOWERS/AGENT_ONLY 不是
+		// 这个交互要表达的东西，改那两档走不到这里（也没有 UI 入口）。
+		return command.Rejected(e, "INVALID_POST_VISIBILITY", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_visibility", nil)
+	}
+	post, err := s.repository.GetPost(ctx, p.PostID)
+	if err != nil {
+		return command.Rejected(e, "POST_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "localnet.post_not_found", map[string]any{"postId": p.PostID})
+	}
+	if post.AuthorID != e.Actor.ID {
+		// 别人的帖子不能被你切换受众——即使你恰好是它现在的受众之一。
+		return command.Rejected(e, "NOT_POST_AUTHOR", "AUTHORIZATION", "AFTER_USER_ACTION", "localnet.not_post_author", nil)
+	}
+	if post.Status != "PUBLISHED" {
+		return command.Rejected(e, "POST_NOT_PUBLISHED", "BUSINESS_STATE", "AFTER_USER_ACTION", "localnet.post_not_published", nil)
+	}
+	// 同 createPost 的校验：TARGETED 必须有非空白名单，作者本人隐式可见
+	// 不需要出现在里面；PUBLIC 不携带白名单（切回公开就是清空，不是保留
+	// 上一次选的人以防"又切回 TARGETED 时悄悄复活旧名单"）。
+	var audienceTargets []string
+	if p.Visibility == "TARGETED" {
+		const maxAudienceTargets = 200
+		seenTarget := make(map[string]struct{}, len(p.AudienceTargetIDs))
+		for _, raw := range p.AudienceTargetIDs {
+			id := strings.TrimSpace(raw)
+			if id == "" || id == e.Actor.ID {
+				continue
+			}
+			if _, dup := seenTarget[id]; dup {
+				continue
+			}
+			seenTarget[id] = struct{}{}
+			audienceTargets = append(audienceTargets, id)
+		}
+		if len(audienceTargets) == 0 {
+			return command.Rejected(e, "POST_AUDIENCE_EMPTY", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_audience_empty", nil)
+		}
+		if len(audienceTargets) > maxAudienceTargets {
+			return command.Rejected(e, "POST_AUDIENCE_LIMIT_EXCEEDED", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_audience_limit", map[string]any{"max": maxAudienceTargets, "got": len(audienceTargets)})
+		}
+	}
+	updated := post
+	updated.Visibility = p.Visibility
+	updated.AudienceTargetIDs = nil // 读时才拼；写路径不需要、也不该带着旧值走一圈
+	if err := s.repository.UpdatePost(ctx, updated, 1); err != nil {
+		return command.Rejected(e, "POST_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.post_update_failed", nil)
+	}
+	// AI-TWIN-POST-AUDIENCE-001：同一个理由——白名单必须真的落库，失败要
+	// 报失败，不能让 visibility 已经改成 TARGETED、白名单却没写上，变成一条
+	// 谁都看不到的帖子（postVisibleTo 对查不到白名单的 TARGETED 帖子是
+	// fail-closed）。PUBLIC 传空列表，落库效果是清空旧白名单。
+	if err := s.repository.SavePostAudienceTargets(ctx, p.PostID, audienceTargets); err != nil {
+		return command.Rejected(e, "POST_AUDIENCE_SAVE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.post_audience_save_failed", nil)
+	}
+	domainEvents := []event.DomainEvent{event.New("PostAudienceUpdated", "Post", p.PostID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+		"visibility":  p.Visibility,
+		"audienceLen": len(audienceTargets),
+	})}
+	if audienceTargets == nil {
+		audienceTargets = []string{} // 契约要求 [] 而不是 null（见 AGENTS.md 的 array-not-null 约定）
+	}
+	return acceptedWithPayload(e, "Post", p.PostID, 1, "POST_AUDIENCE_UPDATED", map[string]any{
+		"postId":            p.PostID,
+		"visibility":        p.Visibility,
+		"audienceTargetIds": audienceTargets,
+	}, domainEvents)
+}
+
 // ---------- ListFeedPosts ----------
 // PRD §8 Feed 管道。ALL 是全部可见公开帖文，默认 createdAt DESC、
 // postId ASC；LocationContext 只作为元数据和显式“附近”筛选依据。
@@ -1567,10 +1813,10 @@ func (s *Service) listPostsByIds(ctx context.Context, e command.Envelope) comman
 		return command.Rejected(e, "INVALID_LIST_POSTS_BY_IDS", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_list_posts_by_ids", nil)
 	}
 	const maxPostIDs = 100
-	posts := make([]Post, 0, len(request.PostIDs))
+	candidates := make([]Post, 0, len(request.PostIDs))
 	seen := make(map[string]struct{}, len(request.PostIDs))
 	for _, rawID := range request.PostIDs {
-		if len(posts) >= maxPostIDs {
+		if len(candidates) >= maxPostIDs {
 			break
 		}
 		id := strings.TrimSpace(rawID)
@@ -1588,10 +1834,14 @@ func (s *Service) listPostsByIds(ctx context.Context, e command.Envelope) comman
 		if post.Status != "PUBLISHED" {
 			continue
 		}
-		if post.Visibility != "PUBLIC" && post.Visibility != "FOLLOWERS" {
-			continue
-		}
-		if post.Visibility == "FOLLOWERS" && post.AuthorID != e.Actor.ID {
+		candidates = append(candidates, post)
+	}
+	// AI-TWIN-POST-AUDIENCE-001: one batch query for the whole candidate set,
+	// not one per post.
+	audience := s.loadTargetedAudience(ctx, candidates)
+	posts := make([]Post, 0, len(candidates))
+	for _, post := range candidates {
+		if !postVisibleTo(post, e.Actor.ID, audience) {
 			continue
 		}
 		// GHOST-24H-001: 按 ID 直取也不能把已过期的临时动态捞回来。收藏夹里躺着
@@ -1609,6 +1859,7 @@ func (s *Service) listPostsByIds(ctx context.Context, e command.Envelope) comman
 		}
 		posts = append(posts, post)
 	}
+	posts = attachAudienceTargets(posts, e.Actor.ID, audience)
 	posts = s.attachPolls(ctx, posts, e.Actor.ID)
 	return acceptedWithPayload(e, "Post", "", 0, "POSTS_BY_IDS", map[string]any{
 		"posts": posts,
@@ -1751,17 +2002,16 @@ func (s *Service) listPostsMentioning(ctx context.Context, e command.Envelope) c
 	if err != nil {
 		return command.Rejected(e, "MENTION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.mention_read_failed", nil)
 	}
+	// AI-TWIN-POST-AUDIENCE-001: batch before the loop, not per post.
+	mentionAudience := s.loadTargetedAudience(ctx, posts)
 	matched := make([]Post, 0, len(posts))
 	for _, p := range posts {
 		// SQL 路径已经在 WHERE 里过了一遍，这里再判一次是纵深防御：只要有一处
-		// 实现漏掉可见性，TAGGED 就会漏出别人的 followers-only 帖子。
+		// 实现漏掉可见性，TAGGED 就会漏出别人指定受众之外的帖子。
 		if p.Status != "PUBLISHED" {
 			continue
 		}
-		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
-			continue
-		}
-		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
+		if !postVisibleTo(p, e.Actor.ID, mentionAudience) {
 			continue
 		}
 		if p.AuthorID == e.Actor.ID {
@@ -2012,13 +2262,15 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 			replyHits = hits
 		}
 	}
+	// AI-TWIN-POST-AUDIENCE-001: batch before the loop, not per post.
+	feedAudience := s.loadTargetedAudience(ctx, posts)
 	// ALL 是全局公开时间流；LocationContext 不参与 eligibility。
 	feed := make([]Post, 0, len(posts))
 	for _, p := range posts {
 		if p.Status != "PUBLISHED" {
 			continue
 		}
-		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
+		if !postVisibleTo(p, e.Actor.ID, feedAudience) {
 			continue
 		}
 		// SEARCH-CORPUS-001: 匹配字段见 postMatchesSearch
@@ -2030,11 +2282,6 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		// PG 侧同一条谓语写在 SQL 里（保证 LIMIT 数对），这里是内存仓的路径，
 		// 同时对 PG 结果再兜一层 —— 过期的东西宁可漏也别漏出来。
 		if postIsExpired(p, s.clock.Now().UTC()) {
-			continue
-		}
-		// Follow-graph authorization is not implemented yet. Fail closed instead
-		// of treating FOLLOWERS as public; authors may still see their own post.
-		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
 			continue
 		}
 		if !cursor.CreatedAt.IsZero() && (p.CreatedAt.After(cursor.CreatedAt) || (p.CreatedAt.Equal(cursor.CreatedAt) && p.ID <= cursor.PostID)) {
@@ -2066,6 +2313,7 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		raw, _ := json.Marshal(map[string]any{"createdAt": last.CreatedAt, "postId": last.ID})
 		nextCursor = signCursor(raw)
 	}
+	feed = attachAudienceTargets(feed, e.Actor.ID, feedAudience)
 	feed = s.attachPolls(ctx, feed, e.Actor.ID)
 	feedMedia := s.hydratePostMedia(ctx, feed)
 	return acceptedWithPayload(e, "Post", "", 0, "FEED", map[string]any{

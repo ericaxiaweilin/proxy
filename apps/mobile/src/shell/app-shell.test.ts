@@ -37,6 +37,21 @@ describe("app shell guest path", () => {
     // showing the guest view; it should still render MeSurface.
     expect(selectMeTabView({ isGuest: false, voucherOpen: false })).toBe("me");
   });
+
+  // SCENE-MAP-DEFAULT-001: "打开附近场景地图" (no sceneId) used to hardcode
+  // realitySceneSelection to "threebeans" — every tap landed on the same
+  // one coffee shop's detail page instead of the scene map/list overview
+  // RealitySceneMapSurface already supports when initialSceneId is
+  // undefined. Lock in that the handler passes sceneId straight through
+  // with no hardcoded fallback.
+  it("SCENE-MAP-DEFAULT-001: onOpenSceneMap forwards sceneId with no hardcoded fallback scene", () => {
+    const source = readFileSync(new URL("./app-shell.tsx", import.meta.url), "utf8");
+    const start = source.indexOf("onOpenSceneMap={(sceneId) => {");
+    expect(start).toBeGreaterThan(-1);
+    const handler = source.slice(start, source.indexOf("}}", start));
+    expect(handler).toContain("setRealitySceneSelection(sceneId);");
+    expect(handler).not.toContain("threebeans");
+  });
 });
 
 describe("app shell scroll chrome ownership", () => {

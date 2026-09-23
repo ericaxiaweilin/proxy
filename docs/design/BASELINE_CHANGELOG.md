@@ -4,6 +4,51 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 243 — 2026-09-22
+
+- **房间见面进壳**（ROOM-CREATE-001）：`app-shell` 新增创建房间面板 +
+  房间聊天页（GROUP + RoomScene），`conversation-client` 新增
+  Propose/Accept/Nudge/Arrive/CompleteMeetup；`main.go` 只做服务接线，
+  不改视觉。
+- **场景地图默认不再硬编码 threebeans**（SCENE-MAP-DEFAULT-001）：无参
+  打开为地图/列表总览，带 sceneId 才直达详情。
+- **聊天门禁提示分槽**（COMP-AI-MINOR-001 聊天侧）：`conversation.tsx`
+  新增持久门禁横幅（GATED 重试无效），瞬时失败仍走 error，不改气泡视觉。
+- **主页帖子失败与空态分开**（PROFILE-POSTS-FAILURE-001）：`ProfileTabs`
+  新增 `postsFailed`，失败显示“动态没读出来”，不再冒充“还没有动态”；
+  `me.tsx` 主页搜索/图库排除 TARGETED 私密帖（AUDIENCE-004），相对路径
+  经 resolveMediaUrl 拼装（GALLERY-004）。
+- **「更多」页距离改成真半径控件**（HOME-MORE-DIST-001）：照
+  `deepseek_html_20260922_1c2e2c.html` 的 distance-chip，「附近」不再是
+  写死 1km 的开关 —— 距离恒生效、可选 1/3/5/10/20/50/100 km（默认 10km），
+  chip 显示当前半径并展开滑杆面板；距离未知的人在任何半径下都不算「附近」
+  （PERSON-DISTANCE-ZERO-001 不变）。chip 样式随原型：无边框、选中转深色。
+- **首页 rail 全部换成真账号写真**（HOME-RAIL-ACCOUNT-001）：废止
+  OVERRIDE-UNSplash-001 的 5 张 stock 占位图（其中 4 张是风景/食物，被当成
+  人脸渲染），28 个 rail 人物全部对应服务端真实账号 + 写真 thumb；缺图回落
+  首字母。目标不存在的好友申请服务端明确拒绝（FRIEND-TARGET-EXISTS-001），
+  文案区分“人不存在”与“不收申请”。
+- **首页语言可选**（HOME-I18N-001）：照原型 `deepseek_html_20260922_1c2e2c.html`
+  的 `LANGS` / 选择语言 sheet，新增 `src/i18n.ts`（6 种语言：zh/vi/en/lo/ko/ja，
+  文案直接取原型 I18N 原文）+ `src/components/language-sheet.tsx`（底部面板），
+  真人推荐页头加「中」按钮显示**当前**语言短标；选完落盘 `pref_language`、
+  冷启动读回。首页整面 chrome（章节标题、空态、按钮、a11y、AI 对话回话、
+  破冰开场白、骑行档位、距离 chip 单位）改为走 `t()`，不再写死中文。
+  顺带修 `preferences.ts` 的语言校验：原先只认字面量 `"vi"`/`"en"`，其它一律
+  回落 `"zh"` —— 会把新增的 lo/ko/ja **静默吞回中文**；改为 i18n 白名单判定。
+  用户可见改动：页头多一个语言按钮、页面文案随语言切换。
+- 影响文件：`apps/api-go/cmd/api/main.go`、
+  `apps/mobile/src/components/language-sheet.tsx`、
+  `apps/mobile/src/conversation-client.ts`、
+  `apps/mobile/src/i18n.ts`、
+  `apps/mobile/src/media/author-avatar.ts`、
+  `apps/mobile/src/preferences.ts`、
+  `apps/mobile/src/shell/app-shell.tsx`、
+  `apps/mobile/src/surfaces/ProfileTabs.tsx`、
+  `apps/mobile/src/surfaces/conversation.tsx`、
+  `apps/mobile/src/surfaces/me.tsx`、
+  `apps/mobile/src/surfaces/requester-home.tsx`。
+
 ## Revision 242 — 2026-09-20
 
 - **访客首页不再弹"好友状态暂时无法加载"**（GUEST-RELATIONSHIP-001）：

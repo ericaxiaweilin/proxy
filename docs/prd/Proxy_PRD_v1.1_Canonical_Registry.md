@@ -381,6 +381,11 @@ Proxy_PRD_v1.0_Complete.md
 
 其中成熟原则已被 v1.1 专题 Chapter 吸收。
 
+> **2026-09-22**：清单里除 `Proxy_MVP_功能规格.md`、`Proxy_检索匹配与治理规则.md`
+> 之外的文件已从仓库删除（文档整理 —— 它们被 v1.1 Canonical Registry 取代，
+> 且全仓无任何代码/门禁引用）。需要回溯时从 git 历史取：
+> `git log --diff-filter=D --name-only -- 'Proxy_PRD_v0.*'`。
+
 ---
 
 ## 3.2 Content Conflict

@@ -71,6 +71,11 @@ export interface ProfileTabsProps {
   savedFailed?: boolean;
   repliesFailed?: boolean;
   taggedFailed?: boolean;
+  // PROFILE-POSTS-FAILURE-001（补齐）: POSTS 当初被漏掉了 —— me.tsx 把失败处理成
+  // 「条数显示 —」＋一条可重试的提示，但**帖子列表本身**照样传空数组进来，于是
+  // 同一屏上横幅写着「不是你没有动态」、下面的空态却写着「还没有动态」。
+  // 一个说没拉到、一个说你没发过，用户只能信后者。同 savedFailed 口径。
+  postsFailed?: boolean;
   // REPLY-TARGET-001: 判定「这条帖子是不是访问者自己的」用，跟 feed 同一套
   // 身份规则（resolveAuthorDisplayName）。缺省 = 游客，一律不当成自己。
   viewerAccountId?: string | undefined;
@@ -197,6 +202,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
         <PostsTab
           pinnedPost={pinnedPost}
           posts={unpinnedPosts}
+          failed={props.postsFailed}
           mediaByPost={props.mediaByPost}
           pinnedIds={props.pinnedIds}
           avatarUri={props.profileAvatarUri}
@@ -256,6 +262,9 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
 function PostsTab(props: {
   pinnedPost: FeedPost | undefined;
   posts: FeedPost[];
+  // PROFILE-POSTS-FAILURE-001: 拉动态失败时调用方传的是空数组，跟「一条都没发」
+  // 长得一模一样。这个 flag 把两者分开 —— 见下面两个空态。
+  failed?: boolean | undefined;
   mediaByPost: Record<string, FeedMediaItem[]>;
   avatarUri?: string | undefined;
   name: string;
@@ -299,7 +308,9 @@ function PostsTab(props: {
           </View>
         </View>
         {allMediaEntries.length === 0 ? (
-          <ProxyEmptyState title="还没有图片" sub="发布带图的帖子后会出现在这里" />
+          props.failed
+            ? <ProxyEmptyState title="动态没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />
+            : <ProxyEmptyState title="还没有图片" sub="发布带图的帖子后会出现在这里" />
         ) : (
           <View style={styles.photoGrid}>
             {allMediaEntries.map((entry) => (
@@ -357,7 +368,9 @@ function PostsTab(props: {
       ) : null}
 
       {props.posts.length === 0 && !props.pinnedPost ? (
-        <ProxyEmptyState title="还没有动态" sub="发布的第一条帖子会出现在这里" />
+        props.failed
+          ? <ProxyEmptyState title="动态没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />
+          : <ProxyEmptyState title="还没有动态" sub="发布的第一条帖子会出现在这里" />
       ) : (
         props.posts.map((post) => (
           <PostCard

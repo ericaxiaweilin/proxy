@@ -451,39 +451,26 @@ if grep -rq 'randomuser.me' apps/api-go --include='*.go'; then
   echo "  FAIL [IDENTITY-ID-001]: external avatar URL literal found in server source" >&2
   exit 1
 fi
+# HOME-RAIL-ACCOUNT-001（2026-09-23，用户报 P0）：首页 rail 上不许再出现 stock
+# 外链头像。这条曾经是一条**放宽**（2026-09-18 批准：无账号的 fixture 人按 id
+# 哈希落 5 张 unsplash「原型肖像」，理由是 mock 期不许灰头像）。2026-09-23 废止，
+# 因为 ① 那 5 张里只有 1 张是人脸，其余是下龙湾风景 / 咖啡店室内 / 城市天际线 /
+# 一盘炒河粉，正被当成「真人」头像渲染；② 放宽的前提（有人没账号）已经消失 ——
+# rail 上 28 个人全部有账号和写真资产。缺图回落首字母，不许拿风景照冒充人脸。
 if grep -q 'images.unsplash.com' apps/mobile/src/recommend-fixtures.ts; then
-  # R34 放宽（OVERRIDE-UNSplash-001，commander 决定 2026-09-18）：mock 期不许灰
-  # 头像，无真人账户的 fixture 允许用 stock 占位 —— 但必须同时满足三条，
-  # 缺一条就还是按违规处理：
-  # ① 所有 unsplash URL 只能出现在 R34_HUMAN_PORTRAITS 注册表内（不许散落各处）；
-  # ② 有账户的一律走写真 thumb（ACCOUNT_AVATAR_ASSET 分支），不许走 R34；
-  # ③ 服务端人物 feed 落地后整段删除，回到有账号才有头像（到期人工执行）。
-  R34_START=$(grep -n 'const R34_HUMAN_PORTRAITS' apps/mobile/src/recommend-fixtures.ts | cut -d: -f1)
-  R34_END=$(awk -v s="$R34_START" 'NR>s && /^\] as const/ {print NR; exit}' apps/mobile/src/recommend-fixtures.ts)
-  R34_OK=true
-  while IFS= read -r ln; do
-    n=${ln%%:*}
-    if [ -z "$R34_START" ] || [ -z "$R34_END" ] || [ "$n" -lt "$R34_START" ] || [ "$n" -gt "$R34_END" ]; then
-      R34_OK=false
-    fi
-  done <<-LINES
-	$(grep -n 'images.unsplash.com' apps/mobile/src/recommend-fixtures.ts)
-	LINES
-  if [ "$R34_OK" != "true" ]; then
-    echo "  FAIL [IDENTITY-ID-001]: unsplash portrait outside the R34 registry ——" >&2
-    echo "        stock 脸只能住在 R34_HUMAN_PORTRAITS 里，不许散落。" >&2
-    exit 1
-  fi
-  if ! grep -q 'ACCOUNT_AVATAR_ASSET\[person.id\] !== undefined' apps/mobile/src/recommend-fixtures.ts ||
-     ! grep -q 'R34_HUMAN_PORTRAITS\[portraitIndexForPerson(person.id)\]' apps/mobile/src/recommend-fixtures.ts; then
-    echo "  FAIL [IDENTITY-ID-001]: wired accounts must use portrait assets, R34 is fallback only ——" >&2
-    echo "        有账号走写真 thumb，无账号才按 id 哈希落 R34。" >&2
-    exit 1
-  fi
-  echo "    IDENTITY-ID-001: PASS with R34 fallback (registry-confined stock, wired accounts on portraits)"
-else
-  echo "    IDENTITY-ID-001: PASS (single source of truth for mock identity)"
+  echo "  FAIL [IDENTITY-ID-001]: 首页 rail 不许再有 stock 外链头像 ——" >&2
+  echo "        rail 上每个人都必须是真实账号 + 写真资产（HOME-RAIL-ACCOUNT-001）；" >&2
+  echo "        缺图时回落首字母，不许拿风景照/食物照冒充人脸。" >&2
+  grep -n 'images.unsplash.com' apps/mobile/src/recommend-fixtures.ts >&2
+  exit 1
 fi
+if ! grep -q 'withAccountPortraits' apps/mobile/src/recommend-fixtures.ts ||
+   ! grep -q 'ACCOUNT_AVATAR_ASSET\[person.id\]' apps/mobile/src/recommend-fixtures.ts; then
+  echo "  FAIL [IDENTITY-ID-001]: 头像必须来自账号写真资产 ——" >&2
+  echo "        photoUri 只有一个来源：/v1/media/thumb/<该账号的 assetId>。" >&2
+  exit 1
+fi
+echo "    IDENTITY-ID-001: PASS (single source of truth for mock identity, no stock fallback)"
 
 # CREATOR-HANA-NAM-001: Hana / Nam 转正 —— facet 键、写真资产、identity 行、
 # 首页映射四件齐，否则首页回落 stock / 关注落到幽灵 id。
@@ -498,6 +485,70 @@ if ! grep -q "'hana'), ('nam')" apps/api-go/scripts/seed_creator_portraits.sql |
   exit 1
 fi
 echo "    CREATOR-HANA-NAM-001: PASS (Hana/Nam are real accounts with real faces)"
+
+# HOME-RAIL-ACCOUNT-001（2026-09-23，用户报 P0）：首页「真人推荐」rail 上出现的
+# 每一个人都必须有服务端账号。
+#
+# 此前 28 个人里只有 7 个有账号，其余 21 个点 + 只会得到「还没有账号，暂时加不了
+# 好友」—— 卡片上却顶着「真人」徽标；ACTIVITY / TRIP / CREATOR / TRANSLATE /
+# MEDICAL 五个场景一个真人都没有。上一版把「没账号」当成正常情况，只把错误说得
+# 更礼貌；这一版改成「造 mock 人物可以，造没有账号的人不行」。
+#
+# 三处一起守（缺一条都能漂移回原样）：
+#   ① 客户端：rail 上每个人都能解析到账号（vitest 逐个断言 accountless 为空）；
+#   ② 服务端人物表与客户端 fixture 逐条一致（go test 直接读客户端文件）；
+#   ③ 作者头像那第三条镜像表同步（漏一个人 = 首页有脸、动态里黑底首字）；
+#   ④ 种子真的被接线（建了账号目录却不调用 = 还是没有账号）。
+require_test "HOME-RAIL-ACCOUNT-001" "./internal/mockidentity" \
+  "TestHomeRailFixturePeopleAllHaveServerAccounts" \
+  "apps/api-go/internal/mockidentity/homerail_test.go" || exit $?
+require_test "HOME-RAIL-ACCOUNT-001" "./internal/mockidentity" \
+  "TestAuthorAvatarMirrorMatchesAllFacetKeys" \
+  "apps/api-go/internal/mockidentity/homerail_test.go" || exit $?
+require_test "HOME-RAIL-ACCOUNT-001" "./internal/mockidentity" \
+  "TestHomeRailIdentitiesAreDistinct" \
+  "apps/api-go/internal/mockidentity/homerail_test.go" || exit $?
+if ! grep -q 'seedPostgresHomeRail(pool, mediaStoreDir)' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [HOME-RAIL-ACCOUNT-001]: 服务端 rail 账号种子没接线 ——" >&2
+  echo "        mockidentity.HomeRailPeople 有表、seedPostgresHomeRail 有实现，" >&2
+  echo "        但 main.go 不调用，等于 rail 上还是没有账号。" >&2
+  exit 1
+fi
+if ! grep -q 'HOME-RAIL-ACCOUNT-001' apps/mobile/src/requester-home-friend-id.test.ts; then
+  echo "  FAIL [HOME-RAIL-ACCOUNT-001]: 客户端逐个断言 rail 人物有账号的测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile test --run src/requester-home-friend-id.test.ts || exit $?
+echo "    HOME-RAIL-ACCOUNT-001: PASS (every rail person is a real account)"
+
+# FRIEND-TARGET-EXISTS-001（2026-09-23）：目标账号不存在时，SendFriendRequest 必须
+# 拒绝，而不是写一条永远没人能同意的 PENDING。
+#
+# 这是 HOME-RAIL-ACCOUNT-001 的服务端半边。客户端已经把 fixture id 解析成账号 id
+# 再发，但客户端不是权限边界 —— 旧客户端 / curl 仍能直调 SendFriendRequest。
+# 库里实测攒过 12 条 user_a/user_b 是 u_* 的死行（894f256 清掉的那批），
+# 来源就是这里从来没校验过目标存在性：用户看到「申请已发送」，其实没有收件人。
+#
+# 判定必须用 identity.user_accounts 的**精确**存在性（GetUser → ErrUserNotFound），
+# 不能用 AuthorNameResolver：后者要求 profile.name 非空，会把「账号存在但还没起名」
+# 的人误判成不存在 —— 那会把正常申请也拒掉，比原 bug 更糟。这条 grep 就是钉这个。
+require_test "FRIEND-TARGET-EXISTS-001" "./internal/relationship" \
+  "TestFriendRequestToMissingAccountIsRejectedWithoutRow" \
+  "apps/api-go/internal/relationship/friend_target_exists_test.go" || exit $?
+require_test "FRIEND-TARGET-EXISTS-001" "./internal/relationship" \
+  "TestMissingAccountAndAINonAcceptorHaveDistinctCodes" \
+  "apps/api-go/internal/relationship/friend_target_exists_test.go" || exit $?
+if ! grep -q 'SetTargetAccountExists' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [FRIEND-TARGET-EXISTS-001]: 生产没接线目标存在性判定 ——" >&2
+  echo "        relationship 有窄函数、有检查，但 main.go 不注入，等于没修。" >&2
+  exit 1
+fi
+if ! grep -q 'identityRepository.GetUser' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [FRIEND-TARGET-EXISTS-001]: 存在性判定必须走 identity.user_accounts 的 GetUser ——" >&2
+  echo "        换成 AuthorNameResolver 会把没起名的真实账号误判为不存在。" >&2
+  exit 1
+fi
+echo "    FRIEND-TARGET-EXISTS-001: PASS (requests to missing accounts are rejected)"
 
 # IDENTITY-ID-001 附加：不得再按「显示名」匹配人。用户名可编辑、可重复，按名字找人在
 # 改名或同名用户存在时会串人（requester-home 曾用 p.name.includes("linh") 选人）。
@@ -524,8 +575,19 @@ done
 echo "    HOME-AVATAR-FALLBACK-001: PASS (home avatars fall back to initials on error)"
 
 # UI-HOME-DISCOVERY-001: 首页发现层级冻结。真人推荐必须在 AI 推荐之前；
-# 两区都要显式标识身份。Owner 决议：一键加好友可在首页做（+ 徽标直调
-# follow），发消息仍只能进主页后做。语义变更待 commander 确认。
+# 两区都要显式标识身份。Owner 决议（旧）：一键加好友可在首页做（+ 徽标直调
+# follow），发消息仍只能进主页后做。
+#
+# 2026-09-22 语义变更（AI-FRIEND-DEAD-PENDING-001，随在制工作落地）：
+# AI 推荐卡上那个 + 号走的是真人同一套 SendFriendRequest，而平台 AI 永远不会
+# accept（服务端另有 AI-FRIEND-REQUEST-001 守卫）—— 它是一条永远卡在 PENDING 的
+# 死记录，UI 还诚实地说「好友申请已发送」。该位置改成「发消息」，直连已有的对话链；
+# AI 主页那个「发消息」保留不动（见 PLACEHOLDER-010），所以「仍从主页进入」没被推翻。
+# 钉同步从反向断言改成正向断言：必须是真对话入口，不是空按钮。
+#
+# ⚠️ 这次语义变更仍待 commander 确认。要退回只需两处：还原 requester-home.tsx
+# 那个 onPress 回 + 徽标，并把 requester-home-discovery-contract.test.ts 里
+# onMessageAI 的三条正向断言改回 `not.toContain("onMessageAI?.(account)")`。
 pnpm --filter @proxy/mobile test --run src/requester-home-discovery-contract.test.ts || exit $?
 echo "    UI-HOME-DISCOVERY-001: PASS"
 
@@ -711,7 +773,8 @@ require_test "MEDIA-REVIEW-PARTITION-001" "./internal/platform/postgres" \
 for migration in \
   111_rls_drift_off_scene_contribution \
   112_media_review_decisions_app_role_access \
-  113_media_review_decisions_forward_partitions; do
+  113_media_review_decisions_forward_partitions \
+  114_twin_operate_actions; do
   if [ ! -f "apps/api-go/migrations/${migration}.sql" ]; then
     echo "  FAIL [RLS-DRIFT-001]: apps/api-go/migrations/${migration}.sql 不见了。" >&2
     echo "        它是把 RLS 漂移 / 审计表写路径 / 分区窗口收归迁移管理的那条迁移；" >&2
@@ -719,6 +782,66 @@ for migration in \
     exit 1
   fi
 done
+
+# ── TWIN-INSIGHT-002 ────────────────────────────────────────────────────────
+# AI 分身「好友洞察」曾经是**纯虚构**：客户端 twin-insight-demo.ts 里躺着
+# 6 个编造好友（Alex/Tom/Minh/Brandon/陈先生/王老板）和编造的分数、建议、
+# 对话摘要；服务端 /v1/ai/twins/* **一个路由都没有** ⇒ 每次请求 404 ⇒
+# 静默降级成那份假数据，屏幕上还挂一个演示角标，看起来像功能做完了。
+# 用户 2026-09-22：「数据也不是真的」。
+#
+# 现在四个端点都接了真表（relationship.friendships + localnet.interaction_events
+# + conversation.messages + engagement.reactions），假数据模块已删除。
+#
+# 这里钉三件事：① 端点真的存在并被门禁守着；② 假数据的入口不存在（反向钉）；
+# ③ 写侧依赖没接时 fail-closed 503，绝不"点了按钮没留痕"。
+require_test "TWIN-INSIGHT-002" "./internal/twininsight" \
+  "TestFriendsWithNoFactsStillAppearWithZeros" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-002" "./internal/twininsight" \
+  "TestScoreWeightsConversationAboveImpressions" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-002" "./internal/twininsight" \
+  "TestRecordOperateRejectsNonFriendTarget" \
+  "apps/api-go/internal/twininsight/operate_test.go" || exit $?
+require_test "TWIN-INSIGHT-002" "./internal/twininsight" \
+  "TestRefreshSummaryFailsClosedWhenModelStackUnconfigured" \
+  "apps/api-go/internal/twininsight/summary_test.go" || exit $?
+# HTTP 门禁：读端点**也要会话**（PRD 写的是匿名，这里刻意偏离 —— payload 是
+# 第三方行为数据，匿名可读等于任何人拿一个 twinId 就能读别人好友的行为轨迹）。
+require_test "TWIN-INSIGHT-002" "./internal/api" \
+  "TestTwinInsightsReadRequiresSession" \
+  "apps/api-go/internal/api/twin_insight_handlers_test.go" || exit $?
+require_test "TWIN-INSIGHT-002" "./internal/api" \
+  "TestTwinInsightsReadRejectsNonOwner" \
+  "apps/api-go/internal/api/twin_insight_handlers_test.go" || exit $?
+require_test "TWIN-INSIGHT-002" "./internal/api" \
+  "TestTwinInsightOperateRecordsAuditableRow" \
+  "apps/api-go/internal/api/twin_insight_handlers_test.go" || exit $?
+require_test "TWIN-INSIGHT-002" "./internal/api" \
+  "TestTwinInsightSummaryFailsClosedWhenModelStackUnwired" \
+  "apps/api-go/internal/api/twin_insight_handlers_test.go" || exit $?
+
+# 反向钉：**虚构兜底数据不许回来**。
+# 为什么需要反向钉：正向的"能渲染洞察"在两种实现下都绿 —— 接真服务端绿，
+# 接一份假数据也绿。只有钉住"假数据的入口不存在"才会真的失败。
+if [ -f "apps/mobile/src/components/twin-insight-demo.ts" ]; then
+  echo "  FAIL [TWIN-INSIGHT-002]: apps/mobile/src/components/twin-insight-demo.ts 又回来了。" >&2
+  echo "        那是 6 个编造好友（Alex/Tom/Minh/Brandon/陈先生/王老板）+ 编造分数/建议，" >&2
+  echo "        用户 2026-09-22 明确说「数据也不是真的」。洞察只许来自服务端真表。" >&2
+  exit 1
+fi
+if grep -q 'DEMO_PAYLOAD\|twin-insight-demo' apps/mobile/src/components/twin-insight-section.tsx; then
+  echo "  FAIL [TWIN-INSIGHT-002]: twin-insight-section.tsx 又在引用演示兜底数据。" >&2
+  echo "        读不出来必须走错误态 + 重试，不许静默降级成假数据。" >&2
+  exit 1
+fi
+# 服务端路由必须挂上（不挂 = 客户端 404 = 又一次静默降级）。
+if ! grep -q '"/v1/ai/twins/"' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [TWIN-INSIGHT-002]: /v1/ai/twins/ 路由没挂在 server.go 上。" >&2
+  echo "        客户端只会拿到 404，然后把兜底假数据显示出来。" >&2
+  exit 1
+fi
 
 # AIBOUND-001: DismissMarketOpportunity 曾经无 aiboundary 落点（AI 可调），
 # market 写曾经无 USER 主体检查（与 activity 不对称）。现 Dismiss 进 gate，
@@ -1261,16 +1384,17 @@ if ! grep -q 'PLACEHOLDER-009' apps/mobile/src/surfaces/placeholder-honest-actio
 fi
 echo "    PLACEHOLDER-009: PASS (tripwire present; covered by the vitest run above)"
 
-# PLACEHOLDER-010: AI 添加待同意显示添加中。
+# PLACEHOLDER-010: AI 主页只留真有结果的动作（AI-FRIEND-DEAD-PENDING-001）。
+# 旧的语义是「AI 添加待同意显示添加中」—— 那个 PENDING 是死记录，已删除。
 if ! grep -q 'PLACEHOLDER-010' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
-  echo "  FAIL [PLACEHOLDER-010]: ai-pending tripwire is missing" >&2
+  echo "  FAIL [PLACEHOLDER-010]: ai-honest-actions tripwire is missing" >&2
   exit 1
 fi
 echo "    PLACEHOLDER-010: PASS (tripwire present; covered by the vitest run above)"
 
-# PLACEHOLDER-011: 待定添加灰字。
+# PLACEHOLDER-011: 那条 添加中/PENDING 死状态不许回来（含它的样式）。
 if ! grep -q 'PLACEHOLDER-011' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
-  echo "  FAIL [PLACEHOLDER-011]: pending-gray tripwire is missing" >&2
+  echo "  FAIL [PLACEHOLDER-011]: dead-pending tripwire is missing" >&2
   exit 1
 fi
 echo "    PLACEHOLDER-011: PASS (tripwire present; covered by the vitest run above)"
@@ -2896,6 +3020,160 @@ if ! grep -qF 'personaSvc.SetAgeLookup(' apps/api-go/cmd/api/main.go; then
   echo "  FAIL [COMP-AI-MINOR-001]: the age lookup is no longer wired in cmd/api/main.go." >&2
   exit 1
 fi
+
+# COMP-AI-MINOR-001（聊天侧）：上面那道门只守在「建分身」上。平台 AI 伴侣
+# （ai_001..005）是平台自带账号 —— 带 assistantMode 建会话就能直接拿到开场白，
+# 一条用户消息都不用发。所以聊天入口必须再拦一道，否则「未成年人不发消息也
+# 拿不到 AI」是假的。判定复用同一个 CompanionAllowedFor，不另写一套年龄规则。
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionGateUnwiredDeniesEveryone" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionGateDenialReportsGatedWithoutWelcome" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionGateBlocksTheModelCallWhenDenied" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+# 反向也钉：允许时必须真的通。没有这一条，上面几条拒绝断言可能只是因为门禁
+# 永远返回 false —— 那测的是「功能被关掉了」，不是「门禁接上了」。
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionGateApprovalKeepsTheCompanionAlive" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+
+# assistantMode 是**调用方自愿提供的**参数，而客户端有好几条路不带它 ——
+# 活动卡片、位置卡片压根不带，名片和语音曾经连回包都不看。
+# 所以「这条会话对面是不是平台 AI 伴侣」必须能从会话成员认出来，
+# 不能只信 assistantMode。否则两个后果同时发生：
+#   1. 合规：被建分身门禁拦掉的账号，发送时不带 assistantMode 就完全不受门禁约束
+#      （活动卡片就是这么发的）—— 门禁形同虚设；
+#   2. 功能：模型拿到**需求助手**的 system prompt、回复署名 proxy_ai，
+#      而客户端按 sender 回退渲染成「AI 虚拟女孩」在说话 ——
+#      女孩的脸配需求助手的口吻（"有没有预算范围？"）。
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionVoiceSurvivesAMissingAssistantMode" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionGateHoldsWhenTheSendOmitsAssistantMode" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+# 开场白和门禁必须是同一个判断。门禁认了「这是伴侣会话」而开场白不认的话，
+# 会话建好了、一条问候都没有、assistantStatus 整个字段缺席 ——
+# 用户进到一间空房间，客户端连"为什么没消息"都拿不到。
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionWelcomeDoesNotDependOnAssistantMode" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+# 负向对照：真人 DM 不能被这个兜底误伤。
+# 没有这一条，上面两条可能只是因为**所有**会话都拿到了伴侣人设 ——
+# 那样首页 / 需求助手全废，而测试还是绿的。
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestHumanDirectMessageKeepsTheRequirementAssistant" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+
+# 接线点必须存在。companion_gate 是 fail-closed 的：没接 = 对所有账号关闭，
+# 而「忘了接线」和「故意关掉」在测试里长得一模一样 —— 只有这条能分辨。
+# 这里踩过一次：门禁定义好了、注释还写着「生产实现见 cmd/api 的接线」，
+# 但真正接上的是 twininsight.Service，conversation.Service 一直没接。
+if ! grep -qF 'conversationService.SetCompanionGate(' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the companion gate is no longer wired onto the" >&2
+  echo "        conversation service in cmd/api/main.go. A nil gate denies everyone," >&2
+  echo "        so platform AI companion chat is dead for 100% of users." >&2
+  exit 1
+fi
+# 两个入口都要拦：开新会话（带 assistantMode 就有开场白）和发消息。
+# 只拦一个的话，另一条路照样能跟 AI 伴侣聊。
+gate_calls=$(grep -cF 's.companionAllowedFor(ctx, e.Actor.ID)' apps/api-go/internal/conversation/service.go)
+if [ "$gate_calls" -lt 2 ]; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the chat-entry gate fires at $gate_calls of the 2 entry" >&2
+  echo "        points (StartConversation + SendMessage). One unguarded path is enough" >&2
+  echo "        for an account that should have been refused to keep chatting." >&2
+  exit 1
+fi
+# GATED 不许被折叠成 FAILED/UNAVAILABLE —— 那是把「依法不提供」说成「服务坏了」，
+# 用户会一直重试一个永远不会成功的东西。契约放 contracts，两端一起认。
+if ! grep -qF '"GATED"' packages/contracts/src/conversation.ts; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the GATED assistant status is gone from the contracts." >&2
+  exit 1
+fi
+if ! grep -qF 'parseAssistantStatus' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the client no longer reads assistantStatus, so GATED" >&2
+  echo "        renders as silence — 'no access' would look like 'no reply'." >&2
+  exit 1
+fi
+# 会渲染 AI 状态的表面必须真的分支到 GATED —— 否则服务端说「依法不提供」，
+# 这一屏什么都不说，又变回沉默。
+#
+# 会话页是**活路径**：开场白 / 文字 / 图片 / 视频四条都带 assistantMode=AI_PERSONA，
+# 门禁一拦就是 GATED，所以这里要真钉住。
+if ! grep -qF '"GATED"' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: conversation.tsx does not branch on GATED — the" >&2
+  echo "        server says 'not provided by policy' and this surface says nothing." >&2
+  exit 1
+fi
+# 首页助手（HomeAssistantSurface）**今天不是伴侣表面**：它的 HomeIntentMode 只有
+# SERVICE / ORDER / ACTIVITY，没有一个带 AI_PERSONA 前缀（只有 HomeChatBox 能
+# 产生 mode，也只有这三个值），所以服务端永远不会对它回 GATED。
+# 那句 GATED 文案留着是对的 —— 将来首页对话真加了伴侣入口时，它必须已经在；
+# 但它**不能算「GATED 已被覆盖」的证据**（原来这条钉就是这么写的，等于拿一句
+# 到不了的话冒充覆盖）。所以改成守**边界**：一旦这个表面开始说 AI_PERSONA，
+# 这条钉就红，逼那个人去把 GATED 这条路真的走一遍。
+if grep -qF 'AI_PERSONA' apps/mobile/src/surfaces/home-assistant.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: home-assistant.tsx now speaks to an AI companion" >&2
+  echo "        (AI_PERSONA showed up in it), but this surface has never been shown to" >&2
+  echo "        render GATED. Its HomeIntentMode set was SERVICE/ORDER/ACTIVITY — a" >&2
+  echo "        companion mode here makes the gate reachable on an unverified path." >&2
+  exit 1
+fi
+# 光有「分支到 GATED」不够 —— 还得保证那句提示进的是**不会被轮询擦掉**的槽。
+# 这里踩过一次（2026-09-22）：上面那 4 个入口全都把 assistantStatusNotice 的
+# 返回值塞进 setError，而会话页每 3 秒轮询一次、hydrateMessages 结尾有一句
+# setError(undefined)（那是给「这次请求失败了」这种瞬时态收尾的）—— 结果是
+# 门禁提示闪一下就被清掉，用户回到一个空会话，跟没提示一模一样。GATED 是
+# 账号级状态（"重试无效"），不是一次失败，它必须有自己的槽。
+if ! grep -qF 'companionGatedNotice ?' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the gated notice is no longer rendered in its own" >&2
+  echo "        slot. In the transient error slot it is wiped by the 3s message poll," >&2
+  echo "        so the user sees it flash once and is left staring at an empty chat." >&2
+  exit 1
+fi
+if ! grep -qF 'persistent: true' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: GATED is no longer classified as a persistent notice," >&2
+  echo "        so it will be routed back into the self-clearing error slot." >&2
+  exit 1
+fi
+# 分类对了还不够 —— 得真的写进那个槽。有人把 setCompanionGatedNotice 改回
+# setError 的话，上面几条（槽存在、有渲染、4 个入口都走分派器）全都照样绿，
+# 而用户看到的又变成闪一下就没。这条钉的就是那一行本身。
+if ! grep -qF 'setCompanionGatedNotice(notice.text)' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the persistent notice is no longer written to its" >&2
+  echo "        own slot — someone routed it back through setError. The slot, the" >&2
+  echo "        render and the 4 dispatch sites all still look fine, but the 3s poll" >&2
+  echo "        clears it and the gated user is back to an unexplained empty chat." >&2
+  exit 1
+fi
+# 伴侣入口的个数**不能写死**。凡是往服务端发 AI_PERSONA 的调用点，都必须消费回包里的
+# assistantStatus —— GATED 只活在那条回包里（不落库、下次刷新拿不到），漏一个，
+# 那条路上的「依法不提供」就是彻底沉默。
+# 这里踩过：我先按「4 个入口（开场白/文字/图片/视频）」写死，而实际有 6 个
+# （还有名片和语音）—— 钉照样绿，那两条路照样哑。所以让两个数自己对上。
+# 注意计数用 `applyAssistantNotice(` —— 定义那行是 `applyAssistantNotice = useCallback(`，
+# 名字后面跟的是空格不是括号，不会被算进来。
+persona_sends=$(grep -cF 'AI_PERSONA:${aiAccount.personaId}' apps/mobile/src/surfaces/conversation.tsx)
+notice_calls=$(grep -cF 'applyAssistantNotice(' apps/mobile/src/surfaces/conversation.tsx)
+if [ "$notice_calls" -lt "$persona_sends" ]; then
+  echo "  FAIL [COMP-AI-MINOR-001]: $persona_sends companion send paths but only" >&2
+  echo "        $notice_calls of them dispatch the returned assistantStatus through" >&2
+  echo "        applyAssistantNotice. GATED travels only in the command response — it" >&2
+  echo "        is never persisted, so an entry that ignores it is silent forever." >&2
+  exit 1
+fi
+# 任何一处直接消费 assistantStatusNotice 的返回值，都等于绕开「持久态 vs 瞬时态」
+# 这个判断 —— 正是上面那次翻车的样子。
+if grep -qF 'assistantStatusNotice(payload' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: a call site consumes assistantStatusNotice directly" >&2
+  echo "        instead of going through applyAssistantNotice — that bypasses the" >&2
+  echo "        persistent-vs-transient decision and GATED can silently go back to" >&2
+  echo "        being rendered in the slot the poll clears." >&2
+  exit 1
+fi
 echo "    COMP-AI-MINOR-001: PASS (AI companions are refused to minors and to accounts with no age evidence)"
 
 # COMP-E2EE-001: 不许宣称做不到的加密。
@@ -3786,7 +4064,12 @@ echo "    SEARCH-CORPUS-001: PASS (feed search reaches the server and matches na
 # 注意别钉裸符号：`personalReplyEntries` 在 state 声明里就出现了，只 grep 它
 # 在删掉搜索链路后照样绿（和 buildContactCard 被 import 行满足是同一个坑）。
 # 所以钉的是**搜索接线**上的形状。
-if ! grep -qF 'filterPostsByFeedSearch(profilePosts, q)' apps/mobile/src/surfaces/me.tsx; then
+# SEARCH-CORPUS-002 订正（2026-09-22）：原来钉的是 `filterPostsByFeedSearch(profilePosts, q)`
+# —— 把**变量名**也钉进去了，自己违反了上面「别钉裸符号」那条。在制的个人主页把
+# 搜索域收窄成「排除 TARGETED 的帖文」（searchablePosts），共享谓词没换、语义没坏，
+# 但字面量对不上就红了。改成钉**调用形状**（共享谓词 + 查询变量 q），不钉数据源叫什么：
+# 契约是「用同一份共享字段语义」，不是「变量必须叫 profilePosts」。
+if ! grep -qE 'filterPostsByFeedSearch\([A-Za-z_$][A-Za-z0-9_$]*, q\)' apps/mobile/src/surfaces/me.tsx; then
   echo "  FAIL [SEARCH-CORPUS-002]: the profile search re-implements its own haystack" >&2
   echo "        instead of using the shared SEARCH-CORPUS-001 predicate, so the same" >&2
   echo "        data is searchable in the feed but not on the profile." >&2
@@ -5280,7 +5563,11 @@ if ! grep -qF 'setProfilePostsState("failed")' apps/mobile/src/surfaces/me.tsx; 
   echo "        失败会被渲染成「0 条动态」，看起来就是「你还没发过动态」。" >&2
   exit 1
 fi
-if ! grep -qF 'posts: profilePostsState === "failed" ? undefined : profilePosts.length' apps/mobile/src/surfaces/me.tsx; then
+# PROFILE-POSTS-FAILURE-001 订正（2026-09-22）：原来把计数变量名也钉进去了
+# （`… : profilePosts.length`）。在制的个人主页把 hub 的计数换成 personalHubPosts
+# （排除 TARGETED 帖文）—— 契约本身没变，是变量名变了，所以这里钉**三元形状**：
+# failed 必须映射成 undefined，冒号右边必须是某个集合的长度（不是字面量 0）。
+if ! grep -qE 'posts: profilePostsState === "failed" \? undefined : [A-Za-z_$][A-Za-z0-9_$]*\.length' apps/mobile/src/surfaces/me.tsx; then
   echo "  FAIL [PROFILE-POSTS-FAILURE-001]: 失败时条数又显示成 0 ——" >&2
   echo "        未知要显示 —（dash 口径），不是 0。" >&2
   exit 1
@@ -5301,6 +5588,32 @@ if grep -qF 'catch {}' apps/mobile/src/surfaces/me.tsx; then
 fi
 if ! grep -q 'PROFILE-POSTS-FAILURE-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
   echo "  FAIL [PROFILE-POSTS-FAILURE-001]: 测试不见了" >&2
+  exit 1
+fi
+# 订正（2026-09-22 第二轮）：上面几条只钉到「条数别显示 0」和「横幅说出来了」。
+# 但用户真正看的是**帖子列表本身** —— me.tsx 失败时传的是空数组，而空数组在
+# ProfileTabs 里渲染成「还没有动态」。于是同一屏上横幅写着「不是你没有动态」、
+# 下面写着「还没有动态」：一个说没拉到，一个说你没发过。空态才是那句话。
+# SAVED/REPLIES/TAGGED 早就有 failed 旗标（PROFILE-TAB-LOAD-FAILED-001），
+# POSTS 是当年漏掉的那一个。
+if ! grep -qF 'postsFailed={profilePostsState === "failed"}' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-POSTS-FAILURE-001]: me.tsx 不再把失败态传给 ProfileTabs ——" >&2
+  echo "        帖子列表拿不到失败信号，空态又会说「还没有动态」。" >&2
+  exit 1
+fi
+# 两个空态（列表 + 网格）都要有失败文案，而且「真的没有」的文案必须还在 ——
+# 只剩一句就说明又不分了。
+#
+# 注意这里钉的是 title="…" 这个 JSX 形态，不是裸字符串：上面那段说明文字里
+# 就写着「还没有动态」，裸 grep 会匹配到注释 —— 把代码删掉、注释留着，测试
+# 照样绿（本仓的老坑，PLACEHOLDER-011 栽过同一次）。
+posts_failed_copy=$(grep -cF 'title="动态没读出来"' apps/mobile/src/surfaces/ProfileTabs.tsx)
+if [ "$posts_failed_copy" -lt 2 ] ||
+   ! grep -qF 'title="还没有动态"' apps/mobile/src/surfaces/ProfileTabs.tsx ||
+   ! grep -qF 'title="还没有图片"' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [PROFILE-POSTS-FAILURE-001]: POSTS 空态又不分「没拉到」和「没有」了" >&2
+  echo "        （title=\"动态没读出来\" $posts_failed_copy 处，需要 2 处；" >&2
+  echo "        且 title=\"还没有动态\" / title=\"还没有图片\" 都要在）" >&2
   exit 1
 fi
 echo "    PROFILE-POSTS-FAILURE-001: PASS (a failed posts load says so; unknown shows —, not 0)"
@@ -6855,7 +7168,10 @@ echo "    MARKET-PRICE-RANGE-PARSE-001: PASS (a published price range is read as
     exit 1
   fi
   # 正向：筛选侧要把"未知"排除在「附近」之外。
-  if ! /usr/bin/grep -q 'p.distanceM === undefined || p.distanceM >= 1000' "$UI"; then
+  # HOME-MORE-DIST-001（2026-09-22）：写死 1km 的「附近」开关改成恒生效的半径
+  # 设置（1/3/5/10/20/50/100km），所以字面 `>= 1000` 改成半径变量；「距离未知
+  # ≠ 很近」这条不许动 —— 任何半径都排除 undefined，否则 regress。
+  if ! /usr/bin/grep -q 'p.distanceM === undefined || p.distanceM >= moreDistanceKm \* 1000' "$UI"; then
     echo "  FAIL [PERSON-DISTANCE-ZERO-001]: 「附近」筛选不再排除距离未知的人" >&2
     exit 1
   fi
@@ -7000,11 +7316,13 @@ echo "    MARKET-PRICE-RANGE-PARSE-001: PASS (a published price range is read as
     exit 1
   fi
   # 展示侧：空状态不许暗示"有记录只是没公开"。
-  if grep -q '她暂未公开活动明细' "$UI"; then
+  # HOME-I18N-001 之后文案搬进 i18n.ts（noActivity 键），UI 走 t("noActivity")。
+  I18N=apps/mobile/src/i18n.ts
+  if grep -q '她暂未公开活动明细' "$UI" "$I18N"; then
     echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 空状态仍在暗示存在未公开的记录" >&2
     exit 1
   fi
-  if ! grep -q '还没有可展示的活动记录' "$UI"; then
+  if ! grep -q 'noActivity: "还没有可展示的活动记录"' "$I18N" || ! grep -q 't("noActivity")' "$UI"; then
     echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 如实的空状态文案不见了" >&2
     exit 1
   fi
@@ -8199,3 +8517,226 @@ fi
 # fi
 pnpm --dir apps/mobile exec vitest run src/command-error-message.test.ts || exit $?
 echo "    SERVICE-DISABLED-MSG-001: PASS (a killed service says 服务已暂停, not compliance.service_disabled)"
+
+# PROXY-OBJECT-PERSIST-001（2026-09-22，发现于 ROOM-CREATE-001 见面邀约卡片的
+# 真机验证）：conversation.messages.proxy_object 列早在迁移 039 就加了，但
+# ConversationRepository.AppendMessage / Messages / GetMessage 从没读写过它——
+# 任何带 ProxyObject 的消息（结构化建议、活动分享、见面邀约卡片）落到 Postgres
+# 后 proxy_object 静默变 NULL，客户端收到一条没有卡片内容的空气泡。内存版
+# Repository（绝大多数单测用）不受影响，只有接真实 Postgres 才会暴露，所以这个
+# 洞混进代码库很久都没被测出来——这条钉必须打真实 Postgres，不能改回内存版。
+require_test "PROXY-OBJECT-PERSIST-001" "./internal/platform/postgres" \
+  "TestAppendMessagePersistsProxyObject" \
+  "apps/api-go/internal/platform/postgres/proxy_object_persist_test.go" || exit $?
+
+# HOME-MORE-DIST-001（2026-09-22，照 deepseek_html_20260922_1c2e2c.html 的
+# distance-chip）：「附近」原来是一个**写死 1km 的开关**，而原型里它是一个
+# **距离控件**（📍 10km 内 ▾ + 滑杆，1/3/5/10/20/50/100 km，默认 10km）。
+#
+# 这不是换皮：写死 1km 的时候，「附近」对 1.05km 的人和 100km 的人是同一个答案，
+# 而用户没有任何办法表达"我想看远一点" —— 控件看着可选，其实只有一个值。
+# 所以这条钉的不是"有没有那个 chip"，是**半径有没有真的接上筛选**。
+MORE_HOME=apps/mobile/src/surfaces/requester-home.tsx
+
+# ① 半径必须来自 state。退回写死的常量即红 —— 那正是"控件是假的"的形态。
+#    后半句同样重要：undefined 那半边是 PERSON-DISTANCE-ZERO-001，
+#    距离未知 ≠ 很近，任何半径都不许放过它。
+if ! grep -qF 'p.distanceM === undefined || p.distanceM >= moreDistanceKm * 1000' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 距离筛选不再用可选的半径（退回写死值了？），" >&2
+  echo "        或者不再排除 distanceM === undefined —— 距离未知不能算「附近」。" >&2
+  exit 1
+fi
+
+# ② chip 上要有当前半径。数字跟 kmUnit 分开拼（HOME-I18N-001 之后
+#    kmUnit 随语言变：zh 是 "km 内"、en 是 "km"、ko 是 "km 이내"），
+#    所以不能再钉字面量 "km 内"。点它是展开面板（不是开关）。
+if ! grep -qF '📍 {moreDistanceKm}{t("kmUnit")}' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 距离 chip 不再显示当前半径。" >&2
+  exit 1
+fi
+if ! grep -qF 'setMoreDistanceOpen((open) => !open)' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 点距离 chip 不再展开/收起面板。" >&2
+  exit 1
+fi
+
+# ③ 档位表 + 每一档可点。只画一条装饰轨道 = 用户选不了任何东西。
+if ! grep -qF 'MORE_DISTANCE_KM: ReadonlyArray<number> = [1, 3, 5, 10, 20, 50, 100]' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 距离档位表被改了或不见了。" >&2
+  exit 1
+fi
+if ! grep -qF 'onPress={() => setMoreDistanceIndex(index)}' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 距离档位点了不再选中（退化成装饰轨道）。" >&2
+  exit 1
+fi
+# 反向：默认档必须是 10km（跟原型一致）。默认值漂了，用户看到的初始半径就变了。
+if ! grep -qF 'MORE_DISTANCE_DEFAULT_INDEX = 3' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 默认半径档位不再是 3（=10km）。" >&2
+  exit 1
+fi
+
+# ④ 不许同时存在两个距离控件：「附近」不能再是一个开关型 chip。
+#    一个开关 + 一个半径会互相矛盾（开关关着时半径还有没有效？没人说得清）。
+if grep -qF '{ id: "near", label: "附近" }' apps/mobile/src/recommend-fixtures.ts; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 「附近」又变回开关型 chip 了 —— 现在会有两个" >&2
+  echo "        距离控件（一个开关 + 一个半径），它们对同一个人可能给出相反答案。" >&2
+  exit 1
+fi
+
+# ⑤ 原型 chip 样式：无边框 + 选中转深色。回到 lime 高亮或带描边即红。
+if ! grep -qF 'filterChipOn: { backgroundColor: color.ink }' "$MORE_HOME" ||
+   grep -qF 'filterChipOn: { backgroundColor: color.lime' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: chip 选中态不是原型的深色（回到 lime 了）。" >&2
+  exit 1
+fi
+if grep -qE 'filterChip: \{[^}]*borderWidth' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: chip 又带上描边了（原型是无边框）。" >&2
+  exit 1
+fi
+
+pnpm --dir apps/mobile exec vitest run src/person-distance-zero.test.ts || exit $?
+echo "    HOME-MORE-DIST-001: PASS (distance is a real selectable radius, and an unknown distance is still not 'nearby')"
+
+# HOME-I18N-001（2026-09-22，用户：「原型是给你参考的 你肯定要改好 语言要支持选择」）：
+# 首页真人推荐页头那个「中」按钮 + 选择语言面板。
+#
+# 这条钉的不是"有没有那个按钮"，是**按钮按下去语言真的换、而且换完还在**：
+#   ① 按钮显示的是**当前**语言的短标（写死「中」= 换完不更新，按钮在骗人）；
+#   ② 面板挂在首页最外层，不在「更多」那个全屏 Modal 里（iOS 一次只呈现一个
+#      Modal，嵌进去会被无声吞掉，点了不弹 —— HOME-MORE-SHEET-004 的同一个坑）；
+#   ③ 选择要落盘（pref_language）、冷启动要读回来（loadPreferences），
+#      否则"选了老挝语、重启回中文"—— 看着能选，其实没生效；
+#   ④ 校验器必须是白名单（isLanguage），不能退回只认字面量 "vi"/"en"：
+#      那种写法会把新增的 lo/ko/ja **静默吞回中文**，是这条钉最想防的形态。
+#
+# 文案本身（6 种语言、没有"复制粘贴忘翻译"）由 src/i18n.test.ts 守；
+# 这里守的是"接线"，两边合起来才叫语言选择是真的。
+I18N_HOME=apps/mobile/src/surfaces/requester-home.tsx
+I18N_SHEET=apps/mobile/src/components/language-sheet.tsx
+I18N_PREFS=apps/mobile/src/preferences.ts
+I18N_SRC=apps/mobile/src/i18n.ts
+
+# ① 页头按钮：存在、显示当前语言短标、且排在「更多」前面（跟原型同位置）。
+if ! grep -qF 'accessibilityLabel={t("language")}' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 页头没有语言按钮（或没接 t(\"language\")）。" >&2
+  exit 1
+fi
+if ! grep -qF '{appLangOption.short}' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 按钮不显示当前语言短标 —— 写死「中」的话，" >&2
+  echo "        切到 VI/EN 之后按钮还在说「中」，是按钮在骗人。" >&2
+  exit 1
+fi
+lang_line=$(grep -nF 'accessibilityLabel={t("language")}' "$I18N_HOME" | head -1 | cut -d: -f1)
+more_line=$(grep -nF 'accessibilityLabel={t("more")}' "$I18N_HOME" | head -1 | cut -d: -f1)
+if [ -z "$lang_line" ] || [ -z "$more_line" ] || [ "$lang_line" -ge "$more_line" ]; then
+  echo "  FAIL [HOME-I18N-001]: 语言按钮不在「更多」前面（原型是标题右侧并排）。" >&2
+  exit 1
+fi
+
+# ② 面板挂载在首页最外层：从「更多」Modal 打开到 LanguageSheet 之间必须已经
+#    出现 </Modal>，否则就是被嵌进了「更多」里面 —— 点了不会弹。
+if ! grep -qF '<LanguageSheet visible={languageSheetOpen}' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 首页没有挂载 LanguageSheet。" >&2
+  exit 1
+fi
+more_open=$(grep -nF 'visible={filterSheetOpen}' "$I18N_HOME" | head -1 | cut -d: -f1)
+sheet_mount=$(grep -nF '<LanguageSheet visible={languageSheetOpen}' "$I18N_HOME" | head -1 | cut -d: -f1)
+if [ -z "$more_open" ] || [ -z "$sheet_mount" ] || [ "$more_open" -ge "$sheet_mount" ]; then
+  echo "  FAIL [HOME-I18N-001]: LanguageSheet 的位置跟「更多」Modal 对不上，" >&2
+  echo "        无法确认它是顶层挂载（可能被挪进 Modal 里了）。" >&2
+  exit 1
+fi
+if ! awk -v a="$more_open" -v b="$sheet_mount" 'NR>a && NR<b' "$I18N_HOME" | grep -qF '</Modal>'; then
+  echo "  FAIL [HOME-I18N-001]: LanguageSheet 被嵌进了「更多」整页 Modal 内部 ——" >&2
+  echo "        iOS 一次只呈现一个 Modal，第二个会被无声吞掉（点按钮不弹）。" >&2
+  echo "        要放进去必须先改成普通 View 覆盖层（见 HOME-MORE-SHEET-004）。" >&2
+  exit 1
+fi
+
+# ③ 选择要落盘、冷启动要读回来。
+if ! grep -qF 'saveLanguage(code)' "$I18N_SHEET"; then
+  echo "  FAIL [HOME-I18N-001]: 选完语言没有落盘 —— 重启就回默认语言。" >&2
+  exit 1
+fi
+if ! grep -qF 'pref_language' "$I18N_PREFS"; then
+  echo "  FAIL [HOME-I18N-001]: pref_language 这个存储键没了。" >&2
+  exit 1
+fi
+if ! grep -qF 'applyLanguage(prefs.language)' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 首页起来没有把存下来的语言读回内存 ——" >&2
+  echo "        落盘了但没人读，等于没存。" >&2
+  exit 1
+fi
+
+# ④ 校验器必须是白名单。退回字面量比较即红 —— 那会把 lo/ko/ja 静默吞回中文。
+if ! grep -qF 'if (v && isLanguage(v)) return v;' "$I18N_PREFS"; then
+  echo "  FAIL [HOME-I18N-001]: 语言校验不再走 isLanguage 白名单。" >&2
+  exit 1
+fi
+if grep -qF 'v === "vi"' "$I18N_PREFS" || grep -qF 'v === "en"' "$I18N_PREFS"; then
+  echo "  FAIL [HOME-I18N-001]: 校验器退回只认字面量 \"vi\"/\"en\" ——" >&2
+  echo "        新增的 lo/ko/ja 会被静默吞回中文（选了老挝语、重启变中文）。" >&2
+  exit 1
+fi
+
+# ⑤ 六种语言的表必须在 i18n.ts 里，而且首页不许再自带一份中文文案表。
+if ! grep -qF 'export const LANGUAGES' "$I18N_SRC" ||
+   ! grep -qF 'export const I18N' "$I18N_SRC" ||
+   ! grep -qF 'export const RIDE_TIMES' "$I18N_SRC" ||
+   ! grep -qF 'export const ICEBREAKER_LINES' "$I18N_SRC"; then
+  echo "  FAIL [HOME-I18N-001]: i18n.ts 少了语言表（LANGUAGES / I18N / RIDE_TIMES / ICEBREAKER_LINES）。" >&2
+  exit 1
+fi
+# 骑行档位 / 破冰开场白曾经是首页里的中文常量，切语言不跟着走。回来了即红。
+if grep -qF 'MORE_DISTANCE_RIDE' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 骑行档位又变回首页里的写死常量了（切语言不跟着变）。" >&2
+  exit 1
+fi
+if grep -qF 'ICEBREAKER_OPENERS' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 破冰开场白又变回首页模块级的中文数组了。" >&2
+  exit 1
+fi
+
+# ⑥ 距离 chip 的数字和单位必须分开拼：zh 的 kmUnit 是「km 内」，en 是「km」，
+#    ko 是「km 이내」—— 把「km 内」写死进 JSX 就等于只有中文对。
+if ! grep -qF '📍 {moreDistanceKm}{t("kmUnit")}' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 距离 chip 不再按语言拼单位（写死「km 内」了？）。" >&2
+  exit 1
+fi
+
+# ⑨ 「继续进行」卡片必须在**渲染时**翻译（卡片存 subKey，不存翻译好的串）。
+#    这个 effect 的依赖只有 demandClient，切语言时它**不会重跑** ——
+#    如果卡片存的是已翻译的串，页面其余部分都换过去了，就这两张卡还停在旧语言。
+#    另一个修法（给 effect 加 lang 依赖）会为了两句文案多拉一次 listHomeItems。
+if ! grep -qF '{t(item.subKey, item.subVars)}' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 「继续进行」卡片不是在渲染时才翻译的 ——" >&2
+  echo "        切语言时那两张卡不会跟着变（effect 依赖只有 demandClient，不会重跑）。" >&2
+  exit 1
+fi
+# 注意别写成通用的 `sub: t(` —— 四宫格那几个 tile 的 sub 也是 sub: t(...)，
+# 但它们是**渲染时**算的（在组件里），不在 state 里，那样写会误伤。
+# 这里只钉两个投影函数里那两句。
+if grep -qF 'sub: t("draftProgress"' "$I18N_HOME" ||
+   grep -qF 'sub: t("publishedWaiting")' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 卡片把翻译好的字符串存进 state 了（sub: t(...)）。" >&2
+  echo "        存串 ⇒ 切语言时 effect 不重跑 ⇒ 这两张卡停在旧语言。" >&2
+  exit 1
+fi
+if ! grep -qF 'subKey: "draftProgress"' "$I18N_HOME" ||
+   ! grep -qF 'subKey: "publishedWaiting"' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 两张卡没有存 subKey（草稿进度 / 已发布等待匹配）。" >&2
+  exit 1
+fi
+
+# ⑦ 文案层面：6 种语言齐全、没有"复制粘贴忘翻译"、占位符不漏成 undefined。
+pnpm --dir apps/mobile exec vitest run src/i18n.test.ts || exit $?
+echo "    HOME-I18N-001: PASS (language is selectable, it persists, and no language silently falls back)"
+
+# ⑧ 持久化行为：六种语言"存进去 → 冷启动读回来"必须原样回来。
+#    这条抓的是源码看不出来的那种坏：校验器只认 "vi"/"en"，lo/ko/ja 存得进、
+#    读出来变中文 —— 界面上的表现就是"选了没生效"。
+pnpm --dir apps/mobile exec vitest run src/preferences.test.ts || exit $?
+echo "    HOME-I18N-001: PASS (every language round-trips through pref_language)"
+
+# 首页的文案契约跟着一起验 —— 那些断言是按 t() 键钉的，键名漂了会红。
+pnpm --dir apps/mobile exec vitest run src/requester-home-discovery-contract.test.ts || exit $?
+echo "    HOME-I18N-001: PASS (home copy still resolves through the same keys)"

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import type {
   ListTwinInsightsPayload,
   TwinOperateAction,
@@ -10,9 +10,8 @@ import type { TransportResponse, TransportRequest } from "../auth-client";
 import { color, foundation } from "../theme";
 import { ProxyEmptyState } from "./proxy-foundation";
 import { TwinInsightCard, TwinTargetRail } from "./twin-insight-card";
-import { DEMO_PAYLOAD } from "./twin-insight-demo";
 
-// TWIN-INSIGHT-001 — AI 分身中心「好友洞察」段。
+// TWIN-INSIGHT-002 — AI 分身中心「好友洞察」段。
 //
 // 落位（owner 定向）：用户 2026-09-21 原型明确把好友洞察放在 AI 分身页
 // （tab「AI 分身」active）。AI-CLUSTER-BOUNDARY-001 说这屏只管数字资产、
@@ -20,18 +19,28 @@ import { DEMO_PAYLOAD } from "./twin-insight-demo";
 // 本段数据走独立的 TwinInsight wire（服务端算好的洞察，不是好友页明细
 // 的复制），不违反「同一份数据只画一次」。见 PRD §6。
 //
-// 数据策略（后端未落地前）：
-//  - 登录用户：先 listMine 取首个分身 → listInsights；成功则渲染服务端真相；
-//    任何失败（endpoint 未实现/网络/解析）→ 本机演示数据兜底（badge 明示）；
-//  - 未登录：直接本机演示（读通道无 token，不发请求）。
-//  - wire 失败 fail-closed 的部分保留：服务端返回但解析失败同样进兜底并
-//    badge，不同的是「没有洞察 []」和「没读出来」仍然分开（空数组走空态）。
-//  - 演示数据的 advice/summary 全是纯文本（无 <strong>），测试钉住。
-//  - 后端落地后删 DEMO 段 + badge（TODO: TWIN-INSIGHT-002 Go wire）。
+// 数据策略（**后端已落地**）：
+//  - 只走服务端：`GET /v1/ai/twins/{id}/insights`（internal/twininsight）。
+//  - **没有任何兜底数据**。原先那份演示兜底模块（6 个编造好友
+//    Alex/Tom/Minh/Brandon/陈先生/王老板 + 编造的分数与建议）已删除 ——
+//    用户 2026-09-22 的反馈是「数据也不是真的」，而虚构兜底正是它的成因：
+//    endpoint 一 404 就静默降级成假数据，屏幕上还挂一个演示角标，
+//    看起来像功能做完了。（本文件刻意不再出现那个角标的文案，
+//    twin-insight-section.test.ts 反向钉住它。）
+//  - 三种结果必须分开显示，不许互相冒充：
+//       insights: []  = 真的没有洞察（空态）
+//       请求失败      = 读不出来（错误态 + 重试）
+//       缺字段        = 协议异常（同样走错误态，fail-closed）
+//   把「读不出来」显示成「还没有好友洞察」就是骗用户，反之亦然。
 
 type AuthChannel = {
   request(path: string, init: { method: TransportRequest["method"]; body?: unknown }): Promise<TransportResponse>;
 };
+
+function messageFor(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  return "读取好友洞察失败";
+}
 
 export function TwinInsightSection({ authClient, ownerId }: {
   authClient: AuthChannel;
@@ -51,8 +60,9 @@ export function TwinInsightSection({ authClient, ownerId }: {
   const personaClient = useMemo(() => new AiPersonaClient({ authClient }), [authClient]);
 
   const [payload, setPayload] = useState<ListTwinInsightsPayload | undefined>(undefined);
-  const [demo, setDemo] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [attempt, setAttempt] = useState(0);
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [expanded, setExpanded] = useState(false);
   const [acting, setActing] = useState(false);
@@ -60,29 +70,31 @@ export function TwinInsightSection({ authClient, ownerId }: {
 
   useEffect(() => {
     if (!ownerId) {
-      setPayload(DEMO_PAYLOAD);
-      setDemo(true);
+      setPayload(undefined);
+      setError(undefined);
+      setLoading(false);
       return;
     }
     let cancelled = false;
     setLoading(true);
+    setError(undefined);
     void (async () => {
       try {
         const personas = await personaClient.listMine(ownerId);
         const twinId = personas[0]?.id;
-        if (!twinId) throw new Error("no twin");
+        // 没有分身 = 真的没有洞察，不是失败 —— 走空态，不进错误态。
+        if (!twinId) {
+          if (!cancelled) setPayload(undefined);
+          return;
+        }
         const data = await insightClient.listInsights(twinId);
         if (!cancelled) {
           setPayload(data);
-          setDemo(false);
           setSelectedId(data.insights[0]?.targetId);
         }
-      } catch {
-        if (!cancelled) {
-          setPayload(DEMO_PAYLOAD);
-          setDemo(true);
-          setSelectedId(DEMO_PAYLOAD.insights[0]?.targetId);
-        }
+      } catch (err) {
+        // fail-closed：读不出来就是读不出来，绝不补一份假数据上去。
+        if (!cancelled) setError(messageFor(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -90,35 +102,27 @@ export function TwinInsightSection({ authClient, ownerId }: {
     return () => {
       cancelled = true;
     };
-  }, [insightClient, personaClient, ownerId]);
+  }, [insightClient, personaClient, ownerId, attempt]);
 
   const insights = payload?.insights ?? [];
   const selected = insights.find((entry) => entry.targetId === selectedId) ?? insights[0];
 
   async function act(action: TwinOperateAction): Promise<void> {
-    if (!selected || acting) return;
-    if (demo || !payload || payload.twinId === "demo") {
-      setNotice("本机演示数据：接服务端后可用");
-      return;
-    }
+    if (!selected || !payload || acting) return;
     setActing(true);
     setNotice(undefined);
     try {
       await insightClient.operate(payload.twinId, selected.targetId, action);
       setNotice(action === "operate" ? `已开启对 ${selected.displayName} 的单独运营` : "已标记为观察");
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "操作失败，请稍后重试");
+      setNotice(messageFor(err));
     } finally {
       setActing(false);
     }
   }
 
   async function refreshSummary(): Promise<void> {
-    if (!selected || acting) return;
-    if (demo || !payload || payload.twinId === "demo") {
-      setNotice("本机演示数据：接服务端后可用");
-      return;
-    }
+    if (!selected || !payload || acting) return;
     setActing(true);
     try {
       const updated = await insightClient.refreshSummary(payload.twinId, selected.targetId);
@@ -127,7 +131,7 @@ export function TwinInsightSection({ authClient, ownerId }: {
       );
       setNotice("已重新总结");
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "重新总结失败，请稍后重试");
+      setNotice(messageFor(err));
     } finally {
       setActing(false);
     }
@@ -136,16 +140,20 @@ export function TwinInsightSection({ authClient, ownerId }: {
   return (
     <View style={styles.section}>
       <Text style={styles.title}>好友洞察</Text>
-      <View style={styles.subRow}>
-        <Text style={styles.sub}>谁值得运营 · 谁只是路人</Text>
-        {demo ? (
-          <View style={styles.demoBadge}>
-            <Text style={styles.demoBadgeText}>本机演示</Text>
-          </View>
-        ) : null}
-      </View>
+      <Text style={styles.sub}>谁值得运营 · 谁只是路人</Text>
 
-      {loading && !payload ? (
+      {error ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{error}</Text>
+          <Pressable
+            accessibilityLabel="重试读取好友洞察"
+            onPress={() => setAttempt((prev) => prev + 1)}
+            style={styles.retryButton}
+          >
+            <Text style={styles.retryText}>重试</Text>
+          </Pressable>
+        </View>
+      ) : loading && !payload ? (
         <Text style={styles.stateText}>正在读取好友洞察…</Text>
       ) : insights.length === 0 ? (
         <ProxyEmptyState title="还没有好友洞察" sub="创建分身并加好友后，这里会告诉你谁值得运营" />
@@ -182,10 +190,18 @@ export function TwinInsightSection({ authClient, ownerId }: {
 const styles = StyleSheet.create({
   section: { marginTop: foundation.space.four },
   title: { color: foundation.ink, fontSize: 18, fontWeight: "800" },
-  subRow: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: foundation.space.three, marginTop: 2 },
-  sub: { color: color.muted, fontSize: 12 },
-  demoBadge: { backgroundColor: color.chipNeutralBg, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  demoBadgeText: { color: color.chipNeutralText, fontSize: 11, fontWeight: "700" },
+  sub: { color: color.muted, fontSize: 12, marginBottom: foundation.space.three, marginTop: 2 },
+  errorBox: {
+    alignItems: "flex-start",
+    backgroundColor: color.chipNeutralBg,
+    borderRadius: 10,
+    gap: 8,
+    marginHorizontal: foundation.space.four,
+    padding: foundation.space.three,
+  },
+  errorText: { color: color.muted, fontSize: 13 },
+  retryButton: { borderColor: color.line, borderRadius: 8, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
+  retryText: { color: foundation.ink, fontSize: 13, fontWeight: "700" },
   body: { marginHorizontal: -16 },
   stateText: { color: color.muted, fontSize: 13, paddingHorizontal: foundation.space.four, paddingVertical: 12 },
   notice: { color: color.muted, fontSize: 12, paddingHorizontal: foundation.space.four, paddingBottom: foundation.space.three },

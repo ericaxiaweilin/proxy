@@ -174,6 +174,12 @@ type Repository interface {
 	// UpdateCompositionHint 仅更新 composition hint 字段（worker 跑完 ONNX/几何 推理后调用）。
 	// 失败不阻塞：FAILED 状态独立保留。
 	UpdateCompositionHint(ctx context.Context, assetID string, hint *MediaCompositionHint) error
+	// AI-TWIN-GALLERY-001: 图库两个 tab 各自的真实来源查询。
+	// ListByPersona 用 persona_id（108 迁移已经建好索引，之前一直没人用）
+	// 找这个分身生成过的 AI 资产；ListByOwner 找这个人自己上传、还没被任何
+	// AI 流程处理过的原始素材。两者都只返回 READY 状态、按新到旧排序。
+	ListByPersona(ctx context.Context, personaID string) ([]MediaAsset, error)
+	ListByOwner(ctx context.Context, ownerPrincipalID string) ([]MediaAsset, error)
 }
 
 type ProcessingJobRepository interface {
@@ -271,6 +277,32 @@ func (r *MemoryRepository) Snapshot(_ context.Context) ([]MediaAsset, error) {
 	result := make([]MediaAsset, 0, len(r.assets))
 	for _, a := range r.assets {
 		result = append(result, a)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+func (r *MemoryRepository) ListByPersona(_ context.Context, personaID string) ([]MediaAsset, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]MediaAsset, 0)
+	for _, a := range r.assets {
+		if a.PersonaID == personaID && a.ProcessingStatus == "READY" {
+			result = append(result, a)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+func (r *MemoryRepository) ListByOwner(_ context.Context, ownerPrincipalID string) ([]MediaAsset, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]MediaAsset, 0)
+	for _, a := range r.assets {
+		if a.OwnerPrincipalID == ownerPrincipalID && a.ProcessingStatus == "READY" {
+			result = append(result, a)
+		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
 	return result, nil
@@ -772,6 +804,46 @@ func (s *Service) ListReadyVariants(ctx context.Context, mediaAssetID string) ([
 		}
 	}
 	return ready, nil
+}
+
+// AI-TWIN-GALLERY-001: 图库两个 tab 的真实来源，不是发明新字段。
+//   source == "ai"  → 这个分身生成过的 AI_PERSONA 资产（persona_id 索引）。
+//   source == "raw" → 这个人自己上传、且从未被标成 AI 来源的原始素材
+//                     （ownerPrincipalID 范围，AIGenerationSource ==
+//                     USER_UPLOADED，只要图片）。 raw 不按 persona 分——
+//                     persona_id 这一列的语义是"AI 资产的来源分身"，原始
+//                     素材本来就不属于哪个分身，属于这个人自己。
+var ErrInvalidGallerySource = errors.New("invalid gallery source")
+
+func (s *Service) ListPersonaGallery(ctx context.Context, ownerPrincipalID, personaID, source string) ([]MediaAsset, error) {
+	switch source {
+	case "ai":
+		assets, err := s.repository.ListByPersona(ctx, personaID)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]MediaAsset, 0, len(assets))
+		for _, a := range assets {
+			if a.AIGenerationSource == "AI_PERSONA" {
+				result = append(result, a)
+			}
+		}
+		return result, nil
+	case "raw":
+		assets, err := s.repository.ListByOwner(ctx, ownerPrincipalID)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]MediaAsset, 0, len(assets))
+		for _, a := range assets {
+			if a.MediaType == "IMAGE" && a.AIGenerationSource == "USER_UPLOADED" {
+				result = append(result, a)
+			}
+		}
+		return result, nil
+	default:
+		return nil, ErrInvalidGallerySource
+	}
 }
 
 // AuthorizeForStorefront promotes technically approved media uploads to

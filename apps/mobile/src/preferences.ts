@@ -1,4 +1,5 @@
 import * as SecureStore from "expo-secure-store";
+import { DEFAULT_LANGUAGE, LANGUAGES, isLanguage, type Language } from "./i18n";
 
 const KEYS = {
   LANGUAGE: "pref_language",
@@ -9,7 +10,9 @@ const KEYS = {
   MEMORIZED_BUDGET: "pref_mem_budget"
 } as const;
 
-export type Language = "zh" | "vi" | "en";
+// 语言的类型单一来源在 i18n.ts（6 种，跟原型 LANGS 一致）。这里只 re-export，
+// 免得两处各写一份、然后随着加语言慢慢漂开。
+export type { Language };
 
 export interface Preferences {
   language: Language;
@@ -21,7 +24,7 @@ export interface Preferences {
 }
 
 const DEFAULTS: Preferences = {
-  language: "zh",
+  language: DEFAULT_LANGUAGE,
   notifyMessage: true,
   notifyEvent: false,
   memorizedCity: "河内",
@@ -41,9 +44,13 @@ async function setBool(key: string, value: boolean): Promise<void> {
 
 export async function loadPreferences(): Promise<Preferences> {
   const [language, notifyMessage, notifyEvent, city, style, budget] = await Promise.all([
+    // HOME-I18N-001：以前这里只认字面量 "vi"/"en"，其它一律回落到 "zh" ——
+    // 也就是说新增的 lo/ko/ja 会被**静默吞回中文**：用户选了老挝语、重启后
+    // 又变回中文，而且没有任何提示。改成走 i18n 的白名单判定，以后加语言
+    // 不用回来改这里，也不会再出现"存进去了但读不出来"。
     SecureStore.getItemAsync(KEYS.LANGUAGE).then((v) => {
-      if (v === "vi" || v === "en") return v;
-      return "zh";
+      if (v && isLanguage(v)) return v;
+      return DEFAULT_LANGUAGE;
     }),
     getBool(KEYS.NOTIFY_MESSAGE, DEFAULTS.notifyMessage),
     getBool(KEYS.NOTIFY_EVENT, DEFAULTS.notifyEvent),
@@ -72,8 +79,8 @@ export async function clearAllPreferences(): Promise<void> {
   );
 }
 
-export const LANG_LABEL: Record<Language, string> = {
-  zh: "中文",
-  vi: "Tiếng Việt",
-  en: "English"
-};
+// 从 i18n 的 LANGUAGES 派生，不再手写第二份 —— 手写的那份只有 3 种语言，
+// 类型扩到 6 种之后它必然对不上（少 3 个键）。
+export const LANG_LABEL: Record<Language, string> = Object.fromEntries(
+  LANGUAGES.map((option) => [option.code, option.name])
+) as Record<Language, string>;

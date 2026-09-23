@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 // 仓库既有做法（见 person-distance-zero.test.ts）是把 base url 直接 mock 掉。
 vi.mock("./native-clients", () => ({ localApiBaseUrl: "http://127.0.0.1:1" }));
 
-import { resolveHomePersonAccountId } from "./recommend-fixtures";
+import { SCENE_RECOMMEND, resolveHomePersonAccountId } from "./recommend-fixtures";
 
 const source = readFileSync(fileURLToPath(new URL("./surfaces/requester-home.tsx", import.meta.url)), "utf8");
 
@@ -17,16 +17,30 @@ const source = readFileSync(fileURLToPath(new URL("./surfaces/requester-home.tsx
 //      没有真人能收到同意入口（库里实测攒了 12 条无人可同意的 PENDING）；
 //   ② 对方同意后卡片仍显示「+ 添加」，因为按 u_linh 查不到状态。
 // 这条测试钉住「发送前解析、状态按解析后的 id 查」。
+//
+// HOME-RAIL-ACCOUNT-001（2026-09-23）：上一版的解法是「没账号的人不发申请」——
+// 那只把错误变成了一句更礼貌的错误。用户报 P0 后改成：rail 上每一个人都必须
+// 有服务端账号，所以这里逐个断言 28 个人全能解析（见下面的 it）。
 describe("HOME-FRIEND-ID-001 home rail sends the account id, not the fixture id", () => {
   it("maps home fixture ids to the server account id", () => {
     expect(resolveHomePersonAccountId("u_linh")).toBe("user_mockcreator_linh");
     expect(resolveHomePersonAccountId("u_hana")).toBe("user_mockcreator_hana");
   });
 
-  it("leaves ids that have no server account alone (caller must treat them as accountless)", () => {
-    // u_vy / u_quynh_anh 不在 ACCOUNT_AVATAR_ASSET 里 —— 服务端没有账号，
-    // 映射函数原样返回，调用方按「无账号」处理，不许发明友申请。
-    expect(resolveHomePersonAccountId("u_vy")).toBe("u_vy");
+  it("maps every rail person to their server account (HOME-RAIL-ACCOUNT-001)", () => {
+    // u_vy / u_quynh_anh 曾经没有服务端账号：点 + 只会得到「还没有账号，暂时加不了
+    // 好友」，而卡片上顶着「真人」徽标。rail 上 28 个人现在全部有账号 —— 这里逐个
+    // 断言「解析后的 id 不再以 u_ 开头」，也就是 relationshipKeyFor 不会再返回
+    // undefined。少一个人就会红。
+    const railIds = new Set<string>();
+    for (const feed of Object.values(SCENE_RECOMMEND)) {
+      for (const person of feed.people) railIds.add(person.id);
+    }
+    expect(railIds.size).toBe(28);
+    const accountless = [...railIds].filter((id) => resolveHomePersonAccountId(id) === id);
+    expect(accountless).toEqual([]);
+    expect(resolveHomePersonAccountId("u_vy")).toBe("user_mockcreator_vy");
+    expect(resolveHomePersonAccountId("u_quynh_anh")).toBe("user_mockcreator_quynh_anh");
     // 已经是账号 id 的（含 AI 账号）原样返回，不能二次前缀。
     expect(resolveHomePersonAccountId("user_mockcreator_mai")).toBe("user_mockcreator_mai");
     expect(resolveHomePersonAccountId("ai_account_001")).toBe("ai_account_001");
@@ -44,7 +58,7 @@ describe("HOME-FRIEND-ID-001 home rail sends the account id, not the fixture id"
 
   it("refuses to send when the fixture person has no server account", () => {
     // 无账号的人以前会发出一条幽灵申请；现在早退并给出人话提示。
-    expect(source).toContain('setRelationshipMsg(`${name} 还没有账号，暂时加不了好友`);');
+    expect(source).toContain('setRelationshipMsg(t("noAccountYet", { name }));');
   });
 
   it("reads relationship state through the resolved key on the home rail and the scene preview", () => {

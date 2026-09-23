@@ -11,6 +11,8 @@ commands:
     domain: CityCompanion
   - command: AcceptFriendRequest
     domain: Relationship
+  - command: AcceptMeetup
+    domain: Conversation
   - command: AcceptSlotOffer
     domain: Fulfillment
   - command: ActivateCampaign
@@ -27,6 +29,8 @@ commands:
     domain: Media
   - command: ApplyToMarketOpportunity
     domain: Marketplace
+  - command: ArriveMeetup
+    domain: Conversation
   - command: AuthenticateWithGoogle
     domain: Identity
   - command: BeginPasswordlessAuthentication
@@ -59,6 +63,8 @@ commands:
     domain: CityCompanion
   - command: CompleteMediaUpload
     domain: Media
+  - command: CompleteMeetup
+    domain: Conversation
   - command: ConfirmCityCompanion
     domain: CityCompanion
   - command: ConfirmCooperation
@@ -343,6 +349,8 @@ commands:
     domain: Activity
   - command: MuteAuthor
     domain: Engagement
+  - command: NudgeMeetup
+    domain: Conversation
   - command: OpenVoucherRedemption
     domain: Voucher
   - command: PauseCampaign
@@ -353,6 +361,8 @@ commands:
     domain: Demand
   - command: ProcessMediaAsset
     domain: Media
+  - command: ProposeMeetup
+    domain: Conversation
   - command: ProposeRealityScene
     domain: RealityScene
   - command: PublishActivity
@@ -531,6 +541,8 @@ commands:
     domain: Supply
   - command: UpdateAgentService
     domain: Supply
+  - command: UpdatePostAudience
+    domain: LocalNet
   - command: UpdateProfile
     domain: Identity
   - command: UpdateScene

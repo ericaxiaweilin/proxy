@@ -21,13 +21,31 @@ export type ProtectionOverride = {
   ttlSeconds?: number;
 };
 
+// ROOM-CREATE-001: 「创建房间」= GROUP conversation + 场景元数据。
+export type RoomScene = { emoji: string; sceneName: string; sceneDesc: string; roomName: string };
+
+export type Meetup = {
+  meetupId: string;
+  conversationId: string;
+  proposerId: string;
+  sceneEmoji: string;
+  sceneName: string;
+  place: string;
+  timeLabel: string;
+  status: "PENDING" | "CONFIRMED" | "ONGOING" | "COMPLETED";
+  acceptedBy: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ConversationInboxItem = {
-  conversation: { conversationId: string; conversationType: string; originType: string; originId: string; state: string; participants: string[]; lastMessageAt: string };
+  conversation: { conversationId: string; conversationType: string; originType: string; originId: string; state: string; participants: string[]; roomScene?: RoomScene; lastMessageAt: string };
   latestMessage?: { messageId: string; senderId: string; body?: string; messageType: string; createdAt: string; senderSnapshot?: { displayName?: string; avatarRef?: string } };
   counterpartyId?: string;
   counterpartySnapshot?: { displayName?: string; avatarRef?: string };
   // UNREAD-PIPELINE-001: 未读数。缺席 = 老服务端没算，不画徽标（不把“不知道”画成 0）。
   unreadCount?: number;
+  activeMeetup?: Meetup;
 };
 
 export type ConvoSummary = {
@@ -63,6 +81,8 @@ export class ConversationClient {
     firstMessage: string;
     assistantMode?: string;
     mediaRef?: string;
+    // ROOM-CREATE-001: 只有创建房间（GROUP）才带；服务端拒绝非 GROUP 带这个字段。
+    roomScene?: RoomScene;
   }): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
     const result = await this.sendCommand(session, "StartConversation", { type: "Conversation", id: "new" }, {
@@ -70,6 +90,44 @@ export class ConversationClient {
       ...params
     });
     return result;
+  }
+
+  // --- ROOM-CREATE-001: 见面邀约 ---
+
+  public async proposeMeetup(conversationId: string, params: { sceneEmoji: string; sceneName: string; place: string; timeLabel: string }): Promise<Meetup> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "ProposeMeetup", { type: "Conversation", id: conversationId }, params);
+    return this.decodeMeetup(result);
+  }
+
+  public async acceptMeetup(conversationId: string, meetupId: string): Promise<Meetup> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "AcceptMeetup", { type: "Conversation", id: conversationId }, { meetupId });
+    return this.decodeMeetup(result);
+  }
+
+  public async nudgeMeetup(conversationId: string, meetupId: string): Promise<Meetup> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "NudgeMeetup", { type: "Conversation", id: conversationId }, { meetupId });
+    return this.decodeMeetup(result);
+  }
+
+  public async arriveMeetup(conversationId: string, meetupId: string): Promise<Meetup> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "ArriveMeetup", { type: "Conversation", id: conversationId }, { meetupId });
+    return this.decodeMeetup(result);
+  }
+
+  public async completeMeetup(conversationId: string, meetupId: string): Promise<Meetup> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "CompleteMeetup", { type: "Conversation", id: conversationId }, { meetupId });
+    return this.decodeMeetup(result);
+  }
+
+  private decodeMeetup(result: Record<string, unknown>): Meetup {
+    const meetup = (typeof result.operationRef === "string" ? JSON.parse(result.operationRef) as { meetup?: Meetup } : {}).meetup;
+    if (!meetup?.meetupId) throw new Error("meetup response malformed");
+    return meetup;
   }
 
   public async sendMessage(
