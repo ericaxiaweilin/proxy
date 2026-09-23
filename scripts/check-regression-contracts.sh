@@ -322,7 +322,7 @@ require_test "OPS-REAL-001" "./internal/api" "TestOperatorConsoleIsOperatorOnly"
   "apps/api-go/internal/api/operator_console_test.go" || exit $?
 require_test "OPS-REAL-001" "./internal/api" "TestOperatorConsoleNeverServesFixtureNumbers" \
   "apps/api-go/internal/api/operator_console_test.go" || exit $?
-if grep -E 'mux\.HandleFunc\("/v1/operator/[a-z-]+"' apps/api-go/internal/api/server.go | grep -v '/v1/operator/legal' | grep -qv 'operatorConsole('; then
+if grep -E 'mux\.HandleFunc\("/v1/operator/[a-z-]+"' apps/api-go/internal/api/server.go | grep -v '/v1/operator/legal' | grep -qvE 'operatorConsole(Method)?\('; then
   echo "  FAIL [OPS-REAL-001]: 有 /v1/operator/* 路由没走 operatorConsole —— 运营数据又能被任何人读到。" >&2
   exit 1
 fi
@@ -330,6 +330,13 @@ if grep -rn 'fetch("/v1/operator' apps/market-intelligence-console/src >/dev/nul
   echo "  FAIL [OPS-REAL-001]: 控制台页面绕过 opFetch 直接 fetch —— 不带运营会话，也不认 NOT_CONNECTED。" >&2
   exit 1
 fi
+# GRAVITY-001：引力状态（spec §6-§7 / §11 / §21）。规律的人在规律的时间点附近引力高；证据不足只学习；
+# 久不发生降回只观察；AI / 平台账号不建模；ACTIVE_ORCHESTRATE 不会自动给（§12 / §13 未建）；引力页只给运营。
+for t in TestRegularNoonChatterHasHighGravityBeforeNoonAndLowAtNight TestSparseOrStaleEvidenceDoesNotNudge TestNeverAutoActiveOrchestrate TestRecomputeSkipsNonHumansAndDowngradesPeopleWhoWentQuiet; do
+  require_test "GRAVITY-001" "./internal/gravity" "$t" "apps/api-go/internal/gravity/gravity_test.go" || exit $?
+done
+require_test "GRAVITY-001" "./internal/api" "TestOperatorGravityIsOperatorOnlyAndLive" \
+  "apps/api-go/internal/api/operator_console_test.go" || exit $?
 echo "    OPS-REAL-001: PASS (operator console is operator-only; no fixture numbers; population/behaviour live)"
 
 require_test "UI-SOCIAL-002" "./internal/identity" \

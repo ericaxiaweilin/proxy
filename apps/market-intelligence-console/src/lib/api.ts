@@ -137,3 +137,14 @@ export async function completeEmailLogin(challengeId: string, code: string): Pro
   if (session.outcome !== "ACCEPTED" || !auth?.accessToken || !auth.userAccountId) throw new Error("登录没有成功");
   sessionStorage.setItem(SESSION_KEY, JSON.stringify({ accessToken: auth.accessToken, userAccountId: auth.userAccountId }));
 }
+
+// 运营写操作（如「立即重算引力」）：同一套会话与 401 / 403 处理。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function opPost<T = any>(path: string): Promise<T> {
+  const session = readOpsSession();
+  const r = await fetch(`${BASE}${path}`, { method: "POST", headers: session ? { Authorization: `Bearer ${session.accessToken}` } : {} });
+  if (r.status === 401) { clearOpsSession(); emit({ kind: "auth" }); throw new OpStatusError({ kind: "auth" }); }
+  if (r.status === 403) { emit({ kind: "forbidden" }); throw new OpStatusError({ kind: "forbidden" }); }
+  if (!r.ok) throw new Error(`${path} ${r.status}`);
+  return (await r.json()) as T;
+}

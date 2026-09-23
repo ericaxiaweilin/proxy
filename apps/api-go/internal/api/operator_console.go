@@ -27,8 +27,13 @@ const (
 
 // operatorConsole：控制台读端点的统一门。没配运营门 = 503（fail-closed），不是放行。
 func (s *Server) operatorConsole(handler http.HandlerFunc) http.HandlerFunc {
+	return s.operatorConsoleMethod(http.MethodGet, handler)
+}
+
+// operatorConsoleMethod：同一道门，给少数运营写操作（如「立即重算引力」）用 POST。
+func (s *Server) operatorConsoleMethod(method string, handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		if r.Method != method {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 			return
 		}

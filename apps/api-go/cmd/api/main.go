@@ -19,6 +19,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/experience"
 	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
+	"github.com/proxy-app/proxy-api/internal/gravity"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
@@ -510,6 +511,7 @@ func main() {
 	// OPS-REAL-001: 运营控制台真实指标（只在有库时）。
 	if pool != nil {
 		server.OpsMetrics = opsmetrics.NewPostgres(pool)
+		server.Gravity = gravity.NewPostgres(pool)
 	}
 	if pool != nil {
 		server.UserModel = usermodel.NewService(postgres.NewUserModelRepository(pool), modelStack)

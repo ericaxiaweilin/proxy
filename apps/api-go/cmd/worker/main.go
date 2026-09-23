@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/proxy-app/proxy-api/internal/event"
+	"github.com/proxy-app/proxy-api/internal/gravity"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/outbox"
@@ -200,6 +202,11 @@ func main() {
 		log.Printf("burner sweep startup burned: count=%d", n)
 	}
 	sweepPrivacyDeletions(ctx, privacyService)
+	// GRAVITY-001: 引力状态（spec §6-§7 / §21）启动时算一次，之后每小时重算。
+	gravityStore := gravity.NewPostgres(pool)
+	recomputeGravity(ctx, gravityStore)
+	gravityTicker := time.NewTicker(time.Hour)
+	defer gravityTicker.Stop()
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -223,6 +230,8 @@ func main() {
 			if mediaProcessed > 0 {
 				log.Printf("media processing batch completed: count=%d", mediaProcessed)
 			}
+		case <-gravityTicker.C:
+			recomputeGravity(ctx, gravityStore)
 		case <-sweeperTicker.C:
 			if n, err := conversationRepository.PurgeExpiredMessages(ctx, time.Now().UTC()); err != nil {
 				log.Printf("conversation sweep failed: %v", err)
@@ -237,6 +246,16 @@ func main() {
 			sweepPrivacyDeletions(ctx, privacyService)
 		}
 	}
+}
+
+// recomputeGravity 重算所有人的引力状态；失败只记日志（派生数据，下个小时再来）。
+func recomputeGravity(ctx context.Context, store gravity.Store) {
+	n, err := gravity.Recompute(ctx, store, time.Now().UTC())
+	if err != nil {
+		log.Printf("gravity recompute failed: %v", err)
+		return
+	}
+	log.Printf("gravity recompute: states=%d model=%s", n, gravity.ModelVersion)
 }
 
 // sweepPrivacyDeletions runs one LC-15 pass and logs what it did. Kept

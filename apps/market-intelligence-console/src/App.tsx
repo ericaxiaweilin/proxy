@@ -14,6 +14,7 @@ import { FulfillmentAttr } from "./pages/FulfillmentAttr";
 import { Population } from "./pages/Population";
 import { Tags } from "./pages/Tags";
 import { IntentOrchestration } from "./pages/IntentOrchestration";
+import { Gravity } from "./pages/Gravity";
 import { EngineAPI } from "./pages/EngineAPI";
 import { Merchant } from "./pages/Merchant";
 import { Retention } from "./pages/Retention";
@@ -126,7 +127,8 @@ export function App() {
           {page === "fulfillmentattr" && <FulfillmentAttr />}
           {page === "population" && <Population />}
           {page === "tags" && <Tags />}
-          {page === "intent" && <IntentOrchestration />}
+          {/* GRAVITY-001: 「意图与撮合」= 真实引力状态；「编排与调度」仍未接入 */}
+          {page === "intent" && <Gravity />}
           {page === "orchestration" && <IntentOrchestration />}
           {page === "merchant" && <Merchant />}
           {page === "retention" && <Retention />}

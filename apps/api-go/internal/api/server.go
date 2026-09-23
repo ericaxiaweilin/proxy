@@ -20,6 +20,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/experience"
 	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
+	"github.com/proxy-app/proxy-api/internal/gravity"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
@@ -110,6 +111,8 @@ type Server struct {
 	UserModel *usermodel.Service
 	// OpsMetrics：运营控制台的真实读模型（OPS-REAL-001）。nil = 没配库，相关页返回 NOT_CONNECTED。
 	OpsMetrics opsmetrics.Source
+	// Gravity：引力状态存储（GRAVITY-001）。nil = 没配库，相关页返回 NOT_CONNECTED。
+	Gravity gravity.Store
 	// TwinInsight 是 AI 分身「好友洞察」的读模型（TWIN-INSIGHT-002）。
 	// 它是一个独立的读模型包而不是挂在 localnet / relationship 上：
 	// 这条洞察跨四个域（好友关系 / 行为事件 / 对话 / 点赞），没有任何
@@ -209,6 +212,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/retention", s.operatorConsole(operatorRetention))
 	mux.HandleFunc("/v1/operator/trust", s.operatorConsole(operatorTrust))
 	mux.HandleFunc("/v1/operator/quality", s.operatorConsole(operatorQuality))
+	// GRAVITY-001: 引力状态（真实派生数据，spec §6-§7 / §21）。
+	mux.HandleFunc("/v1/operator/gravity", s.operatorConsole(s.operatorGravity))
+	mux.HandleFunc("/v1/operator/gravity/recompute", s.operatorConsoleMethod(http.MethodPost, s.operatorGravityRecompute))
 	mux.HandleFunc("/v1/media/upload/", s.mediaUpload)
 	mux.HandleFunc("/v1/media/play/", s.mediaFile)
 	mux.HandleFunc("/v1/media/thumb/", s.mediaFile)

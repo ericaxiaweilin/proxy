@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/gravity"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 )
@@ -43,6 +44,7 @@ func operatorConsoleServer() *Server {
 		RateLimit:  NewRateLimiter(0, 100),
 		Operator:   NewStaticOperatorGate([]string{"user_ops"}),
 		OpsMetrics: stubOpsMetrics{},
+		Gravity:    gravity.NewMemory(),
 		Authenticator: strictAuthenticator{validTokens: map[string]identity.AuthenticatedSession{
 			"ops_token":  {Principal: command.Principal{Type: "INDIVIDUAL", ID: "user_ops"}},
 			"user_token": {Principal: command.Principal{Type: "INDIVIDUAL", ID: "user_xiaomei"}},
@@ -101,5 +103,36 @@ func TestOperatorConsoleNeverServesFixtureNumbers(t *testing.T) {
 		if body["dataSource"] != "LIVE" {
 			t.Fatalf("%s must come from the real query: %v", path, body)
 		}
+	}
+}
+
+// GRAVITY-001：引力页（逐人概率）同样只给运营；重算是 POST，同一道门。
+func TestOperatorGravityIsOperatorOnlyAndLive(t *testing.T) {
+	server := operatorConsoleServer()
+	if rec := consoleGet(server, "gravity", "user_token"); rec.Code != http.StatusForbidden {
+		t.Fatalf("gravity for an ordinary user must be 403, got %d", rec.Code)
+	}
+	post := func(token string) int {
+		req := httptest.NewRequest(http.MethodPost, "/v1/operator/gravity/recompute", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := post(""); code != http.StatusUnauthorized {
+		t.Fatalf("recompute without a session must be 401, got %d", code)
+	}
+	if code := post("user_token"); code != http.StatusForbidden {
+		t.Fatalf("recompute by an ordinary user must be 403, got %d", code)
+	}
+	if code := post("ops_token"); code != http.StatusOK {
+		t.Fatalf("recompute by an operator must be 200, got %d", code)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(consoleGet(server, "gravity", "ops_token").Body.Bytes(), &body)
+	if body["dataSource"] != "LIVE" || body["summary"] == nil || body["top"] == nil {
+		t.Fatalf("gravity page is live derived data: %v", body)
 	}
 }
