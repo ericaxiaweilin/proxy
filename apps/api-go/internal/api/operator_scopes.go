@@ -39,9 +39,12 @@ const (
 	ScopeSafety OperatorScope = "SAFETY"
 	// PAYMENTS: 资金动作（支付确认/退款/保全/券发行结算）。AC-OPS-06 点名可拆分。
 	ScopePayments OperatorScope = "PAYMENTS"
-	// IDENTITY: §12 预留（IDENTITY_VIEW/IDENTITY_DECIDE 的域）。今天门命令里
-	// 还没有纯 IDENTITY 域的条目 —— 按"无引用不进词汇"原则暂不声明，等第一条
-	// IDENTITY 门命令落地时再加（加了就必须进 requiredOperatorScope，被测试数住）。
+	// IDENTITY: §12 预留的 IDENTITY_VIEW/IDENTITY_DECIDE 域。按"无引用不进
+	// 词汇"原则一直没声明，直到 COMP-SELLER-001 的 AttestSellerRealName 落地
+	// —— 那是第一条纯 IDENTITY 域的门命令（核的是"这个人是谁"，不是"这个人
+	// 会不会中文"）。它与 CAPABILITY 必须分开：能力核验失误 = 派错人；实名
+	// 核验失误 = 平台把匿名卖家认成可识别的收款主体。
+	ScopeIdentity OperatorScope = "IDENTITY"
 	// AUTHORITY: 有权机关请求的受理与响应（COMP-AUTHORITY-001，§55 SLA，
 	// fail-closed）。§12 没单列，但这类命令碰的是司法调证，不能跟普通
 	// MODERATION 共用一个 scope。
@@ -70,6 +73,7 @@ var allOperatorScopes = []OperatorScope{
 	ScopeSafety,
 	ScopePayments,
 	ScopeAuthority,
+	ScopeIdentity,
 	ScopeModeration,
 	ScopeCapability,
 	ScopeContribution,
@@ -83,6 +87,11 @@ var allOperatorScopes = []OperatorScope{
 var requiredOperatorScope = map[string]OperatorScope{
 	// CAPABILITY
 	"VerifyCapability": ScopeCapability,
+	// IDENTITY
+	// COMP-SELLER-001: 实名核验的写入口。与 CAPABILITY 分开 —— 能力核验回答
+	// 「会不会」，实名回答「是谁」，两者的失误代价不同（派错人 vs 把匿名
+	// 卖家认成可识别主体）。
+	"AttestSellerRealName": ScopeIdentity,
 	// CONTRIBUTION
 	"ReviewContributionAccess": ScopeContribution,
 	"ReviewContributionDomain": ScopeContribution,

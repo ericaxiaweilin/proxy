@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -157,6 +158,11 @@ type Repository interface {
 	GetCapabilities(ctx context.Context, agentID string) ([]Capability, error)
 	CreateVerification(ctx context.Context, v CapabilityVerification) error
 	GetVerifications(ctx context.Context, agentID string) ([]CapabilityVerification, error)
+	// AttestSellerRealName 是实名核验的唯一写入口（COMP-SELLER-001）。
+	// 实现必须保证「同一 agent 同时只有一条 VERIFIED」：新记录落库前先把旧的
+	// VERIFIED 置为 EXPIRED，否则 084 的 uq_seller_realname_verified_agent
+	// 会直接拒绝第二次核验 —— 而「必须重新核」正好要求第二次能成功。
+	AttestSellerRealName(ctx context.Context, v SellerRealNameVerification) error
 	CreateWindow(ctx context.Context, w AvailabilityWindow) error
 	GetWindow(ctx context.Context, windowID string) (AvailabilityWindow, error)
 	GetWindows(ctx context.Context, agentID string) ([]AvailabilityWindow, error)
@@ -197,6 +203,7 @@ type MemoryRepository struct {
 	services      map[string]AgentService
 	capabilities  map[string]Capability
 	verifications map[string][]CapabilityVerification
+	realNames     map[string][]SellerRealNameVerification
 	windows       map[string]AvailabilityWindow
 	batches       map[string]CandidateBatch
 	events        []event.DomainEvent
@@ -208,9 +215,45 @@ func NewMemoryRepository() *MemoryRepository {
 		services:      make(map[string]AgentService),
 		capabilities:  make(map[string]Capability),
 		verifications: make(map[string][]CapabilityVerification),
+		realNames:     make(map[string][]SellerRealNameVerification),
 		windows:       make(map[string]AvailabilityWindow),
 		batches:       make(map[string]CandidateBatch),
 	}
+}
+
+// AttestSellerRealName 在内存里镜像生产语义：先校验要件，再把该 agent 上
+// 原有的 VERIFIED 记录置为 EXPIRED，最后追加新记录。
+//
+// 校验用与生产同一条规则（SellerRealNameAttestationComplete）—— 内存实现
+// 放宽一格，单测就会在生产路径上骗人（这正是 COMP-REPORT-005 里
+// dispositions_outcome_check 踩过的坑）。
+func (r *MemoryRepository) AttestSellerRealName(_ context.Context, v SellerRealNameVerification) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := SellerRealNameAttestationComplete(v); err != nil {
+		return err
+	}
+	existing := r.realNames[v.AgentID]
+	superseded := make([]SellerRealNameVerification, 0, len(existing)+1)
+	for _, prior := range existing {
+		if prior.Status == SellerRealNameStatusVerified {
+			prior.Status = "EXPIRED"
+			prior.UpdatedAt = v.UpdatedAt
+		}
+		superseded = append(superseded, prior)
+	}
+	r.realNames[v.AgentID] = append(superseded, v)
+	return nil
+}
+
+// SellerRealNameVerifications 返回某 agent 的全部核验记录（按写入顺序）。
+// 内存实现专用：生产侧不暴露全量读，避免把「谁核过谁」做成可枚举的接口。
+func (r *MemoryRepository) SellerRealNameVerifications(agentID string) []SellerRealNameVerification {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]SellerRealNameVerification, len(r.realNames[agentID]))
+	copy(out, r.realNames[agentID])
+	return out
 }
 
 func (r *MemoryRepository) CreateProfile(_ context.Context, p AgentProfile) error {
@@ -476,7 +519,7 @@ func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "CreateAgentProfile", "UpdateAgentProfile", "GetAgentProfile", "GetAgentPassport",
 		"CreateAgentService", "UpdateAgentService",
-		"DeclareCapability", "VerifyCapability",
+		"DeclareCapability", "VerifyCapability", "AttestSellerRealName",
 		"SetAvailabilityWindow", "BlockAvailabilityWindow", "QuerySuppliers",
 		"CreateCandidateBatch", "GetCandidateBatch":
 		return true
@@ -507,6 +550,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.declareCapability(ctx, e)
 	case "VerifyCapability":
 		return s.verifyCapability(ctx, e)
+	case "AttestSellerRealName":
+		return s.attestSellerRealName(ctx, e)
 	case "SetAvailabilityWindow":
 		return s.setAvailabilityWindow(ctx, e)
 	case "BlockAvailabilityWindow":
@@ -896,6 +941,112 @@ func (s *Service) verifyCapability(ctx context.Context, e command.Envelope) comm
 	}
 	if err := s.repository.SetCapability(ctx, cap); err != nil {
 		return command.Rejected(e, "CAPABILITY_SAVE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.capability_save_failed", nil)
+	}
+	return command.Accepted(e, "AgentProfile", p.AgentID, 1, status, eventRefs(domainEvents))
+}
+
+// ---------- SellerRealName (COMP-SELLER-001 写侧) ----------
+
+// attestSellerRealNamePayload 是运营侧实名核验的入参。
+//
+// IDNumber 是**唯一**接受明文的地方：它在本函数里立刻变成哈希，明文既不入库
+// （只落 IDNumberHash）也不进事件载荷（事件里只带 idType，不带号码）。
+type attestSellerRealNamePayload struct {
+	AgentID       string `json:"agentId"`
+	LegalName     string `json:"legalName"`
+	IDType        string `json:"idType"`
+	IDNumber      string `json:"idNumber"`
+	TaxCode       string `json:"taxCode"`
+	UserAccountID string `json:"userAccountId"`
+	Decision      string `json:"decision"` // APPROVE | REJECT
+}
+
+// attestSellerRealName 记录一次实名核验结论（运营门命令，见 api/security.go）。
+//
+// 这条命令补的是「已核验」这个状态的唯一合法来源。在此之前：
+//   - 全仓没有一处 INSERT 这张表，表里的行只能是手写的；
+//   - verified_by 可以填任意字符串（084 要求「具名运营人员」）；
+//   - expires_at 可以留空，而读侧把 NULL 当永不过期（084 要求「必须重新核」）。
+//
+// 三件事合起来的效果是：一个卖家可以在没有任何人核过的情况下永久显示为
+// 「已实名」，而所有守卫都是绿的（它们只钉读侧）。本命令把这三件事都变成
+// 有归属、有时效、可复查的记录。
+func (s *Service) attestSellerRealName(ctx context.Context, e command.Envelope) command.Result {
+	var p attestSellerRealNamePayload
+	if !decode(e.Payload, &p) {
+		return command.Rejected(e, "INVALID_SELLER_REAL_NAME_ATTESTATION", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_real_name_attestation", nil)
+	}
+	if p.Decision != SellerRealNameDecisionApprove && p.Decision != SellerRealNameDecisionReject {
+		return command.Rejected(e, "INVALID_SELLER_REAL_NAME_DECISION", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_real_name_decision", nil)
+	}
+	if !ValidSellerRealNameIDType(p.IDType) {
+		// 与 084 的 CHECK (id_type IN ('CCCD','VNEID','PASSPORT')) 对齐：
+		// 在这里挡住，才不会把 DB 约束错误当成 500 抛给运营。
+		return command.Rejected(e, "SELLER_REAL_NAME_ID_TYPE_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "supply.real_name_id_type_unsupported", nil)
+	}
+	if p.AgentID == "" || p.LegalName == "" || p.IDNumber == "" {
+		return command.Rejected(e, "SELLER_REAL_NAME_ATTESTATION_INCOMPLETE", "VALIDATION", "AFTER_USER_ACTION", "supply.real_name_attestation_incomplete", nil)
+	}
+	// 「具名」是 084 的原话，也是这条记录唯一的举证价值来源：没有归属人的
+	// 核验记录无法回答「谁放的」。缺它就拒绝，而不是写一条 verified_by='' 的。
+	if e.Principal.ID == "" {
+		return command.Rejected(e, "SELLER_REAL_NAME_ATTESTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.real_name_attestor_required", nil)
+	}
+	// 被核的对象必须真实存在。否则运营打错一个 agent id 就会凭空造出一条
+	// 指向「还不存在的卖家」的核验记录 —— 而之后任何用这个 id 建号的卖家
+	// 会直接继承它（读侧只按 agent_id 匹配）。打错字不该等于预先放行。
+	if _, err := s.repository.GetProfile(ctx, p.AgentID); err != nil {
+		if errors.Is(err, ErrProfileNotFound) {
+			return command.Rejected(e, "SELLER_REAL_NAME_AGENT_UNKNOWN", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.real_name_agent_unknown", nil)
+		}
+		return command.Rejected(e, "PROFILE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.profile_read_failed", nil)
+	}
+
+	now := s.clock.Now().UTC()
+	status := SellerRealNameStatusVerified
+	var expiresAt *time.Time
+	if p.Decision == SellerRealNameDecisionApprove {
+		expiry := now.AddDate(0, SellerRealNameAttestationValidityMonths, 0)
+		expiresAt = &expiry
+	} else {
+		status = SellerRealNameStatusRejected
+	}
+
+	verification := SellerRealNameVerification{
+		ID:            newID("srn_"),
+		AgentID:       p.AgentID,
+		UserAccountID: strings.TrimSpace(p.UserAccountID),
+		LegalName:     strings.TrimSpace(p.LegalName),
+		IDType:        p.IDType,
+		// 明文证件号到此为止：往下只有哈希。
+		IDNumberHash: HashIDNumber(p.IDNumber),
+		TaxCode:      strings.TrimSpace(p.TaxCode),
+		Status:       status,
+		Method:       SellerRealNameMethodOperatorAttestation,
+		VerifiedBy:   e.Principal.ID,
+		VerifiedAt:   now,
+		ExpiresAt:    expiresAt,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := SellerRealNameAttestationComplete(verification); err != nil {
+		// 走到这里说明上面的入参校验漏了一项 —— 仍然 fail closed，不写半条记录。
+		return command.Rejected(e, "SELLER_REAL_NAME_ATTESTATION_INCOMPLETE", "VALIDATION", "AFTER_USER_ACTION", "supply.real_name_attestation_incomplete", nil)
+	}
+
+	// 事件载荷刻意不含 legalName / idNumber：事件会进 outbox 并被长期保存，
+	// 把证件号或姓名写进去等于把 PII 复制到一个不受本表访问控制约束的地方。
+	eventPayload := map[string]any{
+		"agentId": p.AgentID, "status": status, "method": SellerRealNameMethodOperatorAttestation,
+		"idType": p.IDType, "taxCodePresent": verification.TaxCode != "",
+	}
+	if expiresAt != nil {
+		eventPayload["expiresAt"] = expiresAt.Format(time.RFC3339)
+	}
+	domainEvents := []event.DomainEvent{event.New("SellerRealNameAttested", "AgentProfile", p.AgentID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, eventPayload)}
+
+	if err := s.repository.AttestSellerRealName(ctx, verification); err != nil {
+		return command.Rejected(e, "SELLER_REAL_NAME_ATTESTATION_FAILED", "INTERNAL", "SAFE_RETRY", "supply.real_name_attestation_failed", nil)
 	}
 	return command.Accepted(e, "AgentProfile", p.AgentID, 1, status, eventRefs(domainEvents))
 }

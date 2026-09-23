@@ -2949,7 +2949,92 @@ if ! grep -qF 'SetSellerIdentityLookup' apps/api-go/cmd/api/main.go ||
   echo "  FAIL [COMP-SELLER-001]: the seller real-name lookup is no longer wired in cmd/api/main.go." >&2
   exit 1
 fi
-echo "    COMP-SELLER-001: PASS (sellers must be real-name verified before they can be matched)"
+# --- COMP-SELLER-001 写侧：实名核验必须有受控写入口 ---
+#
+# 上面钉的是读侧（已核验才准撮合）。但「已核验」这个状态本身当时没有来源：
+# `INSERT INTO supply.seller_real_name_verifications` 全仓零命中，于是表里的行
+# 只能靠手写 SQL 产生 —— verified_by 可填任意字符串（084 要求「具名运营人员」）、
+# expires_at 可留空（084 要求「必须重新核」）、id_number_hash 可以是字面量。
+# 读侧全绿，而「已实名」可以凭空出现。下面钉住写侧的四个不变量。
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestAttestSellerRealNameStoresHashNotTheNumber" \
+  "apps/api-go/internal/supply/seller_real_name_attestation_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestAttestSellerRealNameVerifiedCarriesAnExpiry" \
+  "apps/api-go/internal/supply/seller_real_name_attestation_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestAttestSellerRealNameSupersedesThePriorVerification" \
+  "apps/api-go/internal/supply/seller_real_name_attestation_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestAttestSellerRealNameRejectionSupersedesThePriorVerification" \
+  "apps/api-go/internal/supply/seller_real_name_attestation_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestAttestSellerRealNameRejectsUnknownAgent" \
+  "apps/api-go/internal/supply/seller_real_name_attestation_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestMemoryRepositoryRefusesVerifiedWithoutExpiry" \
+  "apps/api-go/internal/supply/seller_real_name_attestation_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/platform/postgres" \
+  "TestSellerRealNameAttestationRoundTrip" \
+  "apps/api-go/internal/platform/postgres/seller_real_name_attestation_integration_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/platform/postgres" \
+  "TestSellerRealNameReadRefusesMissingExpiry" \
+  "apps/api-go/internal/platform/postgres/seller_real_name_attestation_integration_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/platform/postgres" \
+  "TestSellerRealNameMigrationGuardsAreEnforced" \
+  "apps/api-go/internal/platform/postgres/seller_real_name_attestation_integration_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/api" \
+  "TestSellerRealNameAttestationRequiresOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+
+# 写入口必须是契约的一部分：接口上没有它，就没有任何实现会被要求提供它。
+if ! grep -qF 'AttestSellerRealName(ctx context.Context, v SellerRealNameVerification) error' \
+     apps/api-go/internal/supply/service.go; then
+  echo "  FAIL [COMP-SELLER-001]: the supply repository no longer declares a real-name write path." >&2
+  echo "        Without it the verification table has no producer again." >&2
+  exit 1
+fi
+# 明文证件号必须在命令边界上就地变成哈希。
+if ! grep -qF 'IDNumberHash: HashIDNumber(p.IDNumber),' \
+     apps/api-go/internal/supply/service.go; then
+  echo "  FAIL [COMP-SELLER-001]: the raw id number is no longer hashed at the command boundary" >&2
+  echo "        (PDP 91/2025 + NĐ 356/2025 forbid storing the document number in the clear)." >&2
+  exit 1
+fi
+# 入库语句必须写 id_number_hash（哈希列），而不是任何明文列。
+if ! grep -qF 'id_number_hash' apps/api-go/internal/platform/postgres/supply.go; then
+  echo "  FAIL [COMP-SELLER-001]: the real-name insert no longer writes id_number_hash." >&2
+  exit 1
+fi
+# 写入口必须走 operator 门 + IDENTITY scope。
+if ! grep -qF '"AttestSellerRealName": true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [COMP-SELLER-001]: AttestSellerRealName is no longer operator-gated —" >&2
+  echo "        a seller could sign their own real-name verification." >&2
+  exit 1
+fi
+if ! grep -qF '"AttestSellerRealName": ScopeIdentity' apps/api-go/internal/api/operator_scopes.go; then
+  echo "  FAIL [COMP-SELLER-001]: AttestSellerRealName no longer requires the IDENTITY scope." >&2
+  exit 1
+fi
+# DB 层必须自己拦「VERIFIED 没有有效期」与「没有归属人」——不能只靠 Go 侧。
+if [ ! -f apps/api-go/migrations/118_seller_real_name_attestation_guards.sql ] ||
+   ! grep -qF 'seller_real_name_verified_has_expiry' apps/api-go/migrations/118_seller_real_name_attestation_guards.sql ||
+   ! grep -qF 'seller_real_name_attestor_named' apps/api-go/migrations/118_seller_real_name_attestation_guards.sql; then
+  echo "  FAIL [COMP-SELLER-001]: migration 118 no longer enforces expiry + named attestor at the DB level." >&2
+  exit 1
+fi
+# 读侧不得把空有效期读成「永不过期」—— 这是 118 之前的写法，也是「漏填一次
+# 就等于永久放行」的来源。反向钉住，防止它被写回去。
+# 匹配串带上别名与左括号（`(v.expires_at IS NULL OR`），这样它是代码形状而不是
+# 一句话 —— 否则解释「不要这样写」的注释会把自己钉红（本次已经踩过一次）。
+# 行为侧另有 TestSellerRealNameReadRefusesMissingExpiry 兜底。
+if grep -qF '(v.expires_at IS NULL OR' apps/api-go/internal/platform/postgres/seller_identity.go; then
+  echo "  FAIL [COMP-SELLER-001]: the reader treats a NULL expiry as 'never expires' again." >&2
+  echo "        084 promises '到点即失效，必须重新核'; a missing value must mean unverified." >&2
+  exit 1
+fi
+
+echo "    COMP-SELLER-001: PASS (sellers must be real-name verified before they can be matched, and only a named operator can record that verification)"
 
 # COMP-AGE-001: 注册时判过的 18+ 必须留下证据。
 # 此前 CreateAnonymousSession 在服务端做了 18+ 判定，判完就把 dateOfBirth 丢了 ——

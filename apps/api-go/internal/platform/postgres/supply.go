@@ -205,6 +205,58 @@ func (r *SupplyRepository) GetVerifications(ctx context.Context, agentID string)
 	return result, rows.Err()
 }
 
+// ---------- SellerRealName (COMP-SELLER-001 写侧) ----------
+
+// ErrSupplyStoreUnavailable：仓库没有连接池。与 seller_identity.go 的
+// ErrSellerRealNameUnavailable 同一理由 —— typed-nil 仍满足接口，不挡的话
+// 调用方拿到的是 panic，而不是一次可判定的拒绝。
+var ErrSupplyStoreUnavailable = errors.New("supply store is unavailable")
+
+// expirePriorSellerRealNameSQL 把该 agent 上原有的 VERIFIED 记录置为 EXPIRED。
+//
+// 084 的 uq_seller_realname_verified_agent 是 partial unique index
+// (agent_id) WHERE status='VERIFIED'：不先清掉旧的那条，第二次核验必然撞索引
+// —— 而 084 承诺的「必须重新核」正好要求第二次能成功。
+const expirePriorSellerRealNameSQL = `
+UPDATE supply.seller_real_name_verifications
+   SET status = 'EXPIRED', updated_at = $2
+ WHERE agent_id = $1 AND status = 'VERIFIED'`
+
+// NULLIF($3,'') / NULLIF($7,'')：user_account_id 与 tax_code 在 084 里可空，
+// 语义是「尚未取得 / 未绑定」。空串不是「有值」—— tax_code='' 会让读的人
+// 以为税务身份已绑定，而结算恰恰按这一列判定。
+const insertSellerRealNameSQL = `
+INSERT INTO supply.seller_real_name_verifications
+    (id, agent_id, user_account_id, legal_name, id_type, id_number_hash, tax_code,
+     status, method, verified_by, verified_at, expires_at, created_at, updated_at)
+VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,NULLIF($7,''),$8,$9,$10,$11,$12,$13,$14)`
+
+// AttestSellerRealName 在一个事务里「先作废旧核验、再写新核验」。
+//
+// 两步必须原子：只 UPDATE 不 INSERT = 卖家被摘掉实名；只 INSERT 不 UPDATE =
+// 撞唯一索引。任一步失败整体回滚，不留半条状态（这正是「重新核」的语义：
+// 新结论生效的那一刻，旧结论同时失效）。
+//
+// 入库前先过 SellerRealNameAttestationComplete —— 与内存实现同一条规则，
+// 也让「VERIFIED 必须有有效期」在到达 DB CHECK 之前就变成一次可读的拒绝。
+func (r *SupplyRepository) AttestSellerRealName(ctx context.Context, v supply.SellerRealNameVerification) error {
+	if r == nil || r.pool == nil {
+		return ErrSupplyStoreUnavailable
+	}
+	if err := supply.SellerRealNameAttestationComplete(v); err != nil {
+		return err
+	}
+	return runInTransaction(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, expirePriorSellerRealNameSQL, v.AgentID, v.UpdatedAt); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, insertSellerRealNameSQL,
+			v.ID, v.AgentID, v.UserAccountID, v.LegalName, v.IDType, v.IDNumberHash, v.TaxCode,
+			v.Status, v.Method, v.VerifiedBy, v.VerifiedAt, v.ExpiresAt, v.CreatedAt, v.UpdatedAt)
+		return err
+	})
+}
+
 // ---------- AvailabilityWindow ----------
 
 func (r *SupplyRepository) CreateWindow(ctx context.Context, w supply.AvailabilityWindow) error {

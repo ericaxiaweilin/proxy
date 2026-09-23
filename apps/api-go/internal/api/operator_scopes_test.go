@@ -26,8 +26,8 @@ func TestOperatorScopeCompleteness(t *testing.T) {
 		}
 		known[scope] = true
 	}
-	if len(allOperatorScopes) != 11 {
-		t.Fatalf("operator scope vocabulary changed: got %d scopes %v, want 11 — changing the vocabulary is a deliberate commander decision, update this test and RequiredOperatorScope together", len(allOperatorScopes), allOperatorScopes)
+	if len(allOperatorScopes) != 12 {
+		t.Fatalf("operator scope vocabulary changed: got %d scopes %v, want 12 — changing the vocabulary is a deliberate commander decision, update this test and RequiredOperatorScope together", len(allOperatorScopes), allOperatorScopes)
 	}
 	for command := range operatorCommandTypes {
 		scope, ok := RequiredOperatorScope(command)

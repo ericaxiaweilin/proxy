@@ -579,6 +579,28 @@ func TestModerationReportCommandsRequireOperator(t *testing.T) {
 	}
 }
 
+// COMP-SELLER-001: 实名核验的写入口必须走 operator 门。
+//
+// 这条命令决定「谁有资格在平台上收钱」。不过门的话，卖家可以自己给自己签
+// 「已实名」—— 实名门形同虚设，而平台手里还留着一份看起来完整的核验记录，
+// 比没有记录更糟（它把「没人核过」伪装成「核过了」）。
+//
+// 同时反向钉住读侧：GetAgentProfile / QuerySuppliers 是普通用户路径，
+// 它们只是读「能不能撮合」，收紧它们属于静默失败（谁也用不了）。
+func TestSellerRealNameAttestationRequiresOperator(t *testing.T) {
+	if !requiresOperator("AttestSellerRealName") {
+		t.Fatal("AttestSellerRealName must require operator: ungated, a seller can attest their own real-name verification and the compliance gate becomes decorative")
+	}
+	if scope, ok := RequiredOperatorScope("AttestSellerRealName"); !ok || scope != ScopeIdentity {
+		t.Fatalf("AttestSellerRealName must require the IDENTITY scope (got %q, ok=%v) — real-name is a different question from capability", string(scope), ok)
+	}
+	for _, cmd := range []string{"GetAgentProfile", "QuerySuppliers", "CreateCandidateBatch"} {
+		if requiresOperator(cmd) {
+			t.Fatalf("%s must NOT require operator: it is a read/match path, not a privilege", cmd)
+		}
+	}
+}
+
 // OUTCOME-TEMPLATE-GATE-001: 观察模板的创建必须走 operator 门。
 //
 // 模板是全局共享词汇表：ObservationTemplate 没有 owner/scope 字段（postgres 侧

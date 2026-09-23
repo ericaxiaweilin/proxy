@@ -56,6 +56,12 @@ func (g *StaticOperatorGate) IsOperator(_ command.Actor, principal command.Princ
 // ordinary authenticated users.
 var operatorCommandTypes = map[string]bool{
 	"VerifyCapability":         true,
+	// COMP-SELLER-001: 供给侧实名核验（写入侧）。这条命令决定「谁有资格在平台上
+	// 收钱」，是越南电商法 122/2025 + NĐ 248/2026 下平台唯一的合规凭据来源 ——
+	// 绝不能让卖家自己给自己签「已实名」（否则实名门形同虚设：谁都能把自己
+	// 放行，而平台还拿着一份看起来完整的核验记录）。
+	// 同走 PROXY_OPERATOR_PRINCIPALS 白名单 + IDENTITY scope，未设 = 拒。
+	"AttestSellerRealName": true,
 	"ReviewContributionAccess": true,
 	"ReviewContributionDomain": true,
 	"ReviewRewardGate":         true,

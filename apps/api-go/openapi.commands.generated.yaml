@@ -31,6 +31,8 @@ commands:
     domain: Marketplace
   - command: ArriveMeetup
     domain: Conversation
+  - command: AttestSellerRealName
+    domain: Supply
   - command: AuthenticateWithGoogle
     domain: Identity
   - command: BeginPasswordlessAuthentication
