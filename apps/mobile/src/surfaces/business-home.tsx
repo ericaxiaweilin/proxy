@@ -14,6 +14,7 @@ import { NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSh
 import { Image } from "expo-image";
 import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
+import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import { type MarketTab } from "../market-fixtures";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { color, shadows } from "../theme";
@@ -315,7 +316,8 @@ export function BusinessHome({
           <View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>还没有菜单</Text><Text selectable style={styles.subtle}>去线上店铺加第一道菜</Text></View>
         </Pressable>
       ) : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>
+        // SWIPE-RAIL-001：菜单照片横滑不能触发外层切页。
+        <HorizontalSwipeRail contentContainerStyle={styles.menuRail} preserveChildPresses threshold={3}>
           {menuItems.filter((m) => m.available).slice(0, 6).map((m) => (
             <Pressable key={m.id} onPress={() => onOpenMe()} style={styles.menuCard}>
               {m.mediaAssetId ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-sku:${m.id}`} source={{ uri: `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(m.mediaAssetId)}` }} style={styles.menuImage} transition={0} /> : <View style={styles.menuImageMissing}><ProxyIcon color={color.muted} name="storefront" size={22} /></View>}
@@ -323,7 +325,7 @@ export function BusinessHome({
               <Text selectable style={styles.menuPrice}>{formatVnd(m.priceMinor)}</Text>
             </Pressable>
           ))}
-        </ScrollView>
+        </HorizontalSwipeRail>
       )}
 
       {inProgress.length ? <>

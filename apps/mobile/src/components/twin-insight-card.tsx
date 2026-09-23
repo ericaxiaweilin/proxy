@@ -5,6 +5,7 @@ import { color, foundation } from "../theme";
 import { ProxyAvatar, ProxyButton } from "./proxy-foundation";
 import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
 import { twinAvatarSource } from "./twin-avatar-source";
+import { HorizontalSwipeRail } from "./horizontal-swipe-rail";
 
 // TWIN-INSIGHT-001 — AI 分身 · 好友洞察卡（R3 实现，原型仅功能参考）。
 //
@@ -65,13 +66,11 @@ export function TwinTargetRail({
   onSelect: (targetId: string) => void;
   resolveMediaUrl?: ((path: string) => string) | undefined;
 }): React.JSX.Element {
+  // SWIPE-RAIL-001：头像横滑不能触发外层切页（看起来像 bug）。跟动作 rail /
+  // stories 同一套隔离：PanResponder 接管 dx 手势，轻点仍交给子项 tab。
   return (
-    <ScrollView
-      accessibilityRole="tablist"
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.rail}
-    >
+    <View accessibilityRole="tablist">
+      <HorizontalSwipeRail contentContainerStyle={styles.rail} preserveChildPresses threshold={3}>
       {insights.map((item) => {
         const selected = item.targetId === selectedId;
         const avatarSource = twinAvatarSource(item.avatarUrl, resolveMediaUrl);
@@ -99,7 +98,8 @@ export function TwinTargetRail({
           </Pressable>
         );
       })}
-    </ScrollView>
+      </HorizontalSwipeRail>
+    </View>
   );
 }
 

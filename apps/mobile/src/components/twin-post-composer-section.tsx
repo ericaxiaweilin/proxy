@@ -6,6 +6,7 @@ import type { PersonaGalleryItem } from "../ai-persona-client";
 import type { FriendView, RelationshipClient } from "../relationship-client";
 import { color, foundation } from "../theme";
 import { ProxyAvatar, ProxyEmptyState } from "./proxy-foundation";
+import { HorizontalSwipeRail } from "./horizontal-swipe-rail";
 import { ProxyIcon } from "./proxy-icon";
 import { twinAvatarSource } from "./twin-avatar-source";
 
@@ -260,7 +261,8 @@ function ComposerSheet({ galleryItems, friends, viewerAccountId, createPost, onC
             {galleryItems.length > 0 ? (
               <>
                 <Text selectable style={styles.fieldLabel}>选图库照片（最多 6 张）</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaPicker}>
+                {/* SWIPE-RAIL-001：选图横滑不能触发外层切页。 */}
+                <HorizontalSwipeRail preserveChildPresses style={styles.mediaPicker} threshold={3}>
                   {galleryItems.map((item) => {
                     const selected = selectedMediaIds.includes(item.id);
                     return (
@@ -270,7 +272,7 @@ function ComposerSheet({ galleryItems, friends, viewerAccountId, createPost, onC
                       </Pressable>
                     );
                   })}
-                </ScrollView>
+                </HorizontalSwipeRail>
               </>
             ) : null}
 

@@ -13,6 +13,7 @@ import { Image as ExpoImage } from "expo-image";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { color } from "../theme";
 import type { FeedMediaItem } from "@proxy/contracts";
+import { HorizontalSwipeRail } from "./horizontal-swipe-rail";
 import { AIMediaBadge } from "../media/ai-media-badge";
 
 const FALLBACK_BG = "#EEE";
@@ -62,7 +63,8 @@ export function ThreadsPostMedia({ items, resolveUrl, onOpen }: Props): React.JS
   return (
     <View onLayout={(event) => setRowWidth(event.nativeEvent.layout.width)} style={styles.postMediaRowWrap}>
       {cardWidth > 0 ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rowContent}>
+        // SWIPE-RAIL-001：帖子多图横滑不能触发外层切页（跟 AdaptiveMediaCollection 同一套隔离）。
+        <HorizontalSwipeRail contentContainerStyle={styles.rowContent} preserveChildPresses threshold={3}>
           {items.map((item, i) => (
             <MediaCell
               key={`${item.mediaAssetId}-${i}`}
@@ -72,7 +74,7 @@ export function ThreadsPostMedia({ items, resolveUrl, onOpen }: Props): React.JS
               cellSize={{ width: cardWidth, height: cardHeight }}
             />
           ))}
-        </ScrollView>
+        </HorizontalSwipeRail>
       ) : null}
     </View>
   );

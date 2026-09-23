@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 272 — 2026-09-23
+
+- **照片/头像横滑不再触发切页**（SWIPE-RAIL-001）：用户「左右滑照片就翻页，
+  像 bug」。页面级切页手势会抢走横滑内容。9 处照片/头像轨包
+  `HorizontalSwipeRail` 隔离（AI 分身：洞察头像 rail、图库双轨、选图器；
+  帖子多图、房间成员、AI 助手、场景可约人/菜单、Creator 推荐、商家菜单），
+  有可点子项的一律 `preserveChildPresses + threshold 3`。芯片/筛选行、
+  全屏看图（自带 paging）不在本次范围。另记 JSX 坑：rail 紧跟三元分支 `(`
+  后面时注释只能用 `//`，`{/* */}` 会被当 JS 块直接炸编译。
+- 影响文件：上述 9 个 tsx（只换容器，内容不动）+ `swipe-rail.test.ts`（新建）。
+
 ## Revision 271 — 2026-09-23
 
 - **好友与关系：动态浏览日志折叠成分析面板 + 统计入口；浏览日志分层，逐人明细只给运营；补全日志链路**（CONTENT-ANALYTICS-001）：

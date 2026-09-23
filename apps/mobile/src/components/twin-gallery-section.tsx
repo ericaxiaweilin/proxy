@@ -6,6 +6,7 @@ import { AiPersonaClient, type PersonaGalleryItem } from "../ai-persona-client";
 import type { TransportResponse } from "../auth-client";
 import { promptLikenessConsent } from "./likeness-consent-prompt";
 import type { MediaClient } from "../media-client";
+import { HorizontalSwipeRail } from "./horizontal-swipe-rail";
 import { color, foundation } from "../theme";
 import { ProxyEmptyState } from "./proxy-foundation";
 import { ProxyIcon } from "./proxy-icon";
@@ -140,7 +141,8 @@ export function TwinGallerySection({ rawGalleryItems, mediaClient, authClient, o
         ) : expanded ? (
           <View style={styles.grid}>{items.map((item) => <GalleryThumb item={item} key={item.id} onPress={() => setPreview(item)} style={styles.gridThumb} />)}</View>
         ) : (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.track}>{items.map((item) => <GalleryThumb item={item} key={item.id} onPress={() => setPreview(item)} style={styles.trackThumb} />)}</ScrollView>
+          // SWIPE-RAIL-001：照片横滑不能触发外层切页。跟动态多图同一套隔离。
+          <HorizontalSwipeRail preserveChildPresses style={styles.track} threshold={3}>{items.map((item) => <GalleryThumb item={item} key={item.id} onPress={() => setPreview(item)} style={styles.trackThumb} />)}</HorizontalSwipeRail>
         )
       ) : items.length === 0 && !mediaClient ? (
         <ProxyEmptyState sub="发过带图的帖子后，照片会出现在这里" title="还没有照片" />
@@ -150,10 +152,11 @@ export function TwinGallerySection({ rawGalleryItems, mediaClient, authClient, o
           {items.map((item) => <GalleryThumb item={item} key={item.id} onPress={() => setPreview(item)} style={styles.gridThumb} />)}
         </View>
       ) : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.track}>
+        // SWIPE-RAIL-001：同上（公共图库横滑轨）。
+        <HorizontalSwipeRail preserveChildPresses style={styles.track} threshold={3}>
           <UploadTile disabled={!mediaClient} onPress={() => void importFromLibrary()} style={styles.trackThumb} uploading={uploading} />
           {items.map((item) => <GalleryThumb item={item} key={item.id} onPress={() => setPreview(item)} style={styles.trackThumb} />)}
-        </ScrollView>
+        </HorizontalSwipeRail>
       )}
       {uploadError ? <Text selectable style={styles.errorText}>{uploadError}</Text> : null}
 

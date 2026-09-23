@@ -6,6 +6,7 @@ import type { TransportResponse, TransportRequest } from "./auth-client";
 import { nativeSecureSessionStore, sessionAuthClient } from "./native-clients";
 import { localApiBaseUrl } from "./native-clients";
 import { EngagementClient } from "./engagement-client";
+import { HorizontalSwipeRail } from "./components/horizontal-swipe-rail";
 import { ConversationClient } from "./conversation-client";
 import { color } from "./theme";
 
@@ -157,7 +158,8 @@ export function AIAssistantsRow({ baseUrl = localApiBaseUrl }: { baseUrl?: strin
         <Text selectable style={styles.rowTitle}>小美们</Text>
         <Text selectable style={styles.rowGen}>AI生成</Text>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+      {/* SWIPE-RAIL-001：小美头像横滑不能触发外层切页。 */}
+      <HorizontalSwipeRail contentContainerStyle={styles.row} preserveChildPresses threshold={3}>
         {items.map((item) => (
           <Pressable key={item.id} onPress={() => { setSelectedId(item.id); setNotice(undefined); }} style={styles.story}>
             {broken.has(item.id) ? (
@@ -171,7 +173,7 @@ export function AIAssistantsRow({ baseUrl = localApiBaseUrl }: { baseUrl?: strin
             {following.has(item.id) ? <Text selectable style={styles.followed}>已关注</Text> : null}
           </Pressable>
         ))}
-      </ScrollView>
+      </HorizontalSwipeRail>
     </View>
   );
 }

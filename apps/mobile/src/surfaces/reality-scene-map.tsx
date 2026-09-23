@@ -22,6 +22,7 @@ import {
   type SceneActivity, type SceneActivityFeedState
 } from "../scene-activities";
 import { ProxyIcon } from "../components/proxy-icon";
+import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import { useModuleBackHandler } from "../components/module-back";
 // SCENE-HUMANS-001: 一起玩的人只露圆头像 + 名字 + 可约状态 —— 和首页同款圆头像
 //（CircularAvatarImage，真圆裁剪），role / fit% / fitReason 不在这一屏重复：
@@ -684,7 +685,8 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
                 不能只留标题和一个空横滑（那会被读成"还在加载"）。文案说明它不是一个
                 失败状态，也不是"再等等就会有人"的承诺。 */}
             {detail.humans.length > 0 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.humanRail}>
+            // SWIPE-RAIL-001：可约人头像横滑不能触发外层切页。
+            <HorizontalSwipeRail contentContainerStyle={styles.humanRail} preserveChildPresses threshold={3}>
               {/* SCENE-HUMANS-002: 纯圆头 rail，不要白卡片 —— 和首页同款圆头像放大
                   （64），名字 + 可约状态居中跟在下面。选中态改用头像外圈紫环
                   （卡片删了，边框无处可画）；点按仍是“选中邀约对象”，链不断。 */}
@@ -694,12 +696,13 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
                   可约原文（本周可约/上午可约…）是服务端真值，原样展示不改写。
                   SCENE-HUMANS-004: rail 只渲染一遍 —— 上面那一行 map 就是全部，
                   这里不许再挂第二遍（曾经两遍 identical 并排，每个人出现两次）。 */}
-            </ScrollView>
+            </HorizontalSwipeRail>
             ) : (
               <Text selectable style={styles.humanEmpty}>这个场景现在还没有挂出可约时间的人 —— 这不是加载失败，也不是「再等等就会有人」的承诺。可以先收藏这个场景。</Text>
             )}
             <View style={styles.sectionTitleRow}><Text selectable style={styles.sectionTitle}>{fullMenuOpen ? `${detail.venueName} · 完整菜单` : "这个 Scene 喝什么"}</Text><Pressable onPress={() => setFullMenuOpen((open) => !open)}><Text selectable style={styles.sectionLink}>{fullMenuOpen ? "只看当前 Scene" : "完整菜单"}</Text></Pressable></View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>{(fullMenuOpen ? detail.fullMenu : detail.menu).map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text selectable numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text selectable style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text selectable style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</ScrollView>
+            {/* SWIPE-RAIL-001：菜单照片横滑不能触发外层切页。 */}
+                <HorizontalSwipeRail contentContainerStyle={styles.menuRail} preserveChildPresses threshold={3}>{(fullMenuOpen ? detail.fullMenu : detail.menu).map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text selectable numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text selectable style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text selectable style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</HorizontalSwipeRail>
             {/* SCENE-CHECKIN-100M-001: 详情只留两个动作 —— 收藏（意愿）与打卡
                 （到场证明，100m 门禁）。「标记去过 / 去这里 / 我在这里」三个人工
                 声明入口已撤：无验证的手点不产生到场事实；去过由 300m 自动足迹记，

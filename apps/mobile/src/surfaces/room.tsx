@@ -5,6 +5,7 @@ import * as ImagePicker from "expo-image-picker";
 import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { VoiceToolButton } from "../components/VoiceToolButton";
+import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import { ProxyIcon } from "../components/proxy-icon";
 import type { ConversationClient, ConversationInboxItem, Meetup } from "../conversation-client";
 import type { MediaClient } from "../media-client";
@@ -265,7 +266,8 @@ export function RoomSurface({ conversationId, conversationClient, mediaClient, p
 
           {meetup ? <MeetStatusBar busy={meetBusy} meetup={meetup} onArrive={() => void arriveActiveMeetup(meetup.meetupId)} onComplete={() => void completeActiveMeetup(meetup.meetupId)} onNudge={() => void nudgeActiveMeetup(meetup.meetupId)} selfIsProposer={meetup.proposerId === actorId} /> : null}
 
-          <ScrollView contentContainerStyle={styles.membersStripContent} horizontal showsHorizontalScrollIndicator={false} style={styles.membersStrip}>
+          {/* SWIPE-RAIL-001：成员头像横滑不能触发外层切页。子项无按钮，轻点选择文本不受影响。 */}
+          <HorizontalSwipeRail contentContainerStyle={styles.membersStripContent} preserveChildPresses style={styles.membersStrip} threshold={3}>
             {participants.map((id) => {
               const uri = avatarUri(id);
               return (
@@ -277,7 +279,7 @@ export function RoomSurface({ conversationId, conversationClient, mediaClient, p
                 </View>
               );
             })}
-          </ScrollView>
+          </HorizontalSwipeRail>
 
           <ScrollView
             contentContainerStyle={styles.chatContent}
