@@ -37,6 +37,8 @@ type AiEngineChatState struct {
 	Tone        string
 	ReplyLength string
 	Emoji       string
+	// Rhythm：代回复的节奏 instant | human_3_5 | human_10_30 | random（AI-MANAGE-014，见 stand_in_rhythm.go）。
+	Rhythm string
 	// OwnerName / OwnerBio：代回复以本人身份说话时，AI 得知道自己在替谁说（AI-MANAGE-008）。
 	OwnerName string
 	OwnerBio  string

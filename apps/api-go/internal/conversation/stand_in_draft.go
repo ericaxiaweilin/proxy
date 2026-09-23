@@ -95,31 +95,37 @@ func (s *Service) supersedePendingStandInDraft(ctx context.Context, conversation
 }
 
 // draftStandInReply 在「每次确认」下替本人起草一条回复并存成待确认草稿。
-// 不落消息、不返回给发消息的人；失败只记日志（发消息的人那边本来就是「对方还没回」）。
-func (s *Service) draftStandInReply(ctx context.Context, conv Conversation, e command.Envelope, standIn aiStandIn, inReplyTo string, userText string, assistantMode string) {
+// 在请求之外跑（发消息的人不用等模型）；不落消息、不返回给发消息的人；失败只记日志。
+// 只给最新那条消息起草；起草期间本人自己回了，就不再留草稿。
+func (s *Service) draftStandInReply(_ context.Context, conv Conversation, e command.Envelope, standIn aiStandIn, inReplyTo string, userText string, assistantMode string) {
 	if standIn.Owner == "" || s.modelStack == nil || !s.modelStack.Available() {
 		return
 	}
-	genCtx := withStandIn(ctx, standIn)
-	reply := s.withModelUnlocked(func() *Message {
-		return s.generateAIReplyUnpersisted(genCtx, conv, e, userText, assistantMode, nil, nil)
+	planKey := conv.ID + "#draft"
+	s.standInPlans.mark(planKey, inReplyTo)
+	s.runStandInJob(0, func() {
+		ctx := context.Background()
+		reply, _, _ := s.generateAIReplyInternal(withStandIn(ctx, standIn), conv, e, userText, assistantMode, nil, nil, false)
+		if !s.standInPlans.claim(planKey, inReplyTo) {
+			return // 对方又发了一条，由最新那次起草
+		}
+		if reply == nil || strings.TrimSpace(reply.Body) == "" || s.spokeAfter(ctx, conv.ID, inReplyTo, standIn.Owner) {
+			return
+		}
+		s.supersedePendingStandInDraft(ctx, conv.ID, standIn.Owner)
+		draft := StandInDraft{
+			ID:             newID("sid_"),
+			ConversationID: conv.ID,
+			OwnerID:        standIn.Owner,
+			InReplyTo:      inReplyTo,
+			Body:           strings.TrimSpace(reply.Body),
+			Status:         "PENDING",
+			CreatedAt:      s.clock.Now().UTC(),
+		}
+		if err := s.repository.SaveStandInDraft(ctx, draft); err != nil {
+			log.Printf("conversation ai: save stand-in draft failed: %v", err)
+		}
 	})
-	if reply == nil || strings.TrimSpace(reply.Body) == "" {
-		return
-	}
-	s.supersedePendingStandInDraft(ctx, conv.ID, standIn.Owner)
-	draft := StandInDraft{
-		ID:             newID("sid_"),
-		ConversationID: conv.ID,
-		OwnerID:        standIn.Owner,
-		InReplyTo:      inReplyTo,
-		Body:           strings.TrimSpace(reply.Body),
-		Status:         "PENDING",
-		CreatedAt:      s.clock.Now().UTC(),
-	}
-	if err := s.repository.SaveStandInDraft(ctx, draft); err != nil {
-		log.Printf("conversation ai: save stand-in draft failed: %v", err)
-	}
 }
 
 // pendingStandInDraftFor 只给本人看：别人（包括发消息的人）永远拿不到。

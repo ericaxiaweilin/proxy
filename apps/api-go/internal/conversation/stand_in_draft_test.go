@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 // AI-MANAGE-013：「每次确认」= AI 替本人起草，只有本人看得到；本人发出后就是本人的消息。
@@ -19,6 +20,8 @@ func confirmService(t *testing.T) (*Service, *MemoryRepository, *recordingModelS
 	model := &recordingModelStack{}
 	repo := NewMemoryRepository()
 	s := NewWithModelStack(repo, model)
+	// 起草在请求之外跑；测试里就地执行，结果可断言。
+	s.SetStandInScheduler(func(_ time.Duration, run func()) { run() })
 	var asked []string
 	s.SetAiEngineChatStateReader(stateByUser(map[string]AiEngineChatState{
 		"user_002": {ChatPermission: "confirm", OwnerName: "Linh"},

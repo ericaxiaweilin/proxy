@@ -565,6 +565,9 @@ type Service struct {
 	// 计量失败不打断聊天）。
 	aiEngineChatState AiEngineChatStateReader
 	tokenMeter         TokenMeter
+	// AI-MANAGE-014：全自动代回复按本人「节奏」延迟发出（见 stand_in_rhythm.go）。
+	standInScheduler StandInScheduler
+	standInPlans     standInPlanner
 }
 
 // MediaAuthorizer 由 media 包实现（注入避免循环依赖，同 localnet.MediaLookup
@@ -1232,15 +1235,23 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		}
 		payload["assistantStatus"] = "NOT_REQUESTED"
 		var aiReply *Message
+		standInScheduled := false
 		if temporaryUI != nil {
 			aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
 		} else if s.modelStack != nil && s.modelStack.Available() {
-			genCtx := withStandIn(ctx, standIn)
-			aiReply = s.withModelUnlocked(func() *Message {
-				return s.generateAIReply(genCtx, conv, e, p.FirstMessage, p.AssistantMode, nil, nil)
-			})
+			// AI-MANAGE-014：代回复按本人的节奏延迟发出；秒回才在这个请求里同步回。
+			if standIn.Owner != "" && firstMessageID != "" && s.scheduleStandInReply(conv, e, standIn, firstMessageID, p.FirstMessage, p.AssistantMode, nil) {
+				standInScheduled = true
+			} else {
+				genCtx := withStandIn(ctx, standIn)
+				aiReply = s.withModelUnlocked(func() *Message {
+					return s.generateAIReply(genCtx, conv, e, p.FirstMessage, p.AssistantMode, nil, nil)
+				})
+			}
 		}
-		if aiReply != nil {
+		if standInScheduled {
+			payload["assistantStatus"] = "SCHEDULED"
+		} else if aiReply != nil {
 			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
 				"messageId": aiReply.ID,
 				"note":      "Proxy 生成首条对话引导",
@@ -1499,6 +1510,7 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 		temporaryUI = temporaryUIFor(p.Body)
 	}
 	var aiReply *Message
+	standInScheduled := false
 	hasContent := strings.TrimSpace(p.Body) != "" || strings.TrimSpace(p.MediaRef) != ""
 	// COMP-AI-MINOR-001：平台 AI 伴侣（"AI 虚拟女孩"）是陪聊产品，未成年人不得使用。
 	// 门禁必须挂在**聊天入口**而不是只在建分身处 —— 平台 AI 账号是自带的，
@@ -1540,10 +1552,15 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 			}
 			quote = &ReplyQuote{Sender: sender, Body: quoteBodyTruncated(quoted.Body)}
 		}
-		genCtx := withStandIn(ctx, standIn)
-		aiReply = s.withModelUnlocked(func() *Message {
-			return s.generateAIReply(genCtx, conv, e, p.Body, p.AssistantMode, nil, quote)
-		})
+		// AI-MANAGE-014：代回复按本人的节奏延迟发出；秒回才在这个请求里同步回。
+		if standIn.Owner != "" && s.scheduleStandInReply(conv, e, standIn, msg.ID, p.Body, p.AssistantMode, quote) {
+			standInScheduled = true
+		} else {
+			genCtx := withStandIn(ctx, standIn)
+			aiReply = s.withModelUnlocked(func() *Message {
+				return s.generateAIReply(genCtx, conv, e, p.Body, p.AssistantMode, nil, quote)
+			})
+		}
 		if aiReply != nil {
 			note := "AI 通过模型底座生成对话式需求构建回复"
 			if standIn.Owner != "" {
@@ -1573,6 +1590,9 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 		payload["assistantStatus"] = "GATED"
 	} else if engineBlocked {
 		payload["assistantStatus"] = engineStatus
+	} else if standInScheduled {
+		// 发消息的人那边：对方还没回（客户端对未知状态保持沉默），到点后靠轮询收到本人的回复。
+		payload["assistantStatus"] = "SCHEDULED"
 	} else if hasContent && convoID == nil {
 		if s.modelStack != nil && s.modelStack.Available() {
 			payload["assistantStatus"] = "FAILED"

@@ -9180,6 +9180,12 @@ for t in TestConfirmDraftsForTheOwnerOnlyAndNeverAnswersTheSender TestOwnerSends
   require_test "AI-MANAGE-013" "./internal/conversation" "$t" \
     "apps/api-go/internal/conversation/stand_in_draft_test.go" || exit $?
 done
+# AI-MANAGE-014：全自动代回复按本人「节奏」延迟发出，不在发消息的请求里同步回；连发只回最新一条；
+# 等待期间本人自己回了 / 关掉了就不发。
+for t in TestStandInWaitsForTheOwnersRhythmThenRepliesAsTheOwner TestStandInAnswersOnlyTheLatestMessageAfterABurst TestStandInStaysSilentWhenTheOwnerAnsweredOrTurnedItOffWhileWaiting TestStandInDelayMatchesTheRhythmChoices; do
+  require_test "AI-MANAGE-014" "./internal/conversation" "$t" \
+    "apps/api-go/internal/conversation/stand_in_rhythm_test.go" || exit $?
+done
 require_test "AI-MANAGE-003" "./internal/conversation" \
   "TestStandInAutoUsesTheOwnersStyleAndMetersTheOwner" \
   "apps/api-go/internal/conversation/ai_engine_gate_test.go" || exit $?
