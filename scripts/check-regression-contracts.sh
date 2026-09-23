@@ -9060,7 +9060,7 @@ fi
 # 生成 AI 代回复，所以「已邀约」必须在发请求**之前**就置上，不能挂在请求的 then 上；
 # 也不许再出现「发送中」这种中间态。
 optimistic_line=$(grep -nF 'writeGreetState({ ...greetStateRef.current, [accountId]: Date.now() });' "$GREET_HOME" | head -1 | cut -d: -f1)
-send_line=$(grep -nF 'onGreetHuman(person, line)' "$GREET_HOME" | head -1 | cut -d: -f1)
+send_line=$(grep -nF 'onGreetHuman(person, lines)' "$GREET_HOME" | head -1 | cut -d: -f1)
 if [ -z "$optimistic_line" ] || [ -z "$send_line" ] || [ "$optimistic_line" -ge "$send_line" ]; then
   echo "  FAIL [HOME-MORE-GREET-002]: 「已邀约」没有在发请求之前置上 —— 又在等对方回复才变状态。" >&2
   exit 1
@@ -9090,6 +9090,42 @@ if ! grep -qF '>= GREET_MAX_UNANSWERED) return "awaiting_reply";' "$GREET_SHELL"
   echo "  FAIL [HOME-MORE-GREET-003]: 发之前不再检查「连发 3 条对方没回」。" >&2
   exit 1
 fi
+# HOME-MORE-GREET-004：挑招呼句子要避开跟这个人聊天里我已经发过的（同一句发两遍，AI 代回复都会
+# 吐槽「又是这句」）。
+if ! grep -qF 'const line = pickGreetingLine(lines, alreadySent);' "$GREET_SHELL"; then
+  echo "  FAIL [HOME-MORE-GREET-004]: 招呼句子不再避开已经发过的。" >&2
+  exit 1
+fi
 pnpm --dir apps/mobile exec vitest run src/greet-state.test.ts || exit $?
 pnpm --dir apps/mobile exec vitest run src/i18n.test.ts -t "several distinct greeting lines" || exit $?
-echo "    HOME-MORE-GREET-001/002/003: PASS (one-tap hi; invited persists 12h; max 3 unanswered in a row)"
+echo "    HOME-MORE-GREET-001/002/003/004: PASS (one-tap hi; invited persists 12h; max 3 unanswered in a row; no repeated line)"
+
+# PULL-REFRESH-001（2026-09-23，用户：「目前所有社交产品都是上下滑动进行刷新 我们缺少这个逻辑」）：
+# 首页 / 更多（真人 + 聊天房）/ 消息 / 动态 / 市场 的主列表都能下拉刷新；转圈跟着真实加载停
+# （usePullToRefresh 等 Promise、useTrackedRefresh 等被 track 的请求），不是固定时长。
+PR_HOOK=apps/mobile/src/components/pull-to-refresh.ts
+for spec in \
+  "apps/mobile/src/surfaces/requester-home.tsx:refreshControl={<RefreshControl refreshing={homeRefreshing} onRefresh={onHomeRefresh} />} style={styles.root}" \
+  "apps/mobile/src/surfaces/requester-home.tsx:refreshControl={<RefreshControl refreshing={homeRefreshing} onRefresh={onHomeRefresh} />} style={styles.moreList}" \
+  "apps/mobile/src/surfaces/requester-home.tsx:refreshControl={<RefreshControl refreshing={rooms.status === \"loading\"} onRefresh={refreshRooms} />}" \
+  "apps/mobile/src/surfaces/messages.tsx:refreshControl={<RefreshControl refreshing={inboxPull.refreshing} onRefresh={inboxPull.onRefresh} />}" \
+  "apps/mobile/src/surfaces/feed.tsx:refreshControl={<RefreshControl refreshing={feedPull.refreshing} onRefresh={feedPull.onRefresh} />}" \
+  "apps/mobile/src/surfaces/market.tsx:refreshControl={<RefreshControl refreshing={marketPull.refreshing} onRefresh={marketPull.onRefresh} />}"; do
+  file="${spec%%:*}"; needle="${spec#*:}"
+  if ! grep -qF "$needle" "$file"; then
+    echo "  FAIL [PULL-REFRESH-001]: $file 的主列表没有下拉刷新了：$needle" >&2
+    exit 1
+  fi
+done
+# 首页的加载 effect 必须跟着 nonce 重跑、请求必须被 track —— 否则下拉只是转个圈。
+for needle in 'void trackHomeLoad(relationship.listMyFriendships())' 'void trackHomeLoad(activities.listActivities())' 'void trackHomeLoad((async () => {' '}, [demandClient, homeRefreshNonce]);'; do
+  if ! grep -qF "$needle" apps/mobile/src/surfaces/requester-home.tsx; then
+    echo "  FAIL [PULL-REFRESH-001]: 首页下拉不再真的重拉数据：$needle" >&2
+    exit 1
+  fi
+done
+if grep -qE 'setTimeout\(\(\) => setRefreshing\(false\), [0-9]{3,4}\)' "$PR_HOOK"; then
+  echo "  FAIL [PULL-REFRESH-001]: 转圈改成固定时长收起了 —— 必须等真实加载结束。" >&2
+  exit 1
+fi
+echo "    PULL-REFRESH-001: PASS (home / more / rooms / messages / feed / market all pull-to-refresh on real loads)"

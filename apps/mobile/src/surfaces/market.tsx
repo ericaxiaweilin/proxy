@@ -8,7 +8,8 @@
 //   - “热门地点” = MARKER 显式声明的探索点 (VENDOR_SPOT) — 重要但仅是探索，不会被默认高亮
 //   - “快速真实地址” = showUserLocation 蓝点 + “用我当前位置”按钮
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { usePullToRefresh } from "../components/pull-to-refresh";
 import MapView, { Circle, Marker, type Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useModuleBackHandler } from "../components/module-back";
@@ -276,6 +277,9 @@ export function MarketSurface({
     if (tab === "OPPORTUNITY") void loadOpportunities();
   }, [tab, loadOpportunities]);
 
+  // PULL-REFRESH-001: 下拉重拉当前 tab 的数据。
+  const marketPull = usePullToRefresh(useCallback(() => (tab === "OPPORTUNITY" ? loadOpportunities() : loadActivities()), [tab, loadOpportunities, loadActivities]));
+
   // M4: 机会页拉取真实供给（QuerySuppliers market=hn capability=ZH），用于“供给匹配”状态行
   useEffect(() => {
     if (!supply || tab !== "OPPORTUNITY") {
@@ -420,7 +424,7 @@ export function MarketSurface({
         （横向 padding 清零）之前只给订单 tab，活动 tab 缩进 18，
         同一块 MarketMap 一边顶边一边有缝。地图视图不分 tab 全顶边；
         列表视图保持原样（订单沿用 contentFlat，活动保留 18 padding）。 */}
-    <ScrollView style={styles.root} contentContainerStyle={[styles.content, view === "MAP" || pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
+    <ScrollView refreshControl={<RefreshControl refreshing={marketPull.refreshing} onRefresh={marketPull.onRefresh} />} style={styles.root} contentContainerStyle={[styles.content, view === "MAP" || pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
       <View style={styles.marketHead}>
         <Text style={styles.marketTitle}>市场</Text>
         <View style={styles.headActions}>

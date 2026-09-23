@@ -1,7 +1,8 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, AppState, NativeScrollEvent, NativeSyntheticEvent, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
+import { Animated, AppState, NativeScrollEvent, NativeSyntheticEvent, PanResponder, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
+import { usePullToRefresh } from "../components/pull-to-refresh";
 import { Image } from "expo-image";
 import { Directory, File, Paths } from "expo-file-system";
 import { SwipeBackShell } from "../architecture/swipe-back";
@@ -300,6 +301,8 @@ export function MessagesSurface({
       setInboxError(true);
     }
   }, [apiBaseUrl, conversationClient, profileClient]);
+  // PULL-REFRESH-001: 下拉立刻重拉收件箱（不用等 5 秒轮询）。
+  const inboxPull = usePullToRefresh(refreshInbox);
 
   useEffect(() => {
     if (!conversationClient) return;
@@ -642,7 +645,7 @@ export function MessagesSurface({
       ) : null}
 
       {/* body */}
-      <ScrollView style={styles.homeBody} contentContainerStyle={{ paddingBottom: bottomNavVisible === false ? 16 : 96 }} onScroll={onInboxScroll} scrollEventThrottle={16}>
+      <ScrollView refreshControl={<RefreshControl refreshing={inboxPull.refreshing} onRefresh={inboxPull.onRefresh} />} style={styles.homeBody} contentContainerStyle={{ paddingBottom: bottomNavVisible === false ? 16 : 96 }} onScroll={onInboxScroll} scrollEventThrottle={16}>
         {panel === "dialogs" ? (
           <>
             {!inboxLoaded ? (

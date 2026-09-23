@@ -4,7 +4,7 @@
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html（rhome，HTML 5197-5203）。
 // Experience Runtime 插槽：top_context banner 由 SurfacePlan 驱动（§10 Slots），本地态不被 Delta 覆盖（§15.1）。
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useScrollChrome } from "../shell/scroll-chrome";
@@ -21,6 +21,7 @@ import { GREETING_LINES, ICEBREAKER_LINES, useI18n, type MessageKey, type Messag
 import { loadPreferences } from "../preferences";
 import { LanguageSheet } from "../components/language-sheet";
 import { SCENE_OPTIONS } from "./room-create";
+import { useTrackedRefresh } from "../components/pull-to-refresh";
 import { isInvited, loadGreetState, saveGreetState, type GreetState } from "../greet-state";
 import type { ConversationInboxItem } from "../conversation-client";
 import type { HardDemandCategory } from "../uiplan/types";
@@ -185,7 +186,8 @@ export function RequesterHome({
   // HOME-MORE-GREET-001: 「邀约」= 直接发一句招呼（不进聊天页、不弹面板）。调用方负责真发
   // （PROFILE 源 DM，已有会话就续在里面），失败要 reject，这边才能说"没发出去"。
   // 返回 "awaiting_reply" = 已经连发 3 条、对方本人没回，这次没发（HOME-MORE-GREET-003）。
-  onGreetHuman?: (person: RecommendPerson, line: string) => Promise<"sent" | "awaiting_reply">;
+  // lines = 当前语言的招呼句子池；调用方避开跟这个人聊天里我已经发过的句子再随机挑一句。
+  onGreetHuman?: (person: RecommendPerson, lines: ReadonlyArray<string>) => Promise<"sent" | "awaiting_reply">;
   // ROOM-CREATE-001: "创建房间"入口——把当前"更多"页可见的候选人交给调用方，
   // 由它打开创建房间流程（真实 GROUP conversation，见 room-create.tsx）。
   // HOME-MORE-ROOMS-001: sceneIndex = 开房大卡上点的场景 chip（SCENE_OPTIONS 下标），缺省 = 默认场景。
@@ -267,6 +269,9 @@ export function RequesterHome({
   // HOME-I18N-001：语言。i18n 是模块级 store，这里只是它的一个消费者。
   // 冷启动时用落盘值覆盖一次（见下面的 effect），默认 zh。
   const { t, lang, option: appLangOption, rideTimes, setLanguage: applyLanguage } = useI18n();
+  // PULL-REFRESH-001: 首页下拉 = 让下面几个加载 effect 重跑（nonce 进 deps），
+  // 请求用 trackHomeLoad 包住，全部回来才收起转圈。「更多」真人列表也用同一套。
+  const { refreshing: homeRefreshing, onRefresh: onHomeRefresh, nonce: homeRefreshNonce, track: trackHomeLoad } = useTrackedRefresh();
   const [languageSheetOpen, setLanguageSheetOpen] = useState<boolean>(false);
 
   // HOME-MORE-ROOMS-001: 读「我已有的房」。只认服务端真实的 GROUP 会话且带 roomScene ——
@@ -303,8 +308,8 @@ export function RequesterHome({
   // HOME-MORE-SHEET-003: "更多真人"列表每行的破冰邀请——原型叫它 拼桌/邀约，
   // 不是加好友。选中的开场白进 initialDraft，真的带到聊天输入框里。
   const [icebreakerTarget, setIcebreakerTarget] = useState<RecommendPerson | undefined>(undefined);
-  // HOME-MORE-GREET-001: 「邀约」= 一点就发一句招呼；失败 / 无法发送时顶部一行提示；
-  // lastGreetLine 保证同一个人连着两次不会收到同一句。
+  // HOME-MORE-GREET-001: 「邀约」= 一点就发一句招呼；失败 / 无法发送时顶部一行提示。
+  // 挑哪一句由调用方定（它读得到跟这个人的聊天记录，能避开已经发过的句子）。
   // HOME-MORE-GREET-002（2026-09-23）：点下去立刻就是「已邀约」，请求在后台发 ——
   // StartConversation 带首条消息时服务端会**同步**生成真人账号的 AI 代回复再返回，
   // 等它回来才变状态 = 等对方回复。只有发送失败才撤回并提示。
@@ -316,7 +321,6 @@ export function RequesterHome({
   const greetStateRef = useRef<GreetState>({});
   const greetInFlight = useRef<Set<string>>(new Set());
   const [greetMsg, setGreetMsg] = useState<string>("");
-  const lastGreetLine = useRef<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -346,9 +350,6 @@ export function RequesterHome({
     if (!onGreetHuman || accountId === person.id) { setGreetMsg(t("greetNoAccount", { name: person.name })); return; }
     if (greetInFlight.current.has(accountId)) return;
     const lines = GREETING_LINES[lang] ?? GREETING_LINES.zh;
-    const pool = lines.filter((line) => line !== lastGreetLine.current[accountId]);
-    const line = pool[Math.floor(Math.random() * pool.length)] ?? lines[0]!;
-    lastGreetLine.current[accountId] = line;
     const previousAt = greetStateRef.current[accountId];
     const restore = (): void => {
       const next = { ...greetStateRef.current };
@@ -358,7 +359,7 @@ export function RequesterHome({
     writeGreetState({ ...greetStateRef.current, [accountId]: Date.now() });
     setGreetMsg("");
     greetInFlight.current.add(accountId);
-    onGreetHuman(person, line)
+    onGreetHuman(person, lines)
       .then((outcome) => {
         // 没发出去（等回复）：已邀约状态保留，但冷静期不因为这次没发出的点击往后延。
         if (outcome === "awaiting_reply") {
@@ -405,7 +406,7 @@ export function RequesterHome({
       return;
     }
     if (!relationship || !viewerAccountId) return;    let cancelled = false;
-    void relationship.listMyFriendships().then((payload) => {
+    void trackHomeLoad(relationship.listMyFriendships()).then((payload) => {
       if (cancelled) return;
       const next = new Map<string, HomeRelationshipState>();
       payload.active.forEach((item) => next.set(item.userId, "FRIEND"));
@@ -415,7 +416,7 @@ export function RequesterHome({
       if (!cancelled) setRelationshipMsg(t("relationshipLoadFailed"));
     });
     return () => { cancelled = true; };
-  }, [relationship, viewerAccountId, isGuest]);
+  }, [relationship, viewerAccountId, isGuest, homeRefreshNonce]);
 
   // HOME-PEOPLE-SEARCH-001: 服务端用户转本地人物卡形状，供主页入口复用。
   // 主页按 userId 拉服务端数据，这里只传身份目标，不传业务断言。
@@ -547,9 +548,9 @@ export function RequesterHome({
 
   useEffect(() => {
     let cancelled = false;
-    void aiAccounts?.listRecommended().then((accounts) => { if (!cancelled && accounts.length > 0) setRecommendedAI(accounts); }).catch(() => undefined);
+    if (aiAccounts) void trackHomeLoad(aiAccounts.listRecommended()).then((accounts) => { if (!cancelled && accounts.length > 0) setRecommendedAI(accounts); }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [aiAccounts]);
+  }, [aiAccounts, homeRefreshNonce]);
 
   // R15.34: 算当前 mode 的推荐 feed + 应用筛选过滤
   //   - filter: 多个 chip 可叠加 (附近 AND 最近活跃), 都需满足
@@ -592,7 +593,7 @@ export function RequesterHome({
   useEffect(() => {
     if (!sceneApiBaseUrl) return;
     let cancelled = false;
-    void fetch(`${sceneApiBaseUrl.replace(/\/$/, "")}/v1/reality-scenes`, { headers: { Accept: "application/json" } })
+    void trackHomeLoad(fetch(`${sceneApiBaseUrl.replace(/\/$/, "")}/v1/reality-scenes`, { headers: { Accept: "application/json" } }))
       .then((r) => (r.ok ? r.json() : undefined))
       .then((body) => {
         if (cancelled) return;
@@ -610,7 +611,7 @@ export function RequesterHome({
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [sceneApiBaseUrl]);
+  }, [sceneApiBaseUrl, homeRefreshNonce]);
   const activeSceneCount = sceneBriefs.filter((s) => s.active).length;
   const previewScene = humanScenePreview ? sceneBriefs.find((scene) => scene.id === humanScenePreview.sceneId) : undefined;
   const previewSceneImage = previewScene?.imageUrl
@@ -772,7 +773,7 @@ export function RequesterHome({
   useEffect(() => {
     if (!activities) return;
     let cancelled = false;
-    void activities.listActivities()
+    void trackHomeLoad(activities.listActivities())
       .then((list) => {
         if (cancelled) return;
         const briefs = list.map((a) => ({
@@ -789,7 +790,7 @@ export function RequesterHome({
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [activities]);
+  }, [activities, homeRefreshNonce]);
 
   // Home Search/Conversation v3 — 一个输入框同时做实体匹配和模型对话。
   // 索引里的四个分组**来源不一样**，别把它们混为一谈：
@@ -872,7 +873,7 @@ export function RequesterHome({
       return;
     }
     let cancelled = false;
-    (async () => {
+    void trackHomeLoad((async () => {
       // R15.22 fix: 匿名 session 没 principal, listHomeItems 调
       // requireSession() 立即抛 DemandProtocolError — 不应误报 "加载失败"
       // 由登录入口表达身份状态，不伪造“进行中”事项。
@@ -900,17 +901,17 @@ export function RequesterHome({
         // but never manufacture an active-work section from a read failure.
         if (cancelled) return;
       }
-    })();
+    })());
     return () => {
       cancelled = true;
     };
-  }, [demandClient]);
+  }, [demandClient, homeRefreshNonce]);
 
   // SCROLL-CHROME-001: 共享控制器。卸载回显 chrome 也由它负责（与动态一致）：
   // 切走时壳会重置，内部替换（如进 Scene Composer）时靠这里复位，避免停在隐藏态。
   const onScroll = useScrollChrome(onChromeVisibilityChange);
   return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
+    <ScrollView refreshControl={<RefreshControl refreshing={homeRefreshing} onRefresh={onHomeRefresh} />} style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       {topContext ?? null}
       {/* Home Search/Conversation v3（原型 .searchDock）：单行输入默认搜索；
           左侧 AI 标识显式进入消息模块中的唯一 Proxy AI 会话。 */}
@@ -1610,7 +1611,7 @@ export function RequesterHome({
               </View>
             ) : null}
             {moreMode === "rooms" ? (
-              <ScrollView style={styles.moreList} contentContainerStyle={styles.moreListContent} showsVerticalScrollIndicator={false}>
+              <ScrollView refreshControl={<RefreshControl refreshing={rooms.status === "loading"} onRefresh={refreshRooms} />} style={styles.moreList} contentContainerStyle={styles.moreListContent} showsVerticalScrollIndicator={false}>
                 {/* HOME-MORE-ROOMS-001：开房大卡（原型 .create-room-card）。整卡 = 默认场景开房，
                     4 个场景 chip = 带着该场景开房。创建页叠在本页里（moreRoomLayer），不关本页。 */}
                 <Pressable
@@ -1689,7 +1690,7 @@ export function RequesterHome({
               <>
               {relationshipMsg ? <Text style={styles.followMsg}>{relationshipMsg}</Text> : null}
               {greetMsg ? <Text style={styles.followMsg}>{greetMsg}</Text> : null}
-              <ScrollView style={styles.moreList} contentContainerStyle={styles.moreListContent} showsVerticalScrollIndicator={false}>
+              <ScrollView refreshControl={<RefreshControl refreshing={homeRefreshing} onRefresh={onHomeRefresh} />} style={styles.moreList} contentContainerStyle={styles.moreListContent} showsVerticalScrollIndicator={false}>
                 {filteredPeople.map((p) => {
                   const distance = p.distanceM === undefined ? t("distanceUnknown") : p.distanceM < 1000 ? `${p.distanceM} m` : `${(p.distanceM / 1000).toFixed(1)} km`;
                   const openPreview = (): void => {

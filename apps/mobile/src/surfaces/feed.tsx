@@ -5,9 +5,10 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, AppState, Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Animated, AppState, Image, Modal, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
+import { usePullToRefresh } from "../components/pull-to-refresh";
 import ImageViewing from "react-native-image-viewing";
 import type { FeedMediaItem, FeedPost, PostEngagement, PostPollView, PostReply } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
@@ -604,6 +605,10 @@ export function FeedSurface({
       setPhase(cachedPosts.length > 0 ? "READY" : "ERROR");
     }
   }, [localNet]);
+
+  // PULL-REFRESH-001: 下拉重拉第一页，fresh 穿透 HTTP 缓存（同发布后的重载，FEED-FRESH-001）；
+  // 正在搜索时按当前查询重拉。
+  const feedPull = usePullToRefresh(useCallback(() => loadFeed(searchQuery || undefined, true), [loadFeed, searchQuery]));
 
   async function loadMoreFeed(): Promise<void> {
     if (!hasMore || !nextCursor || loadingMoreRef.current || phase !== "READY") return;
@@ -1202,6 +1207,7 @@ export function FeedSurface({
     <View style={styles.root}>
     <ScrollView
       ref={scrollRef}
+      refreshControl={<RefreshControl refreshing={feedPull.refreshing} onRefresh={feedPull.onRefresh} />}
       style={styles.scrollRoot}
       contentContainerStyle={[styles.content, { paddingBottom: bottomPad }]}
       onScroll={onFeedScroll}

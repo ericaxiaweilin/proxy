@@ -4,6 +4,20 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 253 — 2026-09-23
+
+- **下拉刷新**（PULL-REFRESH-001）：用户反馈「目前所有社交产品都是上下滑动进行刷新 我们缺少
+  这个逻辑」。首页、「更多」真人列表、「更多 → 聊天房」、消息收件箱、动态、市场的主列表都加了
+  系统下拉刷新（`RefreshControl`）。转圈跟真实加载走：`src/components/pull-to-refresh.ts` 的
+  `usePullToRefresh` 等 load 的 Promise，`useTrackedRefresh` 让首页的加载 effect 随 nonce 重跑、
+  请求被 track，全部回来才收起；都带 15s 兜底。「我的」页本轮没接（该文件另一会话正在改）。
+- **招呼句子不重复**（HOME-MORE-GREET-004）：挑句子时避开跟这个人聊天里我已经发过的句子，
+  全发过了才允许重复（之前只记本次运行里上一句，AI 代回复会回「又是这句」）。
+- 影响文件：`apps/mobile/src/components/pull-to-refresh.ts`、`apps/mobile/src/greet-state.ts`、
+  `apps/mobile/src/shell/app-shell.tsx`、`apps/mobile/src/surfaces/requester-home.tsx`、
+  `apps/mobile/src/surfaces/messages.tsx`、`apps/mobile/src/surfaces/feed.tsx`、
+  `apps/mobile/src/surfaces/market.tsx`。
+
 ## Revision 252 — 2026-09-23
 
 - **我的 → 账户 → AI 管理按新原型全量落地，连后端一起做**（AI-MANAGE-002）：

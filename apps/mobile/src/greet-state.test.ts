@@ -13,6 +13,7 @@ import {
   GREET_MAX_UNANSWERED,
   countUnansweredOwnMessages,
   isInvited,
+  pickGreetingLine,
   loadGreetState,
   saveGreetState,
 } from "./greet-state";
@@ -50,5 +51,13 @@ describe("HOME-MORE-GREET-003 greet state", () => {
     // 对方本人一回，计数清零
     expect(countUnansweredOwnMessages([...rows, { senderId: peer }], me, peer)).toBe(0);
     expect(countUnansweredOwnMessages([], me, peer)).toBe(0);
+  });
+
+  it("never repeats a line already sent to the same person until the pool is used up", () => {
+    const lines = ["a", "b", "c"];
+    for (let i = 0; i < 20; i += 1) expect(["b", "c"]).toContain(pickGreetingLine(lines, ["a"]));
+    expect(pickGreetingLine(lines, ["a", "b"])).toBe("c");
+    // 全发过了才允许重复，而且不会返回空串
+    expect(lines).toContain(pickGreetingLine(lines, ["a", "b", "c"]));
   });
 });

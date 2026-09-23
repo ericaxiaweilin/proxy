@@ -67,3 +67,11 @@ export function countUnansweredOwnMessages(
   }
   return count;
 }
+
+// HOME-MORE-GREET-004：从句子池里挑一句跟这个人还没发过的；全都发过了才从整池里随机。
+export function pickGreetingLine(lines: ReadonlyArray<string>, alreadySent: ReadonlyArray<string>, random: () => number = Math.random): string {
+  const sent = new Set(alreadySent);
+  const fresh = lines.filter((line) => !sent.has(line));
+  const pool = fresh.length > 0 ? fresh : lines;
+  return pool[Math.floor(random() * pool.length)] ?? lines[0] ?? "";
+}
