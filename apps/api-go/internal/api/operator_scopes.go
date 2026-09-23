@@ -139,7 +139,9 @@ var requiredOperatorScope = map[string]OperatorScope{
 	"CreateObservationTemplate": ScopePlatform,
 	"SendInboxNotification":     ScopePlatform,
 	// ANALYTICS
-	"ListInteractionEvents": ScopeAnalytics,
+	"ListInteractionEvents":      ScopeAnalytics,
+	"ListPostAudience":           ScopeAnalytics,
+	"ListMediaActivityForViewer": ScopeAnalytics,
 }
 
 // RequiredOperatorScope 返回某命令的 required scope。第二个返回值 false =

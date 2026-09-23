@@ -75,3 +75,18 @@ export async function endMediaView(
     // 双保险：真正的 client 内部已经静默，这里再兜一层 —— 埋点永远不抛。
   }
 }
+
+// CONTENT-ANALYTICS-001: 全屏看图放大（双击 / 捏合）。同一套开关：关了就一个事件都不造。
+export async function recordMediaZoom(
+  localNet: Pick<LocalNetClient, "recordMediaZoom">,
+  mediaAssetId: string,
+  store?: BehaviorAnalyticsStore
+): Promise<void> {
+  if (!mediaAssetId) return;
+  if (!(await behaviorAnalyticsEnabled(store))) return;
+  try {
+    await localNet.recordMediaZoom(mediaAssetId);
+  } catch {
+    // 埋点永远不抛。
+  }
+}

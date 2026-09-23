@@ -187,6 +187,8 @@ commands:
     domain: Business
   - command: GetCandidateBatch
     domain: Supply
+  - command: GetContentAnalytics
+    domain: LocalNet
   - command: GetFollowCounts
     domain: Engagement
   - command: GetLocalContext
@@ -307,6 +309,8 @@ commands:
     domain: Marketplace
   - command: ListPinnedPosts
     domain: Engagement
+  - command: ListPostAudience
+    domain: LocalNet
   - command: ListPostImpressionStats
     domain: LocalNet
   - command: ListPostReplies
@@ -414,6 +418,8 @@ commands:
   - command: RecordMaterialRouteChange
     domain: CityCompanion
   - command: RecordMediaImpression
+    domain: LocalNet
+  - command: RecordMediaZoom
     domain: LocalNet
   - command: RecordOutcome
     domain: Fulfillment

@@ -548,7 +548,7 @@ func (r *LocalNetRepository) ListInteractionEvents(ctx context.Context, actorID 
 	return result, rows.Err()
 }
 
-func (r *LocalNetRepository) ListPostImpressionStats(ctx context.Context, authorID string, limit int) ([]localnet.PostImpressionStats, error) {
+func (r *LocalNetRepository) ListPostImpressionStats(ctx context.Context, authorID string, since time.Time, limit int) ([]localnet.PostImpressionStats, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT p.id,
 			COUNT(ev.event_id) AS impressions,
@@ -556,14 +556,14 @@ func (r *LocalNetRepository) ListPostImpressionStats(ctx context.Context, author
 			COALESCE(SUM(ev.watch_ms), 0) AS total_watch_ms
 		FROM (
 			SELECT id, created_at FROM localnet.posts
-			WHERE author_id = $1
+			WHERE author_id = $1 AND created_at >= $3
 			ORDER BY created_at DESC, id DESC
 			LIMIT $2
 		) p
 		LEFT JOIN localnet.interaction_events ev
 			ON ev.target_type = 'POST' AND ev.target_id = p.id AND ev.event_type = 'POST_IMPRESSION'
 		GROUP BY p.id, p.created_at
-		ORDER BY p.created_at DESC, p.id DESC`, authorID, limit)
+		ORDER BY p.created_at DESC, p.id DESC`, authorID, limit, since)
 	if err != nil {
 		return nil, err
 	}
@@ -579,7 +579,7 @@ func (r *LocalNetRepository) ListPostImpressionStats(ctx context.Context, author
 	return result, rows.Err()
 }
 
-func (r *LocalNetRepository) ListMediaImpressionStats(ctx context.Context, authorID string, limit int) ([]localnet.MediaImpressionStats, error) {
+func (r *LocalNetRepository) ListMediaImpressionStats(ctx context.Context, authorID string, since time.Time, limit int) ([]localnet.MediaImpressionStats, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT p.id,
 			m.media_asset_id,
@@ -588,7 +588,7 @@ func (r *LocalNetRepository) ListMediaImpressionStats(ctx context.Context, autho
 			COALESCE(SUM(ev.watch_ms), 0) AS total_watch_ms
 		FROM (
 			SELECT id, created_at, media_refs FROM localnet.posts
-			WHERE author_id = $1
+			WHERE author_id = $1 AND created_at >= $3
 			ORDER BY created_at DESC, id DESC
 			LIMIT $2
 		) p
@@ -599,7 +599,7 @@ func (r *LocalNetRepository) ListMediaImpressionStats(ctx context.Context, autho
 		LEFT JOIN localnet.interaction_events ev
 			ON ev.target_type = 'MEDIA' AND ev.target_id = m.media_asset_id AND ev.event_type = 'MEDIA_IMPRESSION'
 		GROUP BY p.id, p.created_at, m.media_asset_id, m.sort_order
-		ORDER BY p.created_at DESC, p.id DESC, m.sort_order ASC`, authorID, limit)
+		ORDER BY p.created_at DESC, p.id DESC, m.sort_order ASC`, authorID, limit, since)
 	if err != nil {
 		return nil, err
 	}
@@ -613,6 +613,69 @@ func (r *LocalNetRepository) ListMediaImpressionStats(ctx context.Context, autho
 		result = append(result, stat)
 	}
 	return result, rows.Err()
+}
+
+// CONTENT-ANALYTICS-001: 用户侧分析面板合计（窗口内发的帖子）。
+func (r *LocalNetRepository) ContentAnalytics(ctx context.Context, authorID string, since time.Time) (localnet.ContentAnalytics, error) {
+	var out localnet.ContentAnalytics
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		WITH p AS (
+			SELECT id FROM localnet.posts WHERE author_id = $1 AND created_at >= $2
+		), ev AS (
+			SELECT ev.target_id, ev.actor_id, ev.watch_ms
+			FROM localnet.interaction_events ev JOIN p ON ev.target_id = p.id
+			WHERE ev.target_type = 'POST' AND ev.event_type = 'POST_IMPRESSION'
+		), top AS (
+			SELECT target_id, COUNT(*) AS views FROM ev GROUP BY target_id ORDER BY views DESC, target_id DESC LIMIT 1
+		)
+		SELECT (SELECT COUNT(*) FROM p),
+			(SELECT COUNT(*) FROM ev),
+			(SELECT COUNT(DISTINCT actor_id) FROM ev),
+			(SELECT COALESCE(SUM(watch_ms), 0) FROM ev),
+			COALESCE((SELECT target_id FROM top), ''),
+			COALESCE((SELECT views FROM top), 0)`, authorID, since).
+		Scan(&out.Posts, &out.Impressions, &out.UniqueViewers, &out.TotalWatchMs, &out.TopPostID, &out.TopPostViews)
+	return out, err
+}
+
+// CONTENT-ANALYTICS-001: 仅运营 —— 一条帖子的受众逐人明细（帖子曝光 + 逐张照片停留 + 放大），全量历史。
+func (r *LocalNetRepository) ListPostAudience(ctx context.Context, postID string, limit int) ([]localnet.PostAudienceRow, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		WITH media AS (
+			SELECT (item->>'mediaAssetId') AS media_asset_id
+			FROM localnet.posts p, jsonb_array_elements(p.media_refs) AS item
+			WHERE p.id = $1
+		), ev AS (
+			SELECT actor_id, event_type, watch_ms, created_at FROM localnet.interaction_events
+			WHERE target_type = 'POST' AND target_id = $1 AND event_type = 'POST_IMPRESSION'
+			UNION ALL
+			SELECT actor_id, event_type, watch_ms, created_at FROM localnet.interaction_events
+			WHERE target_type = 'MEDIA' AND target_id IN (SELECT media_asset_id FROM media)
+				AND event_type IN ('MEDIA_IMPRESSION', 'MEDIA_ZOOM')
+		)
+		SELECT actor_id,
+			COUNT(*) FILTER (WHERE event_type = 'POST_IMPRESSION'),
+			COUNT(*) FILTER (WHERE event_type = 'MEDIA_IMPRESSION'),
+			COALESCE(SUM(watch_ms) FILTER (WHERE event_type <> 'MEDIA_ZOOM'), 0),
+			COUNT(*) FILTER (WHERE event_type = 'MEDIA_ZOOM'),
+			MAX(created_at)
+		FROM ev
+		GROUP BY actor_id
+		ORDER BY 4 DESC, actor_id
+		LIMIT $2`, postID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []localnet.PostAudienceRow{}
+	for rows.Next() {
+		var row localnet.PostAudienceRow
+		if err := rows.Scan(&row.ActorID, &row.PostImpressions, &row.MediaOpens, &row.TotalWatchMs, &row.Zooms, &row.LastSeenAt); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 func (r *LocalNetRepository) ListMediaActivityForViewer(ctx context.Context, authorID string, viewerActorID string, limit int) ([]localnet.ViewerMediaActivity, error) {

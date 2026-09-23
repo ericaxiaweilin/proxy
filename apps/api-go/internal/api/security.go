@@ -229,6 +229,11 @@ var operatorCommandTypes = map[string]bool{
 	// 的豁免名单里）、ListPostsByIds、ListPostsMentioning 都是用户正常浏览帖子的读，
 	// 收紧会让 App 静默坏掉，故反向钉住不做。
 	"ListInteractionEvents": true,
+	// CONTENT-ANALYTICS-001（2026-09-23，用户：「更详细的用户 abcd…看了这张照片多少 s 甚至双击放大看…这些是只能
+	// 公司运营用 而不是泄漏给用户侧」）：逐人浏览明细（谁、看了几秒、放大几次）只给运营，用于精准投流。
+	// 用户侧只拿聚合（ListPostImpressionStats / ListMediaImpressionStats / GetContentAnalytics）。
+	"ListPostAudience":           true,
+	"ListMediaActivityForViewer": true,
 }
 
 func requiresOperator(commandType string) bool {

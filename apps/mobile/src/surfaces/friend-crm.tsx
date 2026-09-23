@@ -14,7 +14,7 @@ import { describeError, saveImageToAlbum } from "../image-export";
 import { ProxyIcon } from "../components/proxy-icon";
 import type { ProfileClient, ProfileWire } from "../profile-client";
 import type { FriendView, RelationshipClient } from "../relationship-client";
-import type { LocalNetClient, MediaImpressionStats, PostImpressionStats, ProfileViewerStat, ViewerMediaActivity } from "../localnet-client";
+import type { ContentAnalytics, LocalNetClient, MediaImpressionStats, PostImpressionStats, ProfileViewerStat } from "../localnet-client";
 import type { FeedPost } from "@proxy/contracts";
 import { color, shadows } from "../theme";
 
@@ -215,18 +215,23 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   const [postStats, setPostStats] = useState<Record<string, PostImpressionStats>>({});
   const [mediaStats, setMediaStats] = useState<Record<string, MediaImpressionStats>>({});
   const [statsState, setStatsState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+  // CONTENT-ANALYTICS-001: 分析面板（近 30 天合计）；逐条统计默认折叠，点「每条动态的统计」才展开。
+  const [analytics, setAnalytics] = useState<ContentAnalytics | null | undefined>(undefined);
+  const [statsOpen, setStatsOpen] = useState(false);
   useEffect(() => {
     if (!localNet || !myPosts) return;
     let cancelled = false;
     setStatsState("loading");
     void (async () => {
       try {
-        const [stats, mediaStatsList] = await Promise.all([
+        const [stats, mediaStatsList, panel] = await Promise.all([
           localNet.listPostImpressionStats(),
           // 媒体战绩没读到不影响帖子战绩——各自独立的失败态，媒体这边悄悄
           // 空着就好（帖子行照样显示总数，只是没有逐张照片的细分）。
-          localNet.listMediaImpressionStats().catch(() => [] as MediaImpressionStats[])
+          localNet.listMediaImpressionStats().catch(() => [] as MediaImpressionStats[]),
+          localNet.getContentAnalytics().catch(() => null)
         ]);
+        setAnalytics(panel);
         if (cancelled) return;
         const map: Record<string, PostImpressionStats> = {};
         for (const stat of stats) map[stat.postId] = stat;
@@ -977,15 +982,40 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
       {localNet && myPosts ? (
         <View style={styles.viewersCard}>
           <View style={styles.insightHead}><Text selectable style={styles.insightTitle}>动态浏览</Text></View>
-          <Text selectable style={styles.viewersFootnote}>每条动态被看了多少次、多少人、共停留多久（只统计公开动态）</Text>
+          <Text selectable style={styles.viewersFootnote}>近 30 天发的动态 · 只统计公开动态 · 只显示合计</Text>
           {statsState === "failed" ? (
             <Text selectable style={styles.viewersHint}>战绩没读出来，不是没人看</Text>
           ) : statsState === "loading" ? (
             <Text selectable style={styles.viewersHint}>正在读取…</Text>
-          ) : myPosts.length === 0 ? (
-            <Text selectable style={styles.viewersHint}>还没有动态，先去发一条</Text>
-          ) : (
-            myPosts.map((post, idx) => {
+          ) : analytics ? (
+            <>
+              <View style={styles.analyticsGrid}>
+                {[
+                  { label: "发帖", value: String(analytics.posts) },
+                  { label: "浏览", value: String(analytics.impressions) },
+                  { label: "看过的人", value: String(analytics.uniqueViewers) },
+                  { label: "平均停留", value: analytics.impressions > 0 ? formatWatchMs(Math.round(analytics.totalWatchMs / analytics.impressions)) : "—" },
+                ].map((cell) => (
+                  <View key={cell.label} style={styles.analyticsCell}>
+                    <Text selectable style={styles.analyticsValue}>{cell.value}</Text>
+                    <Text selectable style={styles.analyticsLabel}>{cell.label}</Text>
+                  </View>
+                ))}
+              </View>
+              {analytics.topPostId && analytics.topPostViews > 0 ? (
+                <Text selectable numberOfLines={1} style={styles.analyticsTop}>
+                  最受关注：{myPosts.find((post) => post.postId === analytics.topPostId)?.body || "一条动态"} · 浏览 {analytics.topPostViews}
+                </Text>
+              ) : analytics.posts === 0 ? (
+                <Text selectable style={styles.viewersHint}>近 30 天还没有发动态</Text>
+              ) : null}
+              {Object.keys(postStats).length > 0 ? (
+                <Pressable accessibilityRole="button" onPress={() => setStatsOpen((open) => !open)} style={styles.statsEntry}>
+                  <Text style={styles.statsEntryText}>{statsOpen ? "收起每条动态的统计" : `每条动态的统计（${Object.keys(postStats).length} 条）`}</Text>
+                  <Text style={styles.statsEntryText}>{statsOpen ? "⌃" : "›"}</Text>
+                </Pressable>
+              ) : null}
+              {statsOpen ? myPosts.filter((post) => postStats[post.postId]).map((post, idx) => {
               const stat = postStats[post.postId];
               // MEDIA-DWELL-001: 只有多于 1 张媒体的帖子才值得看逐张细分——
               // 只有 1 张时，逐张数字等于帖子总数，摆出来是纯重复。
@@ -1015,7 +1045,12 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
                   ) : null}
                 </View>
               );
-            })
+              }) : null}
+            </>
+          ) : myPosts.length === 0 ? (
+            <Text selectable style={styles.viewersHint}>还没有动态，先去发一条</Text>
+          ) : (
+            <Text selectable style={styles.viewersHint}>分析面板没读出来，稍后再看</Text>
           )}
         </View>
       ) : null}
@@ -1089,17 +1124,8 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
 }
 
 function FriendDetail({ friend, relationship, onBack, onOpenConversation, onOpenVouchers, onRemoveDemo, showToast, toast, localNet }: { friend: CrmFriend; relationship?: RelationshipClient | undefined; onBack: () => void; onOpenConversation: (a: string, peerUserId?: string) => void; onOpenVouchers?: (() => void) | undefined; onRemoveDemo: (id: string) => void; showToast: (t: string) => void; toast: string; localNet?: LocalNetClient | undefined }): React.JSX.Element {
-  // VIEWER-ACTIVITY-001: 这个人具体看过我哪些内容——只对真实好友有意义
-  // （本机演示好友没有 userId，也就没有真实的 actorId 可查）。
-  const [viewerActivity, setViewerActivity] = useState<ViewerMediaActivity[] | null | undefined>(undefined);
-  useEffect(() => {
-    if (!localNet || !friend.userId) return;
-    let cancelled = false;
-    void localNet.listMediaActivityForViewer(friend.userId)
-      .then((activity) => { if (!cancelled) setViewerActivity(activity); })
-      .catch(() => { if (!cancelled) setViewerActivity(null); });
-    return () => { cancelled = true; };
-  }, [localNet, friend.userId]);
+  // CONTENT-ANALYTICS-001: 以前这里有「看过的内容」卡（VIEWER-ACTIVITY-001：这个好友看了我哪张照片、看了几秒）。
+  // 用户规则：逐人浏览明细（谁、看了几秒、放大）只给公司运营做精准投流，不给用户侧 —— 卡片删除，接口改为仅运营。
   const [note, setNote] = useState(friend.note);
   const [tags, setTags] = useState<string[]>(friend.tags);
   const [newTag, setNewTag] = useState("");
@@ -1147,28 +1173,6 @@ function FriendDetail({ friend, relationship, onBack, onOpenConversation, onOpen
         <View style={styles.kvRow}><Text selectable style={styles.kvLabel}>最近互动</Text><Text selectable style={styles.kvValue}>{friend.lastInteraction}</Text></View>
         <View style={styles.kvRow}><Text selectable style={styles.kvLabel}>关系状态</Text><View style={styles.statusPill}><Text selectable style={styles.statusPillText}>{friend.status === "FRIEND" ? "已是好友" : friend.status}</Text></View></View>
       </View>
-
-      {/* VIEWER-ACTIVITY-001: 这个人具体看过我哪些内容——只对有 userId 的
-          真实好友有意义，本机演示好友没有真实 actorId 可查，不渲染这张卡。 */}
-      {friend.userId && localNet ? (
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>看过的内容</Text><Text selectable style={styles.sectionNote}>只统计公开动态</Text></View>
-          {viewerActivity === undefined ? (
-            <Text selectable style={styles.viewersHint}>正在读取…</Text>
-          ) : viewerActivity === null ? (
-            <Text selectable style={styles.viewersHint}>没读出来，不代表没看过</Text>
-          ) : viewerActivity.length === 0 ? (
-            <Text selectable style={styles.viewersHint}>还没看过你发的内容</Text>
-          ) : (
-            viewerActivity.map((a, idx) => (
-              <View key={`${a.postId}:${a.mediaAssetId}`} style={[styles.kvRow, idx > 0 && styles.friendRowLine]}>
-                <Text selectable style={styles.kvLabel}>{formatLastOpened(a.lastOpenedAt)}看了一张照片</Text>
-                <Text selectable style={styles.kvValue}>{a.opens} 次 · 共{formatWatchMs(a.totalWatchMs)}</Text>
-              </View>
-            ))
-          )}
-        </View>
-      ) : null}
 
       <View style={styles.sectionCard}>
         <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>标签</Text><Text selectable style={styles.sectionNote}>用于筛选与回顾 · 仅本机</Text></View>
@@ -1286,6 +1290,13 @@ const styles = StyleSheet.create({
   tagAddBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 10, justifyContent: "center", paddingHorizontal: 14 },
   tagAddBtnText: { color: color.white, fontSize: 12, fontWeight: "800" },
   noteInput: { backgroundColor: color.chipNeutralBg, borderColor: color.line, borderRadius: 10, borderWidth: 1, color: color.ink, fontSize: 12, minHeight: 72, padding: 10, textAlignVertical: "top" },
+  analyticsGrid: { flexDirection: "row", marginTop: 10 },
+  analyticsCell: { alignItems: "center", flex: 1, gap: 2 },
+  analyticsValue: { color: color.ink, fontSize: 18, fontWeight: "900" },
+  analyticsLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  analyticsTop: { color: color.ink, fontSize: 12, fontWeight: "700", marginTop: 10 },
+  statsEntry: { alignItems: "center", borderTopColor: "rgba(0,0,0,0.06)", borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 10, paddingTop: 10 },
+  statsEntryText: { color: color.proxyPurple, fontSize: 12.5, fontWeight: "800" },
   timelineRow: { alignItems: "flex-start", flexDirection: "row", gap: 10, paddingVertical: 8 },
   timelineDot: { backgroundColor: color.proxyPurple, borderRadius: 5, height: 8, marginTop: 6, width: 8 },
   timelineCopy: { flex: 1 },

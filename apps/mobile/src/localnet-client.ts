@@ -94,24 +94,22 @@ function isMediaImpressionStats(value: unknown): value is MediaImpressionStats {
     && typeof item.totalWatchMs === "number";
 }
 
-// VIEWER-ACTIVITY-001: 某个访客在"我的"媒体上的活动明细——把"谁看了主页"
-// 和"哪张照片被看了多久"接起来，回答"这个人具体看了什么"，不是两条互相
-// 独立的事实。只列这个人真的看过的媒体，没看过的不摆出来。
-export type ViewerMediaActivity = {
-  postId: string;
-  mediaAssetId: string;
-  opens: number;
+// CONTENT-ANALYTICS-001: 用户侧分析面板（近 30 天发的帖子的合计）。逐人明细不下发客户端 ——
+// 以前的 VIEWER-ACTIVITY-001「这个人看了哪张、看了几秒」改为仅运营（ANALYTICS scope）。
+export type ContentAnalytics = {
+  sinceDays: number;
+  posts: number;
+  impressions: number;
+  uniqueViewers: number;
   totalWatchMs: number;
-  lastOpenedAt: string;
+  topPostId?: string;
+  topPostViews: number;
 };
 
-function isViewerMediaActivity(value: unknown): value is ViewerMediaActivity {
+function isContentAnalytics(value: unknown): value is ContentAnalytics {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
-  return typeof item.postId === "string" && item.postId !== ""
-    && typeof item.mediaAssetId === "string" && item.mediaAssetId !== ""
-    && typeof item.opens === "number" && typeof item.totalWatchMs === "number"
-    && typeof item.lastOpenedAt === "string";
+  return ["sinceDays", "posts", "impressions", "uniqueViewers", "totalWatchMs", "topPostViews"].every((key) => typeof item[key] === "number");
 }
 
 export class LocalNetProtocolError extends Error {
@@ -435,22 +433,29 @@ export class LocalNetClient {
     return body.stats.filter(isMediaImpressionStats);
   }
 
+  // CONTENT-ANALYTICS-001: 全屏看图时双击 / 捏合放大 —— 运营侧信号，用户侧不展示。埋点失败静默。
+  public async recordMediaZoom(mediaAssetId: string): Promise<void> {
+    try {
+      if (!mediaAssetId) return;
+      const session = await this.optionalSession();
+      if (!session) return;
+      await this.sendCommand(session, "RecordMediaZoom", { type: "Media", id: mediaAssetId }, { targetType: "MEDIA", targetId: mediaAssetId });
+    } catch {
+      // 埋点失败静默。
+    }
+  }
+
   /**
-   * VIEWER-ACTIVITY-001 — 某个访客在"我的"媒体上的活动明细：只能查自己
-   * 内容上的活动，viewerActorId 必填。空数组是真答案（这个人没看过任何
-   * 一张），只有缺数组才是协议异常。
+   * CONTENT-ANALYTICS-001 — 用户侧分析面板：近 sinceDays 天（默认 30）发的帖子的合计。
+   * 只有聚合，没有逐人明细（谁、看了几秒、放大几次只给运营）。
+   * 逐人明细接口（ListMediaActivityForViewer / ListPostAudience）已改为仅运营，客户端不再调用。
    */
-  public async listMediaActivityForViewer(viewerActorId: string): Promise<ViewerMediaActivity[]> {
+  public async getContentAnalytics(): Promise<ContentAnalytics> {
     const session = await this.requireSession();
-    const result = await this.sendCommand(
-      session,
-      "ListMediaActivityForViewer",
-      { type: "Post", id: "viewer_media_activity" },
-      { viewerActorId }
-    );
-    const body = this.decodeOperationRef(result) as { activity?: unknown };
-    if (!Array.isArray(body.activity)) throw new LocalNetProtocolError("访客活动响应缺少 activity 数组");
-    return body.activity.filter(isViewerMediaActivity);
+    const result = await this.sendCommand(session, "GetContentAnalytics", { type: "Post", id: "content_analytics" }, {});
+    const body = this.decodeOperationRef(result) as { analytics?: unknown };
+    if (!isContentAnalytics(body.analytics)) throw new LocalNetProtocolError("分析面板响应缺少 analytics");
+    return body.analytics;
   }
 
   public async createPost(payload: CreatePostPayload, idempotencyKey?: string): Promise<string> {

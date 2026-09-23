@@ -8452,6 +8452,24 @@ if ! grep -qF 'WatchMs' apps/api-go/internal/localnet/service.go ||
   exit 1
 fi
 echo "    TWIN-SIGNALS-001: PASS (impression watch time stored and readable)"
+# CONTENT-ANALYTICS-001: 浏览日志分层。用户侧只拿近 30 天的聚合（分析面板 + 折叠的逐条统计）；
+# 逐人明细（谁、看了几秒、放大几次）只给运营（ANALYTICS scope），用于精准投流；服务端事件全量保存。
+# 链路：信息流卡片曝光 + 全屏逐张停留 + 放大都要上报（审计时发现信息流一条都不报）。
+require_test "CONTENT-ANALYTICS-001" "./internal/api" "TestPerPersonViewingDetailIsOperatorOnly" \
+  "apps/api-go/internal/api/content_analytics_tier_test.go" || exit $?
+for t in TestUserStatsOnlyLoadTheLastMonthButEveryEventIsKept TestOperationsAudienceHasDwellAndZoomPerPerson; do
+  require_test "CONTENT-ANALYTICS-001" "./internal/localnet" "$t" \
+    "apps/api-go/internal/localnet/content_analytics_test.go" || exit $?
+done
+ca_crm=$(grep -vE '^[[:space:]]*(//|\{/\*)' apps/mobile/src/surfaces/friend-crm.tsx)
+if printf '%s\n' "$ca_crm" | grep -qF 'listMediaActivityForViewer' ||
+   ! printf '%s\n' "$ca_crm" | grep -qF 'getContentAnalytics' ||
+   ! grep -qF 'useFeedImpressions(localNet' apps/mobile/src/surfaces/feed.tsx ||
+   ! grep -qF 'recordMediaZoom' apps/mobile/src/media/AdaptiveMediaCollection.tsx; then
+  echo "  FAIL [CONTENT-ANALYTICS-001]: 用户侧又拿到逐人浏览明细 / 分析面板没了 / 信息流曝光或放大不再上报。" >&2
+  exit 1
+fi
+echo "    CONTENT-ANALYTICS-001: PASS (user side aggregates only; per-person detail is operator-only; feed + zoom logged)"
 # MODAL-HANDOFF-001: 关一个 Modal 同一 tick 再开另一个，后开的被 iOS
 # present 冲突吃掉（点了没反应）。统一走 openModalAfterClose 错峰 350ms。
 if ! grep -qF 'openModalAfterClose' apps/mobile/src/surfaces/me.tsx ||

@@ -321,7 +321,7 @@ func TestMediaImpressionStatsPostgresRoundTrip(t *testing.T) {
 	impress("viewer_1_"+itoa(run), mediaB, 7000)
 	impress("viewer_2_"+itoa(run), mediaB, 3000)
 
-	stats, err := repo.ListMediaImpressionStats(ctx, authorID, 20)
+	stats, err := repo.ListMediaImpressionStats(ctx, authorID, time.Time{}, 20)
 	if err != nil {
 		t.Fatalf("ListMediaImpressionStats: %v", err)
 	}

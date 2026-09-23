@@ -10,7 +10,7 @@ import { color } from "../theme";
 import { ProfileTabs, type ProfileMediaEntry } from "./ProfileTabs";
 import { MediaViewer } from "../media/AdaptiveMediaCollection";
 import { mapFollowError } from "./feed-error-map";
-import { beginMediaView, beginPostView, endMediaView, endPostView } from "../post-impression";
+import { beginPostView, endPostView } from "../post-impression";
 import {
   parentPostIdsForReplies,
   replyEntriesFromReplies,
@@ -74,17 +74,8 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
     const postId = viewer.postId;
     return () => { void endPostView(localNet, postId, postViewStartRef.current); };
   }, [viewer?.postId, localNet]);
-  // MEDIA-DWELL-001: 同一个帖子里的每张照片单独计时——划到下一张就 flush
-  // 上一张，不是整段查看会话关闭才报一次（那样多张照片的时间会全记在
-  // postId 一个数字里，参考稿里"每张照片都有追溯"要的正是这个粒度）。
-  // 依赖数组用 viewer（对象引用），每次 index 变都要重跑。
-  const mediaViewStartRef = useRef(0);
-  useEffect(() => {
-    if (!viewer) return;
-    mediaViewStartRef.current = beginMediaView();
-    const mediaAssetId = resolvedMedia[viewer.postId]?.[viewer.index]?.mediaAssetId;
-    return () => { if (mediaAssetId) void endMediaView(localNet, mediaAssetId, mediaViewStartRef.current); };
-  }, [viewer, localNet, resolvedMedia]);
+  // MEDIA-DWELL-001 / CONTENT-ANALYTICS-001: 逐张照片的停留 + 放大现在由 MediaViewer 自己记（传 analytics），
+  // 信息流和他人主页共用一处，不再各写一遍、也不会重复计。
   // PROFILE-VISIT-001: 打开别人的主页 = 一次访问，喂给对方的"主页访问"战绩
   // （见 friend-crm.tsx 的 Advanced Insight / me.tsx 的访问与转化）。失败静默，
   // 埋点从不影响主渲染路径；recordProfileOpen 内部已经排除"自己看自己"。
@@ -215,7 +206,7 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
           target.avatarUri 是同一个值。 */}
       <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} profileAvatarUri={target.avatarUri} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replies={replyEntries} replyTargets={replyTargets} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={(entry) => setViewer(entry)} onLikePost={(postId) => void likePost(postId)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" viewerAccountId={viewerAccountId} isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name, target.avatarUri)} />
     </ScrollView>
-    {viewer && viewedItems.length > 0 ? <MediaViewer items={viewedItems} index={viewer.index} author={target.name} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onNavigate={(index) => setViewer((current) => current ? { ...current, index } : current)} onClose={() => setViewer(undefined)} /> : null}
+    {viewer && viewedItems.length > 0 ? <MediaViewer items={viewedItems} index={viewer.index} author={target.name} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onNavigate={(index) => setViewer((current) => current ? { ...current, index } : current)} onClose={() => setViewer(undefined)} analytics={localNet} /> : null}
     {/* COMP-REPORT-002: 举报账号。target 用 userId —— 举报要指到账号，
         不是指到某条帖子（帖子举报走 feed 的入口）。 */}
     {reporting ? (

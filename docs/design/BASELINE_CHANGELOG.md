@@ -4,6 +4,20 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 271 — 2026-09-23
+
+- **好友与关系：动态浏览日志折叠成分析面板 + 统计入口；浏览日志分层，逐人明细只给运营；补全日志链路**（CONTENT-ANALYTICS-001）：
+  用户：「动态浏览的日志要折叠起来 不要给用户看这些…给一个分析后的面板 和一个统计入口…默认一个月内的加载…后端服务器存完整的
+  并且检查日志链路是否完整…看了这张照片多少 s 甚至双击放大看…这些是只能公司运营用…合规的公开 完整的属于公司运营用于精准投流」。
+  - 用户侧：「动态浏览」卡 = 近 30 天分析面板（发帖 / 浏览 / 看过的人 / 平均停留 / 最受关注），逐条统计默认折叠；
+    超过 30 天发的帖子不加载；好友详情里「看过的内容」（这个好友看了哪张、几秒）删除。
+  - 运营侧（ANALYTICS scope）：`ListPostAudience`（一条帖子逐人：曝光 / 逐张打开 / 总停留 / 放大次数，全量历史）、
+    `ListMediaActivityForViewer`（改为仅运营）。事件表 append-only 全量保存，窗口只限制用户侧读取。
+  - 链路审计：原来只有「他人主页」全屏看图上报，信息流一条都不报 → 补信息流卡片曝光（可见 ≥50% 且 ≥0.8 秒，含停留）；
+    全屏看图逐张停留 + 双击 / 捏合放大（新事件 MEDIA_ZOOM）统一由 MediaViewer 上报；自己看自己不记；都受「动态浏览统计」开关控制。
+- 影响文件：`apps/mobile/src/surfaces/friend-crm.tsx`、`apps/mobile/src/surfaces/feed.tsx`、`apps/mobile/src/surfaces/other-profile.tsx`、
+  `apps/mobile/src/media/AdaptiveMediaCollection.tsx`、`apps/mobile/src/media/TrackedImageViewing.tsx`。
+
 ## Revision 270 — 2026-09-23
 
 - **场景收藏断线接上**（SCENE-FAVORITE-001）：用户「home 场景卡片点 🤍 但我的

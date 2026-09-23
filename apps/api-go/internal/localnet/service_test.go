@@ -1743,7 +1743,7 @@ func TestMediaImpressionStatsRoundTrip(t *testing.T) {
 	// 停留 6500ms）——这个查询接的就是"这个人具体看了什么"，两张都要出现，
 	// 各自的时长要对得上，不能混到一起。viewer_2 只看了 media_b，media_a
 	// 完全不该出现在 viewer_2 的活动里。
-	viewer1Activity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"viewerActorId": "viewer_1"}))
+	viewer1Activity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"authorId": "user_001", "viewerActorId": "viewer_1"}))
 	if viewer1Activity.Outcome != "ACCEPTED" {
 		t.Fatalf("viewer_1 activity: got %s (%+v)", viewer1Activity.Outcome, viewer1Activity.Error)
 	}
@@ -1771,7 +1771,7 @@ func TestMediaImpressionStatsRoundTrip(t *testing.T) {
 	}
 
 	// viewer_2 只看过 media_b，活动列表里不该出现 media_a。
-	viewer2Activity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"viewerActorId": "viewer_2"}))
+	viewer2Activity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"authorId": "user_001", "viewerActorId": "viewer_2"}))
 	if viewer2Activity.Outcome != "ACCEPTED" {
 		t.Fatalf("viewer_2 activity: got %s (%+v)", viewer2Activity.Outcome, viewer2Activity.Error)
 	}
@@ -1787,14 +1787,15 @@ func TestMediaImpressionStatsRoundTrip(t *testing.T) {
 
 	// viewerActorId 缺失必须拒绝——这个接口存在的意义就是"查这个人"，没
 	// 给人就没有查询目标。
-	missingViewer := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{}))
+	missingViewer := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"authorId": "user_001"}))
 	if missingViewer.Outcome != "REJECTED" {
 		t.Fatalf("missing viewerActorId: got %s, want REJECTED (INVALID_VIEWER_ACTOR_ID)", missingViewer.Outcome)
 	}
 
-	// 别人帖子上的访客活动不暴露。
-	forbiddenActivity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"authorId": "user_other", "viewerActorId": "viewer_1"}))
-	if forbiddenActivity.Outcome != "REJECTED" {
-		t.Fatalf("other author activity: got %s, want REJECTED (STATS_FORBIDDEN)", forbiddenActivity.Outcome)
+	// CONTENT-ANALYTICS-001: 逐人明细改为仅运营（HTTP 入口按 ANALYTICS scope 拦，见 api/security.go），
+	// 运营不是作者本人，所以 authorId 必须显式给出。
+	missingAuthor := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"viewerActorId": "viewer_1"}))
+	if missingAuthor.Outcome != "REJECTED" {
+		t.Fatalf("missing authorId: got %s, want REJECTED (INVALID_AUTHOR_ID)", missingAuthor.Outcome)
 	}
 }

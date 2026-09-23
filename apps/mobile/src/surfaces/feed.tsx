@@ -55,6 +55,7 @@ import { type SocialSpaceClient } from "../socialspace-client";
 import { isOwnAuthorId, isOwnPost as isOwnPostById, resolveAuthorDisplayName, resolveReplyAuthorDisplayName } from "../feed-author";
 import { hiddenReplyCount, repliesMatchingFirst, shouldOfferReplyToggle, visibleReplies } from "../reply-preview";
 import { ProxyLoading } from "../components/proxy-foundation";
+import { useFeedImpressions, visiblePostIds, type CardFrame } from "../feed-impressions";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
 // CAFE-SCENE-001: 原来是 "POSTS" | "STATUS" | "COMMUNITY"——用「咖啡场景」
@@ -467,6 +468,8 @@ export function FeedSurface({
   }, [customFeedDef]);
   // X 式内联视频自动播放：滑近视口中心自动播（默认静音）、滑出即停，同一时刻仅一条在播。
   const [cardYs, setCardYs] = useState<Record<string, number>>({});
+  // CONTENT-ANALYTICS-001: 卡片高度，给信息流曝光判定用（见 feed-impressions.ts）。
+  const [cardHeights, setCardHeights] = useState<Record<string, number>>({});
   const [frames, setFrames] = useState<Record<string, { y: number; height: number }>>({});
   const [scrollY, setScrollY] = useState(0);
   const [stickyHeaderVisible, setStickyHeaderVisible] = useState(false);
@@ -524,6 +527,19 @@ export function FeedSurface({
     }
     return best;
   }, [cardYs, frames, scrollY, viewportHeight]);
+
+  // CONTENT-ANALYTICS-001: 信息流卡片曝光 + 停留（以前信息流一条都不报，战绩里的浏览全靠他人主页那一处）。
+  // 自己的帖子不算浏览。
+  const ownPostIds = useMemo(() => new Set(posts.filter((post) => isOwnPostById(post, viewerAccountId)).map((post) => post.postId)), [posts, viewerAccountId]);
+  const seenPostIds = useMemo(() => {
+    const cards: Record<string, CardFrame> = {};
+    for (const [postId, y] of Object.entries(cardYs)) {
+      const height = cardHeights[postId];
+      if (height !== undefined && !ownPostIds.has(postId)) cards[postId] = { y, height };
+    }
+    return visiblePostIds(cards, scrollY, viewportHeight);
+  }, [cardYs, cardHeights, ownPostIds, scrollY, viewportHeight]);
+  useFeedImpressions(localNet, seenPostIds);
 
   // 【新增】视频帧位置上报：videoKey 格式 "postId:index:mediaAssetId"
   const onVideoFrame = useCallback((videoKey: string, frame: { y: number; height: number }) => {
@@ -1416,7 +1432,7 @@ export function FeedSurface({
             <View
               key={post.postId}
               style={styles.postCard}
-              onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) setCardYs((prev) => ({ ...prev, [post.postId]: ly.y })); }}
+              onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) { setCardYs((prev) => ({ ...prev, [post.postId]: ly.y })); setCardHeights((prev) => ({ ...prev, [post.postId]: ly.height })); } }}
             >
               {/* posthead — R15.69 (restored) 拆头像/名字为 2 个 Pressable:
                   点头像 弹 关注/访问个人主页 菜单 (openProfileActions),
@@ -1689,6 +1705,8 @@ export function FeedSurface({
             setViewer({ postId: viewer.postId, index: next });
           }}
           onClose={() => setViewer(null)}
+          // CONTENT-ANALYTICS-001: 看别人的照片才记停留 / 放大；自己看自己不算浏览。
+          analytics={isOwnPostById(viewerPost, viewerAccountId) ? undefined : localNet}
         />
       ) : null}
 

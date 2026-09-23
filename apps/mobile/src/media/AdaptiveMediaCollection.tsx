@@ -22,6 +22,9 @@ import type { VideoPlayer } from "expo-video";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import ImageViewing from "react-native-image-viewing";
+import type { LocalNetClient } from "../localnet-client";
+import { beginMediaView, endMediaView, recordMediaZoom } from "../post-impression";
+import { TrackedImageViewing } from "./TrackedImageViewing";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import { claimVideoPlayback, releaseVideoPlayback } from "./video-playback-registry";
@@ -162,7 +165,8 @@ export function MediaViewer({
   author,
   resolveUrl,
   onNavigate,
-  onClose
+  onClose,
+  analytics
 }: {
   items: FeedMediaItem[];
   index: number;
@@ -170,9 +174,28 @@ export function MediaViewer({
   resolveUrl: (path: string) => string;
   onNavigate: (next: number) => void;
   onClose: () => void;
+  /** CONTENT-ANALYTICS-001: 看别人的照片时传：每张照片单独记停留，双击 / 捏合放大记一次放大。
+   * 看自己的照片不传（自己看自己不算浏览）。 */
+  analytics?: Pick<LocalNetClient, "recordMediaImpression" | "recordMediaZoom"> | undefined;
 }): React.JSX.Element {
   const safeIndex = Math.max(0, Math.min(index, items.length - 1));
   const current = items[safeIndex];
+  const trackedId = analytics && current && current.mediaType === "IMAGE" ? current.mediaAssetId : undefined;
+  // MEDIA-DWELL-001 / CONTENT-ANALYTICS-001: 每划到一张就结算上一张的停留（不是整段看完才报一次）。
+  useEffect(() => {
+    if (!analytics || !trackedId) return undefined;
+    const startedAt = beginMediaView();
+    return () => { void endMediaView(analytics, trackedId, startedAt); };
+  }, [analytics, trackedId]);
+  // 放大是「从没放大 → 放大」的那一下才记；捏合过程中库会连着报 scaled=true，不能记成十几次。
+  const zoomedRef = useRef(false);
+  const onZoomChange = useCallback((zoomIndex: number, scaled: boolean) => {
+    if (scaled && !zoomedRef.current) {
+      const item = items[zoomIndex];
+      if (analytics && item?.mediaType === "IMAGE") void recordMediaZoom(analytics, item.mediaAssetId);
+    }
+    zoomedRef.current = scaled;
+  }, [analytics, items]);
   if (!current) return <View />;
   const header = (
     <View pointerEvents="box-none" style={viewerStyles.top}>
@@ -206,6 +229,19 @@ export function MediaViewer({
   const sources = items.map((item) => ({
     uri: resolveUrl(item.galleryUrl ?? item.feedUrl ?? item.thumbnailUrl ?? "")
   }));
+  if (analytics) {
+    return (
+      <TrackedImageViewing
+        backgroundColor="#050507"
+        header={header}
+        imageIndex={safeIndex}
+        images={sources}
+        onImageIndexChange={onNavigate}
+        onRequestClose={onClose}
+        onZoomChange={onZoomChange}
+      />
+    );
+  }
   return (
     <ImageViewing
       images={sources}
