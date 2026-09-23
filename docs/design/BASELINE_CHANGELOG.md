@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 258 — 2026-09-23
+
+- **AI 目录外置：价格 / logo / 免费额度不再写在代码里**（AI-MANAGE-007）：用户要求「价格 logo 数字…
+  肯定加载专门的文件 别写在代码里 token 的费用属于高度变化的 后期运营了 直接对接 自动更新就好了」。
+  出图厂商、模型、价格、logo、每月免费出图额度、聊天 Token 付费方放进运营维护的 `config/ai-catalog/`
+  （`catalog.json` + `logos/*.svg`），服务端 `GET /v1/ai/catalog` 下发，按文件修改时间自动重载，坏文件
+  继续用上一份好的。App 的图片管理 → 模型页从目录读，免费额度写在价格提示里；App 里不再有价格和厂商 logo。
+- 影响文件：`apps/mobile/src/surfaces/ai-management.tsx`、`apps/mobile/src/surfaces/ai-management-data.ts`、
+  `apps/mobile/src/ai-catalog-client.ts`。
+
 ## Revision 257 — 2026-09-23
 
 - **生成场景换成照片样片、扩到 12 个**（AI-MANAGE-005）：用户反馈「图片生成场景 目前的 logo 有点难看

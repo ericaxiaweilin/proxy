@@ -7,6 +7,7 @@ import type { TransportRequest, TransportResponse } from "../auth-client";
 import { formatRelativeTime } from "../composer-body";
 import { Image } from "expo-image";
 import { getAiScenePhoto } from "../media/asset-sources";
+import { fetchAiCatalog, sortCatalogVendors, type AiCatalog } from "../ai-catalog-client";
 import {
   AI_CAMERA_ICONS,
   AI_CAMERA_MOVES,
@@ -15,9 +16,7 @@ import {
   AI_POSE_ICONS,
   AI_SCENES,
   AI_SCENE_ALIASES,
-  AI_VENDORS,
   type AiScene,
-  type AiVendor,
 } from "./ai-management-data";
 
 // AI-MANAGE-003（2026-09-23，用户：「我新增了一个 ai 管理模块 原型给了 干的一坨屎 logo 也不对
@@ -114,8 +113,10 @@ function sceneById(id: string): AiScene {
   return AI_SCENES.find((scene) => scene.id === resolved) ?? AI_SCENES[0]!;
 }
 
-function vendorById(id: string): AiVendor {
-  return AI_VENDORS.find((vendor) => vendor.id === id) ?? AI_VENDORS[0]!;
+// 厂商名来自服务端 AI 目录（config/ai-catalog）；目录没读到时只显示偏好里存的模型名 / id，不编名字。
+function vendorLabel(catalog: AiCatalog | undefined, vendorId: string, modelName: string): string {
+  if (modelName) return modelName;
+  return catalog?.vendors.find((vendor) => vendor.id === vendorId)?.name ?? (vendorId === "platform_default" ? "平台默认" : vendorId);
 }
 
 // 提示词历史：服务端存的是字符串数组，每条是一个小 JSON（场景 + 文本 + 时间），
@@ -341,6 +342,14 @@ export function AIManagementSurface({
   const [chatTab, setChatTab] = useState<ChatTab>("style");
   const [imageTab, setImageTab] = useState<ImageTab>("model");
   const { toast, show: showToast } = useToast();
+  // AI-MANAGE-007：出图厂商 / 模型 / 价格 / logo / 免费额度来自服务端 AI 目录（运营文件，自动更新）。
+  const [catalog, setCatalog] = useState<AiCatalog>();
+  const [catalogError, setCatalogError] = useState<string>();
+  const loadCatalog = useCallback(() => {
+    setCatalogError(undefined);
+    fetchAiCatalog(authClient).then(setCatalog).catch((err: unknown) => setCatalogError(err instanceof Error ? err.message : "AI 目录暂时读不到"));
+  }, [authClient]);
+  useEffect(() => { loadCatalog(); }, [loadCatalog]);
 
   const load = useCallback(() => {
     if (!viewerAccountId) {
@@ -397,11 +406,11 @@ export function AIManagementSurface({
     : { text: "…", kind: "off" };
   const imageBadge: Badge = { text: "未接出图", kind: "off" };
   const scene = sceneById(settings?.imageScene ?? "cafe");
-  const vendor = vendorById(settings?.imageVendorPref ?? "platform_default");
+
   const chatActivity = settings
     ? `${TONES.find((t) => t.id === settings.chatTone)?.name ?? ""} · ${LENGTHS.find((l) => l.id === settings.chatReplyLength)?.name ?? ""} · ${RHYTHMS.find((r) => r.id === settings.chatRhythm)?.name ?? ""}`
     : loadError ?? "读取中…";
-  const imageActivity = `${scene.name} · ${settings?.imageModelPref || vendor.name}`;
+  const imageActivity = `${scene.name} · ${vendorLabel(catalog, settings?.imageVendorPref ?? "platform_default", settings?.imageModelPref ?? "")}`;
   const postActivity = lastPostAt ? `上次发帖：${formatRelativeTime(lastPostAt)}` : "还没有发过动态";
 
   const statusLabel = !ready ? (loadError ? "AI 设置没读出来" : "读取中…") : paused ? "AI 已暂停" : "AI 运行中";
@@ -475,7 +484,7 @@ export function AIManagementSurface({
       {settings ? (
         <>
           <ChatSheet toast={toast} visible={sheet === "chat"} tab={chatTab} onTab={setChatTab} settings={settings} patch={patch} onClose={() => setSheet(undefined)} />
-          <ImageSheet toast={toast} visible={sheet === "image"} tab={imageTab} onTab={setImageTab} settings={settings} patch={patch} showToast={showToast} imageCount={imageCount} onOpenImageIdentity={onOpenImageIdentity ? () => { setSheet(undefined); onOpenImageIdentity(); } : undefined} onClose={() => setSheet(undefined)} />
+          <ImageSheet toast={toast} catalog={catalog} catalogError={catalogError} onRetryCatalog={loadCatalog} visible={sheet === "image"} tab={imageTab} onTab={setImageTab} settings={settings} patch={patch} showToast={showToast} imageCount={imageCount} onOpenImageIdentity={onOpenImageIdentity ? () => { setSheet(undefined); onOpenImageIdentity(); } : undefined} onClose={() => setSheet(undefined)} />
           <PostSheet toast={toast} visible={sheet === "post"} settings={settings} patch={patch} onClose={() => setSheet(undefined)} />
         </>
       ) : null}
@@ -545,8 +554,8 @@ function ChatSheet({ toast, visible, tab, onTab, settings, patch, onClose }: { t
 
 // ---------------------------------------------------------------- 图片管理
 
-function ImageSheet({ toast, visible, tab, onTab, settings, patch, showToast, imageCount, onOpenImageIdentity, onClose }: {
-  toast: React.ReactNode; visible: boolean; tab: ImageTab; onTab: (tab: ImageTab) => void; settings: AiEngineSettings; patch: PatchFn; showToast: (message: string) => void;
+function ImageSheet({ toast, catalog, catalogError, onRetryCatalog, visible, tab, onTab, settings, patch, showToast, imageCount, onOpenImageIdentity, onClose }: {
+  toast: React.ReactNode; catalog: AiCatalog | undefined; catalogError: string | undefined; onRetryCatalog: () => void; visible: boolean; tab: ImageTab; onTab: (tab: ImageTab) => void; settings: AiEngineSettings; patch: PatchFn; showToast: (message: string) => void;
   imageCount: number; onOpenImageIdentity?: (() => void) | undefined; onClose: () => void;
 }): React.JSX.Element {
   const [query, setQuery] = useState("");
@@ -559,12 +568,7 @@ function ImageSheet({ toast, visible, tab, onTab, settings, patch, showToast, im
   useEffect(() => { if (visible) { setQuery(""); setPromptDraft(promptForScene(settings, settings.imageScene)); } }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
   const history = decodePromptHistory(settings.imagePromptHistory).filter((entry) => entry.scene === scene.id || entry.scene === "");
 
-  const vendors = useMemo(() => {
-    const pinned = AI_VENDORS.filter((vendor) => vendor.pinned);
-    const rest = AI_VENDORS.filter((vendor) => !vendor.pinned).sort((a, b) =>
-      sort === "quality" ? b.quality - a.quality : sort === "price" ? a.priceScore - b.priceScore : b.popular - a.popular);
-    return [...pinned, ...rest];
-  }, [sort]);
+  const vendors = useMemo(() => sortCatalogVendors(catalog?.vendors ?? [], sort), [catalog, sort]);
   const q = query.trim().toLowerCase();
   const visibleVendors = vendors.filter((vendor) => !q || `${vendor.name} ${vendor.desc} ${vendor.models.map((m) => m.name).join(" ")}`.toLowerCase().includes(q));
 
@@ -617,7 +621,7 @@ function ImageSheet({ toast, visible, tab, onTab, settings, patch, showToast, im
                     style={styles.vendorHead}
                   >
                     <View style={[styles.vendorLogo, { backgroundColor: item.logoBg }]}>
-                      <SvgXml xml={item.logoXml} width={18} height={18} />
+                      <SvgXml xml={item.logoSvg} width={18} height={18} />
                     </View>
                     <View style={styles.vendorInfo}>
                       <View style={styles.vendorNameRow}>
@@ -647,7 +651,7 @@ function ImageSheet({ toast, visible, tab, onTab, settings, patch, showToast, im
                               <Text numberOfLines={1} style={styles.modelChipName}>{model.name}</Text>
                               {model.tag ? <Text style={styles.modelTag}>{model.tag}</Text> : null}
                             </View>
-                            <Text numberOfLines={1} style={[styles.modelPrice, model.subscription && styles.modelPriceSub]}>{model.price}</Text>
+                            <Text numberOfLines={1} style={[styles.modelPrice, model.subscription && styles.modelPriceSub]}>{model.price.label}</Text>
                           </Pressable>
                         );
                       })}
@@ -656,10 +660,18 @@ function ImageSheet({ toast, visible, tab, onTab, settings, patch, showToast, im
                 </View>
               );
             })}
-            {visibleVendors.length === 0 ? <Text style={styles.empty}>没有找到匹配的厂商或模型</Text> : null}
+            {!catalog && catalogError ? (
+              <Pressable accessibilityRole="button" onPress={onRetryCatalog}>
+                <Text style={styles.empty}>{`${catalogError}，点这里重试`}</Text>
+              </Pressable>
+            ) : !catalog ? (
+              <Text style={styles.empty}>模型目录读取中…</Text>
+            ) : visibleVendors.length === 0 ? <Text style={styles.empty}>没有找到匹配的厂商或模型</Text> : null}
             <View style={styles.priceNotice}>
               <Text style={styles.priceNoticeIcon}>💡</Text>
-              <Text style={styles.priceNoticeText}>图片生成费用由用户自行承担。价格为单位生成成本，实际扣费以各厂商官方计费为准。</Text>
+              <Text style={styles.priceNoticeText}>
+                {catalog ? `每月免费 ${catalog.imageBilling.freeImagesPerMonth} 张（${catalog.vendors.find((v) => v.id === catalog.imageBilling.freeVendor)?.name ?? "平台默认"}）。${catalog.imageBilling.priceNotice}` : "价格与免费额度读取中…"}
+              </Text>
             </View>
           </>
         ) : tab === "scene" ? (

@@ -11,7 +11,7 @@ vi.mock("expo-image", () => ({ Image: "Image" }));
 vi.mock("../media/asset-sources", () => ({ getAiScenePhoto: () => undefined }));
 
 import { decodePromptHistory, encodePromptHistoryEntry, formatTokens, promptForScene } from "./ai-management";
-import { AI_CAMERA_ICONS, AI_CAMERA_MOVES, AI_MANAGE_ICONS, AI_SCENE_ALIASES, AI_POSES, AI_POSE_ICONS, AI_SCENES, AI_VENDORS } from "./ai-management-data";
+import { AI_CAMERA_ICONS, AI_CAMERA_MOVES, AI_MANAGE_ICONS, AI_SCENE_ALIASES, AI_POSES, AI_POSE_ICONS, AI_SCENES } from "./ai-management-data";
 
 // AI-MANAGE-003（2026-09-23，用户：「原型给了 干的一坨屎 logo 也不对 功能也不对」）：
 // 整页按原型 deepseek_html_20260923_83b40b (1).html 重做。钉住：
@@ -58,8 +58,17 @@ describe("AI management surface (AI-MANAGE-003)", () => {
     }
     expect(AI_CAMERA_MOVES.map((c) => c.id)).toEqual(["static", "push", "pull", "pan", "track", "crane"]);
     for (const camera of AI_CAMERA_MOVES) expect(AI_CAMERA_ICONS[camera.id]).toContain("<svg");
-    expect(AI_VENDORS[0]).toMatchObject({ id: "platform_default", pinned: true, recommend: true });
-    expect(AI_VENDORS.filter((v) => !v.pinned).every((v) => v.models.length === 3 && v.logoXml.includes("<svg"))).toBe(true);
+  });
+
+  it("loads vendors, prices, logos and the free quota from the server catalog, not from app code (AI-MANAGE-007)", () => {
+    expect(surface).toContain("fetchAiCatalog(authClient)");
+    expect(surface).toContain("sortCatalogVendors(catalog?.vendors ?? [], sort)");
+    expect(surface).toContain("catalog.imageBilling.freeImagesPerMonth");
+    const data = read("./ai-management-data.ts");
+    // 价格 / 厂商 logo 不许再写死在 App 里
+    expect(data).not.toMatch(/\$\d+(\.\d+)?-?[\d.]*\/张/);
+    expect(data).not.toContain("GPT-Image");
+    expect(surface).not.toMatch(/\$\d+(\.\d+)?-?[\d.]*\/张/);
   });
 
   it("uses the user's management icons, not emoji on gradient tiles (AI-MANAGE-004)", () => {
