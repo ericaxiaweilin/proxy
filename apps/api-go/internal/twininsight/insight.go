@@ -744,10 +744,10 @@ func buildInsight(friend Friend, fact SignalFact, events []RecentEvent, t Thresh
 	verdict, label := VerdictOf(signals, score, friend.Since, now, t)
 	displayName := friend.DisplayName
 	if strings.TrimSpace(displayName) == "" {
-		// 名字解析失败时兜底成账号 id —— 契约要求 displayName min 1，
-		// 给空串会让客户端整个 payload 解析失败（fail-closed），
-		// 一个名字缺失不该让整屏挂掉。
-		displayName = friend.UserID
+		// 名字解析不到时用中性标签 —— 绝不把账号 id 当名字显示
+		// （FEED-REPLY-001 同一条规矩：显示名与权威身份是两件事）。
+		// 契约要求 displayName min 1，空串会让客户端整屏解析失败。
+		displayName = "用户"
 	}
 	return Insight{
 		TargetID:     friend.UserID,

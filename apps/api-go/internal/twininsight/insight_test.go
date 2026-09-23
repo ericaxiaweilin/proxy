@@ -194,10 +194,10 @@ func TestEveryInsightSurvivesContractValidation(t *testing.T) {
 		t.Error("targetId must not be empty")
 	}
 	if insight.DisplayName == "" {
-		t.Error("displayName must fall back to the account id, never empty")
+		t.Error("displayName must fall back to a neutral label, never empty")
 	}
-	if insight.DisplayName != "friend_1" {
-		t.Errorf("displayName should fall back to the id, got %q", insight.DisplayName)
+	if insight.DisplayName != "用户" {
+		t.Errorf("displayName should fall back to neutral label, got %q", insight.DisplayName)
 	}
 	if len([]rune(insight.Initial)) < 1 || len([]rune(insight.Initial)) > 2 {
 		t.Errorf("initial must be 1-2 runes, got %q", insight.Initial)
@@ -452,7 +452,7 @@ func TestStrangerAppearingAsFriendAndActorIsListedOnce(t *testing.T) {
 	}
 }
 
-func TestStrangerDisplayNameResolvesOrFallsBackToID(t *testing.T) {
+func TestStrangerDisplayNameResolvesOrFallsBackToNeutral(t *testing.T) {
 	now := fixedTime()
 	seed := Facts{
 		Signals: []SignalFact{
@@ -469,14 +469,14 @@ func TestStrangerDisplayNameResolvesOrFallsBackToID(t *testing.T) {
 		svc.SetClock(fixedTime)
 		return svc, friends
 	}
-	// 没接名字源：回落成账号 id，不断屏（契约 displayName min 1）。
+	// 没接名字源：回落中性标签，不断屏（契约 displayName min 1），绝不显示裸 id。
 	svc, _ := newSvc()
 	payload, err := svc.ListInsights(context.Background(), "twin_1", "owner_1")
 	if err != nil {
 		t.Fatalf("ListInsights: %v", err)
 	}
-	if len(payload.Insights) != 1 || payload.Insights[0].DisplayName != "stranger" {
-		t.Fatalf("without name source DisplayName must fall back to id, got %v", payload.Insights)
+	if len(payload.Insights) != 1 || payload.Insights[0].DisplayName != "用户" {
+		t.Fatalf("without name source DisplayName must fall back to neutral label, got %v", payload.Insights)
 	}
 	// 接上名字源：显示真名。
 	svc, _ = newSvc()
@@ -488,15 +488,15 @@ func TestStrangerDisplayNameResolvesOrFallsBackToID(t *testing.T) {
 	if len(payload.Insights) != 1 || payload.Insights[0].DisplayName != "Linh" {
 		t.Fatalf("with name source DisplayName must resolve, got %v", payload.Insights)
 	}
-	// 名字源解析失败：同样回落 id，不坏屏。
+	// 名字源解析失败：同样回落中性标签，不坏屏，不显示裸 id。
 	svc, _ = newSvc()
 	svc.SetDisplayNameSource(func(context.Context, string) (string, bool) { return "", false })
 	payload, err = svc.ListInsights(context.Background(), "twin_1", "owner_1")
 	if err != nil {
 		t.Fatalf("ListInsights: %v", err)
 	}
-	if len(payload.Insights) != 1 || payload.Insights[0].DisplayName != "stranger" {
-		t.Fatalf("failed resolution must fall back to id, got %v", payload.Insights)
+	if len(payload.Insights) != 1 || payload.Insights[0].DisplayName != "用户" {
+		t.Fatalf("failed resolution must fall back to neutral label, got %v", payload.Insights)
 	}
 }
 

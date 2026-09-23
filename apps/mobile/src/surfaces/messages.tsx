@@ -737,7 +737,9 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
   // 泛泛的「群聊 · N 人」——列表里能认出哪个是哪个房间。
   const roomName = item.conversation.roomScene?.roomName?.trim();
   const isRoom = roomName !== undefined && roomName !== "";
-  const name = isRoom ? roomName : isGroup ? `群聊 · ${item.conversation.participants.length} 人` : aiAccount?.displayName || snapshotName || (isAssistantPeer ? "AI助手" : item.counterpartyId) || "对话";
+  // NO-RAW-ID-001：名字解析不到时用中性标签，绝不把 counterpartyId（裸账号 id）
+  // 当名字显示（FEED-REPLY-001 同一条规矩）。id 只做 peerUserId 导航标识，不上屏。
+  const name = isRoom ? roomName : isGroup ? `群聊 · ${item.conversation.participants.length} 人` : aiAccount?.displayName || snapshotName || (isAssistantPeer ? "AI助手" : "用户") || "对话";
   const avatarRef = item.counterpartySnapshot?.avatarRef?.trim();
   // ASSISTANT-THREAD-001: 助手有且仅有一个（服务端已归一），行头像就是 logo。
   // 真人没解析出可用地址就不设 —— 以前兜底拼 user_<id> 的 thumb 全是 404，

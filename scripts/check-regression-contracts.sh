@@ -856,7 +856,7 @@ require_test "TWIN-INSIGHT-TARGETS-001" "./internal/twininsight" \
   "TestStrangerAppearingAsFriendAndActorIsListedOnce" \
   "apps/api-go/internal/twininsight/insight_test.go" || exit $?
 require_test "TWIN-INSIGHT-TARGETS-001" "./internal/twininsight" \
-  "TestStrangerDisplayNameResolvesOrFallsBackToID" \
+  "TestStrangerDisplayNameResolvesOrFallsBackToNeutral" \
   "apps/api-go/internal/twininsight/insight_test.go" || exit $?
 
 # ── TWIN-INSIGHT-ENTITLEMENT-001 ────────────────────────────────────────────

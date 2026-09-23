@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 267 — 2026-09-23
+
+- **裸账号 id 不再上屏**（NO-RAW-ID-001）：用户「无头像无用户名只有纯 user_ID，
+  不符合规矩」。两处回退改中性「用户」：会话列表对端名（`messages.tsx`，id 只
+  留作导航标识）、好友洞察展示名（`twininsight.buildInsight`）。另清掉 fixture
+  污染进真会话的 `u_linh` 幽灵参与者（2 个会话；平台助手 / AI 账号靠
+  `IsHumanTarget` 在读时过滤，不删数据）。
+- 影响文件：`apps/mobile/src/surfaces/messages.tsx`、
+  `apps/api-go/internal/twininsight/insight.go`。
+
 ## Revision 266 — 2026-09-23
 
 - **全页面内容长按可复制**（SELECTABLE-TEXT-001）：用户「现在我先复制给你都不行」。
