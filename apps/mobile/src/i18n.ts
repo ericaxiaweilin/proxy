@@ -244,9 +244,7 @@ export interface Messages {
   greetLine7: string;
   greetLine8: string;
   greetA11y: string;
-  greetSent: string;
-  greetSentBtn: string;
-  greetSending: string;
+  invited: string;
   greetFailed: string;
   greetLoginFirst: string;
   greetNoAccount: string;
@@ -460,9 +458,7 @@ const ZH: Messages = {
   greetLine7: "你好，想认识一下新朋友",
   greetLine8: "嗨！今天过得怎么样？",
   greetA11y: "向 {name} 打招呼",
-  greetSent: "已向 {name} 打招呼：{line}",
-  greetSentBtn: "已打招呼",
-  greetSending: "发送中…",
+  invited: "已邀约",
   greetFailed: "招呼没发出去，再点一次试试",
   greetLoginFirst: "登录后才能打招呼",
   greetNoAccount: "{name} 还没有账号，暂时发不了招呼",
@@ -676,9 +672,7 @@ const VI: Messages = {
   greetLine7: "Chào bạn, mình muốn làm quen bạn mới",
   greetLine8: "Hi! Hôm nay của bạn thế nào?",
   greetA11y: "Chào {name}",
-  greetSent: "Đã chào {name}: {line}",
-  greetSentBtn: "Đã chào",
-  greetSending: "Đang gửi…",
+  invited: "Đã mời",
   greetFailed: "Chưa gửi được lời chào, thử lại nhé",
   greetLoginFirst: "Đăng nhập để gửi lời chào",
   greetNoAccount: "{name} chưa có tài khoản, tạm thời chưa chào được",
@@ -892,9 +886,7 @@ const EN: Messages = {
   greetLine7: "Hello, I'd love to meet new friends",
   greetLine8: "Hi! How's your day going?",
   greetA11y: "Say hi to {name}",
-  greetSent: "Said hi to {name}: {line}",
-  greetSentBtn: "Said hi",
-  greetSending: "Sending…",
+  invited: "Invited",
   greetFailed: "Couldn't send your hi — tap to try again",
   greetLoginFirst: "Log in to say hi",
   greetNoAccount: "{name} has no account yet, so a hi can't be sent",
@@ -1108,9 +1100,7 @@ const LO: Messages = {
   greetLine7: "ສະບາຍດີ, ຢາກຮູ້ຈັກໝູ່ໃໝ່",
   greetLine8: "ສະບາຍດີ! ມື້ນີ້ເປັນແນວໃດແດ່?",
   greetA11y: "ທັກທາຍ {name}",
-  greetSent: "ທັກທາຍ {name} ແລ້ວ: {line}",
-  greetSentBtn: "ທັກແລ້ວ",
-  greetSending: "ກຳລັງສົ່ງ…",
+  invited: "ເຊີນແລ້ວ",
   greetFailed: "ສົ່ງຄຳທັກທາຍບໍ່ໄດ້, ລອງໃໝ່ອີກຄັ້ງ",
   greetLoginFirst: "ເຂົ້າສູ່ລະບົບເພື່ອທັກທາຍ",
   greetNoAccount: "{name} ຍັງບໍ່ມີບັນຊີ, ຍັງທັກທາຍບໍ່ໄດ້",
@@ -1324,9 +1314,7 @@ const KO: Messages = {
   greetLine7: "안녕하세요, 새 친구를 사귀고 싶어요",
   greetLine8: "안녕하세요! 오늘 하루 어때요?",
   greetA11y: "{name}에게 인사하기",
-  greetSent: "{name}에게 인사했어요: {line}",
-  greetSentBtn: "인사함",
-  greetSending: "보내는 중…",
+  invited: "초대함",
   greetFailed: "인사를 보내지 못했어요. 다시 눌러 주세요",
   greetLoginFirst: "로그인하면 인사할 수 있어요",
   greetNoAccount: "{name}님은 아직 계정이 없어 인사를 보낼 수 없어요",
@@ -1540,9 +1528,7 @@ const JA: Messages = {
   greetLine7: "こんにちは、新しい友達を作りたいです",
   greetLine8: "こんにちは！今日はどんな一日ですか？",
   greetA11y: "{name} に挨拶",
-  greetSent: "{name} に挨拶しました：{line}",
-  greetSentBtn: "挨拶済み",
-  greetSending: "送信中…",
+  invited: "招待済み",
   greetFailed: "挨拶を送れませんでした。もう一度タップしてください",
   greetLoginFirst: "ログインすると挨拶できます",
   greetNoAccount: "{name} さんはまだアカウントがないため挨拶できません",

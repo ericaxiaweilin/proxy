@@ -301,9 +301,13 @@ export function RequesterHome({
   // HOME-MORE-SHEET-003: "更多真人"列表每行的破冰邀请——原型叫它 拼桌/邀约，
   // 不是加好友。选中的开场白进 initialDraft，真的带到聊天输入框里。
   const [icebreakerTarget, setIcebreakerTarget] = useState<RecommendPerson | undefined>(undefined);
-  // HOME-MORE-GREET-001: 每个人的招呼状态 + 顶部一行反馈。sent 之后按钮变「已打招呼」，
-  // 不让连点刷屏；lastGreetLine 保证同一个人连着两次不会收到同一句。
-  const [greetState, setGreetState] = useState<Record<string, "sending" | "sent">>({});
+  // HOME-MORE-GREET-001: 谁已经邀约过（按钮变「已邀约」，不让连点刷屏）+ 失败 / 无法发送时
+  // 顶部一行提示；lastGreetLine 保证同一个人连着两次不会收到同一句。
+  // HOME-MORE-GREET-002（2026-09-23，用户：「显示发送中-已打招呼 这属于多余 … 不能必须等对方
+  // （模型 真人）回复才能更新状态」）：点下去立刻就是「已邀约」，请求在后台发。
+  // StartConversation 带首条消息时，服务端会**同步**生成真人账号的 AI 代回复再返回，
+  // 等它回来才变状态 = 等对方回复。只有发送失败才撤回成「邀约」并提示。
+  const [greetState, setGreetState] = useState<Record<string, true>>({});
   const [greetMsg, setGreetMsg] = useState<string>("");
   const lastGreetLine = useRef<Record<string, string>>({});
 
@@ -317,12 +321,9 @@ export function RequesterHome({
     const pool = lines.filter((line) => line !== lastGreetLine.current[person.id]);
     const line = pool[Math.floor(Math.random() * pool.length)] ?? lines[0]!;
     lastGreetLine.current[person.id] = line;
-    setGreetState((prev) => ({ ...prev, [person.id]: "sending" }));
+    setGreetState((prev) => ({ ...prev, [person.id]: true }));
+    setGreetMsg("");
     onGreetHuman(person, line)
-      .then(() => {
-        setGreetState((prev) => ({ ...prev, [person.id]: "sent" }));
-        setGreetMsg(t("greetSent", { name: person.name, line }));
-      })
       .catch(() => {
         setGreetState((prev) => { const next = { ...prev }; delete next[person.id]; return next; });
         setGreetMsg(t("greetFailed"));
@@ -1658,8 +1659,8 @@ export function RequesterHome({
                   //   - 同一窗景（已知距离 ≤ SAME_SCENE_RADIUS_M）→「拼桌」，弹破冰面板约见面；
                   //   - 其余（更远 / 距离未知）→「邀约」= 纯打招呼，点一下直接发一句，不弹面板。
                   const sameScene = isSameScene(p);
-                  const greet_ = greetState[p.id];
-                  const actionLabel = sameScene ? t("actionTable") : greet_ === "sent" ? t("greetSentBtn") : greet_ === "sending" ? t("greetSending") : t("actionInvite");
+                  const invited = !sameScene && greetState[p.id] === true;
+                  const actionLabel = sameScene ? t("actionTable") : invited ? t("invited") : t("actionInvite");
                   return (
                     <View key={`more:${p.id}`} style={styles.moreRow}>
                       <Pressable onPress={openPreview} accessibilityLabel={t("viewHumanProfileA11y", { name: p.name })} style={styles.moreAvatarWrap}>
@@ -1678,13 +1679,15 @@ export function RequesterHome({
                         </View>
                       </Pressable>
                       <Pressable
-                        disabled={!sameScene && greet_ !== undefined}
+                        disabled={invited}
                         onPress={() => { if (sameScene) setIcebreakerTarget(p); else greet(p); }}
-                        style={[styles.moreActionBtn, !sameScene && greet_ === "sent" && styles.moreActionBtnDone]}
-                        accessibilityLabel={sameScene ? t("icebreakerTitle", { name: p.name, action: actionLabel }) : t("greetA11y", { name: p.name })}
-                        accessibilityState={{ disabled: !sameScene && greet_ !== undefined }}
+                        style={[styles.moreActionBtn, invited && styles.moreActionBtnDone]}
+                        accessibilityLabel={sameScene ? t("icebreakerTitle", { name: p.name, action: actionLabel }) : invited ? actionLabel : t("greetA11y", { name: p.name })}
+                        accessibilityState={{ disabled: invited }}
                       >
-                        <Text style={[styles.moreActionBtnText, !sameScene && greet_ === "sent" && styles.moreActionBtnTextDone]}>{actionLabel}</Text>
+                        {/* HOME-MORE-GREET-002：邀约 = 气泡（打个招呼），已邀约 = ✓。拼桌不带图标。 */}
+                        {sameScene ? null : <ProxyIcon color={invited ? color.muted : color.ink} name={invited ? "check" : "chat"} size={13} />}
+                        <Text style={[styles.moreActionBtnText, invited && styles.moreActionBtnTextDone]}>{actionLabel}</Text>
                       </Pressable>
                     </View>
                   );
@@ -2140,7 +2143,7 @@ const styles = StyleSheet.create({
   moreTagLive: { backgroundColor: color.ink, borderRadius: 4, color: color.white, fontSize: 11, fontWeight: "700", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 3 },
   moreTag: { backgroundColor: color.offWhite, borderRadius: 4, color: color.muted, fontSize: 11, overflow: "hidden", paddingHorizontal: 6, paddingVertical: 3 },
   // HOME-MORE-SHEET-003: 每行唯一的动作按钮（拼桌/邀约），照原型 li-action-btn。
-  moreActionBtn: { borderColor: color.ink, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 7 },
+  moreActionBtn: { alignItems: "center", borderColor: color.ink, borderRadius: 999, borderWidth: 1, flexDirection: "row", gap: 4, paddingHorizontal: 14, paddingVertical: 7 },
   moreActionBtnText: { color: color.ink, fontSize: 12, fontWeight: "700" },
   moreActionBtnDone: { backgroundColor: color.offWhite, borderColor: color.line },
   moreActionBtnTextDone: { color: color.muted },

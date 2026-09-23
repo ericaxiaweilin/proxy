@@ -9055,5 +9055,19 @@ if ! grep -qF 'conversationType: "DM", firstMessage: line,' "$GREET_SHELL"; then
   echo "  FAIL [HOME-MORE-GREET-001]: app-shell 的招呼不再真发到 DM。" >&2
   exit 1
 fi
+# HOME-MORE-GREET-002（2026-09-23，用户：「显示发送中-已打招呼 这属于多余 邀约 已邀约 就可以 …
+# 不能必须等对方（模型 真人）回复才能更新状态」）：StartConversation 带首条消息时服务端会同步
+# 生成 AI 代回复，所以「已邀约」必须在发请求**之前**就置上，不能挂在请求的 then 上；
+# 也不许再出现「发送中」这种中间态。
+optimistic_line=$(grep -nF 'setGreetState((prev) => ({ ...prev, [person.id]: true }));' "$GREET_HOME" | head -1 | cut -d: -f1)
+send_line=$(grep -nF 'onGreetHuman(person, line)' "$GREET_HOME" | head -1 | cut -d: -f1)
+if [ -z "$optimistic_line" ] || [ -z "$send_line" ] || [ "$optimistic_line" -ge "$send_line" ]; then
+  echo "  FAIL [HOME-MORE-GREET-002]: 「已邀约」没有在发请求之前置上 —— 又在等对方回复才变状态。" >&2
+  exit 1
+fi
+if grep -qF 'greetSending' "$GREET_HOME" || grep -qF '"sending"' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-002]: 又出现了「发送中」中间态。" >&2
+  exit 1
+fi
 pnpm --dir apps/mobile exec vitest run src/i18n.test.ts -t "several distinct greeting lines" || exit $?
-echo "    HOME-MORE-GREET-001: PASS (邀约 sends a real one-tap hi from a pool of lines; 拼桌 is only for the same scene ≤200m)"
+echo "    HOME-MORE-GREET-001/002: PASS (邀约 sends a real one-tap hi from a pool of lines; 拼桌 is only for the same scene ≤200m)"

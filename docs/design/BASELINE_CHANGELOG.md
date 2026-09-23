@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 250 — 2026-09-23
+
+- **邀约按钮：点下去立刻「已邀约」，不再等对方回复**（HOME-MORE-GREET-002）：用户反馈
+  「显示发送中-已打招呼 这属于多余 邀约 已邀约 就可以 … 不能必须等对方（模型 真人）回复
+  才能更新状态」。真人账号接了 AI 代回复，`StartConversation` 带首条消息时服务端会同步生成
+  代回复再返回，之前挂在请求结果上改状态 = 等对方回复。现在点下即置「已邀约」，请求在后台发，
+  只有发送失败才撤回并提示；去掉「发送中」和成功横幅。按钮加图标：邀约 = 气泡，已邀约 = ✓。
+- 影响文件：`apps/mobile/src/i18n.ts`、`apps/mobile/src/surfaces/requester-home.tsx`。
+
 ## Revision 249 — 2026-09-23
 
 - **「更多」列表：拼桌 / 邀约按同一窗景分，邀约 = 一点就打招呼**（HOME-MORE-GREET-001）：
