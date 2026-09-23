@@ -29,6 +29,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/notification"
+	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
@@ -107,6 +108,8 @@ type Server struct {
 	AIPersona *aipersona.Service
 	// UserModel：AI 分身的用户建模（AI-MANAGE-015）。nil = 端点返回 503。
 	UserModel *usermodel.Service
+	// OpsMetrics：运营控制台的真实读模型（OPS-REAL-001）。nil = 没配库，相关页返回 NOT_CONNECTED。
+	OpsMetrics opsmetrics.Source
 	// TwinInsight 是 AI 分身「好友洞察」的读模型（TWIN-INSIGHT-002）。
 	// 它是一个独立的读模型包而不是挂在 localnet / relationship 上：
 	// 这条洞察跨四个域（好友关系 / 行为事件 / 对话 / 点赞），没有任何
@@ -189,23 +192,23 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/experience/surface", s.experienceSurface)
 	mux.HandleFunc("/v1/experience/delta", s.experienceDelta)
 	mux.HandleFunc("/v1/experience/metrics", s.experienceMetrics)
-	mux.HandleFunc("/v1/operator/context-field", s.operatorContextField)
-	mux.HandleFunc("/v1/operator/surface-plans", s.operatorSurfacePlans)
-	mux.HandleFunc("/v1/operator/execution-runtime", s.operatorExecutionRuntime)
-	mux.HandleFunc("/v1/operator/decision-engine", s.operatorDecisionEngine)
-	mux.HandleFunc("/v1/operator/clarification-gate", s.operatorClarificationGate)
-	mux.HandleFunc("/v1/operator/supply-health", s.operatorSupplyHealth)
-	mux.HandleFunc("/v1/operator/fulfillment-attribution", s.operatorFulfillmentAttribution)
-	mux.HandleFunc("/v1/operator/behavior", s.operatorBehavior)
-	mux.HandleFunc("/v1/operator/research", s.operatorResearch)
-	mux.HandleFunc("/v1/operator/population", s.operatorPopulation)
-	mux.HandleFunc("/v1/operator/tags", s.operatorTags)
-	mux.HandleFunc("/v1/operator/intent-orchestration", s.operatorIntentOrchestration)
-	mux.HandleFunc("/v1/operator/engine-api", s.operatorEngineAPI)
-	mux.HandleFunc("/v1/operator/merchant", s.operatorMerchant)
-	mux.HandleFunc("/v1/operator/retention", s.operatorRetention)
-	mux.HandleFunc("/v1/operator/trust", s.operatorTrust)
-	mux.HandleFunc("/v1/operator/quality", s.operatorQuality)
+	mux.HandleFunc("/v1/operator/context-field", s.operatorConsole(s.operatorContextField))
+	mux.HandleFunc("/v1/operator/surface-plans", s.operatorConsole(s.operatorSurfacePlans))
+	mux.HandleFunc("/v1/operator/execution-runtime", s.operatorConsole(s.operatorExecutionRuntime))
+	mux.HandleFunc("/v1/operator/decision-engine", s.operatorConsole(operatorDecisionEngine))
+	mux.HandleFunc("/v1/operator/clarification-gate", s.operatorConsole(operatorClarificationGate))
+	mux.HandleFunc("/v1/operator/supply-health", s.operatorConsole(operatorSupplyHealth))
+	mux.HandleFunc("/v1/operator/fulfillment-attribution", s.operatorConsole(operatorFulfillmentAttr))
+	mux.HandleFunc("/v1/operator/behavior", s.operatorConsole(s.operatorBehavior))
+	mux.HandleFunc("/v1/operator/research", s.operatorConsole(operatorResearch))
+	mux.HandleFunc("/v1/operator/population", s.operatorConsole(s.operatorPopulation))
+	mux.HandleFunc("/v1/operator/tags", s.operatorConsole(operatorTags))
+	mux.HandleFunc("/v1/operator/intent-orchestration", s.operatorConsole(operatorIntentOrchestration))
+	mux.HandleFunc("/v1/operator/engine-api", s.operatorConsole(operatorEngineAPI))
+	mux.HandleFunc("/v1/operator/merchant", s.operatorConsole(operatorMerchant))
+	mux.HandleFunc("/v1/operator/retention", s.operatorConsole(operatorRetention))
+	mux.HandleFunc("/v1/operator/trust", s.operatorConsole(operatorTrust))
+	mux.HandleFunc("/v1/operator/quality", s.operatorConsole(operatorQuality))
 	mux.HandleFunc("/v1/media/upload/", s.mediaUpload)
 	mux.HandleFunc("/v1/media/play/", s.mediaFile)
 	mux.HandleFunc("/v1/media/thumb/", s.mediaFile)

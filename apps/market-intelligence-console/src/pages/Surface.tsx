@@ -1,3 +1,4 @@
+import { opFetch } from "../lib/api";
 import { useEffect, useState } from "react";
 
 type SurfacePayload = {
@@ -13,7 +14,7 @@ export function Surface() {
   const [data, setData] = useState<SurfacePayload | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
-    fetch("/v1/operator/surface-plans?surface_id=home").then((r) => r.json()).then(setData).catch((e: unknown) => setErr(String(e)));
+    opFetch("/v1/operator/surface-plans?surface_id=home").then(setData).catch((e: unknown) => setErr(String(e)));
   }, []);
   if (err) return <div className="notice"><b>未连接到 API</b> — {err}</div>;
   if (!data) return <div className="notice">加载 SurfacePlan…</div>;

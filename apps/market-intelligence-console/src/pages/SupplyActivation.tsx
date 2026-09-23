@@ -1,3 +1,4 @@
+import { opFetch } from "../lib/api";
 import { useEffect, useState } from "react";
 import { FixtureNotice } from "../components/FixtureNotice";
 
@@ -5,7 +6,7 @@ type Payload = { dataSource?: string; bands: Array<{ segment: string; health: nu
 
 export function SupplyActivation() {
   const [data, setData] = useState<Payload | null>(null);
-  useEffect(() => { fetch("/v1/operator/supply-health").then((r) => r.json()).then(setData).catch(() => {}); }, []);
+  useEffect(() => { opFetch("/v1/operator/supply-health").then(setData).catch(() => {}); }, []);
   if (!data) return <div className="notice">加载 Supply Health…</div>;
   return (
     <>

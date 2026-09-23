@@ -313,29 +313,24 @@ require_test "GEO-HONEST-001" "./internal/realityscene" \
   "apps/api-go/internal/realityscene/service_test.go" || exit $?
 echo "    GEO-HONEST-001: PASS (伪造容量 / 占位候选 / 临时诊断 / 死桩 均未复现)"
 
-# OPS-TELEMETRY-001: 纯字面量端点必须自报 dataSource，且控制台必须真的渲染它。
-#
-# 服务端声明来源只是半截接线 —— 控制台不读这个字段，运营看到的还是
-# "决策引擎 30 天 1860 万次调用 · 谱系完整度 99.92%"，照样会以为引擎在跑。
-# 一个假的健康度比没有健康度更糟：它让人停止怀疑。所以两边一起钉。
-#
-# 范围要说清：不是所有 /v1/operator/* 都是占位。context-field / surface-plans
-# 真的调用了 runtime.Decide 和 compiler.Compile（输入是固定快照），
-# experience/metrics 返回的是真实进程内计数器。所以只钉这三个纯字面量端点，
-# 不写"整个 /v1/operator 都是假的" —— 那会是另一个谎。
-require_test "OPS-TELEMETRY-001" "./internal/api" \
-  "TestOperatorFixtureEndpointsDeclareSource" \
-  "apps/api-go/internal/api/reality_scene_test.go" || exit $?
-for page in SupplyActivation Clarification Engine; do
-  # 钉 JSX 用法，不钉 import —— 第一版写的是 grep 'FixtureNotice'，它匹配的是
-  # import 那一行；把 <FixtureNotice .../> 从渲染里删掉，import 还在，契约照样绿。
-  # 反向注入时抓到的：那条是假守卫。
-  if ! grep -q '<FixtureNotice' "apps/market-intelligence-console/src/pages/$page.tsx"; then
-    echo "  FAIL [OPS-TELEMETRY-001]: $page.tsx does not render <FixtureNotice> — the server declares dataSource but the console ignores it" >&2
-    exit 1
-  fi
-done
-echo "    OPS-TELEMETRY-001: PASS (3 个占位端点已声明来源，控制台已渲染)"
+# OPS-REAL-001（取代 OPS-TELEMETRY-001）：运营控制台 17 个 /v1/operator/* 端点
+#   - 全部只给运营（会话 + PROXY_OPERATOR_PRINCIPALS + ANALYTICS scope）—— 以前任何人都能调；
+#   - 没有数据源的页面只回 NOT_CONNECTED + 缺的模块，一个数字都不给 —— 以前是写死的 428K / 2.75M / 18.6M，
+#     OPS-TELEMETRY-001 只让其中 3 个自报「占位」，其余 11 个假数字照样以真遥测的样子出现在控制台；
+#   - 用户构成 / 行为信号是真实查询。
+require_test "OPS-REAL-001" "./internal/api" "TestOperatorConsoleIsOperatorOnly" \
+  "apps/api-go/internal/api/operator_console_test.go" || exit $?
+require_test "OPS-REAL-001" "./internal/api" "TestOperatorConsoleNeverServesFixtureNumbers" \
+  "apps/api-go/internal/api/operator_console_test.go" || exit $?
+if grep -E 'mux\.HandleFunc\("/v1/operator/[a-z-]+"' apps/api-go/internal/api/server.go | grep -v '/v1/operator/legal' | grep -qv 'operatorConsole('; then
+  echo "  FAIL [OPS-REAL-001]: 有 /v1/operator/* 路由没走 operatorConsole —— 运营数据又能被任何人读到。" >&2
+  exit 1
+fi
+if grep -rn 'fetch("/v1/operator' apps/market-intelligence-console/src >/dev/null; then
+  echo "  FAIL [OPS-REAL-001]: 控制台页面绕过 opFetch 直接 fetch —— 不带运营会话，也不认 NOT_CONNECTED。" >&2
+  exit 1
+fi
+echo "    OPS-REAL-001: PASS (operator console is operator-only; no fixture numbers; population/behaviour live)"
 
 require_test "UI-SOCIAL-002" "./internal/identity" \
   "TestAccountPreferencesRejectsAnonymousActorAndOversizedContact" \

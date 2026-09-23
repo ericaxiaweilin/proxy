@@ -28,6 +28,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/notification"
+	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
@@ -506,6 +507,10 @@ func main() {
 	mediaService.WithAIPersonaService(personaSvc)
 	server.AIPersona = personaSvc
 	// AI-MANAGE-015: 用户建模。有库用 PG，识图走模型底座的 vision 任务。
+	// OPS-REAL-001: 运营控制台真实指标（只在有库时）。
+	if pool != nil {
+		server.OpsMetrics = opsmetrics.NewPostgres(pool)
+	}
 	if pool != nil {
 		server.UserModel = usermodel.NewService(postgres.NewUserModelRepository(pool), modelStack)
 	} else {

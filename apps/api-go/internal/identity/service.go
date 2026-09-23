@@ -569,7 +569,9 @@ func pruneStamps(stamps []time.Time, cutoff time.Time) []time.Time {
 // it never chooses or learns a pre-seeded account identity.
 func (s *Service) beginPasswordlessAuthentication(ctx context.Context, e command.Envelope) command.Result {
 	var p beginPasswordlessAuthenticationPayload
-	if !decode(e.Payload, &p) || (p.Channel != "EMAIL" && p.Channel != "SMS") || normalizeLoginIdentifier(p.Channel, p.Identifier) == "" || p.DeviceID == "" || (p.Platform != "IOS" && p.Platform != "ANDROID") {
+	// OPS-REAL-001: 运营控制台（网页）走同一条邮箱验证码登录，平台如实报 WEB（device_registrations 早就允许 WEB，
+	// 见 migrations/049），不让网页冒充 iOS。运营权限另由 PROXY_OPERATOR_PRINCIPALS 白名单决定，跟平台无关。
+	if !decode(e.Payload, &p) || (p.Channel != "EMAIL" && p.Channel != "SMS") || normalizeLoginIdentifier(p.Channel, p.Identifier) == "" || p.DeviceID == "" || (p.Platform != "IOS" && p.Platform != "ANDROID" && p.Platform != "WEB") {
 		return command.Rejected(e, "INVALID_PASSWORDLESS_AUTHENTICATION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_passwordless_authentication", nil)
 	}
 	// OTP-THROTTLE-001: bound code delivery per identifier. PEEK before

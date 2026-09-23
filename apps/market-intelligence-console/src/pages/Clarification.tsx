@@ -1,3 +1,4 @@
+import { opFetch } from "../lib/api";
 import { useEffect, useState } from "react";
 import { FixtureNotice } from "../components/FixtureNotice";
 
@@ -5,7 +6,7 @@ type Payload = { dataSource?: string; gates: Array<{ state: string; desc: string
 
 export function Clarification() {
   const [data, setData] = useState<Payload | null>(null);
-  useEffect(() => { fetch("/v1/operator/clarification-gate").then((r) => r.json()).then(setData).catch(() => {}); }, []);
+  useEffect(() => { opFetch("/v1/operator/clarification-gate").then(setData).catch(() => {}); }, []);
   if (!data) return <div className="notice">加载 Clarification Gate…</div>;
   return (
     <>
