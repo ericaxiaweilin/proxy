@@ -1,5 +1,5 @@
 // Package usermodel 是 AI 分身的「用户建模」：小美的物理锚点（身高 / 体重 / 年龄 / 身材 / 肤色 / 发型）
-// 和「亚洲人特征锁定」，给 AI 生成她的形象图 / 视频时当约束用（AI-MANAGE-015，
+// 和「本人特征锁定」，给 AI 生成她的形象图 / 视频时当约束用（AI-MANAGE-015，
 // 用户原型 deepseek_html_20260923_c9c642.html）。
 //
 // 每一项都记来源：
@@ -8,6 +8,10 @@
 //
 // 没有的就是没有：没识别出来、本人也没填，就是空，页面显示「待补充」，不编一个数。
 // 体重不让 AI 从照片猜（猜不准、也冒犯），只能本人填。
+//
+// AI-MANAGE-016：锁定的是「她本人长什么样」（AI 从她照片里读出的面部 / 体型特征），不是预设人种模板 ——
+// 用户：「核心是模型读取小美的照片得出什么人 而不是硬编码 以后说不定去哈萨克斯坦 蒙古运营呢 俄罗斯美女也注册」。
+// 也不给人贴种族 / 民族标签：只描述外观本身。
 package usermodel
 
 import (
@@ -32,18 +36,22 @@ const (
 	FieldBodyType = "bodyType"
 	FieldSkinTone = "skinTone"
 	FieldHair     = "hair"
+	FieldFace     = "faceFeatures"
 )
 
 // Profile 是一个人的用户建模。
 type Profile struct {
-	OwnerID   string `json:"ownerId"`
-	HeightCm  *int   `json:"heightCm,omitempty"`
-	WeightKg  *int   `json:"weightKg,omitempty"`
-	Age       *int   `json:"age,omitempty"`
-	BodyType  string `json:"bodyType,omitempty"`
-	SkinTone  string `json:"skinTone,omitempty"`
-	Hair      string `json:"hair,omitempty"`
-	AsianLock bool   `json:"asianLock"`
+	OwnerID  string `json:"ownerId"`
+	HeightCm *int   `json:"heightCm,omitempty"`
+	WeightKg *int   `json:"weightKg,omitempty"`
+	Age      *int   `json:"age,omitempty"`
+	BodyType string `json:"bodyType,omitempty"`
+	SkinTone string `json:"skinTone,omitempty"`
+	Hair     string `json:"hair,omitempty"`
+	// FaceFeatures：脸型 / 五官 / 眼睛形状与颜色 / 骨架比例 —— 生成时锁住的「这就是她」。
+	FaceFeatures string `json:"faceFeatures,omitempty"`
+	// LikenessLock：生成时锁定本人特征（上面这些），防止出图跑偏成别人。
+	LikenessLock bool `json:"likenessLock"`
 	// Sources：字段 -> ai | manual；没有的字段就是还没有值。
 	Sources            map[string]string `json:"sources"`
 	AnalyzedPhotoCount int               `json:"analyzedPhotoCount"`
@@ -51,9 +59,9 @@ type Profile struct {
 	UpdatedAt          time.Time         `json:"updatedAt"`
 }
 
-// Empty 是一个还没建模的人：什么都没有，亚洲人特征锁定默认开（原型默认）。
+// Empty 是一个还没建模的人：什么都没有，本人特征锁定默认开（原型默认）。
 func Empty(ownerID string) Profile {
-	return Profile{OwnerID: ownerID, AsianLock: true, Sources: map[string]string{}}
+	return Profile{OwnerID: ownerID, LikenessLock: true, Sources: map[string]string{}}
 }
 
 var ErrNotFound = errors.New("user model not found")
@@ -124,14 +132,15 @@ func (s *Service) Get(ctx context.Context, ownerID string) (Profile, error) {
 
 // Patch 是本人手动改的部分；nil = 不动。清空一项：数值传 0、文本传 ""（Clear 里列出）。
 type Patch struct {
-	HeightCm  *int     `json:"heightCm"`
-	WeightKg  *int     `json:"weightKg"`
-	Age       *int     `json:"age"`
-	BodyType  *string  `json:"bodyType"`
-	SkinTone  *string  `json:"skinTone"`
-	Hair      *string  `json:"hair"`
-	AsianLock *bool    `json:"asianLock"`
-	Clear     []string `json:"clear"`
+	HeightCm     *int     `json:"heightCm"`
+	WeightKg     *int     `json:"weightKg"`
+	Age          *int     `json:"age"`
+	BodyType     *string  `json:"bodyType"`
+	SkinTone     *string  `json:"skinTone"`
+	Hair         *string  `json:"hair"`
+	FaceFeatures *string  `json:"faceFeatures"`
+	LikenessLock *bool    `json:"likenessLock"`
+	Clear        []string `json:"clear"`
 }
 
 var ErrInvalid = errors.New("invalid user model value")
@@ -159,8 +168,8 @@ func (s *Service) Update(ctx context.Context, ownerID string, patch Patch) (Prof
 			return
 		}
 		value := strings.TrimSpace(*v)
-		if len([]rune(value)) > 40 {
-			value = string([]rune(value)[:40])
+		if limit := textLimit(field); len([]rune(value)) > limit {
+			value = string([]rune(value)[:limit])
 		}
 		*dst = value
 		if value == "" {
@@ -181,6 +190,7 @@ func (s *Service) Update(ctx context.Context, ownerID string, patch Patch) (Prof
 	setText(FieldBodyType, &p.BodyType, patch.BodyType)
 	setText(FieldSkinTone, &p.SkinTone, patch.SkinTone)
 	setText(FieldHair, &p.Hair, patch.Hair)
+	setText(FieldFace, &p.FaceFeatures, patch.FaceFeatures)
 	for _, field := range patch.Clear {
 		switch field {
 		case FieldHeight:
@@ -195,13 +205,15 @@ func (s *Service) Update(ctx context.Context, ownerID string, patch Patch) (Prof
 			p.SkinTone = ""
 		case FieldHair:
 			p.Hair = ""
+		case FieldFace:
+			p.FaceFeatures = ""
 		default:
 			continue
 		}
 		delete(p.Sources, field)
 	}
-	if patch.AsianLock != nil {
-		p.AsianLock = *patch.AsianLock
+	if patch.LikenessLock != nil {
+		p.LikenessLock = *patch.LikenessLock
 	}
 	p.UpdatedAt = s.now().UTC()
 	return p, s.repo.Save(ctx, p)
@@ -224,16 +236,18 @@ type analysis struct {
 	BodyType string `json:"bodyType"`
 	SkinTone string `json:"skinTone"`
 	Hair     string `json:"hair"`
+	Face     string `json:"faceFeatures"`
 }
 
 const analyzePrompt = `你在帮一位用户给她自己的 AI 分身建模。下面是她本人上传、并授权 AI 使用的照片（同一个人）。
-只描述外观特征，不要识别或猜测她是谁。看不清、判断不了的项填 null，不要编。
+只描述外观特征，不要识别或猜测她是谁，也不要判断种族、民族或国籍。看不清、判断不了的项填 null，不要编。
 只输出一个 JSON 对象，不要任何其他文字：
 {"heightCm": 整数或null（只有照片里有可靠参照时才估计，否则 null）,
  "age": 整数或null（外观年龄估计）,
  "bodyType": "身材，中文短语，如 匀称型 · Mesomorph / 纤细型 · Ectomorph / 丰满型 · Endomorph" 或 null,
  "skinTone": "肤色，Fitzpatrick 分级 + 底调，如 Fitzpatrick II · 暖金底" 或 null,
- "hair": "发型 · 发色，如 长直发 · 黑色" 或 null}`
+ "hair": "发型 · 发色，如 长直发 · 黑色" 或 null,
+ "faceFeatures": "面部与骨架特征，只写看得到的外观：脸型、眉眼形状、眼睛颜色、鼻型、唇形、颧骨、骨架比例，如 鹅蛋脸 · 杏眼 · 深棕瞳 · 高颧骨 · 骨架纤细" 或 null}`
 
 // Analyze 让 vision 模型从本人授权的照片里识别外观特征，写成来源 ai 的项；本人手动改过的项不覆盖。
 // 返回更新后的建模和这次识别出的特征数。
@@ -287,6 +301,7 @@ func (s *Service) Analyze(ctx context.Context, ownerID string, photos []Photo) (
 		{FieldBodyType, &p.BodyType, found.BodyType},
 		{FieldSkinTone, &p.SkinTone, found.SkinTone},
 		{FieldHair, &p.Hair, found.Hair},
+		{FieldFace, &p.FaceFeatures, found.Face},
 	} {
 		value := strings.TrimSpace(item.value)
 		if value == "" || strings.EqualFold(value, "null") {
@@ -294,8 +309,8 @@ func (s *Service) Analyze(ctx context.Context, ownerID string, photos []Photo) (
 		}
 		recognised++
 		if !manual(item.field) {
-			if len([]rune(value)) > 40 {
-				value = string([]rune(value)[:40])
+			if limit := textLimit(item.field); len([]rune(value)) > limit {
+				value = string([]rune(value)[:limit])
 			}
 			*item.dst, p.Sources[item.field] = value, SourceAI
 		}
@@ -319,4 +334,12 @@ func parseAnalysis(raw string) (analysis, error) {
 		return analysis{}, fmt.Errorf("%w: %v", ErrUnreadable, err)
 	}
 	return found, nil
+}
+
+// textLimit：面部特征是一串短语，给长一点；其余一项一个短语。
+func textLimit(field string) int {
+	if field == FieldFace {
+		return 80
+	}
+	return 40
 }

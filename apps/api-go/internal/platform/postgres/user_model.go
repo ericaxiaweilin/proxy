@@ -24,9 +24,9 @@ func (r *UserModelRepository) Get(ctx context.Context, ownerID string) (usermode
 	var p usermodel.Profile
 	var sources []byte
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT owner_id, height_cm, weight_kg, age, body_type, skin_tone, hair, asian_lock, sources, analyzed_photo_count, analyzed_at, updated_at
+		SELECT owner_id, height_cm, weight_kg, age, body_type, skin_tone, hair, face_features, likeness_lock, sources, analyzed_photo_count, analyzed_at, updated_at
 		FROM ai.user_models WHERE owner_id = $1`, ownerID).
-		Scan(&p.OwnerID, &p.HeightCm, &p.WeightKg, &p.Age, &p.BodyType, &p.SkinTone, &p.Hair, &p.AsianLock, &sources, &p.AnalyzedPhotoCount, &p.AnalyzedAt, &p.UpdatedAt)
+		Scan(&p.OwnerID, &p.HeightCm, &p.WeightKg, &p.Age, &p.BodyType, &p.SkinTone, &p.Hair, &p.FaceFeatures, &p.LikenessLock, &sources, &p.AnalyzedPhotoCount, &p.AnalyzedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return usermodel.Profile{}, usermodel.ErrNotFound
 	}
@@ -48,12 +48,12 @@ func (r *UserModelRepository) Save(ctx context.Context, p usermodel.Profile) err
 		return err
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO ai.user_models (owner_id, height_cm, weight_kg, age, body_type, skin_tone, hair, asian_lock, sources, analyzed_photo_count, analyzed_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		INSERT INTO ai.user_models (owner_id, height_cm, weight_kg, age, body_type, skin_tone, hair, face_features, likeness_lock, sources, analyzed_photo_count, analyzed_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		ON CONFLICT (owner_id) DO UPDATE SET height_cm=EXCLUDED.height_cm, weight_kg=EXCLUDED.weight_kg, age=EXCLUDED.age,
-			body_type=EXCLUDED.body_type, skin_tone=EXCLUDED.skin_tone, hair=EXCLUDED.hair, asian_lock=EXCLUDED.asian_lock,
+			body_type=EXCLUDED.body_type, skin_tone=EXCLUDED.skin_tone, hair=EXCLUDED.hair, face_features=EXCLUDED.face_features, likeness_lock=EXCLUDED.likeness_lock,
 			sources=EXCLUDED.sources, analyzed_photo_count=EXCLUDED.analyzed_photo_count, analyzed_at=EXCLUDED.analyzed_at, updated_at=EXCLUDED.updated_at`,
-		p.OwnerID, p.HeightCm, p.WeightKg, p.Age, p.BodyType, p.SkinTone, p.Hair, p.AsianLock, sources, p.AnalyzedPhotoCount, p.AnalyzedAt, p.UpdatedAt)
+		p.OwnerID, p.HeightCm, p.WeightKg, p.Age, p.BodyType, p.SkinTone, p.Hair, p.FaceFeatures, p.LikenessLock, sources, p.AnalyzedPhotoCount, p.AnalyzedAt, p.UpdatedAt)
 	return err
 }
 

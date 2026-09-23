@@ -31,13 +31,13 @@ func strp(v string) *string { return &v }
 
 func TestEmptyModelHasNothingMadeUp(t *testing.T) {
 	p, err := NewService(nil, nil).Get(context.Background(), "u1")
-	if err != nil || p.HeightCm != nil || p.Age != nil || p.BodyType != "" || len(p.Sources) != 0 || !p.AsianLock {
+	if err != nil || p.HeightCm != nil || p.Age != nil || p.BodyType != "" || len(p.Sources) != 0 || !p.LikenessLock {
 		t.Fatalf("a fresh model is empty (asian lock on by default): %+v %v", p, err)
 	}
 }
 
 func TestAnalyzeFillsAIFieldsButNeverOverwritesManualOnesOrGuessesWeight(t *testing.T) {
-	vision := &fakeVision{out: "```json\n{\"heightCm\":165,\"age\":22,\"bodyType\":\"匀称型 · Mesomorph\",\"skinTone\":\"Fitzpatrick II · 暖金底\",\"hair\":null,\"weightKg\":50}\n```"}
+	vision := &fakeVision{out: "```json\n{\"heightCm\":165,\"age\":22,\"bodyType\":\"匀称型 · Mesomorph\",\"skinTone\":\"Fitzpatrick II · 暖金底\",\"hair\":null,\"faceFeatures\":\"鹅蛋脸 · 杏眼 · 高颧骨\",\"weightKg\":50}\n```"}
 	svc := NewService(nil, vision)
 	ctx := context.Background()
 	if _, err := svc.Update(ctx, "u1", Patch{Age: intp(25)}); err != nil {
@@ -50,7 +50,7 @@ func TestAnalyzeFillsAIFieldsButNeverOverwritesManualOnesOrGuessesWeight(t *test
 	if vision.task != "proxy.twin.user_modeling_vision" || vision.parts != 3 {
 		t.Fatalf("must ask a vision task with the prompt + every photo: task=%q parts=%d", vision.task, vision.parts)
 	}
-	if recognised != 4 || p.AnalyzedPhotoCount != 2 {
+	if recognised != 5 || p.FaceFeatures != "鹅蛋脸 · 杏眼 · 高颧骨" || p.Sources[FieldFace] != SourceAI || p.AnalyzedPhotoCount != 2 {
 		t.Fatalf("recognised=%d photos=%d", recognised, p.AnalyzedPhotoCount)
 	}
 	if *p.HeightCm != 165 || p.Sources[FieldHeight] != SourceAI || p.SkinTone == "" {
@@ -87,8 +87,8 @@ func TestUpdateValidatesAndClears(t *testing.T) {
 	if _, err := svc.Update(ctx, "u1", Patch{Age: intp(16)}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("under-18 age must be rejected, got %v", err)
 	}
-	p, _ := svc.Update(ctx, "u1", Patch{WeightKg: intp(48), Hair: strp("短发 · 棕色"), AsianLock: new(bool)})
-	if *p.WeightKg != 48 || p.Sources[FieldWeight] != SourceManual || p.AsianLock {
+	p, _ := svc.Update(ctx, "u1", Patch{WeightKg: intp(48), Hair: strp("短发 · 棕色"), LikenessLock: new(bool)})
+	if *p.WeightKg != 48 || p.Sources[FieldWeight] != SourceManual || p.LikenessLock {
 		t.Fatalf("manual values stick: %+v", p)
 	}
 	p, _ = svc.Update(ctx, "u1", Patch{Clear: []string{FieldWeight, FieldHair}})

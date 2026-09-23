@@ -20,7 +20,9 @@ import { promptLikenessConsent } from "./likeness-consent-prompt";
 
 // AI-MANAGE-015（2026-09-23，用户原型 deepseek_html_20260923_c9c642.html + logo user_modeling_black_white_clean.svg）：
 // AI 分身中心最上面的「用户建模」。AI 分身的核心是给小美生成模型资产（照片 / 视频），
-// 建模就是生成时锁住的「她长什么样」：物理锚点 + 亚洲人特征锁定。
+// 建模就是生成时锁住的「她长什么样」：物理锚点 + 本人特征锁定。
+// AI-MANAGE-016：原型是「亚洲人特征锁定 · 锁定东亚女性骨架」—— 改成锁 AI 从她本人照片读出的面部 / 体型特征，
+// 不套人种模板（用户：以后可能去哈萨克斯坦、蒙古运营，俄罗斯用户也会注册）。
 //
 // 和原型的差别（都是为了不放假数据）：
 //   - 原型写死「AI 已从 12 张照片识别出 8 项特征」「165cm / 22 岁」—— 这里全是服务端真值：
@@ -44,6 +46,7 @@ function rowsOf(model: UserModel): Row[] {
     { field: "bodyType", label: "身材", value: model.bodyType || undefined },
     { field: "skinTone", label: "肤色", value: model.skinTone || undefined },
     { field: "hair", label: "发型", value: model.hair || undefined },
+    { field: "faceFeatures", label: "面部特征", value: model.faceFeatures || undefined },
   ];
 }
 
@@ -202,7 +205,7 @@ function UserModelSheet({ view, authClient, ownerName, ownerAvatarUri, onChange,
       if (!Number.isFinite(value)) { setNotice("身高 / 体重 / 年龄请填数字"); return; }
       if (value !== current) patch[field] = value;
     }
-    for (const field of ["bodyType", "skinTone", "hair"] as const) {
+    for (const field of ["bodyType", "skinTone", "hair", "faceFeatures"] as const) {
       const text = draft[field].trim();
       if (text !== (model[field] ?? "")) patch[field] = text;
     }
@@ -225,7 +228,7 @@ function UserModelSheet({ view, authClient, ownerName, ownerAvatarUri, onChange,
           <View style={styles.hero}>
             <Avatar name={ownerName} size={88} uri={ownerAvatarUri} />
             <Text selectable style={styles.heroName}>{ownerName}</Text>
-            <Text selectable style={styles.heroSub}>你的 AI 分身{model.asianLock ? " · 亚洲人特征锁定" : ""}</Text>
+            <Text selectable style={styles.heroSub}>你的 AI 分身{model.likenessLock ? " · 本人特征锁定" : ""}</Text>
           </View>
 
           <View style={styles.bind}>
@@ -242,13 +245,13 @@ function UserModelSheet({ view, authClient, ownerName, ownerAvatarUri, onChange,
           </View>
           <View style={styles.featureList}>
             {rowsOf(model).map((row, index) => (
-              <View key={row.field} style={[styles.featureRow, index === 5 && styles.featureRowLast]}>
+              <View key={row.field} style={[styles.featureRow, index === 6 && styles.featureRowLast]}>
                 <Text selectable style={styles.featureLabel}>{row.label}</Text>
                 {editing ? (
                   <TextInput
                     keyboardType={row.field === "heightCm" || row.field === "weightKg" || row.field === "age" ? "number-pad" : "default"}
                     onChangeText={(text) => setDraft((prev) => ({ ...prev, [row.field]: text }))}
-                    placeholder={row.field === "heightCm" ? "cm" : row.field === "weightKg" ? "kg" : row.field === "age" ? "岁" : "如 " + (row.field === "bodyType" ? "匀称型" : row.field === "skinTone" ? "Fitzpatrick II · 暖金底" : "长直发 · 黑色")}
+                    placeholder={row.field === "heightCm" ? "cm" : row.field === "weightKg" ? "kg" : row.field === "age" ? "岁" : "如 " + (row.field === "bodyType" ? "匀称型" : row.field === "skinTone" ? "Fitzpatrick II · 暖金底" : row.field === "hair" ? "长直发 · 黑色" : "鹅蛋脸 · 杏眼 · 高颧骨")}
                     placeholderTextColor="#C8C8CC"
                     style={styles.featureInput}
                     value={draft[row.field]}
@@ -265,13 +268,13 @@ function UserModelSheet({ view, authClient, ownerName, ownerAvatarUri, onChange,
 
           <View style={styles.safety}>
             <View style={styles.info}>
-              <Text selectable style={styles.safetyTitle}>亚洲人特征锁定</Text>
-              <Text selectable style={styles.safetyText}>生成时锁定东亚女性骨架与比例，防止跑偏为欧美体型。</Text>
+              <Text selectable style={styles.safetyTitle}>本人特征锁定</Text>
+              <Text selectable style={styles.safetyText}>生成时锁定 AI 从你照片里识别出的面部与体型特征，防止出图跑偏成别人。不套任何人种模板。</Text>
             </View>
             <Switch
               disabled={busy !== undefined}
-              onValueChange={(value) => void run("lock", () => updateUserModel(authClient, { asianLock: value }))}
-              value={model.asianLock}
+              onValueChange={(value) => void run("lock", () => updateUserModel(authClient, { likenessLock: value }))}
+              value={model.likenessLock}
             />
           </View>
 
@@ -309,6 +312,7 @@ function draftOf(model: UserModel): Record<UserModelField, string> {
     bodyType: model.bodyType ?? "",
     skinTone: model.skinTone ?? "",
     hair: model.hair ?? "",
+    faceFeatures: model.faceFeatures ?? "",
   };
 }
 

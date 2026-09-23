@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 269 — 2026-09-23
+
+- **用户建模：「亚洲人特征锁定」改为「本人特征锁定」，新增 AI 识别的「面部特征」**（AI-MANAGE-016）：用户：「核心是模型读取小美的照片
+  得出什么人 而不是硬编码 以后说不定去哈萨克斯坦 蒙古运营呢 俄罗斯美女也注册这个」。
+  - 锁定对象 = AI 从本人授权照片里读出的面部与体型特征（脸型 / 眉眼 / 瞳色 / 鼻型 / 唇形 / 颧骨 / 骨架比例），不套人种模板；
+  - 识图提示词明确不判断种族 / 民族 / 国籍，只描述看得到的外观；面部特征同样可手动改，改过的 AI 不覆盖；
+  - 迁移 123：`asian_lock` → `likeness_lock`，新增 `face_features`。
+- 影响文件：`apps/mobile/src/components/twin-user-model-section.tsx`。
+
 ## Revision 268 — 2026-09-23
 
 - **AI 分身中心新增「用户建模」**（AI-MANAGE-015，原型 deepseek_html_20260923_c9c642.html，logo user_modeling_black_white_clean.svg）：

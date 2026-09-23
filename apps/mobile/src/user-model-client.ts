@@ -1,7 +1,7 @@
 // AI-MANAGE-015：AI 分身「用户建模」客户端（服务端 /v1/ai/user-model，需会话 + 本人形象授权）。
 // 每项带来源：ai = AI 从本人授权的图库照片识别；manual = 本人填的（AI 不覆盖）。没有就是没有，不补假值。
 
-export type UserModelField = "heightCm" | "weightKg" | "age" | "bodyType" | "skinTone" | "hair";
+export type UserModelField = "heightCm" | "weightKg" | "age" | "bodyType" | "skinTone" | "hair" | "faceFeatures";
 
 export type UserModel = {
   ownerId: string;
@@ -11,7 +11,9 @@ export type UserModel = {
   bodyType?: string;
   skinTone?: string;
   hair?: string;
-  asianLock: boolean;
+  // 面部与骨架特征（AI 从本人照片读出）—— 本人特征锁定锁的就是这些，不是预设人种模板（AI-MANAGE-016）。
+  faceFeatures?: string;
+  likenessLock: boolean;
   sources: Partial<Record<UserModelField, "ai" | "manual">>;
   analyzedPhotoCount: number;
   analyzedAt?: string;
@@ -19,7 +21,7 @@ export type UserModel = {
 
 export type UserModelView = { model: UserModel; galleryCount: number; recognised?: number };
 
-export type UserModelPatch = Partial<Pick<UserModel, "heightCm" | "weightKg" | "age" | "bodyType" | "skinTone" | "hair" | "asianLock">> & { clear?: UserModelField[] };
+export type UserModelPatch = Partial<Pick<UserModel, "heightCm" | "weightKg" | "age" | "bodyType" | "skinTone" | "hair" | "faceFeatures" | "likenessLock">> & { clear?: UserModelField[] };
 
 export class UserModelError extends Error {
   constructor(public readonly code: string) {
