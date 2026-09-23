@@ -314,6 +314,12 @@ func (s *Service) ListInsights(ctx context.Context, twinID, ownerID string) (Pay
 	now := s.clockNow()
 	insights := make([]Insight, 0, len(friends))
 	for _, friend := range friends {
+		if friend.UserID == ownerID {
+			// 自己不给自己当洞察目标 —— 投流工具回答"谁值得运营"，
+			// 本人行（历史脏数据里自己既是 owner 又是 peer）进来就是噪音。
+			// 好友集理论上不会含自己，这里是纵深防御。
+			continue
+		}
 		insights = append(insights, buildInsight(friend, byActor[friend.UserID], eventsByActor[friend.UserID], thresholds, now))
 	}
 	// TWIN-INSIGHT-TARGETS-001：目标集 = 好友 ∪ 有过互动的陌生人。
@@ -326,7 +332,7 @@ func (s *Service) ListInsights(ctx context.Context, twinID, ownerID string) (Pay
 	// 陌生目标的 Since 留零值：VerdictOf 的"新好友"宽限只认非零 Since，
 	// 零值 + 零信号走分数分支判 skip，不会伪造"新好友"，也不会让"聊过但
 	// 7 天无数据"的人混进 new。
-	seen := map[string]bool{}
+	seen := map[string]bool{ownerID: true}
 	for _, friend := range friends {
 		seen[friend.UserID] = true
 	}

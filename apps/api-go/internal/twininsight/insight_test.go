@@ -536,3 +536,36 @@ func TestListInsightsDeniedWhenViewerGateRefuses(t *testing.T) {
 		t.Fatalf("refused viewer must get ErrInsightViewerForbidden even with friends and facts, got %v", err)
 	}
 }
+
+func TestOwnerNeverAppearsAsOwnTarget(t *testing.T) {
+	// 真机实测：owner 自己进了目标集（两人会话里自己既是 owner 又是 peer 的
+	// 历史脏数据）。投流工具给自己画像是噪音，必须滤掉。
+	now := fixedTime()
+	repo := NewMemoryRepository()
+	repo.Seed("owner_1", Facts{
+		Signals: []SignalFact{
+			{ActorID: "owner_1", Messages7d: 9, LastSignalAt: now.Add(-time.Hour)},
+			{ActorID: "chatter", Messages7d: 5, LastSignalAt: now.Add(-2 * time.Hour)},
+		},
+	})
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{
+		{UserID: "owner_1", DisplayName: "Me", Since: now.Add(-90 * 24 * time.Hour)},
+		{UserID: "chatter", DisplayName: "Chatter", Since: now.Add(-90 * 24 * time.Hour)},
+	})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetClock(fixedTime)
+	svc.SetViewerGate(allowAllViewers)
+	payload, err := svc.ListInsights(context.Background(), "twin_1", "owner_1")
+	if err != nil {
+		t.Fatalf("ListInsights: %v", err)
+	}
+	for _, in := range payload.Insights {
+		if in.TargetID == "owner_1" {
+			t.Fatalf("owner must never be its own insight target, got %v", payload.Insights)
+		}
+	}
+	if len(payload.Insights) != 1 || payload.Insights[0].TargetID != "chatter" {
+		t.Fatalf("only the real chatter should remain, got %v", payload.Insights)
+	}
+}
