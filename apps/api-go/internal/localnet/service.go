@@ -281,8 +281,9 @@ type Repository interface {
 	// CONTENT-ANALYTICS-001: since 之后发的帖子才算（用户侧默认只看近 30 天；服务端事件照存全量）。
 	ListPostImpressionStats(ctx context.Context, authorID string, since time.Time, limit int) ([]PostImpressionStats, error)
 	// PROFILE-VISIT-001: 主页访问聚合，同样是必需接口——理由跟上面一致，
-	// 别让"有 UI 没后端"的静默降级又发生一次。
-	ListProfileViewStats(ctx context.Context, ownerID string) (ProfileViewStats, error)
+	// 别让"有 UI 没后端"的静默降级又发生一次。since 为零值时不过滤（全量），
+	// 调用方按需传窗口（「我的 → 分析」传 30 天）。
+	ListProfileViewStats(ctx context.Context, ownerID string, since time.Time) (ProfileViewStats, error)
 	// PROFILE-VIEWERS-001: 按 actor 分组的主页访问明细，同样是必需接口。
 	ListProfileViewers(ctx context.Context, ownerID string, limit int) ([]ProfileViewerStat, error)
 	// MEDIA-DWELL-001: 单张媒体曝光聚合，同样是必需接口。
@@ -904,13 +905,16 @@ func (r *MemoryRepository) ListPostImpressionStats(_ context.Context, authorID s
 	return result, nil
 }
 
-func (r *MemoryRepository) ListProfileViewStats(_ context.Context, ownerID string) (ProfileViewStats, error) {
+func (r *MemoryRepository) ListProfileViewStats(_ context.Context, ownerID string, since time.Time) (ProfileViewStats, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var stat ProfileViewStats
 	viewers := make(map[string]bool)
 	for _, ie := range r.interactionEvents {
 		if ie.EventType != "PROFILE_OPEN" || ie.TargetType != "PROFILE" || ie.TargetID != ownerID {
+			continue
+		}
+		if !since.IsZero() && ie.CreatedAt.Before(since) {
 			continue
 		}
 		stat.Opens++
@@ -2687,9 +2691,12 @@ func (s *Service) listPostImpressionStats(ctx context.Context, e command.Envelop
 
 // ListProfileViewStats：主页访问战绩读侧（PROFILE-VISIT-001）。只能查自己的
 // 主页——不暴露"谁在看谁"，ownerId 不传按自己算，传别人的直接拒绝。
+// sinceDays 可选：>0 时只数窗口内的访问（「我的 → 分析」传 30）；缺省全量，
+// friend-crm 的访问/回访行继续用全量口径，不动。
 func (s *Service) listProfileViewStats(ctx context.Context, e command.Envelope) command.Result {
 	var p struct {
-		OwnerID string `json:"ownerId"`
+		OwnerID   string `json:"ownerId"`
+		SinceDays int    `json:"sinceDays"`
 	}
 	_ = decode(e.Payload, &p)
 	ownerID := p.OwnerID
@@ -2699,7 +2706,11 @@ func (s *Service) listProfileViewStats(ctx context.Context, e command.Envelope) 
 	if ownerID != e.Actor.ID {
 		return command.Rejected(e, "STATS_FORBIDDEN", "VALIDATION", "AFTER_USER_ACTION", "localnet.stats_forbidden", nil)
 	}
-	stats, err := s.repository.ListProfileViewStats(ctx, ownerID)
+	var since time.Time
+	if p.SinceDays > 0 {
+		since = s.statsSince(p.SinceDays)
+	}
+	stats, err := s.repository.ListProfileViewStats(ctx, ownerID, since)
 	if err != nil {
 		return command.Rejected(e, "STATS_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.stats_list_failed", nil)
 	}

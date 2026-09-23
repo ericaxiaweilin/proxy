@@ -164,6 +164,17 @@ type PostEngagement struct {
 	Reacted    bool   `json:"reacted"`
 }
 
+// ReceivedEngagementStats 是某人收到的互动合计（ANALYTICS-ME-001）：窗口内
+// 别人给 TA 帖子的赞 + 评论。自赞/自评不算"被互动"，排除；窗口固定 30 天，
+// 跟「我的 → 分析」弹层的「最近 30 天」同一口径。
+type ReceivedEngagementStats struct {
+	Reactions int `json:"reactions"`
+	Replies   int `json:"replies"`
+}
+
+// ReceivedEngagementWindowDays 是收到互动合计的窗口（天）。
+const ReceivedEngagementWindowDays = 30
+
 type Repository interface {
 	AddFollow(ctx context.Context, f Follow) error
 	RemoveFollow(ctx context.Context, followerID, followeeID string) (bool, error)
@@ -210,6 +221,9 @@ type Repository interface {
 	RemoveMutedAuthor(ctx context.Context, actorID, authorID string) (bool, error)
 	ListMutedAuthors(ctx context.Context, actorID string) ([]MutedAuthor, error)
 	Engagement(ctx context.Context, postID string, viewerID ...string) (PostEngagement, error)
+	// CountReceivedEngagement 数某人帖子在窗口内收到的赞 + 评论（ANALYTICS-ME-001）。
+	// 只数作者是 ownerID 的帖子；actor 是 owner 自己的不算；归属解析不到的帖子不猜。
+	CountReceivedEngagement(ctx context.Context, ownerID string, since time.Time) (ReceivedEngagementStats, error)
 }
 
 var ErrPostNotTracked = errors.New("post not tracked")
@@ -237,6 +251,16 @@ type MemoryRepository struct {
 	pins        map[string]PostPin     // key = ownerID + "|" + postID (R15.56 幂等)
 	pinOrder    map[string][]string    // key = ownerID → postIDs in pin order (R15.56)
 	events      []event.DomainEvent
+	// postAuthorOf 解析帖子作者（ANALYTICS-ME-001 收到的互动归属）。
+	// memory 库不存帖子，调用方注入；未注入时收到计数为 0 —— 不猜归属。
+	postAuthorOf func(postID string) (authorID string, ok bool)
+}
+
+// SetPostAuthorSource 注入帖子归属解析（memory 库不存帖子，PG 靠 SQL join）。
+func (r *MemoryRepository) SetPostAuthorSource(src func(postID string) (authorID string, ok bool)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.postAuthorOf = src
 }
 
 func NewMemoryRepository() *MemoryRepository {
@@ -578,6 +602,32 @@ func (r *MemoryRepository) Engagement(_ context.Context, postID string, viewerID
 	return e, nil
 }
 
+// CountReceivedEngagement 数某人帖子在窗口内收到的赞 + 评论（ANALYTICS-ME-001）。
+// 只数解析出作者是 ownerID 的帖子；自己给自己点的不算；窗口含 since 当天。
+func (r *MemoryRepository) CountReceivedEngagement(_ context.Context, ownerID string, since time.Time) (ReceivedEngagementStats, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var stat ReceivedEngagementStats
+	if r.postAuthorOf == nil {
+		return stat, nil
+	}
+	for _, re := range r.reactions {
+		author, ok := r.postAuthorOf(re.PostID)
+		if !ok || author != ownerID || re.ActorID == ownerID || re.CreatedAt.Before(since) {
+			continue
+		}
+		stat.Reactions++
+	}
+	for _, re := range r.replies {
+		author, ok := r.postAuthorOf(re.PostID)
+		if !ok || author != ownerID || re.ActorID == ownerID || re.CreatedAt.Before(since) {
+			continue
+		}
+		stat.Replies++
+	}
+	return stat, nil
+}
+
 type Service struct {
 	mu         sync.Mutex
 	repository Repository
@@ -622,7 +672,7 @@ func NewWithRepository(repository Repository) *Service {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "FollowProfile", "UnfollowProfile", "GetFollowCounts", "IsFollowing", "ReactToPost", "ReplyToPost", "ListPostReplies", "RepostPost", "BookmarkPost", "GetPostEngagement", "RecordFeedPreference", "ReportPost", "MuteAuthor", "UnmuteAuthor", "ListMutedAuthors", "PinPost", "UnpinPost", "ListPinnedPosts", "ListUserReplies", "ListUserBookmarks":
+	case "FollowProfile", "UnfollowProfile", "GetFollowCounts", "IsFollowing", "ReactToPost", "ReplyToPost", "ListPostReplies", "RepostPost", "BookmarkPost", "GetPostEngagement", "GetReceivedEngagementStats", "RecordFeedPreference", "ReportPost", "MuteAuthor", "UnmuteAuthor", "ListMutedAuthors", "PinPost", "UnpinPost", "ListPinnedPosts", "ListUserReplies", "ListUserBookmarks":
 		return true
 	default:
 		return false
@@ -657,6 +707,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.bookmark(ctx, e)
 	case "GetPostEngagement":
 		return s.engagement(ctx, e)
+	case "GetReceivedEngagementStats":
+		return s.receivedEngagementStats(ctx, e)
 	case "RecordFeedPreference":
 		return s.recordFeedPreference(ctx, e)
 	case "ReportPost":
@@ -1225,6 +1277,32 @@ func (s *Service) engagement(ctx context.Context, e command.Envelope) command.Re
 	}
 	return acceptedWithPayload(e, "Post", postID, 1, "ENGAGEMENT", map[string]any{
 		"engagement": eng,
+	}, nil)
+}
+
+// ---------- GetReceivedEngagementStats ----------
+
+// receivedEngagementStats：自己帖子收到的互动合计（ANALYTICS-ME-001）。
+// 只能查自己的 —— 别人的帖子被谁赞了不是公开信息，传别人的 ownerId 直接拒绝。
+func (s *Service) receivedEngagementStats(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		OwnerID string `json:"ownerId"`
+	}
+	_ = decode(e.Payload, &p)
+	ownerID := p.OwnerID
+	if ownerID == "" {
+		ownerID = e.Actor.ID
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" || ownerID != e.Actor.ID {
+		return command.Rejected(e, "ENGAGEMENT_STATS_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "engagement.stats_not_allowed", nil)
+	}
+	stats, err := s.repository.CountReceivedEngagement(ctx, ownerID, s.clock.Now().UTC().AddDate(0, 0, -ReceivedEngagementWindowDays))
+	if err != nil {
+		return command.Rejected(e, "ENGAGEMENT_STATS_READ_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.stats_read_failed", nil)
+	}
+	return acceptedWithPayload(e, "User", ownerID, 1, "RECEIVED_ENGAGEMENT_STATS", map[string]any{
+		"ownerId": ownerID,
+		"stats":   stats,
 	}, nil)
 }
 

@@ -365,14 +365,16 @@ export class LocalNetClient {
   /**
    * PROFILE-VISIT-001 — 主页访问战绩：只查自己的主页。
    * 没人看过是真答案（{opens:0, uniqueViewers:0}），不是协议异常。
+   * sinceDays 可选：>0 只数窗口内（「我的 → 分析」传 30）；缺省全量，
+   * friend-crm 的访问/回访行继续用全量口径。
    */
-  public async listProfileViewStats(): Promise<ProfileViewStats> {
+  public async listProfileViewStats(sinceDays?: number): Promise<ProfileViewStats> {
     const session = await this.requireSession();
     const result = await this.sendCommand(
       session,
       "ListProfileViewStats",
       { type: "Profile", id: "view_stats" },
-      {}
+      { ...(sinceDays !== undefined && sinceDays > 0 ? { sinceDays } : {}) }
     );
     const body = this.decodeOperationRef(result);
     if (!isProfileViewStats(body)) throw new LocalNetProtocolError("主页访问战绩响应格式不对");

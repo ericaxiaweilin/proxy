@@ -1799,3 +1799,43 @@ func TestMediaImpressionStatsRoundTrip(t *testing.T) {
 		t.Fatalf("missing authorId: got %s, want REJECTED (INVALID_AUTHOR_ID)", missingAuthor.Outcome)
 	}
 }
+
+// TestProfileViewStatsSinceDaysWindow: ListProfileViewStats 的 sinceDays
+// 只限制读窗口，不删事件 —— 40 天前的访问在全量口径里，30 天口径里没有。
+// 缺省（不传）保持全量，friend-crm 的访问/回访行口径不动。
+func TestProfileViewStatsSinceDaysWindow(t *testing.T) {
+	repo := NewMemoryRepository()
+	repo.interactionEvents = append(repo.interactionEvents, InteractionEvent{
+		EventID: "ev_old", EventType: "PROFILE_OPEN", ActorID: "viewer_old",
+		TargetType: "PROFILE", TargetID: "user_001", CreatedAt: time.Now().UTC().AddDate(0, 0, -40),
+	})
+	svc := NewWithRepository(repo)
+	open := func(actor string) command.Result {
+		e := envelopeFor("", "RecordProfileOpen", map[string]any{"targetId": "user_001"})
+		e.Actor = command.Actor{Type: "USER", ID: actor}
+		return svc.Handle(e)
+	}
+	if res := open("viewer_new"); res.Outcome != "ACCEPTED" {
+		t.Fatalf("open: got %s (%+v)", res.Outcome, res.Error)
+	}
+	query := func(payload map[string]any) (int64, int64) {
+		res := svc.Handle(envelopeFor("", "ListProfileViewStats", payload))
+		if res.Outcome != "ACCEPTED" {
+			t.Fatalf("stats %v: got %s (%+v)", payload, res.Outcome, res.Error)
+		}
+		var body struct {
+			Opens         int64 `json:"opens"`
+			UniqueViewers int64 `json:"uniqueViewers"`
+		}
+		if err := json.Unmarshal([]byte(res.OperationRef), &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return body.Opens, body.UniqueViewers
+	}
+	if opens, viewers := query(map[string]any{}); opens != 2 || viewers != 2 {
+		t.Fatalf("all-time = (%d,%d), want (2,2)", opens, viewers)
+	}
+	if opens, viewers := query(map[string]any{"sinceDays": 30}); opens != 1 || viewers != 1 {
+		t.Fatalf("30d = (%d,%d), want (1,1)", opens, viewers)
+	}
+}

@@ -1,4 +1,4 @@
-import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList, UserRepliesList, UserBookmarksList, PostEngagement, PostRepliesList, MutedAuthorsList, PostPollView } from "@proxy/contracts";
+import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList, UserRepliesList, UserBookmarksList, PostEngagement, PostRepliesList, MutedAuthorsList, PostPollView, ReceivedEngagementStats } from "@proxy/contracts";
 import {
   parseFollowCounts,
   parseFollowingState,
@@ -8,7 +8,8 @@ import {
   parseMutedAuthorsList,
   PostEngagementSchema,
   PostRepliesListSchema,
-  PostPollViewSchema
+  PostPollViewSchema,
+  ReceivedEngagementStatsSchema
 } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
@@ -64,6 +65,17 @@ export class EngagementClient {
 
   public async getPostEngagement(postId: string): Promise<PostEngagement> {
 	return this.parseEngagement(await this.command("GetPostEngagement", { type: "Post", id: postId }, { postId }));
+  }
+
+  /**
+   * ANALYTICS-ME-001 — 自己帖子收到的互动合计（30 天窗口，服务端聚合）。
+   * 自赞/自评不计入；只能查自己的，别人的聚合不暴露。
+   */
+  public async getReceivedEngagementStats(): Promise<ReceivedEngagementStats> {
+    const result = await this.command("GetReceivedEngagementStats", { type: "User", id: "received_engagement" }, {});
+    if (!result.operationRef) throw new EngagementProtocolError("received engagement response missing operationRef");
+    const raw = JSON.parse(result.operationRef) as { stats?: unknown };
+    return ReceivedEngagementStatsSchema.parse(raw.stats);
   }
 
   public async listPostReplies(postId: string, limit = 20): Promise<PostRepliesList> {

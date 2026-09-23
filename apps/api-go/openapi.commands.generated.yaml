@@ -213,6 +213,8 @@ commands:
     domain: Identity
   - command: GetProfileByHandle
     domain: Identity
+  - command: GetReceivedEngagementStats
+    domain: Engagement
   - command: GetStoreLines
     domain: Business
   - command: GetUserProfile

@@ -4,6 +4,20 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 273 — 2026-09-24
+
+- **「我的」分析弹层接真数据**（ANALYTICS-ME-001）：浏览/互动两行曾写死 "—"。
+  浏览 = 近 30 天主页访问（`ListProfileViewStats` 加可选 `sinceDays`，缺省全量，
+  friend-crm 口径不动）；互动 = 近 30 天收到的赞 + 评论（新命令
+  `GetReceivedEngagementStats`，服务端按作者聚合，自赞/自评排除，客户端不做
+  N+1）。拉失败是未知画 —，不画 0。另清掉测试账号帖子上 6 条 10 天前的
+  probe 评论垃圾（无 profile 的裸 actor）。
+- 影响文件：`apps/api-go/internal/engagement/service.go`、
+  `apps/api-go/internal/localnet/service.go`、
+  `apps/api-go/internal/platform/postgres/network.go`、
+  `apps/mobile/src/surfaces/me.tsx`、`apps/mobile/src/engagement-client.ts`、
+  `apps/mobile/src/localnet-client.ts`。
+
 ## Revision 272 — 2026-09-23
 
 - **照片/头像横滑不再触发切页**（SWIPE-RAIL-001）：用户「左右滑照片就翻页，

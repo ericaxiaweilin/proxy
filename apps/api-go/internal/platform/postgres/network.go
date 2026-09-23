@@ -712,12 +712,18 @@ func (r *LocalNetRepository) ListMediaActivityForViewer(ctx context.Context, aut
 	return result, rows.Err()
 }
 
-func (r *LocalNetRepository) ListProfileViewStats(ctx context.Context, ownerID string) (localnet.ProfileViewStats, error) {
+func (r *LocalNetRepository) ListProfileViewStats(ctx context.Context, ownerID string, since time.Time) (localnet.ProfileViewStats, error) {
 	var stat localnet.ProfileViewStats
-	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+	query := `
 		SELECT COUNT(event_id), COUNT(DISTINCT actor_id)
 		FROM localnet.interaction_events
-		WHERE target_type = 'PROFILE' AND target_id = $1 AND event_type = 'PROFILE_OPEN'`, ownerID).
+		WHERE target_type = 'PROFILE' AND target_id = $1 AND event_type = 'PROFILE_OPEN'`
+	args := []any{ownerID}
+	if !since.IsZero() {
+		query += ` AND created_at >= $2`
+		args = append(args, since)
+	}
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, query, args...).
 		Scan(&stat.Opens, &stat.UniqueViewers)
 	if err != nil {
 		return localnet.ProfileViewStats{}, err
@@ -1743,6 +1749,26 @@ func (r *EngagementRepository) Engagement(ctx context.Context, postID string, vi
 		}
 	}
 	return e, nil
+}
+
+// CountReceivedEngagement 数某人帖子在窗口内收到的赞 + 评论（ANALYTICS-ME-001）。
+// 只数作者是 owner 的帖子；自己给自己点的不算；归属落在 localnet.posts，
+// 那里没有行的帖子（脏引用）自然被 join 掉，不猜。
+func (r *EngagementRepository) CountReceivedEngagement(ctx context.Context, ownerID string, since time.Time) (engagement.ReceivedEngagementStats, error) {
+	var stat engagement.ReceivedEngagementStats
+	if err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT COUNT(*) FROM engagement.reactions r
+		JOIN localnet.posts p ON p.id = r.post_id
+		WHERE p.author_id = $1 AND r.actor_id <> $1 AND r.created_at >= $2`, ownerID, since).Scan(&stat.Reactions); err != nil {
+		return stat, err
+	}
+	if err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT COUNT(*) FROM engagement.replies r
+		JOIN localnet.posts p ON p.id = r.post_id
+		WHERE p.author_id = $1 AND r.actor_id <> $1 AND r.created_at >= $2`, ownerID, since).Scan(&stat.Replies); err != nil {
+		return stat, err
+	}
+	return stat, nil
 }
 
 var _ engagement.Repository = (*EngagementRepository)(nil)

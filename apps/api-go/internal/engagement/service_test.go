@@ -967,3 +967,54 @@ func (p *postNotFoundRepo) ListMutedAuthors(ctx context.Context, actorID string)
 func (p *postNotFoundRepo) Engagement(ctx context.Context, postID string, viewerID ...string) (PostEngagement, error) {
 	return p.inner.Engagement(ctx, postID, viewerID...)
 }
+
+func (p *postNotFoundRepo) CountReceivedEngagement(ctx context.Context, ownerID string, since time.Time) (ReceivedEngagementStats, error) {
+	return p.inner.CountReceivedEngagement(ctx, ownerID, since)
+}
+
+// TestReceivedEngagementStatsCountsOthersActionsInWindow (ANALYTICS-ME-001):
+// 「我的 → 分析」互动行 = 30 天窗口内别人给我的赞 + 评论。自赞/自评不算
+// "被互动"；窗口外的不算；归属解析不到的帖子不猜；只能查自己的。
+func TestReceivedEngagementStatsCountsOthersActionsInWindow(t *testing.T) {
+	repo := NewMemoryRepository()
+	repo.SetPostAuthorSource(func(postID string) (string, bool) {
+		if postID == "post_mine" {
+			return "user_001", true
+		}
+		if postID == "post_other" {
+			return "user_9", true
+		}
+		return "", false
+	})
+	now := time.Now().UTC()
+	old := now.AddDate(0, 0, -31)
+	repo.reactions["rxn_in"] = Reaction{ID: "rxn_in", PostID: "post_mine", ActorID: "user_2", Kind: "LIKE", CreatedAt: now.Add(-time.Hour)}
+	repo.reactions["rxn_self"] = Reaction{ID: "rxn_self", PostID: "post_mine", ActorID: "user_001", Kind: "LIKE", CreatedAt: now.Add(-time.Hour)}
+	repo.reactions["rxn_old"] = Reaction{ID: "rxn_old", PostID: "post_mine", ActorID: "user_3", Kind: "LIKE", CreatedAt: old}
+	repo.reactions["rxn_other_post"] = Reaction{ID: "rxn_other_post", PostID: "post_other", ActorID: "user_2", Kind: "LIKE", CreatedAt: now.Add(-time.Hour)}
+	repo.reactions["rxn_unknown_post"] = Reaction{ID: "rxn_unknown_post", PostID: "post_ghost", ActorID: "user_2", Kind: "LIKE", CreatedAt: now.Add(-time.Hour)}
+	repo.replies["rep_in"] = Reply{ID: "rep_in", PostID: "post_mine", ActorID: "user_4", Body: "好", CreatedAt: now.Add(-time.Hour)}
+	repo.replies["rep_self"] = Reply{ID: "rep_self", PostID: "post_mine", ActorID: "user_001", Body: "自言自语", CreatedAt: now.Add(-time.Hour)}
+	repo.replies["rep_old"] = Reply{ID: "rep_old", PostID: "post_mine", ActorID: "user_5", Body: "老评论", CreatedAt: old}
+
+	svc := NewWithRepository(repo)
+	res := svc.Handle(envelopeFor("GetReceivedEngagementStats", map[string]any{}, ""))
+	if res.Outcome != "ACCEPTED" {
+		t.Fatalf("stats: got %s (%+v)", res.Outcome, res.Error)
+	}
+	var body struct {
+		Stats ReceivedEngagementStats `json:"stats"`
+	}
+	if err := json.Unmarshal([]byte(res.OperationRef), &body); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	if body.Stats.Reactions != 1 || body.Stats.Replies != 1 {
+		t.Fatalf("stats = %+v, want {reactions:1 replies:1}", body.Stats)
+	}
+
+	// 别人的聚合不暴露。
+	other := envelopeFor("GetReceivedEngagementStats", map[string]any{"ownerId": "user_other"}, "")
+	if res := svc.Handle(other); res.Outcome != "REJECTED" {
+		t.Fatalf("other owner stats: got %s, want REJECTED", res.Outcome)
+	}
+}

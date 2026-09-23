@@ -518,6 +518,26 @@ export function MeSurface({
   const [avDaySheet, setAvDaySheet] = useState<{ key: string; label: string }>();
   const [personalHubTab, setPersonalHubTab] = useState<PersonalHubTab>("FEED");
   const [insightsSheetOpen, setInsightsSheetOpen] = useState(false);
+  // ANALYTICS-ME-001：分析弹层数字 —— 浏览（近 30 天主页访问）+ 互动（近 30 天
+  // 收到的赞 + 评论，自赞/自评已在服务端排除）。打开弹层才拉；undefined = 未知
+  // 画 —，不画 0（跟 dash 口径一致：没拉到不是没有）。
+  const [profileAnalytics, setProfileAnalytics] = useState<{ opens: number | undefined; interactions: number | undefined }>({ opens: undefined, interactions: undefined });
+  useEffect(() => {
+    if (!insightsSheetOpen || !engagement) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [views, received] = await Promise.all([
+          localNet.listProfileViewStats(30),
+          engagement.getReceivedEngagementStats(),
+        ]);
+        if (!cancelled) setProfileAnalytics({ opens: views.opens, interactions: received.reactions + received.replies });
+      } catch {
+        if (!cancelled) setProfileAnalytics({ opens: undefined, interactions: undefined });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [insightsSheetOpen, localNet, engagement]);
   const [searchSheetOpen, setSearchSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   // 搜索浮条定位：顶栏高 46 + 上内边距 7，浮条贴在顶栏下方 8px 处。
@@ -648,7 +668,9 @@ export function MeSurface({
       .catch(() => { if (!cancelled) setPersonalFollowCounts(undefined); });
     return () => { cancelled = true; };
   }, [engagement, isSelfProfile, viewingProfileId, viewerAccountId]);
-  // 未知画 "—" 不画 0：浏览/互动暂无服务端口径（绝不拿公式现编），
+  // 未知画 "—" 不画 0：拉失败之前是未知不是零。ANALYTICS-ME-001 起浏览
+  // （ListProfileViewStats 30 天窗口）与互动（GetReceivedEngagementStats，
+  // 30 天收到的赞 + 评论）都有服务端口径，打开分析弹层才拉。
   // 关注数没拉到之前也是未知不是零。
   const dash = (n: number | undefined): string => (n === undefined ? "—" : String(n));
   // PROFILE-VISIT-001: 访问与转化页的"主页访问"是真数字了（其余漏斗环节
@@ -2223,8 +2245,8 @@ export function MeSurface({
               <View style={styles.sheetCard}>
                 <Text selectable style={styles.sheetTitle}>分析</Text>
                 <Text selectable style={styles.sheetSub}>最近 30 天</Text>
-                <View style={styles.sheetField}><Text selectable style={styles.sheetFieldLabel}>浏览</Text><Text selectable style={styles.sheetFieldValue}>—</Text></View>
-                <View style={styles.sheetField}><Text selectable style={styles.sheetFieldLabel}>互动</Text><Text selectable style={styles.sheetFieldValue}>—</Text></View>
+                <View style={styles.sheetField}><Text selectable style={styles.sheetFieldLabel}>浏览</Text><Text selectable style={styles.sheetFieldValue}>{dash(profileAnalytics.opens)}</Text></View>
+                <View style={styles.sheetField}><Text selectable style={styles.sheetFieldLabel}>互动</Text><Text selectable style={styles.sheetFieldValue}>{dash(profileAnalytics.interactions)}</Text></View>
                 <View style={styles.sheetField}><Text selectable style={styles.sheetFieldLabel}>关注者</Text><Text selectable style={styles.sheetFieldValue}>{dash(personalFollowCounts?.followers)}</Text></View>
                 <Pressable onPress={() => setInsightsSheetOpen(false)} style={[styles.sheetWideBtn, styles.sheetWideBtnDark]}>
                   <Text selectable style={styles.sheetWideBtnTextDark}>完成</Text>

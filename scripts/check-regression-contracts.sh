@@ -8472,6 +8472,30 @@ if printf '%s\n' "$ca_crm" | grep -qF 'listMediaActivityForViewer' ||
   exit 1
 fi
 echo "    CONTENT-ANALYTICS-001: PASS (user side aggregates only; per-person detail is operator-only; feed + zoom logged)"
+# ANALYTICS-ME-001: 「我的」分析弹层浏览/互动曾写死 "—"。浏览 = 近 30 天主页
+# 访问（ListProfileViewStats 传 sinceDays，全量口径留给 friend-crm）；互动 =
+# 近 30 天收到的赞 + 评论（GetReceivedEngagementStats 服务端聚合，自赞/自评
+# 排除，客户端不做 N+1）。拉失败是未知画 —，不画 0。
+require_test "ANALYTICS-ME-001" "./internal/engagement" \
+  "TestReceivedEngagementStatsCountsOthersActionsInWindow" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "ANALYTICS-ME-001" "./internal/localnet" \
+  "TestProfileViewStatsSinceDaysWindow" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "ANALYTICS-ME-001" "./internal/platform/postgres" \
+  "TestReceivedEngagementPostgresRoundTrip" \
+  "apps/api-go/internal/platform/postgres/engagement_received_stats_integration_test.go" || exit $?
+require_test "ANALYTICS-ME-001" "./internal/platform/postgres" \
+  "TestProfileViewStatsSinceDaysPostgresRoundTrip" \
+  "apps/api-go/internal/platform/postgres/localnet_integration_test.go" || exit $?
+if ! grep -qF 'GetReceivedEngagementStats' apps/api-go/openapi.commands.generated.yaml ||
+   ! grep -qF 'getReceivedEngagementStats()' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'listProfileViewStats(30)' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'dash(profileAnalytics.interactions)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [ANALYTICS-ME-001]: 分析弹层又回到写死 —，浏览/互动没接数据源。" >&2
+  exit 1
+fi
+echo "    ANALYTICS-ME-001: PASS (sheet wired to 30d views + received likes/comments)"
 # MODAL-HANDOFF-001: 关一个 Modal 同一 tick 再开另一个，后开的被 iOS
 # present 冲突吃掉（点了没反应）。统一走 openModalAfterClose 错峰 350ms。
 if ! grep -qF 'openModalAfterClose' apps/mobile/src/surfaces/me.tsx ||
