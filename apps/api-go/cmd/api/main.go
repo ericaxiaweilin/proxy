@@ -509,6 +509,17 @@ func main() {
 			return nil
 		})
 	}
+	// AI-MANAGE-002：AI 管理页的暂停/对话权限必须在服务端拦（客户端开关
+	// 挡不住 curl）；Token 计量在真实推理成功后累加当月用量。没接 = 不拦
+	// 不记 —— 见 conversation/ai_engine_gate.go 的 fail-open 说明。
+	conversationService.SetAiEngineChatStateReader(func(ctx context.Context, ownerID string) (conversation.AiEngineChatState, error) {
+		paused, permission, err := identityService.GetAiEngineChatState(ctx, ownerID)
+		if err != nil {
+			return conversation.AiEngineChatState{}, err
+		}
+		return conversation.AiEngineChatState{Paused: paused, ChatPermission: permission}, nil
+	})
+	conversationService.SetTokenMeter(identityService.RecordAiTokens)
 	// TWIN-INSIGHT-002: AI 分身「好友洞察」。跨 relationship / localnet /
 	// conversation / engagement 四个域合成，所以它是独立读模型包而不是挂在
 	// 任何单一域上（见 internal/twininsight 的包注释）。接线细节与

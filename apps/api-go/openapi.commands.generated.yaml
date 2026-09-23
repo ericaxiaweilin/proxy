@@ -81,6 +81,8 @@ commands:
     domain: Payment
   - command: ConfirmRealitySceneProposal
     domain: RealityScene
+  - command: ConfirmVoucherPurchase
+    domain: Voucher
   - command: ConfirmVoucherRedemption
     domain: Voucher
   - command: CreateAgentProfile
@@ -179,6 +181,8 @@ commands:
     domain: Supply
   - command: GetAgentProfile
     domain: Supply
+  - command: GetAiEngineSettings
+    domain: Identity
   - command: GetBusinessStore
     domain: Business
   - command: GetCandidateBatch
@@ -356,6 +360,8 @@ commands:
   - command: NudgeMeetup
     domain: Conversation
   - command: OpenVoucherRedemption
+    domain: Voucher
+  - command: OrderVoucherPurchase
     domain: Voucher
   - command: PauseCampaign
     domain: Benefit
@@ -545,6 +551,8 @@ commands:
     domain: Supply
   - command: UpdateAgentService
     domain: Supply
+  - command: UpdateAiEngineSettings
+    domain: Identity
   - command: UpdatePostAudience
     domain: LocalNet
   - command: UpdateProfile

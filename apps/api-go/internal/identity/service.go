@@ -166,6 +166,7 @@ func (s *Service) Supports(commandType string) bool {
 		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity",
 		"UpdateProfile", "GetProfile", "GetProfileByHandle", "SearchProfiles",
 		"GetAccountPreferences", "UpdateAccountPreferences",
+		"GetAiEngineSettings", "UpdateAiEngineSettings",
 		"RequestPrivacyExport", "RequestPrivacyDelete", "CancelPrivacyRequest", "GetPrivacyRequestStatus", "ListPrivacyRequests":
 		return true
 	default:
@@ -230,6 +231,10 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 		return s.getAccountPreferences(ctx, envelope)
 	case "UpdateAccountPreferences":
 		return s.updateAccountPreferences(ctx, envelope)
+	case "GetAiEngineSettings":
+		return s.getAiEngineSettings(ctx, envelope)
+	case "UpdateAiEngineSettings":
+		return s.updateAiEngineSettings(ctx, envelope)
 	case "RequestPrivacyExport":
 		return s.requestPrivacyExport(ctx, envelope)
 	case "RequestPrivacyDelete":

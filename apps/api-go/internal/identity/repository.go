@@ -143,6 +143,10 @@ type ErasedPersonalData struct {
 	Devices            int `json:"devices"`
 	Profiles           int `json:"profiles"`
 	AccountPreferences int `json:"accountPreferences"`
+	// AiEngineSettings / AiTokenUsage：AI 管理页的用户设置与本月计量（AI-MANAGE-002）。
+	// 与 account_preferences 同批擦除 —— 它们不是审计材料，是个人偏好与用量。
+	AiEngineSettings   int `json:"aiEngineSettings"`
+	AiTokenUsage       int `json:"aiTokenUsage"`
 	DisplayIdentities  int `json:"displayIdentities"`
 	Memberships        int `json:"memberships"`
 	Jurisdictions      int `json:"jurisdictions"`
@@ -160,8 +164,8 @@ type ErasedPersonalData struct {
 // erasure was not a no-op.
 func (e ErasedPersonalData) Total() int {
 	return e.LoginIdentities + e.LoginChallenges + e.Sessions + e.SessionTokens +
-		e.Devices + e.Profiles + e.AccountPreferences + e.DisplayIdentities +
-		e.Memberships + e.Jurisdictions + e.AgeAssertionsWiped
+		e.Devices + e.Profiles + e.AccountPreferences + e.AiEngineSettings + e.AiTokenUsage +
+		e.DisplayIdentities + e.Memberships + e.Jurisdictions + e.AgeAssertionsWiped
 }
 
 // Summary renders the receipt for the privacy_request_events audit
@@ -169,9 +173,10 @@ func (e ErasedPersonalData) Total() int {
 // without re-deriving it from the database.
 func (e ErasedPersonalData) Summary() string {
 	return fmt.Sprintf(
-		"login_identities=%d login_challenges=%d sessions=%d session_tokens=%d devices=%d profiles=%d preferences=%d display_identities=%d memberships=%d jurisdictions=%d age_assertion_metadata=%d account_anonymised=%t",
+		"login_identities=%d login_challenges=%d sessions=%d session_tokens=%d devices=%d profiles=%d preferences=%d ai_engine_settings=%d ai_token_usage=%d display_identities=%d memberships=%d jurisdictions=%d age_assertion_metadata=%d account_anonymised=%t",
 		e.LoginIdentities, e.LoginChallenges, e.Sessions, e.SessionTokens,
-		e.Devices, e.Profiles, e.AccountPreferences, e.DisplayIdentities,
+		e.Devices, e.Profiles, e.AccountPreferences, e.AiEngineSettings, e.AiTokenUsage,
+		e.DisplayIdentities,
 		e.Memberships, e.Jurisdictions, e.AgeAssertionsWiped, e.AccountAnonymised,
 	)
 }
@@ -384,6 +389,8 @@ type MemoryRepository struct {
 	privacyEvents      []PrivacyRequestEvent
 	privacyEventSeq    int64
 	accountPreferences map[string]AccountPreferences
+	aiEngineSettings   map[string]AiEngineSettings
+	aiTokenUsage       map[string]AiTokenUsage // key: userID + "\x00" + period
 }
 
 func NewMemoryRepository(seed *Seed) *MemoryRepository {
@@ -397,6 +404,8 @@ func NewMemoryRepository(seed *Seed) *MemoryRepository {
 		challenges:         make(map[string]LoginChallenge),
 		privacyRequests:    make(map[string]PrivacyRequest),
 		accountPreferences: make(map[string]AccountPreferences),
+		aiEngineSettings:   make(map[string]AiEngineSettings),
+		aiTokenUsage:       make(map[string]AiTokenUsage),
 	}
 	if seed != nil {
 		repository.users[seed.User.ID] = seed.User
@@ -430,6 +439,63 @@ func (r *MemoryRepository) UpsertAccountPreferences(_ context.Context, p Account
 	p.Version = r.accountPreferences[p.UserAccountID].Version + 1
 	r.accountPreferences[p.UserAccountID] = p
 	return p, nil
+}
+
+func aiTokenUsageKey(userID, period string) string {
+	return userID + "\x00" + period
+}
+
+func (r *MemoryRepository) GetAiEngineSettings(_ context.Context, userID string) (AiEngineSettings, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.aiEngineSettings[userID]
+	if !ok {
+		return AiEngineSettings{}, ErrAiEngineSettingsNotFound
+	}
+	return s, nil
+}
+
+func (r *MemoryRepository) UpsertAiEngineSettings(_ context.Context, s AiEngineSettings) (AiEngineSettings, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s.Version = r.aiEngineSettings[s.UserAccountID].Version + 1
+	if s.ImagePromptHistory == nil {
+		s.ImagePromptHistory = []string{}
+	}
+	if s.PostTopics == nil {
+		s.PostTopics = []string{}
+	}
+	r.aiEngineSettings[s.UserAccountID] = s
+	return s, nil
+}
+
+func (r *MemoryRepository) AddAiTokens(_ context.Context, userID, period string, prompt, output int) error {
+	if userID == "" || period == "" {
+		return errors.New("ai token usage: missing user or period")
+	}
+	if prompt < 0 || output < 0 {
+		return errors.New("ai token usage: negative tokens")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := aiTokenUsageKey(userID, period)
+	u := r.aiTokenUsage[key]
+	if u.UserAccountID == "" {
+		u = AiTokenUsage{UserAccountID: userID, Period: period}
+	}
+	u.PromptTokens += prompt
+	u.OutputTokens += output
+	r.aiTokenUsage[key] = u
+	return nil
+}
+
+func (r *MemoryRepository) GetAiTokens(_ context.Context, userID, period string) (AiTokenUsage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if u, ok := r.aiTokenUsage[aiTokenUsageKey(userID, period)]; ok {
+		return u, nil
+	}
+	return AiTokenUsage{UserAccountID: userID, Period: period}, nil
 }
 
 func (r *MemoryRepository) GetUser(_ context.Context, id string) (UserAccount, error) {
@@ -1127,6 +1193,16 @@ func (r *MemoryRepository) ErasePersonalData(_ context.Context, userID string) (
 	if _, ok := r.accountPreferences[userID]; ok {
 		delete(r.accountPreferences, userID)
 		receipt.AccountPreferences++
+	}
+	if _, ok := r.aiEngineSettings[userID]; ok {
+		delete(r.aiEngineSettings, userID)
+		receipt.AiEngineSettings++
+	}
+	for key, usage := range r.aiTokenUsage {
+		if usage.UserAccountID == userID || strings.HasPrefix(key, userID+"\x00") {
+			delete(r.aiTokenUsage, key)
+			receipt.AiTokenUsage++
+		}
 	}
 	if user, ok := r.users[userID]; ok {
 		user.Status = AccountStatusErased

@@ -1390,6 +1390,12 @@ func (r *IdentityRepository) ErasePersonalData(ctx context.Context, userID strin
 	if err := step(&receipt.AccountPreferences, `DELETE FROM identity.account_preferences WHERE user_account_id = $1`, userID); err != nil {
 		return identity.ErasedPersonalData{}, err
 	}
+	if err := step(&receipt.AiEngineSettings, `DELETE FROM identity.ai_engine_settings WHERE user_account_id = $1`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
+	if err := step(&receipt.AiTokenUsage, `DELETE FROM identity.ai_token_usage WHERE user_account_id = $1`, userID); err != nil {
+		return identity.ErasedPersonalData{}, err
+	}
 	if err := step(&receipt.DisplayIdentities, `DELETE FROM identity.display_identities WHERE owner_id = $1`, userID); err != nil {
 		return identity.ErasedPersonalData{}, err
 	}

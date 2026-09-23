@@ -4,6 +4,36 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 252 — 2026-09-23
+
+- **我的 → 账户 → AI 管理按新原型全量落地，连后端一起做**（AI-MANAGE-002）：
+  原型 `deepseek_html_20260923_83b40b` 的暂停按钮、本月 Token、对话/图片/动态
+  三个设置 sheet，此前诚实切片因「无后端」整段不做。本轮补齐服务端事实源并接线：
+  - 服务端：迁移 119 `ai_engine_settings`（设置单行 + 当月 token_usage）；
+    命令 `GetAiEngineSettings` / `UpdateAiEngineSettings`（owner 由 actor 盖章，
+    部分字段先 normalize 补默认再 validate）；`RecordAiTokens` 在真实推理成功后
+    累加当月用量；擦除回执带两张表计数。
+  - 会话门禁：`SetAiEngineChatStateReader` + `SetTokenMeter` 装进 `cmd/api`；
+    paused 全局挡（`PAUSED`），`off` 不生成（`OFF`），`confirm` 出草稿不落库
+    （`aiDraft`/`DRAFT`）；reader 未接 = fail-open（见 `ai_engine_gate.go`）。
+  - mobile：新增 `ai-engine-client.ts`（command 信封读写，read 成功后种子
+    write 链避免首写按默认盖掉服务端字段）；`ai-management.tsx` 按原型全量
+    重写（暂停钮、Token/图片/视频状态卡、三管理卡+badge、chat/image/post
+    三个 sheet、`AI Engine v2.4 · 平台托管` footer）。Token 只显示服务端本月
+    累计、不编 120K/200K 上限；厂商/模型是偏好 ID 不直绑 provider；
+    动态卡 `auto` badge 显示「全自动」不虚报「运行中」（无自动发帖 worker）。
+- 影响文件：`apps/api-go/migrations/119_ai_engine_settings.sql`、
+  `apps/api-go/internal/identity/ai_engine_settings.go`（+test）、
+  `apps/api-go/internal/identity/{service,repository}.go`、
+  `apps/api-go/internal/platform/postgres/ai_engine_settings.go`、
+  `apps/api-go/internal/platform/postgres/identity.go`、
+  `apps/api-go/internal/conversation/ai_engine_gate.go`（+test）、
+  `apps/api-go/internal/conversation/service.go`、`apps/api-go/cmd/api/main.go`、
+  `apps/api-go/openapi.commands.generated.yaml`、
+  `apps/mobile/src/ai-engine-client.ts`（+test）、
+  `apps/mobile/src/surfaces/ai-management.tsx`、`ai-management.test.ts`、
+  `apps/mobile/src/surfaces/me.tsx`。
+
 ## Revision 251 — 2026-09-23
 
 - **「已邀约」落盘 12 小时，可连发 3 条**（HOME-MORE-GREET-003）：用户反馈「已邀约 切换到

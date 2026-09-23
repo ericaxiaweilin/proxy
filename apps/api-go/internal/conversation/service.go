@@ -551,6 +551,11 @@ type Service struct {
 	// 一律不回话（fail-closed）。见 companion_gate.go —— 建分身那道门守不住
 	// 直接开聊的人：平台 AI 账号是自带的，不需要创建。
 	companionGate CompanionGate
+	// AI-MANAGE-002：AI 管理页的暂停/对话权限读取 + Token 计量。
+	// 两边都是可选注入；语义见 ai_engine_gate.go（状态读取 fail-open，
+	// 计量失败不打断聊天）。
+	aiEngineChatState AiEngineChatStateReader
+	tokenMeter         TokenMeter
 }
 
 // MediaAuthorizer 由 media 包实现（注入避免循环依赖，同 localnet.MediaLookup
@@ -1160,9 +1165,15 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 	// 没带 assistantMode 也一样是伴侣会话（见 companionFor 的说明）。
 	_, openingWithCompanion := companionFor(conv, p.AssistantMode)
 	companionGated := openingWithCompanion && !s.companionAllowedFor(ctx, e.Actor.ID)
+	// AI-MANAGE-002：AI 管理页的全局暂停 / 对话权限。优先于一切生成
+	//（含伴侣开场白与需求助手引导）—— 暂停开着时 curl 也拿不到回复。
+	engineBlocked, engineStatus := s.aiGenerationBlocked(ctx, e.Actor.ID)
 	if companionGated {
 		log.Printf("conversation ai: companion gated for actor %s (COMP-AI-MINOR-001)", e.Actor.ID)
 		payload["assistantStatus"] = "GATED"
+	} else if engineBlocked {
+		log.Printf("conversation ai: engine blocked status=%s actor=%s (AI-MANAGE-002)", engineStatus, e.Actor.ID)
+		payload["assistantStatus"] = engineStatus
 	} else if persona, ok := companionFor(conv, p.AssistantMode); ok && !hasInitialContent && !reusedConversation {
 		// 这里同样用 companionFor，不是 platformAIPersonaForMode：开场白和门禁
 		// 必须是同一个判断。门禁认了「这是伴侣会话」而开场白不认，结果是
@@ -1192,12 +1203,20 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		}
 		payload["assistantStatus"] = "NOT_REQUESTED"
 		var aiReply *Message
+		var aiDraft *Message
 		if temporaryUI != nil {
 			aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
 		} else if s.modelStack != nil && s.modelStack.Available() {
-			aiReply = s.withModelUnlocked(func() *Message {
-				return s.generateAIReply(ctx, conv, e, p.FirstMessage, p.AssistantMode, nil, nil)
-			})
+			if s.aiRequiresDraftConfirm(ctx, e.Actor.ID) && !engineBlocked {
+				// AI-MANAGE-002：首条引导也走「每次确认」—— 草稿不落库。
+				aiDraft = s.withModelUnlocked(func() *Message {
+					return s.generateAIReplyUnpersisted(ctx, conv, e, p.FirstMessage, p.AssistantMode, nil, nil)
+				})
+			} else {
+				aiReply = s.withModelUnlocked(func() *Message {
+					return s.generateAIReply(ctx, conv, e, p.FirstMessage, p.AssistantMode, nil, nil)
+				})
+			}
 		}
 		if aiReply != nil {
 			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
@@ -1206,6 +1225,9 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 			}))
 			payload["aiMessage"] = aiReply
 			payload["assistantStatus"] = "RESPONDED"
+		} else if aiDraft != nil {
+			payload["aiDraft"] = aiDraft
+			payload["assistantStatus"] = "DRAFT"
 		} else if s.modelStack == nil || !s.modelStack.Available() {
 			payload["assistantStatus"] = "UNAVAILABLE"
 		} else {
@@ -1462,9 +1484,16 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	// 否则"漏传一个参数"就等于把门禁关掉（见 companionFor）。
 	_, chattingWithCompanion := companionFor(conv, p.AssistantMode)
 	companionGated := chattingWithCompanion && !s.companionAllowedFor(ctx, e.Actor.ID)
+	engineBlocked, engineStatus := s.aiGenerationBlocked(ctx, e.Actor.ID)
+	// confirm 权限：AI 起草、用户点发才发 —— 草稿进 payload（aiDraft），
+	// 不 AppendMessage、不发 AIReplySent。
+	confirmDraft := !engineBlocked && !companionGated && s.aiRequiresDraftConfirm(ctx, e.Actor.ID)
+	var aiDraft *Message
 	if companionGated {
 		// 不生成任何 AI 回复，也不发 AIReplySent 事件：这个人根本不该有 AI 陪聊。
 		log.Printf("conversation ai: companion gated for actor %s (COMP-AI-MINOR-001)", e.Actor.ID)
+	} else if engineBlocked {
+		log.Printf("conversation ai: engine blocked status=%s actor=%s (AI-MANAGE-002)", engineStatus, e.Actor.ID)
 	} else if p.TemporaryUIResponseID == "" && temporaryUI != nil && hasContent {
 		aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
 	} else if p.TemporaryUIResponseID != "" && convoID == nil {
@@ -1482,15 +1511,23 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 			}
 			quote = &ReplyQuote{Sender: sender, Body: quoteBodyTruncated(quoted.Body)}
 		}
-		aiReply = s.withModelUnlocked(func() *Message {
-			return s.generateAIReply(ctx, conv, e, p.Body, p.AssistantMode, nil, quote)
-		})
-		if aiReply != nil {
-			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
-				"messageId": aiReply.ID,
-				"model":     aiReply.Body[:min(40, len(aiReply.Body))],
-				"note":      "AI 通过模型底座生成对话式需求构建回复",
-			}))
+		if confirmDraft {
+			// 生成但不落库：只返回草稿，等用户点「发」再走正常 SendMessage。
+			generated := s.withModelUnlocked(func() *Message {
+				return s.generateAIReplyUnpersisted(ctx, conv, e, p.Body, p.AssistantMode, nil, quote)
+			})
+			aiDraft = generated
+		} else {
+			aiReply = s.withModelUnlocked(func() *Message {
+				return s.generateAIReply(ctx, conv, e, p.Body, p.AssistantMode, nil, quote)
+			})
+			if aiReply != nil {
+				domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
+					"messageId": aiReply.ID,
+					"model":     aiReply.Body[:min(40, len(aiReply.Body))],
+					"note":      "AI 通过模型底座生成对话式需求构建回复",
+				}))
+			}
 		}
 	}
 
@@ -1504,10 +1541,15 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if aiReply != nil {
 		payload["aiMessage"] = aiReply
 		payload["assistantStatus"] = "RESPONDED"
+	} else if aiDraft != nil {
+		payload["aiDraft"] = aiDraft
+		payload["assistantStatus"] = "DRAFT"
 	} else if companionGated {
 		// 必须是 GATED，不能用 UNAVAILABLE/FAILED —— 那两个会把
 		// "依法不提供"说成"服务坏了"，用户会一直重试。
 		payload["assistantStatus"] = "GATED"
+	} else if engineBlocked {
+		payload["assistantStatus"] = engineStatus
 	} else if hasContent && convoID == nil {
 		if s.modelStack != nil && s.modelStack.Available() {
 			payload["assistantStatus"] = "FAILED"
@@ -1598,11 +1640,23 @@ func quoteBodyTruncated(body string) string {
 }
 
 func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e command.Envelope, userText string, assistantMode string, temporaryUI *TemporaryUI, quote *ReplyQuote) *Message {
+	aiMsg, _, _ := s.generateAIReplyInternal(ctx, conv, e, userText, assistantMode, temporaryUI, quote, true)
+	return aiMsg
+}
+
+// generateAIReplyUnpersisted 同 generateAIReply，但不 AppendMessage ——
+// 对话权限「每次确认」的草稿路径（AI-MANAGE-002）。Token 照记（推理真的发生了）。
+func (s *Service) generateAIReplyUnpersisted(ctx context.Context, conv Conversation, e command.Envelope, userText string, assistantMode string, temporaryUI *TemporaryUI, quote *ReplyQuote) *Message {
+	aiMsg, _, _ := s.generateAIReplyInternal(ctx, conv, e, userText, assistantMode, temporaryUI, quote, false)
+	return aiMsg
+}
+
+func (s *Service) generateAIReplyInternal(ctx context.Context, conv Conversation, e command.Envelope, userText string, assistantMode string, temporaryUI *TemporaryUI, quote *ReplyQuote, persist bool) (*Message, int, int) {
 	// 1. 构建对话历史（最近 20 条）
 	history, err := s.repository.Messages(ctx, conv.ID)
 	if err != nil {
 		log.Printf("conversation ai: failed to load history: %v", err)
-		return nil
+		return nil, 0, 0
 	}
 	systemPrompt := "你是 Proxy，一个智能需求构建助手。用户会描述他们想在河内完成的事情，你帮助他们理清需求、补充细节（时间、地点、预算、人数等），并最终生成一个结构化的需求摘要。回复简洁、友好、像朋友聊天。如果用户已经提供了足够信息，给出一个简洁的需求摘要供确认。不要要求用户按 1、2、3、4 编号逐项回复；当服务器提供了临时表单时，用一句自然引导让用户点选或简短填写。对于恋爱或交友请求，可以协助推荐自愿开启介绍、且自行选择公开资料范围的成年用户；这只是社交介绍，不是人员交易、临时伴侣或任何有偿/性服务，也不能承诺匹配结果。"
 	persona, isPlatformPersona := companionFor(conv, assistantMode)
@@ -1703,9 +1757,12 @@ func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e comm
 	}
 	if err != nil {
 		log.Printf("conversation ai: modelstack complete failed: %v", err)
-		return nil
+		return nil, 0, 0
 	}
 	log.Printf("conversation ai: model=%s provider=%s tokens=%d/%d", completion.Model, completion.Provider, completion.PromptTokens, completion.OutputTokens)
+	// AI-MANAGE-002：推理成功即计量（管理页「本月 Token」的事实源）。
+	// 记在落库之前：草稿路径不 persist，用量也必须进当月账。
+	s.recordAiTokens(ctx, e.Actor.ID, completion.PromptTokens, completion.OutputTokens)
 
 	// 3. 存储 AI 回复消息
 	aiMsg := Message{
@@ -1720,11 +1777,14 @@ func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e comm
 		aiMsg.SenderID = persona.AccountID
 		aiMsg.SenderSnapshot = aiIdentitySnapshot(persona)
 	}
+	if !persist {
+		return &aiMsg, completion.PromptTokens, completion.OutputTokens
+	}
 	if err := s.repository.AppendMessage(ctx, aiMsg); err != nil {
 		log.Printf("conversation ai: failed to store reply: %v", err)
-		return nil
+		return nil, completion.PromptTokens, completion.OutputTokens
 	}
-	return &aiMsg
+	return &aiMsg, completion.PromptTokens, completion.OutputTokens
 }
 
 func platformAIPersonaForMode(mode string) (aipersona.PlatformAccount, bool) {
