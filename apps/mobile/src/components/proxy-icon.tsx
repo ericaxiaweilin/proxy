@@ -49,7 +49,9 @@ export type ProxyIconName =
   | "aiPersona"
   | "bookmark"
   | "group"
-  | "scan";
+  | "scan"
+  | "mapFold"
+  | "footprint";
 
 const symbolMap: Partial<Record<string, ProxyIconName>> = {
   "home": "home",
@@ -101,6 +103,12 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
   const canvas = (children: React.ReactNode): React.JSX.Element => (
     <Svg height={size} viewBox="0 0 24 24" width={size}>{children}</Svg>
   );
+  // 原型 48 栅格的 logo（deepseek_html_20260923_5c4a22.html：折叠地图 /
+  // 场景足迹）原样移植 —— 路径数据不动，只把 currentColor 换成 color prop，
+  // 折叠地图右上角的状态圆点保持苹果绿 #34C759 不跟主题走。
+  const canvas48 = (children: React.ReactNode): React.JSX.Element => (
+    <Svg height={size} viewBox="0 0 48 48" width={size}>{children}</Svg>
+  );
 
   switch (name) {
     // FEED-ACTION-ICONS-001: 帖文操作行以前是纯文字（"回复 3"/"引用"/"分享"），
@@ -141,6 +149,23 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
       return canvas(<><Path {...common} d="M7 17 17 7"/><Path {...common} d="M10 7h7v7"/></>);
     case "route":
       return canvas(<><Circle {...common} cx="5" cy="17" r="1.5"/><Circle {...common} cx="18" cy="8" r="1.5"/><Path {...common} d="M6.5 16c2.3-5.6 4.6-7.5 7.2-7.5 1.2 0 2.1.3 2.8.6"/></>);
+    // MAP-FOOTPRINT-LOGO-001（2026-09-23，用户原型 deepseek_html_20260923_5c4a22.html）：
+    // 市场头部地图切换按钮用「折叠地图」，个人主页场景足迹入口用「场景足迹」。
+    // 路径照抄原型 48 栅格（描边 4.5），线条跟 color 走，绿点恒 #34C759。
+    case "mapFold":
+      return canvas48(<>
+        <Path d="M14 18 L22 12 L30 18 L36 15 L36 32 L28 38 L20 32 L14 35 Z" fill="none" stroke={color} strokeWidth={4.5} strokeLinejoin="round"/>
+        <Path d="M22 12 V 32" fill="none" stroke={color} strokeWidth={4.5} strokeLinecap="round"/>
+        <Path d="M30 18 V 38" fill="none" stroke={color} strokeWidth={4.5} strokeLinecap="round"/>
+        <Circle cx="37" cy="11" r="5.5" fill="#34C759"/>
+      </>);
+    case "footprint":
+      return canvas48(<>
+        <Circle cx="24" cy="24" r="17" fill="none" stroke={color} strokeWidth={4.5} strokeLinecap="round"/>
+        <Path d="M11 26C16 19 24 33 37 22" fill="none" stroke={color} strokeWidth={4.5} strokeLinecap="round" strokeLinejoin="round"/>
+        <Circle cx="11" cy="26" r="4.5" fill={color}/>
+        <Circle cx="37" cy="22" r="4.5" fill={color}/>
+      </>);
     case "pin":
       return canvas(<><Path {...common} d="M12 21s-6.5-5.8-6.5-10.5A6.5 6.5 0 0 1 12 4a6.5 6.5 0 0 1 6.5 6.5C18.5 15.2 12 21 12 21z"/><Circle {...common} cx="12" cy="10.3" r="2.3"/></>);
     case "remix":

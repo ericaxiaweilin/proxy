@@ -126,6 +126,17 @@ describe("Proxy Design System R3 typography", () => {
     expect(source).toMatch(/personalAvaAdd:\s*\{[\s\S]*?position:\s*"absolute"/);
   });
 
+  // MAP-FOOTPRINT-LOGO-001：个人主页场景足迹入口用原型「场景足迹」logo，
+  // 不再用通用 route 图标（形状见 proxy-icon.tsx footprint，几何照抄原型）。
+  it("keeps the prototype footprint logo on the personal scene entry", () => {
+    const mePath = join(sourceRoot, "surfaces", "me.tsx");
+    const source = readFileSync(mePath, "utf8");
+    const entry = source.match(/personalSceneEntry[\s\S]*?<Text style=\{styles\.personalSceneChevron\}>/)?.[0] ?? "";
+    expect(entry, "personalSceneEntry should exist").not.toBe("");
+    expect(entry).toContain('name="footprint"');
+    expect(entry).not.toContain('name="route"');
+  });
+
   // R15.67: R2 actions 守门 (ProfileTabs) — 1px 边框 + 10 圆角 (R2 .actions button)
   it("keeps R2 action button styling on ProfileTabs", () => {
     const ptPath = join(sourceRoot, "surfaces", "ProfileTabs.tsx");

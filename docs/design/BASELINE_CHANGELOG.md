@@ -4,6 +4,32 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 262 — 2026-09-23
+
+- **市场 / 个人主页换原型 logo**（MAP-FOOTPRINT-LOGO-001）：用户原型
+  `deepseek_html_20260923_5c4a22.html` 更新了 2 个 logo。
+  - `ProxyIcon` 新增 `mapFold`（折叠地图：三折外轮廓 + 两条折痕 + 右上苹果绿
+    `#34C759` 状态点）与 `footprint`（场景足迹：镜头圈 + 轨迹曲线 + 起终点），
+    48 栅格路径照抄原型，线条跟 color 走。`route` 通用图标保留给定位按钮。
+  - 市场头部去地图的切换按钮用 `mapFold`；个人主页场景足迹入口用 `footprint`
+    （紫色不变，只换形状）。
+- 影响文件：`apps/mobile/src/components/proxy-icon.tsx`、`apps/mobile/src/surfaces/market.tsx`、
+  `apps/mobile/src/surfaces/me.tsx`。
+
+## Revision 261 — 2026-09-23
+
+- **AI 分身中心：图库分「公共图库（输入）/ AI 生成图库（输出）」两个按钮，好友洞察只看真人**（AI-MANAGE-012）：用户：
+  「ai 分身 移除 ai 小美 和 user_proxy 这是对真人用户设计的功能…好友洞察只关心真人用户」「我点击开启单独运营报错 404」
+  「有 2 个图库按钮 一个是个人主页的公共图库 一个是 ai 生成图库 一个输入 一个输出」。
+  - 图库：公共图库 = 个人主页照片 + 导入（AI 出图素材）；AI 生成图库 = `GET /v1/ai/personas/{id}/media?source=ai`，
+    只属于已授权的分身，未授权显示「授权形象」按钮，出图任务未接上时如实空态，不放假图。
+  - 好友洞察：服务端 `twininsight.IsHumanTarget` 过滤平台助手 / AI 账号 / agent（proxy_ai、user_proxy_ai、ai_*、agent_*），
+    好友和陌生人两条来源都过滤。
+  - 开启单独运营 404：`RecordOperate` 原来只认好友，列表里的陌生人点了就 404；现在以洞察列表本身为准。
+  - 帖文编排 / 编辑受众的好友选择器显示真实头像（AI-TWIN-AUDIENCE-AVATAR-001，接手上一个中断会话的未提交改动）。
+- 影响文件：`apps/mobile/src/components/twin-gallery-section.tsx`、`apps/mobile/src/components/twin-post-composer-section.tsx`、
+  `apps/mobile/src/surfaces/AIIdentityShowcaseSurface.tsx`。
+
 ## Revision 260 — 2026-09-23
 
 - **AI 分身不再静默自动建，进入时先弹授权提示**（AI-MANAGE-010）：用户规则「ai 分身只给小美授权使用 没有这个授权的

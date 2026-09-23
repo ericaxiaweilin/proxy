@@ -429,7 +429,8 @@ export function MarketSurface({
         <Text style={styles.marketTitle}>市场</Text>
         <View style={styles.headActions}>
           <Pressable onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={[styles.viewToggle, view === "MAP" && styles.viewToggleOn]}>
-            <ProxyIcon color={view === "MAP" ? color.white : color.ink} name={view === "MAP" ? "storeLines" : "route"} size={18} />
+            {/* MAP-FOOTPRINT-LOGO-001：去地图用原型「折叠地图」logo，不再用通用 route。 */}
+            <ProxyIcon color={view === "MAP" ? color.white : color.ink} name={view === "MAP" ? "storeLines" : "mapFold"} size={18} />
           </Pressable>
           <Pressable onPress={() => setPublishMenuOpen(true)} style={styles.plusBtn}>
             <ProxyIcon color={color.white} name="plus" size={18} />

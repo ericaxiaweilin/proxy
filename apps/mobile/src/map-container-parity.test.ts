@@ -48,6 +48,24 @@ describe("MAP-CONTAINER-PARITY-001", () => {
     expect(picker).toContain("MAP-CONTAINER-PARITY-001");
   });
 
+  it("market map toggle uses the 折叠地图 logo, map canvas keeps generic route", () => {
+    // MAP-FOOTPRINT-LOGO-001：市场头部去地图的切换按钮用原型折叠地图，
+    // 不再用通用 route；定位按钮（map-canvas 内）保持 route 不动。
+    expect(market).toContain('name={view === "MAP" ? "storeLines" : "mapFold"}');
+    expect(canvas).toContain('name="route"');
+    const icon = readFileSync(
+      fileURLToPath(new URL("./components/proxy-icon.tsx", import.meta.url)),
+      "utf8",
+    );
+    // 原型 deepseek_html_20260923_5c4a22.html 几何原样移植：三折外轮廓 +
+    // 两条折痕 + 右上苹果绿状态点；场景足迹：镜头圈 + 轨迹 + 起终点。
+    expect(icon).toContain('case "mapFold"');
+    expect(icon).toContain("M14 18 L22 12 L30 18 L36 15 L36 32 L28 38 L20 32 L14 35 Z");
+    expect(icon).toContain("#34C759");
+    expect(icon).toContain('case "footprint"');
+    expect(icon).toContain("M11 26C16 19 24 33 37 22");
+  });
+
   it("locate buttons are icon-only with no explanatory text", () => {
     const locateBtn = market.match(/testID="market-map-locate"[\s\S]*?<\/Pressable>/)?.[0] ?? "";
     expect(locateBtn).toContain("ProxyIcon");

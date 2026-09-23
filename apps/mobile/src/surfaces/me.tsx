@@ -2097,7 +2097,8 @@ export function MeSurface({
             <View style={styles.personalIntroRow}>
               {onOpenRealitySceneMap ? (
                 <Pressable onPress={onOpenRealitySceneMap} style={styles.personalSceneEntry}>
-                  <ProxyIcon color={color.violet} name="route" size={20} />
+                  {/* MAP-FOOTPRINT-LOGO-001：场景足迹入口用原型「场景足迹」logo，不再用通用 route。 */}
+                  <ProxyIcon color={color.violet} name="footprint" size={20} />
                   <View style={styles.personalSceneCopy}>
                     <Text style={styles.personalSceneTitle}>场景足迹</Text>
                   </View>
