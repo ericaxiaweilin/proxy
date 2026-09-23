@@ -381,7 +381,23 @@ func main() {
 		if !ok {
 			return relationship.DisplayNameHint{}, false
 		}
-		return relationship.DisplayNameHint{UserID: userID, DisplayName: name}, true
+		// AI-TWIN-AUDIENCE-AVATAR-001: 帖文编排的「指定好友」是对
+		// 真实关系对象的选择，不能只给名字而让 UI 再猜一张头像。profile
+		// 的 assets/<id> 是存储指针，必须在 API 边界转成公开缩略图路由；
+		// 未设置/不认识的路径保持空串，由客户端显示首字回退。
+		avatarURL := ""
+		if avatarPath, hasAvatar := authorNames.ResolveAuthorAvatarPath(ctx, userID); hasAvatar {
+			avatarPath = strings.TrimSpace(avatarPath)
+			switch {
+			case strings.HasPrefix(avatarPath, "assets/"):
+				if assetID := strings.TrimSpace(strings.TrimPrefix(avatarPath, "assets/")); assetID != "" {
+					avatarURL = "/v1/media/thumb/" + assetID
+				}
+			case strings.HasPrefix(avatarPath, "/"), strings.HasPrefix(avatarPath, "http://"), strings.HasPrefix(avatarPath, "https://"):
+				avatarURL = avatarPath
+			}
+		}
+		return relationship.DisplayNameHint{UserID: userID, DisplayName: name, AvatarURL: avatarURL}, true
 	})
 	server.Relationship = relationshipService
 	server.Payment = paymentService

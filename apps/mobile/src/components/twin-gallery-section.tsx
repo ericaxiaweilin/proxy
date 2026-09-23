@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import type { PersonaGalleryItem } from "../ai-persona-client";
+import { AiPersonaClient, type PersonaGalleryItem } from "../ai-persona-client";
+import type { TransportResponse } from "../auth-client";
+import { promptLikenessConsent } from "./likeness-consent-prompt";
 import type { MediaClient } from "../media-client";
 import { color, foundation } from "../theme";
 import { ProxyEmptyState } from "./proxy-foundation";
@@ -24,8 +26,15 @@ import { ProxyIcon } from "./proxy-icon";
 // 原型里每张图的操作面板（AI 处理/直接发帖/裁剪/保存/重新生成/删除）
 // 全部没有真实后端——这一版不做，那会是"点了没反应"或要另外写"开发中"
 // toast 的假交互。真实能做的只有：横滑+展开成网格、点开看大图、导入。
+//
+// AI-MANAGE-012（2026-09-23，用户：「ai 分身 我说了 有 2 个图库按钮 一个是个人主页的公共图库 一个是 ai 生成图库
+// 一个输入 一个输出 2 个按钮」）：图库分两个按钮 ——
+//   - 公共图库（输入）：个人主页里自己的照片（上面那份数据）+ 导入，是 AI 出图的素材；
+//   - AI 生成图库（输出）：服务端 GET /v1/ai/personas/{id}/media?source=ai，AI 生成的照片。
+// AI 生成图库属于已授权的分身（AI-MANAGE-010：没授权就是没有分身），没授权就给授权按钮；
+// 出图任务还没接上，所以授权了也可能是空的 —— 如实说，不放假图。
 
-export function TwinGallerySection({ rawGalleryItems, mediaClient }: {
+export function TwinGallerySection({ rawGalleryItems, mediaClient, authClient, ownerId, resolveMediaUrl }: {
   /** 这个人自己发过的带图帖子——跟「我的」个人主页图库同一份数据源
    * （profilePosts + profileMedia），在 me.tsx 里已经算好、URL 也已经
    * 解析成完整地址了，这里直接渲染。 */
@@ -33,7 +42,35 @@ export function TwinGallerySection({ rawGalleryItems, mediaClient }: {
   /** 图库导入用——跟头像/帖子同一条上传管线。未传（比如离线会话）时
    * 导入格禁用，不是隐藏，让用户知道功能在但暂不可用。 */
   mediaClient: MediaClient | undefined;
+  authClient: { request(path: string, init: { method: "GET" | "POST"; body?: unknown }): Promise<TransportResponse> };
+  ownerId: string | undefined;
+  resolveMediaUrl: (path: string) => string;
 }): React.JSX.Element {
+  const [source, setSource] = useState<"public" | "ai">("public");
+  const personaClient = useMemo(() => new AiPersonaClient({ authClient }), [authClient]);
+  const [aiState, setAiState] = useState<{ status: "idle" | "loading" | "unauthorized" | "ready" | "error"; items: PersonaGalleryItem[] }>({ status: "idle", items: [] });
+  const [aiAttempt, setAiAttempt] = useState(0);
+  useEffect(() => {
+    if (source !== "ai" || !ownerId) return undefined;
+    let cancelled = false;
+    setAiState((prev) => ({ ...prev, status: "loading" }));
+    void (async () => {
+      try {
+        const found = await personaClient.findAuthorizedTwin(ownerId);
+        if (!found) { if (!cancelled) setAiState({ status: "unauthorized", items: [] }); return; }
+        const items = await personaClient.listGallery(found.twin.id, "ai");
+        if (!cancelled) setAiState({ status: "ready", items: items.map((item) => ({ ...item, thumbnailUrl: resolveMediaUrl(item.thumbnailUrl) })) });
+      } catch {
+        if (!cancelled) setAiState({ status: "error", items: [] });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [source, ownerId, personaClient, resolveMediaUrl, aiAttempt]);
+  const grantAndReload = (): void => {
+    if (!ownerId) return;
+    setAiState({ status: "loading", items: [] });
+    personaClient.grantLikeness(ownerId).then(() => setAiAttempt((n) => n + 1)).catch(() => setAiState({ status: "error", items: [] }));
+  };
   const [expanded, setExpanded] = useState(false);
   const [preview, setPreview] = useState<PersonaGalleryItem>();
   const [uploading, setUploading] = useState(false);
@@ -67,7 +104,8 @@ export function TwinGallerySection({ rawGalleryItems, mediaClient }: {
     }
   }
 
-  const items = mergeGalleryItems(importedItems, rawGalleryItems);
+  const publicItems = mergeGalleryItems(importedItems, rawGalleryItems);
+  const items = source === "public" ? publicItems : aiState.items;
 
   return (
     <View style={styles.section}>
@@ -78,7 +116,33 @@ export function TwinGallerySection({ rawGalleryItems, mediaClient }: {
         </Pressable>
       </View>
 
-      {items.length === 0 && !mediaClient ? (
+      <View style={styles.sourceRow}>
+        {([["public", "公共图库", "输入 · 个人主页照片"], ["ai", "AI 生成图库", "输出 · AI 生成的照片"]] as const).map(([id, label, sub]) => (
+          <Pressable key={id} accessibilityRole="button" accessibilityState={{ selected: source === id }} onPress={() => setSource(id)} style={[styles.sourceBtn, source === id && styles.sourceBtnOn]}>
+            <Text style={[styles.sourceLabel, source === id && styles.sourceLabelOn]}>{label}</Text>
+            <Text style={[styles.sourceSub, source === id && styles.sourceSubOn]}>{sub}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {source === "ai" ? (
+        aiState.status === "loading" || aiState.status === "idle" ? (
+          <Text style={styles.aiState}>读取 AI 生成图库…</Text>
+        ) : aiState.status === "unauthorized" ? (
+          <View style={styles.aiStateBox}>
+            <Text style={styles.aiState}>还没有 AI 分身：授权 AI 使用你的形象后，AI 生成的照片会出现在这里。</Text>
+            <Pressable accessibilityRole="button" onPress={() => promptLikenessConsent(grantAndReload)} style={styles.aiStateBtn}><Text style={styles.aiStateBtnText}>授权形象</Text></Pressable>
+          </View>
+        ) : aiState.status === "error" ? (
+          <Pressable accessibilityRole="button" onPress={() => setAiAttempt((n) => n + 1)}><Text style={styles.aiState}>AI 生成图库没读出来，点这里重试</Text></Pressable>
+        ) : items.length === 0 ? (
+          <ProxyEmptyState sub="出图任务接上后，AI 用你公共图库里的照片生成的形象图会出现在这里" title="还没有 AI 生成的照片" />
+        ) : expanded ? (
+          <View style={styles.grid}>{items.map((item) => <GalleryThumb item={item} key={item.id} onPress={() => setPreview(item)} style={styles.gridThumb} />)}</View>
+        ) : (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.track}>{items.map((item) => <GalleryThumb item={item} key={item.id} onPress={() => setPreview(item)} style={styles.trackThumb} />)}</ScrollView>
+        )
+      ) : items.length === 0 && !mediaClient ? (
         <ProxyEmptyState sub="发过带图的帖子后，照片会出现在这里" title="还没有照片" />
       ) : expanded ? (
         <View style={styles.grid}>
@@ -135,6 +199,17 @@ const styles = StyleSheet.create({
   title: { color: foundation.ink, fontSize: 18, fontWeight: "800" },
   countBadge: { color: color.muted, fontSize: 12, fontWeight: "700" },
   expandBtn: { color: color.muted, fontSize: 12, fontWeight: "700" },
+  sourceRow: { flexDirection: "row", gap: 8, marginBottom: foundation.space.three },
+  sourceBtn: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1.5, flex: 1, paddingHorizontal: 12, paddingVertical: 10 },
+  sourceBtnOn: { backgroundColor: foundation.ink, borderColor: foundation.ink },
+  sourceLabel: { color: foundation.ink, fontSize: 13, fontWeight: "800" },
+  sourceLabelOn: { color: color.white },
+  sourceSub: { color: color.muted, fontSize: 11, fontWeight: "600", marginTop: 2 },
+  sourceSubOn: { color: "rgba(255,255,255,0.7)" },
+  aiState: { color: color.muted, fontSize: 13, paddingVertical: 12 },
+  aiStateBox: { gap: 8, paddingVertical: 4 },
+  aiStateBtn: { alignSelf: "flex-start", backgroundColor: foundation.ink, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 8 },
+  aiStateBtnText: { color: color.white, fontSize: 12.5, fontWeight: "800" },
   errorText: { color: "#b91c1c", fontSize: 12, paddingVertical: 12 },
   track: { gap: 6 },
   trackThumb: { backgroundColor: color.chipNeutralBg, borderRadius: 8, height: 108, marginRight: 6, overflow: "hidden", width: 108 },

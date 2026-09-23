@@ -81,8 +81,6 @@ commands:
     domain: Payment
   - command: ConfirmRealitySceneProposal
     domain: RealityScene
-  - command: ConfirmVoucherPurchase
-    domain: Voucher
   - command: ConfirmVoucherRedemption
     domain: Voucher
   - command: CreateAgentProfile
@@ -360,8 +358,6 @@ commands:
   - command: NudgeMeetup
     domain: Conversation
   - command: OpenVoucherRedemption
-    domain: Voucher
-  - command: OrderVoucherPurchase
     domain: Voucher
   - command: PauseCampaign
     domain: Benefit

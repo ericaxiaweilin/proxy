@@ -334,6 +334,22 @@ func (s *Service) clockNow() time.Time {
 //
 // ownerID 必须是**已认证**的账号 id（由调用点从会话里取）。本方法不做鉴权，
 // 也不该做 —— 鉴权在 HTTP 层，这里只负责合成。
+// AI-MANAGE-011（2026-09-23，用户：「ai 分身 移除 ai 小美 和 user_proxy 这是对真人用户设计的功能」「好友洞察
+// 只关心真人用户」）：洞察目标只要真人。平台助手（proxy_ai / user_proxy_ai）、平台 AI 账号（ai_ / ai_account_）、
+// agent、系统账号即使聊过天、在好友表里，也不进目标集。
+func IsHumanTarget(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" || id == "SYSTEM" || id == "proxy_ai" || id == "user_proxy_ai" || id == "proxy-ai" {
+		return false
+	}
+	for _, prefix := range []string{"ai_", "agent_"} {
+		if strings.HasPrefix(id, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Service) ListInsights(ctx context.Context, twinID, ownerID string) (Payload, error) {
 	if err := s.viewerAllowed(ctx, ownerID); err != nil {
 		return Payload{}, err
@@ -361,7 +377,7 @@ func (s *Service) ListInsights(ctx context.Context, twinID, ownerID string) (Pay
 	now := s.clockNow()
 	insights := make([]Insight, 0, len(friends))
 	for _, friend := range friends {
-		if friend.UserID == ownerID {
+		if friend.UserID == ownerID || !IsHumanTarget(friend.UserID) {
 			// 自己不给自己当洞察目标 —— 投流工具回答"谁值得运营"，
 			// 本人行（历史脏数据里自己既是 owner 又是 peer）进来就是噪音。
 			// 好友集理论上不会含自己，这里是纵深防御。
@@ -385,13 +401,13 @@ func (s *Service) ListInsights(ctx context.Context, twinID, ownerID string) (Pay
 	}
 	strangers := make([]string, 0)
 	for actor := range byActor {
-		if !seen[actor] {
+		if !seen[actor] && IsHumanTarget(actor) {
 			seen[actor] = true
 			strangers = append(strangers, actor)
 		}
 	}
 	for actor := range eventsByActor {
-		if !seen[actor] {
+		if !seen[actor] && IsHumanTarget(actor) {
 			seen[actor] = true
 			strangers = append(strangers, actor)
 		}

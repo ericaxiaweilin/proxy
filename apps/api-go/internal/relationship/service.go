@@ -72,14 +72,19 @@ type FriendshipRecord struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// DisplayNameHint lets a caller attach a project-side
-// display name (from /identity/profile or similar) so the
-// list response can include "Mai · PX-482167" without a
-// second round-trip. Optional.
+// DisplayNameHint lets a caller attach identity presentation data from
+// /identity/profile. The relationship domain owns the friendship state, not
+// another person's name, city, or avatar; resolving those at the composition
+// boundary keeps the same person looking like the same person in the friend
+// list, AI-twin audience picker, and insight rail.
 type DisplayNameHint struct {
 	UserID      string `json:"userId"`
 	DisplayName string `json:"displayName"`
 	City        string `json:"city"`
+	// AvatarURL is either a public media route or an absolute URL. Empty means
+	// the profile has no deliverable avatar and clients must use their initial
+	// fallback rather than manufacture a path.
+	AvatarURL string `json:"avatarUrl"`
 }
 
 type FriendView struct {
@@ -88,6 +93,7 @@ type FriendView struct {
 	State       FriendshipStatus `json:"state"`
 	DisplayName string           `json:"displayName"`
 	City        string           `json:"city"`
+	AvatarURL   string           `json:"avatarUrl"`
 	Since       time.Time        `json:"since"`
 }
 
@@ -234,6 +240,7 @@ func (s *Service) bucketsFor(ctx context.Context, userID string) ([]FriendView, 
 			State:       row.State,
 			DisplayName: hint.DisplayName,
 			City:        hint.City,
+			AvatarURL:   hint.AvatarURL,
 			Since:       row.CreatedAt,
 		}
 		if hint.DisplayName == "" && other != "" {

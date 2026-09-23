@@ -96,13 +96,16 @@ func (s *Service) RecordOperate(ctx context.Context, twinID, ownerID, targetID s
 	if strings.TrimSpace(targetID) == "" {
 		return OperateResult{}, ErrTargetNotAFriend
 	}
-	friends, err := s.friends.ListActiveFriends(ctx, ownerID)
+	// AI-MANAGE-011（用户：「我点击开启单独运营报错 404」）：能运营的人 = 洞察列表里的人。
+	// 列表是「好友 ∪ 有过互动的陌生人」（TWIN-INSIGHT-TARGETS-001），这里原来只认好友 ——
+	// 对列表里任何非好友点「开启单独运营」都 404。现在两边用同一份目标集（也只含真人）。
+	payload, err := s.ListInsights(ctx, twinID, ownerID)
 	if err != nil {
-		return OperateResult{}, fmt.Errorf("twininsight: list friends: %w", err)
+		return OperateResult{}, err
 	}
 	allowed := false
-	for _, friend := range friends {
-		if friend.UserID == targetID {
+	for _, insight := range payload.Insights {
+		if insight.TargetID == targetID {
 			allowed = true
 			break
 		}

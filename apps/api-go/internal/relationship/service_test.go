@@ -12,13 +12,13 @@ func contextBackground() context.Context { return context.Background() }
 
 func envelope(commandType, actor, target string) command.Envelope {
 	return command.Envelope{
-		CommandID:   "cmd_relationship_" + commandType,
-		CommandType: commandType,
-		Actor:       command.Actor{Type: "USER", ID: actor},
-		Principal:   command.Principal{Type: "INDIVIDUAL", ID: actor},
-		Target:      command.Target{Type: "Friendship", ID: actor + ":" + target},
+		CommandID:     "cmd_relationship_" + commandType,
+		CommandType:   commandType,
+		Actor:         command.Actor{Type: "USER", ID: actor},
+		Principal:     command.Principal{Type: "INDIVIDUAL", ID: actor},
+		Target:        command.Target{Type: "Friendship", ID: actor + ":" + target},
 		CorrelationID: "corr_relationship_" + commandType,
-		Payload:     map[string]any{"targetUserId": target},
+		Payload:       map[string]any{"targetUserId": target},
 	}
 }
 
@@ -68,6 +68,40 @@ func TestListMyFriendshipsSplitsActiveAndPending(t *testing.T) {
 	}
 	if len(body.Friendships.Pending) != 2 {
 		t.Fatalf("pending should have 2 (outgoing carol + incoming dave), got %+v", body.Friendships.Pending)
+	}
+}
+
+// AI-TWIN-AUDIENCE-AVATAR-001: the AI-twin audience chooser consumes this
+// same relationship payload. It must receive the identity image with the
+// selected person's id, not invent a second avatar lookup in the client.
+func TestListMyFriendshipsIncludesResolvedAvatarURL(t *testing.T) {
+	svc := NewWithRepository(NewMemoryRepository())
+	svc.SetDisplayNameResolver(func(_ context.Context, userID string) (DisplayNameHint, bool) {
+		if userID != "user_bob" {
+			return DisplayNameHint{}, false
+		}
+		return DisplayNameHint{
+			UserID:      userID,
+			DisplayName: "Bob",
+			AvatarURL:   "/v1/media/thumb/ma_bob",
+		}, true
+	})
+	if r := svc.Handle(envelope("SendFriendRequest", "user_alice", "user_bob")); r.Outcome != "ACCEPTED" {
+		t.Fatalf("alice→bob request: %s", r.Outcome)
+	}
+	if r := svc.Handle(envelope("AcceptFriendRequest", "user_bob", "user_alice")); r.Outcome != "ACCEPTED" {
+		t.Fatalf("bob accepts: %s", r.Outcome)
+	}
+
+	list := svc.Handle(envelope("ListMyFriendships", "user_alice", ""))
+	var body struct {
+		Friendships ListFriendshipsPayload `json:"friendships"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if got := body.Friendships.Active[0].AvatarURL; got != "/v1/media/thumb/ma_bob" {
+		t.Errorf("avatarUrl = %q, want public media path", got)
 	}
 }
 

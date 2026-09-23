@@ -178,3 +178,27 @@ func TestRecordOperateDeniedWhenViewerGateRefuses(t *testing.T) {
 		t.Errorf("an entitlement-rejected action must not be recorded, got %d rows", len(log.All()))
 	}
 }
+
+// AI-MANAGE-011：列表里的陌生人（聊过天但没加好友）也能「开启单独运营」—— 以前只认好友，点了就 404。
+// 非真人（平台助手 / 平台 AI）不在列表里，依然拒绝。
+func TestOperateAcceptsEveryListedTargetAndRejectsNonHumans(t *testing.T) {
+	now := fixedTime()
+	repo := NewMemoryRepository()
+	repo.Seed("owner_1", Facts{Signals: []SignalFact{
+		{ActorID: "user_stranger", Messages7d: 5, LastSignalAt: now.Add(-time.Hour)},
+		{ActorID: "user_proxy_ai", Messages7d: 50, LastSignalAt: now.Add(-time.Hour)},
+	}})
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetViewerGate(allowAllViewers)
+	svc.SetClock(fixedTime)
+	svc.SetCompanionGate(func(context.Context, string) error { return nil })
+	svc.SetActionLog(NewMemoryActionLog())
+	if _, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "user_stranger", ActionOperate); err != nil {
+		t.Fatalf("a listed stranger must be operable, got %v", err)
+	}
+	if _, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "user_proxy_ai", ActionOperate); !errors.Is(err, ErrTargetNotAFriend) {
+		t.Fatalf("a non-human is not a target, got %v", err)
+	}
+}

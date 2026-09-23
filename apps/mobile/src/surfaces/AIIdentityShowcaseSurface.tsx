@@ -69,7 +69,7 @@ export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient,
         <Text style={styles.subtitle}>图库 · 帖文编排 · 好友运营</Text>
 
         {/* AI-TWIN-GALLERY-001: 图库段（原型：小美 · AI 分身受众调度版）。 */}
-        <TwinGallerySection mediaClient={mediaClient} rawGalleryItems={rawGalleryItems} />
+        <TwinGallerySection authClient={authClient} mediaClient={mediaClient} ownerId={viewerAccountId} rawGalleryItems={rawGalleryItems} resolveMediaUrl={resolveMediaUrl} />
 
         {/* AI-TWIN-POST-AUDIENCE-002/003: 帖文编排段（原型同一段，受众调度
             部分）。公开 / 指定好友两档真受众，服务端在 TARGETED 帖子上真正

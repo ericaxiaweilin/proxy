@@ -7,10 +7,10 @@
 /** wire 上的 avatarUrl 可能是服务端相对路径（/v1/media/thumb/<id>）或空串。
  * 必须经 resolveMediaUrl 拼上 base；空/认不出的回落首字（undefined）。 */
 export function twinAvatarSource(
-  avatarUrl: string,
+  avatarUrl: string | undefined,
   resolveMediaUrl?: ((path: string) => string) | undefined,
 ): { uri: string } | undefined {
-  const trimmed = avatarUrl.trim();
+  const trimmed = (avatarUrl ?? "").trim();
   if (trimmed === "") return undefined;
   if (/^https?:\/\//.test(trimmed)) return { uri: trimmed };
   if (trimmed.startsWith("/") && typeof resolveMediaUrl === "function") {

@@ -659,3 +659,37 @@ func TestOwnerNeverAppearsAsOwnTarget(t *testing.T) {
 		t.Fatalf("only the real chatter should remain, got %v", payload.Insights)
 	}
 }
+
+// AI-MANAGE-011：好友洞察只关心真人 —— 平台助手、平台 AI 账号（小美 ai_00X）、agent 即使在好友表里
+// 或聊过天，也不进目标集。
+func TestInsightsListOnlyRealPeople(t *testing.T) {
+	now := fixedTime()
+	repo := NewMemoryRepository()
+	repo.Seed("owner_1", Facts{
+		Signals: []SignalFact{
+			{ActorID: "user_proxy_ai", Messages7d: 40, LastSignalAt: now.Add(-time.Hour)},
+			{ActorID: "proxy_ai", Messages7d: 30, LastSignalAt: now.Add(-time.Hour)},
+			{ActorID: "ai_001", Messages7d: 20, LastSignalAt: now.Add(-time.Hour)},
+			{ActorID: "user_linh", Messages7d: 3, LastSignalAt: now.Add(-time.Hour)},
+		},
+	})
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{
+		{UserID: "ai_account_002", DisplayName: "安安", Since: now.Add(-24 * time.Hour)},
+		{UserID: "user_minh", DisplayName: "Minh", Since: now.Add(-24 * time.Hour)},
+	})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetViewerGate(allowAllViewers)
+	svc.SetClock(fixedTime)
+	payload, err := svc.ListInsights(context.Background(), "twin_1", "owner_1")
+	if err != nil {
+		t.Fatalf("ListInsights: %v", err)
+	}
+	got := map[string]bool{}
+	for _, insight := range payload.Insights {
+		got[insight.TargetID] = true
+	}
+	if len(got) != 2 || !got["user_linh"] || !got["user_minh"] {
+		t.Fatalf("only real people may be insight targets, got %v", got)
+	}
+}

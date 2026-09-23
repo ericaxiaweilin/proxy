@@ -28,6 +28,10 @@ const foundationSource = readFileSync(
   fileURLToPath(new URL("./proxy-foundation.tsx", import.meta.url)),
   "utf8",
 );
+const composerSource = readFileSync(
+  fileURLToPath(new URL("./twin-post-composer-section.tsx", import.meta.url)),
+  "utf8",
+);
 
 describe("TwinInsight no longer ships fabricated data (TWIN-INSIGHT-002)", () => {
   it("the demo module is gone", () => {
@@ -189,5 +193,13 @@ describe("TwinInsight avatar source (TWIN-INSIGHT-AVATAR-001)", () => {
     expect(foundationSource).toContain("onError");
     // 不能回到「二选一渲染」—— Text 和 Image 必须同时在返回树里（条件只包 Image）
     expect(foundationSource).not.toMatch(/\{showImage \? \([\s\S]*?avatarFallback[\s\S]*?\) : \(/);
+  });
+
+  it("renders the same resolved avatar in both AI-twin audience pickers", () => {
+    // 新帖与编辑帖共用 AudiencePicker：关联对象必须是可辨识的人，不能又
+    // 退回只显示名字的列表。头像仍只来自 relationship 的真实 avatarUrl。
+    expect(composerSource).toContain("twinAvatarSource(friend.avatarUrl, resolveMediaUrl)");
+    expect(composerSource).toContain("<ProxyAvatar");
+    expect(composerSource).toContain("accessibilityLabel={`${friend.displayName}头像`}");
   });
 });

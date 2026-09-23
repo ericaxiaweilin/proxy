@@ -5,8 +5,9 @@ import type { CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contract
 import type { PersonaGalleryItem } from "../ai-persona-client";
 import type { FriendView, RelationshipClient } from "../relationship-client";
 import { color, foundation } from "../theme";
-import { ProxyEmptyState } from "./proxy-foundation";
+import { ProxyAvatar, ProxyEmptyState } from "./proxy-foundation";
 import { ProxyIcon } from "./proxy-icon";
+import { twinAvatarSource } from "./twin-avatar-source";
 
 // AI-TWIN-POST-AUDIENCE-002 — 帖文编排（用户 2026-09-21 原型：deepseek_html_
 // 20260921_663482.html「小美 · AI 分身（受众调度版）」帖文区）。
@@ -115,6 +116,7 @@ export function TwinPostComposerSection({ posts, mediaByPost, galleryItems, rela
           galleryItems={galleryItems}
           onClose={() => setComposerOpen(false)}
           onPublished={() => { setComposerOpen(false); onPublished(); }}
+          resolveMediaUrl={resolveMediaUrl}
           viewerAccountId={viewerAccountId}
         />
       ) : null}
@@ -125,6 +127,7 @@ export function TwinPostComposerSection({ posts, mediaByPost, galleryItems, rela
           onClose={() => setEditingPost(undefined)}
           onSaved={() => { setEditingPost(undefined); onPublished(); }}
           post={editingPost}
+          resolveMediaUrl={resolveMediaUrl}
           updatePostAudience={updatePostAudience}
         />
       ) : null}
@@ -190,13 +193,14 @@ function PostCard({ post, media, friendNameById, resolveMediaUrl, onEditAudience
   );
 }
 
-function ComposerSheet({ galleryItems, friends, viewerAccountId, createPost, onClose, onPublished }: {
+function ComposerSheet({ galleryItems, friends, viewerAccountId, createPost, onClose, onPublished, resolveMediaUrl }: {
   galleryItems: PersonaGalleryItem[];
   friends: FriendView[] | undefined;
   viewerAccountId: string | undefined;
   createPost: (payload: CreatePostPayload) => Promise<string>;
   onClose: () => void;
   onPublished: () => void;
+  resolveMediaUrl: (path: string) => string;
 }): React.JSX.Element {
   const [caption, setCaption] = useState("");
   const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>([]);
@@ -274,6 +278,7 @@ function ComposerSheet({ galleryItems, friends, viewerAccountId, createPost, onC
             <AudiencePicker
               audienceMode={audienceMode}
               friends={friends}
+              resolveMediaUrl={resolveMediaUrl}
               selectedFriendIds={selectedFriendIds}
               setAudienceMode={setAudienceMode}
               toggleFriend={toggleFriend}
@@ -302,10 +307,11 @@ function ComposerSheet({ galleryItems, friends, viewerAccountId, createPost, onC
 
 // AI-TWIN-POST-AUDIENCE-003: 公开/指定好友 开关 + 好友多选，发帖和编辑
 // 已发布帖子共用同一套 UI——两处除了"提交时调哪个命令"以外，交互一样。
-function AudiencePicker({ audienceMode, setAudienceMode, friends, selectedFriendIds, toggleFriend }: {
+function AudiencePicker({ audienceMode, setAudienceMode, friends, resolveMediaUrl, selectedFriendIds, toggleFriend }: {
   audienceMode: "public" | "targeted";
   setAudienceMode: (mode: "public" | "targeted") => void;
   friends: FriendView[] | undefined;
+  resolveMediaUrl: (path: string) => string;
   selectedFriendIds: string[];
   toggleFriend: (id: string) => void;
 }): React.JSX.Element {
@@ -335,6 +341,7 @@ function AudiencePicker({ audienceMode, setAudienceMode, friends, selectedFriend
           <View style={styles.friendList}>
             {friends.map((friend) => {
               const selected = selectedFriendIds.includes(friend.userId);
+              const avatarSource = twinAvatarSource(friend.avatarUrl, resolveMediaUrl);
               return (
                 <Pressable
                   accessibilityLabel={`选择${friend.displayName}`}
@@ -342,7 +349,15 @@ function AudiencePicker({ audienceMode, setAudienceMode, friends, selectedFriend
                   onPress={() => toggleFriend(friend.userId)}
                   style={[styles.friendRow, selected && styles.friendRowSelected]}
                 >
-                  <Text style={styles.friendName}>{friend.displayName}</Text>
+                  <View style={styles.friendIdentity}>
+                    <ProxyAvatar
+                      accessibilityLabel={`${friend.displayName}头像`}
+                      fallback={friend.displayName}
+                      size={32}
+                      {...(avatarSource ? { source: avatarSource } : {})}
+                    />
+                    <Text numberOfLines={1} style={styles.friendName}>{friend.displayName}</Text>
+                  </View>
                   <View style={[styles.friendCheck, selected && styles.friendCheckOn]}>
                     {selected ? <ProxyIcon color={color.white} name="check" size={12} /> : null}
                   </View>
@@ -359,12 +374,13 @@ function AudiencePicker({ audienceMode, setAudienceMode, friends, selectedFriend
 // AI-TWIN-POST-AUDIENCE-003: 已发布帖子受众条的编辑面板——原型说的
 // "本质就是一个开关"。跟 ComposerSheet 的区别只有两条：初始值来自
 // post 现在的受众，提交时调 updatePostAudience 而不是 createPost。
-function AudienceEditSheet({ post, friends, updatePostAudience, onClose, onSaved }: {
+function AudienceEditSheet({ post, friends, updatePostAudience, onClose, onSaved, resolveMediaUrl }: {
   post: FeedPost;
   friends: FriendView[] | undefined;
   updatePostAudience: AudienceUpdater;
   onClose: () => void;
   onSaved: () => void;
+  resolveMediaUrl: (path: string) => string;
 }): React.JSX.Element {
   const [audienceMode, setAudienceMode] = useState<"public" | "targeted">(post.visibility === "TARGETED" ? "targeted" : "public");
   const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>(post.audienceTargetIds ?? []);
@@ -405,6 +421,7 @@ function AudienceEditSheet({ post, friends, updatePostAudience, onClose, onSaved
             <AudiencePicker
               audienceMode={audienceMode}
               friends={friends}
+              resolveMediaUrl={resolveMediaUrl}
               selectedFriendIds={selectedFriendIds}
               setAudienceMode={setAudienceMode}
               toggleFriend={toggleFriend}
@@ -482,9 +499,10 @@ const styles = StyleSheet.create({
 
   friendsEmpty: { color: color.muted, fontSize: 12, paddingVertical: 12 },
   friendList: { gap: 6, marginTop: 8 },
-  friendRow: { alignItems: "center", borderColor: color.cardBorder, borderRadius: 10, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 10 },
+  friendRow: { alignItems: "center", borderColor: color.cardBorder, borderRadius: 10, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 8 },
   friendRowSelected: { backgroundColor: color.violetSoftBg, borderColor: color.violet },
-  friendName: { color: foundation.ink, fontSize: 13, fontWeight: "700" },
+  friendIdentity: { alignItems: "center", flex: 1, flexDirection: "row", gap: 10, minWidth: 0 },
+  friendName: { color: foundation.ink, flexShrink: 1, fontSize: 13, fontWeight: "700" },
   friendCheck: { alignItems: "center", borderColor: color.cardBorder, borderRadius: 999, borderWidth: 1.5, height: 20, justifyContent: "center", width: 20 },
   friendCheckOn: { backgroundColor: color.violet, borderColor: color.violet },
 

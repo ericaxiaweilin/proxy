@@ -24,6 +24,8 @@ export type FriendView = {
   state: FriendshipState;
   displayName: string;
   city: string;
+  /** Public server path or absolute URL. Empty / absent falls back to the initial. */
+  avatarUrl?: string;
   since: string;
 };
 

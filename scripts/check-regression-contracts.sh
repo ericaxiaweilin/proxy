@@ -3222,8 +3222,9 @@ require_test "COMP-AI-MINOR-001" "./internal/conversation" \
 # 负向对照：真人 DM 不能被这个兜底误伤。
 # 没有这一条，上面两条可能只是因为**所有**会话都拿到了伴侣人设 ——
 # 那样首页 / 需求助手全废，而测试还是绿的。
+# AI-MANAGE-003/008 起真人 DM 由对面真人的代回复（stand-in）回，测试随之改名；负向对照的本意不变：绝不落到伴侣人设。
 require_test "COMP-AI-MINOR-001" "./internal/conversation" \
-  "TestHumanDirectMessageKeepsTheRequirementAssistant" \
+  "TestHumanDirectMessageGetsTheStandInNotTheCompanion" \
   "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
 
 # 接线点必须存在。companion_gate 是 fail-closed 的：没接 = 对所有账号关闭，
