@@ -40,6 +40,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/socialspace"
 	"github.com/proxy-app/proxy-api/internal/storeonboarding"
 	"github.com/proxy-app/proxy-api/internal/supply"
+	"github.com/proxy-app/proxy-api/internal/usermodel"
 	"github.com/proxy-app/proxy-api/internal/voucher"
 	"log"
 	"net/http"
@@ -504,6 +505,12 @@ func main() {
 	}
 	mediaService.WithAIPersonaService(personaSvc)
 	server.AIPersona = personaSvc
+	// AI-MANAGE-015: 用户建模。有库用 PG，识图走模型底座的 vision 任务。
+	if pool != nil {
+		server.UserModel = usermodel.NewService(postgres.NewUserModelRepository(pool), modelStack)
+	} else {
+		server.UserModel = usermodel.NewService(nil, modelStack)
+	}
 	// COMP-AI-MINOR-001（聊天侧）：上面那道门只守在「建分身」上。平台 AI 伴侣
 	// （ai_001..005）是平台自带账号 —— 带 assistantMode 建会话就能直接拿到开场白，
 	// 一条消息都不用发，所以聊天入口必须再拦一道；否则"未成年人不发消息也拿不到

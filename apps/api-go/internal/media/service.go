@@ -730,6 +730,26 @@ func (s *Service) ResolveServingPath(ctx context.Context, id string, kind string
 	return filepath.Join(s.storeDir, key), nil
 }
 
+// OwnerImagePath returns the on-disk path of an owner's own READY image (the
+// processed playback derivative, else the thumbnail) — AI-MANAGE-015 用户建模读图用。
+// 不看 visibility：调用方（api.likenessReferencePhotos 之后）已经校验过本人的形象授权；
+// 但必须是本人的图，别人的一律拒。
+func (s *Service) OwnerImagePath(ctx context.Context, ownerID, id string) (string, error) {
+	asset, err := s.repository.GetAsset(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if asset.OwnerPrincipalID != ownerID || asset.MediaType != "IMAGE" || asset.ProcessingStatus != "READY" {
+		return "", errors.New("not an owner image")
+	}
+	for _, key := range []string{asset.PlaybackStorageKey, asset.ThumbnailStorageKey} {
+		if s.storeFilePresent(key) {
+			return filepath.Join(s.storeDir, key), nil
+		}
+	}
+	return "", errors.New("image file missing")
+}
+
 // storeFilePresent reports whether a storage key maps to a real regular file.
 //
 // MEDIA-FILE-001: the database records an object as READY when its bytes are

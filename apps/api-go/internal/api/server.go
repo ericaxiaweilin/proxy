@@ -27,6 +27,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
+	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
@@ -37,10 +38,10 @@ import (
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
-	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/storeonboarding"
 	"github.com/proxy-app/proxy-api/internal/supply"
 	"github.com/proxy-app/proxy-api/internal/twininsight"
+	"github.com/proxy-app/proxy-api/internal/usermodel"
 	"github.com/proxy-app/proxy-api/internal/voucher"
 )
 
@@ -104,6 +105,8 @@ type Server struct {
 	// persona asset lacks a live consent. Wired from
 	// cmd/api/main.go.
 	AIPersona *aipersona.Service
+	// UserModel：AI 分身的用户建模（AI-MANAGE-015）。nil = 端点返回 503。
+	UserModel *usermodel.Service
 	// TwinInsight 是 AI 分身「好友洞察」的读模型（TWIN-INSIGHT-002）。
 	// 它是一个独立的读模型包而不是挂在 localnet / relationship 上：
 	// 这条洞察跨四个域（好友关系 / 行为事件 / 对话 / 点赞），没有任何
@@ -263,6 +266,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/ai/assistants", s.listAIAssistants)
 	// AI-MANAGE-007: AI 目录（价格 / logo / 免费额度），来自 config/ai-catalog 文件，匿名可读。
 	mux.HandleFunc("/v1/ai/catalog", s.getAICatalog)
+	// AI-MANAGE-015: AI 分身「用户建模」（需会话 + 本人形象授权）。
+	mux.HandleFunc("/v1/ai/user-model", s.routeUserModel)
+	mux.HandleFunc("/v1/ai/user-model/", s.routeUserModel)
 	// 小美头像原文件（GPT 交付 SVG）：更长 prefix，优先于 personas/ 通配。
 	mux.HandleFunc("/v1/ai/personas/photo/", s.personaPhoto)
 	// R16.7-P1-E: Jurisdiction Policy Engine self-service.

@@ -4,6 +4,18 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 268 — 2026-09-23
+
+- **AI 分身中心新增「用户建模」**（AI-MANAGE-015，原型 deepseek_html_20260923_c9c642.html，logo user_modeling_black_white_clean.svg）：
+  AI 分身的核心是给小美生成模型资产（照片 / 视频），建模是生成时锁住的「她长什么样」。
+  - 卡片：本人头像 / 名字、AI 建模标、识别状态、特征 chips；详情页：授权图库张数、物理锚点（身高 / 体重 / 年龄 / 身材 /
+    肤色 / 发型，每项标 AI 或 手动）、亚洲人特征锁定开关、「让 AI 从图库识别」、「编辑模型」表单。
+  - 全是真值：AI 识别 = vision 模型读本人**授权**的公共图库照片（POST /v1/ai/user-model/analyze，最多 4 张）；
+    识别不出的项就是「待补充」，体重不让 AI 猜；本人改过的项 AI 以后不覆盖。原型里写死的 165cm / 12 张 / 8 项不照搬。
+  - 没有形象授权就没有建模，只给授权入口（与 AI-MANAGE-010 一致）。
+  - 模型底座：vision 任务改走同 provider 里声明能看图的模型（原来会把图发给纯文本模型）。
+- 影响文件：`apps/mobile/src/components/twin-user-model-section.tsx`、`apps/mobile/src/surfaces/AIIdentityShowcaseSurface.tsx`、`apps/mobile/src/surfaces/me.tsx`。
+
 ## Revision 267 — 2026-09-23
 
 - **裸账号 id 不再上屏**（NO-RAW-ID-001）：用户「无头像无用户名只有纯 user_ID，

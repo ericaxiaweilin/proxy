@@ -1453,7 +1453,7 @@ export function MeSurface({
           })
           .filter((entry): entry is PersonaGalleryItem => entry !== undefined)
       );
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} rawGalleryItems={rawGalleryItems} mediaClient={mediaClient} posts={targetedSpacePosts} mediaByPost={profileMedia} relationshipClient={relationshipClient} createPost={(payload) => localNet.createPost(payload)} updatePostAudience={(postId, visibility, audienceTargetIds) => localNet.updatePostAudience(postId, visibility, audienceTargetIds)} onPostPublished={() => setProfilePostsReload((n) => n + 1)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} /></SwipeBackShell>;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} ownerName={hubProfile.displayName} ownerAvatarUri={profileAvatarUri} authClient={sessionAuthClient} rawGalleryItems={rawGalleryItems} mediaClient={mediaClient} posts={targetedSpacePosts} mediaByPost={profileMedia} relationshipClient={relationshipClient} createPost={(payload) => localNet.createPost(payload)} updatePostAudience={(postId, visibility, audienceTargetIds) => localNet.updatePostAudience(postId, visibility, audienceTargetIds)} onPostPublished={() => setProfilePostsReload((n) => n + 1)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} /></SwipeBackShell>;
     }
     if (subPage.route === "myscenes") {
       async function respond(invitationId: string, decision: "ACCEPTED" | "DECLINED" | "ASK"): Promise<void> {

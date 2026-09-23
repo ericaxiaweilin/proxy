@@ -28,11 +28,15 @@ import type { RelationshipClient } from "../relationship-client";
 import { TwinInsightSection } from "../components/twin-insight-section";
 import { TwinGallerySection } from "../components/twin-gallery-section";
 import { TwinPostComposerSection } from "../components/twin-post-composer-section";
+import { TwinUserModelSection } from "../components/twin-user-model-section";
 
-export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient, rawGalleryItems, mediaClient, posts, mediaByPost, relationshipClient, createPost, updatePostAudience, onPostPublished, resolveMediaUrl }: {
+export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, ownerName, ownerAvatarUri, authClient, rawGalleryItems, mediaClient, posts, mediaByPost, relationshipClient, createPost, updatePostAudience, onPostPublished, resolveMediaUrl }: {
   onBack: () => void;
   viewerAccountId: string | undefined;
-  authClient: { request(path: string, init: { method: "GET" | "POST"; body?: unknown }): Promise<TransportResponse> };
+  /** AI-MANAGE-015: 用户建模卡上的本人名字 / 头像（me.tsx 的 hubProfile / profileAvatarUri）。 */
+  ownerName: string;
+  ownerAvatarUri: string | undefined;
+  authClient: { request(path: string, init: { method: "GET" | "POST" | "PUT"; body?: unknown }): Promise<TransportResponse> };
   /** AI-TWIN-GALLERY-002: 图库「原始图库」tab 的本地兜底数据——这个人自己
    * 发过的帖子里的照片，跟「我的」个人主页图库同一份读模型（profilePosts
    * + profileMedia）。调用方（me.tsx）已经拿着这份数据，这里直接接住，
@@ -67,6 +71,9 @@ export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient,
           <Text selectable style={styles.title}>AI分身中心</Text>
         </View>
         <Text selectable style={styles.subtitle}>图库 · 帖文编排 · 好友运营</Text>
+
+        {/* AI-MANAGE-015: 用户建模（原型 deepseek_html_20260923_c9c642）—— AI 分身生成模型资产时锁住的「她长什么样」。 */}
+        <TwinUserModelSection authClient={authClient} ownerAvatarUri={ownerAvatarUri} ownerId={viewerAccountId} ownerName={ownerName} />
 
         {/* AI-TWIN-GALLERY-001: 图库段（原型：小美 · AI 分身受众调度版）。 */}
         <TwinGallerySection authClient={authClient} mediaClient={mediaClient} ownerId={viewerAccountId} rawGalleryItems={rawGalleryItems} resolveMediaUrl={resolveMediaUrl} />
