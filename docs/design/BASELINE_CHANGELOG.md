@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 265 — 2026-09-23
+
+- **对话权限「每次确认」真正可用：AI 替你起草，你确认后以你的身份发出**（AI-MANAGE-013）：用户规则「代回复…应该是代真人的回复」。
+  之前「每次确认」只是不回（AWAITING_OWNER），草稿那一步没做。
+  - 别人私信你 → AI 用你的语气起草一条回复，存成**只有你看得到**的草稿（`conversation.stand_in_drafts`，迁移 121）；
+    发消息的人那边仍是「对方还没回」，拿不到也动不了草稿。
+  - 会话里输入框上方出现草稿卡：「丢弃 / 修改 / 以你的身份发送」；发出去的是你确认过的话，就是你的消息（不带「AI 代回」）。
+  - 消息列表该会话预览前加「[AI 草稿待你确认]」。
+  - 对方又发一条 → 旧草稿作废换新；你自己直接回了 → 草稿作废，过时的草稿不能再被发出。Token 记在你头上。
+- 影响文件：`apps/mobile/src/surfaces/conversation.tsx`、`apps/mobile/src/surfaces/messages.tsx`。
+
 ## Revision 264 — 2026-09-23
 
 - **折叠地图 logo 放大 + 首页入口同步**（MAP-FOOTPRINT-LOGO-001 跟进）：用户：

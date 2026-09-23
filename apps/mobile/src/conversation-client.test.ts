@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ConversationClient } from "./conversation-client";
+import { ConversationClient, standInDraftFromList } from "./conversation-client";
 import { InMemorySecureStorageDriver, SecureSessionStore } from "./secure-session";
 
 async function store(): Promise<SecureSessionStore> {
@@ -161,5 +161,28 @@ describe("CONVO-INBOX-SWALLOW-001", () => {
     const screen = readFileSync(fileURLToPath(new URL("./surfaces/messages.tsx", import.meta.url)), "utf8");
     expect(screen).toContain(") : inboxError ? (");
     expect(screen).toContain("会话列表没读出来");
+  });
+});
+
+// AI-MANAGE-013：每次确认的草稿 —— 只认 PENDING；发送时改过才带 body，没改就原样发。
+describe("AI-MANAGE-013 stand-in drafts", () => {
+  it("reads only a pending draft from the message list", () => {
+    const draft = { draftId: "sid_1", conversationId: "c", ownerId: "user_1", inReplyTo: "m", body: "晚点回你", status: "PENDING", createdAt: "x" };
+    expect(standInDraftFromList({ operationRef: JSON.stringify({ messages: [], standInDraft: draft }) })?.draftId).toBe("sid_1");
+    expect(standInDraftFromList({ operationRef: JSON.stringify({ messages: [], standInDraft: null }) })).toBeUndefined();
+    expect(standInDraftFromList({ operationRef: JSON.stringify({ standInDraft: { ...draft, status: "SENT" } }) })).toBeUndefined();
+    expect(standInDraftFromList({ operationRef: "not json" })).toBeUndefined();
+  });
+
+  it("sends the draft as-is or with the owner's edit, and can discard it", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const client = new ConversationClient({ baseUrl:"http://127.0.0.1:4100", secureSessionStore:await store(), authClient:{request:async (_path, init)=>{sent.push(init.body as Record<string,unknown>);return {status:200,json:async()=>({outcome:"ACCEPTED"})};}} });
+    await client.sendStandInDraft("conv_1", "sid_1");
+    await client.sendStandInDraft("conv_1", "sid_1", "  改过的  ");
+    await client.discardStandInDraft("conv_1", "sid_2");
+    expect(sent.map((c) => c.commandType)).toEqual(["SendStandInDraft", "SendStandInDraft", "DiscardStandInDraft"]);
+    expect(sent[0]?.payload).toEqual({ draftId: "sid_1" });
+    expect(sent[1]?.payload).toEqual({ draftId: "sid_1", body: "改过的" });
+    expect(sent[2]?.payload).toEqual({ draftId: "sid_2" });
   });
 });

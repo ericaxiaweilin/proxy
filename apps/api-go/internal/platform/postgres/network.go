@@ -842,6 +842,41 @@ func (r *ConversationRepository) UpdateConversation(ctx context.Context, c conve
 	return nil
 }
 
+// --- AI-MANAGE-013: 「每次确认」代回复草稿 ---
+
+func (r *ConversationRepository) SaveStandInDraft(ctx context.Context, d conversation.StandInDraft) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO conversation.stand_in_drafts (id, conversation_id, owner_id, in_reply_to, body, status, sent_message_id, created_at, resolved_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (id) DO UPDATE SET body=EXCLUDED.body, status=EXCLUDED.status, sent_message_id=EXCLUDED.sent_message_id, resolved_at=EXCLUDED.resolved_at`,
+		d.ID, d.ConversationID, d.OwnerID, d.InReplyTo, d.Body, d.Status, d.SentMessageID, d.CreatedAt, d.ResolvedAt,
+	)
+	return err
+}
+
+const standInDraftColumns = `id, conversation_id, owner_id, in_reply_to, body, status, sent_message_id, created_at, resolved_at`
+
+func scanStandInDraftRow(row pgx.Row) (conversation.StandInDraft, error) {
+	var d conversation.StandInDraft
+	err := row.Scan(&d.ID, &d.ConversationID, &d.OwnerID, &d.InReplyTo, &d.Body, &d.Status, &d.SentMessageID, &d.CreatedAt, &d.ResolvedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return conversation.StandInDraft{}, conversation.ErrStandInDraftNotFound
+	}
+	return d, err
+}
+
+func (r *ConversationRepository) GetStandInDraft(ctx context.Context, id string) (conversation.StandInDraft, error) {
+	return scanStandInDraftRow(queryerForContext(ctx, r.pool).QueryRow(ctx,
+		`SELECT `+standInDraftColumns+` FROM conversation.stand_in_drafts WHERE id = $1`, id))
+}
+
+func (r *ConversationRepository) PendingStandInDraft(ctx context.Context, conversationID, ownerID string) (conversation.StandInDraft, error) {
+	return scanStandInDraftRow(queryerForContext(ctx, r.pool).QueryRow(ctx,
+		`SELECT `+standInDraftColumns+` FROM conversation.stand_in_drafts
+		 WHERE conversation_id = $1 AND owner_id = $2 AND status = 'PENDING'
+		 ORDER BY created_at DESC LIMIT 1`, conversationID, ownerID))
+}
+
 // --- ROOM-CREATE-001: 见面邀约 ---
 
 func (r *ConversationRepository) CreateMeetup(ctx context.Context, m conversation.Meetup) error {

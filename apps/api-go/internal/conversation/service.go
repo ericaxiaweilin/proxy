@@ -162,6 +162,11 @@ type Repository interface {
 	// 返回 ErrMeetupNotFound —— 调用方（listConversations）按「没有」处理，
 	// 不当错误拒绝整个列表。
 	ActiveMeetup(ctx context.Context, conversationID string) (Meetup, error)
+	// --- AI-MANAGE-013: 「每次确认」的代回复草稿（只给被代表的本人看） ---
+	SaveStandInDraft(ctx context.Context, d StandInDraft) error
+	GetStandInDraft(ctx context.Context, id string) (StandInDraft, error)
+	// PendingStandInDraft 返回本人在该会话里最新一条 PENDING 草稿；没有 = ErrStandInDraftNotFound。
+	PendingStandInDraft(ctx context.Context, conversationID, ownerID string) (StandInDraft, error)
 }
 
 var (
@@ -178,6 +183,7 @@ type MemoryRepository struct {
 	drafts        map[string]NeedDraft
 	convos        map[string]Convo
 	meetups       map[string]Meetup
+	standInDrafts map[string]StandInDraft
 	events        []event.DomainEvent
 }
 
@@ -188,6 +194,7 @@ func NewMemoryRepository() *MemoryRepository {
 		drafts:        make(map[string]NeedDraft),
 		convos:        make(map[string]Convo),
 		meetups:       make(map[string]Meetup),
+		standInDrafts: make(map[string]StandInDraft),
 	}
 }
 
@@ -659,7 +666,8 @@ func (s *Service) Supports(commandType string) bool {
 	case "StartConversation", "SendMessage", "ListConversations", "ListConversationMessages", "MarkMessageRead", "MarkDialogRead", "DeleteMessage", "SetConversationBlocked", "RecordScreenshot", "ForwardMessage",
 		"CreateNeedDraft", "ConfirmNeedDraft",
 		"CreateConvo", "ListMyConvos",
-		"ProposeMeetup", "AcceptMeetup", "NudgeMeetup", "ArriveMeetup", "CompleteMeetup":
+		"ProposeMeetup", "AcceptMeetup", "NudgeMeetup", "ArriveMeetup", "CompleteMeetup",
+		"SendStandInDraft", "DiscardStandInDraft":
 		return true
 	default:
 		return false
@@ -712,6 +720,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.arriveMeetup(ctx, e)
 	case "CompleteMeetup":
 		return s.completeMeetup(ctx, e)
+	case "SendStandInDraft":
+		return s.sendStandInDraft(ctx, e)
+	case "DiscardStandInDraft":
+		return s.discardStandInDraft(ctx, e)
 	default:
 		return command.Rejected(e, "CONVERSATION_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "conversation.unsupported_command", nil)
 	}
@@ -856,6 +868,8 @@ type ConversationSummary struct {
 	UnreadCount int `json:"unreadCount,omitempty"`
 	// ROOM-CREATE-001: 当前未完成（非 COMPLETED）的见面邀约，没有就不带这个字段。
 	ActiveMeetup *Meetup `json:"activeMeetup,omitempty"`
+	// AI-MANAGE-013: 有一条 AI 替你起草、等你确认的回复（只对被代表的本人为 true）。
+	StandInDraftPending bool `json:"standInDraftPending,omitempty"`
 }
 
 func (s *Service) listConversations(ctx context.Context, e command.Envelope) command.Result {
@@ -903,6 +917,9 @@ func (s *Service) listConversations(ctx context.Context, e command.Envelope) com
 			} else if !errors.Is(err, ErrMeetupNotFound) {
 				return command.Rejected(e, "CONVERSATION_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
 			}
+		}
+		if conv.Type == "DM" {
+			summary.StandInDraftPending = s.pendingStandInDraftFor(ctx, conv.ID, e.Actor.ID) != nil
 		}
 		summaries = append(summaries, summary)
 	}
@@ -1124,6 +1141,7 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		}
 	}
 	// 首条消息（如果有）— v1 双写 DialogID/Kind/Security/Delivery/Seq
+	firstMessageID := ""
 	if p.FirstMessage != "" {
 		prot := DefaultProtectionFor("TEXT", conv.Type)
 		msg := Message{
@@ -1141,6 +1159,7 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 			Seq:            nextSeq,
 		}
 		_ = s.repository.AppendMessage(ctx, msg)
+		firstMessageID = msg.ID
 	}
 	if p.MediaRef != "" {
 		prot := DefaultProtectionFor("IMAGE", conv.Type)
@@ -1176,6 +1195,10 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 	} else if standIn.Blocked && hasInitialContent {
 		log.Printf("conversation ai: stand-in blocked status=%s owner=%s (AI-MANAGE-003)", standIn.Status, standIn.Owner)
 		payload["assistantStatus"] = standIn.Status
+		// AI-MANAGE-013：每次确认 = 替本人起草、存成只有本人看得到的草稿；发消息的人仍只看到 AWAITING_OWNER。
+		if standIn.Status == "AWAITING_OWNER" && strings.TrimSpace(p.FirstMessage) != "" {
+			s.draftStandInReply(ctx, conv, e, standIn, firstMessageID, p.FirstMessage, p.AssistantMode)
+		}
 	} else if persona, ok := companionFor(conv, p.AssistantMode); ok && !hasInitialContent && !reusedConversation {
 		// 这里同样用 companionFor，不是 platformAIPersonaForMode：开场白和门禁
 		// 必须是同一个判断。门禁认了「这是伴侣会话」而开场白不认，结果是
@@ -1464,6 +1487,10 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if err := s.repository.AppendMessage(ctx, msg); err != nil {
 		return command.Rejected(e, "MESSAGE_SEND_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.send_failed", nil)
 	}
+	// AI-MANAGE-013：本人自己回了，这个会话里等确认的 AI 草稿就过时了，作废，不能之后再被发出去。
+	if conv.Type == "DM" {
+		s.supersedePendingStandInDraft(ctx, conv.ID, e.Actor.ID)
+	}
 
 	// --- AI 回复：模型底座对话式需求构建助手 ---
 	// 分支内发言不触发 AI（支线讨论不召唤助手，避免主线 AI 回复串进分支）。
@@ -1492,6 +1519,10 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 		log.Printf("conversation ai: companion gated for actor %s (COMP-AI-MINOR-001)", e.Actor.ID)
 	} else if engineBlocked {
 		log.Printf("conversation ai: stand-in blocked status=%s owner=%s (AI-MANAGE-003)", engineStatus, standIn.Owner)
+		// AI-MANAGE-013：每次确认 = 替本人起草一条只有本人看得到的草稿（见 stand_in_draft.go）。
+		if engineStatus == "AWAITING_OWNER" && strings.TrimSpace(p.Body) != "" && convoID == nil {
+			s.draftStandInReply(ctx, conv, e, standIn, msg.ID, p.Body, p.AssistantMode)
+		}
 	} else if p.TemporaryUIResponseID == "" && temporaryUI != nil && hasContent {
 		aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
 	} else if p.TemporaryUIResponseID != "" && convoID == nil && standIn.Owner == "" {
@@ -1637,7 +1668,7 @@ func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e comm
 }
 
 // generateAIReplyUnpersisted 同 generateAIReply，但不 AppendMessage（AI-MANAGE-003：留给「每次确认」
-// 给 owner 起草的那一步用，目前没有调用方）——
+// 给 owner 起草的那一步用，见 stand_in_draft.go）——
 // 对话权限「每次确认」的草稿路径（AI-MANAGE-002）。Token 照记（推理真的发生了）。
 func (s *Service) generateAIReplyUnpersisted(ctx context.Context, conv Conversation, e command.Envelope, userText string, assistantMode string, temporaryUI *TemporaryUI, quote *ReplyQuote) *Message {
 	aiMsg, _, _ := s.generateAIReplyInternal(ctx, conv, e, userText, assistantMode, temporaryUI, quote, false)
@@ -2011,6 +2042,8 @@ func (s *Service) listMessages(ctx context.Context, e command.Envelope) command.
 		"truncated": truncated,
 		"seed":      seedMessage,
 		"convoId":   filterConvoID,
+		// AI-MANAGE-013：只有被代表的本人会拿到自己的待确认草稿；对方永远是 nil。
+		"standInDraft": s.pendingStandInDraftFor(ctx, conv.ID, e.Actor.ID),
 	}, nil)
 }
 

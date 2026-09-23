@@ -159,6 +159,8 @@ commands:
     domain: Conversation
   - command: DeleteStorePhoto
     domain: Business
+  - command: DiscardStandInDraft
+    domain: Conversation
   - command: DismissMarketOpportunity
     domain: Marketplace
   - command: DismissOutcomeLearning
@@ -494,6 +496,8 @@ commands:
   - command: SendInboxNotification
     domain: Notification
   - command: SendMessage
+    domain: Conversation
+  - command: SendStandInDraft
     domain: Conversation
   - command: SetAvailabilityWindow
     domain: Supply

@@ -9172,8 +9172,14 @@ require_test "AI-MANAGE-003" "./internal/conversation" \
   "TestStandInReadsTheRecipientsSettingsNotTheSenders" \
   "apps/api-go/internal/conversation/ai_engine_gate_test.go" || exit $?
 require_test "AI-MANAGE-003" "./internal/conversation" \
-  "TestStandInHonoursRecipientPauseOffAndConfirmBeforeTheModel" \
+  "TestStandInHonoursRecipientPauseAndOffBeforeTheModel" \
   "apps/api-go/internal/conversation/ai_engine_gate_test.go" || exit $?
+# AI-MANAGE-013：每次确认 = 替本人起草、只有本人看得到；发消息的人拿不到也动不了草稿；
+# 本人发出的是本人的消息（不带 AI 代回）；过时的草稿（对方又发 / 本人自己回了）作废不能再发。
+for t in TestConfirmDraftsForTheOwnerOnlyAndNeverAnswersTheSender TestOwnerSendsTheDraftAsTheirOwnMessage TestStaleDraftsAreSupersededAndCanBeDiscarded; do
+  require_test "AI-MANAGE-013" "./internal/conversation" "$t" \
+    "apps/api-go/internal/conversation/stand_in_draft_test.go" || exit $?
+done
 require_test "AI-MANAGE-003" "./internal/conversation" \
   "TestStandInAutoUsesTheOwnersStyleAndMetersTheOwner" \
   "apps/api-go/internal/conversation/ai_engine_gate_test.go" || exit $?

@@ -20,7 +20,7 @@ import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
-import type { ConversationClient, ConversationInboxItem, ProtectionOverride } from "../conversation-client";
+import { standInDraftFromList, type ConversationClient, type ConversationInboxItem, type ProtectionOverride, type StandInDraft } from "../conversation-client";
 import type { ActivityClient } from "../activity-client";
 import type { MediaClient, UploadableImage } from "../media-client";
 import type { ModerationClient } from "../moderation-client";
@@ -222,6 +222,10 @@ export function ConversationSurface({
 }): React.JSX.Element {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState(initialDraft ?? "");
+  // AI-MANAGE-013：对话权限「每次确认」—— AI 替你起草的回复，只有你看得到；你点发送才以你的身份发出。
+  const [standInDraft, setStandInDraft] = useState<StandInDraft | undefined>(undefined);
+  const [standInEdit, setStandInEdit] = useState<{ draftId: string; text: string } | undefined>(undefined);
+  const [standInBusy, setStandInBusy] = useState(false);
   // SEND-NONBLOCK-001: composer 只管"发出去"，不等 AI 回复。sending 旧语义
   // 把输入框按住直到长轮询返回（含 AI 生成），发完位置/图片必须等回复才能
   // 继续说话 —— 错的。拆成两个东西：syncPausedRef（3s 轮询暂停，保护乐观
@@ -501,6 +505,7 @@ export function ConversationSurface({
   }, [aiAccount, peerUserId, author]);
 
   const hydrateMessages = useCallback((result: Record<string, unknown>): void => {
+    setStandInDraft(standInDraftFromList(result));
     const payload = parseOperationRef(result);
     const rows = Array.isArray(payload?.messages) ? payload.messages as Array<Record<string, unknown>> : [];
     const actorId = typeof payload?.actorId === "string" ? payload.actorId : undefined;
@@ -648,6 +653,25 @@ export function ConversationSurface({
     })();
     return () => { cancelled = true; };
   }, [convId, author, aiAccount, peerUserId, conversationClient, ensureSession, parseOperationRef, applyAssistantNotice, connectAttempt]);
+
+  const resolveStandInDraft = useCallback(async (action: "send" | "discard"): Promise<void> => {
+    if (!convId || !standInDraft || standInBusy) return;
+    const edited = standInEdit?.draftId === standInDraft.draftId ? standInEdit.text.trim() : "";
+    if (action === "send" && standInEdit?.draftId === standInDraft.draftId && edited === "") return;
+    setStandInBusy(true);
+    try {
+      if (action === "send") await conversationClient.sendStandInDraft(convId, standInDraft.draftId, edited && edited !== standInDraft.body ? edited : undefined);
+      else await conversationClient.discardStandInDraft(convId, standInDraft.draftId);
+      setStandInEdit(undefined);
+      hydrateMessages(await conversationClient.listMessages(convId, activeConvo?.id));
+    } catch {
+      // 草稿可能已经过时（对方又发了一条 / 你自己回了）：刷新一次，拿最新的草稿。
+      setError(action === "send" ? "草稿没发出去，已刷新" : "草稿没丢掉，已刷新");
+      try { hydrateMessages(await conversationClient.listMessages(convId, activeConvo?.id)); } catch { /* 下次轮询再试 */ }
+    } finally {
+      setStandInBusy(false);
+    }
+  }, [convId, standInDraft, standInEdit, standInBusy, conversationClient, hydrateMessages, activeConvo]);
 
   const buildProtection = useCallback((): ProtectionOverride | undefined => {
     if (burn === "off" && noForward) return undefined;
@@ -1517,6 +1541,23 @@ export function ConversationSurface({
 
         {/* Footer remains in normal layout; root padding follows the keyboard. */}
         <View style={[styles.composerShell, { paddingBottom: keyboardInset > 0 ? 10 : Math.max(insets.bottom, 16) }]}>
+          {standInDraft ? (
+            <View accessibilityLabel="AI 替你起草的回复" style={styles.standInCard}>
+              <Text style={styles.standInTitle}>AI 替你起草了回复 · 只有你看得到</Text>
+              {standInEdit?.draftId === standInDraft.draftId ? (
+                <TextInput autoFocus multiline onChangeText={(text) => setStandInEdit({ draftId: standInDraft.draftId, text })} style={styles.standInInput} value={standInEdit.text} />
+              ) : (
+                <Text style={styles.standInBody}>{standInDraft.body}</Text>
+              )}
+              <View style={styles.standInActions}>
+                <Pressable accessibilityRole="button" disabled={standInBusy} onPress={() => void resolveStandInDraft("discard")} style={styles.standInGhost}><Text style={styles.standInGhostText}>丢弃</Text></Pressable>
+                {standInEdit?.draftId === standInDraft.draftId ? null : (
+                  <Pressable accessibilityRole="button" disabled={standInBusy} onPress={() => setStandInEdit({ draftId: standInDraft.draftId, text: standInDraft.body })} style={styles.standInGhost}><Text style={styles.standInGhostText}>修改</Text></Pressable>
+                )}
+                <Pressable accessibilityRole="button" disabled={standInBusy} onPress={() => void resolveStandInDraft("send")} style={styles.standInSend}><Text style={styles.standInSendText}>{standInBusy ? "发送中…" : "以你的身份发送"}</Text></Pressable>
+              </View>
+            </View>
+          ) : null}
           {selectedImage ? <View style={styles.imagePreviewRow}><Image source={{uri:selectedImage.uri}} style={styles.imagePreview} /><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedImage.fileName ?? "已选择图片") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除图片" onPress={() => setSelectedImage(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
           {selectedVideo ? <View style={styles.imagePreviewRow}><Text style={styles.videoPreviewIcon}>▶</Text><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedVideo.fileName ?? "已选择视频") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除视频" onPress={() => setSelectedVideo(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
           {selectedAudio ? <View style={styles.imagePreviewRow}><Text style={styles.videoPreviewIcon}>♪</Text><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? `语音 ${Math.max(1, Math.round(selectedAudio.durationMs / 1000))} 秒` : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除语音" onPress={() => setSelectedAudio(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
@@ -2100,6 +2141,15 @@ const styles = StyleSheet.create({
   stickerCredit: { color: lotus.faint, fontSize: 11, paddingBottom: 8, paddingHorizontal: 11, textAlign: "right" },
 
   // 输入区
+  standInCard: { backgroundColor: "#f4efff", borderColor: "#d9ccff", borderRadius: 14, borderWidth: 1, gap: 8, marginBottom: 8, padding: 12 },
+  standInTitle: { color: "#6b4fd8", fontSize: 12, fontWeight: "800" },
+  standInBody: { color: lotus.ink, fontSize: 15, lineHeight: 21 },
+  standInInput: { backgroundColor: lotus.paper, borderColor: "#d9ccff", borderRadius: 10, borderWidth: 1, color: lotus.ink, fontSize: 15, maxHeight: 120, minHeight: 44, paddingHorizontal: 10, paddingVertical: 8 },
+  standInActions: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "flex-end" },
+  standInGhost: { borderColor: "#d9ccff", borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
+  standInGhostText: { color: "#6b4fd8", fontSize: 13, fontWeight: "700" },
+  standInSend: { backgroundColor: "#6b4fd8", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 7 },
+  standInSendText: { color: "#fff", fontSize: 13, fontWeight: "800" },
   composerShell: { backgroundColor: lotus.paper, borderTopColor: lotus.line, borderTopWidth: 1, paddingHorizontal: 7, paddingTop: 7 },
   composer: { alignItems: "flex-end", flexDirection: "row", gap: 4, paddingBottom: 2 },
   attachBtn: { alignItems: "center", height: 36, justifyContent: "center", width: 34 },

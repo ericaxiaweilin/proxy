@@ -119,14 +119,14 @@ func TestStandInReadsTheRecipientsSettingsNotTheSenders(t *testing.T) {
 	}
 }
 
-func TestStandInHonoursRecipientPauseOffAndConfirmBeforeTheModel(t *testing.T) {
+// 每次确认（AWAITING_OWNER）会调模型起草草稿，但同样不回给发消息的人 —— 见 stand_in_draft_test.go。
+func TestStandInHonoursRecipientPauseAndOffBeforeTheModel(t *testing.T) {
 	for _, tc := range []struct {
 		state  AiEngineChatState
 		status string
 	}{
 		{AiEngineChatState{Paused: true, ChatPermission: "auto"}, "PAUSED"},
 		{AiEngineChatState{ChatPermission: "off"}, "OFF"},
-		{AiEngineChatState{ChatPermission: "confirm"}, "AWAITING_OWNER"},
 	} {
 		model := &recordingModelStack{}
 		repo := NewMemoryRepository()

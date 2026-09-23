@@ -38,6 +38,27 @@ export type Meetup = {
   updatedAt: string;
 };
 
+// AI-MANAGE-013：对话权限「每次确认」时，AI 替你起草、等你确认的回复。只有你（被代表的本人）拿得到。
+export type StandInDraft = {
+  draftId: string;
+  conversationId: string;
+  ownerId: string;
+  inReplyTo: string;
+  body: string;
+  status: "PENDING" | "SENT" | "DISCARDED" | "SUPERSEDED";
+  createdAt: string;
+};
+
+export function standInDraftFromList(result: Record<string, unknown>): StandInDraft | undefined {
+  if (typeof result.operationRef !== "string") return undefined;
+  try {
+    const draft = (JSON.parse(result.operationRef) as { standInDraft?: StandInDraft | null }).standInDraft;
+    return draft && typeof draft.draftId === "string" && typeof draft.body === "string" && draft.status === "PENDING" ? draft : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export type ConversationInboxItem = {
   conversation: { conversationId: string; conversationType: string; originType: string; originId: string; state: string; participants: string[]; roomScene?: RoomScene; lastMessageAt: string };
   latestMessage?: { messageId: string; senderId: string; body?: string; messageType: string; createdAt: string; senderSnapshot?: { displayName?: string; avatarRef?: string } };
@@ -46,6 +67,8 @@ export type ConversationInboxItem = {
   // UNREAD-PIPELINE-001: 未读数。缺席 = 老服务端没算，不画徽标（不把“不知道”画成 0）。
   unreadCount?: number;
   activeMeetup?: Meetup;
+  // AI-MANAGE-013：有一条 AI 替你起草、等你确认的回复。
+  standInDraftPending?: boolean;
 };
 
 export type ConvoSummary = {
@@ -122,6 +145,20 @@ export class ConversationClient {
     const session = await this.requireSession();
     const result = await this.sendCommand(session, "CompleteMeetup", { type: "Conversation", id: conversationId }, { meetupId });
     return this.decodeMeetup(result);
+  }
+
+  // --- AI-MANAGE-013: 每次确认的代回复草稿（本人发出 / 丢弃） ---
+
+  // body 不传 = 原样发送；传了 = 本人改过再发。发出去的是本人自己的消息。
+  public async sendStandInDraft(conversationId: string, draftId: string, body?: string): Promise<Record<string, unknown>> {
+    const session = await this.requireSession();
+    const trimmed = body?.trim();
+    return this.sendCommand(session, "SendStandInDraft", { type: "Conversation", id: conversationId }, { draftId, ...(trimmed ? { body: trimmed } : {}) });
+  }
+
+  public async discardStandInDraft(conversationId: string, draftId: string): Promise<Record<string, unknown>> {
+    const session = await this.requireSession();
+    return this.sendCommand(session, "DiscardStandInDraft", { type: "Conversation", id: conversationId }, { draftId });
   }
 
   private decodeMeetup(result: Record<string, unknown>): Meetup {

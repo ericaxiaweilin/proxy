@@ -748,6 +748,8 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
   const preview = latest
     ? latest.messageType === "IMAGE" ? "[图片]" : latest.messageType === "VIDEO" ? "[视频]" : latest.messageType === "LOCATION" ? ((meetupPreview(latest.body ?? "") ?? latest.body?.trim()) || "新消息") : latest.body?.trim() || "新消息"
     : "暂无消息";
+  // AI-MANAGE-013：「每次确认」下 AI 替你起草了回复、等你确认 —— 列表上就要看得出来，不然草稿永远躺着没人发。
+  const previewText = item.standInDraftPending ? `[AI 草稿待你确认] ${preview}` : preview;
   const timestamp = latest?.createdAt || item.conversation.lastMessageAt;
   const parsed = new Date(timestamp);
   const time = Number.isNaN(parsed.getTime()) ? "" : parsed.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
@@ -765,7 +767,7 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
     ...(item.counterpartyId && !aiAccount && !isGroup ? { peerUserId: item.counterpartyId } : {}),
     initial: name.slice(0, 2).toUpperCase(),
     name,
-    preview,
+    preview: previewText,
     lastActivityMs,
     time,
     badge: isGroup ? "群组" : item.conversation.originType,
