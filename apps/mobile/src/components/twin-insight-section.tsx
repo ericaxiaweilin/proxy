@@ -45,9 +45,11 @@ function messageFor(err: unknown): string {
   return "读取好友洞察失败";
 }
 
-export function TwinInsightSection({ authClient, ownerId }: {
+export function TwinInsightSection({ authClient, ownerId, resolveMediaUrl }: {
   authClient: AuthChannel;
   ownerId: string | undefined;
+  /** TWIN-INSIGHT-AVATAR-001: 服务端 avatarUrl 是相对路径，必须拼 base 才能显示。 */
+  resolveMediaUrl?: ((path: string) => string) | undefined;
 }): React.JSX.Element {
   const insightClient = useMemo(
     () =>
@@ -162,6 +164,7 @@ export function TwinInsightSection({ authClient, ownerId }: {
           <TwinTargetRail
             insights={insights}
             selectedId={selected?.targetId}
+            resolveMediaUrl={resolveMediaUrl}
             onSelect={(targetId) => {
               setSelectedId(targetId);
               setExpanded(false);
@@ -174,6 +177,7 @@ export function TwinInsightSection({ authClient, ownerId }: {
               thresholds={payload.thresholds}
               expanded={expanded}
               acting={acting}
+              resolveMediaUrl={resolveMediaUrl}
               onToggle={() => setExpanded((prev) => !prev)}
               onObserve={() => void act("observe")}
               onOperate={() => void act("operate")}

@@ -11,13 +11,13 @@ import (
 
 func profileEnvelope(commandType, actor string, payload map[string]any) command.Envelope {
 	return command.Envelope{
-		CommandID:   "cmd_profile_" + commandType,
-		CommandType: commandType,
-		Actor:       command.Actor{Type: "USER", ID: actor},
-		Principal:   command.Principal{Type: "PERSON", ID: actor},
-		Target:      command.Target{Type: "Profile", ID: actor},
+		CommandID:     "cmd_profile_" + commandType,
+		CommandType:   commandType,
+		Actor:         command.Actor{Type: "USER", ID: actor},
+		Principal:     command.Principal{Type: "PERSON", ID: actor},
+		Target:        command.Target{Type: "Profile", ID: actor},
 		CorrelationID: "corr_profile_" + commandType,
-		Payload:     payload,
+		Payload:       payload,
 	}
 }
 
@@ -59,6 +59,15 @@ func TestProfileRoundTripUsesActorAsOwner(t *testing.T) {
 	}
 	if body.Profile.Name != "Alice" || body.Profile.Handle != "@alice" || body.Profile.City != "Hanoi" || body.Profile.AvatarPath != "assets/avatar-alice.jpg" {
 		t.Fatalf("unexpected profile: %#v", body.Profile)
+	}
+
+	// TWIN-INSIGHT-AVATAR-001: 好友洞察头像的事实源必须能从同一条 profile 读出来。
+	resolver := svc.AuthorNameResolver()
+	if path, ok := resolver.ResolveAuthorAvatarPath(context.Background(), "user_alice"); !ok || path != "assets/avatar-alice.jpg" {
+		t.Fatalf("ResolveAuthorAvatarPath = (%q, %v), want assets/avatar-alice.jpg, true", path, ok)
+	}
+	if path, ok := resolver.ResolveAuthorAvatarPath(context.Background(), "user_nobody"); ok || path != "" {
+		t.Fatalf("missing profile must miss, got (%q, %v)", path, ok)
 	}
 
 	second := svc.Handle(profileEnvelope("UpdateProfile", "user_alice", map[string]any{

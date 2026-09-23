@@ -883,6 +883,39 @@ if ! grep -q 'SetViewerGate(newTwinInsightViewerGate(pool))' apps/api-go/cmd/api
   exit 1
 fi
 
+# ── TWIN-INSIGHT-AVATAR-001 ──────────────────────────────────────────────────
+# 好友洞察头像恒空白：服务端 buildInsight 写死 AvatarURL: ""，客户端把相对
+# 路径直接塞 <Image> 也拉不到。头像必须从 identity.profiles 解析并经
+# resolveMediaUrl 拼 base；坏 URI 落回首字，不许留透明圆。
+require_test "TWIN-INSIGHT-AVATAR-001" "./internal/twininsight" \
+  "TestInsightAvatarURLComesFromAvatarSource" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-AVATAR-001" "./internal/twininsight" \
+  "TestInsightAvatarURLStaysEmptyWithoutSource" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-AVATAR-001" "./internal/twininsight" \
+  "TestWireAvatarURLOnlyEmitsDeliverableShapes" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-AVATAR-001" "./internal/identity" \
+  "TestProfileRoundTripUsesActorAsOwner" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+if ! grep -q 'SetAvatarSource(authorNames.ResolveAuthorAvatarPath)' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [TWIN-INSIGHT-AVATAR-001]: 头像源没接线 —— Service 有闸、main.go 不挂，头像仍恒空。" >&2
+  exit 1
+fi
+if ! grep -q 'TWIN-INSIGHT-AVATAR-001' apps/mobile/src/components/twin-insight-section.test.ts ||
+   ! grep -q 'twinAvatarSource' apps/mobile/src/components/twin-avatar-source.ts ||
+   ! grep -q 'twinAvatarSource' apps/mobile/src/components/twin-insight-card.tsx; then
+  echo "  FAIL [TWIN-INSIGHT-AVATAR-001]: 客户端头像解析或它的回归测试丢了。" >&2
+  exit 1
+fi
+if ! grep -q 'onError' apps/mobile/src/components/proxy-foundation.tsx; then
+  echo "  FAIL [TWIN-INSIGHT-AVATAR-001]: ProxyAvatar 没有 onError 回退 —— 坏 URI 仍是空白圆。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/components/twin-insight-section.test.ts || exit $?
+echo "    TWIN-INSIGHT-AVATAR-001: PASS (server avatarUrl + resolveMediaUrl + initial fallback)"
+
 # AIBOUND-001: DismissMarketOpportunity 曾经无 aiboundary 落点（AI 可调），
 # market 写曾经无 USER 主体检查（与 activity 不对称）。现 Dismiss 进 gate，
 # Publish/Apply/Dismiss 必须 USER；PublishActivity 保留位仍 fail-closed。

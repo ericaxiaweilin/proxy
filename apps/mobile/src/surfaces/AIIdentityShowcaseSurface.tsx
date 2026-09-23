@@ -86,9 +86,9 @@ export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, authClient,
           viewerAccountId={viewerAccountId}
         />
 
-        {/* TWIN-INSIGHT-001: 好友洞察段（原型「好友运营」）。未登录/后端未
-            接线时用明示的本机演示数据（见组件内 demo 标记），不冒充真数据。 */}
-        <TwinInsightSection authClient={authClient} ownerId={viewerAccountId} />
+        {/* TWIN-INSIGHT-001 / TWIN-INSIGHT-AVATAR-001: 好友洞察段（原型「好友运营」）。
+            头像 wire 是相对路径，必须把 resolveMediaUrl 传下去拼 base。 */}
+        <TwinInsightSection authClient={authClient} ownerId={viewerAccountId} resolveMediaUrl={resolveMediaUrl} />
       </ScrollView>
     </View>
   );

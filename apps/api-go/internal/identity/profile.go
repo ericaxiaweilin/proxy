@@ -73,11 +73,11 @@ import (
 )
 
 const (
-	MaxProfileName         = 60
-	MaxProfileHandle       = 60
-	MaxProfileBio          = 280
-	MaxProfileCity         = 60
-	MaxProfileAvatarPath   = 4096
+	MaxProfileName       = 60
+	MaxProfileHandle     = 60
+	MaxProfileBio        = 280
+	MaxProfileCity       = 60
+	MaxProfileAvatarPath = 4096
 )
 
 // Site-wide people search bounds (PROFILE-SEARCH-001).
@@ -325,6 +325,25 @@ func (r AuthorNameResolver) ResolveAuthorDisplayName(ctx context.Context, userAc
 	return name, true
 }
 
+// ResolveAuthorAvatarPath returns identity.profiles.avatar_path for a user
+// account (TWIN-INSIGHT-AVATAR-001). Same shape as the display-name resolver:
+// miss → false so callers keep their initial-letter fallback instead of
+// emitting a broken media URL.
+func (r AuthorNameResolver) ResolveAuthorAvatarPath(ctx context.Context, userAccountID string) (string, bool) {
+	if r.service == nil || strings.TrimSpace(userAccountID) == "" {
+		return "", false
+	}
+	profile, err := r.service.GetProfile(ctx, userAccountID)
+	if err != nil {
+		return "", false
+	}
+	path := strings.TrimSpace(profile.AvatarPath)
+	if path == "" {
+		return "", false
+	}
+	return path, true
+}
+
 // initialProfileFor derives a fresh account's home-page identity from the
 // verified login identifier that owns it (PROFILE-READ-001). Registration
 // binds email / phone but previously created no Profile row, so every new
@@ -389,9 +408,9 @@ func sanitizeHandle(local string) string {
 
 // ProfileService is the domain layer that command handlers call.
 type ProfileService struct {
-	mu     sync.Mutex
-	repo   ProfileRepository
-	clock  clock.Clock
+	mu    sync.Mutex
+	repo  ProfileRepository
+	clock clock.Clock
 }
 
 func NewProfileService(repo ProfileRepository, c clock.Clock) *ProfileService {

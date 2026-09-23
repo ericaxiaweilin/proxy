@@ -199,6 +199,34 @@ type ThresholdSource func(ctx context.Context) (Thresholds, error)
 // displayName min 1，不断整屏）。生产接线见 cmd/api/main.go。
 type DisplayNameSource func(ctx context.Context, userID string) (string, bool)
 
+// AvatarSource 把账号 id 解析成 identity.profiles.avatar_path（TWIN-INSIGHT-AVATAR-001）。
+// nil = 没接 = avatarUrl 恒空串，客户端走首字回退 —— 与原先写死 "" 行为一致，
+// 不会因为没接线就多出一个必 404 的坏 URL。生产接线见 cmd/api/main.go。
+type AvatarSource func(ctx context.Context, userID string) (string, bool)
+
+// WireAvatarURL 把 profile 的 avatar_path 翻成 wire 上的 avatarUrl。
+//
+// assets/<id> → /v1/media/thumb/<id>（客户端 resolveMediaUrl 拼 base）；
+// 已是 / 开头的服务端路径或 http(s) 绝对地址原样透出；
+// store/ photo_ ai-personas/ 等认不出的前缀返回空串 —— 拼一个必 404 的图
+// 比首字回退更糟（messages.resolveAvatarSource 同一条原则）。
+func WireAvatarURL(avatarPath string) string {
+	trimmed := strings.TrimSpace(avatarPath)
+	if trimmed == "" {
+		return ""
+	}
+	if id, ok := strings.CutPrefix(trimmed, "assets/"); ok {
+		if id == "" {
+			return ""
+		}
+		return "/v1/media/thumb/" + id
+	}
+	if strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		return trimmed
+	}
+	return ""
+}
+
 // ViewerGate 判定某账号能不能用好友洞察这套工具。
 //
 // 这不是"有没有分身"（那是各段自己的解析），也不是"成年没有"（那是
@@ -223,6 +251,8 @@ type Service struct {
 	thresholds ThresholdSource
 	now        func() time.Time
 	names      DisplayNameSource
+	// avatars 是目标头像（identity.profiles.avatar_path）解析。nil = 没接 = avatarUrl 空串。
+	avatars AvatarSource
 	// viewerGate 是洞察工具的使用权门禁（TWIN-INSIGHT-ENTITLEMENT-001）。
 	// nil = 没接 = 读和写一律拒绝。注意它跟 companionGate 是两道门：
 	// companionGate 回答"成年没有"，viewerGate 回答"有没有发你这个工具"。
@@ -258,6 +288,23 @@ func (s *Service) SetSummaryGenerator(g SummaryGenerator) { s.summaries = g }
 // SetDisplayNameSource 接上非好友目标的展示名解析。不接则陌生互动者显示
 // 账号 id（不断屏）。与 relationship 的 resolveNameCtx 同一事实源，不另写。
 func (s *Service) SetDisplayNameSource(src DisplayNameSource) { s.names = src }
+
+// SetAvatarSource 接上目标头像解析（identity.profiles.avatar_path）。
+// 不接则 avatarUrl 恒空串，客户端首字回退 —— 与修复前行为一致。
+func (s *Service) SetAvatarSource(src AvatarSource) { s.avatars = src }
+
+// avatarURLFor 解析单个目标的 wire 头像。好友与陌生人都走这一条 ——
+// 好友集只带名字，头像的唯一事实源同样是 identity.profiles。
+func (s *Service) avatarURLFor(ctx context.Context, userID string) string {
+	if s.avatars == nil {
+		return ""
+	}
+	path, ok := s.avatars(ctx, userID)
+	if !ok {
+		return ""
+	}
+	return WireAvatarURL(path)
+}
 
 // SetViewerGate 接上洞察工具使用权门禁。不接则 ListInsights / GetInsight /
 // RecordOperate / RefreshSummary 一律拒绝 —— 没发工具的账号连读都不许读，
@@ -320,7 +367,7 @@ func (s *Service) ListInsights(ctx context.Context, twinID, ownerID string) (Pay
 			// 好友集理论上不会含自己，这里是纵深防御。
 			continue
 		}
-		insights = append(insights, buildInsight(friend, byActor[friend.UserID], eventsByActor[friend.UserID], thresholds, now))
+		insights = append(insights, buildInsight(friend, byActor[friend.UserID], eventsByActor[friend.UserID], thresholds, now, s.avatarURLFor(ctx, friend.UserID)))
 	}
 	// TWIN-INSIGHT-TARGETS-001：目标集 = 好友 ∪ 有过互动的陌生人。
 	//
@@ -357,7 +404,7 @@ func (s *Service) ListInsights(ctx context.Context, twinID, ownerID string) (Pay
 				name = resolved
 			}
 		}
-		insights = append(insights, buildInsight(Friend{UserID: actor, DisplayName: name}, byActor[actor], eventsByActor[actor], thresholds, now))
+		insights = append(insights, buildInsight(Friend{UserID: actor, DisplayName: name}, byActor[actor], eventsByActor[actor], thresholds, now, s.avatarURLFor(ctx, actor)))
 	}
 	// 值得运营的排前面；同分按"最近有动静"排（刚互动过的人更该被看到），
 	// 再按 id 兜底，保证顺序完全确定 —— 不稳定的顺序会让「第一个人是谁」
@@ -670,7 +717,7 @@ func InitialOf(displayName string) string {
 	return out
 }
 
-func buildInsight(friend Friend, fact SignalFact, events []RecentEvent, t Thresholds, now time.Time) Insight {
+func buildInsight(friend Friend, fact SignalFact, events []RecentEvent, t Thresholds, now time.Time, avatarURL string) Insight {
 	signals := Signals{
 		Views7d:    fact.Views7d,
 		Messages7d: fact.Messages7d,
@@ -690,7 +737,7 @@ func buildInsight(friend Friend, fact SignalFact, events []RecentEvent, t Thresh
 		TargetID:     friend.UserID,
 		DisplayName:  displayName,
 		Initial:      InitialOf(displayName),
-		AvatarURL:    "",
+		AvatarURL:    avatarURL,
 		Signal:       SignalOf(verdict, score, t),
 		Verdict:      verdict,
 		VerdictLabel: label,

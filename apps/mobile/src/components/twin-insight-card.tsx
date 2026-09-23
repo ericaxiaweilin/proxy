@@ -4,6 +4,7 @@ import { twinScoreBand, formatTwinStay } from "@proxy/contracts";
 import { color, foundation } from "../theme";
 import { ProxyAvatar, ProxyButton } from "./proxy-foundation";
 import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
+import { twinAvatarSource } from "./twin-avatar-source";
 
 // TWIN-INSIGHT-001 — AI 分身 · 好友洞察卡（R3 实现，原型仅功能参考）。
 //
@@ -57,10 +58,12 @@ export function TwinTargetRail({
   insights,
   selectedId,
   onSelect,
+  resolveMediaUrl,
 }: {
   insights: ReadonlyArray<TwinInsight>;
   selectedId: string | undefined;
   onSelect: (targetId: string) => void;
+  resolveMediaUrl?: ((path: string) => string) | undefined;
 }): React.JSX.Element {
   return (
     <ScrollView
@@ -71,6 +74,7 @@ export function TwinTargetRail({
     >
       {insights.map((item) => {
         const selected = item.targetId === selectedId;
+        const avatarSource = twinAvatarSource(item.avatarUrl, resolveMediaUrl);
         return (
           <Pressable
             key={item.targetId}
@@ -85,7 +89,7 @@ export function TwinTargetRail({
                 accessibilityLabel={`${item.displayName}头像`}
                 fallback={item.initial}
                 size={44}
-                {...(item.avatarUrl ? { source: { uri: item.avatarUrl } } : {})}
+                {...(avatarSource ? { source: avatarSource } : {})}
               />
               <View style={[styles.signalDot, { backgroundColor: TWIN_SIGNAL_DOT[item.signal] }]} />
             </View>
@@ -108,6 +112,7 @@ export function TwinInsightCard({
   onObserve,
   onOperate,
   onRefreshSummary,
+  resolveMediaUrl,
 }: {
   insight: TwinInsight;
   thresholds: TwinInsightThresholds;
@@ -117,8 +122,10 @@ export function TwinInsightCard({
   onObserve: () => void;
   onOperate: () => void;
   onRefreshSummary: () => void;
+  resolveMediaUrl?: ((path: string) => string) | undefined;
 }): React.JSX.Element {
   const verdict = twinVerdictMeta(insight.verdict);
+  const avatarSource = twinAvatarSource(insight.avatarUrl, resolveMediaUrl);
   return (
     <View style={styles.card}>
       <Pressable
@@ -134,7 +141,7 @@ export function TwinInsightCard({
               accessibilityLabel={`${insight.displayName}头像`}
               fallback={insight.initial}
               size={44}
-              {...(insight.avatarUrl ? { source: { uri: insight.avatarUrl } } : {})}
+              {...(avatarSource ? { source: avatarSource } : {})}
             />
             <View style={[styles.signalDot, { backgroundColor: TWIN_SIGNAL_DOT[insight.signal] }]} />
           </View>

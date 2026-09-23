@@ -535,6 +535,11 @@ func main() {
 	//（relationship 的 resolveNameCtx 也是它）。nil-safe：解析不到就显示
 	// 账号 id，不断屏。
 	server.TwinInsight.SetDisplayNameSource(authorNames.ResolveAuthorDisplayName)
+	// TWIN-INSIGHT-AVATAR-001：好友洞察头像恒空白 —— buildInsight 曾写死
+	// AvatarURL: ""，好友/陌生人都不带脸。头像事实源与名字同一条
+	// identity.profiles，复用 AuthorNameResolver 的 avatar 路径读法；
+	// 解析不到保持空串（客户端首字回退），绝不下发必 404 的坏地址。
+	server.TwinInsight.SetAvatarSource(authorNames.ResolveAuthorAvatarPath)
 	// TWIN-INSIGHT-ENTITLEMENT-001：洞察工具只向实名创作者发放。
 	// 凭证 = 实名核验 VERIFIED 行（见 wire_twininsight.go），没行/过期/坏池
 	// 一律拒绝。main.go 只挂载，不写判定。

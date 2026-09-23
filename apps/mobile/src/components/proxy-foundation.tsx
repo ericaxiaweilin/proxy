@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -88,9 +88,22 @@ export function ProxyAvatar({
   size?: 32 | 44 | 60;
   source?: ImageSourcePropType;
 }): React.JSX.Element {
+  // TWIN-INSIGHT-AVATAR-001: 坏 URI（404/离网/解码失败）必须落回首字 ——
+  // 否则 <Image> 留一块透明圆，看起来像“头像空白”。uri 变了要重置，
+  // 免得换人后还挂着上一张的失败态。
+  const uri = typeof source === "object" && source !== null && "uri" in source ? source.uri : undefined;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [uri]);
+  const showImage = source !== undefined && !failed;
   return (
     <View accessibilityLabel={accessibilityLabel} style={[styles.avatar, { height: size, width: size }]}>
-      {source ? <Image source={source} style={styles.avatarImage} /> : <Text style={styles.avatarFallback}>{fallback.slice(0, 1)}</Text>}
+      {showImage ? (
+        <Image source={source} style={styles.avatarImage} onError={() => setFailed(true)} />
+      ) : (
+        <Text style={styles.avatarFallback}>{fallback.slice(0, 1)}</Text>
+      )}
     </View>
   );
 }

@@ -7,6 +7,7 @@ import {
   formatTwinStay,
   type TwinInsight,
 } from "@proxy/contracts";
+import { twinAvatarSource } from "./twin-avatar-source";
 
 // TWIN-INSIGHT-002 —— 好友洞察已经接上真服务端，原先那份虚构兜底数据
 // （6 个编造好友 + 编造分数/建议/对话摘要）已删除。
@@ -17,6 +18,10 @@ import {
 
 const sectionSource = readFileSync(
   fileURLToPath(new URL("./twin-insight-section.tsx", import.meta.url)),
+  "utf8",
+);
+const cardSource = readFileSync(
+  fileURLToPath(new URL("./twin-insight-card.tsx", import.meta.url)),
   "utf8",
 );
 
@@ -124,5 +129,50 @@ describe("TwinInsight wire contract tolerates real (empty) data", () => {
     expect(formatTwinStay(0)).toBe("0秒");
     expect(formatTwinStay(45)).toBe("45秒");
     expect(formatTwinStay(180)).toBe("3分");
+  });
+});
+
+// TWIN-INSIGHT-AVATAR-001 —— 好友洞察头像空白。
+// 服务端曾写死 AvatarURL: ""；客户端把相对路径直接塞进 <Image> 也拉不到。
+// 这里钉 wire 解析：相对路径必须经 resolveMediaUrl 拼 base；空/认不出的
+// 回落首字（undefined），绝不产出坏 URI。
+describe("TwinInsight avatar source (TWIN-INSIGHT-AVATAR-001)", () => {
+  const resolve = (path: string) => `http://api.test${path}`;
+
+  it("resolves a server-relative thumb path through resolveMediaUrl", () => {
+    expect(twinAvatarSource("/v1/media/thumb/ma_1", resolve)).toEqual({
+      uri: "http://api.test/v1/media/thumb/ma_1",
+    });
+  });
+
+  it("keeps absolute http(s) URLs as-is", () => {
+    expect(twinAvatarSource("https://cdn.test/a.png", resolve)).toEqual({
+      uri: "https://cdn.test/a.png",
+    });
+  });
+
+  it("empty avatarUrl falls back to the initial (no source)", () => {
+    expect(twinAvatarSource("", resolve)).toBeUndefined();
+    expect(twinAvatarSource("   ", resolve)).toBeUndefined();
+  });
+
+  it("unrecognized shapes never become a broken URI", () => {
+    // assets/ 存储指针不经 resolveMediaUrl 硬拼（会 404）；无 resolver 同理。
+    expect(twinAvatarSource("assets/ma_1", resolve)).toBeUndefined();
+    expect(twinAvatarSource("/v1/media/thumb/ma_1", undefined)).toBeUndefined();
+  });
+
+  it("an empty resolveMediaUrl result is treated as unavailable", () => {
+    expect(twinAvatarSource("/v1/media/thumb/ma_1", () => "")).toBeUndefined();
+  });
+
+  it("the card routes avatarUrl through twinAvatarSource, not a raw uri", () => {
+    expect(cardSource).toContain("twinAvatarSource(");
+    expect(cardSource).not.toContain("source: { uri: insight.avatarUrl }");
+    expect(cardSource).not.toContain("source: { uri: item.avatarUrl }");
+  });
+
+  it("the section threads resolveMediaUrl into rail and card", () => {
+    expect(sectionSource).toContain("resolveMediaUrl={resolveMediaUrl}");
   });
 });

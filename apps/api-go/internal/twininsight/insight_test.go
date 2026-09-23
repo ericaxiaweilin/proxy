@@ -500,6 +500,96 @@ func TestStrangerDisplayNameResolvesOrFallsBackToID(t *testing.T) {
 	}
 }
 
+// TWIN-INSIGHT-AVATAR-001：好友洞察头像曾恒空白（buildInsight 写死 AvatarURL: ""）。
+// 用户原话：「为什么好友洞察头像是空白」。三条钉住：接上 AvatarSource 后好友
+// 与陌生人都带真地址；没接/解析失败保持空串（客户端首字回退，不下发坏 URL）；
+// WireAvatarURL 认不出的前缀绝不拼成必 404 的路径。
+func TestInsightAvatarURLComesFromAvatarSource(t *testing.T) {
+	now := fixedTime()
+	repo := NewMemoryRepository()
+	repo.Seed("owner_1", Facts{
+		Signals: []SignalFact{
+			{ActorID: "friend_1", Messages7d: 3, LastSignalAt: now.Add(-time.Hour)},
+			{ActorID: "stranger", Views7d: 2, LastSignalAt: now.Add(-2 * time.Hour)},
+		},
+	})
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{
+		{UserID: "friend_1", DisplayName: "Mai", Since: now.Add(-48 * time.Hour)},
+	})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetViewerGate(allowAllViewers)
+	svc.SetClock(fixedTime)
+	svc.SetAvatarSource(func(_ context.Context, userID string) (string, bool) {
+		switch userID {
+		case "friend_1":
+			return "assets/ma_friend", true
+		case "stranger":
+			return "assets/ma_stranger", true
+		}
+		return "", false
+	})
+	payload, err := svc.ListInsights(context.Background(), "twin_1", "owner_1")
+	if err != nil {
+		t.Fatalf("ListInsights: %v", err)
+	}
+	byID := map[string]Insight{}
+	for _, in := range payload.Insights {
+		byID[in.TargetID] = in
+	}
+	if got := byID["friend_1"]; got.AvatarURL != "/v1/media/thumb/ma_friend" {
+		t.Errorf("friend avatarUrl = %q, want /v1/media/thumb/ma_friend", got.AvatarURL)
+	}
+	if got := byID["stranger"]; got.AvatarURL != "/v1/media/thumb/ma_stranger" {
+		t.Errorf("stranger avatarUrl = %q, want /v1/media/thumb/ma_stranger", got.AvatarURL)
+	}
+}
+
+func TestInsightAvatarURLStaysEmptyWithoutSource(t *testing.T) {
+	now := fixedTime()
+	repo := NewMemoryRepository()
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{
+		{UserID: "friend_1", DisplayName: "Mai", Since: now.Add(-48 * time.Hour)},
+	})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetViewerGate(allowAllViewers)
+	svc.SetClock(fixedTime)
+	// 没接 AvatarSource：保持修复前的空串，客户端走首字 —— 不能多出坏 URL。
+	payload, err := svc.ListInsights(context.Background(), "twin_1", "owner_1")
+	if err != nil {
+		t.Fatalf("ListInsights: %v", err)
+	}
+	if len(payload.Insights) != 1 {
+		t.Fatalf("expected 1 insight, got %d", len(payload.Insights))
+	}
+	if payload.Insights[0].AvatarURL != "" {
+		t.Errorf("without AvatarSource avatarUrl must be empty, got %q", payload.Insights[0].AvatarURL)
+	}
+	if payload.Insights[0].Initial == "" {
+		t.Error("initial fallback must remain non-empty when avatarUrl is empty")
+	}
+}
+
+func TestWireAvatarURLOnlyEmitsDeliverableShapes(t *testing.T) {
+	cases := map[string]string{
+		"assets/ma_abc":                 "/v1/media/thumb/ma_abc",
+		"/v1/media/thumb/ma_abc":        "/v1/media/thumb/ma_abc",
+		"https://cdn.example.com/a.png": "https://cdn.example.com/a.png",
+		"":                              "",
+		"assets/":                       "",
+		"store/x":                       "",
+		"photo_1":                       "",
+		"ai-personas/photos/ai_001.png": "",
+		"  assets/ma_spaced  ":          "/v1/media/thumb/ma_spaced",
+	}
+	for in, want := range cases {
+		if got := WireAvatarURL(in); got != want {
+			t.Errorf("WireAvatarURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // TWIN-INSIGHT-ENTITLEMENT-001：洞察工具只向后端发放了使用权的账号开放。
 //
 // 这是撮合小美/小帅、卖小美合法时间的精准投流工具，不是人人可见的公开页。

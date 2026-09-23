@@ -4,6 +4,19 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 255 — 2026-09-23
+
+- **好友洞察头像空白**（TWIN-INSIGHT-AVATAR-001）：「为什么好友洞察头像是空白」。
+  - 服务端 `buildInsight` 写死 `AvatarURL: ""` → 从 `identity.profiles.avatar_path` 解析，经
+    `WireAvatarURL` 翻成可下发形状（`/v1/media/thumb/<id>`、`/`、http(s)）；认不出前缀回空串，
+    宁回首字不发必 404 的 URL。`main.go` 挂 `SetAvatarSource(authorNames.ResolveAuthorAvatarPath)`。
+  - 客户端不再把相对路径裸塞 `<Image>`：`twin-avatar-source.ts` 的 `twinAvatarSource` 统一经
+    `resolveMediaUrl` 拼 base；`ProxyAvatar` 加 `Image onError` 回退首字（uri 变更重置失败态）。
+  - 回归契约 `TWIN-INSIGHT-AVATAR-001` 写入 `check-regression-contracts.sh`。
+- 影响文件：`apps/api-go/internal/twininsight/insight.go`、`apps/api-go/internal/identity/profile.go`、
+  `apps/api-go/cmd/api/main.go`、`apps/mobile/src/components/{proxy-foundation.tsx,twin-insight-card.tsx,
+  twin-insight-section.tsx,twin-avatar-source.ts}`、`apps/mobile/src/surfaces/AIIdentityShowcaseSurface.tsx`。
+
 ## Revision 254 — 2026-09-23
 
 - **AI 管理按原型重做 + 对话管理管对人**（AI-MANAGE-003）：用户反馈「原型给了 干的一坨屎 logo 也不对
