@@ -325,6 +325,18 @@ func (r AuthorNameResolver) ResolveAuthorDisplayName(ctx context.Context, userAc
 	return name, true
 }
 
+// ResolveAuthorBio 返回用户的主页简介（AI-MANAGE-008：代回复以本人身份说话时要知道 TA 是谁）。
+func (r AuthorNameResolver) ResolveAuthorBio(ctx context.Context, userAccountID string) (string, bool) {
+	if r.service == nil || strings.TrimSpace(userAccountID) == "" {
+		return "", false
+	}
+	profile, err := r.service.GetProfile(ctx, userAccountID)
+	if err != nil {
+		return "", false
+	}
+	return profile.Bio, strings.TrimSpace(profile.Bio) != ""
+}
+
 // ResolveAuthorAvatarPath returns identity.profiles.avatar_path for a user
 // account (TWIN-INSIGHT-AVATAR-001). Same shape as the display-name resolver:
 // miss → false so callers keep their initial-letter fallback instead of

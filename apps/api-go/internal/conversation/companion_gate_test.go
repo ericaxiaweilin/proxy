@@ -317,13 +317,14 @@ func TestHumanDirectMessageGetsTheStandInNotTheCompanion(t *testing.T) {
 	if sent.AIMessage == nil {
 		t.Fatalf("a human DM with content must still get an assistant reply, status=%q", sent.AssistantStatus)
 	}
-	if sent.AIMessage.SenderID != "proxy_ai" {
-		t.Fatalf("a human DM must be answered by proxy_ai, got %q", sent.AIMessage.SenderID)
+	// AI-MANAGE-008：真人私信的回复以那个真人本人的身份发出（代回复），不是 proxy_ai。
+	if sent.AIMessage.SenderID == "proxy_ai" || sent.AIMessage.AuthoredBy != "ai_stand_in" {
+		t.Fatalf("a human DM is answered as the represented person, got sender=%q authoredBy=%q", sent.AIMessage.SenderID, sent.AIMessage.AuthoredBy)
 	}
 	prompt := systemPromptOf(t, model)
 	// AI-MANAGE-003：真人私信的回复是「替对面那个真人代回复」，用代回复人设（见 ai_engine_gate.go），
 	// 不再是需求助手；这条负向对照的本意不变 —— 绝不能落到伴侣人设上。
-	if !strings.Contains(prompt, "代回复") {
+	if !strings.Contains(prompt, "本人") {
 		t.Fatalf("a human DM must be answered with the stand-in prompt, got: %s", prompt)
 	}
 	if strings.Contains(prompt, "AI 虚拟女孩") {

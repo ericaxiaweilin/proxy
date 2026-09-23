@@ -95,6 +95,8 @@ interface Message {
   time: string;
   isOwn: boolean;
   isAI?: boolean;
+  // AI-MANAGE-008：这条是 AI 以真人身份替 TA 发的（代回复）。对方看到「AI 代回」，本人看到「AI 替你回的」。
+  aiStandIn?: boolean;
   imageUri?: string;
   imageSource?: number | { uri: string };
   videoUri?: string;
@@ -526,6 +528,7 @@ export function ConversationSurface({
         time: new Date(String(row.createdAt ?? Date.now())).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
         isOwn: row.senderId === actorId,
         isAI: Boolean(aiAccount && row.senderId !== actorId),
+        ...(row.authoredBy === "ai_stand_in" ? { aiStandIn: true } : {}),
         isDivider: row.messageType === "SYSTEM_CONTEXT" && row.senderId === "SYSTEM",
         ...(row.messageType === "IMAGE" && typeof row.mediaRef === "string"
           ? { imageUri: `${conversationClient.baseUrl}/v1/media/thumb/${encodeURIComponent(row.mediaRef)}` }
@@ -1281,6 +1284,7 @@ export function ConversationSurface({
         ) : null}
         {message.body.trim() ? <Text style={styles.bubbleText}>{message.body}</Text> : null}
         <View style={styles.bubbleMetaRow}>
+          {message.aiStandIn ? <Text accessibilityLabel={message.isOwn ? "这条是 AI 替你回的" : "这条是 AI 代回的"} style={styles.aiStandInTag}>{message.isOwn ? "AI 替你回的" : "AI 代回"}</Text> : null}
           {message.secureMeta ? <Text style={styles.secureMeta}>{message.secureMeta}</Text> : null}
           <Text style={styles.timeInline}>{message.time}</Text>
         </View>
@@ -2027,6 +2031,7 @@ const styles = StyleSheet.create({
   bubbleMetaRow: { alignItems: "center", flexDirection: "row", justifyContent: "flex-end", marginTop: 5 },
   secureMeta: { color: "#966a19", fontSize: 11, marginRight: 4 },
   timeInline: { color: lotus.faint, fontSize: 11, lineHeight: 14 },
+  aiStandInTag: { backgroundColor: "rgba(59,111,224,0.12)", borderRadius: 6, color: "#3b6fe0", fontSize: 11, fontWeight: "700", lineHeight: 14, marginRight: 6, overflow: "hidden", paddingHorizontal: 5 },
   replyInside: { borderLeftColor: lotus.accent, borderLeftWidth: 2, marginBottom: 6, paddingLeft: 7 },
   replyInsideName: { color: lotus.goldink, fontSize: 11, fontWeight: "800", marginBottom: 1 },
   replyInsideBody: { color: "#777777", fontSize: 11, lineHeight: 15 },

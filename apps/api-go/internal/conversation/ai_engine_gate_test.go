@@ -161,7 +161,7 @@ func TestStandInAutoUsesTheOwnersStyleAndMetersTheOwner(t *testing.T) {
 	s := NewWithModelStack(NewMemoryRepository(), model)
 	var asked []string
 	s.SetAiEngineChatStateReader(stateByUser(map[string]AiEngineChatState{
-		"user_002": {ChatPermission: "auto", Tone: "lively", ReplyLength: "xshort", Emoji: "never"},
+		"user_002": {ChatPermission: "auto", Tone: "lively", ReplyLength: "xshort", Emoji: "never", OwnerName: "Linh", OwnerBio: "胶片 / 街拍"},
 	}, &asked))
 	var meteredUser string
 	s.SetTokenMeter(func(_ context.Context, userID string, _, _ int) { meteredUser = userID })
@@ -177,10 +177,17 @@ func TestStandInAutoUsesTheOwnersStyleAndMetersTheOwner(t *testing.T) {
 	if strings.Contains(prompt, "需求构建助手") {
 		t.Fatalf("a stand-in reply must not use the demand-assistant persona: %s", prompt)
 	}
-	for _, want := range []string{"代回复", "活泼", "不超过 15 个字", "不要使用 emoji", "不能替 TA 答应"} {
+	// AI-MANAGE-008：代回复 = 以真人本人身份、第一人称说话，带本人名字和简介。
+	for _, want := range []string{"「Linh」本人", "第一人称", "胶片 / 街拍", "活泼", "不超过 15 个字", "不要使用 emoji", "我确认一下再回你"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("stand-in prompt must carry %q: %s", want, prompt)
 		}
+	}
+	if strings.Contains(prompt, "助手") && !strings.Contains(prompt, "不要说自己是助手") {
+		t.Fatalf("a stand-in speaks as the person, not as an assistant: %s", prompt)
+	}
+	if opened.AIMessage.SenderID != "user_002" || opened.AIMessage.AuthoredBy != "ai_stand_in" {
+		t.Fatalf("a stand-in reply is sent as the represented person and marked AI-authored: sender=%q authoredBy=%q", opened.AIMessage.SenderID, opened.AIMessage.AuthoredBy)
 	}
 	if meteredUser != "user_002" {
 		t.Fatalf("tokens of a stand-in reply belong to the represented person, metered %q", meteredUser)

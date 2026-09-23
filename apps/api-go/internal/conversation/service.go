@@ -66,6 +66,8 @@ type Message struct {
 	ReplyTo        *string            `json:"replyTo,omitempty"`    // QUOTE-REPLY-001: 引用的消息 ID（同会话内）；客户端按 ID 解析引用块
 	SenderID       string             `json:"senderId"`
 	SenderSnapshot *IdentitySnapshot  `json:"senderSnapshot,omitempty"` // v1: 发送时固化的 displayName/avatar/username
+	// AI-MANAGE-008：这条是 AI 替 SenderID 那个真人写的（代回复）："ai_stand_in"；空 = 人自己写的。
+	AuthoredBy string `json:"authoredBy,omitempty"`
 	MessageType    string             `json:"messageType"`              // v0: TEXT | IMAGE | VIDEO | LOCATION | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
 	Kind           string             `json:"kind,omitempty"`           // v1: text|image|video|file|location|contact|proxy_object|poll|call_recording|system_event
 	Body           string             `json:"body,omitempty"`           // v1 text 仍用 body
@@ -1778,6 +1780,11 @@ func (s *Service) generateAIReplyInternal(ctx context.Context, conv Conversation
 	if isPlatformPersona {
 		aiMsg.SenderID = persona.AccountID
 		aiMsg.SenderSnapshot = aiIdentitySnapshot(persona)
+	} else if isStandIn {
+		// AI-MANAGE-008：代回复以真人本人的身份发出 —— 发送者就是 TA，不是 proxy_ai；
+		// AuthoredBy 标明是 AI 替 TA 写的（双方界面显示「AI 代回」）。
+		aiMsg.SenderID = standIn.Owner
+		aiMsg.AuthoredBy = "ai_stand_in"
 	}
 	if !persist {
 		return &aiMsg, completion.PromptTokens, completion.OutputTokens

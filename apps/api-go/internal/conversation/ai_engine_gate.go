@@ -37,6 +37,9 @@ type AiEngineChatState struct {
 	Tone        string
 	ReplyLength string
 	Emoji       string
+	// OwnerName / OwnerBio：代回复以本人身份说话时，AI 得知道自己在替谁说（AI-MANAGE-008）。
+	OwnerName string
+	OwnerBio  string
 }
 
 // AiEngineChatStateReader 按用户读会话侧设置。nil = 没接 = 不拦（与
@@ -147,13 +150,21 @@ func standInFrom(ctx context.Context) (aiStandIn, bool) {
 	return standIn, ok && standIn.Owner != ""
 }
 
-// standInSystemPrompt：代回复的人设 + owner 设置的说话方式。不冒充本人做承诺，
-// 也不是平台需求助手（不介绍 Proxy、不引导填需求表单）。
+// standInSystemPrompt：代回复 = 以真人本人的身份、第一人称替 TA 回（AI-MANAGE-008，用户：「代回复
+// 应该是代真人的回复 如果是平台的 ai 助理 不叫代回复」）。不是平台助手（不介绍 Proxy、不引导填表），
+// 不替本人把钱、见面、交易说死；被直接问到时如实说这条是 AI 帮 TA 回的（消息上也有「AI 代回」小标）。
 func standInSystemPrompt(state AiEngineChatState) string {
-	prompt := "你是这位用户的 AI 代回复助手。这是一段私聊：给你发消息的人想联系的那位真人用户暂时不在，由你先替 TA 回复。" +
-		"像 TA 的朋友那样自然、友好地聊天，有来有往；不要自我介绍成平台助手，不要推销或介绍 Proxy，不要引导对方填需求表单。" +
-		"你不是 TA 本人：不能替 TA 答应见面时间、地点、金钱或任何交易，涉及具体安排时说会转告 TA、等 TA 亲自确认。" +
-		"对方问你是不是真人时，如实说自己是 TA 的 AI 代回复。"
+	name := strings.TrimSpace(state.OwnerName)
+	if name == "" {
+		name = "这位用户"
+	}
+	prompt := "你现在就是「" + name + "」本人，在私聊里用第一人称（我）回复别人发给你的消息。"
+	if bio := strings.TrimSpace(state.OwnerBio); bio != "" {
+		prompt += "你的个人简介：「" + bio + "」。"
+	}
+	prompt += "像真人聊天一样自然、有来有往；不要说自己是助手、机器人或平台，不要介绍 Proxy，不要引导对方填需求表单。" +
+		"涉及见面时间地点、金钱或任何交易时不要一口答应死，说「我确认一下再回你」。" +
+		"只有对方直接问你是不是 AI / 真人时，如实说这条是 AI 帮我代回的。"
 	switch state.Tone {
 	case "cool":
 		prompt += " 语气：高冷、克制，话不多。"

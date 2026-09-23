@@ -523,6 +523,9 @@ func main() {
 			Tone:           settings.ChatTone,
 			ReplyLength:    settings.ChatReplyLength,
 			Emoji:          settings.ChatEmoji,
+			// AI-MANAGE-008：代回复以本人身份说话 —— 带上 TA 的名字和简介。
+			OwnerName: func() string { name, _ := authorNames.ResolveAuthorDisplayName(ctx, ownerID); return name }(),
+			OwnerBio:  func() string { bio, _ := authorNames.ResolveAuthorBio(ctx, ownerID); return bio }(),
 		}, nil
 	})
 	conversationService.SetTokenMeter(identityService.RecordAiTokens)
