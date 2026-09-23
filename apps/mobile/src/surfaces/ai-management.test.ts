@@ -9,7 +9,7 @@ vi.mock("../ai-engine-client", () => ({ AiEngineClient: class {} }));
 vi.mock("../composer-body", () => ({ formatRelativeTime: () => "" }));
 
 import { decodePromptHistory, encodePromptHistoryEntry, formatTokens, promptForScene } from "./ai-management";
-import { AI_CAMERA_ICONS, AI_CAMERA_MOVES, AI_POSES, AI_POSE_ICONS, AI_SCENES, AI_VENDORS } from "./ai-management-data";
+import { AI_CAMERA_ICONS, AI_CAMERA_MOVES, AI_MANAGE_ICONS, AI_POSES, AI_POSE_ICONS, AI_SCENES, AI_VENDORS } from "./ai-management-data";
 
 // AI-MANAGE-003（2026-09-23，用户：「原型给了 干的一坨屎 logo 也不对 功能也不对」）：
 // 整页按原型 deepseek_html_20260923_83b40b (1).html 重做。钉住：
@@ -51,6 +51,17 @@ describe("AI management surface (AI-MANAGE-003)", () => {
     for (const camera of AI_CAMERA_MOVES) expect(AI_CAMERA_ICONS[camera.id]).toContain("<svg");
     expect(AI_VENDORS[0]).toMatchObject({ id: "platform_default", pinned: true, recommend: true });
     expect(AI_VENDORS.filter((v) => !v.pinned).every((v) => v.models.length === 3 && v.logoXml.includes("<svg"))).toBe(true);
+  });
+
+  it("uses the user's management icons, not emoji on gradient tiles (AI-MANAGE-004)", () => {
+    // 用户给的 proxy_management_icons_svg：对话 #E9EEFF 气泡、图片 #E6F7EF 相框、动态 #FFF4E3 文稿+笔。
+    expect(AI_MANAGE_ICONS.chat).toContain('fill="#E9EEFF"');
+    expect(AI_MANAGE_ICONS.image).toContain('fill="#E6F7EF"');
+    expect(AI_MANAGE_ICONS.post).toContain('fill="#FFF4E3"');
+    expect(surface).toContain("<ManageCard iconXml={AI_MANAGE_ICONS.chat}");
+    expect(surface).toContain("<ManageCard iconXml={AI_MANAGE_ICONS.image}");
+    expect(surface).toContain("<ManageCard iconXml={AI_MANAGE_ICONS.post}");
+    expect(surface).not.toContain('icon="🖼️"');
   });
 
   it("saves every choice to the server optimistically and reverts on failure", () => {

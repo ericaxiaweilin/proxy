@@ -8,6 +8,7 @@ import { formatRelativeTime } from "../composer-body";
 import {
   AI_CAMERA_ICONS,
   AI_CAMERA_MOVES,
+  AI_MANAGE_ICONS,
   AI_POSES,
   AI_POSE_ICONS,
   AI_SCENES,
@@ -455,9 +456,9 @@ export function AIManagementSurface({
 
         <Text style={styles.sectionTitle}>管理项</Text>
         <View style={styles.manageList}>
-          <ManageCard icon="💬" colors={["#e8f2ff", "#d0e2ff"]} name="对话管理" badge={chatBadge} activity={chatActivity} paused={paused} disabled={!ready} onPress={() => { setChatTab("style"); setSheet("chat"); }} />
-          <ManageCard icon="🖼️" colors={["#f0e8ff", "#e0d0ff"]} name="图片管理" badge={imageBadge} activity={imageActivity} paused={paused} disabled={!ready} onPress={() => { setImageTab("model"); setSheet("image"); }} />
-          <ManageCard icon="✍️" colors={["#e8f7ee", "#d0ebda"]} name="动态管理" badge={postBadge} activity={postActivity} paused={paused} disabled={!ready} onPress={() => setSheet("post")} />
+          <ManageCard iconXml={AI_MANAGE_ICONS.chat} name="对话管理" badge={chatBadge} activity={chatActivity} paused={paused} disabled={!ready} onPress={() => { setChatTab("style"); setSheet("chat"); }} />
+          <ManageCard iconXml={AI_MANAGE_ICONS.image} name="图片管理" badge={imageBadge} activity={imageActivity} paused={paused} disabled={!ready} onPress={() => { setImageTab("model"); setSheet("image"); }} />
+          <ManageCard iconXml={AI_MANAGE_ICONS.post} name="动态管理" badge={postBadge} activity={postActivity} paused={paused} disabled={!ready} onPress={() => setSheet("post")} />
         </View>
         {loadError && ready === false ? (
           <Pressable accessibilityRole="button" onPress={() => { setLoadError(undefined); load(); }} style={styles.retry}>
@@ -479,8 +480,8 @@ export function AIManagementSurface({
   );
 }
 
-function ManageCard({ icon, colors, name, badge, activity, paused, disabled, onPress }: {
-  icon: string; colors: [string, string]; name: string; badge: Badge; activity: string; paused: boolean; disabled: boolean; onPress: () => void;
+function ManageCard({ iconXml, name, badge, activity, paused, disabled, onPress }: {
+  iconXml: string; name: string; badge: Badge; activity: string; paused: boolean; disabled: boolean; onPress: () => void;
 }): React.JSX.Element {
   return (
     <Pressable
@@ -491,8 +492,8 @@ function ManageCard({ icon, colors, name, badge, activity, paused, disabled, onP
       style={({ pressed }) => [styles.manageCard, paused && styles.manageCardPaused, pressed && { transform: [{ scale: 0.985 }] }]}
     >
       <View style={styles.manageIcon}>
-        <GradientFill id={`manage-${name}`} from={colors[0]} to={colors[1]} radius={13} />
-        <Text style={styles.manageIconText}>{icon}</Text>
+        {/* AI-MANAGE-004：用户给的图标自带圆角底色，原样画，不再叠渐变底 + emoji。 */}
+        <SvgXml xml={iconXml} width={42} height={42} />
       </View>
       <View style={styles.manageInfo}>
         <View style={styles.manageNameRow}>
@@ -856,7 +857,6 @@ const styles = StyleSheet.create({
   manageCard: { alignItems: "center", backgroundColor: "#fff", borderColor: "#f0f0f0", borderRadius: 16, borderWidth: 1.5, flexDirection: "row", gap: 14, paddingHorizontal: 16, paddingVertical: 14 },
   manageCardPaused: { opacity: 0.5 },
   manageIcon: { alignItems: "center", borderRadius: 13, height: 42, justifyContent: "center", overflow: "hidden", width: 42 },
-  manageIconText: { fontSize: 20 },
   manageInfo: { flex: 1, minWidth: 0 },
   manageNameRow: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 4 },
   manageName: { color: INK, fontSize: 14.5, fontWeight: "800" },

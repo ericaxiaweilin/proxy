@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 256 — 2026-09-23
+
+- **AI 管理的三张管理卡换用户给的图标**（AI-MANAGE-004）：用户反馈「把这 3 个 logo 换一下 目前的 ai 管理
+  图片管理 logo 有点难看」。对话 / 图片 / 动态管理卡改用 `proxy_management_icons_svg` 里的
+  conversation / image / dynamic-management.svg（原样内嵌、自带圆角底色），不再是 emoji + 渐变底。
+- 影响文件：`apps/mobile/src/surfaces/ai-management.tsx`、`apps/mobile/src/surfaces/ai-management-data.ts`。
+
 ## Revision 255 — 2026-09-23
 
 - **好友洞察头像空白**（TWIN-INSIGHT-AVATAR-001）：「为什么好友洞察头像是空白」。
