@@ -9,6 +9,7 @@ import { Image } from "expo-image";
 import { getAiScenePhoto } from "../media/asset-sources";
 import { fetchAiCatalog, sortCatalogVendors, type AiCatalog } from "../ai-catalog-client";
 import { AiPersonaClient, type TwinConsent } from "../ai-persona-client";
+import { promptLikenessConsent } from "../components/likeness-consent-prompt";
 import {
   AI_CAMERA_ICONS,
   AI_CAMERA_MOVES,
@@ -357,42 +358,39 @@ export function AIManagementSurface({
   // LC-07 likeness consent（VISUAL）。没授权，服务端给模型的读图入口一张都不给（likenessReferencePhotos）。
   const personaClient = useMemo(() => new AiPersonaClient({ authClient }), [authClient]);
   const [likeness, setLikeness] = useState<{ status: "loading" | "none" | "granted" | "error"; personaId?: string; consent?: TwinConsent; busy?: boolean }>({ status: "loading" });
+  // AI-MANAGE-010：只读 —— 没有已授权的分身就是没有（不再 ensurePersonalTwin 静默建）。
+  // 进页面时如果还没授权，弹一次授权提示（用户：「点击进入自动默认授权 但是要弹授权提示」）。
+  const promptedOnEntry = useRef(false);
+  const grantLikeness = useCallback(() => {
+    if (!viewerAccountId) return;
+    setLikeness((prev) => ({ ...prev, busy: true }));
+    personaClient.grantLikeness(viewerAccountId)
+      .then(({ twin, consent }) => { setLikeness({ status: "granted", personaId: twin.id, consent }); showToast("已授权"); })
+      .catch(() => { setLikeness((prev) => ({ ...prev, busy: false })); showToast("授权没成功，请稍后再试"); });
+  }, [personaClient, showToast, viewerAccountId]);
   const loadLikeness = useCallback(() => {
     if (!viewerAccountId) { setLikeness({ status: "error" }); return; }
     setLikeness((prev) => ({ ...prev, status: "loading" }));
     void (async () => {
       try {
-        const twin = await personaClient.ensurePersonalTwin(viewerAccountId);
-        const consent = await personaClient.getLiveConsent(twin.id, viewerAccountId);
-        const granted = consent && (consent.consentKind === "VISUAL" || consent.consentKind === "VISUAL_AND_VOICE");
-        setLikeness(granted ? { status: "granted", personaId: twin.id, consent } : { status: "none", personaId: twin.id });
+        const found = await personaClient.findAuthorizedTwin(viewerAccountId);
+        if (found) {
+          setLikeness({ status: "granted", personaId: found.twin.id, consent: found.consent });
+          return;
+        }
+        setLikeness({ status: "none" });
+        if (!promptedOnEntry.current) {
+          promptedOnEntry.current = true;
+          promptLikenessConsent(grantLikeness);
+        }
       } catch {
         setLikeness({ status: "error" });
       }
     })();
-  }, [personaClient, viewerAccountId]);
+  }, [grantLikeness, personaClient, viewerAccountId]);
   useEffect(() => { loadLikeness(); }, [loadLikeness]);
 
-  const askGrantLikeness = useCallback(() => {
-    const personaId = likeness.personaId;
-    if (!personaId || !viewerAccountId) return;
-    Alert.alert(
-      "授权 AI 使用你的形象",
-      "同意后，AI 可以读取你个人主页图库里你自己上传的照片，用来生成你的形象图。只用于你自己的 AI 分身，可以随时在这里撤回。",
-      [
-        { text: "取消", style: "cancel" },
-        {
-          text: "同意授权",
-          onPress: () => {
-            setLikeness((prev) => ({ ...prev, busy: true }));
-            personaClient.grantConsent(personaId, viewerAccountId, "VISUAL")
-              .then((consent) => { setLikeness({ status: "granted", personaId, consent }); showToast("已授权"); })
-              .catch(() => { setLikeness((prev) => ({ ...prev, busy: false })); showToast("授权没成功，请稍后再试"); });
-          },
-        },
-      ],
-    );
-  }, [likeness.personaId, personaClient, showToast, viewerAccountId]);
+  const askGrantLikeness = useCallback(() => promptLikenessConsent(grantLikeness), [grantLikeness]);
 
   const askRevokeLikeness = useCallback(() => {
     const personaId = likeness.personaId;

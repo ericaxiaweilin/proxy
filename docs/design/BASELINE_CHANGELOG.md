@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 260 — 2026-09-23
+
+- **AI 分身不再静默自动建，进入时先弹授权提示**（AI-MANAGE-010）：用户规则「ai 分身只给小美授权使用 没有这个授权的
+  就是没有」「目前是测试账户 全部权限 后期…必须要等你申请接单权限 验证你是小美 会自动更新展示 点击进入自动默认授权
+  但是要弹授权提示」。删除 `ensurePersonalTwin`（TWIN-SUBSPACE-ACTIVATE-001 的进页面就地建分身）：
+  - `findAuthorizedTwin` 只读：有分身且本人形象授权仍生效才算有分身，没授权的旧分身当作没有；
+  - 进入 AI 管理 / 好友洞察时若未授权，弹一次授权提示（`likeness-consent-prompt.ts`），同意才 `grantLikeness`
+    （此时才建分身并写 VISUAL 授权）；「暂不」则什么都不建，显示未授权态 +「授权形象」按钮。
+  - 接单权限 / 小美验证（入口只对小美展示）按用户要求本次不做；当前测试账号全部可见。
+- 影响文件：`apps/mobile/src/surfaces/ai-management.tsx`、`apps/mobile/src/components/twin-insight-section.tsx`。
+
 ## Revision 259 — 2026-09-23
 
 - **AI 管理加「形象授权」**（AI-MANAGE-009）：用户要求「模型提示要有本人授权 否则很容易侵犯肖像权 所以这个

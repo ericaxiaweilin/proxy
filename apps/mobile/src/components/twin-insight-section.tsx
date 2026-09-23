@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type {
   ListTwinInsightsPayload,
@@ -9,6 +9,7 @@ import { AiPersonaClient } from "../ai-persona-client";
 import type { TransportResponse, TransportRequest } from "../auth-client";
 import { color, foundation } from "../theme";
 import { ProxyEmptyState } from "./proxy-foundation";
+import { promptLikenessConsent } from "./likeness-consent-prompt";
 import { TwinInsightCard, TwinTargetRail } from "./twin-insight-card";
 
 // TWIN-INSIGHT-002 — AI 分身中心「好友洞察」段。
@@ -72,6 +73,16 @@ export function TwinInsightSection({ authClient, ownerId, resolveMediaUrl }: {
   const [expanded, setExpanded] = useState(false);
   const [acting, setActing] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
+  // AI-MANAGE-010：没有已授权的分身 = 没有分身。进来时弹一次授权提示，同意才建分身并授权。
+  const [needsLikeness, setNeedsLikeness] = useState(false);
+  const promptedOnEntry = useRef(false);
+  const grantAndReload = (): void => {
+    if (!ownerId) return;
+    setLoading(true);
+    personaClient.grantLikeness(ownerId)
+      .then(() => { setNeedsLikeness(false); setAttempt((prev) => prev + 1); })
+      .catch((err: unknown) => { setLoading(false); setError(messageFor(err)); });
+  };
 
   useEffect(() => {
     if (!ownerId) {
@@ -85,11 +96,22 @@ export function TwinInsightSection({ authClient, ownerId, resolveMediaUrl }: {
     setError(undefined);
     void (async () => {
       try {
-        // TWIN-SUBSPACE-ACTIVATE-001：分身是个人副空间，进页面就地激活 ——
-        // 有就用，没有就建。建失败（年龄门禁/断网）进错误态，不进空态：
-        // 空态只留给"分身在但没目标"（见下面 ProxyEmptyState）。
-        const twin = await personaClient.ensurePersonalTwin(ownerId);
-        const data = await insightClient.listInsights(twin.id);
+        // AI-MANAGE-010（取代 TWIN-SUBSPACE-ACTIVATE-001 的「进页面就地建分身」）：用户规则
+        //「ai 分身只给小美授权使用 没有这个授权的就是没有」「点击进入自动默认授权 但是要弹授权提示」。
+        // 只读找已授权的分身；没有就弹授权提示，本人同意后才建分身（grantAndReload）。
+        const found = await personaClient.findAuthorizedTwin(ownerId);
+        if (!found) {
+          if (!cancelled) {
+            setNeedsLikeness(true);
+            setPayload(undefined);
+            if (!promptedOnEntry.current) {
+              promptedOnEntry.current = true;
+              promptLikenessConsent(grantAndReload);
+            }
+          }
+          return;
+        }
+        const data = await insightClient.listInsights(found.twin.id);
         if (!cancelled) {
           setPayload(data);
           setSelectedId(data.insights[0]?.targetId);
@@ -157,6 +179,13 @@ export function TwinInsightSection({ authClient, ownerId, resolveMediaUrl }: {
         </View>
       ) : loading && !payload ? (
         <Text style={styles.stateText}>正在读取好友洞察…</Text>
+      ) : needsLikeness ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>还没有 AI 分身：授权 AI 使用你的形象后才会开启。</Text>
+          <Pressable accessibilityLabel="授权形象，开启 AI 分身" onPress={() => promptLikenessConsent(grantAndReload)} style={styles.retryButton}>
+            <Text style={styles.retryText}>授权形象</Text>
+          </Pressable>
+        </View>
       ) : insights.length === 0 ? (
         <ProxyEmptyState title="还没有好友洞察" sub="有人找你聊天或来看过主页后，这里会告诉你谁值得运营" />
       ) : (

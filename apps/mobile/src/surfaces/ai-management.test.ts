@@ -91,14 +91,20 @@ describe("AI management surface (AI-MANAGE-003)", () => {
     expect(surface).toContain("Animated.loop(Animated.sequence([");
   });
 
-  it("asks for likeness authorisation before AI may use the owner's photos (AI-MANAGE-009)", () => {
-    // 形象授权 = 本人对自己 AI 分身的 VISUAL likeness consent；授权 / 撤回都要本人二次确认。
+  it("asks for likeness authorisation before AI may use the owner's photos (AI-MANAGE-009/010)", () => {
+    // 形象授权 = 本人对自己 AI 分身的 VISUAL likeness consent。进页面只读；没授权就弹一次授权提示，
+    // 同意才建分身并授权（grantLikeness）；绝不静默建分身（ensurePersonalTwin 已删除）。
     expect(surface).toContain("<LikenessCard likeness={likeness} onGrant={askGrantLikeness} onRevoke={askRevokeLikeness} onRetry={loadLikeness} />");
-    expect(surface).toContain('personaClient.grantConsent(personaId, viewerAccountId, "VISUAL")');
+    expect(surface).toContain("personaClient.findAuthorizedTwin(viewerAccountId)");
+    expect(surface).toContain("promptLikenessConsent(grantLikeness);");
+    expect(surface).toContain("personaClient.grantLikeness(viewerAccountId)");
     expect(surface).toContain("personaClient.revokeConsent(personaId, viewerAccountId)");
-    expect(surface).toContain('Alert.alert(\n      "授权 AI 使用你的形象"');
+    expect(surface).not.toContain("ensurePersonalTwin(");
     expect(surface).toContain("不授权，模型读不到你的个人相册");
     expect(surface).toContain('name={likenessGranted ? "已授权使用你的形象" : "还没有授权形象"}');
+    const insight = read("../components/twin-insight-section.tsx");
+    expect(insight).not.toContain("ensurePersonalTwin(");
+    expect(insight).toContain("personaClient.findAuthorizedTwin(ownerId)");
   });
 
   it("saves every choice to the server optimistically and reverts on failure", () => {

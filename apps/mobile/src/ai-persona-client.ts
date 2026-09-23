@@ -166,14 +166,24 @@ export class AiPersonaClient {
     return payload;
   }
 
-  // 个人副空间激活（TWIN-SUBSPACE-ACTIVATE-001）：分身是个人主页的副空间，
-  // 不是要授权才开的功能 —— 进页面就要有个空间可用。有就直接用第一个，
-  // 没有就地建一个（默认名，用户可在别处改）。建失败（年龄门禁/断网）
-  // 直接抛调用方，由调用方走错误态 —— 不吞错、不静默。
-  public async ensurePersonalTwin(ownerId: string): Promise<TwinPersona> {
-    const existing = await this.listMine(ownerId);
-    if (existing[0]) return existing[0];
-    return this.createTwin({ ownerId, displayName: "我的AI分身" });
+  // AI-MANAGE-010（2026-09-23，用户：「ai 分身只给小美授权使用 没有这个授权的就是没有」「点击进入自动默认
+  // 授权 但是要弹授权提示」）：取代 TWIN-SUBSPACE-ACTIVATE-001 的「进页面就地建分身」。
+  //   - findAuthorizedTwin：只读。本人名下有分身**且**本人对它的形象授权（VISUAL / VISUAL_AND_VOICE）
+  //     仍然生效，才算「有分身」；没授权的分身（比如以前被自动建出来的）当作没有。
+  //   - grantLikeness：只在本人点了授权弹窗的「同意」之后调用 —— 这时才建分身（没有的话）并写授权。
+  // 谁都不许再静默建分身。
+  public async findAuthorizedTwin(ownerId: string): Promise<{ twin: TwinPersona; consent: TwinConsent } | undefined> {
+    for (const twin of await this.listMine(ownerId)) {
+      const consent = await this.getLiveConsent(twin.id, ownerId);
+      if (consent && (consent.consentKind === "VISUAL" || consent.consentKind === "VISUAL_AND_VOICE")) return { twin, consent };
+    }
+    return undefined;
+  }
+
+  public async grantLikeness(ownerId: string): Promise<{ twin: TwinPersona; consent: TwinConsent }> {
+    const twin = (await this.listMine(ownerId))[0] ?? await this.createTwin({ ownerId, displayName: "我的AI分身" });
+    const consent = await this.grantConsent(twin.id, ownerId, "VISUAL");
+    return { twin, consent };
   }
 
   // 没有生效授权时返回 undefined（服务端 204），不是抛错 ——

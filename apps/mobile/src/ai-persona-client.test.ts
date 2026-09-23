@@ -116,45 +116,47 @@ describe("AiPersonaClient", () => {
   });
 });
 
-describe("AiPersonaClient.ensurePersonalTwin (TWIN-SUBSPACE-ACTIVATE-001)", () => {
-  const twin = { id: "aip_1", ownerId: "acct_1", displayName: "我的分身", personaType: "USER_TWIN", createdAt: "2026-09-18T00:00:00Z" };
+describe("AiPersonaClient likeness-gated twin (AI-MANAGE-010)", () => {
+  // 用户：「ai 分身只给小美授权使用 没有这个授权的就是没有」「点击进入自动默认授权 但是要弹授权提示」。
+  // 取代 TWIN-SUBSPACE-ACTIVATE-001 的「进页面就地建分身」：查只读，建分身只在本人同意授权之后。
+  const twin = { id: "aip_1", ownerId: "acct_1", displayName: "我的AI分身", personaType: "USER_TWIN", createdAt: "2026-09-18T00:00:00Z" };
+  const consent = { id: "lc_1", personaId: "aip_1", subjectId: "acct_1", consentKind: "VISUAL", termsVersion: "terms-1.1", grantedAt: "2026-09-23T00:00:00Z" };
 
-  it("有分身直接用，不发创建请求", async () => {
-    const seen: Array<{ path: string; body: unknown }> = [];
-    const client = new AiPersonaClient({
-      authClient: stubTransport((path: string, body: unknown) => {
-        seen.push({ path, body });
-        return { status: 200, payload: { personas: [twin] } };
-      }),
-    });
-    await expect(client.ensurePersonalTwin("acct_1")).resolves.toEqual(twin);
-    expect(seen).toEqual([{ path: "/v1/ai/personas?ownerId=acct_1", body: undefined }]);
-  });
-
-  it("没分身就地建一个个人副空间", async () => {
-    const seen: Array<{ path: string; body: unknown }> = [];
-    const client = new AiPersonaClient({
-      authClient: stubTransport((path: string, body: unknown) => {
-        seen.push({ path, body });
-        if (path.startsWith("/v1/ai/personas?")) return { status: 200, payload: { personas: [] } };
-        return { status: 201, payload: { ...twin, id: "aip_new", displayName: "我的AI分身" } };
-      }),
-    });
-    const out = await client.ensurePersonalTwin("acct_1");
-    expect(out.id).toBe("aip_new");
-    expect(seen[1]).toEqual({
-      path: "/v1/ai/personas",
-      body: { ownerId: "acct_1", displayName: "我的AI分身", personaType: "USER_TWIN", description: "" },
-    });
-  });
-
-  it("建失败直接抛，不吞错（年龄门禁能透出来）", async () => {
+  it("a twin without a live likeness consent counts as no twin, and looking never creates one", async () => {
+    const seen: string[] = [];
     const client = new AiPersonaClient({
       authClient: stubTransport((path: string) => {
-        if (path.startsWith("/v1/ai/personas?")) return { status: 200, payload: { personas: [] } };
-        return { status: 400, payload: { error: "create_failed", reason: "no age evidence on file for this account" } };
+        seen.push(path);
+        if (path.startsWith("/v1/ai/personas?")) return { status: 200, payload: { personas: [twin] } };
+        return { status: 204, payload: {} };
       }),
     });
-    await expect(client.ensurePersonalTwin("acct_1")).rejects.toBeInstanceOf(TwinNoAgeEvidenceError);
+    await expect(client.findAuthorizedTwin("acct_1")).resolves.toBeUndefined();
+    expect(seen.every((path) => !path.endsWith("/v1/ai/personas"))).toBe(true);
+  });
+
+  it("finds the twin only when the owner's visual consent is live", async () => {
+    const client = new AiPersonaClient({
+      authClient: stubTransport((path: string) => {
+        if (path.startsWith("/v1/ai/personas?")) return { status: 200, payload: { personas: [twin] } };
+        return { status: 200, payload: consent };
+      }),
+    });
+    await expect(client.findAuthorizedTwin("acct_1")).resolves.toEqual({ twin, consent });
+  });
+
+  it("creates the twin and grants consent only when the owner agrees", async () => {
+    const seen: Array<{ path: string; body: unknown }> = [];
+    const client = new AiPersonaClient({
+      authClient: stubTransport((path: string, body: unknown) => {
+        seen.push({ path, body });
+        if (path.startsWith("/v1/ai/personas?")) return { status: 200, payload: { personas: [] } };
+        if (path === "/v1/ai/personas") return { status: 201, payload: twin };
+        return { status: 201, payload: consent };
+      }),
+    });
+    await expect(client.grantLikeness("acct_1")).resolves.toEqual({ twin, consent });
+    expect(seen.map((entry) => entry.path)).toEqual(["/v1/ai/personas?ownerId=acct_1", "/v1/ai/personas", "/v1/ai/personas/aip_1/consents"]);
+    expect(seen[2]!.body).toEqual({ subjectId: "acct_1", consentKind: "VISUAL" });
   });
 });
