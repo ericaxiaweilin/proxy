@@ -57,13 +57,19 @@ const (
 // most recent state change; the API rewrites it on accept
 // and on a new request after a previous block.
 type FriendshipRecord struct {
-	ID           string           `json:"id"`
-	UserA        string           `json:"userA"`
-	UserB        string           `json:"userB"`
-	State        FriendshipStatus `json:"state"`
-	RequesterID  string           `json:"requesterId"`
-	CreatedAt    time.Time        `json:"createdAt"`
-	UpdatedAt    time.Time        `json:"updatedAt"`
+	ID          string           `json:"id"`
+	UserA       string           `json:"userA"`
+	UserB       string           `json:"userB"`
+	State       FriendshipStatus `json:"state"`
+	RequesterID string           `json:"requesterId"`
+	// FRIEND-BLOCK-UNDO-001: 谁按的拉黑。显式 Unblock 命令（block_reentry_test
+	// 要求"必须是一个显式命令"）只能由按的人发起，而当前 schema 记不住这个
+	// 人 —— RequesterID 在旧行里是"上次请求的人"，分不清拉黑方向。
+	// 空 = 未知（本字段落地前的历史 BLOCKED 行），未知一律按"对方拉的"处理。
+	// 本字段只做记录，不改变任何现有放行/拒绝（pinned 测试原样全绿）。
+	BlockedBy string    `json:"blockedBy,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // DisplayNameHint lets a caller attach a project-side
@@ -129,7 +135,8 @@ func NewWithRepository(repo Repository) *Service {
 	return &Service{repo: repo, clock: clock.System{}}
 }
 
-func (s *Service) SetRepository(repo Repository)    { s.repo = repo }
+func (s *Service) SetRepository(repo Repository) { s.repo = repo }
+
 // SetCannotFriendTarget 接上"不能成为双向好友"的账号目录（平台 AI）。
 // nil = 不做额外分类；生产必须接（check-regression-contracts.sh 反向钉）。
 func (s *Service) SetCannotFriendTarget(fn func(targetUserID string) bool) { s.cannotFriendTarget = fn }
@@ -368,6 +375,15 @@ func (s *Service) transition(ctx context.Context, e command.Envelope, target Fri
 	now := s.clock.Now().UTC()
 	rec.State = target
 	rec.UpdatedAt = now
+	// FRIEND-BLOCK-UNDO-001：按下拉黑的人记下来，给未来的显式 Unblock 命令
+	// 当唯一凭证（block_reentry_test：解除必须是显式命令，不能是重发）。
+	// 非 BLOCKED 目标清掉（接受/忽略后不再有 blocker）。只记录，不改变放行：
+	// SendFriendRequest 遇到 BLOCKED 仍然两边都拒（pinned 测试不动）。
+	if target == FriendshipBlocked {
+		rec.BlockedBy = e.Actor.ID
+	} else {
+		rec.BlockedBy = ""
+	}
 	saved, err := s.repo.UpsertFriendship(ctx, rec)
 	if err != nil {
 		return command.Rejected(e, "FRIEND_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "relationship.write_failed", nil)
