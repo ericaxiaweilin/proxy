@@ -73,7 +73,15 @@ if (!existsSync(contractsPath)) {
 
 try {
   const productionFiles = execFileSync("git", ["ls-files", "apps/mobile/src"], { cwd: root, encoding: "utf8" }).trim().split("\n").filter(Boolean);
+  // DESIGN-BASELINE-DELETED-001：在工作树里已删除（已暂存或未暂存）但 git 还
+  // 跟踪着的文件，readFileSync 会 ENOENT，之前这里直接让整道门 FAIL —— 而删
+  // 文件本身是正常操作（删完提交后 ls-files 就不再列它，门自然过）。删掉的
+  // 文件不可能再引用 archive，不跳过只会把"正在删"误报成"基线漂移"。
+  // 注意这不是放水：删的是基线敏感实现文件时，下面的 staged 敏感检查 +
+  // contracts 的 existsSync 照样会拦（缺文件 / 缺设计确认）。
+  const deleted = new Set(execFileSync("git", ["ls-files", "--deleted", "apps/mobile/src"], { cwd: root, encoding: "utf8" }).trim().split("\n").filter(Boolean));
   for (const file of productionFiles) {
+    if (deleted.has(file)) continue;
     const source = readFileSync(resolve(root, file), "utf8");
     if (/docs\/design\/archive|archive\/prototypes/.test(source)) errors.push(`production source references archived design: ${file}`);
   }
