@@ -174,6 +174,8 @@ function UserModelSheet({ view, authClient, ownerName, ownerAvatarUri, onChange,
 }): React.JSX.Element {
   const model = view.model;
   const [editing, setEditing] = useState(false);
+  // 点哪一行就编辑哪一行：进入编辑态，光标落在那一项（「手动可改」要能直接点）。
+  const [focusField, setFocusField] = useState<UserModelField | undefined>(undefined);
   const [draft, setDraft] = useState<Record<UserModelField, string>>(() => draftOf(model));
   const [busy, setBusy] = useState<"analyze" | "save" | "lock" | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
@@ -245,10 +247,19 @@ function UserModelSheet({ view, authClient, ownerName, ownerAvatarUri, onChange,
           </View>
           <View style={styles.featureList}>
             {rowsOf(model).map((row, index) => (
-              <View key={row.field} style={[styles.featureRow, index === 6 && styles.featureRowLast]}>
-                <Text selectable style={styles.featureLabel}>{row.label}</Text>
+              <Pressable
+                accessibilityHint="点一下修改这一项"
+                accessibilityLabel={`${row.label}：${row.value ?? "待补充"}`}
+                accessibilityRole="button"
+                disabled={editing || busy !== undefined}
+                key={row.field}
+                onPress={() => { setFocusField(row.field); setEditing(true); }}
+                style={[styles.featureRow, index === 6 && styles.featureRowLast]}
+              >
+                <Text style={styles.featureLabel}>{row.label}</Text>
                 {editing ? (
                   <TextInput
+                    autoFocus={focusField === row.field}
                     keyboardType={row.field === "heightCm" || row.field === "weightKg" || row.field === "age" ? "number-pad" : "default"}
                     onChangeText={(text) => setDraft((prev) => ({ ...prev, [row.field]: text }))}
                     placeholder={row.field === "heightCm" ? "cm" : row.field === "weightKg" ? "kg" : row.field === "age" ? "岁" : "如 " + (row.field === "bodyType" ? "匀称型" : row.field === "skinTone" ? "Fitzpatrick II · 暖金底" : row.field === "hair" ? "长直发 · 黑色" : "鹅蛋脸 · 杏眼 · 高颧骨")}
@@ -257,12 +268,13 @@ function UserModelSheet({ view, authClient, ownerName, ownerAvatarUri, onChange,
                     value={draft[row.field]}
                   />
                 ) : (
-                  <Text selectable style={[styles.featureValue, !row.value && styles.featureValuePending]}>{row.value ?? (row.field === "weightKg" ? "待你补充" : "待补充")}</Text>
+                  <Text style={[styles.featureValue, !row.value && styles.featureValuePending]}>{row.value ?? (row.field === "weightKg" ? "待你补充" : "待补充")}</Text>
                 )}
                 {!editing && row.value ? (
-                  <Text selectable style={[styles.source, model.sources[row.field] === "manual" ? styles.sourceManual : styles.sourceAi]}>{model.sources[row.field] === "manual" ? "手动" : "AI"}</Text>
+                  <Text style={[styles.source, model.sources[row.field] === "manual" ? styles.sourceManual : styles.sourceAi]}>{model.sources[row.field] === "manual" ? "手动" : "AI"}</Text>
                 ) : null}
-              </View>
+                {!editing ? <Text style={styles.editHint}>›</Text> : null}
+              </Pressable>
             ))}
           </View>
 
@@ -295,7 +307,7 @@ function UserModelSheet({ view, authClient, ownerName, ownerAvatarUri, onChange,
               >
                 <Text selectable style={styles.ghostBtnText}>{busy === "analyze" ? "AI 识别中…" : view.galleryCount === 0 ? "公共图库还没有照片" : model.analyzedAt ? "让 AI 重新识别" : "让 AI 从图库识别"}</Text>
               </Pressable>
-              <Pressable accessibilityRole="button" disabled={busy !== undefined} onPress={() => setEditing(true)} style={styles.darkBtnWide}><Text selectable style={styles.darkBtnText}>编辑模型</Text></Pressable>
+              <Pressable accessibilityRole="button" disabled={busy !== undefined} onPress={() => { setFocusField(undefined); setEditing(true); }} style={styles.darkBtnWide}><Text selectable style={styles.darkBtnText}>编辑模型</Text></Pressable>
             </>
           )}
         </ScrollView>
@@ -363,6 +375,7 @@ const styles = StyleSheet.create({
   featureList: { backgroundColor: "#FFFFFF", borderRadius: 16, overflow: "hidden" },
   featureRow: { alignItems: "center", borderBottomColor: "#F5F4F8", borderBottomWidth: 1, flexDirection: "row", minHeight: 50, paddingHorizontal: 16, paddingVertical: 12 },
   featureRowLast: { borderBottomWidth: 0 },
+  editHint: { color: "#C8C8CC", fontSize: 18, marginLeft: 8 },
   featureLabel: { color: "#5A5A60", fontSize: 13, fontWeight: "700", minWidth: 60 },
   featureValue: { color: "#1a1a1a", flex: 1, fontSize: 14, fontWeight: "800", textAlign: "right" },
   featureValuePending: { color: "#A06A2C" },
