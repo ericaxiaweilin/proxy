@@ -245,6 +245,7 @@ export interface Messages {
   greetLine8: string;
   greetA11y: string;
   invited: string;
+  greetAwaitReply: string;
   greetFailed: string;
   greetLoginFirst: string;
   greetNoAccount: string;
@@ -459,6 +460,7 @@ const ZH: Messages = {
   greetLine8: "嗨！今天过得怎么样？",
   greetA11y: "向 {name} 打招呼",
   invited: "已邀约",
+  greetAwaitReply: "已经连发 3 条了，等 {name} 回复吧",
   greetFailed: "招呼没发出去，再点一次试试",
   greetLoginFirst: "登录后才能打招呼",
   greetNoAccount: "{name} 还没有账号，暂时发不了招呼",
@@ -673,6 +675,7 @@ const VI: Messages = {
   greetLine8: "Hi! Hôm nay của bạn thế nào?",
   greetA11y: "Chào {name}",
   invited: "Đã mời",
+  greetAwaitReply: "Đã gửi liền 3 tin rồi, chờ {name} trả lời nhé",
   greetFailed: "Chưa gửi được lời chào, thử lại nhé",
   greetLoginFirst: "Đăng nhập để gửi lời chào",
   greetNoAccount: "{name} chưa có tài khoản, tạm thời chưa chào được",
@@ -887,6 +890,7 @@ const EN: Messages = {
   greetLine8: "Hi! How's your day going?",
   greetA11y: "Say hi to {name}",
   invited: "Invited",
+  greetAwaitReply: "You've sent 3 in a row — wait for {name} to reply",
   greetFailed: "Couldn't send your hi — tap to try again",
   greetLoginFirst: "Log in to say hi",
   greetNoAccount: "{name} has no account yet, so a hi can't be sent",
@@ -1101,6 +1105,7 @@ const LO: Messages = {
   greetLine8: "ສະບາຍດີ! ມື້ນີ້ເປັນແນວໃດແດ່?",
   greetA11y: "ທັກທາຍ {name}",
   invited: "ເຊີນແລ້ວ",
+  greetAwaitReply: "ສົ່ງຕິດກັນ 3 ຂໍ້ຄວາມແລ້ວ, ລໍ {name} ຕອບກ່ອນເດີ",
   greetFailed: "ສົ່ງຄຳທັກທາຍບໍ່ໄດ້, ລອງໃໝ່ອີກຄັ້ງ",
   greetLoginFirst: "ເຂົ້າສູ່ລະບົບເພື່ອທັກທາຍ",
   greetNoAccount: "{name} ຍັງບໍ່ມີບັນຊີ, ຍັງທັກທາຍບໍ່ໄດ້",
@@ -1315,6 +1320,7 @@ const KO: Messages = {
   greetLine8: "안녕하세요! 오늘 하루 어때요?",
   greetA11y: "{name}에게 인사하기",
   invited: "초대함",
+  greetAwaitReply: "연속 3개를 보냈어요. {name}님의 답장을 기다려 주세요",
   greetFailed: "인사를 보내지 못했어요. 다시 눌러 주세요",
   greetLoginFirst: "로그인하면 인사할 수 있어요",
   greetNoAccount: "{name}님은 아직 계정이 없어 인사를 보낼 수 없어요",
@@ -1529,6 +1535,7 @@ const JA: Messages = {
   greetLine8: "こんにちは！今日はどんな一日ですか？",
   greetA11y: "{name} に挨拶",
   invited: "招待済み",
+  greetAwaitReply: "3件続けて送りました。{name} さんの返信を待ちましょう",
   greetFailed: "挨拶を送れませんでした。もう一度タップしてください",
   greetLoginFirst: "ログインすると挨拶できます",
   greetNoAccount: "{name} さんはまだアカウントがないため挨拶できません",

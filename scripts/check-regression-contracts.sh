@@ -9059,7 +9059,7 @@ fi
 # 不能必须等对方（模型 真人）回复才能更新状态」）：StartConversation 带首条消息时服务端会同步
 # 生成 AI 代回复，所以「已邀约」必须在发请求**之前**就置上，不能挂在请求的 then 上；
 # 也不许再出现「发送中」这种中间态。
-optimistic_line=$(grep -nF 'setGreetState((prev) => ({ ...prev, [person.id]: true }));' "$GREET_HOME" | head -1 | cut -d: -f1)
+optimistic_line=$(grep -nF 'writeGreetState({ ...greetStateRef.current, [accountId]: Date.now() });' "$GREET_HOME" | head -1 | cut -d: -f1)
 send_line=$(grep -nF 'onGreetHuman(person, line)' "$GREET_HOME" | head -1 | cut -d: -f1)
 if [ -z "$optimistic_line" ] || [ -z "$send_line" ] || [ "$optimistic_line" -ge "$send_line" ]; then
   echo "  FAIL [HOME-MORE-GREET-002]: 「已邀约」没有在发请求之前置上 —— 又在等对方回复才变状态。" >&2
@@ -9069,5 +9069,27 @@ if grep -qF 'greetSending' "$GREET_HOME" || grep -qF '"sending"' "$GREET_HOME"; 
   echo "  FAIL [HOME-MORE-GREET-002]: 又出现了「发送中」中间态。" >&2
   exit 1
 fi
+# HOME-MORE-GREET-003（2026-09-23，用户：「已邀约 切换到 home-更多 又重置了 … 可以发 3 条连续
+# 超过没有回复等待回复吧 但是状态不能重置 必须要冷静 12H 后才能重置状态」）：
+#   「已邀约」落盘、12h 冷静期；连发 3 条对方本人没回就不再发（AI 代回复 proxy_ai 不算回复）。
+GREET_STATE=apps/mobile/src/greet-state.ts
+if ! grep -qF 'export const GREET_COOLDOWN_MS = 12 * 60 * 60 * 1000;' "$GREET_STATE" ||
+   ! grep -qF 'export const GREET_MAX_UNANSWERED = 3;' "$GREET_STATE"; then
+  echo "  FAIL [HOME-MORE-GREET-003]: 冷静期不是 12h，或连发上限不是 3。" >&2
+  exit 1
+fi
+if ! grep -qF 'void saveGreetState(viewerAccountId, next)' "$GREET_HOME" || ! grep -qF 'loadGreetState(viewerAccountId, Date.now())' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-003]: 「已邀约」不再落盘 / 不再读回 —— 切页面就会重置。" >&2
+  exit 1
+fi
+if ! grep -qF 'const invited = !sameScene && isInvited(greetState, resolveHomePersonAccountId(p.id), Date.now());' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-003]: 按钮状态不再按落盘的 12h 冷静期算。" >&2
+  exit 1
+fi
+if ! grep -qF '>= GREET_MAX_UNANSWERED) return "awaiting_reply";' "$GREET_SHELL"; then
+  echo "  FAIL [HOME-MORE-GREET-003]: 发之前不再检查「连发 3 条对方没回」。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/greet-state.test.ts || exit $?
 pnpm --dir apps/mobile exec vitest run src/i18n.test.ts -t "several distinct greeting lines" || exit $?
-echo "    HOME-MORE-GREET-001/002: PASS (邀约 sends a real one-tap hi from a pool of lines; 拼桌 is only for the same scene ≤200m)"
+echo "    HOME-MORE-GREET-001/002/003: PASS (one-tap hi; invited persists 12h; max 3 unanswered in a row)"

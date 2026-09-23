@@ -4,6 +4,19 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 251 — 2026-09-23
+
+- **「已邀约」落盘 12 小时，可连发 3 条**（HOME-MORE-GREET-003）：用户反馈「已邀约 切换到
+  home-更多 又重置了 … 可以发 3 条连续 超过没有回复等待回复吧 但是状态不能重置 必须要冷静
+  12H 后才能重置状态」。
+  - 新增 `src/greet-state.ts`：按登录账号记每个人最近一次打招呼时间（SecureStore），
+    12 小时内一直「已邀约」，切页面 / 重启不重置；过期条目读回时丢掉。
+  - 「已邀约」还能再点，再发一句；发之前查 DM：末尾我已连发 3 条、对方本人没回，就不发，
+    提示「已经连发 3 条了，等 X 回复吧」。「回复」只认对方本人 —— 真人账号的 AI 代回复署名
+    `proxy_ai`，每条秒回，算它的话上限形同虚设。
+- 影响文件：`apps/mobile/src/greet-state.ts`、`apps/mobile/src/i18n.ts`、
+  `apps/mobile/src/shell/app-shell.tsx`、`apps/mobile/src/surfaces/requester-home.tsx`。
+
 ## Revision 250 — 2026-09-23
 
 - **邀约按钮：点下去立刻「已邀约」，不再等对方回复**（HOME-MORE-GREET-002）：用户反馈

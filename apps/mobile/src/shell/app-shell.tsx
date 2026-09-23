@@ -71,6 +71,7 @@ import { meSubPage } from "../surfaces/me-sub-pages";
 import type { MeSubPage } from "../surfaces/me-types";
 import { RequesterHome, type RequesterGoal } from "../surfaces/requester-home";
 import { resolveHomePersonAccountId, type RecommendPerson } from "../recommend-fixtures";
+import { GREET_MAX_UNANSWERED, countUnansweredOwnMessages } from "../greet-state";
 import { RoomCreateSurface } from "../surfaces/room-create";
 import { RoomSurface } from "../surfaces/room";
 import { AIAccountProfileSurface } from "../surfaces/ai-account-profile";
@@ -852,11 +853,21 @@ export function AppShell({
                 // HOME-MORE-GREET-001: 「邀约」直接发一句招呼。PROFILE 源 DM —— 同一对账号
                 // 服务端复用同一个会话，这句话续在已有聊天里，不另开一条。
                 const peerUserId = resolveHomePersonAccountId(person.id);
+                // HOME-MORE-GREET-003: 已经连发 GREET_MAX_UNANSWERED 条、对方本人还没回，就不再发。
+                // 只数对方本人的回复（AI 代回复署名 proxy_ai，不算）。
+                const inbox = await conversation.listConversations();
+                const dm = inbox.find((item) => item.conversation.conversationType === "DM" && (item.counterpartyId === peerUserId || item.conversation.participants.includes(peerUserId)));
+                if (dm) {
+                  const listed = await conversation.listMessages(dm.conversation.conversationId);
+                  const payload = typeof listed.operationRef === "string" ? JSON.parse(listed.operationRef) as { messages?: Array<{ senderId?: unknown }>; actorId?: unknown } : {};
+                  if (typeof payload.actorId === "string" && countUnansweredOwnMessages(payload.messages ?? [], payload.actorId, peerUserId) >= GREET_MAX_UNANSWERED) return "awaiting_reply";
+                }
                 // 被拒（REJECTED）时 client 会抛，首页据此显示"没发出去"。
                 await conversation.startConversation({
                   originType: "PROFILE", originId: peerUserId, participantId: peerUserId,
                   conversationType: "DM", firstMessage: line,
                 });
+                return "sent";
               }}
               onMessageAI={(account) => {
                 setMessageChat({ author: account.displayName, aiAccount: account });

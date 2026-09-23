@@ -21,6 +21,7 @@ import { GREETING_LINES, ICEBREAKER_LINES, useI18n, type MessageKey, type Messag
 import { loadPreferences } from "../preferences";
 import { LanguageSheet } from "../components/language-sheet";
 import { SCENE_OPTIONS } from "./room-create";
+import { isInvited, loadGreetState, saveGreetState, type GreetState } from "../greet-state";
 import type { ConversationInboxItem } from "../conversation-client";
 import type { HardDemandCategory } from "../uiplan/types";
 import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from "../demand-client";
@@ -183,7 +184,8 @@ export function RequesterHome({
   onMessageHuman?: (person: RecommendPerson, initialDraft?: string) => void;
   // HOME-MORE-GREET-001: 「邀约」= 直接发一句招呼（不进聊天页、不弹面板）。调用方负责真发
   // （PROFILE 源 DM，已有会话就续在里面），失败要 reject，这边才能说"没发出去"。
-  onGreetHuman?: (person: RecommendPerson, line: string) => Promise<void>;
+  // 返回 "awaiting_reply" = 已经连发 3 条、对方本人没回，这次没发（HOME-MORE-GREET-003）。
+  onGreetHuman?: (person: RecommendPerson, line: string) => Promise<"sent" | "awaiting_reply">;
   // ROOM-CREATE-001: "创建房间"入口——把当前"更多"页可见的候选人交给调用方，
   // 由它打开创建房间流程（真实 GROUP conversation，见 room-create.tsx）。
   // HOME-MORE-ROOMS-001: sceneIndex = 开房大卡上点的场景 chip（SCENE_OPTIONS 下标），缺省 = 默认场景。
@@ -301,33 +303,74 @@ export function RequesterHome({
   // HOME-MORE-SHEET-003: "更多真人"列表每行的破冰邀请——原型叫它 拼桌/邀约，
   // 不是加好友。选中的开场白进 initialDraft，真的带到聊天输入框里。
   const [icebreakerTarget, setIcebreakerTarget] = useState<RecommendPerson | undefined>(undefined);
-  // HOME-MORE-GREET-001: 谁已经邀约过（按钮变「已邀约」，不让连点刷屏）+ 失败 / 无法发送时
-  // 顶部一行提示；lastGreetLine 保证同一个人连着两次不会收到同一句。
-  // HOME-MORE-GREET-002（2026-09-23，用户：「显示发送中-已打招呼 这属于多余 … 不能必须等对方
-  // （模型 真人）回复才能更新状态」）：点下去立刻就是「已邀约」，请求在后台发。
-  // StartConversation 带首条消息时，服务端会**同步**生成真人账号的 AI 代回复再返回，
-  // 等它回来才变状态 = 等对方回复。只有发送失败才撤回成「邀约」并提示。
-  const [greetState, setGreetState] = useState<Record<string, true>>({});
+  // HOME-MORE-GREET-001: 「邀约」= 一点就发一句招呼；失败 / 无法发送时顶部一行提示；
+  // lastGreetLine 保证同一个人连着两次不会收到同一句。
+  // HOME-MORE-GREET-002（2026-09-23）：点下去立刻就是「已邀约」，请求在后台发 ——
+  // StartConversation 带首条消息时服务端会**同步**生成真人账号的 AI 代回复再返回，
+  // 等它回来才变状态 = 等对方回复。只有发送失败才撤回并提示。
+  // HOME-MORE-GREET-003（2026-09-23，用户：「已邀约 切换到 home-更多 又重置了 … 可以发 3 条
+  // 连续 超过没有回复等待回复吧 但是状态不能重置 必须要冷静 12H 后才能重置状态」）：
+  //   - 「已邀约」落盘（greet-state.ts，按登录账号分开存），12 小时内切页面 / 重启都不重置；
+  //   - 「已邀约」还能再点，再发一句；连发 3 条对方本人没回，就提示等回复、不再发。
+  const [greetState, setGreetState] = useState<GreetState>({});
+  const greetStateRef = useRef<GreetState>({});
+  const greetInFlight = useRef<Set<string>>(new Set());
   const [greetMsg, setGreetMsg] = useState<string>("");
   const lastGreetLine = useRef<Record<string, string>>({});
 
+  useEffect(() => {
+    let cancelled = false;
+    greetStateRef.current = {};
+    setGreetState({});
+    if (!viewerAccountId || isGuest) return;
+    void loadGreetState(viewerAccountId, Date.now()).then((loaded) => {
+      if (cancelled) return;
+      greetStateRef.current = loaded;
+      setGreetState(loaded);
+    });
+    return () => { cancelled = true; };
+  }, [viewerAccountId, isGuest]);
+
+  function writeGreetState(next: GreetState): void {
+    greetStateRef.current = next;
+    setGreetState(next);
+    // 落盘失败不挡用户 —— 本次会话里状态照样对，最多是重启后提前回到「邀约」。
+    if (viewerAccountId) void saveGreetState(viewerAccountId, next).catch(() => undefined);
+  }
+
   function greet(person: RecommendPerson): void {
-    if (greetState[person.id]) return;
     if (isGuest) { setGreetMsg(t("greetLoginFirst")); return; }
+    const accountId = resolveHomePersonAccountId(person.id);
     // 没有服务端账号的人发不出去（HOME-RAIL-ACCOUNT-001 之后 rail 人都应该有账号）——
     // 如实说，不假装发出去了。
-    if (!onGreetHuman || resolveHomePersonAccountId(person.id) === person.id) { setGreetMsg(t("greetNoAccount", { name: person.name })); return; }
+    if (!onGreetHuman || accountId === person.id) { setGreetMsg(t("greetNoAccount", { name: person.name })); return; }
+    if (greetInFlight.current.has(accountId)) return;
     const lines = GREETING_LINES[lang] ?? GREETING_LINES.zh;
-    const pool = lines.filter((line) => line !== lastGreetLine.current[person.id]);
+    const pool = lines.filter((line) => line !== lastGreetLine.current[accountId]);
     const line = pool[Math.floor(Math.random() * pool.length)] ?? lines[0]!;
-    lastGreetLine.current[person.id] = line;
-    setGreetState((prev) => ({ ...prev, [person.id]: true }));
+    lastGreetLine.current[accountId] = line;
+    const previousAt = greetStateRef.current[accountId];
+    const restore = (): void => {
+      const next = { ...greetStateRef.current };
+      if (previousAt === undefined) delete next[accountId]; else next[accountId] = previousAt;
+      writeGreetState(next);
+    };
+    writeGreetState({ ...greetStateRef.current, [accountId]: Date.now() });
     setGreetMsg("");
+    greetInFlight.current.add(accountId);
     onGreetHuman(person, line)
+      .then((outcome) => {
+        // 没发出去（等回复）：已邀约状态保留，但冷静期不因为这次没发出的点击往后延。
+        if (outcome === "awaiting_reply") {
+          if (previousAt !== undefined) restore();
+          setGreetMsg(t("greetAwaitReply", { name: person.name }));
+        }
+      })
       .catch(() => {
-        setGreetState((prev) => { const next = { ...prev }; delete next[person.id]; return next; });
+        restore();
         setGreetMsg(t("greetFailed"));
-      });
+      })
+      .finally(() => { greetInFlight.current.delete(accountId); });
   }
   const [publicHistoryOpen, setPublicHistoryOpen] = useState(false);
 
@@ -1659,7 +1702,7 @@ export function RequesterHome({
                   //   - 同一窗景（已知距离 ≤ SAME_SCENE_RADIUS_M）→「拼桌」，弹破冰面板约见面；
                   //   - 其余（更远 / 距离未知）→「邀约」= 纯打招呼，点一下直接发一句，不弹面板。
                   const sameScene = isSameScene(p);
-                  const invited = !sameScene && greetState[p.id] === true;
+                  const invited = !sameScene && isInvited(greetState, resolveHomePersonAccountId(p.id), Date.now());
                   const actionLabel = sameScene ? t("actionTable") : invited ? t("invited") : t("actionInvite");
                   return (
                     <View key={`more:${p.id}`} style={styles.moreRow}>
@@ -1679,11 +1722,9 @@ export function RequesterHome({
                         </View>
                       </Pressable>
                       <Pressable
-                        disabled={invited}
                         onPress={() => { if (sameScene) setIcebreakerTarget(p); else greet(p); }}
                         style={[styles.moreActionBtn, invited && styles.moreActionBtnDone]}
-                        accessibilityLabel={sameScene ? t("icebreakerTitle", { name: p.name, action: actionLabel }) : invited ? actionLabel : t("greetA11y", { name: p.name })}
-                        accessibilityState={{ disabled: invited }}
+                        accessibilityLabel={sameScene ? t("icebreakerTitle", { name: p.name, action: actionLabel }) : invited ? `${actionLabel} · ${t("greetA11y", { name: p.name })}` : t("greetA11y", { name: p.name })}
                       >
                         {/* HOME-MORE-GREET-002：邀约 = 气泡（打个招呼），已邀约 = ✓。拼桌不带图标。 */}
                         {sameScene ? null : <ProxyIcon color={invited ? color.muted : color.ink} name={invited ? "check" : "chat"} size={13} />}
