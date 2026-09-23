@@ -259,18 +259,21 @@ func normalizeAiEngineSettings(s *AiEngineSettings) {
 // GetAiEngineChatState 是会话域注入用的公开读取面（AI-MANAGE-002）。
 // 没存过行 = 默认值（非暂停、confirm），与迁移 DEFAULT 一致；仓错误原样
 // 返回，由调用方决定 fail-open/fail-closed。
-func (s *Service) GetAiEngineChatState(ctx context.Context, userID string) (paused bool, chatPermission string, err error) {
+// GetAiEngineChatState 读会话侧要用的那一片设置（暂停 / 对话权限 / 风格）。
+// AI-MANAGE-003：会话侧用它判定**被代表的人**（私聊里收消息的真人）的 AI 要不要、怎么替 TA 回。
+// 没存过设置 = 默认（与迁移 119 的 DEFAULT 一致）。
+func (s *Service) GetAiEngineChatState(ctx context.Context, userID string) (AiEngineSettings, error) {
 	if strings.TrimSpace(userID) == "" {
-		return false, "confirm", nil
+		return DefaultAiEngineSettings(userID), nil
 	}
 	settings, err := s.aiSettingsRepo().GetAiEngineSettings(ctx, userID)
 	if errors.Is(err, ErrAiEngineSettingsNotFound) {
-		return false, "confirm", nil
+		return DefaultAiEngineSettings(userID), nil
 	}
 	if err != nil {
-		return false, "", err
+		return AiEngineSettings{}, err
 	}
-	return settings.Paused, settings.ChatPermission, nil
+	return settings, nil
 }
 
 // RecordAiTokens 供 modelstack 计量装饰器调用：userID 空 = 归属不了用户，跳过

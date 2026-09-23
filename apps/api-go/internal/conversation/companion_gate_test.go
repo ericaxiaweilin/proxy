@@ -306,7 +306,7 @@ func TestCompanionVoiceSurvivesAMissingAssistantMode(t *testing.T) {
 //
 // 没有这一条，上面的测试可能只是因为**所有**会话都拿到了伴侣 prompt ——
 // 那样 proxy_ai 的首页/需求助手就全废了，而测试还是绿的。
-func TestHumanDirectMessageKeepsTheRequirementAssistant(t *testing.T) {
+func TestHumanDirectMessageGetsTheStandInNotTheCompanion(t *testing.T) {
 	model := &capturingModelStack{}
 	s := NewWithModelStack(NewMemoryRepository(), model)
 	s.SetCompanionGate(func(context.Context, string) error { return nil })
@@ -321,8 +321,10 @@ func TestHumanDirectMessageKeepsTheRequirementAssistant(t *testing.T) {
 		t.Fatalf("a human DM must be answered by proxy_ai, got %q", sent.AIMessage.SenderID)
 	}
 	prompt := systemPromptOf(t, model)
-	if !strings.Contains(prompt, "智能需求构建助手") {
-		t.Fatalf("a human DM must keep the requirement-assistant prompt, got: %s", prompt)
+	// AI-MANAGE-003：真人私信的回复是「替对面那个真人代回复」，用代回复人设（见 ai_engine_gate.go），
+	// 不再是需求助手；这条负向对照的本意不变 —— 绝不能落到伴侣人设上。
+	if !strings.Contains(prompt, "代回复") {
+		t.Fatalf("a human DM must be answered with the stand-in prompt, got: %s", prompt)
 	}
 	if strings.Contains(prompt, "AI 虚拟女孩") {
 		t.Fatal("a human DM must never be answered with the companion persona")

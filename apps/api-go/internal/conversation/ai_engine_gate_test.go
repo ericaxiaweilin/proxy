@@ -3,25 +3,31 @@ package conversation
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/proxy-app/proxy-api/internal/modelstack"
 )
 
-// AI-MANAGE-002：暂停 / 对话权限必须在服务端拦在模型调用之前。
-// 与 companion_gate 同款：拒绝方向同时看 assistantStatus 和模型调用次数，
-// 避免"拦了但照样调模型"。
+// AI-MANAGE-003：「对话管理 —— AI 怎么替你聊天」管的是**被代表的人**。
+// 私聊真人时，决定 AI 要不要回、怎么回的是对面那个真人（owner）的设置，
+// 不是发消息的人；跟 Proxy 助手的会话不受对话管理影响。
+// 拒绝方向同时看 assistantStatus 和模型调用次数，避免"拦了但照样调模型"。
 
-type countingModelStack struct {
-	calls int
+type recordingModelStack struct {
+	calls   int
+	prompts []string
 }
 
-func (m *countingModelStack) Available() bool { return true }
+func (m *recordingModelStack) Available() bool { return true }
 
-func (m *countingModelStack) Complete(_ context.Context, _ string, _ []modelstack.ChatMessage) (modelstack.Completion, error) {
+func (m *recordingModelStack) Complete(_ context.Context, _ string, messages []modelstack.ChatMessage) (modelstack.Completion, error) {
 	m.calls++
+	if len(messages) > 0 {
+		m.prompts = append(m.prompts, messages[0].Content)
+	}
 	return modelstack.Completion{
-		Content:      "草稿或回复",
+		Content:      "你好呀，TA 现在不在，我先替 TA 回你～",
 		Model:        "test-model",
 		Provider:     "test-provider",
 		PromptTokens: 11,
@@ -29,169 +35,187 @@ func (m *countingModelStack) Complete(_ context.Context, _ string, _ []modelstac
 	}, nil
 }
 
-type aiEngineStartView struct {
+type aiEngineView struct {
 	ConversationID  string   `json:"conversationId"`
-	AssistantStatus string   `json:"assistantStatus"`
-	AIMessage       *Message `json:"aiMessage"`
-	AIDraft         *Message `json:"aiDraft"`
-}
-
-type aiEngineSendView struct {
 	MessageID       string   `json:"messageId"`
 	AssistantStatus string   `json:"assistantStatus"`
 	AIMessage       *Message `json:"aiMessage"`
 	AIDraft         *Message `json:"aiDraft"`
 }
 
-func startHomeWithFirstMessage(t *testing.T, s *Service) aiEngineStartView {
+func decodeAiEngineView(t *testing.T, raw string) aiEngineView {
+	t.Helper()
+	var view aiEngineView
+	if err := json.Unmarshal([]byte(raw), &view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return view
+}
+
+// user_001（actor）私信真人 user_002（owner）。
+func dmHuman(t *testing.T, s *Service) aiEngineView {
+	t.Helper()
+	result := s.Handle(envelopeFor("StartConversation", map[string]any{
+		"conversationType": "DM", "originType": "PROFILE", "originId": "user_002", "participantId": "user_002",
+		"firstMessage": "嗨，你好呀",
+	}, "new"))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("start DM: %s %+v", result.Outcome, result.Error)
+	}
+	return decodeAiEngineView(t, result.OperationRef)
+}
+
+func sendIn(t *testing.T, s *Service, convID string, body string) aiEngineView {
+	t.Helper()
+	result := s.Handle(envelopeFor("SendMessage", map[string]any{"messageType": "TEXT", "body": body}, convID))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("send: %s %+v", result.Outcome, result.Error)
+	}
+	return decodeAiEngineView(t, result.OperationRef)
+}
+
+func startAssistantThread(t *testing.T, s *Service) aiEngineView {
 	t.Helper()
 	result := s.Handle(envelopeFor("StartConversation", map[string]any{
 		"originType": "HOME", "originId": "home_ai_manage", "participantId": "proxy_ai",
 		"firstMessage": "帮我安排周三河内的咖啡局",
 	}, "new"))
 	if result.Outcome != "ACCEPTED" {
-		t.Fatalf("start: got %s (%+v)", result.Outcome, result.Error)
+		t.Fatalf("start assistant: %s %+v", result.Outcome, result.Error)
 	}
-	var view aiEngineStartView
-	if err := json.Unmarshal([]byte(result.OperationRef), &view); err != nil {
-		t.Fatalf("decode start: %v", err)
-	}
-	return view
+	return decodeAiEngineView(t, result.OperationRef)
 }
 
-func sendHomeMessage(t *testing.T, s *Service, convID string) aiEngineSendView {
-	t.Helper()
-	result := s.Handle(envelopeFor("SendMessage", map[string]any{
-		"messageType": "TEXT", "body": "预算 50 万盾，两个人",
-	}, convID))
-	if result.Outcome != "ACCEPTED" {
-		t.Fatalf("send: got %s (%+v)", result.Outcome, result.Error)
+// stateByUser 让每个用户有自己的设置，并记录会话侧问过谁。
+func stateByUser(states map[string]AiEngineChatState, asked *[]string) AiEngineChatStateReader {
+	return func(_ context.Context, userID string) (AiEngineChatState, error) {
+		*asked = append(*asked, userID)
+		return states[userID], nil
 	}
-	var view aiEngineSendView
-	if err := json.Unmarshal([]byte(result.OperationRef), &view); err != nil {
-		t.Fatalf("decode send: %v", err)
-	}
-	return view
 }
 
-func TestAiEnginePauseBlocksStartAndSendBeforeModelCall(t *testing.T) {
-	model := &countingModelStack{}
+func TestStandInReadsTheRecipientsSettingsNotTheSenders(t *testing.T) {
+	model := &recordingModelStack{}
 	s := NewWithModelStack(NewMemoryRepository(), model)
-	s.SetAiEngineChatStateReader(func(context.Context, string) (AiEngineChatState, error) {
-		return AiEngineChatState{Paused: true, ChatPermission: "auto"}, nil
-	})
+	var asked []string
+	// 发消息的人（user_001）把自己暂停了 —— 这不该影响别人私信里的代回复；
+	// 收消息的 user_002 是全自动，所以要替 user_002 回。
+	s.SetAiEngineChatStateReader(stateByUser(map[string]AiEngineChatState{
+		"user_001": {Paused: true, ChatPermission: "off"},
+		"user_002": {ChatPermission: "auto"},
+	}, &asked))
 
-	opened := startHomeWithFirstMessage(t, s)
-	if opened.AssistantStatus != "PAUSED" {
-		t.Fatalf("paused start must report PAUSED, got %q", opened.AssistantStatus)
+	opened := dmHuman(t, s)
+	if opened.AssistantStatus != "RESPONDED" || opened.AIMessage == nil {
+		t.Fatalf("recipient on auto must get a stand-in reply, got %q", opened.AssistantStatus)
 	}
-	if opened.AIMessage != nil {
-		t.Fatalf("paused start must not produce an AI message: %+v", opened.AIMessage)
-	}
-	sent := sendHomeMessage(t, s, opened.ConversationID)
-	if sent.AssistantStatus != "PAUSED" {
-		t.Fatalf("paused send must report PAUSED, got %q", sent.AssistantStatus)
-	}
-	if sent.AIMessage != nil {
-		t.Fatalf("paused send must not produce an AI reply: %+v", sent.AIMessage)
-	}
-	if model.calls != 0 {
-		t.Fatalf("pause must block before the model is called, got %d calls", model.calls)
-	}
-}
-
-func TestAiEngineChatPermissionOffBlocksGeneration(t *testing.T) {
-	model := &countingModelStack{}
-	s := NewWithModelStack(NewMemoryRepository(), model)
-	s.SetAiEngineChatStateReader(func(context.Context, string) (AiEngineChatState, error) {
-		return AiEngineChatState{Paused: false, ChatPermission: "off"}, nil
-	})
-	opened := startHomeWithFirstMessage(t, s)
-	if opened.AssistantStatus != "OFF" {
-		t.Fatalf("off permission must report OFF, got %q", opened.AssistantStatus)
-	}
-	if model.calls != 0 {
-		t.Fatalf("off permission must block before the model is called, got %d", model.calls)
-	}
-}
-
-func TestAiEngineConfirmPermissionReturnsDraftWithoutPersisting(t *testing.T) {
-	model := &countingModelStack{}
-	repo := NewMemoryRepository()
-	s := NewWithModelStack(repo, model)
-	s.SetAiEngineChatStateReader(func(context.Context, string) (AiEngineChatState, error) {
-		return AiEngineChatState{Paused: false, ChatPermission: "confirm"}, nil
-	})
-
-	opened := startHomeWithFirstMessage(t, s)
-	if opened.AssistantStatus != "DRAFT" {
-		// 首条引导也走确认：草稿不落库，assistantStatus=DRAFT。
-		t.Fatalf("confirm permission must draft the opening, got %q", opened.AssistantStatus)
-	}
-	if opened.AIMessage != nil {
-		t.Fatalf("confirm permission must not persist the opening message: %+v", opened.AIMessage)
-	}
-	sent := sendHomeMessage(t, s, opened.ConversationID)
-	if sent.AssistantStatus != "DRAFT" {
-		t.Fatalf("confirm permission must report DRAFT, got %q", sent.AssistantStatus)
-	}
-	if sent.AIDraft == nil || sent.AIDraft.Body == "" {
-		t.Fatalf("confirm permission must return an aiDraft: %+v", sent.AIDraft)
-	}
-	if sent.AIMessage != nil {
-		t.Fatalf("confirm permission must not persist aiMessage: %+v", sent.AIMessage)
-	}
-	messages, err := repo.Messages(context.Background(), opened.ConversationID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, m := range messages {
-		if m.SenderID == "proxy_ai" && m.Body == "草稿或回复" {
-			t.Fatalf("draft must not be appended to the thread: %+v", m)
+	for _, id := range asked {
+		if id != "user_002" {
+			t.Fatalf("stand-in must only consult the represented person, also asked %q", id)
 		}
 	}
-	if model.calls == 0 {
-		t.Fatal("confirm permission must still reach the model to draft")
+	if len(asked) == 0 {
+		t.Fatal("stand-in must consult the represented person's settings")
 	}
 }
 
-func TestAiEngineAutoPermissionPersistsReplyAndMetersTokens(t *testing.T) {
-	model := &countingModelStack{}
-	var meteredPrompt, meteredOutput int
+func TestStandInHonoursRecipientPauseOffAndConfirmBeforeTheModel(t *testing.T) {
+	for _, tc := range []struct {
+		state  AiEngineChatState
+		status string
+	}{
+		{AiEngineChatState{Paused: true, ChatPermission: "auto"}, "PAUSED"},
+		{AiEngineChatState{ChatPermission: "off"}, "OFF"},
+		{AiEngineChatState{ChatPermission: "confirm"}, "AWAITING_OWNER"},
+	} {
+		model := &recordingModelStack{}
+		repo := NewMemoryRepository()
+		s := NewWithModelStack(repo, model)
+		var asked []string
+		s.SetAiEngineChatStateReader(stateByUser(map[string]AiEngineChatState{"user_002": tc.state}, &asked))
+
+		opened := dmHuman(t, s)
+		sent := sendIn(t, s, opened.ConversationID, "在吗？")
+		for _, view := range []aiEngineView{opened, sent} {
+			if view.AssistantStatus != tc.status {
+				t.Fatalf("state %+v must report %s, got %q", tc.state, tc.status, view.AssistantStatus)
+			}
+			if view.AIMessage != nil || view.AIDraft != nil {
+				t.Fatalf("state %+v must not answer the sender (no reply, no draft leaked to them): %+v %+v", tc.state, view.AIMessage, view.AIDraft)
+			}
+		}
+		if model.calls != 0 {
+			t.Fatalf("state %+v must block before the model is called, got %d", tc.state, model.calls)
+		}
+		messages, _ := repo.Messages(context.Background(), opened.ConversationID)
+		for _, m := range messages {
+			if m.SenderID != "user_001" {
+				t.Fatalf("state %+v: only the sender's own messages may be in the thread, found %q", tc.state, m.SenderID)
+			}
+		}
+	}
+}
+
+func TestStandInAutoUsesTheOwnersStyleAndMetersTheOwner(t *testing.T) {
+	model := &recordingModelStack{}
+	s := NewWithModelStack(NewMemoryRepository(), model)
+	var asked []string
+	s.SetAiEngineChatStateReader(stateByUser(map[string]AiEngineChatState{
+		"user_002": {ChatPermission: "auto", Tone: "lively", ReplyLength: "xshort", Emoji: "never"},
+	}, &asked))
 	var meteredUser string
-	s := NewWithModelStack(NewMemoryRepository(), model)
-	s.SetAiEngineChatStateReader(func(context.Context, string) (AiEngineChatState, error) {
-		return AiEngineChatState{Paused: false, ChatPermission: "auto"}, nil
-	})
-	s.SetTokenMeter(func(_ context.Context, userID string, prompt, output int) {
-		meteredUser = userID
-		meteredPrompt += prompt
-		meteredOutput += output
-	})
+	s.SetTokenMeter(func(_ context.Context, userID string, _, _ int) { meteredUser = userID })
 
-	opened := startHomeWithFirstMessage(t, s)
-	sent := sendHomeMessage(t, s, opened.ConversationID)
-	if sent.AssistantStatus != "RESPONDED" || sent.AIMessage == nil {
-		t.Fatalf("auto permission must persist a reply, got status=%q draft=%+v", sent.AssistantStatus, sent.AIDraft)
+	opened := dmHuman(t, s)
+	if opened.AIMessage == nil {
+		t.Fatalf("auto must reply, got %q", opened.AssistantStatus)
 	}
-	if model.calls == 0 {
-		t.Fatal("auto permission must reach the model")
+	if len(model.prompts) == 0 {
+		t.Fatal("model must be called with a system prompt")
 	}
-	if meteredUser != "user_001" || meteredPrompt == 0 || meteredOutput == 0 {
-		t.Fatalf("successful inference must meter tokens for the actor: user=%q prompt=%d output=%d", meteredUser, meteredPrompt, meteredOutput)
+	prompt := model.prompts[len(model.prompts)-1]
+	if strings.Contains(prompt, "需求构建助手") {
+		t.Fatalf("a stand-in reply must not use the demand-assistant persona: %s", prompt)
+	}
+	for _, want := range []string{"代回复", "活泼", "不超过 15 个字", "不要使用 emoji", "不能替 TA 答应"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("stand-in prompt must carry %q: %s", want, prompt)
+		}
+	}
+	if meteredUser != "user_002" {
+		t.Fatalf("tokens of a stand-in reply belong to the represented person, metered %q", meteredUser)
 	}
 }
 
-func TestAiEngineUnwiredStateReaderDoesNotBlock(t *testing.T) {
-	// 没接 = 不拦：fail-open 与 companionGate 的 fail-closed 相反，
-	// 避免"没接线"和"故意关掉"在行为上无法区分（见 ai_engine_gate.go）。
-	model := &countingModelStack{}
+func TestAssistantThreadIsNotGovernedByChatManagement(t *testing.T) {
+	// 跟 Proxy 助手聊天不是「替谁聊天」：自己暂停了 AI 管理，也照样能问助手。
+	model := &recordingModelStack{}
 	s := NewWithModelStack(NewMemoryRepository(), model)
-	opened := startHomeWithFirstMessage(t, s)
-	if opened.AssistantStatus != "RESPONDED" {
-		t.Fatalf("unwired reader must keep AI alive, got %q", opened.AssistantStatus)
+	var asked []string
+	s.SetAiEngineChatStateReader(stateByUser(map[string]AiEngineChatState{
+		"user_001": {Paused: true, ChatPermission: "off"},
+	}, &asked))
+	var meteredUser string
+	s.SetTokenMeter(func(_ context.Context, userID string, _, _ int) { meteredUser = userID })
+
+	opened := startAssistantThread(t, s)
+	if opened.AssistantStatus != "RESPONDED" || model.calls == 0 {
+		t.Fatalf("assistant thread must still answer, got %q (calls=%d)", opened.AssistantStatus, model.calls)
 	}
-	if model.calls == 0 {
-		t.Fatal("unwired reader must still reach the model")
+	if len(asked) != 0 {
+		t.Fatalf("assistant thread must not consult AI management at all, asked %v", asked)
+	}
+	if meteredUser != "user_001" {
+		t.Fatalf("the actor's own assistant usage is metered to the actor, got %q", meteredUser)
+	}
+}
+
+func TestStandInUnwiredReaderKeepsReplying(t *testing.T) {
+	// 没接 = 不拦（fail-open）：避免"没接线"和"故意关掉"无法区分。
+	model := &recordingModelStack{}
+	s := NewWithModelStack(NewMemoryRepository(), model)
+	opened := dmHuman(t, s)
+	if opened.AssistantStatus != "RESPONDED" || model.calls == 0 {
+		t.Fatalf("unwired reader must keep the stand-in alive, got %q", opened.AssistantStatus)
 	}
 }

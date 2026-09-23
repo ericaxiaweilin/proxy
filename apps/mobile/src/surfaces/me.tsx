@@ -221,7 +221,7 @@ const REQUESTER_ME: PersonaConfig = {
       hint: "安全与结算",
       rows: [
         { icon: "coin", label: "钱包与结算", desc: "付款、收入、退款与记录", route: "wallet" },
-        { icon: "sparkle", label: "AI 管理", desc: "分身状态 · 照片与动态盘点", route: "aimanage" },
+        { icon: "ai-manage", label: "AI 管理", desc: "分身状态 · 照片与动态盘点", route: "aimanage" },
         { icon: "gear", label: "设置与隐私", desc: "安全、推荐、通知与隐私（含数据下载/删除）", route: "appbehavior" }
       ]
     },
@@ -1418,7 +1418,7 @@ export function MeSurface({
         if (!latest) return post.createdAt;
         return post.createdAt > latest ? post.createdAt : latest;
       }, undefined);
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIManagementSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} secureSessionStore={nativeSecureSessionStore} imageCount={imageCount} videoCount={videoCount} postCount={profilePosts.length} lastPostAt={lastPostAt} onOpenImageManage={() => openSubPage("aiidentity")} onOpenPostManage={() => openSubPage("personalhub")} /></SwipeBackShell>;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIManagementSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} secureSessionStore={nativeSecureSessionStore} imageCount={imageCount} videoCount={videoCount} lastPostAt={lastPostAt} onOpenImageIdentity={() => openSubPage("aiidentity")} /></SwipeBackShell>;
     }
     if (subPage.route === "aiidentity") {
       // AI-TWIN-POST-AUDIENCE-004（2026-09-22，用户纠正："帖文编排拿的是

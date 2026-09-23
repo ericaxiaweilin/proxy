@@ -202,6 +202,7 @@ export const styles = StyleSheet.create({
     width: 44
   },
   serviceLogoBox: { backgroundColor: "#08090A" },
+  serviceIconBare: { backgroundColor: "transparent" },
   serviceLogo: { borderRadius: 9, height: 36, width: 36 },
   voucherMenuGlyph: { alignItems: "center", height: 36, justifyContent: "center", width: 36 },
   voucherCup: { borderRadius: 4, borderWidth: 2.4, height: 14, left: 8, position: "absolute", top: 16, width: 17 },

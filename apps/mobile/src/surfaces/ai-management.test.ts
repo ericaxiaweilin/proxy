@@ -1,97 +1,89 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-// AI-MANAGE-002：AI 管理页全量按原型 deepseek_html_20260923_83b40b 落地 ——
-// 暂停 / Token / 三个设置 sheet 都接真服务端。钉住：数从服务端来（不编
-// 120K/200K 上限）、动态卡不虚报「运行中」、厂商是偏好 ID 不是直绑 provider。
-const surfaceSource = readFileSync(fileURLToPath(new URL("./ai-management.tsx", import.meta.url)), "utf8");
-const clientSource = readFileSync(fileURLToPath(new URL("../ai-engine-client.ts", import.meta.url)), "utf8");
-const meSource = readFileSync(fileURLToPath(new URL("./me.tsx", import.meta.url)), "utf8");
-const surfaceCode = surfaceSource
-  .split("\n")
-  .filter((line) => !line.trimStart().startsWith("//"))
-  .join("\n");
-const clientCode = clientSource
-  .split("\n")
-  .filter((line) => !line.trimStart().startsWith("//"))
-  .join("\n");
+vi.mock("react-native", () => ({ StyleSheet: { create: <T,>(s: T) => s, absoluteFill: {} }, Animated: { Value: class {}, View: "View", timing: () => ({ start: () => undefined }) }, Modal: "Modal", Pressable: "Pressable", ScrollView: "ScrollView", Text: "Text", TextInput: "TextInput", View: "View" }));
+vi.mock("react-native-svg", () => ({ Circle: "Circle", Defs: "Defs", Line: "Line", LinearGradient: "LinearGradient", Path: "Path", RadialGradient: "RadialGradient", Rect: "Rect", Stop: "Stop", Svg: "Svg", SvgXml: "SvgXml" }));
+vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
+vi.mock("../ai-engine-client", () => ({ AiEngineClient: class {} }));
+vi.mock("../composer-body", () => ({ formatRelativeTime: () => "" }));
 
-describe("AI management entry (AI-MANAGE-001/002)", () => {
-  it("is listed under the account section", () => {
-    expect(meSource).toContain('label: "AI 管理"');
-    expect(meSource).toContain('route: "aimanage"');
+import { decodePromptHistory, encodePromptHistoryEntry, formatTokens, promptForScene } from "./ai-management";
+import { AI_CAMERA_ICONS, AI_CAMERA_MOVES, AI_POSES, AI_POSE_ICONS, AI_SCENES, AI_VENDORS } from "./ai-management-data";
+
+// AI-MANAGE-003（2026-09-23，用户：「原型给了 干的一坨屎 logo 也不对 功能也不对」）：
+// 整页按原型 deepseek_html_20260923_83b40b (1).html 重做。钉住：
+//   - 「我的」入口用原型的节点牌标，不再是回落成「sp」的 sparkle 文字；
+//   - 目录（场景 / 姿态 / 运镜 / 厂商）逐项来自原型，不是删减版；
+//   - 所有选择真落服务端，点下去先变、失败再撤；
+//   - Token 不画假上限；出图 / 自动发帖没接上就如实说，不画「运行中」。
+const read = (path: string): string => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+const stripComments = (source: string): string => source.split("\n").filter((line) => !line.trimStart().startsWith("//")).join("\n");
+const surface = stripComments(read("./ai-management.tsx"));
+const me = read("./me.tsx");
+const meRow = read("./me-profile-components.tsx");
+
+describe("AI management entry (AI-MANAGE-001/003)", () => {
+  it("is listed under the account section and opens the real surface", () => {
+    expect(me).toContain('{ icon: "ai-manage", label: "AI 管理"');
+    expect(me).toContain('subPage.route === "aimanage"');
+    expect(me).toContain("<AIManagementSurface");
+    expect(me).toContain("secureSessionStore={nativeSecureSessionStore}");
   });
 
-  it("uses its own row icon, not the AI分身 one", () => {
-    expect(meSource).toContain('{ icon: "sparkle", label: "AI 管理"');
-  });
-
-  it("opens a real surface wired to the session store", () => {
-    expect(meSource).toContain("<AIManagementSurface");
-    expect(meSource).toContain('subPage.route === "aimanage"');
-    expect(meSource).toContain("secureSessionStore={nativeSecureSessionStore}");
+  it("draws the prototype logo mark in the 我的 row instead of a fallback glyph", () => {
+    expect(me).not.toContain('icon: "sparkle", label: "AI 管理"');
+    expect(meRow).toContain('row.icon === "ai-manage"');
+    expect(meRow).toContain("<AILogo active size={40} />");
   });
 });
 
-describe("AI management server-backed controls (AI-MANAGE-002)", () => {
-  it("reads and writes settings through the command client", () => {
-    expect(clientCode).toContain("GetAiEngineSettings");
-    expect(clientCode).toContain("UpdateAiEngineSettings");
-    expect(surfaceCode).toContain("engineClient.read()");
-    expect(surfaceCode).toContain("engineClient.write(");
+describe("AI management surface (AI-MANAGE-003)", () => {
+  it("keeps every catalogue entry from the prototype", () => {
+    expect(AI_SCENES.map((s) => s.id)).toEqual(["cafe", "restaurant", "dessert", "izakaya", "brunch", "night"]);
+    for (const scene of AI_SCENES) {
+      expect(scene.elements.length).toBeGreaterThanOrEqual(6);
+      expect(scene.prompt.length).toBeGreaterThan(40);
+      expect(AI_POSES[scene.id]).toHaveLength(6);
+      for (const pose of AI_POSES[scene.id]!) expect(AI_POSE_ICONS[pose.id]).toContain("<svg");
+    }
+    expect(AI_CAMERA_MOVES.map((c) => c.id)).toEqual(["static", "push", "pull", "pan", "track", "crane"]);
+    for (const camera of AI_CAMERA_MOVES) expect(AI_CAMERA_ICONS[camera.id]).toContain("<svg");
+    expect(AI_VENDORS[0]).toMatchObject({ id: "platform_default", pinned: true, recommend: true });
+    expect(AI_VENDORS.filter((v) => !v.pinned).every((v) => v.models.length === 3 && v.logoXml.includes("<svg"))).toBe(true);
   });
 
-  it("has a real pause control that flips server paused", () => {
-    expect(surfaceCode).toContain("togglePause");
-    expect(surfaceCode).toContain('accessibilityLabel={paused ? "继续" : "暂停"}');
-    expect(surfaceCode).toContain("paused: !settings.paused");
+  it("saves every choice to the server optimistically and reverts on failure", () => {
+    expect(surface).toContain("engineClient.write(next).catch(");
+    expect(surface).toContain('showToast("没保存成功，已恢复")');
+    expect(surface).toContain('patch({ paused: !paused }, paused ? "AI 已恢复" : "已暂停所有 AI 操作")');
   });
 
-  it("shows token usage from the server month, not a fake quota cap", () => {
-    expect(surfaceCode).toContain("本月 Token");
-    expect(surfaceCode).toContain("formatTokens(tokenTotal)");
-    // 不编 120K/200K 上限 —— 服务端只回本月累计，没有 limit 字段。
-    expect(surfaceCode).not.toContain("120K");
-    expect(surfaceCode).not.toContain("200K");
-    expect(surfaceCode).not.toContain("/ 200");
+  it("does not draw a fake token quota", () => {
+    expect(surface).not.toContain("200K");
+    expect(surface).toContain("formatTokens(tokenTotal)");
+    expect(formatTokens(0)).toBe("0");
+    expect(formatTokens(1_234)).toBe("1.2K");
+    expect(formatTokens(120_000)).toBe("120K");
+    expect(formatTokens(2_500_000)).toBe("2.5M");
   });
 
-  it("opens three settings sheets matching the prototype", () => {
-    expect(surfaceCode).toContain("对话管理");
-    expect(surfaceCode).toContain("图片管理");
-    expect(surfaceCode).toContain("动态管理");
-    expect(surfaceCode).toContain("AiChatSheet");
-    expect(surfaceCode).toContain("AiImageSheet");
-    expect(surfaceCode).toContain("AiPostSheet");
-    expect(surfaceCode).toContain("AI Engine v2.4 · 平台托管");
+  it("does not claim image generation or auto-posting is running when nothing runs them", () => {
+    expect(surface).toContain('const imageBadge: Badge = { text: "未接出图", kind: "off" };');
+    expect(surface).toContain('settings.postPermission === "auto" ? { text: "全自动", kind: "confirm" }');
+    expect(surface).toContain("自动发帖任务尚未上线");
+    expect(surface).toContain("出图任务还没接上这些设置");
   });
 
-  it("keeps vendor choice as preference ids, not direct provider binds", () => {
-    expect(clientCode).toContain("imageVendorPref");
-    expect(clientCode).toContain("imageModelPref");
-    // 客户端不出现具体 provider SDK/baseURL 绑定字样。
-    expect(surfaceCode).not.toContain("baseUrl");
-    expect(surfaceCode).not.toContain("api.openai.com");
-    expect(surfaceCode).not.toContain("generativelanguage");
-  });
-
-  it("does not fake a running auto-post worker", () => {
-    expect(surfaceCode).toContain("自动发帖任务尚未上线");
-    expect(surfaceCode).toContain("postPermissionBadge");
-    // postPermission=auto 的 badge 说「全自动」，不说「运行中」。
-    expect(surfaceCode).toContain('return "全自动"');
-  });
-
-  it("keeps management cards navigating to real content surfaces", () => {
-    expect(surfaceCode).toContain("onOpenImageManage");
-    expect(surfaceCode).toContain("onOpenPostManage");
-    expect(surfaceCode).toContain("管理已生成图片");
-    expect(surfaceCode).toContain("管理已发动态");
-  });
-
-  it("uses the prototype logo mark", () => {
-    expect(surfaceCode).toContain("<Circle");
-    expect(surfaceCode).toContain("<Line");
+  it("stores prompt history per scene and restores the last saved prompt of a scene", () => {
+    const entry = encodePromptHistoryEntry({ scene: "night", text: "夜景自定义", at: "2026-09-23T10:00:00.000Z" });
+    const settings = { imageScene: "cafe", imagePrompt: "", imagePromptHistory: [entry, "旧纯文本"] };
+    expect(decodePromptHistory(settings.imagePromptHistory)).toEqual([
+      { scene: "night", text: "夜景自定义", at: "2026-09-23T10:00:00.000Z" },
+      { scene: "", text: "旧纯文本", at: "" },
+    ]);
+    expect(promptForScene(settings, "night")).toBe("夜景自定义");
+    expect(promptForScene(settings, "dessert")).toBe(AI_SCENES.find((s) => s.id === "dessert")!.prompt);
+    expect(promptForScene({ ...settings, imagePrompt: "咖啡自定义" }, "cafe")).toBe("咖啡自定义");
   });
 });

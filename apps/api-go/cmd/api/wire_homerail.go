@@ -129,6 +129,18 @@ func seedPostgresHomeRail(pool *pgxpool.Pool, storeDir string) error {
 			avatarPath, now, accountID); err != nil {
 			return err
 		}
+
+		// AI-MANAGE-003：这些是演示用的「真人」账号，没人登录它们；用户在测试时把它们当成
+		// 「AI 托管的真人」（有人私信就由 AI 代回复）。AI 管理的默认对话权限是「每次确认」，
+		// 而这些号没有主人来确认 —— 不给个设置行，私信它们就永远没回音。
+		// 所以只在**没有设置行时**写一行「全自动」；有人手动改过（比如为了测连发上限
+		// 把某个号关掉 AI）就不覆盖。
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO identity.ai_engine_settings (user_account_id, chat_permission, updated_at)
+			VALUES ($1, 'auto', $2)
+			ON CONFLICT (user_account_id) DO NOTHING`, accountID, now); err != nil {
+			return err
+		}
 	}
 	return nil
 }

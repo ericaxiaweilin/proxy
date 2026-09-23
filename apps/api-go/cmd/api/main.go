@@ -513,11 +513,17 @@ func main() {
 	// 挡不住 curl）；Token 计量在真实推理成功后累加当月用量。没接 = 不拦
 	// 不记 —— 见 conversation/ai_engine_gate.go 的 fail-open 说明。
 	conversationService.SetAiEngineChatStateReader(func(ctx context.Context, ownerID string) (conversation.AiEngineChatState, error) {
-		paused, permission, err := identityService.GetAiEngineChatState(ctx, ownerID)
+		settings, err := identityService.GetAiEngineChatState(ctx, ownerID)
 		if err != nil {
 			return conversation.AiEngineChatState{}, err
 		}
-		return conversation.AiEngineChatState{Paused: paused, ChatPermission: permission}, nil
+		return conversation.AiEngineChatState{
+			Paused:         settings.Paused,
+			ChatPermission: settings.ChatPermission,
+			Tone:           settings.ChatTone,
+			ReplyLength:    settings.ChatReplyLength,
+			Emoji:          settings.ChatEmoji,
+		}, nil
 	})
 	conversationService.SetTokenMeter(identityService.RecordAiTokens)
 	// TWIN-INSIGHT-002: AI 分身「好友洞察」。跨 relationship / localnet /

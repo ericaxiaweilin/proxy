@@ -4,6 +4,24 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 254 — 2026-09-23
+
+- **AI 管理按原型重做 + 对话管理管对人**（AI-MANAGE-003）：用户反馈「原型给了 干的一坨屎 logo 也不对
+  功能也不对」（原型 `deepseek_html_20260923_83b40b (1).html`）。
+  - 页面：页头（返回 / 节点牌标 / 红色暂停钮）、副标题「AI 正在替你工作」、深色状态卡、三张管理卡、
+    版本行；三个 sheet 的标签页 / 选项 / 配色 / 尺寸逐项照原型。目录（6 场景、36 姿态、6 运镜、
+    7 厂商含模型与价格）用 node 直接执行原型脚本导出到 `ai-management-data.ts`。所有选择真落
+    服务端，点下去先变、失败撤回。与原型不同的：Token 不画「/ 200K」假上限；出图、自动发帖没接上，
+    徽标写「未接出图」「全自动」并附说明，不画「运行中」；字号下限 11。
+  - 「我的」入口：原来的 `sparkle` 不在图标表里、回落成文字「sp」，换成原型节点牌标。
+  - 服务端：对话管理读**被代表的人**（私聊里收消息的真人）的设置，不再读发消息的人；
+    暂停 / 关闭 / 每次确认都不替 TA 回（每次确认的「草稿给本人确认」尚未做，先不漏草稿给对方），
+    全自动用 TA 的语气 / 长度 / emoji、以代回复人设回；Token 记在 TA 头上。跟 Proxy 助手的会话
+    不受对话管理影响。演示用真人账号（home rail 28 人）种一行「全自动」，保持可测。
+- 影响文件：`apps/mobile/src/surfaces/ai-management.tsx`、`apps/mobile/src/surfaces/ai-management-data.ts`、
+  `apps/mobile/src/surfaces/me.tsx`、`apps/mobile/src/surfaces/me-profile-components.tsx`、
+  `apps/mobile/src/surfaces/me-styles.ts`。
+
 ## Revision 253 — 2026-09-23
 
 - **下拉刷新**（PULL-REFRESH-001）：用户反馈「目前所有社交产品都是上下滑动进行刷新 我们缺少

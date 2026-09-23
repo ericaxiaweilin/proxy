@@ -9129,3 +9129,28 @@ if grep -qE 'setTimeout\(\(\) => setRefreshing\(false\), [0-9]{3,4}\)' "$PR_HOOK
   exit 1
 fi
 echo "    PULL-REFRESH-001: PASS (home / more / rooms / messages / feed / market all pull-to-refresh on real loads)"
+
+# AI-MANAGE-003（2026-09-23，用户：「ai 管理模块 原型给了 干的一坨屎 logo 也不对 功能也不对」）：
+# 「对话管理 —— AI 怎么替你聊天」管的是**被代表的人**：私聊真人时读收消息那个真人（owner）的
+# 暂停 / 权限 / 风格，不是发消息的人；跟 Proxy 助手的会话不受影响；Token 记在 owner 头上。
+# AI-MANAGE-002 读的是 e.Actor —— 方向反了，「每次确认」还把替 owner 起草的回复交给了对方。
+require_test "AI-MANAGE-003" "./internal/conversation" \
+  "TestStandInReadsTheRecipientsSettingsNotTheSenders" \
+  "apps/api-go/internal/conversation/ai_engine_gate_test.go" || exit $?
+require_test "AI-MANAGE-003" "./internal/conversation" \
+  "TestStandInHonoursRecipientPauseOffAndConfirmBeforeTheModel" \
+  "apps/api-go/internal/conversation/ai_engine_gate_test.go" || exit $?
+require_test "AI-MANAGE-003" "./internal/conversation" \
+  "TestStandInAutoUsesTheOwnersStyleAndMetersTheOwner" \
+  "apps/api-go/internal/conversation/ai_engine_gate_test.go" || exit $?
+require_test "AI-MANAGE-003" "./internal/conversation" \
+  "TestAssistantThreadIsNotGovernedByChatManagement" \
+  "apps/api-go/internal/conversation/ai_engine_gate_test.go" || exit $?
+if grep -qF 's.aiGenerationBlocked(ctx, e.Actor.ID)' apps/api-go/internal/conversation/service.go ||
+   grep -qF 'payload["aiDraft"]' apps/api-go/internal/conversation/service.go; then
+  echo "  FAIL [AI-MANAGE-003]: 会话侧又按发消息的人读 AI 管理设置 / 又把草稿交给了对方。" >&2
+  exit 1
+fi
+# 页面：原型牌标、目录完整、不画假上限、没接上的能力不说「运行中」。
+pnpm --dir apps/mobile exec vitest run src/surfaces/ai-management.test.ts || exit $?
+echo "    AI-MANAGE-003: PASS (chat management governs the represented person; surface matches the prototype honestly)"

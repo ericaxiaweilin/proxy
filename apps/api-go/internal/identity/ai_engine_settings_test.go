@@ -87,17 +87,21 @@ func TestAiEngineSettingsRejectsAnonymousActorAndInvalidEnums(t *testing.T) {
 
 func TestAiEnginePauseAndPermissionGateConversationState(t *testing.T) {
 	svc := New(nil)
-	paused, permission, err := svc.GetAiEngineChatState(t.Context(), "user_missing")
-	if err != nil || paused || permission != "confirm" {
-		t.Fatalf("missing row must read as default allow-with-confirm: paused=%v permission=%q err=%v", paused, permission, err)
+	state, err := svc.GetAiEngineChatState(t.Context(), "user_missing")
+	if err != nil || state.Paused || state.ChatPermission != "confirm" || state.ChatTone != "warm" {
+		t.Fatalf("missing row must read as defaults: %+v err=%v", state, err)
 	}
 
-	if got := svc.Handle(aiEngineEnvelope("UpdateAiEngineSettings", "user_1", map[string]any{"paused": true, "chatPermission": "off"})); got.Outcome != "ACCEPTED" {
+	if got := svc.Handle(aiEngineEnvelope("UpdateAiEngineSettings", "user_1", map[string]any{"paused": true, "chatPermission": "off", "chatTone": "lively", "chatEmoji": "never"})); got.Outcome != "ACCEPTED" {
 		t.Fatalf("pause write: %#v", got)
 	}
-	paused, permission, err = svc.GetAiEngineChatState(t.Context(), "user_1")
-	if err != nil || !paused || permission != "off" {
-		t.Fatalf("paused off must gate conversation: paused=%v permission=%q err=%v", paused, permission, err)
+	state, err = svc.GetAiEngineChatState(t.Context(), "user_1")
+	if err != nil || !state.Paused || state.ChatPermission != "off" {
+		t.Fatalf("paused off must gate conversation: %+v err=%v", state, err)
+	}
+	// AI-MANAGE-003：风格也要带给会话侧（代回复按 owner 的语气 / emoji 说话）。
+	if state.ChatTone != "lively" || state.ChatEmoji != "never" {
+		t.Fatalf("style must reach the conversation side: %+v", state)
 	}
 }
 

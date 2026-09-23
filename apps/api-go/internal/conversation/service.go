@@ -1165,15 +1165,15 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 	// 没带 assistantMode 也一样是伴侣会话（见 companionFor 的说明）。
 	_, openingWithCompanion := companionFor(conv, p.AssistantMode)
 	companionGated := openingWithCompanion && !s.companionAllowedFor(ctx, e.Actor.ID)
-	// AI-MANAGE-002：AI 管理页的全局暂停 / 对话权限。优先于一切生成
-	//（含伴侣开场白与需求助手引导）—— 暂停开着时 curl 也拿不到回复。
-	engineBlocked, engineStatus := s.aiGenerationBlocked(ctx, e.Actor.ID)
+	// AI-MANAGE-003：私聊真人时，AI 是替**对面那个人**回 —— 读 TA 的 AI 管理设置
+	//（暂停 / 对话权限 / 风格），不是发消息的人的（见 ai_engine_gate.go）。
+	standIn := s.aiStandInFor(ctx, conv, e.Actor.ID, p.AssistantMode)
 	if companionGated {
 		log.Printf("conversation ai: companion gated for actor %s (COMP-AI-MINOR-001)", e.Actor.ID)
 		payload["assistantStatus"] = "GATED"
-	} else if engineBlocked {
-		log.Printf("conversation ai: engine blocked status=%s actor=%s (AI-MANAGE-002)", engineStatus, e.Actor.ID)
-		payload["assistantStatus"] = engineStatus
+	} else if standIn.Blocked && hasInitialContent {
+		log.Printf("conversation ai: stand-in blocked status=%s owner=%s (AI-MANAGE-003)", standIn.Status, standIn.Owner)
+		payload["assistantStatus"] = standIn.Status
 	} else if persona, ok := companionFor(conv, p.AssistantMode); ok && !hasInitialContent && !reusedConversation {
 		// 这里同样用 companionFor，不是 platformAIPersonaForMode：开场白和门禁
 		// 必须是同一个判断。门禁认了「这是伴侣会话」而开场白不认，结果是
@@ -1197,26 +1197,23 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		// 引导回复会在房间里冒出一条不相干的"你想安排点什么？有没有预算
 		// 范围？"，看着像 AI 乱入。有 RoomScene 就说明这是房间，直接跳过
 		// 这整条 AI 回复分支。
-		temporaryUI := temporaryUIFor(p.FirstMessage)
+		// 代回复不走需求助手的临时表单（那是 Proxy 助手的能力，不是替真人聊天）。
+		var temporaryUI *TemporaryUI
+		if standIn.Owner == "" {
+			temporaryUI = temporaryUIFor(p.FirstMessage)
+		}
 		if temporaryUI != nil {
 			payload["temporaryUI"] = temporaryUI
 		}
 		payload["assistantStatus"] = "NOT_REQUESTED"
 		var aiReply *Message
-		var aiDraft *Message
 		if temporaryUI != nil {
 			aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
 		} else if s.modelStack != nil && s.modelStack.Available() {
-			if s.aiRequiresDraftConfirm(ctx, e.Actor.ID) && !engineBlocked {
-				// AI-MANAGE-002：首条引导也走「每次确认」—— 草稿不落库。
-				aiDraft = s.withModelUnlocked(func() *Message {
-					return s.generateAIReplyUnpersisted(ctx, conv, e, p.FirstMessage, p.AssistantMode, nil, nil)
-				})
-			} else {
-				aiReply = s.withModelUnlocked(func() *Message {
-					return s.generateAIReply(ctx, conv, e, p.FirstMessage, p.AssistantMode, nil, nil)
-				})
-			}
+			genCtx := withStandIn(ctx, standIn)
+			aiReply = s.withModelUnlocked(func() *Message {
+				return s.generateAIReply(genCtx, conv, e, p.FirstMessage, p.AssistantMode, nil, nil)
+			})
 		}
 		if aiReply != nil {
 			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
@@ -1225,9 +1222,6 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 			}))
 			payload["aiMessage"] = aiReply
 			payload["assistantStatus"] = "RESPONDED"
-		} else if aiDraft != nil {
-			payload["aiDraft"] = aiDraft
-			payload["assistantStatus"] = "DRAFT"
 		} else if s.modelStack == nil || !s.modelStack.Available() {
 			payload["assistantStatus"] = "UNAVAILABLE"
 		} else {
@@ -1484,19 +1478,21 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	// 否则"漏传一个参数"就等于把门禁关掉（见 companionFor）。
 	_, chattingWithCompanion := companionFor(conv, p.AssistantMode)
 	companionGated := chattingWithCompanion && !s.companionAllowedFor(ctx, e.Actor.ID)
-	engineBlocked, engineStatus := s.aiGenerationBlocked(ctx, e.Actor.ID)
-	// confirm 权限：AI 起草、用户点发才发 —— 草稿进 payload（aiDraft），
-	// 不 AppendMessage、不发 AIReplySent。
-	confirmDraft := !engineBlocked && !companionGated && s.aiRequiresDraftConfirm(ctx, e.Actor.ID)
-	var aiDraft *Message
+	// AI-MANAGE-003：私聊真人时由对面那个人的 AI 设置决定要不要代回复（见 ai_engine_gate.go）。
+	standIn := s.aiStandInFor(ctx, conv, e.Actor.ID, p.AssistantMode)
+	engineBlocked, engineStatus := standIn.Blocked, standIn.Status
+	if standIn.Owner != "" {
+		// 代回复不走需求助手的临时表单 / 表单回执（那是 Proxy 助手的能力）。
+		temporaryUI = nil
+	}
 	if companionGated {
 		// 不生成任何 AI 回复，也不发 AIReplySent 事件：这个人根本不该有 AI 陪聊。
 		log.Printf("conversation ai: companion gated for actor %s (COMP-AI-MINOR-001)", e.Actor.ID)
 	} else if engineBlocked {
-		log.Printf("conversation ai: engine blocked status=%s actor=%s (AI-MANAGE-002)", engineStatus, e.Actor.ID)
+		log.Printf("conversation ai: stand-in blocked status=%s owner=%s (AI-MANAGE-003)", engineStatus, standIn.Owner)
 	} else if p.TemporaryUIResponseID == "" && temporaryUI != nil && hasContent {
 		aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
-	} else if p.TemporaryUIResponseID != "" && convoID == nil {
+	} else if p.TemporaryUIResponseID != "" && convoID == nil && standIn.Owner == "" {
 		aiReply = s.serverFormResponseReply(ctx, conv)
 	} else if s.modelStack != nil && s.modelStack.Available() && hasContent && convoID == nil {
 		// QUOTE-REPLY-001: 把被引消息的快照喂给模型 —— 用户引了哪条，回复就
@@ -1511,23 +1507,20 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 			}
 			quote = &ReplyQuote{Sender: sender, Body: quoteBodyTruncated(quoted.Body)}
 		}
-		if confirmDraft {
-			// 生成但不落库：只返回草稿，等用户点「发」再走正常 SendMessage。
-			generated := s.withModelUnlocked(func() *Message {
-				return s.generateAIReplyUnpersisted(ctx, conv, e, p.Body, p.AssistantMode, nil, quote)
-			})
-			aiDraft = generated
-		} else {
-			aiReply = s.withModelUnlocked(func() *Message {
-				return s.generateAIReply(ctx, conv, e, p.Body, p.AssistantMode, nil, quote)
-			})
-			if aiReply != nil {
-				domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
-					"messageId": aiReply.ID,
-					"model":     aiReply.Body[:min(40, len(aiReply.Body))],
-					"note":      "AI 通过模型底座生成对话式需求构建回复",
-				}))
+		genCtx := withStandIn(ctx, standIn)
+		aiReply = s.withModelUnlocked(func() *Message {
+			return s.generateAIReply(genCtx, conv, e, p.Body, p.AssistantMode, nil, quote)
+		})
+		if aiReply != nil {
+			note := "AI 通过模型底座生成对话式需求构建回复"
+			if standIn.Owner != "" {
+				note = "AI 代回复（替 " + standIn.Owner + "）"
 			}
+			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
+				"messageId": aiReply.ID,
+				"model":     aiReply.Body[:min(40, len(aiReply.Body))],
+				"note":      note,
+			}))
 		}
 	}
 
@@ -1541,9 +1534,6 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if aiReply != nil {
 		payload["aiMessage"] = aiReply
 		payload["assistantStatus"] = "RESPONDED"
-	} else if aiDraft != nil {
-		payload["aiDraft"] = aiDraft
-		payload["assistantStatus"] = "DRAFT"
 	} else if companionGated {
 		// 必须是 GATED，不能用 UNAVAILABLE/FAILED —— 那两个会把
 		// "依法不提供"说成"服务坏了"，用户会一直重试。
@@ -1644,7 +1634,8 @@ func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e comm
 	return aiMsg
 }
 
-// generateAIReplyUnpersisted 同 generateAIReply，但不 AppendMessage ——
+// generateAIReplyUnpersisted 同 generateAIReply，但不 AppendMessage（AI-MANAGE-003：留给「每次确认」
+// 给 owner 起草的那一步用，目前没有调用方）——
 // 对话权限「每次确认」的草稿路径（AI-MANAGE-002）。Token 照记（推理真的发生了）。
 func (s *Service) generateAIReplyUnpersisted(ctx context.Context, conv Conversation, e command.Envelope, userText string, assistantMode string, temporaryUI *TemporaryUI, quote *ReplyQuote) *Message {
 	aiMsg, _, _ := s.generateAIReplyInternal(ctx, conv, e, userText, assistantMode, temporaryUI, quote, false)
@@ -1667,7 +1658,13 @@ func (s *Service) generateAIReplyInternal(ctx context.Context, conv Conversation
 			// 强度不够，露骨请求会被当成人在人设范围内继续聊。这里补到同口径。
 			CompanionSafetyDirective
 	}
-	if assistantMode != "" && !isPlatformPersona {
+	// AI-MANAGE-003：代回复（私聊真人、对面开了全自动）换成代回复人设 + owner 的风格设置，
+	// 不再用需求助手的 prompt 去回别人给真人发的私信。后面的引用 / 图片说明照常追加。
+	standIn, isStandIn := standInFrom(ctx)
+	if isStandIn && !isPlatformPersona {
+		systemPrompt = standInSystemPrompt(standIn.State)
+	}
+	if assistantMode != "" && !isPlatformPersona && !isStandIn {
 		systemPrompt += " 当前 Home 语义方向是「" + assistantMode + "」，它只是帮助你理解意图，不代表已经选择页面或创建业务事实。"
 	}
 	if temporaryUI != nil {
@@ -1762,7 +1759,12 @@ func (s *Service) generateAIReplyInternal(ctx context.Context, conv Conversation
 	log.Printf("conversation ai: model=%s provider=%s tokens=%d/%d", completion.Model, completion.Provider, completion.PromptTokens, completion.OutputTokens)
 	// AI-MANAGE-002：推理成功即计量（管理页「本月 Token」的事实源）。
 	// 记在落库之前：草稿路径不 persist，用量也必须进当月账。
-	s.recordAiTokens(ctx, e.Actor.ID, completion.PromptTokens, completion.OutputTokens)
+	// 代回复是 owner 的 AI 在干活，Token 记在 owner 头上。
+	meterUser := e.Actor.ID
+	if isStandIn {
+		meterUser = standIn.Owner
+	}
+	s.recordAiTokens(ctx, meterUser, completion.PromptTokens, completion.OutputTokens)
 
 	// 3. 存储 AI 回复消息
 	aiMsg := Message{

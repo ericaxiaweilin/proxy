@@ -7,6 +7,7 @@ import type { AbilityType, AvailabilityRule, AvailabilityState, AvOverride, Menu
 import { ABILITY_SCHEMAS, AVAILABILITY_OPTIONS, avFmt, AV_DAY_NAMES, avStateFor } from "./me-types";
 import { styles } from "./me-styles";
 import { FACET_LOGO, OTTER_LOGO } from "../media/asset-sources";
+import { AILogo } from "./ai-management";
 
 export function availabilityLabel(value: AvailabilityState): string {
   return AVAILABILITY_OPTIONS.find((option) => option.id === value)?.title ?? "可接单";
@@ -431,6 +432,10 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
     // FACET-LOGO-001: 参考稿 Proxy_COMPLETE_FiveRoot_FACET_v11.html 的真牌标
     // （黄黑对半分、白圆+四角星），不是随手指一个通用图标顶替。
     <Image accessibilityLabel="FACET" resizeMode="contain" source={FACET_LOGO} style={styles.serviceLogo} />
+  ) : row.icon === "ai-manage" ? (
+    // AI-MANAGE-003：AI 管理用原型里那枚真牌标（深色圆角方块 + 节点连线 + 在线点），
+    // 以前写的 "sparkle" 不在 ProxySymbolIcon 的表里，回落成文字画出了「sp」。
+    <AILogo active size={40} />
   ) : row.icon === "voucher" ? (
     <ProxyIcon color={row.grad ? color.white : color.ink} name="cup" size={26} />
   ) : (
@@ -443,7 +448,7 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
           {icon}
         </Gradient>
       ) : (
-        <View style={[styles.serviceIcon, row.icon === "P" && styles.serviceLogoBox]}>
+        <View style={[styles.serviceIcon, row.icon === "P" && styles.serviceLogoBox, row.icon === "ai-manage" && styles.serviceIconBare]}>
           {icon}
         </View>
       )}
