@@ -186,9 +186,13 @@ function UploadTile({ disabled, onPress, style, uploading }: { disabled: boolean
 }
 
 function GalleryThumb({ item, onPress, style }: { item: PersonaGalleryItem; onPress: () => void; style: object }): React.JSX.Element {
+  // TWIN-GALLERY-GRID-001：展开墙跟「我的」主页 photoTile 同一写法（padding 边槽，
+  // 不用 gap）—— gap + 百分比宽度的 wrap 网格在真机上只铺第一行。
   return (
     <Pressable accessibilityLabel="查看照片" onPress={onPress} style={style}>
-      <Image contentFit="cover" source={{ uri: item.thumbnailUrl }} style={StyleSheet.absoluteFill} />
+      <View style={styles.thumbFrame}>
+        <Image contentFit="cover" source={{ uri: item.thumbnailUrl }} style={styles.thumbImage} />
+      </View>
     </Pressable>
   );
 }
@@ -213,8 +217,10 @@ const styles = StyleSheet.create({
   errorText: { color: "#b91c1c", fontSize: 12, paddingVertical: 12 },
   track: { gap: 6 },
   trackThumb: { backgroundColor: color.chipNeutralBg, borderRadius: 8, height: 108, marginRight: 6, overflow: "hidden", width: 108 },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 3 },
-  gridThumb: { aspectRatio: 1, backgroundColor: color.chipNeutralBg, borderRadius: 4, overflow: "hidden", width: "32.6%" },
+  grid: { flexDirection: "row", flexWrap: "wrap" },
+  gridThumb: { aspectRatio: 1, padding: 2, width: "33.333%" },
+  thumbFrame: { backgroundColor: color.chipNeutralBg, borderRadius: 4, flex: 1, overflow: "hidden" },
+  thumbImage: { flex: 1 },
   uploadTile: { alignItems: "center", borderColor: color.cardBorder, borderStyle: "dashed", borderWidth: 1.5, gap: 4, justifyContent: "center" },
   uploadTileDisabled: { opacity: 0.5 },
   uploadTileText: { color: color.muted, fontSize: 11, fontWeight: "700" },
