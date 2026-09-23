@@ -429,8 +429,10 @@ export function MarketSurface({
         <Text style={styles.marketTitle}>市场</Text>
         <View style={styles.headActions}>
           <Pressable onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={[styles.viewToggle, view === "MAP" && styles.viewToggleOn]}>
-            {/* MAP-FOOTPRINT-LOGO-001：去地图用原型「折叠地图」logo，不再用通用 route。 */}
-            <ProxyIcon color={view === "MAP" ? color.white : color.ink} name={view === "MAP" ? "storeLines" : "mapFold"} size={18} />
+            {/* MAP-FOOTPRINT-LOGO-001：去地图用原型「折叠地图」logo，不再用通用 route。
+                48 栅格原画占盒比例比 24 栅格小一圈，同 size 会显小 —— mapFold 用 22
+                跟旁边的 + 号（18）视觉对齐；storeLines 保持 18。 */}
+            <ProxyIcon color={view === "MAP" ? color.white : color.ink} name={view === "MAP" ? "storeLines" : "mapFold"} size={view === "MAP" ? 18 : 22} />
           </Pressable>
           <Pressable onPress={() => setPublishMenuOpen(true)} style={styles.plusBtn}>
             <ProxyIcon color={color.white} name="plus" size={18} />
