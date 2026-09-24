@@ -47,9 +47,9 @@ import {
 import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { sendSceneCommand, type AuthenticatedStoredSession } from "../scene-commands";
 import {
-  availableShopSorts, formatShopDistance, sceneDistanceMeters, shopAreaFacets, shopCardSignal,
+  availableShopSorts, sceneDistanceMeters, shopAreaFacets, shopCardSignal,
   shopCountText, shopDetailTags, shopDirectoryRows, shopHereLine, shopInfoCells, shopListEndText,
-  shopListLocationLine,
+  shopAddressLine, shopCardDistance, shopHeroDistanceSuffix, shopListLocationLine, isFarAway, sceneActionSubtitle,
   type SceneOrigin, type SceneShopBrief, type ShopSortId,
 } from "../scene-shop-directory";
 
@@ -116,8 +116,8 @@ function toSceneShopBrief(value: unknown): SceneShopBrief | undefined {
   };
 }
 
-function absoluteNetworkURL(base: string, path: string): string | undefined {
-  const trimmed = path.trim();
+function absoluteNetworkURL(base: string, path: string | undefined): string | undefined {
+  const trimmed = (path ?? "").trim();
   if (!trimmed) return undefined;
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   if (!base) return undefined;
@@ -336,7 +336,7 @@ export function SceneShopDirectory({
 
             <View style={styles.listHead}>
               <Text selectable style={styles.listTitle}>{`附近${label}`}<Text selectable style={styles.listCount}>{`  ${shopCountText(rows.length, unit)}`}</Text></Text>
-              <Text selectable style={styles.listLocation}>{shopListLocationLine(origin !== undefined, rows.map((row) => row.area))}</Text>
+              <Text selectable style={styles.listLocation}>{shopListLocationLine(origin !== undefined, rows.map((row) => row.area), rows.length > 0 && rows.every((row) => isFarAway(sceneDistanceMeters(origin, row))))}</Text>
             </View>
 
             {/* 排序/筛选条：只放这一趟真的能用的项。没有定位就不给「最近」；
@@ -361,20 +361,21 @@ export function SceneShopDirectory({
                 : rows.length === 0 ? <Text selectable style={styles.empty}>{areas.length > 0 ? "这个区域还没有接入的场景，取消筛选看看。" : `附近还没有接入的${label}场景。`}</Text>
                   : <View style={styles.cardList}>{rows.map((scene) => {
                     const photo = absoluteNetworkURL(apiBaseUrl ?? "", scene.imageUrl);
-                    const distance = formatShopDistance(sceneDistanceMeters(origin, scene));
+                    const distance = shopCardDistance(sceneDistanceMeters(origin, scene));
+                    const address = shopAddressLine(scene);
                     const signal = shopCardSignal(scene);
                     return <Pressable accessibilityLabel={`场景 ${scene.name}`} key={scene.id} onPress={() => setSelectedId(scene.id)} style={styles.card}>
                       <View style={styles.cardPhoto}>
-                        {photo ? <Image contentFit="cover" source={{ uri: photo }} style={styles.cardImage} /> : <View style={styles.cardImage} />}
+                        {photo ? <Image contentFit="cover" source={{ uri: photo }} style={styles.cardImage} /> : <View style={[styles.cardImage, styles.photoPlaceholder]}><Text selectable style={styles.photoPlaceholderText}>{scene.type.slice(0, 2) || "场景"}</Text></View>}
                         {scene.hereCount !== undefined && scene.hereCount > 0 ? <View style={styles.liveDot} /> : null}
-                        {distance ? <View style={styles.distancePill}><Text selectable style={styles.distanceText}>{distance}</Text></View> : null}
                       </View>
                       <View style={styles.cardBody}>
                         <View style={styles.cardTitleRow}>
                           <Text selectable numberOfLines={1} style={styles.cardName}>{scene.name}</Text>
                           <Pressable accessibilityLabel={saved.has(scene.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => { void toggleSaved(scene); }} style={styles.heart}><Text selectable style={[styles.heartText, saved.has(scene.id) && styles.heartTextOn]}>{saved.has(scene.id) ? "♥" : "♡"}</Text></Pressable>
                         </View>
-                        {signal ? <Text selectable style={styles.cardSignal}>{signal}</Text> : null}
+                        {signal || distance ? <Text selectable style={styles.cardSignal}>{[signal, distance].filter(Boolean).join(" · ")}</Text> : null}
+                        {address ? <Text selectable numberOfLines={1} style={styles.cardAddress}>{`📍 ${address}`}</Text> : null}
                         <View style={styles.tagRow}>{shopDetailTags(scene).map((tag) => <View key={tag} style={styles.tag}><Text selectable style={styles.tagText}>{tag}</Text></View>)}</View>
                         <View style={styles.cardFoot}>
                           <Text selectable style={styles.cardFootText}>{shopHereLine(scene.hereCount)}</Text>
@@ -390,7 +391,8 @@ export function SceneShopDirectory({
         ) : (
           <ScrollView contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
             <View style={styles.hero}>
-              {heroUri ? <Image contentFit="cover" source={{ uri: heroUri }} style={styles.heroImage} /> : <View style={styles.heroImage} />}
+              {heroUri ? <Image contentFit="cover" source={{ uri: heroUri }} style={styles.heroImage} /> : <View style={[styles.heroImage, styles.photoPlaceholder]}><Text selectable style={styles.heroPlaceholderText}>{selected?.type.slice(0, 2) || "场景"}</Text></View>}
+              <View pointerEvents="none" style={styles.heroShade} />
               <View style={styles.heroTopbar}>
                 <Pressable accessibilityLabel="返回" hitSlop={8} onPress={() => setSelectedId(undefined)} style={styles.heroRound}><Text selectable style={styles.heroRoundText}>‹</Text></Pressable>
                 <View style={styles.heroRight}>
@@ -400,6 +402,7 @@ export function SceneShopDirectory({
               </View>
               <View style={styles.heroCopy}>
                 <Text selectable style={styles.heroTitle}>{detail?.venueName ?? selected?.name ?? ""}</Text>
+                {selected && shopAddressLine(selected) ? <Text selectable numberOfLines={2} style={styles.heroAddress}>{`📍 ${shopAddressLine(selected)}${shopHeroDistanceSuffix(sceneDistanceMeters(origin, selected))}`}</Text> : null}
                 <View style={styles.heroTags}>
                   {hereChecked ? <View style={[styles.tag, styles.tagLive]}><Text selectable style={styles.tagLiveText}>我在这里</Text></View> : null}
                   {detailTags.map((tag) => <View key={tag} style={styles.heroTag}><Text selectable style={styles.heroTagText}>{tag}</Text></View>)}
@@ -408,7 +411,8 @@ export function SceneShopDirectory({
             </View>
 
             <View style={styles.detailBody}>
-              {selected ? <Text selectable style={styles.address}>{`${sceneAddressLine(selected)}${sceneSourceSuffix(selected.source)}`}</Text> : null}
+              {/* 来源角标只给社区提交的（坐标未核实，用户该知道）；「坐标来源未知」是内部数据状态，不给用户看。 */}
+              {selected?.source === "COMMUNITY" ? <Text selectable style={styles.address}>{`${sceneAddressLine(selected)}${sceneSourceSuffix(selected.source)}`}</Text> : null}
 
               {infoCells.length > 0 ? <View style={styles.infoStrip}>{infoCells.map((cell) => <View key={cell.label} style={styles.infoCell}><Text selectable style={styles.infoValue}>{cell.value}</Text><Text selectable style={styles.infoLabel}>{cell.label}</Text></View>)}</View> : null}
 
@@ -454,7 +458,7 @@ export function SceneShopDirectory({
                 {detail.actions.map((action) => <Pressable accessibilityLabel={action.label} key={action.type} onPress={() => { if (selected) onOpenScene?.(selected.id); }} style={styles.actionRow}>
                   <View style={styles.activityCopy}>
                     <Text selectable style={styles.activityTitle}>{action.label}</Text>
-                    <Text selectable style={styles.activityMeta}>{`${action.state} · ${action.moneyMeaning}`}</Text>
+                    <Text selectable style={styles.activityMeta}>{sceneActionSubtitle(action)}</Text>
                   </View>
                   <Text selectable style={styles.cardChevron}>›</Text>
                 </Pressable>)}
@@ -494,11 +498,13 @@ const styles = StyleSheet.create({
   empty: { color: color.muted, fontSize: 13, lineHeight: 20, paddingHorizontal: 16, paddingVertical: 22 },
   cardList: { gap: 10, paddingHorizontal: 16 },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, padding: 11 },
-  cardPhoto: { borderRadius: 13, height: 96, overflow: "hidden", position: "relative", width: 96 },
+  cardPhoto: { borderRadius: 13, height: 112, overflow: "hidden", position: "relative", width: 96 },
   cardImage: { backgroundColor: color.surface, height: "100%", width: "100%" },
   liveDot: { backgroundColor: color.mint, borderRadius: 4, height: 8, position: "absolute", right: 6, top: 6, width: 8 },
-  distancePill: { backgroundColor: "rgba(255,255,255,0.92)", borderRadius: 6, bottom: 6, left: 6, paddingHorizontal: 6, paddingVertical: 2, position: "absolute" },
-  distanceText: { color: color.ink, fontSize: 11, fontWeight: "900" },
+  photoPlaceholder: { alignItems: "center", justifyContent: "center" },
+  photoPlaceholderText: { color: color.muted, fontSize: 15, fontWeight: "900" },
+  heroPlaceholderText: { color: "rgba(255,255,255,0.5)", fontSize: 30, fontWeight: "900" },
+  cardAddress: { color: color.muted, fontSize: 11, fontWeight: "700", marginTop: 5 },
   cardBody: { flex: 1, minWidth: 0 },
   cardTitleRow: { alignItems: "flex-start", flexDirection: "row", gap: 8 },
   cardName: { color: color.ink, flex: 1, fontSize: 14.5, fontWeight: "900" },
@@ -520,11 +526,13 @@ const styles = StyleSheet.create({
   heroImage: { backgroundColor: color.deep, height: "100%", width: "100%" },
   heroTopbar: { flexDirection: "row", justifyContent: "space-between", left: 0, paddingHorizontal: 16, paddingTop: 10, position: "absolute", right: 0, top: 0 },
   heroRight: { flexDirection: "row", gap: 8 },
-  heroRound: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.36)", borderRadius: 20, height: 40, justifyContent: "center", width: 40 },
+  heroRound: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 20, height: 40, justifyContent: "center", width: 40 },
   heroRoundText: { color: color.white, fontSize: 18, fontWeight: "900", lineHeight: 20 },
   heroRoundTextOn: { color: color.magenta },
   heroCopy: { bottom: 18, left: 16, position: "absolute", right: 16 },
-  heroTitle: { color: color.white, fontSize: 29, fontWeight: "900", letterSpacing: -0.9, marginBottom: 10 },
+  heroShade: { backgroundColor: "rgba(0,0,0,0.28)", bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  heroTitle: { color: color.white, fontSize: 29, fontWeight: "900", letterSpacing: -0.9, marginBottom: 6 },
+  heroAddress: { color: "rgba(255,255,255,0.88)", fontSize: 12, fontWeight: "700", lineHeight: 17, marginBottom: 10 },
   heroTags: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   heroTag: { backgroundColor: "rgba(255,255,255,0.18)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
   heroTagText: { color: color.white, fontSize: 11, fontWeight: "800" },

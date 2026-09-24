@@ -778,7 +778,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
                 摆出来的同一份，不存在"图上一个样、文案另一个样"。 */}
             <Text selectable style={styles.sectionTitle}>场景 Studio</Text>
             <View ref={studioShareRef} collapsable={false} style={styles.badgeShareCard}>
-              <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-studio:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.heroMap} transition={0} />
+              {detail.heroImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-studio:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.heroMap} transition={0} /> : null}
               <Text selectable style={styles.studioName}>{detail.venueName} · {activeVariant?.name ?? selected.type}</Text>
               <Text selectable style={styles.studioSub}>{activeVariant ? `${activeVariant.window} · ${activeVariant.bestFor}` : selected.description}</Text>
               <View style={styles.studioRow}>
@@ -953,7 +953,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
 function isSceneDetail(value: unknown): value is SceneDetail {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<SceneDetail>;
-  return typeof item.sceneId === "string" && typeof item.heroImageUrl === "string" && item.heroImageUrl.length > 0 && typeof item.mediaVersion === "number" && (item.logoUrl === undefined || typeof item.logoUrl === "string") && typeof item.selectedVariant === "string" && Array.isArray(item.variants) && item.variants.length > 0 && !!item.liveState && Array.isArray(item.menu) && item.menu.every((menu) => typeof menu.imageUrl === "string" && menu.imageUrl.length > 0) && Array.isArray(item.fullMenu) && item.fullMenu.length >= item.menu.length && item.fullMenu.every((menu) => typeof menu.imageUrl === "string" && menu.imageUrl.length > 0) && Array.isArray(item.humans) && item.humans.every((human) => human.isAI === false && typeof human.avatarUrl === "string" && human.avatarUrl.length > 0) && Array.isArray(item.actions) && item.actions.length === 3 && typeof item.truthBoundary === "string";
+  return typeof item.sceneId === "string" && typeof item.heroImageUrl === "string" && typeof item.mediaVersion === "number" && (item.logoUrl === undefined || typeof item.logoUrl === "string") && typeof item.selectedVariant === "string" && Array.isArray(item.variants) && item.variants.length > 0 && !!item.liveState && Array.isArray(item.menu) && item.menu.every((menu) => typeof menu.imageUrl === "string" && menu.imageUrl.length > 0) && Array.isArray(item.fullMenu) && item.fullMenu.length >= item.menu.length && item.fullMenu.every((menu) => typeof menu.imageUrl === "string" && menu.imageUrl.length > 0) && Array.isArray(item.humans) && item.humans.every((human) => human.isAI === false && typeof human.avatarUrl === "string" && human.avatarUrl.length > 0) && Array.isArray(item.actions) && item.actions.length === 3 && typeof item.truthBoundary === "string";
 }
 
 function isRealityScene(value: unknown): value is RealityScene {

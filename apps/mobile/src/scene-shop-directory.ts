@@ -82,8 +82,24 @@ export function sceneDistanceMeters(
 export function formatShopDistance(meters: number | undefined): string {
   if (typeof meters !== "number" || !Number.isFinite(meters) || meters < 0) return "";
   if (meters < 1000) return `${Math.round(meters)}m`;
-  return `${(meters / 1000).toFixed(1)}km`;
+  // SCENE-DISTANCE-FAR-001：10km 以上不带小数、带千分位 —— 以前是「11730.3km」。
+  if (meters < 10_000) return `${(meters / 1000).toFixed(1)}km`;
+  return `${Math.round(meters / 1000).toLocaleString("en-US")}km`;
 }
+
+/**
+ * SCENE-DISTANCE-FAR-001（2026-09-24）：人不在这座城市时（模拟器、出差、还没到越南），
+ * 直线距离是真的，但「11730km · 步行约 146628 分钟」对用户毫无意义。超过 50km 算「不在附近」：
+ * 列表卡不画距离，详情说「你不在附近」，不算步行时长。
+ */
+export const FAR_AWAY_METERS = 50_000;
+
+export function isFarAway(meters: number | undefined): boolean {
+  return typeof meters === "number" && Number.isFinite(meters) && meters > FAR_AWAY_METERS;
+}
+
+/** 步行只在 3km 以内有意义；更远就只说直线距离，不给一个没人会走的分钟数。 */
+export const WALKABLE_METERS = 3_000;
 
 /** 步行速度口径：80 米/分钟（≈4.8km/h）。原型 1.2km → 「步行约 15 分钟」即此。 */
 export const WALK_METERS_PER_MINUTE = 80;
@@ -266,13 +282,13 @@ export function shopCountText(count: number, unit: string): string {
  * 地址取当前列表真实覆盖的 area 派生；不写「3km 内」：公开目录**不按半径筛**，
  * 写上去就是假的。没有定位时也不假装有 —— 直接说清楚这一页不含距离。
  */
-export function shopListLocationLine(hasOrigin: boolean, areas: readonly string[] = []): string {
+export function shopListLocationLine(hasOrigin: boolean, areas: readonly string[] = [], farAway = false): string {
   const zones = [...new Set(areas.map((area) => area.trim()).filter(Boolean))];
   const zoneText = zones.length <= 3
     ? zones.join(" · ")
     : `${zones.slice(0, 3).join(" · ")}等 ${zones.length} 个区域`;
   const tail = hasOrigin
-    ? "已按你的当前位置排序 · 距离为直线距离"
+    ? (farAway ? "你当前不在这些场景附近 · 不显示距离" : "已按你的当前位置排序 · 距离为直线距离")
     : "未取得定位 · 不含距离，也没有「最近」排序";
   return zoneText === "" ? tail : `${zoneText} · ${tail}`;
 }
@@ -293,8 +309,11 @@ export function shopListEndText(count: number, unit: string): string {
  * 「营业中」**：`reality.scenes.active` 是个静态布尔（SCENE-NO-FABRICATED-001
  * 就是因为拿它渲染「正在发生」才被删的），它不代表此刻开门。
  */
+// SCENE-TAG-HONEST-001：type 里有些词是内部分类（「动态场景」），对用户没有意义，不当标签显示。
+const INTERNAL_TYPE_WORDS: ReadonlySet<string> = new Set(["动态场景"]);
+
 export function shopDetailTags(scene: SceneShopBrief): readonly string[] {
-  const typeParts = scene.type.split("·").map((part) => part.trim()).filter(Boolean);
+  const typeParts = scene.type.split("·").map((part) => part.trim()).filter((part) => part !== "" && !INTERNAL_TYPE_WORDS.has(part));
   const tags = [...typeParts];
   const area = scene.area.trim();
   if (area && !tags.includes(area)) tags.push(area);
@@ -314,8 +333,12 @@ export function shopInfoCells(scene: SceneShopBrief, origin?: SceneOrigin): read
   const meters = sceneDistanceMeters(origin, scene);
   const distance = formatShopDistance(meters);
   if (distance) {
+    // SCENE-DISTANCE-FAR-001：太远就说「你不在附近」；3km 内才给步行时长，其余只说直线距离。
     const minutes = walkMinutes(meters);
-    cells.push({ value: distance, label: minutes === undefined ? "距离" : `步行约 ${minutes} 分钟` });
+    const label = isFarAway(meters) ? "你不在附近"
+      : minutes !== undefined && (meters ?? 0) <= WALKABLE_METERS ? `步行约 ${minutes} 分钟`
+        : "直线距离";
+    cells.push({ value: distance, label });
   }
   const here = realCount(scene.hereCount);
   if (here > 0) cells.push({ value: `${here} 位`, label: "此刻在这里" });
@@ -344,4 +367,51 @@ export function shopDirectoryRows<T extends SceneShopBrief>(
   const matched = scenesForAction(scenes, actionId);
   const filtered = filterShopsByAreas(matched, options?.areas ?? []);
   return sortShops(filtered, options?.sortId ?? "recommended", options?.origin);
+}
+
+// ---------------------------------------------------------------------------
+// SCENE-SHOP-ADDRESS-001（2026-09-24，原型 deepseek_html_20260924_f05cb0「★ 新增：地址行」）
+// ---------------------------------------------------------------------------
+
+/**
+ * 列表卡 / 详情头图上的地址行：门牌地址 · 街区。地址里已经带了街区名就不重复。
+ * 没登记地址返回空串（整行不画）—— 不拿区名假装是门牌。
+ */
+export function shopAddressLine(scene: Pick<SceneShopBrief, "area"> & { address?: string | undefined }): string {
+  const address = (scene.address ?? "").trim();
+  if (address === "") return "";
+  const area = scene.area.trim();
+  return area !== "" && !address.includes(area) ? `${address} · ${area}` : address;
+}
+
+/** 详情头图地址行的尾巴：「距你 1.2km」；太远 / 没定位就不加。 */
+export function shopHeroDistanceSuffix(meters: number | undefined): string {
+  const distance = formatShopDistance(meters);
+  return distance && !isFarAway(meters) ? ` · 距你 ${distance}` : "";
+}
+
+/** 列表卡信息行里的距离：太远就不画（列表头已经说明了）。 */
+export function shopCardDistance(meters: number | undefined): string {
+  return isFarAway(meters) ? "" : formatShopDistance(meters);
+}
+
+// ---------------------------------------------------------------------------
+// SCENE-ACTION-TEXT-001：「这里能做的事」以前把服务端状态码原样给用户看
+// （REQUIRES_HUMAN_ACCEPTANCE / ACCEPTS_APPLICATIONS / REGISTRATION_ONLY）。
+// ---------------------------------------------------------------------------
+
+const ACTION_STATE_TEXT: Readonly<Record<string, string>> = {
+  REQUIRES_HUMAN_ACCEPTANCE: "需要对方同意",
+  ACCEPTS_APPLICATIONS: "接受报名",
+  REGISTRATION_ONLY: "报名即可参加",
+};
+
+/** 状态码 → 人话；认不出的状态不显示（返回空串），绝不把机器码露给用户。 */
+export function sceneActionStateText(state: string): string {
+  return ACTION_STATE_TEXT[state] ?? "";
+}
+
+/** 一条「能做的事」的副标题：人话状态 · 钱的含义（缺哪个就只显示另一个）。 */
+export function sceneActionSubtitle(action: { state: string; moneyMeaning: string }): string {
+  return [sceneActionStateText(action.state), action.moneyMeaning.trim()].filter(Boolean).join(" · ");
 }

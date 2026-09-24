@@ -4,6 +4,21 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 286 — 2026-09-24
+
+- **场景列表 / 详情按原型 f05cb0 精修**（SCENE-SHOP-POLISH-001 / SCENE-IMAGE-HONEST-001 /
+  SCENE-ACTION-TEXT-001 / SCENE-ACTIVITY-EMPTY-001）：列表卡加「📍 地址 · 街区」行，距离从照片
+  角标移到信息行，照片 96→112；详情头图加地址行 +「距你 X」、加暗层、返回键底色加深。
+  远距离（≥50km）不再显示「11730.3km / 步行约 146628 分钟」：列表头说明不在附近、卡片和头图
+  不画距离，≥10km 取整加千分位（打卡提示同）。「这里能做的事」状态码改人话
+  （需要对方同意 / 接受报名 / 报名即可参加，认不出的不显示）。内部类型词「动态场景」和
+  「坐标来源未知」不再给用户看（来源角标只给社区提交的）。活动读完为空显示空态文案，不再只剩标题。
+  服务端：除两家咖啡店外所有场景以前都回同一张 CAFE 照片（龙编桥、文庙也是咖啡招牌）→ 没图回空，
+  客户端画分类占位；地图详情校验放宽为允许空头图。
+- 影响文件：`apps/mobile/src/components/scene-shop-directory.tsx`、`scene-shop-directory.ts`、
+  `scene-checkin.ts`、`scene-activities.ts`、`surfaces/reality-scene-map.tsx`、
+  `apps/api-go/internal/realityscene/service.go`。
+
 ## Revision 285 — 2026-09-24
 
 - **我的头像先默认后照片回归修复**（AVATAR-FLASH-002）：viewerAccountId 是异步

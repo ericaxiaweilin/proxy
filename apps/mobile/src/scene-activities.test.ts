@@ -63,6 +63,8 @@ describe("SCENE-EVENT-SIGNUP-001 场景活动列表", () => {
     expect(sceneActivityFeed(items, "EMPTY").state).toBe("READY");
     expect(sceneActivityFeed([], "ERROR").state).toBe("ERROR");
     expect(sceneActivityFeed([], "EMPTY").state).toBe("EMPTY");
+    // 读完了一条没有：不是 READY（否则整块只剩标题）。
+    expect(sceneActivityFeed([], "READY").state).toBe("EMPTY");
   });
 
   it("「正在取」「没有活动」「取不到」「没登录」四种状态各不相同", () => {

@@ -30,6 +30,8 @@ export function checkinEligibility(distanceMeters: number | undefined): CheckinE
 export function formatCheckinDistance(distanceMeters: number): string {
   if (!Number.isFinite(distanceMeters) || distanceMeters < 0) return "距离未知";
   if (distanceMeters < 1000) return `约 ${Math.round(distanceMeters)} 米`;
+  // 10 公里以上不带小数、加千分位（「11730.3 公里」是假精度）。
+  if (distanceMeters >= 10_000) return `约 ${Math.round(distanceMeters / 1000).toLocaleString("en-US")} 公里`;
   return `约 ${(distanceMeters / 1000).toFixed(1)} 公里`;
 }
 

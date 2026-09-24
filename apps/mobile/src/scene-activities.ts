@@ -81,7 +81,8 @@ export type SceneActivityFeed = {
 export function sceneActivityFeed(items: SceneActivity[], state: SceneActivityFeedState): SceneActivityFeed {
   // 有内容就是 READY：拿 ERROR 当"顺带提示"会让人以为列表是空的。
   if (items.length > 0) return { state: "READY", items };
-  return { state, items: [] };
+  // 读完了但一条都没有 = EMPTY，不是 READY —— 否则整块只剩个标题（SCENE-ACTIVITY-EMPTY-001）。
+  return { state: state === "READY" ? "EMPTY" : state, items: [] };
 }
 
 export function sceneActivityFeedText(feed: SceneActivityFeed): string {

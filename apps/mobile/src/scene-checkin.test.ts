@@ -39,5 +39,8 @@ describe("SCENE-CHECKIN-100M-001 hint copy", () => {
   it("距离格式化", () => {
     expect(formatCheckinDistance(50)).toBe("约 50 米");
     expect(formatCheckinDistance(NaN)).toBe("距离未知");
+    expect(formatCheckinDistance(2_345)).toBe("约 2.3 公里");
+    // 远距离不带假精度小数。
+    expect(formatCheckinDistance(11_730_300)).toBe("约 11,730 公里");
   });
 });

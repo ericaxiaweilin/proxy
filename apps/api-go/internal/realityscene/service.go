@@ -752,11 +752,16 @@ func aiVisitsFor(sceneID string) []AIVisit {
 	return out
 }
 
+// SCENE-IMAGE-HONEST-001（2026-09-24）：以前除 threebeans 外所有场景都回同一张咖啡馆照片 ——
+// 龙编桥、镇国寺、还剑湖、文庙在列表 / 分类封面上全是「CAFE」招牌。那是拿别处的图冒充这个地方。
+// 现在只有真的是咖啡店的两家配咖啡图（仍是示意图，不是店内实拍）；其余没有图就回空，客户端画分类占位。
+var sceneHeroImages = map[string]string{
+	"threebeans":    "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=1200&q=86",
+	"threebeans_bn": "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=86",
+}
+
 func heroImageFor(sceneID string) string {
-	if sceneID == "threebeans" {
-		return "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=1200&q=86"
-	}
-	return "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=86"
+	return sceneHeroImages[sceneID]
 }
 
 // MERCHANT-LOGO-001: 场景→商家 logo 映射点。现在是空表 —— 全仓没有任何一家

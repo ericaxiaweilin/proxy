@@ -7,6 +7,7 @@ import {
   recommendationScore, sceneDistanceMeters, shopAreaFacets, shopCardSignal, shopCountText,
   shopDetailTags, shopDirectoryRows, shopHereLine, shopInfoCells, shopListEndText,
   shopListLocationLine, sortShops, walkMinutes,
+  isFarAway, sceneActionStateText, sceneActionSubtitle, shopAddressLine, shopCardDistance, shopHeroDistanceSuffix,
   type SceneShopBrief,
 } from "./scene-shop-directory";
 
@@ -175,7 +176,8 @@ describe("SCENE-SHOP-DIRECTORY-001: card and detail lines only say what is true"
   });
 
   it("builds tags from the real type and area — never a 「营业中」 we cannot know", () => {
-    expect(shopDetailTags(CAFE_CAUGIAY)).toEqual(["咖啡", "动态场景", "Cầu Giấy"]);
+    // 「动态场景」是内部类型词，不给用户看。
+    expect(shopDetailTags(CAFE_CAUGIAY)).toEqual(["咖啡", "Cầu Giấy"]);
     // area 已经出现在 type 里就不重复。
     expect(shopDetailTags(shop({ id: "g", name: "g", type: "湖边 · Cầu Giấy", area: "Cầu Giấy" }))).toEqual(["湖边", "Cầu Giấy"]);
     expect(shopDetailTags(shop({ id: "h", name: "h", type: "", area: "" }))).toEqual([]);
@@ -265,5 +267,31 @@ describe("SCENE-SHOP-DIRECTORY-001: the screen consumes the tested module instea
     expect(component).toContain('from "../scene-commands"');
     expect(component).toContain('"SetRealitySceneCheckIn"');
     expect(component).toContain("meetupDirectionsUrls");
+  });
+});
+
+describe("SCENE-SHOP-POLISH-001（原型 f05cb0：地址行 / 远距离 / 人话状态）", () => {
+  it("far away: no absurd km or walk minutes", () => {
+    expect(isFarAway(11_730_300)).toBe(true);
+    expect(isFarAway(1_200)).toBe(false);
+    expect(isFarAway(undefined)).toBe(false);
+    expect(shopCardDistance(11_730_300)).toBe("");
+    expect(shopHeroDistanceSuffix(11_730_300)).toBe("");
+    expect(shopHeroDistanceSuffix(1_200)).toBe(" · 距你 1.2km");
+    expect(formatShopDistance(11_730_300)).not.toContain(".");
+    expect(shopListLocationLine(true, ["Cầu Giấy"], true)).toContain("不显示距离");
+  });
+
+  it("address line never fakes a street from the area", () => {
+    expect(shopAddressLine({ area: "Cầu Giấy", address: "12 Trần Thái Tông" })).toBe("12 Trần Thái Tông · Cầu Giấy");
+    expect(shopAddressLine({ area: "Cầu Giấy", address: "12 Trần Thái Tông, Cầu Giấy" })).toBe("12 Trần Thái Tông, Cầu Giấy");
+    expect(shopAddressLine({ area: "Cầu Giấy" })).toBe("");
+  });
+
+  it("action states are plain words, never raw enum codes", () => {
+    expect(sceneActionStateText("REQUIRES_HUMAN_ACCEPTANCE")).toBe("需要对方同意");
+    expect(sceneActionStateText("SOMETHING_NEW")).toBe("");
+    expect(sceneActionSubtitle({ state: "ACCEPTS_APPLICATIONS", moneyMeaning: "报酬由你出" })).toBe("接受报名 · 报酬由你出");
+    expect(sceneActionSubtitle({ state: "SOMETHING_NEW", moneyMeaning: "免费" })).toBe("免费");
   });
 });
