@@ -396,13 +396,19 @@ export function SceneActivityDiscovery({
   // 首页恢复 Moment 大图卡列表（SCENE-CARD-STACK-005 那套：默认 2 个标签 + "+N" 原地展开）。
   // 图是每个 Moment 自己的种子媒体（/v1/scene-assets moments），不是拿别处的图冒充 ——
   // 灰色占位只出现在种子目录和服务端都没有图时。入口卡留下面，仍是场景目录的入口。
-  const renderMomentCard = (moment: MomentSeed): React.JSX.Element => {
+  // SCENE-HOME-NO-HEART-001（2026-09-24，用户：「home 只是非常粗的类别入口，
+  // 不是具体某个咖啡店某个小美，不需要点🤍」）：首页卡右上不挂心形，挂统一「N 家」
+  // —— 这个 Moment 所属动作分类下真实场景的个数；0 就不挂（不摆「0 家」）。
+  // 动作分类页里还是心形（那里是细览，收藏照旧）。
+  const venueCountByAction = useMemo(() => new Map(entries.map((entry) => [entry.actionId, entry.count])), [entries]);
+  const renderMomentCard = (moment: MomentSeed, home = false): React.JSX.Element => {
     const live = liveSceneFor(moment.scene);
     const action = taxon(ACTIONS, moment.action);
     const scene = taxon(SCENES, moment.scene);
     const expanded = expandedMomentId === moment.id;
     const extraThemes = moment.themes.map((id) => taxon(THEMES, id));
     const hiddenCount = extraThemes.length + 2;
+    const homeCount = home ? (venueCountByAction.get(actionMatchId(moment.action) ?? "") ?? 0) : 0;
     return <Pressable accessibilityLabel={`Moment ${moment.title}`} key={moment.id} onPress={() => setDetail(moment)} style={styles.sceneCard}>
       {absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) || networkSource("moments", moment.id) ? <Image contentFit="cover" source={(absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) ? { uri: absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl)! } : networkSource("moments", moment.id))!} style={styles.sceneCardPhoto} /> : <View style={[styles.photoPending, styles.sceneCardPhoto]} />}
       <Svg height="100%" pointerEvents="none" style={styles.sceneCardShade} width="100%">
@@ -415,7 +421,9 @@ export function SceneActivityDiscovery({
         </Defs>
         <Rect fill={`url(#sceneShade-${moment.id})`} height="100%" width="100%" x="0" y="0" />
       </Svg>
-      <Pressable accessibilityLabel={saved.includes(moment.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => toggleSavedMoment(moment.id)} style={styles.sceneFavorite}><ProxyIcon color={saved.includes(moment.id) ? color.magenta : color.white} filled={saved.includes(moment.id)} name="heart" size={20} /></Pressable>
+      {home
+        ? (homeCount > 0 ? <View style={styles.homeCountPill}><Text selectable style={styles.homeCountText}>{homeCount} 家</Text></View> : null)
+        : <Pressable accessibilityLabel={saved.includes(moment.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => toggleSavedMoment(moment.id)} style={styles.sceneFavorite}><ProxyIcon color={saved.includes(moment.id) ? color.magenta : color.white} filled={saved.includes(moment.id)} name="heart" size={20} /></Pressable>}
       <View style={styles.sceneCardContent}>
         <Text selectable style={styles.sceneCardTitle}>{moment.title}</Text>
         <View style={styles.sceneTagsRow}>
@@ -453,7 +461,7 @@ export function SceneActivityDiscovery({
 
       {/* SCENE-HOME-CARDS-RESTORE-001：上午那 8 张大图卡回来了（2 个标签 + "+N" 原地展开）。
           下面入口卡不动，仍是场景目录（列表/详情）的入口。 */}
-      {filtered.length > 0 ? <View style={styles.sceneList}>{filtered.map((moment) => renderMomentCard(moment))}</View> : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>暂时没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个筛选条件，看看更多组合。</Text></View>}
+      {filtered.length > 0 ? <View style={styles.sceneList}>{filtered.map((moment) => renderMomentCard(moment, true))}</View> : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>暂时没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个筛选条件，看看更多组合。</Text></View>}
 
       {/* SCENE-HOME-ENTRY-001：入口卡替掉了原来直接铺在首页的 Moment 大图卡
           列表。一张卡 = 一个真的有场景的分类；计数、去过人数、区域全部来自
@@ -687,6 +695,8 @@ const styles = StyleSheet.create({
   sceneCardPhoto: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   sceneCardShade: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   sceneFavorite: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.35)", borderRadius: 17, height: 34, justifyContent: "center", position: "absolute", right: 12, top: 12, width: 34 },
+  homeCountPill: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.45)", borderRadius: 999, height: 25, justifyContent: "center", paddingHorizontal: 10, position: "absolute", right: 12, top: 12 },
+  homeCountText: { color: color.white, fontSize: 11, fontWeight: "800" },
   sceneCardContent: { padding: 15 },
   sceneCardTitle: { color: color.white, fontSize: 19, fontWeight: "900", marginBottom: 9, textShadowColor: "rgba(0,0,0,0.55)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 4 },
   sceneTagsRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 5 },

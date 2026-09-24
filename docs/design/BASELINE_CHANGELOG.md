@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 308 — 2026-09-24
+
+- **首页场景卡去心形挂家数**（SCENE-HOME-NO-HEART-001）：home 是粗类别入口，
+  卡右上心形拿掉，换统一「N 家」（该动作分类下真实场景数，0 就不挂）。
+  动作分类页里还是心形，收藏照旧。
+- 影响文件：`apps/mobile/src/components/scene-activity-discovery.tsx`。
+
 ## Revision 307 — 2026-09-24
 
 - **首页场景大图卡回来**（SCENE-HOME-CARDS-RESTORE-001）：9134f7b 把 Moment 大图卡
