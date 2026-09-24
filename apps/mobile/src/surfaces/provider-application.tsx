@@ -223,7 +223,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
             </Svg>
             <Text selectable style={s.heroKicker}>KYC · 3 步走完</Text>
             <Text selectable style={s.heroTitle}>轻认证，不卡你</Text>
-            <Text selectable style={s.heroSub}>基础信息 + 证件自拍 + 条款，一次讲清。</Text>
+            <Text selectable style={s.heroSub}>基础信息 + 证件自拍 + 条款。</Text>
           </View>
           <View style={s.infoCard}>
             <View style={s.infoRow}>
@@ -252,15 +252,15 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
           <View style={s.avatarBox}>{avatarUri ? <CircularAvatarImage size={52} uri={avatarUri} /> : <Text selectable style={s.avatarLetter}>{(displayName ?? "").slice(0, 1).toUpperCase() || "?"}</Text>}</View>
           <View style={s.checkCopy}>
             <Text selectable style={s.checkTitle}>{avatarUri ? "头像" : "还没有头像"}</Text>
-            <Text selectable style={s.muted}>正面清晰 · 别用滤镜 · 用你主页的头像，在「个人管理」里改</Text>
+            <Text selectable style={s.muted}>正面清晰 · 别用滤镜 · 在「个人管理」里改</Text>
           </View>
           {onEditProfile ? <Text selectable style={s.pipeBadge}>›</Text> : null}
         </Pressable>
         <Text selectable style={s.label}>真实姓名 *</Text>
-        <TextInput accessibilityLabel="真实姓名" onChangeText={(v) => { setRealName(v); setBasicErrors((p) => { const next = { ...p }; delete next.realName; return next; }); }} placeholder="与证件一致" placeholderTextColor={color.muted} style={[s.input, basicErrors.realName ? s.inputError : null]} value={realName} />
+        <TextInput accessibilityLabel="真实姓名" onChangeText={(v) => { setRealName(v); setBasicErrors((p) => { const next = { ...p }; delete next.realName; return next; }); }} style={[s.input, basicErrors.realName ? s.inputError : null]} value={realName} />
         {basicErrors.realName ? <Text selectable style={s.fieldError}>{basicErrors.realName}</Text> : null}
         <Text selectable style={s.label}>出生日期 *</Text>
-        <TextInput accessibilityLabel="出生日期" keyboardType="number-pad" maxLength={10} onChangeText={(v) => { setBirthDate(formatBirthDateInput(v)); setBasicErrors((p) => { const next = { ...p }; delete next.birthDate; return next; }); }} placeholder="20010520 自动隔断" placeholderTextColor={color.muted} style={[s.input, basicErrors.birthDate ? s.inputError : null]} value={birthDate} />
+        <TextInput accessibilityLabel="出生日期" keyboardType="number-pad" maxLength={10} onChangeText={(v) => { setBirthDate(formatBirthDateInput(v)); setBasicErrors((p) => { const next = { ...p }; delete next.birthDate; return next; }); }} placeholder="20010520" placeholderTextColor={color.muted} style={[s.input, basicErrors.birthDate ? s.inputError : null]} value={birthDate} />
         {basicErrors.birthDate ? <Text selectable style={s.fieldError}>{basicErrors.birthDate}</Text> : null}
         <Text selectable style={s.label}>手机号 *</Text>
         <TextInput accessibilityLabel="手机号" keyboardType="phone-pad" onChangeText={(v) => { setPhone(v); setBasicErrors((p) => { const next = { ...p }; delete next.phone; return next; }); }} placeholder="09xx xxx xxx" placeholderTextColor={color.muted} style={[s.input, basicErrors.phone ? s.inputError : null]} value={phone} />
@@ -281,7 +281,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
       </View> : null}
 
       {step === "terms" ? <View style={s.card}>
-        {stepHead(3, "接受条款，正式接单", "这几条是接单身份的底线。接单后可以随时暂停接单。")}
+        {stepHead(3, "接受条款，正式接单", "接单后可以随时暂停接单。")}
         <Text selectable style={s.label}>紧急联系人 *（不对客户公开）</Text>
         <TextInput accessibilityLabel="紧急联系人" onChangeText={setEmergency} placeholder="姓名 + 电话" placeholderTextColor={color.muted} style={s.input} value={emergency} />
         {view.terms ? view.terms.items.map((item) => check(

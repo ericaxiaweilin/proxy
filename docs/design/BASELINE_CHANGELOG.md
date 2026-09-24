@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 303 — 2026-09-24
+
+- **KYC 文案去废话**（KYC-COPY-TRIM-001）：真实姓名 placeholder「与证件一致」删；
+  头像行「用你主页的头像」与「在个人管理里改」说一遍；hero 副标题去「一次讲清」；
+  出生日期 placeholder 去「自动隔断」；Step 3 导语去「是接单身份的底线」。
+- 影响文件：`apps/mobile/src/surfaces/provider-application.tsx`。
+
 ## Revision 302 — 2026-09-24
 
 - **出生日期自动隔断**（KYC-BIRTH-DATE-002）：第 1 步只管输数字，`-` 自动补
