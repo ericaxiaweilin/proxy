@@ -5,8 +5,9 @@
 //
 // ORDER-PERMISSION-KYC-001（原型 deepseek_html_20260924_33987c「接单中心 · KYC + 履约管线」）：3 步 KYC
 //
-//	1 基础信息：头像（用主页头像）、实名、出生年份（满 18）、性别（可选自述，不参与任何判断）、手机号
-//	  —— KYC 只认人，不收城市 / 服务区域 / 语言（那是接单范围和能力，用户：「把会说的语言也放入了 干什么」）
+//	1 基础信息：头像（用主页头像）、实名、出生日期（精确到日，满 18；用户：「出生如果采集肯定也是日期」）、
+//	  手机号 —— KYC 只认人，不收性别（越南 CCCD 第 4 位自带世纪 + 性别，运营看证件时自然知道；系统无任何逻辑消费性别，
+//	  所以不采集也不派生）、不收城市 / 服务区域 / 语言（那是接单范围和能力，用户：「把会说的语言也放入了 干什么」）
 //	2 证件：CCCD（正反面）或护照（正面）+ 手持证件自拍 —— 运营人工比对（用户选定；Face ID 只能证明是手机主人，
 //	  不能和证件比对，所以不用它冒充「真人比对通过」）；无犯罪声明；KYC 数据使用同意
 //	3 履约条款：紧急联系人 + config/provider-terms/terms.json 的全部条款（记录版本）
@@ -54,6 +55,7 @@ type Application struct {
 	RealName       string     `json:"realName,omitempty"`
 	PhotosAttested bool       `json:"photosAttested"`
 	BirthYear      int        `json:"birthYear,omitempty"`
+	BirthDate      string     `json:"birthDate,omitempty"`
 	Gender         string     `json:"gender,omitempty"`
 	Phone          string     `json:"phone,omitempty"`
 	PhoneVerified  bool       `json:"phoneVerified"`
@@ -86,6 +88,7 @@ type Application struct {
 type Input struct {
 	RealName     string   `json:"realName"`
 	BirthYear    int      `json:"birthYear"`
+	BirthDate    string   `json:"birthDate"`
 	Gender       string   `json:"gender"`
 	Phone        string   `json:"phone"`
 	City         string   `json:"city"`
@@ -197,7 +200,7 @@ func (s *Service) Submit(ctx context.Context, userAccountID string, in Input) (*
 	for _, m := range s.deps.Missing(ctx, userAccountID) {
 		fields = append(fields, "profile_"+m)
 	}
-	fields = append(fields, validate(in, terms, now.Year())...)
+	fields = append(fields, validate(in, terms, now)...)
 	if docs := documentIDs(in); len(docs) > 0 {
 		bad, err := s.deps.BadPhotos(ctx, userAccountID, docs)
 		if err != nil {
@@ -212,7 +215,7 @@ func (s *Service) Submit(ctx context.Context, userAccountID string, in Input) (*
 	}
 	app := Application{
 		ID: newID(), UserAccountID: userAccountID, RealName: in.RealName, PhotosAttested: true,
-		BirthYear: in.BirthYear, Gender: in.Gender, Phone: in.Phone,
+		BirthDate: strings.TrimSpace(in.BirthDate), BirthYear: birthYearOf(in.BirthDate), Gender: in.Gender, Phone: in.Phone,
 		IDType: in.IDType, IDFrontAsset: in.IDFrontAsset, IDBackAsset: in.IDBackAsset, SelfieAsset: in.SelfieAsset,
 		NoCrime: true, DataConsent: true, Emergency: in.Emergency, TermsVersion: terms.Version, TermsAccepted: in.Accepted,
 		City: in.City, ServiceAreas: in.ServiceAreas, Languages: in.Languages, Capabilities: []string{},
@@ -321,6 +324,14 @@ func normalize(in Input) Input {
 	return in
 }
 
+// birthYearOf 从出生日期派生年份，只写兼容列 birth_year（老行只读）；解析失败返回 0（validate 已拦）。
+func birthYearOf(birthDate string) int {
+	if birth, err := time.Parse("2006-01-02", strings.TrimSpace(birthDate)); err == nil {
+		return birth.Year()
+	}
+	return 0
+}
+
 // normalizePhone 只留数字和开头的 +；越南本地写法 0xxxxxxxxx → +84xxxxxxxxx。
 func normalizePhone(v string) string {
 	var b strings.Builder
@@ -346,13 +357,24 @@ func documentIDs(in Input) []string {
 	return out
 }
 
-func validate(in Input, terms Terms, year int) []string {
+func validate(in Input, terms Terms, now time.Time) []string {
 	fields := []string{}
 	if n := utf8.RuneCountInString(in.RealName); n < 2 || n > MaxRealName {
 		fields = append(fields, "real_name")
 	}
-	if age := year - in.BirthYear; in.BirthYear == 0 || age < MinAge || age > 90 {
-		fields = append(fields, "birth_year")
+	// KYC-BIRTH-DATE-001：出生日期精确到日，按精确年龄卡 18–90。年份算法有最大 1 年误差，不再用。
+	if birth, err := time.Parse("2006-01-02", strings.TrimSpace(in.BirthDate)); err != nil {
+		fields = append(fields, "birth_date")
+	} else {
+		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		birthDay := time.Date(birth.Year(), birth.Month(), birth.Day(), 0, 0, 0, 0, time.UTC)
+		age := today.Year() - birthDay.Year()
+		if today.Month() < birthDay.Month() || (today.Month() == birthDay.Month() && today.Day() < birthDay.Day()) {
+			age--
+		}
+		if birthDay.After(today) || age < MinAge || age > 90 {
+			fields = append(fields, "birth_date")
+		}
 	}
 	if in.Gender != "" && in.Gender != "FEMALE" && in.Gender != "MALE" && in.Gender != "OTHER" {
 		fields = append(fields, "gender")

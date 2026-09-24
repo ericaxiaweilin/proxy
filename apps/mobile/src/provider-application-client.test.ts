@@ -13,7 +13,7 @@ describe("PROVIDER-APPLY-001 client", () => {
   it("maps every invalid field to plain words", () => {
     expect(providerApplicationFieldErrors(["profile_avatar", "selfie"])).toEqual(["先在「个人管理」设置头像", "请上传手持证件的自拍"]);
     expect(providerApplicationFieldErrors(["something_new"])).toEqual(["有信息不合格，请检查后再提交"]);
-    expect(providerApplicationErrorText(new ProviderApplicationError("invalid_fields", ["real_name", "birth_year"]))).toBe("请填写 2–40 字的真实姓名；出生年份不对（需年满 18 岁）");
+    expect(providerApplicationErrorText(new ProviderApplicationError("invalid_fields", ["real_name", "birth_date"]))).toBe("请填写 2–40 字的真实姓名；出生日期不对（格式 2001-05-20，需年满 18 岁）");
     expect(providerApplicationErrorText(new Error("x"))).toBe("暂时没连上服务，稍后再试。");
   });
 

@@ -27,7 +27,7 @@ var testTerms = Terms{Version: "v1", Items: []TermItem{{ID: "monitoring"}, {ID: 
 
 func goodInput() Input {
 	return Input{
-		RealName: "Nguyễn Linh", BirthYear: time.Now().Year() - 25, Phone: "090 123 4567",
+		RealName: "Nguyễn Linh", BirthDate: time.Now().AddDate(-25, 0, 0).Format("2006-01-02"), Phone: "090 123 4567",
 		IDType: "cccd", IDFrontAsset: "assets/ma_f", IDBackAsset: "ma_b", SelfieAsset: "ma_s",
 		NoCrime: true, DataConsent: true, Emergency: "Mẹ 0987654321", TermsVersion: "v1", Accepted: []string{"monitoring", "cancel"},
 	}
@@ -51,12 +51,12 @@ func TestSubmitNormalizesAndRejectsASecondOpenApplication(t *testing.T) {
 
 func TestSubmitListsEveryInvalidField(t *testing.T) {
 	s, _ := testService([]string{"avatar"}, nil)
-	_, err := s.Submit(context.Background(), "user_1", Input{Languages: []string{"XX"}, BirthYear: time.Now().Year() - 16, TermsVersion: "v1"})
+	_, err := s.Submit(context.Background(), "user_1", Input{Languages: []string{"XX"}, BirthDate: time.Now().AddDate(-16, 0, 0).Format("2006-01-02"), TermsVersion: "v1"})
 	var v *ValidationError
 	if !errors.As(err, &v) {
 		t.Fatalf("want ValidationError, got %v", err)
 	}
-	want := map[string]bool{"profile_avatar": true, "real_name": true, "birth_year": true, "phone": true,
+	want := map[string]bool{"profile_avatar": true, "real_name": true, "birth_date": true, "phone": true,
 		"languages": true, "id_type": true, "id_documents": true, "selfie": true,
 		"no_crime_declared": true, "data_consent": true, "emergency_contact": true, "terms_accepted": true}
 	for _, f := range v.Fields {
@@ -65,6 +65,39 @@ func TestSubmitListsEveryInvalidField(t *testing.T) {
 	if len(want) != 0 {
 		t.Fatalf("missing field errors %v in %v", want, v.Fields)
 	}
+}
+
+func TestSubmitBirthDateBoundaryIsExactDay(t *testing.T) {
+	// KYC-BIRTH-DATE-001：满 18 当天放行，差一天（还差 1 天满 18）拦下 —— 年份算法做不到这个。
+	s, _ := testService(nil, nil)
+	ctx := context.Background()
+	exact := goodInput()
+	exact.BirthDate = time.Now().AddDate(-18, 0, 0).Format("2006-01-02")
+	app, err := s.Submit(ctx, "user_1", exact)
+	if err != nil {
+		t.Fatalf("exact 18 today: %v", err)
+	}
+	if app.BirthDate != exact.BirthDate || app.BirthYear != time.Now().Year()-18 {
+		t.Fatalf("birth compat columns wrong: %+v", app)
+	}
+	almost := goodInput()
+	almost.BirthDate = time.Now().AddDate(-18, 0, 1).Format("2006-01-02")
+	if _, err := s.Submit(ctx, "user_2", almost); !isBirthDateError(err) {
+		t.Fatalf("1 day short of 18: got %v, want birth_date", err)
+	}
+}
+
+func isBirthDateError(err error) bool {
+	var v *ValidationError
+	if !errors.As(err, &v) {
+		return false
+	}
+	for _, f := range v.Fields {
+		if f == "birth_date" {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSubmitRejectsPhotosThatAreNotOwnRealImages(t *testing.T) {

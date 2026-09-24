@@ -41,7 +41,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
   const [busy, setBusy] = useState<"submit" | "withdraw" | DocSlot>();
   const [error, setError] = useState<string>();
   const [realName, setRealName] = useState("");
-  const [birthYear, setBirthYear] = useState("");
+  const [birthDate, setBirthDate] = useState("");
   // KYC-UI-CLEAN-002（用户：「正常的 kyc 到底验证性别出生吗」）：正常 KYC 不采性别 ——
   // 性别不参与实名比对。后端 gender 字段保留兼容但不再收，这里永远发空。
   const [phone, setPhone] = useState("");
@@ -51,18 +51,31 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
   const [dataConsent, setDataConsent] = useState(false);
   const [emergency, setEmergency] = useState("");
   const [accepted, setAccepted] = useState<string[]>([]);
-  // KYC-CENTER-001：Step 1 行内错误 —— 空名/年份格式/未成年/空电话在客户端先拦，
-  // 免得走一次服务端往返才知道；格式争议一律以服务端为准（这里只拦明显错的）。
-  const [basicErrors, setBasicErrors] = useState<{ realName?: string; birthYear?: string; phone?: string }>({});
+  // KYC-BIRTH-DATE-001：出生日期精确到日，客户端先拦明显错的（格式/不存在的日期/未成年/未来），
+  // 服务端按精确年龄重算（这里只拦明显错的，边界以服务端为准）。
+  function parseBirthDate(value: string): { year: number; month: number; day: number } | undefined {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+    if (!match) return undefined;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return undefined;
+    return { year, month, day };
+  }
+  const [basicErrors, setBasicErrors] = useState<{ realName?: string; birthDate?: string; phone?: string }>({});
   function validateBasic(): boolean {
-    const errors: { realName?: string; birthYear?: string; phone?: string } = {};
+    const errors: { realName?: string; birthDate?: string; phone?: string } = {};
     if (realName.trim().length < 2) errors.realName = "请填写真实姓名（至少 2 个字）";
-    const year = Number.parseInt(birthYear.trim(), 10);
-    const thisYear = new Date().getFullYear();
-    if (!/^\d{4}$/.test(birthYear.trim()) || year < 1900 || year > thisYear) {
-      errors.birthYear = "出生年份填 4 位数字";
-    } else if (thisYear - year < 18) {
-      errors.birthYear = "接单需年满 18 岁";
+    const birth = parseBirthDate(birthDate);
+    if (!birth) {
+      errors.birthDate = "出生日期按 2001-05-20 的格式填";
+    } else {
+      const today = new Date();
+      let age = today.getFullYear() - birth.year;
+      if (today.getMonth() + 1 < birth.month || (today.getMonth() + 1 === birth.month && today.getDate() < birth.day)) age--;
+      if (age < 0 || age > 90) errors.birthDate = "出生日期不在合理范围";
+      else if (age < 18) errors.birthDate = "接单需年满 18 岁";
     }
     if (phone.trim() === "") errors.phone = "请填写手机号";
     setBasicErrors(errors);
@@ -105,7 +118,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
     setError(undefined);
     try {
       setView(await submitProviderApplication(sessionAuthClient, {
-        realName, birthYear: Number.parseInt(birthYear, 10) || 0, gender: "", phone,
+        realName, birthDate: birthDate.trim(), gender: "", phone,
         idType, idFrontAsset: docs.front?.mediaAssetId ?? "", idBackAsset: idType === "CCCD" ? docs.back?.mediaAssetId ?? "" : "",
         selfieAsset: docs.selfie?.mediaAssetId ?? "", noCrimeDeclared: noCrime, dataConsent, emergencyContact: emergency,
         termsVersion: view.terms.version, termsAccepted: accepted,
@@ -238,9 +251,9 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
         <Text selectable style={s.label}>真实姓名 *</Text>
         <TextInput accessibilityLabel="真实姓名" onChangeText={(v) => { setRealName(v); setBasicErrors((p) => { const next = { ...p }; delete next.realName; return next; }); }} placeholder="与证件一致" placeholderTextColor={color.muted} style={[s.input, basicErrors.realName ? s.inputError : null]} value={realName} />
         {basicErrors.realName ? <Text selectable style={s.fieldError}>{basicErrors.realName}</Text> : null}
-        <Text selectable style={s.label}>出生年份 *</Text>
-        <TextInput accessibilityLabel="出生年份" keyboardType="number-pad" maxLength={4} onChangeText={(v) => { setBirthYear(v); setBasicErrors((p) => { const next = { ...p }; delete next.birthYear; return next; }); }} placeholder="例如 1998" placeholderTextColor={color.muted} style={[s.input, basicErrors.birthYear ? s.inputError : null]} value={birthYear} />
-        {basicErrors.birthYear ? <Text selectable style={s.fieldError}>{basicErrors.birthYear}</Text> : null}
+        <Text selectable style={s.label}>出生日期 *</Text>
+        <TextInput accessibilityLabel="出生日期" maxLength={10} onChangeText={(v) => { setBirthDate(v); setBasicErrors((p) => { const next = { ...p }; delete next.birthDate; return next; }); }} placeholder="2001-05-20" placeholderTextColor={color.muted} style={[s.input, basicErrors.birthDate ? s.inputError : null]} value={birthDate} />
+        {basicErrors.birthDate ? <Text selectable style={s.fieldError}>{basicErrors.birthDate}</Text> : null}
         <Text selectable style={s.label}>手机号 *</Text>
         <TextInput accessibilityLabel="手机号" keyboardType="phone-pad" onChangeText={(v) => { setPhone(v); setBasicErrors((p) => { const next = { ...p }; delete next.phone; return next; }); }} placeholder="09xx xxx xxx" placeholderTextColor={color.muted} style={[s.input, basicErrors.phone ? s.inputError : null]} value={phone} />
         {basicErrors.phone ? <Text selectable style={s.fieldError}>{basicErrors.phone}</Text> : null}

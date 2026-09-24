@@ -8,6 +8,8 @@ export type ProviderApplication = {
   displayName: string;
   realName?: string;
   birthYear?: number;
+  // KYC-BIRTH-DATE-001：出生日期精确到日；birthYear 只读兼容老行；gender 后端保留兼容但不再收。
+  birthDate?: string;
   gender?: string;
   phone?: string;
   phoneVerified: boolean;
@@ -37,8 +39,8 @@ export type ProviderTerms = { version: string; items: Array<{ id: string; title:
 
 export type ProviderApplicationInput = {
   realName: string;
-  birthYear: number;
-  gender: "" | "FEMALE" | "MALE" | "OTHER";
+  birthDate: string;
+  gender: "";
   phone: string;
   idType: "CCCD" | "PASSPORT";
   idFrontAsset: string;
@@ -88,16 +90,12 @@ export const withdrawProviderApplication = (client: Requester): Promise<Provider
 // 选项码 → 人话（码跟 supply 同一套）。
 export const AREA_LABELS: Readonly<Record<string, string>> = { hn: "河内", bn: "北宁", hcm: "胡志明市", dn: "岘港" };
 export const LANGUAGE_LABELS: Readonly<Record<string, string>> = { VI: "越南语", ZH: "中文", EN: "英语", KO: "韩语", JA: "日语" };
-export const GENDER_OPTIONS: ReadonlyArray<{ code: ProviderApplicationInput["gender"]; label: string }> = [
-  { code: "", label: "不填" }, { code: "FEMALE", label: "女" }, { code: "MALE", label: "男" }, { code: "OTHER", label: "其他" },
-];
 
 const FIELD_TEXT: Readonly<Record<string, string>> = {
   profile_name: "先在「个人管理」设置用户名",
   profile_avatar: "先在「个人管理」设置头像",
   real_name: "请填写 2–40 字的真实姓名",
-  birth_year: "出生年份不对（需年满 18 岁）",
-  gender: "性别选项无效",
+  birth_date: "出生日期不对（格式 2001-05-20，需年满 18 岁）",
   phone: "手机号格式不对",
   city: "请填写所在城市",
   service_areas: "至少选一个服务区域",

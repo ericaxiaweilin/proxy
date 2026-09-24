@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 301 — 2026-09-24
+
+- **出生年份 → 出生日期**（KYC-BIRTH-DATE-001）：年份按年算年龄有最大 1 年误差，
+  改精确到日，服务端按精确年龄卡 18–90（满 18 当天放行、差一天拦下，有边界测试）。
+  新增 migration 128（`birth_date` 列，老行 `birth_year` 只读保留）。
+  性别：正常 KYC 不采；越南 CCCD 第 4 位自带世纪 + 性别，运营看证件时自然知道，
+  系统无任何逻辑消费性别 —— 不采集也不派生，后端字段保留兼容空值。
+- 影响文件：`apps/mobile/src/surfaces/provider-application.tsx`（migration + Go + client 同改）。
+
 ## Revision 300 — 2026-09-24
 
 - **KYC 去性别**（KYC-UI-CLEAN-002）：正常 KYC 不采性别，表单删掉性别 chips，

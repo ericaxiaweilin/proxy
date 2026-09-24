@@ -20,7 +20,7 @@ const selectColumns = `application_id, user_account_id, display_name, real_name,
 	service_areas, languages, capabilities, intro, photo_asset_ids, status, reject_reason, reviewed_by,
 	reviewed_at, agent_id, source, created_at, updated_at,
 	birth_year, gender, phone, phone_verified, id_type, id_front_asset, id_back_asset, selfie_asset,
-	no_crime_declared, data_consent, emergency_contact, terms_version, terms_accepted`
+	no_crime_declared, data_consent, emergency_contact, terms_version, terms_accepted, birth_date`
 
 func scanApplication(row pgx.Row) (*Application, error) {
 	var a Application
@@ -29,7 +29,7 @@ func scanApplication(row pgx.Row) (*Application, error) {
 		&areas, &langs, &caps, &a.Intro, &photos, &a.Status, &a.RejectReason, &a.ReviewedBy,
 		&a.ReviewedAt, &a.AgentID, &a.Source, &a.CreatedAt, &a.UpdatedAt,
 		&a.BirthYear, &a.Gender, &a.Phone, &a.PhoneVerified, &a.IDType, &a.IDFrontAsset, &a.IDBackAsset, &a.SelfieAsset,
-		&a.NoCrime, &a.DataConsent, &a.Emergency, &a.TermsVersion, &accepted)
+		&a.NoCrime, &a.DataConsent, &a.Emergency, &a.TermsVersion, &accepted, &a.BirthDate)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -71,12 +71,12 @@ func jsonList(values []string) []byte {
 func (p *Postgres) Insert(ctx context.Context, a Application) error {
 	_, err := p.pool.Exec(ctx, `INSERT INTO supply.provider_applications (`+selectColumns+`)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-			$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)`,
+			$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)`,
 		a.ID, a.UserAccountID, a.DisplayName, a.RealName, a.PhotosAttested, a.City,
 		jsonList(a.ServiceAreas), jsonList(a.Languages), jsonList(a.Capabilities), a.Intro, jsonList(a.PhotoAssetIDs),
 		a.Status, a.RejectReason, a.ReviewedBy, a.ReviewedAt, a.AgentID, a.Source, a.CreatedAt, a.UpdatedAt,
 		a.BirthYear, a.Gender, a.Phone, a.PhoneVerified, a.IDType, a.IDFrontAsset, a.IDBackAsset, a.SelfieAsset,
-		a.NoCrime, a.DataConsent, a.Emergency, a.TermsVersion, jsonList(a.TermsAccepted))
+		a.NoCrime, a.DataConsent, a.Emergency, a.TermsVersion, jsonList(a.TermsAccepted), a.BirthDate)
 	return err
 }
 
