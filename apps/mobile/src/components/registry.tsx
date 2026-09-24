@@ -166,11 +166,26 @@ function TimeLocation({ element }: { element: { props: Record<string, unknown> }
 // ---- Human Supply ----
 
 function CandidateRail({ element, emit }: { element: { props: Record<string, unknown> }; emit: (event: string) => void }): React.JSX.Element {
-  const props = element.props as { candidates: Candidate[] };
+  const props = element.props as { candidates: Candidate[]; status?: "loading" | "ready" | "empty" | "error" | "unavailable" };
   const [selectedId, setSelectedId] = useState<string>();
+  // MATCH-LIVE-001：候选来自后端真实供给（按履约 / 需求方评价 / 经验 / 响应 / 预算排序）；没有就如实说为什么。
+  const status = props.status ?? (props.candidates.length > 0 ? "ready" : "empty");
+  if (status !== "ready" || props.candidates.length === 0) {
+    const message =
+      status === "loading" ? "正在按履约和评价为你挑选候选…" :
+      status === "error" ? "候选没有取到，稍后再试" :
+      status === "unavailable" ? "登录后才能看到真实候选" :
+      "暂时没有符合本单的人（语言 / 时段 / 实名核验都要满足），可以换个时间或放宽要求";
+    return (
+      <PanelCard>
+        <SectionLabel text="本次候选" />
+        <Text selectable style={styles.candidateOfferNote}>{message}</Text>
+      </PanelCard>
+    );
+  }
   return (
     <PanelCard>
-      <SectionLabel text="本次候选 · 已通过本单筛选" />
+      <SectionLabel text="本次候选 · 已通过本单筛选 · 按履约和评价排序" />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
         {props.candidates.map((candidate) => {
           const selected = selectedId === candidate.agentId;
@@ -203,20 +218,30 @@ function CandidateRail({ element, emit }: { element: { props: Record<string, unk
                 ₫{candidate.offerVnd.toLocaleString()}
                 <Text selectable style={styles.candidateOfferNote}> · 本次需求报价</Text>
               </Text>
-              <View style={styles.metricRow}>
-                <View style={styles.metricBox}>
-                  <Text selectable style={styles.metricValue}>{Math.round(candidate.fulfillmentRate * 100)}%</Text>
-                  <Text selectable style={styles.metricLabel}>履约率</Text>
+              {candidate.hasTrackRecord === false ? (
+                // 新人：没有完成过订单，不画 0%（那会被读成「履约很差」）。
+                <View style={styles.metricRow}>
+                  <View style={styles.metricBox}>
+                    <Text selectable style={styles.metricValue}>新人</Text>
+                    <Text selectable style={styles.metricLabel}>暂无履约记录</Text>
+                  </View>
                 </View>
-                <View style={styles.metricBox}>
-                  <Text selectable style={styles.metricValue}>{Math.round(candidate.satisfactionRate * 100)}%</Text>
-                  <Text selectable style={styles.metricLabel}>满意率</Text>
+              ) : (
+                <View style={styles.metricRow}>
+                  <View style={styles.metricBox}>
+                    <Text selectable style={styles.metricValue}>{Math.round(candidate.fulfillmentRate * 100)}%</Text>
+                    <Text selectable style={styles.metricLabel}>履约率</Text>
+                  </View>
+                  <View style={styles.metricBox}>
+                    <Text selectable style={styles.metricValue}>{candidate.satisfactionRate > 0 ? `${Math.round(candidate.satisfactionRate * 100)}%` : "—"}</Text>
+                    <Text selectable style={styles.metricLabel}>满意率</Text>
+                  </View>
+                  <View style={styles.metricBox}>
+                    <Text selectable style={styles.metricValue}>{candidate.completedOrders} 单</Text>
+                    <Text selectable style={styles.metricLabel}>已完成</Text>
+                  </View>
                 </View>
-                <View style={styles.metricBox}>
-                  <Text selectable style={styles.metricValue}>{candidate.completedOrders} 单</Text>
-                  <Text selectable style={styles.metricLabel}>已完成</Text>
-                </View>
-              </View>
+              )}
               <View style={styles.chipRow}>
                 {candidate.proofs.map((proof) => (
                   <View key={proof} style={styles.chip}>
@@ -242,6 +267,15 @@ function ContextualQuote({ element }: { element: { props: Record<string, unknown
     note: string;
     breakdown: Array<{ item: string; amountVnd: number }>;
   };
+  // MATCH-LIVE-001：还没有候选时没有「本单价格」可言 —— 不显示假价格。
+  if (props.servicePriceVnd <= 0) {
+    return (
+      <PanelCard>
+        <SectionLabel text="本单报价" />
+        <Text selectable style={styles.quoteNote}>{props.note || "选定人选后显示本单报价"}</Text>
+      </PanelCard>
+    );
+  }
   return (
     <PanelCard>
       <SectionLabel text="本单报价" />

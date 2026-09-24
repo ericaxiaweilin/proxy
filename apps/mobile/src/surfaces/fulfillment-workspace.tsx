@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { ConversationClient } from "../conversation-client";
-import type { DemandClient } from "../demand-client";
+import { DemandProtocolError, type CityCompanionCandidate, type DemandClient } from "../demand-client";
 import { UIPlanRenderer } from "../components/registry";
 import { color } from "../theme";
 import { fallbackPlanFor } from "../uiplan/fallback";
@@ -54,6 +54,25 @@ export function FulfillmentWorkspace({
   const scrollRef = useRef<ScrollView>(null);
   const contentScrollRef = useRef<ScrollView>(null);
 
+  // MATCH-LIVE-001：城市同行的候选来自后端（CreateCityCompanionNeed → ListCityCompanionCandidates，
+  // 按履约 / 需求方评价 / 经验 / 引力响应 / 预算排序）。以前这里是前端写死的 Linh 26 单 / Mai 12 单。
+  const [live, setLive] = useState<{ status: "loading" | "ready" | "empty" | "error" | "unavailable"; candidates: CityCompanionCandidate[] }>({ status: "loading", candidates: [] });
+  useEffect(() => {
+    if (target.category !== "TRAVEL_LOCAL") return undefined;
+    if (!demandClient) {
+      setLive({ status: "unavailable", candidates: [] });
+      return undefined;
+    }
+    let cancelled = false;
+    setLive({ status: "loading", candidates: [] });
+    // 与本页展示的需求一致：河内（市场 hn）· 8H · 中文。
+    demandClient.listCityCompanionCandidates({ duration: "8H", language: "zh", market: "hn" })
+      .then((candidates) => { if (!cancelled) setLive({ status: candidates.length > 0 ? "ready" : "empty", candidates }); })
+      .catch((error: unknown) => { if (!cancelled) setLive({ status: error instanceof DemandProtocolError ? "unavailable" : "error", candidates: [] }); });
+    return () => { cancelled = true; };
+  }, [demandClient, target.category]);
+  const candidateName = useCallback((agentId: string): string => live.candidates.find((c) => c.agentId === agentId)?.name ?? agentId, [live.candidates]);
+
   const { spec, plan, observability } = useMemo(() => {
     const candidatePlan: UIPlan = fixturePlanFor(target.category, target.goal);
     let decision = validateUIPlan(toWire(candidatePlan));
@@ -62,9 +81,24 @@ export function FulfillmentWorkspace({
       usedPlan = fallbackPlanFor(target.category);
       decision = validateUIPlan(toWire(usedPlan));
     }
-    const result = planToSpec(decision, resolveReadModel);
+    // 候选与报价用真实结果注水；其余面板照旧。报价跟着选中的人走，没选就是排第一的人，没人就不显示价格。
+    const resolve: typeof resolveReadModel = (dataRef, componentId, activePlan) => {
+      if (componentId === "CANDIDATE_RAIL") return { candidates: live.candidates, status: live.status };
+      if (componentId === "CONTEXTUAL_QUOTE") {
+        const chosen = live.candidates.find((c) => c.agentId === selectedCandidateId) ?? live.candidates[0];
+        if (!chosen) return { servicePriceVnd: 0, currency: "VND", note: "选定人选后显示本单报价", breakdown: [] };
+        return {
+          servicePriceVnd: chosen.offerVnd,
+          currency: "VND",
+          note: `${chosen.name} 的本单报价（8H），属于本单 Offer，不是人的长期标价；沿途消费另计、自愿。`,
+          breakdown: [{ item: "城市同行 8H", amountVnd: chosen.offerVnd }]
+        };
+      }
+      return resolveReadModel(dataRef, componentId, activePlan);
+    };
+    const result = planToSpec(decision, resolve);
     return { spec: result.spec, plan: decision.plan ?? usedPlan, observability: result.observability };
-  }, [target]);
+  }, [target, live, selectedCandidateId]);
 
   // 自动滚到底部
   useEffect(() => {
@@ -263,14 +297,14 @@ export function FulfillmentWorkspace({
                 } as Record<string, string>).then((result) => {
                   if (result.aggregate?.version) setDraftVersion(result.aggregate.version);
                   setSelectedCandidateId(agentId);
-                  setActionNote(`已选择候选（${agentId}），已写入草稿。`);
+                  setActionNote(`已选择 ${candidateName(agentId)}，已写入草稿。`);
                 }).catch(() => {
                   setSelectedCandidateId(agentId);
-                  setActionNote(`已选择候选（${agentId}，本地暂存，服务端同步中）。`);
+                  setActionNote(`已选择 ${candidateName(agentId)}（本地暂存，服务端同步中）。`);
                 });
               } else {
                 if (agentId) setSelectedCandidateId(agentId);
-                setActionNote(agentId ? `已选择候选（${agentId}，等待服务端连接）。` : "已选择候选。");
+                setActionNote(agentId ? `已选择 ${candidateName(agentId)}（等待服务端连接）。` : "已选择候选。");
               }
             }
           }}
@@ -290,7 +324,7 @@ export function FulfillmentWorkspace({
         ) : null}
         {selectedCandidateId && !actionNote ? (
           <View style={styles.actionNoteRow}>
-            <Text selectable style={styles.actionNote}>已选候选（{selectedCandidateId}）</Text>
+            <Text selectable style={styles.actionNote}>已选 {candidateName(selectedCandidateId)}</Text>
           </View>
         ) : null}
         {observability ? (

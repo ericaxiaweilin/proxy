@@ -100,6 +100,34 @@ export class DemandClient {
   // 读 session 本身可能拒 (expo-secure-store keychain entitlement 缺失
   // 时会抛 KeyChainException — 在 simulator / 没有设置 entitlement 的设备
   // 出现), 这种情况当作 anonymous 看待, 返回 false, 不让 caller 误报 error.
+  // MATCH-LIVE-001：城市同行的真实候选（以前「找人」页显示的是前端写死的 Linh 26 单 / Mai 12 单）。
+  // 先建一个城市同行需求，再按版本号拿后端排好序的候选（internal/matching：履约 / 评价 / 经验 / 响应 / 预算）。
+  // meeting 在后端就是市场代码（hn / hcm），集合点文字只用于展示。
+  public async listCityCompanionCandidates(input: { duration: "4H" | "8H"; language: string; market: string; budgetVnd?: number; interests?: string[] }): Promise<CityCompanionCandidate[]> {
+    const session = await this.requireSession();
+    const created = await this.sendCommand(session, "CreateCityCompanionNeed", { type: "CityCompanionNeed", id: "new" }, {
+      duration: input.duration,
+      language: input.language,
+      meeting: input.market,
+      interests: input.interests ?? [],
+      ...(input.budgetVnd ? { budgetVnd: input.budgetVnd } : {})
+    });
+    const needId = created.aggregate?.type === "CityCompanionNeed" ? created.aggregate.id : undefined;
+    if (created.outcome !== "ACCEPTED" || !needId) throw new DemandCommandRejectedError(created);
+    const listed = await this.sendCommand(session, "ListCityCompanionCandidates", { type: "CityCompanionNeed", id: needId }, {
+      expectedVersion: created.aggregate?.version ?? 1
+    });
+    if (listed.outcome !== "ACCEPTED" || typeof listed.operationRef !== "string") throw new DemandCommandRejectedError(listed);
+    let body: { candidates?: unknown };
+    try {
+      body = JSON.parse(listed.operationRef) as { candidates?: unknown };
+    } catch {
+      throw new DemandProtocolError("candidate list response was not JSON");
+    }
+    if (!Array.isArray(body.candidates)) throw new DemandProtocolError("candidate list response did not contain candidates");
+    return body.candidates.map(parseCityCompanionCandidate).filter((c): c is CityCompanionCandidate => c !== undefined);
+  }
+
   public async hasAuthenticatedSession(): Promise<boolean> {
     try {
       const session = await this.input.secureSessionStore.read();
@@ -216,4 +244,37 @@ export function parseRequesterHomeItemsPayload(operationRef: string | undefined)
   const drafts = Array.isArray(top.drafts) ? (top.drafts as RequesterHomeDraftItem[]) : [];
   const tasks = Array.isArray(top.tasks) ? (top.tasks as RequesterHomeTaskItem[]) : [];
   return { actorId, limit, drafts, tasks };
+}
+
+// MATCH-LIVE-001：后端候选（已排序）。hasTrackRecord=false 表示还没有完成过订单 —— 显示「新人 · 暂无记录」，
+// 不把 0% 画成「履约很差」。
+export type CityCompanionCandidate = {
+  agentId: string;
+  name: string;
+  offerVnd: number;
+  fulfillmentRate: number;
+  satisfactionRate: number;
+  completedOrders: number;
+  hasTrackRecord: boolean;
+  languages: string[];
+  proofs: string[];
+};
+
+function parseCityCompanionCandidate(raw: unknown): CityCompanionCandidate | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const c = raw as Record<string, unknown>;
+  if (typeof c.agentId !== "string" || typeof c.name !== "string") return undefined;
+  const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  return {
+    agentId: c.agentId,
+    name: c.name,
+    offerVnd: num(c.offerVnd),
+    fulfillmentRate: num(c.fulfillmentRate),
+    satisfactionRate: num(c.satisfactionRate),
+    completedOrders: num(c.completedCityOrders),
+    hasTrackRecord: c.hasTrackRecord === true,
+    languages: strings(c.languages),
+    proofs: strings(c.proofs)
+  };
 }

@@ -351,6 +351,15 @@ if ! grep -qE 'FulfillmentRate: +sc\.FulfillmentRate' apps/api-go/internal/cityc
   echo "  FAIL [MATCH-RANK-001]: 城市同行又写死了履约率，或撮合排序读了曝光 / 点赞 / 粉丝信号。" >&2
   exit 1
 fi
+# MATCH-LIVE-001：「找人」页候选只来自后端（ListCityCompanionCandidates，已按 MATCH-RANK-001 排序），
+# 演示数据不能再给任何候选人（以前写死 Linh 26 单 / Mai 12 单）；新人显示「暂无记录」而不是 0%。
+pnpm --dir apps/mobile exec vitest run src/uiplan/fixtures.test.ts src/demand-client.test.ts || exit $?
+if grep -qE 'agentId: "agent_(linh|mai|minh)"' apps/mobile/src/uiplan/fixtures.ts ||
+   ! grep -qF 'listCityCompanionCandidates' apps/mobile/src/surfaces/fulfillment-workspace.tsx ||
+   ! grep -qF 'hasTrackRecord === false' apps/mobile/src/components/registry.tsx; then
+  echo "  FAIL [MATCH-LIVE-001]: 找人页又用演示候选 / 没接后端候选 / 新人被画成 0% 履约。" >&2
+  exit 1
+fi
 echo "    OPS-REAL-001: PASS (operator console is operator-only; no fixture numbers; population/behaviour live)"
 
 require_test "UI-SOCIAL-002" "./internal/identity" \
@@ -9258,3 +9267,8 @@ fi
 # 页面：原型牌标、目录完整、不画假上限、没接上的能力不说「运行中」。
 pnpm --dir apps/mobile exec vitest run src/surfaces/ai-management.test.ts || exit $?
 echo "    AI-MANAGE-003: PASS (chat management governs the represented person; surface matches the prototype honestly)"
+# PROFILE-REPLIES-VISIBLE-001: 个人主页 PostCard 以前只有动作按钮 —— feed 里
+# 能看到的赞数/评论列表在主页完全看不见。调用方传 engagementClient 进来后
+# hydrate 计数、点开拉评论；作者名走 resolveReplyAuthorDisplayName，无名不显示裸 id。
+pnpm --dir apps/mobile exec vitest run src/profile-post-replies.test.ts || exit $?
+echo "    PROFILE-REPLIES-VISIBLE-001: PASS (profile posts show counts + expandable replies)"
