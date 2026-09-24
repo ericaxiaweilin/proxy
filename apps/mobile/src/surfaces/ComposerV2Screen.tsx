@@ -64,6 +64,8 @@ import {
 import { mediaTypeForMime } from "../media-client";
 import { color } from "../theme";
 import { ProxyIcon } from "../components/proxy-icon";
+import { CircularAvatarImage } from "../components/circular-avatar-image";
+import { initialAvatarTint } from "../media/author-avatar";
 import { LocationPickerSheet, type AnyLocation, DEFAULT_LOCATION } from "../components/location-picker-sheet";
 import { VoiceToolButton } from "../components/VoiceToolButton";
 import { TooltipOnLongPress } from "../components/TooltipOnLongPress";
@@ -182,7 +184,29 @@ export function ComposerV2Screen({
   const [longTextDraft, setLongTextDraft] = useState("");
 
   // —— Sheet 显隐 ——
-  const [openSheet, setOpenSheet] = useState<null | "reply" | "quote" | "gif" | "topic" | "more" | "location" | "quotePicker" | "pollDuration">(null);
+  const [openSheet, setOpenSheet] = useState<null | "reply" | "quote" | "gif" | "topic" | "more" | "location" | "quotePicker" | "pollDuration" | "scene">(null);
+  // SCENE-PHOTO-WALL-001：在哪个真实场景拍的。带图发出后会出现在该场景详情的照片墙。
+  const [scene, setScene] = useState<{ id: string; name: string } | null>(null);
+  // COMPOSER-IDENTITY-001：发帖页头部以前写死「Thanh @thanh」+ 画出来的小人 —— 谁发帖都显示别人的名字。
+  // 读本账号资料（与 me 页同一个 store）：名字 / handle / 服务端头像；没头像就首字。
+  const [author, setAuthor] = useState<{ name: string; handle: string; avatarUri: string | undefined }>();
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    void composerProfileStore.read().then((record) => {
+      if (cancelled || !record) return;
+      const mediaAssetId = record.remoteAvatarPath?.startsWith("assets/") ? record.remoteAvatarPath.slice("assets/".length) : "";
+      const avatarUri = mediaAssetId ? localNet.resolveMediaUrl(`/v1/media/thumb/${encodeURIComponent(mediaAssetId)}`) || undefined : undefined;
+      setAuthor({ name: record.name.trim(), handle: record.handle.trim(), avatarUri });
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [composerProfileStore, localNet, visible]);
+  const [sceneOptions, setSceneOptions] = useState<Array<{ id: string; name: string; area: string }> | "loading" | "error">("loading");
+  function openScenePicker(): void {
+    setOpenSheet("scene");
+    setSceneOptions("loading");
+    localNet.listTaggableScenes().then(setSceneOptions, () => setSceneOptions("error"));
+  }
   const [toast, setToast] = useState<ToastState>({ visible: false, message: "" });
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -517,7 +541,8 @@ export function ComposerV2Screen({
           topic,
           gifWord,
           poll,
-          isGhost24h
+          isGhost24h,
+          realitySceneId: scene?.id ?? null
         },
         quoteTarget,
         {
@@ -533,6 +558,7 @@ export function ComposerV2Screen({
       setMedia([]);
       setQuoteId(null);
       setPlace(null);
+      setScene(null);
       setTopic(null);
       setGifWord(null);
       setPoll({ open: false, options: ["", ""], durationLabel: "1 天" });
@@ -621,6 +647,7 @@ export function ComposerV2Screen({
   // —— 视觉装饰 chip 行（地点 / 话题）——
   function renderChips(): React.JSX.Element {
     const list: Array<{ key: string; label: string; type: "place" | "topic"; onRemove: () => void }> = [];
+    if (scene) list.push({ key: "scene", label: `拍摄于 ${scene.name}`, type: "place", onRemove: () => setScene(null) });
     if (place) list.push({ key: "place", label: place.area, type: "place", onRemove: () => setPlace(null) });
     if (topic) list.push({ key: "topic", label: topic, type: "topic", onRemove: () => setTopic(null) });
     if (list.length === 0) return <></>;
@@ -675,17 +702,14 @@ export function ComposerV2Screen({
 
         <ScrollView contentContainerStyle={styles.composerBody} keyboardShouldPersistTaps="handled">
           <View style={styles.postRow}>
-            <View style={styles.avatar}>
-              <View style={styles.avatarArt}>
-                <View style={styles.avatarHead} />
-                <View style={styles.avatarBody} />
-                <View style={styles.avatarBadge} />
-              </View>
+            <View style={[styles.avatar, !author?.avatarUri && author?.name ? { alignItems: "center", backgroundColor: initialAvatarTint(viewerAccountId ?? author.name).backgroundColor, justifyContent: "center" } : null]}>
+              {author?.avatarUri ? <CircularAvatarImage accessibilityLabel={`${author.name}头像`} size={42} uri={author.avatarUri} />
+                : author?.name ? <Text selectable style={{ color: initialAvatarTint(viewerAccountId ?? author.name).color, fontSize: 17, fontWeight: "900" }}>{author.name.slice(0, 1).toUpperCase()}</Text> : null}
             </View>
             <View style={styles.postColumn}>
               <View style={styles.authorLine}>
-                <Text selectable style={styles.author}>Thanh</Text>
-                <Text selectable style={styles.handle}>@thanh</Text>
+                {author?.name ? <Text selectable style={styles.author}>{author.name}</Text> : null}
+                {author?.handle ? <Text selectable style={styles.handle}>@{author.handle.replace(/^@+/, "")}</Text> : null}
                 {isGhost24h ? <View style={styles.modeBadge}><Text selectable style={styles.modeBadgeText}>24h</Text></View> : null}
               </View>
 
@@ -1060,11 +1084,33 @@ export function ComposerV2Screen({
             onPress={() => { Keyboard.dismiss(); setLongTextOpen(true); setOpenSheet(null); }}
           />
           <SheetOption
+            label="拍摄场景"
+            description={scene ? `已标记：${scene.name}` : "标记照片在哪个场景拍的，会出现在该场景的照片墙"}
+            selected={scene !== null}
+            showChevron
+            onPress={openScenePicker}
+          />
+          <SheetOption
             label="24h 动态"
             description="24 小时后自动从公开主页移除"
             selected={isGhost24h}
             onPress={() => { setIsGhost24h(!isGhost24h); setOpenSheet(null); showToast(isGhost24h ? "已关闭 24h" : "已设为 24h 动态"); }}
           />
+        </Sheet>
+
+        <Sheet visible={openSheet === "scene"} title="在哪个场景拍的？" onClose={() => setOpenSheet(null)}>
+          {sceneOptions === "loading" ? <SheetOption label="正在读取场景…" onPress={() => undefined} /> : null}
+          {sceneOptions === "error" ? <SheetOption label="场景列表取不到" description="点这里重试" onPress={openScenePicker} /> : null}
+          {Array.isArray(sceneOptions) && scene ? <SheetOption label="不标记场景" onPress={() => { setScene(null); setOpenSheet(null); }} /> : null}
+          {Array.isArray(sceneOptions) ? <ScrollView style={{ maxHeight: 420 }}>{sceneOptions.map((option) => (
+            <SheetOption
+              key={option.id}
+              label={option.name}
+              description={option.area}
+              selected={scene?.id === option.id}
+              onPress={() => { setScene({ id: option.id, name: option.name }); setOpenSheet(null); }}
+            />
+          ))}</ScrollView> : null}
         </Sheet>
 
         <Sheet visible={openSheet === "pollDuration"} title="投票时长" onClose={() => setOpenSheet(null)}>
@@ -1452,10 +1498,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     width: 42
   },
-  avatarArt: { alignItems: "center", height: "100%", justifyContent: "center", position: "relative", width: "100%" },
-  avatarHead: { backgroundColor: "#191816", borderRadius: 7, height: 14, position: "absolute", top: 8, width: 14 },
-  avatarBody: { backgroundColor: "#191816", bottom: 0, height: 16, left: 5, position: "absolute", right: 5 },
-  avatarBadge: { backgroundColor: color.lime, borderRadius: 4, height: 9, position: "absolute", right: 4, top: 5, width: 9 },
   postColumn: { flex: 1 },
   authorLine: { alignItems: "center", flexDirection: "row", gap: 7, height: 24 },
   author: { color: color.ink, fontSize: 14, fontWeight: "700" },

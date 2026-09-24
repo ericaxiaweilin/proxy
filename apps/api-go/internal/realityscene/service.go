@@ -953,12 +953,21 @@ func (s *Service) listMyState(ctx context.Context, e command.Envelope) command.R
 	return r
 }
 
+// CheckInRadiusMeters 与客户端 scene-checkin.ts 的 CHECKIN_RADIUS_METERS 一致。
+const CheckInRadiusMeters = 100
+
 // setCheckIn 处理「我在这里」的开启与取消。
 func (s *Service) setCheckIn(ctx context.Context, e command.Envelope, sceneID string, enabled bool) command.Result {
 	var distance *int
 	if raw, ok := e.Payload["distanceMeters"].(float64); ok && raw >= 0 {
 		metres := int(raw)
 		distance = &metres
+	}
+	// SCENE-CHECKIN-GATE-001（2026-09-24）：客户端一直写着「走近到 100 米内」，但按钮没接门、服务端也不拦 ——
+	// 模拟器在洛杉矶照样打卡河内的咖啡店。报了距离且超过半径就拒绝；没报距离（没授权定位）的老语义不变，
+	// 只是没有距离佐证。取消打卡永远允许。
+	if enabled && distance != nil && *distance > CheckInRadiusMeters {
+		return command.Rejected(e, "REALITY_SCENE_CHECKIN_TOO_FAR", "VALIDATION", "AFTER_USER_ACTION", "reality_scene.checkin_too_far", nil)
 	}
 	if !enabled {
 		if err := s.repo.CancelCheckIn(ctx, e.Actor.ID, sceneID); err != nil {

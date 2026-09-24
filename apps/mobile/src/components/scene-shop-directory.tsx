@@ -44,11 +44,13 @@ import {
   activitiesAtScene, activitySignupLabel, canSignUp, isSceneActivity, sceneActivityFeed, sceneActivityFeedText,
   type SceneActivity, type SceneActivityFeedState,
 } from "../scene-activities";
-import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
+import { localApiBaseUrl, nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
+import { LocalNetClient } from "../localnet-client";
 import { sendSceneCommand, type AuthenticatedStoredSession } from "../scene-commands";
 import {
   availableShopSorts, sceneDistanceMeters, shopAreaFacets, shopCardSignal,
   shopCountText, shopDetailTags, shopDirectoryRows, shopHereLine, shopInfoCells, shopListEndText,
+  SCENE_PHOTO_WALL_EMPTY, scenePhotoWallTiles, type ScenePhotoTile,
   shopAddressLine, shopCardDistance, shopHeroDistanceSuffix, shopListLocationLine, isFarAway, sceneActionSubtitle,
   type SceneOrigin, type SceneShopBrief, type ShopSortId,
 } from "../scene-shop-directory";
@@ -237,6 +239,25 @@ export function SceneShopDirectory({
   }, [selectedId, session]);
   const activityFeed = sceneActivityFeed([...activities], activityState);
 
+  // SCENE-PHOTO-WALL-001：照片墙 = 发帖时标记了这个场景的帖子里的图（需要登录：走帖子可见性规则）。
+  const localNet = useMemo(
+    () => new LocalNetClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore, baseUrl: apiBaseUrl ?? localApiBaseUrl }),
+    [apiBaseUrl],
+  );
+  const [wall, setWall] = useState<readonly ScenePhotoTile[]>([]);
+  const [wallState, setWallState] = useState<"LOADING" | "READY" | "ERROR" | "SIGNED_OUT">("LOADING");
+  useEffect(() => {
+    let cancelled = false;
+    setWall([]);
+    if (!selectedId) return;
+    if (!session) { setWallState("SIGNED_OUT"); return; }
+    setWallState("LOADING");
+    void localNet.listPostsAtScene(selectedId, 30)
+      .then((model) => { if (!cancelled) { setWall(scenePhotoWallTiles(model)); setWallState("READY"); } })
+      .catch(() => { if (!cancelled) setWallState("ERROR"); });
+    return () => { cancelled = true; };
+  }, [localNet, selectedId, session]);
+
   const matched = useMemo(() => shopDirectoryRows(scenes, actionId), [scenes, actionId]);
   const facets = useMemo(() => shopAreaFacets(matched), [matched]);
   const rows = useMemo(
@@ -258,6 +279,8 @@ export function SceneShopDirectory({
 
   const persistCheckIn = async (scene: SceneShopBrief, enabled: boolean): Promise<void> => {
     if (!session) { setNotice("请先登录，打卡才会同步。"); return; }
+    // SCENE-CHECKIN-GATE-001：checkinAllowed 以前算了没用 —— 11,761 公里外照样打卡成功。取消永远可以。
+    if (enabled && !checkinAllowed) { setNotice(checkinHint(false, checkinDistance)); return; }
     setBusy("checkin");
     setNotice(undefined);
     const snapshot = here;
@@ -421,7 +444,7 @@ export function SceneShopDirectory({
               {/* 能真做的两件事：导航（系统地图深链）和打卡（100 米门禁）。 */}
               <View style={styles.actions}>
                 <Pressable accessibilityLabel="导航到这里" onPress={() => { if (selected) openNavigation(selected); }} style={styles.actionButton}><Text selectable style={styles.actionText}>导航到这里</Text></Pressable>
-                <Pressable accessibilityLabel="我在这里" disabled={busy === "checkin" || !selected} onPress={() => { if (selected) void persistCheckIn(selected, !hereChecked); }} style={[styles.actionButton, hereChecked && styles.actionButtonOn, (busy === "checkin" || !selected) && styles.actionButtonBusy]}><Text selectable style={[styles.actionText, hereChecked && styles.actionTextOn]}>{hereChecked ? "取消打卡" : "我在这里"}</Text></Pressable>
+                <Pressable accessibilityLabel="我在这里" disabled={busy === "checkin" || !selected || (!hereChecked && !checkinAllowed)} onPress={() => { if (selected) void persistCheckIn(selected, !hereChecked); }} style={[styles.actionButton, hereChecked && styles.actionButtonOn, (busy === "checkin" || !selected || (!hereChecked && !checkinAllowed)) && styles.actionButtonBusy]}><Text selectable style={[styles.actionText, hereChecked && styles.actionTextOn]}>{hereChecked ? "取消打卡" : "我在这里"}</Text></Pressable>
               </View>
               <Text selectable style={styles.checkinHint}>{checkinHint(hereChecked, checkinDistance)}</Text>
 
@@ -451,6 +474,22 @@ export function SceneShopDirectory({
                     <Text selectable style={styles.activityJoinText}>{activitySignupLabel(activity)}</Text>
                   </Pressable>
                 </View>) : <Text selectable style={styles.blockEmpty}>{sceneActivityFeedText(activityFeed)}</Text>}
+              </View>
+
+              <View style={styles.block}>
+                <Text selectable style={styles.blockTitle}>照片墙</Text>
+                {wallState === "READY" && wall.length > 0 ? <View style={styles.wallGrid}>{wall.map((tile) => {
+                  const uri = localNet.resolveMediaUrl(tile.path);
+                  return <View key={tile.key} style={styles.wallTile}>
+                    {uri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`wall:${tile.key}`} source={{ uri }} style={styles.wallImage} transition={0} /> : null}
+                    {tile.author ? <Text selectable numberOfLines={1} style={styles.wallAuthor}>{tile.author}</Text> : null}
+                  </View>;
+                })}</View> : <Text selectable style={styles.blockEmpty}>{
+                  wallState === "LOADING" ? "正在读取照片墙…"
+                    : wallState === "ERROR" ? "照片墙暂时取不到，请稍后重试。"
+                      : wallState === "SIGNED_OUT" ? "登录后才能看到这里的照片墙。"
+                        : SCENE_PHOTO_WALL_EMPTY
+                }</Text>}
               </View>
 
               {detail && detail.actions.length > 0 ? <View style={styles.block}>
@@ -520,6 +559,10 @@ const styles = StyleSheet.create({
   cardFoot: { alignItems: "center", borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 9, paddingTop: 8 },
   cardFootText: { color: color.muted, fontSize: 11, fontWeight: "800" },
   cardChevron: { color: color.muted, fontSize: 16 },
+  wallGrid: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 10 },
+  wallTile: { aspectRatio: 1, backgroundColor: color.surface, borderRadius: 10, overflow: "hidden", width: "32.4%" },
+  wallImage: { height: "100%", width: "100%" },
+  wallAuthor: { backgroundColor: "rgba(0,0,0,0.45)", bottom: 0, color: color.white, fontSize: 10, fontWeight: "800", left: 0, paddingHorizontal: 6, paddingVertical: 2, position: "absolute", right: 0 },
   listEnd: { color: color.muted, fontSize: 11, fontWeight: "800", paddingTop: 22, textAlign: "center" },
   notice: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 18, paddingHorizontal: 16, paddingTop: 14 },
   hero: { backgroundColor: color.ink, height: 300, overflow: "hidden", position: "relative" },

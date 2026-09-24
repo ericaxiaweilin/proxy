@@ -326,6 +326,25 @@ type FeedPageRepository interface {
 // handle is passed WITHOUT the leading "@". The implementation is responsible
 // for matching whole-handle occurrences only (so "@thanh" never matches
 // "@thanh2") and for applying the same visibility and mute rules as the feed.
+// SceneWallRepository 是场景照片墙的窄读（SCENE-PHOTO-WALL-001）：标记了某个真实场景
+// （ContextRef{REALITY_SCENE, 场景 id}）且带媒体的帖子，可见性规则与 feed 相同。
+type SceneWallRepository interface {
+	ListPostsAtScene(ctx context.Context, actorID string, sceneID string, limit int) ([]Post, error)
+}
+
+// ContextRealityScene 是帖子「在哪个真实场景拍的」的 ContextRef 类型；contextId = realityscene 的场景 id。
+const ContextRealityScene = "REALITY_SCENE"
+
+// taggedAtScene：这条帖子标记了这个场景。
+func taggedAtScene(p Post, sceneID string) bool {
+	for _, ref := range p.ContextRefs {
+		if ref.ContextType == ContextRealityScene && ref.ContextID == sceneID {
+			return true
+		}
+	}
+	return false
+}
+
 type MentionRepository interface {
 	ListPostsMentioning(ctx context.Context, actorID string, handle string, limit int) ([]Post, error)
 }
@@ -1272,7 +1291,7 @@ func NewWithRepositoryAndClock(repository Repository, domainClock clock.Clock) *
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "CreatePost", "UpdatePostAudience", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "CreateNeedFromPost", "RecordAttribution",
+	case "CreatePost", "UpdatePostAudience", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "ListPostsAtScene", "CreateNeedFromPost", "RecordAttribution",
 		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed", "RecordMediaImpression",
 		"ShortlistAgent", "ListInteractionEvents", "ListPostImpressionStats", "ListProfileViewStats", "ListProfileViewers", "ListMediaImpressionStats", "ListMediaActivityForViewer", "VotePostPoll",
 		"RecordMediaZoom", "GetContentAnalytics", "ListPostAudience":
@@ -1300,6 +1319,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listPostsByIds(ctx, e)
 	case "ListPostsMentioning":
 		return s.listPostsMentioning(ctx, e)
+	case "ListPostsAtScene":
+		return s.listPostsAtScene(ctx, e)
 	case "CreateNeedFromPost":
 		return s.createNeedFromPost(ctx, e)
 	case "RecordAttribution":
@@ -2184,6 +2205,76 @@ func (s *Service) listPostsMentioning(ctx context.Context, e command.Envelope) c
 	}
 	matched = s.attachPolls(ctx, matched, e.Actor.ID)
 	return acceptedWithPayload(e, "Post", "", 0, "POSTS_MENTIONING", map[string]any{
+		"posts":   matched,
+		"media":   s.hydratePostMedia(ctx, matched),
+		"hasMore": hasMore,
+	}, nil)
+}
+
+// listPostsAtScene 是场景详情「照片墙」（SCENE-PHOTO-WALL-001，用户：「照片墙没做的要做」）。
+// 来源只有一个：用户发帖时自己标记了「在这个场景」的帖子 —— 不拿别处的图冒充这个地方，没有就是空墙。
+func (s *Service) listPostsAtScene(ctx context.Context, e command.Envelope) command.Result {
+	var request struct {
+		SceneID string `json:"sceneId"`
+		Limit   int    `json:"limit"`
+	}
+	if !decode(e.Payload, &request) || strings.TrimSpace(request.SceneID) == "" {
+		return command.Rejected(e, "INVALID_LIST_POSTS_AT_SCENE", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_list_posts_at_scene", nil)
+	}
+	sceneID := strings.TrimSpace(request.SceneID)
+	if request.Limit <= 0 {
+		request.Limit = 30
+	}
+	if request.Limit > 60 {
+		request.Limit = 60
+	}
+	var (
+		posts []Post
+		err   error
+	)
+	if wall, ok := s.repository.(SceneWallRepository); ok {
+		posts, err = wall.ListPostsAtScene(ctx, e.Actor.ID, sceneID, request.Limit+1)
+	} else {
+		var snapshot []Post
+		snapshot, err = s.repository.Snapshot(ctx)
+		if err == nil {
+			for _, p := range snapshot {
+				if taggedAtScene(p, sceneID) {
+					posts = append(posts, p)
+				}
+			}
+			sort.Slice(posts, func(i, j int) bool {
+				if posts[i].CreatedAt.Equal(posts[j].CreatedAt) {
+					return posts[i].ID < posts[j].ID
+				}
+				return posts[i].CreatedAt.After(posts[j].CreatedAt)
+			})
+		}
+	}
+	if err != nil {
+		return command.Rejected(e, "SCENE_WALL_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.scene_wall_read_failed", nil)
+	}
+	audience := s.loadTargetedAudience(ctx, posts)
+	now := s.clock.Now()
+	matched := make([]Post, 0, len(posts))
+	for _, p := range posts {
+		// 纵深防御：跟 listPostsMentioning 一样在 Go 侧再判一遍可见性。
+		if p.Status != "PUBLISHED" || !postVisibleTo(p, e.Actor.ID, audience) || !taggedAtScene(p, sceneID) || len(p.MediaRefs) == 0 {
+			continue
+		}
+		if p.EphemeralUntil != nil && !p.EphemeralUntil.After(now) {
+			continue
+		}
+		if p.ContextRefs == nil {
+			p.ContextRefs = []ContextRef{}
+		}
+		matched = append(matched, p)
+	}
+	hasMore := len(matched) > request.Limit
+	if hasMore {
+		matched = matched[:request.Limit]
+	}
+	return acceptedWithPayload(e, "Post", "", 0, "POSTS_AT_SCENE", map[string]any{
 		"posts":   matched,
 		"media":   s.hydratePostMedia(ctx, matched),
 		"hasMore": hasMore,

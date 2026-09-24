@@ -7,7 +7,7 @@ import {
   recommendationScore, sceneDistanceMeters, shopAreaFacets, shopCardSignal, shopCountText,
   shopDetailTags, shopDirectoryRows, shopHereLine, shopInfoCells, shopListEndText,
   shopListLocationLine, sortShops, walkMinutes,
-  isFarAway, sceneActionStateText, sceneActionSubtitle, shopAddressLine, shopCardDistance, shopHeroDistanceSuffix,
+  isFarAway, scenePhotoWallTiles, sceneActionStateText, sceneActionSubtitle, shopAddressLine, shopCardDistance, shopHeroDistanceSuffix,
   type SceneShopBrief,
 } from "./scene-shop-directory";
 
@@ -293,5 +293,30 @@ describe("SCENE-SHOP-POLISH-001（原型 f05cb0：地址行 / 远距离 / 人话
     expect(sceneActionStateText("SOMETHING_NEW")).toBe("");
     expect(sceneActionSubtitle({ state: "ACCEPTS_APPLICATIONS", moneyMeaning: "报酬由你出" })).toBe("接受报名 · 报酬由你出");
     expect(sceneActionSubtitle({ state: "SOMETHING_NEW", moneyMeaning: "免费" })).toBe("免费");
+  });
+});
+
+describe("SCENE-PHOTO-WALL-001 photo wall tiles", () => {
+  it("one tile per image/video, in post order, audio and url-less items skipped, capped", () => {
+    const model = {
+      posts: [
+        { postId: "p1", authorId: "u1", authorDisplayName: " Linh " },
+        { postId: "p2", authorId: "u2" },
+      ],
+      media: {
+        p1: [
+          { mediaAssetId: "a", mediaType: "IMAGE", thumbnailUrl: "/t/a" },
+          { mediaAssetId: "b", mediaType: "AUDIO", thumbnailUrl: "/t/b" },
+          { mediaAssetId: "c", mediaType: "IMAGE" },
+        ],
+        p2: [{ mediaAssetId: "d", mediaType: "VIDEO", feedUrl: "/f/d" }],
+      },
+    };
+    expect(scenePhotoWallTiles(model)).toEqual([
+      { key: "p1:a", postId: "p1", path: "/t/a", author: "Linh" },
+      { key: "p2:d", postId: "p2", path: "/f/d", author: "" },
+    ]);
+    expect(scenePhotoWallTiles(model, 1)).toHaveLength(1);
+    expect(scenePhotoWallTiles({ posts: [], media: {} })).toEqual([]);
   });
 });

@@ -220,8 +220,14 @@ func (r *LocalNetRepository) ListFeedPage(ctx context.Context, actorID string, b
 	if err != nil {
 		return nil, err
 	}
+	return scanPostRows(rows, limit)
+}
+
+// scanPostRows 读 (id, author_type, author_id, author_display_name, body, media_refs, visibility,
+// city_scope, scene_type, status, context_refs, created_at, ephemeral_until) 这一固定列序的帖子行。
+func scanPostRows(rows pgx.Rows, capacity int) ([]localnet.Post, error) {
 	defer rows.Close()
-	result := make([]localnet.Post, 0, limit)
+	result := make([]localnet.Post, 0, capacity)
 	for rows.Next() {
 		var post localnet.Post
 		var mediaRefs, contextRefs []byte
@@ -293,37 +299,41 @@ func (r *LocalNetRepository) ListPostsMentioning(ctx context.Context, actorID st
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := make([]localnet.Post, 0, limit)
-	for rows.Next() {
-		var post localnet.Post
-		var mediaRefs, contextRefs []byte
-		var sceneType, cityScope *string
-		if err := rows.Scan(
-			&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
-			&post.Visibility, &cityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
-			&post.EphemeralUntil,
-		); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(mediaRefs, &post.MediaRefs); err != nil {
-			return nil, fmt.Errorf("decode media refs: %w", err)
-		}
-		if err := json.Unmarshal(contextRefs, &post.ContextRefs); err != nil {
-			return nil, fmt.Errorf("decode context refs: %w", err)
-		}
-		if sceneType != nil {
-			post.SceneType = *sceneType
-		}
-		// FEED-NULL-CITY-001: city_scope 是可空列，直接扫进 string 会让**一整页
-		// feed** 因为某一行的 NULL 而整体报错（cannot scan NULL into *string）。
-		// 一行脏数据打挂所有人的动态流，这个代价远大于多一次判空。
-		if cityScope != nil {
-			post.CityScope = *cityScope
-		}
-		result = append(result, post)
+	return scanPostRows(rows, limit)
+}
+
+// ListPostsAtScene 是场景详情「照片墙」的读（SCENE-PHOTO-WALL-001）：发帖时标记了这个真实场景
+// （context_refs 里 {contextType: REALITY_SCENE, contextId: 场景 id}）且带媒体的帖子。
+// 可见性 / 24h 过期 / 屏蔽作者跟 ListPostsMentioning 同一套 WHERE —— 照片墙不能成为看到
+// 动态流里看不到的帖子的后门。自己的帖子照样上墙（这是场景的墙，不是「提到我」）。
+func (r *LocalNetRepository) ListPostsAtScene(ctx context.Context, actorID string, sceneID string, limit int) ([]localnet.Post, error) {
+	if limit <= 0 || limit > 61 {
+		limit = 31
 	}
-	return result, rows.Err()
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, author_type, author_id, author_display_name, body, media_refs,
+			visibility, city_scope, scene_type, status, context_refs, created_at, ephemeral_until
+		FROM localnet.posts
+		WHERE status='PUBLISHED'
+		  AND (visibility='PUBLIC' OR (visibility='FOLLOWERS' AND author_id=$1)
+		    OR (visibility='TARGETED' AND (author_id=$1 OR EXISTS (
+		          SELECT 1 FROM localnet.post_audience_targets t
+		          WHERE t.post_id = localnet.posts.id AND t.target_account_id = $1
+		    ))))
+		  AND (ephemeral_until IS NULL OR ephemeral_until > now())
+		  AND NOT EXISTS (
+			SELECT 1 FROM engagement.muted_authors
+			WHERE actor_id=$1 AND author_id=localnet.posts.author_id
+		  )
+		  -- 有些老行的 media_refs 是 JSON 标量（null）；AND 不保证短路，必须用 CASE 挡住 jsonb_array_length。
+		  AND CASE WHEN jsonb_typeof(media_refs) = 'array' THEN jsonb_array_length(media_refs) ELSE 0 END > 0
+		  AND context_refs @> jsonb_build_array(jsonb_build_object('contextType', 'REALITY_SCENE', 'contextId', $2::text))
+		ORDER BY created_at DESC, id ASC
+		LIMIT $3`, actorID, sceneID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return scanPostRows(rows, limit)
 }
 
 // ---------- POLL-VOTE-001：投票 ----------

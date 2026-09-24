@@ -301,6 +301,35 @@ export class LocalNetClient {
   }
 
   /**
+   * SCENE-PHOTO-WALL-001 — 场景照片墙：发帖时标记了这个场景、带图、对我可见的帖子。
+   */
+  public async listPostsAtScene(sceneId: string, limit = 30): Promise<FeedReadModel> {
+    const id = sceneId.trim();
+    if (id.length === 0) return { posts: [], media: {}, nextCursor: undefined, hasMore: false };
+    const session = await this.requireSession();
+    const result = await this.sendCommand(
+      session,
+      "ListPostsAtScene",
+      { type: "Post", id: "scene_wall" },
+      { sceneId: id, limit: Math.max(1, Math.min(60, limit)) }
+    );
+    const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
+    return { posts: payload.posts, media: payload.media, nextCursor: undefined, hasMore: payload.hasMore ?? false };
+  }
+
+  /**
+   * SCENE-PHOTO-WALL-001 — 发帖时「拍摄场景」可选的真实场景（公开目录，不需要登录）。
+   */
+  public async listTaggableScenes(): Promise<Array<{ id: string; name: string; area: string }>> {
+    const response = await fetch(`${this.input.baseUrl.replace(/\/$/, "")}/v1/reality-scenes`, { headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error(`reality scenes ${response.status}`);
+    const body = await response.json() as { scenes?: Array<{ id?: unknown; name?: unknown; area?: unknown }> };
+    return (body.scenes ?? []).flatMap((scene) => typeof scene.id === "string" && typeof scene.name === "string"
+      ? [{ id: scene.id, name: scene.name, area: typeof scene.area === "string" ? scene.area : "" }]
+      : []);
+  }
+
+  /**
    * TWIN-SIGNALS-001 — 曝光上报（analytics，失败静默）。
    *
    * 这条链路不影响任何业务状态：没登录（访客）直接跳过不发；发送失败

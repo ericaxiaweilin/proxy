@@ -650,7 +650,7 @@ func TestCheckInIsReachableThroughCommand(t *testing.T) {
 	if !s.Supports("SetRealitySceneCheckIn") {
 		t.Fatal("SetRealitySceneCheckIn is not in Supports() — dispatch will never route it here")
 	}
-	e := envelope("SetRealitySceneCheckIn", map[string]any{"sceneId": "hoankiem", "enabled": true, "distanceMeters": float64(120)})
+	e := envelope("SetRealitySceneCheckIn", map[string]any{"sceneId": "hoankiem", "enabled": true, "distanceMeters": float64(60)})
 	if r := s.HandleContext(ctx, e); r.Outcome != "ACCEPTED" {
 		t.Fatalf("check-in rejected: %q err=%+v", r.Outcome, r.Error)
 	}
@@ -1078,4 +1078,18 @@ func TestSceneDetailDeclaresFixtureProvenance(t *testing.T) {
 	// 方法，reflect.MethodByName 永远找不到，那样的断言是空钉（永远绿）。
 	// "编造容量的函数不许回来"由 scripts/check-regression-contracts.sh 的静态
 	// grep 钉，并且已验证过它会变红。
+}
+
+// SCENE-CHECKIN-GATE-001：报了距离且超过 100 米 → 拒绝；取消打卡不看距离。
+func TestCheckInRejectsReportedDistanceBeyondRadius(t *testing.T) {
+	s := New()
+	ctx := t.Context()
+	far := envelope("SetRealitySceneCheckIn", map[string]any{"sceneId": "hoankiem", "enabled": true, "distanceMeters": float64(11_761_000)})
+	if r := s.HandleContext(ctx, far); r.Outcome == "ACCEPTED" {
+		t.Fatal("11761 km 外的打卡被接受了 —— 100 米门禁没生效")
+	}
+	cancel := envelope("SetRealitySceneCheckIn", map[string]any{"sceneId": "hoankiem", "enabled": false, "distanceMeters": float64(11_761_000)})
+	if r := s.HandleContext(ctx, cancel); r.Outcome != "ACCEPTED" {
+		t.Fatalf("取消打卡不应受距离限制: %q", r.Outcome)
+	}
 }

@@ -415,3 +415,32 @@ export function sceneActionStateText(state: string): string {
 export function sceneActionSubtitle(action: { state: string; moneyMeaning: string }): string {
   return [sceneActionStateText(action.state), action.moneyMeaning.trim()].filter(Boolean).join(" · ");
 }
+
+// ---------------------------------------------------------------------------
+// SCENE-PHOTO-WALL-001：场景照片墙。来源只有「发帖时标记了这个场景」的帖子（服务端 ListPostsAtScene），
+// 每条帖子的每张图一格；视频取封面，音频不上墙。没有就是空墙，不拿别处的图凑。
+// ---------------------------------------------------------------------------
+
+export type ScenePhotoTile = { key: string; postId: string; path: string; author: string };
+
+type WallPost = { postId: string; authorId: string; authorDisplayName?: string | undefined };
+type WallMedia = { mediaAssetId: string; mediaType: string; thumbnailUrl?: string | undefined; feedUrl?: string | undefined; placeholderUrl?: string | undefined };
+
+export function scenePhotoWallTiles(
+  model: { posts: readonly WallPost[]; media: Readonly<Record<string, readonly WallMedia[]>> },
+  max = 30,
+): readonly ScenePhotoTile[] {
+  const out: ScenePhotoTile[] = [];
+  for (const post of model.posts) {
+    for (const item of model.media[post.postId] ?? []) {
+      if (item.mediaType !== "IMAGE" && item.mediaType !== "VIDEO") continue;
+      const path = item.thumbnailUrl || item.feedUrl || item.placeholderUrl || "";
+      if (!path) continue;
+      out.push({ key: `${post.postId}:${item.mediaAssetId}`, postId: post.postId, path, author: post.authorDisplayName?.trim() || "" });
+      if (out.length >= max) return out;
+    }
+  }
+  return out;
+}
+
+export const SCENE_PHOTO_WALL_EMPTY = "还没有人在这里发照片 —— 发动态时在「··· → 拍摄场景」选这里，照片就会出现在这。";

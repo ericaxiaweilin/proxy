@@ -32,6 +32,8 @@ export type ComposerDraftForPublish = {
   gifWord: string | null;
   poll: { open: boolean; options: string[]; durationLabel: string };
   isGhost24h: boolean;
+  /** SCENE-PHOTO-WALL-001：在哪个真实场景拍的（realityscene 场景 id）。带图发出后上这个场景的照片墙。 */
+  realitySceneId?: string | null | undefined;
 };
 
 export type UploadOutcome =
@@ -105,7 +107,10 @@ export function buildCreatePostPayload(
     visibility: draft.visibility
   };
   if (draft.includeCity) payload.cityScope = "hn";
-  if (draft.quoteTargetId) payload.contextRefs = [{ contextType: "QUOTE_POST", contextId: draft.quoteTargetId }];
+  const contextRefs: NonNullable<CreatePostPayload["contextRefs"]> = [];
+  if (draft.quoteTargetId) contextRefs.push({ contextType: "QUOTE_POST", contextId: draft.quoteTargetId });
+  if (draft.realitySceneId) contextRefs.push({ contextType: "REALITY_SCENE", contextId: draft.realitySceneId, relationType: "FEATURED_AT" });
+  if (contextRefs.length > 0) payload.contextRefs = contextRefs;
   if (draft.isGhost24h) {
     payload.ephemeralUntil = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
   }

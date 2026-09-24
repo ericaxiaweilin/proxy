@@ -4,6 +4,22 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 289 — 2026-09-24
+
+- **场景照片墙**（SCENE-PHOTO-WALL-001）：来源只有「发帖时标记了这个场景」的帖子 —— 发帖页
+  「··· → 拍摄场景」选真实场景，帖子带 `ContextRef{REALITY_SCENE, 场景 id, FEATURED_AT}`（沿用种子数据
+  已有的类型，无 migration）。新命令 `ListPostsAtScene`：可见性 / 24h 过期 / 屏蔽作者与 feed 同一套
+  WHERE，只收带图的帖子，自己的也上墙。场景详情加「照片墙」三列网格，空墙写明怎么上墙，不拿别处的图凑。
+  （老行 media_refs 有 JSON 标量，`jsonb_array_length` 必须用 CASE 挡，AND 不保证短路。）
+- **打卡 100 米门禁接线**（SCENE-CHECKIN-GATE-001）：客户端算了 `checkinAllowed` 却没用，服务端也不拦 ——
+  11,761 公里外照样打卡成功。按钮在太远时禁用（取消打卡永远可以），服务端对报了距离且 >100 米的拒绝
+  （REALITY_SCENE_CHECKIN_TOO_FAR）；没报距离的老语义不变。
+- **发帖页身份写死**（COMPOSER-IDENTITY-001）：头部一直是「Thanh @thanh」+ 画的小人，谁发帖都显示别人。
+  改读本账号资料：名字 / handle / 服务端头像，没头像用首字。
+- 影响文件：`apps/mobile/src/surfaces/ComposerV2Screen.tsx`、`components/scene-shop-directory.tsx`、
+  `scene-shop-directory.ts`、`composer-publish.ts`、`localnet-client.ts`；
+  `apps/api-go/internal/localnet/service.go`、`platform/postgres/network.go`、`realityscene/service.go`。
+
 ## Revision 288 — 2026-09-24
 
 - **头像「先空圆后照片」的第二个原因**（AVATAR-SVG-DECODE-001）：AVATAR-FLASH-002 /

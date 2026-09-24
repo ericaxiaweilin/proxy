@@ -354,3 +354,15 @@ function itemPending(localId: string): DraftMediaItem {
     status: "LOCAL"
   };
 }
+describe("SCENE-PHOTO-WALL-001 scene tag", () => {
+  it("adds a REALITY_SCENE context ref next to the quote ref", () => {
+    const payload = buildCreatePostPayload({ ...baseDraft, body: "x", quoteTargetId: "p1", realitySceneId: "threebeans" }, quotePost);
+    expect(payload.contextRefs).toEqual([
+      { contextType: "QUOTE_POST", contextId: "p1" },
+      { contextType: "REALITY_SCENE", contextId: "threebeans", relationType: "FEATURED_AT" },
+    ]);
+  });
+  it("omits contextRefs when there is neither quote nor scene", () => {
+    expect(buildCreatePostPayload({ ...baseDraft, body: "x" }).contextRefs).toBeUndefined();
+  });
+});
