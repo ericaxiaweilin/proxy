@@ -68,7 +68,7 @@ export function ProviderApplications() {
   return (
     <>
       <div className="section-title">
-        <h2>接单权限申请</h2>
+        <h2>KYC认证申请</h2>
         <span>
           {FILTERS.map((f) => <button key={f.id || "all"} disabled={filter === f.id} onClick={() => setFilter(f.id)} style={{ marginLeft: 6 }}>{f.label}</button>)}
           {msg ? ` · ${msg}` : ""}

@@ -171,8 +171,8 @@ export function formatRate(rate: number | null): string {
 export function permissionLine(permission: ProviderStatsView["permission"]): { text: string; canApply: boolean } {
   switch (permission) {
     case "APPROVED": return { text: "已认证 · 可接单", canApply: false };
-    case "SUBMITTED": return { text: "接单权限审核中", canApply: true };
-    case "REJECTED": return { text: "接单权限未通过 · 可修改后重新提交", canApply: true };
-    default: return { text: "还没有接单权限", canApply: true };
+    case "SUBMITTED": return { text: "KYC认证审核中", canApply: true };
+    case "REJECTED": return { text: "KYC认证未通过 · 可修改后重新提交", canApply: true };
+    default: return { text: "还没有完成KYC认证", canApply: true };
   }
 }

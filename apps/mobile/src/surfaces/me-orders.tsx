@@ -57,8 +57,8 @@ function ProviderOrderPanel({ onOpenApply }: { onOpenApply?: (() => void) | unde
           <Text selectable style={styles.orderId}>{line.text}</Text>
         </View>
         {line.canApply && onOpenApply ? (
-          <Pressable accessibilityLabel={view.permission === "SUBMITTED" ? "查看申请进度" : "申请接单权限"} onPress={onOpenApply} style={styles.orderTab}>
-            <Text selectable style={styles.orderTabText}>{view.permission === "SUBMITTED" ? "查看进度" : "去申请"}</Text>
+          <Pressable accessibilityLabel={view.permission === "SUBMITTED" ? "查看KYC认证进度" : "去KYC认证"} onPress={onOpenApply} style={styles.orderTab}>
+            <Text selectable style={styles.orderTabText}>{view.permission === "SUBMITTED" ? "查看进度" : "去认证"}</Text>
           </Pressable>
         ) : null}
       </View>

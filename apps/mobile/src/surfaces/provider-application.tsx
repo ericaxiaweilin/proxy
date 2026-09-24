@@ -239,13 +239,13 @@ export function OrderPermissionGate({ children, onApply, onBack }: { children: R
     <ScrollView contentContainerStyle={s.gatePage}>
       <Pressable accessibilityLabel="返回" onPress={onBack}><Text selectable style={s.gateBack}>‹ 返回</Text></Pressable>
       <Text selectable style={s.gateTitle}>AI 分身</Text>
-      {state === "loading" ? <ProxyLoading label="正在确认接单权限" tone="muted" /> : <View style={s.card}>
-        <Text selectable style={s.cardTitle}>{state === "error" ? "暂时确认不了接单权限" : pending ? "接单权限审核中" : "开通接单权限后才能用 AI 分身"}</Text>
+      {state === "loading" ? <ProxyLoading label="正在确认KYC认证状态" tone="muted" /> : <View style={s.card}>
+        <Text selectable style={s.cardTitle}>{state === "error" ? "暂时确认不了KYC认证状态" : pending ? "KYC认证审核中" : "完成KYC认证后才能用 AI 分身"}</Text>
         <Text selectable style={s.muted}>{state === "error"
           ? "网络或服务有问题，稍后再试。"
-          : "AI 分身会用你的形象生成照片、视频，并在私聊里替你回复 —— 只对通过实名审核、拥有接单权限的人开放。"}</Text>
+          : "AI 分身会用你的形象生成照片、视频，并在私聊里替你回复 —— 只对完成KYC认证的人开放。"}</Text>
         {state === "error" ? <Pressable onPress={check} style={s.secondary}><Text selectable style={s.secondaryText}>重试</Text></Pressable>
-          : <Pressable accessibilityLabel={pending ? "查看申请进度" : "去申请接单权限"} onPress={onApply} style={s.primary}><Text selectable style={s.primaryText}>{pending ? "查看申请进度" : "去申请接单权限"}</Text></Pressable>}
+          : <Pressable accessibilityLabel={pending ? "查看KYC认证进度" : "去KYC认证"} onPress={onApply} style={s.primary}><Text selectable style={s.primaryText}>{pending ? "查看KYC认证进度" : "去KYC认证"}</Text></Pressable>}
       </View>}
     </ScrollView>
   );

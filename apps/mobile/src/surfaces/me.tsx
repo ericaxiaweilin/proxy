@@ -199,7 +199,7 @@ const REQUESTER_ME: PersonaConfig = {
         { icon: "arrow-up-right", label: "社媒与联系", desc: "TikTok、Zalo、Instagram 与可见范围", route: "socialidentity" },
         { icon: "route", label: "访问与转化", desc: "渠道 → 主页 → 聊天 → 订单", route: "socialanalytics" },
         // ORDER-PERMISSION-001：接单权限申请入口 —— 实名 + 本人照片，运营审核；任何人可申请，不按性别设门。
-        { icon: "spark", label: "申请接单权限", desc: "实名 + 本人照片 + 服务区域 · 运营审核通过后开放接单", route: "providerapply" }
+        { icon: "spark", label: "KYC认证", desc: "实名 + 证件 + 履约条款 · 通过后开放接单和 AI 分身", route: "providerapply" }
       ]
     },
     {
@@ -2830,7 +2830,7 @@ export function MeSurface({
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text selectable style={styles.subPageTitle}>申请接单权限</Text>
+            <Text selectable style={styles.subPageTitle}>KYC认证</Text>
             <ProviderApplicationSurface mediaClient={mediaClient} />
           </ScrollView>
         </View>

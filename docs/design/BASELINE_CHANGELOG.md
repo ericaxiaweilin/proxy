@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 295 — 2026-09-24
+
+- **「申请接单权限」改名「KYC认证」**（ORDER-PERMISSION-KYC-002，用户：「申请接单权限改为KYC认证」）：我的 → 个人管理的入口、
+  子页标题、我的订单接单卡（状态 / 「去认证」）、AI 分身门页（「完成KYC认证后才能用 AI 分身」「去KYC认证」）、运营控制台
+  「KYC认证审核」统一改名。只改文案，逻辑不变（KYC 通过 = 可接单 + 开 AI 分身）。
+- 影响文件：`apps/mobile/src/surfaces/{me,me-orders,provider-application}.tsx`、`me-sub-pages.ts`、`provider-application-client.ts`；
+  控制台 `App.tsx`、`pages/ProviderApplications.tsx`。
+
 ## Revision 294 — 2026-09-24
 
 - **接单面板进「我的订单」**（ORDER-CENTER-STATS-001，原型 33987c「接单中心」；用户：「我的订单模块不是有吗 在那里做」）：
