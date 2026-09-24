@@ -4,6 +4,20 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 290 — 2026-09-24
+
+- **申请成为小美 + 运营审核**（PROVIDER-APPLY-001）：小美身份以前没有入口（supply.agent_profiles 只靠种子 /
+  手工 SQL）。我的 → 个人管理 →「申请成为小美」：实名（只给运营看）、自证女性、3–9 张本人真实照片
+  （服务端核验：本人上传、IMAGE、非 AI 生成）、服务区域 / 语言 / 能力、自我介绍；资料门与发帖同一道
+  （用户名 + 平台头像）。不合格逐项人话提示。审核中可撤回；被拒显示原因、可改后重新申请。
+  运营控制台「小美申请审核」：通过 = 开 supply.agent_profiles（ACTIVE，复用账号已绑的那一行）+ 声明能力
+  （declared，不是 verified —— 审核不等于能力核验）；拒绝必须写原因。
+  migration 125：`supply.provider_applications`（同一人最多一份审核中 / 已通过）；存量 6 位 ACTIVE 服务者补录为
+  APPROVED（source=BACKFILL，实名留空、未自证 —— 不编她们没填过的东西）。
+- 影响文件：`apps/mobile/src/surfaces/provider-application.tsx`、`provider-application-client.ts`、`surfaces/me.tsx`；
+  `apps/api-go/internal/providerapp/`、`internal/api/provider_application.go`；
+  `apps/market-intelligence-console/src/pages/ProviderApplications.tsx`。
+
 ## Revision 289 — 2026-09-24
 
 - **场景照片墙**（SCENE-PHOTO-WALL-001）：来源只有「发帖时标记了这个场景」的帖子 —— 发帖页

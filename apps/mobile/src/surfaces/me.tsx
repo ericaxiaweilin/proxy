@@ -54,6 +54,7 @@ import { BenefitClient } from "../benefit-client";
 import { BenefitHubSurface } from "./benefit-hub";
 import { BenefitRedeemScreen } from "./BenefitRedeemScreen";
 import { MyStoreRecommendations } from "./my-store-recommendations";
+import { ProviderApplicationSurface } from "./provider-application";
 import { type LocalNetClient } from "../localnet-client";
 import {
   parentPostIdsForReplies,
@@ -196,7 +197,9 @@ const REQUESTER_ME: PersonaConfig = {
         { icon: "profile-ring", label: "个人管理", desc: "基本信息 · 二维码 · 状态管理 (可接单)", grad: true, route: "personalmanage" },
         { icon: "profile-ring", label: "个人主页", desc: "对外展示 · Threads R2 · 名片、动态、能力、可用时间", route: "personalhub" },
         { icon: "arrow-up-right", label: "社媒与联系", desc: "TikTok、Zalo、Instagram 与可见范围", route: "socialidentity" },
-        { icon: "route", label: "访问与转化", desc: "渠道 → 主页 → 聊天 → 订单", route: "socialanalytics" }
+        { icon: "route", label: "访问与转化", desc: "渠道 → 主页 → 聊天 → 订单", route: "socialanalytics" },
+        // PROVIDER-APPLY-001：小美（接单服务者）申请入口 —— 实名 + 本人照片，运营审核。
+        { icon: "spark", label: "申请成为小美", desc: "实名 + 本人照片 + 服务区域 · 运营审核通过后开放接单", route: "providerapply" }
       ]
     },
     {
@@ -2813,6 +2816,21 @@ export function MeSurface({
                 </Text>
               </View>
             )}
+          </ScrollView>
+        </View>
+      );
+    }
+
+    // PROVIDER-APPLY-001: 申请成为小美。
+    if (subPage.route === "providerapply") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text selectable style={styles.subPageTitle}>申请成为小美</Text>
+            <ProviderApplicationSurface mediaClient={mediaClient} />
           </ScrollView>
         </View>
       );

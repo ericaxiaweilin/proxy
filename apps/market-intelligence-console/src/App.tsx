@@ -15,13 +15,14 @@ import { Population } from "./pages/Population";
 import { Tags } from "./pages/Tags";
 import { IntentOrchestration } from "./pages/IntentOrchestration";
 import { Gravity } from "./pages/Gravity";
+import { ProviderApplications } from "./pages/ProviderApplications";
 import { EngineAPI } from "./pages/EngineAPI";
 import { Merchant } from "./pages/Merchant";
 import { Retention } from "./pages/Retention";
 import { Trust } from "./pages/Trust";
 import { Quality } from "./pages/Quality";
 
-type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "retention" | "trust" | "quality" | "workbench";
+type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "retention" | "trust" | "quality" | "workbench" | "providers";
 
 const TITLES: Record<Page, string> = {
   overview: "平台总览",
@@ -42,6 +43,7 @@ const TITLES: Record<Page, string> = {
   merchant: "商家与投放",
   retention: "留存与复购",
   trust: "信任与风险",
+  providers: "小美申请审核",
   quality: "数据治理",
   workbench: "交叉分析工作台",
 };
@@ -84,7 +86,7 @@ export function App() {
         </div>
         <div className="navgroup">Market</div>
         <div className="nav">
-          {(["merchant", "retention", "trust"] as Page[]).map((p) => (
+          {(["providers", "merchant", "retention", "trust"] as Page[]).map((p) => (
             <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
           ))}
         </div>
@@ -133,6 +135,7 @@ export function App() {
           {page === "merchant" && <Merchant />}
           {page === "retention" && <Retention />}
           {page === "trust" && <Trust />}
+          {page === "providers" && <ProviderApplications />}
           {page === "quality" && <Quality />}
           {page === "workbench" && <Quality />}
           {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "retention", "trust", "quality", "workbench"].includes(page) && (

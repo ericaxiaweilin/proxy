@@ -36,6 +36,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/profile"
+	"github.com/proxy-app/proxy-api/internal/providerapp"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/relationship"
 	"github.com/proxy-app/proxy-api/internal/safety"
@@ -529,6 +530,17 @@ func main() {
 	if pool != nil {
 		server.OpsMetrics = opsmetrics.NewPostgres(pool)
 		server.Gravity = gravity.NewPostgres(pool)
+		// PROVIDER-APPLY-001：申请成为小美 + 运营审核。资料门与发帖同一道（profileCompleteness）。
+		providerStore := providerapp.NewPostgres(pool)
+		server.ProviderApps = providerapp.NewService(providerStore, providerapp.Deps{
+			Missing: profileCompleteness,
+			DisplayName: func(ctx context.Context, userAccountID string) string {
+				name, _ := authorNames.ResolveAuthorDisplayName(ctx, userAccountID)
+				return name
+			},
+			BadPhotos: providerStore.BadPhotos,
+			Activate:  providerStore.ActivateSupply,
+		})
 	}
 	if pool != nil {
 		server.UserModel = usermodel.NewService(postgres.NewUserModelRepository(pool), modelStack)

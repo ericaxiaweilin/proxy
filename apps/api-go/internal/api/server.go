@@ -35,6 +35,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/profile"
+	"github.com/proxy-app/proxy-api/internal/providerapp"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/relationship"
 	"github.com/proxy-app/proxy-api/internal/safety"
@@ -113,6 +114,8 @@ type Server struct {
 	OpsMetrics opsmetrics.Source
 	// Gravity：引力状态存储（GRAVITY-001）。nil = 没配库，相关页返回 NOT_CONNECTED。
 	Gravity gravity.Store
+	// ProviderApps：「申请成为小美」+ 运营审核（PROVIDER-APPLY-001）。nil = 端点返回 503。
+	ProviderApps *providerapp.Service
 	// TwinInsight 是 AI 分身「好友洞察」的读模型（TWIN-INSIGHT-002）。
 	// 它是一个独立的读模型包而不是挂在 localnet / relationship 上：
 	// 这条洞察跨四个域（好友关系 / 行为事件 / 对话 / 点赞），没有任何
@@ -215,6 +218,8 @@ func (s *Server) Handler() http.Handler {
 	// GRAVITY-001: 引力状态（真实派生数据，spec §6-§7 / §21）。
 	mux.HandleFunc("/v1/operator/gravity", s.operatorConsole(s.operatorGravity))
 	mux.HandleFunc("/v1/operator/gravity/recompute", s.operatorConsoleMethod(http.MethodPost, s.operatorGravityRecompute))
+	mux.HandleFunc("/v1/operator/provider-applications", s.operatorConsole(s.operatorProviderApplications))
+	mux.HandleFunc("/v1/operator/provider-applications/review", s.operatorConsoleMethod(http.MethodPost, s.operatorProviderApplicationReview))
 	mux.HandleFunc("/v1/media/upload/", s.mediaUpload)
 	mux.HandleFunc("/v1/media/play/", s.mediaFile)
 	mux.HandleFunc("/v1/media/thumb/", s.mediaFile)
@@ -277,6 +282,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/ai/catalog", s.getAICatalog)
 	// AI-MANAGE-015: AI 分身「用户建模」（需会话 + 本人形象授权）。
 	mux.HandleFunc("/v1/ai/user-model", s.routeUserModel)
+	mux.HandleFunc("/v1/provider-application", s.routeProviderApplication)
+	mux.HandleFunc("/v1/provider-application/", s.routeProviderApplication)
 	mux.HandleFunc("/v1/ai/user-model/", s.routeUserModel)
 	// 小美头像原文件（GPT 交付 SVG）：更长 prefix，优先于 personas/ 通配。
 	mux.HandleFunc("/v1/ai/personas/photo/", s.personaPhoto)
