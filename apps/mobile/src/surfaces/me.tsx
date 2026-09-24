@@ -120,12 +120,18 @@ function initialProfileAvatarUri(accountId?: string): string | undefined {
   try {
     // 注意：不要用 `instanceof File` 过滤 list() 元素（真机上类身份可能对不上，
     // 一旦滤空就回落字母头，等于没修）。与 hydration 同款：只信 name。
+    const scope = avatarScope(accountId);
     const names = PROFILE_AVATAR_DIR.list()
       .map((entry) => entry.name)
-      .filter((name) => name.startsWith(`avatar-${avatarScope(accountId)}-`))
+      .filter((name) => name.startsWith(`avatar-${scope}-`))
       .sort();
     const newest = names.at(-1);
-    return newest ? new File(PROFILE_AVATAR_DIR, newest).uri : undefined;
+    if (newest) return new File(PROFILE_AVATAR_DIR, newest).uri;
+    // AVATAR-REMOTE-CACHE-001: 服务端头像的上次缓存。本机从没选过头像时目录是空的，
+    // 首帧只能等网络 —— 这就是"先默认后照片"天天见的原因。有缓存直接上，
+    // 没有才 undefined（ hydration 会去拉远端并回填这份缓存）。
+    const cached = new File(PROFILE_AVATAR_DIR, `remote-avatar-${scope}.jpg`);
+    return cached.exists ? cached.uri : undefined;
   } catch {
     return undefined;
   }
@@ -979,6 +985,25 @@ export function MeSurface({
         }
         return false;
       };
+      // AVATAR-REMOTE-CACHE-001: 远端头像落盘一份，下次首帧同步直出。fire-and-forget：
+      // 失败就当没这回事（保持远端 URL 现状）；成功后若页面还在当前账号且用户
+      // 没动过头像，切到本机副本。alreadyFresh（服务端路径没变）且文件还在就不
+      // 重复下载；路径变了则覆盖重下，不留过期副本。
+      async function cacheRemoteAvatar(accountId: string, avatarPath: string, alreadyFresh: boolean): Promise<void> {
+        try {
+          const mediaAssetId = avatarPath.slice("assets/".length).trim();
+          if (mediaAssetId === "" || mediaAssetId.startsWith("avatar-")) return;
+          const dest = new File(PROFILE_AVATAR_DIR, `remote-avatar-${avatarScope(accountId)}.jpg`);
+          if (alreadyFresh && dest.exists) return;
+          PROFILE_AVATAR_DIR.create({ idempotent: true, intermediates: true });
+          const url = `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(mediaAssetId)}`;
+          const file = await File.downloadFileAsync(url, dest, { idempotent: true });
+          if (cancelled || profileTouchedRef.current) return;
+          setProfileAvatarUri(file.uri);
+        } catch {
+          // 留远端 URL，不崩。
+        }
+      }
       // 1. server (PROFILE-001 source of truth).
       if (profileClient && viewerAccountId) {
         try {
@@ -992,7 +1017,11 @@ export function MeSurface({
           await profileStore.write(record).catch(() => undefined);
           applyRecord(record);
           setClaimNumber(typeof remote.claimNumber === "number" ? remote.claimNumber : 0);
-          if (!hydrateAvatar(record.avatarPath)) hydrateRemoteAvatar(remote.avatarPath);
+          if (!hydrateAvatar(record.avatarPath)) {
+            if (hydrateRemoteAvatar(remote.avatarPath) && viewerAccountId && remote.avatarPath) {
+              void cacheRemoteAvatar(viewerAccountId, remote.avatarPath, existingRecord?.remoteAvatarPath === remote.avatarPath);
+            }
+          }
           return;
         } catch {
           // No server profile yet (fresh account) or offline: fall through

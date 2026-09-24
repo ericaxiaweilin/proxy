@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 287 — 2026-09-24
+
+- **远端头像落盘，根治首帧闪默认**（AVATAR-REMOTE-CACHE-001）：本机目录是空的
+  （从没选过头像的用户）= 每次启动必等网络，必闪。远端拉到后下载一份到本机，
+  下次首帧同步直出；路径没变且文件在就不重下，变了覆盖；回填前检查页面没走、
+  用户没换头像。FLASH-002 的重置逻辑不动。
+- 影响文件：`apps/mobile/src/surfaces/me.tsx`。
+
 ## Revision 286 — 2026-09-24
 
 - **场景列表 / 详情按原型 f05cb0 精修**（SCENE-SHOP-POLISH-001 / SCENE-IMAGE-HONEST-001 /

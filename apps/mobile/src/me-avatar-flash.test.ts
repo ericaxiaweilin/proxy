@@ -15,4 +15,14 @@ describe("AVATAR-FLASH-002 profile avatar never blanks on account ready", () => 
   it("the local lookup stays account-scoped (no cross-account flash)", () => {
     expect(me).toContain("avatar-${avatarScope(accountId)}-");
   });
+
+  it("AVATAR-REMOTE-CACHE-001: remote avatars are cached for first-frame sync reads", () => {
+    // 本机目录是空的（从没选过头像）= 每次必闪。远端拉到后落盘，下次首帧直出。
+    expect(me).toContain("remote-avatar-${avatarScope(accountId)}.jpg");
+    expect(me).toContain("File.downloadFileAsync(url, dest, { idempotent: true })");
+    // 路径没变且文件还在就不重下；变了覆盖，不留过期副本。
+    expect(me).toContain("existingRecord?.remoteAvatarPath === remote.avatarPath");
+    // 回填前检查页面没走、用户没换头像 —— 不覆盖新选择。
+    expect(me).toContain("if (cancelled || profileTouchedRef.current) return;");
+  });
 });
