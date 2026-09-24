@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 288 — 2026-09-24
+
+- **头像「先空圆后照片」的第二个原因**（AVATAR-SVG-DECODE-001）：AVATAR-FLASH-002 /
+  AVATAR-REMOTE-CACHE-001 让 uri 首帧就有，但 `CircularAvatarImage` 用 react-native-svg 的
+  `<Image>` 画图 —— 没有缓存、每次挂载异步重新解码，首帧仍只剩容器底色（个人主页一帧浅紫空圆，
+  模拟器逐帧截图复现）。底下垫一层 expo-image（memory-disk，同 PLACEHOLDER-009），SVG 圆裁剪
+  （PLACEHOLDER-008）照旧盖在上面。修后逐帧截图首帧即是本人头像。全站所有圆头像同时受益。
+- 影响文件：`apps/mobile/src/components/circular-avatar-image.tsx`。
+
 ## Revision 287 — 2026-09-24
 
 - **远端头像落盘，根治首帧闪默认**（AVATAR-REMOTE-CACHE-001）：本机目录是空的
