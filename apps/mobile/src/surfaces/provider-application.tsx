@@ -173,10 +173,10 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
   const docTile = (slot: DocSlot, label: string, hint: string) => {
     const doc = docs[slot];
     return <Pressable accessibilityLabel={`${label}${doc ? "，已上传" : ""}`} disabled={!mediaClient || busy !== undefined} key={slot} onPress={() => { void pickDoc(slot); }} style={s.doc}>
-      {doc ? <Image contentFit="cover" source={{ uri: doc.uri }} style={s.docImage} /> : null}
-      <View style={doc ? s.docLabelOn : s.docLabel}>
-        <Text selectable style={[s.docTitle, doc && s.docTitleOn]}>{busy === slot ? "上传中…" : doc ? `${label} · 已上传` : label}</Text>
-        {!doc ? <Text selectable style={s.muted}>{hint}</Text> : null}
+      {doc ? <Image contentFit="cover" source={{ uri: doc.uri }} style={s.docImage} /> : <View style={s.docPlus}><ProxyIcon color={color.ink} name="plus" size={22} /></View>}
+      <View style={doc ? s.docLabelOn : s.docLabelEmpty}>
+        <Text selectable style={[s.docTitle, doc && s.docTitleOn, !doc && s.center]}>{busy === slot ? "上传中…" : doc ? `${label} · 已上传` : label}</Text>
+        {!doc ? <Text selectable style={[s.muted, s.center]}>点击上传 · {hint}</Text> : null}
       </View>
     </Pressable>;
   };
@@ -384,9 +384,11 @@ const s = StyleSheet.create({
   pipeDotFailed: { backgroundColor: color.magenta },
   pipeBadge: { color: color.muted, fontSize: 12, fontWeight: "900" },
   stepNo: { color: color.muted, fontSize: 11, fontWeight: "900" },
-  doc: { backgroundColor: color.surface, borderRadius: 14, height: 120, marginTop: 6, overflow: "hidden" },
+  doc: { alignItems: "center", backgroundColor: color.surface, borderRadius: 14, flexDirection: "row", gap: 12, height: 120, marginTop: 6, overflow: "hidden", paddingHorizontal: 14 },
+  docPlus: { alignItems: "center", backgroundColor: color.white, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  docLabelEmpty: { flex: 1, gap: 4, justifyContent: "center" },
+  center: { textAlign: "center" },
   docImage: { height: "100%", position: "absolute", width: "100%" },
-  docLabel: { flex: 1, gap: 4, justifyContent: "center", paddingHorizontal: 14 },
   docLabelOn: { backgroundColor: "rgba(0,0,0,0.45)", bottom: 0, left: 0, paddingHorizontal: 12, paddingVertical: 6, position: "absolute", right: 0 },
   docTitle: { color: color.ink, fontSize: 13, fontWeight: "900" },
   docTitleOn: { color: color.white },

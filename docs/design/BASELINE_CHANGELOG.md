@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 305 — 2026-09-24
+
+- **证件 tile 加 + 号**（KYC-DOC-PLUS-001）：空态居中 + 号徽 +「点击上传 · …」，
+  跟图库 UploadTile 同一手感；已上传态不动。
+- 影响文件：`apps/mobile/src/surfaces/provider-application.tsx`。
+
 ## Revision 304 — 2026-09-24
 
 - **手机号位数判断**（KYC-PHONE-DIGITS-001）：只收越南手机号 —— 本地 0 开头 10 位 /
