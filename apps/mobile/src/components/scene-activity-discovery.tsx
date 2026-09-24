@@ -7,6 +7,7 @@ import { ProxyIcon } from "./proxy-icon";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { createSceneFavoritesStore, type SavedSceneEntry } from "../scene-favorites";
+import { PRIMARY_ACTION_IDS, sceneCategoryEntries } from "../scene-category-entries";
 
 export type SceneDiscoveryBrief = {
   id: string;
@@ -66,78 +67,10 @@ const ACTIONS = SCENE_ACTIONS;
  * 「全部」进动作分类页。
  *
  * 按 id 从 SCENE_ACTIONS 取，不另抄一份 label/icon —— 两处各留一份，改一处
- * 漏一处就是两个不一样的「咖啡」。
+ * 漏一处就是两个不一样的「咖啡」。id 清单和入口卡的计数逻辑在
+ * ../scene-category-entries（纯模块，能被真的测）。
  */
-const PRIMARY_ACTION_IDS = ["coffee", "dining", "city-walk", "photo", "cycling", "exhibition"] as const;
 export const PRIMARY_ACTIONS: readonly Taxon[] = PRIMARY_ACTION_IDS.map((id) => ACTIONS.find((action) => action.id === id)!);
-
-/**
- * SCENE-HOME-ENTRY-001：动作 → 真实场景的归属词。
- *
- * 后端**没有**「这个场景属于哪个动作」这张表：公开列表 /v1/reality-scenes
- * 里只有自由文本 type（如「咖啡 · 户外」）和 SCENE-CATEGORY-001 的封闭顶类
- * （商家/景点/其他）；场景详情里那三条 Actions 是邀请真人 / 发机会 / 报名
- * 三个**可执行动作**，不是分类。所以这里跟 sceneMatches 用同一套路：对
- * name/area/type 做子串归属。
- *
- * 匹配不到就是空 —— 不编场景、不拿本地 MOMENTS fixture 顶上。
- */
-const ACTION_SCENE_KEYWORDS: Record<string, readonly string[]> = {
-  coffee: ["咖啡", "cafe", "coffee", "cà phê"],
-  dining: ["餐", "restaurant", "bistro", "美食", "food", "quán ăn"],
-  "city-walk": ["老城", "old quarter", "old town", "街", "street", "湖", "lake", "公园", "park"],
-  photo: ["拍照", "photo", "观景", "景点", "viewpoint", "camera"],
-  cycling: ["骑行", "cycling", "bike", "自行车", "xe đạp"],
-  exhibition: ["美术馆", "画廊", "gallery", "museum", "展"],
-};
-
-export type SceneCategoryEntry = {
-  actionId: string;
-  label: string;
-  icon: ImageSource;
-  /** 命中的真实场景条数。 */
-  count: number;
-  /** 计数单位：命中里过半是「商家」顶类就用「家」，其余用「个」。 */
-  unit: "家" | "个";
-  /** 真实派生：命中场景 visitedCount 合计。0 就不显示（不是热度）。 */
-  visitedTotal: number;
-  /** 真实派生：命中场景的 area 去重，最多 2 个。 */
-  areas: readonly string[];
-  /** 命中里第一条有图的真实场景的 imageUrl（可能是相对路径，调用方拼 base）。 */
-  imageUrl: string;
-};
-
-/**
- * SCENE-HOME-ENTRY-001：首页场景入口卡 —— 一张卡 = 一个**真的有场景**的
- * 主动作分类。
- *
- * 计数、去过人数、区域全部由 /v1/reality-scenes 的真实字段派生；没有真实
- * 场景的动作**不出卡**（不是显示「0 家」，更不是拿本地 MOMENTS 顶上）。
- * 原型卡片上另外那两行（本周活动 / 正在招募）没有数据源，一律不做。
- */
-export function sceneCategoryEntries(scenes: readonly SceneDiscoveryBrief[]): readonly SceneCategoryEntry[] {
-  return PRIMARY_ACTIONS.flatMap((action) => {
-    const words = ACTION_SCENE_KEYWORDS[action.id] ?? [];
-    const matched = scenes.filter((scene) => {
-      const haystack = `${scene.name} ${scene.area} ${scene.type}`.toLowerCase();
-      return words.some((word) => haystack.includes(word.toLowerCase()));
-    });
-    if (matched.length === 0) return [];
-    const merchantCount = matched.filter((scene) => scene.category === "商家").length;
-    const visitedTotal = matched.reduce((sum, scene) => sum + (Number.isFinite(scene.visitedCount) ? scene.visitedCount : 0), 0);
-    const areas = [...new Set(matched.map((scene) => scene.area).filter(Boolean))].slice(0, 2);
-    return [{
-      actionId: action.id,
-      label: action.label,
-      icon: action.icon,
-      count: matched.length,
-      unit: merchantCount * 2 >= matched.length ? "家" as const : "个" as const,
-      visitedTotal,
-      areas,
-      imageUrl: matched.find((scene) => scene.imageUrl)?.imageUrl ?? "",
-    }];
-  });
-}
 
 // Detail nodes extend a stable top-level taxonomy without making Home wider.
 // matchActionId keeps today's Moment projection compatible until ranking moves
@@ -446,7 +379,8 @@ export function SceneActivityDiscovery({
   };
 
   // SCENE-HOME-ENTRY-001：入口卡按真实场景算，跟 MOMENTS fixture 无关。
-  const entries = useMemo(() => sceneCategoryEntries(scenes), [scenes]);
+  // 计数逻辑在 ../scene-category-entries（纯模块，有真行为测试）。
+  const entries = useMemo(() => sceneCategoryEntries(scenes, PRIMARY_ACTIONS), [scenes]);
   const entriesForAction = entries.filter((entry) => entry.actionId === actionMatchId(actionId));
   // 选了细分动作（跑步/羽毛球…）时它本来就没有对应入口卡 —— 那就把全部入口
   // 摆出来，而不是给用户一块空。

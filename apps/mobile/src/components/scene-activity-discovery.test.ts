@@ -66,7 +66,12 @@ describe("scene activity discovery contract", () => {
     expect(source).not.toContain("HorizontalSwipeRail");
     expect(source).not.toContain("preserveChildPresses");
     expect(source).not.toContain("styles.actionRail");
-    expect(source).toContain('const PRIMARY_ACTION_IDS = ["coffee", "dining", "city-walk", "photo", "cycling", "exhibition"] as const;');
+    // The 6 ids themselves live in ../scene-category-entries and are pinned by
+    // behaviour there (including "every primary action has keywords, so no
+    // button on that row is dead"). Here we only pin that the row is built
+    // from that single source rather than a second hardcoded list.
+    expect(source).toContain('import { PRIMARY_ACTION_IDS, sceneCategoryEntries } from "../scene-category-entries";');
+    expect(source).toContain("PRIMARY_ACTION_IDS.map");
     expect(source).toContain("styles.actionRow");
     expect(source).toContain("PRIMARY_ACTIONS.map");
     // The full taxonomy is still reachable, and still complete.
@@ -300,46 +305,54 @@ describe("SCENE-CARD-STACK-005: single-column big Moment cards", () => {
 // SCENE-HOME-ENTRY-001 (2026-09-24, prototype deepseek_html_20260924_412dba
 // 「Scene · 精修版」首页): the home scene section became the prototype's shape
 // — a fixed 6-action row plus one big entry card per category that actually
-// has scenes. The prototype's cards also carry「3 场本周活动」「2 个正在招募」
-// — there is no activity/recruitment source for a scene category anywhere in
-// this backend (scene detail's three Actions are invite / open-task / signup,
-// i.e. executable actions, not categories). Those lines are deliberately NOT
-// ported: only real derived numbers get rendered (SCENE-REAL-COUNTS-001 /
-// SCENE-CATEGORY-001).
-describe("SCENE-HOME-ENTRY-001: scene category entry cards come from real scenes only", () => {
-  it("emits one entry per primary action that actually has real scenes, and none for the rest", () => {
-    expect(source).toContain("export function sceneCategoryEntries");
-    expect(source).toContain("if (matched.length === 0) return [];");
-    expect(source).toContain("const entries = useMemo(() => sceneCategoryEntries(scenes), [scenes]);");
+// has scenes.
+//
+// The **counting** logic lives in ../scene-category-entries.ts and is covered
+// by real behaviour assertions there (scene-category-entries.test.ts). This
+// block only pins the wiring: that the component really consumes that module
+// instead of re-deriving the numbers inline where no test could reach them.
+//
+// The prototype's cards also carry「3 场本周活动」「2 个正在招募」 — there is no
+// activity/recruitment source for a scene category anywhere in this backend
+// (scene detail's three Actions are invite / open-task / signup, i.e.
+// executable actions, not categories). Those lines are deliberately NOT ported.
+describe("SCENE-HOME-ENTRY-001: home entry cards are wired to the pure, tested derivation", () => {
+  it("consumes the pure module instead of re-deriving counts inline in the untestable .tsx", () => {
+    expect(source).toContain('from "../scene-category-entries"');
+    expect(source).toContain("sceneCategoryEntries(scenes, PRIMARY_ACTIONS)");
+    expect(source).toContain("PRIMARY_ACTION_IDS.map");
+    // The .tsx must not own a second copy of the derivation — a count computed
+    // here would be invisible to scene-category-entries.test.ts.
+    expect(source).not.toContain('scene.category === "商家"');
+    expect(source).not.toContain("const ACTION_SCENE_KEYWORDS");
+    expect(source).not.toContain("export function sceneCategoryEntries");
+  });
+
+  it("renders an entry card per real category and an honest empty state otherwise", () => {
+    expect(source).toContain("const entries = useMemo(() => sceneCategoryEntries(scenes, PRIMARY_ACTIONS), [scenes]);");
     expect(source).toContain("visibleEntries.length > 0 ?");
+    expect(source).toContain("styles.entryCard");
+    expect(source).toContain("styles.entryCountPill");
+    expect(source).toContain("附近还没有接入真实场景");
+    expect(source).toContain("场景目录接上后这里会显示分类入口。");
   });
 
-  it("derives the count unit and the sub-line from real server fields, never from the local MOMENTS fixture", () => {
-    expect(source).toContain('scene.category === "商家"');
-    expect(source).toContain("scene.visitedCount");
-    expect(source).toContain("entry.visitedTotal");
-    expect(source).toContain("entry.areas");
-    // MOMENTS is the placeholder Moment fixture — it must not be able to feed
-    // the home entry cards, or the counts become decorative again.
-    const start = source.indexOf("export function sceneCategoryEntries");
-    const end = source.indexOf("\n}", source.indexOf("return PRIMARY_ACTIONS.flatMap"));
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    expect(source.slice(start, end)).not.toContain("MOMENTS");
-  });
-
-  it("does not port the prototype's activity / recruitment lines that have no data source", () => {
-    expect(source).not.toContain("场本周活动");
-    expect(source).not.toContain("个正在招募");
-    expect(source).not.toContain("位小美走过");
+  it("feeds the entry cards from the real scene list, not the local MOMENTS fixture", () => {
+    // The guarantee is structural, not textual: sceneCategoryEntries takes the
+    // scene list as its only data input, and its own behaviour test proves an
+    // empty list yields zero cards. So pinning the call site is enough — the
+    // fixture cannot reach the cards without this line changing.
+    expect(source).toContain("sceneCategoryEntries(scenes, PRIMARY_ACTIONS)");
+    expect(source).toContain("scenes: readonly SceneDiscoveryBrief[];");
   });
 
   it("opens the full action-category page with that category already selected", () => {
     expect(source).toContain("setActionId(entry.actionId); setPickerOpen(true);");
   });
 
-  it("shows an honest empty state instead of fabricated categories when the catalog is empty", () => {
-    expect(source).toContain("附近还没有接入真实场景");
-    expect(source).toContain("场景目录接上后这里会显示分类入口。");
+  it("does not port the prototype's activity / recruitment lines that have no data source", () => {
+    expect(source).not.toContain("场本周活动");
+    expect(source).not.toContain("个正在招募");
+    expect(source).not.toContain("位小美走过");
   });
 });
