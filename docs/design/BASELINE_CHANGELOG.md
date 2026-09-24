@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 311 — 2026-09-24
+
+- **KYC 入口行换正牌标**（KYC-LOGO-002）：「我的」KYC认证行 `spark` → `kyc-logo`
+  蓝盾标；资源收进 `asset-sources`（顺手把 Rev310 的裸 require 也迁进去，
+  过 media-pipeline 门禁），缺失回落 spark。
+- 影响文件：`apps/mobile/src/surfaces/me.tsx`（+ components / asset-sources / provider-application 同改）。
+
 ## Revision 310 — 2026-09-24
 
 - **KYC logo 落 hero**（KYC-LOGO-001）：用户给的蓝盾 logo 进 `assets/kyc/kyc-logo.png`，

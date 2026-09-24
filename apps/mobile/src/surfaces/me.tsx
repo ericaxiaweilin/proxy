@@ -199,7 +199,7 @@ const REQUESTER_ME: PersonaConfig = {
         { icon: "arrow-up-right", label: "社媒与联系", desc: "TikTok、Zalo、Instagram 与可见范围", route: "socialidentity" },
         { icon: "route", label: "访问与转化", desc: "渠道 → 主页 → 聊天 → 订单", route: "socialanalytics" },
         // ORDER-PERMISSION-001：接单权限申请入口 —— 实名 + 本人照片，运营审核；任何人可申请，不按性别设门。
-        { icon: "spark", label: "KYC认证", desc: "实名 + 证件 + 履约条款 · 通过后开放接单和 AI 分身", route: "providerapply" }
+        { icon: "kyc-logo", label: "KYC认证", desc: "实名 + 证件 + 履约条款 · 通过后开放接单和 AI 分身", route: "providerapply" }
       ]
     },
     {

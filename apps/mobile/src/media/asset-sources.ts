@@ -136,6 +136,17 @@ function loadFacetLogo(): AssetImageSource | undefined {
 }
 export const FACET_LOGO = loadFacetLogo();
 
+// KYC-LOGO-001: 用户给的 KYC 正牌标（蓝盾 + 证件 + 对勾）。me 入口行 + KYC intro
+// hero 共用这一枚，不在各 surface 里裸 require。
+function loadKycLogo(): AssetImageSource | undefined {
+  try {
+    return require("../../assets/kyc/kyc-logo.png") as AssetImageSource;
+  } catch {
+    return undefined;
+  }
+}
+export const KYC_LOGO = loadKycLogo();
+
 function getBundledPhoto(key: string): AssetImageSource | undefined {
   try {
     switch (key) {

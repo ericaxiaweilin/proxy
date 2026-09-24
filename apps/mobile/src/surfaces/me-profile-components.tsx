@@ -6,7 +6,7 @@ import { color, Gradient } from "../theme";
 import type { AbilityType, AvailabilityRule, AvailabilityState, AvOverride, MenuRow } from "./me-types";
 import { ABILITY_SCHEMAS, AVAILABILITY_OPTIONS, avFmt, AV_DAY_NAMES, avStateFor } from "./me-types";
 import { styles } from "./me-styles";
-import { FACET_LOGO, OTTER_LOGO } from "../media/asset-sources";
+import { FACET_LOGO, KYC_LOGO, OTTER_LOGO } from "../media/asset-sources";
 import { AILogo } from "./ai-management";
 
 export function availabilityLabel(value: AvailabilityState): string {
@@ -436,6 +436,14 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
     // AI-MANAGE-003：AI 管理用原型里那枚真牌标（深色圆角方块 + 节点连线 + 在线点），
     // 以前写的 "sparkle" 不在 ProxySymbolIcon 的表里，回落成文字画出了「sp」。
     <AILogo active size={40} />
+  ) : row.icon === "kyc-logo" ? (
+    // KYC-LOGO-001：KYC 入口行用正牌标（蓝盾 + 证件 + 对勾），跟 intro hero 同一枚。
+    // 资源缺失（单测 node 环境）才回落通用 spark。
+    KYC_LOGO ? (
+      <Image accessibilityLabel="KYC认证" resizeMode="contain" source={KYC_LOGO} style={styles.serviceLogo} />
+    ) : (
+      <ProxySymbolIcon color={row.grad ? color.white : color.ink} size={26} symbol="spark" />
+    )
   ) : row.icon === "voucher" ? (
     <ProxyIcon color={row.grad ? color.white : color.ink} name="cup" size={26} />
   ) : (
