@@ -25,6 +25,13 @@ import (
 // to their SELECT lists, which made every feed read fail with a scan-count
 // error on any real DB while `go test ./...` stayed green. Every read path
 // below therefore doubles as a column-count tripwire.
+//
+// 5aa88a8 (SCENE-PHOTO-WALL-001, Rev289) then deduplicated three of those scans
+// into the shared scanPostRows and added a fifth post-row SELECT
+// (ListPostsAtScene). SELECT lists are no longer 1:1 with rows.Scan sites, so
+// the count-based pin in scripts/check-regression-contracts.sh had to start
+// counting scan *paths* instead of scan sites — and the photo wall is exercised
+// below because it is the newest SELECT and the one nothing else covers.
 func TestEphemeralPostFeedFilterLifecycle(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
@@ -39,6 +46,10 @@ func TestEphemeralPostFeedFilterLifecycle(t *testing.T) {
 	postPermanent := "post_ghost24h_perm_" + runID
 	postLive := "post_ghost24h_live_" + runID
 	postExpired := "post_ghost24h_expired_" + runID
+	// 场景照片墙（ListPostsAtScene）那一条读路径用的一组。
+	sceneID := "scene_ghost24h_" + runID
+	postSceneLive := "post_ghost24h_scene_live_" + runID
+	postSceneExpired := "post_ghost24h_scene_expired_" + runID
 	handle := "ghost24h" + runID
 
 	liveUntil := time.Now().UTC().Add(time.Hour)
@@ -59,13 +70,32 @@ func TestEphemeralPostFeedFilterLifecycle(t *testing.T) {
 	seed(postLive, "live ephemeral @"+handle, &liveUntil)
 	seed(postExpired, "expired ephemeral @"+handle, &expiredAt)
 
+	// 照片墙要求「带媒体 + context_refs 里标了这个真实场景」，所以单列一个 seed。
+	seedScene := func(id string, ephemeralUntil *time.Time) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO localnet.posts (id, author_type, author_id, author_display_name, body,
+				media_refs, visibility, city_scope, status, context_refs, created_at, ephemeral_until)
+			VALUES ($1, 'USER', $2, $3, $4,
+				'[{"mediaAssetId":"ma_ghost24h","mediaType":"IMAGE","sortOrder":0}]'::jsonb,
+				'PUBLIC', 'hn', 'PUBLISHED',
+				jsonb_build_array(jsonb_build_object('contextType', 'REALITY_SCENE', 'contextId', $5::text)),
+				NOW(), $6)
+			ON CONFLICT (id) DO NOTHING`,
+			id, author, author, "scene wall "+id, sceneID, ephemeralUntil); err != nil {
+			t.Fatalf("seed scene post %s: %v", id, err)
+		}
+	}
+	seedScene(postSceneLive, &liveUntil)
+	seedScene(postSceneExpired, &expiredAt)
+
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		// TEST-HYGIENE-001: exact rows this test created only.
 		_, _ = pool.Exec(cleanupCtx,
-			`DELETE FROM localnet.posts WHERE id IN ($1, $2, $3)`,
-			postPermanent, postLive, postExpired)
+			`DELETE FROM localnet.posts WHERE id IN ($1, $2, $3, $4, $5)`,
+			postPermanent, postLive, postExpired, postSceneLive, postSceneExpired)
 	})
 
 	saw := func(posts []localnet.Post, id string) (bool, *time.Time) {
@@ -139,6 +169,23 @@ func TestEphemeralPostFeedFilterLifecycle(t *testing.T) {
 	}
 	if !got.EphemeralUntil.Equal(liveUntil) {
 		t.Fatalf("GetPost(%s): ephemeralUntil=%v want %v", postLive, got.EphemeralUntil, liveUntil)
+	}
+
+	// 5. ListPostsAtScene（场景照片墙）：5aa88a8 加的第 5 条帖子 SELECT，也走
+	//    scanPostRows。它不被这条测试覆盖时，单独改它自己的列清单（少选或多选
+	//    一列）不会有任何测试变红 —— 而真机上照片墙会整片读不出来，跟当年 feed
+	//    那次是同一个形状。补上第 5 条路径，让列数漂移在任何一条读路径上都当场红。
+	wall, err := repo.ListPostsAtScene(ctx, viewer, sceneID, 51)
+	if err != nil {
+		t.Fatalf("ListPostsAtScene: %v", err)
+	}
+	if gotLive, liveWall := saw(wall, postSceneLive); !gotLive {
+		t.Fatalf("unexpired scene post %s missing from the photo wall — filter over-reached", postSceneLive)
+	} else if liveWall == nil {
+		t.Fatalf("scene post %s lost its ephemeralUntil on read: the column is not selected or not scanned", postSceneLive)
+	}
+	if gotExpired, _ := saw(wall, postSceneExpired); gotExpired {
+		t.Fatalf("expired scene post %s is still on the photo wall", postSceneExpired)
 	}
 
 	var stillThere bool

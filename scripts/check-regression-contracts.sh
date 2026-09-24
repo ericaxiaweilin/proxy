@@ -4784,8 +4784,8 @@ if [ "$feed_predicates" -lt 2 ]; then
   echo "        (found $feed_predicates, want >= 2: feed + mentions)." >&2
   exit 1
 fi
-# 结构性 pin：每一行 SELECT 都必须在列清单里带上 ephemeral_until，数量要和
-# 扫它的 rows.Scan 对齐。
+# 结构性 pin：每一行帖子 SELECT 都必须在列清单里带上 ephemeral_until，且每一条
+# 读它的扫描路径都必须真的扫这一列。
 #
 # 为什么需要这条：给 4 个 rows.Scan 加了 &post.EphemeralUntil、却忘了给其中
 # 3 条 SELECT 的列清单加 ephemeral_until，结果**任何真实数据库上的 feed 读取
@@ -4794,11 +4794,23 @@ fi
 # 才暴露 —— 所以这里用源码结构做个廉价守门。
 #
 # 只对行尾匹配（`ephemeral_until$`）：INSERT 的列清单以 `)` 结尾，不会被算进来。
+#
+# ⚠️ 比的是**扫描路径数**，不是扫描点数。5aa88a8（SCENE-PHOTO-WALL-001，Rev289）
+# 把三条一模一样的 rows.Scan 抽成了共享的 scanPostRows：一条 scan 服务三个
+# SELECT，于是扫描点从 4 掉到 3、SELECT 涨到 5，原先 `scans == selected` 的 1:1
+# 假设当场失效 —— **代码是对的，红的是这条 pin**。（当时 pin 脚本已经因为
+# COMP-SELLER-001 的 gofmt 假红停在 3144 行，所以这条红没人看见；2026-09-24 修。）
+# 现在按路径数：共享扫描器只算一条定义，它的每个调用点各算一条路径。
 scans=$(grep -cF '&post.EphemeralUntil' apps/api-go/internal/platform/postgres/network.go)
 selected=$(grep -cE 'context_refs, created_at, ephemeral_until[[:space:]]*$' apps/api-go/internal/platform/postgres/network.go)
-if [ "$scans" != "$selected" ]; then
+shared_scanner_defs=$(grep -cF 'func scanPostRows(' apps/api-go/internal/platform/postgres/network.go)
+shared_scanner_calls=$(grep -cF 'scanPostRows(rows, limit)' apps/api-go/internal/platform/postgres/network.go)
+scan_paths=$((scans - shared_scanner_defs + shared_scanner_calls))
+if [ "$scan_paths" != "$selected" ]; then
   echo "  FAIL [GHOST-24H-001]: SELECT/scan drift on ephemeral_until —" >&2
-  echo "        $scans rows.Scan destination(s) vs $selected SELECT list(s)." >&2
+  echo "        $selected SELECT list(s) vs $scan_paths scan path(s)" >&2
+  echo "        ($scans rows.Scan destination(s) − $shared_scanner_defs shared scanner" >&2
+  echo "        definition(s) + $shared_scanner_calls call site(s))." >&2
   echo "        A pgx scan-count mismatch fails every feed read on a real DB" >&2
   echo "        while the in-memory tests stay green." >&2
   exit 1
@@ -8917,11 +8929,25 @@ if ! grep -qF 'commandErrorMessage(' apps/mobile/src/experience-runtime/client.t
   echo "  FAIL [SERVICE-DISABLED-MSG-001]: experience-runtime/client still throws the raw messageKey." >&2
   exit 1
 fi
-# 唯一一处**不在 *-client.ts 里**的出口：现实行动的命令被拒时自己 throw。
-# 它下面还有一层 sceneActionErrorMessage() 会把纯机器串兜成「操作失败，请稍后重试」，
-# 所以原本看不到裸码 —— 但接上映射后能说得更准（「服务已暂停」而非泛泛的「操作失败」）。
-if ! grep -qF 'commandErrorMessage(' apps/mobile/src/surfaces/reality-scene-map.tsx; then
-  echo "  FAIL [SERVICE-DISABLED-MSG-001]: reality-scene-map still throws the raw messageKey." >&2
+# 场景域的命令出口：现实行动（打卡 / 收藏 / 去过 / 邀请 / 发机会 / 发活动）被拒时
+# 自己 throw。它上面还有一层 sceneActionErrorMessage() 会把纯机器串兜成
+# 「操作失败，请稍后重试」，所以原本看不到裸码 —— 但接上映射后能说得更准
+# （「服务已暂停」而非泛泛的「操作失败」）。
+#
+# ⚠️ 这个出口 2026-09-24 从 surfaces/reality-scene-map.tsx 搬到了 scene-commands.ts
+# （分类列表/单店详情也要发同一种命令，封包只留一份 —— 抄第二份等于把
+# commandId / idempotencyKey / purpose / 错误分流各留两套）。**钉必须跟着代码走**：
+# 留在旧文件上就是假守卫，因为 reality-scene-map.tsx 已经一条命令都不发了。
+#
+# b52b4a2 那次只重指了 vitest 那条（command-error-message.test.ts 的 wired 列表），
+# 这条 shell 钉没跟着搬 ⇒ 它从那天起一直是红的；而 pin 脚本在第一个红钉就 exit，
+# 于是它把 8935 行之后的**全部**钉一起静音了。又因为同期 COMP-SELLER-001 的 gofmt
+# 假红把脚本更早地卡在 3144 行，这条红连红都没红到人面前。2026-09-24 修。
+if ! grep -qF 'commandErrorMessage(' apps/mobile/src/scene-commands.ts; then
+  echo "  FAIL [SERVICE-DISABLED-MSG-001]: the scene command exit still throws the raw" >&2
+  echo "        messageKey. This exit lives in scene-commands.ts now —" >&2
+  echo "        reality-scene-map.tsx no longer sends commands, so pinning it there" >&2
+  echo "        guards nothing." >&2
   exit 1
 fi
 # ⚠️ 已知未接（2026-09-22），**故意没钉成 FAIL**：

@@ -254,7 +254,14 @@ describe("PLACEHOLDER-002 every chain runs to completion", () => {
     expect(feed).toContain("customFeedTokens");
     expect(feed).toContain("readFeedPrefs");
     expect(feed).toContain("feedWeightFor");
-    expect(feed).toContain("setSearchOpen(true)");
+    // FEED-POST-CLEAN-001：这里原本钉 `setSearchOpen(true)` —— 那个字面量只存在于
+    // 帖子卡底部「按这个想法找同行」按钮的 onPress 里，而那两个按钮按产品要求已
+    // 全部移除（所有帖文一致、保持清爽）。钉的**意图**是「feed 的搜索是真接线的」，
+    // 所以改钉不变量本身：搜索框绑到 state、且有控件能把它打开。
+    // （打开它的入口现在是两个 toggle 按钮，形状从 `(true)` 变成 `(v => !v)`，
+    //   不变量没变 —— 钉形状会在每次合法重构上假红。）
+    expect(feed).toContain("onChangeText={setSearchQuery}");
+    expect(feed).toContain("setSearchOpen(");
   });
 
   it("assistant pills navigate and start failure retries", () => {
