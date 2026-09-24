@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 298 — 2026-09-24
+
+- **KYC 路由瘦身**（KYC-CENTER-REMOVE-001）：Rev297 塞进 KYC认证 的接单中心首页
+  整个移除 —— KYC认证 只留 KYC 本体（三步表单 + 状态 + 审核进度）。
+  删 `kyc-center.tsx` / `kyc-center-styles.ts` / `kyc-center-model.ts` /
+  `kyc-center.test.ts`；`me.tsx` 路由回到 `ProviderApplicationSurface`；
+  表单保留 Step 1 行内错误，去掉无人调用的 `onBack` 返回行。
+- 影响文件：`apps/mobile/src/surfaces/me.tsx`、
+  `apps/mobile/src/surfaces/provider-application.tsx`。
+
 ## Revision 297 — 2026-09-24
 
 - **接单中心**（KYC-CENTER-001）：按新原型（接单中心 · KYC + 履约流程）搭首页 +

@@ -55,7 +55,6 @@ import { BenefitHubSurface } from "./benefit-hub";
 import { BenefitRedeemScreen } from "./BenefitRedeemScreen";
 import { MyStoreRecommendations } from "./my-store-recommendations";
 import { OrderPermissionGate, ProviderApplicationSurface } from "./provider-application";
-import { KycCenterSurface } from "./kyc-center";
 import { type LocalNetClient } from "../localnet-client";
 import {
   parentPostIdsForReplies,
@@ -2832,14 +2831,7 @@ export function MeSurface({
               <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text selectable style={styles.subPageTitle}>KYC认证</Text>
-            <KycCenterSurface
-              avatarUri={profileAvatarUri}
-              displayName={hubProfile.displayName}
-              city={profileDraft.city}
-              mediaClient={mediaClient}
-              onEditProfile={() => openSubPage("personalmanage")}
-              onBack={() => setSubPage(undefined)}
-            />
+            <ProviderApplicationSurface avatarUri={profileAvatarUri} displayName={hubProfile.displayName} mediaClient={mediaClient} onEditProfile={() => openSubPage("personalmanage")} />
           </ScrollView>
         </View>
       );

@@ -27,13 +27,11 @@ type Doc = { mediaAssetId: string; uri: string };
 
 // ORDER-PERMISSION-KYC-003（原型 807348；用户：「把会说的语言也放入了 干什么」）：KYC 只认人 ——
 // 第 1 步只有头像、实名、出生年份、性别（可选）、手机号；城市 / 服务区域 / 语言是接单范围和能力，不在 KYC 里。
-export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName, onEditProfile, onBack }: {
+export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName, onEditProfile }: {
   mediaClient?: MediaClient | undefined;
   avatarUri?: string | undefined;
   displayName?: string | undefined;
   onEditProfile?: (() => void) | undefined;
-  // KYC-CENTER-001：接单中心包着表单时用，回到中心首页。不传就没有返回行。
-  onBack?: (() => void) | undefined;
 }): React.JSX.Element {
   const [view, setView] = useState<ProviderApplicationView>();
   const [loadError, setLoadError] = useState<string>();
@@ -169,7 +167,6 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
 
   return (
     <View style={s.wrap}>
-      {onBack ? <Pressable accessibilityLabel="返回接单中心" onPress={onBack} style={s.backRow}><Text selectable style={s.backText}>‹ 返回接单中心</Text></Pressable> : null}
       {step === "intro" ? <>
         {card ? <View style={s.card}>
           <Text selectable style={s.cardTitle}>{card.title}</Text>
@@ -287,8 +284,6 @@ export function OrderPermissionGate({ children, onApply, onBack }: { children: R
 
 const s = StyleSheet.create({
   gatePage: { gap: 12, paddingBottom: 40, paddingHorizontal: 16, paddingTop: 12 },
-  backRow: { alignSelf: "flex-start", paddingVertical: 4 },
-  backText: { color: color.magenta, fontSize: 13, fontWeight: "800" },
   gateBack: { color: color.magenta, fontSize: 13, fontWeight: "800" },
   gateTitle: { color: color.ink, fontSize: 22, fontWeight: "900" },
   wrap: { gap: 12, paddingBottom: 24 },
