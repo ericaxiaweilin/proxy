@@ -42,8 +42,9 @@ export function commandErrorMessage(error: CommandErrorLike, fallback: string): 
     return "服务已暂停，暂时无法完成此操作（错误码：SERVICE_DISABLED）。";
   }
   // POST-PROFILE-GATE-001：没有用户名 / 头像的账号不能发动态（服务端门禁），告诉用户去哪补。
-  if (code === "PROFILE_INCOMPLETE" || key === "localnet.profile_incomplete") {
-    return "发动态前请先完善头像和用户名（我的 → 个人主页 → 编辑资料）。";
+  // 发帖（localnet）与评论（engagement）同一道门。
+  if (code === "PROFILE_INCOMPLETE" || key === "localnet.profile_incomplete" || key === "engagement.profile_incomplete") {
+    return "发布前请先完善头像和用户名（我的 → 个人主页 → 编辑资料）。";
   }
   // 未映射的码保持 client 原有行为：messageKey ?? errorCode ?? fallback。
   return key ?? code ?? fallback;

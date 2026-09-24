@@ -329,7 +329,7 @@ func main() {
 	authorNames := identityService.AuthorNameResolver()
 	localNetService.SetAuthorNameResolver(authorNames)
 	// POST-PROFILE-GATE-001：真人发帖前必须有用户名 + 平台头像（assets/…），缺什么就拒绝什么。
-	localNetService.SetProfileCompleteness(func(ctx context.Context, userAccountID string) []string {
+	profileCompleteness := func(ctx context.Context, userAccountID string) []string {
 		missing := []string{}
 		if _, ok := authorNames.ResolveAuthorDisplayName(ctx, userAccountID); !ok {
 			missing = append(missing, "name")
@@ -338,7 +338,10 @@ func main() {
 			missing = append(missing, "avatar")
 		}
 		return missing
-	})
+	}
+	localNetService.SetProfileCompleteness(profileCompleteness)
+	// 评论同一道门（POST-PROFILE-GATE-001）。
+	engagementService.SetProfileCompleteness(profileCompleteness)
 	socialSpaceService.SetAuthorNameResolver(authorNames)
 	marketplaceService.SetAuthorNameResolver(authorNames)
 	// FEED-REPLY-001: comments resolve the author name from the profile too —

@@ -377,7 +377,10 @@ fi
 # POST-PROFILE-GATE-001：真人发帖前必须有用户名 + 平台头像；生产必须接线（没接 = 门形同虚设）。
 require_test "POST-PROFILE-GATE-001" "./internal/localnet" "TestCreatePostRequiresACompleteProfile" \
   "apps/api-go/internal/localnet/post_profile_gate_test.go" || exit $?
+require_test "POST-PROFILE-GATE-001" "./internal/engagement" "TestReplyRequiresACompleteProfile" \
+  "apps/api-go/internal/engagement/reply_profile_gate_test.go" || exit $?
 if ! grep -qF 'localNetService.SetProfileCompleteness(' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'engagementService.SetProfileCompleteness(' apps/api-go/cmd/api/main.go ||
    ! grep -qF 'PROFILE_INCOMPLETE' apps/mobile/src/command-error-message.ts; then
   echo "  FAIL [POST-PROFILE-GATE-001]: 发帖资料门没接线 / 客户端没有对应人话。" >&2
   exit 1

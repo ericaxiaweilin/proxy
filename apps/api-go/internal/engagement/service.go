@@ -635,6 +635,9 @@ type Service struct {
 	// authorNames 解析评论作者的展示名（profile 权威）。nil = 未接线，
 	// 保持旧行为（只回 actorId）；生产接线必设（main.go）。
 	authorNames authorNameResolver
+
+	// POST-PROFILE-GATE-001：评论前的资料完整度门。
+	profileCompleteness ProfileCompleteness
 }
 
 // authorNameResolver 是消费侧窄接口，engagement 不需要 import identity。
@@ -657,6 +660,17 @@ func (s *Service) ListPostIDsWithMatchingReply(ctx context.Context, postIDs []st
 		return map[string]bool{}, nil
 	}
 	return s.repository.ListPostIDsWithMatchingReply(ctx, postIDs, loweredQuery)
+}
+
+// POST-PROFILE-GATE-001（评论）：跟发帖同一道门 —— 没有用户名 / 平台头像的账号不能评论，
+// 否则评论里又会出现「用户」+ 首字头像（匿名会话账号绕过注册）。返回缺的项；读失败按缺失处理。
+type ProfileCompleteness func(ctx context.Context, userAccountID string) (missing []string)
+
+// SetProfileCompleteness 接上评论前的资料完整度门。nil = 不检查（单测）；生产在 cmd/api 接线。
+func (s *Service) SetProfileCompleteness(check ProfileCompleteness) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.profileCompleteness = check
 }
 
 func New() *Service {
@@ -932,6 +946,11 @@ func (s *Service) reply(ctx context.Context, e command.Envelope) command.Result 
 	}
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "REPLY_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "engagement.reply_not_allowed", nil)
+	}
+	if s.profileCompleteness != nil {
+		if missing := s.profileCompleteness(ctx, e.Actor.ID); len(missing) > 0 {
+			return command.Rejected(e, "PROFILE_INCOMPLETE", "BUSINESS_STATE", "AFTER_USER_ACTION", "engagement.profile_incomplete", map[string]any{"missing": missing})
+		}
 	}
 	reply := Reply{ID: newID("rep_"), PostID: p.PostID, ActorID: e.Actor.ID, Body: p.Body, CreatedAt: s.clock.Now().UTC()}
 	domainEvents := []event.DomainEvent{event.New("PostReplied", "Post", p.PostID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, reply.CreatedAt, map[string]any{
