@@ -15,7 +15,7 @@ import { type LocalNetClient } from "../localnet-client";
 import { type SecureSessionStore, OfflineFallbackSessionError } from "../secure-session";
 import { type AIAccountClient } from "../ai-account-client";
 import { localApiBaseUrl } from "../native-clients";
-import { resolveAuthorAvatar, type AvatarAccount, type AvatarHumanAccount } from "../media/author-avatar";
+import { resolveAuthorAvatar, type AvatarAccount, type AvatarHumanAccount, initialAvatarTint } from "../media/author-avatar";
 import { mapEngagementError, mapFollowError } from "./feed-error-map";
 import { type EngagementClient } from "../engagement-client";
 import type { ProfileClient } from "../profile-client";
@@ -1452,8 +1452,9 @@ export function FeedSurface({
                     ) : avatar.kind === "image" ? (
                       <CircularAvatarImage accessibilityLabel={`${name}头像`} size={44} source={avatar.source} />
                     ) : (
-                      <View style={styles.postAvatar}>
-                        <Text selectable style={styles.postAvatarText}>{avatar.letter}</Text>
+                      // AVATAR-FALLBACK-TINT-001：没有头像 → 按 id 的柔和底色 + 首字，不再是 #111 黑圆。
+                      <View style={[styles.postAvatar, { backgroundColor: initialAvatarTint(post.authorId).backgroundColor }]}>
+                        <Text selectable style={[styles.postAvatarText, { color: initialAvatarTint(post.authorId).color }]}>{avatar.letter}</Text>
                       </View>
                     )}
                   </View>

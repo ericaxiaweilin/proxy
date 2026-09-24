@@ -538,6 +538,17 @@ export function MeSurface({
     })();
     return () => { cancelled = true; };
   }, [insightsSheetOpen, localNet, engagement]);
+  // PROFILE-VIEWS-HEADER-001（P0，2026-09-24）：个人主页头部「— 次浏览 · 最近 30 天」以前是写死的 —，从没接数据。
+  // 打开个人主页就拉近 30 天主页访问次数（服务端 ListProfileViewStats sinceDays=30）；拉不到仍显示 —，不画 0。
+  const [personalViews30, setPersonalViews30] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (subPage?.route !== "personalhub") return;
+    let cancelled = false;
+    localNet.listProfileViewStats(30)
+      .then((stats) => { if (!cancelled) setPersonalViews30(stats.opens); })
+      .catch(() => { if (!cancelled) setPersonalViews30(undefined); });
+    return () => { cancelled = true; };
+  }, [subPage?.route, localNet]);
   const [searchSheetOpen, setSearchSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   // 搜索浮条定位：顶栏高 46 + 上内边距 7，浮条贴在顶栏下方 8px 处。
@@ -2146,7 +2157,7 @@ export function MeSurface({
               </View>
               <View style={styles.personalStatRow}>
                 <Text selectable style={styles.personalStatText}>
-                  <Text selectable style={styles.personalStatValue}>—</Text> 次浏览 · 最近 30 天 ›
+                  <Text selectable style={styles.personalStatValue}>{dash(personalViews30)}</Text> 次浏览 · 最近 30 天 ›
                 </Text>
                 {/* FOLLOWER-FACES-001: 以前这里是三个写死的字母头像（M/A/L），不管谁
                     关注都长一个样 —— 数字是真的，脸是假的。最近关注者列表接口还没

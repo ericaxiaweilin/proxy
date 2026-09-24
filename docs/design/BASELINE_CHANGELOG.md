@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 275 — 2026-09-24
+
+- **P0：动态「黑头」头像 + 个人主页互动空白**（AVATAR-FALLBACK-TINT-001 / AVATAR-AGENT-ALIAS-001 / PROFILE-ENGAGEMENT-WIRE-001 / PROFILE-VIEWS-HEADER-001）：
+  用户：「动态页面 帖文 很多真人用户头像是黑头 并且我的个人主页里 没有任何互动的信息 空白的」。
+  - 没头像的作者以前一律画成 #111 纯黑圆 + 白字，一屏好几个像图坏了 → 按 id 稳定取柔和底色 + 深色首字（`initialAvatarTint`）；
+    个人主页头像 / 帖子头像的兜底同样改为浅紫底。
+  - 服务者身份（agent_linh，8 条帖）没有自己的资料 → GetProfile 按 supply.agent_profiles.user_account_id 读本人资料，显示本人头像。
+  - 「我的」页一直没拿到 engagement（app-shell 漏传）→ 个人主页帖子没有 ♡ 喜欢、赞数、评论，关注者显示 —；补上后显示真实互动。
+  - 个人主页「次浏览 · 最近 30 天」以前写死 — → 拉真实的近 30 天主页访问（ListProfileViewStats sinceDays=30）。
+- 影响文件：`apps/mobile/src/surfaces/feed.tsx`、`apps/mobile/src/surfaces/me.tsx`、`apps/mobile/src/surfaces/me-styles.ts`、`apps/mobile/src/shell/app-shell.tsx`。
+
 ## Revision 274 — 2026-09-24
 
 - **个人主页帖子显示收到的互动**（PROFILE-REPLIES-VISIBLE-001）：feed 里能看到

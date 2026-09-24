@@ -129,3 +129,21 @@ export function resolveAuthorAvatar(author: AvatarAuthor, opts: AuthorAvatarOpti
   const letter = (opts.displayName.trim().charAt(0) || "?").toUpperCase();
   return { kind: "initial", letter };
 }
+
+// AVATAR-FALLBACK-TINT-001（2026-09-24，用户：「动态页面 帖文 很多真人用户头像是黑头」）：没有头像的人以前一律画成
+// #111 纯黑圆 + 白字 —— 一屏好几个黑圆，看起来像图片坏了。改成按 id 稳定取一个柔和底色（同一个人永远同一个颜色），
+// 字用深色。这是「没有头像」的兜底，不是假头像。
+const INITIAL_TINTS: ReadonlyArray<{ backgroundColor: string; color: string }> = [
+  { backgroundColor: "#EDE4FF", color: "#5B3FB8" },
+  { backgroundColor: "#FFE6DA", color: "#A4502A" },
+  { backgroundColor: "#DDF3E8", color: "#2E7A55" },
+  { backgroundColor: "#DDEBFF", color: "#2F5E9E" },
+  { backgroundColor: "#FFF1CC", color: "#8A6512" },
+  { backgroundColor: "#FFE0EA", color: "#A8385E" },
+];
+
+export function initialAvatarTint(seed: string): { backgroundColor: string; color: string } {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return INITIAL_TINTS[hash % INITIAL_TINTS.length]!;
+}

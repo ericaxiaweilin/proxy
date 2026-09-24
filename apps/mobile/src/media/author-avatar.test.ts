@@ -220,3 +220,14 @@ describe("AVATAR-OTHER-HUMAN-002 a real human author with a server-side avatar g
     expect(avatar).toEqual({ kind: "initial", letter: "W" });
   });
 });
+
+// AVATAR-FALLBACK-TINT-001：没头像的人不再是 #111 黑圆 —— 按 id 稳定取柔和底色，同一个人永远同一个颜色。
+describe("initial avatar tint", () => {
+  it("is stable per id, varies across ids and is never black", async () => {
+    const { initialAvatarTint } = await import("./author-avatar");
+    expect(initialAvatarTint("user_abc")).toEqual(initialAvatarTint("user_abc"));
+    const colors = new Set(["user_a", "user_b", "user_c", "user_d", "user_e", "user_f", "user_g", "user_h"].map((id) => initialAvatarTint(id).backgroundColor));
+    expect(colors.size).toBeGreaterThan(2);
+    for (const c of colors) expect(c.toLowerCase()).not.toMatch(/^#(111|111111|000|000000)$/);
+  });
+});

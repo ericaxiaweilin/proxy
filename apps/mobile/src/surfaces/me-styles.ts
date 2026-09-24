@@ -885,8 +885,8 @@ export const styles = StyleSheet.create({
   personalName: { color: color.ink, fontSize: 24, fontWeight: "800", letterSpacing: -0.96, lineHeight: 28 },
   personalHandleSub: { color: "#444", fontSize: 11, marginTop: 4 },
   personalAvaWrap: { position: "relative", width: 82, height: 82, justifyContent: "flex-end" },
-  personalAva: { width: 82, height: 82, borderRadius: 41, backgroundColor: "#111", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1, borderColor: "#ececec" },
-  personalAvaLetter: { color: color.white, fontSize: 27, fontWeight: "800" },
+  personalAva: { width: 82, height: 82, borderRadius: 41, backgroundColor: "#EDE4FF", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1, borderColor: "#ececec" },
+  personalAvaLetter: { color: "#5B3FB8", fontSize: 27, fontWeight: "800" },
   personalAvaAdd: {
     position: "absolute", left: -6, bottom: -2, width: 32, height: 32, borderRadius: 16,
     borderWidth: 3, borderColor: "#fff", backgroundColor: "#fff",
@@ -922,7 +922,8 @@ export const styles = StyleSheet.create({
   personalTabTextActive: { color: color.ink, fontWeight: "700" },
   personalPost: { borderBottomColor: "#E8E8E8", borderBottomWidth: 1, paddingBottom: 14, paddingHorizontal: 18, paddingTop: 16 },
   personalPostHead: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
-  personalPostAvatar: { alignItems: "center", backgroundColor: "#111", borderRadius: 19, color: color.white, fontSize: 14, fontWeight: "700", height: 38, justifyContent: "center", overflow: "hidden", width: 38 },
+  // AVATAR-FALLBACK-TINT-001：没头像时不画黑圆（看起来像图坏了），用浅紫底 + 深色字。
+  personalPostAvatar: { alignItems: "center", backgroundColor: "#EDE4FF", borderRadius: 19, color: "#5B3FB8", fontSize: 14, fontWeight: "700", height: 38, justifyContent: "center", overflow: "hidden", width: 38 },
   personalPostAvatarText: { color: color.white, fontSize: 14, fontWeight: "700" },
   personalPostAvatarImage: { borderRadius: 19, height: 38, width: 38 },
   personalPostBody: { flex: 1, marginTop: -12, paddingLeft: 48 },

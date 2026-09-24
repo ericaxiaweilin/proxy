@@ -260,6 +260,17 @@ func main() {
 		supplyService.SetSellerIdentityLookup(postgres.NewSellerRealNameRepository(pool))
 		// MATCH-RANK-001: 撮合排序读真实履约 / 需求方评价 / 引力响应（不读任何曝光数据）。
 		supplyService.SetRankingSignals(matching.NewPostgres(pool))
+		// AVATAR-AGENT-ALIAS-001: 服务者身份发的帖用本人资料（头像 / 名字），不再是黑色首字头像。
+		identityService.SetProfileAlias(func(ctx context.Context, id string) (string, bool) {
+			if !strings.HasPrefix(id, "agent_") {
+				return "", false
+			}
+			var linked string
+			if err := pool.QueryRow(ctx, `SELECT COALESCE(user_account_id, '') FROM supply.agent_profiles WHERE agent_id = $1`, id).Scan(&linked); err != nil || linked == "" {
+				return "", false
+			}
+			return linked, true
+		})
 		mediaService = media.NewWithReviewDecisionRepository(
 			postgres.NewMediaRepository(pool),
 			postgres.NewMediaReviewDecisionRepository(pool),

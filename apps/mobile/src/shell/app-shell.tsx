@@ -996,6 +996,10 @@ export function AppShell({
               key={viewerAccountId ?? "pending-account"}
               context={context}
               localNet={localNet}
+              // PROFILE-ENGAGEMENT-WIRE-001（P0，2026-09-24，用户：「我的个人主页里 没有任何互动的信息 空白的」）：
+              // MeSurface 一直没拿到 engagement —— 个人主页帖子没有 ♡ 喜欢、没有赞数 / 评论（PROFILE-REPLIES-VISIBLE-001
+              // 的注水因此从不执行），主页洞察读不出来显示「—」。其他 surface 都传了，只漏了这里。
+              engagement={engagement}
               fulfillment={fulfillment}
               business={business}
               supply={supply}
