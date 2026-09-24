@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 300 — 2026-09-24
+
+- **KYC 去性别**（KYC-UI-CLEAN-002）：正常 KYC 不采性别，表单删掉性别 chips，
+  提交永远发空（后端字段保留兼容，允许空、无任何判断参与）。
+- 影响文件：`apps/mobile/src/surfaces/provider-application.tsx`。
+
 ## Revision 299 — 2026-09-24
 
 - **KYC 表单清爽化**（KYC-UI-CLEAN-001）：开始填写前不再文字拉满 —— 深色 hero

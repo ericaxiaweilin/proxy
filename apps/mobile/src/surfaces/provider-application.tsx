@@ -10,7 +10,7 @@ import { ProxyLoading } from "../components/proxy-foundation";
 import { ProxyIcon } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import {
-  GENDER_OPTIONS, fetchProviderApplication, kycPipeline, providerApplicationErrorText,
+  fetchProviderApplication, kycPipeline, providerApplicationErrorText,
   providerApplicationStatusCard, submitProviderApplication, withdrawProviderApplication,
   type ProviderApplicationInput, type ProviderApplicationView,
 } from "../provider-application-client";
@@ -42,7 +42,8 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
   const [error, setError] = useState<string>();
   const [realName, setRealName] = useState("");
   const [birthYear, setBirthYear] = useState("");
-  const [gender, setGender] = useState<ProviderApplicationInput["gender"]>("");
+  // KYC-UI-CLEAN-002（用户：「正常的 kyc 到底验证性别出生吗」）：正常 KYC 不采性别 ——
+  // 性别不参与实名比对。后端 gender 字段保留兼容但不再收，这里永远发空。
   const [phone, setPhone] = useState("");
   const [idType, setIdType] = useState<"CCCD" | "PASSPORT">("CCCD");
   const [docs, setDocs] = useState<Partial<Record<DocSlot, Doc>>>({});
@@ -104,7 +105,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
     setError(undefined);
     try {
       setView(await submitProviderApplication(sessionAuthClient, {
-        realName, birthYear: Number.parseInt(birthYear, 10) || 0, gender, phone,
+        realName, birthYear: Number.parseInt(birthYear, 10) || 0, gender: "", phone,
         idType, idFrontAsset: docs.front?.mediaAssetId ?? "", idBackAsset: idType === "CCCD" ? docs.back?.mediaAssetId ?? "" : "",
         selfieAsset: docs.selfie?.mediaAssetId ?? "", noCrimeDeclared: noCrime, dataConsent, emergencyContact: emergency,
         termsVersion: view.terms.version, termsAccepted: accepted,
@@ -240,8 +241,6 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
         <Text selectable style={s.label}>出生年份 *</Text>
         <TextInput accessibilityLabel="出生年份" keyboardType="number-pad" maxLength={4} onChangeText={(v) => { setBirthYear(v); setBasicErrors((p) => { const next = { ...p }; delete next.birthYear; return next; }); }} placeholder="例如 1998" placeholderTextColor={color.muted} style={[s.input, basicErrors.birthYear ? s.inputError : null]} value={birthYear} />
         {basicErrors.birthYear ? <Text selectable style={s.fieldError}>{basicErrors.birthYear}</Text> : null}
-        <Text selectable style={s.label}>性别（可不填，不影响审核）</Text>
-        <View style={s.chips}>{GENDER_OPTIONS.map((option) => <Pressable accessibilityLabel={`性别 ${option.label}${gender === option.code ? "，已选" : ""}`} key={option.label} onPress={() => setGender(option.code)} style={[s.chip, gender === option.code && s.chipOn]}><Text selectable style={[s.chipText, gender === option.code && s.chipTextOn]}>{option.label}</Text></Pressable>)}</View>
         <Text selectable style={s.label}>手机号 *</Text>
         <TextInput accessibilityLabel="手机号" keyboardType="phone-pad" onChangeText={(v) => { setPhone(v); setBasicErrors((p) => { const next = { ...p }; delete next.phone; return next; }); }} placeholder="09xx xxx xxx" placeholderTextColor={color.muted} style={[s.input, basicErrors.phone ? s.inputError : null]} value={phone} />
         {basicErrors.phone ? <Text selectable style={s.fieldError}>{basicErrors.phone}</Text> : null}
