@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/proxy-app/proxy-api/internal/providerapp"
@@ -58,13 +60,16 @@ func (s *Server) routeProviderApplication(w http.ResponseWriter, r *http.Request
 		writeProviderAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"application": providerapp.ForApplicant(app),
 		"options": map[string]any{
-			"serviceAreas": providerapp.AllowedAreas, "languages": providerapp.AllowedLanguages,
-			"capabilities": providerapp.AllowedCapabilities, "minPhotos": providerapp.MinPhotos, "maxPhotos": providerapp.MaxPhotos,
+			"serviceAreas": providerapp.AllowedAreas, "languages": providerapp.AllowedLanguages, "minAge": providerapp.MinAge,
 		},
-	})
+	}
+	if terms, err := ProviderTermsLoader()(); err == nil {
+		body["terms"] = terms
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func writeProviderAppError(w http.ResponseWriter, err error) {
@@ -127,4 +132,50 @@ func (s *Server) operatorProviderApplicationReview(w http.ResponseWriter, r *htt
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"application": app})
+}
+
+// ProviderTermsLoader：履约条款文件（PROVIDER_TERMS_DIR 可覆盖，默认仓库里的 config/provider-terms）。
+func ProviderTermsLoader() func() (providerapp.Terms, error) {
+	return func() (providerapp.Terms, error) {
+		dir := strings.TrimSpace(os.Getenv("PROVIDER_TERMS_DIR"))
+		if dir == "" {
+			dir = resolveRepoDir("config/provider-terms")
+		}
+		return providerapp.LoadTerms(filepath.Join(dir, "terms.json"))
+	}
+}
+
+// operatorProviderApplicationMedia：运营看申请里的证件 / 自拍（OWNER_ONLY，公开的 /v1/media/thumb 不给）。
+// 只放行这份申请自己引用的图，按申请人本人的图读（media.OwnerImagePath）。
+//
+//	GET /v1/operator/provider-applications/media?applicationId=…&asset=…
+func (s *Server) operatorProviderApplicationMedia(w http.ResponseWriter, r *http.Request) {
+	if s.ProviderApps == nil || s.Media == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "provider_application_unavailable"})
+		return
+	}
+	appID, assetID := r.URL.Query().Get("applicationId"), r.URL.Query().Get("asset")
+	app, err := s.ProviderApps.Get(r.Context(), appID)
+	if err != nil || app == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	}
+	allowed := false
+	for _, id := range app.Documents() {
+		if id == assetID {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	}
+	path, err := s.Media.OwnerImagePath(r.Context(), app.UserAccountID, assetID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_not_available"})
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	http.ServeFile(w, r, path)
 }

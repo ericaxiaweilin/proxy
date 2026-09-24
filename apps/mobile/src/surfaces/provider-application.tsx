@@ -7,30 +7,42 @@ import { sessionAuthClient } from "../native-clients";
 import type { MediaClient } from "../media-client";
 import { ProxyLoading } from "../components/proxy-foundation";
 import {
-  AREA_LABELS, CAPABILITY_LABELS, LANGUAGE_LABELS, fetchProviderApplication, providerApplicationErrorText,
+  AREA_LABELS, GENDER_OPTIONS, LANGUAGE_LABELS, fetchProviderApplication, providerApplicationErrorText,
   providerApplicationStatusCard, submitProviderApplication, withdrawProviderApplication,
-  type ProviderApplicationView,
+  type ProviderApplicationInput, type ProviderApplicationView,
 } from "../provider-application-client";
 
-// ORDER-PERMISSION-001：「申请接单权限」（任何人可申请，性别不是门槛）。本人填表 → 运营控制台审核 → 通过才开服务者身份。
-// 照片必须是本人上传的真实照片（服务端核验：本人上传、图片、非 AI 生成）。实名只给运营看。
+// ORDER-PERMISSION-KYC-001（原型 deepseek_html_20260924_33987c「接单中心 · KYC + 履约管线」）：
+// 开始前 → 1 基础信息 → 2 证件 + 手持证件自拍 + 声明 → 3 履约条款 → 提交 → 运营人工审核。
+// 任何人都能申请，性别是可选自述、不参与任何判断。
+// 与原型的差异（都是为了不说假话）：
+//   - 没有「Face ID 扫脸 / 真人比对通过」：Face ID 只能证明是手机主人，不能和证件比对 —— 改为手持证件自拍，运营人工比对；
+//   - 没有「获取验证码」：开发环境短信通道没接（sms=false），手机号如实记为「未验证」，运营电话核实；
+//   - 不写「24 小时内出结果 / 自动比对」：审核是人工的，没有时效承诺。
 
-type Photo = { mediaAssetId: string; uri: string };
+type Step = "intro" | "basic" | "documents" | "terms";
+type DocSlot = "front" | "back" | "selfie";
+type Doc = { mediaAssetId: string; uri: string };
 
 export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: MediaClient | undefined }): React.JSX.Element {
   const [view, setView] = useState<ProviderApplicationView>();
   const [loadError, setLoadError] = useState<string>();
-  const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState<"submit" | "withdraw" | "photo">();
+  const [step, setStep] = useState<Step>("intro");
+  const [busy, setBusy] = useState<"submit" | "withdraw" | DocSlot>();
   const [error, setError] = useState<string>();
   const [realName, setRealName] = useState("");
+  const [birthYear, setBirthYear] = useState("");
+  const [gender, setGender] = useState<ProviderApplicationInput["gender"]>("");
+  const [phone, setPhone] = useState("");
   const [city, setCity] = useState("河内");
   const [areas, setAreas] = useState<string[]>(["hn"]);
   const [languages, setLanguages] = useState<string[]>([]);
-  const [capabilities, setCapabilities] = useState<string[]>([]);
-  const [intro, setIntro] = useState("");
-  const [photos, setPhotos] = useState<Photo[]>([]);
-  const [attested, setAttested] = useState(false);
+  const [idType, setIdType] = useState<"CCCD" | "PASSPORT">("CCCD");
+  const [docs, setDocs] = useState<Partial<Record<DocSlot, Doc>>>({});
+  const [noCrime, setNoCrime] = useState(false);
+  const [dataConsent, setDataConsent] = useState(false);
+  const [emergency, setEmergency] = useState("");
+  const [accepted, setAccepted] = useState<string[]>([]);
 
   const load = useCallback(() => {
     setLoadError(undefined);
@@ -44,35 +56,36 @@ export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: Medi
     set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   };
 
-  const addPhotos = async (): Promise<void> => {
-    if (!mediaClient || !view) return;
-    const room = view.options.maxPhotos - photos.length;
-    if (room <= 0) return;
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85, allowsMultipleSelection: true, selectionLimit: room });
-    if (result.canceled) return;
-    setBusy("photo");
+  // 证件 / 自拍上传后保持 OWNER_ONLY（不挂到任何帖子），只有运营控制台能看。
+  const pickDoc = async (slot: DocSlot): Promise<void> => {
+    if (!mediaClient) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.9, selectionLimit: 1 });
+    const asset = result.assets?.[0];
+    if (result.canceled || !asset) return;
+    setBusy(slot);
     setError(undefined);
     try {
-      for (const asset of result.assets.slice(0, room)) {
-        const uploaded = await mediaClient.uploadImage({ uri: asset.uri, mimeType: asset.mimeType ?? "image/jpeg", width: asset.width, height: asset.height });
-        setPhotos((current) => [...current, { mediaAssetId: uploaded.mediaAssetId, uri: asset.uri }]);
-      }
+      const uploaded = await mediaClient.uploadImage({ uri: asset.uri, mimeType: asset.mimeType ?? "image/jpeg", width: asset.width, height: asset.height });
+      setDocs((current) => ({ ...current, [slot]: { mediaAssetId: uploaded.mediaAssetId, uri: asset.uri } }));
     } catch {
-      setError("照片上传失败，已上传的保留，可以再试。");
+      setError("上传失败，请重试。");
     } finally {
       setBusy(undefined);
     }
   };
 
   const submit = async (): Promise<void> => {
+    if (!view?.terms) return;
     setBusy("submit");
     setError(undefined);
     try {
       setView(await submitProviderApplication(sessionAuthClient, {
-        realName, photosAttested: attested, city, serviceAreas: areas, languages, capabilities, intro,
-        photoAssetIds: photos.map((p) => p.mediaAssetId),
+        realName, birthYear: Number.parseInt(birthYear, 10) || 0, gender, phone, city, serviceAreas: areas, languages,
+        idType, idFrontAsset: docs.front?.mediaAssetId ?? "", idBackAsset: idType === "CCCD" ? docs.back?.mediaAssetId ?? "" : "",
+        selfieAsset: docs.selfie?.mediaAssetId ?? "", noCrimeDeclared: noCrime, dataConsent, emergencyContact: emergency,
+        termsVersion: view.terms.version, termsAccepted: accepted,
       }));
-      setEditing(false);
+      setStep("intro");
     } catch (e) {
       setError(providerApplicationErrorText(e));
     } finally {
@@ -96,92 +109,153 @@ export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: Medi
   if (!view) return <ProxyLoading label="正在读取申请状态" tone="muted" />;
 
   const card = providerApplicationStatusCard(view.application);
-  const showForm = !card || editing;
   const chips = (codes: string[], labels: Readonly<Record<string, string>>, selected: string[], set: (next: string[]) => void) => (
     <View style={s.chips}>{codes.map((code) => {
       const on = selected.includes(code);
       return <Pressable accessibilityLabel={`${labels[code] ?? code}${on ? "，已选" : ""}`} key={code} onPress={() => toggle(selected, set, code)} style={[s.chip, on && s.chipOn]}><Text selectable style={[s.chipText, on && s.chipTextOn]}>{labels[code] ?? code}</Text></Pressable>;
     })}</View>
   );
+  const check = (on: boolean, set: (v: boolean) => void, title: string, body?: string, note?: string) => (
+    <Pressable accessibilityLabel={`${title}${on ? "，已勾选" : ""}`} key={title} onPress={() => set(!on)} style={s.check}>
+      <View style={[s.box, on && s.boxOn]}>{on ? <Text selectable style={s.boxTick}>✓</Text> : null}</View>
+      <View style={s.checkCopy}>
+        <Text selectable style={s.checkTitle}>{title}</Text>
+        {body ? <Text selectable style={s.muted}>{body}</Text> : null}
+        {note ? <Text selectable style={s.note}>{note}</Text> : null}
+      </View>
+    </Pressable>
+  );
+  const docTile = (slot: DocSlot, label: string, hint: string) => {
+    const doc = docs[slot];
+    return <Pressable accessibilityLabel={`${label}${doc ? "，已上传" : ""}`} disabled={!mediaClient || busy !== undefined} key={slot} onPress={() => { void pickDoc(slot); }} style={s.doc}>
+      {doc ? <Image contentFit="cover" source={{ uri: doc.uri }} style={s.docImage} /> : null}
+      <View style={doc ? s.docLabelOn : s.docLabel}>
+        <Text selectable style={[s.docTitle, doc && s.docTitleOn]}>{busy === slot ? "上传中…" : doc ? `${label} · 已上传` : label}</Text>
+        {!doc ? <Text selectable style={s.muted}>{hint}</Text> : null}
+      </View>
+    </Pressable>;
+  };
+  const stepHead = (n: number, title: string, lead: string) => (
+    <View style={s.stepHead}>
+      <Text selectable style={s.stepNo}>{`${n} / 3`}</Text>
+      <Text selectable style={s.cardTitle}>{title}</Text>
+      <Text selectable style={s.muted}>{lead}</Text>
+    </View>
+  );
+  const nav = (back: Step, next: () => void, nextLabel: string) => (
+    <View style={s.navRow}>
+      <Pressable onPress={() => { setError(undefined); setStep(back); }} style={[s.secondary, s.navBack]}><Text selectable style={s.secondaryText}>上一步</Text></Pressable>
+      <Pressable accessibilityLabel={nextLabel} disabled={busy !== undefined} onPress={next} style={[s.primary, s.navNext, busy !== undefined && s.busy]}><Text selectable style={s.primaryText}>{nextLabel}</Text></Pressable>
+    </View>
+  );
 
   return (
     <View style={s.wrap}>
-      <Text selectable style={s.lead}>接单需要实名和本人真实照片。提交后由运营审核，通过后开放接单。</Text>
-      {card ? <View style={s.card}>
-        <Text selectable style={s.cardTitle}>{card.title}</Text>
-        <Text selectable style={s.muted}>{card.detail}</Text>
-        {card.canWithdraw ? <Pressable disabled={busy !== undefined} onPress={() => { void withdraw(); }} style={s.secondary}><Text selectable style={s.secondaryText}>{busy === "withdraw" ? "撤回中…" : "撤回申请"}</Text></Pressable> : null}
-        {card.canReapply && !editing ? <Pressable onPress={() => setEditing(true)} style={s.primary}><Text selectable style={s.primaryText}>修改后重新申请</Text></Pressable> : null}
+      {step === "intro" ? <>
+        {card ? <View style={s.card}>
+          <Text selectable style={s.cardTitle}>{card.title}</Text>
+          <Text selectable style={s.muted}>{card.detail}</Text>
+          {card.canWithdraw ? <Pressable disabled={busy !== undefined} onPress={() => { void withdraw(); }} style={s.secondary}><Text selectable style={s.secondaryText}>{busy === "withdraw" ? "撤回中…" : "撤回申请"}</Text></Pressable> : null}
+          {card.canReapply ? <Pressable onPress={() => setStep("basic")} style={s.primary}><Text selectable style={s.primaryText}>修改后重新提交</Text></Pressable> : null}
+        </View> : <View style={s.card}>
+          <Text selectable style={s.kicker}>开始前</Text>
+          <Text selectable style={s.cardTitle}>KYC · 3 步走完</Text>
+          <Text selectable style={s.muted}>基础信息 → 证件 + 手持证件自拍 → 履约条款。任何人都可以申请接单，性别不影响审核。</Text>
+          <Text selectable style={s.bullet}>· 实名、出生年份（需年满 18 岁）、手机号</Text>
+          <Text selectable style={s.bullet}>· 身份证（正反面）或护照 + 一张手持证件的自拍，运营人工比对</Text>
+          <Text selectable style={s.bullet}>· 审核由运营人工完成，结果显示在这里；不通过可以修改后重新提交</Text>
+          <Text selectable style={s.fine}>提交的资料只用于 KYC 审核，不会公开给客户。</Text>
+          <Pressable accessibilityLabel="开始填写" onPress={() => setStep("basic")} style={s.primary}><Text selectable style={s.primaryText}>开始填写</Text></Pressable>
+        </View>}
+      </> : null}
+
+      {step === "basic" ? <View style={s.card}>
+        {stepHead(1, "先填基础信息", "用于实名比对。头像用你主页的头像（在「个人管理」里改）。")}
+        <Text selectable style={s.label}>真实姓名 *</Text>
+        <TextInput accessibilityLabel="真实姓名" onChangeText={setRealName} placeholder="与证件一致" placeholderTextColor={color.muted} style={s.input} value={realName} />
+        <Text selectable style={s.label}>出生年份 *</Text>
+        <TextInput accessibilityLabel="出生年份" keyboardType="number-pad" maxLength={4} onChangeText={setBirthYear} placeholder="例如 1998" placeholderTextColor={color.muted} style={s.input} value={birthYear} />
+        <Text selectable style={s.label}>性别（可不填，不影响审核）</Text>
+        <View style={s.chips}>{GENDER_OPTIONS.map((option) => <Pressable accessibilityLabel={`性别 ${option.label}${gender === option.code ? "，已选" : ""}`} key={option.label} onPress={() => setGender(option.code)} style={[s.chip, gender === option.code && s.chipOn]}><Text selectable style={[s.chipText, gender === option.code && s.chipTextOn]}>{option.label}</Text></Pressable>)}</View>
+        <Text selectable style={s.label}>手机号 *</Text>
+        <TextInput accessibilityLabel="手机号" keyboardType="phone-pad" onChangeText={setPhone} placeholder="09xx xxx xxx" placeholderTextColor={color.muted} style={s.input} value={phone} />
+        <Text selectable style={s.note}>短信验证码暂未接入：手机号会标为「未验证」，运营审核时电话核实。</Text>
+        <Text selectable style={s.label}>所在城市 *</Text>
+        <TextInput accessibilityLabel="所在城市" onChangeText={setCity} style={s.input} value={city} />
+        <Text selectable style={s.label}>服务区域 *</Text>
+        {chips(view.options.serviceAreas, AREA_LABELS, areas, setAreas)}
+        <Text selectable style={s.label}>会说的语言 *</Text>
+        {chips(view.options.languages, LANGUAGE_LABELS, languages, setLanguages)}
+        {nav("intro", () => { setError(undefined); setStep("documents"); }, "下一步 · 证件认证")}
       </View> : null}
 
-      {showForm ? <View style={s.card}>
-        <Text selectable style={s.label}>真实姓名（只给运营看）</Text>
-        <TextInput accessibilityLabel="真实姓名" onChangeText={setRealName} placeholder="与证件一致" placeholderTextColor={color.muted} style={s.input} value={realName} />
-        <Text selectable style={s.label}>所在城市</Text>
-        <TextInput accessibilityLabel="所在城市" onChangeText={setCity} style={s.input} value={city} />
-        <Text selectable style={s.label}>服务区域</Text>
-        {chips(view.options.serviceAreas, AREA_LABELS, areas, setAreas)}
-        <Text selectable style={s.label}>会说的语言</Text>
-        {chips(view.options.languages, LANGUAGE_LABELS, languages, setLanguages)}
-        <Text selectable style={s.label}>能力（可不选）</Text>
-        {chips(view.options.capabilities, CAPABILITY_LABELS, capabilities, setCapabilities)}
-        <Text selectable style={s.label}>自我介绍</Text>
-        <TextInput accessibilityLabel="自我介绍" multiline onChangeText={setIntro} placeholder="你是谁、擅长带人去哪、适合什么样的约" placeholderTextColor={color.muted} style={[s.input, s.multiline]} value={intro} />
-        <Text selectable style={s.label}>{`本人照片（${photos.length}/${view.options.maxPhotos}，至少 ${view.options.minPhotos} 张，不能用 AI 生成的图）`}</Text>
-        <View style={s.photos}>
-          {photos.map((photo) => <Pressable accessibilityLabel="移除这张照片" key={photo.mediaAssetId} onPress={() => setPhotos((current) => current.filter((p) => p.mediaAssetId !== photo.mediaAssetId))} style={s.photo}>
-            <Image contentFit="cover" source={{ uri: photo.uri }} style={s.photoImage} />
-            <Text selectable style={s.photoX}>×</Text>
-          </Pressable>)}
-          {photos.length < view.options.maxPhotos ? <Pressable accessibilityLabel="添加本人照片" disabled={!mediaClient || busy !== undefined} onPress={() => { void addPhotos(); }} style={[s.photo, s.photoAdd]}>
-            <Text selectable style={s.photoAddText}>{busy === "photo" ? "上传中" : "＋"}</Text>
-          </Pressable> : null}
-        </View>
-        <Pressable accessibilityLabel={`我确认照片均为本人真实照片${attested ? "，已勾选" : ""}`} onPress={() => setAttested(!attested)} style={s.attest}>
-          <View style={[s.box, attested && s.boxOn]}>{attested ? <Text selectable style={s.boxTick}>✓</Text> : null}</View>
-          <Text selectable style={s.attestText}>我确认照片均为本人真实照片（不是别人的，也不是 AI 生成的）</Text>
-        </Pressable>
-        <Pressable accessibilityLabel="提交申请" disabled={busy !== undefined} onPress={() => { void submit(); }} style={[s.primary, busy !== undefined && s.busy]}>
-          <Text selectable style={s.primaryText}>{busy === "submit" ? "提交中…" : "提交申请"}</Text>
-        </Pressable>
+      {step === "documents" ? <View style={s.card}>
+        {stepHead(2, "证件认证", "上传身份证或护照，再拍一张手持证件的自拍。运营会把自拍、证件和你的头像放在一起人工比对。资料只用于 KYC 审核。")}
+        <View style={s.chips}>{(["CCCD", "PASSPORT"] as const).map((type) => <Pressable accessibilityLabel={`${type === "CCCD" ? "身份证" : "护照"}${idType === type ? "，已选" : ""}`} key={type} onPress={() => setIdType(type)} style={[s.chip, idType === type && s.chipOn]}><Text selectable style={[s.chipText, idType === type && s.chipTextOn]}>{type === "CCCD" ? "身份证 CCCD" : "护照"}</Text></Pressable>)}</View>
+        {docTile("front", "证件正面", "四角清晰、不反光")}
+        {idType === "CCCD" ? docTile("back", "证件反面", "四角清晰、不反光") : null}
+        {docTile("selfie", "手持证件自拍", "脸和证件都要拍清楚，别用滤镜")}
+        {check(noCrime, setNoCrime, "无犯罪声明", "我承诺无犯罪记录，若违反将立即冻结并配合调查。此声明将电子留档。")}
+        {check(dataConsent, setDataConsent, "同意 KYC 数据使用", "同意平台按《隐私政策》使用证件信息进行实名比对。")}
+        {nav("basic", () => { setError(undefined); setStep("terms"); }, "下一步 · 履约条款")}
+      </View> : null}
+
+      {step === "terms" ? <View style={s.card}>
+        {stepHead(3, "接受条款，正式接单", "这几条是接单身份的底线。接单后可以随时暂停接单。")}
+        <Text selectable style={s.label}>紧急联系人 *（不对客户公开）</Text>
+        <TextInput accessibilityLabel="紧急联系人" onChangeText={setEmergency} placeholder="姓名 + 电话" placeholderTextColor={color.muted} style={s.input} value={emergency} />
+        {view.terms ? view.terms.items.map((item) => check(
+          accepted.includes(item.id),
+          () => toggle(accepted, setAccepted, item.id),
+          item.title,
+          item.body,
+          item.enforced ? undefined : "这条规则的执行机制还没上线，上线后按此生效。",
+        )) : <Text selectable style={s.error}>履约条款暂时读不到，稍后再试。</Text>}
+        {nav("documents", () => { void submit(); }, busy === "submit" ? "提交中…" : "提交 KYC 审核")}
       </View> : null}
 
       {error ? <Text selectable style={s.error}>{error}</Text> : null}
-      <Text selectable style={s.fine}>照片仅用于审核与服务者主页展示</Text>
     </View>
   );
 }
 
 const s = StyleSheet.create({
   wrap: { gap: 12, paddingBottom: 24 },
-  lead: { color: color.muted, fontSize: 12.5, fontWeight: "700", lineHeight: 19 },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 8, padding: 14 },
-  cardTitle: { color: color.ink, fontSize: 16, fontWeight: "900" },
+  kicker: { color: color.muted, fontSize: 11, fontWeight: "900" },
+  cardTitle: { color: color.ink, fontSize: 17, fontWeight: "900" },
   muted: { color: color.muted, fontSize: 12.5, fontWeight: "700", lineHeight: 19 },
+  bullet: { color: color.ink, fontSize: 12.5, fontWeight: "700", lineHeight: 19 },
+  note: { color: color.muted, fontSize: 11, fontWeight: "800", lineHeight: 16 },
+  fine: { color: color.muted, fontSize: 11, fontWeight: "700", marginTop: 4 },
   label: { color: color.ink, fontSize: 12.5, fontWeight: "900", marginTop: 6 },
   input: { backgroundColor: color.surface, borderRadius: 12, color: color.ink, fontSize: 14, paddingHorizontal: 12, paddingVertical: 10 },
-  multiline: { minHeight: 90, textAlignVertical: "top" },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   chip: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   chipOn: { backgroundColor: color.ink },
   chipText: { color: color.ink, fontSize: 12, fontWeight: "800" },
   chipTextOn: { color: color.white },
-  photos: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  photo: { borderRadius: 12, height: 76, overflow: "hidden", width: 76 },
-  photoImage: { height: "100%", width: "100%" },
-  photoX: { backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 9, color: color.white, fontSize: 12, fontWeight: "900", height: 18, lineHeight: 18, position: "absolute", right: 4, textAlign: "center", top: 4, width: 18 },
-  photoAdd: { alignItems: "center", backgroundColor: color.surface, justifyContent: "center" },
-  photoAddText: { color: color.muted, fontSize: 18, fontWeight: "900" },
-  attest: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 8 },
-  box: { alignItems: "center", borderColor: color.ink, borderRadius: 5, borderWidth: 1.5, height: 20, justifyContent: "center", width: 20 },
+  stepHead: { gap: 4, marginBottom: 4 },
+  stepNo: { color: color.muted, fontSize: 11, fontWeight: "900" },
+  doc: { backgroundColor: color.surface, borderRadius: 14, height: 120, marginTop: 6, overflow: "hidden" },
+  docImage: { height: "100%", position: "absolute", width: "100%" },
+  docLabel: { flex: 1, gap: 4, justifyContent: "center", paddingHorizontal: 14 },
+  docLabelOn: { backgroundColor: "rgba(0,0,0,0.45)", bottom: 0, left: 0, paddingHorizontal: 12, paddingVertical: 6, position: "absolute", right: 0 },
+  docTitle: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  docTitleOn: { color: color.white },
+  check: { alignItems: "flex-start", flexDirection: "row", gap: 10, marginTop: 8 },
+  checkCopy: { flex: 1, gap: 2 },
+  checkTitle: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  box: { alignItems: "center", borderColor: color.ink, borderRadius: 5, borderWidth: 1.5, height: 20, justifyContent: "center", marginTop: 1, width: 20 },
   boxOn: { backgroundColor: color.ink },
   boxTick: { color: color.white, fontSize: 12, fontWeight: "900" },
-  attestText: { color: color.ink, flex: 1, fontSize: 12.5, fontWeight: "700" },
+  navRow: { flexDirection: "row", gap: 8, marginTop: 10 },
+  navBack: { flex: 1, marginTop: 0 },
+  navNext: { flex: 2, marginTop: 0 },
   primary: { alignItems: "center", backgroundColor: color.ink, borderRadius: 14, marginTop: 8, paddingVertical: 13 },
   primaryText: { color: color.white, fontSize: 14, fontWeight: "900" },
-  secondary: { alignItems: "center", borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 4, paddingVertical: 11 },
+  secondary: { alignItems: "center", borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 4, paddingVertical: 12 },
   secondaryText: { color: color.ink, fontSize: 13, fontWeight: "800" },
   busy: { opacity: 0.5 },
   error: { color: color.magenta, fontSize: 12.5, fontWeight: "800", lineHeight: 19 },
-  fine: { color: color.muted, fontSize: 10.5, fontWeight: "700", textAlign: "center" },
 });

@@ -1,0 +1,30 @@
+{
+  "version": "2026-09-24",
+  "note": "接单权限第 3 步「履约条款」。运营改这里即可（改 version 后，新提交的申请记录新版本号）。enforced=false 表示对应机制还没上线，界面会如实标注。",
+  "items": [
+    {
+      "id": "monitoring",
+      "title": "接受履约监控",
+      "body": "平台会记录回复时效、到店打卡、履约完成情况，形成你的履约记录。",
+      "enforced": true
+    },
+    {
+      "id": "complaint",
+      "title": "接受投诉与调查机制",
+      "body": "客户可投诉；平台会进行调查、双方举证；必要时暂停接单或清退。",
+      "enforced": true
+    },
+    {
+      "id": "cancel",
+      "title": "取消政策 · 24h 内保留 30%",
+      "body": "客户或你在开始前 24 小时内取消订单，对方保留订单金额的 30% 作为补偿。",
+      "enforced": false
+    },
+    {
+      "id": "no_offline",
+      "title": "不接受线下交易",
+      "body": "任何情况下不私下转账，所有交易走平台。",
+      "enforced": true
+    }
+  ]
+}

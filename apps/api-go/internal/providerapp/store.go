@@ -18,14 +18,18 @@ func NewPostgres(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
 const selectColumns = `application_id, user_account_id, display_name, real_name, photos_attested, city,
 	service_areas, languages, capabilities, intro, photo_asset_ids, status, reject_reason, reviewed_by,
-	reviewed_at, agent_id, source, created_at, updated_at`
+	reviewed_at, agent_id, source, created_at, updated_at,
+	birth_year, gender, phone, phone_verified, id_type, id_front_asset, id_back_asset, selfie_asset,
+	no_crime_declared, data_consent, emergency_contact, terms_version, terms_accepted`
 
 func scanApplication(row pgx.Row) (*Application, error) {
 	var a Application
-	var areas, langs, caps, photos []byte
+	var areas, langs, caps, photos, accepted []byte
 	err := row.Scan(&a.ID, &a.UserAccountID, &a.DisplayName, &a.RealName, &a.PhotosAttested, &a.City,
 		&areas, &langs, &caps, &a.Intro, &photos, &a.Status, &a.RejectReason, &a.ReviewedBy,
-		&a.ReviewedAt, &a.AgentID, &a.Source, &a.CreatedAt, &a.UpdatedAt)
+		&a.ReviewedAt, &a.AgentID, &a.Source, &a.CreatedAt, &a.UpdatedAt,
+		&a.BirthYear, &a.Gender, &a.Phone, &a.PhoneVerified, &a.IDType, &a.IDFrontAsset, &a.IDBackAsset, &a.SelfieAsset,
+		&a.NoCrime, &a.DataConsent, &a.Emergency, &a.TermsVersion, &accepted)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -35,7 +39,7 @@ func scanApplication(row pgx.Row) (*Application, error) {
 	for _, pair := range []struct {
 		raw []byte
 		dst *[]string
-	}{{areas, &a.ServiceAreas}, {langs, &a.Languages}, {caps, &a.Capabilities}, {photos, &a.PhotoAssetIDs}} {
+	}{{areas, &a.ServiceAreas}, {langs, &a.Languages}, {caps, &a.Capabilities}, {photos, &a.PhotoAssetIDs}, {accepted, &a.TermsAccepted}} {
 		*pair.dst = []string{}
 		if len(pair.raw) > 0 {
 			if err := json.Unmarshal(pair.raw, pair.dst); err != nil {
@@ -66,10 +70,13 @@ func jsonList(values []string) []byte {
 
 func (p *Postgres) Insert(ctx context.Context, a Application) error {
 	_, err := p.pool.Exec(ctx, `INSERT INTO supply.provider_applications (`+selectColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
+			$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)`,
 		a.ID, a.UserAccountID, a.DisplayName, a.RealName, a.PhotosAttested, a.City,
 		jsonList(a.ServiceAreas), jsonList(a.Languages), jsonList(a.Capabilities), a.Intro, jsonList(a.PhotoAssetIDs),
-		a.Status, a.RejectReason, a.ReviewedBy, a.ReviewedAt, a.AgentID, a.Source, a.CreatedAt, a.UpdatedAt)
+		a.Status, a.RejectReason, a.ReviewedBy, a.ReviewedAt, a.AgentID, a.Source, a.CreatedAt, a.UpdatedAt,
+		a.BirthYear, a.Gender, a.Phone, a.PhoneVerified, a.IDType, a.IDFrontAsset, a.IDBackAsset, a.SelfieAsset,
+		a.NoCrime, a.DataConsent, a.Emergency, a.TermsVersion, jsonList(a.TermsAccepted))
 	return err
 }
 

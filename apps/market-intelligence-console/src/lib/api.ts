@@ -138,6 +138,16 @@ export async function completeEmailLogin(challengeId: string, code: string): Pro
   sessionStorage.setItem(SESSION_KEY, JSON.stringify({ accessToken: auth.accessToken, userAccountId: auth.userAccountId }));
 }
 
+// 运营看私有图（如接单申请的证件 / 自拍）：<img> 带不了 Authorization，所以取成 blob 再给 object URL。
+export async function opBlobUrl(path: string): Promise<string> {
+  const session = readOpsSession();
+  const r = await fetch(`${BASE}${path}`, { headers: session ? { Authorization: `Bearer ${session.accessToken}` } : {} });
+  if (r.status === 401) { clearOpsSession(); emit({ kind: "auth" }); throw new OpStatusError({ kind: "auth" }); }
+  if (r.status === 403) { emit({ kind: "forbidden" }); throw new OpStatusError({ kind: "forbidden" }); }
+  if (!r.ok) throw new Error(`${path} ${r.status}`);
+  return URL.createObjectURL(await r.blob());
+}
+
 // 运营写操作（如「立即重算引力」）：同一套会话与 401 / 403 处理。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function opPost<T = any>(path: string, body?: unknown): Promise<T> {

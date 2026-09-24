@@ -538,8 +538,15 @@ func main() {
 				name, _ := authorNames.ResolveAuthorDisplayName(ctx, userAccountID)
 				return name
 			},
+			Terms:     api.ProviderTermsLoader(),
 			BadPhotos: providerStore.BadPhotos,
-			Activate:  providerStore.ActivateSupply,
+			// 服务者主页照片用本人资料头像（已是公开媒体）；证件 / 自拍永远不进公开资料。
+			Activate: func(ctx context.Context, app providerapp.Application) (string, error) {
+				if path, ok := authorNames.ResolveAuthorAvatarPath(ctx, app.UserAccountID); ok && strings.HasPrefix(path, "assets/") {
+					app.PhotoAssetIDs = []string{strings.TrimPrefix(path, "assets/")}
+				}
+				return providerStore.ActivateSupply(ctx, app)
+			},
 		})
 	}
 	if pool != nil {

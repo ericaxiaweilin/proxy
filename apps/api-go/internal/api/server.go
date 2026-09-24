@@ -220,6 +220,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/gravity/recompute", s.operatorConsoleMethod(http.MethodPost, s.operatorGravityRecompute))
 	mux.HandleFunc("/v1/operator/provider-applications", s.operatorConsole(s.operatorProviderApplications))
 	mux.HandleFunc("/v1/operator/provider-applications/review", s.operatorConsoleMethod(http.MethodPost, s.operatorProviderApplicationReview))
+	mux.HandleFunc("/v1/operator/provider-applications/media", s.operatorConsole(s.operatorProviderApplicationMedia))
 	mux.HandleFunc("/v1/media/upload/", s.mediaUpload)
 	mux.HandleFunc("/v1/media/play/", s.mediaFile)
 	mux.HandleFunc("/v1/media/thumb/", s.mediaFile)

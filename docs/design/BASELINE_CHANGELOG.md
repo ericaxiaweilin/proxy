@@ -4,6 +4,20 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 292 — 2026-09-24
+
+- **接单权限 = 3 步 KYC**（ORDER-PERMISSION-KYC-001，原型 deepseek_html_20260924_33987c「接单中心 · KYC + 履约管线」）：
+  开始前 → 基础信息（实名 / 出生年份满 18 / 性别可选、不参与判断 / 手机号 / 城市 / 区域 / 语言）→ 证件（身份证正反面或护照
+  + 手持证件自拍 + 无犯罪声明 + 数据使用同意）→ 履约条款（紧急联系人 + `config/provider-terms/terms.json` 逐条接受，记录版本）。
+  与原型的差异（不说假话）：没有「Face ID 真人比对」—— Face ID 只证明是手机主人，改为手持证件自拍 + 运营人工比对（用户选定）；
+  没有「获取验证码」—— 开发环境短信没接（sms=false），手机号记为未验证、运营电话核实；取消政策 30% 订单系统还没执行，
+  条款文件 enforced=false，界面如实标注；不承诺 24 小时出结果。
+  证件 / 自拍是 OWNER_ONLY 媒体，只有运营控制台经 `/v1/operator/provider-applications/media` 能看（顺带修了 Rev290
+  控制台用公开 thumb 读私有图、永远加载不出来的问题）。服务者主页照片改用本人资料头像，证件永不进公开资料。
+- 回归钉：SCENE-PHOTO-WALL-001 / SCENE-CHECKIN-GATE-001 / AVATAR-SVG-DECODE-001 / COMPOSER-IDENTITY-001 / ORDER-PERMISSION-001。
+- 影响文件：`apps/mobile/src/surfaces/provider-application.tsx`、`provider-application-client.ts`；`apps/api-go/internal/providerapp/`、
+  `internal/api/provider_application.go`、`migrations/127_*`；`config/provider-terms/terms.json`；控制台 `ProviderApplications.tsx`、`lib/api.ts`。
+
 ## Revision 291 — 2026-09-24
 
 - **接单权限不按性别设门**（ORDER-PERMISSION-001）：Rev290 把入口做成「申请成为小美」并要求「自证女性」——

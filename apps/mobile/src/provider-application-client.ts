@@ -7,6 +7,12 @@ export type ProviderApplication = {
   applicationId: string;
   displayName: string;
   realName?: string;
+  birthYear?: number;
+  gender?: string;
+  phone?: string;
+  phoneVerified: boolean;
+  idType?: "CCCD" | "PASSPORT";
+  termsVersion?: string;
   city: string;
   serviceAreas: string[];
   languages: string[];
@@ -23,23 +29,32 @@ export type ProviderApplication = {
 export type ProviderApplicationOptions = {
   serviceAreas: string[];
   languages: string[];
-  capabilities: string[];
-  minPhotos: number;
-  maxPhotos: number;
+  minAge: number;
 };
+
+// 履约条款来自服务端读的 config/provider-terms/terms.json；enforced=false = 机制还没上线，界面如实标注。
+export type ProviderTerms = { version: string; items: Array<{ id: string; title: string; body: string; enforced: boolean }> };
 
 export type ProviderApplicationInput = {
   realName: string;
-  photosAttested: boolean;
+  birthYear: number;
+  gender: "" | "FEMALE" | "MALE" | "OTHER";
+  phone: string;
   city: string;
   serviceAreas: string[];
   languages: string[];
-  capabilities: string[];
-  intro: string;
-  photoAssetIds: string[];
+  idType: "CCCD" | "PASSPORT";
+  idFrontAsset: string;
+  idBackAsset: string;
+  selfieAsset: string;
+  noCrimeDeclared: boolean;
+  dataConsent: boolean;
+  emergencyContact: string;
+  termsVersion: string;
+  termsAccepted: string[];
 };
 
-export type ProviderApplicationView = { application: ProviderApplication | null; options: ProviderApplicationOptions };
+export type ProviderApplicationView = { application: ProviderApplication | null; options: ProviderApplicationOptions; terms: ProviderTerms | null };
 
 export class ProviderApplicationError extends Error {
   constructor(public readonly code: string, public readonly fields: readonly string[] = []) {
@@ -49,7 +64,7 @@ export class ProviderApplicationError extends Error {
 
 type Requester = { request(path: string, init: { method: "GET" | "POST"; body?: unknown }): Promise<{ status: number; json(): Promise<unknown> }> };
 
-const DEFAULT_OPTIONS: ProviderApplicationOptions = { serviceAreas: [], languages: [], capabilities: [], minPhotos: 3, maxPhotos: 9 };
+const DEFAULT_OPTIONS: ProviderApplicationOptions = { serviceAreas: [], languages: [], minAge: 18 };
 
 async function call(client: Requester, path: string, init: { method: "GET" | "POST"; body?: unknown }): Promise<ProviderApplicationView> {
   const response = await client.request(path, init);
@@ -61,7 +76,12 @@ async function call(client: Requester, path: string, init: { method: "GET" | "PO
     );
   }
   const app = body.application as ProviderApplication | null | undefined;
-  return { application: app && typeof app.applicationId === "string" ? app : null, options: { ...DEFAULT_OPTIONS, ...(body.options as Partial<ProviderApplicationOptions> | undefined) } };
+  const terms = body.terms as ProviderTerms | undefined;
+  return {
+    application: app && typeof app.applicationId === "string" ? app : null,
+    options: { ...DEFAULT_OPTIONS, ...(body.options as Partial<ProviderApplicationOptions> | undefined) },
+    terms: terms && typeof terms.version === "string" && Array.isArray(terms.items) ? terms : null,
+  };
 }
 
 export const fetchProviderApplication = (client: Requester): Promise<ProviderApplicationView> => call(client, "/v1/provider-application", { method: "GET" });
@@ -71,20 +91,29 @@ export const withdrawProviderApplication = (client: Requester): Promise<Provider
 // 选项码 → 人话（码跟 supply 同一套）。
 export const AREA_LABELS: Readonly<Record<string, string>> = { hn: "河内", bn: "北宁", hcm: "胡志明市", dn: "岘港" };
 export const LANGUAGE_LABELS: Readonly<Record<string, string>> = { VI: "越南语", ZH: "中文", EN: "英语", KO: "韩语", JA: "日语" };
-export const CAPABILITY_LABELS: Readonly<Record<string, string>> = { CITY_GUIDE: "城市向导", PHOTOGRAPHY: "拍照", TRANSLATION: "翻译", DRIVING: "驾车" };
+export const GENDER_OPTIONS: ReadonlyArray<{ code: ProviderApplicationInput["gender"]; label: string }> = [
+  { code: "", label: "不填" }, { code: "FEMALE", label: "女" }, { code: "MALE", label: "男" }, { code: "OTHER", label: "其他" },
+];
 
 const FIELD_TEXT: Readonly<Record<string, string>> = {
   profile_name: "先在「个人管理」设置用户名",
   profile_avatar: "先在「个人管理」设置头像",
   real_name: "请填写 2–40 字的真实姓名",
-  photos_attested: "请确认照片均为本人真实照片",
+  birth_year: "出生年份不对（需年满 18 岁）",
+  gender: "性别选项无效",
+  phone: "手机号格式不对",
   city: "请填写所在城市",
   service_areas: "至少选一个服务区域",
   languages: "至少选一种会说的语言",
-  capabilities: "能力选项无效",
-  intro: "自我介绍写 10–500 字",
-  photos_count: "请上传 3–9 张本人照片",
-  photos_not_own_real: "照片必须是你本人上传的真实照片（不能用 AI 生成的图）",
+  id_type: "请选择证件类型",
+  id_documents: "请上传证件（身份证要正反面，护照只要正面）",
+  selfie: "请上传手持证件的自拍",
+  documents_not_own_real: "证件和自拍必须是你本人上传的真实照片（不能用 AI 生成的图）",
+  no_crime_declared: "请勾选无犯罪声明",
+  data_consent: "请同意 KYC 数据使用",
+  emergency_contact: "请填写紧急联系人（姓名 + 电话）",
+  terms_accepted: "请逐条接受履约条款",
+  terms_outdated: "履约条款已更新，请重新阅读后再提交",
 };
 
 /** 服务端逐项不合格 → 逐条人话（认不出的码原样不显示，给一句兜底）。 */

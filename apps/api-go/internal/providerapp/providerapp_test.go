@@ -3,7 +3,10 @@ package providerapp
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 )
 
 func testService(missing []string, bad []string) (*Service, *[]Application) {
@@ -11,6 +14,7 @@ func testService(missing []string, bad []string) (*Service, *[]Application) {
 	return NewService(NewMemory(), Deps{
 		Missing:     func(context.Context, string) []string { return missing },
 		DisplayName: func(context.Context, string) string { return "Linh" },
+		Terms:       func() (Terms, error) { return testTerms, nil },
 		BadPhotos:   func(context.Context, string, []string) ([]string, error) { return bad, nil },
 		Activate: func(_ context.Context, a Application) (string, error) {
 			*activated = append(*activated, a)
@@ -19,11 +23,14 @@ func testService(missing []string, bad []string) (*Service, *[]Application) {
 	}), activated
 }
 
+var testTerms = Terms{Version: "v1", Items: []TermItem{{ID: "monitoring"}, {ID: "cancel"}}}
+
 func goodInput() Input {
 	return Input{
-		RealName: "Nguyễn Linh", PhotosAttested: true, City: "河内",
-		ServiceAreas: []string{"hn", "HN"}, Languages: []string{"vi", "zh"}, Capabilities: []string{"photography"},
-		Intro: "河内本地人，中文流利，喜欢带朋友拍照。", PhotoAssetIDs: []string{"assets/ma_1", "ma_2", "ma_3"},
+		RealName: "Nguyễn Linh", BirthYear: time.Now().Year() - 25, Phone: "090 123 4567", City: "河内",
+		ServiceAreas: []string{"hn", "HN"}, Languages: []string{"vi", "zh"},
+		IDType: "cccd", IDFrontAsset: "assets/ma_f", IDBackAsset: "ma_b", SelfieAsset: "ma_s",
+		NoCrime: true, DataConsent: true, Emergency: "Mẹ 0987654321", TermsVersion: "v1", Accepted: []string{"monitoring", "cancel"},
 	}
 }
 
@@ -34,7 +41,8 @@ func TestSubmitNormalizesAndRejectsASecondOpenApplication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if app.Status != StatusSubmitted || app.DisplayName != "Linh" || len(app.ServiceAreas) != 1 || app.PhotoAssetIDs[0] != "ma_1" || app.Languages[1] != "ZH" {
+	if app.Status != StatusSubmitted || app.DisplayName != "Linh" || len(app.ServiceAreas) != 1 || app.IDFrontAsset != "ma_f" ||
+		app.Languages[1] != "ZH" || app.Phone != "+84901234567" || app.IDType != "CCCD" || app.TermsVersion != "v1" || app.Gender != "" {
 		t.Fatalf("unexpected application: %+v", app)
 	}
 	if _, err := s.Submit(ctx, "user_1", goodInput()); !errors.Is(err, ErrAlreadyOpen) {
@@ -44,13 +52,14 @@ func TestSubmitNormalizesAndRejectsASecondOpenApplication(t *testing.T) {
 
 func TestSubmitListsEveryInvalidField(t *testing.T) {
 	s, _ := testService([]string{"avatar"}, nil)
-	_, err := s.Submit(context.Background(), "user_1", Input{Languages: []string{"XX"}, PhotoAssetIDs: []string{"ma_1"}})
+	_, err := s.Submit(context.Background(), "user_1", Input{Languages: []string{"XX"}, BirthYear: time.Now().Year() - 16, TermsVersion: "v1"})
 	var v *ValidationError
 	if !errors.As(err, &v) {
 		t.Fatalf("want ValidationError, got %v", err)
 	}
-	want := map[string]bool{"profile_avatar": true, "real_name": true, "photos_attested": true, "city": true,
-		"service_areas": true, "languages": true, "intro": true, "photos_count": true}
+	want := map[string]bool{"profile_avatar": true, "real_name": true, "birth_year": true, "phone": true, "city": true,
+		"service_areas": true, "languages": true, "id_type": true, "id_documents": true, "selfie": true,
+		"no_crime_declared": true, "data_consent": true, "emergency_contact": true, "terms_accepted": true}
 	for _, f := range v.Fields {
 		delete(want, f)
 	}
@@ -60,11 +69,11 @@ func TestSubmitListsEveryInvalidField(t *testing.T) {
 }
 
 func TestSubmitRejectsPhotosThatAreNotOwnRealImages(t *testing.T) {
-	s, _ := testService(nil, []string{"ma_2"})
+	s, _ := testService(nil, []string{"ma_s"})
 	_, err := s.Submit(context.Background(), "user_1", goodInput())
 	var v *ValidationError
-	if !errors.As(err, &v) || len(v.Fields) != 1 || v.Fields[0] != "photos_not_own_real" {
-		t.Fatalf("want photos_not_own_real, got %v", err)
+	if !errors.As(err, &v) || len(v.Fields) != 1 || v.Fields[0] != "documents_not_own_real" {
+		t.Fatalf("want documents_not_own_real, got %v", err)
 	}
 }
 
@@ -111,5 +120,46 @@ func TestWithdrawOnlyWhileSubmittedAndFailClosedWithoutDeps(t *testing.T) {
 	}
 	if _, err := NewService(NewMemory(), Deps{}).Mine(ctx, "user_1"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("no deps = %v, want ErrUnavailable", err)
+	}
+}
+
+// 用户：「如果只是小美有性别歧视限制」—— 性别可选，填什么都不影响能不能提交。
+func TestGenderIsOptionalAndNeverGates(t *testing.T) {
+	for _, gender := range []string{"", "female", "MALE", "other"} {
+		s, _ := testService(nil, nil)
+		in := goodInput()
+		in.Gender = gender
+		if _, err := s.Submit(context.Background(), "user_1", in); err != nil {
+			t.Fatalf("gender %q blocked submission: %v", gender, err)
+		}
+	}
+}
+
+func TestPassportNeedsNoBackAndOutdatedTermsAreRejected(t *testing.T) {
+	s, _ := testService(nil, nil)
+	in := goodInput()
+	in.IDType, in.IDBackAsset = "PASSPORT", ""
+	app, err := s.Submit(context.Background(), "user_1", in)
+	if err != nil || app.IDBackAsset != "" {
+		t.Fatalf("passport without back: %+v %v", app, err)
+	}
+	s2, _ := testService(nil, nil)
+	stale := goodInput()
+	stale.TermsVersion = "v0"
+	var v *ValidationError
+	if _, err := s2.Submit(context.Background(), "user_2", stale); !errors.As(err, &v) || v.Fields[0] != "terms_outdated" {
+		t.Fatalf("stale terms = %v", err)
+	}
+}
+
+func TestLoadTermsFromTheRepoFile(t *testing.T) {
+	terms, err := LoadTerms(filepath.Join("..", "..", "..", "..", "config", "provider-terms", "terms.json"))
+	if err != nil || terms.Version == "" || len(terms.Items) < 4 {
+		t.Fatalf("repo terms: %+v %v", terms, err)
+	}
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "t.json"), []byte(`{"version":"x","items":[{"id":"a"},{"id":"a"}]}`), 0o600)
+	if _, err := LoadTerms(filepath.Join(dir, "t.json")); err == nil {
+		t.Fatal("duplicate term ids must be rejected")
 	}
 }

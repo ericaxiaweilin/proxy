@@ -9376,3 +9376,33 @@ require_test "ORDER-SCENARIO-001" "./internal/marketplace" \
   "apps/api-go/internal/marketplace/service_test.go" || exit $?
 pnpm --dir apps/mobile exec vitest run src/demand-moments.test.ts || exit $?
 echo "    ORDER-SCENARIO-001: PASS (scenario published, snapshotted, and tiered)"
+# SCENE-PHOTO-WALL-001: 照片墙只收标记了本场景、带图、对看的人可见的帖子（可见性与 feed 同一套）。
+require_test "SCENE-PHOTO-WALL-001" "./internal/localnet" "TestListPostsAtSceneOnlyTaggedVisiblePostsWithMedia" \
+  "apps/api-go/internal/localnet/scene_wall_test.go" || exit $?
+# SCENE-CHECKIN-GATE-001: 11,761 公里外照样打卡成功 —— 服务端对报了距离且 >100 米的拒绝，按钮在太远时禁用。
+require_test "SCENE-CHECKIN-GATE-001" "./internal/realityscene" "TestCheckInRejectsReportedDistanceBeyondRadius" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+if ! grep -qF '(!hereChecked && !checkinAllowed)' apps/mobile/src/components/scene-shop-directory.tsx; then
+  echo "  FAIL [SCENE-CHECKIN-GATE-001]: 「我在这里」按钮没接 100 米门禁。" >&2
+  exit 1
+fi
+# AVATAR-SVG-DECODE-001: react-native-svg <Image> 无缓存、每次挂载异步解码 —— 首帧一个空圆。垫 expo-image（memory-disk）。
+if ! grep -qF 'cachePolicy="memory-disk"' apps/mobile/src/components/circular-avatar-image.tsx ||
+   ! grep -qF '<ClipPath' apps/mobile/src/components/circular-avatar-image.tsx; then
+  echo "  FAIL [AVATAR-SVG-DECODE-001]: 圆头像没有缓存底图（或丢了 SVG 圆裁剪）。" >&2
+  exit 1
+fi
+# COMPOSER-IDENTITY-001: 发帖页头部写死「Thanh @thanh」—— 谁发帖都显示别人。必须读本账号资料。
+if grep -qF '>Thanh</Text>' apps/mobile/src/surfaces/ComposerV2Screen.tsx ||
+   ! grep -qF 'composerProfileStore.read().then' apps/mobile/src/surfaces/ComposerV2Screen.tsx; then
+  echo "  FAIL [COMPOSER-IDENTITY-001]: 发帖页身份又写死了。" >&2
+  exit 1
+fi
+# ORDER-PERMISSION-001: 接单权限不按性别设门（Rev290 曾要求「自证女性」—— 歧视）。性别只是可选自述。
+require_test "ORDER-PERMISSION-001" "./internal/providerapp" "TestGenderIsOptionalAndNeverGates" \
+  "apps/api-go/internal/providerapp/providerapp_test.go" || exit $?
+if grep -qF 'gender_attested' apps/api-go/internal/providerapp/providerapp.go apps/mobile/src/provider-application-client.ts; then
+  echo "  FAIL [ORDER-PERMISSION-001]: 又出现了性别门槛字段。" >&2
+  exit 1
+fi
+echo "    SCENE-PHOTO-WALL-001 / SCENE-CHECKIN-GATE-001 / AVATAR-SVG-DECODE-001 / COMPOSER-IDENTITY-001 / ORDER-PERMISSION-001: PASS"

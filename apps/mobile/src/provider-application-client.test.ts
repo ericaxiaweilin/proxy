@@ -5,15 +5,15 @@ import {
 } from "./provider-application-client";
 
 const base: ProviderApplication = {
-  applicationId: "papp_1", displayName: "Linh", city: "河内", serviceAreas: ["hn"], languages: ["VI"], capabilities: [],
+  applicationId: "papp_1", displayName: "Linh", phoneVerified: false, city: "河内", serviceAreas: ["hn"], languages: ["VI"], capabilities: [],
   intro: "hello", photoAssetIds: [], status: "SUBMITTED", source: "APP", createdAt: "2026-09-24T00:00:00Z",
 };
 
 describe("PROVIDER-APPLY-001 client", () => {
   it("maps every invalid field to plain words", () => {
-    expect(providerApplicationFieldErrors(["profile_avatar", "photos_count"])).toEqual(["先在「个人管理」设置头像", "请上传 3–9 张本人照片"]);
+    expect(providerApplicationFieldErrors(["profile_avatar", "selfie"])).toEqual(["先在「个人管理」设置头像", "请上传手持证件的自拍"]);
     expect(providerApplicationFieldErrors(["something_new"])).toEqual(["有信息不合格，请检查后再提交"]);
-    expect(providerApplicationErrorText(new ProviderApplicationError("invalid_fields", ["real_name", "intro"]))).toBe("请填写 2–40 字的真实姓名；自我介绍写 10–500 字");
+    expect(providerApplicationErrorText(new ProviderApplicationError("invalid_fields", ["real_name", "birth_year"]))).toBe("请填写 2–40 字的真实姓名；出生年份不对（需年满 18 岁）");
     expect(providerApplicationErrorText(new Error("x"))).toBe("暂时没连上服务，稍后再试。");
   });
 
@@ -29,7 +29,8 @@ describe("PROVIDER-APPLY-001 client", () => {
     const ok = { request: async () => ({ status: 200, json: async () => ({ application: null, options: { languages: ["VI"] } }) }) };
     const view = await fetchProviderApplication(ok);
     expect(view.application).toBeNull();
-    expect(view.options.minPhotos).toBe(3);
+    expect(view.options.minAge).toBe(18);
+    expect(view.terms).toBeNull();
     const bad = { request: async () => ({ status: 422, json: async () => ({ error: "invalid_fields", fields: ["city"] }) }) };
     await expect(fetchProviderApplication(bad)).rejects.toMatchObject({ code: "invalid_fields", fields: ["city"] });
   });
