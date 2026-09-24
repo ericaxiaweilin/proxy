@@ -3915,7 +3915,14 @@ if ! grep -qF 'engagementService.SetAuthorNameResolver(authorNames)' apps/api-go
   echo "        resolver, so production would keep returning unnamed comments." >&2
   exit 1
 fi
-if ! grep -qF 'resolveReplyAuthorDisplayName(reply, viewerAccountId)' apps/mobile/src/surfaces/feed.tsx; then
+# 只匹配到第二个实参为止、不写右括号：Rev276（自己的帖子显示用户名而不是「你」）给这个
+# 调用加了第三个实参（本人的资料名，仅在该评论确实属于观察者时才会被采用），原先的整串
+# 匹配当场变红 —— 而它位于钉脚本前段，红一次就把它后面所有钉一起挡住。这里断言的不变
+# 量是「评论作者标签仍然走观察者相对的解析器、并且带上观察者的账号 id」，多出来的实参
+# 不归本钉管。
+# 注意：本注释刻意不复述那段调用文本。反向/正向 grep 命中的是文件全文（含注释），一旦
+# 注释里出现同样的字符串，删掉真正的调用后这行注释会继续让钉保持绿色。
+if ! grep -qF 'resolveReplyAuthorDisplayName(reply, viewerAccountId' apps/mobile/src/surfaces/feed.tsx; then
   echo "  FAIL [FEED-REPLY-001]: the feed stopped resolving the comment author label." >&2
   exit 1
 fi
