@@ -526,6 +526,18 @@ func LoadTerms(path string) (Terms, error) {
 	return t, nil
 }
 
+// Granted：这个人有没有接单权限（最近一份申请已通过）。AI 分身只对有接单权限的人开（ORDER-PERMISSION-TWIN-001）。
+func (s *Service) Granted(ctx context.Context, userAccountID string) (bool, error) {
+	if !s.ready() {
+		return false, ErrUnavailable
+	}
+	latest, err := s.store.Latest(ctx, userAccountID)
+	if err != nil {
+		return false, err
+	}
+	return latest != nil && latest.Status == StatusApproved, nil
+}
+
 // Get：运营按 id 读一份申请。
 func (s *Service) Get(ctx context.Context, id string) (*Application, error) {
 	if !s.ready() {

@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 293 — 2026-09-24
+
+- **AI 分身只对有接单权限的人开**（ORDER-PERMISSION-TWIN-001，用户：「对 要改 有接单权限才开动 ai 分身」）：
+  服务端三处都查（最近一份接单申请 = 已通过）：建本人分身（USER_TWIN，403 order_permission_required）、模型读本人照片
+  （likenessReferencePhotos → 用户建模同样被拦）、私聊代回复（按「关闭」处理，模型一次不调）；查询出错按没权限。
+  App：所有 AI 分身入口（我的 / FACET / AI 管理）落到同一页，没权限显示说明 +「去申请接单权限」（审核中显示「查看申请进度」）。
+  顺带：`providerapply` 登记进子页注册表 —— 以前只有菜单行能进（行有兜底），`openSubPage` 跳不过去。
+  KYC 定位（用户）：基础 KYC 自建；涉及支付的 KYC 以后接商业服务；现在基本现金支付，先用自建的简单版。
+- 影响文件：`apps/api-go/internal/api/{likeness_access,aipersona_handlers,user_model_handlers}.go`、`internal/conversation/ai_engine_gate.go`、
+  `internal/providerapp/providerapp.go`、`cmd/api/main.go`；`apps/mobile/src/surfaces/provider-application.tsx`、`me.tsx`、`me-sub-pages.ts`。
+
 ## Revision 292 — 2026-09-24
 
 - **接单权限 = 3 步 KYC**（ORDER-PERMISSION-KYC-001，原型 deepseek_html_20260924_33987c「接单中心 · KYC + 履约管线」）：

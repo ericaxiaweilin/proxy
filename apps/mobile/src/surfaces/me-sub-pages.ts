@@ -2,6 +2,12 @@
 import type { MeSubPage } from "./me-types";
 
 export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; icon: string; sections?: Array<{ title: string; rows: Array<{ label: string; value: string }> }> }> = {
+  // ORDER-PERMISSION-001：接单权限（AI 分身门页的「去申请」用 openSubPage 跳过来，必须在这里登记）。
+  providerapply: {
+    title: "申请接单权限",
+    desc: "实名 + 证件 + 履约条款 · 运营审核通过后开放接单和 AI 分身",
+    icon: "spark",
+  },
   myscenes: {
     title: "我的场景",
     desc: "R15.13 Scene Value Exchange · 我发起的 Scene 与收到的邀请。预算进场景，不买人。",

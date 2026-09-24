@@ -548,6 +548,9 @@ func main() {
 				return providerStore.ActivateSupply(ctx, app)
 			},
 		})
+		// ORDER-PERMISSION-TWIN-001：AI 分身（建分身 / 模型读本人照片 / 代回复）只对有接单权限的人开。
+		server.OrderPermission = server.ProviderApps.Granted
+		conversationService.SetOrderPermission(server.ProviderApps.Granted)
 	}
 	if pool != nil {
 		server.UserModel = usermodel.NewService(postgres.NewUserModelRepository(pool), modelStack)

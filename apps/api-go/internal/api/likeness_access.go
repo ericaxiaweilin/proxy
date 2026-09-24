@@ -21,9 +21,27 @@ import (
 
 var ErrLikenessConsentRequired = errors.New("likeness consent required: the owner has not authorised AI use of their photos")
 
+// ErrOrderPermissionRequired：AI 分身只对有接单权限的人开（ORDER-PERMISSION-TWIN-001，用户：「有接单权限才开动 ai 分身」）。
+var ErrOrderPermissionRequired = errors.New("order permission required: AI twin is only available to approved providers")
+
+// requireOrderPermission：没接（nil）= 放行（测试 / 无库）；接了就查，查错也拒（fail-closed）。
+func (s *Server) requireOrderPermission(ctx context.Context, userAccountID string) error {
+	if s.OrderPermission == nil {
+		return nil
+	}
+	ok, err := s.OrderPermission(ctx, userAccountID)
+	if err != nil || !ok {
+		return ErrOrderPermissionRequired
+	}
+	return nil
+}
+
 func (s *Server) likenessReferencePhotos(ctx context.Context, ownerID string) ([]media.MediaAsset, error) {
 	if s.AIPersona == nil || s.Media == nil || ownerID == "" {
 		return nil, ErrLikenessConsentRequired
+	}
+	if err := s.requireOrderPermission(ctx, ownerID); err != nil {
+		return nil, err
 	}
 	personas, err := s.AIPersona.ListPersonas(ctx, ownerID)
 	if err != nil {

@@ -114,8 +114,11 @@ type Server struct {
 	OpsMetrics opsmetrics.Source
 	// Gravity：引力状态存储（GRAVITY-001）。nil = 没配库，相关页返回 NOT_CONNECTED。
 	Gravity gravity.Store
-	// ProviderApps：「申请成为小美」+ 运营审核（PROVIDER-APPLY-001）。nil = 端点返回 503。
+	// ProviderApps：接单权限申请 + 运营审核（ORDER-PERMISSION-001）。nil = 端点返回 503。
 	ProviderApps *providerapp.Service
+	// OrderPermission：有没有接单权限。AI 分身（建分身、模型读本人照片）只对有权限的人开
+	// （ORDER-PERMISSION-TWIN-001）。nil = 没接（测试 / 无库），生产 main.go 必须接。
+	OrderPermission func(ctx context.Context, userAccountID string) (bool, error)
 	// TwinInsight 是 AI 分身「好友洞察」的读模型（TWIN-INSIGHT-002）。
 	// 它是一个独立的读模型包而不是挂在 localnet / relationship 上：
 	// 这条洞察跨四个域（好友关系 / 行为事件 / 对话 / 点赞），没有任何

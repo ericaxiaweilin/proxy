@@ -157,3 +157,9 @@ func (s *Service) runStandInJob(delay time.Duration, job func()) {
 	}
 	time.AfterFunc(delay, job)
 }
+
+// SetOrderPermission 接上「有没有接单权限」的查询（ORDER-PERMISSION-TWIN-001）：没有就不代回复。
+// 不接 = 老行为（测试 / 无库环境）；生产在 main.go 必须接（回归钉 ORDER-PERMISSION-TWIN-001 守着）。
+func (s *Service) SetOrderPermission(check func(ctx context.Context, userAccountID string) (bool, error)) {
+	s.orderPermission = check
+}

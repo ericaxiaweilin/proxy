@@ -54,7 +54,7 @@ import { BenefitClient } from "../benefit-client";
 import { BenefitHubSurface } from "./benefit-hub";
 import { BenefitRedeemScreen } from "./BenefitRedeemScreen";
 import { MyStoreRecommendations } from "./my-store-recommendations";
-import { ProviderApplicationSurface } from "./provider-application";
+import { OrderPermissionGate, ProviderApplicationSurface } from "./provider-application";
 import { type LocalNetClient } from "../localnet-client";
 import {
   parentPostIdsForReplies,
@@ -1545,7 +1545,8 @@ export function MeSurface({
           })
           .filter((entry): entry is PersonaGalleryItem => entry !== undefined)
       );
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} ownerName={hubProfile.displayName} ownerAvatarUri={profileAvatarUri} authClient={sessionAuthClient} rawGalleryItems={rawGalleryItems} mediaClient={mediaClient} posts={targetedSpacePosts} mediaByPost={profileMedia} relationshipClient={relationshipClient} createPost={(payload) => localNet.createPost(payload)} updatePostAudience={(postId, visibility, audienceTargetIds) => localNet.updatePostAudience(postId, visibility, audienceTargetIds)} onPostPublished={() => setProfilePostsReload((n) => n + 1)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} /></SwipeBackShell>;
+      // ORDER-PERMISSION-TWIN-001：AI 分身只对有接单权限的人开（服务端同样拦）。
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><OrderPermissionGate onApply={() => openSubPage("providerapply")} onBack={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} ownerName={hubProfile.displayName} ownerAvatarUri={profileAvatarUri} authClient={sessionAuthClient} rawGalleryItems={rawGalleryItems} mediaClient={mediaClient} posts={targetedSpacePosts} mediaByPost={profileMedia} relationshipClient={relationshipClient} createPost={(payload) => localNet.createPost(payload)} updatePostAudience={(postId, visibility, audienceTargetIds) => localNet.updatePostAudience(postId, visibility, audienceTargetIds)} onPostPublished={() => setProfilePostsReload((n) => n + 1)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} /></OrderPermissionGate></SwipeBackShell>;
     }
     if (subPage.route === "myscenes") {
       async function respond(invitationId: string, decision: "ACCEPTED" | "DECLINED" | "ASK"): Promise<void> {

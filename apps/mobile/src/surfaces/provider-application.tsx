@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { color } from "../theme";
@@ -219,7 +219,42 @@ export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: Medi
   );
 }
 
+// ORDER-PERMISSION-TWIN-001（用户：「有接单权限才开动 ai 分身」）：AI 分身页的门。服务端同样拦
+// （建分身 / 模型读照片 / 代回复），这里只是把「为什么打不开、去哪开」说清楚，不靠前端藏入口当安全。
+export function OrderPermissionGate({ children, onApply, onBack }: { children: React.ReactNode; onApply: () => void; onBack: () => void }): React.JSX.Element {
+  const [state, setState] = useState<"loading" | "granted" | "locked" | "error">("loading");
+  const [pending, setPending] = useState(false);
+  const check = useCallback(() => {
+    setState("loading");
+    fetchProviderApplication(sessionAuthClient)
+      .then((view) => {
+        setPending(view.application?.status === "SUBMITTED");
+        setState(view.application?.status === "APPROVED" ? "granted" : "locked");
+      })
+      .catch(() => setState("error"));
+  }, []);
+  useEffect(check, [check]);
+  if (state === "granted") return <>{children}</>;
+  return (
+    <ScrollView contentContainerStyle={s.gatePage}>
+      <Pressable accessibilityLabel="返回" onPress={onBack}><Text selectable style={s.gateBack}>‹ 返回</Text></Pressable>
+      <Text selectable style={s.gateTitle}>AI 分身</Text>
+      {state === "loading" ? <ProxyLoading label="正在确认接单权限" tone="muted" /> : <View style={s.card}>
+        <Text selectable style={s.cardTitle}>{state === "error" ? "暂时确认不了接单权限" : pending ? "接单权限审核中" : "开通接单权限后才能用 AI 分身"}</Text>
+        <Text selectable style={s.muted}>{state === "error"
+          ? "网络或服务有问题，稍后再试。"
+          : "AI 分身会用你的形象生成照片、视频，并在私聊里替你回复 —— 只对通过实名审核、拥有接单权限的人开放。"}</Text>
+        {state === "error" ? <Pressable onPress={check} style={s.secondary}><Text selectable style={s.secondaryText}>重试</Text></Pressable>
+          : <Pressable accessibilityLabel={pending ? "查看申请进度" : "去申请接单权限"} onPress={onApply} style={s.primary}><Text selectable style={s.primaryText}>{pending ? "查看申请进度" : "去申请接单权限"}</Text></Pressable>}
+      </View>}
+    </ScrollView>
+  );
+}
+
 const s = StyleSheet.create({
+  gatePage: { gap: 12, paddingBottom: 40, paddingHorizontal: 16, paddingTop: 12 },
+  gateBack: { color: color.magenta, fontSize: 13, fontWeight: "800" },
+  gateTitle: { color: color.ink, fontSize: 22, fontWeight: "900" },
   wrap: { gap: 12, paddingBottom: 24 },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 8, padding: 14 },
   kicker: { color: color.muted, fontSize: 11, fontWeight: "900" },

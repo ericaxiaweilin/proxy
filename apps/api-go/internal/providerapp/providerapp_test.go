@@ -163,3 +163,19 @@ func TestLoadTermsFromTheRepoFile(t *testing.T) {
 		t.Fatal("duplicate term ids must be rejected")
 	}
 }
+
+func TestGrantedOnlyAfterApproval(t *testing.T) {
+	s, _ := testService(nil, nil)
+	ctx := context.Background()
+	if ok, _ := s.Granted(ctx, "user_1"); ok {
+		t.Fatal("no application must not grant")
+	}
+	app, _ := s.Submit(ctx, "user_1", goodInput())
+	if ok, _ := s.Granted(ctx, "user_1"); ok {
+		t.Fatal("pending application must not grant")
+	}
+	_, _ = s.Review(ctx, app.ID, "op", true, "")
+	if ok, _ := s.Granted(ctx, "user_1"); !ok {
+		t.Fatal("approved application must grant")
+	}
+}

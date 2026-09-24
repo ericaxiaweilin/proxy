@@ -9406,3 +9406,15 @@ if grep -qF 'gender_attested' apps/api-go/internal/providerapp/providerapp.go ap
   exit 1
 fi
 echo "    SCENE-PHOTO-WALL-001 / SCENE-CHECKIN-GATE-001 / AVATAR-SVG-DECODE-001 / COMPOSER-IDENTITY-001 / ORDER-PERMISSION-001: PASS"
+# ORDER-PERMISSION-TWIN-001: 「有接单权限才开动 ai 分身」—— 建本人分身 / 模型读本人照片 / 代回复 三处都要查接单权限，生产必须接线。
+require_test "ORDER-PERMISSION-TWIN-001" "./internal/api" "TestAITwinRequiresOrderPermission" \
+  "apps/api-go/internal/api/order_permission_twin_test.go" || exit $?
+require_test "ORDER-PERMISSION-TWIN-001" "./internal/conversation" "TestStandInRequiresTheOwnersOrderPermission" \
+  "apps/api-go/internal/conversation/stand_in_order_permission_test.go" || exit $?
+if ! grep -qF 'server.OrderPermission = server.ProviderApps.Granted' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'conversationService.SetOrderPermission(' apps/api-go/cmd/api/main.go ||
+   ! grep -qF '<OrderPermissionGate' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [ORDER-PERMISSION-TWIN-001]: AI 分身的接单权限门没接线。" >&2
+  exit 1
+fi
+echo "    ORDER-PERMISSION-TWIN-001: PASS"

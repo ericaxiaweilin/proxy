@@ -53,6 +53,13 @@ func (s *Server) createPersona(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_persona_type", "reason": err.Error()})
 		return
 	}
+	// ORDER-PERMISSION-TWIN-001：本人数字分身只对有接单权限的人开。
+	if pt == aipersona.PersonaTypeUserTwin {
+		if err := s.requireOrderPermission(r.Context(), strings.TrimSpace(body.OwnerID)); err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "order_permission_required"})
+			return
+		}
+	}
 	p, err := s.AIPersona.CreatePersona(r.Context(), aipersona.Persona{
 		OwnerID:     strings.TrimSpace(body.OwnerID),
 		DisplayName: strings.TrimSpace(body.DisplayName),

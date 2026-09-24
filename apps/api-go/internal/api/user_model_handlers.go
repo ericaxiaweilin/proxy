@@ -45,6 +45,10 @@ func (s *Server) routeUserModel(w http.ResponseWriter, r *http.Request) {
 	}
 	ownerID := authenticated.Principal.ID
 	photos, err := s.likenessReferencePhotos(r.Context(), ownerID)
+	if errors.Is(err, ErrOrderPermissionRequired) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "order_permission_required"})
+		return
+	}
 	if errors.Is(err, ErrLikenessConsentRequired) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "likeness_consent_required"})
 		return

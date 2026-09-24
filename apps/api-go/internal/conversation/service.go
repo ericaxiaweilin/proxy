@@ -567,6 +567,8 @@ type Service struct {
 	tokenMeter         TokenMeter
 	// AI-MANAGE-014：全自动代回复按本人「节奏」延迟发出（见 stand_in_rhythm.go）。
 	standInScheduler StandInScheduler
+	// orderPermission：AI 分身只对有接单权限的人开（ORDER-PERMISSION-TWIN-001）。
+	orderPermission func(ctx context.Context, userAccountID string) (bool, error)
 	standInPlans     standInPlanner
 }
 

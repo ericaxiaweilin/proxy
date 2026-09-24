@@ -122,6 +122,14 @@ func (s *Service) aiStandInFor(ctx context.Context, conv Conversation, actorID s
 	}
 	state, wired := s.aiEngineChatStateFor(ctx, owner)
 	result := aiStandIn{Owner: owner, State: state}
+	// ORDER-PERMISSION-TWIN-001（用户：「有接单权限才开动 ai 分身」）：没有接单权限 = AI 分身不开，
+	// 代回复按「关闭」处理 —— 不回，消息等本人。查询出错也按没权限（fail-closed）。
+	if s.orderPermission != nil {
+		if ok, err := s.orderPermission(ctx, owner); err != nil || !ok {
+			result.Blocked, result.Status = true, "OFF"
+			return result
+		}
+	}
 	if !wired {
 		// 设置没接：保持旧行为（直接回），不因为读不到就把所有代回复关掉。
 		return result
