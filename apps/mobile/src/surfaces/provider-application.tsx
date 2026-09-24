@@ -11,6 +11,7 @@ import { ProxyIcon } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import {
   fetchProviderApplication, kycPipeline, providerApplicationErrorText,
+  phoneDigitsError, formatPhoneInput,
   providerApplicationStatusCard, submitProviderApplication, withdrawProviderApplication,
   type ProviderApplicationInput, type ProviderApplicationView,
 } from "../provider-application-client";
@@ -86,6 +87,10 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
       else if (age < 18) errors.birthDate = "接单需年满 18 岁";
     }
     if (phone.trim() === "") errors.phone = "请填写手机号";
+    else {
+      const phoneError = phoneDigitsError(phone);
+      if (phoneError) errors.phone = phoneError;
+    }
     setBasicErrors(errors);
     return Object.keys(errors).length === 0;
   }
@@ -263,7 +268,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
         <TextInput accessibilityLabel="出生日期" keyboardType="number-pad" maxLength={10} onChangeText={(v) => { setBirthDate(formatBirthDateInput(v)); setBasicErrors((p) => { const next = { ...p }; delete next.birthDate; return next; }); }} placeholder="20010520" placeholderTextColor={color.muted} style={[s.input, basicErrors.birthDate ? s.inputError : null]} value={birthDate} />
         {basicErrors.birthDate ? <Text selectable style={s.fieldError}>{basicErrors.birthDate}</Text> : null}
         <Text selectable style={s.label}>手机号 *</Text>
-        <TextInput accessibilityLabel="手机号" keyboardType="phone-pad" onChangeText={(v) => { setPhone(v); setBasicErrors((p) => { const next = { ...p }; delete next.phone; return next; }); }} placeholder="09xx xxx xxx" placeholderTextColor={color.muted} style={[s.input, basicErrors.phone ? s.inputError : null]} value={phone} />
+        <TextInput accessibilityLabel="手机号" keyboardType="phone-pad" maxLength={15} onChangeText={(v) => { setPhone(formatPhoneInput(v)); setBasicErrors((p) => { const next = { ...p }; delete next.phone; return next; }); }} placeholder="09xx xxx xxx" placeholderTextColor={color.muted} style={[s.input, basicErrors.phone ? s.inputError : null]} value={phone} />
         {basicErrors.phone ? <Text selectable style={s.fieldError}>{basicErrors.phone}</Text> : null}
         <Text selectable style={s.note}>短信验证码暂未接入：手机号会标为「未验证」，运营审核时电话核实。</Text>
         {nav("intro", () => { setError(undefined); if (validateBasic()) setStep("documents"); }, "下一步 · 证件认证")}

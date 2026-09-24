@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ProviderApplicationError, fetchProviderApplication, providerApplicationErrorText, providerApplicationFieldErrors,
+  ProviderApplicationError, fetchProviderApplication, formatPhoneInput, phoneDigitsError, providerApplicationErrorText, providerApplicationFieldErrors,
   providerApplicationStatusCard, type ProviderApplication,
 } from "./provider-application-client";
 
@@ -23,6 +23,25 @@ describe("PROVIDER-APPLY-001 client", () => {
     expect(providerApplicationStatusCard(base)?.canWithdraw).toBe(true);
     expect(providerApplicationStatusCard({ ...base, status: "REJECTED", rejectReason: "照片太暗" })).toMatchObject({ detail: "原因：照片太暗", canReapply: true });
     expect(providerApplicationStatusCard({ ...base, status: "APPROVED", source: "BACKFILL" })?.detail).toContain("补录");
+  });
+
+  it("phone digits: VN local 10 or +84 plus 9, nothing else", () => {
+    expect(phoneDigitsError("")).toBe("请填写手机号");
+    expect(phoneDigitsError("0912345678")).toBeUndefined();
+    expect(phoneDigitsError("0912 345 678")).toBeUndefined();
+    expect(phoneDigitsError("+84 912 345 678")).toBeUndefined();
+    expect(phoneDigitsError("091234567")).toBe("手机号填 10 位，以 0 开头");
+    expect(phoneDigitsError("1912345678")).toBe("手机号填 10 位，以 0 开头");
+    expect(phoneDigitsError("+84 912 345 67")).toBe("越南手机号是 +84 开头，后面 9 位");
+    expect(phoneDigitsError("+86 1312345678")).toBe("越南手机号是 +84 开头，后面 9 位");
+  });
+
+  it("phone input auto-groups digits", () => {
+    expect(formatPhoneInput("0912345678")).toBe("0912 345 678");
+    expect(formatPhoneInput("0912")).toBe("0912");
+    expect(formatPhoneInput("+84912345678")).toBe("+84 912 345 678");
+    expect(formatPhoneInput("0912-345-678")).toBe("0912 345 678");
+    expect(formatPhoneInput("091234567890")).toBe("0912 345 678");
   });
 
   it("reads null application and server errors with fields", async () => {

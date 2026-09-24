@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 304 — 2026-09-24
+
+- **手机号位数判断**（KYC-PHONE-DIGITS-001）：只收越南手机号 —— 本地 0 开头 10 位 /
+  国际 +84 开头后面 9 位，其余拦下；输入自动断空格（0912 345 678）。
+  纯函数进 client + 单测钉住。
+- 影响文件：`apps/mobile/src/surfaces/provider-application.tsx`（client 同改）。
+
 ## Revision 303 — 2026-09-24
 
 - **KYC 文案去废话**（KYC-COPY-TRIM-001）：真实姓名 placeholder「与证件一致」删；

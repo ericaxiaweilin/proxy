@@ -91,6 +91,31 @@ export const withdrawProviderApplication = (client: Requester): Promise<Provider
 export const AREA_LABELS: Readonly<Record<string, string>> = { hn: "河内", bn: "北宁", hcm: "胡志明市", dn: "岘港" };
 export const LANGUAGE_LABELS: Readonly<Record<string, string>> = { VI: "越南语", ZH: "中文", EN: "英语", KO: "韩语", JA: "日语" };
 
+// 手机号成熟做法：只收越南手机号 —— 本地 0 开头 10 位 / 国际 +84 开头后面 9 位。
+// 输入时自动断空格（0912 345 678 / +84 912 345 678），服务端 normalize 会去空格，两边一致。
+export function formatPhoneInput(value: string): string {
+  const v = value.trim();
+  if (v.startsWith("+")) {
+    const digits = v.replace(/\D/g, "").slice(0, 11);
+    const parts = [digits.slice(0, 2), digits.slice(2, 5), digits.slice(5, 8), digits.slice(8)].filter((p) => p !== "");
+    return `+${parts.join(" ")}`.trimEnd();
+  }
+  const digits = v.replace(/\D/g, "").slice(0, 10);
+  const parts = [digits.slice(0, 4), digits.slice(4, 7), digits.slice(7)].filter((p) => p !== "");
+  return parts.join(" ");
+}
+
+// 返回错误文案，没有错误返回 undefined。
+export function phoneDigitsError(value: string): string | undefined {
+  const v = value.trim();
+  if (v === "") return "请填写手机号";
+  const digits = v.replace(/\D/g, "");
+  if (v.startsWith("+")) {
+    return /^84\d{9}$/.test(digits) ? undefined : "越南手机号是 +84 开头，后面 9 位";
+  }
+  return /^0\d{9}$/.test(digits) ? undefined : "手机号填 10 位，以 0 开头";
+}
+
 const FIELD_TEXT: Readonly<Record<string, string>> = {
   profile_name: "先在「个人管理」设置用户名",
   profile_avatar: "先在「个人管理」设置头像",
