@@ -562,7 +562,7 @@ const styles = StyleSheet.create({
   wallGrid: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 10 },
   wallTile: { aspectRatio: 1, backgroundColor: color.surface, borderRadius: 10, overflow: "hidden", width: "32.4%" },
   wallImage: { height: "100%", width: "100%" },
-  wallAuthor: { backgroundColor: "rgba(0,0,0,0.45)", bottom: 0, color: color.white, fontSize: 10, fontWeight: "800", left: 0, paddingHorizontal: 6, paddingVertical: 2, position: "absolute", right: 0 },
+  wallAuthor: { backgroundColor: "rgba(0,0,0,0.45)", bottom: 0, color: color.white, fontSize: 11, fontWeight: "800", left: 0, paddingHorizontal: 6, paddingVertical: 2, position: "absolute", right: 0 },
   listEnd: { color: color.muted, fontSize: 11, fontWeight: "800", paddingTop: 22, textAlign: "center" },
   notice: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 18, paddingHorizontal: 16, paddingTop: 14 },
   hero: { backgroundColor: color.ink, height: 300, overflow: "hidden", position: "relative" },

@@ -4,6 +4,20 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 297 — 2026-09-24
+
+- **接单中心**（KYC-CENTER-001）：按新原型（接单中心 · KYC + 履约流程）搭首页 +
+  进度 + 履约安全三段，数字全部来自真接口（资料/接单统计/能力核验/KYC 状态）。
+  无数据源的一律不做：Face ID 比对（无匹配后端，留手持自拍链路）、短信验证码
+  （通道未接，电话维持未验证）、24h 时效与自动比对承诺、评分热榜出图墙。
+  表单加 Step 1 行内错误与返回入口；修复一处 10pt 字号违规。
+- 影响文件：`apps/mobile/src/surfaces/kyc-center.tsx`（新建）、
+  `apps/mobile/src/surfaces/kyc-center-styles.ts`（新建）、
+  `apps/mobile/src/kyc-center-model.ts`（新建）、
+  `apps/mobile/src/surfaces/provider-application.tsx`、
+  `apps/mobile/src/surfaces/me.tsx`、
+  `apps/mobile/src/components/scene-shop-directory.tsx`。
+
 ## Revision 296 — 2026-09-24
 
 - **KYC 只认人**（ORDER-PERMISSION-KYC-003，原型 deepseek_html_20260924_807348；用户：「把会说的语言也放入了 干什么」）：

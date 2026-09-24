@@ -27,11 +27,13 @@ type Doc = { mediaAssetId: string; uri: string };
 
 // ORDER-PERMISSION-KYC-003（原型 807348；用户：「把会说的语言也放入了 干什么」）：KYC 只认人 ——
 // 第 1 步只有头像、实名、出生年份、性别（可选）、手机号；城市 / 服务区域 / 语言是接单范围和能力，不在 KYC 里。
-export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName, onEditProfile }: {
+export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName, onEditProfile, onBack }: {
   mediaClient?: MediaClient | undefined;
   avatarUri?: string | undefined;
   displayName?: string | undefined;
   onEditProfile?: (() => void) | undefined;
+  // KYC-CENTER-001：接单中心包着表单时用，回到中心首页。不传就没有返回行。
+  onBack?: (() => void) | undefined;
 }): React.JSX.Element {
   const [view, setView] = useState<ProviderApplicationView>();
   const [loadError, setLoadError] = useState<string>();
@@ -48,6 +50,23 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
   const [dataConsent, setDataConsent] = useState(false);
   const [emergency, setEmergency] = useState("");
   const [accepted, setAccepted] = useState<string[]>([]);
+  // KYC-CENTER-001：Step 1 行内错误 —— 空名/年份格式/未成年/空电话在客户端先拦，
+  // 免得走一次服务端往返才知道；格式争议一律以服务端为准（这里只拦明显错的）。
+  const [basicErrors, setBasicErrors] = useState<{ realName?: string; birthYear?: string; phone?: string }>({});
+  function validateBasic(): boolean {
+    const errors: { realName?: string; birthYear?: string; phone?: string } = {};
+    if (realName.trim().length < 2) errors.realName = "请填写真实姓名（至少 2 个字）";
+    const year = Number.parseInt(birthYear.trim(), 10);
+    const thisYear = new Date().getFullYear();
+    if (!/^\d{4}$/.test(birthYear.trim()) || year < 1900 || year > thisYear) {
+      errors.birthYear = "出生年份填 4 位数字";
+    } else if (thisYear - year < 18) {
+      errors.birthYear = "接单需年满 18 岁";
+    }
+    if (phone.trim() === "") errors.phone = "请填写手机号";
+    setBasicErrors(errors);
+    return Object.keys(errors).length === 0;
+  }
 
   const load = useCallback(() => {
     setLoadError(undefined);
@@ -150,6 +169,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
 
   return (
     <View style={s.wrap}>
+      {onBack ? <Pressable accessibilityLabel="返回接单中心" onPress={onBack} style={s.backRow}><Text selectable style={s.backText}>‹ 返回接单中心</Text></Pressable> : null}
       {step === "intro" ? <>
         {card ? <View style={s.card}>
           <Text selectable style={s.cardTitle}>{card.title}</Text>
@@ -189,15 +209,18 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
           {onEditProfile ? <Text selectable style={s.pipeBadge}>›</Text> : null}
         </Pressable>
         <Text selectable style={s.label}>真实姓名 *</Text>
-        <TextInput accessibilityLabel="真实姓名" onChangeText={setRealName} placeholder="与证件一致" placeholderTextColor={color.muted} style={s.input} value={realName} />
+        <TextInput accessibilityLabel="真实姓名" onChangeText={(v) => { setRealName(v); setBasicErrors((p) => { const next = { ...p }; delete next.realName; return next; }); }} placeholder="与证件一致" placeholderTextColor={color.muted} style={[s.input, basicErrors.realName ? s.inputError : null]} value={realName} />
+        {basicErrors.realName ? <Text selectable style={s.fieldError}>{basicErrors.realName}</Text> : null}
         <Text selectable style={s.label}>出生年份 *</Text>
-        <TextInput accessibilityLabel="出生年份" keyboardType="number-pad" maxLength={4} onChangeText={setBirthYear} placeholder="例如 1998" placeholderTextColor={color.muted} style={s.input} value={birthYear} />
+        <TextInput accessibilityLabel="出生年份" keyboardType="number-pad" maxLength={4} onChangeText={(v) => { setBirthYear(v); setBasicErrors((p) => { const next = { ...p }; delete next.birthYear; return next; }); }} placeholder="例如 1998" placeholderTextColor={color.muted} style={[s.input, basicErrors.birthYear ? s.inputError : null]} value={birthYear} />
+        {basicErrors.birthYear ? <Text selectable style={s.fieldError}>{basicErrors.birthYear}</Text> : null}
         <Text selectable style={s.label}>性别（可不填，不影响审核）</Text>
         <View style={s.chips}>{GENDER_OPTIONS.map((option) => <Pressable accessibilityLabel={`性别 ${option.label}${gender === option.code ? "，已选" : ""}`} key={option.label} onPress={() => setGender(option.code)} style={[s.chip, gender === option.code && s.chipOn]}><Text selectable style={[s.chipText, gender === option.code && s.chipTextOn]}>{option.label}</Text></Pressable>)}</View>
         <Text selectable style={s.label}>手机号 *</Text>
-        <TextInput accessibilityLabel="手机号" keyboardType="phone-pad" onChangeText={setPhone} placeholder="09xx xxx xxx" placeholderTextColor={color.muted} style={s.input} value={phone} />
+        <TextInput accessibilityLabel="手机号" keyboardType="phone-pad" onChangeText={(v) => { setPhone(v); setBasicErrors((p) => { const next = { ...p }; delete next.phone; return next; }); }} placeholder="09xx xxx xxx" placeholderTextColor={color.muted} style={[s.input, basicErrors.phone ? s.inputError : null]} value={phone} />
+        {basicErrors.phone ? <Text selectable style={s.fieldError}>{basicErrors.phone}</Text> : null}
         <Text selectable style={s.note}>短信验证码暂未接入：手机号会标为「未验证」，运营审核时电话核实。</Text>
-        {nav("intro", () => { setError(undefined); setStep("documents"); }, "下一步 · 证件认证")}
+        {nav("intro", () => { setError(undefined); if (validateBasic()) setStep("documents"); }, "下一步 · 证件认证")}
       </View> : null}
 
       {step === "documents" ? <View style={s.card}>
@@ -264,6 +287,8 @@ export function OrderPermissionGate({ children, onApply, onBack }: { children: R
 
 const s = StyleSheet.create({
   gatePage: { gap: 12, paddingBottom: 40, paddingHorizontal: 16, paddingTop: 12 },
+  backRow: { alignSelf: "flex-start", paddingVertical: 4 },
+  backText: { color: color.magenta, fontSize: 13, fontWeight: "800" },
   gateBack: { color: color.magenta, fontSize: 13, fontWeight: "800" },
   gateTitle: { color: color.ink, fontSize: 22, fontWeight: "900" },
   wrap: { gap: 12, paddingBottom: 24 },
@@ -276,6 +301,8 @@ const s = StyleSheet.create({
   fine: { color: color.muted, fontSize: 11, fontWeight: "700", marginTop: 4 },
   label: { color: color.ink, fontSize: 12.5, fontWeight: "900", marginTop: 6 },
   input: { backgroundColor: color.surface, borderRadius: 12, color: color.ink, fontSize: 14, paddingHorizontal: 12, paddingVertical: 10 },
+  inputError: { borderColor: color.magenta, borderWidth: 1.5 },
+  fieldError: { color: color.magenta, fontSize: 12, fontWeight: "800", marginTop: 4 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   chip: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   chipOn: { backgroundColor: color.ink },
