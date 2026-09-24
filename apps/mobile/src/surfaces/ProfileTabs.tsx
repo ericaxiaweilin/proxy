@@ -14,13 +14,15 @@
 // 可见性: SAVED 只对本人可见（PROFILE-TABS-001）—— 别人的收藏夹是他的私库，
 //   不是公开主页的一栏。
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
-import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
+import type { FeedMediaItem, FeedPost, PostEngagement, PostReply } from "@proxy/contracts";
 import { ThreadsPostMedia } from "../components/threads-post-media";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import type { LocalNetClient } from "../localnet-client";
+import type { EngagementClient } from "../engagement-client";
+import { resolveReplyAuthorDisplayName } from "../feed-author";
 import {
   replyTargetLabel,
   replyTimestampLabel,
@@ -92,6 +94,10 @@ export interface ProfileTabsProps {
   // 帖子互动：有 handler 才渲染对应按钮，没有不渲染假按钮。
   // 分享走系统分享（无需后端），喜欢走 engagement.reactToPost。
   onLikePost?: ((postId: string) => void) | undefined;
+  // PROFILE-REPLIES-VISIBLE-001: 主页帖子收到的赞数/评论列表。feed 里能看到的
+  // 互动，在个人主页上完全看不见 —— PostCard 只有动作按钮，没有计数也没有列表。
+  // engagementClient 可选：没传就保持今天的样子（不渲染假按钮/假数字）。
+  engagementClient?: EngagementClient | undefined;
   onReplyPost?: ((postId: string) => void) | undefined;
   resolveMediaUrl: (path: string) => string;
   fallbackLogo: unknown;                      // OTTER_LOGO / ProxyIcon
@@ -211,6 +217,8 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           onOpenScene={props.onOpenScene}
           onLikePost={props.onLikePost}
           onReplyPost={props.onReplyPost}
+          engagementClient={props.engagementClient}
+          viewerAccountId={props.viewerAccountId}
           resolveMediaUrl={props.resolveMediaUrl}
           fallbackLogo={props.fallbackLogo}
           color={props.color}
@@ -277,11 +285,62 @@ function PostsTab(props: {
   // R15.99: 接 pinnedIds 进来 — ProfileTabs 顶层 hasRealPin 闭包不传进 PostsTab,
   //   而 PostsTab 内部 PinnedCard render 条件需要.
   pinnedIds?: ReadonlyArray<string> | undefined;
+  // PROFILE-REPLIES-VISIBLE-001: 帖子互动数据（计数 + 评论列表） hydration 用。
+  engagementClient?: EngagementClient | undefined;
+  viewerAccountId?: string | undefined;
   color: ProfileTabsProps["color"];
 }): React.JSX.Element {
   const [view, setView] = useState<"LIST" | "GRID">("LIST");
   // R15.99: hasRealPin local — 跟 ProfileTabs 顶层同逻辑.
   const hasRealPin = !!(props.pinnedIds && props.pinnedIds.length > 0);
+  // PROFILE-REPLIES-VISIBLE-001: 每帖的计数（getPostEngagement）+ 评论列表
+  // （点开才拉 ListPostReplies）。失败不断屏：计数缺席就不显示数字（不回填 0），
+  // 评论拉失败行内提示可重试。hydratedRef 避免重复注水。
+  const [postEngagement, setPostEngagement] = useState<Record<string, PostEngagement>>({});
+  const [postReplies, setPostReplies] = useState<Record<string, PostReply[]>>({});
+  const [expandedReplies, setExpandedReplies] = useState<ReadonlySet<string>>(new Set());
+  const [repliesFailed, setRepliesFailed] = useState<Record<string, boolean>>({});
+  const hydratedEngagementRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const client = props.engagementClient;
+    if (!client) return;
+    const fresh = props.posts.map((post) => post.postId).filter((id) => !hydratedEngagementRef.current.has(id));
+    if (fresh.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const settled = await Promise.all(fresh.map(async (postId) => {
+        try {
+          return await client.getPostEngagement(postId);
+        } catch {
+          return undefined;
+        }
+      }));
+      if (cancelled) return;
+      const next: Record<string, PostEngagement> = {};
+      settled.forEach((eng, index) => {
+        const postId = fresh[index];
+        if (!postId || !eng) return;
+        hydratedEngagementRef.current.add(postId);
+        next[postId] = eng;
+      });
+      if (Object.keys(next).length > 0) setPostEngagement((previous) => ({ ...previous, ...next }));
+    })();
+    return () => { cancelled = true; };
+  }, [props.posts, props.engagementClient]);
+  function togglePostReplies(postId: string): void {
+    const client = props.engagementClient;
+    if (!client) return;
+    if (expandedReplies.has(postId)) {
+      setExpandedReplies((previous) => { const next = new Set(previous); next.delete(postId); return next; });
+      return;
+    }
+    setExpandedReplies((previous) => new Set(previous).add(postId));
+    if (postReplies[postId] !== undefined) return;
+    setRepliesFailed((previous) => ({ ...previous, [postId]: false }));
+    void client.listPostReplies(postId, 50)
+      .then((listed) => setPostReplies((previous) => ({ ...previous, [postId]: listed.replies })))
+      .catch(() => setRepliesFailed((previous) => ({ ...previous, [postId]: true })));
+  }
   const allMediaEntries = useMemo(() => {
     const out: ProfileMediaEntry[] = [];
     for (const post of props.posts) {
@@ -362,6 +421,12 @@ function PostsTab(props: {
             onOpenScene={props.onOpenScene}
             onLikePost={props.onLikePost}
             onReplyPost={props.onReplyPost}
+            engagement={postEngagement[props.pinnedPost.postId]}
+            replies={postReplies[props.pinnedPost.postId]}
+            repliesExpanded={expandedReplies.has(props.pinnedPost.postId)}
+            repliesFailed={repliesFailed[props.pinnedPost.postId] === true}
+            onToggleReplies={() => { const pinned = props.pinnedPost; if (pinned) togglePostReplies(pinned.postId); }}
+            replyViewerId={props.viewerAccountId}
             resolveMediaUrl={props.resolveMediaUrl}
           />
         </View>
@@ -383,6 +448,12 @@ function PostsTab(props: {
             onOpenScene={props.onOpenScene}
             onLikePost={props.onLikePost}
             onReplyPost={props.onReplyPost}
+            engagement={postEngagement[post.postId]}
+            replies={postReplies[post.postId]}
+            repliesExpanded={expandedReplies.has(post.postId)}
+            repliesFailed={repliesFailed[post.postId] === true}
+            onToggleReplies={() => togglePostReplies(post.postId)}
+            replyViewerId={props.viewerAccountId}
             resolveMediaUrl={props.resolveMediaUrl}
           />
         ))
@@ -402,6 +473,14 @@ function PostCard(props: {
   onOpenScene?: ((sceneId: string) => void) | undefined;
   onLikePost?: ((postId: string) => void) | undefined;
   onReplyPost?: ((postId: string) => void) | undefined;
+  // PROFILE-REPLIES-VISIBLE-001: 收到的计数 + 评论列表（调用方 hydrate 进来）。
+  // 全是可选：没传就是今天的样子（只有动作按钮，不编数字）。
+  engagement?: PostEngagement | undefined;
+  replies?: ReadonlyArray<PostReply> | undefined;
+  repliesExpanded?: boolean | undefined;
+  repliesFailed?: boolean | undefined;
+  onToggleReplies?: (() => void) | undefined;
+  replyViewerId?: string | undefined;
   resolveMediaUrl: (path: string) => string;
 }): React.JSX.Element {
   const sharePost = (): void => {
@@ -462,6 +541,41 @@ function PostCard(props: {
             <Text selectable style={styles.postActionText}>↗ 分享</Text>
           </Pressable>
         </View>
+        {/* PROFILE-REPLIES-VISIBLE-001：收到的赞数/评论列表。计数只在拉到后显示
+            （>0 才画，不回填 0）；评论点开才拉，拉失败行内提示。作者名走
+            resolveReplyAuthorDisplayName —— 无名不显示裸 id。 */}
+        {props.onToggleReplies && props.engagement && (props.engagement.reactions > 0 || props.engagement.replies > 0) ? (
+          <Pressable
+            onPress={props.onToggleReplies}
+            style={styles.postReplyToggle}
+            accessibilityLabel={props.repliesExpanded ? "收起评论" : "展开评论"}
+          >
+            <Text selectable style={styles.postReplyToggleText}>
+              {props.engagement.reactions > 0 ? `♡ ${props.engagement.reactions}  ` : ""}💬 {props.engagement.replies} 条评论 {props.repliesExpanded ? "︿" : "﹀"}
+            </Text>
+          </Pressable>
+        ) : null}
+        {props.repliesExpanded && props.onToggleReplies ? (
+          props.repliesFailed ? (
+            <Pressable onPress={props.onToggleReplies} style={styles.postReplyToggle} accessibilityLabel="收起评论">
+              <Text selectable style={styles.postReplyToggleText}>评论暂时无法读取，点这里收起重试</Text>
+            </Pressable>
+          ) : (
+            <View>
+              {(props.replies ?? []).map((reply) => (
+                <View key={reply.replyId} style={styles.replyCard}>
+                  <View style={styles.replyMeta}>
+                    <Text selectable style={styles.replyTarget}>
+                      {resolveReplyAuthorDisplayName(reply, props.replyViewerId)}
+                    </Text>
+                    <Text selectable style={styles.replyTime}>· {replyTimestampLabel(reply.createdAt)}</Text>
+                  </View>
+                  <Text selectable style={styles.replyText}>{reply.body}</Text>
+                </View>
+              ))}
+            </View>
+          )
+        ) : null}
       </View>
     </View>
   );
@@ -689,6 +803,8 @@ const styles = StyleSheet.create({
   postContextChip: { backgroundColor: "#f1f5f9", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
   postContextText: { fontSize: 11, color: "#475569" },
   postActions: { flexDirection: "row", gap: 16, marginTop: 10 },
+  postReplyToggle: { marginTop: 8 },
+  postReplyToggleText: { color: "#64748b", fontSize: 12, fontWeight: "600" },
   postAction: { paddingVertical: 4 },
   postActionText: { fontSize: 12, color: "#64748b" },
   // Photo grid

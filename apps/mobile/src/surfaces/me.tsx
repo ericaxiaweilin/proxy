@@ -2226,6 +2226,7 @@ export function MeSurface({
                 }
               }}
               onLikePost={engagement ? (postId) => { void engagement.reactToPost(postId, "LIKE", true).then(() => setLikeError(undefined)).catch(() => setLikeError("点赞没有提交成功，请检查连接后重试。")); } : undefined}
+              engagementClient={engagement ?? undefined}
               viewerMode={isSelfProfile ? "SELF" : "OTHER"}
               viewerAccountId={viewerAccountId}
               isFollowing={false}

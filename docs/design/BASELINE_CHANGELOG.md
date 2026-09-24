@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 274 — 2026-09-24
+
+- **个人主页帖子显示收到的互动**（PROFILE-REPLIES-VISIBLE-001）：feed 里能看到
+  的赞数/评论列表，在主页 PostCard 上完全看不见（只有动作按钮）。调用方传
+  `engagementClient` 进来后按帖 hydrate 计数、点 💬 行展开拉评论；作者名走
+  `resolveReplyAuthorDisplayName`，无名不显示裸 id；没传 client 就是今天的样子。
+- 影响文件：`apps/mobile/src/surfaces/ProfileTabs.tsx`、
+  `apps/mobile/src/surfaces/me.tsx`、
+  `apps/mobile/src/surfaces/other-profile.tsx`。
+
 ## Revision 273 — 2026-09-24
 
 - **「我的」分析弹层接真数据**（ANALYTICS-ME-001）：浏览/互动两行曾写死 "—"。
