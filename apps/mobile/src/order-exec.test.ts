@@ -10,7 +10,7 @@ describe("ORDER-EXEC-001 order detail drives the lifecycle", () => {
     expect(orders).toContain('detail.lifecycle === "OFFERED"');
     expect(orders).toContain("client.confirmCooperation(detail.orderId)");
     expect(orders).toContain('detail.lifecycle === "CONFIRMED"');
-    expect(orders).toContain("client.startExecution(detail.orderId)");
+    expect(orders).toContain("client.checkInOrder(detail.orderId");
     expect(orders).toContain('detail.lifecycle === "EXECUTING"');
     expect(orders).toContain("pickOutcomePhoto()");
     expect(orders).toContain("submitCompletion(detail.orderId)");
@@ -18,12 +18,12 @@ describe("ORDER-EXEC-001 order detail drives the lifecycle", () => {
     expect(orders).toContain("client.recordSatisfaction(detail.orderId");
   });
 
-  it("stays lean: one path per transition, evidence folds into completion", () => {
-    // 打卡跟开始执行是同一个状态跃迁，只留一键；证据并进确认完成（可选照片）。
-    expect(orders).not.toContain("checkinMarket");
-    expect(orders).not.toContain('accessibilityLabel="到场打卡"');
-    expect(orders).not.toContain("submitEvidencePhoto(");
-    expect(orders).not.toContain("记录结果并完成");
+  it("arrival follows the consumption scenario, not a generic start", () => {
+    // PRD Ch11：到场是信任锚（agent 到场举证，requester 可确认到场），
+    // 开工是另一个节拍。UI 只给出场这一条路，不摆两条。
+    expect(orders).toContain('accessibilityLabel="确认到场"');
+    expect(orders).not.toContain('accessibilityLabel="开始执行"');
+    expect(orders).toContain("client.recordOutcome(orderId");
   });
 
   it("satisfaction is requester-only and settlement is DIRECT-only", () => {

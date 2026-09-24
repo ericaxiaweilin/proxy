@@ -104,6 +104,8 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
   // 成功后重拉列表并同步明细；服务端拒绝码翻译成人话，不直接展示。
   const [acting, setActing] = useState<string | undefined>(undefined);
   const [actError, setActError] = useState<string | undefined>(undefined);
+  const [checkinMarket, setCheckinMarket] = useState("");
+  const [checkinPlace, setCheckinPlace] = useState("");
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   const [outcomeOnTime, setOutcomeOnTime] = useState(true);
   const [outcomeScope, setOutcomeScope] = useState(true);
@@ -187,6 +189,13 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
     }
   }
 
+  // 打卡地点默认填快照里的碰面地点；市场名按碰面地点猜填，可改。
+  useEffect(() => {
+    if (detail) {
+      if (checkinPlace === "") setCheckinPlace(detail.snapshot.meetingContext || "");
+    }
+  }, [detail?.orderId]);
+
   if (detail) {
     const showSettlement = detail.snapshot.settlementMode === "DIRECT_SETTLEMENT" && detail.lifecycle !== "OFFERED" && detail.lifecycle !== "CANCELLED";
     const actBtn = [styles.orderTab, styles.orderActBtn];
@@ -231,16 +240,35 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
           ) : null}
           {detail.lifecycle === "CONFIRMED" ? (
             <View style={styles.orderCard}>
-              <Text selectable style={styles.orderTitle}>开始执行</Text>
-              {/* 到场打卡跟开始执行是同一个状态跃迁（CONFIRMED→EXECUTING），只留一键，
-                  不摆两条路。打卡要填市场编号，先不放出来，服务端保留该能力。 */}
+              <Text selectable style={styles.orderTitle}>到场</Text>
+              {/* 消费场景（PRD Ch11）：到场是信任锚 —— agent 到场举证，requester 也可
+                  按"对方已到场"确认。开工是另一个节拍，服务端保留 StartExecution
+                  能力，UI 只给出场这一条路，步骤不翻倍。 */}
+              <Text selectable style={styles.orderFieldLabel}>碰面地点（默认快照里的地点）</Text>
+              <TextInput
+                value={checkinPlace}
+                onChangeText={setCheckinPlace}
+                placeholder="碰面地点"
+                placeholderTextColor={color.muted}
+                style={styles.actInput}
+                accessibilityLabel="碰面地点"
+              />
+              <Text selectable style={styles.orderFieldLabel}>市场 / 商场名</Text>
+              <TextInput
+                value={checkinMarket}
+                onChangeText={setCheckinMarket}
+                placeholder="如 Complex 01"
+                placeholderTextColor={color.muted}
+                style={styles.actInput}
+                accessibilityLabel="市场编号"
+              />
               <Pressable
-                disabled={acting !== undefined}
-                onPress={() => void runOrderAction("开始执行", detail.orderId, () => client.startExecution(detail.orderId))}
+                disabled={acting !== undefined || checkinMarket.trim() === ""}
+                onPress={() => void runOrderAction("到场", detail.orderId, () => client.checkInOrder(detail.orderId, { marketId: checkinMarket.trim(), locationLabel: checkinPlace.trim() || checkinMarket.trim() }))}
                 style={actBtn}
-                accessibilityLabel="开始执行"
+                accessibilityLabel="确认到场"
               >
-                <Text selectable style={actBtnText}>{acting === "开始执行" ? "提交中…" : "开始执行"}</Text>
+                <Text selectable style={actBtnText}>{acting === "到场" ? "提交中…" : "确认到场"}</Text>
               </Pressable>
             </View>
           ) : null}

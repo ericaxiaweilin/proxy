@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 281 — 2026-09-24
+
+- **订单执行跟消费场景对齐**（ORDER-EXEC-001 跟进）：用户「是按照消费场景来的吗」。
+  对过 PRD Ch11/Ch10/Ch12：到场是信任锚（agent 到场举证、requester 可确认），
+  开工是另一个节拍 —— 上版拿通用的开始执行替掉到场，省错了地方。换回确认到场
+  （地点默认快照碰面地，市场名给示例）；确认合作 → 到场 → 确认完成 → 评价
+  （+结算/取消）四步不变。
+- 影响文件：`apps/mobile/src/surfaces/me-orders.tsx`。
+
 ## Revision 280 — 2026-09-24
 
 - **订单执行流程砍到四步**（ORDER-EXEC-001 跟进）：用户「步骤太多了」。打卡跟
