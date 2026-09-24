@@ -59,8 +59,6 @@ type Seed struct {
 }
 
 type Service struct {
-	// profileAlias：作者 id → 本人用户账号（AVATAR-AGENT-ALIAS-001）。
-	profileAlias           ProfileAlias
 	mu                     sync.Mutex
 	repository             Repository
 	clock                  clock.Clock
@@ -403,9 +401,9 @@ func (s *Service) recordLegalConsents(ctx context.Context, userID, docVersion st
 // 年龄断言流水（migrations/085）。
 //
 // COMP-AGE-001：判定与留痕是两个动作，此前只有判定。没有留痕意味着 ——
-//  1. 无法复查（账号一旦建好，年龄这件事就再没人知道）
-//  2. 无法举证（监管问「你怎么确认他 18 岁」，答不上来）
-//  3. 未成年人保护无从做起（没有任何年龄信号可供 AI 法 134/2025 的守卫使用）
+//   1. 无法复查（账号一旦建好，年龄这件事就再没人知道）
+//   2. 无法举证（监管问「你怎么确认他 18 岁」，答不上来）
+//   3. 未成年人保护无从做起（没有任何年龄信号可供 AI 法 134/2025 的守卫使用）
 //
 // 与同意记录同样的写法：走可选接口断言，不进 Repository 契约，
 // 因此隐私/年龄这两套独立部署的表缺了也不会把注册主流程拖垮。
@@ -424,10 +422,10 @@ func (s *Service) RecordAgeAssertionDetached(ctx context.Context, userID, dateOf
 
 // RecordAgeAssertionBackfill 给 COMP-AGE-001 之前注册的老账号补一条年龄断言。
 // 那些账号注册时没填出生日期，服务端零年龄证据，AI 伴侣 / 分身门禁
-// （COMP-AI-MINOR-001）会 fail-closed 拒绝 —— 补上这条就能用。
+//（COMP-AI-MINOR-001）会 fail-closed 拒绝 —— 补上这条就能用。
 //
 // Append-only：和注册断言一样只追加不覆盖，写错重交一行新的即可纠正
-// （AgeAt 取最新一行）。来源 SELF_DECLARED_BACKFILL 与注册时的
+//（AgeAt 取最新一行）。来源 SELF_DECLARED_BACKFILL 与注册时的
 // SELF_DECLARED_AT_SIGNUP 区分开，举证时说得清。
 //
 // 任何能解析的过去日期都如实记录 —— 包括未成年。成年与否由各门禁判定，
@@ -511,7 +509,7 @@ func (s *Service) lookupPasswordlessIdentity(ctx context.Context, e command.Enve
 // unlimited fresh codes, each with its own 5 attempts.
 const (
 	otpThrottlePerMinute = 1
-	otpThrottlePerHour   = 10
+	otpThrottlePerHour  = 10
 	otpThrottleWindow    = time.Minute
 	otpThrottleHourly    = time.Hour
 )
@@ -521,9 +519,9 @@ const (
 // boundary; this counter bounds CODE DELIVERY per login identifier
 // (the resource that actually costs money and attack surface).
 type otpThrottler struct {
-	mu     sync.Mutex
-	minute map[string][]time.Time
-	hourly map[string][]time.Time
+	mu       sync.Mutex
+	minute   map[string][]time.Time
+	hourly   map[string][]time.Time
 }
 
 func newOtpThrottler() *otpThrottler {
@@ -1555,12 +1553,6 @@ func (s *Service) updateProfile(ctx context.Context, e command.Envelope) command
 	return r
 }
 
-// ProfileAlias 把「不是用户账号的作者 id」（如服务者 id）映射到本人的用户账号；ok=false 表示没有绑定。
-type ProfileAlias func(ctx context.Context, id string) (string, bool)
-
-// SetProfileAlias 接上作者 id → 用户账号的映射（AVATAR-AGENT-ALIAS-001）。nil = 不映射。
-func (s *Service) SetProfileAlias(alias ProfileAlias) { s.profileAlias = alias }
-
 func (s *Service) getProfile(ctx context.Context, e command.Envelope) command.Result {
 	userID := e.Target.ID
 	if userID == "" {
@@ -1577,17 +1569,6 @@ func (s *Service) getProfile(ctx context.Context, e command.Envelope) command.Re
 		return command.Rejected(e, "INVALID_PROFILE_READ", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_profile_read", nil)
 	}
 	p, err := s.profileService.GetProfile(ctx, userID)
-	// AVATAR-AGENT-ALIAS-001：服务者身份（agent_linh）发的帖，作者 id 是服务者 id 而不是用户账号 —— 没有资料，
-	// 动态里就只剩一个黑色首字头像。服务者档案绑定了本人的用户账号（supply.agent_profiles.user_account_id），
-	// 找不到时按绑定账号读本人资料；返回的 userAccountId 仍是被问的那个 id（调用方按它缓存）。
-	if errors.Is(err, ErrProfileNotFound) && s.profileAlias != nil {
-		if linked, ok := s.profileAlias(ctx, userID); ok && linked != "" && linked != userID {
-			if lp, lerr := s.profileService.GetProfile(ctx, linked); lerr == nil {
-				lp.UserAccountID = userID
-				p, err = lp, nil
-			}
-		}
-	}
 	if errors.Is(err, ErrProfileNotFound) {
 		return command.Rejected(e, "PROFILE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "identity.profile_not_found", nil)
 	}

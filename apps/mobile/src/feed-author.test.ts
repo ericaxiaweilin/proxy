@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import { isOwnAuthorId, isOwnPost, resolveAuthorDisplayName, resolveReplyAuthorDisplayName } from "./feed-author";
 
 describe("FEED-OWN-001 different accounts never share the own-post label", () => {
-  it("labels only the author's own posts as 你", () => {
+  // OWN-NAME-001：自己的帖子显示自己的用户名（当前资料名优先），不再是「你」。
+  it("labels the author's own posts with their own name, not 你", () => {
     const mine = { authorId: "user_a", authorDisplayName: "A" };
     const theirs = { authorId: "user_b", authorDisplayName: "B" };
-    expect(resolveAuthorDisplayName(mine, "user_a")).toBe("你");
+    expect(resolveAuthorDisplayName(mine, "user_a")).toBe("A");
+    expect(resolveAuthorDisplayName(mine, "user_a", "A 改名后")).toBe("A 改名后");
     expect(resolveAuthorDisplayName(theirs, "user_a")).toBe("B");
     expect(isOwnPost(mine, "user_a")).toBe(true);
     expect(isOwnPost(theirs, "user_a")).toBe(false);
@@ -17,8 +19,9 @@ describe("FEED-OWN-001 different accounts never share the own-post label", () =>
     // Other viewers see a neutral label, never "你" and never a raw id.
     expect(resolveAuthorDisplayName(poisoned, "user_new")).toBe("用户");
     expect(isOwnPost(poisoned, "user_new")).toBe(false);
-    // The real author still sees their own post as "你" via author id.
-    expect(resolveAuthorDisplayName(poisoned, "user_dev")).toBe("你");
+    // The real author sees their current name (never 你); without it, the neutral label.
+    expect(resolveAuthorDisplayName(poisoned, "user_dev", "Dev")).toBe("Dev");
+    expect(resolveAuthorDisplayName(poisoned, "user_dev")).toBe("用户");
     expect(isOwnPost(poisoned, "user_dev")).toBe(true);
   });
 
@@ -42,9 +45,9 @@ describe("FEED-REPLY-001 comment author shows a name, never an account id", () =
     expect(resolveReplyAuthorDisplayName(reply, "user_a")).toBe("Khoa");
   });
 
-  it("labels the viewer's own comment as 你", () => {
+  it("labels the viewer's own comment with their own name, not 你", () => {
     const mine = { actorId: "user_a", actorDisplayName: "Huyen" };
-    expect(resolveReplyAuthorDisplayName(mine, "user_a")).toBe("你");
+    expect(resolveReplyAuthorDisplayName(mine, "user_a")).toBe("Huyen");
   });
 
   it("never falls back to the raw account id when the name is missing", () => {
@@ -60,8 +63,8 @@ describe("FEED-REPLY-001 comment author shows a name, never an account id", () =
     const poisoned = { actorId: "user_b", actorDisplayName: "你" };
     expect(resolveReplyAuthorDisplayName(poisoned, "user_a")).toBe("用户");
     expect(resolveReplyAuthorDisplayName(poisoned, undefined)).toBe("用户");
-    // 真正的作者仍然凭 actorId 认领自己的评论。
-    expect(resolveReplyAuthorDisplayName(poisoned, "user_b")).toBe("你");
+    // 真正的作者看到自己的当前名字（不是「你」）。
+    expect(resolveReplyAuthorDisplayName(poisoned, "user_b", "B")).toBe("B");
   });
 
   it("agrees with the post author label for the same identity", () => {

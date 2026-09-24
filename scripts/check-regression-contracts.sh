@@ -362,15 +362,18 @@ if grep -qE 'agentId: "agent_(linh|mai|minh)"' apps/mobile/src/uiplan/fixtures.t
 fi
 # PROFILE-ENGAGEMENT-WIRE-001（P0）：MeSurface 漏传 engagement → 个人主页没有 ♡ 喜欢 / 赞数 / 评论，洞察全是 —。
 # PROFILE-VIEWS-HEADER-001（P0）：个人主页「次浏览 · 最近 30 天」以前写死 —。
-# AVATAR-AGENT-ALIAS-001 / AVATAR-FALLBACK-TINT-001（P0）：服务者身份的帖用本人头像；没头像不再是 #111 黑圆。
+# AVATAR-FALLBACK-TINT-001（P0）：没头像不再是 #111 黑圆。
 if ! awk '/<MeSurface/,/\/>/' apps/mobile/src/shell/app-shell.tsx | grep -qF 'engagement={engagement}' ||
    grep -qF '<Text selectable style={styles.personalStatValue}>—</Text> 次浏览' apps/mobile/src/surfaces/me.tsx ||
    grep -A3 '^  postAvatar: {' apps/mobile/src/surfaces/feed.tsx | grep -qF 'backgroundColor: "#111"' && ! grep -qF 'initialAvatarTint(post.authorId)' apps/mobile/src/surfaces/feed.tsx; then
   echo "  FAIL [PROFILE-ENGAGEMENT-WIRE-001 / PROFILE-VIEWS-HEADER-001 / AVATAR-FALLBACK-TINT-001]: 个人主页又没有互动 / 浏览数写死 / 没头像又是黑圆。" >&2
   exit 1
 fi
-require_test "AVATAR-AGENT-ALIAS-001" "./internal/identity" "TestGetProfileFollowsAgentAliasToTheLinkedAccount" \
-  "apps/api-go/internal/identity/profile_alias_test.go" || exit $?
+# AVATAR-AGENT-ALIAS-001 已撤回（2026-09-24）：agent_* 发的帖是集成测试种子，映射到本人会把测试帖显示成真人发的（P0）。
+if grep -qF 'SetProfileAlias' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [OWN-NAME-001 / AVATAR-AGENT-ALIAS-001]: 又把服务者 id 映射成本人资料 —— 测试帖会冒充真人。" >&2
+  exit 1
+fi
 echo "    OPS-REAL-001: PASS (operator console is operator-only; no fixture numbers; population/behaviour live)"
 
 require_test "UI-SOCIAL-002" "./internal/identity" \

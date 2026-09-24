@@ -134,7 +134,7 @@ function scenarioIconForPost(post: FeedPost): ProxyIconName {
 }
 
 // FEED-OWN-001: "你" is viewer-relative and resolved per call site via
-// resolveAuthorDisplayName(post, viewerAccountId) — never a stored name.
+// resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName) — never a stored name.
 
 function relativeTime(iso: string): string {
   const diffMs = Date.now() - Date.parse(iso);
@@ -392,6 +392,16 @@ export function FeedSurface({
   // 真相源是模块级 humanAvatarCache（跨 remount 存活）；这个计数器只是让缓存
   // 增长后能触发一次重算 —— 不另存一份 state，就不会出现「缓存有了、state 还是
   // 旧的」这种两处状态互相追不上的 bug。
+  // OWN-NAME-001：自己的帖子显示自己的当前用户名（不再是「你」）。拿不到就用帖子保存的名字。
+  const [viewerDisplayName, setViewerDisplayName] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!profileClient || !viewerAccountId) return undefined;
+    let cancelled = false;
+    profileClient.getProfile(viewerAccountId)
+      .then((profile) => { if (!cancelled) setViewerDisplayName(profile.name?.trim() || undefined); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [profileClient, viewerAccountId]);
   const [humanAvatarVersion, setHumanAvatarVersion] = useState(0);
   const humanAvatarsById = useMemo(() => snapshotHumanAvatars(), [humanAvatarVersion]);
   useEffect(() => {
@@ -1117,7 +1127,7 @@ export function FeedSurface({
       if (!isPostWithinScope(post.createdAt, scope)) return false;
       // 偏好-不想看：主题切词命中正文/上下文/作者即隐藏。
       if (feedPrefs.muted.length > 0) {
-        const haystack = [resolveAuthorDisplayName(post, viewerAccountId), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
+        const haystack = [resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
           .filter((value): value is string => typeof value === "string")
           .join(" ")
           .toLocaleLowerCase();
@@ -1164,7 +1174,7 @@ export function FeedSurface({
       } else if (customFeedTokens.length > 0) {
         // AI 生成的自定频道（id=ai_…）：内置 feedMap 没有规则，
         // 用频道名+描述切词做本地过滤；之前直接看全部。
-        const haystack = [resolveAuthorDisplayName(post, viewerAccountId), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
+        const haystack = [resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
           .filter((value): value is string => typeof value === "string")
           .join(" ")
           .toLocaleLowerCase();
@@ -1403,7 +1413,7 @@ export function FeedSurface({
           {visible.map((post) => {
           const quoted = findQuote(post);
           const items = mediaFor(post.postId);
-          const name = resolveAuthorDisplayName(post, viewerAccountId);
+          const name = resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName);
           // MEDIA-PIPELINE-001: 头像走统一管线（本人/AI 账号/AI 人像/首字）。
           const avatar = resolveAuthorAvatar(
             { authorType: post.authorType, authorId: post.authorId },
@@ -1549,9 +1559,9 @@ export function FeedSurface({
                 <View style={styles.quoteCard}>
                   <View style={styles.quoteHead}>
                     <View style={styles.quoteAvatar}>
-                      <Text selectable style={styles.quoteAvatarText}>{resolveAuthorDisplayName(quoted, viewerAccountId).charAt(0)}</Text>
+                      <Text selectable style={styles.quoteAvatarText}>{resolveAuthorDisplayName(quoted, viewerAccountId, viewerDisplayName).charAt(0)}</Text>
                     </View>
-                    <Text selectable style={styles.quoteAuthor}>{resolveAuthorDisplayName(quoted, viewerAccountId)}</Text>
+                    <Text selectable style={styles.quoteAuthor}>{resolveAuthorDisplayName(quoted, viewerAccountId, viewerDisplayName)}</Text>
                     <Text selectable style={styles.quoteMeta}>引用帖文</Text>
                   </View>
                   <Text selectable numberOfLines={2} style={styles.quoteBody}>{quoted.body}</Text>
@@ -1604,7 +1614,7 @@ export function FeedSurface({
 			  {shownReplies.map((reply) => (
 				<View key={reply.replyId} style={styles.postReply}>
 				  {/* FEED-REPLY-001: 显示作者名，绝不回显 actorId。 */}
-				  <Text selectable style={styles.postReplyAuthor}>{resolveReplyAuthorDisplayName(reply, viewerAccountId)}</Text>
+				  <Text selectable style={styles.postReplyAuthor}>{resolveReplyAuthorDisplayName(reply, viewerAccountId, viewerDisplayName)}</Text>
 				  <Text selectable style={styles.postReplyBody}>{reply.body}</Text>
 				</View>
 			  ))}
@@ -1699,7 +1709,7 @@ export function FeedSurface({
           key={viewer.postId}
           items={viewerItems}
           index={viewer.index}
-          author={resolveAuthorDisplayName(viewerPost, viewerAccountId)}
+          author={resolveAuthorDisplayName(viewerPost, viewerAccountId, viewerDisplayName)}
           resolveUrl={(path) => localNet.resolveMediaUrl(path)}
           onNavigate={(next) => {
             setMediaPositions((current) => ({ ...current, [viewer.postId]: next }));

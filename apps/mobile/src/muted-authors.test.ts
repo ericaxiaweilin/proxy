@@ -69,9 +69,9 @@ describe("mutedAuthorLabel", () => {
   });
 
   it("is viewer-relative like every other author label", () => {
-    // 跟 feed-author 同一条链：自己的行显示"你"，别人的行显示名字。
+    // 跟 feed-author 同一条链（OWN-NAME-001：自己也显示名字，不再是「你」）。
     // 这里断言的是「同一个解析器」，不是另起一套命名规则。
-    expect(mutedAuthorLabel(entry("user_001", "Huyen"), "user_001")).toBe("你");
+    expect(mutedAuthorLabel(entry("user_001", "Huyen"), "user_001")).toBe("Huyen");
     expect(mutedAuthorLabel(entry("author_b", "Khoa"), "user_001")).toBe("Khoa");
   });
 

@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 276 — 2026-09-24
+
+- **撤回 AVATAR-AGENT-ALIAS-001（P0）+ 自己的帖子显示用户名（OWN-NAME-001）**：用户：「那些帖文是之前测试账户发的 为什么现在变成了其它账户的帖文
+  严重 p0」「自己的帖文 显示不叫你 而是正常用户名 点击头像也是跳转到个人主页 逻辑都一样」。
+  - Rev275 把 agent_* 作者按服务者档案映射到本人资料 —— 但 agent_linh 的 8 条帖是集成测试种子（pin / rb test seed），
+    结果显示成了 Linh 本人发的。已完全撤回（identity / main.go 恢复原样），并加钉子防止再映射。
+  - 自己的帖子 / 评论不再显示「你」，跟别人一样显示用户名（当前资料名优先，其次帖子保存的名字）；点头像同一套逻辑（菜单无「关注」，可访问主页）。
+- 影响文件：`apps/mobile/src/feed-author.ts`、`apps/mobile/src/surfaces/feed.tsx`。
+
 ## Revision 275 — 2026-09-24
 
 - **P0：动态「黑头」头像 + 个人主页互动空白**（AVATAR-FALLBACK-TINT-001 / AVATAR-AGENT-ALIAS-001 / PROFILE-ENGAGEMENT-WIRE-001 / PROFILE-VIEWS-HEADER-001）：
