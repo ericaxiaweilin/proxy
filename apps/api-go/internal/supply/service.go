@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/geo"
+	"github.com/proxy-app/proxy-api/internal/matching"
 )
 
 // Supply 真源（R14 Canonical Data Model §6 + B 完成标准）。
@@ -122,6 +124,8 @@ type Candidate struct {
 	Eligibility    EligibilitySnapshot  `json:"eligibility"`
 	Availability   AvailabilitySnapshot `json:"availability"`
 	RankingReason  string               `json:"rankingReason"`
+	// MATCH-RANK-001：排序得分明细（可靠 / 满意 / 经验 / 响应 / 适配），只含履约与评价信号，不含任何曝光数据。
+	Ranking *matching.Breakdown `json:"ranking,omitempty"`
 }
 
 // CandidateBatch 是一次有限候选集的快照。
@@ -497,6 +501,26 @@ type Service struct {
 	// = 候选集为空。这是刻意的 fail-closed，不是 bug：宁可撮合不着，
 	// 也不能在「明知卖家匿名」的状态下收款。
 	sellerIdentity SellerIdentityLookup
+	// MATCH-RANK-001：撮合排序的真实信号。nil = 没接 → 全员按先验分 + 价格排（不假装有履约记录）。
+	rankingSignals matching.SignalSource
+}
+
+// SetRankingSignals 接上撮合排序信号（履约 / 满意 / 引力响应）。
+func (s *Service) SetRankingSignals(source matching.SignalSource) {
+	s.rankingSignals = source
+}
+
+// rankSignals 读候选的排序信号；读失败只记日志，按「没有记录」排（撮合不能因为排序信号挂掉而整个失败）。
+func (s *Service) rankSignals(ctx context.Context, agentIDs []string) map[string]matching.Signals {
+	if s.rankingSignals == nil {
+		return map[string]matching.Signals{}
+	}
+	signals, err := s.rankingSignals.Signals(ctx, agentIDs)
+	if err != nil {
+		log.Printf("supply ranking signals unavailable: %v", err)
+		return map[string]matching.Signals{}
+	}
+	return signals
 }
 
 // SetSellerIdentityLookup 接上实名查询。不接就撮合不出任何候选。
@@ -1291,6 +1315,8 @@ type batchPayload struct {
 	DurationH    int      `json:"durationH"`
 	Languages    []string `json:"languages"`
 	Capabilities []string `json:"capabilities"`
+	// MATCH-RANK-001：需求方预算（可选）。给了才算「预算适配」分，不给不猜。
+	BudgetVND int64 `json:"budgetVnd"`
 }
 
 func (s *Service) createCandidateBatch(ctx context.Context, e command.Envelope) command.Result {
@@ -1345,12 +1371,25 @@ func (s *Service) createCandidateBatch(ctx context.Context, e command.Envelope) 
 		})
 	}
 	// 排序：参考价升序 + 语言匹配优先
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].ReferencePrice != candidates[j].ReferencePrice {
-			return candidates[i].ReferencePrice < candidates[j].ReferencePrice
-		}
-		return candidates[i].AgentID < candidates[j].AgentID
-	})
+	// MATCH-RANK-001：以前只按价格从低到高排 —— 最便宜的永远第一，跟她靠不靠谱无关。
+	// 现在按真实履约 / 需求方评价 / 经验 / 引力响应 / 预算适配打分（internal/matching），同分再按价格。
+	ids := make([]string, 0, len(candidates))
+	prices := map[string]int64{}
+	byID := map[string]Candidate{}
+	for _, c := range candidates {
+		ids = append(ids, c.AgentID)
+		prices[c.AgentID] = c.ReferencePrice
+		byID[c.AgentID] = c
+	}
+	ranked := matching.Rank(ids, prices, s.rankSignals(ctx, ids), p.BudgetVND)
+	candidates = candidates[:0]
+	for _, r := range ranked {
+		c := byID[r.AgentID]
+		breakdown := r.Breakdown
+		c.Ranking = &breakdown
+		c.RankingReason = "verified_capabilities_and_availability; ranked_by_reliability_satisfaction_experience_response_fit"
+		candidates = append(candidates, c)
+	}
 	now := s.clock.Now().UTC()
 	// 有限候选集：封顶 maxBatchCandidates，且快照记录归属 principal。
 	if len(candidates) > maxBatchCandidates {

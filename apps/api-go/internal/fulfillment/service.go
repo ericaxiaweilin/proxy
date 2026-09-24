@@ -104,6 +104,9 @@ type OutcomeRecord struct {
 	ScopeCompleted  bool      `json:"scopeCompleted"`
 	ObjectiveNote   string    `json:"objectiveNote"`
 	RecordedAt      time.Time `json:"recordedAt"`
+	// MATCH-RANK-001：需求方事后的主观满意。以前 RecordSatisfaction 只发一个领域事件、哪都不存 ——
+	// 撮合排序想用「满意度」时根本没有数据可读。存在 outcome 里（同一个 JSONB 列，不用改表）。
+	Satisfaction *SatisfactionRecord `json:"satisfaction,omitempty"`
 }
 
 // SatisfactionRecord 是主观满意（Gate：履约事实不要求用户重复打分）。
@@ -1358,17 +1361,29 @@ func (s *Service) recordSatisfaction(ctx context.Context, e command.Envelope) co
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
-	if !isOrderParty(order, e.Actor.ID) {
-		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
+	// MATCH-RANK-001：满意度是「需求方对服务者」的评价，进撮合排序 —— 服务者自己不能给自己打分。
+	if order.RequesterID != e.Actor.ID {
+		return command.Rejected(e, "ONLY_REQUESTER_RATES", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.only_requester_rates", nil)
 	}
-	if order.Lifecycle != "COMPLETED" {
+	if order.Lifecycle != "COMPLETED" || order.Outcome == nil {
 		return command.Rejected(e, "ORDER_NOT_COMPLETED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.not_completed", map[string]any{"lifecycle": order.Lifecycle})
 	}
-	domainEvents := []event.DomainEvent{event.New("SatisfactionRecorded", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+	if p.RepeatIntent != "" && p.RepeatIntent != "REUSE" && p.RepeatIntent != "MAYBE" && p.RepeatIntent != "NO" {
+		return command.Rejected(e, "INVALID_REPEAT_INTENT", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_repeat_intent", nil)
+	}
+	now := s.clock.Now().UTC()
+	// 改评价 = 覆盖成最新一次（Version 递增、事件留痕），不叠加成多条。
+	order.Outcome.Satisfaction = &SatisfactionRecord{Resolved: p.Resolved, RepeatIntent: p.RepeatIntent, RecordedAt: now}
+	order.Version++
+	order.UpdatedAt = now
+	domainEvents := []event.DomainEvent{event.New("SatisfactionRecorded", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"resolved":     p.Resolved,
 		"repeatIntent": p.RepeatIntent,
 		"note":         "履约事实不要求用户重复打分",
 	})}
+	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
+		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
+	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
 }
 

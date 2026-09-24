@@ -26,6 +26,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
+	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/notification"
@@ -257,6 +258,8 @@ func main() {
 		// COMP-SELLER-001：候选资格只认已实名且未过期的卖家。接在这里（pool 分支内）
 		// 意味着没有数据库时 lookup 为 nil → 撮合不出候选，而不是「照常撮合」。
 		supplyService.SetSellerIdentityLookup(postgres.NewSellerRealNameRepository(pool))
+		// MATCH-RANK-001: 撮合排序读真实履约 / 需求方评价 / 引力响应（不读任何曝光数据）。
+		supplyService.SetRankingSignals(matching.NewPostgres(pool))
 		mediaService = media.NewWithReviewDecisionRepository(
 			postgres.NewMediaRepository(pool),
 			postgres.NewMediaReviewDecisionRepository(pool),

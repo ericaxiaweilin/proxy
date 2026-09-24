@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
+	"github.com/proxy-app/proxy-api/internal/matching"
 )
 
 // CityCompanionSupplier 实现 citycompanion.Supplier：真实供给查询。
@@ -74,7 +75,34 @@ func (s *CityCompanionSupplier) QueryEligibleCandidates(ctx context.Context, que
 			VerifiedCaps:   verified,
 		})
 	}
-	return result, nil
+	return rankCityCompanion(ctx, s.service, result, query.BudgetVND), nil
+}
+
+// rankCityCompanion：MATCH-RANK-001 —— 按真实履约 / 需求方评价 / 经验 / 引力响应 / 预算适配排序，
+// 并带上真实的履约率 / 满意率 / 完成单量（以前是写死的 0.97 / 0.95 / 0 单，候选也不排序）。
+func rankCityCompanion(ctx context.Context, service *Service, candidates []citycompanion.SupplyCandidate, budget int64) []citycompanion.SupplyCandidate {
+	ids := make([]string, 0, len(candidates))
+	prices := map[string]int64{}
+	byID := map[string]citycompanion.SupplyCandidate{}
+	for _, c := range candidates {
+		ids = append(ids, c.AgentID)
+		prices[c.AgentID] = c.ReferencePrice
+		byID[c.AgentID] = c
+	}
+	signals := service.rankSignals(ctx, ids)
+	ranked := matching.Rank(ids, prices, signals, budget)
+	out := make([]citycompanion.SupplyCandidate, 0, len(ranked))
+	for _, r := range ranked {
+		c := byID[r.AgentID]
+		breakdown := r.Breakdown
+		c.Ranking = &breakdown
+		c.FulfillmentRate = breakdown.FulfillmentRate
+		c.SatisfactionRate = breakdown.SatisfactionRate
+		c.CompletedOrders = signals[r.AgentID].Completed
+		c.HasTrackRecord = breakdown.HasTrackRecord
+		out = append(out, c)
+	}
+	return out
 }
 
 func langList(language string) []string {

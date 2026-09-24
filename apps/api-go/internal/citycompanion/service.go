@@ -14,6 +14,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/clock"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
+	"github.com/proxy-app/proxy-api/internal/matching"
 )
 
 // CityCompanionNeed 是城市同行需求的聚合。
@@ -63,6 +64,10 @@ type Candidate struct {
 	Languages           []string `json:"languages"`
 	Style               string   `json:"style"`
 	Proofs              []string `json:"proofs"` // 1-3 个本单证明：中文已验证 / 河内 26 单 ...
+	// MATCH-RANK-001：没有任何完成单 = 新人。前端据此显示「新人 · 暂无记录」，不把 0% 当成「履约很差」。
+	HasTrackRecord bool `json:"hasTrackRecord"`
+	// MATCH-RANK-001：排序得分明细（真实供给模式才有）。
+	Ranking *matching.Breakdown `json:"ranking,omitempty"`
 }
 
 // eligibilityScore 实现 "Eligibility before Ranking"（PRD §7）：
@@ -231,6 +236,12 @@ type SupplyCandidate struct {
 	ReferencePrice int64
 	Currency       string
 	VerifiedCaps   []string
+	// MATCH-RANK-001：supplier 已按 internal/matching 排好序，并带上真实履约数字（没有记录就是 0 + HasTrackRecord=false）。
+	FulfillmentRate  float64
+	SatisfactionRate float64
+	CompletedOrders  int
+	HasTrackRecord   bool
+	Ranking          *matching.Breakdown
 }
 
 func New() *Service {
@@ -406,12 +417,15 @@ func (s *Service) candidatesFor(ctx context.Context, need CityCompanionNeed) []C
 			result := make([]Candidate, 0, len(supplyCandidates))
 			for _, sc := range supplyCandidates {
 				result = append(result, Candidate{
-					AgentID:             sc.AgentID,
-					Name:                sc.Name,
-					OfferVND:            sc.ReferencePrice, // 本单报价来自真实参考价
-					FulfillmentRate:     0.97,              // 待 Outcome 数据接入后取真实履约率
-					SatisfactionRate:    0.95,
-					CompletedCityOrders: 0,
+					AgentID:  sc.AgentID,
+					Name:     sc.Name,
+					OfferVND: sc.ReferencePrice, // 本单报价来自真实参考价
+					// MATCH-RANK-001：以前写死 0.97 / 0.95 / 0 单；现在是真实履约数字，没有记录就是没有记录。
+					FulfillmentRate:     sc.FulfillmentRate,
+					SatisfactionRate:    sc.SatisfactionRate,
+					CompletedCityOrders: sc.CompletedOrders,
+					HasTrackRecord:      sc.HasTrackRecord,
+					Ranking:             sc.Ranking,
 					Languages:           sc.Languages,
 					Style:               "city_companion",
 					Proofs:              verifiedProofs(sc.VerifiedCaps),
@@ -466,7 +480,9 @@ func (s *Service) eligible(need CityCompanionNeed) []Candidate {
 		if i >= 3 {
 			break
 		}
-		result = append(result, *item.candidate)
+		candidate := *item.candidate
+		candidate.HasTrackRecord = candidate.CompletedCityOrders > 0
+		result = append(result, candidate)
 	}
 	return result
 }

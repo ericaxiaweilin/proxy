@@ -337,6 +337,20 @@ for t in TestRegularNoonChatterHasHighGravityBeforeNoonAndLowAtNight TestSparseO
 done
 require_test "GRAVITY-001" "./internal/api" "TestOperatorGravityIsOperatorOnlyAndLive" \
   "apps/api-go/internal/api/operator_console_test.go" || exit $?
+# MATCH-RANK-001：撮合排序只用真实履约 / 需求方评价 / 经验 / 引力响应 / 预算适配；新人按先验、不编履约率；
+# 响应只打破接近的平局、压不过可靠度；不读任何曝光信号（PRD R15.2 Popularity ≠ Qualification）；
+# 满意度真的落库、服务者不能给自己打分。
+for t in TestReliableWellRatedProviderOutranksCheaperUnreliableOne TestNewProviderGetsAPriorNotZeroNorPerfect TestResponsivenessOnlyBreaksNearTies; do
+  require_test "MATCH-RANK-001" "./internal/matching" "$t" "apps/api-go/internal/matching/matching_test.go" || exit $?
+done
+require_test "MATCH-RANK-001" "./internal/fulfillment" "TestTraceableHumanOrder" \
+  "apps/api-go/internal/fulfillment/service_test.go" || exit $?
+# 真实供给路径必须用 supplier 算出的真实履约率（内存模式的演示种子池不在此列）。
+if ! grep -qE 'FulfillmentRate: +sc\.FulfillmentRate' apps/api-go/internal/citycompanion/service.go ||
+   grep -qE 'interaction_events|reactions|follows' apps/api-go/internal/matching/source.go; then
+  echo "  FAIL [MATCH-RANK-001]: 城市同行又写死了履约率，或撮合排序读了曝光 / 点赞 / 粉丝信号。" >&2
+  exit 1
+fi
 echo "    OPS-REAL-001: PASS (operator console is operator-only; no fixture numbers; population/behaviour live)"
 
 require_test "UI-SOCIAL-002" "./internal/identity" \
