@@ -109,7 +109,7 @@ var requiredOperatorScope = map[string]OperatorScope{
 	// ——「看得见该处理什么」与「记录处理了什么」是同一件治理动作的两半。
 	"ListReportQueue":         ScopeModeration,
 	"RecordReportDisposition": ScopeModeration,
-	"RecordAppealDecision":     ScopeModeration,
+	"RecordAppealDecision":    ScopeModeration,
 	// PAYMENTS
 	"ConfirmPaymentIntent": ScopePayments,
 	"RefundPaymentIntent":  ScopePayments,
@@ -117,6 +117,12 @@ var requiredOperatorScope = map[string]OperatorScope{
 	"ReleasePayout":        ScopePayments,
 	"CreateVoucher":        ScopePayments,
 	"SettleVoucher":        ScopePayments,
+	// VOUCHER-PURCHASE-001: 平台向商户采购券(B2B)—— 普通用户与商户都不能
+	// 给自己开采购单(等于自己印券),所以与 CreateVoucher / SettleVoucher
+	// 同归 PAYMENTS。这两条在 security.go 的 operatorCommandTypes 里,
+	// 却漏了 scope,导致 OPS-SCOPE-001 completeness 钉打红(2026-09-24 修)。
+	"OrderVoucherPurchase":   ScopePayments,
+	"ConfirmVoucherPurchase": ScopePayments,
 	// AUTHORITY
 	"RecordAuthorityRequest":  ScopeAuthority,
 	"RecordAuthorityResponse": ScopeAuthority,
