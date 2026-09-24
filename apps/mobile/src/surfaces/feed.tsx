@@ -1437,7 +1437,6 @@ export function FeedSurface({
 		  const collapsedReplies = hiddenReplyCount(replies.length);
 		  const offerReplyToggle = shouldOfferReplyToggle(replies.length);
           const chips = post.contextRefs.filter((entry) => entry.contextType !== "QUOTE_POST");
-          const isCityCompanion = post.authorType === "AGENT";
           return (
             <View
               key={post.postId}
@@ -1670,27 +1669,10 @@ export function FeedSurface({
                 </View>
               ) : null}
 
-              {/* postintent（基线文案）：城市同行动态 → 聊一下 / 按这个想法找同行 */}
-              {isCityCompanion ? (
-                <View style={styles.postIntent}>
-                  <Pressable onPress={() => onOpenChat(name)} style={styles.intentChat}>
-                    <Text selectable style={styles.intentChatText}>聊一下</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => {
-                      // 按这个想法找同行：用帖子的首个上下文主题（没有则取正文前 8 字）
-                      // 打开动态搜索并填入，列表即按该想法过滤——之前与“聊一下”完全同行为。
-                      const idea = post.contextRefs[0]?.contextId ?? post.body.slice(0, 8);
-                      setSearchOpen(true);
-                      setSearchQuery(idea);
-                    }}
-                    style={styles.intentNeed}
-                    accessibilityLabel="按这个想法找同行"
-                  >
-                    <Text selectable style={styles.intentNeedText}>按这个想法找同行</Text>
-                  </Pressable>
-                </View>
-              ) : null}
+              {/* FEED-POST-CLEAN-001：帖子卡底部的两个 CTA 按钮已移除 —— 产品要求
+                  所有帖文都不显示，保持清爽。原先只对 AGENT 帖（城市同行）渲染，
+                  所以此前只有部分帖文带这两个按钮。 */}
+
               </View>
             </View>
           );
@@ -2260,19 +2242,6 @@ const styles = StyleSheet.create({
   postActionText: { color: color.ink, fontSize: 12, fontWeight: "700" },
   postActionCount: { color: color.ink, fontSize: 12, fontWeight: "700" },
   postActionOn: { color: "#6C36C8" },
-
-  postIntent: { flexDirection: "row", gap: 6, marginTop: 8 },
-  intentChat: { backgroundColor: color.ink, borderRadius: 12, flex: 1, padding: 9 },
-  intentChatText: { color: color.white, fontSize: 11, fontWeight: "700", textAlign: "center" },
-  intentNeed: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 12,
-    borderWidth: 1,
-    flex: 1,
-    padding: 9
-  },
-  intentNeedText: { color: color.ink, fontSize: 11, fontWeight: "700", textAlign: "center" },
 
   // 长按减少推荐菜单（X 式 ··· 菜单）。
   menuOverlay: {
