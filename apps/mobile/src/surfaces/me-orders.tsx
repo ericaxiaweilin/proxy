@@ -104,12 +104,11 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
   // 成功后重拉列表并同步明细；服务端拒绝码翻译成人话，不直接展示。
   const [acting, setActing] = useState<string | undefined>(undefined);
   const [actError, setActError] = useState<string | undefined>(undefined);
-  const [checkinMarket, setCheckinMarket] = useState("");
-  const [checkinPlace, setCheckinPlace] = useState("");
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   const [outcomeOnTime, setOutcomeOnTime] = useState(true);
   const [outcomeScope, setOutcomeScope] = useState(true);
   const [outcomeNote, setOutcomeNote] = useState("");
+  const [outcomePhoto, setOutcomePhoto] = useState<{ uri: string; mimeType: string; width: number; height: number } | undefined>(undefined);
   const [satisfactionResolved, setSatisfactionResolved] = useState<"FULL" | "PARTIAL" | "NONE">("FULL");
   const [satisfactionRepeat, setSatisfactionRepeat] = useState<"" | "REUSE" | "MAYBE" | "NO">("");
   const [settleAmount, setSettleAmount] = useState("");
@@ -153,32 +152,40 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
     }
   }
 
-  async function submitEvidencePhoto(orderId: string): Promise<void> {
+  async function pickOutcomePhoto(): Promise<void> {
     if (!mediaClient || evidenceBusy) return;
     setActError(undefined);
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      setActError("请允许 Proxy 读取照片才能提交证据。");
+      setActError("请允许 Proxy 读取照片才能附证据。");
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8, selectionLimit: 1 });
     const asset = result.canceled ? undefined : result.assets[0];
     if (!asset?.uri) return;
+    setOutcomePhoto({ uri: asset.uri, mimeType: asset.mimeType ?? "image/jpeg", width: asset.width ?? 0, height: asset.height ?? 0 });
+  }
+
+  // 确认完成 = 可选附一张证据照片 + 准时/范围/备注，一次提交。照片先上传拿
+  // mediaAssetId 再调记录结果；没选照片就只记结果，不摆拍不了照的假按钮。
+  async function submitCompletion(orderId: string): Promise<void> {
+    if (!mediaClient && outcomePhoto) return;
+    setActError(undefined);
     setEvidenceBusy(true);
     try {
-      const uploaded = await mediaClient.uploadImage({ uri: asset.uri, mimeType: asset.mimeType ?? "image/jpeg", width: asset.width ?? 0, height: asset.height ?? 0 });
-      await runOrderAction("evidence", orderId, () => client.submitEvidence(orderId, { mediaAssetId: uploaded.mediaAssetId }));
+      if (outcomePhoto && mediaClient) {
+        const uploaded = await mediaClient.uploadImage({ uri: outcomePhoto.uri, mimeType: outcomePhoto.mimeType, width: outcomePhoto.width, height: outcomePhoto.height });
+        await client.submitEvidence(orderId, { mediaAssetId: uploaded.mediaAssetId });
+      }
+      await runOrderAction("确认完成", orderId, () => client.recordOutcome(orderId, { onTime: outcomeOnTime, scopeCompleted: outcomeScope, ...(outcomeNote.trim() ? { objectiveNote: outcomeNote.trim() } : {}) }));
+      setOutcomePhoto(undefined);
+      setOutcomeNote("");
     } catch (error) {
-      setActError(humanOrderError(error, "证据提交失败，请稍后重试。"));
+      setActError(humanOrderError(error, "完成提交失败，请稍后重试。"));
     } finally {
       setEvidenceBusy(false);
     }
   }
-
-  // 打卡地点默认填快照里的碰面地点，省一次输入；换地方就地改。
-  useEffect(() => {
-    if (detail) setCheckinPlace(detail.snapshot.meetingContext || "");
-  }, [detail?.orderId]);
 
   if (detail) {
     const showSettlement = detail.snapshot.settlementMode === "DIRECT_SETTLEMENT" && detail.lifecycle !== "OFFERED" && detail.lifecycle !== "CANCELLED";
@@ -225,6 +232,8 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
           {detail.lifecycle === "CONFIRMED" ? (
             <View style={styles.orderCard}>
               <Text selectable style={styles.orderTitle}>开始执行</Text>
+              {/* 到场打卡跟开始执行是同一个状态跃迁（CONFIRMED→EXECUTING），只留一键，
+                  不摆两条路。打卡要填市场编号，先不放出来，服务端保留该能力。 */}
               <Pressable
                 disabled={acting !== undefined}
                 onPress={() => void runOrderAction("开始执行", detail.orderId, () => client.startExecution(detail.orderId))}
@@ -233,47 +242,22 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
               >
                 <Text selectable style={actBtnText}>{acting === "开始执行" ? "提交中…" : "开始执行"}</Text>
               </Pressable>
-              <Text selectable style={styles.orderFieldLabel}>到场打卡（市场编号 + 地点）</Text>
-              <TextInput
-                value={checkinMarket}
-                onChangeText={setCheckinMarket}
-                placeholder="市场编号"
-                placeholderTextColor={color.muted}
-                style={styles.actInput}
-                accessibilityLabel="打卡市场编号"
-              />
-              <TextInput
-                value={checkinPlace}
-                onChangeText={setCheckinPlace}
-                placeholder="地点"
-                placeholderTextColor={color.muted}
-                style={styles.actInput}
-                accessibilityLabel="打卡地点"
-              />
-              <Pressable
-                disabled={acting !== undefined || checkinMarket.trim() === ""}
-                onPress={() => void runOrderAction("打卡", detail.orderId, () => client.checkInOrder(detail.orderId, { marketId: checkinMarket.trim(), locationLabel: checkinPlace.trim() || checkinMarket.trim() }))}
-                style={actBtn}
-                accessibilityLabel="到场打卡"
-              >
-                <Text selectable style={actBtnText}>{acting === "打卡" ? "提交中…" : "到场打卡"}</Text>
-              </Pressable>
             </View>
           ) : null}
           {detail.lifecycle === "EXECUTING" ? (
             <View style={styles.orderCard}>
-              <Text selectable style={styles.orderTitle}>履约进展</Text>
+              <Text selectable style={styles.orderTitle}>确认完成</Text>
               {mediaClient ? (
                 <Pressable
                   disabled={acting !== undefined || evidenceBusy}
-                  onPress={() => void submitEvidencePhoto(detail.orderId)}
+                  onPress={() => void pickOutcomePhoto()}
                   style={actBtn}
-                  accessibilityLabel="提交证据照片"
+                  accessibilityLabel="附证据照片"
                 >
-                  <Text selectable style={actBtnText}>{evidenceBusy || acting === "evidence" ? "提交中…" : "提交证据照片"}</Text>
+                  <Text selectable style={actBtnText}>{outcomePhoto ? "✓ 已选一张证据照片" : "附证据照片（可选）"}</Text>
                 </Pressable>
               ) : null}
-              <Text selectable style={styles.orderFieldLabel}>记录结果</Text>
+              <Text selectable style={styles.orderFieldLabel}>准时和范围如实勾选，有话写在说明里</Text>
               <View style={styles.actRow}>
                 <Pressable onPress={() => setOutcomeOnTime((v) => !v)} style={[styles.actChip, outcomeOnTime && styles.actChipOn]} accessibilityLabel="是否准时">
                   <Text selectable style={styles.actChipText}>{outcomeOnTime ? "✓ 准时" : "未准时"}</Text>
@@ -291,12 +275,12 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
                 accessibilityLabel="结果说明"
               />
               <Pressable
-                disabled={acting !== undefined}
-                onPress={() => void runOrderAction("记录结果", detail.orderId, () => client.recordOutcome(detail.orderId, { onTime: outcomeOnTime, scopeCompleted: outcomeScope, ...(outcomeNote.trim() ? { objectiveNote: outcomeNote.trim() } : {}) }))}
+                disabled={acting !== undefined || evidenceBusy}
+                onPress={() => void submitCompletion(detail.orderId)}
                 style={actBtn}
-                accessibilityLabel="记录履约结果"
+                accessibilityLabel="确认完成"
               >
-                <Text selectable style={actBtnText}>{acting === "记录结果" ? "提交中…" : "记录结果并完成"}</Text>
+                <Text selectable style={actBtnText}>{acting === "确认完成" || evidenceBusy ? "提交中…" : "确认完成"}</Text>
               </Pressable>
             </View>
           ) : null}

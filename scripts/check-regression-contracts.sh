@@ -9330,3 +9330,7 @@ echo "    AI-MANAGE-003: PASS (chat management governs the represented person; s
 # hydrate 计数、点开拉评论；作者名走 resolveReplyAuthorDisplayName，无名不显示裸 id。
 pnpm --dir apps/mobile exec vitest run src/profile-post-replies.test.ts || exit $?
 echo "    PROFILE-REPLIES-VISIBLE-001: PASS (profile posts show counts + expandable replies)"
+# ORDER-EXEC-001: 订单明细以前只有"返回列表" —— OFFERED 卡死，EXECUTING 走不到
+# COMPLETED，COMPLETED 评不了分。明细页按 lifecycle 逐态出真按钮，全部走命令。
+pnpm --dir apps/mobile exec vitest run src/order-exec.test.ts src/fulfillment-client.test.ts || exit $?
+echo "    ORDER-EXEC-001: PASS (order detail drives confirm/start/complete/satisfaction)"

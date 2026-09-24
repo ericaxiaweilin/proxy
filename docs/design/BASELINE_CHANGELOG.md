@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 280 — 2026-09-24
+
+- **订单执行流程砍到四步**（ORDER-EXEC-001 跟进）：用户「步骤太多了」。打卡跟
+  开始执行是同一个状态跃迁，只留一键的开始执行（打卡表单撤下，服务端保留能力）；
+  证据照片并进确认完成（可选附一张，一次提交先传图后记结果）。
+  确认合作 → 开始执行 → 确认完成 → 评价（+结算/取消）.
+- 影响文件：`apps/mobile/src/surfaces/me-orders.tsx`。
+
 ## Revision 279 — 2026-09-24
 
 - **订单执行断线接上**（ORDER-EXEC-001）：用户「继续检查撮合交易引擎」。订单明细
