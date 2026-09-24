@@ -43,7 +43,7 @@ const TITLES: Record<Page, string> = {
   merchant: "商家与投放",
   retention: "留存与复购",
   trust: "信任与风险",
-  providers: "小美申请审核",
+  providers: "接单权限审核",
   quality: "数据治理",
   workbench: "交叉分析工作台",
 };

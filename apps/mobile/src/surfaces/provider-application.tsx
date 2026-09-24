@@ -12,7 +12,7 @@ import {
   type ProviderApplicationView,
 } from "../provider-application-client";
 
-// PROVIDER-APPLY-001：「申请成为小美」。本人填表 → 运营控制台审核 → 通过才开服务者身份。
+// ORDER-PERMISSION-001：「申请接单权限」（任何人可申请，性别不是门槛）。本人填表 → 运营控制台审核 → 通过才开服务者身份。
 // 照片必须是本人上传的真实照片（服务端核验：本人上传、图片、非 AI 生成）。实名只给运营看。
 
 type Photo = { mediaAssetId: string; uri: string };
@@ -69,7 +69,7 @@ export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: Medi
     setError(undefined);
     try {
       setView(await submitProviderApplication(sessionAuthClient, {
-        realName, genderAttested: attested, city, serviceAreas: areas, languages, capabilities, intro,
+        realName, photosAttested: attested, city, serviceAreas: areas, languages, capabilities, intro,
         photoAssetIds: photos.map((p) => p.mediaAssetId),
       }));
       setEditing(false);
@@ -106,7 +106,7 @@ export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: Medi
 
   return (
     <View style={s.wrap}>
-      <Text selectable style={s.lead}>小美是 Proxy 上接单的真人服务者。提交后由运营审核，通过后开放接单和 AI 分身。</Text>
+      <Text selectable style={s.lead}>接单需要实名和本人真实照片。提交后由运营审核，通过后开放接单。</Text>
       {card ? <View style={s.card}>
         <Text selectable style={s.cardTitle}>{card.title}</Text>
         <Text selectable style={s.muted}>{card.detail}</Text>
@@ -137,9 +137,9 @@ export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: Medi
             <Text selectable style={s.photoAddText}>{busy === "photo" ? "上传中" : "＋"}</Text>
           </Pressable> : null}
         </View>
-        <Pressable accessibilityLabel={`我确认本人为女性，照片为本人真实照片${attested ? "，已勾选" : ""}`} onPress={() => setAttested(!attested)} style={s.attest}>
+        <Pressable accessibilityLabel={`我确认照片均为本人真实照片${attested ? "，已勾选" : ""}`} onPress={() => setAttested(!attested)} style={s.attest}>
           <View style={[s.box, attested && s.boxOn]}>{attested ? <Text selectable style={s.boxTick}>✓</Text> : null}</View>
-          <Text selectable style={s.attestText}>我确认本人为女性，照片均为本人真实照片</Text>
+          <Text selectable style={s.attestText}>我确认照片均为本人真实照片（不是别人的，也不是 AI 生成的）</Text>
         </Pressable>
         <Pressable accessibilityLabel="提交申请" disabled={busy !== undefined} onPress={() => { void submit(); }} style={[s.primary, busy !== undefined && s.busy]}>
           <Text selectable style={s.primaryText}>{busy === "submit" ? "提交中…" : "提交申请"}</Text>

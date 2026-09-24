@@ -1,4 +1,4 @@
-// PROVIDER-APPLY-001：「申请成为小美」客户端（服务端 /v1/provider-application，需会话）。
+// ORDER-PERMISSION-001：「申请接单权限」客户端（任何人可申请，性别不是门槛）（服务端 /v1/provider-application，需会话）。
 // 实名只提交、只给运营看；这里的读模型是本人自己的那一份。
 
 export type ProviderApplicationStatus = "SUBMITTED" | "APPROVED" | "REJECTED" | "WITHDRAWN";
@@ -30,7 +30,7 @@ export type ProviderApplicationOptions = {
 
 export type ProviderApplicationInput = {
   realName: string;
-  genderAttested: boolean;
+  photosAttested: boolean;
   city: string;
   serviceAreas: string[];
   languages: string[];
@@ -77,7 +77,7 @@ const FIELD_TEXT: Readonly<Record<string, string>> = {
   profile_name: "先在「个人管理」设置用户名",
   profile_avatar: "先在「个人管理」设置头像",
   real_name: "请填写 2–40 字的真实姓名",
-  gender_attested: "请确认本人为女性",
+  photos_attested: "请确认照片均为本人真实照片",
   city: "请填写所在城市",
   service_areas: "至少选一个服务区域",
   languages: "至少选一种会说的语言",
@@ -108,7 +108,7 @@ export function providerApplicationStatusCard(app: ProviderApplication | null): 
   if (!app || app.status === "WITHDRAWN") return null;
   switch (app.status) {
     case "SUBMITTED": return { title: "审核中", detail: "运营会看你的资料和照片，结果会显示在这里。审核期间可以撤回。", canWithdraw: true, canReapply: false };
-    case "APPROVED": return { title: "已通过 · 你是小美了", detail: app.source === "BACKFILL" ? "申请入口上线前你已是服务者，已为你补录。" : "现在可以接单，AI 分身等小美功能对你开放。", canWithdraw: false, canReapply: false };
+    case "APPROVED": return { title: "已通过 · 可以接单了", detail: app.source === "BACKFILL" ? "申请入口上线前你已是服务者，已为你补录。" : "你的服务者身份已开通，现在可以接单。", canWithdraw: false, canReapply: false };
     case "REJECTED": return { title: "未通过", detail: app.rejectReason ? `原因：${app.rejectReason}` : "运营没有写原因。", canWithdraw: false, canReapply: true };
     default: return null;
   }

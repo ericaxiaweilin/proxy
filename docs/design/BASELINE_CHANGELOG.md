@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 291 — 2026-09-24
+
+- **接单权限不按性别设门**（ORDER-PERMISSION-001）：Rev290 把入口做成「申请成为小美」并要求「自证女性」——
+  用户更正：「不是申请成为小美 是申请接单权限 如果只是小美有性别歧视限制」。改名「申请接单权限」，
+  去掉性别必填，换成「照片均为本人真实照片」的承诺；migration 126 把 gender_attested 改名 photos_attested
+  并清零旧值。运营控制台页改名「接单权限审核」。
+- 影响文件：`apps/mobile/src/surfaces/provider-application.tsx`、`provider-application-client.ts`、`surfaces/me.tsx`；
+  `apps/api-go/internal/providerapp/`、`migrations/126_*`；`apps/market-intelligence-console/src/pages/ProviderApplications.tsx`、`App.tsx`。
+
 ## Revision 290 — 2026-09-24
 
 - **申请成为小美 + 运营审核**（PROVIDER-APPLY-001）：小美身份以前没有入口（supply.agent_profiles 只靠种子 /

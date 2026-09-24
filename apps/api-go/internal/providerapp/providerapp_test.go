@@ -21,7 +21,7 @@ func testService(missing []string, bad []string) (*Service, *[]Application) {
 
 func goodInput() Input {
 	return Input{
-		RealName: "Nguyễn Linh", GenderAttested: true, City: "河内",
+		RealName: "Nguyễn Linh", PhotosAttested: true, City: "河内",
 		ServiceAreas: []string{"hn", "HN"}, Languages: []string{"vi", "zh"}, Capabilities: []string{"photography"},
 		Intro: "河内本地人，中文流利，喜欢带朋友拍照。", PhotoAssetIDs: []string{"assets/ma_1", "ma_2", "ma_3"},
 	}
@@ -49,7 +49,7 @@ func TestSubmitListsEveryInvalidField(t *testing.T) {
 	if !errors.As(err, &v) {
 		t.Fatalf("want ValidationError, got %v", err)
 	}
-	want := map[string]bool{"profile_avatar": true, "real_name": true, "gender_attested": true, "city": true,
+	want := map[string]bool{"profile_avatar": true, "real_name": true, "photos_attested": true, "city": true,
 		"service_areas": true, "languages": true, "intro": true, "photos_count": true}
 	for _, f := range v.Fields {
 		delete(want, f)

@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { opFetch, opPost } from "../lib/api";
 
-// PROVIDER-APPLY-001：小美申请审核。审核中的排最前；通过 = 开 supply 服务者身份（ACTIVE）+ 声明能力（不是核验）；
+// ORDER-PERMISSION-001：接单权限申请审核（任何人可申请，性别不是门槛）。审核中的排最前；通过 = 开 supply 服务者身份（ACTIVE）+ 声明能力（不是核验）；
 // 拒绝必须写原因（申请人能看到）。实名只在这里出现。
 type Application = {
-  applicationId: string; userAccountId: string; displayName: string; realName?: string; genderAttested: boolean;
+  applicationId: string; userAccountId: string; displayName: string; realName?: string; photosAttested: boolean;
   city: string; serviceAreas: string[]; languages: string[]; capabilities: string[]; intro: string; photoAssetIds: string[];
   status: "SUBMITTED" | "APPROVED" | "REJECTED" | "WITHDRAWN"; rejectReason?: string; reviewedBy?: string; reviewedAt?: string;
   agentId?: string; source: "APP" | "BACKFILL"; createdAt: string;
@@ -44,7 +44,7 @@ export function ProviderApplications() {
   return (
     <>
       <div className="section-title">
-        <h2>小美申请</h2>
+        <h2>接单权限申请</h2>
         <span>
           {FILTERS.map((f) => <button key={f.id || "all"} disabled={filter === f.id} onClick={() => setFilter(f.id)} style={{ marginLeft: 6 }}>{f.label}</button>)}
           {msg ? ` · ${msg}` : ""}
@@ -56,7 +56,7 @@ export function ProviderApplications() {
             <div>
               <b>{app.displayName || "（没有资料名）"}</b>{" "}
               <span style={{ color: "#8a8190" }}>{app.userAccountId} · {STATUS_LABEL[app.status]}{app.source === "BACKFILL" ? " · 存量补录" : ""}</span>
-              <div style={{ marginTop: 4 }}>实名：{app.realName || "—（未填）"} · 自证女性：{app.genderAttested ? "是" : "未自证"} · 城市：{app.city || "—"}</div>
+              <div style={{ marginTop: 4 }}>实名：{app.realName || "—（未填）"} · 照片承诺：{app.photosAttested ? "已承诺本人" : "未承诺"} · 城市：{app.city || "—"}</div>
               <div>区域：{app.serviceAreas.join(" / ") || "—"} · 语言：{app.languages.join(" / ") || "—"} · 能力：{app.capabilities.join(" / ") || "—"}</div>
               <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{app.intro || "—"}</div>
               {app.status === "REJECTED" && app.rejectReason ? <div style={{ marginTop: 4, color: "#b3261e" }}>拒绝原因：{app.rejectReason}</div> : null}

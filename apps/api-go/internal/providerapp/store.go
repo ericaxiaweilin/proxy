@@ -16,14 +16,14 @@ type Postgres struct {
 
 func NewPostgres(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
-const selectColumns = `application_id, user_account_id, display_name, real_name, gender_attested, city,
+const selectColumns = `application_id, user_account_id, display_name, real_name, photos_attested, city,
 	service_areas, languages, capabilities, intro, photo_asset_ids, status, reject_reason, reviewed_by,
 	reviewed_at, agent_id, source, created_at, updated_at`
 
 func scanApplication(row pgx.Row) (*Application, error) {
 	var a Application
 	var areas, langs, caps, photos []byte
-	err := row.Scan(&a.ID, &a.UserAccountID, &a.DisplayName, &a.RealName, &a.GenderAttested, &a.City,
+	err := row.Scan(&a.ID, &a.UserAccountID, &a.DisplayName, &a.RealName, &a.PhotosAttested, &a.City,
 		&areas, &langs, &caps, &a.Intro, &photos, &a.Status, &a.RejectReason, &a.ReviewedBy,
 		&a.ReviewedAt, &a.AgentID, &a.Source, &a.CreatedAt, &a.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -67,7 +67,7 @@ func jsonList(values []string) []byte {
 func (p *Postgres) Insert(ctx context.Context, a Application) error {
 	_, err := p.pool.Exec(ctx, `INSERT INTO supply.provider_applications (`+selectColumns+`)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
-		a.ID, a.UserAccountID, a.DisplayName, a.RealName, a.GenderAttested, a.City,
+		a.ID, a.UserAccountID, a.DisplayName, a.RealName, a.PhotosAttested, a.City,
 		jsonList(a.ServiceAreas), jsonList(a.Languages), jsonList(a.Capabilities), a.Intro, jsonList(a.PhotoAssetIDs),
 		a.Status, a.RejectReason, a.ReviewedBy, a.ReviewedAt, a.AgentID, a.Source, a.CreatedAt, a.UpdatedAt)
 	return err

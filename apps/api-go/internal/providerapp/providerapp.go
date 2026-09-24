@@ -1,9 +1,9 @@
-// Package providerapp 是「申请成为小美」（PROVIDER-APPLY-001，2026-09-24）。
+// Package providerapp 是「申请接单权限」（PROVIDER-APPLY-001 → ORDER-PERMISSION-001，2026-09-24）。
 //
-// 用户规则：只有小美（女性服务者）有 AI 分身授权；接单资格以前没有申请入口，supply.agent_profiles 只能靠
-// 种子 / 手工 SQL 开。用户：「目前好几个真人 可以考虑做小美的申请了 把数据做全」，选定「申请 + 运营审核」：
+// 接单资格以前没有申请入口，supply.agent_profiles 只能靠种子 / 手工 SQL 开。选定「申请 + 运营审核」：
+// 用户更正：「不是申请成为小美 是申请接单权限 如果只是小美有性别歧视限制」—— 任何人都能申请，性别不是门槛。
 //
-//	本人提交（实名、自证女性、≥3 张本人真实照片、可服务区域 / 语言 / 能力、自我介绍）
+//	本人提交（实名、≥3 张本人真实照片并承诺为本人、可服务区域 / 语言 / 能力、自我介绍）
 //	→ 运营控制台审核（通过 / 拒绝并写原因）
 //	→ 通过才开 supply.agent_profiles（ACTIVE）并声明能力（declared —— 审核不等于能力核验，verified 另走核验）。
 //
@@ -47,7 +47,7 @@ type Application struct {
 	UserAccountID  string     `json:"userAccountId"`
 	DisplayName    string     `json:"displayName"`
 	RealName       string     `json:"realName,omitempty"`
-	GenderAttested bool       `json:"genderAttested"`
+	PhotosAttested bool       `json:"photosAttested"`
 	City           string     `json:"city"`
 	ServiceAreas   []string   `json:"serviceAreas"`
 	Languages      []string   `json:"languages"`
@@ -67,7 +67,7 @@ type Application struct {
 // Input 是本人提交的表单。
 type Input struct {
 	RealName       string   `json:"realName"`
-	GenderAttested bool     `json:"genderAttested"`
+	PhotosAttested bool     `json:"photosAttested"`
 	City           string   `json:"city"`
 	ServiceAreas   []string `json:"serviceAreas"`
 	Languages      []string `json:"languages"`
@@ -166,7 +166,7 @@ func (s *Service) Submit(ctx context.Context, userAccountID string, in Input) (*
 	}
 	now := s.now().UTC()
 	app := Application{
-		ID: newID(), UserAccountID: userAccountID, RealName: in.RealName, GenderAttested: true,
+		ID: newID(), UserAccountID: userAccountID, RealName: in.RealName, PhotosAttested: true,
 		City: in.City, ServiceAreas: in.ServiceAreas, Languages: in.Languages, Capabilities: in.Capabilities,
 		Intro: in.Intro, PhotoAssetIDs: in.PhotoAssetIDs, Status: StatusSubmitted, Source: "APP",
 		CreatedAt: now, UpdatedAt: now,
@@ -272,8 +272,8 @@ func validate(in Input) []string {
 	if n := utf8.RuneCountInString(in.RealName); n < 2 || n > MaxRealName {
 		fields = append(fields, "real_name")
 	}
-	if !in.GenderAttested {
-		fields = append(fields, "gender_attested")
+	if !in.PhotosAttested {
+		fields = append(fields, "photos_attested")
 	}
 	if in.City == "" {
 		fields = append(fields, "city")
