@@ -35,3 +35,15 @@ describe("PROVIDER-APPLY-001 client", () => {
     await expect(fetchProviderApplication(bad)).rejects.toMatchObject({ code: "invalid_fields", fields: ["city"] });
   });
 });
+
+describe("ORDER-CENTER-STATS-001 order panel", () => {
+  it("rates render as — without a denominator, never a fake 0% or 100%", async () => {
+    const { formatRate, permissionLine, fetchProviderStats } = await import("./provider-application-client");
+    expect(formatRate(null)).toBe("—");
+    expect(formatRate(0.756)).toBe("76%");
+    expect(permissionLine("APPROVED")).toEqual({ text: "已认证 · 可接单", canApply: false });
+    expect(permissionLine("NONE").canApply).toBe(true);
+    const ok = { request: async () => ({ status: 200, json: async () => ({ permission: "SUBMITTED", stats: { completed: 0, cancelledByMe: 0, onTime: 0, completionRate: null, onTimeRate: null, repeatClients: 0, complaints: 0, openComplaints: 0 } }) }) };
+    expect((await fetchProviderStats(ok)).permission).toBe("SUBMITTED");
+  });
+});

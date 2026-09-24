@@ -185,3 +185,60 @@ func trimUserPrefix(id string) string {
 	}
 	return id
 }
+
+// ProviderStats 是「我的订单」顶部接单面板的数（ORDER-CENTER-STATS-001）：全部来自真实订单 / 举报。
+// 比率在分母为 0 时是 nil（界面显示 —），不给 0% 也不给 100%。
+type ProviderStats struct {
+	Completed      int      `json:"completed"`
+	CancelledByMe  int      `json:"cancelledByMe"`
+	OnTime         int      `json:"onTime"`
+	CompletionRate *float64 `json:"completionRate"`
+	OnTimeRate     *float64 `json:"onTimeRate"`
+	RepeatClients  int      `json:"repeatClients"`
+	Complaints     int      `json:"complaints"`
+	OpenComplaints int      `json:"openComplaints"`
+}
+
+// Stats：这个账号作为服务者（supply.agent_profiles.user_account_id）的履约记录。
+//   - 按约完成率 = 完成 /（完成 + 服务者自己取消）—— 需求方取消不算她违约（与 MATCH-RANK-001 同口径）；
+//   - 准时率 = 完成且结果里 onTime=true / 完成；
+//   - 复邀客户 = 和她完成过 ≥2 单的需求方人数；
+//   - 投诉 = 对她的订单的「举报这笔交易」（moderation.reports，TRANSACTION），举报人不是她本人；驳回的不算，
+//     处理中 = SUBMITTED / TRIAGED / ESCALATED / REOPENED。
+func (p *Postgres) Stats(ctx context.Context, userAccountID string) (ProviderStats, error) {
+	var s ProviderStats
+	err := p.pool.QueryRow(ctx, `
+		WITH mine AS (SELECT agent_id FROM supply.agent_profiles WHERE user_account_id = $1),
+		orders AS (SELECT o.* FROM fulfillment.orders o WHERE o.agent_id IN (SELECT agent_id FROM mine))
+		SELECT
+			(SELECT COUNT(*) FROM orders WHERE lifecycle = 'COMPLETED'),
+			(SELECT COUNT(*) FROM orders o WHERE o.lifecycle = 'CANCELLED' AND EXISTS (
+				SELECT 1 FROM integration.outbox_messages m
+				WHERE m.aggregate_id = o.id AND m.event_type = 'OrderCancelled' AND m.payload->>'role' = 'AGENT')),
+			(SELECT COUNT(*) FROM orders WHERE lifecycle = 'COMPLETED' AND COALESCE((outcome->>'onTime')::boolean, false)),
+			(SELECT COUNT(*) FROM (SELECT requester_id FROM orders WHERE lifecycle = 'COMPLETED'
+				GROUP BY requester_id HAVING COUNT(*) >= 2) repeaters),
+			(SELECT COUNT(*) FROM moderation.reports r JOIN orders o ON o.id = r.target_id
+				WHERE r.target_type = 'TRANSACTION' AND r.reporter_id <> $1 AND r.state <> 'DISMISSED'),
+			(SELECT COUNT(*) FROM moderation.reports r JOIN orders o ON o.id = r.target_id
+				WHERE r.target_type = 'TRANSACTION' AND r.reporter_id <> $1
+				  AND r.state IN ('SUBMITTED', 'TRIAGED', 'ESCALATED', 'REOPENED'))`,
+		userAccountID).Scan(&s.Completed, &s.CancelledByMe, &s.OnTime, &s.RepeatClients, &s.Complaints, &s.OpenComplaints)
+	if err != nil {
+		return ProviderStats{}, err
+	}
+	FillRates(&s)
+	return s, nil
+}
+
+// FillRates 算两个比率；分母为 0 时保持 nil。
+func FillRates(s *ProviderStats) {
+	if ended := s.Completed + s.CancelledByMe; ended > 0 {
+		v := float64(s.Completed) / float64(ended)
+		s.CompletionRate = &v
+	}
+	if s.Completed > 0 {
+		v := float64(s.OnTime) / float64(s.Completed)
+		s.OnTimeRate = &v
+	}
+}

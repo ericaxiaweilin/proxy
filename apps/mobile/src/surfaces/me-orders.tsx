@@ -16,6 +16,7 @@ import { styles } from "./me-styles";
 import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
 import { createSceneFavoritesStore, resolveSavedSceneIds, type SavedSceneEntry } from "../scene-favorites";
 import { savedSceneLookup } from "../components/scene-activity-discovery";
+import { fetchProviderStats, formatRate, permissionLine, type ProviderStatsView } from "../provider-application-client";
 
 type OrderFilter = "all" | "published" | "joined" | "done" | "cancelled";
 
@@ -29,7 +30,52 @@ function canCancel(order: FulfillmentOrder): boolean {
   return order.lifecycle === "OFFERED" || order.lifecycle === "CONFIRMED" || order.lifecycle === "EXECUTING";
 }
 
-export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
+// ORDER-CENTER-STATS-001（原型 33987c「接单中心」；用户：「我的订单模块不是有吗 在那里做」）：
+// 我的订单顶部的接单面板 —— 接单权限状态 + 真实履约记录（已接单 / 按约完成率 / 准时率 / 复邀客户 / 投诉）。
+// 数字全部来自真实订单与举报；分母为 0 的比率显示「—」。读失败就不画，不影响订单列表。
+function ProviderOrderPanel({ onOpenApply }: { onOpenApply?: (() => void) | undefined }): React.JSX.Element | null {
+  const [view, setView] = useState<ProviderStatsView>();
+  useEffect(() => {
+    let active = true;
+    fetchProviderStats(sessionAuthClient).then((v) => { if (active) setView(v); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+  if (!view) return null;
+  const line = permissionLine(view.permission);
+  const cells: Array<[string, string]> = [
+    ["已接单", String(view.stats.completed)],
+    ["按约完成率", formatRate(view.stats.completionRate)],
+    ["准时率", formatRate(view.stats.onTimeRate)],
+    ["复邀客户", String(view.stats.repeatClients)],
+    ["投诉记录", view.stats.openComplaints > 0 ? `${view.stats.complaints}（${view.stats.openComplaints} 处理中）` : String(view.stats.complaints)],
+  ];
+  return (
+    <View style={styles.orderCard}>
+      <View style={styles.orderHead}>
+        <View style={styles.orderCopy}>
+          <Text selectable style={styles.orderTitle}>接单</Text>
+          <Text selectable style={styles.orderId}>{line.text}</Text>
+        </View>
+        {line.canApply && onOpenApply ? (
+          <Pressable accessibilityLabel={view.permission === "SUBMITTED" ? "查看申请进度" : "申请接单权限"} onPress={onOpenApply} style={styles.orderTab}>
+            <Text selectable style={styles.orderTabText}>{view.permission === "SUBMITTED" ? "查看进度" : "去申请"}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      <View style={styles.orderGrid}>
+        {cells.map(([label, value]) => (
+          <View key={label} style={styles.orderField}>
+            <Text selectable style={styles.orderFieldLabel}>{label}</Text>
+            <Text selectable style={styles.orderFieldValue}>{value}</Text>
+          </View>
+        ))}
+      </View>
+      <Text selectable style={[styles.orderFieldLabel, { marginTop: 10 }]}>按约完成率只算你自己取消的单；客户取消不算你违约。投诉记录不含已驳回的。</Text>
+    </View>
+  );
+}
+
+export function MyOrdersSurface({ client, moderation, mediaClient, onBack, onOpenApply }: {
   client: FulfillmentClient;
   // COMP-REPORT-002: 举报这笔交易。钱与线下见面都在这一层 —— 诈骗、
   // 招嫖揽客、人身威胁的暴露面正是订单，不是帖子。
@@ -38,6 +84,8 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
   // 不摆拍不了照的假按钮。
   mediaClient?: MediaClient | undefined;
   onBack: () => void;
+  // ORDER-CENTER-STATS-001：接单面板「去申请 / 查看进度」→ 接单权限申请页。
+  onOpenApply?: (() => void) | undefined;
 }): React.JSX.Element {
   const [filter, setFilter] = useState<OrderFilter>("all");
   const [orders, setOrders] = useState<FulfillmentOrder[]>([]);
@@ -436,6 +484,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
           <Pressable onPress={onBack} style={styles.orderBack}><Text selectable style={styles.orderBackText}>‹</Text></Pressable>
           <Text selectable style={styles.detailTitle}>我的订单</Text>
         </View>
+        <ProviderOrderPanel onOpenApply={onOpenApply} />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>
           {([['all','全部'],['published','我发布的'],['joined','我参与的'],['done','已完成'],['cancelled','已取消']] as const).map(([id,label]) => (
             <Pressable key={id} onPress={() => setFilter(id)} style={[styles.orderTab, filter === id && styles.orderTabOn]}>

@@ -538,6 +538,22 @@ func (s *Service) Granted(ctx context.Context, userAccountID string) (bool, erro
 	return latest != nil && latest.Status == StatusApproved, nil
 }
 
+// StatsStore 是可选能力（Postgres 实现；内存实现没有订单数据 → 全 0）。
+type StatsStore interface {
+	Stats(ctx context.Context, userAccountID string) (ProviderStats, error)
+}
+
+// Stats：本人作为服务者的履约记录（「我的订单」顶部接单面板）。
+func (s *Service) Stats(ctx context.Context, userAccountID string) (ProviderStats, error) {
+	if !s.ready() {
+		return ProviderStats{}, ErrUnavailable
+	}
+	if source, ok := s.store.(StatsStore); ok {
+		return source.Stats(ctx, userAccountID)
+	}
+	return ProviderStats{}, nil
+}
+
 // Get：运营按 id 读一份申请。
 func (s *Service) Get(ctx context.Context, id string) (*Application, error) {
 	if !s.ready() {

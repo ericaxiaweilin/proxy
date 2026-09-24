@@ -1488,7 +1488,7 @@ export function MeSurface({
     const contentWrapper = (node: React.JSX.Element): React.JSX.Element => <SwipeBackShell onExit={() => closeSubPage()}>{node}</SwipeBackShell>;
     const content = SUB_PAGE_CONTENT[subPage.route];
 
-    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} moderation={moderation} mediaClient={mediaClient} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} moderation={moderation} mediaClient={mediaClient} onOpenApply={() => openSubPage("providerapply")} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "myactivities") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyActivitiesSurface onBack={() => setSubPage(undefined)} moderation={moderation} /></SwipeBackShell>;
     if (subPage.route === "merchantcampaign") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MerchantCampaignSurface onBack={() => setSubPage(undefined)} moderation={moderation} /></SwipeBackShell>;
     if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} /></SwipeBackShell>;

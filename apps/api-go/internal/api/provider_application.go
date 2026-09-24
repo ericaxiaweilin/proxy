@@ -17,6 +17,7 @@ import (
 //	GET  /v1/provider-application           本人最近一份申请（没有 = application: null）+ 表单可选值
 //	POST /v1/provider-application           提交
 //	POST /v1/provider-application/withdraw  撤回（只在审核中可撤）
+//	GET  /v1/provider-application/stats     接单权限状态 + 本人履约记录（我的订单顶部面板）
 //
 // 运营（operatorConsole 同一道门）：
 //
@@ -50,6 +51,24 @@ func (s *Server) routeProviderApplication(w http.ResponseWriter, r *http.Request
 			return
 		}
 		app, err = s.ProviderApps.Submit(r.Context(), userID, in)
+	case path == "/v1/provider-application/stats" && r.Method == http.MethodGet:
+		// ORDER-CENTER-STATS-001：「我的订单」顶部接单面板 —— 接单权限状态 + 真实履约记录。
+		mine, err := s.ProviderApps.Mine(r.Context(), userID)
+		if err != nil {
+			writeProviderAppError(w, err)
+			return
+		}
+		stats, err := s.ProviderApps.Stats(r.Context(), userID)
+		if err != nil {
+			writeProviderAppError(w, err)
+			return
+		}
+		status := "NONE"
+		if mine != nil {
+			status = mine.Status
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"permission": status, "stats": stats})
+		return
 	case path == "/v1/provider-application/withdraw" && r.Method == http.MethodPost:
 		app, err = s.ProviderApps.Withdraw(r.Context(), userID)
 	default:

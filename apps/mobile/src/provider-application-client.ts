@@ -142,3 +142,37 @@ export function providerApplicationStatusCard(app: ProviderApplication | null): 
     default: return null;
   }
 }
+
+// ORDER-CENTER-STATS-001：「我的订单」顶部接单面板（真实订单 / 举报算出来的；比率分母为 0 时是 null）。
+export type ProviderStats = {
+  completed: number;
+  cancelledByMe: number;
+  onTime: number;
+  completionRate: number | null;
+  onTimeRate: number | null;
+  repeatClients: number;
+  complaints: number;
+  openComplaints: number;
+};
+export type ProviderStatsView = { permission: "NONE" | ProviderApplicationStatus; stats: ProviderStats };
+
+export async function fetchProviderStats(client: Requester): Promise<ProviderStatsView> {
+  const response = await client.request("/v1/provider-application/stats", { method: "GET" });
+  const body = (await response.json().catch(() => ({}))) as Partial<ProviderStatsView> & { error?: string };
+  if (response.status !== 200 || !body.stats) throw new ProviderApplicationError(body.error ?? `http_${response.status}`);
+  return { permission: body.permission ?? "NONE", stats: body.stats };
+}
+
+/** 比率 → 「92%」；没有分母 → 「—」（不给 0% 也不给 100%）。 */
+export function formatRate(rate: number | null): string {
+  return rate === null ? "—" : `${Math.round(rate * 100)}%`;
+}
+
+export function permissionLine(permission: ProviderStatsView["permission"]): { text: string; canApply: boolean } {
+  switch (permission) {
+    case "APPROVED": return { text: "已认证 · 可接单", canApply: false };
+    case "SUBMITTED": return { text: "接单权限审核中", canApply: true };
+    case "REJECTED": return { text: "接单权限未通过 · 可修改后重新提交", canApply: true };
+    default: return { text: "还没有接单权限", canApply: true };
+  }
+}

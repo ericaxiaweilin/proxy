@@ -9418,3 +9418,11 @@ if ! grep -qF 'server.OrderPermission = server.ProviderApps.Granted' apps/api-go
   exit 1
 fi
 echo "    ORDER-PERMISSION-TWIN-001: PASS"
+# ORDER-CENTER-STATS-001: 接单面板放在「我的订单」里；比率分母为 0 必须是 —（不许 0% / 100% 冒充）。
+require_test "ORDER-CENTER-STATS-001" "./internal/providerapp" "TestFillRatesLeavesEmptyDenominatorsNil" \
+  "apps/api-go/internal/providerapp/providerapp_test.go" || exit $?
+if ! grep -qF '<ProviderOrderPanel' apps/mobile/src/surfaces/me-orders.tsx; then
+  echo "  FAIL [ORDER-CENTER-STATS-001]: 我的订单里没有接单面板。" >&2
+  exit 1
+fi
+echo "    ORDER-CENTER-STATS-001: PASS"

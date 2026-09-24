@@ -179,3 +179,17 @@ func TestGrantedOnlyAfterApproval(t *testing.T) {
 		t.Fatal("approved application must grant")
 	}
 }
+
+// ORDER-CENTER-STATS-001：分母为 0 时比率是 nil（界面显示 —），不是 0% 也不是 100%。
+func TestFillRatesLeavesEmptyDenominatorsNil(t *testing.T) {
+	empty := ProviderStats{}
+	FillRates(&empty)
+	if empty.CompletionRate != nil || empty.OnTimeRate != nil {
+		t.Fatalf("no orders must give nil rates, got %+v", empty)
+	}
+	s := ProviderStats{Completed: 3, CancelledByMe: 1, OnTime: 2}
+	FillRates(&s)
+	if s.CompletionRate == nil || *s.CompletionRate != 0.75 || s.OnTimeRate == nil || *s.OnTimeRate < 0.66 || *s.OnTimeRate > 0.67 {
+		t.Fatalf("rates: %+v", s)
+	}
+}

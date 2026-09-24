@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 294 — 2026-09-24
+
+- **接单面板进「我的订单」**（ORDER-CENTER-STATS-001，原型 33987c「接单中心」；用户：「我的订单模块不是有吗 在那里做」）：
+  我的订单顶部加「接单」卡：接单权限状态（已认证 · 可接单 / 审核中 / 未通过 / 还没有）+「去申请 / 查看进度」，
+  以及真实履约记录 —— 已接单、按约完成率（完成 /（完成 + 本人取消），客户取消不算她违约，与 MATCH-RANK-001 同口径）、
+  准时率、复邀客户（完成 ≥2 单的需求方）、投诉记录（对她订单的「举报这笔交易」，驳回的不算，另列处理中）。
+  分母为 0 的比率显示「—」。新端点 `GET /v1/provider-application/stats`。
+- 影响文件：`apps/mobile/src/surfaces/me-orders.tsx`、`provider-application-client.ts`、`surfaces/me.tsx`；
+  `apps/api-go/internal/providerapp/{providerapp,store}.go`、`internal/api/provider_application.go`。
+
 ## Revision 293 — 2026-09-24
 
 - **AI 分身只对有接单权限的人开**（ORDER-PERMISSION-TWIN-001，用户：「对 要改 有接单权限才开动 ai 分身」）：
