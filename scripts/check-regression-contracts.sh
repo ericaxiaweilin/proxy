@@ -3137,12 +3137,17 @@ if ! grep -qF 'id_number_hash' apps/api-go/internal/platform/postgres/supply.go;
   exit 1
 fi
 # 写入口必须走 operator 门 + IDENTITY scope。
-if ! grep -qF '"AttestSellerRealName": true' apps/api-go/internal/api/security.go; then
+# ⚠️ 用 [[:space:]]+ 而不是字面一个空格：这两张 map 是 gofmt 对齐的，加一个更长的
+# key 就会把这一行的冒号后重排成 N 个空格。原先写成字面 "…": true 的 -qF 在
+# b82602e（VOUCHER-PURCHASE 合入，Rev283）被 gofmt 重排后**假红**了 —— 而钉脚本
+# 在第一个红钉就 exit，于是 3144 行之后的钉全部没跑过（2026-09-24 修）。
+# 钉的是不变量（这条命令在受门集合里且为 true），空格不属于不变量。
+if ! grep -qE '"AttestSellerRealName":[[:space:]]+true' apps/api-go/internal/api/security.go; then
   echo "  FAIL [COMP-SELLER-001]: AttestSellerRealName is no longer operator-gated —" >&2
   echo "        a seller could sign their own real-name verification." >&2
   exit 1
 fi
-if ! grep -qF '"AttestSellerRealName": ScopeIdentity' apps/api-go/internal/api/operator_scopes.go; then
+if ! grep -qE '"AttestSellerRealName":[[:space:]]+ScopeIdentity' apps/api-go/internal/api/operator_scopes.go; then
   echo "  FAIL [COMP-SELLER-001]: AttestSellerRealName no longer requires the IDENTITY scope." >&2
   exit 1
 fi
