@@ -8158,6 +8158,28 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/feed-saved-count.test.ts || exit $?
 echo "    FEED-SAVED-COUNT-001: PASS (saved shows state, never a fabricated aggregate)"
 
+# SCENE-FAVORITE-002: 用户报「home 场景点🤍 在我的 收藏没有」。
+#
+# 根因不是没接线，是「收藏」这一个词下面有两个互不相通的库：我的 → 收藏 读本机
+# 场景 hearts（SCENE-FAVORITE-001），个人主页 → 收藏 tab 只读服务端帖子收藏 ——
+# 对场景收藏的引用数是 0。用户在首页点了 🤍，去个人主页的收藏 tab 找，永远找不到；
+# 而且只有场景收藏、没有帖子收藏时，那一屏还写着「还没有收藏」。
+#
+# SCENE-FAVORITE-001 当初只留了源码文本断言（"文件里有没有这个符号"）、没有进钉，
+# 所以这个缺陷活了下来 —— 同族前科 22004f9（绿钉 + 用户可见缺陷同时成立）。
+# 所以这条钉里必须有**行为**断言：解析函数对未知/重复 id 的真实行为。只 grep
+# 符号在不在文件里，守不住「每条路径都走到」。
+pnpm --filter @proxy/mobile exec vitest run src/scene-favorites.test.ts || exit $?
+echo "    SCENE-FAVORITE-002: PASS (scene hearts reach both 收藏 surfaces, one shared resolver)"
+# 反向钉：两个收藏面不许各写一遍目录回查 —— 那正是这个 bug 的漂移形状。
+# 匹配的是调用形状（带括号），不是符号名：光出现在 import 里不算漂移。
+if grep -q 'sceneMomentById(' apps/mobile/src/surfaces/me.tsx ||
+   grep -q 'sceneMomentById(' apps/mobile/src/surfaces/me-orders.tsx; then
+  echo "  FAIL [SCENE-FAVORITE-002]: 收藏面又自己写了一遍目录回查 ——" >&2
+  echo "        两个面必须共用 resolveSavedSceneIds(ids, savedSceneLookup)。" >&2
+  exit 1
+fi
+
 # MAIN-WIRING-SPLIT-001: cmd/api/main.go 曾是 1387 行的单文件接线根，
 # 多 worktree 并行时 merge 冲突概率最高的单点。已按域拆成 wire_*.go
 # （main 只留 main 函数），回潮就红。

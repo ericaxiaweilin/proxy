@@ -28,7 +28,11 @@ describe("PROFILE-TAB-LOAD-FAILED-001", () => {
     // 判空在前的话，失败时数组是空的，会先命中「还没有…」—— 等于没修。
     const guards = tabs.match(/if \(props\.failed\) \{/g) ?? [];
     expect(guards).toHaveLength(3);
-    const emptyGuards = tabs.match(/if \(props\.(replies|saved|tagged)\.length === 0\) \{/g) ?? [];
+    // SCENE-FAVORITE-002: 收藏的空态守卫现在多一个合取项
+    // （`props.saved.length === 0 && scenes.length === 0` —— 只有场景收藏时不能说
+    // "还没有收藏"）。所以这里允许判空条件带后续条件，但**仍然要求它存在**：
+    // 这条钉守的是「失败态先于空态」，不是判空条件的字面形状。
+    const emptyGuards = tabs.match(/if \(props\.(replies|saved|tagged)\.length === 0[^)]*\) \{/g) ?? [];
     expect(emptyGuards).toHaveLength(3);
     for (const empty of emptyGuards) {
       const at = tabs.indexOf(empty);

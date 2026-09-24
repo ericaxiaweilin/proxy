@@ -7,7 +7,7 @@ import { ProxyIcon } from "./proxy-icon";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
 import { HorizontalSwipeRail } from "./horizontal-swipe-rail";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
-import { createSceneFavoritesStore } from "../scene-favorites";
+import { createSceneFavoritesStore, type SavedSceneEntry } from "../scene-favorites";
 
 export type SceneDiscoveryBrief = {
   id: string;
@@ -207,6 +207,21 @@ export function sceneMomentById(id: string): MomentSeed | undefined {
 /** SCENE-FAVORITE-001：收藏卡副标题 —— 静态目录的真实动作/场景标签（跟卡片上显示的一致）。 */
 export function sceneMomentLabels(moment: MomentSeed): { actionLabel: string; sceneLabel: string } {
   return { actionLabel: taxon(ACTIONS, moment.action).label, sceneLabel: taxon(SCENES, moment.scene).label };
+}
+
+/**
+ * SCENE-FAVORITE-002：收藏 id → 可渲染条目的**目录回查**（真目录这一半）。
+ *
+ * 解析逻辑（去重、丢弃未知 id）在 scene-favorites.ts 的 resolveSavedSceneIds ——
+ * 那边是纯模块、不依赖 React Native，所以能被真的测；这个文件只能被 grep
+ * （导入它会拉进 react-native / Metro 的 asset require）。逻辑放那边、目录放这边，
+ * 是为了让「未知 id 被丢弃」这类行为有行为测试守着，而不是只靠文本钉。
+ */
+export function savedSceneLookup(id: string): SavedSceneEntry | undefined {
+  const moment = sceneMomentById(id);
+  if (!moment) return undefined;
+  const labels = sceneMomentLabels(moment);
+  return { id: moment.id, title: moment.title, meta: `${labels.actionLabel} · ${labels.sceneLabel}` };
 }
 
 function absoluteNetworkURL(apiBaseUrl: string, value?: string): string | undefined {
