@@ -162,6 +162,7 @@ func (a marketplaceFulfillmentAdapter) EnsureOrder(ctx context.Context, record m
 		AgreedCompensation: 0, // TBD until CreateOffer replaces this
 		Currency:           "VND",
 		SettlementMode:     "DIRECT_SETTLEMENT",
+		Scenario:           record.Scenario,
 	}
 	return a.repo.EnsureOrder(ctx, fulfillment.Order{
 		ID:          record.ID,

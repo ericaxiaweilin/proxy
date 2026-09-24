@@ -123,6 +123,9 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
     title: template.title,
     shortTitle: template.title,
     theme: template.theme,
+    // ORDER-SCENARIO-001: 场景跟着 moment 家族走 —— pro（城市协助）标 assistance，
+    // 其余普通消费标 ordinary。订单流程按它分档（城市协助永远全流程）。
+    scenario: template.id === "pro" ? "assistance" : "ordinary",
     date: specs.time.trim() === "" ? "近期" : specs.time.trim(),
     time: time === "" ? template.defaultTime : time,
     location: specs.place.trim() === "" ? template.venue : specs.place.trim(),

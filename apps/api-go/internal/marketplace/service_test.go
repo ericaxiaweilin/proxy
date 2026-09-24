@@ -995,3 +995,60 @@ func TestSeedDefaultsStillProvideDemoListings(t *testing.T) {
 		}
 	}
 }
+
+// TestConfirmMarketApplicationCarriesScenario (ORDER-SCENARIO-001): 消费场景跟着
+// 机会走 —— 发布时带的 scenario（发布向导按 moment 家族填）必须原样落进
+// OrderRecord，订单快照才能按它分档；乱填的值归一成空（按金额档兜底），不存脏值。
+func TestConfirmMarketApplicationCarriesScenario(t *testing.T) {
+	publishConfirm := func(scenario string) (string, []OrderRecord) {
+		s := New()
+		publish := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner_1", map[string]any{
+			"title": "scenario tripwire", "location": "河内", "moneyFlow": "FREE", "scenario": scenario,
+		}))
+		if publish.Outcome != "ACCEPTED" {
+			t.Fatalf("publish %q: %+v", scenario, publish)
+		}
+		var pub struct {
+			Opportunity Opportunity `json:"opportunity"`
+		}
+		if err := json.Unmarshal([]byte(publish.OperationRef), &pub); err != nil {
+			t.Fatal(err)
+		}
+		if pub.Opportunity.Scenario != scenario && scenario != "bogus" {
+			t.Fatalf("published scenario = %q, want %q", pub.Opportunity.Scenario, scenario)
+		}
+		apply := s.HandleContext(t.Context(), marketEnvelope("ApplyToMarketOpportunity", "applicant_1", map[string]any{
+			"opportunityId": pub.Opportunity.ID, "quote": "100000", "scope": "tripwire",
+		}))
+		if apply.Outcome != "ACCEPTED" {
+			t.Fatalf("apply: %+v", apply)
+		}
+		var appBody struct {
+			Application Application `json:"application"`
+		}
+		if err := json.Unmarshal([]byte(apply.OperationRef), &appBody); err != nil {
+			t.Fatal(err)
+		}
+		sel := s.HandleContext(t.Context(), marketEnvelope("SelectMarketApplication", "owner_1", map[string]any{
+			"opportunityId": pub.Opportunity.ID, "applicationId": appBody.Application.ID,
+		}))
+		if sel.Outcome != "ACCEPTED" {
+			t.Fatalf("select: %+v", sel)
+		}
+		fc := &fakeOrderCreator{}
+		s.SetOrderCreator(fc)
+		confirm := s.HandleContext(t.Context(), marketEnvelope("ConfirmMarketApplication", "applicant_1", map[string]any{
+			"applicationId": appBody.Application.ID,
+		}))
+		if confirm.Outcome != "ACCEPTED" {
+			t.Fatalf("confirm: %+v", confirm)
+		}
+		return pub.Opportunity.Scenario, fc.records
+	}
+	if _, records := publishConfirm("assistance"); len(records) != 1 || records[0].Scenario != "assistance" {
+		t.Fatalf("assistance must reach OrderRecord, got %+v", records)
+	}
+	if published, records := publishConfirm("bogus"); published != "" || len(records) != 1 || records[0].Scenario != "" {
+		t.Fatalf("bogus scenario must normalize to empty, got published=%q records=%+v", published, records)
+	}
+}

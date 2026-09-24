@@ -68,6 +68,9 @@ type OrderRecord struct {
 	RequesterID string `json:"requesterId"`
 	AgentID     string `json:"agentId"`
 	NeedID      string `json:"needId"` // opportunity id; order sees it as needId for backward-compat with fulfillment listMyOrders
+	// ORDER-SCENARIO-001: 机会的消费场景（ordinary/assistance/空），Confirm 时
+	// 从 opportunity 回查填入，fulfillment 快照原样带到订单上。
+	Scenario string `json:"scenario,omitempty"`
 }
 
 // SetOrderCreator wires the fulfillment-backed order creator.
@@ -165,6 +168,9 @@ type Opportunity struct {
 	// OwnerID keeps pointing at the publisher so Owned/接单/屏蔽 stay
 	// intact; this field only narrows VISIBILITY + eligibility.
 	TargetAccountID string `json:"targetAccountId,omitempty"`
+	// ORDER-SCENARIO-001: 消费场景 —— ordinary 普通消费 / assistance 城市协助。
+	// 发布向导按 moment 家族填；订单流程按它分档。空 = 历史数据，按金额档兜底。
+	Scenario string `json:"scenario,omitempty"`
 }
 
 type Application struct {
@@ -175,6 +181,10 @@ type Application struct {
 	Quote         string     `json:"quote"`
 	Scope         string     `json:"scope"`
 	Status        string     `json:"status"`
+	// ORDER-SCENARIO-001: 报名时从机会快照的消费场景（ordinary/assistance/空），
+	// 确认时原样带进 OrderRecord。与 OwnerID 同一条快照 precedent —— 确认回调里
+	// 不许再读仓（memory 锁重入死锁），只消费这里现成的值。
+	Scenario      string     `json:"scenario,omitempty"`
 	CreatedAt     time.Time  `json:"createdAt"`
 	SelectedAt    *time.Time `json:"selectedAt,omitempty"`
 	ConfirmedAt   *time.Time `json:"confirmedAt,omitempty"`
@@ -406,7 +416,7 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		if stored.OwnerID == e.Actor.ID {
 			return rejected(e, "OWNER_CANNOT_APPLY", "market.owner_cannot_apply")
 		}
-		a := Application{ID: newID("app_"), OpportunityID: id, ApplicantID: e.Actor.ID, Quote: quote, Scope: scope, Status: "SUBMITTED", CreatedAt: time.Now().UTC()}
+		a := Application{ID: newID("app_"), OpportunityID: id, ApplicantID: e.Actor.ID, Quote: quote, Scope: scope, Status: "SUBMITTED", CreatedAt: time.Now().UTC(), Scenario: stored.Scenario}
 		a, _, err = s.repository.Apply(ctx, a)
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_failed", nil)
@@ -467,6 +477,7 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 				return s.orderCreator.EnsureOrder(txCtx, OrderRecord{
 					ID: orderID, RequesterID: application.OwnerID,
 					AgentID: application.ApplicantID, NeedID: application.OpportunityID,
+					Scenario: application.Scenario,
 				})
 			})
 		}
@@ -563,6 +574,12 @@ func normalizeOpportunityMoney(o *Opportunity) {
 	// 下发的 PriceLabel 与 MoneyFlow 语义严格一致。这是 MONEYFLOW-004
 	// tripwire。
 	o.PriceLabel = opportunityPriceLabel(o.MoneyFlow)
+
+	// ORDER-SCENARIO-001: scenario 只认 allowlist，其余清空 —— 历史行与
+	// 非向导发布本来就没有这个字段，空值由订单侧按金额档兜底，不猜。
+	if o.Scenario != "ordinary" && o.Scenario != "assistance" {
+		o.Scenario = ""
+	}
 }
 
 func opportunityPriceLabel(flow string) string {

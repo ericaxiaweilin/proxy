@@ -9366,3 +9366,10 @@ echo "    PROFILE-REPLIES-VISIBLE-001: PASS (profile posts show counts + expanda
 # COMPLETED，COMPLETED 评不了分。明细页按 lifecycle 逐态出真按钮，全部走命令。
 pnpm --dir apps/mobile exec vitest run src/order-exec.test.ts src/fulfillment-client.test.ts || exit $?
 echo "    ORDER-EXEC-001: PASS (order detail drives confirm/start/complete/satisfaction)"
+# ORDER-SCENARIO-001: 消费场景跟着机会走（发布向导按 moment 家族填 scenario，
+# 确认时快照进 OrderRecord → 订单快照）。城市协助永远全流程，不跟金额走。
+require_test "ORDER-SCENARIO-001" "./internal/marketplace" \
+  "TestConfirmMarketApplicationCarriesScenario" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
+pnpm --dir apps/mobile exec vitest run src/demand-moments.test.ts || exit $?
+echo "    ORDER-SCENARIO-001: PASS (scenario published, snapshotted, and tiered)"

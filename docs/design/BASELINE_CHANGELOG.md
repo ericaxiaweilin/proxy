@@ -4,6 +4,19 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 284 — 2026-09-24
+
+- **订单流程金额 + 场景双维度分档**（ORDER-SCENARIO-001）：不分场景同一套流程是错的，
+  步骤多的基本是城市协助。场景跟着机会走：发布向导按 moment 家族填 scenario
+  （pro → assistance），确认时快照进 OrderRecord → 订单快照（JSONB，无 migration；
+  确认回调里不读仓，memory 锁重入死锁，场景在报名时快照进 Application）。
+  城市协助永远全流程，跟金额无关；普通消费按金额（500K 线，0/面议按大单）。
+  slot/邀约路径没有场景信息，保持空走金额档。
+- 影响文件：`apps/api-go/internal/marketplace/service.go`、
+  `apps/api-go/internal/fulfillment/service.go`、`apps/api-go/cmd/api/wire_fulfillment.go`、
+  `apps/mobile/src/demand-moments.ts`、`apps/mobile/src/fulfillment-client.ts`、
+  `apps/mobile/src/surfaces/me-orders.tsx`、`packages/contracts/src/index.ts`。
+
 ## Revision 283 — 2026-09-24
 
 - **平台采购与可追溯券实例**（VOUCHER-PURCHASE-001，`feat/voucher-purchase-instances` 合入）：

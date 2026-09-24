@@ -63,6 +63,10 @@ type OrderSnapshot struct {
 	ExcludedScope      string `json:"excludedScope"`
 	SettlementMode     string `json:"settlementMode"` // DIRECT_SETTLEMENT | PLATFORM_PAY
 	PaymentMethodLabel string `json:"paymentMethodLabel"`
+	// ORDER-SCENARIO-001: 消费场景（ordinary/assistance/空）。market 路径由
+	// 机会快照带入；slot/scene 路径没有该信息，保持空。空 = 历史数据，
+	// 客户端按金额档兜底。
+	Scenario string `json:"scenario,omitempty"`
 	// R8 Pillar #6: Cash Eligibility 状态机。仅在 SettlementMode
 	// = DIRECT_SETTLEMENT 时生效。ALLOW/REVIEW/PLATFORM_PAY_REQUIRED/
 	// BLOCK 四态之一。PLATFORM_PAY 任务此字段为空串。写入快照后不

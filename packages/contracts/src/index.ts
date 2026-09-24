@@ -687,7 +687,11 @@ export const MarketOpportunitySchema = z.object({
   viewerOrderRef: z.string().optional(),
   // OPP-TARGETED-001: 定向邀约时非空 — 只对目标人和 owner 可见、
   // 只收目标人报名。空/缺省 = 经典公开卡（向后兼容）。
-  targetAccountId: z.string().min(1).optional()
+  targetAccountId: z.string().min(1).optional(),
+  // ORDER-SCENARIO-001: 消费场景 —— ordinary 普通消费 / assistance 城市协助。
+  // 发布向导按 moment 家族填（pro → assistance）；订单流程按它分档（城市协助
+  // 永远走全流程）。缺省 = 历史数据，按金额档兜底。
+  scenario: z.enum(["ordinary", "assistance"]).optional()
 });
 export type MarketOpportunity = z.infer<typeof MarketOpportunitySchema>;
 
@@ -832,7 +836,9 @@ export const PublishMarketOpportunityInputSchema = z.object({
   // OPP-TARGETED-001: 定向邀约（选人 → 向 TA 发出邀约）。带上后 server
   // 把机会快照为 targetAccountId 非空：List 只对目标人和 owner 可见，
   // Apply 只收目标人。不传 = 公开发布，行为与之前完全一致。
-  targetUserId: z.string().min(1).optional()
+  targetUserId: z.string().min(1).optional(),
+  // ORDER-SCENARIO-001: 发布向导按 moment 家族填（pro → assistance）。
+  scenario: z.enum(["ordinary", "assistance"]).optional()
 });
 export type PublishMarketOpportunityInput = z.infer<typeof PublishMarketOpportunityInputSchema>;
 

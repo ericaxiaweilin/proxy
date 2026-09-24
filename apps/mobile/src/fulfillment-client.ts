@@ -34,6 +34,9 @@ export type FulfillmentOrder = {
     excludedScope: string;
     settlementMode: string;
     paymentMethodLabel: string;
+    // ORDER-SCENARIO-001: 消费场景（ordinary 普通消费 / assistance 城市协助 /
+    // 缺省历史数据）。market 路径由机会快照带入；订单流程按它分档。
+    scenario?: string | undefined;
   };
   createdAt: string;
   updatedAt: string;

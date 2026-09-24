@@ -107,3 +107,16 @@ describe("R58 people filtering", () => {
     )).toHaveLength(1);
   });
 });
+
+describe("ORDER-SCENARIO-001 publish carries the consumption scenario", () => {
+  it("marks pro moments assistance and ordinary moments ordinary", () => {
+    const pro = MOMENT_TEMPLATES.find((t) => t.id === "pro")!;
+    const proInput = buildDemandPublishInput(pro, defaultSpecsFor(pro));
+    expect(proInput.scenario).toBe("assistance");
+    expect(PublishMarketOpportunityInputSchema.safeParse(proInput).success).toBe(true);
+    const coffee = MOMENT_TEMPLATES.find((t) => t.id === "coffee")!;
+    const coffeeInput = buildDemandPublishInput(coffee, defaultSpecsFor(coffee));
+    expect(coffeeInput.scenario).toBe("ordinary");
+    expect(PublishMarketOpportunityInputSchema.safeParse(coffeeInput).success).toBe(true);
+  });
+});

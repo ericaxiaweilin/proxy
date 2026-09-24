@@ -202,13 +202,15 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
   }, [detail?.orderId]);
 
   if (detail) {
-    // ORDER-TIER-001：流程按金额分档 —— 小单步骤多就是阻碍。500K 以下走短流程
-    // （确认合作 → 确认完成 → 评价），到场/结算表单不出现；大单走全流程
-    // （到场证明 + 证据 + 结算 + 评价）。线是常量，要调只改这里。
-    // 服务端状态机强制过 EXECUTING：小单点确认完成时自动先开工再记结果，
+    // ORDER-TIER-001：流程按金额 + 场景双维度分档 —— 小单步骤多就是阻碍，
+    // 步骤多的基本是城市协助。城市协助（scenario === "assistance"）永远走全流程，
+    // 跟金额无关；普通消费按金额：500K 以下短流程，大单/面议（0/未填）全流程。
+    // 服务端状态机强制过 EXECUTING：短流程点确认完成时自动先开工再记结果，
     // 两次服务端状态翻转都留痕，只是用户只点一次。
     const SMALL_ORDER_AMOUNT_VND = 500_000;
-    const isSmallOrder = (detail.snapshot.agreedCompensation || 0) < SMALL_ORDER_AMOUNT_VND;
+    const quotedAmount = detail.snapshot.agreedCompensation || 0;
+    const isAssistance = detail.snapshot.scenario === "assistance";
+    const isSmallOrder = !isAssistance && quotedAmount > 0 && quotedAmount < SMALL_ORDER_AMOUNT_VND;
     const showSettlement = detail.snapshot.settlementMode === "DIRECT_SETTLEMENT" && detail.lifecycle !== "OFFERED" && detail.lifecycle !== "CANCELLED" && !isSmallOrder;
     const actBtn = [styles.orderTab, styles.orderActBtn];
     const actBtnText = [styles.orderTabText, styles.orderActBtnText];
