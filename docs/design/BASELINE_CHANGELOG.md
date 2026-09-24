@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 302 — 2026-09-24
+
+- **出生日期自动隔断**（KYC-BIRTH-DATE-002）：第 1 步只管输数字，`-` 自动补
+  （20010520 → 2001-05-20），键盘换数字盘，退格自然。
+- 影响文件：`apps/mobile/src/surfaces/provider-application.tsx`。
+
 ## Revision 301 — 2026-09-24
 
 - **出生年份 → 出生日期**（KYC-BIRTH-DATE-001）：年份按年算年龄有最大 1 年误差，

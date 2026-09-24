@@ -53,6 +53,14 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
   const [accepted, setAccepted] = useState<string[]>([]);
   // KYC-BIRTH-DATE-001：出生日期精确到日，客户端先拦明显错的（格式/不存在的日期/未成年/未来），
   // 服务端按精确年龄重算（这里只拦明显错的，边界以服务端为准）。
+  // KYC-BIRTH-DATE-002（用户：「出生日期自动隔断」）：只管输数字，隔断自动补 ——
+  // 20010520 → 2001-05-20。按纯数字重排，所以退格也是自然的。
+  function formatBirthDateInput(value: string): string {
+    const digits = value.replace(/\D/g, "").slice(0, 8);
+    if (digits.length <= 4) return digits;
+    if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+    return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
+  }
   function parseBirthDate(value: string): { year: number; month: number; day: number } | undefined {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
     if (!match) return undefined;
@@ -252,7 +260,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
         <TextInput accessibilityLabel="真实姓名" onChangeText={(v) => { setRealName(v); setBasicErrors((p) => { const next = { ...p }; delete next.realName; return next; }); }} placeholder="与证件一致" placeholderTextColor={color.muted} style={[s.input, basicErrors.realName ? s.inputError : null]} value={realName} />
         {basicErrors.realName ? <Text selectable style={s.fieldError}>{basicErrors.realName}</Text> : null}
         <Text selectable style={s.label}>出生日期 *</Text>
-        <TextInput accessibilityLabel="出生日期" maxLength={10} onChangeText={(v) => { setBirthDate(v); setBasicErrors((p) => { const next = { ...p }; delete next.birthDate; return next; }); }} placeholder="2001-05-20" placeholderTextColor={color.muted} style={[s.input, basicErrors.birthDate ? s.inputError : null]} value={birthDate} />
+        <TextInput accessibilityLabel="出生日期" keyboardType="number-pad" maxLength={10} onChangeText={(v) => { setBirthDate(formatBirthDateInput(v)); setBasicErrors((p) => { const next = { ...p }; delete next.birthDate; return next; }); }} placeholder="20010520 自动隔断" placeholderTextColor={color.muted} style={[s.input, basicErrors.birthDate ? s.inputError : null]} value={birthDate} />
         {basicErrors.birthDate ? <Text selectable style={s.fieldError}>{basicErrors.birthDate}</Text> : null}
         <Text selectable style={s.label}>手机号 *</Text>
         <TextInput accessibilityLabel="手机号" keyboardType="phone-pad" onChangeText={(v) => { setPhone(v); setBasicErrors((p) => { const next = { ...p }; delete next.phone; return next; }); }} placeholder="09xx xxx xxx" placeholderTextColor={color.muted} style={[s.input, basicErrors.phone ? s.inputError : null]} value={phone} />
