@@ -5000,11 +5000,21 @@ if grep -qF '&post.CityScope' apps/api-go/internal/platform/postgres/network.go;
   echo "        string again — one NULL row will fail every feed read." >&2
   exit 1
 fi
-# 4 条读路径（ListFeedPage / Snapshot / GetPost / ListPostsMentioning）都要判空。
+# 每条读路径都要判空。⚠️ 同样按**路径数**算，不能按 guard 点数：5aa88a8
+# （SCENE-PHOTO-WALL-001，Rev289）把三条相同的判空抽进共享的 scanPostRows
+# （一条 guard 服务三个 SELECT），guard 点数从 4 掉到 3、读路径反而涨到 5
+# （新增 ListPostsAtScene）—— 代码是对的，红的是这条钉。它当时被
+# COMP-SELLER-001 的 gofmt 假红静音（脚本卡在 3144 行），2026-09-24 修。
+# 5 条 = GetPost / Snapshot / ListFeedPage / ListPostsMentioning / ListPostsAtScene。
 city_guards=$(grep -cF 'cityScope != nil' apps/api-go/internal/platform/postgres/network.go)
-if [ "$city_guards" -lt 4 ]; then
-  echo "  FAIL [FEED-NULL-CITY-001]: only $city_guards read path(s) guard the" >&2
-  echo "        nullable city_scope, want 4." >&2
+city_shared_defs=$(grep -cF 'func scanPostRows(' apps/api-go/internal/platform/postgres/network.go)
+city_shared_calls=$(grep -cF 'scanPostRows(rows, limit)' apps/api-go/internal/platform/postgres/network.go)
+city_paths=$((city_guards - city_shared_defs + city_shared_calls))
+if [ "$city_paths" -lt 5 ]; then
+  echo "  FAIL [FEED-NULL-CITY-001]: only $city_paths read path(s) guard the" >&2
+  echo "        nullable city_scope, want 5" >&2
+  echo "        ($city_guards guard(s) − $city_shared_defs shared scanner definition(s)" >&2
+  echo "        + $city_shared_calls call site(s))." >&2
   exit 1
 fi
 echo "    FEED-NULL-CITY-001: PASS (one NULL city_scope no longer kills the feed)"
