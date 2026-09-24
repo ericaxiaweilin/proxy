@@ -4214,7 +4214,12 @@ if ! grep -qF 'key={reply.replyId}' apps/mobile/src/surfaces/ProfileTabs.tsx; th
   echo "        replies to the same post collide." >&2
   exit 1
 fi
-if ! grep -qF 'replyTargetLabel(props.viewerMode, target, props.viewerAccountId)' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+# 同 FEED-REPLY-001：Rev276 也给这个调用加了第四个实参（观察者本人的资料名，供
+# resolveAuthorDisplayName 的 isOwnAuthorId 分支使用），整串匹配于是过期。收窄到
+# 「仍然调用同一个共享标签、并带上观察者的账号 id」为止 —— 这正是本钉要守的东西
+# （tab 不许自己拼标签、从而和 feed 对「谁是谁」的说法不一致）。注释同样不复述
+# 那段调用文本，否则删掉真正的调用后这行注释会让钉继续变绿。
+if ! grep -qF 'replyTargetLabel(props.viewerMode, target, props.viewerAccountId' apps/mobile/src/surfaces/ProfileTabs.tsx; then
   echo "  FAIL [REPLY-TARGET-001]: the replies tab no longer uses the shared label," >&2
   echo "        so it can disagree with the feed about who someone is." >&2
   exit 1
