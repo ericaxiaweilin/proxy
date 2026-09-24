@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 299 — 2026-09-24
+
+- **KYC 表单清爽化**（KYC-UI-CLEAN-001）：开始填写前不再文字拉满 —— 深色 hero
+  （KYC · 3 步走完 / 轻认证，不卡你 / 一句话说明）+ 白卡两行图标
+  （3–5 分钟填完 / 运营人工审核）+ 一行注 + 全宽「开始填写 ›」。
+  三步头上加 3 段进度条；Step 2 导语缩成一句。布局取自原型 807348，
+  文案保持诚实：无 Face ID 行、无验证码行、无 24h 承诺。
+- 影响文件：`apps/mobile/src/surfaces/provider-application.tsx`。
+
 ## Revision 298 — 2026-09-24
 
 - **KYC 路由瘦身**（KYC-CENTER-REMOVE-001）：Rev297 塞进 KYC认证 的接单中心首页

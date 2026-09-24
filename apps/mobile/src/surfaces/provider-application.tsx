@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Defs, LinearGradient, Rect, Stop, Svg } from "react-native-svg";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { color } from "../theme";
 import { sessionAuthClient } from "../native-clients";
 import type { MediaClient } from "../media-client";
 import { ProxyLoading } from "../components/proxy-foundation";
+import { ProxyIcon } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import {
   GENDER_OPTIONS, fetchProviderApplication, kycPipeline, providerApplicationErrorText,
@@ -154,6 +156,9 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
   const stepHead = (n: number, title: string, lead: string) => (
     <View style={s.stepHead}>
       <Text selectable style={s.stepNo}>{`${n} / 3`}</Text>
+      <View style={s.segRow}>{[1, 2, 3].map((i) => (
+        <View key={i} style={[s.seg, i < n && s.segDone, i === n && s.segOn]} />
+      ))}</View>
       <Text selectable style={s.cardTitle}>{title}</Text>
       <Text selectable style={s.muted}>{lead}</Text>
     </View>
@@ -183,15 +188,39 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
           ))}</View>
           {card.canWithdraw ? <Pressable disabled={busy !== undefined} onPress={() => { void withdraw(); }} style={s.secondary}><Text selectable style={s.secondaryText}>{busy === "withdraw" ? "撤回中…" : "撤回申请"}</Text></Pressable> : null}
           {card.canReapply ? <Pressable onPress={() => setStep("basic")} style={s.primary}><Text selectable style={s.primaryText}>修改后重新提交</Text></Pressable> : null}
-        </View> : <View style={s.card}>
-          <Text selectable style={s.kicker}>开始前</Text>
-          <Text selectable style={s.cardTitle}>KYC · 3 步走完</Text>
-          <Text selectable style={s.muted}>基础信息 → 证件 + 手持证件自拍 → 履约条款。任何人都可以申请接单，性别不影响审核。</Text>
-          <Text selectable style={s.bullet}>· 头像、实名、出生年份（需年满 18 岁）、手机号</Text>
-          <Text selectable style={s.bullet}>· 身份证（正反面）或护照 + 一张手持证件的自拍，运营人工比对</Text>
-          <Text selectable style={s.bullet}>· 审核由运营人工完成，结果显示在这里；不通过可以修改后重新提交</Text>
-          <Text selectable style={s.fine}>提交的资料只用于 KYC 审核，不会公开给客户。</Text>
-          <Pressable accessibilityLabel="开始填写" onPress={() => setStep("basic")} style={s.primary}><Text selectable style={s.primaryText}>开始填写</Text></Pressable>
+        </View> : <View style={s.introGap}>
+          <View style={s.hero}>
+            <Svg pointerEvents="none" style={StyleSheet.absoluteFill}>
+              <Defs>
+                <LinearGradient id="kycHero" x1="0" y1="0" x2="1" y2="1">
+                  <Stop offset="0" stopColor="#1E1B16" />
+                  <Stop offset="1" stopColor="#2E2A24" />
+                </LinearGradient>
+              </Defs>
+              <Rect height="100%" rx={18} ry={18} width="100%" x="0" y="0" fill="url(#kycHero)" />
+            </Svg>
+            <Text selectable style={s.heroKicker}>KYC · 3 步走完</Text>
+            <Text selectable style={s.heroTitle}>轻认证，不卡你</Text>
+            <Text selectable style={s.heroSub}>基础信息 + 证件自拍 + 条款，一次讲清。</Text>
+          </View>
+          <View style={s.infoCard}>
+            <View style={s.infoRow}>
+              <View style={[s.infoTile, s.infoTileTime]}><ProxyIcon color={color.ink} name="clock" size={17} /></View>
+              <View style={s.checkCopy}>
+                <Text selectable style={s.checkTitle}>3–5 分钟填完</Text>
+                <Text selectable style={s.muted}>身份证/护照 + 本人手机号</Text>
+              </View>
+            </View>
+            <View style={s.infoRowLast}>
+              <View style={[s.infoTile, s.infoTileHuman]}><ProxyIcon color={color.ink} name="user" size={17} /></View>
+              <View style={s.checkCopy}>
+                <Text selectable style={s.checkTitle}>运营人工审核</Text>
+                <Text selectable style={s.muted}>结果显示在这里，不通过可重提</Text>
+              </View>
+            </View>
+          </View>
+          <Text selectable style={s.fine}>提交资料仅用于 KYC 审核，不会公开给客户。</Text>
+          <Pressable accessibilityLabel="开始填写" onPress={() => setStep("basic")} style={s.primary}><Text selectable style={s.primaryText}>开始填写 ›</Text></Pressable>
         </View>}
       </> : null}
 
@@ -221,7 +250,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
       </View> : null}
 
       {step === "documents" ? <View style={s.card}>
-        {stepHead(2, "证件认证", "上传身份证或护照，再拍一张手持证件的自拍。运营会把自拍、证件和你的头像放在一起人工比对。资料只用于 KYC 审核。")}
+        {stepHead(2, "证件认证", "证件 + 手持自拍，运营人工比对。")}
         <View style={s.chips}>{(["CCCD", "PASSPORT"] as const).map((type) => <Pressable accessibilityLabel={`${type === "CCCD" ? "身份证" : "护照"}${idType === type ? "，已选" : ""}`} key={type} onPress={() => setIdType(type)} style={[s.chip, idType === type && s.chipOn]}><Text selectable style={[s.chipText, idType === type && s.chipTextOn]}>{type === "CCCD" ? "身份证 CCCD" : "护照"}</Text></Pressable>)}</View>
         {docTile("front", "证件正面", "四角清晰、不反光")}
         {idType === "CCCD" ? docTile("back", "证件反面", "四角清晰、不反光") : null}
@@ -287,6 +316,17 @@ const s = StyleSheet.create({
   gateBack: { color: color.magenta, fontSize: 13, fontWeight: "800" },
   gateTitle: { color: color.ink, fontSize: 22, fontWeight: "900" },
   wrap: { gap: 12, paddingBottom: 24 },
+  introGap: { gap: 14 },
+  hero: { borderRadius: 18, gap: 8, overflow: "hidden", paddingHorizontal: 20, paddingVertical: 24 },
+  heroKicker: { color: "#A79EAF", fontSize: 11, fontWeight: "900", letterSpacing: 1 },
+  heroTitle: { color: color.white, fontSize: 24, fontWeight: "900", letterSpacing: -0.5 },
+  heroSub: { color: "#D8D1E0", fontSize: 12.5, fontWeight: "600", lineHeight: 20 },
+  infoCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 6 },
+  infoRow: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 13, paddingVertical: 14 },
+  infoRowLast: { alignItems: "center", flexDirection: "row", gap: 13, paddingVertical: 14 },
+  infoTile: { alignItems: "center", borderRadius: 11, height: 36, justifyContent: "center", width: 36 },
+  infoTileTime: { backgroundColor: color.warn },
+  infoTileHuman: { backgroundColor: color.stateInfoBg },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 8, padding: 14 },
   kicker: { color: color.muted, fontSize: 11, fontWeight: "900" },
   cardTitle: { color: color.ink, fontSize: 17, fontWeight: "900" },
@@ -304,6 +344,10 @@ const s = StyleSheet.create({
   chipText: { color: color.ink, fontSize: 12, fontWeight: "800" },
   chipTextOn: { color: color.white },
   stepHead: { gap: 4, marginBottom: 4 },
+  segRow: { flexDirection: "row", gap: 6, marginVertical: 6 },
+  seg: { backgroundColor: color.line, borderRadius: 2, flex: 1, height: 4 },
+  segDone: { backgroundColor: color.ink },
+  segOn: { backgroundColor: color.magenta },
   avatarRow: { alignItems: "center", backgroundColor: color.surface, borderRadius: 14, flexDirection: "row", gap: 12, padding: 10 },
   avatarBox: { alignItems: "center", backgroundColor: color.white, borderRadius: 26, height: 52, justifyContent: "center", overflow: "hidden", width: 52 },
   avatarLetter: { color: color.muted, fontSize: 20, fontWeight: "900" },
