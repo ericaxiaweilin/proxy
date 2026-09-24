@@ -47,3 +47,14 @@ describe("ORDER-CENTER-STATS-001 order panel", () => {
     expect((await fetchProviderStats(ok)).permission).toBe("SUBMITTED");
   });
 });
+
+describe("ORDER-PERMISSION-KYC-003 review pipeline", () => {
+  it("lists only steps that really happen, and follows the status", async () => {
+    const { kycPipeline } = await import("./provider-application-client");
+    const titles = kycPipeline(null).map((step) => step.title);
+    expect(titles).toEqual(["资料提交", "运营人工比对", "KYC 通过"]);
+    expect(titles.join()).not.toMatch(/Face ID|自动比对/);
+    expect(kycPipeline({ ...base, status: "SUBMITTED" }).map((step) => step.state)).toEqual(["done", "active", "pending"]);
+    expect(kycPipeline({ ...base, status: "REJECTED" })[2]?.state).toBe("failed");
+  });
+});

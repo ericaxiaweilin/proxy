@@ -2831,7 +2831,7 @@ export function MeSurface({
               <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text selectable style={styles.subPageTitle}>KYC认证</Text>
-            <ProviderApplicationSurface mediaClient={mediaClient} />
+            <ProviderApplicationSurface avatarUri={profileAvatarUri} displayName={hubProfile.displayName} mediaClient={mediaClient} onEditProfile={() => openSubPage("personalmanage")} />
           </ScrollView>
         </View>
       );

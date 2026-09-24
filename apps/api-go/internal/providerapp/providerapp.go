@@ -5,7 +5,8 @@
 //
 // ORDER-PERMISSION-KYC-001（原型 deepseek_html_20260924_33987c「接单中心 · KYC + 履约管线」）：3 步 KYC
 //
-//	1 基础信息：实名、出生年份（满 18）、性别（可选自述，不参与任何判断）、手机号、服务区域、语言
+//	1 基础信息：头像（用主页头像）、实名、出生年份（满 18）、性别（可选自述，不参与任何判断）、手机号
+//	  —— KYC 只认人，不收城市 / 服务区域 / 语言（那是接单范围和能力，用户：「把会说的语言也放入了 干什么」）
 //	2 证件：CCCD（正反面）或护照（正面）+ 手持证件自拍 —— 运营人工比对（用户选定；Face ID 只能证明是手机主人，
 //	  不能和证件比对，所以不用它冒充「真人比对通过」）；无犯罪声明；KYC 数据使用同意
 //	3 履约条款：紧急联系人 + config/provider-terms/terms.json 的全部条款（记录版本）
@@ -359,13 +360,11 @@ func validate(in Input, terms Terms, year int) []string {
 	if digits := strings.TrimPrefix(in.Phone, "+"); len(digits) < 8 || len(digits) > 15 || !strings.HasPrefix(in.Phone, "+") {
 		fields = append(fields, "phone")
 	}
-	if in.City == "" {
-		fields = append(fields, "city")
-	}
-	if len(in.ServiceAreas) == 0 || !subset(in.ServiceAreas, AllowedAreas) {
+	// 城市 / 区域 / 语言是可选的旧字段（KYC 不收）；传了就得是认识的值。
+	if !subset(in.ServiceAreas, AllowedAreas) {
 		fields = append(fields, "service_areas")
 	}
-	if len(in.Languages) == 0 || !subset(in.Languages, AllowedLanguages) {
+	if !subset(in.Languages, AllowedLanguages) {
 		fields = append(fields, "languages")
 	}
 	if in.IDType != "CCCD" && in.IDType != "PASSPORT" {

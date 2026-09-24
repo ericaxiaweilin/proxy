@@ -9426,3 +9426,12 @@ if ! grep -qF '<ProviderOrderPanel' apps/mobile/src/surfaces/me-orders.tsx; then
   exit 1
 fi
 echo "    ORDER-CENTER-STATS-001: PASS"
+# ORDER-PERMISSION-KYC-003: KYC 只认人（头像 / 实名 / 出生年份 / 性别可选 / 手机号 + 证件 + 条款），
+# 不收城市 / 服务区域 / 语言（用户：「把会说的语言也放入了 干什么」）。
+require_test "ORDER-PERMISSION-KYC-003" "./internal/providerapp" "TestKYCDoesNotRequireCityAreasOrLanguages" \
+  "apps/api-go/internal/providerapp/providerapp_test.go" || exit $?
+if grep -qF 'LANGUAGE_LABELS' apps/mobile/src/surfaces/provider-application.tsx || grep -qF 'accessibilityLabel="所在城市"' apps/mobile/src/surfaces/provider-application.tsx; then
+  echo "  FAIL [ORDER-PERMISSION-KYC-003]: KYC 表单又收语言 / 区域了。" >&2
+  exit 1
+fi
+echo "    ORDER-PERMISSION-KYC-003: PASS"

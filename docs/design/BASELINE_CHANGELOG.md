@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 296 — 2026-09-24
+
+- **KYC 只认人**（ORDER-PERMISSION-KYC-003，原型 deepseek_html_20260924_807348；用户：「把会说的语言也放入了 干什么」）：
+  第 1 步只剩头像（主页头像，点进「个人管理」改）、真实姓名、出生年份、性别（可选）、手机号；城市 / 服务区域 / 语言
+  从 KYC 拿掉（那是接单范围和能力，不是身份）。服务端不再要求这三项。
+  状态卡加原型的「审核进度」，只列真实发生的步骤：资料提交 → 运营人工比对（手持证件自拍 ↔ 证件 ↔ 头像）→ KYC 通过
+  （没有「证件自动比对」「Face ID」—— 这两样没有）。
+- 影响文件：`apps/mobile/src/surfaces/provider-application.tsx`、`provider-application-client.ts`、`surfaces/me.tsx`；
+  `apps/api-go/internal/providerapp/providerapp.go`。
+
 ## Revision 295 — 2026-09-24
 
 - **「申请接单权限」改名「KYC认证」**（ORDER-PERMISSION-KYC-002，用户：「申请接单权限改为KYC认证」）：我的 → 个人管理的入口、

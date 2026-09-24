@@ -40,9 +40,6 @@ export type ProviderApplicationInput = {
   birthYear: number;
   gender: "" | "FEMALE" | "MALE" | "OTHER";
   phone: string;
-  city: string;
-  serviceAreas: string[];
-  languages: string[];
   idType: "CCCD" | "PASSPORT";
   idFrontAsset: string;
   idBackAsset: string;
@@ -175,4 +172,27 @@ export function permissionLine(permission: ProviderStatsView["permission"]): { t
     case "REJECTED": return { text: "KYC认证未通过 · 可修改后重新提交", canApply: true };
     default: return { text: "还没有完成KYC认证", canApply: true };
   }
+}
+
+// 审核进度（原型「KYC 审核进度」），只列真实发生的步骤：没有「证件自动比对」「Face ID」—— 这两样没有。
+export type KycPipelineStep = { title: string; state: "done" | "active" | "pending" | "failed"; badge: string; hint: string };
+
+export function kycPipeline(app: ProviderApplication | null): KycPipelineStep[] {
+  const status = app?.status;
+  const submitted = status === "SUBMITTED" || status === "APPROVED" || status === "REJECTED";
+  return [
+    { title: "资料提交", state: submitted ? "done" : "pending", badge: submitted ? "完成" : "待提交", hint: submitted ? "基础信息 + 证件 + 手持证件自拍 + 条款" : "3 步填完后提交" },
+    {
+      title: "运营人工比对",
+      state: status === "SUBMITTED" ? "active" : status === "APPROVED" || status === "REJECTED" ? "done" : "pending",
+      badge: status === "SUBMITTED" ? "进行中" : status === "APPROVED" || status === "REJECTED" ? "完成" : "等待中",
+      hint: "手持证件自拍 ↔ 证件照 ↔ 主页头像",
+    },
+    {
+      title: "KYC 通过",
+      state: status === "APPROVED" ? "done" : status === "REJECTED" ? "failed" : "pending",
+      badge: status === "APPROVED" ? "通过" : status === "REJECTED" ? "未通过" : "等待中",
+      hint: status === "APPROVED" ? "可以接单，AI 分身已开放" : status === "REJECTED" ? "看原因，修改后重新提交" : "通过后开始接单",
+    },
+  ];
 }

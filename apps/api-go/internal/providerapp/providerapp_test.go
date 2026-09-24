@@ -27,8 +27,7 @@ var testTerms = Terms{Version: "v1", Items: []TermItem{{ID: "monitoring"}, {ID: 
 
 func goodInput() Input {
 	return Input{
-		RealName: "Nguyễn Linh", BirthYear: time.Now().Year() - 25, Phone: "090 123 4567", City: "河内",
-		ServiceAreas: []string{"hn", "HN"}, Languages: []string{"vi", "zh"},
+		RealName: "Nguyễn Linh", BirthYear: time.Now().Year() - 25, Phone: "090 123 4567",
 		IDType: "cccd", IDFrontAsset: "assets/ma_f", IDBackAsset: "ma_b", SelfieAsset: "ma_s",
 		NoCrime: true, DataConsent: true, Emergency: "Mẹ 0987654321", TermsVersion: "v1", Accepted: []string{"monitoring", "cancel"},
 	}
@@ -41,8 +40,8 @@ func TestSubmitNormalizesAndRejectsASecondOpenApplication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if app.Status != StatusSubmitted || app.DisplayName != "Linh" || len(app.ServiceAreas) != 1 || app.IDFrontAsset != "ma_f" ||
-		app.Languages[1] != "ZH" || app.Phone != "+84901234567" || app.IDType != "CCCD" || app.TermsVersion != "v1" || app.Gender != "" {
+	if app.Status != StatusSubmitted || app.DisplayName != "Linh" || app.IDFrontAsset != "ma_f" ||
+		app.Phone != "+84901234567" || app.IDType != "CCCD" || app.TermsVersion != "v1" || app.Gender != "" {
 		t.Fatalf("unexpected application: %+v", app)
 	}
 	if _, err := s.Submit(ctx, "user_1", goodInput()); !errors.Is(err, ErrAlreadyOpen) {
@@ -57,8 +56,8 @@ func TestSubmitListsEveryInvalidField(t *testing.T) {
 	if !errors.As(err, &v) {
 		t.Fatalf("want ValidationError, got %v", err)
 	}
-	want := map[string]bool{"profile_avatar": true, "real_name": true, "birth_year": true, "phone": true, "city": true,
-		"service_areas": true, "languages": true, "id_type": true, "id_documents": true, "selfie": true,
+	want := map[string]bool{"profile_avatar": true, "real_name": true, "birth_year": true, "phone": true,
+		"languages": true, "id_type": true, "id_documents": true, "selfie": true,
 		"no_crime_declared": true, "data_consent": true, "emergency_contact": true, "terms_accepted": true}
 	for _, f := range v.Fields {
 		delete(want, f)
@@ -191,5 +190,15 @@ func TestFillRatesLeavesEmptyDenominatorsNil(t *testing.T) {
 	FillRates(&s)
 	if s.CompletionRate == nil || *s.CompletionRate != 0.75 || s.OnTimeRate == nil || *s.OnTimeRate < 0.66 || *s.OnTimeRate > 0.67 {
 		t.Fatalf("rates: %+v", s)
+	}
+}
+
+// ORDER-PERMISSION-KYC-003：KYC 只认人 —— 不填城市 / 服务区域 / 语言也能提交。
+func TestKYCDoesNotRequireCityAreasOrLanguages(t *testing.T) {
+	s, _ := testService(nil, nil)
+	in := goodInput()
+	in.City, in.ServiceAreas, in.Languages = "", nil, nil
+	if _, err := s.Submit(context.Background(), "user_1", in); err != nil {
+		t.Fatalf("KYC must not require service-profile fields: %v", err)
 	}
 }

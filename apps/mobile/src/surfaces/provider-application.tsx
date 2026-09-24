@@ -6,8 +6,9 @@ import { color } from "../theme";
 import { sessionAuthClient } from "../native-clients";
 import type { MediaClient } from "../media-client";
 import { ProxyLoading } from "../components/proxy-foundation";
+import { CircularAvatarImage } from "../components/circular-avatar-image";
 import {
-  AREA_LABELS, GENDER_OPTIONS, LANGUAGE_LABELS, fetchProviderApplication, providerApplicationErrorText,
+  GENDER_OPTIONS, fetchProviderApplication, kycPipeline, providerApplicationErrorText,
   providerApplicationStatusCard, submitProviderApplication, withdrawProviderApplication,
   type ProviderApplicationInput, type ProviderApplicationView,
 } from "../provider-application-client";
@@ -24,7 +25,14 @@ type Step = "intro" | "basic" | "documents" | "terms";
 type DocSlot = "front" | "back" | "selfie";
 type Doc = { mediaAssetId: string; uri: string };
 
-export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: MediaClient | undefined }): React.JSX.Element {
+// ORDER-PERMISSION-KYC-003（原型 807348；用户：「把会说的语言也放入了 干什么」）：KYC 只认人 ——
+// 第 1 步只有头像、实名、出生年份、性别（可选）、手机号；城市 / 服务区域 / 语言是接单范围和能力，不在 KYC 里。
+export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName, onEditProfile }: {
+  mediaClient?: MediaClient | undefined;
+  avatarUri?: string | undefined;
+  displayName?: string | undefined;
+  onEditProfile?: (() => void) | undefined;
+}): React.JSX.Element {
   const [view, setView] = useState<ProviderApplicationView>();
   const [loadError, setLoadError] = useState<string>();
   const [step, setStep] = useState<Step>("intro");
@@ -34,9 +42,6 @@ export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: Medi
   const [birthYear, setBirthYear] = useState("");
   const [gender, setGender] = useState<ProviderApplicationInput["gender"]>("");
   const [phone, setPhone] = useState("");
-  const [city, setCity] = useState("河内");
-  const [areas, setAreas] = useState<string[]>(["hn"]);
-  const [languages, setLanguages] = useState<string[]>([]);
   const [idType, setIdType] = useState<"CCCD" | "PASSPORT">("CCCD");
   const [docs, setDocs] = useState<Partial<Record<DocSlot, Doc>>>({});
   const [noCrime, setNoCrime] = useState(false);
@@ -80,7 +85,7 @@ export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: Medi
     setError(undefined);
     try {
       setView(await submitProviderApplication(sessionAuthClient, {
-        realName, birthYear: Number.parseInt(birthYear, 10) || 0, gender, phone, city, serviceAreas: areas, languages,
+        realName, birthYear: Number.parseInt(birthYear, 10) || 0, gender, phone,
         idType, idFrontAsset: docs.front?.mediaAssetId ?? "", idBackAsset: idType === "CCCD" ? docs.back?.mediaAssetId ?? "" : "",
         selfieAsset: docs.selfie?.mediaAssetId ?? "", noCrimeDeclared: noCrime, dataConsent, emergencyContact: emergency,
         termsVersion: view.terms.version, termsAccepted: accepted,
@@ -109,12 +114,6 @@ export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: Medi
   if (!view) return <ProxyLoading label="正在读取申请状态" tone="muted" />;
 
   const card = providerApplicationStatusCard(view.application);
-  const chips = (codes: string[], labels: Readonly<Record<string, string>>, selected: string[], set: (next: string[]) => void) => (
-    <View style={s.chips}>{codes.map((code) => {
-      const on = selected.includes(code);
-      return <Pressable accessibilityLabel={`${labels[code] ?? code}${on ? "，已选" : ""}`} key={code} onPress={() => toggle(selected, set, code)} style={[s.chip, on && s.chipOn]}><Text selectable style={[s.chipText, on && s.chipTextOn]}>{labels[code] ?? code}</Text></Pressable>;
-    })}</View>
-  );
   const check = (on: boolean, set: (v: boolean) => void, title: string, body?: string, note?: string) => (
     <Pressable accessibilityLabel={`${title}${on ? "，已勾选" : ""}`} key={title} onPress={() => set(!on)} style={s.check}>
       <View style={[s.box, on && s.boxOn]}>{on ? <Text selectable style={s.boxTick}>✓</Text> : null}</View>
@@ -155,13 +154,23 @@ export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: Medi
         {card ? <View style={s.card}>
           <Text selectable style={s.cardTitle}>{card.title}</Text>
           <Text selectable style={s.muted}>{card.detail}</Text>
+          <View style={s.pipeline}>{kycPipeline(view.application).map((item) => (
+            <View key={item.title} style={s.pipeRow}>
+              <View style={[s.pipeDot, item.state === "done" && s.pipeDotDone, item.state === "active" && s.pipeDotActive, item.state === "failed" && s.pipeDotFailed]} />
+              <View style={s.checkCopy}>
+                <Text selectable style={s.checkTitle}>{item.title}</Text>
+                <Text selectable style={s.muted}>{item.hint}</Text>
+              </View>
+              <Text selectable style={[s.pipeBadge, item.state === "failed" && s.error]}>{item.badge}</Text>
+            </View>
+          ))}</View>
           {card.canWithdraw ? <Pressable disabled={busy !== undefined} onPress={() => { void withdraw(); }} style={s.secondary}><Text selectable style={s.secondaryText}>{busy === "withdraw" ? "撤回中…" : "撤回申请"}</Text></Pressable> : null}
           {card.canReapply ? <Pressable onPress={() => setStep("basic")} style={s.primary}><Text selectable style={s.primaryText}>修改后重新提交</Text></Pressable> : null}
         </View> : <View style={s.card}>
           <Text selectable style={s.kicker}>开始前</Text>
           <Text selectable style={s.cardTitle}>KYC · 3 步走完</Text>
           <Text selectable style={s.muted}>基础信息 → 证件 + 手持证件自拍 → 履约条款。任何人都可以申请接单，性别不影响审核。</Text>
-          <Text selectable style={s.bullet}>· 实名、出生年份（需年满 18 岁）、手机号</Text>
+          <Text selectable style={s.bullet}>· 头像、实名、出生年份（需年满 18 岁）、手机号</Text>
           <Text selectable style={s.bullet}>· 身份证（正反面）或护照 + 一张手持证件的自拍，运营人工比对</Text>
           <Text selectable style={s.bullet}>· 审核由运营人工完成，结果显示在这里；不通过可以修改后重新提交</Text>
           <Text selectable style={s.fine}>提交的资料只用于 KYC 审核，不会公开给客户。</Text>
@@ -170,7 +179,15 @@ export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: Medi
       </> : null}
 
       {step === "basic" ? <View style={s.card}>
-        {stepHead(1, "先填基础信息", "用于实名比对。头像用你主页的头像（在「个人管理」里改）。")}
+        {stepHead(1, "先填基础信息", "用于实名比对。")}
+        <Pressable accessibilityLabel="头像，在个人管理里修改" disabled={!onEditProfile} onPress={onEditProfile} style={s.avatarRow}>
+          <View style={s.avatarBox}>{avatarUri ? <CircularAvatarImage size={52} uri={avatarUri} /> : <Text selectable style={s.avatarLetter}>{(displayName ?? "").slice(0, 1).toUpperCase() || "?"}</Text>}</View>
+          <View style={s.checkCopy}>
+            <Text selectable style={s.checkTitle}>{avatarUri ? "头像" : "还没有头像"}</Text>
+            <Text selectable style={s.muted}>正面清晰 · 别用滤镜 · 用你主页的头像，在「个人管理」里改</Text>
+          </View>
+          {onEditProfile ? <Text selectable style={s.pipeBadge}>›</Text> : null}
+        </Pressable>
         <Text selectable style={s.label}>真实姓名 *</Text>
         <TextInput accessibilityLabel="真实姓名" onChangeText={setRealName} placeholder="与证件一致" placeholderTextColor={color.muted} style={s.input} value={realName} />
         <Text selectable style={s.label}>出生年份 *</Text>
@@ -180,12 +197,6 @@ export function ProviderApplicationSurface({ mediaClient }: { mediaClient?: Medi
         <Text selectable style={s.label}>手机号 *</Text>
         <TextInput accessibilityLabel="手机号" keyboardType="phone-pad" onChangeText={setPhone} placeholder="09xx xxx xxx" placeholderTextColor={color.muted} style={s.input} value={phone} />
         <Text selectable style={s.note}>短信验证码暂未接入：手机号会标为「未验证」，运营审核时电话核实。</Text>
-        <Text selectable style={s.label}>所在城市 *</Text>
-        <TextInput accessibilityLabel="所在城市" onChangeText={setCity} style={s.input} value={city} />
-        <Text selectable style={s.label}>服务区域 *</Text>
-        {chips(view.options.serviceAreas, AREA_LABELS, areas, setAreas)}
-        <Text selectable style={s.label}>会说的语言 *</Text>
-        {chips(view.options.languages, LANGUAGE_LABELS, languages, setLanguages)}
         {nav("intro", () => { setError(undefined); setStep("documents"); }, "下一步 · 证件认证")}
       </View> : null}
 
@@ -271,6 +282,16 @@ const s = StyleSheet.create({
   chipText: { color: color.ink, fontSize: 12, fontWeight: "800" },
   chipTextOn: { color: color.white },
   stepHead: { gap: 4, marginBottom: 4 },
+  avatarRow: { alignItems: "center", backgroundColor: color.surface, borderRadius: 14, flexDirection: "row", gap: 12, padding: 10 },
+  avatarBox: { alignItems: "center", backgroundColor: color.white, borderRadius: 26, height: 52, justifyContent: "center", overflow: "hidden", width: 52 },
+  avatarLetter: { color: color.muted, fontSize: 20, fontWeight: "900" },
+  pipeline: { gap: 10, marginTop: 6 },
+  pipeRow: { alignItems: "center", flexDirection: "row", gap: 10 },
+  pipeDot: { backgroundColor: color.line, borderRadius: 6, height: 12, width: 12 },
+  pipeDotDone: { backgroundColor: color.ink },
+  pipeDotActive: { backgroundColor: color.lime },
+  pipeDotFailed: { backgroundColor: color.magenta },
+  pipeBadge: { color: color.muted, fontSize: 12, fontWeight: "900" },
   stepNo: { color: color.muted, fontSize: 11, fontWeight: "900" },
   doc: { backgroundColor: color.surface, borderRadius: 14, height: 120, marginTop: 6, overflow: "hidden" },
   docImage: { height: "100%", position: "absolute", width: "100%" },
