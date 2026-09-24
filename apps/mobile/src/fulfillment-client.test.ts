@@ -98,3 +98,57 @@ describe("FulfillmentClient.cancelOrder", () => {
     await expect(client.cancelOrder("ord_abc", "offline")).rejects.toBeInstanceOf(OfflineFallbackSessionError);
   });
 });
+
+describe("FulfillmentClient execution actions (ORDER-EXEC-001)", () => {
+  // 订单执行动作之前只接了打卡/证据/取消 —— 明细页按 lifecycle 出按钮，
+  // 每个按钮必须真调到对应的服务端命令。这里钉方法→命令→目标的映射。
+  async function captureCommand(
+    call: (client: FulfillmentClient) => Promise<unknown>,
+  ): Promise<{ path: string; body: Record<string, unknown> }> {
+    const store = makeStore();
+    await writeSession(store);
+    let seen = { path: "", body: {} as Record<string, unknown> };
+    const client = new FulfillmentClient({
+      secureSessionStore: store,
+      authClient: { request: async (path, init: { method: "POST"; body: unknown }) => {
+        seen = { path, body: init.body as Record<string, unknown> };
+        return { status: 200, json: async () => envelope("ok", { type: "Order", id: "ord_x" }, {}) };
+      } },
+    });
+    await call(client);
+    return seen;
+  }
+
+  it("confirmCooperation hits ConfirmCooperation on the order", async () => {
+    const seen = await captureCommand((c) => c.confirmCooperation("ord_1"));
+    expect(seen.path.endsWith("/ConfirmCooperation")).toBe(true);
+    expect((seen.body.target as { id: string }).id).toBe("ord_1");
+  });
+
+  it("startExecution hits StartExecution on the order", async () => {
+    const seen = await captureCommand((c) => c.startExecution("ord_1"));
+    expect(seen.path.endsWith("/StartExecution")).toBe(true);
+  });
+
+  it("recordSettlement hits RecordDirectSettlement with the agreed payload", async () => {
+    const seen = await captureCommand((c) => c.recordSettlement("ord_1", { agreedAmount: 500000, payerConfirmed: true }));
+    expect(seen.path.endsWith("/RecordDirectSettlement")).toBe(true);
+    const payload = seen.body.payload as Record<string, unknown>;
+    expect(payload.agreedAmount).toBe(500000);
+    expect(payload.payerConfirmed).toBe(true);
+  });
+
+  it("recordOutcome hits RecordOutcome with scope/onTime/note", async () => {
+    const seen = await captureCommand((c) => c.recordOutcome("ord_1", { onTime: true, scopeCompleted: false, objectiveNote: "差收尾" }));
+    expect(seen.path.endsWith("/RecordOutcome")).toBe(true);
+    const payload = seen.body.payload as Record<string, unknown>;
+    expect(payload).toMatchObject({ onTime: true, scopeCompleted: false, objectiveNote: "差收尾" });
+  });
+
+  it("recordSatisfaction hits RecordSatisfaction with resolved/repeat", async () => {
+    const seen = await captureCommand((c) => c.recordSatisfaction("ord_1", { resolved: "PARTIAL", repeatIntent: "MAYBE" }));
+    expect(seen.path.endsWith("/RecordSatisfaction")).toBe(true);
+    const payload = seen.body.payload as Record<string, unknown>;
+    expect(payload).toMatchObject({ resolved: "PARTIAL", repeatIntent: "MAYBE" });
+  });
+});

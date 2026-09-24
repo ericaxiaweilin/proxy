@@ -149,9 +149,16 @@ describe("REPLY-TARGET-001 label never shows an account id", () => {
   });
 
   it("reads correctly when the target is the viewer's own post", () => {
+    // OWN-NAME-001：自己的内容显示用户名不再是「你」—— 存了名的用存的名，
+    // 当前资料名优先（viewerDisplayName），都没有才中性兜底。「你回复了你」
+    // 这类自指句式不再出现。
     const mine = target({ authorId: ME });
-    expect(replyTargetLabel("SELF", mine, ME)).toBe("你回复了你自己的帖子");
-    expect(replyTargetLabel("OTHER", mine, ME)).toBe("回复了你的帖子");
+    expect(replyTargetLabel("SELF", mine, ME)).toBe("你回复了 Khoa 的帖子");
+    expect(replyTargetLabel("OTHER", mine, ME)).toBe("回复了 Khoa 的帖子");
+    expect(replyTargetLabel("SELF", mine, ME, "Huyen")).toBe("你回复了 Huyen 的帖子");
+    expect(replyTargetLabel("SELF", target({ authorId: ME, authorDisplayName: undefined }), ME)).toBe(
+      "你回复了 用户 的帖子"
+    );
   });
 
   it("degrades to a neutral line when the parent post cannot be resolved", () => {

@@ -23,6 +23,15 @@ export const styles = StyleSheet.create({
   // cancel an order.
   orderCancelBtn: { alignSelf: "flex-end", borderColor: "#D33D5B", marginRight: 0, marginTop: 6 },
   orderCancelBtnText: { color: "#D33D5B" },
+  // ORDER-EXEC-001: 执行动作主按钮 + 表单行。跟 orderTab 同一语言（圆角胶囊），
+  // 深底表示"推进状态"，区别于中性的页签和红色的取消。
+  orderActBtn: { alignItems: "center", backgroundColor: color.ink, borderColor: color.ink, marginTop: 8 },
+  orderActBtnText: { color: color.white },
+  actInput: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 10, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 8, paddingHorizontal: 12, paddingVertical: 9 },
+  actRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  actChip: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 7 },
+  actChipOn: { backgroundColor: color.ink, borderColor: color.ink },
+  actChipText: { color: color.muted, fontSize: 12, fontWeight: "700" },
   orderCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginBottom: 11, padding: 14, ...shadows.card },
   orderHead: { alignItems: "flex-start", flexDirection: "row", gap: 8, justifyContent: "space-between" },
   orderCopy: { flex: 1 },

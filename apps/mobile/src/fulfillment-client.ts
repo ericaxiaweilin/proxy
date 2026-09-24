@@ -102,6 +102,29 @@ export class FulfillmentClient {
     return { lifecycle: body.lifecycle as string, version: body.version as number };
   }
 
+  // ORDER-EXEC-001: 订单执行动作之前只接了打卡/证据/取消 —— OFFERED 卡死，
+  // EXECUTING 走不到 COMPLETED，COMPLETED 评不了分。下面补齐状态机缺的五块，
+  // 明细页按 lifecycle 逐态出按钮。
+  public async confirmCooperation(orderId: string): Promise<void> {
+    await this.command("ConfirmCooperation", { type: "Order", id: orderId }, {});
+  }
+
+  public async startExecution(orderId: string): Promise<void> {
+    await this.command("StartExecution", { type: "Order", id: orderId }, {});
+  }
+
+  public async recordSettlement(orderId: string, input: { agreedAmount: number; paymentMethodLabel?: string; payerConfirmed?: boolean; payeeConfirmed?: boolean }): Promise<void> {
+    await this.command("RecordDirectSettlement", { type: "Order", id: orderId }, input as unknown as Record<string, unknown>);
+  }
+
+  public async recordOutcome(orderId: string, input: { onTime: boolean; scopeCompleted: boolean; objectiveNote?: string }): Promise<void> {
+    await this.command("RecordOutcome", { type: "Order", id: orderId }, input as unknown as Record<string, unknown>);
+  }
+
+  public async recordSatisfaction(orderId: string, input: { resolved: "FULL" | "PARTIAL" | "NONE"; repeatIntent?: "REUSE" | "MAYBE" | "NO" }): Promise<void> {
+    await this.command("RecordSatisfaction", { type: "Order", id: orderId }, input as unknown as Record<string, unknown>);
+  }
+
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {
     const session = await this.requireSession();
     const next = (prefix: string) => `mobile_fulfill_${prefix}_${Date.now().toString(36)}_${(++this.sequence).toString(36)}`;

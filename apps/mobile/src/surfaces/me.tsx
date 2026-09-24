@@ -88,6 +88,10 @@ import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSec
 import { ABILITY_SCHEMAS, DEFAULT_ABILITIES, AVAILABILITY_OPTIONS, AV_DAY_NAMES, avKeyOf, avFmt, describeAvRule, avStateFor, nextDays, INITIAL_SOCIAL_ACCOUNTS, resolveHubProfile, resolveHubSocials } from "./me-types";
 import { AbilitySheet, AvRuleSheet, AvDaySheet, FakeQr, QrCard, SocialRow, AvailabilitySheet, MeLocationContext, VoucherMenuGlyph, ServiceRow, availabilityLabel, formatClaimNumber } from "./me-profile-components";
 import { MyOrdersSurface, MyActivitiesSurface, FavoritesSurface, MerchantCampaignSurface } from "./me-orders";
+// SCENE-FAVORITE-002：个人主页的收藏 tab 也要显示场景 🤍 —— 与「我的 → 收藏」
+// 读同一个本机 store、用同一份解析（resolveSavedSceneIds），不各写一遍。
+import { createSceneFavoritesStore, resolveSavedSceneIds, type SavedSceneEntry } from "../scene-favorites";
+import { savedSceneLookup } from "../components/scene-activity-discovery";
 import { SUB_PAGE_CONTENT, meSubPage } from "./me-sub-pages";
 import { useMerchantIdentity } from "../use-merchant-identity";
 import { styles } from "./me-styles";
@@ -198,7 +202,7 @@ const REQUESTER_ME: PersonaConfig = {
         { icon: "diamond", label: "我的订单", desc: "我发布的 / 我参与的已成交订单", route: "myorders" },
         { icon: "clock", label: "能力与可用时间", desc: "能力、主题、区域与空闲时间", route: "available" },
         { icon: "ring", label: "我的活动", desc: "已参加 / 我发起的活动", route: "myactivities" },
-        { icon: "star", label: "收藏", desc: "商家、Creator、动态与活动", route: "favorites" },
+        { icon: "star", label: "收藏", desc: "场景灵感、商家、Creator、动态与活动", route: "favorites" },
         { icon: "gift", label: "我的权益", desc: "可领取的活动权益，领取后到店出示验证码核销", route: "benefits" }
       ]
     },
@@ -658,6 +662,9 @@ export function MeSurface({
   const [personalReplyEntries, setPersonalReplyEntries] = useState<ReplyEntry[]>([]);
   const [personalReplyTargets, setPersonalReplyTargets] = useState<Record<string, ReplyTarget>>({});
   const [personalSavedPosts, setPersonalSavedPosts] = useState<FeedPost[]>([]);
+  // SCENE-FAVORITE-002：首页场景卡片的 🤍（本机按账号存）。个人主页收藏 tab 以前
+  // 只认服务端帖子收藏 ⇒ 用户在首页点过 🤍，来这里看到的是「还没有收藏」。
+  const [personalSavedScenes, setPersonalSavedScenes] = useState<readonly SavedSceneEntry[]>([]);
   const [personalTaggedPosts, setPersonalTaggedPosts] = useState<FeedPost[]>([]);
   // PROFILE-TAB-LOAD-FAILED-001: 收藏 / 回复 / 提及 的**加载成败**。以前失败时只把
   // 数组 set 成 []，空数组在 ProfileTabs 里渲染成「你还没有这类内容」—— 用户
@@ -1173,6 +1180,23 @@ export function MeSurface({
     return () => { cancelled = true; };
   }, [engagement, viewerAccountId, localNet, profileDraft.name, profileDraft.handle]);
 
+  // SCENE-FAVORITE-002：首页场景 🤍 存本机（按账号），跟帖子收藏（服务端）是两份
+  // 数据。个人主页的收藏 tab 以前只读服务端 ⇒ 首页点过的 🤍 在这里永远看不见。
+  // 读同一份本机 hearts 交给 ProfileTabs 一起画；解析走 resolveSavedSceneIds，
+  // 与「我的 → 收藏」共用同一实现。
+  useEffect(() => {
+    let cancelled = false;
+    if (!viewerAccountId) {
+      setPersonalSavedScenes([]);
+      return;
+    }
+    void createSceneFavoritesStore(nativeSecureStorageDriver, viewerAccountId)
+      .read()
+      .then((ids) => { if (!cancelled) setPersonalSavedScenes(resolveSavedSceneIds(ids, savedSceneLookup)); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [viewerAccountId]);
+
   // SCROLL-CHROME-001: shared controller (see shell/scroll-chrome.ts).
   const onScroll = useScrollChrome(onChromeVisibilityChange);
 
@@ -1429,7 +1453,7 @@ export function MeSurface({
     const contentWrapper = (node: React.JSX.Element): React.JSX.Element => <SwipeBackShell onExit={() => closeSubPage()}>{node}</SwipeBackShell>;
     const content = SUB_PAGE_CONTENT[subPage.route];
 
-    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} moderation={moderation} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} moderation={moderation} mediaClient={mediaClient} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "myactivities") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyActivitiesSurface onBack={() => setSubPage(undefined)} moderation={moderation} /></SwipeBackShell>;
     if (subPage.route === "merchantcampaign") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MerchantCampaignSurface onBack={() => setSubPage(undefined)} moderation={moderation} /></SwipeBackShell>;
     if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} /></SwipeBackShell>;
@@ -2218,6 +2242,7 @@ export function MeSurface({
               replies={personalReplyEntries}
               replyTargets={personalReplyTargets}
               savedPosts={personalSavedPosts}
+              savedScenes={personalSavedScenes}
               taggedPosts={personalTaggedPosts}
               savedFailed={personalSavedFailed}
               repliesFailed={personalRepliesFailed}

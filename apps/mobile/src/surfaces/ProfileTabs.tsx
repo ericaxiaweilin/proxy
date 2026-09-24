@@ -65,6 +65,12 @@ export interface ProfileTabsProps {
   replies: ReplyEntry[];
   replyTargets: Record<string, ReplyTarget>;
   savedPosts: FeedPost[];
+  // SCENE-FAVORITE-002: home 场景卡片的 🤍 存本机（MOMENTS 是客户端静态目录，
+  // 服务端没有「场景收藏」概念 —— 所以不编造服务端记录）。个人主页的收藏 tab
+  // 以前完全不知道它存在 ⇒ 用户在首页点了 🤍、来「我的收藏」找，永远找不到。
+  // 这里把同一份 hearts 也画出来；解析由调用方（me.tsx）用
+  // resolveSavedSceneIds 完成，与「我的 → 收藏」共用同一份实现。
+  savedScenes?: ReadonlyArray<{ id: string; title: string; meta: string }> | undefined;
   taggedPosts: FeedPost[];
   // PROFILE-TAB-LOAD-FAILED-001: 这三个列表加载失败时，调用方以前把它们 set 成 []。
   // 而空数组在这里渲染成「你还没有这类内容」的空态文案 —— 用户会以为自己的
@@ -231,12 +237,16 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           failed={props.repliesFailed}
           viewerMode={props.viewerMode}
           viewerAccountId={props.viewerAccountId}
+          // OWN-NAME-001：当前资料名优先只在 SELF 生效 —— OTHER 时 profileDraft
+          // 是对方的名字，传进去会把"我回复过的帖子"标成对方的名字。
+          viewerDisplayName={props.viewerMode === "SELF" ? props.profileDraft.name : undefined}
           color={props.color}
         />
       ) : null}
       {activeTab === "SAVED" ? (
         <SavedTab
           saved={props.savedPosts}
+          savedScenes={props.savedScenes}
           failed={props.savedFailed}
           mediaByPost={props.mediaByPost}
           onOpenMedia={props.onOpenMedia}
@@ -588,6 +598,7 @@ function RepliesTab(props: {
   targets: Record<string, ReplyTarget>;
   viewerMode: "SELF" | "OTHER" | undefined;
   viewerAccountId?: string | undefined;
+  viewerDisplayName?: string | undefined;
   color: ProfileTabsProps["color"];
   failed?: boolean | undefined;
 }): React.JSX.Element {
@@ -609,7 +620,7 @@ function RepliesTab(props: {
           <View key={reply.replyId} style={styles.replyCard}>
             <View style={styles.replyMeta}>
               <Text selectable style={styles.replyTarget}>
-                {replyTargetLabel(props.viewerMode, target, props.viewerAccountId)}
+                {replyTargetLabel(props.viewerMode, target, props.viewerAccountId, props.viewerDisplayName)}
               </Text>
               <Text selectable style={styles.replyTime}>· {replyTimestampLabel(reply.createdAt)}</Text>
             </View>
@@ -632,6 +643,7 @@ function RepliesTab(props: {
 
 function SavedTab(props: {
   saved: FeedPost[];
+  savedScenes?: ReadonlyArray<{ id: string; title: string; meta: string }> | undefined;
   mediaByPost: Record<string, FeedMediaItem[]>;
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   resolveMediaUrl: (path: string) => string;
@@ -642,31 +654,52 @@ function SavedTab(props: {
   if (props.failed) {
     return <ProxyEmptyState title="收藏没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />;
   }
-  if (props.saved.length === 0) {
-    return <ProxyEmptyState title="还没有收藏" sub="点击帖子右下角的 🔖 可以加入收藏" />;
+  const scenes = props.savedScenes ?? [];
+  // SCENE-FAVORITE-002: 只有场景收藏、没有帖子收藏时，以前整屏显示「还没有收藏」
+  // —— 用户明明刚在首页点过 🤍，来这里看到的却是一句"你没有收藏"。只要有一边
+  // 非空就不能说"还没有收藏"。
+  if (props.saved.length === 0 && scenes.length === 0) {
+    return <ProxyEmptyState title="还没有收藏" sub="点击帖子右下角的 🔖 或首页场景卡片右上角的 🤍 可以加入收藏" />;
   }
   // 3-列网格 — 复用 IG 收藏页布局
   const all = selectPostMedia(props.saved, props.mediaByPost);
   return (
     <View>
-      <View style={styles.savedHint}>
-        <Text selectable style={styles.savedHintText}>仅自己可见 · {all.length} 项</Text>
-      </View>
-      <View style={styles.photoGrid}>
-        {all.map((entry) => (
-          <Pressable
-            key={`${entry.item.mediaAssetId}-${entry.index}`}
-            onPress={() => props.onOpenMedia({ postId: entry.postId, index: entry.index })}
-            style={styles.photoTile}
-          >
-            <Image
-              source={{ uri: props.resolveMediaUrl(entry.item.feedUrl ?? entry.item.thumbnailUrl ?? entry.item.galleryUrl ?? "") }}
-              resizeMode="cover"
-              style={styles.photoImage}
-            />
-          </Pressable>
-        ))}
-      </View>
+      {scenes.length > 0 ? (
+        <View>
+          <View style={styles.savedHint}>
+            <Text selectable style={styles.savedHintText}>场景灵感 · 来自首页收藏</Text>
+          </View>
+          {scenes.map((scene) => (
+            <View key={scene.id} style={styles.savedSceneRow}>
+              <Text selectable style={styles.savedSceneTitle}>{scene.title}</Text>
+              <Text selectable style={styles.savedSceneMeta}>{scene.meta}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+      {all.length > 0 ? (
+        <View>
+          <View style={styles.savedHint}>
+            <Text selectable style={styles.savedHintText}>仅自己可见 · {all.length} 项</Text>
+          </View>
+          <View style={styles.photoGrid}>
+            {all.map((entry) => (
+              <Pressable
+                key={`${entry.item.mediaAssetId}-${entry.index}`}
+                onPress={() => props.onOpenMedia({ postId: entry.postId, index: entry.index })}
+                style={styles.photoTile}
+              >
+                <Image
+                  source={{ uri: props.resolveMediaUrl(entry.item.feedUrl ?? entry.item.thumbnailUrl ?? entry.item.galleryUrl ?? "") }}
+                  resizeMode="cover"
+                  style={styles.photoImage}
+                />
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -818,6 +851,11 @@ const styles = StyleSheet.create({
   // Saved
   savedHint: { paddingHorizontal: 16, paddingVertical: 6 },
   savedHintText: { fontSize: 11, color: "#94a3b8" },
+  // SCENE-FAVORITE-002: 场景收藏行（个人主页收藏 tab）。跟「我的 → 收藏」
+  // 同一份数据、同一套解析，样式各自适配各页的排版。
+  savedSceneRow: { paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e2e8f0" },
+  savedSceneTitle: { fontSize: 14, color: "#0f172a" },
+  savedSceneMeta: { fontSize: 12, color: "#64748b", marginTop: 2 },
   // Reply
   replyCard: { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e2e8f0" },
   replyMeta: { flexDirection: "row", alignItems: "center" },

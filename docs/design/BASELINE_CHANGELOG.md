@@ -4,6 +4,44 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 279 — 2026-09-24
+
+- **订单执行断线接上**（ORDER-EXEC-001）：用户「继续检查撮合交易引擎」。订单明细
+  以前只有「返回列表」—— OFFERED 卡死，EXECUTING 走不到 COMPLETED，COMPLETED
+  评不了分；客户端缺了五个动作方法。补齐 `confirmCooperation / startExecution /
+  recordSettlement / recordOutcome / recordSatisfaction`，明细页按 lifecycle 逐态
+  出真按钮（打卡要市场编号 + 地点、证据走照片上传、结算只在 DIRECT 模式出现、
+  评价只给需求方），拒绝码翻人话。另跟进 Rev276：`replyTargetLabel` 接
+  `viewerDisplayName`（当前资料名优先，仅 SELF）， stale 测试按新规则更新。
+- 影响文件：`apps/mobile/src/fulfillment-client.ts`、
+  `apps/mobile/src/surfaces/me-orders.tsx`、`apps/mobile/src/surfaces/me-styles.ts`、
+  `apps/mobile/src/surfaces/me.tsx`、`apps/mobile/src/reply-target.ts`。
+
+## Revision 278 — 2026-09-24
+
+- **场景收藏两个面接通 + 场景页签**（SCENE-FAVORITE-002）：用户：「有断线 home 场景点🤍 在我的 收藏没有」。
+  Rev270（SCENE-FAVORITE-001）只接了**一半** —— 它把 hearts 落本机、让「我的 → 收藏」读盘展示，
+  但**个人主页的收藏 tab 对场景收藏的引用数是 0**（`createSceneFavoritesStore` 在 `ProfileTabs.tsx`
+  与 `me.tsx` 里出现次数都是 0）：用户在首页点 🤍、去个人主页的收藏 tab 找，永远找不到；
+  而且只有场景收藏、没有帖子收藏时，那一屏还写着「还没有收藏」。Rev270 的守卫只有源码文本断言
+  （「文件里有没有这个符号」）、没有进钉，所以缺陷活了下来 —— 同族前科 22004f9
+  （绿钉 + 用户可见缺陷可同时成立）。
+  - 两个收藏面读同一份本机 hearts，解析收敛成**唯一实现** `resolveSavedSceneIds(ids, lookup)`，
+    放在纯模块 `scene-favorites.ts`、目录由 `savedSceneLookup` 注入 —— 这样解析逻辑不依赖
+    React Native，能被**行为**测试守住（未知 id 丢弃 / 重复去重），而不是只 grep 符号在不在文件里。
+  - 个人主页收藏 tab 增加「场景灵感 · 来自首页收藏」区；空态改成「帖子收藏与场景收藏都为空」
+    才说「还没有收藏」。
+  - 「我的 → 收藏」增加**场景页签**：以前场景区只在「全部」出现，而页签是 全部/商家/Creator/
+    动态/活动 —— 没有场景页签，切到任一其它页签就只剩空态，等于把这一页唯一的真内容藏起来。
+    入口描述补上「场景灵感」。
+  - 场景收藏仍按账号落本机：MOMENTS 是**客户端静态目录**（服务端没有「场景收藏」概念），
+    写成服务端记录等于往库里写没人能校验的客户端分类键 —— 正是 FRIEND-TARGET-EXISTS-001
+    刚清掉的那类死行，不做。
+- 影响文件：`apps/mobile/src/scene-favorites.ts`、`apps/mobile/src/scene-favorites.test.ts`、
+  `apps/mobile/src/components/scene-activity-discovery.tsx`、`apps/mobile/src/surfaces/me-orders.tsx`、
+  `apps/mobile/src/surfaces/ProfileTabs.tsx`、`apps/mobile/src/surfaces/me.tsx`、
+  `apps/mobile/src/profile-tabs-load-failed.test.ts`、`scripts/check-regression-contracts.sh`。
+
 ## Revision 277 — 2026-09-24
 
 - **帖文数据治理 + 发帖资料门**（DATA-HYGIENE-001 / POST-PROFILE-GATE-001）：用户：「所有没有头像的 用户名的 绕过注册流程的必须要补齐
