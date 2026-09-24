@@ -207,6 +207,23 @@ describe("SCENE-SHOP-DIRECTORY-001: card and detail lines only say what is true"
     expect(shopCountText(-1, "家")).toBe("0 家");
     expect(shopListEndText(2, "家")).toBe("已加载全部 2 家");
   });
+
+  it("shows the real area coverage from the listed rows, never a fabricated radius", () => {
+    // 原型这行有地址：区域取当前列表真实覆盖的 area，去重去空。
+    expect(shopListLocationLine(true, ["西湖区", "还剑湖区"])).toBe(
+      "西湖区 · 还剑湖区 · 已按你的当前位置排序 · 距离为直线距离"
+    );
+    expect(shopListLocationLine(false, ["西湖区"])).toBe(
+      "西湖区 · 未取得定位 · 不含距离，也没有「最近」排序"
+    );
+    expect(shopListLocationLine(true, ["  ", "西湖区", "西湖区"])).toBe(
+      "西湖区 · 已按你的当前位置排序 · 距离为直线距离"
+    );
+    expect(
+      shopListLocationLine(true, ["A 区", "B 区", "C 区", "D 区", "E 区"])
+    ).toBe("A 区 · B 区 · C 区等 5 个区域 · 已按你的当前位置排序 · 距离为直线距离");
+    expect(shopListLocationLine(true, [])).not.toContain(" · 已按");
+  });
 });
 
 // ---------------------------------------------------------------------------

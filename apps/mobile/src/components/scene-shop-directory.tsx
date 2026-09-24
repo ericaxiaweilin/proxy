@@ -336,7 +336,7 @@ export function SceneShopDirectory({
 
             <View style={styles.listHead}>
               <Text selectable style={styles.listTitle}>{`附近${label}`}<Text selectable style={styles.listCount}>{`  ${shopCountText(rows.length, unit)}`}</Text></Text>
-              <Text selectable style={styles.listLocation}>{shopListLocationLine(origin !== undefined)}</Text>
+              <Text selectable style={styles.listLocation}>{shopListLocationLine(origin !== undefined, rows.map((row) => row.area))}</Text>
             </View>
 
             {/* 排序/筛选条：只放这一趟真的能用的项。没有定位就不给「最近」；

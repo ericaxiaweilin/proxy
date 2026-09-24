@@ -263,13 +263,18 @@ export function shopCountText(count: number, unit: string): string {
 /**
  * 列表头下面那行定位说明（原型：「河内市区 · 3km 内 · 已按当前位置排序」）。
  *
- * 不写「3km 内」：公开目录**不按半径筛**，写上去就是假的。没有定位时也不
- * 假装有 —— 直接说清楚这一页不含距离。
+ * 地址取当前列表真实覆盖的 area 派生；不写「3km 内」：公开目录**不按半径筛**，
+ * 写上去就是假的。没有定位时也不假装有 —— 直接说清楚这一页不含距离。
  */
-export function shopListLocationLine(hasOrigin: boolean): string {
-  return hasOrigin
+export function shopListLocationLine(hasOrigin: boolean, areas: readonly string[] = []): string {
+  const zones = [...new Set(areas.map((area) => area.trim()).filter(Boolean))];
+  const zoneText = zones.length <= 3
+    ? zones.join(" · ")
+    : `${zones.slice(0, 3).join(" · ")}等 ${zones.length} 个区域`;
+  const tail = hasOrigin
     ? "已按你的当前位置排序 · 距离为直线距离"
     : "未取得定位 · 不含距离，也没有「最近」排序";
+  return zoneText === "" ? tail : `${zoneText} · ${tail}`;
 }
 
 /** 列表尾部那行收尾（原型：「已加载附近全部 23 家」）。 */
