@@ -170,7 +170,9 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
 
   // 确认完成 = 可选附一张证据照片 + 准时/范围/备注，一次提交。照片先上传拿
   // mediaAssetId 再调记录结果；没选照片就只记结果，不摆拍不了照的假按钮。
-  async function submitCompletion(orderId: string): Promise<void> {
+  // 小单在 CONFIRMED 点确认完成时先自动开工（服务端强制过 EXECUTING），
+  // 用户只点一次，两次状态翻转都在服务端留痕。
+  async function submitCompletion(orderId: string, lifecycle: string): Promise<void> {
     if (!mediaClient && outcomePhoto) return;
     setActError(undefined);
     setEvidenceBusy(true);
@@ -178,6 +180,9 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
       if (outcomePhoto && mediaClient) {
         const uploaded = await mediaClient.uploadImage({ uri: outcomePhoto.uri, mimeType: outcomePhoto.mimeType, width: outcomePhoto.width, height: outcomePhoto.height });
         await client.submitEvidence(orderId, { mediaAssetId: uploaded.mediaAssetId });
+      }
+      if (lifecycle === "CONFIRMED") {
+        await client.startExecution(orderId);
       }
       await runOrderAction("确认完成", orderId, () => client.recordOutcome(orderId, { onTime: outcomeOnTime, scopeCompleted: outcomeScope, ...(outcomeNote.trim() ? { objectiveNote: outcomeNote.trim() } : {}) }));
       setOutcomePhoto(undefined);
@@ -197,7 +202,14 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
   }, [detail?.orderId]);
 
   if (detail) {
-    const showSettlement = detail.snapshot.settlementMode === "DIRECT_SETTLEMENT" && detail.lifecycle !== "OFFERED" && detail.lifecycle !== "CANCELLED";
+    // ORDER-TIER-001：流程按金额分档 —— 小单步骤多就是阻碍。500K 以下走短流程
+    // （确认合作 → 确认完成 → 评价），到场/结算表单不出现；大单走全流程
+    // （到场证明 + 证据 + 结算 + 评价）。线是常量，要调只改这里。
+    // 服务端状态机强制过 EXECUTING：小单点确认完成时自动先开工再记结果，
+    // 两次服务端状态翻转都留痕，只是用户只点一次。
+    const SMALL_ORDER_AMOUNT_VND = 500_000;
+    const isSmallOrder = (detail.snapshot.agreedCompensation || 0) < SMALL_ORDER_AMOUNT_VND;
+    const showSettlement = detail.snapshot.settlementMode === "DIRECT_SETTLEMENT" && detail.lifecycle !== "OFFERED" && detail.lifecycle !== "CANCELLED" && !isSmallOrder;
     const actBtn = [styles.orderTab, styles.orderActBtn];
     const actBtnText = [styles.orderTabText, styles.orderActBtnText];
     return (
@@ -238,7 +250,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
               <Text selectable style={actBtnText}>{acting === "确认合作" ? "提交中…" : "确认合作"}</Text>
             </Pressable>
           ) : null}
-          {detail.lifecycle === "CONFIRMED" ? (
+          {detail.lifecycle === "CONFIRMED" && !isSmallOrder ? (
             <View style={styles.orderCard}>
               <Text selectable style={styles.orderTitle}>到场</Text>
               {/* 消费场景（PRD Ch11）：到场是信任锚 —— agent 到场举证，requester 也可
@@ -272,7 +284,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
               </Pressable>
             </View>
           ) : null}
-          {detail.lifecycle === "EXECUTING" ? (
+          {(detail.lifecycle === "EXECUTING" || (isSmallOrder && detail.lifecycle === "CONFIRMED")) ? (
             <View style={styles.orderCard}>
               <Text selectable style={styles.orderTitle}>确认完成</Text>
               {mediaClient ? (
@@ -304,7 +316,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
               />
               <Pressable
                 disabled={acting !== undefined || evidenceBusy}
-                onPress={() => void submitCompletion(detail.orderId)}
+                onPress={() => void submitCompletion(detail.orderId, detail.lifecycle)}
                 style={actBtn}
                 accessibilityLabel="确认完成"
               >

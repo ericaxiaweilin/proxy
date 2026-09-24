@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 282 — 2026-09-24
+
+- **订单流程按金额分档**（ORDER-TIER-001）：不分金额同一套流程是错的 —— 小单
+  步骤多就是阻碍。500K 以下短流程（确认合作 → 确认完成 → 评价），到场与结算
+  表单不出现；小单点确认完成时自动先开工（服务端强制过 EXECUTING，两次翻转
+  都留痕，用户只点一次）。500K 及以上走全流程。分档线是常量，要调只改一处。
+- 影响文件：`apps/mobile/src/surfaces/me-orders.tsx`。
+
 ## Revision 281 — 2026-09-24
 
 - **订单执行跟消费场景对齐**（ORDER-EXEC-001 跟进）：用户「是按照消费场景来的吗」。

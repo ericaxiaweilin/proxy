@@ -13,7 +13,7 @@ describe("ORDER-EXEC-001 order detail drives the lifecycle", () => {
     expect(orders).toContain("client.checkInOrder(detail.orderId");
     expect(orders).toContain('detail.lifecycle === "EXECUTING"');
     expect(orders).toContain("pickOutcomePhoto()");
-    expect(orders).toContain("submitCompletion(detail.orderId)");
+    expect(orders).toContain("submitCompletion(detail.orderId, detail.lifecycle)");
     expect(orders).toContain("client.recordOutcome(orderId");
     expect(orders).toContain("client.recordSatisfaction(detail.orderId");
   });
@@ -24,6 +24,16 @@ describe("ORDER-EXEC-001 order detail drives the lifecycle", () => {
     expect(orders).toContain('accessibilityLabel="确认到场"');
     expect(orders).not.toContain('accessibilityLabel="开始执行"');
     expect(orders).toContain("client.recordOutcome(orderId");
+  });
+
+  it("flow tiers by amount: small orders skip arrival and settlement forms", () => {
+    // ORDER-TIER-001：小单步骤多就是阻碍。500K 以下短流程（确认→完成→评价），
+    // 到场/结算表单不出现；服务端强制过 EXECUTING，小单点确认完成时自动先开工。
+    expect(orders).toContain("SMALL_ORDER_AMOUNT_VND = 500_000");
+    expect(orders).toContain("isSmallOrder");
+    expect(orders).toContain('detail.lifecycle === "CONFIRMED" && !isSmallOrder');
+    expect(orders).toContain("isSmallOrder && detail.lifecycle === \"CONFIRMED\"");
+    expect(orders).toContain("!isSmallOrder");
   });
 
   it("satisfaction is requester-only and settlement is DIRECT-only", () => {
