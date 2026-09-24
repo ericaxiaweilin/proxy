@@ -8473,11 +8473,16 @@ require_test "TWIN-CENTER-001" "./internal/api" \
 require_test "TWIN-CENTER-002" "./internal/api" \
   "TestGrantRevokeConsentRoundTrip" \
   "apps/api-go/internal/api/aipersona_personas_test.go" || exit $?
+# 移动端那一段曾经钉的是分身客户端的「列出我的分身」方法名，但它在这一屏里
+# **只出现在一句注释中**（而那句注释本身也已经过期：三段实际走的是「找出已授权
+# 的那个分身」而不是「列出全部取第一个」）⇒ 删掉真接线这条钉照样绿，是一颗假守卫。
+# 换成两个会真的失败的点：这一屏必须真的挂载分身段，段内必须真的从服务端解析分身。
 if ! grep -qF 'func (s *Server) listPersonas' apps/api-go/internal/api/aipersona_handlers.go ||
    ! grep -qF 'func (s *Server) revokeConsent' apps/api-go/internal/api/aipersona_handlers.go ||
    ! grep -qF 'func (s *Service) RevokeLiveConsent' apps/api-go/internal/aipersona/personas.go ||
    ! grep -qF 'class AiPersonaClient' apps/mobile/src/ai-persona-client.ts ||
-   ! grep -qF 'listMine' apps/mobile/src/surfaces/AIIdentityShowcaseSurface.tsx; then
+   ! grep -qF '<TwinGallerySection' apps/mobile/src/surfaces/AIIdentityShowcaseSurface.tsx ||
+   ! grep -qF 'personaClient.findAuthorizedTwin(ownerId)' apps/mobile/src/components/twin-gallery-section.tsx; then
   echo "  FAIL [TWIN-CENTER]: 分身真接线不见了 ——" >&2
   echo "        列表/收回接口、client、分身段真列表，少一段就回到假数据。" >&2
   exit 1

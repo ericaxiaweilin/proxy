@@ -14,8 +14,8 @@
 // 面前。这一版删掉，只保留跟原型一一对应的三段。
 //
 // 分身解析：图库（TwinGallerySection）、帖文编排（TwinPostComposerSection）、
-// 好友洞察（TwinInsightSection）三段各自内部解析 personaId（listMine 取
-// 第一个），不依赖这一屏再传一份「当前分身」下去——原型本来就是单一分身
+// 好友洞察（TwinInsightSection）三段各自内部解析 personaId（findAuthorizedTwin
+// 取已授权的那个），不依赖这一屏再传一份「当前分身」下去——原型本来就是单一分身
 // 视角，没有分身切换器。这一屏因此不再需要 AiPersonaClient。
 
 import { ScrollView, StyleSheet, Text, View } from "react-native";
