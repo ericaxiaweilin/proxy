@@ -938,7 +938,10 @@ export function MeSurface({
     profileHydratedForRef.current = viewerAccountId;
     setProfileDraft({ ...NEUTRAL_PROFILE });
     setClaimNumber(0);
-    setProfileAvatarUri(undefined);
+    // AVATAR-FLASH-002: 账号就绪（undefined → 真 id）瞬间先同步读本机副本 ——
+    // 直接 set undefined 再等异步回填，就是"先默认后照片"的那一闪。读到就上，
+    // 读不到才 undefined 走后续 hydration（远端/首字）。
+    setProfileAvatarUri(initialProfileAvatarUri(viewerAccountId));
     setProfileRemoteAvatarPath(undefined);
     let cancelled = false;
     void (async () => {
