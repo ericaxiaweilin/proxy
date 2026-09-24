@@ -52,12 +52,29 @@ describe("scene activity discovery contract", () => {
     expect(source).toContain("占位字段");
   });
 
-  it("keeps taxonomy cards tappable while still taking over real horizontal swipes", () => {
-    // Only the inline "动作" rail uses HorizontalSwipeRail now — the old
-    // THEME_GROUPS template rail is gone (SCENE-PICKER-FILTER-SINGLE-ROW-003
-    // replaced all three rows with plain popup buttons, no horizontal swipe
-    // surface to disambiguate against tap).
-    expect(source.match(/preserveChildPresses threshold=\{3\}/g)).toHaveLength(1);
+  // SCENE-HOME-ENTRY-001 (2026-09-24, prototype deepseek_html_20260924_412dba
+  // 「Scene · 精修版」首页): the home action row is now the prototype's 6
+  // fixed equal-width items — there is nothing left to scroll, so the
+  // HorizontalSwipeRail wrapper (and the tap-vs-swipe disambiguation it
+  // existed for) is gone from this file. The 8 secondary actions and 17
+  // sub-details are still one tap away through 「全部」.
+  //
+  // Asserting the import is *gone* is the point: re-adding a horizontal swipe
+  // surface on Home for a row that already fits would buy nothing and fight
+  // the iOS system tab-switch gesture again.
+  it("SCENE-HOME-ENTRY-001: the home action row is a fixed 6-item row with no horizontal swipe surface", () => {
+    expect(source).not.toContain("HorizontalSwipeRail");
+    expect(source).not.toContain("preserveChildPresses");
+    expect(source).not.toContain("styles.actionRail");
+    expect(source).toContain('const PRIMARY_ACTION_IDS = ["coffee", "dining", "city-walk", "photo", "cycling", "exhibition"] as const;');
+    expect(source).toContain("styles.actionRow");
+    expect(source).toContain("PRIMARY_ACTIONS.map");
+    // The full taxonomy is still reachable, and still complete.
+    expect(source).toContain("setPickerOpen(true)");
+    expect((source.match(/assets\/scene-activity\/actions\//g) ?? [])).toHaveLength(32);
+    // The rail itself is unchanged and still used by Home's other rails
+    // (stories / person chooser / photo & time choosers) — its tap-vs-swipe
+    // contract still has to hold there.
     expect(rail).toContain("onStartShouldSetPanResponder: () => !preserveChildPresses");
     expect(rail).toContain("!preserveChildPresses || Math.abs(gs.dx) > threshold");
   });
@@ -83,7 +100,13 @@ describe("scene activity discovery contract", () => {
     expect(source).not.toContain('{ key: "themes", label: "主题", items: THEMES }');
     expect(source).toContain("styles.waimaiRail");
     expect(source).toContain("styles.waimaiList");
-    expect(source).toContain("styles.waimaiMomentRow");
+    // SCENE-HOME-ENTRY-001: the right column used to be a list of small rows
+    // (waimaiMomentRow, 64px thumb). It now renders the big single-column
+    // Moment cards that used to live on Home — same content, same favourite
+    // and expand behaviour, moved behind the category entry instead of
+    // deleted.
+    expect(source).toContain("styles.sceneCard");
+    expect(source).not.toContain("styles.waimaiMomentRow");
     // Per-category counts so a user can see before tapping whether a
     // category actually has anything, instead of discovering an empty
     // state only after combining several filters.
@@ -271,5 +294,52 @@ describe("SCENE-CARD-STACK-005: single-column big Moment cards", () => {
     expect(source).toContain("const [expandedMomentId, setExpandedMomentId] = useState<string>();");
     expect(source).toContain("expandedMomentId === moment.id");
     expect(source).toContain("styles.sceneTagMore");
+  });
+});
+
+// SCENE-HOME-ENTRY-001 (2026-09-24, prototype deepseek_html_20260924_412dba
+// 「Scene · 精修版」首页): the home scene section became the prototype's shape
+// — a fixed 6-action row plus one big entry card per category that actually
+// has scenes. The prototype's cards also carry「3 场本周活动」「2 个正在招募」
+// — there is no activity/recruitment source for a scene category anywhere in
+// this backend (scene detail's three Actions are invite / open-task / signup,
+// i.e. executable actions, not categories). Those lines are deliberately NOT
+// ported: only real derived numbers get rendered (SCENE-REAL-COUNTS-001 /
+// SCENE-CATEGORY-001).
+describe("SCENE-HOME-ENTRY-001: scene category entry cards come from real scenes only", () => {
+  it("emits one entry per primary action that actually has real scenes, and none for the rest", () => {
+    expect(source).toContain("export function sceneCategoryEntries");
+    expect(source).toContain("if (matched.length === 0) return [];");
+    expect(source).toContain("const entries = useMemo(() => sceneCategoryEntries(scenes), [scenes]);");
+    expect(source).toContain("visibleEntries.length > 0 ?");
+  });
+
+  it("derives the count unit and the sub-line from real server fields, never from the local MOMENTS fixture", () => {
+    expect(source).toContain('scene.category === "商家"');
+    expect(source).toContain("scene.visitedCount");
+    expect(source).toContain("entry.visitedTotal");
+    expect(source).toContain("entry.areas");
+    // MOMENTS is the placeholder Moment fixture — it must not be able to feed
+    // the home entry cards, or the counts become decorative again.
+    const start = source.indexOf("export function sceneCategoryEntries");
+    const end = source.indexOf("\n}", source.indexOf("return PRIMARY_ACTIONS.flatMap"));
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(source.slice(start, end)).not.toContain("MOMENTS");
+  });
+
+  it("does not port the prototype's activity / recruitment lines that have no data source", () => {
+    expect(source).not.toContain("场本周活动");
+    expect(source).not.toContain("个正在招募");
+    expect(source).not.toContain("位小美走过");
+  });
+
+  it("opens the full action-category page with that category already selected", () => {
+    expect(source).toContain("setActionId(entry.actionId); setPickerOpen(true);");
+  });
+
+  it("shows an honest empty state instead of fabricated categories when the catalog is empty", () => {
+    expect(source).toContain("附近还没有接入真实场景");
+    expect(source).toContain("场景目录接上后这里会显示分类入口。");
   });
 });

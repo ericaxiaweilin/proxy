@@ -588,7 +588,11 @@ export function RequesterHome({
 
   // R36.x SCENE-RECOMMEND-001: 真实场景列表（公开接口，免登录），用于
   // 地图入口真计数 + 场景推荐横滑。失败/未配置时保持空，不展示假场景。
-  type SceneBrief = { id: string; name: string; area: string; type: string; description: string; best: string; active: boolean; imageUrl: string };
+  // SCENE-HOME-ENTRY-001（2026-09-24）：多带两个**接口本来就有**的真实字段
+  // —— category（SCENE-CATEGORY-001 的封闭顶类，决定入口卡写「N 家」还是
+  // 「N 个」）和 visitedCount（SCENE-REAL-COUNTS-001 的真实派生计数）。
+  // 以前没透传，首页就没法说出任何真实数字。
+  type SceneBrief = { id: string; name: string; area: string; type: string; description: string; best: string; active: boolean; imageUrl: string; category: string; visitedCount: number };
   const [sceneBriefs, setSceneBriefs] = useState<SceneBrief[]>([]);
   useEffect(() => {
     if (!sceneApiBaseUrl) return;
@@ -607,6 +611,8 @@ export function RequesterHome({
           best: typeof s.best === "string" ? s.best : "",
           active: s.active === true,
           imageUrl: typeof s.imageUrl === "string" ? s.imageUrl : "",
+          category: typeof s.category === "string" ? s.category : "",
+          visitedCount: typeof s.visitedCount === "number" && Number.isFinite(s.visitedCount) ? s.visitedCount : 0,
         })));
       })
       .catch(() => undefined);

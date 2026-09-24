@@ -5,7 +5,6 @@ import { color } from "../theme";
 import { Image, type ImageSource } from "expo-image";
 import { ProxyIcon } from "./proxy-icon";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
-import { HorizontalSwipeRail } from "./horizontal-swipe-rail";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { createSceneFavoritesStore, type SavedSceneEntry } from "../scene-favorites";
 
@@ -15,6 +14,10 @@ export type SceneDiscoveryBrief = {
   area: string;
   type: string;
   imageUrl: string;
+  /** SCENE-CATEGORY-001 的封闭顶类（商家/景点/其他）。入口卡的计数单位靠它。 */
+  category: string;
+  /** SCENE-REAL-COUNTS-001 的真实派生计数（不是热度）。0 就不显示。 */
+  visitedCount: number;
 };
 
 type Taxon = { id: string; label: string; icon: ImageSource };
@@ -54,6 +57,87 @@ export const SCENE_ACTIONS: readonly Taxon[] = [
 ] as const;
 
 const ACTIONS = SCENE_ACTIONS;
+
+/**
+ * SCENE-HOME-ENTRY-001（2026-09-24，原型 deepseek_html_20260924_412dba
+ * 「Scene · 精修版」首页）：首页那一行只放 6 个主动作 —— 咖啡 / 用餐 /
+ * City Walk / 拍照 / 骑行 / 看展 —— 等宽平铺、不横滑。剩下 8 个动作
+ * （逛街/观影/音乐/探店/出游/运动/翻译/城市协助）一个都没删，仍然从右上
+ * 「全部」进动作分类页。
+ *
+ * 按 id 从 SCENE_ACTIONS 取，不另抄一份 label/icon —— 两处各留一份，改一处
+ * 漏一处就是两个不一样的「咖啡」。
+ */
+const PRIMARY_ACTION_IDS = ["coffee", "dining", "city-walk", "photo", "cycling", "exhibition"] as const;
+export const PRIMARY_ACTIONS: readonly Taxon[] = PRIMARY_ACTION_IDS.map((id) => ACTIONS.find((action) => action.id === id)!);
+
+/**
+ * SCENE-HOME-ENTRY-001：动作 → 真实场景的归属词。
+ *
+ * 后端**没有**「这个场景属于哪个动作」这张表：公开列表 /v1/reality-scenes
+ * 里只有自由文本 type（如「咖啡 · 户外」）和 SCENE-CATEGORY-001 的封闭顶类
+ * （商家/景点/其他）；场景详情里那三条 Actions 是邀请真人 / 发机会 / 报名
+ * 三个**可执行动作**，不是分类。所以这里跟 sceneMatches 用同一套路：对
+ * name/area/type 做子串归属。
+ *
+ * 匹配不到就是空 —— 不编场景、不拿本地 MOMENTS fixture 顶上。
+ */
+const ACTION_SCENE_KEYWORDS: Record<string, readonly string[]> = {
+  coffee: ["咖啡", "cafe", "coffee", "cà phê"],
+  dining: ["餐", "restaurant", "bistro", "美食", "food", "quán ăn"],
+  "city-walk": ["老城", "old quarter", "old town", "街", "street", "湖", "lake", "公园", "park"],
+  photo: ["拍照", "photo", "观景", "景点", "viewpoint", "camera"],
+  cycling: ["骑行", "cycling", "bike", "自行车", "xe đạp"],
+  exhibition: ["美术馆", "画廊", "gallery", "museum", "展"],
+};
+
+export type SceneCategoryEntry = {
+  actionId: string;
+  label: string;
+  icon: ImageSource;
+  /** 命中的真实场景条数。 */
+  count: number;
+  /** 计数单位：命中里过半是「商家」顶类就用「家」，其余用「个」。 */
+  unit: "家" | "个";
+  /** 真实派生：命中场景 visitedCount 合计。0 就不显示（不是热度）。 */
+  visitedTotal: number;
+  /** 真实派生：命中场景的 area 去重，最多 2 个。 */
+  areas: readonly string[];
+  /** 命中里第一条有图的真实场景的 imageUrl（可能是相对路径，调用方拼 base）。 */
+  imageUrl: string;
+};
+
+/**
+ * SCENE-HOME-ENTRY-001：首页场景入口卡 —— 一张卡 = 一个**真的有场景**的
+ * 主动作分类。
+ *
+ * 计数、去过人数、区域全部由 /v1/reality-scenes 的真实字段派生；没有真实
+ * 场景的动作**不出卡**（不是显示「0 家」，更不是拿本地 MOMENTS 顶上）。
+ * 原型卡片上另外那两行（本周活动 / 正在招募）没有数据源，一律不做。
+ */
+export function sceneCategoryEntries(scenes: readonly SceneDiscoveryBrief[]): readonly SceneCategoryEntry[] {
+  return PRIMARY_ACTIONS.flatMap((action) => {
+    const words = ACTION_SCENE_KEYWORDS[action.id] ?? [];
+    const matched = scenes.filter((scene) => {
+      const haystack = `${scene.name} ${scene.area} ${scene.type}`.toLowerCase();
+      return words.some((word) => haystack.includes(word.toLowerCase()));
+    });
+    if (matched.length === 0) return [];
+    const merchantCount = matched.filter((scene) => scene.category === "商家").length;
+    const visitedTotal = matched.reduce((sum, scene) => sum + (Number.isFinite(scene.visitedCount) ? scene.visitedCount : 0), 0);
+    const areas = [...new Set(matched.map((scene) => scene.area).filter(Boolean))].slice(0, 2);
+    return [{
+      actionId: action.id,
+      label: action.label,
+      icon: action.icon,
+      count: matched.length,
+      unit: merchantCount * 2 >= matched.length ? "家" as const : "个" as const,
+      visitedTotal,
+      areas,
+      imageUrl: matched.find((scene) => scene.imageUrl)?.imageUrl ?? "",
+    }];
+  });
+}
 
 // Detail nodes extend a stable top-level taxonomy without making Home wider.
 // matchActionId keeps today's Moment projection compatible until ranking moves
@@ -235,11 +319,6 @@ function taxon(items: readonly Taxon[], id: string): Taxon {
   return items.find((item) => item.id === id) ?? items[0]!;
 }
 
-function selectedAction(id?: string): Taxon | undefined {
-  if (!id) return undefined;
-  return [...ACTIONS, ...ACTION_DETAILS].find((item) => item.id === id);
-}
-
 function actionMatchId(id?: string): string | undefined {
   if (!id) return undefined;
   return ACTION_DETAILS.find((item) => item.id === id)?.matchActionId ?? id;
@@ -366,67 +445,62 @@ export function SceneActivityDiscovery({
     setPriceId(undefined);
   };
 
+  // SCENE-HOME-ENTRY-001：入口卡按真实场景算，跟 MOMENTS fixture 无关。
+  const entries = useMemo(() => sceneCategoryEntries(scenes), [scenes]);
+  const entriesForAction = entries.filter((entry) => entry.actionId === actionMatchId(actionId));
+  // 选了细分动作（跑步/羽毛球…）时它本来就没有对应入口卡 —— 那就把全部入口
+  // 摆出来，而不是给用户一块空。
+  const visibleEntries = actionId && entriesForAction.length > 0 ? entriesForAction : entries;
+
   return (
     <View style={styles.root}>
       <SectionHead label="动作" onAll={() => setPickerOpen(true)} />
-      <HorizontalSwipeRail contentContainerStyle={styles.actionRail} preserveChildPresses threshold={3}>
-        {ACTIONS.map((action) => {
+      {/* SCENE-HOME-ENTRY-001：原型首页那一行是 6 个等宽主动作，平铺不横滑
+          —— 横滑那一版在真机上还会跟 iOS 系统 tab 切换手势打架（见那个横滑
+          rail 组件自己的注释）。8 个次要动作 + 17 个细分动作仍然从右上
+          「全部」进动作分类页，一个都没少。 */}
+      <View style={styles.actionRow}>
+        {PRIMARY_ACTIONS.map((action) => {
           const active = action.id === actionMatchId(actionId);
           return <Pressable accessibilityLabel={`动作 ${action.label}`} key={action.id} onPress={() => setActionId(active ? undefined : action.id)} style={styles.actionOption}>
             <View style={[styles.actionGlyph, active && styles.actionGlyphActive]}><Image contentFit="contain" source={action.icon} style={styles.actionIcon} /></View>
             <Text selectable numberOfLines={1} style={styles.actionLabel}>{action.label}</Text>
           </Pressable>;
         })}
-      </HorizontalSwipeRail>
+      </View>
 
-      {(actionId || occasionId || timeId || priceId) ? <View style={styles.filterState}><Text selectable style={styles.filterStateText}>{[selectedAction(actionId)?.label ?? "", simpleLabel(PRICE_OPTIONS, priceId), simpleLabel(TIME_OPTIONS, timeId), simpleLabel(OCCASION_OPTIONS, occasionId)].filter(Boolean).join(" × ")}</Text><Pressable onPress={resetAll}><Text selectable style={styles.clear}>重置</Text></Pressable></View> : null}
-
-      {/* SCENE-CARD-STACK-005（2026-09-21，用户带参考图）：原来是 2 列并排
-          的小卡片网格（每张 194 高，标题+3 个标签挤在一起）。改成参考图那
-          种单列大图卡：整卡背景图、底部深色遮罩上放标题，默认只露 2 个标
-          签（动作+场景，最可靠的两个真实维度），其余标签（该 Moment 的
-          THEMES + 时间/金额档位）收在"+N"里，点了在卡片内原地展开，不跳
-          转、不弹层。收藏心形按钮是已有的真实 saved 状态，只是从小卡片挪
-          到大卡片同样的右上角位置，行为没变。参考图里的"🔥 热门"角标没有
-          真实的热度/排序数据支撑，这里没有加——留到有真实信号（比如真实
-          浏览量/完成量）时再做，不编造一个假热门。 */}
-      {filtered.length > 0 ? <View style={styles.sceneList}>{filtered.map((moment) => {
-        const live = liveSceneFor(moment.scene);
-        const action = taxon(ACTIONS, moment.action);
-        const scene = taxon(SCENES, moment.scene);
-        const expanded = expandedMomentId === moment.id;
-        const extraThemes = moment.themes.map((id) => taxon(THEMES, id));
-        const hiddenCount = extraThemes.length + 2;
-        return <Pressable accessibilityLabel={`Moment ${moment.title}`} key={moment.id} onPress={() => setDetail(moment)} style={styles.sceneCard}>
-          {absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) || networkSource("moments", moment.id) ? <Image contentFit="cover" source={(absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) ? { uri: absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl)! } : networkSource("moments", moment.id))!} style={styles.sceneCardPhoto} /> : <View style={[styles.photoPending, styles.sceneCardPhoto]} />}
-          <Svg height="100%" pointerEvents="none" style={styles.sceneCardShade} width="100%">
+      {/* SCENE-HOME-ENTRY-001：入口卡替掉了原来直接铺在首页的 Moment 大图卡
+          列表。一张卡 = 一个真的有场景的分类；计数、去过人数、区域全部来自
+          /v1/reality-scenes 的真实字段（SCENE-REAL-COUNTS-001 /
+          SCENE-CATEGORY-001）。原型卡片上另外还有「本周活动」和「正在招募」
+          两行 —— 后端没有这两项的数据源，不做。
+          没有任何真实场景时整块不出 —— 首页不再拿本地 MOMENTS fixture 当内容。
+          Moment 大图卡整体挪进「动作分类」页右侧列表，之前那版的设计没有丢。 */}
+      {visibleEntries.length > 0 ? <View style={styles.entryList}>{visibleEntries.map((entry) => {
+        const photo = absoluteNetworkURL(apiBaseUrl ?? "", entry.imageUrl);
+        const sub = [entry.visitedTotal > 0 ? `${entry.visitedTotal} 人去过` : "", ...entry.areas].filter(Boolean).join(" · ");
+        return <Pressable accessibilityLabel={`场景分类 ${entry.label} · ${entry.count} ${entry.unit}`} key={entry.actionId} onPress={() => { setActionId(entry.actionId); setPickerOpen(true); }} style={styles.entryCard}>
+          {photo ? <Image contentFit="cover" source={{ uri: photo }} style={styles.entryPhoto} /> : <View style={[styles.photoPending, styles.entryPhoto]} />}
+          <Svg height="100%" pointerEvents="none" style={styles.entryShade} width="100%">
             <Defs>
-              <SvgLinearGradient id={`sceneShade-${moment.id}`} x1="0" x2="0" y1="0" y2="1">
+              <SvgLinearGradient id={`sceneEntryShade-${entry.actionId}`} x1="0" x2="0" y1="0" y2="1">
                 <Stop offset="0" stopColor="#000000" stopOpacity={0} />
                 <Stop offset="0.62" stopColor="#000000" stopOpacity={0} />
                 <Stop offset="1" stopColor="#000000" stopOpacity={0.48} />
               </SvgLinearGradient>
             </Defs>
-            <Rect fill={`url(#sceneShade-${moment.id})`} height="100%" width="100%" x="0" y="0" />
+            <Rect fill={`url(#sceneEntryShade-${entry.actionId})`} height="100%" width="100%" x="0" y="0" />
           </Svg>
-          <Pressable accessibilityLabel={saved.includes(moment.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => toggleSavedMoment(moment.id)} style={styles.sceneFavorite}><ProxyIcon color={saved.includes(moment.id) ? color.magenta : color.white} filled={saved.includes(moment.id)} name="heart" size={20} /></Pressable>
-          <View style={styles.sceneCardContent}>
-            <Text selectable style={styles.sceneCardTitle}>{moment.title}</Text>
-            <View style={styles.sceneTagsRow}>
-              <Tag icon={action.icon} label={action.label} />
-              <Tag icon={scene.icon} label={scene.label} />
-              {expanded ? <>
-                {extraThemes.map((t) => <Tag icon={t.icon} key={t.id} label={t.label} />)}
-                <View style={styles.sceneMetaTag}><Text selectable style={styles.sceneMetaTagText}>🕐 {simpleLabel(TIME_OPTIONS, moment.time)}</Text></View>
-                <View style={styles.sceneMetaTag}><Text selectable style={styles.sceneMetaTagText}>💰 {simpleLabel(PRICE_OPTIONS, moment.price)}</Text></View>
-              </> : null}
-              <Pressable accessibilityLabel={expanded ? "收起标签" : `展开剩余 ${hiddenCount} 个标签`} hitSlop={6} onPress={() => setExpandedMomentId(expanded ? undefined : moment.id)} style={styles.sceneTagMore}>
-                <Text selectable style={styles.sceneTagMoreText}>{expanded ? "收起" : `+${hiddenCount}`}</Text>
-              </Pressable>
-            </View>
+          <View style={styles.entryCountPill}>
+            <Text selectable style={styles.entryCountText}>{entry.count} {entry.unit}</Text>
+            <Text selectable style={styles.entryCountChevron}>›</Text>
+          </View>
+          <View style={styles.entryContent}>
+            <Text selectable style={styles.entryTitle}>{entry.label}</Text>
+            {sub ? <Text selectable style={styles.entrySub}>{sub}</Text> : null}
           </View>
         </Pressable>;
-      })}</View> : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>暂时没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个筛选条件，看看更多组合。</Text></View>}
+      })}</View> : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>附近还没有接入真实场景</Text><Text selectable style={styles.emptyText}>场景目录接上后这里会显示分类入口。</Text></View>}
 
       {/* SCENE-PICKER-WAIMAI-001（2026-09-20）：以前是 动作/场景/主题 三张平铺
           网格竖向堆叠，30+ 个可点目标一次性摆给用户，AND 组合筛选却只过滤
@@ -526,7 +600,7 @@ export function SceneActivityDiscovery({
                 })}
               </ScrollView>
 
-              <ScrollView showsVerticalScrollIndicator={false} style={styles.waimaiList}>
+              <ScrollView contentContainerStyle={styles.sceneList} showsVerticalScrollIndicator={false} style={styles.waimaiList}>
                 {actionFamily(actionId) ? <View style={styles.detailGroup}>
                   <Text selectable style={styles.detailGroupTitle}>{ACTION_FAMILY_LABELS[actionFamily(actionId)!]}</Text>
                   <View style={styles.detailChipGrid}>{ACTION_DETAILS.filter((detailAction) => detailAction.familyId === actionFamily(actionId)).map((detailAction) => {
@@ -539,16 +613,52 @@ export function SceneActivityDiscovery({
                   {actionMatchId(actionId) === "urban-support" ? <Text selectable style={styles.medicalBoundary}>仅提供陪同、翻译和流程协助；不代办资质，不提供法律、金融或政府审批承诺。</Text> : null}
                 </View> : null}
 
+                {/* SCENE-CARD-STACK-005（2026-09-21，用户带参考图）：原来是 2 列并排
+                    的小卡片网格（每张 194 高，标题+3 个标签挤在一起）。改成参考图那
+                    种单列大图卡：整卡背景图、底部深色遮罩上放标题，默认只露 2 个标
+                    签（动作+场景，最可靠的两个真实维度），其余标签（该 Moment 的
+                    THEMES + 时间/金额档位）收在"+N"里，点了在卡片内原地展开，不跳
+                    转、不弹层。收藏心形按钮是已有的真实 saved 状态，只是从小卡片挪
+                    到大卡片同样的右上角位置，行为没变。参考图里的"🔥 热门"角标没有
+                    真实的热度/排序数据支撑，这里没有加——留到有真实信号（比如真实
+                    浏览量/完成量）时再做，不编造一个假热门。
+                    SCENE-HOME-ENTRY-001（2026-09-24）：这一列从「小行卡片」换成这套
+                    大图卡 —— 首页那格让给场景入口卡之后，Moment 浏览整条挪进来，
+                    内容与交互原样保留，只是换了个入口。 */}
                 {filtered.length > 0 ? filtered.map((moment) => {
                   const live = liveSceneFor(moment.scene);
                   const action = taxon(ACTIONS, moment.action);
                   const scene = taxon(SCENES, moment.scene);
-                  const photo = absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) || networkSource("moments", moment.id);
-                  return <Pressable accessibilityLabel={`Moment ${moment.title}`} key={moment.id} onPress={() => { setDetail(moment); setPickerOpen(false); }} style={styles.waimaiMomentRow}>
-                    {photo ? <Image contentFit="cover" source={photo} style={styles.waimaiMomentPhoto} /> : <View style={[styles.photoPending, styles.waimaiMomentPhoto]} />}
-                    <View style={styles.waimaiMomentCopy}>
-                      <Text selectable numberOfLines={1} style={styles.waimaiMomentTitle}>{moment.title}</Text>
-                      <View style={styles.tagRow}><Tag icon={action.icon} label={action.label} /><Tag icon={scene.icon} label={scene.label} /></View>
+                  const expanded = expandedMomentId === moment.id;
+                  const extraThemes = moment.themes.map((id) => taxon(THEMES, id));
+                  const hiddenCount = extraThemes.length + 2;
+                  return <Pressable accessibilityLabel={`Moment ${moment.title}`} key={moment.id} onPress={() => setDetail(moment)} style={styles.sceneCard}>
+                    {absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) || networkSource("moments", moment.id) ? <Image contentFit="cover" source={(absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) ? { uri: absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl)! } : networkSource("moments", moment.id))!} style={styles.sceneCardPhoto} /> : <View style={[styles.photoPending, styles.sceneCardPhoto]} />}
+                    <Svg height="100%" pointerEvents="none" style={styles.sceneCardShade} width="100%">
+                      <Defs>
+                        <SvgLinearGradient id={`sceneShade-${moment.id}`} x1="0" x2="0" y1="0" y2="1">
+                          <Stop offset="0" stopColor="#000000" stopOpacity={0} />
+                          <Stop offset="0.62" stopColor="#000000" stopOpacity={0} />
+                          <Stop offset="1" stopColor="#000000" stopOpacity={0.48} />
+                        </SvgLinearGradient>
+                      </Defs>
+                      <Rect fill={`url(#sceneShade-${moment.id})`} height="100%" width="100%" x="0" y="0" />
+                    </Svg>
+                    <Pressable accessibilityLabel={saved.includes(moment.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => toggleSavedMoment(moment.id)} style={styles.sceneFavorite}><ProxyIcon color={saved.includes(moment.id) ? color.magenta : color.white} filled={saved.includes(moment.id)} name="heart" size={20} /></Pressable>
+                    <View style={styles.sceneCardContent}>
+                      <Text selectable style={styles.sceneCardTitle}>{moment.title}</Text>
+                      <View style={styles.sceneTagsRow}>
+                        <Tag icon={action.icon} label={action.label} />
+                        <Tag icon={scene.icon} label={scene.label} />
+                        {expanded ? <>
+                          {extraThemes.map((t) => <Tag icon={t.icon} key={t.id} label={t.label} />)}
+                          <View style={styles.sceneMetaTag}><Text selectable style={styles.sceneMetaTagText}>🕐 {simpleLabel(TIME_OPTIONS, moment.time)}</Text></View>
+                          <View style={styles.sceneMetaTag}><Text selectable style={styles.sceneMetaTagText}>💰 {simpleLabel(PRICE_OPTIONS, moment.price)}</Text></View>
+                        </> : null}
+                        <Pressable accessibilityLabel={expanded ? "收起标签" : `展开剩余 ${hiddenCount} 个标签`} hitSlop={6} onPress={() => setExpandedMomentId(expanded ? undefined : moment.id)} style={styles.sceneTagMore}>
+                          <Text selectable style={styles.sceneTagMoreText}>{expanded ? "收起" : `+${hiddenCount}`}</Text>
+                        </Pressable>
+                      </View>
                     </View>
                   </Pressable>;
                 }) : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>这类还没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个金额/时间/场合筛选，看看更多组合。</Text></View>}
@@ -589,9 +699,24 @@ const styles = StyleSheet.create({
   root: { marginHorizontal: -16, paddingHorizontal: 16 },
   sectionHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 9, marginTop: 17 },
   sectionTitle: { color: "#151515", fontSize: 17, fontWeight: "900" }, all: { color: "#777169", fontSize: 12, fontWeight: "600" },
-  actionRail: { gap: 6, paddingRight: 16 }, actionOption: { alignItems: "center", gap: 4, width: 52 }, actionGlyph: { alignItems: "center", borderColor: "transparent", borderRadius: 14, borderWidth: 1, height: 46, justifyContent: "center", width: 46 }, actionGlyphActive: { backgroundColor: "#FFF6DF", borderColor: "#151515" }, actionIcon: { height: 30, width: 30 }, actionLabel: { color: "#151515", fontSize: 11, fontWeight: "700" },
+  // SCENE-HOME-ENTRY-001：首页那一行是 6 个等宽主动作（原型 action-row），
+  // 不是横滑 rail —— 6 个正好铺满一行，再套一层手势隔离只会白吃一次横滑。
+  actionRow: { flexDirection: "row", justifyContent: "space-between" },
+  actionOption: { alignItems: "center", flex: 1, gap: 6 }, actionGlyph: { alignItems: "center", borderColor: "transparent", borderRadius: 14, borderWidth: 1, height: 46, justifyContent: "center", width: 46 }, actionGlyphActive: { backgroundColor: "#FFF6DF", borderColor: "#151515" }, actionIcon: { height: 30, width: 30 }, actionLabel: { color: "#151515", fontSize: 11, fontWeight: "700" },
   photoPending: { backgroundColor: "#DDD7CF", height: "100%", width: "100%" },
-  filterState: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 10 }, filterStateText: { color: "#8C867E", flex: 1, fontSize: 11 }, clear: { color: "#151515", fontSize: 11, fontWeight: "900" },
+  // SCENE-HOME-ENTRY-001：场景入口卡（原型 .scene-entry）——大图 + 右上计数
+  // 药丸 + 底部标题/真实统计。图就是这条分类下第一条真实场景的 imageUrl，
+  // 没有图就留灰底，不拿动作图标冒充照片。
+  entryList: { gap: 14, marginTop: 13 },
+  entryCard: { backgroundColor: "#DDD7CF", borderRadius: 22, justifyContent: "flex-end", minHeight: 224, overflow: "hidden" },
+  entryPhoto: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  entryShade: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  entryCountPill: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.18)", borderColor: "rgba(255,255,255,0.28)", borderRadius: 999, borderWidth: 1, flexDirection: "row", gap: 5, paddingHorizontal: 12, paddingVertical: 6, position: "absolute", right: 16, top: 16 },
+  entryCountText: { color: color.white, fontSize: 11, fontWeight: "900" },
+  entryCountChevron: { color: color.white, fontSize: 13, fontWeight: "900" },
+  entryContent: { padding: 15 },
+  entryTitle: { color: color.white, fontSize: 24, fontWeight: "900", textShadowColor: "rgba(0,0,0,0.55)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 4 },
+  entrySub: { color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "700", marginTop: 6 },
   // SCENE-CARD-STACK-005：单列大图卡，参考 deepseek_html_20260921_c417e3
   // ——整卡背景图 + 底部渐变遮罩承托标题和可展开的标签行。渐变实现见上面
   // SCENE-CARD-SHADE-008 的注释（Svg + LinearGradient，用已经链接进原生
@@ -608,7 +733,7 @@ const styles = StyleSheet.create({
   sceneMetaTagText: { color: "#151515", fontSize: 11, fontWeight: "700" },
   sceneTagMore: { backgroundColor: "rgba(0,0,0,0.45)", borderRadius: 999, height: 25, justifyContent: "center", paddingHorizontal: 8 },
   sceneTagMoreText: { color: color.white, fontSize: 11, fontWeight: "800" },
-  tagRow: { flexDirection: "row", gap: 3 }, tag: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.94)", borderRadius: 999, flexDirection: "row", gap: 2, height: 25, maxWidth: "34%", paddingHorizontal: 4 }, tagIcon: { height: 17, width: 17 }, tagText: { color: "#151515", fontSize: 11, fontWeight: "700" },
+  tag: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.94)", borderRadius: 999, flexDirection: "row", gap: 2, height: 25, maxWidth: "34%", paddingHorizontal: 4 }, tagIcon: { height: 17, width: 17 }, tagText: { color: "#151515", fontSize: 11, fontWeight: "700" },
   empty: { alignItems: "center", backgroundColor: color.white, borderColor: "#E8E1D8", borderRadius: 18, borderWidth: 1, marginTop: 13, padding: 22 }, emptyTitle: { color: "#151515", fontSize: 13, fontWeight: "800" }, emptyText: { color: "#8C867E", fontSize: 11, marginTop: 6 },
   // SCENE-PICKER-WAIMAI-001（2026-09-21）：整页，不再是底部弹层——去掉了
   // maxHeight/圆角/拖拽把手，换成"‹ 返回"的整页 header，跟其余全屏 surface
@@ -651,7 +776,7 @@ const styles = StyleSheet.create({
   // 比如英文 "City Walk"，会把宽度撑开）。显式钉住 flexGrow/flexShrink/
   // flexBasis + maxWidth，不给 Yoga 任何"按内容重新算宽度"的空子。
   waimaiRail: { backgroundColor: "#EFEAE1", borderRadius: 16, flexBasis: 84, flexGrow: 0, flexShrink: 0, maxWidth: 84, width: 84 }, waimaiRailItem: { alignItems: "center", gap: 3, paddingVertical: 12, width: "100%" }, waimaiRailItemActive: { backgroundColor: color.white, borderLeftColor: "#151515", borderLeftWidth: 3 }, waimaiRailIcon: { height: 26, width: 26 }, waimaiRailLabel: { color: "#777169", fontSize: 11, fontWeight: "700", textAlign: "center" }, waimaiRailLabelActive: { color: "#151515", fontWeight: "900" }, waimaiRailCount: { color: "#A39C90", fontSize: 11, fontWeight: "700" },
-  waimaiList: { flex: 1 }, waimaiMomentRow: { alignItems: "center", backgroundColor: color.white, borderColor: "#E8E1D8", borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 9, padding: 8 }, waimaiMomentPhoto: { borderRadius: 12, height: 64, width: 64 }, waimaiMomentCopy: { flex: 1, gap: 6 }, waimaiMomentTitle: { color: "#151515", fontSize: 14, fontWeight: "800" },
+  waimaiList: { flex: 1 },
   detailGroup: { backgroundColor: color.white, borderRadius: 16, marginBottom: 10, padding: 12 }, detailGroupTitle: { color: "#777169", fontSize: 11, fontWeight: "800", marginBottom: 8 }, detailChipGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, detailChip: { borderColor: "#DED7CE", borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8 }, detailChipActive: { backgroundColor: "#151515", borderColor: "#151515" }, detailChipText: { color: "#151515", fontSize: 11, fontWeight: "700" }, detailChipTextActive: { color: color.white }, medicalBoundary: { color: "#8C5B35", fontSize: 11, lineHeight: 16, marginTop: 9 }, pickerActions: { flexDirection: "row", gap: 8, marginTop: 12 }, pickerReset: { alignItems: "center", backgroundColor: color.white, borderColor: "#151515", borderRadius: 17, borderWidth: 1, flex: 0.7, paddingVertical: 13 }, pickerResetText: { color: "#151515", fontSize: 13, fontWeight: "900" }, pickerDone: { alignItems: "center", backgroundColor: "#151515", borderRadius: 17, flex: 1.3, paddingVertical: 13 }, pickerDoneText: { color: color.white, fontSize: 13, fontWeight: "900" },
   backdrop: { backgroundColor: "rgba(0,0,0,0.28)", flex: 1, justifyContent: "flex-end" }, sheet: { backgroundColor: "#F7F4EF", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 18, paddingBottom: 34 }, grab: { alignSelf: "center", backgroundColor: "#CFC8BF", borderRadius: 3, height: 4, marginBottom: 14, width: 42 }, detailPhoto: { borderRadius: 18, height: 180, width: "100%" }, detailTitle: { color: "#151515", fontSize: 24, fontWeight: "900", marginTop: 15 }, detailLayers: { flexDirection: "row", gap: 8, marginTop: 13 }, detailLayer: { alignItems: "center", backgroundColor: color.white, borderColor: "#E8E1D8", borderRadius: 15, borderWidth: 1, flex: 1, padding: 10 }, detailIcon: { height: 30, width: 30 }, detailLabel: { color: "#8C867E", fontSize: 11, marginTop: 4 }, detailValue: { color: "#151515", fontSize: 11, fontWeight: "800", marginTop: 2 }, detailActions: { flexDirection: "row", gap: 8, marginTop: 16 }, secondaryButton: { alignItems: "center", backgroundColor: color.white, borderColor: "#151515", borderRadius: 18, borderWidth: 1, flex: 1, paddingVertical: 13 }, secondaryText: { color: "#151515", fontSize: 12, fontWeight: "800" }, primaryButton: { alignItems: "center", backgroundColor: "#151515", borderRadius: 18, flex: 1.2, paddingVertical: 13 }, primaryText: { color: color.white, fontSize: 12, fontWeight: "800" }, disabled: { opacity: 0.45 },
 });
