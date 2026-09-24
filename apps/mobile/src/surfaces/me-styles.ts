@@ -212,6 +212,10 @@ export const styles = StyleSheet.create({
   },
   serviceLogoBox: { backgroundColor: "#08090A" },
   serviceIconBare: { backgroundColor: "transparent" },
+  // KYC-LOGO-003：KYC 标是不透明白底 PNG —— 以前 36×36 塞在 44×44 的黄绿色块里，四周露一圈黄、白块圆角还对不上。
+  // 整块改白：块本身白底 + 细边框（轮廓跟相邻图标块一致），标铺满整块、由块的圆角裁切。
+  serviceIconWhite: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1, overflow: "hidden" },
+  serviceLogoFill: { height: "100%", width: "100%" },
   serviceLogo: { borderRadius: 9, height: 36, width: 36 },
   voucherMenuGlyph: { alignItems: "center", height: 36, justifyContent: "center", width: 36 },
   voucherCup: { borderRadius: 4, borderWidth: 2.4, height: 14, left: 8, position: "absolute", top: 16, width: 17 },

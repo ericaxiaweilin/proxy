@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 312 — 2026-09-24
+
+- **KYC 入口标露馅**（KYC-LOGO-003，用户：「橙黄包括白矩形 包 logo 要么白 要么橙黄 尺寸没对齐露馅了」）：KYC 标是不透明白底 PNG，
+  以前 36×36 塞在 44×44 黄绿色块里 —— 四周露一圈黄，白块圆角（9）和色块圆角（14）也对不上。改为整块白：块白底 + 细边框
+  （轮廓与相邻图标块一致），标铺满整块、由块的圆角裁切。图片不再重复朗读「KYC认证」（行本身已有）。
+- 影响文件：`apps/mobile/src/surfaces/me-profile-components.tsx`、`me-styles.ts`。
+
 ## Revision 311 — 2026-09-24
 
 - **KYC 入口行换正牌标**（KYC-LOGO-002）：「我的」KYC认证行 `spark` → `kyc-logo`

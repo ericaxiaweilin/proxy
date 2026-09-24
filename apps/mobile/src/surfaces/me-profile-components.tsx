@@ -440,7 +440,7 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
     // KYC-LOGO-001：KYC 入口行用正牌标（蓝盾 + 证件 + 对勾），跟 intro hero 同一枚。
     // 资源缺失（单测 node 环境）才回落通用 spark。
     KYC_LOGO ? (
-      <Image accessibilityLabel="KYC认证" resizeMode="contain" source={KYC_LOGO} style={styles.serviceLogo} />
+      <Image accessible={false} resizeMode="cover" source={KYC_LOGO} style={styles.serviceLogoFill} />
     ) : (
       <ProxySymbolIcon color={row.grad ? color.white : color.ink} size={26} symbol="spark" />
     )
@@ -456,7 +456,7 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
           {icon}
         </Gradient>
       ) : (
-        <View style={[styles.serviceIcon, row.icon === "P" && styles.serviceLogoBox, row.icon === "ai-manage" && styles.serviceIconBare]}>
+        <View style={[styles.serviceIcon, row.icon === "P" && styles.serviceLogoBox, row.icon === "ai-manage" && styles.serviceIconBare, row.icon === "kyc-logo" && KYC_LOGO !== undefined && styles.serviceIconWhite]}>
           {icon}
         </View>
       )}
