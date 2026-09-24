@@ -6,7 +6,10 @@ import MapView, { Circle, Marker } from "react-native-maps";
 import * as Location from "expo-location";
 import { getCurrentFix } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
-import { commandErrorMessage } from "../command-error-message";
+// 命令出口搬到 ../scene-commands —— 分类列表/单店详情（原型第 2/3 屏）也要发
+// 同一种命令。这一屏仍然负责「哪些动作、什么文案、失败怎么跟用户说」，只是
+// 不再自己持有封包。
+import { sendSceneCommand, type AuthenticatedStoredSession } from "../scene-commands";
 import { sceneAddressLine, sceneCountsLine, sceneHeatScore, sceneSignalLine, sceneSourceSuffix } from "../reality-scene-address";
 import { captureRef } from "react-native-view-shot";
 import { checkinEligibility, checkinHint } from "../scene-checkin";
@@ -30,8 +33,7 @@ import { useModuleBackHandler } from "../components/module-back";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { color } from "../theme";
 import type { SessionAuthClient } from "../auth-client";
-import type { SecureSessionStore, StoredSession } from "../secure-session";
-import { parseCommandResult } from "../login-client";
+import type { SecureSessionStore } from "../secure-session";
 import { localApiBaseUrl } from "../native-clients";
 
 // GEO-HONEST-001: 取不到位置时地图的兜底中心。
@@ -57,7 +59,6 @@ type SceneView = "MAP" | "LIST";
 // SCENE-CATEGORY-001: 场景顶类，封闭三态。前端只认这三个 —— picker 三选一，
 // 标记颜色和徽标都按它 key；后端细分（咖啡店/湖/海滩…）继续走 type。
 type SceneCategory = "商家" | "景点" | "其他";
-type AuthenticatedStoredSession = StoredSession & { principal: NonNullable<StoredSession["principal"]> };
 
 type RealityScene = {
   id: string;
@@ -972,26 +973,6 @@ function isUserSceneState(value: unknown): value is { sceneId: string; saved: bo
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
   return typeof item.sceneId === "string" && typeof item.saved === "boolean" && typeof item.planned === "boolean" && typeof item.privateVisited === "boolean";
-}
-
-async function sendSceneCommand(authClient: SessionAuthClient, session: AuthenticatedStoredSession, commandType: string, targetId: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const nonce = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const response = await authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: {
-    commandId: `scene_${nonce}`, commandType, commandVersion: 1,
-    actor: { type: "USER", id: session.userAccountId }, principal: session.principal,
-    target: { type: "RealityScene", id: targetId }, idempotencyKey: `scene_idem_${nonce}`,
-    authContext: { sessionId: session.auth.sessionId }, purpose: "reality_scene_user_state",
-    correlationId: `scene_corr_${nonce}`, requestedAt: new Date().toISOString(), payload
-  }});
-  const result = parseCommandResult(await response.json());
-  if (!result || response.status < 200 || response.status >= 300 || result.outcome === "REJECTED") throw new Error(commandErrorMessage(result?.error, "reality scene command failed"));
-  let decoded: Record<string, unknown> = {};
-  if (result.operationRef) {
-    const value = JSON.parse(result.operationRef) as unknown;
-    if (!value || typeof value !== "object") throw new Error("reality scene response malformed");
-    decoded = value as Record<string, unknown>;
-  }
-  return { ...decoded, aggregateId: result.aggregate?.id, aggregateState: result.aggregate?.state };
 }
 
 function Stat({ value, label, onPress }: { value: number; label: string; onPress: () => void }): React.JSX.Element {

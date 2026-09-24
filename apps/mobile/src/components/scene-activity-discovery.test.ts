@@ -346,8 +346,19 @@ describe("SCENE-HOME-ENTRY-001: home entry cards are wired to the pure, tested d
     expect(source).toContain("scenes: readonly SceneDiscoveryBrief[];");
   });
 
-  it("opens the full action-category page with that category already selected", () => {
-    expect(source).toContain("setActionId(entry.actionId); setPickerOpen(true);");
+  it("opens the category's own list page — the prototype's card → list → shop flow", () => {
+    // SCENE-SHOP-DIRECTORY-001: 卡片以前直接开动作分类页（picker）。原型里
+    // 卡片点进去是**这个分类自己的列表**（咖啡 → 附近咖啡 N 家 → 单店详情），
+    // 动作分类页仍然从右上「全部」进 —— 那条路一个都没少。
+    expect(source).toContain("onPress={() => setDirectoryEntry(entry)}");
+    expect(source).toContain("<SceneShopDirectory");
+    expect(source).toContain("actionId={directoryEntry.actionId}");
+    expect(source).toContain("unit={directoryEntry.unit}");
+    expect(source).toContain("onClose={() => setDirectoryEntry(undefined)}");
+    expect(source).toContain("setPickerOpen(true)");
+    // 旧行为（点卡片顺手把 picker 也打开）不该回来：两个全屏 Modal 叠着开，
+    // 系统返回只会收掉上面那个，用户会以为返回坏了。
+    expect(source).not.toContain("setActionId(entry.actionId);");
   });
 
   it("does not port the prototype's activity / recruitment lines that have no data source", () => {

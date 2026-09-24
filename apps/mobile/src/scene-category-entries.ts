@@ -64,6 +64,28 @@ export type SceneCategoryEntry = {
 };
 
 /**
+ * 一个主动作分类下命中的真实场景。
+ *
+ * 单独提出来是因为**入口卡的计数**和**点进去那页列表的内容**必须是同一批
+ * 场景。两处各写一遍子串匹配，改一处漏一处，就会出现「卡片写 2 家、点进去
+ * 3 家」这种没人能解释的差。
+ *
+ * 未知动作 id 返回空 —— 不是「匹配全部」。动作目录里新增一个 id 而忘了加
+ * 归属词，就该看到空列表，而不是看到整个场景目录。
+ */
+export function scenesForAction<T extends SceneCategoryBrief>(
+  scenes: readonly T[],
+  actionId: string,
+): readonly T[] {
+  const words = ACTION_SCENE_KEYWORDS[actionId] ?? [];
+  if (words.length === 0) return [];
+  return scenes.filter((scene) => {
+    const haystack = `${scene.name} ${scene.area} ${scene.type}`.toLowerCase();
+    return words.some((word) => haystack.includes(word.toLowerCase()));
+  });
+}
+
+/**
  * 首页场景入口卡 —— 一张卡 = 一个**真的有场景**的主动作分类。
  *
  * 计数、去过人数、区域全部由 /v1/reality-scenes 的真实字段派生；没有真实
@@ -75,11 +97,7 @@ export function sceneCategoryEntries(
   actions: readonly SceneCategoryAction[],
 ): readonly SceneCategoryEntry[] {
   return actions.flatMap((action) => {
-    const words = ACTION_SCENE_KEYWORDS[action.id] ?? [];
-    const matched = scenes.filter((scene) => {
-      const haystack = `${scene.name} ${scene.area} ${scene.type}`.toLowerCase();
-      return words.some((word) => haystack.includes(word.toLowerCase()));
-    });
+    const matched = scenesForAction(scenes, action.id);
     if (matched.length === 0) return [];
     const merchantCount = matched.filter((scene) => scene.category === "商家").length;
     const visitedTotal = matched.reduce((sum, scene) => sum + (Number.isFinite(scene.visitedCount) ? scene.visitedCount : 0), 0);

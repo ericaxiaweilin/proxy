@@ -66,7 +66,12 @@ describe("SERVICE-DISABLED-MSG-001: 被拒的命令说人话，不说机器串",
       "./scene-client.ts",
       "./media-client.ts",
       "./experience-runtime/client.ts",
-      "./surfaces/reality-scene-map.tsx",
+      // 场景域的命令出口从 surfaces/reality-scene-map.tsx 搬到了
+      // ./scene-commands.ts（分类列表/单店详情也要发同一种命令，封包只留
+      // 一份）。这一条钉的是「发命令的地方必须把 messageKey 翻成人话」——
+      // 所以跟着代码走：现在真正发命令、真正调 commandErrorMessage 的是
+      // scene-commands.ts，还盯着 reality-scene-map.tsx 就是假守卫。
+      "./scene-commands.ts",
     ];
     for (const rel of wired) {
       const code = read(rel);

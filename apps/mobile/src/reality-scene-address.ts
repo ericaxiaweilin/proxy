@@ -11,7 +11,7 @@
 
 export interface SceneAddressFields {
   /** 门牌/街道级地址。没有就是没有 —— 不许拿 area 冒充。 */
-  address?: string;
+  address?: string | undefined;
   /** 区名（Cầu Giấy / Bắc Ninh …）。不是地址。 */
   area: string;
   type: string;

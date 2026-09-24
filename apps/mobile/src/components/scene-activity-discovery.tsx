@@ -8,6 +8,10 @@ import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "reac
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { createSceneFavoritesStore, type SavedSceneEntry } from "../scene-favorites";
 import { PRIMARY_ACTION_IDS, sceneCategoryEntries } from "../scene-category-entries";
+import type { SceneCategoryEntry } from "../scene-category-entries";
+// SCENE-SHOP-DIRECTORY-001：入口卡点进去是原型第 2/3 屏（分类列表 → 单店
+// 详情）。两屏在同一个全屏 Modal 里，返回逐层收。
+import { SceneShopDirectory } from "./scene-shop-directory";
 
 export type SceneDiscoveryBrief = {
   id: string;
@@ -306,6 +310,8 @@ export function SceneActivityDiscovery({
   const [expandedMomentId, setExpandedMomentId] = useState<string>();
   const [detail, setDetail] = useState<MomentSeed>();
   const [pickerOpen, setPickerOpen] = useState(false);
+  // SCENE-SHOP-DIRECTORY-001：点中的那张入口卡。非空 = 列表页打开。
+  const [directoryEntry, setDirectoryEntry] = useState<SceneCategoryEntry>();
   const [assets, setAssets] = useState<SceneAssetCatalog>();
   const safeArea = useSafeAreaInsets();
 
@@ -413,7 +419,7 @@ export function SceneActivityDiscovery({
       {visibleEntries.length > 0 ? <View style={styles.entryList}>{visibleEntries.map((entry) => {
         const photo = absoluteNetworkURL(apiBaseUrl ?? "", entry.imageUrl);
         const sub = [entry.visitedTotal > 0 ? `${entry.visitedTotal} 人去过` : "", ...entry.areas].filter(Boolean).join(" · ");
-        return <Pressable accessibilityLabel={`场景分类 ${entry.label} · ${entry.count} ${entry.unit}`} key={entry.actionId} onPress={() => { setActionId(entry.actionId); setPickerOpen(true); }} style={styles.entryCard}>
+        return <Pressable accessibilityLabel={`场景分类 ${entry.label} · ${entry.count} ${entry.unit}`} key={entry.actionId} onPress={() => setDirectoryEntry(entry)} style={styles.entryCard}>
           {photo ? <Image contentFit="cover" source={{ uri: photo }} style={styles.entryPhoto} /> : <View style={[styles.photoPending, styles.entryPhoto]} />}
           <Svg height="100%" pointerEvents="none" style={styles.entryShade} width="100%">
             <Defs>
@@ -613,6 +619,17 @@ export function SceneActivityDiscovery({
           </View> : null}
         </Pressable>
       </Modal>
+
+      {/* SCENE-SHOP-DIRECTORY-001：入口卡 → 分类列表 → 单店详情。全屏两屏，
+          返回逐层收（列表里点返回关整页，详情里点返回回列表）。 */}
+      {directoryEntry ? <SceneShopDirectory
+        actionId={directoryEntry.actionId}
+        label={directoryEntry.label}
+        unit={directoryEntry.unit}
+        apiBaseUrl={apiBaseUrl}
+        onClose={() => setDirectoryEntry(undefined)}
+        {...(onOpenScene ? { onOpenScene } : {})}
+      /> : null}
     </View>
   );
 }
