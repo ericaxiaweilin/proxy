@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 307 — 2026-09-24
+
+- **首页场景大图卡回来**（SCENE-HOME-CARDS-RESTORE-001）：9134f7b 把 Moment 大图卡
+  挪进动作分类页、首页只剩入口卡；309b970 又把入口卡的图掏空 —— 首页几张全灰。
+  首页恢复大图卡列表（默认 2 标签 + "+N" 原地展开 + 收藏心），卡片抽成共用渲染，
+  动作分类页同体。图是每个 Moment 自己的种子媒体（10 张 thumb 全 200），
+  不是拿别处的图冒充。入口卡留下面，仍是场景目录的入口。
+- 影响文件：`apps/mobile/src/components/scene-activity-discovery.tsx`。
+
 ## Revision 306 — 2026-09-24
 
 - **证件 tile + 号居中**（KYC-DOC-PLUS-002）：空态改竖向居中 —— + 号徽在上，

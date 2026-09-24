@@ -392,6 +392,48 @@ export function SceneActivityDiscovery({
   // 摆出来，而不是给用户一块空。
   const visibleEntries = actionId && entriesForAction.length > 0 ? entriesForAction : entries;
 
+  // SCENE-HOME-CARDS-RESTORE-001（2026-09-24，用户：「上午还有 8 个场景卡片 … 找回来」）：
+  // 首页恢复 Moment 大图卡列表（SCENE-CARD-STACK-005 那套：默认 2 个标签 + "+N" 原地展开）。
+  // 图是每个 Moment 自己的种子媒体（/v1/scene-assets moments），不是拿别处的图冒充 ——
+  // 灰色占位只出现在种子目录和服务端都没有图时。入口卡留下面，仍是场景目录的入口。
+  const renderMomentCard = (moment: MomentSeed): React.JSX.Element => {
+    const live = liveSceneFor(moment.scene);
+    const action = taxon(ACTIONS, moment.action);
+    const scene = taxon(SCENES, moment.scene);
+    const expanded = expandedMomentId === moment.id;
+    const extraThemes = moment.themes.map((id) => taxon(THEMES, id));
+    const hiddenCount = extraThemes.length + 2;
+    return <Pressable accessibilityLabel={`Moment ${moment.title}`} key={moment.id} onPress={() => setDetail(moment)} style={styles.sceneCard}>
+      {absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) || networkSource("moments", moment.id) ? <Image contentFit="cover" source={(absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) ? { uri: absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl)! } : networkSource("moments", moment.id))!} style={styles.sceneCardPhoto} /> : <View style={[styles.photoPending, styles.sceneCardPhoto]} />}
+      <Svg height="100%" pointerEvents="none" style={styles.sceneCardShade} width="100%">
+        <Defs>
+          <SvgLinearGradient id={`sceneShade-${moment.id}`} x1="0" x2="0" y1="0" y2="1">
+            <Stop offset="0" stopColor="#000000" stopOpacity={0} />
+            <Stop offset="0.62" stopColor="#000000" stopOpacity={0} />
+            <Stop offset="1" stopColor="#000000" stopOpacity={0.48} />
+          </SvgLinearGradient>
+        </Defs>
+        <Rect fill={`url(#sceneShade-${moment.id})`} height="100%" width="100%" x="0" y="0" />
+      </Svg>
+      <Pressable accessibilityLabel={saved.includes(moment.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => toggleSavedMoment(moment.id)} style={styles.sceneFavorite}><ProxyIcon color={saved.includes(moment.id) ? color.magenta : color.white} filled={saved.includes(moment.id)} name="heart" size={20} /></Pressable>
+      <View style={styles.sceneCardContent}>
+        <Text selectable style={styles.sceneCardTitle}>{moment.title}</Text>
+        <View style={styles.sceneTagsRow}>
+          <Tag icon={action.icon} label={action.label} />
+          <Tag icon={scene.icon} label={scene.label} />
+          {expanded ? <>
+            {extraThemes.map((t) => <Tag icon={t.icon} key={t.id} label={t.label} />)}
+            <View style={styles.sceneMetaTag}><Text selectable style={styles.sceneMetaTagText}>🕐 {simpleLabel(TIME_OPTIONS, moment.time)}</Text></View>
+            <View style={styles.sceneMetaTag}><Text selectable style={styles.sceneMetaTagText}>💰 {simpleLabel(PRICE_OPTIONS, moment.price)}</Text></View>
+          </> : null}
+          <Pressable accessibilityLabel={expanded ? "收起标签" : `展开剩余 ${hiddenCount} 个标签`} hitSlop={6} onPress={() => setExpandedMomentId(expanded ? undefined : moment.id)} style={styles.sceneTagMore}>
+            <Text selectable style={styles.sceneTagMoreText}>{expanded ? "收起" : `+${hiddenCount}`}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Pressable>;
+  };
+
   return (
     <View style={styles.root}>
       <SectionHead label="动作" onAll={() => setPickerOpen(true)} />
@@ -408,6 +450,10 @@ export function SceneActivityDiscovery({
           </Pressable>;
         })}
       </View>
+
+      {/* SCENE-HOME-CARDS-RESTORE-001：上午那 8 张大图卡回来了（2 个标签 + "+N" 原地展开）。
+          下面入口卡不动，仍是场景目录（列表/详情）的入口。 */}
+      {filtered.length > 0 ? <View style={styles.sceneList}>{filtered.map((moment) => renderMomentCard(moment))}</View> : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>暂时没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个筛选条件，看看更多组合。</Text></View>}
 
       {/* SCENE-HOME-ENTRY-001：入口卡替掉了原来直接铺在首页的 Moment 大图卡
           列表。一张卡 = 一个真的有场景的分类；计数、去过人数、区域全部来自
@@ -565,43 +611,7 @@ export function SceneActivityDiscovery({
                     SCENE-HOME-ENTRY-001（2026-09-24）：这一列从「小行卡片」换成这套
                     大图卡 —— 首页那格让给场景入口卡之后，Moment 浏览整条挪进来，
                     内容与交互原样保留，只是换了个入口。 */}
-                {filtered.length > 0 ? filtered.map((moment) => {
-                  const live = liveSceneFor(moment.scene);
-                  const action = taxon(ACTIONS, moment.action);
-                  const scene = taxon(SCENES, moment.scene);
-                  const expanded = expandedMomentId === moment.id;
-                  const extraThemes = moment.themes.map((id) => taxon(THEMES, id));
-                  const hiddenCount = extraThemes.length + 2;
-                  return <Pressable accessibilityLabel={`Moment ${moment.title}`} key={moment.id} onPress={() => setDetail(moment)} style={styles.sceneCard}>
-                    {absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) || networkSource("moments", moment.id) ? <Image contentFit="cover" source={(absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) ? { uri: absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl)! } : networkSource("moments", moment.id))!} style={styles.sceneCardPhoto} /> : <View style={[styles.photoPending, styles.sceneCardPhoto]} />}
-                    <Svg height="100%" pointerEvents="none" style={styles.sceneCardShade} width="100%">
-                      <Defs>
-                        <SvgLinearGradient id={`sceneShade-${moment.id}`} x1="0" x2="0" y1="0" y2="1">
-                          <Stop offset="0" stopColor="#000000" stopOpacity={0} />
-                          <Stop offset="0.62" stopColor="#000000" stopOpacity={0} />
-                          <Stop offset="1" stopColor="#000000" stopOpacity={0.48} />
-                        </SvgLinearGradient>
-                      </Defs>
-                      <Rect fill={`url(#sceneShade-${moment.id})`} height="100%" width="100%" x="0" y="0" />
-                    </Svg>
-                    <Pressable accessibilityLabel={saved.includes(moment.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => toggleSavedMoment(moment.id)} style={styles.sceneFavorite}><ProxyIcon color={saved.includes(moment.id) ? color.magenta : color.white} filled={saved.includes(moment.id)} name="heart" size={20} /></Pressable>
-                    <View style={styles.sceneCardContent}>
-                      <Text selectable style={styles.sceneCardTitle}>{moment.title}</Text>
-                      <View style={styles.sceneTagsRow}>
-                        <Tag icon={action.icon} label={action.label} />
-                        <Tag icon={scene.icon} label={scene.label} />
-                        {expanded ? <>
-                          {extraThemes.map((t) => <Tag icon={t.icon} key={t.id} label={t.label} />)}
-                          <View style={styles.sceneMetaTag}><Text selectable style={styles.sceneMetaTagText}>🕐 {simpleLabel(TIME_OPTIONS, moment.time)}</Text></View>
-                          <View style={styles.sceneMetaTag}><Text selectable style={styles.sceneMetaTagText}>💰 {simpleLabel(PRICE_OPTIONS, moment.price)}</Text></View>
-                        </> : null}
-                        <Pressable accessibilityLabel={expanded ? "收起标签" : `展开剩余 ${hiddenCount} 个标签`} hitSlop={6} onPress={() => setExpandedMomentId(expanded ? undefined : moment.id)} style={styles.sceneTagMore}>
-                          <Text selectable style={styles.sceneTagMoreText}>{expanded ? "收起" : `+${hiddenCount}`}</Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                  </Pressable>;
-                }) : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>这类还没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个金额/时间/场合筛选，看看更多组合。</Text></View>}
+                {filtered.length > 0 ? filtered.map((moment) => renderMomentCard(moment)) : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>这类还没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个金额/时间/场合筛选，看看更多组合。</Text></View>}
               </ScrollView>
             </View>
 
