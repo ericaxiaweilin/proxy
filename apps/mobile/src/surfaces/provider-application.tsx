@@ -17,6 +17,9 @@ import {
 } from "../provider-application-client";
 
 // ORDER-PERMISSION-KYC-001（原型 deepseek_html_20260924_33987c「接单中心 · KYC + 履约管线」）：
+// KYC-LOGO-001（2026-09-24，用户给的 KYC logo：蓝盾 + 证件 + 对勾）：
+// 深 hero 左上白圆角徽，cover 裁掉白边。
+const KYC_LOGO = require("../../assets/kyc/kyc-logo.png");
 // 开始前 → 1 基础信息 → 2 证件 + 手持证件自拍 + 声明 → 3 履约条款 → 提交 → 运营人工审核。
 // 任何人都能申请，性别是可选自述、不参与任何判断。
 // 与原型的差异（都是为了不说假话）：
@@ -226,6 +229,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
               </Defs>
               <Rect height="100%" rx={18} ry={18} width="100%" x="0" y="0" fill="url(#kycHero)" />
             </Svg>
+            <View style={s.heroLogo}><Image contentFit="cover" source={KYC_LOGO} style={s.heroLogoImage} transition={0} /></View>
             <Text selectable style={s.heroKicker}>KYC · 3 步走完</Text>
             <Text selectable style={s.heroTitle}>轻认证，不卡你</Text>
             <Text selectable style={s.heroSub}>基础信息 + 证件自拍 + 条款。</Text>
@@ -343,6 +347,8 @@ const s = StyleSheet.create({
   wrap: { gap: 12, paddingBottom: 24 },
   introGap: { gap: 14 },
   hero: { borderRadius: 18, gap: 8, overflow: "hidden", paddingHorizontal: 20, paddingVertical: 24 },
+  heroLogo: { backgroundColor: color.white, borderRadius: 16, height: 64, overflow: "hidden", width: 64 },
+  heroLogoImage: { height: "100%", width: "100%" },
   heroKicker: { color: "#A79EAF", fontSize: 11, fontWeight: "900", letterSpacing: 1 },
   heroTitle: { color: color.white, fontSize: 24, fontWeight: "900", letterSpacing: -0.5 },
   heroSub: { color: "#D8D1E0", fontSize: 12.5, fontWeight: "600", lineHeight: 20 },

@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 310 — 2026-09-24
+
+- **KYC logo 落 hero**（KYC-LOGO-001）：用户给的蓝盾 logo 进 `assets/kyc/kyc-logo.png`，
+  intro 深 hero 左上白圆角徽（cover 裁白边）。
+- 影响文件：`apps/mobile/src/surfaces/provider-application.tsx`（资源同入）。
+
 ## Revision 309 — 2026-09-24
 
 - **Moment 卡点击走目录流程**（SCENE-HOME-CARD-FLOW-001）：旧卡点击不再进详情浮层，
