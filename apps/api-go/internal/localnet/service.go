@@ -1157,6 +1157,9 @@ type Service struct {
 	authorNames authorNameResolver
 	// replySearch 让评论进 feed 搜索（SEARCH-CORPUS-003）。nil = 不搜评论。
 	replySearch ReplySearchLookup
+
+	// POST-PROFILE-GATE-001：发帖前的资料完整度门。
+	profileCompleteness ProfileCompleteness
 }
 
 // ReplySearchLookup 是 feed 搜索读**评论**的窄口（SEARCH-CORPUS-003）。
@@ -1191,6 +1194,19 @@ func (s *Service) SetAuthorNameResolver(resolver authorNameResolver) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.authorNames = resolver
+}
+
+// POST-PROFILE-GATE-001（2026-09-24，用户：「所有没有头像的 用户名的 绕过注册流程的必须要补齐…守护 gate」）：
+// 审计发现 13 个匿名会话账号（没有任何登录方式、资料里没有名字没有头像）发了帖，动态里满屏「用户」+ 首字头像，
+// 还有测试账号冒用 Linh / Mai 的名字发帖。真人账号发帖前必须有用户名 + 平台头像（assets/…）。
+// ProfileCompleteness 返回缺的项（"name" / "avatar"）；读失败按缺失处理（fail-closed，宁可让人重试也不放行）。
+type ProfileCompleteness func(ctx context.Context, userAccountID string) (missing []string)
+
+// SetProfileCompleteness 接上发帖前的资料完整度门。nil = 不检查（单测）；生产在 cmd/api 接线，钉子保证不漏。
+func (s *Service) SetProfileCompleteness(check ProfileCompleteness) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.profileCompleteness = check
 }
 
 func New() *Service {
@@ -1508,6 +1524,12 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	}
 	if p.Body == "" && len(p.MediaRefs) == 0 {
 		return command.Rejected(e, "POST_EMPTY_CONTENT", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_empty_content", nil)
+	}
+	// POST-PROFILE-GATE-001：真人发帖先有用户名 + 头像。平台 / 系统主体（非 USER）不在此列。
+	if e.Actor.Type == "USER" && s.profileCompleteness != nil {
+		if missing := s.profileCompleteness(ctx, e.Actor.ID); len(missing) > 0 {
+			return command.Rejected(e, "PROFILE_INCOMPLETE", "BUSINESS_STATE", "AFTER_USER_ACTION", "localnet.profile_incomplete", map[string]any{"missing": missing})
+		}
 	}
 	// R15.15 P1: SceneType 可选 — 客户端发布时可填。未知 / 拼错的值
 	// 不被静默接受，会 reject 避免下游 sceneAesthetic.GetAestheticBackdrop

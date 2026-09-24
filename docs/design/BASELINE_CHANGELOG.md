@@ -4,6 +4,19 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 277 — 2026-09-24
+
+- **帖文数据治理 + 发帖资料门**（DATA-HYGIENE-001 / POST-PROFILE-GATE-001）：用户：「所有没有头像的 用户名的 绕过注册流程的必须要补齐
+  就算是同用户名不同ID；帖文不能乱 必须要调查清楚有没有少帖文 错乱」「修吧 守护 gate」。
+  - 调查：没有丢帖（所有点赞 / 评论 / 收藏 / 置顶 / 媒体 / 统计行都指向存在的帖子）；错乱 3 类 ——
+    9/20 一次性 SQL 用用户本人 17 张照片造了 14 条演示账号帖；user_001 一个账号署名 Linh / Mai / Bonsaidon / Huyen；
+    agent_linh（不是账号，集成测试种子）署名「Linh」。另有 13 个匿名会话账号（无登录方式）无名无头像发帖。
+  - 开发库：13 个账号补齐资料（各自默认头像 + 用户名，同名允许），帖子署名改回本人资料名；
+    agent_linh 8 条 + 演示假帖 14 条标 HIDDEN_TEST_DATA（不删，可恢复）；用户本人 13 条空署名补为用户名。
+  - 发帖门：真人发帖前必须有用户名 + 平台头像，缺什么拒绝什么（PROFILE_INCOMPLETE），客户端提示去个人主页补齐。
+  - 根因：集成测试在 DATABASE_URL 存在时直连开发库、用 agent_linh / Linh 造帖且不清理 → 改为本次运行独有作者 + t.Cleanup。
+- 影响文件：`apps/mobile/src/command-error-message.ts`（发帖被拒的提示）。
+
 ## Revision 276 — 2026-09-24
 
 - **撤回 AVATAR-AGENT-ALIAS-001（P0）+ 自己的帖子显示用户名（OWN-NAME-001）**：用户：「那些帖文是之前测试账户发的 为什么现在变成了其它账户的帖文

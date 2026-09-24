@@ -81,3 +81,12 @@ describe("SERVICE-DISABLED-MSG-001: 被拒的命令说人话，不说机器串",
     }
   });
 });
+
+// POST-PROFILE-GATE-001：没有用户名 / 头像不能发动态 —— 给人话 + 去哪补，不露机器码。
+describe("profile incomplete", () => {
+  it("tells the user to complete avatar and username", () => {
+    const text = commandErrorMessage({ errorCode: "PROFILE_INCOMPLETE", messageKey: "localnet.profile_incomplete" }, "fallback");
+    expect(text).toContain("头像和用户名");
+    expect(text).not.toContain("localnet.");
+  });
+});

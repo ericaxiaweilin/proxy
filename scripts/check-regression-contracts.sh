@@ -374,6 +374,21 @@ if grep -qF 'SetProfileAlias' apps/api-go/cmd/api/main.go; then
   echo "  FAIL [OWN-NAME-001 / AVATAR-AGENT-ALIAS-001]: 又把服务者 id 映射成本人资料 —— 测试帖会冒充真人。" >&2
   exit 1
 fi
+# POST-PROFILE-GATE-001：真人发帖前必须有用户名 + 平台头像；生产必须接线（没接 = 门形同虚设）。
+require_test "POST-PROFILE-GATE-001" "./internal/localnet" "TestCreatePostRequiresACompleteProfile" \
+  "apps/api-go/internal/localnet/post_profile_gate_test.go" || exit $?
+if ! grep -qF 'localNetService.SetProfileCompleteness(' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'PROFILE_INCOMPLETE' apps/mobile/src/command-error-message.ts; then
+  echo "  FAIL [POST-PROFILE-GATE-001]: 发帖资料门没接线 / 客户端没有对应人话。" >&2
+  exit 1
+fi
+# DATA-HYGIENE-001：集成测试不许冒用真人名字当作者、跑完必须清理自己建的帖子（以前 agent_linh / Linh 的种子帖留在开发库）。
+for f in apps/api-go/internal/platform/postgres/engagement_pin_integration_test.go apps/api-go/internal/platform/postgres/engagement_replies_bookmarks_integration_test.go; do
+  if grep -qF "'agent_linh'" "$f" || ! grep -qF 't.Cleanup' "$f"; then
+    echo "  FAIL [DATA-HYGIENE-001]: $f 又用真人名字造种子帖 / 跑完不清理。" >&2
+    exit 1
+  fi
+done
 echo "    OPS-REAL-001: PASS (operator console is operator-only; no fixture numbers; population/behaviour live)"
 
 require_test "UI-SOCIAL-002" "./internal/identity" \
