@@ -6,8 +6,8 @@
 
 - `Proxy_Brand_Final_Handoff_v1.0(1).zip`
 - `Proxy_Free_Prototype_v1.5.2_Outcome_Finalization_FINAL.html`
-- `Proxy_PRD_v1.1_Chapter21D_Outcome_Data_Learning_Contract_R3_FINAL.md`
-- `Proxy_PRD_v1.1_P0_Engineering_Acceptance_Addendum_R3_FINAL_ALIGNED.md`
+- `../docs/prd/Proxy_PRD_v1.1_Chapter21D_Outcome_Data_Learning_Contract_R3_FINAL.md`
+- `../docs/prd/Proxy_PRD_v1.1_P0_Engineering_Acceptance_Addendum_R3_FINAL_ALIGNED.md`
 
 Proxy 是 iOS / Android App-first 产品。Requester、Agent、Business 共用同一个 App；Operator Console 仅供内部人员使用。
 
@@ -17,7 +17,7 @@ Proxy 是 iOS / Android App-first 产品。Requester、Agent、Business 共用�
 2. [Architecture Decisions](./Proxy_Architecture_Decisions_v1.md)
 3. [Outcome Intelligence Architecture R3](./Proxy_Outcome_Intelligence_Architecture_R3.md)
 4. [Context-Driven Experience Runtime v1](./Proxy_Context_Driven_Experience_Runtime_Enhanced_UI_Architecture_v1.md) — 前端不再拥有页面，页面由后台根据 Context 实时编译
-5. [Luna Implementation Handoff](./Luna_Implementation_Handoff.md)
+5. [Luna Implementation Handoff](../docs/archive/audits/Luna_Implementation_Handoff.md) — 一次性交接快照，已归档
 6. [Implementation Status](./Implementation_Status.md)
 
 内部后台（与 App/API 物理隔离）：

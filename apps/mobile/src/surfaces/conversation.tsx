@@ -4,6 +4,7 @@
 // R36.1 Lotus 对话视觉：cluster 气泡 / 对象基线 / 安全条 / 表情包 Drawer。
 // 设计引用：docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as Clipboard from "expo-clipboard";
 import { ActivityIndicator, AppState, FlatList, Image, Keyboard, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -20,7 +21,7 @@ import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
-import type { ConversationClient, ConversationInboxItem, ProtectionOverride } from "../conversation-client";
+import { standInDraftFromList, type ConversationClient, type ConversationInboxItem, type ProtectionOverride, type StandInDraft } from "../conversation-client";
 import type { ActivityClient } from "../activity-client";
 import type { MediaClient, UploadableImage } from "../media-client";
 import type { ModerationClient } from "../moderation-client";
@@ -28,6 +29,9 @@ import { ReportSheet } from "../components/report-sheet";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
 import { useKeyboardSafeInset } from "../components/use-keyboard-safe-inset";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
+// COMP-AI-MINOR-001（聊天侧）：assistantStatus 的联合类型在 contracts 里，
+// 这里不再自己写字符串字面量 —— 服务端加状态时两端一起红，而不是客户端静默漏掉。
+import { parseAssistantStatus } from "@proxy/contracts";
 import { decodeMeetupLocation, meetupDirectionsUrls, meetupMapsUrls, meetupPointFromLocation, type DecodedMeetup, type MeetupPoint } from "../meetup-share";
 // CONTACT-CARD-001: 名片解析用 profile-qr 那份**唯一实现** —— 二维码和消息里
 // 的名片是同一串 vCard，绝不允许这里再写一份解析器。
@@ -92,6 +96,8 @@ interface Message {
   time: string;
   isOwn: boolean;
   isAI?: boolean;
+  // AI-MANAGE-008：这条是 AI 以真人身份替 TA 发的（代回复）。对方看到「AI 代回」，本人看到「AI 替你回的」。
+  aiStandIn?: boolean;
   imageUri?: string;
   imageSource?: number | { uri: string };
   videoUri?: string;
@@ -141,6 +147,40 @@ export type ContactCardOption = {
   vcard: string;
 };
 
+type AssistantNotice = { text: string; persistent: boolean };
+
+/**
+ * COMP-AI-MINOR-001（聊天侧）：把服务端回的 assistantStatus 翻成人话，
+ * 并说明这条话该放进哪个槽。
+ *
+ * 三种「AI 没回」必须说成三件不同的事，因为它们对用户意味着三种不同的下一步：
+ *   UNAVAILABLE 环境没配好   —— 重试没用，得有人去配
+ *   FAILED      这次调用失败 —— 重试有用
+ *   GATED       按规则不向该账号提供 —— 重试永远没用
+ *
+ * GATED 落进沉默是最坏的一种：用户以为对方只是没理他，于是反复重试一个
+ * 永远不会成功的东西。把 GATED 并进 FAILED 同样错 —— 那是把「不提供」
+ * 说成「服务坏了」。
+ *
+ * persistent 是给「放哪个槽」用的，不是修辞：这个页面每 3 秒轮询一次消息
+ * （见下面那个 setInterval），而 hydrateMessages 结尾有一句
+ * `setError(undefined)` —— 那是给「这次请求失败了」这种瞬时态收尾用的。
+ * 门禁是**账号级状态**（"重试无效"），塞进那个槽的后果是提示闪一下就被
+ * 轮询擦掉，用户回到一个空会话，跟没提示一模一样。所以 persistent=true
+ * 的必须走自己的 state，只有服务端明确说 RESPONDED（真拿到 AI 回复）才撤。
+ *
+ * 未知值返回 undefined：服务端将来加状态时老客户端保持现状（沉默），
+ * 而不是猜成故障然后提示一句错的。
+ */
+function assistantStatusNotice(value: unknown, messageKept: boolean): AssistantNotice | undefined {
+  const status = parseAssistantStatus(value);
+  const kept = messageKept ? "，消息已保留" : "";
+  if (status === "FAILED") return { text: `模型服务暂时不可用${kept}`, persistent: false };
+  if (status === "UNAVAILABLE") return { text: `模型服务未配置${kept}`, persistent: false };
+  if (status === "GATED") return { text: `AI 伴侣暂不对该账号开放，重试无效${kept}`, persistent: true };
+  return undefined;
+}
+
 export function ConversationSurface({
   author,
   conversationClient,
@@ -183,6 +223,10 @@ export function ConversationSurface({
 }): React.JSX.Element {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState(initialDraft ?? "");
+  // AI-MANAGE-013：对话权限「每次确认」—— AI 替你起草的回复，只有你看得到；你点发送才以你的身份发出。
+  const [standInDraft, setStandInDraft] = useState<StandInDraft | undefined>(undefined);
+  const [standInEdit, setStandInEdit] = useState<{ draftId: string; text: string } | undefined>(undefined);
+  const [standInBusy, setStandInBusy] = useState(false);
   // SEND-NONBLOCK-001: composer 只管"发出去"，不等 AI 回复。sending 旧语义
   // 把输入框按住直到长轮询返回（含 AI 生成），发完位置/图片必须等回复才能
   // 继续说话 —— 错的。拆成两个东西：syncPausedRef（3s 轮询暂停，保护乐观
@@ -193,6 +237,11 @@ export function ConversationSurface({
   const [connectAttempt, setConnectAttempt] = useState(0);
   const [loading, setLoading] = useState(!initialConvId);
   const [error, setError] = useState<string | undefined>();
+  // COMP-AI-MINOR-001（聊天侧）：门禁提示有自己的槽，不走 error。
+  // error 会被下面 3 秒轮询的 hydrateMessages 清掉（那行 setError(undefined)
+  // 是给瞬时失败收尾的），而 GATED 是账号级状态、重试无效 —— 放进 error 就是
+  // 「闪一下就没」。只有服务端说 RESPONDED 才撤。
+  const [companionGatedNotice, setCompanionGatedNotice] = useState<string | undefined>();
   const [temporaryUI, setTemporaryUI] = useState<ServerTemporaryUI>();
   // R36.1 安全会话：burn 计时 + 禁止转发。默认保持既有保护姿态（禁止转发开）。
   const [burn, setBurn] = useState<Burn>("off");
@@ -427,6 +476,22 @@ export function ConversationSurface({
     }
   }, []);
 
+  // COMP-AI-MINOR-001（聊天侧）：把服务端状态分派到两个槽。
+  //   persistent（GATED）→ companionGatedNotice，轮询碰不到它。
+  //   瞬时（FAILED / UNAVAILABLE）→ error，刷新时自生自灭。
+  //   RESPONDED → 撤掉门禁横幅（真的能聊了）。
+  //   NOT_REQUESTED / 未知 → 什么都不动：这条消息本来就没问 AI，
+  //   不该把上一条留下的门禁横幅擦掉。
+  const applyAssistantNotice = useCallback((value: unknown, messageKept: boolean): void => {
+    const notice = assistantStatusNotice(value, messageKept);
+    if (notice?.persistent) {
+      setCompanionGatedNotice(notice.text);
+      return;
+    }
+    if (parseAssistantStatus(value) === "RESPONDED") setCompanionGatedNotice(undefined);
+    if (notice) setError(notice.text);
+  }, []);
+
   // SENDER-NAME-HONEST-001: senderSnapshot 缺失时，之前直接落到字面"对方"——
   // 1:1 对话里 author/peerUserId 明明知道对方是谁（顶栏就写着名字），消息
   // 气泡上方却显示一个毫无信息量的"对方"，跟顶栏的真名对不上。群聊没有
@@ -441,6 +506,7 @@ export function ConversationSurface({
   }, [aiAccount, peerUserId, author]);
 
   const hydrateMessages = useCallback((result: Record<string, unknown>): void => {
+    setStandInDraft(standInDraftFromList(result));
     const payload = parseOperationRef(result);
     const rows = Array.isArray(payload?.messages) ? payload.messages as Array<Record<string, unknown>> : [];
     const actorId = typeof payload?.actorId === "string" ? payload.actorId : undefined;
@@ -468,6 +534,7 @@ export function ConversationSurface({
         time: new Date(String(row.createdAt ?? Date.now())).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
         isOwn: row.senderId === actorId,
         isAI: Boolean(aiAccount && row.senderId !== actorId),
+        ...(row.authoredBy === "ai_stand_in" ? { aiStandIn: true } : {}),
         isDivider: row.messageType === "SYSTEM_CONTEXT" && row.senderId === "SYSTEM",
         ...(row.messageType === "IMAGE" && typeof row.mediaRef === "string"
           ? { imageUri: `${conversationClient.baseUrl}/v1/media/thumb/${encodeURIComponent(row.mediaRef)}` }
@@ -573,6 +640,11 @@ export function ConversationSurface({
             isOwn: false,
             isAI: true
           }]);
+        } else {
+          // COMP-AI-MINOR-001（聊天侧）：被门禁拦下时服务端回 GATED 且不带 aiMessage。
+          // 不处理的话这里就是一个空会话 —— 用户以为 AI 马上会开口，一直在等。
+          // 这一屏还没发出任何消息，所以不带"消息已保留"。
+          applyAssistantNotice(payload?.assistantStatus, false);
         }
       } catch (e) {
         if (!cancelled) setError("无法创建会话，请重试");
@@ -581,7 +653,26 @@ export function ConversationSurface({
       }
     })();
     return () => { cancelled = true; };
-  }, [convId, author, aiAccount, peerUserId, conversationClient, ensureSession, parseOperationRef, connectAttempt]);
+  }, [convId, author, aiAccount, peerUserId, conversationClient, ensureSession, parseOperationRef, applyAssistantNotice, connectAttempt]);
+
+  const resolveStandInDraft = useCallback(async (action: "send" | "discard"): Promise<void> => {
+    if (!convId || !standInDraft || standInBusy) return;
+    const edited = standInEdit?.draftId === standInDraft.draftId ? standInEdit.text.trim() : "";
+    if (action === "send" && standInEdit?.draftId === standInDraft.draftId && edited === "") return;
+    setStandInBusy(true);
+    try {
+      if (action === "send") await conversationClient.sendStandInDraft(convId, standInDraft.draftId, edited && edited !== standInDraft.body ? edited : undefined);
+      else await conversationClient.discardStandInDraft(convId, standInDraft.draftId);
+      setStandInEdit(undefined);
+      hydrateMessages(await conversationClient.listMessages(convId, activeConvo?.id));
+    } catch {
+      // 草稿可能已经过时（对方又发了一条 / 你自己回了）：刷新一次，拿最新的草稿。
+      setError(action === "send" ? "草稿没发出去，已刷新" : "草稿没丢掉，已刷新");
+      try { hydrateMessages(await conversationClient.listMessages(convId, activeConvo?.id)); } catch { /* 下次轮询再试 */ }
+    } finally {
+      setStandInBusy(false);
+    }
+  }, [convId, standInDraft, standInEdit, standInBusy, conversationClient, hydrateMessages, activeConvo]);
 
   const buildProtection = useCallback((): ProtectionOverride | undefined => {
     if (burn === "off" && noForward) return undefined;
@@ -752,8 +843,10 @@ export function ConversationSurface({
           imageSource: aiAccountPhoto(aiAccount),
         }]);
       }
-      if (payload?.assistantStatus === "FAILED") setError("模型服务暂时不可用，消息已保留");
-      if (payload?.assistantStatus === "UNAVAILABLE") setError("模型服务未配置，消息已保留");
+      // COMP-AI-MINOR-001（聊天侧）：消息已经落库了（服务端先存后生成），
+      // 所以三种"AI 没回"都带"消息已保留"。之前只认 FAILED/UNAVAILABLE，
+      // GATED 落到什么都不说 —— 用户看到的是沉默。
+      applyAssistantNotice(payload?.assistantStatus, true);
     } catch (e: unknown) {
       // 发送失败：撤回乐观气泡、恢复草稿和引用并提示，不留假成功。
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
@@ -941,7 +1034,12 @@ export function ConversationSurface({
       const result = await conversationClient.sendImageMessage(convId, uploaded.mediaAssetId, caption, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
       const payload = parseOperationRef(result);
       const aiMsg = payload?.aiMessage as Record<string, unknown> | undefined;
-      if (aiMsg) setMessages((current) => [...current, { id: String(aiMsg.messageId ?? `ai_${Date.now()}`), sender: aiAccount?.displayName ?? "Proxy AI", body: String(aiMsg.body ?? ""), time: new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:false, isAI:true }]);
+      if (aiMsg) {
+        setMessages((current) => [...current, { id: String(aiMsg.messageId ?? `ai_${Date.now()}`), sender: aiAccount?.displayName ?? "Proxy AI", body: String(aiMsg.body ?? ""), time: new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:false, isAI:true }]);
+      } else {
+        // COMP-AI-MINOR-001（聊天侧）：图片已经发出去了，所以带"消息已保留"。
+        applyAssistantNotice(payload?.assistantStatus, true);
+      }
     } catch (cause) {
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setSelectedImage(picked);
@@ -972,7 +1070,12 @@ export function ConversationSurface({
       const result = await conversationClient.sendVideoMessage(convId, uploaded.mediaAssetId, caption, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
       const payload = parseOperationRef(result);
       const aiMsg = payload?.aiMessage as Record<string, unknown> | undefined;
-      if (aiMsg) setMessages((current) => [...current, { id:String(aiMsg.messageId ?? `ai_${Date.now()}`), sender:aiAccount?.displayName ?? "Proxy AI", body:String(aiMsg.body ?? ""), time: new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:false, isAI:true }]);
+      if (aiMsg) {
+        setMessages((current) => [...current, { id:String(aiMsg.messageId ?? `ai_${Date.now()}`), sender:aiAccount?.displayName ?? "Proxy AI", body:String(aiMsg.body ?? ""), time: new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:false, isAI:true }]);
+      } else {
+        // COMP-AI-MINOR-001（聊天侧）：视频已经发出去了，所以带"消息已保留"。
+        applyAssistantNotice(payload?.assistantStatus, true);
+      }
     } catch (cause) {
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setSelectedVideo(picked);
@@ -993,10 +1096,16 @@ export function ConversationSurface({
     setError(undefined);
     try {
       const contact = parseContactCard(option.vcard);
-      await conversationClient.sendContactMessage(convId, option.vcard, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
+      const result = await conversationClient.sendContactMessage(convId, option.vcard, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
       const secureMeta = secureMetaForSend();
       setMessages((current) => [...current, { id: `contact_${Date.now()}`, sender: "你", body: contact ? (contact.handle ? `@${contact.handle}` : contact.name) : option.name, time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }), isOwn: true, ...(contact ? { contact, contactVcard: option.vcard } : {}), ...(secureMeta ? { secureMeta } : {}) }]);
       setCardPickerOpen(false);
+      // COMP-AI-MINOR-001（聊天侧）：名片也带 AI_PERSONA，服务端照样会回 GATED。
+      // GATED 只活在**这条回包**里（不落库、下次刷新拿不到），所以每个伴侣入口
+      // 都必须自己消费一次 —— 漏一个，那条路上的「依法不提供」就是彻底沉默。
+      // 名片已经发出去了，所以带"消息已保留"。
+      const payload = parseOperationRef(result);
+      applyAssistantNotice(payload?.assistantStatus, true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "名片发送失败，请重试");
     } finally {
@@ -1018,7 +1127,11 @@ export function ConversationSurface({
     setPendingReplies((n) => n + 1);
     try {
       const uploaded = await mediaClient.uploadMedia({ uri:picked.uri, width:0, height:0, durationMs:picked.durationMs, mediaType:"AUDIO", defaultMime:"audio/m4a" }, { onProgress:setUploadProgress });
-      await conversationClient.sendAudioMessage(convId, uploaded.mediaAssetId, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
+      const result = await conversationClient.sendAudioMessage(convId, uploaded.mediaAssetId, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
+      // COMP-AI-MINOR-001（聊天侧）：语音同样带 AI_PERSONA，同样要消费回包 —— 见
+      // sendContactCard 的说明。语音已经发出去了，所以带"消息已保留"。
+      const payload = parseOperationRef(result);
+      applyAssistantNotice(payload?.assistantStatus, true);
     } catch (cause) {
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setSelectedAudio(picked);
@@ -1092,7 +1205,7 @@ export function ConversationSurface({
     if (peerAvatarSource && !brokenPeerAvatar) return <ExpoImage accessibilityLabel={`${author}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:peer:${author}`} source={peerAvatarSource} style={styles.avatarMini} transition={0} onError={() => setBrokenPeerAvatar(true)} />;
     return (
       <View style={styles.avatarFallback}>
-        <Text style={styles.avatarFallbackText}>{(message.sender || author || "对").slice(0, 1)}</Text>
+        <Text selectable style={styles.avatarFallbackText}>{(message.sender || author || "对").slice(0, 1)}</Text>
       </View>
     );
   }
@@ -1196,6 +1309,7 @@ export function ConversationSurface({
         ) : null}
         {message.body.trim() ? <Text style={styles.bubbleText}>{message.body}</Text> : null}
         <View style={styles.bubbleMetaRow}>
+          {message.aiStandIn ? <Text accessibilityLabel={message.isOwn ? "这条是 AI 替你回的" : "这条是 AI 代回的"} style={styles.aiStandInTag}>{message.isOwn ? "AI 替你回的" : "AI 代回"}</Text> : null}
           {message.secureMeta ? <Text style={styles.secureMeta}>{message.secureMeta}</Text> : null}
           <Text style={styles.timeInline}>{message.time}</Text>
         </View>
@@ -1213,18 +1327,18 @@ export function ConversationSurface({
             onPress={() => { if (activeConvo) setActiveConvo(null); else onBack(); }}
             style={styles.backBtn}
           >
-            <Text style={styles.backText}>‹</Text>
+            <Text selectable style={styles.backText}>‹</Text>
           </Pressable>
           <View style={styles.headerInfo}>
-            <Text style={styles.headerName}>{activeConvo ? `支线 · ${activeConvo.title}` : author}</Text>
-            <Text style={styles.headerStatus}>{aiAccount ? `AI 虚拟 · ${aiAccount.role}` : convId ? "已连接" : "连接中..."}</Text>
+            <Text selectable style={styles.headerName}>{activeConvo ? `支线 · ${activeConvo.title}` : author}</Text>
+            <Text selectable style={styles.headerStatus}>{aiAccount ? `AI 虚拟 · ${aiAccount.role}` : convId ? "已连接" : "连接中..."}</Text>
           </View>
           <Pressable
             accessibilityLabel={secureOn ? "安全对话已开启" : "安全对话设置"}
             onPress={() => { setStickerOpen(false); setSecureSheetOpen(true); }}
             style={[styles.secureBtn, secureOn && styles.secureBtnActive]}
           >
-            <Text style={[styles.secureBtnText, secureOn && styles.secureBtnTextActive]}>🛡</Text>
+            <Text selectable style={[styles.secureBtnText, secureOn && styles.secureBtnTextActive]}>🛡</Text>
           </Pressable>
           {aiAccount || peerAvatarSource ? (
             onOpenPeerProfile && !peerIsAssistant ? (
@@ -1237,7 +1351,7 @@ export function ConversationSurface({
                   <ExpoImage accessibilityLabel={`${aiAccount?.displayName ?? author}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:top:${aiAccount?.accountId ?? author}`} source={aiAccount ? aiPhotoSource! : peerAvatarSource!} style={styles.topAvatar} transition={0} onError={() => setBrokenPeerAvatar(true)} />
                 ) : (
                   <View style={styles.topAvatarFallback}>
-                    <Text style={styles.topAvatarFallbackText}>{(aiAccount?.displayName ?? author ?? "对").slice(0, 1)}</Text>
+                    <Text selectable style={styles.topAvatarFallbackText}>{(aiAccount?.displayName ?? author ?? "对").slice(0, 1)}</Text>
                   </View>
                 )}
               </Pressable>
@@ -1245,7 +1359,7 @@ export function ConversationSurface({
               <ExpoImage accessibilityLabel={`${aiAccount?.displayName ?? author}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:top:${aiAccount?.accountId ?? author}`} source={aiAccount ? aiPhotoSource! : peerAvatarSource!} style={styles.topAvatar} transition={0} onError={() => setBrokenPeerAvatar(true)} />
             ) : (
               <View style={styles.topAvatarFallback}>
-                <Text style={styles.topAvatarFallbackText}>{(aiAccount?.displayName ?? author ?? "对").slice(0, 1)}</Text>
+                <Text selectable style={styles.topAvatarFallbackText}>{(aiAccount?.displayName ?? author ?? "对").slice(0, 1)}</Text>
               </View>
             )
           ) : (
@@ -1256,42 +1370,42 @@ export function ConversationSurface({
                 onPress={() => void openPeerProfile(author, false)}
               >
                 <View style={styles.topAvatarFallback}>
-                  <Text style={styles.topAvatarFallbackText}>{(author || "对").slice(0, 1)}</Text>
+                  <Text selectable style={styles.topAvatarFallbackText}>{(author || "对").slice(0, 1)}</Text>
                 </View>
               </Pressable>
             ) : (
               <View style={styles.topAvatarFallback}>
-                <Text style={styles.topAvatarFallbackText}>{(author || "对").slice(0, 1)}</Text>
+                <Text selectable style={styles.topAvatarFallbackText}>{(author || "对").slice(0, 1)}</Text>
               </View>
             )
           )}
           <Pressable accessibilityLabel="会话设置" onPress={() => setConversationMenuOpen((value) => !value)} style={styles.headerAction}>
-            <Text style={styles.headerActionText}>•••</Text>
+            <Text selectable style={styles.headerActionText}>•••</Text>
           </Pressable>
         </View>
 
         {pinned ? (
           <View style={styles.pinStrip}>
-            <Text style={styles.pinGlyph}>⌁</Text>
-            <Text numberOfLines={1} style={styles.pinCopy}>置顶：{pinned.body}</Text>
+            <Text selectable style={styles.pinGlyph}>⌁</Text>
+            <Text selectable numberOfLines={1} style={styles.pinCopy}>置顶：{pinned.body}</Text>
             <Pressable accessibilityLabel="取消置顶" onPress={() => setPinned(null)} style={styles.pinClose}>
-              <Text style={styles.pinCloseText}>×</Text>
+              <Text selectable style={styles.pinCloseText}>×</Text>
             </Pressable>
           </View>
         ) : null}
 
-        {searchOpen ? <View style={styles.chatSearch}><TextInput autoFocus onChangeText={setSearchQuery} placeholder="搜索此对话" placeholderTextColor={lotus.muted} style={styles.chatSearchInput} value={searchQuery} /><Text style={styles.searchCount}>{visibleMessages.length} 条</Text><Pressable onPress={() => { setSearchOpen(false); setSearchQuery(""); }}><Text style={styles.searchClose}>取消</Text></Pressable></View> : null}
+        {searchOpen ? <View style={styles.chatSearch}><TextInput autoFocus onChangeText={setSearchQuery} placeholder="搜索此对话" placeholderTextColor={lotus.muted} style={styles.chatSearchInput} value={searchQuery} /><Text selectable style={styles.searchCount}>{visibleMessages.length} 条</Text><Pressable onPress={() => { setSearchOpen(false); setSearchQuery(""); }}><Text selectable style={styles.searchClose}>取消</Text></Pressable></View> : null}
         {conversationMenuOpen ? <View style={styles.conversationMenu}>
-          <Pressable onPress={() => { setSearchOpen(true); setConversationMenuOpen(false); }} style={styles.menuRow}><Text style={styles.menuRowText}>搜索对话</Text></Pressable>
-          <Pressable onPress={() => { setMessages([]); setConversationMenuOpen(false); }} style={styles.menuRow}><Text style={styles.menuRowText}>清空本机显示</Text></Pressable>
-          <Pressable onPress={() => void (async () => { if (!convId) return; try { await conversationClient.setConversationBlocked(convId, !blocked); setBlocked((value) => !value); } catch { setError("屏蔽状态更新失败"); } finally { setConversationMenuOpen(false); } })()} style={styles.menuRow}><Text style={[styles.menuRowText, styles.menuDanger]}>{blocked ? "解除屏蔽" : "屏蔽此会话"}</Text></Pressable>
-          <Text style={styles.menuHint}>屏蔽状态会保存到服务端；屏蔽后不可继续发送消息。</Text>
+          <Pressable onPress={() => { setSearchOpen(true); setConversationMenuOpen(false); }} style={styles.menuRow}><Text selectable style={styles.menuRowText}>搜索对话</Text></Pressable>
+          <Pressable onPress={() => { setMessages([]); setConversationMenuOpen(false); }} style={styles.menuRow}><Text selectable style={styles.menuRowText}>清空本机显示</Text></Pressable>
+          <Pressable onPress={() => void (async () => { if (!convId) return; try { await conversationClient.setConversationBlocked(convId, !blocked); setBlocked((value) => !value); } catch { setError("屏蔽状态更新失败"); } finally { setConversationMenuOpen(false); } })()} style={styles.menuRow}><Text selectable style={[styles.menuRowText, styles.menuDanger]}>{blocked ? "解除屏蔽" : "屏蔽此会话"}</Text></Pressable>
+          <Text selectable style={styles.menuHint}>屏蔽状态会保存到服务端；屏蔽后不可继续发送消息。</Text>
         </View> : null}
 
         {activeConvo && seedMsg ? (
           <View style={styles.seedCard} accessibilityLabel="支线来源消息">
-            <Text style={styles.seedLabel}>支线源自 · {seedMsg.sender}</Text>
-            <Text style={styles.seedBody} numberOfLines={2}>{seedMsg.body}</Text>
+            <Text selectable style={styles.seedLabel}>支线源自 · {seedMsg.sender}</Text>
+            <Text selectable style={styles.seedBody} numberOfLines={2}>{seedMsg.body}</Text>
           </View>
         ) : null}
 
@@ -1303,16 +1417,20 @@ export function ConversationSurface({
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
         >
-          {loading ? <Text style={styles.systemEvent}>正在创建会话...</Text> : null}
-          {aiAccount && !loading ? <Text style={styles.systemEvent}>AI 虚拟女孩 · 陪伴聊天与内容创作，不是平台业务助手，也没有现实身体。</Text> : null}
+          {loading ? <Text selectable style={styles.systemEvent}>正在创建会话...</Text> : null}
+          {aiAccount && !loading ? <Text selectable style={styles.systemEvent}>AI 虚拟女孩 · 陪伴聊天与内容创作，不是平台业务助手，也没有现实身体。</Text> : null}
           {error ? (
             <View style={styles.systemEventWrap}>
-              <Text style={styles.systemEvent}>{error}</Text>
-              {!convId && !loading ? <Pressable onPress={() => { setError(undefined); setLoading(true); setConnectAttempt((value) => value + 1); }} style={styles.retryButton}><Text style={styles.retryButtonText}>重新连接</Text></Pressable> : null}
+              <Text selectable style={styles.systemEvent}>{error}</Text>
+              {!convId && !loading ? <Pressable onPress={() => { setError(undefined); setLoading(true); setConnectAttempt((value) => value + 1); }} style={styles.retryButton}><Text selectable style={styles.retryButtonText}>重新连接</Text></Pressable> : null}
             </View>
           ) : null}
-          {blocked ? <Text style={styles.systemEvent}>此会话已在本机屏蔽，可从右上角解除。</Text> : null}
-          {visibleMessages.length > 0 ? <Text style={styles.dayDivider}>今天</Text> : null}
+          {blocked ? <Text selectable style={styles.systemEvent}>此会话已在本机屏蔽，可从右上角解除。</Text> : null}
+          {/* COMP-AI-MINOR-001（聊天侧）：门禁是账号级持久态，跟"屏蔽"一样是这一屏的
+              状态而不是一次失败，所以它跟 error 分开渲染 —— 上面那个 error 块每 3 秒
+              会被轮询清一次，这条不会。 */}
+          {companionGatedNotice ? <Text selectable style={styles.systemEvent}>{companionGatedNotice}</Text> : null}
+          {visibleMessages.length > 0 ? <Text selectable style={styles.dayDivider}>今天</Text> : null}
           {blocked ? null : clusters.map((cluster) => {
             const first = cluster.messages[0];
             if (!first) return null;
@@ -1320,9 +1438,9 @@ export function ConversationSurface({
             if (first.v1) {
               return (
                 <View key={cluster.key} style={[styles.v1Wrap, cluster.isOwn ? styles.v1Own : styles.v1Other]}>
-                  {!cluster.isOwn && <Text style={styles.clusterSender}>{cluster.sender}</Text>}
+                  {!cluster.isOwn && <Text selectable style={styles.clusterSender}>{cluster.sender}</Text>}
                   <MessageRenderer message={first.v1} />
-                  <Text style={styles.v1Time}>{first.time}</Text>
+                  <Text selectable style={styles.v1Time}>{first.time}</Text>
                 </View>
               );
             }
@@ -1353,7 +1471,7 @@ export function ConversationSurface({
                         </View>
                       ) : null}
                       <View style={[styles.stack, msg.isOwn && styles.stackMe]}>
-                        {!msg.isOwn && isFirst ? <Text style={styles.clusterSender}>{cluster.sender}</Text> : null}
+                        {!msg.isOwn && isFirst ? <Text selectable style={styles.clusterSender}>{cluster.sender}</Text> : null}
                         <Pressable
                           accessibilityHint={msg.isOwn ? "长按管理消息" : "长按管理消息"}
                           onLongPress={() => setMenuMessage(msg)}
@@ -1369,7 +1487,7 @@ export function ConversationSurface({
                         </Pressable>
                         {itemReactions.length > 0 ? (
                           <View style={styles.reactionChip}>
-                            <Text style={styles.reactionChipText}>{itemReactions.join("")} {itemReactions.length}</Text>
+                            <Text selectable style={styles.reactionChipText}>{itemReactions.join("")} {itemReactions.length}</Text>
                           </View>
                         ) : null}
                       </View>
@@ -1379,14 +1497,14 @@ export function ConversationSurface({
               </View>
             );
           })}
-          {pendingReplies > 0 && aiAccount ? <View style={styles.aiTypingRow}><ActivityIndicator color={lotus.goldtext} size="small" /><Text style={styles.aiTypingText}>{aiAccount.displayName} 正在回复…</Text></View> : null}
+          {pendingReplies > 0 && aiAccount ? <View style={styles.aiTypingRow}><ActivityIndicator color={lotus.goldtext} size="small" /><Text selectable style={styles.aiTypingText}>{aiAccount.displayName} 正在回复…</Text></View> : null}
           {temporaryUI ? <ServerTemporaryForm disabled={!convId} onSubmit={(summary) => void send(`我的补充信息：${summary}`, temporaryUI.id)} spec={temporaryUI} /> : null}
         </ScrollView>
 
         {/* R36.1 安全条：burn 开启时显示 */}
         {secureOn ? (
           <View style={styles.secureStrip}>
-            <Text style={styles.secureStripText}>🔥 阅后 {BURN_LABEL[burn]} 消失{noForward ? " · 禁止转发" : ""}</Text>
+            <Text selectable style={styles.secureStripText}>🔥 阅后 {BURN_LABEL[burn]} 消失{noForward ? " · 禁止转发" : ""}</Text>
           </View>
         ) : null}
 
@@ -1395,11 +1513,11 @@ export function ConversationSurface({
           <View style={styles.replyPreview}>
             <View style={styles.replyLine} />
             <View style={styles.replyCopy}>
-              <Text style={styles.replyCopyName}>回复 {replyTo.sender}</Text>
-              <Text numberOfLines={1} style={styles.replyCopyBody}>{replyTo.body}</Text>
+              <Text selectable style={styles.replyCopyName}>回复 {replyTo.sender}</Text>
+              <Text selectable numberOfLines={1} style={styles.replyCopyBody}>{replyTo.body}</Text>
             </View>
             <Pressable accessibilityLabel="取消回复" onPress={() => setReplyTo(null)} style={styles.replyClose}>
-              <Text style={styles.replyCloseText}>×</Text>
+              <Text selectable style={styles.replyCloseText}>×</Text>
             </Pressable>
           </View>
         ) : null}
@@ -1408,25 +1526,42 @@ export function ConversationSurface({
         {stickerOpen ? (
           <View style={styles.stickerDrawer}>
             <View style={styles.stickerHead}>
-              <Text style={styles.stickerHeadTitle}>表情包</Text>
-              <Text style={styles.stickerHeadSub}>OpenMoji</Text>
+              <Text selectable style={styles.stickerHeadTitle}>表情包</Text>
+              <Text selectable style={styles.stickerHeadSub}>OpenMoji</Text>
             </View>
             <View style={styles.stickerGrid}>
               {STICKERS.map((item) => (
                 <Pressable key={item.code} accessibilityLabel={`发送表情 ${item.name}`} disabled={!convId || blocked} onPress={() => void sendSticker(item)} style={styles.stickerItem}>
-                  <Text style={styles.stickerItemGlyph}>{item.emoji}</Text>
+                  <Text selectable style={styles.stickerItemGlyph}>{item.emoji}</Text>
                 </Pressable>
               ))}
             </View>
-            <Text style={styles.stickerCredit}>OpenMoji · CC BY-SA 4.0</Text>
+            <Text selectable style={styles.stickerCredit}>OpenMoji · CC BY-SA 4.0</Text>
           </View>
         ) : null}
 
         {/* Footer remains in normal layout; root padding follows the keyboard. */}
         <View style={[styles.composerShell, { paddingBottom: keyboardInset > 0 ? 10 : Math.max(insets.bottom, 16) }]}>
-          {selectedImage ? <View style={styles.imagePreviewRow}><Image source={{uri:selectedImage.uri}} style={styles.imagePreview} /><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedImage.fileName ?? "已选择图片") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除图片" onPress={() => setSelectedImage(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
-          {selectedVideo ? <View style={styles.imagePreviewRow}><Text style={styles.videoPreviewIcon}>▶</Text><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedVideo.fileName ?? "已选择视频") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除视频" onPress={() => setSelectedVideo(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
-          {selectedAudio ? <View style={styles.imagePreviewRow}><Text style={styles.videoPreviewIcon}>♪</Text><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? `语音 ${Math.max(1, Math.round(selectedAudio.durationMs / 1000))} 秒` : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除语音" onPress={() => setSelectedAudio(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
+          {standInDraft ? (
+            <View accessibilityLabel="AI 替你起草的回复" style={styles.standInCard}>
+              <Text selectable style={styles.standInTitle}>AI 替你起草了回复 · 只有你看得到</Text>
+              {standInEdit?.draftId === standInDraft.draftId ? (
+                <TextInput autoFocus multiline onChangeText={(text) => setStandInEdit({ draftId: standInDraft.draftId, text })} style={styles.standInInput} value={standInEdit.text} />
+              ) : (
+                <Text selectable style={styles.standInBody}>{standInDraft.body}</Text>
+              )}
+              <View style={styles.standInActions}>
+                <Pressable accessibilityRole="button" disabled={standInBusy} onPress={() => void resolveStandInDraft("discard")} style={styles.standInGhost}><Text selectable style={styles.standInGhostText}>丢弃</Text></Pressable>
+                {standInEdit?.draftId === standInDraft.draftId ? null : (
+                  <Pressable accessibilityRole="button" disabled={standInBusy} onPress={() => setStandInEdit({ draftId: standInDraft.draftId, text: standInDraft.body })} style={styles.standInGhost}><Text selectable style={styles.standInGhostText}>修改</Text></Pressable>
+                )}
+                <Pressable accessibilityRole="button" disabled={standInBusy} onPress={() => void resolveStandInDraft("send")} style={styles.standInSend}><Text selectable style={styles.standInSendText}>{standInBusy ? "发送中…" : "以你的身份发送"}</Text></Pressable>
+              </View>
+            </View>
+          ) : null}
+          {selectedImage ? <View style={styles.imagePreviewRow}><Image source={{uri:selectedImage.uri}} style={styles.imagePreview} /><Text selectable numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedImage.fileName ?? "已选择图片") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除图片" onPress={() => setSelectedImage(undefined)}><Text selectable style={styles.imageRemove}>×</Text></Pressable></View> : null}
+          {selectedVideo ? <View style={styles.imagePreviewRow}><Text selectable style={styles.videoPreviewIcon}>▶</Text><Text selectable numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedVideo.fileName ?? "已选择视频") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除视频" onPress={() => setSelectedVideo(undefined)}><Text selectable style={styles.imageRemove}>×</Text></Pressable></View> : null}
+          {selectedAudio ? <View style={styles.imagePreviewRow}><Text selectable style={styles.videoPreviewIcon}>♪</Text><Text selectable numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? `语音 ${Math.max(1, Math.round(selectedAudio.durationMs / 1000))} 秒` : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除语音" onPress={() => setSelectedAudio(undefined)}><Text selectable style={styles.imageRemove}>×</Text></Pressable></View> : null}
           {/* SHEET-ICONS-001: ＋ 只弹 3 个小 logo（名片 user / 活动 ticket / 位置 pin），
               无文字、紧贴输入框上方。相机媒体走相机图标，不在这里。 */}
           {attachOpen ? (
@@ -1439,7 +1574,7 @@ export function ConversationSurface({
           {/* Composer — R36.1：+ / 输入 pill（贴纸·相机内置）/ mic-or-send */}
           <View style={styles.composer}>
             <Pressable accessibilityLabel="添加附件" onPress={() => { setStickerOpen(false); setAttachOpen((open) => !open); }} disabled={!convId} style={styles.attachBtn}>
-              <Text style={styles.attachBtnText}>＋</Text>
+              <Text selectable style={styles.attachBtnText}>＋</Text>
             </Pressable>
             <View style={styles.inputWrap}>
               <TextInput
@@ -1452,7 +1587,7 @@ export function ConversationSurface({
                 editable={!!convId}
               />
               <Pressable accessibilityLabel="表情包" onPress={() => { setAttachOpen(false); setStickerOpen((open) => !open); }} disabled={!convId} style={styles.inlineTool}>
-                <Text style={styles.inlineToolText}>☺</Text>
+                <Text selectable style={styles.inlineToolText}>☺</Text>
               </Pressable>
               {/* CONVO-ATTACH-001: 相机图标点下去直接就是相册（Lotus 式）—— 首格拍摄，
                   后面是最新照片。拍照也不经＋面板：相册首格就是拍摄。 */}
@@ -1467,7 +1602,7 @@ export function ConversationSurface({
                 onPress={() => void (selectedAudio ? sendAudio() : selectedVideo ? sendVideo() : selectedImage ? sendImage() : send())}
                 style={[styles.sendCircle, !canSend && styles.sendCircleDisabled]}
               >
-                <Text style={styles.sendCircleText}>↑</Text>
+                <Text selectable style={styles.sendCircleText}>↑</Text>
               </Pressable>
             ) : (
               <View style={styles.micSlot}>
@@ -1551,21 +1686,21 @@ export function ConversationSurface({
         <Pressable accessibilityLabel="关闭活动选择" onPress={() => setActivityPickerOpen(false)} style={styles.scrim}>
           <Pressable onPress={() => undefined} style={styles.bottomSheet}>
             <View style={styles.sheetGrab} />
-            <Text style={styles.pickerTitle}>选一个活动</Text>
-            <Text style={styles.pickerSub}>选中的活动会作为代理卡片发到对话</Text>
-            {activityPickerError ? <Text style={styles.pickerError}>{activityPickerError}</Text> : null}
-            {activityOptions === undefined ? <ActivityIndicator color={lotus.goldtext} /> : activityOptions.length === 0 ? <Text style={styles.pickerSub}>本周暂无开放活动。</Text> : (
+            <Text selectable style={styles.pickerTitle}>选一个活动</Text>
+            <Text selectable style={styles.pickerSub}>选中的活动会作为代理卡片发到对话</Text>
+            {activityPickerError ? <Text selectable style={styles.pickerError}>{activityPickerError}</Text> : null}
+            {activityOptions === undefined ? <ActivityIndicator color={lotus.goldtext} /> : activityOptions.length === 0 ? <Text selectable style={styles.pickerSub}>本周暂无开放活动。</Text> : (
               <ScrollView style={styles.pickerList}>
                 {activityOptions.map((option) => (
                   <Pressable key={option.id} onPress={() => void sendActivityProxy(option.id)} style={styles.pickerItem}>
-                    <Text style={styles.pickerItemTitle}>{option.title}</Text>
-                    <Text style={styles.pickerItemSub}>{option.subtitle}</Text>
+                    <Text selectable style={styles.pickerItemTitle}>{option.title}</Text>
+                    <Text selectable style={styles.pickerItemSub}>{option.subtitle}</Text>
                   </Pressable>
                 ))}
               </ScrollView>
             )}
             <Pressable onPress={() => setActivityPickerOpen(false)} style={styles.pickerCancel}>
-              <Text style={styles.pickerCancelText}>取消</Text>
+              <Text selectable style={styles.pickerCancelText}>取消</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -1592,21 +1727,21 @@ export function ConversationSurface({
         <Pressable accessibilityLabel="关闭名片选择" onPress={() => setCardPickerOpen(false)} style={styles.scrim}>
           <Pressable onPress={() => undefined} style={styles.bottomSheet}>
             <View style={styles.sheetGrab} />
-            <Text style={styles.pickerTitle}>发一张名片</Text>
-            <Text style={styles.pickerSub}>对方可以直接存下，也可以点开用相机扫</Text>
-            {cardPickerError ? <Text style={styles.pickerError}>{cardPickerError}</Text> : null}
-            {cardOptions === undefined ? <ActivityIndicator color={lotus.goldtext} /> : cardOptions.length === 0 ? <Text style={styles.pickerSub}>还没有可用的名片。</Text> : (
+            <Text selectable style={styles.pickerTitle}>发一张名片</Text>
+            <Text selectable style={styles.pickerSub}>对方可以直接存下，也可以点开用相机扫</Text>
+            {cardPickerError ? <Text selectable style={styles.pickerError}>{cardPickerError}</Text> : null}
+            {cardOptions === undefined ? <ActivityIndicator color={lotus.goldtext} /> : cardOptions.length === 0 ? <Text selectable style={styles.pickerSub}>还没有可用的名片。</Text> : (
               <ScrollView style={styles.pickerList}>
                 {cardOptions.map((option) => (
                   <Pressable key={option.key} accessibilityLabel={`发送 ${option.name} 的名片`} disabled={cardBusy} onPress={() => void sendContactCard(option)} style={styles.pickerItem}>
-                    <Text style={styles.pickerItemTitle}>{option.name}</Text>
-                    <Text style={styles.pickerItemSub}>{option.caption}</Text>
+                    <Text selectable style={styles.pickerItemTitle}>{option.name}</Text>
+                    <Text selectable style={styles.pickerItemSub}>{option.caption}</Text>
                   </Pressable>
                 ))}
               </ScrollView>
             )}
             <Pressable onPress={() => setCardPickerOpen(false)} style={styles.pickerCancel}>
-              <Text style={styles.pickerCancelText}>取消</Text>
+              <Text selectable style={styles.pickerCancelText}>取消</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -1638,7 +1773,7 @@ export function ConversationSurface({
                   onPress={() => { toggleReaction(menuMsg.id, emoji); setMenuMessage(null); showToast(`已回应 ${emoji}`); }}
                   style={[styles.reactionBtn, menuReactions.includes(emoji) && styles.reactionBtnActive]}
                 >
-                  <Text style={styles.reactionBtnText}>{emoji}</Text>
+                  <Text selectable style={styles.reactionBtnText}>{emoji}</Text>
                 </Pressable>
               ))}
             </View>
@@ -1646,7 +1781,16 @@ export function ConversationSurface({
               onPress={() => { const target = menuMsg; setMenuMessage(null); setReplyTo({ id: target.id, sender: target.sender, body: target.body.slice(0, 60) }); }}
               style={styles.sheetItem}
             >
-              <Text style={styles.sheetItemText}>回复</Text><Text style={styles.sheetItemHint}>↩</Text>
+              <Text selectable style={styles.sheetItemText}>回复</Text><Text selectable style={styles.sheetItemHint}>↩</Text>
+            </Pressable>
+            {/* SELECTABLE-TEXT-001：气泡长按菜单优先（bubble Text 不加 selectable），
+                复制走这里 —— 文本消息体进剪贴板，成功/失败都说人话。 */}
+            <Pressable
+              onPress={() => { const target = menuMsg; setMenuMessage(null); if (target) void Clipboard.setStringAsync(target.body).then(() => showToast("已复制")).catch(() => showToast("复制失败，请重试。")); }}
+              style={styles.sheetItem}
+              accessibilityLabel="复制这条消息"
+            >
+              <Text selectable style={styles.sheetItemText}>复制</Text><Text selectable style={styles.sheetItemHint}>⧉</Text>
             </Pressable>
             <Pressable
               disabled={creatingConvo}
@@ -1666,7 +1810,7 @@ export function ConversationSurface({
               style={styles.sheetItem}
               accessibilityLabel="从这条消息创建支线讨论"
             >
-              <Text style={styles.sheetItemText}>{creatingConvo ? "创建中…" : "创建 Convo"}</Text><Text style={styles.sheetItemHint}>›</Text>
+              <Text selectable style={styles.sheetItemText}>{creatingConvo ? "创建中…" : "创建 Convo"}</Text><Text selectable style={styles.sheetItemHint}>›</Text>
             </Pressable>
             <Pressable
               onPress={() => {
@@ -1680,24 +1824,24 @@ export function ConversationSurface({
               }}
               style={styles.sheetItem}
             >
-              <Text style={[styles.sheetItemText, noForward && styles.sheetItemDisabled]}>转发</Text><Text style={styles.sheetItemHint}>›</Text>
+              <Text selectable style={[styles.sheetItemText, noForward && styles.sheetItemDisabled]}>转发</Text><Text selectable style={styles.sheetItemHint}>›</Text>
             </Pressable>
             <Pressable
               onPress={() => { const target = menuMsg; setMenuMessage(null); setPinned({ id: target.id, body: target.body.slice(0, 40) }); showToast("已置顶"); }}
               style={styles.sheetItem}
             >
-              <Text style={styles.sheetItemText}>置顶</Text><Text style={styles.sheetItemHint}>›</Text>
+              <Text selectable style={styles.sheetItemText}>置顶</Text><Text selectable style={styles.sheetItemHint}>›</Text>
             </Pressable>
             <Pressable
               onPress={() => { const target = menuMsg; setMenuMessage(null); setReportFor(target); }}
               style={styles.sheetItem}
               accessibilityLabel="举报这条消息"
             >
-              <Text style={styles.sheetItemText}>举报</Text><Text style={styles.sheetItemHint}>›</Text>
+              <Text selectable style={styles.sheetItemText}>举报</Text><Text selectable style={styles.sheetItemHint}>›</Text>
             </Pressable>
             {menuMsg.isOwn ? (
               <Pressable onPress={() => { const target = menuMsg; setMenuMessage(null); void deleteOwnMessage(target.id); }} style={styles.sheetItem}>
-                <Text style={[styles.sheetItemText, styles.menuDanger]}>删除</Text>
+                <Text selectable style={[styles.sheetItemText, styles.menuDanger]}>删除</Text>
               </Pressable>
             ) : null}
           </Pressable>
@@ -1723,10 +1867,10 @@ export function ConversationSurface({
         <Pressable accessibilityLabel="关闭转发选择" onPress={() => { if (!forwardBusy) setForwardFor(null); }} style={styles.scrim}>
           <Pressable onPress={() => undefined} style={styles.bottomSheet}>
             <View style={styles.sheetGrab} />
-            <Text style={styles.sheetItemText}>转发给…</Text>
-            <Text style={styles.sheetItemHint} numberOfLines={1}>{forwardFor.body.slice(0, 40)}</Text>
+            <Text selectable style={styles.sheetItemText}>转发给…</Text>
+            <Text selectable style={styles.sheetItemHint} numberOfLines={1}>{forwardFor.body.slice(0, 40)}</Text>
             {forwardInbox === undefined && !forwardError ? <ProxyLoading tone="muted" style={{ marginVertical: 12 }} /> : null}
-            {forwardError ? <Text style={styles.menuDanger}>{forwardError}</Text> : null}
+            {forwardError ? <Text selectable style={styles.menuDanger}>{forwardError}</Text> : null}
             {(forwardInbox ?? []).map((item) => {
               const targetId = item.conversation.conversationId;
               const name = item.counterpartySnapshot?.displayName ?? item.counterpartyId ?? targetId.slice(0, 8);
@@ -1737,13 +1881,13 @@ export function ConversationSurface({
                   onPress={() => void forwardTo(targetId)}
                   style={styles.sheetItem}
                 >
-                  <Text style={styles.sheetItemText} numberOfLines={1}>{name}</Text>
-                  <Text style={styles.sheetItemHint}>{forwardBusy ? "…" : "›"}</Text>
+                  <Text selectable style={styles.sheetItemText} numberOfLines={1}>{name}</Text>
+                  <Text selectable style={styles.sheetItemHint}>{forwardBusy ? "…" : "›"}</Text>
                 </Pressable>
               );
             })}
             {forwardInbox !== undefined && forwardInbox.length === 0 && !forwardError ? (
-              <Text style={styles.sheetItemHint}>没有可转发的会话</Text>
+              <Text selectable style={styles.sheetItemHint}>没有可转发的会话</Text>
             ) : null}
           </Pressable>
         </Pressable>
@@ -1756,15 +1900,15 @@ export function ConversationSurface({
             <View style={styles.sheetGrab} />
             <View style={styles.secureHead}>
               <View>
-                <Text style={styles.secureHeadTitle}>安全对话</Text>
-                <Text style={styles.secureHeadSub}>只影响这个会话</Text>
+                <Text selectable style={styles.secureHeadTitle}>安全对话</Text>
+                <Text selectable style={styles.secureHeadSub}>只影响这个会话</Text>
               </View>
               <Pressable accessibilityLabel="关闭" onPress={() => setSecureSheetOpen(false)} style={styles.sheetClose}>
-                <Text style={styles.sheetCloseText}>×</Text>
+                <Text selectable style={styles.sheetCloseText}>×</Text>
               </Pressable>
             </View>
-            <Text style={styles.secureCopyTitle}>阅后即焚</Text>
-            <Text style={styles.secureCopySub}>对方阅读后开始计时；历史普通消息不受影响</Text>
+            <Text selectable style={styles.secureCopyTitle}>阅后即焚</Text>
+            <Text selectable style={styles.secureCopySub}>对方阅读后开始计时；历史普通消息不受影响</Text>
             <View style={styles.timerGrid}>
               {BURN_OPTIONS.map((option) => (
                 <Pressable
@@ -1772,25 +1916,25 @@ export function ConversationSurface({
                   onPress={() => setBurn(option)}
                   style={[styles.timerOpt, burn === option && styles.timerOptActive]}
                 >
-                  <Text style={[styles.timerOptText, burn === option && styles.timerOptTextActive]}>{BURN_LABEL[option]}</Text>
+                  <Text selectable style={[styles.timerOptText, burn === option && styles.timerOptTextActive]}>{BURN_LABEL[option]}</Text>
                 </Pressable>
               ))}
             </View>
             <View style={styles.settingRow}>
               <View style={styles.settingCopy}>
-                <Text style={styles.secureCopyTitle}>禁止转发</Text>
-                <Text style={styles.secureCopySub}>开启后，这个会话里的消息不能通过 Proxy 转发</Text>
+                <Text selectable style={styles.secureCopyTitle}>禁止转发</Text>
+                <Text selectable style={styles.secureCopySub}>开启后，这个会话里的消息不能通过 Proxy 转发</Text>
               </View>
               <ProxySwitch accessibilityLabel="禁止转发开关" onChange={setNoForward} value={noForward} />
             </View>
-            <Text style={styles.secureNote}>阅后即焚用阅读计数加过期时间执行；禁止转发由服务端拒绝转发请求。此会话已开启截屏上报。</Text>
+            <Text selectable style={styles.secureNote}>阅后即焚用阅读计数加过期时间执行；禁止转发由服务端拒绝转发请求。此会话已开启截屏上报。</Text>
           </Pressable>
         </Pressable>
       ) : null}
 
       {toast ? (
         <View pointerEvents="none" style={styles.toastWrap}>
-          <Text style={styles.toast}>{toast}</Text>
+          <Text selectable style={styles.toast}>{toast}</Text>
         </View>
       ) : null}
     </SwipeBackShell>
@@ -1851,9 +1995,9 @@ function ChatAudio({ uri }: { uri: string }): React.JSX.Element {
   }, [uri]);
   return (
     <Pressable accessibilityLabel={playing ? "暂停语音" : "播放语音"} onPress={() => { const player = playerRef.current; if (!player) return; if (playing) player.pause(); else player.play(); setPlaying(!playing); }} style={styles.audioMessage}>
-      <View style={styles.audioPlayBtn}><Text style={styles.audioPlayGlyph}>{playing ? "❚❚" : "▶"}</Text></View>
-      <Text style={styles.audioWave}>▂▅▃▇▄▆▂▅▃▄</Text>
-      <Text style={styles.audioLabel}>语音</Text>
+      <View style={styles.audioPlayBtn}><Text selectable style={styles.audioPlayGlyph}>{playing ? "❚❚" : "▶"}</Text></View>
+      <Text selectable style={styles.audioWave}>▂▅▃▇▄▆▂▅▃▄</Text>
+      <Text selectable style={styles.audioLabel}>语音</Text>
     </Pressable>
   );
 }
@@ -1938,6 +2082,7 @@ const styles = StyleSheet.create({
   bubbleMetaRow: { alignItems: "center", flexDirection: "row", justifyContent: "flex-end", marginTop: 5 },
   secureMeta: { color: "#966a19", fontSize: 11, marginRight: 4 },
   timeInline: { color: lotus.faint, fontSize: 11, lineHeight: 14 },
+  aiStandInTag: { backgroundColor: "rgba(59,111,224,0.12)", borderRadius: 6, color: "#3b6fe0", fontSize: 11, fontWeight: "700", lineHeight: 14, marginRight: 6, overflow: "hidden", paddingHorizontal: 5 },
   replyInside: { borderLeftColor: lotus.accent, borderLeftWidth: 2, marginBottom: 6, paddingLeft: 7 },
   replyInsideName: { color: lotus.goldink, fontSize: 11, fontWeight: "800", marginBottom: 1 },
   replyInsideBody: { color: "#777777", fontSize: 11, lineHeight: 15 },
@@ -2006,6 +2151,15 @@ const styles = StyleSheet.create({
   stickerCredit: { color: lotus.faint, fontSize: 11, paddingBottom: 8, paddingHorizontal: 11, textAlign: "right" },
 
   // 输入区
+  standInCard: { backgroundColor: "#f4efff", borderColor: "#d9ccff", borderRadius: 14, borderWidth: 1, gap: 8, marginBottom: 8, padding: 12 },
+  standInTitle: { color: "#6b4fd8", fontSize: 12, fontWeight: "800" },
+  standInBody: { color: lotus.ink, fontSize: 15, lineHeight: 21 },
+  standInInput: { backgroundColor: lotus.paper, borderColor: "#d9ccff", borderRadius: 10, borderWidth: 1, color: lotus.ink, fontSize: 15, maxHeight: 120, minHeight: 44, paddingHorizontal: 10, paddingVertical: 8 },
+  standInActions: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "flex-end" },
+  standInGhost: { borderColor: "#d9ccff", borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
+  standInGhostText: { color: "#6b4fd8", fontSize: 13, fontWeight: "700" },
+  standInSend: { backgroundColor: "#6b4fd8", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 7 },
+  standInSendText: { color: "#fff", fontSize: 13, fontWeight: "800" },
   composerShell: { backgroundColor: lotus.paper, borderTopColor: lotus.line, borderTopWidth: 1, paddingHorizontal: 7, paddingTop: 7 },
   composer: { alignItems: "flex-end", flexDirection: "row", gap: 4, paddingBottom: 2 },
   attachBtn: { alignItems: "center", height: 36, justifyContent: "center", width: 34 },

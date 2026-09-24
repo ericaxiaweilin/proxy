@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -43,7 +43,7 @@ export function ProxyButton({
       onPress={onPress}
       style={[styles.button, styles[`button_${tone}`], disabled && styles.disabled, style]}
     >
-      {typeof children === "string" ? <Text style={[styles.buttonText, textTone[tone]]}>{children}</Text> : children}
+      {typeof children === "string" ? <Text selectable style={[styles.buttonText, textTone[tone]]}>{children}</Text> : children}
     </Pressable>
   );
 }
@@ -88,9 +88,22 @@ export function ProxyAvatar({
   size?: 32 | 44 | 60;
   source?: ImageSourcePropType;
 }): React.JSX.Element {
+  // TWIN-INSIGHT-AVATAR-001: 首字永远垫在底下 —— 图在加载/404/解码失败时
+  // 绝不能把灰圈+字藏掉（之前 Image 顶掉 Text，坏 URI 时 onError 没来得及
+  // 或不触发就成了“连灰头像都没有”）。图成功后盖住字；失败撤掉图露出字。
+  // uri 变了重置失败态，免得换人后还挂着上一张的失败。
+  const uri = typeof source === "object" && source !== null && "uri" in source ? source.uri : undefined;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [uri]);
+  const showImage = source !== undefined && !failed;
   return (
     <View accessibilityLabel={accessibilityLabel} style={[styles.avatar, { height: size, width: size }]}>
-      {source ? <Image source={source} style={styles.avatarImage} /> : <Text style={styles.avatarFallback}>{fallback.slice(0, 1)}</Text>}
+      <Text selectable style={styles.avatarFallback}>{fallback.slice(0, 1)}</Text>
+      {showImage ? (
+        <Image source={source} style={styles.avatarImageAbsolute} onError={() => setFailed(true)} />
+      ) : null}
     </View>
   );
 }
@@ -118,7 +131,7 @@ export function ProxyTabs<T extends string>({
             onPress={() => onChange(item.id)}
             style={styles.tab}
           >
-            <Text style={[styles.tabText, active && styles.tabTextActive]}>{item.label}</Text>
+            <Text selectable style={[styles.tabText, active && styles.tabTextActive]}>{item.label}</Text>
             {active ? <View style={styles.tabUnderline} /> : null}
           </Pressable>
         );
@@ -187,7 +200,7 @@ export function ProxyLoading({
   return (
     <View style={styles.loadingLabelWrap}>
       {indicator}
-      <Text style={styles.loadingLabel}>{label}</Text>
+      <Text selectable style={styles.loadingLabel}>{label}</Text>
     </View>
   );
 }
@@ -210,8 +223,8 @@ export function ProxyEmptyState({
   return (
     <View style={styles.empty}>
       {icon !== undefined ? <ProxyIcon color={foundation.muted} name={icon} size={28} /> : null}
-      <Text style={styles.emptyTitle}>{title}</Text>
-      {sub !== undefined ? <Text style={styles.emptySub}>{sub}</Text> : null}
+      <Text selectable style={styles.emptyTitle}>{title}</Text>
+      {sub !== undefined ? <Text selectable style={styles.emptySub}>{sub}</Text> : null}
       {cta !== undefined ? (
         <View style={styles.emptyCta}>
           <ProxyButton disabled={cta.disabled ?? false} onPress={cta.onPress}>{cta.label}</ProxyButton>
@@ -225,6 +238,7 @@ const styles = StyleSheet.create({
   avatar: { alignItems: "center", backgroundColor: foundation.surfaceSecondary, borderColor: foundation.line, borderRadius: foundation.radius.full, borderWidth: 1, justifyContent: "center", overflow: "hidden" },
   avatarFallback: { color: foundation.ink, fontSize: foundation.text.sm, fontWeight: "800" },
   avatarImage: { height: "100%", width: "100%" },
+  avatarImageAbsolute: { height: "100%", left: 0, position: "absolute", top: 0, width: "100%" },
   button: { alignItems: "center", borderRadius: foundation.radius.sm, borderWidth: 1, flexDirection: "row", gap: foundation.space.two, justifyContent: "center", minHeight: foundation.control.md, paddingHorizontal: 14 },
   button_primary: { backgroundColor: foundation.ink, borderColor: foundation.ink },
   button_secondary: { backgroundColor: foundation.surface, borderColor: foundation.line },

@@ -29,7 +29,7 @@ func TestWarningsAllExpectedWhenNoEnv(t *testing.T) {
 		joined := strings.Join(w, "\n")
 		for _, needle := range []string{
 			"DATABASE_URL is unset",
-			"PROXY_LOGIN_PROVIDER=\"simulated\"",
+			"PROXY_LOGIN_PROVIDER is unset",
 			"PROXY_OPERATOR_PRINCIPALS is unset",
 			"MODELSTACK_* is partially or fully unset",
 			"OBJECT_STORAGE_ENDPOINT is unset",
@@ -124,13 +124,22 @@ func TestWarningsDetectsInvalidPoolBoundsAndSemver(t *testing.T) {
 	})
 }
 
-func TestDefaultModeReturnsSimulatedForEmpty(t *testing.T) {
-	if got := defaultMode(""); got != "simulated" {
-		t.Fatalf("empty mode should map to simulated, got %q", got)
-	}
-	if got := defaultMode("smtp"); got != "smtp" {
-		t.Fatalf("non-empty mode should round-trip, got %q", got)
-	}
+// LOGIN-PROVIDER-BOOT-001: the recurring "验证码服务尚未配置" reports traced
+// back to an empty PROXY_LOGIN_PROVIDER silently behaving like a working
+// dev mode instead of the fail-closed state it actually is. cmd/api's
+// wire_providers.go now refuses to boot on empty/unrecognized mode (see
+// configuredLoginChallengeProvider); this locks in that the warning text
+// itself never claims "simulated" for a state that isn't.
+func TestWarningsNeverCallsEmptyLoginProviderSimulated(t *testing.T) {
+	withEnv(t, map[string]string{"PROXY_LOGIN_PROVIDER": ""}, func() {
+		joined := strings.Join(Warnings(), "\n")
+		if strings.Contains(joined, "PROXY_LOGIN_PROVIDER=\"simulated\"") {
+			t.Fatalf("empty PROXY_LOGIN_PROVIDER must not be described as \"simulated\" — it is fail-closed and the API refuses to boot, got: %s", joined)
+		}
+		if !strings.Contains(joined, "PROXY_LOGIN_PROVIDER is unset") {
+			t.Fatalf("expected an honest 'is unset' warning, got: %s", joined)
+		}
+	})
 }
 
 // TestProductionDocCoversEveryWarning guarantees that the PRODUCTION.md

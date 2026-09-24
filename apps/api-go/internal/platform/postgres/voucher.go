@@ -14,7 +14,9 @@ import (
 
 type VoucherRepository struct{ pool *pgxpool.Pool }
 
-func NewVoucherRepository(pool *pgxpool.Pool) *VoucherRepository { return &VoucherRepository{pool: pool} }
+func NewVoucherRepository(pool *pgxpool.Pool) *VoucherRepository {
+	return &VoucherRepository{pool: pool}
+}
 
 func (r *VoucherRepository) ListVouchers(ctx context.Context, actorID string) ([]voucher.Voucher, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `

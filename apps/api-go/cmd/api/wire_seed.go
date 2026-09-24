@@ -173,6 +173,15 @@ func seedPostgresMedia(pool *pgxpool.Pool) error {
 	return nil
 }
 
+// 开发用登录身份的 channel / identifier。空串 => 写 NULL。
+// 做成变量而不是 SQL 字面量，是为了让它能被测试盯住：这两个值必须落在 049
+// identity_login_channel_check 允许的范围内（见 TestDevSeedLoginIdentityChannelIsAllowed）。
+// 写死字面量时没人能拦——'PHONE' 就是这么活到 049 之后的。
+var (
+	devLoginIdentityChannel    = ""
+	devLoginIdentityIdentifier = ""
+)
+
 // seedPostgresIdentity 在 simulated 模式把开发用户幂等写入 Postgres
 // （与 localIdentityService 的 memory seed 对齐，保证模拟登录在 DB 模式可用）。
 func seedPostgresIdentity(pool *pgxpool.Pool) error {
@@ -186,11 +195,26 @@ func seedPostgresIdentity(pool *pgxpool.Pool) error {
 		return err
 	}
 	// login_identities
+	//
+	// 这里曾经写死 'PHONE' / 'jvn'：两个值在仓库里都没有第二个出处（service 的
+	// 入参校验、channel_router、049 的 identity_login_channel_check 一律只认
+	// EMAIL / SMS）。049 是 2026-09-01 加的，比这条 INSERT 晚 —— 加了之后它必然
+	// 被 CHECK 拒绝，而调用方是 log.Fatalf：simulated + Postgres 直接起不来，
+	// 排在它后面的 supply / home-rail / media 三个种子也一并跑不到（这正是
+	// 实名核验行当年只能手写 SQL 的原因）。
+	//
+	// 改法与内存种子 localIdentityService 完全对齐：两者都不给这个开发身份写
+	// channel / identifier。读侧一律 COALESCE(channel,'') / COALESCE(identifier,'')，
+	// 所以 NULL 与内存里的零值等价；049 的 CHECK 明确允许 NULL，部分唯一索引
+	// uq_login_identity_active_identifier 也把 channel IS NULL 的行排除在外。
+	// ON CONFLICT 必须把这两列一起写回去，否则存量那行 'PHONE' 会在 UPDATE 时
+	// 被 CHECK 重新校验，照样过不去。
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO identity.login_identities (id, user_account_id, verified, status, channel, identifier)
-		VALUES ($1, $2, TRUE, 'ACTIVE', 'PHONE', 'jvn')
-		ON CONFLICT (id) DO UPDATE SET verified = TRUE, status = 'ACTIVE'`,
-		"login_001", "user_001"); err != nil {
+		VALUES ($1, $2, TRUE, 'ACTIVE', NULLIF($3, ''), NULLIF($4, ''))
+		ON CONFLICT (id) DO UPDATE SET verified = TRUE, status = 'ACTIVE',
+			channel = EXCLUDED.channel, identifier = EXCLUDED.identifier`,
+		"login_001", "user_001", devLoginIdentityChannel, devLoginIdentityIdentifier); err != nil {
 		return err
 	}
 	// memberships

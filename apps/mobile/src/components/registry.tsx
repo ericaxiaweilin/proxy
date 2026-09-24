@@ -19,7 +19,7 @@ function PanelCard({ children }: { children: React.ReactNode }): React.JSX.Eleme
 }
 
 function SectionLabel({ text }: { text: string }): React.JSX.Element {
-  return <Text style={styles.sectionLabel}>{text}</Text>;
+  return <Text selectable style={styles.sectionLabel}>{text}</Text>;
 }
 
 // ---- Request / Goal ----
@@ -29,12 +29,12 @@ function CategoryAnchor({ element }: { element: { props: Record<string, unknown>
   return (
     <PanelCard>
       <SectionLabel text="需求大类锚点" />
-      <Text style={styles.cardTitle}>{props.label}</Text>
-      <Text style={styles.mono}>{props.category}</Text>
+      <Text selectable style={styles.cardTitle}>{props.label}</Text>
+      <Text selectable style={styles.mono}>{props.category}</Text>
       <View style={styles.chipRow}>
         {props.tags.map((tag) => (
           <View key={tag} style={styles.chip}>
-            <Text style={styles.chipText}>{tag}</Text>
+            <Text selectable style={styles.chipText}>{tag}</Text>
           </View>
         ))}
       </View>
@@ -47,11 +47,11 @@ function GoalSummary({ element }: { element: { props: Record<string, unknown> } 
   return (
     <PanelCard>
       <SectionLabel text="目标摘要" />
-      <Text style={styles.cardTitle}>{props.title}</Text>
-      <Text style={styles.body}>{props.summary}</Text>
+      <Text selectable style={styles.cardTitle}>{props.title}</Text>
+      <Text selectable style={styles.body}>{props.summary}</Text>
       <View style={styles.chipRow}>
         <View style={styles.chipDark}>
-          <Text style={styles.chipDarkText}>{props.archetype ?? props.category}</Text>
+          <Text selectable style={styles.chipDarkText}>{props.archetype ?? props.category}</Text>
         </View>
       </View>
     </PanelCard>
@@ -66,7 +66,7 @@ function CriticalQuestion({ element, emit }: { element: { props: Record<string, 
   return (
     <PanelCard>
       <SectionLabel text="关键问题" />
-      <Text style={styles.cardTitle}>{props.question}</Text>
+      <Text selectable style={styles.cardTitle}>{props.question}</Text>
       <View style={styles.optionColumn}>
         {props.options.map((option) => (
           <Pressable
@@ -77,7 +77,7 @@ function CriticalQuestion({ element, emit }: { element: { props: Record<string, 
             }}
             style={[styles.option, selected === option && styles.optionSelected]}
           >
-            <Text style={[styles.optionText, selected === option && styles.optionTextSelected]}>{option}</Text>
+            <Text selectable style={[styles.optionText, selected === option && styles.optionTextSelected]}>{option}</Text>
           </Pressable>
         ))}
       </View>
@@ -89,7 +89,7 @@ function CriticalQuestion({ element, emit }: { element: { props: Record<string, 
         }}
         style={[styles.confirmButton, (selected === undefined || answered) && styles.disabled]}
       >
-        <Text style={styles.confirmButtonText}>{answered ? "✓ 已记录回答" : "确认回答"}</Text>
+        <Text selectable style={styles.confirmButtonText}>{answered ? "✓ 已记录回答" : "确认回答"}</Text>
       </Pressable>
     </PanelCard>
   );
@@ -103,9 +103,9 @@ function KnownFacts({ element }: { element: { props: Record<string, unknown> } }
       <View style={styles.factList}>
         {props.facts.map((fact) => (
           <View key={fact} style={styles.factRow}>
-            <Text style={styles.factRowText}>{fact}</Text>
+            <Text selectable style={styles.factRowText}>{fact}</Text>
             <View style={styles.factStateConfirmed}>
-              <Text style={styles.factStateConfirmedText}>已确认</Text>
+              <Text selectable style={styles.factStateConfirmedText}>已确认</Text>
             </View>
           </View>
         ))}
@@ -123,11 +123,11 @@ function InferredFacts({ element }: { element: { props: Record<string, unknown> 
         {props.facts.map((item) => (
           <View key={item.fact} style={styles.factRow}>
             <View style={styles.factRowCopy}>
-              <Text style={styles.factRowText}>{item.fact}</Text>
-              <Text style={styles.factBasis}>依据：{item.basis}</Text>
+              <Text selectable style={styles.factRowText}>{item.fact}</Text>
+              <Text selectable style={styles.factBasis}>依据：{item.basis}</Text>
             </View>
             <View style={styles.factStateInferred}>
-              <Text style={styles.factStateInferredText}>推断</Text>
+              <Text selectable style={styles.factStateInferredText}>推断</Text>
             </View>
           </View>
         ))}
@@ -144,19 +144,19 @@ function TimeLocation({ element }: { element: { props: Record<string, unknown> }
     <PanelCard>
       <SectionLabel text="时间 · 地点" />
       <View style={styles.kvRow}>
-        <Text style={styles.kvLabel}>时间</Text>
-        <Text style={styles.kvValue}>
+        <Text selectable style={styles.kvLabel}>时间</Text>
+        <Text selectable style={styles.kvValue}>
           {props.startAt} · {props.durationH}H
         </Text>
       </View>
       <View style={styles.kvRow}>
-        <Text style={styles.kvLabel}>地点</Text>
-        <Text style={styles.kvValue}>{props.location}</Text>
+        <Text selectable style={styles.kvLabel}>地点</Text>
+        <Text selectable style={styles.kvValue}>{props.location}</Text>
       </View>
       {props.meetingPoint ? (
         <View style={styles.kvRow}>
-          <Text style={styles.kvLabel}>集合点</Text>
-          <Text style={styles.kvValue}>{props.meetingPoint}</Text>
+          <Text selectable style={styles.kvLabel}>集合点</Text>
+          <Text selectable style={styles.kvValue}>{props.meetingPoint}</Text>
         </View>
       ) : null}
     </PanelCard>
@@ -166,11 +166,26 @@ function TimeLocation({ element }: { element: { props: Record<string, unknown> }
 // ---- Human Supply ----
 
 function CandidateRail({ element, emit }: { element: { props: Record<string, unknown> }; emit: (event: string) => void }): React.JSX.Element {
-  const props = element.props as { candidates: Candidate[] };
+  const props = element.props as { candidates: Candidate[]; status?: "loading" | "ready" | "empty" | "error" | "unavailable" };
   const [selectedId, setSelectedId] = useState<string>();
+  // MATCH-LIVE-001：候选来自后端真实供给（按履约 / 需求方评价 / 经验 / 响应 / 预算排序）；没有就如实说为什么。
+  const status = props.status ?? (props.candidates.length > 0 ? "ready" : "empty");
+  if (status !== "ready" || props.candidates.length === 0) {
+    const message =
+      status === "loading" ? "正在按履约和评价为你挑选候选…" :
+      status === "error" ? "候选没有取到，稍后再试" :
+      status === "unavailable" ? "登录后才能看到真实候选" :
+      "暂时没有符合本单的人（语言 / 时段 / 实名核验都要满足），可以换个时间或放宽要求";
+    return (
+      <PanelCard>
+        <SectionLabel text="本次候选" />
+        <Text selectable style={styles.candidateOfferNote}>{message}</Text>
+      </PanelCard>
+    );
+  }
   return (
     <PanelCard>
-      <SectionLabel text="本次候选 · 已通过本单筛选" />
+      <SectionLabel text="本次候选 · 已通过本单筛选 · 按履约和评价排序" />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
         {props.candidates.map((candidate) => {
           const selected = selectedId === candidate.agentId;
@@ -185,46 +200,56 @@ function CandidateRail({ element, emit }: { element: { props: Record<string, unk
             >
               <View style={styles.candTop}>
                 <Gradient from={color.magenta} to={color.violet} style={styles.avatar}>
-                  <Text style={styles.avatarText}>{candidate.name.charAt(0)}</Text>
+                  <Text selectable style={styles.avatarText}>{candidate.name.charAt(0)}</Text>
                 </Gradient>
                 <View style={styles.candCopy}>
-                  <Text style={styles.candidateName}>{candidate.name}</Text>
-                  <Text numberOfLines={1} style={styles.candidateTagline}>
+                  <Text selectable style={styles.candidateName}>{candidate.name}</Text>
+                  <Text selectable numberOfLines={1} style={styles.candidateTagline}>
                     {candidate.languages.join(" / ")}
                   </Text>
                 </View>
                 {selected ? (
                   <View style={styles.selectedTag}>
-                    <Text style={styles.selectedTagText}>✓ 已选</Text>
+                    <Text selectable style={styles.selectedTagText}>✓ 已选</Text>
                   </View>
                 ) : null}
               </View>
-              <Text style={styles.candidateOffer}>
+              <Text selectable style={styles.candidateOffer}>
                 ₫{candidate.offerVnd.toLocaleString()}
-                <Text style={styles.candidateOfferNote}> · 本次需求报价</Text>
+                <Text selectable style={styles.candidateOfferNote}> · 本次需求报价</Text>
               </Text>
-              <View style={styles.metricRow}>
-                <View style={styles.metricBox}>
-                  <Text style={styles.metricValue}>{Math.round(candidate.fulfillmentRate * 100)}%</Text>
-                  <Text style={styles.metricLabel}>履约率</Text>
+              {candidate.hasTrackRecord === false ? (
+                // 新人：没有完成过订单，不画 0%（那会被读成「履约很差」）。
+                <View style={styles.metricRow}>
+                  <View style={styles.metricBox}>
+                    <Text selectable style={styles.metricValue}>新人</Text>
+                    <Text selectable style={styles.metricLabel}>暂无履约记录</Text>
+                  </View>
                 </View>
-                <View style={styles.metricBox}>
-                  <Text style={styles.metricValue}>{Math.round(candidate.satisfactionRate * 100)}%</Text>
-                  <Text style={styles.metricLabel}>满意率</Text>
+              ) : (
+                <View style={styles.metricRow}>
+                  <View style={styles.metricBox}>
+                    <Text selectable style={styles.metricValue}>{Math.round(candidate.fulfillmentRate * 100)}%</Text>
+                    <Text selectable style={styles.metricLabel}>履约率</Text>
+                  </View>
+                  <View style={styles.metricBox}>
+                    <Text selectable style={styles.metricValue}>{candidate.satisfactionRate > 0 ? `${Math.round(candidate.satisfactionRate * 100)}%` : "—"}</Text>
+                    <Text selectable style={styles.metricLabel}>满意率</Text>
+                  </View>
+                  <View style={styles.metricBox}>
+                    <Text selectable style={styles.metricValue}>{candidate.completedOrders} 单</Text>
+                    <Text selectable style={styles.metricLabel}>已完成</Text>
+                  </View>
                 </View>
-                <View style={styles.metricBox}>
-                  <Text style={styles.metricValue}>{candidate.completedOrders} 单</Text>
-                  <Text style={styles.metricLabel}>已完成</Text>
-                </View>
-              </View>
+              )}
               <View style={styles.chipRow}>
                 {candidate.proofs.map((proof) => (
                   <View key={proof} style={styles.chip}>
-                    <Text style={styles.chipText}>✓ {proof}</Text>
+                    <Text selectable style={styles.chipText}>✓ {proof}</Text>
                   </View>
                 ))}
               </View>
-              {selected ? <Text style={styles.selectedMark}>确认成交将走后端命令</Text> : null}
+              {selected ? <Text selectable style={styles.selectedMark}>确认成交将走后端命令</Text> : null}
             </Pressable>
           );
         })}
@@ -242,19 +267,28 @@ function ContextualQuote({ element }: { element: { props: Record<string, unknown
     note: string;
     breakdown: Array<{ item: string; amountVnd: number }>;
   };
+  // MATCH-LIVE-001：还没有候选时没有「本单价格」可言 —— 不显示假价格。
+  if (props.servicePriceVnd <= 0) {
+    return (
+      <PanelCard>
+        <SectionLabel text="本单报价" />
+        <Text selectable style={styles.quoteNote}>{props.note || "选定人选后显示本单报价"}</Text>
+      </PanelCard>
+    );
+  }
   return (
     <PanelCard>
       <SectionLabel text="本单报价" />
-      <Text style={styles.quotePrice}>
-        ₫{props.servicePriceVnd.toLocaleString()} <Text style={styles.quoteCurrency}>{props.currency}</Text>
+      <Text selectable style={styles.quotePrice}>
+        ₫{props.servicePriceVnd.toLocaleString()} <Text selectable style={styles.quoteCurrency}>{props.currency}</Text>
       </Text>
       {props.breakdown.map((item) => (
         <View key={item.item} style={styles.kvRow}>
-          <Text style={styles.kvLabel}>{item.item}</Text>
-          <Text style={styles.kvValue}>₫{item.amountVnd.toLocaleString()}</Text>
+          <Text selectable style={styles.kvLabel}>{item.item}</Text>
+          <Text selectable style={styles.kvValue}>₫{item.amountVnd.toLocaleString()}</Text>
         </View>
       ))}
-      <Text style={styles.quoteNote}>{props.note}</Text>
+      <Text selectable style={styles.quoteNote}>{props.note}</Text>
     </PanelCard>
   );
 }
@@ -265,8 +299,8 @@ function WaitingStatus({ element }: { element: { props: Record<string, unknown> 
   const props = element.props as { status: string; message: string };
   return (
     <View style={styles.waiting}>
-      <Text style={styles.waitingStatus}>{props.status}</Text>
-      <Text style={styles.waitingMessage}>{props.message}</Text>
+      <Text selectable style={styles.waitingStatus}>{props.status}</Text>
+      <Text selectable style={styles.waitingMessage}>{props.message}</Text>
     </View>
   );
 }

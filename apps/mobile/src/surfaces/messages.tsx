@@ -1,7 +1,8 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, AppState, NativeScrollEvent, NativeSyntheticEvent, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
+import { Animated, AppState, NativeScrollEvent, NativeSyntheticEvent, PanResponder, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
+import { usePullToRefresh } from "../components/pull-to-refresh";
 import { Image } from "expo-image";
 import { Directory, File, Paths } from "expo-file-system";
 import { SwipeBackShell } from "../architecture/swipe-back";
@@ -31,7 +32,7 @@ type Folder = "all" | "friends" | "activity" | "invite";
 
 // v8 原型 mock 已删除（R36.x MOCK-001）：Dialog 只走 server
 // listConversations()，空收件箱显示诚实空态，不再展示假会话。
-type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; folder: Folder; type?: string; peerUserId?: string; lastActivityMs: number };
+type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; folder: Folder; type?: string; peerUserId?: string; lastActivityMs: number; isRoom?: boolean };
 
 const ASSISTANT_LOGO = OTTER_LOGO;
 
@@ -151,7 +152,7 @@ function SwipeableRow({ onDelete, children, edgeInset = 0, topInset = 0, cornerR
         {/* 圆角要画在真正有背景色的按钮上——外层 swipeBehind 是透明定位壳，
             没有背景，给它加圆角什么都不会发生（没东西可裁）。 */}
         <Pressable onPress={onDelete} style={[styles.swipeDelete, { borderTopRightRadius: cornerRadius, borderBottomRightRadius: cornerRadius }]} accessibilityLabel="删除对话">
-          <Text style={styles.swipeDeleteText}>删除</Text>
+          <Text selectable style={styles.swipeDeleteText}>删除</Text>
         </Pressable>
       </View>
       <Animated.View {...pan.panHandlers} style={{ transform: [{ translateX: clampedX }] }}>
@@ -168,6 +169,7 @@ let cachedServerDialogs: Dialog[] | undefined;
 
 export function MessagesSurface({
   onOpenConversation,
+  onOpenRoom,
   onOpenContacts,
   onChromeVisibilityChange,
   bottomNavVisible,
@@ -181,6 +183,10 @@ export function MessagesSurface({
   viewer,
 }: {
   onOpenConversation: (author: string, conversationId?: string, aiAccount?: PlatformAIAccount, avatarSource?: number | { uri: string }, peerUserId?: string) => void;
+  // ROOM-CREATE-001: 房间（GROUP + roomScene）走专门的房间聊天页（场景banner/
+  // 成员条/见面邀约），不是通用 ConversationSurface——那边不认识见面邀约卡片，
+  // 会把它画成一个空气泡。
+  onOpenRoom?: (conversationId: string) => void;
   onOpenContacts?: () => void;
   // MSG-SCAN-SHORTCUT-001: 消息模块加好友现在只剩顶栏"扫码"这一条路——
   // "+"号连着的方式选择页（邀请/通讯录/社媒/搜索）已经摘掉，本人的二维码
@@ -295,6 +301,8 @@ export function MessagesSurface({
       setInboxError(true);
     }
   }, [apiBaseUrl, conversationClient, profileClient]);
+  // PULL-REFRESH-001: 下拉立刻重拉收件箱（不用等 5 秒轮询）。
+  const inboxPull = usePullToRefresh(refreshInbox);
 
   useEffect(() => {
     if (!conversationClient) return;
@@ -420,27 +428,27 @@ export function MessagesSurface({
         <View style={styles.app}>
           <View style={styles.safe} />
           <View style={styles.topbar}>
-            <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
-            <View style={styles.centerTitle}><Text style={styles.centerMain}>建群</Text><Text style={styles.centerSub}>选至少 2 人 · 收件箱里聊过天的人</Text></View>
+            <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text selectable style={styles.backText}>‹</Text></Pressable>
+            <View style={styles.centerTitle}><Text selectable style={styles.centerMain}>建群</Text><Text selectable style={styles.centerSub}>选至少 2 人 · 收件箱里聊过天的人</Text></View>
             <View style={styles.icon} />
           </View>
           <ScrollView style={{ flex: 1 }}>
-            <Text style={styles.contactSection}>{groupCandidates.length === 0 ? "还没有可建群的联系人" : `选择成员 · 已选 ${groupSelected.size}`}</Text>
-            {groupCandidates.length === 0 ? <Text style={styles.empty}>先在「新聊天」里跟人聊上，才能把他们拉进群</Text> : null}
+            <Text selectable style={styles.contactSection}>{groupCandidates.length === 0 ? "还没有可建群的联系人" : `选择成员 · 已选 ${groupSelected.size}`}</Text>
+            {groupCandidates.length === 0 ? <Text selectable style={styles.empty}>先在「新聊天」里跟人聊上，才能把他们拉进群</Text> : null}
             {groupCandidates.map((c) => {
               const id = c.peerUserId as string;
               const on = groupSelected.has(id);
               return (
                 <Pressable key={id} onPress={() => toggleGroupMember(id)} style={styles.contactRow}>
-                  {c.avatarSource && !brokenAvatarIds.has(c.id) ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:group:${c.id}`} source={c.avatarSource} style={styles.avatar} transition={0} onError={() => markAvatarBroken(c.id)} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text></View>}
-                  <View style={{ flex: 1 }}><Text style={styles.contactName}>{c.name}</Text></View>
-                  <View style={[styles.groupCheck, on && styles.groupCheckOn]}>{on ? <Text style={styles.groupCheckMark}>✓</Text> : null}</View>
+                  {c.avatarSource && !brokenAvatarIds.has(c.id) ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:group:${c.id}`} source={c.avatarSource} style={styles.avatar} transition={0} onError={() => markAvatarBroken(c.id)} /> : <View style={styles.avatar}><Text selectable style={styles.avatarText}>{c.name.slice(0, 1)}</Text></View>}
+                  <View style={{ flex: 1 }}><Text selectable style={styles.contactName}>{c.name}</Text></View>
+                  <View style={[styles.groupCheck, on && styles.groupCheckOn]}>{on ? <Text selectable style={styles.groupCheckMark}>✓</Text> : null}</View>
                 </Pressable>
               );
             })}
           </ScrollView>
           <View style={styles.groupComposeBar}>
-            {groupError ? <Text style={styles.groupError}>{groupError}</Text> : null}
+            {groupError ? <Text selectable style={styles.groupError}>{groupError}</Text> : null}
             <View style={styles.groupComposeRow}>
               <TextInput
                 value={groupMessage}
@@ -456,7 +464,7 @@ export function MessagesSurface({
                 onPress={() => void createGroup()}
                 style={[styles.groupCreateBtn, !canCreateGroup && styles.groupCreateBtnOff]}
               >
-                <Text style={styles.groupCreateBtnText}>{groupBusy ? "创建中…" : "创建"}</Text>
+                <Text selectable style={styles.groupCreateBtnText}>{groupBusy ? "创建中…" : "创建"}</Text>
               </Pressable>
             </View>
           </View>
@@ -483,12 +491,12 @@ export function MessagesSurface({
         <View style={styles.app}>
           <View style={styles.safe} />
           <View style={styles.topbar}>
-            <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
+            <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text selectable style={styles.backText}>‹</Text></Pressable>
             {/* CONTACT-SEARCH-COPY-001: 副标题正压在这个搜索框上方，必须和它搜得到的东西一致。
                 这一页只搜「姓名 + 最近一条消息」（见下方 filtered），CONTACTS 里根本没有 username
                 —— 见本段开头注释「不编造 username」。写「/ Username」等于让用户在框里输 @handle
                 却永远搜不到。找还没聊过的人走顶栏"扫码"，这一页只搜已经在收件箱里的人。 */}
-            <View style={styles.centerTitle}><Text style={styles.centerMain}>新聊天</Text><Text style={styles.centerSub}>联系人 · 姓名或最近消息</Text></View>
+            <View style={styles.centerTitle}><Text selectable style={styles.centerMain}>新聊天</Text><Text selectable style={styles.centerSub}>联系人 · 姓名或最近消息</Text></View>
             <View style={styles.icon} />
           </View>
           <View style={styles.contactHeadSearch}>
@@ -496,13 +504,13 @@ export function MessagesSurface({
             <TextInput value={contactSearch} onChangeText={setContactSearch} placeholder="姓名或最近消息" placeholderTextColor="#9a968f" style={styles.contactInput} />
           </View>
           <ScrollView style={{ flex: 1 }}>
-            <Text style={styles.contactSection}>已在 Proxy · 来自你的收件箱</Text>
-            {filtered.length === 0 ? <Text style={styles.empty}>{serverDialogs === undefined ? "加载中…" : "暂无联系人"}</Text> : null}
+            <Text selectable style={styles.contactSection}>已在 Proxy · 来自你的收件箱</Text>
+            {filtered.length === 0 ? <Text selectable style={styles.empty}>{serverDialogs === undefined ? "加载中…" : "暂无联系人"}</Text> : null}
             {filtered.map((c) => (
               <Pressable key={`${c.name}-${c.conversationId ?? ""}`} onPress={() => openPerson(c)} style={styles.contactRow}>
-                {c.avatarSource && !brokenAvatarIds.has(c.conversationId ?? c.name) ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:contact:${c.conversationId ?? c.name}`} source={c.avatarSource} style={styles.avatar} transition={0} onError={() => markAvatarBroken(c.conversationId ?? c.name)} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text></View>}
-                <View style={{ flex: 1 }}><Text style={styles.contactName}>{c.name}</Text><Text style={styles.contactMeta}>{c.preview}</Text><Text style={styles.contactMeta}>{c.time}</Text></View>
-                <Text style={styles.contactAction}>聊天 ›</Text>
+                {c.avatarSource && !brokenAvatarIds.has(c.conversationId ?? c.name) ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:contact:${c.conversationId ?? c.name}`} source={c.avatarSource} style={styles.avatar} transition={0} onError={() => markAvatarBroken(c.conversationId ?? c.name)} /> : <View style={styles.avatar}><Text selectable style={styles.avatarText}>{c.name.slice(0, 1)}</Text></View>}
+                <View style={{ flex: 1 }}><Text selectable style={styles.contactName}>{c.name}</Text><Text selectable style={styles.contactMeta}>{c.preview}</Text><Text selectable style={styles.contactMeta}>{c.time}</Text></View>
+                <Text selectable style={styles.contactAction}>聊天 ›</Text>
               </Pressable>
             ))}
           </ScrollView>
@@ -517,18 +525,18 @@ export function MessagesSurface({
         <View style={styles.app}>
           <View style={styles.safe} />
           <View style={styles.topbar}>
-            <Pressable onPress={() => setSubView("contacts")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
-            <View style={styles.centerTitle}><Text style={styles.centerMain}>联系人</Text></View>
+            <Pressable onPress={() => setSubView("contacts")} style={styles.icon}><Text selectable style={styles.backText}>‹</Text></Pressable>
+            <View style={styles.centerTitle}><Text selectable style={styles.centerMain}>联系人</Text></View>
             <View style={styles.icon} />
           </View>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-          <View style={styles.personHero}>{personCtx.avatarSource && !brokenAvatarIds.has(personCtx.conversationId ?? personName) ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:person:${personCtx.conversationId ?? personName}`} source={personCtx.avatarSource} style={[styles.avatar, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]} transition={0} onError={() => markAvatarBroken(personCtx.conversationId ?? personName)} /> : <View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View>}<Text style={styles.personName}>{personName}</Text><Text style={styles.personUser}>{personCtx.time ? `最近消息 · ${personCtx.time}` : "Proxy 联系人"}</Text></View>
+          <View style={styles.personHero}>{personCtx.avatarSource && !brokenAvatarIds.has(personCtx.conversationId ?? personName) ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:person:${personCtx.conversationId ?? personName}`} source={personCtx.avatarSource} style={[styles.avatar, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]} transition={0} onError={() => markAvatarBroken(personCtx.conversationId ?? personName)} /> : <View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text selectable style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View>}<Text selectable style={styles.personName}>{personName}</Text><Text selectable style={styles.personUser}>{personCtx.time ? `最近消息 · ${personCtx.time}` : "Proxy 联系人"}</Text></View>
           <View style={styles.personActions}>
-            <Pressable onPress={() => onOpenConversation(personName, personCtx.conversationId, personCtx.aiAccount, personCtx.avatarSource)} style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="chat" size={18} /></View><Text style={styles.personActionText}>消息</Text></Pressable>
-            <Pressable onPress={() => void Share.share({ message: `Proxy 联系人：${personName}（本地通讯录）` })} style={styles.personAction} accessibilityLabel="分享联系人"><View style={styles.personActionIcon}><Text style={{ fontSize: 12 }}>🔗</Text></View><Text style={styles.personActionText}>分享</Text></Pressable>
+            <Pressable onPress={() => onOpenConversation(personName, personCtx.conversationId, personCtx.aiAccount, personCtx.avatarSource)} style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="chat" size={18} /></View><Text selectable style={styles.personActionText}>消息</Text></Pressable>
+            <Pressable onPress={() => void Share.share({ message: `Proxy 联系人：${personName}（本地通讯录）` })} style={styles.personAction} accessibilityLabel="分享联系人"><View style={styles.personActionIcon}><Text selectable style={{ fontSize: 12 }}>🔗</Text></View><Text selectable style={styles.personActionText}>分享</Text></Pressable>
           </View>
           <View style={{ paddingHorizontal: 16, gap: 8 }}>
-            {personCtx.preview ? <View style={styles.aliasCard}><Text style={styles.aliasLabel}>最近消息</Text><Text style={styles.aliasValue} numberOfLines={2}>{personCtx.preview}</Text></View> : null}
+            {personCtx.preview ? <View style={styles.aliasCard}><Text selectable style={styles.aliasLabel}>最近消息</Text><Text selectable style={styles.aliasValue} numberOfLines={2}>{personCtx.preview}</Text></View> : null}
           </View>
         </ScrollView>
         </View>
@@ -550,7 +558,7 @@ export function MessagesSurface({
       {/* homeHead — v8 */}
       <View style={styles.homeHead}>
         <View style={styles.homeTitle}>
-          <Text style={styles.homeTitleText}>信息</Text>
+          <Text selectable style={styles.homeTitleText}>信息</Text>
           <View style={styles.homeActions}>
             {/* MSG-HEADER-SLIM-001: 顶栏按钮太多——"消息请求"指向一个从没接过
                 真数据的死屏幕（陌生消息=Mặc Kệ，唯一状态是"暂无陌生消息"，
@@ -599,7 +607,7 @@ export function MessagesSurface({
               returnKeyType="search"
               style={styles.searchInput}
             />
-            {search ? <Pressable accessibilityLabel="清除搜索" onPress={() => setSearch("")}><Text style={styles.inlineClearText}>清除</Text></Pressable> : null}
+            {search ? <Pressable accessibilityLabel="清除搜索" onPress={() => setSearch("")}><Text selectable style={styles.inlineClearText}>清除</Text></Pressable> : null}
           </View>
         ) : null}
 
@@ -609,15 +617,15 @@ export function MessagesSurface({
             页签现在如实叫"群组"，只列真的群聊。 */}
         <View style={styles.homeTabs}>
           <Pressable onPress={() => setPanel("dialogs")} style={[styles.homeTab, panel === "dialogs" && styles.homeTabActive]}>
-            <Text style={[styles.homeTabText, panel === "dialogs" && styles.homeTabTextActive]}>对话</Text>
+            <Text selectable style={[styles.homeTabText, panel === "dialogs" && styles.homeTabTextActive]}>对话</Text>
             <View style={[styles.countBadge, panel !== "dialogs" && styles.countBadgeMuted]}>
-              <Text style={styles.countBadgeText}>{filteredRecent.length}</Text>
+              <Text selectable style={styles.countBadgeText}>{filteredRecent.length}</Text>
             </View>
           </Pressable>
           <Pressable onPress={() => setPanel("groups")} style={[styles.homeTab, panel === "groups" && styles.homeTabActive]}>
-            <Text style={[styles.homeTabText, panel === "groups" && styles.homeTabTextActive]}>群组</Text>
+            <Text selectable style={[styles.homeTabText, panel === "groups" && styles.homeTabTextActive]}>群组</Text>
             <View style={[styles.countBadge, panel !== "groups" && styles.countBadgeMuted]}>
-              <Text style={styles.countBadgeText}>{groupDialogs.length}</Text>
+              <Text selectable style={styles.countBadgeText}>{groupDialogs.length}</Text>
             </View>
           </Pressable>
         </View>
@@ -629,7 +637,7 @@ export function MessagesSurface({
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderRow}>
           {(Object.keys(FOLDER_LABEL) as Folder[]).map((f) => (
             <Pressable key={f} onPress={() => setFolder(f)} style={[styles.folderChip, folder === f && styles.folderChipActive]}>
-              <Text style={[styles.folderChipText, folder === f && styles.folderChipTextActive]}>{FOLDER_LABEL[f]}</Text>
+              <Text selectable style={[styles.folderChipText, folder === f && styles.folderChipTextActive]}>{FOLDER_LABEL[f]}</Text>
             </Pressable>
           ))}
         </ScrollView>
@@ -637,25 +645,25 @@ export function MessagesSurface({
       ) : null}
 
       {/* body */}
-      <ScrollView style={styles.homeBody} contentContainerStyle={{ paddingBottom: bottomNavVisible === false ? 16 : 96 }} onScroll={onInboxScroll} scrollEventThrottle={16}>
+      <ScrollView refreshControl={<RefreshControl refreshing={inboxPull.refreshing} onRefresh={inboxPull.onRefresh} />} style={styles.homeBody} contentContainerStyle={{ paddingBottom: bottomNavVisible === false ? 16 : 96 }} onScroll={onInboxScroll} scrollEventThrottle={16}>
         {panel === "dialogs" ? (
           <>
             {!inboxLoaded ? (
-              <Text style={styles.empty}>加载中…</Text>
+              <Text selectable style={styles.empty}>加载中…</Text>
             ) : filteredRecent.length > 0 ? (
               filteredRecent.map((d) => (
                 <SwipeableRow key={d.id} onDelete={() => hideDialog(d.id)}>
-                <Pressable onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource, d.peerUserId)} style={styles.dialog}>
+                <Pressable onPress={() => { if (d.isRoom && d.conversationId && onOpenRoom) onOpenRoom(d.conversationId); else onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource, d.peerUserId); }} style={styles.dialog}>
                   {d.avatarSource && !brokenAvatarIds.has(d.id) ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:recent:${d.conversationId ?? d.id}`} source={d.avatarSource} style={styles.avatar} transition={0} onError={() => markAvatarBroken(d.id)} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
-                    <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
+                    <Text selectable style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
                   </View>}
                   <View style={styles.dialogMain}>
-                    <View style={styles.dialogTop}><Text style={styles.dialogName}>{d.name}</Text></View>
-                    <Text style={styles.preview} numberOfLines={1}>{d.preview}</Text>
+                    <View style={styles.dialogTop}><Text selectable style={styles.dialogName}>{d.name}</Text></View>
+                    <Text selectable style={styles.preview} numberOfLines={1}>{d.preview}</Text>
                   </View>
                     <View style={styles.dialogSide}>
-                      <Text style={styles.time}>{d.time}</Text>
-                      {d.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{d.unread}</Text></View> : null}
+                      <Text selectable style={styles.time}>{d.time}</Text>
+                      {d.unread ? <View style={styles.unread}><Text selectable style={styles.unreadText}>{d.unread}</Text></View> : null}
                     </View>
                   </Pressable>
                   </SwipeableRow>
@@ -663,9 +671,9 @@ export function MessagesSurface({
             ) : inboxError ? (
               // CONVO-INBOX-SWALLOW-001: 这一格以前只有一个分支，加载失败和真的
               // 没有会话共用同一句文案 —— 失败被渲染成「还没有对话」。
-              <Text style={styles.empty}>会话列表没读出来 —— 这不是「还没有对话」。5 秒后自动重试</Text>
+              <Text selectable style={styles.empty}>会话列表没读出来 —— 这不是「还没有对话」。5 秒后自动重试</Text>
             ) : (
-              <Text style={styles.empty}>还没有对话 — 从动态或市场开始聊一下</Text>
+              <Text selectable style={styles.empty}>还没有对话 — 从动态或市场开始聊一下</Text>
             )}
           </>
         ) : panel === "groups" ? (
@@ -674,22 +682,22 @@ export function MessagesSurface({
                 点行直接进群聊会话。以前这里叫 Convo 又列支线又列群组，
                 还拿「＋ 文件夹」当组织负担；现在支线只在对话里长按消息开。 */}
             {groupDialogs.length === 0 ? (
-              <Text style={styles.preview}>还没有群组对话 —— 建群后会出现在这里</Text>
+              <Text selectable style={styles.preview}>还没有群组对话 —— 建群后会出现在这里</Text>
             ) : null}
             {groupDialogs.map((c) => (
               <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)} edgeInset={14} topInset={10} cornerRadius={15}>
-              <Pressable onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard} accessibilityLabel={`打开群组 ${c.name}`}>
+              <Pressable onPress={() => { if (c.isRoom && c.conversationId && onOpenRoom) onOpenRoom(c.conversationId); else onOpenConversation(c.name, c.conversationId); }} style={styles.convoCard} accessibilityLabel={`打开群组 ${c.name}`}>
                 <View style={styles.convoHead}>
                   <View style={styles.convoMark}><ProxyIcon color="#fff" name="group" size={18} /></View>
                   <View style={styles.convoCopy}>
-                    <Text style={styles.convoName}>{c.name}</Text>
-                    <Text style={styles.convoParent}>{c.badge ?? "群组"}</Text>
+                    <Text selectable style={styles.convoName}>{c.name}</Text>
+                    <Text selectable style={styles.convoParent}>{c.badge ?? "群组"}</Text>
                   </View>
-                  {c.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{c.unread}</Text></View> : null}
+                  {c.unread ? <View style={styles.unread}><Text selectable style={styles.unreadText}>{c.unread}</Text></View> : null}
                 </View>
-                <Text style={styles.convoPreview} numberOfLines={1}>{c.preview}</Text>
+                <Text selectable style={styles.convoPreview} numberOfLines={1}>{c.preview}</Text>
                 <View style={styles.convoFoot}>
-                  <Text style={styles.convoFootText}>{c.time}</Text>
+                  <Text selectable style={styles.convoFootText}>{c.time}</Text>
                 </View>
               </Pressable>
               </SwipeableRow>
@@ -725,7 +733,13 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
   // 当群名字等于把一个 3 人群显示成跟其中一个人的私聊。参与者总数是诚实的，
   // 名字用它拼，不编成员名单（客户端这里没有其他成员的 displayName）。
   const isGroup = item.conversation.conversationType === "GROUP";
-  const name = isGroup ? `群聊 · ${item.conversation.participants.length} 人` : aiAccount?.displayName || snapshotName || (isAssistantPeer ? "AI助手" : item.counterpartyId) || "对话";
+  // ROOM-CREATE-001: 有 roomScene 就是「创建房间」建的房间，用房间名而不是
+  // 泛泛的「群聊 · N 人」——列表里能认出哪个是哪个房间。
+  const roomName = item.conversation.roomScene?.roomName?.trim();
+  const isRoom = roomName !== undefined && roomName !== "";
+  // NO-RAW-ID-001：名字解析不到时用中性标签，绝不把 counterpartyId（裸账号 id）
+  // 当名字显示（FEED-REPLY-001 同一条规矩）。id 只做 peerUserId 导航标识，不上屏。
+  const name = isRoom ? roomName : isGroup ? `群聊 · ${item.conversation.participants.length} 人` : aiAccount?.displayName || snapshotName || (isAssistantPeer ? "AI助手" : "用户") || "对话";
   const avatarRef = item.counterpartySnapshot?.avatarRef?.trim();
   // ASSISTANT-THREAD-001: 助手有且仅有一个（服务端已归一），行头像就是 logo。
   // 真人没解析出可用地址就不设 —— 以前兜底拼 user_<id> 的 thumb 全是 404，
@@ -736,6 +750,8 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
   const preview = latest
     ? latest.messageType === "IMAGE" ? "[图片]" : latest.messageType === "VIDEO" ? "[视频]" : latest.messageType === "LOCATION" ? ((meetupPreview(latest.body ?? "") ?? latest.body?.trim()) || "新消息") : latest.body?.trim() || "新消息"
     : "暂无消息";
+  // AI-MANAGE-013：「每次确认」下 AI 替你起草了回复、等你确认 —— 列表上就要看得出来，不然草稿永远躺着没人发。
+  const previewText = item.standInDraftPending ? `[AI 草稿待你确认] ${preview}` : preview;
   const timestamp = latest?.createdAt || item.conversation.lastMessageAt;
   const parsed = new Date(timestamp);
   const time = Number.isNaN(parsed.getTime()) ? "" : parsed.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
@@ -753,7 +769,7 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
     ...(item.counterpartyId && !aiAccount && !isGroup ? { peerUserId: item.counterpartyId } : {}),
     initial: name.slice(0, 2).toUpperCase(),
     name,
-    preview,
+    preview: previewText,
     lastActivityMs,
     time,
     badge: isGroup ? "群组" : item.conversation.originType,
@@ -762,6 +778,7 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
     ...(item.unreadCount !== undefined && item.unreadCount > 0 ? { unread: String(item.unreadCount) } : {}),
     // R15.74: 透出 conversationType 给 Convo tab filter (GROUP/SUPPORT)
     type: item.conversation.conversationType,
+    ...(isRoom ? { isRoom: true } : {}),
     folder: item.conversation.originType === "ACTIVITY" ? "activity" : item.conversation.originType === "PROFILE" ? "friends" : "all",
   };
 }

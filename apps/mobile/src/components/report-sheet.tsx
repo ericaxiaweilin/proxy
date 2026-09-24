@@ -54,9 +54,9 @@ export function ReportSheet({
     <Pressable accessibilityLabel="关闭举报" onPress={() => { if (!busy) onClose(); }} style={styles.scrim}>
       <Pressable onPress={() => undefined} style={styles.sheet}>
         <View style={styles.grab} />
-        <Text style={styles.title}>{title}</Text>
-        {subtitle ? <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text> : null}
-        {error ? <Text style={styles.error} accessibilityLabel="举报失败">{error}</Text> : null}
+        <Text selectable style={styles.title}>{title}</Text>
+        {subtitle ? <Text selectable style={styles.subtitle} numberOfLines={1}>{subtitle}</Text> : null}
+        {error ? <Text selectable style={styles.error} accessibilityLabel="举报失败">{error}</Text> : null}
         {REPORT_REASONS.map((item) => (
           <Pressable
             key={item.reason}
@@ -65,12 +65,12 @@ export function ReportSheet({
             onPress={() => { void submit(item.reason); }}
             style={styles.item}
           >
-            <Text style={styles.itemText}>{item.label}</Text>
+            <Text selectable style={styles.itemText}>{item.label}</Text>
           </Pressable>
         ))}
         {busy ? <ProxyLoading tone="muted" style={{ marginVertical: 12 }} /> : null}
         <Pressable accessibilityLabel="取消举报" disabled={busy} onPress={onClose} style={styles.item}>
-          <Text style={[styles.itemText, styles.cancel]}>取消</Text>
+          <Text selectable style={[styles.itemText, styles.cancel]}>取消</Text>
         </Pressable>
       </Pressable>
     </Pressable>

@@ -19,15 +19,18 @@ import (
 	"github.com/proxy-app/proxy-api/internal/experience"
 	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
+	"github.com/proxy-app/proxy-api/internal/gravity"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
+	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/notification"
+	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
@@ -40,6 +43,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/socialspace"
 	"github.com/proxy-app/proxy-api/internal/storeonboarding"
 	"github.com/proxy-app/proxy-api/internal/supply"
+	"github.com/proxy-app/proxy-api/internal/usermodel"
 	"github.com/proxy-app/proxy-api/internal/voucher"
 	"log"
 	"net/http"
@@ -229,6 +233,13 @@ func main() {
 		if err := seedPostgresSupply(pool); err != nil {
 			log.Fatalf("seed postgres supply: %v", err)
 		}
+		// HOME-RAIL-ACCOUNT-001（2026-09-23，用户报 P0）：首页「真人推荐」rail
+		// 上有 21 个人在服务端没有账号 —— 点 + 只会得到「还没有账号，暂时加不了
+		// 好友」，卡片却顶着「真人」徽标。必须在 supply 之后跑：rail 里 linh /
+		// mai / an / minh 的资料由供给域种子先写，这里只补缺、不覆盖。
+		if err := seedPostgresHomeRail(pool, mediaStoreDir); err != nil {
+			log.Fatalf("seed postgres home rail: %v", err)
+		}
 		// 公开种子帖长期引用这些固定媒体 ID。媒体读模型不能跟登录
 		// Provider（simulated / SMTP / SMS）耦合，否则切换认证方式后会出现
 		// “帖子还在但图片和视频全部消失”的静默数据断链。
@@ -247,6 +258,8 @@ func main() {
 		// COMP-SELLER-001：候选资格只认已实名且未过期的卖家。接在这里（pool 分支内）
 		// 意味着没有数据库时 lookup 为 nil → 撮合不出候选，而不是「照常撮合」。
 		supplyService.SetSellerIdentityLookup(postgres.NewSellerRealNameRepository(pool))
+		// MATCH-RANK-001: 撮合排序读真实履约 / 需求方评价 / 引力响应（不读任何曝光数据）。
+		supplyService.SetRankingSignals(matching.NewPostgres(pool))
 		mediaService = media.NewWithReviewDecisionRepository(
 			postgres.NewMediaRepository(pool),
 			postgres.NewMediaReviewDecisionRepository(pool),
@@ -315,6 +328,17 @@ func main() {
 	// covered.
 	authorNames := identityService.AuthorNameResolver()
 	localNetService.SetAuthorNameResolver(authorNames)
+	// POST-PROFILE-GATE-001：真人发帖前必须有用户名 + 平台头像（assets/…），缺什么就拒绝什么。
+	localNetService.SetProfileCompleteness(func(ctx context.Context, userAccountID string) []string {
+		missing := []string{}
+		if _, ok := authorNames.ResolveAuthorDisplayName(ctx, userAccountID); !ok {
+			missing = append(missing, "name")
+		}
+		if path, ok := authorNames.ResolveAuthorAvatarPath(ctx, userAccountID); !ok || !strings.HasPrefix(path, "assets/") {
+			missing = append(missing, "avatar")
+		}
+		return missing
+	})
 	socialSpaceService.SetAuthorNameResolver(authorNames)
 	marketplaceService.SetAuthorNameResolver(authorNames)
 	// FEED-REPLY-001: comments resolve the author name from the profile too —
@@ -339,6 +363,59 @@ func main() {
 	server := api.NewServerWithRuntime(identityService, demandService, cityCompanionService, localNetService, localContextService, conversationService, engagementService, fulfillmentService, supplyService, mediaService, contributionService, idempotencyStore, readyCheck, authenticator, transactions)
 	server.SocialSpace = socialSpaceService
 	server.Business = businessService
+	// RELATIONSHIP-DISPLAYNAME-001（2026-09-22 修）：SetDisplayNameResolver 定义了
+	// 却从没被任何生产代码调用过 —— relationship/service.go 的兜底于是把
+	// DisplayName 写成原始账号 id，好友列表里显示的是那一长串 id 而不是「Mai」
+	// （friend-crm 渲染 displayName || userId）。
+	//
+	// 名字的事实源是 identity.profiles，identity 服务已经为内容发布方（localnet /
+	// socialspace / marketplace）暴露了同一个解析器 AuthorNameResolver，这里直接复用
+	// —— 不再另开一条读名片的路径。（注意 profile.Repository 读的是
+	// profile.user_profiles，那是 Profile 域自己的表，本地库里是空的；
+	// 真人名字都在 identity.profiles，别读错。）复用上面 PROFILE-READ-001 那个实例。
+	// AI-FRIEND-REQUEST-001：平台 AI 是可寻址、可聊天、可关注的账号，但不会
+	// accept 双向好友申请。只改移动端按钮挡不住旧客户端 / curl，所以服务端
+	// SendFriendRequest 也要识别并拒绝；relationship 只持窄函数，不 import AI 目录。
+	relationshipService.SetCannotFriendTarget(func(targetUserID string) bool {
+		account, err := aipersona.GetPlatformAccount(targetUserID)
+		return err == nil && account.PersonaType == aipersona.PersonaTypePlatformAI
+	})
+	// FRIEND-TARGET-EXISTS-001：目标账号不存在时必须拒绝，而不是写一条永远
+	// 没人能同意的 PENDING（首页 rail 曾把本地 fixture id 当账号 id 发出来）。
+	//
+	// 判定用 identity.user_accounts 的**精确**存在性（GetUser → ErrUserNotFound），
+	// 不用 AuthorNameResolver：后者要求 profile.name 非空，账号存在但还没起名字
+	// 的人会被误判成"不存在"，那会把正常申请也拒掉 —— 比原 bug 更糟。
+	// identityService.Repository() 在 pool 可用时是 PG 仓储（main.go 上面的替换），
+	// 没有 pool 时是内存仓储，两者 GetUser 语义一致（都是 ErrUserNotFound）。
+	identityRepository := identityService.Repository()
+	relationshipService.SetTargetAccountExists(func(ctx context.Context, targetUserID string) bool {
+		_, err := identityRepository.GetUser(ctx, targetUserID)
+		return err == nil
+	})
+	relationshipService.SetDisplayNameResolver(func(ctx context.Context, userID string) (relationship.DisplayNameHint, bool) {
+		name, ok := authorNames.ResolveAuthorDisplayName(ctx, userID)
+		if !ok {
+			return relationship.DisplayNameHint{}, false
+		}
+		// AI-TWIN-AUDIENCE-AVATAR-001: 帖文编排的「指定好友」是对
+		// 真实关系对象的选择，不能只给名字而让 UI 再猜一张头像。profile
+		// 的 assets/<id> 是存储指针，必须在 API 边界转成公开缩略图路由；
+		// 未设置/不认识的路径保持空串，由客户端显示首字回退。
+		avatarURL := ""
+		if avatarPath, hasAvatar := authorNames.ResolveAuthorAvatarPath(ctx, userID); hasAvatar {
+			avatarPath = strings.TrimSpace(avatarPath)
+			switch {
+			case strings.HasPrefix(avatarPath, "assets/"):
+				if assetID := strings.TrimSpace(strings.TrimPrefix(avatarPath, "assets/")); assetID != "" {
+					avatarURL = "/v1/media/thumb/" + assetID
+				}
+			case strings.HasPrefix(avatarPath, "/"), strings.HasPrefix(avatarPath, "http://"), strings.HasPrefix(avatarPath, "https://"):
+				avatarURL = avatarPath
+			}
+		}
+		return relationship.DisplayNameHint{UserID: userID, DisplayName: name, AvatarURL: avatarURL}, true
+	})
 	server.Relationship = relationshipService
 	server.Payment = paymentService
 	server.Notification = notificationService
@@ -444,6 +521,78 @@ func main() {
 	}
 	mediaService.WithAIPersonaService(personaSvc)
 	server.AIPersona = personaSvc
+	// AI-MANAGE-015: 用户建模。有库用 PG，识图走模型底座的 vision 任务。
+	// OPS-REAL-001: 运营控制台真实指标（只在有库时）。
+	if pool != nil {
+		server.OpsMetrics = opsmetrics.NewPostgres(pool)
+		server.Gravity = gravity.NewPostgres(pool)
+	}
+	if pool != nil {
+		server.UserModel = usermodel.NewService(postgres.NewUserModelRepository(pool), modelStack)
+	} else {
+		server.UserModel = usermodel.NewService(nil, modelStack)
+	}
+	// COMP-AI-MINOR-001（聊天侧）：上面那道门只守在「建分身」上。平台 AI 伴侣
+	// （ai_001..005）是平台自带账号 —— 带 assistantMode 建会话就能直接拿到开场白，
+	// 一条消息都不用发，所以聊天入口必须再拦一道；否则"未成年人不发消息也拿不到
+	// AI"是假的。判定复用 aipersona.CompanionAllowedFor（同一个年龄事实源、
+	// 同一套三态全拒），这里不另写年龄规则 —— 两条路给同一个账号不同答案比没有门禁更糟。
+	//
+	// 只在 pool 可用时接：没有数据库就没有年龄查询，门禁保持 nil → fail-closed
+	// → AI 伴侣聊天整体关闭。与上面 CreatePersona 同口径：宁可关功能，也不对
+	// 未成年人开放。客户端拦得住手，拦不住 curl。
+	if pool != nil {
+		conversationService.SetCompanionGate(func(ctx context.Context, ownerID string) error {
+			ok, err := aipersona.CompanionAllowedFor(ctx, postgres.NewIdentityRepository(pool), ownerID, time.Now().UTC())
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return aipersona.ErrMinorForbidden
+			}
+			return nil
+		})
+	}
+	// AI-MANAGE-002：AI 管理页的暂停/对话权限必须在服务端拦（客户端开关
+	// 挡不住 curl）；Token 计量在真实推理成功后累加当月用量。没接 = 不拦
+	// 不记 —— 见 conversation/ai_engine_gate.go 的 fail-open 说明。
+	conversationService.SetAiEngineChatStateReader(func(ctx context.Context, ownerID string) (conversation.AiEngineChatState, error) {
+		settings, err := identityService.GetAiEngineChatState(ctx, ownerID)
+		if err != nil {
+			return conversation.AiEngineChatState{}, err
+		}
+		return conversation.AiEngineChatState{
+			Paused:         settings.Paused,
+			ChatPermission: settings.ChatPermission,
+			Tone:           settings.ChatTone,
+			ReplyLength:    settings.ChatReplyLength,
+			Emoji:          settings.ChatEmoji,
+			// AI-MANAGE-014：全自动代回复按本人设置的节奏延迟发出。
+			Rhythm: settings.ChatRhythm,
+			// AI-MANAGE-008：代回复以本人身份说话 —— 带上 TA 的名字和简介。
+			OwnerName: func() string { name, _ := authorNames.ResolveAuthorDisplayName(ctx, ownerID); return name }(),
+			OwnerBio:  func() string { bio, _ := authorNames.ResolveAuthorBio(ctx, ownerID); return bio }(),
+		}, nil
+	})
+	conversationService.SetTokenMeter(identityService.RecordAiTokens)
+	// TWIN-INSIGHT-002: AI 分身「好友洞察」。跨 relationship / localnet /
+	// conversation / engagement 四个域合成，所以它是独立读模型包而不是挂在
+	// 任何单一域上（见 internal/twininsight 的包注释）。接线细节与
+	// fail-closed 规则见 wire_twininsight.go。
+	server.TwinInsight = newTwinInsightService(pool, relationshipService, facetService, modelStack)
+	// TWIN-INSIGHT-TARGETS-001：陌生互动者的展示名用同一套作者名解析
+	//（relationship 的 resolveNameCtx 也是它）。nil-safe：解析不到就显示
+	// 账号 id，不断屏。
+	server.TwinInsight.SetDisplayNameSource(authorNames.ResolveAuthorDisplayName)
+	// TWIN-INSIGHT-AVATAR-001：好友洞察头像恒空白 —— buildInsight 曾写死
+	// AvatarURL: ""，好友/陌生人都不带脸。头像事实源与名字同一条
+	// identity.profiles，复用 AuthorNameResolver 的 avatar 路径读法；
+	// 解析不到保持空串（客户端首字回退），绝不下发必 404 的坏地址。
+	server.TwinInsight.SetAvatarSource(authorNames.ResolveAuthorAvatarPath)
+	// TWIN-INSIGHT-ENTITLEMENT-001：洞察工具只向实名创作者发放。
+	// 凭证 = 实名核验 VERIFIED 行（见 wire_twininsight.go），没行/过期/坏池
+	// 一律拒绝。main.go 只挂载，不写判定。
+	server.TwinInsight.SetViewerGate(newTwinInsightViewerGate(pool))
 	// R16.7-P1-E: Jurisdiction Policy Engine. The
 	// jurisdiction service looks up the requester's
 	// (country, region) for the policy decision; the

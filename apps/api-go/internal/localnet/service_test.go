@@ -549,6 +549,85 @@ func TestListFeedPosts_PropagatesDominantColorHex(t *testing.T) {
 	}
 }
 
+// LC-06 显示侧（2026-09-21 产品决定「AI 做的就标注，法规要求要满足」）：
+// 资产级 AI 溯源必须真的走到 feed wire。
+//
+// 这一跳以前是缺的 —— media_assets.ai_generation_source 在库里活着（migration 108），
+// 但 mediaAssetInfo() 不拷它、PostMediaItem 也没这个字段，于是「按资产的 AI 溯源」
+// 对任何用户都不可见。只断言「结构体里有这个字段」证明不了这件事：真正会坏的是
+// hydrate 那一跳被删掉，而那种改动不会让编译失败，只会让标注静默消失。
+func TestListFeedPosts_PropagatesAIGenerationSourceToMediaWire(t *testing.T) {
+	stub := &stubMediaLookup{assets: map[string]MediaAssetInfo{
+		"media_ai": {
+			MediaAssetID:       "media_ai",
+			MediaType:          "IMAGE",
+			Width:              1080,
+			Height:             1440,
+			ProcessingStatus:   "READY",
+			ModerationStatus:   "APPROVED",
+			VisibilityClass:    "PUBLIC",
+			AIGenerationSource: "AI_PERSONA",
+		},
+		"media_human": {
+			MediaAssetID:       "media_human",
+			MediaType:          "IMAGE",
+			Width:              1080,
+			Height:             1440,
+			ProcessingStatus:   "READY",
+			ModerationStatus:   "APPROVED",
+			VisibilityClass:    "PUBLIC",
+			AIGenerationSource: "USER_UPLOADED",
+		},
+	}}
+	s := NewWithMediaLookup(NewMemoryRepository(), stub)
+	for _, id := range []string{"media_ai", "media_human"} {
+		post := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+			"authorType": "AGENT",
+			"body":       id,
+			"visibility": "PUBLIC",
+			"mediaRefs":  []map[string]any{{"mediaAssetId": id, "mediaType": "IMAGE", "sortOrder": 0}},
+		}))
+		if post.Outcome != "ACCEPTED" {
+			t.Fatalf("create post %s: %s (%+v)", id, post.Outcome, post.Error)
+		}
+	}
+
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	if list.Outcome != "ACCEPTED" {
+		t.Fatalf("list feed: %s (%+v)", list.Outcome, list.Error)
+	}
+	var view struct {
+		Posts []Post                      `json:"posts"`
+		Media map[string][]map[string]any `json:"media"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatalf("parse feed: %v\n%s", err, list.OperationRef)
+	}
+	// 用 body（就是 mediaAssetId）找回来，不依赖 feed 排序。
+	got := map[string]string{}
+	for _, p := range view.Posts {
+		items := view.Media[p.ID]
+		if len(items) != 1 {
+			t.Fatalf("post %s: want 1 hydrated media item, got %d", p.ID, len(items))
+		}
+		raw, ok := items[0]["aiGenerationSource"]
+		if !ok {
+			t.Fatalf("post %s: aiGenerationSource 没上 wire —— 客户端无从判定该不该标注", p.ID)
+		}
+		str, ok := raw.(string)
+		if !ok {
+			t.Fatalf("post %s: aiGenerationSource 不是字符串: %T", p.ID, raw)
+		}
+		got[p.Body] = str
+	}
+	if v := got["media_ai"]; v != "AI_PERSONA" {
+		t.Fatalf("AI_PERSONA 资产的溯源在 hydrate 那一跳丢了: got %q", v)
+	}
+	if v := got["media_human"]; v != "USER_UPLOADED" {
+		t.Fatalf("USER_UPLOADED 资产被误报: got %q", v)
+	}
+}
+
 func TestListFeedPosts_EmptyDominantColorHex_Omitted(t *testing.T) {
 	// omitempty contract: an empty DominantColorHex must NOT appear in
 	// the JSON (otherwise clients see "#" or "" and may render a white
@@ -1664,7 +1743,7 @@ func TestMediaImpressionStatsRoundTrip(t *testing.T) {
 	// 停留 6500ms）——这个查询接的就是"这个人具体看了什么"，两张都要出现，
 	// 各自的时长要对得上，不能混到一起。viewer_2 只看了 media_b，media_a
 	// 完全不该出现在 viewer_2 的活动里。
-	viewer1Activity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"viewerActorId": "viewer_1"}))
+	viewer1Activity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"authorId": "user_001", "viewerActorId": "viewer_1"}))
 	if viewer1Activity.Outcome != "ACCEPTED" {
 		t.Fatalf("viewer_1 activity: got %s (%+v)", viewer1Activity.Outcome, viewer1Activity.Error)
 	}
@@ -1692,7 +1771,7 @@ func TestMediaImpressionStatsRoundTrip(t *testing.T) {
 	}
 
 	// viewer_2 只看过 media_b，活动列表里不该出现 media_a。
-	viewer2Activity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"viewerActorId": "viewer_2"}))
+	viewer2Activity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"authorId": "user_001", "viewerActorId": "viewer_2"}))
 	if viewer2Activity.Outcome != "ACCEPTED" {
 		t.Fatalf("viewer_2 activity: got %s (%+v)", viewer2Activity.Outcome, viewer2Activity.Error)
 	}
@@ -1708,14 +1787,55 @@ func TestMediaImpressionStatsRoundTrip(t *testing.T) {
 
 	// viewerActorId 缺失必须拒绝——这个接口存在的意义就是"查这个人"，没
 	// 给人就没有查询目标。
-	missingViewer := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{}))
+	missingViewer := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"authorId": "user_001"}))
 	if missingViewer.Outcome != "REJECTED" {
 		t.Fatalf("missing viewerActorId: got %s, want REJECTED (INVALID_VIEWER_ACTOR_ID)", missingViewer.Outcome)
 	}
 
-	// 别人帖子上的访客活动不暴露。
-	forbiddenActivity := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"authorId": "user_other", "viewerActorId": "viewer_1"}))
-	if forbiddenActivity.Outcome != "REJECTED" {
-		t.Fatalf("other author activity: got %s, want REJECTED (STATS_FORBIDDEN)", forbiddenActivity.Outcome)
+	// CONTENT-ANALYTICS-001: 逐人明细改为仅运营（HTTP 入口按 ANALYTICS scope 拦，见 api/security.go），
+	// 运营不是作者本人，所以 authorId 必须显式给出。
+	missingAuthor := s.Handle(envelopeFor("", "ListMediaActivityForViewer", map[string]any{"viewerActorId": "viewer_1"}))
+	if missingAuthor.Outcome != "REJECTED" {
+		t.Fatalf("missing authorId: got %s, want REJECTED (INVALID_AUTHOR_ID)", missingAuthor.Outcome)
+	}
+}
+
+// TestProfileViewStatsSinceDaysWindow: ListProfileViewStats 的 sinceDays
+// 只限制读窗口，不删事件 —— 40 天前的访问在全量口径里，30 天口径里没有。
+// 缺省（不传）保持全量，friend-crm 的访问/回访行口径不动。
+func TestProfileViewStatsSinceDaysWindow(t *testing.T) {
+	repo := NewMemoryRepository()
+	repo.interactionEvents = append(repo.interactionEvents, InteractionEvent{
+		EventID: "ev_old", EventType: "PROFILE_OPEN", ActorID: "viewer_old",
+		TargetType: "PROFILE", TargetID: "user_001", CreatedAt: time.Now().UTC().AddDate(0, 0, -40),
+	})
+	svc := NewWithRepository(repo)
+	open := func(actor string) command.Result {
+		e := envelopeFor("", "RecordProfileOpen", map[string]any{"targetId": "user_001"})
+		e.Actor = command.Actor{Type: "USER", ID: actor}
+		return svc.Handle(e)
+	}
+	if res := open("viewer_new"); res.Outcome != "ACCEPTED" {
+		t.Fatalf("open: got %s (%+v)", res.Outcome, res.Error)
+	}
+	query := func(payload map[string]any) (int64, int64) {
+		res := svc.Handle(envelopeFor("", "ListProfileViewStats", payload))
+		if res.Outcome != "ACCEPTED" {
+			t.Fatalf("stats %v: got %s (%+v)", payload, res.Outcome, res.Error)
+		}
+		var body struct {
+			Opens         int64 `json:"opens"`
+			UniqueViewers int64 `json:"uniqueViewers"`
+		}
+		if err := json.Unmarshal([]byte(res.OperationRef), &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return body.Opens, body.UniqueViewers
+	}
+	if opens, viewers := query(map[string]any{}); opens != 2 || viewers != 2 {
+		t.Fatalf("all-time = (%d,%d), want (2,2)", opens, viewers)
+	}
+	if opens, viewers := query(map[string]any{"sinceDays": 30}); opens != 1 || viewers != 1 {
+		t.Fatalf("30d = (%d,%d), want (1,1)", opens, viewers)
 	}
 }

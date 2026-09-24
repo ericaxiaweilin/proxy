@@ -115,19 +115,19 @@ export function replyTargetsFromPosts(posts: readonly FeedPost[]): Record<string
 /**
  * 这一行的标题。
  *
- * 名字取不到时给中性文案，绝不给 id。对方恰好就是当前访问者本人时
- * （回复了自己的帖子 / 别人回复了你的帖子），resolveAuthorDisplayName 会返回
- * 「你」—— 直接拼进去会变成「你回复了你」，所以单独表述。
+ * 名字取不到时给中性文案，绝不给 id。OWN-NAME-001 起自己的内容显示用户名
+ * 不再是「你」—— 当前资料名优先（viewerDisplayName），其次帖子保存的名字；
+ * 「你回复了你」这种自指句式不再出现。
  */
 export function replyTargetLabel(
   viewerMode: "SELF" | "OTHER" | undefined,
   target: ReplyTarget | undefined,
-  viewerAccountId?: string | undefined
+  viewerAccountId?: string | undefined,
+  viewerDisplayName?: string | undefined
 ): string {
   const self = viewerMode !== "OTHER";
   if (!target) return self ? "你回复了这条帖子" : "回复了这条帖子";
-  const name = resolveAuthorDisplayName(target, viewerAccountId);
-  if (name === "你") return self ? "你回复了你自己的帖子" : "回复了你的帖子";
+  const name = resolveAuthorDisplayName(target, viewerAccountId, viewerDisplayName);
   return self ? `你回复了 ${name} 的帖子` : `回复了 ${name} 的帖子`;
 }
 

@@ -14,13 +14,15 @@
 // 可见性: SAVED 只对本人可见（PROFILE-TABS-001）—— 别人的收藏夹是他的私库，
 //   不是公开主页的一栏。
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
-import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
+import type { FeedMediaItem, FeedPost, PostEngagement, PostReply } from "@proxy/contracts";
 import { ThreadsPostMedia } from "../components/threads-post-media";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import type { LocalNetClient } from "../localnet-client";
+import type { EngagementClient } from "../engagement-client";
+import { resolveReplyAuthorDisplayName } from "../feed-author";
 import {
   replyTargetLabel,
   replyTimestampLabel,
@@ -63,6 +65,12 @@ export interface ProfileTabsProps {
   replies: ReplyEntry[];
   replyTargets: Record<string, ReplyTarget>;
   savedPosts: FeedPost[];
+  // SCENE-FAVORITE-002: home 场景卡片的 🤍 存本机（MOMENTS 是客户端静态目录，
+  // 服务端没有「场景收藏」概念 —— 所以不编造服务端记录）。个人主页的收藏 tab
+  // 以前完全不知道它存在 ⇒ 用户在首页点了 🤍、来「我的收藏」找，永远找不到。
+  // 这里把同一份 hearts 也画出来；解析由调用方（me.tsx）用
+  // resolveSavedSceneIds 完成，与「我的 → 收藏」共用同一份实现。
+  savedScenes?: ReadonlyArray<{ id: string; title: string; meta: string }> | undefined;
   taggedPosts: FeedPost[];
   // PROFILE-TAB-LOAD-FAILED-001: 这三个列表加载失败时，调用方以前把它们 set 成 []。
   // 而空数组在这里渲染成「你还没有这类内容」的空态文案 —— 用户会以为自己的
@@ -71,6 +79,11 @@ export interface ProfileTabsProps {
   savedFailed?: boolean;
   repliesFailed?: boolean;
   taggedFailed?: boolean;
+  // PROFILE-POSTS-FAILURE-001（补齐）: POSTS 当初被漏掉了 —— me.tsx 把失败处理成
+  // 「条数显示 —」＋一条可重试的提示，但**帖子列表本身**照样传空数组进来，于是
+  // 同一屏上横幅写着「不是你没有动态」、下面的空态却写着「还没有动态」。
+  // 一个说没拉到、一个说你没发过，用户只能信后者。同 savedFailed 口径。
+  postsFailed?: boolean;
   // REPLY-TARGET-001: 判定「这条帖子是不是访问者自己的」用，跟 feed 同一套
   // 身份规则（resolveAuthorDisplayName）。缺省 = 游客，一律不当成自己。
   viewerAccountId?: string | undefined;
@@ -87,6 +100,10 @@ export interface ProfileTabsProps {
   // 帖子互动：有 handler 才渲染对应按钮，没有不渲染假按钮。
   // 分享走系统分享（无需后端），喜欢走 engagement.reactToPost。
   onLikePost?: ((postId: string) => void) | undefined;
+  // PROFILE-REPLIES-VISIBLE-001: 主页帖子收到的赞数/评论列表。feed 里能看到的
+  // 互动，在个人主页上完全看不见 —— PostCard 只有动作按钮，没有计数也没有列表。
+  // engagementClient 可选：没传就保持今天的样子（不渲染假按钮/假数字）。
+  engagementClient?: EngagementClient | undefined;
   onReplyPost?: ((postId: string) => void) | undefined;
   resolveMediaUrl: (path: string) => string;
   fallbackLogo: unknown;                      // OTTER_LOGO / ProxyIcon
@@ -160,7 +177,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
               disabled={props.followBusy}
               style={[styles.actionBtn, props.isFollowing ? styles.actionSecondary : styles.actionPrimary]}
             >
-              <Text style={props.isFollowing ? styles.actionSecondaryText : styles.actionPrimaryText}>
+              <Text selectable style={props.isFollowing ? styles.actionSecondaryText : styles.actionPrimaryText}>
                 {props.followBusy ? "处理中…" : props.isFollowing ? "✓ 已关注" : "+ 关注"}
               </Text>
             </Pressable>
@@ -169,7 +186,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
               onPress={props.onSendMessage}
               style={[styles.actionBtn, styles.actionSecondary]}
             >
-              <Text style={styles.actionSecondaryText}>💬 消息</Text>
+              <Text selectable style={styles.actionSecondaryText}>💬 消息</Text>
             </Pressable>
           </>
         </View>
@@ -186,7 +203,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
             style={styles.tabBtn}
           >
             <ProxyIcon name={PROFILE_TAB_ICON[key]} color={activeTab === key ? props.color.ink : props.color.muted} size={20} />
-            <Text style={[styles.tabLabel, activeTab === key && styles.tabLabelActive]}>{PROFILE_TAB_LABEL[key]}</Text>
+            <Text selectable style={[styles.tabLabel, activeTab === key && styles.tabLabelActive]}>{PROFILE_TAB_LABEL[key]}</Text>
             {activeTab === key ? <View style={styles.tabUnderline} /> : null}
           </Pressable>
         ))}
@@ -197,6 +214,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
         <PostsTab
           pinnedPost={pinnedPost}
           posts={unpinnedPosts}
+          failed={props.postsFailed}
           mediaByPost={props.mediaByPost}
           pinnedIds={props.pinnedIds}
           avatarUri={props.profileAvatarUri}
@@ -205,6 +223,8 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           onOpenScene={props.onOpenScene}
           onLikePost={props.onLikePost}
           onReplyPost={props.onReplyPost}
+          engagementClient={props.engagementClient}
+          viewerAccountId={props.viewerAccountId}
           resolveMediaUrl={props.resolveMediaUrl}
           fallbackLogo={props.fallbackLogo}
           color={props.color}
@@ -217,12 +237,16 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           failed={props.repliesFailed}
           viewerMode={props.viewerMode}
           viewerAccountId={props.viewerAccountId}
+          // OWN-NAME-001：当前资料名优先只在 SELF 生效 —— OTHER 时 profileDraft
+          // 是对方的名字，传进去会把"我回复过的帖子"标成对方的名字。
+          viewerDisplayName={props.viewerMode === "SELF" ? props.profileDraft.name : undefined}
           color={props.color}
         />
       ) : null}
       {activeTab === "SAVED" ? (
         <SavedTab
           saved={props.savedPosts}
+          savedScenes={props.savedScenes}
           failed={props.savedFailed}
           mediaByPost={props.mediaByPost}
           onOpenMedia={props.onOpenMedia}
@@ -256,6 +280,9 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
 function PostsTab(props: {
   pinnedPost: FeedPost | undefined;
   posts: FeedPost[];
+  // PROFILE-POSTS-FAILURE-001: 拉动态失败时调用方传的是空数组，跟「一条都没发」
+  // 长得一模一样。这个 flag 把两者分开 —— 见下面两个空态。
+  failed?: boolean | undefined;
   mediaByPost: Record<string, FeedMediaItem[]>;
   avatarUri?: string | undefined;
   name: string;
@@ -268,11 +295,62 @@ function PostsTab(props: {
   // R15.99: 接 pinnedIds 进来 — ProfileTabs 顶层 hasRealPin 闭包不传进 PostsTab,
   //   而 PostsTab 内部 PinnedCard render 条件需要.
   pinnedIds?: ReadonlyArray<string> | undefined;
+  // PROFILE-REPLIES-VISIBLE-001: 帖子互动数据（计数 + 评论列表） hydration 用。
+  engagementClient?: EngagementClient | undefined;
+  viewerAccountId?: string | undefined;
   color: ProfileTabsProps["color"];
 }): React.JSX.Element {
   const [view, setView] = useState<"LIST" | "GRID">("LIST");
   // R15.99: hasRealPin local — 跟 ProfileTabs 顶层同逻辑.
   const hasRealPin = !!(props.pinnedIds && props.pinnedIds.length > 0);
+  // PROFILE-REPLIES-VISIBLE-001: 每帖的计数（getPostEngagement）+ 评论列表
+  // （点开才拉 ListPostReplies）。失败不断屏：计数缺席就不显示数字（不回填 0），
+  // 评论拉失败行内提示可重试。hydratedRef 避免重复注水。
+  const [postEngagement, setPostEngagement] = useState<Record<string, PostEngagement>>({});
+  const [postReplies, setPostReplies] = useState<Record<string, PostReply[]>>({});
+  const [expandedReplies, setExpandedReplies] = useState<ReadonlySet<string>>(new Set());
+  const [repliesFailed, setRepliesFailed] = useState<Record<string, boolean>>({});
+  const hydratedEngagementRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const client = props.engagementClient;
+    if (!client) return;
+    const fresh = props.posts.map((post) => post.postId).filter((id) => !hydratedEngagementRef.current.has(id));
+    if (fresh.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const settled = await Promise.all(fresh.map(async (postId) => {
+        try {
+          return await client.getPostEngagement(postId);
+        } catch {
+          return undefined;
+        }
+      }));
+      if (cancelled) return;
+      const next: Record<string, PostEngagement> = {};
+      settled.forEach((eng, index) => {
+        const postId = fresh[index];
+        if (!postId || !eng) return;
+        hydratedEngagementRef.current.add(postId);
+        next[postId] = eng;
+      });
+      if (Object.keys(next).length > 0) setPostEngagement((previous) => ({ ...previous, ...next }));
+    })();
+    return () => { cancelled = true; };
+  }, [props.posts, props.engagementClient]);
+  function togglePostReplies(postId: string): void {
+    const client = props.engagementClient;
+    if (!client) return;
+    if (expandedReplies.has(postId)) {
+      setExpandedReplies((previous) => { const next = new Set(previous); next.delete(postId); return next; });
+      return;
+    }
+    setExpandedReplies((previous) => new Set(previous).add(postId));
+    if (postReplies[postId] !== undefined) return;
+    setRepliesFailed((previous) => ({ ...previous, [postId]: false }));
+    void client.listPostReplies(postId, 50)
+      .then((listed) => setPostReplies((previous) => ({ ...previous, [postId]: listed.replies })))
+      .catch(() => setRepliesFailed((previous) => ({ ...previous, [postId]: true })));
+  }
   const allMediaEntries = useMemo(() => {
     const out: ProfileMediaEntry[] = [];
     for (const post of props.posts) {
@@ -291,15 +369,17 @@ function PostsTab(props: {
         <View style={styles.viewToggleRow}>
           <View style={styles.viewToggle}>
             <Pressable onPress={() => setView("LIST")} style={styles.viewToggleBtn}>
-              <Text style={[styles.viewToggleIcon, styles.viewToggleIconInactive]}>≡</Text>
+              <Text selectable style={[styles.viewToggleIcon, styles.viewToggleIconInactive]}>≡</Text>
             </Pressable>
             <Pressable onPress={() => setView("GRID")} style={[styles.viewToggleBtn, styles.viewToggleBtnActive]}>
-              <Text style={[styles.viewToggleIcon, styles.viewToggleIconActive]}>▦</Text>
+              <Text selectable style={[styles.viewToggleIcon, styles.viewToggleIconActive]}>▦</Text>
             </Pressable>
           </View>
         </View>
         {allMediaEntries.length === 0 ? (
-          <ProxyEmptyState title="还没有图片" sub="发布带图的帖子后会出现在这里" />
+          props.failed
+            ? <ProxyEmptyState title="动态没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />
+            : <ProxyEmptyState title="还没有图片" sub="发布带图的帖子后会出现在这里" />
         ) : (
           <View style={styles.photoGrid}>
             {allMediaEntries.map((entry) => (
@@ -326,10 +406,10 @@ function PostsTab(props: {
       <View style={styles.viewToggleRow}>
         <View style={styles.viewToggle}>
           <Pressable onPress={() => setView("LIST")} style={[styles.viewToggleBtn, styles.viewToggleBtnActive]}>
-            <Text style={[styles.viewToggleIcon, styles.viewToggleIconActive]}>≡</Text>
+            <Text selectable style={[styles.viewToggleIcon, styles.viewToggleIconActive]}>≡</Text>
           </Pressable>
           <Pressable onPress={() => setView("GRID")} style={styles.viewToggleBtn}>
-            <Text style={[styles.viewToggleIcon, styles.viewToggleIconInactive]}>▦</Text>
+            <Text selectable style={[styles.viewToggleIcon, styles.viewToggleIconInactive]}>▦</Text>
           </Pressable>
         </View>
       </View>
@@ -339,8 +419,8 @@ function PostsTab(props: {
       {hasRealPin && props.pinnedPost ? (
         <View style={styles.pinnedCard}>
           <View style={styles.pinnedHeader}>
-            <Text style={styles.pinnedBadge}>📌 置顶</Text>
-            <Text style={styles.pinnedTime}>· {new Date(props.pinnedPost.createdAt).toLocaleDateString()}</Text>
+            <Text selectable style={styles.pinnedBadge}>📌 置顶</Text>
+            <Text selectable style={styles.pinnedTime}>· {new Date(props.pinnedPost.createdAt).toLocaleDateString()}</Text>
           </View>
           <PostCard
             post={props.pinnedPost}
@@ -351,13 +431,21 @@ function PostsTab(props: {
             onOpenScene={props.onOpenScene}
             onLikePost={props.onLikePost}
             onReplyPost={props.onReplyPost}
+            engagement={postEngagement[props.pinnedPost.postId]}
+            replies={postReplies[props.pinnedPost.postId]}
+            repliesExpanded={expandedReplies.has(props.pinnedPost.postId)}
+            repliesFailed={repliesFailed[props.pinnedPost.postId] === true}
+            onToggleReplies={() => { const pinned = props.pinnedPost; if (pinned) togglePostReplies(pinned.postId); }}
+            replyViewerId={props.viewerAccountId}
             resolveMediaUrl={props.resolveMediaUrl}
           />
         </View>
       ) : null}
 
       {props.posts.length === 0 && !props.pinnedPost ? (
-        <ProxyEmptyState title="还没有动态" sub="发布的第一条帖子会出现在这里" />
+        props.failed
+          ? <ProxyEmptyState title="动态没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />
+          : <ProxyEmptyState title="还没有动态" sub="发布的第一条帖子会出现在这里" />
       ) : (
         props.posts.map((post) => (
           <PostCard
@@ -370,6 +458,12 @@ function PostsTab(props: {
             onOpenScene={props.onOpenScene}
             onLikePost={props.onLikePost}
             onReplyPost={props.onReplyPost}
+            engagement={postEngagement[post.postId]}
+            replies={postReplies[post.postId]}
+            repliesExpanded={expandedReplies.has(post.postId)}
+            repliesFailed={repliesFailed[post.postId] === true}
+            onToggleReplies={() => togglePostReplies(post.postId)}
+            replyViewerId={props.viewerAccountId}
             resolveMediaUrl={props.resolveMediaUrl}
           />
         ))
@@ -389,6 +483,14 @@ function PostCard(props: {
   onOpenScene?: ((sceneId: string) => void) | undefined;
   onLikePost?: ((postId: string) => void) | undefined;
   onReplyPost?: ((postId: string) => void) | undefined;
+  // PROFILE-REPLIES-VISIBLE-001: 收到的计数 + 评论列表（调用方 hydrate 进来）。
+  // 全是可选：没传就是今天的样子（只有动作按钮，不编数字）。
+  engagement?: PostEngagement | undefined;
+  replies?: ReadonlyArray<PostReply> | undefined;
+  repliesExpanded?: boolean | undefined;
+  repliesFailed?: boolean | undefined;
+  onToggleReplies?: (() => void) | undefined;
+  replyViewerId?: string | undefined;
   resolveMediaUrl: (path: string) => string;
 }): React.JSX.Element {
   const sharePost = (): void => {
@@ -401,19 +503,19 @@ function PostCard(props: {
           {props.avatarUri ? (
             <CircularAvatarImage accessibilityLabel={`${props.name}头像`} size={38} uri={props.avatarUri} />
           ) : (
-            <Text style={styles.postAvatarText}>{(props.name || "?").charAt(0).toUpperCase()}</Text>
+            <Text selectable style={styles.postAvatarText}>{(props.name || "?").charAt(0).toUpperCase()}</Text>
           )}
         </View>
         <View style={styles.postHeadBody}>
-          <Text style={styles.postName} numberOfLines={1}>{props.name}</Text>
-          <Text style={styles.postTime} numberOfLines={1}>· {new Date(props.post.createdAt).toLocaleDateString()}</Text>
+          <Text selectable style={styles.postName} numberOfLines={1}>{props.name}</Text>
+          <Text selectable style={styles.postTime} numberOfLines={1}>· {new Date(props.post.createdAt).toLocaleDateString()}</Text>
         </View>
         <Pressable accessibilityLabel="更多" onPress={sharePost} style={styles.postMore}>
-          <Text style={styles.postMoreText}>⋯</Text>
+          <Text selectable style={styles.postMoreText}>⋯</Text>
         </Pressable>
       </View>
       <View style={styles.postBody}>
-        <Text style={styles.postText}>{props.post.body}</Text>
+        <Text selectable style={styles.postText}>{props.post.body}</Text>
         {props.post.contextRefs.length > 0 ? (
           <View style={styles.postContextRow}>
             {props.post.contextRefs.map((entry) => (
@@ -422,7 +524,7 @@ function PostCard(props: {
                 onPress={() => props.onOpenScene?.(entry.contextId)}
                 style={styles.postContextChip}
               >
-                <Text style={styles.postContextText}>{entry.contextId}</Text>
+                <Text selectable style={styles.postContextText}>{entry.contextId}</Text>
               </Pressable>
             ))}
           </View>
@@ -437,18 +539,53 @@ function PostCard(props: {
         <View style={styles.postActions}>
           {props.onLikePost ? (
             <Pressable onPress={() => props.onLikePost?.(props.post.postId)} style={styles.postAction} accessibilityLabel="喜欢">
-              <Text style={styles.postActionText}>♡ 喜欢</Text>
+              <Text selectable style={styles.postActionText}>♡ 喜欢</Text>
             </Pressable>
           ) : null}
           {props.onReplyPost ? (
             <Pressable onPress={() => props.onReplyPost?.(props.post.postId)} style={styles.postAction} accessibilityLabel="回复">
-              <Text style={styles.postActionText}>💬 回复</Text>
+              <Text selectable style={styles.postActionText}>💬 回复</Text>
             </Pressable>
           ) : null}
           <Pressable onPress={sharePost} style={styles.postAction} accessibilityLabel="分享帖子">
-            <Text style={styles.postActionText}>↗ 分享</Text>
+            <Text selectable style={styles.postActionText}>↗ 分享</Text>
           </Pressable>
         </View>
+        {/* PROFILE-REPLIES-VISIBLE-001：收到的赞数/评论列表。计数只在拉到后显示
+            （>0 才画，不回填 0）；评论点开才拉，拉失败行内提示。作者名走
+            resolveReplyAuthorDisplayName —— 无名不显示裸 id。 */}
+        {props.onToggleReplies && props.engagement && (props.engagement.reactions > 0 || props.engagement.replies > 0) ? (
+          <Pressable
+            onPress={props.onToggleReplies}
+            style={styles.postReplyToggle}
+            accessibilityLabel={props.repliesExpanded ? "收起评论" : "展开评论"}
+          >
+            <Text selectable style={styles.postReplyToggleText}>
+              {props.engagement.reactions > 0 ? `♡ ${props.engagement.reactions}  ` : ""}💬 {props.engagement.replies} 条评论 {props.repliesExpanded ? "︿" : "﹀"}
+            </Text>
+          </Pressable>
+        ) : null}
+        {props.repliesExpanded && props.onToggleReplies ? (
+          props.repliesFailed ? (
+            <Pressable onPress={props.onToggleReplies} style={styles.postReplyToggle} accessibilityLabel="收起评论">
+              <Text selectable style={styles.postReplyToggleText}>评论暂时无法读取，点这里收起重试</Text>
+            </Pressable>
+          ) : (
+            <View>
+              {(props.replies ?? []).map((reply) => (
+                <View key={reply.replyId} style={styles.replyCard}>
+                  <View style={styles.replyMeta}>
+                    <Text selectable style={styles.replyTarget}>
+                      {resolveReplyAuthorDisplayName(reply, props.replyViewerId)}
+                    </Text>
+                    <Text selectable style={styles.replyTime}>· {replyTimestampLabel(reply.createdAt)}</Text>
+                  </View>
+                  <Text selectable style={styles.replyText}>{reply.body}</Text>
+                </View>
+              ))}
+            </View>
+          )
+        ) : null}
       </View>
     </View>
   );
@@ -461,6 +598,7 @@ function RepliesTab(props: {
   targets: Record<string, ReplyTarget>;
   viewerMode: "SELF" | "OTHER" | undefined;
   viewerAccountId?: string | undefined;
+  viewerDisplayName?: string | undefined;
   color: ProfileTabsProps["color"];
   failed?: boolean | undefined;
 }): React.JSX.Element {
@@ -481,17 +619,17 @@ function RepliesTab(props: {
           // key 用 replyId：同一条帖子可以被同一个人回复多次，用父帖 id 会撞。
           <View key={reply.replyId} style={styles.replyCard}>
             <View style={styles.replyMeta}>
-              <Text style={styles.replyTarget}>
-                {replyTargetLabel(props.viewerMode, target, props.viewerAccountId)}
+              <Text selectable style={styles.replyTarget}>
+                {replyTargetLabel(props.viewerMode, target, props.viewerAccountId, props.viewerDisplayName)}
               </Text>
-              <Text style={styles.replyTime}>· {replyTimestampLabel(reply.createdAt)}</Text>
+              <Text selectable style={styles.replyTime}>· {replyTimestampLabel(reply.createdAt)}</Text>
             </View>
-            <Text style={styles.replyText}>{reply.body}</Text>
+            <Text selectable style={styles.replyText}>{reply.body}</Text>
             {/* 引用块：让「回复了谁」这条信息能落到实处 —— 看到原帖才知道
                 说的是哪件事（Threads 的做法）。 */}
             {target && target.excerpt !== "" ? (
               <View style={styles.replyQuote}>
-                <Text numberOfLines={2} style={styles.replyQuoteText}>{target.excerpt}</Text>
+                <Text selectable numberOfLines={2} style={styles.replyQuoteText}>{target.excerpt}</Text>
               </View>
             ) : null}
           </View>
@@ -505,6 +643,7 @@ function RepliesTab(props: {
 
 function SavedTab(props: {
   saved: FeedPost[];
+  savedScenes?: ReadonlyArray<{ id: string; title: string; meta: string }> | undefined;
   mediaByPost: Record<string, FeedMediaItem[]>;
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   resolveMediaUrl: (path: string) => string;
@@ -515,31 +654,52 @@ function SavedTab(props: {
   if (props.failed) {
     return <ProxyEmptyState title="收藏没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />;
   }
-  if (props.saved.length === 0) {
-    return <ProxyEmptyState title="还没有收藏" sub="点击帖子右下角的 🔖 可以加入收藏" />;
+  const scenes = props.savedScenes ?? [];
+  // SCENE-FAVORITE-002: 只有场景收藏、没有帖子收藏时，以前整屏显示「还没有收藏」
+  // —— 用户明明刚在首页点过 🤍，来这里看到的却是一句"你没有收藏"。只要有一边
+  // 非空就不能说"还没有收藏"。
+  if (props.saved.length === 0 && scenes.length === 0) {
+    return <ProxyEmptyState title="还没有收藏" sub="点击帖子右下角的 🔖 或首页场景卡片右上角的 🤍 可以加入收藏" />;
   }
   // 3-列网格 — 复用 IG 收藏页布局
   const all = selectPostMedia(props.saved, props.mediaByPost);
   return (
     <View>
-      <View style={styles.savedHint}>
-        <Text style={styles.savedHintText}>仅自己可见 · {all.length} 项</Text>
-      </View>
-      <View style={styles.photoGrid}>
-        {all.map((entry) => (
-          <Pressable
-            key={`${entry.item.mediaAssetId}-${entry.index}`}
-            onPress={() => props.onOpenMedia({ postId: entry.postId, index: entry.index })}
-            style={styles.photoTile}
-          >
-            <Image
-              source={{ uri: props.resolveMediaUrl(entry.item.feedUrl ?? entry.item.thumbnailUrl ?? entry.item.galleryUrl ?? "") }}
-              resizeMode="cover"
-              style={styles.photoImage}
-            />
-          </Pressable>
-        ))}
-      </View>
+      {scenes.length > 0 ? (
+        <View>
+          <View style={styles.savedHint}>
+            <Text selectable style={styles.savedHintText}>场景灵感 · 来自首页收藏</Text>
+          </View>
+          {scenes.map((scene) => (
+            <View key={scene.id} style={styles.savedSceneRow}>
+              <Text selectable style={styles.savedSceneTitle}>{scene.title}</Text>
+              <Text selectable style={styles.savedSceneMeta}>{scene.meta}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+      {all.length > 0 ? (
+        <View>
+          <View style={styles.savedHint}>
+            <Text selectable style={styles.savedHintText}>仅自己可见 · {all.length} 项</Text>
+          </View>
+          <View style={styles.photoGrid}>
+            {all.map((entry) => (
+              <Pressable
+                key={`${entry.item.mediaAssetId}-${entry.index}`}
+                onPress={() => props.onOpenMedia({ postId: entry.postId, index: entry.index })}
+                style={styles.photoTile}
+              >
+                <Image
+                  source={{ uri: props.resolveMediaUrl(entry.item.feedUrl ?? entry.item.thumbnailUrl ?? entry.item.galleryUrl ?? "") }}
+                  resizeMode="cover"
+                  style={styles.photoImage}
+                />
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -576,7 +736,7 @@ function TaggedTab(props: {
             style={styles.photoImage}
           />
           <View style={styles.taggedOverlay}>
-            <Text style={styles.taggedOverlayText}>@{entry.postId.slice(0, 6)}</Text>
+            <Text selectable style={styles.taggedOverlayText}>@{entry.postId.slice(0, 6)}</Text>
           </View>
         </Pressable>
       ))}
@@ -593,19 +753,19 @@ function AboutTab(props: {
 }): React.JSX.Element {
   return (
     <View style={styles.aboutCard}>
-      <Text style={styles.aboutBio}>{props.profileDraft.bio}</Text>
+      <Text selectable style={styles.aboutBio}>{props.profileDraft.bio}</Text>
       <View style={styles.aboutMetaRow}>
-        <Text style={styles.aboutMetaLabel}>📍</Text>
-        <Text style={styles.aboutMetaValue}>{props.profileDraft.city}</Text>
+        <Text selectable style={styles.aboutMetaLabel}>📍</Text>
+        <Text selectable style={styles.aboutMetaValue}>{props.profileDraft.city}</Text>
       </View>
       <View style={styles.aboutMetaRow}>
-        <Text style={styles.aboutMetaLabel}>🆔</Text>
-        <Text style={styles.aboutMetaValue}>@{props.profileDraft.handle}</Text>
+        <Text selectable style={styles.aboutMetaLabel}>🆔</Text>
+        <Text selectable style={styles.aboutMetaValue}>@{props.profileDraft.handle}</Text>
       </View>
       <View style={styles.aboutDivider} />
       <View style={styles.aboutStatBig}>
-        <Text style={styles.aboutStatBigLabel}>粉丝 / 关注 / 帖子</Text>
-        <Text style={styles.aboutStatBigValue}>
+        <Text selectable style={styles.aboutStatBigLabel}>粉丝 / 关注 / 帖子</Text>
+        <Text selectable style={styles.aboutStatBigValue}>
           {props.stats.followers ?? "—"} · {props.stats.following ?? "—"} · {props.stats.posts ?? "—"}
         </Text>
       </View>
@@ -676,6 +836,8 @@ const styles = StyleSheet.create({
   postContextChip: { backgroundColor: "#f1f5f9", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
   postContextText: { fontSize: 11, color: "#475569" },
   postActions: { flexDirection: "row", gap: 16, marginTop: 10 },
+  postReplyToggle: { marginTop: 8 },
+  postReplyToggleText: { color: "#64748b", fontSize: 12, fontWeight: "600" },
   postAction: { paddingVertical: 4 },
   postActionText: { fontSize: 12, color: "#64748b" },
   // Photo grid
@@ -689,6 +851,11 @@ const styles = StyleSheet.create({
   // Saved
   savedHint: { paddingHorizontal: 16, paddingVertical: 6 },
   savedHintText: { fontSize: 11, color: "#94a3b8" },
+  // SCENE-FAVORITE-002: 场景收藏行（个人主页收藏 tab）。跟「我的 → 收藏」
+  // 同一份数据、同一套解析，样式各自适配各页的排版。
+  savedSceneRow: { paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e2e8f0" },
+  savedSceneTitle: { fontSize: 14, color: "#0f172a" },
+  savedSceneMeta: { fontSize: 12, color: "#64748b", marginTop: 2 },
   // Reply
   replyCard: { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e2e8f0" },
   replyMeta: { flexDirection: "row", alignItems: "center" },

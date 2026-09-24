@@ -3,6 +3,7 @@
 import type { CommandResult } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
+import { commandErrorMessage } from "./command-error-message";
 
 // ──────────────────────────────────────────────────────────────
 // Types
@@ -261,7 +262,7 @@ export class BenefitClient {
     if (response.status < 200 || response.status >= 300) {
       const error = json?.error as Record<string, unknown> | undefined;
       throw new BenefitError(
-        (error?.messageKey as string) ?? `benefit command ${commandType} failed`,
+        commandErrorMessage(error as { messageKey?: string; errorCode?: string } | undefined, `benefit command ${commandType} failed`),
         error?.errorCode as string | undefined
       );
     }
@@ -275,7 +276,7 @@ export class BenefitClient {
   private payload(response: { result: CommandResult; body: Record<string, unknown> } | undefined): Record<string, unknown> {
     if (!response) throw new BenefitError("no response");
     if (response.result.outcome === "REJECTED") {
-      throw new BenefitError(response.result.error?.messageKey ?? "command rejected", response.result.error?.errorCode);
+      throw new BenefitError(commandErrorMessage(response.result.error, "command rejected"), response.result.error?.errorCode);
     }
     return response.body ?? {};
   }

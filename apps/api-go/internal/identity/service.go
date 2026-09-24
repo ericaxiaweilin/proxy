@@ -166,6 +166,7 @@ func (s *Service) Supports(commandType string) bool {
 		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity",
 		"UpdateProfile", "GetProfile", "GetProfileByHandle", "SearchProfiles",
 		"GetAccountPreferences", "UpdateAccountPreferences",
+		"GetAiEngineSettings", "UpdateAiEngineSettings",
 		"RequestPrivacyExport", "RequestPrivacyDelete", "CancelPrivacyRequest", "GetPrivacyRequestStatus", "ListPrivacyRequests":
 		return true
 	default:
@@ -230,6 +231,10 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 		return s.getAccountPreferences(ctx, envelope)
 	case "UpdateAccountPreferences":
 		return s.updateAccountPreferences(ctx, envelope)
+	case "GetAiEngineSettings":
+		return s.getAiEngineSettings(ctx, envelope)
+	case "UpdateAiEngineSettings":
+		return s.updateAiEngineSettings(ctx, envelope)
 	case "RequestPrivacyExport":
 		return s.requestPrivacyExport(ctx, envelope)
 	case "RequestPrivacyDelete":
@@ -564,7 +569,9 @@ func pruneStamps(stamps []time.Time, cutoff time.Time) []time.Time {
 // it never chooses or learns a pre-seeded account identity.
 func (s *Service) beginPasswordlessAuthentication(ctx context.Context, e command.Envelope) command.Result {
 	var p beginPasswordlessAuthenticationPayload
-	if !decode(e.Payload, &p) || (p.Channel != "EMAIL" && p.Channel != "SMS") || normalizeLoginIdentifier(p.Channel, p.Identifier) == "" || p.DeviceID == "" || (p.Platform != "IOS" && p.Platform != "ANDROID") {
+	// OPS-REAL-001: 运营控制台（网页）走同一条邮箱验证码登录，平台如实报 WEB（device_registrations 早就允许 WEB，
+	// 见 migrations/049），不让网页冒充 iOS。运营权限另由 PROXY_OPERATOR_PRINCIPALS 白名单决定，跟平台无关。
+	if !decode(e.Payload, &p) || (p.Channel != "EMAIL" && p.Channel != "SMS") || normalizeLoginIdentifier(p.Channel, p.Identifier) == "" || p.DeviceID == "" || (p.Platform != "IOS" && p.Platform != "ANDROID" && p.Platform != "WEB") {
 		return command.Rejected(e, "INVALID_PASSWORDLESS_AUTHENTICATION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_passwordless_authentication", nil)
 	}
 	// OTP-THROTTLE-001: bound code delivery per identifier. PEEK before
@@ -867,6 +874,22 @@ func (s *Service) createSession(ctx context.Context, e command.Envelope) command
 	return result
 }
 
+// AccountStatusErased is the terminal state of a user account whose
+// LC-15 erasure has run. The row itself survives, and that is
+// deliberate: business.accounts.owner_user_id is ON DELETE RESTRICT
+// and the payment / order ledgers reference the account for the
+// statutory retention window (Decree 248/2026 §23, >= 12 months), so
+// hard-deleting the row would either fail or destroy legally-required
+// records. What makes the erasure real rather than cosmetic is that
+// canHoldSession refuses this status: the account cannot authenticate,
+// so no session, no device and no login identifier can ever be
+// reattached to it.
+const AccountStatusErased = "ERASED"
+
+// canHoldSession reports whether an account status may hold a session.
+// AccountStatusErased is deliberately ABSENT from this list — that
+// absence is the enforcement point for LC-15 erasure, not an
+// oversight. Adding it back would silently resurrect erased accounts.
 func canHoldSession(status string) bool {
 	return status == "ACTIVE" || status == "ANONYMOUS" || status == "REGISTERED" || status == "VERIFIED" || status == "COMMERCIAL_VERIFIED"
 }
@@ -1835,6 +1858,15 @@ func firstString(payload map[string]any, key string) string {
 // request.
 const PrivacyDeleteGracePeriod = 30 * 24 * time.Hour
 
+// PrivacyDeleteInProgressDelay is when the LC-15 executor flips a
+// delete request from 'received' to 'in_progress'. The operating terms
+// supplement §B fixes the acknowledgement SLA at 24h (「删除请求处理：
+// 一般 24 小时」), so the request stops looking un-handled at exactly
+// the moment the platform is contractually required to have picked it
+// up. It is deliberately shorter than the grace period: the status
+// change acknowledges the request, it does not action it.
+const PrivacyDeleteInProgressDelay = 24 * time.Hour
+
 // PrivacyExportRetention is how long the export snapshot URL stays
 // downloadable. After this window the platform purges the snapshot
 // (it is the user's responsibility to download it within the window).
@@ -2121,6 +2153,168 @@ func (s *Service) listPrivacyRequests(ctx context.Context, e command.Envelope) c
 	return result
 }
 
+// PrivacySweepAction is what one sweep pass did to one request.
+type PrivacySweepAction string
+
+const (
+	// PrivacySweepAcknowledged: received -> in_progress. The platform has
+	// picked the request up; the grace window is still open.
+	PrivacySweepAcknowledged PrivacySweepAction = "ACKNOWLEDGED"
+	// PrivacySweepErased: the personal data is gone and the request is
+	// completed with erased_at set.
+	PrivacySweepErased PrivacySweepAction = "ERASED"
+)
+
+// PrivacySweepOutcome is the per-request result of a sweep pass. The
+// worker logs these; the tests assert on them.
+type PrivacySweepOutcome struct {
+	RequestID string
+	UserID    string
+	Action    PrivacySweepAction
+	Erased    ErasedPersonalData
+	// External is the receipt for the cross-aggregate half (display
+	// names on authored content, the avatar asset, push tokens). Zero
+	// on an ACKNOWLEDGED outcome — nothing is erased at that milestone.
+	External ErasedCrossAggregate
+}
+
+// SweepPrivacyDeletions runs one pass of the LC-15 erasure executor.
+//
+// This is the code the privacy-settings screen has been promising since
+// R16.10: requestPrivacyDelete only writes a 'received' row, and until
+// this method existed nothing ever moved it. It is invoked by the
+// worker on a timer, which is what makes the promise "30 天后你的个人
+// 数据将被永久删除" a statement about the system rather than about a
+// form submission.
+//
+// Two milestones, both derived from requested_at so a worker outage
+// cannot stretch the window:
+//
+//   - requested_at + PrivacyDeleteInProgressDelay (24h) -> in_progress
+//   - requested_at + PrivacyDeleteGracePeriod   (30d) -> erased + completed
+//
+// A request that is already past the grace period goes straight from
+// 'received' to 'completed'; the 24h acknowledgement is a courtesy to
+// the user, not a precondition for erasing.
+//
+// Errors are per-request: one bad row must not stall the backlog. The
+// first error is returned alongside whatever did succeed, so the
+// worker can log it without losing the rest of the pass.
+func (s *Service) SweepPrivacyDeletions(ctx context.Context, now time.Time) ([]PrivacySweepOutcome, error) {
+	repo := s.privacyRepo()
+	if repo == nil {
+		return nil, nil
+	}
+	eraser := s.personalDataEraser()
+	if eraser == nil {
+		return nil, ErrPersonalDataEraserUnavailable
+	}
+	crossEraser := s.crossAggregateEraser()
+	if crossEraser == nil {
+		return nil, ErrCrossAggregateEraserUnavailable
+	}
+	due, err := repo.ListDuePrivacyDeletions(ctx, now.Add(-PrivacyDeleteInProgressDelay))
+	if err != nil {
+		return nil, err
+	}
+	outcomes := make([]PrivacySweepOutcome, 0, len(due))
+	var firstErr error
+	for _, req := range due {
+		outcome, err := s.advancePrivacyDeletion(ctx, repo, crossEraser, eraser, req, now)
+		if err != nil {
+			log.Printf("privacy sweep failed request=%s user=%s err=%v", req.ID, req.UserID, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if outcome != nil {
+			outcomes = append(outcomes, *outcome)
+		}
+	}
+	return outcomes, firstErr
+}
+
+// advancePrivacyDeletion applies the correct milestone for one request
+// and returns what it did (nil when there is nothing to do yet).
+func (s *Service) advancePrivacyDeletion(
+	ctx context.Context,
+	repo PrivacyRequestRepository,
+	cross CrossAggregateEraser,
+	eraser PersonalDataEraser,
+	req PrivacyRequest,
+	now time.Time,
+) (*PrivacySweepOutcome, error) {
+	eraseDue := req.RequestedAt.Add(PrivacyDeleteGracePeriod)
+
+	if now.Before(eraseDue) {
+		if req.Status != PrivacyRequestStatusReceived {
+			return nil, nil
+		}
+		previous := req.Status
+		req.Status = PrivacyRequestStatusInProgress
+		req.Version++
+		if err := repo.UpdatePrivacyRequest(ctx, req, req.Version-1); err != nil {
+			return nil, err
+		}
+		s.recordPrivacyEvent(ctx, req, previous, "grace window open; erasure scheduled for "+eraseDue.UTC().Format(time.RFC3339))
+		return &PrivacySweepOutcome{RequestID: req.ID, UserID: req.UserID, Action: PrivacySweepAcknowledged}, nil
+	}
+
+	// Past the grace window. Erase first, bookkeep second, on purpose:
+	// if the erasure succeeds and the update fails, the next pass
+	// re-runs an idempotent erasure. The reverse order could mark a
+	// request completed whose data was never erased — the one failure
+	// mode that would make the product lie.
+	//
+	// Cross-aggregate BEFORE identity, and that order is forced rather
+	// than a preference: the avatar asset is identifiable only through
+	// identity.profiles.avatar_path, so erasing the identity aggregate
+	// first would make the avatar unreachable to this executor while
+	// leaving it publicly servable. Both halves are idempotent, so a
+	// crash between them simply replays.
+	external, err := cross.EraseCrossAggregateIdentity(ctx, req.UserID)
+	if err != nil {
+		return nil, err
+	}
+	erased, err := eraser.ErasePersonalData(ctx, req.UserID)
+	if err != nil {
+		return nil, err
+	}
+	previous := req.Status
+	completedAt := now.UTC()
+	req.Status = PrivacyRequestStatusCompleted
+	req.CompletedAt = &completedAt
+	req.ErasedAt = &completedAt
+	req.Version++
+	if err := repo.UpdatePrivacyRequest(ctx, req, req.Version-1); err != nil {
+		return nil, err
+	}
+	s.recordPrivacyEvent(ctx, req, previous, "erased: "+erased.Summary()+" | "+external.Summary()+
+		" | retained: "+RetainedOnErasure+" | boundary: "+CrossAggregateErasureBoundary)
+	return &PrivacySweepOutcome{
+		RequestID: req.ID, UserID: req.UserID,
+		Action: PrivacySweepErased, Erased: erased, External: external,
+	}, nil
+}
+
+// recordPrivacyEvent appends the audit row for a sweep transition.
+// Best-effort, matching the rest of the privacy surface: a missing
+// audit row is worse than nothing but must never roll back an erasure
+// that already happened.
+func (s *Service) recordPrivacyEvent(ctx context.Context, req PrivacyRequest, from PrivacyRequestStatus, notes string) {
+	if err := s.privacyRepo().AppendPrivacyRequestEvent(ctx, PrivacyRequestEvent{
+		RequestID:  req.ID,
+		FromStatus: string(from),
+		ToStatus:   string(req.Status),
+		OccurredAt: s.clock.Now().UTC(),
+		Actor:      "system",
+		Notes:      notes,
+	}); err != nil {
+		log.Printf("privacy request event write failed request=%s err=%v", req.ID, err)
+	}
+}
+
 // generatePrivacyExportData assembles the PrivacyDataExport payload.
 // This is the synchronous counterpart of an 'export' request; in
 // production the same code runs in the background job that flips
@@ -2196,6 +2390,32 @@ func (s *Service) GeneratePrivacyExportData(ctx context.Context, userID string) 
 func (s *Service) privacyRepo() PrivacyRequestRepository {
 	if r, ok := s.repository.(PrivacyRequestRepository); ok {
 		return r
+	}
+	return nil
+}
+
+// personalDataEraser is the sibling adapter for the destructive half
+// of LC-15. Kept separate from privacyRepo so the executor's
+// dependency is visible in one place: a deployment whose repository
+// cannot erase refuses to sweep (SweepPrivacyDeletions returns
+// ErrPersonalDataEraserUnavailable) rather than silently marking
+// requests completed without erasing anything.
+func (s *Service) personalDataEraser() PersonalDataEraser {
+	if e, ok := s.repository.(PersonalDataEraser); ok {
+		return e
+	}
+	return nil
+}
+
+// crossAggregateEraser is the third adapter, for the copies of the
+// user's display identity that live outside the identity aggregate.
+// Required, not optional: a deployment that can erase the identity
+// rows but not the display names would report "completed" while the
+// user's name is still on their posts, which is the same lie the
+// identity-side check exists to prevent.
+func (s *Service) crossAggregateEraser() CrossAggregateEraser {
+	if e, ok := s.repository.(CrossAggregateEraser); ok {
+		return e
 	}
 	return nil
 }

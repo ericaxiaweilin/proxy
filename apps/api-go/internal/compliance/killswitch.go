@@ -12,10 +12,19 @@
 //   - DELETE /v1/operator/legal/kill-switch/{category}  (operator only)
 //
 // The server also consults the switch before running certain
-// command types: a KILLED AI_MEDIA switch blocks AI media
-// publish, a KILLED MARKETPLACE switch blocks CreateOrder, a
-// KILLED GLOBAL switch blocks everything that returns a 503
-// "service_disabled" body.
+// command types -- and ONLY those. A KILLED AI_MEDIA switch
+// blocks the AI-media publish commands; a KILLED MARKETPLACE
+// switch blocks the order/payment commands. See
+// EnforceableCategories for the authoritative list.
+//
+// IMPORTANT (2026-09-21): GLOBAL, LOCATION_CONSENT and PAYMENTS
+// are accepted by the database and by this package's wire
+// normalizer, but NO command is gated on them. Arming one
+// records the operator's decision in the audit trail and
+// blocks nothing. This comment used to claim a KILLED GLOBAL
+// switch "blocks everything that returns a 503"; it never did,
+// and there is no such gate anywhere in the server. Read the
+// note on EnforceableCategories before trusting any of these.
 package compliance
 
 import (
@@ -27,8 +36,14 @@ import (
 )
 
 // Category enumerates the things the operator can flip. The
-// check constraint in migration 064 mirrors this list; a
-// mismatch there is a startup-time migration failure.
+// check constraint in migration 064 accepts this same
+// five-value set, but it is deliberately WIDER than what is
+// enforced: the constraint has to keep accepting historical
+// rows for categories that were never wired to an enforcement
+// point. Nothing compares the two lists at startup -- this
+// comment used to claim a mismatch was a "startup-time
+// migration failure", which no code performs. The enforced
+// subset is EnforceableCategories.
 type Category string
 
 const (
@@ -50,14 +65,65 @@ const (
 )
 
 // AllowedCategories is the list the HTTP layer accepts in a
-// request body. We deliberately keep this short: every entry
-// must map to a concrete enforcement point.
+// request body, and the list GlobalStatus reports on. It is
+// the same five-value set the migration 064 check constraint
+// accepts.
+//
+// NOTE (2026-09-21): this is NOT the set of categories that do
+// anything. It used to be documented as "every entry must map
+// to a concrete enforcement point" -- that was false for three
+// of the five. The enforceable subset is
+// EnforceableCategories; anything outside it can still be
+// armed (so the operator's decision is recorded) but blocks no
+// command, and the operator route says so in its response.
 var AllowedCategories = []Category{
 	CategoryGlobal,
 	CategoryAIMedia,
 	CategoryMarketplace,
 	CategoryLocationConsent,
 	CategoryPayments,
+}
+
+// EnforceableCategories is the subset of AllowedCategories that
+// has at least one concrete enforcement point, reached through
+// Server.enforceKillSwitch (apps/api-go/internal/api/
+// command_dispatch.go) -> commandKillSwitchCategory:
+//
+//	AI_MEDIA     -> PublishAIPost, GenerateAIContent
+//	MARKETPLACE  -> CreateOrder, SubmitPayment, ConfirmOrder
+//
+// The other three are deliberately NOT here. Do not add one
+// without also adding its enforcement point -- the LC-16 gate
+// pins this list against commandKillSwitchCategory and will go
+// red if you do:
+//
+//	GLOBAL           needs to gate every command EXCEPT the
+//	                 escape hatches the client needs in order
+//	                 to explain itself (auth, /v1/legal/status).
+//	                 Choosing that exception list is a product
+//	                 decision, not a wiring detail.
+//	LOCATION_CONSENT needs to gate the precise-location
+//	                 commands. Which surfaces count as "precise
+//	                 location" is a product/legal decision.
+//	PAYMENTS         SubmitPayment currently maps to
+//	                 MARKETPLACE, not here. Moving it changes
+//	                 what the marketplace switch blocks.
+var EnforceableCategories = []Category{
+	CategoryAIMedia,
+	CategoryMarketplace,
+}
+
+// IsEnforceable reports whether arming this category blocks any
+// command today. A false result does not make Kill fail: the
+// row is still written so the operator's decision stays in the
+// audit trail. It only means nothing is stopped.
+func IsEnforceable(category Category) bool {
+	for _, c := range EnforceableCategories {
+		if c == category {
+			return true
+		}
+	}
+	return false
 }
 
 // NormalizeCategory guards against case / whitespace drift in

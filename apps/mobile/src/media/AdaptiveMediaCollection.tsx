@@ -22,9 +22,13 @@ import type { VideoPlayer } from "expo-video";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import ImageViewing from "react-native-image-viewing";
+import type { LocalNetClient } from "../localnet-client";
+import { beginMediaView, endMediaView, recordMediaZoom } from "../post-impression";
+import { TrackedImageViewing } from "./TrackedImageViewing";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import { claimVideoPlayback, releaseVideoPlayback } from "./video-playback-registry";
+import { AIMediaBadge } from "./ai-media-badge";
 import type { FeedMediaItem } from "@proxy/contracts";
 import type { MediaCompositionHint } from "@proxy/contracts";
 import {
@@ -123,6 +127,9 @@ function renderKindAwareStage(
     return (
       <View style={styles.singleInset}>
         <VideoStage item={item} uri={playbackUri} autoPlay={shouldAutoPlayVideo(item)} {...(isActive === undefined ? {} : { isActive })} onPress={onPress} frameAspect={aspect} resolveUrl={resolveUrl} {...(onFrame ? { onFrame } : {})} />
+        {/* LC-06 显示侧：VIDEO 分支在图片分支**之前** return —— 标注必须单独挂，
+            否则 AI 生成的视频会成为唯一没有标注的媒体形状。 */}
+        <AIMediaBadge item={item} />
       </View>
     );
   }
@@ -130,6 +137,8 @@ function renderKindAwareStage(
     // §5.2.3 AUDIO：语音播放卡（无画面），playbackUrl 即原文件；不进图片查看器。
     return <AudioStage item={item} uri={resolveUrl(item.playbackUrl ?? "")} />;
   }
+  // 图片分支的标注由 SinglePostImage 在**叶子层**自己挂（ai-media-badge.tsx），
+  // 这里不再重复画 —— 否则同一张图会出现两个「AI 生成」。
   return (
     <View style={styles.singleInset}>
       <SinglePostImage
@@ -156,7 +165,8 @@ export function MediaViewer({
   author,
   resolveUrl,
   onNavigate,
-  onClose
+  onClose,
+  analytics
 }: {
   items: FeedMediaItem[];
   index: number;
@@ -164,13 +174,36 @@ export function MediaViewer({
   resolveUrl: (path: string) => string;
   onNavigate: (next: number) => void;
   onClose: () => void;
+  /** CONTENT-ANALYTICS-001: 看别人的照片时传：每张照片单独记停留，双击 / 捏合放大记一次放大。
+   * 看自己的照片不传（自己看自己不算浏览）。 */
+  analytics?: Pick<LocalNetClient, "recordMediaImpression" | "recordMediaZoom"> | undefined;
 }): React.JSX.Element {
   const safeIndex = Math.max(0, Math.min(index, items.length - 1));
   const current = items[safeIndex];
+  const trackedId = analytics && current && current.mediaType === "IMAGE" ? current.mediaAssetId : undefined;
+  // MEDIA-DWELL-001 / CONTENT-ANALYTICS-001: 每划到一张就结算上一张的停留（不是整段看完才报一次）。
+  useEffect(() => {
+    if (!analytics || !trackedId) return undefined;
+    const startedAt = beginMediaView();
+    return () => { void endMediaView(analytics, trackedId, startedAt); };
+  }, [analytics, trackedId]);
+  // 放大是「从没放大 → 放大」的那一下才记；捏合过程中库会连着报 scaled=true，不能记成十几次。
+  const zoomedRef = useRef(false);
+  const onZoomChange = useCallback((zoomIndex: number, scaled: boolean) => {
+    if (scaled && !zoomedRef.current) {
+      const item = items[zoomIndex];
+      if (analytics && item?.mediaType === "IMAGE") void recordMediaZoom(analytics, item.mediaAssetId);
+    }
+    zoomedRef.current = scaled;
+  }, [analytics, items]);
   if (!current) return <View />;
   const header = (
     <View pointerEvents="box-none" style={viewerStyles.top}>
-      <Text style={viewerStyles.counter}>{safeIndex + 1}/{items.length} · {author}</Text>
+      <Text selectable style={viewerStyles.counter}>{safeIndex + 1}/{items.length} · {author}</Text>
+      {/* LC-06 显示侧：全屏查看器里 AI 生成的图也必须带标注 —— 它跟 feed 里
+          是同一张图，放大了反而没标注 = 用户以为是人拍的。顶栏已经覆盖在图片上，
+          用行内变体（绝对定位会压住右上角关闭按钮）。 */}
+      <AIMediaBadge item={current} inline />
       <Pressable
         accessibilityLabel="关闭原图"
         accessibilityRole="button"
@@ -179,7 +212,7 @@ export function MediaViewer({
         onPressIn={onClose}
         style={viewerStyles.close}
       >
-        <Text style={viewerStyles.closeText}>×</Text>
+        <Text selectable style={viewerStyles.closeText}>×</Text>
       </Pressable>
     </View>
   );
@@ -187,6 +220,8 @@ export function MediaViewer({
   // 不需在 MediaViewer 里自己造 Modal + VideoView (用开源 native fullscreen 代替重复造轮子)。
   // fullscreen 状态由 expo-video 内部管理 (enterFullscreen / exitFullscreen)，
   // 这里返回 null — VideoStage 的 onPress() 已经调 videoViewRef.current.enterFullscreen()。
+  // ⇒ VIDEO 的全屏态是**原生播放器**，没有 React 挂点，标注只能挂在进入全屏之前的
+  //   视频卡上（本文件挂点 ②③）。别试图在这里"补"一个 —— 补不上去。
   if (current.mediaType === "VIDEO") {
     return null as unknown as React.JSX.Element;
   }
@@ -194,6 +229,19 @@ export function MediaViewer({
   const sources = items.map((item) => ({
     uri: resolveUrl(item.galleryUrl ?? item.feedUrl ?? item.thumbnailUrl ?? "")
   }));
+  if (analytics) {
+    return (
+      <TrackedImageViewing
+        backgroundColor="#050507"
+        header={header}
+        imageIndex={safeIndex}
+        images={sources}
+        onImageIndexChange={onNavigate}
+        onRequestClose={onClose}
+        onZoomChange={onZoomChange}
+      />
+    );
+  }
   return (
     <ImageViewing
       images={sources}
@@ -353,6 +401,9 @@ export function SinglePostImage({ item, aspect, resolveUrl, onPress }: {
               />
             </View>
           )}
+          {/* LC-06 显示侧：AI 生成的图必须带标注。挂在**叶子**上 —— 单图帖、
+              个人主页（me.tsx / other-profile.tsx 直接调本组件）都从这里经过。 */}
+          <AIMediaBadge item={item} />
         </Pressable>
       ) : null}
     </View>
@@ -455,8 +506,8 @@ function VideoStage({
           />
         )}
         <View pointerEvents="none" style={styles.videoBadge}>
-          <Text style={styles.videoBadgeText}>视频</Text>
-          {item.durationMs ? <Text style={styles.videoBadgeText}>· {Math.round(item.durationMs / 1000)}s</Text> : null}
+          <Text selectable style={styles.videoBadgeText}>视频</Text>
+          {item.durationMs ? <Text selectable style={styles.videoBadgeText}>· {Math.round(item.durationMs / 1000)}s</Text> : null}
         </View>
       </Pressable>
     );
@@ -602,8 +653,8 @@ function ActiveVideoStage({
         />
       ) : null}
       <View pointerEvents="none" style={styles.videoBadge}>
-        <Text style={styles.videoBadgeText}>视频</Text>
-        {item.durationMs ? <Text style={styles.videoBadgeText}>· {Math.round(item.durationMs / 1000)}s</Text> : null}
+        <Text selectable style={styles.videoBadgeText}>视频</Text>
+        {item.durationMs ? <Text selectable style={styles.videoBadgeText}>· {Math.round(item.durationMs / 1000)}s</Text> : null}
       </View>
     </Pressable>
   );
@@ -690,7 +741,10 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
               ) : (
                 <SocialMediaFrame item={item as ItemWithHint} frameAspect={frameAspect} resolveUrl={resolveUrl} />
               )}
-              <View style={styles.railBadge}><Text style={styles.railBadgeText}>{index + 1}/{items.length}</Text></View>
+              {/* LC-06：多图帖里 AI 生成的那一张也必须标注。图片卡的标注由
+                  SocialMediaFrame（叶子）自己挂；VIDEO 卡没有叶子挂点，这里补。 */}
+              {isVideo ? <AIMediaBadge item={item} /> : null}
+              <View style={styles.railBadge}><Text selectable style={styles.railBadgeText}>{index + 1}/{items.length}</Text></View>
             </Pressable>
           );
         })}

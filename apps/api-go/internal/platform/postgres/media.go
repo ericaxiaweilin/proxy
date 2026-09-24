@@ -28,6 +28,8 @@ const mediaAssetColumns = `
 	COALESCE(orientation,1), COALESCE(color_space,''), has_alpha, animated, moderation_status, visibility_class,
 	composition_hint, COALESCE(composition_recipe_version,''), composition_computed_at, COALESCE(composition_confidence,0),
 	COALESCE(dominant_color_hex,''),
+	ai_generation_source, ai_generated,
+	COALESCE(persona_id,''), COALESCE(subject_id,''), COALESCE(likeness_consent_id,''),
 	created_at, updated_at
 `
 
@@ -45,8 +47,9 @@ func (r *MediaRepository) CreateAsset(ctx context.Context, a media.MediaAsset) e
 			orientation, color_space, has_alpha, animated, moderation_status, visibility_class,
 			composition_hint, composition_recipe_version, composition_computed_at, composition_confidence,
 			dominant_color_hex,
+			ai_generation_source, ai_generated, persona_id, subject_id, likeness_consent_id,
 			created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)`,
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)`,
 		a.MediaAssetID, a.OwnerPrincipalType, a.OwnerPrincipalID, a.MediaType,
 		a.OriginalStorageKey, a.PlaybackStorageKey, a.ThumbnailStorageKey,
 		a.MimeType, a.Width, a.Height, a.DurationMs, a.Codec,
@@ -54,9 +57,29 @@ func (r *MediaRepository) CreateAsset(ctx context.Context, a media.MediaAsset) e
 		a.Orientation, a.ColorSpace, a.HasAlpha, a.Animated, a.ModerationStatus, a.VisibilityClass,
 		hintJSON, a.CompositionRecipeVersion, a.CompositionComputedAt, a.CompositionConfidence,
 		a.DominantColorHex,
+		aiGenerationSource(a), a.AIGenerated, a.PersonaID, a.SubjectID, a.LikenessConsentID,
 		a.CreatedAt, a.UpdatedAt,
 	)
 	return err
+}
+
+// aiGenerationSource 是写入前的最后一道兜底。
+//
+// LC-06 的闸门只在 MarkMediaReady 上，比的是字面量 "UNKNOWN"。如果一行落库时
+// 是空串，闸门读回来还是空串，比对失败 → 放行 —— 那就是 fail-open。
+// 迁移 108 给这一列设了 NOT NULL DEFAULT 'USER_UPLOADED'，但 DEFAULT 只在
+// 语句完全没提这一列时生效，而这里显式传参，所以空值必须在这里就归一化掉。
+// 空串按「手机直传」处理（与 internal/media 的 normalizeAIGenerationSource
+// 对空输入的口径一致）；闭集之外的任何值一律落 'UNKNOWN'，让闸门去拒绝。
+func aiGenerationSource(a media.MediaAsset) string {
+	switch a.AIGenerationSource {
+	case "USER_UPLOADED", "AI_PERSONA", "MODEL_API", "UNKNOWN":
+		return a.AIGenerationSource
+	case "":
+		return "USER_UPLOADED"
+	default:
+		return "UNKNOWN"
+	}
 }
 
 func (r *MediaRepository) GetAsset(ctx context.Context, id string) (media.MediaAsset, error) {
@@ -73,6 +96,8 @@ func (r *MediaRepository) GetAsset(ctx context.Context, id string) (media.MediaA
 		&a.Orientation, &a.ColorSpace, &a.HasAlpha, &a.Animated, &a.ModerationStatus, &a.VisibilityClass,
 		&hintJSON, &a.CompositionRecipeVersion, &computedAt, &a.CompositionConfidence,
 		&a.DominantColorHex,
+		&a.AIGenerationSource, &a.AIGenerated,
+		&a.PersonaID, &a.SubjectID, &a.LikenessConsentID,
 		&a.CreatedAt, &a.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -117,7 +142,10 @@ func (r *MediaRepository) GetAssets(ctx context.Context, ids []string) ([]media.
 			&a.ProcessingStatus, &a.PlaybackURL, &a.ThumbnailURL, &a.SourceBytes, &a.ChecksumSHA256,
 			&a.Orientation, &a.ColorSpace, &a.HasAlpha, &a.Animated, &a.ModerationStatus, &a.VisibilityClass,
 			&hintJSON, &a.CompositionRecipeVersion, &computedAt, &a.CompositionConfidence,
-			&a.DominantColorHex, &a.CreatedAt, &a.UpdatedAt,
+			&a.DominantColorHex,
+			&a.AIGenerationSource, &a.AIGenerated,
+			&a.PersonaID, &a.SubjectID, &a.LikenessConsentID,
+			&a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -149,8 +177,9 @@ func (r *MediaRepository) UpdateAsset(ctx context.Context, a media.MediaAsset, e
 			composition_hint=$19, composition_recipe_version=$20,
 			composition_computed_at=$21, composition_confidence=$22,
 			dominant_color_hex=$23,
-			updated_at=$24
-		WHERE media_asset_id=$25 AND processing_status=$26`,
+			likeness_consent_id=$24,
+			updated_at=$25
+		WHERE media_asset_id=$26 AND processing_status=$27`,
 		a.PlaybackStorageKey, a.ThumbnailStorageKey, a.MimeType,
 		a.Width, a.Height, a.DurationMs, a.Codec,
 		a.ProcessingStatus, a.PlaybackURL, a.ThumbnailURL,
@@ -158,6 +187,11 @@ func (r *MediaRepository) UpdateAsset(ctx context.Context, a media.MediaAsset, e
 		a.HasAlpha, a.Animated, a.ModerationStatus, a.VisibilityClass,
 		hintJSON, a.CompositionRecipeVersion, a.CompositionComputedAt, a.CompositionConfidence,
 		a.DominantColorHex,
+		// LC-07: MarkMediaReady 通过同意校验后把 consent.ID 盖在这里。
+		// 只有这一列会在这里更新 —— ai_generation_source / persona_id /
+		// subject_id 是创建时定下的溯源，不允许被后续状态流转改写。
+		// 空串写 NULL，读回时由 COALESCE 还原成空串。
+		nullIfEmpty(a.LikenessConsentID),
 		a.UpdatedAt, a.MediaAssetID, expectedStatus,
 	)
 	if err != nil {
@@ -228,6 +262,69 @@ func (r *MediaRepository) Snapshot(ctx context.Context) ([]media.MediaAsset, err
 			&a.Orientation, &a.ColorSpace, &a.HasAlpha, &a.Animated, &a.ModerationStatus, &a.VisibilityClass,
 			&hintJSON, &a.CompositionRecipeVersion, &computedAt, &a.CompositionConfidence,
 			&a.DominantColorHex,
+			&a.CreatedAt, &a.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		a.CompositionComputedAt = computedAt
+		if len(hintJSON) > 0 {
+			hint, hintErr := decodeCompositionHint(hintJSON)
+			if hintErr != nil {
+				return nil, hintErr
+			}
+			a.CompositionHint = hint
+		}
+		result = append(result, a)
+	}
+	return result, rows.Err()
+}
+
+// AI-TWIN-GALLERY-001: 图库两个 tab 各自的真实查询，SELECT 用 GetAssets 那
+// 一套完整 scan（含 AI 溯源 5 列），不是 Snapshot 那套少 scan 的旧写法。
+func (r *MediaRepository) ListByPersona(ctx context.Context, personaID string) ([]media.MediaAsset, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT `+mediaAssetColumns+`
+		FROM media.media_assets
+		WHERE persona_id = $1 AND processing_status = 'READY'
+		ORDER BY created_at DESC
+		LIMIT 60`, personaID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMediaAssetRows(rows)
+}
+
+func (r *MediaRepository) ListByOwner(ctx context.Context, ownerPrincipalID string) ([]media.MediaAsset, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT `+mediaAssetColumns+`
+		FROM media.media_assets
+		WHERE owner_principal_id = $1 AND processing_status = 'READY'
+		ORDER BY created_at DESC
+		LIMIT 60`, ownerPrincipalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMediaAssetRows(rows)
+}
+
+func scanMediaAssetRows(rows pgx.Rows) ([]media.MediaAsset, error) {
+	result := []media.MediaAsset{}
+	for rows.Next() {
+		var a media.MediaAsset
+		var hintJSON []byte
+		var computedAt *time.Time
+		if err := rows.Scan(
+			&a.MediaAssetID, &a.OwnerPrincipalType, &a.OwnerPrincipalID, &a.MediaType,
+			&a.OriginalStorageKey, &a.PlaybackStorageKey, &a.ThumbnailStorageKey,
+			&a.MimeType, &a.Width, &a.Height, &a.DurationMs, &a.Codec,
+			&a.ProcessingStatus, &a.PlaybackURL, &a.ThumbnailURL, &a.SourceBytes, &a.ChecksumSHA256,
+			&a.Orientation, &a.ColorSpace, &a.HasAlpha, &a.Animated, &a.ModerationStatus, &a.VisibilityClass,
+			&hintJSON, &a.CompositionRecipeVersion, &computedAt, &a.CompositionConfidence,
+			&a.DominantColorHex,
+			&a.AIGenerationSource, &a.AIGenerated,
+			&a.PersonaID, &a.SubjectID, &a.LikenessConsentID,
 			&a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
 			return nil, err

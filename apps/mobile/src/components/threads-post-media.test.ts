@@ -21,8 +21,10 @@ describe("MEDIA-ROW-HARDEN-001 profile post photos use the fixed-size golden-rat
     expect(code).not.toMatch(/\brow: \{/);
   });
 
-  it("renders 2+ photos in a horizontal ScrollView, all items, none dropped", () => {
-    expect(code).toContain("<ScrollView horizontal");
+  it("renders 2+ photos in an isolated horizontal rail, all items, none dropped", () => {
+    // SWIPE-RAIL-001：裸 ScrollView 会被外层切页抢走手势 —— 用 HorizontalSwipeRail
+    //（内部就是横滑 ScrollView），行为不断：全部 items 照样 map 出来。
+    expect(code).toContain("<HorizontalSwipeRail contentContainerStyle={styles.rowContent} preserveChildPresses threshold={3}>");
     expect(code).toContain("items.map((item, i) =>");
   });
 

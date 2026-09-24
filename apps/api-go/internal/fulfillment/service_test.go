@@ -119,6 +119,18 @@ func TestTraceableHumanOrder(t *testing.T) {
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("satisfaction: got %s (%+v)", r.Outcome, r.Error)
 	}
+	// MATCH-RANK-001：满意度真的落在订单上（以前只发事件、哪都不存，撮合排序读不到）。
+	stored, err := s.repository.GetOrder(context.Background(), orderID)
+	if err != nil || stored.Outcome == nil || stored.Outcome.Satisfaction == nil || stored.Outcome.Satisfaction.Resolved != "FULL" || stored.Outcome.Satisfaction.RepeatIntent != "REUSE" {
+		t.Fatalf("satisfaction must be persisted on the order outcome: %+v %v", stored.Outcome, err)
+	}
+	// 服务者不能给自己打分。
+	self := envelopeFor("RecordSatisfaction", map[string]any{"resolved": "FULL", "repeatIntent": "REUSE"}, orderID)
+	self.Actor = command.Actor{Type: "USER", ID: stored.AgentID}
+	self.Principal = command.Principal{Type: "INDIVIDUAL", ID: stored.AgentID}
+	if r := s.Handle(self); r.Outcome == "ACCEPTED" {
+		t.Fatalf("the provider must not rate their own order")
+	}
 }
 
 func TestListMyOrdersOnlyReturnsActorOrdersWithViewerRole(t *testing.T) {
@@ -1245,7 +1257,7 @@ func inviteAs(agentID, offerID string, accept bool) command.Envelope {
 		Target: command.Target{Type: "Offer", ID: offerID}, IdempotencyKey: "idem_resp_" + offerID,
 		AuthContext: map[string]any{"session": "s1"}, Purpose: "test", CorrelationID: "corr_resp",
 		RequestedAt: "2026-08-16T00:00:00Z",
-		Payload: map[string]any{"offerId": offerID, "accept": accept},
+		Payload:     map[string]any{"offerId": offerID, "accept": accept},
 	}
 }
 

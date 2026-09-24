@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { OpsGate } from "./components/OpsGate";
+import { clearOpsSession, onOpStatus, readOpsSession, type OpStatus } from "./lib/api";
 import { Overview } from "./pages/Overview";
 import { ContextField } from "./pages/ContextField";
 import { Surface } from "./pages/Surface";
@@ -12,6 +14,7 @@ import { FulfillmentAttr } from "./pages/FulfillmentAttr";
 import { Population } from "./pages/Population";
 import { Tags } from "./pages/Tags";
 import { IntentOrchestration } from "./pages/IntentOrchestration";
+import { Gravity } from "./pages/Gravity";
 import { EngineAPI } from "./pages/EngineAPI";
 import { Merchant } from "./pages/Merchant";
 import { Retention } from "./pages/Retention";
@@ -44,7 +47,13 @@ const TITLES: Record<Page, string> = {
 };
 
 export function App() {
-  const [page, setPage] = useState<Page>("overview");
+  const [page, setPageRaw] = useState<Page>("overview");
+  // OPS-REAL-001：页面取数时遇到 未登录 / 非运营 / 未接入，由这里统一展示；换页清空，登录后整页重取。
+  const [status, setStatus] = useState<OpStatus | undefined>(undefined);
+  const [reload, setReload] = useState(0);
+  const [who, setWho] = useState(() => readOpsSession()?.userAccountId);
+  useEffect(() => onOpStatus(setStatus), []);
+  const setPage = (next: Page): void => { setStatus(undefined); setPageRaw(next); };
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -95,10 +104,16 @@ export function App() {
         <div className="topbar">
           <div className="titlewrap">
             <div className="title">{TITLES[page]}</div>
-            <div className="subtitle">Proxy Market Intelligence + Decision Engine v9 · React 控制台（接真实 /v1/experience/metrics）</div>
+            <div className="subtitle">Proxy 运营控制台 · 仅运营可见 · 没有数据源的页面显示「未接入」，不显示任何数字</div>
           </div>
+          {who ? (
+            <button className="ops-logout" onClick={() => { clearOpsSession(); setWho(undefined); setStatus({ kind: "auth" }); }}>
+              运营 {who.slice(0, 14)}… · 退出
+            </button>
+          ) : null}
         </div>
-        <div className="content">
+        {status ? <OpsGate onLoggedIn={() => { setWho(readOpsSession()?.userAccountId); setStatus(undefined); setReload((n) => n + 1); }} status={status} /> : null}
+        <div className="content" key={reload} style={status ? { display: "none" } : undefined}>
           {page === "overview" && <Overview />}
           {page === "contextfield" && <ContextField />}
           {page === "surface" && <Surface />}
@@ -112,7 +127,8 @@ export function App() {
           {page === "fulfillmentattr" && <FulfillmentAttr />}
           {page === "population" && <Population />}
           {page === "tags" && <Tags />}
-          {page === "intent" && <IntentOrchestration />}
+          {/* GRAVITY-001: 「意图与撮合」= 真实引力状态；「编排与调度」仍未接入 */}
+          {page === "intent" && <Gravity />}
           {page === "orchestration" && <IntentOrchestration />}
           {page === "merchant" && <Merchant />}
           {page === "retention" && <Retention />}

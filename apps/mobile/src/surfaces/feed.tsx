@@ -5,16 +5,17 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, AppState, Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Animated, AppState, Image, Modal, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
+import { usePullToRefresh } from "../components/pull-to-refresh";
 import ImageViewing from "react-native-image-viewing";
 import type { FeedMediaItem, FeedPost, PostEngagement, PostPollView, PostReply } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type SecureSessionStore, OfflineFallbackSessionError } from "../secure-session";
 import { type AIAccountClient } from "../ai-account-client";
 import { localApiBaseUrl } from "../native-clients";
-import { resolveAuthorAvatar, type AvatarAccount } from "../media/author-avatar";
+import { resolveAuthorAvatar, type AvatarAccount, type AvatarHumanAccount, initialAvatarTint } from "../media/author-avatar";
 import { mapEngagementError, mapFollowError } from "./feed-error-map";
 import { type EngagementClient } from "../engagement-client";
 import type { ProfileClient } from "../profile-client";
@@ -54,6 +55,7 @@ import { type SocialSpaceClient } from "../socialspace-client";
 import { isOwnAuthorId, isOwnPost as isOwnPostById, resolveAuthorDisplayName, resolveReplyAuthorDisplayName } from "../feed-author";
 import { hiddenReplyCount, repliesMatchingFirst, shouldOfferReplyToggle, visibleReplies } from "../reply-preview";
 import { ProxyLoading } from "../components/proxy-foundation";
+import { useFeedImpressions, visiblePostIds, type CardFrame } from "../feed-impressions";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
 // CAFE-SCENE-001: 原来是 "POSTS" | "STATUS" | "COMMUNITY"——用「咖啡场景」
@@ -73,6 +75,35 @@ let feedNetworkLoadedThisSession = false;
 // 切 tab 再回来不闪；effect 照常异步重验，不一致就纠正（换头像后最多闪一帧旧图，
 // 不闪黑）。按账户 key，切换账号不串。
 let cachedViewerAvatar: { accountId: string; uri: string } | undefined;
+
+// AVATAR-OTHER-HUMAN-002 (2026-09-21): 其他真人作者的头像缓存。
+//
+// 背景：`FeedPostSchema` 没有头像字段，服务端 feed 查询也不 JOIN
+// `identity.profiles`，所以「非本人、非 AI」的作者在动态里一律只能画首字黑圈。
+// 本地库实测：69 条 PUBLISHED 里 46 条（67%）如此，其中 23 条的作者在服务端
+// **真有**头像资产（`identity.profiles.avatar_path = assets/<mediaAssetId>`）。
+// AI 账号有 listRecommended 批量接口，真人没有 —— 只能按 accountId 逐个
+// getProfile，所以这里必须做会话级缓存，否则每次 remount 都是请求风暴。
+//
+// 值是 `null` 表示「查过了，但没有头像」—— 与「没查过」区分开，避免反复重查
+// 那些注定没有头像的账号。
+let humanAvatarCache: Map<string, AvatarHumanAccount | null> = new Map();
+// 在飞去重：同一个 accountId 并发只查一次。
+const humanAvatarInFlight = new Set<string>();
+// 并发上限：首屏最多同时挂 6 个 getProfile，失败静默（渲染走首字兜底）。
+const AUTHOR_AVATAR_FETCH_CONCURRENCY = 6;
+// 不进这个管线的 authorType：AGENT / AI_NATIVE 各有自己的解析路径（AI 账号表、
+// 打包人像），PLATFORM_SPECIAL 是平台内容、没有对应账号。其余（USER / MERCHANT
+// 以及以后新增的真人类型）都去查真实 profile。
+const AUTHOR_AVATAR_SKIP_TYPES: ReadonlySet<string> = new Set(["AGENT", "AI_NATIVE", "PLATFORM_SPECIAL"]);
+
+function snapshotHumanAvatars(): ReadonlyMap<string, AvatarHumanAccount> {
+  const out = new Map<string, AvatarHumanAccount>();
+  for (const [accountId, account] of humanAvatarCache) {
+    if (account) out.set(accountId, account);
+  }
+  return out;
+}
 
 // 本人头像：与“我的→个人总管理”同源（profileStore 本地记录 + document
 // 目录重锚 + 存在性校验，AVATAR-001 同款逻辑）。动态之前写死黑底圆圈，
@@ -103,7 +134,7 @@ function scenarioIconForPost(post: FeedPost): ProxyIconName {
 }
 
 // FEED-OWN-001: "你" is viewer-relative and resolved per call site via
-// resolveAuthorDisplayName(post, viewerAccountId) — never a stored name.
+// resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName) — never a stored name.
 
 function relativeTime(iso: string): string {
   const diffMs = Date.now() - Date.parse(iso);
@@ -356,6 +387,59 @@ export function FeedSurface({
   }, [feedProfileStore, aiAccountsClient, profileClient, viewerAccountId]);
   // MEDIA-PIPELINE-001: AI 账号目录已在上方并行初始化（启动优化），此处仅保留状态。
   const [aiAccountsById, setAiAccountsById] = useState<ReadonlyMap<string, AvatarAccount>>(new Map());
+
+  // AVATAR-OTHER-HUMAN-002: 真人作者头像。
+  // 真相源是模块级 humanAvatarCache（跨 remount 存活）；这个计数器只是让缓存
+  // 增长后能触发一次重算 —— 不另存一份 state，就不会出现「缓存有了、state 还是
+  // 旧的」这种两处状态互相追不上的 bug。
+  // OWN-NAME-001：自己的帖子显示自己的当前用户名（不再是「你」）。拿不到就用帖子保存的名字。
+  const [viewerDisplayName, setViewerDisplayName] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!profileClient || !viewerAccountId) return undefined;
+    let cancelled = false;
+    profileClient.getProfile(viewerAccountId)
+      .then((profile) => { if (!cancelled) setViewerDisplayName(profile.name?.trim() || undefined); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [profileClient, viewerAccountId]);
+  const [humanAvatarVersion, setHumanAvatarVersion] = useState(0);
+  const humanAvatarsById = useMemo(() => snapshotHumanAvatars(), [humanAvatarVersion]);
+  useEffect(() => {
+    if (!profileClient) return;
+    let cancelled = false;
+    const wanted: string[] = [];
+    for (const post of posts) {
+      const authorId = post.authorId;
+      if (authorId === viewerAccountId) continue; // 本人走本地文件优先那条路
+      if (AUTHOR_AVATAR_SKIP_TYPES.has(post.authorType)) continue;
+      if (humanAvatarCache.has(authorId) || humanAvatarInFlight.has(authorId)) continue;
+      if (!wanted.includes(authorId)) wanted.push(authorId);
+    }
+    if (wanted.length === 0) return;
+    void (async () => {
+      for (let i = 0; i < wanted.length; i += AUTHOR_AVATAR_FETCH_CONCURRENCY) {
+        if (cancelled) return;
+        const chunk = wanted.slice(i, i + AUTHOR_AVATAR_FETCH_CONCURRENCY);
+        for (const accountId of chunk) humanAvatarInFlight.add(accountId);
+        await Promise.all(chunk.map(async (accountId) => {
+          try {
+            const profile = await profileClient.getProfile(accountId);
+            const path = (profile?.avatarPath ?? "").trim();
+            // 没有头像也记下来（null），否则每次 remount 都会重查这些注定空的账号。
+            humanAvatarCache.set(accountId, path === "" ? null : { avatarPath: path, avatarVersion: profile.version });
+          } catch {
+            // 查不到就当作没有头像：动态渲染走首字兜底，绝不因为头像失败影响内容。
+            humanAvatarCache.set(accountId, null);
+          } finally {
+            humanAvatarInFlight.delete(accountId);
+          }
+        }));
+        if (cancelled) return;
+        setHumanAvatarVersion((version) => version + 1);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [posts, profileClient, viewerAccountId]);
   function isOwnPost(post: FeedPost): boolean {
     // FEED-OWN-001: strict author-id check only. Unknown viewer is
     // fail-closed (never own); display-name matching is forbidden.
@@ -394,6 +478,8 @@ export function FeedSurface({
   }, [customFeedDef]);
   // X 式内联视频自动播放：滑近视口中心自动播（默认静音）、滑出即停，同一时刻仅一条在播。
   const [cardYs, setCardYs] = useState<Record<string, number>>({});
+  // CONTENT-ANALYTICS-001: 卡片高度，给信息流曝光判定用（见 feed-impressions.ts）。
+  const [cardHeights, setCardHeights] = useState<Record<string, number>>({});
   const [frames, setFrames] = useState<Record<string, { y: number; height: number }>>({});
   const [scrollY, setScrollY] = useState(0);
   const [stickyHeaderVisible, setStickyHeaderVisible] = useState(false);
@@ -451,6 +537,19 @@ export function FeedSurface({
     }
     return best;
   }, [cardYs, frames, scrollY, viewportHeight]);
+
+  // CONTENT-ANALYTICS-001: 信息流卡片曝光 + 停留（以前信息流一条都不报，战绩里的浏览全靠他人主页那一处）。
+  // 自己的帖子不算浏览。
+  const ownPostIds = useMemo(() => new Set(posts.filter((post) => isOwnPostById(post, viewerAccountId)).map((post) => post.postId)), [posts, viewerAccountId]);
+  const seenPostIds = useMemo(() => {
+    const cards: Record<string, CardFrame> = {};
+    for (const [postId, y] of Object.entries(cardYs)) {
+      const height = cardHeights[postId];
+      if (height !== undefined && !ownPostIds.has(postId)) cards[postId] = { y, height };
+    }
+    return visiblePostIds(cards, scrollY, viewportHeight);
+  }, [cardYs, cardHeights, ownPostIds, scrollY, viewportHeight]);
+  useFeedImpressions(localNet, seenPostIds);
 
   // 【新增】视频帧位置上报：videoKey 格式 "postId:index:mediaAssetId"
   const onVideoFrame = useCallback((videoKey: string, frame: { y: number; height: number }) => {
@@ -532,6 +631,10 @@ export function FeedSurface({
       setPhase(cachedPosts.length > 0 ? "READY" : "ERROR");
     }
   }, [localNet]);
+
+  // PULL-REFRESH-001: 下拉重拉第一页，fresh 穿透 HTTP 缓存（同发布后的重载，FEED-FRESH-001）；
+  // 正在搜索时按当前查询重拉。
+  const feedPull = usePullToRefresh(useCallback(() => loadFeed(searchQuery || undefined, true), [loadFeed, searchQuery]));
 
   async function loadMoreFeed(): Promise<void> {
     if (!hasMore || !nextCursor || loadingMoreRef.current || phase !== "READY") return;
@@ -1024,7 +1127,7 @@ export function FeedSurface({
       if (!isPostWithinScope(post.createdAt, scope)) return false;
       // 偏好-不想看：主题切词命中正文/上下文/作者即隐藏。
       if (feedPrefs.muted.length > 0) {
-        const haystack = [resolveAuthorDisplayName(post, viewerAccountId), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
+        const haystack = [resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
           .filter((value): value is string => typeof value === "string")
           .join(" ")
           .toLocaleLowerCase();
@@ -1071,7 +1174,7 @@ export function FeedSurface({
       } else if (customFeedTokens.length > 0) {
         // AI 生成的自定频道（id=ai_…）：内置 feedMap 没有规则，
         // 用频道名+描述切词做本地过滤；之前直接看全部。
-        const haystack = [resolveAuthorDisplayName(post, viewerAccountId), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
+        const haystack = [resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
           .filter((value): value is string => typeof value === "string")
           .join(" ")
           .toLocaleLowerCase();
@@ -1130,6 +1233,7 @@ export function FeedSurface({
     <View style={styles.root}>
     <ScrollView
       ref={scrollRef}
+      refreshControl={<RefreshControl refreshing={feedPull.refreshing} onRefresh={feedPull.onRefresh} />}
       style={styles.scrollRoot}
       contentContainerStyle={[styles.content, { paddingBottom: bottomPad }]}
       onScroll={onFeedScroll}
@@ -1149,16 +1253,16 @@ export function FeedSurface({
     >
       {/* R15.3 feedhead：≡ + 标题 + ＋ */}
       <View style={styles.feedHead}>
-        <Text style={styles.feedTitle}>动态</Text>
+        <Text selectable style={styles.feedTitle}>动态</Text>
         <View style={styles.feedTools}>
           <Pressable accessibilityLabel="定制频道" onPress={() => setCustomFeedHubOpen(true)} style={styles.iconBtn}>
-            <Text style={styles.iconBtnText}>≡</Text>
+            <Text selectable style={styles.iconBtnText}>≡</Text>
           </Pressable>
           <Pressable accessibilityLabel={searchOpen ? "关闭动态搜索" : "搜索动态"} onPress={() => setSearchOpen((value) => !value)} style={styles.iconBtn}>
             <ProxyIcon color={color.ink} name="search" size={18} />
           </Pressable>
           <Pressable onPress={toggleEmbeddedComposer} style={styles.iconBtn}>
-            <Text style={styles.iconBtnText}>{composerOpen ? "×" : "＋"}</Text>
+            <Text selectable style={styles.iconBtnText}>{composerOpen ? "×" : "＋"}</Text>
           </Pressable>
         </View>
       </View>
@@ -1169,7 +1273,7 @@ export function FeedSurface({
           return (
             <Pressable key={entry.id} onPress={() => setSection(entry.id)} style={[styles.sectionTab, active && styles.sectionTabOn]}>
               <ProxyIcon color={active ? color.white : color.muted} name={entry.icon} size={16} />
-              <Text style={[styles.sectionTabText, active && styles.sectionTabTextOn]}>{entry.label}</Text>
+              <Text selectable style={[styles.sectionTabText, active && styles.sectionTabTextOn]}>{entry.label}</Text>
             </Pressable>
           );
         })}
@@ -1177,11 +1281,11 @@ export function FeedSurface({
 
       {scopeHiddenCount > 0 ? (
         <View style={styles.scopeBanner} testID="feed-scope-banner-v1">
-          <Text style={styles.scopeBannerText}>
+          <Text selectable style={styles.scopeBannerText}>
             正在按「{feedScopeLabel(feedPrefs.scope)}」筛选 · 已隐藏 {scopeHiddenCount} 篇更早的
           </Text>
           <Pressable accessibilityLabel="显示全部帖文" onPress={clearScopeFilter}>
-            <Text style={styles.scopeBannerAction}>显示全部</Text>
+            <Text selectable style={styles.scopeBannerAction}>显示全部</Text>
           </Pressable>
         </View>
       ) : null}
@@ -1192,9 +1296,9 @@ export function FeedSurface({
       <>
       {selectedCustomFeed ? (
         <View style={styles.customFeedBanner}>
-          <Text style={styles.customFeedBannerText}>定制频道 · {CUSTOM_FEED_LABELS[selectedCustomFeed] ?? customFeedDef?.name ?? selectedCustomFeed}</Text>
+          <Text selectable style={styles.customFeedBannerText}>定制频道 · {CUSTOM_FEED_LABELS[selectedCustomFeed] ?? customFeedDef?.name ?? selectedCustomFeed}</Text>
           <Pressable onPress={() => setSelectedCustomFeed(null)}>
-            <Text style={styles.customFeedBannerAction}>退出频道</Text>
+            <Text selectable style={styles.customFeedBannerAction}>退出频道</Text>
           </Pressable>
         </View>
       ) : null}
@@ -1212,7 +1316,7 @@ export function FeedSurface({
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
-        {searchQuery ? <Pressable accessibilityLabel="清空动态搜索" onPress={() => setSearchQuery("")}><Text style={styles.searchArrow}>×</Text></Pressable> : null}
+        {searchQuery ? <Pressable accessibilityLabel="清空动态搜索" onPress={() => setSearchQuery("")}><Text selectable style={styles.searchArrow}>×</Text></Pressable> : null}
       </View> : null}
 
       {/* R15.3 networktabs：2 列（推荐 / 关注） */}
@@ -1221,7 +1325,7 @@ export function FeedSurface({
           const active = tab === entry.id;
           return (
             <Pressable key={entry.id} onPress={() => setTab(entry.id)} style={styles.tabItem}>
-              <Text style={[styles.tabText, active && styles.tabTextActive]}>{entry.label}</Text>
+              <Text selectable style={[styles.tabText, active && styles.tabTextActive]}>{entry.label}</Text>
               {active ? (
                 <View style={styles.tabBar}>
                   <View style={[styles.tabBarSeg, { backgroundColor: color.magenta }]} />
@@ -1253,18 +1357,18 @@ export function FeedSurface({
       {/* R15.3 preferencehint：推荐由你和算法共同决定 */}
       <View style={styles.prefHint}>
         <View style={styles.prefHintLeft}>
-          <Text style={styles.prefHintTitle}>推荐由你和算法共同决定</Text>
-          <Text style={styles.prefHintSub}>搜索意图优先 · 可随时减少 / 屏蔽</Text>
+          <Text selectable style={styles.prefHintTitle}>推荐由你和算法共同决定</Text>
+          <Text selectable style={styles.prefHintSub}>搜索意图优先 · 可随时减少 / 屏蔽</Text>
         </View>
         <Pressable onPress={onOpenFeedPrefs}>
-          <Text style={styles.prefHintBtn}>调整 ›</Text>
+          <Text selectable style={styles.prefHintBtn}>调整 ›</Text>
         </Pressable>
       </View>
 
       {/* 新更新提示条 */}
       {pendingCount > 0 ? (
         <Pressable onPress={showLatest} style={styles.updateBanner}>
-          <Text style={styles.updateBannerText}>{pendingCount} 条更新 · 点击查看最新</Text>
+          <Text selectable style={styles.updateBannerText}>{pendingCount} 条更新 · 点击查看最新</Text>
         </Pressable>
       ) : null}
 
@@ -1281,24 +1385,24 @@ export function FeedSurface({
         visible={composerOpen}
       />
 
-      {engagementError ? <Text style={styles.engagementError}>{engagementError}</Text> : null}
-      {engagementNotice ? <Text style={styles.engagementNotice}>{engagementNotice}</Text> : null}
+      {engagementError ? <Text selectable style={styles.engagementError}>{engagementError}</Text> : null}
+      {engagementNotice ? <Text selectable style={styles.engagementNotice}>{engagementNotice}</Text> : null}
       {phase === "LOADING" ? (
         <View style={styles.feedEmpty}>
           <ProxyLoading tone="brand" />
-          <Text style={styles.feedEmptyText}>正在读取本地动态（ListFeedPosts）…</Text>
+          <Text selectable style={styles.feedEmptyText}>正在读取本地动态（ListFeedPosts）…</Text>
         </View>
       ) : phase === "ERROR" ? (
         <View style={styles.feedEmpty}>
-          <Text style={styles.feedEmptyText}>读模型暂时不可用（本地 API 未连接？）。</Text>
-          {lastFeedError ? <Text style={[styles.feedEmptyText, { marginTop: 8, color: color.error }]}>{lastFeedError}</Text> : null}
+          <Text selectable style={styles.feedEmptyText}>读模型暂时不可用（本地 API 未连接？）。</Text>
+          {lastFeedError ? <Text selectable style={[styles.feedEmptyText, { marginTop: 8, color: color.error }]}>{lastFeedError}</Text> : null}
           <Pressable onPress={() => void loadFeed(undefined, true)} style={styles.retryBtn}>
-            <Text style={styles.retryBtnText}>重试</Text>
+            <Text selectable style={styles.retryBtnText}>重试</Text>
           </Pressable>
         </View>
       ) : visible.length === 0 ? (
         <View style={styles.feedEmpty}>
-          <Text style={styles.feedEmptyText}>
+          <Text selectable style={styles.feedEmptyText}>
 			{feedFilter !== "ALL"
 			  ? `当前筛选下没有足够内容。换个筛选，或直接搜索你想找的东西。`
 			  : "这里还没有足够的动态。关注本地的人和商家后会更有用。"}
@@ -1309,11 +1413,11 @@ export function FeedSurface({
           {visible.map((post) => {
           const quoted = findQuote(post);
           const items = mediaFor(post.postId);
-          const name = resolveAuthorDisplayName(post, viewerAccountId);
+          const name = resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName);
           // MEDIA-PIPELINE-001: 头像走统一管线（本人/AI 账号/AI 人像/首字）。
           const avatar = resolveAuthorAvatar(
             { authorType: post.authorType, authorId: post.authorId },
-            { baseUrl: localApiBaseUrl, viewerAccountId, viewerAvatarUri: isOwnPost(post) ? viewerAvatarUri : undefined, avatarSource: isOwnPost(post) ? viewerAvatarUri ? { uri: viewerAvatarUri } : undefined : undefined, aiAccountsById, displayName: name }
+            { baseUrl: localApiBaseUrl, viewerAccountId, viewerAvatarUri: isOwnPost(post) ? viewerAvatarUri : undefined, avatarSource: isOwnPost(post) ? viewerAvatarUri ? { uri: viewerAvatarUri } : undefined : undefined, aiAccountsById, humanAvatarsById, displayName: name }
           );
           const meta = AUTHOR_TYPE_META[post.authorType];
           const isFollow = following.has(post.authorId);
@@ -1338,7 +1442,7 @@ export function FeedSurface({
             <View
               key={post.postId}
               style={styles.postCard}
-              onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) setCardYs((prev) => ({ ...prev, [post.postId]: ly.y })); }}
+              onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) { setCardYs((prev) => ({ ...prev, [post.postId]: ly.y })); setCardHeights((prev) => ({ ...prev, [post.postId]: ly.height })); } }}
             >
               {/* posthead — R15.69 (restored) 拆头像/名字为 2 个 Pressable:
                   点头像 弹 关注/访问个人主页 菜单 (openProfileActions),
@@ -1358,8 +1462,9 @@ export function FeedSurface({
                     ) : avatar.kind === "image" ? (
                       <CircularAvatarImage accessibilityLabel={`${name}头像`} size={44} source={avatar.source} />
                     ) : (
-                      <View style={styles.postAvatar}>
-                        <Text style={styles.postAvatarText}>{avatar.letter}</Text>
+                      // AVATAR-FALLBACK-TINT-001：没有头像 → 按 id 的柔和底色 + 首字，不再是 #111 黑圆。
+                      <View style={[styles.postAvatar, { backgroundColor: initialAvatarTint(post.authorId).backgroundColor }]}>
+                        <Text selectable style={[styles.postAvatarText, { color: initialAvatarTint(post.authorId).color }]}>{avatar.letter}</Text>
                       </View>
                     )}
                   </View>
@@ -1375,11 +1480,11 @@ export function FeedSurface({
                 >
                 <View style={styles.postIdentity}>
                   <View style={styles.postNameLine}>
-                    <Text style={styles.postName}>{name}</Text>
-                    <Text style={styles.postMeta}>· {relativeTime(post.createdAt)}</Text>
+                    <Text selectable style={styles.postName}>{name}</Text>
+                    <Text selectable style={styles.postMeta}>· {relativeTime(post.createdAt)}</Text>
                   </View>
-                  {meta.label ? <Text style={styles.postMeta}>{meta.label}</Text> : null}
-                  {meta.aiBadge ? <Text style={styles.aiBadge}>AI生成</Text> : null}
+                  {meta.label ? <Text selectable style={styles.postMeta}>{meta.label}</Text> : null}
+                  {meta.aiBadge ? <Text selectable style={styles.aiBadge}>AI生成</Text> : null}
                 </View>
                 </Pressable>
                 <Pressable
@@ -1387,13 +1492,13 @@ export function FeedSurface({
                   onPress={() => openPostMenu(post.postId)}
                   style={styles.postMenu}
                 >
-                  <Text style={styles.postMenuText}>⋯</Text>
+                  <Text selectable style={styles.postMenuText}>⋯</Text>
                 </Pressable>
               </View>
 
               <View style={styles.postBody}>
-                <Text style={styles.postReason}>{meta.reason}</Text>
-                <Text style={styles.postCopy}>{post.body}</Text>
+                <Text selectable style={styles.postReason}>{meta.reason}</Text>
+                <Text selectable style={styles.postCopy}>{post.body}</Text>
 
               {/* 服务端媒体（READY Hydrate）：多图横滑轨 / 单图全宽 / 视频内联自动播放（X 式，滑近中心播、滑出停，带声音） */}
               {/* MEDIA-EDGE-BLEED-002（2026-09-20）：静止态要跟文字缩进对齐，
@@ -1443,7 +1548,7 @@ export function FeedSurface({
                 <View style={styles.contextRefs}>
                   {chips.map((entry, index) => (
                     <Pressable disabled={entry.contextType !== "REALITY_SCENE" || !onOpenRealityScene} onPress={() => onOpenRealityScene?.(entry.contextId)} key={`${entry.contextType}_${entry.contextId}`} style={[styles.contextRef, index === 0 && styles.contextRefStrong]}>
-                      <Text style={[styles.contextRefText, index === 0 && styles.contextRefTextStrong]}>{entry.contextType === "REALITY_SCENE" ? "查看场景 ›" : entry.contextId}</Text>
+                      <Text selectable style={[styles.contextRefText, index === 0 && styles.contextRefTextStrong]}>{entry.contextType === "REALITY_SCENE" ? "查看场景 ›" : entry.contextId}</Text>
                     </Pressable>
                   ))}
                 </View>
@@ -1454,13 +1559,13 @@ export function FeedSurface({
                 <View style={styles.quoteCard}>
                   <View style={styles.quoteHead}>
                     <View style={styles.quoteAvatar}>
-                      <Text style={styles.quoteAvatarText}>{resolveAuthorDisplayName(quoted, viewerAccountId).charAt(0)}</Text>
+                      <Text selectable style={styles.quoteAvatarText}>{resolveAuthorDisplayName(quoted, viewerAccountId, viewerDisplayName).charAt(0)}</Text>
                     </View>
-                    <Text style={styles.quoteAuthor}>{resolveAuthorDisplayName(quoted, viewerAccountId)}</Text>
-                    <Text style={styles.quoteMeta}>引用帖文</Text>
+                    <Text selectable style={styles.quoteAuthor}>{resolveAuthorDisplayName(quoted, viewerAccountId, viewerDisplayName)}</Text>
+                    <Text selectable style={styles.quoteMeta}>引用帖文</Text>
                   </View>
-                  <Text numberOfLines={2} style={styles.quoteBody}>{quoted.body}</Text>
-                  {mediaFor(quoted.postId)[0] ? <Text style={styles.quoteMediaLabel}>🎞 含媒体附件</Text> : null}
+                  <Text selectable numberOfLines={2} style={styles.quoteBody}>{quoted.body}</Text>
+                  {mediaFor(quoted.postId)[0] ? <Text selectable style={styles.quoteMediaLabel}>🎞 含媒体附件</Text> : null}
                 </View>
               ) : null}
 
@@ -1481,11 +1586,11 @@ export function FeedSurface({
               <View style={styles.postActions}>
                 <Pressable disabled={engagementBusy.has(`like:${post.postId}`)} onPress={() => void toggleLike(post.postId)} style={styles.postAction}>
                   <ProxyIcon color={isLiked ? color.magenta : color.ink} filled={isLiked} name="heart" size={19} />
-                  <Text style={[styles.postActionCount, isLiked && styles.postActionOn]}>{truth?.reactions ?? 0}</Text>
+                  <Text selectable style={[styles.postActionCount, isLiked && styles.postActionOn]}>{truth?.reactions ?? 0}</Text>
                 </Pressable>
                 <Pressable onPress={() => void openReplies(post.postId)} style={styles.postAction}>
                   <ProxyIcon color={color.ink} name="chat" size={18} />
-                  <Text style={styles.postActionCount}>{truth?.replies ?? 0}</Text>
+                  <Text selectable style={styles.postActionCount}>{truth?.replies ?? 0}</Text>
                 </Pressable>
                 <Pressable onPress={() => openComposerFor(post.postId)} style={styles.postAction}>
                   <ProxyIcon color={color.ink} name="remix" size={18} />
@@ -1501,7 +1606,7 @@ export function FeedSurface({
                   onPress={() => { setReportMode(false); setContextMenu({ postId: post.postId, x: 0, y: 0 }); }}
                   style={styles.postAction}
                 >
-                  <Text style={styles.postActionText}>···</Text>
+                  <Text selectable style={styles.postActionText}>···</Text>
                 </Pressable>
               </View>
 		  {shownReplies.length > 0 ? (
@@ -1509,18 +1614,18 @@ export function FeedSurface({
 			  {shownReplies.map((reply) => (
 				<View key={reply.replyId} style={styles.postReply}>
 				  {/* FEED-REPLY-001: 显示作者名，绝不回显 actorId。 */}
-				  <Text style={styles.postReplyAuthor}>{resolveReplyAuthorDisplayName(reply, viewerAccountId)}</Text>
-				  <Text style={styles.postReplyBody}>{reply.body}</Text>
+				  <Text selectable style={styles.postReplyAuthor}>{resolveReplyAuthorDisplayName(reply, viewerAccountId, viewerDisplayName)}</Text>
+				  <Text selectable style={styles.postReplyBody}>{reply.body}</Text>
 				</View>
 			  ))}
 			  {offerReplyToggle && !repliesExpanded ? (
 				<Pressable accessibilityLabel="查看全部回复" hitSlop={8} onPress={() => toggleReplies(post.postId)}>
-				  <Text style={styles.postRepliesMore}>查看其余 {collapsedReplies} 条回复</Text>
+				  <Text selectable style={styles.postRepliesMore}>查看其余 {collapsedReplies} 条回复</Text>
 				</Pressable>
 			  ) : null}
 			  {offerReplyToggle && repliesExpanded ? (
 				<Pressable accessibilityLabel="收起回复" hitSlop={8} onPress={() => toggleReplies(post.postId)}>
-				  <Text style={styles.postRepliesMore}>收起回复</Text>
+				  <Text selectable style={styles.postRepliesMore}>收起回复</Text>
 				</Pressable>
 			  ) : null}
 			</View>
@@ -1551,7 +1656,7 @@ export function FeedSurface({
                       onPress={() => { setReplyTargetId(null); setReplyDraft(""); }}
                       style={styles.inlineReplyCancel}
                     >
-                      <Text style={styles.inlineReplyCancelText}>取消</Text>
+                      <Text selectable style={styles.inlineReplyCancelText}>取消</Text>
                     </Pressable>
                     <Pressable
                       accessibilityLabel="发送回复"
@@ -1559,7 +1664,7 @@ export function FeedSurface({
                       onPress={() => void submitReply()}
                       style={[styles.inlineReplySend, (!replyDraft.trim() || replying) && styles.disabled]}
                     >
-                      <Text style={styles.inlineReplySendText}>{replying ? "发送中…" : "发送"}</Text>
+                      <Text selectable style={styles.inlineReplySendText}>{replying ? "发送中…" : "发送"}</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -1569,7 +1674,7 @@ export function FeedSurface({
               {isCityCompanion ? (
                 <View style={styles.postIntent}>
                   <Pressable onPress={() => onOpenChat(name)} style={styles.intentChat}>
-                    <Text style={styles.intentChatText}>聊一下</Text>
+                    <Text selectable style={styles.intentChatText}>聊一下</Text>
                   </Pressable>
                   <Pressable
                     onPress={() => {
@@ -1582,7 +1687,7 @@ export function FeedSurface({
                     style={styles.intentNeed}
                     accessibilityLabel="按这个想法找同行"
                   >
-                    <Text style={styles.intentNeedText}>按这个想法找同行</Text>
+                    <Text selectable style={styles.intentNeedText}>按这个想法找同行</Text>
                   </Pressable>
                 </View>
               ) : null}
@@ -1604,13 +1709,15 @@ export function FeedSurface({
           key={viewer.postId}
           items={viewerItems}
           index={viewer.index}
-          author={resolveAuthorDisplayName(viewerPost, viewerAccountId)}
+          author={resolveAuthorDisplayName(viewerPost, viewerAccountId, viewerDisplayName)}
           resolveUrl={(path) => localNet.resolveMediaUrl(path)}
           onNavigate={(next) => {
             setMediaPositions((current) => ({ ...current, [viewer.postId]: next }));
             setViewer({ postId: viewer.postId, index: next });
           }}
           onClose={() => setViewer(null)}
+          // CONTENT-ANALYTICS-001: 看别人的照片才记停留 / 放大；自己看自己不算浏览。
+          analytics={isOwnPostById(viewerPost, viewerAccountId) ? undefined : localNet}
         />
       ) : null}
 
@@ -1619,24 +1726,24 @@ export function FeedSurface({
         <Modal transparent animationType="fade" onRequestClose={() => setContextMenu(null)}>
           <Pressable style={styles.menuOverlay} onPress={() => setContextMenu(null)}>
             <Pressable style={styles.menuContent} onPress={(event) => event.stopPropagation()}>
-              <Text style={styles.menuTitle}>{reportMode ? "举报原因" : "调整推荐"}</Text>
+              <Text selectable style={styles.menuTitle}>{reportMode ? "举报原因" : "调整推荐"}</Text>
               {reportMode ? (
                 <>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("SPAM")}><Text style={styles.menuItemText}>垃圾信息或广告</Text></Pressable>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("HARASSMENT")}><Text style={styles.menuItemText}>骚扰或攻击</Text></Pressable>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("UNSAFE")}><Text style={styles.menuItemText}>不安全内容</Text></Pressable>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("OTHER")}><Text style={styles.menuItemText}>其他问题</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("SPAM")}><Text selectable style={styles.menuItemText}>垃圾信息或广告</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("HARASSMENT")}><Text selectable style={styles.menuItemText}>骚扰或攻击</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("UNSAFE")}><Text selectable style={styles.menuItemText}>不安全内容</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("OTHER")}><Text selectable style={styles.menuItemText}>其他问题</Text></Pressable>
                 </>
               ) : (
                 <>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitFeedPreference("NOT_INTERESTED")}><Text style={styles.menuItemText}>不感兴趣</Text></Pressable>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitFeedPreference("REDUCE_TOPIC")}><Text style={styles.menuItemText}>减少这类内容</Text></Pressable>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitFeedPreference("REDUCE_AUTHOR")}><Text style={styles.menuItemText}>少看这个人</Text></Pressable>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => setReportMode(true)}><Text style={styles.menuItemText}>举报</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitFeedPreference("NOT_INTERESTED")}><Text selectable style={styles.menuItemText}>不感兴趣</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitFeedPreference("REDUCE_TOPIC")}><Text selectable style={styles.menuItemText}>减少这类内容</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitFeedPreference("REDUCE_AUTHOR")}><Text selectable style={styles.menuItemText}>少看这个人</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => setReportMode(true)}><Text selectable style={styles.menuItemText}>举报</Text></Pressable>
                 </>
               )}
               <Pressable style={styles.menuCancel} onPress={() => { setReportMode(false); setContextMenu(null); }}>
-                <Text style={styles.menuCancelText}>取消</Text>
+                <Text selectable style={styles.menuCancelText}>取消</Text>
               </Pressable>
             </Pressable>
           </Pressable>
@@ -1649,23 +1756,23 @@ export function FeedSurface({
     </ScrollView>
     {stickyHeaderVisible ? (
       <View style={styles.stickyFeedHead}>
-        <Text style={styles.stickyFeedTitle}>动态</Text>
+        <Text selectable style={styles.stickyFeedTitle}>动态</Text>
         <View style={styles.feedTools}>
           <Pressable accessibilityLabel="定制频道" onPress={() => setCustomFeedHubOpen(true)} style={styles.stickyIconBtn}>
-            <Text style={styles.iconBtnText}>≡</Text>
+            <Text selectable style={styles.iconBtnText}>≡</Text>
           </Pressable>
           <Pressable accessibilityLabel={searchOpen ? "关闭动态搜索" : "搜索动态"} onPress={() => { setSearchOpen((value) => !value); scrollRef.current?.scrollTo({ y: 0, animated: true }); }} style={styles.stickyIconBtn}>
             <ProxyIcon color={color.ink} name="search" size={17} />
           </Pressable>
           <Pressable onPress={toggleEmbeddedComposer} style={styles.stickyIconBtn}>
-            <Text style={styles.iconBtnText}>{composerOpen ? "×" : "＋"}</Text>
+            <Text selectable style={styles.iconBtnText}>{composerOpen ? "×" : "＋"}</Text>
           </Pressable>
         </View>
       </View>
     ) : null}
     {section === "POSTS" ? (
       <Pressable accessibilityLabel={composerOpen ? "关闭发布器" : "发布帖文"} onPress={toggleEmbeddedComposer} style={[styles.feedFab, { bottom: bottomNavVisible === false ? 28 : 116 }]}>
-        <Text style={styles.feedFabText}>{composerOpen ? "×" : "＋"}</Text>
+        <Text selectable style={styles.feedFabText}>{composerOpen ? "×" : "＋"}</Text>
       </Pressable>
     ) : null}
     {/* R15.45: post menu modal (举报 / 不感兴趣 / 屏蔽作者) */}
@@ -1687,11 +1794,11 @@ export function FeedSurface({
               （当作不是自己），所以只有明确是自己时才隐藏这一行。 */}
           {profileActions && !isOwnAuthorId(profileActions.userId, viewerAccountId) ? (
             <GlassView glassEffectStyle="clear" isInteractive style={styles.profileGlassDropFull}>
-              <Pressable disabled={profileFollowBusy} onPress={(event) => { event.stopPropagation(); void toggleProfileFollow(); }} style={styles.profileDropPress}><Text style={styles.profileDropText}>{profileFollowBusy ? "处理中…" : profileFollowing ? "✓ 已关注" : "+ 关注"}</Text></Pressable>
+              <Pressable disabled={profileFollowBusy} onPress={(event) => { event.stopPropagation(); void toggleProfileFollow(); }} style={styles.profileDropPress}><Text selectable style={styles.profileDropText}>{profileFollowBusy ? "处理中…" : profileFollowing ? "✓ 已关注" : "+ 关注"}</Text></Pressable>
             </GlassView>
           ) : null}
           <GlassView glassEffectStyle="clear" isInteractive style={styles.profileGlassDropFull}>
-            <Pressable onPress={(event) => { event.stopPropagation(); const target = profileActions; setProfileActions(undefined); if (target) { const { anchor: _anchor, ...profileTarget } = target; onOpenProfile?.(profileTarget); } }} style={styles.profileDropPress}><Text style={styles.profileDropText}>访问个人主页</Text></Pressable>
+            <Pressable onPress={(event) => { event.stopPropagation(); const target = profileActions; setProfileActions(undefined); if (target) { const { anchor: _anchor, ...profileTarget } = target; onOpenProfile?.(profileTarget); } }} style={styles.profileDropPress}><Text selectable style={styles.profileDropText}>访问个人主页</Text></Pressable>
           </GlassView>
         </GlassContainer>
       </Pressable>
@@ -2284,11 +2391,11 @@ export function PollCard({ poll, busy, onVote }: PollCardProps): React.JSX.Eleme
           >
             {showResults ? <View style={[styles.pollBar, { width: `${percent}%` }]} /> : null}
             <View style={styles.pollOptionRow}>
-              <Text numberOfLines={2} style={[styles.pollOptionLabel, mine && styles.pollOptionLabelMine]}>
+              <Text selectable numberOfLines={2} style={[styles.pollOptionLabel, mine && styles.pollOptionLabelMine]}>
                 {option.label}
               </Text>
               {showResults ? (
-                <Text style={[styles.pollOptionCount, mine && styles.pollOptionCountMine]}>
+                <Text selectable style={[styles.pollOptionCount, mine && styles.pollOptionCountMine]}>
                   {percent}% · {option.voteCount}
                 </Text>
               ) : null}
@@ -2296,7 +2403,7 @@ export function PollCard({ poll, busy, onVote }: PollCardProps): React.JSX.Eleme
           </Pressable>
         );
       })}
-      <Text style={styles.pollMeta}>
+      <Text selectable style={styles.pollMeta}>
         {poll.closed ? `已截止 · 共 ${poll.totalVotes} 票` : `共 ${poll.totalVotes} 票${voted ? " · 可改票" : ""}`}
       </Text>
     </View>
@@ -2324,53 +2431,53 @@ function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, 
         <Pressable onPress={(e) => e.stopPropagation()} style={postMenuStyles.sheet}>
           {!showReportReasons ? (
             <>
-              <Text style={postMenuStyles.title}>更多操作</Text>
-              <Text style={postMenuStyles.subtitle}>选一项作用于这篇帖子</Text>
-              {error ? <Text style={postMenuStyles.error}>{error}</Text> : null}
+              <Text selectable style={postMenuStyles.title}>更多操作</Text>
+              <Text selectable style={postMenuStyles.subtitle}>选一项作用于这篇帖子</Text>
+              {error ? <Text selectable style={postMenuStyles.error}>{error}</Text> : null}
               <Pressable onPress={() => { void onNotInterested(); }} style={postMenuStyles.row}>
-                <Text style={postMenuStyles.rowIcon}>👎</Text>
+                <Text selectable style={postMenuStyles.rowIcon}>👎</Text>
                 <View style={postMenuStyles.rowCopy}>
-                  <Text style={postMenuStyles.rowTitle}>不感兴趣</Text>
-                  <Text style={postMenuStyles.rowHint}>减少类似内容推送</Text>
+                  <Text selectable style={postMenuStyles.rowTitle}>不感兴趣</Text>
+                  <Text selectable style={postMenuStyles.rowHint}>减少类似内容推送</Text>
                 </View>
               </Pressable>
               <Pressable onPress={() => setShowReportReasons(true)} style={postMenuStyles.row}>
-                <Text style={postMenuStyles.rowIcon}>⚠️</Text>
+                <Text selectable style={postMenuStyles.rowIcon}>⚠️</Text>
                 <View style={postMenuStyles.rowCopy}>
-                  <Text style={postMenuStyles.rowTitle}>举报</Text>
-                  <Text style={postMenuStyles.rowHint}>按平台规则处理</Text>
+                  <Text selectable style={postMenuStyles.rowTitle}>举报</Text>
+                  <Text selectable style={postMenuStyles.rowHint}>按平台规则处理</Text>
                 </View>
               </Pressable>
               <Pressable onPress={() => { void onMuteAuthor(); }} style={postMenuStyles.row}>
-                <Text style={postMenuStyles.rowIcon}>🚫</Text>
+                <Text selectable style={postMenuStyles.rowIcon}>🚫</Text>
                 <View style={postMenuStyles.rowCopy}>
-                  <Text style={postMenuStyles.rowTitle}>屏蔽作者</Text>
-                  <Text style={postMenuStyles.rowHint}>不再看 Ta 的任何内容</Text>
+                  <Text selectable style={postMenuStyles.rowTitle}>屏蔽作者</Text>
+                  <Text selectable style={postMenuStyles.rowHint}>不再看 Ta 的任何内容</Text>
                 </View>
               </Pressable>
               <Pressable onPress={onClose} style={postMenuStyles.cancel}>
-                <Text style={postMenuStyles.cancelText}>取消</Text>
+                <Text selectable style={postMenuStyles.cancelText}>取消</Text>
               </Pressable>
             </>
           ) : (
             <>
-              <Text style={postMenuStyles.title}>举报原因</Text>
-              <Text style={postMenuStyles.subtitle}>选一个最贴近的</Text>
-              {error ? <Text style={postMenuStyles.error}>{error}</Text> : null}
+              <Text selectable style={postMenuStyles.title}>举报原因</Text>
+              <Text selectable style={postMenuStyles.subtitle}>选一个最贴近的</Text>
+              {error ? <Text selectable style={postMenuStyles.error}>{error}</Text> : null}
               <Pressable onPress={() => { void onReport("SPAM"); }} style={postMenuStyles.row}>
-                <Text style={postMenuStyles.rowTitle}>垃圾广告</Text>
+                <Text selectable style={postMenuStyles.rowTitle}>垃圾广告</Text>
               </Pressable>
               <Pressable onPress={() => { void onReport("HARASSMENT"); }} style={postMenuStyles.row}>
-                <Text style={postMenuStyles.rowTitle}>骚扰 / 人身攻击</Text>
+                <Text selectable style={postMenuStyles.rowTitle}>骚扰 / 人身攻击</Text>
               </Pressable>
               <Pressable onPress={() => { void onReport("UNSAFE"); }} style={postMenuStyles.row}>
-                <Text style={postMenuStyles.rowTitle}>不安全 / 违规</Text>
+                <Text selectable style={postMenuStyles.rowTitle}>不安全 / 违规</Text>
               </Pressable>
               <Pressable onPress={() => { void onReport("OTHER"); }} style={postMenuStyles.row}>
-                <Text style={postMenuStyles.rowTitle}>其他</Text>
+                <Text selectable style={postMenuStyles.rowTitle}>其他</Text>
               </Pressable>
               <Pressable onPress={() => setShowReportReasons(false)} style={postMenuStyles.cancel}>
-                <Text style={postMenuStyles.cancelText}>返回</Text>
+                <Text selectable style={postMenuStyles.cancelText}>返回</Text>
               </Pressable>
             </>
           )}

@@ -5,9 +5,12 @@ import "testing"
 // CREATOR-HANA-NAM-001: Hana / Nam 从 stock 占位转正为真人账户 ——
 // facet 键、账号 id、写真资产 id 三件必须齐且互不相同，否则关注/会话落到
 // 幽灵 id（头像 404、动态扫不到帖子，见 recommend-fixtures 的注释）。
+//
+// HOME-RAIL-ACCOUNT-001：遍历范围从 CreatorFacetKeys 扩到 AllFacetKeys()，
+// 首页 rail 上的人一并纳入「一个账号一张脸」的检查。
 func TestHanaNamKeysResolveDistinctIdentity(t *testing.T) {
 	seenAccounts, seenAssets := map[string]string{}, map[string]string{}
-	for _, key := range CreatorFacetKeys {
+	for _, key := range AllFacetKeys() {
 		account := AccountIDForFacetKey(key)
 		asset := AvatarAssetIDForFacetKey(key)
 		if account == "" || asset == "" {

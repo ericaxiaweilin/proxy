@@ -130,6 +130,53 @@ if ! grep -q 'MEDIA-PIPELINE-001' apps/mobile/src/media/asset-sources.test.ts ||
 fi
 pnpm --filter @proxy/mobile exec vitest run src/media/asset-sources.test.ts src/media/author-avatar.test.ts || exit $?
 echo "    MEDIA-PIPELINE-001: PASS (unified asset resolution + author avatars, feed on pipeline)"
+
+# AVATAR-OTHER-HUMAN-002 (2026-09-21): 真实账号的服务端头像。
+#
+# 这条钉子的由来是一个**已经逃到真机**的 bug：动态页里「非本人、非 AI」的作者
+# 一律画首字黑圈。本地库实测 69 条 PUBLISHED 里 46 条（67%）如此，其中 23 条的
+# 作者在服务端**真有** avatar_path。用户原话：「怎么头像还特意保护成无头像
+# 还是程序架构缺陷」。
+#
+# 为什么上面 MEDIA-PIPELINE-001 那条钉抓不到它：那条钉跑的两个测试文件里，
+# author-avatar.test.ts 的旧断言 `falls back to initials for users without photo
+# assets` 用 user_b 断言首字 —— 它把 bug 当成了**正确行为**，证明的只是「没有
+# 数据源时首字」，从没覆盖「有数据源时能不能出图」。
+#
+# 为什么这里不再跑一次 vitest：上面第 131 行已经跑过这两个文件，重复跑只是浪费
+# 门禁时间。这里负责的是**接线**，而接线是测试看不见的 —— 新测试都自己显式传
+# humanAvatarsById，所以「feed.tsx 忘了传」它们照样全绿。形状和 LC-16
+# 「调用点被删掉、测试依然全绿」一模一样。
+if ! grep -q 'AVATAR-OTHER-HUMAN-002' apps/mobile/src/media/author-avatar.test.ts ||
+   ! grep -q 'AVATAR-OTHER-HUMAN-002' apps/mobile/src/media/asset-sources.test.ts; then
+  echo "  FAIL [AVATAR-OTHER-HUMAN-002]: the real-human avatar tests are missing" >&2
+  exit 1
+fi
+# 1) 渲染点必须真的把这张表交给 resolveAuthorAvatar。
+#    钉的是整段实参序列，不是 'humanAvatarsById' 子串 —— 只钉子串的话，
+#    声明一个同名变量、或传个永远为空的 Map，都能让这条钉绿而动态照样全黑。
+if ! grep -qF 'aiAccountsById, humanAvatarsById, displayName: name' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [AVATAR-OTHER-HUMAN-002]: feed.tsx no longer passes humanAvatarsById into resolveAuthorAvatar." >&2
+  exit 1
+fi
+# 2) 这张表必须真的被填过：feed.tsx 要按 accountId 去查真实 profile。
+#    少了这一条，把加载逻辑删掉、只留一个永远为空的 Map，第 1 条依然绿 ——
+#    这正是「绿在空处」。
+if ! grep -qF 'profileClient.getProfile(accountId)' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [AVATAR-OTHER-HUMAN-002]: feed.tsx no longer loads real author profiles." >&2
+  echo "        humanAvatarsById would be permanently empty and every non-self," >&2
+  echo "        non-AI author would go back to a black initial circle." >&2
+  exit 1
+fi
+# 3) 反方向：'assets/<mediaId>' 是 identity.profiles.avatar_path 的真实存储格式
+#    （migrations/039_profile.sql:18 的 CHECK）。解析器丢了这一支，上面两条
+#    静态钉和所有测试都会绿，而真机上一张图都出不来。
+if ! grep -qF 'path.startsWith("assets/")' apps/mobile/src/media/asset-sources.ts; then
+  echo "  FAIL [AVATAR-OTHER-HUMAN-002]: avatarPathToInput no longer understands the server's assets/ format." >&2
+  echo "        Every real profile's avatar_path would resolve to undefined." >&2
+  exit 1
+fi
+echo "    AVATAR-OTHER-HUMAN-002: PASS (real author profiles reach the feed avatar pipeline)"
 # 第二臂以前 grep 的是 merchant-me-r21.tsx（兼容 shim）里的组件名 —— 而那个名字
 # 只出现在该文件的注释和一个死常量 `_tripwireMarker` 里。后果：把真链路
 # （replacement 渲染 <MerchantCreatorRecommendations> → merchant-creator-
@@ -266,29 +313,83 @@ require_test "GEO-HONEST-001" "./internal/realityscene" \
   "apps/api-go/internal/realityscene/service_test.go" || exit $?
 echo "    GEO-HONEST-001: PASS (伪造容量 / 占位候选 / 临时诊断 / 死桩 均未复现)"
 
-# OPS-TELEMETRY-001: 纯字面量端点必须自报 dataSource，且控制台必须真的渲染它。
-#
-# 服务端声明来源只是半截接线 —— 控制台不读这个字段，运营看到的还是
-# "决策引擎 30 天 1860 万次调用 · 谱系完整度 99.92%"，照样会以为引擎在跑。
-# 一个假的健康度比没有健康度更糟：它让人停止怀疑。所以两边一起钉。
-#
-# 范围要说清：不是所有 /v1/operator/* 都是占位。context-field / surface-plans
-# 真的调用了 runtime.Decide 和 compiler.Compile（输入是固定快照），
-# experience/metrics 返回的是真实进程内计数器。所以只钉这三个纯字面量端点，
-# 不写"整个 /v1/operator 都是假的" —— 那会是另一个谎。
-require_test "OPS-TELEMETRY-001" "./internal/api" \
-  "TestOperatorFixtureEndpointsDeclareSource" \
-  "apps/api-go/internal/api/reality_scene_test.go" || exit $?
-for page in SupplyActivation Clarification Engine; do
-  # 钉 JSX 用法，不钉 import —— 第一版写的是 grep 'FixtureNotice'，它匹配的是
-  # import 那一行；把 <FixtureNotice .../> 从渲染里删掉，import 还在，契约照样绿。
-  # 反向注入时抓到的：那条是假守卫。
-  if ! grep -q '<FixtureNotice' "apps/market-intelligence-console/src/pages/$page.tsx"; then
-    echo "  FAIL [OPS-TELEMETRY-001]: $page.tsx does not render <FixtureNotice> — the server declares dataSource but the console ignores it" >&2
+# OPS-REAL-001（取代 OPS-TELEMETRY-001）：运营控制台 17 个 /v1/operator/* 端点
+#   - 全部只给运营（会话 + PROXY_OPERATOR_PRINCIPALS + ANALYTICS scope）—— 以前任何人都能调；
+#   - 没有数据源的页面只回 NOT_CONNECTED + 缺的模块，一个数字都不给 —— 以前是写死的 428K / 2.75M / 18.6M，
+#     OPS-TELEMETRY-001 只让其中 3 个自报「占位」，其余 11 个假数字照样以真遥测的样子出现在控制台；
+#   - 用户构成 / 行为信号是真实查询。
+require_test "OPS-REAL-001" "./internal/api" "TestOperatorConsoleIsOperatorOnly" \
+  "apps/api-go/internal/api/operator_console_test.go" || exit $?
+require_test "OPS-REAL-001" "./internal/api" "TestOperatorConsoleNeverServesFixtureNumbers" \
+  "apps/api-go/internal/api/operator_console_test.go" || exit $?
+if grep -E 'mux\.HandleFunc\("/v1/operator/[a-z-]+"' apps/api-go/internal/api/server.go | grep -v '/v1/operator/legal' | grep -qvE 'operatorConsole(Method)?\('; then
+  echo "  FAIL [OPS-REAL-001]: 有 /v1/operator/* 路由没走 operatorConsole —— 运营数据又能被任何人读到。" >&2
+  exit 1
+fi
+if grep -rn 'fetch("/v1/operator' apps/market-intelligence-console/src >/dev/null; then
+  echo "  FAIL [OPS-REAL-001]: 控制台页面绕过 opFetch 直接 fetch —— 不带运营会话，也不认 NOT_CONNECTED。" >&2
+  exit 1
+fi
+# GRAVITY-001：引力状态（spec §6-§7 / §11 / §21）。规律的人在规律的时间点附近引力高；证据不足只学习；
+# 久不发生降回只观察；AI / 平台账号不建模；ACTIVE_ORCHESTRATE 不会自动给（§12 / §13 未建）；引力页只给运营。
+for t in TestRegularNoonChatterHasHighGravityBeforeNoonAndLowAtNight TestSparseOrStaleEvidenceDoesNotNudge TestNeverAutoActiveOrchestrate TestRecomputeSkipsNonHumansAndDowngradesPeopleWhoWentQuiet; do
+  require_test "GRAVITY-001" "./internal/gravity" "$t" "apps/api-go/internal/gravity/gravity_test.go" || exit $?
+done
+require_test "GRAVITY-001" "./internal/api" "TestOperatorGravityIsOperatorOnlyAndLive" \
+  "apps/api-go/internal/api/operator_console_test.go" || exit $?
+# MATCH-RANK-001：撮合排序只用真实履约 / 需求方评价 / 经验 / 引力响应 / 预算适配；新人按先验、不编履约率；
+# 响应只打破接近的平局、压不过可靠度；不读任何曝光信号（PRD R15.2 Popularity ≠ Qualification）；
+# 满意度真的落库、服务者不能给自己打分。
+for t in TestReliableWellRatedProviderOutranksCheaperUnreliableOne TestNewProviderGetsAPriorNotZeroNorPerfect TestResponsivenessOnlyBreaksNearTies; do
+  require_test "MATCH-RANK-001" "./internal/matching" "$t" "apps/api-go/internal/matching/matching_test.go" || exit $?
+done
+require_test "MATCH-RANK-001" "./internal/fulfillment" "TestTraceableHumanOrder" \
+  "apps/api-go/internal/fulfillment/service_test.go" || exit $?
+# 真实供给路径必须用 supplier 算出的真实履约率（内存模式的演示种子池不在此列）。
+if ! grep -qE 'FulfillmentRate: +sc\.FulfillmentRate' apps/api-go/internal/citycompanion/service.go ||
+   grep -qE 'interaction_events|reactions|follows' apps/api-go/internal/matching/source.go; then
+  echo "  FAIL [MATCH-RANK-001]: 城市同行又写死了履约率，或撮合排序读了曝光 / 点赞 / 粉丝信号。" >&2
+  exit 1
+fi
+# MATCH-LIVE-001：「找人」页候选只来自后端（ListCityCompanionCandidates，已按 MATCH-RANK-001 排序），
+# 演示数据不能再给任何候选人（以前写死 Linh 26 单 / Mai 12 单）；新人显示「暂无记录」而不是 0%。
+pnpm --dir apps/mobile exec vitest run src/uiplan/fixtures.test.ts src/demand-client.test.ts || exit $?
+if grep -qE 'agentId: "agent_(linh|mai|minh)"' apps/mobile/src/uiplan/fixtures.ts ||
+   ! grep -qF 'listCityCompanionCandidates' apps/mobile/src/surfaces/fulfillment-workspace.tsx ||
+   ! grep -qF 'hasTrackRecord === false' apps/mobile/src/components/registry.tsx; then
+  echo "  FAIL [MATCH-LIVE-001]: 找人页又用演示候选 / 没接后端候选 / 新人被画成 0% 履约。" >&2
+  exit 1
+fi
+# PROFILE-ENGAGEMENT-WIRE-001（P0）：MeSurface 漏传 engagement → 个人主页没有 ♡ 喜欢 / 赞数 / 评论，洞察全是 —。
+# PROFILE-VIEWS-HEADER-001（P0）：个人主页「次浏览 · 最近 30 天」以前写死 —。
+# AVATAR-FALLBACK-TINT-001（P0）：没头像不再是 #111 黑圆。
+if ! awk '/<MeSurface/,/\/>/' apps/mobile/src/shell/app-shell.tsx | grep -qF 'engagement={engagement}' ||
+   grep -qF '<Text selectable style={styles.personalStatValue}>—</Text> 次浏览' apps/mobile/src/surfaces/me.tsx ||
+   grep -A3 '^  postAvatar: {' apps/mobile/src/surfaces/feed.tsx | grep -qF 'backgroundColor: "#111"' && ! grep -qF 'initialAvatarTint(post.authorId)' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [PROFILE-ENGAGEMENT-WIRE-001 / PROFILE-VIEWS-HEADER-001 / AVATAR-FALLBACK-TINT-001]: 个人主页又没有互动 / 浏览数写死 / 没头像又是黑圆。" >&2
+  exit 1
+fi
+# AVATAR-AGENT-ALIAS-001 已撤回（2026-09-24）：agent_* 发的帖是集成测试种子，映射到本人会把测试帖显示成真人发的（P0）。
+if grep -qF 'SetProfileAlias' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [OWN-NAME-001 / AVATAR-AGENT-ALIAS-001]: 又把服务者 id 映射成本人资料 —— 测试帖会冒充真人。" >&2
+  exit 1
+fi
+# POST-PROFILE-GATE-001：真人发帖前必须有用户名 + 平台头像；生产必须接线（没接 = 门形同虚设）。
+require_test "POST-PROFILE-GATE-001" "./internal/localnet" "TestCreatePostRequiresACompleteProfile" \
+  "apps/api-go/internal/localnet/post_profile_gate_test.go" || exit $?
+if ! grep -qF 'localNetService.SetProfileCompleteness(' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'PROFILE_INCOMPLETE' apps/mobile/src/command-error-message.ts; then
+  echo "  FAIL [POST-PROFILE-GATE-001]: 发帖资料门没接线 / 客户端没有对应人话。" >&2
+  exit 1
+fi
+# DATA-HYGIENE-001：集成测试不许冒用真人名字当作者、跑完必须清理自己建的帖子（以前 agent_linh / Linh 的种子帖留在开发库）。
+for f in apps/api-go/internal/platform/postgres/engagement_pin_integration_test.go apps/api-go/internal/platform/postgres/engagement_replies_bookmarks_integration_test.go; do
+  if grep -qF "'agent_linh'" "$f" || ! grep -qF 't.Cleanup' "$f"; then
+    echo "  FAIL [DATA-HYGIENE-001]: $f 又用真人名字造种子帖 / 跑完不清理。" >&2
     exit 1
   fi
 done
-echo "    OPS-TELEMETRY-001: PASS (3 个占位端点已声明来源，控制台已渲染)"
+echo "    OPS-REAL-001: PASS (operator console is operator-only; no fixture numbers; population/behaviour live)"
 
 require_test "UI-SOCIAL-002" "./internal/identity" \
   "TestAccountPreferencesRejectsAnonymousActorAndOversizedContact" \
@@ -404,39 +505,26 @@ if grep -rq 'randomuser.me' apps/api-go --include='*.go'; then
   echo "  FAIL [IDENTITY-ID-001]: external avatar URL literal found in server source" >&2
   exit 1
 fi
+# HOME-RAIL-ACCOUNT-001（2026-09-23，用户报 P0）：首页 rail 上不许再出现 stock
+# 外链头像。这条曾经是一条**放宽**（2026-09-18 批准：无账号的 fixture 人按 id
+# 哈希落 5 张 unsplash「原型肖像」，理由是 mock 期不许灰头像）。2026-09-23 废止，
+# 因为 ① 那 5 张里只有 1 张是人脸，其余是下龙湾风景 / 咖啡店室内 / 城市天际线 /
+# 一盘炒河粉，正被当成「真人」头像渲染；② 放宽的前提（有人没账号）已经消失 ——
+# rail 上 28 个人全部有账号和写真资产。缺图回落首字母，不许拿风景照冒充人脸。
 if grep -q 'images.unsplash.com' apps/mobile/src/recommend-fixtures.ts; then
-  # R34 放宽（OVERRIDE-UNSplash-001，commander 决定 2026-09-18）：mock 期不许灰
-  # 头像，无真人账户的 fixture 允许用 stock 占位 —— 但必须同时满足三条，
-  # 缺一条就还是按违规处理：
-  # ① 所有 unsplash URL 只能出现在 R34_HUMAN_PORTRAITS 注册表内（不许散落各处）；
-  # ② 有账户的一律走写真 thumb（ACCOUNT_AVATAR_ASSET 分支），不许走 R34；
-  # ③ 服务端人物 feed 落地后整段删除，回到有账号才有头像（到期人工执行）。
-  R34_START=$(grep -n 'const R34_HUMAN_PORTRAITS' apps/mobile/src/recommend-fixtures.ts | cut -d: -f1)
-  R34_END=$(awk -v s="$R34_START" 'NR>s && /^\] as const/ {print NR; exit}' apps/mobile/src/recommend-fixtures.ts)
-  R34_OK=true
-  while IFS= read -r ln; do
-    n=${ln%%:*}
-    if [ -z "$R34_START" ] || [ -z "$R34_END" ] || [ "$n" -lt "$R34_START" ] || [ "$n" -gt "$R34_END" ]; then
-      R34_OK=false
-    fi
-  done <<-LINES
-	$(grep -n 'images.unsplash.com' apps/mobile/src/recommend-fixtures.ts)
-	LINES
-  if [ "$R34_OK" != "true" ]; then
-    echo "  FAIL [IDENTITY-ID-001]: unsplash portrait outside the R34 registry ——" >&2
-    echo "        stock 脸只能住在 R34_HUMAN_PORTRAITS 里，不许散落。" >&2
-    exit 1
-  fi
-  if ! grep -q 'ACCOUNT_AVATAR_ASSET\[person.id\] !== undefined' apps/mobile/src/recommend-fixtures.ts ||
-     ! grep -q 'R34_HUMAN_PORTRAITS\[portraitIndexForPerson(person.id)\]' apps/mobile/src/recommend-fixtures.ts; then
-    echo "  FAIL [IDENTITY-ID-001]: wired accounts must use portrait assets, R34 is fallback only ——" >&2
-    echo "        有账号走写真 thumb，无账号才按 id 哈希落 R34。" >&2
-    exit 1
-  fi
-  echo "    IDENTITY-ID-001: PASS with R34 fallback (registry-confined stock, wired accounts on portraits)"
-else
-  echo "    IDENTITY-ID-001: PASS (single source of truth for mock identity)"
+  echo "  FAIL [IDENTITY-ID-001]: 首页 rail 不许再有 stock 外链头像 ——" >&2
+  echo "        rail 上每个人都必须是真实账号 + 写真资产（HOME-RAIL-ACCOUNT-001）；" >&2
+  echo "        缺图时回落首字母，不许拿风景照/食物照冒充人脸。" >&2
+  grep -n 'images.unsplash.com' apps/mobile/src/recommend-fixtures.ts >&2
+  exit 1
 fi
+if ! grep -q 'withAccountPortraits' apps/mobile/src/recommend-fixtures.ts ||
+   ! grep -q 'ACCOUNT_AVATAR_ASSET\[person.id\]' apps/mobile/src/recommend-fixtures.ts; then
+  echo "  FAIL [IDENTITY-ID-001]: 头像必须来自账号写真资产 ——" >&2
+  echo "        photoUri 只有一个来源：/v1/media/thumb/<该账号的 assetId>。" >&2
+  exit 1
+fi
+echo "    IDENTITY-ID-001: PASS (single source of truth for mock identity, no stock fallback)"
 
 # CREATOR-HANA-NAM-001: Hana / Nam 转正 —— facet 键、写真资产、identity 行、
 # 首页映射四件齐，否则首页回落 stock / 关注落到幽灵 id。
@@ -451,6 +539,70 @@ if ! grep -q "'hana'), ('nam')" apps/api-go/scripts/seed_creator_portraits.sql |
   exit 1
 fi
 echo "    CREATOR-HANA-NAM-001: PASS (Hana/Nam are real accounts with real faces)"
+
+# HOME-RAIL-ACCOUNT-001（2026-09-23，用户报 P0）：首页「真人推荐」rail 上出现的
+# 每一个人都必须有服务端账号。
+#
+# 此前 28 个人里只有 7 个有账号，其余 21 个点 + 只会得到「还没有账号，暂时加不了
+# 好友」—— 卡片上却顶着「真人」徽标；ACTIVITY / TRIP / CREATOR / TRANSLATE /
+# MEDICAL 五个场景一个真人都没有。上一版把「没账号」当成正常情况，只把错误说得
+# 更礼貌；这一版改成「造 mock 人物可以，造没有账号的人不行」。
+#
+# 三处一起守（缺一条都能漂移回原样）：
+#   ① 客户端：rail 上每个人都能解析到账号（vitest 逐个断言 accountless 为空）；
+#   ② 服务端人物表与客户端 fixture 逐条一致（go test 直接读客户端文件）；
+#   ③ 作者头像那第三条镜像表同步（漏一个人 = 首页有脸、动态里黑底首字）；
+#   ④ 种子真的被接线（建了账号目录却不调用 = 还是没有账号）。
+require_test "HOME-RAIL-ACCOUNT-001" "./internal/mockidentity" \
+  "TestHomeRailFixturePeopleAllHaveServerAccounts" \
+  "apps/api-go/internal/mockidentity/homerail_test.go" || exit $?
+require_test "HOME-RAIL-ACCOUNT-001" "./internal/mockidentity" \
+  "TestAuthorAvatarMirrorMatchesAllFacetKeys" \
+  "apps/api-go/internal/mockidentity/homerail_test.go" || exit $?
+require_test "HOME-RAIL-ACCOUNT-001" "./internal/mockidentity" \
+  "TestHomeRailIdentitiesAreDistinct" \
+  "apps/api-go/internal/mockidentity/homerail_test.go" || exit $?
+if ! grep -q 'seedPostgresHomeRail(pool, mediaStoreDir)' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [HOME-RAIL-ACCOUNT-001]: 服务端 rail 账号种子没接线 ——" >&2
+  echo "        mockidentity.HomeRailPeople 有表、seedPostgresHomeRail 有实现，" >&2
+  echo "        但 main.go 不调用，等于 rail 上还是没有账号。" >&2
+  exit 1
+fi
+if ! grep -q 'HOME-RAIL-ACCOUNT-001' apps/mobile/src/requester-home-friend-id.test.ts; then
+  echo "  FAIL [HOME-RAIL-ACCOUNT-001]: 客户端逐个断言 rail 人物有账号的测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile test --run src/requester-home-friend-id.test.ts || exit $?
+echo "    HOME-RAIL-ACCOUNT-001: PASS (every rail person is a real account)"
+
+# FRIEND-TARGET-EXISTS-001（2026-09-23）：目标账号不存在时，SendFriendRequest 必须
+# 拒绝，而不是写一条永远没人能同意的 PENDING。
+#
+# 这是 HOME-RAIL-ACCOUNT-001 的服务端半边。客户端已经把 fixture id 解析成账号 id
+# 再发，但客户端不是权限边界 —— 旧客户端 / curl 仍能直调 SendFriendRequest。
+# 库里实测攒过 12 条 user_a/user_b 是 u_* 的死行（894f256 清掉的那批），
+# 来源就是这里从来没校验过目标存在性：用户看到「申请已发送」，其实没有收件人。
+#
+# 判定必须用 identity.user_accounts 的**精确**存在性（GetUser → ErrUserNotFound），
+# 不能用 AuthorNameResolver：后者要求 profile.name 非空，会把「账号存在但还没起名」
+# 的人误判成不存在 —— 那会把正常申请也拒掉，比原 bug 更糟。这条 grep 就是钉这个。
+require_test "FRIEND-TARGET-EXISTS-001" "./internal/relationship" \
+  "TestFriendRequestToMissingAccountIsRejectedWithoutRow" \
+  "apps/api-go/internal/relationship/friend_target_exists_test.go" || exit $?
+require_test "FRIEND-TARGET-EXISTS-001" "./internal/relationship" \
+  "TestMissingAccountAndAINonAcceptorHaveDistinctCodes" \
+  "apps/api-go/internal/relationship/friend_target_exists_test.go" || exit $?
+if ! grep -q 'SetTargetAccountExists' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [FRIEND-TARGET-EXISTS-001]: 生产没接线目标存在性判定 ——" >&2
+  echo "        relationship 有窄函数、有检查，但 main.go 不注入，等于没修。" >&2
+  exit 1
+fi
+if ! grep -q 'identityRepository.GetUser' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [FRIEND-TARGET-EXISTS-001]: 存在性判定必须走 identity.user_accounts 的 GetUser ——" >&2
+  echo "        换成 AuthorNameResolver 会把没起名的真实账号误判为不存在。" >&2
+  exit 1
+fi
+echo "    FRIEND-TARGET-EXISTS-001: PASS (requests to missing accounts are rejected)"
 
 # IDENTITY-ID-001 附加：不得再按「显示名」匹配人。用户名可编辑、可重复，按名字找人在
 # 改名或同名用户存在时会串人（requester-home 曾用 p.name.includes("linh") 选人）。
@@ -477,8 +629,19 @@ done
 echo "    HOME-AVATAR-FALLBACK-001: PASS (home avatars fall back to initials on error)"
 
 # UI-HOME-DISCOVERY-001: 首页发现层级冻结。真人推荐必须在 AI 推荐之前；
-# 两区都要显式标识身份。Owner 决议：一键加好友可在首页做（+ 徽标直调
-# follow），发消息仍只能进主页后做。语义变更待 commander 确认。
+# 两区都要显式标识身份。Owner 决议（旧）：一键加好友可在首页做（+ 徽标直调
+# follow），发消息仍只能进主页后做。
+#
+# 2026-09-22 语义变更（AI-FRIEND-DEAD-PENDING-001，随在制工作落地）：
+# AI 推荐卡上那个 + 号走的是真人同一套 SendFriendRequest，而平台 AI 永远不会
+# accept（服务端另有 AI-FRIEND-REQUEST-001 守卫）—— 它是一条永远卡在 PENDING 的
+# 死记录，UI 还诚实地说「好友申请已发送」。该位置改成「发消息」，直连已有的对话链；
+# AI 主页那个「发消息」保留不动（见 PLACEHOLDER-010），所以「仍从主页进入」没被推翻。
+# 钉同步从反向断言改成正向断言：必须是真对话入口，不是空按钮。
+#
+# ⚠️ 这次语义变更仍待 commander 确认。要退回只需两处：还原 requester-home.tsx
+# 那个 onPress 回 + 徽标，并把 requester-home-discovery-contract.test.ts 里
+# onMessageAI 的三条正向断言改回 `not.toContain("onMessageAI?.(account)")`。
 pnpm --filter @proxy/mobile test --run src/requester-home-discovery-contract.test.ts || exit $?
 echo "    UI-HOME-DISCOVERY-001: PASS"
 
@@ -606,6 +769,206 @@ require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
 require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
   "TestFacetPostgresLifecycle" \
   "apps/api-go/internal/platform/postgres/activity_facet_integration_test.go" || exit $?
+# 第 4 个：这个 fixture 造 2 个媒体资产 + 4 条审核决定，而 media_review_decisions
+# 是故意 append-only 的审计链，DELETE 自清会跟合规设计对撞。它改用 ctx 事务回滚，
+# 并在回滚后**断言**共享库里没有残留（不是"我相信 t.Cleanup 写对了"）。
+require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
+  "TestMediaReviewDecisionPostgresLifecycle" \
+  "apps/api-go/internal/platform/postgres/marketplace_media_integration_test.go" || exit $?
+# 第 5 个：payment 那条用**固定**的 providerEventId（字面量 evt_pay_pg_1 / _2）打共享库。
+# payment.provider_events 是 webhook 去重表，而 confirmIntent 的第一步就是
+# ProviderEventExists ⇒ 命中就返回 ALREADY_PROCESSED、**一行 ledger 都不写**。
+# 第一次跑留下 evt_pay_pg_1（库里那行是 2026-09-03 的），之后每次跑都被它短路；
+# 而 step 3 只断言 Outcome=="ACCEPTED"（短路也满足）⇒ 红在很后面的
+# "ledger len must be 2, got 0"，完全指不到真因。临时集群每次全新，所以看不见。
+require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
+  "TestPaymentPostgresRoundTrip" \
+  "apps/api-go/internal/platform/postgres/payment_integration_test.go" || exit $?
+
+# PAYMENT-DEDUPE-FIXTURE-001（反向）：不许再把固定的 providerEventId 写回 fixture。
+# 这是上面那条红的**唯一**根因，而正向钉（测试存在且过）挡不住它 —— 只有共享库脏了才红。
+if grep -qE '"evt_pay_pg_[0-9]+"' \
+    apps/api-go/internal/platform/postgres/payment_integration_test.go; then
+  echo "  FAIL [PAYMENT-DEDUPE-FIXTURE-001]: payment fixture 又用了固定的 providerEventId 字面量。" >&2
+  echo "        provider_events 是共享库里的去重表：固定 id 会让第二次跑被上一次的残留短路，" >&2
+  echo "        Outcome 仍是 ACCEPTED 但 ledger 不写，于是红在 ledger len 断言上，指不到真因。" >&2
+  echo "        事件 id 要按 run 派生（见该测试开头的 TEST-HYGIENE-001 注释）。" >&2
+  exit 1
+fi
+if ! grep -q 'DELETE FROM payment.provider_events' \
+    apps/api-go/internal/platform/postgres/payment_integration_test.go; then
+  echo "  FAIL [PAYMENT-DEDUPE-FIXTURE-001]: cleanup 不再删 payment.provider_events。" >&2
+  echo "        那是这条测试唯一会跨 run 残留的表（intents / ledger / payout_holds 本来就删）。" >&2
+  exit 1
+fi
+
+# RLS-DRIFT-001: 库里出现过一类极难发现的漂移 —— 表被开了 ENABLE + FORCE
+# ROW LEVEL SECURITY 却**零 policy**（scene.scenes / scene.invitations /
+# contribution.contributions，与 065 修掉的 supply 两表同一类；032 则只给
+# media.media_review_decisions 建了 SELECT policy、漏了 INSERT）。FORCE 下连表属主
+# 也要过 policy ⇒ SELECT **静默返回 0 行**（"没数据"和"没权限"长得一样），
+# 写入报 row-level security policy 错误，而 media/service.go 把审计写入做成软失败，
+# 所以线上只表现为"审计链永远为空"。
+#
+# 这三个测试在临时集群里是**真空绿**的（testdb_test.go 用 `initdb -U proxy`，
+# 那里的 proxy 是超级用户、绕过 RLS），所以它们断言的是**结构**（privilege +
+# pg_policy），不是"插一行试试"。要在真实权限模型下验，得带 DATABASE_URL 跑。
+require_test "RLS-DRIFT-001" "./internal/platform/postgres" \
+  "TestNoTableHasUnusableRowLevelSecurity" \
+  "apps/api-go/internal/platform/postgres/media_review_decisions_rls_test.go" || exit $?
+require_test "RLS-DRIFT-001" "./internal/platform/postgres" \
+  "TestMediaReviewDecisionAuditTrailIsAppendOnlyForAppRole" \
+  "apps/api-go/internal/platform/postgres/media_review_decisions_rls_test.go" || exit $?
+require_test "MEDIA-REVIEW-PARTITION-001" "./internal/platform/postgres" \
+  "TestMediaReviewDecisionPartitionWindowCoversNow" \
+  "apps/api-go/internal/platform/postgres/media_review_decisions_rls_test.go" || exit $?
+# 反向：修复必须留在迁移集里，不能再靠手工 DDL（这两处漂移当年就是这么来的）。
+# 042 声称建了 p2026_08..p2027_07 而实际一行没建，就是因为修法没有落在会执行的地方。
+for migration in \
+  111_rls_drift_off_scene_contribution \
+  112_media_review_decisions_app_role_access \
+  113_media_review_decisions_forward_partitions \
+  114_twin_operate_actions; do
+  if [ ! -f "apps/api-go/migrations/${migration}.sql" ]; then
+    echo "  FAIL [RLS-DRIFT-001]: apps/api-go/migrations/${migration}.sql 不见了。" >&2
+    echo "        它是把 RLS 漂移 / 审计表写路径 / 分区窗口收归迁移管理的那条迁移；" >&2
+    echo "        删掉它等于把修复退回成「手工改过就算」的状态。" >&2
+    exit 1
+  fi
+done
+
+# ── TWIN-INSIGHT-002 ────────────────────────────────────────────────────────
+# AI 分身「好友洞察」曾经是**纯虚构**：客户端 twin-insight-demo.ts 里躺着
+# 6 个编造好友（Alex/Tom/Minh/Brandon/陈先生/王老板）和编造的分数、建议、
+# 对话摘要；服务端 /v1/ai/twins/* **一个路由都没有** ⇒ 每次请求 404 ⇒
+# 静默降级成那份假数据，屏幕上还挂一个演示角标，看起来像功能做完了。
+# 用户 2026-09-22：「数据也不是真的」。
+#
+# 现在四个端点都接了真表（relationship.friendships + localnet.interaction_events
+# + conversation.messages + engagement.reactions），假数据模块已删除。
+#
+# 这里钉三件事：① 端点真的存在并被门禁守着；② 假数据的入口不存在（反向钉）；
+# ③ 写侧依赖没接时 fail-closed 503，绝不"点了按钮没留痕"。
+require_test "TWIN-INSIGHT-002" "./internal/twininsight" \
+  "TestFriendsWithNoFactsStillAppearWithZeros" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-002" "./internal/twininsight" \
+  "TestScoreWeightsConversationAboveImpressions" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-002" "./internal/twininsight" \
+  "TestRecordOperateRejectsNonFriendTarget" \
+  "apps/api-go/internal/twininsight/operate_test.go" || exit $?
+require_test "TWIN-INSIGHT-002" "./internal/twininsight" \
+  "TestRefreshSummaryFailsClosedWhenModelStackUnconfigured" \
+  "apps/api-go/internal/twininsight/summary_test.go" || exit $?
+# HTTP 门禁：读端点**也要会话**（PRD 写的是匿名，这里刻意偏离 —— payload 是
+# 第三方行为数据，匿名可读等于任何人拿一个 twinId 就能读别人好友的行为轨迹）。
+require_test "TWIN-INSIGHT-002" "./internal/api" \
+  "TestTwinInsightsReadRequiresSession" \
+  "apps/api-go/internal/api/twin_insight_handlers_test.go" || exit $?
+require_test "TWIN-INSIGHT-002" "./internal/api" \
+  "TestTwinInsightsReadRejectsNonOwner" \
+  "apps/api-go/internal/api/twin_insight_handlers_test.go" || exit $?
+require_test "TWIN-INSIGHT-002" "./internal/api" \
+  "TestTwinInsightOperateRecordsAuditableRow" \
+  "apps/api-go/internal/api/twin_insight_handlers_test.go" || exit $?
+require_test "TWIN-INSIGHT-002" "./internal/api" \
+  "TestTwinInsightSummaryFailsClosedWhenModelStackUnwired" \
+  "apps/api-go/internal/api/twin_insight_handlers_test.go" || exit $?
+
+# 反向钉：**虚构兜底数据不许回来**。
+# 为什么需要反向钉：正向的"能渲染洞察"在两种实现下都绿 —— 接真服务端绿，
+# 接一份假数据也绿。只有钉住"假数据的入口不存在"才会真的失败。
+if [ -f "apps/mobile/src/components/twin-insight-demo.ts" ]; then
+  echo "  FAIL [TWIN-INSIGHT-002]: apps/mobile/src/components/twin-insight-demo.ts 又回来了。" >&2
+  echo "        那是 6 个编造好友（Alex/Tom/Minh/Brandon/陈先生/王老板）+ 编造分数/建议，" >&2
+  echo "        用户 2026-09-22 明确说「数据也不是真的」。洞察只许来自服务端真表。" >&2
+  exit 1
+fi
+if grep -q 'DEMO_PAYLOAD\|twin-insight-demo' apps/mobile/src/components/twin-insight-section.tsx; then
+  echo "  FAIL [TWIN-INSIGHT-002]: twin-insight-section.tsx 又在引用演示兜底数据。" >&2
+  echo "        读不出来必须走错误态 + 重试，不许静默降级成假数据。" >&2
+  exit 1
+fi
+# 服务端路由必须挂上（不挂 = 客户端 404 = 又一次静默降级）。
+if ! grep -q '"/v1/ai/twins/"' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [TWIN-INSIGHT-002]: /v1/ai/twins/ 路由没挂在 server.go 上。" >&2
+  echo "        客户端只会拿到 404，然后把兜底假数据显示出来。" >&2
+  exit 1
+fi
+
+# ── TWIN-INSIGHT-TARGETS-001 ────────────────────────────────────────────────
+# 目标集 = 好友 ∪ 有过互动的陌生人。之前只迭代 friends，facts 里聊过天 /
+# 看过主页的陌生 actor 被直接丢掉 —— 明明刚说过话，洞察页却显示"还没有洞察"。
+require_test "TWIN-INSIGHT-TARGETS-001" "./internal/twininsight" \
+  "TestNonFriendChatterAppearsInInsights" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-TARGETS-001" "./internal/twininsight" \
+  "TestNonFriendViewerAppearsInInsights" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-TARGETS-001" "./internal/twininsight" \
+  "TestStrangerAppearingAsFriendAndActorIsListedOnce" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-TARGETS-001" "./internal/twininsight" \
+  "TestStrangerDisplayNameResolvesOrFallsBackToNeutral" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+
+# ── TWIN-INSIGHT-ENTITLEMENT-001 ────────────────────────────────────────────
+# 洞察是卖小美合法时间的精准投流工具，只向实名创作者发放。
+# 凭证 = 实名核验 VERIFIED 行（空有效期不算，见 889c1e6），三入口第一道闸。
+require_test "TWIN-INSIGHT-ENTITLEMENT-001" "./internal/twininsight" \
+  "TestListInsightsDeniedWithoutViewerGate" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-ENTITLEMENT-001" "./internal/twininsight" \
+  "TestRecordOperateDeniedWithoutViewerGate" \
+  "apps/api-go/internal/twininsight/operate_test.go" || exit $?
+require_test "TWIN-INSIGHT-ENTITLEMENT-001" "./internal/platform/postgres" \
+  "TestSellerRealNameVerifiedForAccount" \
+  "apps/api-go/internal/platform/postgres/seller_identity_integration_test.go" || exit $?
+require_test "TWIN-INSIGHT-ENTITLEMENT-001" "./internal/api" \
+  "TestTwinInsightsListDeniedWithoutEntitlement" \
+  "apps/api-go/internal/api/twin_insight_handlers_test.go" || exit $?
+require_test "TWIN-INSIGHT-ENTITLEMENT-001" "./internal/api" \
+  "TestTwinInsightOperateDeniedWithoutEntitlement" \
+  "apps/api-go/internal/api/twin_insight_handlers_test.go" || exit $?
+if ! grep -q 'SetViewerGate(newTwinInsightViewerGate(pool))' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [TWIN-INSIGHT-ENTITLEMENT-001]: 使用权门禁没接线 ——" >&2
+  echo "        Service 有闸、main.go 不挂，等于没修。" >&2
+  exit 1
+fi
+
+# ── TWIN-INSIGHT-AVATAR-001 ──────────────────────────────────────────────────
+# 好友洞察头像恒空白：服务端 buildInsight 写死 AvatarURL: ""，客户端把相对
+# 路径直接塞 <Image> 也拉不到。头像必须从 identity.profiles 解析并经
+# resolveMediaUrl 拼 base；坏 URI 落回首字，不许留透明圆。
+require_test "TWIN-INSIGHT-AVATAR-001" "./internal/twininsight" \
+  "TestInsightAvatarURLComesFromAvatarSource" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-AVATAR-001" "./internal/twininsight" \
+  "TestInsightAvatarURLStaysEmptyWithoutSource" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-AVATAR-001" "./internal/twininsight" \
+  "TestWireAvatarURLOnlyEmitsDeliverableShapes" \
+  "apps/api-go/internal/twininsight/insight_test.go" || exit $?
+require_test "TWIN-INSIGHT-AVATAR-001" "./internal/identity" \
+  "TestProfileRoundTripUsesActorAsOwner" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+if ! grep -q 'SetAvatarSource(authorNames.ResolveAuthorAvatarPath)' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [TWIN-INSIGHT-AVATAR-001]: 头像源没接线 —— Service 有闸、main.go 不挂，头像仍恒空。" >&2
+  exit 1
+fi
+if ! grep -q 'TWIN-INSIGHT-AVATAR-001' apps/mobile/src/components/twin-insight-section.test.ts ||
+   ! grep -q 'twinAvatarSource' apps/mobile/src/components/twin-avatar-source.ts ||
+   ! grep -q 'twinAvatarSource' apps/mobile/src/components/twin-insight-card.tsx; then
+  echo "  FAIL [TWIN-INSIGHT-AVATAR-001]: 客户端头像解析或它的回归测试丢了。" >&2
+  exit 1
+fi
+if ! grep -q 'onError' apps/mobile/src/components/proxy-foundation.tsx; then
+  echo "  FAIL [TWIN-INSIGHT-AVATAR-001]: ProxyAvatar 没有 onError 回退 —— 坏 URI 仍是空白圆。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/components/twin-insight-section.test.ts || exit $?
+echo "    TWIN-INSIGHT-AVATAR-001: PASS (server avatarUrl + resolveMediaUrl + initial fallback)"
 
 # AIBOUND-001: DismissMarketOpportunity 曾经无 aiboundary 落点（AI 可调），
 # market 写曾经无 USER 主体检查（与 activity 不对称）。现 Dismiss 进 gate，
@@ -665,7 +1028,7 @@ require_test "ACT-PUBLISH-001" "./internal/activity" \
 require_test "ACT-PUBLISH-001" "./internal/activity" \
   "TestPublishActivityRejectsAIAndInvalidVenueBoundary" \
   "apps/api-go/internal/activity/service_test.go" || exit $?
-pnpm --dir apps/mobile test -- --run src/activity-client.test.ts
+pnpm --dir apps/mobile exec vitest run src/activity-client.test.ts || exit $?
 echo "    ACT-PUBLISH-001: PASS (mobile publish + offline write guard)"
 
 # ACT-MY-ACTIVITIES-001: “我的活动” 物化路径。ListMyActivities
@@ -679,7 +1042,7 @@ require_test "ACT-MY-ACTIVITIES-001" "./internal/activity" \
 require_test "ACT-MY-ACTIVITIES-002" "./internal/platform/postgres" \
   "TestActivityPostgresListByOwnerAndParticipant" \
   "apps/api-go/internal/platform/postgres/activity_facet_integration_test.go" || exit $?
-pnpm --dir packages/contracts test -- --run src/activity.test.ts
+pnpm --dir packages/contracts exec vitest run src/activity.test.ts || exit $?
 echo "    ACT-MY-ACTIVITIES-001: PASS (mobile wire schema round-trip)"
 
 # AI-PERSONA-PHOTO-001: 平台 AI 5 角色 (ai_001-ai_005) 冷启动
@@ -689,14 +1052,14 @@ echo "    ACT-MY-ACTIVITIES-001: PASS (mobile wire schema round-trip)"
 require_test "AI-PERSONA-PHOTO-001" "./internal/activity" \
   "TestPlatformAIPersonaPhotoRequiredOnColdStart" \
   "apps/api-go/internal/activity/service_test.go" || exit $?
-pnpm --dir packages/contracts test -- --run src/activity.test.ts
+pnpm --dir packages/contracts exec vitest run src/activity.test.ts || exit $?
 echo "    AI-PERSONA-PHOTO-001: PASS (mobile wire schema round-trip)"
 
 # CHAT-PROXY-ACTIVITY-001: conversation sendProxyObject 必须
 # 使用 server 真 activityId, 不允许 hardcoded "act_westlake"
 # 等不存在的 ID. 防 "聊天发活动 ≠ 我的活动页有活动" 的两路径
 # 不对齐. mobile test 拒绝任何隐性 fallback 到 hardcoded ID.
-pnpm --dir apps/mobile test -- --run src/conversation-client.test.ts
+pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts || exit $?
 echo "    CHAT-PROXY-ACTIVITY-001: PASS (real activityId round-trip)"
 
 # PERF-001: ListConversationMessages 必须封顶（200 条，尾部保留，
@@ -846,7 +1209,7 @@ require_test "PRODUCT-001" "./internal/platform/postgres" \
 # BusinessClient (不是 hardcoded '48 张')。'me.tsx > merchantstorefront'
 # route 之前是 Bonsaidon 假数据, 现在路由到 MerchantStorefrontSurface
 # + 真接 BusinessClient. tripwire 验证 client 能 round-trip photos。
-pnpm --dir apps/mobile exec vitest run src/business-client.test.ts
+pnpm --dir apps/mobile exec vitest run src/business-client.test.ts || exit $?
 if ! grep -q 'MerchantStorefrontSurface' apps/mobile/src/surfaces/me.tsx; then
   echo "  FAIL [STORE-PHOTO-001 mobile]: me.tsx lost the MerchantStorefrontSurface wire" >&2
   exit 1
@@ -964,7 +1327,7 @@ if ! grep -q 'supply={supply}' apps/mobile/src/shell/app-shell.tsx; then
   echo "  FAIL [R35-OPERATING-HOME-001]: merchant Home lost eligible Creator supply" >&2
   exit 1
 fi
-pnpm --dir apps/mobile exec vitest run src/business-client.test.ts
+pnpm --dir apps/mobile exec vitest run src/business-client.test.ts || exit $?
 echo "    R35-OPERATING-HOME-001: PASS (real outcome; unknown demand/forecast; conservative NO_ACTION)"
 
 # R35-HOME-BOUNDARY-001: Operating Home belongs only to the BUSINESS Home tab.
@@ -994,7 +1357,7 @@ if ! grep -q 'profileClient\.updateProfile\|profileClient\.getProfile' apps/mobi
   echo "  FAIL [PROFILE-001 mobile]: me.tsx saveProfile never calls profileClient.updateProfile" >&2
   exit 1
 fi
-pnpm --dir apps/mobile exec vitest run src/profile-client.test.ts
+pnpm --dir apps/mobile exec vitest run src/profile-client.test.ts || exit $?
 echo "    PROFILE-001: PASS (server + mobile half wired to UpdateProfile / GetProfile)"
 
 # CANCEL-001: Order lifecycle enum included CANCELLED, but no
@@ -1017,7 +1380,7 @@ require_test "CANCEL-001" "./internal/fulfillment" \
 require_test "CANCEL-001" "./internal/fulfillment" \
   "TestCancelOrderNotFound" \
   "apps/api-go/internal/fulfillment/service_test.go" || exit $?
-pnpm --dir apps/mobile exec vitest run src/fulfillment-client.test.ts >/dev/null
+pnpm --dir apps/mobile exec vitest run src/fulfillment-client.test.ts >/dev/null || exit $?
 if ! grep -q 'cancelOrder' apps/mobile/src/surfaces/me-orders.tsx; then
   echo "  FAIL [CANCEL-001 mobile]: me-orders surface never calls client.cancelOrder" >&2
   exit 1
@@ -1040,7 +1403,7 @@ if ! grep -q 'client.upsertStoreLines' apps/mobile/src/surfaces/merchant-storefr
   echo "  FAIL [LINES-EDITOR-001]: saveLines never calls client.upsertStoreLines" >&2
   exit 1
 fi
-pnpm --dir apps/mobile exec vitest run src/business-client.test.ts >/dev/null
+pnpm --dir apps/mobile exec vitest run src/business-client.test.ts >/dev/null || exit $?
 echo "    LINES-EDITOR-001: PASS (inline edit form wires to UpsertStoreLines)"
 
 # FRIEND-001: 我的 → 好友与关系 之前是 4 行 hardcoded CRM_FRIENDS
@@ -1066,7 +1429,7 @@ require_test "FRIEND-001" "./internal/relationship" \
 require_test "FRIEND-001" "./internal/relationship" \
   "TestSendFriendRequestRejectsSelf" \
   "apps/api-go/internal/relationship/service_test.go" || exit $?
-pnpm --dir apps/mobile exec vitest run src/relationship-client.test.ts >/dev/null
+pnpm --dir apps/mobile exec vitest run src/relationship-client.test.ts >/dev/null || exit $?
 if ! grep -q 'relationship\.listMyFriendships\|relationship\.acceptFriendRequest' apps/mobile/src/surfaces/friend-crm.tsx; then
   echo "  FAIL [FRIEND-001 mobile]: friend-crm surface never calls RelationshipClient" >&2
   exit 1
@@ -1083,7 +1446,7 @@ if ! grep -q 'PLACEHOLDER-001' apps/mobile/src/surfaces/placeholder-honest-actio
   echo "  FAIL [PLACEHOLDER-001]: placeholder tripwire test file is missing" >&2
   exit 1
 fi
-pnpm --dir apps/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts >/dev/null
+pnpm --dir apps/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts >/dev/null || exit $?
 echo "    PLACEHOLDER-001: PASS (no placeholder buttons / invented fields)"
 
 # PLACEHOLDER-002: 每条交互链必须走完（出图分享之后不断线）。
@@ -1148,16 +1511,17 @@ if ! grep -q 'PLACEHOLDER-009' apps/mobile/src/surfaces/placeholder-honest-actio
 fi
 echo "    PLACEHOLDER-009: PASS (tripwire present; covered by the vitest run above)"
 
-# PLACEHOLDER-010: AI 添加待同意显示添加中。
+# PLACEHOLDER-010: AI 主页只留真有结果的动作（AI-FRIEND-DEAD-PENDING-001）。
+# 旧的语义是「AI 添加待同意显示添加中」—— 那个 PENDING 是死记录，已删除。
 if ! grep -q 'PLACEHOLDER-010' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
-  echo "  FAIL [PLACEHOLDER-010]: ai-pending tripwire is missing" >&2
+  echo "  FAIL [PLACEHOLDER-010]: ai-honest-actions tripwire is missing" >&2
   exit 1
 fi
 echo "    PLACEHOLDER-010: PASS (tripwire present; covered by the vitest run above)"
 
-# PLACEHOLDER-011: 待定添加灰字。
+# PLACEHOLDER-011: 那条 添加中/PENDING 死状态不许回来（含它的样式）。
 if ! grep -q 'PLACEHOLDER-011' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
-  echo "  FAIL [PLACEHOLDER-011]: pending-gray tripwire is missing" >&2
+  echo "  FAIL [PLACEHOLDER-011]: dead-pending tripwire is missing" >&2
   exit 1
 fi
 echo "    PLACEHOLDER-011: PASS (tripwire present; covered by the vitest run above)"
@@ -1231,7 +1595,7 @@ echo "    PLACEHOLDER-017: PASS (tripwire present; covered by the vitest run abo
 # avatar onto both cards. The me.tsx render path is the
 # canonical consumer — confirm it uses hubProfile, not the
 # raw persona name.
-pnpm --dir apps/mobile exec vitest run src/surfaces/hub-profile.test.ts >/dev/null
+pnpm --dir apps/mobile exec vitest run src/surfaces/hub-profile.test.ts >/dev/null || exit $?
 if ! grep -q 'resolveHubProfile' apps/mobile/src/surfaces/me.tsx; then
   echo "  FAIL [HUB-PROFILE-001]: me.tsx never resolves the live profile for the hub card" >&2
   exit 1
@@ -1254,7 +1618,7 @@ echo "    HUB-PROFILE-001: PASS (hub card + identity card both read live profile
 # the me.tsx render path uses it. Tripwire: the helper is
 # imported, the render path uses it, and the old hardcoded
 # "TT" "Z" "IG" "in" array literal is gone.
-pnpm --dir apps/mobile exec vitest run src/surfaces/hub-profile.test.ts >/dev/null
+pnpm --dir apps/mobile exec vitest run src/surfaces/hub-profile.test.ts >/dev/null || exit $?
 if ! grep -q 'resolveHubSocials' apps/mobile/src/surfaces/me.tsx; then
   echo "  FAIL [HUB-SOCIAL-001]: me.tsx never resolves the live social accounts for the hub card" >&2
   exit 1
@@ -1302,7 +1666,7 @@ echo "    DEAD-SUBPAGE-001: PASS (messages / requestermemory / businessdiagnosti
 
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。
-pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts
+pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts || exit $?
 if ! grep -q 'Math.max(insets.bottom, 16)' apps/mobile/src/surfaces/conversation.tsx; then
   echo "  FAIL [UI-CHAT-001]: conversation composer lost bottom safe-area spacing" >&2
   exit 1
@@ -1472,8 +1836,7 @@ fi
 # 修复 = 全部读入口 await 化 + 纯解析层 local-snapshot.ts（单测覆盖）+
 # mock 如实模拟 async 形态。supersedes HIDDEN-CHATS-001（同一 bug 的
 # 全类收网版；hidden-chats 分支只修了 hidden 一点且已被本修复覆盖）。
-pnpm --dir apps/mobile exec vitest run src/local-snapshot.test.ts \
-  src/sync-fs-persist.test.ts || exit $?
+pnpm --dir apps/mobile exec vitest run src/local-snapshot.test.ts src/sync-fs-persist.test.ts || exit $?
 if ! grep -q 'await hiddenChatsFile.json()' apps/mobile/src/surfaces/messages.tsx; then
   echo "  FAIL [SYNC-FS-001]: hidden chats read must await json()" >&2
   exit 1
@@ -2050,6 +2413,594 @@ if [ -n "${DATABASE_URL:-}" ] || command -v pg_ctl >/dev/null 2>&1; then
 fi
 echo "    COMP-ID-002: PASS (burner guard reads the real payment tables, both stub directions pinned)"
 
+# LC-06 / LC-07: AI 生成溯源必须真的落库 —— 否则 MarkMediaReady 上那两道
+# fail-closed 合规闸门是死代码。
+#
+# 2026-09-21 发现：闸门本身早就写好了（internal/media/service.go）：
+#   aiGenerationSource == "UNKNOWN"                 → AI_LABEL_MISSING
+#   AI_PERSONA 查不到活体 likeness 同意             → AI_LIKENESS_CONSENT_MISSING
+# 但 media.media_assets 当时没有这 5 列，platform/postgres/media.go 的
+# INSERT / SELECT / UPDATE 也从来没提过它们。后果是双向的：
+# 写入侧静默丢弃，读取侧永远是 Go 零值 ""，而闸门比的是字面量 "UNKNOWN" ——
+# "" 比不过，直接放行。越南 AI 法 134/2025/QH15 第 12 条要求的
+# 「AI 生成内容必须可标注、无法标注则不得发布」在生产上没有任何数据在支撑。
+#
+# 为什么之前没被抓住（两个盲区叠加，缺一个都会更早暴露）：
+#   - media/lc06_lc07_test.go 用的是 MemoryRepository（整个结构体存 map），
+#     内存路径一直是绿的；
+#   - g3 的 scripts/lc06-ai-media-e2e.sh 在第 1 步就挂了（fixture 给
+#     CreatePersona 编了一个没有年龄断言的 owner），走不到闸门，
+#     而它的注释还声称覆盖了这两条。
+#
+# 所以这里钉三层，少一层洞就会回来：
+#   1. 静态：三个 SQL 写点（SELECT / INSERT / UPDATE）都带这些列 ——
+#      不需要数据库，任何一次重构都会被立刻拦下。
+#   2. 静态：迁移必须真的 ADD COLUMN。列不存在，代码写得再对也存不进去。
+#   3. 动态：真库上的往返 + 两道闸门的红→绿用例。
+lc06_repo_file=apps/api-go/internal/platform/postgres/media.go
+# 先剥行首注释再断言：这个文件里有一行注释正好把这几个列名列了一遍，
+# 不剥的话「SELECT/INSERT 把列删了」也能被那行注释喂绿。
+lc06_repo_code=$(grep -vE '^[[:space:]]*//' "$lc06_repo_file")
+# SELECT：mediaAssetColumns 常量，GetAsset / GetAssets / Snapshot 三条读路径共用。
+# 用 COALESCE 那一行做判据 —— 它是 SELECT 独有的，不会和 INSERT 撞。
+if ! printf '%s\n' "$lc06_repo_code" | grep -qF "COALESCE(persona_id,''), COALESCE(subject_id,''), COALESCE(likeness_consent_id,'')"; then
+  echo "  FAIL [LC-06]: the SELECT column list dropped the AI provenance columns." >&2
+  echo "        Read paths would hand back empty provenance, so the MarkMediaReady gate fails open." >&2
+  exit 1
+fi
+# INSERT：CreateAsset。用完整的 5 列名做判据，它是 INSERT 独有的。
+if ! printf '%s\n' "$lc06_repo_code" | grep -qF 'ai_generation_source, ai_generated, persona_id, subject_id, likeness_consent_id,'; then
+  echo "  FAIL [LC-06]: the INSERT column list dropped the AI provenance columns." >&2
+  echo "        createAsset computes the AI label correctly and the write path throws it away." >&2
+  exit 1
+fi
+# UPDATE：MarkMediaReady 在这里给 likeness consent 盖章。
+if ! printf '%s\n' "$lc06_repo_code" | grep -qF 'likeness_consent_id=$'; then
+  echo "  FAIL [LC-07]: UpdateAsset no longer persists likeness_consent_id." >&2
+  echo "        MarkMediaReady stamps the consent id and the UPDATE drops it, so the audit trail is empty." >&2
+  exit 1
+fi
+# 迁移：列必须真的加进 schema。
+lc06_migration=apps/api-go/migrations/108_media_ai_provenance.sql
+if [ ! -f "$lc06_migration" ]; then
+  echo "  FAIL [LC-06]: $lc06_migration is missing." >&2
+  echo "        Without the columns the repository code above cannot store anything." >&2
+  exit 1
+fi
+for lc06_col in ai_generation_source ai_generated persona_id subject_id likeness_consent_id; do
+  if ! grep -qF "ADD COLUMN IF NOT EXISTS $lc06_col" "$lc06_migration"; then
+    echo "  FAIL [LC-06]: $lc06_migration no longer adds $lc06_col." >&2
+    exit 1
+  fi
+done
+# g3 的 e2e fixture：persona 的 owner 必须是那个带年龄断言的会话账号。
+# 编一个假 id 会让 CreatePersona 撞上 COMP-AI-MINOR-001 守卫并 fail-closed
+# （"no age evidence on file for this account"），脚本挂在第 1 步，
+# 后面所有用例都跑不到 —— 这正是这个洞能藏住的原因之一。
+if grep -qE 'envelope_create_persona "user_\$\{TS\}' scripts/lc06-ai-media-e2e.sh; then
+  echo "  FAIL [LC-06]: lc06-ai-media-e2e.sh fabricates a persona owner id again." >&2
+  echo "        CreatePersona looks up user_age_assertions for OwnerID and refuses accounts it cannot find." >&2
+  exit 1
+fi
+echo "    LC-06 / LC-07: PASS (provenance columns present in SELECT / INSERT / UPDATE / migration)"
+# 闸门必须挡在「实际跑的那条路」上（2026-09-21，同一类问题的第二处）。
+#
+# 上面那几层钉的是「溯源有没有落库」；这一层钉的是「判定有没有被调用」。
+# LC-06 / LC-07 原先只写在 markReady 里，而 markReady 是 operator 专属命令
+# （API 边界限定；PROXY_OPERATOR_PRINCIPALS 未配置时整条被拒）。真正把资产
+# 推到 READY 的是 worker 的 ProcessAssetNow —— 它从不调用那段判定。
+# 实测（真库 + 真 repository）：挂了 USER_TWIN 分身、没有任何 likeness 同意的
+# AI_PERSONA 资产走完 worker 之后 status=READY、moderationStatus=APPROVED，
+# consent 全程为空。也就是说闸门在「实际跑的那条路」上不存在。
+#
+# 这三个用例跑 MemoryRepository，不依赖数据库 —— 不存在 SKIP 冒充 PASS 的问题。
+require_test "LC-06" "./internal/media" \
+  "TestLC06WorkerPathRefusesUnknownLabel" \
+  "apps/api-go/internal/media/worker_publish_gate_test.go" || exit $?
+require_test "LC-07" "./internal/media" \
+  "TestLC07WorkerPathRefusesAIPersonaWithoutConsent" \
+  "apps/api-go/internal/media/worker_publish_gate_test.go" || exit $?
+require_test "LC-06" "./internal/media" \
+  "TestWorkerPathStillPublishesPlainUploadAndCreativePersona" \
+  "apps/api-go/internal/media/worker_publish_gate_test.go" || exit $?
+# 两条发布路径必须共用同一份判定，否则又会漂移成「一条有闸门、一条没有」——
+# 这正是这次出问题的形状。任何一条掉了就红。
+for lc06_publish_path in \
+  apps/api-go/internal/media/worker.go \
+  apps/api-go/internal/media/service.go; do
+  # 钉**整条守卫**（含 v != nil 条件），不是子串。只钉子串的话，
+  # 把条件改成 'false && v != nil' 就能让闸门失效而钉照样绿 ——
+  # 2026-09-21 在 LC-16 的同类钉上实测踩到过这个洞，两处一起收紧。
+  if ! grep -qF 'if v := s.enforceAIPublishGates(ctx, &asset); v != nil {' "$lc06_publish_path"; then
+    echo "  FAIL [LC-06/LC-07]: $lc06_publish_path no longer runs the AI publish gates." >&2
+    echo "        markReady is operator-only; the worker is what actually promotes assets to READY." >&2
+    echo "        Both publish paths must share enforceAIPublishGates or they drift apart again." >&2
+    exit 1
+  fi
+done
+echo "    LC-06 / LC-07: PASS (gates run on BOTH publish paths: markReady + worker)"
+# 动态层：真库往返。这里不用 require_test —— 每个 require_test 都是一次独立的
+# go test 进程（各自起一个一次性集群），7 条就是 7 次 initdb；而且它无法区分
+# 「跑了并通过」和「被 SKIP 了」，后者会让钉在没验过任何东西的情况下报 PASS。
+# 一次跑完 + 数 PASS 条数，SKIP 也数得出来。
+lc06_pg_dir=""
+for lc06_p in /opt/homebrew/opt/postgresql@15/bin /opt/homebrew/opt/postgresql@16/bin /opt/homebrew/opt/postgresql/bin \
+               /usr/local/opt/postgresql@15/bin /usr/local/opt/postgresql@16/bin \
+               /usr/lib/postgresql/15/bin /usr/lib/postgresql/16/bin; do
+  if [ -x "$lc06_p/pg_ctl" ]; then lc06_pg_dir="$lc06_p"; break; fi
+done
+if [ -n "${DATABASE_URL:-}" ] || [ -n "$lc06_pg_dir" ] || command -v pg_ctl >/dev/null 2>&1; then
+  lc06_pg_re='^(TestMediaProvenanceAIPersonaRoundTrip|TestMediaProvenanceBatchReadKeepsPersonaAndSubjectApart|TestMediaProvenanceUserUploadedIsLabelledAndPublishes|TestMediaUnknownProvenanceFailsClosedAtMarkReady|TestMediaAIPersonaWithoutLiveConsentFailsClosedAtMarkReady|TestMediaAIPersonaWithLiveConsentStampsConsentID|TestMediaCreativePersonaPublishesWithoutConsent)$'
+  lc06_pg_out=$(go -C apps/api-go test -count=1 -v -run "$lc06_pg_re" ./internal/platform/postgres 2>&1)
+  lc06_pg_rc=$?
+  if [ "$lc06_pg_rc" -ne 0 ]; then
+    printf '%s\n' "$lc06_pg_out" | grep -E -- '--- FAIL|_test\.go:[0-9]+:' >&2
+    echo "  FAIL [LC-06/LC-07]: the AI-provenance round-trip tests failed." >&2
+    echo "        These are the only tests that prove the fail-closed gates fire on the real schema." >&2
+    exit 1
+  fi
+  lc06_pg_pass=$(printf '%s\n' "$lc06_pg_out" | grep -c -- '^--- PASS' || true)
+  if [ "$lc06_pg_pass" -ne 7 ]; then
+    lc06_pg_skip=$(printf '%s\n' "$lc06_pg_out" | grep -c -- '^--- SKIP' || true)
+    echo "  FAIL [LC-06/LC-07]: expected 7 passing round-trip tests, got $lc06_pg_pass (skipped=$lc06_pg_skip)." >&2
+    echo "        A skipped test proves nothing — LC-06/LC-07 must be verified against a real schema." >&2
+    exit 1
+  fi
+  echo "    LC-06 / LC-07: PASS (real-schema round-trip: label + persona + consent survive, both gates fire closed)"
+else
+  echo "    LC-06 / LC-07: SKIP (no postgres cluster found — the round-trip tests did NOT run; install postgresql@15 or set DATABASE_URL)" >&2
+fi
+
+# LC-06 的**显示侧**（2026-09-21 产品决定：补上）。
+#
+# 上面那几条钉证明的是存储侧：溯源列在 migration / SELECT / INSERT / UPDATE 里活着，
+# 两道闸门（markReady + worker）都开火，真实 schema 上 7 条往返测试全过。
+#
+# 在这条钉最初写下的时候（2026-09-21 早些时候），显示侧是**空的**，当时的读数是：
+#
+#   grep -c  "aiGenerationSource" packages/contracts/src/index.ts            # → 0
+#   grep -rn "aiGenerationSource" apps/api-go/internal/api/ --include=*.go   # → 0
+#   grep -c  "ai_generation_source\|ai_generated" \
+#        apps/api-go/internal/platform/postgres/network.go                   # → 0（feed 四条查询都不选）
+#   grep -rn "aiBadge: true" apps/mobile/src/surfaces/feed.tsx               # → 1（只有 AI_NATIVE）
+#
+# 即：**按资产**的 AI 溯源（LC-06 的交付物本体）对任何用户都不可见。
+# 当时这条钉钉的是「缺口」，不是「决定」——它不判定该不该显示，只逼出那个决定。
+#
+# 同一天用户定了口径（原话）：「ai做的 就标注 法规要求要满足」。
+# 于是缺口被补上，链变成五跳，每一跳都有钉：
+#
+#   media_assets.ai_generation_source          （migration 108，存储侧，已有）
+#     → GetAssets 选列 + 扫进 MediaAsset        （已有，未改动）
+#     → mediaAssetInfo() 带出 media 包          ← 第①跳，曾缺
+#     → hydratePostMedia() 放进 PostMediaItem   ← 第②跳，曾缺
+#     → FeedMediaItemSchema.aiGenerationSource  ← 第③跳，曾缺
+#     → AIMediaBadge 画「AI 生成」               ← 第④跳，曾缺
+#     → **每一种媒体形状都挂了它**                ← 第⑤跳，曾缺（见下面的更正）
+#
+# 任何一跳掉了都是「标注静默消失」且编译不报错，所以五跳各有各的钉：
+#   ① TestPostMediaLookup_PropagatesAIGenerationSource      (internal/media)
+#   ② TestListFeedPosts_PropagatesAIGenerationSourceToMediaWire (internal/localnet)
+#   ③ 下面这条契约钉
+#   ④⑤ mobile 的 ai-media-label.test.ts + 下面的挂点覆盖钉
+#
+# **仍然没有被判定的事**：134/2025/QH15 第 12 条要求的是「记录」还是「向终端用户
+# 显示」，需要法务确认 —— docs/design/references/ 那份对齐文档里「法务 review」
+# 至今未勾选。我们选的是**更严的那一边**（显示），所以这个未决项不构成合规风险，
+# 但也别把「法务已确认」写进任何文档：那是我们主动多做的，不是法务签过字的。
+#
+# 另外，`MODEL_API` 这个枚举值仍然**没有任何生产者** —— 全仓非测试代码里只有校验
+# 白名单、注释和 normalize 的透传，没有哪条管线会写它。所以「平台的 MODEL_API 资产
+# 被 USER 作者发布、界面无标注」这个形状**不存在**；客户端对它的处理属于预先接线，
+# 不是当前在跑的行为。
+if ! grep -qE 'aiGenerationSource' packages/contracts/src/index.ts; then
+  echo "  FAIL [LC-06-display]: contracts no longer carry per-asset AI provenance." >&2
+  echo "        Without this field the client cannot label AI-generated media." >&2
+  echo "        产品决定 2026-09-21：「AI 做的就标注」。撤字段 = 撤标注，请显式面对。" >&2
+  exit 1
+fi
+# 只钉契约不够：字段在 wire 上、渲染那一行被删掉，照样「没有标注」。
+#
+# ⚠️ 2026-09-21 更正（第一次的钉**绿着**却漏了三条路）：
+# 原来这里钉的是「AdaptiveMediaCollection.tsx 里出现 aiMediaLabel」。它一直是绿的，
+# 因为标注确实被内联进了那个文件的**单图分支** —— 于是这些形状全都没标注：
+#   - 多图帖：mediaCollectionMode() 判成 RAIL → AdaptiveMediaRail → SocialMediaFrame
+#     （根本不经过单图分支）
+#   - AI 视频：renderKindAwareStage 的 VIDEO 分支在算 aiLabel **之前**就 return 了
+#   - 个人主页 / 他人主页：直接调 SinglePostImage / ThreadsPostMedia
+# 教训：**钉「某行代码在某个文件里」会漏掉"这条渲染路径根本没走到那里"。**
+# 现在钉的是**覆盖**：每个「画媒体」的形状都必须挂 AIMediaBadge，
+# 而且判定口径只允许一条链（renderer → ai-media-badge → ai-media-label）。
+if ! grep -qE 'export function aiMediaLabel\(' apps/mobile/src/media/ai-media-label.ts; then
+  echo "  FAIL [LC-06-display]: the single AI-label rule is gone." >&2
+  exit 1
+fi
+if ! grep -qE 'from "\./ai-media-label"' apps/mobile/src/media/ai-media-badge.tsx; then
+  echo "  FAIL [LC-06-display]: the badge no longer asks the single rule." >&2
+  echo "        A second copy of the rule will drift from ai-media-label.ts." >&2
+  exit 1
+fi
+# 每种媒体形状的挂点。少一个 = 那一类 AI 媒体对用户可见但没标注。
+if ! grep -qE '<AIMediaBadge' apps/mobile/src/media/AdaptiveMediaCollection.tsx; then
+  echo "  FAIL [LC-06-display]: single-image / single-video posts lost the AI label." >&2
+  exit 1
+fi
+if ! grep -qE '<AIMediaBadge' apps/mobile/src/media/SocialMediaFrame.tsx; then
+  echo "  FAIL [LC-06-display]: multi-image posts (RAIL cards) lost the AI label." >&2
+  echo "        A post with 2+ images renders through SocialMediaFrame, not the single branch." >&2
+  exit 1
+fi
+if ! grep -qE '<AIMediaBadge' apps/mobile/src/components/threads-post-media.tsx; then
+  echo "  FAIL [LC-06-display]: profile post media lost the AI label." >&2
+  exit 1
+fi
+# 全屏查看器（点开原图）：跟 feed 里是同一张图，放大了反而没标注 = 用户当成真人拍的。
+# 它用**行内**变体（顶栏是 flex row，absolute 会压住关闭按钮），所以钉的是带 inline
+# 的那一处 —— 文件级 `grep '<AIMediaBadge'` 对这一处被删是无感的。
+# 注：VIDEO 的全屏态是原生播放器，没有 React 挂点，标注只挂在进入全屏之前的视频卡上。
+if ! grep -qF '<AIMediaBadge item={current} inline />' apps/mobile/src/media/AdaptiveMediaCollection.tsx; then
+  echo "  FAIL [LC-06-display]: the fullscreen viewer (MediaViewer) lost the AI label." >&2
+  echo "        Opening an AI image full-screen must still label it — same image, bigger." >&2
+  exit 1
+fi
+# 渲染分支不许自己判来源 —— 把判定内联进某一个分支，正是第一次漏掉三条路的原因。
+if grep -rnE 'aiGenerationSource' apps/mobile/src/media/AdaptiveMediaCollection.tsx apps/mobile/src/media/SocialMediaFrame.tsx apps/mobile/src/components/threads-post-media.tsx; then
+  echo "  FAIL [LC-06-display]: a renderer judges AI provenance itself instead of mounting the badge." >&2
+  echo "        Inlining the decision into one branch is exactly how 3 shapes got missed." >&2
+  exit 1
+fi
+# 作者级徽标仍只覆盖 AI_NATIVE（小美）一档 —— 那是 feed **身份轴**上唯一的 AI 作者。
+# AGENT / MERCHANT / USER 的帖若带 AI 生成的图，现在由上面的**资产轴**标注覆盖，
+# 所以这里保持 1 是自洽的，不是漏标。
+if [ "$(grep -c 'aiBadge: true' apps/mobile/src/surfaces/feed.tsx)" != "1" ]; then
+  echo "  FAIL [LC-06-display]: the set of author types that render an AI badge changed." >&2
+  echo "        Today exactly one does (AI_NATIVE / 小美). If AGENT or another type was added," >&2
+  echo "        that is a labelling decision — confirm it, then update this pin." >&2
+  exit 1
+fi
+require_test "LC-06" "./internal/media" "TestPostMediaLookup_PropagatesAIGenerationSource" "apps/api-go/internal/media/postmedia_lookup_test.go" || exit $?
+require_test "LC-06" "./internal/localnet" "TestListFeedPosts_PropagatesAIGenerationSourceToMediaWire" "apps/api-go/internal/localnet/service_test.go" || exit $?
+pnpm --dir apps/mobile exec vitest run src/media/ai-media-label.test.ts || exit $?
+echo "    LC-06-display: PASS (per-asset AI provenance reaches the client; every media shape — single image, single video, RAIL card, profile cell, fullscreen viewer — is labelled)"
+
+# AI-DISCLOSURE-001：activity 面上的 AI 标注**不能**挂在 persona 名字上。
+#
+# 契约（packages/contracts/src/index.ts 的 ActivitySchema 注释）承诺的是
+#   「aiStatus != NONE 时客户端**必**显示 AI 标注 + persona 头像 + 名字」。
+# 注意主语：必显示的是**标注**；persona 名字是补充信息 —— schema 里是
+# `z.string().min(1).optional()`，服务端 `omitempty`，wire 允许缺名字。
+#
+# 2026-09-21 修之前的三个列表渲染点写的是
+#   {item.aiStatus !== "NONE" && item.aiPersonaName ? (…) : null}
+# 名字一缺，标注**整块消失** —— 界面把 AI 生成的活动当成人做的呈现。
+#
+# 这是漏接线，不是产品决定，证据在同一个文件里：tasks.tsx 的 footer
+# 免责声明（aiPersonaDisclaimerFooter，grep 得到）当时**已经**是无条件标注
+#   aiStatus === "AI_GENERATED" || aiStatus === "AI_ASSISTED"
+# 并且自己写了 `?? "用户分身"` / `?? "AI 助理"` 兜底。同一份数据、两种口径，
+# 同一个文件内自相矛盾 —— 所以判定为 bug。
+#
+# 现在归属名的兜底只有一处：activityAIPersonaName()（activity-detail-model.ts），
+# 只做**事实级**归因，不编造 persona：
+#   PLATFORM_AI → 「平台 AI 小美」（平台 AI 角色，assets/ai-personas/INDEX.md）
+#   USER_TWIN   → 「用户分身」（是**本人**的分身，不是平台的人）
+#   其余/未知    → 「AI 助理」（中性，不指认任何具体角色）
+#
+# 为什么钉在 mobile 而不是服务端：服务端**不能**替客户端编名字。`AIActorKind`
+# 有 USER_TWIN / USER_ASSISTANT 两档，给它们回填「平台 AI 小美」是把发布者
+# 说成平台 —— 那是比漏标更糟的假陈述。所以服务端的责任是「该带的带出来」，
+# 客户端必须有「名字缺失也照样标」的路径。
+if ! grep -qE 'export function activityAIPersonaName\(' apps/mobile/src/surfaces/activity-detail-model.ts; then
+  echo "  FAIL [AI-DISCLOSURE-001]: the shared persona-name fallback is gone." >&2
+  echo "        Without it every surface re-invents its own fallback and they drift." >&2
+  exit 1
+fi
+# 反回归 ①：任何 surface 再把标注挂回名字上 → 名字一缺标注就消失。
+if grep -rnE 'aiStatus !== "NONE"[[:space:]]*&&[[:space:]]*[A-Za-z_]+\.aiPersonaName' apps/mobile/src/surfaces/; then
+  echo "  FAIL [AI-DISCLOSURE-001]: an AI label is gated on aiPersonaName again." >&2
+  echo "        aiStatus != NONE must disclose on its own; the name is supplementary." >&2
+  echo "        名字一缺，标注就整块消失 —— 界面把 AI 生成的内容当成人做的。" >&2
+  exit 1
+fi
+# 反回归 ②：绕过共享助手自己写兜底 → 两套口径迟早漂移。
+if grep -rnE 'aiPersonaName[[:space:]]*\?\?' apps/mobile/src/surfaces/; then
+  echo "  FAIL [AI-DISCLOSURE-001]: a surface hand-rolls its own persona-name fallback." >&2
+  echo "        Use activityAIPersonaName() from ./activity-detail-model instead." >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/surfaces/activity-detail.test.ts || exit $?
+echo "    AI-DISCLOSURE-001: PASS (AI activity content discloses on aiStatus alone; a missing persona name never hides the label)"
+
+# LC-07 活动侧：PRD 与 activity/service.go 的注释都声称
+#   「USER_TWIN 角色 photo 必须先有 LikenessConsent LIVE 才会下发」
+# 但 activity 包里除了那行注释没有任何 consent 判定（grep HasLiveConsent/Likeness
+# → 只有注释本身），服务也没注入 persona/consent 依赖。也就是说这句承诺**无法被执行**。
+#
+# 它今天不是线上风险，只因为 USER_TWIN 活动压根不存在：AIPersonaPhoto 只在
+# SeedDefaults 里被写成 PLATFORM_AI 的打包资源路径，没有任何命令能写这个字段。
+# 而 media 侧那道 LC-07 闸门覆盖不到这里 —— 它只管 media.media_assets 行，
+# aiPersonaPhoto 是打包资源路径而不是 mediaAssetId。
+#
+# 所以这条钉子的作用不是「禁止这个功能」，而是「不许悄悄把路打通」：
+# 一旦有人让活动带上 USER_TWIN 的 photo，测试立刻红，逼出「先接 consent 还是
+# 先下线该字段」的决定。测试同时拒绝空转 —— 如果 aiPersonaPhoto 整个字段被丢掉，
+# 它会报「观测不到任何带 photo 的活动」而不是空跑一遍算通过。
+#
+# 用 require_test 是因为这个用例跑 MemoryRepository（New()），不碰数据库，
+# 因此不存在 SKIP 冒充 PASS 的问题。
+require_test "LC-07" "./internal/activity" \
+  "TestLC07ActivityNeverServesUserTwinPersonaPhoto" \
+  "apps/api-go/internal/activity/lc07_activity_photo_gate_test.go" || exit $?
+
+# LC-16 (R16.7-P1-G) 远程法律 kill switch 的**执行路径**。
+#
+# `Server.enforceKillSwitch` 是唯一真正拦住命令的地方（command_dispatch.go 在鉴权
+# 之后、业务分发之前调用它），但在这条钉之前它**一个测试都没有**：
+#
+#   grep -rn 'SERVICE_DISABLED\|enforceKillSwitch' apps/api-go --include=*.go
+#   # → 只有定义本身和那一处调用点，没有任何 _test.go 引用
+#
+# 而 internal/compliance 的 13 个测试全都只测 Service 自己（Kill/Rearm/IsEnabled/
+# GlobalStatus），没有一个穿过 dispatch 那一层。「拨下开关 -> 命令真的被 503 拦掉」
+# 这条不变量从来没被验证过：它今天是对的，但没有任何东西阻止它变成错的。
+#
+# 两条测试都带反向配重（Rearm 后必须重新放行、不相关命令必须不受影响），
+# 否则「一律拒绝」这种最省事的改法会让它们假绿。
+require_test "LC-16" "./internal/api" \
+  "TestKillSwitchBlocksTheCommandsItsCategoriesCover" \
+  "apps/api-go/internal/api/kill_switch_dispatch_test.go" || exit $?
+require_test "LC-16" "./internal/api" \
+  "TestKillSwitchLeavesUnrelatedCommandsAlone" \
+  "apps/api-go/internal/api/kill_switch_dispatch_test.go" || exit $?
+# 上面两条直接调 enforceKillSwitch，所以「调用点被删掉」它们抓不到 —— 补一条静态钉。
+# 没有这一条，把 dispatch 里那两行删掉、闸门彻底不接线，上面两条依然全绿。
+if ! grep -qF 'if blocked, blockedStatus := s.enforceKillSwitch(envelope); blocked != nil {' apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [LC-16]: command_dispatch.go no longer calls enforceKillSwitch." >&2
+  echo "        The kill switch would be dead code: operator can arm it, the client shows" >&2
+  echo "        '服务暂停', and nothing is actually blocked." >&2
+  echo "        注意这里钉的是**整条守卫**（含 blocked != nil 条件），不是子串 ——" >&2
+  echo "        只钉子串的话，把条件改成 'false && blocked != nil' 就能让闸门失效而钉照样绿。" >&2
+  exit 1
+fi
+echo "    LC-16: PASS (armed switch blocks its commands; call site still wired)"
+
+# LC-16 (2026-09-21) —— 「可拨的类别」和「真的会拦的类别」必须是同一个集合。
+#
+# 这条钉子的由来：AllowedCategories 有 5 个类别（GLOBAL / AI_MEDIA / MARKETPLACE /
+# LOCATION_CONSENT / PAYMENTS，与 migration 064 的 CHECK 一致），但
+# commandKillSwitchCategory 只给 2 个类别接上了执行点。运营拨下另外三个时：
+#
+#   POST /v1/operator/legal/kill-switch {"category":"PAYMENTS", ...}
+#   -> 201 Created，审计表写一行，然后**没有任何命令被拦**
+#
+# 一条假的合规记录比「没有这个开关」更糟 —— 运营以为自己已经止住了，
+# 事故复盘时会照着这行记录说「我们已经关掉了」。
+#
+# 处置方式刻意选了「说出来」而不是「拒绝」：宣布事件、留审计记录本身是
+# kill switch 的正当用途（真正的缓解可能在负载均衡或别处），所以 Kill 照常成功，
+# 但响应体必须自报 enforced=false。下面四条钉分别守四个点。
+#
+# 为什么这里需要静态钉、而不是只靠 Go 测试：Go 测试只能探针「已知的命令」——
+# 全仓没有命令类型注册表（dispatch 是各域 service.go 里的 switch），所以
+# 「有人给一条新命令接上了一个从没声明过的类别」它看不见。静态钉看的是函数体。
+if sed -n '/^func commandKillSwitchCategory/,/^}/p' apps/api-go/internal/api/command_dispatch.go \
+     | grep -qE '"(GLOBAL|LOCATION_CONSENT|PAYMENTS)"'; then
+  echo "  FAIL [LC-16]: commandKillSwitchCategory now returns a category with no declared enforcement point." >&2
+  echo "        If you really wired it, add it to compliance.EnforceableCategories and extend" >&2
+  echo "        TestEveryEnforceableCategoryHasAnEnforcementPoint. If you did not, drop the mapping." >&2
+  exit 1
+fi
+
+# EnforceableCategories 必须**恰好**是那两个真的会拦的类别。operator 响应里的
+# enforced 字段读的就是它，所以它被改宽 = 把空转的开关报成有效。
+ENFORCEABLE_BLOCK=$(sed -n '/^var EnforceableCategories = \[\]Category{/,/^}/p' apps/api-go/internal/compliance/killswitch.go)
+if ! printf '%s' "$ENFORCEABLE_BLOCK" | grep -qF 'CategoryAIMedia,'; then
+  echo "  FAIL [LC-16]: compliance.EnforceableCategories no longer lists CategoryAIMedia." >&2
+  exit 1
+fi
+if ! printf '%s' "$ENFORCEABLE_BLOCK" | grep -qF 'CategoryMarketplace,'; then
+  echo "  FAIL [LC-16]: compliance.EnforceableCategories no longer lists CategoryMarketplace." >&2
+  exit 1
+fi
+if printf '%s' "$ENFORCEABLE_BLOCK" | grep -qE 'CategoryGlobal|CategoryLocationConsent|CategoryPayments'; then
+  echo "  FAIL [LC-16]: compliance.EnforceableCategories gained a category." >&2
+  echo "        GLOBAL / LOCATION_CONSENT / PAYMENTS have no enforcement point, so the operator" >&2
+  echo "        response would report enforced=true for a switch that blocks nothing." >&2
+  echo "        Wire the enforcement point first (see the note above EnforceableCategories)." >&2
+  exit 1
+fi
+
+# 唯一消除「运营以为自己关掉了」这个误解的地方：响应体里的 enforced 字段。
+# 只钉子串，不钉整个 map 字面量，免得别人加个字段就要改钉。
+if ! grep -qF '"enforced": compliance.IsEnforceable(k.Category),' apps/api-go/internal/api/kill_switch.go; then
+  echo "  FAIL [LC-16]: the operator kill-switch response no longer reports whether the switch is enforced." >&2
+  echo "        Without it, arming GLOBAL/LOCATION_CONSENT/PAYMENTS silently returns 201 and blocks nothing." >&2
+  exit 1
+fi
+
+require_test "LC-16" "./internal/api" \
+  "TestEveryEnforceableCategoryHasAnEnforcementPoint" \
+  "apps/api-go/internal/api/kill_switch_dispatch_test.go" || exit $?
+require_test "LC-16" "./internal/api" \
+  "TestUnenforcedCategoryIsReportedAsUnenforced" \
+  "apps/api-go/internal/api/kill_switch_dispatch_test.go" || exit $?
+echo "    LC-16: PASS (enforceable set == wired set; unenforced categories self-report)"
+
+# LC-15 (R16.7-P1-F) 个人数据擦除的**执行者**。
+#
+# 这条钉子的由来是一个"定义了但没人调用"的 P0，形状和 LC-16 一模一样：
+#
+#   POST /v1/privacy/delete  ->  requestPrivacyDelete 写一行 status='received'
+#   ...然后什么都没有。没有东西把它推到 in_progress，更没有东西执行擦除。
+#   而 apps/mobile/src/components/privacy-settings.tsx 明着承诺
+#   「30 天后，你的个人数据将被永久删除」。
+#
+# 证据链（2026-09-21）：
+#   grep -rn 'PrivacyRequestStatusCompleted' apps/api-go --include=*.go
+#   # -> 只有常量定义那一处，没有任何写入点
+#   grep -rn 'ErasedAt *=' apps/api-go --include=*.go
+#   # -> 服务端零赋值（只有 struct 字段和 scan）
+#   grep -rn 'privacy' apps/api-go/cmd/worker/main.go
+#   # -> 零命中：worker 的 sweep 只清消息和 burner，从来没有 privacy
+#
+# 所以下面三条 require_test 只证明"决策逻辑对"，证明不了"有人跑它" ——
+# 这正是当初那个 bug 的形状（代码在，接线不在）。因此必须补一条静态钉钉住
+# worker 的调用点，而且钉的是**调用次数 >= 2**：只在启动时扫一次、把 ticker
+# 里的那次删掉，用户等 30 天也等不到擦除，但钉调用点存在的话照样绿。
+require_test "LC-15" "./internal/identity" \
+  "TestPrivacyDeleteErasureExecutorRunsTheFullLifecycle" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+require_test "LC-15" "./internal/identity" \
+  "TestPrivacyDeleteErasureSkipsCancelledRequests" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+require_test "LC-15" "./internal/identity" \
+  "TestErasedStatusIsNotSessionCapable" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+# 这一条才是「数据真的没了」对**正在运行的客户端**的含义：擦除前签发的
+# access token 必须失效。只删行不够 —— 旧 token 是个 bearer 凭据，它要是
+# 还能用，用户就还在一个资料/设备/登录标识都已不存在的账号里，而
+# canHoldSession 只在**新建**会话时被查，根本拦不到它。
+require_test "LC-15" "./internal/identity" \
+  "TestErasureInvalidatesOutstandingAccessTokens" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+# 收据必须落到审计流水里（privacy_request_events.notes），否则「擦了哪些、留了哪些、
+# 依据是什么」只能靠再查一遍库反推 —— 合规流程要的恰恰是一行可读的凭证。
+require_test "LC-15" "./internal/identity" \
+  "TestErasureReceiptReachesTheAuditTrail" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+
+lc15_worker_calls="$(grep -cF 'sweepPrivacyDeletions(ctx, privacyService)' apps/api-go/cmd/worker/main.go || true)"
+if [ "${lc15_worker_calls:-0}" -lt 2 ]; then
+  echo "  FAIL [LC-15]: cmd/worker/main.go runs the erasure executor ${lc15_worker_calls:-0} time(s), expected >= 2 (startup + hourly ticker)." >&2
+  echo "        The executor can be perfectly correct and still never run — that IS the" >&2
+  echo "        original bug: the delete request was recorded and nothing actioned it." >&2
+  echo "        只在启动时扫一次不够：30 天宽限期到点时进程早就重启过了。" >&2
+  exit 1
+fi
+# 擦除必须走 PersonalDataEraser 这条边界，而不是在 service 里手写 DELETE。
+# 没有这条，把 ErasePersonalData 换成一句 return 就能让上面三条测试里的
+# 「收据非零」断言失去意义（memory 仓的实现在测试里）。
+if ! grep -qF 'var _ identity.PersonalDataEraser = (*IdentityRepository)(nil)' apps/api-go/internal/platform/postgres/identity.go; then
+  echo "  FAIL [LC-15]: postgres IdentityRepository no longer implements PersonalDataEraser." >&2
+  echo "        A deployment whose repository cannot erase must refuse to sweep" >&2
+  echo "        (ErrPersonalDataEraserUnavailable), never mark requests completed without erasing." >&2
+  exit 1
+fi
+echo "    LC-15: PASS (erasure executor runs on a timer; account becomes unauthenticatable)"
+
+# LC-15-CROSS: 擦除必须擦到**别的聚合里去**，而不只是 identity 自己。
+#
+# 上面那组钉子证明 identity 聚合被清空了。但用户的显示身份早就被复制到了
+# 别处 —— 而且都是写时快照，不是活连接：
+#
+#   localnet.posts.author_display_name      发布时把 profile.name 抄了一份
+#   socialspace.statuses.author_display_name  同上
+#   marketplace.opportunities.payload.owner  同上（权威 id 在 owner_id）
+#   business.member_directory.display_name   同上
+#   identity.profiles.avatar_path -> media.media_assets 的一个资产，
+#     而 /v1/media/play/<id> 是**公开无鉴权**的（见 media_handlers.go 的注释）
+#
+# 删掉 identity.profiles 这一行，上面每一样都原地不动。于是 app 里写着
+# 「头像会被永久删除」，而那张脸还能被任何人按 id 拉走。这就是这组钉子要
+# 守住的东西：**收据说擦了，就得真擦了。**
+#
+# 2026-09-21 取证（对着活库读的，不是推断）：
+#   SELECT author_type, author_id, author_display_name FROM localnet.posts
+#   # -> USER 行带着真名（'Mai' / 'Hana' / ...）
+#   SELECT owner_principal_type, owner_principal_id, visibility_class
+#     FROM media.media_assets WHERE media_asset_id = 'ma_9b85...'
+#   # -> INDIVIDUAL / user_5fbe... / PUBLIC，playback_url=/v1/media/play/<id>
+#   SELECT pg_get_constraintdef(oid) FROM pg_constraint
+#     WHERE conrelid='media.media_assets'::regclass AND contype='c'
+#   # -> visibility_class IN (OWNER_ONLY, PUBLIC, FOLLOWERS, AGENT_ONLY)
+#      => 把头像降级成 OWNER_ONLY 即可让 ResolveServingPath 拒绝它
+#         （该方法显式要求 PUBLIC），不必删行、不必发明新枚举值。
+require_test "LC-15-CROSS" "./internal/platform/postgres" \
+  "TestEraseCrossAggregateIdentityScrubsEveryCopy" \
+  "apps/api-go/internal/platform/postgres/privacy_cross_aggregate_integration_test.go" || exit $?
+# 媒体那一半必须按**真实下发路径**验证，而不是读回列值：要紧的不是
+# visibility_class 变了，而是 /v1/media/play/<id> 不再能解析。同一个测试里
+# 还有反向断言 —— 同属主、但只是普通帖子配图的那个资产必须**继续可下发**，
+# 这条专门打「用 owner_principal_id 找头像」的实现（media_assets 没有
+# purpose 列，按属主找会把用户的全部媒体一起扫进去）。
+require_test "LC-15-CROSS" "./internal/platform/postgres" \
+  "TestEraseCrossAggregateIdentityUnservesTheAvatar" \
+  "apps/api-go/internal/platform/postgres/privacy_cross_aggregate_integration_test.go" || exit $?
+# 顺序不是风格问题：头像是**只能**通过 identity.profiles.avatar_path 认出来的
+# （media_assets 没有 purpose 列），所以先跑 identity 擦除就会永久销毁这个
+# 引用，让头像公开可下发到天荒地老。这条测试故意用错顺序，把后果钉出来。
+require_test "LC-15-CROSS" "./internal/platform/postgres" \
+  "TestAvatarUnservingRequiresTheProfileRowToStillExist" \
+  "apps/api-go/internal/platform/postgres/privacy_cross_aggregate_integration_test.go" || exit $?
+# 上面那条钉的是后果，这条钉的是**服务端真的按那个顺序调**。少了它，一次
+# 重构把两个调用对调，后果测试照样绿（它自己调 eraser，不经过 service）。
+require_test "LC-15-CROSS" "./internal/identity" \
+  "TestSweepErasesCrossAggregateBeforeIdentity" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+# 缺了跨聚合擦除能力时必须**拒绝清扫**，而不是照常标 completed：那会让用户
+# 的名字继续挂在他的帖子上，而 app 告诉他数据已经没了。和 identity 侧那条
+# ErrPersonalDataEraserUnavailable 是同一个形状。
+require_test "LC-15-CROSS" "./internal/identity" \
+  "TestSweepRefusesToEraseWithoutACrossAggregateEraser" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+
+lc15c_impl="apps/api-go/internal/platform/postgres/privacy_cross_aggregate.go"
+if ! grep -qF 'var _ identity.CrossAggregateEraser = (*IdentityRepository)(nil)' "$lc15c_impl"; then
+  echo "  FAIL [LC-15-CROSS]: postgres IdentityRepository no longer implements CrossAggregateEraser." >&2
+  echo "        Without it the sweep refuses to run at all, so this shows up as an outage" >&2
+  echo "        rather than as silently-retained names — but the pin is here because the" >&2
+  echo "        assertion is one line and its absence is invisible in review." >&2
+  exit 1
+fi
+# 头像必须降级成 OWNER_ONLY（服务端拒绝下发的那个值），并且必须是**按
+# avatar_path 关联**出来的。两条一起钉，因为改掉任何一条都能让上面那条
+# 集成测试从「精确擦一个资产」退化成「把用户的媒体全扫了」。
+if ! grep -qF "SET visibility_class = 'OWNER_ONLY'" "$lc15c_impl"; then
+  echo "  FAIL [LC-15-CROSS]: the avatar is no longer demoted to visibility_class='OWNER_ONLY'." >&2
+  echo "        That value is what makes ResolveServingPath refuse it (/v1/media/play/<id>" >&2
+  echo "        requires PUBLIC). Removing the demotion leaves the photo publicly fetchable." >&2
+  exit 1
+fi
+if ! grep -qF "AND profile.avatar_path = 'assets/' || asset.media_asset_id" "$lc15c_impl"; then
+  echo "  FAIL [LC-15-CROSS]: the avatar is no longer identified through identity.profiles.avatar_path." >&2
+  echo "        media.media_assets has no purpose/kind column, so any other join (by owner," >&2
+  echo "        by media_type) sweeps in the user's ordinary post media as well." >&2
+  exit 1
+fi
+# 顺序的静态兜底：行为钉在 identity 包里，这里再按行号确认一次调用次序。
+# 行号比较很脆，所以它只作为**额外**一层，不是唯一证据。
+lc15c_cross_line="$(grep -nF 'cross.EraseCrossAggregateIdentity(ctx, req.UserID)' apps/api-go/internal/identity/service.go | head -1 | sed 's/:.*//')"
+lc15c_identity_line="$(grep -nF 'eraser.ErasePersonalData(ctx, req.UserID)' apps/api-go/internal/identity/service.go | head -1 | sed 's/:.*//')"
+if [ -z "$lc15c_cross_line" ] || [ -z "$lc15c_identity_line" ]; then
+  echo "  FAIL [LC-15-CROSS]: service.go no longer calls both erasers from the sweep." >&2
+  echo "        cross=${lc15c_cross_line:-<missing>} identity=${lc15c_identity_line:-<missing>}" >&2
+  exit 1
+fi
+if [ "$lc15c_cross_line" -ge "$lc15c_identity_line" ]; then
+  echo "  FAIL [LC-15-CROSS]: the identity erasure is called first (line $lc15c_identity_line) and the" >&2
+  echo "        cross-aggregate one second (line $lc15c_cross_line). The avatar is only" >&2
+  echo "        identifiable while identity.profiles exists, so this order strands it." >&2
+  exit 1
+fi
+# 反向钉：这一轮刻意**不删内容**。用户的帖子和他的普通配图都不是这次擦除的
+# 对象 —— 擦的是个人数据，不是撤回内容；别人对他的回复/收藏还挂着这些行。
+# 谁要是把 SET ... = '' 换成 DELETE，这几条会先响。
+for lc15c_forbidden in \
+  'DELETE FROM localnet.posts' \
+  'DELETE FROM socialspace.statuses' \
+  'DELETE FROM marketplace.opportunities' \
+  'DELETE FROM media.media_assets'; do
+  if grep -qF "$lc15c_forbidden" "$lc15c_impl"; then
+    echo "  FAIL [LC-15-CROSS]: '$lc15c_forbidden' found in $lc15c_impl." >&2
+    echo "        This pass de-attributes content; it does not delete it. The rows are" >&2
+    echo "        referenced by other users' replies/bookmarks, and the request was for" >&2
+    echo "        erasure of personal data — not withdrawal of content." >&2
+    echo "        For the avatar specifically the chosen shape is the OWNER_ONLY demotion." >&2
+    exit 1
+  fi
+done
+echo "    LC-15-CROSS: PASS (display-name snapshots scrubbed; avatar un-served before the profile row goes)"
+
 # TEST-ABSDATE-001: 测试里写死绝对日期 = 定时炸弹。
 # 2026-09-13 全仓库 g2 变红：business/service_test.go 把 bucketDate 写成
 # "2026-09-06"，7 天滚动窗口一过就查不到它，OrderCount 恒为 0，测试自己
@@ -2125,7 +3076,92 @@ if ! grep -qF 'SetSellerIdentityLookup' apps/api-go/cmd/api/main.go ||
   echo "  FAIL [COMP-SELLER-001]: the seller real-name lookup is no longer wired in cmd/api/main.go." >&2
   exit 1
 fi
-echo "    COMP-SELLER-001: PASS (sellers must be real-name verified before they can be matched)"
+# --- COMP-SELLER-001 写侧：实名核验必须有受控写入口 ---
+#
+# 上面钉的是读侧（已核验才准撮合）。但「已核验」这个状态本身当时没有来源：
+# `INSERT INTO supply.seller_real_name_verifications` 全仓零命中，于是表里的行
+# 只能靠手写 SQL 产生 —— verified_by 可填任意字符串（084 要求「具名运营人员」）、
+# expires_at 可留空（084 要求「必须重新核」）、id_number_hash 可以是字面量。
+# 读侧全绿，而「已实名」可以凭空出现。下面钉住写侧的四个不变量。
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestAttestSellerRealNameStoresHashNotTheNumber" \
+  "apps/api-go/internal/supply/seller_real_name_attestation_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestAttestSellerRealNameVerifiedCarriesAnExpiry" \
+  "apps/api-go/internal/supply/seller_real_name_attestation_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestAttestSellerRealNameSupersedesThePriorVerification" \
+  "apps/api-go/internal/supply/seller_real_name_attestation_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestAttestSellerRealNameRejectionSupersedesThePriorVerification" \
+  "apps/api-go/internal/supply/seller_real_name_attestation_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestAttestSellerRealNameRejectsUnknownAgent" \
+  "apps/api-go/internal/supply/seller_real_name_attestation_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestMemoryRepositoryRefusesVerifiedWithoutExpiry" \
+  "apps/api-go/internal/supply/seller_real_name_attestation_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/platform/postgres" \
+  "TestSellerRealNameAttestationRoundTrip" \
+  "apps/api-go/internal/platform/postgres/seller_real_name_attestation_integration_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/platform/postgres" \
+  "TestSellerRealNameReadRefusesMissingExpiry" \
+  "apps/api-go/internal/platform/postgres/seller_real_name_attestation_integration_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/platform/postgres" \
+  "TestSellerRealNameMigrationGuardsAreEnforced" \
+  "apps/api-go/internal/platform/postgres/seller_real_name_attestation_integration_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/api" \
+  "TestSellerRealNameAttestationRequiresOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+
+# 写入口必须是契约的一部分：接口上没有它，就没有任何实现会被要求提供它。
+if ! grep -qF 'AttestSellerRealName(ctx context.Context, v SellerRealNameVerification) error' \
+     apps/api-go/internal/supply/service.go; then
+  echo "  FAIL [COMP-SELLER-001]: the supply repository no longer declares a real-name write path." >&2
+  echo "        Without it the verification table has no producer again." >&2
+  exit 1
+fi
+# 明文证件号必须在命令边界上就地变成哈希。
+if ! grep -qF 'IDNumberHash: HashIDNumber(p.IDNumber),' \
+     apps/api-go/internal/supply/service.go; then
+  echo "  FAIL [COMP-SELLER-001]: the raw id number is no longer hashed at the command boundary" >&2
+  echo "        (PDP 91/2025 + NĐ 356/2025 forbid storing the document number in the clear)." >&2
+  exit 1
+fi
+# 入库语句必须写 id_number_hash（哈希列），而不是任何明文列。
+if ! grep -qF 'id_number_hash' apps/api-go/internal/platform/postgres/supply.go; then
+  echo "  FAIL [COMP-SELLER-001]: the real-name insert no longer writes id_number_hash." >&2
+  exit 1
+fi
+# 写入口必须走 operator 门 + IDENTITY scope。
+if ! grep -qF '"AttestSellerRealName": true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [COMP-SELLER-001]: AttestSellerRealName is no longer operator-gated —" >&2
+  echo "        a seller could sign their own real-name verification." >&2
+  exit 1
+fi
+if ! grep -qF '"AttestSellerRealName": ScopeIdentity' apps/api-go/internal/api/operator_scopes.go; then
+  echo "  FAIL [COMP-SELLER-001]: AttestSellerRealName no longer requires the IDENTITY scope." >&2
+  exit 1
+fi
+# DB 层必须自己拦「VERIFIED 没有有效期」与「没有归属人」——不能只靠 Go 侧。
+if [ ! -f apps/api-go/migrations/118_seller_real_name_attestation_guards.sql ] ||
+   ! grep -qF 'seller_real_name_verified_has_expiry' apps/api-go/migrations/118_seller_real_name_attestation_guards.sql ||
+   ! grep -qF 'seller_real_name_attestor_named' apps/api-go/migrations/118_seller_real_name_attestation_guards.sql; then
+  echo "  FAIL [COMP-SELLER-001]: migration 118 no longer enforces expiry + named attestor at the DB level." >&2
+  exit 1
+fi
+# 读侧不得把空有效期读成「永不过期」—— 这是 118 之前的写法，也是「漏填一次
+# 就等于永久放行」的来源。反向钉住，防止它被写回去。
+# 匹配串带上别名与左括号（`(v.expires_at IS NULL OR`），这样它是代码形状而不是
+# 一句话 —— 否则解释「不要这样写」的注释会把自己钉红（本次已经踩过一次）。
+# 行为侧另有 TestSellerRealNameReadRefusesMissingExpiry 兜底。
+if grep -qF '(v.expires_at IS NULL OR' apps/api-go/internal/platform/postgres/seller_identity.go; then
+  echo "  FAIL [COMP-SELLER-001]: the reader treats a NULL expiry as 'never expires' again." >&2
+  echo "        084 promises '到点即失效，必须重新核'; a missing value must mean unverified." >&2
+  exit 1
+fi
+
+echo "    COMP-SELLER-001: PASS (sellers must be real-name verified before they can be matched, and only a named operator can record that verification)"
 
 # COMP-AGE-001: 注册时判过的 18+ 必须留下证据。
 # 此前 CreateAnonymousSession 在服务端做了 18+ 判定，判完就把 dateOfBirth 丢了 ——
@@ -2194,6 +3230,161 @@ fi
 # 不接线 = 谁都建不了（fail-closed）。
 if ! grep -qF 'personaSvc.SetAgeLookup(' apps/api-go/cmd/api/main.go; then
   echo "  FAIL [COMP-AI-MINOR-001]: the age lookup is no longer wired in cmd/api/main.go." >&2
+  exit 1
+fi
+
+# COMP-AI-MINOR-001（聊天侧）：上面那道门只守在「建分身」上。平台 AI 伴侣
+# （ai_001..005）是平台自带账号 —— 带 assistantMode 建会话就能直接拿到开场白，
+# 一条用户消息都不用发。所以聊天入口必须再拦一道，否则「未成年人不发消息也
+# 拿不到 AI」是假的。判定复用同一个 CompanionAllowedFor，不另写一套年龄规则。
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionGateUnwiredDeniesEveryone" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionGateDenialReportsGatedWithoutWelcome" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionGateBlocksTheModelCallWhenDenied" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+# 反向也钉：允许时必须真的通。没有这一条，上面几条拒绝断言可能只是因为门禁
+# 永远返回 false —— 那测的是「功能被关掉了」，不是「门禁接上了」。
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionGateApprovalKeepsTheCompanionAlive" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+
+# assistantMode 是**调用方自愿提供的**参数，而客户端有好几条路不带它 ——
+# 活动卡片、位置卡片压根不带，名片和语音曾经连回包都不看。
+# 所以「这条会话对面是不是平台 AI 伴侣」必须能从会话成员认出来，
+# 不能只信 assistantMode。否则两个后果同时发生：
+#   1. 合规：被建分身门禁拦掉的账号，发送时不带 assistantMode 就完全不受门禁约束
+#      （活动卡片就是这么发的）—— 门禁形同虚设；
+#   2. 功能：模型拿到**需求助手**的 system prompt、回复署名 proxy_ai，
+#      而客户端按 sender 回退渲染成「AI 虚拟女孩」在说话 ——
+#      女孩的脸配需求助手的口吻（"有没有预算范围？"）。
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionVoiceSurvivesAMissingAssistantMode" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionGateHoldsWhenTheSendOmitsAssistantMode" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+# 开场白和门禁必须是同一个判断。门禁认了「这是伴侣会话」而开场白不认的话，
+# 会话建好了、一条问候都没有、assistantStatus 整个字段缺席 ——
+# 用户进到一间空房间，客户端连"为什么没消息"都拿不到。
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestCompanionWelcomeDoesNotDependOnAssistantMode" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+# 负向对照：真人 DM 不能被这个兜底误伤。
+# 没有这一条，上面两条可能只是因为**所有**会话都拿到了伴侣人设 ——
+# 那样首页 / 需求助手全废，而测试还是绿的。
+# AI-MANAGE-003/008 起真人 DM 由对面真人的代回复（stand-in）回，测试随之改名；负向对照的本意不变：绝不落到伴侣人设。
+require_test "COMP-AI-MINOR-001" "./internal/conversation" \
+  "TestHumanDirectMessageGetsTheStandInNotTheCompanion" \
+  "apps/api-go/internal/conversation/companion_gate_test.go" || exit $?
+
+# 接线点必须存在。companion_gate 是 fail-closed 的：没接 = 对所有账号关闭，
+# 而「忘了接线」和「故意关掉」在测试里长得一模一样 —— 只有这条能分辨。
+# 这里踩过一次：门禁定义好了、注释还写着「生产实现见 cmd/api 的接线」，
+# 但真正接上的是 twininsight.Service，conversation.Service 一直没接。
+if ! grep -qF 'conversationService.SetCompanionGate(' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the companion gate is no longer wired onto the" >&2
+  echo "        conversation service in cmd/api/main.go. A nil gate denies everyone," >&2
+  echo "        so platform AI companion chat is dead for 100% of users." >&2
+  exit 1
+fi
+# 两个入口都要拦：开新会话（带 assistantMode 就有开场白）和发消息。
+# 只拦一个的话，另一条路照样能跟 AI 伴侣聊。
+gate_calls=$(grep -cF 's.companionAllowedFor(ctx, e.Actor.ID)' apps/api-go/internal/conversation/service.go)
+if [ "$gate_calls" -lt 2 ]; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the chat-entry gate fires at $gate_calls of the 2 entry" >&2
+  echo "        points (StartConversation + SendMessage). One unguarded path is enough" >&2
+  echo "        for an account that should have been refused to keep chatting." >&2
+  exit 1
+fi
+# GATED 不许被折叠成 FAILED/UNAVAILABLE —— 那是把「依法不提供」说成「服务坏了」，
+# 用户会一直重试一个永远不会成功的东西。契约放 contracts，两端一起认。
+if ! grep -qF '"GATED"' packages/contracts/src/conversation.ts; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the GATED assistant status is gone from the contracts." >&2
+  exit 1
+fi
+if ! grep -qF 'parseAssistantStatus' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the client no longer reads assistantStatus, so GATED" >&2
+  echo "        renders as silence — 'no access' would look like 'no reply'." >&2
+  exit 1
+fi
+# 会渲染 AI 状态的表面必须真的分支到 GATED —— 否则服务端说「依法不提供」，
+# 这一屏什么都不说，又变回沉默。
+#
+# 会话页是**活路径**：开场白 / 文字 / 图片 / 视频四条都带 assistantMode=AI_PERSONA，
+# 门禁一拦就是 GATED，所以这里要真钉住。
+if ! grep -qF '"GATED"' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: conversation.tsx does not branch on GATED — the" >&2
+  echo "        server says 'not provided by policy' and this surface says nothing." >&2
+  exit 1
+fi
+# 首页助手（HomeAssistantSurface）**今天不是伴侣表面**：它的 HomeIntentMode 只有
+# SERVICE / ORDER / ACTIVITY，没有一个带 AI_PERSONA 前缀（只有 HomeChatBox 能
+# 产生 mode，也只有这三个值），所以服务端永远不会对它回 GATED。
+# 那句 GATED 文案留着是对的 —— 将来首页对话真加了伴侣入口时，它必须已经在；
+# 但它**不能算「GATED 已被覆盖」的证据**（原来这条钉就是这么写的，等于拿一句
+# 到不了的话冒充覆盖）。所以改成守**边界**：一旦这个表面开始说 AI_PERSONA，
+# 这条钉就红，逼那个人去把 GATED 这条路真的走一遍。
+if grep -qF 'AI_PERSONA' apps/mobile/src/surfaces/home-assistant.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: home-assistant.tsx now speaks to an AI companion" >&2
+  echo "        (AI_PERSONA showed up in it), but this surface has never been shown to" >&2
+  echo "        render GATED. Its HomeIntentMode set was SERVICE/ORDER/ACTIVITY — a" >&2
+  echo "        companion mode here makes the gate reachable on an unverified path." >&2
+  exit 1
+fi
+# 光有「分支到 GATED」不够 —— 还得保证那句提示进的是**不会被轮询擦掉**的槽。
+# 这里踩过一次（2026-09-22）：上面那 4 个入口全都把 assistantStatusNotice 的
+# 返回值塞进 setError，而会话页每 3 秒轮询一次、hydrateMessages 结尾有一句
+# setError(undefined)（那是给「这次请求失败了」这种瞬时态收尾的）—— 结果是
+# 门禁提示闪一下就被清掉，用户回到一个空会话，跟没提示一模一样。GATED 是
+# 账号级状态（"重试无效"），不是一次失败，它必须有自己的槽。
+if ! grep -qF 'companionGatedNotice ?' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the gated notice is no longer rendered in its own" >&2
+  echo "        slot. In the transient error slot it is wiped by the 3s message poll," >&2
+  echo "        so the user sees it flash once and is left staring at an empty chat." >&2
+  exit 1
+fi
+if ! grep -qF 'persistent: true' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: GATED is no longer classified as a persistent notice," >&2
+  echo "        so it will be routed back into the self-clearing error slot." >&2
+  exit 1
+fi
+# 分类对了还不够 —— 得真的写进那个槽。有人把 setCompanionGatedNotice 改回
+# setError 的话，上面几条（槽存在、有渲染、4 个入口都走分派器）全都照样绿，
+# 而用户看到的又变成闪一下就没。这条钉的就是那一行本身。
+if ! grep -qF 'setCompanionGatedNotice(notice.text)' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the persistent notice is no longer written to its" >&2
+  echo "        own slot — someone routed it back through setError. The slot, the" >&2
+  echo "        render and the 4 dispatch sites all still look fine, but the 3s poll" >&2
+  echo "        clears it and the gated user is back to an unexplained empty chat." >&2
+  exit 1
+fi
+# 伴侣入口的个数**不能写死**。凡是往服务端发 AI_PERSONA 的调用点，都必须消费回包里的
+# assistantStatus —— GATED 只活在那条回包里（不落库、下次刷新拿不到），漏一个，
+# 那条路上的「依法不提供」就是彻底沉默。
+# 这里踩过：我先按「4 个入口（开场白/文字/图片/视频）」写死，而实际有 6 个
+# （还有名片和语音）—— 钉照样绿，那两条路照样哑。所以让两个数自己对上。
+# 注意计数用 `applyAssistantNotice(` —— 定义那行是 `applyAssistantNotice = useCallback(`，
+# 名字后面跟的是空格不是括号，不会被算进来。
+persona_sends=$(grep -cF 'AI_PERSONA:${aiAccount.personaId}' apps/mobile/src/surfaces/conversation.tsx)
+notice_calls=$(grep -cF 'applyAssistantNotice(' apps/mobile/src/surfaces/conversation.tsx)
+if [ "$notice_calls" -lt "$persona_sends" ]; then
+  echo "  FAIL [COMP-AI-MINOR-001]: $persona_sends companion send paths but only" >&2
+  echo "        $notice_calls of them dispatch the returned assistantStatus through" >&2
+  echo "        applyAssistantNotice. GATED travels only in the command response — it" >&2
+  echo "        is never persisted, so an entry that ignores it is silent forever." >&2
+  exit 1
+fi
+# 任何一处直接消费 assistantStatusNotice 的返回值，都等于绕开「持久态 vs 瞬时态」
+# 这个判断 —— 正是上面那次翻车的样子。
+if grep -qF 'assistantStatusNotice(payload' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-AI-MINOR-001]: a call site consumes assistantStatusNotice directly" >&2
+  echo "        instead of going through applyAssistantNotice — that bypasses the" >&2
+  echo "        persistent-vs-transient decision and GATED can silently go back to" >&2
+  echo "        being rendered in the slot the poll clears." >&2
   exit 1
 fi
 echo "    COMP-AI-MINOR-001: PASS (AI companions are refused to minors and to accounts with no age evidence)"
@@ -2512,6 +3703,104 @@ if [ ! -f apps/api-go/migrations/088_moderation_appeals.sql ]; then
 fi
 echo "    COMP-REPORT-004: PASS (the appeal channel exists, is attributable, and is operator-reviewed)"
 
+# COMP-REPORT-005: 举报的处置时限 + **读出口**。
+#
+# 001/002 解决了「收得到」，003 解决了「处置留痕」—— 但 003 只做了写侧：
+# Repository 只有 AddReport / FindReport，而 FindReport 只被写入口当作
+# 「对象是否存在」的校验用。**没有任何一条查询能列出举报**。087 甚至替
+# 「运营队列」建好了 idx_moderation_dispositions_action 索引，那条查询从来
+# 没被写出来 —— 实现存在 ≠ 生效。
+#
+# 结果：举报只进不出。平台收得下举报，却没有任何路径把它交到人手上。
+# 实测证据：库里唯一一条举报 reason='SOLICITATION'（2026-09-15 18:59 受理）
+# 到 2026-09-22 已 7 天、处置记录 0 条 —— 不是没人处理，是没人能发现它存在。
+# 而 SOLICITATION 恰是刑法 327 条（介绍卖淫）那类风险所在。
+#
+# 同时补上时限：服务条款 §58 承诺「建立举报、核查、限制传播、纠正、移除和
+# 账号处置流程」，Decree 328/2026 §4 把时限钉成「一般 24h、紧急 6h」
+# （口径见 docs/legal/vietnam/Proxy_Operating_Terms_Supplement_2026-08-31.md）。
+# 没有截止时刻，平台既做不到、也证明不了自己按时处理过。
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestEverySupportedReasonHasAnSLA" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestReportSLAUrgentClassCoversMinorAndSolicitation" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestAcceptedReportCarriesAFixedDueAt" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestReportQueueSurfacesTheStaleSolicitation" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestReportQueueFailsClosedWhenRepositoryIsDown" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+# 超时判定的对象是「有没有在时限内处理完」，不是「现在是否晚于截止时刻」——
+# 后者会把按时处置完的举报在几天后显示成超时（假警报），而假警报会让人
+# 整体忽略这个字段，真超时的那条也跟着被忽略。
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestReportQueueDoesNotCallAPromptResolutionOverdue" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestReportQueueFlagsALateResolution" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+# 迁移里的 SQL CASE 与 Go 的时限表必须一致 —— 两边各写一遍，改一边不改另一边
+# 会把历史举报的时限算错。
+require_test "COMP-REPORT-005" "./internal/moderation" \
+  "TestMigrationBackfillMatchesGoMapping" \
+  "apps/api-go/internal/moderation/queue_test.go" || exit $?
+# 队列与处置必须走 operator 门。这条独立钉的必要性：operator_scopes_test.go
+# 的 completeness 只保证两张表**互相**一致 —— 同时删掉一条命令时它依然绿，
+# 而命令就此对所有人敞开。
+require_test "COMP-REPORT-005" "./internal/api" \
+  "TestModerationReportCommandsRequireOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+# 真库往返：单测跑的是内存仓储，证明不了 SQL（两个 LEFT JOIN LATERAL、
+# 「没有处置时 last_disposition_at 是 NULL」、以及 outcome 空串撞 CHECK）。
+require_test "COMP-REPORT-005" "./internal/platform/postgres" \
+  "TestModerationReportQueueRoundTrip" \
+  "apps/api-go/internal/platform/postgres/moderation_integration_test.go" || exit $?
+# 反向：队列命令必须真被 moderation 服务受理，否则命令面写了也走不到（501）。
+if ! grep -qF 'case "ListReportQueue"' apps/api-go/internal/moderation/service.go; then
+  echo "  FAIL [COMP-REPORT-005]: ListReportQueue is no longer handled by the" >&2
+  echo "        moderation service, so the report queue would 501 and reports" >&2
+  echo "        would go back to being write-only." >&2
+  exit 1
+fi
+if ! grep -qF '"ListReportQueue": true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [COMP-REPORT-005]: ListReportQueue is no longer operator-only, so" >&2
+  echo "        any logged-in user could enumerate who reported whom." >&2
+  exit 1
+fi
+# 反向：dispositions 的 outcome 必须走 NULLIF。空串撞
+# dispositions_outcome_check 会让五种处置动作里四种
+# （TRIAGE / ESCALATE / DISMISS / REOPEN）在生产路径上全部失败，而内存仓储
+# 不校验 outcome，单测照样全绿 —— 典型的「内存绿、生产红」。
+if ! grep -qF "NULLIF(\$4, '')" apps/api-go/internal/platform/postgres/moderation.go; then
+  echo "  FAIL [COMP-REPORT-005]: the dispositions INSERT no longer nulls an empty" >&2
+  echo "        outcome. Postgres then rejects every disposition without an outcome" >&2
+  echo "        (TRIAGE/ESCALATE/DISMISS/REOPEN) with dispositions_outcome_check." >&2
+  exit 1
+fi
+# 反向：举报必须带处置截止时刻，且截止列必须是 NOT NULL —— 一条没有时限的
+# 举报正是本笔要消灭的状态。
+if ! grep -qF 'due_at' apps/api-go/internal/platform/postgres/moderation.go; then
+  echo "  FAIL [COMP-REPORT-005]: AddReport no longer writes due_at, so new reports" >&2
+  echo "        would have no disposition deadline." >&2
+  exit 1
+fi
+if [ ! -f apps/api-go/migrations/117_moderation_reports_due_at.sql ]; then
+  echo "  FAIL [COMP-REPORT-005]: migration 117_moderation_reports_due_at.sql is missing." >&2
+  exit 1
+fi
+if ! grep -qF 'ALTER COLUMN due_at SET NOT NULL' \
+     apps/api-go/migrations/117_moderation_reports_due_at.sql; then
+  echo "  FAIL [COMP-REPORT-005]: 117 no longer makes due_at NOT NULL, so a report" >&2
+  echo "        without a deadline could be written again." >&2
+  exit 1
+fi
+echo "    COMP-REPORT-005: PASS (reports carry a statutory deadline and are actually reachable)"
+
 # COMP-AUTHORITY-001: 有权机关请求的受理留痕与响应时限（§55 + 网安法
 # 116/2025 + 333/2026/NĐ-CP）。代码里 REFERRED_TO_AUTHORITY 曾是 087 里
 # 一个从未被写入路径使用的枚举值 —— 平台证明不了自己在法定时限内响应过，
@@ -2626,7 +3915,14 @@ if ! grep -qF 'engagementService.SetAuthorNameResolver(authorNames)' apps/api-go
   echo "        resolver, so production would keep returning unnamed comments." >&2
   exit 1
 fi
-if ! grep -qF 'resolveReplyAuthorDisplayName(reply, viewerAccountId)' apps/mobile/src/surfaces/feed.tsx; then
+# 只匹配到第二个实参为止、不写右括号：Rev276（自己的帖子显示用户名而不是「你」）给这个
+# 调用加了第三个实参（本人的资料名，仅在该评论确实属于观察者时才会被采用），原先的整串
+# 匹配当场变红 —— 而它位于钉脚本前段，红一次就把它后面所有钉一起挡住。这里断言的不变
+# 量是「评论作者标签仍然走观察者相对的解析器、并且带上观察者的账号 id」，多出来的实参
+# 不归本钉管。
+# 注意：本注释刻意不复述那段调用文本。反向/正向 grep 命中的是文件全文（含注释），一旦
+# 注释里出现同样的字符串，删掉真正的调用后这行注释会继续让钉保持绿色。
+if ! grep -qF 'resolveReplyAuthorDisplayName(reply, viewerAccountId' apps/mobile/src/surfaces/feed.tsx; then
   echo "  FAIL [FEED-REPLY-001]: the feed stopped resolving the comment author label." >&2
   exit 1
 fi
@@ -2918,7 +4214,12 @@ if ! grep -qF 'key={reply.replyId}' apps/mobile/src/surfaces/ProfileTabs.tsx; th
   echo "        replies to the same post collide." >&2
   exit 1
 fi
-if ! grep -qF 'replyTargetLabel(props.viewerMode, target, props.viewerAccountId)' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+# 同 FEED-REPLY-001：Rev276 也给这个调用加了第四个实参（观察者本人的资料名，供
+# resolveAuthorDisplayName 的 isOwnAuthorId 分支使用），整串匹配于是过期。收窄到
+# 「仍然调用同一个共享标签、并带上观察者的账号 id」为止 —— 这正是本钉要守的东西
+# （tab 不许自己拼标签、从而和 feed 对「谁是谁」的说法不一致）。注释同样不复述
+# 那段调用文本，否则删掉真正的调用后这行注释会让钉继续变绿。
+if ! grep -qF 'replyTargetLabel(props.viewerMode, target, props.viewerAccountId' apps/mobile/src/surfaces/ProfileTabs.tsx; then
   echo "  FAIL [REPLY-TARGET-001]: the replies tab no longer uses the shared label," >&2
   echo "        so it can disagree with the feed about who someone is." >&2
   exit 1
@@ -3086,7 +4387,12 @@ echo "    SEARCH-CORPUS-001: PASS (feed search reaches the server and matches na
 # 注意别钉裸符号：`personalReplyEntries` 在 state 声明里就出现了，只 grep 它
 # 在删掉搜索链路后照样绿（和 buildContactCard 被 import 行满足是同一个坑）。
 # 所以钉的是**搜索接线**上的形状。
-if ! grep -qF 'filterPostsByFeedSearch(profilePosts, q)' apps/mobile/src/surfaces/me.tsx; then
+# SEARCH-CORPUS-002 订正（2026-09-22）：原来钉的是 `filterPostsByFeedSearch(profilePosts, q)`
+# —— 把**变量名**也钉进去了，自己违反了上面「别钉裸符号」那条。在制的个人主页把
+# 搜索域收窄成「排除 TARGETED 的帖文」（searchablePosts），共享谓词没换、语义没坏，
+# 但字面量对不上就红了。改成钉**调用形状**（共享谓词 + 查询变量 q），不钉数据源叫什么：
+# 契约是「用同一份共享字段语义」，不是「变量必须叫 profilePosts」。
+if ! grep -qE 'filterPostsByFeedSearch\([A-Za-z_$][A-Za-z0-9_$]*, q\)' apps/mobile/src/surfaces/me.tsx; then
   echo "  FAIL [SEARCH-CORPUS-002]: the profile search re-implements its own haystack" >&2
   echo "        instead of using the shared SEARCH-CORPUS-001 predicate, so the same" >&2
   echo "        data is searchable in the feed but not on the profile." >&2
@@ -4580,7 +5886,11 @@ if ! grep -qF 'setProfilePostsState("failed")' apps/mobile/src/surfaces/me.tsx; 
   echo "        失败会被渲染成「0 条动态」，看起来就是「你还没发过动态」。" >&2
   exit 1
 fi
-if ! grep -qF 'posts: profilePostsState === "failed" ? undefined : profilePosts.length' apps/mobile/src/surfaces/me.tsx; then
+# PROFILE-POSTS-FAILURE-001 订正（2026-09-22）：原来把计数变量名也钉进去了
+# （`… : profilePosts.length`）。在制的个人主页把 hub 的计数换成 personalHubPosts
+# （排除 TARGETED 帖文）—— 契约本身没变，是变量名变了，所以这里钉**三元形状**：
+# failed 必须映射成 undefined，冒号右边必须是某个集合的长度（不是字面量 0）。
+if ! grep -qE 'posts: profilePostsState === "failed" \? undefined : [A-Za-z_$][A-Za-z0-9_$]*\.length' apps/mobile/src/surfaces/me.tsx; then
   echo "  FAIL [PROFILE-POSTS-FAILURE-001]: 失败时条数又显示成 0 ——" >&2
   echo "        未知要显示 —（dash 口径），不是 0。" >&2
   exit 1
@@ -4601,6 +5911,32 @@ if grep -qF 'catch {}' apps/mobile/src/surfaces/me.tsx; then
 fi
 if ! grep -q 'PROFILE-POSTS-FAILURE-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
   echo "  FAIL [PROFILE-POSTS-FAILURE-001]: 测试不见了" >&2
+  exit 1
+fi
+# 订正（2026-09-22 第二轮）：上面几条只钉到「条数别显示 0」和「横幅说出来了」。
+# 但用户真正看的是**帖子列表本身** —— me.tsx 失败时传的是空数组，而空数组在
+# ProfileTabs 里渲染成「还没有动态」。于是同一屏上横幅写着「不是你没有动态」、
+# 下面写着「还没有动态」：一个说没拉到，一个说你没发过。空态才是那句话。
+# SAVED/REPLIES/TAGGED 早就有 failed 旗标（PROFILE-TAB-LOAD-FAILED-001），
+# POSTS 是当年漏掉的那一个。
+if ! grep -qF 'postsFailed={profilePostsState === "failed"}' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-POSTS-FAILURE-001]: me.tsx 不再把失败态传给 ProfileTabs ——" >&2
+  echo "        帖子列表拿不到失败信号，空态又会说「还没有动态」。" >&2
+  exit 1
+fi
+# 两个空态（列表 + 网格）都要有失败文案，而且「真的没有」的文案必须还在 ——
+# 只剩一句就说明又不分了。
+#
+# 注意这里钉的是 title="…" 这个 JSX 形态，不是裸字符串：上面那段说明文字里
+# 就写着「还没有动态」，裸 grep 会匹配到注释 —— 把代码删掉、注释留着，测试
+# 照样绿（本仓的老坑，PLACEHOLDER-011 栽过同一次）。
+posts_failed_copy=$(grep -cF 'title="动态没读出来"' apps/mobile/src/surfaces/ProfileTabs.tsx)
+if [ "$posts_failed_copy" -lt 2 ] ||
+   ! grep -qF 'title="还没有动态"' apps/mobile/src/surfaces/ProfileTabs.tsx ||
+   ! grep -qF 'title="还没有图片"' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [PROFILE-POSTS-FAILURE-001]: POSTS 空态又不分「没拉到」和「没有」了" >&2
+  echo "        （title=\"动态没读出来\" $posts_failed_copy 处，需要 2 处；" >&2
+  echo "        且 title=\"还没有动态\" / title=\"还没有图片\" 都要在）" >&2
   exit 1
 fi
 echo "    PROFILE-POSTS-FAILURE-001: PASS (a failed posts load says so; unknown shows —, not 0)"
@@ -6155,7 +7491,10 @@ echo "    MARKET-PRICE-RANGE-PARSE-001: PASS (a published price range is read as
     exit 1
   fi
   # 正向：筛选侧要把"未知"排除在「附近」之外。
-  if ! /usr/bin/grep -q 'p.distanceM === undefined || p.distanceM >= 1000' "$UI"; then
+  # HOME-MORE-DIST-001（2026-09-22）：写死 1km 的「附近」开关改成恒生效的半径
+  # 设置（1/3/5/10/20/50/100km），所以字面 `>= 1000` 改成半径变量；「距离未知
+  # ≠ 很近」这条不许动 —— 任何半径都排除 undefined，否则 regress。
+  if ! /usr/bin/grep -q 'p.distanceM === undefined || p.distanceM >= moreDistanceKm \* 1000' "$UI"; then
     echo "  FAIL [PERSON-DISTANCE-ZERO-001]: 「附近」筛选不再排除距离未知的人" >&2
     exit 1
   fi
@@ -6300,11 +7639,13 @@ echo "    MARKET-PRICE-RANGE-PARSE-001: PASS (a published price range is read as
     exit 1
   fi
   # 展示侧：空状态不许暗示"有记录只是没公开"。
-  if grep -q '她暂未公开活动明细' "$UI"; then
+  # HOME-I18N-001 之后文案搬进 i18n.ts（noActivity 键），UI 走 t("noActivity")。
+  I18N=apps/mobile/src/i18n.ts
+  if grep -q '她暂未公开活动明细' "$UI" "$I18N"; then
     echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 空状态仍在暗示存在未公开的记录" >&2
     exit 1
   fi
-  if ! grep -q '还没有可展示的活动记录' "$UI"; then
+  if ! grep -q 'noActivity: "还没有可展示的活动记录"' "$I18N" || ! grep -q 't("noActivity")' "$UI"; then
     echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 如实的空状态文案不见了" >&2
     exit 1
   fi
@@ -6829,6 +8170,28 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/feed-saved-count.test.ts || exit $?
 echo "    FEED-SAVED-COUNT-001: PASS (saved shows state, never a fabricated aggregate)"
 
+# SCENE-FAVORITE-002: 用户报「home 场景点🤍 在我的 收藏没有」。
+#
+# 根因不是没接线，是「收藏」这一个词下面有两个互不相通的库：我的 → 收藏 读本机
+# 场景 hearts（SCENE-FAVORITE-001），个人主页 → 收藏 tab 只读服务端帖子收藏 ——
+# 对场景收藏的引用数是 0。用户在首页点了 🤍，去个人主页的收藏 tab 找，永远找不到；
+# 而且只有场景收藏、没有帖子收藏时，那一屏还写着「还没有收藏」。
+#
+# SCENE-FAVORITE-001 当初只留了源码文本断言（"文件里有没有这个符号"）、没有进钉，
+# 所以这个缺陷活了下来 —— 同族前科 22004f9（绿钉 + 用户可见缺陷同时成立）。
+# 所以这条钉里必须有**行为**断言：解析函数对未知/重复 id 的真实行为。只 grep
+# 符号在不在文件里，守不住「每条路径都走到」。
+pnpm --filter @proxy/mobile exec vitest run src/scene-favorites.test.ts || exit $?
+echo "    SCENE-FAVORITE-002: PASS (scene hearts reach both 收藏 surfaces, one shared resolver)"
+# 反向钉：两个收藏面不许各写一遍目录回查 —— 那正是这个 bug 的漂移形状。
+# 匹配的是调用形状（带括号），不是符号名：光出现在 import 里不算漂移。
+if grep -q 'sceneMomentById(' apps/mobile/src/surfaces/me.tsx ||
+   grep -q 'sceneMomentById(' apps/mobile/src/surfaces/me-orders.tsx; then
+  echo "  FAIL [SCENE-FAVORITE-002]: 收藏面又自己写了一遍目录回查 ——" >&2
+  echo "        两个面必须共用 resolveSavedSceneIds(ids, savedSceneLookup)。" >&2
+  exit 1
+fi
+
 # MAIN-WIRING-SPLIT-001: cmd/api/main.go 曾是 1387 行的单文件接线根，
 # 多 worktree 并行时 merge 冲突概率最高的单点。已按域拆成 wire_*.go
 # （main 只留 main 函数），回潮就红。
@@ -7177,6 +8540,48 @@ if ! grep -qF 'WatchMs' apps/api-go/internal/localnet/service.go ||
   exit 1
 fi
 echo "    TWIN-SIGNALS-001: PASS (impression watch time stored and readable)"
+# CONTENT-ANALYTICS-001: 浏览日志分层。用户侧只拿近 30 天的聚合（分析面板 + 折叠的逐条统计）；
+# 逐人明细（谁、看了几秒、放大几次）只给运营（ANALYTICS scope），用于精准投流；服务端事件全量保存。
+# 链路：信息流卡片曝光 + 全屏逐张停留 + 放大都要上报（审计时发现信息流一条都不报）。
+require_test "CONTENT-ANALYTICS-001" "./internal/api" "TestPerPersonViewingDetailIsOperatorOnly" \
+  "apps/api-go/internal/api/content_analytics_tier_test.go" || exit $?
+for t in TestUserStatsOnlyLoadTheLastMonthButEveryEventIsKept TestOperationsAudienceHasDwellAndZoomPerPerson; do
+  require_test "CONTENT-ANALYTICS-001" "./internal/localnet" "$t" \
+    "apps/api-go/internal/localnet/content_analytics_test.go" || exit $?
+done
+ca_crm=$(grep -vE '^[[:space:]]*(//|\{/\*)' apps/mobile/src/surfaces/friend-crm.tsx)
+if printf '%s\n' "$ca_crm" | grep -qF 'listMediaActivityForViewer' ||
+   ! printf '%s\n' "$ca_crm" | grep -qF 'getContentAnalytics' ||
+   ! grep -qF 'useFeedImpressions(localNet' apps/mobile/src/surfaces/feed.tsx ||
+   ! grep -qF 'recordMediaZoom' apps/mobile/src/media/AdaptiveMediaCollection.tsx; then
+  echo "  FAIL [CONTENT-ANALYTICS-001]: 用户侧又拿到逐人浏览明细 / 分析面板没了 / 信息流曝光或放大不再上报。" >&2
+  exit 1
+fi
+echo "    CONTENT-ANALYTICS-001: PASS (user side aggregates only; per-person detail is operator-only; feed + zoom logged)"
+# ANALYTICS-ME-001: 「我的」分析弹层浏览/互动曾写死 "—"。浏览 = 近 30 天主页
+# 访问（ListProfileViewStats 传 sinceDays，全量口径留给 friend-crm）；互动 =
+# 近 30 天收到的赞 + 评论（GetReceivedEngagementStats 服务端聚合，自赞/自评
+# 排除，客户端不做 N+1）。拉失败是未知画 —，不画 0。
+require_test "ANALYTICS-ME-001" "./internal/engagement" \
+  "TestReceivedEngagementStatsCountsOthersActionsInWindow" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "ANALYTICS-ME-001" "./internal/localnet" \
+  "TestProfileViewStatsSinceDaysWindow" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "ANALYTICS-ME-001" "./internal/platform/postgres" \
+  "TestReceivedEngagementPostgresRoundTrip" \
+  "apps/api-go/internal/platform/postgres/engagement_received_stats_integration_test.go" || exit $?
+require_test "ANALYTICS-ME-001" "./internal/platform/postgres" \
+  "TestProfileViewStatsSinceDaysPostgresRoundTrip" \
+  "apps/api-go/internal/platform/postgres/localnet_integration_test.go" || exit $?
+if ! grep -qF 'GetReceivedEngagementStats' apps/api-go/openapi.commands.generated.yaml ||
+   ! grep -qF 'getReceivedEngagementStats()' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'listProfileViewStats(30)' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'dash(profileAnalytics.interactions)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [ANALYTICS-ME-001]: 分析弹层又回到写死 —，浏览/互动没接数据源。" >&2
+  exit 1
+fi
+echo "    ANALYTICS-ME-001: PASS (sheet wired to 30d views + received likes/comments)"
 # MODAL-HANDOFF-001: 关一个 Modal 同一 tick 再开另一个，后开的被 iOS
 # present 冲突吃掉（点了没反应）。统一走 openModalAfterClose 错峰 350ms。
 if ! grep -qF 'openModalAfterClose' apps/mobile/src/surfaces/me.tsx ||
@@ -7460,3 +8865,499 @@ if ! grep -qF '"OrderVoucherPurchase":' apps/api-go/internal/api/security.go ||
 fi
 go -C apps/api-go test ./internal/platform/postgres/ -run TestVoucherPurchasePostgresRoundTrip -count=1 || exit $?
 echo "    VOUCHER-PURCHASE-001: PASS (server-computed totals, atomic mint, PG traceability join)"
+
+# SERVICE-DISABLED-MSG-001：运营拨下 kill switch 后，命令被拒时用户看到的是**句子**，
+# 不是英文机器串。
+#
+# 服务端拒绝时给的是
+#   code       = "SERVICE_DISABLED"
+#   messageKey = "compliance.service_disabled"     ← 机器串，不是句子
+# （apps/api-go/internal/api/command_dispatch.go:171；签名见 command/model.go:102）
+# 而各 *-client.ts 原本一律
+#   throw new Error(result.error?.messageKey ?? result.error?.errorCode ?? fallback)
+# ⇒ 那个英文机器串直接进了 Error.message，也就是直接给用户看了。
+# 全仓原本没有任何 messageKey → 人话的翻译表。
+#
+# 这不是文案取舍，是漏翻译。仓库里已经修过同一类：native-app.tsx 的
+# loginChallengeErrorMessage()（注释「裸 messageKey 换成与主路径同一套映射文案」），
+# 并且刻意**把原始错误码留在括号里**便于排查 —— 这里照同一形状做。
+#
+# 钉的形状跟 LC-06 那条教训一致：**逐个出口**钉。第一版只接了 7 个 commerce
+# client，grep 一查还有 18 处同样的漏翻译（其中 marketplace-client 正是
+# 「MARKETPLACE 被停、用户点下单」那条路）。文件级 grep 抓不到「这一处没接」。
+if ! grep -qE 'export function commandErrorMessage\(' apps/mobile/src/command-error-message.ts; then
+  echo "  FAIL [SERVICE-DISABLED-MSG-001]: the command-error translator is gone." >&2
+  exit 1
+fi
+for f in payment-client fulfillment-client supply-client voucher-client social-settings-client \
+         socialspace-client benefit-client login-client relationship-client profile-client \
+         engagement-client experience-client moderation-client activity-client marketplace-client \
+         session-client demand-client notification-client outcome-client business-client \
+         localnet-client storeonboarding-client scene-client media-client; do
+  if ! grep -qF 'commandErrorMessage(' "apps/mobile/src/$f.ts"; then
+    echo "  FAIL [SERVICE-DISABLED-MSG-001]: $f still throws the raw messageKey at the user." >&2
+    echo "        A killed service returns messageKey=compliance.service_disabled — not a sentence." >&2
+    exit 1
+  fi
+done
+if ! grep -qF 'commandErrorMessage(' apps/mobile/src/experience-runtime/client.ts; then
+  echo "  FAIL [SERVICE-DISABLED-MSG-001]: experience-runtime/client still throws the raw messageKey." >&2
+  exit 1
+fi
+# 唯一一处**不在 *-client.ts 里**的出口：现实行动的命令被拒时自己 throw。
+# 它下面还有一层 sceneActionErrorMessage() 会把纯机器串兜成「操作失败，请稍后重试」，
+# 所以原本看不到裸码 —— 但接上映射后能说得更准（「服务已暂停」而非泛泛的「操作失败」）。
+if ! grep -qF 'commandErrorMessage(' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SERVICE-DISABLED-MSG-001]: reality-scene-map still throws the raw messageKey." >&2
+  exit 1
+fi
+# ⚠️ 已知未接（2026-09-22），**故意没钉成 FAIL**：
+#   apps/mobile/src/shell/app-shell.tsx:1038
+#     setError(e?.result?.error?.messageKey ?? e?.message ?? "创建失败")
+#   仍然把 messageKey 直接上屏（GLOBAL 开关拨下时用户会看到
+#   "compliance.service_disabled"）。
+#   但该文件当时是**别人的在制文件**，动不得；而为它加一条"从写出来就红"的钉，
+#   会挡住所有人提交 —— 那是拿门禁替别人做决定。所以这里只记录，不拦。
+#   等文件空闲了：接上 commandErrorMessage，并把下面这段注掉的臂打开。
+#
+# if grep -qF 'error?.messageKey ?? e?.message' apps/mobile/src/shell/app-shell.tsx; then
+#   echo "  FAIL [SERVICE-DISABLED-MSG-001]: app-shell still puts the raw messageKey on screen." >&2
+#   exit 1
+# fi
+pnpm --dir apps/mobile exec vitest run src/command-error-message.test.ts || exit $?
+echo "    SERVICE-DISABLED-MSG-001: PASS (a killed service says 服务已暂停, not compliance.service_disabled)"
+
+# PROXY-OBJECT-PERSIST-001（2026-09-22，发现于 ROOM-CREATE-001 见面邀约卡片的
+# 真机验证）：conversation.messages.proxy_object 列早在迁移 039 就加了，但
+# ConversationRepository.AppendMessage / Messages / GetMessage 从没读写过它——
+# 任何带 ProxyObject 的消息（结构化建议、活动分享、见面邀约卡片）落到 Postgres
+# 后 proxy_object 静默变 NULL，客户端收到一条没有卡片内容的空气泡。内存版
+# Repository（绝大多数单测用）不受影响，只有接真实 Postgres 才会暴露，所以这个
+# 洞混进代码库很久都没被测出来——这条钉必须打真实 Postgres，不能改回内存版。
+require_test "PROXY-OBJECT-PERSIST-001" "./internal/platform/postgres" \
+  "TestAppendMessagePersistsProxyObject" \
+  "apps/api-go/internal/platform/postgres/proxy_object_persist_test.go" || exit $?
+
+# HOME-MORE-DIST-001（2026-09-22，照 deepseek_html_20260922_1c2e2c.html 的
+# distance-chip）：「附近」原来是一个**写死 1km 的开关**，而原型里它是一个
+# **距离控件**（📍 10km 内 ▾ + 滑杆，1/3/5/10/20/50/100 km，默认 10km）。
+#
+# 这不是换皮：写死 1km 的时候，「附近」对 1.05km 的人和 100km 的人是同一个答案，
+# 而用户没有任何办法表达"我想看远一点" —— 控件看着可选，其实只有一个值。
+# 所以这条钉的不是"有没有那个 chip"，是**半径有没有真的接上筛选**。
+MORE_HOME=apps/mobile/src/surfaces/requester-home.tsx
+
+# ① 半径必须来自 state。退回写死的常量即红 —— 那正是"控件是假的"的形态。
+#    后半句同样重要：undefined 那半边是 PERSON-DISTANCE-ZERO-001，
+#    距离未知 ≠ 很近，任何半径都不许放过它。
+if ! grep -qF 'p.distanceM === undefined || p.distanceM >= moreDistanceKm * 1000' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 距离筛选不再用可选的半径（退回写死值了？），" >&2
+  echo "        或者不再排除 distanceM === undefined —— 距离未知不能算「附近」。" >&2
+  exit 1
+fi
+
+# ② chip 上要有当前半径。数字跟 kmUnit 分开拼（HOME-I18N-001 之后
+#    kmUnit 随语言变：zh 是 "km 内"、en 是 "km"、ko 是 "km 이내"），
+#    所以不能再钉字面量 "km 内"。点它是展开面板（不是开关）。
+if ! grep -qF '📍 {moreDistanceKm}{t("kmUnit")}' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 距离 chip 不再显示当前半径。" >&2
+  exit 1
+fi
+if ! grep -qF 'setMoreDistanceOpen((open) => !open)' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 点距离 chip 不再展开/收起面板。" >&2
+  exit 1
+fi
+
+# ③ 档位表 + 每一档可点。只画一条装饰轨道 = 用户选不了任何东西。
+if ! grep -qF 'MORE_DISTANCE_KM: ReadonlyArray<number> = [1, 3, 5, 10, 20, 50, 100]' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 距离档位表被改了或不见了。" >&2
+  exit 1
+fi
+if ! grep -qF 'onPress={() => setMoreDistanceIndex(index)}' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 距离档位点了不再选中（退化成装饰轨道）。" >&2
+  exit 1
+fi
+# 反向：默认档必须是 10km（跟原型一致）。默认值漂了，用户看到的初始半径就变了。
+if ! grep -qF 'MORE_DISTANCE_DEFAULT_INDEX = 3' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 默认半径档位不再是 3（=10km）。" >&2
+  exit 1
+fi
+
+# ④ 不许同时存在两个距离控件：「附近」不能再是一个开关型 chip。
+#    一个开关 + 一个半径会互相矛盾（开关关着时半径还有没有效？没人说得清）。
+if grep -qF '{ id: "near", label: "附近" }' apps/mobile/src/recommend-fixtures.ts; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 「附近」又变回开关型 chip 了 —— 现在会有两个" >&2
+  echo "        距离控件（一个开关 + 一个半径），它们对同一个人可能给出相反答案。" >&2
+  exit 1
+fi
+
+# ⑤ 原型 chip 样式：无边框 + 选中转深色。回到 lime 高亮或带描边即红。
+if ! grep -qF 'filterChipOn: { backgroundColor: color.ink }' "$MORE_HOME" ||
+   grep -qF 'filterChipOn: { backgroundColor: color.lime' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: chip 选中态不是原型的深色（回到 lime 了）。" >&2
+  exit 1
+fi
+if grep -qE 'filterChip: \{[^}]*borderWidth' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: chip 又带上描边了（原型是无边框）。" >&2
+  exit 1
+fi
+
+pnpm --dir apps/mobile exec vitest run src/person-distance-zero.test.ts || exit $?
+echo "    HOME-MORE-DIST-001: PASS (distance is a real selectable radius, and an unknown distance is still not 'nearby')"
+
+# HOME-I18N-001（2026-09-22，用户：「原型是给你参考的 你肯定要改好 语言要支持选择」）：
+# 「更多」整页的「中文」chip（原在首页页头，HOME-I18N-002 挪过去）+ 选择语言面板。
+#
+# 这条钉的不是"有没有那个按钮"，是**按钮按下去语言真的换、而且换完还在**：
+#   ① chip 显示的是**当前**语言的本名（写死「中文」= 换完不更新，chip 在骗人）；
+#   ② 入口是「更多」整页的「中文」chip（HOME-I18N-002），面板以 overlay 叠在
+#      那个全屏 Modal 里（iOS 一次只呈现一个 Modal，嵌第二个会被无声吞掉，点了不弹
+#      —— HOME-MORE-SHEET-004 的同一个坑）；
+#   ③ 选择要落盘（pref_language）、冷启动要读回来（loadPreferences），
+#      否则"选了老挝语、重启回中文"—— 看着能选，其实没生效；
+#   ④ 校验器必须是白名单（isLanguage），不能退回只认字面量 "vi"/"en"：
+#      那种写法会把新增的 lo/ko/ja **静默吞回中文**，是这条钉最想防的形态。
+#
+# 文案本身（6 种语言、没有"复制粘贴忘翻译"）由 src/i18n.test.ts 守；
+# 这里守的是"接线"，两边合起来才叫语言选择是真的。
+I18N_HOME=apps/mobile/src/surfaces/requester-home.tsx
+I18N_SHEET=apps/mobile/src/components/language-sheet.tsx
+I18N_PREFS=apps/mobile/src/preferences.ts
+I18N_SRC=apps/mobile/src/i18n.ts
+
+# ① 入口在「更多」整页的「中文」chip，不在首页页头（HOME-I18N-002，2026-09-23 用户：
+#    「多语言筛选按钮做在 home 这个不对 应该做在已有的更多-中文按钮」）。
+if grep -qF 'accessibilityLabel={t("language")}' "$I18N_HOME" || grep -qF '{appLangOption.short}' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-002]: 首页页头又长出了语言按钮 —— 入口只在「更多」的「中文」chip。" >&2
+  exit 1
+fi
+lang_chip=$(grep -nF 'if (chip.id === "lang_zh") {' "$I18N_HOME" | head -1 | cut -d: -f1)
+if [ -z "$lang_chip" ]; then
+  echo "  FAIL [HOME-I18N-002]: 「更多」里的「中文」chip 不再是语言入口。" >&2
+  exit 1
+fi
+lang_chip_body=$(sed -n "${lang_chip},$((lang_chip + 14))p" "$I18N_HOME")
+if ! grep -qF 'onPress={() => setLanguageSheetOpen(true)}' <<<"$lang_chip_body" ||
+   ! grep -qF '{appLangOption.name}' <<<"$lang_chip_body"; then
+  echo "  FAIL [HOME-I18N-002]: 「中文」chip 没有打开语言面板，或没显示**当前**语言本名 ——" >&2
+  echo "        写死「中文」的话，切到 Tiếng Việt 之后 chip 还在说「中文」，是 chip 在骗人。" >&2
+  exit 1
+fi
+
+# ② 面板在「更多」整页 Modal **里面**，而且必须是 overlay 形态：iOS 一次只呈现一个
+#    Modal，嵌第二个会被无声吞掉（HOME-MORE-SHEET-004 的同一个坑）。
+if ! grep -qF '<LanguageSheet presentation="overlay" visible={languageSheetOpen}' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-002]: 「更多」页里没有以 overlay 形态挂 LanguageSheet。" >&2
+  exit 1
+fi
+if grep -F '<LanguageSheet ' "$I18N_HOME" | grep -vqF 'presentation="overlay"'; then
+  echo "  FAIL [HOME-I18N-002]: 首页还有一个 Modal 形态的 LanguageSheet —— 它跟「更多」" >&2
+  echo "        整页 Modal 同时 present 会被吞，入口也应该只有一个。" >&2
+  exit 1
+fi
+more_open=$(grep -nF 'visible={filterSheetOpen}' "$I18N_HOME" | head -1 | cut -d: -f1)
+sheet_mount=$(grep -nF '<LanguageSheet presentation="overlay"' "$I18N_HOME" | head -1 | cut -d: -f1)
+if [ -z "$more_open" ] || [ -z "$sheet_mount" ] || [ "$more_open" -ge "$sheet_mount" ] ||
+   awk -v a="$more_open" -v b="$sheet_mount" 'NR>a && NR<b' "$I18N_HOME" | grep -qF '</Modal>'; then
+  echo "  FAIL [HOME-I18N-002]: overlay 面板不在「更多」整页 Modal 内部 —— 在外面的话" >&2
+  echo "        它会被全屏 Modal 盖住，点 chip 看不到面板。" >&2
+  exit 1
+fi
+if ! grep -qF 'if (presentation === "overlay") return visible ? body : null;' "$I18N_SHEET"; then
+  echo "  FAIL [HOME-I18N-002]: LanguageSheet 的 overlay 形态又包回了 Modal。" >&2
+  exit 1
+fi
+
+# ③ 选择要落盘、冷启动要读回来。
+if ! grep -qF 'saveLanguage(code)' "$I18N_SHEET"; then
+  echo "  FAIL [HOME-I18N-001]: 选完语言没有落盘 —— 重启就回默认语言。" >&2
+  exit 1
+fi
+if ! grep -qF 'pref_language' "$I18N_PREFS"; then
+  echo "  FAIL [HOME-I18N-001]: pref_language 这个存储键没了。" >&2
+  exit 1
+fi
+if ! grep -qF 'applyLanguage(prefs.language)' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 首页起来没有把存下来的语言读回内存 ——" >&2
+  echo "        落盘了但没人读，等于没存。" >&2
+  exit 1
+fi
+
+# ④ 校验器必须是白名单。退回字面量比较即红 —— 那会把 lo/ko/ja 静默吞回中文。
+if ! grep -qF 'if (v && isLanguage(v)) return v;' "$I18N_PREFS"; then
+  echo "  FAIL [HOME-I18N-001]: 语言校验不再走 isLanguage 白名单。" >&2
+  exit 1
+fi
+if grep -qF 'v === "vi"' "$I18N_PREFS" || grep -qF 'v === "en"' "$I18N_PREFS"; then
+  echo "  FAIL [HOME-I18N-001]: 校验器退回只认字面量 \"vi\"/\"en\" ——" >&2
+  echo "        新增的 lo/ko/ja 会被静默吞回中文（选了老挝语、重启变中文）。" >&2
+  exit 1
+fi
+
+# ⑤ 六种语言的表必须在 i18n.ts 里，而且首页不许再自带一份中文文案表。
+if ! grep -qF 'export const LANGUAGES' "$I18N_SRC" ||
+   ! grep -qF 'export const I18N' "$I18N_SRC" ||
+   ! grep -qF 'export const RIDE_TIMES' "$I18N_SRC" ||
+   ! grep -qF 'export const ICEBREAKER_LINES' "$I18N_SRC"; then
+  echo "  FAIL [HOME-I18N-001]: i18n.ts 少了语言表（LANGUAGES / I18N / RIDE_TIMES / ICEBREAKER_LINES）。" >&2
+  exit 1
+fi
+# 骑行档位 / 破冰开场白曾经是首页里的中文常量，切语言不跟着走。回来了即红。
+if grep -qF 'MORE_DISTANCE_RIDE' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 骑行档位又变回首页里的写死常量了（切语言不跟着变）。" >&2
+  exit 1
+fi
+if grep -qF 'ICEBREAKER_OPENERS' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 破冰开场白又变回首页模块级的中文数组了。" >&2
+  exit 1
+fi
+
+# ⑥ 距离 chip 的数字和单位必须分开拼：zh 的 kmUnit 是「km 内」，en 是「km」，
+#    ko 是「km 이내」—— 把「km 内」写死进 JSX 就等于只有中文对。
+if ! grep -qF '📍 {moreDistanceKm}{t("kmUnit")}' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 距离 chip 不再按语言拼单位（写死「km 内」了？）。" >&2
+  exit 1
+fi
+
+# ⑨ 「继续进行」卡片必须在**渲染时**翻译（卡片存 subKey，不存翻译好的串）。
+#    这个 effect 的依赖只有 demandClient，切语言时它**不会重跑** ——
+#    如果卡片存的是已翻译的串，页面其余部分都换过去了，就这两张卡还停在旧语言。
+#    另一个修法（给 effect 加 lang 依赖）会为了两句文案多拉一次 listHomeItems。
+if ! grep -qF '{t(item.subKey, item.subVars)}' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 「继续进行」卡片不是在渲染时才翻译的 ——" >&2
+  echo "        切语言时那两张卡不会跟着变（effect 依赖只有 demandClient，不会重跑）。" >&2
+  exit 1
+fi
+# 注意别写成通用的 `sub: t(` —— 四宫格那几个 tile 的 sub 也是 sub: t(...)，
+# 但它们是**渲染时**算的（在组件里），不在 state 里，那样写会误伤。
+# 这里只钉两个投影函数里那两句。
+if grep -qF 'sub: t("draftProgress"' "$I18N_HOME" ||
+   grep -qF 'sub: t("publishedWaiting")' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 卡片把翻译好的字符串存进 state 了（sub: t(...)）。" >&2
+  echo "        存串 ⇒ 切语言时 effect 不重跑 ⇒ 这两张卡停在旧语言。" >&2
+  exit 1
+fi
+if ! grep -qF 'subKey: "draftProgress"' "$I18N_HOME" ||
+   ! grep -qF 'subKey: "publishedWaiting"' "$I18N_HOME"; then
+  echo "  FAIL [HOME-I18N-001]: 两张卡没有存 subKey（草稿进度 / 已发布等待匹配）。" >&2
+  exit 1
+fi
+
+# ⑦ 文案层面：6 种语言齐全、没有"复制粘贴忘翻译"、占位符不漏成 undefined。
+pnpm --dir apps/mobile exec vitest run src/i18n.test.ts || exit $?
+echo "    HOME-I18N-001: PASS (language is selectable, it persists, and no language silently falls back)"
+
+# ⑧ 持久化行为：六种语言"存进去 → 冷启动读回来"必须原样回来。
+#    这条抓的是源码看不出来的那种坏：校验器只认 "vi"/"en"，lo/ko/ja 存得进、
+#    读出来变中文 —— 界面上的表现就是"选了没生效"。
+pnpm --dir apps/mobile exec vitest run src/preferences.test.ts || exit $?
+echo "    HOME-I18N-001: PASS (every language round-trips through pref_language)"
+
+# 首页的文案契约跟着一起验 —— 那些断言是按 t() 键钉的，键名漂了会红。
+pnpm --dir apps/mobile exec vitest run src/requester-home-discovery-contract.test.ts || exit $?
+echo "    HOME-I18N-001: PASS (home copy still resolves through the same keys)"
+
+# HOME-MORE-ROOMS-001（2026-09-23，原型 deepseek_html_20260923_2308b7.html，用户：
+# 「聊天房点击 list 直接弹出已有的房和创建房卡片 目前的不对」）：
+# 「更多」整页的「聊天房」chip 是本页的视图切换 —— 列表换成「开房大卡 + 正在进行的房间」，
+# 不是直接跳创建页。房间只认服务端真实的 GROUP 会话（带 roomScene），读失败和
+# 没有房分开说；开创建页 / 进房前先关掉「更多」Modal（iOS 只呈现一个 Modal）。
+ROOMS_HOME=apps/mobile/src/surfaces/requester-home.tsx
+ROOMS_SHELL=apps/mobile/src/shell/app-shell.tsx
+if ! grep -qF 'setMoreMode("rooms");' "$ROOMS_HOME" || ! grep -qF '{moreMode === "rooms" ? (' "$ROOMS_HOME"; then
+  echo "  FAIL [HOME-MORE-ROOMS-001]: 「聊天房」chip 不再切到房间列表视图。" >&2
+  exit 1
+fi
+chip_line=$(grep -nF 'accessibilityLabel={t("chipChatRoom")}' "$ROOMS_HOME" | head -1 | cut -d: -f1)
+if [ -z "$chip_line" ] || sed -n "${chip_line},$((chip_line + 10))p" "$ROOMS_HOME" | grep -qF 'onOpenRoomCreate'; then
+  echo "  FAIL [HOME-MORE-ROOMS-001]: 「聊天房」chip 又直接跳创建页了 —— 原型是先看到已有的房 + 开房大卡。" >&2
+  exit 1
+fi
+if ! grep -qF 'item.conversation.conversationType === "GROUP" && item.conversation.roomScene !== undefined' "$ROOMS_HOME"; then
+  echo "  FAIL [HOME-MORE-ROOMS-001]: 房间列表不再只认真实的 GROUP + roomScene 会话。" >&2
+  exit 1
+fi
+if ! grep -qF 't("roomsLoadFailed")' "$ROOMS_HOME" || ! grep -qF 't("roomsEmpty")' "$ROOMS_HOME"; then
+  echo "  FAIL [HOME-MORE-ROOMS-001]: 读失败和没有房不再分开说。" >&2
+  exit 1
+fi
+# HOME-MORE-ROOMS-002（2026-09-23，用户：「点击聊天房卡片创建 先弹回 home 再进入创建
+# 这个多此一举」）：开房 / 进房不关「更多」，创建页和房间以 overlay 叠在「更多」Modal 里。
+if grep -qF 'setFilterSheetOpen(false); onOpenRoomCreate' "$ROOMS_HOME" ||
+   awk '/const enter = \(\): void => \{/{f=1} f&&/setFilterSheetOpen\(false\)/{print; exit} f&&/^                  \};/{exit}' "$ROOMS_HOME" | grep -q .; then
+  echo "  FAIL [HOME-MORE-ROOMS-002]: 开房 / 进房又先关了「更多」—— 中间会闪回首页。" >&2
+  exit 1
+fi
+more_open=$(grep -nF 'visible={filterSheetOpen}' "$ROOMS_HOME" | head -1 | cut -d: -f1)
+layer_line=$(grep -nF '{moreRoomLayer}' "$ROOMS_HOME" | head -1 | cut -d: -f1)
+if [ -z "$more_open" ] || [ -z "$layer_line" ] || [ "$more_open" -ge "$layer_line" ] ||
+   awk -v a="$more_open" -v b="$layer_line" 'NR>a && NR<b' "$ROOMS_HOME" | grep -qF '</Modal>'; then
+  echo "  FAIL [HOME-MORE-ROOMS-002]: 创建页 / 房间没有叠在「更多」整页 Modal 里面。" >&2
+  exit 1
+fi
+if ! grep -qF 'moreRoomLayer={roomLayerInMore ? renderRoomLayers("overlay") : null}' "$ROOMS_SHELL" ||
+   ! grep -qF 'const here = presentation === "overlay" ? roomLayerInMore : !roomLayerInMore;' "$ROOMS_SHELL"; then
+  echo "  FAIL [HOME-MORE-ROOMS-002]: app-shell 不再按入口区分 overlay / Modal —— 两份同时 visible 会被 iOS 吞掉一份。" >&2
+  exit 1
+fi
+for f in apps/mobile/src/surfaces/room-create.tsx apps/mobile/src/surfaces/room.tsx; do
+  if ! grep -qF 'if (presentation === "overlay") return visible ? body : null;' "$f"; then
+    echo "  FAIL [HOME-MORE-ROOMS-002]: $f 的 overlay 形态又包回了 Modal。" >&2
+    exit 1
+  fi
+done
+if ! grep -qF 'loadRooms={() => conversation.listConversations()}' "$ROOMS_SHELL" || ! grep -qF 'onOpenRoom={(conversationId) => { setRoomLayerInMore(true); setRoomChatId(conversationId); }}' "$ROOMS_SHELL"; then
+  echo "  FAIL [HOME-MORE-ROOMS-001]: app-shell 没把房间读取 / 进房接进首页。" >&2
+  exit 1
+fi
+echo "    HOME-MORE-ROOMS-001/002: PASS (聊天房 shows the create card and my real rooms; create/enter stack on top of the more page)"
+
+# HOME-MORE-GREET-001（2026-09-23，用户：「邀约一般就是打招呼 … 线下很近的 2 个人 比如 200m
+# 以内 我们认为处于同一个窗景 这个提示就比较正常的逻辑 但是超出了 … 就是 hi 的行为 点击就
+# 发出默认预制的招呼话语 不要只有一个 多写几句」）：
+#   - 拼桌 / 邀约按「同一窗景」（已知距离 ≤ 200m）分，不按在线分；
+#   - 邀约 = 一点就真发一句招呼（PROFILE DM），不弹破冰面板；句子池 ≥ 6 句，随机挑；
+#   - 发失败要说没发出去，没账号的人不假装发出去。
+GREET_HOME=apps/mobile/src/surfaces/requester-home.tsx
+GREET_SHELL=apps/mobile/src/shell/app-shell.tsx
+if ! grep -qF 'const SAME_SCENE_RADIUS_M = 200;' "$GREET_HOME" ||
+   ! grep -qF 'return person.distanceM !== undefined && person.distanceM <= SAME_SCENE_RADIUS_M;' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-001]: 同一窗景不再是「已知距离 ≤ 200m」。" >&2
+  exit 1
+fi
+if grep -qF 'const actionLabel = p.online ? t("actionTable")' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-001]: 拼桌 / 邀约又按在线状态分了。" >&2
+  exit 1
+fi
+if ! grep -qF 'onPress={() => { if (sameScene) setIcebreakerTarget(p); else greet(p); }}' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-001]: 邀约又弹了破冰面板（应该一点就发招呼）。" >&2
+  exit 1
+fi
+if ! grep -qF 'setGreetMsg(t("greetFailed"));' "$GREET_HOME" || ! grep -qF 't("greetNoAccount", { name: person.name })' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-001]: 发失败 / 没账号不再如实说。" >&2
+  exit 1
+fi
+if ! grep -qF 'conversationType: "DM", firstMessage: line,' "$GREET_SHELL"; then
+  echo "  FAIL [HOME-MORE-GREET-001]: app-shell 的招呼不再真发到 DM。" >&2
+  exit 1
+fi
+# HOME-MORE-GREET-002（2026-09-23，用户：「显示发送中-已打招呼 这属于多余 邀约 已邀约 就可以 …
+# 不能必须等对方（模型 真人）回复才能更新状态」）：StartConversation 带首条消息时服务端会同步
+# 生成 AI 代回复，所以「已邀约」必须在发请求**之前**就置上，不能挂在请求的 then 上；
+# 也不许再出现「发送中」这种中间态。
+optimistic_line=$(grep -nF 'writeGreetState({ ...greetStateRef.current, [accountId]: Date.now() });' "$GREET_HOME" | head -1 | cut -d: -f1)
+send_line=$(grep -nF 'onGreetHuman(person, lines)' "$GREET_HOME" | head -1 | cut -d: -f1)
+if [ -z "$optimistic_line" ] || [ -z "$send_line" ] || [ "$optimistic_line" -ge "$send_line" ]; then
+  echo "  FAIL [HOME-MORE-GREET-002]: 「已邀约」没有在发请求之前置上 —— 又在等对方回复才变状态。" >&2
+  exit 1
+fi
+if grep -qF 'greetSending' "$GREET_HOME" || grep -qF '"sending"' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-002]: 又出现了「发送中」中间态。" >&2
+  exit 1
+fi
+# HOME-MORE-GREET-003（2026-09-23，用户：「已邀约 切换到 home-更多 又重置了 … 可以发 3 条连续
+# 超过没有回复等待回复吧 但是状态不能重置 必须要冷静 12H 后才能重置状态」）：
+#   「已邀约」落盘、12h 冷静期；连发 3 条对方本人没回就不再发（AI 代回复 proxy_ai 不算回复）。
+GREET_STATE=apps/mobile/src/greet-state.ts
+if ! grep -qF 'export const GREET_COOLDOWN_MS = 12 * 60 * 60 * 1000;' "$GREET_STATE" ||
+   ! grep -qF 'export const GREET_MAX_UNANSWERED = 3;' "$GREET_STATE"; then
+  echo "  FAIL [HOME-MORE-GREET-003]: 冷静期不是 12h，或连发上限不是 3。" >&2
+  exit 1
+fi
+if ! grep -qF 'void saveGreetState(viewerAccountId, next)' "$GREET_HOME" || ! grep -qF 'loadGreetState(viewerAccountId, Date.now())' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-003]: 「已邀约」不再落盘 / 不再读回 —— 切页面就会重置。" >&2
+  exit 1
+fi
+if ! grep -qF 'const invited = !sameScene && isInvited(greetState, resolveHomePersonAccountId(p.id), Date.now());' "$GREET_HOME"; then
+  echo "  FAIL [HOME-MORE-GREET-003]: 按钮状态不再按落盘的 12h 冷静期算。" >&2
+  exit 1
+fi
+if ! grep -qF '>= GREET_MAX_UNANSWERED) return "awaiting_reply";' "$GREET_SHELL"; then
+  echo "  FAIL [HOME-MORE-GREET-003]: 发之前不再检查「连发 3 条对方没回」。" >&2
+  exit 1
+fi
+# HOME-MORE-GREET-004：挑招呼句子要避开跟这个人聊天里我已经发过的（同一句发两遍，AI 代回复都会
+# 吐槽「又是这句」）。
+if ! grep -qF 'const line = pickGreetingLine(lines, alreadySent);' "$GREET_SHELL"; then
+  echo "  FAIL [HOME-MORE-GREET-004]: 招呼句子不再避开已经发过的。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/greet-state.test.ts || exit $?
+pnpm --dir apps/mobile exec vitest run src/i18n.test.ts -t "several distinct greeting lines" || exit $?
+echo "    HOME-MORE-GREET-001/002/003/004: PASS (one-tap hi; invited persists 12h; max 3 unanswered in a row; no repeated line)"
+
+# PULL-REFRESH-001（2026-09-23，用户：「目前所有社交产品都是上下滑动进行刷新 我们缺少这个逻辑」）：
+# 首页 / 更多（真人 + 聊天房）/ 消息 / 动态 / 市场 的主列表都能下拉刷新；转圈跟着真实加载停
+# （usePullToRefresh 等 Promise、useTrackedRefresh 等被 track 的请求），不是固定时长。
+PR_HOOK=apps/mobile/src/components/pull-to-refresh.ts
+for spec in \
+  "apps/mobile/src/surfaces/requester-home.tsx:refreshControl={<RefreshControl refreshing={homeRefreshing} onRefresh={onHomeRefresh} />} style={styles.root}" \
+  "apps/mobile/src/surfaces/requester-home.tsx:refreshControl={<RefreshControl refreshing={homeRefreshing} onRefresh={onHomeRefresh} />} style={styles.moreList}" \
+  "apps/mobile/src/surfaces/requester-home.tsx:refreshControl={<RefreshControl refreshing={rooms.status === \"loading\"} onRefresh={refreshRooms} />}" \
+  "apps/mobile/src/surfaces/messages.tsx:refreshControl={<RefreshControl refreshing={inboxPull.refreshing} onRefresh={inboxPull.onRefresh} />}" \
+  "apps/mobile/src/surfaces/feed.tsx:refreshControl={<RefreshControl refreshing={feedPull.refreshing} onRefresh={feedPull.onRefresh} />}" \
+  "apps/mobile/src/surfaces/market.tsx:refreshControl={<RefreshControl refreshing={marketPull.refreshing} onRefresh={marketPull.onRefresh} />}"; do
+  file="${spec%%:*}"; needle="${spec#*:}"
+  if ! grep -qF "$needle" "$file"; then
+    echo "  FAIL [PULL-REFRESH-001]: $file 的主列表没有下拉刷新了：$needle" >&2
+    exit 1
+  fi
+done
+# 首页的加载 effect 必须跟着 nonce 重跑、请求必须被 track —— 否则下拉只是转个圈。
+for needle in 'void trackHomeLoad(relationship.listMyFriendships())' 'void trackHomeLoad(activities.listActivities())' 'void trackHomeLoad((async () => {' '}, [demandClient, homeRefreshNonce]);'; do
+  if ! grep -qF "$needle" apps/mobile/src/surfaces/requester-home.tsx; then
+    echo "  FAIL [PULL-REFRESH-001]: 首页下拉不再真的重拉数据：$needle" >&2
+    exit 1
+  fi
+done
+if grep -qE 'setTimeout\(\(\) => setRefreshing\(false\), [0-9]{3,4}\)' "$PR_HOOK"; then
+  echo "  FAIL [PULL-REFRESH-001]: 转圈改成固定时长收起了 —— 必须等真实加载结束。" >&2
+  exit 1
+fi
+echo "    PULL-REFRESH-001: PASS (home / more / rooms / messages / feed / market all pull-to-refresh on real loads)"
+
+# AI-MANAGE-003（2026-09-23，用户：「ai 管理模块 原型给了 干的一坨屎 logo 也不对 功能也不对」）：
+# 「对话管理 —— AI 怎么替你聊天」管的是**被代表的人**：私聊真人时读收消息那个真人（owner）的
+# 暂停 / 权限 / 风格，不是发消息的人；跟 Proxy 助手的会话不受影响；Token 记在 owner 头上。
+# AI-MANAGE-002 读的是 e.Actor —— 方向反了，「每次确认」还把替 owner 起草的回复交给了对方。
+require_test "AI-MANAGE-003" "./internal/conversation" \
+  "TestStandInReadsTheRecipientsSettingsNotTheSenders" \
+  "apps/api-go/internal/conversation/ai_engine_gate_test.go" || exit $?
+require_test "AI-MANAGE-003" "./internal/conversation" \
+  "TestStandInHonoursRecipientPauseAndOffBeforeTheModel" \
+  "apps/api-go/internal/conversation/ai_engine_gate_test.go" || exit $?
+# AI-MANAGE-013：每次确认 = 替本人起草、只有本人看得到；发消息的人拿不到也动不了草稿；
+# 本人发出的是本人的消息（不带 AI 代回）；过时的草稿（对方又发 / 本人自己回了）作废不能再发。
+for t in TestConfirmDraftsForTheOwnerOnlyAndNeverAnswersTheSender TestOwnerSendsTheDraftAsTheirOwnMessage TestStaleDraftsAreSupersededAndCanBeDiscarded; do
+  require_test "AI-MANAGE-013" "./internal/conversation" "$t" \
+    "apps/api-go/internal/conversation/stand_in_draft_test.go" || exit $?
+done
+# AI-MANAGE-014：全自动代回复按本人「节奏」延迟发出，不在发消息的请求里同步回；连发只回最新一条；
+# 等待期间本人自己回了 / 关掉了就不发。
+for t in TestStandInWaitsForTheOwnersRhythmThenRepliesAsTheOwner TestStandInAnswersOnlyTheLatestMessageAfterABurst TestStandInStaysSilentWhenTheOwnerAnsweredOrTurnedItOffWhileWaiting TestStandInDelayMatchesTheRhythmChoices; do
+  require_test "AI-MANAGE-014" "./internal/conversation" "$t" \
+    "apps/api-go/internal/conversation/stand_in_rhythm_test.go" || exit $?
+done
+require_test "AI-MANAGE-003" "./internal/conversation" \
+  "TestStandInAutoUsesTheOwnersStyleAndMetersTheOwner" \
+  "apps/api-go/internal/conversation/ai_engine_gate_test.go" || exit $?
+require_test "AI-MANAGE-003" "./internal/conversation" \
+  "TestAssistantThreadIsNotGovernedByChatManagement" \
+  "apps/api-go/internal/conversation/ai_engine_gate_test.go" || exit $?
+if grep -qF 's.aiGenerationBlocked(ctx, e.Actor.ID)' apps/api-go/internal/conversation/service.go ||
+   grep -qF 'payload["aiDraft"]' apps/api-go/internal/conversation/service.go; then
+  echo "  FAIL [AI-MANAGE-003]: 会话侧又按发消息的人读 AI 管理设置 / 又把草稿交给了对方。" >&2
+  exit 1
+fi
+# 页面：原型牌标、目录完整、不画假上限、没接上的能力不说「运行中」。
+pnpm --dir apps/mobile exec vitest run src/surfaces/ai-management.test.ts || exit $?
+echo "    AI-MANAGE-003: PASS (chat management governs the represented person; surface matches the prototype honestly)"
+# PROFILE-REPLIES-VISIBLE-001: 个人主页 PostCard 以前只有动作按钮 —— feed 里
+# 能看到的赞数/评论列表在主页完全看不见。调用方传 engagementClient 进来后
+# hydrate 计数、点开拉评论；作者名走 resolveReplyAuthorDisplayName，无名不显示裸 id。
+pnpm --dir apps/mobile exec vitest run src/profile-post-replies.test.ts || exit $?
+echo "    PROFILE-REPLIES-VISIBLE-001: PASS (profile posts show counts + expandable replies)"
+# ORDER-EXEC-001: 订单明细以前只有"返回列表" —— OFFERED 卡死，EXECUTING 走不到
+# COMPLETED，COMPLETED 评不了分。明细页按 lifecycle 逐态出真按钮，全部走命令。
+pnpm --dir apps/mobile exec vitest run src/order-exec.test.ts src/fulfillment-client.test.ts || exit $?
+echo "    ORDER-EXEC-001: PASS (order detail drives confirm/start/complete/satisfaction)"

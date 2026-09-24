@@ -24,7 +24,7 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(searchDock).toContain('accessibilityLabel="发送"');
     const dockUse = source.indexOf("<HomeSearchDock");
     expect(dockUse).toBeGreaterThan(-1);
-    expect(dockUse).toBeLessThan(source.indexOf(">真人推荐<"));
+    expect(dockUse).toBeLessThan(source.indexOf('t("title")'));
     expect((searchDock.match(/<TextInput\s/g) ?? [])).toHaveLength(1);
     expect(searchDock).toContain("<View style={styles.searchShell}>");
     expect(searchDock).toContain('name="camera" size={24}');
@@ -42,12 +42,12 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(homeAssistant).toContain("!externalComposer ? <View style={styles.composer}>");
   });
   it("keeps the labeled human section before the labeled AI section", () => {
-    const human = source.indexOf(">真人推荐<");
-    const ai = source.indexOf(">AI 推荐<");
+    const human = source.indexOf('t("title")');
+    const ai = source.indexOf('t("aiRecommend")');
     expect(human).toBeGreaterThan(-1);
     expect(ai).toBeGreaterThan(human);
-    expect(source).toContain(">真人<");
-    expect(source).toContain(">AI 生成<");
+    expect(source).toContain('t("humanBadge")');
+    expect(source).toContain('t("aiGenerated")');
   });
 
   // AI-ROW-DUPE-001: 首页曾经同时渲染两条 AI 行 —— 上面一条「小美们」
@@ -58,33 +58,33 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).not.toMatch(/<AIAssistantsRow[\s/>]/);
     expect(source).not.toContain('from "../ai-assistants-row"');
     expect(source).not.toContain("小美们");
-    expect((source.match(/>AI 推荐</g) ?? [])).toHaveLength(1);
+    expect((source.match(/t\("aiRecommend"\)/g) ?? [])).toHaveLength(1);
     expect((source.match(/styles\.aiRail\b/g) ?? [])).toHaveLength(1);
     expect((source.match(/styles\.aiSection\b/g) ?? [])).toHaveLength(1);
     // 「AI 生成」只作为徽标 / 卡片副标题出现，不再是一条独立行的标题。
-    expect((source.match(/>AI 生成</g) ?? [])).toHaveLength(2);
-    expect(source).toContain("<Text style={styles.aiTitle}>AI 推荐</Text>");
-    expect(source).toContain("styles.aiBadgeText}>AI 生成");
+    expect((source.match(/t\("aiGenerated"\)/g) ?? [])).toHaveLength(2);
+    expect(source).toContain('<Text selectable style={styles.aiTitle}>{t("aiRecommend")}</Text>');
+    expect(source).toContain('styles.aiBadgeText}>{t("aiGenerated")}');
     expect(source).toContain("styles.aiHandle}");
   });
 
   it("keeps matchmaking above nearby scenes because Scene is a meeting tool, not inventory", () => {
-    const human = source.indexOf(">真人推荐<");
-    const ai = source.indexOf(">AI 推荐<");
-    const composition = source.indexOf(">为你组合<");
-    const activeWork = source.indexOf(">继续进行<");
-    const sceneInspiration = source.indexOf(">附近场景<");
+    const human = source.indexOf('t("title")');
+    const ai = source.indexOf('t("aiRecommend")');
+    const composition = source.indexOf('t("combo")');
+    const activeWork = source.indexOf('t("continueSection")');
+    const sceneInspiration = source.indexOf('t("nearbyScenes")');
     expect(sceneInspiration).toBeGreaterThan(activeWork);
     expect(activeWork).toBeGreaterThan(composition);
     expect(composition).toBeGreaterThan(ai);
     expect(ai).toBeGreaterThan(human);
-    expect(source).toContain("打开附近场景地图");
+    expect(source).toContain("onOpenSceneMap?.()");
     expect((source.match(/<SceneActivityDiscovery/g) ?? [])).toHaveLength(1);
   });
 
   it("keeps human discovery as circle-and-name nodes that preserve the real Scene context", () => {
     expect(source).toContain("setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId })");
-    expect(source).toContain('accessibilityLabel="查看完整场景"');
+    expect(source).toContain('accessibilityLabel={t("viewFullScene")}');
     expect(source).not.toContain('testID="human-node-reveal"');
     expect(source).not.toContain("styles.recCard");
     expect(source).not.toContain("styles.storyHint");
@@ -100,48 +100,57 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     // 真人头像右下 + 徽标走真实好友申请，点头像本身仍走 Scene。
     expect(source).toContain("handleHomeFriend(p.id, p.name)");
     expect(source).toContain("styles.addBadge");
-    // OVERRIDE-UNSplash-001（commander 决定 2026-09-18，覆盖 IDENTITY-ID-001
-    // 的"无账号就灰头像"）：mock 期真人不许出现灰色空头像，之前 5 张 R34 原型
-    // 肖像全部用上。钉死新约定的三条：① 真账号永远走媒体资产（原型图不许覆盖
-    // 真照片）；② 没账号的按 id 哈希固定一张（同一个人任何页面同一张脸，绝不
-    // 按列表下标轮转）；③ 代价（stock 素材≠本人、会撞脸、服务端 feed 落地后删）
-    // 写在 fixtures 注释里，不许静默。
-    expect(fixtures).toContain("R34_HUMAN_PORTRAITS");
-    expect(fixtures).toContain("images.unsplash.com");
-    expect(fixtures).toContain("portraitIndexForPerson");
-    expect(fixtures).toContain("ACCOUNT_AVATAR_ASSET[person.id] !== undefined");
-    expect(fixtures).toContain("OVERRIDE-UNSplash-001");
+    // HOME-RAIL-ACCOUNT-001（2026-09-23，用户报 P0）取代了 OVERRIDE-UNSplash-001。
+    //
+    // 旧的放宽是「没账号的人按 id 哈希落 unsplash 原型图，mock 期不许灰头像」。
+    // 它有两个问题：① 前提是假的 —— 那 5 张里只有 1 张是人脸，另外 4 张是下龙湾
+    // 风景 / 咖啡店室内 / 城市天际线 / 一盘炒河粉，正被当成「真人」的头像渲染；
+    // ② 适用条件已经消失 —— rail 上 28 个人现在全部有服务端账号和写真资产。
+    //
+    // 新约定三条：① 头像只有一个来源：账号的媒体资产 thumb；② 不许再有 stock /
+    // 外链占位图（拿风景照冒充人脸比灰头像更糟）；③ 缺图回落首字母
+    //（HOME-AVATAR-FALLBACK-001 的 onError 分支）。
+    expect(fixtures).not.toContain("images.unsplash.com");
+    expect(fixtures).not.toContain("R34_HUMAN_PORTRAITS");
+    expect(fixtures).not.toContain("portraitIndexForPerson");
+    expect(fixtures).not.toContain("OVERRIDE-UNSplash-001");
     expect(fixtures).toContain("ACCOUNT_AVATAR_ASSET");
     expect(fixtures).toContain("/v1/media/thumb/");
-    expect(fixtures).toContain("withR34Portraits");
+    expect(fixtures).toContain("withAccountPortraits");
+    // 账号表必须覆盖 fixture 里出现的每一个人。少一个 = rail 上出现一个「没有账号
+    // 的真人」：卡片顶着「真人」徽标，点 + 却只会说「还没有账号」。
+    const tableKeys = [...fixtures.matchAll(/^\s{2}(u_[a-z_]+): "ma_creator_/gm)].map((m) => m[1]);
+    const railIds = [...fixtures.matchAll(/id: "(u_[a-z_]+)"/g)].map((m) => m[1]);
+    expect(new Set(tableKeys).size).toBe(28);
+    expect([...new Set(railIds)].sort()).toEqual([...new Set(tableKeys)].sort());
   });
 
   it("keeps the linked human Scene preview connected to friendship, profile and messaging workflows", () => {
     expect(source).toContain("handleHomeFriend(humanScenePreview.person.id");
-    expect(source).toContain('"添加中"');
-    expect(source).toContain('accessibilityLabel="查看主页"');
-    expect(source).toContain('accessibilityLabel="发消息"');
+    expect(source).toContain('t("adding")');
+    expect(source).toContain('accessibilityLabel={t("viewProfile")}');
+    expect(source).toContain('accessibilityLabel={t("messageAction")}');
     expect(source).toContain("onOpenHumanProfile?.(person)");
     expect(source).toContain("onMessageHuman?.(person)");
     expect(source).toContain("person.availabilityText");
     expect(source).toContain("person.rating");
     expect(source).toContain("person.completedActivities");
-    expect(source).toContain(">当前主题<");
-    expect(source).toContain(">当前可一起去<");
+    expect(source).toContain('t("currentTheme")');
+    expect(source).toContain('t("canGoTogether")');
     expect(source).toContain("previewSceneOptions.map");
     expect(fixtures).toContain("availabilityText");
     expect(source).toContain('style={styles.humanScenePage}');
     expect(source).toContain('style={styles.humanSceneActionsTop}');
-    expect(source).toContain(">她可以做什么<");
-    expect(source).toContain(">历史信誉与评价<");
+    expect(source).toContain('t("whatSheCanDo")');
+    expect(source).toContain('t("reputation")');
     expect(source).not.toContain("位共同好友");
     expect(fixtures).not.toContain('{ id: "mutual", label: "共同好友" }');
     expect(fixtures).toContain('sceneNames: person.id === "u_linh"');
-    expect(source).toContain('accessibilityLabel="返回Home"');
+    expect(source).toContain('accessibilityLabel={t("backHome")}');
     expect(source).toContain("safeArea.top");
-    expect(source).toContain('accessibilityLabel="查看公开历史活动"');
+    expect(source).toContain('accessibilityLabel={t("viewPublicHistory")}');
     expect(source).toContain("publicActivityHistory?.length");
-    expect(source).toContain("非公开记录不展示");
+    expect(source).toContain('t("privateHidden")');
   });
 
   it("reuses the approved Scene action logo registry in the compact Home action rail", () => {
@@ -159,13 +168,32 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).not.toContain('testID="ai-scene-preview"');
     expect(source).not.toContain("setSelectedAIAccount");
     expect(source).not.toContain("onPress={() => onOpenAIScene?.(account)}");
-    // Owner 决议：AI 也是可寻址账户，使用同一套好友关系；发消息仍从主页进入。
-    expect(source).toContain("relationship.sendFriendRequest(id)");
-    expect(source).toContain("relationship.acceptFriendRequest(id)");
+    // Owner 决议：AI 也是可寻址账户，使用同一套好友关系。
+    // HOME-FRIEND-ID-001（2026-09-22）：调用点传的是解析后的账号 id（key），
+    // 不是本地 fixture id —— 这里跟着改参数名，契约本身（同一套好友关系、
+    // 不走 engagement.followProfile）没变。
+    expect(source).toContain("relationship.sendFriendRequest(key)");
+    expect(source).toContain("relationship.acceptFriendRequest(key)");
     expect(source).toContain("relationship.listMyFriendships()");
     expect(source).toContain("好友申请已发送");
     expect(source).not.toContain("engagement.followProfile");
-    expect(source).not.toContain("onMessageAI?.(account)");
+    // AI-FRIEND-DEAD-PENDING-001（2026-09-22）：AI 推荐卡上原来那个 + 号走的是
+    // 真人同一套 SendFriendRequest，而平台 AI 永远不会 accept（服务端另有
+    // AI-FRIEND-REQUEST-001 守卫）—— 它是一条永远卡在 PENDING 的死记录，UI 还
+    // 诚实地说「好友申请已发送」。那个位置现在换成「发消息」：AI 有完整对话链，
+    // 点进去真有结果。
+    //
+    // 这条原来是**反向**断言（not.toContain），它挡住的正是 shell 里那个
+    // onMessageAI —— 结果那个 handler 建好了、prop 也声明了，却零调用方，
+    // 正是本仓点名的「半截接线」。现在改成**正向**断言：钉的是「这个入口必须是
+    // 真对话入口」，谁把它换回好友申请、或换成一个不接线的空按钮，都会红。
+    // 「发消息仍从主页进入」没有被推翻 —— AI 主页那个「发消息」还在
+    // （见 placeholder-honest-actions.test.ts 的 PLACEHOLDER-010），
+    // 卡片上这个是同一目标的第二个入口，不是替代。
+    expect(source).toContain("onMessageAI?.(account)");
+    // 没接 handler 时按钮必须 disabled，不留一个点了没反应的假按钮。
+    expect(source).toContain("disabled={!onMessageAI}");
+    expect(shell).toContain("onMessageAI={");
     expect(scene).toContain('testID="human-scene-binding"');
     expect(scene).toContain("onOpenHumanProfile?.(featuredHuman)");
     expect(scene).toContain("尚未代表本人到场或接受邀请");
@@ -180,7 +208,7 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   });
 
   it("gives the 4-grid composer its own For You theme header", () => {
-    const forYou = source.indexOf("为你组合");
+    const forYou = source.indexOf('t("combo")');
     expect(forYou).toBeGreaterThan(-1);
     expect(source).toContain("For You");
     // 主题头在 4 宫格之前，真人在 AI 之前的大顺序不变。
@@ -188,7 +216,7 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   });
 
   it("uses the four-grid center diamond to remix the whole selection", () => {
-    expect(source).toContain('accessibilityLabel="整组换一组"');
+    expect(source).toContain('accessibilityLabel={t("changeAllLabel")}');
     expect(source).toContain("onPress={remixAll}");
     expect(source).toContain("(current + 1) % filteredPeople.length");
     expect(source).toContain("(current + 1) % distinctTimes.length");
@@ -235,11 +263,11 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("names the two order chains honestly: join is join, publish-demand is the other chain", () => {
     // 4 宫格按钮曾经挂"邀请 →"实际调 join（自己报名）。名实不符已修正：
     // 报名就是报名，发布需求是另一条链路（进市场机会 Tab）。
-    expect(source).toContain("报名 →");
+    expect(source).toContain('t("joinCta")');
     expect(source).toContain("joinSelected(gridActivity?.activityId)");
-    expect(source).toContain("发布需求");
+    expect(source).toContain('t("publishDemand")');
     expect(source).toContain('onOpenMarket?.("OPPORTUNITY")');
-    expect(source).toContain("直接约她");
+    expect(source).toContain('t("chainHint")');
     expect(source).not.toContain('"邀请 →"');
     expect(source).not.toContain("inviteSelected");
   });
@@ -248,7 +276,7 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     // 登录着点报名失败，曾一律报"登录后重试"。现在按服务端错误码说人话。
     expect(source).toContain("joinErrorMessage");
     expect(source).toContain("ACTIVITY_ALREADY_JOINED");
-    expect(source).toContain("你已报过名");
+    expect(source).toContain('t("joinAlready")');
     expect(source).toContain("ACTIVITY_FULL");
     expect(source).toContain("ACTIVITY_NOT_FOUND");
     expect(source).not.toContain("报名失败，登录后重试");

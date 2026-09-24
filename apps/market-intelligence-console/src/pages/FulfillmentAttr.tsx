@@ -1,10 +1,11 @@
+import { opFetch } from "../lib/api";
 import { useEffect, useState } from "react";
 
 type Payload = { attribution: Array<{ order_id: string; decision_id: string; surface_plan_id: string; delta_id: string; outcome: string; channel: string }>; record_example: string };
 
 export function FulfillmentAttr() {
   const [data, setData] = useState<Payload | null>(null);
-  useEffect(() => { fetch("/v1/operator/fulfillment-attribution").then((r) => r.json()).then(setData).catch(() => {}); }, []);
+  useEffect(() => { opFetch("/v1/operator/fulfillment-attribution").then(setData).catch(() => {}); }, []);
   if (!data) return <div className="notice">加载 Fulfillment Attribution…</div>;
   return (
     <>

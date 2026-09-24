@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { ConversationClient } from "../conversation-client";
-import type { DemandClient } from "../demand-client";
+import { DemandProtocolError, type CityCompanionCandidate, type DemandClient } from "../demand-client";
 import { UIPlanRenderer } from "../components/registry";
 import { color } from "../theme";
 import { fallbackPlanFor } from "../uiplan/fallback";
@@ -54,6 +54,25 @@ export function FulfillmentWorkspace({
   const scrollRef = useRef<ScrollView>(null);
   const contentScrollRef = useRef<ScrollView>(null);
 
+  // MATCH-LIVE-001：城市同行的候选来自后端（CreateCityCompanionNeed → ListCityCompanionCandidates，
+  // 按履约 / 需求方评价 / 经验 / 引力响应 / 预算排序）。以前这里是前端写死的 Linh 26 单 / Mai 12 单。
+  const [live, setLive] = useState<{ status: "loading" | "ready" | "empty" | "error" | "unavailable"; candidates: CityCompanionCandidate[] }>({ status: "loading", candidates: [] });
+  useEffect(() => {
+    if (target.category !== "TRAVEL_LOCAL") return undefined;
+    if (!demandClient) {
+      setLive({ status: "unavailable", candidates: [] });
+      return undefined;
+    }
+    let cancelled = false;
+    setLive({ status: "loading", candidates: [] });
+    // 与本页展示的需求一致：河内（市场 hn）· 8H · 中文。
+    demandClient.listCityCompanionCandidates({ duration: "8H", language: "zh", market: "hn" })
+      .then((candidates) => { if (!cancelled) setLive({ status: candidates.length > 0 ? "ready" : "empty", candidates }); })
+      .catch((error: unknown) => { if (!cancelled) setLive({ status: error instanceof DemandProtocolError ? "unavailable" : "error", candidates: [] }); });
+    return () => { cancelled = true; };
+  }, [demandClient, target.category]);
+  const candidateName = useCallback((agentId: string): string => live.candidates.find((c) => c.agentId === agentId)?.name ?? agentId, [live.candidates]);
+
   const { spec, plan, observability } = useMemo(() => {
     const candidatePlan: UIPlan = fixturePlanFor(target.category, target.goal);
     let decision = validateUIPlan(toWire(candidatePlan));
@@ -62,9 +81,24 @@ export function FulfillmentWorkspace({
       usedPlan = fallbackPlanFor(target.category);
       decision = validateUIPlan(toWire(usedPlan));
     }
-    const result = planToSpec(decision, resolveReadModel);
+    // 候选与报价用真实结果注水；其余面板照旧。报价跟着选中的人走，没选就是排第一的人，没人就不显示价格。
+    const resolve: typeof resolveReadModel = (dataRef, componentId, activePlan) => {
+      if (componentId === "CANDIDATE_RAIL") return { candidates: live.candidates, status: live.status };
+      if (componentId === "CONTEXTUAL_QUOTE") {
+        const chosen = live.candidates.find((c) => c.agentId === selectedCandidateId) ?? live.candidates[0];
+        if (!chosen) return { servicePriceVnd: 0, currency: "VND", note: "选定人选后显示本单报价", breakdown: [] };
+        return {
+          servicePriceVnd: chosen.offerVnd,
+          currency: "VND",
+          note: `${chosen.name} 的本单报价（8H），属于本单 Offer，不是人的长期标价；沿途消费另计、自愿。`,
+          breakdown: [{ item: "城市同行 8H", amountVnd: chosen.offerVnd }]
+        };
+      }
+      return resolveReadModel(dataRef, componentId, activePlan);
+    };
+    const result = planToSpec(decision, resolve);
     return { spec: result.spec, plan: decision.plan ?? usedPlan, observability: result.observability };
-  }, [target]);
+  }, [target, live, selectedCandidateId]);
 
   // 自动滚到底部
   useEffect(() => {
@@ -167,21 +201,21 @@ export function FulfillmentWorkspace({
     <View style={styles.root}>
       <View style={styles.topBar}>
         <Pressable onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backText}>‹</Text>
+          <Text selectable style={styles.backText}>‹</Text>
         </Pressable>
-        <Text numberOfLines={1} style={styles.title}>
+        <Text selectable numberOfLines={1} style={styles.title}>
           {plan.title}
         </Text>
       </View>
       <View style={styles.flowRow}>
         <View style={styles.flowPill}>
           <View style={styles.flowDot} />
-          <Text style={styles.flowPillText}>履约进行中 · {plan.taskArchetype ?? plan.demandCategory}</Text>
+          <Text selectable style={styles.flowPillText}>履约进行中 · {plan.taskArchetype ?? plan.demandCategory}</Text>
         </View>
       </View>
       <View style={styles.stageRail}>
         {STAGES.map((stage) => (
-          <Text key={stage} style={[styles.stage, stage === "匹配" && styles.stageActive]}>
+          <Text selectable key={stage} style={[styles.stage, stage === "匹配" && styles.stageActive]}>
             {stage}
           </Text>
         ))}
@@ -190,8 +224,8 @@ export function FulfillmentWorkspace({
       {/* Plan 讨论区 */}
       <View style={styles.chatSection}>
         <View style={styles.chatHeader}>
-          <Text style={styles.chatTitle}>Plan 讨论</Text>
-          <Text style={styles.chatHint}>和 AI 讨论调整计划</Text>
+          <Text selectable style={styles.chatTitle}>Plan 讨论</Text>
+          <Text selectable style={styles.chatHint}>和 AI 讨论调整计划</Text>
         </View>
         <ScrollView
           ref={scrollRef}
@@ -200,14 +234,14 @@ export function FulfillmentWorkspace({
         >
           {chatMessages.length === 0 && (
             <View style={styles.chatEmpty}>
-              <Text style={styles.chatEmptyText}>有任何问题或调整想法，直接告诉 AI</Text>
+              <Text selectable style={styles.chatEmptyText}>有任何问题或调整想法，直接告诉 AI</Text>
             </View>
           )}
           {chatMessages.map((msg) => (
             <View key={msg.id} style={[styles.chatBubble, msg.isOwn ? styles.chatBubbleOwn : msg.isAI ? styles.chatBubbleAI : styles.chatBubbleOther]}>
-              {!msg.isOwn && <Text style={styles.chatSender}>{msg.sender}</Text>}
-              <Text style={[styles.chatBody, msg.isOwn && styles.chatBodyOwn]}>{msg.body}</Text>
-              <Text style={[styles.chatTime, msg.isOwn && styles.chatTimeOwn]}>{msg.time}</Text>
+              {!msg.isOwn && <Text selectable style={styles.chatSender}>{msg.sender}</Text>}
+              <Text selectable style={[styles.chatBody, msg.isOwn && styles.chatBodyOwn]}>{msg.body}</Text>
+              <Text selectable style={[styles.chatTime, msg.isOwn && styles.chatTimeOwn]}>{msg.time}</Text>
             </View>
           ))}
         </ScrollView>
@@ -226,13 +260,13 @@ export function FulfillmentWorkspace({
             onPress={() => void sendPlanMessage()}
             style={[styles.chatSendBtn, (!draft.trim() || sending) && styles.chatSendBtnDisabled]}
           >
-            <Text style={styles.chatSendText}>{sending ? "..." : "发送"}</Text>
+            <Text selectable style={styles.chatSendText}>{sending ? "..." : "发送"}</Text>
           </Pressable>
         </View>
       </View>
 
       <ScrollView ref={contentScrollRef} contentContainerStyle={styles.content}>
-        {target.goal !== "" ? <Text style={styles.goalEcho}>你的目标：{target.goal}</Text> : null}
+        {target.goal !== "" ? <Text selectable style={styles.goalEcho}>你的目标：{target.goal}</Text> : null}
         <UIPlanRenderer
           spec={spec}
           state={{ critical_answer: "" }}
@@ -263,38 +297,38 @@ export function FulfillmentWorkspace({
                 } as Record<string, string>).then((result) => {
                   if (result.aggregate?.version) setDraftVersion(result.aggregate.version);
                   setSelectedCandidateId(agentId);
-                  setActionNote(`已选择候选（${agentId}），已写入草稿。`);
+                  setActionNote(`已选择 ${candidateName(agentId)}，已写入草稿。`);
                 }).catch(() => {
                   setSelectedCandidateId(agentId);
-                  setActionNote(`已选择候选（${agentId}，本地暂存，服务端同步中）。`);
+                  setActionNote(`已选择 ${candidateName(agentId)}（本地暂存，服务端同步中）。`);
                 });
               } else {
                 if (agentId) setSelectedCandidateId(agentId);
-                setActionNote(agentId ? `已选择候选（${agentId}，等待服务端连接）。` : "已选择候选。");
+                setActionNote(agentId ? `已选择 ${candidateName(agentId)}（等待服务端连接）。` : "已选择候选。");
               }
             }
           }}
         />
         {actionNote ? (
           <View style={styles.actionNoteRow}>
-            <Text style={styles.actionNote}>{actionNote}</Text>
+            <Text selectable style={styles.actionNote}>{actionNote}</Text>
             {actionNote.includes("失败") ? (
               <Pressable onPress={() => {
                 setActionNote(undefined);
                 setDraftId(undefined);
               }} style={styles.retryBtn}>
-                <Text style={styles.retryBtnText}>重试</Text>
+                <Text selectable style={styles.retryBtnText}>重试</Text>
               </Pressable>
             ) : null}
           </View>
         ) : null}
         {selectedCandidateId && !actionNote ? (
           <View style={styles.actionNoteRow}>
-            <Text style={styles.actionNote}>已选候选（{selectedCandidateId}）</Text>
+            <Text selectable style={styles.actionNote}>已选 {candidateName(selectedCandidateId)}</Text>
           </View>
         ) : null}
         {observability ? (
-          <Text style={styles.obs}>
+          <Text selectable style={styles.obs}>
             UIPlan {observability.uiPlanId} · 请求 {observability.requestedComponents} / 渲染 {observability.renderedComponents} / 拒绝{" "}
             {observability.rejectedComponents.length}
             {observability.fallbackUsed ? " · fallback" : ""}

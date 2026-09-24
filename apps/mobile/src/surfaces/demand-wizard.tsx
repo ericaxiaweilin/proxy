@@ -266,44 +266,44 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.head}>
         <Pressable accessibilityLabel="返回" onPress={back} style={styles.backBtn}>
-          <Text style={styles.backText}>‹</Text>
+          <Text selectable style={styles.backText}>‹</Text>
         </Pressable>
-        <Text style={styles.title}>{step === "done" ? "✓ 需求已发布" : "发布需求"}</Text>
+        <Text selectable style={styles.title}>{step === "done" ? "✓ 需求已发布" : "发布需求"}</Text>
         {step === "done" ? <View style={styles.headSpacer} /> : (
           <Pressable accessibilityLabel="存草稿" onPress={() => void saveDraft()} style={styles.draftBtn}>
-            <Text style={styles.draftText}>草稿</Text>
+            <Text selectable style={styles.draftText}>草稿</Text>
           </Pressable>
         )}
       </View>
       <View style={styles.tabs}>
-        <View style={[styles.tab, styles.tabActive]}><Text style={[styles.tabText, styles.tabTextActive]}>发布需求</Text></View>
+        <View style={[styles.tab, styles.tabActive]}><Text selectable style={[styles.tabText, styles.tabTextActive]}>发布需求</Text></View>
         <Pressable accessibilityLabel="去创建活动" onPress={onCreateActivity} style={styles.tab}>
-          <Text style={styles.tabText}>创建活动</Text>
+          <Text selectable style={styles.tabText}>创建活动</Text>
         </Pressable>
       </View>
-      {draftRestored && step !== "done" ? <Text style={styles.restoredHint}>已恢复上次草稿。</Text> : null}
+      {draftRestored && step !== "done" ? <Text selectable style={styles.restoredHint}>已恢复上次草稿。</Text> : null}
 
       {step === "moment" ? (
         <>
           <View style={styles.hero}>
-            <Text style={styles.heroTitle}>想约什么？</Text>
-            <Text style={styles.heroSub}>左边找方向，右边直接选一个 Moment。</Text>
-            <View style={styles.momentBadge}><Text style={styles.momentBadgeText}>Moment · 人与场景优先</Text></View>
+            <Text selectable style={styles.heroTitle}>想约什么？</Text>
+            <Text selectable style={styles.heroSub}>左边找方向，右边直接选一个 Moment。</Text>
+            <View style={styles.momentBadge}><Text selectable style={styles.momentBadgeText}>Moment · 人与场景优先</Text></View>
           </View>
           <View style={styles.searchRow}>
             <View style={styles.searchBox}>
-              <Text style={styles.searchIcon}>⌕</Text>
+              <Text selectable style={styles.searchIcon}>⌕</Text>
               <TextInput onChangeText={setQuery} placeholder="例如：4个人，周六晚上唱歌" placeholderTextColor="#A9A2B0" style={styles.searchInput} value={query} />
             </View>
             <Pressable accessibilityLabel="按输入生成需求" disabled={query.trim() === ""} onPress={createCustom} style={[styles.generateBtn, query.trim() === "" && styles.disabled]}>
-              <Text style={styles.generateText}>生成</Text>
+              <Text selectable style={styles.generateText}>生成</Text>
             </Pressable>
           </View>
           {/* R58 单行 quick-filter */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickFilterRow}>
             {QUICK_FILTERS.map((filter) => (
               <Pressable key={filter.id} onPress={() => setQuickFilter(filter.id)} style={[styles.filterChip, quickFilter === filter.id && styles.filterChipOn]}>
-                <Text style={[styles.filterText, quickFilter === filter.id && styles.filterTextOn]}>{filter.label}</Text>
+                <Text selectable style={[styles.filterText, quickFilter === filter.id && styles.filterTextOn]}>{filter.label}</Text>
               </Pressable>
             ))}
           </ScrollView>
@@ -312,14 +312,14 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <View style={styles.categoryRail}>
               {CATEGORIES.map((cat) => (
                 <Pressable key={cat.id} onPress={() => setCategory(cat.id)} style={[styles.categoryBtn, category === cat.id && styles.categoryBtnOn]}>
-                  <Text style={[styles.categoryBtnText, category === cat.id && styles.categoryBtnTextOn]}>{cat.label}</Text>
+                  <Text selectable style={[styles.categoryBtnText, category === cat.id && styles.categoryBtnTextOn]}>{cat.label}</Text>
                 </Pressable>
               ))}
             </View>
             <View style={styles.catalogPane}>
               <View style={styles.catalogHead}>
-                <Text style={styles.catalogTitle}>{CATEGORIES.find((cat) => cat.id === category)?.label ?? "热门"}</Text>
-                <Text style={styles.catalogHint}>高频 Moment</Text>
+                <Text selectable style={styles.catalogTitle}>{CATEGORIES.find((cat) => cat.id === category)?.label ?? "热门"}</Text>
+                <Text selectable style={styles.catalogHint}>高频 Moment</Text>
               </View>
               {moments.map((item) => {
                 const active = template?.id === item.id;
@@ -329,31 +329,31 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                     <View style={styles.momentEmoji}>
                       {icon !== undefined
                         ? <Image contentFit="contain" source={icon} style={styles.momentIcon} />
-                        : <Text style={styles.momentEmojiText}>{item.emoji}</Text>}
+                        : <Text selectable style={styles.momentEmojiText}>{item.emoji}</Text>}
                     </View>
                     <View style={styles.momentCopy}>
-                      <Text style={styles.momentTitle}>{item.title}</Text>
-                      <Text style={styles.momentDesc}>{item.venueLabel}</Text>
+                      <Text selectable style={styles.momentTitle}>{item.title}</Text>
+                      <Text selectable style={styles.momentDesc}>{item.venueLabel}</Text>
                       <View style={styles.catalogTags}>
-                        {item.tags.map((tag) => <View key={tag} style={styles.catalogTag}><Text style={styles.catalogTagText}>{tag}</Text></View>)}
+                        {item.tags.map((tag) => <View key={tag} style={styles.catalogTag}><Text selectable style={styles.catalogTagText}>{tag}</Text></View>)}
                       </View>
                     </View>
                     <View style={styles.catalogSide}>
-                      <Text style={styles.catalogSideRatio}>{item.defaultRatio}</Text>
-                      <Text style={styles.catalogSideTime}>{item.defaultTime || "时间自定"}</Text>
+                      <Text selectable style={styles.catalogSideRatio}>{item.defaultRatio}</Text>
+                      <Text selectable style={styles.catalogSideTime}>{item.defaultTime || "时间自定"}</Text>
                     </View>
                   </Pressable>
                 );
               })}
-              {moments.length === 0 ? <Text style={styles.empty}>没有匹配的 Moment，换个条件或点生成。</Text> : null}
+              {moments.length === 0 ? <Text selectable style={styles.empty}>没有匹配的 Moment，换个条件或点生成。</Text> : null}
             </View>
           </View>
           <View style={styles.currentCard}>
-            <Text style={styles.currentLabel}>当前需求</Text>
-            <Text style={styles.currentValue}>{template ? `${template.title}${proService ? ` · ${PRO_SERVICES.find((item) => item.id === proService)?.title ?? ""}` : ""} · ${specs.ratio || template.defaultRatio}` : "先选一个"}</Text>
+            <Text selectable style={styles.currentLabel}>当前需求</Text>
+            <Text selectable style={styles.currentValue}>{template ? `${template.title}${proService ? ` · ${PRO_SERVICES.find((item) => item.id === proService)?.title ?? ""}` : ""} · ${specs.ratio || template.defaultRatio}` : "先选一个"}</Text>
           </View>
           <Pressable disabled={!template} onPress={() => setStep("people")} style={[styles.primaryBtn, !template && styles.disabled]}>
-            <Text style={styles.primaryBtnText}>下一步 · 选人 / 服务 / 价格</Text>
+            <Text selectable style={styles.primaryBtnText}>下一步 · 选人 / 服务 / 价格</Text>
           </Pressable>
           {/* R58 城市协助 · Professional：服务目录默认展开（原型 pro-card 四类：
               现场翻译 / 签证协助 / 法律咨询 / 商务协助）。放在主 CTA 之下——
@@ -363,13 +363,13 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <View style={styles.proIcon}>
               {proIcon !== undefined
                 ? <Image contentFit="contain" source={proIcon} style={styles.proIconArt} />
-                : <Text style={styles.proIconText}>证</Text>}
+                : <Text selectable style={styles.proIconText}>证</Text>}
             </View>
             <View style={styles.proCopy}>
-              <Text style={styles.proTitle}>城市协助 · Professional</Text>
-              <Text style={styles.proDesc}>翻译 / 签证 / 法律 / 商务 · 专业认证优先</Text>
+              <Text selectable style={styles.proTitle}>城市协助 · Professional</Text>
+              <Text selectable style={styles.proDesc}>翻译 / 签证 / 法律 / 商务 · 专业认证优先</Text>
             </View>
-            <Text style={styles.proLink}>专业认证 ›</Text>
+            <Text selectable style={styles.proLink}>专业认证 ›</Text>
           </View>
           <View style={styles.proGrid}>
             {PRO_SERVICES.map((service) => {
@@ -382,15 +382,15 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                   style={[styles.proCard, active && styles.proCardOn]}
                 >
                   <View style={styles.proCardHead}>
-                    <Text style={styles.proCardTitle}>{service.title}</Text>
+                    <Text selectable style={styles.proCardTitle}>{service.title}</Text>
                     <View style={[styles.proCardCert, active && styles.proCardCertOn]}>
-                      <Text style={[styles.proCardCertText, active && styles.proCardCertTextOn]}>{service.cert}</Text>
+                      <Text selectable style={[styles.proCardCertText, active && styles.proCardCertTextOn]}>{service.cert}</Text>
                     </View>
                   </View>
-                  <Text style={styles.proCardSub}>{service.sub}</Text>
+                  <Text selectable style={styles.proCardSub}>{service.sub}</Text>
                   <View style={styles.proCardFoot}>
-                    <Text style={styles.proCardPrice}>{service.price}</Text>
-                    <Text style={styles.proCardRange}>{service.range}</Text>
+                    <Text selectable style={styles.proCardPrice}>{service.price}</Text>
+                    <Text selectable style={styles.proCardRange}>{service.range}</Text>
                   </View>
                 </Pressable>
               );
@@ -401,72 +401,72 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
         <>
           <View style={styles.confirmCard}>
             <View style={styles.confirmCopy}>
-              <Text style={styles.confirmEyebrow}>Moment · {template?.defaultRatio}</Text>
-              <Text style={styles.confirmTitle}>{template?.title}</Text>
+              <Text selectable style={styles.confirmEyebrow}>Moment · {template?.defaultRatio}</Text>
+              <Text selectable style={styles.confirmTitle}>{template?.title}</Text>
             </View>
-            <Pressable onPress={() => setStep("moment")}><Text style={styles.linkText}>更换</Text></Pressable>
+            <Pressable onPress={() => setStep("moment")}><Text selectable style={styles.linkText}>更换</Text></Pressable>
           </View>
           <View style={styles.filterHeadRow}>
-            <Text style={styles.sectionTitle}>匹配条件</Text>
+            <Text selectable style={styles.sectionTitle}>匹配条件</Text>
             <Pressable accessibilityLabel="打开筛选" onPress={() => setSheetOpen((open) => !open)} style={styles.sheetToggle}>
-              <Text style={styles.sheetToggleText}>筛选{sheetActiveCount > 0 ? ` · ${sheetActiveCount}` : ""}</Text>
+              <Text selectable style={styles.sheetToggleText}>筛选{sheetActiveCount > 0 ? ` · ${sheetActiveCount}` : ""}</Text>
             </Pressable>
           </View>
           <View style={styles.filterRow}>
             {PEOPLE_FILTERS.map((filter) => (
               <Pressable key={filter} onPress={() => togglePeopleFilter(filter)} style={[styles.filterChip, peopleFilters.includes(filter) && styles.filterChipOn]}>
-                <Text style={[styles.filterText, peopleFilters.includes(filter) && styles.filterTextOn]}>{filter}</Text>
+                <Text selectable style={[styles.filterText, peopleFilters.includes(filter) && styles.filterTextOn]}>{filter}</Text>
               </Pressable>
             ))}
           </View>
           {sheetOpen ? (
             <View style={styles.sheet}>
-              <Text style={styles.sheetLabel}>可用时间</Text>
+              <Text selectable style={styles.sheetLabel}>可用时间</Text>
               <View style={styles.filterRow}>
                 {["不限", "今晚", "明天", "周末"].map((day) => (
                   <Pressable key={day} onPress={() => setSheetFilters((prev) => ({ ...prev, day }))} style={[styles.filterChip, sheetFilters.day === day && styles.filterChipOn]}>
-                    <Text style={[styles.filterText, sheetFilters.day === day && styles.filterTextOn]}>{day}</Text>
+                    <Text selectable style={[styles.filterText, sheetFilters.day === day && styles.filterTextOn]}>{day}</Text>
                   </Pressable>
                 ))}
               </View>
-              <Text style={styles.sheetLabel}>语言</Text>
+              <Text selectable style={styles.sheetLabel}>语言</Text>
               <View style={styles.filterRow}>
                 {["不限", "中文", "English", "越南语"].map((language) => (
                   <Pressable key={language} onPress={() => setSheetFilters((prev) => ({ ...prev, language }))} style={[styles.filterChip, sheetFilters.language === language && styles.filterChipOn]}>
-                    <Text style={[styles.filterText, sheetFilters.language === language && styles.filterTextOn]}>{language}</Text>
+                    <Text selectable style={[styles.filterText, sheetFilters.language === language && styles.filterTextOn]}>{language}</Text>
                   </Pressable>
                 ))}
               </View>
-              <Text style={styles.sheetLabel}>认证</Text>
+              <Text selectable style={styles.sheetLabel}>认证</Text>
               <View style={styles.filterRow}>
                 {[false, true].map((only) => (
                   <Pressable key={only ? "cert" : "all"} onPress={() => setSheetFilters((prev) => ({ ...prev, certifiedOnly: only }))} style={[styles.filterChip, sheetFilters.certifiedOnly === only && styles.filterChipOn]}>
-                    <Text style={[styles.filterText, sheetFilters.certifiedOnly === only && styles.filterTextOn]}>{only ? "已认证" : "不限"}</Text>
+                    <Text selectable style={[styles.filterText, sheetFilters.certifiedOnly === only && styles.filterTextOn]}>{only ? "已认证" : "不限"}</Text>
                   </Pressable>
                 ))}
               </View>
-              <Text style={styles.sheetLabel}>预算</Text>
+              <Text selectable style={styles.sheetLabel}>预算</Text>
               <View style={styles.filterRow}>
                 {[{ label: "不限", value: 0 }, { label: "≤ 200K", value: 200000 }, { label: "≤ 300K", value: 300000 }, { label: "≤ 500K", value: 500000 }].map((budget) => (
                   <Pressable key={budget.label} onPress={() => setSheetFilters((prev) => ({ ...prev, maxBudget: budget.value }))} style={[styles.filterChip, sheetFilters.maxBudget === budget.value && styles.filterChipOn]}>
-                    <Text style={[styles.filterText, sheetFilters.maxBudget === budget.value && styles.filterTextOn]}>{budget.label}</Text>
+                    <Text selectable style={[styles.filterText, sheetFilters.maxBudget === budget.value && styles.filterTextOn]}>{budget.label}</Text>
                   </Pressable>
                 ))}
               </View>
               <View style={styles.sheetActions}>
                 <Pressable onPress={() => setSheetFilters(DEFAULT_PEOPLE_FILTERS)} style={styles.sheetReset}>
-                  <Text style={styles.sheetResetText}>重置</Text>
+                  <Text selectable style={styles.sheetResetText}>重置</Text>
                 </Pressable>
                 <Pressable onPress={() => setSheetOpen(false)} style={styles.sheetApply}>
-                  <Text style={styles.sheetApplyText}>应用筛选</Text>
+                  <Text selectable style={styles.sheetApplyText}>应用筛选</Text>
                 </Pressable>
               </View>
             </View>
           ) : null}
-          <Text style={styles.sectionSub}>选人 · 可选，不选默认发布到市场</Text>
-          {!supply ? <Text style={styles.empty}>供给目录不可用，直接发布到市场。</Text>
-            : !peopleLoaded ? <Text style={styles.empty}>正在匹配…</Text>
-            : visiblePeople.length === 0 ? <Text style={styles.empty}>当前筛选没有匹配的人，放宽条件或直接发布到市场。</Text>
+          <Text selectable style={styles.sectionSub}>选人 · 可选，不选默认发布到市场</Text>
+          {!supply ? <Text selectable style={styles.empty}>供给目录不可用，直接发布到市场。</Text>
+            : !peopleLoaded ? <Text selectable style={styles.empty}>正在匹配…</Text>
+            : visiblePeople.length === 0 ? <Text selectable style={styles.empty}>当前筛选没有匹配的人，放宽条件或直接发布到市场。</Text>
             : visiblePeople.map((person) => {
               const active = selectedPerson?.agentId === person.agentId;
               const photo = person.photos.length > 0
@@ -480,69 +480,69 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                   {typeof photo === "object" ? (
                     <CircularAvatarImage accessibilityLabel={`${person.name}头像`} size={44} source={photo} />
                   ) : (
-                    <View style={styles.personAvatar}><Text style={styles.personAvatarText}>{person.name.trim().charAt(0) || "?"}</Text></View>
+                    <View style={styles.personAvatar}><Text selectable style={styles.personAvatarText}>{person.name.trim().charAt(0) || "?"}</Text></View>
                   )}
                   <View style={styles.personCopy}>
                     <View style={styles.personNameRow}>
-                      <Text style={styles.personName}>{person.name}</Text>
-                      {person.eligibility.capabilitiesOk ? <Text style={styles.certBadge}>已认证</Text> : null}
+                      <Text selectable style={styles.personName}>{person.name}</Text>
+                      {person.eligibility.capabilitiesOk ? <Text selectable style={styles.certBadge}>已认证</Text> : null}
                     </View>
-                    <Text style={styles.personMeta}>{person.languages.length > 0 ? person.languages.join(" · ") : person.serviceType}</Text>
-                    <Text style={styles.personMeta}>
+                    <Text selectable style={styles.personMeta}>{person.languages.length > 0 ? person.languages.join(" · ") : person.serviceType}</Text>
+                    <Text selectable style={styles.personMeta}>
                       {person.availability ? "有档期" : "档期待确认"} · {person.referencePrice > 0 ? `参考 ${Math.round(person.referencePrice / 1000)}K ${person.currency}` : "价格面议"}
                     </Text>
                   </View>
                   <Pressable accessibilityLabel={`选择${person.name}`} onPress={() => setSelectedPerson(active ? undefined : person)} style={[styles.selectBtn, active && styles.selectBtnOn]}>
-                    <Text style={[styles.selectText, active && styles.selectTextOn]}>{active ? "已选择" : "选择 TA"}</Text>
+                    <Text selectable style={[styles.selectText, active && styles.selectTextOn]}>{active ? "已选择" : "选择 TA"}</Text>
                   </Pressable>
                 </View>
               );
             })}
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text selectable style={styles.error}>{error}</Text> : null}
           <View style={styles.doneRow}>
-            <Pressable onPress={() => setStep("moment")} style={styles.secondaryBtn}><Text style={styles.secondaryBtnText}>上一步</Text></Pressable>
-            <Pressable onPress={() => setStep("specs")} style={styles.primaryBtnFlex}><Text style={styles.primaryBtnText}>下一步 · 规格</Text></Pressable>
+            <Pressable onPress={() => setStep("moment")} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
+            <Pressable onPress={() => setStep("specs")} style={styles.primaryBtnFlex}><Text selectable style={styles.primaryBtnText}>下一步 · 规格</Text></Pressable>
           </View>
         </>
       ) : step === "specs" ? (
         <>
           <View style={styles.confirmCard}>
             <View style={styles.confirmCopy}>
-              <Text style={styles.confirmEyebrow}>Moment · {specs.ratio || template?.defaultRatio}</Text>
-              <Text style={styles.confirmTitle}>{template?.title}</Text>
-              {selectedPerson ? <Text style={styles.confirmSub}>意向人选：{selectedPerson.name}（发布仍为公开市场）</Text> : null}
+              <Text selectable style={styles.confirmEyebrow}>Moment · {specs.ratio || template?.defaultRatio}</Text>
+              <Text selectable style={styles.confirmTitle}>{template?.title}</Text>
+              {selectedPerson ? <Text selectable style={styles.confirmSub}>意向人选：{selectedPerson.name}（发布仍为公开市场）</Text> : null}
             </View>
-            <Pressable onPress={() => setStep("moment")}><Text style={styles.linkText}>更换</Text></Pressable>
+            <Pressable onPress={() => setStep("moment")}><Text selectable style={styles.linkText}>更换</Text></Pressable>
           </View>
-          <Text style={styles.sectionSub}>Moment 规格 · 默认已帮你填好</Text>
+          <Text selectable style={styles.sectionSub}>Moment 规格 · 默认已帮你填好</Text>
           <View style={styles.specSummary}>
-            <Text style={styles.specSummaryText}>
+            <Text selectable style={styles.specSummaryText}>
               {specs.prefs.includes("公共场所见面") ? "公共场所见面" : "见面方式自定"} · {specs.duration || "时长自定"} · 现场消费双方自结
             </Text>
           </View>
 
-          <Text style={styles.fieldLabel}>你们几人</Text>
+          <Text selectable style={styles.fieldLabel}>你们几人</Text>
           <View style={styles.chipRow}>
             {(template?.ratios ?? []).map((ratio) => (
               <Pressable key={ratio} onPress={() => setSpecs((prev) => ({ ...prev, ratio }))} style={[styles.chip, specs.ratio === ratio && styles.chipOn]}>
-                <Text style={[styles.chipText, specs.ratio === ratio && styles.chipTextOn]}>{ratio}</Text>
+                <Text selectable style={[styles.chipText, specs.ratio === ratio && styles.chipTextOn]}>{ratio}</Text>
               </Pressable>
             ))}
           </View>
 
-          <Text style={styles.fieldLabel}>时间段</Text>
+          <Text selectable style={styles.fieldLabel}>时间段</Text>
           <TextInput onChangeText={(time) => setSpecs((prev) => ({ ...prev, time }))} placeholder={template?.defaultTime} placeholderTextColor={color.muted} style={styles.input} value={specs.time} />
 
-          <Text style={styles.fieldLabel}>时长</Text>
+          <Text selectable style={styles.fieldLabel}>时长</Text>
           <View style={styles.chipRow}>
             {DURATIONS.map((duration) => (
               <Pressable key={duration} onPress={() => setSpecs((prev) => ({ ...prev, duration }))} style={[styles.chip, specs.duration === duration && styles.chipOn]}>
-                <Text style={[styles.chipText, specs.duration === duration && styles.chipTextOn]}>{duration}</Text>
+                <Text selectable style={[styles.chipText, specs.duration === duration && styles.chipTextOn]}>{duration}</Text>
               </Pressable>
             ))}
           </View>
 
-          <Text style={styles.fieldLabel}>地点</Text>
+          <Text selectable style={styles.fieldLabel}>地点</Text>
           <TextInput onChangeText={(place) => setSpecs((prev) => ({ ...prev, place }))} placeholder={template?.venue} placeholderTextColor={color.muted} style={styles.input} value={specs.place} />
           {/* OPP-REAL-COORDS-001: 地图选点（可选，不卡发布）。点/拖即记真坐标，
               发布带 lat/lng、订单上图；不动则纯文字地点、无钉。 */}
@@ -563,11 +563,11 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             />
           </View>
 
-          <Text style={styles.fieldLabel}>场景偏好 · 影响匹配 / 报价</Text>
+          <Text selectable style={styles.fieldLabel}>场景偏好 · 影响匹配 / 报价</Text>
           <View style={styles.chipRow}>
             {PREF_OPTIONS.map((pref) => (
               <Pressable key={pref} onPress={() => togglePref(pref)} style={[styles.chip, specs.prefs.includes(pref) && styles.chipOn]}>
-                <Text style={[styles.chipText, specs.prefs.includes(pref) && styles.chipTextOn]}>{pref}</Text>
+                <Text selectable style={[styles.chipText, specs.prefs.includes(pref) && styles.chipTextOn]}>{pref}</Text>
               </Pressable>
             ))}
           </View>
@@ -577,7 +577,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               {/* R58 城市协助服务目录（原型 pro-card 四类：现场翻译 / 签证协助 /
                   法律咨询 / 商务协助）。放在「规格」步按模板展开，不再挤在
                   选 Moment 那一步挡「下一步」。 */}
-              <Text style={styles.fieldLabel}>专业服务 · 城市协助</Text>
+              <Text selectable style={styles.fieldLabel}>专业服务 · 城市协助</Text>
               <View style={styles.proGrid}>
                 {PRO_SERVICES.map((service) => {
                   const active = proService === service.id;
@@ -589,54 +589,54 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                       style={[styles.proCard, active && styles.proCardOn]}
                     >
                       <View style={styles.proCardHead}>
-                        <Text style={styles.proCardTitle}>{service.title}</Text>
+                        <Text selectable style={styles.proCardTitle}>{service.title}</Text>
                         <View style={[styles.proCardCert, active && styles.proCardCertOn]}>
-                          <Text style={[styles.proCardCertText, active && styles.proCardCertTextOn]}>{service.cert}</Text>
+                          <Text selectable style={[styles.proCardCertText, active && styles.proCardCertTextOn]}>{service.cert}</Text>
                         </View>
                       </View>
-                      <Text style={styles.proCardSub}>{service.sub}</Text>
+                      <Text selectable style={styles.proCardSub}>{service.sub}</Text>
                       <View style={styles.proCardFoot}>
-                        <Text style={styles.proCardPrice}>{service.price}</Text>
-                        <Text style={styles.proCardRange}>{service.range}</Text>
+                        <Text selectable style={styles.proCardPrice}>{service.price}</Text>
+                        <Text selectable style={styles.proCardRange}>{service.range}</Text>
                       </View>
                     </Pressable>
                   );
                 })}
               </View>
-              {proService ? <Text style={styles.hint}>{PRO_SERVICES.find((item) => item.id === proService)?.note ?? ""}</Text> : null}
+              {proService ? <Text selectable style={styles.hint}>{PRO_SERVICES.find((item) => item.id === proService)?.note ?? ""}</Text> : null}
             </>
           ) : null}
 
           <View style={styles.fieldLabelRow}>
-            <Text style={styles.fieldLabelNoGap}>预计服务价</Text>
-            <Text style={styles.dynamicBadge}>动态</Text>
+            <Text selectable style={styles.fieldLabelNoGap}>预计服务价</Text>
+            <Text selectable style={styles.dynamicBadge}>动态</Text>
           </View>
           <View style={styles.priceMain}>
             <TextInput keyboardType="numbers-and-punctuation" onChangeText={(price) => setSpecs((prev) => ({ ...prev, price }))} placeholder={template?.defaultPrice} placeholderTextColor={color.muted} style={[styles.input, styles.priceInput]} value={specs.price} />
             <Pressable accessibilityLabel={negotiable ? "取消可协商" : "标记可协商"} onPress={() => setNegotiable((current) => !current)} style={[styles.negoBtn, negotiable && styles.negoBtnOn]}>
-              <Text style={[styles.negoBtnText, negotiable && styles.negoBtnTextOn]}>{negotiable ? "✓ 可协商" : "可协商"}</Text>
+              <Text selectable style={[styles.negoBtnText, negotiable && styles.negoBtnTextOn]}>{negotiable ? "✓ 可协商" : "可协商"}</Text>
             </Pressable>
           </View>
-          <Text style={styles.hint}>参考 {template?.priceRef} · 可协商；现场消费不包含在内。</Text>
-          <Text style={styles.hint}>ⓘ 价格由场景基础价、时间、人数和额外偏好组成；偏好只用于匹配，不按行为收费。服务参考价；餐饮、咖啡、KTV、门票等现场消费不包含在内。</Text>
+          <Text selectable style={styles.hint}>参考 {template?.priceRef} · 可协商；现场消费不包含在内。</Text>
+          <Text selectable style={styles.hint}>ⓘ 价格由场景基础价、时间、人数和额外偏好组成；偏好只用于匹配，不按行为收费。服务参考价；餐饮、咖啡、KTV、门票等现场消费不包含在内。</Text>
 
-          <Text style={styles.fieldLabel}>备注 · 可选</Text>
+          <Text selectable style={styles.fieldLabel}>备注 · 可选</Text>
           <TextInput maxLength={500} multiline onChangeText={(notes) => setSpecs((prev) => ({ ...prev, notes }))} placeholder="补充说明（随订单展示）" placeholderTextColor={color.muted} style={[styles.input, styles.notesInput]} value={specs.notes} />
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text selectable style={styles.error}>{error}</Text> : null}
           <View style={styles.doneRow}>
-            <Pressable onPress={() => setStep("people")} style={styles.secondaryBtn}><Text style={styles.secondaryBtnText}>上一步</Text></Pressable>
+            <Pressable onPress={() => setStep("people")} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
             <Pressable disabled={publishing || !template} onPress={() => void publish()} style={[styles.primaryBtnFlex, (publishing || !template) && styles.disabled]}>
-              <Text style={styles.primaryBtnText}>{publishing ? "发布中…" : "发布到市场"}</Text>
+              <Text selectable style={styles.primaryBtnText}>{publishing ? "发布中…" : "发布到市场"}</Text>
             </Pressable>
           </View>
         </>
       ) : (
         <>
-          <Text style={styles.doneSub}>你的需求已经进入市场。</Text>
+          <Text selectable style={styles.doneSub}>你的需求已经进入市场。</Text>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryEyebrow}>Opportunity</Text>
-            <Text style={styles.summaryTitle}>{result?.title ?? template?.title}</Text>
+            <Text selectable style={styles.summaryEyebrow}>Opportunity</Text>
+            <Text selectable style={styles.summaryTitle}>{result?.title ?? template?.title}</Text>
             <SummaryRow label="对象" value="公开市场" />
             <SummaryRow label="客户方" value={specs.ratio === "1:1" ? "1 人 · 1:1" : (specs.ratio || (template?.defaultRatio ?? ""))} />
             <SummaryRow label="标准" value={`${specs.time} · ${specs.duration}`} />
@@ -645,8 +645,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             {showPerson ? <SummaryRow label="意向人选" value={selectedPerson.name} last /> : null}
           </View>
           <View style={styles.doneRow}>
-            <Pressable onPress={restart} style={styles.secondaryBtn}><Text style={styles.secondaryBtnText}>再发一个</Text></Pressable>
-            <Pressable onPress={onViewMarket} style={styles.primaryBtnFlex}><Text style={styles.primaryBtnText}>查看市场</Text></Pressable>
+            <Pressable onPress={restart} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>再发一个</Text></Pressable>
+            <Pressable onPress={onViewMarket} style={styles.primaryBtnFlex}><Text selectable style={styles.primaryBtnText}>查看市场</Text></Pressable>
           </View>
         </>
       )}
@@ -656,8 +656,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
 
 function SummaryRow({ label, value, last }: { label: string; value: string; last?: boolean }): React.JSX.Element {  return (
     <View style={[styles.summaryRow, last && styles.summaryRowLast]}>
-      <Text style={styles.summaryLabel}>{label}</Text>
-      <Text style={styles.summaryValue}>{value}</Text>
+      <Text selectable style={styles.summaryLabel}>{label}</Text>
+      <Text selectable style={styles.summaryValue}>{value}</Text>
     </View>
   );
 }

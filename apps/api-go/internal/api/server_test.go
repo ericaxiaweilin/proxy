@@ -551,6 +551,56 @@ func TestBenefitCampaignManagementRequiresOperator(t *testing.T) {
 	}
 }
 
+// COMP-REPORT-005: 举报队列与举报处置必须走 operator 门。
+//
+// 队列里含举报人 id 与被举报目标 id，属于个人信息 —— 普通用户能拉到它就等于
+// 能枚举「谁举报了谁、举报了什么」，既是隐私泄漏，也让举报人可能被报复。
+// 处置入口更直接：它是「平台处理过举报」的唯一留痕入口，让普通用户写得进去，
+// 处置记录的举证价值立刻归零（谁都能伪造自己处置过一条涉未成年人的举报）。
+//
+// 为什么需要这条独立的钉：operator_scopes_test.go 的 completeness 测试只保证
+// 「在 operatorCommandTypes 里 ⇒ 必须有 scope」与「有 scope ⇒ 必须在表里」，
+// **但两张表同时删掉一条命令时它依然绿** —— 命令就此对所有人敞开，而门禁
+// 毫无反应。所以这里直接把「必须要求 operator」钉死，与 safety / benefit 同口径。
+//
+// 反向：ReportTarget 是用户动作 —— 举报渠道对用户必须是开的（服务条款 §38
+// 承诺八类可举报目标）。顺手把它一起收紧就等于把举报渠道关掉。
+func TestModerationReportCommandsRequireOperator(t *testing.T) {
+	for _, cmd := range []string{
+		"ListReportQueue",
+		"RecordReportDisposition",
+	} {
+		if !requiresOperator(cmd) {
+			t.Fatalf("%s must require operator: ungated, any logged-in user can enumerate who reported whom, or forge a disposition", cmd)
+		}
+	}
+	if requiresOperator("ReportTarget") {
+		t.Fatal("ReportTarget must NOT require operator: it is the user-facing report channel promised by §38")
+	}
+}
+
+// COMP-SELLER-001: 实名核验的写入口必须走 operator 门。
+//
+// 这条命令决定「谁有资格在平台上收钱」。不过门的话，卖家可以自己给自己签
+// 「已实名」—— 实名门形同虚设，而平台手里还留着一份看起来完整的核验记录，
+// 比没有记录更糟（它把「没人核过」伪装成「核过了」）。
+//
+// 同时反向钉住读侧：GetAgentProfile / QuerySuppliers 是普通用户路径，
+// 它们只是读「能不能撮合」，收紧它们属于静默失败（谁也用不了）。
+func TestSellerRealNameAttestationRequiresOperator(t *testing.T) {
+	if !requiresOperator("AttestSellerRealName") {
+		t.Fatal("AttestSellerRealName must require operator: ungated, a seller can attest their own real-name verification and the compliance gate becomes decorative")
+	}
+	if scope, ok := RequiredOperatorScope("AttestSellerRealName"); !ok || scope != ScopeIdentity {
+		t.Fatalf("AttestSellerRealName must require the IDENTITY scope (got %q, ok=%v) — real-name is a different question from capability", string(scope), ok)
+	}
+	for _, cmd := range []string{"GetAgentProfile", "QuerySuppliers", "CreateCandidateBatch"} {
+		if requiresOperator(cmd) {
+			t.Fatalf("%s must NOT require operator: it is a read/match path, not a privilege", cmd)
+		}
+	}
+}
+
 // OUTCOME-TEMPLATE-GATE-001: 观察模板的创建必须走 operator 门。
 //
 // 模板是全局共享词汇表：ObservationTemplate 没有 owner/scope 字段（postgres 侧

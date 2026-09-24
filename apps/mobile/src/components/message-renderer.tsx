@@ -21,22 +21,22 @@ export function MessageRenderer({ message, onPressProxyObject }: { message: Mess
     case "text":
       return (
         <View style={styles.bubble}>
-          <Text style={styles.text}>{message.text ?? ""}</Text>
+          <Text selectable style={styles.text}>{message.text ?? ""}</Text>
         </View>
       );
     case "image":
     case "video":
       return (
         <View style={styles.media}>
-          <Text style={styles.mediaPlaceholder}>{message.kind === "image" ? "🖼 图片" : "🎬 视频"}</Text>
-          {message.text ? <Text style={styles.caption}>{message.text}</Text> : null}
+          <Text selectable style={styles.mediaPlaceholder}>{message.kind === "image" ? "🖼 图片" : "🎬 视频"}</Text>
+          {message.text ? <Text selectable style={styles.caption}>{message.text}</Text> : null}
         </View>
       );
     case "file":
       return (
         <View style={styles.file}>
-          <Text style={styles.fileName}>{(message.attachments?.[0] as { mime?: string })?.mime ?? "文件"}</Text>
-          <Text style={styles.meta}>点击查看</Text>
+          <Text selectable style={styles.fileName}>{(message.attachments?.[0] as { mime?: string })?.mime ?? "文件"}</Text>
+          <Text selectable style={styles.meta}>点击查看</Text>
         </View>
       );
     case "proxy_object":
@@ -44,28 +44,28 @@ export function MessageRenderer({ message, onPressProxyObject }: { message: Mess
     case "poll":
       return (
         <View style={styles.poll}>
-          <Text style={styles.pollQ}>{message.poll?.question ?? "投票"}</Text>
+          <Text selectable style={styles.pollQ}>{message.poll?.question ?? "投票"}</Text>
           {(message.poll?.options ?? []).map((o) => (
-            <View key={o.id} style={styles.pollOpt}><Text style={styles.pollOptText}>{o.text}</Text></View>
+            <View key={o.id} style={styles.pollOpt}><Text selectable style={styles.pollOptText}>{o.text}</Text></View>
           ))}
         </View>
       );
     case "call_recording":
       return (
         <View style={styles.callRec}>
-          <Text style={styles.callRecText}>📞 录音 · {Math.round((message.call_recording?.duration_ms ?? 0) / 1000)}s</Text>
+          <Text selectable style={styles.callRecText}>📞 录音 · {Math.round((message.call_recording?.duration_ms ?? 0) / 1000)}s</Text>
         </View>
       );
     case "system_event":
       return (
         <View style={styles.system}>
-          <Text style={styles.systemText}>{message.text ?? "系统事件"}</Text>
+          <Text selectable style={styles.systemText}>{message.text ?? "系统事件"}</Text>
         </View>
       );
     default:
       return (
         <View style={styles.bubble}>
-          <Text style={styles.text}>{message.text ?? ""}</Text>
+          <Text selectable style={styles.text}>{message.text ?? ""}</Text>
         </View>
       );
   }
@@ -78,9 +78,9 @@ function ProxyObjectMessage({ object, onPress }: { object: NonNullable<MessageV1
   const subtitle = live ? `当前：${String((live.state as string) ?? (live.status as string) ?? JSON.stringify(live).slice(0, 40))}` : `发送时：${String((snap.state as string) ?? "")}`;
   return (
     <Pressable onPress={() => onPress?.(object)} style={styles.proxyCard}>
-      <View style={styles.proxyHead}><Text style={styles.proxyType}>{object.object_type}</Text><Text style={styles.proxyTitle}>{title}</Text></View>
-      <Text style={styles.proxyMeta}>{subtitle}</Text>
-      {live ? <Text style={styles.proxyLive}>实时已更新</Text> : null}
+      <View style={styles.proxyHead}><Text selectable style={styles.proxyType}>{object.object_type}</Text><Text selectable style={styles.proxyTitle}>{title}</Text></View>
+      <Text selectable style={styles.proxyMeta}>{subtitle}</Text>
+      {live ? <Text selectable style={styles.proxyLive}>实时已更新</Text> : null}
     </Pressable>
   );
 }

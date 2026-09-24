@@ -2,6 +2,7 @@ import type { CommandResult } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 // STORE-REC-001: 「推荐商铺进体系」客户端。
 //
@@ -110,7 +111,7 @@ export class StoreRecommendationAiUnavailableError extends Error {
 
 export class StoreRecommendationRejectedError extends Error {
   public constructor(public readonly result: CommandResult) {
-    super(`推荐未受理：${result.error?.messageKey ?? "请稍后重试"}`);
+    super(`推荐未受理：${commandErrorMessage(result.error, "请稍后重试")}`);
     this.name = "StoreRecommendationRejectedError";
   }
 }

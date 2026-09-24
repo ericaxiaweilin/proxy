@@ -10,7 +10,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/proxy-app/proxy-api/internal/event"
+	"github.com/proxy-app/proxy-api/internal/gravity"
+	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/outbox"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
@@ -179,6 +182,12 @@ func main() {
 	// idx_display_identities_expires; cheap even with large tables.
 	conversationRepository := postgres.NewConversationRepository(pool)
 	displayIdentityRepository := postgres.NewDisplayIdentityRepository(pool)
+	// LC-15 (Vietnam PDP 91/2025/QH15 Art. 32): the erasure executor.
+	// Until this wiring existed, POST /v1/privacy/delete wrote a
+	// 'received' row that nothing ever acted on, while the app promised
+	// permanent deletion in 30 days. The same hourly tick now drives
+	// received -> in_progress (24h) -> erased (30d).
+	privacyService := identity.NewWithRepositoryAndClock(postgres.NewIdentityRepository(pool), nil)
 	sweeperTicker := time.NewTicker(time.Hour)
 	defer sweeperTicker.Stop()
 	// Run once on startup so dev restarts immediately clean up stale fixtures.
@@ -192,6 +201,12 @@ func main() {
 	} else if n > 0 {
 		log.Printf("burner sweep startup burned: count=%d", n)
 	}
+	sweepPrivacyDeletions(ctx, privacyService)
+	// GRAVITY-001: 引力状态（spec §6-§7 / §21）启动时算一次，之后每小时重算。
+	gravityStore := gravity.NewPostgres(pool)
+	recomputeGravity(ctx, gravityStore)
+	gravityTicker := time.NewTicker(time.Hour)
+	defer gravityTicker.Stop()
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -215,6 +230,8 @@ func main() {
 			if mediaProcessed > 0 {
 				log.Printf("media processing batch completed: count=%d", mediaProcessed)
 			}
+		case <-gravityTicker.C:
+			recomputeGravity(ctx, gravityStore)
 		case <-sweeperTicker.C:
 			if n, err := conversationRepository.PurgeExpiredMessages(ctx, time.Now().UTC()); err != nil {
 				log.Printf("conversation sweep failed: %v", err)
@@ -226,6 +243,37 @@ func main() {
 			} else if n > 0 {
 				log.Printf("burner sweep burned: count=%d", n)
 			}
+			sweepPrivacyDeletions(ctx, privacyService)
+		}
+	}
+}
+
+// recomputeGravity 重算所有人的引力状态；失败只记日志（派生数据，下个小时再来）。
+func recomputeGravity(ctx context.Context, store gravity.Store) {
+	n, err := gravity.Recompute(ctx, store, time.Now().UTC())
+	if err != nil {
+		log.Printf("gravity recompute failed: %v", err)
+		return
+	}
+	log.Printf("gravity recompute: states=%d model=%s", n, gravity.ModelVersion)
+}
+
+// sweepPrivacyDeletions runs one LC-15 pass and logs what it did. Kept
+// out of the select body so the startup pass and the hourly pass share
+// exactly one code path — a startup-only or tick-only regression would
+// otherwise be invisible.
+func sweepPrivacyDeletions(ctx context.Context, svc *identity.Service) {
+	outcomes, err := svc.SweepPrivacyDeletions(ctx, time.Now().UTC())
+	if err != nil {
+		log.Printf("privacy deletion sweep failed: %v", err)
+	}
+	for _, outcome := range outcomes {
+		switch outcome.Action {
+		case identity.PrivacySweepAcknowledged:
+			log.Printf("privacy deletion acknowledged: request=%s user=%s", outcome.RequestID, outcome.UserID)
+		case identity.PrivacySweepErased:
+			log.Printf("privacy deletion erased: request=%s user=%s rows=%d external=%s",
+				outcome.RequestID, outcome.UserID, outcome.Erased.Total(), outcome.External.Summary())
 		}
 	}
 }

@@ -5,6 +5,7 @@ import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type VoucherFamily = "COFFEE" | "EXPERIENCE" | "ACTIVITY";
 export type VoucherStatus = "AVAILABLE" | "REDEEMED" | "SETTLED" | "EXPIRED";
@@ -37,7 +38,7 @@ export type VoucherCommandTransport = {
 
 export class VoucherProtocolError extends Error {}
 export class VoucherCommandRejectedError extends Error {
-  public constructor(public readonly result: CommandResult) { super(result.error?.messageKey ?? "voucher command rejected"); }
+  public constructor(public readonly result: CommandResult) { super(commandErrorMessage(result.error, "voucher command rejected")); }
 }
 
 export class VoucherClient {

@@ -118,15 +118,23 @@ func (r *LocalNetRepository) GetPost(ctx context.Context, id string) (localnet.P
 	return post, nil
 }
 
+// AI-TWIN-POST-AUDIENCE-003: this UPDATE used to leave out visibility
+// entirely — it was written for classification.go's enrichPostClassification
+// (body/media_refs/status/context_refs only), which never touches
+// visibility, so the gap was silent and harmless until UpdatePostAudience
+// started calling UpdatePost to flip a post between PUBLIC and TARGETED.
+// Without this column in the SET list, that command would return ACCEPTED
+// while the database kept the old visibility — the exact "UI says it
+// worked, server didn't" shape this codebase's comments keep warning about.
 func (r *LocalNetRepository) UpdatePost(ctx context.Context, post localnet.Post, _ int) error {
 	mediaRefs, contextRefs, err := encodePostJSON(post)
 	if err != nil {
 		return err
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
-		UPDATE localnet.posts SET body=$1, media_refs=$2, status=$3, context_refs=$4
-		WHERE id=$5`,
-		post.Body, mediaRefs, post.Status, contextRefs, post.ID,
+		UPDATE localnet.posts SET body=$1, media_refs=$2, status=$3, context_refs=$4, visibility=$5
+		WHERE id=$6`,
+		post.Body, mediaRefs, post.Status, contextRefs, post.Visibility, post.ID,
 	)
 	return err
 }
@@ -184,7 +192,14 @@ func (r *LocalNetRepository) ListFeedPage(ctx context.Context, actorID string, b
 			visibility, city_scope, scene_type, status, context_refs, created_at, ephemeral_until
 		FROM localnet.posts
 		WHERE status='PUBLISHED'
-		  AND (visibility='PUBLIC' OR (visibility='FOLLOWERS' AND author_id=$1))
+		  -- AI-TWIN-POST-AUDIENCE-001: TARGETED 帖子只对作者本人和白名单里的
+		  -- 人可见。跟 localnet/service.go 的 postVisibleTo 必须同一套语义——
+		  -- 那边的注释解释了为什么两边不能各画一遍还各画各的。
+		  AND (visibility='PUBLIC' OR (visibility='FOLLOWERS' AND author_id=$1)
+		    OR (visibility='TARGETED' AND (author_id=$1 OR EXISTS (
+		          SELECT 1 FROM localnet.post_audience_targets t
+		          WHERE t.post_id = localnet.posts.id AND t.target_account_id = $1
+		    ))))
 		  -- GHOST-24H-001: 到期的临时动态不再出现。必须写在 SQL 里而不是查完
 		  -- 再在 Go 里过滤 —— 先 LIMIT 再过滤会让一页少给好几条、往下翻还会
 		  -- 重复或漏帖。NULL = 永久动态（存量数据全是 NULL，无需回填）。
@@ -255,7 +270,14 @@ func (r *LocalNetRepository) ListPostsMentioning(ctx context.Context, actorID st
 			visibility, city_scope, scene_type, status, context_refs, created_at, ephemeral_until
 		FROM localnet.posts
 		WHERE status='PUBLISHED'
-		  AND (visibility='PUBLIC' OR (visibility='FOLLOWERS' AND author_id=$1))
+		  -- AI-TWIN-POST-AUDIENCE-001: TARGETED 帖子只对作者本人和白名单里的
+		  -- 人可见。跟 localnet/service.go 的 postVisibleTo 必须同一套语义——
+		  -- 那边的注释解释了为什么两边不能各画一遍还各画各的。
+		  AND (visibility='PUBLIC' OR (visibility='FOLLOWERS' AND author_id=$1)
+		    OR (visibility='TARGETED' AND (author_id=$1 OR EXISTS (
+		          SELECT 1 FROM localnet.post_audience_targets t
+		          WHERE t.post_id = localnet.posts.id AND t.target_account_id = $1
+		    ))))
 		  AND author_id <> $1
 		  -- GHOST-24H-001: 与 ListFeedPage 同一个过期谓语。这条查询刻意与 feed
 		  -- 保持同一套 WHERE 形状，否则一条已经「消失」的 24h 帖会因为提到了谁
@@ -429,6 +451,55 @@ func (r *LocalNetRepository) ListPollsForPosts(ctx context.Context, postIDs []st
 	return out, nil
 }
 
+// SavePostAudienceTargets replaces a TARGETED post's viewer allowlist.
+// DELETE + re-INSERT (not upsert-and-diff): the caller always sends the
+// full desired set — a partial "add these" call would need a separate
+// signature, and callers editing an existing draft's audience must not
+// leave a stale target behind that the UI no longer shows them.
+func (r *LocalNetRepository) SavePostAudienceTargets(ctx context.Context, postID string, targetAccountIDs []string) error {
+	return runInTransaction(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM localnet.post_audience_targets WHERE post_id = $1`, postID); err != nil {
+			return err
+		}
+		for _, targetID := range targetAccountIDs {
+			if _, err := tx.Exec(ctx, `
+			INSERT INTO localnet.post_audience_targets (post_id, target_account_id)
+			VALUES ($1, $2)
+			ON CONFLICT (post_id, target_account_id) DO NOTHING`,
+				postID, targetID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// ListPostAudienceTargets batch-fetches allowlists for a set of posts.
+// AI-TWIN-POST-AUDIENCE-001: this is the ONLY place TARGETED membership is
+// decided from — callers must not infer visibility any other way, or a post
+// invisible through one path can become visible through another.
+func (r *LocalNetRepository) ListPostAudienceTargets(ctx context.Context, postIDs []string) (map[string][]string, error) {
+	out := make(map[string][]string)
+	if len(postIDs) == 0 {
+		return out, nil
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT post_id, target_account_id FROM localnet.post_audience_targets
+		WHERE post_id = ANY($1)`, postIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var postID, targetID string
+		if err := rows.Scan(&postID, &targetID); err != nil {
+			return nil, err
+		}
+		out[postID] = append(out[postID], targetID)
+	}
+	return out, rows.Err()
+}
+
 func (r *LocalNetRepository) SaveNeedFromPost(ctx context.Context, record localnet.NeedFromPost) error {
 	lineage, err := json.Marshal(record.Lineage)
 	if err != nil {
@@ -477,7 +548,7 @@ func (r *LocalNetRepository) ListInteractionEvents(ctx context.Context, actorID 
 	return result, rows.Err()
 }
 
-func (r *LocalNetRepository) ListPostImpressionStats(ctx context.Context, authorID string, limit int) ([]localnet.PostImpressionStats, error) {
+func (r *LocalNetRepository) ListPostImpressionStats(ctx context.Context, authorID string, since time.Time, limit int) ([]localnet.PostImpressionStats, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT p.id,
 			COUNT(ev.event_id) AS impressions,
@@ -485,14 +556,14 @@ func (r *LocalNetRepository) ListPostImpressionStats(ctx context.Context, author
 			COALESCE(SUM(ev.watch_ms), 0) AS total_watch_ms
 		FROM (
 			SELECT id, created_at FROM localnet.posts
-			WHERE author_id = $1
+			WHERE author_id = $1 AND created_at >= $3
 			ORDER BY created_at DESC, id DESC
 			LIMIT $2
 		) p
 		LEFT JOIN localnet.interaction_events ev
 			ON ev.target_type = 'POST' AND ev.target_id = p.id AND ev.event_type = 'POST_IMPRESSION'
 		GROUP BY p.id, p.created_at
-		ORDER BY p.created_at DESC, p.id DESC`, authorID, limit)
+		ORDER BY p.created_at DESC, p.id DESC`, authorID, limit, since)
 	if err != nil {
 		return nil, err
 	}
@@ -508,7 +579,7 @@ func (r *LocalNetRepository) ListPostImpressionStats(ctx context.Context, author
 	return result, rows.Err()
 }
 
-func (r *LocalNetRepository) ListMediaImpressionStats(ctx context.Context, authorID string, limit int) ([]localnet.MediaImpressionStats, error) {
+func (r *LocalNetRepository) ListMediaImpressionStats(ctx context.Context, authorID string, since time.Time, limit int) ([]localnet.MediaImpressionStats, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT p.id,
 			m.media_asset_id,
@@ -517,7 +588,7 @@ func (r *LocalNetRepository) ListMediaImpressionStats(ctx context.Context, autho
 			COALESCE(SUM(ev.watch_ms), 0) AS total_watch_ms
 		FROM (
 			SELECT id, created_at, media_refs FROM localnet.posts
-			WHERE author_id = $1
+			WHERE author_id = $1 AND created_at >= $3
 			ORDER BY created_at DESC, id DESC
 			LIMIT $2
 		) p
@@ -528,7 +599,7 @@ func (r *LocalNetRepository) ListMediaImpressionStats(ctx context.Context, autho
 		LEFT JOIN localnet.interaction_events ev
 			ON ev.target_type = 'MEDIA' AND ev.target_id = m.media_asset_id AND ev.event_type = 'MEDIA_IMPRESSION'
 		GROUP BY p.id, p.created_at, m.media_asset_id, m.sort_order
-		ORDER BY p.created_at DESC, p.id DESC, m.sort_order ASC`, authorID, limit)
+		ORDER BY p.created_at DESC, p.id DESC, m.sort_order ASC`, authorID, limit, since)
 	if err != nil {
 		return nil, err
 	}
@@ -542,6 +613,69 @@ func (r *LocalNetRepository) ListMediaImpressionStats(ctx context.Context, autho
 		result = append(result, stat)
 	}
 	return result, rows.Err()
+}
+
+// CONTENT-ANALYTICS-001: 用户侧分析面板合计（窗口内发的帖子）。
+func (r *LocalNetRepository) ContentAnalytics(ctx context.Context, authorID string, since time.Time) (localnet.ContentAnalytics, error) {
+	var out localnet.ContentAnalytics
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		WITH p AS (
+			SELECT id FROM localnet.posts WHERE author_id = $1 AND created_at >= $2
+		), ev AS (
+			SELECT ev.target_id, ev.actor_id, ev.watch_ms
+			FROM localnet.interaction_events ev JOIN p ON ev.target_id = p.id
+			WHERE ev.target_type = 'POST' AND ev.event_type = 'POST_IMPRESSION'
+		), top AS (
+			SELECT target_id, COUNT(*) AS views FROM ev GROUP BY target_id ORDER BY views DESC, target_id DESC LIMIT 1
+		)
+		SELECT (SELECT COUNT(*) FROM p),
+			(SELECT COUNT(*) FROM ev),
+			(SELECT COUNT(DISTINCT actor_id) FROM ev),
+			(SELECT COALESCE(SUM(watch_ms), 0) FROM ev),
+			COALESCE((SELECT target_id FROM top), ''),
+			COALESCE((SELECT views FROM top), 0)`, authorID, since).
+		Scan(&out.Posts, &out.Impressions, &out.UniqueViewers, &out.TotalWatchMs, &out.TopPostID, &out.TopPostViews)
+	return out, err
+}
+
+// CONTENT-ANALYTICS-001: 仅运营 —— 一条帖子的受众逐人明细（帖子曝光 + 逐张照片停留 + 放大），全量历史。
+func (r *LocalNetRepository) ListPostAudience(ctx context.Context, postID string, limit int) ([]localnet.PostAudienceRow, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		WITH media AS (
+			SELECT (item->>'mediaAssetId') AS media_asset_id
+			FROM localnet.posts p, jsonb_array_elements(p.media_refs) AS item
+			WHERE p.id = $1
+		), ev AS (
+			SELECT actor_id, event_type, watch_ms, created_at FROM localnet.interaction_events
+			WHERE target_type = 'POST' AND target_id = $1 AND event_type = 'POST_IMPRESSION'
+			UNION ALL
+			SELECT actor_id, event_type, watch_ms, created_at FROM localnet.interaction_events
+			WHERE target_type = 'MEDIA' AND target_id IN (SELECT media_asset_id FROM media)
+				AND event_type IN ('MEDIA_IMPRESSION', 'MEDIA_ZOOM')
+		)
+		SELECT actor_id,
+			COUNT(*) FILTER (WHERE event_type = 'POST_IMPRESSION'),
+			COUNT(*) FILTER (WHERE event_type = 'MEDIA_IMPRESSION'),
+			COALESCE(SUM(watch_ms) FILTER (WHERE event_type <> 'MEDIA_ZOOM'), 0),
+			COUNT(*) FILTER (WHERE event_type = 'MEDIA_ZOOM'),
+			MAX(created_at)
+		FROM ev
+		GROUP BY actor_id
+		ORDER BY 4 DESC, actor_id
+		LIMIT $2`, postID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []localnet.PostAudienceRow{}
+	for rows.Next() {
+		var row localnet.PostAudienceRow
+		if err := rows.Scan(&row.ActorID, &row.PostImpressions, &row.MediaOpens, &row.TotalWatchMs, &row.Zooms, &row.LastSeenAt); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 func (r *LocalNetRepository) ListMediaActivityForViewer(ctx context.Context, authorID string, viewerActorID string, limit int) ([]localnet.ViewerMediaActivity, error) {
@@ -578,12 +712,18 @@ func (r *LocalNetRepository) ListMediaActivityForViewer(ctx context.Context, aut
 	return result, rows.Err()
 }
 
-func (r *LocalNetRepository) ListProfileViewStats(ctx context.Context, ownerID string) (localnet.ProfileViewStats, error) {
+func (r *LocalNetRepository) ListProfileViewStats(ctx context.Context, ownerID string, since time.Time) (localnet.ProfileViewStats, error) {
 	var stat localnet.ProfileViewStats
-	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+	query := `
 		SELECT COUNT(event_id), COUNT(DISTINCT actor_id)
 		FROM localnet.interaction_events
-		WHERE target_type = 'PROFILE' AND target_id = $1 AND event_type = 'PROFILE_OPEN'`, ownerID).
+		WHERE target_type = 'PROFILE' AND target_id = $1 AND event_type = 'PROFILE_OPEN'`
+	args := []any{ownerID}
+	if !since.IsZero() {
+		query += ` AND created_at >= $2`
+		args = append(args, since)
+	}
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, query, args...).
 		Scan(&stat.Opens, &stat.UniqueViewers)
 	if err != nil {
 		return localnet.ProfileViewStats{}, err
@@ -724,21 +864,25 @@ func (r *ConversationRepository) CreateConversation(ctx context.Context, c conve
 	if err != nil {
 		return err
 	}
+	roomScene, err := json.Marshal(c.RoomScene)
+	if err != nil {
+		return err
+	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO conversation.conversations (id, type, origin_type, origin_id, market_id, state, participants, created_at, last_message_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		c.ID, c.Type, c.OriginType, c.OriginID, c.MarketID, c.State, participants, c.CreatedAt, c.LastMessageAt,
+		INSERT INTO conversation.conversations (id, type, origin_type, origin_id, market_id, state, participants, room_scene, created_at, last_message_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		c.ID, c.Type, c.OriginType, c.OriginID, c.MarketID, c.State, participants, roomScene, c.CreatedAt, c.LastMessageAt,
 	)
 	return err
 }
 
 func (r *ConversationRepository) GetConversation(ctx context.Context, id string) (conversation.Conversation, error) {
 	var c conversation.Conversation
-	var participants []byte
+	var participants, roomScene []byte
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, type, origin_type, origin_id, market_id, state, participants, created_at, last_message_at
+		SELECT id, type, origin_type, origin_id, market_id, state, participants, room_scene, created_at, last_message_at
 		FROM conversation.conversations WHERE id = $1`, id).Scan(
-		&c.ID, &c.Type, &c.OriginType, &c.OriginID, &c.MarketID, &c.State, &participants, &c.CreatedAt, &c.LastMessageAt,
+		&c.ID, &c.Type, &c.OriginType, &c.OriginID, &c.MarketID, &c.State, &participants, &roomScene, &c.CreatedAt, &c.LastMessageAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return conversation.Conversation{}, conversation.ErrConversationNotFound
@@ -748,6 +892,11 @@ func (r *ConversationRepository) GetConversation(ctx context.Context, id string)
 	}
 	if err := json.Unmarshal(participants, &c.Participants); err != nil {
 		return c, fmt.Errorf("decode participants: %w", err)
+	}
+	if len(roomScene) > 0 && string(roomScene) != "null" {
+		if err := json.Unmarshal(roomScene, &c.RoomScene); err != nil {
+			return c, fmt.Errorf("decode room_scene: %w", err)
+		}
 	}
 	return c, nil
 }
@@ -762,6 +911,108 @@ func (r *ConversationRepository) UpdateConversation(ctx context.Context, c conve
 	return nil
 }
 
+// --- AI-MANAGE-013: 「每次确认」代回复草稿 ---
+
+func (r *ConversationRepository) SaveStandInDraft(ctx context.Context, d conversation.StandInDraft) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO conversation.stand_in_drafts (id, conversation_id, owner_id, in_reply_to, body, status, sent_message_id, created_at, resolved_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (id) DO UPDATE SET body=EXCLUDED.body, status=EXCLUDED.status, sent_message_id=EXCLUDED.sent_message_id, resolved_at=EXCLUDED.resolved_at`,
+		d.ID, d.ConversationID, d.OwnerID, d.InReplyTo, d.Body, d.Status, d.SentMessageID, d.CreatedAt, d.ResolvedAt,
+	)
+	return err
+}
+
+const standInDraftColumns = `id, conversation_id, owner_id, in_reply_to, body, status, sent_message_id, created_at, resolved_at`
+
+func scanStandInDraftRow(row pgx.Row) (conversation.StandInDraft, error) {
+	var d conversation.StandInDraft
+	err := row.Scan(&d.ID, &d.ConversationID, &d.OwnerID, &d.InReplyTo, &d.Body, &d.Status, &d.SentMessageID, &d.CreatedAt, &d.ResolvedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return conversation.StandInDraft{}, conversation.ErrStandInDraftNotFound
+	}
+	return d, err
+}
+
+func (r *ConversationRepository) GetStandInDraft(ctx context.Context, id string) (conversation.StandInDraft, error) {
+	return scanStandInDraftRow(queryerForContext(ctx, r.pool).QueryRow(ctx,
+		`SELECT `+standInDraftColumns+` FROM conversation.stand_in_drafts WHERE id = $1`, id))
+}
+
+func (r *ConversationRepository) PendingStandInDraft(ctx context.Context, conversationID, ownerID string) (conversation.StandInDraft, error) {
+	return scanStandInDraftRow(queryerForContext(ctx, r.pool).QueryRow(ctx,
+		`SELECT `+standInDraftColumns+` FROM conversation.stand_in_drafts
+		 WHERE conversation_id = $1 AND owner_id = $2 AND status = 'PENDING'
+		 ORDER BY created_at DESC LIMIT 1`, conversationID, ownerID))
+}
+
+// --- ROOM-CREATE-001: 见面邀约 ---
+
+func (r *ConversationRepository) CreateMeetup(ctx context.Context, m conversation.Meetup) error {
+	acceptedBy, err := json.Marshal(m.AcceptedBy)
+	if err != nil {
+		return err
+	}
+	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO conversation.meetups (id, conversation_id, proposer_id, scene_emoji, scene_name, place, time_label, status, accepted_by, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		m.ID, m.ConversationID, m.ProposerID, m.SceneEmoji, m.SceneName, m.Place, m.TimeLabel, m.Status, acceptedBy, m.CreatedAt, m.UpdatedAt,
+	)
+	return err
+}
+
+func (r *ConversationRepository) UpdateMeetup(ctx context.Context, m conversation.Meetup) error {
+	acceptedBy, err := json.Marshal(m.AcceptedBy)
+	if err != nil {
+		return err
+	}
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE conversation.meetups SET status=$1, accepted_by=$2, updated_at=$3 WHERE id=$4`,
+		m.Status, acceptedBy, m.UpdatedAt, m.ID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return conversation.ErrMeetupNotFound
+	}
+	return nil
+}
+
+func scanMeetupRow(row pgx.Row) (conversation.Meetup, error) {
+	var m conversation.Meetup
+	var acceptedBy []byte
+	err := row.Scan(&m.ID, &m.ConversationID, &m.ProposerID, &m.SceneEmoji, &m.SceneName, &m.Place, &m.TimeLabel, &m.Status, &acceptedBy, &m.CreatedAt, &m.UpdatedAt)
+	if err != nil {
+		return conversation.Meetup{}, err
+	}
+	if err := json.Unmarshal(acceptedBy, &m.AcceptedBy); err != nil {
+		return m, fmt.Errorf("decode accepted_by: %w", err)
+	}
+	return m, nil
+}
+
+func (r *ConversationRepository) GetMeetup(ctx context.Context, id string) (conversation.Meetup, error) {
+	m, err := scanMeetupRow(queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, conversation_id, proposer_id, scene_emoji, scene_name, place, time_label, status, accepted_by, created_at, updated_at
+		FROM conversation.meetups WHERE id = $1`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return conversation.Meetup{}, conversation.ErrMeetupNotFound
+	}
+	return m, err
+}
+
+func (r *ConversationRepository) ActiveMeetup(ctx context.Context, conversationID string) (conversation.Meetup, error) {
+	m, err := scanMeetupRow(queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, conversation_id, proposer_id, scene_emoji, scene_name, place, time_label, status, accepted_by, created_at, updated_at
+		FROM conversation.meetups WHERE conversation_id = $1 AND status != 'COMPLETED'
+		ORDER BY created_at DESC LIMIT 1`, conversationID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return conversation.Meetup{}, conversation.ErrMeetupNotFound
+	}
+	return m, err
+}
+
 // AppendMessage persists a message plus its MessageProtection envelope
 // (Lotus Chat RFC v0.1 §3). The protection column is JSONB so future
 // anti-leak fields can land without a migration. ViewCount is column-level
@@ -772,10 +1023,23 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, m conversati
 	if err != nil {
 		return fmt.Errorf("encode protection: %w", err)
 	}
+	// PROXY-OBJECT-PERSIST-001（2026-09-22，ROOM-CREATE-001 见面邀约卡片验证时
+	// 发现）：conversation.messages.proxy_object 列早在迁移 039 就加了，但这条
+	// INSERT 从来没写过它——任何带 ProxyObject 的消息（见面邀约卡片、已有的
+	// sendProxyObject 活动分享）落到 Postgres 后 proxy_object 静默变 NULL，
+	// 客户端收到一条没有卡片内容的空气泡。内存版 Repository（单测用）不受
+	// 影响，所以这个洞一直没被测出来——只有接 Postgres 的真机验证才会看见。
+	var proxyObjectJSON []byte
+	if m.ProxyObject != nil {
+		proxyObjectJSON, err = json.Marshal(m.ProxyObject)
+		if err != nil {
+			return fmt.Errorf("encode proxy_object: %w", err)
+		}
+	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id, reply_to)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		m.ID, m.ConversationID, m.SenderID, m.MessageType, m.Body, m.MediaRef, m.CreatedAt, protectionJSON, m.Protection.ViewCount, m.ConvoID, m.ReplyTo,
+		INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id, reply_to, proxy_object, authored_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NULLIF($13,''))`,
+		m.ID, m.ConversationID, m.SenderID, m.MessageType, m.Body, m.MediaRef, m.CreatedAt, protectionJSON, m.Protection.ViewCount, m.ConvoID, m.ReplyTo, proxyObjectJSON, m.AuthoredBy,
 	)
 	if err != nil {
 		return err
@@ -789,7 +1053,7 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, m conversati
 
 func (r *ConversationRepository) Messages(ctx context.Context, conversationID string) ([]conversation.Message, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id, reply_to
+		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id, reply_to, proxy_object, COALESCE(authored_by, '')
 		FROM conversation.messages WHERE conversation_id = $1 ORDER BY created_at`, conversationID)
 	if err != nil {
 		return nil, err
@@ -820,7 +1084,7 @@ func (r *ConversationRepository) Messages(ctx context.Context, conversationID st
 // would mask the fact that the seed path skipped protection.
 func (r *ConversationRepository) GetMessage(ctx context.Context, id string) (conversation.Message, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id, reply_to
+		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id, reply_to, proxy_object, COALESCE(authored_by, '')
 		FROM conversation.messages WHERE id = $1`, id)
 	if err != nil {
 		return conversation.Message{}, err
@@ -875,10 +1139,11 @@ func scanConversationMessage(rows pgx.Rows) (conversation.Message, error) {
 	var m conversation.Message
 	var protection []byte
 	var convoID *string
+	var proxyObject []byte
 	if err := rows.Scan(
 		&m.ID, &m.ConversationID, &m.SenderID, &m.MessageType,
 		&m.Body, &m.MediaRef, &m.CreatedAt, &protection, &m.Protection.ViewCount,
-		&convoID, &m.ReplyTo,
+		&convoID, &m.ReplyTo, &proxyObject, &m.AuthoredBy,
 	); err != nil {
 		return conversation.Message{}, err
 	}
@@ -888,6 +1153,12 @@ func scanConversationMessage(rows pgx.Rows) (conversation.Message, error) {
 	if len(protection) > 0 {
 		if err := json.Unmarshal(protection, &m.Protection); err != nil {
 			return m, fmt.Errorf("decode protection: %w", err)
+		}
+	}
+	// PROXY-OBJECT-PERSIST-001: 见 AppendMessage 注释。
+	if len(proxyObject) > 0 && string(proxyObject) != "null" {
+		if err := json.Unmarshal(proxyObject, &m.ProxyObject); err != nil {
+			return m, fmt.Errorf("decode proxy_object: %w", err)
 		}
 	}
 	return m, nil
@@ -925,7 +1196,7 @@ func (r *ConversationRepository) UpdateNeedDraft(ctx context.Context, d conversa
 
 func (r *ConversationRepository) Snapshot(ctx context.Context) ([]conversation.Conversation, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, type, origin_type, origin_id, market_id, state, participants, created_at, last_message_at
+		SELECT id, type, origin_type, origin_id, market_id, state, participants, room_scene, created_at, last_message_at
 		FROM conversation.conversations ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -934,11 +1205,14 @@ func (r *ConversationRepository) Snapshot(ctx context.Context) ([]conversation.C
 	result := []conversation.Conversation{}
 	for rows.Next() {
 		var c conversation.Conversation
-		var participants []byte
-		if err := rows.Scan(&c.ID, &c.Type, &c.OriginType, &c.OriginID, &c.MarketID, &c.State, &participants, &c.CreatedAt, &c.LastMessageAt); err != nil {
+		var participants, roomScene []byte
+		if err := rows.Scan(&c.ID, &c.Type, &c.OriginType, &c.OriginID, &c.MarketID, &c.State, &participants, &roomScene, &c.CreatedAt, &c.LastMessageAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(participants, &c.Participants)
+		if len(roomScene) > 0 && string(roomScene) != "null" {
+			_ = json.Unmarshal(roomScene, &c.RoomScene)
+		}
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -1475,6 +1749,26 @@ func (r *EngagementRepository) Engagement(ctx context.Context, postID string, vi
 		}
 	}
 	return e, nil
+}
+
+// CountReceivedEngagement 数某人帖子在窗口内收到的赞 + 评论（ANALYTICS-ME-001）。
+// 只数作者是 owner 的帖子；自己给自己点的不算；归属落在 localnet.posts，
+// 那里没有行的帖子（脏引用）自然被 join 掉，不猜。
+func (r *EngagementRepository) CountReceivedEngagement(ctx context.Context, ownerID string, since time.Time) (engagement.ReceivedEngagementStats, error) {
+	var stat engagement.ReceivedEngagementStats
+	if err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT COUNT(*) FROM engagement.reactions r
+		JOIN localnet.posts p ON p.id = r.post_id
+		WHERE p.author_id = $1 AND r.actor_id <> $1 AND r.created_at >= $2`, ownerID, since).Scan(&stat.Reactions); err != nil {
+		return stat, err
+	}
+	if err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT COUNT(*) FROM engagement.replies r
+		JOIN localnet.posts p ON p.id = r.post_id
+		WHERE p.author_id = $1 AND r.actor_id <> $1 AND r.created_at >= $2`, ownerID, since).Scan(&stat.Replies); err != nil {
+		return stat, err
+	}
+	return stat, nil
 }
 
 var _ engagement.Repository = (*EngagementRepository)(nil)

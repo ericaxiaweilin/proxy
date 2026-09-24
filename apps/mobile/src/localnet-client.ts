@@ -8,6 +8,7 @@ import { filterPostsByFeedSearch, normalizeFeedSearchQuery } from "./feed-search
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type AuthenticatedCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
@@ -93,24 +94,22 @@ function isMediaImpressionStats(value: unknown): value is MediaImpressionStats {
     && typeof item.totalWatchMs === "number";
 }
 
-// VIEWER-ACTIVITY-001: 某个访客在"我的"媒体上的活动明细——把"谁看了主页"
-// 和"哪张照片被看了多久"接起来，回答"这个人具体看了什么"，不是两条互相
-// 独立的事实。只列这个人真的看过的媒体，没看过的不摆出来。
-export type ViewerMediaActivity = {
-  postId: string;
-  mediaAssetId: string;
-  opens: number;
+// CONTENT-ANALYTICS-001: 用户侧分析面板（近 30 天发的帖子的合计）。逐人明细不下发客户端 ——
+// 以前的 VIEWER-ACTIVITY-001「这个人看了哪张、看了几秒」改为仅运营（ANALYTICS scope）。
+export type ContentAnalytics = {
+  sinceDays: number;
+  posts: number;
+  impressions: number;
+  uniqueViewers: number;
   totalWatchMs: number;
-  lastOpenedAt: string;
+  topPostId?: string;
+  topPostViews: number;
 };
 
-function isViewerMediaActivity(value: unknown): value is ViewerMediaActivity {
+function isContentAnalytics(value: unknown): value is ContentAnalytics {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
-  return typeof item.postId === "string" && item.postId !== ""
-    && typeof item.mediaAssetId === "string" && item.mediaAssetId !== ""
-    && typeof item.opens === "number" && typeof item.totalWatchMs === "number"
-    && typeof item.lastOpenedAt === "string";
+  return ["sinceDays", "posts", "impressions", "uniqueViewers", "totalWatchMs", "topPostViews"].every((key) => typeof item[key] === "number");
 }
 
 export class LocalNetProtocolError extends Error {
@@ -122,7 +121,7 @@ export class LocalNetProtocolError extends Error {
 
 export class LocalNetCommandRejectedError extends Error {
   public constructor(public readonly result: CommandResult) {
-    super(result.error?.messageKey ?? "localnet command rejected");
+    super(commandErrorMessage(result.error, "localnet command rejected"));
     this.name = "LocalNetCommandRejectedError";
   }
 }
@@ -366,14 +365,16 @@ export class LocalNetClient {
   /**
    * PROFILE-VISIT-001 — 主页访问战绩：只查自己的主页。
    * 没人看过是真答案（{opens:0, uniqueViewers:0}），不是协议异常。
+   * sinceDays 可选：>0 只数窗口内（「我的 → 分析」传 30）；缺省全量，
+   * friend-crm 的访问/回访行继续用全量口径。
    */
-  public async listProfileViewStats(): Promise<ProfileViewStats> {
+  public async listProfileViewStats(sinceDays?: number): Promise<ProfileViewStats> {
     const session = await this.requireSession();
     const result = await this.sendCommand(
       session,
       "ListProfileViewStats",
       { type: "Profile", id: "view_stats" },
-      {}
+      { ...(sinceDays !== undefined && sinceDays > 0 ? { sinceDays } : {}) }
     );
     const body = this.decodeOperationRef(result);
     if (!isProfileViewStats(body)) throw new LocalNetProtocolError("主页访问战绩响应格式不对");
@@ -434,22 +435,29 @@ export class LocalNetClient {
     return body.stats.filter(isMediaImpressionStats);
   }
 
+  // CONTENT-ANALYTICS-001: 全屏看图时双击 / 捏合放大 —— 运营侧信号，用户侧不展示。埋点失败静默。
+  public async recordMediaZoom(mediaAssetId: string): Promise<void> {
+    try {
+      if (!mediaAssetId) return;
+      const session = await this.optionalSession();
+      if (!session) return;
+      await this.sendCommand(session, "RecordMediaZoom", { type: "Media", id: mediaAssetId }, { targetType: "MEDIA", targetId: mediaAssetId });
+    } catch {
+      // 埋点失败静默。
+    }
+  }
+
   /**
-   * VIEWER-ACTIVITY-001 — 某个访客在"我的"媒体上的活动明细：只能查自己
-   * 内容上的活动，viewerActorId 必填。空数组是真答案（这个人没看过任何
-   * 一张），只有缺数组才是协议异常。
+   * CONTENT-ANALYTICS-001 — 用户侧分析面板：近 sinceDays 天（默认 30）发的帖子的合计。
+   * 只有聚合，没有逐人明细（谁、看了几秒、放大几次只给运营）。
+   * 逐人明细接口（ListMediaActivityForViewer / ListPostAudience）已改为仅运营，客户端不再调用。
    */
-  public async listMediaActivityForViewer(viewerActorId: string): Promise<ViewerMediaActivity[]> {
+  public async getContentAnalytics(): Promise<ContentAnalytics> {
     const session = await this.requireSession();
-    const result = await this.sendCommand(
-      session,
-      "ListMediaActivityForViewer",
-      { type: "Post", id: "viewer_media_activity" },
-      { viewerActorId }
-    );
-    const body = this.decodeOperationRef(result) as { activity?: unknown };
-    if (!Array.isArray(body.activity)) throw new LocalNetProtocolError("访客活动响应缺少 activity 数组");
-    return body.activity.filter(isViewerMediaActivity);
+    const result = await this.sendCommand(session, "GetContentAnalytics", { type: "Post", id: "content_analytics" }, {});
+    const body = this.decodeOperationRef(result) as { analytics?: unknown };
+    if (!isContentAnalytics(body.analytics)) throw new LocalNetProtocolError("分析面板响应缺少 analytics");
+    return body.analytics;
   }
 
   public async createPost(payload: CreatePostPayload, idempotencyKey?: string): Promise<string> {
@@ -462,6 +470,17 @@ export class LocalNetClient {
     }
     console.log(`[proxy.R15.63.DEBUG.post] CreatePost ok postId=${result.aggregate.id}`);
     return result.aggregate.id;
+  }
+
+  // AI-TWIN-POST-AUDIENCE-003: 帖文编排的"编辑"就是切这个开关（公开 ⇄
+  // 指定好友），不是重新发一条帖子。服务端只允许作者本人切、只在
+  // PUBLIC/TARGETED 之间切（见 apps/api-go 的 updatePostAudience）。
+  public async updatePostAudience(postId: string, visibility: "PUBLIC" | "TARGETED", audienceTargetIds: string[]): Promise<void> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "UpdatePostAudience", { type: "Post", id: postId }, { postId, visibility, audienceTargetIds });
+    if (result.outcome !== "ACCEPTED") {
+      throw new LocalNetProtocolError(commandErrorMessage(result.error, "受众没改成，请稍后重试。"));
+    }
   }
 
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {

@@ -43,8 +43,8 @@ function renderBlock(block: LegalBlock, key: number): React.JSX.Element {
     case "heading":
       return (
         <View key={key} nativeID={block.anchor} style={styles.headingWrap}>
-          <Text style={styles.headingNumber}>{block.number}.</Text>
-          <Text style={styles.headingTitle}>{block.title}</Text>
+          <Text selectable style={styles.headingNumber}>{block.number}.</Text>
+          <Text selectable style={styles.headingTitle}>{block.title}</Text>
         </View>
       );
     case "list":
@@ -52,15 +52,15 @@ function renderBlock(block: LegalBlock, key: number): React.JSX.Element {
         <View key={key} style={styles.listWrap}>
           {block.items.map((item, idx) => (
             <View key={idx} style={styles.listItem}>
-              <Text style={styles.bulletDot}>•</Text>
-              <Text style={styles.listText}>{item}</Text>
+              <Text selectable style={styles.bulletDot}>•</Text>
+              <Text selectable style={styles.listText}>{item}</Text>
             </View>
           ))}
         </View>
       );
     case "paragraph":
       return (
-        <Text key={key} style={styles.paragraph}>
+        <Text selectable key={key} style={styles.paragraph}>
           {block.text}
         </Text>
       );
@@ -78,7 +78,7 @@ function TocBar({ toc, onJumpToAnchor }: { toc: ReadonlyArray<{ number: string; 
       style={styles.tocBarScroll}
     >
       {toc.map((entry) => (
-        <Text
+        <Text selectable
           key={entry.anchor}
           accessibilityRole={onJumpToAnchor ? "button" : undefined}
           onPress={onJumpToAnchor ? () => onJumpToAnchor(entry.anchor) : undefined}

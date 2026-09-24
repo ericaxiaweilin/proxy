@@ -16,6 +16,7 @@ import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type ExperienceCommandTransport = {
   request(
@@ -43,7 +44,7 @@ export class ExperienceProtocolError extends Error {
 
 export class ExperienceCommandRejectedError extends Error {
   public constructor(public readonly result: CommandResult) {
-    super(result.error?.messageKey ?? "experience command rejected");
+    super(commandErrorMessage(result.error, "experience command rejected"));
     this.name = "ExperienceCommandRejectedError";
   }
 }

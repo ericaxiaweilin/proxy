@@ -7,6 +7,7 @@ import type { AbilityType, AvailabilityRule, AvailabilityState, AvOverride, Menu
 import { ABILITY_SCHEMAS, AVAILABILITY_OPTIONS, avFmt, AV_DAY_NAMES, avStateFor } from "./me-types";
 import { styles } from "./me-styles";
 import { FACET_LOGO, OTTER_LOGO } from "../media/asset-sources";
+import { AILogo } from "./ai-management";
 
 export function availabilityLabel(value: AvailabilityState): string {
   return AVAILABILITY_OPTIONS.find((option) => option.id === value)?.title ?? "可接单";
@@ -57,22 +58,22 @@ function AbilitySheet({
         <Pressable onPress={() => undefined} style={styles.availabilitySheet}>
           <ScrollView showsVerticalScrollIndicator={false}>
             <View style={styles.abilitySheetHead}>
-              <View style={styles.abilityIcon}><Text style={styles.abilityIconText}>{schema.icon}</Text></View>
+              <View style={styles.abilityIcon}><Text selectable style={styles.abilityIconText}>{schema.icon}</Text></View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.availabilityTitle}>新增{sheet.type}</Text>
-                <Text style={styles.availabilitySub}>{schema.subtitle}</Text>
+                <Text selectable style={styles.availabilityTitle}>新增{sheet.type}</Text>
+                <Text selectable style={styles.availabilitySub}>{schema.subtitle}</Text>
               </View>
             </View>
             {schema.fields.map((field) => (
               <View key={field.id} style={styles.abilityFieldBlock}>
-                <Text style={styles.abilityFieldLabel}>{field.label}</Text>
+                <Text selectable style={styles.abilityFieldLabel}>{field.label}</Text>
                 {field.type === "select" ? (
                   <View style={styles.chipWrap}>
                     {field.options.map((option) => {
                       const active = draft.get(field.id) === option;
                       return (
                         <Pressable key={option} onPress={() => setDraft((prev) => new Map(prev).set(field.id, option))} style={[styles.chip, active && styles.chipActive]}>
-                          <Text style={active ? styles.chipTextActive : styles.chipText}>{option}</Text>
+                          <Text selectable style={active ? styles.chipTextActive : styles.chipText}>{option}</Text>
                         </Pressable>
                       );
                     })}
@@ -83,7 +84,7 @@ function AbilitySheet({
                       const active = (draft.get(field.id) ?? "").split(" / ").includes(option);
                       return (
                         <Pressable key={option} onPress={() => toggleChip(field.id, option)} style={[styles.chip, active && styles.chipActive]}>
-                          <Text style={active ? styles.chipTextActive : styles.chipText}>{option}</Text>
+                          <Text selectable style={active ? styles.chipTextActive : styles.chipText}>{option}</Text>
                         </Pressable>
                       );
                     })}
@@ -92,7 +93,7 @@ function AbilitySheet({
               </View>
             ))}
             <Pressable onPress={() => onSave(sheet.type, buildFields(), sheet.mode === "EDIT" ? sheet.id : undefined)} style={styles.primaryCta}>
-              <Text style={styles.primaryCtaText}>{sheet.mode === "EDIT" ? "保存" : "添加"}</Text>
+              <Text selectable style={styles.primaryCtaText}>{sheet.mode === "EDIT" ? "保存" : "添加"}</Text>
             </Pressable>
           </ScrollView>
         </Pressable>
@@ -125,15 +126,15 @@ function AvRuleSheet({
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
       <Pressable onPress={onClose} style={styles.availabilityOverlay}>
         <Pressable onPress={() => undefined} style={styles.availabilitySheet}>
-          <Text style={styles.availabilityTitle}>每周规律</Text>
-          <Text style={styles.availabilitySub}>按日例外优先于每周规律；两者都不覆盖时该日不可约。</Text>
-          <Text style={styles.abilityFieldLabel}>重复</Text>
+          <Text selectable style={styles.availabilityTitle}>每周规律</Text>
+          <Text selectable style={styles.availabilitySub}>按日例外优先于每周规律；两者都不覆盖时该日不可约。</Text>
+          <Text selectable style={styles.abilityFieldLabel}>重复</Text>
           <View style={styles.chipWrap}>
             {[...presets, { label: "自定义", days: [] }].map((preset) => {
               const active = JSON.stringify([...days].sort((a, b) => a - b)) === JSON.stringify([...preset.days].sort((a, b) => a - b)) || (preset.label === "自定义" && !presets.some((p) => JSON.stringify([...p.days].sort((a, b) => a - b)) === JSON.stringify([...days].sort((a, b) => a - b))));
               return (
                 <Pressable key={preset.label} onPress={() => preset.days.length > 0 && setDays(preset.days)} style={[styles.chip, active && styles.chipActive]}>
-                  <Text style={active ? styles.chipTextActive : styles.chipText}>{preset.label}</Text>
+                  <Text selectable style={active ? styles.chipTextActive : styles.chipText}>{preset.label}</Text>
                 </Pressable>
               );
             })}
@@ -143,24 +144,24 @@ function AvRuleSheet({
               const active = days.includes(index);
               return (
                 <Pressable key={index} onPress={() => setDays((prev) => (prev.includes(index) ? prev.filter((d) => d !== index) : [...prev, index]))} style={[styles.dayCell, active && styles.chipActive]}>
-                  <Text style={active ? styles.chipTextActive : styles.chipText}>{name}</Text>
+                  <Text selectable style={active ? styles.chipTextActive : styles.chipText}>{name}</Text>
                 </Pressable>
               );
             })}
           </View>
-          <Text style={styles.abilityFieldLabel}>时间段</Text>
+          <Text selectable style={styles.abilityFieldLabel}>时间段</Text>
           <View style={styles.chipWrap}>
             {slots.map(([s, e]) => {
               const active = start === s && end === e;
               return (
                 <Pressable key={s} onPress={() => { setStart(s); setEnd(e); }} style={[styles.chip, active && styles.chipActive]}>
-                  <Text style={active ? styles.chipTextActive : styles.chipText}>{avFmt(s)}–{avFmt(e)}</Text>
+                  <Text selectable style={active ? styles.chipTextActive : styles.chipText}>{avFmt(s)}–{avFmt(e)}</Text>
                 </Pressable>
               );
             })}
           </View>
           <Pressable onPress={() => { onSave({ days, start, end }); onClose(); }} style={styles.primaryCta}>
-            <Text style={styles.primaryCtaText}>保存规律</Text>
+            <Text selectable style={styles.primaryCtaText}>保存规律</Text>
           </Pressable>
         </Pressable>
       </Pressable>
@@ -192,19 +193,19 @@ function AvDaySheet({
     <Modal animationType="fade" onRequestClose={onClose} transparent visible>
       <Pressable onPress={onClose} style={styles.availabilityOverlay}>
         <Pressable onPress={() => undefined} style={styles.availabilitySheet}>
-          <Text style={styles.availabilityTitle}>{day.label}</Text>
-          <Text style={styles.availabilitySub}>当前：{current.type === "blank" ? "不可约" : `${avFmt(current.start ?? rule.start)}–${avFmt(current.end ?? rule.end)}`}</Text>
+          <Text selectable style={styles.availabilityTitle}>{day.label}</Text>
+          <Text selectable style={styles.availabilitySub}>当前：{current.type === "blank" ? "不可约" : `${avFmt(current.start ?? rule.start)}–${avFmt(current.end ?? rule.end)}`}</Text>
           {options.slice(0, 3).map((option) => (
             <Pressable key={option.id} onPress={() => { onSet(day.key, option.id === "full" ? { type: "full" } : option.id === "off" ? { type: "off" } : { type: "custom", start: customStart, end: customEnd }); onClose(); }} style={styles.availabilityOption}>
               <View style={styles.availabilityCopy}>
-                <Text style={styles.availabilityOptionTitle}>{option.title}</Text>
-                <Text style={styles.availabilityOptionDesc}>{option.desc}</Text>
+                <Text selectable style={styles.availabilityOptionTitle}>{option.title}</Text>
+                <Text selectable style={styles.availabilityOptionDesc}>{option.desc}</Text>
               </View>
               {option.id === "custom" ? (
                 <View style={styles.chipWrap}>
                   {([[17, 21], [18, 22], [19, 23]] as Array<[number, number]>).map(([s, e]) => (
                     <Pressable key={s} onPress={() => { setCustomStart(s); setCustomEnd(e); }} style={[styles.chip, customStart === s && styles.chipActive]}>
-                      <Text style={customStart === s ? styles.chipTextActive : styles.chipText}>{avFmt(s)}–{avFmt(e)}</Text>
+                      <Text selectable style={customStart === s ? styles.chipTextActive : styles.chipText}>{avFmt(s)}–{avFmt(e)}</Text>
                     </Pressable>
                   ))}
                 </View>
@@ -212,7 +213,7 @@ function AvDaySheet({
             </Pressable>
           ))}
           <Pressable onPress={() => { onSet(day.key, null); onClose(); }} style={[styles.lightCta, { marginTop: 8 }]}>
-            <Text style={styles.lightCtaText}>跟随每周规律（清除例外）</Text>
+            <Text selectable style={styles.lightCtaText}>跟随每周规律（清除例外）</Text>
           </Pressable>
         </Pressable>
       </Pressable>
@@ -315,22 +316,22 @@ function QrCard({
         )}
       </View>
       <View style={[styles.qrCardText, alignCenter && styles.qrCardTextCenter]}>
-        <Text style={styles.qrCardTitle}>{title}</Text>
-        <Text style={styles.qrCardDesc}>{desc}</Text>
+        <Text selectable style={styles.qrCardTitle}>{title}</Text>
+        <Text selectable style={styles.qrCardDesc}>{desc}</Text>
         {buttons ? (
           <View style={styles.qrCardActions}>
             {buttons.map((action) => (
               <Pressable key={action.label} onPress={action.onPress} accessibilityLabel={action.label} style={action.primary ? styles.qrCardBtn : styles.qrCardBtnGhost}>
-                <Text style={action.primary ? styles.qrCardBtnText : styles.qrCardBtnTextGhost}>{action.label}</Text>
+                <Text selectable style={action.primary ? styles.qrCardBtnText : styles.qrCardBtnTextGhost}>{action.label}</Text>
               </Pressable>
             ))}
           </View>
         ) : (
           <Pressable onPress={onAction} style={styles.qrCardBtn}>
-            <Text style={styles.qrCardBtnText}>{actionLabel}</Text>
+            <Text selectable style={styles.qrCardBtnText}>{actionLabel}</Text>
           </Pressable>
         )}
-        {notice ? <Text style={styles.qrCardNotice}>{notice}</Text> : null}
+        {notice ? <Text selectable style={styles.qrCardNotice}>{notice}</Text> : null}
       </View>
     </View>
   );
@@ -350,13 +351,13 @@ function SocialRow({
   return (
     <Pressable onPress={onPress} style={styles.socialRow}>
       <View style={styles.socialRowIcon}>
-        <Text style={styles.socialRowIconText}>{icon}</Text>
+        <Text selectable style={styles.socialRowIconText}>{icon}</Text>
       </View>
       <View style={styles.socialRowCopy}>
-        <Text style={styles.socialRowLabel}>{label}</Text>
-        <Text style={styles.socialRowDesc}>{desc}</Text>
+        <Text selectable style={styles.socialRowLabel}>{label}</Text>
+        <Text selectable style={styles.socialRowDesc}>{desc}</Text>
       </View>
-      <Text style={styles.socialRowChev}>›</Text>
+      <Text selectable style={styles.socialRowChev}>›</Text>
     </Pressable>
   );
 }
@@ -376,8 +377,8 @@ function AvailabilitySheet({
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
       <Pressable onPress={onClose} style={styles.availabilityOverlay}>
         <Pressable onPress={() => undefined} style={styles.availabilitySheet}>
-          <Text style={styles.availabilityTitle}>个人状态</Text>
-          <Text style={styles.availabilitySub}>这是市场状态，不是身份切换。</Text>
+          <Text selectable style={styles.availabilityTitle}>个人状态</Text>
+          <Text selectable style={styles.availabilitySub}>这是市场状态，不是身份切换。</Text>
           {AVAILABILITY_OPTIONS.map((option) => {
             const active = option.id === current;
             return (
@@ -390,10 +391,10 @@ function AvailabilitySheet({
                   <ProxyIcon color={active ? color.white : color.ink} name={option.id === "AVAILABLE" ? "target" : "circle"} size={22} />
                 </View>
                 <View style={styles.availabilityCopy}>
-                  <Text style={styles.availabilityOptionTitle}>{option.title}</Text>
-                  <Text style={styles.availabilityOptionDesc}>{option.desc}</Text>
+                  <Text selectable style={styles.availabilityOptionTitle}>{option.title}</Text>
+                  <Text selectable style={styles.availabilityOptionDesc}>{option.desc}</Text>
                 </View>
-                <Text style={styles.availabilityAction}>{active ? "当前" : "设置"}</Text>
+                <Text selectable style={styles.availabilityAction}>{active ? "当前" : "设置"}</Text>
               </Pressable>
             );
           })}
@@ -410,12 +411,12 @@ function MeLocationContext(): React.JSX.Element {
         <ProxyIcon color={color.ink} name="crosshair" size={17} />
       </View>
       <View style={styles.meLocationCopy}>
-        <Text style={styles.meLocationCity}>河内 · 还剑湖附近</Text>
-        <Text numberOfLines={1} style={styles.meLocationSub}>
+        <Text selectable style={styles.meLocationCity}>河内 · 还剑湖附近</Text>
+        <Text selectable numberOfLines={1} style={styles.meLocationSub}>
           你正在看的本地范围 · 仅城市 / 区域
         </Text>
       </View>
-      <Text style={styles.meLocationSwitch}>切换⌄</Text>
+      <Text selectable style={styles.meLocationSwitch}>切换⌄</Text>
     </View>
   );
 }
@@ -431,6 +432,10 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
     // FACET-LOGO-001: 参考稿 Proxy_COMPLETE_FiveRoot_FACET_v11.html 的真牌标
     // （黄黑对半分、白圆+四角星），不是随手指一个通用图标顶替。
     <Image accessibilityLabel="FACET" resizeMode="contain" source={FACET_LOGO} style={styles.serviceLogo} />
+  ) : row.icon === "ai-manage" ? (
+    // AI-MANAGE-003：AI 管理用原型里那枚真牌标（深色圆角方块 + 节点连线 + 在线点），
+    // 以前写的 "sparkle" 不在 ProxySymbolIcon 的表里，回落成文字画出了「sp」。
+    <AILogo active size={40} />
   ) : row.icon === "voucher" ? (
     <ProxyIcon color={row.grad ? color.white : color.ink} name="cup" size={26} />
   ) : (
@@ -443,15 +448,15 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
           {icon}
         </Gradient>
       ) : (
-        <View style={[styles.serviceIcon, row.icon === "P" && styles.serviceLogoBox]}>
+        <View style={[styles.serviceIcon, row.icon === "P" && styles.serviceLogoBox, row.icon === "ai-manage" && styles.serviceIconBare]}>
           {icon}
         </View>
       )}
       <View style={styles.serviceCopy}>
-        <Text style={styles.serviceLabel}>{row.label}</Text>
-        <Text style={styles.serviceDesc}>{row.desc}</Text>
+        <Text selectable style={styles.serviceLabel}>{row.label}</Text>
+        <Text selectable style={styles.serviceDesc}>{row.desc}</Text>
       </View>
-      <Text style={styles.chev}>›</Text>
+      <Text selectable style={styles.chev}>›</Text>
     </Pressable>
   );
 }

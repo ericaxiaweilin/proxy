@@ -25,11 +25,21 @@ export type LegalStatusBannerProps = {
   onDismiss?: () => void;
 };
 
-// bannerPriority lists the categories that are severe enough
-// to warrant a top-of-screen banner. MARKETPLACE / PAYMENTS
-// are not listed because they disable commerce, not
-// information — the relevant subpages already render a
-// "service paused" card when the category is killed.
+// bannerCategories lists the categories that are severe
+// enough to warrant a top-of-screen banner. MARKETPLACE /
+// PAYMENTS are not listed because they disable commerce, not
+// information -- the intent was for those to surface
+// in-context instead.
+//
+// KNOWN GAP (2026-09-21): that in-context "service paused"
+// card does not exist. This comment used to assert it did.
+// Nothing in apps/mobile/src handles the SERVICE_DISABLED 503
+// the server returns when MARKETPLACE is killed, so a user who
+// taps "order" while the switch is armed gets an unexplained
+// failure. Adding "MARKETPLACE" to this list is the one-line
+// stopgap, but it puts a commerce outage at the top of every
+// unrelated screen -- which is what the split above was trying
+// to avoid. Picking between those two is a product call.
 const bannerCategories: ReadonlyArray<LegalStatusCategory> = [
   "GLOBAL",
   "AI_MEDIA",
@@ -50,12 +60,12 @@ export function LegalStatusBanner({ status, onDismiss }: LegalStatusBannerProps)
   return (
     <View style={styles.banner}>
       <View style={styles.text}>
-        <Text style={styles.title}>服务暂停 · {labelFor(killed)}</Text>
-        <Text style={styles.body}>{status?.killed[killed]?.reason ?? ""}</Text>
+        <Text selectable style={styles.title}>服务暂停 · {labelFor(killed)}</Text>
+        <Text selectable style={styles.body}>{status?.killed[killed]?.reason ?? ""}</Text>
       </View>
       {onDismiss ? (
         <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.closeBtn}>
-          <Text style={styles.closeText}>×</Text>
+          <Text selectable style={styles.closeText}>×</Text>
         </Pressable>
       ) : null}
     </View>

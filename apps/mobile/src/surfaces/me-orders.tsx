@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import type { Activity } from "@proxy/contracts";
 import { ActivityClient, ActivityCommandRejectedError } from "../activity-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
+import type { MediaClient } from "../media-client";
 import type { ModerationClient } from "../moderation-client";
 import { ReportSheet } from "../components/report-sheet";
 import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
+import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { color } from "../theme";
 import { ActivityDetailSurface } from "./activity-detail";
+import { activityAIPersonaName } from "./activity-detail-model";
 import { styles } from "./me-styles";
 import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
+import { createSceneFavoritesStore, resolveSavedSceneIds, type SavedSceneEntry } from "../scene-favorites";
+import { savedSceneLookup } from "../components/scene-activity-discovery";
 
 type OrderFilter = "all" | "published" | "joined" | "done" | "cancelled";
 
@@ -23,11 +29,14 @@ function canCancel(order: FulfillmentOrder): boolean {
   return order.lifecycle === "OFFERED" || order.lifecycle === "CONFIRMED" || order.lifecycle === "EXECUTING";
 }
 
-export function MyOrdersSurface({ client, moderation, onBack }: {
+export function MyOrdersSurface({ client, moderation, mediaClient, onBack }: {
   client: FulfillmentClient;
   // COMP-REPORT-002: 举报这笔交易。钱与线下见面都在这一层 —— 诈骗、
   // 招嫖揽客、人身威胁的暴露面正是订单，不是帖子。
   moderation: ModerationClient;
+  // ORDER-EXEC-001: 提交证据要传照片，没有 mediaClient 就不画证据入口，
+  // 不摆拍不了照的假按钮。
+  mediaClient?: MediaClient | undefined;
   onBack: () => void;
 }): React.JSX.Element {
   const [filter, setFilter] = useState<OrderFilter>("all");
@@ -90,53 +99,317 @@ export function MyOrdersSurface({ client, moderation, onBack }: {
     }
   }
 
+  // ORDER-EXEC-001: 订单详情以前只有"返回列表" —— OFFERED 卡死，EXECUTING 走不到
+  // COMPLETED，COMPLETED 评不了分。下面按 lifecycle 逐态出按钮，全部走真命令，
+  // 成功后重拉列表并同步明细；服务端拒绝码翻译成人话，不直接展示。
+  const [acting, setActing] = useState<string | undefined>(undefined);
+  const [actError, setActError] = useState<string | undefined>(undefined);
+  const [checkinMarket, setCheckinMarket] = useState("");
+  const [checkinPlace, setCheckinPlace] = useState("");
+  const [evidenceBusy, setEvidenceBusy] = useState(false);
+  const [outcomeOnTime, setOutcomeOnTime] = useState(true);
+  const [outcomeScope, setOutcomeScope] = useState(true);
+  const [outcomeNote, setOutcomeNote] = useState("");
+  const [outcomePhoto, setOutcomePhoto] = useState<{ uri: string; mimeType: string; width: number; height: number } | undefined>(undefined);
+  const [satisfactionResolved, setSatisfactionResolved] = useState<"FULL" | "PARTIAL" | "NONE">("FULL");
+  const [satisfactionRepeat, setSatisfactionRepeat] = useState<"" | "REUSE" | "MAYBE" | "NO">("");
+  const [settleAmount, setSettleAmount] = useState("");
+  const [settleMethod, setSettleMethod] = useState("");
+  const [settlePayer, setSettlePayer] = useState(false);
+  const [settlePayee, setSettlePayee] = useState(false);
+
+  function humanOrderError(error: unknown, fallback: string): string {
+    const msg = error instanceof Error ? error.message : "";
+    if (/principal|session|signed|sign in|re-authenticate|AUTH|auth/i.test(msg)) return "登录已过期，请重新登录后再操作。";
+    if (/NOT_ORDER_PARTY/i.test(msg)) return "只有订单双方能操作这笔订单。";
+    if (/NOT_CHECKINABLE|NOT_EXECUTABLE|EVIDENCE_NOT_ALLOWED|NOT_COMPLETABLE|NOT_COMPLETED|NOT_CONFIRMABLE|NOT_AMENDABLE|SETTLEMENT_NOT_RECORDABLE|MODE_MISMATCH/i.test(msg)) return "当前状态不能做这个操作，下拉刷新看看最新状态。";
+    if (/ONLY_REQUESTER_RATES/i.test(msg)) return "只有需求方能评价。";
+    if (/CASH_ELIGIBILITY|ELIGIBILITY/i.test(msg)) return "这笔现金单还没过审，先走平台担保或等审核。";
+    if (/OUTCOME_ALREADY|ALREADY/i.test(msg)) return "已经操作过了，刷新看看。";
+    return fallback;
+  }
+
+  async function refreshDetail(orderId: string): Promise<void> {
+    try {
+      const rows = await client.listMyOrders();
+      setOrders(rows);
+      const updated = rows.find((o) => o.orderId === orderId);
+      if (updated) setDetail(updated);
+    } catch {
+      setActError("已提交，但列表刷新失败，重进页面查看最新状态。");
+    }
+  }
+
+  async function runOrderAction(label: string, orderId: string, fn: () => Promise<void>): Promise<void> {
+    if (acting) return;
+    setActError(undefined);
+    setActing(label);
+    try {
+      await fn();
+      await refreshDetail(orderId);
+    } catch (error) {
+      setActError(humanOrderError(error, "操作失败，请检查连接后重试。"));
+    } finally {
+      setActing(undefined);
+    }
+  }
+
+  async function pickOutcomePhoto(): Promise<void> {
+    if (!mediaClient || evidenceBusy) return;
+    setActError(undefined);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setActError("请允许 Proxy 读取照片才能附证据。");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8, selectionLimit: 1 });
+    const asset = result.canceled ? undefined : result.assets[0];
+    if (!asset?.uri) return;
+    setOutcomePhoto({ uri: asset.uri, mimeType: asset.mimeType ?? "image/jpeg", width: asset.width ?? 0, height: asset.height ?? 0 });
+  }
+
+  // 确认完成 = 可选附一张证据照片 + 准时/范围/备注，一次提交。照片先上传拿
+  // mediaAssetId 再调记录结果；没选照片就只记结果，不摆拍不了照的假按钮。
+  // 小单在 CONFIRMED 点确认完成时先自动开工（服务端强制过 EXECUTING），
+  // 用户只点一次，两次状态翻转都在服务端留痕。
+  async function submitCompletion(orderId: string, lifecycle: string): Promise<void> {
+    if (!mediaClient && outcomePhoto) return;
+    setActError(undefined);
+    setEvidenceBusy(true);
+    try {
+      if (outcomePhoto && mediaClient) {
+        const uploaded = await mediaClient.uploadImage({ uri: outcomePhoto.uri, mimeType: outcomePhoto.mimeType, width: outcomePhoto.width, height: outcomePhoto.height });
+        await client.submitEvidence(orderId, { mediaAssetId: uploaded.mediaAssetId });
+      }
+      if (lifecycle === "CONFIRMED") {
+        await client.startExecution(orderId);
+      }
+      await runOrderAction("确认完成", orderId, () => client.recordOutcome(orderId, { onTime: outcomeOnTime, scopeCompleted: outcomeScope, ...(outcomeNote.trim() ? { objectiveNote: outcomeNote.trim() } : {}) }));
+      setOutcomePhoto(undefined);
+      setOutcomeNote("");
+    } catch (error) {
+      setActError(humanOrderError(error, "完成提交失败，请稍后重试。"));
+    } finally {
+      setEvidenceBusy(false);
+    }
+  }
+
+  // 打卡地点默认填快照里的碰面地点；市场名按碰面地点猜填，可改。
+  useEffect(() => {
+    if (detail) {
+      if (checkinPlace === "") setCheckinPlace(detail.snapshot.meetingContext || "");
+    }
+  }, [detail?.orderId]);
+
   if (detail) {
+    // ORDER-TIER-001：流程按金额分档 —— 小单步骤多就是阻碍。500K 以下走短流程
+    // （确认合作 → 确认完成 → 评价），到场/结算表单不出现；大单走全流程
+    // （到场证明 + 证据 + 结算 + 评价）。线是常量，要调只改这里。
+    // 服务端状态机强制过 EXECUTING：小单点确认完成时自动先开工再记结果，
+    // 两次服务端状态翻转都留痕，只是用户只点一次。
+    const SMALL_ORDER_AMOUNT_VND = 500_000;
+    const isSmallOrder = (detail.snapshot.agreedCompensation || 0) < SMALL_ORDER_AMOUNT_VND;
+    const showSettlement = detail.snapshot.settlementMode === "DIRECT_SETTLEMENT" && detail.lifecycle !== "OFFERED" && detail.lifecycle !== "CANCELLED" && !isSmallOrder;
+    const actBtn = [styles.orderTab, styles.orderActBtn];
+    const actBtnText = [styles.orderTabText, styles.orderActBtnText];
     return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
-          <Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回订单</Text></Pressable>
-          <Text style={styles.detailTitle}>订单详情</Text>
+          <Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}><Text selectable style={styles.subPageBackText}>‹ 返回订单</Text></Pressable>
+          <Text selectable style={styles.detailTitle}>订单详情</Text>
           <View style={styles.orderCard}>
             <View style={styles.orderHead}>
               <View style={styles.orderCopy}>
-                <Text style={styles.orderTitle}>{detail.snapshot.serviceSku || "Proxy 订单"}</Text>
-                <Text style={styles.orderId}>{detail.orderId}</Text>
+                <Text selectable style={styles.orderTitle}>{detail.snapshot.serviceSku || "Proxy 订单"}</Text>
+                <Text selectable style={styles.orderId}>{detail.orderId}</Text>
               </View>
-              <Text style={[styles.orderBadge, detail.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(detail)}</Text>
+              <Text selectable style={[styles.orderBadge, detail.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(detail)}</Text>
             </View>
-            <Text style={styles.orderNotice}>订单编号是订单全生命周期的唯一识别号，用于支付、退款、客服、争议、结算和记录查询。</Text>
+            <Text selectable style={styles.orderNotice}>订单编号是订单全生命周期的唯一识别号，用于支付、退款、客服、争议、结算和记录查询。</Text>
           </View>
           <View style={styles.orderCard}>
-            <Text style={styles.orderTitle}>服务信息</Text>
+            <Text selectable style={styles.orderTitle}>服务信息</Text>
             <View style={styles.orderGrid}>
               {fields(detail).map(([label, value]) => (
                 <View key={label} style={styles.orderField}>
-                  <Text style={styles.orderFieldLabel}>{label}</Text>
-                  <Text style={styles.orderFieldValue}>{value}</Text>
+                  <Text selectable style={styles.orderFieldLabel}>{label}</Text>
+                  <Text selectable style={styles.orderFieldValue}>{value}</Text>
                 </View>
               ))}
             </View>
           </View>
+          {/* ORDER-EXEC-001：按 lifecycle 出执行动作。服务端按状态 + 身份 double-check，
+              这里只做"该出的出"（不该出的不摆假按钮），拒绝码翻人话。 */}
+          {detail.lifecycle === "OFFERED" ? (
+            <Pressable
+              disabled={acting !== undefined}
+              onPress={() => void runOrderAction("确认合作", detail.orderId, () => client.confirmCooperation(detail.orderId))}
+              style={actBtn}
+              accessibilityLabel="确认合作"
+            >
+              <Text selectable style={actBtnText}>{acting === "确认合作" ? "提交中…" : "确认合作"}</Text>
+            </Pressable>
+          ) : null}
+          {detail.lifecycle === "CONFIRMED" && !isSmallOrder ? (
+            <View style={styles.orderCard}>
+              <Text selectable style={styles.orderTitle}>到场</Text>
+              {/* 消费场景（PRD Ch11）：到场是信任锚 —— agent 到场举证，requester 也可
+                  按"对方已到场"确认。开工是另一个节拍，服务端保留 StartExecution
+                  能力，UI 只给出场这一条路，步骤不翻倍。 */}
+              <Text selectable style={styles.orderFieldLabel}>碰面地点（默认快照里的地点）</Text>
+              <TextInput
+                value={checkinPlace}
+                onChangeText={setCheckinPlace}
+                placeholder="碰面地点"
+                placeholderTextColor={color.muted}
+                style={styles.actInput}
+                accessibilityLabel="碰面地点"
+              />
+              <Text selectable style={styles.orderFieldLabel}>市场 / 商场名</Text>
+              <TextInput
+                value={checkinMarket}
+                onChangeText={setCheckinMarket}
+                placeholder="如 Complex 01"
+                placeholderTextColor={color.muted}
+                style={styles.actInput}
+                accessibilityLabel="市场编号"
+              />
+              <Pressable
+                disabled={acting !== undefined || checkinMarket.trim() === ""}
+                onPress={() => void runOrderAction("到场", detail.orderId, () => client.checkInOrder(detail.orderId, { marketId: checkinMarket.trim(), locationLabel: checkinPlace.trim() || checkinMarket.trim() }))}
+                style={actBtn}
+                accessibilityLabel="确认到场"
+              >
+                <Text selectable style={actBtnText}>{acting === "到场" ? "提交中…" : "确认到场"}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {(detail.lifecycle === "EXECUTING" || (isSmallOrder && detail.lifecycle === "CONFIRMED")) ? (
+            <View style={styles.orderCard}>
+              <Text selectable style={styles.orderTitle}>确认完成</Text>
+              {mediaClient ? (
+                <Pressable
+                  disabled={acting !== undefined || evidenceBusy}
+                  onPress={() => void pickOutcomePhoto()}
+                  style={actBtn}
+                  accessibilityLabel="附证据照片"
+                >
+                  <Text selectable style={actBtnText}>{outcomePhoto ? "✓ 已选一张证据照片" : "附证据照片（可选）"}</Text>
+                </Pressable>
+              ) : null}
+              <Text selectable style={styles.orderFieldLabel}>准时和范围如实勾选，有话写在说明里</Text>
+              <View style={styles.actRow}>
+                <Pressable onPress={() => setOutcomeOnTime((v) => !v)} style={[styles.actChip, outcomeOnTime && styles.actChipOn]} accessibilityLabel="是否准时">
+                  <Text selectable style={styles.actChipText}>{outcomeOnTime ? "✓ 准时" : "未准时"}</Text>
+                </Pressable>
+                <Pressable onPress={() => setOutcomeScope((v) => !v)} style={[styles.actChip, outcomeScope && styles.actChipOn]} accessibilityLabel="范围是否完成">
+                  <Text selectable style={styles.actChipText}>{outcomeScope ? "✓ 范围完成" : "范围未完成"}</Text>
+                </Pressable>
+              </View>
+              <TextInput
+                value={outcomeNote}
+                onChangeText={setOutcomeNote}
+                placeholder="结果说明（可选）"
+                placeholderTextColor={color.muted}
+                style={styles.actInput}
+                accessibilityLabel="结果说明"
+              />
+              <Pressable
+                disabled={acting !== undefined || evidenceBusy}
+                onPress={() => void submitCompletion(detail.orderId, detail.lifecycle)}
+                style={actBtn}
+                accessibilityLabel="确认完成"
+              >
+                <Text selectable style={actBtnText}>{acting === "确认完成" || evidenceBusy ? "提交中…" : "确认完成"}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {detail.lifecycle === "COMPLETED" && detail.viewerRole === "REQUESTER" ? (
+            <View style={styles.orderCard}>
+              <Text selectable style={styles.orderTitle}>评价这次合作</Text>
+              <View style={styles.actRow}>
+                {(["FULL", "PARTIAL", "NONE"] as const).map((option) => (
+                  <Pressable key={option} onPress={() => setSatisfactionResolved(option)} style={[styles.actChip, satisfactionResolved === option && styles.actChipOn]} accessibilityLabel={`解决程度${option}`}>
+                    <Text selectable style={styles.actChipText}>{option === "FULL" ? "完全解决" : option === "PARTIAL" ? "部分解决" : "没解决"}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={styles.actRow}>
+                {(["REUSE", "MAYBE", "NO"] as const).map((option) => (
+                  <Pressable key={option} onPress={() => setSatisfactionRepeat((prev) => (prev === option ? "" : option))} style={[styles.actChip, satisfactionRepeat === option && styles.actChipOn]} accessibilityLabel={`是否再合作${option}`}>
+                    <Text selectable style={styles.actChipText}>{option === "REUSE" ? "再合作" : option === "MAYBE" ? "考虑" : "不再合作"}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable
+                disabled={acting !== undefined}
+                onPress={() => void runOrderAction("评价", detail.orderId, () => client.recordSatisfaction(detail.orderId, { resolved: satisfactionResolved, ...(satisfactionRepeat ? { repeatIntent: satisfactionRepeat } : {}) }))}
+                style={actBtn}
+                accessibilityLabel="提交评价"
+              >
+                <Text selectable style={actBtnText}>{acting === "评价" ? "提交中…" : "提交评价"}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {showSettlement ? (
+            <View style={styles.orderCard}>
+              <Text selectable style={styles.orderTitle}>记录结算（线下直接结算）</Text>
+              <TextInput
+                value={settleAmount}
+                onChangeText={(v) => setSettleAmount(v.replace(/[^0-9]/g, ""))}
+                placeholder={`金额（快照 ${detail.snapshot.agreedCompensation.toLocaleString()} ${detail.snapshot.currency || "VND"}）`}
+                placeholderTextColor={color.muted}
+                keyboardType="numeric"
+                style={styles.actInput}
+                accessibilityLabel="结算金额"
+              />
+              <TextInput
+                value={settleMethod}
+                onChangeText={setSettleMethod}
+                placeholder={detail.snapshot.paymentMethodLabel || "支付方式说明"}
+                placeholderTextColor={color.muted}
+                style={styles.actInput}
+                accessibilityLabel="支付方式"
+              />
+              <View style={styles.actRow}>
+                <Pressable onPress={() => setSettlePayer((v) => !v)} style={[styles.actChip, settlePayer && styles.actChipOn]} accessibilityLabel="付款方已确认">
+                  <Text selectable style={styles.actChipText}>{settlePayer ? "✓ 付款方确认" : "付款方确认"}</Text>
+                </Pressable>
+                <Pressable onPress={() => setSettlePayee((v) => !v)} style={[styles.actChip, settlePayee && styles.actChipOn]} accessibilityLabel="收款方已确认">
+                  <Text selectable style={styles.actChipText}>{settlePayee ? "✓ 收款方确认" : "收款方确认"}</Text>
+                </Pressable>
+              </View>
+              <Pressable
+                disabled={acting !== undefined || settleAmount.trim() === ""}
+                onPress={() => void runOrderAction("记录结算", detail.orderId, () => client.recordSettlement(detail.orderId, { agreedAmount: Number(settleAmount), ...(settleMethod.trim() ? { paymentMethodLabel: settleMethod.trim() } : {}), payerConfirmed: settlePayer, payeeConfirmed: settlePayee }))}
+                style={actBtn}
+                accessibilityLabel="记录结算"
+              >
+                <Text selectable style={actBtnText}>{acting === "记录结算" ? "提交中…" : "记录结算"}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {actError ? <Text selectable style={styles.orderNotice}>{actError}</Text> : null}
           {canCancel(detail) ? (
             <Pressable
               disabled={cancellingId === detail.orderId}
               onPress={() => void confirmAndCancel(detail)}
               style={[styles.orderTab, styles.orderCancelBtn, cancellingId === detail.orderId && styles.orderTabOn]}
             >
-              <Text style={[styles.orderTabText, styles.orderCancelBtnText, cancellingId === detail.orderId && styles.orderTabTextOn]}>
+              <Text selectable style={[styles.orderTabText, styles.orderCancelBtnText, cancellingId === detail.orderId && styles.orderTabTextOn]}>
                 {cancellingId === detail.orderId ? "取消中…" : "取消订单"}
               </Text>
             </Pressable>
           ) : null}
-          {cancelError ? <Text style={styles.orderNotice}>{cancelError}</Text> : null}
+          {cancelError ? <Text selectable style={styles.orderNotice}>{cancelError}</Text> : null}
           <Pressable
             accessibilityLabel="举报这笔交易"
             onPress={() => { setReportNotice(undefined); setReporting(detail.orderId); }}
             style={styles.orderTab}
           >
-            <Text style={styles.orderTabText}>举报这笔交易</Text>
+            <Text selectable style={styles.orderTabText}>举报这笔交易</Text>
           </Pressable>
-          {reportNotice ? <Text style={styles.orderNotice}>{reportNotice}</Text> : null}
+          {reportNotice ? <Text selectable style={styles.orderNotice}>{reportNotice}</Text> : null}
         </ScrollView>
         {/* COMP-REPORT-002: 举报交易。target 用 orderId —— 报的是这笔
             交易，不是对方这个人（报人走账号举报入口）。 */}
@@ -158,35 +431,35 @@ export function MyOrdersSurface({ client, moderation, onBack }: {
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.orderPageHead}>
-          <Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable>
-          <Text style={styles.detailTitle}>我的订单</Text>
+          <Pressable onPress={onBack} style={styles.orderBack}><Text selectable style={styles.orderBackText}>‹</Text></Pressable>
+          <Text selectable style={styles.detailTitle}>我的订单</Text>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>
           {([['all','全部'],['published','我发布的'],['joined','我参与的'],['done','已完成'],['cancelled','已取消']] as const).map(([id,label]) => (
             <Pressable key={id} onPress={() => setFilter(id)} style={[styles.orderTab, filter === id && styles.orderTabOn]}>
-              <Text style={[styles.orderTabText, filter === id && styles.orderTabTextOn]}>{label}</Text>
+              <Text selectable style={[styles.orderTabText, filter === id && styles.orderTabTextOn]}>{label}</Text>
             </Pressable>
           ))}
         </ScrollView>
         {phase === "LOADING" ? <ProxyLoading tone="brand" /> : null}
-        {phase === "ERROR" ? <Text style={styles.personalEmpty}>订单服务暂时不可用，请稍后重试。</Text> : null}
-        {phase === "READY" && visible.length === 0 ? <Text style={styles.personalEmpty}>当前分类还没有订单。</Text> : null}
-        {cancelError ? <Text style={styles.orderNotice}>{cancelError}</Text> : null}
+        {phase === "ERROR" ? <Text selectable style={styles.personalEmpty}>订单服务暂时不可用，请稍后重试。</Text> : null}
+        {phase === "READY" && visible.length === 0 ? <Text selectable style={styles.personalEmpty}>当前分类还没有订单。</Text> : null}
+        {cancelError ? <Text selectable style={styles.orderNotice}>{cancelError}</Text> : null}
         {visible.map((item) => (
           <View key={item.orderId} style={styles.orderCard}>
             <Pressable onPress={() => setDetail(item)}>
               <View style={styles.orderHead}>
                 <View style={styles.orderCopy}>
-                  <Text style={styles.orderTitle}>{item.snapshot.serviceSku || "Proxy 订单"}</Text>
-                  <Text style={styles.orderId}>订单编号：{item.orderId}</Text>
+                  <Text selectable style={styles.orderTitle}>{item.snapshot.serviceSku || "Proxy 订单"}</Text>
+                  <Text selectable style={styles.orderId}>订单编号：{item.orderId}</Text>
                 </View>
-                <Text style={[styles.orderBadge, item.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(item)}</Text>
+                <Text selectable style={[styles.orderBadge, item.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(item)}</Text>
               </View>
               <View style={styles.orderGrid}>
                 {fields(item).slice(0, 4).map(([label, value]) => (
                   <View key={label} style={styles.orderField}>
-                    <Text style={styles.orderFieldLabel}>{label}</Text>
-                    <Text style={styles.orderFieldValue}>{value}</Text>
+                    <Text selectable style={styles.orderFieldLabel}>{label}</Text>
+                    <Text selectable style={styles.orderFieldValue}>{value}</Text>
                   </View>
                 ))}
               </View>
@@ -197,7 +470,7 @@ export function MyOrdersSurface({ client, moderation, onBack }: {
                 onPress={() => void confirmAndCancel(item)}
                 style={[styles.orderTab, styles.orderCancelBtn, cancellingId === item.orderId && styles.orderTabOn]}
               >
-                <Text style={[styles.orderTabText, styles.orderCancelBtnText, cancellingId === item.orderId && styles.orderTabTextOn]}>
+                <Text selectable style={[styles.orderTabText, styles.orderCancelBtnText, cancellingId === item.orderId && styles.orderTabTextOn]}>
                   {cancellingId === item.orderId ? "取消中…" : "取消订单"}
                 </Text>
               </Pressable>
@@ -298,28 +571,28 @@ export function MyActivitiesSurface({ onBack, moderation }: { onBack: () => void
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.orderPageHead}>
-          <Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable>
-          <Text style={styles.detailTitle}>我的活动</Text>
+          <Pressable onPress={onBack} style={styles.orderBack}><Text selectable style={styles.orderBackText}>‹</Text></Pressable>
+          <Text selectable style={styles.detailTitle}>我的活动</Text>
         </View>
         <View style={styles.activityOwnedTabs}>
           {([["open", "可参加"], ["joined", "已参加"], ["created", "我发起的"]] as const).map(([id, label]) => (
             <Pressable key={id} onPress={() => setTab(id)} style={[styles.activityOwnedTab, tab === id && styles.activityOwnedTabOn]}>
-              <Text style={[styles.activityOwnedTabText, tab === id && styles.activityOwnedTabTextOn]}>{label}</Text>
+              <Text selectable style={[styles.activityOwnedTabText, tab === id && styles.activityOwnedTabTextOn]}>{label}</Text>
             </Pressable>
           ))}
         </View>
-        {notice ? <Text style={styles.savedMeta}>{notice}</Text> : null}
-        {!authed ? <Text style={styles.savedMeta}>登录后才能查看 “已参加” / “我发起的”。</Text> : null}
+        {notice ? <Text selectable style={styles.savedMeta}>{notice}</Text> : null}
+        {!authed ? <Text selectable style={styles.savedMeta}>登录后才能查看 “已参加” / “我发起的”。</Text> : null}
         {phase === "LOADING" ? <ProxyLoading tone="brand" /> : null}
         {phase === "ERROR" ? (
           <View>
-            <Text style={styles.personalEmpty}>活动加载失败，请检查连接后重试。</Text>
-            <Pressable onPress={() => reload()} style={[styles.orderTab, styles.orderTabOn]}><Text style={[styles.orderTabText, styles.orderTabTextOn]}>重试</Text></Pressable>
+            <Text selectable style={styles.personalEmpty}>活动加载失败，请检查连接后重试。</Text>
+            <Pressable onPress={() => reload()} style={[styles.orderTab, styles.orderTabOn]}><Text selectable style={[styles.orderTabText, styles.orderTabTextOn]}>重试</Text></Pressable>
           </View>
         ) : null}
-        {phase === "READY" && tab === "created" && authed && items.length === 0 ? <Text style={styles.personalEmpty}>还没有发起过活动。</Text> : null}
-        {phase === "READY" && tab === "joined" && authed && items.length === 0 ? <Text style={styles.personalEmpty}>还没有报名，去可参加看看。</Text> : null}
-        {phase === "READY" && tab === "open" && items.length === 0 ? <Text style={styles.personalEmpty}>本周暂无开放活动。</Text> : null}
+        {phase === "READY" && tab === "created" && authed && items.length === 0 ? <Text selectable style={styles.personalEmpty}>还没有发起过活动。</Text> : null}
+        {phase === "READY" && tab === "joined" && authed && items.length === 0 ? <Text selectable style={styles.personalEmpty}>还没有报名，去可参加看看。</Text> : null}
+        {phase === "READY" && tab === "open" && items.length === 0 ? <Text selectable style={styles.personalEmpty}>本周暂无开放活动。</Text> : null}
         {phase === "READY" ? items.map((item) => {
           const joinedSet = new Set(joined.map((a) => a.activityId));
           const isJoined = joinedSet.has(item.activityId);
@@ -328,11 +601,11 @@ export function MyActivitiesSurface({ onBack, moderation }: { onBack: () => void
           return (
             <View key={item.activityId} style={styles.savedCard}>
               <Pressable onPress={() => setDetailId(item.activityId)} accessibilityLabel={`查看${item.title}明细`}>
-              <Text style={styles.orderTitle}>{item.title}</Text>
-              <Text style={styles.savedMeta}>{item.time} · {item.venueIcon} {item.venueName}</Text>
-              <Text style={styles.savedMeta}>{item.priceLabel}{item.price ? ` · ${item.price}` : ""} · 感兴趣 {item.interested} · 已报名 {item.joined}{capacity > 0 ? `/${capacity}` : ""}</Text>
-              {item.aiStatus !== "NONE" && item.aiPersonaName ? <Text style={styles.savedMeta}>AI 虚拟 · {item.aiPersonaName}</Text> : null}
-              <Text style={styles.savedMeta}>查看明细 ›</Text>
+              <Text selectable style={styles.orderTitle}>{item.title}</Text>
+              <Text selectable style={styles.savedMeta}>{item.time} · {item.venueIcon} {item.venueName}</Text>
+              <Text selectable style={styles.savedMeta}>{item.priceLabel}{item.price ? ` · ${item.price}` : ""} · 感兴趣 {item.interested} · 已报名 {item.joined}{capacity > 0 ? `/${capacity}` : ""}</Text>
+              {item.aiStatus !== "NONE" ? <Text selectable style={styles.savedMeta}>AI 虚拟 · {activityAIPersonaName(item)}</Text> : null}
+              <Text selectable style={styles.savedMeta}>查看明细 ›</Text>
               </Pressable>
               {tab === "open" ? (
                 <Pressable
@@ -340,7 +613,7 @@ export function MyActivitiesSurface({ onBack, moderation }: { onBack: () => void
                   onPress={() => void join(item.activityId)}
                   style={[styles.orderTab, (isJoined || full) && styles.orderTabOn]}
                 >
-                  <Text style={[styles.orderTabText, (isJoined || full) && styles.orderTabTextOn]}>
+                  <Text selectable style={[styles.orderTabText, (isJoined || full) && styles.orderTabTextOn]}>
                     {joiningId === item.activityId ? "报名中…" : isJoined ? "已报名" : full ? "已满员" : "报名"}
                   </Text>
                 </Pressable>
@@ -353,10 +626,34 @@ export function MyActivitiesSurface({ onBack, moderation }: { onBack: () => void
   );
 }
 
-type FavoriteTab = "all" | "merchant" | "creator" | "post" | "activity";
+// SCENE-FAVORITE-002：加 "scene" 页签。以前场景区只在「全部」出现，而页签是
+// 全部/商家/Creator/动态/活动 —— 没有场景页签，切到任何一个别的页签就只剩空态，
+// 等于把这一页唯一的真内容藏起来。
+type FavoriteTab = "all" | "scene" | "merchant" | "creator" | "post" | "activity";
 
-export function FavoritesSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
+export function FavoritesSurface({ onBack, viewerAccountId }: { onBack: () => void; viewerAccountId?: string | undefined }): React.JSX.Element {
   const [tab, setTab] = useState<FavoriteTab>("all");
+  // SCENE-FAVORITE-001：home 场景卡片的 🤍 落盘到本机（按账号），这里读出来
+  // 用静态目录回查标题 —— 标题来自 MOMENTS 真目录，hearts 是用户自己的，
+  // 两边都是真数据。目录里查不到的 id 直接丢弃，不画幽灵卡。
+  // SCENE-FAVORITE-002：解析改走 resolveSavedSceneIds —— 与个人主页的收藏 tab
+  // 共用同一份实现，两个面不会各写一遍导致同一份 hearts 显示不一致。
+  const [savedScenes, setSavedScenes] = useState<readonly SavedSceneEntry[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!viewerAccountId) {
+      setSavedScenes([]);
+      return;
+    }
+    void createSceneFavoritesStore(nativeSecureStorageDriver, viewerAccountId)
+      .read()
+      .then((ids) => {
+        if (cancelled) return;
+        setSavedScenes(resolveSavedSceneIds(ids, savedSceneLookup));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [viewerAccountId]);
   // FAVORITES-REAL-001: 以前这里是两条写死的假记录，所有用户看到同一份，
   // 所有用户看到同一份，跟本人收藏无关。后端有 bookmarkPost 写入和
   // ListUserBookmarks 读 ID 的能力，但 ID 没有批量解标题的接口 ——
@@ -364,7 +661,13 @@ export function FavoritesSurface({ onBack }: { onBack: () => void }): React.JSX.
   // 这里只放诚实空态，不放示例数据冒充。
   const visible: Array<{ type: string; title: string; meta: string }> = [];
   const shown = tab === "all" ? visible : visible.filter((item) => item.type === tab);
-  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>收藏</Text></View><Text style={styles.savedIntro}>很轻的个人备忘夹。以后还想找到，就放这里。</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['merchant','商家'],['creator','Creator'],['post','动态'],['activity','活动']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setTab(id)} style={[styles.orderTab, tab === id && styles.orderTabOn]}><Text style={[styles.orderTabText, tab === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{shown.length ? shown.map((item) => <View key={item.title} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text style={styles.savedThumbText}>☆</Text></View><View><Text style={styles.orderTitle}>{item.title}</Text><Text style={styles.savedMeta}>{item.meta}</Text></View></View>) : <ProxyEmptyState title="还没有收藏列表" sub="动态收藏正在接入，这里不放示例数据。" />}</ScrollView></View>;
+  // SCENE-FAVORITE-001：场景区只画读盘回查到的真目录条目，只在「全部」出现
+  // （场景灵感不属于商家/Creator/动态/活动任一页签，不冒充）；动态区仍是诚实空态
+  // （服务端收藏读 ID 的能力有了，但批量解标题接口还没接，见注释）。
+  // SCENE-FAVORITE-002：场景区在「全部」和「场景」两个页签都画 —— 有独立页签，
+  // 切过去不会空掉。
+  const showSceneSection = savedScenes.length > 0 && (tab === "all" || tab === "scene");
+  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text selectable style={styles.orderBackText}>‹</Text></Pressable><Text selectable style={styles.detailTitle}>收藏</Text></View><Text selectable style={styles.savedIntro}>很轻的个人备忘夹。以后还想找到，就放这里。</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['scene','场景'],['merchant','商家'],['creator','Creator'],['post','动态'],['activity','活动']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setTab(id)} style={[styles.orderTab, tab === id && styles.orderTabOn]}><Text selectable style={[styles.orderTabText, tab === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{showSceneSection ? <View><Text selectable style={styles.savedMeta}>场景灵感 · 来自首页收藏</Text>{savedScenes.map((scene) => <View key={scene.id} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text selectable style={styles.savedThumbText}>☆</Text></View><View><Text selectable style={styles.orderTitle}>{scene.title}</Text><Text selectable style={styles.savedMeta}>{scene.meta}</Text></View></View>)}</View> : null}{shown.length ? shown.map((item) => <View key={item.title} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text selectable style={styles.savedThumbText}>☆</Text></View><View><Text selectable style={styles.orderTitle}>{item.title}</Text><Text selectable style={styles.savedMeta}>{item.meta}</Text></View></View>) : (showSceneSection ? null : (tab === "scene" ? <ProxyEmptyState title="还没有收藏场景" sub="首页场景卡片右上角的 🤍 可以加入收藏" /> : <ProxyEmptyState title="还没有收藏列表" sub="动态收藏正在接入，这里不放示例数据。" />))}</ScrollView></View>;
 }
 
 // 商家活动导流：只列 Origin=MERCHANT 的开放活动（种子 + 商家实发），匿名
@@ -421,35 +724,35 @@ export function MerchantCampaignSurface({ onBack, moderation }: { onBack: () => 
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.orderPageHead}>
-          <Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable>
-          <Text style={styles.detailTitle}>活动导流</Text>
+          <Pressable onPress={onBack} style={styles.orderBack}><Text selectable style={styles.orderBackText}>‹</Text></Pressable>
+          <Text selectable style={styles.detailTitle}>活动导流</Text>
         </View>
-        {notice ? <Text style={styles.savedMeta}>{notice}</Text> : null}
+        {notice ? <Text selectable style={styles.savedMeta}>{notice}</Text> : null}
         {phase === "LOADING" ? <ProxyLoading tone="brand" /> : null}
         {phase === "ERROR" ? (
           <View>
-            <Text style={styles.personalEmpty}>活动加载失败，请检查连接后重试。</Text>
-            <Pressable onPress={() => reload()} style={[styles.orderTab, styles.orderTabOn]}><Text style={[styles.orderTabText, styles.orderTabTextOn]}>重试</Text></Pressable>
+            <Text selectable style={styles.personalEmpty}>活动加载失败，请检查连接后重试。</Text>
+            <Pressable onPress={() => reload()} style={[styles.orderTab, styles.orderTabOn]}><Text selectable style={[styles.orderTabText, styles.orderTabTextOn]}>重试</Text></Pressable>
           </View>
         ) : null}
-        {phase === "READY" && items.length === 0 ? <Text style={styles.personalEmpty}>暂无商家活动。</Text> : null}
+        {phase === "READY" && items.length === 0 ? <Text selectable style={styles.personalEmpty}>暂无商家活动。</Text> : null}
         {phase === "READY" ? items.map((item) => {
           const capacity = item.capacity ?? 0;
           const full = capacity > 0 && item.joined >= capacity;
           return (
             <View key={item.activityId} style={styles.savedCard}>
               <Pressable onPress={() => setDetailId(item.activityId)} accessibilityLabel={`查看${item.title}明细`}>
-              <Text style={styles.orderTitle}>{item.title}</Text>
-              <Text style={styles.savedMeta}>{item.time} · {item.venueIcon} {item.venueName}</Text>
-              <Text style={styles.savedMeta}>{item.priceLabel}{item.price ? ` · ${item.price}` : ""} · 已报名 {item.joined}{capacity > 0 ? `/${capacity}` : ""}</Text>
-              <Text style={styles.savedMeta}>查看明细 ›</Text>
+              <Text selectable style={styles.orderTitle}>{item.title}</Text>
+              <Text selectable style={styles.savedMeta}>{item.time} · {item.venueIcon} {item.venueName}</Text>
+              <Text selectable style={styles.savedMeta}>{item.priceLabel}{item.price ? ` · ${item.price}` : ""} · 已报名 {item.joined}{capacity > 0 ? `/${capacity}` : ""}</Text>
+              <Text selectable style={styles.savedMeta}>查看明细 ›</Text>
               </Pressable>
               <Pressable
                 disabled={full || joiningId === item.activityId}
                 onPress={() => void join(item.activityId)}
                 style={[styles.orderTab, full && styles.orderTabOn]}
               >
-                <Text style={[styles.orderTabText, full && styles.orderTabTextOn]}>
+                <Text selectable style={[styles.orderTabText, full && styles.orderTabTextOn]}>
                   {joiningId === item.activityId ? "报名中…" : full ? "已满员" : "报名"}
                 </Text>
               </Pressable>

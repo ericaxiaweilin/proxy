@@ -79,7 +79,7 @@ export function FilterChipRail({
             accessibilityLabel={`${testPrefix} ${item.label}${active ? "，已选" : ""}`}
           >
             {item.assetIcon ? <Image contentFit="contain" source={item.assetIcon} style={[styles.assetIcon, active && styles.assetIconActive]} /> : item.icon ? <ProxyIcon color={active ? color.white : color.ink} name={item.icon} size={18} /> : null}
-            <Text style={[styles.chipText, active && styles.chipTextActive]}>{item.label}</Text>
+            <Text selectable style={[styles.chipText, active && styles.chipTextActive]}>{item.label}</Text>
           </Pressable>
         );
       })}

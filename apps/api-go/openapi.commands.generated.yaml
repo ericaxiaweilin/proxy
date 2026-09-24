@@ -11,6 +11,8 @@ commands:
     domain: CityCompanion
   - command: AcceptFriendRequest
     domain: Relationship
+  - command: AcceptMeetup
+    domain: Conversation
   - command: AcceptSlotOffer
     domain: Fulfillment
   - command: ActivateCampaign
@@ -27,6 +29,10 @@ commands:
     domain: Media
   - command: ApplyToMarketOpportunity
     domain: Marketplace
+  - command: ArriveMeetup
+    domain: Conversation
+  - command: AttestSellerRealName
+    domain: Supply
   - command: AuthenticateWithGoogle
     domain: Identity
   - command: BeginPasswordlessAuthentication
@@ -59,6 +65,8 @@ commands:
     domain: CityCompanion
   - command: CompleteMediaUpload
     domain: Media
+  - command: CompleteMeetup
+    domain: Conversation
   - command: ConfirmCityCompanion
     domain: CityCompanion
   - command: ConfirmCooperation
@@ -153,6 +161,8 @@ commands:
     domain: Conversation
   - command: DeleteStorePhoto
     domain: Business
+  - command: DiscardStandInDraft
+    domain: Conversation
   - command: DismissMarketOpportunity
     domain: Marketplace
   - command: DismissOutcomeLearning
@@ -173,10 +183,14 @@ commands:
     domain: Supply
   - command: GetAgentProfile
     domain: Supply
+  - command: GetAiEngineSettings
+    domain: Identity
   - command: GetBusinessStore
     domain: Business
   - command: GetCandidateBatch
     domain: Supply
+  - command: GetContentAnalytics
+    domain: LocalNet
   - command: GetFollowCounts
     domain: Engagement
   - command: GetLocalContext
@@ -201,6 +215,8 @@ commands:
     domain: Identity
   - command: GetProfileByHandle
     domain: Identity
+  - command: GetReceivedEngagementStats
+    domain: Engagement
   - command: GetStoreLines
     domain: Business
   - command: GetUserProfile
@@ -297,6 +313,8 @@ commands:
     domain: Marketplace
   - command: ListPinnedPosts
     domain: Engagement
+  - command: ListPostAudience
+    domain: LocalNet
   - command: ListPostImpressionStats
     domain: LocalNet
   - command: ListPostReplies
@@ -313,6 +331,8 @@ commands:
     domain: LocalNet
   - command: ListRealitySceneProposals
     domain: RealityScene
+  - command: ListReportQueue
+    domain: Moderation
   - command: ListRequesterHomeItems
     domain: Demand
   - command: ListSpendDaily
@@ -345,6 +365,8 @@ commands:
     domain: Activity
   - command: MuteAuthor
     domain: Engagement
+  - command: NudgeMeetup
+    domain: Conversation
   - command: OpenVoucherRedemption
     domain: Voucher
   - command: OrderVoucherPurchase
@@ -357,6 +379,8 @@ commands:
     domain: Demand
   - command: ProcessMediaAsset
     domain: Media
+  - command: ProposeMeetup
+    domain: Conversation
   - command: ProposeRealityScene
     domain: RealityScene
   - command: PublishActivity
@@ -400,6 +424,8 @@ commands:
   - command: RecordMaterialRouteChange
     domain: CityCompanion
   - command: RecordMediaImpression
+    domain: LocalNet
+  - command: RecordMediaZoom
     domain: LocalNet
   - command: RecordOutcome
     domain: Fulfillment
@@ -483,6 +509,8 @@ commands:
     domain: Notification
   - command: SendMessage
     domain: Conversation
+  - command: SendStandInDraft
+    domain: Conversation
   - command: SetAvailabilityWindow
     domain: Supply
   - command: SetCommunityMembership
@@ -535,6 +563,10 @@ commands:
     domain: Supply
   - command: UpdateAgentService
     domain: Supply
+  - command: UpdateAiEngineSettings
+    domain: Identity
+  - command: UpdatePostAudience
+    domain: LocalNet
   - command: UpdateProfile
     domain: Identity
   - command: UpdateScene

@@ -4,6 +4,7 @@ import * as Crypto from "expo-crypto";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 import { isRestartableUploadSessionStatus, uploadOriginalWithRetry } from "./media-upload-retry";
 
 // 纯逻辑/类型已抽到 media-classify.ts（零原生依赖，供 Vitest 单测使用）。
@@ -231,7 +232,7 @@ export class MediaClient {
     const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
     if (!result) { console.log(`[proxy.R15.63.DEBUG.media] command ${commandType} FAIL: parse result null`); throw new Error("媒体服务返回格式错误"); }
-    if (result.outcome === "REJECTED") { console.log(`[proxy.R15.63.DEBUG.media] command ${commandType} REJECTED messageKey=${result.error?.messageKey ?? "?"} errorCode=${result.error?.errorCode ?? "?"} category=${result.error?.category ?? "?"} retryability=${result.error?.retryability ?? "?"} requiredAction=${result.error?.requiredAction ?? "?"} safeDetails=${JSON.stringify(result.error?.safeDetails ?? {})}`); throw new Error(result.error?.messageKey || "媒体命令被拒绝"); }
+    if (result.outcome === "REJECTED") { console.log(`[proxy.R15.63.DEBUG.media] command ${commandType} REJECTED messageKey=${result.error?.messageKey ?? "?"} errorCode=${result.error?.errorCode ?? "?"} category=${result.error?.category ?? "?"} retryability=${result.error?.retryability ?? "?"} requiredAction=${result.error?.requiredAction ?? "?"} safeDetails=${JSON.stringify(result.error?.safeDetails ?? {})}`); throw new Error(commandErrorMessage(result.error, "媒体命令被拒绝")); }
     if (response.status < 200 || response.status >= 300) { console.log(`[proxy.R15.63.DEBUG.media] command ${commandType} http status=${response.status}`); throw new Error(`媒体命令失败（${response.status}）`); }
     console.log(`[proxy.R15.63.DEBUG.media] command ${commandType} ok status=${response.status}`);
     if (!result.operationRef) return {};

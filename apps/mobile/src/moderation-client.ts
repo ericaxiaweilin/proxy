@@ -2,6 +2,7 @@ import type { CommandResult } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 // COMP-REPORT-002: 用户举报入口的客户端。
 //
@@ -123,7 +124,7 @@ export class ModerationProtocolError extends Error {
 
 export class ModerationCommandRejectedError extends Error {
   public constructor(public readonly result: CommandResult) {
-    super(result.error?.messageKey ?? "moderation command rejected");
+    super(commandErrorMessage(result.error, "moderation command rejected"));
     this.name = "ModerationCommandRejectedError";
   }
 }

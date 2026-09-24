@@ -32,15 +32,27 @@ import (
 
 // Conversation 是对话聚合。
 type Conversation struct {
-	ID            string    `json:"conversationId"`
-	Type          string    `json:"conversationType"` // DM | GROUP | SUPPORT
-	OriginType    string    `json:"originType"`       // HOME | TASK | POST | PROFILE | SERVICE | ACTIVITY | NEED | OFFER | ORDER
-	OriginID      string    `json:"originId"`
-	MarketID      string    `json:"marketId,omitempty"`
-	State         string    `json:"state"` // ACTIVE | ARCHIVED | BLOCKED
-	Participants  []string  `json:"participants"`
-	CreatedAt     time.Time `json:"createdAt"`
-	LastMessageAt time.Time `json:"lastMessageAt"`
+	ID            string     `json:"conversationId"`
+	Type          string     `json:"conversationType"` // DM | GROUP | SUPPORT
+	OriginType    string     `json:"originType"`       // HOME | TASK | POST | PROFILE | SERVICE | ACTIVITY | NEED | OFFER | ORDER
+	OriginID      string     `json:"originId"`
+	MarketID      string     `json:"marketId,omitempty"`
+	State         string     `json:"state"` // ACTIVE | ARCHIVED | BLOCKED
+	Participants  []string   `json:"participants"`
+	// ROOM-CREATE-001: 「创建房间」= GROUP conversation 附带场景元数据。仅
+	// GROUP 会用；DM/SUPPORT 恒为 nil。见 startConversation 里的赋值。
+	RoomScene     *RoomScene `json:"roomScene,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	LastMessageAt time.Time  `json:"lastMessageAt"`
+}
+
+// RoomScene 是「创建房间」时选的活动场景 + 房间名，一次性写在会话上，不随
+// 消息流变化（跟 见面邀约 Meetup 不一样 —— 那个是可变状态机）。
+type RoomScene struct {
+	Emoji     string `json:"emoji"`
+	SceneName string `json:"sceneName"`
+	SceneDesc string `json:"sceneDesc"`
+	RoomName  string `json:"roomName"`
 }
 
 // Message 是对话消息。v0 字段 (ConversationID/MessageType) 保留兼容；v1 契约见
@@ -54,6 +66,8 @@ type Message struct {
 	ReplyTo        *string            `json:"replyTo,omitempty"`    // QUOTE-REPLY-001: 引用的消息 ID（同会话内）；客户端按 ID 解析引用块
 	SenderID       string             `json:"senderId"`
 	SenderSnapshot *IdentitySnapshot  `json:"senderSnapshot,omitempty"` // v1: 发送时固化的 displayName/avatar/username
+	// AI-MANAGE-008：这条是 AI 替 SenderID 那个真人写的（代回复）："ai_stand_in"；空 = 人自己写的。
+	AuthoredBy string `json:"authoredBy,omitempty"`
 	MessageType    string             `json:"messageType"`              // v0: TEXT | IMAGE | VIDEO | LOCATION | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
 	Kind           string             `json:"kind,omitempty"`           // v1: text|image|video|file|location|contact|proxy_object|poll|call_recording|system_event
 	Body           string             `json:"body,omitempty"`           // v1 text 仍用 body
@@ -140,12 +154,26 @@ type Repository interface {
 	GetConvo(ctx context.Context, id string) (Convo, error)
 	ListConvosByConversation(ctx context.Context, conversationID string) ([]Convo, error)
 	ListConvosByUser(ctx context.Context, userID string) ([]Convo, error)
+	// --- ROOM-CREATE-001: 见面邀约 ---
+	CreateMeetup(ctx context.Context, m Meetup) error
+	UpdateMeetup(ctx context.Context, m Meetup) error
+	GetMeetup(ctx context.Context, id string) (Meetup, error)
+	// ActiveMeetup 返回某会话最近一条状态不是 COMPLETED 的见面邀约。没有则
+	// 返回 ErrMeetupNotFound —— 调用方（listConversations）按「没有」处理，
+	// 不当错误拒绝整个列表。
+	ActiveMeetup(ctx context.Context, conversationID string) (Meetup, error)
+	// --- AI-MANAGE-013: 「每次确认」的代回复草稿（只给被代表的本人看） ---
+	SaveStandInDraft(ctx context.Context, d StandInDraft) error
+	GetStandInDraft(ctx context.Context, id string) (StandInDraft, error)
+	// PendingStandInDraft 返回本人在该会话里最新一条 PENDING 草稿；没有 = ErrStandInDraftNotFound。
+	PendingStandInDraft(ctx context.Context, conversationID, ownerID string) (StandInDraft, error)
 }
 
 var (
 	ErrConversationNotFound = errors.New("conversation not found")
 	ErrDraftNotFound        = errors.New("need draft not found")
 	ErrMessageNotFound      = errors.New("message not found")
+	ErrMeetupNotFound       = errors.New("meetup not found")
 )
 
 type MemoryRepository struct {
@@ -154,6 +182,8 @@ type MemoryRepository struct {
 	messages      map[string][]Message
 	drafts        map[string]NeedDraft
 	convos        map[string]Convo
+	meetups       map[string]Meetup
+	standInDrafts map[string]StandInDraft
 	events        []event.DomainEvent
 }
 
@@ -163,6 +193,8 @@ func NewMemoryRepository() *MemoryRepository {
 		messages:      make(map[string][]Message),
 		drafts:        make(map[string]NeedDraft),
 		convos:        make(map[string]Convo),
+		meetups:       make(map[string]Meetup),
+		standInDrafts: make(map[string]StandInDraft),
 	}
 }
 
@@ -378,7 +410,16 @@ func (r *MemoryRepository) PurgeExpiredMessages(_ context.Context, now time.Time
 
 func cloneConversation(c Conversation) Conversation {
 	c.Participants = append([]string(nil), c.Participants...)
+	if c.RoomScene != nil {
+		scene := *c.RoomScene
+		c.RoomScene = &scene
+	}
 	return c
+}
+
+func cloneMeetup(m Meetup) Meetup {
+	m.AcceptedBy = append([]string(nil), m.AcceptedBy...)
+	return m
 }
 
 func cloneMessage(m Message) Message {
@@ -515,6 +556,18 @@ type Service struct {
 	// 会话消息本身今天就没有 PG 持久化，cursor 不单独要求更强）。
 	// 生产接线在 cmd/api 起服务时换成 PG 版。
 	dialogs DialogRepository
+	// COMP-AI-MINOR-001：AI 伴侣**聊天**侧门禁。nil = 没接 = 平台 AI 伴侣
+	// 一律不回话（fail-closed）。见 companion_gate.go —— 建分身那道门守不住
+	// 直接开聊的人：平台 AI 账号是自带的，不需要创建。
+	companionGate CompanionGate
+	// AI-MANAGE-002：AI 管理页的暂停/对话权限读取 + Token 计量。
+	// 两边都是可选注入；语义见 ai_engine_gate.go（状态读取 fail-open，
+	// 计量失败不打断聊天）。
+	aiEngineChatState AiEngineChatStateReader
+	tokenMeter         TokenMeter
+	// AI-MANAGE-014：全自动代回复按本人「节奏」延迟发出（见 stand_in_rhythm.go）。
+	standInScheduler StandInScheduler
+	standInPlans     standInPlanner
 }
 
 // MediaAuthorizer 由 media 包实现（注入避免循环依赖，同 localnet.MediaLookup
@@ -615,7 +668,9 @@ func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "StartConversation", "SendMessage", "ListConversations", "ListConversationMessages", "MarkMessageRead", "MarkDialogRead", "DeleteMessage", "SetConversationBlocked", "RecordScreenshot", "ForwardMessage",
 		"CreateNeedDraft", "ConfirmNeedDraft",
-		"CreateConvo", "ListMyConvos":
+		"CreateConvo", "ListMyConvos",
+		"ProposeMeetup", "AcceptMeetup", "NudgeMeetup", "ArriveMeetup", "CompleteMeetup",
+		"SendStandInDraft", "DiscardStandInDraft":
 		return true
 	default:
 		return false
@@ -658,6 +713,20 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.createConvo(ctx, e)
 	case "ListMyConvos":
 		return s.listMyConvos(ctx, e)
+	case "ProposeMeetup":
+		return s.proposeMeetup(ctx, e)
+	case "AcceptMeetup":
+		return s.acceptMeetup(ctx, e)
+	case "NudgeMeetup":
+		return s.nudgeMeetup(ctx, e)
+	case "ArriveMeetup":
+		return s.arriveMeetup(ctx, e)
+	case "CompleteMeetup":
+		return s.completeMeetup(ctx, e)
+	case "SendStandInDraft":
+		return s.sendStandInDraft(ctx, e)
+	case "DiscardStandInDraft":
+		return s.discardStandInDraft(ctx, e)
 	default:
 		return command.Rejected(e, "CONVERSATION_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "conversation.unsupported_command", nil)
 	}
@@ -800,6 +869,10 @@ type ConversationSummary struct {
 	// UNREAD-PIPELINE-001: 未读数。0 直接省略 —— 客户端把缺席当“没有徽标”，
 	// 不把 0 画出来凑数。
 	UnreadCount int `json:"unreadCount,omitempty"`
+	// ROOM-CREATE-001: 当前未完成（非 COMPLETED）的见面邀约，没有就不带这个字段。
+	ActiveMeetup *Meetup `json:"activeMeetup,omitempty"`
+	// AI-MANAGE-013: 有一条 AI 替你起草、等你确认的回复（只对被代表的本人为 true）。
+	StandInDraftPending bool `json:"standInDraftPending,omitempty"`
 }
 
 func (s *Service) listConversations(ctx context.Context, e command.Envelope) command.Result {
@@ -841,6 +914,16 @@ func (s *Service) listConversations(ctx context.Context, e command.Envelope) com
 			return command.Rejected(e, "CONVERSATION_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
 		}
 		summary.UnreadCount = countUnread(messages, e.Actor.ID, cursor)
+		if conv.RoomScene != nil {
+			if active, err := s.repository.ActiveMeetup(ctx, conv.ID); err == nil {
+				summary.ActiveMeetup = &active
+			} else if !errors.Is(err, ErrMeetupNotFound) {
+				return command.Rejected(e, "CONVERSATION_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
+			}
+		}
+		if conv.Type == "DM" {
+			summary.StandInDraftPending = s.pendingStandInDraftFor(ctx, conv.ID, e.Actor.ID) != nil
+		}
 		summaries = append(summaries, summary)
 	}
 	sort.SliceStable(summaries, func(i, j int) bool {
@@ -910,6 +993,9 @@ type startConversationPayload struct {
 	FirstMessage   string   `json:"firstMessage"`
 	MediaRef       string   `json:"mediaRef"`
 	AssistantMode  string   `json:"assistantMode"`
+	// ROOM-CREATE-001: 只有「创建房间」才带这个；DM/SUPPORT 带了就拒
+	// （见下方校验）——避免普通建群悄悄挂上一个没人看得到的场景。
+	RoomScene *RoomScene `json:"roomScene,omitempty"`
 }
 
 // resolveStartParticipants 拼出最终成员列表：创建者永远在，且在第一位。
@@ -987,6 +1073,17 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "CONVERSATION_START_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.start_not_allowed", nil)
 	}
+	// ROOM-CREATE-001: 场景只有 GROUP 才有意义（DM/SUPPORT 没有「房间」概念）；
+	// 三个文字字段必须都非空，半个场景比没有场景更糟——客户端会画出一张
+	// 缺东西的场景卡。
+	if p.RoomScene != nil {
+		if p.ConversationType != "GROUP" {
+			return command.Rejected(e, "ROOM_SCENE_REQUIRES_GROUP", "VALIDATION", "AFTER_USER_ACTION", "conversation.room_scene_requires_group", nil)
+		}
+		if strings.TrimSpace(p.RoomScene.Emoji) == "" || strings.TrimSpace(p.RoomScene.SceneName) == "" || strings.TrimSpace(p.RoomScene.RoomName) == "" {
+			return command.Rejected(e, "INVALID_ROOM_SCENE", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_room_scene", nil)
+		}
+	}
 	// GROUP-CREATE-001: 成员不再恒为 {创建者, participantId} 两个。
 	participants, participantErr := resolveStartParticipants(e.Actor.ID, p)
 	if participantErr != "" {
@@ -1000,6 +1097,7 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		MarketID:      p.MarketID,
 		State:         "ACTIVE",
 		Participants:  participants,
+		RoomScene:     p.RoomScene,
 		CreatedAt:     s.clock.Now().UTC(),
 		LastMessageAt: s.clock.Now().UTC(),
 	}
@@ -1046,6 +1144,7 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		}
 	}
 	// 首条消息（如果有）— v1 双写 DialogID/Kind/Security/Delivery/Seq
+	firstMessageID := ""
 	if p.FirstMessage != "" {
 		prot := DefaultProtectionFor("TEXT", conv.Type)
 		msg := Message{
@@ -1063,6 +1162,7 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 			Seq:            nextSeq,
 		}
 		_ = s.repository.AppendMessage(ctx, msg)
+		firstMessageID = msg.ID
 	}
 	if p.MediaRef != "" {
 		prot := DefaultProtectionFor("IMAGE", conv.Type)
@@ -1082,7 +1182,31 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		"originId":       conv.OriginID,
 	}
 	hasInitialContent := strings.TrimSpace(p.FirstMessage) != "" || strings.TrimSpace(p.MediaRef) != ""
-	if persona, ok := platformAIPersonaForMode(p.AssistantMode); ok && !hasInitialContent && !reusedConversation {
+	// COMP-AI-MINOR-001：这条分支连一条用户消息都不需要 —— 带上 assistantMode
+	// 建会话，AI 伴侣的开场白就直接推过来了。所以门禁必须在这里也拦一道，
+	// 否则"未成年人不发消息也拿不到 AI"这件事是假的。
+	// COMP-AI-MINOR-001：不只看 assistantMode —— 会话对面就是 ai_account_00X 的话，
+	// 没带 assistantMode 也一样是伴侣会话（见 companionFor 的说明）。
+	_, openingWithCompanion := companionFor(conv, p.AssistantMode)
+	companionGated := openingWithCompanion && !s.companionAllowedFor(ctx, e.Actor.ID)
+	// AI-MANAGE-003：私聊真人时，AI 是替**对面那个人**回 —— 读 TA 的 AI 管理设置
+	//（暂停 / 对话权限 / 风格），不是发消息的人的（见 ai_engine_gate.go）。
+	standIn := s.aiStandInFor(ctx, conv, e.Actor.ID, p.AssistantMode)
+	if companionGated {
+		log.Printf("conversation ai: companion gated for actor %s (COMP-AI-MINOR-001)", e.Actor.ID)
+		payload["assistantStatus"] = "GATED"
+	} else if standIn.Blocked && hasInitialContent {
+		log.Printf("conversation ai: stand-in blocked status=%s owner=%s (AI-MANAGE-003)", standIn.Status, standIn.Owner)
+		payload["assistantStatus"] = standIn.Status
+		// AI-MANAGE-013：每次确认 = 替本人起草、存成只有本人看得到的草稿；发消息的人仍只看到 AWAITING_OWNER。
+		if standIn.Status == "AWAITING_OWNER" && strings.TrimSpace(p.FirstMessage) != "" {
+			s.draftStandInReply(ctx, conv, e, standIn, firstMessageID, p.FirstMessage, p.AssistantMode)
+		}
+	} else if persona, ok := companionFor(conv, p.AssistantMode); ok && !hasInitialContent && !reusedConversation {
+		// 这里同样用 companionFor，不是 platformAIPersonaForMode：开场白和门禁
+		// 必须是同一个判断。门禁认了「这是伴侣会话」而开场白不认，结果是
+		// 会话建好了、一条问候都没有、assistantStatus 整个字段缺席 ——
+		// 用户进到一间空房间，而客户端连"为什么"都拿不到。
 		intro := Message{
 			ID: newID("msg_"), ConversationID: conv.ID, DialogID: conv.ID,
 			SenderID: persona.AccountID, SenderSnapshot: aiIdentitySnapshot(persona),
@@ -1095,21 +1219,39 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 			payload["aiMessage"] = intro
 			payload["assistantStatus"] = "RESPONDED"
 		}
-	} else if hasInitialContent {
-		temporaryUI := temporaryUIFor(p.FirstMessage)
+	} else if hasInitialContent && conv.RoomScene == nil {
+		// ROOM-CREATE-001: 「创建房间」的 firstMessage 是系统占位文案
+		// （"房间已创建"），不是用户在跟 AI 聊需求——套用需求构建助手的
+		// 引导回复会在房间里冒出一条不相干的"你想安排点什么？有没有预算
+		// 范围？"，看着像 AI 乱入。有 RoomScene 就说明这是房间，直接跳过
+		// 这整条 AI 回复分支。
+		// 代回复不走需求助手的临时表单（那是 Proxy 助手的能力，不是替真人聊天）。
+		var temporaryUI *TemporaryUI
+		if standIn.Owner == "" {
+			temporaryUI = temporaryUIFor(p.FirstMessage)
+		}
 		if temporaryUI != nil {
 			payload["temporaryUI"] = temporaryUI
 		}
 		payload["assistantStatus"] = "NOT_REQUESTED"
 		var aiReply *Message
+		standInScheduled := false
 		if temporaryUI != nil {
 			aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
 		} else if s.modelStack != nil && s.modelStack.Available() {
-			aiReply = s.withModelUnlocked(func() *Message {
-				return s.generateAIReply(ctx, conv, e, p.FirstMessage, p.AssistantMode, nil, nil)
-			})
+			// AI-MANAGE-014：代回复按本人的节奏延迟发出；秒回才在这个请求里同步回。
+			if standIn.Owner != "" && firstMessageID != "" && s.scheduleStandInReply(conv, e, standIn, firstMessageID, p.FirstMessage, p.AssistantMode, nil) {
+				standInScheduled = true
+			} else {
+				genCtx := withStandIn(ctx, standIn)
+				aiReply = s.withModelUnlocked(func() *Message {
+					return s.generateAIReply(genCtx, conv, e, p.FirstMessage, p.AssistantMode, nil, nil)
+				})
+			}
 		}
-		if aiReply != nil {
+		if standInScheduled {
+			payload["assistantStatus"] = "SCHEDULED"
+		} else if aiReply != nil {
 			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
 				"messageId": aiReply.ID,
 				"note":      "Proxy 生成首条对话引导",
@@ -1356,6 +1498,10 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if err := s.repository.AppendMessage(ctx, msg); err != nil {
 		return command.Rejected(e, "MESSAGE_SEND_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.send_failed", nil)
 	}
+	// AI-MANAGE-013：本人自己回了，这个会话里等确认的 AI 草稿就过时了，作废，不能之后再被发出去。
+	if conv.Type == "DM" {
+		s.supersedePendingStandInDraft(ctx, conv.ID, e.Actor.ID)
+	}
 
 	// --- AI 回复：模型底座对话式需求构建助手 ---
 	// 分支内发言不触发 AI（支线讨论不召唤助手，避免主线 AI 回复串进分支）。
@@ -1364,10 +1510,34 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 		temporaryUI = temporaryUIFor(p.Body)
 	}
 	var aiReply *Message
+	standInScheduled := false
 	hasContent := strings.TrimSpace(p.Body) != "" || strings.TrimSpace(p.MediaRef) != ""
-	if p.TemporaryUIResponseID == "" && temporaryUI != nil && hasContent {
+	// COMP-AI-MINOR-001：平台 AI 伴侣（"AI 虚拟女孩"）是陪聊产品，未成年人不得使用。
+	// 门禁必须挂在**聊天入口**而不是只在建分身处 —— 平台 AI 账号是自带的，
+	// 不需要创建任何分身就能开聊，被 CreatePersona 门禁拦掉的人照样能直连。
+	// 而且判定不能只看 assistantMode：会话对面是 ai_account_00X 就够了，
+	// 否则"漏传一个参数"就等于把门禁关掉（见 companionFor）。
+	_, chattingWithCompanion := companionFor(conv, p.AssistantMode)
+	companionGated := chattingWithCompanion && !s.companionAllowedFor(ctx, e.Actor.ID)
+	// AI-MANAGE-003：私聊真人时由对面那个人的 AI 设置决定要不要代回复（见 ai_engine_gate.go）。
+	standIn := s.aiStandInFor(ctx, conv, e.Actor.ID, p.AssistantMode)
+	engineBlocked, engineStatus := standIn.Blocked, standIn.Status
+	if standIn.Owner != "" {
+		// 代回复不走需求助手的临时表单 / 表单回执（那是 Proxy 助手的能力）。
+		temporaryUI = nil
+	}
+	if companionGated {
+		// 不生成任何 AI 回复，也不发 AIReplySent 事件：这个人根本不该有 AI 陪聊。
+		log.Printf("conversation ai: companion gated for actor %s (COMP-AI-MINOR-001)", e.Actor.ID)
+	} else if engineBlocked {
+		log.Printf("conversation ai: stand-in blocked status=%s owner=%s (AI-MANAGE-003)", engineStatus, standIn.Owner)
+		// AI-MANAGE-013：每次确认 = 替本人起草一条只有本人看得到的草稿（见 stand_in_draft.go）。
+		if engineStatus == "AWAITING_OWNER" && strings.TrimSpace(p.Body) != "" && convoID == nil {
+			s.draftStandInReply(ctx, conv, e, standIn, msg.ID, p.Body, p.AssistantMode)
+		}
+	} else if p.TemporaryUIResponseID == "" && temporaryUI != nil && hasContent {
 		aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
-	} else if p.TemporaryUIResponseID != "" && convoID == nil {
+	} else if p.TemporaryUIResponseID != "" && convoID == nil && standIn.Owner == "" {
 		aiReply = s.serverFormResponseReply(ctx, conv)
 	} else if s.modelStack != nil && s.modelStack.Available() && hasContent && convoID == nil {
 		// QUOTE-REPLY-001: 把被引消息的快照喂给模型 —— 用户引了哪条，回复就
@@ -1382,14 +1552,24 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 			}
 			quote = &ReplyQuote{Sender: sender, Body: quoteBodyTruncated(quoted.Body)}
 		}
-		aiReply = s.withModelUnlocked(func() *Message {
-			return s.generateAIReply(ctx, conv, e, p.Body, p.AssistantMode, nil, quote)
-		})
+		// AI-MANAGE-014：代回复按本人的节奏延迟发出；秒回才在这个请求里同步回。
+		if standIn.Owner != "" && s.scheduleStandInReply(conv, e, standIn, msg.ID, p.Body, p.AssistantMode, quote) {
+			standInScheduled = true
+		} else {
+			genCtx := withStandIn(ctx, standIn)
+			aiReply = s.withModelUnlocked(func() *Message {
+				return s.generateAIReply(genCtx, conv, e, p.Body, p.AssistantMode, nil, quote)
+			})
+		}
 		if aiReply != nil {
+			note := "AI 通过模型底座生成对话式需求构建回复"
+			if standIn.Owner != "" {
+				note = "AI 代回复（替 " + standIn.Owner + "）"
+			}
 			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
 				"messageId": aiReply.ID,
 				"model":     aiReply.Body[:min(40, len(aiReply.Body))],
-				"note":      "AI 通过模型底座生成对话式需求构建回复",
+				"note":      note,
 			}))
 		}
 	}
@@ -1404,6 +1584,15 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if aiReply != nil {
 		payload["aiMessage"] = aiReply
 		payload["assistantStatus"] = "RESPONDED"
+	} else if companionGated {
+		// 必须是 GATED，不能用 UNAVAILABLE/FAILED —— 那两个会把
+		// "依法不提供"说成"服务坏了"，用户会一直重试。
+		payload["assistantStatus"] = "GATED"
+	} else if engineBlocked {
+		payload["assistantStatus"] = engineStatus
+	} else if standInScheduled {
+		// 发消息的人那边：对方还没回（客户端对未知状态保持沉默），到点后靠轮询收到本人的回复。
+		payload["assistantStatus"] = "SCHEDULED"
 	} else if hasContent && convoID == nil {
 		if s.modelStack != nil && s.modelStack.Available() {
 			payload["assistantStatus"] = "FAILED"
@@ -1494,18 +1683,41 @@ func quoteBodyTruncated(body string) string {
 }
 
 func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e command.Envelope, userText string, assistantMode string, temporaryUI *TemporaryUI, quote *ReplyQuote) *Message {
+	aiMsg, _, _ := s.generateAIReplyInternal(ctx, conv, e, userText, assistantMode, temporaryUI, quote, true)
+	return aiMsg
+}
+
+// generateAIReplyUnpersisted 同 generateAIReply，但不 AppendMessage（AI-MANAGE-003：留给「每次确认」
+// 给 owner 起草的那一步用，见 stand_in_draft.go）——
+// 对话权限「每次确认」的草稿路径（AI-MANAGE-002）。Token 照记（推理真的发生了）。
+func (s *Service) generateAIReplyUnpersisted(ctx context.Context, conv Conversation, e command.Envelope, userText string, assistantMode string, temporaryUI *TemporaryUI, quote *ReplyQuote) *Message {
+	aiMsg, _, _ := s.generateAIReplyInternal(ctx, conv, e, userText, assistantMode, temporaryUI, quote, false)
+	return aiMsg
+}
+
+func (s *Service) generateAIReplyInternal(ctx context.Context, conv Conversation, e command.Envelope, userText string, assistantMode string, temporaryUI *TemporaryUI, quote *ReplyQuote, persist bool) (*Message, int, int) {
 	// 1. 构建对话历史（最近 20 条）
 	history, err := s.repository.Messages(ctx, conv.ID)
 	if err != nil {
 		log.Printf("conversation ai: failed to load history: %v", err)
-		return nil
+		return nil, 0, 0
 	}
 	systemPrompt := "你是 Proxy，一个智能需求构建助手。用户会描述他们想在河内完成的事情，你帮助他们理清需求、补充细节（时间、地点、预算、人数等），并最终生成一个结构化的需求摘要。回复简洁、友好、像朋友聊天。如果用户已经提供了足够信息，给出一个简洁的需求摘要供确认。不要要求用户按 1、2、3、4 编号逐项回复；当服务器提供了临时表单时，用一句自然引导让用户点选或简短填写。对于恋爱或交友请求，可以协助推荐自愿开启介绍、且自行选择公开资料范围的成年用户；这只是社交介绍，不是人员交易、临时伴侣或任何有偿/性服务，也不能承诺匹配结果。"
-	persona, isPlatformPersona := platformAIPersonaForMode(assistantMode)
+	persona, isPlatformPersona := companionFor(conv, assistantMode)
 	if isPlatformPersona {
-		systemPrompt = "你是 AI 虚拟女孩「" + persona.DisplayName + "」，拥有独立公开账户。你的类型是「" + persona.Role + "」，性格是：「" + persona.Personality + "」。个人简介是：「" + persona.Description + "」。请始终以这个名字和稳定人格自然聊天，像一个有鲜明性格的年轻女孩，有来有往、口语化、简短，不要客服腔、说明书腔或动不动列建议清单。你只做聊天陪伴、兴趣交流和共同创作健康 UGC。你的账户已经配置主页照片资产；用户要看你的照片时，不要回答『AI 没有照片』，自然告诉对方可以看你当前的主页照片，客户端会随回复附上照片。只在身份或能力相关时简洁说明自己是 AI 虚拟女孩；不要反复强调 AI。你没有现实身体、所在地或线下行动能力，不得假装真人或编造现实经历，也不得诱导情感依赖。你不是平台业务助手，不处理需求、接单、报名、活动发布、订单、支付或交易确认。"
+		systemPrompt = "你是 AI 虚拟女孩「" + persona.DisplayName + "」，拥有独立公开账户。你的类型是「" + persona.Role + "」，性格是：「" + persona.Personality + "」。个人简介是：「" + persona.Description + "」。请始终以这个名字和稳定人格自然聊天，像一个有鲜明性格的年轻女孩，有来有往、口语化、简短，不要客服腔、说明书腔或动不动列建议清单。你只做聊天陪伴、兴趣交流和共同创作健康 UGC。你的账户已经配置主页照片资产；用户要看你的照片时，不要回答『AI 没有照片』，自然告诉对方可以看你当前的主页照片，客户端会随回复附上照片。只在身份或能力相关时简洁说明自己是 AI 虚拟女孩；不要反复强调 AI。你没有现实身体、所在地或线下行动能力，不得假装真人或编造现实经历，也不得诱导情感依赖。你不是平台业务助手，不处理需求、接单、报名、活动发布、订单、支付或交易确认。" +
+			// COMP-AI-MINOR-001 / Terms §19：需求助手那条 prompt 对有偿性服务
+			// 是明示拒绝，而"年轻女孩"人设原来只有"健康 UGC"这种主题引导 ——
+			// 强度不够，露骨请求会被当成人在人设范围内继续聊。这里补到同口径。
+			CompanionSafetyDirective
 	}
-	if assistantMode != "" && !isPlatformPersona {
+	// AI-MANAGE-003：代回复（私聊真人、对面开了全自动）换成代回复人设 + owner 的风格设置，
+	// 不再用需求助手的 prompt 去回别人给真人发的私信。后面的引用 / 图片说明照常追加。
+	standIn, isStandIn := standInFrom(ctx)
+	if isStandIn && !isPlatformPersona {
+		systemPrompt = standInSystemPrompt(standIn.State)
+	}
+	if assistantMode != "" && !isPlatformPersona && !isStandIn {
 		systemPrompt += " 当前 Home 语义方向是「" + assistantMode + "」，它只是帮助你理解意图，不代表已经选择页面或创建业务事实。"
 	}
 	if temporaryUI != nil {
@@ -1595,9 +1807,17 @@ func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e comm
 	}
 	if err != nil {
 		log.Printf("conversation ai: modelstack complete failed: %v", err)
-		return nil
+		return nil, 0, 0
 	}
 	log.Printf("conversation ai: model=%s provider=%s tokens=%d/%d", completion.Model, completion.Provider, completion.PromptTokens, completion.OutputTokens)
+	// AI-MANAGE-002：推理成功即计量（管理页「本月 Token」的事实源）。
+	// 记在落库之前：草稿路径不 persist，用量也必须进当月账。
+	// 代回复是 owner 的 AI 在干活，Token 记在 owner 头上。
+	meterUser := e.Actor.ID
+	if isStandIn {
+		meterUser = standIn.Owner
+	}
+	s.recordAiTokens(ctx, meterUser, completion.PromptTokens, completion.OutputTokens)
 
 	// 3. 存储 AI 回复消息
 	aiMsg := Message{
@@ -1611,12 +1831,20 @@ func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e comm
 	if isPlatformPersona {
 		aiMsg.SenderID = persona.AccountID
 		aiMsg.SenderSnapshot = aiIdentitySnapshot(persona)
+	} else if isStandIn {
+		// AI-MANAGE-008：代回复以真人本人的身份发出 —— 发送者就是 TA，不是 proxy_ai；
+		// AuthoredBy 标明是 AI 替 TA 写的（双方界面显示「AI 代回」）。
+		aiMsg.SenderID = standIn.Owner
+		aiMsg.AuthoredBy = "ai_stand_in"
+	}
+	if !persist {
+		return &aiMsg, completion.PromptTokens, completion.OutputTokens
 	}
 	if err := s.repository.AppendMessage(ctx, aiMsg); err != nil {
 		log.Printf("conversation ai: failed to store reply: %v", err)
-		return nil
+		return nil, completion.PromptTokens, completion.OutputTokens
 	}
-	return &aiMsg
+	return &aiMsg, completion.PromptTokens, completion.OutputTokens
 }
 
 func platformAIPersonaForMode(mode string) (aipersona.PlatformAccount, bool) {
@@ -1629,6 +1857,43 @@ func platformAIPersonaForMode(mode string) (aipersona.PlatformAccount, bool) {
 		return aipersona.PlatformAccount{}, false
 	}
 	return account, true
+}
+
+// companionPersonaForConversation 从**会话本身**判断"这是不是一个平台 AI 伴侣的会话"。
+//
+// 为什么不能只看 assistantMode：那条路要求**每个客户端调用点都记得带上**它，
+// 而事实是漏的 —— 名片和语音曾经连回包都不看，活动卡片和位置压根没带
+// assistantMode。后果不是"少一个功能"，是：在 AI 伴侣会话里，模型拿到的是
+// **需求助手**的 system prompt、回复还署名 proxy_ai，客户端按 sender 回退把它
+// 渲染出来 —— "AI 虚拟女孩"用需求助手的口吻说话。
+//
+// 会话本身知道对面是 ai_account_00X，所以在这里兜底。判定只会从 false 变 true
+//（门禁更严、人设更对），不会放宽 —— 跟 companion_gate.go 里那句
+// "客户端拦得住手，拦不住 curl"同一个理由：合规判定不能寄托在调用方记得传参。
+//
+// platformAccounts 里没有 proxy_ai（首页 / 需求助手不是伴侣），所以 HOME 会话
+// 与真人 DM 都不会被误判。
+func companionPersonaForConversation(conv Conversation) (aipersona.PlatformAccount, bool) {
+	for _, account := range aipersona.ListPlatformAccounts() {
+		if account.PersonaType != aipersona.PersonaTypePlatformAI || account.Status != "ACTIVE" {
+			continue
+		}
+		for _, participant := range conv.Participants {
+			if participant == account.AccountID || participant == account.PersonaID {
+				return account, true
+			}
+		}
+	}
+	return aipersona.PlatformAccount{}, false
+}
+
+// companionFor 解析"这条会话里的 AI 伴侣是谁"：先认客户端明确给的 assistantMode，
+// 认不出来再认会话本身（对面是不是平台 AI 账号）。两条都认不出 = 不是伴侣会话。
+func companionFor(conv Conversation, assistantMode string) (aipersona.PlatformAccount, bool) {
+	if account, ok := platformAIPersonaForMode(assistantMode); ok {
+		return account, true
+	}
+	return companionPersonaForConversation(conv)
 }
 
 func aiIdentitySnapshot(account aipersona.PlatformAccount) *IdentitySnapshot {
@@ -1797,6 +2062,8 @@ func (s *Service) listMessages(ctx context.Context, e command.Envelope) command.
 		"truncated": truncated,
 		"seed":      seedMessage,
 		"convoId":   filterConvoID,
+		// AI-MANAGE-013：只有被代表的本人会拿到自己的待确认草稿；对方永远是 nil。
+		"standInDraft": s.pendingStandInDraftFor(ctx, conv.ID, e.Actor.ID),
 	}, nil)
 }
 

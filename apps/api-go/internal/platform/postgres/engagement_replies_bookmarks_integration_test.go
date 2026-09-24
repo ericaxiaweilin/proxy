@@ -29,10 +29,28 @@ func TestEngagementPostgresReplyBookmarkRoundTrip(t *testing.T) {
 	postID := "post_eng_rb_pg_" + time.Now().Format("150405.000000")
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO localnet.posts (id, author_type, author_id, author_display_name, body, visibility, city_scope, status, created_at)
-		VALUES ($1, 'USER', 'agent_linh', 'Linh', 'rb test seed', 'PUBLIC', 'hanoi', 'PUBLISHED', NOW())
-		ON CONFLICT (id) DO NOTHING`, postID); err != nil {
+		VALUES ($1, 'USER', $2, '测试种子', 'rb test seed', 'PUBLIC', 'hanoi', 'PUBLISHED', NOW())
+		ON CONFLICT (id) DO NOTHING`, postID, "test_seed_author_"+postID); err != nil {
 		t.Fatalf("seed post: %v", err)
 	}
+	// DATA-HYGIENE-001（2026-09-24）：以前用 agent_linh / 「Linh」当作者、跑完不清理 —— 8 条种子帖留在开发库，
+	// 动态里显示成「Linh」发的（没头像），还一度被当成 Linh 本人。现在作者是本次运行独有的测试 id，
+	// 跑完只删本次建的这条帖子及挂在它上面的互动行（AGENTS.md：测试只能删自己建的行）。
+	t.Cleanup(func() {
+		for _, stmt := range []string{
+			`DELETE FROM engagement.post_pins WHERE post_id = $1`,
+			`DELETE FROM engagement.replies WHERE post_id = $1`,
+			`DELETE FROM engagement.bookmarks WHERE post_id = $1`,
+			`DELETE FROM engagement.reactions WHERE post_id = $1`,
+			`DELETE FROM engagement.reposts WHERE post_id = $1`,
+			`DELETE FROM localnet.post_stats WHERE post_id = $1`,
+			`DELETE FROM localnet.posts WHERE id = $1`,
+		} {
+			if _, err := pool.Exec(context.Background(), stmt, postID); err != nil {
+				t.Logf("cleanup %q: %v", stmt, err)
+			}
+		}
+	})
 
 	actor := "user_rb_pg_" + time.Now().Format("150405.000000")
 

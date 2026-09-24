@@ -1,7 +1,7 @@
 // Gate J：确定性 fixtures 的不变式。TRAVEL_LOCAL 完整计划必须通过 fail-closed
 // 校验；候选读模型对齐后端 simulated seed；其余类目走各自 fallback。
 import { describe, expect, it } from "vitest";
-import { fixturePlanFor, resolveReadModel, TRAVEL_LOCAL_CANDIDATES } from "./fixtures";
+import { fixturePlanFor, resolveReadModel } from "./fixtures";
 import { HARD_DEMAND_CATEGORIES, type UIPlan } from "./types";
 import { validateUIPlan } from "./validator";
 
@@ -48,15 +48,12 @@ describe("fixturePlanFor（Gate J 确定性计划）", () => {
 });
 
 describe("resolveReadModel（Gate F：组件只见塑形 props）", () => {
-  it("候选数据对齐后端 supply seed（agent_linh 120 万）", () => {
+  // MATCH-LIVE-001：演示数据不再提供任何候选人 —— 以前写死 Linh 26 单 / Mai 12 单，「找人」页永远是这两张假卡。
+  it("候选不来自演示数据：没有真实结果时是空 + unavailable", () => {
     const plan = fixturePlanFor("TRAVEL_LOCAL");
-    const linh = TRAVEL_LOCAL_CANDIDATES.find((candidate) => candidate.agentId === "agent_linh");
-    expect(linh?.offerVnd).toBe(1200000);
-    expect(linh?.languages).toEqual(["ZH", "VI"]);
-    const props = resolveReadModel("candidate_batch:cb_fixture_88", "CANDIDATE_RAIL", plan) as {
-      candidates: typeof TRAVEL_LOCAL_CANDIDATES;
-    };
-    expect(props.candidates.map((candidate) => candidate.agentId)).toContain("agent_linh");
+    const props = resolveReadModel("candidate_batch:cb_fixture_88", "CANDIDATE_RAIL", plan) as { candidates: unknown[]; status?: string };
+    expect(props.candidates).toEqual([]);
+    expect(props.status).toBe("unavailable");
   });
 
   it("CRITICAL_QUESTION 按类目提供问题；TIME_LOCATION 提供时间地点", () => {

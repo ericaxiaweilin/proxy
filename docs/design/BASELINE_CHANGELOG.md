@@ -4,6 +4,572 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 283 — 2026-09-24
+
+- **平台采购与可追溯券实例**（VOUCHER-PURCHASE-001，`feat/voucher-purchase-instances` 合入）：
+  voucher 正本第 2 步。平台向商户采购一批券（B2B：合同号 / 发票号 / MST 快照 / 单价 /
+  数量），确认时按数量铸出每一张实例；追溯链 instance → purchase →
+  (merchant, contract, invoice, MST) 一次 join 走通。
+- 两条命令 `OrderVoucherPurchase` / `ConfirmVoucherPurchase` 收进 **operator 门** ——
+  普通用户与商户都不能给自己开采购单，那等于自己印券。金额算术在**库层**闭合：
+  `CHECK (total_minor = quantity * unit_cost_minor)`，服务端先算、DB 再复核；
+  确认走 CAS 守 `ORDERED`，重放不双铸。
+- 影响文件：`apps/api-go/internal/voucher/purchases.go`、
+  `apps/api-go/internal/voucher/service.go`、
+  `apps/api-go/internal/platform/postgres/voucher.go`、
+  `apps/api-go/internal/api/security.go`、
+  `apps/api-go/migrations/109_voucher_purchases_instances.sql`。
+- 合入说明：该迁移与 main 的 `109_account_status_erased.sql` **同号**，这是安全的 ——
+  migrator 的 Version 取完整文件名（`migrator.go:282`），同号不同名是两个独立版本；
+  全仓没有任何唯一性检查，main 里 003 / 035 / 078 本来就各有两份同号迁移。故保留原编号。
+
+## Revision 282 — 2026-09-24
+
+- **订单流程按金额分档**（ORDER-TIER-001）：不分金额同一套流程是错的 —— 小单
+  步骤多就是阻碍。500K 以下短流程（确认合作 → 确认完成 → 评价），到场与结算
+  表单不出现；小单点确认完成时自动先开工（服务端强制过 EXECUTING，两次翻转
+  都留痕，用户只点一次）。500K 及以上走全流程。分档线是常量，要调只改一处。
+- 影响文件：`apps/mobile/src/surfaces/me-orders.tsx`。
+
+## Revision 281 — 2026-09-24
+
+- **订单执行跟消费场景对齐**（ORDER-EXEC-001 跟进）：用户「是按照消费场景来的吗」。
+  对过 PRD Ch11/Ch10/Ch12：到场是信任锚（agent 到场举证、requester 可确认），
+  开工是另一个节拍 —— 上版拿通用的开始执行替掉到场，省错了地方。换回确认到场
+  （地点默认快照碰面地，市场名给示例）；确认合作 → 到场 → 确认完成 → 评价
+  （+结算/取消）四步不变。
+- 影响文件：`apps/mobile/src/surfaces/me-orders.tsx`。
+
+## Revision 280 — 2026-09-24
+
+- **订单执行流程砍到四步**（ORDER-EXEC-001 跟进）：用户「步骤太多了」。打卡跟
+  开始执行是同一个状态跃迁，只留一键的开始执行（打卡表单撤下，服务端保留能力）；
+  证据照片并进确认完成（可选附一张，一次提交先传图后记结果）。
+  确认合作 → 开始执行 → 确认完成 → 评价（+结算/取消）.
+- 影响文件：`apps/mobile/src/surfaces/me-orders.tsx`。
+
+## Revision 279 — 2026-09-24
+
+- **订单执行断线接上**（ORDER-EXEC-001）：用户「继续检查撮合交易引擎」。订单明细
+  以前只有「返回列表」—— OFFERED 卡死，EXECUTING 走不到 COMPLETED，COMPLETED
+  评不了分；客户端缺了五个动作方法。补齐 `confirmCooperation / startExecution /
+  recordSettlement / recordOutcome / recordSatisfaction`，明细页按 lifecycle 逐态
+  出真按钮（打卡要市场编号 + 地点、证据走照片上传、结算只在 DIRECT 模式出现、
+  评价只给需求方），拒绝码翻人话。另跟进 Rev276：`replyTargetLabel` 接
+  `viewerDisplayName`（当前资料名优先，仅 SELF）， stale 测试按新规则更新。
+- 影响文件：`apps/mobile/src/fulfillment-client.ts`、
+  `apps/mobile/src/surfaces/me-orders.tsx`、`apps/mobile/src/surfaces/me-styles.ts`、
+  `apps/mobile/src/surfaces/me.tsx`、`apps/mobile/src/reply-target.ts`。
+
+## Revision 278 — 2026-09-24
+
+- **场景收藏两个面接通 + 场景页签**（SCENE-FAVORITE-002）：用户：「有断线 home 场景点🤍 在我的 收藏没有」。
+  Rev270（SCENE-FAVORITE-001）只接了**一半** —— 它把 hearts 落本机、让「我的 → 收藏」读盘展示，
+  但**个人主页的收藏 tab 对场景收藏的引用数是 0**（`createSceneFavoritesStore` 在 `ProfileTabs.tsx`
+  与 `me.tsx` 里出现次数都是 0）：用户在首页点 🤍、去个人主页的收藏 tab 找，永远找不到；
+  而且只有场景收藏、没有帖子收藏时，那一屏还写着「还没有收藏」。Rev270 的守卫只有源码文本断言
+  （「文件里有没有这个符号」）、没有进钉，所以缺陷活了下来 —— 同族前科 22004f9
+  （绿钉 + 用户可见缺陷可同时成立）。
+  - 两个收藏面读同一份本机 hearts，解析收敛成**唯一实现** `resolveSavedSceneIds(ids, lookup)`，
+    放在纯模块 `scene-favorites.ts`、目录由 `savedSceneLookup` 注入 —— 这样解析逻辑不依赖
+    React Native，能被**行为**测试守住（未知 id 丢弃 / 重复去重），而不是只 grep 符号在不在文件里。
+  - 个人主页收藏 tab 增加「场景灵感 · 来自首页收藏」区；空态改成「帖子收藏与场景收藏都为空」
+    才说「还没有收藏」。
+  - 「我的 → 收藏」增加**场景页签**：以前场景区只在「全部」出现，而页签是 全部/商家/Creator/
+    动态/活动 —— 没有场景页签，切到任一其它页签就只剩空态，等于把这一页唯一的真内容藏起来。
+    入口描述补上「场景灵感」。
+  - 场景收藏仍按账号落本机：MOMENTS 是**客户端静态目录**（服务端没有「场景收藏」概念），
+    写成服务端记录等于往库里写没人能校验的客户端分类键 —— 正是 FRIEND-TARGET-EXISTS-001
+    刚清掉的那类死行，不做。
+- 影响文件：`apps/mobile/src/scene-favorites.ts`、`apps/mobile/src/scene-favorites.test.ts`、
+  `apps/mobile/src/components/scene-activity-discovery.tsx`、`apps/mobile/src/surfaces/me-orders.tsx`、
+  `apps/mobile/src/surfaces/ProfileTabs.tsx`、`apps/mobile/src/surfaces/me.tsx`、
+  `apps/mobile/src/profile-tabs-load-failed.test.ts`、`scripts/check-regression-contracts.sh`。
+
+## Revision 277 — 2026-09-24
+
+- **帖文数据治理 + 发帖资料门**（DATA-HYGIENE-001 / POST-PROFILE-GATE-001）：用户：「所有没有头像的 用户名的 绕过注册流程的必须要补齐
+  就算是同用户名不同ID；帖文不能乱 必须要调查清楚有没有少帖文 错乱」「修吧 守护 gate」。
+  - 调查：没有丢帖（所有点赞 / 评论 / 收藏 / 置顶 / 媒体 / 统计行都指向存在的帖子）；错乱 3 类 ——
+    9/20 一次性 SQL 用用户本人 17 张照片造了 14 条演示账号帖；user_001 一个账号署名 Linh / Mai / Bonsaidon / Huyen；
+    agent_linh（不是账号，集成测试种子）署名「Linh」。另有 13 个匿名会话账号（无登录方式）无名无头像发帖。
+  - 开发库：13 个账号补齐资料（各自默认头像 + 用户名，同名允许），帖子署名改回本人资料名；
+    agent_linh 8 条 + 演示假帖 14 条标 HIDDEN_TEST_DATA（不删，可恢复）；用户本人 13 条空署名补为用户名。
+  - 发帖门：真人发帖前必须有用户名 + 平台头像，缺什么拒绝什么（PROFILE_INCOMPLETE），客户端提示去个人主页补齐。
+  - 根因：集成测试在 DATABASE_URL 存在时直连开发库、用 agent_linh / Linh 造帖且不清理 → 改为本次运行独有作者 + t.Cleanup。
+- 影响文件：`apps/mobile/src/command-error-message.ts`（发帖被拒的提示）。
+
+## Revision 276 — 2026-09-24
+
+- **撤回 AVATAR-AGENT-ALIAS-001（P0）+ 自己的帖子显示用户名（OWN-NAME-001）**：用户：「那些帖文是之前测试账户发的 为什么现在变成了其它账户的帖文
+  严重 p0」「自己的帖文 显示不叫你 而是正常用户名 点击头像也是跳转到个人主页 逻辑都一样」。
+  - Rev275 把 agent_* 作者按服务者档案映射到本人资料 —— 但 agent_linh 的 8 条帖是集成测试种子（pin / rb test seed），
+    结果显示成了 Linh 本人发的。已完全撤回（identity / main.go 恢复原样），并加钉子防止再映射。
+  - 自己的帖子 / 评论不再显示「你」，跟别人一样显示用户名（当前资料名优先，其次帖子保存的名字）；点头像同一套逻辑（菜单无「关注」，可访问主页）。
+- 影响文件：`apps/mobile/src/feed-author.ts`、`apps/mobile/src/surfaces/feed.tsx`。
+
+## Revision 275 — 2026-09-24
+
+- **P0：动态「黑头」头像 + 个人主页互动空白**（AVATAR-FALLBACK-TINT-001 / AVATAR-AGENT-ALIAS-001 / PROFILE-ENGAGEMENT-WIRE-001 / PROFILE-VIEWS-HEADER-001）：
+  用户：「动态页面 帖文 很多真人用户头像是黑头 并且我的个人主页里 没有任何互动的信息 空白的」。
+  - 没头像的作者以前一律画成 #111 纯黑圆 + 白字，一屏好几个像图坏了 → 按 id 稳定取柔和底色 + 深色首字（`initialAvatarTint`）；
+    个人主页头像 / 帖子头像的兜底同样改为浅紫底。
+  - 服务者身份（agent_linh，8 条帖）没有自己的资料 → GetProfile 按 supply.agent_profiles.user_account_id 读本人资料，显示本人头像。
+  - 「我的」页一直没拿到 engagement（app-shell 漏传）→ 个人主页帖子没有 ♡ 喜欢、赞数、评论，关注者显示 —；补上后显示真实互动。
+  - 个人主页「次浏览 · 最近 30 天」以前写死 — → 拉真实的近 30 天主页访问（ListProfileViewStats sinceDays=30）。
+- 影响文件：`apps/mobile/src/surfaces/feed.tsx`、`apps/mobile/src/surfaces/me.tsx`、`apps/mobile/src/surfaces/me-styles.ts`、`apps/mobile/src/shell/app-shell.tsx`。
+
+## Revision 274 — 2026-09-24
+
+- **个人主页帖子显示收到的互动**（PROFILE-REPLIES-VISIBLE-001）：feed 里能看到
+  的赞数/评论列表，在主页 PostCard 上完全看不见（只有动作按钮）。调用方传
+  `engagementClient` 进来后按帖 hydrate 计数、点 💬 行展开拉评论；作者名走
+  `resolveReplyAuthorDisplayName`，无名不显示裸 id；没传 client 就是今天的样子。
+- 影响文件：`apps/mobile/src/surfaces/ProfileTabs.tsx`、
+  `apps/mobile/src/surfaces/me.tsx`、
+  `apps/mobile/src/surfaces/other-profile.tsx`。
+
+## Revision 273 — 2026-09-24
+
+- **「我的」分析弹层接真数据**（ANALYTICS-ME-001）：浏览/互动两行曾写死 "—"。
+  浏览 = 近 30 天主页访问（`ListProfileViewStats` 加可选 `sinceDays`，缺省全量，
+  friend-crm 口径不动）；互动 = 近 30 天收到的赞 + 评论（新命令
+  `GetReceivedEngagementStats`，服务端按作者聚合，自赞/自评排除，客户端不做
+  N+1）。拉失败是未知画 —，不画 0。另清掉测试账号帖子上 6 条 10 天前的
+  probe 评论垃圾（无 profile 的裸 actor）。
+- 影响文件：`apps/api-go/internal/engagement/service.go`、
+  `apps/api-go/internal/localnet/service.go`、
+  `apps/api-go/internal/platform/postgres/network.go`、
+  `apps/mobile/src/surfaces/me.tsx`、`apps/mobile/src/engagement-client.ts`、
+  `apps/mobile/src/localnet-client.ts`。
+
+## Revision 272 — 2026-09-23
+
+- **照片/头像横滑不再触发切页**（SWIPE-RAIL-001）：用户「左右滑照片就翻页，
+  像 bug」。页面级切页手势会抢走横滑内容。9 处照片/头像轨包
+  `HorizontalSwipeRail` 隔离（AI 分身：洞察头像 rail、图库双轨、选图器；
+  帖子多图、房间成员、AI 助手、场景可约人/菜单、Creator 推荐、商家菜单），
+  有可点子项的一律 `preserveChildPresses + threshold 3`。芯片/筛选行、
+  全屏看图（自带 paging）不在本次范围。另记 JSX 坑：rail 紧跟三元分支 `(`
+  后面时注释只能用 `//`，`{/* */}` 会被当 JS 块直接炸编译。
+- 影响文件：上述 9 个 tsx（只换容器，内容不动）+ `swipe-rail.test.ts`（新建）。
+
+## Revision 271 — 2026-09-23
+
+- **好友与关系：动态浏览日志折叠成分析面板 + 统计入口；浏览日志分层，逐人明细只给运营；补全日志链路**（CONTENT-ANALYTICS-001）：
+  用户：「动态浏览的日志要折叠起来 不要给用户看这些…给一个分析后的面板 和一个统计入口…默认一个月内的加载…后端服务器存完整的
+  并且检查日志链路是否完整…看了这张照片多少 s 甚至双击放大看…这些是只能公司运营用…合规的公开 完整的属于公司运营用于精准投流」。
+  - 用户侧：「动态浏览」卡 = 近 30 天分析面板（发帖 / 浏览 / 看过的人 / 平均停留 / 最受关注），逐条统计默认折叠；
+    超过 30 天发的帖子不加载；好友详情里「看过的内容」（这个好友看了哪张、几秒）删除。
+  - 运营侧（ANALYTICS scope）：`ListPostAudience`（一条帖子逐人：曝光 / 逐张打开 / 总停留 / 放大次数，全量历史）、
+    `ListMediaActivityForViewer`（改为仅运营）。事件表 append-only 全量保存，窗口只限制用户侧读取。
+  - 链路审计：原来只有「他人主页」全屏看图上报，信息流一条都不报 → 补信息流卡片曝光（可见 ≥50% 且 ≥0.8 秒，含停留）；
+    全屏看图逐张停留 + 双击 / 捏合放大（新事件 MEDIA_ZOOM）统一由 MediaViewer 上报；自己看自己不记；都受「动态浏览统计」开关控制。
+- 影响文件：`apps/mobile/src/surfaces/friend-crm.tsx`、`apps/mobile/src/surfaces/feed.tsx`、`apps/mobile/src/surfaces/other-profile.tsx`、
+  `apps/mobile/src/media/AdaptiveMediaCollection.tsx`、`apps/mobile/src/media/TrackedImageViewing.tsx`。
+
+## Revision 270 — 2026-09-23
+
+- **场景收藏断线接上**（SCENE-FAVORITE-001）：用户「home 场景卡片点 🤍 但我的
+  收藏没有更新」。心形按钮只翻本地 `useState`，退出重进就丢，更到不了收藏。
+  hearts 按账号落本机 SecureStore（新 `scene-favorites.ts`），「我的 → 收藏」
+  读盘后用静态目录回查标题展示；动态区仍是诚实空态。顺带审计：动态 🔖、
+  喜欢、编排提交、偏好/屏蔽、隐私导出全链路真连接；friend-crm 标签是 demo
+  数据纯内存（toast 标了仅本机），未动。
+- 影响文件：`apps/mobile/src/scene-favorites.ts`（新建）、
+  `apps/mobile/src/components/scene-activity-discovery.tsx`、
+  `apps/mobile/src/surfaces/me-orders.tsx`、`apps/mobile/src/surfaces/me.tsx`、
+  `apps/mobile/src/surfaces/requester-home.tsx`。
+
+## Revision 269 — 2026-09-23
+
+- **用户建模：「亚洲人特征锁定」改为「本人特征锁定」，新增 AI 识别的「面部特征」**（AI-MANAGE-016）：用户：「核心是模型读取小美的照片
+  得出什么人 而不是硬编码 以后说不定去哈萨克斯坦 蒙古运营呢 俄罗斯美女也注册这个」。
+  - 锁定对象 = AI 从本人授权照片里读出的面部与体型特征（脸型 / 眉眼 / 瞳色 / 鼻型 / 唇形 / 颧骨 / 骨架比例），不套人种模板；
+  - 识图提示词明确不判断种族 / 民族 / 国籍，只描述看得到的外观；面部特征同样可手动改，改过的 AI 不覆盖；
+  - 迁移 123：`asian_lock` → `likeness_lock`，新增 `face_features`。
+- 影响文件：`apps/mobile/src/components/twin-user-model-section.tsx`。
+
+## Revision 268 — 2026-09-23
+
+- **AI 分身中心新增「用户建模」**（AI-MANAGE-015，原型 deepseek_html_20260923_c9c642.html，logo user_modeling_black_white_clean.svg）：
+  AI 分身的核心是给小美生成模型资产（照片 / 视频），建模是生成时锁住的「她长什么样」。
+  - 卡片：本人头像 / 名字、AI 建模标、识别状态、特征 chips；详情页：授权图库张数、物理锚点（身高 / 体重 / 年龄 / 身材 /
+    肤色 / 发型，每项标 AI 或 手动）、亚洲人特征锁定开关、「让 AI 从图库识别」、「编辑模型」表单。
+  - 全是真值：AI 识别 = vision 模型读本人**授权**的公共图库照片（POST /v1/ai/user-model/analyze，最多 4 张）；
+    识别不出的项就是「待补充」，体重不让 AI 猜；本人改过的项 AI 以后不覆盖。原型里写死的 165cm / 12 张 / 8 项不照搬。
+  - 没有形象授权就没有建模，只给授权入口（与 AI-MANAGE-010 一致）。
+  - 模型底座：vision 任务改走同 provider 里声明能看图的模型（原来会把图发给纯文本模型）。
+- 影响文件：`apps/mobile/src/components/twin-user-model-section.tsx`、`apps/mobile/src/surfaces/AIIdentityShowcaseSurface.tsx`、`apps/mobile/src/surfaces/me.tsx`。
+
+## Revision 267 — 2026-09-23
+
+- **裸账号 id 不再上屏**（NO-RAW-ID-001）：用户「无头像无用户名只有纯 user_ID，
+  不符合规矩」。两处回退改中性「用户」：会话列表对端名（`messages.tsx`，id 只
+  留作导航标识）、好友洞察展示名（`twininsight.buildInsight`）。另清掉 fixture
+  污染进真会话的 `u_linh` 幽灵参与者（2 个会话；平台助手 / AI 账号靠
+  `IsHumanTarget` 在读时过滤，不删数据）。
+- 影响文件：`apps/mobile/src/surfaces/messages.tsx`、
+  `apps/api-go/internal/twininsight/insight.go`。
+
+## Revision 266 — 2026-09-23
+
+- **全页面内容长按可复制**（SELECTABLE-TEXT-001）：用户「现在我先复制给你都不行」。
+  全仓 RN `<Text>` 统一加 `selectable`（codemod，约 3100 处）；例外：会话气泡
+  （长按出管理菜单，复制走菜单新增的「复制」项，经 expo-clipboard）与
+  `TooltipOnLongPress` 包裹的工具栏按钮（长按出 tooltip）。回归钉
+  `selectable-text.test.ts`。
+- 影响文件：`apps/mobile/src` 下 81 个 tsx（纯加 `selectable`）、
+  `apps/mobile/src/surfaces/conversation.tsx`（菜单复制项）、
+  `apps/mobile/src/selectable-text.test.ts`（新建）。
+
+## Revision 265 — 2026-09-23
+
+- **对话权限「每次确认」真正可用：AI 替你起草，你确认后以你的身份发出**（AI-MANAGE-013）：用户规则「代回复…应该是代真人的回复」。
+  之前「每次确认」只是不回（AWAITING_OWNER），草稿那一步没做。
+  - 别人私信你 → AI 用你的语气起草一条回复，存成**只有你看得到**的草稿（`conversation.stand_in_drafts`，迁移 121）；
+    发消息的人那边仍是「对方还没回」，拿不到也动不了草稿。
+  - 会话里输入框上方出现草稿卡：「丢弃 / 修改 / 以你的身份发送」；发出去的是你确认过的话，就是你的消息（不带「AI 代回」）。
+  - 消息列表该会话预览前加「[AI 草稿待你确认]」。
+  - 对方又发一条 → 旧草稿作废换新；你自己直接回了 → 草稿作废，过时的草稿不能再被发出。Token 记在你头上。
+- 影响文件：`apps/mobile/src/surfaces/conversation.tsx`、`apps/mobile/src/surfaces/messages.tsx`。
+
+## Revision 264 — 2026-09-23
+
+- **折叠地图 logo 放大 + 首页入口同步**（MAP-FOOTPRINT-LOGO-001 跟进）：用户：
+  「把地图 logo 做大一点」「home 首页的地图 logo 也要换这个」。
+  - 市场切换按钮 `mapFold` 用到 26，比 + 号（18）大一圈。
+  - 首页 `LocationContext`「打开场景地图」入口同步换 `mapFold`（27 小格里
+    用 21，等效原来 route 17 的分量）。
+- 影响文件：`apps/mobile/src/surfaces/market.tsx`、`apps/mobile/src/shell/app-shell.tsx`。
+
+## Revision 263 — 2026-09-23
+
+- **折叠地图 logo 视觉对齐**（MAP-FOOTPRINT-LOGO-001 跟进）：48 栅格原画占盒
+  比例小一圈，同 size 下比旁边的 + 号显小。`mapFold` 状态用 size 22，
+  跟 + 号（18）视觉对齐；`storeLines` 状态保持 18。
+- 影响文件：`apps/mobile/src/surfaces/market.tsx`。
+
+## Revision 262 — 2026-09-23
+
+- **市场 / 个人主页换原型 logo**（MAP-FOOTPRINT-LOGO-001）：用户原型
+  `deepseek_html_20260923_5c4a22.html` 更新了 2 个 logo。
+  - `ProxyIcon` 新增 `mapFold`（折叠地图：三折外轮廓 + 两条折痕 + 右上苹果绿
+    `#34C759` 状态点）与 `footprint`（场景足迹：镜头圈 + 轨迹曲线 + 起终点），
+    48 栅格路径照抄原型，线条跟 color 走。`route` 通用图标保留给定位按钮。
+  - 市场头部去地图的切换按钮用 `mapFold`；个人主页场景足迹入口用 `footprint`
+    （紫色不变，只换形状）。
+- 影响文件：`apps/mobile/src/components/proxy-icon.tsx`、`apps/mobile/src/surfaces/market.tsx`、
+  `apps/mobile/src/surfaces/me.tsx`。
+
+## Revision 261 — 2026-09-23
+
+- **AI 分身中心：图库分「公共图库（输入）/ AI 生成图库（输出）」两个按钮，好友洞察只看真人**（AI-MANAGE-012）：用户：
+  「ai 分身 移除 ai 小美 和 user_proxy 这是对真人用户设计的功能…好友洞察只关心真人用户」「我点击开启单独运营报错 404」
+  「有 2 个图库按钮 一个是个人主页的公共图库 一个是 ai 生成图库 一个输入 一个输出」。
+  - 图库：公共图库 = 个人主页照片 + 导入（AI 出图素材）；AI 生成图库 = `GET /v1/ai/personas/{id}/media?source=ai`，
+    只属于已授权的分身，未授权显示「授权形象」按钮，出图任务未接上时如实空态，不放假图。
+  - 好友洞察：服务端 `twininsight.IsHumanTarget` 过滤平台助手 / AI 账号 / agent（proxy_ai、user_proxy_ai、ai_*、agent_*），
+    好友和陌生人两条来源都过滤。
+  - 开启单独运营 404：`RecordOperate` 原来只认好友，列表里的陌生人点了就 404；现在以洞察列表本身为准。
+  - 帖文编排 / 编辑受众的好友选择器显示真实头像（AI-TWIN-AUDIENCE-AVATAR-001，接手上一个中断会话的未提交改动）。
+- 影响文件：`apps/mobile/src/components/twin-gallery-section.tsx`、`apps/mobile/src/components/twin-post-composer-section.tsx`、
+  `apps/mobile/src/surfaces/AIIdentityShowcaseSurface.tsx`。
+
+## Revision 260 — 2026-09-23
+
+- **AI 分身不再静默自动建，进入时先弹授权提示**（AI-MANAGE-010）：用户规则「ai 分身只给小美授权使用 没有这个授权的
+  就是没有」「目前是测试账户 全部权限 后期…必须要等你申请接单权限 验证你是小美 会自动更新展示 点击进入自动默认授权
+  但是要弹授权提示」。删除 `ensurePersonalTwin`（TWIN-SUBSPACE-ACTIVATE-001 的进页面就地建分身）：
+  - `findAuthorizedTwin` 只读：有分身且本人形象授权仍生效才算有分身，没授权的旧分身当作没有；
+  - 进入 AI 管理 / 好友洞察时若未授权，弹一次授权提示（`likeness-consent-prompt.ts`），同意才 `grantLikeness`
+    （此时才建分身并写 VISUAL 授权）；「暂不」则什么都不建，显示未授权态 +「授权形象」按钮。
+  - 接单权限 / 小美验证（入口只对小美展示）按用户要求本次不做；当前测试账号全部可见。
+- 影响文件：`apps/mobile/src/surfaces/ai-management.tsx`、`apps/mobile/src/components/twin-insight-section.tsx`。
+
+## Revision 259 — 2026-09-23
+
+- **AI 管理加「形象授权」**（AI-MANAGE-009）：用户要求「模型提示要有本人授权 否则很容易侵犯肖像权 所以这个
+  ai 管理还要有授权按钮 读取个人主页的图库 不然模型访问不了个人公共相册」。主页新增形象授权卡：未授权说明
+  「不授权，模型读不到你的个人相册」+「授权」；已授权显示日期 +「撤回授权」；授权 / 撤回都要系统弹窗二次确认。
+  授权即本人对自己 AI 分身的 LC-07 likeness consent（VISUAL，走已有的 /v1/ai/personas/{id}/consents）。
+  服务端新增唯一的模型读图入口 `likenessReferencePhotos`：没有生效授权一张不给，撤回后立刻失效，只给本人上传的原图。
+  图片管理 → 参数「形象绑定」改为反映授权状态（原来只看有没有照片）。
+- 影响文件：`apps/mobile/src/surfaces/ai-management.tsx`。
+
+## Revision 258 — 2026-09-23
+
+- **AI 目录外置：价格 / logo / 免费额度不再写在代码里**（AI-MANAGE-007）：用户要求「价格 logo 数字…
+  肯定加载专门的文件 别写在代码里 token 的费用属于高度变化的 后期运营了 直接对接 自动更新就好了」。
+  出图厂商、模型、价格、logo、每月免费出图额度、聊天 Token 付费方放进运营维护的 `config/ai-catalog/`
+  （`catalog.json` + `logos/*.svg`），服务端 `GET /v1/ai/catalog` 下发，按文件修改时间自动重载，坏文件
+  继续用上一份好的。App 的图片管理 → 模型页从目录读，免费额度写在价格提示里；App 里不再有价格和厂商 logo。
+- 影响文件：`apps/mobile/src/surfaces/ai-management.tsx`、`apps/mobile/src/surfaces/ai-management-data.ts`、
+  `apps/mobile/src/ai-catalog-client.ts`。
+
+## Revision 257 — 2026-09-23
+
+- **生成场景换成照片样片、扩到 12 个**（AI-MANAGE-005）：用户反馈「图片生成场景 目前的 logo 有点难看
+  场景有点少 这是做的场景资产样板 你也同步更新代替目前 6 个 增加场景 代替 logo」。场景卡改用
+  `proxy_scene_photo_assets` 的 12 张样片做封面（底部压暗 + 白字名称 / 描述，选中黑框 + ✓），
+  不再是 emoji + 渐变色块。场景：暖调咖啡厅、高级餐厅、海边度假、花园漫步、自然光 Brunch、城市天台、
+  文青甜品店、夜色露台、老街灯笼、书店咖啡、江边日落、度假泳池；新场景各配视觉要素、提示词与 6 个姿态。
+  旧场景 id（restaurant / izakaya / night）映射到新场景。照片打包在 `assets/ai-scenes/`，经
+  `media/asset-sources.ts` 的 `getAiScenePhoto` 取。
+- 影响文件：`apps/mobile/src/surfaces/ai-management.tsx`、`apps/mobile/src/surfaces/ai-management-data.ts`、
+  `apps/mobile/src/media/asset-sources.ts`。
+
+## Revision 256 — 2026-09-23
+
+- **AI 管理的三张管理卡换用户给的图标**（AI-MANAGE-004）：用户反馈「把这 3 个 logo 换一下 目前的 ai 管理
+  图片管理 logo 有点难看」。对话 / 图片 / 动态管理卡改用 `proxy_management_icons_svg` 里的
+  conversation / image / dynamic-management.svg（原样内嵌、自带圆角底色），不再是 emoji + 渐变底。
+- 影响文件：`apps/mobile/src/surfaces/ai-management.tsx`、`apps/mobile/src/surfaces/ai-management-data.ts`。
+
+## Revision 255 — 2026-09-23
+
+- **好友洞察头像空白**（TWIN-INSIGHT-AVATAR-001）：「为什么好友洞察头像是空白」。
+  - 服务端 `buildInsight` 写死 `AvatarURL: ""` → 从 `identity.profiles.avatar_path` 解析，经
+    `WireAvatarURL` 翻成可下发形状（`/v1/media/thumb/<id>`、`/`、http(s)）；认不出前缀回空串，
+    宁回首字不发必 404 的 URL。`main.go` 挂 `SetAvatarSource(authorNames.ResolveAuthorAvatarPath)`。
+  - 客户端不再把相对路径裸塞 `<Image>`：`twin-avatar-source.ts` 的 `twinAvatarSource` 统一经
+    `resolveMediaUrl` 拼 base；`ProxyAvatar` 加 `Image onError` 回退首字（uri 变更重置失败态）。
+  - 回归契约 `TWIN-INSIGHT-AVATAR-001` 写入 `check-regression-contracts.sh`。
+- 影响文件：`apps/api-go/internal/twininsight/insight.go`、`apps/api-go/internal/identity/profile.go`、
+  `apps/api-go/cmd/api/main.go`、`apps/mobile/src/components/{proxy-foundation.tsx,twin-insight-card.tsx,
+  twin-insight-section.tsx,twin-avatar-source.ts}`、`apps/mobile/src/surfaces/AIIdentityShowcaseSurface.tsx`。
+
+## Revision 254 — 2026-09-23
+
+- **AI 管理按原型重做 + 对话管理管对人**（AI-MANAGE-003）：用户反馈「原型给了 干的一坨屎 logo 也不对
+  功能也不对」（原型 `deepseek_html_20260923_83b40b (1).html`）。
+  - 页面：页头（返回 / 节点牌标 / 红色暂停钮）、副标题「AI 正在替你工作」、深色状态卡、三张管理卡、
+    版本行；三个 sheet 的标签页 / 选项 / 配色 / 尺寸逐项照原型。目录（6 场景、36 姿态、6 运镜、
+    7 厂商含模型与价格）用 node 直接执行原型脚本导出到 `ai-management-data.ts`。所有选择真落
+    服务端，点下去先变、失败撤回。与原型不同的：Token 不画「/ 200K」假上限；出图、自动发帖没接上，
+    徽标写「未接出图」「全自动」并附说明，不画「运行中」；字号下限 11。
+  - 「我的」入口：原来的 `sparkle` 不在图标表里、回落成文字「sp」，换成原型节点牌标。
+  - 服务端：对话管理读**被代表的人**（私聊里收消息的真人）的设置，不再读发消息的人；
+    暂停 / 关闭 / 每次确认都不替 TA 回（每次确认的「草稿给本人确认」尚未做，先不漏草稿给对方），
+    全自动用 TA 的语气 / 长度 / emoji、以代回复人设回；Token 记在 TA 头上。跟 Proxy 助手的会话
+    不受对话管理影响。演示用真人账号（home rail 28 人）种一行「全自动」，保持可测。
+- 影响文件：`apps/mobile/src/surfaces/ai-management.tsx`、`apps/mobile/src/surfaces/ai-management-data.ts`、
+  `apps/mobile/src/surfaces/me.tsx`、`apps/mobile/src/surfaces/me-profile-components.tsx`、
+  `apps/mobile/src/surfaces/me-styles.ts`。
+
+## Revision 253 — 2026-09-23
+
+- **下拉刷新**（PULL-REFRESH-001）：用户反馈「目前所有社交产品都是上下滑动进行刷新 我们缺少
+  这个逻辑」。首页、「更多」真人列表、「更多 → 聊天房」、消息收件箱、动态、市场的主列表都加了
+  系统下拉刷新（`RefreshControl`）。转圈跟真实加载走：`src/components/pull-to-refresh.ts` 的
+  `usePullToRefresh` 等 load 的 Promise，`useTrackedRefresh` 让首页的加载 effect 随 nonce 重跑、
+  请求被 track，全部回来才收起；都带 15s 兜底。「我的」页本轮没接（该文件另一会话正在改）。
+- **招呼句子不重复**（HOME-MORE-GREET-004）：挑句子时避开跟这个人聊天里我已经发过的句子，
+  全发过了才允许重复（之前只记本次运行里上一句，AI 代回复会回「又是这句」）。
+- 影响文件：`apps/mobile/src/components/pull-to-refresh.ts`、`apps/mobile/src/greet-state.ts`、
+  `apps/mobile/src/shell/app-shell.tsx`、`apps/mobile/src/surfaces/requester-home.tsx`、
+  `apps/mobile/src/surfaces/messages.tsx`、`apps/mobile/src/surfaces/feed.tsx`、
+  `apps/mobile/src/surfaces/market.tsx`。
+
+## Revision 252 — 2026-09-23
+
+- **我的 → 账户 → AI 管理按新原型全量落地，连后端一起做**（AI-MANAGE-002）：
+  原型 `deepseek_html_20260923_83b40b` 的暂停按钮、本月 Token、对话/图片/动态
+  三个设置 sheet，此前诚实切片因「无后端」整段不做。本轮补齐服务端事实源并接线：
+  - 服务端：迁移 119 `ai_engine_settings`（设置单行 + 当月 token_usage）；
+    命令 `GetAiEngineSettings` / `UpdateAiEngineSettings`（owner 由 actor 盖章，
+    部分字段先 normalize 补默认再 validate）；`RecordAiTokens` 在真实推理成功后
+    累加当月用量；擦除回执带两张表计数。
+  - 会话门禁：`SetAiEngineChatStateReader` + `SetTokenMeter` 装进 `cmd/api`；
+    paused 全局挡（`PAUSED`），`off` 不生成（`OFF`），`confirm` 出草稿不落库
+    （`aiDraft`/`DRAFT`）；reader 未接 = fail-open（见 `ai_engine_gate.go`）。
+  - mobile：新增 `ai-engine-client.ts`（command 信封读写，read 成功后种子
+    write 链避免首写按默认盖掉服务端字段）；`ai-management.tsx` 按原型全量
+    重写（暂停钮、Token/图片/视频状态卡、三管理卡+badge、chat/image/post
+    三个 sheet、`AI Engine v2.4 · 平台托管` footer）。Token 只显示服务端本月
+    累计、不编 120K/200K 上限；厂商/模型是偏好 ID 不直绑 provider；
+    动态卡 `auto` badge 显示「全自动」不虚报「运行中」（无自动发帖 worker）。
+- 影响文件：`apps/api-go/migrations/119_ai_engine_settings.sql`、
+  `apps/api-go/internal/identity/ai_engine_settings.go`（+test）、
+  `apps/api-go/internal/identity/{service,repository}.go`、
+  `apps/api-go/internal/platform/postgres/ai_engine_settings.go`、
+  `apps/api-go/internal/platform/postgres/identity.go`、
+  `apps/api-go/internal/conversation/ai_engine_gate.go`（+test）、
+  `apps/api-go/internal/conversation/service.go`、`apps/api-go/cmd/api/main.go`、
+  `apps/api-go/openapi.commands.generated.yaml`、
+  `apps/mobile/src/ai-engine-client.ts`（+test）、
+  `apps/mobile/src/surfaces/ai-management.tsx`、`ai-management.test.ts`、
+  `apps/mobile/src/surfaces/me.tsx`。
+
+## Revision 251 — 2026-09-23
+
+- **「已邀约」落盘 12 小时，可连发 3 条**（HOME-MORE-GREET-003）：用户反馈「已邀约 切换到
+  home-更多 又重置了 … 可以发 3 条连续 超过没有回复等待回复吧 但是状态不能重置 必须要冷静
+  12H 后才能重置状态」。
+  - 新增 `src/greet-state.ts`：按登录账号记每个人最近一次打招呼时间（SecureStore），
+    12 小时内一直「已邀约」，切页面 / 重启不重置；过期条目读回时丢掉。
+  - 「已邀约」还能再点，再发一句；发之前查 DM：末尾我已连发 3 条、对方本人没回，就不发，
+    提示「已经连发 3 条了，等 X 回复吧」。「回复」只认对方本人 —— 真人账号的 AI 代回复署名
+    `proxy_ai`，每条秒回，算它的话上限形同虚设。
+- 影响文件：`apps/mobile/src/greet-state.ts`、`apps/mobile/src/i18n.ts`、
+  `apps/mobile/src/shell/app-shell.tsx`、`apps/mobile/src/surfaces/requester-home.tsx`。
+
+## Revision 250 — 2026-09-23
+
+- **邀约按钮：点下去立刻「已邀约」，不再等对方回复**（HOME-MORE-GREET-002）：用户反馈
+  「显示发送中-已打招呼 这属于多余 邀约 已邀约 就可以 … 不能必须等对方（模型 真人）回复
+  才能更新状态」。真人账号接了 AI 代回复，`StartConversation` 带首条消息时服务端会同步生成
+  代回复再返回，之前挂在请求结果上改状态 = 等对方回复。现在点下即置「已邀约」，请求在后台发，
+  只有发送失败才撤回并提示；去掉「发送中」和成功横幅。按钮加图标：邀约 = 气泡，已邀约 = ✓。
+- 影响文件：`apps/mobile/src/i18n.ts`、`apps/mobile/src/surfaces/requester-home.tsx`。
+
+## Revision 249 — 2026-09-23
+
+- **「更多」列表：拼桌 / 邀约按同一窗景分，邀约 = 一点就打招呼**（HOME-MORE-GREET-001）：
+  用户反馈「点击邀约 弹出了底部提示 和拼桌一样 这个要改」。以前按在线状态分拼桌 / 邀约，
+  两个都弹同一个破冰面板。现在：
+  - 已知距离 ≤ 200m（同一窗景）→「拼桌」，仍弹破冰面板约见面；
+  - 更远或距离未知 →「邀约」= 纯打招呼：点一下直接从 8 句预制招呼里随机挑一句，
+    经 PROFILE 源 DM 真发出去（已有会话就续在里面），按钮变「已打招呼」，列表顶部
+    一行显示发了哪句；同一个人连着两次不会收到同一句。发失败说没发出去，访客提示登录，
+    没账号的人如实说发不了。招呼句 6 种语言各 8 句（`GREETING_LINES`）。
+- 影响文件：`apps/mobile/src/i18n.ts`、`apps/mobile/src/shell/app-shell.tsx`、
+  `apps/mobile/src/surfaces/requester-home.tsx`。
+
+## Revision 248 — 2026-09-23
+
+- **我的 → 账户新增 AI 管理入口**（AI-MANAGE-001）：原型
+  deepseek_html_20260923_83b40b 落地诚实切片 —— 状态卡只画真数（分身
+  listMine 真查 + 照片/视频/动态现算），管理项只保留有真实去处的两条
+  （出图 → AI 分身页，动态 → 个人主页）。Token 用量/暂停/三设置 sheet
+  无后端，不做。
+- 入口行图标用 `sparkle`（AI 分身行是 `aiPersona` 半身像，两行不再撞脸）。
+- 影响文件：`apps/mobile/src/surfaces/me.tsx`（账户组加行 + `aimanage`
+  路由，新文件 `ai-management.tsx` 不在契约实现清单内）。
+
+## Revision 247 — 2026-09-23
+
+- **好友洞察目标集扩大**（TWIN-INSIGHT-TARGETS-001）：只认好友会漏掉聊过天/
+  看过主页的陌生人，rail 上出现"刚说过话却没有洞察"。目标=好友∪互动者，
+  陌生人显示账号名或解析到的真名；无目标时空态文案改为"有人找你聊天或
+  来看过主页后…"。
+- **洞察工具仅向实名创作者发放**（TWIN-INSIGHT-ENTITLEMENT-001）：无使用权的
+  账号读/写一律 403（`insight_viewer_forbidden`），客户端照实说"仅向认证
+  创作者开放"，不折叠成未成年或故障。
+- **分身副空间就地激活**（TWIN-SUBSPACE-ACTIVATE-001）：进 AI 分身页无分身则
+  建一个（默认名，可改），不再停在"还没有洞察"死胡同；建失败走错误态。
+- 影响文件：`apps/api-go/cmd/api/main.go`、
+  `apps/mobile/src/twin-insight-client.ts`、
+  `apps/mobile/src/components/twin-insight-section.tsx`。
+
+## Revision 246 — 2026-09-23
+
+- **卖家实名核验补上受控写入口**（COMP-SELLER-001）：读侧（撮合/收款按「已实名且
+  未过期」放行）一直是通的，但「已实名」这个状态**没有来源** ——
+  `INSERT INTO supply.seller_real_name_verifications` 全仓零命中，库里那 6 行只能靠
+  手写 SQL，同时违反 084 自己的三条承诺（`legal_name='TEST-ONLY …'`、
+  `id_number_hash` 是字面量而非哈希、`verified_by` 是会话标签而非运营主体），
+  而读侧又把 `expires_at IS NULL` 读成「永不过期」⇒ **6 个卖家在无人核验的情况下
+  通过了实名闸，而 5 条钉全绿**（「没数据」与「没权限」在这里长得一样）。
+  现在：新增命令 `AttestSellerRealName`（operator 门 + 新增 `IDENTITY` scope；明文
+  证件号在命令边界就地 sha256，领域事件载荷不带姓名/证件号）、迁移 118 加两条
+  DB 级 CHECK、读侧谓词收紧为 `expires_at > NOW()`，dev 种子改走真实写入口。
+- **simulated + Postgres 起不来**（SEED-IDENTITY-CHANNEL-001）：开发身份种子往
+  `identity.login_identities` 写 `channel='PHONE'`，而 049 的 CHECK 只认 `EMAIL`/`SMS`
+  —— 049 比这条 INSERT 晚三周上线，之后启动必然 `log.Fatalf`，**排在后面的
+  supply / home-rail / media 三个种子一个都跑不到**（上一批实名行只能手写 SQL 的
+  根因）。改为与内存种子 `localIdentityService` 对齐：不写 channel/identifier。
+- 影响文件：`apps/api-go/internal/supply/seller_identity.go`、
+  `apps/api-go/internal/supply/service.go`、
+  `apps/api-go/internal/platform/postgres/supply.go`、
+  `apps/api-go/internal/platform/postgres/seller_identity.go`、
+  `apps/api-go/internal/api/security.go`、
+  `apps/api-go/internal/api/operator_scopes.go`、
+  `apps/api-go/cmd/api/wire_seed.go`、`apps/api-go/cmd/api/wire_supply.go`、
+  `apps/api-go/migrations/118_seller_real_name_attestation_guards.sql`、
+  `scripts/check-regression-contracts.sh`（另有新增测试：
+  `internal/supply/seller_real_name_attestation_test.go`、
+  `internal/platform/postgres/seller_real_name_attestation_integration_test.go`、
+  `cmd/api/dev_identity_seed_test.go`）。
+
+## Revision 245 — 2026-09-23
+
+- **开房 / 进房不再闪回首页**（HOME-MORE-ROOMS-002）：用户反馈「点击聊天房卡片
+  创建 先弹回 home 再进入创建 这个多此一举」。根因是「更多」整页是全屏 Modal，
+  创建页 / 房间是 app-shell 里另外的 Modal，iOS 只能呈现一个，只好先关「更多」。
+  现在 `RoomCreateSurface` / `RoomSurface` 新增 `presentation="overlay"`，从
+  「更多 → 聊天房」进来时叠在「更多」Modal 里面；返回回到聊天房列表（并重读列表）。
+  从消息页进房仍走原来的独立 Modal（app-shell 按入口区分，同一时刻只有一份 visible）。
+- 影响文件：`apps/mobile/src/shell/app-shell.tsx`、
+  `apps/mobile/src/surfaces/requester-home.tsx`、
+  `apps/mobile/src/surfaces/room-create.tsx`、`apps/mobile/src/surfaces/room.tsx`。
+
+## Revision 244 — 2026-09-23
+
+- **「更多 → 聊天房」改成列表视图**（HOME-MORE-ROOMS-001）：照原型
+  `deepseek_html_20260923_2308b7.html`，「聊天房」chip 不再直接跳创建页，
+  而是把本页列表切成「开房大卡 + 正在进行的房间」。大卡整卡 = 默认场景开房，
+  4 个场景 chip（City Walk / 咖啡 / 看展 / 桌游，复用 `room-create.tsx` 的
+  `SCENE_OPTIONS`）= 带着该场景打开创建页。房间列表只列服务端真实的 GROUP
+  会话（带 `roomScene`），点一行进房；读失败与没有房分开显示，访客提示登录。
+  没有公开可加入的房间目录，所以不画别人的房、不画假「加入」。
+- **语言入口挪到「更多」的「中文」chip**（HOME-I18N-002）：首页页头的「中」
+  按钮去掉；「中文」chip 显示当前语言本名（中文 / Tiếng Việt / English …），
+  点开选择语言面板。面板新增 `presentation="overlay"`，叠在「更多」整页 Modal
+  里面，不嵌第二个 Modal。原「会中文」筛选随之让位给语言入口。
+- **「更多」chip 行改为单行横滑**：返回箭头、搜索固定两端，chip 在中间横滑
+  （原型 `.filter-chips { overflow-x: auto }`）。之前 flexWrap 换行时「聊天房」
+  会被挤到第二行，落进返回箭头的 hitSlop。
+- 影响文件：`apps/mobile/src/components/language-sheet.tsx`、
+  `apps/mobile/src/i18n.ts`、`apps/mobile/src/shell/app-shell.tsx`、
+  `apps/mobile/src/surfaces/requester-home.tsx`、
+  `apps/mobile/src/surfaces/room-create.tsx`。
+
+## Revision 243 — 2026-09-22
+
+- **房间见面进壳**（ROOM-CREATE-001）：`app-shell` 新增创建房间面板 +
+  房间聊天页（GROUP + RoomScene），`conversation-client` 新增
+  Propose/Accept/Nudge/Arrive/CompleteMeetup；`main.go` 只做服务接线，
+  不改视觉。
+- **场景地图默认不再硬编码 threebeans**（SCENE-MAP-DEFAULT-001）：无参
+  打开为地图/列表总览，带 sceneId 才直达详情。
+- **聊天门禁提示分槽**（COMP-AI-MINOR-001 聊天侧）：`conversation.tsx`
+  新增持久门禁横幅（GATED 重试无效），瞬时失败仍走 error，不改气泡视觉。
+- **主页帖子失败与空态分开**（PROFILE-POSTS-FAILURE-001）：`ProfileTabs`
+  新增 `postsFailed`，失败显示“动态没读出来”，不再冒充“还没有动态”；
+  `me.tsx` 主页搜索/图库排除 TARGETED 私密帖（AUDIENCE-004），相对路径
+  经 resolveMediaUrl 拼装（GALLERY-004）。
+- **「更多」页距离改成真半径控件**（HOME-MORE-DIST-001）：照
+  `deepseek_html_20260922_1c2e2c.html` 的 distance-chip，「附近」不再是
+  写死 1km 的开关 —— 距离恒生效、可选 1/3/5/10/20/50/100 km（默认 10km），
+  chip 显示当前半径并展开滑杆面板；距离未知的人在任何半径下都不算「附近」
+  （PERSON-DISTANCE-ZERO-001 不变）。chip 样式随原型：无边框、选中转深色。
+- **首页 rail 全部换成真账号写真**（HOME-RAIL-ACCOUNT-001）：废止
+  OVERRIDE-UNSplash-001 的 5 张 stock 占位图（其中 4 张是风景/食物，被当成
+  人脸渲染），28 个 rail 人物全部对应服务端真实账号 + 写真 thumb；缺图回落
+  首字母。目标不存在的好友申请服务端明确拒绝（FRIEND-TARGET-EXISTS-001），
+  文案区分“人不存在”与“不收申请”。
+- **首页语言可选**（HOME-I18N-001）：照原型 `deepseek_html_20260922_1c2e2c.html`
+  的 `LANGS` / 选择语言 sheet，新增 `src/i18n.ts`（6 种语言：zh/vi/en/lo/ko/ja，
+  文案直接取原型 I18N 原文）+ `src/components/language-sheet.tsx`（底部面板），
+  真人推荐页头加「中」按钮显示**当前**语言短标；选完落盘 `pref_language`、
+  冷启动读回。首页整面 chrome（章节标题、空态、按钮、a11y、AI 对话回话、
+  破冰开场白、骑行档位、距离 chip 单位）改为走 `t()`，不再写死中文。
+  顺带修 `preferences.ts` 的语言校验：原先只认字面量 `"vi"`/`"en"`，其它一律
+  回落 `"zh"` —— 会把新增的 lo/ko/ja **静默吞回中文**；改为 i18n 白名单判定。
+  用户可见改动：页头多一个语言按钮、页面文案随语言切换。
+- 影响文件：`apps/api-go/cmd/api/main.go`、
+  `apps/mobile/src/components/language-sheet.tsx`、
+  `apps/mobile/src/conversation-client.ts`、
+  `apps/mobile/src/i18n.ts`、
+  `apps/mobile/src/media/author-avatar.ts`、
+  `apps/mobile/src/preferences.ts`、
+  `apps/mobile/src/shell/app-shell.tsx`、
+  `apps/mobile/src/surfaces/ProfileTabs.tsx`、
+  `apps/mobile/src/surfaces/conversation.tsx`、
+  `apps/mobile/src/surfaces/me.tsx`、
+  `apps/mobile/src/surfaces/requester-home.tsx`。
+
 ## Revision 242 — 2026-09-20
 
 - **访客首页不再弹"好友状态暂时无法加载"**（GUEST-RELATIONSHIP-001）：

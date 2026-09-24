@@ -5,6 +5,7 @@ import { ActivitySchema, JoinActivityPayloadSchema, ListActivitiesPayloadSchema,
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import { requireAuthenticatedServerSession, type SecureSessionStore, type StoredSession } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type ActivityCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
@@ -44,7 +45,7 @@ export class ActivityProtocolError extends Error {
 
 export class ActivityCommandRejectedError extends Error {
   public constructor(public readonly result: CommandResult) {
-    super(result.error?.messageKey ?? "activity command rejected");
+    super(commandErrorMessage(result.error, "activity command rejected"));
     this.name = "ActivityCommandRejectedError";
   }
 }

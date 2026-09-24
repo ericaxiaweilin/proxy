@@ -14,14 +14,24 @@ import { aiPersonaBundledPhoto, avatarPathToInput, resolveAssetSource, type Asse
 // 包），动态这条管线完全没查过它，任何非本人/非 AI 的作者一律落到首字兜底。
 //
 // 这份表是 apps/api-go/internal/mockidentity/identity.go 里
-// CreatorFacetKeys/AccountIDForFacetKey/AvatarAssetIDForFacetKey 三个函数的
-// 客户端镜像（服务端目前没有把作者头像放进 FeedPostSchema，这是短期在客户端
+// CreatorFacetKeys / HomeRailPeople / AccountIDForFacetKey / AvatarAssetIDForFacetKey
+// 的客户端镜像（服务端目前没有把作者头像放进 FeedPostSchema，这是短期在客户端
 // 补的对照表，长期应该是服务端直接把 authorAvatar 下发，不用客户端猜）。
 // recommend-fixtures.ts 的 ACCOUNT_AVATAR_ASSET 是同一份数据的另一份镜像
-// （用首页 fixture id `u_linh` 当 key，覆盖的人也少两个）——真正的账号 id
-// 前缀是 `user_mockcreator_`，跟这里保持一致才能覆盖"这人在动态里发帖"这条路。
+//（用首页 fixture id `u_<key>` 当 key）——真正的账号 id 前缀是 `user_mockcreator_`，
+// 跟这里保持一致才能覆盖"这人在动态里发帖"这条路。
+//
+// HOME-RAIL-ACCOUNT-001（2026-09-23）：rail 上 28 个人现在全部是真实账号，
+// 所以这份表从 9 个键扩到 30 个（Creator 9 + rail 28，去重后 30）。漏一个的
+// 症状就是 AVATAR-OTHER-HUMAN-002 那个老毛病：首页有脸、动态里黑底首字。
+// 三份表（本文件、recommend-fixtures、Go 侧 mockidentity）的一致性由 Go 侧的
+// TestHomeRailFixturePeopleAllHaveServerAccounts 逐条比对钉住。
 const MOCK_CREATOR_ACCOUNT_PREFIX = "user_mockcreator_";
-const MOCK_CREATOR_FACET_KEYS = new Set(["linh", "mai", "an", "thao", "yen", "minh", "trang", "hana", "nam"]);
+const MOCK_CREATOR_FACET_KEYS = new Set([
+  "an", "duc", "duy_khang", "hai", "hana", "hong_anh", "huy", "kien", "khoa", "lan",
+  "linh", "long", "ly", "mai", "minh", "my", "nam", "ngoc", "nhi", "phuong",
+  "phuong_thanh", "quynh_anh", "son", "thao", "thao_nhi", "thu_trang", "trang", "tu", "vy", "yen",
+]);
 
 function mockCreatorAvatarAssetId(authorId: string): string | undefined {
   if (!authorId.startsWith(MOCK_CREATOR_ACCOUNT_PREFIX)) return undefined;
@@ -43,6 +53,20 @@ export type AvatarAccount = {
   avatarVersion?: number | undefined;
 };
 
+// AVATAR-OTHER-HUMAN-002 (2026-09-21): 其他**真人**作者的真实账号。
+//
+// 为什么不能复用 AvatarAccount：那个类型的 personaId 是必填的（AI 账号靠它取
+// 打包人像），真人没有 personaId，塞一个空串当哨兵会让「AI 账号」这个语义糊掉。
+//
+// 数据来自 ProfileClient.getProfile(accountId)（identity.profiles.avatar_path，
+// 真实格式 `assets/<mediaAssetId>`）。服务端契约 FeedPostSchema 没有头像字段，
+// 所以只能客户端按 accountId 补查 —— 长期方向是服务端直接把 authorAvatar 下发。
+// 不重复存 accountId：Map 的 key 就是账号 id。
+export type AvatarHumanAccount = {
+  avatarPath: string;
+  avatarVersion?: number | undefined;
+};
+
 export type AuthorAvatar =
   | { kind: "image"; source: AssetImageSource }
   | { kind: "initial"; letter: string };
@@ -55,6 +79,8 @@ export type AuthorAvatarOptions = {
   avatarSource?: number | { uri: string } | undefined;
   /** AI 账号表（accountId → 账号），动态按需加载后传入。 */
   aiAccountsById?: ReadonlyMap<string, AvatarAccount> | undefined;
+  /** 真人作者表（accountId → 账号），动态按需加载后传入。优先级高于写死的 mock creator 表。 */
+  humanAvatarsById?: ReadonlyMap<string, AvatarHumanAccount> | undefined;
   /** 首字 fallback 用名（已解析的展示名）。 */
   displayName: string;
 };
@@ -80,6 +106,19 @@ export function resolveAuthorAvatar(author: AvatarAuthor, opts: AuthorAvatarOpti
     const bundled = aiPersonaBundledPhoto(author.authorId);
     if (bundled !== undefined) return { kind: "image", source: bundled };
   }
+  // AVATAR-OTHER-HUMAN-002: 其他真人作者的真实头像（identity.profiles.avatar_path）。
+  // 放在写死的 mock creator 表**之前** —— 服务端数据比客户端猜的准，而且那张表
+  // 已经漂移过一次（客户端有 `trang`，服务端没有这一行 profile）。
+  if (opts.humanAvatarsById) {
+    const human = opts.humanAvatarsById.get(author.authorId);
+    if (human) {
+      const input = avatarPathToInput({ avatarPath: human.avatarPath, avatarVersion: human.avatarVersion });
+      if (input) {
+        const source = resolveAssetSource(input, { baseUrl: opts.baseUrl });
+        if (source !== undefined) return { kind: "image", source };
+      }
+    }
+  }
   // AVATAR-OTHER-HUMAN-001: mock creator 真人账号（Linh 等）发的帖，用该账号
   // 在服务端真实存在的头像资产——不是本人、不是 AI，但也不该落到首字兜底。
   const mockCreatorAssetId = mockCreatorAvatarAssetId(author.authorId);
@@ -89,4 +128,22 @@ export function resolveAuthorAvatar(author: AvatarAuthor, opts: AuthorAvatarOpti
   }
   const letter = (opts.displayName.trim().charAt(0) || "?").toUpperCase();
   return { kind: "initial", letter };
+}
+
+// AVATAR-FALLBACK-TINT-001（2026-09-24，用户：「动态页面 帖文 很多真人用户头像是黑头」）：没有头像的人以前一律画成
+// #111 纯黑圆 + 白字 —— 一屏好几个黑圆，看起来像图片坏了。改成按 id 稳定取一个柔和底色（同一个人永远同一个颜色），
+// 字用深色。这是「没有头像」的兜底，不是假头像。
+const INITIAL_TINTS: ReadonlyArray<{ backgroundColor: string; color: string }> = [
+  { backgroundColor: "#EDE4FF", color: "#5B3FB8" },
+  { backgroundColor: "#FFE6DA", color: "#A4502A" },
+  { backgroundColor: "#DDF3E8", color: "#2E7A55" },
+  { backgroundColor: "#DDEBFF", color: "#2F5E9E" },
+  { backgroundColor: "#FFF1CC", color: "#8A6512" },
+  { backgroundColor: "#FFE0EA", color: "#A8385E" },
+];
+
+export function initialAvatarTint(seed: string): { backgroundColor: string; color: string } {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return INITIAL_TINTS[hash % INITIAL_TINTS.length]!;
 }

@@ -3,7 +3,9 @@ package identity
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -98,9 +100,222 @@ type PrivacyRequestRepository interface {
 	GetActivePrivacyRequest(ctx context.Context, userID string, kind PrivacyRequestKind) (PrivacyRequest, error)
 	GetPrivacyRequest(ctx context.Context, id string) (PrivacyRequest, error)
 	ListPrivacyRequestsByUser(ctx context.Context, userID string) ([]PrivacyRequest, error)
+	// ListDuePrivacyDeletions returns the delete requests the LC-15
+	// erasure executor still has to act on: kind='delete', status in
+	// ('received','in_progress'), requested_at <= receivedBefore.
+	// The caller passes now - PrivacyDeleteInProgressDelay, so this is
+	// "requests the platform is contractually late on". The executor
+	// then decides between the in_progress flip and the real erasure.
+	ListDuePrivacyDeletions(ctx context.Context, receivedBefore time.Time) ([]PrivacyRequest, error)
 	UpdatePrivacyRequest(ctx context.Context, req PrivacyRequest, expectedVersion int) error
 	AppendPrivacyRequestEvent(ctx context.Context, evt PrivacyRequestEvent) error
 }
+
+// PersonalDataEraser is the persistence boundary for the destructive
+// half of LC-15 (Vietnam PDP 91/2025/QH15 Art. 32 erasure). It is a
+// separate interface from PrivacyRequestRepository because the two
+// concerns are genuinely different: the request centre records an
+// intention, this one carries it out. Keeping them apart means the
+// executor can be handed exactly one dependency, and it keeps the
+// "did anything actually get erased?" question answerable by looking
+// at one method body.
+//
+// The contract is idempotent: running it twice for the same user must
+// be safe and must report zero rows the second time. The executor
+// relies on that — it erases before it bookkeeps, so a crash between
+// the two steps simply replays the erasure.
+type PersonalDataEraser interface {
+	ErasePersonalData(ctx context.Context, userID string) (ErasedPersonalData, error)
+}
+
+// ErasedPersonalData is the machine-readable receipt of one erasure
+// pass. Every counter is a table the executor physically deleted rows
+// from; every counter being zero on a second pass is how the
+// idempotency contract above is verified. What the executor
+// deliberately does NOT delete is spelled out in RetainedOnErasure,
+// because "个人数据将被永久删除" is only an honest promise together
+// with its exceptions.
+type ErasedPersonalData struct {
+	LoginIdentities    int `json:"loginIdentities"`
+	LoginChallenges    int `json:"loginChallenges"`
+	Sessions           int `json:"sessions"`
+	SessionTokens      int `json:"sessionTokens"`
+	Devices            int `json:"devices"`
+	Profiles           int `json:"profiles"`
+	AccountPreferences int `json:"accountPreferences"`
+	// AiEngineSettings / AiTokenUsage：AI 管理页的用户设置与本月计量（AI-MANAGE-002）。
+	// 与 account_preferences 同批擦除 —— 它们不是审计材料，是个人偏好与用量。
+	AiEngineSettings   int `json:"aiEngineSettings"`
+	AiTokenUsage       int `json:"aiTokenUsage"`
+	DisplayIdentities  int `json:"displayIdentities"`
+	Memberships        int `json:"memberships"`
+	Jurisdictions      int `json:"jurisdictions"`
+	// AgeAssertionsWiped counts age-assertion rows whose client
+	// metadata (ip / user_agent) was cleared. The date_of_birth itself
+	// is retained — see RetainedOnErasure.
+	AgeAssertionsWiped int `json:"ageAssertionsWiped"`
+	// AccountAnonymised is true when the identity.user_accounts row was
+	// flipped to status='ERASED'. The row survives; the account does not.
+	AccountAnonymised bool `json:"accountAnonymised"`
+}
+
+// Total is the number of rows the erasure physically removed or
+// scrubbed. Used by the sweep log line and by tests asserting that an
+// erasure was not a no-op.
+func (e ErasedPersonalData) Total() int {
+	return e.LoginIdentities + e.LoginChallenges + e.Sessions + e.SessionTokens +
+		e.Devices + e.Profiles + e.AccountPreferences + e.AiEngineSettings + e.AiTokenUsage +
+		e.DisplayIdentities + e.Memberships + e.Jurisdictions + e.AgeAssertionsWiped
+}
+
+// Summary renders the receipt for the privacy_request_events audit
+// trail, so an auditor reading one row can see what was removed
+// without re-deriving it from the database.
+func (e ErasedPersonalData) Summary() string {
+	return fmt.Sprintf(
+		"login_identities=%d login_challenges=%d sessions=%d session_tokens=%d devices=%d profiles=%d preferences=%d ai_engine_settings=%d ai_token_usage=%d display_identities=%d memberships=%d jurisdictions=%d age_assertion_metadata=%d account_anonymised=%t",
+		e.LoginIdentities, e.LoginChallenges, e.Sessions, e.SessionTokens,
+		e.Devices, e.Profiles, e.AccountPreferences, e.AiEngineSettings, e.AiTokenUsage,
+		e.DisplayIdentities,
+		e.Memberships, e.Jurisdictions, e.AgeAssertionsWiped, e.AccountAnonymised,
+	)
+}
+
+// RetainedOnErasure names the categories the erasure executor keeps,
+// each with the reason it survives. It exists as a value (not only a
+// comment) so the audit event and the regression pins can assert on
+// it: the user-facing promise is "永久删除（法律要求保存的记录除外）",
+// and this constant is the "除外".
+const RetainedOnErasure = "account_row (anonymised to status=ERASED: " +
+	"business.accounts.owner_user_id is ON DELETE RESTRICT and the payment/order " +
+	"ledgers reference it for the statutory window), " +
+	"agent_claim_number (no-gap numbering audit), " +
+	"age_assertion date_of_birth (COMP-AGE-001 minor-protection evidence; ip/user_agent wiped), " +
+	"legal_consent_records (proof the processing was lawful), " +
+	"payment/order/business rows (Decree 248/2026 §23, >=12 months), " +
+	"privacy_requests + privacy_request_events (this audit trail)"
+
+// ErrPersonalDataEraserUnavailable is returned when a repository does
+// not implement PersonalDataEraser. The service treats it as
+// "erasure not configured" and refuses to mark a request completed —
+// silently pretending to have erased is the one outcome that must
+// never happen.
+var ErrPersonalDataEraserUnavailable = errors.New("personal data eraser is not configured")
+
+// CrossAggregateEraser is the second half of LC-15: the copies of a
+// user's display identity that were written into aggregates other
+// than Identity.
+//
+// PersonalDataEraser removes the authoritative rows. It cannot remove
+// what other aggregates snapshotted at write time, and they all do:
+//
+//   - localnet.posts.author_display_name and
+//     socialspace.statuses.author_display_name hold the profile name
+//     as it was when the post was published.
+//   - marketplace.opportunities keeps the publisher's display name
+//     inside its payload, next to the authoritative owner_id.
+//   - business.member_directory keeps one for the same reason.
+//   - identity.profiles.avatar_path points at a media asset that
+//     /v1/media/play/<id> serves over a public, unauthenticated URL.
+//
+// Deleting the profile row leaves every one of those behind, which is
+// what would make the shipped copy 「头像会被永久删除」 false.
+//
+// The contract matches PersonalDataEraser: idempotent (a second pass
+// reports zero rows) and every counter is a row actually touched.
+//
+// ORDERING — this runs BEFORE PersonalDataEraser, and the order is
+// load-bearing rather than cosmetic. media.media_assets has no
+// "purpose" column, so the avatar is identifiable only through
+// identity.profiles.avatar_path. Once the profile row is gone the
+// avatar cannot be told apart from the user's ordinary post media and
+// the reference is unrecoverable — the avatar would stay publicly
+// servable forever. Service.advancePrivacyDeletion enforces the order.
+type CrossAggregateEraser interface {
+	EraseCrossAggregateIdentity(ctx context.Context, userID string) (ErasedCrossAggregate, error)
+}
+
+// ErasedCrossAggregate is the receipt of one cross-aggregate pass.
+// The counters are of two different kinds and the difference matters
+// when reading the audit trail:
+//
+//   - the name counters are UPDATEs that blanked a snapshot column.
+//     The authored row itself survives, de-attributed.
+//   - AvatarAssetsUnserved and PushTokens are rows whose
+//     reachability was removed: the avatar stops being publicly
+//     deliverable, the push token stops existing.
+type ErasedCrossAggregate struct {
+	PostDisplayNames       int `json:"postDisplayNames"`
+	StatusDisplayNames     int `json:"statusDisplayNames"`
+	OpportunityOwners      int `json:"opportunityOwners"`
+	BusinessDirectoryNames int `json:"businessDirectoryNames"`
+	// ConversationSnapshots counts conversation.messages rows whose
+	// sender_snapshot was cleared. The column is defined by migration
+	// 039 and no writer populates it yet; the statement is here so the
+	// first writer to land cannot create a leak that the erasure does
+	// not cover. The counter reads zero until then.
+	ConversationSnapshots int `json:"conversationSnapshots"`
+	AvatarAssetsUnserved  int `json:"avatarAssetsUnserved"`
+	PushTokens            int `json:"pushTokens"`
+}
+
+// Total is the number of rows the pass scrubbed or un-served.
+func (e ErasedCrossAggregate) Total() int {
+	return e.PostDisplayNames + e.StatusDisplayNames + e.OpportunityOwners +
+		e.BusinessDirectoryNames + e.ConversationSnapshots +
+		e.AvatarAssetsUnserved + e.PushTokens
+}
+
+// Summary renders the receipt for the privacy_request_events audit
+// trail, alongside ErasedPersonalData.Summary().
+func (e ErasedCrossAggregate) Summary() string {
+	return fmt.Sprintf(
+		"external: post_names=%d status_names=%d opportunity_owners=%d business_directory_names=%d conversation_snapshots=%d avatar_assets_unserved=%d push_tokens=%d",
+		e.PostDisplayNames, e.StatusDisplayNames, e.OpportunityOwners,
+		e.BusinessDirectoryNames, e.ConversationSnapshots,
+		e.AvatarAssetsUnserved, e.PushTokens,
+	)
+}
+
+// CrossAggregateErasureBoundary names what the cross-aggregate pass
+// leaves behind. It is the companion of RetainedOnErasure: that one
+// covers the identity aggregate, this one covers everywhere else the
+// user's identity was copied to.
+//
+// Two different kinds of reason appear here and they must not be
+// conflated — one is a deliberate retention, the other is a
+// capability this build does not have:
+//
+//   - statutory / product retention: the row is a record the platform
+//     is required to keep, so it survives with the name blanked.
+//   - missing capability: the avatar's stored object bytes are not
+//     purged. The media package has no object-delete path (every
+//     os.Remove in it is temp-file cleanup during upload or
+//     processing), so the asset row is demoted to
+//     visibility_class=OWNER_ONLY instead — which is exactly what
+//     makes ResolveServingPath refuse it, because that method
+//     requires PUBLIC. The public URL stops resolving; the blob
+//     stays on disk.
+const CrossAggregateErasureBoundary = "authored content rows (localnet.posts, " +
+	"socialspace.statuses, marketplace.opportunities) are KEPT with the display name " +
+	"blanked rather than deleted: other users' replies / bookmarks / reposts reference " +
+	"them, and the request was for erasure of personal data, not withdrawal of content; " +
+	"business.member_directory rows are KEPT (the membership is a commercial record) with " +
+	"the name blanked; " +
+	"ai.ai_personas KEPT (a separate entity the user created; owner_id now points at an " +
+	"anonymised account), " +
+	"supply.agent_profiles + supply.seller_real_name_verifications KEPT (real-name / KYC " +
+	"evidence, Decree 248/2026 §23), " +
+	"fulfillment.* and payment.* ledgers KEPT (statutory window); " +
+	"LIMITATION (not a retention): the avatar's stored object bytes are NOT purged — this " +
+	"build has no object-delete path, so the asset row is demoted to " +
+	"visibility_class=OWNER_ONLY and the blob remains on disk"
+
+// ErrCrossAggregateEraserUnavailable is returned when a repository does
+// not implement CrossAggregateEraser. Like its identity-side sibling
+// the service refuses to sweep rather than mark a request completed
+// while the user's name is still on their posts.
+var ErrCrossAggregateEraserUnavailable = errors.New("cross-aggregate eraser is not configured")
 
 // Repository is the canonical persistence boundary for Identity aggregates.
 // Session updates must enforce expectedVersion atomically.
@@ -174,6 +389,8 @@ type MemoryRepository struct {
 	privacyEvents      []PrivacyRequestEvent
 	privacyEventSeq    int64
 	accountPreferences map[string]AccountPreferences
+	aiEngineSettings   map[string]AiEngineSettings
+	aiTokenUsage       map[string]AiTokenUsage // key: userID + "\x00" + period
 }
 
 func NewMemoryRepository(seed *Seed) *MemoryRepository {
@@ -187,6 +404,8 @@ func NewMemoryRepository(seed *Seed) *MemoryRepository {
 		challenges:         make(map[string]LoginChallenge),
 		privacyRequests:    make(map[string]PrivacyRequest),
 		accountPreferences: make(map[string]AccountPreferences),
+		aiEngineSettings:   make(map[string]AiEngineSettings),
+		aiTokenUsage:       make(map[string]AiTokenUsage),
 	}
 	if seed != nil {
 		repository.users[seed.User.ID] = seed.User
@@ -220,6 +439,63 @@ func (r *MemoryRepository) UpsertAccountPreferences(_ context.Context, p Account
 	p.Version = r.accountPreferences[p.UserAccountID].Version + 1
 	r.accountPreferences[p.UserAccountID] = p
 	return p, nil
+}
+
+func aiTokenUsageKey(userID, period string) string {
+	return userID + "\x00" + period
+}
+
+func (r *MemoryRepository) GetAiEngineSettings(_ context.Context, userID string) (AiEngineSettings, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.aiEngineSettings[userID]
+	if !ok {
+		return AiEngineSettings{}, ErrAiEngineSettingsNotFound
+	}
+	return s, nil
+}
+
+func (r *MemoryRepository) UpsertAiEngineSettings(_ context.Context, s AiEngineSettings) (AiEngineSettings, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s.Version = r.aiEngineSettings[s.UserAccountID].Version + 1
+	if s.ImagePromptHistory == nil {
+		s.ImagePromptHistory = []string{}
+	}
+	if s.PostTopics == nil {
+		s.PostTopics = []string{}
+	}
+	r.aiEngineSettings[s.UserAccountID] = s
+	return s, nil
+}
+
+func (r *MemoryRepository) AddAiTokens(_ context.Context, userID, period string, prompt, output int) error {
+	if userID == "" || period == "" {
+		return errors.New("ai token usage: missing user or period")
+	}
+	if prompt < 0 || output < 0 {
+		return errors.New("ai token usage: negative tokens")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := aiTokenUsageKey(userID, period)
+	u := r.aiTokenUsage[key]
+	if u.UserAccountID == "" {
+		u = AiTokenUsage{UserAccountID: userID, Period: period}
+	}
+	u.PromptTokens += prompt
+	u.OutputTokens += output
+	r.aiTokenUsage[key] = u
+	return nil
+}
+
+func (r *MemoryRepository) GetAiTokens(_ context.Context, userID, period string) (AiTokenUsage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if u, ok := r.aiTokenUsage[aiTokenUsageKey(userID, period)]; ok {
+		return u, nil
+	}
+	return AiTokenUsage{UserAccountID: userID, Period: period}, nil
 }
 
 func (r *MemoryRepository) GetUser(_ context.Context, id string) (UserAccount, error) {
@@ -822,6 +1098,120 @@ func (r *MemoryRepository) AppendPrivacyRequestEvent(_ context.Context, evt Priv
 	return nil
 }
 
+// ListDuePrivacyDeletions mirrors the postgres query: delete requests
+// whose grace-window acknowledgement deadline has passed, oldest
+// first so a long backlog is drained in submission order.
+func (r *MemoryRepository) ListDuePrivacyDeletions(_ context.Context, receivedBefore time.Time) ([]PrivacyRequest, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]PrivacyRequest, 0)
+	for _, req := range r.privacyRequests {
+		if req.Kind != PrivacyRequestKindDelete {
+			continue
+		}
+		if req.Status != PrivacyRequestStatusReceived && req.Status != PrivacyRequestStatusInProgress {
+			continue
+		}
+		if req.RequestedAt.After(receivedBefore) {
+			continue
+		}
+		result = append(result, req)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].RequestedAt.Before(result[j].RequestedAt) })
+	return result, nil
+}
+
+// ErasePersonalData is the in-memory counterpart of the postgres
+// erasure. The memory repository only owns part of the identity
+// aggregate — it has no profile / display-identity / jurisdiction /
+// age-assertion storage — so the counters it reports are the subset it
+// actually holds. The full-wipe assertions live in the postgres
+// integration test; this implementation exists so the service-level
+// sweep logic can be exercised hermetically, with no DB and no
+// goroutines.
+//
+// Idempotency is structural: every loop deletes by key, so a second
+// call finds nothing and reports zeroes.
+func (r *MemoryRepository) ErasePersonalData(_ context.Context, userID string) (ErasedPersonalData, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var receipt ErasedPersonalData
+
+	// Login identities first, so the challenges that hang off them can
+	// be matched by identity id as well as by user id (mirrors the
+	// postgres order).
+	erasedIdentityIDs := make(map[string]struct{})
+	for id, li := range r.loginIdentities {
+		if li.UserAccountID == userID {
+			erasedIdentityIDs[id] = struct{}{}
+			delete(r.loginIdentities, id)
+			receipt.LoginIdentities++
+		}
+	}
+	for id, c := range r.challenges {
+		_, identityErased := erasedIdentityIDs[c.LoginIdentityID]
+		if c.UserAccountID != userID && !identityErased {
+			continue
+		}
+		delete(r.challenges, id)
+		receipt.LoginChallenges++
+	}
+	// Sessions before devices, matching identity_sessions_device_fk
+	// (ON DELETE RESTRICT) in postgres.
+	erasedSessionIDs := make(map[string]struct{})
+	for id, s := range r.sessions {
+		if s.UserAccountID != userID {
+			continue
+		}
+		erasedSessionIDs[id] = struct{}{}
+		delete(r.sessions, id)
+		receipt.Sessions++
+	}
+	for sessionID := range r.tokens {
+		if _, ok := erasedSessionIDs[sessionID]; !ok {
+			continue
+		}
+		delete(r.tokens, sessionID)
+		receipt.SessionTokens++
+	}
+	for id, d := range r.devices {
+		if d.UserAccountID != userID {
+			continue
+		}
+		delete(r.devices, id)
+		receipt.Devices++
+	}
+	kept := r.memberships[:0]
+	for _, m := range r.memberships {
+		if m.UserAccountID == userID {
+			receipt.Memberships++
+			continue
+		}
+		kept = append(kept, m)
+	}
+	r.memberships = kept
+	if _, ok := r.accountPreferences[userID]; ok {
+		delete(r.accountPreferences, userID)
+		receipt.AccountPreferences++
+	}
+	if _, ok := r.aiEngineSettings[userID]; ok {
+		delete(r.aiEngineSettings, userID)
+		receipt.AiEngineSettings++
+	}
+	for key, usage := range r.aiTokenUsage {
+		if usage.UserAccountID == userID || strings.HasPrefix(key, userID+"\x00") {
+			delete(r.aiTokenUsage, key)
+			receipt.AiTokenUsage++
+		}
+	}
+	if user, ok := r.users[userID]; ok {
+		user.Status = AccountStatusErased
+		r.users[userID] = user
+		receipt.AccountAnonymised = true
+	}
+	return receipt, nil
+}
+
 // ListLegalConsents returns the legal-consent rows the user has
 // recorded, for inclusion in a PrivacyDataExport payload. The in-memory
 // repository is consulted by the service's type-assertion in
@@ -841,3 +1231,23 @@ func (r *MemoryRepository) ListLegalConsents(_ context.Context, userID string) (
 }
 
 var _ PrivacyRequestRepository = (*MemoryRepository)(nil)
+var _ PersonalDataEraser = (*MemoryRepository)(nil)
+
+// EraseCrossAggregateIdentity is the in-memory counterpart of the
+// Postgres cross-aggregate eraser.
+//
+// It reports zero for every counter, and that is the correct answer
+// rather than a stub: this repository holds the identity aggregate
+// only, so it contains no posts, statuses, opportunities, media
+// assets, business directory rows or push tokens to scrub. The
+// behaviour of the pass is pinned against a real database by
+// TestEraseCrossAggregateIdentityScrubsEveryCopy, because a memory
+// implementation cannot exercise SQL it does not run.
+func (r *MemoryRepository) EraseCrossAggregateIdentity(_ context.Context, userID string) (ErasedCrossAggregate, error) {
+	if strings.TrimSpace(userID) == "" {
+		return ErasedCrossAggregate{}, errors.New("erase cross-aggregate identity: empty user id")
+	}
+	return ErasedCrossAggregate{}, nil
+}
+
+var _ CrossAggregateEraser = (*MemoryRepository)(nil)

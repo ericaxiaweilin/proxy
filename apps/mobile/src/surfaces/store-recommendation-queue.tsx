@@ -161,12 +161,12 @@ export function StoreRecommendationQueue(): React.JSX.Element {
 
   return (
     <View>
-      <Text style={styles.appBehaviorCardDesc}>
+      <Text selectable style={styles.appBehaviorCardDesc}>
         用户与小美（AI）推荐进体系的商铺都会留在这里，按城市 / 来源筛选后逐条评估。
         推荐记录 append-only，只增不改 —— 评估结论记在另一张表里，也不改原记录。
       </Text>
 
-      <Text style={styles.socialEditorLabel}>城市（可选）</Text>
+      <Text selectable style={styles.socialEditorLabel}>城市（可选）</Text>
       <TextInput
         placeholder="不填 = 全部城市"
         style={styles.socialEditorInput}
@@ -174,7 +174,7 @@ export function StoreRecommendationQueue(): React.JSX.Element {
         onChangeText={setCity}
       />
 
-      <Text style={styles.socialEditorLabel}>来源</Text>
+      <Text selectable style={styles.socialEditorLabel}>来源</Text>
       <View style={{ flexDirection: "row", gap: 8, marginTop: 2 }}>
         {ORIGIN_FILTERS.map((option) => {
           const active = origin === option.id;
@@ -191,7 +191,7 @@ export function StoreRecommendationQueue(): React.JSX.Element {
                 paddingVertical: 7
               }}
             >
-              <Text style={{ color: active ? color.white : color.ink, fontSize: 11, fontWeight: "700" }}>
+              <Text selectable style={{ color: active ? color.white : color.ink, fontSize: 11, fontWeight: "700" }}>
                 {option.label}
               </Text>
             </Pressable>
@@ -203,11 +203,11 @@ export function StoreRecommendationQueue(): React.JSX.Element {
           onPress={() => void load()}
           style={[styles.appBehaviorReturn, { marginTop: 0, paddingHorizontal: 16, paddingVertical: 7 }, busy && { opacity: 0.5 }]}
         >
-          <Text style={styles.appBehaviorReturnText}>{busy ? "读取中…" : "刷新"}</Text>
+          <Text selectable style={styles.appBehaviorReturnText}>{busy ? "读取中…" : "刷新"}</Text>
         </Pressable>
       </View>
 
-      <Text style={[styles.socialEditorLabel, { marginTop: 12 }]}>结论</Text>
+      <Text selectable style={[styles.socialEditorLabel, { marginTop: 12 }]}>结论</Text>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
         {STATUS_FILTERS.map((option) => {
           const active = status === option.id;
@@ -224,7 +224,7 @@ export function StoreRecommendationQueue(): React.JSX.Element {
                 paddingVertical: 7
               }}
             >
-              <Text style={{ color: active ? color.white : color.ink, fontSize: 11, fontWeight: "700" }}>
+              <Text selectable style={{ color: active ? color.white : color.ink, fontSize: 11, fontWeight: "700" }}>
                 {option.label}
               </Text>
             </Pressable>
@@ -234,7 +234,7 @@ export function StoreRecommendationQueue(): React.JSX.Element {
       {/* 采纳不等于店铺已存在。这句话必须说，否则运营会以为批完就完事了，
           而实际上商家还没入驻 —— 队列看起来「办结了」，事情却没发生。 */}
       {status === "ACCEPTED" ? (
-        <Text style={[styles.appBehaviorCardDesc, { marginTop: 6 }]}>
+        <Text selectable style={[styles.appBehaviorCardDesc, { marginTop: 6 }]}>
           已采纳只代表运营批准接入，商家实际入驻是另一件事 —— 这一列就是待跟进的名单。
         </Text>
       ) : null}
@@ -247,21 +247,21 @@ export function StoreRecommendationQueue(): React.JSX.Element {
 
       {forbidden ? (
         <View style={styles.infoNote}>
-          <Text style={styles.infoNoteText}>
+          <Text selectable style={styles.infoNoteText}>
             这个账号没有运营权限，看不到推荐队列。
           </Text>
-          <Text style={[styles.appBehaviorCardDesc, { marginTop: 4 }]}>
+          <Text selectable style={[styles.appBehaviorCardDesc, { marginTop: 4 }]}>
             注意：这不是「还没有人推荐」。队列内容只对运营白名单内的账号开放
             （服务端 PROXY_OPERATOR_PRINCIPALS），因为推荐记录里有推荐人的账号与理由。
           </Text>
         </View>
       ) : null}
 
-      {error ? <Text style={{ color: "#B3261E", fontSize: 12, marginTop: 8 }}>{error}</Text> : null}
+      {error ? <Text selectable style={{ color: "#B3261E", fontSize: 12, marginTop: 8 }}>{error}</Text> : null}
 
       {!forbidden && !error && rows && rows.length === 0 ? (
         <View style={styles.infoNote}>
-          <Text style={styles.infoNoteText}>
+          <Text selectable style={styles.infoNoteText}>
             {STATUS_FILTERS.find((option) => option.id === status)?.empty ?? "当前筛选条件下还没有推荐记录。"}
           </Text>
         </View>
@@ -270,8 +270,8 @@ export function StoreRecommendationQueue(): React.JSX.Element {
       {rows?.map((row) => (
         <View key={row.recommendationId} style={styles.prototypeCard}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Text style={styles.prototypeCardTitle}>{row.storeName}</Text>
-            <Text
+            <Text selectable style={styles.prototypeCardTitle}>{row.storeName}</Text>
+            <Text selectable
               style={{
                 backgroundColor: row.origin === "AI" ? "#EFE6FB" : "#EAF3EE",
                 borderRadius: 999,
@@ -287,12 +287,12 @@ export function StoreRecommendationQueue(): React.JSX.Element {
               {row.origin === "AI" ? "小美" : "用户"}
             </Text>
           </View>
-          <Text style={styles.prototypeCardDesc}>
+          <Text selectable style={styles.prototypeCardDesc}>
             {row.city}
             {row.category ? ` · ${row.category}` : ""} · {when(row.createdAt)}
           </Text>
-          <Text style={styles.prototypeCardDesc}>{row.reason}</Text>
-          <Text style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
+          <Text selectable style={styles.prototypeCardDesc}>{row.reason}</Text>
+          <Text selectable style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
             {/* origin=AI 表示内容由小美产出，recommendedBy 是发起对话的账号 —— 两个
                 身份都要留着：前者说明谁写的，后者保证举证链能回访。 */}
             {row.origin === "AI"
@@ -303,11 +303,11 @@ export function StoreRecommendationQueue(): React.JSX.Element {
           {row.decision ? (
             // 已经出过结论：把结论连同人与时间显示出来，不留「默默被处理掉了」的观感。
             <View style={{ marginTop: 8 }}>
-              <Text style={[styles.prototypeCardDesc, { color: row.decision === "ACCEPT" ? "#1B7F4D" : "#8C5A2B", fontWeight: "800" }]}>
+              <Text selectable style={[styles.prototypeCardDesc, { color: row.decision === "ACCEPT" ? "#1B7F4D" : "#8C5A2B", fontWeight: "800" }]}>
                 {row.decision === "ACCEPT" ? "已采纳" : "已不采纳"}
                 {row.decisionReason ? ` · ${row.decisionReason}` : ""}
               </Text>
-              <Text style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
+              <Text selectable style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
                 {row.decidedBy}
                 {row.decidedAt ? ` · ${when(row.decidedAt)}` : ""}
               </Text>
@@ -316,7 +316,7 @@ export function StoreRecommendationQueue(): React.JSX.Element {
             <View style={{ marginTop: 8 }}>
               {rejectFor === row.recommendationId ? (
                 <View>
-                  <Text style={styles.socialEditorLabel}>为什么不采纳（必填）</Text>
+                  <Text selectable style={styles.socialEditorLabel}>为什么不采纳（必填）</Text>
                   <TextInput
                     placeholder="例如：同品类已接入三家"
                     style={[styles.socialEditorInput, { minHeight: 60 }]}
@@ -330,13 +330,13 @@ export function StoreRecommendationQueue(): React.JSX.Element {
                       onPress={() => void decide(row.recommendationId, "REJECT")}
                       style={{ backgroundColor: color.ink, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, opacity: actingId === row.recommendationId ? 0.5 : 1 }}
                     >
-                      <Text style={{ color: color.white, fontSize: 11, fontWeight: "900" }}>确认不采纳</Text>
+                      <Text selectable style={{ color: color.white, fontSize: 11, fontWeight: "900" }}>确认不采纳</Text>
                     </Pressable>
                     <Pressable
                       onPress={() => { setRejectFor(undefined); setRejectReason(""); }}
                       style={{ backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 8 }}
                     >
-                      <Text style={{ color: color.ink, fontSize: 11, fontWeight: "900" }}>取消</Text>
+                      <Text selectable style={{ color: color.ink, fontSize: 11, fontWeight: "900" }}>取消</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -347,14 +347,14 @@ export function StoreRecommendationQueue(): React.JSX.Element {
                     onPress={() => void decide(row.recommendationId, "ACCEPT")}
                     style={{ backgroundColor: color.ink, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8, opacity: actingId === row.recommendationId ? 0.5 : 1 }}
                   >
-                    <Text style={{ color: color.white, fontSize: 11, fontWeight: "900" }}>采纳</Text>
+                    <Text selectable style={{ color: color.white, fontSize: 11, fontWeight: "900" }}>采纳</Text>
                   </Pressable>
                   <Pressable
                     disabled={actingId === row.recommendationId}
                     onPress={() => setRejectFor(row.recommendationId)}
                     style={{ backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 8, opacity: actingId === row.recommendationId ? 0.5 : 1 }}
                   >
-                    <Text style={{ color: color.ink, fontSize: 11, fontWeight: "900" }}>不采纳</Text>
+                    <Text selectable style={{ color: color.ink, fontSize: 11, fontWeight: "900" }}>不采纳</Text>
                   </Pressable>
                 </View>
               )}

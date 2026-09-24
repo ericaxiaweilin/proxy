@@ -1,3 +1,4 @@
+import { opFetch } from "../lib/api";
 import { useEffect, useState } from "react";
 
 type Snapshot = { context_snapshot_id: string; weather: string; mobility_friction: number; delivery_capacity: number; commute_eta: number; decision_id: string };
@@ -7,7 +8,7 @@ export function ContextField() {
   const [data, setData] = useState<Payload | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
-    fetch("/v1/operator/context-field").then((r) => r.json()).then(setData).catch((e: unknown) => setErr(String(e)));
+    opFetch("/v1/operator/context-field").then(setData).catch((e: unknown) => setErr(String(e)));
   }, []);
   if (err) return <div className="notice"><b>未连接到 API</b> — {err}</div>;
   if (!data) return <div className="notice">加载 ContextSnapshot…</div>;

@@ -72,7 +72,7 @@ export function BenefitHubSurface({ onBack }: { onBack: () => void }): React.JSX
 
   return (
     <ScrollView>
-      <Text style={styles.appBehaviorCardDesc}>
+      <Text selectable style={styles.appBehaviorCardDesc}>
         平台与商家发放的权益活动列在这里。领取后生成一次性验证码，到店出示给商家
         核销 —— 不伪造「已到账」，状态一律以服务端为准。
       </Text>
@@ -83,13 +83,13 @@ export function BenefitHubSurface({ onBack }: { onBack: () => void }): React.JSX
         </View>
       ) : null}
 
-      {error ? <Text style={{ color: "#B3261E", fontSize: 12, marginTop: 8 }}>{error}</Text> : null}
+      {error ? <Text selectable style={{ color: "#B3261E", fontSize: 12, marginTop: 8 }}>{error}</Text> : null}
 
       {/* 「读不出来」和「确实没有活动」必须长不一样 —— 同为空列表，
           前者是故障，后者是事实。 */}
       {!error && campaigns && campaigns.length === 0 ? (
         <View style={styles.infoNote}>
-          <Text style={styles.infoNoteText}>当前没有进行中的权益活动。</Text>
+          <Text selectable style={styles.infoNoteText}>当前没有进行中的权益活动。</Text>
         </View>
       ) : null}
 
@@ -99,16 +99,16 @@ export function BenefitHubSurface({ onBack }: { onBack: () => void }): React.JSX
           onPress={() => setOpenId(campaign.campaignId)}
           style={styles.prototypeCard}
         >
-          <Text style={styles.prototypeCardTitle}>{campaignTitle(campaign)}</Text>
-          <Text style={styles.prototypeCardDesc}>{campaign.goal}</Text>
-          <Text style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
+          <Text selectable style={styles.prototypeCardTitle}>{campaignTitle(campaign)}</Text>
+          <Text selectable style={styles.prototypeCardDesc}>{campaign.goal}</Text>
+          <Text selectable style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
             活动 {campaign.campaignId}
           </Text>
         </Pressable>
       ))}
 
       <Pressable onPress={onBack} style={[styles.lightCta, { marginTop: 12 }]}>
-        <Text style={styles.lightCtaText}>返回我的</Text>
+        <Text selectable style={styles.lightCtaText}>返回我的</Text>
       </Pressable>
     </ScrollView>
   );

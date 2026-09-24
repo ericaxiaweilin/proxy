@@ -1,3 +1,4 @@
+import { opFetch } from "../lib/api";
 import { useEffect, useState } from "react";
 
 type Exec = {
@@ -10,7 +11,7 @@ export function ExecutionRuntime() {
   const [data, setData] = useState<Exec | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
-    fetch("/v1/operator/execution-runtime").then((r) => r.json()).then(setData).catch((e: unknown) => setErr(String(e)));
+    opFetch("/v1/operator/execution-runtime").then(setData).catch((e: unknown) => setErr(String(e)));
   }, []);
   if (err) return <div className="notice"><b>未连接到 API</b> — {err}</div>;
   if (!data) return <div className="notice">加载 Execution Runtime…</div>;

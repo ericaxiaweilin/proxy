@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveAuthorAvatar, type AvatarAccount } from "./author-avatar";
+import { resolveAuthorAvatar, type AvatarAccount, type AvatarHumanAccount } from "./author-avatar";
 
 const BASE = "http://api.test";
 const ACCOUNT: AvatarAccount = {
@@ -131,5 +131,103 @@ describe("AVATAR-OTHER-HUMAN-001 mock creator accounts show their real avatar in
       );
       expect(avatar).toEqual({ kind: "image", source: { uri: `${BASE}/v1/media/thumb/ma_creator_linh_portrait_v1?v=1` } });
     }
+  });
+});
+
+// AVATAR-OTHER-HUMAN-002 (2026-09-21): 真实账号的服务端头像。
+//
+// 这个 describe 补的是一个**测试覆盖缺口**：上面 `falls back to initials for users
+// without photo assets` 用 `user_b` 断言首字，读起来像是「真人没头像就首字」，
+// 但真实世界里 46/69 条动态的作者都落进那一格，其中 23 条的 `identity.profiles`
+// **真有** avatar_path。所以旧测试实际上把 bug 当成了正确行为 —— 它证明的只是
+// 「没有数据源时首字」，从来没覆盖「有数据源时能不能出图」。
+//
+// 数据源现在是 feed.tsx 用 ProfileClient.getProfile(authorId) 按需补查出来的
+// 真人 profile 表（服务端契约 FeedPostSchema 没有头像字段，AI 账号有批量接口、
+// 真人没有，所以只能在客户端补）。
+const REAL_HUMAN_ASSET_ID = "ma_9b85d31f5712125ca8d5682e";
+const REAL_HUMAN_AUTHOR = "user_5fbe354a954f14391d5a056ce97f3e15";
+const REAL_HUMAN: AvatarHumanAccount = { avatarPath: `assets/${REAL_HUMAN_ASSET_ID}`, avatarVersion: 3 };
+
+describe("AVATAR-OTHER-HUMAN-002 a real human author with a server-side avatar gets their photo, not a black initial", () => {
+  it("resolves a non-viewer, non-AI author from the loaded profile map", () => {
+    const avatar = resolveAuthorAvatar(
+      { authorType: "USER", authorId: REAL_HUMAN_AUTHOR },
+      {
+        baseUrl: BASE,
+        viewerAccountId: "user_a",
+        humanAvatarsById: new Map([[REAL_HUMAN_AUTHOR, REAL_HUMAN]]),
+        displayName: "weilinxia511"
+      }
+    );
+    expect(avatar).toEqual({ kind: "image", source: { uri: `${BASE}/v1/media/thumb/${REAL_HUMAN_ASSET_ID}?v=3` } });
+  });
+
+  // 反向配重：如果哪天有人把 humanAvatarsById 分支删了、或者 feed 忘了传这张表，
+  // 上面那条会红；但「一律返回某张图」这种改法也能让它假绿，所以这里钉住
+  // 「没有表就必须回退」——即这张表是**必需的**，不是可有可无的装饰。
+  it("without the profile map the same author still falls back to initials (the map is load-bearing)", () => {
+    const avatar = resolveAuthorAvatar(
+      { authorType: "USER", authorId: REAL_HUMAN_AUTHOR },
+      { baseUrl: BASE, viewerAccountId: "user_a", displayName: "weilinxia511" }
+    );
+    expect(avatar).toEqual({ kind: "initial", letter: "W" });
+  });
+
+  it("server-side profile beats the hardcoded mock creator table", () => {
+    // 那张写死的表已经漂移过一次（客户端有 `trang`，服务端没有这行 profile）。
+    // 服务端数据必须优先，否则漂移永远修不掉。
+    const avatar = resolveAuthorAvatar(
+      { authorType: "USER", authorId: "user_mockcreator_linh" },
+      {
+        baseUrl: BASE,
+        humanAvatarsById: new Map([["user_mockcreator_linh", { avatarPath: "assets/ma_from_server" }]]),
+        displayName: "Linh"
+      }
+    );
+    expect(avatar).toEqual({ kind: "image", source: { uri: `${BASE}/v1/media/thumb/ma_from_server?v=1` } });
+  });
+
+  it("a MERCHANT author is resolved the same way — USER is not the only human type", () => {
+    const avatar = resolveAuthorAvatar(
+      { authorType: "MERCHANT", authorId: "user_merchant_1" },
+      { baseUrl: BASE, humanAvatarsById: new Map([["user_merchant_1", REAL_HUMAN]]), displayName: "Cafe" }
+    );
+    expect(avatar).toEqual({ kind: "image", source: { uri: `${BASE}/v1/media/thumb/${REAL_HUMAN_ASSET_ID}?v=3` } });
+  });
+
+  it("an empty avatarPath in the profile falls through instead of building a broken URL", () => {
+    const avatar = resolveAuthorAvatar(
+      { authorType: "USER", authorId: REAL_HUMAN_AUTHOR },
+      { baseUrl: BASE, humanAvatarsById: new Map([[REAL_HUMAN_AUTHOR, { avatarPath: "" }]]), displayName: "weilinxia511" }
+    );
+    expect(avatar).toEqual({ kind: "initial", letter: "W" });
+  });
+
+  it("an undocumented prefix (store/) never produces an invented thumb URL", () => {
+    const avatar = resolveAuthorAvatar(
+      { authorType: "USER", authorId: REAL_HUMAN_AUTHOR },
+      { baseUrl: BASE, humanAvatarsById: new Map([[REAL_HUMAN_AUTHOR, { avatarPath: "store/whatever" }]]), displayName: "weilinxia511" }
+    );
+    expect(avatar).toEqual({ kind: "initial", letter: "W" });
+  });
+
+  it("an empty profile map behaves exactly like no map at all", () => {
+    const avatar = resolveAuthorAvatar(
+      { authorType: "USER", authorId: REAL_HUMAN_AUTHOR },
+      { baseUrl: BASE, humanAvatarsById: new Map(), displayName: "weilinxia511" }
+    );
+    expect(avatar).toEqual({ kind: "initial", letter: "W" });
+  });
+});
+
+// AVATAR-FALLBACK-TINT-001：没头像的人不再是 #111 黑圆 —— 按 id 稳定取柔和底色，同一个人永远同一个颜色。
+describe("initial avatar tint", () => {
+  it("is stable per id, varies across ids and is never black", async () => {
+    const { initialAvatarTint } = await import("./author-avatar");
+    expect(initialAvatarTint("user_abc")).toEqual(initialAvatarTint("user_abc"));
+    const colors = new Set(["user_a", "user_b", "user_c", "user_d", "user_e", "user_f", "user_g", "user_h"].map((id) => initialAvatarTint(id).backgroundColor));
+    expect(colors.size).toBeGreaterThan(2);
+    for (const c of colors) expect(c.toLowerCase()).not.toMatch(/^#(111|111111|000|000000)$/);
   });
 });

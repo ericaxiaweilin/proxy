@@ -28,6 +28,19 @@ export interface TwinPersona {
   archivedAt?: string;
 }
 
+// AI-TWIN-GALLERY-001: 图库两个 tab 的真实来源——ai 是这个分身生成过的
+// 资产（persona_id 范围），raw 是这个人自己上传、还没被标成 AI 来源的
+// 原始素材（owner 范围，见 GET /v1/ai/personas/{id}/media?source=）。
+export type PersonaGallerySource = "ai" | "raw";
+
+export interface PersonaGalleryItem {
+  id: string;
+  thumbnailUrl: string;
+  playbackUrl?: string;
+  aiGenerationSource: string;
+  createdAt: string;
+}
+
 export type TwinConsentKind = "VISUAL" | "VOICE" | "VISUAL_AND_VOICE";
 
 export interface TwinConsent {
@@ -80,6 +93,15 @@ function isTwinPersona(value: unknown): value is TwinPersona {
     && typeof item.createdAt === "string" && item.createdAt !== "";
 }
 
+function isPersonaGalleryItem(value: unknown): value is PersonaGalleryItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.id === "string" && item.id !== ""
+    && typeof item.thumbnailUrl === "string" && item.thumbnailUrl !== ""
+    && typeof item.aiGenerationSource === "string" && item.aiGenerationSource !== ""
+    && typeof item.createdAt === "string" && item.createdAt !== "";
+}
+
 function isTwinConsent(value: unknown): value is TwinConsent {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
@@ -100,6 +122,25 @@ export class AiPersonaClient {
     const personas = (payload as { personas?: unknown }).personas;
     if (!Array.isArray(personas)) throw new Error("分身列表响应缺少 personas 数组");
     return personas.filter(isTwinPersona);
+  }
+
+  // AI-TWIN-GALLERY-001: 服务端要求登录（跟这个 client 其余大部分方法不
+  // 同——分身列表/consents 目前对未登录也开放，见 aipersona_handlers.go
+  // 的注释）。401/403 翻译成人话，不是让调用方自己猜状态码。
+  public async listGallery(personaId: string, source: PersonaGallerySource): Promise<PersonaGalleryItem[]> {
+    const response = await this.input.authClient.request(
+      `/v1/ai/personas/${encodeURIComponent(personaId)}/media?source=${source}`,
+      { method: "GET" },
+    );
+    const payload = await this.readJson(response, "图库");
+    if (response.status === 401) throw new Error("登录已失效，请重新登录后查看图库。");
+    if (response.status === 403) throw new Error("这个分身不属于当前账号，看不到它的图库。");
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`图库没读出来（${response.status}），请稍后重试。`);
+    }
+    const items = (payload as { items?: unknown }).items;
+    if (!Array.isArray(items)) throw new Error("图库响应缺少 items 数组");
+    return items.filter(isPersonaGalleryItem);
   }
 
   public async createTwin(input: { ownerId: string; displayName: string; description?: string }): Promise<TwinPersona> {
@@ -123,6 +164,26 @@ export class AiPersonaClient {
     }
     if (!isTwinPersona(payload)) throw new Error("创建分身响应缺少分身记录");
     return payload;
+  }
+
+  // AI-MANAGE-010（2026-09-23，用户：「ai 分身只给小美授权使用 没有这个授权的就是没有」「点击进入自动默认
+  // 授权 但是要弹授权提示」）：取代 TWIN-SUBSPACE-ACTIVATE-001 的「进页面就地建分身」。
+  //   - findAuthorizedTwin：只读。本人名下有分身**且**本人对它的形象授权（VISUAL / VISUAL_AND_VOICE）
+  //     仍然生效，才算「有分身」；没授权的分身（比如以前被自动建出来的）当作没有。
+  //   - grantLikeness：只在本人点了授权弹窗的「同意」之后调用 —— 这时才建分身（没有的话）并写授权。
+  // 谁都不许再静默建分身。
+  public async findAuthorizedTwin(ownerId: string): Promise<{ twin: TwinPersona; consent: TwinConsent } | undefined> {
+    for (const twin of await this.listMine(ownerId)) {
+      const consent = await this.getLiveConsent(twin.id, ownerId);
+      if (consent && (consent.consentKind === "VISUAL" || consent.consentKind === "VISUAL_AND_VOICE")) return { twin, consent };
+    }
+    return undefined;
+  }
+
+  public async grantLikeness(ownerId: string): Promise<{ twin: TwinPersona; consent: TwinConsent }> {
+    const twin = (await this.listMine(ownerId))[0] ?? await this.createTwin({ ownerId, displayName: "我的AI分身" });
+    const consent = await this.grantConsent(twin.id, ownerId, "VISUAL");
+    return { twin, consent };
   }
 
   // 没有生效授权时返回 undefined（服务端 204），不是抛错 ——

@@ -1,0 +1,204 @@
+package twininsight
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
+
+// TWIN-INSIGHT-002 写侧测试。
+//
+// 这里钉的是三道 fail-closed 闸门：
+//   1. 没接审计 → 拒绝（不留"点了按钮没留痕"的口子）；
+//   2. 没接未成年人门禁 → 拒绝（COMP-AI-MINOR-001）；
+//   3. 目标不是自己的活跃好友 → 拒绝（不能往任意账号身上写）。
+// 以及一个正向：过了闸就真的落一行，且字段完整可审计。
+
+func newOperateFixture() (*Service, *MemoryFriendSource, *MemoryActionLog) {
+	repo := NewMemoryRepository()
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{
+		{UserID: "friend_1", DisplayName: "Linh", Since: time.Now().Add(-30 * 24 * time.Hour)},
+	})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	log := NewMemoryActionLog()
+	svc.SetActionLog(log)
+	// 门禁默认放行，让每条用例自己决定要不要放行。
+	svc.SetCompanionGate(func(context.Context, string) error { return nil })
+	// 使用权门禁同样默认放行；拒绝路径由 TestRecordOperate*Entitlement* 钉。
+	svc.SetViewerGate(func(context.Context, string) error { return nil })
+	return svc, friends, log
+}
+
+func TestRecordOperateFailsClosedWithoutActionLog(t *testing.T) {
+	repo := NewMemoryRepository()
+	friends := NewMemoryFriendSource()
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	// 只缺审计：使用权和未成年门禁都放行，拒绝必须精确指向审计未接。
+	svc.SetViewerGate(func(context.Context, string) error { return nil })
+	svc.SetCompanionGate(func(context.Context, string) error { return nil })
+	if _, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "friend_1", ActionOperate); !errors.Is(err, ErrActionLogUnavailable) {
+		t.Fatalf("want ErrActionLogUnavailable, got %v", err)
+	}
+}
+
+func TestRecordOperateFailsClosedWithoutCompanionGate(t *testing.T) {
+	repo := NewMemoryRepository()
+	friends := NewMemoryFriendSource()
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetActionLog(NewMemoryActionLog())
+	svc.SetViewerGate(func(context.Context, string) error { return nil })
+	// 只接审计和使用权、不接未成年门禁 → 必须拒绝（宁可关动作，不对未成年人开放）。
+	_, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "friend_1", ActionOperate)
+	if !errors.Is(err, ErrCompanionGateUnavailable) {
+		t.Fatalf("want ErrCompanionGateUnavailable, got %v", err)
+	}
+}
+
+func TestRecordOperateRejectsUnknownAction(t *testing.T) {
+	svc, _, log := newOperateFixture()
+	if _, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "friend_1", "delete_everything"); !errors.Is(err, ErrActionInvalid) {
+		t.Fatalf("want ErrActionInvalid, got %v", err)
+	}
+	if len(log.All()) != 0 {
+		t.Errorf("a rejected action must not be recorded, got %d rows", len(log.All()))
+	}
+}
+
+func TestRecordOperateRejectsNonFriendTarget(t *testing.T) {
+	svc, _, log := newOperateFixture()
+	// stranger 不是 owner_1 的好友 —— 不加这条，任何人可以对任意账号开运营，
+	// 审计表会变成一张可以随便往别人身上写的表。
+	_, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "stranger_9", ActionOperate)
+	if !errors.Is(err, ErrTargetNotAFriend) {
+		t.Fatalf("want ErrTargetNotAFriend, got %v", err)
+	}
+	if len(log.All()) != 0 {
+		t.Errorf("a rejected action must not be recorded, got %d rows", len(log.All()))
+	}
+}
+
+func TestRecordOperatePropagatesCompanionGateRefusal(t *testing.T) {
+	svc, _, log := newOperateFixture()
+	gateErr := errors.New("minor forbidden")
+	svc.SetCompanionGate(func(context.Context, string) error { return gateErr })
+	_, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "friend_1", ActionOperate)
+	if !errors.Is(err, gateErr) {
+		t.Fatalf("gate refusal must propagate unchanged, got %v", err)
+	}
+	if len(log.All()) != 0 {
+		t.Errorf("a gate-rejected action must not be recorded, got %d rows", len(log.All()))
+	}
+}
+
+func TestRecordOperateWritesAuditableRow(t *testing.T) {
+	svc, _, log := newOperateFixture()
+	result, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "friend_1", ActionObserve)
+	if err != nil {
+		t.Fatalf("RecordOperate: %v", err)
+	}
+	if result.TargetID != "friend_1" || result.Action != ActionObserve {
+		t.Errorf("result mismatch: %+v", result)
+	}
+	if result.ActedAt == "" {
+		t.Error("actedAt must never be empty (contract min 1)")
+	}
+	rows := log.All()
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 audit row, got %d", len(rows))
+	}
+	row := rows[0]
+	// 审计必须能回答：谁 / 何时 / 对谁 / 什么动作 / 哪个分身。
+	if row.OwnerID != "owner_1" {
+		t.Errorf("audit owner = %q, want owner_1", row.OwnerID)
+	}
+	if row.TargetID != "friend_1" {
+		t.Errorf("audit target = %q, want friend_1", row.TargetID)
+	}
+	if row.TwinID != "twin_1" {
+		t.Errorf("audit twin = %q, want twin_1", row.TwinID)
+	}
+	if row.Action != ActionObserve {
+		t.Errorf("audit action = %q, want observe", row.Action)
+	}
+	if row.ActedAt.IsZero() {
+		t.Error("audit actedAt must be set")
+	}
+	if row.ID == "" {
+		t.Error("audit row must have an id")
+	}
+}
+
+func TestGetInsightRejectsNonFriend(t *testing.T) {
+	svc, _, _ := newOperateFixture()
+	if _, err := svc.GetInsight(context.Background(), "twin_1", "owner_1", "stranger_9"); !errors.Is(err, ErrTargetNotAFriend) {
+		t.Fatalf("want ErrTargetNotAFriend, got %v", err)
+	}
+}
+
+func TestGetInsightReturnsFriendWithZeroSignal(t *testing.T) {
+	svc, _, _ := newOperateFixture()
+	insight, err := svc.GetInsight(context.Background(), "twin_1", "owner_1", "friend_1")
+	if err != nil {
+		t.Fatalf("GetInsight: %v", err)
+	}
+	if insight.TargetID != "friend_1" {
+		t.Errorf("target = %q, want friend_1", insight.TargetID)
+	}
+	if insight.Score != 0 {
+		t.Errorf("no facts must mean score 0, got %d", insight.Score)
+	}
+}
+
+// TWIN-INSIGHT-ENTITLEMENT-001（写侧）：没使用权的账号，写动作在第一道闸
+// 就被拒绝 —— 不验证动作合法性、不读好友集、不留审计行。
+func TestRecordOperateDeniedWithoutViewerGate(t *testing.T) {
+	repo := NewMemoryRepository()
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{
+		{UserID: "friend_1", DisplayName: "Linh", Since: time.Now().Add(-30 * 24 * time.Hour)},
+	})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetActionLog(NewMemoryActionLog())
+	svc.SetCompanionGate(func(context.Context, string) error { return nil })
+	// 故意不 SetViewerGate：其他全接好也必须拒绝。
+	if _, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "friend_1", ActionOperate); !errors.Is(err, ErrInsightViewerForbidden) {
+		t.Fatalf("want ErrInsightViewerForbidden, got %v", err)
+	}
+}
+
+func TestRecordOperateDeniedWhenViewerGateRefuses(t *testing.T) {
+	svc, _, log := newOperateFixture()
+	svc.SetViewerGate(func(context.Context, string) error { return ErrInsightViewerForbidden })
+	if _, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "friend_1", ActionOperate); !errors.Is(err, ErrInsightViewerForbidden) {
+		t.Fatalf("want ErrInsightViewerForbidden, got %v", err)
+	}
+	if len(log.All()) != 0 {
+		t.Errorf("an entitlement-rejected action must not be recorded, got %d rows", len(log.All()))
+	}
+}
+
+// AI-MANAGE-011：列表里的陌生人（聊过天但没加好友）也能「开启单独运营」—— 以前只认好友，点了就 404。
+// 非真人（平台助手 / 平台 AI）不在列表里，依然拒绝。
+func TestOperateAcceptsEveryListedTargetAndRejectsNonHumans(t *testing.T) {
+	now := fixedTime()
+	repo := NewMemoryRepository()
+	repo.Seed("owner_1", Facts{Signals: []SignalFact{
+		{ActorID: "user_stranger", Messages7d: 5, LastSignalAt: now.Add(-time.Hour)},
+		{ActorID: "user_proxy_ai", Messages7d: 50, LastSignalAt: now.Add(-time.Hour)},
+	}})
+	friends := NewMemoryFriendSource()
+	friends.Set("owner_1", []Friend{})
+	svc := New(repo, friends, func(context.Context) (Thresholds, error) { return DefaultThresholds(), nil })
+	svc.SetViewerGate(allowAllViewers)
+	svc.SetClock(fixedTime)
+	svc.SetCompanionGate(func(context.Context, string) error { return nil })
+	svc.SetActionLog(NewMemoryActionLog())
+	if _, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "user_stranger", ActionOperate); err != nil {
+		t.Fatalf("a listed stranger must be operable, got %v", err)
+	}
+	if _, err := svc.RecordOperate(context.Background(), "twin_1", "owner_1", "user_proxy_ai", ActionOperate); !errors.Is(err, ErrTargetNotAFriend) {
+		t.Fatalf("a non-human is not a target, got %v", err)
+	}
+}

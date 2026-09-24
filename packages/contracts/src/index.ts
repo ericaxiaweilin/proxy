@@ -385,7 +385,11 @@ export const FeedPostSchema = z.object({
   aiAuthorKind: z.enum(["NATIVE", "TWIN", "DETECTED"]).optional(),
   body: z.string(),
   mediaRefs: z.array(PostMediaRefSchema).default([]),
-  visibility: z.enum(["PUBLIC", "FOLLOWERS", "AGENT_ONLY"]).optional(),
+  visibility: z.enum(["PUBLIC", "FOLLOWERS", "AGENT_ONLY", "TARGETED"]).optional(),
+  // AI-TWIN-POST-AUDIENCE-001: 只有 visibility=="TARGETED" 且当前浏览者
+  // 是作者本人时，服务端才会下发这个字段（帖文编排的受众条要用）。被投放
+  // 的人自己读回同一条帖子时不带——不能从这里看出"还有谁也被投放了"。
+  audienceTargetIds: z.array(z.string()).optional(),
   cityScope: z.string().optional(),
   // R15.15 P1: Post.SceneType — 解锁 per-(city, sceneType) 背景
   // 缓存。不传 = UNKNOWN，listFeed 仍查到样本 (只是会跌进
@@ -459,7 +463,19 @@ export const FeedMediaItemSchema = z.object({
   ]),
   sortOrder: z.number().int().nonnegative(),
   // 服务端 composition hint（§5.2.2）。可选；缺时前端走启发式。
-  compositionHint: MediaCompositionHintSchema.optional()
+  compositionHint: MediaCompositionHintSchema.optional(),
+  // LC-06：资产级 AI 生成溯源。闭集与 media_assets.ai_generation_source 的 DB
+  // 约束一致（migration 108，那份迁移自称「单一事实来源」），所以这里不另造词汇。
+  //
+  // 服务端对 feed media 恒下发（库里 NOT NULL DEFAULT 'USER_UPLOADED'）；这里标
+  // optional 只是为了向后兼容 —— 遵循本 schema 既有约定「缺字段 → undefined」，
+  // 不给客户端制造解析硬失败。防「服务端悄悄丢掉它」由 Go 侧测试钉住，不靠 zod。
+  //
+  // 客户端规则（2026-09-21 产品决定：「AI 做的就标注，法规要求要满足」）：
+  //   AI_PERSONA / MODEL_API → 必须显示「AI 生成」标注
+  //   USER_UPLOADED / 缺省   → 不显示（手机直传，没有 AI 参与）
+  // UNKNOWN 到不了客户端：MarkMediaReady 对它 fail-closed，READY 资产不可能是它。
+  aiGenerationSource: z.enum(["USER_UPLOADED", "AI_PERSONA", "MODEL_API", "UNKNOWN"]).optional()
 });
 export type FeedMediaItem = z.infer<typeof FeedMediaItemSchema>;
 
@@ -484,7 +500,12 @@ export const CreatePostPayloadSchema = z.object({
   authorDisplayName: z.string().optional(),
   body: z.string(),
   mediaRefs: z.array(PostMediaRefSchema).max(6).optional(),
-  visibility: z.enum(["PUBLIC", "FOLLOWERS", "AGENT_ONLY"]).optional(),
+  // AI-TWIN-POST-AUDIENCE-001: TARGETED 加了受众调度（帖文编排）用——只对
+  // 作者本人和 audienceTargetIds 里的账号可见。server 要求非空、去重、
+  // ≤200；其余 visibility 档位带了 audienceTargetIds 会被拒绝（不是静默
+  // 忽略），见 apps/api-go/internal/localnet/service.go 的 createPost 校验。
+  visibility: z.enum(["PUBLIC", "FOLLOWERS", "AGENT_ONLY", "TARGETED"]).optional(),
+  audienceTargetIds: z.array(z.string()).optional(),
   cityScope: z.string().optional(),
   // R15.15 P1: Post.SceneType。Server 在 CreatePost 处
   // 验证合法性。不传=UNKNOWN（依然合规）。发虚假值服务器 reject。
@@ -993,5 +1014,14 @@ export * from "./engagement";
 
 // AI-ASSIST-001: 平台 AI 助手公开目录（首页 5 小美推荐）wire 契约。
 export * from "./ai-assistants";
+
+// TWIN-INSIGHT-001: AI 分身 · 好友洞察 wire 契约（原型见
+// docs/design/references/proxy_ai_twin_insight_v1.html）。
+export * from "./twin-insight";
+
+// COMP-AI-MINOR-001（聊天侧）：会话命令回给客户端的 assistantStatus。
+// 放在 contracts 里而不是各端各写一份字面量，是因为「GATED 不能折叠成
+// FAILED/UNAVAILABLE」是一条跨端的约定：服务端负责发，客户端负责照实说。
+export * from "./conversation";
 
 // R15.33: map contracts 撤了 — 独立 map tab 已删。

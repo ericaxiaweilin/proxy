@@ -8,7 +8,8 @@
 //   - “热门地点” = MARKER 显式声明的探索点 (VENDOR_SPOT) — 重要但仅是探索，不会被默认高亮
 //   - “快速真实地址” = showUserLocation 蓝点 + “用我当前位置”按钮
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { usePullToRefresh } from "../components/pull-to-refresh";
 import MapView, { Circle, Marker, type Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useModuleBackHandler } from "../components/module-back";
@@ -276,6 +277,9 @@ export function MarketSurface({
     if (tab === "OPPORTUNITY") void loadOpportunities();
   }, [tab, loadOpportunities]);
 
+  // PULL-REFRESH-001: 下拉重拉当前 tab 的数据。
+  const marketPull = usePullToRefresh(useCallback(() => (tab === "OPPORTUNITY" ? loadOpportunities() : loadActivities()), [tab, loadOpportunities, loadActivities]));
+
   // M4: 机会页拉取真实供给（QuerySuppliers market=hn capability=ZH），用于“供给匹配”状态行
   useEffect(() => {
     if (!supply || tab !== "OPPORTUNITY") {
@@ -420,12 +424,15 @@ export function MarketSurface({
         （横向 padding 清零）之前只给订单 tab，活动 tab 缩进 18，
         同一块 MarketMap 一边顶边一边有缝。地图视图不分 tab 全顶边；
         列表视图保持原样（订单沿用 contentFlat，活动保留 18 padding）。 */}
-    <ScrollView style={styles.root} contentContainerStyle={[styles.content, view === "MAP" || pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
+    <ScrollView refreshControl={<RefreshControl refreshing={marketPull.refreshing} onRefresh={marketPull.onRefresh} />} style={styles.root} contentContainerStyle={[styles.content, view === "MAP" || pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
       <View style={styles.marketHead}>
-        <Text style={styles.marketTitle}>市场</Text>
+        <Text selectable style={styles.marketTitle}>市场</Text>
         <View style={styles.headActions}>
           <Pressable onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={[styles.viewToggle, view === "MAP" && styles.viewToggleOn]}>
-            <ProxyIcon color={view === "MAP" ? color.white : color.ink} name={view === "MAP" ? "storeLines" : "route"} size={18} />
+            {/* MAP-FOOTPRINT-LOGO-001：去地图用原型「折叠地图」logo，不再用通用 route。
+                48 栅格原画占盒比例比 24 栅格小一圈 —— mapFold 用 26，比旁边的
+                + 号（18）大一圈；storeLines 保持 18。 */}
+            <ProxyIcon color={view === "MAP" ? color.white : color.ink} name={view === "MAP" ? "storeLines" : "mapFold"} size={view === "MAP" ? 18 : 26} />
           </Pressable>
           <Pressable onPress={() => setPublishMenuOpen(true)} style={styles.plusBtn}>
             <ProxyIcon color={color.white} name="plus" size={18} />
@@ -446,7 +453,7 @@ export function MarketSurface({
       />
 
       {supply ? (
-        <Text style={styles.offerMsg}>
+        <Text selectable style={styles.offerMsg}>
           {supplierMatches === undefined ? "供给匹配中…（hn·ZH）" : supplierError ? `供给查询失败：${supplierError}` : `供给匹配 ${supplierMatches.length} 人（hn·ZH 已核验）`}
         </Text>
       ) : null}
@@ -515,7 +522,7 @@ export function MarketSurface({
           />
         ) : (
           <>
-            {opportunityError ? <Text style={styles.marketError}>{opportunityError}</Text> : null}
+            {opportunityError ? <Text selectable style={styles.marketError}>{opportunityError}</Text> : null}
             {opportunityPhase === "LOADING" ? <ProxyLoading tone="brand" style={{ marginVertical: 8 }} /> : null}
             <OpportunityTab items={opportunityItems} marketLabel={effectiveMarketLabel} onOpen={(o) => setOppDetail(o)} onDismiss={(id) => void dismissOpportunity(id)} />
           </>
@@ -525,35 +532,35 @@ export function MarketSurface({
           <View style={styles.searchRow}>
             <View style={styles.searchBox}>
               <TextInput onChangeText={setSearch} placeholder="搜活动、地点、主题…" placeholderTextColor="#A9A2B0" style={styles.searchInput} value={search} />
-              <Text style={styles.searchIcon}>⌕</Text>
+              <Text selectable style={styles.searchIcon}>⌕</Text>
             </View>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.lensRow} style={styles.lensScroll}>
             {ACTIVITY_FILTERS.map((entry) => (
               <Pressable key={entry.id} onPress={() => setActivityFilter(entry.id)} style={[styles.lens, activityFilter === entry.id && styles.lensOn]}>
-                <Text style={[styles.lensText, activityFilter === entry.id && styles.lensTextOn]}>{entry.label}</Text>
+                <Text selectable style={[styles.lensText, activityFilter === entry.id && styles.lensTextOn]}>{entry.label}</Text>
               </Pressable>
             ))}
           </ScrollView>
           <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>趋势活动</Text>
-            <Text style={styles.sectionHint}>多人 / 兴趣 / 品牌场景</Text>
+            <Text selectable style={styles.sectionTitle}>趋势活动</Text>
+            <Text selectable style={styles.sectionHint}>多人 / 兴趣 / 品牌场景</Text>
           </View>
           {activityPhase === "LOADING" && activityItems.length === 0 ? (
             <View style={styles.emptyBox}>
               <ProxyLoading tone="brand" />
-              <Text style={styles.emptyText}>正在读取活动读模型（ListActivities）…</Text>
+              <Text selectable style={styles.emptyText}>正在读取活动读模型（ListActivities）…</Text>
             </View>
           ) : activityPhase === "ERROR" ? (
             <View style={styles.emptyBox}>
-              <Text style={styles.emptyText}>活动读模型暂时不可用（本地 API 未连接？）。</Text>
+              <Text selectable style={styles.emptyText}>活动读模型暂时不可用（本地 API 未连接？）。</Text>
               <Pressable onPress={() => void loadActivities()} style={styles.retryBtn}>
-                <Text style={styles.retryText}>重试</Text>
+                <Text selectable style={styles.retryText}>重试</Text>
               </Pressable>
             </View>
           ) : visibleActivities.length === 0 ? (
             <View style={styles.emptyBox}>
-              <Text style={styles.emptyText}>{activityFilter === "MINE" ? "还没有参加或感兴趣的活动。" : "附近暂时没有符合的活动。"}</Text>
+              <Text selectable style={styles.emptyText}>{activityFilter === "MINE" ? "还没有参加或感兴趣的活动。" : "附近暂时没有符合的活动。"}</Text>
             </View>
           ) : activityDetail ? (
             <ActivityDetail
@@ -572,7 +579,7 @@ export function MarketSurface({
               <View key={item.activityId}>
                 <ActivityFeedCard item={item} onPress={() => setActivityDetail(item)} />
                 <View style={styles.hostFlag}>
-                  <Text style={styles.hostFlagText}>Host / Creator 可参与</Text>
+                  <Text selectable style={styles.hostFlagText}>Host / Creator 可参与</Text>
                 </View>
               </View>
             ))
@@ -613,14 +620,14 @@ export function MarketSurface({
             当成点击关闭——表现为「+ → 创建订单」点了只关弹层、进不去向导。 */}
         <Pressable accessibilityLabel="发布选择面板" onPress={() => undefined} testID="publish-menu-sheet-v1" style={[styles.publishMenuSheet, { marginBottom: bottomNavVisible === false ? 24 : 104 }]}>
           <View style={styles.publishMenuGrab} />
-          <Text style={styles.publishMenuTitle}>创建</Text>
-          <Text style={styles.publishMenuHint}>订单按 Moment 向导发布；活动用于多人共同参与。</Text>
+          <Text selectable style={styles.publishMenuTitle}>创建</Text>
+          <Text selectable style={styles.publishMenuHint}>订单按 Moment 向导发布；活动用于多人共同参与。</Text>
           <View style={styles.publishMenu}>
             <Pressable accessibilityLabel="创建订单" onPress={openDemandWizard} style={styles.publishMenuPrimary}>
-              <ProxyIcon color={color.white} name="plus" size={20} /><Text style={styles.publishMenuPrimaryText}>创建订单</Text>
+              <ProxyIcon color={color.white} name="plus" size={20} /><Text selectable style={styles.publishMenuPrimaryText}>创建订单</Text>
             </Pressable>
             <Pressable accessibilityLabel="创建活动" onPress={openActivityPublisher} style={styles.publishMenuSecondary}>
-              <ProxyIcon color={color.ink} name="star" size={20} /><Text style={styles.publishMenuSecondaryText}>创建活动</Text>
+              <ProxyIcon color={color.ink} name="star" size={20} /><Text selectable style={styles.publishMenuSecondaryText}>创建活动</Text>
             </Pressable>
           </View>
         </Pressable>
@@ -656,7 +663,7 @@ function OpportunityTab({
       <View style={styles.searchRow}>
         <View style={styles.searchBox}>
           <TextInput onChangeText={setQuery} placeholder="搜订单…" placeholderTextColor="#A9A2B0" style={styles.searchInput} value={query} />
-          <Text style={styles.searchIcon}>⌕</Text>
+          <Text selectable style={styles.searchIcon}>⌕</Text>
         </View>
       </View>
 
@@ -665,7 +672,7 @@ function OpportunityTab({
           const active = statusFilter === entry.id;
           return <Pressable key={entry.id} onPress={() => setStatusFilter(entry.id)} style={[styles.statusFilter, active && styles.statusFilterOn]}>
             <ProxyIcon color={active ? color.white : color.ink} name={entry.icon} size={17} />
-            <Text style={[styles.statusFilterText, active && styles.statusFilterTextOn]}>{entry.label}</Text>
+            <Text selectable style={[styles.statusFilterText, active && styles.statusFilterTextOn]}>{entry.label}</Text>
           </Pressable>;
         })}
       </ScrollView>
@@ -739,18 +746,18 @@ function OpportunityDetail({
     <View style={styles.oppDetailRoot}>
       <View style={styles.detailHead}>
         <Pressable onPress={onBack} style={styles.detailBack}>
-          <Text style={styles.detailBackText}>‹</Text>
+          <Text selectable style={styles.detailBackText}>‹</Text>
         </Pressable>
-        <Text style={styles.detailTitle}>订单详情</Text>
+        <Text selectable style={styles.detailTitle}>订单详情</Text>
       </View>
 
       <View style={styles.detailHero}>
         <View style={styles.detailHeroPhoto}>
           <ExpoImage cachePolicy="memory-disk" contentFit="cover" source={opportunity.sceneImageUrl ? { uri: opportunity.sceneImageUrl } : SAMPLE_SCENE_IMAGE[detailType]} style={StyleSheet.absoluteFill} transition={0} />
-          {!opportunity.sceneImageUrl ? <View style={styles.detailHeroPhotoTag}><Text style={styles.detailHeroPhotoTagText}>AI 样张</Text></View> : null}
+          {!opportunity.sceneImageUrl ? <View style={styles.detailHeroPhotoTag}><Text selectable style={styles.detailHeroPhotoTagText}>AI 样张</Text></View> : null}
           <View style={styles.detailHeroOverlay}>
-            <Text style={styles.detailHeroKicker}>{detailTypeLabel.sub.toUpperCase()} · {opportunity.location || "河内"}</Text>
-            <Text style={styles.detailHeroTitle}>{opportunity.title}</Text>
+            <Text selectable style={styles.detailHeroKicker}>{detailTypeLabel.sub.toUpperCase()} · {opportunity.location || "河内"}</Text>
+            <Text selectable style={styles.detailHeroTitle}>{opportunity.title}</Text>
           </View>
         </View>
       </View>
@@ -760,26 +767,26 @@ function OpportunityDetail({
       <View style={styles.detailTypeRow}>
         <MarketTypeLogo type={detailType} size="FILTER" />
         <View style={styles.detailTypeMeta}>
-          <Text style={styles.detailTypeLabel}>标准订单类型</Text>
-          <Text style={styles.detailTypeTitle}>{detailTypeLabel.label}</Text>
+          <Text selectable style={styles.detailTypeLabel}>标准订单类型</Text>
+          <Text selectable style={styles.detailTypeTitle}>{detailTypeLabel.label}</Text>
         </View>
       </View>
-      {opportunity.desc ? <Text style={styles.detailDesc}>{opportunity.desc}</Text> : null}
+      {opportunity.desc ? <Text selectable style={styles.detailDesc}>{opportunity.desc}</Text> : null}
 
       <View style={styles.r4PriceStrip}>
         <View style={styles.r4PriceCell}>
-          <Text style={styles.r4PriceLabel}>{opportunity.priceLabel ?? "完成后你可获得"}</Text>
-          <Text style={styles.r4PriceValue}>{budget || "费用待确认"}</Text>
+          <Text selectable style={styles.r4PriceLabel}>{opportunity.priceLabel ?? "完成后你可获得"}</Text>
+          <Text selectable style={styles.r4PriceValue}>{budget || "费用待确认"}</Text>
         </View>
         {opportunity.moneyFlow !== "TBD" && opportunity.moneyFlow !== "FREE" && fairRange ? (
           <View style={[styles.r4PriceCell, styles.r4PriceCellHot]}>
-            <Text style={styles.r4PriceLabel}>报价区间</Text>
-            <Text style={styles.r4PriceValue}>{fairRange}</Text>
+            <Text selectable style={styles.r4PriceLabel}>报价区间</Text>
+            <Text selectable style={styles.r4PriceValue}>{fairRange}</Text>
           </View>
         ) : null}
         <View style={styles.r4PriceCell}>
-          <Text style={styles.r4PriceLabel}>{opportunity.moneyFlow === "TBD" ? "双方面谈" : opportunity.moneyFlow === "FREE" ? "同好/社区" : "你的历史"}</Text>
-          <Text style={styles.r4PriceValue}>{opportunity.moneyFlow === "FREE" ? "0₫" : opportunity.moneyFlow === "TBD" ? "—" : `约 ${budget}`}</Text>
+          <Text selectable style={styles.r4PriceLabel}>{opportunity.moneyFlow === "TBD" ? "双方面谈" : opportunity.moneyFlow === "FREE" ? "同好/社区" : "你的历史"}</Text>
+          <Text selectable style={styles.r4PriceValue}>{opportunity.moneyFlow === "FREE" ? "0₫" : opportunity.moneyFlow === "TBD" ? "—" : `约 ${budget}`}</Text>
         </View>
       </View>
 
@@ -788,74 +795,74 @@ function OpportunityDetail({
           话, 跟 prototype 的"参考报价区间"对齐。 */}
       <View style={styles.valueBox}>
         <View style={styles.valueHead}>
-          <Text style={styles.valueTitle}>参考报价区间</Text>
-          <Text style={styles.valueBadge}>仅供锚定</Text>
+          <Text selectable style={styles.valueTitle}>参考报价区间</Text>
+          <Text selectable style={styles.valueBadge}>仅供锚定</Text>
         </View>
-        <Text style={styles.valueText}>客户预算落在 Proxy 公平区间内。你点的"报名报价"会进独立 sheet 自己定金额 —— 报价 UI 不在这屏, 不让详情页同时承担读订单和出价两件事。</Text>
+        <Text selectable style={styles.valueText}>客户预算落在 Proxy 公平区间内。你点的"报名报价"会进独立 sheet 自己定金额 —— 报价 UI 不在这屏, 不让详情页同时承担读订单和出价两件事。</Text>
       </View>
 
       <View style={styles.factGrid}>
         <View style={styles.fact}>
-          <Text style={styles.factLabel}>时间</Text>
-          <Text style={styles.factValue}>{opportunity.date} {opportunity.time}</Text>
+          <Text selectable style={styles.factLabel}>时间</Text>
+          <Text selectable style={styles.factValue}>{opportunity.date} {opportunity.time}</Text>
         </View>
         <View style={styles.fact}>
-          <Text style={styles.factLabel}>地点</Text>
-          <Text style={styles.factValue}>{opportunity.location}</Text>
+          <Text selectable style={styles.factLabel}>地点</Text>
+          <Text selectable style={styles.factValue}>{opportunity.location}</Text>
         </View>
         <View style={styles.fact}>
-          <Text style={styles.factLabel}>发布方</Text>
+          <Text selectable style={styles.factLabel}>发布方</Text>
           {/* PROFILE-READ-001: 服务端曾把个人机会 Owner 写死成 "你"；
               存量行经 079 回填清成空，此处对残留脏串同样中性兜底，
               永不把 "你" 展示给非作者。wire 暂无 ownerId，不做归属判定。 */}
-          <Text style={styles.factValue}>{resolveAuthorDisplayName({ authorId: `market_owner:${opportunity.owner}`, authorType: opportunity.ownerType === "BUSINESS" ? "MERCHANT" : "USER", authorDisplayName: opportunity.owner })} {opportunity.verified ? "✓" : ""}</Text>
+          <Text selectable style={styles.factValue}>{resolveAuthorDisplayName({ authorId: `market_owner:${opportunity.owner}`, authorType: opportunity.ownerType === "BUSINESS" ? "MERCHANT" : "USER", authorDisplayName: opportunity.owner })} {opportunity.verified ? "✓" : ""}</Text>
         </View>
         <View style={styles.fact}>
-          <Text style={styles.factLabel}>当前回应</Text>
-          <Text style={styles.factValue}>{opportunity.responses} 人</Text>
+          <Text selectable style={styles.factLabel}>当前回应</Text>
+          <Text selectable style={styles.factValue}>{opportunity.responses} 人</Text>
         </View>
       </View>
       {opportunity.desc ? (
         <View style={styles.noteBox}>
-          <Text style={styles.noteLabel}>备注</Text>
-          <Text style={styles.noteText}>{opportunity.desc}</Text>
+          <Text selectable style={styles.noteLabel}>备注</Text>
+          <Text selectable style={styles.noteText}>{opportunity.desc}</Text>
         </View>
       ) : null}
 
       <View style={styles.aiBox}>
         <View style={styles.aiHead}>
-          <Text style={styles.aiTitle}>Proxy · 给小美的判断</Text>
+          <Text selectable style={styles.aiTitle}>Proxy · 给小美的判断</Text>
         </View>
         <View style={styles.aiChecks}>
           {/* MARKET-FAKE-JUDGMENT-001: 这一盒以前是三条写死的结论（匹配度 / 出价
                下限 / 是否值得接），服务端既没有匹配引擎，也不存在"类似履约"数据
                —— 整盒是编出来的 AI 判断。改成如实说明这一版还没有评估：
                不删这块位置，但不再伪造结论。 */}
-          <Text style={styles.aiCheck}>这一版还没有评估：匹配度要按你的技能与历史履约算，出价建议要按同类订单算 —— 两样数据目前都没有，所以这里不给出结论。</Text>
-          <Text style={styles.aiCheck}>↗ {viewerTravelMinutes != null ? `通勤约 ${viewerTravelMinutes} 分钟，` : ""}平台托管付款。</Text>
+          <Text selectable style={styles.aiCheck}>这一版还没有评估：匹配度要按你的技能与历史履约算，出价建议要按同类订单算 —— 两样数据目前都没有，所以这里不给出结论。</Text>
+          <Text selectable style={styles.aiCheck}>↗ {viewerTravelMinutes != null ? `通勤约 ${viewerTravelMinutes} 分钟，` : ""}平台托管付款。</Text>
         </View>
       </View>
 
       {/* MARKET-QUOTE-SHEET-001: 为什么不直接报价 —— 详情页给"推荐理由"+"区间"，
           真正的报价按钮独立成一屏 sheet, 不让用户在这屏边读边算。 */}
       <View style={styles.detailWhyBox}>
-        <Text style={styles.detailWhyTitle}>为什么推荐给你</Text>
+        <Text selectable style={styles.detailWhyTitle}>为什么推荐给你</Text>
         {/* MARKET-FAKE-JUDGMENT-001: 匹配度那条删掉了 —— 服务端没有匹配引擎，
             以前显示的是发布时写死的常量。 */}
-        {opportunity.verified ? <Text style={styles.detailWhyRow}>✓ 商家身份已验证</Text> : null}
-        {viewerTravelMinutes != null ? <Text style={styles.detailWhyRow}>✓ 通勤约 {viewerTravelMinutes} 分钟</Text> : null}
+        {opportunity.verified ? <Text selectable style={styles.detailWhyRow}>✓ 商家身份已验证</Text> : null}
+        {viewerTravelMinutes != null ? <Text selectable style={styles.detailWhyRow}>✓ 通勤约 {viewerTravelMinutes} 分钟</Text> : null}
       </View>
 
       <View style={styles.detailActions}>
         <Pressable onPress={onBack} style={styles.detailActionGhost}>
-          <Text style={styles.detailActionGhostText}>先看看</Text>
+          <Text selectable style={styles.detailActionGhostText}>先看看</Text>
         </Pressable>
         <Pressable
           disabled={busy || opportunity.appliedByViewer || opportunity.ownedByViewer}
           onPress={() => { setQuoteError(undefined); setQuoteOpen(true); }}
           style={[styles.detailActionPrimary, (busy || opportunity.appliedByViewer || opportunity.ownedByViewer) && styles.detailActionBusy]}
         >
-          <Text style={styles.detailActionPrimaryText}>{opportunity.appliedByViewer ? "已回应" : opportunity.ownedByViewer ? "这是你发布的订单" : busy ? "打开报价中…" : "报名报价"}</Text>
+          <Text selectable style={styles.detailActionPrimaryText}>{opportunity.appliedByViewer ? "已回应" : opportunity.ownedByViewer ? "这是你发布的订单" : busy ? "打开报价中…" : "报名报价"}</Text>
         </Pressable>
       </View>
 
@@ -870,32 +877,32 @@ function OpportunityDetail({
       />
       {opportunity.ownedByViewer ? (
         <Pressable onPress={onOpenSelect} style={[styles.r4ActionGhost, { marginTop: 7 }]}>
-          <Text style={styles.r4ActionGhostText}>查看客户选人视角 ›</Text>
+          <Text selectable style={styles.r4ActionGhostText}>查看客户选人视角 ›</Text>
         </Pressable>
       ) : null}
 
       {opportunity.viewerApplicationStatus === "SELECTED" ? (
         <View style={[styles.aiBox, { marginTop: 8 }]}>
-          <Text style={styles.aiTitle}>发布者已选择你的申请</Text>
-          <Text style={styles.aiCheck}>再次核对本次报价与范围后，由你本人确认合作；AI 助理不能代确认。</Text>
+          <Text selectable style={styles.aiTitle}>发布者已选择你的申请</Text>
+          <Text selectable style={styles.aiCheck}>再次核对本次报价与范围后，由你本人确认合作；AI 助理不能代确认。</Text>
           <Pressable disabled={busy} onPress={onConfirm} style={[styles.r4ActionPrimary, { marginTop: 8 }]}>
-            <Text style={styles.r4ActionPrimaryText}>{busy ? "确认中…" : "本人确认合作"}</Text>
+            <Text selectable style={styles.r4ActionPrimaryText}>{busy ? "确认中…" : "本人确认合作"}</Text>
           </Pressable>
         </View>
       ) : opportunity.viewerApplicationStatus === "CONFIRMED" ? (
-        <Text style={styles.detailHint}>双方已确认合作 · {opportunity.viewerOrderRef}</Text>
+        <Text selectable style={styles.detailHint}>双方已确认合作 · {opportunity.viewerOrderRef}</Text>
       ) : opportunity.viewerApplicationStatus === "NOT_SELECTED" ? (
-        <Text style={styles.detailHint}>本次申请未被选择。</Text>
+        <Text selectable style={styles.detailHint}>本次申请未被选择。</Text>
       ) : null}
 
-      <Text style={styles.detailHint}>价格只属于这次需求。你的主页不会永久显示“小时价”。AI 不替客户压价，也不替你接受。</Text>
+      <Text selectable style={styles.detailHint}>价格只属于这次需求。你的主页不会永久显示“小时价”。AI 不替客户压价，也不替你接受。</Text>
 
       {/* COMP-REPORT-002: 机会 / 邀约举报入口。常驻在详情页底部，不做成
           长按菜单 —— 用户读到一条可疑的邀约时，不该还要先猜哪里能举报。 */}
       <Pressable accessibilityLabel={reportTarget.label} onPress={() => { setReportDone(undefined); setReporting(reportTarget); }} style={styles.reportLink}>
-        <Text style={styles.reportLinkText}>⚑ {reportTarget.label}</Text>
+        <Text selectable style={styles.reportLinkText}>⚑ {reportTarget.label}</Text>
       </Pressable>
-      {reportDone ? <Text style={styles.detailHint}>{reportDone}</Text> : null}
+      {reportDone ? <Text selectable style={styles.detailHint}>{reportDone}</Text> : null}
       {reporting ? (
         <ReportSheet
           moderation={moderation}
@@ -1024,19 +1031,19 @@ function PublishActivityForm({ activities, marketplace, venueOptions, onBack, on
   if (createdActivity && activityTraceId) {
     return <View style={styles.activityPublishPanel}>
       <View style={styles.publishSuccessCard}>
-        <Text style={styles.publishSuccessCheck}>✓</Text>
-        <Text style={styles.publishSuccessTitle}>活动已创建</Text>
-        <Text style={styles.publishFlowSub}>活动已经进入市场 · 活动，其他用户可以查看并报名。</Text>
+        <Text selectable style={styles.publishSuccessCheck}>✓</Text>
+        <Text selectable style={styles.publishSuccessTitle}>活动已创建</Text>
+        <Text selectable style={styles.publishFlowSub}>活动已经进入市场 · 活动，其他用户可以查看并报名。</Text>
         <View style={styles.publishTraceBox}>
-          <Text style={styles.publishFlowSub}>活动编号</Text>
-          <Text style={styles.publishTraceId}>{activityTraceId}</Text>
+          <Text selectable style={styles.publishFlowSub}>活动编号</Text>
+          <Text selectable style={styles.publishTraceId}>{activityTraceId}</Text>
         </View>
         <View style={styles.publishFlowRow}>
           <Pressable onPress={() => { setCreatedActivity(undefined); setActivityTraceId(undefined); setPickedPreset(undefined); setTitle(""); setTime(""); setDesc(""); }} style={styles.r4ActionGhost}>
-            <Text style={styles.r4ActionGhostText}>再建一个</Text>
+            <Text selectable style={styles.r4ActionGhostText}>再建一个</Text>
           </Pressable>
           <Pressable onPress={() => onPublished(createdActivity)} style={styles.r4ActionGhost}>
-            <Text style={styles.r4ActionGhostText}>查看活动 ›</Text>
+            <Text selectable style={styles.r4ActionGhostText}>查看活动 ›</Text>
           </Pressable>
         </View>
       </View>
@@ -1046,54 +1053,54 @@ function PublishActivityForm({ activities, marketplace, venueOptions, onBack, on
   if (!pickedPreset) {
     // step 1 — preset cards from the server catalog (R58 activity1).
     return <View style={styles.activityPublishPanel}>
-      <View style={styles.detailHead}><Pressable onPress={onBack}><Text style={styles.detailBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>创建活动</Text></View>
-      <Text style={styles.activityPublishTitle}>想组织什么？</Text>
-      <Text style={styles.publishFlowSub}>活动强调多人参与；先选一个完整玩法，也可以直接自定义。</Text>
+      <View style={styles.detailHead}><Pressable onPress={onBack}><Text selectable style={styles.detailBackText}>‹</Text></Pressable><Text selectable style={styles.detailTitle}>创建活动</Text></View>
+      <Text selectable style={styles.activityPublishTitle}>想组织什么？</Text>
+      <Text selectable style={styles.publishFlowSub}>活动强调多人参与；先选一个完整玩法，也可以直接自定义。</Text>
       {presetPhase === "LOADING" ? <ProxyLoading tone="muted" style={{ marginTop: 24 }} /> : null}
-      {presetPhase === "ERROR" ? <Text style={styles.marketError}>活动目录加载失败，可直接自定义填写。</Text> : null}
+      {presetPhase === "ERROR" ? <Text selectable style={styles.marketError}>活动目录加载失败，可直接自定义填写。</Text> : null}
       {presetPhase === "READY" ? <View style={styles.publishTemplateGrid}>
         {presets.map((p) => (
           <Pressable key={p.id} onPress={() => pickPreset(p)} style={[styles.publishTemplateCard, p.theme && { borderColor: "#B79BD1", borderWidth: 1.5 }]}>
-            <Text style={styles.publishTemplateMark}>{p.mark}</Text>
-            <Text style={styles.publishTemplateTitle}>{p.title}</Text>
-            <Text style={styles.publishTemplateSub}>{p.sub}</Text>
+            <Text selectable style={styles.publishTemplateMark}>{p.mark}</Text>
+            <Text selectable style={styles.publishTemplateTitle}>{p.title}</Text>
+            <Text selectable style={styles.publishTemplateSub}>{p.sub}</Text>
           </Pressable>
         ))}
       </View> : null}
       {presetPhase === "READY" ? <Pressable onPress={() => setPickedPreset(FREEFORM_PRESET)} style={[styles.r4ActionGhost, { marginTop: 12 }]}>
-        <Text style={styles.r4ActionGhostText}>找不到？自定义活动 ›</Text>
+        <Text selectable style={styles.r4ActionGhostText}>找不到？自定义活动 ›</Text>
       </Pressable> : null}
     </View>;
   }
 
   return <View style={styles.activityPublishPanel}>
     <View style={styles.detailHead}>
-      <Pressable onPress={() => { if (pickedPreset.id) setPickedPreset(undefined); else onBack(); }}><Text style={styles.detailBackText}>‹</Text></Pressable>
-      <Text style={styles.detailTitle}>活动设置</Text>
+      <Pressable onPress={() => { if (pickedPreset.id) setPickedPreset(undefined); else onBack(); }}><Text selectable style={styles.detailBackText}>‹</Text></Pressable>
+      <Text selectable style={styles.detailTitle}>活动设置</Text>
     </View>
     {pickedPreset.id ? (
       <View style={styles.publishTemplateSummary}>
-        <Text style={styles.publishTemplateSub}>Activity</Text>
-        <Text style={styles.publishTemplateSummaryTitle}>{pickedPreset.title}</Text>
+        <Text selectable style={styles.publishTemplateSub}>Activity</Text>
+        <Text selectable style={styles.publishTemplateSummaryTitle}>{pickedPreset.title}</Text>
         <Pressable onPress={() => setPickedPreset(undefined)} style={styles.publishTemplateChange}>
-          <Text style={styles.publishTemplateChangeText}>更换活动 ›</Text>
+          <Text selectable style={styles.publishTemplateChangeText}>更换活动 ›</Text>
         </Pressable>
       </View>
     ) : null}
-    <Text style={styles.activityPublishTitle}>{pickedPreset.id ? "完善活动" : "发起真实活动"}</Text>
+    <Text selectable style={styles.activityPublishTitle}>{pickedPreset.id ? "完善活动" : "发起真实活动"}</Text>
     <TextInput onChangeText={setTitle} placeholder="活动名称" placeholderTextColor="#A9A2B0" style={styles.activityPublishInput} value={title} />
     <TextInput onChangeText={setTime} placeholder="时间，例如 周六 14:00" placeholderTextColor="#A9A2B0" style={styles.activityPublishInput} value={time} />
     <TextInput keyboardType="number-pad" onChangeText={setCapacity} placeholder="人数" placeholderTextColor="#A9A2B0" style={styles.activityPublishInput} value={capacity} />
     <TextInput multiline onChangeText={setDesc} placeholder="活动说明（可选）" placeholderTextColor="#A9A2B0" style={[styles.activityPublishInput, { minHeight: 72 }]} value={desc} />
-    <Text style={styles.activityPublishLabel}>选择真实场景</Text>
+    <Text selectable style={styles.activityPublishLabel}>选择真实场景</Text>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusFilterRow}>
       {venues.map((item) => <Pressable key={item.realitySceneId} onPress={() => setSelectedSceneId(item.realitySceneId ?? "")} style={[styles.statusFilter, selectedSceneId === item.realitySceneId && styles.statusFilterOn]}>
-        <Text style={[styles.statusFilterText, selectedSceneId === item.realitySceneId && styles.statusFilterTextOn]}>{item.venueIcon} {item.venueName}</Text>
+        <Text selectable style={[styles.statusFilterText, selectedSceneId === item.realitySceneId && styles.statusFilterTextOn]}>{item.venueIcon} {item.venueName}</Text>
       </Pressable>)}
     </ScrollView>
-    {venues.length === 0 ? <Text style={styles.marketError}>当前没有可绑定的真实场景，请先刷新活动数据。</Text> : null}
-    {error ? <Text style={styles.marketError}>{error}</Text> : null}
-    <Pressable disabled={busy || venues.length === 0} onPress={() => void submit()} style={[styles.r4ActionPrimary, (busy || venues.length === 0) && styles.offerBtnDisabled]}><Text style={styles.r4ActionPrimaryText}>{busy ? "发布中…" : "确认发布活动"}</Text></Pressable>
+    {venues.length === 0 ? <Text selectable style={styles.marketError}>当前没有可绑定的真实场景，请先刷新活动数据。</Text> : null}
+    {error ? <Text selectable style={styles.marketError}>{error}</Text> : null}
+    <Pressable disabled={busy || venues.length === 0} onPress={() => void submit()} style={[styles.r4ActionPrimary, (busy || venues.length === 0) && styles.offerBtnDisabled]}><Text selectable style={styles.r4ActionPrimaryText}>{busy ? "发布中…" : "确认发布活动"}</Text></Pressable>
   </View>;
 }
 
@@ -1169,13 +1176,13 @@ function PublishTemplatePicker({ marketplace, onBack, onPicked, onCustom }: { ma
 
   return <View>
     <View style={styles.detailHead}>
-      <Pressable onPress={onBack} style={styles.detailBack}><Text style={styles.detailBackText}>‹</Text></Pressable>
-      <Text style={styles.detailTitle}>发布需求</Text>
+      <Pressable onPress={onBack} style={styles.detailBack}><Text selectable style={styles.detailBackText}>‹</Text></Pressable>
+      <Text selectable style={styles.detailTitle}>发布需求</Text>
     </View>
     <View style={styles.detailHero}>
-      <Text style={styles.detailHeroKicker}>CREATE DEMAND</Text>
-      <Text style={styles.detailHeroTitle}>想约什么？</Text>
-      <Text style={styles.detailHeroSub}>热门直接点；更特别的玩法从主题里选。</Text>
+      <Text selectable style={styles.detailHeroKicker}>CREATE DEMAND</Text>
+      <Text selectable style={styles.detailHeroTitle}>想约什么？</Text>
+      <Text selectable style={styles.detailHeroSub}>热门直接点；更特别的玩法从主题里选。</Text>
     </View>
     <View style={styles.publishSearchRow}>
       <TextInput
@@ -1186,44 +1193,44 @@ function PublishTemplatePicker({ marketplace, onBack, onPicked, onCustom }: { ma
         value={searchQuery}
       />
       <Pressable disabled={suggesting || !searchQuery.trim()} onPress={() => void runSuggest()} style={[styles.publishSearchGo, (suggesting || !searchQuery.trim()) && styles.offerBtnDisabled]}>
-        <Text style={styles.publishSearchGoText}>{suggesting ? "…" : "生成"}</Text>
+        <Text selectable style={styles.publishSearchGoText}>{suggesting ? "…" : "生成"}</Text>
       </Pressable>
     </View>
-    {suggestError ? <Text style={styles.marketError}>{suggestError}</Text> : null}
+    {suggestError ? <Text selectable style={styles.marketError}>{suggestError}</Text> : null}
     {phase === "LOADING" ? <ProxyLoading tone="muted" style={{ marginTop: 24 }} /> : null}
     {phase === "ERROR" ? <View style={styles.r4Card}>
-      <Text style={styles.marketError}>场景目录加载失败，可直接自定义发布。</Text>
-      <Pressable onPress={onCustom} style={[styles.r4ActionPrimary, { marginTop: 12 }]}><Text style={styles.r4ActionPrimaryText}>自定义发布</Text></Pressable>
+      <Text selectable style={styles.marketError}>场景目录加载失败，可直接自定义发布。</Text>
+      <Pressable onPress={onCustom} style={[styles.r4ActionPrimary, { marginTop: 12 }]}><Text selectable style={styles.r4ActionPrimaryText}>自定义发布</Text></Pressable>
     </View> : null}
     {phase === "READY" ? <>
       {rail.length > 1 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusFilterRow} style={{ marginTop: 10 }}>
           {rail.map((c) => (
             <Pressable key={c.id} onPress={() => setActiveCategory(c.id)} style={[styles.statusFilter, active.id === c.id && styles.statusFilterOn]}>
-              <Text style={[styles.statusFilterText, active.id === c.id && styles.statusFilterTextOn]}>{c.label}</Text>
+              <Text selectable style={[styles.statusFilterText, active.id === c.id && styles.statusFilterTextOn]}>{c.label}</Text>
             </Pressable>
           ))}
         </ScrollView>
       ) : null}
       <View style={styles.r4Card}>
-        <Text style={styles.r4Title}>{active.label} · {active.hint}</Text>
+        <Text selectable style={styles.r4Title}>{active.label} · {active.hint}</Text>
         <View style={styles.publishTemplateGrid}>
           {active.items.map((t) => (
             <Pressable key={t.id} onPress={() => setPickedId(t.id)} style={[styles.publishTemplateCard, pickedId === t.id && styles.publishTemplateCardOn]}>
-              <Text style={styles.publishTemplateMark}>{t.mark || t.title.slice(0, 1)}</Text>
-              <Text style={styles.publishTemplateTitle}>{t.title}</Text>
-              <Text style={styles.publishTemplateSub}>{t.sub || t.tags.slice(0, 2).join(" · ")}</Text>
-              <Text style={styles.publishTemplateRange}>参考 {t.range}</Text>
+              <Text selectable style={styles.publishTemplateMark}>{t.mark || t.title.slice(0, 1)}</Text>
+              <Text selectable style={styles.publishTemplateTitle}>{t.title}</Text>
+              <Text selectable style={styles.publishTemplateSub}>{t.sub || t.tags.slice(0, 2).join(" · ")}</Text>
+              <Text selectable style={styles.publishTemplateRange}>参考 {t.range}</Text>
             </Pressable>
           ))}
-          {active.items.length === 0 ? <Text style={styles.marketError}>这个分类下暂没有场景卡。</Text> : null}
+          {active.items.length === 0 ? <Text selectable style={styles.marketError}>这个分类下暂没有场景卡。</Text> : null}
         </View>
-        <Pressable onPress={onCustom} style={[styles.r4ActionGhost, { marginTop: 12 }]}><Text style={styles.r4ActionGhostText}>找不到？自定义发布 ›</Text></Pressable>
+        <Pressable onPress={onCustom} style={[styles.r4ActionGhost, { marginTop: 12 }]}><Text selectable style={styles.r4ActionGhostText}>找不到？自定义发布 ›</Text></Pressable>
       </View>
       <View style={styles.r4Actions}>
-        <Pressable onPress={onCustom} style={styles.r4ActionGhost}><Text style={styles.r4ActionGhostText}>自定义</Text></Pressable>
+        <Pressable onPress={onCustom} style={styles.r4ActionGhost}><Text selectable style={styles.r4ActionGhostText}>自定义</Text></Pressable>
         <Pressable disabled={!pickedId} onPress={() => { if (pickedTemplate) onPicked(pickedTemplate); }} style={[styles.r4ActionPrimary, !pickedId && styles.offerBtnDisabled]}>
-          <Text style={styles.r4ActionPrimaryText}>下一步 · 服务与价格</Text>
+          <Text selectable style={styles.r4ActionPrimaryText}>下一步 · 服务与价格</Text>
         </Pressable>
       </View>
     </> : null}
@@ -1427,29 +1434,29 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
     <View>
       <View style={styles.detailHead}>
         <Pressable onPress={() => { if (pickedTemplate && pickedTemplate.id) setPickedTemplate(undefined); else onBack(); }} style={styles.detailBack}>
-          <Text style={styles.detailBackText}>‹</Text>
+          <Text selectable style={styles.detailBackText}>‹</Text>
         </Pressable>
-        <Text style={styles.detailTitle}>发布需求</Text>
+        <Text selectable style={styles.detailTitle}>发布需求</Text>
       </View>
       {pickedTemplate && pickedTemplate.id ? (
         <View style={styles.publishTemplateSummary}>
-          <Text style={styles.publishTemplateSub}>你要发布</Text>
-          <Text style={styles.publishTemplateSummaryTitle}>{pickedTemplate.title}</Text>
-          <Text style={styles.publishTemplateSummaryStandard}>{pickedTemplate.standard}</Text>
+          <Text selectable style={styles.publishTemplateSub}>你要发布</Text>
+          <Text selectable style={styles.publishTemplateSummaryTitle}>{pickedTemplate.title}</Text>
+          <Text selectable style={styles.publishTemplateSummaryStandard}>{pickedTemplate.standard}</Text>
           <Pressable onPress={() => setPickedTemplate(undefined)} style={styles.publishTemplateChange}>
-            <Text style={styles.publishTemplateChangeText}>更换需求 ›</Text>
+            <Text selectable style={styles.publishTemplateChangeText}>更换需求 ›</Text>
           </Pressable>
         </View>
       ) : null}
       {engineActive && enginePolicy ? (
         <View style={styles.r4Card}>
           <View style={styles.publishSpecHead}>
-            <Text style={styles.r4Title}>Moment 规格</Text>
-            <Text style={styles.publishRatioBadge}>{enginePolicy.mode} · {enginePolicy.ratio}</Text>
+            <Text selectable style={styles.r4Title}>Moment 规格</Text>
+            <Text selectable style={styles.publishRatioBadge}>{enginePolicy.mode} · {enginePolicy.ratio}</Text>
           </View>
-          <Text style={styles.publishFlowSub}>{enginePolicy.ratioText}</Text>
+          <Text selectable style={styles.publishFlowSub}>{enginePolicy.ratioText}</Text>
           {providers > 1 ? (
-            <Text style={styles.publishProviderNeed}>保持 {enginePolicy.ratio}：{momentGroup ?? ""} 位客户 · 需匹配 {providers} 位搭档，多组自动合并同一个需求。</Text>
+            <Text selectable style={styles.publishProviderNeed}>保持 {enginePolicy.ratio}：{momentGroup ?? ""} 位客户 · 需匹配 {providers} 位搭档，多组自动合并同一个需求。</Text>
           ) : null}
           {[
             { label: "人数", values: engineSpec?.groups ?? [], current: momentGroup, onPick: setMomentGroup },
@@ -1458,11 +1465,11 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
             { label: "地点", values: engineSpec?.places ?? [], current: momentPlace, onPick: setMomentPlace }
           ].map((dim) => (
             <View key={dim.label} style={styles.publishSpecRow}>
-              <Text style={styles.factLabel}>{dim.label}</Text>
+              <Text selectable style={styles.factLabel}>{dim.label}</Text>
               <View style={styles.publishFlowRow}>
                 {dim.values.map((v) => (
                   <Pressable key={v} onPress={() => { dim.onPick(v); if (dim.label === "时间") setTime(v); if (dim.label === "地点" && v !== "地图选点") setLocation(v); }} style={[styles.publishFlowChip, dim.current === v && styles.publishFlowChipOn]}>
-                    <Text style={[styles.publishFlowLabel, dim.current === v && styles.publishFlowLabelOn]}>{v}</Text>
+                    <Text selectable style={[styles.publishFlowLabel, dim.current === v && styles.publishFlowLabelOn]}>{v}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -1470,10 +1477,10 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
           ))}
           {enginePolicy.prefs && enginePolicy.prefs.length > 0 ? (
             <View style={[styles.publishSpecRow, { borderTopWidth: 1, borderTopColor: "#E7E2EA" }]}>
-              <Text style={styles.factLabel}>偏好</Text>
+              <Text selectable style={styles.factLabel}>偏好</Text>
               {enginePolicy.prefs.map((pref) => (
                 <View key={pref.key} style={{ marginTop: 6 }}>
-                  <Text style={styles.publishFlowSub}>{pref.label}</Text>
+                  <Text selectable style={styles.publishFlowSub}>{pref.label}</Text>
                   <View style={styles.publishFlowRow}>
                     {pref.options.map((opt) => (
                       <Pressable
@@ -1481,7 +1488,7 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
                         onPress={() => setPrefValues((prev) => ({ ...prev, [pref.key]: { value: opt.value, add: opt.add } }))}
                         style={[styles.publishFlowChip, prefValues[pref.key]?.value === opt.value && styles.publishFlowChipOn]}
                       >
-                        <Text style={[styles.publishFlowLabel, prefValues[pref.key]?.value === opt.value && styles.publishFlowLabelOn]}>{opt.value}{opt.add > 0 ? ` · +${opt.add}K` : ""}</Text>
+                        <Text selectable style={[styles.publishFlowLabel, prefValues[pref.key]?.value === opt.value && styles.publishFlowLabelOn]}>{opt.value}{opt.add > 0 ? ` · +${opt.add}K` : ""}</Text>
                       </Pressable>
                     ))}
                   </View>
@@ -1490,105 +1497,105 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
             </View>
           ) : null}
           <View style={styles.publishPriceBreakdown}>
-            <Text style={styles.r4PriceLabel}>动态报价</Text>
-            <Text style={styles.publishQuoteTotal}>{quoteToVND(quote.total)}{enginePricing?.perPair && providers > 1 ? ` · ${providers} 组 × ${quoteToVND(quote.perUnit)}` : ""}</Text>
-            <Text style={styles.publishFlowSub}>
+            <Text selectable style={styles.r4PriceLabel}>动态报价</Text>
+            <Text selectable style={styles.publishQuoteTotal}>{quoteToVND(quote.total)}{enginePricing?.perPair && providers > 1 ? ` · ${providers} 组 × ${quoteToVND(quote.perUnit)}` : ""}</Text>
+            <Text selectable style={styles.publishFlowSub}>
               基础 {baseK}K{quote.addOns.length > 0 ? quote.addOns.map((a) => ` · ${a.label} ${a.amount > 0 ? "+" : ""}${a.amount}K`).join("") : ""} · 偏好环境仅用于匹配，不按行为收费
             </Text>
             <Pressable onPress={() => setPriceMin(quoteToVND(quote.total))} style={[styles.r4ActionGhost, { marginTop: 8, alignSelf: "flex-start" }]}>
-              <Text style={styles.r4ActionGhostText}>按此报价填入价格框 ›</Text>
+              <Text selectable style={styles.r4ActionGhostText}>按此报价填入价格框 ›</Text>
             </Pressable>
           </View>
         </View>
       ) : null}
       <View style={styles.detailHero}>
-        <Text style={styles.detailHeroKicker}>CREATE DEMAND</Text>
+        <Text selectable style={styles.detailHeroKicker}>CREATE DEMAND</Text>
         <TextInput onChangeText={setTitle} placeholder="例如：周六想找人一起逛西湖" placeholderTextColor="#D8D4CA" style={[styles.detailHeroTitle, styles.publishInput]} value={title} />
-        <Text style={styles.detailHeroSub}>Proxy 在发布前就告诉客户合理价格，避免把需求故意压成低价再让真人竞价。</Text>
+        <Text selectable style={styles.detailHeroSub}>Proxy 在发布前就告诉客户合理价格，避免把需求故意压成低价再让真人竞价。</Text>
       </View>
       <View style={styles.r4Card}>
-        <Text style={styles.r4Title}>你想完成什么</Text>
+        <Text selectable style={styles.r4Title}>你想完成什么</Text>
         <View style={styles.factGrid}>
           <View style={styles.fact}>
-            <Text style={styles.factLabel}>时间</Text>
+            <Text selectable style={styles.factLabel}>时间</Text>
             <TextInput onChangeText={setTime} placeholder="例如 10:00–18:00" placeholderTextColor="#A9A2B0" style={styles.publishFactInput} value={time} />
           </View>
           <View style={styles.fact}>
-            <Text style={styles.factLabel}>地点</Text>
+            <Text selectable style={styles.factLabel}>地点</Text>
             <TextInput onChangeText={setLocation} placeholder="例如 河内 · 西湖" placeholderTextColor="#A9A2B0" style={styles.publishFactInput} value={location} />
           </View>
         </View>
         <View style={[styles.r4PriceCellHot, { borderRadius: 11, marginTop: 8, padding: 10 }]}>
-          <Text style={styles.r4PriceLabel}>资金方向</Text>
+          <Text selectable style={styles.r4PriceLabel}>资金方向</Text>
           <View style={styles.publishFlowRow}>
             {PUBLISH_FLOW_OPTIONS.map((opt) => (
               <Pressable key={opt.id} onPress={() => onPickFlow(opt.id)} style={[styles.publishFlowChip, moneyFlow === opt.id && styles.publishFlowChipOn]}>
-                <Text style={[styles.publishFlowLabel, moneyFlow === opt.id && styles.publishFlowLabelOn]}>{opt.label}</Text>
-                <Text style={styles.publishFlowSub}>{opt.sub}</Text>
+                <Text selectable style={[styles.publishFlowLabel, moneyFlow === opt.id && styles.publishFlowLabelOn]}>{opt.label}</Text>
+                <Text selectable style={styles.publishFlowSub}>{opt.sub}</Text>
               </Pressable>
             ))}
           </View>
-          <Text style={styles.r4PriceLabel}>{priceLabelForPublisher(moneyFlow)} · {moneyFlow === "TBD" ? "金额由双方面谈确定" : moneyFlow === "FREE" ? "0₫ 免费" : "公开在卡片上"}</Text>
+          <Text selectable style={styles.r4PriceLabel}>{priceLabelForPublisher(moneyFlow)} · {moneyFlow === "TBD" ? "金额由双方面谈确定" : moneyFlow === "FREE" ? "0₫ 免费" : "公开在卡片上"}</Text>
           {priceRequired ? (
             <View style={styles.publishPriceRow}>
               <View style={styles.publishPriceCell}>
-                <Text style={styles.factLabel}>最低</Text>
+                <Text selectable style={styles.factLabel}>最低</Text>
                 <TextInput onChangeText={setPriceMin} style={styles.publishPriceInput} value={priceMin} placeholder={moneyFlow === "EARN" ? "例如 1,500,000₫" : "例如 500,000₫"} />
               </View>
               <View style={styles.publishPriceCell}>
-                <Text style={styles.factLabel}>最高（可选）</Text>
+                <Text selectable style={styles.factLabel}>最高（可选）</Text>
                 <TextInput onChangeText={setPriceMax} style={styles.publishPriceInput} value={priceMax} placeholder="例如 2,000,000₫" />
               </View>
             </View>
           ) : (
-            <Text style={[styles.publishPriceInput, styles.publishPricePlaceholder]}>{moneyFlow === "TBD" ? "金额不公开在卡片上" : "0₫"}</Text>
+            <Text selectable style={[styles.publishPriceInput, styles.publishPricePlaceholder]}>{moneyFlow === "TBD" ? "金额不公开在卡片上" : "0₫"}</Text>
           )}
-          <Text style={styles.r4PriceLabel}>平台保底：100,000 VND · 上限 10,000,000 VND</Text>
+          <Text selectable style={styles.r4PriceLabel}>平台保底：100,000 VND · 上限 10,000,000 VND</Text>
         </View>
         <View style={styles.r4Match}>
-          <Text style={styles.r4MatchText}>{moneyFlow === "TBD" ? "金额不公开，由双方面谈确定" : moneyFlow === "FREE" ? "免费任务 · 完整展示给回应者" : "金额完整展示给回应者"} · 有多少人报名要等发布后才知道，这里不预估</Text>
+          <Text selectable style={styles.r4MatchText}>{moneyFlow === "TBD" ? "金额不公开，由双方面谈确定" : moneyFlow === "FREE" ? "免费任务 · 完整展示给回应者" : "金额完整展示给回应者"} · 有多少人报名要等发布后才知道，这里不预估</Text>
         </View>
       </View>
       <View style={styles.aiBox}>
-        <Text style={styles.aiTitle}>低于 100,000 VND 不能发布</Text>
-        <Text style={styles.aiCheck}>Proxy 对付费机会执行最低保底；免费同行请明确选择“免费任务”。</Text>
+        <Text selectable style={styles.aiTitle}>低于 100,000 VND 不能发布</Text>
+        <Text selectable style={styles.aiCheck}>Proxy 对付费机会执行最低保底；免费同行请明确选择“免费任务”。</Text>
       </View>
       <View style={styles.r4Card}>
-        <Text style={styles.r4Title}>选人 · 可选</Text>
-        <Text style={styles.publishFlowSub}>不选 = 发布到公开市场；选 TA = 定向邀约，只有 TA 能看到并回应。</Text>
+        <Text selectable style={styles.r4Title}>选人 · 可选</Text>
+        <Text selectable style={styles.publishFlowSub}>不选 = 发布到公开市场；选 TA = 定向邀约，只有 TA 能看到并回应。</Text>
         {targetAgent ? (
           <View style={[styles.publishFlowChip, styles.publishFlowChipOn, { marginTop: 8 }]}>
-            <Text style={[styles.publishFlowLabel, styles.publishFlowLabelOn]}>{targetAgent.name}</Text>
-            <Text style={styles.publishFlowSub}>已选定 · 发布后仅 TA 可见</Text>
+            <Text selectable style={[styles.publishFlowLabel, styles.publishFlowLabelOn]}>{targetAgent.name}</Text>
+            <Text selectable style={styles.publishFlowSub}>已选定 · 发布后仅 TA 可见</Text>
           </View>
         ) : null}
         <View style={styles.publishFlowRow}>
           {candidatesPhase === "HIDDEN" ? (
             supply ? (
               <Pressable onPress={() => setCandidatesPhase("LOADING")} style={styles.publishFlowChip}>
-                <Text style={styles.publishFlowLabel}>＋ 选个人邀约</Text>
+                <Text selectable style={styles.publishFlowLabel}>＋ 选个人邀约</Text>
               </Pressable>
             ) : null
           ) : null}
           {candidatesPhase === "LOADING" ? <ProxyLoading tone="muted" style={{ marginTop: 8 }} /> : null}
           {candidatesPhase === "ERROR" ? (
             <View style={styles.publishFlowRow}>
-              <Text style={styles.marketError}>候选加载失败。</Text>
-              <Pressable onPress={() => setCandidatesPhase("LOADING")} style={styles.publishFlowChip}><Text style={styles.publishFlowLabel}>重试</Text></Pressable>
-              <Pressable onPress={() => setCandidatesPhase("HIDDEN")} style={styles.publishFlowChip}><Text style={styles.publishFlowLabel}>不选了</Text></Pressable>
+              <Text selectable style={styles.marketError}>候选加载失败。</Text>
+              <Pressable onPress={() => setCandidatesPhase("LOADING")} style={styles.publishFlowChip}><Text selectable style={styles.publishFlowLabel}>重试</Text></Pressable>
+              <Pressable onPress={() => setCandidatesPhase("HIDDEN")} style={styles.publishFlowChip}><Text selectable style={styles.publishFlowLabel}>不选了</Text></Pressable>
             </View>
           ) : null}
           {candidatesPhase === "READY" ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusFilterRow}>
               {candidates.map((candidate) => (
                 <Pressable key={candidate.agentId} onPress={() => setTargetAgent(targetAgent?.agentId === candidate.agentId ? undefined : candidate)} style={[styles.publishThemeCard, targetAgent?.agentId === candidate.agentId && styles.publishThemeCardOn]}>
-                  <Text style={styles.publishTemplateMark}>{candidate.name.slice(0, 1)}</Text>
-                  <Text style={styles.publishTemplateTitle}>{candidate.name}</Text>
-                  <Text style={styles.publishTemplateRange}>{candidate.languages.join(" · ") || "CITY_COMPANION"}</Text>
+                  <Text selectable style={styles.publishTemplateMark}>{candidate.name.slice(0, 1)}</Text>
+                  <Text selectable style={styles.publishTemplateTitle}>{candidate.name}</Text>
+                  <Text selectable style={styles.publishTemplateRange}>{candidate.languages.join(" · ") || "CITY_COMPANION"}</Text>
                 </Pressable>
               ))}
               <Pressable onPress={() => { setCandidatesPhase("HIDDEN"); setTargetAgent(undefined); }} style={styles.publishThemeCard}>
-                <Text style={styles.publishTemplateTitle}>不选 · 公开市场</Text>
+                <Text selectable style={styles.publishTemplateTitle}>不选 · 公开市场</Text>
               </Pressable>
             </ScrollView>
           ) : null}
@@ -1596,16 +1603,16 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
       </View>
       {merchant.accounts.length > 0 ? (
         <View style={styles.r4Card}>
-          <Text style={styles.r4Title}>发布身份</Text>
+          <Text selectable style={styles.r4Title}>发布身份</Text>
           <View style={styles.publishFlowRow}>
             <Pressable onPress={() => merchant.setMerchantId(undefined)} style={[styles.publishFlowChip, !merchant.merchantId && styles.publishFlowChipOn]}>
-              <Text style={[styles.publishFlowLabel, !merchant.merchantId && styles.publishFlowLabelOn]}>个人</Text>
-              <Text style={styles.publishFlowSub}>以自己名义</Text>
+              <Text selectable style={[styles.publishFlowLabel, !merchant.merchantId && styles.publishFlowLabelOn]}>个人</Text>
+              <Text selectable style={styles.publishFlowSub}>以自己名义</Text>
             </Pressable>
             {merchant.accounts.map((shop) => (
               <Pressable key={shop.id} onPress={() => merchant.setMerchantId(shop.id)} style={[styles.publishFlowChip, merchant.merchantId === shop.id && styles.publishFlowChipOn]}>
-                <Text style={[styles.publishFlowLabel, merchant.merchantId === shop.id && styles.publishFlowLabelOn]}>{shop.name}</Text>
-                <Text style={styles.publishFlowSub}>以店铺名义</Text>
+                <Text selectable style={[styles.publishFlowLabel, merchant.merchantId === shop.id && styles.publishFlowLabelOn]}>{shop.name}</Text>
+                <Text selectable style={styles.publishFlowSub}>以店铺名义</Text>
               </Pressable>
             ))}
           </View>
@@ -1615,33 +1622,33 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
         {traceId ? null : (
           <>
             <Pressable onPress={onBack} style={styles.r4ActionGhost}>
-              <Text style={styles.r4ActionGhostText}>预览小美视角</Text>
+              <Text selectable style={styles.r4ActionGhostText}>预览小美视角</Text>
             </Pressable>
             <Pressable disabled={publishing} onPress={() => void publish()} style={styles.r4ActionPrimary}>
-              <Text style={styles.r4ActionPrimaryText}>{publishing ? "发布中…" : targetAgent ? `向 ${targetAgent.name} 发出邀约` : "发布到市场"}</Text>
+              <Text selectable style={styles.r4ActionPrimaryText}>{publishing ? "发布中…" : targetAgent ? `向 ${targetAgent.name} 发出邀约` : "发布到市场"}</Text>
             </Pressable>
           </>
         )}
       </View>
-      {error ? <Text style={styles.marketError}>{error}</Text> : null}
+      {error ? <Text selectable style={styles.marketError}>{error}</Text> : null}
       {/* R58 TraceID 成功页 — 编号 + 概要 + 复制 + 去市场/再发一个 */}
       {traceId ? (
         <View style={styles.publishSuccessCard}>
-          <Text style={styles.publishSuccessCheck}>✓</Text>
-          <Text style={styles.publishSuccessTitle}>{targetAgent ? "邀约已发出" : "需求已发布"}</Text>
-          <Text style={styles.publishFlowSub}>
+          <Text selectable style={styles.publishSuccessCheck}>✓</Text>
+          <Text selectable style={styles.publishSuccessTitle}>{targetAgent ? "邀约已发出" : "需求已发布"}</Text>
+          <Text selectable style={styles.publishFlowSub}>
             {targetAgent ? `已经向 ${targetAgent.name} 发出需求，等待确认。` : "你的需求已经进入市场，符合条件的人可以报名或报价。"}
           </Text>
           <View style={styles.publishTraceBox}>
-            <Text style={styles.publishFlowSub}>{targetAgent ? "订单编号" : "需求编号"}</Text>
-            <Text style={styles.publishTraceId}>{traceId}</Text>
+            <Text selectable style={styles.publishFlowSub}>{targetAgent ? "订单编号" : "需求编号"}</Text>
+            <Text selectable style={styles.publishTraceId}>{traceId}</Text>
           </View>
           <View style={styles.publishFlowRow}>
             <Pressable onPress={() => { setTraceId(undefined); setPickedTemplate(undefined); setTargetAgent(undefined); }} style={styles.r4ActionGhost}>
-              <Text style={styles.r4ActionGhostText}>再发一个</Text>
+              <Text selectable style={styles.r4ActionGhostText}>再发一个</Text>
             </Pressable>
             <Pressable onPress={() => { setTraceId(undefined); onBack(); }} style={styles.r4ActionGhost}>
-              <Text style={styles.r4ActionGhostText}>查看市场 ›</Text>
+              <Text selectable style={styles.r4ActionGhostText}>查看市场 ›</Text>
             </Pressable>
           </View>
         </View>
@@ -1739,56 +1746,56 @@ function SelectWorkbench({ marketplace, fulfillment, profileClient, opportunity,
     <View>
       <View style={styles.detailHead}>
         <Pressable onPress={onBack} style={styles.detailBack}>
-          <Text style={styles.detailBackText}>‹</Text>
+          <Text selectable style={styles.detailBackText}>‹</Text>
         </Pressable>
-        <Text style={styles.detailTitle}>选人工作台</Text>
+        <Text selectable style={styles.detailTitle}>选人工作台</Text>
       </View>
       <View style={styles.detailHero}>
-        <Text style={styles.detailHeroKicker}>报名明细 · 仅发布者可见</Text>
-        <Text style={styles.detailHeroTitle}>{opportunity.title}</Text>
-        <Text style={styles.detailHeroSub}>
+        <Text selectable style={styles.detailHeroKicker}>报名明细 · 仅发布者可见</Text>
+        <Text selectable style={styles.detailHeroTitle}>{opportunity.title}</Text>
+        <Text selectable style={styles.detailHeroSub}>
           {opportunity.date} {opportunity.time} · {opportunity.location} · {candidates.length} 份真实报名
         </Text>
       </View>
       <View style={styles.r4PriceStrip}>
         {[[String(candidates.length), "报名"], [String(candidates.filter((x) => x.status === "SUBMITTED").length), "待选择"], [String(selectedCount), "已选择"], [String(candidates.filter((x) => x.status === "CONFIRMED").length), "已确认"]].map(([n, l]) => (
           <View key={l} style={styles.r4PriceCell}>
-            <Text style={[styles.r4PriceValue, { textAlign: "center" }]}>{n}</Text>
-            <Text style={[styles.r4PriceLabel, { textAlign: "center" }]}>{l}</Text>
+            <Text selectable style={[styles.r4PriceValue, { textAlign: "center" }]}>{n}</Text>
+            <Text selectable style={[styles.r4PriceLabel, { textAlign: "center" }]}>{l}</Text>
           </View>
         ))}
       </View>
       <View style={styles.aiBox}>
-        <Text style={styles.aiTitle}>申请制，不把任何人直接上架</Text>
-        <Text style={styles.aiCheck}>这里只展示真人主动提交的本次报价与范围。没有可靠履约数据时，不伪造推荐排名。</Text>
+        <Text selectable style={styles.aiTitle}>申请制，不把任何人直接上架</Text>
+        <Text selectable style={styles.aiCheck}>这里只展示真人主动提交的本次报价与范围。没有可靠履约数据时，不伪造推荐排名。</Text>
       </View>
       {phase === "LOADING" ? <ProxyLoading tone="brand" /> : null}
-      {error ? <Text style={styles.marketError}>{error}</Text> : null}
-      {phase === "READY" && candidates.length === 0 ? <Text style={styles.detailHint}>还没有人报名。候选人不会由平台或 AI 自动补位。</Text> : null}
+      {error ? <Text selectable style={styles.marketError}>{error}</Text> : null}
+      {phase === "READY" && candidates.length === 0 ? <Text selectable style={styles.detailHint}>还没有人报名。候选人不会由平台或 AI 自动补位。</Text> : null}
       {phase === "READY" && candidates.length > 0 ? (
         <View style={styles.r4Card}>
-          <Text style={styles.r4Title}>快速 Offer 金额 · VND</Text>
+          <Text selectable style={styles.r4Title}>快速 Offer 金额 · VND</Text>
           <TextInput keyboardType="number-pad" onChangeText={setOfferAmount} style={styles.publishPriceInput} value={offerAmount} placeholder="例如 1200000" />
-          <Text style={styles.detailHint}>给选中的报名人发 5 分钟 Offer，对方接单后直接生成订单。金额至少 100,000 VND。</Text>
+          <Text selectable style={styles.detailHint}>给选中的报名人发 5 分钟 Offer，对方接单后直接生成订单。金额至少 100,000 VND。</Text>
         </View>
       ) : null}
-      {offerMsg ? <Text style={styles.offerMsg}>{offerMsg}</Text> : null}
+      {offerMsg ? <Text selectable style={styles.offerMsg}>{offerMsg}</Text> : null}
       {candidates.map((c) => (
         <View key={c.applicationId} style={[styles.r4Card, (c.status === "SELECTED" || c.status === "CONFIRMED") && { borderColor: color.magenta }]}>
           <View style={styles.r4Top}>
-            <Text style={styles.r4Title}>{applicantTitle(applicantProfiles[c.applicantId], c.applicantId)}</Text>
+            <Text selectable style={styles.r4Title}>{applicantTitle(applicantProfiles[c.applicantId], c.applicantId)}</Text>
             <View style={styles.r4FitBadge}>
-              <Text style={styles.r4FitText}>{c.status === "SUBMITTED" ? "待选择" : c.status === "SELECTED" ? "等待对方确认" : c.status === "CONFIRMED" ? "双方已确认" : "未选择"}</Text>
+              <Text selectable style={styles.r4FitText}>{c.status === "SUBMITTED" ? "待选择" : c.status === "SELECTED" ? "等待对方确认" : c.status === "CONFIRMED" ? "双方已确认" : "未选择"}</Text>
             </View>
           </View>
-          <Text style={styles.r4Meta}>本次报价 {c.quote} · {c.scope || "申请人未填写服务范围"}</Text>
+          <Text selectable style={styles.r4Meta}>本次报价 {c.quote} · {c.scope || "申请人未填写服务范围"}</Text>
           <View style={styles.r4Actions}>
             <Pressable disabled={c.status !== "SUBMITTED" || Boolean(workingId)} onPress={() => void select(c)} style={c.status === "SUBMITTED" ? styles.r4ActionPrimary : styles.r4ActionGhost}>
-              <Text style={c.status === "SUBMITTED" ? styles.r4ActionPrimaryText : styles.r4ActionGhostText}>{workingId === c.applicationId ? "保存中…" : c.status === "SUBMITTED" ? "选择并发出合作邀请" : "状态已记录"}</Text>
+              <Text selectable style={c.status === "SUBMITTED" ? styles.r4ActionPrimaryText : styles.r4ActionGhostText}>{workingId === c.applicationId ? "保存中…" : c.status === "SUBMITTED" ? "选择并发出合作邀请" : "状态已记录"}</Text>
             </Pressable>
             {c.status === "SUBMITTED" && fulfillment ? (
               <Pressable disabled={Boolean(offerWorkingId)} onPress={() => void offer(c)} style={styles.r4ActionGhost} accessibilityLabel={`给申请人发 Offer`}>
-                <Text style={styles.r4ActionGhostText}>{offerWorkingId === c.applicationId ? "发 Offer 中…" : "发 Offer →"}</Text>
+                <Text selectable style={styles.r4ActionGhostText}>{offerWorkingId === c.applicationId ? "发 Offer 中…" : "发 Offer →"}</Text>
               </Pressable>
             ) : null}
           </View>
@@ -2013,7 +2020,7 @@ function MarketMap({
                 testID="market-map-cluster"
               >
                 <View style={styles.clusterBubble}>
-                  <Text style={styles.clusterText}>{c.count}</Text>
+                  <Text selectable style={styles.clusterText}>{c.count}</Text>
                 </View>
               </Marker>
             );
@@ -2066,7 +2073,7 @@ function MarketMap({
         </Pressable>
       {locError ? (
         <View style={styles.geoLocateError}>
-          <Text style={styles.geoLocateErrorText}>{locError}</Text>
+          <Text selectable style={styles.geoLocateErrorText}>{locError}</Text>
         </View>
       ) : null}
       {/* 需热开关：左上 ◉（只在订单 tab 出现，活动无坐标本就无热力），
@@ -2078,7 +2085,7 @@ function MarketMap({
           testID="market-map-heat"
           accessibilityLabel="热力图"
         >
-          <Text style={heat ? styles.heatToggleTextOn : styles.heatToggleText}>◉</Text>
+          <Text selectable style={heat ? styles.heatToggleTextOn : styles.heatToggleText}>◉</Text>
         </Pressable>
       ) : null}
     </>
@@ -2086,9 +2093,9 @@ function MarketMap({
   return (
     <View style={styles.mapWrap}>
       <View style={styles.mapLegend}>
-          <Text style={styles.mapLegendTitle}>{titleText}</Text>
-          <Text style={styles.mapLegendTitle}>{titleText}</Text>
-          <Text numberOfLines={2} style={styles.mapLegendSub}>{subText}</Text>
+          <Text selectable style={styles.mapLegendTitle}>{titleText}</Text>
+          <Text selectable style={styles.mapLegendTitle}>{titleText}</Text>
+          <Text selectable numberOfLines={2} style={styles.mapLegendSub}>{subText}</Text>
       </View>
       <View style={styles.geoMap}>
         {fullscreen ? null : mapBody}
@@ -2099,26 +2106,26 @@ function MarketMap({
           testID="market-map-expand"
           accessibilityLabel="全屏显示地图"
         >
-          <Text style={styles.geoLocateBtnText}>⛶</Text>
+          <Text selectable style={styles.geoLocateBtnText}>⛶</Text>
         </Pressable>
       </View>
       {remoteLens ? (
         <View style={styles.mapRemote}>
-          <Text style={styles.mapRemoteText}>远程订单不依赖地理位置。{"\n"}地图仅保留可定位的本地订单；远程订单请切回列表查看完整结果。</Text>
+          <Text selectable style={styles.mapRemoteText}>远程订单不依赖地理位置。{"\n"}地图仅保留可定位的本地订单；远程订单请切回列表查看完整结果。</Text>
         </View>
       ) : null}
       {fullscreen ? (
         <Modal visible animationType="slide" onRequestClose={() => setFullscreenAndZoom(false)}>
           <View style={[styles.mapFullscreen, { paddingTop: Math.max(insets.top, 8), paddingBottom: Math.max(insets.bottom, 8) }]}>
             <View style={styles.mapFsHead}>
-              <Text style={styles.mapFsTitle}>{titleText}</Text>
+              <Text selectable style={styles.mapFsTitle}>{titleText}</Text>
               <Pressable
                 onPress={() => setFullscreenAndZoom(false)}
                 testID="market-map-collapse"
                 accessibilityLabel="退出全屏地图"
                 style={styles.mapFsClose}
               >
-                <Text style={styles.mapFsCloseText}>✕</Text>
+                <Text selectable style={styles.mapFsCloseText}>✕</Text>
               </Pressable>
             </View>
             <View style={styles.mapFsBody}>{mapBody}</View>

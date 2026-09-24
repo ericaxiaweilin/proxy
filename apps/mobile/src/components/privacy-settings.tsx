@@ -90,7 +90,7 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
   const onDelete = useCallback(() => {
     Alert.alert(
       "请求删除账号?",
-      "依据《个人数据保护法》91/2025/QH15 第 32 条, 你有 30 天宽限期撤回请求. 30 天后, 你的个人数据将被永久删除 (法律要求保存的记录除外).",
+      "依据《个人数据保护法》91/2025/QH15 第 32 条, 你有 30 天宽限期撤回请求. 30 天后, 你的账号资料与登录信息会被永久删除, 账号被匿名化 —— 你将无法再登录。交易 / 税务 / 安全 / 同意记录按法律要求继续保留。",
       [
         { text: "取消", style: "cancel" },
         {
@@ -158,10 +158,10 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
   return (
     <View style={styles.root}>
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>📦 下载我的数据</Text>
-        <Text style={styles.cardDesc}>依据《个人数据保护法》第 31 条, 你可以随时导出 Proxy 保存的个人数据副本。导出请求生成后, 你有 7 天下载期。</Text>
+        <Text selectable style={styles.cardTitle}>📦 下载我的数据</Text>
+        <Text selectable style={styles.cardDesc}>依据《个人数据保护法》第 31 条, 你可以随时导出 Proxy 保存的个人数据副本。导出请求生成后, 你有 7 天下载期。</Text>
         {activeExport ? (
-          <Text style={styles.badge}>导出请求处理中 · {statusLabel(activeExport.status)}</Text>
+          <Text selectable style={styles.badge}>导出请求处理中 · {statusLabel(activeExport.status)}</Text>
         ) : (
           <Pressable
             onPress={onDownload}
@@ -172,25 +172,25 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
             {busy === "export" ? (
               <ProxyLoading tone="onDark" />
             ) : (
-              <Text style={styles.ctaText}>生成我的数据副本</Text>
+              <Text selectable style={styles.ctaText}>生成我的数据副本</Text>
             )}
           </Pressable>
         )}
         {exportData && (
           <View style={styles.exportSummary}>
-            <Text style={styles.exportLine}>账号: {exportData.data.account.id}</Text>
-            <Text style={styles.exportLine}>会话数: {exportData.data.sessions.length}</Text>
-            <Text style={styles.exportLine}>设备数: {exportData.data.devices.length}</Text>
-            <Text style={styles.exportLine}>已记录的同意: {exportData.data.consents.length}</Text>
-            <Text style={styles.exportLine}>生成时间: {formatDate(exportData.generatedAt)}</Text>
-            <Text style={styles.exportFootnote}>依据: {exportData.legalBasis}</Text>
+            <Text selectable style={styles.exportLine}>账号: {exportData.data.account.id}</Text>
+            <Text selectable style={styles.exportLine}>会话数: {exportData.data.sessions.length}</Text>
+            <Text selectable style={styles.exportLine}>设备数: {exportData.data.devices.length}</Text>
+            <Text selectable style={styles.exportLine}>已记录的同意: {exportData.data.consents.length}</Text>
+            <Text selectable style={styles.exportLine}>生成时间: {formatDate(exportData.generatedAt)}</Text>
+            <Text selectable style={styles.exportFootnote}>依据: {exportData.legalBasis}</Text>
             <View style={styles.exportActions}>
               <Pressable
                 onPress={() => setShowExportDetail((v) => !v)}
                 accessibilityLabel={showExportDetail ? "收起数据明细" : "查看数据明细"}
                 style={styles.ctaSecondary}
               >
-                <Text style={styles.ctaSecondaryText}>{showExportDetail ? "‹ 收起明细" : "查看明细 ›"}</Text>
+                <Text selectable style={styles.ctaSecondaryText}>{showExportDetail ? "‹ 收起明细" : "查看明细 ›"}</Text>
               </Pressable>
               <Pressable
                 onPress={() => void onSaveCopy()}
@@ -198,42 +198,42 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
                 accessibilityLabel="保存副本到文件"
                 style={[styles.ctaSecondary, busy !== null && styles.ctaDisabled]}
               >
-                <Text style={styles.ctaSecondaryText}>{busy === "save" ? "保存中…" : "保存副本到文件"}</Text>
+                <Text selectable style={styles.ctaSecondaryText}>{busy === "save" ? "保存中…" : "保存副本到文件"}</Text>
               </Pressable>
             </View>
             {saveState.kind === "saved" ? (
-              <Text style={styles.exportLine}>已存为 {saveState.name}，可从刚才的分享面板存到"文件"。</Text>
+              <Text selectable style={styles.exportLine}>已存为 {saveState.name}，可从刚才的分享面板存到"文件"。</Text>
             ) : null}
             {saveState.kind === "failed" ? (
-              <Text style={styles.errorText}>{saveState.message}</Text>
+              <Text selectable style={styles.errorText}>{saveState.message}</Text>
             ) : null}
             {showExportDetail ? (
               <View style={styles.exportDetail}>
-                <Text style={styles.exportDetailTitle}>会话（{exportData.data.sessions.length}）</Text>
-                {exportData.data.sessions.length === 0 ? <Text style={styles.exportLine}>暂无会话记录。</Text> : null}
+                <Text selectable style={styles.exportDetailTitle}>会话（{exportData.data.sessions.length}）</Text>
+                {exportData.data.sessions.length === 0 ? <Text selectable style={styles.exportLine}>暂无会话记录。</Text> : null}
                 {exportData.data.sessions.map((s) => (
-                  <Text key={s.id} style={styles.exportLine}>
+                  <Text selectable key={s.id} style={styles.exportLine}>
                     {truncateId(s.id)} · {sessionStatusLabel(s.status)} · 设备 {truncateId(s.deviceId)}
                   </Text>
                 ))}
-                <Text style={styles.exportDetailTitle}>设备（{exportData.data.devices.length}）</Text>
-                {exportData.data.devices.length === 0 ? <Text style={styles.exportLine}>暂无设备记录。</Text> : null}
+                <Text selectable style={styles.exportDetailTitle}>设备（{exportData.data.devices.length}）</Text>
+                {exportData.data.devices.length === 0 ? <Text selectable style={styles.exportLine}>暂无设备记录。</Text> : null}
                 {exportData.data.devices.map((d) => (
-                  <Text key={d.id} style={styles.exportLine}>
+                  <Text selectable key={d.id} style={styles.exportLine}>
                     {truncateId(d.id)} · {d.platform || "未知平台"} · {sessionStatusLabel(d.status)}
                   </Text>
                 ))}
-                <Text style={styles.exportDetailTitle}>同意记录（{exportData.data.consents.length}）</Text>
-                {exportData.data.consents.length === 0 ? <Text style={styles.exportLine}>暂无同意记录。</Text> : null}
+                <Text selectable style={styles.exportDetailTitle}>同意记录（{exportData.data.consents.length}）</Text>
+                {exportData.data.consents.length === 0 ? <Text selectable style={styles.exportLine}>暂无同意记录。</Text> : null}
                 {exportData.data.consents.map((c, index) => (
-                  <Text key={`${c.docKind}-${c.docVersion}-${index}`} style={styles.exportLine}>
+                  <Text selectable key={`${c.docKind}-${c.docVersion}-${index}`} style={styles.exportLine}>
                     {c.docKind} · 版本 {c.docVersion} · {formatDate(c.acceptedAt)}{c.required ? " · 必需" : ""}
                   </Text>
                 ))}
-                <Text style={styles.exportDetailTitle}>历史请求（{exportData.history.length}）</Text>
-                {exportData.history.length === 0 ? <Text style={styles.exportLine}>暂无历史请求。</Text> : null}
+                <Text selectable style={styles.exportDetailTitle}>历史请求（{exportData.history.length}）</Text>
+                {exportData.history.length === 0 ? <Text selectable style={styles.exportLine}>暂无历史请求。</Text> : null}
                 {exportData.history.map((r) => (
-                  <Text key={r.id} style={styles.exportLine}>
+                  <Text selectable key={r.id} style={styles.exportLine}>
                     {kindLabel(r.kind)} · {statusLabel(r.status)} · {formatDate(r.requestedAt)}
                   </Text>
                 ))}
@@ -244,12 +244,12 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>🗑️ 请求删除账号</Text>
-        <Text style={styles.cardDesc}>30 天宽限期内你可以随时撤回。30 天后, 你的个人数据将被永久删除 (法律要求保存的交易 / 安全 / 税务记录除外)。</Text>
+        <Text selectable style={styles.cardTitle}>🗑️ 请求删除账号</Text>
+        <Text selectable style={styles.cardDesc}>30 天宽限期内你可以随时撤回。30 天后, 你的账号资料 (姓名 / 简介 / 头像 / 登录手机或邮箱 / 设备与登录会话) 会被永久删除, 账号被匿名化且无法再登录。交易 / 税务 / 安全 / 同意记录按法律要求保留。</Text>
         {activeDelete ? (
           <View>
-            <Text style={styles.badge}>删除请求已提交 · {statusLabel(activeDelete.status)}</Text>
-            <Text style={styles.exportLine}>预计完成: {formatDate(activeDelete.erasedAt)}</Text>
+            <Text selectable style={styles.badge}>删除请求已提交 · {statusLabel(activeDelete.status)}</Text>
+            <Text selectable style={styles.exportLine}>预计完成: {formatDate(activeDelete.erasedAt)}</Text>
             <Pressable
               onPress={() => onCancelDelete(activeDelete.id)}
               disabled={busy !== null}
@@ -259,7 +259,7 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
               {busy === "cancel:" + activeDelete.id ? (
                 <ProxyLoading tone="onLight" />
               ) : (
-                <Text style={styles.ctaSecondaryText}>撤回删除请求</Text>
+                <Text selectable style={styles.ctaSecondaryText}>撤回删除请求</Text>
               )}
             </Pressable>
           </View>
@@ -273,7 +273,7 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
             {busy === "delete" ? (
               <ProxyLoading tone="onDark" />
             ) : (
-              <Text style={styles.ctaDangerText}>提交删除请求</Text>
+              <Text selectable style={styles.ctaDangerText}>提交删除请求</Text>
             )}
           </Pressable>
         )}
@@ -281,11 +281,11 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
 
       {history.length > 0 && (
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>🕘 请求历史</Text>
+          <Text selectable style={styles.cardTitle}>🕘 请求历史</Text>
           {history.map((req) => (
             <View key={req.id} style={styles.historyRow}>
-              <Text style={styles.historyKind}>{kindLabel(req.kind)}</Text>
-              <Text style={styles.historyMeta}>{statusLabel(req.status)} · {formatDate(req.requestedAt)}</Text>
+              <Text selectable style={styles.historyKind}>{kindLabel(req.kind)}</Text>
+              <Text selectable style={styles.historyMeta}>{statusLabel(req.status)} · {formatDate(req.requestedAt)}</Text>
             </View>
           ))}
         </View>
@@ -293,9 +293,9 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
 
       {error && (
         <View style={styles.errorCard}>
-          <Text style={styles.errorText}>{error}</Text>
+          <Text selectable style={styles.errorText}>{error}</Text>
           <Pressable onPress={refresh} style={styles.ctaSecondary}>
-            <Text style={styles.ctaSecondaryText}>重试</Text>
+            <Text selectable style={styles.ctaSecondaryText}>重试</Text>
           </Pressable>
         </View>
       )}

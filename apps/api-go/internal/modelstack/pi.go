@@ -16,7 +16,12 @@ import (
 type PiProvider struct {
 	provider string
 	model    string
-	gateway  *GatewayClient
+	// visionModel 处理 *vision* 任务（看图）。默认模型常常是纯文本模型 —— 把图发给它，
+	// 它要么报错、要么看不见图却照样编一段描述。AI-MANAGE-015：同一 provider 里挑一个声明
+	// input 含 image 的模型（MODELSTACK_PI_VISION_MODEL 可指定）；没有就为空，vision 任务
+	// 直接报 ErrTaskNotRoutable，不假装看过图。
+	visionModel string
+	gateway     *GatewayClient
 }
 
 type piSettings struct {
@@ -29,7 +34,8 @@ type piModels struct {
 		BaseURL string `json:"baseUrl"`
 		APIKey  string `json:"apiKey"`
 		Models  []struct {
-			ID string `json:"id"`
+			ID    string   `json:"id"`
+			Input []string `json:"input"`
 		} `json:"models"`
 	} `json:"providers"`
 }
@@ -69,10 +75,25 @@ func NewFromPiConfig(modelsPath, settingsPath string) (*PiProvider, error) {
 	if model == "" {
 		return nil, fmt.Errorf("%w: pi default model is empty", ErrUnconfigured)
 	}
+	visionModel := strings.TrimSpace(os.Getenv("MODELSTACK_PI_VISION_MODEL"))
+	if visionModel == "" {
+		for _, candidate := range provider.Models {
+			for _, input := range candidate.Input {
+				if input == "image" && strings.TrimSpace(candidate.ID) != "" {
+					visionModel = strings.TrimSpace(candidate.ID)
+					break
+				}
+			}
+			if visionModel != "" {
+				break
+			}
+		}
+	}
 	return &PiProvider{
-		provider: settings.DefaultProvider,
-		model:    model,
-		gateway:  NewGatewayClient(provider.BaseURL, apiKey),
+		provider:    settings.DefaultProvider,
+		model:       model,
+		visionModel: visionModel,
+		gateway:     NewGatewayClient(provider.BaseURL, apiKey),
 	}, nil
 }
 
@@ -106,10 +127,15 @@ func (p *PiProvider) Complete(ctx context.Context, taskID string, messages []Cha
 		return Completion{}, fmt.Errorf("%w: empty task or messages", ErrTaskNotRoutable)
 	}
 	timeout := 90 * time.Second
+	model := p.model
 	if strings.Contains(taskID, "vision") {
-		timeout = 40 * time.Second
+		if p.visionModel == "" {
+			return Completion{}, fmt.Errorf("%w: no image-capable model configured for %s", ErrTaskNotRoutable, taskID)
+		}
+		model = p.visionModel
+		timeout = 60 * time.Second
 	}
-	result, err := p.gateway.Chat(ctx, p.model, taskID, messages, 2048, timeout)
+	result, err := p.gateway.Chat(ctx, model, taskID, messages, 2048, timeout)
 	if err != nil {
 		return Completion{}, err
 	}
@@ -118,7 +144,7 @@ func (p *PiProvider) Complete(ctx context.Context, taskID string, messages []Cha
 		TaskID:       taskID,
 		Model:        result.Model,
 		Provider:     p.provider,
-		ModelOption:  p.model,
+		ModelOption:  model,
 		PromptTokens: result.PromptTokens,
 		OutputTokens: result.OutputTokens,
 	}, nil

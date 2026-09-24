@@ -73,8 +73,8 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
   if (pickingDuration) {
     return (
       <View style={styles.card}>
-        <Text style={styles.title}>Chia sẻ vị trí chính xác</Text>
-        <Text style={styles.subtitle}>Bạn muốn cho phép trong bao lâu?</Text>
+        <Text selectable style={styles.title}>Chia sẻ vị trí chính xác</Text>
+        <Text selectable style={styles.subtitle}>Bạn muốn cho phép trong bao lâu?</Text>
         <View style={styles.row}>
           {ALLOWED_DURATION_SECONDS.map((d) => (
             <Pressable
@@ -90,7 +90,7 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
                 onGrant(d);
               }}
             >
-              <Text style={styles.choiceText}>{labelForDuration(d, locale)}</Text>
+              <Text selectable style={styles.choiceText}>{labelForDuration(d, locale)}</Text>
             </Pressable>
           ))}
         </View>
@@ -99,7 +99,7 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
           onPress={() => setPickingDuration(false)}
           disabled={busy}
         >
-          <Text style={styles.cancel}>Hủy</Text>
+          <Text selectable style={styles.cancel}>Hủy</Text>
         </Pressable>
       </View>
     );
@@ -109,8 +109,8 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <View style={styles.headerText}>
-          <Text style={styles.title}>Vị trí chính xác</Text>
-          <Text style={styles.subtitle}>{summary}</Text>
+          <Text selectable style={styles.title}>Vị trí chính xác</Text>
+          <Text selectable style={styles.subtitle}>{summary}</Text>
         </View>
         {busy ? (
           <ProxyLoading tone="onLight" />
@@ -123,8 +123,8 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
           />
         )}
       </View>
-      {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
-      <Text style={styles.footnote}>
+      {errorMessage ? <Text selectable style={styles.error}>{errorMessage}</Text> : null}
+      <Text selectable style={styles.footnote}>
         Theo PDP Việt Nam 91/2025/QH15 Art. 4 & 12 — vị trí chính xác là dữ liệu nhạy cảm.
         Bạn có thể thu hồi bất kỳ lúc nào.
       </Text>

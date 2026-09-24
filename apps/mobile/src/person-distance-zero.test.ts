@@ -25,11 +25,14 @@ describe("PERSON-DISTANCE-ZERO-001 no invented proximity for real people", () =>
 
   it("excludes people with no distance from the nearby filter", () => {
     // 距离未知的人不能算「附近」—— 恒 0 的时候每个人都会通过。
-    expect(home).toContain("p.distanceM === undefined || p.distanceM >= 1000");
+    // HOME-MORE-DIST-001（2026-09-22）：半径从写死 1km 改成用户可选
+    // （1~100km，默认 10km，见 MORE_DISTANCE_KM）。改的是半径，不是这条规则：
+    // 任何半径都必须把 distanceM === undefined 排除在外 —— 距离未知 ≠ 很近。
+    expect(home).toContain("p.distanceM === undefined || p.distanceM >= moreDistanceKm * 1000");
   });
 
   it("renders an honest placeholder instead of a fake zero distance", () => {
-    expect(home).toContain('humanScenePreview.person.distanceM === undefined ? "距离未知"');
+    expect(home).toContain('humanScenePreview.person.distanceM === undefined ? t("distanceUnknown")');
   });
 
   it("keeps the distance on the demo recommendation list", () => {

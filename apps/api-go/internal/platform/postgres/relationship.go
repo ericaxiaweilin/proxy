@@ -26,17 +26,18 @@ func NewRelationshipRepository(pool *pgxpool.Pool) *RelationshipRepository {
 
 func (r *RelationshipRepository) UpsertFriendship(ctx context.Context, rec relationship.FriendshipRecord) (relationship.FriendshipRecord, error) {
 	row := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		INSERT INTO relationship.friendships (id, user_a, user_b, state, requester_id, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		INSERT INTO relationship.friendships (id, user_a, user_b, state, requester_id, blocked_by, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (user_a, user_b) DO UPDATE SET
 			state=EXCLUDED.state,
 			requester_id=EXCLUDED.requester_id,
+			blocked_by=EXCLUDED.blocked_by,
 			updated_at=EXCLUDED.updated_at
-		RETURNING id, user_a, user_b, state, requester_id, created_at, updated_at`,
-		rec.ID, rec.UserA, rec.UserB, string(rec.State), rec.RequesterID, rec.CreatedAt, rec.UpdatedAt)
+		RETURNING id, user_a, user_b, state, requester_id, blocked_by, created_at, updated_at`,
+		rec.ID, rec.UserA, rec.UserB, string(rec.State), rec.RequesterID, rec.BlockedBy, rec.CreatedAt, rec.UpdatedAt)
 	var state string
 	var out relationship.FriendshipRecord
-	if err := row.Scan(&out.ID, &out.UserA, &out.UserB, &state, &out.RequesterID, &out.CreatedAt, &out.UpdatedAt); err != nil {
+	if err := row.Scan(&out.ID, &out.UserA, &out.UserB, &state, &out.RequesterID, &out.BlockedBy, &out.CreatedAt, &out.UpdatedAt); err != nil {
 		return relationship.FriendshipRecord{}, err
 	}
 	out.State = relationship.FriendshipStatus(state)
@@ -46,12 +47,12 @@ func (r *RelationshipRepository) UpsertFriendship(ctx context.Context, rec relat
 func (r *RelationshipRepository) GetFriendship(ctx context.Context, userA, userB string) (relationship.FriendshipRecord, error) {
 	a, b := orderPair(userA, userB)
 	row := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, user_a, user_b, state, requester_id, created_at, updated_at
+		SELECT id, user_a, user_b, state, requester_id, blocked_by, created_at, updated_at
 		FROM relationship.friendships
 		WHERE user_a=$1 AND user_b=$2 AND state <> 'IGNORED_TOMBSTONE'`, a, b)
 	var state string
 	var rec relationship.FriendshipRecord
-	if err := row.Scan(&rec.ID, &rec.UserA, &rec.UserB, &state, &rec.RequesterID, &rec.CreatedAt, &rec.UpdatedAt); err != nil {
+	if err := row.Scan(&rec.ID, &rec.UserA, &rec.UserB, &state, &rec.RequesterID, &rec.BlockedBy, &rec.CreatedAt, &rec.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return relationship.FriendshipRecord{}, relationship.ErrFriendshipNotFound
 		}
@@ -63,7 +64,7 @@ func (r *RelationshipRepository) GetFriendship(ctx context.Context, userA, userB
 
 func (r *RelationshipRepository) ListByUser(ctx context.Context, userID string) ([]relationship.FriendshipRecord, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, user_a, user_b, state, requester_id, created_at, updated_at
+		SELECT id, user_a, user_b, state, requester_id, blocked_by, created_at, updated_at
 		FROM relationship.friendships
 		WHERE (user_a=$1 OR user_b=$1) AND state <> 'IGNORED_TOMBSTONE'
 		ORDER BY updated_at DESC`, userID)
@@ -75,7 +76,7 @@ func (r *RelationshipRepository) ListByUser(ctx context.Context, userID string) 
 	for rows.Next() {
 		var state string
 		var rec relationship.FriendshipRecord
-		if err := rows.Scan(&rec.ID, &rec.UserA, &rec.UserB, &state, &rec.RequesterID, &rec.CreatedAt, &rec.UpdatedAt); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.UserA, &rec.UserB, &state, &rec.RequesterID, &rec.BlockedBy, &rec.CreatedAt, &rec.UpdatedAt); err != nil {
 			return nil, err
 		}
 		rec.State = relationship.FriendshipStatus(state)

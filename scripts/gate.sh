@@ -251,6 +251,70 @@ gate_g4_drift() {
   fi
   echo "  semantic fixtures: OK (no fake map regressions, no non-AI activity origins)"
 
+  # Pin hygiene: an invocation whose exit code is not enforced makes the block
+  # above it decorative. scripts/check-regression-contracts.sh runs with
+  # `set -u` only (no `set -e`) and its last statement is an `echo`, so an
+  # unguarded failing command neither stops the script nor changes its exit
+  # code -- the block above still prints PASS. Measured 2026-09-21: 14
+  # invocations across 13 blocks were unguarded, and 4 of those used
+  # `test -- --run <file>`, which swallows the file argument and runs the whole
+  # suite (149 files / 1381 tests) instead of the one file it names.
+  #
+  # Covers BOTH carriers, not just vitest: the 387 semantic pins ride on
+  # `require_test`, and a swallowed `require_test` failure is the same defect.
+  # Swept 2026-09-21: 446 guarded invocations, 0 whose failure was swallowed.
+  echo "  pin hygiene: checking every invocation enforces its exit code..."
+  local pin_script="scripts/check-regression-contracts.sh"
+  # Fail loudly if it is missing: a grep against a nonexistent path also
+  # produces "no unguarded lines", i.e. a vacuous pass. Never let "the check
+  # could not run" read the same as "the check passed".
+  if [ ! -f "$pin_script" ]; then
+    echo "  FAIL: $pin_script not found; pin hygiene cannot be verified" >&2
+    return 1
+  fi
+  local unguarded
+  # Join backslash continuations BEFORE matching. A guard written on the
+  # continuation line is still a guard; matching line-by-line would red a
+  # correct invocation (this file used exactly that shape before the fix
+  # above), and a check that reddens on correct code is one people learn to
+  # bypass. Comment lines are skipped for the same reason: documenting the
+  # bug must not trip the check that guards against it.
+  unguarded=$(awk '
+    {
+      if (buf == "") start = NR
+      buf = buf $0
+      if ($0 ~ /\\$/) { buf = buf " "; next }
+      is_inv = (buf ~ /^[[:space:]]*require_test[[:space:]]/) || (buf ~ /pnpm/ && buf ~ /(exec vitest run|test --run|test -- --run)/)
+      if (buf !~ /^[[:space:]]*#/ && is_inv && buf !~ /\|\|[[:space:]]*exit/) {
+        printf "%d: %s\n", start, buf
+      }
+      buf = ""
+    }
+    END {
+      is_inv = (buf ~ /^[[:space:]]*require_test[[:space:]]/) || (buf ~ /pnpm/ && buf ~ /(exec vitest run|test --run|test -- --run)/)
+      if (buf != "" && buf !~ /^[[:space:]]*#/ && is_inv && buf !~ /\|\|[[:space:]]*exit/) {
+        printf "%d: %s\n", NR, buf
+      }
+    }
+  ' "$pin_script")
+  if [ -n "$unguarded" ]; then
+    echo "  FAIL: invocation whose result is not enforced (append '|| exit \$?'):" >&2
+    echo "$unguarded" | sed 's/^/    - /' >&2
+    return 1
+  fi
+  local swallow
+  swallow=$(awk '
+    { line = $0 }
+    line ~ /^[[:space:]]*#/ { next }
+    line ~ /test -- --run/ { printf "%d: %s\n", NR, line }
+  ' "$pin_script")
+  if [ -n "$swallow" ]; then
+    echo "  FAIL: 'test -- --run <file>' swallows the file argument and runs the whole suite:" >&2
+    echo "$swallow" | sed 's/^/    - /' >&2
+    return 1
+  fi
+  echo "  pin hygiene: OK (every invocation enforces its exit code)"
+
   bash scripts/check-regression-contracts.sh || return $?
 }
 

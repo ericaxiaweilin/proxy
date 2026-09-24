@@ -21,6 +21,14 @@ export const PostRepliesListSchema = z.object({
 });
 export type PostRepliesList = z.infer<typeof PostRepliesListSchema>;
 
+// ANALYTICS-ME-001: 自己帖子收到的互动合计（窗口内别人给的赞 + 评论）。
+// 自赞/自评不计入；服务端按作者归属聚合，客户端不做 N+1 逐条加总。
+export const ReceivedEngagementStatsSchema = z.object({
+  reactions: z.number().int().min(0),
+  replies: z.number().int().min(0),
+});
+export type ReceivedEngagementStats = z.infer<typeof ReceivedEngagementStatsSchema>;
+
 // ---------- R15.45 PostMenu / Report / MuteAuthor ----------
 
 // PostReportReason — 举报原因枚举 (mobile menu 4 选项)

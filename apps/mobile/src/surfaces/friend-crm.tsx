@@ -14,7 +14,7 @@ import { describeError, saveImageToAlbum } from "../image-export";
 import { ProxyIcon } from "../components/proxy-icon";
 import type { ProfileClient, ProfileWire } from "../profile-client";
 import type { FriendView, RelationshipClient } from "../relationship-client";
-import type { LocalNetClient, MediaImpressionStats, PostImpressionStats, ProfileViewerStat, ViewerMediaActivity } from "../localnet-client";
+import type { ContentAnalytics, LocalNetClient, MediaImpressionStats, PostImpressionStats, ProfileViewerStat } from "../localnet-client";
 import type { FeedPost } from "@proxy/contracts";
 import { color, shadows } from "../theme";
 
@@ -215,18 +215,23 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   const [postStats, setPostStats] = useState<Record<string, PostImpressionStats>>({});
   const [mediaStats, setMediaStats] = useState<Record<string, MediaImpressionStats>>({});
   const [statsState, setStatsState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+  // CONTENT-ANALYTICS-001: 分析面板（近 30 天合计）；逐条统计默认折叠，点「每条动态的统计」才展开。
+  const [analytics, setAnalytics] = useState<ContentAnalytics | null | undefined>(undefined);
+  const [statsOpen, setStatsOpen] = useState(false);
   useEffect(() => {
     if (!localNet || !myPosts) return;
     let cancelled = false;
     setStatsState("loading");
     void (async () => {
       try {
-        const [stats, mediaStatsList] = await Promise.all([
+        const [stats, mediaStatsList, panel] = await Promise.all([
           localNet.listPostImpressionStats(),
           // 媒体战绩没读到不影响帖子战绩——各自独立的失败态，媒体这边悄悄
           // 空着就好（帖子行照样显示总数，只是没有逐张照片的细分）。
-          localNet.listMediaImpressionStats().catch(() => [] as MediaImpressionStats[])
+          localNet.listMediaImpressionStats().catch(() => [] as MediaImpressionStats[]),
+          localNet.getContentAnalytics().catch(() => null)
         ]);
+        setAnalytics(panel);
         if (cancelled) return;
         const map: Record<string, PostImpressionStats> = {};
         for (const stat of stats) map[stat.postId] = stat;
@@ -695,28 +700,28 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
     const backText = directEntry ? (addFriendBackLabel ?? "‹ 返回") : "‹ 返回好友";
     return (
       <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-        <Pressable onPress={handleBack} style={styles.backRow}><Text style={styles.backText}>{backText}</Text></Pressable>
-        <Text style={styles.title}>添加好友</Text>
-        <Text style={styles.sub}>通过二维码、邀请、通讯录、社媒或 Proxy 搜索找到你认识的人。</Text>
+        <Pressable onPress={handleBack} style={styles.backRow}><Text selectable style={styles.backText}>{backText}</Text></Pressable>
+        <Text selectable style={styles.title}>添加好友</Text>
+        <Text selectable style={styles.sub}>通过二维码、邀请、通讯录、社媒或 Proxy 搜索找到你认识的人。</Text>
 
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>选择添加方式</Text><Text style={styles.sectionNote}>5 种方式</Text></View>
+        <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>选择添加方式</Text><Text selectable style={styles.sectionNote}>5 种方式</Text></View>
         <View style={styles.methodGrid}>
-          <Pressable onPress={() => setSheet("SCAN")} style={styles.method}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="scan" size={20} /></View><Text style={styles.methodStrong}>扫码添加</Text><Text style={styles.methodSpan}>扫描对方的 Proxy Personal QR</Text></Pressable>
-          <Pressable onPress={() => setSheet("INVITE")} style={styles.method}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="arrowUpRight" size={20} /></View><Text style={styles.methodStrong}>邀请好友</Text><Text style={styles.methodSpan}>发送链接或你的个人二维码</Text></Pressable>
-          <Pressable onPress={() => setSheet("CONTACTS")} style={styles.method}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="user" size={20} /></View><Text style={styles.methodStrong}>通讯录</Text><Text style={styles.methodSpan}>授权后只匹配可能认识的人</Text></Pressable>
-          <Pressable onPress={() => setSheet("SOCIAL")} style={styles.method}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="spark" size={20} /></View><Text style={styles.methodStrong}>社媒好友</Text><Text style={styles.methodSpan}>TikTok / Instagram / Facebook / Zalo</Text></Pressable>
+          <Pressable onPress={() => setSheet("SCAN")} style={styles.method}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="scan" size={20} /></View><Text selectable style={styles.methodStrong}>扫码添加</Text><Text selectable style={styles.methodSpan}>扫描对方的 Proxy Personal QR</Text></Pressable>
+          <Pressable onPress={() => setSheet("INVITE")} style={styles.method}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="arrowUpRight" size={20} /></View><Text selectable style={styles.methodStrong}>邀请好友</Text><Text selectable style={styles.methodSpan}>发送链接或你的个人二维码</Text></Pressable>
+          <Pressable onPress={() => setSheet("CONTACTS")} style={styles.method}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="user" size={20} /></View><Text selectable style={styles.methodStrong}>通讯录</Text><Text selectable style={styles.methodSpan}>授权后只匹配可能认识的人</Text></Pressable>
+          <Pressable onPress={() => setSheet("SOCIAL")} style={styles.method}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="spark" size={20} /></View><Text selectable style={styles.methodStrong}>社媒好友</Text><Text selectable style={styles.methodSpan}>TikTok / Instagram / Facebook / Zalo</Text></Pressable>
           {/* ADD-FRIEND-PHONE-COPY-001: 这一行原本把手机号也列成可搜项，但它打开的
               SEARCH sheet 自己写着「手机号暂不可搜 —— 还没有『允许被手机号搜到』这个
               授权开关」。同一屏自相矛盾：方式列表说能搜手机号，点进去说搜不了。
               手机号搜索落地（授权开关 + 后端）之前，这一行只报昵称与 Proxy ID，
               与 sheet 和输入框 placeholder 保持一致。 */}
-          <Pressable onPress={() => setSheet("SEARCH")} style={styles.methodFull}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="search" size={20} /></View><View style={styles.methodFullCopy}><Text style={styles.methodStrong}>搜索 Proxy</Text><Text style={styles.methodSpan}>昵称或 Proxy ID</Text></View><Text style={styles.chev}>›</Text></Pressable>
+          <Pressable onPress={() => setSheet("SEARCH")} style={styles.methodFull}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="search" size={20} /></View><View style={styles.methodFullCopy}><Text selectable style={styles.methodStrong}>搜索 Proxy</Text><Text selectable style={styles.methodSpan}>昵称或 Proxy ID</Text></View><Text selectable style={styles.chev}>›</Text></Pressable>
         </View>
 
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>好友请求</Text><Text style={styles.sectionNote}>需要你确认</Text></View>
-        <Pressable onPress={() => setSheet("REQUESTS")} style={styles.pendingCard}><View style={styles.pendingIcon}><Text style={styles.pendingIconText}>♡</Text></View><View style={styles.pendingMain}><Text style={styles.pendingStrong}>{requests.length} 个待处理请求</Text><Text style={styles.pendingSub}>查看谁想添加你为好友</Text></View><View style={styles.badge}><Text style={styles.badgeText}>{requests.length}</Text></View></Pressable>
+        <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>好友请求</Text><Text selectable style={styles.sectionNote}>需要你确认</Text></View>
+        <Pressable onPress={() => setSheet("REQUESTS")} style={styles.pendingCard}><View style={styles.pendingIcon}><Text selectable style={styles.pendingIconText}>♡</Text></View><View style={styles.pendingMain}><Text selectable style={styles.pendingStrong}>{requests.length} 个待处理请求</Text><Text selectable style={styles.pendingSub}>查看谁想添加你为好友</Text></View><View style={styles.badge}><Text selectable style={styles.badgeText}>{requests.length}</Text></View></Pressable>
 
-        <View style={styles.privacy}><View style={styles.privacyIcon}><Text style={styles.privacyIconText}>i</Text></View><View style={styles.privacyCopy}><Text style={styles.privacyStrong}>关系不会自动导入</Text><Text style={styles.privacyP}>通讯录或外部社媒只用于发现“可能认识”的人。成为 Proxy 好友前，仍需要发送好友请求并由对方确认。</Text></View></View>
+        <View style={styles.privacy}><View style={styles.privacyIcon}><Text selectable style={styles.privacyIconText}>i</Text></View><View style={styles.privacyCopy}><Text selectable style={styles.privacyStrong}>关系不会自动导入</Text><Text selectable style={styles.privacyP}>通讯录或外部社媒只用于发现“可能认识”的人。成为 Proxy 好友前，仍需要发送好友请求并由对方确认。</Text></View></View>
 
         {/* Sheets */}
         <CrmSheet open={sheet === "SCAN"} onClose={() => { if (scanOnly) { onBack(); return; } setSheet(undefined); setScanned(undefined); setScanError(""); scanBusyRef.current = false; }} title="扫码添加好友" sub="对准对方的 Proxy 个人二维码，或从相册选图、从剪贴板识别名片文本，识别成功后再去添加。">
@@ -729,32 +734,32 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
                 onBarcodeScanned={(result) => { void handleScannedCode(result.data); }}
               />
               <View style={styles.scanFrame} />
-              <Text style={styles.scannerNote}>对准二维码即可识别</Text>
+              <Text selectable style={styles.scannerNote}>对准二维码即可识别</Text>
             </View>
           ) : (
             <View style={styles.scanner}>
               <View style={styles.scanFrame} />
-              <Text style={styles.scannerNote}>{cameraPermission ? "需要相机权限才能扫码" : "相机权限未决定"}</Text>
+              <Text selectable style={styles.scannerNote}>{cameraPermission ? "需要相机权限才能扫码" : "相机权限未决定"}</Text>
               {!cameraPermission?.granted ? (
-                <Pressable onPress={() => void requestCameraPermission()} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>允许使用相机</Text></Pressable>
+                <Pressable onPress={() => void requestCameraPermission()} style={[styles.btn, styles.btnPrimary]}><Text selectable style={styles.btnPrimaryText}>允许使用相机</Text></Pressable>
               ) : null}
             </View>
           )}
           {/* 相册和剪贴板都是「没相机 / 相机不好使」时的正路，不能只当兜底。 */}
           <View style={styles.actions}>
-            <Pressable onPress={() => void scanFromLibrary()} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="从相册选取图片识别"><Text style={styles.btnPrimaryText}>从相册选取</Text></Pressable>
-            <Pressable onPress={() => void scanFromClipboard()} style={[styles.btn, styles.btnGhost]} accessibilityLabel="从剪贴板识别"><Text style={styles.btnGhostText}>从剪贴板识别</Text></Pressable>
+            <Pressable onPress={() => void scanFromLibrary()} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="从相册选取图片识别"><Text selectable style={styles.btnPrimaryText}>从相册选取</Text></Pressable>
+            <Pressable onPress={() => void scanFromClipboard()} style={[styles.btn, styles.btnGhost]} accessibilityLabel="从剪贴板识别"><Text selectable style={styles.btnGhostText}>从剪贴板识别</Text></Pressable>
           </View>
           {scanned ? (
             <View style={styles.scanHit}>
-              <Text style={styles.scanHitTitle}>已识别{scanned.kind === "store" ? "店铺名片" : "个人名片"}{scanned.name ? ` · ${scanned.name}` : ""}</Text>
-              <Text style={styles.scanHitSub}>{scannedCaption(scanned)}</Text>
-              {scanBusy ? <Text style={styles.scanHitNote}>正在查找这个人…</Text> : null}
+              <Text selectable style={styles.scanHitTitle}>已识别{scanned.kind === "store" ? "店铺名片" : "个人名片"}{scanned.name ? ` · ${scanned.name}` : ""}</Text>
+              <Text selectable style={styles.scanHitSub}>{scannedCaption(scanned)}</Text>
+              {scanBusy ? <Text selectable style={styles.scanHitNote}>正在查找这个人…</Text> : null}
               {scanLookup === "found" && scanMatch ? (
                 <View style={styles.scanPerson}>
-                  <View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{(scanMatch.name || "?").slice(0, 1)}</Text></View>
-                  <View style={styles.personCopy}><Text style={styles.personName}>{scanMatch.name}</Text><Text style={styles.personSub}>@{scanMatch.handle}{scanMatch.city ? ` · ${scanMatch.city}` : ""}</Text></View>
-                  <Pressable disabled={scanAddSent || scanAddBusy || !relationship} onPress={() => void addScannedPerson()} style={[styles.addBtn, (scanAddSent || scanAddBusy) && styles.addBtnSent]}><Text style={[styles.addBtnText, (scanAddSent || scanAddBusy) && styles.addBtnTextSent]}>{scanAddSent ? "已发送" : scanAddBusy ? "发送中…" : "添加"}</Text></Pressable>
+                  <View style={styles.avatarSmall}><Text selectable style={styles.avatarSmallText}>{(scanMatch.name || "?").slice(0, 1)}</Text></View>
+                  <View style={styles.personCopy}><Text selectable style={styles.personName}>{scanMatch.name}</Text><Text selectable style={styles.personSub}>@{scanMatch.handle}{scanMatch.city ? ` · ${scanMatch.city}` : ""}</Text></View>
+                  <Pressable disabled={scanAddSent || scanAddBusy || !relationship} onPress={() => void addScannedPerson()} style={[styles.addBtn, (scanAddSent || scanAddBusy) && styles.addBtnSent]}><Text selectable style={[styles.addBtnText, (scanAddSent || scanAddBusy) && styles.addBtnTextSent]}>{scanAddSent ? "已发送" : scanAddBusy ? "发送中…" : "添加"}</Text></Pressable>
                 </View>
               ) : null}
               {/* ADD-FRIEND-NEXT-001: “已发送”不是终点。对方通过后出现在好友列表走
@@ -762,29 +767,29 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
                   不新增 prop、不碰邀请/解析/相机段。 */}
               {scanLookup === "found" && scanAddSent ? (
                 <View>
-                  <Text style={styles.scanHitNote}>对方通过后会出现在好友列表，可直接开聊</Text>
-                  <Pressable onPress={() => setSheet("REQUESTS")} style={[styles.btn, styles.btnGhost, { marginTop: 8 }]} accessibilityLabel="看看我发出的请求"><Text style={styles.btnGhostText}>看看我发出的请求</Text></Pressable>
+                  <Text selectable style={styles.scanHitNote}>对方通过后会出现在好友列表，可直接开聊</Text>
+                  <Pressable onPress={() => setSheet("REQUESTS")} style={[styles.btn, styles.btnGhost, { marginTop: 8 }]} accessibilityLabel="看看我发出的请求"><Text selectable style={styles.btnGhostText}>看看我发出的请求</Text></Pressable>
                 </View>
               ) : null}
-              {scanLookup === "found" && !relationship ? <Text style={styles.scanHitNote}>登录后才能发送好友请求。</Text> : null}
-              {scanLookup === "missing" ? <Text style={styles.scanError}>这张名片指向的人不存在 —— 可能已注销，或者名片被改过。</Text> : null}
-              {scanLookup === "failed" ? <Text style={styles.scanError}>查询失败，请稍后重试。</Text> : null}
-              {scanLookup === "no-client" ? <Text style={styles.scanHitNote}>识别到了 @{scanned.kind === "person" ? scanned.handle : ""}，但当前没有登录态，查不到这个人。</Text> : null}
+              {scanLookup === "found" && !relationship ? <Text selectable style={styles.scanHitNote}>登录后才能发送好友请求。</Text> : null}
+              {scanLookup === "missing" ? <Text selectable style={styles.scanError}>这张名片指向的人不存在 —— 可能已注销，或者名片被改过。</Text> : null}
+              {scanLookup === "failed" ? <Text selectable style={styles.scanError}>查询失败，请稍后重试。</Text> : null}
+              {scanLookup === "no-client" ? <Text selectable style={styles.scanHitNote}>识别到了 @{scanned.kind === "person" ? scanned.handle : ""}，但当前没有登录态，查不到这个人。</Text> : null}
               {/* 不能指路到扫码人自己的商家页：他**不是**这家店的老板，指过去等于指错人。
                   App 里现在也没有给顾客看的店铺页（只有商家自己那个「线上店铺」管理面），
                   所以这里只说清楚「这不是个人名片」。
                   （这个注释刻意不写出那条指路原文 —— 测试对这条文案有反向钉，
                   写在注释里会让钉在正确的树上误报。） */}
-              {scanLookup === "store" ? <Text style={styles.scanHitNote}>这是「{scanned.name}」的店铺名片，不是个人名片 —— 加好友要扫对方个人的二维码。App 目前不支持用店铺名片加好友。</Text> : null}
+              {scanLookup === "store" ? <Text selectable style={styles.scanHitNote}>这是「{scanned.name}」的店铺名片，不是个人名片 —— 加好友要扫对方个人的二维码。App 目前不支持用店铺名片加好友。</Text> : null}
             </View>
           ) : null}
-          {scanned === null && scanError ? <Text style={styles.scanError}>{scanError}</Text> : null}
+          {scanned === null && scanError ? <Text selectable style={styles.scanError}>{scanError}</Text> : null}
         </CrmSheet>
 
         <CrmSheet open={sheet === "INVITE"} onClose={() => { setSheet(undefined); setInviteCopied(false); }} title="邀请好友" sub="把你的名片发给对方。扫到就能存进通讯录；在 App 里搜你的 @handle 也能找到你。">
           {viewer && inviteCard ? (
             <>
-              <View style={styles.qrName}><Text style={styles.qrNameStrong}>{viewer.name}</Text><Text style={styles.qrNameSub}>Proxy ID · {inviteCaption}</Text></View>
+              <View style={styles.qrName}><Text selectable style={styles.qrNameStrong}>{viewer.name}</Text><Text selectable style={styles.qrNameSub}>Proxy ID · {inviteCaption}</Text></View>
               <View ref={inviteShotRef} collapsable={false} style={styles.inviteQrWrap}>
                 <Pressable accessibilityLabel="放大邀请二维码" accessibilityRole="button" onPress={() => { setInviteQrNotice(undefined); setInviteZoomOpen(true); }}>
                   <ProxyQrCode size={168} value={inviteCard} />
@@ -792,14 +797,14 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
               </View>
               <View style={styles.inviteLink}><Text selectable style={styles.inviteLinkText}>{inviteCaption}</Text></View>
               <View style={styles.actions}>
-                <Pressable onPress={() => void copyInviteText(inviteCaption)} style={[styles.btn, styles.btnGhost]} accessibilityLabel="复制 Proxy ID"><Text style={styles.btnGhostText}>复制 @handle</Text></Pressable>
-                <Pressable onPress={() => void saveInviteQrFromSheet()} style={[styles.btn, styles.btnGhost]} accessibilityLabel="保存邀请二维码到相册"><Text style={styles.btnGhostText}>保存到相册</Text></Pressable>
-                <Pressable onPress={() => void Share.share({ message: `加我 Proxy：在 App 里搜 ${inviteCaption}，或者扫我的名片二维码。` })} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="系统分享邀请"><Text style={styles.btnPrimaryText}>系统分享</Text></Pressable>
+                <Pressable onPress={() => void copyInviteText(inviteCaption)} style={[styles.btn, styles.btnGhost]} accessibilityLabel="复制 Proxy ID"><Text selectable style={styles.btnGhostText}>复制 @handle</Text></Pressable>
+                <Pressable onPress={() => void saveInviteQrFromSheet()} style={[styles.btn, styles.btnGhost]} accessibilityLabel="保存邀请二维码到相册"><Text selectable style={styles.btnGhostText}>保存到相册</Text></Pressable>
+                <Pressable onPress={() => void Share.share({ message: `加我 Proxy：在 App 里搜 ${inviteCaption}，或者扫我的名片二维码。` })} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="系统分享邀请"><Text selectable style={styles.btnPrimaryText}>系统分享</Text></Pressable>
               </View>
-              {inviteCopied ? <Text style={styles.inviteCopiedNote}>已复制 {inviteCaption} —— 让对方在 Proxy 里搜它就能找到你。</Text> : null}
+              {inviteCopied ? <Text selectable style={styles.inviteCopiedNote}>已复制 {inviteCaption} —— 让对方在 Proxy 里搜它就能找到你。</Text> : null}
             </>
           ) : (
-            <View style={styles.qrName}><Text style={styles.qrNameSub}>{viewer ? "先设置你的 Proxy ID，才能生成邀请名片。" : "登录后显示你的邀请名片"}</Text></View>
+            <View style={styles.qrName}><Text selectable style={styles.qrNameSub}>{viewer ? "先设置你的 Proxy ID，才能生成邀请名片。" : "登录后显示你的邀请名片"}</Text></View>
           )}
         </CrmSheet>
 
@@ -824,38 +829,38 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
 
         <CrmSheet open={sheet === "CONTACTS"} onClose={() => setSheet(undefined)} title="通讯录匹配" sub="Proxy 不会自动添加你的通讯录联系人。下面是本机演示匹配，添加后按钮变已发送，仅本机流转。">
           {!contactsAllowed ? (
-            <View style={styles.permission}><View style={styles.permissionIcon}><ProxyIcon color={color.proxyPurple} name="user" size={24} /></View><Text style={styles.permissionStrong}>允许访问通讯录</Text><Text style={styles.permissionP}>只用于匹配可能认识的人，不会将你的完整通讯录公开给其他用户。</Text><Pressable onPress={() => setContactsAllowed(true)} style={[styles.btn, styles.btnPrimary, { marginTop: 12 }]}><Text style={styles.btnPrimaryText}>允许并查找</Text></Pressable></View>
+            <View style={styles.permission}><View style={styles.permissionIcon}><ProxyIcon color={color.proxyPurple} name="user" size={24} /></View><Text selectable style={styles.permissionStrong}>允许访问通讯录</Text><Text selectable style={styles.permissionP}>只用于匹配可能认识的人，不会将你的完整通讯录公开给其他用户。</Text><Pressable onPress={() => setContactsAllowed(true)} style={[styles.btn, styles.btnPrimary, { marginTop: 12 }]}><Text selectable style={styles.btnPrimaryText}>允许并查找</Text></Pressable></View>
           ) : (
             <View>
-              <View style={styles.sectionHead}><Text style={styles.sectionTitle}>可能认识的人</Text><Text style={styles.sectionNote}>{CONTACT_MATCHES.length} 人 · 本机演示</Text></View>
+              <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>可能认识的人</Text><Text selectable style={styles.sectionNote}>{CONTACT_MATCHES.length} 人 · 本机演示</Text></View>
               {CONTACT_MATCHES.map((p) => (
-                <View key={p.name} style={styles.personRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{p.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{p.name}</Text><Text style={styles.personSub}>{p.sub}</Text></View><Pressable disabled={Boolean(sentIds[p.name])} onPress={() => setSentIds((m) => ({ ...m, [p.name]: true }))} style={[styles.addBtn, sentIds[p.name] && styles.addBtnSent]} accessibilityLabel={sentIds[p.name] ? `已发送给${p.name}` : `添加${p.name}`}><Text style={[styles.addBtnText, sentIds[p.name] && styles.addBtnTextSent]}>{sentIds[p.name] ? "已发送" : "添加"}</Text></Pressable></View>
+                <View key={p.name} style={styles.personRow}><View style={styles.avatarSmall}><Text selectable style={styles.avatarSmallText}>{p.initial}</Text></View><View style={styles.personCopy}><Text selectable style={styles.personName}>{p.name}</Text><Text selectable style={styles.personSub}>{p.sub}</Text></View><Pressable disabled={Boolean(sentIds[p.name])} onPress={() => setSentIds((m) => ({ ...m, [p.name]: true }))} style={[styles.addBtn, sentIds[p.name] && styles.addBtnSent]} accessibilityLabel={sentIds[p.name] ? `已发送给${p.name}` : `添加${p.name}`}><Text selectable style={[styles.addBtnText, sentIds[p.name] && styles.addBtnTextSent]}>{sentIds[p.name] ? "已发送" : "添加"}</Text></Pressable></View>
               ))}
             </View>
           )}
         </CrmSheet>
 
         <CrmSheet open={sheet === "SOCIAL"} onClose={() => setSheet(undefined)} title="从社媒发现好友" sub="下面是本机演示匹配，添加后按钮变已发送，仅本机流转，不会自动导入社交关系。">
-          <View style={[styles.sectionHead, { marginTop: 4 }]}><Text style={styles.sectionTitle}>Instagram 匹配</Text><Text style={styles.sectionNote}>{SOCIAL_MATCHES.length} 人 · 本机演示</Text></View>
+          <View style={[styles.sectionHead, { marginTop: 4 }]}><Text selectable style={styles.sectionTitle}>Instagram 匹配</Text><Text selectable style={styles.sectionNote}>{SOCIAL_MATCHES.length} 人 · 本机演示</Text></View>
           {SOCIAL_MATCHES.map((p) => (
-            <View key={p.name} style={styles.personRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{p.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{p.name}</Text><Text style={styles.personSub}>{p.sub}</Text></View><Pressable disabled={Boolean(sentIds[p.name])} onPress={() => setSentIds((m) => ({ ...m, [p.name]: true }))} style={[styles.addBtn, sentIds[p.name] && styles.addBtnSent]} accessibilityLabel={sentIds[p.name] ? `已发送给${p.name}` : `添加${p.name}`}><Text style={[styles.addBtnText, sentIds[p.name] && styles.addBtnTextSent]}>{sentIds[p.name] ? "已发送" : "添加"}</Text></Pressable></View>
+            <View key={p.name} style={styles.personRow}><View style={styles.avatarSmall}><Text selectable style={styles.avatarSmallText}>{p.initial}</Text></View><View style={styles.personCopy}><Text selectable style={styles.personName}>{p.name}</Text><Text selectable style={styles.personSub}>{p.sub}</Text></View><Pressable disabled={Boolean(sentIds[p.name])} onPress={() => setSentIds((m) => ({ ...m, [p.name]: true }))} style={[styles.addBtn, sentIds[p.name] && styles.addBtnSent]} accessibilityLabel={sentIds[p.name] ? `已发送给${p.name}` : `添加${p.name}`}><Text selectable style={[styles.addBtnText, sentIds[p.name] && styles.addBtnTextSent]}>{sentIds[p.name] ? "已发送" : "添加"}</Text></Pressable></View>
           ))}
         </CrmSheet>
 
         <CrmSheet open={sheet === "SEARCH"} onClose={() => { setSheet(undefined); setSearchState("idle"); setSearchResults([]); }} title="搜索 Proxy" sub="按昵称或 Proxy ID 搜索全站用户，至少 2 个字符。手机号暂不可搜 —— 还没有「允许被手机号搜到」这个授权开关，先不假装能搜。">
-          <View style={styles.searchLine}><TextInput value={proxySearch} onChangeText={setProxySearch} onSubmitEditing={() => void runProxySearch()} returnKeyType="search" placeholder="昵称 / Proxy ID" placeholderTextColor={color.muted} style={styles.searchInput} /><Pressable onPress={() => void runProxySearch()} style={styles.searchBtn}><Text style={styles.searchBtnText}>搜索</Text></Pressable></View>
-          {searchState === "idle" ? <View style={styles.resultEmpty}><Text style={styles.resultEmptyText}>输入昵称或 Proxy ID 开始搜索</Text></View> : null}
-          {searchState === "too-short" ? <Text style={styles.scanError}>至少输入 2 个字符 —— 一个字会匹配到太多人。</Text> : null}
-          {searchState === "no-client" ? <Text style={styles.scanHitNote}>当前没有登录态，无法搜索全站用户。</Text> : null}
-          {searchState === "busy" ? <View style={styles.resultEmpty}><Text style={styles.resultEmptyText}>搜索中…</Text></View> : null}
-          {searchState === "failed" ? <Text style={styles.scanError}>搜索失败，请稍后重试。</Text> : null}
-          {searchState === "empty" ? <View style={styles.resultEmpty}><Text style={styles.resultEmptyText}>没有找到匹配的人。换个昵称或 Proxy ID 试试。</Text></View> : null}
+          <View style={styles.searchLine}><TextInput value={proxySearch} onChangeText={setProxySearch} onSubmitEditing={() => void runProxySearch()} returnKeyType="search" placeholder="昵称 / Proxy ID" placeholderTextColor={color.muted} style={styles.searchInput} /><Pressable onPress={() => void runProxySearch()} style={styles.searchBtn}><Text selectable style={styles.searchBtnText}>搜索</Text></Pressable></View>
+          {searchState === "idle" ? <View style={styles.resultEmpty}><Text selectable style={styles.resultEmptyText}>输入昵称或 Proxy ID 开始搜索</Text></View> : null}
+          {searchState === "too-short" ? <Text selectable style={styles.scanError}>至少输入 2 个字符 —— 一个字会匹配到太多人。</Text> : null}
+          {searchState === "no-client" ? <Text selectable style={styles.scanHitNote}>当前没有登录态，无法搜索全站用户。</Text> : null}
+          {searchState === "busy" ? <View style={styles.resultEmpty}><Text selectable style={styles.resultEmptyText}>搜索中…</Text></View> : null}
+          {searchState === "failed" ? <Text selectable style={styles.scanError}>搜索失败，请稍后重试。</Text> : null}
+          {searchState === "empty" ? <View style={styles.resultEmpty}><Text selectable style={styles.resultEmptyText}>没有找到匹配的人。换个昵称或 Proxy ID 试试。</Text></View> : null}
           {searchState === "found" ? <View>{searchResults.map((p) => {
             const self = isSelfProfile(p);
             const added = Boolean(searchAdded[p.userAccountId]);
             const label = p.name || p.handle;
             return (
-              <View key={p.userAccountId} style={styles.personRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{label.slice(0, 1)}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{label}</Text><Text style={styles.personSub}>@{p.handle}{p.city ? ` · ${p.city}` : ""}</Text></View>{self ? <Text style={styles.scanHitNote}>这是你</Text> : <Pressable disabled={added || !relationship} onPress={() => void addSearchResult(p)} style={[styles.addBtn, added && styles.addBtnSent]} accessibilityLabel={added ? `已发送给${label}` : `添加${label}`}><Text style={[styles.addBtnText, added && styles.addBtnTextSent]}>{added ? "已发送" : "添加"}</Text></Pressable>}</View>
+              <View key={p.userAccountId} style={styles.personRow}><View style={styles.avatarSmall}><Text selectable style={styles.avatarSmallText}>{label.slice(0, 1)}</Text></View><View style={styles.personCopy}><Text selectable style={styles.personName}>{label}</Text><Text selectable style={styles.personSub}>@{p.handle}{p.city ? ` · ${p.city}` : ""}</Text></View>{self ? <Text selectable style={styles.scanHitNote}>这是你</Text> : <Pressable disabled={added || !relationship} onPress={() => void addSearchResult(p)} style={[styles.addBtn, added && styles.addBtnSent]} accessibilityLabel={added ? `已发送给${label}` : `添加${label}`}><Text selectable style={[styles.addBtnText, added && styles.addBtnTextSent]}>{added ? "已发送" : "添加"}</Text></Pressable>}</View>
             );
           })}</View> : null}
         </CrmSheet>
@@ -865,20 +870,20 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
             const demo = r.userId.startsWith("demo:");
             const actionable = demo || Boolean(relationship);
             return (
-              <View key={`${r.userId ?? r.name}`} style={styles.requestRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{r.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{r.name}</Text><Text style={styles.personSub}>{r.source} · {r.time}</Text><View style={styles.requestActions}><Pressable disabled={!actionable} onPress={async () => { if (!actionable) return; if (demo) { acceptDemoRequest(r.userId); return; } if (!relationship) return; try { await relationship.acceptFriendRequest(r.userId); showToast("已成为好友"); void reload(); } catch (error) { showToast(requestErrorMessage(error, "接受失败，请稍后重试。")); } }} style={[styles.btn, styles.btnPrimary, { flex: 1 }]}><Text style={styles.btnPrimaryText}>接受</Text></Pressable><Pressable disabled={!actionable} onPress={async () => { if (!actionable) return; if (demo) { ignoreDemoRequest(r.userId); return; } if (!relationship) return; try { await relationship.ignoreFriendRequest(r.userId); showToast("已忽略请求"); void reload(); } catch (error) { showToast(requestErrorMessage(error, "忽略失败，请稍后重试。")); } }} style={[styles.btn, { flex: 1 }]}><Text style={styles.btnText}>忽略</Text></Pressable></View></View></View>
+              <View key={`${r.userId ?? r.name}`} style={styles.requestRow}><View style={styles.avatarSmall}><Text selectable style={styles.avatarSmallText}>{r.initial}</Text></View><View style={styles.personCopy}><Text selectable style={styles.personName}>{r.name}</Text><Text selectable style={styles.personSub}>{r.source} · {r.time}</Text><View style={styles.requestActions}><Pressable disabled={!actionable} onPress={async () => { if (!actionable) return; if (demo) { acceptDemoRequest(r.userId); return; } if (!relationship) return; try { await relationship.acceptFriendRequest(r.userId); showToast("已成为好友"); void reload(); } catch (error) { showToast(requestErrorMessage(error, "接受失败，请稍后重试。")); } }} style={[styles.btn, styles.btnPrimary, { flex: 1 }]}><Text selectable style={styles.btnPrimaryText}>接受</Text></Pressable><Pressable disabled={!actionable} onPress={async () => { if (!actionable) return; if (demo) { ignoreDemoRequest(r.userId); return; } if (!relationship) return; try { await relationship.ignoreFriendRequest(r.userId); showToast("已忽略请求"); void reload(); } catch (error) { showToast(requestErrorMessage(error, "忽略失败，请稍后重试。")); } }} style={[styles.btn, { flex: 1 }]}><Text selectable style={styles.btnText}>忽略</Text></Pressable></View></View></View>
             );
           })}
-          {!requests.length ? <Text style={styles.resultEmptyText}>暂无待处理请求</Text> : null}
+          {!requests.length ? <Text selectable style={styles.resultEmptyText}>暂无待处理请求</Text> : null}
           {/* ADD-FRIEND-NEXT-001: “我发出的”分组只展示等待态，不加动作按钮
               （服务端无撤回命令，不编）。空态独立一句，不与上混用。 */}
-          <View style={styles.sectionHead}><Text style={styles.sectionTitle}>我发出的</Text><Text style={styles.sectionNote}>{outgoingRequests.length} 个等待中</Text></View>
+          <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>我发出的</Text><Text selectable style={styles.sectionNote}>{outgoingRequests.length} 个等待中</Text></View>
           {outgoingRequests.map((o) => (
-            <View key={o.userId} style={styles.personRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{o.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{o.name}</Text><Text style={styles.personSub}>{o.sub}</Text></View><Text style={styles.scanHitNote}>等待对方通过</Text></View>
+            <View key={o.userId} style={styles.personRow}><View style={styles.avatarSmall}><Text selectable style={styles.avatarSmallText}>{o.initial}</Text></View><View style={styles.personCopy}><Text selectable style={styles.personName}>{o.name}</Text><Text selectable style={styles.personSub}>{o.sub}</Text></View><Text selectable style={styles.scanHitNote}>等待对方通过</Text></View>
           ))}
-          {!outgoingRequests.length ? <Text style={styles.resultEmptyText}>你还没发出过请求</Text> : null}
+          {!outgoingRequests.length ? <Text selectable style={styles.resultEmptyText}>你还没发出过请求</Text> : null}
         </CrmSheet>
 
-        {toast ? <View style={styles.toast}><Text style={styles.toastText}>{toast}</Text></View> : null}
+        {toast ? <View style={styles.toast}><Text selectable style={styles.toastText}>{toast}</Text></View> : null}
       </ScrollView>
     );
   }
@@ -888,9 +893,9 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   const serverMode = projectedServerFriends.length > 0;
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <Pressable onPress={onBack} style={styles.backRow}><Text style={styles.backText}>‹ 返回我的</Text></Pressable>
-      <Text style={styles.title}>好友关系</Text>
-      <Text style={styles.sub}>关系状态、互动与下一步动作</Text>
+      <Pressable onPress={onBack} style={styles.backRow}><Text selectable style={styles.backText}>‹ 返回我的</Text></Pressable>
+      <Text selectable style={styles.title}>好友关系</Text>
+      <Text selectable style={styles.sub}>关系状态、互动与下一步动作</Text>
       {/*
         ADD-FRIEND-ENTRY-002: 这个"添加好友"按钮曾经是 ADD_FRIEND 唯一的
         入口（见旧注释 ADD-FRIEND-ENTRY-001）。现在消息模块顶栏已经有扫码
@@ -899,44 +904,44 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
         ADD_FRIEND 视图本身、setView("ADD_FRIEND") 都还在，消息模块那条路
         照常能到。
       */}
-      {friendsError ? <Text style={styles.loadError}>好友列表加载失败（{friendsError}），当前显示本地数据。</Text> : null}
+      {friendsError ? <Text selectable style={styles.loadError}>好友列表加载失败（{friendsError}），当前显示本地数据。</Text> : null}
 
       {onOpenFacet ? (
         <Pressable onPress={onOpenFacet} style={styles.facetLinkCard} accessibilityLabel="去 FACET 查看内容投给了谁">
           <View style={styles.facetLinkCopy}>
-            <Text style={styles.facetLinkTitle}>这些关系在看什么？</Text>
-            <Text style={styles.facetLinkSub}>去 FACET 查看内容按关系投给了谁，AI 分身负责生成新内容。</Text>
+            <Text selectable style={styles.facetLinkTitle}>这些关系在看什么？</Text>
+            <Text selectable style={styles.facetLinkSub}>去 FACET 查看内容按关系投给了谁，AI 分身负责生成新内容。</Text>
           </View>
-          <Text style={styles.facetLinkChevron}>›</Text>
+          <Text selectable style={styles.facetLinkChevron}>›</Text>
         </Pressable>
       ) : null}
 
       <View style={styles.metricGrid}>
-        <View style={styles.metricCard}><Text style={styles.metricValue}>{serverMode ? visible.length + advFriends.length : advFriends.length}</Text><Text style={styles.metricLabel}>好友关系</Text></View>
-        <View style={[styles.metricCard, styles.metricCardActive]}><Text style={styles.metricValue}>{advFriends.filter((f) => f.crmStatus === "WARM").length}</Text><Text style={styles.metricLabel}>暖关系</Text></View>
-        <View style={styles.metricCard}><Text style={styles.metricValue}>{advFriends.filter((f) => f.crmStatus === "FOLLOW").length}</Text><Text style={styles.metricLabel}>待跟进</Text></View>
-        <View style={styles.metricCard}><Text style={styles.metricValue}>{advFriends.filter((f) => f.crmStatus === "MET").length}</Text><Text style={styles.metricLabel}>已见面</Text></View>
+        <View style={styles.metricCard}><Text selectable style={styles.metricValue}>{serverMode ? visible.length + advFriends.length : advFriends.length}</Text><Text selectable style={styles.metricLabel}>好友关系</Text></View>
+        <View style={[styles.metricCard, styles.metricCardActive]}><Text selectable style={styles.metricValue}>{advFriends.filter((f) => f.crmStatus === "WARM").length}</Text><Text selectable style={styles.metricLabel}>暖关系</Text></View>
+        <View style={styles.metricCard}><Text selectable style={styles.metricValue}>{advFriends.filter((f) => f.crmStatus === "FOLLOW").length}</Text><Text selectable style={styles.metricLabel}>待跟进</Text></View>
+        <View style={styles.metricCard}><Text selectable style={styles.metricValue}>{advFriends.filter((f) => f.crmStatus === "MET").length}</Text><Text selectable style={styles.metricLabel}>已见面</Text></View>
       </View>
       {/* CRM-HONEST-001: 暖关系/待跟进/已见面只统计"本地好友"（本机演示，见
           下面的分区标签），服务端好友没有 crmStatus 概念。三个数字紧挨着上面
           的"好友关系"总数（真的包含服务端好友），不说清楚这三个只数演示数据，
           用户会以为这是自己真实好友的关系画像。 */}
-      <Text style={styles.metricFootnote}>暖关系 / 待跟进 / 已见面：基于下方"本地好友"演示数据，服务端好友暂无关系分级</Text>
+      <Text selectable style={styles.metricFootnote}>暖关系 / 待跟进 / 已见面：基于下方"本地好友"演示数据，服务端好友暂无关系分级</Text>
 
       <View style={styles.insightCard}>
-        <View style={styles.insightHead}><Text style={styles.insightTitle}>关系数据洞察</Text>{profileViewStats === undefined || profileViewStats === null ? <View style={styles.insightBadge}><Text style={styles.insightBadgeText}>部分即将上线</Text></View> : null}</View>
+        <View style={styles.insightHead}><Text selectable style={styles.insightTitle}>关系数据洞察</Text>{profileViewStats === undefined || profileViewStats === null ? <View style={styles.insightBadge}><Text selectable style={styles.insightBadgeText}>部分即将上线</Text></View> : null}</View>
         {/* PROFILE-VISIT-001: 主页访问/回访人数现在是真数字（RecordProfileOpen
             → ListProfileViewStats，见 localnet-client.ts）。访问→私信、关系→用券
             需要新的事件类型（"访问后是否发起私信" / "关系带来的用券"）—— 这两个
             现有的 PROFILE_OPEN 事件回答不了，不编，继续说"即将上线"。 */}
-        <Text style={styles.insightSub}>主页访问、回访已经是真实数据；私信转化、用券转化的统计管线还没接</Text>
+        <Text selectable style={styles.insightSub}>主页访问、回访已经是真实数据；私信转化、用券转化的统计管线还没接</Text>
         <View style={styles.insightRows}>
-          <View style={styles.insightRow}><Text style={styles.insightRowLabel}>主页访问</Text><Text style={styles.insightRowDots}>{profileViewStats == null ? "—" : profileViewStats.opens}</Text></View>
-          <View style={styles.insightRow}><Text style={styles.insightRowLabel}>回访人数</Text><Text style={styles.insightRowDots}>{profileViewStats == null ? "—" : profileViewStats.uniqueViewers}</Text></View>
-          <View style={styles.insightRow}><Text style={styles.insightRowLabel}>访问 → 私信</Text><Text style={styles.insightRowDots}>—</Text></View>
-          <View style={styles.insightRow}><Text style={styles.insightRowLabel}>关系 → 用券</Text><Text style={styles.insightRowDots}>—</Text></View>
+          <View style={styles.insightRow}><Text selectable style={styles.insightRowLabel}>主页访问</Text><Text selectable style={styles.insightRowDots}>{profileViewStats == null ? "—" : profileViewStats.opens}</Text></View>
+          <View style={styles.insightRow}><Text selectable style={styles.insightRowLabel}>回访人数</Text><Text selectable style={styles.insightRowDots}>{profileViewStats == null ? "—" : profileViewStats.uniqueViewers}</Text></View>
+          <View style={styles.insightRow}><Text selectable style={styles.insightRowLabel}>访问 → 私信</Text><Text selectable style={styles.insightRowDots}>—</Text></View>
+          <View style={styles.insightRow}><Text selectable style={styles.insightRowLabel}>关系 → 用券</Text><Text selectable style={styles.insightRowDots}>—</Text></View>
         </View>
-        <Text style={styles.insightFoot}>{profileViewStats === null ? "主页访问数据没读出来，不是没人看" : "私信转化、用券转化的统计管线上线后会换成真数字"}</Text>
+        <Text selectable style={styles.insightFoot}>{profileViewStats === null ? "主页访问数据没读出来，不是没人看" : "私信转化、用券转化的统计管线上线后会换成真数字"}</Text>
       </View>
 
       {/* PROFILE-VIEWERS-001: 汇总数字之外的真正关系洞察——是谁看了你的主页、
@@ -944,27 +949,27 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
           "其他访客"一个数字，不把陌生账号 id 摆出来。 */}
       {localNet ? (
         <View style={styles.viewersCard}>
-          <View style={styles.insightHead}><Text style={styles.insightTitle}>谁看了你的主页</Text></View>
+          <View style={styles.insightHead}><Text selectable style={styles.insightTitle}>谁看了你的主页</Text></View>
           {profileViewers === undefined ? (
-            <Text style={styles.viewersHint}>正在读取…</Text>
+            <Text selectable style={styles.viewersHint}>正在读取…</Text>
           ) : profileViewers === null ? (
-            <Text style={styles.viewersHint}>访客明细没读出来，不是没人看</Text>
+            <Text selectable style={styles.viewersHint}>访客明细没读出来，不是没人看</Text>
           ) : namedViewers.length === 0 && anonymousViewerCount === 0 ? (
-            <Text style={styles.viewersHint}>还没有人看过你的主页</Text>
+            <Text selectable style={styles.viewersHint}>还没有人看过你的主页</Text>
           ) : (
             <>
               {namedViewers.map((v, idx) => (
                 <View key={v.actorId} style={[styles.viewerRow, idx > 0 && styles.friendRowLine]}>
-                  <View style={styles.avatar}><Text style={styles.avatarText}>{v.friend.name.charAt(0)}</Text></View>
+                  <View style={styles.avatar}><Text selectable style={styles.avatarText}>{v.friend.name.charAt(0)}</Text></View>
                   <View style={styles.friendCopy}>
-                    <Text style={styles.friendName}>{v.friend.name}</Text>
-                    <Text style={styles.friendContext}>{v.friend.city ? `${v.friend.city} · ` : ""}{formatLastOpened(v.lastOpenedAt)}</Text>
+                    <Text selectable style={styles.friendName}>{v.friend.name}</Text>
+                    <Text selectable style={styles.friendContext}>{v.friend.city ? `${v.friend.city} · ` : ""}{formatLastOpened(v.lastOpenedAt)}</Text>
                   </View>
-                  <Text style={styles.viewerCount}>{v.opens} 次</Text>
+                  <Text selectable style={styles.viewerCount}>{v.opens} 次</Text>
                 </View>
               ))}
               {anonymousViewerCount > 0 ? (
-                <Text style={styles.viewersFootnote}>另有 {anonymousViewerCount} 位非好友访客，不在这里具名显示</Text>
+                <Text selectable style={styles.viewersFootnote}>另有 {anonymousViewerCount} 位非好友访客，不在这里具名显示</Text>
               ) : null}
             </>
           )}
@@ -976,16 +981,41 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
           的关系运营数据，跟上面的"谁看了你的主页"同一族。AI 分身那边只管生成。 */}
       {localNet && myPosts ? (
         <View style={styles.viewersCard}>
-          <View style={styles.insightHead}><Text style={styles.insightTitle}>动态浏览</Text></View>
-          <Text style={styles.viewersFootnote}>每条动态被看了多少次、多少人、共停留多久（只统计公开动态）</Text>
+          <View style={styles.insightHead}><Text selectable style={styles.insightTitle}>动态浏览</Text></View>
+          <Text selectable style={styles.viewersFootnote}>近 30 天发的动态 · 只统计公开动态 · 只显示合计</Text>
           {statsState === "failed" ? (
-            <Text style={styles.viewersHint}>战绩没读出来，不是没人看</Text>
+            <Text selectable style={styles.viewersHint}>战绩没读出来，不是没人看</Text>
           ) : statsState === "loading" ? (
-            <Text style={styles.viewersHint}>正在读取…</Text>
-          ) : myPosts.length === 0 ? (
-            <Text style={styles.viewersHint}>还没有动态，先去发一条</Text>
-          ) : (
-            myPosts.map((post, idx) => {
+            <Text selectable style={styles.viewersHint}>正在读取…</Text>
+          ) : analytics ? (
+            <>
+              <View style={styles.analyticsGrid}>
+                {[
+                  { label: "发帖", value: String(analytics.posts) },
+                  { label: "浏览", value: String(analytics.impressions) },
+                  { label: "看过的人", value: String(analytics.uniqueViewers) },
+                  { label: "平均停留", value: analytics.impressions > 0 ? formatWatchMs(Math.round(analytics.totalWatchMs / analytics.impressions)) : "—" },
+                ].map((cell) => (
+                  <View key={cell.label} style={styles.analyticsCell}>
+                    <Text selectable style={styles.analyticsValue}>{cell.value}</Text>
+                    <Text selectable style={styles.analyticsLabel}>{cell.label}</Text>
+                  </View>
+                ))}
+              </View>
+              {analytics.topPostId && analytics.topPostViews > 0 ? (
+                <Text selectable numberOfLines={1} style={styles.analyticsTop}>
+                  最受关注：{myPosts.find((post) => post.postId === analytics.topPostId)?.body || "一条动态"} · 浏览 {analytics.topPostViews}
+                </Text>
+              ) : analytics.posts === 0 ? (
+                <Text selectable style={styles.viewersHint}>近 30 天还没有发动态</Text>
+              ) : null}
+              {Object.keys(postStats).length > 0 ? (
+                <Pressable accessibilityRole="button" onPress={() => setStatsOpen((open) => !open)} style={styles.statsEntry}>
+                  <Text style={styles.statsEntryText}>{statsOpen ? "收起每条动态的统计" : `每条动态的统计（${Object.keys(postStats).length} 条）`}</Text>
+                  <Text style={styles.statsEntryText}>{statsOpen ? "⌃" : "›"}</Text>
+                </Pressable>
+              ) : null}
+              {statsOpen ? myPosts.filter((post) => postStats[post.postId]).map((post, idx) => {
               const stat = postStats[post.postId];
               // MEDIA-DWELL-001: 只有多于 1 张媒体的帖子才值得看逐张细分——
               // 只有 1 张时，逐张数字等于帖子总数，摆出来是纯重复。
@@ -994,8 +1024,8 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
                 : [];
               return (
                 <View key={post.postId} style={[styles.postStatRow, idx > 0 && styles.friendRowLine]}>
-                  <Text numberOfLines={1} style={styles.postStatBody}>{post.body}</Text>
-                  <Text style={styles.postStatNums}>
+                  <Text selectable numberOfLines={1} style={styles.postStatBody}>{post.body}</Text>
+                  <Text selectable style={styles.postStatNums}>
                     {stat ? `浏览 ${stat.impressions} · ${stat.viewers}人 · 共${formatWatchMs(stat.totalWatchMs)}` : "暂无浏览"}
                   </Text>
                   {mediaRefs.length > 0 ? (
@@ -1004,8 +1034,8 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
                         const mstat = mediaStats[ref.mediaAssetId];
                         return (
                           <View key={ref.mediaAssetId} style={styles.postStatMediaRow}>
-                            <Text style={styles.postStatMediaLabel}>第 {i + 1} 张</Text>
-                            <Text style={styles.postStatMediaNums}>
+                            <Text selectable style={styles.postStatMediaLabel}>第 {i + 1} 张</Text>
+                            <Text selectable style={styles.postStatMediaNums}>
                               {mstat ? `浏览 ${mstat.impressions} · ${mstat.viewers}人 · 共${formatWatchMs(mstat.totalWatchMs)}` : "暂无浏览"}
                             </Text>
                           </View>
@@ -1015,7 +1045,12 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
                   ) : null}
                 </View>
               );
-            })
+              }) : null}
+            </>
+          ) : myPosts.length === 0 ? (
+            <Text selectable style={styles.viewersHint}>还没有动态，先去发一条</Text>
+          ) : (
+            <Text selectable style={styles.viewersHint}>分析面板没读出来，稍后再看</Text>
           )}
         </View>
       ) : null}
@@ -1030,76 +1065,67 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
         if (!first) return null;
         return (
       <View style={styles.recommendCard}>
-        <View style={styles.recommendHead}><Text style={styles.recommendTitle}>推荐动作</Text><Text style={styles.recommendSub}>今天最值得先处理的关系 · 本地好友演示</Text></View>
-        <View style={styles.recommendPriority}><View style={styles.priorityDot} /><Text style={styles.priorityText}>高优先级 · {first.name} · 发咖啡券</Text></View>
-        <Text style={styles.recommendDesc}>{first.lastInteraction}{first.note ? ` · ${first.note}` : ""}</Text>
-        <View style={styles.recommendActions}><Pressable onPress={() => openDetail(first)} style={styles.recommendBtn} accessibilityLabel="查看推荐对象详情"><Text style={styles.recommendBtnText}>查看</Text></Pressable><Pressable onPress={sendVoucher} style={[styles.recommendBtn, styles.recommendBtnPrimary]} accessibilityLabel="发礼券"><Text style={styles.recommendBtnPrimaryText}>发礼券</Text></Pressable><Pressable onPress={() => onOpenConversation(first.name)} style={styles.recommendBtn}><Text style={styles.recommendBtnText}>发消息</Text></Pressable></View>
-        <View style={styles.contextBuilder}><Text style={styles.contextTitle}>语境构建建议</Text><Text style={styles.contextSub}>用户可选，不自动替用户发送</Text><Text style={styles.contextTag}>可选 · 建议风格：自然、轻松、先场景后邀约</Text><Text style={styles.contextDesc}>从咖啡或摄影共同兴趣切入，再自然推进礼券或活动邀请。</Text><View style={styles.contextChips}><View style={styles.contextChipActive}><Text style={styles.contextChipActiveText}>轻松</Text></View><View style={styles.contextChip}><Text style={styles.contextChipText}>朋友式</Text></View><View style={styles.contextChip}><Text style={styles.contextChipText}>直接</Text></View><View style={styles.contextChip}><Text style={styles.contextChipText}>商务</Text></View></View></View>
+        <View style={styles.recommendHead}><Text selectable style={styles.recommendTitle}>推荐动作</Text><Text selectable style={styles.recommendSub}>今天最值得先处理的关系 · 本地好友演示</Text></View>
+        <View style={styles.recommendPriority}><View style={styles.priorityDot} /><Text selectable style={styles.priorityText}>高优先级 · {first.name} · 发咖啡券</Text></View>
+        <Text selectable style={styles.recommendDesc}>{first.lastInteraction}{first.note ? ` · ${first.note}` : ""}</Text>
+        <View style={styles.recommendActions}><Pressable onPress={() => openDetail(first)} style={styles.recommendBtn} accessibilityLabel="查看推荐对象详情"><Text selectable style={styles.recommendBtnText}>查看</Text></Pressable><Pressable onPress={sendVoucher} style={[styles.recommendBtn, styles.recommendBtnPrimary]} accessibilityLabel="发礼券"><Text selectable style={styles.recommendBtnPrimaryText}>发礼券</Text></Pressable><Pressable onPress={() => onOpenConversation(first.name)} style={styles.recommendBtn}><Text selectable style={styles.recommendBtnText}>发消息</Text></Pressable></View>
+        <View style={styles.contextBuilder}><Text selectable style={styles.contextTitle}>语境构建建议</Text><Text selectable style={styles.contextSub}>用户可选，不自动替用户发送</Text><Text selectable style={styles.contextTag}>可选 · 建议风格：自然、轻松、先场景后邀约</Text><Text selectable style={styles.contextDesc}>从咖啡或摄影共同兴趣切入，再自然推进礼券或活动邀请。</Text><View style={styles.contextChips}><View style={styles.contextChipActive}><Text selectable style={styles.contextChipActiveText}>轻松</Text></View><View style={styles.contextChip}><Text selectable style={styles.contextChipText}>朋友式</Text></View><View style={styles.contextChip}><Text selectable style={styles.contextChipText}>直接</Text></View><View style={styles.contextChip}><Text selectable style={styles.contextChipText}>商务</Text></View></View></View>
       </View>
         );
       })()}
 
       <View style={styles.assistantCard}>
-        <Text style={styles.assistantTitle}>智能关系助手</Text>
-        <Text style={styles.assistantSub}>自动整理 Proxy 内部关系事件；消息内容理解独立授权</Text>
-        <View style={styles.assistantRow}><View><Text style={styles.assistantLabel}>内部互动事件整理</Text><Text style={styles.assistantDesc}>基于 Proxy 内部事件</Text></View><View style={styles.toggleOn}><Text style={styles.toggleOnText}>开启</Text></View></View>
-        <View style={styles.assistantRow}><View><Text style={styles.assistantLabel}>消息内容理解</Text><Text style={styles.assistantDesc}>需独立授权</Text></View><View style={styles.toggleOff}><Text style={styles.toggleOffText}>关闭</Text></View></View>
-        <View style={styles.assistantRow}><View><Text style={styles.assistantLabel}>主动分享的社媒账号自动保存</Text><Text style={styles.assistantDesc}>确认后保存</Text></View><Pressable onPress={() => setAutoSaveSocial((v) => !v)} style={autoSaveSocial ? styles.toggleOn : styles.toggleOff} accessibilityLabel={`社媒账号自动保存${autoSaveSocial ? "开" : "关"}`}><Text style={autoSaveSocial ? styles.toggleOnText : styles.toggleOffText}>{autoSaveSocial ? "开启" : "关闭"}</Text></Pressable></View>
-        <Text style={styles.assistantFoot}>数据来源仅限 Proxy 内部事件、用户授权绑定、双方主动分享的信息。</Text>
+        <Text selectable style={styles.assistantTitle}>智能关系助手</Text>
+        <Text selectable style={styles.assistantSub}>自动整理 Proxy 内部关系事件；消息内容理解独立授权</Text>
+        <View style={styles.assistantRow}><View><Text selectable style={styles.assistantLabel}>内部互动事件整理</Text><Text selectable style={styles.assistantDesc}>基于 Proxy 内部事件</Text></View><View style={styles.toggleOn}><Text selectable style={styles.toggleOnText}>开启</Text></View></View>
+        <View style={styles.assistantRow}><View><Text selectable style={styles.assistantLabel}>消息内容理解</Text><Text selectable style={styles.assistantDesc}>需独立授权</Text></View><View style={styles.toggleOff}><Text selectable style={styles.toggleOffText}>关闭</Text></View></View>
+        <View style={styles.assistantRow}><View><Text selectable style={styles.assistantLabel}>主动分享的社媒账号自动保存</Text><Text selectable style={styles.assistantDesc}>确认后保存</Text></View><Pressable onPress={() => setAutoSaveSocial((v) => !v)} style={autoSaveSocial ? styles.toggleOn : styles.toggleOff} accessibilityLabel={`社媒账号自动保存${autoSaveSocial ? "开" : "关"}`}><Text selectable style={autoSaveSocial ? styles.toggleOnText : styles.toggleOffText}>{autoSaveSocial ? "开启" : "关闭"}</Text></Pressable></View>
+        <Text selectable style={styles.assistantFoot}>数据来源仅限 Proxy 内部事件、用户授权绑定、双方主动分享的信息。</Text>
       </View>
 
       <View style={styles.searchRow}><TextInput value={search} onChangeText={setSearch} placeholder="搜索好友、备注、互动…" placeholderTextColor={color.muted} style={styles.searchInputFull} /><View style={styles.searchBtnIcon}><ProxyIcon color={color.white} name="search" size={18} /></View></View>
 
       <View style={styles.filterTabs}>
-        <Pressable onPress={() => setCrmTab("ALL")} style={[styles.filterTab, crmTab === "ALL" && styles.filterTabActive]}><Text style={[styles.filterTabText, crmTab === "ALL" && styles.filterTabTextActive]}>全部</Text></Pressable>
-        <Pressable onPress={() => setCrmTab("WARM")} style={[styles.filterTab, crmTab === "WARM" && styles.filterTabActive]}><Text style={[styles.filterTabText, crmTab === "WARM" && styles.filterTabTextActive]}>暖关系</Text></Pressable>
-        <Pressable onPress={() => setCrmTab("FOLLOW")} style={[styles.filterTab, crmTab === "FOLLOW" && styles.filterTabActive]}><Text style={[styles.filterTabText, crmTab === "FOLLOW" && styles.filterTabTextActive]}>待跟进</Text></Pressable>
-        <Pressable onPress={() => setCrmTab("MET")} style={[styles.filterTab, crmTab === "MET" && styles.filterTabActive]}><Text style={[styles.filterTabText, crmTab === "MET" && styles.filterTabTextActive]}>已见面</Text></Pressable>
+        <Pressable onPress={() => setCrmTab("ALL")} style={[styles.filterTab, crmTab === "ALL" && styles.filterTabActive]}><Text selectable style={[styles.filterTabText, crmTab === "ALL" && styles.filterTabTextActive]}>全部</Text></Pressable>
+        <Pressable onPress={() => setCrmTab("WARM")} style={[styles.filterTab, crmTab === "WARM" && styles.filterTabActive]}><Text selectable style={[styles.filterTabText, crmTab === "WARM" && styles.filterTabTextActive]}>暖关系</Text></Pressable>
+        <Pressable onPress={() => setCrmTab("FOLLOW")} style={[styles.filterTab, crmTab === "FOLLOW" && styles.filterTabActive]}><Text selectable style={[styles.filterTabText, crmTab === "FOLLOW" && styles.filterTabTextActive]}>待跟进</Text></Pressable>
+        <Pressable onPress={() => setCrmTab("MET")} style={[styles.filterTab, crmTab === "MET" && styles.filterTabActive]}><Text selectable style={[styles.filterTabText, crmTab === "MET" && styles.filterTabTextActive]}>已见面</Text></Pressable>
       </View>
 
       {serverMode ? (
       <View style={styles.sectionCard}>
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>服务端好友</Text><Text style={styles.sectionNote}>{visible.length} 人 · 服务端真相</Text></View>
+        <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>服务端好友</Text><Text selectable style={styles.sectionNote}>{visible.length} 人 · 服务端真相</Text></View>
         {visible.map((friend, idx) => (
           <View key={friend.id} style={[styles.friendRow, idx > 0 && styles.friendRowLine]}>
-            <Pressable onPress={() => openDetail(friend)} style={styles.friendMain}><View style={styles.avatar}><Text style={styles.avatarText}>{friend.initial}</Text></View><View style={styles.friendCopy}><Text style={styles.friendName}>{friend.name}</Text><Text style={styles.friendContext}>{friend.relation}</Text></View></Pressable>
-            <Pressable onPress={() => onOpenConversation(friend.name, friend.userId)} style={styles.listActionBtn} accessibilityLabel={`给${friend.name}发消息`}><Text style={styles.listActionBtnText}>发消息</Text></Pressable>
+            <Pressable onPress={() => openDetail(friend)} style={styles.friendMain}><View style={styles.avatar}><Text selectable style={styles.avatarText}>{friend.initial}</Text></View><View style={styles.friendCopy}><Text selectable style={styles.friendName}>{friend.name}</Text><Text selectable style={styles.friendContext}>{friend.relation}</Text></View></Pressable>
+            <Pressable onPress={() => onOpenConversation(friend.name, friend.userId)} style={styles.listActionBtn} accessibilityLabel={`给${friend.name}发消息`}><Text selectable style={styles.listActionBtnText}>发消息</Text></Pressable>
           </View>
         ))}
-        {!visible.length ? <Text style={styles.emptyResult}>没有匹配的好友</Text> : null}
+        {!visible.length ? <Text selectable style={styles.emptyResult}>没有匹配的好友</Text> : null}
       </View>
       ) : null}
 
       <View style={styles.sectionCard}>
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>本地好友</Text><Text style={styles.sectionNote}>{visibleAdv.length} 人 · 本机演示，可全流程操作</Text></View>
+        <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>本地好友</Text><Text selectable style={styles.sectionNote}>{visibleAdv.length} 人 · 本机演示，可全流程操作</Text></View>
         {visibleAdv.map((friend, idx) => (
           <View key={friend.id} style={[styles.friendRow, idx > 0 && styles.friendRowLine]}>
-            <Pressable onPress={() => openDetail({ ...friend, relation: friend.actionSub } as CrmFriend)} style={styles.friendMain}><View style={styles.avatar}><Text style={styles.avatarText}>{friend.initial}</Text></View><View style={styles.friendCopy}><Text style={styles.friendName}>{friend.name}</Text><Text style={styles.friendContext}>{friend.note}</Text><View style={styles.tagRow}><View style={styles.tag}><Text style={styles.tagText}>{friend.actionSub}</Text></View></View></View></Pressable>
-            <Pressable onPress={() => { if (friend.actionLabel.includes("礼券") || friend.actionLabel.includes("咖啡") || friend.actionLabel.includes("体验")) sendVoucher(); else onOpenConversation(friend.name, friend.userId); }} style={styles.listActionBtn}><Text style={styles.listActionBtnText}>{friend.actionLabel}</Text></Pressable>
+            <Pressable onPress={() => openDetail({ ...friend, relation: friend.actionSub } as CrmFriend)} style={styles.friendMain}><View style={styles.avatar}><Text selectable style={styles.avatarText}>{friend.initial}</Text></View><View style={styles.friendCopy}><Text selectable style={styles.friendName}>{friend.name}</Text><Text selectable style={styles.friendContext}>{friend.note}</Text><View style={styles.tagRow}><View style={styles.tag}><Text selectable style={styles.tagText}>{friend.actionSub}</Text></View></View></View></Pressable>
+            <Pressable onPress={() => { if (friend.actionLabel.includes("礼券") || friend.actionLabel.includes("咖啡") || friend.actionLabel.includes("体验")) sendVoucher(); else onOpenConversation(friend.name, friend.userId); }} style={styles.listActionBtn}><Text selectable style={styles.listActionBtnText}>{friend.actionLabel}</Text></Pressable>
           </View>
         ))}
-        {!visibleAdv.length ? <Text style={styles.emptyResult}>没有匹配的好友</Text> : null}
+        {!visibleAdv.length ? <Text selectable style={styles.emptyResult}>没有匹配的好友</Text> : null}
       </View>
 
-      <View style={styles.privacy}><View style={styles.privacyIcon}><Text style={styles.privacyIconText}>i</Text></View><View style={styles.privacyCopy}><Text style={styles.privacyStrong}>数据边界</Text><Text style={styles.privacyP}>全部数据来自 Proxy 内部事件与你主动分享的信息，不会自动读取聊天内容或社媒私信。</Text></View></View>
+      <View style={styles.privacy}><View style={styles.privacyIcon}><Text selectable style={styles.privacyIconText}>i</Text></View><View style={styles.privacyCopy}><Text selectable style={styles.privacyStrong}>数据边界</Text><Text selectable style={styles.privacyP}>全部数据来自 Proxy 内部事件与你主动分享的信息，不会自动读取聊天内容或社媒私信。</Text></View></View>
 
-      {toast ? <View style={styles.toast}><Text style={styles.toastText}>{toast}</Text></View> : null}
+      {toast ? <View style={styles.toast}><Text selectable style={styles.toastText}>{toast}</Text></View> : null}
     </ScrollView>
   );
 }
 
 function FriendDetail({ friend, relationship, onBack, onOpenConversation, onOpenVouchers, onRemoveDemo, showToast, toast, localNet }: { friend: CrmFriend; relationship?: RelationshipClient | undefined; onBack: () => void; onOpenConversation: (a: string, peerUserId?: string) => void; onOpenVouchers?: (() => void) | undefined; onRemoveDemo: (id: string) => void; showToast: (t: string) => void; toast: string; localNet?: LocalNetClient | undefined }): React.JSX.Element {
-  // VIEWER-ACTIVITY-001: 这个人具体看过我哪些内容——只对真实好友有意义
-  // （本机演示好友没有 userId，也就没有真实的 actorId 可查）。
-  const [viewerActivity, setViewerActivity] = useState<ViewerMediaActivity[] | null | undefined>(undefined);
-  useEffect(() => {
-    if (!localNet || !friend.userId) return;
-    let cancelled = false;
-    void localNet.listMediaActivityForViewer(friend.userId)
-      .then((activity) => { if (!cancelled) setViewerActivity(activity); })
-      .catch(() => { if (!cancelled) setViewerActivity(null); });
-    return () => { cancelled = true; };
-  }, [localNet, friend.userId]);
+  // CONTENT-ANALYTICS-001: 以前这里有「看过的内容」卡（VIEWER-ACTIVITY-001：这个好友看了我哪张照片、看了几秒）。
+  // 用户规则：逐人浏览明细（谁、看了几秒、放大）只给公司运营做精准投流，不给用户侧 —— 卡片删除，接口改为仅运营。
   const [note, setNote] = useState(friend.note);
   const [tags, setTags] = useState<string[]>(friend.tags);
   const [newTag, setNewTag] = useState("");
@@ -1133,66 +1159,44 @@ function FriendDetail({ friend, relationship, onBack, onOpenConversation, onOpen
   }
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <Pressable onPress={onBack} style={styles.backRow}><Text style={styles.backText}>‹ 返回好友</Text></Pressable>
+      <Pressable onPress={onBack} style={styles.backRow}><Text selectable style={styles.backText}>‹ 返回好友</Text></Pressable>
 
-      <View style={styles.detailHead}><View style={styles.avatarLarge}><Text style={styles.avatarLargeText}>{friend.initial}</Text></View><View style={styles.detailHeadCopy}><Text style={styles.detailName}>{friend.name}</Text><Text style={styles.detailProxyId}>{friend.proxyId} · {friend.city} · 已验证</Text><View style={styles.tagRow}>{tags.map((t) => <View key={t} style={styles.tag}><Text style={styles.tagText}>{t}</Text></View>)}</View></View></View>
+      <View style={styles.detailHead}><View style={styles.avatarLarge}><Text selectable style={styles.avatarLargeText}>{friend.initial}</Text></View><View style={styles.detailHeadCopy}><Text selectable style={styles.detailName}>{friend.name}</Text><Text selectable style={styles.detailProxyId}>{friend.proxyId} · {friend.city} · 已验证</Text><View style={styles.tagRow}>{tags.map((t) => <View key={t} style={styles.tag}><Text selectable style={styles.tagText}>{t}</Text></View>)}</View></View></View>
 
-      <View style={styles.actionRow}><Pressable onPress={() => onOpenConversation(friend.name, friend.userId)} style={[styles.actionBtn, styles.actionBtnPrimary]}><Text style={styles.actionBtnPrimaryText}>发消息</Text></Pressable>{onOpenVouchers ? <Pressable onPress={onOpenVouchers} style={styles.actionBtn} accessibilityLabel="发礼券"><Text style={styles.actionBtnText}>发礼券</Text></Pressable> : null}</View>
-
-      <View style={styles.sectionCard}>
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>关系信息</Text><Text style={styles.sectionNote}>轻 CRM</Text></View>
-        <View style={styles.kvRow}><Text style={styles.kvLabel}>来源</Text><Text style={styles.kvValue}>{friend.sourceLabel}</Text></View>
-        <View style={styles.kvRow}><Text style={styles.kvLabel}>认识时间</Text><Text style={styles.kvValue}>{friend.createdAt}</Text></View>
-        <View style={styles.kvRow}><Text style={styles.kvLabel}>共同好友</Text><Text style={styles.kvValue}>{friend.commonFriends} 人</Text></View>
-        <View style={styles.kvRow}><Text style={styles.kvLabel}>最近互动</Text><Text style={styles.kvValue}>{friend.lastInteraction}</Text></View>
-        <View style={styles.kvRow}><Text style={styles.kvLabel}>关系状态</Text><View style={styles.statusPill}><Text style={styles.statusPillText}>{friend.status === "FRIEND" ? "已是好友" : friend.status}</Text></View></View>
-      </View>
-
-      {/* VIEWER-ACTIVITY-001: 这个人具体看过我哪些内容——只对有 userId 的
-          真实好友有意义，本机演示好友没有真实 actorId 可查，不渲染这张卡。 */}
-      {friend.userId && localNet ? (
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHead}><Text style={styles.sectionTitle}>看过的内容</Text><Text style={styles.sectionNote}>只统计公开动态</Text></View>
-          {viewerActivity === undefined ? (
-            <Text style={styles.viewersHint}>正在读取…</Text>
-          ) : viewerActivity === null ? (
-            <Text style={styles.viewersHint}>没读出来，不代表没看过</Text>
-          ) : viewerActivity.length === 0 ? (
-            <Text style={styles.viewersHint}>还没看过你发的内容</Text>
-          ) : (
-            viewerActivity.map((a, idx) => (
-              <View key={`${a.postId}:${a.mediaAssetId}`} style={[styles.kvRow, idx > 0 && styles.friendRowLine]}>
-                <Text style={styles.kvLabel}>{formatLastOpened(a.lastOpenedAt)}看了一张照片</Text>
-                <Text style={styles.kvValue}>{a.opens} 次 · 共{formatWatchMs(a.totalWatchMs)}</Text>
-              </View>
-            ))
-          )}
-        </View>
-      ) : null}
+      <View style={styles.actionRow}><Pressable onPress={() => onOpenConversation(friend.name, friend.userId)} style={[styles.actionBtn, styles.actionBtnPrimary]}><Text selectable style={styles.actionBtnPrimaryText}>发消息</Text></Pressable>{onOpenVouchers ? <Pressable onPress={onOpenVouchers} style={styles.actionBtn} accessibilityLabel="发礼券"><Text selectable style={styles.actionBtnText}>发礼券</Text></Pressable> : null}</View>
 
       <View style={styles.sectionCard}>
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>标签</Text><Text style={styles.sectionNote}>用于筛选与回顾 · 仅本机</Text></View>
-        <View style={styles.tagRow}>{tags.map((t) => <Pressable key={t} onPress={() => setTags((prev) => prev.filter((x) => x !== t))} style={styles.tagEditable}><Text style={styles.tagText}>{t} ×</Text></Pressable>)}{!tags.length ? <Text style={styles.emptyInline}>暂无标签</Text> : null}</View>
-        <View style={styles.tagAddRow}><TextInput value={newTag} onChangeText={setNewTag} placeholder="新增标签，如：摄影" placeholderTextColor={color.muted} style={styles.tagInput} /><Pressable onPress={addTag} style={styles.tagAddBtn}><Text style={styles.tagAddBtnText}>添加</Text></Pressable></View>
+        <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>关系信息</Text><Text selectable style={styles.sectionNote}>轻 CRM</Text></View>
+        <View style={styles.kvRow}><Text selectable style={styles.kvLabel}>来源</Text><Text selectable style={styles.kvValue}>{friend.sourceLabel}</Text></View>
+        <View style={styles.kvRow}><Text selectable style={styles.kvLabel}>认识时间</Text><Text selectable style={styles.kvValue}>{friend.createdAt}</Text></View>
+        <View style={styles.kvRow}><Text selectable style={styles.kvLabel}>共同好友</Text><Text selectable style={styles.kvValue}>{friend.commonFriends} 人</Text></View>
+        <View style={styles.kvRow}><Text selectable style={styles.kvLabel}>最近互动</Text><Text selectable style={styles.kvValue}>{friend.lastInteraction}</Text></View>
+        <View style={styles.kvRow}><Text selectable style={styles.kvLabel}>关系状态</Text><View style={styles.statusPill}><Text selectable style={styles.statusPillText}>{friend.status === "FRIEND" ? "已是好友" : friend.status}</Text></View></View>
       </View>
 
       <View style={styles.sectionCard}>
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>备注</Text><Text style={styles.sectionNote}>仅自己可见 · 仅本机</Text></View>
+        <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>标签</Text><Text selectable style={styles.sectionNote}>用于筛选与回顾 · 仅本机</Text></View>
+        <View style={styles.tagRow}>{tags.map((t) => <Pressable key={t} onPress={() => setTags((prev) => prev.filter((x) => x !== t))} style={styles.tagEditable}><Text selectable style={styles.tagText}>{t} ×</Text></Pressable>)}{!tags.length ? <Text selectable style={styles.emptyInline}>暂无标签</Text> : null}</View>
+        <View style={styles.tagAddRow}><TextInput value={newTag} onChangeText={setNewTag} placeholder="新增标签，如：摄影" placeholderTextColor={color.muted} style={styles.tagInput} /><Pressable onPress={addTag} style={styles.tagAddBtn}><Text selectable style={styles.tagAddBtnText}>添加</Text></Pressable></View>
+      </View>
+
+      <View style={styles.sectionCard}>
+        <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>备注</Text><Text selectable style={styles.sectionNote}>仅自己可见 · 仅本机</Text></View>
         <TextInput value={note} onChangeText={setNote} placeholder="写下你对这位好友的备注…" placeholderTextColor={color.muted} multiline style={styles.noteInput} />
-        <Pressable onPress={() => showToast("备注已保存（仅本机）")} style={[styles.btn, styles.btnPrimary, { marginTop: 10 }]}><Text style={styles.btnPrimaryText}>保存备注</Text></Pressable>
+        <Pressable onPress={() => showToast("备注已保存（仅本机）")} style={[styles.btn, styles.btnPrimary, { marginTop: 10 }]}><Text selectable style={styles.btnPrimaryText}>保存备注</Text></Pressable>
       </View>
 
       <View style={styles.sectionCard}>
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>互动记录</Text><Text style={styles.sectionNote}>最近 3 条</Text></View>
-        <View style={styles.timelineRow}><View style={styles.timelineDot} /><View style={styles.timelineCopy}><Text style={styles.timelineTitle}>聊天 · 昨天</Text><Text style={styles.timelineSub}>“好的，到时候联系你。”</Text></View></View>
-        <View style={styles.timelineRow}><View style={styles.timelineDot} /><View style={styles.timelineCopy}><Text style={styles.timelineTitle}>活动报名 · 3 天前</Text><Text style={styles.timelineSub}>一起报名了「西湖摄影散步」</Text></View></View>
-        <View style={styles.timelineRow}><View style={styles.timelineDot} /><View style={styles.timelineCopy}><Text style={styles.timelineTitle}>添加好友 · {friend.createdAt}</Text><Text style={styles.timelineSub}>{friend.sourceLabel}</Text></View></View>
+        <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>互动记录</Text><Text selectable style={styles.sectionNote}>最近 3 条</Text></View>
+        <View style={styles.timelineRow}><View style={styles.timelineDot} /><View style={styles.timelineCopy}><Text selectable style={styles.timelineTitle}>聊天 · 昨天</Text><Text selectable style={styles.timelineSub}>“好的，到时候联系你。”</Text></View></View>
+        <View style={styles.timelineRow}><View style={styles.timelineDot} /><View style={styles.timelineCopy}><Text selectable style={styles.timelineTitle}>活动报名 · 3 天前</Text><Text selectable style={styles.timelineSub}>一起报名了「西湖摄影散步」</Text></View></View>
+        <View style={styles.timelineRow}><View style={styles.timelineDot} /><View style={styles.timelineCopy}><Text selectable style={styles.timelineTitle}>添加好友 · {friend.createdAt}</Text><Text selectable style={styles.timelineSub}>{friend.sourceLabel}</Text></View></View>
       </View>
 
-      <View style={styles.dangerRow}><Pressable disabled={!blockable} onPress={() => void block()} style={[styles.dangerBtn, !blockable && styles.dangerBtnDisabled]} accessibilityLabel="拉黑"><Text style={styles.dangerBtnText}>{blocking ? "处理中…" : "拉黑"}</Text></Pressable></View>
-      {demo ? <Text style={styles.dangerHint}>本机演示好友：拉黑立即从列表移除，仅本机生效。移除好友暂无服务端指令，不提供假按钮。</Text> : null}
+      <View style={styles.dangerRow}><Pressable disabled={!blockable} onPress={() => void block()} style={[styles.dangerBtn, !blockable && styles.dangerBtnDisabled]} accessibilityLabel="拉黑"><Text selectable style={styles.dangerBtnText}>{blocking ? "处理中…" : "拉黑"}</Text></Pressable></View>
+      {demo ? <Text selectable style={styles.dangerHint}>本机演示好友：拉黑立即从列表移除，仅本机生效。移除好友暂无服务端指令，不提供假按钮。</Text> : null}
 
-      {toast ? <View style={styles.toast}><Text style={styles.toastText}>{toast}</Text></View> : null}
+      {toast ? <View style={styles.toast}><Text selectable style={styles.toastText}>{toast}</Text></View> : null}
     </ScrollView>
   );
 }
@@ -1200,7 +1204,7 @@ function FriendDetail({ friend, relationship, onBack, onOpenConversation, onOpen
 function CrmSheet({ open, onClose, title, sub, children }: { open: boolean; onClose: () => void; title: string; sub: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={open}>
-      <Pressable onPress={onClose} style={styles.sheetOverlay}><Pressable onPress={() => undefined} style={styles.sheet}><View style={styles.sheetGrab} /><View style={styles.sheetHead}><Text style={styles.sheetTitle}>{title}</Text><Pressable onPress={onClose}><Text style={styles.sheetClose}>×</Text></Pressable></View><Text style={styles.sheetSub}>{sub}</Text>{children}</Pressable></Pressable>
+      <Pressable onPress={onClose} style={styles.sheetOverlay}><Pressable onPress={() => undefined} style={styles.sheet}><View style={styles.sheetGrab} /><View style={styles.sheetHead}><Text selectable style={styles.sheetTitle}>{title}</Text><Pressable onPress={onClose}><Text selectable style={styles.sheetClose}>×</Text></Pressable></View><Text selectable style={styles.sheetSub}>{sub}</Text>{children}</Pressable></Pressable>
     </Modal>
   );
 }
@@ -1286,6 +1290,13 @@ const styles = StyleSheet.create({
   tagAddBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 10, justifyContent: "center", paddingHorizontal: 14 },
   tagAddBtnText: { color: color.white, fontSize: 12, fontWeight: "800" },
   noteInput: { backgroundColor: color.chipNeutralBg, borderColor: color.line, borderRadius: 10, borderWidth: 1, color: color.ink, fontSize: 12, minHeight: 72, padding: 10, textAlignVertical: "top" },
+  analyticsGrid: { flexDirection: "row", marginTop: 10 },
+  analyticsCell: { alignItems: "center", flex: 1, gap: 2 },
+  analyticsValue: { color: color.ink, fontSize: 18, fontWeight: "900" },
+  analyticsLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  analyticsTop: { color: color.ink, fontSize: 12, fontWeight: "700", marginTop: 10 },
+  statsEntry: { alignItems: "center", borderTopColor: "rgba(0,0,0,0.06)", borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 10, paddingTop: 10 },
+  statsEntryText: { color: color.proxyPurple, fontSize: 12.5, fontWeight: "800" },
   timelineRow: { alignItems: "flex-start", flexDirection: "row", gap: 10, paddingVertical: 8 },
   timelineDot: { backgroundColor: color.proxyPurple, borderRadius: 5, height: 8, marginTop: 6, width: 8 },
   timelineCopy: { flex: 1 },

@@ -174,6 +174,12 @@ type Repository interface {
 	// UpdateCompositionHint 仅更新 composition hint 字段（worker 跑完 ONNX/几何 推理后调用）。
 	// 失败不阻塞：FAILED 状态独立保留。
 	UpdateCompositionHint(ctx context.Context, assetID string, hint *MediaCompositionHint) error
+	// AI-TWIN-GALLERY-001: 图库两个 tab 各自的真实来源查询。
+	// ListByPersona 用 persona_id（108 迁移已经建好索引，之前一直没人用）
+	// 找这个分身生成过的 AI 资产；ListByOwner 找这个人自己上传、还没被任何
+	// AI 流程处理过的原始素材。两者都只返回 READY 状态、按新到旧排序。
+	ListByPersona(ctx context.Context, personaID string) ([]MediaAsset, error)
+	ListByOwner(ctx context.Context, ownerPrincipalID string) ([]MediaAsset, error)
 }
 
 type ProcessingJobRepository interface {
@@ -271,6 +277,32 @@ func (r *MemoryRepository) Snapshot(_ context.Context) ([]MediaAsset, error) {
 	result := make([]MediaAsset, 0, len(r.assets))
 	for _, a := range r.assets {
 		result = append(result, a)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+func (r *MemoryRepository) ListByPersona(_ context.Context, personaID string) ([]MediaAsset, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]MediaAsset, 0)
+	for _, a := range r.assets {
+		if a.PersonaID == personaID && a.ProcessingStatus == "READY" {
+			result = append(result, a)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+func (r *MemoryRepository) ListByOwner(_ context.Context, ownerPrincipalID string) ([]MediaAsset, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]MediaAsset, 0)
+	for _, a := range r.assets {
+		if a.OwnerPrincipalID == ownerPrincipalID && a.ProcessingStatus == "READY" {
+			result = append(result, a)
+		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
 	return result, nil
@@ -698,6 +730,26 @@ func (s *Service) ResolveServingPath(ctx context.Context, id string, kind string
 	return filepath.Join(s.storeDir, key), nil
 }
 
+// OwnerImagePath returns the on-disk path of an owner's own READY image (the
+// processed playback derivative, else the thumbnail) — AI-MANAGE-015 用户建模读图用。
+// 不看 visibility：调用方（api.likenessReferencePhotos 之后）已经校验过本人的形象授权；
+// 但必须是本人的图，别人的一律拒。
+func (s *Service) OwnerImagePath(ctx context.Context, ownerID, id string) (string, error) {
+	asset, err := s.repository.GetAsset(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if asset.OwnerPrincipalID != ownerID || asset.MediaType != "IMAGE" || asset.ProcessingStatus != "READY" {
+		return "", errors.New("not an owner image")
+	}
+	for _, key := range []string{asset.PlaybackStorageKey, asset.ThumbnailStorageKey} {
+		if s.storeFilePresent(key) {
+			return filepath.Join(s.storeDir, key), nil
+		}
+	}
+	return "", errors.New("image file missing")
+}
+
 // storeFilePresent reports whether a storage key maps to a real regular file.
 //
 // MEDIA-FILE-001: the database records an object as READY when its bytes are
@@ -772,6 +824,46 @@ func (s *Service) ListReadyVariants(ctx context.Context, mediaAssetID string) ([
 		}
 	}
 	return ready, nil
+}
+
+// AI-TWIN-GALLERY-001: 图库两个 tab 的真实来源，不是发明新字段。
+//   source == "ai"  → 这个分身生成过的 AI_PERSONA 资产（persona_id 索引）。
+//   source == "raw" → 这个人自己上传、且从未被标成 AI 来源的原始素材
+//                     （ownerPrincipalID 范围，AIGenerationSource ==
+//                     USER_UPLOADED，只要图片）。 raw 不按 persona 分——
+//                     persona_id 这一列的语义是"AI 资产的来源分身"，原始
+//                     素材本来就不属于哪个分身，属于这个人自己。
+var ErrInvalidGallerySource = errors.New("invalid gallery source")
+
+func (s *Service) ListPersonaGallery(ctx context.Context, ownerPrincipalID, personaID, source string) ([]MediaAsset, error) {
+	switch source {
+	case "ai":
+		assets, err := s.repository.ListByPersona(ctx, personaID)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]MediaAsset, 0, len(assets))
+		for _, a := range assets {
+			if a.AIGenerationSource == "AI_PERSONA" {
+				result = append(result, a)
+			}
+		}
+		return result, nil
+	case "raw":
+		assets, err := s.repository.ListByOwner(ctx, ownerPrincipalID)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]MediaAsset, 0, len(assets))
+		for _, a := range assets {
+			if a.MediaType == "IMAGE" && a.AIGenerationSource == "USER_UPLOADED" {
+				result = append(result, a)
+			}
+		}
+		return result, nil
+	default:
+		return nil, ErrInvalidGallerySource
+	}
 }
 
 // AuthorizeForStorefront promotes technically approved media uploads to
@@ -1069,47 +1161,10 @@ func (s *Service) markReady(ctx context.Context, e command.Envelope) command.Res
 	if expectedStatus != "PROCESSING" {
 		return command.Rejected(e, "MEDIA_NOT_PROCESSABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.not_processable", map[string]any{"status": asset.ProcessingStatus})
 	}
-	// R16.7-P1-K (LC-06) fail-closed gate: an asset whose
-	// AIGenerationSource is UNKNOWN cannot be promoted to
-	// READY. The producer must re-declare the source. This is
-	// the practical shape of 'fail closed when the AI label
-	// cannot be produced' (Vietnam 134/2025/QH15 Art. 12):
-	// the platform never publishes unlabeled media, even
-	// when the asset looks ready. We do not auto-reject on
-	// USER_UPLOADED — the absence of an AI label is
-	// meaningful there, not a missing label.
-	if asset.AIGenerationSource == "UNKNOWN" {
-		return command.Rejected(e, "AI_LABEL_MISSING", "VALIDATION", "AFTER_USER_ACTION", "media.ai_label_missing", map[string]any{"mediaAssetId": asset.MediaAssetID})
-	}
-	// R16.7-P1-I (LC-07) fail-closed gate: an AI_PERSONA
-	// asset must have a live likeness consent for the
-	// (persona, subject) tuple. We resolve SubjectID against
-	// the asset's subject field first, then fall back to the
-	// owner. The check is only enforced when the persona
-	// service is wired; the legacy test path skips the
-	// consent check so the existing test suite keeps
-	// passing. Production deployments must wire it.
-	if asset.AIGenerationSource == "AI_PERSONA" && asset.PersonaID != "" && s.personaService != nil {
-		subject := asset.SubjectID
-		if subject == "" {
-			subject = asset.OwnerPrincipalID
-		}
-		persona, perr := s.personaService.GetPersona(ctx, asset.PersonaID)
-		if perr != nil {
-			return command.Rejected(e, "AI_PERSONA_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.ai_persona_not_found", map[string]any{"personaId": asset.PersonaID})
-		}
-		// CREATIVE personas have no real-person likeness;
-		// the consent gate is for USER_TWIN only.
-		if persona.PersonaType == aipersona.PersonaTypeUserTwin {
-			consent, cerr := s.personaService.HasLiveConsent(ctx, asset.PersonaID, subject)
-			if cerr != nil {
-				return command.Rejected(e, "AI_LIKENESS_CONSENT_LOOKUP_FAILED", "INTERNAL", "SAFE_RETRY", "media.likeness_consent_lookup_failed", map[string]any{"personaId": asset.PersonaID, "subjectId": subject, "error": cerr.Error()})
-			}
-			if consent == nil {
-				return command.Rejected(e, "AI_LIKENESS_CONSENT_MISSING", "VALIDATION", "AFTER_USER_ACTION", "media.likeness_consent_missing", map[string]any{"personaId": asset.PersonaID, "subjectId": subject, "personaType": string(persona.PersonaType)})
-			}
-			asset.LikenessConsentID = consent.ID
-		}
+	// LC-06 / LC-07 fail-closed gates. 唯一实现见 enforceAIPublishGates ——
+	// 这里和 worker 的 ProcessAssetNow 共用同一段判定，避免两条发布路径漂移。
+	if v := s.enforceAIPublishGates(ctx, &asset); v != nil {
+		return command.Rejected(e, v.ErrorCode, v.Category, v.Retryability, v.MessageKey, v.SafeDetail)
 	}
 	asset.ProcessingStatus = "READY"
 	if p.PlaybackStorageKey != "" {
@@ -1132,6 +1187,86 @@ func (s *Service) markReady(ctx context.Context, e command.Envelope) command.Res
 		return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
 	}
 	return command.Accepted(e, "MediaAsset", asset.MediaAssetID, 1, "READY", eventRefs(domainEvents))
+}
+
+// aiPublishViolation 是 LC-06 / LC-07 闸门的一次拒绝。
+// Category / Retryability 沿用仓库的既有词汇，让两条发布路径各自决定
+// 怎么处置：MarkMediaReady 转成 command.Rejected；worker 用 Retryability
+// 区分「确定性拒绝，落 FAILED」和「暂时查不到，交给重试」。
+type aiPublishViolation struct {
+	ErrorCode    string
+	Category     string
+	Retryability string
+	MessageKey   string
+	SafeDetail   map[string]any
+}
+
+// enforceAIPublishGates 是 LC-06 / LC-07 的唯一实现。
+//
+// 为什么必须只有一个实现（2026-09-21）：这两道闸门原先只写在 markReady
+// 里，而 markReady 是 operator 专属命令（API 边界限定，且
+// PROXY_OPERATOR_PRINCIPALS 未配置时整条命令被拒）。真正把资产推到 READY
+// 的是 worker 的 ProcessAssetNow —— 它从不调用这段判定。实测：一个挂了
+// USER_TWIN 分身、没有任何 likeness 同意的 AI_PERSONA 资产，走
+// CreateMediaAsset → CompleteMediaUpload → ProcessAssetNow 之后
+// status=READY、moderationStatus=APPROVED，consent 全程为空。
+// 也就是说闸门在「实际跑的那条路」上不存在。把判定抽到这里，两条路径
+// 共用一段代码，再加一条钉防止其中一条被单独改回。
+//
+// 通过时会把 likeness consent id 盖到 asset 上（LC-07 的审计留痕）；
+// 调用方负责持久化。返回 nil 表示可以发布。
+//
+// personaService 未接线时跳过同意校验 —— 这是既有测试面的前提，
+// 保留原行为（生产部署必须接线，见 cmd/api/main.go 的 WithAIPersonaService）。
+func (s *Service) enforceAIPublishGates(ctx context.Context, asset *MediaAsset) *aiPublishViolation {
+	// LC-06：来源未声明的资产不得发布。生产者必须重新声明来源。
+	// USER_UPLOADED 不拦 —— 那里「没有 AI 标注」是事实，不是缺标注。
+	// 依据：越南 AI 法 134/2025/QH15 第 12 条。
+	if asset.AIGenerationSource == "UNKNOWN" {
+		return &aiPublishViolation{
+			ErrorCode: "AI_LABEL_MISSING", Category: "VALIDATION", Retryability: "AFTER_USER_ACTION",
+			MessageKey: "media.ai_label_missing",
+			SafeDetail: map[string]any{"mediaAssetId": asset.MediaAssetID},
+		}
+	}
+	if asset.AIGenerationSource != "AI_PERSONA" || asset.PersonaID == "" || s.personaService == nil {
+		return nil
+	}
+	// LC-07：AI_PERSONA 资产必须对 (persona, subject) 有活体 likeness 同意。
+	// subject 先取资产上的 SubjectID，为空回落到 owner。
+	subject := asset.SubjectID
+	if subject == "" {
+		subject = asset.OwnerPrincipalID
+	}
+	persona, perr := s.personaService.GetPersona(ctx, asset.PersonaID)
+	if perr != nil {
+		return &aiPublishViolation{
+			ErrorCode: "AI_PERSONA_NOT_FOUND", Category: "BUSINESS_STATE", Retryability: "AFTER_USER_ACTION",
+			MessageKey: "media.ai_persona_not_found",
+			SafeDetail: map[string]any{"personaId": asset.PersonaID},
+		}
+	}
+	// CREATIVE 分身没有真人 likeness，同意闸门只针对 USER_TWIN。
+	if persona.PersonaType != aipersona.PersonaTypeUserTwin {
+		return nil
+	}
+	consent, cerr := s.personaService.HasLiveConsent(ctx, asset.PersonaID, subject)
+	if cerr != nil {
+		return &aiPublishViolation{
+			ErrorCode: "AI_LIKENESS_CONSENT_LOOKUP_FAILED", Category: "INTERNAL", Retryability: "SAFE_RETRY",
+			MessageKey: "media.likeness_consent_lookup_failed",
+			SafeDetail: map[string]any{"personaId": asset.PersonaID, "subjectId": subject, "error": cerr.Error()},
+		}
+	}
+	if consent == nil {
+		return &aiPublishViolation{
+			ErrorCode: "AI_LIKENESS_CONSENT_MISSING", Category: "VALIDATION", Retryability: "AFTER_USER_ACTION",
+			MessageKey: "media.likeness_consent_missing",
+			SafeDetail: map[string]any{"personaId": asset.PersonaID, "subjectId": subject, "personaType": string(persona.PersonaType)},
+		}
+	}
+	asset.LikenessConsentID = consent.ID
+	return nil
 }
 
 // ---------- ReviewMediaAsset (R15.17) ----------

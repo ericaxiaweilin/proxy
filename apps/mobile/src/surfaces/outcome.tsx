@@ -46,23 +46,23 @@ export function OutcomeSurface({ client }: { client: OutcomeClient }): React.JSX
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>结果 · Outcome Intelligence</Text>
-      <Text style={styles.sub}>ObservationSet → Delta → Learning 真实链路（M6.5），已接 OutcomeClient，非占位。</Text>
+      <Text selectable style={styles.title}>结果 · Outcome Intelligence</Text>
+      <Text selectable style={styles.sub}>ObservationSet → Delta → Learning 真实链路（M6.5），已接 OutcomeClient，非占位。</Text>
       <View style={styles.card}>
-        <Text style={styles.label}>targetId</Text><TextInput value={targetId} onChangeText={setTargetId} style={styles.input} placeholder="真实目标 ID" placeholderTextColor={color.muted} />
-        <Text style={styles.label}>templateId</Text><TextInput value={templateId} onChangeText={setTemplateId} style={styles.input} placeholder="真实模板 ID" placeholderTextColor={color.muted} />
-        <Text style={styles.label}>venueId</Text><TextInput value={venueId} onChangeText={setVenueId} style={styles.input} placeholder="真实场地 ID" placeholderTextColor={color.muted} />
-        <Pressable onPress={runDemo} disabled={busy} style={[styles.cta, busy && { opacity: 0.6 }]}><Text style={styles.ctaText}>{busy ? "执行中…" : "跑一次 Demo 链路"}</Text></Pressable>
-        {baselineId ? <Text style={styles.mono}>baseline: {baselineId}</Text> : null}
-        {resultId ? <Text style={styles.mono}>result: {resultId}</Text> : null}
+        <Text selectable style={styles.label}>targetId</Text><TextInput value={targetId} onChangeText={setTargetId} style={styles.input} placeholder="真实目标 ID" placeholderTextColor={color.muted} />
+        <Text selectable style={styles.label}>templateId</Text><TextInput value={templateId} onChangeText={setTemplateId} style={styles.input} placeholder="真实模板 ID" placeholderTextColor={color.muted} />
+        <Text selectable style={styles.label}>venueId</Text><TextInput value={venueId} onChangeText={setVenueId} style={styles.input} placeholder="真实场地 ID" placeholderTextColor={color.muted} />
+        <Pressable onPress={runDemo} disabled={busy} style={[styles.cta, busy && { opacity: 0.6 }]}><Text selectable style={styles.ctaText}>{busy ? "执行中…" : "跑一次 Demo 链路"}</Text></Pressable>
+        {baselineId ? <Text selectable style={styles.mono}>baseline: {baselineId}</Text> : null}
+        {resultId ? <Text selectable style={styles.mono}>result: {resultId}</Text> : null}
       </View>
       <View style={styles.logCard}>
-        <Text style={styles.logTitle}>执行日志</Text>
-        {log.length === 0 ? <Text style={styles.empty}>点上方按钮触发 CreateSet → Finalize → Compare</Text> : null}
-        {log.map((l, i) => <Text key={i} style={styles.logLine}>• {l}</Text>)}
+        <Text selectable style={styles.logTitle}>执行日志</Text>
+        {log.length === 0 ? <Text selectable style={styles.empty}>点上方按钮触发 CreateSet → Finalize → Compare</Text> : null}
+        {log.map((l, i) => <Text selectable key={i} style={styles.logLine}>• {l}</Text>)}
         {busy ? <ProxyLoading tone="muted" style={{ marginTop: 8 }} /> : null}
       </View>
-      <Text style={styles.hint}>说明：Outcome 域已 PG 化（apps/api-go/internal/outcome + postgres/outcome.go），本页直接复用 List/Compare 真实命令，失败会以 REJECTED 抛错展示。</Text>
+      <Text selectable style={styles.hint}>说明：Outcome 域已 PG 化（apps/api-go/internal/outcome + postgres/outcome.go），本页直接复用 List/Compare 真实命令，失败会以 REJECTED 抛错展示。</Text>
     </ScrollView>
   );
 }

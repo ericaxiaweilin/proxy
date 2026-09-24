@@ -99,115 +99,115 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onView
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.head}>
         <Pressable accessibilityLabel="返回" onPress={back} style={styles.backBtn}>
-          <Text style={styles.backText}>‹</Text>
+          <Text selectable style={styles.backText}>‹</Text>
         </Pressable>
-        <Text style={styles.title}>{step === "done" ? "✓ 活动已创建" : "创建活动"}</Text>
+        <Text selectable style={styles.title}>{step === "done" ? "✓ 活动已创建" : "创建活动"}</Text>
         <View style={styles.headSpacer} />
       </View>
       {step === "done" ? null : (
         <View style={styles.tabs}>
           <Pressable accessibilityLabel="去发布需求" onPress={onOpenDemand} style={styles.tab}>
-            <Text style={styles.tabText}>发布需求</Text>
+            <Text selectable style={styles.tabText}>发布需求</Text>
           </Pressable>
-          <View style={[styles.tab, styles.tabActive]}><Text style={[styles.tabText, styles.tabTextActive]}>创建活动</Text></View>
+          <View style={[styles.tab, styles.tabActive]}><Text selectable style={[styles.tabText, styles.tabTextActive]}>创建活动</Text></View>
         </View>
       )}
 
       {step === "template" ? (
         <>
           <View style={styles.hero}>
-            <Text style={styles.heroTitle}>想组织什么？</Text>
-            <Text style={styles.heroSub}>活动强调多人参与；先选一个完整玩法。</Text>
+            <Text selectable style={styles.heroTitle}>想组织什么？</Text>
+            <Text selectable style={styles.heroSub}>活动强调多人参与；先选一个完整玩法。</Text>
           </View>
           <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>热门活动</Text>
-            <Text style={styles.sectionHint}>直接选</Text>
+            <Text selectable style={styles.sectionTitle}>热门活动</Text>
+            <Text selectable style={styles.sectionHint}>直接选</Text>
           </View>
           <View style={styles.activityGrid}>
             {ACTIVITY_TEMPLATES.map((item) => (
               <Pressable key={item.id} accessibilityLabel={`选择${item.title}`} onPress={() => pickTemplate(item)} style={styles.activityPreset}>
-                <Text style={styles.activityMark}>{item.emoji}</Text>
-                <Text style={styles.activityPresetTitle} numberOfLines={1}>{item.title}</Text>
-                <Text style={styles.activityPresetMeta} numberOfLines={1}>{item.meta}</Text>
+                <Text selectable style={styles.activityMark}>{item.emoji}</Text>
+                <Text selectable style={styles.activityPresetTitle} numberOfLines={1}>{item.title}</Text>
+                <Text selectable style={styles.activityPresetMeta} numberOfLines={1}>{item.meta}</Text>
               </Pressable>
             ))}
           </View>
           <View style={styles.currentCard}>
-            <Text style={styles.currentLabel}>当前活动</Text>
-            <Text style={styles.currentValue}>{template.title}</Text>
+            <Text selectable style={styles.currentLabel}>当前活动</Text>
+            <Text selectable style={styles.currentValue}>{template.title}</Text>
           </View>
         </>
       ) : step === "settings" ? (
         <>
           <View style={styles.confirmCard}>
             <View style={styles.confirmCopy}>
-              <Text style={styles.confirmEyebrow}>Activity</Text>
-              <Text style={styles.confirmTitle}>{template.title}</Text>
+              <Text selectable style={styles.confirmEyebrow}>Activity</Text>
+              <Text selectable style={styles.confirmTitle}>{template.title}</Text>
             </View>
-            <Pressable onPress={() => setStep("template")}><Text style={styles.linkText}>更换</Text></Pressable>
+            <Pressable onPress={() => setStep("template")}><Text selectable style={styles.linkText}>更换</Text></Pressable>
           </View>
 
-          <Text style={styles.fieldLabel}>参与人数</Text>
+          <Text selectable style={styles.fieldLabel}>参与人数</Text>
           <View style={styles.chipRow}>
             {ACTIVITY_SIZES.map((size) => (
               <Pressable key={size.label} onPress={() => setSpecs((prev) => ({ ...prev, capacity: size.value }))} style={[styles.chip, specs.capacity === size.value && styles.chipOn]}>
-                <Text style={[styles.chipText, specs.capacity === size.value && styles.chipTextOn]}>{size.label}</Text>
+                <Text selectable style={[styles.chipText, specs.capacity === size.value && styles.chipTextOn]}>{size.label}</Text>
               </Pressable>
             ))}
           </View>
 
-          <Text style={styles.fieldLabel}>时间段</Text>
+          <Text selectable style={styles.fieldLabel}>时间段</Text>
           <View style={styles.chipRow}>
             {ACTIVITY_TIMES.map((time) => (
               <Pressable key={time} onPress={() => setSpecs((prev) => ({ ...prev, time }))} style={[styles.chip, specs.time === time && styles.chipOn]}>
-                <Text style={[styles.chipText, specs.time === time && styles.chipTextOn]}>{time}</Text>
+                <Text selectable style={[styles.chipText, specs.time === time && styles.chipTextOn]}>{time}</Text>
               </Pressable>
             ))}
           </View>
           <TextInput onChangeText={(time) => setSpecs((prev) => ({ ...prev, time }))} placeholder="自定义时间" placeholderTextColor={color.muted} style={[styles.input, styles.gapTop]} value={specs.time} />
 
-          <Text style={styles.fieldLabel}>地点 / Scene</Text>
+          <Text selectable style={styles.fieldLabel}>地点 / Scene</Text>
           {sceneOptions.length === 0 ? (
             <View style={styles.emptyRow}>
-              <Text style={styles.hint}>暂无可选场景，可能是列表尚未加载成功。</Text>
+              <Text selectable style={styles.hint}>暂无可选场景，可能是列表尚未加载成功。</Text>
               <Pressable accessibilityLabel="重新加载场景" onPress={onReloadScenes} style={styles.retryBtn}>
-                <Text style={styles.retryText}>重新加载</Text>
+                <Text selectable style={styles.retryText}>重新加载</Text>
               </Pressable>
             </View>
           ) : (
             <View style={styles.chipRow}>
               {sceneOptions.map((scene) => (
                 <Pressable key={scene.realitySceneId} onPress={() => { setSceneId(scene.realitySceneId ?? ""); setSpecs((prev) => ({ ...prev, venueName: scene.venueName })); }} style={[styles.chip, sceneId === scene.realitySceneId && styles.chipOn]}>
-                  <Text style={[styles.chipText, sceneId === scene.realitySceneId && styles.chipTextOn]}>{scene.venueName}</Text>
+                  <Text selectable style={[styles.chipText, sceneId === scene.realitySceneId && styles.chipTextOn]}>{scene.venueName}</Text>
                 </Pressable>
               ))}
             </View>
           )}
           <TextInput onChangeText={(venueName) => setSpecs((prev) => ({ ...prev, venueName }))} placeholder={template.venueName} placeholderTextColor={color.muted} style={[styles.input, styles.gapTop]} value={specs.venueName} />
 
-          <Text style={styles.fieldLabel}>主题</Text>
+          <Text selectable style={styles.fieldLabel}>主题</Text>
           <View style={styles.chipRow}>
             {ACTIVITY_THEMES.map((theme) => (
               <Pressable key={theme} onPress={() => setSpecs((prev) => ({ ...prev, theme: theme === "无主题" ? "" : theme }))} style={[styles.chip, (specs.theme === theme || (theme === "无主题" && specs.theme === "")) && styles.chipOn]}>
-                <Text style={[styles.chipText, (specs.theme === theme || (theme === "无主题" && specs.theme === "")) && styles.chipTextOn]}>{theme}</Text>
+                <Text selectable style={[styles.chipText, (specs.theme === theme || (theme === "无主题" && specs.theme === "")) && styles.chipTextOn]}>{theme}</Text>
               </Pressable>
             ))}
           </View>
 
-          <Text style={styles.fieldLabel}>报名方式</Text>
+          <Text selectable style={styles.fieldLabel}>报名方式</Text>
           <View style={styles.chipRow}>
             {ACTIVITY_SIGNUPS.map((signup) => (
               <Pressable key={signup.id} onPress={() => setSpecs((prev) => ({ ...prev, signup: signup.id }))} style={[styles.chip, specs.signup === signup.id && styles.chipOn]}>
-                <Text style={[styles.chipText, specs.signup === signup.id && styles.chipTextOn]}>{signup.label}</Text>
+                <Text selectable style={[styles.chipText, specs.signup === signup.id && styles.chipTextOn]}>{signup.label}</Text>
               </Pressable>
             ))}
           </View>
 
-          <Text style={styles.fieldLabel}>费用</Text>
+          <Text selectable style={styles.fieldLabel}>费用</Text>
           <View style={styles.chipRow}>
             {ACTIVITY_FEES.map((fee) => (
               <Pressable key={fee.id} onPress={() => setSpecs((prev) => ({ ...prev, fee: fee.id }))} style={[styles.chip, specs.fee === fee.id && styles.chipOn]}>
-                <Text style={[styles.chipText, specs.fee === fee.id && styles.chipTextOn]}>{fee.label}</Text>
+                <Text selectable style={[styles.chipText, specs.fee === fee.id && styles.chipTextOn]}>{fee.label}</Text>
               </Pressable>
             ))}
           </View>
@@ -215,39 +215,39 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onView
             <TextInput onChangeText={(customFee) => setSpecs((prev) => ({ ...prev, customFee }))} placeholder="自定义金额，如 300K" placeholderTextColor={color.muted} style={[styles.input, styles.gapTop]} value={specs.customFee} />
           ) : null}
 
-          <Text style={styles.fieldLabel}>补充说明 · 可选</Text>
+          <Text selectable style={styles.fieldLabel}>补充说明 · 可选</Text>
           <TextInput maxLength={500} multiline onChangeText={(notes) => setSpecs((prev) => ({ ...prev, notes }))} placeholder="补充说明" placeholderTextColor={color.muted} style={[styles.input, styles.notesInput]} value={specs.notes} />
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text selectable style={styles.error}>{error}</Text> : null}
           <Pressable disabled={publishing} onPress={() => setStep("preview")} style={[styles.primaryBtn, styles.gapTop]}>
-            <Text style={styles.primaryBtnText}>下一步 · 预览</Text>
+            <Text selectable style={styles.primaryBtnText}>下一步 · 预览</Text>
           </Pressable>
         </>
       ) : step === "preview" ? (
         <>
-          <Text style={styles.sectionTitle}>发布预览</Text>
+          <Text selectable style={styles.sectionTitle}>发布预览</Text>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryTitle}>{template.title}</Text>
+            <Text selectable style={styles.summaryTitle}>{template.title}</Text>
             <SummaryRow label="人数" value={`${specs.capacity} 人`} />
             <SummaryRow label="时间" value={specs.time} />
             <SummaryRow label="地点" value={specs.venueName} />
             <SummaryRow label="报名" value={ACTIVITY_SIGNUPS.find((item) => item.id === specs.signup)?.label ?? specs.signup} />
             <SummaryRow label="费用" value={specs.fee === "FREE" ? "免费" : specs.fee === "AA" ? "AA" : `自定义（${specs.customFee || "待定"}）`} last />
           </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text selectable style={styles.error}>{error}</Text> : null}
           <View style={styles.doneRow}>
-            <Pressable onPress={() => setStep("settings")} style={styles.secondaryBtn}><Text style={styles.secondaryBtnText}>上一步</Text></Pressable>
+            <Pressable onPress={() => setStep("settings")} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
             <Pressable disabled={publishing} onPress={() => void publish()} style={[styles.primaryBtnFlex, publishing && styles.disabled]}>
-              <Text style={styles.primaryBtnText}>{publishing ? "创建中…" : "创建活动"}</Text>
+              <Text selectable style={styles.primaryBtnText}>{publishing ? "创建中…" : "创建活动"}</Text>
             </Pressable>
           </View>
         </>
       ) : (
         <>
-          <Text style={styles.doneSub}>活动已经进入市场 · 活动，其他用户可以查看并报名。</Text>
+          <Text selectable style={styles.doneSub}>活动已经进入市场 · 活动，其他用户可以查看并报名。</Text>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryEyebrow}>Activity</Text>
-            <Text style={styles.summaryTitle}>{result?.title ?? template.title}</Text>
+            <Text selectable style={styles.summaryEyebrow}>Activity</Text>
+            <Text selectable style={styles.summaryTitle}>{result?.title ?? template.title}</Text>
             <SummaryRow label="活动编号" value={result?.code ?? ""} />
             <SummaryRow label="人数" value={`${specs.capacity} 人`} />
             <SummaryRow label="时间" value={specs.time} />
@@ -255,8 +255,8 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onView
             <SummaryRow label="报名" value={ACTIVITY_SIGNUPS.find((item) => item.id === specs.signup)?.label ?? specs.signup} last />
           </View>
           <View style={styles.doneRow}>
-            <Pressable onPress={restart} style={styles.secondaryBtn}><Text style={styles.secondaryBtnText}>再建一个</Text></Pressable>
-            <Pressable onPress={onViewActivities} style={styles.primaryBtnFlex}><Text style={styles.primaryBtnText}>查看活动</Text></Pressable>
+            <Pressable onPress={restart} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>再建一个</Text></Pressable>
+            <Pressable onPress={onViewActivities} style={styles.primaryBtnFlex}><Text selectable style={styles.primaryBtnText}>查看活动</Text></Pressable>
           </View>
         </>
       )}
@@ -267,7 +267,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onView
 function SummaryRow({ label, value, last }: { label: string; value: string; last?: boolean }): React.JSX.Element {
   return (
     <View style={[styles.summaryRow, last && styles.summaryRowLast]}>
-      <Text style={styles.summaryLabel}>{label}</Text>
+      <Text selectable style={styles.summaryLabel}>{label}</Text>
       <Text selectable style={styles.summaryValue}>{value}</Text>
     </View>
   );

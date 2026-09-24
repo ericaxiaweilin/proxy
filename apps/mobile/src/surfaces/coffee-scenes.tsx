@@ -115,16 +115,16 @@ export function CoffeeScenesHub(): React.JSX.Element {
     const filtered = PLACEHOLDER_SHOPS.filter((s) => matchesFilter(s, shopFilter));
     return (
       <View>
-        <Pressable onPress={() => setView("HOME")}><Text style={styles.back}>‹ 返回咖啡场景</Text></Pressable>
-        <Text style={styles.placeholderBanner}>示例数据 · 店铺库还没接后端，界面先搭起来。</Text>
+        <Pressable onPress={() => setView("HOME")}><Text selectable style={styles.back}>‹ 返回咖啡场景</Text></Pressable>
+        <Text selectable style={styles.placeholderBanner}>示例数据 · 店铺库还没接后端，界面先搭起来。</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
           {SHOP_FILTERS.map((f) => (
             <Pressable key={f.id} onPress={() => setShopFilter(f.id)} style={[styles.filterTab, shopFilter === f.id && styles.filterTabOn]}>
-              <Text style={[styles.filterTabText, shopFilter === f.id && styles.filterTabTextOn]}>{f.label}</Text>
+              <Text selectable style={[styles.filterTabText, shopFilter === f.id && styles.filterTabTextOn]}>{f.label}</Text>
             </Pressable>
           ))}
         </ScrollView>
-        <Text style={styles.resultCount}>共 {filtered.length} 家</Text>
+        <Text selectable style={styles.resultCount}>共 {filtered.length} 家</Text>
         {filtered.map((s) => <ShopCard key={s.id} shop={s} />)}
       </View>
     );
@@ -132,38 +132,38 @@ export function CoffeeScenesHub(): React.JSX.Element {
 
   return (
     <View>
-      <Text style={styles.placeholderBanner}>示例数据 · 场景 / 店铺 / 活动后端还没接，界面先搭起来。</Text>
+      <Text selectable style={styles.placeholderBanner}>示例数据 · 场景 / 店铺 / 活动后端还没接，界面先搭起来。</Text>
 
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>☕ 实时咖啡场景</Text>
-        <Text style={styles.sectionSub}>Live Now</Text>
+        <Text selectable style={styles.sectionTitle}>☕ 实时咖啡场景</Text>
+        <Text selectable style={styles.sectionSub}>Live Now</Text>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sceneScroll}>
         {PLACEHOLDER_SCENES.map((s) => (
           <Pressable key={s.id} onPress={() => setActiveScene(s)} style={styles.sceneCard}>
-            <View style={styles.liveTag}><View style={styles.liveDot} /><Text style={styles.liveText}>现在在店里</Text></View>
+            <View style={styles.liveTag}><View style={styles.liveDot} /><Text selectable style={styles.liveText}>现在在店里</Text></View>
             <View style={styles.scenePerson}>
-              <View style={styles.sceneAvatar}><Text style={styles.sceneAvatarText}>{s.initial}</Text></View>
+              <View style={styles.sceneAvatar}><Text selectable style={styles.sceneAvatarText}>{s.initial}</Text></View>
               <View>
-                <Text style={styles.scenePersonName}>{s.name}</Text>
-                <Text style={styles.scenePersonWaited}>已待 {s.waitedMin} 分钟</Text>
+                <Text selectable style={styles.scenePersonName}>{s.name}</Text>
+                <Text selectable style={styles.scenePersonWaited}>已待 {s.waitedMin} 分钟</Text>
               </View>
             </View>
-            <Text style={styles.scenePlace}>📍 {s.shop} · {s.distanceKm}km</Text>
-            <Text style={styles.sceneActivity}>{s.activity}</Text>
+            <Text selectable style={styles.scenePlace}>📍 {s.shop} · {s.distanceKm}km</Text>
+            <Text selectable style={styles.sceneActivity}>{s.activity}</Text>
             <View style={styles.sceneMetaGrid}>
-              <View style={styles.sceneMeta}><Text style={styles.sceneMetaValue}>{s.availableHours}h</Text><Text style={styles.sceneMetaKey}>可陪</Text></View>
-              <View style={styles.sceneMeta}><Text style={styles.sceneMetaValue}>有空</Text><Text style={styles.sceneMetaKey}>状态</Text></View>
-              <View style={styles.sceneMeta}><Text style={styles.sceneMetaValue}>{s.pref}</Text><Text style={styles.sceneMetaKey}>偏好</Text></View>
+              <View style={styles.sceneMeta}><Text selectable style={styles.sceneMetaValue}>{s.availableHours}h</Text><Text selectable style={styles.sceneMetaKey}>可陪</Text></View>
+              <View style={styles.sceneMeta}><Text selectable style={styles.sceneMetaValue}>有空</Text><Text selectable style={styles.sceneMetaKey}>状态</Text></View>
+              <View style={styles.sceneMeta}><Text selectable style={styles.sceneMetaValue}>{s.pref}</Text><Text selectable style={styles.sceneMetaKey}>偏好</Text></View>
             </View>
             <View style={styles.sceneJoinRow}>
-              <Text style={styles.sceneTag}>{s.lang}</Text>
+              <Text selectable style={styles.sceneTag}>{s.lang}</Text>
               <Pressable
                 disabled={joinedScenes.has(s.id)}
                 onPress={(event) => { event.stopPropagation(); joinScene(s.id); }}
                 style={[styles.sceneJoinBtn, joinedScenes.has(s.id) && styles.sceneJoinBtnOn]}
               >
-                <Text style={styles.sceneJoinBtnText}>{joinedScenes.has(s.id) ? "已加入" : "加入"}</Text>
+                <Text selectable style={styles.sceneJoinBtnText}>{joinedScenes.has(s.id) ? "已加入" : "加入"}</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -171,30 +171,30 @@ export function CoffeeScenesHub(): React.JSX.Element {
       </ScrollView>
 
       <View style={styles.eventCard}>
-        <Text style={styles.eventBadge}>✦ 活动预告</Text>
-        <Text style={styles.eventTitle}>周六咖啡拉花体验课</Text>
+        <Text selectable style={styles.eventBadge}>✦ 活动预告</Text>
+        <Text selectable style={styles.eventTitle}>周六咖啡拉花体验课</Text>
         <View style={styles.eventHost}>
-          <View style={styles.eventHostAvatar}><Text style={styles.eventHostAvatarText}>P</Text></View>
-          <Text style={styles.eventHostText}>Proxy Coffee Roastery 主办</Text>
+          <View style={styles.eventHostAvatar}><Text selectable style={styles.eventHostAvatarText}>P</Text></View>
+          <Text selectable style={styles.eventHostText}>Proxy Coffee Roastery 主办</Text>
         </View>
         <View style={styles.eventDetailGrid}>
-          <View style={styles.eventDetail}><Text style={styles.eventDetailValue}>21</Text><Text style={styles.eventDetailKey}>周六</Text></View>
-          <View style={styles.eventDetail}><Text style={styles.eventDetailValue}>15:00</Text><Text style={styles.eventDetailKey}>开始</Text></View>
-          <View style={styles.eventDetail}><Text style={styles.eventDetailValue}>8 人</Text><Text style={styles.eventDetailKey}>名额</Text></View>
+          <View style={styles.eventDetail}><Text selectable style={styles.eventDetailValue}>21</Text><Text selectable style={styles.eventDetailKey}>周六</Text></View>
+          <View style={styles.eventDetail}><Text selectable style={styles.eventDetailValue}>15:00</Text><Text selectable style={styles.eventDetailKey}>开始</Text></View>
+          <View style={styles.eventDetail}><Text selectable style={styles.eventDetailValue}>8 人</Text><Text selectable style={styles.eventDetailKey}>名额</Text></View>
         </View>
-        <Text style={styles.eventDesc}>专业咖啡师带您体验拉花基础，从打奶泡到心形、叶形图案，亲手做一杯拿铁。含一杯饮品和甜点。</Text>
+        <Text selectable style={styles.eventDesc}>专业咖啡师带您体验拉花基础，从打奶泡到心形、叶形图案，亲手做一杯拿铁。含一杯饮品和甜点。</Text>
         <View style={styles.eventBottomRow}>
-          <Text style={styles.eventSpots}>已报名 <Text style={styles.eventSpotsStrong}>{eventSpots}</Text> / 8 人</Text>
+          <Text selectable style={styles.eventSpots}>已报名 <Text selectable style={styles.eventSpotsStrong}>{eventSpots}</Text> / 8 人</Text>
           <Pressable onPress={joinEvent} style={[styles.eventJoinBtn, eventJoined && styles.eventJoinBtnOn]}>
-            <Text style={styles.eventJoinBtnText}>{eventJoined ? "已加入 ✓" : "加入"}</Text>
+            <Text selectable style={styles.eventJoinBtnText}>{eventJoined ? "已加入 ✓" : "加入"}</Text>
           </Pressable>
         </View>
       </View>
 
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>🔥 本周热门</Text>
+        <Text selectable style={styles.sectionTitle}>🔥 本周热门</Text>
         <Pressable onPress={() => setView("ALL_SHOPS")} style={styles.moreBtn}>
-          <Text style={styles.moreBtnText}>更多</Text>
+          <Text selectable style={styles.moreBtnText}>更多</Text>
           <ProxyIcon color={color.muted} name="arrowUpRight" size={11} />
         </Pressable>
       </View>
@@ -202,19 +202,19 @@ export function CoffeeScenesHub(): React.JSX.Element {
 
       <Pressable onPress={() => setLegendOpen((v) => !v)} style={styles.legendToggle}>
         <View style={styles.legendToggleLeft}>
-          <Text style={styles.legendToggleIcon}>🏷️</Text>
-          <Text style={styles.legendToggleText}>标记说明</Text>
+          <Text selectable style={styles.legendToggleIcon}>🏷️</Text>
+          <Text selectable style={styles.legendToggleText}>标记说明</Text>
         </View>
-        <Text style={[styles.legendArrow, legendOpen && styles.legendArrowOpen]}>▾</Text>
+        <Text selectable style={[styles.legendArrow, legendOpen && styles.legendArrowOpen]}>▾</Text>
       </Pressable>
       {legendOpen ? (
         <View style={styles.legendGrid}>
           {LEGEND.map((l) => (
             <View key={l.label} style={styles.legendItem}>
-              <Text style={styles.legendItemIcon}>{l.icon}</Text>
+              <Text selectable style={styles.legendItemIcon}>{l.icon}</Text>
               <View style={styles.legendItemTextWrap}>
-                <Text style={styles.legendItemLabel}>{l.label}</Text>
-                <Text style={styles.legendItemDetail}>{l.detail}</Text>
+                <Text selectable style={styles.legendItemLabel}>{l.label}</Text>
+                <Text selectable style={styles.legendItemDetail}>{l.detail}</Text>
               </View>
             </View>
           ))}
@@ -228,30 +228,30 @@ export function CoffeeScenesHub(): React.JSX.Element {
               <>
                 <View style={styles.modalDrag} />
                 <View style={styles.modalTop}>
-                  <View style={styles.modalAvatar}><Text style={styles.modalAvatarText}>{activeScene.initial}</Text></View>
+                  <View style={styles.modalAvatar}><Text selectable style={styles.modalAvatarText}>{activeScene.initial}</Text></View>
                   <View>
-                    <Text style={styles.modalName}>{activeScene.name}</Text>
-                    <Text style={styles.modalStatus}>已待 {activeScene.waitedMin} 分钟 · {activeScene.shop}</Text>
+                    <Text selectable style={styles.modalName}>{activeScene.name}</Text>
+                    <Text selectable style={styles.modalStatus}>已待 {activeScene.waitedMin} 分钟 · {activeScene.shop}</Text>
                   </View>
                 </View>
                 <View style={styles.modalBlock}>
-                  <Text style={styles.modalBlockTitle}>场景信息</Text>
+                  <Text selectable style={styles.modalBlockTitle}>场景信息</Text>
                   <ModalRow label="📍 位置" value={activeScene.shop} />
                   <ModalRow label="☕ 活动" value={activeScene.activity} />
                   <ModalRow label="⏱ 可陪时间" value={`${activeScene.availableHours} 小时`} />
                   <ModalRow label="👥 偏好" value={activeScene.pref} />
                 </View>
                 <View style={styles.modalBlock}>
-                  <Text style={styles.modalBlockTitle}>关于她</Text>
+                  <Text selectable style={styles.modalBlockTitle}>关于她</Text>
                   <ModalRow label="语言" value={activeScene.lang} />
                   <ModalRow label="兴趣" value={activeScene.tags} />
                 </View>
                 <View style={styles.modalActionRow}>
                   <Pressable onPress={() => setActiveScene(undefined)} style={styles.modalCancel}>
-                    <Text style={styles.modalCancelText}>取消</Text>
+                    <Text selectable style={styles.modalCancelText}>取消</Text>
                   </Pressable>
                   <Pressable onPress={() => { joinScene(activeScene.id); setActiveScene(undefined); }} style={styles.modalConfirm}>
-                    <Text style={styles.modalConfirmText}>{joinedScenes.has(activeScene.id) ? "已加入" : "确认加入"}</Text>
+                    <Text selectable style={styles.modalConfirmText}>{joinedScenes.has(activeScene.id) ? "已加入" : "确认加入"}</Text>
                   </Pressable>
                 </View>
               </>
@@ -266,8 +266,8 @@ export function CoffeeScenesHub(): React.JSX.Element {
 function ModalRow({ label, value }: { label: string; value: string }): React.JSX.Element {
   return (
     <View style={styles.modalRow}>
-      <Text style={styles.modalRowLabel}>{label}</Text>
-      <Text style={styles.modalRowValue}>{value}</Text>
+      <Text selectable style={styles.modalRowLabel}>{label}</Text>
+      <Text selectable style={styles.modalRowValue}>{value}</Text>
     </View>
   );
 }
@@ -277,25 +277,25 @@ function ShopCard({ shop }: { shop: Shop }): React.JSX.Element {
     <View style={styles.shopCard}>
       <View style={styles.shopRow1}>
         <View style={styles.shopThumb}>
-          <Text style={styles.shopThumbEmoji}>{shop.emoji}</Text>
-          {shop.hot ? <View style={styles.shopBadgeHot}><Text style={styles.shopBadgeText}>HOT</Text></View> : null}
-          {shop.isNew ? <View style={styles.shopBadgeNew}><Text style={styles.shopBadgeText}>NEW</Text></View> : null}
+          <Text selectable style={styles.shopThumbEmoji}>{shop.emoji}</Text>
+          {shop.hot ? <View style={styles.shopBadgeHot}><Text selectable style={styles.shopBadgeText}>HOT</Text></View> : null}
+          {shop.isNew ? <View style={styles.shopBadgeNew}><Text selectable style={styles.shopBadgeText}>NEW</Text></View> : null}
         </View>
         <View style={styles.shopInfo}>
-          <Text style={styles.shopName}>{shop.name}</Text>
-          <Text style={styles.shopSub}>{shop.distanceKm}km · {shop.desc}</Text>
+          <Text selectable style={styles.shopName}>{shop.name}</Text>
+          <Text selectable style={styles.shopSub}>{shop.distanceKm}km · {shop.desc}</Text>
         </View>
         <View style={styles.shopScore}>
-          <Text style={styles.shopScoreValue}>{shop.rating}</Text>
-          <Text style={styles.shopScoreSub}>{shop.reviews} 评价</Text>
+          <Text selectable style={styles.shopScoreValue}>{shop.rating}</Text>
+          <Text selectable style={styles.shopScoreSub}>{shop.reviews} 评价</Text>
         </View>
       </View>
       <View style={styles.shopMarks}>
-        <Text style={styles.shopMark}>🌐 {shop.wifi}</Text>
-        <Text style={styles.shopMark}>{shop.smoke === "无烟" ? "🚭" : "🚬"} {shop.smoke}</Text>
-        <Text style={styles.shopMark}>❄️ {shop.ac}</Text>
-        <Text style={styles.shopMark}>🔌 {shop.plug}</Text>
-        <Text style={styles.shopMark}>🔇 {shop.quiet}</Text>
+        <Text selectable style={styles.shopMark}>🌐 {shop.wifi}</Text>
+        <Text selectable style={styles.shopMark}>{shop.smoke === "无烟" ? "🚭" : "🚬"} {shop.smoke}</Text>
+        <Text selectable style={styles.shopMark}>❄️ {shop.ac}</Text>
+        <Text selectable style={styles.shopMark}>🔌 {shop.plug}</Text>
+        <Text selectable style={styles.shopMark}>🔇 {shop.quiet}</Text>
       </View>
     </View>
   );

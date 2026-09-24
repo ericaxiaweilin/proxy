@@ -40,6 +40,12 @@ func (r *MemoryRepository) AddReport(_ context.Context, report Report) error {
 	if report.Reason == "" {
 		return ErrReportReasonRequired
 	}
+	// COMP-REPORT-005：与 DB 侧的 due_at NOT NULL 同口径。Service 已经在受理
+	// 时算过一遍，这里是绕过 Service 直接调仓储时的兜底 —— 一条算不出时限的
+	// 举报，平台证明不了自己按时处理过。
+	if report.DueAt.IsZero() {
+		return ErrReportDueAtRequired
+	}
 	r.rows = append(r.rows, report)
 	return nil
 }
@@ -69,6 +75,32 @@ func (r *MemoryRepository) FindReport(_ context.Context, reportID string) (Repor
 		}
 	}
 	return Report{}, false
+}
+
+// ListReportQueue（COMP-REPORT-005）：举报唯一的读出口。与 postgres 实现同
+// 语义 —— 每一行带处置链摘要（最后动作 / 最后时刻 / 条数），让「这条现在到
+// 哪一步」不必再查一次。
+func (r *MemoryRepository) ListReportQueue(_ context.Context) ([]ReportQueueEntry, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fail {
+		return nil, ErrReportRepositoryDown
+	}
+	out := make([]ReportQueueEntry, 0, len(r.rows))
+	for _, row := range r.rows {
+		entry := ReportQueueEntry{Report: row}
+		// 处置按写入顺序追加，所以遍历到最后的那个就是「现在到哪一步」。
+		for _, d := range r.dispositions {
+			if d.ReportID != row.ID {
+				continue
+			}
+			entry.DispositionCount++
+			entry.LastAction = d.Action
+			entry.LastDispositionAt = d.CreatedAt
+		}
+		out = append(out, entry)
+	}
+	return out, nil
 }
 
 // COMP-REPORT-004: 申诉落库。与举报 / 处置同口径：只有 append，没有 UPDATE / DELETE。

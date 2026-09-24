@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/proxy-app/proxy-api/internal/platform/postgres"
+	"github.com/proxy-app/proxy-api/internal/supply"
 	"strings"
 	"time"
 )
@@ -113,6 +115,44 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 			VALUES ($1,$2,$3,'VERIFIED','INTERVIEW','ops_001',$4,$5,$4)
 			ON CONFLICT (id) DO UPDATE SET status='VERIFIED'`,
 			v.id, v.agentID, v.capability, now, now.AddDate(1, 0, 0)); err != nil {
+			return err
+		}
+	}
+	// COMP-SELLER-001：供给侧实名的种子。
+	//
+	// 这里刻意走**真实的写入口**，而不是再写一段手写 INSERT。之前那批
+	// test-rn-* 行就是手写 SQL 造的：legal_name='TEST-ONLY *'、
+	// id_number_hash 是字面量而不是哈希、verified_by 是一个会话标签而不是
+	// 运营 principal、expires_at 为空 —— 而读侧当时把空有效期读成「永不过期」，
+	// 于是 6 个卖家在没人核过的情况下一直显示为「已实名」。种子数据不该能造出
+	// 这种形状：走写入口就自动拿到「具名运营 + 真哈希 + 必有有效期」三件事，
+	// 与生产形态不可能漂移。
+	//
+	// 幂等：已经有一条「VERIFIED 且未过期」的记录就跳过。所以第一次启动会把
+	// 旧的 test-rn-* 行置为 EXPIRED（写入口的作废语义）并写下 srn_* 行，
+	// 之后每次启动都是 no-op —— 不会重复插入，也不会撞 084 的 partial unique
+	// index（同一 agent 只允许一条 VERIFIED）。
+	sellerLookup := postgres.NewSellerRealNameRepository(pool)
+	supplyRepo := postgres.NewSupplyRepository(pool)
+	for _, p := range profiles {
+		alreadyVerified, err := sellerLookup.RealNameVerified(ctx, p.agentID)
+		if err != nil {
+			return err
+		}
+		if alreadyVerified {
+			continue
+		}
+		expiresAt := now.AddDate(0, supply.SellerRealNameAttestationValidityMonths, 0)
+		if err := supplyRepo.AttestSellerRealName(ctx, supply.SellerRealNameVerification{
+			ID: "srn_" + p.agentID, AgentID: p.agentID,
+			// 明确标注是种子数据：这条记录不该被误读成真实核验证据。
+			LegalName: "DEV SEED " + p.name, IDType: "CCCD",
+			IDNumberHash: supply.HashIDNumber("dev-seed-" + p.agentID),
+			Status:       supply.SellerRealNameStatusVerified,
+			Method:       supply.SellerRealNameMethodOperatorAttestation,
+			VerifiedBy:   "ops_001", VerifiedAt: now, ExpiresAt: &expiresAt,
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
 			return err
 		}
 	}

@@ -170,11 +170,11 @@ export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>我的推荐</Text>
-      <Text style={styles.sub}>你可以直接告诉 Proxy 多看什么、少看什么。搜索和明确需求仍然优先。</Text>
+      <Text selectable style={styles.title}>我的推荐</Text>
+      <Text selectable style={styles.sub}>你可以直接告诉 Proxy 多看什么、少看什么。搜索和明确需求仍然优先。</Text>
 
       <View style={styles.algoCard}>
-        <Text style={styles.algoTitle}>直接训练算法 — Your Algo 对话版</Text>
+        <Text selectable style={styles.algoTitle}>直接训练算法 — Your Algo 对话版</Text>
         <TextInput value={algoInput} onChangeText={setAlgoInput} placeholder="例：最近一个月多给我看河内创业活动，摄影多一点，兼职少一点" placeholderTextColor={color.muted} style={styles.algoInput} multiline />
         <Pressable
           onPress={() => {
@@ -188,29 +188,29 @@ export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.
           }}
           style={[styles.algoBtn, !algoInput.trim() && styles.disabled]}
         >
-          <Text style={styles.algoBtnText}>应用到推荐 · {scope === "7D" ? "7 天" : scope === "30D" ? "30 天" : "长期"}</Text>
+          <Text selectable style={styles.algoBtnText}>应用到推荐 · {scope === "7D" ? "7 天" : scope === "30D" ? "30 天" : "长期"}</Text>
         </Pressable>
-        {algoApplied ? <Text style={styles.algoApplied}>已应用：{algoApplied}</Text> : null}
-        <Text style={styles.algoHint}>试试：多给我摄影和本地活动，少一点商业内容，持续一周 / 最近想认识做产品的人</Text>
+        {algoApplied ? <Text selectable style={styles.algoApplied}>已应用：{algoApplied}</Text> : null}
+        <Text selectable style={styles.algoHint}>试试：多给我摄影和本地活动，少一点商业内容，持续一周 / 最近想认识做产品的人</Text>
       </View>
 
       {/* 权重卡片 — 每行 3 列：标签 + slider + 数值 */}
       <View style={styles.card}>
         {FEED_ROWS.map(([key, label]) => (
           <View key={key} style={styles.prefRow}>
-            <Text style={styles.prefLabel}>{label}</Text>
+            <Text selectable style={styles.prefLabel}>{label}</Text>
             <Slider
               value={weights[key] ?? 50}
               onValueChange={(v) => setWeights((prev) => ({ ...prev, [key]: v }))}
             />
-            <Text style={styles.prefValue}>{weights[key] ?? 50}</Text>
+            <Text selectable style={styles.prefValue}>{weights[key] ?? 50}</Text>
           </View>
         ))}
       </View>
 
       {/* 时间范围 */}
-      <Text style={styles.sectionTitle}>暂时调整多久？</Text>
-      <Text style={styles.sectionSub}>自动恢复也可以</Text>
+      <Text selectable style={styles.sectionTitle}>暂时调整多久？</Text>
+      <Text selectable style={styles.sectionSub}>自动恢复也可以</Text>
       <View style={styles.scopeRow}>
         {(["7D", "30D", "PERSISTENT"] as const).map((s) => (
           <Pressable
@@ -218,7 +218,7 @@ export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.
             onPress={() => setScope(s)}
             style={[styles.scopeChip, scope === s && styles.scopeChipActive]}
           >
-            <Text style={[styles.scopeChipText, scope === s && styles.scopeChipTextActive]}>
+            <Text selectable style={[styles.scopeChipText, scope === s && styles.scopeChipTextActive]}>
               {s === "7D" ? "7 天" : s === "30D" ? "30 天" : "长期"}
             </Text>
           </Pressable>
@@ -226,8 +226,8 @@ export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.
       </View>
 
       {/* 暂停主题 */}
-      <Text style={styles.sectionTitle}>不想看的内容</Text>
-      <Text style={styles.sectionSub}>点击可恢复</Text>
+      <Text selectable style={styles.sectionTitle}>不想看的内容</Text>
+      <Text selectable style={styles.sectionSub}>点击可恢复</Text>
       <View style={styles.mutedRow}>
         {MUTED_TOPICS.map((t) => {
           const off = muted.has(t);
@@ -243,7 +243,7 @@ export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.
               }}
               style={[styles.mutedChip, off && styles.mutedChipOff]}
             >
-              <Text style={[styles.mutedChipText, off && styles.mutedChipTextOff]}>
+              <Text selectable style={[styles.mutedChipText, off && styles.mutedChipTextOff]}>
                 {off ? "已暂停 · " : ""}{t}
               </Text>
             </Pressable>
@@ -252,24 +252,24 @@ export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.
       </View>
 
       {/* 我屏蔽的人（MUTE-REVERSIBLE-001）— 作者级，权威在服务端，唯一的解除入口 */}
-      <Text style={styles.sectionTitle}>我屏蔽的人</Text>
-      <Text style={styles.sectionSub}>屏蔽后 Ta 的帖子不再出现，可以随时解除</Text>
+      <Text selectable style={styles.sectionTitle}>我屏蔽的人</Text>
+      <Text selectable style={styles.sectionSub}>屏蔽后 Ta 的帖子不再出现，可以随时解除</Text>
       <View style={styles.card}>
         {mutedAuthorsError ? (
           <View style={styles.mutedAuthorRow}>
-            <Text style={styles.mutedAuthorHint}>{mutedAuthorsError}</Text>
+            <Text selectable style={styles.mutedAuthorHint}>{mutedAuthorsError}</Text>
             <Pressable onPress={() => void loadMutedAuthors()} style={styles.mutedAuthorAction}>
-              <Text style={styles.mutedAuthorActionText}>重试</Text>
+              <Text selectable style={styles.mutedAuthorActionText}>重试</Text>
             </Pressable>
           </View>
         ) : mutedAuthors === undefined ? (
-          <Text style={styles.mutedAuthorHint}>读取中…</Text>
+          <Text selectable style={styles.mutedAuthorHint}>读取中…</Text>
         ) : mutedAuthors.length === 0 ? (
-          <Text style={styles.mutedAuthorHint}>还没有屏蔽任何人。</Text>
+          <Text selectable style={styles.mutedAuthorHint}>还没有屏蔽任何人。</Text>
         ) : (
           mutedAuthors.map((row) => (
             <View key={row.muteId} style={styles.mutedAuthorRow}>
-              <Text style={styles.mutedAuthorName} numberOfLines={1}>
+              <Text selectable style={styles.mutedAuthorName} numberOfLines={1}>
                 {mutedAuthorLabel(row)}
               </Text>
               <Pressable
@@ -277,7 +277,7 @@ export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.
                 disabled={unmutingId !== undefined}
                 style={[styles.mutedAuthorAction, unmutingId !== undefined && styles.disabled]}
               >
-                <Text style={styles.mutedAuthorActionText}>
+                <Text selectable style={styles.mutedAuthorActionText}>
                   {unmutingId === row.authorId ? "解除中…" : "解除屏蔽"}
                 </Text>
               </Pressable>
@@ -288,14 +288,14 @@ export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.
 
       {/* 推荐原则 */}
       <View style={styles.principleCard}>
-        <Text style={styles.principleTitle}>推荐原则</Text>
-        <Text style={styles.principleText}>
+        <Text selectable style={styles.principleTitle}>推荐原则</Text>
+        <Text selectable style={styles.principleText}>
           搜索 / 明确意图 &gt; 你的显式偏好 &gt; 真实结果 &gt; 关系与机会 &gt; 普通互动。停留和点赞不会自动把 Feed 变成同一种内容。
         </Text>
       </View>
 
       <Pressable onPress={onBack} style={styles.backBtn}>
-        <Text style={styles.backBtnText}>返回动态</Text>
+        <Text selectable style={styles.backBtnText}>返回动态</Text>
       </Pressable>
     </ScrollView>
   );

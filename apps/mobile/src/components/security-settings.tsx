@@ -65,40 +65,40 @@ export function SecuritySettings({
   return (
     <View style={styles.root}>
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>🔒 加密与访问控制</Text>
-        <Text style={styles.cardDesc}>消息在传输中使用 TLS 加密，在服务器上使用 AES-256 静态加密。</Text>
-        <Text style={styles.cardDesc}>Proxy 不提供 E2EE（端到端）加密：为履行法律义务、处理举报与安全审计，Proxy 可能依法访问通信内容。</Text>
-        <Text style={styles.badge}>已开启</Text>
+        <Text selectable style={styles.cardTitle}>🔒 加密与访问控制</Text>
+        <Text selectable style={styles.cardDesc}>消息在传输中使用 TLS 加密，在服务器上使用 AES-256 静态加密。</Text>
+        <Text selectable style={styles.cardDesc}>Proxy 不提供 E2EE（端到端）加密：为履行法律义务、处理举报与安全审计，Proxy 可能依法访问通信内容。</Text>
+        <Text selectable style={styles.badge}>已开启</Text>
       </View>
 
       <View style={styles.card}>
         <View style={styles.row}>
-          <Text style={styles.cardTitle}>🛡️ 防截图提醒</Text>
+          <Text selectable style={styles.cardTitle}>🛡️ 防截图提醒</Text>
           <ProxySwitch accessibilityLabel="防截图提醒" onChange={onToggleScreenshotWarn} value={screenshotWarnEnabled} />
         </View>
-        <Text style={styles.cardDesc}>您发送的图片和位置，对方截图时您将立即收到通知。</Text>
+        <Text selectable style={styles.cardDesc}>您发送的图片和位置，对方截图时您将立即收到通知。</Text>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>👤 多身份模式</Text>
-        <Text style={styles.cardDesc}>工作号 / 私人号 / 备用号（7天后自动销毁）隔离会话与未读。身份切换在消息页左上角。</Text>
+        <Text selectable style={styles.cardTitle}>👤 多身份模式</Text>
+        <Text selectable style={styles.cardDesc}>工作号 / 私人号 / 备用号（7天后自动销毁）隔离会话与未读。身份切换在消息页左上角。</Text>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>⏱️ 消息保留时间</Text>
+        <Text selectable style={styles.cardTitle}>⏱️ 消息保留时间</Text>
         <View style={styles.chips}>
           {([7, 30, 90, 365] as const).map((v) => (
             <Pressable key={v} onPress={() => onRetentionChange(v)} style={[styles.chip, retentionDays === v && styles.chipActive]}>
-              <Text style={[styles.chipText, retentionDays === v && styles.chipTextActive]}>{v}天</Text>
+              <Text selectable style={[styles.chipText, retentionDays === v && styles.chipTextActive]}>{v}天</Text>
             </Pressable>
           ))}
         </View>
-        <Text style={styles.cardDesc}>到期自动清理（场景/订单/优惠券消息不受影响）。</Text>
+        <Text selectable style={styles.cardDesc}>到期自动清理（场景/订单/优惠券消息不受影响）。</Text>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>📱 设备管理</Text>
-        <Text style={styles.cardDesc}>最多 2 台设备同时在线，新登录自动踢出最旧设备。</Text>
+        <Text selectable style={styles.cardTitle}>📱 设备管理</Text>
+        <Text selectable style={styles.cardDesc}>最多 2 台设备同时在线，新登录自动踢出最旧设备。</Text>
         <DeviceList client={sessionClient} />
       </View>
     </View>
@@ -154,17 +154,17 @@ function DeviceList({ client }: { client: SessionListClient | undefined }): Reac
   }
 
   if (!client) {
-    return <Text style={styles.cardDesc}>登录后可查看已登录设备。</Text>;
+    return <Text selectable style={styles.cardDesc}>登录后可查看已登录设备。</Text>;
   }
   if (state.kind === "loading" || state.kind === "idle") {
-    return <Text style={styles.cardDesc}>正在读取设备列表…</Text>;
+    return <Text selectable style={styles.cardDesc}>正在读取设备列表…</Text>;
   }
   if (state.kind === "failed") {
     return (
       <View style={styles.deviceBox}>
-        <Text style={styles.deviceError}>{state.message}</Text>
+        <Text selectable style={styles.deviceError}>{state.message}</Text>
         <Pressable onPress={() => void reload()} accessibilityLabel="重新拉取设备列表" style={styles.retryBtn}>
-          <Text style={styles.retryText}>重试</Text>
+          <Text selectable style={styles.retryText}>重试</Text>
         </Pressable>
       </View>
     );
@@ -172,9 +172,9 @@ function DeviceList({ client }: { client: SessionListClient | undefined }): Reac
   if (state.sessions.length === 0) {
     return (
       <View style={styles.deviceBox}>
-        <Text style={styles.cardDesc}>暂无已登录设备记录。</Text>
+        <Text selectable style={styles.cardDesc}>暂无已登录设备记录。</Text>
         <Pressable onPress={() => void reload()} accessibilityLabel="重新拉取设备列表" style={styles.retryBtn}>
-          <Text style={styles.retryText}>重试</Text>
+          <Text selectable style={styles.retryText}>重试</Text>
         </Pressable>
       </View>
     );
@@ -194,11 +194,11 @@ function DeviceList({ client }: { client: SessionListClient | undefined }): Reac
       {visible.map((session) => (
         <View key={session.id} style={styles.deviceRow}>
           <View style={styles.deviceInfo}>
-            <Text style={styles.deviceName}>
+            <Text selectable style={styles.deviceName}>
               {platformLabel(session.platform, session.current)}
-              {session.current ? <Text style={styles.deviceCurrent}> · 本机</Text> : null}
+              {session.current ? <Text selectable style={styles.deviceCurrent}> · 本机</Text> : null}
             </Text>
-            <Text style={styles.deviceMeta}>
+            <Text selectable style={styles.deviceMeta}>
               {statusLabel(session.status)} · {session.issuedAt.slice(0, 10)} 登录
             </Text>
           </View>
@@ -209,15 +209,15 @@ function DeviceList({ client }: { client: SessionListClient | undefined }): Reac
               accessibilityLabel={`踢出${platformLabel(session.platform, session.current)}`}
               style={styles.kickBtn}
             >
-              <Text style={styles.kickText}>{revokingId === session.id ? "踢出中…" : "踢出"}</Text>
+              <Text selectable style={styles.kickText}>{revokingId === session.id ? "踢出中…" : "踢出"}</Text>
             </Pressable>
           ) : null}
         </View>
       ))}
-      {revokeError ? <Text style={styles.deviceError}>{revokeError}</Text> : null}
+      {revokeError ? <Text selectable style={styles.deviceError}>{revokeError}</Text> : null}
       {ordered.length > 5 ? (
         <Pressable onPress={() => setExpanded((v) => !v)} accessibilityLabel={expanded ? "收起历史登录" : `展开全部${ordered.length}条登录记录`} style={styles.retryBtn}>
-          <Text style={styles.retryText}>{expanded ? "‹ 收起" : `展开全部 ${ordered.length} 条 ›`}</Text>
+          <Text selectable style={styles.retryText}>{expanded ? "‹ 收起" : `展开全部 ${ordered.length} 条 ›`}</Text>
         </Pressable>
       ) : null}
     </View>

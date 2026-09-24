@@ -3,6 +3,7 @@ import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type SlotOffer = {
   offerId: string;
@@ -101,6 +102,29 @@ export class FulfillmentClient {
     return { lifecycle: body.lifecycle as string, version: body.version as number };
   }
 
+  // ORDER-EXEC-001: 订单执行动作之前只接了打卡/证据/取消 —— OFFERED 卡死，
+  // EXECUTING 走不到 COMPLETED，COMPLETED 评不了分。下面补齐状态机缺的五块，
+  // 明细页按 lifecycle 逐态出按钮。
+  public async confirmCooperation(orderId: string): Promise<void> {
+    await this.command("ConfirmCooperation", { type: "Order", id: orderId }, {});
+  }
+
+  public async startExecution(orderId: string): Promise<void> {
+    await this.command("StartExecution", { type: "Order", id: orderId }, {});
+  }
+
+  public async recordSettlement(orderId: string, input: { agreedAmount: number; paymentMethodLabel?: string; payerConfirmed?: boolean; payeeConfirmed?: boolean }): Promise<void> {
+    await this.command("RecordDirectSettlement", { type: "Order", id: orderId }, input as unknown as Record<string, unknown>);
+  }
+
+  public async recordOutcome(orderId: string, input: { onTime: boolean; scopeCompleted: boolean; objectiveNote?: string }): Promise<void> {
+    await this.command("RecordOutcome", { type: "Order", id: orderId }, input as unknown as Record<string, unknown>);
+  }
+
+  public async recordSatisfaction(orderId: string, input: { resolved: "FULL" | "PARTIAL" | "NONE"; repeatIntent?: "REUSE" | "MAYBE" | "NO" }): Promise<void> {
+    await this.command("RecordSatisfaction", { type: "Order", id: orderId }, input as unknown as Record<string, unknown>);
+  }
+
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {
     const session = await this.requireSession();
     const next = (prefix: string) => `mobile_fulfill_${prefix}_${Date.now().toString(36)}_${(++this.sequence).toString(36)}`;
@@ -121,7 +145,7 @@ export class FulfillmentClient {
     const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
     if (!result) throw new Error("fulfillment command malformed");
-    if (result.outcome === "REJECTED") throw new Error(result.error?.messageKey ?? result.error?.errorCode ?? "fulfillment rejected");
+    if (result.outcome === "REJECTED") throw new Error(commandErrorMessage(result.error, "fulfillment rejected"));
     if (response.status < 200 || response.status >= 300) throw new Error(`unexpected fulfillment status: ${response.status}`);
     return result;
   }

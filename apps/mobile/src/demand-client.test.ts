@@ -208,3 +208,41 @@ describe("parseRequesterHomeItemsPayload", () => {
     expect(out.tasks[0]?.draftId).toBe("d0");
   });
 });
+
+// MATCH-LIVE-001：「找人」页的候选来自后端 —— 先建城市同行需求（meeting = 市场代码 hn），再按版本号拿排好序的候选；
+// completedCityOrders / hasTrackRecord 原样透出（新人不能被画成 0% 履约）。
+describe("city companion live candidates", () => {
+  it("creates the need, lists ranked candidates and keeps the newcomer flag", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver(), () => new Date("2026-08-14T00:00:00.000Z"));
+    await store.write({
+      userAccountId: "user_001",
+      principal: { type: "INDIVIDUAL", id: "user_001" },
+      auth: {
+        sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" },
+        accessToken: "access_001", refreshToken: "refresh_001", accessExpiresAt: "2026-08-14T00:15:00.000Z",
+        refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1
+      }
+    });
+    const bodies: Record<string, unknown>[] = [];
+    const responses = [
+      response(200, { commandId: "1", outcome: "ACCEPTED", aggregate: { type: "CityCompanionNeed", id: "ccn_1", version: 1, state: "CANDIDATES" }, eventRefs: [], correlationId: "c1" }),
+      response(200, {
+        commandId: "2", outcome: "ACCEPTED", aggregate: { type: "CityCompanionNeed", id: "ccn_1", version: 1, state: "CANDIDATES" }, eventRefs: [], correlationId: "c2",
+        operationRef: JSON.stringify({ candidates: [
+          { agentId: "agent_linh", name: "Linh", offerVnd: 1200000, fulfillmentRate: 1, satisfactionRate: 1, completedCityOrders: 1, hasTrackRecord: true, languages: ["vi", "zh"], proofs: ["中文已验证"] },
+          { agentId: "agent_an", name: "An", offerVnd: 900000, fulfillmentRate: 0, satisfactionRate: 0, completedCityOrders: 0, hasTrackRecord: false, languages: ["vi"], proofs: [] }
+        ] })
+      })
+    ];
+    const transport: AuthenticatedCommandTransport = { request: async (_path, init) => { bodies.push(init.body as Record<string, unknown>); return responses.shift()!; } };
+    const client = new DemandClient({ authClient: transport, secureSessionStore: store });
+    const candidates = await client.listCityCompanionCandidates({ duration: "8H", language: "zh", market: "hn" });
+    expect(bodies.map((b) => b.commandType)).toEqual(["CreateCityCompanionNeed", "ListCityCompanionCandidates"]);
+    expect((bodies[0]?.payload as Record<string, unknown>).meeting).toBe("hn");
+    expect(bodies[1]?.target).toEqual({ type: "CityCompanionNeed", id: "ccn_1" });
+    expect((bodies[1]?.payload as Record<string, unknown>).expectedVersion).toBe(1);
+    expect(candidates.map((c) => c.agentId)).toEqual(["agent_linh", "agent_an"]);
+    expect(candidates[0]).toMatchObject({ completedOrders: 1, hasTrackRecord: true });
+    expect(candidates[1]).toMatchObject({ completedOrders: 0, hasTrackRecord: false });
+  });
+});

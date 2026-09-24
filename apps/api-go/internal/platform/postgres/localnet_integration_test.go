@@ -321,7 +321,7 @@ func TestMediaImpressionStatsPostgresRoundTrip(t *testing.T) {
 	impress("viewer_1_"+itoa(run), mediaB, 7000)
 	impress("viewer_2_"+itoa(run), mediaB, 3000)
 
-	stats, err := repo.ListMediaImpressionStats(ctx, authorID, 20)
+	stats, err := repo.ListMediaImpressionStats(ctx, authorID, time.Time{}, 20)
 	if err != nil {
 		t.Fatalf("ListMediaImpressionStats: %v", err)
 	}
@@ -394,4 +394,45 @@ func lnEnvelope(commandType string, payload map[string]any, actorID string, targ
 		envelope.Target = command.Target{Type: "Post", ID: targetID[0]}
 	}
 	return envelope
+}
+
+// TestProfileViewStatsSinceDaysPostgresRoundTrip: sinceDays 只限制读窗口 ——
+// 40 天前的访问在全量口径里，30 天口径里没有；事件本身不删。
+func TestProfileViewStatsSinceDaysPostgresRoundTrip(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewLocalNetRepository(pool)
+
+	run := time.Now().UnixNano()
+	ownerID := "user_viewwin_pg_" + itoa(run)
+	oldViewer := "viewer_old_pg_" + itoa(run)
+
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM localnet.interaction_events WHERE target_type='PROFILE' AND target_id=$1`, ownerID)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, created_at) VALUES ($1,'PROFILE_OPEN',$2,'PROFILE',$3,$4)`,
+		"ev_viewwin_old_"+itoa(run), oldViewer, ownerID, time.Now().UTC().AddDate(0, 0, -40)); err != nil {
+		t.Fatalf("seed old open: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, created_at) VALUES ($1,'PROFILE_OPEN',$2,'PROFILE',$3, NOW())`,
+		"ev_viewwin_new_"+itoa(run), "viewer_new_pg_"+itoa(run), ownerID); err != nil {
+		t.Fatalf("seed new open: %v", err)
+	}
+
+	all, err := repo.ListProfileViewStats(ctx, ownerID, time.Time{})
+	if err != nil {
+		t.Fatalf("all-time: %v", err)
+	}
+	if all.Opens != 2 || all.UniqueViewers != 2 {
+		t.Fatalf("all-time = %+v, want {2 2}", all)
+	}
+	win, err := repo.ListProfileViewStats(ctx, ownerID, time.Now().UTC().AddDate(0, 0, -30))
+	if err != nil {
+		t.Fatalf("30d: %v", err)
+	}
+	if win.Opens != 1 || win.UniqueViewers != 1 {
+		t.Fatalf("30d = %+v, want {1 1}", win)
+	}
 }

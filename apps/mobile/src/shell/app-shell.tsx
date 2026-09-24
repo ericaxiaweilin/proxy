@@ -70,7 +70,10 @@ import { MessagesSurface } from "../surfaces/messages";
 import { meSubPage } from "../surfaces/me-sub-pages";
 import type { MeSubPage } from "../surfaces/me-types";
 import { RequesterHome, type RequesterGoal } from "../surfaces/requester-home";
-import { resolveHomePersonAccountId } from "../recommend-fixtures";
+import { resolveHomePersonAccountId, type RecommendPerson } from "../recommend-fixtures";
+import { GREET_MAX_UNANSWERED, countUnansweredOwnMessages, pickGreetingLine } from "../greet-state";
+import { RoomCreateSurface } from "../surfaces/room-create";
+import { RoomSurface } from "../surfaces/room";
 import { AIAccountProfileSurface } from "../surfaces/ai-account-profile";
 import { OtherProfileSurface, type OtherProfileTarget } from "../surfaces/other-profile";
 import { RealitySceneMapSurface } from "../surfaces/reality-scene-map";
@@ -205,6 +208,18 @@ export function AppShell({
   // MSG-GROUPS-TAB-001: convoId/convoTitle（打开一条已有消息支线）已经摘掉——
   // 唯一入口是消息模块的 Convo 列表页，那张列表已经不存在了（见 messages.tsx）。
   const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initialDraft?: string; peerUserId?: string }>();
+  // ROOM-CREATE-001: "创建房间"面板 + 建好之后的房间聊天页，各自独立于
+  // messageChat（房间是 GROUP + 场景，跟 1:1 对话的展示/交互不是一回事，
+  // 见 room-create.tsx / room.tsx 顶部注释）。
+  const [roomCreateCandidates, setRoomCreateCandidates] = useState<ReadonlyArray<RecommendPerson>>();
+  // HOME-MORE-ROOMS-001: 开房大卡上点的场景（SCENE_OPTIONS 下标）。
+  const [roomCreateSceneIndex, setRoomCreateSceneIndex] = useState<number>(0);
+  const [roomChatId, setRoomChatId] = useState<string>();
+  // HOME-MORE-ROOMS-002（2026-09-23，用户：「点击聊天房卡片创建 先弹回 home 再进入创建
+  // 这个多此一举」）：从「更多 → 聊天房」开的创建页 / 房间，叠在「更多」整页 Modal
+  // **里面**（overlay），不先关「更多」再开新 Modal —— 之前那样中间会闪一下首页。
+  // 从消息页进房不在任何 Modal 里，仍走下面的独立 Modal。
+  const [roomLayerInMore, setRoomLayerInMore] = useState<boolean>(false);
   const [openAIProfile, setOpenAIProfile] = useState<PlatformAIAccount>();
   const [openHumanProfile, setOpenHumanProfile] = useState<OtherProfileTarget>();
   // BRAND-CHROME-L1-001: 「我的」子页（个人主页等）跟 openAIProfile/openHumanProfile
@@ -598,6 +613,34 @@ export function AppShell({
         ? { latitude: currentLocation.custom.lat, longitude: currentLocation.custom.lng }
         : undefined;
 
+  // HOME-MORE-ROOMS-002: 同一对创建页 / 房间，按入口决定是独立 Modal 还是叠在「更多」里。
+  // 两处都挂着，但同一时刻只有入口那一处 visible。
+  function renderRoomLayers(presentation: "modal" | "overlay"): React.JSX.Element {
+    const here = presentation === "overlay" ? roomLayerInMore : !roomLayerInMore;
+    return (
+      <>
+        <RoomCreateSurface
+          candidates={roomCreateCandidates ?? []}
+          initialSceneIndex={roomCreateSceneIndex}
+          conversationClient={conversation}
+          onClose={() => setRoomCreateCandidates(undefined)}
+          onCreated={(conversationId) => { setRoomCreateCandidates(undefined); setRoomChatId(conversationId); }}
+          presentation={presentation}
+          visible={here && roomCreateCandidates !== undefined}
+        />
+        <RoomSurface
+          conversationClient={conversation}
+          conversationId={roomChatId ?? ""}
+          mediaClient={media}
+          onClose={() => setRoomChatId(undefined)}
+          presentation={presentation}
+          profileClient={profile}
+          visible={here && roomChatId !== undefined}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <SafeAreaView edges={["top"]} style={styles.safeArea}>
@@ -670,7 +713,6 @@ export function AppShell({
           <AIAccountProfileSurface
             account={openAIProfile}
             engagement={engagement}
-            relationship={relationship}
             {...(secureSessionStore ? { secureSessionStore } : {})}
             onBack={() => { setOpenAIProfile(undefined); if (aiProfileReturnToScene) { setAIProfileReturnToScene(false); setRealitySceneOpen(true); } }}
             onViewPosts={(account) => {
@@ -802,24 +844,62 @@ export function AppShell({
                 posts: [],
                 mediaByPost: {},
               })}
-              onMessageHuman={(person) => {
-                setMessageChat({ author: person.name, ...(person.photoUri ? { avatarSource: { uri: person.photoUri } } : {}), peerUserId: resolveHomePersonAccountId(person.id) });
+              onMessageHuman={(person, initialDraft) => {
+                setMessageChat({ author: person.name, ...(person.photoUri ? { avatarSource: { uri: person.photoUri } } : {}), peerUserId: resolveHomePersonAccountId(person.id), ...(initialDraft ? { initialDraft } : {}) });
                 setPageOverride("MSG_CHAT");
                 setTab("MESSAGES");
+              }}
+              onGreetHuman={async (person, lines) => {
+                // HOME-MORE-GREET-001: 「邀约」直接发一句招呼。PROFILE 源 DM —— 同一对账号
+                // 服务端复用同一个会话，这句话续在已有聊天里，不另开一条。
+                const peerUserId = resolveHomePersonAccountId(person.id);
+                // HOME-MORE-GREET-003: 已经连发 GREET_MAX_UNANSWERED 条、对方本人还没回，就不再发。
+                // 只数对方本人的回复（AI 代回复署名 proxy_ai，不算）。
+                const inbox = await conversation.listConversations();
+                const dm = inbox.find((item) => item.conversation.conversationType === "DM" && (item.counterpartyId === peerUserId || (item.conversation.participants ?? []).includes(peerUserId)));
+                let alreadySent: ReadonlyArray<string> = [];
+                if (dm) {
+                  const listed = await conversation.listMessages(dm.conversation.conversationId);
+                  const payload = typeof listed.operationRef === "string" ? JSON.parse(listed.operationRef) as { messages?: Array<{ senderId?: unknown; body?: unknown }>; actorId?: unknown } : {};
+                  const rows = payload.messages ?? [];
+                  if (typeof payload.actorId === "string") {
+                    if (countUnansweredOwnMessages(rows, payload.actorId, peerUserId) >= GREET_MAX_UNANSWERED) return "awaiting_reply";
+                    const me = payload.actorId;
+                    alreadySent = rows.filter((row) => row.senderId === me && typeof row.body === "string").map((row) => row.body as string);
+                  }
+                }
+                // HOME-MORE-GREET-004: 避开跟这个人聊天里我已经发过的句子 —— 同一句发两遍，
+                // 对面（AI 代回复）都会吐槽「又是这句」。全发过了才允许重复。
+                const line = pickGreetingLine(lines, alreadySent);
+                // 被拒（REJECTED）时 client 会抛，首页据此显示"没发出去"。
+                await conversation.startConversation({
+                  originType: "PROFILE", originId: peerUserId, participantId: peerUserId,
+                  conversationType: "DM", firstMessage: line,
+                });
+                return "sent";
               }}
               onMessageAI={(account) => {
                 setMessageChat({ author: account.displayName, aiAccount: account });
                 setPageOverride("MSG_CHAT");
                 setTab("MESSAGES");
               }}
+              onOpenRoomCreate={(candidates, sceneIndex) => { setRoomLayerInMore(true); setRoomCreateSceneIndex(sceneIndex ?? 0); setRoomCreateCandidates(candidates); }}
+              loadRooms={() => conversation.listConversations()}
+              onOpenRoom={(conversationId) => { setRoomLayerInMore(true); setRoomChatId(conversationId); }}
+              moreRoomLayer={roomLayerInMore ? renderRoomLayers("overlay") : null}
+              moreRoomLayerOpen={roomLayerInMore && (roomCreateCandidates !== undefined || roomChatId !== undefined)}
               onCreateScene={setSceneComposerTool}
+              // SCENE-MAP-DEFAULT-001（2026-09-20）：无参数时以前硬编码跳
+              // "threebeans"，把"打开附近场景地图"这个入口悄悄变成"直达
+              // 某一家咖啡馆的详情页"——点哪个都是同一个结果，跟没有地图
+              // 一样。RealitySceneMapSurface 本来就支持 initialSceneId
+              // 缺省显示地图/列表总览（reality-scene-map.tsx 的 selectedId
+              // 初值就是 initialSceneId，undefined 时渲染总览，不是详情）；
+              // 带 sceneId（场景推荐卡点进来）才应该直达该场景详情。
               onOpenSceneMap={(sceneId) => {
-                // 带 sceneId（场景推荐卡）则直达该场景详情；无参数时保持
-                // 原行为：打开 R27 推荐的 threebeans 动态 venue/time 详情。
                 setRealitySceneAI(undefined);
                 setRealitySceneHuman(undefined);
-                if (sceneId) setRealitySceneSelection(sceneId);
-                else setRealitySceneSelection("threebeans");
+                setRealitySceneSelection(sceneId);
                 setRealitySceneOpen(true);
               }}
               sceneApiBaseUrl={localApiBaseUrl}
@@ -901,13 +981,13 @@ export function AppShell({
               onOpenPeerProfile={openPeerProfile}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} relationship={relationship} onOpenConversation={(author, conversationId, aiAccount, avatarSource, peerUserId) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}), ...(peerUserId ? { peerUserId } : {}) } : { author, ...(peerUserId ? { peerUserId } : {}) })} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
+            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} relationship={relationship} onOpenConversation={(author, conversationId, aiAccount, avatarSource, peerUserId) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}), ...(peerUserId ? { peerUserId } : {}) } : { author, ...(peerUserId ? { peerUserId } : {}) })} onOpenRoom={(conversationId) => { setRoomLayerInMore(false); setRoomChatId(conversationId); }} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>
-            <Text style={styles.guestMeTitle}>需要登录</Text>
-            <Text style={styles.guestMeSub}>访客可浏览首页/市场/动态，个人资料、关系与订单需登录后查看</Text>
-            <Pressable onPress={onSignOut} style={styles.guestMeCTA}><Text style={styles.guestMeCTAText}>去登录 / 注册</Text></Pressable>
+            <Text selectable style={styles.guestMeTitle}>需要登录</Text>
+            <Text selectable style={styles.guestMeSub}>访客可浏览首页/市场/动态，个人资料、关系与订单需登录后查看</Text>
+            <Pressable onPress={onSignOut} style={styles.guestMeCTA}><Text selectable style={styles.guestMeCTAText}>去登录 / 注册</Text></Pressable>
           </View>
         ) : voucherOpen ? (
             <VoucherSurface client={vouchers} context={context} onBack={() => setVoucherOpen(false)} />
@@ -916,6 +996,10 @@ export function AppShell({
               key={viewerAccountId ?? "pending-account"}
               context={context}
               localNet={localNet}
+              // PROFILE-ENGAGEMENT-WIRE-001（P0，2026-09-24，用户：「我的个人主页里 没有任何互动的信息 空白的」）：
+              // MeSurface 一直没拿到 engagement —— 个人主页帖子没有 ♡ 喜欢、没有赞数 / 评论（PROFILE-REPLIES-VISIBLE-001
+              // 的注水因此从不执行），主页洞察读不出来显示「—」。其他 surface 都传了，只漏了这里。
+              engagement={engagement}
               fulfillment={fulfillment}
               business={business}
               supply={supply}
@@ -982,6 +1066,7 @@ export function AppShell({
           }}
           open={locationSheetOpen}
         />
+        {renderRoomLayers("modal")}
       </View>
       </SafeAreaView>
     </>
@@ -1002,7 +1087,7 @@ function Header({ compact }: { compact: boolean }): React.JSX.Element {
     <View style={[styles.header, compact && styles.headerCompact]}>
       <View style={styles.headerBrand}>
         <Image resizeMode="contain" source={OTTER_LOGO} style={[styles.headerLogo, compact && styles.headerLogoCompact]} />
-        <Text style={[styles.headerName, compact && styles.headerNameCompact]}>Proxy</Text>
+        <Text selectable style={[styles.headerName, compact && styles.headerNameCompact]}>Proxy</Text>
       </View>
     </View>
   );
@@ -1035,16 +1120,16 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
   }
   return (
     <View style={styles.composerRoot}>
-      <Pressable onPress={onBack} style={styles.composerBack}><Text style={styles.composerBackText}>‹ 返回</Text></Pressable>
-      <Text style={styles.composerTitle}>{meta?.label ?? tool} · Scene Composer</Text>
-      <Text style={styles.composerSub}>P0: 把意图变成可邀请的 Scene — 预算进场景而非买人</Text>
-      <View style={styles.composerField}><Text style={styles.composerLabel}>意图</Text><View style={styles.composerInput}><Text style={styles.composerInputText}>例如：周六下午想在西湖拍照 · 2–4人</Text></View></View>
-      <View style={styles.composerRow}><Pressable onPress={() => setParticipation("OPEN_SIGNUP")} style={[styles.composerChip, participation==="OPEN_SIGNUP"&&styles.composerChipActive]}><Text style={[styles.composerChipText, participation==="OPEN_SIGNUP"&&styles.composerChipTextActive]}>公开报名</Text></Pressable><Pressable onPress={() => setParticipation("PRIVATE_INVITE")} style={[styles.composerChip, participation==="PRIVATE_INVITE"&&styles.composerChipActive]}><Text style={[styles.composerChipText, participation==="PRIVATE_INVITE"&&styles.composerChipTextActive]}>私邀关系</Text></Pressable><Pressable onPress={() => setParticipation("HYBRID")} style={[styles.composerChip, participation==="HYBRID"&&styles.composerChipActive]}><Text style={[styles.composerChipText, participation==="HYBRID"&&styles.composerChipTextActive]}>混合</Text></Pressable></View>
-      <View style={styles.composerRow}><Pressable onPress={() => setCost("HOST_SPONSORED")} style={[styles.composerChip, cost==="HOST_SPONSORED"&&styles.composerChipActive]}><Text style={[styles.composerChipText, cost==="HOST_SPONSORED"&&styles.composerChipTextActive]}>Host Sponsored</Text></Pressable><Pressable onPress={() => setCost("AA")} style={[styles.composerChip, cost==="AA"&&styles.composerChipActive]}><Text style={[styles.composerChipText, cost==="AA"&&styles.composerChipTextActive]}>AA</Text></Pressable><Pressable onPress={() => setCost("MERCHANT_SPONSORED")} style={[styles.composerChip, cost==="MERCHANT_SPONSORED"&&styles.composerChipActive]}><Text style={[styles.composerChipText, cost==="MERCHANT_SPONSORED"&&styles.composerChipTextActive]}>商家权益</Text></Pressable></View>
-      {guard!=="GOOD_FIT" ? <View style={styles.guardWarn}><Text style={styles.guardWarnText}>Guard: 交易感过重 — 建议加场景权益而非直付</Text></View> : <View style={styles.guardOk}><Text style={styles.guardOkText}>Guard: GOOD_FIT · 拿掉目标人仍成立</Text></View>}
-      <View style={styles.invitePreview}><Text style={styles.invitePreviewTitle}>对方将看到</Text><Text style={styles.invitePreviewBody}>{previewBody}</Text><Text style={styles.invitePreviewHint}>独立同意 · 可婉拒</Text></View>
-      {error ? <Text style={styles.guardWarnText}>{error}</Text> : null}
-      <Pressable onPress={handleCreate} style={[styles.composerCTA, busy && {opacity:0.6}]} disabled={busy}><Text style={styles.composerCTAText}>{busy ? "创建中…" : "创建 Scene 草稿"}</Text></Pressable>
+      <Pressable onPress={onBack} style={styles.composerBack}><Text selectable style={styles.composerBackText}>‹ 返回</Text></Pressable>
+      <Text selectable style={styles.composerTitle}>{meta?.label ?? tool} · Scene Composer</Text>
+      <Text selectable style={styles.composerSub}>P0: 把意图变成可邀请的 Scene — 预算进场景而非买人</Text>
+      <View style={styles.composerField}><Text selectable style={styles.composerLabel}>意图</Text><View style={styles.composerInput}><Text selectable style={styles.composerInputText}>例如：周六下午想在西湖拍照 · 2–4人</Text></View></View>
+      <View style={styles.composerRow}><Pressable onPress={() => setParticipation("OPEN_SIGNUP")} style={[styles.composerChip, participation==="OPEN_SIGNUP"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, participation==="OPEN_SIGNUP"&&styles.composerChipTextActive]}>公开报名</Text></Pressable><Pressable onPress={() => setParticipation("PRIVATE_INVITE")} style={[styles.composerChip, participation==="PRIVATE_INVITE"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, participation==="PRIVATE_INVITE"&&styles.composerChipTextActive]}>私邀关系</Text></Pressable><Pressable onPress={() => setParticipation("HYBRID")} style={[styles.composerChip, participation==="HYBRID"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, participation==="HYBRID"&&styles.composerChipTextActive]}>混合</Text></Pressable></View>
+      <View style={styles.composerRow}><Pressable onPress={() => setCost("HOST_SPONSORED")} style={[styles.composerChip, cost==="HOST_SPONSORED"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, cost==="HOST_SPONSORED"&&styles.composerChipTextActive]}>Host Sponsored</Text></Pressable><Pressable onPress={() => setCost("AA")} style={[styles.composerChip, cost==="AA"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, cost==="AA"&&styles.composerChipTextActive]}>AA</Text></Pressable><Pressable onPress={() => setCost("MERCHANT_SPONSORED")} style={[styles.composerChip, cost==="MERCHANT_SPONSORED"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, cost==="MERCHANT_SPONSORED"&&styles.composerChipTextActive]}>商家权益</Text></Pressable></View>
+      {guard!=="GOOD_FIT" ? <View style={styles.guardWarn}><Text selectable style={styles.guardWarnText}>Guard: 交易感过重 — 建议加场景权益而非直付</Text></View> : <View style={styles.guardOk}><Text selectable style={styles.guardOkText}>Guard: GOOD_FIT · 拿掉目标人仍成立</Text></View>}
+      <View style={styles.invitePreview}><Text selectable style={styles.invitePreviewTitle}>对方将看到</Text><Text selectable style={styles.invitePreviewBody}>{previewBody}</Text><Text selectable style={styles.invitePreviewHint}>独立同意 · 可婉拒</Text></View>
+      {error ? <Text selectable style={styles.guardWarnText}>{error}</Text> : null}
+      <Pressable onPress={handleCreate} style={[styles.composerCTA, busy && {opacity:0.6}]} disabled={busy}><Text selectable style={styles.composerCTAText}>{busy ? "创建中…" : "创建 Scene 草稿"}</Text></Pressable>
     </View>
   );
 }
@@ -1083,16 +1168,18 @@ function LocationContext({
       style={({ pressed }) => [styles.locationMain, pressed && styles.locationRowPressed]}
     >
       <View style={styles.locationPin}>
-        <ProxyIcon color={color.ink} name="route" size={17} />
+        {/* MAP-FOOTPRINT-LOGO-001：首页场景地图入口用原型「折叠地图」logo。
+            27 小格里用 21（48 栅格原画显小一圈，等效原来 route 17 的分量）。 */}
+        <ProxyIcon color={color.ink} name="mapFold" size={21} />
       </View>
       <View style={styles.locationCopy}>
-        <Text numberOfLines={2} style={styles.locationCity}>{formatLocationTitle(location)}</Text>
-        <Text numberOfLines={1} style={styles.locationSub}>
+        <Text selectable numberOfLines={2} style={styles.locationCity}>{formatLocationTitle(location)}</Text>
+        <Text selectable numberOfLines={1} style={styles.locationSub}>
           {sub}
         </Text>
       </View>
     </Pressable>
-      <Pressable accessibilityLabel="切换本地范围" accessibilityRole="button" onPress={onSwitchLocation} style={styles.locationSwitchButton}><Text style={styles.locationSwitch}>切换⌄</Text></Pressable>
+      <Pressable accessibilityLabel="切换本地范围" accessibilityRole="button" onPress={onSwitchLocation} style={styles.locationSwitchButton}><Text selectable style={styles.locationSwitch}>切换⌄</Text></Pressable>
     </View>
   );
 }
@@ -1417,7 +1504,7 @@ function RootNav({
                     <ProxyIcon color={isActiveVisual ? accent : "#8d8d92"} name={entry.icon} size={22} />
                     {entry.badge ? <View style={styles.navBadgeDot} /> : null}
                   </View>
-                  <Text
+                  <Text selectable
                     numberOfLines={1}
                     style={[
                       styles.navLabel,

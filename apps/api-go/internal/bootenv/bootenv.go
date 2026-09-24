@@ -31,12 +31,19 @@ func Warnings() []string {
 	if Getenv("DATABASE_URL") == "" {
 		warnings = append(warnings, "DATABASE_URL is unset; using in-memory stores (dev/test only, no data survives restart)")
 	}
-	// Login provider: PROXY_LOGIN_PROVIDER defaults to "simulated"
-	// which is dev-only. In prod the operator must set SMTP or SMS
-	// env so a real challenge is delivered.
+	// Login provider. LOGIN-PROVIDER-BOOT-001: an EMPTY PROXY_LOGIN_PROVIDER
+	// does not degrade to "simulated" — cmd/api's wire_providers.go treats
+	// unset the same as an unrecognized mode and refuses to boot (previously
+	// it silently fell back to a fail-closed provider that rejected every
+	// OTP request, which is the actual mechanism behind the recurring
+	// "验证码服务尚未配置" reports). This warning must never claim the empty
+	// case is "simulated" — that wording is what made the fail-closed state
+	// look like a working dev mode in the boot log.
 	mode := Getenv("PROXY_LOGIN_PROVIDER")
-	if mode == "" || mode == "simulated" {
-		warnings = append(warnings, fmt.Sprintf("PROXY_LOGIN_PROVIDER=%q is dev-only; configure PROXY_SMTP_HOST (or PROXY_SMS_URL) for production", defaultMode(mode)))
+	if mode == "" {
+		warnings = append(warnings, "PROXY_LOGIN_PROVIDER is unset; the API will refuse to boot (fail-closed, not simulated) — set it to \"simulated\", \"smtp\", \"sms\", or \"production\"")
+	} else if mode == "simulated" {
+		warnings = append(warnings, "PROXY_LOGIN_PROVIDER=\"simulated\" is dev-only; configure PROXY_SMTP_HOST (or PROXY_SMS_URL) for production")
 	}
 	// Operator gate: empty = every privileged command is rejected.
 	// This is fail-closed by design but we surface it as a warning
@@ -75,13 +82,6 @@ func Warnings() []string {
 		warnings = append(warnings, fmt.Sprintf("PROXY_MIN_APP_VERSION=%q is not a valid semver (expected e.g. 1.0.0); version enforcement will be best-effort", value))
 	}
 	return warnings
-}
-
-func defaultMode(mode string) string {
-	if mode == "" {
-		return "simulated"
-	}
-	return mode
 }
 
 func parseInt32(s string) (int32, error) {

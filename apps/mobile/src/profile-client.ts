@@ -13,6 +13,7 @@ import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { commandErrorMessage } from "./command-error-message";
 
 export type ProfileWire = {
   userAccountId: string;
@@ -121,7 +122,7 @@ export class ProfileClient {
     const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
     if (!result) throw new Error("profile command malformed");
-    if (result.outcome === "REJECTED") throw new Error(result.error?.messageKey ?? result.error?.errorCode ?? "profile rejected");
+    if (result.outcome === "REJECTED") throw new Error(commandErrorMessage(result.error, "profile rejected"));
     if (response.status < 200 || response.status >= 300) throw new Error(`unexpected profile status: ${response.status}`);
     return result;
   }

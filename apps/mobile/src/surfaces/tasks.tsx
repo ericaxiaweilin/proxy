@@ -12,6 +12,7 @@ import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, Text
 import type { Activity } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { color, Gradient, shadows } from "../theme";
+import { activityAIPersonaName } from "./activity-detail-model";
 
 // origin 徽标 — 指“发布人身份”（平台 / 商家 / 用户 / TEST）。
 // AI 状态在 aiStatus / aiActorKind / aiPersona* 表达，origin
@@ -46,9 +47,9 @@ export function ActivityFeedCard({ item, onPress }: { item: Activity; onPress: (
       <View style={styles.exampleHead}>
         <View style={styles.exampleTitle}>
           <View style={[styles.originBadge, { backgroundColor: origin.bg }]}>
-            <Text style={[styles.originBadgeText, { color: origin.fg }]}>{origin.label}</Text>
+            <Text selectable style={[styles.originBadgeText, { color: origin.fg }]}>{origin.label}</Text>
           </View>
-          {item.aiStatus !== "NONE" && item.aiPersonaName ? (
+          {item.aiStatus !== "NONE" ? (
             // R17.x: 平台 AI 角色 photo 资产。三件 (id / name / photo)
             // 总是同时下发. mobile 优先用 personaPhotoColor (从
             // persona id 推出: ai_001=紫/ai_002=粉/...) 在 32x32
@@ -59,52 +60,52 @@ export function ActivityFeedCard({ item, onPress }: { item: Activity; onPress: (
             // — 未来 expo-image SVG 支持上线后渲染。
             <View style={styles.exampleAIPersonaRow}>
               <View style={[styles.exampleAIPersonaCircle, personaColorStyle(item.aiPersonaId ?? "")]}>
-                <Text style={styles.exampleAIPersonaCircleText}>{item.aiPersonaAvatar ?? "🤖"}</Text>
+                <Text selectable style={styles.exampleAIPersonaCircleText}>{item.aiPersonaAvatar ?? "🤖"}</Text>
               </View>
               <View>
-                <Text style={styles.exampleAIPersona}>
-                  {item.aiPersonaName} · {item.aiStatus === "AI_GENERATED" ? "AI 生成，平台审核发布" : "AI 辅助"}
+                <Text selectable style={styles.exampleAIPersona}>
+                  {activityAIPersonaName(item)} · {item.aiStatus === "AI_GENERATED" ? "AI 生成，平台审核发布" : "AI 辅助"}
                 </Text>
-                <Text style={styles.exampleAIPersonaBadge}>AI 虚拟形象</Text>
+                <Text selectable style={styles.exampleAIPersonaBadge}>AI 虚拟形象</Text>
               </View>
             </View>
           ) : null}
-          <Text style={styles.exampleName}>{item.title}</Text>
-          <Text style={styles.exampleMeta}>
+          <Text selectable style={styles.exampleName}>{item.title}</Text>
+          <Text selectable style={styles.exampleMeta}>
             {item.time} · {item.people}
           </Text>
         </View>
         <View style={styles.examplePrice}>
-          <Text style={styles.examplePriceStrong}>{item.price}</Text>
-          <Text style={styles.examplePriceSmall}>{item.priceLabel}</Text>
+          <Text selectable style={styles.examplePriceStrong}>{item.price}</Text>
+          <Text selectable style={styles.examplePriceSmall}>{item.priceLabel}</Text>
         </View>
       </View>
       <View style={styles.venue}>
         <View style={styles.venueIcon}>
-          <Text style={styles.venueIconText}>{item.venueIcon}</Text>
+          <Text selectable style={styles.venueIconText}>{item.venueIcon}</Text>
         </View>
         <View style={styles.venueCopy}>
-          <Text style={styles.venueName}>{item.venueName}</Text>
-          <Text style={styles.venueNote}>
+          <Text selectable style={styles.venueName}>{item.venueName}</Text>
+          <Text selectable style={styles.venueNote}>
             {item.consumption} · 预计 {item.venueSpend}
           </Text>
         </View>
         <View style={styles.venueTag}>
-          <Text style={styles.venueTagText}>平台商家</Text>
+          <Text selectable style={styles.venueTagText}>平台商家</Text>
         </View>
       </View>
       {/* 基线 .activitysignals：感兴趣 / 已参加 / 分享 */}
       <View style={styles.activitySignals}>
-        <Text style={styles.activitySignalText}>◉ {item.interested} 人感兴趣</Text>
-        <Text style={styles.activitySignalText}>
+        <Text selectable style={styles.activitySignalText}>◉ {item.interested} 人感兴趣</Text>
+        <Text selectable style={styles.activitySignalText}>
           ✓ {item.joined}
           {item.capacity ? `/${item.capacity}` : ""} 已参加
         </Text>
-        <Text style={styles.activitySignalText}>↗ {item.shares} 次分享</Text>
+        <Text selectable style={styles.activitySignalText}>↗ {item.shares} 次分享</Text>
       </View>
       {item.parentTitle ? (
         <View style={styles.linkLine}>
-          <Text style={styles.linkLineText}>关联：{item.parentTitle}</Text>
+          <Text selectable style={styles.linkLineText}>关联：{item.parentTitle}</Text>
         </View>
       ) : null}
     </Pressable>
@@ -142,104 +143,104 @@ export function ActivityDetail({
       <Gradient from="color.ink" to="#342446" style={styles.detailHero}>
         <View style={styles.detailTopLine}>
           <View style={[styles.originBadge, { backgroundColor: origin.bg }]}>
-            <Text style={[styles.originBadgeText, { color: origin.fg }]}>{origin.label}</Text>
+            <Text selectable style={[styles.originBadgeText, { color: origin.fg }]}>{origin.label}</Text>
           </View>
           <View style={styles.detailPrice}>
-            <Text style={styles.detailPriceStrong}>{item.price}</Text>
-            <Text style={styles.detailPriceSmall}>{item.priceLabel}</Text>
+            <Text selectable style={styles.detailPriceStrong}>{item.price}</Text>
+            <Text selectable style={styles.detailPriceSmall}>{item.priceLabel}</Text>
           </View>
         </View>
-        {item.aiStatus !== "NONE" && item.aiPersonaName ? (
+        {item.aiStatus !== "NONE" ? (
           <View style={styles.detailAIPersonaRow}>
             <View style={[styles.detailAIPersonaAvatarCircle, personaColorStyle(item.aiPersonaId ?? "")]}>
-              <Text style={styles.detailAIPersonaAvatarEmoji}>{item.aiPersonaAvatar ?? "🤖"}</Text>
+              <Text selectable style={styles.detailAIPersonaAvatarEmoji}>{item.aiPersonaAvatar ?? "🤖"}</Text>
             </View>
             <View style={styles.detailAIPersonaTextCol}>
-              <Text style={styles.detailAIPersonaName}>{item.aiPersonaName}</Text>
-              <Text style={styles.detailAIPersonaDisclaimer}>{item.aiStatus === "AI_GENERATED" ? "AI 生成冷启动内容 · 由 Proxy 审核并作为发布方 · AI 不能报名或收款" : "AI 辅助整理 · 发布方承担责任"}</Text>
+              <Text selectable style={styles.detailAIPersonaName}>{activityAIPersonaName(item)}</Text>
+              <Text selectable style={styles.detailAIPersonaDisclaimer}>{item.aiStatus === "AI_GENERATED" ? "AI 生成冷启动内容 · 由 Proxy 审核并作为发布方 · AI 不能报名或收款" : "AI 辅助整理 · 发布方承担责任"}</Text>
             </View>
           </View>
         ) : null}
-        <Text style={styles.detailTitle}>{item.title}</Text>
-        <Text style={styles.detailDesc}>{item.desc}</Text>
+        <Text selectable style={styles.detailTitle}>{item.title}</Text>
+        <Text selectable style={styles.detailDesc}>{item.desc}</Text>
       </Gradient>
 
       {/* 基线 .sceneanchor：深色场地锚点 */}
       <View style={styles.sceneAnchor}>
         <View style={styles.sceneIcon}>
-          <Text style={styles.sceneIconText}>{item.venueIcon}</Text>
+          <Text selectable style={styles.sceneIconText}>{item.venueIcon}</Text>
         </View>
         <View style={styles.sceneCopy}>
-          <Text style={styles.sceneName}>{item.venueName}</Text>
-          <Text style={styles.sceneNote}>
+          <Text selectable style={styles.sceneName}>{item.venueName}</Text>
+          <Text selectable style={styles.sceneNote}>
             {item.venueTypeLabel} · {item.time}
           </Text>
-          <Text style={styles.sceneNote}>
+          <Text selectable style={styles.sceneNote}>
             {item.consumption} · 预计消费 {item.venueSpend}
           </Text>
         </View>
-        <Text style={styles.sceneTag}>平台商家</Text>
+        <Text selectable style={styles.sceneTag}>平台商家</Text>
       </View>
 
       {/* 基线 .benefitbox：lime 权益盒 */}
       <View style={styles.benefitBox}>
-        <Text style={styles.benefitTitle}>本场可用权益</Text>
-        <Text style={styles.benefitText}>{item.benefit}</Text>
+        <Text selectable style={styles.benefitTitle}>本场可用权益</Text>
+        <Text selectable style={styles.benefitText}>{item.benefit}</Text>
       </View>
 
       <View style={styles.activitySignals}>
-        <Text style={styles.activitySignalText}>◉ {item.interested} 人感兴趣</Text>
-        <Text style={styles.activitySignalText}>
+        <Text selectable style={styles.activitySignalText}>◉ {item.interested} 人感兴趣</Text>
+        <Text selectable style={styles.activitySignalText}>
           ✓ {item.joined}
           {item.capacity ? `/${item.capacity}` : ""} 已参加
         </Text>
-        <Text style={styles.activitySignalText}>↗ {item.shares} 次分享</Text>
+        <Text selectable style={styles.activitySignalText}>↗ {item.shares} 次分享</Text>
       </View>
 
       {/* 基线 .activitysocialbar：感兴趣（不是点赞）+ 分享 */}
       <View style={styles.socialBar}>
         <Pressable onPress={onToggleInterested} disabled={busy} style={[styles.socialBtn, interested && styles.socialBtnOn]}>
-          <Text style={[styles.socialBtnText, interested && styles.socialBtnTextOn]}>
+          <Text selectable style={[styles.socialBtnText, interested && styles.socialBtnTextOn]}>
             {busy ? "…" : interested ? "✓ 已感兴趣" : "☆ 感兴趣"}
           </Text>
         </Pressable>
         <Pressable onPress={() => void Share.share({ message: `${item.title} · ${item.time} · ${item.venueName} — Proxy` })} style={styles.socialBtn} accessibilityLabel="分享活动">
-          <Text style={styles.socialBtnText}>↗ 分享活动</Text>
+          <Text selectable style={styles.socialBtnText}>↗ 分享活动</Text>
         </Pressable>
       </View>
-      {notice ? <Text style={styles.errorText}>{notice}</Text> : null}
+      {notice ? <Text selectable style={styles.errorText}>{notice}</Text> : null}
 
       {item.parentTitle ? (
         <View style={styles.linkLine}>
-          <Text style={styles.linkLineText}>关联活动：{item.parentTitle}</Text>
+          <Text selectable style={styles.linkLineText}>关联活动：{item.parentTitle}</Text>
         </View>
       ) : null}
 
       {/* 基线 .qabox：公开层结构化问答，不是开放评论区 */}
       <View style={styles.qaBox}>
         <View style={styles.qaHead}>
-          <Text style={styles.qaHeadTitle}>活动问答 · {item.qaCount}</Text>
-          <Text style={styles.qaHeadMore}>查看 / 提问 →</Text>
+          <Text selectable style={styles.qaHeadTitle}>活动问答 · {item.qaCount}</Text>
+          <Text selectable style={styles.qaHeadMore}>查看 / 提问 →</Text>
         </View>
         <View style={styles.qaItem}>
-          <Text style={styles.qaQuestion}>饮品怎么付？</Text>
-          <Text style={styles.qaAnswer}>
+          <Text selectable style={styles.qaQuestion}>饮品怎么付？</Text>
+          <Text selectable style={styles.qaAnswer}>
             {item.consumption === "各自消费" ? "各自按门店实际消费结算。" : item.consumption}
           </Text>
-          <Text style={styles.qaWho}>发起人已回答</Text>
+          <Text selectable style={styles.qaWho}>发起人已回答</Text>
         </View>
         <View style={styles.qaItem}>
           {isCafe ? (
             <>
-              <Text style={styles.qaQuestion}>必须带相机吗？</Text>
-              <Text style={styles.qaAnswer}>不用，手机也可以；重点是互相拍照。</Text>
-              <Text style={styles.qaWho}>发起人已回答</Text>
+              <Text selectable style={styles.qaQuestion}>必须带相机吗？</Text>
+              <Text selectable style={styles.qaAnswer}>不用，手机也可以；重点是互相拍照。</Text>
+              <Text selectable style={styles.qaWho}>发起人已回答</Text>
             </>
           ) : (
             <>
-              <Text style={styles.qaQuestion}>需要提前到吗？</Text>
-              <Text style={styles.qaAnswer}>按活动时间到店即可，座位由门店保留。</Text>
-              <Text style={styles.qaWho}>商家已回答</Text>
+              <Text selectable style={styles.qaQuestion}>需要提前到吗？</Text>
+              <Text selectable style={styles.qaAnswer}>按活动时间到店即可，座位由门店保留。</Text>
+              <Text selectable style={styles.qaWho}>商家已回答</Text>
             </>
           )}
         </View>
@@ -248,10 +249,10 @@ export function ActivityDetail({
       {/* 基线 .verifiedreview：往期参与者反馈（实际到店） */}
       <View style={styles.reviewBox}>
         <View style={styles.reviewHead}>
-          <Text style={styles.reviewTitle}>往期参与者反馈</Text>
-          <Text style={styles.reviewBadge}>实际到店</Text>
+          <Text selectable style={styles.reviewTitle}>往期参与者反馈</Text>
+          <Text selectable style={styles.reviewBadge}>实际到店</Text>
         </View>
-        <Text style={styles.reviewText}>
+        <Text selectable style={styles.reviewText}>
           {isCafe ? "“座位拍照光线不错，活动人数刚好，不会太尴尬。”" : "“场次组织比较顺，套餐规则提前写清楚了，到店不用再沟通。”"}
         </Text>
       </View>
@@ -259,37 +260,37 @@ export function ActivityDetail({
       {/* 参加状态与 CTA：确认参加后才开放群聊 */}
       {joined ? (
         <View style={styles.joinState}>
-          <Text style={styles.joinStateTitle}>你已参加这场活动</Text>
-          <Text style={styles.joinStateText}>活动群聊仅向已确认参与者开放，用于到店前必要沟通。群聊入口尚未接入，不显示假按钮。</Text>
+          <Text selectable style={styles.joinStateTitle}>你已参加这场活动</Text>
+          <Text selectable style={styles.joinStateText}>活动群聊仅向已确认参与者开放，用于到店前必要沟通。群聊入口尚未接入，不显示假按钮。</Text>
         </View>
       ) : item.origin === "USER" || (item.aiStatus !== "NONE" && item.aiActorKind === "USER_TWIN") ? null : (
         <Gradient from={color.magenta} to={color.violet} style={styles.ctaPrimary}>
           <Pressable onPress={onJoin} disabled={busy} style={styles.ctaPrimaryInner}>
-            <Text style={styles.ctaPrimaryText}>{busy ? "处理中…" : "参加活动"}</Text>
+            <Text selectable style={styles.ctaPrimaryText}>{busy ? "处理中…" : "参加活动"}</Text>
           </Pressable>
         </Gradient>
       )}
       {item.origin !== "USER" ? (
         <Pressable onPress={() => void Share.share({ message: `${item.title} · ${item.time} · ${item.venueName} — Proxy` })} style={styles.ctaLight} accessibilityLabel="找人一起参加">
-          <Text style={styles.ctaLightText}>找人一起参加</Text>
+          <Text selectable style={styles.ctaLightText}>找人一起参加</Text>
         </Pressable>
       ) : null}
       {item.aiStatus === "AI_GENERATED" || item.aiStatus === "AI_ASSISTED" ? (
-        <Text style={styles.aiPersonaDisclaimerFooter}>
+        <Text selectable style={styles.aiPersonaDisclaimerFooter}>
           {item.aiStatus === "AI_GENERATED" && item.aiActorKind === "PLATFORM_AI"
             ? `本活动由平台 AI 小美生成 · 由 Proxy 审核并作为发布方。AI 不能报名、不能收款。如不适请在详情页点“向平台反馈”。`
             : item.aiStatus === "AI_GENERATED" && item.aiActorKind === "USER_TWIN"
-              ? `本活动由“${item.aiPersonaName ?? "用户分身"}”数字分身起草 · 真人为本人发布。如不适请在详情页点“向平台反馈”。`
-              : `本活动由 AI 助理协助起草 · “${item.aiPersonaName ?? "AI 助理"}”不是活动主办方，发布方本人承担责任。`}
+              ? `本活动由“${activityAIPersonaName(item)}”数字分身起草 · 真人为本人发布。如不适请在详情页点“向平台反馈”。`
+              : `本活动由 AI 助理协助起草 · “${activityAIPersonaName(item)}”不是活动主办方，发布方本人承担责任。`}
         </Text>
       ) : null}
       {item.realitySceneId && onOpenRealityScene ? (
         <Pressable onPress={() => onOpenRealityScene(item.realitySceneId!)} style={styles.ctaLight}>
-          <Text style={styles.ctaLightText}>查看场景地图</Text>
+          <Text selectable style={styles.ctaLightText}>查看场景地图</Text>
         </Pressable>
       ) : null}
       <Pressable onPress={onBack} style={styles.ctaLight}>
-        <Text style={styles.ctaLightText}>返回活动</Text>
+        <Text selectable style={styles.ctaLightText}>返回活动</Text>
       </Pressable>
     </>
   );

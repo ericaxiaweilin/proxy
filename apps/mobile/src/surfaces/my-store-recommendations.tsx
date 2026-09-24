@@ -53,7 +53,7 @@ export function MyStoreRecommendations(): React.JSX.Element {
 
   return (
     <View>
-      <Text style={styles.appBehaviorCardDesc}>
+      <Text selectable style={styles.appBehaviorCardDesc}>
         你推荐进体系的店都在这里。采纳只代表运营批准接入，商家真正入驻是另一件事 ——
         看到「已采纳」就该去建店了，否则这条推荐只是被批准了，店铺并不会自己出现。
       </Text>
@@ -64,28 +64,28 @@ export function MyStoreRecommendations(): React.JSX.Element {
         </View>
       ) : null}
 
-      {error ? <Text style={{ color: "#B3261E", fontSize: 12, marginTop: 8 }}>{error}</Text> : null}
+      {error ? <Text selectable style={{ color: "#B3261E", fontSize: 12, marginTop: 8 }}>{error}</Text> : null}
 
       {!error && rows && rows.length === 0 ? (
         <View style={styles.infoNote}>
-          <Text style={styles.infoNoteText}>你还没有推荐过店铺。</Text>
+          <Text selectable style={styles.infoNoteText}>你还没有推荐过店铺。</Text>
         </View>
       ) : null}
 
       {rows?.map((row) => (
         <View key={row.recommendationId} style={styles.prototypeCard}>
-          <Text style={styles.prototypeCardTitle}>{row.storeName}</Text>
-          <Text style={styles.prototypeCardDesc}>
+          <Text selectable style={styles.prototypeCardTitle}>{row.storeName}</Text>
+          <Text selectable style={styles.prototypeCardDesc}>
             {row.city}
             {row.category ? ` · ${row.category}` : ""} · 推荐于 {when(row.createdAt)}
           </Text>
 
           {row.decision === "ACCEPT" ? (
             <View style={{ marginTop: 8 }}>
-              <Text style={[styles.prototypeCardDesc, { color: "#1B7F4D", fontWeight: "800" }]}>
+              <Text selectable style={[styles.prototypeCardDesc, { color: "#1B7F4D", fontWeight: "800" }]}>
                 已采纳 · 等你建店
               </Text>
-              <Text style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
+              <Text selectable style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
                 运营已经批准这家店进体系了。批准不等于店铺已存在 ——
                 需要你在「我的店铺」里把店铺建出来，它才算真的接入。
               </Text>
@@ -94,12 +94,12 @@ export function MyStoreRecommendations(): React.JSX.Element {
 
           {row.decision === "REJECT" ? (
             <View style={{ marginTop: 8 }}>
-              <Text style={[styles.prototypeCardDesc, { color: "#8C5A2B", fontWeight: "800" }]}>
+              <Text selectable style={[styles.prototypeCardDesc, { color: "#8C5A2B", fontWeight: "800" }]}>
                 这次没有采纳
               </Text>
               {/* 理由是运营必填的。不给理由的拒绝无法解释，所以这里照实显示。 */}
               {row.decisionReason ? (
-                <Text style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
+                <Text selectable style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
                   原因：{row.decisionReason}
                 </Text>
               ) : null}
@@ -107,7 +107,7 @@ export function MyStoreRecommendations(): React.JSX.Element {
           ) : null}
 
           {!row.decision ? (
-            <Text style={[styles.prototypeCardDesc, { marginTop: 8 }]}>运营还在评估中。</Text>
+            <Text selectable style={[styles.prototypeCardDesc, { marginTop: 8 }]}>运营还在评估中。</Text>
           ) : null}
         </View>
       ))}
@@ -117,7 +117,7 @@ export function MyStoreRecommendations(): React.JSX.Element {
         onPress={() => void load()}
         style={[styles.appBehaviorReturn, { marginTop: 12 }, busy && { opacity: 0.5 }]}
       >
-        <Text style={styles.appBehaviorReturnText}>{busy ? "读取中…" : "刷新"}</Text>
+        <Text selectable style={styles.appBehaviorReturnText}>{busy ? "读取中…" : "刷新"}</Text>
       </Pressable>
     </View>
   );

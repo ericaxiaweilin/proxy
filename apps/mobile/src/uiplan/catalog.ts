@@ -14,6 +14,8 @@ export const CandidateSchema = z.object({
   fulfillmentRate: z.number(),
   satisfactionRate: z.number(),
   completedOrders: z.number(),
+  // MATCH-LIVE-001：false = 还没有完成过订单（新人），界面显示「暂无记录」，不把 0% 画成履约很差。
+  hasTrackRecord: z.boolean().optional(),
   languages: z.array(z.string()),
   proofs: z.array(z.string())
 });
@@ -70,7 +72,11 @@ export const proxyCatalog = defineCatalog(schema, {
     },
     // ---- Human Supply ----
     CANDIDATE_RAIL: {
-      props: z.object({ candidates: z.array(CandidateSchema) }),
+      // MATCH-LIVE-001：status 让面板如实说「在排 / 没人 / 出错 / 需要登录」，不再用演示人顶替。
+      props: z.object({
+        candidates: z.array(CandidateSchema),
+        status: z.enum(["loading", "ready", "empty", "error", "unavailable"]).optional()
+      }),
       description:
         "候选轨道：真实供给查询返回的候选卡（本单报价 + 履约/满意/单量 + 证明）。允许 Surface：FULFILLMENT_WORKSPACE。"
     },

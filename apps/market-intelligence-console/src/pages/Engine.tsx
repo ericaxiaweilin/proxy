@@ -1,3 +1,4 @@
+import { opFetch } from "../lib/api";
 import { useEffect, useState } from "react";
 import { FixtureNotice } from "../components/FixtureNotice";
 
@@ -10,7 +11,7 @@ type EnginePayload = {
 
 export function Engine() {
   const [data, setData] = useState<EnginePayload | null>(null);
-  useEffect(() => { fetch("/v1/operator/decision-engine").then((r) => r.json()).then(setData).catch(() => {}); }, []);
+  useEffect(() => { opFetch("/v1/operator/decision-engine").then(setData).catch(() => {}); }, []);
   if (!data) return <div className="notice">加载 Decision Engine…</div>;
   return (
     <>

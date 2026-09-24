@@ -64,6 +64,36 @@ describe("social media pipeline contracts", () => {
   });
 });
 
+describe("FeedMediaItem AI provenance (LC-06)", () => {
+  const base = {
+    mediaAssetId: "ma_ai_001",
+    mediaType: "IMAGE" as const,
+    width: 1024,
+    height: 1024,
+    aspectRatio: 1,
+    processingStatus: "READY",
+    moderationStatus: "APPROVED" as const,
+    sortOrder: 0
+  };
+
+  it("carries the closed set declared by media_assets.ai_generation_source", () => {
+    for (const source of ["USER_UPLOADED", "AI_PERSONA", "MODEL_API", "UNKNOWN"] as const) {
+      expect(FeedMediaItemSchema.parse({ ...base, aiGenerationSource: source }).aiGenerationSource).toBe(source);
+    }
+  });
+
+  it("rejects a provenance value outside the DB closed set", () => {
+    // migration 108 的 CHECK 只认这四个。契约这边放宽，客户端就会见到它无法归类的
+    // 值 —— 而「AI 做的就标注」这条规则正是靠这个字段判定，归不了类就判不了。
+    expect(FeedMediaItemSchema.safeParse({ ...base, aiGenerationSource: "AI_GENERATED" }).success).toBe(false);
+  });
+
+  it("stays parseable when the field is absent (backward compat)", () => {
+    // 向后兼容是本 schema 的既有约定；「服务端不会悄悄丢掉它」由 Go 侧钉住。
+    expect(FeedMediaItemSchema.parse(base).aiGenerationSource).toBeUndefined();
+  });
+});
+
 describe("AUDIO media (voice posts, ≤30s)", () => {
   it("accepts AUDIO as a FeedMediaItem mediaType", () => {
     const item = FeedMediaItemSchema.parse({

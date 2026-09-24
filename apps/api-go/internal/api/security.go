@@ -12,6 +12,10 @@ import (
 // readiness override). Fail-closed: a nil gate denies everything.
 type OperatorGate interface {
 	IsOperator(actor command.Actor, principal command.Principal, authContext map[string]any) bool
+	// OPS-SCOPE-002: scopes held by this caller (see operator_scopes.go).
+	// Empty = none. Call only after IsOperator passes; non-operators get
+	// an empty set either way.
+	ScopesFor(actor command.Actor, principal command.Principal, authContext map[string]any) map[OperatorScope]bool
 }
 
 // StaticOperatorGate grants operator rights to an explicit principal allowlist
@@ -19,6 +23,10 @@ type OperatorGate interface {
 // their server-issued auth context.
 type StaticOperatorGate struct {
 	principalIDs map[string]bool
+	// OPS-SCOPE-002: optional per-principal scopes (env
+	// PROXY_OPERATOR_SCOPES, see ParsePrincipalScopes). Nil = every
+	// allowlisted caller holds the full scope set (pre-scope behavior).
+	scoped map[string]map[OperatorScope]bool
 }
 
 func NewStaticOperatorGate(principalIDs []string) *StaticOperatorGate {
@@ -47,7 +55,13 @@ func (g *StaticOperatorGate) IsOperator(_ command.Actor, principal command.Princ
 // operatorCommandTypes are privileged commands that must never be reachable by
 // ordinary authenticated users.
 var operatorCommandTypes = map[string]bool{
-	"VerifyCapability":         true,
+	"VerifyCapability": true,
+	// COMP-SELLER-001: 供给侧实名核验（写入侧）。这条命令决定「谁有资格在平台上
+	// 收钱」，是越南电商法 122/2025 + NĐ 248/2026 下平台唯一的合规凭据来源 ——
+	// 绝不能让卖家自己给自己签「已实名」（否则实名门形同虚设：谁都能把自己
+	// 放行，而平台还拿着一份看起来完整的核验记录）。
+	// 同走 PROXY_OPERATOR_PRINCIPALS 白名单 + IDENTITY scope，未设 = 拒。
+	"AttestSellerRealName":     true,
 	"ReviewContributionAccess": true,
 	"ReviewContributionDomain": true,
 	"ReviewRewardGate":         true,
@@ -74,10 +88,16 @@ var operatorCommandTypes = map[string]bool{
 	"CreateVoucher":        true,
 	"SettleVoucher":        true,
 	// VOUCHER-PURCHASE-001: 平台向商户采购是平台侧动作（运营下单/确认），
-	// 普通用户与商户都不能自己给自己开采购单。确认即铸券， arithmetic 由
+	// 普通用户与商户都不能自己给自己开采购单。确认即铸券，算术由
 	// 服务端算、109 迁移 CHECK 闭合，但入口仍收进 operator 门。
 	"OrderVoucherPurchase":   true,
 	"ConfirmVoucherPurchase": true,
+	// COMP-REPORT-005: 举报队列（列表）。队列里含举报人 id 与被举报目标 id，
+	// 属于个人信息 —— 普通用户绝不能枚举别人举报了什么、谁举报的。
+	// 与 COMP-REPORT-003 是同一件事的两半：没有这条读出口，处置入口就没有
+	// 入口可言（举报收得下，却没人能发现它存在）。
+	// 同走 PROXY_OPERATOR_PRINCIPALS 白名单，未设 = 拒。
+	"ListReportQueue": true,
 	// COMP-REPORT-003: 举报处置（接手 / 升级 / 处置 / 判定不成立 / 重开）。
 	// 这是「平台处理过举报」的唯一留痕入口，绝不能让普通用户自己写 ——
 	// 否则处置记录就成了谁都能伪造的东西，举证价值归零。
@@ -214,6 +234,11 @@ var operatorCommandTypes = map[string]bool{
 	// 的豁免名单里）、ListPostsByIds、ListPostsMentioning 都是用户正常浏览帖子的读，
 	// 收紧会让 App 静默坏掉，故反向钉住不做。
 	"ListInteractionEvents": true,
+	// CONTENT-ANALYTICS-001（2026-09-23，用户：「更详细的用户 abcd…看了这张照片多少 s 甚至双击放大看…这些是只能
+	// 公司运营用 而不是泄漏给用户侧」）：逐人浏览明细（谁、看了几秒、放大几次）只给运营，用于精准投流。
+	// 用户侧只拿聚合（ListPostImpressionStats / ListMediaImpressionStats / GetContentAnalytics）。
+	"ListPostAudience":           true,
+	"ListMediaActivityForViewer": true,
 }
 
 func requiresOperator(commandType string) bool {

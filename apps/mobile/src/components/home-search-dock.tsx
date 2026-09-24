@@ -216,7 +216,7 @@ export function HomeSearchDock({
           hitSlop={6}
           style={[styles.goBtn, !canSend && styles.goBtnDisabled]}
         >
-          <Text style={styles.goGlyph}>→</Text>
+          <Text selectable style={styles.goGlyph}>→</Text>
         </Pressable>
       </View>
 
@@ -224,8 +224,8 @@ export function HomeSearchDock({
       {responseText ? (
         <View style={styles.responseBar}>
           <View style={styles.responseInner}>
-            <Text style={styles.responseText} numberOfLines={2}>
-              <Text style={styles.responseBrand}>Proxy </Text>
+            <Text selectable style={styles.responseText} numberOfLines={2}>
+              <Text selectable style={styles.responseBrand}>Proxy </Text>
               {responseText}
             </Text>
             {responseWhy ? (
@@ -234,7 +234,7 @@ export function HomeSearchDock({
                 style={styles.whyBtn}
                 accessibilityLabel="为什么"
               >
-                <Text style={styles.whyBtnText}>为什么</Text>
+                <Text selectable style={styles.whyBtnText}>为什么</Text>
               </Pressable>
             ) : null}
           </View>
@@ -245,7 +245,7 @@ export function HomeSearchDock({
       {/* Toast 提示 */}
       {toastMessage ? (
         <View style={styles.toast}>
-          <Text style={styles.toastText}>{toastMessage}</Text>
+          <Text selectable style={styles.toastText}>{toastMessage}</Text>
         </View>
       ) : null}
 
@@ -253,19 +253,19 @@ export function HomeSearchDock({
       {photo ? (
         <View style={styles.photoPreviewRow}>
           <Image accessibilityLabel="已选择的照片" source={{ uri: photo.uri }} style={styles.photoPreview} />
-          <Text numberOfLines={1} style={styles.photoPreviewText}>{photo.fileName || "照片参与当前对话"}</Text>
+          <Text selectable numberOfLines={1} style={styles.photoPreviewText}>{photo.fileName || "照片参与当前对话"}</Text>
           <Pressable accessibilityLabel="移除照片" onPress={() => setPhoto(undefined)} style={styles.photoRemove}>
-            <Text style={styles.photoRemoveText}>×</Text>
+            <Text selectable style={styles.photoRemoveText}>×</Text>
           </Pressable>
         </View>
       ) : null}
 
-      {toolError ? <Text accessibilityLiveRegion="polite" style={styles.toolError}>{toolError}</Text> : null}
+      {toolError ? <Text selectable accessibilityLiveRegion="polite" style={styles.toolError}>{toolError}</Text> : null}
 
       {/* 澄清选项 Clarify Chips */}
       {clarifyChoices && clarifyChoices.length > 0 ? (
         <View style={styles.clarifyBox}>
-          {clarifyQuestion ? <Text style={styles.clarifyQuestion}>{clarifyQuestion}</Text> : null}
+          {clarifyQuestion ? <Text selectable style={styles.clarifyQuestion}>{clarifyQuestion}</Text> : null}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.clarifyRow}>
             {clarifyChoices.map((c) => (
               <Pressable
@@ -274,7 +274,7 @@ export function HomeSearchDock({
                 style={styles.clarifyChip}
                 accessibilityLabel={`选择 ${c}`}
               >
-                <Text style={styles.clarifyChipText}>{c}</Text>
+                <Text selectable style={styles.clarifyChipText}>{c}</Text>
               </Pressable>
             ))}
           </ScrollView>
@@ -291,8 +291,8 @@ export function HomeSearchDock({
               onPress={() => onApplySuggestion(s)}
               style={styles.chip}
             >
-              <Text style={styles.chipSlot}>{SLOT_LABEL[s.slot]}</Text>
-              <Text numberOfLines={1} style={styles.chipLabel}>{s.label}</Text>
+              <Text selectable style={styles.chipSlot}>{SLOT_LABEL[s.slot]}</Text>
+              <Text selectable numberOfLines={1} style={styles.chipLabel}>{s.label}</Text>
             </Pressable>
           ))}
         </View>
@@ -301,7 +301,7 @@ export function HomeSearchDock({
       {/* 意图执行 chips */}
       {intentRemix ? (
         <Pressable accessibilityLabel="整组换一套候选" onPress={onRemix} style={styles.actionChip}>
-          <Text style={styles.actionChipText}>✦ 帮你整组换一套 →</Text>
+          <Text selectable style={styles.actionChipText}>✦ 帮你整组换一套 →</Text>
         </Pressable>
       ) : null}
       {intentSlot ? (
@@ -310,7 +310,7 @@ export function HomeSearchDock({
           onPress={() => onExchange(intentSlot)}
           style={styles.actionChip}
         >
-          <Text style={styles.actionChipText}>换{SLOT_LABEL[intentSlot]}，选一个 →</Text>
+          <Text selectable style={styles.actionChipText}>换{SLOT_LABEL[intentSlot]}，选一个 →</Text>
         </Pressable>
       ) : null}
 
@@ -319,14 +319,14 @@ export function HomeSearchDock({
         <Modal transparent animationType="fade" visible onRequestClose={() => setPhotoMenuOpen(false)}>
           <Pressable onPress={() => setPhotoMenuOpen(false)} style={styles.menuBackdrop}>
             <View style={styles.menuSheet} onStartShouldSetResponder={() => true}>
-              <Text style={styles.menuTitle}>添加照片</Text>
+              <Text selectable style={styles.menuTitle}>添加照片</Text>
               <Pressable accessibilityLabel="拍照" onPress={() => void choosePhoto("CAMERA")} style={styles.menuItem}>
                 <ProxyIcon color={color.ink} name="camera" size={20} />
-                <Text style={styles.menuItemText}>拍照</Text>
+                <Text selectable style={styles.menuItemText}>拍照</Text>
               </Pressable>
               <Pressable accessibilityLabel="从相册选择" onPress={() => void choosePhoto("LIBRARY")} style={styles.menuItem}>
                 <ProxyIcon color={color.ink} name="image" size={20} />
-                <Text style={styles.menuItemText}>从相册选择</Text>
+                <Text selectable style={styles.menuItemText}>从相册选择</Text>
               </Pressable>
             </View>
           </Pressable>

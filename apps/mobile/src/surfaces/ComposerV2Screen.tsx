@@ -631,10 +631,10 @@ export function ComposerV2Screen({
             {c.type === "place" ? (
               <ProxyIcon name="route" size={14} color={color.ink} />
             ) : (
-              <Text style={styles.chipHash}>#</Text>
+              <Text selectable style={styles.chipHash}>#</Text>
             )}
-            <Text style={styles.chipActiveText}>{c.label}</Text>
-            <Text style={styles.chipX}>×</Text>
+            <Text selectable style={styles.chipActiveText}>{c.label}</Text>
+            <Text selectable style={styles.chipX}>×</Text>
           </Pressable>
         ))}
       </View>
@@ -647,9 +647,9 @@ export function ComposerV2Screen({
         <View style={{ height: insets.top }} />
         <View style={styles.topbar}>
           <Pressable accessibilityLabel="取消发帖" hitSlop={12} onPress={() => { Keyboard.dismiss(); handleCancel(); }} style={styles.cancelBtn}>
-            <Text style={styles.cancelText}>取消</Text>
+            <Text selectable style={styles.cancelText}>取消</Text>
           </Pressable>
-          <Text style={styles.topbarTitle}>新动态</Text>
+          <Text selectable style={styles.topbarTitle}>新动态</Text>
           <Pressable
             accessibilityLabel={publishing ? "发布中" : "发布动态"}
             accessibilityState={{ disabled: !isReady }}
@@ -657,7 +657,7 @@ export function ComposerV2Screen({
             onPress={() => void publish()}
             style={[styles.publishBtn, isReady ? styles.publishBtnReady : null]}
           >
-            <Text style={[styles.publishBtnText, isReady ? styles.publishBtnTextReady : null]}>
+            <Text selectable style={[styles.publishBtnText, isReady ? styles.publishBtnTextReady : null]}>
               {publishing ? "发布中" : "发布"}
             </Text>
           </Pressable>
@@ -668,8 +668,8 @@ export function ComposerV2Screen({
             提供 “去登录” 出口 避免用户在一个不能用的 composer 里干靠。 */}
         {secureSessionStore !== undefined && !isAuthenticatedForWrite ? (
           <View style={styles.authWall} accessibilityLiveRegion="polite">
-            <Text style={styles.authWallTitle}>发布需登录</Text>
-            <Text style={styles.authWallBody}>完成手机号 / 邮箱验证 或 Google 登录后, 才能在动态上发文、 送图。访客可以浏览、点赞、引用，但发布需要身份。</Text>
+            <Text selectable style={styles.authWallTitle}>发布需登录</Text>
+            <Text selectable style={styles.authWallBody}>完成手机号 / 邮箱验证 或 Google 登录后, 才能在动态上发文、 送图。访客可以浏览、点赞、引用，但发布需要身份。</Text>
           </View>
         ) : null}
 
@@ -684,9 +684,9 @@ export function ComposerV2Screen({
             </View>
             <View style={styles.postColumn}>
               <View style={styles.authorLine}>
-                <Text style={styles.author}>Thanh</Text>
-                <Text style={styles.handle}>@thanh</Text>
-                {isGhost24h ? <View style={styles.modeBadge}><Text style={styles.modeBadgeText}>24h</Text></View> : null}
+                <Text selectable style={styles.author}>Thanh</Text>
+                <Text selectable style={styles.handle}>@thanh</Text>
+                {isGhost24h ? <View style={styles.modeBadge}><Text selectable style={styles.modeBadgeText}>24h</Text></View> : null}
               </View>
 
               <TextInput
@@ -708,8 +708,8 @@ export function ComposerV2Screen({
 
                 {gifWord ? (
                   <View style={styles.gifCard}>
-                    <Text style={styles.gifWord}>{gifWord}</Text>
-                    <View style={styles.gifLabel}><Text style={styles.gifLabelText}>GIF</Text></View>
+                    <Text selectable style={styles.gifWord}>{gifWord}</Text>
+                    <View style={styles.gifLabel}><Text selectable style={styles.gifLabelText}>GIF</Text></View>
                     <Pressable
                       accessibilityLabel="移除 GIF"
                       onPress={() => setGifWord(null)}
@@ -743,7 +743,7 @@ export function ComposerV2Screen({
                           onPress={() => setPoll((p) => ({ ...p, options: p.options.filter((_, i) => i !== idx) }))}
                           style={styles.pollX}
                         >
-                          <Text style={styles.pollXText}>×</Text>
+                          <Text selectable style={styles.pollXText}>×</Text>
                         </Pressable>
                       </View>
                     ))}
@@ -758,14 +758,14 @@ export function ComposerV2Screen({
                       }}
                       style={styles.pollAdd}
                     >
-                      <Text style={styles.pollAddText}>＋ 添加选项</Text>
+                      <Text selectable style={styles.pollAddText}>＋ 添加选项</Text>
                     </Pressable>
                     <View style={styles.pollFoot}>
                       <Pressable onPress={() => setOpenSheet("pollDuration")} style={styles.pollDurationBtn}>
-                        <Text style={styles.pollFootLabel}>投票时长 · {poll.durationLabel} ›</Text>
+                        <Text selectable style={styles.pollFootLabel}>投票时长 · {poll.durationLabel} ›</Text>
                       </Pressable>
                       <Pressable onPress={() => setPoll({ open: false, options: ["", ""], durationLabel: "1 天" })}>
-                        <Text style={styles.pollRemove}>移除投票</Text>
+                        <Text selectable style={styles.pollRemove}>移除投票</Text>
                       </Pressable>
                     </View>
                   </View>
@@ -774,24 +774,24 @@ export function ComposerV2Screen({
                 {quoteTarget ? (
                   <View style={styles.quoteCard}>
                     <View style={styles.quoteTag}>
-                      <Text style={styles.quoteTagText}>引用帖文</Text>
+                      <Text selectable style={styles.quoteTagText}>引用帖文</Text>
                     </View>
                     <View style={styles.quoteHead}>
                       <View style={styles.quoteAvatar}>
-                        <Text style={styles.quoteAvatarText}>{(quoteTarget.authorDisplayName ?? "·").charAt(0)}</Text>
+                        <Text selectable style={styles.quoteAvatarText}>{(quoteTarget.authorDisplayName ?? "·").charAt(0)}</Text>
                       </View>
-                      <Text style={styles.quoteName}>{quoteTarget.authorDisplayName ?? "某人"}</Text>
-                      <Text style={styles.quoteHandle}>@{quoteTarget.authorId}</Text>
+                      <Text selectable style={styles.quoteName}>{quoteTarget.authorDisplayName ?? "某人"}</Text>
+                      <Text selectable style={styles.quoteHandle}>@{quoteTarget.authorId}</Text>
                       <Pressable
                         accessibilityLabel="移除引用"
                         onPress={() => { invalidatePublishAttempt(); setQuoteId(null); }}
                         style={styles.quoteRemove}
                       >
-                        <Text style={styles.quoteRemoveText}>移除</Text>
+                        <Text selectable style={styles.quoteRemoveText}>移除</Text>
                       </Pressable>
                     </View>
-                    <Text numberOfLines={3} style={styles.quoteText}>{quoteTarget.body}</Text>
-                    <Text style={styles.quoteMeta}>{quoteTarget.cityScope === "hn" ? "Hanoi" : "—"} · {new Date(quoteTarget.createdAt).toLocaleString()}</Text>
+                    <Text selectable numberOfLines={3} style={styles.quoteText}>{quoteTarget.body}</Text>
+                    <Text selectable style={styles.quoteMeta}>{quoteTarget.cityScope === "hn" ? "Hanoi" : "—"} · {new Date(quoteTarget.createdAt).toLocaleString()}</Text>
                   </View>
                 ) : null}
               </View>
@@ -799,7 +799,7 @@ export function ComposerV2Screen({
           </View>
 
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text selectable style={styles.error}>{error}</Text> : null}
         </ScrollView>
 
         {/* —— 底部工具栏：权限行 + 工具行 —— */}
@@ -807,11 +807,11 @@ export function ComposerV2Screen({
           <View style={styles.permissions}>
             <Pressable accessibilityLabel={`谁可以回复：当前 ${replyPerm}`} onPress={() => setOpenSheet("reply")} style={styles.permission}>
               <ProxyIcon name="chat" size={17} color={color.muted} />
-              <Text style={styles.permissionText}>{replyPerm}可回复</Text>
+              <Text selectable style={styles.permissionText}>{replyPerm}可回复</Text>
             </Pressable>
             <Pressable accessibilityLabel={`谁可以引用：当前 ${quotePerm}`} onPress={() => setOpenSheet("quote")} style={styles.permission}>
               <ProxyIcon name="mail" size={17} color={color.muted} />
-              <Text style={styles.permissionText}>{quotePerm}可引用</Text>
+              <Text selectable style={styles.permissionText}>{quotePerm}可引用</Text>
             </Pressable>
           </View>
 
@@ -901,7 +901,7 @@ export function ComposerV2Screen({
               </View>
             </TooltipOnLongPress>
 
-            <Text
+            <Text selectable
               accessibilityLabel={`正文有效长度 ${effectiveBodyLength}/${MAX_BODY_LENGTH}${showCountWarn ? "，接近上限" : ""}`}
               style={[styles.count, showCountWarn ? styles.countWarn : null]}
             >
@@ -913,7 +913,7 @@ export function ComposerV2Screen({
         {/* —— Toast —— */}
         {toast.visible ? (
           <View style={styles.toast}>
-            <Text style={styles.toastText}>{toast.message}</Text>
+            <Text selectable style={styles.toastText}>{toast.message}</Text>
           </View>
         ) : null}
 
@@ -938,9 +938,9 @@ export function ComposerV2Screen({
                     }
                   }}
                 >
-                  <Text style={styles.longTextCancel}>取消</Text>
+                  <Text selectable style={styles.longTextCancel}>取消</Text>
                 </Pressable>
-                <Text style={styles.longTextTitle}>长文</Text>
+                <Text selectable style={styles.longTextTitle}>长文</Text>
                 <Pressable
                   onPress={() => {
                     const { body: next, truncated } = appendLongText(body, longTextDraft, MAX_BODY_LENGTH * 4);
@@ -958,7 +958,7 @@ export function ComposerV2Screen({
                     else showToast("已追加到正文");
                   }}
                 >
-                  <Text style={styles.longTextDone}>完成</Text>
+                  <Text selectable style={styles.longTextDone}>完成</Text>
                 </Pressable>
               </View>
               <TextInput
@@ -971,10 +971,10 @@ export function ComposerV2Screen({
                 value={longTextDraft}
               />
               <View style={styles.longTextFoot}>
-                <Text style={styles.longTextFootMeta}>
+                <Text selectable style={styles.longTextFootMeta}>
                   正文最多 {MAX_BODY_LENGTH * 4} 字。已用 {body.length}/{MAX_BODY_LENGTH * 4}{body.length > 0 ? "（追加到正文末尾）" : ""}
                 </Text>
-                <Text style={[styles.longTextCount, longTextDraft.length > MAX_BODY_LENGTH * 4 - body.length ? styles.longTextCountWarn : null]}>
+                <Text selectable style={[styles.longTextCount, longTextDraft.length > MAX_BODY_LENGTH * 4 - body.length ? styles.longTextCountWarn : null]}>
                   {longTextDraft.length}/{MAX_BODY_LENGTH * 4 - body.length}
                 </Text>
               </View>
@@ -1034,7 +1034,7 @@ export function ComposerV2Screen({
                   onPress={() => { setGifWord(w); setOpenSheet(null); }}
                   style={[styles.gifPick, altStyle, isSelected ? styles.gifPickSelected : null]}
                 >
-                  <Text style={styles.gifPickText}>{w}</Text>
+                  <Text selectable style={styles.gifPickText}>{w}</Text>
                 </Pressable>
               );
             })}
@@ -1082,7 +1082,7 @@ export function ComposerV2Screen({
         <Sheet visible={openSheet === "quotePicker"} title="选择要引用的帖文" onClose={() => setOpenSheet(null)}>
           {posts.length === 0 ? (
             <View style={styles.quotePickerEmpty}>
-              <Text style={styles.quotePickerEmptyText}>暂无可引用的帖文。退出后下拉刷新试试。</Text>
+              <Text selectable style={styles.quotePickerEmptyText}>暂无可引用的帖文。退出后下拉刷新试试。</Text>
             </View>
           ) : (
             <QuotePickerSheetBody
@@ -1177,7 +1177,7 @@ function ComposerMediaCard({
           <Image resizeMode="cover" source={{ uri: item.image.uri }} style={[styles.mediaCardThumb, failed ? styles.mediaCardThumbFailed : null]} />
           {uploading || paused ? (
             <View style={styles.mediaCardOverlay}>
-              <Text style={styles.mediaCardOverlayText}>{mediaStatusLabel(item)}</Text>
+              <Text selectable style={styles.mediaCardOverlayText}>{mediaStatusLabel(item)}</Text>
             </View>
           ) : null}
         </Pressable>
@@ -1188,12 +1188,12 @@ function ComposerMediaCard({
           onPress={uploading ? onCancel : onRemove}
           style={styles.mediaCardRemoveBadge}
         >
-          <Text style={styles.mediaCardRemoveBadgeText}>×</Text>
+          <Text selectable style={styles.mediaCardRemoveBadgeText}>×</Text>
         </Pressable>
 
         {uploading ? (
           <Pressable accessibilityLabel="暂停上传" onPress={onPause} style={styles.mediaCardPauseBadge}>
-            <Text style={styles.mediaCardPauseBadgeText}>⏸</Text>
+            <Text selectable style={styles.mediaCardPauseBadgeText}>⏸</Text>
           </Pressable>
         ) : (
           <Pressable
@@ -1202,7 +1202,7 @@ function ComposerMediaCard({
             onPress={() => setAltOpen((v) => !v)}
             style={[styles.mediaCardAltBadge, item.altText ? styles.mediaCardAltBadgeOn : null]}
           >
-            <Text style={[styles.mediaCardAltBadgeText, item.altText ? styles.mediaCardAltBadgeTextOn : null]}>ALT</Text>
+            <Text selectable style={[styles.mediaCardAltBadgeText, item.altText ? styles.mediaCardAltBadgeTextOn : null]}>ALT</Text>
           </Pressable>
         )}
       </View>
@@ -1221,7 +1221,7 @@ function ComposerMediaCard({
         />
       ) : null}
 
-      {failed && item.error ? <Text numberOfLines={2} style={styles.mediaCardError}>{item.error}</Text> : null}
+      {failed && item.error ? <Text selectable numberOfLines={2} style={styles.mediaCardError}>{item.error}</Text> : null}
     </Animated.View>
   );
 }
@@ -1244,7 +1244,7 @@ function Sheet({
       <Pressable style={styles.sheetBackdrop} onPress={onClose} />
       <View style={styles.sheet}>
         <View style={styles.sheetGrab} />
-        <Text style={styles.sheetTitle}>{title}</Text>
+        <Text selectable style={styles.sheetTitle}>{title}</Text>
         {children}
       </View>
     </Modal>
@@ -1267,11 +1267,11 @@ function SheetOption({
   return (
     <Pressable onPress={onPress} style={[styles.sheetOption, selected ? styles.sheetOptionSelected : null]}>
       <View style={styles.sheetOptionText}>
-        <Text style={styles.sheetOptionLabel}>{label}</Text>
-        {description ? <Text style={styles.sheetOptionDesc}>{description}</Text> : null}
+        <Text selectable style={styles.sheetOptionLabel}>{label}</Text>
+        {description ? <Text selectable style={styles.sheetOptionDesc}>{description}</Text> : null}
       </View>
-      {showChevron ? <Text style={styles.sheetOptionRight}>›</Text> : null}
-      {selected ? <Text style={styles.sheetOptionCheck}>✓</Text> : null}
+      {showChevron ? <Text selectable style={styles.sheetOptionRight}>›</Text> : null}
+      {selected ? <Text selectable style={styles.sheetOptionCheck}>✓</Text> : null}
     </Pressable>
   );
 }
@@ -1332,7 +1332,7 @@ function QuotePickerSheetBody({
             onPress={() => setFilter(f.key)}
             style={[styles.quotePickerTab, filter === f.key ? styles.quotePickerTabActive : null]}
           >
-            <Text style={[styles.quotePickerTabText, filter === f.key ? styles.quotePickerTabTextActive : null]}>
+            <Text selectable style={[styles.quotePickerTabText, filter === f.key ? styles.quotePickerTabTextActive : null]}>
               {f.label}
             </Text>
           </Pressable>
@@ -1348,7 +1348,7 @@ function QuotePickerSheetBody({
       />
       {filtered.length === 0 ? (
         <View style={styles.quotePickerEmpty}>
-          <Text style={styles.quotePickerEmptyText}>{query.trim() ? "无匹配结果" : "当前筛选下无帖文"}</Text>
+          <Text selectable style={styles.quotePickerEmptyText}>{query.trim() ? "无匹配结果" : "当前筛选下无帖文"}</Text>
         </View>
       ) : (
         <ScrollView style={styles.quotePickerScroll}>
@@ -1359,10 +1359,10 @@ function QuotePickerSheetBody({
               style={styles.quotePickerItem}
             >
               <View style={styles.quotePickerHead}>
-                <Text style={styles.quotePickerName}>{post.authorDisplayName ?? post.authorId}</Text>
-                <Text style={styles.quotePickerMeta}>{formatRelativeTime(post.createdAt)}</Text>
+                <Text selectable style={styles.quotePickerName}>{post.authorDisplayName ?? post.authorId}</Text>
+                <Text selectable style={styles.quotePickerMeta}>{formatRelativeTime(post.createdAt)}</Text>
               </View>
-              <Text numberOfLines={2} style={styles.quotePickerBody}>
+              <Text selectable numberOfLines={2} style={styles.quotePickerBody}>
                 {post.body || "（无正文）"}
               </Text>
             </Pressable>

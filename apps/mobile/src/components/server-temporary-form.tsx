@@ -66,16 +66,16 @@ export function ServerTemporaryForm({ spec, disabled, onSubmit }: { spec: Server
 
   return (
     <View style={styles.card} accessibilityLabel={spec.title}>
-      <Text style={styles.title}>{spec.title}</Text>
-      {spec.description ? <Text style={styles.description}>{spec.description}</Text> : null}
+      <Text selectable style={styles.title}>{spec.title}</Text>
+      {spec.description ? <Text selectable style={styles.description}>{spec.description}</Text> : null}
       {spec.fields.map((field) => (
         <View key={field.id} style={styles.field}>
-          <Text style={styles.label}>{field.label}{field.required ? <Text style={styles.required}> · 必填</Text> : null}</Text>
+          <Text selectable style={styles.label}>{field.label}{field.required ? <Text selectable style={styles.required}> · 必填</Text> : null}</Text>
           {field.type === "SINGLE_SELECT" ? (
             <View style={styles.options}>
               {field.options?.map((option) => {
                 const selected = values[field.id] === option.label;
-                return <Pressable key={option.id} disabled={disabled} onPress={() => setValues((current) => ({ ...current, [field.id]: option.label }))} style={[styles.option, selected && styles.optionSelected, disabled && styles.disabled]}><Text style={[styles.optionText, selected && styles.optionTextSelected]}>{option.label}</Text></Pressable>;
+                return <Pressable key={option.id} disabled={disabled} onPress={() => setValues((current) => ({ ...current, [field.id]: option.label }))} style={[styles.option, selected && styles.optionSelected, disabled && styles.disabled]}><Text selectable style={[styles.optionText, selected && styles.optionTextSelected]}>{option.label}</Text></Pressable>;
               })}
             </View>
           ) : (
@@ -91,7 +91,7 @@ export function ServerTemporaryForm({ spec, disabled, onSubmit }: { spec: Server
         </View>
       ))}
       <Pressable accessibilityLabel={spec.submitLabel} disabled={!complete || disabled} onPress={submit} style={[styles.submit, (!complete || disabled) && styles.disabled]}>
-        <Text style={styles.submitText}>{spec.submitLabel}</Text>
+        <Text selectable style={styles.submitText}>{spec.submitLabel}</Text>
       </Pressable>
     </View>
   );

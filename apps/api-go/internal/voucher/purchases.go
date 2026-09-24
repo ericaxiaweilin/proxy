@@ -39,12 +39,12 @@ type Purchase struct {
 }
 
 type Instance struct {
-	ID          string `json:"instanceId"`
-	PurchaseID  string `json:"purchaseId"`
+	ID           string `json:"instanceId"`
+	PurchaseID   string `json:"purchaseId"`
 	DefinitionID string `json:"definitionId"`
-	MerchantID  string `json:"merchantId"`
-	Code        string `json:"code"`
-	Status      string `json:"status"`
+	MerchantID   string `json:"merchantId"`
+	Code         string `json:"code"`
+	Status       string `json:"status"`
 }
 
 // ErrPurchaseNotOrderable reports a confirm CAS miss: the purchase is not
@@ -53,13 +53,13 @@ type Instance struct {
 var ErrPurchaseNotOrderable = errors.New("purchase is not orderable")
 
 type orderPurchasePayload struct {
-	DefinitionID          string `json:"definitionId"`
-	Quantity              int    `json:"quantity"`
-	UnitCostMinor         int    `json:"unitCostMinor"`
-	ContractRef           string `json:"contractRef"`
-	InvoiceRef            string `json:"invoiceRef"`
-	TaxCodeSnapshot       string `json:"taxCodeSnapshot"`
-	TotalMinor            int    `json:"totalMinor"` // 客户端自带 total 直接无视，服务端重算
+	DefinitionID    string `json:"definitionId"`
+	Quantity        int    `json:"quantity"`
+	UnitCostMinor   int    `json:"unitCostMinor"`
+	ContractRef     string `json:"contractRef"`
+	InvoiceRef      string `json:"invoiceRef"`
+	TaxCodeSnapshot string `json:"taxCodeSnapshot"`
+	TotalMinor      int    `json:"totalMinor"` // 客户端自带 total 直接无视，服务端重算
 }
 
 type confirmPurchasePayload struct {
@@ -208,8 +208,8 @@ func (s *Service) confirmPurchase(ctx context.Context, e command.Envelope) comma
 		s.instances[cp.ID] = &cp
 	}
 	return accepted(e, "VoucherPurchase", purchase.ID, purchase.Status, map[string]any{
-		"purchase":   *purchase,
-		"minted":     len(instances),
+		"purchase":    *purchase,
+		"minted":      len(instances),
 		"confirmedAt": confirmedAt,
 	})
 }

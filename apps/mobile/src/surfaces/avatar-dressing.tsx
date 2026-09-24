@@ -5,16 +5,16 @@ export function AvatarDressingSurface({ onBack }: { onBack: () => void }): React
   return (
     <View style={styles.root}>
       <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.subPageBack}>
-        <Text style={styles.subPageBackText}>‹ 返回</Text>
+        <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
       </Pressable>
-      <Text style={styles.h1}>3D 换装已下线</Text>
-      <Text style={styles.meta}>该功能暂不成熟，已移除 · 请从 Creator 详情继续操作</Text>
+      <Text selectable style={styles.h1}>3D 换装已下线</Text>
+      <Text selectable style={styles.meta}>该功能暂不成熟，已移除 · 请从 Creator 详情继续操作</Text>
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>提示</Text>
-        <Text style={styles.cardText}>实时 3D 预览与换装已暂时移除，后续成熟后再开放。当前 Creator 经营请使用 Creator / 活动 / 券 页面。</Text>
+        <Text selectable style={styles.cardTitle}>提示</Text>
+        <Text selectable style={styles.cardText}>实时 3D 预览与换装已暂时移除，后续成熟后再开放。当前 Creator 经营请使用 Creator / 活动 / 券 页面。</Text>
       </View>
       <Pressable onPress={onBack} style={styles.primary}>
-        <Text style={styles.primaryText}>返回 Creator</Text>
+        <Text selectable style={styles.primaryText}>返回 Creator</Text>
       </Pressable>
     </View>
   );

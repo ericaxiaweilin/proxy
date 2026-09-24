@@ -23,6 +23,15 @@ export const styles = StyleSheet.create({
   // cancel an order.
   orderCancelBtn: { alignSelf: "flex-end", borderColor: "#D33D5B", marginRight: 0, marginTop: 6 },
   orderCancelBtnText: { color: "#D33D5B" },
+  // ORDER-EXEC-001: 执行动作主按钮 + 表单行。跟 orderTab 同一语言（圆角胶囊），
+  // 深底表示"推进状态"，区别于中性的页签和红色的取消。
+  orderActBtn: { alignItems: "center", backgroundColor: color.ink, borderColor: color.ink, marginTop: 8 },
+  orderActBtnText: { color: color.white },
+  actInput: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 10, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 8, paddingHorizontal: 12, paddingVertical: 9 },
+  actRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  actChip: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 7 },
+  actChipOn: { backgroundColor: color.ink, borderColor: color.ink },
+  actChipText: { color: color.muted, fontSize: 12, fontWeight: "700" },
   orderCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginBottom: 11, padding: 14, ...shadows.card },
   orderHead: { alignItems: "flex-start", flexDirection: "row", gap: 8, justifyContent: "space-between" },
   orderCopy: { flex: 1 },
@@ -202,6 +211,7 @@ export const styles = StyleSheet.create({
     width: 44
   },
   serviceLogoBox: { backgroundColor: "#08090A" },
+  serviceIconBare: { backgroundColor: "transparent" },
   serviceLogo: { borderRadius: 9, height: 36, width: 36 },
   voucherMenuGlyph: { alignItems: "center", height: 36, justifyContent: "center", width: 36 },
   voucherCup: { borderRadius: 4, borderWidth: 2.4, height: 14, left: 8, position: "absolute", top: 16, width: 17 },
@@ -884,8 +894,8 @@ export const styles = StyleSheet.create({
   personalName: { color: color.ink, fontSize: 24, fontWeight: "800", letterSpacing: -0.96, lineHeight: 28 },
   personalHandleSub: { color: "#444", fontSize: 11, marginTop: 4 },
   personalAvaWrap: { position: "relative", width: 82, height: 82, justifyContent: "flex-end" },
-  personalAva: { width: 82, height: 82, borderRadius: 41, backgroundColor: "#111", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1, borderColor: "#ececec" },
-  personalAvaLetter: { color: color.white, fontSize: 27, fontWeight: "800" },
+  personalAva: { width: 82, height: 82, borderRadius: 41, backgroundColor: "#EDE4FF", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1, borderColor: "#ececec" },
+  personalAvaLetter: { color: "#5B3FB8", fontSize: 27, fontWeight: "800" },
   personalAvaAdd: {
     position: "absolute", left: -6, bottom: -2, width: 32, height: 32, borderRadius: 16,
     borderWidth: 3, borderColor: "#fff", backgroundColor: "#fff",
@@ -921,7 +931,8 @@ export const styles = StyleSheet.create({
   personalTabTextActive: { color: color.ink, fontWeight: "700" },
   personalPost: { borderBottomColor: "#E8E8E8", borderBottomWidth: 1, paddingBottom: 14, paddingHorizontal: 18, paddingTop: 16 },
   personalPostHead: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
-  personalPostAvatar: { alignItems: "center", backgroundColor: "#111", borderRadius: 19, color: color.white, fontSize: 14, fontWeight: "700", height: 38, justifyContent: "center", overflow: "hidden", width: 38 },
+  // AVATAR-FALLBACK-TINT-001：没头像时不画黑圆（看起来像图坏了），用浅紫底 + 深色字。
+  personalPostAvatar: { alignItems: "center", backgroundColor: "#EDE4FF", borderRadius: 19, color: "#5B3FB8", fontSize: 14, fontWeight: "700", height: 38, justifyContent: "center", overflow: "hidden", width: 38 },
   personalPostAvatarText: { color: color.white, fontSize: 14, fontWeight: "700" },
   personalPostAvatarImage: { borderRadius: 19, height: 38, width: 38 },
   personalPostBody: { flex: 1, marginTop: -12, paddingLeft: 48 },

@@ -104,6 +104,12 @@ type Post struct {
 	// (ctx, post.CityScope, post.SceneType) 而不只是全局一个色 —
 	// 不同场景类型的帖背景都不一样。
 	SceneType string `json:"sceneType,omitempty"`
+	// AI-TWIN-POST-AUDIENCE-001: Visibility=="TARGETED" 时的可见者白名单。
+	// 跟 Poll 一样是**读时**拼上去的，不落进 posts 表——见 attachAudienceTargets。
+	// 只在作者本人读自己的帖子时才会被填充；其他读者永远看到 nil，防止一个
+	// 被投放到的人从这个字段里看到"还有谁也被投放了"（同一批人之间互相
+	// 暴露名单不是这个功能的本意）。
+	AudienceTargetIDs []string `json:"audienceTargetIds,omitempty"`
 }
 
 // PostMediaRef 是 Post 的媒体引用（R14 §16.5：sort_order = 作者确认的展示顺序）。
@@ -142,6 +148,15 @@ type PostMediaItem struct {
 	// 同 (cityScope, sceneType) 已完成场景中 Memory.aestheticAssets
 	// dominant 色的众数。为空时前端继续走默认 FRAME_BACKGROUND_HEX。
 	SceneAestheticBackdrop string `json:"sceneAestheticBackdrop,omitempty"`
+	// AIGenerationSource：LC-06 的溯源第一次走到客户端（2026-09-21 产品决定
+	// 「AI 做的就标注，法规要求要满足」）。闭集与 migration 108 的 DB 约束一致：
+	// USER_UPLOADED | AI_PERSONA | MODEL_API | UNKNOWN。
+	//
+	// 不加 omitempty：这一列在库里是 NOT NULL DEFAULT 'USER_UPLOADED'，值永远已知，
+	// 省掉它等于让「我们不知道」和「手机直传」在 wire 上长得一样 —— 而这两者对
+	// 客户端是相反的处理（前者不该沉默，后者本就不需要标注）。UNKNOWN 到不了
+	// 这里：MarkMediaReady 对 UNKNOWN fail-closed，READY 资产不可能是 UNKNOWN。
+	AIGenerationSource string `json:"aiGenerationSource"`
 }
 
 // MediaCompositionHintDTO 是给前端的 wire 形状（与 @proxy/contracts 一致）。
@@ -218,6 +233,11 @@ type MediaAssetInfo struct {
 	VisibilityClass   string
 	// CompositionHint：来自 media_assets.composition_hint。
 	CompositionHint *MediaCompositionHintDTO
+	// AIGenerationSource：来自 media_assets.ai_generation_source（migration 108，
+	// LC-06 的单一事实来源）。闭集 USER_UPLOADED | AI_PERSONA | MODEL_API | UNKNOWN。
+	// 以前这一列只在存储侧活着，没有任何读路径把它带走 —— 所以「按资产的 AI 溯源」
+	// 对任何用户都不可见。这里接上第一跳，见 PostMediaItem 同名 json 字段。
+	AIGenerationSource string
 }
 
 // ContextRef 是 Post 的结构化上下文关联（PRD §4 PostContextRef）。
@@ -258,14 +278,20 @@ type Repository interface {
 	ListInteractionEvents(ctx context.Context, actorID string, limit int) ([]InteractionEvent, error)
 	// TWIN-SIGNALS-001: 战绩读侧。按作者聚合自己帖子的曝光 —— 必需接口，
 	// 两个实现（memory + postgres）都必须接上，编译期保证。
-	ListPostImpressionStats(ctx context.Context, authorID string, limit int) ([]PostImpressionStats, error)
+	// CONTENT-ANALYTICS-001: since 之后发的帖子才算（用户侧默认只看近 30 天；服务端事件照存全量）。
+	ListPostImpressionStats(ctx context.Context, authorID string, since time.Time, limit int) ([]PostImpressionStats, error)
 	// PROFILE-VISIT-001: 主页访问聚合，同样是必需接口——理由跟上面一致，
-	// 别让"有 UI 没后端"的静默降级又发生一次。
-	ListProfileViewStats(ctx context.Context, ownerID string) (ProfileViewStats, error)
+	// 别让"有 UI 没后端"的静默降级又发生一次。since 为零值时不过滤（全量），
+	// 调用方按需传窗口（「我的 → 分析」传 30 天）。
+	ListProfileViewStats(ctx context.Context, ownerID string, since time.Time) (ProfileViewStats, error)
 	// PROFILE-VIEWERS-001: 按 actor 分组的主页访问明细，同样是必需接口。
 	ListProfileViewers(ctx context.Context, ownerID string, limit int) ([]ProfileViewerStat, error)
 	// MEDIA-DWELL-001: 单张媒体曝光聚合，同样是必需接口。
-	ListMediaImpressionStats(ctx context.Context, authorID string, limit int) ([]MediaImpressionStats, error)
+	ListMediaImpressionStats(ctx context.Context, authorID string, since time.Time, limit int) ([]MediaImpressionStats, error)
+	// CONTENT-ANALYTICS-001: 用户侧分析面板 —— 窗口内发的帖子的合计（含去重后的看过的人数）。
+	ContentAnalytics(ctx context.Context, authorID string, since time.Time) (ContentAnalytics, error)
+	// CONTENT-ANALYTICS-001: 仅运营 —— 一条帖子的受众明细（谁、看了几次、停留多久、放大几次）。全量历史。
+	ListPostAudience(ctx context.Context, postID string, limit int) ([]PostAudienceRow, error)
 	// VIEWER-ACTIVITY-001: 指定某个访客在"我的"媒体上的活动明细，同样是必需接口。
 	ListMediaActivityForViewer(ctx context.Context, authorID string, viewerActorID string, limit int) ([]ViewerMediaActivity, error)
 	// POLL-VOTE-001：投票。刻意放进**必需**的 Repository 而不是另开一个可选
@@ -274,6 +300,15 @@ type Repository interface {
 	SavePostPoll(ctx context.Context, poll PostPoll) error
 	RecordPollVote(ctx context.Context, postID, optionID, voterID string) error
 	ListPollsForPosts(ctx context.Context, postIDs []string, viewerID string) (map[string]PostPollTally, error)
+	// AI-TWIN-POST-AUDIENCE-001：TARGETED 帖子的受众白名单。跟 SavePostPoll
+	// 同一个理由放进必需接口——可选接口没人实现，TARGETED 就会变成
+	// "UI 有、服务端没有" 的静默降级：要么谁都看不到（过度收紧），要么谁都
+	// 能看到（安全洞），两者都不该靠"忘了实现"决定。
+	SavePostAudienceTargets(ctx context.Context, postID string, targetAccountIDs []string) error
+	// ListPostAudienceTargets 批量取一批帖子各自的受众白名单，postID 不在
+	// 返回的 map 里 = 没有白名单（PUBLIC/FOLLOWERS 帖子，或查询失败时的
+	// fail-closed 结果——调用方把"查不到"当"没人在名单里"处理，不是当"公开"）。
+	ListPostAudienceTargets(ctx context.Context, postIDs []string) (map[string][]string, error)
 }
 
 type FeedPageRepository interface {
@@ -309,6 +344,35 @@ type InteractionEvent struct {
 	// completion_rate 为空的老帖）。客户端离开视口时上报，0 = 一划而过。
 	WatchMs int64 `json:"watchMs,omitempty"`
 	CreatedAt  time.Time `json:"createdAt"`
+}
+
+// CONTENT-ANALYTICS-001（2026-09-23，用户：「好友关系 动态浏览的日志要折叠起来 不要给用户看这些…给一个分析后的
+// 面板 和一个统计入口…默认一个月内的加载 超过一个月的不加载 后端服务器存完整的…日志分层级…合规的公开 完整的属于公司
+// 运营用于精准投流」）。日志分两层：
+//   - 用户侧（合规公开）：只给聚合 —— 窗口内（默认 30 天）的帖子各自浏览 / 看过的人数 / 总停留，和整体分析面板；
+//     不给「谁、看了几秒、放大了几次」；
+//   - 运营侧（ANALYTICS scope，见 api/operator_scopes.go）：逐人明细（ListPostAudience / ListMediaActivityForViewer），全量历史。
+// interaction_events 是 append-only，全量保存；窗口只限制「用户侧读多少」，不删任何事件。
+
+// ContentAnalytics 是用户侧分析面板的合计。
+type ContentAnalytics struct {
+	SinceDays     int    `json:"sinceDays"`
+	Posts         int64  `json:"posts"`
+	Impressions   int64  `json:"impressions"`
+	UniqueViewers int64  `json:"uniqueViewers"`
+	TotalWatchMs  int64  `json:"totalWatchMs"`
+	TopPostID     string `json:"topPostId,omitempty"`
+	TopPostViews  int64  `json:"topPostViews"`
+}
+
+// PostAudienceRow 是运营侧一条帖子的逐人明细。
+type PostAudienceRow struct {
+	ActorID         string    `json:"actorId"`
+	PostImpressions int64     `json:"postImpressions"`
+	MediaOpens      int64     `json:"mediaOpens"`
+	TotalWatchMs    int64     `json:"totalWatchMs"`
+	Zooms           int64     `json:"zooms"`
+	LastSeenAt      time.Time `json:"lastSeenAt"`
 }
 
 // PostImpressionStats 是一条帖子的曝光聚合：看了多少次、多少人看过、
@@ -384,13 +448,16 @@ type MemoryRepository struct {
 	// POLL-VOTE-001
 	polls map[string]PostPoll          // postID -> poll
 	votes map[string]map[string]string // postID -> voterID -> optionID
+	// AI-TWIN-POST-AUDIENCE-001
+	audienceTargets map[string][]string // postID -> target account IDs
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		posts: make(map[string]Post),
-		polls: make(map[string]PostPoll),
-		votes: make(map[string]map[string]string),
+		posts:           make(map[string]Post),
+		polls:           make(map[string]PostPoll),
+		votes:           make(map[string]map[string]string),
+		audienceTargets: make(map[string][]string),
 	}
 }
 
@@ -449,6 +516,25 @@ func (r *MemoryRepository) ListPollsForPosts(_ context.Context, postIDs []string
 			}
 		}
 		out[postID] = PostPollTally{Poll: poll, Counts: counts, VotedOptionID: voted}
+	}
+	return out, nil
+}
+
+func (r *MemoryRepository) SavePostAudienceTargets(_ context.Context, postID string, targetAccountIDs []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.audienceTargets[postID] = append([]string(nil), targetAccountIDs...)
+	return nil
+}
+
+func (r *MemoryRepository) ListPostAudienceTargets(_ context.Context, postIDs []string) (map[string][]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string][]string, len(postIDs))
+	for _, postID := range postIDs {
+		if targets, ok := r.audienceTargets[postID]; ok {
+			out[postID] = append([]string(nil), targets...)
+		}
 	}
 	return out, nil
 }
@@ -782,13 +868,13 @@ func (r *MemoryRepository) ListInteractionEvents(_ context.Context, actorID stri
 	return result, nil
 }
 
-func (r *MemoryRepository) ListPostImpressionStats(_ context.Context, authorID string, limit int) ([]PostImpressionStats, error) {
+func (r *MemoryRepository) ListPostImpressionStats(_ context.Context, authorID string, since time.Time, limit int) ([]PostImpressionStats, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// 自己的帖子按创建时间倒序取前 N。
 	owned := make([]Post, 0)
 	for _, post := range r.posts {
-		if post.AuthorID == authorID {
+		if post.AuthorID == authorID && !post.CreatedAt.Before(since) {
 			owned = append(owned, post)
 		}
 	}
@@ -819,13 +905,16 @@ func (r *MemoryRepository) ListPostImpressionStats(_ context.Context, authorID s
 	return result, nil
 }
 
-func (r *MemoryRepository) ListProfileViewStats(_ context.Context, ownerID string) (ProfileViewStats, error) {
+func (r *MemoryRepository) ListProfileViewStats(_ context.Context, ownerID string, since time.Time) (ProfileViewStats, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var stat ProfileViewStats
 	viewers := make(map[string]bool)
 	for _, ie := range r.interactionEvents {
 		if ie.EventType != "PROFILE_OPEN" || ie.TargetType != "PROFILE" || ie.TargetID != ownerID {
+			continue
+		}
+		if !since.IsZero() && ie.CreatedAt.Before(since) {
 			continue
 		}
 		stat.Opens++
@@ -869,14 +958,14 @@ func (r *MemoryRepository) ListProfileViewers(_ context.Context, ownerID string,
 	return result, nil
 }
 
-func (r *MemoryRepository) ListMediaImpressionStats(_ context.Context, authorID string, limit int) ([]MediaImpressionStats, error) {
+func (r *MemoryRepository) ListMediaImpressionStats(_ context.Context, authorID string, since time.Time, limit int) ([]MediaImpressionStats, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// 自己的帖子按创建时间倒序取前 N，跟 ListPostImpressionStats 同一个截取
 	// 口径——媒体战绩不该比帖子战绩多看到更早的历史。
 	owned := make([]Post, 0)
 	for _, post := range r.posts {
-		if post.AuthorID == authorID {
+		if post.AuthorID == authorID && !post.CreatedAt.Before(since) {
 			owned = append(owned, post)
 		}
 	}
@@ -909,6 +998,89 @@ func (r *MemoryRepository) ListMediaImpressionStats(_ context.Context, authorID 
 		}
 	}
 	return result, nil
+}
+
+func (r *MemoryRepository) ContentAnalytics(_ context.Context, authorID string, since time.Time) (ContentAnalytics, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out ContentAnalytics
+	viewers := map[string]bool{}
+	for _, post := range r.posts {
+		if post.AuthorID != authorID || post.CreatedAt.Before(since) {
+			continue
+		}
+		out.Posts++
+		var views int64
+		for _, ie := range r.interactionEvents {
+			if ie.EventType != "POST_IMPRESSION" || ie.TargetType != "POST" || ie.TargetID != post.ID {
+				continue
+			}
+			views++
+			out.TotalWatchMs += ie.WatchMs
+			viewers[ie.ActorID] = true
+		}
+		out.Impressions += views
+		if views > out.TopPostViews || (views == out.TopPostViews && views > 0 && post.ID > out.TopPostID) {
+			out.TopPostID, out.TopPostViews = post.ID, views
+		}
+	}
+	out.UniqueViewers = int64(len(viewers))
+	return out, nil
+}
+
+func (r *MemoryRepository) ListPostAudience(_ context.Context, postID string, limit int) ([]PostAudienceRow, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	post, ok := r.posts[postID]
+	if !ok {
+		return []PostAudienceRow{}, nil
+	}
+	media := map[string]bool{}
+	for _, ref := range post.MediaRefs {
+		media[ref.MediaAssetID] = true
+	}
+	byActor := map[string]*PostAudienceRow{}
+	row := func(actor string) *PostAudienceRow {
+		if byActor[actor] == nil {
+			byActor[actor] = &PostAudienceRow{ActorID: actor}
+		}
+		return byActor[actor]
+	}
+	for _, ie := range r.interactionEvents {
+		var target *PostAudienceRow
+		switch {
+		case ie.EventType == "POST_IMPRESSION" && ie.TargetType == "POST" && ie.TargetID == postID:
+			target = row(ie.ActorID)
+			target.PostImpressions++
+			target.TotalWatchMs += ie.WatchMs
+		case ie.EventType == "MEDIA_IMPRESSION" && ie.TargetType == "MEDIA" && media[ie.TargetID]:
+			target = row(ie.ActorID)
+			target.MediaOpens++
+			target.TotalWatchMs += ie.WatchMs
+		case ie.EventType == "MEDIA_ZOOM" && ie.TargetType == "MEDIA" && media[ie.TargetID]:
+			target = row(ie.ActorID)
+			target.Zooms++
+		default:
+			continue
+		}
+		if ie.CreatedAt.After(target.LastSeenAt) {
+			target.LastSeenAt = ie.CreatedAt
+		}
+	}
+	out := make([]PostAudienceRow, 0, len(byActor))
+	for _, r := range byActor {
+		out = append(out, *r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].TotalWatchMs != out[j].TotalWatchMs {
+			return out[i].TotalWatchMs > out[j].TotalWatchMs
+		}
+		return out[i].ActorID < out[j].ActorID
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 func (r *MemoryRepository) ListMediaActivityForViewer(_ context.Context, authorID string, viewerActorID string, limit int) ([]ViewerMediaActivity, error) {
@@ -985,6 +1157,9 @@ type Service struct {
 	authorNames authorNameResolver
 	// replySearch 让评论进 feed 搜索（SEARCH-CORPUS-003）。nil = 不搜评论。
 	replySearch ReplySearchLookup
+
+	// POST-PROFILE-GATE-001：发帖前的资料完整度门。
+	profileCompleteness ProfileCompleteness
 }
 
 // ReplySearchLookup 是 feed 搜索读**评论**的窄口（SEARCH-CORPUS-003）。
@@ -1019,6 +1194,19 @@ func (s *Service) SetAuthorNameResolver(resolver authorNameResolver) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.authorNames = resolver
+}
+
+// POST-PROFILE-GATE-001（2026-09-24，用户：「所有没有头像的 用户名的 绕过注册流程的必须要补齐…守护 gate」）：
+// 审计发现 13 个匿名会话账号（没有任何登录方式、资料里没有名字没有头像）发了帖，动态里满屏「用户」+ 首字头像，
+// 还有测试账号冒用 Linh / Mai 的名字发帖。真人账号发帖前必须有用户名 + 平台头像（assets/…）。
+// ProfileCompleteness 返回缺的项（"name" / "avatar"）；读失败按缺失处理（fail-closed，宁可让人重试也不放行）。
+type ProfileCompleteness func(ctx context.Context, userAccountID string) (missing []string)
+
+// SetProfileCompleteness 接上发帖前的资料完整度门。nil = 不检查（单测）；生产在 cmd/api 接线，钉子保证不漏。
+func (s *Service) SetProfileCompleteness(check ProfileCompleteness) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.profileCompleteness = check
 }
 
 func New() *Service {
@@ -1084,9 +1272,10 @@ func NewWithRepositoryAndClock(repository Repository, domainClock clock.Clock) *
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "CreatePost", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "CreateNeedFromPost", "RecordAttribution",
+	case "CreatePost", "UpdatePostAudience", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "CreateNeedFromPost", "RecordAttribution",
 		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed", "RecordMediaImpression",
-		"ShortlistAgent", "ListInteractionEvents", "ListPostImpressionStats", "ListProfileViewStats", "ListProfileViewers", "ListMediaImpressionStats", "ListMediaActivityForViewer", "VotePostPoll":
+		"ShortlistAgent", "ListInteractionEvents", "ListPostImpressionStats", "ListProfileViewStats", "ListProfileViewers", "ListMediaImpressionStats", "ListMediaActivityForViewer", "VotePostPoll",
+		"RecordMediaZoom", "GetContentAnalytics", "ListPostAudience":
 		return true
 	default:
 		return false
@@ -1103,6 +1292,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	switch e.CommandType {
 	case "CreatePost":
 		return s.createPost(ctx, e)
+	case "UpdatePostAudience":
+		return s.updatePostAudience(ctx, e)
 	case "ListFeedPosts":
 		return s.listFeed(ctx, e)
 	case "ListPostsByIds":
@@ -1121,6 +1312,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.recordCandidateViewed(ctx, e)
 	case "RecordMediaImpression":
 		return s.recordMediaImpression(ctx, e)
+	case "RecordMediaZoom":
+		return s.recordMediaZoom(ctx, e)
+	case "GetContentAnalytics":
+		return s.getContentAnalytics(ctx, e)
+	case "ListPostAudience":
+		return s.listPostAudience(ctx, e)
 	case "ShortlistAgent":
 		return s.shortlistAgent(ctx, e)
 	case "ListInteractionEvents":
@@ -1184,6 +1381,9 @@ type createPostPayload struct {
 	EphemeralUntil *time.Time `json:"ephemeralUntil"`
 	// POLL-VOTE-001：帖内投票。不传 / null = 普通帖子。
 	Poll *createPostPollPayload `json:"poll"`
+	// AI-TWIN-POST-AUDIENCE-001：visibility=="TARGETED" 时必填，且必须非空——
+	// 只在这个档位才读取，别的档位传了也会被拒绝（见下方校验），不是静默忽略。
+	AudienceTargetIDs []string `json:"audienceTargetIds"`
 }
 
 // createPostPollPayload 是建帖时随帖提交的投票。
@@ -1221,6 +1421,81 @@ func postIsExpired(p Post, now time.Time) bool {
 	return !p.EphemeralUntil.After(now)
 }
 
+// postVisibleTo is the single source of truth for "can viewerID see this
+// post" across listFeed / listPostsByIds / listPostsMentioning and their
+// Postgres SQL mirrors in platform/postgres/network.go. AI-TWIN-POST-
+// AUDIENCE-001 added the TARGETED branch; every other branch is unchanged
+// from before. Centralizing this (instead of the same two-line check
+// copy-pasted per call site, which is how it looked before) is deliberate:
+// the surrounding comments in this file repeatedly warn about a post
+// invisible on one path "从后门复活"（reappearing through a back door) on
+// another when the copies drift — one function makes drift impossible.
+// AGENT_ONLY is deliberately absent: no caller in this set serves
+// agent-only content today, matching the pre-existing behavior.
+func postVisibleTo(p Post, viewerID string, audience map[string][]string) bool {
+	switch p.Visibility {
+	case "PUBLIC":
+		return true
+	case "FOLLOWERS":
+		// Follow-graph authorization is not implemented yet. Fail closed
+		// instead of treating FOLLOWERS as public; authors may still see
+		// their own post.
+		return p.AuthorID == viewerID
+	case "TARGETED":
+		if p.AuthorID == viewerID {
+			return true
+		}
+		for _, id := range audience[p.ID] {
+			if id == viewerID {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// loadTargetedAudience batch-fetches the audience allowlist for every
+// TARGETED post among candidates — one query for the whole page, not N+1.
+// A repository error fails closed: the returned map simply won't have
+// entries for those post IDs, and postVisibleTo treats a missing entry as
+// "nobody is targeted" (so the post drops out for every non-author viewer),
+// never as "everybody can see it".
+func (s *Service) loadTargetedAudience(ctx context.Context, posts []Post) map[string][]string {
+	var targetedIDs []string
+	for _, p := range posts {
+		if p.Visibility == "TARGETED" {
+			targetedIDs = append(targetedIDs, p.ID)
+		}
+	}
+	if len(targetedIDs) == 0 {
+		return nil
+	}
+	audience, err := s.repository.ListPostAudienceTargets(ctx, targetedIDs)
+	if err != nil {
+		return nil
+	}
+	return audience
+}
+
+// attachAudienceTargets hydrates Post.AudienceTargetIDs for the AUTHOR's own
+// posts only (mirrors attachPolls' shape). A non-author viewer never gets
+// the roster back, even for a TARGETED post they were let through by
+// postVisibleTo — seeing the post is not the same as seeing who else it
+// was shared with.
+func attachAudienceTargets(posts []Post, viewerID string, audience map[string][]string) []Post {
+	if len(audience) == 0 {
+		return posts
+	}
+	for i := range posts {
+		if posts[i].Visibility == "TARGETED" && posts[i].AuthorID == viewerID {
+			posts[i].AudienceTargetIDs = audience[posts[i].ID]
+		}
+	}
+	return posts
+}
+
 // allowedSceneTypes 是 Post.SceneType 的允许集。需要保持与
 // @proxy/contracts scene.ts SceneTypeSchema 同源。这是列表是
 // 唯一应该被 listFeed 接叏去 sceneAesthetic provider 的输入。
@@ -1249,6 +1524,12 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	}
 	if p.Body == "" && len(p.MediaRefs) == 0 {
 		return command.Rejected(e, "POST_EMPTY_CONTENT", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_empty_content", nil)
+	}
+	// POST-PROFILE-GATE-001：真人发帖先有用户名 + 头像。平台 / 系统主体（非 USER）不在此列。
+	if e.Actor.Type == "USER" && s.profileCompleteness != nil {
+		if missing := s.profileCompleteness(ctx, e.Actor.ID); len(missing) > 0 {
+			return command.Rejected(e, "PROFILE_INCOMPLETE", "BUSINESS_STATE", "AFTER_USER_ACTION", "localnet.profile_incomplete", map[string]any{"missing": missing})
+		}
 	}
 	// R15.15 P1: SceneType 可选 — 客户端发布时可填。未知 / 拼错的值
 	// 不被静默接受，会 reject 避免下游 sceneAesthetic.GetAestheticBackdrop
@@ -1281,8 +1562,36 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	if p.Visibility == "" {
 		p.Visibility = "PUBLIC"
 	}
-	if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" && p.Visibility != "AGENT_ONLY" {
+	if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" && p.Visibility != "AGENT_ONLY" && p.Visibility != "TARGETED" {
 		return command.Rejected(e, "INVALID_POST_VISIBILITY", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_visibility", nil)
+	}
+	// AI-TWIN-POST-AUDIENCE-001: TARGETED 必须带非空白名单——targeting nobody
+	// 没有意义，静默当成"没有受众"发布会让作者以为发给了谁、实际谁都看不到。
+	// 反过来，非 TARGETED 档位带了 audienceTargetIds 说明客户端状态和它以为
+	// 发的可见度对不上，同样拒绝而不是悄悄丢弃这份列表。
+	var audienceTargets []string
+	if p.Visibility == "TARGETED" {
+		const maxAudienceTargets = 200
+		seenTarget := make(map[string]struct{}, len(p.AudienceTargetIDs))
+		for _, raw := range p.AudienceTargetIDs {
+			id := strings.TrimSpace(raw)
+			if id == "" || id == e.Actor.ID {
+				continue // 作者本人隐式可见，不需要出现在白名单里
+			}
+			if _, dup := seenTarget[id]; dup {
+				continue
+			}
+			seenTarget[id] = struct{}{}
+			audienceTargets = append(audienceTargets, id)
+		}
+		if len(audienceTargets) == 0 {
+			return command.Rejected(e, "POST_AUDIENCE_EMPTY", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_audience_empty", nil)
+		}
+		if len(audienceTargets) > maxAudienceTargets {
+			return command.Rejected(e, "POST_AUDIENCE_LIMIT_EXCEEDED", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_audience_limit", map[string]any{"max": maxAudienceTargets, "got": len(audienceTargets)})
+		}
+	} else if len(p.AudienceTargetIDs) > 0 {
+		return command.Rejected(e, "POST_AUDIENCE_REQUIRES_TARGETED", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_audience_requires_targeted", nil)
 	}
 	if p.AuthorType != "USER" && p.AuthorType != "AGENT" && p.AuthorType != "MERCHANT" && p.AuthorType != "PLATFORM_SPECIAL" {
 		return command.Rejected(e, "INVALID_AUTHOR_TYPE", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_author_type", nil)
@@ -1419,6 +1728,15 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 			return command.Rejected(e, "POST_POLL_SAVE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.poll_save_failed", nil)
 		}
 	}
+	// AI-TWIN-POST-AUDIENCE-001：同 POLL-VOTE-001 的理由——白名单必须真的落库，
+	// 失败要报失败。宁可让客户端看到失败去重发，也不要发出一条自称
+	// "只给这几个人看"、实际白名单是空的帖子（等于悄悄变成谁都看不到，因为
+	// postVisibleTo 对没查到白名单的 TARGETED 帖子是 fail-closed）。
+	if len(audienceTargets) > 0 {
+		if err := s.repository.SavePostAudienceTargets(ctx, post.ID, audienceTargets); err != nil {
+			return command.Rejected(e, "POST_AUDIENCE_SAVE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.post_audience_save_failed", nil)
+		}
+	}
 	go s.enrichPostClassification(post)
 	return command.Accepted(e, "Post", post.ID, 1, post.Status, eventRefs(domainEvents))
 }
@@ -1527,6 +1845,98 @@ func (s *Service) votePostPoll(ctx context.Context, e command.Envelope) command.
 	}, domainEvents)
 }
 
+// ---------- UpdatePostAudience ----------
+
+// AI-TWIN-POST-AUDIENCE-003（2026-09-22，用户反馈"帖文编辑本质就是一个
+// 开关，决定对哪个人展开"）：原型里受众条是可以在已发布帖子上直接点开
+// 重新设置的——不是只在发帖那一刻定死。AI-TWIN-POST-AUDIENCE-001 只做了
+// CreatePost 时写白名单，这里补上编辑已发布帖子受众的路径，复用同一套
+// 校验和同一张 post_audience_targets 表，不是另起一份数据模型。
+//
+// 只改 visibility + 受众白名单，不碰帖子其余字段——避免变成一个「什么都能
+// 改」的通用 UpdatePost 命令（那类命令的校验面会随时间失控）。
+type updatePostAudiencePayload struct {
+	PostID            string   `json:"postId"`
+	Visibility        string   `json:"visibility"`
+	AudienceTargetIDs []string `json:"audienceTargetIds"`
+}
+
+func (s *Service) updatePostAudience(ctx context.Context, e command.Envelope) command.Result {
+	var p updatePostAudiencePayload
+	if !decode(e.Payload, &p) || p.PostID == "" {
+		return command.Rejected(e, "INVALID_UPDATE_POST_AUDIENCE", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_update_post_audience", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "POST_AUDIENCE_UPDATE_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "localnet.post_audience_update_not_allowed", nil)
+	}
+	if p.Visibility != "PUBLIC" && p.Visibility != "TARGETED" {
+		// 这个开关只在"公开"和"指定好友"之间切——FOLLOWERS/AGENT_ONLY 不是
+		// 这个交互要表达的东西，改那两档走不到这里（也没有 UI 入口）。
+		return command.Rejected(e, "INVALID_POST_VISIBILITY", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_visibility", nil)
+	}
+	post, err := s.repository.GetPost(ctx, p.PostID)
+	if err != nil {
+		return command.Rejected(e, "POST_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "localnet.post_not_found", map[string]any{"postId": p.PostID})
+	}
+	if post.AuthorID != e.Actor.ID {
+		// 别人的帖子不能被你切换受众——即使你恰好是它现在的受众之一。
+		return command.Rejected(e, "NOT_POST_AUTHOR", "AUTHORIZATION", "AFTER_USER_ACTION", "localnet.not_post_author", nil)
+	}
+	if post.Status != "PUBLISHED" {
+		return command.Rejected(e, "POST_NOT_PUBLISHED", "BUSINESS_STATE", "AFTER_USER_ACTION", "localnet.post_not_published", nil)
+	}
+	// 同 createPost 的校验：TARGETED 必须有非空白名单，作者本人隐式可见
+	// 不需要出现在里面；PUBLIC 不携带白名单（切回公开就是清空，不是保留
+	// 上一次选的人以防"又切回 TARGETED 时悄悄复活旧名单"）。
+	var audienceTargets []string
+	if p.Visibility == "TARGETED" {
+		const maxAudienceTargets = 200
+		seenTarget := make(map[string]struct{}, len(p.AudienceTargetIDs))
+		for _, raw := range p.AudienceTargetIDs {
+			id := strings.TrimSpace(raw)
+			if id == "" || id == e.Actor.ID {
+				continue
+			}
+			if _, dup := seenTarget[id]; dup {
+				continue
+			}
+			seenTarget[id] = struct{}{}
+			audienceTargets = append(audienceTargets, id)
+		}
+		if len(audienceTargets) == 0 {
+			return command.Rejected(e, "POST_AUDIENCE_EMPTY", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_audience_empty", nil)
+		}
+		if len(audienceTargets) > maxAudienceTargets {
+			return command.Rejected(e, "POST_AUDIENCE_LIMIT_EXCEEDED", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_audience_limit", map[string]any{"max": maxAudienceTargets, "got": len(audienceTargets)})
+		}
+	}
+	updated := post
+	updated.Visibility = p.Visibility
+	updated.AudienceTargetIDs = nil // 读时才拼；写路径不需要、也不该带着旧值走一圈
+	if err := s.repository.UpdatePost(ctx, updated, 1); err != nil {
+		return command.Rejected(e, "POST_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.post_update_failed", nil)
+	}
+	// AI-TWIN-POST-AUDIENCE-001：同一个理由——白名单必须真的落库，失败要
+	// 报失败，不能让 visibility 已经改成 TARGETED、白名单却没写上，变成一条
+	// 谁都看不到的帖子（postVisibleTo 对查不到白名单的 TARGETED 帖子是
+	// fail-closed）。PUBLIC 传空列表，落库效果是清空旧白名单。
+	if err := s.repository.SavePostAudienceTargets(ctx, p.PostID, audienceTargets); err != nil {
+		return command.Rejected(e, "POST_AUDIENCE_SAVE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.post_audience_save_failed", nil)
+	}
+	domainEvents := []event.DomainEvent{event.New("PostAudienceUpdated", "Post", p.PostID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+		"visibility":  p.Visibility,
+		"audienceLen": len(audienceTargets),
+	})}
+	if audienceTargets == nil {
+		audienceTargets = []string{} // 契约要求 [] 而不是 null（见 AGENTS.md 的 array-not-null 约定）
+	}
+	return acceptedWithPayload(e, "Post", p.PostID, 1, "POST_AUDIENCE_UPDATED", map[string]any{
+		"postId":            p.PostID,
+		"visibility":        p.Visibility,
+		"audienceTargetIds": audienceTargets,
+	}, domainEvents)
+}
+
 // ---------- ListFeedPosts ----------
 // PRD §8 Feed 管道。ALL 是全部可见公开帖文，默认 createdAt DESC、
 // postId ASC；LocationContext 只作为元数据和显式“附近”筛选依据。
@@ -1553,10 +1963,10 @@ func (s *Service) listPostsByIds(ctx context.Context, e command.Envelope) comman
 		return command.Rejected(e, "INVALID_LIST_POSTS_BY_IDS", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_list_posts_by_ids", nil)
 	}
 	const maxPostIDs = 100
-	posts := make([]Post, 0, len(request.PostIDs))
+	candidates := make([]Post, 0, len(request.PostIDs))
 	seen := make(map[string]struct{}, len(request.PostIDs))
 	for _, rawID := range request.PostIDs {
-		if len(posts) >= maxPostIDs {
+		if len(candidates) >= maxPostIDs {
 			break
 		}
 		id := strings.TrimSpace(rawID)
@@ -1574,10 +1984,14 @@ func (s *Service) listPostsByIds(ctx context.Context, e command.Envelope) comman
 		if post.Status != "PUBLISHED" {
 			continue
 		}
-		if post.Visibility != "PUBLIC" && post.Visibility != "FOLLOWERS" {
-			continue
-		}
-		if post.Visibility == "FOLLOWERS" && post.AuthorID != e.Actor.ID {
+		candidates = append(candidates, post)
+	}
+	// AI-TWIN-POST-AUDIENCE-001: one batch query for the whole candidate set,
+	// not one per post.
+	audience := s.loadTargetedAudience(ctx, candidates)
+	posts := make([]Post, 0, len(candidates))
+	for _, post := range candidates {
+		if !postVisibleTo(post, e.Actor.ID, audience) {
 			continue
 		}
 		// GHOST-24H-001: 按 ID 直取也不能把已过期的临时动态捞回来。收藏夹里躺着
@@ -1595,6 +2009,7 @@ func (s *Service) listPostsByIds(ctx context.Context, e command.Envelope) comman
 		}
 		posts = append(posts, post)
 	}
+	posts = attachAudienceTargets(posts, e.Actor.ID, audience)
 	posts = s.attachPolls(ctx, posts, e.Actor.ID)
 	return acceptedWithPayload(e, "Post", "", 0, "POSTS_BY_IDS", map[string]any{
 		"posts": posts,
@@ -1737,17 +2152,16 @@ func (s *Service) listPostsMentioning(ctx context.Context, e command.Envelope) c
 	if err != nil {
 		return command.Rejected(e, "MENTION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.mention_read_failed", nil)
 	}
+	// AI-TWIN-POST-AUDIENCE-001: batch before the loop, not per post.
+	mentionAudience := s.loadTargetedAudience(ctx, posts)
 	matched := make([]Post, 0, len(posts))
 	for _, p := range posts {
 		// SQL 路径已经在 WHERE 里过了一遍，这里再判一次是纵深防御：只要有一处
-		// 实现漏掉可见性，TAGGED 就会漏出别人的 followers-only 帖子。
+		// 实现漏掉可见性，TAGGED 就会漏出别人指定受众之外的帖子。
 		if p.Status != "PUBLISHED" {
 			continue
 		}
-		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
-			continue
-		}
-		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
+		if !postVisibleTo(p, e.Actor.ID, mentionAudience) {
 			continue
 		}
 		if p.AuthorID == e.Actor.ID {
@@ -1876,6 +2290,8 @@ func (s *Service) hydratePostMedia(ctx context.Context, feed []Post) map[string]
 					ModerationStatus:  info.ModerationStatus,
 					SortOrder:         ref.SortOrder,
 					CompositionHint:   info.CompositionHint,
+					// LC-06 溯源透出：资产级「谁生成的」随 feed media 一起下发。
+					AIGenerationSource: info.AIGenerationSource,
 				})
 				// R15.15 P1: 按 (post.CityScope, post.SceneType) 取
 				// 背景 — 不同场景类型的帖背景会不一样。相同 (city,
@@ -1996,13 +2412,15 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 			replyHits = hits
 		}
 	}
+	// AI-TWIN-POST-AUDIENCE-001: batch before the loop, not per post.
+	feedAudience := s.loadTargetedAudience(ctx, posts)
 	// ALL 是全局公开时间流；LocationContext 不参与 eligibility。
 	feed := make([]Post, 0, len(posts))
 	for _, p := range posts {
 		if p.Status != "PUBLISHED" {
 			continue
 		}
-		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
+		if !postVisibleTo(p, e.Actor.ID, feedAudience) {
 			continue
 		}
 		// SEARCH-CORPUS-001: 匹配字段见 postMatchesSearch
@@ -2014,11 +2432,6 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		// PG 侧同一条谓语写在 SQL 里（保证 LIMIT 数对），这里是内存仓的路径，
 		// 同时对 PG 结果再兜一层 —— 过期的东西宁可漏也别漏出来。
 		if postIsExpired(p, s.clock.Now().UTC()) {
-			continue
-		}
-		// Follow-graph authorization is not implemented yet. Fail closed instead
-		// of treating FOLLOWERS as public; authors may still see their own post.
-		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
 			continue
 		}
 		if !cursor.CreatedAt.IsZero() && (p.CreatedAt.After(cursor.CreatedAt) || (p.CreatedAt.Equal(cursor.CreatedAt) && p.ID <= cursor.PostID)) {
@@ -2050,6 +2463,7 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		raw, _ := json.Marshal(map[string]any{"createdAt": last.CreatedAt, "postId": last.ID})
 		nextCursor = signCursor(raw)
 	}
+	feed = attachAudienceTargets(feed, e.Actor.ID, feedAudience)
 	feed = s.attachPolls(ctx, feed, e.Actor.ID)
 	feedMedia := s.hydratePostMedia(ctx, feed)
 	return acceptedWithPayload(e, "Post", "", 0, "FEED", map[string]any{
@@ -2194,6 +2608,11 @@ func (s *Service) recordMediaImpression(ctx context.Context, e command.Envelope)
 	return s.appendInteraction(ctx, e, "MEDIA_IMPRESSION", "MEDIA")
 }
 
+// CONTENT-ANALYTICS-001: 全屏看图时双击 / 捏合放大 —— 运营侧「这张照片被认真看了」的信号，用户侧不展示。
+func (s *Service) recordMediaZoom(ctx context.Context, e command.Envelope) command.Result {
+	return s.appendInteraction(ctx, e, "MEDIA_ZOOM", "MEDIA")
+}
+
 func (s *Service) shortlistAgent(ctx context.Context, e command.Envelope) command.Result {
 	return s.appendInteraction(ctx, e, "AGENT_SHORTLISTED", "AGENT")
 }
@@ -2264,8 +2683,9 @@ func (s *Service) listInteractionEvents(ctx context.Context, e command.Envelope)
 // 传别人的 authorId 直接拒绝。空列表返回 []，不是 null。
 func (s *Service) listPostImpressionStats(ctx context.Context, e command.Envelope) command.Result {
 	var p struct {
-		AuthorID string `json:"authorId"`
-		Limit    int    `json:"limit"`
+		AuthorID  string `json:"authorId"`
+		Limit     int    `json:"limit"`
+		SinceDays int    `json:"sinceDays"`
 	}
 	_ = decode(e.Payload, &p)
 	authorID := p.AuthorID
@@ -2275,10 +2695,10 @@ func (s *Service) listPostImpressionStats(ctx context.Context, e command.Envelop
 	if authorID != e.Actor.ID {
 		return command.Rejected(e, "STATS_FORBIDDEN", "VALIDATION", "AFTER_USER_ACTION", "localnet.stats_forbidden", nil)
 	}
-	if p.Limit <= 0 || p.Limit > 50 {
-		p.Limit = 20
+	if p.Limit <= 0 || p.Limit > 100 {
+		p.Limit = 100
 	}
-	stats, err := s.repository.ListPostImpressionStats(ctx, authorID, p.Limit)
+	stats, err := s.repository.ListPostImpressionStats(ctx, authorID, s.statsSince(p.SinceDays), p.Limit)
 	if err != nil {
 		return command.Rejected(e, "STATS_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.stats_list_failed", nil)
 	}
@@ -2293,9 +2713,12 @@ func (s *Service) listPostImpressionStats(ctx context.Context, e command.Envelop
 
 // ListProfileViewStats：主页访问战绩读侧（PROFILE-VISIT-001）。只能查自己的
 // 主页——不暴露"谁在看谁"，ownerId 不传按自己算，传别人的直接拒绝。
+// sinceDays 可选：>0 时只数窗口内的访问（「我的 → 分析」传 30）；缺省全量，
+// friend-crm 的访问/回访行继续用全量口径，不动。
 func (s *Service) listProfileViewStats(ctx context.Context, e command.Envelope) command.Result {
 	var p struct {
-		OwnerID string `json:"ownerId"`
+		OwnerID   string `json:"ownerId"`
+		SinceDays int    `json:"sinceDays"`
 	}
 	_ = decode(e.Payload, &p)
 	ownerID := p.OwnerID
@@ -2305,7 +2728,11 @@ func (s *Service) listProfileViewStats(ctx context.Context, e command.Envelope) 
 	if ownerID != e.Actor.ID {
 		return command.Rejected(e, "STATS_FORBIDDEN", "VALIDATION", "AFTER_USER_ACTION", "localnet.stats_forbidden", nil)
 	}
-	stats, err := s.repository.ListProfileViewStats(ctx, ownerID)
+	var since time.Time
+	if p.SinceDays > 0 {
+		since = s.statsSince(p.SinceDays)
+	}
+	stats, err := s.repository.ListProfileViewStats(ctx, ownerID, since)
 	if err != nil {
 		return command.Rejected(e, "STATS_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.stats_list_failed", nil)
 	}
@@ -2354,8 +2781,9 @@ func (s *Service) listProfileViewers(ctx context.Context, e command.Envelope) co
 // 完全一样，只是从"帖子"细到"帖子里的第几张"。
 func (s *Service) listMediaImpressionStats(ctx context.Context, e command.Envelope) command.Result {
 	var p struct {
-		AuthorID string `json:"authorId"`
-		Limit    int    `json:"limit"`
+		AuthorID  string `json:"authorId"`
+		Limit     int    `json:"limit"`
+		SinceDays int    `json:"sinceDays"`
 	}
 	_ = decode(e.Payload, &p)
 	authorID := p.AuthorID
@@ -2365,10 +2793,10 @@ func (s *Service) listMediaImpressionStats(ctx context.Context, e command.Envelo
 	if authorID != e.Actor.ID {
 		return command.Rejected(e, "STATS_FORBIDDEN", "VALIDATION", "AFTER_USER_ACTION", "localnet.stats_forbidden", nil)
 	}
-	if p.Limit <= 0 || p.Limit > 50 {
-		p.Limit = 20
+	if p.Limit <= 0 || p.Limit > 100 {
+		p.Limit = 100
 	}
-	stats, err := s.repository.ListMediaImpressionStats(ctx, authorID, p.Limit)
+	stats, err := s.repository.ListMediaImpressionStats(ctx, authorID, s.statsSince(p.SinceDays), p.Limit)
 	if err != nil {
 		return command.Rejected(e, "STATS_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.stats_list_failed", nil)
 	}
@@ -2392,12 +2820,11 @@ func (s *Service) listMediaActivityForViewer(ctx context.Context, e command.Enve
 		Limit         int    `json:"limit"`
 	}
 	_ = decode(e.Payload, &p)
-	authorID := p.AuthorID
+	// CONTENT-ANALYTICS-001: 逐人明细是运营数据（ANALYTICS scope，HTTP 入口已按运营白名单拦），
+	// 运营不是作者本人，所以 authorId 必填，不再按 actor 自己算。
+	authorID := strings.TrimSpace(p.AuthorID)
 	if authorID == "" {
-		authorID = e.Actor.ID
-	}
-	if authorID != e.Actor.ID {
-		return command.Rejected(e, "STATS_FORBIDDEN", "VALIDATION", "AFTER_USER_ACTION", "localnet.stats_forbidden", nil)
+		return command.Rejected(e, "INVALID_AUTHOR_ID", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_author_id", nil)
 	}
 	if p.ViewerActorID == "" {
 		return command.Rejected(e, "INVALID_VIEWER_ACTOR_ID", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_viewer_actor_id", nil)
@@ -2417,6 +2844,58 @@ func (s *Service) listMediaActivityForViewer(ctx context.Context, e command.Enve
 		"viewerActorId": p.ViewerActorID,
 		"activity":      activity,
 	}, nil)
+}
+
+// statsSince：用户侧战绩窗口。默认 30 天，最多 365 天。
+func (s *Service) statsSince(days int) time.Time {
+	if days <= 0 {
+		days = 30
+	}
+	if days > 365 {
+		days = 365
+	}
+	return s.clock.Now().UTC().AddDate(0, 0, -days)
+}
+
+// GetContentAnalytics：用户侧分析面板（CONTENT-ANALYTICS-001）。只能查自己；只有合计，没有逐人明细。
+func (s *Service) getContentAnalytics(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		SinceDays int `json:"sinceDays"`
+	}
+	_ = decode(e.Payload, &p)
+	days := p.SinceDays
+	if days <= 0 || days > 365 {
+		days = 30
+	}
+	out, err := s.repository.ContentAnalytics(ctx, e.Actor.ID, s.statsSince(days))
+	if err != nil {
+		return command.Rejected(e, "STATS_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.stats_list_failed", nil)
+	}
+	out.SinceDays = days
+	return acceptedWithPayload(e, "ContentAnalytics", "", 0, "READ", map[string]any{"analytics": out}, nil)
+}
+
+// ListPostAudience：仅运营（ANALYTICS scope）—— 一条帖子的受众逐人明细，全量历史，用于精准投流。
+func (s *Service) listPostAudience(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		PostID string `json:"postId"`
+		Limit  int    `json:"limit"`
+	}
+	_ = decode(e.Payload, &p)
+	if strings.TrimSpace(p.PostID) == "" {
+		return command.Rejected(e, "INVALID_POST_ID", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_post_id", nil)
+	}
+	if p.Limit <= 0 || p.Limit > 500 {
+		p.Limit = 200
+	}
+	rows, err := s.repository.ListPostAudience(ctx, strings.TrimSpace(p.PostID), p.Limit)
+	if err != nil {
+		return command.Rejected(e, "STATS_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.stats_list_failed", nil)
+	}
+	if rows == nil {
+		rows = []PostAudienceRow{}
+	}
+	return acceptedWithPayload(e, "PostAudience", p.PostID, 0, "LIST", map[string]any{"postId": p.PostID, "audience": rows}, nil)
 }
 
 // ---------- helpers ----------

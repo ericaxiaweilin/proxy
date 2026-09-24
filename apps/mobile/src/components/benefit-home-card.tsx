@@ -44,15 +44,15 @@ export function BenefitHomeCard({
   return (
     <Pressable onPress={onPress} style={[styles.card, { borderColor: accentColor }]}>
       <View style={styles.row}>
-        <Text style={styles.icon}>{BENEFIT_ICONS[benefit.kind] ?? "•"}</Text>
+        <Text selectable style={styles.icon}>{BENEFIT_ICONS[benefit.kind] ?? "•"}</Text>
         <View style={styles.info}>
-          <Text style={styles.label} numberOfLines={1}>{benefit.label}</Text>
-          <Text style={styles.sub} numberOfLines={1}>
+          <Text selectable style={styles.label} numberOfLines={1}>{benefit.label}</Text>
+          <Text selectable style={styles.sub} numberOfLines={1}>
             {benefit.userPayMinor === 0 ? "免费" : `${formatMoney(benefit.userPayMinor)}₫`}
           </Text>
         </View>
         <View style={[styles.badge, { backgroundColor: accentColor }]}>
-          <Text style={styles.badgeText}>领取</Text>
+          <Text selectable style={styles.badgeText}>领取</Text>
         </View>
       </View>
     </Pressable>
@@ -71,7 +71,7 @@ export function BenefitHomeSection({
   if (campaigns.length === 0) return null;
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>为你推荐</Text>
+      <Text selectable style={styles.sectionTitle}>为你推荐</Text>
       {campaigns.slice(0, 3).map((camp) => {
         const benefit = benefits.find((b) => b.campaignId === camp.campaignId);
         if (!benefit) return null;

@@ -1,7 +1,6 @@
 // Gate J：主要 Task Archetype 的确定性 UIPlan fixtures。
 // Phase 1-5 不接模型与真实 API：类目选择 → 确定性计划；读模型数据对齐后端
 // simulated seed（agent_linh / agent_mai / agent_minh），Phase 9 换成真实读模型。
-import type { Candidate } from "./catalog";
 import { FALLBACK_CRITICAL_QUESTION, fallbackPlanFor } from "./fallback";
 import { UI_PLAN_SCHEMA_VERSION, type HardDemandCategory, type UIPlan } from "./types";
 
@@ -27,30 +26,9 @@ export interface QuoteReadModel {
   breakdown: Array<{ item: string; amountVnd: number }>;
 }
 
-// 与 apps/api-go seedPostgresSupply 对齐：Linh 120 万（ZH+VI+摄影）、Mai 100 万、Minh 110 万（hcm）。
-export const TRAVEL_LOCAL_CANDIDATES: Candidate[] = [
-  {
-    agentId: "agent_linh",
-    name: "Linh",
-    offerVnd: 1200000,
-    fulfillmentRate: 0.98,
-    satisfactionRate: 0.97,
-    completedOrders: 26,
-    languages: ["ZH", "VI"],
-    proofs: ["中文已验证", "河内 26 单", "摄影能力已核验"]
-  },
-  {
-    agentId: "agent_mai",
-    name: "Mai",
-    offerVnd: 1000000,
-    fulfillmentRate: 0.95,
-    satisfactionRate: 0.94,
-    completedOrders: 12,
-    languages: ["VI"],
-    proofs: ["越南语已验证", "河内 12 单"]
-  }
-];
-
+// MATCH-LIVE-001：候选不再有演示数据。以前这里写死 Linh（履约 98%、26 单）/ Mai（12 单），「找人」页永远显示
+// 这两张假卡片。真实候选由 FulfillmentWorkspace 调后端 ListCityCompanionCandidates 拿（按履约 / 评价排序），
+// 这里只给「不可用」态，让面板如实说明。
 const TRAVEL_LOCAL_NEED: NeedReadModel = {
   needId: "need_fixture_travel",
   title: "河内城市同行",
@@ -103,7 +81,7 @@ export function resolveReadModel(dataRef: string | undefined, componentId: strin
         meetingPoint: TRAVEL_LOCAL_NEED.meetingPoint
       };
     case "CANDIDATE_RAIL":
-      return { candidates: TRAVEL_LOCAL_CANDIDATES };
+      return { candidates: [], status: "unavailable" };
     case "CONTEXTUAL_QUOTE":
       return { ...TRAVEL_LOCAL_QUOTE };
     case "WAITING_STATUS":

@@ -1,10 +1,11 @@
+import { opFetch } from "../lib/api";
 import { useEffect, useState } from "react";
 
 type Payload = { stages: Array<{ stage: string; desc: string; count: number }>; field_flow: Array<{ k: string; v: string; d: string }> };
 
 export function Research() {
   const [data, setData] = useState<Payload | null>(null);
-  useEffect(() => { fetch("/v1/operator/research").then((r) => r.json()).then(setData).catch(() => {}); }, []);
+  useEffect(() => { opFetch("/v1/operator/research").then(setData).catch(() => {}); }, []);
   if (!data) return <div className="notice">加载 Research…</div>;
   return (
     <>

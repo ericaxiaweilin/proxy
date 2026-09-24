@@ -35,4 +35,11 @@ describe("conversation avatar pipeline", () => {
     expect(messages).toContain("/v1/media/thumb/${encodeURIComponent(assetId)}");
     expect(messages).not.toContain("user_\" + item.counterpartyId");
   });
+
+  it("NO-RAW-ID-001: inbox never shows a bare account id as the peer name", () => {
+    // 名字解析不到（无 profile、无 snapshot、非 AI/助手）时用中性「用户」，
+    // 绝不把 counterpartyId 当名字上屏。id 只做 peerUserId 导航标识。
+    expect(messages).toContain('(isAssistantPeer ? "AI助手" : "用户")');
+    expect(messages).not.toContain(': item.counterpartyId) || "对话"');
+  });
 });

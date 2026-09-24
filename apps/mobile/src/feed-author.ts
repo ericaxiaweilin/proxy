@@ -29,7 +29,11 @@ export function isOwnAuthorId(authorId: string | undefined, viewerAccountId?: st
 }
 
 /**
- * Resolve the author label for one viewer. Own posts render as "你";
+ * Resolve the author label for one viewer.
+ *
+ * OWN-NAME-001（2026-09-24，用户：「自己的帖文 显示不叫你 而是正常用户名 点击头像也是跳转到个人主页 逻辑都一样」）：
+ * 自己的帖子不再显示「你」，跟别人一样显示用户名 —— 优先当前资料名（viewerDisplayName），其次帖子保存的名字，
+ * 都没有才用中性兜底。以前是：Own posts render as "你";
  * everyone else sees the stored name — except legacy poisoned rows whose
  * stored name is literally "你", which fall back to a neutral label so one
  * user's posts are never labeled as another viewer's own. Raw ids (and
@@ -37,9 +41,13 @@ export function isOwnAuthorId(authorId: string | undefined, viewerAccountId?: st
  */
 export function resolveAuthorDisplayName(
   post: AuthoredItem,
-  viewerAccountId?: string | undefined
+  viewerAccountId?: string | undefined,
+  viewerDisplayName?: string | undefined
 ): string {
-  if (isOwnAuthorId(post.authorId, viewerAccountId)) return "你";
+  if (isOwnAuthorId(post.authorId, viewerAccountId)) {
+    const current = (viewerDisplayName ?? "").trim();
+    if (current !== "" && current !== "你") return current;
+  }
   const stored = (post.authorDisplayName ?? "").trim();
   if (stored !== "" && stored !== "你") return stored;
   return post.authorType === "MERCHANT" ? "商家" : "用户";
@@ -69,10 +77,12 @@ export type ReplyAuthorItem = {
  */
 export function resolveReplyAuthorDisplayName(
   reply: ReplyAuthorItem,
-  viewerAccountId?: string | undefined
+  viewerAccountId?: string | undefined,
+  viewerDisplayName?: string | undefined
 ): string {
   return resolveAuthorDisplayName(
     { authorId: reply.actorId, authorDisplayName: reply.actorDisplayName },
-    viewerAccountId
+    viewerAccountId,
+    viewerDisplayName
   );
 }

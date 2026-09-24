@@ -77,6 +77,30 @@ describe("AiPersonaClient", () => {
     expect(calls).toBe(0);
   });
 
+  it("图库：正常列表按 source 发对路径，缺 items 数组才抛错", async () => {
+    const seen: string[] = [];
+    const item = { id: "ma_1", thumbnailUrl: "/v1/media/thumb/ma_1", aiGenerationSource: "AI_PERSONA", createdAt: "2026-09-21T00:00:00Z" };
+    const client = new AiPersonaClient({
+      authClient: stubTransport((path: string) => {
+        seen.push(path);
+        return { status: 200, payload: { items: [item] } };
+      }),
+    });
+    await expect(client.listGallery("aip_1", "ai")).resolves.toEqual([item]);
+    expect(seen).toEqual(["/v1/ai/personas/aip_1/media?source=ai"]);
+
+    const broken = new AiPersonaClient({ authClient: stubTransport(() => ({ status: 200, payload: {} })) });
+    await expect(broken.listGallery("aip_1", "raw")).rejects.toThrow("缺少 items 数组");
+  });
+
+  it("图库：401/403 翻译成人话，不是裸状态码", async () => {
+    const unauthed = new AiPersonaClient({ authClient: stubTransport(() => ({ status: 401, payload: {} })) });
+    await expect(unauthed.listGallery("aip_1", "ai")).rejects.toThrow("重新登录");
+
+    const forbidden = new AiPersonaClient({ authClient: stubTransport(() => ({ status: 403, payload: {} })) });
+    await expect(forbidden.listGallery("aip_1", "raw")).rejects.toThrow("不属于当前账号");
+  });
+
   it("补年龄断言发对路径，格式不对本地拦", async () => {
     const seen: Array<{ path: string; body: unknown }> = [];
     const client = new AiPersonaClient({
@@ -89,5 +113,50 @@ describe("AiPersonaClient", () => {
     expect(seen).toEqual([{ path: "/v1/identity/age-assertion", body: { dateOfBirth: "1990-05-06" } }]);
     await expect(client.recordAgeAssertion("1990/05/06")).rejects.toThrow("YYYY-MM-DD");
     expect(seen).toHaveLength(1);
+  });
+});
+
+describe("AiPersonaClient likeness-gated twin (AI-MANAGE-010)", () => {
+  // 用户：「ai 分身只给小美授权使用 没有这个授权的就是没有」「点击进入自动默认授权 但是要弹授权提示」。
+  // 取代 TWIN-SUBSPACE-ACTIVATE-001 的「进页面就地建分身」：查只读，建分身只在本人同意授权之后。
+  const twin = { id: "aip_1", ownerId: "acct_1", displayName: "我的AI分身", personaType: "USER_TWIN", createdAt: "2026-09-18T00:00:00Z" };
+  const consent = { id: "lc_1", personaId: "aip_1", subjectId: "acct_1", consentKind: "VISUAL", termsVersion: "terms-1.1", grantedAt: "2026-09-23T00:00:00Z" };
+
+  it("a twin without a live likeness consent counts as no twin, and looking never creates one", async () => {
+    const seen: string[] = [];
+    const client = new AiPersonaClient({
+      authClient: stubTransport((path: string) => {
+        seen.push(path);
+        if (path.startsWith("/v1/ai/personas?")) return { status: 200, payload: { personas: [twin] } };
+        return { status: 204, payload: {} };
+      }),
+    });
+    await expect(client.findAuthorizedTwin("acct_1")).resolves.toBeUndefined();
+    expect(seen.every((path) => !path.endsWith("/v1/ai/personas"))).toBe(true);
+  });
+
+  it("finds the twin only when the owner's visual consent is live", async () => {
+    const client = new AiPersonaClient({
+      authClient: stubTransport((path: string) => {
+        if (path.startsWith("/v1/ai/personas?")) return { status: 200, payload: { personas: [twin] } };
+        return { status: 200, payload: consent };
+      }),
+    });
+    await expect(client.findAuthorizedTwin("acct_1")).resolves.toEqual({ twin, consent });
+  });
+
+  it("creates the twin and grants consent only when the owner agrees", async () => {
+    const seen: Array<{ path: string; body: unknown }> = [];
+    const client = new AiPersonaClient({
+      authClient: stubTransport((path: string, body: unknown) => {
+        seen.push({ path, body });
+        if (path.startsWith("/v1/ai/personas?")) return { status: 200, payload: { personas: [] } };
+        if (path === "/v1/ai/personas") return { status: 201, payload: twin };
+        return { status: 201, payload: consent };
+      }),
+    });
+    await expect(client.grantLikeness("acct_1")).resolves.toEqual({ twin, consent });
+    expect(seen.map((entry) => entry.path)).toEqual(["/v1/ai/personas?ownerId=acct_1", "/v1/ai/personas", "/v1/ai/personas/aip_1/consents"]);
+    expect(seen[2]!.body).toEqual({ subjectId: "acct_1", consentKind: "VISUAL" });
   });
 });

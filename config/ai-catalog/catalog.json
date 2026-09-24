@@ -1,0 +1,285 @@
+{
+  "version": "2026-09-23.1",
+  "note": "运营维护的 AI 目录：厂商 / 模型 / 价格 / logo / 免费额度。服务端按文件修改时间自动重载（改完即生效，不用发版）；以后对接自动同步，直接覆盖本文件与 logos/ 即可。",
+  "imageBilling": {
+    "payer": "user",
+    "freeImagesPerMonth": 10,
+    "freeVendor": "platform_default",
+    "priceNotice": "图片生成费用由用户自行承担，每月有少量免费额度。价格为单位生成成本，实际扣费以各厂商官方计费为准。"
+  },
+  "chatBilling": {
+    "payer": "platform",
+    "note": "代回复的聊天 Token 目前由平台承担；改为用户付费时把 payer 改成 user 并填 pricePer1kTokens。",
+    "pricePer1kTokens": null
+  },
+  "vendors": [
+    {
+      "id": "platform_default",
+      "name": "平台默认",
+      "desc": "系统自动选择最优厂商",
+      "logo": "logos/platform_default.svg",
+      "logoBg": "#1a1a1a",
+      "recommend": true,
+      "pinned": true,
+      "rank": {
+        "quality": 0,
+        "price": 0,
+        "popular": 0
+      },
+      "models": []
+    },
+    {
+      "id": "google",
+      "name": "Google",
+      "desc": "细节丰富 · 文字渲染强",
+      "logo": "logos/google.svg",
+      "logoBg": "#ffffff",
+      "rank": {
+        "quality": 9.6,
+        "price": 0.02,
+        "popular": 9.2
+      },
+      "models": [
+        {
+          "name": "Imagen 4",
+          "price": {
+            "label": "$0.02-0.06/张",
+            "currency": "USD",
+            "min": 0.02,
+            "max": 0.06,
+            "unit": "image"
+          },
+          "tag": "NEW"
+        },
+        {
+          "name": "Imagen 4 Fast",
+          "price": {
+            "label": "$0.02/张",
+            "currency": "USD",
+            "min": 0.02,
+            "max": 0.02,
+            "unit": "image"
+          }
+        },
+        {
+          "name": "Imagen 3",
+          "price": {
+            "label": "$0.03-0.12/张",
+            "currency": "USD",
+            "min": 0.03,
+            "max": 0.12,
+            "unit": "image"
+          }
+        }
+      ]
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "desc": "通用性强 · 指令跟随好",
+      "logo": "logos/openai.svg",
+      "logoBg": "#10a37f",
+      "rank": {
+        "quality": 9.3,
+        "price": 0.011,
+        "popular": 10
+      },
+      "models": [
+        {
+          "name": "GPT-Image-1",
+          "price": {
+            "label": "$0.04-0.17/张",
+            "currency": "USD",
+            "min": 0.04,
+            "max": 0.17,
+            "unit": "image"
+          },
+          "tag": "NEW"
+        },
+        {
+          "name": "GPT-Image-1.5",
+          "price": {
+            "label": "$0.011-0.25/张",
+            "currency": "USD",
+            "min": 0.011,
+            "max": 0.25,
+            "unit": "image"
+          }
+        },
+        {
+          "name": "DALL·E 3",
+          "price": {
+            "label": "$0.04-0.12/张",
+            "currency": "USD",
+            "min": 0.04,
+            "max": 0.12,
+            "unit": "image"
+          }
+        }
+      ]
+    },
+    {
+      "id": "midjourney",
+      "name": "Midjourney",
+      "desc": "艺术感强 · 氛围大片",
+      "logo": "logos/midjourney.svg",
+      "logoBg": "#000000",
+      "rank": {
+        "quality": 9.4,
+        "price": 0.1,
+        "popular": 9.5
+      },
+      "models": [
+        {
+          "name": "MJ v7",
+          "price": {
+            "label": "$10-120/月",
+            "currency": "USD",
+            "min": 10.0,
+            "max": 120.0,
+            "unit": "month"
+          },
+          "tag": "NEW",
+          "subscription": true
+        },
+        {
+          "name": "MJ v6.1",
+          "price": {
+            "label": "$10-120/月",
+            "currency": "USD",
+            "min": 10.0,
+            "max": 120.0,
+            "unit": "month"
+          },
+          "subscription": true
+        },
+        {
+          "name": "Niji 6",
+          "price": {
+            "label": "$10-120/月",
+            "currency": "USD",
+            "min": 10.0,
+            "max": 120.0,
+            "unit": "month"
+          },
+          "subscription": true
+        }
+      ]
+    },
+    {
+      "id": "bfl",
+      "name": "Black Forest Labs",
+      "desc": "速度快 · 真实感好",
+      "logo": "logos/bfl.svg",
+      "logoBg": "#ff6b35",
+      "rank": {
+        "quality": 9.2,
+        "price": 0.00258,
+        "popular": 8.5
+      },
+      "models": [
+        {
+          "name": "FLUX.2 Pro",
+          "price": {
+            "label": "$0.03-0.045/张",
+            "currency": "USD",
+            "min": 0.03,
+            "max": 0.045,
+            "unit": "image"
+          }
+        },
+        {
+          "name": "FLUX.2 Max",
+          "price": {
+            "label": "$0.07/张起",
+            "currency": "USD",
+            "min": 0.07,
+            "max": 0.07,
+            "unit": "image"
+          }
+        },
+        {
+          "name": "FLUX.1 Schnell",
+          "price": {
+            "label": "$0.00258/张",
+            "currency": "USD",
+            "min": 0.00258,
+            "max": 0.00258,
+            "unit": "image"
+          }
+        }
+      ]
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "desc": "提示词优化辅助",
+      "logo": "logos/anthropic.svg",
+      "logoBg": "#d4a574",
+      "rank": {
+        "quality": 8,
+        "price": 0.08,
+        "popular": 7
+      },
+      "models": [
+        {
+          "name": "Claude 4 Opus",
+          "price": {
+            "label": "按量计费",
+            "unit": "metered"
+          }
+        },
+        {
+          "name": "Claude 4 Sonnet",
+          "price": {
+            "label": "按量计费",
+            "unit": "metered"
+          }
+        },
+        {
+          "name": "Claude 3.5 Sonnet",
+          "price": {
+            "label": "按量计费",
+            "unit": "metered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "sensenova",
+      "name": "商汤 SenseNova",
+      "desc": "亚洲人像更自然",
+      "logo": "logos/sensenova.svg",
+      "logoBg": "#e91e63",
+      "rank": {
+        "quality": 8.5,
+        "price": 0.05,
+        "popular": 7.5
+      },
+      "models": [
+        {
+          "name": "SenseNova 5.5",
+          "price": {
+            "label": "按量计费",
+            "unit": "metered"
+          },
+          "tag": "NEW"
+        },
+        {
+          "name": "日日新 5.0",
+          "price": {
+            "label": "按量计费",
+            "unit": "metered"
+          }
+        },
+        {
+          "name": "SenseMirage",
+          "price": {
+            "label": "按量计费",
+            "unit": "metered"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -78,55 +78,55 @@ export function CustomFeedHub({ onBack, onOpenFeed }: { onBack: () => void; onOp
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>自定频道</Text>
-      <Text style={styles.sub}>在动态左上角集中管理「朋友/河内/摄影/机会/商家/创业」；也可让 AI 按一句话生成频道。</Text>
+      <Text selectable style={styles.title}>自定频道</Text>
+      <Text selectable style={styles.sub}>在动态左上角集中管理「朋友/河内/摄影/机会/商家/创业」；也可让 AI 按一句话生成频道。</Text>
 
       <View style={styles.aiBox}>
-        <Text style={styles.aiTitle}>按关键词快速创建频道</Text>
+        <Text selectable style={styles.aiTitle}>按关键词快速创建频道</Text>
         <TextInput value={draft} onChangeText={setDraft} placeholder="例：给我建一个只看河内做 AI/产品的人和活动的频道" placeholderTextColor={color.muted} style={styles.aiInput} multiline />
         <Pressable onPress={generateAI} style={[styles.aiBtn, !draft.trim() && styles.disabled]}>
-          <Text style={styles.aiBtnText}>创建并固定到首页</Text>
+          <Text selectable style={styles.aiBtnText}>创建并固定到首页</Text>
         </Pressable>
       </View>
 
-      <Text style={styles.sectionTitle}>已固定频道 · {pinned.length}</Text>
-      <Text style={styles.sectionSub}>从动态左上角菜单进入并切换</Text>
+      <Text selectable style={styles.sectionTitle}>已固定频道 · {pinned.length}</Text>
+      <Text selectable style={styles.sectionSub}>从动态左上角菜单进入并切换</Text>
       {pinned.map((f) => (
         <View key={f.id} style={styles.card}>
           <View style={styles.cardIcon}>
-            <Text style={styles.cardIconText}>{f.icon}</Text>
+            <Text selectable style={styles.cardIconText}>{f.icon}</Text>
           </View>
           <View style={styles.cardCopy}>
-            <Text style={styles.cardName}>{f.name}{f.aiGenerated ? " · AI" : ""}</Text>
-            <Text style={styles.cardDesc}>{f.desc}</Text>
+            <Text selectable style={styles.cardName}>{f.name}{f.aiGenerated ? " · AI" : ""}</Text>
+            <Text selectable style={styles.cardDesc}>{f.desc}</Text>
           </View>
           <Pressable onPress={() => togglePin(f.id)} style={[styles.pinBtn, styles.pinBtnOn]}>
-            <Text style={[styles.pinText, styles.pinTextOn]}>已固定</Text>
+            <Text selectable style={[styles.pinText, styles.pinTextOn]}>已固定</Text>
           </Pressable>
           <Pressable onPress={() => onOpenFeed?.(f.id)} style={styles.openBtn}>
-            <Text style={styles.openText}>查看</Text>
+            <Text selectable style={styles.openText}>查看</Text>
           </Pressable>
         </View>
       ))}
 
-      <Text style={styles.sectionTitle}>更多频道</Text>
+      <Text selectable style={styles.sectionTitle}>更多频道</Text>
       {others.map((f) => (
         <View key={f.id} style={styles.card}>
           <View style={styles.cardIcon}>
-            <Text style={styles.cardIconText}>{f.icon}</Text>
+            <Text selectable style={styles.cardIconText}>{f.icon}</Text>
           </View>
           <View style={styles.cardCopy}>
-            <Text style={styles.cardName}>{f.name}</Text>
-            <Text style={styles.cardDesc}>{f.desc}</Text>
+            <Text selectable style={styles.cardName}>{f.name}</Text>
+            <Text selectable style={styles.cardDesc}>{f.desc}</Text>
           </View>
           <Pressable onPress={() => togglePin(f.id)} style={styles.pinBtn}>
-            <Text style={styles.pinText}>固定</Text>
+            <Text selectable style={styles.pinText}>固定</Text>
           </Pressable>
         </View>
       ))}
 
       <Pressable onPress={onBack} style={styles.backBtn}>
-        <Text style={styles.backText}>返回动态</Text>
+        <Text selectable style={styles.backText}>返回动态</Text>
       </Pressable>
     </ScrollView>
   );

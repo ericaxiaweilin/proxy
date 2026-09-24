@@ -14,6 +14,7 @@ import { SwipeBackShell } from "../architecture/swipe-back";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { ProfileTabs } from "./ProfileTabs";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
+import { AIManagementSurface } from "./ai-management";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
 import { ProxyQrCode } from "../components/proxy-qr-code";
@@ -28,6 +29,7 @@ import { deriveProfileFromIdentifier, NEUTRAL_PROFILE } from "../profile-identit
 import { createLastSignInStore } from "../last-signin-store";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, Memory, RegisteredExperienceRoute } from "@proxy/contracts";
+import type { PersonaGalleryItem } from "../ai-persona-client";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { MerchantMeR21Replacement } from "./merchant-me-r21-replacement";
@@ -86,6 +88,10 @@ import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSec
 import { ABILITY_SCHEMAS, DEFAULT_ABILITIES, AVAILABILITY_OPTIONS, AV_DAY_NAMES, avKeyOf, avFmt, describeAvRule, avStateFor, nextDays, INITIAL_SOCIAL_ACCOUNTS, resolveHubProfile, resolveHubSocials } from "./me-types";
 import { AbilitySheet, AvRuleSheet, AvDaySheet, FakeQr, QrCard, SocialRow, AvailabilitySheet, MeLocationContext, VoucherMenuGlyph, ServiceRow, availabilityLabel, formatClaimNumber } from "./me-profile-components";
 import { MyOrdersSurface, MyActivitiesSurface, FavoritesSurface, MerchantCampaignSurface } from "./me-orders";
+// SCENE-FAVORITE-002：个人主页的收藏 tab 也要显示场景 🤍 —— 与「我的 → 收藏」
+// 读同一个本机 store、用同一份解析（resolveSavedSceneIds），不各写一遍。
+import { createSceneFavoritesStore, resolveSavedSceneIds, type SavedSceneEntry } from "../scene-favorites";
+import { savedSceneLookup } from "../components/scene-activity-discovery";
 import { SUB_PAGE_CONTENT, meSubPage } from "./me-sub-pages";
 import { useMerchantIdentity } from "../use-merchant-identity";
 import { styles } from "./me-styles";
@@ -196,7 +202,7 @@ const REQUESTER_ME: PersonaConfig = {
         { icon: "diamond", label: "我的订单", desc: "我发布的 / 我参与的已成交订单", route: "myorders" },
         { icon: "clock", label: "能力与可用时间", desc: "能力、主题、区域与空闲时间", route: "available" },
         { icon: "ring", label: "我的活动", desc: "已参加 / 我发起的活动", route: "myactivities" },
-        { icon: "star", label: "收藏", desc: "商家、Creator、动态与活动", route: "favorites" },
+        { icon: "star", label: "收藏", desc: "场景灵感、商家、Creator、动态与活动", route: "favorites" },
         { icon: "gift", label: "我的权益", desc: "可领取的活动权益，领取后到店出示验证码核销", route: "benefits" }
       ]
     },
@@ -219,6 +225,7 @@ const REQUESTER_ME: PersonaConfig = {
       hint: "安全与结算",
       rows: [
         { icon: "coin", label: "钱包与结算", desc: "付款、收入、退款与记录", route: "wallet" },
+        { icon: "ai-manage", label: "AI 管理", desc: "分身状态 · 照片与动态盘点", route: "aimanage" },
         { icon: "gear", label: "设置与隐私", desc: "安全、推荐、通知与隐私（含数据下载/删除）", route: "appbehavior" }
       ]
     },
@@ -515,6 +522,37 @@ export function MeSurface({
   const [avDaySheet, setAvDaySheet] = useState<{ key: string; label: string }>();
   const [personalHubTab, setPersonalHubTab] = useState<PersonalHubTab>("FEED");
   const [insightsSheetOpen, setInsightsSheetOpen] = useState(false);
+  // ANALYTICS-ME-001：分析弹层数字 —— 浏览（近 30 天主页访问）+ 互动（近 30 天
+  // 收到的赞 + 评论，自赞/自评已在服务端排除）。打开弹层才拉；undefined = 未知
+  // 画 —，不画 0（跟 dash 口径一致：没拉到不是没有）。
+  const [profileAnalytics, setProfileAnalytics] = useState<{ opens: number | undefined; interactions: number | undefined }>({ opens: undefined, interactions: undefined });
+  useEffect(() => {
+    if (!insightsSheetOpen || !engagement) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [views, received] = await Promise.all([
+          localNet.listProfileViewStats(30),
+          engagement.getReceivedEngagementStats(),
+        ]);
+        if (!cancelled) setProfileAnalytics({ opens: views.opens, interactions: received.reactions + received.replies });
+      } catch {
+        if (!cancelled) setProfileAnalytics({ opens: undefined, interactions: undefined });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [insightsSheetOpen, localNet, engagement]);
+  // PROFILE-VIEWS-HEADER-001（P0，2026-09-24）：个人主页头部「— 次浏览 · 最近 30 天」以前是写死的 —，从没接数据。
+  // 打开个人主页就拉近 30 天主页访问次数（服务端 ListProfileViewStats sinceDays=30）；拉不到仍显示 —，不画 0。
+  const [personalViews30, setPersonalViews30] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (subPage?.route !== "personalhub") return;
+    let cancelled = false;
+    localNet.listProfileViewStats(30)
+      .then((stats) => { if (!cancelled) setPersonalViews30(stats.opens); })
+      .catch(() => { if (!cancelled) setPersonalViews30(undefined); });
+    return () => { cancelled = true; };
+  }, [subPage?.route, localNet]);
   const [searchSheetOpen, setSearchSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   // 搜索浮条定位：顶栏高 46 + 上内边距 7，浮条贴在顶栏下方 8px 处。
@@ -528,21 +566,21 @@ export function MeSurface({
       <Modal animationType="slide" onRequestClose={() => setProfileEditorOpen(false)} transparent visible={profileEditorOpen}>
         <View style={styles.profileEditorOverlay}>
           <View style={styles.profileEditorSheet}>
-            <View style={styles.profileEditorHead}><Text style={styles.profileEditorTitle}>编辑主页</Text><Pressable onPress={() => void saveProfile()}><Text style={styles.profileEditorDone}>完成</Text></Pressable></View>
-            {profileSaveError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{profileSaveError}</Text> : null}
+            <View style={styles.profileEditorHead}><Text selectable style={styles.profileEditorTitle}>编辑主页</Text><Pressable onPress={() => void saveProfile()}><Text selectable style={styles.profileEditorDone}>完成</Text></Pressable></View>
+            {profileSaveError ? <Text selectable style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{profileSaveError}</Text> : null}
             <Pressable onPress={() => void chooseProfileAvatar()} style={styles.profileEditorAvatarRow}>
               <Image source={profileAvatarUri ? { uri: profileAvatarUri } : OTTER_LOGO} style={styles.profileEditorAvatar} />
-              <View><Text style={styles.profileEditorAvatarTitle}>更换头像</Text><Text style={styles.profileEditorAvatarHint}>从之前发布或手机相册选择</Text></View>
+              <View><Text selectable style={styles.profileEditorAvatarTitle}>更换头像</Text><Text selectable style={styles.profileEditorAvatarHint}>从之前发布或手机相册选择</Text></View>
             </Pressable>
             {([['name', '显示名称'], ['handle', '用户名'], ['bio', '一句话介绍'], ['city', '城市']] as const).map(([key, label]) => (
-              <View key={key} style={styles.profileEditorField}><Text style={styles.profileEditorLabel}>{label}</Text><TextInput onChangeText={(value) => setProfileDraft((current) => ({ ...current, [key]: value }))} style={styles.profileEditorInput} value={profileDraft[key]} /></View>
+              <View key={key} style={styles.profileEditorField}><Text selectable style={styles.profileEditorLabel}>{label}</Text><TextInput onChangeText={(value) => setProfileDraft((current) => ({ ...current, [key]: value }))} style={styles.profileEditorInput} value={profileDraft[key]} /></View>
             ))}
             {/* AGENT-CLAIM-NUMBER-001: 接单编号——系统按注册顺序分配，只读；
                 仅可接单（AVAILABLE）时展示，不接单整行隐藏，无手动开关。 */}
             {availability === "AVAILABLE" && formatClaimNumber(claimNumber) !== "" ? (
               <View style={styles.profileEditorField}>
-                <Text style={styles.profileEditorLabel}>接单编号</Text>
-                <Text style={styles.profileEditorClaimNumber}>{formatClaimNumber(claimNumber)}</Text>
+                <Text selectable style={styles.profileEditorLabel}>接单编号</Text>
+                <Text selectable style={styles.profileEditorClaimNumber}>{formatClaimNumber(claimNumber)}</Text>
               </View>
             ) : null}
           </View>
@@ -591,7 +629,11 @@ export function MeSurface({
       setProfileSearchResults(undefined);
       return;
     }
-    const posts: ProfileSearchHit[] = filterPostsByFeedSearch(profilePosts, q).map((post) => ({
+    // AI-TWIN-POST-AUDIENCE-004: 主页搜索只搜主页展示的帖子，不搜「帖文
+    // 编排」私密副空间的 TARGETED 帖子——否则搜索结果会泄露主页列表里
+    // 看不到的私密帖子存在。
+    const searchablePosts = profilePosts.filter((post) => post.visibility !== "TARGETED");
+    const posts: ProfileSearchHit[] = filterPostsByFeedSearch(searchablePosts, q).map((post) => ({
       kind: "post",
       postId: post.postId,
       body: post.body
@@ -620,6 +662,9 @@ export function MeSurface({
   const [personalReplyEntries, setPersonalReplyEntries] = useState<ReplyEntry[]>([]);
   const [personalReplyTargets, setPersonalReplyTargets] = useState<Record<string, ReplyTarget>>({});
   const [personalSavedPosts, setPersonalSavedPosts] = useState<FeedPost[]>([]);
+  // SCENE-FAVORITE-002：首页场景卡片的 🤍（本机按账号存）。个人主页收藏 tab 以前
+  // 只认服务端帖子收藏 ⇒ 用户在首页点过 🤍，来这里看到的是「还没有收藏」。
+  const [personalSavedScenes, setPersonalSavedScenes] = useState<readonly SavedSceneEntry[]>([]);
   const [personalTaggedPosts, setPersonalTaggedPosts] = useState<FeedPost[]>([]);
   // PROFILE-TAB-LOAD-FAILED-001: 收藏 / 回复 / 提及 的**加载成败**。以前失败时只把
   // 数组 set 成 []，空数组在 ProfileTabs 里渲染成「你还没有这类内容」—— 用户
@@ -641,7 +686,9 @@ export function MeSurface({
       .catch(() => { if (!cancelled) setPersonalFollowCounts(undefined); });
     return () => { cancelled = true; };
   }, [engagement, isSelfProfile, viewingProfileId, viewerAccountId]);
-  // 未知画 "—" 不画 0：浏览/互动暂无服务端口径（绝不拿公式现编），
+  // 未知画 "—" 不画 0：拉失败之前是未知不是零。ANALYTICS-ME-001 起浏览
+  // （ListProfileViewStats 30 天窗口）与互动（GetReceivedEngagementStats，
+  // 30 天收到的赞 + 评论）都有服务端口径，打开分析弹层才拉。
   // 关注数没拉到之前也是未知不是零。
   const dash = (n: number | undefined): string => (n === undefined ? "—" : String(n));
   // PROFILE-VISIT-001: 访问与转化页的"主页访问"是真数字了（其余漏斗环节
@@ -1133,6 +1180,23 @@ export function MeSurface({
     return () => { cancelled = true; };
   }, [engagement, viewerAccountId, localNet, profileDraft.name, profileDraft.handle]);
 
+  // SCENE-FAVORITE-002：首页场景 🤍 存本机（按账号），跟帖子收藏（服务端）是两份
+  // 数据。个人主页的收藏 tab 以前只读服务端 ⇒ 首页点过的 🤍 在这里永远看不见。
+  // 读同一份本机 hearts 交给 ProfileTabs 一起画；解析走 resolveSavedSceneIds，
+  // 与「我的 → 收藏」共用同一实现。
+  useEffect(() => {
+    let cancelled = false;
+    if (!viewerAccountId) {
+      setPersonalSavedScenes([]);
+      return;
+    }
+    void createSceneFavoritesStore(nativeSecureStorageDriver, viewerAccountId)
+      .read()
+      .then((ids) => { if (!cancelled) setPersonalSavedScenes(resolveSavedSceneIds(ids, savedSceneLookup)); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [viewerAccountId]);
+
   // SCROLL-CHROME-001: shared controller (see shell/scroll-chrome.ts).
   const onScroll = useScrollChrome(onChromeVisibilityChange);
 
@@ -1389,20 +1453,64 @@ export function MeSurface({
     const contentWrapper = (node: React.JSX.Element): React.JSX.Element => <SwipeBackShell onExit={() => closeSubPage()}>{node}</SwipeBackShell>;
     const content = SUB_PAGE_CONTENT[subPage.route];
 
-    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} moderation={moderation} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} moderation={moderation} mediaClient={mediaClient} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "myactivities") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyActivitiesSurface onBack={() => setSubPage(undefined)} moderation={moderation} /></SwipeBackShell>;
     if (subPage.route === "merchantcampaign") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MerchantCampaignSurface onBack={() => setSubPage(undefined)} moderation={moderation} /></SwipeBackShell>;
-    if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} /></SwipeBackShell>;
     if (subPage.route === "facet") {
       const facetClient = new FacetClient({ requester: sessionAuthClient, baseUrl: localApiBaseUrl });
       // AI-FACET-CLUSTER-001: AI 分身与 FACET 是"生成 → 分发"同一条链路，
       // 两边互相有一条回去对方的路，不用退回「我的」根页再点一次。
       return <SwipeBackShell onExit={() => setSubPage(undefined)}><FacetHomeSurface client={facetClient} onBack={() => setSubPage(undefined)} onOpenAiIdentity={() => openSubPage("aiidentity")} /></SwipeBackShell>;
     }
+    if (subPage.route === "aimanage") {
+      // AI-MANAGE-002：我的 → 账户 → AI 管理全量。状态卡 = 服务端 Token +
+      // 本人图片/视频（profileMedia 现算）+ 动态数；暂停/三 sheet 走
+      // Get/UpdateAiEngineSettings（服务端盖章 actor）。lastPostAt 取主页
+      // 帖里最新一条 createdAt。
+      const allMedia = Object.values(profileMedia).flat();
+      const imageCount = allMedia.filter((item) => item.mediaType === "IMAGE").length;
+      const videoCount = allMedia.filter((item) => item.mediaType === "VIDEO").length;
+      const lastPostAt = profilePosts.reduce<string | undefined>((latest, post) => {
+        if (!latest) return post.createdAt;
+        return post.createdAt > latest ? post.createdAt : latest;
+      }, undefined);
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIManagementSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} secureSessionStore={nativeSecureSessionStore} imageCount={imageCount} videoCount={videoCount} lastPostAt={lastPostAt} onOpenImageIdentity={() => openSubPage("aiidentity")} /></SwipeBackShell>;
+    }
     if (subPage.route === "aiidentity") {
-      // AI-CLUSTER-BOUNDARY-001: 这一屏只拿分身自己的东西（列表/授权/创建）。
-      // 访问战绩（谁看了我的动态、看了多久）归「好友与关系」，不从这里传进去。
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} authClient={sessionAuthClient} onOpenFacet={() => openSubPage("facet")} /></SwipeBackShell>;
+      // AI-TWIN-POST-AUDIENCE-004（2026-09-22，用户纠正："帖文编排拿的是
+      // 公共主页的帖文，没理解对。只能拿主页的图片/视频做原型给 AI 用，
+      // 但不能跟主页的帖文重合"）：profilePosts 混着两类帖子——公开发在
+      // 主页上的、和只想给特定人看的 TARGETED。图库拿这个人公开主页的
+      // 图片/视频当原始素材（rawGalleryItems 只取非 TARGETED 帖子的媒体，
+      // TARGETED 帖子本来就是"私密副空间"的产物，不是主页素材池的一部分）；
+      // 帖文编排管理的是 TARGETED 这一份——跟主页帖子列表（personalhub
+      // 分支的 ProfileTabs）完全不重叠：主页只显示非 TARGETED，帖文编排
+      // 只显示 TARGETED，两边加起来才是 profilePosts 的全集，任何一条
+      // 帖子只会出现在其中一边。
+      const publicHomepagePosts = profilePosts.filter((post) => post.visibility !== "TARGETED");
+      const targetedSpacePosts = profilePosts.filter((post) => post.visibility === "TARGETED");
+      // AI-TWIN-GALLERY-004（2026-09-22，用户反馈"图库没有图"）：服务端
+      // thumbnailUrl/feedUrl/... 都是相对路径，ProfileTabs 全靠
+      // localNet.resolveMediaUrl 拼上服务器地址才能显示——这里漏了这一步，
+      // <Image> 拿着相对路径请求，静默加载失败。
+      const rawGalleryItems: PersonaGalleryItem[] = publicHomepagePosts.flatMap((post) =>
+        (profileMedia[post.postId] ?? [])
+          .filter((item) => item.mediaType === "IMAGE")
+          .map((item): PersonaGalleryItem | undefined => {
+            const rawThumbnailUrl = item.thumbnailUrl ?? item.feedUrl ?? item.galleryUrl ?? item.placeholderUrl;
+            if (!rawThumbnailUrl) return undefined;
+            return {
+              id: item.mediaAssetId,
+              thumbnailUrl: localNet.resolveMediaUrl(rawThumbnailUrl),
+              ...(item.playbackUrl !== undefined ? { playbackUrl: localNet.resolveMediaUrl(item.playbackUrl) } : {}),
+              aiGenerationSource: item.aiGenerationSource ?? "USER_UPLOADED",
+              createdAt: post.createdAt,
+            };
+          })
+          .filter((entry): entry is PersonaGalleryItem => entry !== undefined)
+      );
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><AIIdentityShowcaseSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} ownerName={hubProfile.displayName} ownerAvatarUri={profileAvatarUri} authClient={sessionAuthClient} rawGalleryItems={rawGalleryItems} mediaClient={mediaClient} posts={targetedSpacePosts} mediaByPost={profileMedia} relationshipClient={relationshipClient} createPost={(payload) => localNet.createPost(payload)} updatePostAudience={(postId, visibility, audienceTargetIds) => localNet.updatePostAudience(postId, visibility, audienceTargetIds)} onPostPublished={() => setProfilePostsReload((n) => n + 1)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} /></SwipeBackShell>;
     }
     if (subPage.route === "myscenes") {
       async function respond(invitationId: string, decision: "ACCEPTED" | "DECLINED" | "ASK"): Promise<void> {
@@ -1425,54 +1533,54 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.detailTitle}>{subPage.title}</Text>
-            <Text style={styles.detailSub}>{subPage.desc}</Text>
-            <View style={styles.fallbackSection}><View style={styles.detailSectionHead}><Text style={styles.detailSectionTitle}>我发起的场景</Text></View>
-              {myScenes.length === 0 ? <View style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>还没有发起场景</Text></View> : myScenes.map((row) => <View key={row.sceneId} style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>{row.title}</Text><Text style={styles.prototypeCardDesc}>{row.status} · {new Date(row.startsAt).toLocaleString()}</Text></View>)}
+            <Text selectable style={styles.detailTitle}>{subPage.title}</Text>
+            <Text selectable style={styles.detailSub}>{subPage.desc}</Text>
+            <View style={styles.fallbackSection}><View style={styles.detailSectionHead}><Text selectable style={styles.detailSectionTitle}>我发起的场景</Text></View>
+              {myScenes.length === 0 ? <View style={styles.prototypeCard}><Text selectable style={styles.prototypeCardTitle}>还没有发起场景</Text></View> : myScenes.map((row) => <View key={row.sceneId} style={styles.prototypeCard}><Text selectable style={styles.prototypeCardTitle}>{row.title}</Text><Text selectable style={styles.prototypeCardDesc}>{row.status} · {new Date(row.startsAt).toLocaleString()}</Text></View>)}
             </View>
-            <View style={styles.fallbackSection}><View style={styles.detailSectionHead}><Text style={styles.detailSectionTitle}>收到的真人邀请</Text></View>
-              {myInvitations.length === 0 ? <View style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>还没有收到邀请</Text></View> : myInvitations.map((row) => <View key={row.invitationId} style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>{row.card.what ?? "场景邀请"}</Text><Text style={styles.prototypeCardDesc}>{row.card.where ?? "地点待确认"} · {row.card.when ?? "时间待确认"}</Text><Text style={styles.prototypeCardDesc}>{row.plannedBudget ? `${row.plannedBudget.toLocaleString()} ${row.currency || "VND"}` : "金额待双方确认"} · {row.status}</Text>{row.orderRef ? <Text style={styles.prototypeCardDesc}>已生成订单 · {row.orderRef}</Text> : null}{row.status === "PENDING" ? <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}><Pressable disabled={invitationBusyId === row.invitationId} onPress={() => void respond(row.invitationId, "ACCEPTED")} style={styles.lightCta}><Text style={styles.lightCtaText}>接受</Text></Pressable><Pressable disabled={invitationBusyId === row.invitationId} onPress={() => void respond(row.invitationId, "DECLINED")} style={styles.lightCta}><Text style={styles.lightCtaText}>拒绝</Text></Pressable></View> : null}</View>)}
-            {invitationError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{invitationError}</Text> : null}
+            <View style={styles.fallbackSection}><View style={styles.detailSectionHead}><Text selectable style={styles.detailSectionTitle}>收到的真人邀请</Text></View>
+              {myInvitations.length === 0 ? <View style={styles.prototypeCard}><Text selectable style={styles.prototypeCardTitle}>还没有收到邀请</Text></View> : myInvitations.map((row) => <View key={row.invitationId} style={styles.prototypeCard}><Text selectable style={styles.prototypeCardTitle}>{row.card.what ?? "场景邀请"}</Text><Text selectable style={styles.prototypeCardDesc}>{row.card.where ?? "地点待确认"} · {row.card.when ?? "时间待确认"}</Text><Text selectable style={styles.prototypeCardDesc}>{row.plannedBudget ? `${row.plannedBudget.toLocaleString()} ${row.currency || "VND"}` : "金额待双方确认"} · {row.status}</Text>{row.orderRef ? <Text selectable style={styles.prototypeCardDesc}>已生成订单 · {row.orderRef}</Text> : null}{row.status === "PENDING" ? <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}><Pressable disabled={invitationBusyId === row.invitationId} onPress={() => void respond(row.invitationId, "ACCEPTED")} style={styles.lightCta}><Text selectable style={styles.lightCtaText}>接受</Text></Pressable><Pressable disabled={invitationBusyId === row.invitationId} onPress={() => void respond(row.invitationId, "DECLINED")} style={styles.lightCta}><Text selectable style={styles.lightCtaText}>拒绝</Text></Pressable></View> : null}</View>)}
+            {invitationError ? <Text selectable style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{invitationError}</Text> : null}
             </View>
             <View style={styles.fallbackSection}>
               <View style={styles.detailSectionHead}>
-                <Text style={styles.detailSectionTitle}>场景记忆 (R15.13 P2 · 真实数据)</Text>
+                <Text selectable style={styles.detailSectionTitle}>场景记忆 (R15.13 P2 · 真实数据)</Text>
               </View>
               {memoriesLoadState === "loading" ? (
                 <View style={styles.prototypeCard}>
-                  <Text style={styles.prototypeCardTitle}>加载中…</Text>
-                  <Text style={styles.prototypeCardDesc}>正在从 Scene 服务拉取你的历史记忆</Text>
+                  <Text selectable style={styles.prototypeCardTitle}>加载中…</Text>
+                  <Text selectable style={styles.prototypeCardDesc}>正在从 Scene 服务拉取你的历史记忆</Text>
                 </View>
               ) : memoriesLoadState === "error" ? (
                 <View style={styles.prototypeCard}>
-                  <Text style={styles.prototypeCardTitle}>记忆不可用</Text>
-                  <Text style={styles.prototypeCardDesc}>未登录或未写入任何 Scene Outcome</Text>
+                  <Text selectable style={styles.prototypeCardTitle}>记忆不可用</Text>
+                  <Text selectable style={styles.prototypeCardDesc}>未登录或未写入任何 Scene Outcome</Text>
                 </View>
               ) : memories.length === 0 ? (
                 <View style={styles.prototypeCard}>
-                  <Text style={styles.prototypeCardTitle}>还没有记忆</Text>
-                  <Text style={styles.prototypeCardDesc}>场景结束后由发起方记录实际花费与时长，才会生成一条 Memory（host + guest 双视角可见）。App 目前还没有「记录结果」的入口 —— 在它接上之前，这里不会有内容。</Text>
+                  <Text selectable style={styles.prototypeCardTitle}>还没有记忆</Text>
+                  <Text selectable style={styles.prototypeCardDesc}>场景结束后由发起方记录实际花费与时长，才会生成一条 Memory（host + guest 双视角可见）。App 目前还没有「记录结果」的入口 —— 在它接上之前，这里不会有内容。</Text>
                 </View>
               ) : (
                 memories.map((m) => (
                   <View key={m.memoryId} style={styles.prototypeCard}>
-                    <Text style={styles.prototypeCardTitle}>
+                    <Text selectable style={styles.prototypeCardTitle}>
                       {m.sceneType ?? "Scene"} · {m.role === "HOST" ? "我是主人" : "我是客人"}
                     </Text>
-                    <Text style={styles.prototypeCardDesc}>
+                    <Text selectable style={styles.prototypeCardDesc}>
                       实际花费 {(m.actualSpend / 1000).toFixed(0)}k {m.currency ?? ""}
                       {m.durationMin ? ` ·  ${m.durationMin} 分钟` : ""}
                       {typeof m.rating === "number" ? ` · 评分 ${(m.rating * 100).toFixed(0)}` : ""}
                     </Text>
-                    {m.notes ? <Text style={styles.prototypeCardDesc}>{m.notes}</Text> : null}
+                    {m.notes ? <Text selectable style={styles.prototypeCardDesc}>{m.notes}</Text> : null}
                   </View>
                 ))
               )}
             </View>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.lightCta}>
-              <Text style={styles.lightCtaText}>返回我的</Text>
+              <Text selectable style={styles.lightCtaText}>返回我的</Text>
             </Pressable>
           </ScrollView>
         </View>
@@ -1495,9 +1603,9 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.appBehaviorTitle}>设置与隐私 · 安全</Text>
+            <Text selectable style={styles.appBehaviorTitle}>设置与隐私 · 安全</Text>
             <SecuritySettings
               retentionDays={securityRetention}
               onRetentionChange={setSecurityRetention}
@@ -1505,18 +1613,18 @@ export function MeSurface({
               onToggleScreenshotWarn={setScreenshotWarn}
               sessionClient={sessionClient}
             />
-            <Text style={[styles.appBehaviorTitle, { marginTop: 24 }]}>应用行为检查</Text>
+            <Text selectable style={[styles.appBehaviorTitle, { marginTop: 24 }]}>应用行为检查</Text>
             {checks.map(([title, desc], index) => (
               <View key={title} style={[styles.appBehaviorCard, index === checks.length - 1 && styles.appBehaviorCardDark]}>
-                <Text style={[styles.appBehaviorCardTitle, index === checks.length - 1 && styles.appBehaviorCardTitleDark]}>{title}</Text>
-                <Text style={[styles.appBehaviorCardDesc, index === checks.length - 1 && styles.appBehaviorCardDescDark]}>{desc}</Text>
+                <Text selectable style={[styles.appBehaviorCardTitle, index === checks.length - 1 && styles.appBehaviorCardTitleDark]}>{title}</Text>
+                <Text selectable style={[styles.appBehaviorCardDesc, index === checks.length - 1 && styles.appBehaviorCardDescDark]}>{desc}</Text>
               </View>
             ))}
-            <Text style={[styles.appBehaviorTitle, { marginTop: 24 }]}>隐私与数据</Text>
-            <Text style={styles.appBehaviorCardDesc}>
+            <Text selectable style={[styles.appBehaviorTitle, { marginTop: 24 }]}>隐私与数据</Text>
+            <Text selectable style={styles.appBehaviorCardDesc}>
               依据《个人数据保护法》91/2025/QH15 第 31 条 (访问权) 与第 32 条 (删除权), 你可以随时下载或删除 Proxy 保存的个人数据。
             </Text>
-            <Text style={styles.appBehaviorCardDesc}>
+            <Text selectable style={styles.appBehaviorCardDesc}>
               如需联系 DPO (数据保护官) 或申诉数据处理问题, 请发邮件至 privacy@proxy.vn (最终地址以《服务协议》§53 为准)。依据 PDP 91/2025/QH15 Art. 13, Proxy 已指定 DPO 负责监管个人数据处理活动及处理用户申诉。
             </Text>
             {/* TWIN-SIGNALS-001 / MEDIA-DWELL-001: 动态浏览统计总闸。默认开
@@ -1525,8 +1633,8 @@ export function MeSurface({
                 变细了，说明文案要跟着说清楚，不能让文案还停在"哪条动态"。 */}
             <View style={styles.socialSettingRow}>
               <View style={styles.socialAccountCopy}>
-                <Text style={styles.socialSettingName}>动态浏览统计</Text>
-                <Text style={styles.socialSettingDesc}>记录你看过哪些动态、多图动态里具体看了哪张照片多久，用于给你推更对味的内容。关掉后不再记录。</Text>
+                <Text selectable style={styles.socialSettingName}>动态浏览统计</Text>
+                <Text selectable style={styles.socialSettingDesc}>记录你看过哪些动态、多图动态里具体看了哪张照片多久，用于给你推更对味的内容。关掉后不再记录。</Text>
               </View>
               <Pressable
                 accessibilityRole="switch"
@@ -1545,7 +1653,7 @@ export function MeSurface({
               client={resolveLocationConsentClient({ authClient: sessionAuthClient })}
             />
             <Pressable onPress={() => setSubPage(undefined)} style={styles.appBehaviorReturn}>
-              <Text style={styles.appBehaviorReturnText}>返回我的</Text>
+              <Text selectable style={styles.appBehaviorReturnText}>返回我的</Text>
             </Pressable>
           </ScrollView>
         </View>
@@ -1557,72 +1665,72 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.socialAccountsContent}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.socialAccountsTitle}>社媒账户</Text>
-            <Text style={styles.socialAccountsSub}>管理你的外部社交平台。账号、链接和公开范围都由你控制。</Text>
+            <Text selectable style={styles.socialAccountsTitle}>社媒账户</Text>
+            <Text selectable style={styles.socialAccountsSub}>管理你的外部社交平台。账号、链接和公开范围都由你控制。</Text>
             <CreatorInvitationCard />
             <View style={styles.socialShareBox}>
-              <View style={styles.socialSettingsHead}><Text style={styles.socialSettingsTitle}>合作</Text><Text style={styles.socialSettingsHint}>{collaboration.enabled ? "已开放" : "未开放"}</Text></View>
-              <View style={styles.socialSettingRow}><View style={styles.socialAccountCopy}><Text style={styles.socialSettingName}>接受合作邀请</Text><Text style={styles.socialSettingDesc}>关闭后不影响普通账号使用</Text></View><Pressable accessibilityRole="switch" accessibilityState={{ checked: collaboration.enabled }} onPress={() => setCollaboration((v) => ({ ...v, enabled: !v.enabled }))} style={[styles.socialSwitch, collaboration.enabled ? styles.socialSwitchOn : null]}><View style={[styles.socialSwitchDot, collaboration.enabled ? styles.socialSwitchDotOn : null]} /></Pressable></View>
-              <Text style={styles.socialEditorLabel}>合作类型</Text>
-              <View style={styles.socialVisibilityRow}>{["探店", "UGC", "拍摄", "同行", "其他"].map((type) => <Pressable key={type} onPress={() => setCollaboration((v) => ({ ...v, types: v.types.includes(type) ? v.types.filter((x) => x !== type) : [...v.types, type] }))} style={[styles.socialVisibilityButton, collaboration.types.includes(type) ? styles.socialVisibilityButtonOn : null]}><Text style={[styles.socialVisibilityText, collaboration.types.includes(type) ? styles.socialVisibilityTextOn : null]}>{type}</Text></Pressable>)}</View>
-              <Text style={styles.socialEditorLabel}>报价（可选）</Text><TextInput placeholder="例如：500,000 VND / 次" style={styles.socialEditorInput} value={collaboration.rate} onChangeText={(rate) => setCollaboration((v) => ({ ...v, rate }))} />
-              <Text style={styles.socialEditorLabel}>合作联系方式</Text><TextInput placeholder="合作建立后开放" style={styles.socialEditorInput} value={collaboration.contact} onChangeText={(contact) => setCollaboration((v) => ({ ...v, contact }))} />
+              <View style={styles.socialSettingsHead}><Text selectable style={styles.socialSettingsTitle}>合作</Text><Text selectable style={styles.socialSettingsHint}>{collaboration.enabled ? "已开放" : "未开放"}</Text></View>
+              <View style={styles.socialSettingRow}><View style={styles.socialAccountCopy}><Text selectable style={styles.socialSettingName}>接受合作邀请</Text><Text selectable style={styles.socialSettingDesc}>关闭后不影响普通账号使用</Text></View><Pressable accessibilityRole="switch" accessibilityState={{ checked: collaboration.enabled }} onPress={() => setCollaboration((v) => ({ ...v, enabled: !v.enabled }))} style={[styles.socialSwitch, collaboration.enabled ? styles.socialSwitchOn : null]}><View style={[styles.socialSwitchDot, collaboration.enabled ? styles.socialSwitchDotOn : null]} /></Pressable></View>
+              <Text selectable style={styles.socialEditorLabel}>合作类型</Text>
+              <View style={styles.socialVisibilityRow}>{["探店", "UGC", "拍摄", "同行", "其他"].map((type) => <Pressable key={type} onPress={() => setCollaboration((v) => ({ ...v, types: v.types.includes(type) ? v.types.filter((x) => x !== type) : [...v.types, type] }))} style={[styles.socialVisibilityButton, collaboration.types.includes(type) ? styles.socialVisibilityButtonOn : null]}><Text selectable style={[styles.socialVisibilityText, collaboration.types.includes(type) ? styles.socialVisibilityTextOn : null]}>{type}</Text></Pressable>)}</View>
+              <Text selectable style={styles.socialEditorLabel}>报价（可选）</Text><TextInput placeholder="例如：500,000 VND / 次" style={styles.socialEditorInput} value={collaboration.rate} onChangeText={(rate) => setCollaboration((v) => ({ ...v, rate }))} />
+              <Text selectable style={styles.socialEditorLabel}>合作联系方式</Text><TextInput placeholder="合作建立后开放" style={styles.socialEditorInput} value={collaboration.contact} onChangeText={(contact) => setCollaboration((v) => ({ ...v, contact }))} />
             </View>
             <View style={styles.socialAccountList}>
             {socialAccounts.map((account) => (
               <Pressable key={account.key} onPress={() => setSocialEditor({ ...account })} style={styles.socialAccountRow}>
                 <View style={[styles.socialAccountIcon, account.dark ? styles.socialAccountIconDark : null]}>
-                  <Text style={[styles.socialAccountIconText, account.dark ? styles.socialAccountIconTextDark : null]}>{account.mark}</Text>
+                  <Text selectable style={[styles.socialAccountIconText, account.dark ? styles.socialAccountIconTextDark : null]}>{account.mark}</Text>
                 </View>
                 <View style={styles.socialAccountCopy}>
-                  <Text style={styles.socialAccountName}>{account.name}</Text>
-                  <Text numberOfLines={1} style={styles.socialAccountHandle}>{account.handle || "未关联"}</Text>
-                  <Text numberOfLines={1} style={styles.socialAccountUrl}>{account.url ? account.url.replace(/^https?:\/\/(www\.)?/, "") : "添加账号后可生成主页链接"}</Text>
+                  <Text selectable style={styles.socialAccountName}>{account.name}</Text>
+                  <Text selectable numberOfLines={1} style={styles.socialAccountHandle}>{account.handle || "未关联"}</Text>
+                  <Text selectable numberOfLines={1} style={styles.socialAccountUrl}>{account.url ? account.url.replace(/^https?:\/\/(www\.)?/, "") : "添加账号后可生成主页链接"}</Text>
                 </View>
                 <View style={styles.socialAccountTrailing}>
-                  <View style={[styles.socialAccountState, account.visibility !== "仅自己" ? styles.socialAccountStateActive : null]}><Text style={[styles.socialAccountStateText, account.visibility !== "仅自己" ? styles.socialAccountStateTextActive : null]}>{account.handle ? account.visibility : "关联"}</Text></View>
-                  <Text style={styles.socialAccountChev}>›</Text>
+                  <View style={[styles.socialAccountState, account.visibility !== "仅自己" ? styles.socialAccountStateActive : null]}><Text selectable style={[styles.socialAccountStateText, account.visibility !== "仅自己" ? styles.socialAccountStateTextActive : null]}>{account.handle ? account.visibility : "关联"}</Text></View>
+                  <Text selectable style={styles.socialAccountChev}>›</Text>
                 </View>
               </Pressable>
             ))}
             </View>
 
-            <View style={styles.socialSettingsHead}><Text style={styles.socialSettingsTitle}>展示设置</Text><Text style={styles.socialSettingsHint}>按需开放</Text></View>
+            <View style={styles.socialSettingsHead}><Text selectable style={styles.socialSettingsTitle}>展示设置</Text><Text selectable style={styles.socialSettingsHint}>按需开放</Text></View>
             {([['merchant', '商家合作资料', '允许商家在合作场景查看你已开放的社媒账户。'], ['profile', '个人主页入口', '在个人主页显示一个轻量"社媒"入口，不直接铺开账号。'], ['influence', '影响力信息', '后续可向商家展示粉丝量等信息，默认关闭。']] as const).map(([key, title, desc]) => (
               <View key={key} style={styles.socialSettingRow}>
-                <View style={styles.socialAccountCopy}><Text style={styles.socialSettingName}>{title}</Text><Text style={styles.socialSettingDesc}>{desc}</Text></View>
+                <View style={styles.socialAccountCopy}><Text selectable style={styles.socialSettingName}>{title}</Text><Text selectable style={styles.socialSettingDesc}>{desc}</Text></View>
                 <Pressable accessibilityRole="switch" accessibilityState={{ checked: socialSettings[key] }} onPress={() => setSocialSettings((current) => ({ ...current, [key]: !current[key] }))} style={[styles.socialSwitch, socialSettings[key] ? styles.socialSwitchOn : null]}><View style={[styles.socialSwitchDot, socialSettings[key] ? styles.socialSwitchDotOn : null]} /></Pressable>
               </View>
             ))}
 
             <View style={styles.socialShareBox}>
-              <View style={styles.socialSettingsHead}><Text style={styles.socialSettingsTitle}>公开分享链接</Text><Text style={styles.socialSettingsHint}>可选</Text></View>
+              <View style={styles.socialSettingsHead}><Text selectable style={styles.socialSettingsTitle}>公开分享链接</Text><Text selectable style={styles.socialSettingsHint}>可选</Text></View>
               {/* SHARE-LINK-001: 分享链接里的用户名必须是当前登录用户。之前这里写死
                   了测试账号，等于每个用户分享出去的都是别人的主页。空 handle 时
                   禁用分享 —— 发一个带空用户名的残链接出去更糟。 */}
               {(() => {
                 const shareHandle = profileDraft.handle.replace(/^@+/, "");
                 return (
-                  <View style={styles.socialShareLine}><Text numberOfLines={1} style={styles.socialShareLink}>{shareHandle ? `pxy.app/${shareHandle}/social` : "设置你的 Proxy ID 后可分享"}</Text><Pressable disabled={!shareHandle} onPress={() => void Share.share({ message: `https://pxy.app/${shareHandle}/social` })} style={styles.socialShareButton}><Text style={styles.socialShareButtonText}>分享</Text></Pressable></View>
+                  <View style={styles.socialShareLine}><Text selectable numberOfLines={1} style={styles.socialShareLink}>{shareHandle ? `pxy.app/${shareHandle}/social` : "设置你的 Proxy ID 后可分享"}</Text><Pressable disabled={!shareHandle} onPress={() => void Share.share({ message: `https://pxy.app/${shareHandle}/social` })} style={styles.socialShareButton}><Text selectable style={styles.socialShareButtonText}>分享</Text></Pressable></View>
                 );
               })()}
-              <Text style={styles.socialShareNote}>只有你设置为"公开展示"的账号会出现在这个分享页。商家可见账号不会自动公开。</Text>
+              <Text selectable style={styles.socialShareNote}>只有你设置为"公开展示"的账号会出现在这个分享页。商家可见账号不会自动公开。</Text>
             </View>
           </ScrollView>
           <Modal animationType="slide" onRequestClose={() => setSocialEditor(undefined)} transparent visible={Boolean(socialEditor)}>
             <Pressable onPress={() => setSocialEditor(undefined)} style={styles.socialEditorOverlay}>
               {socialEditor ? <Pressable onPress={(event) => event.stopPropagation()} style={styles.socialEditorSheet}>
                 <View style={styles.socialEditorGrabber} />
-                <View style={styles.socialEditorHead}><Text style={styles.socialEditorTitle}>{socialEditor.name}</Text><Pressable onPress={() => setSocialEditor(undefined)} style={styles.socialEditorClose}><Text style={styles.socialEditorCloseText}>×</Text></Pressable></View>
-                <Text style={styles.socialEditorNote}>账号和主页链接用于跳转外部平台。展示范围可单独控制。</Text>
-                <Text style={styles.socialEditorLabel}>账号</Text><TextInput onChangeText={(handle) => setSocialEditor((current) => current ? { ...current, handle } : current)} style={styles.socialEditorInput} value={socialEditor.handle} />
-                <Text style={styles.socialEditorLabel}>主页链接</Text><TextInput autoCapitalize="none" keyboardType="url" onChangeText={(url) => { setSocialOpenError(undefined); setSocialEditor((current) => current ? { ...current, url } : current); }} style={styles.socialEditorInput} value={socialEditor.url} />
-                <Text style={styles.socialEditorLabel}>谁可以看到</Text><View style={styles.socialVisibilityRow}>{(["仅自己", "商家可见", "公开展示"] as const).map((visibility) => <Pressable key={visibility} onPress={() => setSocialEditor((current) => current ? { ...current, visibility } : current)} style={[styles.socialVisibilityButton, socialEditor.visibility === visibility ? styles.socialVisibilityButtonOn : null]}><Text style={[styles.socialVisibilityText, socialEditor.visibility === visibility ? styles.socialVisibilityTextOn : null]}>{visibility}</Text></Pressable>)}</View>
-                <Pressable disabled={!socialEditor.url} onPress={() => { const url = socialEditor.url.trim(); if (url) void Linking.openURL(/^https?:\/\//i.test(url) ? url : `https://${url}`).catch(() => setSocialOpenError("外部主页打不开，请检查链接后重试。")); }} style={styles.socialOpenLink}><Text style={styles.socialOpenLinkText}>打开外部主页</Text><Text style={styles.socialOpenLinkText}>↗</Text></Pressable>
-                {socialOpenError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{socialOpenError}</Text> : null}
-                <Pressable onPress={() => { setSocialAccounts((current) => current.map((account) => account.key === socialEditor.key ? socialEditor : account)); setSocialEditor(undefined); }} style={styles.socialSave}><Text style={styles.socialSaveText}>保存</Text></Pressable>
+                <View style={styles.socialEditorHead}><Text selectable style={styles.socialEditorTitle}>{socialEditor.name}</Text><Pressable onPress={() => setSocialEditor(undefined)} style={styles.socialEditorClose}><Text selectable style={styles.socialEditorCloseText}>×</Text></Pressable></View>
+                <Text selectable style={styles.socialEditorNote}>账号和主页链接用于跳转外部平台。展示范围可单独控制。</Text>
+                <Text selectable style={styles.socialEditorLabel}>账号</Text><TextInput onChangeText={(handle) => setSocialEditor((current) => current ? { ...current, handle } : current)} style={styles.socialEditorInput} value={socialEditor.handle} />
+                <Text selectable style={styles.socialEditorLabel}>主页链接</Text><TextInput autoCapitalize="none" keyboardType="url" onChangeText={(url) => { setSocialOpenError(undefined); setSocialEditor((current) => current ? { ...current, url } : current); }} style={styles.socialEditorInput} value={socialEditor.url} />
+                <Text selectable style={styles.socialEditorLabel}>谁可以看到</Text><View style={styles.socialVisibilityRow}>{(["仅自己", "商家可见", "公开展示"] as const).map((visibility) => <Pressable key={visibility} onPress={() => setSocialEditor((current) => current ? { ...current, visibility } : current)} style={[styles.socialVisibilityButton, socialEditor.visibility === visibility ? styles.socialVisibilityButtonOn : null]}><Text selectable style={[styles.socialVisibilityText, socialEditor.visibility === visibility ? styles.socialVisibilityTextOn : null]}>{visibility}</Text></Pressable>)}</View>
+                <Pressable disabled={!socialEditor.url} onPress={() => { const url = socialEditor.url.trim(); if (url) void Linking.openURL(/^https?:\/\//i.test(url) ? url : `https://${url}`).catch(() => setSocialOpenError("外部主页打不开，请检查链接后重试。")); }} style={styles.socialOpenLink}><Text selectable style={styles.socialOpenLinkText}>打开外部主页</Text><Text selectable style={styles.socialOpenLinkText}>↗</Text></Pressable>
+                {socialOpenError ? <Text selectable style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{socialOpenError}</Text> : null}
+                <Pressable onPress={() => { setSocialAccounts((current) => current.map((account) => account.key === socialEditor.key ? socialEditor : account)); setSocialEditor(undefined); }} style={styles.socialSave}><Text selectable style={styles.socialSaveText}>保存</Text></Pressable>
               </Pressable> : null}
             </Pressable>
           </Modal>
@@ -1641,33 +1749,33 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.detailTitle}>可见范围</Text>
+            <Text selectable style={styles.detailTitle}>可见范围</Text>
             <View style={styles.visibilityLadder}>
               {levels.map(([step, title, desc, tag]) => (
                 <View key={step} style={styles.visibilityStep}>
-                  <View style={styles.visibilityIndex}><Text style={styles.visibilityIndexText}>{step}</Text></View>
+                  <View style={styles.visibilityIndex}><Text selectable style={styles.visibilityIndexText}>{step}</Text></View>
                   <View style={styles.visibilityCopy}>
-                    <Text style={styles.visibilityTitle}>{title}</Text>
-                    <Text style={styles.visibilityDesc}>{desc}</Text>
+                    <Text selectable style={styles.visibilityTitle}>{title}</Text>
+                    <Text selectable style={styles.visibilityDesc}>{desc}</Text>
                   </View>
-                  <Text style={styles.visibilityTag}>{tag}</Text>
+                  <Text selectable style={styles.visibilityTag}>{tag}</Text>
                 </View>
               ))}
             </View>
             <View style={styles.detailSectionHead}>
-              <Text style={styles.detailSectionTitle}>当前规则</Text>
-              <Text style={styles.detailSectionHint}>可编辑</Text>
+              <Text selectable style={styles.detailSectionTitle}>当前规则</Text>
+              <Text selectable style={styles.detailSectionHint}>可编辑</Text>
             </View>
             {[["TT", "TikTok", "公开"], ["Z", "Zalo", "合作后"], ["☎", "手机号", "合作后 · 订单结束可关闭"]].map(([mark, title, desc]) => (
               <View key={title} style={styles.socialDetailRow}>
-                <View style={styles.socialDetailIcon}><Text style={styles.socialDetailIconText}>{mark}</Text></View>
+                <View style={styles.socialDetailIcon}><Text selectable style={styles.socialDetailIconText}>{mark}</Text></View>
                 <View style={styles.socialDetailCopy}>
-                  <Text style={styles.socialDetailLabel}>{title}</Text>
-                  <Text style={styles.socialDetailDesc}>{desc}</Text>
+                  <Text selectable style={styles.socialDetailLabel}>{title}</Text>
+                  <Text selectable style={styles.socialDetailDesc}>{desc}</Text>
                 </View>
-                <Text style={styles.socialDetailChev}>›</Text>
+                <Text selectable style={styles.socialDetailChev}>›</Text>
               </View>
             ))}
           </ScrollView>
@@ -1685,31 +1793,31 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.detailTitle}>访问与转化</Text>
+            <Text selectable style={styles.detailTitle}>访问与转化</Text>
             {/* ANALYTICS-HONEST-001 / PROFILE-VISIT-001: "主页访问"这一步已经
                 是真数字；合格聊天往后 4 步和下面的渠道来源表仍是示例占位
                 （没有聊天资格判定、机会、订单、渠道归因的事件类型）。 */}
-            <Text style={styles.detailSub}>主页访问是真实数据；往后每一步和下方渠道来源仍是示例，做经营决策前请以实际到账和到店为准。</Text>
+            <Text selectable style={styles.detailSub}>主页访问是真实数据；往后每一步和下方渠道来源仍是示例，做经营决策前请以实际到账和到店为准。</Text>
             <View style={styles.funnelCard}>
               {funnel.map(([label, width, value]) => (
                 <View key={label} style={styles.funnelRow}>
-                  <Text style={styles.funnelLabel}>{label}</Text>
+                  <Text selectable style={styles.funnelLabel}>{label}</Text>
                   <View style={styles.funnelTrack}><Gradient from="#9D74E8" to="#6F36BE" style={[styles.funnelBar, { width }]} /></View>
-                  <Text style={styles.funnelValue}>{value}</Text>
+                  <Text selectable style={styles.funnelValue}>{value}</Text>
                 </View>
               ))}
             </View>
             <View style={styles.sourceTable}>
-              <View style={[styles.sourceRow, styles.sourceHead]}><Text style={styles.sourceHeadText}>来源</Text><Text style={styles.sourceHeadText}>访问</Text><Text style={styles.sourceHeadText}>聊天</Text><Text style={styles.sourceHeadText}>订单</Text></View>
+              <View style={[styles.sourceRow, styles.sourceHead]}><Text selectable style={styles.sourceHeadText}>来源</Text><Text selectable style={styles.sourceHeadText}>访问</Text><Text selectable style={styles.sourceHeadText}>聊天</Text><Text selectable style={styles.sourceHeadText}>订单</Text></View>
               {sources.map(([source, visit, chat, order]) => (
-                <View key={source} style={styles.sourceRow}><Text style={styles.sourceName}>{source}</Text><Text style={styles.sourceValue}>{visit}</Text><Text style={styles.sourceValue}>{chat}</Text><Text style={styles.sourceValue}>{order}</Text></View>
+                <View key={source} style={styles.sourceRow}><Text selectable style={styles.sourceName}>{source}</Text><Text selectable style={styles.sourceValue}>{visit}</Text><Text selectable style={styles.sourceValue}>{chat}</Text><Text selectable style={styles.sourceValue}>{order}</Text></View>
               ))}
             </View>
             <View style={styles.infoNote}>
-              <Text style={styles.infoNoteTitle}>平台信誉仍来自 Proxy</Text>
-              <Text style={styles.infoNoteText}>外部粉丝、点赞和播放量只帮助发现；准时、履约、Outcome 与复购才决定长期市场信誉。</Text>
+              <Text selectable style={styles.infoNoteTitle}>平台信誉仍来自 Proxy</Text>
+              <Text selectable style={styles.infoNoteText}>外部粉丝、点赞和播放量只帮助发现；准时、履约、Outcome 与复购才决定长期市场信誉。</Text>
             </View>
           </ScrollView>
         </View>
@@ -1727,26 +1835,26 @@ export function MeSurface({
           <View style={styles.root}>
             <ScrollView contentContainerStyle={styles.content}>
               <Pressable onPress={() => setAvailabilityPanel("ABILITIES")} style={styles.subPageBack}>
-                <Text style={styles.subPageBackText}>‹ 返回能力</Text>
+                <Text selectable style={styles.subPageBackText}>‹ 返回能力</Text>
               </Pressable>
-              <Text style={styles.detailTitle}>可用时间</Text>
-              <Text style={styles.availabilityLead}>固定规律只设一次；临时变化点日期覆盖。</Text>
+              <Text selectable style={styles.detailTitle}>可用时间</Text>
+              <Text selectable style={styles.availabilityLead}>固定规律只设一次；临时变化点日期覆盖。</Text>
 
               <View style={styles.availabilityRuleCard}>
                 <View style={styles.availabilityRuleIcon}><ProxySymbolIcon color={color.ink} symbol="clock" size={22} /></View>
                 <View style={styles.availabilityRuleCopy}>
-                  <Text style={styles.availabilityRuleKicker}>常用规律</Text>
-                  <Text style={styles.availabilityRuleValue}>{describeAvRule(avRule)}</Text>
+                  <Text selectable style={styles.availabilityRuleKicker}>常用规律</Text>
+                  <Text selectable style={styles.availabilityRuleValue}>{describeAvRule(avRule)}</Text>
                 </View>
-                <Pressable onPress={() => setAvRuleSheetOpen(true)} style={styles.availabilityEditButton}><Text style={styles.availabilityEditText}>编辑</Text></Pressable>
+                <Pressable onPress={() => setAvRuleSheetOpen(true)} style={styles.availabilityEditButton}><Text selectable style={styles.availabilityEditText}>编辑</Text></Pressable>
               </View>
 
               <View style={styles.availabilityMonthCard}>
                 <View style={styles.availabilityMonthHead}>
-                  <Text style={styles.availabilityMonthTitle}>未来 30 天</Text>
-                  {Object.keys(avOverrides).length ? <Pressable onPress={() => setAvOverrides({})}><Text style={styles.availabilityClear}>清除例外</Text></Pressable> : null}
+                  <Text selectable style={styles.availabilityMonthTitle}>未来 30 天</Text>
+                  {Object.keys(avOverrides).length ? <Pressable onPress={() => setAvOverrides({})}><Text selectable style={styles.availabilityClear}>清除例外</Text></Pressable> : null}
                 </View>
-                <View style={styles.availabilityWeekHead}>{["一", "二", "三", "四", "五", "六", "日"].map((name) => <Text key={name} style={styles.availabilityWeekName}>{name}</Text>)}</View>
+                <View style={styles.availabilityWeekHead}>{["一", "二", "三", "四", "五", "六", "日"].map((name) => <Text selectable key={name} style={styles.availabilityWeekName}>{name}</Text>)}</View>
                 <View style={styles.availabilityMonthGrid}>
                   {Array.from({ length: days.length ? (days[0]!.date.getDay() + 6) % 7 : 0 }).map((_, index) => <View key={`blank-${index}`} style={styles.availabilityMonthBlank} />)}
                   {days.map((day) => {
@@ -1754,15 +1862,15 @@ export function MeSurface({
                     const dateNumber = day.date.getDate();
                     return (
                       <Pressable key={day.key} onPress={() => setAvDaySheet({ key: day.key, label: day.label })} style={[styles.availabilityMonthDay, styles[`availabilityMonthDay_${state.type}`]]}>
-                        <Text style={[styles.availabilityMonthNumber, state.type === "off" && styles.availabilityMonthNumberOff]}>{dateNumber}</Text>
+                        <Text selectable style={[styles.availabilityMonthNumber, state.type === "off" && styles.availabilityMonthNumberOff]}>{dateNumber}</Text>
                         {state.type === "base" ? <View style={styles.availabilityBaseDot} /> : null}
-                        {state.type === "off" ? <Text style={styles.availabilityOffMark}>×</Text> : null}
+                        {state.type === "off" ? <Text selectable style={styles.availabilityOffMark}>×</Text> : null}
                       </Pressable>
                     );
                   })}
                 </View>
                 <View style={styles.availabilityLegend}>
-                  <Text style={styles.availabilityLegendText}>● 规律可用</Text><Text style={styles.availabilityLegendText}>绿色 全天</Text><Text style={styles.availabilityLegendText}>描边 自定义</Text><Text style={styles.availabilityLegendText}>× 休息</Text>
+                  <Text selectable style={styles.availabilityLegendText}>● 规律可用</Text><Text selectable style={styles.availabilityLegendText}>绿色 全天</Text><Text selectable style={styles.availabilityLegendText}>描边 自定义</Text><Text selectable style={styles.availabilityLegendText}>× 休息</Text>
                 </View>
               </View>
             </ScrollView>
@@ -1774,39 +1882,39 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => { setAvailabilityPanel("ABILITIES"); setSubPage(undefined); }} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.detailTitle}>能力与可用时间</Text>
-            <Text style={styles.detailSub}>维护你愿意接受邀请的能力。</Text>
+            <Text selectable style={styles.detailTitle}>能力与可用时间</Text>
+            <Text selectable style={styles.detailSub}>维护你愿意接受邀请的能力。</Text>
 
             <Pressable onPress={() => setAvailabilityPanel("CALENDAR")} style={styles.availabilitySummaryCard}>
               <View style={styles.availabilityRuleIcon}><ProxySymbolIcon color={color.ink} symbol="clock" size={22} /></View>
-              <View style={styles.availabilityRuleCopy}><Text style={styles.prototypeCardTitle}>可用时间</Text><Text style={styles.abilitySub}>{describeAvRule(avRule)} · {Object.keys(avOverrides).length} 个例外</Text></View>
-              <Text style={styles.walletActionArrow}>›</Text>
+              <View style={styles.availabilityRuleCopy}><Text selectable style={styles.prototypeCardTitle}>可用时间</Text><Text selectable style={styles.abilitySub}>{describeAvRule(avRule)} · {Object.keys(avOverrides).length} 个例外</Text></View>
+              <Text selectable style={styles.walletActionArrow}>›</Text>
             </Pressable>
 
-            <View style={styles.detailSectionHead}><Text style={styles.detailSectionTitle}>我的能力</Text><Text style={styles.detailSectionHint}>{abilities.length} 项 · {passportError ? "同步失败" : "已接 supply"}</Text></View>
-            {passportError ? <Text style={{ color: "#B00020", fontSize: 11, marginBottom: 6 }}>{passportError}</Text> : null}
+            <View style={styles.detailSectionHead}><Text selectable style={styles.detailSectionTitle}>我的能力</Text><Text selectable style={styles.detailSectionHint}>{abilities.length} 项 · {passportError ? "同步失败" : "已接 supply"}</Text></View>
+            {passportError ? <Text selectable style={{ color: "#B00020", fontSize: 11, marginBottom: 6 }}>{passportError}</Text> : null}
             {abilities.map((ability) => (
               <View key={ability.id} style={styles.abilityCompactCard}>
                 <View style={styles.abilityHead}>
-                  <View style={styles.abilityIcon}><Text style={styles.abilityIconText}>{ABILITY_SCHEMAS[ability.type].icon}</Text></View>
+                  <View style={styles.abilityIcon}><Text selectable style={styles.abilityIconText}>{ABILITY_SCHEMAS[ability.type].icon}</Text></View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.prototypeCardTitle}>{ability.type}</Text>
-                    <Text style={styles.abilitySub}>{ABILITY_SCHEMAS[ability.type].subtitle}</Text>
+                    <Text selectable style={styles.prototypeCardTitle}>{ability.type}</Text>
+                    <Text selectable style={styles.abilitySub}>{ABILITY_SCHEMAS[ability.type].subtitle}</Text>
                   </View>
-                  <Pressable accessibilityLabel={`编辑${ability.type}`} onPress={() => setAbilitySheet({ mode: "EDIT", type: ability.type, id: ability.id })} style={styles.availabilityEditButton}><Text style={styles.availabilityEditText}>编辑</Text></Pressable>
+                  <Pressable accessibilityLabel={`编辑${ability.type}`} onPress={() => setAbilitySheet({ mode: "EDIT", type: ability.type, id: ability.id })} style={styles.availabilityEditButton}><Text selectable style={styles.availabilityEditText}>编辑</Text></Pressable>
                 </View>
-                <View style={styles.abilityFieldChips}>{ability.fields.filter((field) => field.value.trim().length > 0).map((field) => <View key={field.label} style={styles.abilityFieldChip}><Text style={styles.abilityFieldChipText}><Text style={styles.abilityFieldChipLabel}>{field.label} </Text>{field.value}</Text></View>)}</View>
+                <View style={styles.abilityFieldChips}>{ability.fields.filter((field) => field.value.trim().length > 0).map((field) => <View key={field.label} style={styles.abilityFieldChip}><Text selectable style={styles.abilityFieldChipText}><Text selectable style={styles.abilityFieldChipLabel}>{field.label} </Text>{field.value}</Text></View>)}</View>
               </View>
             ))}
-            <View style={styles.addAbilityRow}>{(["同行", "翻译", "拍照"] as AbilityType[]).map((type) => <Pressable key={type} accessibilityLabel={`添加${type}`} onPress={() => setAbilitySheet({ mode: "ADD", type })} style={styles.addAbilityChip}><Text style={styles.addAbilityChipText}>＋ {type}</Text></Pressable>)}</View>
+            <View style={styles.addAbilityRow}>{(["同行", "翻译", "拍照"] as AbilityType[]).map((type) => <Pressable key={type} accessibilityLabel={`添加${type}`} onPress={() => setAbilitySheet({ mode: "ADD", type })} style={styles.addAbilityChip}><Text selectable style={styles.addAbilityChipText}>＋ {type}</Text></Pressable>)}</View>
 
             <Pressable
               onPress={() => openSubPage("personalhub")}
               style={[styles.primaryCta, abilities.length === 0 && { opacity: 0.5 }]}
             >
-              <Text style={styles.primaryCtaText}>预览主页展示</Text>
+              <Text selectable style={styles.primaryCtaText}>预览主页展示</Text>
             </Pressable>
           </ScrollView>
           {abilitySheet ? (
@@ -1862,39 +1970,39 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.subPageTitle}>钱包与结算</Text>
-            <Text style={styles.subPageDesc}>只展示 Proxy 真正经手或需要记录的资金状态。账本接口未接入前不编造余额。</Text>
+            <Text selectable style={styles.subPageTitle}>钱包与结算</Text>
+            <Text selectable style={styles.subPageDesc}>只展示 Proxy 真正经手或需要记录的资金状态。账本接口未接入前不编造余额。</Text>
 
             <View style={styles.walletDarkCard}>
-              <Text style={styles.walletDarkLabel}>可用余额</Text>
-              <Text style={styles.walletDarkAmount}>—</Text>
-              <Text style={styles.walletDarkHint}>账本未接入，未知不画数</Text>
+              <Text selectable style={styles.walletDarkLabel}>可用余额</Text>
+              <Text selectable style={styles.walletDarkAmount}>—</Text>
+              <Text selectable style={styles.walletDarkHint}>账本未接入，未知不画数</Text>
             </View>
 
             <View style={styles.walletCard}>
-              <Text style={styles.walletCardLabel}>待结算收入</Text>
-              <Text style={styles.walletCardValue}>—</Text>
-              <Text style={styles.walletCardHint}>来自平台支付订单（待账本接入）</Text>
+              <Text selectable style={styles.walletCardLabel}>待结算收入</Text>
+              <Text selectable style={styles.walletCardValue}>—</Text>
+              <Text selectable style={styles.walletCardHint}>来自平台支付订单（待账本接入）</Text>
             </View>
 
             <View style={styles.walletCard}>
-              <Text style={styles.walletCardLabel}>直接结算记录</Text>
-              <Text style={styles.walletCardHint}>个人时间 / 技能服务可由双方直接结算；这里只保留合作确认与双方状态。</Text>
+              <Text selectable style={styles.walletCardLabel}>直接结算记录</Text>
+              <Text selectable style={styles.walletCardHint}>个人时间 / 技能服务可由双方直接结算；这里只保留合作确认与双方状态。</Text>
             </View>
 
             <Pressable onPress={() => openSubPage("myorders")} style={styles.walletAction} accessibilityLabel="现场结算记录">
-              <Text style={styles.walletActionIcon}>₫</Text>
+              <Text selectable style={styles.walletActionIcon}>₫</Text>
               <View style={styles.walletActionBody}>
-                <Text style={styles.walletActionLabel}>现场结算记录</Text>
-                <Text style={styles.walletActionDesc}>查看双方确认状态</Text>
+                <Text selectable style={styles.walletActionLabel}>现场结算记录</Text>
+                <Text selectable style={styles.walletActionDesc}>查看双方确认状态</Text>
               </View>
-              <Text style={styles.walletActionArrow}>›</Text>
+              <Text selectable style={styles.walletActionArrow}>›</Text>
             </Pressable>
 
             <Pressable onPress={() => openSubPage("myorders")} style={styles.walletBtnLight} accessibilityLabel="退款记录">
-              <Text style={styles.walletBtnLightText}>退款记录</Text>
+              <Text selectable style={styles.walletBtnLightText}>退款记录</Text>
             </Pressable>
           </ScrollView>
         </View>
@@ -1911,32 +2019,32 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.subPageTitle}>个人管理</Text>
-            <Text style={styles.subPageSub}>基本信息、二维码、状态管理都集中在这里。</Text>
+            <Text selectable style={styles.subPageTitle}>个人管理</Text>
+            <Text selectable style={styles.subPageSub}>基本信息、二维码、状态管理都集中在这里。</Text>
 
-            <Text style={styles.customSectionTitle}>基本信息</Text>
-            <Text style={styles.customSectionHint}>公开主页展示</Text>
+            <Text selectable style={styles.customSectionTitle}>基本信息</Text>
+            <Text selectable style={styles.customSectionHint}>公开主页展示</Text>
             <View style={styles.profileManageRow}>
               <View style={styles.profileManageAva}>
-                {profileAvatarUri ? <CircularAvatarImage accessibilityLabel={`${profileDraft.name}头像`} size={88} uri={profileAvatarUri} /> : <Text style={styles.profileManageAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
+                {profileAvatarUri ? <CircularAvatarImage accessibilityLabel={`${profileDraft.name}头像`} size={88} uri={profileAvatarUri} /> : <Text selectable style={styles.profileManageAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
               </View>
               <View style={styles.profileManageCopy}>
-                <Text style={styles.profileManageName}>{profileDraft.name}</Text>
-                <Text style={styles.profileManageHandle}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
-                <Text style={styles.profileManageCity}>{profileDraft.city || "河内"}</Text>
+                <Text selectable style={styles.profileManageName}>{profileDraft.name}</Text>
+                <Text selectable style={styles.profileManageHandle}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
+                <Text selectable style={styles.profileManageCity}>{profileDraft.city || "河内"}</Text>
               </View>
               <Pressable accessibilityLabel="编辑头像" onPress={() => void chooseProfileAvatar()} style={styles.profileManageEdit}>
-                <Text style={styles.profileManageEditText}>换头像</Text>
+                <Text selectable style={styles.profileManageEditText}>换头像</Text>
               </Pressable>
             </View>
             <Pressable accessibilityLabel="编辑资料" onPress={() => setProfileEditorOpen(true)} style={styles.profileManageEdit}>
-              <Text style={styles.profileManageEditText}>编辑资料</Text>
+              <Text selectable style={styles.profileManageEditText}>编辑资料</Text>
             </Pressable>
 
-            <Text style={styles.customSectionTitle}>二维码</Text>
-            <Text style={styles.customSectionHint}>保存、复制、放大都在这</Text>
+            <Text selectable style={styles.customSectionTitle}>二维码</Text>
+            <Text selectable style={styles.customSectionHint}>保存、复制、放大都在这</Text>
             <QrCard
               title={`${profileDraft.name} · Proxy`}
               desc={manageQrPayload ? "扫码打开你的 Proxy 主页；也可以直接存图或复制链接发给好友。" : "还没设置个人主页名，先起一个才能生成二维码。"}
@@ -1953,8 +2061,8 @@ export function MeSurface({
               ] : [{ label: "去设置主页名", onPress: () => setProfileEditorOpen(true), primary: true }]}
             />
 
-            <Text style={styles.customSectionTitle}>状态管理</Text>
-            <Text style={styles.customSectionHint}>决定你出现在人物发现、机会分发的方式</Text>
+            <Text selectable style={styles.customSectionTitle}>状态管理</Text>
+            <Text selectable style={styles.customSectionHint}>决定你出现在人物发现、机会分发的方式</Text>
             <Pressable
               accessibilityLabel="选择状态"
               onPress={() => setAvailabilityOpen(true)}
@@ -1962,10 +2070,10 @@ export function MeSurface({
             >
               <View style={styles.profileManageStatusDot} />
               <View style={styles.profileManageStatusCopy}>
-                <Text style={styles.profileManageStatusLabel}>当前状态</Text>
-                <Text style={styles.profileManageStatusValue}>● {availabilityLabel(availability)}</Text>
+                <Text selectable style={styles.profileManageStatusLabel}>当前状态</Text>
+                <Text selectable style={styles.profileManageStatusValue}>● {availabilityLabel(availability)}</Text>
               </View>
-              <Text style={styles.profileManageStatusChev}>›</Text>
+              <Text selectable style={styles.profileManageStatusChev}>›</Text>
             </Pressable>
           </ScrollView>
 
@@ -2001,14 +2109,19 @@ export function MeSurface({
     }
 
     if (subPage.route === "personalhub") {
-      const personalPhotos = profilePosts.flatMap((post) => (profileMedia[post.postId] ?? []).map((item, index) => ({ item, index, postId: post.postId }))).filter((entry) => entry.item.mediaType === "IMAGE");
+      // AI-TWIN-POST-AUDIENCE-004（2026-09-22）：TARGETED 帖子是「AI 分身 →
+      // 帖文编排」私密副空间的内容，不是这个人公开主页的一部分——主页
+      // （个人主页/ProfileTabs）只显示非 TARGETED 帖子，跟 aiidentity 分支
+      // 的 targetedSpacePosts 互斥，两边不重叠。
+      const personalHubPosts = profilePosts.filter((post) => post.visibility !== "TARGETED");
+      const personalPhotos = personalHubPosts.flatMap((post) => (profileMedia[post.postId] ?? []).map((item, index) => ({ item, index, postId: post.postId }))).filter((entry) => entry.item.mediaType === "IMAGE");
       const viewedItems = profileViewer ? profileMedia[profileViewer.postId] ?? [] : [];
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.personalHubContent}>
             <View style={styles.personalTopbar}>
               <Pressable accessibilityLabel="返回" onPress={() => setSubPage(undefined)} style={styles.personalTopbarButton}>
-                <Text style={styles.personalTopbarIcon}>‹</Text>
+                <Text selectable style={styles.personalTopbarIcon}>‹</Text>
               </Pressable>
               <View style={styles.personalTopbarTools}>
                 <Pressable accessibilityLabel="分析" style={styles.personalTopbarIconBtn} onPress={() => setInsightsSheetOpen(true)}>
@@ -2029,26 +2142,27 @@ export function MeSurface({
                 下面单独一块，跟参考稿的头部密度对齐。 */}
             <View style={styles.personalHead}>
               <View style={styles.personalNameBlock}>
-                <Text numberOfLines={1} style={styles.personalName}>{profileDraft.name}</Text>
-                <Text numberOfLines={1} style={styles.personalHandleSub}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
+                <Text selectable numberOfLines={1} style={styles.personalName}>{profileDraft.name}</Text>
+                <Text selectable numberOfLines={1} style={styles.personalHandleSub}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
               </View>
               <View style={styles.personalAvaWrap}>
                 <Pressable accessibilityLabel="更换头像" onPress={() => void chooseProfileAvatar()} style={styles.personalAva}>
-                  {profileAvatarUri ? <CircularAvatarImage accessibilityLabel={`${profileDraft.name}头像`} size={82} uri={profileAvatarUri} /> : <Text style={styles.personalAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
+                  {profileAvatarUri ? <CircularAvatarImage accessibilityLabel={`${profileDraft.name}头像`} size={82} uri={profileAvatarUri} /> : <Text selectable style={styles.personalAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
                 </Pressable>
               </View>
             </View>
             <View style={styles.personalIntroRow}>
               {onOpenRealitySceneMap ? (
                 <Pressable onPress={onOpenRealitySceneMap} style={styles.personalSceneEntry}>
-                  <ProxyIcon color={color.violet} name="route" size={20} />
+                  {/* MAP-FOOTPRINT-LOGO-001：场景足迹入口用原型「场景足迹」logo，不再用通用 route。 */}
+                  <ProxyIcon color={color.violet} name="footprint" size={20} />
                   <View style={styles.personalSceneCopy}>
-                    <Text style={styles.personalSceneTitle}>场景足迹</Text>
+                    <Text selectable style={styles.personalSceneTitle}>场景足迹</Text>
                   </View>
-                  <Text style={styles.personalSceneChevron}>›</Text>
+                  <Text selectable style={styles.personalSceneChevron}>›</Text>
                 </Pressable>
               ) : null}
-              <Text numberOfLines={2} style={styles.personalIntroText}>{profileDraft.bio || "介绍一下自己吧"}</Text>
+              <Text selectable numberOfLines={2} style={styles.personalIntroText}>{profileDraft.bio || "介绍一下自己吧"}</Text>
             </View>
 
             <View style={styles.personalBio}>
@@ -2061,18 +2175,18 @@ export function MeSurface({
                 {(() => {
                   const topics = profileDraft.city ? [profileDraft.city] : [];
                   return topics.map((t) => (
-                    <View key={t} style={styles.personalTopicPill}><Text style={styles.personalTopicText}>{t}</Text></View>
+                    <View key={t} style={styles.personalTopicPill}><Text selectable style={styles.personalTopicText}>{t}</Text></View>
                   ));
                 })()}
               </View>
               <View style={styles.personalStatRow}>
-                <Text style={styles.personalStatText}>
-                  <Text style={styles.personalStatValue}>—</Text> 次浏览 · 最近 30 天 ›
+                <Text selectable style={styles.personalStatText}>
+                  <Text selectable style={styles.personalStatValue}>{dash(personalViews30)}</Text> 次浏览 · 最近 30 天 ›
                 </Text>
                 {/* FOLLOWER-FACES-001: 以前这里是三个写死的字母头像（M/A/L），不管谁
                     关注都长一个样 —— 数字是真的，脸是假的。最近关注者列表接口还没
                     有（只有计数），先把假脸拿掉只留真数字，不拿装饰冒充真人预览。 */}
-                <Text style={styles.personalFollowersCount}><Text style={styles.personalFollowersValue}>{dash(personalFollowCounts?.followers)}</Text> 位关注者</Text>
+                <Text selectable style={styles.personalFollowersCount}><Text selectable style={styles.personalFollowersValue}>{dash(personalFollowCounts?.followers)}</Text> 位关注者</Text>
               </View>
             </View>
 
@@ -2081,9 +2195,9 @@ export function MeSurface({
                 profileSaveError 的写法一致（内联，字号 >= 11）。 */}
             {profilePostsState === "failed" ? (
               <View style={{ marginHorizontal: 16, marginBottom: 10, padding: 10, borderRadius: 10, backgroundColor: "#fdf2f2", borderWidth: 1, borderColor: "#f3c6c6", flexDirection: "row", alignItems: "center", gap: 10 }}>
-                <Text style={{ flex: 1, color: "#B3261E", fontSize: 11, lineHeight: 15 }}>动态没拉到 —— 可能是网络或登录态的问题，不是你没有动态。</Text>
+                <Text selectable style={{ flex: 1, color: "#B3261E", fontSize: 11, lineHeight: 15 }}>动态没拉到 —— 可能是网络或登录态的问题，不是你没有动态。</Text>
                 <Pressable onPress={() => setProfilePostsReload((n) => n + 1)} accessibilityLabel="重新拉取动态" style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: "#B3261E" }}>
-                  <Text style={{ color: "#fff", fontSize: 11, fontWeight: "700" }}>重试</Text>
+                  <Text selectable style={{ color: "#fff", fontSize: 11, fontWeight: "700" }}>重试</Text>
                 </Pressable>
               </View>
             ) : null}
@@ -2092,14 +2206,14 @@ export function MeSurface({
                 （desc 就是条件原文）。计数/集合类给进度（还差几家），hasAny 和
                 足迹类没有进度概念，只给条件。失败可重试，空墙是“还没开始玩”。 */}
             <View style={styles.badgeWall}>
-              <Text style={styles.badgeWallTitle}>场景徽章 · {badgeEarnedIds ? SCENE_BADGES.filter((b) => badgeEarnedIds.includes(b.id)).length : "—"}/{SCENE_BADGES.length}</Text>
+              <Text selectable style={styles.badgeWallTitle}>场景徽章 · {badgeEarnedIds ? SCENE_BADGES.filter((b) => badgeEarnedIds.includes(b.id)).length : "—"}/{SCENE_BADGES.length}</Text>
               {badgeWallFailed ? (
                 <View style={styles.badgeWallFailed}>
-                  <Text style={styles.badgeWallFailedText}>徽章没拉到 —— 不是没有徽章。</Text>
-                  <Pressable onPress={() => setBadgeWallNonce((n) => n + 1)} accessibilityLabel="重新拉取徽章" style={styles.badgeWallRetry}><Text style={styles.badgeWallRetryText}>重试</Text></Pressable>
+                  <Text selectable style={styles.badgeWallFailedText}>徽章没拉到 —— 不是没有徽章。</Text>
+                  <Pressable onPress={() => setBadgeWallNonce((n) => n + 1)} accessibilityLabel="重新拉取徽章" style={styles.badgeWallRetry}><Text selectable style={styles.badgeWallRetryText}>重试</Text></Pressable>
                 </View>
               ) : badgeEarnedIds === undefined ? (
-                <Text style={styles.badgeWallLoading}>正在加载徽章…</Text>
+                <Text selectable style={styles.badgeWallLoading}>正在加载徽章…</Text>
               ) : (
                 <View style={styles.badgeGrid}>
                   {SCENE_BADGES.map((badge) => {
@@ -2107,10 +2221,10 @@ export function MeSurface({
                     const progress = badgeProgress(badge.id, badgeHistoryIds);
                     return (
                       <View key={badge.id} style={[styles.badgeTile, !earned && styles.badgeTileLocked]} accessibilityLabel={earned ? `已获得${badge.name}` : badge.name}>
-                        <Text style={styles.badgeIcon}>{badge.icon}</Text>
-                        <Text style={styles.badgeName}>{badge.name}</Text>
-                        {!earned ? <Text style={styles.badgeDesc}>{badge.desc}</Text> : null}
-                        {!earned && progress !== undefined && progress.done < progress.total ? <Text style={styles.badgeProgress}>还差 {progress.total - progress.done} 家</Text> : null}
+                        <Text selectable style={styles.badgeIcon}>{badge.icon}</Text>
+                        <Text selectable style={styles.badgeName}>{badge.name}</Text>
+                        {!earned ? <Text selectable style={styles.badgeDesc}>{badge.desc}</Text> : null}
+                        {!earned && progress !== undefined && progress.done < progress.total ? <Text selectable style={styles.badgeProgress}>还差 {progress.total - progress.done} 家</Text> : null}
                       </View>
                     );
                   })}
@@ -2122,17 +2236,23 @@ export function MeSurface({
               profileDraft={profileDraft}
               profileAvatarUri={profileAvatarUri}
               pinnedIds={personalPinnedIds}
-              posts={profilePosts}
+              posts={personalHubPosts}
               mediaByPost={profileMedia}
               photos={personalPhotos}
               replies={personalReplyEntries}
               replyTargets={personalReplyTargets}
               savedPosts={personalSavedPosts}
+              savedScenes={personalSavedScenes}
               taggedPosts={personalTaggedPosts}
               savedFailed={personalSavedFailed}
               repliesFailed={personalRepliesFailed}
               taggedFailed={personalTaggedFailed}
-              stats={{ posts: profilePostsState === "failed" ? undefined : profilePosts.length, followers: personalFollowCounts?.followers, following: personalFollowCounts?.following }}
+              // PROFILE-POSTS-FAILURE-001: 上面那条横幅只解决了「条数别显示 0」；
+              // 帖子列表本身还是空数组，空态照样写着「还没有动态」—— 同一屏上
+              // 一个说没拉到、一个说你没发过。把失败态也传下去，让它渲染成
+              // 「动态没读出来」而不是「还没有动态」。
+              postsFailed={profilePostsState === "failed"}
+              stats={{ posts: profilePostsState === "failed" ? undefined : personalHubPosts.length, followers: personalFollowCounts?.followers, following: personalFollowCounts?.following }}
               onOpenMedia={(entry) => setProfileViewer(entry)}
               onOpenRealitySceneMap={onOpenRealitySceneMap}
               onOpenScene={(sceneId) => {
@@ -2142,6 +2262,7 @@ export function MeSurface({
                 }
               }}
               onLikePost={engagement ? (postId) => { void engagement.reactToPost(postId, "LIKE", true).then(() => setLikeError(undefined)).catch(() => setLikeError("点赞没有提交成功，请检查连接后重试。")); } : undefined}
+              engagementClient={engagement ?? undefined}
               viewerMode={isSelfProfile ? "SELF" : "OTHER"}
               viewerAccountId={viewerAccountId}
               isFollowing={false}
@@ -2153,19 +2274,19 @@ export function MeSurface({
               fallbackLogo={OTTER_LOGO}
               color={color}
             />
-            {likeError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{likeError}</Text> : null}
+            {likeError ? <Text selectable style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{likeError}</Text> : null}
 
           </ScrollView>
           <Modal animationType="slide" onRequestClose={() => setInsightsSheetOpen(false)} transparent visible={insightsSheetOpen}>
             <View style={styles.sheetOverlay}>
               <View style={styles.sheetCard}>
-                <Text style={styles.sheetTitle}>分析</Text>
-                <Text style={styles.sheetSub}>最近 30 天</Text>
-                <View style={styles.sheetField}><Text style={styles.sheetFieldLabel}>浏览</Text><Text style={styles.sheetFieldValue}>—</Text></View>
-                <View style={styles.sheetField}><Text style={styles.sheetFieldLabel}>互动</Text><Text style={styles.sheetFieldValue}>—</Text></View>
-                <View style={styles.sheetField}><Text style={styles.sheetFieldLabel}>关注者</Text><Text style={styles.sheetFieldValue}>{dash(personalFollowCounts?.followers)}</Text></View>
+                <Text selectable style={styles.sheetTitle}>分析</Text>
+                <Text selectable style={styles.sheetSub}>最近 30 天</Text>
+                <View style={styles.sheetField}><Text selectable style={styles.sheetFieldLabel}>浏览</Text><Text selectable style={styles.sheetFieldValue}>{dash(profileAnalytics.opens)}</Text></View>
+                <View style={styles.sheetField}><Text selectable style={styles.sheetFieldLabel}>互动</Text><Text selectable style={styles.sheetFieldValue}>{dash(profileAnalytics.interactions)}</Text></View>
+                <View style={styles.sheetField}><Text selectable style={styles.sheetFieldLabel}>关注者</Text><Text selectable style={styles.sheetFieldValue}>{dash(personalFollowCounts?.followers)}</Text></View>
                 <Pressable onPress={() => setInsightsSheetOpen(false)} style={[styles.sheetWideBtn, styles.sheetWideBtnDark]}>
-                  <Text style={styles.sheetWideBtnTextDark}>完成</Text>
+                  <Text selectable style={styles.sheetWideBtnTextDark}>完成</Text>
                 </Pressable>
               </View>
             </View>
@@ -2196,7 +2317,7 @@ export function MeSurface({
                   />
                   {searchQuery ? (
                     <Pressable accessibilityLabel="清空搜索" onPress={() => { setSearchQuery(""); setProfileSearchResults(undefined); }} style={styles.profileSearchClear}>
-                      <Text style={styles.profileSearchClearText}>×</Text>
+                      <Text selectable style={styles.profileSearchClearText}>×</Text>
                     </Pressable>
                   ) : null}
                   <Pressable
@@ -2204,13 +2325,13 @@ export function MeSurface({
                     onPress={() => { runProfileSearch(searchQuery); profileSearchInputRef.current?.blur(); }}
                     style={styles.profileSearchGo}
                   >
-                    <Text style={styles.profileSearchGoGlyph}>→</Text>
+                    <Text selectable style={styles.profileSearchGoGlyph}>→</Text>
                   </Pressable>
                 </View>
                 {profileSearchResults !== undefined ? (
                   <View style={styles.profileSearchHits}>
                     {profileSearchResults.length === 0 ? (
-                      <Text style={styles.profileSearchEmpty}>无结果</Text>
+                      <Text selectable style={styles.profileSearchEmpty}>无结果</Text>
                     ) : (
                       profileSearchResults.slice(0, 5).map((hit) => (
                         <Pressable
@@ -2218,7 +2339,7 @@ export function MeSurface({
                           onPress={() => { const postId = hit.postId; openModalAfterClose(closeProfileSearch, () => setProfileViewer({ postId, index: 0 })); }}
                           style={styles.profileSearchHit}
                         >
-                          <Text numberOfLines={2} style={styles.profileSearchHitText}>{hit.kind === "reply" ? "我的回复" : "动态"} · {hit.body.slice(0, 60)}</Text>
+                          <Text selectable numberOfLines={2} style={styles.profileSearchHitText}>{hit.kind === "reply" ? "我的回复" : "动态"} · {hit.body.slice(0, 60)}</Text>
                         </Pressable>
                       ))
                     )}
@@ -2231,21 +2352,21 @@ export function MeSurface({
           <Modal animationType="slide" onRequestClose={() => setSettingsSheetOpen(false)} transparent visible={settingsSheetOpen}>
             <View style={styles.sheetOverlay}>
               <View style={styles.sheetCard}>
-                <Text style={styles.sheetTitle}>主页设置</Text>
+                <Text selectable style={styles.sheetTitle}>主页设置</Text>
                 <Pressable onPress={() => openModalAfterClose(() => setSettingsSheetOpen(false), () => setProfileEditorOpen(true))} style={[styles.sheetWideBtn, styles.sheetWideBtnNarrow]}>
                   <View style={styles.sheetWideBtnRow}>
                     <ProxyIcon name="editProfile" color={color.ink} size={18} />
-                    <Text style={styles.sheetWideBtnText}>编辑个人资料</Text>
+                    <Text selectable style={styles.sheetWideBtnText}>编辑个人资料</Text>
                   </View>
                 </Pressable>
                 <Pressable onPress={() => { setSettingsSheetOpen(false); const shareHandle = profileDraft.handle.replace(/^@+/, ""); void Share.share({ message: shareHandle ? `查看 ${profileDraft.name} 的 Proxy 主页：在 App 里搜 @${shareHandle}` : `${profileDraft.name} 的 Proxy 主页` }); }} style={[styles.sheetWideBtn, styles.sheetWideBtnNarrow]}>
                   <View style={styles.sheetWideBtnRow}>
                     <ProxyIcon name="shareUp" color={color.ink} size={18} />
-                    <Text style={styles.sheetWideBtnText}>分享主页</Text>
+                    <Text selectable style={styles.sheetWideBtnText}>分享主页</Text>
                   </View>
                 </Pressable>
                 <Pressable onPress={() => setSettingsSheetOpen(false)} style={[styles.sheetWideBtn, styles.sheetWideBtnDark, styles.sheetWideBtnNarrow]}>
-                  <Text style={styles.sheetWideBtnTextDark}>完成</Text>
+                  <Text selectable style={styles.sheetWideBtnTextDark}>完成</Text>
                 </Pressable>
               </View>
             </View>
@@ -2278,10 +2399,10 @@ export function MeSurface({
           <View style={styles.root}>
             <ScrollView contentContainerStyle={styles.content}>
               <Pressable onPress={() => closeSubPage()} style={styles.subPageBack}>
-                <Text style={styles.subPageBackText}>‹ 返回</Text>
+                <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
               </Pressable>
-              <Text style={styles.subPageTitle}>我的二维码</Text>
-              <Text style={styles.qrRealHint}>先设置你的个人主页名，才能生成二维码。</Text>
+              <Text selectable style={styles.subPageTitle}>我的二维码</Text>
+              <Text selectable style={styles.qrRealHint}>先设置你的个人主页名，才能生成二维码。</Text>
             </ScrollView>
           </View>
         );
@@ -2290,9 +2411,9 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => closeSubPage()} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.subPageTitle}>{qrHeading}</Text>
+            <Text selectable style={styles.subPageTitle}>{qrHeading}</Text>
 
             <View style={styles.qrRealCard}>
               <View ref={qrShotRef} collapsable={false} style={styles.qrShotWrap}>
@@ -2301,32 +2422,32 @@ export function MeSurface({
                 </Pressable>
                 {qrCaption ? <Text selectable style={styles.qrRealHandle}>{qrCaption}</Text> : null}
               </View>
-              <Text style={styles.qrRealHint}>{storeId ? "扫这张码会把门店存成联系人（标准 vCard 名片），任何手机的相机都能扫。可用于桌牌、海报和 Creator 分享。点二维码可放大。" : "点二维码可放大，方便对方扫描；扫出来是一张标准 vCard 名片，存进通讯录即可。TikTok / Zalo 是否展示，继续遵循你的可见范围。"}</Text>
+              <Text selectable style={styles.qrRealHint}>{storeId ? "扫这张码会把门店存成联系人（标准 vCard 名片），任何手机的相机都能扫。可用于桌牌、海报和 Creator 分享。点二维码可放大。" : "点二维码可放大，方便对方扫描；扫出来是一张标准 vCard 名片，存进通讯录即可。TikTok / Zalo 是否展示，继续遵循你的可见范围。"}</Text>
               <View style={styles.qrRealActions}>
                 <Pressable onPress={() => void copyQrText(qrCaption)} style={styles.qrRealBtnGhost}>
-                  <Text style={styles.qrRealBtnTextGhost}>{storeId ? "复制店名" : "复制 @handle"}</Text>
+                  <Text selectable style={styles.qrRealBtnTextGhost}>{storeId ? "复制店名" : "复制 @handle"}</Text>
                 </Pressable>
                 <Pressable onPress={() => void saveQrToAlbum(qrShotRef)} style={styles.qrRealBtn}>
-                  <Text style={styles.qrRealBtnText}>保存到相册</Text>
+                  <Text selectable style={styles.qrRealBtnText}>保存到相册</Text>
                 </Pressable>
               </View>
               <View style={[styles.qrRealActions, { marginTop: 8 }]}>
                 <Pressable onPress={() => void shareQrImage(qrShotRef)} style={styles.qrRealBtnGhost}>
-                  <Text style={styles.qrRealBtnTextGhost}>分享二维码图</Text>
+                  <Text selectable style={styles.qrRealBtnTextGhost}>分享二维码图</Text>
                 </Pressable>
                 <Pressable onPress={() => { void Share.share({ message: qrShareText }); }} style={styles.qrRealBtnGhost}>
-                  <Text style={styles.qrRealBtnTextGhost}>分享文字</Text>
+                  <Text selectable style={styles.qrRealBtnTextGhost}>分享文字</Text>
                 </Pressable>
               </View>
-              {qrNotice ? <Text style={styles.qrRealNotice}>{qrNotice}</Text> : null}
+              {qrNotice ? <Text selectable style={styles.qrRealNotice}>{qrNotice}</Text> : null}
             </View>
 
             {/* PROFILE-QR-004：这段是「个人主页」的可见范围预览 —— 店铺码扫出来
                 是一张门店名片，拿 TikTok / Zalo 的分层去描述它属于编内容，不显示。 */}
             {storeId ? null : (
               <>
-                <Text style={styles.customSectionTitle}>扫码后看到</Text>
-                <Text style={styles.customSectionHint}>预览</Text>
+                <Text selectable style={styles.customSectionTitle}>扫码后看到</Text>
+                <Text selectable style={styles.customSectionHint}>预览</Text>
                 <View style={styles.privacyLadder}>
                   {[
                     ["1", "Proxy 主页", "姓名、城市、公开能力、Proxy 信誉", "始终"],
@@ -2335,14 +2456,14 @@ export function MeSurface({
                   ].map(([i, t, d, v]) => (
                     <View key={i} style={styles.privacyStep}>
                       <View style={styles.privacyStepIndex}>
-                        <Text style={styles.privacyStepIndexText}>{i}</Text>
+                        <Text selectable style={styles.privacyStepIndexText}>{i}</Text>
                       </View>
                       <View style={styles.privacyStepCopy}>
-                        <Text style={styles.privacyStepTitle}>{t}</Text>
-                        <Text style={styles.privacyStepDesc}>{d}</Text>
+                        <Text selectable style={styles.privacyStepTitle}>{t}</Text>
+                        <Text selectable style={styles.privacyStepDesc}>{d}</Text>
                       </View>
                       <View style={styles.privacyStepTag}>
-                        <Text style={styles.privacyStepTagText}>{v}</Text>
+                        <Text selectable style={styles.privacyStepTagText}>{v}</Text>
                       </View>
                     </View>
                   ))}
@@ -2383,16 +2504,16 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <View style={styles.enterpriseHero}>
-              <Text style={styles.enterpriseSkillId}>enterprise_ops</Text>
-              <Text style={styles.enterpriseHeroTitle}>企业运营助手</Text>
-              <Text style={styles.enterpriseHeroText}>上传现实资料，或直接说"建店、整理商品、做内容、复盘经营"。系统只生成 Draft，业务真源始终要由商家确认。</Text>
+              <Text selectable style={styles.enterpriseSkillId}>enterprise_ops</Text>
+              <Text selectable style={styles.enterpriseHeroTitle}>企业运营助手</Text>
+              <Text selectable style={styles.enterpriseHeroText}>上传现实资料，或直接说"建店、整理商品、做内容、复盘经营"。系统只生成 Draft，业务真源始终要由商家确认。</Text>
             </View>
             <View style={styles.enterpriseRuntime}>
-              <Text style={styles.enterpriseRuntimeTitle}>Unified Model Runtime</Text>
-              <Text style={styles.enterpriseRuntimeText}>Skill 只声明理解、抽取与写作能力；底层模型由模型底座分发，业务端不绑定具体模型。</Text>
+              <Text selectable style={styles.enterpriseRuntimeTitle}>Unified Model Runtime</Text>
+              <Text selectable style={styles.enterpriseRuntimeText}>Skill 只声明理解、抽取与写作能力；底层模型由模型底座分发，业务端不绑定具体模型。</Text>
             </View>
             <View style={styles.enterpriseQuickGrid}>
               {[
@@ -2402,43 +2523,43 @@ export function MeSurface({
                 ["复盘门店经营", "基于订单、结果与客流数据给建议"]
               ].map(([title, desc]) => (
                 <Pressable key={title} accessibilityLabel={title} onPress={() => setEnterpriseOpsStage("DRAFT_READY")} style={styles.enterpriseQuick}>
-                  <Text style={styles.enterpriseQuickTitle}>{title}</Text>
-                  <Text style={styles.enterpriseQuickDesc}>{desc}</Text>
+                  <Text selectable style={styles.enterpriseQuickTitle}>{title}</Text>
+                  <Text selectable style={styles.enterpriseQuickDesc}>{desc}</Text>
                 </Pressable>
               ))}
             </View>
             <View style={styles.detailSectionHead}>
-              <Text style={styles.detailSectionTitle}>给 Proxy 看现实资料</Text>
-              <Text style={styles.detailSectionHint}>{enterpriseAssets.length} 个 Source Assets</Text>
+              <Text selectable style={styles.detailSectionTitle}>给 Proxy 看现实资料</Text>
+              <Text selectable style={styles.detailSectionHint}>{enterpriseAssets.length} 个 Source Assets</Text>
             </View>
             <View style={styles.enterpriseAssetTray}>
               {enterpriseAssets.map((asset) => (
                 <View key={`${asset.label}-${asset.uri ?? "preset"}`} style={styles.enterpriseAsset}>
-                  {asset.uri ? <Image source={{ uri: asset.uri }} style={styles.enterpriseAssetThumbImg} /> : <Text style={styles.enterpriseAssetThumb}>▧</Text>}
-                  <Text style={styles.enterpriseAssetText}>{asset.label}</Text>
+                  {asset.uri ? <Image source={{ uri: asset.uri }} style={styles.enterpriseAssetThumbImg} /> : <Text selectable style={styles.enterpriseAssetThumb}>▧</Text>}
+                  <Text selectable style={styles.enterpriseAssetText}>{asset.label}</Text>
                 </View>
               ))}
             </View>
             <View style={styles.enterpriseAssetActions}>
-              <Pressable onPress={() => void addEnterpriseAsset("photo")} style={styles.lightCta}><Text style={styles.lightCtaText}>拍店铺 / 产品</Text></Pressable>
-              <Pressable onPress={() => void addEnterpriseAsset("file")} style={styles.lightCta}><Text style={styles.lightCtaText}>上传文件</Text></Pressable>
+              <Pressable onPress={() => void addEnterpriseAsset("photo")} style={styles.lightCta}><Text selectable style={styles.lightCtaText}>拍店铺 / 产品</Text></Pressable>
+              <Pressable onPress={() => void addEnterpriseAsset("file")} style={styles.lightCta}><Text selectable style={styles.lightCtaText}>上传文件</Text></Pressable>
             </View>
-            {enterpriseAssetError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{enterpriseAssetError}</Text> : null}
+            {enterpriseAssetError ? <Text selectable style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{enterpriseAssetError}</Text> : null}
             {draftReady ? (
               <View style={styles.enterpriseDraft}>
-                <Text style={styles.enterpriseDraftTitle}>Store Digitization Draft</Text>
+                <Text selectable style={styles.enterpriseDraftTitle}>Store Digitization Draft</Text>
                 {enterpriseAssets.map((asset) => (
                   <View key={asset.label} style={styles.enterpriseDraftRow}>
-                    <View style={styles.enterpriseDraftCopy}><Text style={styles.enterpriseDraftName}>{asset.label}</Text><Text style={styles.enterpriseDraftMeta}>{asset.uri ? "你上传的现实资料 · 存在本机" : "内置示例条目 · 不是你上传的资料"}</Text></View>
-                    <Text style={styles.enterpriseDraftState}>待抽取</Text>
+                    <View style={styles.enterpriseDraftCopy}><Text selectable style={styles.enterpriseDraftName}>{asset.label}</Text><Text selectable style={styles.enterpriseDraftMeta}>{asset.uri ? "你上传的现实资料 · 存在本机" : "内置示例条目 · 不是你上传的资料"}</Text></View>
+                    <Text selectable style={styles.enterpriseDraftState}>待抽取</Text>
                   </View>
                 ))}
-                <Text style={styles.enterpriseDraftMeta}>菜单项、价格、权益与置信度都由模型层抽取。这个面还没有接模型调用，所以不显示任何抽取结果或百分比。</Text>
+                <Text selectable style={styles.enterpriseDraftMeta}>菜单项、价格、权益与置信度都由模型层抽取。这个面还没有接模型调用，所以不显示任何抽取结果或百分比。</Text>
               </View>
             ) : null}
-            {draftReady && !confirmed ? <Pressable onPress={() => setEnterpriseOpsStage("CONFIRMED")} style={styles.primaryCta}><Text style={styles.primaryCtaText}>确认这些资料</Text></Pressable> : null}
-            <Pressable onPress={() => openSubPage("merchantstorefront")} style={styles.primaryCta}><Text style={styles.primaryCtaText}>查看线上店铺</Text></Pressable>
-            <View style={styles.infoNote}><Text style={styles.infoNoteTitle}>Skill Boundary</Text><Text style={styles.infoNoteText}>Source Asset → Model Output → Draft Artifact → Merchant Confirmation → Authorized Domain Command。模型不直接成为 Merchant、Catalog 或 Order 真源。</Text></View>
+            {draftReady && !confirmed ? <Pressable onPress={() => setEnterpriseOpsStage("CONFIRMED")} style={styles.primaryCta}><Text selectable style={styles.primaryCtaText}>确认这些资料</Text></Pressable> : null}
+            <Pressable onPress={() => openSubPage("merchantstorefront")} style={styles.primaryCta}><Text selectable style={styles.primaryCtaText}>查看线上店铺</Text></Pressable>
+            <View style={styles.infoNote}><Text selectable style={styles.infoNoteTitle}>Skill Boundary</Text><Text selectable style={styles.infoNoteText}>Source Asset → Model Output → Draft Artifact → Merchant Confirmation → Authorized Domain Command。模型不直接成为 Merchant、Catalog 或 Order 真源。</Text></View>
           </ScrollView>
         </View>
       );
@@ -2453,17 +2574,17 @@ export function MeSurface({
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回</Text></Pressable>
-            <Text style={styles.detailTitle}>合作执行网络</Text>
-            <Text style={styles.detailSub}>功能预览 · 执行者数据尚未接入</Text>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text selectable style={styles.subPageBackText}>‹ 返回</Text></Pressable>
+            <Text selectable style={styles.detailTitle}>合作执行网络</Text>
+            <Text selectable style={styles.detailSub}>功能预览 · 执行者数据尚未接入</Text>
             <View style={styles.infoNote}>
-              <Text style={styles.infoNoteTitle}>这里还没有执行者</Text>
-              <Text style={styles.infoNoteText}>常用执行者来自真实合作记录：谁接过你的单、有没有到场、有没有按时完成。App 目前没有这个接口，也没有合作次数与按时率字段，所以这里不显示任何名字、评分或百分比。</Text>
+              <Text selectable style={styles.infoNoteTitle}>这里还没有执行者</Text>
+              <Text selectable style={styles.infoNoteText}>常用执行者来自真实合作记录：谁接过你的单、有没有到场、有没有按时完成。App 目前没有这个接口，也没有合作次数与按时率字段，所以这里不显示任何名字、评分或百分比。</Text>
             </View>
             <Pressable accessibilityLabel="再次邀请团队" onPress={() => openSubPage("multislot")} style={styles.trustedInviteTouchable}>
-              <Gradient from={color.magenta} to={color.violet} style={styles.trustedInvite}><Text style={styles.trustedInviteText}>再次邀请团队</Text></Gradient>
+              <Gradient from={color.magenta} to={color.violet} style={styles.trustedInvite}><Text selectable style={styles.trustedInviteText}>再次邀请团队</Text></Gradient>
             </Pressable>
-            <Pressable accessibilityLabel="返回我的企业" onPress={() => setSubPage(undefined)} style={styles.trustedReturn}><Text style={styles.trustedReturnText}>返回我的企业</Text></Pressable>
+            <Pressable accessibilityLabel="返回我的企业" onPress={() => setSubPage(undefined)} style={styles.trustedReturn}><Text selectable style={styles.trustedReturnText}>返回我的企业</Text></Pressable>
           </ScrollView>
         </View>
       );
@@ -2476,13 +2597,13 @@ export function MeSurface({
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回</Text></Pressable>
-            <Text style={styles.detailTitle}>门店开业</Text>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text selectable style={styles.subPageBackText}>‹ 返回</Text></Pressable>
+            <Text selectable style={styles.detailTitle}>门店开业</Text>
             <View style={styles.infoNote}>
-              <Text style={styles.infoNoteTitle}>名额尚未接入</Text>
-              <Text style={styles.infoNoteText}>多名额任务需要服务端把一项需求拆成多个独立名额，并逐个记录匹配、取消、支付与评价。这个面目前读不到名额数据，所以名额清单与整体进度都不显示。</Text>
+              <Text selectable style={styles.infoNoteTitle}>名额尚未接入</Text>
+              <Text selectable style={styles.infoNoteText}>多名额任务需要服务端把一项需求拆成多个独立名额，并逐个记录匹配、取消、支付与评价。这个面目前读不到名额数据，所以名额清单与整体进度都不显示。</Text>
             </View>
-            <Pressable onPress={() => openSubPage("todayboard")} style={styles.primaryCta}><Text style={styles.primaryCtaText}>打开今日执行</Text></Pressable>
+            <Pressable onPress={() => openSubPage("todayboard")} style={styles.primaryCta}><Text selectable style={styles.primaryCtaText}>打开今日执行</Text></Pressable>
           </ScrollView>
         </View>
       );
@@ -2495,14 +2616,14 @@ export function MeSurface({
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回</Text></Pressable>
-            <Text style={styles.detailTitle}>今日执行</Text>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text selectable style={styles.subPageBackText}>‹ 返回</Text></Pressable>
+            <Text selectable style={styles.detailTitle}>今日执行</Text>
             <View style={styles.infoNote}>
-              <Text style={styles.infoNoteTitle}>执行看板尚未接入</Text>
-              <Text style={styles.infoNoteText}>名额统计、到场与风险都来自执行者真实上报的位置和状态。这个面目前读不到执行数据，所以不显示任何统计数字或执行者清单。</Text>
+              <Text selectable style={styles.infoNoteTitle}>执行看板尚未接入</Text>
+              <Text selectable style={styles.infoNoteText}>名额统计、到场与风险都来自执行者真实上报的位置和状态。这个面目前读不到执行数据，所以不显示任何统计数字或执行者清单。</Text>
             </View>
-            <Pressable onPress={() => openSubPage("multislot")} style={styles.primaryCta}><Text style={styles.primaryCtaText}>查看名额与补位</Text></Pressable>
-            <Pressable onPress={() => openSubPage("members")} style={styles.lightCta}><Text style={styles.lightCtaText}>成员与权限</Text></Pressable>
+            <Pressable onPress={() => openSubPage("multislot")} style={styles.primaryCta}><Text selectable style={styles.primaryCtaText}>查看名额与补位</Text></Pressable>
+            <Pressable onPress={() => openSubPage("members")} style={styles.lightCta}><Text selectable style={styles.lightCtaText}>成员与权限</Text></Pressable>
           </ScrollView>
         </View>
       );
@@ -2513,9 +2634,9 @@ export function MeSurface({
         return contentWrapper(
           <View style={styles.root}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.subPageTitle}>线上店铺</Text>
+            <Text selectable style={styles.subPageTitle}>线上店铺</Text>
             <MerchantStorefrontSurface client={business} viewerAccountId={viewerAccountId} />
           </View>
         );
@@ -2523,10 +2644,10 @@ export function MeSurface({
       return contentWrapper(
         <View style={styles.root}>
           <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-            <Text style={styles.subPageBackText}>‹ 返回</Text>
+            <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
           </Pressable>
-          <Text style={styles.subPageTitle}>线上店铺</Text>
-          <View style={styles.infoNote}><Text style={styles.infoNoteText}>请在 “商家” Tab 登录后查看</Text></View>
+          <Text selectable style={styles.subPageTitle}>线上店铺</Text>
+          <View style={styles.infoNote}><Text selectable style={styles.infoNoteText}>请在 “商家” Tab 登录后查看</Text></View>
         </View>
       );
     }
@@ -2546,18 +2667,18 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.subPageTitle}>企业 / 店铺资料</Text>
+            <Text selectable style={styles.subPageTitle}>企业 / 店铺资料</Text>
 
             <View style={styles.storeTop}>
               <View style={styles.storeTopRow}>
                 <Gradient from={color.magenta} to={color.violet} style={styles.storeAvatar}>
-                  <Text style={styles.storeAvatarText}>B</Text>
+                  <Text selectable style={styles.storeAvatarText}>B</Text>
                 </Gradient>
                 <View style={styles.heroCopy}>
-                  <Text style={styles.heroName}>{liveShopName ?? persona.name}</Text>
-                  <Text style={styles.heroMeta}>{liveShopName ? "我的店铺" : (persona.contextLineLabel ?? "")}</Text>
+                  <Text selectable style={styles.heroName}>{liveShopName ?? persona.name}</Text>
+                  <Text selectable style={styles.heroMeta}>{liveShopName ? "我的店铺" : (persona.contextLineLabel ?? "")}</Text>
                 </View>
               </View>
             </View>
@@ -2573,7 +2694,7 @@ export function MeSurface({
             />
 
             <View style={styles.subSection}>
-              <Text style={styles.subSectionTitle}>企业主体</Text>
+              <Text selectable style={styles.subSectionTitle}>企业主体</Text>
               {[
                 ["主体名称", "Bonsaidon · 海鲜自助"],
                 ["经营城市", "河内"],
@@ -2581,14 +2702,14 @@ export function MeSurface({
                 ["身份验证", "已认证 · Proxy 商家身份"]
               ].map(([label, value]) => (
                 <View key={label} style={styles.subRow}>
-                  <Text style={styles.subRowLabel}>{label}</Text>
-                  <Text style={styles.subRowValue}>{value}</Text>
+                  <Text selectable style={styles.subRowLabel}>{label}</Text>
+                  <Text selectable style={styles.subRowValue}>{value}</Text>
                 </View>
               ))}
             </View>
 
-            <Text style={styles.customSectionTitle}>二维码与展示</Text>
-            <Text style={styles.customSectionHint}>Proxy 商家身份</Text>
+            <Text selectable style={styles.customSectionTitle}>二维码与展示</Text>
+            <Text selectable style={styles.customSectionHint}>Proxy 商家身份</Text>
             <SocialRow
               icon="◈"
               label="门店主页"
@@ -2611,9 +2732,9 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.subPageTitle}>推荐评估队列</Text>
+            <Text selectable style={styles.subPageTitle}>推荐评估队列</Text>
             <StoreRecommendationQueue />
           </ScrollView>
         </View>
@@ -2626,9 +2747,9 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.subPageTitle}>我的权益</Text>
+            <Text selectable style={styles.subPageTitle}>我的权益</Text>
             <BenefitHubSurface onBack={() => setSubPage(undefined)} />
           </ScrollView>
         </View>
@@ -2643,9 +2764,9 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.subPageTitle}>权益核销</Text>
+            <Text selectable style={styles.subPageTitle}>权益核销</Text>
             {merchantId ? (
               <BenefitRedeemScreen
                 client={benefitClient}
@@ -2654,8 +2775,8 @@ export function MeSurface({
               />
             ) : (
               <View style={styles.infoNote}>
-                <Text style={styles.infoNoteText}>当前账号没有店铺主体，无法核销权益。</Text>
-                <Text style={[styles.appBehaviorCardDesc, { marginTop: 4 }]}>
+                <Text selectable style={styles.infoNoteText}>当前账号没有店铺主体，无法核销权益。</Text>
+                <Text selectable style={[styles.appBehaviorCardDesc, { marginTop: 4 }]}>
                   核销必须绑定到一个真实门店（商家主体），因为它决定了这笔核销记在谁账上。
                 </Text>
               </View>
@@ -2671,9 +2792,9 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.subPageTitle}>我推荐的店</Text>
+            <Text selectable style={styles.subPageTitle}>我推荐的店</Text>
             <MyStoreRecommendations />
           </ScrollView>
         </View>
@@ -2685,18 +2806,18 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.subPageTitle}>推荐商铺进体系</Text>
-            <Text style={styles.appBehaviorCardDesc}>
+            <Text selectable style={styles.subPageTitle}>推荐商铺进体系</Text>
+            <Text selectable style={styles.appBehaviorCardDesc}>
               把你看过、去过、觉得适合 Proxy 的场地 / 商家推荐给平台：小美（AI）与
               用户一起把好的店铺带进体系，运营评估后接入。推荐记录会留档（append-only），
               后续接入进度在运营侧推进。
             </Text>
             {storeRecAiAvailable ? (
               <View style={styles.infoNote}>
-                <Text style={styles.socialEditorLabel}>让小美帮你整理</Text>
-                <Text style={styles.appBehaviorCardDesc}>
+                <Text selectable style={styles.socialEditorLabel}>让小美帮你整理</Text>
+                <Text selectable style={styles.appBehaviorCardDesc}>
                   用一句话说说这家店（在哪儿、为什么值得进体系），小美整理成草稿，
                   你确认后提交 —— 会记为「小美推荐」。你没提到的字段小美不会瞎填。
                 </Text>
@@ -2712,33 +2833,33 @@ export function MeSurface({
                   onPress={() => void suggestWithXiaomei()}
                   style={[styles.lightCta, (storeRecAiBusy || storeRecNote.trim() === "") && { opacity: 0.5 }]}
                 >
-                  <Text style={styles.lightCtaText}>{storeRecAiBusy ? "小美整理中…" : "让小美整理"}</Text>
+                  <Text selectable style={styles.lightCtaText}>{storeRecAiBusy ? "小美整理中…" : "让小美整理"}</Text>
                 </Pressable>
               </View>
             ) : null}
-            {storeRecAiNote ? <Text style={{ color: "#1B7F4D", fontSize: 12, marginTop: 8 }}>{storeRecAiNote}</Text> : null}
-            <Text style={styles.socialEditorLabel}>店名 / 场地名</Text>
+            {storeRecAiNote ? <Text selectable style={{ color: "#1B7F4D", fontSize: 12, marginTop: 8 }}>{storeRecAiNote}</Text> : null}
+            <Text selectable style={styles.socialEditorLabel}>店名 / 场地名</Text>
             <TextInput
               placeholder="例如：Three Beans · Cầu Giấy"
               style={styles.socialEditorInput}
               value={storeRecDraft.storeName}
               onChangeText={(v) => setStoreRecDraft((cur) => ({ ...cur, storeName: v }))}
             />
-            <Text style={styles.socialEditorLabel}>城市</Text>
+            <Text selectable style={styles.socialEditorLabel}>城市</Text>
             <TextInput
               placeholder="例如：河内"
               style={styles.socialEditorInput}
               value={storeRecDraft.city}
               onChangeText={(v) => setStoreRecDraft((cur) => ({ ...cur, city: v }))}
             />
-            <Text style={styles.socialEditorLabel}>品类（可选）</Text>
+            <Text selectable style={styles.socialEditorLabel}>品类（可选）</Text>
             <TextInput
               placeholder="例如：咖啡 / 餐饮 / 展览"
               style={styles.socialEditorInput}
               value={storeRecDraft.category}
               onChangeText={(v) => setStoreRecDraft((cur) => ({ ...cur, category: v }))}
             />
-            <Text style={styles.socialEditorLabel}>为什么推荐它进体系</Text>
+            <Text selectable style={styles.socialEditorLabel}>为什么推荐它进体系</Text>
             <TextInput
               placeholder="例如：适合聊天与 Afterwork 场景，老板愿意合作活动"
               style={[styles.socialEditorInput, { minHeight: 88 }]}
@@ -2746,14 +2867,14 @@ export function MeSurface({
               value={storeRecDraft.reason}
               onChangeText={(v) => setStoreRecDraft((cur) => ({ ...cur, reason: v }))}
             />
-            {storeRecError ? <Text style={{ color: "#B3261E", fontSize: 12, marginTop: 8 }}>{storeRecError}</Text> : null}
-            {storeRecDone ? <Text style={{ color: "#1B7F4D", fontSize: 12, marginTop: 8 }}>{storeRecDone}</Text> : null}
+            {storeRecError ? <Text selectable style={{ color: "#B3261E", fontSize: 12, marginTop: 8 }}>{storeRecError}</Text> : null}
+            {storeRecDone ? <Text selectable style={{ color: "#1B7F4D", fontSize: 12, marginTop: 8 }}>{storeRecDone}</Text> : null}
             <Pressable
               disabled={storeRecBusy}
               onPress={() => void submitStoreRecommendation()}
               style={[styles.appBehaviorReturn, storeRecBusy && { opacity: 0.5 }]}
             >
-              <Text style={styles.appBehaviorReturnText}>{storeRecBusy ? "提交中…" : (storeRecOrigin === "AI" ? "以小美推荐提交" : "提交推荐")}</Text>
+              <Text selectable style={styles.appBehaviorReturnText}>{storeRecBusy ? "提交中…" : (storeRecOrigin === "AI" ? "以小美推荐提交" : "提交推荐")}</Text>
             </Pressable>
           </ScrollView>
         </View>
@@ -2764,20 +2885,20 @@ export function MeSurface({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-            <Text style={styles.subPageBackText}>‹ 返回</Text>
+            <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
           </Pressable>
-          <Text style={styles.detailTitle}>{subPage.title}</Text>
-          <Text style={styles.detailSub}>{subPage.desc}</Text>
+          <Text selectable style={styles.detailTitle}>{subPage.title}</Text>
+          <Text selectable style={styles.detailSub}>{subPage.desc}</Text>
 
           {content?.sections?.map((section, sIdx) => (
             <View key={sIdx} style={styles.fallbackSection}>
               <View style={styles.detailSectionHead}>
-                <Text style={styles.detailSectionTitle}>{section.title}</Text>
+                <Text selectable style={styles.detailSectionTitle}>{section.title}</Text>
               </View>
               {section.rows.map((row, rIdx) => (
                 <View key={rIdx} style={styles.prototypeCard}>
-                  <Text style={styles.prototypeCardTitle}>{row.label}</Text>
-                  {row.value ? <Text style={styles.prototypeCardDesc}>{row.value}</Text> : null}
+                  <Text selectable style={styles.prototypeCardTitle}>{row.label}</Text>
+                  {row.value ? <Text selectable style={styles.prototypeCardDesc}>{row.value}</Text> : null}
                 </View>
               ))}
             </View>
@@ -2785,12 +2906,12 @@ export function MeSurface({
 
           {!content?.sections ? (
             <View style={styles.infoNote}>
-              <Text style={styles.infoNoteTitle}>正在准备这个工作区</Text>
-              <Text style={styles.infoNoteText}>它会沿用此页面的真实业务对象和权限边界，不再以通用占位页替代。</Text>
+              <Text selectable style={styles.infoNoteTitle}>正在准备这个工作区</Text>
+              <Text selectable style={styles.infoNoteText}>它会沿用此页面的真实业务对象和权限边界，不再以通用占位页替代。</Text>
             </View>
           ) : null}
           <Pressable onPress={() => setSubPage(undefined)} style={styles.lightCta}>
-            <Text style={styles.lightCtaText}>返回我的</Text>
+            <Text selectable style={styles.lightCtaText}>返回我的</Text>
           </Pressable>
         </ScrollView>
       </View>
@@ -2801,7 +2922,7 @@ export function MeSurface({
     <View style={styles.root}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
         <View style={styles.pageTitleRow}>
-          <Text style={styles.pageTitle}>{persona.pageTitle}</Text>
+          <Text selectable style={styles.pageTitle}>{persona.pageTitle}</Text>
         </View>
 
         {persona.profileCard ? (
@@ -2811,19 +2932,19 @@ export function MeSurface({
                 {hubProfile.hasAvatar ? (
                   <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={46} uri={profileAvatarUri!} />
                 ) : (
-                  <Text style={styles.profileAvatarText}>{hubProfile.initial}</Text>
+                  <Text selectable style={styles.profileAvatarText}>{hubProfile.initial}</Text>
                 )}
               </Gradient>
               <View style={styles.profileCopy}>
-                <Text style={styles.profileName}>{hubProfile.displayName}</Text>
+                <Text selectable style={styles.profileName}>{hubProfile.displayName}</Text>
                 <View style={styles.profileMeta}>
-                  <Text style={styles.profileMetaText}>{hubProfile.city}</Text>
+                  <Text selectable style={styles.profileMetaText}>{hubProfile.city}</Text>
                   {hubProfile.handle ? (
                     <>
                       <View style={styles.profileVerifyDot}>
-                        <Text style={styles.profileVerifyText}>@</Text>
+                        <Text selectable style={styles.profileVerifyText}>@</Text>
                       </View>
-                      <Text style={styles.profileMetaText}>{hubProfile.handle}</Text>
+                      <Text selectable style={styles.profileMetaText}>{hubProfile.handle}</Text>
                     </>
                   ) : null}
                 </View>
@@ -2834,7 +2955,7 @@ export function MeSurface({
                 style={styles.profileStatus}
                 hitSlop={4}
               >
-                <Text style={styles.profileStatusText}>● {availabilityLabel(availability)}</Text>
+                <Text selectable style={styles.profileStatusText}>● {availabilityLabel(availability)}</Text>
               </Pressable>
             </View>
             <View style={styles.profileSocial}>
@@ -2843,18 +2964,18 @@ export function MeSurface({
                 // in ./me-types for the precedence rules.
                 const hubSocials = resolveHubSocials(socialAccounts);
                 if (hubSocials.isEmpty) {
-                  return <Text style={styles.profileSocialMore}>去 “我的” → 社媒账户 设置 ›</Text>;
+                  return <Text selectable style={styles.profileSocialMore}>去 “我的” → 社媒账户 设置 ›</Text>;
                 }
                 return hubSocials.visible.map((social) => (
                   <View
                     key={social.key}
                     style={[styles.profileSocialBadge, social.mark === "TT" && styles.profileSocialBadgeOn, social.dark && styles.profileSocialBadgeDark]}
                   >
-                    <Text style={styles.profileSocialBadgeText}>{social.mark}</Text>
+                    <Text selectable style={styles.profileSocialBadgeText}>{social.mark}</Text>
                   </View>
                 ));
               })()}
-              <Text style={styles.profileSocialMore}>社媒与二维码 ›</Text>
+              <Text selectable style={styles.profileSocialMore}>社媒与二维码 ›</Text>
             </View>
           </Pressable>
         ) : (
@@ -2864,7 +2985,7 @@ export function MeSurface({
                 {hubProfile.hasAvatar ? (
                   <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={40} uri={profileAvatarUri!} />
                 ) : (
-                  <Text style={styles.identityAvatarText}>{hubProfile.initial}</Text>
+                  <Text selectable style={styles.identityAvatarText}>{hubProfile.initial}</Text>
                 )}
               </Gradient>
             ) : (
@@ -2872,19 +2993,19 @@ export function MeSurface({
                 {hubProfile.hasAvatar ? (
                   <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={40} uri={profileAvatarUri!} />
                 ) : (
-                  <Text style={styles.identityAvatarText}>{hubProfile.initial}</Text>
+                  <Text selectable style={styles.identityAvatarText}>{hubProfile.initial}</Text>
                 )}
               </View>
             )}
             <View style={styles.identityCopy}>
-              <Text style={styles.identityName}>{hubProfile.displayName}</Text>
-              <Text style={styles.identityDesc}>{persona.desc}</Text>
+              <Text selectable style={styles.identityName}>{hubProfile.displayName}</Text>
+              <Text selectable style={styles.identityDesc}>{persona.desc}</Text>
             </View>
             <Pressable
               onPress={() => persona.identityActionSwitch && onOpenSwitcher()}
               style={styles.identityButton}
             >
-              <Text style={styles.identityButtonText}>{persona.identityActionLabel}</Text>
+              <Text selectable style={styles.identityButtonText}>{persona.identityActionLabel}</Text>
             </Pressable>
           </View>
         )}
@@ -2893,12 +3014,12 @@ export function MeSurface({
           <Pressable accessibilityLabel="礼品券，3 张可用，去使用" onPress={onOpenVouchers} style={styles.voucherPin}>
             <View style={styles.voucherPinMark}><VoucherMenuGlyph color={color.ink} /></View>
             <View style={styles.voucherPinCopy}>
-              <Text style={styles.voucherPinTitle}>礼品券</Text>
-              <Text style={styles.voucherPinDesc}>咖啡券、体验券与活动券</Text>
+              <Text selectable style={styles.voucherPinTitle}>礼品券</Text>
+              <Text selectable style={styles.voucherPinDesc}>咖啡券、体验券与活动券</Text>
             </View>
             <View style={styles.voucherPinRight}>
-              <Text style={styles.voucherPinCount}>3 张可用</Text>
-              <Text style={styles.voucherPinAction}>去使用 ›</Text>
+              <Text selectable style={styles.voucherPinCount}>3 张可用</Text>
+              <Text selectable style={styles.voucherPinAction}>去使用 ›</Text>
             </View>
           </Pressable>
         ) : null}
@@ -2906,21 +3027,21 @@ export function MeSurface({
         {persona.alert ? (
           <Pressable onPress={() => persona.alert && openSubPage(persona.alert.route)} style={styles.bizAlert}>
             <View style={styles.bizAlertMark}>
-              <Text style={styles.bizAlertMarkText}>{persona.alert.icon}</Text>
+              <Text selectable style={styles.bizAlertMarkText}>{persona.alert.icon}</Text>
             </View>
             <View style={styles.bizAlertCopy}>
-              <Text style={styles.bizAlertTitle}>{persona.alert.title}</Text>
-              <Text style={styles.bizAlertDesc}>{persona.alert.desc}</Text>
+              <Text selectable style={styles.bizAlertTitle}>{persona.alert.title}</Text>
+              <Text selectable style={styles.bizAlertDesc}>{persona.alert.desc}</Text>
             </View>
-            <Text style={styles.bizAlertTag}>{persona.alert.tag}</Text>
+            <Text selectable style={styles.bizAlertTag}>{persona.alert.tag}</Text>
           </Pressable>
         ) : null}
 
         {effectiveSections.map((section) => (
           <View key={section.id ?? section.title} style={styles.section}>
             <View style={styles.sectionHead}>
-              <Text style={styles.sectionTitle}>{section.title}</Text>
-              <Text style={styles.sectionHint}>{section.hint}</Text>
+              <Text selectable style={styles.sectionTitle}>{section.title}</Text>
+              <Text selectable style={styles.sectionHint}>{section.hint}</Text>
             </View>
             {section.rows.map((row) => (
               <ServiceRow key={row.label} onPress={() => pressRow(row)} row={row} />
@@ -2929,9 +3050,9 @@ export function MeSurface({
         ))}
 
         <View style={styles.contextLine}>
-          <Text style={styles.contextLineText}>{persona.contextLineLabel}</Text>
+          <Text selectable style={styles.contextLineText}>{persona.contextLineLabel}</Text>
           <Pressable onPress={onOpenSwitcher}>
-            <Text style={styles.contextLineAction}>{persona.contextLineAction} ›</Text>
+            <Text selectable style={styles.contextLineAction}>{persona.contextLineAction} ›</Text>
           </Pressable>
         </View>
 
@@ -2940,7 +3061,7 @@ export function MeSurface({
         ) : null}
 
         <Pressable onPress={onSignOut} style={styles.signOut}>
-          <Text style={styles.signOutText}>退出登录</Text>
+          <Text selectable style={styles.signOutText}>退出登录</Text>
         </Pressable>
       </ScrollView>
       {/* 个人资料编辑器三处分支各挂一份（见 renderProfileEditor 注释）。 */}

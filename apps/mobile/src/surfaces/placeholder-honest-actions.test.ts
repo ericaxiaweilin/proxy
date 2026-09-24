@@ -234,8 +234,8 @@ describe("PLACEHOLDER-002 every chain runs to completion", () => {
 
   it("moment share handles shared/dismissed/error", () => {
     expect(home).toContain("momentBusy");
-    expect(home).toContain("邀请已分享");
-    expect(home).toContain("分享没有调起");
+    expect(home).toContain('t("inviteShared")');
+    expect(home).toContain('t("shareFailed")');
   });
 
   it("conversation retracts failed bubbles and forwards for real", () => {
@@ -318,9 +318,9 @@ describe("PLACEHOLDER-004 moment publishes to feed", () => {
   it("wires publish-to-feed through the real post pipeline", () => {
     expect(home).toContain("buildCreatePostPayload");
     expect(home).toContain("localNet.createPost");
-    expect(home).toContain("发布到动态");
-    expect(home).toContain("已发布到动态");
-    expect(home).toContain("请先登录后再发布");
+    expect(home).toContain('t("postToFeed")');
+    expect(home).toContain('t("postedToFeed")');
+    expect(home).toContain('t("loginToPost")');
     expect(shell).toContain("localNet={localNet}");
   });
 });
@@ -418,25 +418,61 @@ describe("PLACEHOLDER-009 avatars persist on disk", () => {
   });
 });
 
-describe("PLACEHOLDER-010 ai add shows pending", () => {
-  const profile = readFileSync(fileURLToPath(new URL("./ai-account-profile.tsx", import.meta.url)), "utf8");
-  const shell = readFileSync(fileURLToPath(new URL("../shell/app-shell.tsx", import.meta.url)), "utf8");
+describe("PLACEHOLDER-010 ai profile keeps only actions that land", () => {
+  // 剥注释再断言（同文件顶部的坑）：AI-FRIEND-DEAD-PENDING-001 的说明里
+  // **就写着** SendFriendRequest 和「添加中」—— 直接在原文上 indexOf 会把
+  // 解释这段历史的注释当成代码，删掉代码留下注释照样绿。
+  const profile = stripComments(readFileSync(fileURLToPath(new URL("./ai-account-profile.tsx", import.meta.url)), "utf8"));
+  const shell = appShellCode;
 
-  it("reads friendship truth and locks pending as 添加中", () => {
-    expect(profile).toContain("listMyFriendships");
-    expect(profile).toContain("sendFriendRequest");
-    expect(profile).toContain("添加中");
-    expect(profile).toContain('disabled={useFriendFlow && (friendState !== "NONE" || friendBusy)}');
+  // AI-FRIEND-DEAD-PENDING-001（按钮级合规审计 2026-09-22）：
+  // 平台 AI 账号不会 accept 好友申请（服务端另有 AI-FRIEND-REQUEST-001 守卫）。
+  // 原来 AI 主页上的「+ 添加」走的是真人同一套 SendFriendRequest —— 结果是一条
+  // 永远卡在 PENDING 的死记录，UI 还诚实地告诉用户「好友申请已发送」。
+  // 这一屏现在只留两个真有结果的动作：看主页、发消息。
+  //
+  // 钉的是「死动作不许回来」，不是「按钮长什么样」：谁再把好友申请接回
+  // AI 账号，这里立刻红。
+  it("never routes an AI account through the human friend-request flow", () => {
+    expect(profile).not.toContain("sendFriendRequest");
+    expect(profile).not.toContain("listMyFriendships");
+    expect(profile).not.toContain("friendState");
+    expect(profile).not.toContain("useFriendFlow");
+  });
+
+  it("keeps the two actions that actually land", () => {
+    // 发消息：真的进对话（shell 的 onMessage 开 MSG_CHAT）。
+    expect(profile).toContain('accessibilityLabel="发消息"');
+    expect(profile).toContain("onMessage(account)");
+    // 建议提问走同一个入口，只是带上 initialDraft。
+    expect(profile).toContain("onMessage(account, prompt)");
+    expect(shell).toContain('setPageOverride("MSG_CHAT")');
+    // 主页：看她公开动态。
+    expect(profile).toContain('accessibilityLabel="查看个人主页"');
+    expect(profile).toContain("onViewPosts?.(account)");
     expect(shell).toContain("relationship={relationship}");
+  });
+
+  it("follows as a content subscription, not as a disguised friendship", () => {
+    // 关注走 engagement（内容订阅），不是 relationship（双向好友）。
+    expect(profile).toContain("engagement.followProfile(account.accountId)");
+    expect(profile).toContain("engagement.unfollowProfile(account.accountId)");
+    // 关注失败仍要说人话：同一个 catch 曾把网络抖动也报成「登录后…」。
+    expect(profile).toContain("mapFollowError");
   });
 });
 
-describe("PLACEHOLDER-011 pending add is gray", () => {
-  const profile = readFileSync(fileURLToPath(new URL("./ai-account-profile.tsx", import.meta.url)), "utf8");
+describe("PLACEHOLDER-011 the PENDING dead state cannot come back", () => {
+  const profile = stripComments(readFileSync(fileURLToPath(new URL("./ai-account-profile.tsx", import.meta.url)), "utf8"));
 
-  it("renders 添加中 in muted gray, distinct from added violet", () => {
-    expect(profile).toContain("pendingText");
-    expect(profile).toContain('friendState === "OUTGOING" && styles.pendingText');
+  // 旧的 PLACEHOLDER-011 钉的是「添加中渲染成灰色」。那个状态本身就是错的：
+  // 它描述「申请已发出、等对方同意」，而平台 AI 永远不会同意 —— 灰色也好、
+  // 紫色也好，都是把一条死记录画得很好看。所以这条反过来钉：那个状态、
+  // 它的判定条件、它的样式，都不许再出现。
+  it("has no 添加中 state and no styling left over for it", () => {
+    expect(profile).not.toContain("添加中");
+    expect(profile).not.toContain("pendingText");
+    expect(profile).not.toContain("OUTGOING");
   });
 });
 
@@ -757,7 +793,11 @@ describe("PROFILE-POSTS-FAILURE-001 a failed posts load is not an empty profile"
 
   it("shows an honest notice with a retry, and unknown instead of zero", () => {
     // 条数在失败时显示 —（同文件 dash() 的口径：未知不是零）。
-    expect(meCode).toContain('posts: profilePostsState === "failed" ? undefined : profilePosts.length');
+    // 订正（2026-09-22）：这里原本把计数变量名也钉进去了（… : profilePosts.length）。
+    // 在制的个人主页把 hub 计数换成 personalHubPosts（排除 TARGETED 帖文）——
+    // 契约没变、变量名变了，所以改成钉**三元形状**：failed → undefined，
+    // 冒号右边是某个集合的长度（不是字面量 0）。
+    expect(meCode).toMatch(/posts: profilePostsState === "failed" \? undefined : [A-Za-z_$][A-Za-z0-9_$]*\.length/);
     expect(meCode).toContain("不是你没有动态");
     expect(meCode).toContain("setProfilePostsReload((n) => n + 1)");
     // 重试要真的能重跑 effect：reload 计数必须在依赖里。

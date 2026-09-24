@@ -78,6 +78,9 @@ func mediaAssetInfo(asset MediaAsset, variants []MediaVariant, svc *Service) loc
 		Width: asset.Width, Height: asset.Height, DurationMs: asset.DurationMs, Animated: asset.Animated,
 		ProcessingStatus: asset.ProcessingStatus, ModerationStatus: asset.ModerationStatus,
 		VisibilityClass: asset.VisibilityClass, DominantColorHex: asset.DominantColorHex,
+		// LC-06：这一跳以前是缺的 —— 资产级 AI 溯源在库里，但没有任何读路径
+		// 把它带出 media 包，所以客户端永远看不到「这张图是 AI 生成的」。
+		AIGenerationSource: asset.AIGenerationSource,
 	}
 	if svc.AssetThumbnailPresent(asset) {
 		info.ThumbnailURL = asset.ThumbnailURL

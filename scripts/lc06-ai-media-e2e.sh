@@ -4,25 +4,37 @@
 # against a LIVE server. Run after the server is up
 # (e.g. via the gate g3 runner).
 #
-# What it covers:
-#   1. POST /v1/ai/personas creates a persona row.
-#   2. POST /v1/ai/personas/{id}/consents grants a likeness
-#      consent. GET /v1/ai/personas/{id}/consents?subjectId=...
-#      returns 200 with the live consent.
-#   3. CreateMediaAsset with aiGenerationSource=USER_UPLOADED
-#      is accepted; the asset is AIGenerated=false.
-#   4. CreateMediaAsset with aiGenerationSource=AI_PERSONA but
-#      no personaId is rejected with AI_PERSONA_ID_REQUIRED.
-#   5. CreateMediaAsset with aiGenerationSource=GARBAGE is
-#      rejected with INVALID_AI_GENERATION_SOURCE.
-#   6. CreateMediaAsset + MarkMediaReady cycle for an
-#      AI_PERSONA asset without a live consent is rejected at
-#      MarkMediaReady with AI_LIKENESS_CONSENT_MISSING
-#      (LC-07 fail-closed).
-#   7. Same scenario but with a granted consent succeeds;
-#      the asset's likenessConsentId is stamped.
-#   8. CREATIVE persona + AI_PERSONA is published without a
-#      consent (no real-person likeness).
+# 本脚本覆盖的是 **create 边界 + persona / consent 的 HTTP 面**：
+#   0a. CreateAnonymousSession 建一个带年龄断言的账号（persona 的 owner 用它）。
+#   1.  POST /v1/ai/personas creates a persona row.
+#   2.  POST /v1/ai/personas/{id}/consents grants a likeness
+#       consent. GET /v1/ai/personas/{id}/consents?subjectId=...
+#       returns 200 with the live consent.
+#   3.  GET consents for a subject with none → 204.
+#   5.  CreateMediaAsset with aiGenerationSource=USER_UPLOADED
+#       is accepted; the asset is AIGenerated=false.
+#   6.  CreateMediaAsset with aiGenerationSource=AI_PERSONA but
+#       no personaId is rejected with AI_PERSONA_ID_REQUIRED.
+#   7.  CreateMediaAsset with aiGenerationSource=GARBAGE is
+#       rejected with INVALID_AI_GENERATION_SOURCE.
+#   8-10. CreateMediaAsset with AI_PERSONA (+ persona + subject,
+#       ± consent, CREATIVE) is accepted at create — the gate
+#       fires later, at MarkMediaReady.
+#
+# 本脚本**不覆盖** MarkMediaReady 上的两道 fail-closed 闸门
+# （AI_LABEL_MISSING / AI_LIKENESS_CONSENT_MISSING）：
+# MarkMediaReady 要求资产先在 PROCESSING，而把一行从 UPLOADING 推到
+# PROCESSING 需要走真实上传 + worker，脚本这一层做不到（见下面
+# envelope_mark_ready 附近的说明）。
+#
+# 2026-09-21 教训：这段「本脚本覆盖 6/7 两条」的旧注释是错的，而且正是
+# 这个错误让 P0 藏了很久 —— 闸门在 Postgres 路径上其实是死代码
+# （media.media_assets 当时没有 AI 溯源列，读回来永远是空值，比不过字面量
+# "UNKNOWN"），但没人去看，因为脚本注释说它已经覆盖了。
+# 那两道闸门的真实覆盖在：
+#   apps/api-go/internal/platform/postgres/media_ai_provenance_test.go
+#   （LC-06 / LC-07 在真库上的往返 + fail-closed 用例，走真实 schema）
+# 由 scripts/check-regression-contracts.sh 的 LC-06 / LC-07 钉强制执行。
 set -e
 BASE="${PROXY_API_BASE_URL:-http://127.0.0.1:4100}"
 TS=$(date +%s%N)
@@ -176,6 +188,16 @@ EOF
 # envelope_create_persona POSTs a CreatePersona command (we use the
 # HTTP API surface, not the command bus, because persona CRUD
 # lives outside the command bus for now).
+#
+# owner_id 必须是**真实带年龄断言的账号**，也就是上面那个匿名会话的
+# user_id —— 不能随便编一个。CreatePersona 里有 COMP-AI-MINOR-001 守卫
+# （internal/aipersona/personas.go:194）：它拿 OwnerID 去查
+# identity.user_age_assertions，查不到就 fail-closed 返回
+# "no age evidence on file for this account"。
+# 年龄断言是 CreateAnonymousSession / CreateSession 写的（identity/service.go:365），
+# 所以只有 user_id 有；像 "user_${TS}_subject" 这种拼出来的串库里根本没有，
+# 会以 create_failed 挂在第 1 步 —— 整个脚本再也走不到后面的用例。
+# subjectId 不受此限：它只是「这份 likeness 属于谁」，不需要年龄证据。
 envelope_create_persona() {
   local owner_id="$1"
   local display_name="$2"
@@ -225,7 +247,7 @@ envelope_has_consent() {
 
 echo
 echo "=== 1. POST /v1/ai/personas (USER_TWIN) ==="
-out=$(envelope_create_persona "user_${TS}_subject" "Alice Twin" "USER_TWIN" "Alice 的中文数字分身")
+out=$(envelope_create_persona "$user_id" "Alice Twin" "USER_TWIN" "Alice 的中文数字分身")
 echo "  resp: $out"
 persona_id=$(echo "$out" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 [ -n "$persona_id" ] || { echo "FAIL: persona id missing"; exit 1; }
@@ -258,9 +280,11 @@ echo "  resp: $out"
 outcome=$(echo "$out" | sed -n 's/.*"outcome":"\([^"]*\)".*/\1/p')
 [ "$outcome" = "ACCEPTED" ] || { echo "FAIL: expected ACCEPTED, got $outcome"; exit 1; }
 # The operationRef carries mediaAssetId; aiGenerated is on
-# the persisted asset and exercised by the unit test
-# TestLC06UserUploadedDefaultHasAIGeneratedFalse.
-echo "  OK: ACCEPTED (aiGenerated=false verified by unit test)"
+# the persisted asset and exercised by
+# platform/postgres/media_ai_provenance_test.go
+# (TestMediaProvenanceUserUploadedIsLabelledAndPublishes) on the
+# real schema, not only by the in-memory media unit tests.
+echo "  OK: ACCEPTED (aiGenerated=false verified against the real schema)"
 
 echo
 echo "=== 6. CreateMediaAsset with AI_PERSONA but no personaId ==="
@@ -289,17 +313,18 @@ echo "  OK: ACCEPTED with AI_PERSONA + persona + subject"
 echo
 echo "=== 9. CreateMediaAsset with AI_PERSONA but no consent (different persona) ==="
 # Build a fresh USER_TWIN persona that has no consent row.
-out=$(envelope_create_persona "user_${TS}_subject2" "Bob Twin" "USER_TWIN" "")
+# owner 仍然必须是真实账号（年龄断言）；没有同意的是 subject，不是 owner。
+out=$(envelope_create_persona "$user_id" "Bob Twin" "USER_TWIN" "")
 persona_id_no_consent=$(echo "$out" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 [ -n "$persona_id_no_consent" ] || { echo "FAIL: persona 2 id missing"; exit 1; }
 out=$(envelope_create_asset "asset_no_consent_${TS}" "IMAGE" "uploads/ai.png" "image/png" "AI_PERSONA" "$persona_id_no_consent" "user_${TS}_subject2")
 outcome=$(echo "$out" | sed -n 's/.*"outcome":"\([^"]*\)".*/\1/p')
 [ "$outcome" = "ACCEPTED" ] || { echo "FAIL: expected ACCEPTED at create, got $outcome"; exit 1; }
-echo "  OK: ACCEPTED at create (the gate fires at MarkMediaReady, covered by unit tests)"
+echo "  OK: ACCEPTED at create (the gate fires at MarkMediaReady — see platform/postgres/media_ai_provenance_test.go)"
 
 echo
 echo "=== 10. CreateMediaAsset with AI_PERSONA + CREATIVE persona (no consent needed) ==="
-out=$(envelope_create_persona "user_${TS}_biz" "Concierge 1" "CREATIVE" "")
+out=$(envelope_create_persona "$user_id" "Concierge 1" "CREATIVE" "")
 persona_id_creative=$(echo "$out" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 [ -n "$persona_id_creative" ] || { echo "FAIL: creative persona id missing"; exit 1; }
 out=$(envelope_create_asset "asset_creative_${TS}" "IMAGE" "uploads/ai.png" "image/png" "AI_PERSONA" "$persona_id_creative" "user_${TS}_biz")

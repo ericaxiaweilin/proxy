@@ -80,7 +80,7 @@ describe("RelationshipClient", () => {
         if (path.endsWith("/ListMyFriendships")) {
           return { status: 200, json: async () => envelope("ListMyFriendships", { type: "FriendshipCollection", id: "mine" }, {
             friendships: {
-              active: [{ userId: "user_bob", direction: "MUTUAL", state: "FRIEND", displayName: "Bob", city: "Hanoi", since: "2026-08-01T00:00:00Z" }],
+              active: [{ userId: "user_bob", direction: "MUTUAL", state: "FRIEND", displayName: "Bob", city: "Hanoi", avatarUrl: "/v1/media/thumb/ma_bob", since: "2026-08-01T00:00:00Z" }],
               pending: [{ userId: "user_carol", direction: "INCOMING", state: "PENDING", displayName: "Carol", city: "Saigon", since: "2026-09-01T00:00:00Z" }],
             },
           }) };
@@ -91,6 +91,7 @@ describe("RelationshipClient", () => {
     const payload = await client.listMyFriendships();
     expect(payload.active).toHaveLength(1);
     expect(payload.active[0]?.userId).toBe("user_bob");
+    expect(payload.active[0]?.avatarUrl).toBe("/v1/media/thumb/ma_bob");
     expect(payload.pending).toHaveLength(1);
     expect(payload.pending[0]?.direction).toBe("INCOMING");
   });
