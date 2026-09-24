@@ -319,6 +319,8 @@ commands:
     domain: LocalNet
   - command: ListPostReplies
     domain: Engagement
+  - command: ListPostsAtScene
+    domain: LocalNet
   - command: ListPostsByIds
     domain: LocalNet
   - command: ListPostsMentioning
