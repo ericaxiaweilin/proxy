@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 309 — 2026-09-24
+
+- **Moment 卡点击走目录流程**（SCENE-HOME-CARD-FLOW-001）：旧卡点击不再进详情浮层，
+  按动作找分类 entry，直接进场景目录（列表 → 单店详情），跟入口卡同一套；
+  该动作没有真实场景才回退旧详情。
+- 影响文件：`apps/mobile/src/components/scene-activity-discovery.tsx`。
+
 ## Revision 308 — 2026-09-24
 
 - **首页场景卡去心形挂家数**（SCENE-HOME-NO-HEART-001）：home 是粗类别入口，

@@ -401,6 +401,9 @@ export function SceneActivityDiscovery({
   // —— 这个 Moment 所属动作分类下真实场景的个数；0 就不挂（不摆「0 家」）。
   // 动作分类页里还是心形（那里是细览，收藏照旧）。
   const venueCountByAction = useMemo(() => new Map(entries.map((entry) => [entry.actionId, entry.count])), [entries]);
+  // SCENE-HOME-CARD-FLOW-001（2026-09-24，用户：「旧的卡片点击要保持和新版本卡片一样的流程」）：
+  // Moment 卡点击不再进旧详情浮层，直接走入口卡同一套 —— 按动作找分类 entry，进场景目录
+  // （列表 → 单店详情）。该动作没有真实场景（没 entry）才回退旧详情浮层。
   const renderMomentCard = (moment: MomentSeed, home = false): React.JSX.Element => {
     const live = liveSceneFor(moment.scene);
     const action = taxon(ACTIONS, moment.action);
@@ -409,7 +412,8 @@ export function SceneActivityDiscovery({
     const extraThemes = moment.themes.map((id) => taxon(THEMES, id));
     const hiddenCount = extraThemes.length + 2;
     const homeCount = home ? (venueCountByAction.get(actionMatchId(moment.action) ?? "") ?? 0) : 0;
-    return <Pressable accessibilityLabel={`Moment ${moment.title}`} key={moment.id} onPress={() => setDetail(moment)} style={styles.sceneCard}>
+    const directoryTarget = entries.find((entry) => entry.actionId === actionMatchId(moment.action));
+    return <Pressable accessibilityLabel={`Moment ${moment.title}`} key={moment.id} onPress={() => { if (directoryTarget) setDirectoryEntry(directoryTarget); else setDetail(moment); }} style={styles.sceneCard}>
       {absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) || networkSource("moments", moment.id) ? <Image contentFit="cover" source={(absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) ? { uri: absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl)! } : networkSource("moments", moment.id))!} style={styles.sceneCardPhoto} /> : <View style={[styles.photoPending, styles.sceneCardPhoto]} />}
       <Svg height="100%" pointerEvents="none" style={styles.sceneCardShade} width="100%">
         <Defs>
