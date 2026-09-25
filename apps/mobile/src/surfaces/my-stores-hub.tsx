@@ -1,6 +1,17 @@
 // STORE-HUB-001：我的店铺 hub（原型 deepseek_html_20260925_2ef163「我的店铺 · 推荐管理」）。
 // 列表 → 详情；推荐管理不复制 —— 入口跳现有 storerecmanage 路由（同一套 StoreRecommendationManage）。
 //
+// STORE-HUB-NAV-001（2026-09-25 修）：
+//   - **返回按钮归本组件所有**。以前 me.tsx 的 bdash 分支自己画一个「‹ 返回」（退出整页），
+//     本组件底部又画一个（同一个动作），详情页顶上再画一个（回列表）⇒ 详情页有两个返回，
+//     而用户会点的那个（最上面那个）直接把他踢出「我的店铺」。现在整个 hub 只有一条返回：
+//     列表态 = 退出，详情态 = 回列表。me.tsx 那一层不再画 back / title。
+//   - **建店入口**。推荐管理在 ACCEPTED 态给的 CTA 就是「去我的店铺建店」，落点正是这一页；
+//     而这一页以前没有任何建店动作 ⇒ 那条 CTA 是死路（与 merchant-storefront 里
+//     「两处空态互相指'去别处建'，实际无入口」是同一个 bug）。现在空态和页脚都有建店，
+//     落到 merchantstorefront（全 App 唯一的建店流程：账号 + 首店一次建完）。
+//   - 空态文案不再说「推荐的店被签约后会自动进来」—— 那跟服务端语义相反（采纳 ≠ 店铺已存在）。
+//
 // 诚实边界（都是这轮后端刚补的，没有就砍，没有假数）：
 //   - 概览/卡片/详情的单数/满意率/复购/最近接单全部来自 GetStoreOrderStats（只数
 //     COMPLETED 归因单；老订单没归因，从 0 开始攒，不回填）；
@@ -20,6 +31,12 @@ import {
   coverForStore, filterHubShops, formatHoursLines, formatMonthDay,
   satisfactionRate, satisfactionRateText, satisfactionText,
 } from "../my-store-hub-model";
+import { SUB_PAGE_CONTENT } from "./me-sub-pages";
+
+// 标题只有一处出处（SUB_PAGE_CONTENT.bdash）—— 以前这一屏同时存在四个名字：
+// 磁贴「我的店铺」/ 磁贴副文案「企业 · 经营 · 工作台」/ 页内标题「企业 / 店铺资料」/
+// 本组件的链接行「店铺资料与二维码」。
+const HUB_TITLE = SUB_PAGE_CONTENT.bdash?.title ?? "我的店铺";
 
 type HubShop = {
   store: BusinessStoreWire;
@@ -29,12 +46,14 @@ type HubShop = {
   statsFailed: boolean;
 };
 
-export function MyStoresHub({ business, fulfillment, profile, onOpenRecommend, onOpenStoreProfile, onBack }: {
+export function MyStoresHub({ business, fulfillment, profile, onOpenRecommend, onOpenStoreProfile, onOpenStoreCreate, onBack }: {
   business: BusinessClient;
   fulfillment: FulfillmentClient;
   profile: ProfileClient;
   onOpenRecommend: () => void;
   onOpenStoreProfile: () => void;
+  /** STORE-HUB-NAV-001：建店 / 添加门店 → merchantstorefront（唯一的建店流程）。 */
+  onOpenStoreCreate: () => void;
   onBack: () => void;
 }): React.JSX.Element {
   const [shops, setShops] = useState<HubShop[] | null>(null);
@@ -151,17 +170,27 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenRecommend, o
   }, []);
 
   if (selected) {
-    return <StoreDetail
-      row={selected}
-      copied={copied}
-      requesterNames={requesterNames}
-      onBack={() => { setSelectedId(undefined); setCopied(false); }}
-      onCopyAddress={() => void copyAddress(selected.store.address)}
-    />;
+    return (
+      <View>
+        <HubNav
+          backLabel="‹ 返回店铺列表"
+          onBack={() => { setSelectedId(undefined); setCopied(false); }}
+          title={selected.store.name}
+        />
+        <StoreDetail
+          row={selected}
+          copied={copied}
+          requesterNames={requesterNames}
+          onCopyAddress={() => void copyAddress(selected.store.address)}
+        />
+      </View>
+    );
   }
 
   return (
     <View>
+      <HubNav backLabel="‹ 返回" onBack={onBack} title={HUB_TITLE} />
+
       <View style={s.overview}>
         <View style={s.ovRow}>
           <View style={s.ovItem}><Text selectable style={s.ovNum}>{overview.count}</Text><Text selectable style={s.ovLabel}>合作店铺</Text></View>
@@ -197,8 +226,17 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenRecommend, o
         loadError ? <Text selectable style={s.error}>{loadError}</Text> : <ProxyLoading label="正在读取合作店铺" tone="muted" />
       ) : visibleRows.length === 0 ? (
         <View style={s.empty}>
-          <Text selectable style={s.emptyTitle}>{shops.length === 0 ? "还没有合作店铺" : "没有找到店铺"}</Text>
-          <Text selectable style={s.emptyText}>{shops.length === 0 ? "推荐的店被签约后会自动进来，也可以直接去推荐新店。" : "换个关键词或切回「全部」试试。"}</Text>
+          <Text selectable style={s.emptyTitle}>{shops.length === 0 ? "还没有你的店" : "没有找到店铺"}</Text>
+          <Text selectable style={s.emptyText}>
+            {shops.length === 0
+              ? "推荐被采纳不等于店铺已存在 —— 要有人真的把店建出来才算接入。现在建一家，或先去「推荐管理」推荐新店。"
+              : "换个关键词或切回「全部」试试。"}
+          </Text>
+          {shops.length === 0 ? (
+            <Pressable accessibilityLabel="建店" onPress={onOpenStoreCreate} style={s.emptyCta}>
+              <Text selectable style={s.emptyCtaText}>建店</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : (
         visibleRows.map((row) => {
@@ -227,6 +265,10 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenRecommend, o
       )}
       {listFailed ? <Text selectable style={s.error}>部分店铺没读出来，下拉刷一下试试。</Text> : null}
 
+      <Pressable accessibilityLabel="建店或添加门店" onPress={onOpenStoreCreate} style={s.linkRow}>
+        <Text selectable style={s.linkText}>建店 / 添加门店</Text>
+        <Text selectable style={s.arrow}>›</Text>
+      </Pressable>
       <Pressable accessibilityLabel="推荐管理" onPress={onOpenRecommend} style={s.linkRow}>
         <Text selectable style={s.linkText}>推荐管理 · 我推荐的店和新店推荐</Text>
         <Text selectable style={s.arrow}>›</Text>
@@ -235,18 +277,30 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenRecommend, o
         <Text selectable style={s.linkText}>店铺资料与二维码</Text>
         <Text selectable style={s.arrow}>›</Text>
       </Pressable>
-      <Pressable accessibilityLabel="返回" onPress={onBack} style={s.backRow}>
-        <Text selectable style={s.backText}>‹ 返回</Text>
-      </Pressable>
     </View>
   );
 }
 
-function StoreDetail({ row, copied, requesterNames, onBack, onCopyAddress }: {
+// STORE-HUB-NAV-001：全 hub 唯一的返回条。列表态退到「我的」，详情态回列表。
+function HubNav({ backLabel, onBack, title }: {
+  backLabel: string;
+  onBack: () => void;
+  title: string;
+}): React.JSX.Element {
+  return (
+    <View>
+      <Pressable accessibilityLabel={backLabel} onPress={onBack} style={s.backRow}>
+        <Text selectable style={s.backText}>{backLabel}</Text>
+      </Pressable>
+      <Text selectable style={s.navTitle}>{title}</Text>
+    </View>
+  );
+}
+
+function StoreDetail({ row, copied, requesterNames, onCopyAddress }: {
   row: HubShop;
   copied: boolean;
   requesterNames: ReadonlyMap<string, string>;
-  onBack: () => void;
   onCopyAddress: () => void;
 }): React.JSX.Element {
   const cover = coverForStore(row.store.category?.trim() || row.store.name);
@@ -268,9 +322,6 @@ function StoreDetail({ row, copied, requesterNames, onBack, onCopyAddress }: {
 
   return (
     <View>
-      <Pressable accessibilityLabel="返回店铺列表" onPress={onBack} style={s.backRow}>
-        <Text selectable style={s.backText}>‹ 返回</Text>
-      </Pressable>
       <View style={s.hero}>
         <View style={[s.heroCover, { backgroundColor: cover.from }]}>
           <Text selectable style={[s.heroCoverText, { color: cover.ink }]}>{row.store.name.slice(0, 1)}</Text>
@@ -372,6 +423,8 @@ const s = StyleSheet.create({
   cardTagMuted: { color: color.muted, fontSize: 11, fontWeight: "700" },
   arrow: { color: color.muted, fontSize: 18, fontWeight: "800" },
   empty: { alignItems: "center", gap: 6, paddingVertical: 28 },
+  emptyCta: { alignItems: "center", alignSelf: "stretch", backgroundColor: color.ink, borderRadius: 14, marginTop: 8, paddingVertical: 13 },
+  emptyCtaText: { color: color.white, fontSize: 14, fontWeight: "900" },
   emptyTitle: { color: color.ink, fontSize: 14, fontWeight: "900" },
   emptyText: { color: color.muted, fontSize: 12, fontWeight: "700", textAlign: "center" },
   error: { color: color.error, fontSize: 12, fontWeight: "700", marginTop: 8 },
@@ -379,6 +432,7 @@ const s = StyleSheet.create({
   linkText: { color: color.ink, fontSize: 13, fontWeight: "800" },
   backRow: { alignSelf: "flex-start", paddingVertical: 6 },
   backText: { color: color.magenta, fontSize: 13, fontWeight: "800" },
+  navTitle: { color: color.ink, fontSize: 18, fontWeight: "800", marginBottom: 10 },
   hero: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 14, marginBottom: 14, padding: 16 },
   heroCover: { alignItems: "center", borderRadius: 14, height: 64, justifyContent: "center", width: 64 },
   heroCoverText: { fontSize: 28, fontWeight: "900" },

@@ -299,7 +299,10 @@ const BUSINESS_ME: PersonaConfig = {
   identityActionSwitch: false,
   contextLineLabel: "当前使用 · Bonsaidon",
   contextLineAction: "切换身份",
-  settingsRow: { icon: "P", label: "Proxy 中心", desc: "应用状态、主体权限与业务工作区", route: "bdash" },
+  // STORE-HUB-NAV-001：bdash 已经改成「我的店铺」hub，这条「Proxy 中心」（应用状态 /
+  // 主体权限 / 业务工作区）不能跟着落到店铺列表上 —— 它的原目的地是企业 / 店铺资料
+  // （企业主体那几行就是「主体权限」），跟着搬到 bdashprofile。
+  settingsRow: { icon: "P", label: "Proxy 中心", desc: "应用状态、主体权限与业务工作区", route: "bdashprofile" },
   sections: [
     {
       title: "关系",
@@ -2666,14 +2669,13 @@ export function MeSurface({
 
     // STORE-HUB-001：bdash 换成我的店铺 hub（列表 → 详情，推荐走 storerecmanage）。
     // 原来的企业 / 店铺资料（门店名片二维码等）原样搬到 bdashprofile，hub 里留入口。
+    // STORE-HUB-NAV-001：这一层**不再画返回和标题** —— 画了就有两个返回，而且详情页
+    // 顶上那个（me.tsx 的）是「退出整页」，用户以为回列表、结果被踢出「我的店铺」。
+    // 返回/标题归 MyStoresHub 自己管（列表态退出、详情态回列表）。
     if (subPage.route === "bdash") {
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
-            </Pressable>
-            <Text selectable style={styles.subPageTitle}>我的店铺</Text>
             {business && profileClient ? (
               <MyStoresHub
                 business={business}
@@ -2681,6 +2683,7 @@ export function MeSurface({
                 profile={profileClient}
                 onOpenRecommend={() => openSubPage("storerecmanage")}
                 onOpenStoreProfile={() => openSubPage("bdashprofile")}
+                onOpenStoreCreate={() => openSubPage("merchantstorefront")}
                 onBack={() => setSubPage(undefined)}
               />
             ) : (
@@ -2730,7 +2733,7 @@ export function MeSurface({
                 ? "扫这张码会把门店存成联系人（标准 vCard 名片），任何手机的相机都能扫。点下方按钮打开可放大、存图、分享的完整页面。"
                 : "还没有接入店铺主体，这里先放你的个人名片。点下方按钮可以放大、存图、分享。"}
               actionLabel={merchantCard ? "打开商家二维码" : "打开我的二维码"}
-              onAction={() => openSubPage("personalqr", { backRoute: "bdash", ...(merchantId ? { qrStoreId: merchantId, qrTitle: "商家二维码" } : {}) })}
+              onAction={() => openSubPage("personalqr", { backRoute: "bdashprofile", ...(merchantId ? { qrStoreId: merchantId, qrTitle: "商家二维码" } : {}) })}
               qrValue={merchantQrValue ?? undefined}
             />
 
