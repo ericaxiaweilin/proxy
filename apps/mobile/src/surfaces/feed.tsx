@@ -619,6 +619,23 @@ export function FeedSurface({
       setMedia(read.media);
       setNextCursor(read.nextCursor);
       setHasMore(read.hasMore);
+      // FEED-OWN-PIN-001：自己的帖子必须可见 —— 首页 25 条装不下时（被新帖顶到 30+ 位），
+      // 光靠 feedWeightFor 置顶没用（它只排已加载的）。首页一条自己的都没有，就把
+      // listMyFeedPosts 并进来（去重），置顶逻辑照旧生效。翻页/搜索不重复拉。
+      if (!searching && viewerAccountId && !read.posts.some((post) => isOwnPost(post))) {
+        try {
+          const mine = await localNet.listMyFeedPosts();
+          if (mine.posts.length > 0) {
+            const known = new Set(read.posts.map((post) => post.postId));
+            const missing = mine.posts.filter((post) => !known.has(post.postId));
+            if (missing.length > 0) {
+              setPosts([...missing, ...read.posts]);
+              setMedia((prev) => ({ ...prev, ...mine.media }));
+              void hydrateEngagement(missing);
+            }
+          }
+        } catch { /* 自己的帖子拉不到就不并，不挡正常流 */ }
+      }
       feedRetryAttemptRef.current = 0;
 	  setPhase("READY");
 	  void hydrateEngagement(read.posts);

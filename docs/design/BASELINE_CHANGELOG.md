@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 316 — 2026-09-24
+
+- **自己的帖子必须可见**（FEED-OWN-PIN-001）：首页 25 条装不下时自己的帖被埋
+  （实测排 33 位开外），feedWeightFor 置顶只排已加载的，够不着。首载首页没有
+  自己的帖，就把 listMyFeedPosts 并进来（去重），置顶照旧生效；翻页/搜索不重复拉。
+- 影响文件：`apps/mobile/src/surfaces/feed.tsx`（peer 同文件未提交改动未碰，仅取己方 1 hunk）。
+
 ## Revision 315 — 2026-09-25
 
 - **「我的 → 企业 / 店铺」整合成 2 个入口磁贴**（STORE-TILES-001）：按产品稿把原来
