@@ -38,6 +38,8 @@ import { gridToLatLng } from "../components/location-options";
 import { clusterPins } from "../cluster-pins";
 import { ProxyIcon } from "../components/proxy-icon";
 import { ProxyTabs, ProxyLoading } from "../components/proxy-foundation";
+import { sessionAuthClient } from "../native-clients";
+import { fetchProviderApplication } from "../provider-application-client";
 import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 import { color, shadows } from "../theme";
 import { R37OpportunityCard, SAMPLE_SCENE_IMAGE, TYPE_LABEL, type OpportunityType, inferOpportunityTypeForFilter } from "./r37-opportunity-card";
@@ -131,7 +133,8 @@ export function MarketSurface({
   onOpenRealityScene,
   onChromeVisibilityChange,
   bottomNavVisible,
-  userCenter
+  userCenter,
+  onRequireKYC
 }: {
   activities: ActivityClient;
   marketplace: MarketplaceClient;
@@ -148,6 +151,8 @@ export function MarketSurface({
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
+  // ORDER-APPLY-KYC-GATE-001：没过 KYC 点接单 → 弹提示 → 跳 KYC 页。壳接线（切 ME + 直达 providerapply）。
+  onRequireKYC?: (() => void) | undefined;
   // MARKET-MAP-USER-CENTER-001: 壳已经有活的位置（设备跟随/CUSTOM/DEVICE），
   // 地图初开就该以人为中心 —— 而不是先摆河内、非要点一下按钮。
   // 缺省 = 没接线：退回订单 centroid / 河内（原来唯一的样子），不编位置。
@@ -188,6 +193,8 @@ export function MarketSurface({
   const [interestedIn, setInterestedIn] = useState<ReadonlySet<string>>(new Set());
   const [joinedIds, setJoinedIds] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  // ORDER-APPLY-KYC-GATE-001：没过 KYC 的接单提示。出 KYC 页回来重新点（状态重读），不缓存 gate。
+  const [kycGateOpen, setKycGateOpen] = useState(false);
   const [activityNotice, setActivityNotice] = useState<string | undefined>(undefined);
   const [oppDetail, setOppDetail] = useState<MarketOpportunity | null>(null);
   const [oppQuoteMode, setOppQuoteMode] = useState<"budget" | "standard" | "premium" | "custom">("standard");
@@ -311,6 +318,12 @@ export function MarketSurface({
 
   async function applyToOpportunity(opportunity: MarketOpportunity, quote: string): Promise<void> {
     if (busy || opportunity.appliedByViewer) return;
+    // ORDER-APPLY-KYC-GATE-001：先读 KYC 状态，没过直接弹提示，不走到服务端。
+    // 读失败不断流 —— 服务端同样拦（KYC_REQUIRED），那里会报错。
+    try {
+      const view = await fetchProviderApplication(sessionAuthClient);
+      if (view.application?.status !== "APPROVED") { setKycGateOpen(true); return; }
+    } catch { /* fall through to server-side gate */ }
     setBusy(true);
     try {
       await marketplace.apply(opportunity.id, quote, opportunity.skills);
@@ -628,6 +641,24 @@ export function MarketSurface({
             </Pressable>
             <Pressable accessibilityLabel="创建活动" onPress={openActivityPublisher} style={styles.publishMenuSecondary}>
               <ProxyIcon color={color.ink} name="star" size={20} /><Text selectable style={styles.publishMenuSecondaryText}>创建活动</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+    {/* ORDER-APPLY-KYC-GATE-001：没过 KYC 点接单的提示 —— 去 KYC 页。出 KYC 页回来重新点。 */}
+    <Modal animationType="fade" onRequestClose={() => setKycGateOpen(false)} transparent visible={kycGateOpen}>
+      <Pressable accessibilityLabel="关闭KYC提示" onPress={() => setKycGateOpen(false)} style={styles.publishMenuBackdrop}>
+        <Pressable accessibilityLabel="KYC提示面板" onPress={() => undefined} style={[styles.publishMenuSheet, { marginBottom: bottomNavVisible === false ? 24 : 104 }]}>
+          <View style={styles.publishMenuGrab} />
+          <Text selectable style={styles.publishMenuTitle}>先完成KYC认证</Text>
+          <Text selectable style={styles.publishMenuHint}>接单需要实名 + 证件 + 履约条款审核，通过后开放接单和 AI 分身。</Text>
+          <View style={styles.publishMenu}>
+            <Pressable accessibilityLabel="去KYC认证" onPress={() => { setKycGateOpen(false); onRequireKYC?.(); }} style={styles.publishMenuPrimary}>
+              <Text selectable style={styles.publishMenuPrimaryText}>去KYC认证</Text>
+            </Pressable>
+            <Pressable accessibilityLabel="稍后再说" onPress={() => setKycGateOpen(false)} style={styles.publishMenuSecondary}>
+              <Text selectable style={styles.publishMenuSecondaryText}>稍后再说</Text>
             </Pressable>
           </View>
         </Pressable>

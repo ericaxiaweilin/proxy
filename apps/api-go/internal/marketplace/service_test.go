@@ -452,7 +452,38 @@ func TestHaversineKnownDistances(t *testing.T) {
 	}
 }
 
-// R16.x: MONEYFLOW-001 — AI 主体不能在机会上发起“接单”动作。
+// ORDER-APPLY-KYC-GATE-001：报名必须 KYC 通过。checker 没接 = 老行为（放行）；
+// 接了以后，没过 / 查询出错一律 KYC_REQUIRED。
+func TestMarketApplyRequiresKYCWhenCheckerSet(t *testing.T) {
+	newService := func(check func(ctx context.Context, userAccountID string) (bool, error)) *Service {
+		s := New()
+		s.SeedDefaults()
+		if check != nil {
+			s.SetOrderPermission(check)
+		}
+		return s
+	}
+	apply := func(s *Service) command.Result {
+		return s.HandleContext(t.Context(), marketEnvelope("ApplyToMarketOpportunity", "creator", map[string]any{
+			"opportunityId": "biz_negotiation", "quote": "1,000,000₫", "scope": "中文",
+		}))
+	}
+	if out := apply(newService(nil)); out.Outcome != "ACCEPTED" {
+		t.Fatalf("unwired checker keeps legacy accept, got %+v", out)
+	}
+	deny := func(context.Context, string) (bool, error) { return false, nil }
+	if out := apply(newService(deny)); out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "KYC_REQUIRED" {
+		t.Fatalf("denied KYC must be KYC_REQUIRED, got %+v", out)
+	}
+	broken := func(context.Context, string) (bool, error) { return false, errors.New("kyc store down") }
+	if out := apply(newService(broken)); out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "KYC_REQUIRED" {
+		t.Fatalf("checker error must be KYC_REQUIRED, got %+v", out)
+	}
+	allow := func(context.Context, string) (bool, error) { return true, nil }
+	if out := apply(newService(allow)); out.Outcome != "ACCEPTED" {
+		t.Fatalf("approved KYC must accept, got %+v", out)
+	}
+}
 // 服务器应在 ApplyToMarketOpportunity 边界返回 AI_ACTION_FORBIDDEN。
 // 这条 tripwire 保证未来重构不会默默打开“AI 助手调用接单”的能力。
 func TestMarketApplyIsForbiddenForAIActor(t *testing.T) {

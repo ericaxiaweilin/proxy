@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 313 — 2026-09-24
+
+- **市场接单要 KYC**（ORDER-APPLY-KYC-GATE-001）：没过 KYC 点「我想接」→ 弹
+  「先完成KYC认证」→「去KYC认证」切「我的」直达 KYC 页；回来重进重新读状态。
+  服务端 `ApplyToMarketOpportunity` 同样拦（KYC_REQUIRED，没接 checker 的测试 /
+  无库环境保持老行为）。R3 那 22 条是 peer 未提交的 my-benefits.tsx，本次不动。
+- 影响文件：`apps/mobile/src/surfaces/market.tsx`、`apps/mobile/src/shell/app-shell.tsx`
+  （+ marketplace service/test、main.go 接线同改）。
+
 ## Revision 312 — 2026-09-24
 
 - **KYC 入口标露馅**（KYC-LOGO-003，用户：「橙黄包括白矩形 包 logo 要么白 要么橙黄 尺寸没对齐露馅了」）：KYC 标是不透明白底 PNG，

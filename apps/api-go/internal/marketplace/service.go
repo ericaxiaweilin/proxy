@@ -30,6 +30,9 @@ import (
 type Service struct {
 	repository   Repository
 	orderCreator OrderCreator // nil = legacy behaviour (only stamp orderRef)
+	// orderPermission：接单报名只对有接单权限（KYC 通过）的人开（ORDER-APPLY-KYC-GATE-001）。
+	// 不接 = 老行为（测试 / 无库环境）；生产在 main.go 必须接。
+	orderPermission func(ctx context.Context, userAccountID string) (bool, error)
 	// authorNames resolves PERSON opportunity owner names from the verified
 	// account profile (PROFILE-READ-001). Nil = legacy unwired behaviour.
 	authorNames authorNameResolver
@@ -73,7 +76,11 @@ type OrderRecord struct {
 	Scenario string `json:"scenario,omitempty"`
 }
 
-// SetOrderCreator wires the fulfillment-backed order creator.
+// SetOrderPermission 接上「有没有接单权限」的查询（ORDER-APPLY-KYC-GATE-001）：没有就报 KYC_REQUIRED。
+// 不接 = 老行为（测试 / 无库环境）；生产在 main.go 必须接。
+func (s *Service) SetOrderPermission(check func(ctx context.Context, userAccountID string) (bool, error)) {
+	s.orderPermission = check
+}
 // Production code in cmd/api/main.go calls this once at boot; tests
 // can leave it nil to exercise the legacy path.
 func (s *Service) SetOrderCreator(c OrderCreator) { s.orderCreator = c }
@@ -394,6 +401,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		// AIBOUND-001: 同上，报名必须 USER 主体。
 		if e.Actor.Type != "USER" || e.Actor.ID == "" {
 			return command.Rejected(e, "MARKET_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "market.actor_required", nil)
+		}
+		// ORDER-APPLY-KYC-GATE-001：报名必须 KYC 通过。没接 checker（测试 / 无库）= 老行为。
+		if s.orderPermission != nil {
+			if ok, err := s.orderPermission(ctx, e.Actor.ID); err != nil || !ok {
+				return rejected(e, "KYC_REQUIRED", "market.kyc_required")
+			}
 		}
 		id, _ := e.Payload["opportunityId"].(string)
 		quote, _ := e.Payload["quote"].(string)

@@ -551,6 +551,8 @@ func main() {
 		// ORDER-PERMISSION-TWIN-001：AI 分身（建分身 / 模型读本人照片 / 代回复）只对有接单权限的人开。
 		server.OrderPermission = server.ProviderApps.Granted
 		conversationService.SetOrderPermission(server.ProviderApps.Granted)
+		// ORDER-APPLY-KYC-GATE-001：市场报名同样只对 KYC 通过的人开（没过驳回 KYC_REQUIRED）。
+		marketplaceService.SetOrderPermission(server.ProviderApps.Granted)
 	}
 	if pool != nil {
 		server.UserModel = usermodel.NewService(postgres.NewUserModelRepository(pool), modelStack)

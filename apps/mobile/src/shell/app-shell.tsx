@@ -921,6 +921,8 @@ export function AppShell({
               onChromeVisibilityChange={setFeedChromeVisible}
               bottomNavVisible={isNavVisible}
               userCenter={sceneMapOrigin ? { lat: sceneMapOrigin.latitude, lng: sceneMapOrigin.longitude } : undefined}
+              // ORDER-APPLY-KYC-GATE-001：市场接单没过 KYC → 切「我的」直达 KYC认证。
+              onRequireKYC={() => { setTab("ME"); setMeOpenSubPage(meSubPage("providerapply") ?? undefined); }}
             />
         ) : tab === "FEED" ? (
           feedChatAuthor ? (
@@ -1021,6 +1023,7 @@ export function AppShell({
                 : {})}
               onOpenSwitcher={openContextSwitcher}
               onOpenFeed={() => selectTab("FEED")}
+              onOpenMarket={() => selectTab("MARKET")}
               onOpenVouchers={() => setVoucherOpen(true)}
               onOpenRealitySceneMap={() => { setRealitySceneSelection(undefined); setRealitySceneOpen(true); }}
               onExperienceAction={executeExperienceAction}
