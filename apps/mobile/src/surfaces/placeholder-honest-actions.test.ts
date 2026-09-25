@@ -253,7 +253,8 @@ describe("PLACEHOLDER-002 every chain runs to completion", () => {
     expect(composer).toContain("replyPerm,");
     expect(feed).toContain("customFeedTokens");
     expect(feed).toContain("readFeedPrefs");
-    expect(feed).toContain("feedWeightFor");
+    // FEED-TIME-SORT-001：权重排序已下线 —— feed 消费偏好的是 scope/muted/
+    // 自定频道（过滤），排序只按创建时间倒序。feedWeightFor 已删除。
     // FEED-POST-CLEAN-001：这里原本钉 `setSearchOpen(true)` —— 那个字面量只存在于
     // 帖子卡底部「按这个想法找同行」按钮的 onPress 里，而那两个按钮按产品要求已
     // 全部移除（所有帖文一致、保持清爽）。钉的**意图**是「feed 的搜索是真接线的」，

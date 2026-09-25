@@ -171,42 +171,10 @@ export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <Text selectable style={styles.title}>我的推荐</Text>
-      <Text selectable style={styles.sub}>你可以直接告诉 Proxy 多看什么、少看什么。搜索和明确需求仍然优先。</Text>
+      <Text selectable style={styles.sub}>时间线按时间排序；这里只管时间范围和屏蔽。</Text>
 
-      <View style={styles.algoCard}>
-        <Text selectable style={styles.algoTitle}>直接训练算法 — Your Algo 对话版</Text>
-        <TextInput value={algoInput} onChangeText={setAlgoInput} placeholder="例：最近一个月多给我看河内创业活动，摄影多一点，兼职少一点" placeholderTextColor={color.muted} style={styles.algoInput} multiline />
-        <Pressable
-          onPress={() => {
-            if (!algoInput.trim()) return;
-            setAlgoApplied(algoInput.trim());
-            const t = algoInput.toLowerCase();
-            if (t.includes("摄影")) setWeights((p) => ({ ...p, people: Math.min(100, (p.people ?? 50) + 20) }));
-            if (t.includes("创业")) setWeights((p) => ({ ...p, intelligence: Math.min(100, (p.intelligence ?? 50) + 20) }));
-            if (t.includes("商业") && t.includes("少")) setWeights((p) => ({ ...p, commercial: Math.max(0, (p.commercial ?? 50) - 20) }));
-            setAlgoInput("");
-          }}
-          style={[styles.algoBtn, !algoInput.trim() && styles.disabled]}
-        >
-          <Text selectable style={styles.algoBtnText}>应用到推荐 · {scope === "7D" ? "7 天" : scope === "30D" ? "30 天" : "长期"}</Text>
-        </Pressable>
-        {algoApplied ? <Text selectable style={styles.algoApplied}>已应用：{algoApplied}</Text> : null}
-        <Text selectable style={styles.algoHint}>试试：多给我摄影和本地活动，少一点商业内容，持续一周 / 最近想认识做产品的人</Text>
-      </View>
-
-      {/* 权重卡片 — 每行 3 列：标签 + slider + 数值 */}
-      <View style={styles.card}>
-        {FEED_ROWS.map(([key, label]) => (
-          <View key={key} style={styles.prefRow}>
-            <Text selectable style={styles.prefLabel}>{label}</Text>
-            <Slider
-              value={weights[key] ?? 50}
-              onValueChange={(v) => setWeights((prev) => ({ ...prev, [key]: v }))}
-            />
-            <Text selectable style={styles.prefValue}>{weights[key] ?? 50}</Text>
-          </View>
-        ))}
-      </View>
+      {/* FEED-TIME-SORT-001：权重排序已下线 —— 算法对话卡和权重滑杆整块隐藏，
+          免得写着"应用到推荐"实际什么都不影响。时间范围 + 屏蔽照常工作。 */}
 
       {/* 时间范围 */}
       <Text selectable style={styles.sectionTitle}>暂时调整多久？</Text>

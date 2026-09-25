@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 320 — 2026-09-25
+
+- **时间线按时间排序**（FEED-TIME-SORT-001）：公共流把测试账户帖钉最上面 ——
+  自己的帖子加分（OWN-POST-TOP-001）+ 类目权重重排 + 我上轮的首屏合并全下掉，
+  可见列表只按创建时间倒序。偏好页权重滑杆/算法对话卡同步隐藏（不再谎称影响排序），
+  时间范围 + 屏蔽照常。刚发的（谁的都一样）自然在上。
+- 影响文件：`apps/mobile/src/surfaces/feed.tsx` 等 4 文件
+  （peer 同文件未提交改动未碰；facet 误暂存已还原）。
+
 ## Revision 319 — 2026-09-25
 
 - **我的店铺 hub 落 bdash**（STORE-HUB-001，前端轮）：原型 2ef163 的列表 + 详情，

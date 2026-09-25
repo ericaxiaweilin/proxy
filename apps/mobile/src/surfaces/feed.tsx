@@ -619,23 +619,6 @@ export function FeedSurface({
       setMedia(read.media);
       setNextCursor(read.nextCursor);
       setHasMore(read.hasMore);
-      // FEED-OWN-PIN-001：自己的帖子必须可见 —— 首页 25 条装不下时（被新帖顶到 30+ 位），
-      // 光靠 feedWeightFor 置顶没用（它只排已加载的）。首页一条自己的都没有，就把
-      // listMyFeedPosts 并进来（去重），置顶逻辑照旧生效。翻页/搜索不重复拉。
-      if (!searching && viewerAccountId && !read.posts.some((post) => isOwnPost(post))) {
-        try {
-          const mine = await localNet.listMyFeedPosts();
-          if (mine.posts.length > 0) {
-            const known = new Set(read.posts.map((post) => post.postId));
-            const missing = mine.posts.filter((post) => !known.has(post.postId));
-            if (missing.length > 0) {
-              setPosts([...missing, ...read.posts]);
-              setMedia((prev) => ({ ...prev, ...mine.media }));
-              void hydrateEngagement(missing);
-            }
-          }
-        } catch { /* 自己的帖子拉不到就不并，不挡正常流 */ }
-      }
       feedRetryAttemptRef.current = 0;
 	  setPhase("READY");
 	  void hydrateEngagement(read.posts);
@@ -1110,36 +1093,15 @@ export function FeedSurface({
     return posts.find((candidate) => candidate.postId === ref.contextId);
   }
 
-  // 偏好权重归一：帖子→偏好类别→权重分（缺省 50）。只用于排序。
-  // OWN-POST-TOP-001: 自己刚发的帖子不吃这套类目权重。这套权重是"我想少看/
-  // 多看哪类内容"的本地个人偏好，套在自己发的帖子上会出现荒谬结果——比如
-  // 只发了张照片被自动归类成 people(60)，同一屏里 9 天前一条带了
-  // "AVAILABILITY" 语境的老帖被归类成 opportunity(70)，于是自己发的新帖在
-  // 自己的屏幕上被自己的偏好设置压到看不见，作者刷自己主页都找不到刚发的
-  // 东西。发帖满足感（作者自己看得到）跟这条帖子该不该被推给别人看，是两件
-  // 独立的事：这层权重只在本地算、每个用户各自一份，本来就不影响别人刷到
-  // 你的概率——所以把自己的帖子摘出来给全类目最高分 +1（稳赢，不管权重被
-  // 调成什么样），彼此之间再按时间新旧比，不影响其它帖子之间的排序逻辑。
-  function feedWeightFor(post: FeedPost): number {
-    if (isOwnPost(post)) {
-      return Math.max(50, ...Object.values(feedPrefs.weights)) + 1;
-    }
-    const ctxTypes = new Set(post.contextRefs.map((r) => r.contextType));
-    let category = "lifestyle";
-    if (isOpportunityPost(post)) category = "opportunity";
-    else if (ctxTypes.has("ACTIVITY")) category = "activity";
-    else if (post.authorType === "MERCHANT") category = "commercial";
-    else if (ctxTypes.has("INDUSTRY_INFO") || ctxTypes.has("VENUE")) category = "intelligence";
-    else if (post.authorType === "USER" || ctxTypes.has("PEOPLE_RELATIONSHIP")) category = "people";
-    return feedPrefs.weights[category] ?? 50;
-  }
+  // 偏好权重归一函数已删除（FEED-TIME-SORT-001）：时间线只按创建时间倒序。
+  // feedPrefs.weights 还存在（偏好页照常读写），但排序不再消费 —— 类目偏好
+  // 不再决定先后，自己的帖子也不再加分。
 
   // `scope` is a parameter (not feedPrefs.scope) so the banner can ask "how many
   // posts would I see without the time filter?" using the exact same predicate —
   // the count and the filter can never drift apart again.
   const getVisibleForTab = (forTab: FeedTab, scope: FeedScope = feedPrefs.scope): FeedPost[] =>
     posts.filter((post) => {
-      if (hiddenPosts.has(post.postId)) return false;
       // 偏好-时间范围：7D/30D 按创建时间过滤，长期不过滤（FEED-SCOPE-001）。
       if (!isPostWithinScope(post.createdAt, scope)) return false;
       // 偏好-不想看：主题切词命中正文/上下文/作者即隐藏。
@@ -1217,18 +1179,26 @@ export function FeedSurface({
   // V8 sort 稳定，同分保持服务端顺序。
   // TAB-SWITCH-JANK-001: 过滤+权重+排序是纯派生——以前每次 setState（注水每条
   // 评论都 set 一次）全量重跑。用 useMemo 钉死输入，注水只重渲染行，不重算。
+  // FEED-TIME-SORT-001（2026-09-25，用户：「公共帖文让测试账户帖文展示最上面，
+  // 这个不对，按时间排序就可以」）：时间线按创建时间倒序，不再按偏好权重重排，
+  // 也不再给自己的帖子加分 —— 刚发的（谁的都一样）自然在上面，老帖沉底，
+  // 谁都不置顶。feedPrefs.weights 还存着（偏好页照常写），但排序不再消费它。
   const { visible, scopeHiddenCount } = useMemo(() => {
     const unranked = getVisibleForTab(tab);
-    const scored = unranked.map((post, index) => ({ post, index, score: feedWeightFor(post) }));
-    scored.sort((a, b) => b.score - a.score || a.index - b.index);
+    const ranked = [...unranked].sort((a, b) => {
+      const ta = Date.parse(a.createdAt);
+      const tb = Date.parse(b.createdAt);
+      if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return tb - ta;
+      return 0;
+    });
     return {
-      visible: scored.map((entry) => entry.post),
+      visible: ranked,
       scopeHiddenCount: isFeedScopeActive(feedPrefs.scope)
         ? getVisibleForTab(tab, "PERSISTENT").length - unranked.length
         : 0,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts, tab, feedPrefs, hiddenPosts, following, feedFilter, selectedCustomFeed, customFeedTokens, viewerAccountId]);
+  }, [posts, tab, feedPrefs, following, feedFilter, selectedCustomFeed, customFeedTokens, viewerAccountId]);
   // FEED-SCOPE-001: 时间范围是相对 Date.now() 滚动的，帖文会一天天无声消失 ——
   // 实测默认 7D 隐藏了 62% 的帖文，而时间线上没有任何提示，看起来就是「数据丢了」。
   // 生效时把「正在筛选」和「藏了多少」摆出来，并给一个一键看全部的出口。
@@ -1374,8 +1344,8 @@ export function FeedSurface({
       {/* R15.3 preferencehint：推荐由你和算法共同决定 */}
       <View style={styles.prefHint}>
         <View style={styles.prefHintLeft}>
-          <Text selectable style={styles.prefHintTitle}>推荐由你和算法共同决定</Text>
-          <Text selectable style={styles.prefHintSub}>搜索意图优先 · 可随时减少 / 屏蔽</Text>
+          <Text selectable style={styles.prefHintTitle}>按时间排序</Text>
+          <Text selectable style={styles.prefHintSub}>新的在上 · 筛选和屏蔽依然有效</Text>
         </View>
         <Pressable onPress={onOpenFeedPrefs}>
           <Text selectable style={styles.prefHintBtn}>调整 ›</Text>

@@ -49,16 +49,14 @@ describe("FEED-FRESH-002 recovery paths also bypass the stale-if-error cache, no
   });
 });
 
-// OWN-POST-TOP-001: 就算缓存穿透了、posts[0] 真的是自己刚发的帖子，"推荐"tab
-// 还有第二层——按内容类目权重重排（feedWeightFor + scored.sort）。这层权重
-// 是本地的"我想少看/多看哪类内容"个人偏好，跟自己发的帖子毫无关系，套用之后
-// 会出现真实复现过的荒谬结果：只发了张照片被自动分类成 people(60 分)，同屏
-// 一条 9 天前带 "AVAILABILITY" 语境的老帖被分类成 opportunity(70 分，默认
-// 最高档)，作者刷自己主页都找不到刚发的帖子——数据是对的，纯粹被自己的偏好
-// 设置压没了。这层权重只在本地算、每个用户各自一份，不影响别人刷到你的
-// 概率，所以把自己的帖子从这套类目权重里摘出来是安全的。
-describe("OWN-POST-TOP-001 own posts aren't buried by the local content-weight preferences", () => {
-  it("gives own posts the top weight regardless of content category, before the category switch runs", () => {
-    expect(feedCode).toContain("function feedWeightFor(post: FeedPost): number {\n    if (isOwnPost(post)) {\n      return Math.max(50, ...Object.values(feedPrefs.weights)) + 1;\n    }");
+// OWN-POST-TOP-001（FEED-TIME-SORT-001 已替代）：时间线按创建时间倒序 ——
+// 刚发的（谁的都一样）自然在上面，不再需要给自己的帖子加分，也不按类目权重重排。
+describe("OWN-POST-TOP-001 timeline is chronological, no own-post boost or category weights", () => {
+  it("sorts visible posts by createdAt desc", () => {
+    expect(feedCode).toContain("tb - ta");
+  });
+  it("no longer boosts own posts or scores categories", () => {
+    expect(feedCode).not.toContain("feedWeightFor");
+    expect(feedCode).not.toContain("Math.max(50, ...Object.values(feedPrefs.weights)) + 1");
   });
 });
