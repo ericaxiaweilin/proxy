@@ -135,14 +135,14 @@ func (r *BusinessRepository) ListMembers(ctx context.Context, businessID string)
 
 func (r *BusinessRepository) CreateStore(ctx context.Context, store business.Store) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO business.stores (id, business_id, name, address, status, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6)`, store.ID, store.BusinessID, store.Name, store.Address, store.Status, store.CreatedAt)
+		INSERT INTO business.stores (id, business_id, name, address, status, created_at, category)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`, store.ID, store.BusinessID, store.Name, store.Address, store.Status, store.CreatedAt, store.Category)
 	return err
 }
 
 func (r *BusinessRepository) ListStores(ctx context.Context, businessID string) ([]business.Store, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, business_id, name, address, status, created_at
+		SELECT id, business_id, name, address, status, created_at, category
 		FROM business.stores WHERE business_id=$1 ORDER BY created_at`, businessID)
 	if err != nil {
 		return nil, err
@@ -151,7 +151,7 @@ func (r *BusinessRepository) ListStores(ctx context.Context, businessID string) 
 	result := []business.Store{}
 	for rows.Next() {
 		var store business.Store
-		if err := rows.Scan(&store.ID, &store.BusinessID, &store.Name, &store.Address, &store.Status, &store.CreatedAt); err != nil {
+		if err := rows.Scan(&store.ID, &store.BusinessID, &store.Name, &store.Address, &store.Status, &store.CreatedAt, &store.Category); err != nil {
 			return nil, err
 		}
 		result = append(result, store)
@@ -162,14 +162,23 @@ func (r *BusinessRepository) ListStores(ctx context.Context, businessID string) 
 func (r *BusinessRepository) GetStore(ctx context.Context, storeID string) (business.Store, error) {
 	var store business.Store
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, business_id, name, address, status, created_at
+		SELECT id, business_id, name, address, status, created_at, category
 		FROM business.stores WHERE id=$1`, storeID).Scan(
-		&store.ID, &store.BusinessID, &store.Name, &store.Address, &store.Status, &store.CreatedAt,
+		&store.ID, &store.BusinessID, &store.Name, &store.Address, &store.Status, &store.CreatedAt, &store.Category,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return business.Store{}, errors.New("store not found")
 	}
 	return store, err
+}
+
+// UpdateStore 全量覆盖（STORE-STATS-001；目前只有品类改这里）。
+func (r *BusinessRepository) UpdateStore(ctx context.Context, store business.Store) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE business.stores SET name=$2, address=$3, status=$4, category=$5
+		WHERE id=$1`,
+		store.ID, store.Name, store.Address, store.Status, store.Category)
+	return err
 }
 
 func (r *BusinessRepository) AddStorePhoto(ctx context.Context, p business.StorePhoto) error {
@@ -227,14 +236,15 @@ func (r *BusinessRepository) GetStorePhoto(ctx context.Context, storeID, photoID
 
 func (r *BusinessRepository) UpsertStoreLines(ctx context.Context, l business.StoreLines) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO business.store_lines (store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, updated_by, updated_at, wifi, smoking, ac_temp_c, power, quiet, seating)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		INSERT INTO business.store_lines (store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, contact_name, updated_by, updated_at, wifi, smoking, ac_temp_c, power, quiet, seating)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		ON CONFLICT (store_id) DO UPDATE SET
 			logo_asset_path=EXCLUDED.logo_asset_path,
 			description=EXCLUDED.description,
 			hours_json=EXCLUDED.hours_json,
 			contact_phone=EXCLUDED.contact_phone,
 			contact_email=EXCLUDED.contact_email,
+			contact_name=EXCLUDED.contact_name,
 			updated_by=EXCLUDED.updated_by,
 			updated_at=EXCLUDED.updated_at,
 			wifi=EXCLUDED.wifi,
@@ -243,7 +253,7 @@ func (r *BusinessRepository) UpsertStoreLines(ctx context.Context, l business.St
 			power=EXCLUDED.power,
 			quiet=EXCLUDED.quiet,
 			seating=EXCLUDED.seating`,
-		l.StoreID, l.BusinessID, l.LogoAssetPath, l.Description, l.HoursJSON, l.ContactPhone, l.ContactEmail, l.UpdatedBy, l.UpdatedAt,
+		l.StoreID, l.BusinessID, l.LogoAssetPath, l.Description, l.HoursJSON, l.ContactPhone, l.ContactEmail, l.ContactName, l.UpdatedBy, l.UpdatedAt,
 		l.Wifi, l.Smoking, l.AcTempC, l.Power, l.Quiet, l.Seating)
 	return err
 }
@@ -251,9 +261,9 @@ func (r *BusinessRepository) UpsertStoreLines(ctx context.Context, l business.St
 func (r *BusinessRepository) GetStoreLines(ctx context.Context, storeID string) (business.StoreLines, error) {
 	var l business.StoreLines
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, updated_by, updated_at, wifi, smoking, ac_temp_c, power, quiet, seating
+		SELECT store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, contact_name, updated_by, updated_at, wifi, smoking, ac_temp_c, power, quiet, seating
 		FROM business.store_lines WHERE store_id=$1`, storeID).Scan(
-		&l.StoreID, &l.BusinessID, &l.LogoAssetPath, &l.Description, &l.HoursJSON, &l.ContactPhone, &l.ContactEmail, &l.UpdatedBy, &l.UpdatedAt,
+		&l.StoreID, &l.BusinessID, &l.LogoAssetPath, &l.Description, &l.HoursJSON, &l.ContactPhone, &l.ContactEmail, &l.ContactName, &l.UpdatedBy, &l.UpdatedAt,
 		&l.Wifi, &l.Smoking, &l.AcTempC, &l.Power, &l.Quiet, &l.Seating,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

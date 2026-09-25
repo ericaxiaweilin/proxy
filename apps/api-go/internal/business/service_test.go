@@ -422,3 +422,53 @@ func TestStoreLinesAmenitiesRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// STORE-STATS-001：品类 + 对接人姓名写读。
+func TestStoreCategoryAndContactName(t *testing.T) {
+	service := New()
+	created := service.Handle(businessEnvelope("owner", "CreateBusinessAccount", "new", map[string]any{"name": "Bonsaidon"}))
+	var body map[string]any
+	if err := json.Unmarshal([]byte(created.OperationRef), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	businessID, _ := body["businessId"].(string)
+	stored := service.Handle(businessEnvelope("owner", "CreateBusinessStore", "new", map[string]any{
+		"businessId": businessID, "name": "Three Beans", "address": "Cau Giay", "category": "咖啡厅",
+	}))
+	var storeBody map[string]any
+	if err := json.Unmarshal([]byte(stored.OperationRef), &storeBody); err != nil {
+		t.Fatalf("decode store: %v", err)
+	}
+	storeID, _ := storeBody["storeId"].(string)
+	if storeID == "" {
+		t.Fatalf("missing storeId: %+v", storeBody)
+	}
+	set := service.Handle(businessEnvelope("owner", "SetStoreCategory", storeID, map[string]any{
+		"storeId": storeID, "category": "咖啡厅",
+	}))
+	if set.Outcome != "ACCEPTED" {
+		t.Fatalf("set category: %+v", set.Error)
+	}
+	lines := service.Handle(businessEnvelope("owner", "UpsertStoreLines", storeID, map[string]any{
+		"storeId": storeID, "contactName": "Nguyen Van A", "contactPhone": "+84912345678",
+	}))
+	if lines.Outcome != "ACCEPTED" {
+		t.Fatalf("upsert lines: %+v", lines.Error)
+	}
+	got := service.Handle(businessEnvelope("owner", "GetStoreLines", storeID, map[string]any{"storeId": storeID}))
+	var linesBody map[string]any
+	if err := json.Unmarshal([]byte(got.OperationRef), &linesBody); err != nil {
+		t.Fatalf("decode lines: %v", got.Error)
+	}
+	linesMap, _ := linesBody["lines"].(map[string]any)
+	if linesMap["contactName"] != "Nguyen Van A" {
+		t.Fatalf("contactName not persisted: %+v", linesBody)
+	}
+	// 非 OWNER 改品类驳回。
+	denied := service.Handle(businessEnvelope("intruder", "SetStoreCategory", storeID, map[string]any{
+		"storeId": storeID, "category": "酒吧",
+	}))
+	if denied.Outcome != "REJECTED" {
+		t.Fatalf("intruder category write must be rejected: %+v", denied)
+	}
+}

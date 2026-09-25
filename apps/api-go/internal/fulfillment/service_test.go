@@ -77,7 +77,94 @@ func createOffer(t *testing.T, s *Service) string {
 	return view.OrderID
 }
 
-// Traceable Human Order：Offer → Confirm → Execute → Settlement → Outcome。
+// STORE-STATS-001：RecordOutcome 归因 + GetStoreOrderStats。
+// 归因是人类断言：未知店驳回；已知店落单；统计只数 COMPLETED 且归因的单。
+func TestStoreAttributionAndStats(t *testing.T) {
+	s := New()
+	s.SetStoreLookup(func(context.Context, string) (bool, error) { return false, nil })
+	newCompletedOrder := func(t *testing.T, storeID, satisfaction string) string {
+		orderID := createOffer(t, s)
+		if r := s.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, orderID)); r.Outcome != "ACCEPTED" {
+			t.Fatalf("confirm: %+v", r.Error)
+		}
+		if r := s.Handle(envelopeFor("StartExecution", map[string]any{}, orderID)); r.Outcome != "ACCEPTED" {
+			t.Fatalf("execute: %+v", r.Error)
+		}
+		payload := map[string]any{
+			"onTime": true, "actualStart": "09:35", "actualEnd": "17:40",
+			"materialChanges": 0, "scopeCompleted": true, "objectiveNote": "按约完成",
+		}
+		if storeID != "" {
+			payload["storeId"] = storeID
+		}
+		if r := s.Handle(envelopeFor("RecordOutcome", payload, orderID)); r.Outcome != "ACCEPTED" {
+			t.Fatalf("outcome: %+v", r.Error)
+		}
+		if satisfaction != "" {
+			if r := s.Handle(envelopeFor("RecordSatisfaction", map[string]any{"resolved": satisfaction, "repeatIntent": "REUSE"}, orderID)); r.Outcome != "ACCEPTED" {
+				t.Fatalf("satisfaction: %+v", r.Error)
+			}
+		}
+		return orderID
+	}
+
+	// hook 全否：未知店驳回。
+	if r := s.Handle(envelopeFor("RecordOutcome", map[string]any{"onTime": true, "storeId": "store_nope"}, func() string {
+		id := createOffer(t, s)
+		if r := s.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, id)); r.Outcome != "ACCEPTED" {
+			t.Fatalf("confirm: %+v", r.Error)
+		}
+		if r := s.Handle(envelopeFor("StartExecution", map[string]any{}, id)); r.Outcome != "ACCEPTED" {
+			t.Fatalf("execute: %+v", r.Error)
+		}
+		return id
+	}())); r.Outcome != "REJECTED" || r.Error == nil || r.Error.ErrorCode != "UNKNOWN_STORE" {
+		t.Fatalf("unknown store must be UNKNOWN_STORE, got %+v", r)
+	}
+
+	s.SetStoreLookup(func(_ context.Context, id string) (bool, error) { return id == "store_tb1", nil })
+	first := newCompletedOrder(t, "store_tb1", "FULL")
+	second := newCompletedOrder(t, "store_tb1", "PARTIAL")
+	_ = first
+	_ = second
+	// 没归因的单不计入。
+	newCompletedOrder(t, "", "")
+
+	stats := func(storeID string) map[string]any {
+		r := s.Handle(envelopeFor("GetStoreOrderStats", map[string]any{"storeId": storeID}, ""))
+		if r.Outcome != "ACCEPTED" {
+			t.Fatalf("stats %s: %+v", storeID, r.Error)
+		}
+		var body map[string]any
+		if err := json.Unmarshal([]byte(r.OperationRef), &body); err != nil {
+			t.Fatalf("decode stats: %v", err)
+		}
+		stats, _ := body["stats"].(map[string]any)
+		return stats
+	}
+	got := stats("store_tb1")
+	if got["orderCount"] != float64(2) || got["fullCount"] != float64(1) || got["partialCount"] != float64(1) {
+		t.Fatalf("counts wrong: %+v", got)
+	}
+	if got["repeatRequesters"] != float64(1) {
+		t.Fatalf("repeat wrong: %+v", got)
+	}
+	if recent, _ := got["recent"].([]any); len(recent) != 2 {
+		t.Fatalf("recent wrong: %+v", got)
+	}
+	if got["lastOrderAt"] == "" {
+		t.Fatalf("lastOrderAt missing: %+v", got)
+	}
+	empty := stats("store_empty")
+	// recent 为空数组不是 null（客户端直接 map，不过滤）；全零，不编数。
+	recentEmpty, ok := empty["recent"].([]any)
+	if !ok || len(recentEmpty) != 0 || empty["orderCount"] != float64(0) {
+		t.Fatalf("empty store must be zeros: %+v", empty)
+	}
+	if r := s.Handle(envelopeFor("GetStoreOrderStats", map[string]any{}, "")); r.Outcome != "REJECTED" || r.Error == nil || r.Error.ErrorCode != "INVALID_STORE_ID" {
+		t.Fatalf("missing store must be INVALID_STORE_ID, got %+v", r)
+	}
+}
 func TestTraceableHumanOrder(t *testing.T) {
 	s := New()
 	orderID := createOffer(t, s)

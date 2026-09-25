@@ -219,6 +219,8 @@ commands:
     domain: Engagement
   - command: GetStoreLines
     domain: Business
+  - command: GetStoreOrderStats
+    domain: Fulfillment
   - command: GetUserProfile
     domain: Profile
   - command: GetVoucher
@@ -531,6 +533,8 @@ commands:
     domain: RealityScene
   - command: SetRealitySceneSaved
     domain: RealityScene
+  - command: SetStoreCategory
+    domain: Business
   - command: SettleVoucher
     domain: Voucher
   - command: ShortlistAgent

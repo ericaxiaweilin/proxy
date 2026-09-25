@@ -41,6 +41,8 @@ type Store struct {
 	BusinessID string    `json:"businessId"`
 	Name       string    `json:"name"`
 	Address    string    `json:"address"`
+	// STORE-STATS-001：店铺品类（咖啡厅/SPA/…，店主自填，空 = 没填）。
+	Category   string    `json:"category,omitempty"`
 	Status     string    `json:"status"`
 	CreatedAt  time.Time `json:"createdAt"`
 }
@@ -71,6 +73,8 @@ type StoreLines struct {
 	HoursJSON     string    `json:"hoursJson"`
 	ContactPhone  string    `json:"contactPhone"`
 	ContactEmail  string    `json:"contactEmail"`
+	// STORE-STATS-001：对接人姓名（跟电话配对，空 = 没填）。
+	ContactName   string    `json:"contactName,omitempty"`
 	// STORE-AMENITIES-001: 门店设施属性（商家自填：网速/吸烟/空调/插座/噪音/
 	// 座位）。空=没填，没填的不显示不筛选，绝不用默认值冒充。空调存摄氏度
 	// 整数，0=没填。
@@ -188,6 +192,7 @@ type Repository interface {
 	ListMembers(ctx context.Context, businessID string) ([]Membership, error)
 	CreateStore(ctx context.Context, s Store) error
 	GetStore(ctx context.Context, storeID string) (Store, error)
+	UpdateStore(ctx context.Context, s Store) error
 	ListStores(ctx context.Context, businessID string) ([]Store, error)
 	AddSpend(ctx context.Context, businessID, orderID string, amount int64) error
 	SpendSummary(ctx context.Context, businessID string) (int64, error)
@@ -330,6 +335,18 @@ func (r *MemoryRepository) CreateStore(_ context.Context, s Store) error {
 	r.stores[s.ID] = s
 	return nil
 }
+
+// UpdateStore 全量覆盖（STORE-STATS-001；内存实现目前只有品类改这里）。
+func (r *MemoryRepository) UpdateStore(_ context.Context, s Store) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.stores[s.ID]; !ok {
+		return errors.New("store not found")
+	}
+	r.stores[s.ID] = s
+	return nil
+}
+
 func (r *MemoryRepository) ListStores(_ context.Context, businessID string) ([]Store, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -535,7 +552,7 @@ func NewWithRepository(repo Repository) *Service {
 func (s *Service) Supports(t string) bool {
 	switch t {
 	case "CreateBusinessAccount", "ListMyBusinessAccounts", "AddBusinessMember",
-		"CreateBusinessStore", "ListBusinessStores", "GetBusinessStore", "SpendSummary",
+		"CreateBusinessStore", "ListBusinessStores", "GetBusinessStore", "SetStoreCategory", "SpendSummary",
 		"AddStorePhoto", "ListStorePhotos", "DeleteStorePhoto",
 		"UpsertStoreLines", "GetStoreLines",
 		"CreateStoreProduct", "UpdateStoreProduct", "ListStoreProducts", "SetProductAvailability",
@@ -564,6 +581,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listStores(ctx, e)
 	case "GetBusinessStore":
 		return s.getStore(ctx, e)
+	case "SetStoreCategory":
+		return s.setStoreCategory(ctx, e)
 	case "SpendSummary":
 		return s.spendSummary(ctx, e)
 	case "AddStorePhoto":
@@ -748,6 +767,8 @@ func (s *Service) createStore(ctx context.Context, e command.Envelope) command.R
 		BusinessID string `json:"businessId"`
 		Name       string `json:"name"`
 		Address    string `json:"address"`
+		// STORE-STATS-001：建店时可顺手带品类（空 = 没填，以后 SetStoreCategory 改）。
+		Category string `json:"category"`
 	}
 	if !decode(e.Payload, &p) || p.BusinessID == "" || p.Name == "" {
 		return command.Rejected(e, "INVALID_STORE", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_store", nil)
@@ -756,12 +777,40 @@ func (s *Service) createStore(ctx context.Context, e command.Envelope) command.R
 		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
 	}
 	now := s.clock.Now().UTC()
-	store := Store{ID: newID("store_"), BusinessID: p.BusinessID, Name: p.Name, Address: p.Address, Status: "ACTIVE", CreatedAt: now}
+	store := Store{ID: newID("store_"), BusinessID: p.BusinessID, Name: p.Name, Address: p.Address, Category: strings.TrimSpace(p.Category), Status: "ACTIVE", CreatedAt: now}
 	if err := s.repo.CreateStore(ctx, store); err != nil {
 		return command.Rejected(e, "BUSINESS_STORE_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_create_failed", nil)
 	}
 	ev := event.New("BusinessStoreCreated", "Store", store.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, nil)
 	return acceptedWithPayload(e, "Store", store.ID, 1, store.Status, map[string]any{"storeId": store.ID, "store": store}, []event.DomainEvent{ev})
+}
+
+// setStoreCategory 改店铺品类（STORE-STATS-001；店主自填，空 = 清除）。品类是展示 /
+// 筛选入口用，不做封闭词表 —— 有什么显示什么，不编造。
+func (s *Service) setStoreCategory(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		StoreID  string `json:"storeId"`
+		Category string `json:"category"`
+	}
+	if !decode(e.Payload, &p) || p.StoreID == "" {
+		p.StoreID = e.Target.ID
+		if p.StoreID == "" {
+			return command.Rejected(e, "INVALID_STORE_ID", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_store_id", nil)
+		}
+	}
+	store, err := s.repo.GetStore(ctx, p.StoreID)
+	if err != nil {
+		return command.Rejected(e, "STORE_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "business.store_not_found", nil)
+	}
+	if !s.hasRole(ctx, store.BusinessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR") {
+		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
+	}
+	store.Category = strings.TrimSpace(p.Category)
+	if err := s.repo.UpdateStore(ctx, store); err != nil {
+		return command.Rejected(e, "STORE_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_update_failed", nil)
+	}
+	ev := event.New("BusinessStoreUpdated", "Store", store.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), nil)
+	return acceptedWithPayload(e, "Store", store.ID, 1, store.Status, map[string]any{"store": store}, []event.DomainEvent{ev})
 }
 
 func (s *Service) listStores(ctx context.Context, e command.Envelope) command.Result {
@@ -915,6 +964,8 @@ func (s *Service) upsertStoreLines(ctx context.Context, e command.Envelope) comm
 		HoursJSON     string `json:"hoursJson"`
 		ContactPhone  string `json:"contactPhone"`
 		ContactEmail  string `json:"contactEmail"`
+		// STORE-STATS-001：对接人姓名（跟电话配对）。
+		ContactName   string `json:"contactName"`
 		Wifi          string `json:"wifi"`
 		Smoking       string `json:"smoking"`
 		AcTempC       int    `json:"acTempC"`
@@ -946,7 +997,7 @@ func (s *Service) upsertStoreLines(ctx context.Context, e command.Envelope) comm
 		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
 	}
 	now := s.clock.Now().UTC()
-	lines := StoreLines{StoreID: p.StoreID, BusinessID: store.BusinessID, LogoAssetPath: p.LogoAssetPath, Description: p.Description, HoursJSON: p.HoursJSON, ContactPhone: p.ContactPhone, ContactEmail: p.ContactEmail, Wifi: wifi, Smoking: smoking, AcTempC: p.AcTempC, Power: power, Quiet: quiet, Seating: seating, UpdatedBy: e.Actor.ID, UpdatedAt: now}
+	lines := StoreLines{StoreID: p.StoreID, BusinessID: store.BusinessID, LogoAssetPath: p.LogoAssetPath, Description: p.Description, HoursJSON: p.HoursJSON, ContactPhone: p.ContactPhone, ContactEmail: p.ContactEmail, ContactName: strings.TrimSpace(p.ContactName), Wifi: wifi, Smoking: smoking, AcTempC: p.AcTempC, Power: power, Quiet: quiet, Seating: seating, UpdatedBy: e.Actor.ID, UpdatedAt: now}
 	if err := s.repo.UpsertStoreLines(ctx, lines); err != nil {
 		return command.Rejected(e, "STORE_LINES_UPSERT_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_lines_upsert_failed", nil)
 	}

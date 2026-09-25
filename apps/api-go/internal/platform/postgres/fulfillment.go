@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -41,11 +42,11 @@ func (r *FulfillmentRepository) EnsureOrder(ctx context.Context, order fulfillme
 	if _, err = q.Exec(ctx, `
 		INSERT INTO fulfillment.orders (
 			id, requester_id, agent_id, need_id, lifecycle, version,
-			snapshot, amendments, settlement, outcome, created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			snapshot, amendments, settlement, outcome, created_at, updated_at, store_id
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		ON CONFLICT (id) DO NOTHING`,
 		order.ID, order.RequesterID, order.AgentID, order.NeedID, order.Lifecycle, order.Version,
-		snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt); err != nil {
+		snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, order.StoreID); err != nil {
 		return err
 	}
 	var requesterID, agentID, needID string
@@ -68,10 +69,10 @@ func insertOrder(ctx context.Context, execer interface {
 	_, err = execer.Exec(ctx, `
 		INSERT INTO fulfillment.orders (
 			id, requester_id, agent_id, need_id, lifecycle, version,
-			snapshot, amendments, settlement, outcome, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			snapshot, amendments, settlement, outcome, created_at, updated_at, store_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		order.ID, order.RequesterID, order.AgentID, order.NeedID, order.Lifecycle, order.Version,
-		snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt,
+		snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, order.StoreID,
 	)
 	return err
 }
@@ -98,11 +99,11 @@ func (r *FulfillmentRepository) GetOrder(ctx context.Context, id string) (fulfil
 	var snapshot, amendments, settlement, outcome []byte
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
 		SELECT id, requester_id, agent_id, need_id, lifecycle, version,
-		       snapshot, amendments, settlement, outcome, created_at, updated_at
+		       snapshot, amendments, settlement, outcome, created_at, updated_at, store_id
 		FROM fulfillment.orders
 		WHERE id = $1`, id).Scan(
 		&order.ID, &order.RequesterID, &order.AgentID, &order.NeedID, &order.Lifecycle, &order.Version,
-		&snapshot, &amendments, &settlement, &outcome, &order.CreatedAt, &order.UpdatedAt,
+		&snapshot, &amendments, &settlement, &outcome, &order.CreatedAt, &order.UpdatedAt, &order.StoreID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fulfillment.Order{}, fulfillment.ErrOrderNotFound
@@ -143,9 +144,9 @@ func updateOrder(ctx context.Context, execer interface {
 	commandTag, err := execer.Exec(ctx, `
 		UPDATE fulfillment.orders
 		SET lifecycle = $1, version = $2, snapshot = $3, amendments = $4,
-		    settlement = $5, outcome = $6, updated_at = $7
-		WHERE id = $8 AND version = $9`,
-		order.Lifecycle, order.Version, snapshot, amendments, settlement, outcome, order.UpdatedAt,
+		    settlement = $5, outcome = $6, updated_at = $7, store_id = $8
+		WHERE id = $9 AND version = $10`,
+		order.Lifecycle, order.Version, snapshot, amendments, settlement, outcome, order.UpdatedAt, order.StoreID,
 		order.ID, expectedVersion,
 	)
 	if err != nil {
@@ -333,7 +334,7 @@ func isUniqueViolation(err error) bool {
 func (r *FulfillmentRepository) Snapshot(ctx context.Context) ([]fulfillment.Order, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT id, requester_id, agent_id, need_id, lifecycle, version,
-		       snapshot, amendments, settlement, outcome, created_at, updated_at
+		       snapshot, amendments, settlement, outcome, created_at, updated_at, store_id
 		FROM fulfillment.orders
 		ORDER BY created_at DESC`)
 	if err != nil {
@@ -347,7 +348,57 @@ func (r *FulfillmentRepository) Snapshot(ctx context.Context) ([]fulfillment.Ord
 		var snapshot, amendments, settlement, outcome []byte
 		if err := rows.Scan(
 			&order.ID, &order.RequesterID, &order.AgentID, &order.NeedID, &order.Lifecycle, &order.Version,
-			&snapshot, &amendments, &settlement, &outcome, &order.CreatedAt, &order.UpdatedAt,
+			&snapshot, &amendments, &settlement, &outcome, &order.CreatedAt, &order.UpdatedAt, &order.StoreID,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(snapshot, &order.Snapshot); err != nil {
+			return nil, fmt.Errorf("decode order snapshot: %w", err)
+		}
+		if err := json.Unmarshal(amendments, &order.Amendments); err != nil {
+			return nil, fmt.Errorf("decode order amendments: %w", err)
+		}
+		if len(settlement) > 0 {
+			if err := json.Unmarshal(settlement, &order.Settlement); err != nil {
+				return nil, fmt.Errorf("decode order settlement: %w", err)
+			}
+		}
+		if len(outcome) > 0 {
+			if err := json.Unmarshal(outcome, &order.Outcome); err != nil {
+				return nil, fmt.Errorf("decode order outcome: %w", err)
+			}
+		}
+		result = append(result, order)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ListOrdersByStore 按店查订单（STORE-STATS-001）。
+func (r *FulfillmentRepository) ListOrdersByStore(ctx context.Context, storeID string) ([]fulfillment.Order, error) {
+	if strings.TrimSpace(storeID) == "" {
+		return []fulfillment.Order{}, nil
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, requester_id, agent_id, need_id, lifecycle, version,
+		       snapshot, amendments, settlement, outcome, created_at, updated_at, store_id
+		FROM fulfillment.orders
+		WHERE store_id = $1
+		ORDER BY created_at DESC`, storeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []fulfillment.Order{}
+	for rows.Next() {
+		var order fulfillment.Order
+		var snapshot, amendments, settlement, outcome []byte
+		if err := rows.Scan(
+			&order.ID, &order.RequesterID, &order.AgentID, &order.NeedID, &order.Lifecycle, &order.Version,
+			&snapshot, &amendments, &settlement, &outcome, &order.CreatedAt, &order.UpdatedAt, &order.StoreID,
 		); err != nil {
 			return nil, err
 		}

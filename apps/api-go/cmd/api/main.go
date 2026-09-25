@@ -317,6 +317,19 @@ func main() {
 	// Wire after the optional PostgreSQL replacements. Wiring before this block
 	// leaves marketplace pointing at the discarded in-memory fulfillment repo.
 	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository()})
+	// STORE-STATS-001：RecordOutcome 归因校验 —— 必须是真实存在的 ACTIVE 店。
+	// 跟 SetOrderCreator 一样，必须在 PG 替换之后接（否则接到被丢弃的内存实例上）。
+	// 无库模式不接（SetStoreLookup nil = 不校验，测试/内存行为不变）。
+	if pool != nil {
+		storeLookupRepo := postgres.NewBusinessRepository(pool)
+		fulfillmentService.SetStoreLookup(func(ctx context.Context, storeID string) (bool, error) {
+			store, err := storeLookupRepo.GetStore(ctx, storeID)
+			if err != nil {
+				return false, err
+			}
+			return store.Status == "ACTIVE", nil
+		})
+	}
 	// 语义层同理：必须在 PG 替换之后注入，否则配了 DATABASE_URL 时
 	// NewWithRepository 重建的 Service 会丢掉 modelstack，AI 能力被静默降级成
 	// 「永远 AI_NOT_CONFIGURED」—— 而客户端会因此把入口藏起来，从外部看

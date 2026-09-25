@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 317 — 2026-09-25
+
+- **店铺经营数据地基**（STORE-STATS-001，后端先行）：migration 129（orders.store_id +
+  stores.category + store_lines.contact_name）；RecordOutcome 接受人类断言归因
+  （ACTIVE 店才收）；新命令 GetStoreOrderStats（累计/满意分布/复购/最近5单/末单时间，
+  只数 COMPLETED 归因单）+ SetStoreCategory；openapi 契约同步。老订单不回填。
+  前端頁下一輪。
+- 影响文件：后端 9 文件（peer 的 growth/benefit/campaign 改动未碰）。
+
 ## Revision 316 — 2026-09-24
 
 - **自己的帖子必须可见**（FEED-OWN-PIN-001）：首页 25 条装不下时自己的帖被埋

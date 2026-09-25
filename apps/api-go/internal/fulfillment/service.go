@@ -43,8 +43,11 @@ type Order struct {
 	// Orders created before the LC-28 gate rolled out; the
 	// migration 065 backfill is a separate task.
 	PolicyDecisionID string    `json:"policyDecisionId,omitempty"`
-	CreatedAt        time.Time `json:"createdAt"`
-	UpdatedAt        time.Time `json:"updatedAt"`
+	// STORE-STATS-001：服务发生在哪家店（人类断言，RecordOutcome 时由订单当事一方
+	// 指认）。空 = 没归因（老订单/没填），统计时不计入任何店，不回填。
+	StoreID       string    `json:"storeId,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // OrderSnapshot 是 Gate G 冻结的确认快照。
@@ -156,6 +159,8 @@ type Repository interface {
 	GetOffer(ctx context.Context, id string) (Offer, error)
 	UpdateOffer(ctx context.Context, o Offer, expectedVersion int) error
 	ListOffersByAgent(ctx context.Context, agentID string) ([]Offer, error)
+	// STORE-STATS-001：按店查订单（读店铺经营统计用）。
+	ListOrdersByStore(ctx context.Context, storeID string) ([]Order, error)
 }
 
 // TransactionalRepository 由支持事务性 outbox 的存储实现（订单与事件原子提交）。
@@ -270,6 +275,20 @@ func (r *MemoryRepository) Snapshot(_ context.Context) ([]Order, error) {
 	result := make([]Order, 0, len(r.orders))
 	for _, o := range r.orders {
 		result = append(result, cloneOrder(o))
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+// ListOrdersByStore 按店查订单（STORE-STATS-001；内存实现：全量过滤）。
+func (r *MemoryRepository) ListOrdersByStore(_ context.Context, storeID string) ([]Order, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []Order{}
+	for _, o := range r.orders {
+		if storeID != "" && o.StoreID == storeID {
+			result = append(result, cloneOrder(o))
+		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
 	return result, nil
@@ -417,6 +436,9 @@ type Service struct {
 	// Order; otherwise the transition is rejected. nil means
 	// the legacy test server is in use (no policy enforcement).
 	policyDecisions policydecisionsService
+	// STORE-STATS-001：店铺存在性查询（RecordOutcome 归因校验用）。不接 = 不校验
+	// （测试 / 无库环境）；生产在 main.go 接 business 仓。
+	storeLookup func(ctx context.Context, storeID string) (active bool, err error)
 	// jurisdictionResolver resolves the requester's
 	// jurisdiction (R16.7-P1-E) so the policy decision can
 	// be evaluated under the correct regulatory family. The
@@ -535,7 +557,7 @@ func (s *Service) resolveRequesterJurisdiction(ctx context.Context, requesterID 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "CreateOffer", "CreateSlotOffer", "AcceptSlotOffer", "CreateTopicInvite", "RespondTopicInvite", "GetOffer", "ListAgentOffers",
-		"ListMyOrders",
+		"ListMyOrders", "GetStoreOrderStats",
 		"CheckInOrder", "SubmitEvidence",
 		"ConfirmCooperation", "StartExecution", "RecordDirectSettlement",
 		"RecordOutcome", "RecordSatisfaction", "RecordMaterialOrderChange",
@@ -570,6 +592,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listAgentOffers(ctx, e)
 	case "ListMyOrders":
 		return s.listMyOrders(ctx, e)
+	case "GetStoreOrderStats":
+		return s.getStoreOrderStats(ctx, e)
 	case "CheckInOrder":
 		return s.checkInOrder(ctx, e)
 	case "SubmitEvidence":
@@ -612,6 +636,88 @@ func (s *Service) listMyOrders(ctx context.Context, e command.Envelope) command.
 	}
 	r := command.Accepted(e, "OrderCollection", e.Actor.ID, 1, "READY", nil)
 	raw, _ := json.Marshal(map[string]any{"orders": visible})
+	r.OperationRef = string(raw)
+	return r
+}
+
+// ---------- GetStoreOrderStats ----------
+// STORE-STATS-001：一家店的经营统计（累计接单 / 满意分布 / 复购客户 / 最近接单）。
+// 只数 COMPLETED 且归因到这家店的订单；老订单（store_id 为空）不计入，不回填。
+// 调用方（店主/店员）由 dispatch 鉴权；这里不额外限角色 —— 店铺 id 本身不敏感，
+// 数字只来自已完成的公开履约事实。
+
+type StoreOrderRecent struct {
+	OrderID      string `json:"orderId"`
+	RequesterID  string `json:"requesterId"`
+	ServiceSKU   string `json:"serviceSku"`
+	Satisfaction string `json:"satisfaction"` // FULL | PARTIAL | NONE | ""
+	CompletedAt  string `json:"completedAt"`
+}
+
+type StoreOrderStats struct {
+	StoreID         string            `json:"storeId"`
+	OrderCount      int               `json:"orderCount"`
+	FullCount       int               `json:"fullCount"`
+	PartialCount    int               `json:"partialCount"`
+	RepeatRequesters int              `json:"repeatRequesters"`
+	LastOrderAt     string            `json:"lastOrderAt,omitempty"`
+	Recent          []StoreOrderRecent `json:"recent"`
+}
+
+func (s *Service) getStoreOrderStats(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		StoreID string `json:"storeId"`
+	}
+	if !decode(e.Payload, &p) || strings.TrimSpace(p.StoreID) == "" {
+		p.StoreID = e.Target.ID
+		if strings.TrimSpace(p.StoreID) == "" {
+			return command.Rejected(e, "INVALID_STORE_ID", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_store_id", nil)
+		}
+	}
+	storeID := strings.TrimSpace(p.StoreID)
+	orders, err := s.repository.ListOrdersByStore(ctx, storeID)
+	if err != nil {
+		return command.Rejected(e, "ORDER_STATS_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_stats_failed", nil)
+	}
+	stats := StoreOrderStats{StoreID: storeID, Recent: []StoreOrderRecent{}}
+	reuseRequesters := map[string]bool{}
+	for _, order := range orders {
+		if order.Lifecycle != "COMPLETED" || order.Outcome == nil {
+			continue
+		}
+		stats.OrderCount++
+		completedAt := order.UpdatedAt.UTC().Format(time.RFC3339)
+		if stats.LastOrderAt == "" || completedAt > stats.LastOrderAt {
+			stats.LastOrderAt = completedAt
+		}
+		satisfaction := ""
+		if order.Outcome.Satisfaction != nil {
+			satisfaction = order.Outcome.Satisfaction.Resolved
+			switch satisfaction {
+			case "FULL":
+				stats.FullCount++
+			case "PARTIAL":
+				stats.PartialCount++
+			}
+			if order.Outcome.Satisfaction.RepeatIntent == "REUSE" {
+				reuseRequesters[order.RequesterID] = true
+			}
+		}
+		if len(stats.Recent) < 5 {
+			stats.Recent = append(stats.Recent, StoreOrderRecent{
+				OrderID:      order.ID,
+				RequesterID:  order.RequesterID,
+				ServiceSKU:   order.Snapshot.ServiceSKU,
+				Satisfaction: satisfaction,
+				CompletedAt:  completedAt,
+			})
+		}
+	}
+	for range reuseRequesters {
+		stats.RepeatRequesters++
+	}
+	r := command.Accepted(e, "StoreOrderStats", storeID, 1, "READY", nil)
+	raw, _ := json.Marshal(map[string]any{"stats": stats})
 	r.OperationRef = string(raw)
 	return r
 }
@@ -1295,6 +1401,14 @@ type outcomePayload struct {
 	MaterialChanges int    `json:"materialChanges"`
 	ScopeCompleted  bool   `json:"scopeCompleted"`
 	ObjectiveNote   string `json:"objectiveNote"`
+	// STORE-STATS-001：服务发生在哪家店（人类断言，可选）。空 = 不归因。
+	StoreID string `json:"storeId"`
+}
+
+// SetStoreLookup 接上店铺存在性查询（STORE-STATS-001）：RecordOutcome 归因时必须
+// 是真实存在的 ACTIVE 店。不接 = 不校验（测试 / 无库环境）；生产在 main.go 必须接。
+func (s *Service) SetStoreLookup(check func(ctx context.Context, storeID string) (bool, error)) {
+	s.storeLookup = check
 }
 
 func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command.Result {
@@ -1319,7 +1433,16 @@ func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command
 	if order.Outcome != nil {
 		return command.Rejected(e, "OUTCOME_ALREADY_RECORDED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.outcome_exists", nil)
 	}
+	// STORE-STATS-001：归因必须指向真实存在的 ACTIVE 店（防手滑/编造 id）。
+	// 空 = 不归因，直接过。
+	storeID := strings.TrimSpace(p.StoreID)
+	if storeID != "" && s.storeLookup != nil {
+		if active, err := s.storeLookup(ctx, storeID); err != nil || !active {
+			return command.Rejected(e, "UNKNOWN_STORE", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.unknown_store", nil)
+		}
+	}
 	now := s.clock.Now().UTC()
+	order.StoreID = storeID
 	order.Outcome = &OutcomeRecord{
 		OnTime:          p.OnTime,
 		ActualStart:     p.ActualStart,
