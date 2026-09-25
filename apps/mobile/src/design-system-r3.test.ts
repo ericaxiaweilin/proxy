@@ -124,6 +124,11 @@ describe("Proxy Design System R3 typography", () => {
     expect(source).toMatch(/personalAvaWrap:\s*\{[\s\S]*?width:\s*82/);
     // ava + 浮层 (Threads R2 .add 32x32 浮在 -6 -2)
     expect(source).toMatch(/personalAvaAdd:\s*\{[\s\S]*?position:\s*"absolute"/);
+    // STAT-ROW-TIGHT-001（2026-09-25，用户对照原型）：参考稿统计行是
+    // `display:flex; gap:18px` —— 左对齐、两个数字挨着。不许再用 space-between
+    // 把它们顶到屏幕左右两边（一行里隔几百像素，读起来像两个不相干的指标）。
+    expect(source).toMatch(/personalStatRow:\s*\{[^}]*gap:\s*18/);
+    expect(source.match(/personalStatRow:\s*\{[^}]*\}/)?.[0] ?? "").not.toContain("space-between");
   });
 
   // PROFILE-HEAD-PARITY-001（2026-09-23）：上面那条只钉了「我的 → 个人主页」。
@@ -151,6 +156,10 @@ describe("Proxy Design System R3 typography", () => {
     expect(other).toContain("</Text> 粉丝</Text>");
     // 计数没拉到画「—」，不回填 0（0 读起来是「没人关注他」）
     expect(other).toContain("function countLabel(value: number | undefined): string");
+    // STAT-ROW-TIGHT-001：统计行也要挨着（与 me-styles personalStatRow 同形），
+    // 两条路的间距规则必须一样，否则又变成「同一个 App 两个长相」。
+    expect(other).toMatch(/statRow:\s*\{[^}]*gap:\s*18/);
+    expect(other.match(/statRow:\s*\{[^}]*\}/)?.[0] ?? "").not.toContain("space-between");
   });
 
   // MAP-FOOTPRINT-LOGO-001：个人主页场景足迹入口用原型「场景足迹」logo，

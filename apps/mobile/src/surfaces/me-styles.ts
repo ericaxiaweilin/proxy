@@ -924,7 +924,11 @@ export const styles = StyleSheet.create({
   personalTopicPill: { borderWidth: 1, borderColor: "#e1e1e1", backgroundColor: "#fff", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   personalTopicText: { color: "#333", fontSize: 11, fontWeight: "600" },
 
-  personalStatRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 15, marginTop: 12 },
+  // STAT-ROW-TIGHT-001（2026-09-25，用户对照原型）：参考稿的统计行是
+  // `display:flex; gap:18px` —— 左对齐、两个数字**挨着**。以前用
+  // justifyContent:"space-between" 把它们顶到屏幕左右两边，一行里隔着几百像素，
+  // 读起来像两个不相干的指标而不是「浏览 / 关注者」这一组。
+  personalStatRow: { alignItems: "center", flexDirection: "row", gap: 18, justifyContent: "flex-start", marginBottom: 15, marginTop: 12 },
   personalStatText: { color: "#8c8c8c", fontSize: 11 },
   personalStatValue: { color: "#111", fontWeight: "800" },
 
