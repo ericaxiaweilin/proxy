@@ -192,8 +192,15 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
     icon: "₫",
   },
   bdash: {
-    title: "企业 / 店铺资料",
-    desc: "店铺、Venue、主体与线上节点。",
+    title: "我的店铺",
+    desc: "合作店铺 · 接单数据 · 推荐管理。",
+    icon: "▣"
+  },
+  // STORE-HUB-001：bdash 换成店铺 hub 后，原来的企业 / 店铺资料（门店名片
+  // 二维码等）搬到这里，hub 里留入口。无 sections（专属分支渲染）。
+  bdashprofile: {
+    title: "店铺资料",
+    desc: "门店名片 · 二维码 · 主体信息。",
     icon: "▣"
   },
   // STORE-TILES-001 / STORE-REC-MANAGE-001：「企业 / 店铺」按产品稿整合成 2 个

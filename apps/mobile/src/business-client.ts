@@ -78,8 +78,20 @@ export type StoreLinesWire = {
   hoursJson: string;
   contactPhone: string;
   contactEmail: string;
+  // STORE-STATS-001：对接人姓名（跟电话配对，空 = 没填）。
+  contactName?: string;
   updatedAt: string;
 } & StoreAmenities;
+
+export type BusinessStoreWire = {
+  id: string;
+  businessId: string;
+  name: string;
+  address: string;
+  // STORE-STATS-001：店铺品类（店主自填，空 = 没填）。
+  category?: string;
+  status: string;
+};
 
 export class BusinessClient {
   private sequence = 0;
@@ -119,16 +131,24 @@ export class BusinessClient {
     return { storeId: requiredString(body, "storeId") };
   }
 
-  public async listStores(businessId: string): Promise<Array<{ id: string; businessId: string; name: string; address: string; status: string }>> {
+  public async listStores(businessId: string): Promise<BusinessStoreWire[]> {
     const body = this.body(await this.command("ListBusinessStores", { type: "BusinessAccount", id: businessId }, { businessId }));
     if (!Array.isArray(body.stores)) throw new Error("business stores malformed");
-    return body.stores as Array<{ id: string; businessId: string; name: string; address: string; status: string }>;
+    return body.stores as BusinessStoreWire[];
   }
 
-  public async getStore(storeId: string): Promise<{ id: string; businessId: string; name: string; address: string; status: string }> {
+  public async getStore(storeId: string): Promise<BusinessStoreWire> {
     const body = this.body(await this.command("GetBusinessStore", { type: "Store", id: storeId }, { storeId }));
-    const store = body.store as { id: string; businessId: string; name: string; address: string; status: string };
+    const store = body.store as BusinessStoreWire;
     if (!store?.id) throw new Error("business store not found");
+    return store;
+  }
+
+  // STORE-STATS-001：改店铺品类（店主自填，空 = 清除）。
+  public async setStoreCategory(storeId: string, category: string): Promise<BusinessStoreWire> {
+    const body = this.body(await this.command("SetStoreCategory", { type: "Store", id: storeId }, { storeId, category }));
+    const store = body.store as BusinessStoreWire;
+    if (!store?.id) throw new Error("business store category update malformed");
     return store;
   }
 
@@ -171,6 +191,8 @@ export class BusinessClient {
     hoursJson?: string;
     contactPhone?: string;
     contactEmail?: string;
+    // STORE-STATS-001：对接人姓名。
+    contactName?: string;
     wifi?: string;
     smoking?: string;
     acTempC?: number;
@@ -185,6 +207,7 @@ export class BusinessClient {
       hoursJson: input.hoursJson ?? "{}",
       contactPhone: input.contactPhone ?? "",
       contactEmail: input.contactEmail ?? "",
+      contactName: input.contactName ?? "",
       wifi: input.wifi ?? "",
       smoking: input.smoking ?? "",
       acTempC: input.acTempC ?? 0,

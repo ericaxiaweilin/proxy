@@ -33,6 +33,7 @@ import type { PersonaGalleryItem } from "../ai-persona-client";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { MerchantMeR21Replacement } from "./merchant-me-r21-replacement";
+import { MyStoresHub } from "./my-stores-hub";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { StoreRecommendationQueue } from "./store-recommendation-queue";
 import { CreatorInvitationCard } from "./creator-application";
@@ -2663,7 +2664,36 @@ export function MeSurface({
       );
     }
 
+    // STORE-HUB-001：bdash 换成我的店铺 hub（列表 → 详情，推荐走 storerecmanage）。
+    // 原来的企业 / 店铺资料（门店名片二维码等）原样搬到 bdashprofile，hub 里留入口。
     if (subPage.route === "bdash") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text selectable style={styles.subPageTitle}>我的店铺</Text>
+            {business && profileClient ? (
+              <MyStoresHub
+                business={business}
+                fulfillment={fulfillment}
+                profile={profileClient}
+                onOpenRecommend={() => openSubPage("storerecmanage")}
+                onOpenStoreProfile={() => openSubPage("bdashprofile")}
+                onBack={() => setSubPage(undefined)}
+              />
+            ) : (
+              <View style={styles.infoNote}>
+                <Text selectable style={styles.infoNoteText}>店铺服务没接上，稍后再试。</Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      );
+    }
+
+    if (subPage.route === "bdashprofile") {
       // PROFILE-QR-004：这张卡画的是**门店名片**（店名 + 店铺 id），不是个人主页码 ——
       // 以前不管有没有商家主体，这里编的都是拼出来的主页链接，扫出来只有一条链接。
       // 现在编标准 vCard：扫到就能存联系人，不需要域名。

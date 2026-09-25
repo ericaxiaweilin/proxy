@@ -4,6 +4,19 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 319 — 2026-09-25
+
+- **我的店铺 hub 落 bdash**（STORE-HUB-001，前端轮）：原型 2ef163 的列表 + 详情，
+  全部真数 —— 概览/卡片/详情统计走 GetStoreOrderStats（只数 COMPLETED 归因单，
+  空店全零 + "暂无评价"，不编 ★）；品类 chips 只出现店里真实有的；对接人/电话/
+  营业时间空就不画；打电话/复制地址真动作（电话空不摆按钮）；最近接单客人只叫
+  真名，拿不到叫"到店客人"。推荐不复制 —— 入口跳现有 storerecmanage；
+  原 bdash 资料页原样迁 bdashprofile，hub 留入口。砍掉的（无源）：星级、复购
+  假数、品类写死 chips（咖啡厅/SPA）、推荐表单照片上传（服务端不收）、签约日期。
+  归因入口（完成订单时指认店铺）下一轮，否则统计永远是 0。
+- 影响文件：`apps/mobile/src/surfaces/my-stores-hub.tsx`（新建）等 7 文件
+  （peer 同文件未提交改动未碰）。
+
 ## Revision 318 — 2026-09-25
 
 - **「推荐管理」按设计稿做成完整界面**（STORE-REC-MANAGE-001）：原来这一页只是 3 条

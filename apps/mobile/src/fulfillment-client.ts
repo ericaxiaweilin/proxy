@@ -43,6 +43,25 @@ export type FulfillmentOrder = {
   viewerRole: "REQUESTER" | "AGENT";
 };
 
+// STORE-STATS-001：一家店的经营统计（只数 COMPLETED 归因单；空店全零，recent []）。
+export type StoreOrderRecent = {
+  orderId: string;
+  requesterId: string;
+  serviceSku: string;
+  satisfaction: string;
+  completedAt: string;
+};
+
+export type StoreOrderStats = {
+  storeId: string;
+  orderCount: number;
+  fullCount: number;
+  partialCount: number;
+  repeatRequesters: number;
+  lastOrderAt?: string;
+  recent: StoreOrderRecent[];
+};
+
 export class FulfillmentClient {
   private sequence = 0;
   public constructor(
@@ -122,6 +141,16 @@ export class FulfillmentClient {
 
   public async recordOutcome(orderId: string, input: { onTime: boolean; scopeCompleted: boolean; objectiveNote?: string }): Promise<void> {
     await this.command("RecordOutcome", { type: "Order", id: orderId }, input as unknown as Record<string, unknown>);
+  }
+
+  // STORE-STATS-001：读一家店的经营统计。失败抛 —— 调用方区分「读不出来」和「确实没有」。
+  public async getStoreOrderStats(storeId: string): Promise<StoreOrderStats> {
+    const body = this.body(await this.command("GetStoreOrderStats", { type: "Store", id: storeId }, { storeId }));
+    const stats = body.stats as StoreOrderStats | undefined;
+    if (!stats || typeof stats.orderCount !== "number" || !Array.isArray(stats.recent)) {
+      throw new Error("store order stats malformed");
+    }
+    return stats;
   }
 
   public async recordSatisfaction(orderId: string, input: { resolved: "FULL" | "PARTIAL" | "NONE"; repeatIntent?: "REUSE" | "MAYBE" | "NO" }): Promise<void> {
