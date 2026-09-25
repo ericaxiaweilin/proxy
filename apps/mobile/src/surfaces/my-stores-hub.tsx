@@ -1,5 +1,5 @@
 // STORE-HUB-001：我的店铺 hub（原型 deepseek_html_20260925_2ef163「我的店铺 · 推荐管理」）。
-// 列表 → 详情；推荐管理不复制 —— 入口跳现有 storerecmanage 路由（同一套 StoreRecommendationManage）。
+// 列表 → 详情。本页只有店铺 —— 推荐管理不在这里（理由见下面 STORE-HUB-003）。
 //
 // STORE-HUB-NAV-001（2026-09-25 修）：
 //   - **返回按钮归本组件所有**。以前 me.tsx 的 bdash 分支自己画一个「‹ 返回」（退出整页），
@@ -11,6 +11,19 @@
 //     「两处空态互相指'去别处建'，实际无入口」是同一个 bug）。现在空态和页脚都有建店，
 //     落到 merchantstorefront（全 App 唯一的建店流程：账号 + 首店一次建完）。
 //   - 空态文案不再说「推荐的店被签约后会自动进来」—— 那跟服务端语义相反（采纳 ≠ 店铺已存在）。
+//
+// STORE-HUB-003（2026-09-25，产品决定）：**「我的店铺」里没有推荐管理。**
+// STORE-HUB-002 在页内加过「店铺 | 推荐管理」分段 tab（直接把 StoreRecommendationManage 嵌进来），
+// 用户看实机截图后否掉了。三条理由，都不是口味问题：
+//   ① 原型 2ef163 的「我的店铺」就是一张店铺列表，没有分段 tab；
+//   ② 推荐管理在「我的 → 企业 / 店铺」已经是**独立磁贴**（me.tsx 的 tiles）——
+//      页内再嵌一遍 = 同一个功能两个入口、两套壳，用户会分不清哪条是正门；
+//   ③ 嵌进来的那一份要自己再传一遍 tabs / 队列入口，等于把 storerecmanage 那一页
+//      的分工复制到第二个地方，两边迟早漂。
+// 所以这里只留店铺列表。**推荐管理的可达性没丢** —— 由磁贴 + `storerecmanage`
+// 路由负责（`store-section-tiles.test.ts` 钉的那 4 个目的地一个没动）。
+// 空态里那句「……或先去「推荐管理」推荐新店」也一并去掉：这一页不再往别处指路，
+// 只留一个真能点的「建店」。
 //
 // 诚实边界（都是这轮后端刚补的，没有就砍，没有假数）：
 //   - 概览/卡片/详情的单数/满意率/复购/最近接单全部来自 GetStoreOrderStats（只数
@@ -28,7 +41,6 @@ import type { BusinessClient, BusinessStoreWire, StoreLinesWire } from "../busin
 import type { FulfillmentClient, StoreOrderStats } from "../fulfillment-client";
 import type { ProfileClient } from "../profile-client";
 import { ProxyLoading } from "../components/proxy-foundation";
-import { StoreRecommendationManage } from "./store-recommendation-manage";
 import {
   coverForStore, filterHubShops, formatFullDate, formatHoursLines, formatMonthDay,
   satisfactionRate, satisfactionRateText, satisfactionText,
@@ -52,19 +64,15 @@ type HubShop = {
   statsFailed: boolean;
 };
 
-export function MyStoresHub({ business, fulfillment, profile, recommendTabs, onOpenRecQueue, onOpenStoreProfile, onOpenStoreCreate, onBack }: {
+export function MyStoresHub({ business, fulfillment, profile, onOpenStoreProfile, onOpenStoreCreate, onBack }: {
   business: BusinessClient;
   fulfillment: FulfillmentClient;
   profile: ProfileClient;
-  /** 推荐页签直接嵌现有组件（不复制）：me.tsx 的 STORE_REC_MANAGE_TABS。 */
-  recommendTabs: Array<{ id: "mine" | "new"; label: string }>;
-  onOpenRecQueue: () => void;
   onOpenStoreProfile: () => void;
   /** STORE-HUB-NAV-001：建店 / 添加门店 → merchantstorefront（唯一的建店流程）。 */
   onOpenStoreCreate: () => void;
   onBack: () => void;
 }): React.JSX.Element {
-  const [hubTab, setHubTab] = useState<"shops" | "rec">("shops");
   const [shops, setShops] = useState<HubShop[] | null>(null);
   const [listFailed, setListFailed] = useState(false);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
@@ -200,22 +208,6 @@ export function MyStoresHub({ business, fulfillment, profile, recommendTabs, onO
     <View>
       <HubNav backLabel="‹ 返回" onBack={onBack} title={HUB_TITLE} />
 
-      {/* 原型 2ef163 的分段 tab：店铺 | 推荐管理。推荐直接嵌现有组件，不复制。 */}
-      <View style={s.tabs}>
-        {(["shops", "rec"] as const).map((t) => (
-          <Pressable accessibilityLabel={t === "shops" ? "店铺" : "推荐管理"} key={t} onPress={() => setHubTab(t)} style={[s.tab, hubTab === t && s.tabOn]}>
-            <Text selectable style={[s.tabText, hubTab === t && s.tabTextOn]}>{t === "shops" ? "店铺" : "推荐管理"}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      {hubTab === "rec" ? (
-        <StoreRecommendationManage
-          tabs={recommendTabs}
-          onOpenQueue={onOpenRecQueue}
-          onOpenStore={() => setHubTab("shops")}
-        />
-      ) : (<>
       <View style={s.overview}>
         <Svg pointerEvents="none" style={StyleSheet.absoluteFill}>
           <Defs>
@@ -266,7 +258,7 @@ export function MyStoresHub({ business, fulfillment, profile, recommendTabs, onO
           <Text selectable style={s.emptyTitle}>{shops.length === 0 ? "还没有你的店" : "没有找到店铺"}</Text>
           <Text selectable style={s.emptyText}>
             {shops.length === 0
-              ? "推荐被采纳不等于店铺已存在 —— 要有人真的把店建出来才算接入。现在建一家，或先去「推荐管理」推荐新店。"
+              ? "推荐被采纳不等于店铺已存在 —— 要有人真的把店建出来才算接入。现在建一家。"
               : "换个关键词或切回「全部」试试。"}
           </Text>
           {shops.length === 0 ? (
@@ -304,10 +296,6 @@ export function MyStoresHub({ business, fulfillment, profile, recommendTabs, onO
 
       <Pressable accessibilityLabel="建店或添加门店" onPress={onOpenStoreCreate} style={s.linkRow}>
         <Text selectable style={s.linkText}>建店 / 添加门店</Text>
-        <Text selectable style={s.arrow}>›</Text>
-      </Pressable>
-      <Pressable accessibilityLabel="推荐管理" onPress={onOpenRecommend} style={s.linkRow}>
-        <Text selectable style={s.linkText}>推荐管理 · 我推荐的店和新店推荐</Text>
         <Text selectable style={s.arrow}>›</Text>
       </Pressable>
       <Pressable accessibilityLabel="店铺资料与二维码" onPress={onOpenStoreProfile} style={s.linkRow}>
@@ -471,12 +459,6 @@ const s = StyleSheet.create({
   ovLabelDark: { color: "#A79EAF", fontSize: 11, fontWeight: "700" },
   ovNum: { color: color.ink, fontSize: 20, fontWeight: "900" },
   ovLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
-  // 原型分段 tab：店铺 | 推荐管理。
-  tabs: { backgroundColor: color.surface, borderRadius: 13, flexDirection: "row", gap: 4, marginBottom: 14, padding: 4 },
-  tab: { alignItems: "center", borderRadius: 10, flex: 1, paddingVertical: 10 },
-  tabOn: { backgroundColor: color.white },
-  tabText: { color: color.muted, fontSize: 12, fontWeight: "900" },
-  tabTextOn: { color: color.ink },
   searchBox: { alignItems: "center", backgroundColor: color.surface, borderRadius: 12, flexDirection: "row", gap: 8, marginBottom: 10, paddingHorizontal: 12, paddingVertical: 10 },
   searchIcon: { color: color.muted, fontSize: 14, fontWeight: "800" },
   searchInput: { color: color.ink, flex: 1, fontSize: 14 },

@@ -89,3 +89,35 @@ describe("STORE-HUB-NAV-001 bdash 改语义后，老入口不跟着漂", () => {
     expect(meCode).not.toContain('backRoute: "bdash"');
   });
 });
+
+// STORE-HUB-003（2026-09-25，产品决定）：「我的店铺」里**没有**推荐管理。
+//
+// STORE-HUB-002 在页内加过「店铺 | 推荐管理」分段 tab（把 StoreRecommendationManage
+// 直接嵌进来），用户看实机截图后否掉了 —— 原型 2ef163 的「我的店铺」就是一张店铺列表；
+// 推荐管理在「我的 → 企业 / 店铺」已经是独立磁贴，页内再嵌一遍等于同一个功能两个入口。
+// 连空态文案里那句「……或先去「推荐管理」推荐新店」也去掉了：这一页只留店铺，不再指路。
+//
+// ⚠️ 删「页内入口」最容易顺手把**整条路**删掉（这正是 store-section-tiles.test.ts
+// 钉的那类事故），所以这里两条一起钉：页面里没有它，但路由和磁贴都还在。
+describe("STORE-HUB-003 我的店铺里没有推荐管理", () => {
+  it("页内不再有分段 tab，也不再嵌推荐管理组件", () => {
+    expect(hubCode).not.toContain("hubTab");
+    expect(hubCode).not.toContain("StoreRecommendationManage");
+    // 剥注释之后，这一页一个字都不许再出现「推荐管理」—— 包括空态文案里那句指路。
+    // 用户的原话是「我的店铺是没有推荐管理的」，所以钉的是**零出现**，不是「没有 tab」。
+    expect(hubCode).not.toContain("推荐管理");
+    // 样式一起删：留着就是死样式，下一个人会以为还有 tab。
+    expect(hubCode).not.toContain("s.tabs");
+    expect(hubCode).not.toContain("tabTextOn");
+  });
+
+  it("me.tsx 也不再往 hub 传推荐页签的 props", () => {
+    expect(meCode).not.toContain("recommendTabs");
+    expect(meCode).not.toContain("onOpenRecQueue");
+  });
+
+  it("但推荐管理的可达性没丢 —— 路由分支和磁贴都还在", () => {
+    expect(meCode).toContain('subPage.route === "storerecmanage"');
+    expect(meCode).toContain('label: "推荐管理"');
+  });
+});

@@ -2681,8 +2681,6 @@ export function MeSurface({
                 business={business}
                 fulfillment={fulfillment}
                 profile={profileClient}
-                recommendTabs={STORE_REC_MANAGE_TABS}
-                onOpenRecQueue={() => openSubPage(STORE_REC_QUEUE_ROW.route)}
                 onOpenStoreProfile={() => openSubPage("bdashprofile")}
                 onOpenStoreCreate={() => openSubPage("merchantstorefront")}
                 onBack={() => setSubPage(undefined)}
