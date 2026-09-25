@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 322 — 2026-09-25
+
+- **建店/二维码归位推荐管理**（STORE-HUB-MOVE-001）：我的店铺 hub 撤掉建店/资料两行，
+  只放已建成的店（空态 CTA 直连建店流程）；推荐管理顶部加体系接入区（建店 → 建店流程，
+  二维码 → 门店名片），ACCEPTED 的去建店同路；NAV-001 守卫同步到新分工。
+- 影响文件：hub / manage / me.tsx（3 处分支）/ 守卫（peer 同文件其他改动未碰）。
+
 ## Revision 321 — 2026-09-25
 
 - **店铺 hub 补齐**（STORE-HUB-002）：深色概览卡 + lime 复制地址（原型样）；

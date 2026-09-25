@@ -6,12 +6,8 @@
 //     本组件底部又画一个（同一个动作），详情页顶上再画一个（回列表）⇒ 详情页有两个返回，
 //     而用户会点的那个（最上面那个）直接把他踢出「我的店铺」。现在整个 hub 只有一条返回：
 //     列表态 = 退出，详情态 = 回列表。me.tsx 那一层不再画 back / title。
-//   - **建店入口**。这一页以前没有任何建店动作，而推荐管理在 ACCEPTED 态又把人指过来
-//     ⇒ 那条 CTA 是死路（与 merchant-storefront 里「两处空态互相指'去别处建'，实际无入口」
-//     是同一个 bug）。现在空态和页脚都有建店，落到 merchantstorefront（全 App 唯一的建店流程：
-//     账号 + 首店一次建完）。
-//     ⚠️ STORE-HUB-004 之后，推荐管理 ACCEPTED 的 CTA **直接**落 merchantstorefront，
-//     不再绕经这一页 —— 那一屏（workspace）才是建店的地方，这一页只放**已经处理完**的店。
+//   - **建店入口不在这一页**（STORE-HUB-MOVE-001）。建店 / 二维码归推荐管理，
+//     这一页只放**已经处理完**的店；空态 CTA 去推荐管理。
 //   - 空态文案不再说「推荐的店被签约后会自动进来」—— 那跟服务端语义相反（采纳 ≠ 店铺已存在）。
 //
 // STORE-HUB-003（2026-09-25，产品决定）：**「我的店铺」里没有推荐管理。**
@@ -66,12 +62,12 @@ type HubShop = {
   statsFailed: boolean;
 };
 
-export function MyStoresHub({ business, fulfillment, profile, onOpenStoreProfile, onOpenStoreCreate, onBack }: {
+export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate, onBack }: {
   business: BusinessClient;
   fulfillment: FulfillmentClient;
   profile: ProfileClient;
-  onOpenStoreProfile: () => void;
-  /** STORE-HUB-NAV-001：建店 / 添加门店 → merchantstorefront（唯一的建店流程）。 */
+  // STORE-HUB-MOVE-001：建店/二维码归推荐管理 —— 本页只放已建成的店。
+  // 空态 CTA 直连建店流程（merchantstorefront）；本页不出现"推荐管理"四字（HUB-003 零出现）。
   onOpenStoreCreate: () => void;
   onBack: () => void;
 }): React.JSX.Element {
@@ -304,15 +300,6 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreProfile
         })
       )}
       {listFailed ? <Text selectable style={s.error}>部分店铺没读出来，下拉刷一下试试。</Text> : null}
-
-      <Pressable accessibilityLabel="建店或添加门店" onPress={onOpenStoreCreate} style={s.linkRow}>
-        <Text selectable style={s.linkText}>建店 / 添加门店</Text>
-        <Text selectable style={s.arrow}>›</Text>
-      </Pressable>
-      <Pressable accessibilityLabel="店铺资料与二维码" onPress={onOpenStoreProfile} style={s.linkRow}>
-        <Text selectable style={s.linkText}>店铺资料与二维码</Text>
-        <Text selectable style={s.arrow}>›</Text>
-      </Pressable>
     </View>
   );
 }

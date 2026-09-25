@@ -45,6 +45,9 @@ export interface StoreRecommendationManageProps {
   initialTab?: "mine" | "new" | undefined;
   onOpenQueue?: (() => void) | undefined;
   onOpenStore?: (() => void) | undefined;
+  // STORE-HUB-MOVE-001（用户：建店/二维码归推荐管理）：体系接入区把去建店
+  // （= onOpenStore，建店流程）和店铺资料与二维码摆在一起。缺省不画。
+  onOpenStoreProfile?: (() => void) | undefined;
 }
 
 const STAGE_BG: Record<RecStageState, string> = {
@@ -72,7 +75,8 @@ export function StoreRecommendationManage({
   tabs,
   initialTab,
   onOpenQueue,
-  onOpenStore
+  onOpenStore,
+  onOpenStoreProfile,
 }: StoreRecommendationManageProps): React.JSX.Element {
   const [tab, setTab] = useState<"mine" | "new">(initialTab ?? "mine");
   const [detail, setDetail] = useState<StoreRecommendation | undefined>(undefined);
@@ -268,6 +272,24 @@ export function StoreRecommendationManage({
 
   return (
     <View>
+      {/* STORE-HUB-MOVE-001：体系接入行原来在「我的店铺」hub 里 —— 建店/二维码
+          是把店弄进体系的动作，不是已有店铺的数据，归推荐管理。 */}
+      {onOpenStore || onOpenStoreProfile ? (
+        <View style={s.accessSection}>
+          {onOpenStore ? (
+            <Pressable accessibilityLabel="建店或添加门店" onPress={onOpenStore} style={s.accessRow}>
+              <Text selectable style={s.accessText}>建店 / 添加门店</Text>
+              <Text selectable style={s.accessArrow}>›</Text>
+            </Pressable>
+          ) : null}
+          {onOpenStoreProfile ? (
+            <Pressable accessibilityLabel="店铺资料与二维码" onPress={onOpenStoreProfile} style={s.accessRow}>
+              <Text selectable style={s.accessText}>店铺资料与二维码</Text>
+              <Text selectable style={s.accessArrow}>›</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
       <View style={s.tabBar}>
         {tabs.map((entry) => {
           const active = tab === entry.id;
@@ -420,6 +442,10 @@ export function StoreRecommendationManage({
 }
 
 const s = StyleSheet.create({
+  accessSection: { gap: 8, marginBottom: 4 },
+  accessRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 13 },
+  accessText: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  accessArrow: { color: color.muted, fontSize: 18, fontWeight: "800" },
   tabBar: {
     backgroundColor: color.surface,
     borderRadius: 14,

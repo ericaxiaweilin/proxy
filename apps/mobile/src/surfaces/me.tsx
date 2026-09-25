@@ -2681,7 +2681,6 @@ export function MeSurface({
                 business={business}
                 fulfillment={fulfillment}
                 profile={profileClient}
-                onOpenStoreProfile={() => openSubPage("bdashprofile")}
                 onOpenStoreCreate={() => openSubPage("merchantstorefront")}
                 onBack={() => setSubPage(undefined)}
               />
@@ -2804,6 +2803,7 @@ export function MeSurface({
             <StoreRecommendationManage
               onOpenQueue={() => openSubPage(STORE_REC_QUEUE_ROW.route)}
               onOpenStore={() => openSubPage("merchantstorefront")}
+              onOpenStoreProfile={() => openSubPage("bdashprofile")}
               tabs={STORE_REC_MANAGE_TABS}
             />
           </ScrollView>
@@ -2882,7 +2882,7 @@ export function MeSurface({
               <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text selectable style={styles.subPageTitle}>我推荐的店</Text>
-            <StoreRecommendationManage initialTab="mine" onOpenStore={() => openSubPage("merchantstorefront")} tabs={STORE_REC_MANAGE_TABS} />
+            <StoreRecommendationManage initialTab="mine" onOpenStore={() => openSubPage("merchantstorefront")} onOpenStoreProfile={() => openSubPage("bdashprofile")} tabs={STORE_REC_MANAGE_TABS} />
           </ScrollView>
         </View>
       );
@@ -2904,7 +2904,7 @@ export function MeSurface({
               用户一起把好的店铺带进体系，运营评估后接入。推荐记录会留档（append-only），
               后续接入进度在运营侧推进。
             </Text>
-            <StoreRecommendationManage initialTab="new" onOpenStore={() => openSubPage("merchantstorefront")} tabs={STORE_REC_MANAGE_TABS} />
+            <StoreRecommendationManage initialTab="new" onOpenStore={() => openSubPage("merchantstorefront")} onOpenStoreProfile={() => openSubPage("bdashprofile")} tabs={STORE_REC_MANAGE_TABS} />
           </ScrollView>
         </View>
       );

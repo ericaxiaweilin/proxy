@@ -63,12 +63,21 @@ describe("STORE-HUB-NAV-001 我的店铺的返回只有一个", () => {
 });
 
 describe("STORE-HUB-NAV-001 建店闭环", () => {
-  it("hub 有建店入口，且落到全 App 唯一的建店流程", () => {
+  // STORE-HUB-MOVE-001（用户：建店/二维码归推荐管理）：hub 里不再摆建店/资料行 ——
+  // 空态一个建店 CTA（直连建店流程），体系接入两行（建店/二维码）在推荐管理。
+  it("hub 只有空态一个建店入口，列表态不摆建店/资料行", () => {
     expect(meCode).toContain('onOpenStoreCreate={() => openSubPage("merchantstorefront")}');
-    // 两处：空态的「建店」和页脚的「建店 / 添加门店」。
-    expect(countOf(hubCode, "onOpenStoreCreate")).toBeGreaterThanOrEqual(3);
+    // 三处：props 解构 + 类型 + 空态 CTA。列表态不再摆建店/资料行。
+    expect(countOf(hubCode, "onOpenStoreCreate")).toBe(3);
     expect(hubCode).toContain('accessibilityLabel="建店"');
-    expect(hubCode).toContain("建店 / 添加门店");
+    expect(hubCode).not.toContain("建店 / 添加门店");
+    expect(hubCode).not.toContain("店铺资料与二维码");
+  });
+
+  it("推荐管理摆体系接入两行：建店走建店流程，二维码看门店名片", () => {
+    expect(manageCode).toContain("建店 / 添加门店");
+    expect(manageCode).toContain("店铺资料与二维码");
+    expect(manageCode).toContain("onOpenStoreProfile");
   });
 
   it("空态不再承诺「推荐被签约后自动进来」—— 那是跟服务端相反的说法", () => {
