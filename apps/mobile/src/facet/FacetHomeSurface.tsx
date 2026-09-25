@@ -4,10 +4,32 @@
 // 原则 "Not a sixth root" — FACET 是 ME tab 内的 deep module.
 // 顶部 hero: Otter logo (真实 PNG, 非 emoji) + "对象化内容运营" + stats + nav + 对象 list.
 // Phase 1.5 在 Phase 1 基础上补齐：真实 logo、ProxyIcon、重试/下拉刷新、对象预览与 LIBRARY/OBJECTS/OPS 子页.
+//
+// 2026-09-25 对齐 deepseek_html_20260925_cb1dd9.html（FACET · AI 辅助内容发布）：
+//   · 首屏第一块从「AI 分身入口」改成「AI 今日建议」—— 把 server 早就给了、
+//     但只藏在展开卡片里的推荐方向（recommendedKind / gap / confidence）提到
+//     首屏；对象列表按关系分组。
+//   · 原型里「准备了 N 张素材」「建议文案」「确认发布」没有数据源，**没有照抄**。
+//   · 原型里的 PDPL 同意闸 / 隐私看板（AES-256、越南境内服务器、60 日备案、
+//     DPO 邮箱）是法律断言，仓库里没有对应事实，**没有照抄**。
+//   · 原型用自绘 SVG 水獭头当 logo，本屏保持真实 otter-logo.png 不变。
+//
+// 纯逻辑（选谁当今日建议 / 分组 / 时间格式化）在 facet-home-model.ts，
+// 因为 .tsx 不能被 vitest import。
 
 import { useCallback, useEffect, useState } from "react";
 import { Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { extractShownCount } from "./extract-shown-count";
+import {
+  CONFIDENCE_TIER_TEXT,
+  RELATION_LABEL,
+  confidenceTier,
+  formatNextShowAt,
+  groupObjectsByRelation,
+  kindLabel,
+  objectSuggestionHint,
+  pickDailySuggestion
+} from "./facet-home-model";
 import type { FacetConfig, FacetObject, FacetSideSpacePost, ListFacetObjectsPayload, SideSpaceCatalogPost } from "@proxy/contracts";
 import { FacetClient, FacetProtocolError } from "../facet-client";
 import { ProxyIcon } from "../components/proxy-icon";
@@ -16,26 +38,12 @@ import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
-const RELATION_PILL: Record<FacetObject["relation"], string> = {
-  BUILDING_TRUST: "重点关系",
-  SHARED_INTEREST: "朋友",
-  CREATOR_COLLAB: "合作",
-};
+// 关系 pill 文案跟分组标题共用一份（facet-home-model），避免两处漂移。
+const RELATION_PILL = RELATION_LABEL;
 
-// R15.43: FacetRecommendedKind 中文 label（副空间项 / 缺口推荐都用）
-const KIND_LABEL: Record<string, string> = {
-  "personal/real-life": "真实日常",
-  "personal/honest": "真实软肋",
-  "city/travel": "城市 · 旅行",
-  "photo": "摄影",
-  "shared-experience": "共同回忆",
-  "portfolio/capability": "作品 · 能力",
-  "intro/services": "服务介绍"
-};
-
-function kindLabel(kind: string): string {
-  return KIND_LABEL[kind] ?? kind;
-}
+// 深色卡渐变端点（「AI 今日建议」+ 对象详情 hero 共用）—— 对齐原型
+// .ai-daily / .detail-hero 的 #2A1E3A → 近黑。
+const DARK_CARD_FROM = "#2A1E3A";
 
 function formatAddedAt(iso: string): string {
   // Phase 1.5: 简单转 "MM-DD HH:mm"，避免 Intl 依赖 (Hermes 不全)
@@ -72,6 +80,10 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
   const [pushSuggestions, setPushSuggestions] = useState<{ post: SideSpaceCatalogPost; reason: string; rank: number }[]>([]);
   const [sideSpaceError, setSideSpaceError] = useState<string | undefined>();
   const [sideSpaceBusy, setSideSpaceBusy] = useState(false);
+
+  // 首屏「AI 今日建议」—— 纯派生，不额外请求。payload 没到就是 undefined，
+  // 卡片整块不渲染（宁可不显示，也不编一条建议出来）。
+  const dailySuggestion = payload ? pickDailySuggestion(payload.objects) : undefined;
 
   const fetchObjects = useCallback(async (showLoading: boolean) => {
     if (showLoading) setPhase("LOADING");
@@ -278,24 +290,39 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
           <Pressable onPress={() => setView("HOME")} style={styles.backRow}>
             <Text selectable style={styles.backText}>‹ 返回 FACET</Text>
           </Pressable>
-          <View style={styles.previewHead}>
-            <View style={styles.previewAvatar}><Text selectable style={styles.previewAvatarText}>{previewObject.displayName.charAt(0)}</Text></View>
-            <View style={styles.previewCopy}>
-              <View style={styles.objectNameRow}>
-                <Text selectable style={styles.objectName}>{previewObject.displayName}</Text>
-                <View style={styles.objectPill}><Text selectable style={styles.objectPillText}>{RELATION_PILL[previewObject.relation]}</Text></View>
+          {/* 对象详情深色 hero —— 对齐原型 .detail-hero（深色渐变 + 头像 + 关系 pill）。 */}
+          <Gradient from={DARK_CARD_FROM} to={color.deep} style={styles.previewHero}>
+            <View style={styles.previewHead}>
+              <View style={styles.previewAvatar}><Text selectable style={styles.previewAvatarText}>{previewObject.displayName.charAt(0)}</Text></View>
+              <View style={styles.previewCopy}>
+                <View style={styles.objectNameRow}>
+                  <Text selectable style={styles.previewName}>{previewObject.displayName}</Text>
+                  <View style={styles.previewPill}><Text selectable style={styles.previewPillText}>{RELATION_PILL[previewObject.relation]}</Text></View>
+                </View>
+                <Text selectable style={styles.previewSub}>{previewObject.currentState}</Text>
               </View>
-              <Text selectable style={styles.previewSub}>{previewObject.currentState}</Text>
             </View>
-          </View>
+          </Gradient>
           <View style={styles.sectionCard}>
             <Text selectable style={styles.sectionCardTitle}>关系目标</Text>
             <Text selectable style={styles.sectionCardBody}>{previewObject.goal}</Text>
           </View>
+          {/* 原型把这块叫「AI 已准备好」并配一张素材 + 文案 + 发布时间。素材和文案
+              没有数据源；这里只把 server 真给了的三样放进来：推荐方向、为什么、什么时候。 */}
           <View style={styles.sectionCard}>
-            <Text selectable style={styles.sectionCardTitle}>当前缺口</Text>
+            <View style={styles.aiSuggestHead}>
+              <Text selectable style={styles.sectionCardTitle}>AI 建议</Text>
+              <View style={styles.aiSuggestKindChip}>
+                <Text selectable style={styles.aiSuggestKindText}>{kindLabel(previewObject.recommendedKind)}</Text>
+              </View>
+            </View>
             <Text selectable style={styles.sectionCardBody}>{previewObject.gap.summary}</Text>
-            <Text selectable style={styles.sectionCardAccent}>下一次：{previewObject.gap.nextShowAt}</Text>
+            <Text selectable style={styles.sectionCardAccent}>
+              下一次：{formatNextShowAt(previewObject.gap.nextShowAt)}
+            </Text>
+            <Text selectable style={styles.sectionCardHint}>
+              AI 判断把握 {previewObject.reasoningConfidence}%（{CONFIDENCE_TIER_TEXT[confidenceTier(previewObject.reasoningConfidence)]}）· 数字由服务端推理给出
+            </Text>
           </View>
           <View style={styles.sectionCard}>
             <Text selectable style={styles.sectionCardTitle}>TA 将看到的你</Text>
@@ -304,9 +331,9 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
               {/* R15.50: 预览 feed 从 server 字段生成 (不再 hardcode) */}
               {/* 1) 下一次推荐 — 来自 AI recommendedKind + gap */}
               <View style={styles.previewFeedItem}>
-                <Text selectable style={styles.previewFeedLabel}>优先 · {KIND_LABEL[previewObject.recommendedKind] ?? "未推荐"}</Text>
+                <Text selectable style={styles.previewFeedLabel}>优先 · {previewObject.recommendedKind ? kindLabel(previewObject.recommendedKind) : "未推荐"}</Text>
                 <Text selectable style={styles.previewFeedText}>
-                  {previewObject.gap.summary} · 下次“{previewObject.gap.nextShowAt}”补 1 条
+                  {previewObject.gap.summary} · 下次“{formatNextShowAt(previewObject.gap.nextShowAt)}”补 1 条
                 </Text>
               </View>
               {/* 2) 现状计数 — 从 currentState 拆出“已展示 N 条” */}
@@ -516,6 +543,37 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
           </Text>
         </View>
 
+        {/* AI 今日建议 — 对齐原型首屏第一块。卡上每个字都能追到 server：
+            recommendedKind（方向）/ gap.summary（为什么）/ gap.nextShowAt（什么时候）
+            / reasoningConfidence（把握）。原型那套「准备了 N 张素材 + AI 生成文案 +
+            确认发布」没有数据源，这里一条都没有搬。 */}
+        {dailySuggestion ? (
+          <Gradient from={DARK_CARD_FROM} to={color.deep} style={styles.aiDaily}>
+            <View style={styles.aiDailyHead}>
+              <View style={styles.aiDailyDot} />
+              <Text selectable style={styles.aiDailyKicker}>AI 今日建议</Text>
+              <Text selectable style={styles.aiDailyConfidence}>
+                {CONFIDENCE_TIER_TEXT[dailySuggestion.tier]} · {dailySuggestion.confidence}%
+              </Text>
+            </View>
+            <Text selectable style={styles.aiDailyTitle}>
+              给 {dailySuggestion.object.displayName} 优先展示
+              <Text selectable style={styles.aiDailyKind}>「{dailySuggestion.kindText}」</Text>
+            </Text>
+            <Text selectable style={styles.aiDailyRationale}>{dailySuggestion.rationale}</Text>
+            <Text selectable style={styles.aiDailyTime}>
+              下一次展示 {dailySuggestion.nextShowText}
+            </Text>
+            <Pressable
+              onPress={() => openPreview(dailySuggestion.object)}
+              style={styles.aiDailyBtn}
+              accessibilityLabel={`查看 ${dailySuggestion.object.displayName} 看到的我`}
+            >
+              <Text selectable style={styles.aiDailyBtnText}>查看 TA 看到的我</Text>
+            </Pressable>
+          </Gradient>
+        ) : null}
+
         {onOpenAiIdentity ? (
           <Pressable onPress={onOpenAiIdentity} style={styles.aiLinkCard} accessibilityLabel="去 AI 分身生成新素材">
             <View style={styles.aiLinkCopy}>
@@ -567,14 +625,24 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
             <View style={styles.objectsList}>
               {payload.objects.length === 0 ? (
                 <ProxyEmptyState title="还没有对象" sub="创建首个对象后，这里会显示关系与缺口" />
-              ) : payload.objects.map((obj: FacetObject) => (
-                <ObjectCard
-                  key={obj.id}
-                  object={obj}
-                  expanded={expandedId === obj.id}
-                  onToggle={() => setExpandedId((current) => current === obj.id ? undefined : obj.id)}
-                  onPreview={() => openPreview(obj)}
-                />
+              ) : groupObjectsByRelation(payload.objects).map((group) => (
+                <View key={group.relation} style={styles.relationGroup}>
+                  <View style={styles.relationHead}>
+                    <Text selectable style={styles.relationLabel}>{group.label}</Text>
+                    <Text selectable style={styles.relationCount}>{group.objects.length}</Text>
+                    <View style={styles.relationRule} />
+                  </View>
+                  {group.objects.map((obj: FacetObject) => (
+                    <ObjectCard
+                      key={obj.id}
+                      object={obj}
+                      featured={dailySuggestion?.object.id === obj.id}
+                      expanded={expandedId === obj.id}
+                      onToggle={() => setExpandedId((current) => current === obj.id ? undefined : obj.id)}
+                      onPreview={() => openPreview(obj)}
+                    />
+                  ))}
+                </View>
               ))}
             </View>
           </View>
@@ -609,10 +677,14 @@ function NavCard({ label, sub, iconName, onPress }: { label: string; sub: string
   );
 }
 
-function ObjectCard({ object: obj, expanded, onToggle, onPreview }: { object: FacetObject; expanded: boolean; onToggle: () => void; onPreview: () => void }): React.JSX.Element {
+function ObjectCard({ object: obj, featured, expanded, onToggle, onPreview }: { object: FacetObject; featured: boolean; expanded: boolean; onToggle: () => void; onPreview: () => void }): React.JSX.Element {
   const initial = obj.displayName.charAt(0);
+  // 每个对象都有一行 ✨（server 恒给 recommendedKind）；只有「今日建议」那一个
+  // 换淡紫底强调 —— 原型给所有待处理对象加底色 + 未读徽章，但 FACET 每个对象
+  // 都恰好一条建议，全上底色等于没强调。
+  const hint = objectSuggestionHint(obj);
   return (
-    <Pressable onPress={onToggle} style={styles.objectCard}>
+    <Pressable onPress={onToggle} style={featured ? styles.objectCardFeatured : styles.objectCard}>
       <View style={styles.objectHead}>
         <View style={styles.objectAvatar}><Text selectable style={styles.objectAvatarText}>{initial}</Text></View>
         <View style={styles.objectHeadCopy}>
@@ -623,6 +695,7 @@ function ObjectCard({ object: obj, expanded, onToggle, onPreview }: { object: Fa
           <Text selectable style={styles.objectState} numberOfLines={expanded ? undefined : 2}>
             {obj.currentState}
           </Text>
+          {hint ? <Text selectable style={styles.objectHint}>{hint}</Text> : null}
         </View>
         <Text selectable style={styles.objectChevron}>{expanded ? "▾" : "›"}</Text>
       </View>
@@ -630,7 +703,7 @@ function ObjectCard({ object: obj, expanded, onToggle, onPreview }: { object: Fa
         <View style={styles.objectDetail}>
           <DetailRow label="关系目标" value={obj.goal} />
           <DetailRow label="当前缺口" value={obj.gap.summary} />
-          <DetailRow label="下一次展示" value={obj.gap.nextShowAt} accent />
+          <DetailRow label="下一次展示" value={formatNextShowAt(obj.gap.nextShowAt)} accent />
           <Pressable onPress={onPreview} style={styles.objectDetailBtn}>
             <Text selectable style={styles.objectDetailBtnText}>查看 {obj.displayName} 看到的我</Text>
           </Pressable>
@@ -682,6 +755,19 @@ const styles = StyleSheet.create({
   aiLinkSub: { fontSize: 11, color: color.ink, marginTop: 3, lineHeight: 15 },
   aiLinkChevron: { fontSize: 20, color: color.violet },
 
+  // AI 今日建议（深色卡）—— 对齐原型 .ai-daily。
+  aiDaily: { borderRadius: 18, marginTop: 12, overflow: "hidden", padding: 15 },
+  aiDailyHead: { alignItems: "center", flexDirection: "row", gap: 6 },
+  aiDailyDot: { backgroundColor: "#A78BFA", borderRadius: 3, height: 6, width: 6 },
+  aiDailyKicker: { color: "#C4B5FD", fontSize: 10, fontWeight: "800", letterSpacing: 1 },
+  aiDailyConfidence: { color: color.darkTextMuted, fontSize: 10, fontWeight: "700", marginLeft: "auto" },
+  aiDailyTitle: { color: color.white, fontSize: 16, fontWeight: "800", lineHeight: 22, marginTop: 10 },
+  aiDailyKind: { color: "#D6C6FC", fontWeight: "800" },
+  aiDailyRationale: { color: color.darkCardText, fontSize: 12, lineHeight: 18, marginTop: 8 },
+  aiDailyTime: { color: color.darkCardText, fontSize: 11, fontWeight: "700", marginTop: 10 },
+  aiDailyBtn: { alignItems: "center", backgroundColor: "rgba(255, 255, 255, 0.14)", borderColor: "rgba(255, 255, 255, 0.22)", borderRadius: 13, borderWidth: 1, marginTop: 12, paddingVertical: 11 },
+  aiDailyBtnText: { color: color.white, fontSize: 13, fontWeight: "800" },
+
   stats: { flexDirection: "row", gap: 7, marginTop: 10 },
   statBlock: { backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, flex: 1, padding: 10, ...shadows.card },
   statValue: { color: color.ink, fontSize: 18, fontWeight: "800" },
@@ -704,9 +790,18 @@ const styles = StyleSheet.create({
   objectsSection: { marginTop: 18 },
   sectionTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   sectionNote: { color: color.muted, fontSize: 10, marginTop: 3 },
-  objectsList: { gap: 8, marginTop: 10 },
+  objectsList: { gap: 14, marginTop: 10 },
+
+  // 按关系分组（原型 .group-label）—— label + 计数 + 一条撑满的细线。
+  relationGroup: { gap: 8 },
+  relationHead: { alignItems: "center", flexDirection: "row", gap: 6, paddingHorizontal: 2 },
+  relationLabel: { color: color.muted, fontSize: 10, fontWeight: "800", letterSpacing: 0.6 },
+  relationCount: { backgroundColor: color.surface, borderRadius: 7, color: color.muted, fontSize: 9, fontWeight: "800", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 1 },
+  relationRule: { backgroundColor: color.line, flex: 1, height: 1 },
 
   objectCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, padding: 11, ...shadows.card },
+  // 有 AI 推荐方向的对象：淡紫底 + 紫边，跟原型 .object-card.pending 一致。
+  objectCardFeatured: { backgroundColor: "#FCFAFF", borderColor: "#E4D9FD", borderRadius: 15, borderWidth: 1, padding: 11, ...shadows.card },
   objectHead: { alignItems: "center", flexDirection: "row", gap: 10 },
   objectAvatar: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 21, borderWidth: 1, height: 42, justifyContent: "center", width: 42 },
   objectAvatarText: { color: color.ink, fontSize: 16, fontWeight: "800" },
@@ -716,6 +811,7 @@ const styles = StyleSheet.create({
   objectPill: { backgroundColor: color.attentionBg, borderColor: color.attentionBorder, borderRadius: 10, borderWidth: 1, paddingHorizontal: 7, paddingVertical: 2 },
   objectPillText: { color: color.magenta, fontSize: 9, fontWeight: "700" },
   objectState: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },
+  objectHint: { color: color.violet, fontSize: 10, fontWeight: "800", marginTop: 5 },
   objectChevron: { color: color.muted, fontSize: 18, fontWeight: "300" },
 
   objectDetail: { borderColor: color.line, borderTopWidth: 1, gap: 6, marginTop: 9, paddingTop: 9 },
@@ -729,12 +825,19 @@ const styles = StyleSheet.create({
   scopeFooter: { marginTop: 18, paddingTop: 12 },
   scopeFooterText: { color: color.muted, fontSize: 10, lineHeight: 15, textAlign: "center" },
 
-  // Preview / subpage
-  previewHead: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 10, padding: 14, ...shadows.card },
-  previewAvatar: { alignItems: "center", backgroundColor: "#F1E8FF", borderRadius: 16, height: 56, justifyContent: "center", width: 56 },
-  previewAvatarText: { color: color.ink, fontSize: 16, fontWeight: "900" },
+  // Preview / subpage —— 深色 hero 对齐原型 .detail-hero（深色渐变 + 头像 + 关系 pill）。
+  previewHero: { borderRadius: 18, marginTop: 10, overflow: "hidden", padding: 16 },
+  previewHead: { alignItems: "center", flexDirection: "row", gap: 12 },
+  previewAvatar: { alignItems: "center", backgroundColor: "rgba(255, 255, 255, 0.16)", borderRadius: 16, height: 56, justifyContent: "center", width: 56 },
+  previewAvatarText: { color: color.white, fontSize: 16, fontWeight: "900" },
   previewCopy: { flex: 1 },
-  previewSub: { color: color.muted, fontSize: 11, marginTop: 4 },
+  previewName: { color: color.white, fontSize: 17, fontWeight: "800" },
+  previewPill: { backgroundColor: "rgba(255, 255, 255, 0.18)", borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
+  previewPillText: { color: color.white, fontSize: 9, fontWeight: "800" },
+  previewSub: { color: color.darkTextMuted, fontSize: 11, marginTop: 4 },
+  aiSuggestHead: { alignItems: "center", flexDirection: "row", gap: 8 },
+  aiSuggestKindChip: { backgroundColor: color.proxyPurpleSoft, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
+  aiSuggestKindText: { color: color.proxyPurple, fontSize: 10, fontWeight: "800" },
   sectionCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 12, padding: 12, ...shadows.card },
   sectionCardTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
   sectionCardBody: { color: color.ink, fontSize: 12, lineHeight: 18, marginTop: 6 },
