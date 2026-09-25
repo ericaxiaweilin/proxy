@@ -21,6 +21,12 @@ import {
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
+// 计数没拉到就画「—」，不回填 0 —— 0 读起来是「没人关注他」，那是编出来的事实。
+// 与「我的 → 个人主页」的 dash 同一口径（me.tsx）。
+function countLabel(value: number | undefined): string {
+  return value === undefined ? "—" : String(value);
+}
+
 export type OtherProfileTarget = {
   userId: string;
   name: string;
@@ -197,7 +203,31 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
   return <View style={styles.root}>
     <View style={styles.header}><Pressable onPress={onBack} style={styles.back}><Text selectable style={styles.backText}>‹ 返回</Text></Pressable><Text selectable style={styles.headerTitle}>{target.name}</Text><Pressable onPress={() => setReporting(true)} style={styles.headerAction} accessibilityLabel="举报这个账号"><Text selectable style={styles.headerActionText}>举报</Text></Pressable></View>
     <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.identity}><View style={styles.avatar}>{target.avatarUri ? <Image source={{ uri: target.avatarUri }} style={styles.avatarPhoto} /> : <Text selectable style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text>}</View><View style={styles.identityCopy}><Text selectable style={styles.name}>{target.name}</Text><Text selectable style={styles.handle}>@{target.userId}</Text><Text selectable style={styles.bio}>{target.city ?? "公开主页"}</Text></View></View>
+      {/* PROFILE-HEAD-PARITY-001: 头部跟「我的 → 个人主页」对齐。参考稿 (Threads R2)
+          是名字在左、头像在右的一行；这里以前是反过来的（头像在左、名字在右），
+          同一个 App 里两条路进到「一个人的主页」却长得不一样 —— 从动态点头像
+          进来的那条看着像另一个产品。样式 token 直接沿用 me-styles 的 personalHead
+          一组值（24/800 名字、82 圆头像、11pt 次级文字），不另造一套。 */}
+      <View style={styles.head}>
+        <View style={styles.headCopy}>
+          <Text selectable numberOfLines={1} style={styles.name}>{target.name}</Text>
+          <Text selectable numberOfLines={1} style={styles.handle}>@{target.userId}</Text>
+        </View>
+        <View style={styles.avatarWrap}>
+          <View style={styles.avatar}>{target.avatarUri ? <Image source={{ uri: target.avatarUri }} style={styles.avatarPhoto} /> : <Text selectable style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text>}</View>
+        </View>
+      </View>
+      {/* 简介行：「我的主页」那一份把 bio 放在头像行下面单独一行（personalIntroRow）。
+          他人主页没有 bio 字段，城市是唯一一句自我介绍，就放同一个位置，不挤进名字下面。 */}
+      <View style={styles.introRow}>
+        <Text selectable numberOfLines={2} style={styles.introText}>{target.city ?? "公开主页"}</Text>
+      </View>
+      {/* 统计行：参考稿头部下面是「关注 / 粉丝」，「我的主页」的 personalStatRow 是同一形状。
+          计数没拉到画「—」，不回填 0。 */}
+      <View style={styles.statRow}>
+        <Text selectable style={styles.statText}><Text selectable style={styles.statValue}>{countLabel(counts?.following)}</Text> 关注</Text>
+        <Text selectable style={styles.statText}><Text selectable style={styles.statValue}>{countLabel(counts?.followers)}</Text> 粉丝</Text>
+      </View>
       {notice ? <Text selectable style={styles.notice}>{notice}</Text> : null}
       {/* AVATAR-CARRY-001: profileAvatarUri 之前没传——ProfileTabs 内部这根线
           (PostsTab → PostCard.avatarUri) 本来就是通的，帖子头像栏一直画着，
@@ -223,4 +253,4 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
   </View>;
 }
 
-const styles=StyleSheet.create({root:{backgroundColor:color.offWhite,flex:1},header:{alignItems:"center",borderBottomColor:color.line,borderBottomWidth:1,flexDirection:"row",height:50,paddingHorizontal:16},back:{flex:1},backText:{color:color.magenta,fontSize:15,fontWeight:"800"},headerTitle:{color:color.ink,fontSize:17,fontWeight:"900"},headerSpacer:{flex:1},headerAction:{alignItems:"flex-end",flex:1},headerActionText:{color:color.muted,fontSize:14,fontWeight:"700"},content:{paddingBottom:30},identity:{alignItems:"center",flexDirection:"row",gap:14,padding:18},avatar:{alignItems:"center",backgroundColor:color.proxyPurpleSoft,borderRadius:38,height:76,justifyContent:"center",overflow:"hidden",width:76},avatarPhoto:{height:"100%",width:"100%"},avatarText:{color:color.violet,fontSize:30,fontWeight:"900"},identityCopy:{flex:1},name:{color:color.ink,fontSize:24,fontWeight:"900"},handle:{color:color.muted,fontSize:13,marginTop:2},bio:{color:color.ink,fontSize:13,marginTop:7},notice:{color:color.error,fontSize:12,paddingHorizontal:18,paddingBottom:8}});
+const styles=StyleSheet.create({root:{backgroundColor:color.offWhite,flex:1},header:{alignItems:"center",borderBottomColor:color.line,borderBottomWidth:1,flexDirection:"row",height:50,paddingHorizontal:16},back:{flex:1},backText:{color:color.magenta,fontSize:15,fontWeight:"800"},headerTitle:{color:color.ink,fontSize:17,fontWeight:"900"},headerSpacer:{flex:1},headerAction:{alignItems:"flex-end",flex:1},headerActionText:{color:color.muted,fontSize:14,fontWeight:"700"},content:{paddingBottom:30},head:{alignItems:"flex-start",flexDirection:"row",gap:16,justifyContent:"space-between",paddingHorizontal:18,paddingTop:7},headCopy:{flex:1,minWidth:0},avatarWrap:{height:82,width:82},avatar:{alignItems:"center",backgroundColor:"#EDE4FF",borderColor:"#ececec",borderRadius:41,borderWidth:1,height:82,justifyContent:"center",overflow:"hidden",width:82},avatarPhoto:{height:"100%",width:"100%"},avatarText:{color:"#5B3FB8",fontSize:27,fontWeight:"800"},name:{color:color.ink,fontSize:24,fontWeight:"800",letterSpacing:-0.96,lineHeight:28},handle:{color:"#444",fontSize:11,marginTop:4},introRow:{alignItems:"center",flexDirection:"row",paddingHorizontal:18,paddingTop:10},introText:{color:color.ink,flex:1,fontSize:11,lineHeight:16},statRow:{alignItems:"center",flexDirection:"row",justifyContent:"space-between",marginBottom:15,marginTop:12,paddingHorizontal:18},statText:{color:"#8c8c8c",fontSize:11},statValue:{color:"#111",fontWeight:"800"},notice:{color:color.error,fontSize:12,paddingHorizontal:18,paddingBottom:8}});

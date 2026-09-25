@@ -126,6 +126,33 @@ describe("Proxy Design System R3 typography", () => {
     expect(source).toMatch(/personalAvaAdd:\s*\{[\s\S]*?position:\s*"absolute"/);
   });
 
+  // PROFILE-HEAD-PARITY-001（2026-09-23）：上面那条只钉了「我的 → 个人主页」。
+  // 从「动态 → 点帖文头像 → 主页」进来的那一份（other-profile.tsx）当时还是
+  // 头像在左、名字在右的老布局 —— 同一个 App 里两条路进到「一个人的主页」
+  // 却长得不一样，而且**没有任何断言会红**，所以它一直没人发现。这里把同一条
+  // 不变量钉到第二条路上：名字在左、头像在右的一行 + 82 圆头像（与 me-styles
+  // personalAvaWrap 同值）+ 头部下面是「关注 / 粉丝」统计行。
+  it("keeps the same Threads R2 header on the profile reached from the feed", () => {
+    const otherPath = join(sourceRoot, "surfaces", "other-profile.tsx");
+    const other = readFileSync(otherPath, "utf8");
+    // 名字/头像同一行 + gap 16（= me-styles personalHead）
+    expect(other).toMatch(/head:\s*\{[\s\S]*?flexDirection:\s*"row"[\s\S]*?gap:\s*16/);
+    // 头像 82px（= me-styles personalAvaWrap）
+    expect(other).toMatch(/avatarWrap:\s*\{[\s\S]*?width:\s*82/);
+    // 名字块必须在头像之前 —— 顺序反了就是回到「头像在左」的老布局。
+    // 两个标记串都只在 JSX 里出现（styles 表里是 headCopy:{ / avatarWrap:{）。
+    const nameAt = other.indexOf("styles.headCopy");
+    const avatarAt = other.indexOf("styles.avatarWrap");
+    expect(nameAt, "styles.headCopy should be rendered").toBeGreaterThan(-1);
+    expect(avatarAt, "styles.avatarWrap should be rendered").toBeGreaterThan(-1);
+    expect(nameAt, "名字块要排在头像前面").toBeLessThan(avatarAt);
+    // 参考稿头部下面是「关注 / 粉丝」两格
+    expect(other).toContain("</Text> 关注</Text>");
+    expect(other).toContain("</Text> 粉丝</Text>");
+    // 计数没拉到画「—」，不回填 0（0 读起来是「没人关注他」）
+    expect(other).toContain("function countLabel(value: number | undefined): string");
+  });
+
   // MAP-FOOTPRINT-LOGO-001：个人主页场景足迹入口用原型「场景足迹」logo，
   // 不再用通用 route 图标（形状见 proxy-icon.tsx footprint，几何照抄原型）。
   it("keeps the prototype footprint logo on the personal scene entry", () => {
