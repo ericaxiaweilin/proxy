@@ -86,11 +86,24 @@ export interface MenuRow {
   route?: string;
 }
 
+// STORE-TILES-001：「企业 / 店铺」这一组按产品稿从「4 行平铺」整合成「2 个入口」。
+// 磁贴跟菜单行是两种呈现，但走的是同一条路由解析（见 me.tsx 的 pressTile），
+// 所以磁贴只带 icon/label/desc/route —— 不带 action/grad，免得出现
+// 「磁贴能表达但渲染器不支持」的字段。
+export interface MenuTile {
+  icon: string;
+  label: string;
+  desc: string;
+  route: string;
+}
+
 export interface MenuSection {
   id?: string;
   title: string;
   hint: string;
   rows: MenuRow[];
+  /** 给了磁贴就渲染成网格；此时 rows 通常为空（两者可以并存，先磁贴后行）。 */
+  tiles?: MenuTile[];
 }
 
 export type PersonalHubTab = "FEED" | "PHOTOS" | "RECORDS";

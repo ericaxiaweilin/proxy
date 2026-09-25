@@ -4,6 +4,21 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 315 — 2026-09-25
+
+- **「我的 → 企业 / 店铺」整合成 2 个入口磁贴**（STORE-TILES-001）：按产品稿把原来
+  4 行平铺（我的企业 / 店铺 · 推荐商铺进体系 · 我推荐的店 · 推荐评估队列）收成
+  2 个磁贴 —— **我的店铺**（企业 · 经营 · 工作台）、**推荐管理**（推荐 · 状态 · 审核）。
+  4 个目的地一个都没丢：我的店铺 → `bdash`（企业 / 店铺资料）；另外 3 条搬进新的
+  「推荐管理」子页（路由 `storerecmanage`）—— 该页**必须有专属分支**，否则会落到
+  通用兜底、只渲染「正在准备这个工作区」，3 条入口等于消失。
+  `MenuSection` 新增可选 `tiles`，磁贴与菜单行走同一条路由解析（`pressTile`），
+  避免同一目的地出现两种行为。这一组 `rows` 留空而非删除：服务端下发的
+  managed sections 仍按 id 合并进 rows。
+- 影响文件：`apps/mobile/src/surfaces/me.tsx`、`me-types.ts`、`me-styles.ts`、
+  `me-sub-pages.ts`，新增守卫 `apps/mobile/src/surfaces/store-section-tiles.test.ts`
+  （4 处锚点变异验证过会变红）。（me.tsx 里 peer 的 growth / benefit 未提交改动未碰。）
+
 ## Revision 314 — 2026-09-24
 
 - **进主页带头像**（FEED-PROFILE-AVATAR-001）：feed 帖子有头像、点进他人主页变灰首字 ——

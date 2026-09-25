@@ -190,6 +190,15 @@ export const styles = StyleSheet.create({
   sectionTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
   sectionHint: { color: color.muted, fontSize: 11, lineHeight: 15 },
 
+  // STORE-TILES-001：「企业 / 店铺」的入口磁贴。产品稿里就是「品牌绿圆角方块 +
+  // 黑图标 + 粗标题 + 灰色副标题」，方块明显大于菜单行那枚 44×44，且没有卡片底 /
+  // 描边 —— 所以这里不套 serviceRow 那层白卡。
+  tileGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 10 },
+  tile: { gap: 8, paddingVertical: 4, width: "48%" },
+  tileIcon: { alignItems: "center", backgroundColor: color.lime, borderRadius: 20, height: 64, justifyContent: "center", width: 64 },
+  tileLabel: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
+  tileDesc: { color: color.muted, fontSize: 11, lineHeight: 15 },
+
   serviceRow: {
     alignItems: "center",
     backgroundColor: color.white,

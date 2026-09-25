@@ -196,6 +196,14 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
     desc: "店铺、Venue、主体与线上节点。",
     icon: "▣"
   },
+  // STORE-TILES-001：「企业 / 店铺」按产品稿整合成 2 个入口磁贴后，这一页承接
+  // 原来那 3 条推荐入口（推荐商铺进体系 / 我推荐的店 / 推荐评估队列），
+  // 行本身在 me.tsx 的 STORE_REC_MANAGE_ROWS，这里只放页面的身份文案。
+  storerecmanage: {
+    title: "推荐管理",
+    desc: "把好的场地 / 商家推荐进体系；你推荐的那条走到哪一步、运营评估出什么结论，都在这里看。",
+    icon: "star"
+  },
   multislot: {
     title: "多人任务",
     desc: "一项业务需求可以拆成多个真人角色；每个名额独立匹配、取消、支付和评价。",

@@ -85,7 +85,7 @@ import { createSocialSettingsStore } from "../social-settings-store";
 import { createBehaviorAnalyticsStore } from "../behavior-analytics-settings";
 
 // Extracted modules
-import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSection, PersonalHubTab, SocialVisibility, SocialAccount, AbilityType, AbilityInstance, AvailabilityRule, AvOverride } from "./me-types";
+import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSection, MenuTile, PersonalHubTab, SocialVisibility, SocialAccount, AbilityType, AbilityInstance, AvailabilityRule, AvOverride } from "./me-types";
 import { ABILITY_SCHEMAS, DEFAULT_ABILITIES, AVAILABILITY_OPTIONS, AV_DAY_NAMES, avKeyOf, avFmt, describeAvRule, avStateFor, nextDays, INITIAL_SOCIAL_ACCOUNTS, resolveHubProfile, resolveHubSocials } from "./me-types";
 import { AbilitySheet, AvRuleSheet, AvDaySheet, FakeQr, QrCard, SocialRow, AvailabilitySheet, MeLocationContext, VoucherMenuGlyph, ServiceRow, availabilityLabel, formatClaimNumber } from "./me-profile-components";
 import { MyOrdersSurface, MyActivitiesSurface, FavoritesSurface, MerchantCampaignSurface } from "./me-orders";
@@ -173,6 +173,23 @@ interface PersonaConfig {
   alert?: { icon: string; title: string; desc: string; route: string; tag: string };
 }
 
+// STORE-TILES-001：「推荐管理」页的三条入口。
+//
+// 产品稿把「企业 / 店铺」组从 4 行平铺整合成 2 个入口磁贴（我的店铺 / 推荐管理），
+// 这 3 条推荐相关入口原样搬进「推荐管理」，一个都没删：
+//   · 推荐商铺进体系 —— 把场地 / 商家推荐进体系（STORE-REC-001 钉的就是这条）
+//   · 我推荐的店 —— 推荐人自己的进展（STORE-REC-007）
+//   · 推荐评估队列 —— 运营侧出结论（STORE-REC-002 / 004，operator-only）
+// 放在这里而不是搬进 me-sub-pages.ts，是因为它们要按菜单行的样子渲染（图标 +
+// 文案 + 路由），而 SUB_PAGE_CONTENT 只存 title/desc/icon。
+const STORE_REC_MANAGE_ROWS: MenuRow[] = [
+  { icon: "spark", label: "推荐商铺进体系", desc: "把好的场地 / 商家推荐给 Proxy 平台，运营评估后接入", route: "recommendstore" },
+  // STORE-REC-007: 推荐完就没有回音了 —— 推荐人看不到自己那条被采纳了没有，
+  // 而能完成入驻的人通常就是他。队列是运营专属的，这一条是给推荐人自己的。
+  { icon: "ring", label: "我推荐的店", desc: "查看我推荐的店铺现在什么状态，被采纳后去建店", route: "mystorerecs" },
+  { icon: "target", label: "推荐评估队列", desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）", route: "storerecqueue" }
+];
+
 const REQUESTER_ME: PersonaConfig = {
   pageTitle: "我的",
   avatarText: "H",
@@ -219,14 +236,16 @@ const REQUESTER_ME: PersonaConfig = {
       id: "biz",
       title: "企业 / 店铺",
       hint: "经营与体系共建 · 独立模块（原始设计：发展 builder，小美与用户推荐商铺进入体系）",
-      rows: [
-        { icon: "store-lines", label: "我的企业 / 店铺", desc: "有经营权限时进入 Business Workspace", route: "bdash" },
-        { icon: "spark", label: "推荐商铺进体系", desc: "把好的场地 / 商家推荐给 Proxy 平台，运营评估后接入", route: "recommendstore" },
-        // STORE-REC-007: 推荐完就没有回音了 —— 推荐人看不到自己那条被采纳了没有，
-        // 而能完成入驻的人通常就是他。队列是运营专属的，这一条是给推荐人自己的。
-        { icon: "ring", label: "我推荐的店", desc: "查看我推荐的店铺现在什么状态，被采纳后去建店", route: "mystorerecs" },
-        { icon: "target", label: "推荐评估队列", desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）", route: "storerecqueue" }
-      ]
+      // STORE-TILES-001：按产品稿把这组从 4 行平铺整合成 2 个入口磁贴。
+      // 原来的 4 个目的地一个都没丢 —— 我的店铺 → bdash（企业 / 店铺资料）；
+      // 推荐管理 → storerecmanage，页内就是 STORE_REC_MANAGE_ROWS 那 3 条。
+      // rows 留空是刻意的：服务端下发的 managed sections 仍按 id 合并进 rows
+      // （见 effectiveSections），那一路不能因为这里换成磁贴就断掉。
+      tiles: [
+        { icon: "home", label: "我的店铺", desc: "企业 · 经营 · 工作台", route: "bdash" },
+        { icon: "star", label: "推荐管理", desc: "推荐 · 状态 · 审核", route: "storerecmanage" }
+      ],
+      rows: []
     },
     {
       id: "account",
@@ -1293,6 +1312,12 @@ export function MeSurface({
     const next = meSubPage(route);
     if (!next) return;
     setSubPage(next);
+  }
+
+  // STORE-TILES-001：磁贴跟菜单行走**同一条**路由解析。不另开一套，否则
+  // 同一个目的地会出现「点磁贴一种行为、点行另一种行为」。
+  function pressTile(tile: MenuTile): void {
+    pressRow({ icon: tile.icon, label: tile.label, desc: tile.desc, route: tile.route });
   }
 
   function pressRow(row: MenuRow): void {
@@ -2777,6 +2802,27 @@ export function MeSurface({
       );
     }
 
+    // STORE-TILES-001：「企业 / 店铺」整合成 2 个入口磁贴后，这一页承接原来那 3 条
+    // 推荐入口。它**必须**有专属分支 —— 否则会落到通用兜底，而
+    // subpage-generic-fabricated.test.ts 的不变量（菜单可达 + 无专属分支 ⇒ 不许带
+    // sections）决定那种页面只渲染诚实空态，等于把 3 条入口弄丢。
+    if (subPage.route === "storerecmanage") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text selectable style={styles.subPageTitle}>推荐管理</Text>
+            <Text selectable style={styles.subPageDesc}>把好的场地 / 商家推荐进体系；你推荐的那条走到哪一步、运营评估出什么结论，都在这里看。</Text>
+            {STORE_REC_MANAGE_ROWS.map((row) => (
+              <ServiceRow key={row.label} onPress={() => pressRow(row)} row={row} />
+            ))}
+          </ScrollView>
+        </View>
+      );
+    }
+
     // BENEFIT-WIRE-001: 权益领取（个人身份）。
     if (subPage.route === "benefits") {
       return contentWrapper(
@@ -3094,6 +3140,19 @@ export function MeSurface({
               <Text selectable style={styles.sectionTitle}>{section.title}</Text>
               <Text selectable style={styles.sectionHint}>{section.hint}</Text>
             </View>
+            {section.tiles && section.tiles.length > 0 ? (
+              <View style={styles.tileGrid}>
+                {section.tiles.map((tile) => (
+                  <Pressable key={tile.label} accessibilityLabel={tile.label} accessibilityRole="button" onPress={() => pressTile(tile)} style={styles.tile}>
+                    <View style={styles.tileIcon}>
+                      <ProxySymbolIcon color={color.ink} size={28} symbol={tile.icon} />
+                    </View>
+                    <Text selectable style={styles.tileLabel}>{tile.label}</Text>
+                    <Text selectable style={styles.tileDesc}>{tile.desc}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
             {section.rows.map((row) => (
               <ServiceRow key={row.label} onPress={() => pressRow(row)} row={row} />
             ))}
