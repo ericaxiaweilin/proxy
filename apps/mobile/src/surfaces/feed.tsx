@@ -219,7 +219,7 @@ export function FeedSurface({
   // MEDIA-PIPELINE-001: AI 账号目录，用于解析 AGENT 帖头像；缺省则 AI 帖走首字。
   aiAccountsClient?: AIAccountClient | undefined;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
-  onOpenProfile?: ((profile: { userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]> }) => void) | undefined;
+  onOpenProfile?: ((profile: { userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]>; avatarUri?: string | undefined }) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   refreshTrigger?: number;
   bottomNavVisible?: boolean;
@@ -254,7 +254,7 @@ export function FeedSurface({
   const [following, setFollowing] = useState<ReadonlySet<string>>(new Set());
   const { width: viewportWidth } = useWindowDimensions();
   // R15.69 (restored): 点头像弹 关注/访问个人主页 菜单（液态玻璃，双行上下排）
-  const [profileActions, setProfileActions] = useState<{ userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]>; anchor: { x: number; y: number } }>();
+  const [profileActions, setProfileActions] = useState<{ userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]>; avatarUri?: string | undefined; anchor: { x: number; y: number } }>();
   const [profileFollowing, setProfileFollowing] = useState(false);
   const [profileFollowBusy, setProfileFollowBusy] = useState(false);
   const [postMenuPostId, setPostMenuPostId] = useState<string | undefined>();
@@ -1420,6 +1420,11 @@ export function FeedSurface({
             { baseUrl: localApiBaseUrl, viewerAccountId, viewerAvatarUri: isOwnPost(post) ? viewerAvatarUri : undefined, avatarSource: isOwnPost(post) ? viewerAvatarUri ? { uri: viewerAvatarUri } : undefined : undefined, aiAccountsById, humanAvatarsById, displayName: name }
           );
           const meta = AUTHOR_TYPE_META[post.authorType];
+          // FEED-PROFILE-AVATAR-001：帖子上有头像，点进主页必须同一个 —— 把解出来的
+          // 远端 uri 顺手带给个人主页（只有 {uri} 串能带，打包图 number 带不过去，就不带）。
+          const profileAvatarUri = avatar.kind === "image" && typeof avatar.source === "object" && avatar.source !== null && typeof (avatar.source as { uri?: unknown }).uri === "string"
+            ? (avatar.source as { uri: string }).uri
+            : undefined;
           const isFollow = following.has(post.authorId);
           const isLiked = liked.has(post.postId);
 		  const isSaved = bookmarked.has(post.postId);
@@ -1449,7 +1454,7 @@ export function FeedSurface({
               <View style={styles.postHead}>
                 <Pressable
                   accessibilityLabel={`${name} 的操作`}
-                  onPress={(event) => void openProfileActions({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media, anchor: { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY } })}
+                  onPress={(event) => void openProfileActions({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media, ...(profileAvatarUri ? { avatarUri: profileAvatarUri } : {}), anchor: { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY } })}
                   style={styles.postAvatarPressable}
                 >
                   <View style={styles.postAvatarWrap}>
@@ -1474,7 +1479,7 @@ export function FeedSurface({
                 </Pressable>
                 <Pressable
                   accessibilityLabel={`查看 ${name} 的主页`}
-                  onPress={() => onOpenProfile?.({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media })}
+                  onPress={() => onOpenProfile?.({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media, ...(profileAvatarUri ? { avatarUri: profileAvatarUri } : {}) })}
                   style={styles.postIdentityPressable}
                 >
                 <View style={styles.postIdentity}>

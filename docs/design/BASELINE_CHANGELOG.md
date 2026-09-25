@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 314 — 2026-09-24
+
+- **进主页带头像**（FEED-PROFILE-AVATAR-001）：feed 帖子有头像、点进他人主页变灰首字 ——
+  onOpenProfile 只传了名字没传头像。两条入口（点名字直达、点头像菜单）都把解出来的
+  远端 uri 带给个人主页。打包图 number 带不过去就不带（维持原 fallback）。
+- 影响文件：`apps/mobile/src/surfaces/feed.tsx`（peer 同文件未提交改动未碰，仅取己方 5 hunk）。
+
 ## Revision 313 — 2026-09-24
 
 - **市场接单要 KYC**（ORDER-APPLY-KYC-GATE-001）：没过 KYC 点「我想接」→ 弹
