@@ -5329,6 +5329,135 @@ if ! [ -f apps/mobile/src/surfaces/my-store-recommendations.tsx ]; then
 fi
 echo "    STORE-REC-007: PASS (recommenders can see their own status, scoped server-side)"
 
+# STORE-REC-ADDRESS-001: 推荐记录要带上地址与地图落点。
+#
+# 「城市」是筛选口径，不是位置：运营在推荐管理里看到的是一行行店名 + 城市，
+# 但真去跑店的人需要门牌；只写门牌又没法在地图上核对店在哪。于是推荐记录
+# 多出 address（文本）+ latitude / longitude（落点）三列。
+#
+# 三者都可选，理由不同：地址可选是因为 092 存量行没有地址、AI 草稿
+# （SuggestStoreRecommendation）也产不出门牌；落点可选是因为地图在 Android 上
+# 只是只读占位（拿不到坐标），手打地址是安卓唯一的录入路径 —— 所以地图只能是
+# iOS 的便利通道，不能变成唯一入口。但落点必须**成对**：只有纬度没有经度画不出
+# 任何东西。服务端 fail-closed 拒掉，库里也钉同一对约束（否则绕过命令层的写入
+# 会破坏这条不变量）。
+#
+# 钉死：①服务端接受并带回地址/落点；②半截或越界坐标被拒，且什么都没存；
+# ③真库往返；④真库拒绝半截坐标（证明迁移的约束真的会咬，不只是写着好看；
+#   本机实测数据库点名报的正是 store_recommendations_coordinate_pair / _latitude_range，
+#   而把经度补齐后同一条 INSERT 就能过 —— 所以拒绝确实来自这两条约束本身。
+#   注意：机器上没有 postgres 时这两条会 SKIP ⇒ 下面**不能**用 require_test
+#   （SKIP 的退出码也是 0，会假装 PASS）。改成数 `--- PASS` 条数，SKIP 也数得出来）；
+# ⑤迁移存在且真的加列、加约束；⑥错误码是 INVALID_RECOMMENDATION_LOCATION，
+# 不是静默存进去；⑦列表与详情两条读路径都选出这三列（写进去读不回来等于没写）；
+# ⑧NULL 仍是「没落点」的唯一哨兵；⑨App 有选点面板，且**不传** radiusMeters
+# （店没有服务半径，画个「覆盖 3 km」是编出来的信息）；⑩读模型暴露落点判定与地图链接。
+require_test "STORE-REC-ADDRESS-001" "./internal/storeonboarding" \
+  "TestRecommendStoreCarriesAddressAndPin" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-ADDRESS-001" "./internal/storeonboarding" \
+  "TestRecommendStoreRefusesHalfOrOutOfRangeCoordinate" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+# PG 集成测试：先钉「文件 + 函数名」在，再**一次跑完数 PASS 条数**。
+# ⚠️ 这里刻意不用 require_test：它的判据是 go test 的退出码，而**测试被 SKIP 时
+# 退出码也是 0** —— 没有集群的机器上会打印 PASS 而实际什么都没验。数 `--- PASS`
+# 条数就能把 SKIP 数出来（顺带：一次 go test 比两次 require_test 快得多，
+# 后者各起一个一次性 PG 集群）。
+addr_pg_file="apps/api-go/internal/platform/postgres/store_recommendation_address_integration_test.go"
+for addr_pg_fn in TestStoreRecommendationAddressPostgresRoundTrip \
+                  TestStoreRecommendationHalfCoordinateRefusedByDatabase; do
+  if ! grep -q "func ${addr_pg_fn}(" "$addr_pg_file"; then
+    echo "  FAIL [STORE-REC-ADDRESS-001]: $addr_pg_fn is missing from $addr_pg_file" >&2
+    exit 1
+  fi
+done
+addr_pg_re='^TestStoreRecommendation(AddressPostgresRoundTrip|HalfCoordinateRefusedByDatabase)$'
+addr_pg_out=$(go -C apps/api-go test -count=1 -v -run "$addr_pg_re" ./internal/platform/postgres 2>&1)
+addr_pg_rc=$?
+if [ "$addr_pg_rc" -ne 0 ]; then
+  printf '%s\n' "$addr_pg_out" | grep -E -- '--- FAIL|_test\.go:[0-9]+:' >&2
+  echo "  FAIL [STORE-REC-ADDRESS-001]: the address/pin round-trip tests failed." >&2
+  exit 1
+fi
+addr_pg_pass=$(printf '%s\n' "$addr_pg_out" | grep -c -- '^--- PASS' || true)
+if [ "$addr_pg_pass" -ne 2 ]; then
+  addr_pg_skip=$(printf '%s\n' "$addr_pg_out" | grep -c -- '^--- SKIP' || true)
+  echo "  FAIL [STORE-REC-ADDRESS-001]: expected 2 passing PG tests, got $addr_pg_pass" >&2
+  echo "        (skipped=$addr_pg_skip). A SKIP means the migration's CHECKs were" >&2
+  echo "        never exercised -- the constraint is unproven, not proven." >&2
+  exit 1
+fi
+if ! [ -f apps/api-go/migrations/130_store_recommendation_address.sql ]; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: migration 130 is gone, so the address and" >&2
+  echo "        the map pin have nowhere to live." >&2
+  exit 1
+fi
+if ! grep -qF 'ADD COLUMN IF NOT EXISTS latitude' apps/api-go/migrations/130_store_recommendation_address.sql; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: the migration stopped adding the latitude" >&2
+  echo "        column, so a map pin cannot be stored." >&2
+  exit 1
+fi
+if ! grep -qF 'store_recommendations_coordinate_pair' apps/api-go/migrations/130_store_recommendation_address.sql; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: the coordinate-pair constraint is gone. A row" >&2
+  echo "        with a latitude but no longitude draws nothing on a map." >&2
+  exit 1
+fi
+if ! grep -qF 'INVALID_RECOMMENDATION_LOCATION' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: the service no longer refuses a bad pin." >&2
+  echo "        Silently storing half a coordinate is worse than rejecting it." >&2
+  exit 1
+fi
+# 写进去了还得读回来：列表与详情两条读路径都要选这三列。
+if ! grep -qF 'r.address, r.latitude, r.longitude' apps/api-go/internal/platform/postgres/storeonboarding.go; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: the recommendation list query stopped" >&2
+  echo "        selecting address/latitude/longitude, so operators cannot see them." >&2
+  exit 1
+fi
+if ! grep -qF 'SELECT id, store_name, city, category, reason, address, latitude, longitude' apps/api-go/internal/platform/postgres/storeonboarding.go; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: the single-recommendation query stopped" >&2
+  echo "        selecting the address and the pin." >&2
+  exit 1
+fi
+# NULL 是「没落点」的唯一哨兵。改成 float64 直扫会让 NULL 报错，或者让 0 变成
+# 一个「恰好落在几内亚湾」的假落点。
+if ! grep -qF 'var lat, lng sql.NullFloat64' apps/api-go/internal/platform/postgres/storeonboarding.go; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: the NULL-safe scan is gone. NULL is the only" >&2
+  echo "        correct 'no pin' -- (0,0) is a real coordinate in the Gulf of Guinea." >&2
+  exit 1
+fi
+if ! [ -f apps/mobile/src/components/store-address-sheet.tsx ]; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: the address picker sheet is gone, so iOS" >&2
+  echo "        operators are back to guessing coordinates by hand." >&2
+  exit 1
+fi
+if ! grep -qF 'disabled={!coord}' apps/mobile/src/components/store-address-sheet.tsx; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: the address sheet no longer requires a pin" >&2
+  echo "        before confirming, so it can save an empty location." >&2
+  exit 1
+fi
+# 店没有服务半径。传 radiusMeters 会在地址面板上画出一个编出来的「覆盖 3 km」。
+if grep -qF 'radiusMeters' apps/mobile/src/components/store-address-sheet.tsx; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: the address sheet started passing radiusMeters." >&2
+  echo "        A store has no service radius -- that circle would be fabricated." >&2
+  exit 1
+fi
+if ! grep -qF 'export function recHasPin' apps/mobile/src/surfaces/store-recommendation-manage-model.ts; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: recHasPin is gone, so the UI can no longer" >&2
+  echo "        tell a pinned recommendation from an unpinned one." >&2
+  exit 1
+fi
+if ! grep -qF 'export function recMapsUrl' apps/mobile/src/surfaces/store-recommendation-manage-model.ts; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: recMapsUrl is gone, so a pinned store can no" >&2
+  echo "        longer be opened on a map." >&2
+  exit 1
+fi
+if ! grep -qF 'StoreAddressSheet' apps/mobile/src/surfaces/store-recommendation-manage.tsx; then
+  echo "  FAIL [STORE-REC-ADDRESS-001]: the recommendation form stopped wiring the" >&2
+  echo "        address picker, so there is no way to drop a pin anymore." >&2
+  exit 1
+fi
+echo "    STORE-REC-ADDRESS-001: PASS (recommendations carry an address and a real map pin)"
+
 # BENEFIT-ELIG-001: 资格门不能只是个装饰。
 #
 # EligibilityEngine 本身是对的，eligibility_test.go 也用真实信号把它测透了 ——
