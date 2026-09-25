@@ -46,6 +46,15 @@ export function formatMonthDay(iso: string | undefined): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/** ISO 时间 → YYYY-MM-DD（入驻时间行用）。解析失败返回空串（整行不画）。 */
+export function formatFullDate(iso: string | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 /** hoursJson 自由 blob → 行列表。不是对象/空对象返回 []（整段不画）。 */
 export function formatHoursLines(hoursJson: string): string[] {
   let parsed: unknown;
@@ -70,14 +79,15 @@ export type HubShopFilter = {
   orderCount: number;
   fullCount: number;
   partialCount: number;
+  lastOrderAt?: string;
 };
 
-/** 搜索（名/地址/品类）+ 品类 chip；sortByRate 按满意率降序（无评价沉底）。 */
+/** 搜索（名/地址/品类）+ 品类 chip；recent 按末单倒序（无单沉底），rate 按满意率降序（无评价沉底）。 */
 export function filterHubShops(
   shops: readonly HubShopFilter[],
   query: string,
   category: string,
-  sortByRate: boolean,
+  sort: "none" | "recent" | "rate",
 ): HubShopFilter[] {
   const q = query.trim().toLowerCase();
   const list = shops.filter((s) => {
@@ -89,7 +99,14 @@ export function filterHubShops(
       s.category.toLowerCase().includes(q)
     );
   });
-  if (!sortByRate) return [...list];
+  if (sort === "none") return [...list];
+  if (sort === "recent") {
+    const timeOf = (s: HubShopFilter): number => {
+      const t = s.lastOrderAt ? Date.parse(s.lastOrderAt) : NaN;
+      return Number.isFinite(t) ? t : -1;
+    };
+    return [...list].sort((a, b) => timeOf(b) - timeOf(a) || b.orderCount - a.orderCount);
+  }
   const rateOf = (s: HubShopFilter): number => satisfactionRate(s.fullCount, s.partialCount) ?? -1;
   return [...list].sort((a, b) => rateOf(b) - rateOf(a) || b.orderCount - a.orderCount);
 }

@@ -91,6 +91,8 @@ export type BusinessStoreWire = {
   // STORE-STATS-001：店铺品类（店主自填，空 = 没填）。
   category?: string;
   status: string;
+  // 入驻时间（建店行创建时间）。
+  createdAt?: string;
 };
 
 export class BusinessClient {

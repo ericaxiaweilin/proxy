@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  coverForStore, filterHubShops, formatHoursLines, formatMonthDay,
+  coverForStore, filterHubShops, formatFullDate, formatHoursLines, formatMonthDay,
   satisfactionRate, satisfactionRateText, satisfactionText,
 } from "./my-store-hub-model";
 
@@ -24,10 +24,12 @@ describe("STORE-HUB-001 hub pure functions", () => {
     expect(satisfactionText("")).toBe("待评价");
   });
 
-  it("month-day formats or hides", () => {
+  it("month-day and full date format or hide", () => {
     expect(formatMonthDay("2026-09-22T10:00:00Z")).toBe("09-22");
     expect(formatMonthDay("")).toBe("");
     expect(formatMonthDay("not-a-date")).toBe("");
+    expect(formatFullDate("2026-03-15T10:00:00Z")).toBe("2026-03-15");
+    expect(formatFullDate("")).toBe("");
   });
 
   it("hours blob renders lines or nothing", () => {
@@ -36,14 +38,15 @@ describe("STORE-HUB-001 hub pure functions", () => {
     expect(formatHoursLines("oops")).toEqual([]);
   });
 
-  it("search plus category plus rate sort", () => {
+  it("search plus category plus sorts", () => {
     const shops = [
-      { id: "a", name: "云顶咖啡", address: "西湖区", category: "咖啡厅", orderCount: 12, fullCount: 9, partialCount: 1 },
+      { id: "a", name: "云顶咖啡", address: "西湖区", category: "咖啡厅", orderCount: 12, fullCount: 9, partialCount: 1, lastOrderAt: "2026-09-20T10:00:00Z" },
       { id: "b", name: "Hana 美甲", address: "还剑区", category: "美甲", orderCount: 8, fullCount: 0, partialCount: 0 },
-      { id: "c", name: "光影摄影", address: "二征区", category: "摄影", orderCount: 6, fullCount: 5, partialCount: 0 },
+      { id: "c", name: "光影摄影", address: "二征区", category: "摄影", orderCount: 6, fullCount: 5, partialCount: 0, lastOrderAt: "2026-09-22T10:00:00Z" },
     ];
-    expect(filterHubShops(shops, "咖啡", "", false).map((s) => s.id)).toEqual(["a"]);
-    expect(filterHubShops(shops, "", "美甲", false).map((s) => s.id)).toEqual(["b"]);
-    expect(filterHubShops(shops, "", "", true).map((s) => s.id)).toEqual(["c", "a", "b"]);
+    expect(filterHubShops(shops, "咖啡", "", "none").map((s) => s.id)).toEqual(["a"]);
+    expect(filterHubShops(shops, "", "美甲", "none").map((s) => s.id)).toEqual(["b"]);
+    expect(filterHubShops(shops, "", "", "rate").map((s) => s.id)).toEqual(["c", "a", "b"]);
+    expect(filterHubShops(shops, "", "", "recent").map((s) => s.id)).toEqual(["c", "a", "b"]);
   });
 });

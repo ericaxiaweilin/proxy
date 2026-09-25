@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 321 — 2026-09-25
+
+- **店铺 hub 补齐**（STORE-HUB-002）：深色概览卡 + lime 复制地址（原型样）；
+  店铺 | 推荐管理分段 tab（推荐嵌现有组件，不复制）；最近使用 chip（真末单排序）；
+  入驻时间行（建店行 createdAt）；品类编辑器（原型 6 品类 + 清除，调 SetStoreCategory，
+  非店主服务端驳回并显示）；详情已有店名标题（HubNav），不再另加。
+- 影响文件：`apps/mobile/src/surfaces/my-stores-hub.tsx` 等 5 文件
+  （peer 同文件 NAV-001 等改动未碰，仅取己方 hunk）。
+
 ## Revision 320 — 2026-09-25
 
 - **时间线按时间排序**（FEED-TIME-SORT-001）：公共流把测试账户帖钉最上面 ——

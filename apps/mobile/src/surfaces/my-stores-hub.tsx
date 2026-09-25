@@ -21,16 +21,22 @@
 //   - 最近接单的客人只显示 profile 真名，拿不到叫"到店客人"，绝不露 user_id。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Defs, LinearGradient, Rect, Stop, Svg } from "react-native-svg";
 import * as Clipboard from "expo-clipboard";
 import { color } from "../theme";
 import type { BusinessClient, BusinessStoreWire, StoreLinesWire } from "../business-client";
 import type { FulfillmentClient, StoreOrderStats } from "../fulfillment-client";
 import type { ProfileClient } from "../profile-client";
 import { ProxyLoading } from "../components/proxy-foundation";
+import { StoreRecommendationManage } from "./store-recommendation-manage";
 import {
-  coverForStore, filterHubShops, formatHoursLines, formatMonthDay,
+  coverForStore, filterHubShops, formatFullDate, formatHoursLines, formatMonthDay,
   satisfactionRate, satisfactionRateText, satisfactionText,
 } from "../my-store-hub-model";
+
+// 原型 2ef163 的品类（推荐表单同一套）：品类编辑器只给这 6 个 + 清除，不手填 ——
+// 手填必然漂移（"咖啡" vs "咖啡厅"），筛选 chips 会裂成两个。
+const STORE_CATEGORIES = ["咖啡厅", "SPA", "美甲", "摄影", "茶馆", "酒吧"] as const;
 import { SUB_PAGE_CONTENT } from "./me-sub-pages";
 
 // 标题只有一处出处（SUB_PAGE_CONTENT.bdash）—— 以前这一屏同时存在四个名字：
@@ -46,22 +52,25 @@ type HubShop = {
   statsFailed: boolean;
 };
 
-export function MyStoresHub({ business, fulfillment, profile, onOpenRecommend, onOpenStoreProfile, onOpenStoreCreate, onBack }: {
+export function MyStoresHub({ business, fulfillment, profile, recommendTabs, onOpenRecQueue, onOpenStoreProfile, onOpenStoreCreate, onBack }: {
   business: BusinessClient;
   fulfillment: FulfillmentClient;
   profile: ProfileClient;
-  onOpenRecommend: () => void;
+  /** 推荐页签直接嵌现有组件（不复制）：me.tsx 的 STORE_REC_MANAGE_TABS。 */
+  recommendTabs: Array<{ id: "mine" | "new"; label: string }>;
+  onOpenRecQueue: () => void;
   onOpenStoreProfile: () => void;
   /** STORE-HUB-NAV-001：建店 / 添加门店 → merchantstorefront（唯一的建店流程）。 */
   onOpenStoreCreate: () => void;
   onBack: () => void;
 }): React.JSX.Element {
+  const [hubTab, setHubTab] = useState<"shops" | "rec">("shops");
   const [shops, setShops] = useState<HubShop[] | null>(null);
   const [listFailed, setListFailed] = useState(false);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
-  const [sortByRate, setSortByRate] = useState(false);
+  const [sort, setSort] = useState<"none" | "recent" | "rate">("none");
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [copied, setCopied] = useState(false);
   const [requesterNames, setRequesterNames] = useState<ReadonlyMap<string, string>>(new Map());
@@ -191,11 +200,36 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenRecommend, o
     <View>
       <HubNav backLabel="‹ 返回" onBack={onBack} title={HUB_TITLE} />
 
+      {/* 原型 2ef163 的分段 tab：店铺 | 推荐管理。推荐直接嵌现有组件，不复制。 */}
+      <View style={s.tabs}>
+        {(["shops", "rec"] as const).map((t) => (
+          <Pressable accessibilityLabel={t === "shops" ? "店铺" : "推荐管理"} key={t} onPress={() => setHubTab(t)} style={[s.tab, hubTab === t && s.tabOn]}>
+            <Text selectable style={[s.tabText, hubTab === t && s.tabTextOn]}>{t === "shops" ? "店铺" : "推荐管理"}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {hubTab === "rec" ? (
+        <StoreRecommendationManage
+          tabs={recommendTabs}
+          onOpenQueue={onOpenRecQueue}
+          onOpenStore={() => setHubTab("shops")}
+        />
+      ) : (<>
       <View style={s.overview}>
+        <Svg pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <Defs>
+            <LinearGradient id="storeHubOverview" x1="0" y1="0" x2="1" y2="1">
+              <Stop offset="0" stopColor="#1E1B16" />
+              <Stop offset="1" stopColor="#2E2A24" />
+            </LinearGradient>
+          </Defs>
+          <Rect height="100%" rx={18} ry={18} width="100%" x="0" y="0" fill="url(#storeHubOverview)" />
+        </Svg>
         <View style={s.ovRow}>
-          <View style={s.ovItem}><Text selectable style={s.ovNum}>{overview.count}</Text><Text selectable style={s.ovLabel}>合作店铺</Text></View>
-          <View style={s.ovItem}><Text selectable style={s.ovNum}>{overview.orders}</Text><Text selectable style={s.ovLabel}>累计接单</Text></View>
-          <View style={s.ovItem}><Text selectable style={s.ovNum}>{overview.rate === undefined ? "—" : `${overview.rate}%`}</Text><Text selectable style={s.ovLabel}>平均满意率</Text></View>
+          <View style={s.ovItem}><Text selectable style={s.ovNumDark}>{overview.count}</Text><Text selectable style={s.ovLabelDark}>合作店铺</Text></View>
+          <View style={s.ovItem}><Text selectable style={s.ovNumDark}>{overview.orders}</Text><Text selectable style={s.ovLabelDark}>累计接单</Text></View>
+          <View style={s.ovItem}><Text selectable style={s.ovNumDark}>{overview.rate === undefined ? "—" : `${overview.rate}%`}</Text><Text selectable style={s.ovLabelDark}>平均满意率</Text></View>
         </View>
       </View>
 
@@ -207,13 +241,16 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenRecommend, o
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.chips} contentContainerStyle={s.chipsContent}>
         {["全部", ...categories].map((c) => {
           const value = c === "全部" ? "" : c;
-          const on = category === value && !sortByRate;
-          return <Pressable accessibilityLabel={`筛选 ${c}`} key={c} onPress={() => { setCategory(value); setSortByRate(false); }} style={[s.chip, on && s.chipOn]}>
+          const on = category === value && sort === "none";
+          return <Pressable accessibilityLabel={`筛选 ${c}`} key={c} onPress={() => { setCategory(value); setSort("none"); }} style={[s.chip, on && s.chipOn]}>
             <Text selectable style={[s.chipText, on && s.chipTextOn]}>{c}</Text>
           </Pressable>;
         })}
-        <Pressable accessibilityLabel="按满意率排序" onPress={() => setSortByRate((v) => !v)} style={[s.chip, sortByRate && s.chipOn]}>
-          <Text selectable style={[s.chipText, sortByRate && s.chipTextOn]}>满意率优先</Text>
+        <Pressable accessibilityLabel="按最近使用排序" onPress={() => setSort((v) => v === "recent" ? "none" : "recent")} style={[s.chip, sort === "recent" && s.chipOn]}>
+          <Text selectable style={[s.chipText, sort === "recent" && s.chipTextOn]}>最近使用</Text>
+        </Pressable>
+        <Pressable accessibilityLabel="按满意率排序" onPress={() => setSort((v) => v === "rate" ? "none" : "rate")} style={[s.chip, sort === "rate" && s.chipOn]}>
+          <Text selectable style={[s.chipText, sort === "rate" && s.chipTextOn]}>满意率优先</Text>
         </Pressable>
       </ScrollView>
 
@@ -312,6 +349,7 @@ function StoreDetail({ row, copied, requesterNames, onCopyAddress }: {
   const address = row.store.address.trim();
   const hours = formatHoursLines(row.lines?.hoursJson ?? "");
   const desc = (row.lines?.description ?? "").trim();
+  const joinedDate = formatFullDate(row.store.createdAt);
   const infoRows: Array<[string, string]> = [];
   infoRows.push(["店名", row.store.name]);
   if (address !== "") infoRows.push(["地址", address]);
@@ -319,6 +357,18 @@ function StoreDetail({ row, copied, requesterNames, onCopyAddress }: {
     infoRows.push(["对接人", [contactName, contactPhone].filter((v) => v !== "").join(" · ")]);
   }
   if (desc !== "") infoRows.push(["简介", desc]);
+  if (joinedDate !== "") infoRows.push(["入驻时间", joinedDate]);
+  const [savingCategory, setSavingCategory] = useState(false);
+  const [categoryError, setCategoryError] = useState<string | undefined>(undefined);
+  const saveCategory = (value: string): void => {
+    if (value === (row.store.category ?? "").trim() || savingCategory) return;
+    setSavingCategory(true);
+    setCategoryError(undefined);
+    business.setStoreCategory(row.store.id, value).then(
+      (saved) => { onCategorySaved(row.store.id, (saved.category ?? "").trim()); },
+      (e: unknown) => { setCategoryError(e instanceof Error ? e.message : "保存失败"); },
+    ).finally(() => { setSavingCategory(false); });
+  };
 
   return (
     <View>
@@ -361,6 +411,24 @@ function StoreDetail({ row, copied, requesterNames, onCopyAddress }: {
         {row.linesFailed ? <Text selectable style={s.error}>店铺资料没读出来，稍后再试。</Text> : null}
       </View>
 
+      {/* 品类决定列表 chips 里出现什么：只给原型那 6 个 + 清除，不手填。 */}
+      <Text selectable style={s.secTitle}>店铺品类</Text>
+      <View style={s.catRow}>
+        {STORE_CATEGORIES.map((c) => {
+          const on = (row.store.category ?? "").trim() === c;
+          return <Pressable accessibilityLabel={`品类 ${c}`} disabled={savingCategory} key={c} onPress={() => saveCategory(c)} style={[s.chip, on && s.chipOn]}>
+            <Text selectable style={[s.chipText, on && s.chipTextOn]}>{c}</Text>
+          </Pressable>;
+        })}
+        {(row.store.category ?? "").trim() !== "" ? (
+          <Pressable accessibilityLabel="清除品类" disabled={savingCategory} onPress={() => saveCategory("")} style={s.chip}>
+            <Text selectable style={s.chipText}>清除</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {savingCategory ? <Text selectable style={s.mutedLine}>保存品类中…</Text> : null}
+      {categoryError ? <Text selectable style={s.error}>{categoryError}</Text> : null}
+
       <View style={s.secHead}>
         <Text selectable style={s.secTitle}>最近接单</Text>
         <Text selectable style={s.secCount}>{stats ? `${stats.recent.length} 条` : ""}</Text>
@@ -385,8 +453,8 @@ function StoreDetail({ row, copied, requesterNames, onCopyAddress }: {
           </Pressable>
         ) : null}
         {address !== "" ? (
-          <Pressable accessibilityLabel="复制店铺地址" onPress={onCopyAddress} style={s.primaryBtn}>
-            <Text selectable style={s.primaryText}>{copied ? "已复制" : "复制地址"}</Text>
+          <Pressable accessibilityLabel="复制店铺地址" onPress={onCopyAddress} style={s.limeBtn}>
+            <Text selectable style={s.limeText}>{copied ? "已复制" : "复制地址"}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -395,11 +463,20 @@ function StoreDetail({ row, copied, requesterNames, onCopyAddress }: {
 }
 
 const s = StyleSheet.create({
-  overview: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, marginBottom: 14, paddingVertical: 16 },
+  // 原型 2ef163 的深色概览卡（列表 + 详情共用）：白字，分隔线淡白。
+  overview: { borderRadius: 18, marginBottom: 14, overflow: "hidden", paddingVertical: 16 },
   ovRow: { flexDirection: "row" },
   ovItem: { alignItems: "center", flex: 1, gap: 4 },
+  ovNumDark: { color: color.white, fontSize: 20, fontWeight: "900" },
+  ovLabelDark: { color: "#A79EAF", fontSize: 11, fontWeight: "700" },
   ovNum: { color: color.ink, fontSize: 20, fontWeight: "900" },
   ovLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  // 原型分段 tab：店铺 | 推荐管理。
+  tabs: { backgroundColor: color.surface, borderRadius: 13, flexDirection: "row", gap: 4, marginBottom: 14, padding: 4 },
+  tab: { alignItems: "center", borderRadius: 10, flex: 1, paddingVertical: 10 },
+  tabOn: { backgroundColor: color.white },
+  tabText: { color: color.muted, fontSize: 12, fontWeight: "900" },
+  tabTextOn: { color: color.ink },
   searchBox: { alignItems: "center", backgroundColor: color.surface, borderRadius: 12, flexDirection: "row", gap: 8, marginBottom: 10, paddingHorizontal: 12, paddingVertical: 10 },
   searchIcon: { color: color.muted, fontSize: 14, fontWeight: "800" },
   searchInput: { color: color.ink, flex: 1, fontSize: 14 },
@@ -457,4 +534,9 @@ const s = StyleSheet.create({
   ghostText: { color: color.ink, fontSize: 14, fontWeight: "900" },
   primaryBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 14, flex: 1, paddingVertical: 13 },
   primaryText: { color: color.white, fontSize: 14, fontWeight: "900" },
+  // 原型 lime 主按钮（复制地址）。
+  limeBtn: { alignItems: "center", backgroundColor: color.lime, borderRadius: 14, flex: 1, paddingVertical: 13 },
+  limeText: { color: color.ink, fontSize: 14, fontWeight: "900" },
+  catRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 6 },
+  mutedLine: { color: color.muted, fontSize: 12, fontWeight: "700", marginTop: 6 },
 });
