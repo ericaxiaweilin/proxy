@@ -149,11 +149,12 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreProfile
       orderCount: row.stats?.orderCount ?? 0,
       fullCount: row.stats?.fullCount ?? 0,
       partialCount: row.stats?.partialCount ?? 0,
+      ...(row.stats?.lastOrderAt ? { lastOrderAt: row.stats.lastOrderAt } : {}),
     })),
     query,
     category,
-    sortByRate,
-  ), [shops, query, category, sortByRate]);
+    sort,
+  ), [shops, query, category, sort]);
   const visibleRows = useMemo(() => {
     const byId = new Map((shops ?? []).map((row) => [row.store.id, row]));
     return visible.map((v) => byId.get(v.id)).filter((r): r is HubShop => r !== undefined);
@@ -186,6 +187,12 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreProfile
     setCopied(true);
   }, []);
 
+  const patchCategory = useCallback((storeId: string, saved: string) => {
+    setShops((prev) => prev?.map((row) => row.store.id === storeId
+      ? { ...row, store: { ...row.store, category: saved } }
+      : row) ?? null);
+  }, []);
+
   if (selected) {
     return (
       <View>
@@ -198,6 +205,8 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreProfile
           row={selected}
           copied={copied}
           requesterNames={requesterNames}
+          business={business}
+          onCategorySaved={patchCategory}
           onCopyAddress={() => void copyAddress(selected.store.address)}
         />
       </View>
@@ -322,10 +331,12 @@ function HubNav({ backLabel, onBack, title }: {
   );
 }
 
-function StoreDetail({ row, copied, requesterNames, onCopyAddress }: {
+function StoreDetail({ row, copied, requesterNames, business, onCategorySaved, onCopyAddress }: {
   row: HubShop;
   copied: boolean;
   requesterNames: ReadonlyMap<string, string>;
+  business: BusinessClient;
+  onCategorySaved: (storeId: string, category: string) => void;
   onCopyAddress: () => void;
 }): React.JSX.Element {
   const cover = coverForStore(row.store.category?.trim() || row.store.name);
