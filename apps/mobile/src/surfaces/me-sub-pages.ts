@@ -196,9 +196,12 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
     desc: "店铺、Venue、主体与线上节点。",
     icon: "▣"
   },
-  // STORE-TILES-001：「企业 / 店铺」按产品稿整合成 2 个入口磁贴后，这一页承接
-  // 原来那 3 条推荐入口（推荐商铺进体系 / 我推荐的店 / 推荐评估队列），
-  // 行本身在 me.tsx 的 STORE_REC_MANAGE_ROWS，这里只放页面的身份文案。
+  // STORE-TILES-001 / STORE-REC-MANAGE-001：「企业 / 店铺」按产品稿整合成 2 个
+  // 入口磁贴后，这一页承接原来那 3 条推荐入口（推荐商铺进体系 / 我推荐的店 /
+  // 推荐评估队列）。现在它本身就是一个完整界面（页签 + 列表 + 详情 + 表单，
+  // 见 ./store-recommendation-manage），这里只放页面的身份文案。
+  // 页签文案在 me.tsx 的 STORE_REC_MANAGE_TABS —— 它归产品承诺，跟这一页的
+  // title/desc 一样属于「文案」而不是「行为」。
   storerecmanage: {
     title: "推荐管理",
     desc: "把好的场地 / 商家推荐进体系；你推荐的那条走到哪一步、运营评估出什么结论，都在这里看。",

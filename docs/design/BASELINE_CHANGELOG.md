@@ -4,6 +4,33 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 318 — 2026-09-25
+
+- **「推荐管理」按设计稿做成完整界面**（STORE-REC-MANAGE-001）：原来这一页只是 3 条
+  入口平铺（STORE-TILES-001 的壳），现在按设计稿
+  （`deepseek_html_20260925_38b4e5.html`）做成**页签 + 列表 + 详情 + 表单**：
+  页签①「我推荐的店」（搜索 + 概览卡 + 状态筛选 + 记录卡 + 详情页：状态 hero /
+  3 段进度时间线 / 推荐信息 / 按状态给下一步），页签②「推荐商铺进体系」（表单本体
+  从 me.tsx 搬进来，逻辑一字未改），页脚保留「推荐评估队列」（受众是运营）。
+  3 个路由都落到同一屏：`storerecmanage` 完整页、`mystorerecs` / `recommendstore`
+  直接落到对应页签（旧深链不断）。
+- **设计稿里系统没有的东西一律没画**（这是本次改动的重点，不是省略）：奖励金额
+  （「+800 成长值」—— 没有任何奖励模型或与推荐挂钩的入账）、4 段进度里的
+  「线下洽谈 / 签约完成」（服务端只有 createdAt + decidedAt 两个时刻）、
+  「撤回推荐」（推荐记录 append-only，没有撤回命令）、详细地址 / 对接人电话 /
+  店铺照片（推荐记录里没有这三个字段，收了也只会丢，故不收并说明）。
+  状态词汇沿用既有纪律：**待评估 / 已采纳 · 待接入 / 未采纳**，不用设计稿的
+  「已签约 / 未通过」—— 采纳只代表运营批准接入，不等于店铺已存在（STORE-REC-007）。
+- 影响文件：`apps/mobile/src/surfaces/store-recommendation-manage.tsx`（新增）、
+  `store-recommendation-manage-model.ts`（新增，纯读模型）、
+  `store-recommendation-manage.test.ts`（新增守卫，7 处锚点变异验证过会变红）、
+  `my-store-recommendations.tsx`（改为纯展示的列表屏）、`me.tsx`、`me-sub-pages.ts`、
+  `store-section-tiles.test.ts`。（me.tsx / my-store-recommendations 里 peer 的
+  growth / benefit 未提交改动未碰。）
+- **未改门禁**：STORE-REC-001 钉的 `label: "推荐商铺进体系"` 仍在 me.tsx 里（现在是
+  页签文案，见 `STORE_REC_MANAGE_TABS`）。设计稿把它写成「推荐新店」—— 改用户可见
+  文案是产品决定，留给产品点头。
+
 ## Revision 317 — 2026-09-25
 
 - **店铺经营数据地基**（STORE-STATS-001，后端先行）：migration 129（orders.store_id +

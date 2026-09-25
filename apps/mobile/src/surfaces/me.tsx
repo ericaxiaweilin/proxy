@@ -47,13 +47,14 @@ import { resolvePrivacyRequestClient } from "../privacy-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import type { EngagementClient } from "../engagement-client";
 import type { ModerationClient } from "../moderation-client";
-import { StoreOnboardingClient, StoreRecommendationAiUnavailableError } from "../storeonboarding-client";
 // BENEFIT-WIRE-001: 权益链路。命令、client、界面早就写好了，但从没被渲染过 ——
 // 这里补的是「入口 + 接线」那一段。
 import { BenefitClient } from "../benefit-client";
 import { BenefitHubSurface } from "./benefit-hub";
 import { BenefitRedeemScreen } from "./BenefitRedeemScreen";
-import { MyStoreRecommendations } from "./my-store-recommendations";
+// STORE-REC-MANAGE-001: 推荐管理整屏（页签 + 列表 + 详情 + 表单）。
+// storeonboarding 的 client 现在只在那一屏里用，me.tsx 不再直接持有它。
+import { StoreRecommendationManage } from "./store-recommendation-manage";
 import { OrderPermissionGate, ProviderApplicationSurface } from "./provider-application";
 import { type LocalNetClient } from "../localnet-client";
 import {
@@ -180,15 +181,24 @@ interface PersonaConfig {
 //   · 推荐商铺进体系 —— 把场地 / 商家推荐进体系（STORE-REC-001 钉的就是这条）
 //   · 我推荐的店 —— 推荐人自己的进展（STORE-REC-007）
 //   · 推荐评估队列 —— 运营侧出结论（STORE-REC-002 / 004，operator-only）
-// 放在这里而不是搬进 me-sub-pages.ts，是因为它们要按菜单行的样子渲染（图标 +
-// 文案 + 路由），而 SUB_PAGE_CONTENT 只存 title/desc/icon。
-const STORE_REC_MANAGE_ROWS: MenuRow[] = [
-  { icon: "spark", label: "推荐商铺进体系", desc: "把好的场地 / 商家推荐给 Proxy 平台，运营评估后接入", route: "recommendstore" },
-  // STORE-REC-007: 推荐完就没有回音了 —— 推荐人看不到自己那条被采纳了没有，
-  // 而能完成入驻的人通常就是他。队列是运营专属的，这一条是给推荐人自己的。
-  { icon: "ring", label: "我推荐的店", desc: "查看我推荐的店铺现在什么状态，被采纳后去建店", route: "mystorerecs" },
-  { icon: "target", label: "推荐评估队列", desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）", route: "storerecqueue" }
+//
+// STORE-REC-MANAGE-001（2026-09-25）：这一页按产品稿从「3 行入口」变成推荐这件事
+// 的完整界面，于是前两条收成页签、第三条留在页脚：
+//   · 页签文案放这里而不是搬进组件 —— STORE-REC-001 钉的就是 me.tsx 里这条
+//     `label`，而且**菜单文案是产品承诺**：把「推荐商铺进体系」改成设计稿写的
+//     「推荐新店」得产品先点头，不能我一个人拍板。
+//   · 队列留在页脚是因为它的受众是运营，跟推荐人不是同一批人。
+const STORE_REC_MANAGE_TABS: Array<{ id: "mine" | "new"; label: string }> = [
+  { id: "mine", label: "我推荐的店" },
+  { id: "new", label: "推荐商铺进体系" }
 ];
+
+const STORE_REC_QUEUE_ROW: MenuRow & { route: string } = {
+  icon: "target",
+  label: "推荐评估队列",
+  desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）",
+  route: "storerecqueue"
+};
 
 const REQUESTER_ME: PersonaConfig = {
   pageTitle: "我的",
@@ -238,7 +248,7 @@ const REQUESTER_ME: PersonaConfig = {
       hint: "经营与体系共建 · 独立模块（原始设计：发展 builder，小美与用户推荐商铺进入体系）",
       // STORE-TILES-001：按产品稿把这组从 4 行平铺整合成 2 个入口磁贴。
       // 原来的 4 个目的地一个都没丢 —— 我的店铺 → bdash（企业 / 店铺资料）；
-      // 推荐管理 → storerecmanage，页内就是 STORE_REC_MANAGE_ROWS 那 3 条。
+      // 推荐管理 → storerecmanage，页内就是 STORE_REC_MANAGE_TABS 那 2 个页签。
       // rows 留空是刻意的：服务端下发的 managed sections 仍按 id 合并进 rows
       // （见 effectiveSections），那一路不能因为这里换成磁贴就断掉。
       tiles: [
@@ -774,19 +784,9 @@ export function MeSurface({
   const [socialOpenError, setSocialOpenError] = useState<string | undefined>(undefined);
   const [socialSettings, setSocialSettings] = useState({ merchant: true, profile: false, influence: false });
   const [collaboration, setCollaboration] = useState({ enabled: false, types: ["探店", "UGC"], rate: "", contact: "" });
-  // STORE-REC-001: 推荐商铺进体系表单状态。
-  const [storeRecDraft, setStoreRecDraft] = useState({ storeName: "", city: "", category: "", reason: "" });
-  const [storeRecBusy, setStoreRecBusy] = useState(false);
-  const [storeRecError, setStoreRecError] = useState<string | undefined>(undefined);
-  const [storeRecDone, setStoreRecDone] = useState<string | undefined>(undefined);
-  // STORE-REC-003: 小美（AI）整理。origin 决定这条推荐记成「用户推荐」还是
-  // 「小美推荐」—— 默认 USER，只有小美真的整理过才切成 AI。
-  const [storeRecNote, setStoreRecNote] = useState("");
-  const [storeRecOrigin, setStoreRecOrigin] = useState<"USER" | "AI">("USER");
-  const [storeRecAiBusy, setStoreRecAiBusy] = useState(false);
-  // 底座未配置时把入口整个藏掉：留一个点了没反应的按钮，比没有这个功能更糟。
-  const [storeRecAiAvailable, setStoreRecAiAvailable] = useState(true);
-  const [storeRecAiNote, setStoreRecAiNote] = useState<string | undefined>(undefined);
+  // STORE-REC-MANAGE-001: 推荐表单的状态跟着「推荐管理」整屏一起搬进了
+  // ./store-recommendation-manage —— me.tsx 不再自己持有一份，否则同一件事
+  // 会有两处状态、两条提交路径。
   // 个人二维码复制反馈（PROFILE-QR-001）。
   const [qrNotice, setQrNotice] = useState<string | undefined>(undefined);
   // PROFILE-QR-002：放大扫码 + 分享二维码图。
@@ -863,59 +863,9 @@ export function MeSurface({
       setQrNotice(`复制失败：${qrFailureReason(err)}`);
     }
   }
-  async function submitStoreRecommendation(): Promise<void> {
-    setStoreRecBusy(true);
-    setStoreRecError(undefined);
-    setStoreRecDone(undefined);
-    try {
-      const client = new StoreOnboardingClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore });
-      await client.recommendStore({ ...storeRecDraft, origin: storeRecOrigin });
-      setStoreRecDone(
-        storeRecOrigin === "AI"
-          ? "已提交，这条记为「小美推荐」，运营会评估这家店是否接入体系。"
-          : "已提交，运营会评估这家店是否接入体系。谢谢推荐！"
-      );
-      setStoreRecDraft({ storeName: "", city: "", category: "", reason: "" });
-      setStoreRecNote("");
-      setStoreRecOrigin("USER");
-      setStoreRecAiNote(undefined);
-    } catch (err) {
-      setStoreRecError(err instanceof Error ? err.message : "提交失败，请稍后重试");
-    } finally {
-      setStoreRecBusy(false);
-    }
-  }
-
-  // STORE-REC-003: 让小美把随口说的话整理成草稿。**只读** —— 草稿要用户确认后
-  // 才由 recommendStore 落库，小美不直接写库，也就绕不过服务端那套校验。
-  // 小美没填的字段保持空，让用户自己补，绝不替他编一个城市或理由出来。
-  async function suggestWithXiaomei(): Promise<void> {
-    setStoreRecAiBusy(true);
-    setStoreRecError(undefined);
-    setStoreRecAiNote(undefined);
-    try {
-      const client = new StoreOnboardingClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore });
-      const draft = await client.suggestRecommendation(storeRecNote);
-      setStoreRecDraft({ storeName: draft.storeName, city: draft.city, category: draft.category, reason: draft.reason });
-      setStoreRecOrigin("AI");
-      const missing = [
-        draft.storeName ? "" : "店名",
-        draft.city ? "" : "城市",
-        draft.reason ? "" : "推荐理由"
-      ].filter((label) => label !== "");
-      setStoreRecAiNote(
-        missing.length > 0
-          ? `小美整理好了，但你没提到${missing.join("、")} —— 补上再提交，这几项我们不替你猜。`
-          : "小美整理好了，确认后会记为「小美推荐」。"
-      );
-    } catch (err) {
-      // 能力不存在 ≠ 操作失败：不弹红字，直接把入口藏起来。
-      if (err instanceof StoreRecommendationAiUnavailableError) setStoreRecAiAvailable(false);
-      else setStoreRecError(err instanceof Error ? err.message : "小美整理失败，请稍后重试");
-    } finally {
-      setStoreRecAiBusy(false);
-    }
-  }
+  // STORE-REC-MANAGE-001: submitStoreRecommendation / suggestWithXiaomei 一起搬进
+  // ./store-recommendation-manage。逻辑一字未改（小美仍只整理不落库、没提到的
+  // 字段仍留空让用户补），只是换了持有者。
   const socialSettingsHydrated = useRef(false);
   useEffect(() => { let cancelled = false; void (async () => { const local = await socialSettingsStore.read(); let remote: typeof local; let serverReachable = false; if (socialSettingsClient) { try { remote = await socialSettingsClient.read(); serverReachable = true; } catch { serverReachable = false; } } const value = remote ?? local; if (!cancelled && value) { setSocialAccounts(value.accounts); setSocialSettings({ merchant: value.merchant, profile: value.profile, influence: value.influence }); setCollaboration({ enabled: value.collaborationEnabled ?? false, types: value.collaborationTypes ?? ["探店", "UGC"], rate: value.collaborationRate ?? "", contact: value.collaborationContact ?? "" }); await socialSettingsStore.write(value); if (serverReachable && !remote && local) await socialSettingsClient?.write(local).catch(() => undefined); } if (!cancelled) socialSettingsHydrated.current = true; })(); return () => { cancelled = true; }; }, [socialSettingsClient]);
   useEffect(() => { if (!socialSettingsHydrated.current) return; const value = { accounts: socialAccounts, ...socialSettings, collaborationEnabled: collaboration.enabled, collaborationTypes: collaboration.types, collaborationRate: collaboration.rate, collaborationContact: collaboration.contact }; void socialSettingsStore.write(value); if (!socialSettingsClient) return; const timer = setTimeout(() => { void socialSettingsClient.write(value).catch(() => undefined); }, 250); return () => clearTimeout(timer); }, [socialAccounts, socialSettings, collaboration, socialSettingsClient]);
@@ -2802,22 +2752,26 @@ export function MeSurface({
       );
     }
 
-    // STORE-TILES-001：「企业 / 店铺」整合成 2 个入口磁贴后，这一页承接原来那 3 条
-    // 推荐入口。它**必须**有专属分支 —— 否则会落到通用兜底，而
+    // STORE-TILES-001 / STORE-REC-MANAGE-001：「企业 / 店铺」整合成 2 个入口磁贴后，
+    // 这一页承接原来那 3 条推荐入口；现在它本身就是一个完整界面（页签 + 列表 +
+    // 详情 + 表单），不再只是一张入口列表。
+    // 它**必须**有专属分支 —— 否则会落到通用兜底，而
     // subpage-generic-fabricated.test.ts 的不变量（菜单可达 + 无专属分支 ⇒ 不许带
-    // sections）决定那种页面只渲染诚实空态，等于把 3 条入口弄丢。
+    // sections）决定那种页面只渲染诚实空态，等于把入口弄丢。
     if (subPage.route === "storerecmanage") {
       return contentWrapper(
         <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
+          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text selectable style={styles.subPageTitle}>推荐管理</Text>
             <Text selectable style={styles.subPageDesc}>把好的场地 / 商家推荐进体系；你推荐的那条走到哪一步、运营评估出什么结论，都在这里看。</Text>
-            {STORE_REC_MANAGE_ROWS.map((row) => (
-              <ServiceRow key={row.label} onPress={() => pressRow(row)} row={row} />
-            ))}
+            <StoreRecommendationManage
+              onOpenQueue={() => openSubPage(STORE_REC_QUEUE_ROW.route)}
+              onOpenStore={() => openSubPage("bdash")}
+              tabs={STORE_REC_MANAGE_TABS}
+            />
           </ScrollView>
         </View>
       );
@@ -2884,24 +2838,29 @@ export function MeSurface({
     }
 
     // STORE-REC-007: 我推荐的店 —— 推荐人自己的进展视图。
+    // STORE-REC-MANAGE-001 之后它是「推荐管理」的页签①，但这条路由不能断
+    // （深链 / 别处跳过来都得还能到），所以直接落到那一屏的「我推荐的店」页签。
     if (subPage.route === "mystorerecs") {
       return contentWrapper(
         <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
+          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text selectable style={styles.subPageTitle}>我推荐的店</Text>
-            <MyStoreRecommendations />
+            <StoreRecommendationManage initialTab="mine" onOpenStore={() => openSubPage("bdash")} tabs={STORE_REC_MANAGE_TABS} />
           </ScrollView>
         </View>
       );
     }
 
+    // STORE-REC-001 / STORE-REC-MANAGE-001: 推荐商铺进体系 —— 表单本体搬进了
+    // 「推荐管理」的页签②，这条路由直接落到那一个页签（原来的表单状态与提交
+    // 逻辑一字未改，只是换了持有者，见 ./store-recommendation-manage）。
     if (subPage.route === "recommendstore") {
       return contentWrapper(
         <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
+          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
@@ -2911,68 +2870,7 @@ export function MeSurface({
               用户一起把好的店铺带进体系，运营评估后接入。推荐记录会留档（append-only），
               后续接入进度在运营侧推进。
             </Text>
-            {storeRecAiAvailable ? (
-              <View style={styles.infoNote}>
-                <Text selectable style={styles.socialEditorLabel}>让小美帮你整理</Text>
-                <Text selectable style={styles.appBehaviorCardDesc}>
-                  用一句话说说这家店（在哪儿、为什么值得进体系），小美整理成草稿，
-                  你确认后提交 —— 会记为「小美推荐」。你没提到的字段小美不会瞎填。
-                </Text>
-                <TextInput
-                  placeholder="例如：Cầu Giấy 那家 Three Beans 咖啡，适合 afterwork，老板愿意合作活动"
-                  style={[styles.socialEditorInput, { minHeight: 64 }]}
-                  multiline
-                  value={storeRecNote}
-                  onChangeText={setStoreRecNote}
-                />
-                <Pressable
-                  disabled={storeRecAiBusy || storeRecNote.trim() === ""}
-                  onPress={() => void suggestWithXiaomei()}
-                  style={[styles.lightCta, (storeRecAiBusy || storeRecNote.trim() === "") && { opacity: 0.5 }]}
-                >
-                  <Text selectable style={styles.lightCtaText}>{storeRecAiBusy ? "小美整理中…" : "让小美整理"}</Text>
-                </Pressable>
-              </View>
-            ) : null}
-            {storeRecAiNote ? <Text selectable style={{ color: "#1B7F4D", fontSize: 12, marginTop: 8 }}>{storeRecAiNote}</Text> : null}
-            <Text selectable style={styles.socialEditorLabel}>店名 / 场地名</Text>
-            <TextInput
-              placeholder="例如：Three Beans · Cầu Giấy"
-              style={styles.socialEditorInput}
-              value={storeRecDraft.storeName}
-              onChangeText={(v) => setStoreRecDraft((cur) => ({ ...cur, storeName: v }))}
-            />
-            <Text selectable style={styles.socialEditorLabel}>城市</Text>
-            <TextInput
-              placeholder="例如：河内"
-              style={styles.socialEditorInput}
-              value={storeRecDraft.city}
-              onChangeText={(v) => setStoreRecDraft((cur) => ({ ...cur, city: v }))}
-            />
-            <Text selectable style={styles.socialEditorLabel}>品类（可选）</Text>
-            <TextInput
-              placeholder="例如：咖啡 / 餐饮 / 展览"
-              style={styles.socialEditorInput}
-              value={storeRecDraft.category}
-              onChangeText={(v) => setStoreRecDraft((cur) => ({ ...cur, category: v }))}
-            />
-            <Text selectable style={styles.socialEditorLabel}>为什么推荐它进体系</Text>
-            <TextInput
-              placeholder="例如：适合聊天与 Afterwork 场景，老板愿意合作活动"
-              style={[styles.socialEditorInput, { minHeight: 88 }]}
-              multiline
-              value={storeRecDraft.reason}
-              onChangeText={(v) => setStoreRecDraft((cur) => ({ ...cur, reason: v }))}
-            />
-            {storeRecError ? <Text selectable style={{ color: "#B3261E", fontSize: 12, marginTop: 8 }}>{storeRecError}</Text> : null}
-            {storeRecDone ? <Text selectable style={{ color: "#1B7F4D", fontSize: 12, marginTop: 8 }}>{storeRecDone}</Text> : null}
-            <Pressable
-              disabled={storeRecBusy}
-              onPress={() => void submitStoreRecommendation()}
-              style={[styles.appBehaviorReturn, storeRecBusy && { opacity: 0.5 }]}
-            >
-              <Text selectable style={styles.appBehaviorReturnText}>{storeRecBusy ? "提交中…" : (storeRecOrigin === "AI" ? "以小美推荐提交" : "提交推荐")}</Text>
-            </Pressable>
+            <StoreRecommendationManage initialTab="new" onOpenStore={() => openSubPage("bdash")} tabs={STORE_REC_MANAGE_TABS} />
           </ScrollView>
         </View>
       );

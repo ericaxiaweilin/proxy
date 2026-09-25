@@ -1,12 +1,29 @@
-import { useCallback, useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { useState } from "react";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { color } from "../theme";
 import { styles } from "./me-styles";
-import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
-import { StoreOnboardingClient, type StoreRecommendation } from "../storeonboarding-client";
+import type { StoreRecommendation } from "../storeonboarding-client";
 import { ProxyLoading } from "../components/proxy-foundation";
+import {
+  REC_FILTERS,
+  REC_STATUS_TEXT,
+  countRecs,
+  filterRecs,
+  highlight,
+  recAccent,
+  recDay,
+  recInitial,
+  recNextStep,
+  recStages,
+  recStatus,
+  type RecAccent,
+  type RecFilter,
+  type RecSegment,
+  type RecStageState,
+  type RecStatus
+} from "./store-recommendation-manage-model";
 
-// STORE-REC-007: 「我推荐的店」—— 推荐人看见自己那条的进展。
+// STORE-REC-007 / STORE-REC-MANAGE-001: 「我推荐的店」列表屏。
 //
 // 为什么必须存在：运营队列是 operator-only，普通用户看不到。于是推荐人提交完
 // 就再无回音，永远不知道自己推荐的那家店被采纳了没有。
@@ -17,104 +34,219 @@ import { ProxyLoading } from "../components/proxy-foundation";
 //
 // 纪律沿用队列那一套：**「读不出来」和「确实没有」必须长不一样**。
 // 两者列表都为空，混在一起会让人以为「我没推荐过」。
+//
+// 取数在 StoreRecommendationManage 那一层（页签徽标也要用同一份数据），
+// 这里只负责把 rows 画出来 + 本地搜索/筛选，所以它是纯展示组件。
 
-function when(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+export interface MyStoreRecommendationsProps {
+  rows: readonly StoreRecommendation[] | null;
+  busy: boolean;
+  error?: string | undefined;
+  onRetry: () => void;
+  onOpenDetail: (row: StoreRecommendation) => void;
 }
 
-export function MyStoreRecommendations(): React.JSX.Element {
-  const [rows, setRows] = useState<StoreRecommendation[] | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
+// 首字母色块 / 状态药丸 / 进度点。键都是有限枚举，所以这里用 Record<Union, T>
+// 而不是 Record<string, T> —— 后者在 noUncheckedIndexedAccess 下每次取都带
+// undefined，逼出一堆 ?? 兜底，兜底本身又变成一处「不可能发生」的死代码。
+const ACCENT: Record<RecAccent, { bg: string; fg: string }> = {
+  lime: { bg: "#EAF7B8", fg: "#4A5C00" },
+  rose: { bg: "#F7DDE3", fg: "#7A2434" },
+  sky: { bg: "#DCE8F7", fg: "#1E4574" },
+  gold: { bg: "#F6E7BE", fg: "#6B5300" }
+};
 
-  const load = useCallback(async () => {
-    setBusy(true);
-    setError(undefined);
-    try {
-      const client = new StoreOnboardingClient({
-        authClient: sessionAuthClient,
-        secureSessionStore: nativeSecureSessionStore
-      });
-      setRows(await client.listMyRecommendations({ limit: 50 }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "读取失败");
-      setRows(null);
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+const PILL: Record<RecStatus, { bg: string; fg: string }> = {
+  PENDING: { bg: color.warn, fg: "#7A5B00" },
+  ACCEPTED: { bg: color.proxyGreenSoft, fg: "#0F7A3D" },
+  REJECTED: { bg: color.stateDangerBg, fg: color.error }
+};
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+const DOT: Record<RecStageState, string> = {
+  done: color.proxyGreen,
+  active: "#E8A23C",
+  fail: color.error,
+  todo: color.line
+};
+
+function Highlighted({ segments, style, hitStyle }: {
+  segments: RecSegment[];
+  style: object;
+  hitStyle: object;
+}): React.JSX.Element {
+  return (
+    <Text numberOfLines={1} selectable style={style}>
+      {segments.map((segment, index) => (
+        <Text key={index} style={segment.hit ? hitStyle : undefined}>
+          {segment.text}
+        </Text>
+      ))}
+    </Text>
+  );
+}
+
+export function MyStoreRecommendations({
+  rows,
+  busy,
+  error,
+  onRetry,
+  onOpenDetail
+}: MyStoreRecommendationsProps): React.JSX.Element {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<RecFilter>("ALL");
+
+  const searching = query.trim().length > 0;
+  const counts = countRecs(rows ?? []);
+  const visible = filterRecs(rows ?? [], filter, query);
 
   return (
     <View>
-      <Text selectable style={styles.appBehaviorCardDesc}>
-        你推荐进体系的店都在这里。采纳只代表运营批准接入，商家真正入驻是另一件事 ——
-        看到「已采纳」就该去建店了，否则这条推荐只是被批准了，店铺并不会自己出现。
-      </Text>
+      <View style={s.searchRow}>
+        <TextInput
+          accessibilityLabel="搜索我推荐的店"
+          placeholder="搜索店名、城市、品类"
+          style={s.searchInput}
+          value={query}
+          onChangeText={setQuery}
+        />
+        {searching ? (
+          <Pressable accessibilityLabel="清空搜索" onPress={() => setQuery("")} style={s.searchClear}>
+            <Text selectable style={s.searchClearText}>✕</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      {searching ? (
+        <View style={s.resultBar}>
+          <Text selectable style={s.resultText}>
+            找到 <Text style={s.resultCount}>{visible.length}</Text> 条包含「{query.trim()}」的记录
+          </Text>
+          <Pressable onPress={() => { setQuery(""); setFilter("ALL"); }} style={s.resultReset}>
+            <Text selectable style={s.resultResetText}>重置</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={s.overview}>
+          <View style={s.ovItem}>
+            <Text selectable style={s.ovValue}>{counts.total}</Text>
+            <Text selectable style={s.ovLabel}>已推荐</Text>
+          </View>
+          <View style={s.ovItem}>
+            <Text selectable style={s.ovValue}>{counts.accepted}</Text>
+            <Text selectable style={s.ovLabel}>已采纳</Text>
+          </View>
+          <View style={s.ovItem}>
+            <Text selectable style={s.ovValue}>{counts.pending}</Text>
+            <Text selectable style={s.ovLabel}>待评估</Text>
+          </View>
+        </View>
+      )}
+
+      <View style={s.chips}>
+        {REC_FILTERS.map((option) => {
+          const active = filter === option.id;
+          const n =
+            option.id === "ALL"
+              ? counts.total
+              : option.id === "PENDING"
+                ? counts.pending
+                : option.id === "ACCEPTED"
+                  ? counts.accepted
+                  : counts.rejected;
+          return (
+            <Pressable
+              key={option.id}
+              onPress={() => setFilter(option.id)}
+              style={[s.chip, active && s.chipOn]}
+            >
+              <Text selectable style={[s.chipText, active && s.chipTextOn]}>
+                {option.label} {n}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
 
       {busy && rows === null ? (
-        <View style={{ paddingVertical: 18, alignItems: "center" }}>
+        <View style={s.loading}>
           <ProxyLoading tone="muted" />
         </View>
       ) : null}
 
-      {error ? <Text selectable style={{ color: "#B3261E", fontSize: 12, marginTop: 8 }}>{error}</Text> : null}
+      {error ? <Text selectable style={s.error}>{error}</Text> : null}
 
-      {!error && rows && rows.length === 0 ? (
+      {/* 「读不出来」和「确实没有」必须长不一样：两者列表都为空。 */}
+      {!error && rows !== null && rows.length === 0 ? (
         <View style={styles.infoNote}>
           <Text selectable style={styles.infoNoteText}>你还没有推荐过店铺。</Text>
         </View>
       ) : null}
 
-      {rows?.map((row) => (
-        <View key={row.recommendationId} style={styles.prototypeCard}>
-          <Text selectable style={styles.prototypeCardTitle}>{row.storeName}</Text>
-          <Text selectable style={styles.prototypeCardDesc}>
-            {row.city}
-            {row.category ? ` · ${row.category}` : ""} · 推荐于 {when(row.createdAt)}
+      {!error && rows !== null && rows.length > 0 && visible.length === 0 ? (
+        <View style={styles.infoNote}>
+          <Text selectable style={styles.infoNoteText}>
+            没有匹配的记录{searching ? "，换个关键词" : ""}
+            {searching && filter !== "ALL" ? "，或" : ""}
+            {filter !== "ALL" ? "切到「全部」筛选" : ""}。
           </Text>
-
-          {row.decision === "ACCEPT" ? (
-            <View style={{ marginTop: 8 }}>
-              <Text selectable style={[styles.prototypeCardDesc, { color: "#1B7F4D", fontWeight: "800" }]}>
-                已采纳 · 等你建店
-              </Text>
-              <Text selectable style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
-                运营已经批准这家店进体系了。批准不等于店铺已存在 ——
-                需要你在「我的店铺」里把店铺建出来，它才算真的接入。
-              </Text>
-            </View>
-          ) : null}
-
-          {row.decision === "REJECT" ? (
-            <View style={{ marginTop: 8 }}>
-              <Text selectable style={[styles.prototypeCardDesc, { color: "#8C5A2B", fontWeight: "800" }]}>
-                这次没有采纳
-              </Text>
-              {/* 理由是运营必填的。不给理由的拒绝无法解释，所以这里照实显示。 */}
-              {row.decisionReason ? (
-                <Text selectable style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
-                  原因：{row.decisionReason}
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
-
-          {!row.decision ? (
-            <Text selectable style={[styles.prototypeCardDesc, { marginTop: 8 }]}>运营还在评估中。</Text>
-          ) : null}
         </View>
-      ))}
+      ) : null}
+
+      {visible.map((row) => {
+        const status = recStatus(row);
+        const accent = ACCENT[recAccent(row.storeName)];
+        const pill = PILL[status];
+        const stages = recStages(row);
+        return (
+          <Pressable
+            accessibilityLabel={`查看推荐详情 ${row.storeName}`}
+            accessibilityRole="button"
+            key={row.recommendationId}
+            onPress={() => onOpenDetail(row)}
+            style={s.card}
+          >
+            <View style={s.cardHead}>
+              <View style={[s.cover, { backgroundColor: accent.bg }]}>
+                <Text selectable style={[s.coverText, { color: accent.fg }]}>
+                  {recInitial(row.storeName)}
+                </Text>
+              </View>
+              <View style={s.cardMain}>
+                <Highlighted
+                  segments={highlight(row.storeName, query)}
+                  style={s.cardName}
+                  hitStyle={s.hit}
+                />
+                <Highlighted
+                  segments={highlight([row.city, row.category].filter(Boolean).join(" · "), query)}
+                  style={s.cardMeta}
+                  hitStyle={s.hit}
+                />
+              </View>
+              <Text selectable style={[s.pill, { backgroundColor: pill.bg, color: pill.fg }]}>
+                {REC_STATUS_TEXT[status]}
+              </Text>
+            </View>
+
+            <View style={s.dots}>
+              {stages.map((stage) => (
+                <View key={stage.id} style={[s.dot, { backgroundColor: DOT[stage.state] }]} />
+              ))}
+            </View>
+
+            <View style={s.cardFoot}>
+              <Text selectable style={s.cardTime}>提交于 {recDay(row.createdAt)}</Text>
+              <Text selectable style={[s.cardNext, status === "REJECTED" && s.cardNextMuted]}>
+                {recNextStep(row)}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      })}
 
       <Pressable
         disabled={busy}
-        onPress={() => void load()}
+        onPress={onRetry}
         style={[styles.appBehaviorReturn, { marginTop: 12 }, busy && { opacity: 0.5 }]}
       >
         <Text selectable style={styles.appBehaviorReturnText}>{busy ? "读取中…" : "刷新"}</Text>
@@ -122,3 +254,114 @@ export function MyStoreRecommendations(): React.JSX.Element {
     </View>
   );
 }
+
+const s = StyleSheet.create({
+  searchRow: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 4 },
+  searchInput: {
+    backgroundColor: color.white,
+    borderColor: color.line,
+    borderRadius: 13,
+    borderWidth: 1.5,
+    color: color.ink,
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  searchClear: {
+    alignItems: "center",
+    backgroundColor: color.surface,
+    borderRadius: 999,
+    height: 28,
+    justifyContent: "center",
+    width: 28
+  },
+  searchClearText: { color: color.muted, fontSize: 12, fontWeight: "900" },
+  resultBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 10
+  },
+  resultText: { color: color.muted, flex: 1, fontSize: 11, fontWeight: "700" },
+  resultCount: { color: color.ink, fontSize: 11, fontWeight: "900" },
+  resultReset: {
+    backgroundColor: color.surface,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5
+  },
+  resultResetText: { color: color.ink, fontSize: 11, fontWeight: "800" },
+
+  overview: {
+    backgroundColor: color.ink,
+    borderRadius: 18,
+    flexDirection: "row",
+    marginTop: 12,
+    paddingVertical: 16
+  },
+  ovItem: { alignItems: "center", flex: 1 },
+  ovValue: { color: color.lime, fontSize: 24, fontWeight: "900", lineHeight: 28 },
+  ovLabel: { color: color.darkCardText, fontSize: 11, fontWeight: "700", marginTop: 2 },
+
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  chip: {
+    backgroundColor: color.white,
+    borderColor: color.line,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 7
+  },
+  chipOn: { backgroundColor: color.ink, borderColor: color.ink },
+  chipText: { color: color.muted, fontSize: 11, fontWeight: "800" },
+  chipTextOn: { color: color.white },
+
+  loading: { alignItems: "center", paddingVertical: 18 },
+  error: { color: color.error, fontSize: 12, marginTop: 8 },
+
+  card: {
+    backgroundColor: color.white,
+    borderColor: color.line,
+    borderRadius: 18,
+    borderWidth: 1,
+    marginTop: 12,
+    padding: 14
+  },
+  cardHead: { alignItems: "flex-start", flexDirection: "row", gap: 12 },
+  cover: {
+    alignItems: "center",
+    borderRadius: 14,
+    height: 50,
+    justifyContent: "center",
+    width: 50
+  },
+  coverText: { fontSize: 16, fontWeight: "900" },
+  cardMain: { flex: 1, minWidth: 0 },
+  cardName: { color: color.ink, fontSize: 14, fontWeight: "900", lineHeight: 19 },
+  cardMeta: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15, marginTop: 4 },
+  hit: { backgroundColor: "#EAF7B8", color: "#4A5C00", fontWeight: "900" },
+  pill: {
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: "900",
+    overflow: "hidden",
+    paddingHorizontal: 9,
+    paddingVertical: 4
+  },
+  dots: { flexDirection: "row", gap: 5, marginTop: 12 },
+  dot: { borderRadius: 2, flex: 1, height: 3 },
+  cardFoot: {
+    alignItems: "center",
+    borderTopColor: color.line,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 12,
+    paddingTop: 10
+  },
+  cardTime: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  cardNext: { color: "#0F7A3D", flex: 1, fontSize: 11, fontWeight: "900", textAlign: "right" },
+  cardNextMuted: { color: color.muted }
+});

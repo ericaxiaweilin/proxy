@@ -50,24 +50,35 @@ describe("STORE-TILES-001 企业 / 店铺整合成两个入口磁贴", () => {
   });
 
   it("all four original destinations survive the consolidation", () => {
+    // STORE-REC-MANAGE-001 之后前 3 条换了层壳（菜单行 → 页签 / 页脚行），
+    // 但**路由分支一个都没删**：旧的深链（mystorerecs / recommendstore）还得能到，
+    // 队列对 BUSINESS 身份也仍然可达。少一个分支 = 少一个目的地。
     for (const route of ["bdash", "recommendstore", "mystorerecs", "storerecqueue"]) {
-      expect(meCode).toContain(`route: "${route}"`);
+      expect(meCode, `路由分支 ${route} 不见了`).toContain(`subPage.route === "${route}"`);
     }
   });
 
-  it("STORE-REC-001's recommend-store entry is still a real menu row", () => {
-    // 钉脚本 grep 的是 me.tsx 里的 `label: "推荐商铺进体系"`。这条入口从菜单组
-    // 挪进了「推荐管理」页 —— 钉的意图（入口独立可达）没变，字符串必须还在，
+  it("STORE-REC-001's recommend-store entry keeps its pinned label", () => {
+    // 钉脚本 grep 的是 me.tsx 里的 `label: "推荐商铺进体系"`。这条入口从菜单行
+    // 变成了「推荐管理」的页签② —— 钉的意图（入口独立可达）没变，字符串必须还在，
     // 且必须配着它原来的路由。
+    // ⚠️ 设计稿（deepseek_html_20260925_38b4e5.html）把这一页签写成「推荐新店」。
+    // 改用户可见文案是产品决定，不是我能顺手改的，所以这里沿用既有入口名。
     expect(meCode).toContain('label: "推荐商铺进体系"');
-    expect(meCode).toContain('route: "recommendstore"');
+    // 文案必须配着它自己的页签 id 和路由分支 —— 只留一句文案、点进去是空的，
+    // 那比把入口删掉更糟（用户以为功能没了）。
+    expect(meCode).toContain('{ id: "new", label: "推荐商铺进体系" }');
+    expect(meCode).toContain('subPage.route === "recommendstore"');
   });
 
-  it("推荐管理 renders those rows itself instead of falling back to the empty state", () => {
+  it("推荐管理 renders the real experience instead of falling back to the empty state", () => {
     expect(manageStart).toBeGreaterThan(-1);
-    expect(manageBranch).toContain("STORE_REC_MANAGE_ROWS.map(");
+    expect(manageBranch).toContain("<StoreRecommendationManage");
     // 没有专属分支 ⇒ 通用兜底 ⇒ 只剩「正在准备这个工作区」。
     expect(meCode).toContain('subPage.route === "storerecmanage"');
+    // 3 条入口收成 2 个页签 + 1 个运营入口，一个都没丢。
+    expect(meCode).toContain("STORE_REC_MANAGE_TABS");
+    expect(meCode).toContain("STORE_REC_QUEUE_ROW");
   });
 
   it("both tiles point at a registered sub-page, so neither opens a generic page", () => {
