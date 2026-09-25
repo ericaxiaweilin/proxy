@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { color } from "../theme";
 import { styles } from "./me-styles";
-import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
+import { localApiBaseUrl, nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import {
   StoreOnboardingClient,
   StoreRecommendationAiUnavailableError,
   type StoreRecommendation
 } from "../storeonboarding-client";
 import { ProxyLoading } from "../components/proxy-foundation";
+import { StoreAddressSheet, type PickedStoreAddress } from "../components/store-address-sheet";
 import { MyStoreRecommendations } from "./my-store-recommendations";
 import {
   REC_CITIES,
@@ -16,7 +17,9 @@ import {
   REC_STORE_TYPES,
   REC_TIP,
   REC_UNCOLLECTED_NOTE,
+  recAddressLine,
   recCityIsPreset,
+  recMapsUrl,
   recMoment,
   recStages,
   recStatus,
@@ -32,8 +35,10 @@ import {
 //
 // 设计稿（deepseek_html_20260925_38b4e5.html）里有、系统里**没有**的东西，
 // 这里一律不画。清单在 store-recommendation-manage-model.ts 的注释里：
-// 奖励金额、4 段进度里的「线下洽谈 / 签约完成」、撤回推荐、地址/对接人/照片。
+// 奖励金额、4 段进度里的「线下洽谈 / 签约完成」、撤回推荐、对接人电话/照片。
 // 少画一块用户看不出来；画一块假的，他会照着它做决定。
+// （详细地址原本也在这个清单里，STORE-REC-ADDRESS-001 起服务端真的存了，
+//   所以它已经不是「系统里没有的东西」。）
 
 export interface StoreRecManageTab {
   id: "mine" | "new";
@@ -84,7 +89,11 @@ export function StoreRecommendationManage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  const [draft, setDraft] = useState({ storeName: "", city: "", category: "", reason: "" });
+  const [draft, setDraft] = useState({ storeName: "", city: "", category: "", reason: "", address: "" });
+  // STORE-REC-ADDRESS-001：地址与落点分开存。地址是文本 —— 谁都能填，
+  // Android 上没有地图，手打是那条路上唯一能用的入口；落点只有地图能给。
+  const [pin, setPin] = useState<{ lat: number; lng: number } | undefined>(undefined);
+  const [mapOpen, setMapOpen] = useState(false);
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState<string | undefined>(undefined);
   const [formDone, setFormDone] = useState<string | undefined>(undefined);
@@ -116,9 +125,16 @@ export function StoreRecommendationManage({
     setFormError(undefined);
     setFormDone(undefined);
     try {
-      await newClient().recommendStore({ ...draft, origin });
+      await newClient().recommendStore({
+        ...draft,
+        origin,
+        // 只有真的落了点才发坐标。半个坐标服务端会拒；而拿 0 当「没选」
+        // 会把河内的店画到几内亚湾 —— 所以缺省是「不发这两个键」。
+        ...(pin ? { latitude: pin.lat, longitude: pin.lng } : {})
+      });
       setFormDone("推荐已提交。运营出结论后会写进这条记录，在「我推荐的店」里能看到。");
-      setDraft({ storeName: "", city: "", category: "", reason: "" });
+      setDraft({ storeName: "", city: "", category: "", reason: "", address: "" });
+      setPin(undefined);
       setNote("");
       setAiNote(undefined);
       setOrigin("USER");
@@ -139,6 +155,9 @@ export function StoreRecommendationManage({
       // 小美只整理，不落库；空字段留空让用户自己补 —— 替用户编一个城市
       // 或品类，等于把「用户没说」写成「用户说了」。
       setDraft((cur) => ({
+        // 展开在前：地址与落点不归小美管 —— 它没法知道门牌号，更给不出坐标，
+        // 所以这里既不覆盖也不清空用户已经填好的位置。
+        ...cur,
         storeName: next.storeName || cur.storeName,
         city: next.city || cur.city,
         category: next.category || cur.category,
@@ -161,6 +180,9 @@ export function StoreRecommendationManage({
   if (detail) {
     const status = recStatus(detail);
     const stages = recStages(detail);
+    // STORE-REC-ADDRESS-001：只有真的落了点才有地图链接 ——
+    // 拿城市名猜一个坐标是编，点了会落到一个和这家店无关的地方。
+    const mapsUrl = recMapsUrl(detail);
     return (
       <View>
         <Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}>
@@ -206,6 +228,10 @@ export function StoreRecommendationManage({
           {[
             { label: "店名", value: detail.storeName },
             { label: "城市", value: detail.city || "—" },
+            // STORE-REC-ADDRESS-001：没有地址但有落点时，recAddressLine 给的是
+            // 坐标 —— 那时候坐标就是我们知道的最具体的东西，显示「—」等于把
+            // 已经拿到的信息藏起来。
+            { label: "地址", value: recAddressLine(detail) || "—" },
             { label: "品类", value: detail.category || "—" },
             { label: "推荐理由", value: detail.reason || "—" },
             { label: "提交时间", value: recMoment(detail.createdAt) },
@@ -217,6 +243,15 @@ export function StoreRecommendationManage({
             </View>
           ))}
         </View>
+
+        {mapsUrl ? (
+          <Pressable
+            onPress={() => void Linking.openURL(mapsUrl).catch(() => undefined)}
+            style={[styles.appBehaviorReturn, { marginTop: 8 }]}
+          >
+            <Text selectable style={styles.appBehaviorReturnText}>在地图上打开这家店</Text>
+          </Pressable>
+        ) : null}
 
         {/* 结论态才有的按钮。设计稿的「撤回推荐」没有对应命令 —— 推荐记录是
             append-only，撤回等于删掉举证链，服务端不提供。所以这里不画那个按钮，
@@ -238,11 +273,20 @@ export function StoreRecommendationManage({
             <Pressable
               onPress={() => {
                 setDraft((cur) => ({
+                  ...cur,
                   storeName: detail.storeName,
                   city: detail.city,
                   category: detail.category,
-                  reason: detail.reason
+                  reason: detail.reason,
+                  address: detail.address ?? ""
                 }));
+                // 落点一起带过去：重新推荐的是同一家店，位置没变，
+                // 让用户再在地图上点一次是白费力气。
+                setPin(
+                  typeof detail.latitude === "number" && typeof detail.longitude === "number"
+                    ? { lat: detail.latitude, lng: detail.longitude }
+                    : undefined
+                );
                 setDetail(undefined);
                 setTab("new");
                 setFormDone(undefined);
@@ -254,7 +298,8 @@ export function StoreRecommendationManage({
             </Pressable>
             <Pressable
               onPress={() => {
-                setDraft({ storeName: "", city: "", category: "", reason: "" });
+                setDraft({ storeName: "", city: "", category: "", reason: "", address: "" });
+                setPin(undefined);
                 setDetail(undefined);
                 setTab("new");
                 setFormDone(undefined);
@@ -404,6 +449,29 @@ export function StoreRecommendationManage({
             </View>
           ) : null}
 
+          <Text selectable style={styles.socialEditorLabel}>地址（可选）</Text>
+          {/* STORE-REC-ADDRESS-001：地址是**文本** —— Android 上没有地图
+              （MapCanvas 在那边只会渲染一张静态卡片），手打是那条路上唯一能用的
+              入口，所以这里不把它做成「只能选点」。地图是 iOS 上的省事路径。 */}
+          <TextInput
+            onChangeText={(value) => setDraft((cur) => ({ ...cur, address: value }))}
+            placeholder="门牌地址，例如：12 Trần Duy Hưng, Cầu Giấy"
+            style={styles.socialEditorInput}
+            value={draft.address}
+          />
+          <Pressable onPress={() => setMapOpen(true)} style={styles.appBehaviorReturn}>
+            <Text selectable style={styles.appBehaviorReturnText}>
+              {pin ? "重新在地图上选点" : "在地图上选点"}
+            </Text>
+          </Pressable>
+          {pin ? (
+            <View style={styles.infoNote}>
+              <Text selectable style={styles.infoNoteText}>
+                已落点 {pin.lat.toFixed(5)}, {pin.lng.toFixed(5)} —— 提交后运营能直接在地图上打开这家店。
+              </Text>
+            </View>
+          ) : null}
+
           <Text selectable style={styles.socialEditorLabel}>为什么推荐它进体系（必填）</Text>
           <TextInput
             multiline
@@ -429,6 +497,25 @@ export function StoreRecommendationManage({
               {formBusy ? "提交中…" : origin === "AI" ? "以小美推荐提交" : "提交推荐"}
             </Text>
           </Pressable>
+
+          {/* STORE-REC-ADDRESS-001：地图选点。cityHint 只用来定初始视野 ——
+              还没选城市时它是空串，地图给全国视野，比硬套一个「河内」诚实。 */}
+          <StoreAddressSheet
+            baseUrl={localApiBaseUrl}
+            cityHint={draft.city}
+            initial={pin}
+            onClose={() => setMapOpen(false)}
+            onConfirm={(next: PickedStoreAddress) => {
+              setPin({ lat: next.lat, lng: next.lng });
+              // 解析出来的地址填进输入框，但用户可以改 —— 逆编码给的可能是
+              // 附近的 POI 名，不是门牌号。
+              if (next.address.trim()) {
+                setDraft((cur) => ({ ...cur, address: next.address.trim() }));
+              }
+              setMapOpen(false);
+            }}
+            open={mapOpen}
+          />
         </View>
       )}
 

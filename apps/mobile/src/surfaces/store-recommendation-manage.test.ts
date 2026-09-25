@@ -13,9 +13,12 @@ import {
   filterRecs,
   highlight,
   recAccent,
+  recAddressLine,
   recCityIsPreset,
   recDay,
+  recHasPin,
   recInitial,
+  recMapsUrl,
   recMoment,
   recNextStep,
   recSearchText,
@@ -30,7 +33,7 @@ import {
 //      只会静默给用户一个错误结论（「已采纳」当成「已签约」、搜索漏字段、
 //      进度画到一段不存在的阶段）。
 //   ② **设计稿里系统没有的东西不许画** —— 奖励金额、4 段进度里的「线下洽谈 /
-//      签约完成」、撤回推荐、地址/对接人/照片。画出来用户看不出来，但他会照着
+//      签约完成」、撤回推荐、对接人电话/照片。画出来用户看不出来，但他会照着
 //      它做决定。这条只能靠对源码做文本钉（surfaces/*.tsx 不能被 vitest import）。
 
 const here = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
@@ -92,14 +95,22 @@ describe("推荐状态：服务端只有 ACCEPT / REJECT，没有「已签约」
 });
 
 describe("搜索与筛选", () => {
-  it("searches exactly the three fields the placeholder promises", () => {
-    const row = rec({ storeName: "静心茶馆", city: "河内", category: "茶室" });
+  it("searches exactly the fields the record can actually store", () => {
+    const row = rec({
+      storeName: "静心茶馆",
+      city: "河内",
+      category: "茶室",
+      address: "12 Trần Duy Hưng, Cầu Giấy"
+    });
     const text = recSearchText(row);
     expect(text).toContain("静心茶馆");
     expect(text).toContain("河内");
     expect(text).toContain("茶室");
-    // 推荐理由不参与搜索：占位符写的是「店名、城市、品类」，多搜一样会让人
-    // 以为「搜不到 = 没推荐过」。设计稿的占位符还写了「对接人」，而推荐记录里
+    // 地址从 STORE-REC-ADDRESS-001 起进了搜索：运营常常记得门牌、记不住店名，
+    // 搜不到就会以为「没人推荐过这家店」。
+    expect(text).toContain("trần duy hưng");
+    // 推荐理由不参与搜索：占位符没承诺搜它，多搜一样会让人以为「搜不到 =
+    // 没推荐过」。设计稿的占位符还写了「对接人」，而推荐记录里
     // 没有这个字段 —— 那正是这个断言要挡住的东西。
     expect(text).not.toContain("环境安静");
     expect(text).not.toContain("acc_1");
@@ -182,13 +193,19 @@ describe("不画系统里没有的东西", () => {
     expect(listCode).not.toContain("撤回");
   });
 
-  it("does not collect address / contact / photos the record cannot store", () => {
-    for (const field of ["对接人", "门牌", "照片"]) {
+  it("does not collect the contact / photo fields the record still cannot store", () => {
+    // 地址原本也在这条清单里。STORE-REC-ADDRESS-001（迁移 130）之后服务端真的
+    // 存它了，所以清单只剩还没地方放的两项 —— 这是**产品承诺变了**，不是守卫
+    // 松了：「地址确实接上了」由下面 STORE-REC-ADDRESS-001 那一组钉住。
+    for (const field of ["对接人", "照片"]) {
       expect(manageCode).not.toContain(field);
       expect(listCode).not.toContain(field);
     }
-    // 但要说清楚为什么不收 —— 静默少三个字段，用户只会以为是自己没找到。
-    expect(REC_UNCOLLECTED_NOTE).toContain("推荐记录里没有这几个字段");
+    // 但要说清楚为什么不收 —— 静默少两个字段，用户只会以为是自己没找到。
+    expect(REC_UNCOLLECTED_NOTE).toContain("推荐记录里没有这两个字段");
+    // 说了不收的东西不能同时又出现在表单里。地址就是这么从这句话里消失的：
+    // 界面一边收、一边说不收，是最容易让人不再相信提示的那种不一致。
+    expect(REC_UNCOLLECTED_NOTE).not.toContain("门牌");
   });
 
   it("offers the store types as free-text fillers, not as an enum the server lacks", () => {
@@ -237,6 +254,85 @@ describe("STORE-REC-CITY-001 城市是预设，不是自由文本", () => {
     expect(recCityIsPreset("北宁")).toBe(false);
     // 同一座城市的英文写法在服务端是**另一个城市** —— 这正是要预设的原因。
     expect(recCityIsPreset("Hanoi")).toBe(false);
+  });
+});
+
+// STORE-REC-ADDRESS-001：推荐记录带上位置（门牌地址 + 地图落点）。
+//
+// 用户的原话是「推荐管理城市要用预设的+地址地图」。城市那半是
+// STORE-REC-CITY-001；这一半是地址 —— 服务端加了三列（迁移 130），
+// 表单收地址并能在 iOS 上地图选点，运营队列和详情能看见、能打开地图。
+//
+// 两个最容易写错、而且写错了不会崩的地方：
+//   ① **坐标必须成对**才算「有落点」。只有一半的坐标画不出点，界面却会摆一个
+//      「在地图上打开」的按钮，点下去落到几内亚湾（0,0 是那里的真实坐标）。
+//   ② **地址与落点各自独立可选**。Android 上地图给不出坐标（MapCanvas 在那边
+//      只渲染一张静态卡片），手打地址是那条路上唯一能用的入口 ——
+//      所以不能把它做成「只能选点」。
+describe("STORE-REC-ADDRESS-001 地址与地图落点", () => {
+  const queueCode = stripComments(readFileSync(here("./store-recommendation-queue.tsx"), "utf8"));
+  const sheetCode = stripComments(
+    readFileSync(here("../components/store-address-sheet.tsx"), "utf8")
+  );
+
+  it("只有成对的坐标才算有落点", () => {
+    expect(recHasPin(rec({ latitude: 21.01, longitude: 105.79 }))).toBe(true);
+    // 半个坐标画不出点 —— 拿它当「有落点」会渲染一个点了没用的按钮。
+    expect(recHasPin(rec({ latitude: 21.01 }))).toBe(false);
+    expect(recHasPin(rec({ longitude: 105.79 }))).toBe(false);
+    expect(recHasPin(rec())).toBe(false);
+    // (0,0) 是几内亚湾上的一个真实坐标，不是「没填」的哨兵值。
+    expect(recHasPin(rec({ latitude: 0, longitude: 0 }))).toBe(true);
+  });
+
+  it("地址行优先门牌，只有落点时退回坐标，两者都没有才空", () => {
+    expect(recAddressLine(rec({ address: "  12 Trần Duy Hưng  " }))).toBe("12 Trần Duy Hưng");
+    // 只有点没地址：坐标就是我们知道的最具体的东西，显示「—」等于把已有信息藏起来。
+    expect(recAddressLine(rec({ latitude: 21.01, longitude: 105.79 }))).toBe("21.01, 105.79");
+    expect(recAddressLine(rec())).toBe("");
+  });
+
+  it("没有落点就没有地图链接 —— 拿城市名猜一个坐标是编", () => {
+    expect(recMapsUrl(rec({ latitude: 21.01, longitude: 105.79 }))).toBe(
+      "https://maps.google.com/?q=21.01,105.79"
+    );
+    expect(recMapsUrl(rec({ address: "12 Trần Duy Hưng" }))).toBeUndefined();
+    expect(recMapsUrl(rec({ latitude: 21.01 }))).toBeUndefined();
+  });
+
+  it("表单收地址，而且地址能直接手打（Android 上没有地图）", () => {
+    expect(manageCode).toContain("address: value");
+    expect(manageCode).toContain("在地图上选点");
+    // 地图选点是一个真的 sheet，不是点了没反应的按钮。
+    expect(manageCode).toContain("<StoreAddressSheet");
+    expect(manageCode).toContain("setMapOpen(true)");
+    // 提交时只有真的落了点才发坐标（半个坐标服务端会拒，(0,0) 是真实坐标）。
+    expect(manageCode).toContain("...(pin ? { latitude: pin.lat, longitude: pin.lng } : {})");
+  });
+
+  it("地图 sheet 复用全 App 的地图，不另画一套", () => {
+    expect(sheetCode).toContain("<MapCanvas");
+    // 地图给不出坐标时（Android）确认键必须是禁用的 ——
+    // 摆一个点了没反应的键，比没有键更糟。
+    expect(sheetCode).toContain("disabled={!coord}");
+    // 落点没有「覆盖半径」这回事：传了 radiusMeters 会画出一个假的覆盖圈。
+    expect(sheetCode).not.toContain("radiusMeters");
+  });
+
+  it("运营队列能看见地址、能打开地图", () => {
+    expect(queueCode).toContain("recAddressLine(row)");
+    expect(queueCode).toContain("recHasPin(row)");
+    expect(queueCode).toContain("在地图上打开");
+  });
+
+  it("详情页也带地址与地图入口", () => {
+    expect(manageCode).toContain("recAddressLine(detail)");
+    expect(manageCode).toContain("recMapsUrl(detail)");
+  });
+
+  it("重新推荐同一家店时位置跟着走，不用再点一次地图", () => {
+    expect(manageCode).toContain('address: detail.address ?? ""');
+    expect(manageCode).toContain("? { lat: detail.latitude, lng: detail.longitude }");
   });
 });
 

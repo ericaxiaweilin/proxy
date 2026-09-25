@@ -38,8 +38,10 @@ export interface MapCanvasProps {
   // 初始 pin 位置（grid coord）。0,0 = 城市西北角；
   // GRID_W, GRID_H = 东南角。
   initialPin: GridCoord;
-  // 半径（米）。
-  radiusMeters: 1000 | 3000 | 5000;
+  // 半径（米）。**可选** —— 它是「本地范围」的语义（feed 按 1/3/5 km 筛），
+  // 不是每个用地图的地方都有这回事：给店铺标个位置时没有「覆盖半径」，
+  // 硬传一个 3 km 会让人以为那是在划经营范围。不传就不画圈、不显示半径。
+  radiusMeters?: 1000 | 3000 | 5000;
   // 城市名（显示在角标）。"" 表示未知 — 不再默认任何城市。
   cityHint: string;
   // pin / 拖动 / 完成时回调 (新 grid coord)。kind 区分"点选跳跃"和
@@ -288,15 +290,18 @@ export function MapCanvas({
           // teardrop tip sits exactly on the marker's coordinate.
           icon={require("../../assets/map-pin/pin-violet.png")}
           title={hudCityText}
-          description={`半径 ${radiusMeters / 1000} km`}
+          {...(radiusMeters ? { description: `半径 ${radiusMeters / 1000} km` } : {})}
         />
-        <Circle
-          center={pinLatLng}
-          fillColor="rgba(128, 51, 240, 0.10)"
-          radius={radiusMeters}
-          strokeColor="#8033F0"
-          strokeWidth={1.5}
-        />
+        {/* 没有半径就不画圈：一个凭空的覆盖范围比没有覆盖范围更误导。 */}
+        {radiusMeters ? (
+          <Circle
+            center={pinLatLng}
+            fillColor="rgba(128, 51, 240, 0.10)"
+            radius={radiusMeters}
+            strokeColor="#8033F0"
+            strokeWidth={1.5}
+          />
+        ) : null}
       </MapView>
 
       {/* Top-right: 用我当前位置 button. Sits on top of the map
@@ -338,7 +343,7 @@ export function MapCanvas({
       <View pointerEvents="none" style={styles.hud}>
         <Text selectable style={styles.hudCity}>{hudCityText}</Text>
         <Text selectable style={styles.hudCoord}>
-          ({pin.x}, {pin.y}) · 半径 {radiusMeters / 1000} km
+          ({pin.x}, {pin.y}){radiusMeters ? ` · 半径 ${radiusMeters / 1000} km` : ""}
         </Text>
         <Text selectable style={styles.hudHint}>拖 pin / 点地图 / 📍用我位置</Text>
       </View>
@@ -358,14 +363,18 @@ function FallbackNotice({
   cityHint: string;
   onChange: (g: GridCoord) => void;
   pin: GridCoord;
-  radiusMeters: number;
+  // 可选 —— 调用方现在会传 undefined 进来（「没有半径」是合法状态）。
+  radiusMeters?: number | undefined;
 }): React.JSX.Element {
   return (
     <View style={[styles.canvas, styles.androidFallback]}>
       <Text selectable style={styles.androidTitle}>地图仅在 iOS 可用</Text>
+      {/* 这段话以前是内部排期（「R15.29 已接 Apple Maps (MapKit)。Android 端需要
+          Google Maps key (R15.30+)」）—— 用户该看到的是「这台机器上我做不到什么、
+          还能怎么办」，不是我们的版本号。 */}
       <Text selectable style={styles.androidBody}>
-        R15.29 已接 Apple Maps (MapKit)。Android 端需要 Google Maps key
-        (R15.30+)。当前覆盖范围：{radiusMeters / 1000} km
+        这个版本的地图只在 iOS 上能看。Android 上可以手动填写地址，不影响提交。
+        {radiusMeters ? `\n当前覆盖范围：${radiusMeters / 1000} km` : ""}
       </Text>
       <View style={{ display: "none" }} onTouchEnd={() => onChange(pin)} />
       <Text selectable style={styles.androidHint}>{cityHint}</Text>

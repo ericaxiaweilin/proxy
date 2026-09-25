@@ -1,4 +1,7 @@
 import type { StoreRecommendation } from "../storeonboarding-client";
+// location-options 是纯 .ts（无 react-native import），所以这个模型仍然能被
+// vitest 直接 import —— 地图 URL 不在这里另写一份。
+import { googleMapsUrl } from "../components/location-options";
 
 // STORE-REC-MANAGE-001: 「推荐管理」的读模型。
 //
@@ -54,11 +57,12 @@ export function countRecs(rows: readonly StoreRecommendation[]): RecCounts {
   return counts;
 }
 
-// 搜索只覆盖**服务端真的存了的**字段：店名 / 城市 / 品类。
-// 设计稿的占位符还写了「对接人」—— 推荐记录里没有这个字段（同样没有门牌地址、
-// 电话、照片），把它写进占位符就是承诺一个永远搜不到的东西。
+// 搜索只覆盖**服务端真的存了的**字段：店名 / 城市 / 品类 / 地址。
+// 设计稿的占位符还写了「对接人」—— 推荐记录里没有这个字段（同样没有电话、
+// 照片），把它写进占位符就是承诺一个永远搜不到的东西。
+// 地址是 STORE-REC-ADDRESS-001 起才存进来的（迁移 130），所以这里才敢搜它。
 export function recSearchText(row: StoreRecommendation): string {
-  return [row.storeName, row.city, row.category]
+  return [row.storeName, row.city, row.category, row.address ?? ""]
     .filter((value) => typeof value === "string" && value.trim().length > 0)
     .join(" ")
     .toLowerCase();
@@ -255,6 +259,30 @@ export function recCityIsPreset(city: string): boolean {
   return REC_CITIES.includes(city.trim());
 }
 
+// STORE-REC-ADDRESS-001：推荐记录现在带位置了 —— 门牌地址（给人看）+ 地图落点
+// （给地图用）。两者**独立可选**：只有地址没点、或只有点没地址，都合法。
+//
+// 但坐标必须**成对**才算数。只有一半的坐标画不出点，服务端会拒，这里也不能
+// 拿它当「有位置」—— 否则界面会摆一个「打开地图」的按钮，点下去落到几内亚湾。
+export function recHasPin(row: StoreRecommendation): boolean {
+  return typeof row.latitude === "number" && typeof row.longitude === "number";
+}
+
+// 一行能显示的位置描述。优先门牌地址；只有落点、没写地址时退回坐标 ——
+// 那种情况下坐标就是我们知道的最具体的东西，显示「—」等于把已有的信息藏起来。
+export function recAddressLine(row: StoreRecommendation): string {
+  const address = (row.address ?? "").trim();
+  if (address) return address;
+  if (recHasPin(row)) return `${row.latitude}, ${row.longitude}`;
+  return "";
+}
+
+// 打开地图的链接。没有落点就没有链接 —— 拿城市名去猜一个坐标是编。
+export function recMapsUrl(row: StoreRecommendation): string | undefined {
+  if (!recHasPin(row)) return undefined;
+  return googleMapsUrl(row.latitude as number, row.longitude as number);
+}
+
 // 设计稿这条提示写的是「推荐被平台签约后，店铺自动进入我的店铺，你拿成长值奖励。
 // 采纳后店铺前 3 个月独家使用。」——三件事系统里都没有：
 //   ① 没有奖励模型（growth 域里没有任何与推荐挂钩的入账）；
@@ -264,7 +292,9 @@ export function recCityIsPreset(city: string): boolean {
 export const REC_TIP =
   "推荐先由平台运营评估。采纳后要有人真的把店建出来（在「推荐管理」里建），建完才会出现在「我的店铺」—— 采纳本身不等于店铺已存在。";
 
-// 表单里目前**不收**的东西。设计稿有详细地址 / 对接人电话 / 店铺照片三项，
-// 推荐记录里一个字段都没有 —— 收了也只能丢，所以宁可不收，也不让用户白填。
+// 表单里目前**不收**的东西。设计稿有详细地址 / 对接人电话 / 店铺照片三项 ——
+// 详细地址从 STORE-REC-ADDRESS-001（迁移 130）起已经收了，所以这句提示里
+// 不能再提它：界面一边在收、一边说不收，是最容易让人不再相信提示的那种不一致。
+// 剩下两项推荐记录里仍然一个字段都没有，收了也只能丢，宁可不收。
 export const REC_UNCOLLECTED_NOTE =
-  "门牌地址、对接人电话、店铺照片暂时不收：推荐记录里没有这几个字段，填了也只会丢。要加得先扩服务端。";
+  "对接人电话、店铺照片暂时不收：推荐记录里没有这两个字段，填了也只会丢。要加得先扩服务端。";

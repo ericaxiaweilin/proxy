@@ -20,8 +20,8 @@ func NewStoreOnboardingRepository(pool *pgxpool.Pool) *StoreOnboardingRepository
 
 const insertStoreRecommendationSQL = `
 INSERT INTO business.store_recommendations
-    (id, store_name, city, category, reason, recommended_by, origin, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+    (id, store_name, city, category, reason, address, latitude, longitude, recommended_by, origin, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 
 func (r *StoreOnboardingRepository) AddRecommendation(ctx context.Context, rec storeonboarding.StoreRecommendation) error {
 	if r == nil || r.pool == nil {
@@ -37,8 +37,11 @@ func (r *StoreOnboardingRepository) AddRecommendation(ctx context.Context, rec s
 		return storeonboarding.ErrRecommendationReasonRequired
 	}
 	category := rec.Category
+	// STORE-REC-ADDRESS-001: Latitude/Longitude 是 *float64 —— nil 直接绑成
+	// NULL，这正是「没选点」该有的样子（0,0 是真实坐标，不能用它当缺省）。
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, insertStoreRecommendationSQL,
 		rec.ID, rec.StoreName, rec.City, category, rec.Reason,
+		rec.Address, rec.Latitude, rec.Longitude,
 		rec.RecommendedBy, rec.Origin, rec.CreatedAt.UTC())
 	return err
 }
@@ -52,7 +55,9 @@ func (r *StoreOnboardingRepository) AddRecommendation(ctx context.Context, rec s
 // 推荐复制成多行，运营会在队列里看到同一家店出现两次。
 // decided_at 可能为 NULL（还没评估），必须扫进可空类型。
 const listStoreRecommendationsSQL = `
-SELECT r.id, r.store_name, r.city, r.category, r.reason, r.recommended_by, r.origin, r.created_at,
+SELECT r.id, r.store_name, r.city, r.category, r.reason,
+       r.address, r.latitude, r.longitude,
+       r.recommended_by, r.origin, r.created_at,
        COALESCE(d.decision, '')   AS decision,
        COALESCE(d.reason, '')     AS decision_reason,
        COALESCE(d.decided_by, '') AS decided_by,
@@ -107,11 +112,22 @@ func (r *StoreOnboardingRepository) ListRecommendations(ctx context.Context, fil
 		var rec storeonboarding.StoreRecommendation
 		// 结论列可能为 NULL —— 必须扫进 sql.Null*，否则「还没评估」会
 		// 变成一次 scan 错误，整个队列直接读不出来。
+		// STORE-REC-ADDRESS-001: 坐标同理，NULL = 这条推荐没有地图落点。
 		var decidedAt sql.NullTime
+		var lat, lng sql.NullFloat64
 		if err := rows.Scan(&rec.ID, &rec.StoreName, &rec.City, &rec.Category, &rec.Reason,
+			&rec.Address, &lat, &lng,
 			&rec.RecommendedBy, &rec.Origin, &rec.CreatedAt,
 			&rec.Decision, &rec.DecisionReason, &rec.DecidedBy, &decidedAt); err != nil {
 			return nil, err
+		}
+		if lat.Valid {
+			v := lat.Float64
+			rec.Latitude = &v
+		}
+		if lng.Valid {
+			v := lng.Float64
+			rec.Longitude = &v
 		}
 		if decidedAt.Valid {
 			at := decidedAt.Time
@@ -127,7 +143,7 @@ func (r *StoreOnboardingRepository) ListRecommendations(ctx context.Context, fil
 
 // STORE-REC-006 — 按 id 取一条推荐，用于校验结论落在真实存在的推荐上。
 const findStoreRecommendationSQL = `
-SELECT id, store_name, city, category, reason, recommended_by, origin, created_at
+SELECT id, store_name, city, category, reason, address, latitude, longitude, recommended_by, origin, created_at
 FROM business.store_recommendations
 WHERE id = $1
 LIMIT 1`
@@ -151,9 +167,19 @@ func (r *StoreOnboardingRepository) FindRecommendation(ctx context.Context, id s
 		return storeonboarding.StoreRecommendation{}, false, nil
 	}
 	var rec storeonboarding.StoreRecommendation
+	var lat, lng sql.NullFloat64
 	if err := rows.Scan(&rec.ID, &rec.StoreName, &rec.City, &rec.Category, &rec.Reason,
+		&rec.Address, &lat, &lng,
 		&rec.RecommendedBy, &rec.Origin, &rec.CreatedAt); err != nil {
 		return storeonboarding.StoreRecommendation{}, false, err
+	}
+	if lat.Valid {
+		v := lat.Float64
+		rec.Latitude = &v
+	}
+	if lng.Valid {
+		v := lng.Float64
+		rec.Longitude = &v
 	}
 	return rec, true, nil
 }

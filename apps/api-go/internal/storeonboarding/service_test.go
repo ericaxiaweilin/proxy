@@ -672,3 +672,81 @@ func TestLatestDispositionWinsWhenOperatorChangesMind(t *testing.T) {
 		t.Fatalf("latest disposition must win: %+v", all[0])
 	}
 }
+
+// STORE-REC-ADDRESS-001：推荐带上门牌地址与地图落点。
+//
+// 重点不是「字段存得下」，而是**「没选点」和「选了点」必须能分开**：
+// (0,0) 是几内亚湾上的一个真实坐标，实现里若拿 0 当「没填」，一条在河内的
+// 推荐会被画到西非去。所以坐标走指针 + NULL，缺省是「没有」而不是「零」。
+func TestRecommendStoreCarriesAddressAndPin(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewWithRepository(repo)
+	svc.SetClock(fixedClock())
+	r := svc.Handle(envelopeFor("RecommendStore", map[string]any{
+		"storeName": "Three Beans Cau Giay",
+		"city":      "河内",
+		"category":  "咖啡",
+		"reason":    "适合 afterwork",
+		"address":   "  12 Trần Duy Hưng, Cầu Giấy  ",
+		"latitude":  21.0113,
+		"longitude": 105.7985,
+	}, "user_001"))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("recommend with pin: %+v", r)
+	}
+	rec := repo.Recommendations()[0]
+	if rec.Address != "12 Trần Duy Hưng, Cầu Giấy" {
+		t.Fatalf("address must be trimmed, got %q", rec.Address)
+	}
+	if rec.Latitude == nil || rec.Longitude == nil {
+		t.Fatalf("pin must be kept: %+v", rec)
+	}
+	if *rec.Latitude != 21.0113 || *rec.Longitude != 105.7985 {
+		t.Fatalf("pin must round-trip unchanged: %v,%v", *rec.Latitude, *rec.Longitude)
+	}
+}
+
+// 不填地址、不选点也必须能提交 —— 这是 092 时代就有的路径，而且小美草稿
+// （SuggestStoreRecommendation）不可能给出坐标，必填会让 AI 那条路直接废掉。
+func TestRecommendStoreWithoutLocationIsStillAccepted(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewWithRepository(repo)
+	svc.SetClock(fixedClock())
+	r := svc.Handle(envelopeFor("RecommendStore", map[string]any{
+		"storeName": "店", "city": "河内", "reason": "x",
+	}, "user_001"))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("location is optional: %+v", r)
+	}
+	rec := repo.Recommendations()[0]
+	if rec.Address != "" || rec.Latitude != nil || rec.Longitude != nil {
+		t.Fatalf("absent location must stay absent, got %+v", rec)
+	}
+}
+
+// 只有一半的坐标画不出点：存下来只会让队列显示「有坐标」却定位不到任何地方，
+// 而没人看得出它是坏的。出界的坐标同理。两种都当场拒绝 ——
+// 别留给 postgres 那条 CHECK，那样返回的是 INTERNAL 500，长得像故障。
+func TestRecommendStoreRefusesHalfOrOutOfRangeCoordinate(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload map[string]any
+	}{
+		{"latitude only", map[string]any{"storeName": "店", "city": "河内", "reason": "x", "latitude": 21.0}},
+		{"longitude only", map[string]any{"storeName": "店", "city": "河内", "reason": "x", "longitude": 105.0}},
+		{"latitude out of range", map[string]any{"storeName": "店", "city": "河内", "reason": "x", "latitude": 91.0, "longitude": 105.0}},
+		{"longitude out of range", map[string]any{"storeName": "店", "city": "河内", "reason": "x", "latitude": 21.0, "longitude": 181.0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := NewMemoryRepository()
+			svc := NewWithRepository(repo)
+			r := svc.Handle(envelopeFor("RecommendStore", tc.payload, "user_001"))
+			if r.Outcome != "REJECTED" || r.Error.ErrorCode != "INVALID_RECOMMENDATION_LOCATION" {
+				t.Fatalf("want location rejection, got %+v", r)
+			}
+			if len(repo.Recommendations()) != 0 {
+				t.Fatalf("a rejected recommendation must not be stored")
+			}
+		})
+	}
+}

@@ -31,6 +31,13 @@ type StoreRecommendation struct {
 	Category      string `json:"category"`
 	Reason        string `json:"reason"`
 	RecommendedBy string `json:"recommendedByAccountId"`
+
+	// STORE-REC-ADDRESS-001：位置。Address 是给人看的（门牌地址，可空），
+	// Latitude/Longitude 是给地图用的落点。两者独立可选，但坐标**要么都有、
+	// 要么都没有** —— 校验在 recommendStore，落库约束在迁移 130。
+	Address   string   `json:"address,omitempty"`
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
 	// Origin 区分「真人用户推荐」与「AI（小美）推荐」。
 	Origin    string    `json:"origin"` // USER | AI
 	CreatedAt time.Time `json:"createdAt"`
@@ -178,6 +185,11 @@ type recommendStorePayload struct {
 	Category  string `json:"category"`
 	Reason    string `json:"reason"`
 	Origin    string `json:"origin"`
+	// STORE-REC-ADDRESS-001：可选的地址与地图落点。指针是为了区分
+	// 「没传」和「传了 0」—— 0,0 是几内亚湾上的一个真实坐标，不是缺省值。
+	Address   string   `json:"address"`
+	Latitude  *float64 `json:"latitude"`
+	Longitude *float64 `json:"longitude"`
 }
 
 func decodeRecommendStorePayload(payload map[string]any, out *recommendStorePayload) bool {
@@ -202,6 +214,24 @@ func (s *Service) recommendStore(ctx context.Context, e command.Envelope) comman
 	if strings.TrimSpace(p.Reason) == "" {
 		return command.Rejected(e, "INVALID_RECOMMENDATION_REASON", "VALIDATION", "AFTER_USER_ACTION", "storeonboarding.invalid_recommendation_reason", nil)
 	}
+	// STORE-REC-ADDRESS-001：地图落点要么都有、要么都没有。只有一半的坐标
+	// 画不出点，存下来就是坏数据 —— 队列里那条推荐会一直显示「有坐标」
+	// 却定位不到任何地方，而没人能看出它是坏的。
+	if (p.Latitude == nil) != (p.Longitude == nil) {
+		return command.Rejected(e, "INVALID_RECOMMENDATION_LOCATION", "VALIDATION", "AFTER_USER_ACTION", "storeonboarding.invalid_recommendation_location", nil)
+	}
+	// 范围当场拦，别留给 postgres 那条 CHECK：那样返回的是 INTERNAL 500，
+	// 而这是**客户端的输入问题**，必须长得像拒绝，不能像故障。
+	if p.Latitude != nil && (*p.Latitude < -90 || *p.Latitude > 90) {
+		return command.Rejected(e, "INVALID_RECOMMENDATION_LOCATION", "VALIDATION", "AFTER_USER_ACTION", "storeonboarding.invalid_recommendation_location", map[string]any{
+			"latitude": *p.Latitude,
+		})
+	}
+	if p.Longitude != nil && (*p.Longitude < -180 || *p.Longitude > 180) {
+		return command.Rejected(e, "INVALID_RECOMMENDATION_LOCATION", "VALIDATION", "AFTER_USER_ACTION", "storeonboarding.invalid_recommendation_location", map[string]any{
+			"longitude": *p.Longitude,
+		})
+	}
 	origin := strings.ToUpper(strings.TrimSpace(p.Origin))
 	if origin != "USER" && origin != "AI" {
 		origin = "USER"
@@ -219,6 +249,9 @@ func (s *Service) recommendStore(ctx context.Context, e command.Envelope) comman
 		City:          strings.TrimSpace(p.City),
 		Category:      strings.TrimSpace(p.Category),
 		Reason:        strings.TrimSpace(p.Reason),
+		Address:       strings.TrimSpace(p.Address),
+		Latitude:      p.Latitude,
+		Longitude:     p.Longitude,
 		RecommendedBy: e.Actor.ID,
 		Origin:        origin,
 		CreatedAt:     s.clock().UTC(),

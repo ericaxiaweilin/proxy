@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Linking, Pressable, Text, TextInput, View } from "react-native";
 import { color } from "../theme";
 import { styles } from "./me-styles";
 import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
@@ -12,7 +12,12 @@ import {
   type StoreRecommendationQueueStatus
 } from "../storeonboarding-client";
 import { ProxyLoading } from "../components/proxy-foundation";
-import { REC_CITY_FILTERS } from "./store-recommendation-manage-model";
+import {
+  REC_CITY_FILTERS,
+  recAddressLine,
+  recHasPin,
+  recMapsUrl
+} from "./store-recommendation-manage-model";
 
 // STORE-REC-002/004: 运营评估队列（App 内）。
 //
@@ -120,6 +125,14 @@ export function StoreRecommendationQueue(): React.JSX.Element {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // STORE-REC-ADDRESS-001：打开这条推荐的地图落点。
+  // 按钮只在 recHasPin 为真时渲染，所以这里取不到 URL 就什么都不做 ——
+  // 不弹一句「打不开」，那是把不可能发生的事说给用户听。
+  function openMaps(row: StoreRecommendation): void {
+    const url = recMapsUrl(row);
+    if (url) void Linking.openURL(url).catch(() => undefined);
+  }
 
   async function decide(id: string, decision: StoreRecommendationDecision, reason?: string): Promise<void> {
     setActingId(id);
@@ -311,6 +324,19 @@ export function StoreRecommendationQueue(): React.JSX.Element {
             {row.city}
             {row.category ? ` · ${row.category}` : ""} · {when(row.createdAt)}
           </Text>
+          {/* STORE-REC-ADDRESS-001：运营是照着这条去谈的，光有城市（「河内」）
+              指不到任何一扇门 —— 地址是这条推荐里唯一能落到具体位置的东西。
+              没填就整行不画，不写「地址：—」白占一行。 */}
+          {recAddressLine(row) ? (
+            <Text selectable style={styles.prototypeCardDesc}>{recAddressLine(row)}</Text>
+          ) : null}
+          {recHasPin(row) ? (
+            <Pressable onPress={() => openMaps(row)} style={{ marginTop: 4 }}>
+              <Text selectable style={{ color: color.magenta, fontSize: 11, fontWeight: "800" }}>
+                在地图上打开
+              </Text>
+            </Pressable>
+          ) : null}
           <Text selectable style={styles.prototypeCardDesc}>{row.reason}</Text>
           <Text selectable style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
             {/* origin=AI 表示内容由小美产出，recommendedBy 是发起对话的账号 —— 两个

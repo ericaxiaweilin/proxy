@@ -47,6 +47,12 @@ export interface StoreRecommendation {
   recommendedByAccountId: string;
   origin: StoreRecommendationOrigin;
   createdAt: string;
+  // STORE-REC-ADDRESS-001：位置。服务端用 omitempty —— 没填地址 / 没选点时
+  // 这几个键根本不出现，所以「缺键」和「空」在这里是同一件事。
+  // 坐标必须**成对**才算数（只有一半画不出点），判据见 recHasPin。
+  address?: string;
+  latitude?: number;
+  longitude?: number;
   // STORE-REC-004: 运营的最新评估结论。服务端用 omitempty，没评估时这些字段
   // 根本不会出现 —— 所以「没有 decision」才代表「还没评估」。
   decision?: StoreRecommendationDecision;
@@ -75,6 +81,16 @@ export interface RecommendStoreInput {
   category: string;
   reason: string;
   origin: StoreRecommendationOrigin;
+  /**
+   * STORE-REC-ADDRESS-001：位置，都可选。
+   *
+   * `address` 是人话地址；`latitude`/`longitude` 是地图落点。两者独立 ——
+   * 手打地址不选点、选了点不写地址，都合法。但坐标**要么都给、要么都不给**：
+   * 只有一半的坐标画不出点，服务端会拒，这里也先拦一道。
+   */
+  address?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 export class StoreRecommendationProtocolError extends Error {
@@ -133,13 +149,29 @@ export class StoreOnboardingClient {
     if (!storeName) throw new StoreRecommendationProtocolError("店名不能为空");
     if (!city) throw new StoreRecommendationProtocolError("城市不能为空");
     if (!reason) throw new StoreRecommendationProtocolError("推荐理由不能为空");
-    await this.command("RecommendStore", {
+    // STORE-REC-ADDRESS-001：坐标要么都有、要么都没有。只有一半画不出点，
+    // 本地先拦 —— 让用户看到一句能懂的话，而不是等服务端一个 INVALID_*。
+    const hasLat = typeof input.latitude === "number";
+    const hasLng = typeof input.longitude === "number";
+    if (hasLat !== hasLng) {
+      throw new StoreRecommendationProtocolError("地图落点缺了经度或纬度，请重新选点");
+    }
+    const payload: Record<string, unknown> = {
       storeName,
       city,
       category: input.category.trim(),
       reason,
       origin: input.origin
-    });
+    };
+    // 空地址不发键：服务端把「没传」和「传了空串」当同一件事（列默认 ''），
+    // 但少发一个键能让日志里一眼看出这条推荐到底有没有填地址。
+    const address = input.address?.trim() ?? "";
+    if (address) payload.address = address;
+    if (hasLat && hasLng) {
+      payload.latitude = input.latitude;
+      payload.longitude = input.longitude;
+    }
+    await this.command("RecommendStore", payload);
   }
 
   /**
