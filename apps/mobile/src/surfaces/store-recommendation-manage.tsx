@@ -11,10 +11,12 @@ import {
 import { ProxyLoading } from "../components/proxy-foundation";
 import { MyStoreRecommendations } from "./my-store-recommendations";
 import {
+  REC_CITIES,
   REC_STATUS_TEXT,
   REC_STORE_TYPES,
   REC_TIP,
   REC_UNCOLLECTED_NOTE,
+  recCityIsPreset,
   recMoment,
   recStages,
   recStatus,
@@ -350,12 +352,35 @@ export function StoreRecommendationManage({
           />
 
           <Text selectable style={styles.socialEditorLabel}>城市（必填）</Text>
+          {/* STORE-REC-CITY-001：先给预设。手打的「河内」和「Hanoi」在服务端是两个
+              城市（筛选是精确字符串相等），运营按城市一筛就静默 0 条。 */}
+          <View style={s.typeGrid}>
+            {REC_CITIES.map((city) => {
+              const active = draft.city === city;
+              return (
+                <Pressable
+                  key={city}
+                  onPress={() => setDraft((cur) => ({ ...cur, city: active ? "" : city }))}
+                  style={[s.typeItem, active && s.typeItemOn]}
+                >
+                  <Text selectable style={[s.typeText, active && s.typeTextOn]}>{city}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
           <TextInput
             onChangeText={(value) => setDraft((cur) => ({ ...cur, city: value }))}
-            placeholder="例如：河内"
+            placeholder="预设外的城市写在这里"
             style={styles.socialEditorInput}
             value={draft.city}
           />
+          {draft.city.trim() !== "" && !recCityIsPreset(draft.city) ? (
+            <View style={styles.infoNote}>
+              <Text selectable style={styles.infoNoteText}>
+                预设外的城市：队列按城市精确筛选，它只会出现在「全部城市」里。
+              </Text>
+            </View>
+          ) : null}
 
           <Text selectable style={styles.socialEditorLabel}>为什么推荐它进体系（必填）</Text>
           <TextInput

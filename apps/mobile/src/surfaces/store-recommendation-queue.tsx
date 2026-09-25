@@ -12,6 +12,7 @@ import {
   type StoreRecommendationQueueStatus
 } from "../storeonboarding-client";
 import { ProxyLoading } from "../components/proxy-foundation";
+import { REC_CITY_FILTERS } from "./store-recommendation-manage-model";
 
 // STORE-REC-002/004: 运营评估队列（App 内）。
 //
@@ -167,12 +168,31 @@ export function StoreRecommendationQueue(): React.JSX.Element {
       </Text>
 
       <Text selectable style={styles.socialEditorLabel}>城市（可选）</Text>
-      <TextInput
-        placeholder="不填 = 全部城市"
-        style={styles.socialEditorInput}
-        value={city}
-        onChangeText={setCity}
-      />
+      {/* STORE-REC-CITY-001：筛选也用预设。手打的「河内市」在服务端是另一个城市，
+          筛出来是空列表 —— 看起来像"没人推荐过"，而不是报错。 */}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
+        {REC_CITY_FILTERS.map((option) => {
+          const active = city === option.id;
+          return (
+            <Pressable
+              key={option.id || "ALL"}
+              onPress={() => setCity(option.id)}
+              style={{
+                backgroundColor: active ? color.magenta : color.white,
+                borderColor: active ? color.magenta : color.line,
+                borderRadius: 999,
+                borderWidth: 1,
+                paddingHorizontal: 12,
+                paddingVertical: 7
+              }}
+            >
+              <Text selectable style={{ color: active ? color.white : color.ink, fontSize: 11, fontWeight: "700" }}>
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
 
       <Text selectable style={styles.socialEditorLabel}>来源</Text>
       <View style={{ flexDirection: "row", gap: 8, marginTop: 2 }}>

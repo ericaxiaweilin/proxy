@@ -231,6 +231,30 @@ export function recMoment(iso: string): string {
 // 服务端的 category 是自由文本，没有枚举，所以这里也不假装有枚举。
 export const REC_STORE_TYPES: readonly string[] = ["咖啡厅", "SPA", "美甲", "摄影", "茶馆", "酒吧"];
 
+// STORE-REC-CITY-001：城市用**预设**，不让人手打。
+//
+// 这不是口味问题。服务端按城市筛是**精确字符串相等**
+// （`storeonboarding/service.go`：`filter.City != "" && rec.City != filter.City`），
+// 而「河内 / 河内市 / Hanoi / hn」在自由文本里是四个不同的值 ⇒ 运营在队列里按城市
+// 一筛就是**静默 0 条**（不报错，看起来像"没人推荐过这家店"）。feed 域踩过同一个坑，
+// 那次的做法是给城市定一套 canonical key（`packages/contracts/src/city-key.ts`）。
+// 这里沿用**同一套城市集合**，不另立一份词汇 —— 有测试钉住「预设里每个城市
+// 都出现在那份 canonical 别名表里」。
+export const REC_CITIES: readonly string[] = ["河内", "胡志明市", "岘港"];
+
+// 队列的城市筛选项。第一项 id 是空串 —— 那是服务端「不过滤」的语义，不是缺省值。
+export const REC_CITY_FILTERS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "", label: "全部城市" },
+  ...REC_CITIES.map((city) => ({ id: city, label: city }))
+];
+
+// 预设之外的城市。AI 草稿（SuggestStoreRecommendation）可能给出别的城市，
+// 北宁 / 芽庄这些也真实存在 —— 允许写，但界面会标明它是预设外的，
+// 让人知道它在队列的城市筛选里只会出现在「全部城市」下。
+export function recCityIsPreset(city: string): boolean {
+  return REC_CITIES.includes(city.trim());
+}
+
 // 设计稿这条提示写的是「推荐被平台签约后，店铺自动进入我的店铺，你拿成长值奖励。
 // 采纳后店铺前 3 个月独家使用。」——三件事系统里都没有：
 //   ① 没有奖励模型（growth 域里没有任何与推荐挂钩的入账）；

@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { StoreRecommendation } from "../storeonboarding-client";
 import {
+  REC_CITIES,
+  REC_CITY_FILTERS,
   REC_STATUS_TEXT,
   REC_STORE_TYPES,
   REC_TIP,
@@ -11,6 +13,7 @@ import {
   filterRecs,
   highlight,
   recAccent,
+  recCityIsPreset,
   recDay,
   recInitial,
   recMoment,
@@ -192,6 +195,48 @@ describe("不画系统里没有的东西", () => {
     expect(REC_STORE_TYPES.length).toBe(6);
     // category 在服务端是自由文本，所以快捷项只是往同一个输入框里填词。
     expect(manageCode).toContain("REC_STORE_TYPES.map(");
+  });
+});
+
+// STORE-REC-CITY-001：城市用预设，不用自由文本。
+//
+// 服务端按城市筛是**精确字符串相等**（`storeonboarding/service.go`），所以
+// 「河内」和「河内市」在运营队列里是两个城市 —— 手打出来的错别字不报错，
+// 只会让筛选结果静默变空（"看起来没人推荐过"）。这条钉住「城市来自一套预设」，
+// 并且那套预设必须**就是全 App 的 canonical 城市集合**，不是本文件自己编的名字。
+describe("STORE-REC-CITY-001 城市是预设，不是自由文本", () => {
+  const queueCode = stripComments(readFileSync(here("./store-recommendation-queue.tsx"), "utf8"));
+  // 跨包读契约源码而不是 import：`@proxy/contracts` 的 dist/index.d.ts 是旧的
+  // （JS 里 re-export 了 city-key，d.ts 里没有）⇒ import 会报 TS2305。
+  const cityKeySrc = readFileSync(here("../../../../packages/contracts/src/city-key.ts"), "utf8");
+
+  it("预设就是全 App 的 canonical 城市集合，不另立一份词汇", () => {
+    // canonical 只有 3 个 key（hanoi / hcmc / danang）。想加第 4 个城市 = 先改契约。
+    expect(REC_CITIES.length).toBe(3);
+    for (const city of REC_CITIES) {
+      // 每个预设城市都必须是契约里认得的别名，否则它就是本地自己编的名字。
+      expect(cityKeySrc).toContain(`"${city}":`);
+    }
+  });
+
+  it("表单先给预设按钮，并且不再提示「例如：河内」那种手打写法", () => {
+    expect(manageCode).toContain("REC_CITIES.map(");
+    expect(manageCode).not.toContain('placeholder="例如：河内"');
+  });
+
+  it("队列的城市筛选也是预设，「全部」= 服务端的不过滤语义", () => {
+    expect(queueCode).toContain("REC_CITY_FILTERS.map(");
+    expect(queueCode).not.toContain('placeholder="不填 = 全部城市"');
+    expect(REC_CITY_FILTERS[0]?.id).toBe("");
+    expect(REC_CITY_FILTERS.map((option) => option.id)).toEqual(["", ...REC_CITIES]);
+  });
+
+  it("预设外的城市仍可提交，但认得出来它不是预设", () => {
+    expect(recCityIsPreset("河内")).toBe(true);
+    expect(recCityIsPreset("  胡志明市  ")).toBe(true);
+    expect(recCityIsPreset("北宁")).toBe(false);
+    // 同一座城市的英文写法在服务端是**另一个城市** —— 这正是要预设的原因。
+    expect(recCityIsPreset("Hanoi")).toBe(false);
   });
 });
 
