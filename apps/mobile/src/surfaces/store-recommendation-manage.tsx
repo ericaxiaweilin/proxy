@@ -223,7 +223,7 @@ export function StoreRecommendationManage({
 
         {status === "ACCEPTED" && onOpenStore ? (
           <Pressable onPress={onOpenStore} style={[styles.lightCta, { marginTop: 8 }]}>
-            <Text selectable style={styles.lightCtaText}>去我的店铺建店</Text>
+            <Text selectable style={styles.lightCtaText}>去建店</Text>
           </Pressable>
         ) : null}
 

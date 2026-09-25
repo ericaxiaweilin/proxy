@@ -2799,9 +2799,11 @@ export function MeSurface({
             </Pressable>
             <Text selectable style={styles.subPageTitle}>推荐管理</Text>
             <Text selectable style={styles.subPageDesc}>把好的场地 / 商家推荐进体系；你推荐的那条走到哪一步、运营评估出什么结论，都在这里看。</Text>
+            {/* STORE-HUB-004：建店属于 workspace（本屏），不属于「我的店铺」——
+                那一屏只放**已经处理完**的店，还没建出来的店不在里面，所以不能把人指过去。 */}
             <StoreRecommendationManage
               onOpenQueue={() => openSubPage(STORE_REC_QUEUE_ROW.route)}
-              onOpenStore={() => openSubPage("bdash")}
+              onOpenStore={() => openSubPage("merchantstorefront")}
               tabs={STORE_REC_MANAGE_TABS}
             />
           </ScrollView>
@@ -2880,7 +2882,7 @@ export function MeSurface({
               <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text selectable style={styles.subPageTitle}>我推荐的店</Text>
-            <StoreRecommendationManage initialTab="mine" onOpenStore={() => openSubPage("bdash")} tabs={STORE_REC_MANAGE_TABS} />
+            <StoreRecommendationManage initialTab="mine" onOpenStore={() => openSubPage("merchantstorefront")} tabs={STORE_REC_MANAGE_TABS} />
           </ScrollView>
         </View>
       );
@@ -2902,7 +2904,7 @@ export function MeSurface({
               用户一起把好的店铺带进体系，运营评估后接入。推荐记录会留档（append-only），
               后续接入进度在运营侧推进。
             </Text>
-            <StoreRecommendationManage initialTab="new" onOpenStore={() => openSubPage("bdash")} tabs={STORE_REC_MANAGE_TABS} />
+            <StoreRecommendationManage initialTab="new" onOpenStore={() => openSubPage("merchantstorefront")} tabs={STORE_REC_MANAGE_TABS} />
           </ScrollView>
         </View>
       );

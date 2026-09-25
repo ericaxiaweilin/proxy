@@ -9,9 +9,9 @@ import { SUB_PAGE_CONTENT } from "./me-sub-pages";
 //   ① 一屏只能有一个返回。以前 me.tsx 的 bdash 分支画一个（退出整页）、hub 底部画一个
 //      （同一个动作）、详情页顶上再画一个（回列表）⇒ 详情页有两个返回，而用户会点的
 //      最上面那个直接把他踢出「我的店铺」。现在返回/标题归 hub 自己管。
-//   ② 「去我的店铺建店」必须真的能建店。推荐管理 ACCEPTED 态的 CTA 落点就是这一页，
-//      而这一页以前没有任何建店动作 ⇒ 死路（与 merchant-storefront 里「两处空态互相指
-//      '去别处建'，实际无入口」同一个 bug）。
+//   ② 建店必须真的能建店。这一页以前没有任何建店动作 ⇒ 死路（与 merchant-storefront 里
+//      「两处空态互相指'去别处建'，实际无入口」同一个 bug）。STORE-HUB-004 之后，
+//      推荐管理 ACCEPTED 态的 CTA 直接落 merchantstorefront，不再绕经这一页。
 //   ③ bdash 被改成店铺 hub 之后，原来指向它的入口不能跟着落到店铺列表上
 //      （BUSINESS 的「Proxy 中心」、二维码页的 backRoute）。
 //
@@ -22,6 +22,8 @@ const stripComments = (source: string): string =>
 
 const meCode = stripComments(readFileSync(here("./me.tsx"), "utf8"));
 const hubCode = stripComments(readFileSync(here("./my-stores-hub.tsx"), "utf8"));
+const manageCode = stripComments(readFileSync(here("./store-recommendation-manage.tsx"), "utf8"));
+const recModelCode = stripComments(readFileSync(here("./store-recommendation-manage-model.ts"), "utf8"));
 
 // bdash 分支：从 `subPage.route === "bdash"` 到 `subPage.route === "bdashprofile"`。
 const bdashStart = meCode.indexOf('subPage.route === "bdash"');
@@ -119,5 +121,38 @@ describe("STORE-HUB-003 我的店铺里没有推荐管理", () => {
   it("但推荐管理的可达性没丢 —— 路由分支和磁贴都还在", () => {
     expect(meCode).toContain('subPage.route === "storerecmanage"');
     expect(meCode).toContain('label: "推荐管理"');
+  });
+});
+
+// STORE-HUB-004（2026-09-25，用户定的分工）：
+//   「推荐管理」= workspace —— 在飞的推荐在这里处理，**建店也属于这里**；
+//   「我的店铺」= 只放**已经处理完**的店（真实存在的店）。
+// 推论：还没建出来的店不在「我的店铺」里 ⇒ 任何把它指过去的入口都是空指；
+// 反过来，「我的店铺」也不许把在飞的推荐掺进来（那不是"处理完的"）。
+describe("STORE-HUB-004 建店属于推荐管理，不属于我的店铺", () => {
+  it("推荐管理 ACCEPTED 的 CTA 直接落建店流程，不再绕经我的店铺", () => {
+    // 三处挂载（页签① / 页签② / 直落路由）都要改，漏一处就还是空指。
+    expect(countOf(meCode, 'onOpenStore={() => openSubPage("merchantstorefront")}')).toBe(3);
+    expect(meCode).not.toContain('onOpenStore={() => openSubPage("bdash")}');
+  });
+
+  it("按钮和「下一步」文案不再说「去我的店铺」", () => {
+    expect(manageCode).not.toContain("去我的店铺");
+    expect(recModelCode).not.toContain("去「我的店铺」");
+    // 但仍必须说清「要有人把它建出来」—— 采纳 ≠ 店铺已存在。
+    expect(recModelCode).toContain("把店建出来");
+  });
+
+  it("推荐管理 不说「在『我的店铺』里建店」—— 建店不发生在那一屏", () => {
+    // 「出现在「我的店铺」」是对的（建完才会出现在那里）；
+    // 「在「我的店铺」里建出来」是空指 —— 建店入口在 merchantstorefront。
+    expect(recModelCode).not.toContain("在「我的店铺」里");
+  });
+
+  it("我的店铺 只放已经处理完的店 —— 它不读推荐记录", () => {
+    // 钉住「不要把在飞的推荐掺进我的店铺」这个决定：一旦有人接上
+    // listMyRecommendations，这里立刻红。
+    expect(hubCode).not.toContain("listMyRecommendations");
+    expect(hubCode).not.toContain("StoreRecommendation");
   });
 });
