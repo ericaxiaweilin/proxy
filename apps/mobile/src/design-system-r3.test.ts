@@ -185,13 +185,43 @@ describe("Proxy Design System R3 typography", () => {
     const table = source.match(/const PROFILE_TAB_ICON[\s\S]*?\n\};/)?.[0] ?? "";
     expect(table, "PROFILE_TAB_ICON 应该还在").not.toBe("");
     expect(table).toMatch(/POSTS:\s*"postsGrid"/);
-    expect(table).toMatch(/REPLIES:\s*"chat"/);
+    expect(table).toMatch(/REPLIES:\s*"replyBubble"/);
     expect(table).toMatch(/TAGGED:\s*"target"/);
     expect(table).toMatch(/ABOUT:\s*"infoCircle"/);
     // 语义错位的旧字形不许回来（`"spark"` 也会命中 `"sparkle"`，两向都守住）
     expect(table).not.toMatch(/POSTS:\s*"sparkle"/);
     expect(table).not.toMatch(/REPLIES:\s*"spark"/);
     expect(table).not.toMatch(/ABOUT:\s*"ring"/);
+    // ⚠️ REPLIES 不许退回 chat：chat 是**方角**气泡，原型是**圆形**对话气泡。
+    // 第一轮就是误用了 chat，用户第二轮当场指出「回复的 logo 还是不符合原型」。
+    expect(table).not.toMatch(/REPLIES:\s*"chat"/);
+  });
+
+  // REPLY-ROW-FORMAT-001（2026-09-25，用户「回复的格式」对齐原型）：原型回复行 =
+  // 左头像 + 右一列（名字/@handle → 「回复了 X 的帖子 · 时间」→ 正文）。
+  // 守的是**这一行有作者块**，不是某个词 —— 没有头像/名字时一屏回复看不出是谁发的。
+  it("keeps the reply row shaped like the prototype feed item", () => {
+    const ptPath = join(sourceRoot, "surfaces", "ProfileTabs.tsx");
+    const source = readFileSync(ptPath, "utf8");
+    // replyCard 必须是「左头像 + 右一列」的横向结构（原型 .feed-item{display:flex}）
+    expect(source).toMatch(/replyCard:\s*\{[^}]*flexDirection:\s*"row"/);
+    expect(source).toMatch(/replyAvatar:\s*\{[^}]*width:\s*36/);
+    expect(source).toMatch(/replyBody:\s*\{[^}]*flex:\s*1/);
+    // 作者块三个字段都要渲染出来（头像 / 名字 / @handle）。
+    // ⚠️ 别用裸 toContain("styles.replyAvatar") —— 它同样命中 styles.replyAvatarText，
+    // 把头像整块删掉都不会红（反向验时抓到的假绿）。这里断言 JSX 形状。
+    expect(source).toMatch(/<View style=\{styles\.replyAvatar\}>/);
+    expect(source).toMatch(/style=\{styles\.replyName\}/);
+    expect(source).toMatch(/style=\{styles\.replyHandle\}/);
+    // handle 空串时不渲染 —— 一个光秃秃的 "@" 比没有更糟
+    expect(source).toContain("const atHandle = props.handle.replace(/^@+/, \"\").trim();");
+    // 上下文行（回复了谁 · 时间）和正文仍在，且排在作者块里面
+    expect(source).toMatch(/styles\.replyHead\}>[\s\S]*?styles\.replyName[\s\S]*?styles\.replyHandle/);
+    expect(source).toMatch(/styles\.replyMeta[\s\S]*?replyTargetLabel\(/);
+    // 圆气泡字形真的存在（不是只改了映射表却没实现字形）
+    const icon = readFileSync(join(sourceRoot, "components", "proxy-icon.tsx"), "utf8");
+    expect(icon).toMatch(/case\s*"replyBubble":/);
+    expect(icon).toContain('d="M21 11.5a8.38 8.38 0 0 1-.9 3.8');
   });
 
   // R15.67: R2 actions 守门 (ProfileTabs) — 1px 边框 + 10 圆角 (R2 .actions button)

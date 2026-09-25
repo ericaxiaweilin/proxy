@@ -138,14 +138,16 @@ const PROFILE_TAB_LABEL: Record<ProfileTabKey, string> = {
 
 // PROFILE-TAB-LOGO-001（2026-09-25，用户「还有 logo 要对齐原型」）：tab 图标一律
 // 用原型 deepseek_html_20260925_4e54a0.html 的那套字形 —— 帖子 = 圆角方框 + 十字
-// 分隔、回复 = 气泡、标签 = 同心圆、关于 = ⓘ。
+// 分隔、回复 = 圆形对话气泡、标签 = 同心圆、关于 = ⓘ。
 // 改之前：帖子 和 回复 共用同一颗 sparkle（两个 tab 长得一模一样），关于 是个空心
 // 圆 —— 三个字形跟"帖子 / 回复 / 关于"没有任何关系，只有 标签 早就是同心圆。
+// ⚠️ 第二轮：回复先被指到了现成的 chat（方角气泡），用户当场指出「回复的 logo 还是
+// 不符合原型」—— 原型是**圆**气泡，所以单独加了 replyBubble，不复用 chat。
 // SAVED 原型没有这一栏（收藏是私库，他人主页本来就不给），沿用 App 里「收藏」
 // 一贯的 star（见 me.tsx 的收藏入口），不自己编一个字形。
 const PROFILE_TAB_ICON: Record<ProfileTabKey, ProxyIconName> = {
   POSTS: "postsGrid",
-  REPLIES: "chat",
+  REPLIES: "replyBubble",
   SAVED: "star",
   TAGGED: "target",
   ABOUT: "infoCircle"
@@ -247,6 +249,10 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           // OWN-NAME-001：当前资料名优先只在 SELF 生效 —— OTHER 时 profileDraft
           // 是对方的名字，传进去会把"我回复过的帖子"标成对方的名字。
           viewerDisplayName={props.viewerMode === "SELF" ? props.profileDraft.name : undefined}
+          // REPLY-ROW-FORMAT-001：作者块 = 主页本人，三个字段都取自 profileDraft。
+          avatarUri={props.profileAvatarUri}
+          name={props.profileDraft.name}
+          handle={props.profileDraft.handle}
           color={props.color}
         />
       ) : null}
@@ -606,6 +612,14 @@ function RepliesTab(props: {
   viewerMode: "SELF" | "OTHER" | undefined;
   viewerAccountId?: string | undefined;
   viewerDisplayName?: string | undefined;
+  // REPLY-ROW-FORMAT-001（2026-09-25，用户「回复的格式」对齐原型）：原型每一行是
+  // `.feed-item` = 左侧头像 + 右侧一列（feed-head 名字/@handle → reply-context
+  // 「回复了 X 的帖子 · 时间」→ 正文）。以前这一行只有后两项，没有作者块 ——
+  // 一屏回复看不出是谁发的。作者就是主页本人，头像/名字/handle 都取自
+  // profileDraft（真数据，不是占位）。
+  avatarUri?: string | undefined;
+  name: string;
+  handle: string;
   color: ProfileTabsProps["color"];
   failed?: boolean | undefined;
 }): React.JSX.Element {
@@ -616,6 +630,10 @@ function RepliesTab(props: {
   if (props.replies.length === 0) {
     return <ProxyEmptyState title="还没有回复" sub="你在其他帖子下面的回复会出现在这里" />;
   }
+  // REPLY-ROW-FORMAT-001: handle 可能带也可能不带前导 @（me.tsx 两处都在运行时补
+  // @，见 1069/1099 行）。这里先剥掉再统一加一个 —— 否则会出现 "@@name"。
+  // 剥完是空串就不渲染 handle：一个光秃秃的 "@" 比没有更糟（不编内容）。
+  const atHandle = props.handle.replace(/^@+/, "").trim();
   return (
     <View>
       {props.replies.map((reply) => {
@@ -625,20 +643,35 @@ function RepliesTab(props: {
         return (
           // key 用 replyId：同一条帖子可以被同一个人回复多次，用父帖 id 会撞。
           <View key={reply.replyId} style={styles.replyCard}>
-            <View style={styles.replyMeta}>
-              <Text selectable style={styles.replyTarget}>
-                {replyTargetLabel(props.viewerMode, target, props.viewerAccountId, props.viewerDisplayName)}
-              </Text>
-              <Text selectable style={styles.replyTime}>· {replyTimestampLabel(reply.createdAt)}</Text>
+            <View style={styles.replyAvatar}>
+              {props.avatarUri ? (
+                <CircularAvatarImage accessibilityLabel={`${props.name}头像`} size={36} uri={props.avatarUri} />
+              ) : (
+                <Text selectable style={styles.replyAvatarText}>{(props.name || "?").charAt(0).toUpperCase()}</Text>
+              )}
             </View>
-            <Text selectable style={styles.replyText}>{reply.body}</Text>
-            {/* 引用块：让「回复了谁」这条信息能落到实处 —— 看到原帖才知道
-                说的是哪件事（Threads 的做法）。 */}
-            {target && target.excerpt !== "" ? (
-              <View style={styles.replyQuote}>
-                <Text selectable numberOfLines={2} style={styles.replyQuoteText}>{target.excerpt}</Text>
+            <View style={styles.replyBody}>
+              <View style={styles.replyHead}>
+                <Text selectable numberOfLines={1} style={styles.replyName}>{props.name}</Text>
+                {atHandle !== "" ? (
+                  <Text selectable numberOfLines={1} style={styles.replyHandle}>@{atHandle}</Text>
+                ) : null}
               </View>
-            ) : null}
+              <View style={styles.replyMeta}>
+                <Text selectable style={styles.replyTarget}>
+                  {replyTargetLabel(props.viewerMode, target, props.viewerAccountId, props.viewerDisplayName)}
+                </Text>
+                <Text selectable style={styles.replyTime}>· {replyTimestampLabel(reply.createdAt)}</Text>
+              </View>
+              <Text selectable style={styles.replyText}>{reply.body}</Text>
+              {/* 引用块：让「回复了谁」这条信息能落到实处 —— 看到原帖才知道
+                  说的是哪件事（Threads 的做法）。 */}
+              {target && target.excerpt !== "" ? (
+                <View style={styles.replyQuote}>
+                  <Text selectable numberOfLines={2} style={styles.replyQuoteText}>{target.excerpt}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
         );
       })}
@@ -864,8 +897,17 @@ const styles = StyleSheet.create({
   savedSceneTitle: { fontSize: 14, color: "#0f172a" },
   savedSceneMeta: { fontSize: 12, color: "#64748b", marginTop: 2 },
   // Reply
-  replyCard: { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e2e8f0" },
-  replyMeta: { flexDirection: "row", alignItems: "center" },
+  // REPLY-ROW-FORMAT-001：照原型 `.feed-item{display:flex;gap:12px}` + 左头像右一
+  // 列；头像 36 圆形、名字 13/700、@handle 11 灰 —— 跟 PostsTab 的 postHead 同一口径
+  // （那边头像 38），两栏看起来是同一套列表。gap 12 直接抄原型。
+  replyCard: { flexDirection: "row", gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e2e8f0" },
+  replyAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#cbd5e1", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  replyAvatarText: { fontSize: 15, color: "#0f172a", fontWeight: "700" },
+  replyBody: { flex: 1, minWidth: 0 },
+  replyHead: { alignItems: "center", flexDirection: "row", gap: 6, marginBottom: 2 },
+  replyName: { fontSize: 13, fontWeight: "700", color: "#0f172a", flexShrink: 1 },
+  replyHandle: { fontSize: 11, color: "#94a3b8", flexShrink: 1 },
+  replyMeta: { flexDirection: "row", alignItems: "center", marginTop: 2 },
   replyTarget: { fontSize: 11, color: "#94a3b8" },
   replyTime: { fontSize: 11, color: "#94a3b8" },
   replyText: { fontSize: 13, color: "#0f172a", marginTop: 4, lineHeight: 18 },

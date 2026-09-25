@@ -41,6 +41,7 @@ export type ProxyIconName =
   | "infoCircle"
   | "qrGrid"
   | "postsGrid"
+  | "replyBubble"
   | "ellipsis"
   | "search"
   | "chart"
@@ -141,6 +142,13 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
     // 不拿 qrGrid 顶替 —— 那个字形是「这是一个 QR 码」的语义（MSG-SCAN-ICON-001）。
     case "postsGrid":
       return canvas(<><Path {...common} d="M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z"/><Path {...common} d="M4 10h16M10 4v16"/></>);
+    // PROFILE-TAB-LOGO-001（2026-09-25 补）：前一天先把「回复」指到了现成的 chat，
+    // 但 chat 是**方角气泡**（圆角矩形 + 尾巴），原型的回复字形是**圆形对话气泡**
+    // （左下角带尾巴的 message-circle）—— 用户第二轮明确指出「回复的 logo 还是不
+    // 符合原型」。几何照抄原型 24 栅格，不复用 chat：chat 还被 symbolMap 的 ✉ 和
+    // 消息类入口用着，改它的几何会连带改到别处。
+    case "replyBubble":
+      return canvas(<Path {...common} d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>);
     case "chat":
       return canvas(<Path {...common} d="M5 6h14v9H9l-4 3z"/>);
     case "meRing":
