@@ -136,12 +136,19 @@ const PROFILE_TAB_LABEL: Record<ProfileTabKey, string> = {
   ABOUT: "关于"
 };
 
+// PROFILE-TAB-LOGO-001（2026-09-25，用户「还有 logo 要对齐原型」）：tab 图标一律
+// 用原型 deepseek_html_20260925_4e54a0.html 的那套字形 —— 帖子 = 圆角方框 + 十字
+// 分隔、回复 = 气泡、标签 = 同心圆、关于 = ⓘ。
+// 改之前：帖子 和 回复 共用同一颗 sparkle（两个 tab 长得一模一样），关于 是个空心
+// 圆 —— 三个字形跟"帖子 / 回复 / 关于"没有任何关系，只有 标签 早就是同心圆。
+// SAVED 原型没有这一栏（收藏是私库，他人主页本来就不给），沿用 App 里「收藏」
+// 一贯的 star（见 me.tsx 的收藏入口），不自己编一个字形。
 const PROFILE_TAB_ICON: Record<ProfileTabKey, ProxyIconName> = {
-  POSTS: "sparkle",
-  REPLIES: "spark",
+  POSTS: "postsGrid",
+  REPLIES: "chat",
   SAVED: "star",
   TAGGED: "target",
-  ABOUT: "ring"
+  ABOUT: "infoCircle"
 };
 
 export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {

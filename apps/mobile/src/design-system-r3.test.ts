@@ -173,6 +173,27 @@ describe("Proxy Design System R3 typography", () => {
     expect(entry).not.toContain('name="route"');
   });
 
+  // PROFILE-TAB-LOGO-001（2026-09-25，用户「还有 logo 要对齐原型」）：个人主页的
+  // tab 图标是原型 deepseek_html_20260925_4e54a0.html 那一套 —— 帖子 = 圆角方框 +
+  // 十字分隔、回复 = 气泡、标签 = 同心圆、关于 = ⓘ。
+  // 这条钉的是**形状的来源**：改之前 帖子/回复 都是 sparkle/spark（同一颗星画两遍），
+  // 关于 是空心圆 ring —— 三个字形跟标签毫无关系，而且**没有任何断言会红**，
+  // 所以一直漂着没人发现。
+  it("keeps the profile tab glyphs on the prototype vocabulary", () => {
+    const ptPath = join(sourceRoot, "surfaces", "ProfileTabs.tsx");
+    const source = readFileSync(ptPath, "utf8");
+    const table = source.match(/const PROFILE_TAB_ICON[\s\S]*?\n\};/)?.[0] ?? "";
+    expect(table, "PROFILE_TAB_ICON 应该还在").not.toBe("");
+    expect(table).toMatch(/POSTS:\s*"postsGrid"/);
+    expect(table).toMatch(/REPLIES:\s*"chat"/);
+    expect(table).toMatch(/TAGGED:\s*"target"/);
+    expect(table).toMatch(/ABOUT:\s*"infoCircle"/);
+    // 语义错位的旧字形不许回来（`"spark"` 也会命中 `"sparkle"`，两向都守住）
+    expect(table).not.toMatch(/POSTS:\s*"sparkle"/);
+    expect(table).not.toMatch(/REPLIES:\s*"spark"/);
+    expect(table).not.toMatch(/ABOUT:\s*"ring"/);
+  });
+
   // R15.67: R2 actions 守门 (ProfileTabs) — 1px 边框 + 10 圆角 (R2 .actions button)
   it("keeps R2 action button styling on ProfileTabs", () => {
     const ptPath = join(sourceRoot, "surfaces", "ProfileTabs.tsx");

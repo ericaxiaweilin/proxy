@@ -40,6 +40,7 @@ export type ProxyIconName =
   | "image"
   | "infoCircle"
   | "qrGrid"
+  | "postsGrid"
   | "ellipsis"
   | "search"
   | "chart"
@@ -134,6 +135,12 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
       return canvas(<Path {...common} d="M12 4 20 12 12 20 4 12z"/>);
     case "target":
       return canvas(<><Circle {...common} cx="12" cy="12" r="7"/><Circle {...common} cx="12" cy="12" r="3"/></>);
+    // PROFILE-TAB-LOGO-001（2026-09-25，原型 deepseek_html_20260925_4e54a0.html）：
+    // 原型个人主页 tab 栏的「帖子」字形 = 圆角方框 + 十字分隔。几何照抄原型 24 栅格
+    // （rect x4 y4 w16 h16 rx3 + M4 10h16 + M10 4v16），只有描边跟 common 走。
+    // 不拿 qrGrid 顶替 —— 那个字形是「这是一个 QR 码」的语义（MSG-SCAN-ICON-001）。
+    case "postsGrid":
+      return canvas(<><Path {...common} d="M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z"/><Path {...common} d="M4 10h16M10 4v16"/></>);
     case "chat":
       return canvas(<Path {...common} d="M5 6h14v9H9l-4 3z"/>);
     case "meRing":
