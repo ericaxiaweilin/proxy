@@ -584,17 +584,11 @@ export function MeSurface({
     })();
     return () => { cancelled = true; };
   }, [insightsSheetOpen, localNet, engagement]);
-  // PROFILE-VIEWS-HEADER-001（P0，2026-09-24）：个人主页头部「— 次浏览 · 最近 30 天」以前是写死的 —，从没接数据。
-  // 打开个人主页就拉近 30 天主页访问次数（服务端 ListProfileViewStats sinceDays=30）；拉不到仍显示 —，不画 0。
-  const [personalViews30, setPersonalViews30] = useState<number | undefined>(undefined);
-  useEffect(() => {
-    if (subPage?.route !== "personalhub") return;
-    let cancelled = false;
-    localNet.listProfileViewStats(30)
-      .then((stats) => { if (!cancelled) setPersonalViews30(stats.opens); })
-      .catch(() => { if (!cancelled) setPersonalViews30(undefined); });
-    return () => { cancelled = true; };
-  }, [subPage?.route, localNet]);
+  // STAT-ROW-FOLLOW-001（2026-09-25）：头部不再有「次浏览 · 最近 30 天」这一格
+  // （见 personalhub 统计行的注释），这一份专为它拉的 ListProfileViewStats(30)
+  // 就没有消费者了 —— 一起删掉，别让每次打开主页都白发一次请求。
+  // 浏览数仍在顶栏「分析」弹层里，走下面 profileAnalytics 的
+  // listProfileViewStats(30)，口径不变（ANALYTICS-ME-001）。
   const [searchSheetOpen, setSearchSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   // 搜索浮条定位：顶栏高 46 + 上内边距 7，浮条贴在顶栏下方 8px 处。
@@ -2194,14 +2188,17 @@ export function MeSurface({
                   ));
                 })()}
               </View>
+              {/* STAT-ROW-FOLLOW-001（2026-09-25，用户明确）：本人主页的统计行就是
+                  「关注 / 粉丝」两个数字，对齐原型（公开主页那份写的是 128 关注 /
+                  2.4K 粉丝）。以前这里是「次浏览 · 最近 30 天」+「位关注者」——
+                  浏览数不是没有，它在顶栏「分析」弹层里（浏览 / 互动 / 关注者，
+                  近 30 天口径），不该在头部再占一格，更不该把「最近 30 天」这种
+                  窗口话术摆在主页上。
+                  计数没拉到画「—」，不回填 0（0 读起来是「没人关注」）。
+                  FOLLOWER-FACES-001 仍然成立：这一行只放真数字，不摆假头像脸。 */}
               <View style={styles.personalStatRow}>
-                <Text selectable style={styles.personalStatText}>
-                  <Text selectable style={styles.personalStatValue}>{dash(personalViews30)}</Text> 次浏览 · 最近 30 天 ›
-                </Text>
-                {/* FOLLOWER-FACES-001: 以前这里是三个写死的字母头像（M/A/L），不管谁
-                    关注都长一个样 —— 数字是真的，脸是假的。最近关注者列表接口还没
-                    有（只有计数），先把假脸拿掉只留真数字，不拿装饰冒充真人预览。 */}
-                <Text selectable style={styles.personalFollowersCount}><Text selectable style={styles.personalFollowersValue}>{dash(personalFollowCounts?.followers)}</Text> 位关注者</Text>
+                <Text selectable style={styles.personalStatText}><Text selectable style={styles.personalStatValue}>{dash(personalFollowCounts?.following)}</Text> 关注</Text>
+                <Text selectable style={styles.personalStatText}><Text selectable style={styles.personalStatValue}>{dash(personalFollowCounts?.followers)}</Text> 粉丝</Text>
               </View>
             </View>
 

@@ -57,6 +57,25 @@ describe("AUDIT-BATCH3-005 follower faces are gone until real avatars exist", ()
     // FOLLOWER-FACES-001：M/A/L 三张脸不管谁关注都一样。最近关注者列表
     // 接口还没有（只有计数），先拿掉装饰只留真数字。
     expect(meCode).not.toContain("styles.personalFaces");
-    expect(meCode).toContain("位关注者");
+    // STAT-ROW-FOLLOW-001（2026-09-25）：头部统计行按原型改成「关注 / 粉丝」，
+    // 措辞从「位关注者」换成「粉丝」。这条守的仍是**真数字还在**（且都走 dash()，
+    // 未知画 — 不回填 0），不是那个词本身 —— 所以断言换成新的数字形状，不换意图。
+    expect(meCode).toContain("{dash(personalFollowCounts?.following)}</Text> 关注");
+    expect(meCode).toContain("{dash(personalFollowCounts?.followers)}</Text> 粉丝");
+  });
+
+  it("the header stats row is 关注 / 粉丝, not a views window", () => {
+    // STAT-ROW-FOLLOW-001（2026-09-25，用户对照原型明确）：本人主页头部的统计行
+    // 就是「关注 / 粉丝」两个数字。以前是「次浏览 · 最近 30 天」+「位关注者」——
+    // 浏览数不该在头部占一格，更不该把「最近 30 天」这种窗口话术摆在主页上
+    // （它仍在顶栏「分析」弹层里）。
+    // 直接切出那个 View 再判，不用裸子串 —— 文件里的注释也会提到这些词，
+    // 裸 not.toContain 会被自己的注释打红。
+    const statRow = meCode.match(/<View style=\{styles\.personalStatRow\}>[\s\S]*?<\/View>/)?.[0] ?? "";
+    expect(statRow, "personalStatRow 应该还在渲染").not.toBe("");
+    expect(statRow).toContain("关注");
+    expect(statRow).toContain("粉丝");
+    expect(statRow).not.toContain("次浏览");
+    expect(statRow).not.toContain("最近");
   });
 });
