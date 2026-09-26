@@ -67,6 +67,16 @@ type FilterKey = "ALL" | "人/关系" | "机会/需求" | "活动/团体" | "情
 let cachedPosts: FeedPost[] = [];
 let cachedMedia: Record<string, FeedMediaItem[]> = {};
 let cachedPostIds: Set<string> = new Set();
+// ENGAGEMENT-CACHE-001（2026-09-26，用户报的 P0：「帖文的评论 点赞…切换来回就不
+// 显示了 要重新刷新才显示」）：互动态以前**没有**跟着帖文一起缓存。
+// TAB-SWITCH-JANK-001 定的口径是「remount 有缓存就同步渲染、不重注水」，而注水
+// （hydrateEngagement）只活在 loadFeed 里 —— remount 撞上
+// `feedNetworkLoadedThisSession` 那条早退，压根不调 loadFeed。
+// 结果：切走再切回来，帖文还在（cachedPosts），心却是空的、点赞/评论/转发计数全 0、
+// 评论预览也空了，必须下拉刷新（才会重跑 loadFeed）才回来。三样一起缓存上。
+let cachedPostEngagement: Record<string, PostEngagement> = {};
+let cachedLikedPostIds: ReadonlySet<string> = new Set();
+let cachedPostReplies: Record<string, PostReply[]> = {};
 // TAB-SWITCH-JANK-001: 本 session 是否做过一次网络 fresh 加载。切 tab 是 remount
 // 不是冷启动——remount 有缓存就同步渲染（毫秒级），不再每次 fresh 重拉；冷启动
 // （两级缓存都空）仍走 fresh（FEED-FRESH-002 那条 stale 缓存的教训保留）。
@@ -290,9 +300,11 @@ export function FeedSurface({
   const [postMenuPostId, setPostMenuPostId] = useState<string | undefined>();
   const [mutedAuthors, setMutedAuthors] = useState<ReadonlySet<string>>(new Set());
   const [postMenuError, setPostMenuError] = useState<string | undefined>();
-  const [liked, setLiked] = useState<ReadonlySet<string>>(new Set());
-	const [postEngagement, setPostEngagement] = useState<Record<string, PostEngagement>>({});
-	const [postReplies, setPostReplies] = useState<Record<string, PostReply[]>>({});
+  // ENGAGEMENT-CACHE-001: 初值取模块级缓存（见文件头）。remount（切 tab 回来）时
+  // 组件状态是全新的，只有这三样有缓存，心 / 计数 / 评论预览才会立刻正确。
+  const [liked, setLiked] = useState<ReadonlySet<string>>(cachedLikedPostIds);
+	const [postEngagement, setPostEngagement] = useState<Record<string, PostEngagement>>(cachedPostEngagement);
+	const [postReplies, setPostReplies] = useState<Record<string, PostReply[]>>(cachedPostReplies);
 	const [expandedReplies, setExpandedReplies] = useState<ReadonlySet<string>>(new Set());
 	// FEED-REPLY-002: 已经拉过评论的帖子，翻页回来不再重复拉。
 	const requestedRepliesRef = useRef<Set<string>>(new Set());
@@ -304,6 +316,12 @@ export function FeedSurface({
   const [bookmarked, setBookmarked] = useState<ReadonlySet<string>>(new Set());
   const [engagementBusy, setEngagementBusy] = useState<ReadonlySet<string>>(new Set());
   const [engagementError, setEngagementError] = useState<string>();
+	// ENGAGEMENT-CACHE-001: 镜像回模块级缓存。effect 在 commit 之后跑（unmount 时
+	// React 会先把待跑的 passive effect 刷完），晚一拍无所谓 —— 缓存是留给**下一次
+	// remount** 用的。别改成在 setState 里写：那样要包一层 setter，收益为零。
+	useEffect(() => { cachedLikedPostIds = liked; }, [liked]);
+	useEffect(() => { cachedPostEngagement = postEngagement; }, [postEngagement]);
+	useEffect(() => { cachedPostReplies = postReplies; }, [postReplies]);
   const [engagementNotice, setEngagementNotice] = useState<string>();
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
@@ -1340,7 +1358,14 @@ export function FeedSurface({
           const active = section === entry.id;
           return (
             <Pressable key={entry.id} onPress={() => setSection(entry.id)} style={[styles.sectionTab, active && styles.sectionTabOn]}>
-              <ProxyIcon color={active ? color.white : color.muted} name={entry.icon} size={16} />
+              {/* ICON-INK-001（2026-09-26，用户：「logo不能发灰 必须黑 对齐 threads
+                  风格」）：未选中那格原来用 color.muted —— 截图里量到字形最深像素
+                  (124,117,133)，确实是灰的。改成 ink：**字形恒为黑**，选中态由
+                  「ink 底 + 白字」那个药丸承担，不靠图标变灰。
+                  尺寸 16 → 18 对齐同屏下面那行分类胶囊（18px / ink），用户对那行的
+                  观感是认可的；16px 时 32 栅格字形的描边只有 0.95px，太细，即使颜色
+                  是 ink 也会被抗锯齿读成灰（推荐那颗星实测最深 25% 平均 (176,173,180)）。 */}
+              <ProxyIcon color={active ? color.white : color.ink} name={entry.icon} size={18} />
               <Text selectable style={[styles.sectionTabText, active && styles.sectionTabTextOn]}>{entry.label}</Text>
             </Pressable>
           );
@@ -1393,9 +1418,13 @@ export function FeedSurface({
           const active = tab === entry.id;
           return (
             <Pressable key={entry.id} onPress={() => setTab(entry.id)} style={styles.tabItem}>
-              {/* 尺寸与间距跟同屏上面的分段控件 sectionTab 取同一套（16pt / gap 5）——
+              {/* 尺寸与间距跟同屏上面的分段控件 sectionTab 取同一套（18pt / gap 5）——
                   两行图标在同一个屏幕上必须是同一个系统。 */}
-              <ProxyIcon color={active ? color.ink : color.muted} name={entry.icon} size={16} />
+              {/* ICON-INK-001（用户：「logo不能发灰 必须黑 对齐 threads 风格」）：
+                  字形颜色不再跟选中态走 —— 未选中那栏也是 ink。这条**推翻**了
+                  SEC-CATEGORY-ICONS-001 当初「图标要跟选中态走」的判断，理由写在
+                  sec-category-icons.test.ts 那条钉上。 */}
+              <ProxyIcon color={color.ink} name={entry.icon} size={18} />
               <Text selectable style={[styles.tabText, active && styles.tabTextActive]}>{entry.label}</Text>
               {active ? (
                 <View style={styles.tabBar}>
@@ -1911,9 +1940,13 @@ const styles = StyleSheet.create({
   },
   iconBtnText: { color: color.ink, fontSize: 14, fontWeight: "900" },
   sectionTabs: { backgroundColor: "#F0EBF3", borderRadius: 16, flexDirection: "row", gap: 4, marginBottom: 10, marginTop: 9, padding: 4 },
-  sectionTab: { alignItems: "center", borderRadius: 12, flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", minHeight: 42, paddingHorizontal: 8 },
+  // SECTION-TAB-SIZE-001（2026-09-26，用户：「顶部的探索 动态可以稍微做大点」）：
+  // 字号 12 → 13.5 —— 原型 03 节 .preview-segment 就是 13.5px，也正是同屏下面
+  // tab 行 tabText 的档位，两行这才对得上；行高 42 → 46 跟着字号放。
+  // 图标尺寸不在这里，在渲染处（两行都 18）。
+  sectionTab: { alignItems: "center", borderRadius: 12, flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", minHeight: 46, paddingHorizontal: 8 },
   sectionTabOn: { backgroundColor: color.ink },
-  sectionTabText: { color: color.muted, fontSize: 12, fontWeight: "800" },
+  sectionTabText: { color: color.muted, fontSize: 13.5, fontWeight: "800" },
   sectionTabTextOn: { color: color.white },
   feedNote: { color: color.muted, fontSize: 12, lineHeight: 17, marginBottom: 8, marginTop: 0 },
   // 与市场 + 号同式：ink 底 54×54，底栏显隐跟随（116/28）。

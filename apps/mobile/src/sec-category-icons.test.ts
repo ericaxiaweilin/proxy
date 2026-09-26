@@ -99,9 +99,18 @@ describe("SEC-CATEGORY-ICONS-001 推荐 / 关注 挂上原型 02 的分类字形
     // 字形必须排在标签**前面** —— 原型 02 的分类单元是「图标在上/在左，文字跟其后」，
     // 渲染到文字后面会变成「推荐 ⭐」。
     expect(block.indexOf("<ProxyIcon"), "字形不在标签前面").toBeLessThan(block.indexOf("styles.tabText"));
-    // 图标颜色要跟选中态走：写死 color.ink 的话未选中那个 tab 的图标会跟文字一样深，
-    // 「当前在哪一栏」就只剩下面那条渐变下划线在提示了。
-    expect(block, "图标颜色没跟选中态走").toMatch(/<ProxyIcon color=\{active \?/);
+    // ICON-INK-001（2026-09-26，用户：「logo不能发灰 必须黑 对齐 threads 风格」）：
+    // 这条钉原来是**反的** —— 它要求写 `color={active ? …}`，理由是「写死 ink 的话
+    // 未选中那栏的图标会跟文字一样深，就只剩下面那条渐变下划线在提示在哪一栏」。
+    // 产品明确要图标恒黑（截图实测：未选中的探索罗盘最深像素是 (124,117,133)，
+    // 而 16px 下 32 栅格描边只有 0.95px，连 ink 的星形都被读成 (176,173,180)）。
+    // 按新口径改钉：选中态由**文字颜色 + 渐变下划线**承担，不再靠图标变灰。
+    // 钉整条 ProxyIcon 标签，不是只钉 `color={color.ink}`——后者在文件别处也有。
+    expect(block, "tab 行字形颜色又跟着选中态走了（产品要求恒为 ink）").toMatch(
+      /<ProxyIcon color=\{color\.ink\} name=\{entry\.icon\} size=\{\d+\}/
+    );
+    // 反向臂：不许退回「跟选中态走」那版。
+    expect(block, "tab 行字形又退回跟选中态发灰了").not.toMatch(/<ProxyIcon color=\{active \?/);
   });
 
   it("两行图标同一套尺寸（tab 行 = 它上面的分段控件）", () => {
@@ -141,6 +150,13 @@ describe("SEC-CATEGORY-ICONS-001 推荐 / 关注 挂上原型 02 的分类字形
     expect(sections, "动态 又指回 24 栅格的 target 了").not.toContain('icon: "target"');
     expect(sections, "探索 又指回 24 栅格的 cup 了").not.toContain('icon: "cup"');
     expect(sections, "探索 又指回咖啡杯字形了").not.toContain('icon: "cafeCup"');
+    // ICON-INK-001：两行的**颜色口径**也得是同一套 —— 图标恒 ink，不跟选中态发灰。
+    // 分段控件未选中那格原来是 color.muted（截图量到 (124,117,133)，确实是灰的）。
+    const sectionRowBlock = slice(feed, SECTION_ROW_FROM, "</View>");
+    expect(sectionRowBlock, "分段控件未选中的图标又发灰了（muted）").toContain(
+      "color={active ? color.white : color.ink}"
+    );
+    expect(sectionRowBlock, "分段控件未选中的图标又退回 muted 了").not.toContain("color.muted");
   });
 
   it("分类胶囊那行也挂上原型 02 的字形（原型 06 的首页顶部三行都有图标）", () => {
