@@ -1,0 +1,103 @@
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+// SEC-CATEGORY-ICONS-001（2026-09-26，用户：「模拟器的 推荐 关注还没有 logo 原型我给你了」）：
+//
+// 原型 deepseek_html_20260926_9d241a.html 的 02「推荐 / 关注 / 动态 / 探索 / 分类」把
+// 「推荐」「关注」定义成了**有形状**的分类图标（推荐 = 五角星，关注 = 人 + 右上信号点）。
+// ⚠️ 但同一份原型的 03「分段 / Tabs / 胶囊」里，推荐/关注 tab 本身是**纯文字** ——
+//    所以这两个字形一直没有出处可抄，feed 顶部那行 tab 就一直空着。
+//    这两个字形是**跨节**搬过来的（02 的定义 → 03 的位置），这个文件钉住这件事。
+//
+// 为什么是源码级 tripwire：vitest 这边没有 RN 渲染器，画不出 SVG。
+// 所以钉「用的是哪条路径 / 挂在哪一处」，而不是钉「看起来对不对」——
+// 看起来对不对只能靠真机截图（原型 02 那节的栅格与描边已按 CSS 核对，见下面的注释）。
+const here = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
+const read = (p: string): string => readFileSync(here(p), "utf8");
+
+// 剥注释再断言：本仓的注释会解释「这条路径从原型哪一节抄的」，被抄的路径原文
+// 也可能出现在注释里。不剥的话，把实现删掉、注释留着，断言照样绿。
+const stripComments = (source: string): string =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+
+const icon = stripComments(read("./components/proxy-icon.tsx"));
+const feed = stripComments(read("./surfaces/feed.tsx"));
+
+// 先切出目标片段再断言：「符号在文件里」≠「这条路径走到它」。
+// feed.tsx 里 `size={16}` 的 ProxyIcon 有三处（搜索框 / 分段控件 / 这行 tab），
+// 全文 toContain 分不出是哪一处 —— 把实现从 tab 行删掉、留在搜索框里，断言会照样绿。
+const slice = (source: string, from: string, to: string): string => {
+  const start = source.indexOf(from);
+  expect(start, `找不到起始锚点：${from}`).toBeGreaterThanOrEqual(0);
+  const end = source.indexOf(to, start);
+  expect(end, `找不到结束锚点：${to}`).toBeGreaterThan(start);
+  return source.slice(start, end);
+};
+
+const TAB_ROW_FROM = "{TABS.map((entry) => {";
+const SECTION_ROW_FROM = "{SECTIONS.map((entry) => {";
+
+describe("SEC-CATEGORY-ICONS-001 推荐 / 关注 挂上原型 02 的分类字形", () => {
+  it("两个字形名进了 ProxyIconName，且各有自己的 case 分支", () => {
+    // 只钉 `| "recommend"` 不够：它也可能只是被人加进了联合类型却没实现分支，
+    // 于是 <ProxyIcon name="recommend"/> 渲染出 null（静默空白，不报错）。
+    expect(icon, '"recommend" 没进 ProxyIconName').toMatch(/\|\s*"recommend"/);
+    expect(icon, '"follow" 没进 ProxyIconName（或不再是最后一项）').toMatch(/\|\s*"follow";/);
+    expect(icon, '没有 case "recommend" 分支').toContain('case "recommend":');
+    expect(icon, '没有 case "follow" 分支').toContain('case "follow":');
+  });
+
+  it("推荐 = 原型那条 10 段折线五角星（不是拿 24 栅格的 star 顶替）", () => {
+    const body = slice(icon, 'case "recommend":', 'case "follow":');
+    // 原型 02 的路径原文，照抄：
+    // <path d="M16 4L19.5 12L28 13L21.5 18.5L23.5 27L16 22.5L8.5 27L10.5 18.5L4 13L12.5 12Z"/>
+    expect(body, "五角星的路径原文被改了").toContain('d="M16 4L19.5 12L28 13L21.5 18.5L23.5 27L16 22.5L8.5 27L10.5 18.5L4 13L12.5 12Z"');
+    // 坐标最大到 28 ⇒ 必须画在 32 栅格上。已有的 `star` 是 24 栅格的圆角星，
+    // 形状不同，不能顶替（顶替了就会是「看着有个星，但不是原型那颗」）。
+    expect(body, "推荐字形没走 32 栅格").toContain("canvas32");
+  });
+
+  it("关注 = 人 + 右上信号点（少了那个点就退化成普通的 user）", () => {
+    const body = slice(icon, 'case "follow":', "default:");
+    expect(body, "人形轮廓的路径原文被改了").toContain('d="M6 27C6 22 10 19 16 19C22 19 26 22 26 27"');
+    expect(body, "少了头部的圆").toMatch(/<Circle[^>]*cx="16"[^>]*cy="11"[^>]*r="5"/);
+    // 信号点：实心、无描边。这是「关注」和已有 `user` 字形的唯一区别。
+    expect(body, "右上角的信号点丢了（那就变成普通的 user 了）").toMatch(/<Circle[^>]*cx="25"[^>]*cy="8"[^>]*fill=\{color\}[^>]*r="2\.5"[^>]*stroke="none"/);
+  });
+
+  it("feed 的 推荐 / 关注 两个 tab 各自绑了字形，不再是纯文字", () => {
+    // 钉整条字面量（id + icon + label 三件套一起），不是只钉 `icon: "recommend"`——
+    // 后者在文件别处也可能出现，分不出是哪个 tab 绑的。
+    expect(feed, "推荐 tab 没绑字形").toMatch(/\{\s*id:\s*"RECOMMENDED",\s*icon:\s*"recommend",\s*label:\s*"推荐"\s*\}/);
+    expect(feed, "关注 tab 没绑字形").toMatch(/\{\s*id:\s*"FOLLOWING",\s*icon:\s*"follow",\s*label:\s*"关注"\s*\}/);
+    // 反向臂：纯文字那版（只有 id + label）不许回来。
+    expect(feed, "推荐 tab 又退回纯文字了").not.toMatch(/\{\s*id:\s*"RECOMMENDED",\s*label:\s*"推荐"\s*\}/);
+    expect(feed, "关注 tab 又退回纯文字了").not.toMatch(/\{\s*id:\s*"FOLLOWING",\s*label:\s*"关注"\s*\}/);
+  });
+
+  it("tab 行真的把字形渲染出来了，且在标签前面（图标 + 文字）", () => {
+    const block = slice(feed, TAB_ROW_FROM, "</View>");
+    // 这里刻意不写死 16：尺寸是下一条测试的事（它钉的是两行相等）。
+    // 写死会变成两颗钉钉同一件事，改尺寸时两条一起红，反而看不出是哪条在起作用。
+    expect(block, "tab 行没有渲染字形").toMatch(/name=\{entry\.icon\} size=\{\d+\}/);
+    // 字形必须排在标签**前面** —— 原型 02 的分类单元是「图标在上/在左，文字跟其后」，
+    // 渲染到文字后面会变成「推荐 ⭐」。
+    expect(block.indexOf("<ProxyIcon"), "字形不在标签前面").toBeLessThan(block.indexOf("styles.tabText"));
+    // 图标颜色要跟选中态走：写死 color.ink 的话未选中那个 tab 的图标会跟文字一样深，
+    // 「当前在哪一栏」就只剩下面那条渐变下划线在提示了。
+    expect(block, "图标颜色没跟选中态走").toMatch(/<ProxyIcon color=\{active \?/);
+  });
+
+  it("两行图标同一套尺寸（tab 行 = 它上面的分段控件）", () => {
+    // 同屏两行图标（动态/咖啡场景 与 推荐/关注）必须是同一个系统 ——
+    // 这也是这次改动的口径（见 feed.tsx 里那句注释）。钉的是**两者相等**，
+    // 不是「都等于 16」：将来一起改尺寸不该打红，只改一行才该打红。
+    const sizeOf = (s: string): string => s.match(/name=\{entry\.icon\} size=\{(\d+)\}/)?.[1] ?? "";
+    const tabRow = sizeOf(slice(feed, TAB_ROW_FROM, "</View>"));
+    const sectionRow = sizeOf(slice(feed, SECTION_ROW_FROM, "</View>"));
+    expect(tabRow, "tab 行取不到图标尺寸").not.toBe("");
+    expect(sectionRow, "分段控件取不到图标尺寸").not.toBe("");
+    expect(tabRow, "两行图标尺寸不一致了").toBe(sectionRow);
+  });
+});

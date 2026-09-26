@@ -53,7 +53,12 @@ export type ProxyIconName =
   | "group"
   | "scan"
   | "mapFold"
-  | "footprint";
+  | "footprint"
+  // SEC-CATEGORY-ICONS-001：原型 deepseek_html_20260926_9d241a.html 的 02
+  // 「推荐 / 关注 / 动态 / 探索 / 分类」把「推荐」「关注」也定义成了有形状的图标
+  // （推荐 = 五角星，关注 = 人 + 信号点）。同一套 32 栅格 / 描边 1.9。
+  | "recommend"
+  | "follow";
 
 const symbolMap: Partial<Record<string, ProxyIconName>> = {
   "home": "home",
@@ -110,6 +115,11 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
   // 折叠地图右上角的状态圆点保持苹果绿 #34C759 不跟主题走。
   const canvas48 = (children: React.ReactNode): React.JSX.Element => (
     <Svg height={size} viewBox="0 0 48 48" width={size}>{children}</Svg>
+  );
+
+  const common32 = { fill: "none", stroke: color, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, strokeWidth: 1.9 };
+  const canvas32 = (children: React.ReactNode): React.JSX.Element => (
+    <Svg height={size} viewBox="0 0 32 32" width={size}>{children}</Svg>
   );
 
   switch (name) {
@@ -235,6 +245,18 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
       return canvas(<><Path {...common} d="M12 3v12"/><Path {...common} d="M8.2 6.8 12 3l3.8 3.8"/><Path {...common} d="M5 12v6.8A2.2 2.2 0 0 0 7.2 21h9.6a2.2 2.2 0 0 0 2.2-2.2V12"/></>);
     case "aiPersona":
       return canvas(<><Circle {...common} cx="10" cy="8.5" r="3.2"/><Path {...common} d="M4.6 19.4c1.1-3 3.4-4.8 6.2-4.8 1.5 0 2.9.5 4 1.3"/><Path {...common} d="M18 4.5l.7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7.7-2.1z"/></>);
+    // SEC-CATEGORY-ICONS-001（2026-09-26，用户：「模拟器的 推荐 关注还没有 logo 原型我给你了」）：
+    // 原型 02 那节把「推荐」「关注」也定义成了有形状的分类图标，但同一份原型的
+    // 03「分段 / Tabs / 胶囊」里这两个 tab 是**纯文字** —— 所以这两个字形一直没有出处可抄，
+    // feed 顶部那行 tab 就一直空着。这里是跨节搬：02 的定义 → 03 的位置。
+    // 栅格与描边按原型 02 的 .icon-frame svg（stroke-width:1.9 + round；坐标最大到 28
+    // ⇒ 32 栅格），路径数据原样移植，只把 currentColor 换成 color。
+    // ⚠️ 不要拿已有的 `star` 顶替「推荐」—— 那是 24 栅格的圆角星，和原型这条 10 段折线的
+    // 尖角星不是同一个形状（同理别用 `user` 顶替「关注」，原型多一个右上信号点）。
+    case "recommend": // 推荐（五角星）
+      return canvas32(<Path {...common32} d="M16 4L19.5 12L28 13L21.5 18.5L23.5 27L16 22.5L8.5 27L10.5 18.5L4 13L12.5 12Z"/>);
+    case "follow": // 关注（人 + 信号点）
+      return canvas32(<><Circle {...common32} cx="16" cy="11" r="5"/><Path {...common32} d="M6 27C6 22 10 19 16 19C22 19 26 22 26 27"/><Circle cx="25" cy="8" fill={color} r="2.5" stroke="none"/></>);
     default:
       return null;
   }

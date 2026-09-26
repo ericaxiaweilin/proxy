@@ -153,9 +153,12 @@ function formatDurationMs(durationMs: number | undefined): string {
   return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, "0")}`;
 }
 
-const TABS: ReadonlyArray<{ id: FeedTab; label: string }> = [
-  { id: "RECOMMENDED", label: "推荐" },
-  { id: "FOLLOWING", label: "关注" }
+// SEC-CATEGORY-ICONS-001：推荐 / 关注 挂上原型 02「推荐 / 关注 / 动态 / 探索 / 分类」
+// 那节的分类字形（推荐 = 五角星，关注 = 人 + 信号点）。原型 03 的推荐/关注 tab 本身是
+// 纯文字 —— 但同屏上面的分段控件（动态 / 咖啡场景）一直是有字形的，只有这两个 tab 空着。
+const TABS: ReadonlyArray<{ id: FeedTab; icon: ProxyIconName; label: string }> = [
+  { id: "RECOMMENDED", icon: "recommend", label: "推荐" },
+  { id: "FOLLOWING", icon: "follow", label: "关注" }
 ];
 
 const SECTIONS: ReadonlyArray<{ id: FeedSection; label: string; icon: ProxyIconName }> = [
@@ -1312,6 +1315,9 @@ export function FeedSurface({
           const active = tab === entry.id;
           return (
             <Pressable key={entry.id} onPress={() => setTab(entry.id)} style={styles.tabItem}>
+              {/* 尺寸与间距跟同屏上面的分段控件 sectionTab 取同一套（16pt / gap 5）——
+                  两行图标在同一个屏幕上必须是同一个系统。 */}
+              <ProxyIcon color={active ? color.ink : color.muted} name={entry.icon} size={16} />
               <Text selectable style={[styles.tabText, active && styles.tabTextActive]}>{entry.label}</Text>
               {active ? (
                 <View style={styles.tabBar}>
@@ -1983,20 +1989,33 @@ const styles = StyleSheet.create({
   inlineReplySend: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
   inlineReplySendText: { color: color.white, fontSize: 12, fontWeight: "800" },
 
-  // 基线 .networktabs：border-bottom var(--ln)。
-  tabs: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row" },
-  tabItem: { alignItems: "center", flex: 1, paddingBottom: 9, paddingTop: 11 },
-  tabText: { color: color.muted, fontSize: 11, fontWeight: "800" },
+  // 基线 .preview-tabs（原型 deepseek_html_20260926_9d241a.html「图标系统 · 完整版」
+  // 手机内预览那一节，就是本行这一处）：
+  //   容器 display:flex; gap:24px; border-bottom:1px solid var(--line); padding-left:4px
+  //   子项 padding:8px 4px 14px; font-size:13.5px
+  //   下划线 left:0; right:0; bottom:-1px; height:3px; border-radius:2px
+  // 旧实现是「flex:1 平分 + 下划线 left/right:28%」，于是两个标签被推到左右两端、
+  // 下划线只占中间一小段 —— 原型是「贴着左边、彼此间隔 24」，这就是「没对齐」的来源。
+  tabs: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 24, paddingLeft: 4 },
+  // SEC-CATEGORY-ICONS-001：加了字形之后这里要变成横向一行（字形 + 文字）。
+  // 下划线 tabBar 是绝对定位的，不受 flexDirection 影响。
+  tabItem: { alignItems: "center", flexDirection: "row", gap: 5, paddingBottom: 14, paddingHorizontal: 4, paddingTop: 8 },
+  // 字距 -0.2 来自原型 .tabs-tab 的 letter-spacing（.preview-tabs 只覆盖了 padding/font-size）。
+  tabText: { color: color.muted, fontSize: 13.5, fontWeight: "800", letterSpacing: -0.2 },
   tabTextActive: { color: color.ink },
+  // 下划线铺满整个标签（原型 left:0; right:0），不再左右各缩进 28%。
+  // 渐变仍用本仓品牌色 magenta→violet：原型那支 mock 自己的调色板是暖米色系
+  // （--rose/--purple），和全 App 20 多处 `from={color.magenta} to={color.violet}` 不是一套，
+  // 这里对齐的是几何，不换品牌色。
   tabBar: {
-    borderRadius: 3,
+    borderRadius: 2,
     bottom: -1,
     flexDirection: "row",
     height: 3,
-    left: "28%",
+    left: 0,
     overflow: "hidden",
     position: "absolute",
-    right: "28%"
+    right: 0
   },
   tabBarSeg: { flex: 1 },
 
