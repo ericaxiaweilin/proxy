@@ -168,3 +168,55 @@ describe("BUTTON-UNIFY-003 又一批主按钮迁到 ProxyButton", () => {
     expect(source).toContain("accessibilityLabel={a.label}");
   });
 });
+
+describe("BUTTON-UNIFY-004 999 胶囊 CTA 收敛到 ProxyButton", () => {
+  const shapeKeys = (source: string, key: string): string => {
+    const body = source.match(new RegExp(key + ":\\s*\\{[^}]*\\}"))?.[0] ?? "";
+    expect(body, `${key} 样式键应该还在（它是布局覆盖）`).not.toBe("");
+    return body;
+  };
+
+  it("outcome 的「跑一次 Demo 链路」走 ProxyButton（禁用态不再自己写 0.6）", () => {
+    const source = read("surfaces/outcome.tsx");
+    expect(source).not.toMatch(/ctaText:\s*\{/);
+    const body = shapeKeys(source, "cta");
+    expect(body).not.toContain("backgroundColor");
+    expect(body).not.toContain("borderRadius");
+    expect(body).not.toContain("paddingVertical");
+    // 整份文件不再有手写 Pressable（原来就这一个）
+    expect(source).not.toContain("<Pressable");
+    expect(source).toContain("<ProxyButton");
+    // 禁用条件一字未改
+    expect(source).toContain("disabled={busy}");
+    expect(source).not.toContain("opacity: 0.6");
+  });
+
+  it("custom-feed 的「创建并固定到首页」走 ProxyButton", () => {
+    const source = read("surfaces/custom-feed.tsx");
+    expect(source).not.toMatch(/aiBtnText:\s*\{/);
+    // 自己那份 disabled 键也删了（ProxyButton 有统一的 0.42）
+    expect(source).not.toMatch(/^\s*disabled:\s*\{/m);
+    const body = shapeKeys(source, "aiBtn");
+    expect(body).not.toContain("backgroundColor");
+    expect(body).not.toContain("borderRadius");
+    expect(body).not.toContain("paddingVertical");
+    expect(source).toContain("<ProxyButton");
+    // 禁用条件一字未改
+    expect(source).toContain("disabled={!draft.trim()}");
+  });
+
+  it("ExperienceSurfaceBanner 的 primary_action 走 ProxyButton", () => {
+    const source = read("experience-runtime/ExperienceSurfaceBanner.tsx");
+    expect(source).not.toMatch(/actionText:\s*\{/);
+    const body = shapeKeys(source, "action");
+    expect(body).not.toContain("backgroundColor");
+    expect(body).not.toContain("borderRadius");
+    expect(body).not.toContain("padding");
+    // alignSelf 是定位，留着 —— 去掉会撑满 banner 整行
+    expect(body).toContain('alignSelf: "flex-start"');
+    expect(source).not.toContain("<Pressable");
+    expect(source).toContain("<ProxyButton");
+    // 标签回退值一字未改
+    expect(source).toContain('String(node.props.label ?? "查看")');
+  });
+});

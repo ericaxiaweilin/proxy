@@ -2,6 +2,7 @@
 // Threads Custom Feeds / X Lists 的 Proxy 化：用户建 + AI 建 + 固定到首页。
 import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ProxyButton } from "../components/proxy-foundation";
 import { color, shadows } from "../theme";
 import { readCustomFeedsAsync, writeCustomFeeds } from "../expo-custom-feed-store";
 
@@ -84,9 +85,10 @@ export function CustomFeedHub({ onBack, onOpenFeed }: { onBack: () => void; onOp
       <View style={styles.aiBox}>
         <Text selectable style={styles.aiTitle}>按关键词快速创建频道</Text>
         <TextInput value={draft} onChangeText={setDraft} placeholder="例：给我建一个只看河内做 AI/产品的人和活动的频道" placeholderTextColor={color.muted} style={styles.aiInput} multiline />
-        <Pressable onPress={generateAI} style={[styles.aiBtn, !draft.trim() && styles.disabled]}>
-          <Text selectable style={styles.aiBtnText}>创建并固定到首页</Text>
-        </Pressable>
+        {/* BUTTON-UNIFY-004：「创建并固定到首页」改用公共 ProxyButton。原来手写 ink 底 +
+            圆角 999 胶囊 + 白字 11/800 + 自己那份 opacity 0.4 的禁用态。迁完形状/字号/
+            禁用态/按压反馈只有一个出处。文案与禁用条件一字未改。 */}
+        <ProxyButton disabled={!draft.trim()} onPress={generateAI} style={styles.aiBtn}>创建并固定到首页</ProxyButton>
       </View>
 
       <Text selectable style={styles.sectionTitle}>已固定频道 · {pinned.length}</Text>
@@ -140,9 +142,9 @@ const styles = StyleSheet.create({
   aiBox: { backgroundColor: "#F8F5FA", borderColor: "#ECE4F0", borderRadius: 14, borderWidth: 1, marginBottom: 14, padding: 10 },
   aiTitle: { color: color.ink, fontSize: 11, fontWeight: "800" },
   aiInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 11, borderWidth: 1, color: color.ink, fontSize: 11, marginTop: 8, minHeight: 44, paddingHorizontal: 10, paddingVertical: 8, textAlignVertical: "top" },
-  aiBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, marginTop: 8, paddingVertical: 8 },
-  aiBtnText: { color: color.white, fontSize: 11, fontWeight: "800" },
-  disabled: { opacity: 0.4 },
+  // BUTTON-UNIFY-004: 只剩布局（上间距）。ink 底 / 圆角 11 / 最小高 40 / 白字 13 800 /
+  // 按压反馈与禁用态由 ProxyButton tone="primary" 提供；aiBtnText 与 disabled 两个键已删。
+  aiBtn: { marginTop: 8 },
   sectionTitle: { color: color.ink, fontSize: 11, fontWeight: "800", marginTop: 8 },
   sectionSub: { color: color.muted, fontSize: 11, marginBottom: 6, marginTop: 2 },
   card: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginVertical: 4, padding: 10, ...shadows.card },

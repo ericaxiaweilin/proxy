@@ -2,10 +2,10 @@
 // PRD Chapter21D：ObservationSet → Delta → Learning
 // 接线：OutcomeClient 真实命令链（CreateSet / Record / Finalize / Compare / Confirm），非 ComingSoon 占位
 import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { color, shadows } from "../theme";
 import type { OutcomeClient } from "../outcome-client";
-import { ProxyLoading } from "../components/proxy-foundation";
+import { ProxyButton, ProxyLoading } from "../components/proxy-foundation";
 
 export function OutcomeSurface({ client }: { client: OutcomeClient }): React.JSX.Element {
   // 三个 ID 必须手填真实值：之前默认 target_demo / tpl_v1 / venue_001，
@@ -52,7 +52,10 @@ export function OutcomeSurface({ client }: { client: OutcomeClient }): React.JSX
         <Text selectable style={styles.label}>targetId</Text><TextInput value={targetId} onChangeText={setTargetId} style={styles.input} placeholder="真实目标 ID" placeholderTextColor={color.muted} />
         <Text selectable style={styles.label}>templateId</Text><TextInput value={templateId} onChangeText={setTemplateId} style={styles.input} placeholder="真实模板 ID" placeholderTextColor={color.muted} />
         <Text selectable style={styles.label}>venueId</Text><TextInput value={venueId} onChangeText={setVenueId} style={styles.input} placeholder="真实场地 ID" placeholderTextColor={color.muted} />
-        <Pressable onPress={runDemo} disabled={busy} style={[styles.cta, busy && { opacity: 0.6 }]}><Text selectable style={styles.ctaText}>{busy ? "执行中…" : "跑一次 Demo 链路"}</Text></Pressable>
+        {/* BUTTON-UNIFY-004：「跑一次 Demo 链路」改用公共 ProxyButton。原来手写 ink 底 +
+            圆角 999 胶囊 + 自己那份 opacity 0.6 的禁用态。迁完形状/禁用态/按压反馈只有
+            一个出处。文案一字未改。⚠️ 禁用态 0.6 → 统一的 0.42。 */}
+        <ProxyButton disabled={busy} onPress={runDemo} style={styles.cta}>{busy ? "执行中…" : "跑一次 Demo 链路"}</ProxyButton>
         {baselineId ? <Text selectable style={styles.mono}>baseline: {baselineId}</Text> : null}
         {resultId ? <Text selectable style={styles.mono}>result: {resultId}</Text> : null}
       </View>
@@ -75,8 +78,9 @@ const styles = StyleSheet.create({
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, gap: 6, padding: 14, ...shadows.card },
   label: { color: color.muted, fontSize: 11, fontWeight: "700", marginTop: 4 },
   input: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 10, borderWidth: 1, color: color.ink, fontSize: 13, paddingHorizontal: 10, paddingVertical: 8 },
-  cta: { backgroundColor: color.ink, borderRadius: 999, marginTop: 10, paddingVertical: 12, alignItems: "center" },
-  ctaText: { color: color.white, fontSize: 13, fontWeight: "800" },
+  // BUTTON-UNIFY-004: 只剩布局（上间距）。ink 底 / 圆角 11 / 最小高 40 / 白字 13 800 /
+  // 按压反馈与禁用态由 ProxyButton tone="primary" 提供；ctaText 键已删。
+  cta: { marginTop: 10 },
   mono: { color: color.muted, fontSize: 11, marginTop: 4 },
   logCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, padding: 14, ...shadows.card },
   logTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
