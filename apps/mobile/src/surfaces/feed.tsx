@@ -96,6 +96,11 @@ const AUTHOR_AVATAR_FETCH_CONCURRENCY = 6;
 // 打包人像），PLATFORM_SPECIAL 是平台内容、没有对应账号。其余（USER / MERCHANT
 // 以及以后新增的真人类型）都去查真实 profile。
 const AUTHOR_AVATAR_SKIP_TYPES: ReadonlySet<string> = new Set(["AGENT", "AI_NATIVE", "PLATFORM_SPECIAL"]);
+// FOLLOW-STATE-HYDRATE-001：关注态回读的并发上限。和头像那条同一套做法 ——
+// 「我关注了谁」同样没有批量接口（只有逐个 IsFollowing），所以只能限并发 + 去重。
+// 和头像不同的一点：这里**不**按 authorType 跳过，关注对 AGENT / AI 账号一样成立
+// （ai-assistants-row 就在关注 AI 账号），只跳过本人。
+const FOLLOW_PROBE_CONCURRENCY = 6;
 
 function snapshotHumanAvatars(): ReadonlyMap<string, AvatarHumanAccount> {
   const out = new Map<string, AvatarHumanAccount>();
@@ -255,6 +260,14 @@ export function FeedSurface({
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
   const [following, setFollowing] = useState<ReadonlySet<string>>(new Set());
+  // FOLLOW-STATE-HYDRATE-001: 用户在**本会话里自己点过**的关注态。回读结果不许覆盖它 ——
+  // 回读可能在 toggle 之前就发出去了（读到的还是旧值），不挡的话会出现「刚取消关注、
+  // 切一下又变回已关注」。只记用户明确决定过的 id，其余照常由回读决定。
+  const followDecisionsRef = useRef<Map<string, boolean>>(new Map());
+  // 本 mount 内在飞的 isFollowing（按作者去重）。刻意用 ref 而不是模块级集合：
+  // remount 必须重查。若用模块级，切模块回来时新 mount 会看到上一次 mount 留下的
+  // 「在飞」记录而跳过回读 —— 那就是这个 bug 原地复发。
+  const followProbeInFlightRef = useRef<Set<string>>(new Set());
   const { width: viewportWidth } = useWindowDimensions();
   // R15.69 (restored): 点头像弹 关注/访问个人主页 菜单（液态玻璃，双行上下排）
   const [profileActions, setProfileActions] = useState<{ userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]>; avatarUri?: string | undefined; anchor: { x: number; y: number } }>();
@@ -443,6 +456,54 @@ export function FeedSurface({
     })();
     return () => { cancelled = true; };
   }, [posts, profileClient, viewerAccountId]);
+  // FOLLOW-STATE-HYDRATE-001（2026-09-26，用户：「点头像 → 关注 → 已关注 → 切模块回来
+  // 被重置」）：`following` 过去**只有** toggleProfileFollow 一个写点，从不回读 ——
+  // 它实际是「本会话手动点过谁」的内存集合，remount（切模块）即清空。四个消费点
+  // 因此全部失真：头像菜单的 关注/已关注、关注 tab 的过滤、friends 自定义流、
+  // 帖子卡上的 isFollow。服务端一直是好的（engagement.follows 有行、IsFollowing
+  // 读得回来），缺的是客户端这一根回读线。
+  // 做法照同文件的头像补查：按 posts 里的作者去重 → 限并发逐个 isFollowing →
+  // 单个失败不挡整批 → 只并入（并回放用户自己的决定），不整份替换。
+  useEffect(() => {
+    if (!viewerAccountId) return undefined;
+    let cancelled = false;
+    const wanted: string[] = [];
+    for (const post of posts) {
+      const authorId = post.authorId;
+      if (!authorId) continue;
+      if (isOwnAuthorId(authorId, viewerAccountId)) continue;
+      if (followProbeInFlightRef.current.has(authorId)) continue;
+      if (!wanted.includes(authorId)) wanted.push(authorId);
+    }
+    if (wanted.length === 0) return undefined;
+    void (async () => {
+      const found: string[] = [];
+      for (let i = 0; i < wanted.length; i += FOLLOW_PROBE_CONCURRENCY) {
+        if (cancelled) return;
+        const chunk = wanted.slice(i, i + FOLLOW_PROBE_CONCURRENCY);
+        for (const authorId of chunk) followProbeInFlightRef.current.add(authorId);
+        await Promise.all(chunk.map(async (authorId) => {
+          try {
+            if (await engagement.isFollowing(viewerAccountId, authorId)) found.push(authorId);
+          } catch {
+            // 查不到就当作未关注（保持现状），绝不因为一次失败清空整批。
+          } finally {
+            followProbeInFlightRef.current.delete(authorId);
+          }
+        }));
+      }
+      if (cancelled || found.length === 0) return;
+      setFollowing((current) => {
+        const next = new Set([...current, ...found]);
+        for (const [authorId, on] of followDecisionsRef.current) {
+          if (on) next.add(authorId);
+          else next.delete(authorId);
+        }
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [posts, viewerAccountId, engagement]);
   function isOwnPost(post: FeedPost): boolean {
     // FEED-OWN-001: strict author-id check only. Unknown viewer is
     // fail-closed (never own); display-name matching is forbidden.
@@ -1039,6 +1100,9 @@ export function FeedSurface({
       if (profileFollowing) next.delete(profileActions.userId);
       else next.add(profileActions.userId);
       setFollowing(next);
+      // FOLLOW-STATE-HYDRATE-001: 记下用户自己的决定。回读可能在这次 toggle 之前就
+      // 发出了（读到的还是旧值），并回去会把「刚取消关注」翻成「已关注」。
+      followDecisionsRef.current.set(profileActions.userId, !profileFollowing);
       setProfileFollowing(!profileFollowing);
     } catch (error) {
       setEngagementError(mapFollowError(error, profileFollowing ? "unfollow" : "follow"));
