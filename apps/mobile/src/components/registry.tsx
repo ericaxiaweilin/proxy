@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { createRenderer, useStateStore } from "@json-render/react-native";
+import { ProxyButton } from "./proxy-foundation";
 import { color, Gradient, shadows } from "../theme";
 import { proxyCatalog, type Candidate } from "../uiplan/catalog";
 
@@ -81,16 +82,18 @@ function CriticalQuestion({ element, emit }: { element: { props: Record<string, 
           </Pressable>
         ))}
       </View>
-      <Pressable
+      {/* BUTTON-UNIFY-001：确认键改用公共 ProxyButton（原来手写 ink 底 + 圆角 12 +
+          自己那份 opacity 0.4 的禁用态）。marginTop 作为布局覆盖保留，形状全走 token。 */}
+      <ProxyButton
         disabled={selected === undefined || answered}
         onPress={() => {
           setAnswered(true);
           emit("press");
         }}
-        style={[styles.confirmButton, (selected === undefined || answered) && styles.disabled]}
+        style={styles.confirmButton}
       >
-        <Text selectable style={styles.confirmButtonText}>{answered ? "✓ 已记录回答" : "确认回答"}</Text>
-      </Pressable>
+        {answered ? "✓ 已记录回答" : "确认回答"}
+      </ProxyButton>
     </PanelCard>
   );
 }
@@ -345,9 +348,9 @@ const styles = StyleSheet.create({
   optionSelected: { backgroundColor: color.answerSelectedBg, borderColor: color.violet },
   optionText: { color: color.ink, fontSize: 11 },
   optionTextSelected: { fontWeight: "800" },
-  confirmButton: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, marginTop: 12, paddingVertical: 11 },
-  confirmButtonText: { color: color.white, fontSize: 11, fontWeight: "800" },
-  disabled: { opacity: 0.4 },
+  // BUTTON-UNIFY-001: 只剩布局（上间距）；底色/圆角/高度/字号/字重/禁用态由
+  // ProxyButton tone="primary" 提供。confirmButtonText 与 disabled 两个键已删。
+  confirmButton: { marginTop: 12 },
   factList: { gap: 6 },
   factRow: {
     alignItems: "center",

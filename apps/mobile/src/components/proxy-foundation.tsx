@@ -16,13 +16,20 @@ import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
 
 type ButtonTone = "primary" | "secondary" | "ghost" | "danger";
 
+// BUTTON-UNIFY-001（2026-09-26，用户「推进新的按钮组件统一更新」）：补 accessibilityLabel。
+// 兄弟组件 ProxyIconButton 一直有这个口子，ProxyButton 没有 —— 于是所有**手写**的
+// Pressable 按钮都带着自己的 accessibilityLabel（"用这个落点" / "保存到 X 的 Y"），
+// 迁到 ProxyButton 就会把这个标签**静默丢掉**（读屏用户失去按钮语义）。补上它，
+// 迁移才是等价替换而不是功能倒退。可选参数，不传的行为和以前完全一致。
 export function ProxyButton({
+  accessibilityLabel,
   children,
   disabled = false,
   onPress,
   tone = "primary",
   style
 }: {
+  accessibilityLabel?: string;
   children: ReactNode;
   disabled?: boolean;
   onPress?: () => void;
@@ -37,6 +44,7 @@ export function ProxyButton({
   };
   return (
     <Pressable
+      accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
       accessibilityState={{ disabled }}
       disabled={disabled}

@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MapCanvas } from "./map-canvas";
 import { reverseGeocodeViaProxy, type GridCoord } from "./location-options";
+import { ProxyButton } from "./proxy-foundation";
 import { color } from "../theme";
 
 export interface PickedStoreAddress {
@@ -117,17 +118,19 @@ export function StoreAddressSheet({
             ) : null}
           </ScrollView>
 
+          {/* BUTTON-UNIFY-001：确认键改用公共 ProxyButton（原来手写 ink 底 + 圆角 14 +
+              自带的 disabled 0.45）。迁移后圆角/高度/字号/字重/禁用态全走 foundation，
+              跟其余确认键一致；文案和 accessibilityLabel 一字未改。 */}
           <View style={styles.footer}>
-            <Pressable
+            <ProxyButton
               accessibilityLabel={coord ? "用这个落点" : "先在地图上落点"}
               disabled={!coord}
               onPress={() => {
                 if (coord) onConfirm({ address: addressText, lat: coord.lat, lng: coord.lng });
               }}
-              style={[styles.confirm, !coord && styles.confirmDisabled]}
             >
-              <Text selectable style={styles.confirmText}>{coord ? "用这个落点" : "先在地图上落点"}</Text>
-            </Pressable>
+              {coord ? "用这个落点" : "先在地图上落点"}
+            </ProxyButton>
           </View>
         </Pressable>
       </Pressable>
@@ -154,15 +157,8 @@ const styles = StyleSheet.create({
   fieldLabel: { color: color.ink, fontSize: 12, fontWeight: "800", marginTop: 6 },
   addressText: { color: color.ink, fontSize: 14, fontWeight: "700", lineHeight: 20 },
   hint: { color: color.muted, fontSize: 11, lineHeight: 15 },
-  footer: { borderTopColor: color.line, borderTopWidth: 0.5, paddingTop: 10 },
-  confirm: {
-    alignItems: "center",
-    backgroundColor: color.ink,
-    borderRadius: 14,
-    justifyContent: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 14
-  },
-  confirmDisabled: { opacity: 0.45 },
-  confirmText: { color: color.white, fontSize: 14, fontWeight: "800" }
+  footer: { borderTopColor: color.line, borderTopWidth: 0.5, paddingTop: 10 }
+  // BUTTON-UNIFY-001: confirm / confirmDisabled / confirmText 三个键已删 —— 形状
+  // （ink 底、圆角、内边距、白字 800）现在由 ProxyButton 的 tone="primary" 统一提供。
+  // 留着就是第二个出处，下次谁改 token 这里不会跟着动。
 });

@@ -15,7 +15,7 @@
 // Errors are surfaced inline so the user can retry without leaving
 // the page; the parent surface does not need to handle them.
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Pressable, Share, StyleSheet, Text, View } from "react-native";
+import { Alert, Share, StyleSheet, Text, View } from "react-native";
 import { documentDirectory, writeAsStringAsync } from "expo-file-system/legacy";
 import { color } from "../theme";
 import type {
@@ -24,7 +24,7 @@ import type {
   PrivacyRequest
 } from "../privacy-client";
 import { activeRequestOf, exportCopyFileName, formatDate, kindLabel, sessionStatusLabel, statusLabel, truncateId } from "./privacy-settings-helpers";
-import { ProxyLoading } from "./proxy-foundation";
+import { ProxyButton, ProxyLoading } from "./proxy-foundation";
 
 export type PrivacySettingsProps = {
   client: PrivacyClient;
@@ -155,6 +155,12 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
     }
   }, [exportData, busy]);
 
+  // BUTTON-UNIFY-001：本文件 6 个手写按钮（主 / 次 ×3 / 危险 / 重试）全部改用公共
+  // ProxyButton —— 它们本来各自一份圆角 12、字号 14/13、字重 600、禁用 0.5，而且
+  // 危险色写死 #c0392b（不是 foundation.danger）。迁移后形状与颜色只有一个出处。
+  // 文案 / 加载态 / accessibilityLabel 一字未改。
+  // ⚠️ 这段注释必须留在 return 之前：放进 `? ( … ) : ( … )` 的分支里会被当成
+  // JS 表达式上下文，`{/* … */}` 不合法（TS2657），整个文件报语法错。
   return (
     <View style={styles.root}>
       <View style={styles.card}>
@@ -163,18 +169,9 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
         {activeExport ? (
           <Text selectable style={styles.badge}>导出请求处理中 · {statusLabel(activeExport.status)}</Text>
         ) : (
-          <Pressable
-            onPress={onDownload}
-            disabled={busy !== null}
-            accessibilityRole="button"
-            style={[styles.cta, busy !== null && styles.ctaDisabled]}
-          >
-            {busy === "export" ? (
-              <ProxyLoading tone="onDark" />
-            ) : (
-              <Text selectable style={styles.ctaText}>生成我的数据副本</Text>
-            )}
-          </Pressable>
+          <ProxyButton disabled={busy !== null} onPress={onDownload}>
+            {busy === "export" ? <ProxyLoading tone="onDark" /> : "生成我的数据副本"}
+          </ProxyButton>
         )}
         {exportData && (
           <View style={styles.exportSummary}>
@@ -185,21 +182,23 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
             <Text selectable style={styles.exportLine}>生成时间: {formatDate(exportData.generatedAt)}</Text>
             <Text selectable style={styles.exportFootnote}>依据: {exportData.legalBasis}</Text>
             <View style={styles.exportActions}>
-              <Pressable
-                onPress={() => setShowExportDetail((v) => !v)}
+              <ProxyButton
                 accessibilityLabel={showExportDetail ? "收起数据明细" : "查看数据明细"}
+                onPress={() => setShowExportDetail((v) => !v)}
                 style={styles.ctaSecondary}
+                tone="secondary"
               >
-                <Text selectable style={styles.ctaSecondaryText}>{showExportDetail ? "‹ 收起明细" : "查看明细 ›"}</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => void onSaveCopy()}
-                disabled={busy !== null}
+                {showExportDetail ? "‹ 收起明细" : "查看明细 ›"}
+              </ProxyButton>
+              <ProxyButton
                 accessibilityLabel="保存副本到文件"
-                style={[styles.ctaSecondary, busy !== null && styles.ctaDisabled]}
+                disabled={busy !== null}
+                onPress={() => void onSaveCopy()}
+                style={styles.ctaSecondary}
+                tone="secondary"
               >
-                <Text selectable style={styles.ctaSecondaryText}>{busy === "save" ? "保存中…" : "保存副本到文件"}</Text>
-              </Pressable>
+                {busy === "save" ? "保存中…" : "保存副本到文件"}
+              </ProxyButton>
             </View>
             {saveState.kind === "saved" ? (
               <Text selectable style={styles.exportLine}>已存为 {saveState.name}，可从刚才的分享面板存到"文件"。</Text>
@@ -250,32 +249,19 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
           <View>
             <Text selectable style={styles.badge}>删除请求已提交 · {statusLabel(activeDelete.status)}</Text>
             <Text selectable style={styles.exportLine}>预计完成: {formatDate(activeDelete.erasedAt)}</Text>
-            <Pressable
-              onPress={() => onCancelDelete(activeDelete.id)}
+            <ProxyButton
               disabled={busy !== null}
-              accessibilityRole="button"
-              style={[styles.ctaSecondary, busy !== null && styles.ctaDisabled]}
+              onPress={() => onCancelDelete(activeDelete.id)}
+              style={styles.ctaSecondary}
+              tone="secondary"
             >
-              {busy === "cancel:" + activeDelete.id ? (
-                <ProxyLoading tone="onLight" />
-              ) : (
-                <Text selectable style={styles.ctaSecondaryText}>撤回删除请求</Text>
-              )}
-            </Pressable>
+              {busy === "cancel:" + activeDelete.id ? <ProxyLoading tone="onLight" /> : "撤回删除请求"}
+            </ProxyButton>
           </View>
         ) : (
-          <Pressable
-            onPress={onDelete}
-            disabled={busy !== null}
-            accessibilityRole="button"
-            style={[styles.ctaDanger, busy !== null && styles.ctaDisabled]}
-          >
-            {busy === "delete" ? (
-              <ProxyLoading tone="onDark" />
-            ) : (
-              <Text selectable style={styles.ctaDangerText}>提交删除请求</Text>
-            )}
-          </Pressable>
+          <ProxyButton disabled={busy !== null} onPress={onDelete} tone="danger">
+            {busy === "delete" ? <ProxyLoading tone="onDark" /> : "提交删除请求"}
+          </ProxyButton>
         )}
       </View>
 
@@ -294,9 +280,7 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
       {error && (
         <View style={styles.errorCard}>
           <Text selectable style={styles.errorText}>{error}</Text>
-          <Pressable onPress={refresh} style={styles.ctaSecondary}>
-            <Text selectable style={styles.ctaSecondaryText}>重试</Text>
-          </Pressable>
+          <ProxyButton onPress={refresh} style={styles.ctaSecondary} tone="secondary">重试</ProxyButton>
         </View>
       )}
     </View>
@@ -325,34 +309,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 4
   },
-  cta: {
-    backgroundColor: color.ink,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    alignItems: "center"
-  },
-  ctaDisabled: { opacity: 0.5 },
-  ctaText: { color: color.white, fontSize: 14, fontWeight: "600" },
-  ctaSecondary: {
-    backgroundColor: color.white,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: color.line
-  },
-  ctaSecondaryText: { color: color.ink, fontSize: 13, fontWeight: "600" },
-  ctaDanger: {
-    backgroundColor: "#c0392b",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    alignItems: "center"
-  },
-  ctaDangerText: { color: color.white, fontSize: 14, fontWeight: "600" },
+  // BUTTON-UNIFY-001: cta / ctaDisabled / ctaText / ctaSecondaryText / ctaDanger /
+  // ctaDangerText 六个键已删 —— 主/次/危险三种形状与颜色现在由 ProxyButton 的
+  // tone="primary" / "secondary" / "danger" 统一提供（危险色也从写死的 #c0392b
+  // 换成 foundation.danger）。ctaSecondary 只留布局（上间距），它是两个次按钮共用
+  // 的定位，不是形状。
+  ctaSecondary: { marginTop: 12 },
   exportSummary: { marginTop: 12, gap: 4 },
   exportActions: { flexDirection: "row", gap: 8, marginTop: 8 },
   exportDetail: { gap: 3, marginTop: 8 },
