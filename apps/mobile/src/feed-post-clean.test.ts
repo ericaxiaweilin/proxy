@@ -37,7 +37,14 @@ describe("FEED-POST-CLEAN-001 no per-post CTA buttons", () => {
 
   it("the real post action row and body are still rendered", () => {
     expect(code).toContain("<Text selectable style={styles.postCopy}>{post.body}</Text>");
-    expect(code).toContain("更多帖子操作");
+    // 2026-09-26（FEED-MENU-DEDUP-001）：操作行那颗重复的「···」按用户要求删掉了
+    // （同一条帖子上原本露出两个「更多」入口），菜单入口只剩帖头那一颗。
+    // 这条原来钉的是**被删掉那颗**的无障碍标签，于是钉跟着删掉的东西一起失效 ——
+    // 改成钉「⋯ 菜单入口还在」，也就是帖头那颗的样式绑定。
+    // 用 toMatch 的 JSX 形状而不是裸 `toContain("styles.postMenu")`：后者会被
+    // `styles.postMenuText`（它的前缀）喂饱，删掉真入口也照样绿。
+    // 钉的东西没变：帖子卡的真实动作行、正文、以及「更多」入口都还在。
+    expect(code).toMatch(/style=\{styles\.postMenu\}/);
     expect(code).toContain("styles.postAction");
     expect(code).toContain("查看其余");
   });
