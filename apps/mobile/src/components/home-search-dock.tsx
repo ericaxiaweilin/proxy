@@ -5,6 +5,7 @@ import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View 
 import * as ImagePicker from "expo-image-picker";
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { ProxyIcon } from "./proxy-icon";
+import { ProxyButton } from "./proxy-foundation";
 import { color, shadows } from "../theme";
 import { type HomeAttachment } from "./home-chat-box";
 import { type HomeSearchSuggestion } from "../home-search-intent";
@@ -299,19 +300,23 @@ export function HomeSearchDock({
       ) : null}
 
       {/* 意图执行 chips */}
+      {/* BUTTON-UNIFY-002：两个 action chip 改用公共 ProxyButton（原来手写 ink 底 +
+          圆角 16 + 白字 12）。迁移后圆角/高度/字号/字重/禁用态/按压反馈全走
+          foundation 与 ProxyButton，跟其余主按钮一致；文案和 accessibilityLabel
+          一字未改。actionChip 只留布局（上间距）。 */}
       {intentRemix ? (
-        <Pressable accessibilityLabel="整组换一套候选" onPress={onRemix} style={styles.actionChip}>
-          <Text selectable style={styles.actionChipText}>✦ 帮你整组换一套 →</Text>
-        </Pressable>
+        <ProxyButton accessibilityLabel="整组换一套候选" onPress={onRemix} style={styles.actionChip}>
+          ✦ 帮你整组换一套 →
+        </ProxyButton>
       ) : null}
       {intentSlot ? (
-        <Pressable
+        <ProxyButton
           accessibilityLabel={`更换${SLOT_LABEL[intentSlot]}候选`}
           onPress={() => onExchange(intentSlot)}
           style={styles.actionChip}
         >
-          <Text selectable style={styles.actionChipText}>换{SLOT_LABEL[intentSlot]}，选一个 →</Text>
-        </Pressable>
+          换{SLOT_LABEL[intentSlot]}，选一个 →
+        </ProxyButton>
       ) : null}
 
       {/* 相机/相册选择弹窗 */}
@@ -545,17 +550,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800"
   },
+  // BUTTON-UNIFY-002: 只剩布局（上间距）；ink 底 / 圆角 / 高度 / 白字 13 800 /
+  // 按压反馈由 ProxyButton tone="primary" 提供。actionChipText 键已删。
   actionChip: {
-    alignItems: "center",
-    backgroundColor: color.ink,
-    borderRadius: 16,
-    marginTop: 7,
-    paddingVertical: 10
-  },
-  actionChipText: {
-    color: color.white,
-    fontSize: 12,
-    fontWeight: "800"
+    marginTop: 7
   },
   menuBackdrop: {
     alignItems: "center",

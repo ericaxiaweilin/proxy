@@ -49,7 +49,13 @@ export function ProxyButton({
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={[styles.button, styles[`button_${tone}`], disabled && styles.disabled, style]}
+      style={({ pressed }) => [
+        styles.button,
+        styles[`button_${tone}`],
+        disabled && styles.disabled,
+        pressed && styles.buttonPressed,
+        style
+      ]}
     >
       {typeof children === "string" ? <Text selectable style={[styles.buttonText, textTone[tone]]}>{children}</Text> : children}
     </Pressable>
@@ -254,6 +260,12 @@ const styles = StyleSheet.create({
   button_danger: { backgroundColor: foundation.danger, borderColor: foundation.danger },
   buttonText: { color: foundation.ink, fontSize: foundation.text.sm, fontWeight: "800" },
   buttonTextInverse: { color: foundation.surface },
+  // BUTTON-UNIFY-002：按压反馈。原型的按钮**全都**是 :active{transform:scale(.97)}
+  // —— .btn-follow / .btn-message / .btn-more 三条一模一样。公共按钮此前一个按压
+  // 反馈都没有，而各页面手写的那份又各写各的（#3A2F4A 换底色 / opacity .78 /
+  // scale .92 / .96 / .985）。这里按原型收成唯一一个值 .97。
+  // 用 scale 不用换色：换色要给四个 tone 各配一个按压色，就是四个新出处。
+  buttonPressed: { transform: [{ scale: 0.97 }] },
   disabled: { opacity: 0.42 },
   iconButton: { alignItems: "center", backgroundColor: foundation.surface, borderColor: foundation.line, borderRadius: foundation.radius.full, borderWidth: 1, height: foundation.control.md, justifyContent: "center", width: foundation.control.md },
   iconButtonSelected: { backgroundColor: foundation.ink, borderColor: foundation.ink },

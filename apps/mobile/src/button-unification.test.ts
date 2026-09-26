@@ -86,3 +86,34 @@ describe("BUTTON-UNIFY-001 主按钮只有 ProxyButton 一个出处", () => {
     expect(source).not.toMatch(/^\s*disabled:\s*\{/m);
   });
 });
+
+describe("BUTTON-UNIFY-002 按压反馈按原型收成 .97，chip 也走 ProxyButton", () => {
+  it("ProxyButton 有原型的按压反馈 scale(.97)，而不是各页面自己那份", () => {
+    const foundation = read("components/proxy-foundation.tsx");
+    // ⚠️ 同样先切出 ProxyButton 的函数体：ProxyIconButton 没有按压反馈，
+    // 若只断言「整份文件里有 buttonPressed」，把 ProxyButton 那条拆掉也不会红。
+    const start = foundation.indexOf("export function ProxyButton(");
+    const end = foundation.indexOf("export function ProxyIconButton(");
+    expect(start, "ProxyButton 应该还在").toBeGreaterThan(-1);
+    expect(end, "ProxyIconButton 应该还在 ProxyButton 之后").toBeGreaterThan(start);
+    const proxyButton = foundation.slice(start, end);
+    // 两头都要在：接线（pressed && …）+ 样式值（scale .97 = 原型那一个值）
+    expect(proxyButton).toMatch(/pressed && styles\.buttonPressed/);
+    expect(foundation).toMatch(/buttonPressed: \{ transform: \[\{ scale: 0\.97 \}\] \}/);
+  });
+
+  it("home-search-dock 的两个 action chip 走 ProxyButton", () => {
+    const source = read("components/home-search-dock.tsx");
+    // 形状键不许回来（只留布局）
+    expect(source).not.toMatch(/actionChipText:\s*\{/);
+    const chipStyle = source.match(/actionChip:\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(chipStyle, "actionChip 样式键应该还在（它是布局覆盖）").not.toBe("");
+    expect(chipStyle).not.toContain("backgroundColor");
+    expect(chipStyle).not.toContain("borderRadius");
+    expect(chipStyle).not.toContain("paddingVertical");
+    // 两个调用点，且各自的 accessibilityLabel 一字未改
+    expect((source.match(/<ProxyButton/g) ?? []).length).toBe(2);
+    expect(source).toContain('accessibilityLabel="整组换一套候选"');
+    expect(source).toContain("accessibilityLabel={`更换${SLOT_LABEL[intentSlot]}候选`}");
+  });
+});
