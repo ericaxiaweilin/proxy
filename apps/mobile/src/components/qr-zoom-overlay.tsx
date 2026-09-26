@@ -24,6 +24,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ProxyQrCode } from "./proxy-qr-code";
 import { ProxyIcon } from "./proxy-icon";
+import { ProxyButton } from "./proxy-foundation";
 import { color } from "../theme";
 import { useScreenBrightness } from "../lib/screen-brightness";
 
@@ -104,16 +105,19 @@ export function QrZoomOverlay({
 
         {actions && actions.length > 0 ? (
           <View style={styles.actions}>
+            {/* BUTTON-UNIFY-003：两个动作键改用公共 ProxyButton（原来手写圆角 999
+                胶囊 + 主/次两套底色与两套文字样式）。主/次直接映射到 tone，形状与
+                按压反馈只有一个出处。label 与 accessibilityLabel 一字未改。 */}
             {actions.map((a) => (
-              <Pressable
+              <ProxyButton
                 accessibilityLabel={a.label}
-                accessibilityRole="button"
                 key={a.label}
                 onPress={a.onPress}
-                style={[styles.btn, a.primary ? styles.btnPrimary : styles.btnGhost]}
+                style={styles.btn}
+                tone={a.primary ? "primary" : "secondary"}
               >
-                <Text selectable style={a.primary ? styles.btnPrimaryText : styles.btnGhostText}>{a.label}</Text>
-              </Pressable>
+                {a.label}
+              </ProxyButton>
             ))}
           </View>
         ) : null}
@@ -162,10 +166,11 @@ const styles = StyleSheet.create({
   link: { color: color.muted, fontSize: 12, marginTop: 14, textAlign: "center" },
   hint: { color: color.muted, fontSize: 13, marginTop: 16, paddingHorizontal: 28, textAlign: "center" },
   actions: { flexDirection: "row", gap: 10, marginTop: 14, paddingHorizontal: 28 },
-  btn: { alignItems: "center", borderRadius: 999, flex: 1, paddingVertical: 12 },
-  btnPrimary: { backgroundColor: color.ink },
-  btnGhost: { backgroundColor: color.surface },
-  btnPrimaryText: { color: color.white, fontSize: 13, fontWeight: "700" },
-  btnGhostText: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  // BUTTON-UNIFY-003: 只剩布局（两个键平分一行）。圆角从写死的 999 胶囊收敛到
+  // foundation.radius.sm（11），底色 / 文字 / 边框 / 高度 / 按压反馈由 ProxyButton 的
+  // tone="primary" / "secondary" 提供 —— btnPrimary / btnGhost / btnPrimaryText /
+  // btnGhostText 四个键已删。两处看得见的收敛：胶囊变圆角矩形；次按钮多了一条
+  // foundation.line 边框（那就是 secondary 的形状）。
+  btn: { flex: 1 },
   notice: { color: color.ink, fontSize: 12, marginTop: 10, paddingHorizontal: 28, textAlign: "center" },
 });

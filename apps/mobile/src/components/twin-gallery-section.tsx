@@ -8,7 +8,7 @@ import { promptLikenessConsent } from "./likeness-consent-prompt";
 import type { MediaClient } from "../media-client";
 import { HorizontalSwipeRail } from "./horizontal-swipe-rail";
 import { color, foundation } from "../theme";
-import { ProxyEmptyState } from "./proxy-foundation";
+import { ProxyButton, ProxyEmptyState } from "./proxy-foundation";
 import { ProxyIcon } from "./proxy-icon";
 
 // AI-TWIN-GALLERY-001 — 图库段（用户 2026-09-21 原型：deepseek_html_
@@ -132,7 +132,10 @@ export function TwinGallerySection({ rawGalleryItems, mediaClient, authClient, o
         ) : aiState.status === "unauthorized" ? (
           <View style={styles.aiStateBox}>
             <Text selectable style={styles.aiState}>还没有 AI 分身：授权 AI 使用你的形象后，AI 生成的照片会出现在这里。</Text>
-            <Pressable accessibilityRole="button" onPress={() => promptLikenessConsent(grantAndReload)} style={styles.aiStateBtn}><Text selectable style={styles.aiStateBtnText}>授权形象</Text></Pressable>
+            {/* BUTTON-UNIFY-003：「授权形象」改用公共 ProxyButton。原来手写 ink 底 +
+                圆角 14 + 内边距 16/8 + 白字 12.5/800。迁完圆角/高度/字号/字重/按压
+                反馈只有一个出处。文案一字未改（可访问名仍来自内层 Text）。 */}
+            <ProxyButton onPress={() => promptLikenessConsent(grantAndReload)} style={styles.aiStateBtn}>授权形象</ProxyButton>
           </View>
         ) : aiState.status === "error" ? (
           <Pressable accessibilityRole="button" onPress={() => setAiAttempt((n) => n + 1)}><Text selectable style={styles.aiState}>AI 生成图库没读出来，点这里重试</Text></Pressable>
@@ -215,8 +218,9 @@ const styles = StyleSheet.create({
   sourceSubOn: { color: "rgba(255,255,255,0.7)" },
   aiState: { color: color.muted, fontSize: 13, paddingVertical: 12 },
   aiStateBox: { gap: 8, paddingVertical: 4 },
-  aiStateBtn: { alignSelf: "flex-start", backgroundColor: foundation.ink, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 8 },
-  aiStateBtnText: { color: color.white, fontSize: 12.5, fontWeight: "800" },
+  // BUTTON-UNIFY-003: 只剩布局（左对齐，不撑满一行）。ink 底 / 圆角 11 / 最小高 40 /
+  // 白字 13 800 / 按压反馈由 ProxyButton tone="primary" 提供；aiStateBtnText 键已删。
+  aiStateBtn: { alignSelf: "flex-start" },
   errorText: { color: "#b91c1c", fontSize: 12, paddingVertical: 12 },
   track: { gap: 6 },
   trackThumb: { backgroundColor: color.chipNeutralBg, borderRadius: 8, height: 108, marginRight: 6, overflow: "hidden", width: 108 },

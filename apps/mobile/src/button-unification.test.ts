@@ -117,3 +117,54 @@ describe("BUTTON-UNIFY-002 按压反馈按原型收成 .97，chip 也走 ProxyBu
     expect(source).toContain("accessibilityLabel={`更换${SLOT_LABEL[intentSlot]}候选`}");
   });
 });
+
+describe("BUTTON-UNIFY-003 又一批主按钮迁到 ProxyButton", () => {
+  // 判定「这个样式键还剩什么」的公共小工具：切出键体，断言里面没有形状字段。
+  const shapeKeys = (source: string, key: string): string => {
+    const body = source.match(new RegExp(key + ":\\s*\\{[^}]*\\}"))?.[0] ?? "";
+    expect(body, `${key} 样式键应该还在（它是布局覆盖）`).not.toBe("");
+    return body;
+  };
+
+  it("native-app 的「继续」走 ProxyButton，写死的 height 38 与 11 圆角都交出去", () => {
+    const source = read("native-app.tsx");
+    expect(source).not.toMatch(/rememberedContinueText:\s*\{/);
+    const body = shapeKeys(source, "rememberedContinue");
+    // 形状字段一个都不许留：圆角 11 本来就是 foundation.radius.sm，
+    // height 38 是死代码（ProxyButton 的 minHeight 40 会赢）
+    expect(body).not.toContain("backgroundColor");
+    expect(body).not.toContain("borderRadius");
+    expect(body).not.toContain("height");
+    expect((source.match(/<ProxyButton/g) ?? []).length).toBe(1);
+    expect(source).toContain('accessibilityLabel="继续上次的账号"');
+  });
+
+  it("twin-gallery-section 的「授权形象」走 ProxyButton", () => {
+    const source = read("components/twin-gallery-section.tsx");
+    expect(source).not.toMatch(/aiStateBtnText:\s*\{/);
+    const body = shapeKeys(source, "aiStateBtn");
+    expect(body).not.toContain("backgroundColor");
+    expect(body).not.toContain("borderRadius");
+    expect(body).not.toContain("padding");
+    // alignSelf 是定位，必须留着 —— 去掉它会撑满一行
+    expect(body).toContain('alignSelf: "flex-start"');
+    expect(source).toContain("<ProxyButton");
+  });
+
+  it("qr-zoom-overlay 的主/次动作键走 ProxyButton 的 tone，四个形状键全删", () => {
+    const source = read("components/qr-zoom-overlay.tsx");
+    expect(source).not.toMatch(/btnPrimary:\s*\{/);
+    expect(source).not.toMatch(/btnGhost:\s*\{/);
+    expect(source).not.toMatch(/btnPrimaryText:\s*\{/);
+    expect(source).not.toMatch(/btnGhostText:\s*\{/);
+    const body = shapeKeys(source, "btn");
+    expect(body).not.toContain("borderRadius");
+    expect(body).not.toContain("paddingVertical");
+    // flex: 1 是「两个键平分一行」，是布局，必须留着
+    expect(body).toContain("flex: 1");
+    expect((source.match(/<ProxyButton/g) ?? []).length).toBe(1);
+    // 主/次映射不许写死成一种
+    expect(source).toContain('tone={a.primary ? "primary" : "secondary"}');
+    expect(source).toContain("accessibilityLabel={a.label}");
+  });
+});

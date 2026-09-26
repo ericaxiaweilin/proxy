@@ -42,7 +42,7 @@ import { color, Gradient, shadows } from "./theme";
 import { sessionAuthClient, localApiBaseUrl, nativeSecureSessionStore } from "./native-clients";
 import { SECURE_SESSION_STORAGE_KEY } from "./secure-session";
 import { getOrCreateDeviceIdentity, rotateDeviceIdentity, INSTALLATION_DEVICE_ID_KEY } from "./device-credential";
-import { ProxyLoading } from "./components/proxy-foundation";
+import { ProxyButton, ProxyLoading } from "./components/proxy-foundation";
 
 const APP_VERSION = "1.0.0";
 
@@ -737,13 +737,18 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
                 {maskIdentifier(lastSignIn.channel, lastSignIn.identifier)}
               </Text>
             </View>
-            <Pressable
+            {/* BUTTON-UNIFY-003：「继续」改用公共 ProxyButton。原来手写 ink 底 +
+                圆角 11（恰好是 foundation.radius.sm 的原值）+ 写死 height 38 + 白字
+                13/700。迁完形状与按压反馈只有一个出处。文案和 accessibilityLabel
+                一字未改。⚠️ height 38 去掉了：ProxyButton 的 minHeight 是 40，两个
+                都写 minHeight 会赢，留着就是死代码。 */}
+            <ProxyButton
+              accessibilityLabel="继续上次的账号"
               onPress={() => void continueAsLastSignIn(lastSignIn)}
               style={styles.rememberedContinue}
-              accessibilityLabel="继续上次的账号"
             >
-              <Text selectable style={styles.rememberedContinueText}>继续</Text>
-            </Pressable>
+              继续
+            </ProxyButton>
             <Pressable
               onPress={() => {
                 setLastSignInDismissed(true);
@@ -1272,18 +1277,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 3
   },
+  // BUTTON-UNIFY-003: 只剩布局（横向内边距）。ink 底 / 圆角 11 / 最小高 40 /
+  // 白字 13 800 / 按压反馈由 ProxyButton tone="primary" 提供。
+  // rememberedContinueText 键已删。
   rememberedContinue: {
-    alignItems: "center",
-    backgroundColor: color.ink,
-    borderRadius: 11,
-    height: 38,
-    justifyContent: "center",
     paddingHorizontal: 13
-  },
-  rememberedContinueText: {
-    color: color.white,
-    fontSize: 13,
-    fontWeight: "700"
   },
   rememberedSwitch: {
     alignItems: "center",
