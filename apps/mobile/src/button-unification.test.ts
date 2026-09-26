@@ -247,3 +247,48 @@ describe("BUTTON-UNIFY-005 两行保存键：形状收敛，版式保留", () =>
     expect(source).toContain('{finalCommit.city || "所选区域"}');
   });
 });
+
+// BUTTON-UNIFY-006 —— 覆盖审计的追溯补齐（2026-09-26）。
+//
+// 上面五段守的都是「我这一批迁过的文件」。这一段不一样：`twin-insight-card.tsx`
+// 不是迁出来的，它是 TWIN-INSIGHT-001（67ec205，9-21）诞生时就用了 ProxyButton ——
+// 比我这几批早 5 天，所以从来没有人为它加过钉。
+//
+// 做覆盖审计时数出来：全仓 13 个含 `<ProxyButton` 调用点的文件里，只有它一条钉都没有
+// （12/13）。也就是说它的两个动作键漂回手写 Pressable，不会有任何东西变红。
+describe("BUTTON-UNIFY-006 twin-insight-card 的两个动作键（追溯补齐）", () => {
+  it("先观察 / 开启单独运营 仍是 ProxyButton，tone 一主一次", () => {
+    const source = read("components/twin-insight-card.tsx");
+    // 两个调用点。⚠️ 不能只钉 `<ProxyButton` —— 把两个键换成同一个 tone
+    // （主次消失、两个键长得一样）也照样满足「有 ProxyButton」。
+    // 所以把 tone / disabled / handler 一起钉在那一行上。
+    expect((source.match(/<ProxyButton/g) ?? []).length).toBe(2);
+    expect(source).toContain('<ProxyButton tone="secondary" disabled={acting} onPress={onObserve}>');
+    expect(source).toContain('<ProxyButton tone="primary" disabled={acting} onPress={onOperate}>');
+    // 文案一字未改 —— ⚠️ 但不能只 toContain("开启单独运营")：twinScoreHint() 的返回文案里
+    // 就有这四个字（「建议开启单独运营」），所以按钮上那行被删掉，断言照样绿（假守卫）。
+    // 用「ProxyButton 开标签 → 文案 → 闭标签」的正则把文案绑回按钮本身。
+    // 这条是注入实验抓出来的：删掉整个主键后 toContain 版本仍然满足。
+    expect(source).toMatch(/<ProxyButton tone="secondary"[^>]*>\s*先观察\s*<\/ProxyButton>/);
+    expect(source).toMatch(/<ProxyButton tone="primary"[^>]*>\s*开启单独运营\s*<\/ProxyButton>/);
+  });
+
+  it("动作行只留版式，禁用态交回 ProxyButton", () => {
+    const source = read("components/twin-insight-card.tsx");
+    // actions 是那一行的版式覆盖，必须还在（不在了说明整行被重写）
+    const actions = source.match(/actions:\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(actions, "actions 样式键应该还在（它是版式行）").not.toBe("");
+    expect(actions).not.toContain("backgroundColor");
+    expect(actions).not.toContain("borderRadius");
+    // 自己那份 disabled 键不许回来（ProxyButton 有统一的 0.42）
+    expect(source).not.toMatch(/^\s*disabled:\s*\{/m);
+  });
+
+  // ⚠️ 这个文件里另外 3 个 Pressable 是**故意不迁**的，不是漏的。写在这里，
+  // 免得下一个人拿着「统一按钮」的清单来把它们「补全」：
+  //   · TwinTargetRail 的头像项 —— accessibilityRole="tab"，是 tab 不是按钮；
+  //   · styles.summary 那张卡 —— 整卡可点（展开/收起），是卡片点击面，不是 CTA；
+  //   · styles.refresh「重新总结」—— 11pt 紫色文字链，嵌在 summaryHead 的
+  //     justifyContent:"space-between" 里；ProxyButton 的 minHeight 40 + paddingHorizontal 14
+  //     会把它撑成一个 40pt 药丸、把那一行版式顶坏。要迁它是设计决定，不是机械统一。
+});
