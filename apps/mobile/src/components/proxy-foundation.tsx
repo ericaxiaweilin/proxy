@@ -84,7 +84,9 @@ export function ProxyIconButton({
       accessibilityState={{ disabled, selected }}
       disabled={disabled}
       onPress={onPress}
-      style={[styles.iconButton, selected && styles.iconButtonSelected, disabled && styles.disabled, style]}
+      // BUTTON-SHAPE-ALIGN-001：原型 .icon-btn 有 :active{scale(.94)}，本仓此前没有。
+      // 改成函数式 style 才拿得到 pressed（跟 ProxyButton 的 buttonPressed 同一套路）。
+      style={({ pressed }) => [styles.iconButton, selected && styles.iconButtonSelected, disabled && styles.disabled, pressed && styles.iconButtonPressed, style]}
     >
       {children}
     </Pressable>
@@ -253,12 +255,22 @@ const styles = StyleSheet.create({
   avatarFallback: { color: foundation.ink, fontSize: foundation.text.sm, fontWeight: "800" },
   avatarImage: { height: "100%", width: "100%" },
   avatarImageAbsolute: { height: "100%", left: 0, position: "absolute", top: 0, width: "100%" },
-  button: { alignItems: "center", borderRadius: foundation.radius.sm, borderWidth: 1, flexDirection: "row", gap: foundation.space.two, justifyContent: "center", minHeight: foundation.control.md, paddingHorizontal: 14 },
+  // BUTTON-SHAPE-ALIGN-001（2026-09-26）：基准形状换成原型 sec-buttons 04 的值。
+  // 原型「所有按钮共享同一套圆角、间距、字号、状态反馈」：
+  //   .btn { padding:0 20px; height:48px; border-radius:14px; font-size:14px;
+  //          font-weight:900; letter-spacing:-.2px; gap:8px }
+  //   .btn-ghost / .icon-btn 的边框是 1.5px；.btn:disabled { opacity:.4 }
+  // 对齐前是 40 高 / radius 11 / padding 0 14 / 13pt / 800 / 1px / .42 —— 那几个数不是
+  // 原型值，是各页面手写按钮互相抄出来的（见 BUTTON-UNIFY-001 那张表）。用户看了原型后
+  // 明确「对齐」⇒ 这是换基线，不是机械统一。
+  // 48 用 control.lg、20 用 space.five（这两个 token 本来就等于原型值，别写死数字）；
+  // 14 圆角 / 14 字号本仓没有对应 token（radius.sm=11、text.sm=13），按原型写死。
+  button: { alignItems: "center", borderRadius: 14, borderWidth: 1.5, flexDirection: "row", gap: foundation.space.two, justifyContent: "center", minHeight: foundation.control.lg, paddingHorizontal: foundation.space.five },
   button_primary: { backgroundColor: foundation.ink, borderColor: foundation.ink },
   button_secondary: { backgroundColor: foundation.surface, borderColor: foundation.line },
   button_ghost: { backgroundColor: "transparent", borderColor: "transparent" },
   button_danger: { backgroundColor: foundation.danger, borderColor: foundation.danger },
-  buttonText: { color: foundation.ink, fontSize: foundation.text.sm, fontWeight: "800" },
+  buttonText: { color: foundation.ink, fontSize: 14, fontWeight: "900", letterSpacing: -0.2 },
   buttonTextInverse: { color: foundation.surface },
   // BUTTON-UNIFY-002：按压反馈。原型的按钮**全都**是 :active{transform:scale(.97)}
   // —— .btn-follow / .btn-message / .btn-more 三条一模一样。公共按钮此前一个按压
@@ -266,8 +278,15 @@ const styles = StyleSheet.create({
   // scale .92 / .96 / .985）。这里按原型收成唯一一个值 .97。
   // 用 scale 不用换色：换色要给四个 tone 各配一个按压色，就是四个新出处。
   buttonPressed: { transform: [{ scale: 0.97 }] },
-  disabled: { opacity: 0.42 },
-  iconButton: { alignItems: "center", backgroundColor: foundation.surface, borderColor: foundation.line, borderRadius: foundation.radius.full, borderWidth: 1, height: foundation.control.md, justifyContent: "center", width: foundation.control.md },
+  disabled: { opacity: 0.4 },
+  // 原型 .icon-btn：44×44 / border-radius:14px / 1.5px 边框 / :active{scale(.94)}。
+  // 对齐前是 40×40 **胶囊**（radius.full）—— 胶囊是本仓自己的形状，原型是圆角方。
+  // ⚠️ 下游有按旧 40pt 几何算的常量：surfaces/badminton-companion.tsx 的
+  // `DETAIL_BADGE_TOP = 6 + foundation.control.md + 10` 会差 4pt。那是 peer 在制文件，
+  // 这里不动，只记着。
+  iconButton: { alignItems: "center", backgroundColor: foundation.surface, borderColor: foundation.line, borderRadius: 14, borderWidth: 1.5, height: 44, justifyContent: "center", width: 44 },
+  // 原型图标钮有按压反馈（scale .94），本仓此前一个都没有 —— 补上，跟 .btn 的 .97 同源。
+  iconButtonPressed: { transform: [{ scale: 0.94 }] },
   iconButtonSelected: { backgroundColor: foundation.ink, borderColor: foundation.ink },
   tabs: { borderBottomColor: foundation.line, borderBottomWidth: 1, flexDirection: "row", gap: foundation.space.four },
   tab: { alignItems: "center", flex: 1, minHeight: foundation.control.md, justifyContent: "center", paddingHorizontal: 1, position: "relative" },

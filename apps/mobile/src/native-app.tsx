@@ -740,8 +740,9 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
             {/* BUTTON-UNIFY-003：「继续」改用公共 ProxyButton。原来手写 ink 底 +
                 圆角 11（恰好是 foundation.radius.sm 的原值）+ 写死 height 38 + 白字
                 13/700。迁完形状与按压反馈只有一个出处。文案和 accessibilityLabel
-                一字未改。⚠️ height 38 去掉了：ProxyButton 的 minHeight 是 40，两个
-                都写 minHeight 会赢，留着就是死代码。 */}
+                一字未改。⚠️ height 38 去掉了：ProxyButton 的 minHeight 是 48（原型
+                .btn 的值，2026-09-26 对齐后从 40 提上来的），两个都写 minHeight
+                会赢，留着就是死代码。 */}
             <ProxyButton
               accessibilityLabel="继续上次的账号"
               onPress={() => void continueAsLastSignIn(lastSignIn)}

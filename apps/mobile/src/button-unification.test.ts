@@ -82,7 +82,7 @@ describe("BUTTON-UNIFY-001 主按钮只有 ProxyButton 一个出处", () => {
     expect(confirmStyle, "confirmButton 样式键应该还在（它是布局覆盖）").not.toBe("");
     expect(confirmStyle).not.toContain("backgroundColor");
     expect(confirmStyle).not.toContain("borderRadius");
-    // 自己那份 disabled 键已删（ProxyButton 有统一的 0.42）
+    // 自己那份 disabled 键已删（ProxyButton 有统一的 0.4）
     expect(source).not.toMatch(/^\s*disabled:\s*\{/m);
   });
 });
@@ -130,8 +130,9 @@ describe("BUTTON-UNIFY-003 又一批主按钮迁到 ProxyButton", () => {
     const source = read("native-app.tsx");
     expect(source).not.toMatch(/rememberedContinueText:\s*\{/);
     const body = shapeKeys(source, "rememberedContinue");
-    // 形状字段一个都不许留：圆角 11 本来就是 foundation.radius.sm，
-    // height 38 是死代码（ProxyButton 的 minHeight 40 会赢）
+    // 形状字段一个都不许留：原来覆盖的是圆角 11（当时恰好 = radius.sm）与 height 38。
+    // ⚠️ 2026-09-26 对齐后基准圆角是 14，所以「删掉 11」不再是等值替换，是真换了形状。
+    // height 38 仍是死代码（ProxyButton 的 minHeight 48 会赢）。
     expect(body).not.toContain("backgroundColor");
     expect(body).not.toContain("borderRadius");
     expect(body).not.toContain("height");
@@ -194,7 +195,7 @@ describe("BUTTON-UNIFY-004 999 胶囊 CTA 收敛到 ProxyButton", () => {
   it("custom-feed 的「创建并固定到首页」走 ProxyButton", () => {
     const source = read("surfaces/custom-feed.tsx");
     expect(source).not.toMatch(/aiBtnText:\s*\{/);
-    // 自己那份 disabled 键也删了（ProxyButton 有统一的 0.42）
+    // 自己那份 disabled 键也删了（ProxyButton 有统一的 0.4）
     expect(source).not.toMatch(/^\s*disabled:\s*\{/m);
     const body = shapeKeys(source, "aiBtn");
     expect(body).not.toContain("backgroundColor");
@@ -237,7 +238,7 @@ describe("BUTTON-UNIFY-005 两行保存键：形状收敛，版式保留", () =>
     const body = shapeKeys(source, "confirm");
     expect(body).not.toContain("backgroundColor");
     expect(body).not.toContain("borderRadius");
-    // 纵向内边距必须留着 —— 这是全 App 唯一的两行主按钮，去掉会压成 40pt 最小高
+    // 纵向内边距必须留着 —— 这是全 App 唯一的两行主按钮，去掉会压成 48pt 最小高
     expect(body).toContain("paddingVertical: 14");
     // 两行内容必须自己竖排：ProxyButton 的行方向是 row，不包一层就是左右并排
     expect(source).toContain("<View style={styles.confirmCopy}>");
@@ -280,7 +281,7 @@ describe("BUTTON-UNIFY-006 twin-insight-card 的两个动作键（追溯补齐�
     expect(actions, "actions 样式键应该还在（它是版式行）").not.toBe("");
     expect(actions).not.toContain("backgroundColor");
     expect(actions).not.toContain("borderRadius");
-    // 自己那份 disabled 键不许回来（ProxyButton 有统一的 0.42）
+    // 自己那份 disabled 键不许回来（ProxyButton 有统一的 0.4）
     expect(source).not.toMatch(/^\s*disabled:\s*\{/m);
   });
 
@@ -289,6 +290,63 @@ describe("BUTTON-UNIFY-006 twin-insight-card 的两个动作键（追溯补齐�
   //   · TwinTargetRail 的头像项 —— accessibilityRole="tab"，是 tab 不是按钮；
   //   · styles.summary 那张卡 —— 整卡可点（展开/收起），是卡片点击面，不是 CTA；
   //   · styles.refresh「重新总结」—— 11pt 紫色文字链，嵌在 summaryHead 的
-  //     justifyContent:"space-between" 里；ProxyButton 的 minHeight 40 + paddingHorizontal 14
-  //     会把它撑成一个 40pt 药丸、把那一行版式顶坏。要迁它是设计决定，不是机械统一。
+  //     justifyContent:"space-between" 里；ProxyButton 的 minHeight 48 + paddingHorizontal 20
+  //     会把它撑成一个 48pt 药丸、把那一行版式顶坏。要迁它是设计决定，不是机械统一。
+});
+
+// BUTTON-SHAPE-ALIGN-001 —— 基准形状本身也要钉（2026-09-26，用户看了 sec-buttons
+// 原型之后说「对齐」）。
+//
+// 上面六段钉的都是**调用点**（某个页面有没有退回手写按钮）。这一段钉的是**原语自己**：
+// 基准形状一旦被谁顺手改回 40 / radius 11 / 13pt，20+ 个已迁按钮会一起变，而上面每一段
+// 都还是绿的 —— 因为调用点确实还在用 ProxyButton。所以形状必须有独立的钉。
+//
+// 值全部来自原型 sec-buttons 04「所有按钮共享同一套圆角、间距、字号、状态反馈」：
+//   .btn { padding:0 20px; height:48px; border-radius:14px; font-size:14px;
+//          font-weight:900; letter-spacing:-.2px }   .btn:disabled{opacity:.4}
+//   .icon-btn { width:44px; height:44px; border-radius:14px }   :active{scale(.94)}
+describe("BUTTON-SHAPE-ALIGN-001 基准形状对齐原型 sec-buttons 04", () => {
+  const shapeKeys = (source: string, key: string): string => {
+    const body = source.match(new RegExp(key + ":\\s*\\{[^}]*\\}"))?.[0] ?? "";
+    expect(body, `${key} 样式键应该还在`).not.toBe("");
+    return body;
+  };
+
+  it("ProxyButton 基准形状 = 原型的 48 / 圆角 14 / 0 20 / 14pt / 900", () => {
+    const foundation = read("components/proxy-foundation.tsx");
+    const button = shapeKeys(foundation, "button");
+    expect(button).toContain("minHeight: foundation.control.lg"); // = 48
+    expect(button).toMatch(/borderRadius: 14\b/);
+    expect(button).toMatch(/borderWidth: 1\.5\b/);
+    expect(button).toContain("paddingHorizontal: foundation.space.five"); // = 20
+    const text = shapeKeys(foundation, "buttonText");
+    expect(text).toMatch(/fontSize: 14\b/);
+    expect(text).toContain('fontWeight: "900"');
+    expect(text).toMatch(/letterSpacing: -0\.2\b/);
+    // ⚠️ 这里用正则而不是 toContain("opacity: 0.4") —— 后者会被 "opacity: 0.42"
+    // 喂饱（0.4 是 0.42 的前缀），退回 .42 也照样绿。本仓库踩过的同族假守卫。
+    expect(shapeKeys(foundation, "disabled")).toMatch(/opacity: 0\.4\b/);
+  });
+
+  it("对齐前的 40 / radius 11 / 13pt 不许回来", () => {
+    const foundation = read("components/proxy-foundation.tsx");
+    const button = shapeKeys(foundation, "button");
+    expect(button).not.toContain("minHeight: foundation.control.md");
+    expect(button).not.toContain("borderRadius: foundation.radius.sm");
+    expect(shapeKeys(foundation, "buttonText")).not.toContain("foundation.text.sm");
+  });
+
+  it("ProxyIconButton 是原型的 44×44 圆角方（不是 40×40 胶囊），且按压反馈接上了", () => {
+    const foundation = read("components/proxy-foundation.tsx");
+    const icon = shapeKeys(foundation, "iconButton");
+    expect(icon).toMatch(/height: 44\b/);
+    expect(icon).toMatch(/width: 44\b/);
+    expect(icon).toMatch(/borderRadius: 14\b/);
+    expect(icon).toMatch(/borderWidth: 1\.5\b/);
+    // 反向臂：胶囊（radius.full）是本仓自己的形状，原型是圆角方，不许回来
+    expect(icon).not.toContain("radius.full");
+    // 原型图标钮有 :active{scale(.94)}；定义了还得**接上**（没接上 = 没接线）
+    expect(foundation).toMatch(/iconButtonPressed: \{ transform: \[\{ scale: 0\.94 \}\] \}/);
+    expect(foundation).toMatch(/pressed && styles\.iconButtonPressed/);
+  });
 });

@@ -589,8 +589,8 @@ export function LocationPickerSheet({
             <View style={styles.footer}>
               {/* BUTTON-UNIFY-005：保存键改用公共 ProxyButton。它是全 App 唯一的
                   **两行**主按钮（主标题 + 副标题），所以两行文字与纵向内边距留着 ——
-                  去掉会把 64pt 压成 ProxyButton 的 40pt 最小高。收敛的是形状：
-                  圆角 14→11、按压反馈从「换 #3A2F4A 底色」改成原型的 scale(.97)。
+                  去掉会把 64pt 压成 ProxyButton 的 48pt 最小高。收敛的是形状：
+                  按压反馈从「换 #3A2F4A 底色」改成原型的 scale(.97)。
                   accessibilityLabel 与文案一字未改。 */}
               <ProxyButton
                 accessibilityLabel={`保存到 ${finalCommit.city} 的 ${finalCommit.area}`}
@@ -764,7 +764,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10
   },
   // BUTTON-UNIFY-005: 只剩布局 —— 这是全 App 唯一的**两行**主按钮，纵向内边距必须
-  // 留着（去掉会把 64pt 压成 ProxyButton 的 40pt 最小高）。ink 底 / 圆角 11 / 边框 /
+  // 留着（去掉会把 64pt 压成 ProxyButton 的 48pt 最小高）。ink 底 / 圆角 14 / 边框 /
   // 按压反馈由 ProxyButton tone="primary" 提供；confirmPressed 键已删。
   confirm: {
     paddingVertical: 14
