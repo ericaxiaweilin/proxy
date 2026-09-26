@@ -43,7 +43,13 @@ describe("SEC-CATEGORY-ICONS-001 推荐 / 关注 挂上原型 02 的分类字形
     // 只钉 `| "recommend"` 不够：它也可能只是被人加进了联合类型却没实现分支，
     // 于是 <ProxyIcon name="recommend"/> 渲染出 null（静默空白，不报错）。
     expect(icon, '"recommend" 没进 ProxyIconName').toMatch(/\|\s*"recommend"/);
-    expect(icon, '"follow" 没进 ProxyIconName（或不再是最后一项）').toMatch(/\|\s*"follow";/);
+    // 这一条以前钉的是「follow 是联合类型的最后一项」（`| "follow";`）。
+    // SEC-CATEGORY-ICONS-002 把同族的「动态」「咖啡场景」两个字形接在 follow 后面，
+    // 所以「最后一项」这个位置断言挪到新的尾巴上 —— 钉的仍然是「进了联合类型」，
+    // 不是「谁排最后」。
+    expect(icon, '"follow" 没进 ProxyIconName').toMatch(/\|\s*"follow"/);
+    expect(icon, '"dynamicRing" 没进 ProxyIconName').toMatch(/\|\s*"dynamicRing"/);
+    expect(icon, '"cafeCup" 没进 ProxyIconName（或不再是最后一项）').toMatch(/\|\s*"cafeCup";/);
     expect(icon, '没有 case "recommend" 分支').toContain('case "recommend":');
     expect(icon, '没有 case "follow" 分支').toContain('case "follow":');
   });
@@ -99,5 +105,37 @@ describe("SEC-CATEGORY-ICONS-001 推荐 / 关注 挂上原型 02 的分类字形
     expect(tabRow, "tab 行取不到图标尺寸").not.toBe("");
     expect(sectionRow, "分段控件取不到图标尺寸").not.toBe("");
     expect(tabRow, "两行图标尺寸不一致了").toBe(sectionRow);
+  });
+
+  it("两行图标是同一套字形系统（栅格 + 描边），不只是同一个尺寸", () => {
+    // 上面那条只钉了 size 相等。尺寸一样、但一行画在 24 栅格 / 描边 2.2、
+    // 另一行画在 32 栅格 / 描边 1.9 的话，16pt 下渲染出来是 1.47px vs 0.95px
+    // （差 1.55 倍）—— 同屏看就是「上面一行粗、下面一行细」。
+    // 分段控件那行原来挂的是 target / cup，两个都是 24 栅格，就是这个毛病。
+    // 所以这里钉**系统**：两行四个字形都必须走 canvas32（原型 02 那套 32 栅格 / 1.9）。
+    //
+    // ⚠️ 钉的必须是「这两行**实际指到**的字形」，不能写死四个名字。写死的话：
+    //    那四个字形一直躺在文件里，把某一行改指到别的 24 栅格字形，这种钉照样绿
+    //    （假守卫 —— 「字形是 32 栅格」≠「这一行用的是它」）。所以从行表里把名字读出来。
+    const namesOf = (table: string): string[] =>
+      [...table.matchAll(/icon:\s*"([a-zA-Z0-9]+)"/g)].map((m) => m[1] ?? "").filter((n) => n !== "");
+    const rows = namesOf(slice(feed, "const SECTIONS", "];")).concat(
+      namesOf(slice(feed, "const TABS", "];"))
+    );
+    // 非空校验：锚点漂了就会取到 0 个名字，下面的循环空转 = 假绿。
+    expect(rows.length, "两行一个字都没取到（锚点漂了）").toBeGreaterThanOrEqual(4);
+    for (const name of rows) {
+      const at = icon.indexOf(`case "${name}":`);
+      expect(at, `没有 case "${name}" 分支 —— 图标名写错只会静默渲染空白`).toBeGreaterThanOrEqual(0);
+      // 窗口收到下一个 case / default 为止：不收的话最后一个分支会一路吃到文件尾，
+      // 别的分支里的 canvas32 也能让断言变绿（窗口太松 = 假守卫）。
+      const ends = [icon.indexOf("case ", at + 1), icon.indexOf("default:", at + 1)].filter((i) => i > -1);
+      const body = icon.slice(at, ends.length > 0 ? Math.min(...ends) : undefined);
+      expect(body, `${name} 没走 32 栅格 —— 和同屏那一行不是一套字形系统`).toContain("canvas32");
+    }
+    // 反向臂：分段控件那行不许指回 24 栅格的 target / cup。
+    const sections = slice(feed, "const SECTIONS", "];");
+    expect(sections, "动态 又指回 24 栅格的 target 了").not.toContain('icon: "target"');
+    expect(sections, "咖啡场景 又指回 24 栅格的 cup 了").not.toContain('icon: "cup"');
   });
 });

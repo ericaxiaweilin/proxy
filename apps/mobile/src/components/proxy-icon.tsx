@@ -58,7 +58,18 @@ export type ProxyIconName =
   // 「推荐 / 关注 / 动态 / 探索 / 分类」把「推荐」「关注」也定义成了有形状的图标
   // （推荐 = 五角星，关注 = 人 + 信号点）。同一套 32 栅格 / 描边 1.9。
   | "recommend"
-  | "follow";
+  | "follow"
+  // SEC-CATEGORY-ICONS-002（2026-09-26）：同一份原型 02 节里，「动态」「咖啡场景」
+  // 也是**有形状**的分类字形（动态 = 同心圆 + 实心圆心，咖啡场景 = 咖啡杯）。
+  // 而且它们和推荐 / 关注**画在同一屏**：分段控件那行（动态 / 咖啡场景）就在
+  // tab 那行（推荐 / 关注）上面。这两行以前一个走 24 栅格 / 描边 2.2、一个走
+  // 32 栅格 / 描边 1.9 —— 尺寸都写 16，渲染出来却是 1.47px vs 0.95px（差 1.55 倍），
+  // 同屏看就是「上面一行粗、下面一行细」。所以按原型 02 把这两个字形补成 32 栅格，
+  // 把分段控件那行一起拉进同一套系统。
+  // ⚠️ **不动** target / cup 本身 —— 它们各有一堆别的调用点（target 在 me / ProfileTabs /
+  //    FacetHomeSurface / 底栏等 15+ 处当通用标记用），改几何会牵连到别处。
+  | "dynamicRing"
+  | "cafeCup";
 
 const symbolMap: Partial<Record<string, ProxyIconName>> = {
   "home": "home",
@@ -257,6 +268,15 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
       return canvas32(<Path {...common32} d="M16 4L19.5 12L28 13L21.5 18.5L23.5 27L16 22.5L8.5 27L10.5 18.5L4 13L12.5 12Z"/>);
     case "follow": // 关注（人 + 信号点）
       return canvas32(<><Circle {...common32} cx="16" cy="11" r="5"/><Path {...common32} d="M6 27C6 22 10 19 16 19C22 19 26 22 26 27"/><Circle cx="25" cy="8" fill={color} r="2.5" stroke="none"/></>);
+    // SEC-CATEGORY-ICONS-002：原型 02 节同一组里的「动态」「咖啡场景」，路径原文照抄
+    // （32 栅格 / 描边 1.9，只把 currentColor 换成 color）。
+    // ⚠️ 「动态」别拿 24 栅格的 `target` 顶替：target 是 r7 外圈 + r3 **描边**内圈，
+    //    原型这个是 r11 外圈 + r3 **实心**圆心 —— 外径和重心都不一样，而且描边
+    //    比同屏那行粗 1.55 倍（见文件头 SEC-CATEGORY-ICONS-002 的说明）。
+    case "dynamicRing": // 动态（同心圆 · 实心圆心）
+      return canvas32(<><Circle {...common32} cx="16" cy="16" r="11"/><Circle cx="16" cy="16" fill={color} r="3" stroke="none"/></>);
+    case "cafeCup": // 咖啡场景（咖啡杯）
+      return canvas32(<><Path {...common32} d="M6 12L22 12L22 22C22 24 20 26 18 26L10 26C8 26 6 24 6 22Z"/><Path {...common32} d="M22 15L25 15C26.5 15 27 16 27 17C27 18 26.5 19 25 19L22 19"/><Path {...common32} d="M10 7L10 9M14 6L14 9M18 7L18 9"/></>);
     default:
       return null;
   }

@@ -166,9 +166,13 @@ const TABS: ReadonlyArray<{ id: FeedTab; icon: ProxyIconName; label: string }> =
   { id: "FOLLOWING", icon: "follow", label: "关注" }
 ];
 
+// SEC-CATEGORY-ICONS-002：这一行和下面的 TABS 行（推荐 / 关注）**同屏**，原型 02 节
+// 把「动态」「咖啡场景」也定义成同一套 32 栅格 / 描边 1.9 的分类字形。
+// 以前这里挂 target / cup —— 两个都是 24 栅格 / 描边 2.2，尺寸同为 16 时线重
+// 1.47px vs 下面那行 0.95px，两行看上去一粗一细。target / cup 本身不动（各有 15+ 调用点）。
 const SECTIONS: ReadonlyArray<{ id: FeedSection; label: string; icon: ProxyIconName }> = [
-  { id: "POSTS", label: "动态", icon: "target" },
-  { id: "CAFE", label: "咖啡场景", icon: "cup" }
+  { id: "POSTS", label: "动态", icon: "dynamicRing" },
+  { id: "CAFE", label: "咖啡场景", icon: "cafeCup" }
 ];
 
 const FILTERS: ReadonlyArray<{ id: FilterKey; label: string }> = [
