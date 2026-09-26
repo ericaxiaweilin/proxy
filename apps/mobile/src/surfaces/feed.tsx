@@ -160,23 +160,27 @@ function formatDurationMs(durationMs: number | undefined): string {
 
 // SEC-CATEGORY-ICONS-001：推荐 / 关注 挂上原型 02「推荐 / 关注 / 动态 / 探索 / 分类」
 // 那节的分类字形（推荐 = 五角星，关注 = 人 + 信号点）。原型 03 的推荐/关注 tab 本身是
-// 纯文字 —— 但同屏上面的分段控件（动态 / 咖啡场景）一直是有字形的，只有这两个 tab 空着。
+// 纯文字 —— 但同屏上面的分段控件（动态 / 探索）一直是有字形的，只有这两个 tab 空着。
 const TABS: ReadonlyArray<{ id: FeedTab; icon: ProxyIconName; label: string }> = [
   { id: "RECOMMENDED", icon: "recommend", label: "推荐" },
   { id: "FOLLOWING", icon: "follow", label: "关注" }
 ];
 
 // SEC-CATEGORY-ICONS-002：这一行和下面的 TABS 行（推荐 / 关注）**同屏**，原型 02 节
-// 把「动态」「咖啡场景」也定义成同一套 32 栅格 / 描边 1.9 的分类字形。
+// 把「动态」「探索」也定义成同一套 32 栅格 / 描边 1.9 的分类字形。
 // 以前这里挂 target / cup —— 两个都是 24 栅格 / 描边 2.2，尺寸同为 16 时线重
 // 1.47px vs 下面那行 0.95px，两行看上去一粗一细。target / cup 本身不动（各有 15+ 调用点）。
+// EXPLORE-RENAME-001：第二格的产品名从「咖啡场景」改成「探索」（字形 = 原型 02 的罗盘指针）。
+// ⚠️ `id: "CAFE"` 是内部标识、不是用户可见文案，**故意不跟着改名** —— `"CAFE"` 在
+//    activity-client / market / tasks 等 7+ 个文件里是**场地类型**（咖啡店），
+//    这里的 PageId.FEED_CAFE 又是导航路由；跟显示名一起改会把两种含义搅在一起。
 const SECTIONS: ReadonlyArray<{ id: FeedSection; label: string; icon: ProxyIconName }> = [
   { id: "POSTS", label: "动态", icon: "dynamicRing" },
-  { id: "CAFE", label: "咖啡场景", icon: "cafeCup" }
+  { id: "CAFE", label: "探索", icon: "explore" }
 ];
 
 // SEC-CATEGORY-ICONS-002：原型 deepseek_html_20260926_9d241a.html 的 06「真实场景组合」
-// 把首页顶部画成**三行** —— 分段控件（动态 / 咖啡场景）→ Tabs（推荐 / 关注）→
+// 把首页顶部画成**三行** —— 分段控件（动态 / 探索）→ Tabs（推荐 / 关注）→
 // **分类胶囊**（全部 / 人关系 / 机会需求 / 活动团体），三行都带图标。
 // FilterChipRail 本来就有 icon 槽（requester-home 那边传 assetIcon 在用），
 // feed 这边只传 { id, label } 把槽空着 —— 所以这一行一直是纯文字。

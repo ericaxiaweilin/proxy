@@ -115,7 +115,7 @@ export function CoffeeScenesHub(): React.JSX.Element {
     const filtered = PLACEHOLDER_SHOPS.filter((s) => matchesFilter(s, shopFilter));
     return (
       <View>
-        <Pressable onPress={() => setView("HOME")}><Text selectable style={styles.back}>‹ 返回咖啡场景</Text></Pressable>
+        <Pressable onPress={() => setView("HOME")}><Text selectable style={styles.back}>‹ 返回探索</Text></Pressable>
         <Text selectable style={styles.placeholderBanner}>示例数据 · 店铺库还没接后端，界面先搭起来。</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
           {SHOP_FILTERS.map((f) => (

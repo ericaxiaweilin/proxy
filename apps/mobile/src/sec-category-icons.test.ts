@@ -53,10 +53,10 @@ describe("SEC-CATEGORY-ICONS-001 推荐 / 关注 挂上原型 02 的分类字形
     // 于是 <ProxyIcon name="recommend"/> 渲染出 null（静默空白，不报错）。
     expect(icon, '"recommend" 没进 ProxyIconName').toMatch(/\|\s*"recommend"/);
     // 这一组以前钉的是「follow 是联合类型的最后一项」（`| "follow";`）。
-    // SEC-CATEGORY-ICONS-002 分两批把同族字形接在后面（先 动态/咖啡场景，再
+    // SEC-CATEGORY-ICONS-002 分两批把同族字形接在后面（先 动态/探索，再
     // 全部/人关系/机会需求/活动团体），而「谁排最后」本来也不是不变量 ——
     // 改成逐个钉「进了联合类型」：以后再加同族字形只需往数组里加一个名字。
-    for (const name of ["follow", "dynamicRing", "cafeCup", "allGrid", "peoplePair", "clockDot", "hexGroup"]) {
+    for (const name of ["follow", "dynamicRing", "explore", "allGrid", "peoplePair", "clockDot", "hexGroup"]) {
       expect(icon, `"${name}" 没进 ProxyIconName`).toMatch(new RegExp(`\\|\\s*"${name}"`));
     }
     expect(icon, '没有 case "recommend" 分支').toContain('case "recommend":');
@@ -105,7 +105,7 @@ describe("SEC-CATEGORY-ICONS-001 推荐 / 关注 挂上原型 02 的分类字形
   });
 
   it("两行图标同一套尺寸（tab 行 = 它上面的分段控件）", () => {
-    // 同屏两行图标（动态/咖啡场景 与 推荐/关注）必须是同一个系统 ——
+    // 同屏两行图标（动态/探索 与 推荐/关注）必须是同一个系统 ——
     // 这也是这次改动的口径（见 feed.tsx 里那句注释）。钉的是**两者相等**，
     // 不是「都等于 16」：将来一起改尺寸不该打红，只改一行才该打红。
     const sizeOf = (s: string): string => s.match(/name=\{entry\.icon\} size=\{(\d+)\}/)?.[1] ?? "";
@@ -139,11 +139,12 @@ describe("SEC-CATEGORY-ICONS-001 推荐 / 关注 挂上原型 02 的分类字形
     // 反向臂：分段控件那行不许指回 24 栅格的 target / cup。
     const sections = slice(feed, "const SECTIONS", "];");
     expect(sections, "动态 又指回 24 栅格的 target 了").not.toContain('icon: "target"');
-    expect(sections, "咖啡场景 又指回 24 栅格的 cup 了").not.toContain('icon: "cup"');
+    expect(sections, "探索 又指回 24 栅格的 cup 了").not.toContain('icon: "cup"');
+    expect(sections, "探索 又指回咖啡杯字形了").not.toContain('icon: "cafeCup"');
   });
 
   it("分类胶囊那行也挂上原型 02 的字形（原型 06 的首页顶部三行都有图标）", () => {
-    // 原型 06「真实场景组合」把首页顶部画成**三行**：分段控件（动态 / 咖啡场景）→
+    // 原型 06「真实场景组合」把首页顶部画成**三行**：分段控件（动态 / 探索）→
     // Tabs（推荐 / 关注）→ **分类胶囊**（全部 / 人关系 / 机会需求 / 活动团体），
     // 三行都带图标。FilterChipRail 本来就有 icon 槽（requester-home 传 assetIcon 在用），
     // feed 这边只传 { id, label } 把槽空着 —— 所以这一行一直是纯文字。
@@ -166,5 +167,36 @@ describe("SEC-CATEGORY-ICONS-001 推荐 / 关注 挂上原型 02 的分类字形
     expect(feed, "FilterChipRail 没透传 icon").toContain("...(f.icon ? { icon: f.icon } : {})");
     // 反向臂：透传又退回不带 icon 的那版。
     expect(feed, "FilterChipRail 又只传 { id, label } 了").not.toContain("({ id: f.id, label: f.label })");
+  });
+
+  it("EXPLORE-RENAME-001：分段控件第二格是「探索」+ 罗盘指针（不再是「咖啡场景」+ 咖啡杯）", () => {
+    // 产品 2026-09-26：「探索是代替咖啡场景 改名 目前没改」——
+    // 这一格原叫「咖啡场景」（字形 = 咖啡杯），改名叫「探索」，字形换成
+    // 原型 02 同一组里的**罗盘指针**。
+    // ⚠️ 钉整条字面量（id + label + icon 三件套），不是只钉 label：
+    //    只钉 label 的话「名字改了、字形还是咖啡杯」照样绿。
+    expect(feed, "分段控件第二格没改名成「探索」").toMatch(
+      /\{\s*id:\s*"CAFE",\s*label:\s*"探索",\s*icon:\s*"explore"\s*\}/
+    );
+    // 反向臂：旧名 / 旧字形不许回来。
+    expect(feed, "分段控件又退回「咖啡场景」了").not.toContain('label: "咖啡场景"');
+    expect(feed, "分段控件又指回咖啡杯字形了").not.toContain('icon: "cafeCup"');
+    // 咖啡杯那个字形只有这一处调用点，换名后就是死字形 —— 一起删掉，别留。
+    expect(icon, "咖啡杯字形没删干净（换名后它已经没有调用点了）").not.toContain('case "cafeCup"');
+    // 罗盘指针 = 原型 02 的路径原文：
+    // <circle cx="16" cy="16" r="11"/> + <path d="M21 11 L 18 18 L 11 21 L 14 14 Z"/>
+    const body = caseBody("explore");
+    expect(body, "罗盘指针的路径原文被改了").toContain('d="M21 11L18 18L11 21L14 14Z"');
+    expect(body, "外圈那个圆丢了（只剩指针就成了一个菱形）").toMatch(
+      /<Circle[^>]*cx="16"[^>]*cy="16"[^>]*r="11"/
+    );
+    // 和同屏那三行同一套字形系统：32 栅格 / 描边 1.9。
+    expect(body, "探索字形没走 32 栅格").toContain("canvas32");
+    // 改名要一路改到用户看得见的地方：分段控件下面那一层 —— CoffeeScenesHub 的
+    // 「全部店铺」子视图 —— 的返回标签也写着这一格的名字，别只改分段控件、
+    // 留下「探索 里写着 返回咖啡场景」这种半截接线。
+    const coffee = stripComments(read("./surfaces/coffee-scenes.tsx"));
+    expect(coffee, "探索 里面的返回标签没跟着改名").toContain("返回探索");
+    expect(coffee, "探索 里面的返回标签又退回「返回咖啡场景」了").not.toContain("返回咖啡场景");
   });
 });
