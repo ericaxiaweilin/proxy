@@ -38,18 +38,27 @@ const slice = (source: string, from: string, to: string): string => {
 const TAB_ROW_FROM = "{TABS.map((entry) => {";
 const SECTION_ROW_FROM = "{SECTIONS.map((entry) => {";
 
+// 切出 proxy-icon 里某个 case 分支的实现体。窗口收到下一个 case / default 为止 ——
+// 不收的话最后一个分支会一路吃到文件尾，别的分支里的 canvas32 也能让断言变绿（假守卫）。
+const caseBody = (name: string): string => {
+  const at = icon.indexOf(`case "${name}":`);
+  expect(at, `没有 case "${name}" 分支 —— 图标名写错只会静默渲染空白`).toBeGreaterThanOrEqual(0);
+  const ends = [icon.indexOf("case ", at + 1), icon.indexOf("default:", at + 1)].filter((i) => i > -1);
+  return icon.slice(at, ends.length > 0 ? Math.min(...ends) : undefined);
+};
+
 describe("SEC-CATEGORY-ICONS-001 推荐 / 关注 挂上原型 02 的分类字形", () => {
   it("两个字形名进了 ProxyIconName，且各有自己的 case 分支", () => {
     // 只钉 `| "recommend"` 不够：它也可能只是被人加进了联合类型却没实现分支，
     // 于是 <ProxyIcon name="recommend"/> 渲染出 null（静默空白，不报错）。
     expect(icon, '"recommend" 没进 ProxyIconName').toMatch(/\|\s*"recommend"/);
-    // 这一条以前钉的是「follow 是联合类型的最后一项」（`| "follow";`）。
-    // SEC-CATEGORY-ICONS-002 把同族的「动态」「咖啡场景」两个字形接在 follow 后面，
-    // 所以「最后一项」这个位置断言挪到新的尾巴上 —— 钉的仍然是「进了联合类型」，
-    // 不是「谁排最后」。
-    expect(icon, '"follow" 没进 ProxyIconName').toMatch(/\|\s*"follow"/);
-    expect(icon, '"dynamicRing" 没进 ProxyIconName').toMatch(/\|\s*"dynamicRing"/);
-    expect(icon, '"cafeCup" 没进 ProxyIconName（或不再是最后一项）').toMatch(/\|\s*"cafeCup";/);
+    // 这一组以前钉的是「follow 是联合类型的最后一项」（`| "follow";`）。
+    // SEC-CATEGORY-ICONS-002 分两批把同族字形接在后面（先 动态/咖啡场景，再
+    // 全部/人关系/机会需求/活动团体），而「谁排最后」本来也不是不变量 ——
+    // 改成逐个钉「进了联合类型」：以后再加同族字形只需往数组里加一个名字。
+    for (const name of ["follow", "dynamicRing", "cafeCup", "allGrid", "peoplePair", "clockDot", "hexGroup"]) {
+      expect(icon, `"${name}" 没进 ProxyIconName`).toMatch(new RegExp(`\\|\\s*"${name}"`));
+    }
     expect(icon, '没有 case "recommend" 分支').toContain('case "recommend":');
     expect(icon, '没有 case "follow" 分支').toContain('case "follow":');
   });
@@ -125,17 +134,37 @@ describe("SEC-CATEGORY-ICONS-001 推荐 / 关注 挂上原型 02 的分类字形
     // 非空校验：锚点漂了就会取到 0 个名字，下面的循环空转 = 假绿。
     expect(rows.length, "两行一个字都没取到（锚点漂了）").toBeGreaterThanOrEqual(4);
     for (const name of rows) {
-      const at = icon.indexOf(`case "${name}":`);
-      expect(at, `没有 case "${name}" 分支 —— 图标名写错只会静默渲染空白`).toBeGreaterThanOrEqual(0);
-      // 窗口收到下一个 case / default 为止：不收的话最后一个分支会一路吃到文件尾，
-      // 别的分支里的 canvas32 也能让断言变绿（窗口太松 = 假守卫）。
-      const ends = [icon.indexOf("case ", at + 1), icon.indexOf("default:", at + 1)].filter((i) => i > -1);
-      const body = icon.slice(at, ends.length > 0 ? Math.min(...ends) : undefined);
-      expect(body, `${name} 没走 32 栅格 —— 和同屏那一行不是一套字形系统`).toContain("canvas32");
+      expect(caseBody(name), `${name} 没走 32 栅格 —— 和同屏那一行不是一套字形系统`).toContain("canvas32");
     }
     // 反向臂：分段控件那行不许指回 24 栅格的 target / cup。
     const sections = slice(feed, "const SECTIONS", "];");
     expect(sections, "动态 又指回 24 栅格的 target 了").not.toContain('icon: "target"');
     expect(sections, "咖啡场景 又指回 24 栅格的 cup 了").not.toContain('icon: "cup"');
+  });
+
+  it("分类胶囊那行也挂上原型 02 的字形（原型 06 的首页顶部三行都有图标）", () => {
+    // 原型 06「真实场景组合」把首页顶部画成**三行**：分段控件（动态 / 咖啡场景）→
+    // Tabs（推荐 / 关注）→ **分类胶囊**（全部 / 人关系 / 机会需求 / 活动团体），
+    // 三行都带图标。FilterChipRail 本来就有 icon 槽（requester-home 传 assetIcon 在用），
+    // feed 这边只传 { id, label } 把槽空着 —— 所以这一行一直是纯文字。
+    const filters = slice(feed, "const FILTERS", "];");
+    const wanted: ReadonlyArray<readonly [string, string]> = [
+      ["allGrid", "全部"],
+      ["peoplePair", "人 / 关系"],
+      ["clockDot", "机会 / 需求"],
+      ["hexGroup", "活动 / 团体"]
+    ];
+    for (const [name, label] of wanted) {
+      expect(filters, `分类胶囊「${label}」没绑字形`).toContain(`icon: "${name}"`);
+      // 同一套字形系统：也必须是 32 栅格（上面两行都是）。
+      expect(caseBody(name), `${name} 没走 32 栅格`).toContain("canvas32");
+    }
+    // 只往表里加 icon、不透传给 FilterChipRail = 静默不渲染（icon 是可选字段，tsc 不报）。
+    // 透传写成 `...(cond ? { icon } : {})` 而不是 `icon: f.icon`，是因为
+    // exactOptionalPropertyTypes：f.icon 可能是 undefined，直接赋给 icon?: ProxyIconName
+    // 过不了类型（TS2322）。这个写法跟 composer-publish / secure-session 一致。
+    expect(feed, "FilterChipRail 没透传 icon").toContain("...(f.icon ? { icon: f.icon } : {})");
+    // 反向臂：透传又退回不带 icon 的那版。
+    expect(feed, "FilterChipRail 又只传 { id, label } 了").not.toContain("({ id: f.id, label: f.label })");
   });
 });

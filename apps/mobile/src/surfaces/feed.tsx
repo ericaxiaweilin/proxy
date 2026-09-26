@@ -175,11 +175,17 @@ const SECTIONS: ReadonlyArray<{ id: FeedSection; label: string; icon: ProxyIconN
   { id: "CAFE", label: "咖啡场景", icon: "cafeCup" }
 ];
 
-const FILTERS: ReadonlyArray<{ id: FilterKey; label: string }> = [
-  { id: "ALL", label: "全部" },
-  { id: "人/关系", label: "人 / 关系" },
-  { id: "机会/需求", label: "机会 / 需求" },
-  { id: "活动/团体", label: "活动 / 团体" },
+// SEC-CATEGORY-ICONS-002：原型 deepseek_html_20260926_9d241a.html 的 06「真实场景组合」
+// 把首页顶部画成**三行** —— 分段控件（动态 / 咖啡场景）→ Tabs（推荐 / 关注）→
+// **分类胶囊**（全部 / 人关系 / 机会需求 / 活动团体），三行都带图标。
+// FilterChipRail 本来就有 icon 槽（requester-home 那边传 assetIcon 在用），
+// feed 这边只传 { id, label } 把槽空着 —— 所以这一行一直是纯文字。
+// 后两项（情报 / 行业信息、附近）原型 02 里没有对应字形，保持纯文字（icon 可选）。
+const FILTERS: ReadonlyArray<{ id: FilterKey; label: string; icon?: ProxyIconName }> = [
+  { id: "ALL", label: "全部", icon: "allGrid" },
+  { id: "人/关系", label: "人 / 关系", icon: "peoplePair" },
+  { id: "机会/需求", label: "机会 / 需求", icon: "clockDot" },
+  { id: "活动/团体", label: "活动 / 团体", icon: "hexGroup" },
   { id: "情报/行业信息", label: "情报 / 行业信息" },
   { id: "附近", label: "河内 · 附近" }
 ];
@@ -1405,7 +1411,7 @@ export function FeedSurface({
           requester-home 复用同一份。feed 这边的 filterRailRef /
           filterRailScrollXRef / filterRailPanResponder 已删除。 */}
       <FilterChipRail
-        items={FILTERS.map((f) => ({ id: f.id, label: f.label }))}
+        items={FILTERS.map((f) => ...(f.icon ? { icon: f.icon } : {}))}
         activeId={feedFilter}
         onChange={(id) => {
           setFeedFilter(id as FilterKey);

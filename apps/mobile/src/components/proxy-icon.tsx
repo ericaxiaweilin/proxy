@@ -1,5 +1,7 @@
 import { type StyleProp, StyleSheet, Text, type ViewStyle, View } from "react-native";
-import Svg, { Circle, Path } from "react-native-svg";
+// Rect 是 SEC-CATEGORY-ICONS-002 的「全部（四宫格）」要用的：原型 02 那格画的是
+// 四个 <rect x y width height rx>，用 Rect 才能把原型的坐标原样搬过来，不用手抄圆弧。
+import Svg, { Circle, Path, Rect } from "react-native-svg";
 
 // Android 的符号回退字体会把 ◎ / ◇ / ○ 等字形压得很小；这里使用固定画布，
 // 让图标的可见面积和原型保持一致，不再依赖字体的 glyph metrics。
@@ -69,7 +71,15 @@ export type ProxyIconName =
   // ⚠️ **不动** target / cup 本身 —— 它们各有一堆别的调用点（target 在 me / ProfileTabs /
   //    FacetHomeSurface / 底栏等 15+ 处当通用标记用），改几何会牵连到别处。
   | "dynamicRing"
-  | "cafeCup";
+  | "cafeCup"
+  // 同一条原型 06「真实场景组合」里的**分类胶囊**那行（全部 / 人关系 / 机会需求 / 活动团体）。
+  // 那行以前是纯文字 —— FilterChipRail 本来就有 icon 槽，feed 只是没传。
+  // 这四个字形同样来自 02 节（全部 = 四宫格，人/关系 = 双人形，机会/需求 = 时钟 + 实心圆心，
+  // 活动/团体 = 六边形双框），同一套 32 栅格 / 描边 1.9。
+  | "allGrid"
+  | "peoplePair"
+  | "clockDot"
+  | "hexGroup";
 
 const symbolMap: Partial<Record<string, ProxyIconName>> = {
   "home": "home",
@@ -277,6 +287,17 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
       return canvas32(<><Circle {...common32} cx="16" cy="16" r="11"/><Circle cx="16" cy="16" fill={color} r="3" stroke="none"/></>);
     case "cafeCup": // 咖啡场景（咖啡杯）
       return canvas32(<><Path {...common32} d="M6 12L22 12L22 22C22 24 20 26 18 26L10 26C8 26 6 24 6 22Z"/><Path {...common32} d="M22 15L25 15C26.5 15 27 16 27 17C27 18 26.5 19 25 19L22 19"/><Path {...common32} d="M10 7L10 9M14 6L14 9M18 7L18 9"/></>);
+    // 原型 02 节里「分类胶囊」那行的四个字形（原型 06 的首页顶部第三行）。
+    // 同样 32 栅格 / 描边 1.9，坐标原样照抄；「全部」用 <Rect> 是为了不动原型的
+    // rect x/y/width/height/rx（手抄成圆弧路径容易算错，见文件里 canvas48 那条注释）。
+    case "allGrid": // 全部（四宫格）
+      return canvas32(<><Rect {...common32} height="9" rx="2" width="9" x="5" y="5"/><Rect {...common32} height="9" rx="2" width="9" x="18" y="5"/><Rect {...common32} height="9" rx="2" width="9" x="5" y="18"/><Rect {...common32} height="9" rx="2" width="9" x="18" y="18"/></>);
+    case "peoplePair": // 人 / 关系（双人形）
+      return canvas32(<><Circle {...common32} cx="11" cy="12" r="4"/><Circle {...common32} cx="22" cy="12" r="4"/><Path {...common32} d="M4 25C4 21 7 18.5 11 18.5C15 18.5 18 21 18 25"/><Path {...common32} d="M15 25C15 21 18 18.5 22 18.5C26 18.5 29 21 29 25"/></>);
+    case "clockDot": // 机会 / 需求（时钟 · 实心圆心）
+      return canvas32(<><Circle {...common32} cx="16" cy="16" r="11"/><Path {...common32} d="M16 10L16 16L20 20"/><Circle cx="16" cy="16" fill={color} r="1.5" stroke="none"/></>);
+    case "hexGroup": // 活动 / 团体（六边形双框）
+      return canvas32(<><Path {...common32} d="M16 4L27 9L27 22L16 27L5 22L5 9Z"/><Path {...common32} d="M16 11L21 14L21 20L16 23L11 20L11 14Z"/></>);
     default:
       return null;
   }
