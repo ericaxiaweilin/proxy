@@ -39,7 +39,7 @@ import {
 } from "./location-store";
 import type { DeviceLocationState } from "../device-location";
 import { fetchNearbySpots, formatSpotDistance, type NearbySpot } from "../nearby-spots";
-import { ProxyEmptyState } from "./proxy-foundation";
+import { ProxyButton, ProxyEmptyState } from "./proxy-foundation";
 
 export { DEFAULT_LOCATION, LOCATION_OPTIONS };
 export type { Location, CustomLocation, PresetLocation, AnyLocation, CustomLocationFields, ReverseGeocodeShape };
@@ -587,19 +587,26 @@ export function LocationPickerSheet({
               don't need a footer. */}
           {tab === "CUSTOM" && (
             <View style={styles.footer}>
-              <Pressable
+              {/* BUTTON-UNIFY-005：保存键改用公共 ProxyButton。它是全 App 唯一的
+                  **两行**主按钮（主标题 + 副标题），所以两行文字与纵向内边距留着 ——
+                  去掉会把 64pt 压成 ProxyButton 的 40pt 最小高。收敛的是形状：
+                  圆角 14→11、按压反馈从「换 #3A2F4A 底色」改成原型的 scale(.97)。
+                  accessibilityLabel 与文案一字未改。 */}
+              <ProxyButton
                 accessibilityLabel={`保存到 ${finalCommit.city} 的 ${finalCommit.area}`}
                 onPress={() => void commitCustom()}
-                style={({ pressed }) => [styles.confirm, pressed && styles.confirmPressed]}
+                style={styles.confirm}
               >
-                <Text selectable style={styles.confirmText} numberOfLines={1}>
-                  ✓ {finalCommit.header} · {finalCommit.area} · {formatRadius(radius)}
-                </Text>
-                <Text selectable style={styles.confirmSubText} numberOfLines={1}>
-                  {finalCommit.city || "所选区域"}
-                  {reverse?.source === "offline-grid" ? " · 离线估算" : ""}
-                </Text>
-              </Pressable>
+                <View style={styles.confirmCopy}>
+                  <Text selectable style={styles.confirmText} numberOfLines={1}>
+                    ✓ {finalCommit.header} · {finalCommit.area} · {formatRadius(radius)}
+                  </Text>
+                  <Text selectable style={styles.confirmSubText} numberOfLines={1}>
+                    {finalCommit.city || "所选区域"}
+                    {reverse?.source === "offline-grid" ? " · 离线估算" : ""}
+                  </Text>
+                </View>
+              </ProxyButton>
             </View>
           )}
         </Pressable>
@@ -756,16 +763,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10
   },
+  // BUTTON-UNIFY-005: 只剩布局 —— 这是全 App 唯一的**两行**主按钮，纵向内边距必须
+  // 留着（去掉会把 64pt 压成 ProxyButton 的 40pt 最小高）。ink 底 / 圆角 11 / 边框 /
+  // 按压反馈由 ProxyButton tone="primary" 提供；confirmPressed 键已删。
   confirm: {
-    backgroundColor: color.ink,
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    justifyContent: "center"
+    paddingVertical: 14
   },
-  confirmPressed: { backgroundColor: "#3A2F4A" },
-  confirmText: { color: color.white, fontSize: 14, fontWeight: "800" },
+  // 两行文字的容器：ProxyButton 的行方向是 row，两行要自己竖排 + 居中。
+  confirmCopy: { alignItems: "center" },
+  confirmText: { color: color.white, fontSize: 13, fontWeight: "800" },
   // R15.32.1.3: 小字副标 — city + lat/lng + offline 标记，
   // 告诉用户 GPS 定位后的“真实地点 + 坐标”。
   confirmSubText: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: "500", marginTop: 2 },

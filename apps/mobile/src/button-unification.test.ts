@@ -220,3 +220,30 @@ describe("BUTTON-UNIFY-004 999 胶囊 CTA 收敛到 ProxyButton", () => {
     expect(source).toContain('String(node.props.label ?? "查看")');
   });
 });
+
+describe("BUTTON-UNIFY-005 两行保存键：形状收敛，版式保留", () => {
+  const shapeKeys = (source: string, key: string): string => {
+    const body = source.match(new RegExp(key + ":\\s*\\{[^}]*\\}"))?.[0] ?? "";
+    expect(body, `${key} 样式键应该还在（它是布局覆盖）`).not.toBe("");
+    return body;
+  };
+
+  it("location-picker-sheet 的保存键走 ProxyButton", () => {
+    const source = read("components/location-picker-sheet.tsx");
+    // ⚠️ 不能断言 not.toContain("#3A2F4A") / not.toContain("confirmPressed") ——
+    // 我自己的注释里就复述了这两个词，断言会被注释喂饱（假守卫）。
+    // 只钉样式键：那个形状键必须消失。
+    expect(source).not.toMatch(/confirmPressed:\s*\{/);
+    const body = shapeKeys(source, "confirm");
+    expect(body).not.toContain("backgroundColor");
+    expect(body).not.toContain("borderRadius");
+    // 纵向内边距必须留着 —— 这是全 App 唯一的两行主按钮，去掉会压成 40pt 最小高
+    expect(body).toContain("paddingVertical: 14");
+    // 两行内容必须自己竖排：ProxyButton 的行方向是 row，不包一层就是左右并排
+    expect(source).toContain("<View style={styles.confirmCopy}>");
+    expect(source).toContain("<ProxyButton");
+    // accessibilityLabel 与副标题文案一字未改
+    expect(source).toContain("accessibilityLabel={`保存到 ${finalCommit.city} 的 ${finalCommit.area}`}");
+    expect(source).toContain('{finalCommit.city || "所选区域"}');
+  });
+});
