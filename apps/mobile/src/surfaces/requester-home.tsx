@@ -51,6 +51,8 @@ import {
   type RecommendPerson
 } from "../recommend-fixtures";
 
+import { sceneIdOfActivity } from "../requester-home-combo";
+
 export interface RequesterGoal {
   category: HardDemandCategory;
   goal: string;
@@ -228,10 +230,15 @@ export function RequesterHome({
   const [serverPeopleQuery, setServerPeopleQuery] = useState("");
   const serverPeopleSeq = useRef(0);
   // 4 宫格：各槽位独立下标，点格子弹选择窗（弹窗控制格子），主页入口保留。
-  const [personIndex, setPersonIndex] = useState(0);
-  const [timeIndex, setTimeIndex] = useState(0);
-  const [activityIndex, setActivityIndex] = useState(0);
-  const [placeIndex, setPlaceIndex] = useState(0);
+  // HOME-FORYOU-POOL-001（2026-09-26，用户：「这个 home 的 for you 要好好做…随机根据
+  // 用户的 location 推荐可用资源组合池」）：四个 index 原来**全从 0 起步** ⇒ 所有人首屏
+  // 看到的组合一模一样，那就不叫随机推荐。改成每个 mount 取一次随机种子，四个 index 由
+  // 它派生（useState 惰性初始化，只算一次，不会每次 render 都跳）。
+  const [forYouSeed] = useState(() => Math.floor(Math.random() * 0x7fffffff) + 1);
+  const [personIndex, setPersonIndex] = useState(() => forYouSeed);
+  const [timeIndex, setTimeIndex] = useState(() => forYouSeed >> 3);
+  const [activityIndex, setActivityIndex] = useState(() => forYouSeed >> 7);
+  const [placeIndex, setPlaceIndex] = useState(() => forYouSeed >> 11);
   const [chooser, setChooser] = useState<"person" | "time" | "activity" | "place" | null>(null);
   // HOME-AVATAR-FALLBACK-001: 真人头像挂了回落首字母（图走服务端 thumb；
   // 加载失败不断白圈）。与 ai-assistants-row 的 broken 集同 pattern，按人记。
@@ -654,10 +661,12 @@ export function RequesterHome({
 
   // 整组换（remix）— 与原型及四宫格 remix 按钮完全对齐
   function remixForYou(): void {
-    if (filteredPeople.length > 1) setPersonIndex((current) => (current + 1) % filteredPeople.length);
-    if (distinctTimes.length > 1) setTimeIndex((current) => (current + 1) % distinctTimes.length);
-    if (storeActivities.length > 1) setActivityIndex((current) => (current + 1) % storeActivities.length);
-    if (sceneBriefs.length > 1) setPlaceIndex((current) => (current + 1) % sceneBriefs.length);
+    // HOME-FORYOU-POOL-001：「整组换」改成**真随机**重配，而不是四个轴各 +1 轮转。
+    // +1 的序列是固定的，用户按几次就看出来了 —— 那和「随机推荐」直接矛盾。
+    if (filteredPeople.length > 1) setPersonIndex(Math.floor(Math.random() * filteredPeople.length));
+    if (storeActivities.length > 1) setActivityIndex(Math.floor(Math.random() * storeActivities.length));
+    if (distinctTimes.length > 1) setTimeIndex(Math.floor(Math.random() * distinctTimes.length));
+    if (sceneBriefs.length > 1) setPlaceIndex(Math.floor(Math.random() * sceneBriefs.length));
     showResponse(t("recombo"), t("recomboSub"));
     setSearchQuery("");
     setClarifyChoices(undefined);
@@ -1118,16 +1127,26 @@ export function RequesterHome({
       {onChat ? (
         <>
           {(() => {
+            // HOME-FORYOU-POOL-001：**活动是主轴** —— 它自己带着场地和时间。
+            // 原来 place / time 是另外两条独立轴各自取模，于是能配出两种不可能的组合：
+            // ① 活动**不在**那个场地办（活动挂 realitySceneId，场地是另一条轴）；
+            // ② 时间**不是**那场活动的时间（distinctTimes 本就是从活动时间派生的）。
+            // 现在：场地跟着活动走（口径与活动选择器 :1236 一致），时间直接取活动自己的；
+            // 只有活动没有已知场地时，才退回 placeIndex 那条兜底。
             const gridPerson = filteredPeople.length > 0 ? filteredPeople[personIndex % filteredPeople.length] : undefined;
-            const gridTime = distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined;
             const gridActivity = storeActivities.length > 0 ? storeActivities[activityIndex % storeActivities.length] : undefined;
-            const gridPlace = sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined;
+            const gridActivitySceneId = gridActivity ? sceneIdOfActivity(gridActivity, sceneBriefs) : undefined;
+            const gridPlace = (gridActivitySceneId ? sceneBriefs.find((s) => s.id === gridActivitySceneId) : undefined)
+              ?? (sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined);
+            const gridTime = gridActivity?.time || (distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined);
             if (!gridPerson && !gridActivity && !gridPlace && !gridTime) return null;
             const remixAll = (): void => {
-                        if (filteredPeople.length > 1) setPersonIndex((current) => (current + 1) % filteredPeople.length);
-              if (distinctTimes.length > 1) setTimeIndex((current) => (current + 1) % distinctTimes.length);
-              if (storeActivities.length > 1) setActivityIndex((current) => (current + 1) % storeActivities.length);
-              if (sceneBriefs.length > 1) setPlaceIndex((current) => (current + 1) % sceneBriefs.length);
+              // HOME-FORYOU-POOL-001: 中心键 = 真随机重配（与 remixForYou 同一条口径）。
+              // 活动是主轴（场地 / 时间都跟着它），所以它必须重掷。
+              if (filteredPeople.length > 1) setPersonIndex(Math.floor(Math.random() * filteredPeople.length));
+              if (storeActivities.length > 1) setActivityIndex(Math.floor(Math.random() * storeActivities.length));
+              if (distinctTimes.length > 1) setTimeIndex(Math.floor(Math.random() * distinctTimes.length));
+              if (sceneBriefs.length > 1) setPlaceIndex(Math.floor(Math.random() * sceneBriefs.length));
             };
             const composed = [gridPerson ? t("withPerson", { name: gridPerson.name }) : "", gridTime ?? "", gridActivity ? gridActivity.title : "", gridPlace ? `@${gridPlace.name}` : ""].filter(Boolean).join(" ");
             const tiles = [

@@ -218,11 +218,36 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("uses the four-grid center diamond to remix the whole selection", () => {
     expect(source).toContain('accessibilityLabel={t("changeAllLabel")}');
     expect(source).toContain("onPress={remixAll}");
-    expect(source).toContain("(current + 1) % filteredPeople.length");
-    expect(source).toContain("(current + 1) % distinctTimes.length");
-    expect(source).toContain("(current + 1) % storeActivities.length");
-    expect(source).toContain("(current + 1) % sceneBriefs.length");
+    // HOME-FORYOU-POOL-001（2026-09-26）：这里原来钉的是四个轴各 `(current + 1) % len`
+    // —— 固定序列轮转。用户明确要求「随机根据用户的 location 推荐可用资源组合池」，
+    // 所以改成真随机重掷；钉跟着改口径（不是把钉删掉，旧口径走下面的反向臂）。
+    expect(source).toContain("setPersonIndex(Math.floor(Math.random() * filteredPeople.length))");
+    expect(source).toContain("setActivityIndex(Math.floor(Math.random() * storeActivities.length))");
+    expect(source).toContain("setTimeIndex(Math.floor(Math.random() * distinctTimes.length))");
+    expect(source).toContain("setPlaceIndex(Math.floor(Math.random() * sceneBriefs.length))");
+    // 反向臂：固定轮转不许再回来（它的序列可预测，和「随机」直接矛盾）。
+    expect(source).not.toContain("(current + 1) % filteredPeople.length");
+    expect(source).not.toContain("(current + 1) % sceneBriefs.length");
     expect(source).toContain("borderWidth: 2");
+  });
+
+  it("HOME-FORYOU-POOL-001：四宫格配出的组合必须成立（活动决定场地和时间）", () => {
+    // 用户：「这属于 n*n 维度覆盖…推荐**可用**资源组合池」。
+    // 原实现 place / time 是另外两条独立轴各自取模，于是能配出两种不可能的组合：
+    // ① 活动不在那个场地办；② 时间不是那场活动的时间。现在活动是主轴。
+    expect(source).toContain("sceneIdOfActivity");
+    expect(source).toContain("const gridActivitySceneId = gridActivity ? sceneIdOfActivity(gridActivity, sceneBriefs) : undefined;");
+    expect(source).toContain("const gridTime = gridActivity?.time ||");
+    // 反向臂：time 那条独立取模不许回来（它就是「时间不是那场活动的时间」的来源）。
+    expect(source).not.toContain("const gridTime = distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined;");
+  });
+
+  it("HOME-FORYOU-POOL-001：首屏随机起手，不再所有人都看到第 0 组", () => {
+    // 四个 index 原来全 `useState(0)` ⇒ 所有人首屏组合一模一样。
+    expect(source).toContain("const [forYouSeed] = useState(() => Math.floor(Math.random() * 0x7fffffff) + 1);");
+    expect(source).toContain("useState(() => forYouSeed)");
+    expect(source).not.toContain("const [personIndex, setPersonIndex] = useState(0);");
+    expect(source).not.toContain("const [placeIndex, setPlaceIndex] = useState(0);");
   });
 
   it("chooses people from a horizontal photo rail instead of a name-only list", () => {
