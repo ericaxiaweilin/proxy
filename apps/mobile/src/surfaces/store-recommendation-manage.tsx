@@ -8,7 +8,7 @@ import {
   StoreRecommendationAiUnavailableError,
   type StoreRecommendation
 } from "../storeonboarding-client";
-import { ProxyLoading } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyLoading } from "../components/proxy-foundation";
 import { StoreAddressSheet, type PickedStoreAddress } from "../components/store-address-sheet";
 import { MyStoreRecommendations } from "./my-store-recommendations";
 import {
@@ -185,8 +185,8 @@ export function StoreRecommendationManage({
     const mapsUrl = recMapsUrl(detail);
     return (
       <View>
-        <Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}>
-          <Text selectable style={styles.subPageBackText}>‹ 我推荐的店</Text>
+        <Pressable accessibilityLabel="返回我推荐的店" onPress={() => setDetail(undefined)} style={styles.subPageBack}>
+          <ProxyBackGlyph />
         </Pressable>
 
         <View style={[s.hero, status === "ACCEPTED" && s.heroOk, status === "REJECTED" && s.heroBad]}>

@@ -3,9 +3,11 @@ import type { FeedPost } from "@proxy/contracts";
 import {
   REPLY_TARGET_EXCERPT_MAX,
   parentPostIdsForReplies,
+  repliesEmptyHint,
   replyEntriesFromReplies,
   replyTargetExcerpt,
   replyTargetLabel,
+  replyTargetParts,
   replyTargetsFromPosts,
   replyTimestampLabel,
   type ReplyEntry,
@@ -186,6 +188,64 @@ describe("REPLY-TARGET-001 label never shows an account id", () => {
     expect(replyTargetLabel("SELF", target({ authorType: "MERCHANT", authorDisplayName: undefined }), ME)).toBe(
       "你回复了 商家 的帖子"
     );
+  });
+});
+
+describe("REPLY-TARGET-NAME-INK-001 the replied-to name is its own segment", () => {
+  it("splits the sentence so the name can carry its own colour", () => {
+    expect(replyTargetParts("OTHER", target(), ME)).toEqual({
+      prefix: "回复了 ",
+      name: "Khoa",
+      suffix: " 的帖子"
+    });
+  });
+
+  it("joins back to exactly the whole-sentence label (the two cannot drift)", () => {
+    const cases: Array<{ mode: "SELF" | "OTHER"; t: ReplyTarget | undefined }> = [
+      { mode: "SELF", t: target() },
+      { mode: "OTHER", t: target() },
+      { mode: "SELF", t: target({ authorDisplayName: undefined }) },
+      { mode: "OTHER", t: target({ authorType: "MERCHANT", authorDisplayName: undefined }) },
+      { mode: "SELF", t: undefined },
+      { mode: "OTHER", t: undefined }
+    ];
+    for (const { mode, t } of cases) {
+      const parts = replyTargetParts(mode, t, ME);
+      expect(`${parts.prefix}${parts.name}${parts.suffix}`).toBe(replyTargetLabel(mode, t, ME));
+    }
+  });
+
+  it("leaves the name segment empty when there is no parent post to name", () => {
+    // 取不回父帖时整句都在 prefix 里，名字段为空 —— 调用方据此不渲染墨色那一段，
+    // 不会留下一个空 <Text> 把行距撑开。
+    const parts = replyTargetParts("OTHER", undefined, ME);
+    expect(parts.prefix).toBe("回复了这条帖子");
+    expect(parts.name).toBe("");
+    expect(parts.suffix).toBe("");
+  });
+
+  it("keeps the viewer-relative prefix inside the prefix segment", () => {
+    expect(replyTargetParts("SELF", target(), ME).prefix).toBe("你回复了 ");
+    expect(replyTargetParts("OTHER", target(), ME).prefix.startsWith("你")).toBe(false);
+  });
+});
+
+describe("REPLY-EMPTY-VIEWER-001 the replies empty state is viewer-relative too", () => {
+  it("does not tell a visitor about 你", () => {
+    // 看别人的主页时，「你在其他帖子下面的回复会出现在这里」把别人的东西说成了
+    // 访问者的 —— 和 REPLY-TARGET-001 修掉的标题是同一句话、同一个毛病。
+    const hint = repliesEmptyHint("OTHER");
+    expect(hint).not.toContain("你");
+    expect(hint).toContain("出现在这里");
+  });
+
+  it("still speaks in the first person on my own profile", () => {
+    expect(repliesEmptyHint("SELF")).toBe("你在其他帖子下面的回复会出现在这里");
+  });
+
+  it("treats an unknown viewer as the owner (same default as the label)", () => {
+    // replyTargetLabel 的缺省口径同样是「不是 OTHER 就当自己」，两处必须一致。
+    expect(repliesEmptyHint(undefined)).toBe(repliesEmptyHint("SELF"));
   });
 });
 

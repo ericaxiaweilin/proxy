@@ -8,10 +8,14 @@ import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "reac
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { createSceneFavoritesStore, type SavedSceneEntry } from "../scene-favorites";
 import { PRIMARY_ACTION_IDS, sceneCategoryEntries } from "../scene-category-entries";
-import type { SceneCategoryEntry } from "../scene-category-entries";
 // SCENE-SHOP-DIRECTORY-001：入口卡点进去是原型第 2/3 屏（分类列表 → 单店
 // 详情）。两屏在同一个全屏 Modal 里，返回逐层收。
 import { SceneShopDirectory } from "./scene-shop-directory";
+// SPORT-BADMINTON-001：运动 · 羽毛球入口。原型
+// Downloads/deepseek_html_20260925_e64f86.html（陪打羽毛球：列表 → 选择城市 → 详情）。
+// 数据是演示数据，依据与免责边界写在 ../badminton-companion.ts 文件头。
+import { BadmintonCompanion } from "../surfaces/badminton-companion";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 export type SceneDiscoveryBrief = {
   id: string;
@@ -62,6 +66,10 @@ export const SCENE_ACTIONS: readonly Taxon[] = [
 ] as const;
 
 const ACTIONS = SCENE_ACTIONS;
+
+// SPORT-BADMINTON-001：运动图标从动作表里取，不再 require 一遍同一个 svg
+// —— 两处各自 require，将来换图标只会换一处，剩下一处就是旧的。
+const SPORT_ACTION_ICON: ImageSource = ACTIONS.find((action) => action.id === "sport")!.icon;
 
 /**
  * SCENE-HOME-ENTRY-001（2026-09-24，原型 deepseek_html_20260924_412dba
@@ -292,14 +300,12 @@ export function SceneActivityDiscovery({
   apiBaseUrl,
   viewerAccountId,
   onOpenScene,
-  onCompose,
 }: {
   scenes: readonly SceneDiscoveryBrief[];
   apiBaseUrl: string | undefined;
   /** SCENE-FAVORITE-001：收藏按账号落盘，没有它 hearts 只活在 useState 里。 */
   viewerAccountId?: string | undefined;
   onOpenScene?: (sceneId: string) => void;
-  onCompose?: (prompt: string) => void;
 }): React.JSX.Element {
   const [actionId, setActionId] = useState<string>();
   const [occasionId, setOccasionId] = useState<string>();
@@ -308,10 +314,21 @@ export function SceneActivityDiscovery({
   const [openFilter, setOpenFilter] = useState<FilterDim>();
   const [saved, setSaved] = useState<readonly string[]>([]);
   const [expandedMomentId, setExpandedMomentId] = useState<string>();
-  const [detail, setDetail] = useState<MomentSeed>();
   const [pickerOpen, setPickerOpen] = useState(false);
   // SCENE-SHOP-DIRECTORY-001：点中的那张入口卡。非空 = 列表页打开。
-  const [directoryEntry, setDirectoryEntry] = useState<SceneCategoryEntry>();
+  //
+  // SCENE-CARD-DIRECT-LIST-001（用户："还有很多场景卡片点击 弹出半页引导
+  // 这个要移除 现在所有的场景卡片都是点击 进入场景list"）：以前一张
+  // Moment 卡的动作分类如果还没有真实场景命中（entries 里找不到），就弹一个
+  // 半页详情 sheet（配一个类似的 / 查看真实场景，常常是"场景数据接入中"置灰）。
+  // 现在统一改成直接开列表——SceneShopDirectory 自己已经有诚实的空态
+  // （"附近还没有接入的 X 场景"），不需要再让卡片自己另外弹一层"这个还没有"
+  // 的中间页。所以这里的类型只留列表真正要用的三个字段，不是完整的
+  // SceneCategoryEntry（没有真实场景命中时，count/visitedTotal/areas/imageUrl
+  // 这些派生字段本来就没有真实值，不编占位）。
+  const [directoryEntry, setDirectoryEntry] = useState<{ actionId: string; label: string; unit: "家" | "个" }>();
+  // SPORT-BADMINTON-001：运动 · 羽毛球那张卡。整页是全屏 Modal，自己管三屏切换。
+  const [badmintonOpen, setBadmintonOpen] = useState(false);
   const [assets, setAssets] = useState<SceneAssetCatalog>();
   const safeArea = useSafeAreaInsets();
 
@@ -413,7 +430,10 @@ export function SceneActivityDiscovery({
     const hiddenCount = extraThemes.length + 2;
     const homeCount = home ? (venueCountByAction.get(actionMatchId(moment.action) ?? "") ?? 0) : 0;
     const directoryTarget = entries.find((entry) => entry.actionId === actionMatchId(moment.action));
-    return <Pressable accessibilityLabel={`Moment ${moment.title}`} key={moment.id} onPress={() => { if (directoryTarget) setDirectoryEntry(directoryTarget); else setDetail(moment); }} style={styles.sceneCard}>
+    // SCENE-CARD-DIRECT-LIST-001：真有命中就用真数据的 label/unit；没有命中
+    // 也直接开列表（用动作分类表自己的 label，unit 默认"个"——没有真实场景就
+    // 没有真实的商家占比，不编）。列表进去自己会说"附近还没有接入的 X 场景"。
+    return <Pressable accessibilityLabel={`Moment ${moment.title}`} key={moment.id} onPress={() => setDirectoryEntry(directoryTarget ?? { actionId: actionMatchId(moment.action) ?? moment.action, label: action.label, unit: "个" })} style={styles.sceneCard}>
       {absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) || networkSource("moments", moment.id) ? <Image contentFit="cover" source={(absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) ? { uri: absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl)! } : networkSource("moments", moment.id))!} style={styles.sceneCardPhoto} /> : <View style={[styles.photoPending, styles.sceneCardPhoto]} />}
       <Svg height="100%" pointerEvents="none" style={styles.sceneCardShade} width="100%">
         <Defs>
@@ -500,6 +520,54 @@ export function SceneActivityDiscovery({
         </Pressable>;
       })}</View> : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>附近还没有接入真实场景</Text><Text selectable style={styles.emptyText}>场景目录接上后这里会显示分类入口。</Text></View>}
 
+      {/* SPORT-BADMINTON-001（2026-09-25，用户：「home 场景加一个运动·羽毛球卡片，
+          点击进入这个 原型给你了」；紧接着「大卡片怎么成了 list 了」）：运动 · 羽毛球入口。
+          原型 Downloads/deepseek_html_20260925_e64f86.html（陪打羽毛球）。
+
+          四个刻意的决定，改之前先读：
+
+          1) 它**不走 sceneCategoryEntries**。那条路是「真实场景目录的分类入口」，
+             要有真场景才出卡、角标写「N 家」。这里进去的是**陪打人**列表，
+             不是场馆目录 —— 混进那条路就等于把陪打人说成场馆。
+          2) 但**外观必须和旁边那几张入口卡是同一张卡**（用户提过：它不该是一行 list）。
+             所以它复用同一套 entryCard 版式 / entryShade 渐变 / entryContent / 
+             entryCountPill，minHeight 224、圆角 22、标题压左下角。
+          3) 角标胶囊里**没有数字**，只留一个「›」。真实场景目录里没有羽毛球馆
+             （ACTION_SCENE_KEYWORDS 里也没有 sport），挂「N 家」就是编的。
+             这是它和旁边几张卡**唯一**的差别 —— 差在数据，不差在版式。
+          4) 封面**没有真图**（后端没有羽毛球馆的图），所以底色用 ink、把动作表那份
+             sport 图标放在 warn 圆角块上居中 —— 不编一张假照片。
+             副标题只描述**服务形态**（陪打 · 场馆 · 按小时计费），**不带资质断言**。
+             资质是合规性断言，演示数据没资格在首页就把它说成事实；它出现在表面内部、
+             并且和顶部那条演示数据提示行在一起。门禁里有一条 `grep -qF` 反向钉扫这个
+             文件，所以这段注释刻意不写出那句断言的原话 —— 注释里写着它，会把那颗钉
+             自己喂红（REPLY-EMPTY-VIEWER-001 踩过同一个坑）。 */}
+      <Pressable accessibilityLabel="运动 羽毛球 陪打" onPress={() => setBadmintonOpen(true)} style={styles.sportCard}>
+        <View style={styles.sportCover}>
+          <View style={styles.sportGlyph}>
+            <Image contentFit="contain" source={SPORT_ACTION_ICON} style={styles.sportIcon} />
+          </View>
+        </View>
+        {/* 和旁边几张入口卡同一段渐变，只是 id 要唯一（同一份 SVG defs 不能撞名）。 */}
+        <Svg height="100%" pointerEvents="none" style={styles.entryShade} width="100%">
+          <Defs>
+            <SvgLinearGradient id="sceneEntryShade-badminton" x1="0" x2="0" y1="0" y2="1">
+              <Stop offset="0" stopColor="#000000" stopOpacity={0} />
+              <Stop offset="0.62" stopColor="#000000" stopOpacity={0} />
+              <Stop offset="1" stopColor="#000000" stopOpacity={0.48} />
+            </SvgLinearGradient>
+          </Defs>
+          <Rect fill="url(#sceneEntryShade-badminton)" height="100%" width="100%" x="0" y="0" />
+        </Svg>
+        <View style={styles.entryCountPill}>
+          <Text selectable style={styles.entryCountChevron}>›</Text>
+        </View>
+        <View style={styles.entryContent}>
+          <Text selectable style={styles.entryTitle}>运动 · 羽毛球</Text>
+          <Text selectable style={styles.entrySub}>陪打 · 场馆 · 按小时计费</Text>
+        </View>
+      </Pressable>
+
       {/* SCENE-PICKER-WAIMAI-001（2026-09-20）：以前是 动作/场景/主题 三张平铺
           网格竖向堆叠，30+ 个可点目标一次性摆给用户，AND 组合筛选却只过滤
           10 条本地 fixture——大概率筛完是空的，纯负担没收益。改成外卖 App
@@ -518,7 +586,7 @@ export function SceneActivityDiscovery({
         <View style={[styles.pickerPage, { paddingTop: safeArea.top }]}>
           <View style={styles.pickerHead}>
             <Pressable accessibilityLabel="返回" hitSlop={8} onPress={() => setPickerOpen(false)} style={styles.pickerBack}>
-              <Text selectable style={styles.pickerBackText}>‹ 返回</Text>
+              <ProxyBackGlyph label="返回" />
             </Pressable>
             <View style={styles.pickerHeadCopy}><Text selectable style={styles.pickerTitle}>动作分类</Text><Text selectable style={styles.pickerHint}>先选一类，再用金额/时间/场合细筛</Text></View>
           </View>
@@ -631,17 +699,6 @@ export function SceneActivityDiscovery({
         </View>
       </Modal>
 
-      <Modal animationType="slide" onRequestClose={() => setDetail(undefined)} transparent visible={detail !== undefined}>
-        <Pressable onPress={() => setDetail(undefined)} style={styles.backdrop}>
-          {detail ? <View onStartShouldSetResponder={() => true} style={styles.sheet}>
-            <View style={styles.grab} />{absoluteNetworkURL(apiBaseUrl ?? "", liveSceneFor(detail.scene)?.imageUrl) || networkSource("moments", detail.id) ? <Image contentFit="cover" source={(absoluteNetworkURL(apiBaseUrl ?? "", liveSceneFor(detail.scene)?.imageUrl) ? { uri: absoluteNetworkURL(apiBaseUrl ?? "", liveSceneFor(detail.scene)!.imageUrl)! } : networkSource("moments", detail.id))!} style={styles.detailPhoto} /> : <View style={[styles.photoPending, styles.detailPhoto]} />}
-            <Text selectable style={styles.detailTitle}>{detail.title}</Text>
-            <View style={styles.detailLayers}><DetailLayer icon={taxon(ACTIONS, detail.action).icon} label="动作" value={taxon(ACTIONS, detail.action).label} /><DetailLayer icon={taxon(SCENES, detail.scene).icon} label="场景" value={taxon(SCENES, detail.scene).label} /><DetailLayer icon={taxon(THEMES, detail.themes[0]!).icon} label="主题" value={detail.themes.map((id) => taxon(THEMES, id).label).join("、")} /></View>
-            <View style={styles.detailActions}><Pressable onPress={() => { onCompose?.(`配一个类似的：${detail.title}`); setDetail(undefined); }} style={styles.secondaryButton}><Text selectable style={styles.secondaryText}>配一个类似的</Text></Pressable><Pressable onPress={() => { const target = liveSceneFor(detail.scene); if (target) onOpenScene?.(target.id); setDetail(undefined); }} style={[styles.primaryButton, !liveSceneFor(detail.scene) && styles.disabled]} disabled={!liveSceneFor(detail.scene)}><Text selectable style={styles.primaryText}>{liveSceneFor(detail.scene) ? "查看真实场景" : "场景数据接入中"}</Text></Pressable></View>
-          </View> : null}
-        </Pressable>
-      </Modal>
-
       {/* SCENE-SHOP-DIRECTORY-001：入口卡 → 分类列表 → 单店详情。全屏两屏，
           返回逐层收（列表里点返回关整页，详情里点返回回列表）。 */}
       {directoryEntry ? <SceneShopDirectory
@@ -652,6 +709,11 @@ export function SceneActivityDiscovery({
         onClose={() => setDirectoryEntry(undefined)}
         {...(onOpenScene ? { onOpenScene } : {})}
       /> : null}
+
+      {/* SPORT-BADMINTON-001：整页一个全屏 Modal，三屏（列表 / 选择城市 / 详情）
+          在它内部切 state —— 内部再套 Modal 在 iOS 上会被无声吞掉
+          （HOME-MORE-SHEET-004）。 */}
+      <BadmintonCompanion onClose={() => setBadmintonOpen(false)} visible={badmintonOpen} />
     </View>
   );
 }
@@ -662,10 +724,6 @@ function SectionHead({ label, onAll }: { label: string; onAll: () => void }): Re
 
 function Tag({ icon, label }: { icon: ImageSource; label: string }): React.JSX.Element {
   return <View style={styles.tag}><Image contentFit="contain" source={icon} style={styles.tagIcon} /><Text selectable numberOfLines={1} style={styles.tagText}>{label}</Text></View>;
-}
-
-function DetailLayer({ icon, label, value }: { icon: ImageSource; label: string; value: string }): React.JSX.Element {
-  return <View style={styles.detailLayer}><Image contentFit="contain" source={icon} style={styles.detailIcon} /><Text selectable style={styles.detailLabel}>{label}</Text><Text selectable numberOfLines={1} style={styles.detailValue}>{value}</Text></View>;
 }
 
 const styles = StyleSheet.create({
@@ -690,6 +748,14 @@ const styles = StyleSheet.create({
   entryContent: { padding: 15 },
   entryTitle: { color: color.white, fontSize: 24, fontWeight: "900", textShadowColor: "rgba(0,0,0,0.55)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 4 },
   entrySub: { color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "700", marginTop: 6 },
+  // SPORT-BADMINTON-001：运动 · 羽毛球那张卡。**和 entryCard 同一张卡**（圆角 22 /
+  // minHeight 224 / 内容压左下 / 同一段渐变），用户提过「大卡片怎么成了 list 了」。
+  // 它没有真实场景照片，所以底色用 ink、把动作表那份 sport 图标放在 warn 圆角块上居中
+  // —— 不编一张假封面。角标胶囊只放「›」，不编数字（理由见 JSX 上方那段注释）。
+  sportCard: { backgroundColor: color.ink, borderRadius: 22, justifyContent: "flex-end", marginTop: 14, minHeight: 224, overflow: "hidden" },
+  sportCover: { alignItems: "center", bottom: 0, justifyContent: "center", left: 0, position: "absolute", right: 0, top: 0 },
+  sportGlyph: { alignItems: "center", backgroundColor: color.warn, borderRadius: 26, height: 92, justifyContent: "center", width: 92 },
+  sportIcon: { height: 58, width: 58 },
   // SCENE-CARD-STACK-005：单列大图卡，参考 deepseek_html_20260921_c417e3
   // ——整卡背景图 + 底部渐变遮罩承托标题和可展开的标签行。渐变实现见上面
   // SCENE-CARD-SHADE-008 的注释（Svg + LinearGradient，用已经链接进原生
@@ -715,7 +781,7 @@ const styles = StyleSheet.create({
   // 的返回手感一致。
   pickerPage: { backgroundColor: "#F7F4EF", flex: 1, paddingHorizontal: 18 },
   pickerHead: { alignItems: "center", flexDirection: "row", gap: 12, paddingBottom: 8, paddingTop: 14 },
-  pickerBack: { paddingVertical: 4 }, pickerBackText: { color: "#151515", fontSize: 16, fontWeight: "800" },
+  pickerBack: { paddingVertical: 4 },
   pickerHeadCopy: { flex: 1 },
   pickerTitle: { color: "#151515", fontSize: 20, fontWeight: "900" }, pickerHint: { color: "#777169", fontSize: 11, fontWeight: "700" },
   // SCENE-PICKER-FILTER-ANCHORED-004：一行三个弹出式按钮（金额/时间/场
@@ -753,5 +819,4 @@ const styles = StyleSheet.create({
   waimaiRail: { backgroundColor: "#EFEAE1", borderRadius: 16, flexBasis: 84, flexGrow: 0, flexShrink: 0, maxWidth: 84, width: 84 }, waimaiRailItem: { alignItems: "center", gap: 3, paddingVertical: 12, width: "100%" }, waimaiRailItemActive: { backgroundColor: color.white, borderLeftColor: "#151515", borderLeftWidth: 3 }, waimaiRailIcon: { height: 26, width: 26 }, waimaiRailLabel: { color: "#777169", fontSize: 11, fontWeight: "700", textAlign: "center" }, waimaiRailLabelActive: { color: "#151515", fontWeight: "900" }, waimaiRailCount: { color: "#A39C90", fontSize: 11, fontWeight: "700" },
   waimaiList: { flex: 1 },
   detailGroup: { backgroundColor: color.white, borderRadius: 16, marginBottom: 10, padding: 12 }, detailGroupTitle: { color: "#777169", fontSize: 11, fontWeight: "800", marginBottom: 8 }, detailChipGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, detailChip: { borderColor: "#DED7CE", borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8 }, detailChipActive: { backgroundColor: "#151515", borderColor: "#151515" }, detailChipText: { color: "#151515", fontSize: 11, fontWeight: "700" }, detailChipTextActive: { color: color.white }, medicalBoundary: { color: "#8C5B35", fontSize: 11, lineHeight: 16, marginTop: 9 }, pickerActions: { flexDirection: "row", gap: 8, marginTop: 12 }, pickerReset: { alignItems: "center", backgroundColor: color.white, borderColor: "#151515", borderRadius: 17, borderWidth: 1, flex: 0.7, paddingVertical: 13 }, pickerResetText: { color: "#151515", fontSize: 13, fontWeight: "900" }, pickerDone: { alignItems: "center", backgroundColor: "#151515", borderRadius: 17, flex: 1.3, paddingVertical: 13 }, pickerDoneText: { color: color.white, fontSize: 13, fontWeight: "900" },
-  backdrop: { backgroundColor: "rgba(0,0,0,0.28)", flex: 1, justifyContent: "flex-end" }, sheet: { backgroundColor: "#F7F4EF", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 18, paddingBottom: 34 }, grab: { alignSelf: "center", backgroundColor: "#CFC8BF", borderRadius: 3, height: 4, marginBottom: 14, width: 42 }, detailPhoto: { borderRadius: 18, height: 180, width: "100%" }, detailTitle: { color: "#151515", fontSize: 24, fontWeight: "900", marginTop: 15 }, detailLayers: { flexDirection: "row", gap: 8, marginTop: 13 }, detailLayer: { alignItems: "center", backgroundColor: color.white, borderColor: "#E8E1D8", borderRadius: 15, borderWidth: 1, flex: 1, padding: 10 }, detailIcon: { height: 30, width: 30 }, detailLabel: { color: "#8C867E", fontSize: 11, marginTop: 4 }, detailValue: { color: "#151515", fontSize: 11, fontWeight: "800", marginTop: 2 }, detailActions: { flexDirection: "row", gap: 8, marginTop: 16 }, secondaryButton: { alignItems: "center", backgroundColor: color.white, borderColor: "#151515", borderRadius: 18, borderWidth: 1, flex: 1, paddingVertical: 13 }, secondaryText: { color: "#151515", fontSize: 12, fontWeight: "800" }, primaryButton: { alignItems: "center", backgroundColor: "#151515", borderRadius: 18, flex: 1.2, paddingVertical: 13 }, primaryText: { color: color.white, fontSize: 12, fontWeight: "800" }, disabled: { opacity: 0.45 },
 });

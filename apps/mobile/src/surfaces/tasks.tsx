@@ -140,7 +140,16 @@ export function ActivityDetail({
   return (
     <>
       {/* 基线 .detailhero：深色渐变 + originbadge + 价格 */}
-      <Gradient from="color.ink" to="#342446" style={styles.detailHero}>
+      {/*
+        ACTIVITY-DETAIL-HERO-001：这里必须传**颜色值**（color.ink），不能传 token
+        **名字**（"color.ink"）。Gradient 内部是 `backgroundColor: from` +
+        `lerpHex(from, to, t)`（theme.tsx:158/180），lerpHex 按 hex 切片 parseInt ——
+        传名字进去会得到 rgb(NaN,NaN,NaN)，整块渐变静默变成透明。
+        而这一块里所有文字都是给深色底设计的（detailTitle/detailPriceStrong 是
+        color.white，desc 是 #D8D1DF），底一透明就变成浅色页面上写白字：标题整个看不见。
+        症状是「文字消失」，病根在渐变参数上 —— 别去改文字颜色。
+      */}
+      <Gradient from={color.ink} to="#342446" style={styles.detailHero}>
         <View style={styles.detailTopLine}>
           <View style={[styles.originBadge, { backgroundColor: origin.bg }]}>
             <Text selectable style={[styles.originBadgeText, { color: origin.fg }]}>{origin.label}</Text>
@@ -398,7 +407,7 @@ const styles = StyleSheet.create({
   // 基线 .sceneanchor：color.ink radius 16 padding 10 gap 9 margin 8 0。
   sceneAnchor: {
     alignItems: "center",
-    backgroundColor: "color.ink",
+    backgroundColor: color.ink,
     borderRadius: 16,
     flexDirection: "row",
     gap: 9,
@@ -421,7 +430,7 @@ const styles = StyleSheet.create({
 
   // 基线 .benefitbox：color.inspireSavedBg border #DBED94 radius 11 padding 8。
   benefitBox: {
-    backgroundColor: "color.inspireSavedBg",
+    backgroundColor: color.inspireSavedBg,
     borderColor: "#DBED94",
     borderRadius: 11,
     borderWidth: 1,
@@ -474,7 +483,7 @@ const styles = StyleSheet.create({
   },
   reviewHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   reviewTitle: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  reviewBadge: { color: "color.activityOriginUserFg", fontSize: 11, backgroundColor: "color.activityOriginUserBg", borderRadius: 999, paddingHorizontal: 6, paddingVertical: 4, fontWeight: "900" },
+  reviewBadge: { color: color.activityOriginUserFg, fontSize: 11, backgroundColor: color.activityOriginUserBg, borderRadius: 999, paddingHorizontal: 6, paddingVertical: 4, fontWeight: "900" },
   reviewText: { color: "#4A4250", fontSize: 11, lineHeight: 15, marginTop: 7 },
 
   // 基线 .joinstate：#F4FFD5 border #D1E778 radius 15 padding 10。
@@ -542,7 +551,7 @@ const styles = StyleSheet.create({
   exampleTitle: { flex: 1, minWidth: 0 },
   originBadge: {
     alignSelf: "flex-start",
-    backgroundColor: "color.bottomActiveBg",
+    backgroundColor: color.bottomActiveBg,
     borderRadius: 999,
     paddingHorizontal: 7,
     paddingVertical: 4
@@ -551,7 +560,7 @@ const styles = StyleSheet.create({
   exampleName: { color: color.ink, fontSize: 11, fontWeight: "700", marginTop: 5 },
   exampleMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
   // R15.x+: AI 数字人发起的活动 — 列表卡上在 title 上方加一行 "X 发起" 标识
-  exampleAIPersona: { color: "color.aiActivityBadgeFg", fontSize: 11, fontWeight: "700", marginTop: 5 },
+  exampleAIPersona: { color: color.aiActivityBadgeFg, fontSize: 11, fontWeight: "700", marginTop: 5 },
   // R17.x: AI persona 圆形 token. photo 资产是 SVG
   // (apps/mobile/assets/ai-personas/), 这里 surface 仅画
   // 圆形色 + emoji 表情 — 未来 expo-image SVG 支持 上线后

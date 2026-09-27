@@ -34,7 +34,7 @@ import type { FacetConfig, FacetObject, FacetSideSpacePost, ListFacetObjectsPayl
 import { FacetClient, FacetProtocolError } from "../facet-client";
 import { ProxyIcon } from "../components/proxy-icon";
 import { Gradient, color, shadows } from "../theme";
-import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyEmptyState, ProxyLoading } from "../components/proxy-foundation";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
@@ -288,7 +288,7 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           <Pressable onPress={() => setView("HOME")} style={styles.backRow}>
-            <Text selectable style={styles.backText}>‹ 返回 FACET</Text>
+            <ProxyBackGlyph label="返回 FACET" />
           </Pressable>
           {/* 对象详情深色 hero —— 对齐原型 .detail-hero（深色渐变 + 头像 + 关系 pill）。 */}
           <Gradient from={DARK_CARD_FROM} to={color.deep} style={styles.previewHero}>
@@ -470,7 +470,7 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           <Pressable onPress={() => setView("HOME")} style={styles.backRow}>
-            <Text selectable style={styles.backText}>‹ 返回 FACET</Text>
+            <ProxyBackGlyph label="返回 FACET" />
           </Pressable>
           <Text selectable style={styles.subPageTitle}>{metaVal!.title}</Text>
           <Text selectable style={styles.subPageDesc}>{metaVal!.desc}</Text>
@@ -521,7 +521,7 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={color.magenta} />}
       >
         <Pressable onPress={onBack} style={styles.backRow}>
-          <Text selectable style={styles.backText}>‹ 返回</Text>
+          <ProxyBackGlyph label="返回" />
         </Pressable>
 
         {/* Hero — 使用真实 otter-logo.png + 渐变圆背景 */}
@@ -735,7 +735,7 @@ const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 24, paddingHorizontal: 16, paddingTop: 10 },
   backRow: { paddingVertical: 6 },
-  backText: { color: color.magenta, fontSize: 14, fontWeight: "800" },
+  // backText 已删：字形和标签都由公共组件 ProxyBackGlyph 画（BACK-GLYPH-001）。
 
   hero: { paddingBottom: 10, paddingTop: 4 },
   heroBrand: { alignItems: "center", flexDirection: "row", gap: 12, paddingVertical: 4 },

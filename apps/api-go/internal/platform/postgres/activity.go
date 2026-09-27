@@ -178,6 +178,36 @@ func (r *ActivityRepository) ListByParticipant(ctx context.Context, actorID stri
 	return items, rows.Err()
 }
 
+// FilterKnownParticipants 实现见 activity.Repository 接口注释：只测已知
+// 候选，不反查名单——ANY($2) 只能命中调用方已经给出的 actor id。
+// realitySceneId 存在 payload JSONB 里（见 037_activity_persistence.sql，
+// activities 表没有专列），所以走 payload->>'realitySceneId' 表达式过滤。
+func (r *ActivityRepository) FilterKnownParticipants(ctx context.Context, sceneID string, candidateActorIDs []string) ([]string, error) {
+	if len(candidateActorIDs) == 0 {
+		return []string{}, nil
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT DISTINCT p.actor_id
+		FROM activity.participants p
+		JOIN activity.activities a ON a.id = p.activity_id
+		WHERE a.payload->>'realitySceneId' = $1
+		  AND p.actor_id = ANY($2)`,
+		sceneID, candidateActorIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var actorID string
+		if err := rows.Scan(&actorID); err != nil {
+			return nil, err
+		}
+		out = append(out, actorID)
+	}
+	return out, rows.Err()
+}
+
 type activityScanner interface{ Scan(dest ...any) error }
 
 func scanActivityRow(row activityScanner) (activity.Activity, error) {

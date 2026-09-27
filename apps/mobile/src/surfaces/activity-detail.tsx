@@ -9,7 +9,7 @@ import { activityAIDisclosure, activityAIPersonaName, activityMoneySummary } fro
 // COMP-REPORT-002: 活动与（商家主办的）主办商家都要可举报。
 import { ReportSheet } from "../components/report-sheet";
 import { activityReportTargets, type ModerationClient, type ReportTarget } from "../moderation-client";
-import { ProxyLoading } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyLoading } from "../components/proxy-foundation";
 
 // R17.x persona 色：与 tasks.tsx personaColorStyle 同源（ai_001=紫/002=粉/
 // 003=绿/004=橙/005=金）。tasks 侧为 canonical；这里仅为明细页封面
@@ -55,7 +55,7 @@ export function ActivityDetailSurface({ client, moderation, initialActivityId, o
     return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.container}>
-          <Pressable onPress={() => { if (onBack) onBack(); else setSelected(undefined); }}><Text selectable style={styles.back}>‹ 返回</Text></Pressable>
+          <Pressable accessibilityLabel="返回" onPress={() => { if (onBack) onBack(); else setSelected(undefined); }}><ProxyBackGlyph /></Pressable>
           {selected.coverImageUrl ? (
             <Image source={{ uri: selected.coverImageUrl }} style={styles.cover} />
           ) : showPersona ? (
@@ -135,7 +135,6 @@ const styles = StyleSheet.create({
   money: { color: color.ink, fontSize: 14, fontWeight: "800", marginTop: 10 },
   aiDisclosure: { backgroundColor: "#F4F0FF", borderRadius: 8, color: "#5B3FA3", fontSize: 12, lineHeight: 17, marginTop: 10, padding: 9 },
   empty: { color: color.muted, fontSize: 12 },
-  back: { color: color.ink, fontSize: 14, fontWeight: "700" },
   cover: { borderRadius: 14, height: 190, width: "100%" },
   coverPlaceholder: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, gap: 6, paddingVertical: 26 },
   coverIcon: { fontSize: 44 },

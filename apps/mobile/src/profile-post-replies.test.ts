@@ -18,8 +18,15 @@ describe("PROFILE-REPLIES-VISIBLE-001 profile posts show received engagement", (
   });
 
   it("counts render only when loaded, never fabricated zeros", () => {
-    expect(tabs).toContain("props.engagement.reactions > 0 || props.engagement.replies > 0");
-    expect(tabs).toContain("💬 {props.engagement.replies} 条评论");
+    // PROFILE-ACTION-COUNTS-001 收尾（2026-09-25，用户「少了评论logo功能」）之后，
+    // 评论数只有**一个**落点：动作行第 2 颗 —— 原型 `function post(p)` 就是
+    // `<button>${I.reply}<span>${p.replies}</span></button>`（图标 + 评论数）。
+    // 闸门必须「拉到才画」（`props.engagement ? … : null`），不回填 0；真·0 照常显示 0。
+    // 以前动作行下面那行独立的「💬 N 条评论 ﹀」开关整行删掉了：动作行第 2 颗现在
+    // **就是**这个开关（它同时是评论入口），留着那行等于同屏两个评论入口、
+    // 隔 8px 说同一个数字。
+    expect(tabs).toContain("{props.engagement ? <Text selectable style={styles.postActionCount}>{props.engagement.replies}</Text> : null}");
+    expect(tabs).not.toContain("条评论 {props.repliesExpanded");
   });
 
   it("reply authors resolve to display names, never bare ids", () => {

@@ -36,15 +36,18 @@ describe("MARKET-LOGO-SINGLE-TILE-001", () => {
     expect(card).toContain("AI 样张");
   });
 
-  it("uses a scene photo as a substantial mobile card anchor", () => {
-    expect(card).toMatch(/thumb:\s*\{[^}]*flex:\s*1[^}]*minHeight:\s*136[^}]*width:\s*104/);
+  // 市场·订单重做（deepseek_html_20260926_34df37.html）：thumb 从"撑满卡片
+  // 高度的竖长矩形"改成正方形 96×96 圆角，不再拉伸到卡片底。
+  it("uses a square 96x96 rounded scene photo, not the old stretched rectangle", () => {
+    expect(card).toMatch(/thumb:\s*\{[^}]*height:\s*96[^}]*width:\s*96/);
+    expect(card).not.toMatch(/thumb:\s*\{[^}]*flex:\s*1[^}]*minHeight:\s*136[^}]*width:\s*104/);
     expect(card).not.toMatch(/thumb:\s*\{[^}]*height:\s*88[^}]*width:\s*64/);
   });
 
-  it("keeps the square scene photo flush to the card's top, bottom, and left edges", () => {
+  it("centers the square thumbnail instead of stretching it flush to the card edges", () => {
     expect(card).toContain('card: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 12 }');
-    expect(card).not.toMatch(/thumb:\s*\{[^}]*borderRadius/);
-    expect(card).toContain('body: { flex: 1, minWidth: 0, paddingBottom: 12, paddingRight: 14, paddingTop: 12 }');
+    expect(card).toMatch(/thumbWrap:\s*\{\s*alignSelf:\s*"center"\s*\}/);
+    expect(card).toMatch(/thumb:\s*\{[^}]*borderRadius:\s*12/);
   });
 });
 

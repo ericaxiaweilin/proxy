@@ -597,3 +597,59 @@ describe("ENGAGEMENT-FALLBACK-EMPTY-001", () => {
     expect(source).not.toContain("return { userId, bookmarks: [], count: 0 };");
   });
 });
+
+describe("REPOST-POST-001 the client can actually repost", () => {
+  // 原型每一行操作区第 3 个按钮是转发（↻），服务端 RepostPost 从 R14 起就完整实现
+  // 并有集成测试，但客户端一直没有这个方法 —— 手机上无处可转发、reposts 恒为 0。
+  // 这不是「服务端还没做」，是客户端少了一根线。
+  function authed(responder: (env: Record<string, unknown>) => Record<string, unknown>) {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    void store.write({
+      userAccountId: "user_001",
+      principal: { type: "INDIVIDUAL", id: "user_001" },
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1 }
+    });
+    return new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => {
+      const envelope = init.body as Record<string, unknown>;
+      return { status: 200, json: async () => responder(envelope) };
+    } } });
+  }
+
+  it("sends RepostPost with the postId", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const client = authed((env) => {
+      seen.push(env);
+      return { commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [], correlationId: env.correlationId };
+    });
+    await expect(client.repostPost("post_1")).resolves.toBe("REPOSTED");
+    expect(seen[0]?.commandType).toBe("RepostPost");
+    expect(seen[0]?.target).toEqual({ type: "Post", id: "post_1" });
+    expect(seen[0]?.payload).toEqual({ postId: "post_1" });
+  });
+
+  it("treats ALREADY_REPOSTED as success, not as an error", async () => {
+    // 服务端把重复转发判成 REJECTED/ALREADY_REPOSTED（不是 Accepted + state，
+    // 跟 PinPost/UnpinPost 的写法不一样）。对用户来说「已经转过了」不是失败 ——
+    // 双击弹一个错会让那颗按钮看起来是坏的。
+    const client = authed((env) => ({
+      commandId: env.commandId,
+      outcome: "REJECTED",
+      // 字段必须齐：parseErrorEnvelope 缺一个就把整条 error 丢掉，errorCode 就白判了。
+      error: { errorCode: "ALREADY_REPOSTED", category: "BUSINESS_STATE", retryability: "AFTER_USER_ACTION", messageKey: "engagement.already_reposted", correlationId: env.correlationId },
+      eventRefs: [],
+      correlationId: env.correlationId
+    }));
+    await expect(client.repostPost("post_1")).resolves.toBe("ALREADY_REPOSTED");
+  });
+
+  it("still throws on every other rejection — the code is not swallowed wholesale", async () => {
+    const client = authed((env) => ({
+      commandId: env.commandId,
+      outcome: "REJECTED",
+      error: { errorCode: "POST_NOT_FOUND", category: "BUSINESS_STATE", retryability: "AFTER_USER_ACTION", messageKey: "engagement.post_not_found", correlationId: env.correlationId },
+      eventRefs: [],
+      correlationId: env.correlationId
+    }));
+    await expect(client.repostPost("post_ghost")).rejects.toBeInstanceOf(EngagementCommandRejectedError);
+  });
+});

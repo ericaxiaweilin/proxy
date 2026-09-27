@@ -14,7 +14,7 @@ import { color, shadows } from "../theme";
 import type { ConversationClient, ConversationInboxItem } from "../conversation-client";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
-import { dedupeInboxDialogs } from "../conversation-inbox-model";
+import { dedupeInboxDialogs, resolveAvatarSource } from "../conversation-inbox-model";
 import type { ProfileClient } from "../profile-client";
 import type { RelationshipClient } from "../relationship-client";
 import { FriendCrmSurface } from "./friend-crm";
@@ -22,6 +22,7 @@ import { meetupPreview } from "../meetup-share";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import { parseHiddenChatIds, parseHiddenChatTimes, shouldResurfaceHidden } from "../local-snapshot";
 import { OTTER_LOGO } from "../media/asset-sources";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 // MSG-GROUPS-TAB-001: 第二个页签以前叫"Convo"（消息支线/message branch，见
 // conversation.tsx 的"创建 Convo"长按项），列的却是 GROUP/SUPPORT 会话——
@@ -414,7 +415,7 @@ export function MessagesSurface({
         initialView="ADD_FRIEND"
         initialSheet="SCAN"
         scanOnly
-        addFriendBackLabel="‹ 返回"
+        addFriendBackLabel="返回"
         viewer={viewer}
         onBack={() => setScanShortcut(false)}
         onOpenConversation={(author) => { setScanShortcut(false); onOpenConversation(author); }}
@@ -428,7 +429,7 @@ export function MessagesSurface({
         <View style={styles.app}>
           <View style={styles.safe} />
           <View style={styles.topbar}>
-            <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text selectable style={styles.backText}>‹</Text></Pressable>
+            <Pressable onPress={() => setSubView("home")} style={styles.icon}><ProxyBackGlyph /></Pressable>
             <View style={styles.centerTitle}><Text selectable style={styles.centerMain}>建群</Text><Text selectable style={styles.centerSub}>选至少 2 人 · 收件箱里聊过天的人</Text></View>
             <View style={styles.icon} />
           </View>
@@ -491,7 +492,7 @@ export function MessagesSurface({
         <View style={styles.app}>
           <View style={styles.safe} />
           <View style={styles.topbar}>
-            <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text selectable style={styles.backText}>‹</Text></Pressable>
+            <Pressable onPress={() => setSubView("home")} style={styles.icon}><ProxyBackGlyph /></Pressable>
             {/* CONTACT-SEARCH-COPY-001: 副标题正压在这个搜索框上方，必须和它搜得到的东西一致。
                 这一页只搜「姓名 + 最近一条消息」（见下方 filtered），CONTACTS 里根本没有 username
                 —— 见本段开头注释「不编造 username」。写「/ Username」等于让用户在框里输 @handle
@@ -525,7 +526,7 @@ export function MessagesSurface({
         <View style={styles.app}>
           <View style={styles.safe} />
           <View style={styles.topbar}>
-            <Pressable onPress={() => setSubView("contacts")} style={styles.icon}><Text selectable style={styles.backText}>‹</Text></Pressable>
+            <Pressable onPress={() => setSubView("contacts")} style={styles.icon}><ProxyBackGlyph /></Pressable>
             <View style={styles.centerTitle}><Text selectable style={styles.centerMain}>联系人</Text></View>
             <View style={styles.icon} />
           </View>
@@ -783,20 +784,6 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
   };
 }
 
-// 服务端头像引用归一：http(s)/file 原样用；/ 开头拼 base；assets/<id>
-// （profile avatar_path、AI persona 写真）转 thumb 真地址；avatar- 开头是
-// 本机副本文件名、空串及其他格式认不出 —— 返回 undefined 交给首字母回落，
-// 绝不拼个 404 出来（之前裸 assets/ 直接当 URL，Linh/Minh 行永远空白）。
-function resolveAvatarSource(ref: string, apiBaseUrl?: string): { uri: string } | undefined {
-  const trimmed = ref.trim();
-  if (!trimmed) return undefined;
-  if (/^(?:https?:|file:)/.test(trimmed)) return { uri: trimmed };
-  if (trimmed.startsWith("/")) return { uri: `${apiBaseUrl ?? ""}${trimmed}` };
-  const assetId = trimmed.startsWith("assets/") ? trimmed.slice("assets/".length).trim() : "";
-  if (!assetId || assetId.startsWith("avatar-")) return undefined;
-  return { uri: `${apiBaseUrl ?? ""}/v1/media/thumb/${encodeURIComponent(assetId)}` };
-}
-
 const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: "#fffdf8" },
   safe: { height: 13, backgroundColor: "#fffdf8" },
@@ -861,7 +848,6 @@ const styles = StyleSheet.create({
   centerTitle: { flex: 1, alignItems: "center" },
   centerMain: { fontSize: 14, fontWeight: "700", color: "#11110f" },
   centerSub: { fontSize: 11, color: "#8d8982", marginTop: 2 },
-  backText: { fontSize: 22, color: "#11110f", textAlign: "center", width: 38 },
   requestIntro: { paddingHorizontal: 16, paddingTop: 15, paddingBottom: 8, fontSize: 11.5, lineHeight: 18, color: "#77736c" },
   mackeBanner: { marginHorizontal: 14, marginTop: 10, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 14, padding: 11, backgroundColor: "#fff9eb", flexDirection: "row", gap: 9, alignItems: "flex-start" },
   mackeIcon: { fontSize: 18 },

@@ -16,7 +16,7 @@ import type { BusinessClient, StoreProduct } from "../business-client";
 import { MediaClient } from "../media-client";
 import { localApiBaseUrl, nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { ProxyIcon } from "../components/proxy-icon";
-import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyEmptyState, ProxyLoading } from "../components/proxy-foundation";
 
 // 和 native-app 共用同一份 Keychain 会话：相册/菜单照片走媒体管线上传，
 // 拿到 mediaAssetId 后以 thumb URL 远端展示，不再只存本地路径。
@@ -535,7 +535,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                     <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "photos" })} style={styles.assetRow}><View style={styles.assetIcon}><Text selectable style={styles.assetIconText}>图</Text></View><View style={styles.photoRowMain}><Text selectable style={styles.assetTitle}>照片与内容</Text><Text selectable style={styles.assetMeta}>{sPhotos.length} 张店铺照片</Text></View><Text selectable style={styles.assetChevron}>›</Text></Pressable>
                     <Pressable disabled={!onOpenVouchers} onPress={onOpenVouchers} style={styles.assetRow}><View style={styles.assetIcon}><Text selectable style={styles.assetIconText}>券</Text></View><View style={styles.photoRowMain}><Text selectable style={styles.assetTitle}>当前礼券</Text><Text selectable style={styles.assetMeta}>查看发行、领取与核销状态</Text></View><Text selectable style={styles.assetChevron}>›</Text></Pressable>
                     <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "details" })} style={styles.assetRow}><View style={styles.assetIcon}><Text selectable style={styles.assetIconText}>店</Text></View><View style={styles.photoRowMain}><Text selectable style={styles.assetTitle}>店铺照片与经营资料</Text><Text selectable style={styles.assetMeta}>门店环境、营业时间、地址与联系方式</Text></View><Text selectable style={styles.assetChevron}>›</Text></Pressable>
-                  </View> : <Pressable onPress={() => setAssetPage(undefined)} style={styles.assetBack}><Text selectable style={styles.assetBackText}>‹ 返回店铺资产</Text></Pressable>}
+                  </View> : <Pressable accessibilityLabel="返回店铺资产" onPress={() => setAssetPage(undefined)} style={styles.assetBack}><ProxyBackGlyph /></Pressable>}
 
                   {currentPage === "menu" ? <>
                   <View style={styles.managerPanel}><View style={styles.photoHead}>
@@ -838,7 +838,6 @@ const styles = StyleSheet.create({
   assetMeta: { color: color.muted, fontSize: 12, marginTop: 4 },
   assetChevron: { color: color.ink, fontSize: 25, fontWeight: "700" },
   assetBack: { alignSelf: "flex-start", paddingHorizontal: 2, paddingVertical: 10 },
-  assetBackText: { color: color.violet, fontSize: 13, fontWeight: "800" },
   metricStrip: { backgroundColor: color.offWhite, borderRadius: 16, flexDirection: "row", gap: 4, padding: 8 },
   metricItem: { alignItems: "center", flex: 1, minWidth: 0, paddingVertical: 5 },
   metricValue: { color: color.ink, fontSize: 13, fontWeight: "900" },

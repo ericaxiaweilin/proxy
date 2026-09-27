@@ -110,6 +110,12 @@ type Repository interface {
 	// 两个方法必须都是 actor-scoped：不能“错”返回为“”"（否则看到“别人的”"）。
 	ListByOwner(ctx context.Context, ownerID string) ([]Activity, error)
 	ListByParticipant(ctx context.Context, actorID string) ([]Activity, error)
+
+	// SCENE-COMPANION-001: 只对调用方已经提供的候选 actor id 集合做命中测试
+	// （"这些人里谁在这个场景报名过活动"），不能反查"这个场景有哪些人报名
+	// 过"——结构上防止拿它去枚举陌生人。返回 candidateActorIDs 的子集
+	// （去重），不保证顺序。
+	FilterKnownParticipants(ctx context.Context, sceneID string, candidateActorIDs []string) ([]string, error)
 }
 
 type MemoryRepository struct {
@@ -127,6 +133,14 @@ func NewWithParticipations(repo Repository, ps *ParticipationStore) *Service {
 
 func NewWithRepository(repository Repository) *Service {
 	return &Service{repository: repository, participations: NewParticipationStore()}
+}
+
+// FilterKnownParticipants is the public read seam realityscene.Service
+// calls through its own small activityVisitorFilter interface
+// (SCENE-COMPANION-001) — same "narrow public method, not the whole repo"
+// convention as realityscene.Service.ListMyCheckinHistory.
+func (s *Service) FilterKnownParticipants(ctx context.Context, sceneID string, candidateActorIDs []string) ([]string, error) {
+	return s.repository.FilterKnownParticipants(ctx, sceneID, candidateActorIDs)
 }
 
 // SeedDefaults 幂等写入基线 5 条活动（平台/商家数据，启动时 seed）。
@@ -611,6 +625,32 @@ func (r *MemoryRepository) ListByParticipant(_ context.Context, actorID string) 
 	reverseActivityOrder(items)
 	return items, nil
 }
+// FilterKnownParticipants 实现见 Repository 接口注释：只测已知候选，不
+// 反查名单。
+func (r *MemoryRepository) FilterKnownParticipants(_ context.Context, sceneID string, candidateActorIDs []string) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	candidates := map[string]bool{}
+	for _, id := range candidateActorIDs {
+		candidates[id] = true
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, id := range r.order {
+		item := r.activities[id]
+		if item == nil || item.RealitySceneID != sceneID || item.joinedBy == nil {
+			continue
+		}
+		for actorID := range item.joinedBy {
+			if candidates[actorID] && !seen[actorID] {
+				seen[actorID] = true
+				out = append(out, actorID)
+			}
+		}
+	}
+	return out, nil
+}
+
 func reverseActivityOrder(items []Activity) {
 	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
 		items[i], items[j] = items[j], items[i]

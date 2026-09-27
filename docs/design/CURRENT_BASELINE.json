@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 322,
-  "updatedAt": "2026-09-25",
+  "baselineRevision": 329,
+  "updatedAt": "2026-09-27",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
     "visualReference": "Proxy_App_Design_System_R3_Visual.html",
@@ -78,11 +78,11 @@
     },
     {
       "scope": "market",
-      "version": "MARKET_OPPORTUNITY_APPLICATION_FLOW_R11",
+      "version": "MARKET_ORDERS_CARD_REDESIGN_CLIENT_RATING_001_R38",
       "file": "docs/design/references/Proxy_Market_Opportunity_Filter_R7.html",
       "status": "ACTIVE_SCREEN_REFERENCE",
       "implementationBaseline": "docs/design/CURRENT_BASELINE.json",
-      "implementationStatus": "REAL_APPLICATION_SELECTION_AND_CONFIRMATION_WIRED_LIFECYCLE_FILTERS_DUAL_PUBLISH_ENTRY_ACTIVITY_SCENE_BOUND_PRICE_RANGE_MIN_MAX_REAL_APPLICANT_OFFERS_PROFILE_ENRICHMENT_PENDING"
+      "implementationStatus": "REAL_APPLICATION_SELECTION_AND_CONFIRMATION_WIRED_LIFECYCLE_FILTERS_DUAL_PUBLISH_ENTRY_ACTIVITY_SCENE_BOUND_PRICE_RANGE_MIN_MAX_REAL_APPLICANT_OFFERS_PROFILE_ENRICHMENT_PENDING_SQUARE_THUMBNAIL_PUBLISHER_ROW_REAL_RATING_SYSTEM_6_ICON_TYPE_FILTER_WIRED_LATEST_MOCKUP_deepseek_html_20260926_34df37_NOT_YET_ARCHIVED_UNDER_REFERENCES"
     },
     {
       "scope": "activity",
@@ -97,6 +97,14 @@
       "version": "MY_MARKET_MODULES_V5",
       "file": "docs/design/references/proxy_my_market_modules_v5.html",
       "status": "FUNCTIONAL_REFERENCE_ONLY"
+    },
+    {
+      "scope": "reality-scene-detail",
+      "version": "SCENE_CARD_REVIEW_AND_COMPANION_R1",
+      "file": "apps/mobile/src/surfaces/reality-scene-map.tsx",
+      "status": "ACTIVE_IMPLEMENTATION_REFERENCE",
+      "implementationBaseline": "docs/design/CURRENT_BASELINE.json",
+      "implementationStatus": "REAL_CHECKIN_GATED_SCENE_RATING_WIRED_AUTHENTICATED_FRIEND_ONLY_COMPANION_SUGGESTIONS_WIRED_HONEST_FIXTURE_FALLBACK_UNCHANGED_PHOTO_WALL_PORTED_UNDIFFERENTIATED_NO_OFFICIAL_VS_USER_CURATION_ACTIVITY_HISTORY_LIST_REVIEW_LIST_BROWSING_UI_NOT_BUILT_deepseek_html_20260927_7fc18d_NOT_ARCHIVED_UNDER_REFERENCES"
     }
   ],
   "legacy": [

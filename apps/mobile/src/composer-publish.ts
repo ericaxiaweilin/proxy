@@ -19,6 +19,9 @@ import { mediaTypeForMime } from "./media-classify";
 import type { MediaClient } from "./media-client";
 import type { DraftMediaItem } from "./composer-media";
 import { assembleComposerBody, parsePollDurationMs, shouldSerializePoll } from "./composer-body";
+// ACTIVITY-REF-001：活动引用的 relationType 常量与读端共用同一个词表，
+// 防止写端/读端各写一份字符串、改了一边另一边悄悄不认。
+import { ACTIVITY_REF_RELATION } from "./activity-ref";
 import type { AnyLocation } from "./components/location-picker-sheet";
 
 export type ComposerDraftForPublish = {
@@ -34,6 +37,17 @@ export type ComposerDraftForPublish = {
   isGhost24h: boolean;
   /** SCENE-PHOTO-WALL-001：在哪个真实场景拍的（realityscene 场景 id）。带图发出后上这个场景的照片墙。 */
   realitySceneId?: string | null | undefined;
+  /**
+   * ACTIVITY-REF-001：这条帖文引用的活动 id。
+   *
+   * 走 contextRefs 的 ACTIVITY + relationType REFERS_TO —— **不是** slug 短链：
+   * 少一个域名、少一个解析器、少一类钓鱼面（proxy.app 不是我们的域名）。
+   * 标记必须是 REFERS_TO 而不能省：服务端 mergeClassificationRefs
+   * （internal/localnet/classification.go:93）会把 relationType == AUTO_CLASSIFIED
+   * 的 ref 当分类标签丢掉重算，而读端靠这个标记把「实体引用」和「分类标签」分开
+   * —— 详见 apps/mobile/src/activity-ref.ts。
+   */
+  activityId?: string | null | undefined;
 };
 
 export type UploadOutcome =
@@ -110,6 +124,9 @@ export function buildCreatePostPayload(
   const contextRefs: NonNullable<CreatePostPayload["contextRefs"]> = [];
   if (draft.quoteTargetId) contextRefs.push({ contextType: "QUOTE_POST", contextId: draft.quoteTargetId });
   if (draft.realitySceneId) contextRefs.push({ contextType: "REALITY_SCENE", contextId: draft.realitySceneId, relationType: "FEATURED_AT" });
+  // ACTIVITY-REF-001：活动引用。relationType 必须显式写 REFERS_TO（理由见
+  // ComposerDraftForPublish.activityId 的注释）—— 读端按白名单判定实体引用。
+  if (draft.activityId) contextRefs.push({ contextType: "ACTIVITY", contextId: draft.activityId, relationType: ACTIVITY_REF_RELATION });
   if (contextRefs.length > 0) payload.contextRefs = contextRefs;
   if (draft.isGhost24h) {
     payload.ephemeralUntil = new Date(Date.now() + 24 * 3600 * 1000).toISOString();

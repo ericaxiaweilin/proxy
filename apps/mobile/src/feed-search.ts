@@ -13,9 +13,13 @@
 //
 // 匹配「用户看得见的东西」：正文、作者展示名、城市。
 //
-// 刻意**不含** contextRefs：它是 server 端 classifyPostFallback 从正文派生的
-// （见 createPost），让搜索命中派生标签会返回用户根本没写过的词，
-// 那是噪音而不是功能。
+// 刻意**不含** contextRefs，两个原因：
+//   ① 分类标签是 server 端 classifyPostFallback 从正文派生的（见 createPost），
+//      让搜索命中派生标签会返回用户根本没写过的词，那是噪音而不是功能；
+//   ② 实体引用的 contextId 是 **id**（ACTIVITY + REFERS_TO 时是 activityId），
+//      更不该进搜索词堆 —— 详见 apps/mobile/src/activity-ref.ts。
+// 注意这跟 feed.tsx 里「本地过滤用哪些字段」是两件事：那边用 contextRefLabels()
+// 取标签文案做话题/静音判定，这边整个 contextRefs 都不参与搜索。
 import type { FeedPost } from "@proxy/contracts";
 
 /** 搜索只读这三个字段 —— 结构上兼容 FeedPost，测试里也能直接喂字面量。 */

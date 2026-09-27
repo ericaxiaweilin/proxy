@@ -50,6 +50,7 @@ import {
   type RecommendFilter,
   type RecommendPerson
 } from "../recommend-fixtures";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 import { sceneIdOfActivity } from "../requester-home-combo";
 
@@ -1425,12 +1426,11 @@ export function RequesterHome({
         scenes={sceneBriefs}
         viewerAccountId={viewerAccountId}
         onOpenScene={(sceneId) => onOpenSceneMap?.(sceneId)}
-        onCompose={(prompt) => handleExecuteHomeQuery(prompt)}
       />
 
       {humanScenePreview ? <Modal animationType="slide" onRequestClose={() => setHumanScenePreview(undefined)} visible>
         <View style={styles.humanScenePage}>
-          <View style={[styles.humanSceneHeader, { height: 54 + safeArea.top, paddingTop: safeArea.top }]}><Pressable accessibilityLabel={t("backHome")} hitSlop={12} onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBack}><Text selectable style={styles.humanSceneBackText}>{t("backShort")}</Text></Pressable><Text selectable style={styles.humanSceneHeaderTitle}>{t("humanProfile")}</Text><View style={styles.humanSceneHeaderSpacer} /></View>
+          <View style={[styles.humanSceneHeader, { height: 54 + safeArea.top, paddingTop: safeArea.top }]}><Pressable accessibilityLabel={t("backHome")} hitSlop={12} onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBack}><ProxyBackGlyph label={t("backShort")} tone="ink" /></Pressable><Text selectable style={styles.humanSceneHeaderTitle}>{t("humanProfile")}</Text><View style={styles.humanSceneHeaderSpacer} /></View>
             <ScrollView contentContainerStyle={styles.humanSceneContent} showsVerticalScrollIndicator={false}>
               <View style={styles.humanSceneTop}>
                 <Text selectable style={styles.humanSceneEyebrow}>{humanScenePreview.person.online ? t("nearbyNowVisible") : t("nearbyRecommend")}</Text>
@@ -1444,15 +1444,15 @@ export function RequesterHome({
                 </View>
               </View>
               <View style={styles.humanSceneActionsTop}>
-                <Pressable accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)} disabled={relationshipBusyFor(humanScenePreview.person.id) || relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND"} onPress={() => void handleHomeFriend(humanScenePreview.person.id, humanScenePreview.person.name)} style={[styles.humanSceneTopAction, styles.humanSceneTopActionPrimary, (relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDone]}><Text selectable style={styles.humanSceneTopActionPrimaryText}>{relationshipBusyFor(humanScenePreview.person.id) ? t("adding") : relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" ? t("addingShort") : relationshipStateFor(humanScenePreview.person.id) === "FRIEND" ? t("added") : relationshipStateFor(humanScenePreview.person.id) === "INCOMING" ? t("acceptAdd") : t("addAction")}</Text></Pressable>
+                <Pressable accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)} disabled={relationshipBusyFor(humanScenePreview.person.id) || relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND"} onPress={() => void handleHomeFriend(humanScenePreview.person.id, humanScenePreview.person.name)} style={[styles.humanSceneTopAction, styles.humanSceneTopActionPrimary, (relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDone]}><Text selectable style={[styles.humanSceneTopActionPrimaryText, (relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" || relationshipStateFor(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDoneText]}>{relationshipBusyFor(humanScenePreview.person.id) ? t("adding") : relationshipStateFor(humanScenePreview.person.id) === "OUTGOING" ? t("addingShort") : relationshipStateFor(humanScenePreview.person.id) === "FRIEND" ? t("added") : relationshipStateFor(humanScenePreview.person.id) === "INCOMING" ? t("acceptAdd") : t("addAction")}</Text></Pressable>
                 <Pressable accessibilityLabel={t("viewProfile")} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanProfile?.(person); }} style={styles.humanSceneTopAction}><Text selectable style={styles.humanSceneTopActionText}>{t("home")}</Text></Pressable>
                 <Pressable accessibilityLabel={t("messageAction")} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onMessageHuman?.(person); }} style={styles.humanSceneTopAction}><Text selectable style={styles.humanSceneTopActionText}>{t("messageAction")}</Text></Pressable>
               </View>
               {relationshipMsg ? <Text selectable style={styles.humanSceneNotice}>{relationshipMsg}</Text> : null}
               <View style={styles.humanSceneFacts}>
-                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="clock" size={18} /><Text selectable style={styles.humanSceneFactValue}>{humanScenePreview.person.availabilityText ?? t("availabilityUnknown")}</Text></View>
-                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="route" size={18} /><Text selectable style={styles.humanSceneFactValue}>{humanScenePreview.person.distanceM === undefined ? t("distanceUnknown") : humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`}</Text></View>
-                <Pressable accessibilityLabel={t("viewPublicHistory")} onPress={() => setPublicHistoryOpen((open) => !open)} style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="check" size={18} /><Text selectable style={styles.humanSceneFactValue}>{humanScenePreview.person.completedActivities !== undefined ? t("historyCount", { n: humanScenePreview.person.completedActivities }) : t("noPublicPosts")}</Text></Pressable>
+                <View style={styles.humanSceneFact}><ProxyIcon color={color.muted} name="clock" size={18} /><Text selectable style={styles.humanSceneFactValue}>{humanScenePreview.person.availabilityText ?? t("availabilityUnknown")}</Text></View>
+                <View style={styles.humanSceneFact}><ProxyIcon color={color.muted} name="route" size={18} /><Text selectable style={styles.humanSceneFactValue}>{humanScenePreview.person.distanceM === undefined ? t("distanceUnknown") : humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`}</Text></View>
+                <Pressable accessibilityLabel={t("viewPublicHistory")} onPress={() => setPublicHistoryOpen((open) => !open)} style={styles.humanSceneFact}><ProxyIcon color={color.muted} name="check" size={18} /><Text selectable style={styles.humanSceneFactValue}>{humanScenePreview.person.completedActivities !== undefined ? t("historyCount", { n: humanScenePreview.person.completedActivities }) : t("noPublicPosts")}</Text></Pressable>
               </View>
               {publicHistoryOpen ? <View style={styles.humanSceneHistory}><View style={styles.humanSceneHistoryHead}><Text selectable style={styles.humanSceneHistoryTitle}>{t("publicActivity")}</Text><Text selectable style={styles.humanSceneHistoryPrivacy}>{t("privateHidden")}</Text></View>{humanScenePreview.person.publicActivityHistory?.length ? humanScenePreview.person.publicActivityHistory.map((item) => <View key={item.id} style={styles.humanSceneHistoryRow}><View style={styles.humanSceneHistoryCopy}><Text selectable style={styles.humanSceneHistoryName}>{item.title}</Text><Text selectable style={styles.humanSceneHistoryMeta}>{item.scene} · {item.dateLabel}</Text></View><Text selectable style={styles.humanSceneHistoryRating}>★ {item.rating.toFixed(1)}</Text></View>) : <Text selectable style={styles.humanSceneHistoryEmpty}>{t("noActivity")}</Text>}</View> : null}
               <Text selectable style={styles.humanSceneSectionTitle}>{t("whatSheCanDo")}</Text>
@@ -1509,7 +1509,7 @@ export function RequesterHome({
                 返回箭头直接并进筛选 chip 那一行，排在"附近"前面。 */}
             <View style={styles.filterChips}>
               <Pressable accessibilityLabel={t("back")} hitSlop={12} onPress={() => setFilterSheetOpen(false)} style={styles.morePageBackInline}>
-                <Text selectable style={styles.morePageBackIcon}>‹</Text>
+                <ProxyBackGlyph />
               </Pressable>
               {/* HOME-MORE-ROOMS-001：chip 行照原型 .filter-chips —— 单行横滑，返回箭头和
                   搜索固定在两端。之前 flexWrap 换行：语言 chip 显示「Tiếng Việt」这类长名、
@@ -1892,7 +1892,7 @@ const styles = StyleSheet.create({
   gridImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 18, height: "100%", justifyContent: "center", width: "100%" },
   gridGlyph: { color: color.muted, fontSize: 30 },
   gridOverlay: { bottom: 0, gap: 1, left: 0, padding: 10, position: "absolute", right: 0 },
-  gridLabel: { color: "color.white", fontSize: 13, fontWeight: "800", textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 5 },
+  gridLabel: { color: color.white, fontSize: 13, fontWeight: "800", textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 5 },
   gridLabelDark: { color: color.ink, textShadowColor: "transparent" },
   gridSub: { color: "rgba(255,255,255,0.85)", fontSize: 11, textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 5 },
   gridSubDark: { color: color.muted, textShadowColor: "transparent" },
@@ -1974,74 +1974,77 @@ const styles = StyleSheet.create({
   peopleHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginTop: 18, marginBottom: 12 },
   peopleTitleRow: { alignItems: "center", flexDirection: "row", gap: 8 },
   peopleTitle: { color: color.ink, fontSize: 22, fontWeight: "800", lineHeight: 26 },
-  humanScenePage: { backgroundColor: "#162030", flex: 1 },
-  humanSceneHeader: { alignItems: "center", backgroundColor: "#162030", borderBottomColor: "rgba(255,255,255,0.12)", borderBottomWidth: 1, flexDirection: "row", height: 54, paddingHorizontal: 16 },
+  // HOME-HUMAN-PROFILE-LIGHT-001（用户："真人推荐-点击头像进入 真人主页 页面
+  // 背景黑的 改下 正常白色的"）：这一屏原来是深色主题（导航/事实卡/详情卡都用
+  // 半透明白覆在 #162030 深底上）。改成跟 App 其余页面一致的白底——半透明白
+  // 覆盖层换成 color.surface/color.line，原来在深底上才看得清的白字/浅蓝字
+  // 换成 color.ink/color.muted。真正需要留深色的只有两张贴真实照片的卡片
+  // （humanSceneLinkCard「当前 Scene」/ humanSceneSceneCard「可以一起去的
+  // 地方」——它们的深色遮罩是为了在照片上读文字，跟页面整体主题无关，不动）。
+  humanScenePage: { backgroundColor: color.offWhite, flex: 1 },
+  humanSceneHeader: { alignItems: "center", backgroundColor: color.offWhite, borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", height: 54, paddingHorizontal: 16 },
   humanSceneBack: { flex: 1 },
-  humanSceneBackText: { color: "#DCE6F7", fontSize: 14, fontWeight: "800" },
-  humanSceneHeaderTitle: { color: color.white, fontSize: 16, fontWeight: "900" },
+  humanSceneHeaderTitle: { color: color.ink, fontSize: 16, fontWeight: "900" },
   humanSceneHeaderSpacer: { flex: 1 },
   humanSceneContent: { padding: 18, paddingBottom: 40 },
   humanSceneTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  humanSceneEyebrow: { color: "#DCE6F7", fontSize: 12, fontWeight: "700" },
-  humanSceneClose: { alignItems: "center", borderColor: "rgba(255,255,255,0.35)", borderRadius: 21, borderWidth: 1, height: 42, justifyContent: "center", width: 42 },
-  humanSceneCloseText: { color: color.white, fontSize: 27, fontWeight: "300", lineHeight: 30 },
+  humanSceneEyebrow: { color: color.muted, fontSize: 12, fontWeight: "700" },
   humanScenePerson: { alignItems: "center", flexDirection: "row", gap: 14, marginTop: 10 },
-  humanSceneAvatarRing: { alignItems: "center", borderColor: "rgba(150,203,255,0.9)", borderRadius: 999, borderWidth: 2, height: 96, justifyContent: "center", padding: 3, width: 96 },
+  humanSceneAvatarRing: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderColor: "rgba(91,143,213,0.6)", borderRadius: 999, borderWidth: 2, height: 96, justifyContent: "center", padding: 3, width: 96 },
   humanSceneAvatar: { borderRadius: 999, height: "100%", width: "100%" },
-  humanSceneInitials: { color: color.white, fontSize: 24, fontWeight: "900" },
+  humanSceneInitials: { color: color.violet, fontSize: 24, fontWeight: "900" },
   humanScenePersonCopy: { flex: 1, minWidth: 0 },
-  humanSceneName: { color: color.white, fontSize: 28, fontWeight: "900" },
-  humanSceneBio: { color: "#CFDAEA", fontSize: 13, lineHeight: 18, marginTop: 4 },
-  humanSceneRating: { color: "#FFCE55", fontSize: 12, fontWeight: "800", marginTop: 6 },
+  humanSceneName: { color: color.ink, fontSize: 28, fontWeight: "900" },
+  humanSceneBio: { color: color.muted, fontSize: 13, lineHeight: 18, marginTop: 4 },
+  humanSceneRating: { color: "#8C6A00", fontSize: 12, fontWeight: "800", marginTop: 6 },
   humanSceneActionsTop: { flexDirection: "row", gap: 8, marginTop: 16 },
-  humanSceneTopAction: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderColor: "rgba(255,255,255,0.24)", borderRadius: 999, borderWidth: 1, flex: 1, justifyContent: "center", minHeight: 46 },
+  humanSceneTopAction: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, flex: 1, justifyContent: "center", minHeight: 46 },
   humanSceneTopActionPrimary: { backgroundColor: "#586CFF", borderColor: "#586CFF" },
-  humanSceneTopActionText: { color: color.white, fontSize: 13, fontWeight: "900" },
+  humanSceneTopActionText: { color: color.ink, fontSize: 13, fontWeight: "900" },
   humanSceneTopActionPrimaryText: { color: color.white, fontSize: 13, fontWeight: "900" },
   humanSceneFacts: { flexDirection: "row", gap: 7, marginTop: 14 },
-  humanSceneFact: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.18)", borderRadius: 14, borderWidth: 1, flex: 1, gap: 5, justifyContent: "center", minHeight: 62, paddingHorizontal: 6 },
-  humanSceneFactValue: { color: "#DCE6F7", fontSize: 11, fontWeight: "700", textAlign: "center" },
-  humanSceneHistory: { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.18)", borderRadius: 16, borderWidth: 1, marginTop: 9, padding: 12 },
+  humanSceneFact: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, gap: 5, justifyContent: "center", minHeight: 62, paddingHorizontal: 6 },
+  humanSceneFactValue: { color: color.ink, fontSize: 11, fontWeight: "700", textAlign: "center" },
+  humanSceneHistory: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 16, borderWidth: 1, marginTop: 9, padding: 12 },
   humanSceneHistoryHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
-  humanSceneHistoryTitle: { color: color.white, fontSize: 13, fontWeight: "900" },
-  humanSceneHistoryPrivacy: { color: "#AAB9CE", fontSize: 11 },
-  humanSceneHistoryRow: { alignItems: "center", borderTopColor: "rgba(255,255,255,0.12)", borderTopWidth: 1, flexDirection: "row", paddingVertical: 10 },
+  humanSceneHistoryTitle: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  humanSceneHistoryPrivacy: { color: color.muted, fontSize: 11 },
+  humanSceneHistoryRow: { alignItems: "center", borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", paddingVertical: 10 },
   humanSceneHistoryCopy: { flex: 1 },
-  humanSceneHistoryName: { color: color.white, fontSize: 13, fontWeight: "800" },
-  humanSceneHistoryMeta: { color: "#AAB9CE", fontSize: 11, marginTop: 3 },
-  humanSceneHistoryRating: { color: "#FFCE55", fontSize: 12, fontWeight: "900" },
-  humanSceneHistoryEmpty: { color: "#AAB9CE", fontSize: 12, paddingVertical: 12 },
+  humanSceneHistoryName: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  humanSceneHistoryMeta: { color: color.muted, fontSize: 11, marginTop: 3 },
+  humanSceneHistoryRating: { color: "#8C6A00", fontSize: 12, fontWeight: "900" },
+  humanSceneHistoryEmpty: { color: color.muted, fontSize: 12, paddingVertical: 12 },
   humanScenePills: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 9 },
-  humanScenePill: { backgroundColor: "rgba(88,108,255,0.2)", borderColor: "rgba(150,203,255,0.45)", borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
-  humanScenePillText: { color: color.white, fontSize: 12, fontWeight: "800" },
-  humanSceneSectionTitle: { color: color.white, fontSize: 14, fontWeight: "900", marginTop: 18 },
+  humanScenePill: { backgroundColor: color.proxyPurpleSoft, borderColor: color.violet, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
+  humanScenePillText: { color: color.violet, fontSize: 12, fontWeight: "800" },
+  humanSceneSectionTitle: { color: color.ink, fontSize: 14, fontWeight: "900", marginTop: 18 },
   humanSceneLinkRow: { flexDirection: "row", gap: 8, marginTop: 8 },
-  humanSceneLinkChip: { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.2)", borderRadius: 14, borderWidth: 1, flex: 1, minHeight: 72, padding: 10 },
+  humanSceneLinkChip: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, minHeight: 72, padding: 10 },
+  // 贴真实场景照片的卡片——深色遮罩是给盖在照片上的文字读性用的，跟页面
+  // 整体是白底还是黑底无关，不跟着这次改色。
   humanSceneLinkCard: { borderColor: "rgba(255,255,255,0.2)", borderRadius: 14, borderWidth: 1, flex: 1.2, minHeight: 72, overflow: "hidden", padding: 10 },
   humanSceneLinkShade: { backgroundColor: "rgba(8,13,24,0.48)", bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
-  humanSceneLinkLabel: { color: "#AAB9CE", fontSize: 11 },
-  humanSceneLinkValue: { color: color.white, fontSize: 12, fontWeight: "800", marginTop: 8 },
+  humanSceneLinkLabel: { color: color.muted, fontSize: 11 },
+  humanSceneLinkValue: { color: color.ink, fontSize: 12, fontWeight: "800", marginTop: 8 },
   humanSceneLinkLabelLight: { color: "#E0E8F4", fontSize: 11 },
   humanSceneLinkValueLight: { color: color.white, fontSize: 12, fontWeight: "900", marginTop: 8 },
   humanSceneSceneHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 13 },
-  humanSceneSceneHint: { color: "#AAB9CE", fontSize: 11 },
+  humanSceneSceneHint: { color: color.muted, fontSize: 11 },
   humanSceneSceneRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  // 同 humanSceneLinkCard：贴真实场景照片，遮罩不跟着改色。
   humanSceneSceneCard: { borderColor: "rgba(255,255,255,0.2)", borderRadius: 15, borderWidth: 1, flex: 1, height: 92, justifyContent: "flex-end", overflow: "hidden", padding: 10 },
   humanSceneSceneShade: { backgroundColor: "rgba(8,13,24,0.35)", bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   humanSceneSceneName: { color: color.white, fontSize: 13, fontWeight: "900" },
   humanSceneSceneMeta: { color: "#E0E8F4", fontSize: 11, marginTop: 2 },
-  humanSceneDetailCard: { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.18)", borderRadius: 16, borderWidth: 1, marginTop: 12, padding: 13 },
-  humanSceneDetailTitle: { color: "#AAB9CE", fontSize: 11, fontWeight: "700", marginTop: 4 },
-  humanSceneDetailText: { color: color.white, fontSize: 13, lineHeight: 19, marginBottom: 7, marginTop: 4 },
-  humanSceneTrust: { color: "#FFCE55", fontSize: 13, fontWeight: "900", marginTop: 7 },
-  humanSceneReason: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 14, color: "#DCE6F7", fontSize: 12, lineHeight: 18, marginTop: 12, padding: 11 },
-  humanSceneNotice: { color: "#FFCE55", fontSize: 11, marginTop: 8 },
-  humanSceneAdd: { alignItems: "center", backgroundColor: "#586CFF", borderRadius: 999, flexDirection: "row", gap: 7, justifyContent: "center", marginTop: 12, minHeight: 48 },
-  humanSceneAddDone: { backgroundColor: "rgba(255,255,255,0.14)", borderColor: "rgba(255,255,255,0.3)", borderWidth: 1 },
-  humanSceneAddText: { color: color.white, fontSize: 14, fontWeight: "900" },
-  humanSceneActions: { flexDirection: "row", gap: 8, marginTop: 9 },
-  humanSceneAction: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.86)", borderRadius: 999, flex: 1, flexDirection: "row", gap: 7, justifyContent: "center", minHeight: 44 },
-  humanSceneActionText: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  humanSceneDetailCard: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 16, borderWidth: 1, marginTop: 12, padding: 13 },
+  humanSceneDetailTitle: { color: color.muted, fontSize: 11, fontWeight: "700", marginTop: 4 },
+  humanSceneDetailText: { color: color.ink, fontSize: 13, lineHeight: 19, marginBottom: 7, marginTop: 4 },
+  humanSceneTrust: { color: "#8C6A00", fontSize: 13, fontWeight: "900", marginTop: 7 },
+  humanSceneReason: { backgroundColor: color.surface, borderRadius: 14, color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 12, padding: 11 },
+  humanSceneNotice: { color: color.muted, fontSize: 11, marginTop: 8 },
+  humanSceneAddDone: { backgroundColor: color.surface, borderColor: color.line, borderWidth: 1 },
+  humanSceneAddDoneText: { color: color.ink },
   humanBadge: { backgroundColor: "#EAF7EE", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   humanBadgeText: { color: "#18733B", fontSize: 11, fontWeight: "900" },
   peopleSceneTitle: { color: color.ink, fontSize: 13, fontWeight: "800", marginTop: 5 },
@@ -2192,7 +2195,6 @@ const styles = StyleSheet.create({
   morePage: { backgroundColor: color.white, flex: 1, paddingHorizontal: 16, paddingTop: 8 },
   // HOME-MORE-SHEET-006: 返回箭头并进筛选 chip 行，不再单独占一行标题。
   morePageBackInline: { alignItems: "center", height: 34, justifyContent: "center", width: 28 },
-  morePageBackIcon: { color: color.ink, fontSize: 26, fontWeight: "600" },
   // HOME-MORE-SHEET-001: 更多真人列表行（照原型 list-item）。
   moreList: { flex: 1, marginTop: 8 },
   moreListContent: { gap: 4, paddingBottom: 4 },

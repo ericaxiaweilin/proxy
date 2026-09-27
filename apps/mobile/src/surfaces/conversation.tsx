@@ -15,7 +15,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 // 只会 throw），拍照这块用 expo-camera 的 CameraView（friend-crm.tsx 扫码
 // 已经在用同一个库，这里是同一套权限/组件模式，不是另起一个）。
 import { Asset, AssetField, MediaType, Query, requestPermissionsAsync } from "expo-media-library";
-import { ProxySwitch, ProxyLoading } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyLoading, ProxySwitch } from "../components/proxy-foundation";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -1327,7 +1327,7 @@ export function ConversationSurface({
             onPress={() => { if (activeConvo) setActiveConvo(null); else onBack(); }}
             style={styles.backBtn}
           >
-            <Text selectable style={styles.backText}>‹</Text>
+            <ProxyBackGlyph />
           </Pressable>
           <View style={styles.headerInfo}>
             <Text selectable style={styles.headerName}>{activeConvo ? `支线 · ${activeConvo.title}` : author}</Text>
@@ -2008,7 +2008,6 @@ const styles = StyleSheet.create({
   // 顶栏
   header: { alignItems: "center", backgroundColor: lotus.paper, borderBottomColor: lotus.line, borderBottomWidth: 1, flexDirection: "row", gap: 4, paddingHorizontal: 8, paddingVertical: 9 },
   backBtn: { alignItems: "center", height: 36, justifyContent: "center", width: 36 },
-  backText: { color: lotus.ink, fontSize: 26, lineHeight: 28 },
   headerInfo: { alignItems: "center", flex: 1 },
   headerName: { color: lotus.ink, fontSize: 13, fontWeight: "800", lineHeight: 15 },
   headerStatus: { color: lotus.muted, fontSize: 11, marginTop: 3 },

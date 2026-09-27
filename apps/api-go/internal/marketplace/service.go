@@ -41,6 +41,24 @@ type Service struct {
 	// production wires the real adapter via SetModelStack.
 	mu         sync.Mutex
 	modelStack modelstack.Port
+	// CLIENT-RATING-001: resolves a listing's real Owner rating (nil =
+	// unwired, no Rating/RatingCount fields get populated — same
+	// "unwired means honestly absent" convention as authorNames).
+	ratingLookup ratingLookup
+}
+
+// ratingLookup is the narrow consumer-side contract so marketplace does
+// not import the rating package's Repository/command machinery, only the
+// one read it needs. rating.Service already satisfies this.
+type ratingLookup interface {
+	GetUserRatingAggregate(ctx context.Context, userID string) (average float64, count int, err error)
+}
+
+// SetRatingLookup wires a client's real public rating onto their market
+// listings. Unwired (nil) means every Opportunity keeps Rating/RatingCount
+// empty — never a fabricated average.
+func (s *Service) SetRatingLookup(lookup ratingLookup) {
+	s.ratingLookup = lookup
 }
 
 // authorNameResolver is the narrow consumer-side contract so marketplace
@@ -149,6 +167,13 @@ type Opportunity struct {
 	Posted                  string   `json:"posted"`
 	Skills                  string   `json:"skills"`
 	Verified                bool     `json:"verified"`
+	// CLIENT-RATING-001: the owner's real public rating (providers rate
+	// clients after a completed order — see internal/rating). Both are
+	// omitted (not zero) when RatingCount == 0: nobody has rated this
+	// owner yet, so there is no average to show, and 0 would read as a
+	// real (bad) score rather than "no data".
+	Rating      float64 `json:"rating,omitempty"`
+	RatingCount int     `json:"ratingCount,omitempty"`
 	Lens                    []string `json:"lens"`
 	Travel                  *int     `json:"travel"`
 	Signal                  string   `json:"signal"`
@@ -293,6 +318,26 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		}
 		for i := range items {
 			normalizeOpportunityMoney(&items[i])
+			// MARKET-LEGACY-FABRICATED-001: 清扫前落库的行还带着写死的 Match /
+			// 个人 owner 的 Verified，读路径必须清掉再下发。
+			stripLegacyFabricatedJudgment(&items[i])
+		}
+		// CLIENT-RATING-001: attach each owner's real public rating.
+		// count == 0 (nobody has rated them yet) leaves both fields at
+		// their zero value, which json:",omitempty" then drops entirely —
+		// the card must not render a 0-star badge for "no data".
+		if s.ratingLookup != nil {
+			for i := range items {
+				if items[i].OwnerID == "" {
+					continue
+				}
+				avg, count, err := s.ratingLookup.GetUserRatingAggregate(ctx, items[i].OwnerID)
+				if err != nil || count == 0 {
+					continue
+				}
+				items[i].Rating = avg
+				items[i].RatingCount = count
+			}
 		}
 		return payload(e, "Market", "local", "READY", map[string]any{"opportunities": items})
 	case "PublishMarketOpportunity":
@@ -592,6 +637,32 @@ func normalizeOpportunityMoney(o *Opportunity) {
 	// 非向导发布本来就没有这个字段，空值由订单侧按金额档兜底，不猜。
 	if o.Scenario != "ordinary" && o.Scenario != "assistance" {
 		o.Scenario = ""
+	}
+}
+
+// stripLegacyFabricatedJudgment — 读路径上的存量编造值清理。
+//
+// MARKET-FAKE-JUDGMENT-001（2026-09-16）改的是**写**路径：PublishMarketOpportunity
+// 不再无条件写 Verified=true，也不再写死 Match。但读路径
+// （internal/platform/postgres/marketplace.go）是把整段 payload unmarshal 回来照发
+// 的 —— 那次清扫之前发布的行，至今仍带着当时的编造值下发，客户端只能照画：
+//
+//   · Match  —— 平台从来没有匹配引擎，写路径现在恒为空串。任何非空 Match
+//     都是存量值（活库里能看到 "100%"/"96%"），卡片会渲染成「100% 匹配」。
+//   · Verified —— 只有商家成员资格真的验过（api 层 merchantStamp，见
+//     merchant_identity.go）才该为 true，写路径同时把 OwnerType 置成
+//     BUSINESS。存量行里 ownerType=PERSON + verified=true 这个组合是写路径
+//     从来不产出的，详情页据此给个人发布者画了「商家身份已验证」。
+//
+// 只清「平台不产出的形态」，不新增任何判断：Verified 为 true 且 OwnerType 是
+// BUSINESS 的行（真商家）原样保留；种子行的 Verified=false 也原样保留。
+//
+// 真接上匹配引擎 / 个人核验那天，删掉对应那一行，并把
+// MARKET-LEGACY-FABRICATED-001 的钉一起改。
+func stripLegacyFabricatedJudgment(o *Opportunity) {
+	o.Match = ""
+	if o.Verified && o.OwnerType != "BUSINESS" {
+		o.Verified = false
 	}
 }
 

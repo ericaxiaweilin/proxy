@@ -63,6 +63,6 @@ describe("OPP-TYPE-OTHER-001 unrecognised opportunities are uncategorised", () =
 
   it("exposes the uncategorised bucket in the filter palette", () => {
     const palette = stripComments(read("./r37-type-palette.tsx"));
-    expect(palette).toContain('{ key: "other", label: "其他未分类" }');
+    expect(palette).toContain('{ key: "other", label: "其他" }');
   });
 });

@@ -38,7 +38,7 @@ import { color } from "../theme";
 import type { BusinessClient, BusinessStoreWire, StoreLinesWire } from "../business-client";
 import type { FulfillmentClient, StoreOrderStats } from "../fulfillment-client";
 import type { ProfileClient } from "../profile-client";
-import { ProxyLoading } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyLoading } from "../components/proxy-foundation";
 import {
   coverForStore, filterHubShops, formatFullDate, formatHoursLines, formatMonthDay,
   satisfactionRate, satisfactionRateText, satisfactionText,
@@ -195,7 +195,7 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate,
     return (
       <View>
         <HubNav
-          backLabel="‹ 返回店铺列表"
+          backLabel="返回店铺列表"
           onBack={() => { setSelectedId(undefined); setCopied(false); }}
           title={selected.store.name}
         />
@@ -213,7 +213,7 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate,
 
   return (
     <View>
-      <HubNav backLabel="‹ 返回" onBack={onBack} title={HUB_TITLE} />
+      <HubNav backLabel="返回" onBack={onBack} title={HUB_TITLE} />
 
       <View style={s.overview}>
         <Svg pointerEvents="none" style={StyleSheet.absoluteFill}>
@@ -305,6 +305,11 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate,
 }
 
 // STORE-HUB-NAV-001：全 hub 唯一的返回条。列表态退到「我的」，详情态回列表。
+//
+// BACK-GLYPH-001（2026-09-26）：backLabel 现在只写**文字**，字形由公共组件
+// ProxyBackGlyph 画。原来这里传的是 `"‹"`（只有字形、没有目的地）—— 那正是
+// STORE-HUB-NAV-001 那条钉要防的事：标签不写目的地，就等于替用户猜。
+// 两个落点必须各写各的：「返回」（回我的）/「返回店铺列表」（回列表）。
 function HubNav({ backLabel, onBack, title }: {
   backLabel: string;
   onBack: () => void;
@@ -312,8 +317,8 @@ function HubNav({ backLabel, onBack, title }: {
 }): React.JSX.Element {
   return (
     <View>
-      <Pressable accessibilityLabel={backLabel} onPress={onBack} style={s.backRow}>
-        <Text selectable style={s.backText}>{backLabel}</Text>
+      <Pressable accessibilityLabel={title ? `返回${title}` : "返回"} onPress={onBack} style={s.backRow}>
+        <ProxyBackGlyph label={backLabel} />
       </Pressable>
       <Text selectable style={s.navTitle}>{title}</Text>
     </View>
@@ -490,7 +495,7 @@ const s = StyleSheet.create({
   linkRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 10, paddingHorizontal: 14, paddingVertical: 13 },
   linkText: { color: color.ink, fontSize: 13, fontWeight: "800" },
   backRow: { alignSelf: "flex-start", paddingVertical: 6 },
-  backText: { color: color.magenta, fontSize: 13, fontWeight: "800" },
+  // backText 已删：字形和标签都由公共组件 ProxyBackGlyph 画（BACK-GLYPH-001）。
   navTitle: { color: color.ink, fontSize: 18, fontWeight: "800", marginBottom: 10 },
   hero: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 14, marginBottom: 14, padding: 16 },
   heroCover: { alignItems: "center", borderRadius: 14, height: 64, justifyContent: "center", width: 64 },

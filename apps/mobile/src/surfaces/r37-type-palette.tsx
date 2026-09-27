@@ -5,13 +5,17 @@ import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { MarketTypeLogo, type MarketOpportunityType as OpportunityType } from "../components/market-type-logo";
 import { color } from "../theme";
 
+// 市场·订单重做：筛选栏展示新设计的 6 个单一概念桶（咖啡/晚餐/运动/音乐/
+// 聊天/其他）。旧的复合类型（walk_photo/coffee_chinese/bilingual_store）不
+// 从筛选栏移除逻辑——它们靠 inferOpportunityTypeForFilter 的关键词推断继续
+// 归到最接近的新桶，老种子数据不需要用户手动选老类型就能被筛出来。
 const TYPES: { key: OpportunityType; label: string }[] = [
-  { key: "coffee_photo", label: "咖啡加拍照" },
-  { key: "walk_photo", label: "城市漫步加拍照" },
-  { key: "coffee_chinese", label: "咖啡加中文交流" },
-  { key: "bilingual_store", label: "看店加双语服务" },
-  { key: "event_photo", label: "活动加拍照" },
-  { key: "other", label: "其他未分类" },
+  { key: "coffee_photo", label: "咖啡" },
+  { key: "dining", label: "晚餐" },
+  { key: "sport_companion", label: "运动" },
+  { key: "music", label: "音乐" },
+  { key: "chat_companion", label: "聊天" },
+  { key: "other", label: "其他" },
 ];
 
 export function R37TypePalette({ active, onChange }: { active: OpportunityType | "all"; onChange: (next: OpportunityType | "all") => void }): React.JSX.Element {
@@ -23,11 +27,12 @@ export function R37TypePalette({ active, onChange }: { active: OpportunityType |
         onPress={() => onChange("all")}
         active={active === "all"}
         renderLogo={() => (
-          <View style={styles.allGrid}>
-            <View style={styles.allCell} />
-            <View style={styles.allCell} />
-            <View style={styles.allCell} />
-            <View style={styles.allCell} />
+          // 市场·订单重做：新稿 type-tabs 的"全部"是三横线（M4 6h16M4 12h16M4
+          // 18h16），换掉旧的四宫格，纯视觉，不影响 onChange("all") 逻辑。
+          <View style={styles.allBars}>
+            <View style={styles.allBar} />
+            <View style={styles.allBar} />
+            <View style={styles.allBar} />
           </View>
         )}
       />
@@ -59,6 +64,6 @@ const styles = StyleSheet.create({
   pill: { alignItems: "center", height: 46, justifyContent: "center", width: 46 },
   logoBox: { alignItems: "center", height: 42, justifyContent: "center", width: 42 },
   allLogo: { backgroundColor: "#F7EFE1" },
-  allGrid: { gap: 1, height: 18, width: 18 },
-  allCell: { backgroundColor: color.ink, borderRadius: 0.5, flex: 1, height: 8, margin: 0.5, width: 8 },
+  allBars: { gap: 4, height: 18, justifyContent: "center", width: 20 },
+  allBar: { backgroundColor: color.ink, borderRadius: 1, height: 2, width: 20 },
 });

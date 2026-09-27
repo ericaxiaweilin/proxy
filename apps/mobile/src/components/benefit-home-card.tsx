@@ -6,7 +6,7 @@ import type { Campaign, BenefitDefinition } from "../benefit-client";
 
 const CAMPAIGN_COLORS: Record<string, string> = {
   SCENE_IGNITION: "#E85D3A",
-  CREATOR_SEED: "color.proxyPurple",
+  CREATOR_SEED: color.proxyPurple,
   NEW_TO_SCENE: "#059669",
   REACTIVATION: "#D97706",
   NEWCOMER: "#2563EB",

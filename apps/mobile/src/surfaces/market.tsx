@@ -27,6 +27,8 @@ import { useMerchantIdentity } from "../use-merchant-identity";
 import {  OPPORTUNITY_LENS_LABEL,
   buildSlotOfferInput,
   composePriceRange,
+  merchantVerified,
+  opportunityWhenLabel,
   parseOpportunityPrice,
   travelMinutesFromViewer,
   validateOpportunityPriceRange,
@@ -37,7 +39,7 @@ import {  OPPORTUNITY_LENS_LABEL,
 import { gridToLatLng } from "../components/location-options";
 import { clusterPins } from "../cluster-pins";
 import { ProxyIcon } from "../components/proxy-icon";
-import { ProxyTabs, ProxyLoading } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyLoading, ProxyTabs } from "../components/proxy-foundation";
 import { sessionAuthClient } from "../native-clients";
 import { fetchProviderApplication } from "../provider-application-client";
 import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
@@ -755,6 +757,11 @@ function OpportunityDetail({
   // MARKET-SEEDED-TRAVEL-001: 只有服务端按看的人的位置算出来的通勤时间才展示。
   // seeded（种子占位）就当没有 —— 不给定位授权时显示"通勤约 18 分钟"是假的。
   const viewerTravelMinutes = travelMinutesFromViewer(opportunity);
+  // MARKET-LEGACY-VERIFIED-001: 推荐理由行 —— 只放服务端真能背的两条。
+  const whyRows = [
+    merchantVerified(opportunity) ? "✓ 商家身份已验证" : null,
+    viewerTravelMinutes != null ? `✓ 通勤约 ${viewerTravelMinutes} 分钟` : null
+  ].filter((row): row is string => row !== null);
   // MARKET-QUOTE-SHEET-001: 详情页给 VND, sheet 给 K。两者都从同一份预算推。
   // MARKET-PRICE-RANGE-PARSE-001: 报价 sheet 的锚定区间必须来自发布方真实填的
   // 两框；单一预算外推出的区间会让三个预设按钮变成编出来的金额。
@@ -777,12 +784,19 @@ function OpportunityDetail({
     <View style={styles.oppDetailRoot}>
       <View style={styles.detailHead}>
         <Pressable onPress={onBack} style={styles.detailBack}>
-          <Text selectable style={styles.detailBackText}>‹</Text>
+          <ProxyBackGlyph />
         </Pressable>
         <Text selectable style={styles.detailTitle}>订单详情</Text>
       </View>
 
-      <View style={styles.detailHero}>
+      {/* MARKET-DETAIL-HERO-MEDIA-001: 详情 hero 是**照片卡**，不是那张深色文字卡。
+          detailHero（padding 14）是给「发布需求 / 选人工作台」的深色文字 hero 用的；
+          照片塞进它里面，就变成照片外面套一圈 14pt 黑框，底部还要再加
+          detailHeroPhoto 的 marginBottom 12 —— 上/左/右 14pt、底边 26pt 的黑边，
+          而且照片自己的 radius 18 落在卡片的 radius 18 里，两层圆角也不齐。
+          这里改用不带头距的容器：照片铺满整张卡（容器圆角后来也去掉了，
+          见 MARKET-DETAIL-HERO-RATIO-001）。 */}
+      <View style={styles.detailHeroMedia}>
         <View style={styles.detailHeroPhoto}>
           <ExpoImage cachePolicy="memory-disk" contentFit="cover" source={opportunity.sceneImageUrl ? { uri: opportunity.sceneImageUrl } : SAMPLE_SCENE_IMAGE[detailType]} style={StyleSheet.absoluteFill} transition={0} />
           {!opportunity.sceneImageUrl ? <View style={styles.detailHeroPhotoTag}><Text selectable style={styles.detailHeroPhotoTagText}>AI 样张</Text></View> : null}
@@ -815,27 +829,39 @@ function OpportunityDetail({
             <Text selectable style={styles.r4PriceValue}>{fairRange}</Text>
           </View>
         ) : null}
-        <View style={styles.r4PriceCell}>
-          <Text selectable style={styles.r4PriceLabel}>{opportunity.moneyFlow === "TBD" ? "双方面谈" : opportunity.moneyFlow === "FREE" ? "同好/社区" : "你的历史"}</Text>
-          <Text selectable style={styles.r4PriceValue}>{opportunity.moneyFlow === "FREE" ? "0₫" : opportunity.moneyFlow === "TBD" ? "—" : `约 ${budget}`}</Text>
-        </View>
+        {/* MARKET-HISTORY-CELL-001: 这里第三格以前拿订单价当"接单者的历史参考价"
+            复读了一遍 —— 值就是这单自己的价（budget = opportunity.price），跟左边
+            那格恒等，永远不可能不同。平台也没有"你的类似履约中位数"这个数据源
+            （MARKET-FAKE-JUDGMENT-001 的原话：不存在"类似履约"数据）。
+            一格恒等复读 + 一个没有来源的历史标签 = 编出来的。整格删掉；
+            FREE / TBD 的语义已经由左格的 priceLabel 表达。
+            （注释刻意不复述那两个中文字面量，否则守门的 grep 会被注释自己骗绿。） */}
       </View>
 
       {/* MARKET-QUOTE-SHEET-001: valueBox 之前写一个硬编码的竞争力评分(中等 + 68% 进度条),
-          服务端没返回任何竞争力数据 —— 这是从 0 编出来的数字。换成参考区间 + 一句
-          话, 跟 prototype 的"参考报价区间"对齐。 */}
+          服务端没返回任何竞争力数据 —— 这是从 0 编出来的数字。换成一句说明,
+          跟 prototype 的"参考报价区间"对齐。
+          MARKET-FAIR-RANGE-CLAIM-001: 这里后来还是留了一句无条件的断言，说客户预算
+          落在 Proxy 的公平区间内 —— 平台没有公平区间引擎（全仓只有这句文案和原型），
+          而且区间只在发布方真填了两框时才有。标题承诺"参考报价区间"却不给区间，
+          等于又替系统许了一个没有依据的承诺。改成按有没有真区间分两种说法。
+          （注释刻意不复述那句原文，否则守门的 grep 会被注释自己骗绿。） */}
       <View style={styles.valueBox}>
         <View style={styles.valueHead}>
-          <Text selectable style={styles.valueTitle}>参考报价区间</Text>
-          <Text selectable style={styles.valueBadge}>仅供锚定</Text>
+          <Text selectable style={styles.valueTitle}>{fairRange ? "参考报价区间" : "报价说明"}</Text>
+          {fairRange ? <Text selectable style={styles.valueBadge}>仅供锚定</Text> : null}
         </View>
-        <Text selectable style={styles.valueText}>客户预算落在 Proxy 公平区间内。你点的"报名报价"会进独立 sheet 自己定金额 —— 报价 UI 不在这屏, 不让详情页同时承担读订单和出价两件事。</Text>
+        <Text selectable style={styles.valueText}>
+          {fairRange
+            ? `区间 ${fairRange} 来自发布方填的两框，只供锚定，不是平台评估的公平价。你点的"报名报价"会进独立 sheet 自己定金额 —— 报价 UI 不在这屏, 不让详情页同时承担读订单和出价两件事。`
+            : `发布方只填了一个价，这单没有区间可锚定。你点的"报名报价"会进独立 sheet 自己定金额 —— 报价 UI 不在这屏, 不让详情页同时承担读订单和出价两件事。`}
+        </Text>
       </View>
 
       <View style={styles.factGrid}>
         <View style={styles.fact}>
           <Text selectable style={styles.factLabel}>时间</Text>
-          <Text selectable style={styles.factValue}>{opportunity.date} {opportunity.time}</Text>
+          <Text selectable style={styles.factValue}>{opportunityWhenLabel(opportunity)}</Text>
         </View>
         <View style={styles.fact}>
           <Text selectable style={styles.factLabel}>地点</Text>
@@ -846,7 +872,7 @@ function OpportunityDetail({
           {/* PROFILE-READ-001: 服务端曾把个人机会 Owner 写死成 "你"；
               存量行经 079 回填清成空，此处对残留脏串同样中性兜底，
               永不把 "你" 展示给非作者。wire 暂无 ownerId，不做归属判定。 */}
-          <Text selectable style={styles.factValue}>{resolveAuthorDisplayName({ authorId: `market_owner:${opportunity.owner}`, authorType: opportunity.ownerType === "BUSINESS" ? "MERCHANT" : "USER", authorDisplayName: opportunity.owner })} {opportunity.verified ? "✓" : ""}</Text>
+          <Text selectable style={styles.factValue}>{resolveAuthorDisplayName({ authorId: `market_owner:${opportunity.owner}`, authorType: opportunity.ownerType === "BUSINESS" ? "MERCHANT" : "USER", authorDisplayName: opportunity.owner })} {merchantVerified(opportunity) ? "✓" : ""}</Text>
         </View>
         <View style={styles.fact}>
           <Text selectable style={styles.factLabel}>当前回应</Text>
@@ -879,9 +905,16 @@ function OpportunityDetail({
       <View style={styles.detailWhyBox}>
         <Text selectable style={styles.detailWhyTitle}>为什么推荐给你</Text>
         {/* MARKET-FAKE-JUDGMENT-001: 匹配度那条删掉了 —— 服务端没有匹配引擎，
-            以前显示的是发布时写死的常量。 */}
-        {opportunity.verified ? <Text selectable style={styles.detailWhyRow}>✓ 商家身份已验证</Text> : null}
-        {viewerTravelMinutes != null ? <Text selectable style={styles.detailWhyRow}>✓ 通勤约 {viewerTravelMinutes} 分钟</Text> : null}
+            以前显示的是发布时写死的常量。
+            MARKET-LEGACY-VERIFIED-001: 认证那条只在服务端能背的形态下画
+            （ownerType=BUSINESS + verified），存量行里 ownerType=PERSON +
+            verified=true 的组合平台从来不产出。
+            SOUL 里那条：一个理由都没有时不许留一个只有标题的空盒 —— 如实说明。 */}
+        {whyRows.length > 0 ? (
+          whyRows.map((row) => <Text key={row} selectable style={styles.detailWhyRow}>{row}</Text>)
+        ) : (
+          <Text selectable style={styles.detailWhyRow}>这一版没有可展示的推荐理由：匹配度要按你的技能与历史履约算，平台目前没有这份数据，这里不给出结论。</Text>
+        )}
       </View>
 
       <View style={styles.detailActions}>
@@ -1084,7 +1117,7 @@ function PublishActivityForm({ activities, marketplace, venueOptions, onBack, on
   if (!pickedPreset) {
     // step 1 — preset cards from the server catalog (R58 activity1).
     return <View style={styles.activityPublishPanel}>
-      <View style={styles.detailHead}><Pressable onPress={onBack}><Text selectable style={styles.detailBackText}>‹</Text></Pressable><Text selectable style={styles.detailTitle}>创建活动</Text></View>
+      <View style={styles.detailHead}><Pressable onPress={onBack}><ProxyBackGlyph /></Pressable><Text selectable style={styles.detailTitle}>创建活动</Text></View>
       <Text selectable style={styles.activityPublishTitle}>想组织什么？</Text>
       <Text selectable style={styles.publishFlowSub}>活动强调多人参与；先选一个完整玩法，也可以直接自定义。</Text>
       {presetPhase === "LOADING" ? <ProxyLoading tone="muted" style={{ marginTop: 24 }} /> : null}
@@ -1106,7 +1139,7 @@ function PublishActivityForm({ activities, marketplace, venueOptions, onBack, on
 
   return <View style={styles.activityPublishPanel}>
     <View style={styles.detailHead}>
-      <Pressable onPress={() => { if (pickedPreset.id) setPickedPreset(undefined); else onBack(); }}><Text selectable style={styles.detailBackText}>‹</Text></Pressable>
+      <Pressable onPress={() => { if (pickedPreset.id) setPickedPreset(undefined); else onBack(); }}><ProxyBackGlyph /></Pressable>
       <Text selectable style={styles.detailTitle}>活动设置</Text>
     </View>
     {pickedPreset.id ? (
@@ -1207,7 +1240,7 @@ function PublishTemplatePicker({ marketplace, onBack, onPicked, onCustom }: { ma
 
   return <View>
     <View style={styles.detailHead}>
-      <Pressable onPress={onBack} style={styles.detailBack}><Text selectable style={styles.detailBackText}>‹</Text></Pressable>
+      <Pressable onPress={onBack} style={styles.detailBack}><ProxyBackGlyph /></Pressable>
       <Text selectable style={styles.detailTitle}>发布需求</Text>
     </View>
     <View style={styles.detailHero}>
@@ -1465,7 +1498,7 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
     <View>
       <View style={styles.detailHead}>
         <Pressable onPress={() => { if (pickedTemplate && pickedTemplate.id) setPickedTemplate(undefined); else onBack(); }} style={styles.detailBack}>
-          <Text selectable style={styles.detailBackText}>‹</Text>
+          <ProxyBackGlyph />
         </Pressable>
         <Text selectable style={styles.detailTitle}>发布需求</Text>
       </View>
@@ -1777,7 +1810,7 @@ function SelectWorkbench({ marketplace, fulfillment, profileClient, opportunity,
     <View>
       <View style={styles.detailHead}>
         <Pressable onPress={onBack} style={styles.detailBack}>
-          <Text selectable style={styles.detailBackText}>‹</Text>
+          <ProxyBackGlyph />
         </Pressable>
         <Text selectable style={styles.detailTitle}>选人工作台</Text>
       </View>
@@ -1785,7 +1818,7 @@ function SelectWorkbench({ marketplace, fulfillment, profileClient, opportunity,
         <Text selectable style={styles.detailHeroKicker}>报名明细 · 仅发布者可见</Text>
         <Text selectable style={styles.detailHeroTitle}>{opportunity.title}</Text>
         <Text selectable style={styles.detailHeroSub}>
-          {opportunity.date} {opportunity.time} · {opportunity.location} · {candidates.length} 份真实报名
+          {opportunityWhenLabel(opportunity)} · {opportunity.location} · {candidates.length} 份真实报名
         </Text>
       </View>
       <View style={styles.r4PriceStrip}>
@@ -2249,7 +2282,7 @@ const styles = StyleSheet.create({
   contextTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
   contextSub: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
   contextBadge: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
-  contextBadgeText: { color: "color.factInferredFg", fontSize: 11, fontWeight: "800" },
+  contextBadgeText: { color: color.factInferredFg, fontSize: 11, fontWeight: "800" },
   r4Card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, marginVertical: 5, padding: 12, ...shadows.card },
   r4CardFlat: { backgroundColor: "transparent", borderBottomColor: "rgba(35,28,42,0.09)", borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12, paddingHorizontal: 12, marginVertical: 0 },
   r4Top: { alignItems: "flex-start", flexDirection: "row", gap: 8, justifyContent: "space-between" },
@@ -2306,17 +2339,17 @@ const styles = StyleSheet.create({
   r4Meta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },
   r4PriceStrip: { flexDirection: "row", gap: 6, marginTop: 8 },
   r4PriceCell: { backgroundColor: color.surface, borderRadius: 10, flex: 1, padding: 8 },
-  r4PriceCellHot: { backgroundColor: "color.warn" },
+  r4PriceCellHot: { backgroundColor: color.warn },
   r4PriceLabel: { color: color.muted, fontSize: 11 },
   r4PriceValue: { color: color.ink, fontSize: 11, fontWeight: "800", marginTop: 2 },
   r4Tags: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 8 },
   r4Tag: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
-  r4TagHot: { backgroundColor: "color.bottomActiveBg" },
+  r4TagHot: { backgroundColor: color.bottomActiveBg },
   r4TagText: { color: "#5E5665", fontSize: 11 },
   r4TagTextHot: { color: "#B91451", fontWeight: "800" },
   r4Match: { alignItems: "center", borderTopColor: "#F1EDF3", borderTopWidth: 1, flexDirection: "row", gap: 8, justifyContent: "space-between", marginTop: 9, paddingTop: 8 },
   r4MatchText: { color: color.muted, flex: 1, fontSize: 11, lineHeight: 15 },
-  r4FitBadge: { backgroundColor: "color.bottomActiveBg", borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
+  r4FitBadge: { backgroundColor: color.bottomActiveBg, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
   r4FitText: { color: "#B91451", fontSize: 11, fontWeight: "800" },
   r4Actions: { flexDirection: "row", gap: 7, marginTop: 9 },
   r4ActionGhost: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, flex: 1, justifyContent: "center", minHeight: 40 },
@@ -2326,17 +2359,21 @@ const styles = StyleSheet.create({
   // 详情
   detailHead: { alignItems: "center", flexDirection: "row", gap: 4, marginBottom: 8 },
   detailBack: { paddingHorizontal: 6, paddingVertical: 4 },
-  detailBackText: { color: color.ink, fontSize: 22, fontWeight: "700" },
   detailTitle: { color: color.ink, flex: 1, fontSize: 16, fontWeight: "800" },
-  detailHero: { backgroundColor: color.ink, borderRadius: 18, marginBottom: 10, padding: 14 }, detailHeroTypeRow: { alignItems: "center", flexDirection: "row", gap: 10, marginBottom: 10 }, detailHeroTypeMeta: { flex: 1, minWidth: 0 }, detailHeroTypeTitle: { color: color.white, fontSize: 14, fontWeight: "800", lineHeight: 18, marginTop: 2 },
+  // MARKET-DETAIL-HERO-MEDIA-001: 深色**文字** hero（发布需求 / 选人工作台用）。
+  // 照片卡不再套用它，改用下面的 detailHeroMedia。
+  // 同行的 detailHeroTypeRow / detailHeroTypeMeta / detailHeroTypeTitle 删掉了 ——
+  // 那是"类型行放进深色 hero 里"的写法，详情页最终走的是白底 detailTypeRow，
+  // 三个 style 从加上那天起就没有调用方（跟 detailBackText 同一次清理）。
+  detailHero: { backgroundColor: color.ink, borderRadius: 18, marginBottom: 10, padding: 14 },
   detailHeroKicker: { color: "#CDC8BF", fontSize: 11, fontWeight: "800" },
   detailHeroTitle: { color: color.white, fontSize: 18, fontWeight: "800", lineHeight: 24, marginTop: 4 },
   detailHeroSub: { color: "#D8D4CA", fontSize: 11, lineHeight: 16, marginTop: 6 },
   valueBox: { backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, marginTop: 10, padding: 10 },
   valueHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   valueTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  valueBadge: { backgroundColor: "color.warn", borderRadius: 999, color: "color.factUnknownFg", fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 7, paddingVertical: 4 },
-  valueBar: { backgroundColor: "color.appBg", borderRadius: 999, height: 8, marginVertical: 7, overflow: "hidden" },
+  valueBadge: { backgroundColor: color.warn, borderRadius: 999, color: color.factUnknownFg, fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 7, paddingVertical: 4 },
+  valueBar: { backgroundColor: color.appBg, borderRadius: 999, height: 8, marginVertical: 7, overflow: "hidden" },
   valueFill: { backgroundColor: color.magenta, borderRadius: 999, height: "100%" },
   valueText: { color: color.muted, fontSize: 11, lineHeight: 15 },
   factGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
@@ -2346,15 +2383,15 @@ const styles = StyleSheet.create({
   fact: { backgroundColor: color.surface, borderRadius: 10, flexBasis: "48%", flexGrow: 1, padding: 8 },
   factLabel: { color: color.muted, fontSize: 11 },
   factValue: { color: color.ink, fontSize: 11, fontWeight: "700", marginTop: 2 },
-  aiBox: { backgroundColor: "color.factInferredBg", borderColor: "#E6DBF8", borderRadius: 15, borderWidth: 1, marginTop: 10, padding: 10 },
+  aiBox: { backgroundColor: color.factInferredBg, borderColor: "#E6DBF8", borderRadius: 15, borderWidth: 1, marginTop: 10, padding: 10 },
   aiHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   aiTitle: { color: color.ink, fontSize: 11, fontWeight: "800" },
-  aiStrong: { color: "color.factInferredFg", fontSize: 11, fontWeight: "800" },
+  aiStrong: { color: color.factInferredFg, fontSize: 11, fontWeight: "800" },
   aiChecks: { gap: 4, marginTop: 7 },
   aiCheck: { color: "#3E2E5A", fontSize: 11, lineHeight: 15 },
   quoteGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 10 },
   quoteOption: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flexBasis: "48%", flexGrow: 1, padding: 9 },
-  quoteOptionOn: { backgroundColor: "color.bottomActiveBg", borderColor: color.magenta },
+  quoteOptionOn: { backgroundColor: color.bottomActiveBg, borderColor: color.magenta },
   quotePrice: { color: color.ink, fontSize: 12, fontWeight: "800" },
   quoteSub: { color: color.muted, fontSize: 11, marginTop: 2 },
   detailHint: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 10, textAlign: "center" },
@@ -2406,7 +2443,7 @@ const styles = StyleSheet.create({
   heatToggleText: { color: color.ink, fontSize: 14, fontWeight: "900" },
   heatToggleTextOn: { color: color.white, fontSize: 14, fontWeight: "900" },
   geoLocateError: { backgroundColor: "rgba(255,255,255,0.92)", borderColor: "#E6B100", borderRadius: 10, borderWidth: 1, left: 10, paddingHorizontal: 10, paddingVertical: 6, position: "absolute", right: 10, top: 10 },
-  geoLocateErrorText: { color: "color.factUnknownFg", fontSize: 11, fontWeight: "700" },
+  geoLocateErrorText: { color: color.factUnknownFg, fontSize: 11, fontWeight: "700" },
   mapRemote: { backgroundColor: "#F7F4FA", borderColor: "#D8CFDE", borderRadius: 13, borderStyle: "dashed", borderWidth: 1, marginTop: 8, padding: 10 },
   mapRemoteText: { color: color.muted, fontSize: 11, lineHeight: 15 },
   mapResult: { backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, marginTop: 8, padding: 10 },
@@ -2416,7 +2453,16 @@ const styles = StyleSheet.create({
   mapResultBtnText: { color: color.white, fontSize: 11, fontWeight: "800" },
   // MARKET-QUOTE-SHEET-001: 详情 hero 改为场景照片 + overlay, 跟 prototype 客户需求
   // 屏一致; 报价搬出去之后, 详情底部只剩"为什么推荐给你 + 先看看 / 报名报价"。
-  detailHeroPhoto: { backgroundColor: "#F1ECE3", borderRadius: 18, height: 196, justifyContent: "flex-end", marginBottom: 12, overflow: "hidden" },
+  // MARKET-DETAIL-HERO-RATIO-001: 高度不写死。素材样张是 640x480（4:3），而在
+  // 390 宽的屏上写死 196 高等于 2:1 —— cover 会把 4:3 的图上下裁掉三分之一，
+  // 屏幕上就是一条横条；更宽的屏（平板 / 分屏）还会越裁越扁，因为高度钉死而
+  // 宽高比跟着宽度跑。改成按素材比例约束：任何宽度下都完整显示，不裁不拉伸。
+  detailHeroPhoto: { aspectRatio: 4 / 3, backgroundColor: "#F1ECE3", justifyContent: "flex-end", overflow: "hidden" },
+  // MARKET-DETAIL-HERO-MEDIA-001: 照片卡的容器 —— 只有底色 + 裁切，没有
+  // padding / marginBottom（那是文字 hero 的排版参数，套在照片上就是一圈黑框）。
+  // MARKET-DETAIL-HERO-RATIO-001: 也不切圆角 —— 满宽封面照切了圆角，四个角会露出
+  // 页面底色，看着像一张贴歪的卡片；方形满宽才是封面照该有的样子。
+  detailHeroMedia: { backgroundColor: color.ink, marginBottom: 10, overflow: "hidden" },
   detailHeroPhotoTag: { backgroundColor: "rgba(20,19,26,.74)", borderRadius: 6, left: 10, paddingHorizontal: 6, paddingVertical: 3, position: "absolute", top: 10 },
   detailHeroPhotoTagText: { color: color.white, fontSize: 11, fontWeight: "800" },
   detailHeroOverlay: { backgroundColor: "rgba(20,19,26,.45)", paddingBottom: 14, paddingHorizontal: 14, paddingTop: 18 },

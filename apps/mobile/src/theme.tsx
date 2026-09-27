@@ -109,7 +109,24 @@ export const foundation = {
   radius: { xs: 8, sm: 11, md: 16, lg: 22, xl: 28, full: 999 },
   space: { one: 4, two: 8, three: 12, four: 16, five: 20, six: 24, eight: 32 },
   text: { xs: 11, sm: 13, md: 15, lg: 18, xl: 24 },
-  control: { sm: 32, md: 40, lg: 48 }
+  control: { sm: 32, md: 40, lg: 48 },
+  // BACK-GLYPH-001（2026-09-26，用户：「把所有页面的返回 < 这个logo统一颜色 大小 形状」）：
+  // 全 App 返回字形的**唯一**尺寸。
+  //
+  // 统一之前：38 个文件各自手写一个 `‹` 文本，fontSize 从 11 到 28 都有
+  // （11/12/13/14/16/20/22/24/25/26/28），颜色 ink / magenta / violet / #151515 /
+  // #11110f / lotus.ink / foundation.ink / #DCE6F7 / muted 九种，容器从裸字形到
+  // 40pt 圆到 44pt 圆都有。
+  //
+  // 根因是**字形本身**：`‹` 是单左引号，不是箭头。它的可见形状、粗细、垂直基线
+  // 都跟着 fontSize + fontWeight + 平台字体漂移 —— 所以每个页面都得各自手调字号
+  // 去"把它凑成一个箭头"，于是必然调出 11→28 这一串。原型也一样：
+  // Proxy_R15_15 / R15_18 两份稿里就有 6 个不同的返回 class（.r160Back 30×30/22px、
+  // .r169Back 32×32/圆角11/18px、.backbtn 26×26/圆角9/22px、.r201Back 34×34/圆角12/20px、
+  // .r160IconBtn 34×34/圆角12/15px、.r200Back 18px），我们是逐个照抄才抄花的。
+  //
+  // 现在字形是 SVG 描边路径（proxy-icon 的 chevronLeft），这个数是它唯一的尺寸来源。
+  backGlyph: 18
 } as const;
 
 export const gradient = {

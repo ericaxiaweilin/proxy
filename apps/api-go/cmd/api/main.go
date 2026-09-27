@@ -20,6 +20,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/gravity"
+	"github.com/proxy-app/proxy-api/internal/growth"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
@@ -37,10 +38,12 @@ import (
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/profile"
 	"github.com/proxy-app/proxy-api/internal/providerapp"
+	"github.com/proxy-app/proxy-api/internal/rating"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/relationship"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
+	"github.com/proxy-app/proxy-api/internal/scenereview"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
 	"github.com/proxy-app/proxy-api/internal/storeonboarding"
 	"github.com/proxy-app/proxy-api/internal/supply"
@@ -149,6 +152,16 @@ func main() {
 	// bottom of this function, once businessService has its final (memory or
 	// Postgres) form.
 	benefitService := benefit.NewService(benefit.NewMemoryRepository())
+	// CLIENT-RATING-001: defaults to the in-memory repo; the DATABASE_URL
+	// branch below swaps in postgres.NewRatingRepository. Depends only on
+	// fulfillmentService.Repository() (read-only GetOrder), same pattern
+	// as growthService below.
+	ratingService := rating.New(rating.NewMemoryRepository(), fulfillmentService.Repository())
+	// SCENE-REVIEW-001: defaults to the in-memory repo; the DATABASE_URL
+	// branch below swaps in postgres.NewSceneReviewRepository. Depends only
+	// on realitySceneService.ListMyCheckinHistory (read-only), same pattern
+	// as ratingService above.
+	sceneReviewService := scenereview.New(scenereview.NewMemoryRepository(), realitySceneService)
 	demandService.SetBatchCreator(newSupplyBatchCreator(supplyService))
 	authenticator = identityService
 	var transactions api.TransactionRunner
@@ -294,6 +307,7 @@ func main() {
 		// it for hermetic, no-Docker runs).
 		sceneService = scene.NewWithRepository(postgres.NewSceneRepository(pool))
 		realitySceneService = realityscene.NewWithRepository(postgres.NewRealitySceneRepository(pool))
+		sceneReviewService = scenereview.New(postgres.NewSceneReviewRepository(pool), realitySceneService)
 		marketplaceService = marketplace.NewWithRepository(postgres.NewMarketplaceRepository(pool))
 		activityService = activity.NewWithRepository(postgres.NewActivityRepository(pool))
 		facetService = facet.NewWithRepository(postgres.NewFacetRepository(pool))
@@ -302,6 +316,7 @@ func main() {
 		voucherService = voucher.NewWithRepository(postgres.NewVoucherRepository(pool))
 		voucherService.SetSettlementCreator(voucher.LogSettlementCreator{})
 		benefitService = benefit.NewService(postgres.NewBenefitRepository(pool))
+		ratingService = rating.New(postgres.NewRatingRepository(pool), fulfillmentService.Repository())
 		demandService.SetBatchCreator(newSupplyBatchCreator(supplyService))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
@@ -659,6 +674,30 @@ func main() {
 	// same verified-identity pattern MerchantPublishIdentity already uses.
 	benefitService.WithMerchantVerifier(businessService)
 	server.Benefit = benefitService
+	// GROWTH-REAL-DATA-001: read-only over fulfillmentService's own Order
+	// store (same repo, same Snapshot() read listMyOrders already uses) —
+	// no separate service construction order to worry about, no new
+	// repository to open.
+	server.Growth = growth.New(fulfillmentService.Repository())
+	// CLIENT-RATING-001: ratingService already has its final (memory or
+	// Postgres) form by here — wire it into both the command surface and
+	// marketplace's read-through lookup (ListMarketOpportunities attaches
+	// a client's real rating to their listings; no data means no field,
+	// never a fabricated default).
+	server.Rating = ratingService
+	marketplaceService.SetRatingLookup(ratingService)
+	// SCENE-REVIEW-001: sceneReviewService already has its final (memory or
+	// Postgres) form by here — wire it into the command surface and
+	// realityscene's read-through lookup (Scene/Detail attach a real
+	// rating when one exists; no data means no field, never a fabricated
+	// default).
+	server.SceneReview = sceneReviewService
+	realitySceneService.SetRatingLookup(sceneReviewService)
+	// SCENE-COMPANION-001: real, friend-only companion suggestions — both
+	// relationshipService and activityService already have their final
+	// (memory or Postgres) form by here.
+	realitySceneService.SetFriendLister(relationshipService)
+	realitySceneService.SetActivityVisitorFilter(activityService)
 	// VOUCHER-DEFAULTS-001: the voucher wallet no longer mints free vouchers
 	// (see voucher.Service.ensureDefaults) — this is how a user's real,
 	// merchant-funded benefit.Claim rows show up in that same wallet

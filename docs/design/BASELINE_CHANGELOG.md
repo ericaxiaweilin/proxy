@@ -4,6 +4,325 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 329 — 2026-09-27
+
+- **场景名片重做 + 真实场景评分 + 有隐私边界的同行推荐**（SCENE-REVIEW-001 /
+  SCENE-COMPANION-001）。用户给的新设计稿 `deepseek_html_20260927_7fc18d.html`
+  （标题「场景名片」）排查结论：不是新页面——仓库里已经有一个成熟、诚实的真实域
+  `internal/realityscene`（打卡 100m 门禁、真收藏/去过聚合、真活动横滑、AI/真人
+  绑定卡），生产页面是 `apps/mobile/src/surfaces/reality-scene-map.tsx`。这个
+  scope **从未在 `CURRENT_BASELINE.json`/`IMPLEMENTATION_CONTRACTS.json` 里登记
+  过**——一个先于本次改动就存在的登记缺口，这次借着改这个文件顺手补上。
+- 新稿三处没有真实数据支撑，跟用户逐一确认过怎么处理：
+  1. **★4.8/12 条评价**——全仓没有场景评价域，之前专门删过一次假字段
+     （`SCENE-NO-FABRICATED-001`）。用户决定：**建一个真的**。新包
+     `internal/scenereview`：`SubmitSceneReview` 命令门禁在"打过卡"（命中
+     `ListMyCheckinHistory`），一场景一人一次（`UNIQUE(scene_id, rater_id)`，
+     改分覆盖不叠加）；`GetSceneRatingAggregate` 只读方法，跟
+     `rating.Service.GetUserRatingAggregate` 同一惯例。迁移
+     `132_scene_reviews.sql`。`realityscene.Scene`/`Detail` 新增
+     `Rating`/`RatingCount`（含 `MarshalJSON` 手写序列化那份，不是只加
+     struct 字段——`SCENE-ADDRESS-001` 踩过的坑），通过小接口 `ratingLookup`
+     （`SetRatingLookup`）查，只有 `count > 0` 才填，跟 marketplace 的
+     `CLIENT-RATING-001` 一个做法。
+  2. **"匹配推荐"（Mai/Linh/Trang）**——`humansFor()` 明确写死是占位
+     （`GEO-HONEST-002` ticket 等着接真数据），客户端已经诚实标了
+     "· 占位候选"。用户决定：**接一个真实但简单的信号**。排查发现关键冲突：
+     `/v1/scenes/:id` 是**匿名公开 + 共享缓存**接口（"Public reads are
+     intentional: authentication gates commitments, not scene discovery"，
+     `ListScenePresence` 也因此刻意只给聚合数不给名单）。直接把真实到场者塞进
+     这个公开接口 = 把真实用户的到场记录广播给任意匿名访客——这是**实现前**
+     发现并改路线的一个真实设计冲突，不是事后补救。用户决定：**只在登录时
+     接入，且只给真实好友看**。新增认证态命令 `ListSceneCompanionSuggestions`
+     （走正常 command envelope，自带 session 鉴权）：`relationship.Service.
+     ListActiveFriends` 取真实好友 → 分别过两个新的"只测已知候选、不能反查
+     名单"接口——`realityscene.Repository.FilterKnownVisitors`（真去过）和
+     `activity.Repository/Service.FilterKnownParticipants`（真报名过这里的
+     活动，查 `activity.activities.payload->>'realitySceneId'` join
+     `activity.participants`）——并集去重，上限 6。两个新接口的方法签名本身
+     就是隐私边界：只能拿调用方已经给出的候选 id 集合去测命中，永远不能拿它
+     去枚举"这个场景有哪些人"。公开的 `Detail.Humans` FIXTURE **原样保留**，
+     只在未登录或零命中时兜底。
+  3. **照片墙 官方/环境/菜单/用户精选 分类**——排查发现现有
+     `scene-shop-directory.tsx` 的照片墙实现（`localnet-client.ts` 的
+     `listPostsAtScene`，需登录）只是"这个场景下的真实帖子"，没有任何策展
+     管线。默认按同一条纪律处理：**只做"全部"，不做分类 tab、不做官方/用户
+     徽标**（没问，用户之前两次都选"建真的/接真的"而不是"先凑合"，按同一条
+     纪律做默认判断，不再单独发问）。
+- **移动端**（`reality-scene-map.tsx`）：新增区块而非推倒重写——variant
+  rail、菜单 rail、AI/真人绑定卡、徽章墙、"Reality Evidence · Scene Memory"
+  调试区都是新稿没画但是真实存在的功能，原样保留。加了返回按钮旁的分享按钮；
+  评分格只在 `ratingCount > 0` 时画，打过卡才能点开评分提交 Modal（星级 1–5 +
+  可选评论）；"适合一起的人"区块已登录且真的命中好友信号时画新的真实横滑
+  （只展示，不接 `selectedHumanId`/`DIRECT_INVITE`——那条链认的是
+  `detail.humans` 的 FIXTURE 形状，这轮不把真实推荐套进那个邀约链路），否则
+  回落原有 FIXTURE 渲染；新增"照片墙"区块（port 自 `scene-shop-directory.tsx`
+  同一套模式）；"这里的活动"卡**没有**加假的单场评分——`Activity` 结构体没有
+  rating 字段，这次也没加。
+- **顺带修复一个真实的既有缺口**：`internal/openapicmds` 的域注册清单
+  （`OPENAPI-DOMAIN-001`）漏了 `scenereview`——补上并重新生成
+  `openapi.commands.generated.yaml`。同一个检查还报出两个跟本次改动无关、
+  本来就存在的缺口（`growth GetMyGrowthSummary`、`rating SubmitRating`），
+  确认后**故意不修**，留给对应的历史改动收尾。
+- 涉及文件：`apps/api-go/internal/scenereview/`（新）、
+  `apps/api-go/internal/platform/postgres/scene_review.go`（新）、
+  `apps/api-go/migrations/132_scene_reviews.sql`（新）、
+  `apps/api-go/internal/realityscene/service.go`、
+  `apps/api-go/internal/activity/service.go`、
+  `apps/api-go/internal/platform/postgres/reality_scene.go`、
+  `apps/api-go/internal/platform/postgres/activity.go`、
+  `apps/api-go/internal/api/server.go`、
+  `apps/api-go/internal/api/command_dispatch.go`、`apps/api-go/cmd/api/main.go`、
+  `apps/api-go/internal/openapicmds/openapicmds.go`、
+  `apps/mobile/src/surfaces/reality-scene-map.tsx`。钉：
+  `apps/api-go/internal/scenereview/service_test.go`（8 条：门禁/星级校验/
+  同场景改分覆盖/多评分人各自计入/零聚合不是假默认/查历史失败拒绝/命令支持
+  校验）、`apps/api-go/internal/realityscene/service_test.go` 新增
+  `TestSceneRatingOnlyAppearsWithRealData`（未接线/接线但零数据/真数据三态）+
+  三条 `ListSceneCompanionSuggestions` 用例（要求认证/未接线返回空/只有真好友
+  + 真信号才出现，陌生人无论信号多强都不泄露）、
+  `apps/mobile/src/surfaces/scene-review-and-companions.test.ts`（新，10 条）。
+  `go build ./... && go test ./internal/scenereview/... ./internal/realityscene/...
+  ./internal/activity/... ./internal/relationship/... ./internal/api/...
+  ./cmd/api/...` + `pnpm typecheck` + 相关 mobile 测试文件全部跑过（targeted，
+  未跑 `scripts/check-regression-contracts.sh` 或全量套件）。模拟器人工验证：
+  重启 launchd 管的 dev API + 终止重开 App，对一个真打过卡的场景（Three
+  Beans · Bắc Ninh）提交 5 星评价，刷新后卡片正确显示"★5.0 · 1 条评价"且
+  入口变成"你评过 5 星 · 改评"；对一个没人去过的场景（Cầu Long Biên）确认
+  评分格和评价入口都不出现，"适合一起的人"正确回落到诚实标注的 FIXTURE。
+
+## Revision 328 — 2026-09-27
+
+- **市场·订单卡片重做 + 真实客户评分系统**（CLIENT-RATING-001）。用户下午给的新
+  设计稿 `deepseek_html_20260926_34df37.html`（标题「市场·订单」）之前完全没被接进
+  代码——现状卡片是更早一轮 R37 改版（高矮长方缩略图、类型 logo + 标题竖排、没有
+  发布者行），跟新稿子的差异不是微调：正方形缩略图、新增发布者行（头像 + 姓名 +
+  认证徽章 + ★评分）、类别图标+标题+匹配度合一行、类型筛选简化成咖啡/晚餐/运动/
+  音乐/聊天/其他 6 个单一概念。已跟用户确认两处分歧：★评分没有真数据 →**做一个真
+  的评分系统**（不是先留白）；类型筛选跟现状枚举不对应 →**扩展成新设计的分类集合**
+  （加新值，不砍旧值）。
+- **`internal/rating`（新包）**：真实、可验证的评分——只有完成过订单、且是那单
+  接单方（`AgentID`）的人，能给那单需求方（`RequesterID`）打 1–5 星，一单一次（改
+  分覆盖，不叠加）。方向跟 `fulfillment.RecordSatisfaction`（客户评价服务者，私有，
+  进撮合排序）正好相反——`RecordSatisfaction` 是 client-rates-provider，新的
+  `rating` 是 provider-rates-client（公开，卡片上的 ★评的是发布者）。迁移
+  `131_client_ratings.sql`：`client_ratings` 表 + `UNIQUE(order_id)` 约束（真约束
+  兜底，不是应用层承诺）+ `rated_user_id` 索引。Postgres 仓储用
+  `ON CONFLICT (order_id) DO UPDATE`；内存仓储给测试用。接线跟 `growth`/`benefit`
+  同一套三处小改动（`api/server.go` 加字段、`command_dispatch.go` 加一条 case、
+  `cmd/api/main.go` 构造 + 注入）。
+- **`marketplace.Service` 接入**：新增小接口 `ratingLookup`
+  (`GetUserRatingAggregate`) + `SetRatingLookup` 设置器（跟
+  `benefit.MerchantVerifier` 同一套"小接口只吃需要的方法"惯例）。`Opportunity`
+  新增 `Rating`/`RatingCount`（`json:",omitempty"`），`ListMarketOpportunities`
+  组装时按 `OwnerID` 查一次聚合，**`count > 0` 才填**，`count == 0` 或未接线时两个
+  字段都不出现——跟 `MARKET-FAKE-JUDGMENT-001` 那条"没数据不编"的规矩同一条线，绝
+  不用 0 或假 4.9 垫底。
+- **移动端类型扩展**（`components/market-type-logo.tsx`）：`MarketOpportunityType`
+  新增 `dining`/`sport_companion`/`music`/`chat_companion`，旧值
+  (`coffee_photo`/`walk_photo`/`coffee_chinese`/`bilingual_store`/`event_photo`)
+  全部保留（兼容老种子数据的关键词推断）。`chat_companion` 没有对应的
+  `SCENE_ACTIONS` 照片资产，改用 `ProxyIcon name="chat"` 矢量字形，不编一张假图片。
+  `r37-opportunity-card.tsx` 的 `inferOpportunityTypeForFilter` 加四个新关键词分支
+  （晚餐/dinner、运动/羽毛球/网球/sport、陪聊/chat/线上），跟旧分支（活动/双语/中文）
+  互不抢命中；`music` 只在直接出现"音乐"/"music"时命中，不从 `event_photo` 里抢。
+  `r37-type-palette.tsx` 的 `TYPES` 表换成新 6 桶（咖啡/晚餐/运动/音乐/聊天/其他），
+  "全部"图标从四宫格换成新稿的三横线（纯视觉，`onChange("all")` 逻辑不变）。
+- **卡片重排**（`r37-opportunity-card.tsx`）：缩略图 96×96 圆角正方形（原 104 宽撑满
+  卡片高度的竖长矩形），类别图标 + 真实 `opportunity.title` + 匹配度合一行（去掉了
+  原来单独一行的"标准订单类型"kicker + `TYPE_LABEL` 文案，那两行现在只剩图标承担
+  语义）；新增发布者行——首字头像（`initialAvatarTint` 稳定配色兜底，`Opportunity`
+  没有头像 URL 字段，不编一张假照片）+ 真实 `owner` + `verified` 为真才画认证徽章 +
+  `ratingCount > 0` 才画星级，三者任一没有真数据就整块不画（`owner` 为空时连发布者
+  行都不渲染）。
+- **契约**：`packages/contracts` 的 `MarketOpportunitySchema` 新增可选
+  `rating`/`ratingCount`，重新 build；`market-fixtures.ts` 的 `MarketOpportunity`
+  接口同步镜像两个字段 + 扩展后的 `opportunityType` 枚举。
+- **遗留缺口（本次未处理，留痕）**：`CURRENT_BASELINE.json` 的 `market`
+  `screenReferences` 条目 `file` 字段沿用惯例仍锚定在 `Filter_R7`（这个仓库的既有
+  做法是后续版本在 prose 里叙述演进，不逐次替换锚点文件）；原始的
+  `deepseek_html_20260926_34df37.html` 没有被拷进 `docs/design/references/`
+  改成规范命名——如果后续修订需要引用它作为稳定路径而不是 Downloads 相对路径，先
+  做这一步。
+- 涉及文件：`apps/api-go/internal/rating/`（新）、
+  `apps/api-go/internal/platform/postgres/rating.go`（新）、
+  `apps/api-go/migrations/131_client_ratings.sql`（新）、
+  `apps/api-go/internal/marketplace/service.go`、`apps/api-go/internal/api/server.go`、
+  `apps/api-go/internal/api/command_dispatch.go`、`apps/api-go/cmd/api/main.go`、
+  `packages/contracts/src/index.ts`、`apps/mobile/src/market-fixtures.ts`、
+  `apps/mobile/src/components/market-type-logo.tsx`、
+  `apps/mobile/src/surfaces/r37-opportunity-card.tsx`、
+  `apps/mobile/src/surfaces/r37-type-palette.tsx`。钉：
+  `apps/api-go/internal/rating/service_test.go`（7 条，接单方校验/完成态校验/星级
+  范围/同单覆盖不叠加/零聚合不是假默认/未知订单拒绝/未知命令拒绝）、
+  `apps/api-go/internal/marketplace/service_test.go` 新增
+  `TestListMarketOpportunitiesAttachesRealRatingOnly`（未接线/接线但零数据/真数据
+  三态）、`apps/mobile/src/surfaces/r37-market-logo.test.ts`（正方形缩略图 + 居中
+  断言替换旧的撑满矩形断言）、`apps/mobile/src/surfaces/market-publish-honest.test.ts`
+  （"其他"筛选标签文案同步）。`go build ./... && go test
+  ./internal/rating/... ./internal/marketplace/... ./internal/api/...
+  ./cmd/api/...` + `pnpm typecheck` + 上述 mobile 测试文件全部跑过（targeted，未跑
+  `scripts/check-regression-contracts.sh` 或全量套件）。模拟器人工验证：重启
+  launchd 管的 dev API（`launchctl kickstart -k`，拿的是 `go run` 编译的老二进制）
+  + 终止重开 App（不是热重载），确认正方形缩略图、真实发布者行（`weilinxia511`
+  显示蓝色认证勾，没有真评分历史的种子行不画星）、新 6 图标筛选行（含三横线"全部"）、
+  `chat_companion` 筛选出诚实的空列表（还没有种子数据命中，不是假兜底）。
+
+## Revision 326 — 2026-09-25
+
+- **主页帖子动作行第 2 颗「评论」补上**（PROFILE-ACTION-COUNTS-001 收尾）。用户
+  2026-09-25 第二次对照原型截图：「少了评论logo功能」。原型
+  `Proxy_Profile_Threads_Standalone_R2.html` 的 `function post(p)` 第 2 颗是
+  `<button>${I.reply}<span>${p.replies}</span></button>`（图标 + 评论数）。
+  **它从来没画出来过**：那一颗的闸门是 `{props.onReply ? … : null}`，而
+  `onReplyPost` **全仓没有任何调用方传过**（`grep -rn onReplyPost apps/mobile/src`
+  只命中 `ProfileTabs.tsx` 自己）—— 一个没人传的 prop 把一颗按钮焊死在 false 上，
+  而且**不会让任何断言变红**。现在删掉那个死 prop，第 2 颗改走已有的
+  `onToggleReplies`（展开/收起评论列表，语义 = 看这条帖子的评论），计数照旧
+  「拉到才画」；两个调用点在**没接 `engagementClient` 时不传 handler**，
+  PostCard 那颗整颗不画（不摆一颗按不动的按钮）。
+- **删掉动作行下面那行独立的「💬 N 条评论 ﹀」开关**。动作行第 2 颗现在**就是**这个
+  开关（原型也把评论数画在动作行里），留着那行 = 同屏两个评论入口、隔 8px 说同一个
+  数字。它原来的闸门 `reactions > 0 || replies > 0` 还会给「赞多但零评论」的帖子画
+  出一个点开是空列表的**假控件**。
+- **展开成功但零评论时给一句话**（「还没有评论」，新增 `postReplyEmpty` 样式）。
+  否则点完 💬 屏幕上什么都不变，看起来像按钮坏了。只在**确实拉到过**
+  （`replies !== undefined`）之后才说 —— 不能把「还没读到」说成「没有」。
+- **字形必须是 `replyBubble`（圆气泡），不是 `chat`（方角气泡）**。原型的
+  `I.reply` 是 `M20 11.5a7.5 7.5 0 1 1-3.2-6.1A7.5 7.5 0 0 1 20 11.5Z` + 尾巴（圆的），
+  而 `proxy-icon.tsx` 的 `chat` 是 `M5 6h14v9H9l-4 3z`（方角）。同一个错在
+  PROFILE-TAB-LOGO-001 已经犯过一次（回复 tab 指到 `chat`，用户当场指出「回复的 logo
+  还是不符合原型」），回复行第 2 颗也是 `replyBubble`（REPLY-ACTION-ICONS-001）——
+  三处必须同源。钉里带一条**反向臂**：动作行不许再出现 `name="chat"`。
+- 顺带把 `PostsTab.onLikePost` 的类型从 `=> void` 改成跟 `ProfileTabsProps` 一致的
+  `=> void | Promise<PostEngagement | void>`：它以前靠 TS 的「void 返回值可赋值」
+  侥幸过关，等于把 `toggleLike` 依赖的契约藏起来了。
+- 涉及文件：`apps/mobile/src/surfaces/ProfileTabs.tsx`。钉：
+  `apps/mobile/src/profile-action-row.test.ts`（**40 条臂全部负向注入验过**）、
+  `profile-post-replies.test.ts`；门禁 `PROFILE-ACTION-MORE-001` /
+  `PROFILE-ACTION-COUNTS-001`（含两条 `grep -qF` 反向守卫）。
+
+## Revision 327 — 2026-09-26
+
+- **主页帖子动作行第 1 颗「喜欢」换字形**（FEED-ACTION-ROW-001 收尾）。之前
+  那颗 `ProxyIcon name="heart" size={19}` 走的是 CSS 拼的 View（边框实现），
+  几何和描边粗细都跟同排的 replyBubble / replyRepost / replyShare（Feather 1.8）
+  不一样 —— 这是「不像原型」的根因，不是字号（之前一直在试字号，从来没人试过
+  换字形）。现在改成 `name="replyLike" size={18}`，4 颗同源。同步改了
+  `apps/mobile/src/components/proxy-icon.tsx` 里 `replyLike` 的 case：写死
+  `{...common}` 时 filled prop 被静默吞掉（点赞后只变色、不变实心 —— 状态反馈少
+  一档），现在改成 `(filled ? filledCommon : common)`，跟 bookmark 同形；描边恒 1.8
+  写在展开后面，不让 filledCommon 的 1.4 把它拉细。**Feather 风格恒为 1.8**，
+  不要给 `replyLike` 写 size>18 的版本（已是几何上限），也不要给 replyBubble /
+  replyRepost / replyShare 传非 18。
+- **同源字形现在跨 3 个动作行**：feed 卡片（`feed.tsx`，4 颗全部 reply*）、
+  ProfileTabs 帖子（4 颗全部 reply*）、回复行（`reply-target.ts` 渲染的那条）。
+  同一个「喜欢」在动态流和主页不能长成两个样子 —— 这是这两轮钉的核心诉求。
+- 涉及文件：`apps/mobile/src/surfaces/ProfileTabs.tsx`、
+  `apps/mobile/src/components/proxy-icon.tsx`。钉：
+  `apps/mobile/src/profile-action-row.test.ts`（同步把正向断言改成 replyLike /
+  18；`name="heart" size={19}` 和 `filled={liked} name="heart"` 反向臂由
+  `surfaces/feed-saved-count.test.ts` 里 `FEED-ACTION-ROW-001` 的「uses the
+  prototype's glyph family」那条覆盖）、`surfaces/feed-saved-count.test.ts`
+  新增 3 条 `FEED-ACTION-ROW-001` 断言（4 颗同源 / 计数 4 / replyLike 真读 filled），
+  全部负向注入验过会红。
+- 不可回归的点：`heart` glyph 在 `proxy-icon.tsx` 里**仍然存在**（被
+  `scene-activity-discovery.tsx` 用着），但**不再用于任何动作行**；回复行
+  `responses.tsx` 用的 replyBubble / replyLike 也不动。
+
+## Revision 325 — 2026-09-25
+
+- **他人主页行动行补上原型第三个控件**（PROFILE-ACTION-MORE-001）。用户 2026-09-25
+  把原型和模拟器并排截图：「我看了 还没有对齐原型」—— 原型 `+ 关注 / 消息 / ⋯`
+  是**三个**控件，我们只有前两个。第三个是 38×38 正圆（`borderRadius: 19`）里一颗
+  `ProxyIcon name="ellipsis"`（真图标：三个 `<View>` 画的点，不是往 `<Text>` 里塞
+  `···` 字符 —— 字符的字重和基线跟着字号跑）。它打开的菜单（`ProfileMoreSheet`）
+  必须是**真 `Modal`**：`ProfileTabs` 渲染在调用方的 `ScrollView` 里面，普通
+  `absoluteFill` 覆盖层会被滚出可视区/被裁掉（`ReportSheet` 能用遮罩是因为调用方
+  把它放在 `ScrollView` 外面）。菜单里**只放真能做的事**：分享主页（走系统分享）
+  + 屏蔽作者（`muteAuthor`，没接 client 时**整条不画**）。刻意**没有**「举报」
+  （页头那颗是唯一入口；FEED-MENU-DEDUP-001 就是为这个把 feed 帖文里重复的「···」
+  删掉的）和**没有**「减少推荐」（服务端只有按**帖子**的 `RecordFeedPreference`，
+  没有按**账号**的命令）。屏蔽失败必须说出来，成功提示给出唯一剩下的撤销路径。
+- **主页帖子动作行改成图标 + 计数**（PROFILE-ACTION-COUNTS-001）。原型
+  （`Proxy_Profile_Threads_Standalone_R2.html` 的 `function post()`：
+  `<button>${I.heart}<span>${p.likes}</span></button>` 四项）和用户的设计稿都是
+  `♡ 12  💬 3  ↻  ⤴`，我们却是文字「♡ 喜欢 / 💬 回复 / ↗ 分享」—— 而 feed 早就
+  改成图标了（FEED-ACTION-ICONS-001），同一个「喜欢」在两个页面长成两个样子。
+  字形改为 `heart`（已喜欢 `filled` + magenta）/ `chat` / `replyRepost` /
+  `replyShare`，分享顶到行尾（原型 `.pa` 第 4 个按钮带 `margin-left: auto`）。
+  计数**只在 `engagement` 拉到之后才画**，不回填 0（真·0 照常显示 0）。
+- **客户端补上转发**（REPOST-POST-001）。`RepostPost` 从 R14 起服务端就完整实现
+  （含 23505/23503 → `ALREADY_REPOSTED` / `POST_NOT_FOUND` 的集成测试），客户端却
+  一直没有方法 ⇒ 手机上无处可转发、`reposts` 恒为 0，动作行第 3 个按钮**根本画不
+  出来**。新增 `engagement-client.repostPost()`，重复转发判成成功（服务端把它当
+  `REJECTED / ALREADY_REPOSTED`，跟 PinPost 那种 `Accepted + state` 写法不同）；
+  转发后**重读** `getPostEngagement` 而不是猜 +1。
+- **配套收尾（同一处改动带出来的两个问题）**：
+  - 「展开评论」的闸门从 `reactions > 0 || replies > 0` 收成 `replies > 0`
+    —— 赞很多但一条评论都没有的帖子以前会画出一个「💬 0 条评论 ﹀」，点开是空列表：
+    一个**假控件**。
+  - 同一行原来的 `♡ N  ` 前缀删掉：计数已经在动作行里（原型的位置），隔 8px 再说
+    一遍读起来像两个不相干的指标。
+- 涉及文件：`apps/mobile/src/surfaces/ProfileTabs.tsx`、`me.tsx`、
+  `other-profile.tsx`、`apps/mobile/src/engagement-client.ts`、`reply-target.ts`。
+  钉：`apps/mobile/src/profile-action-row.test.ts`（32 条臂全部负向注入验过）、
+  `profile-post-replies.test.ts`、`engagement-client.test.ts`，门禁
+  `PROFILE-ACTION-MORE-001` / `PROFILE-ACTION-COUNTS-001` / `REPOST-POST-001`。
+
+## Revision 324 — 2026-09-25
+
+- **个人主页回复行：被回复者的名字单独上墨色**（REPLY-TARGET-NAME-INK-001）。用户
+  2026-09-25 报的：「你看回复xx 这个xx是灰色 但是原型是黑色的」。原型那一行是
+  「回复了 Linh 的帖子 · 1.2B」—— 名字墨色、其余次要色；我们整句一个 `<Text>`
+  （`styles.replyTarget` 只有 `#94a3b8`），名字跟着一起变灰。
+  **句式没变、文案一个字没改**：`reply-target.ts` 新增 `replyTargetParts()`
+  （prefix / name / suffix），`replyTargetLabel()` 改成它的拼接 —— 两处不可能漂。
+  `ProfileTabs.tsx` 分三段渲染，只有名字段换新样式 `replyTargetName`（`#0f172a`，
+  与 `replyName` / `replyText` 同一支墨色；嵌套 `<Text>` 继承父级字号，只改颜色，
+  11pt 底线不动）。
+- **回复 tab 的空态也按观察者取词**（REPLY-EMPTY-VIEWER-001，同一处漏掉的另一半）。
+  REPLY-TARGET-001 修掉了标题里写死的「你回复了」，但同一屏的空态漏了：访客点开
+  别人的主页、那个人一条回复都没有时，屏幕上写着「**你**在其他帖子下面的回复会
+  出现在这里」—— 把别人的东西说成了访问者的。现在这句副文案走
+  `repliesEmptyHint(viewerMode)`，OTHER 说「这个人回复过的帖子会出现在这里」。
+- 受影响文件：`apps/mobile/src/surfaces/ProfileTabs.tsx`（基线敏感）、
+  `apps/mobile/src/reply-target.ts`、`apps/mobile/src/reply-target.test.ts`、
+  `apps/mobile/src/design-system-r3.test.ts`、`scripts/check-regression-contracts.sh`
+  （REPLY-TARGET-001 那颗调用点针跟着换到 `replyTargetParts`，语义未变松）。
+
+## Revision 323 — 2026-09-25
+
+- **完成订单时指认店铺**（STORE-ATTRIB-001，补 Rev 319 留的缺口）。Rev 319 原文：
+  「归因入口（完成订单时指认店铺）下一轮，否则统计永远是 0。」这一轮补上。
+  缺口是真的、而且**看不见**：`fulfillment-client.recordOutcome` 的类型里根本没有
+  `storeId`，`me-orders.tsx` 那个唯一的生产调用点也不传 ⇒ 每一单落库 `store_id`
+  都是空 ⇒ 所有店铺统计恒为 0。而 Rev 319 的 hub 把这个状态渲染成一个**诚实的**
+  空态（空店全零 + 「暂无评价」，不编 ★）—— 于是「坏了」和「对了」在界面上长得
+  一模一样。服务端不用动：Rev 317 已经收 `storeId`（只认 ACTIVE 店，否则
+  `UNKNOWN_STORE` 驳回），`TestStoreAttributionAndStats` 早就在跑。
+- 归因**在同一笔提交里**发出（`lifecycle === "EXECUTING"` 或小单 `CONFIRMED` 的那次
+  `RecordOutcome`），不另开一步 —— 否则会出现「已完成但未归因」的中间态，而
+  `RecordOutcome` 是唯一写入通道，没有事后补归因的命令。
+- **归因是可选的**：不选 = 这一单不计入任何店（服务端语义），不是强制项。
+- **只有 AGENT（履约方）能选**：店铺统计的口径是「这家店接了多少单」，需求方
+  不该替它决定。非 AGENT 视图完全不画这一块。
+- **不摆假控件**：没有 `business` 客户端、或确实一家店都没有 ⇒ 整块不画；店铺
+  列表**读失败** ⇒ 单独说一句「店铺列表没读出来，这次先不计入店铺统计」。后两者
+  必须分开 —— 「读不出来」和「你确实没有店」不是一回事。
+- 取店逻辑抽成 `my-store-options.ts`（提炼自 `my-stores-hub.tsx` 的内联版本，保留
+  「逐个账号读失败不中断」），并补了行为测试。原来那段逻辑只在 `.tsx` 里，只能用
+  grep 钉住文本、测不了行为（读失败 vs 没有店 这两条正是靠行为测试守的）。
+  `my-stores-hub.tsx` 里那份内联副本**未动**（peer 同文件有未提交改动），
+  待其落地后再指回本模块。
+- 门禁：`STORE-ATTRIB-001` 钉在 `check-regression-contracts.sh`，10 条负向注入
+  全部验过会变红（含一条反向钉：`.tsx` 里不许再出现内联的 `business.listMyAccounts()`）。
+- 影响文件：`apps/mobile/src/surfaces/me-orders.tsx`、`apps/mobile/src/surfaces/me.tsx`
+  （peer 的 36 处未提交改动未碰，只加了一行 `business={business}`）、
+  `apps/mobile/src/fulfillment-client.ts`、`apps/mobile/src/my-store-options.ts`（新建）、
+  `apps/mobile/src/my-store-options.test.ts`（新建）、
+  `apps/mobile/src/fulfillment-client.test.ts`、`scripts/check-regression-contracts.sh`。
+
 ## Revision 322 — 2026-09-25
 
 - **建店/二维码归位推荐管理**（STORE-HUB-MOVE-001）：我的店铺 hub 撤掉建店/资料两行，

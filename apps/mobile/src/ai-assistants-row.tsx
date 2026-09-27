@@ -9,6 +9,7 @@ import { EngagementClient } from "./engagement-client";
 import { HorizontalSwipeRail } from "./components/horizontal-swipe-rail";
 import { ConversationClient } from "./conversation-client";
 import { color } from "./theme";
+import { ProxyBackGlyph } from "./components/proxy-foundation";
 
 export class AIAssistantsProtocolError extends Error {
   public constructor(message: string) {
@@ -128,7 +129,7 @@ export function AIAssistantsRow({ baseUrl = localApiBaseUrl }: { baseUrl?: strin
     return (
       <View>
         <Pressable onPress={() => { setSelectedId(undefined); setNotice(undefined); }} style={styles.backButton}>
-          <Text selectable style={styles.backText}>‹ 小美们</Text>
+          <ProxyBackGlyph label="小美们" />
         </Pressable>
         {broken.has(selected.id) ? (
           <View style={[styles.homeToken, { backgroundColor: selected.color }]}>
@@ -207,7 +208,7 @@ const styles = StyleSheet.create({
   followed: { color: color.muted, fontSize: 10 },
   // 个人主页（整页替换行，非底部弹卡）。
   backButton: { alignItems: "center", flexDirection: "row", paddingHorizontal: 16, paddingVertical: 8 },
-  backText: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  // backText 已删：字形和标签都由公共组件 ProxyBackGlyph 画（BACK-GLYPH-001）。
   homePortrait: { aspectRatio: 1, borderRadius: 18, marginHorizontal: 16, width: "100%" },
   homeToken: { alignItems: "center", borderRadius: 18, height: 240, justifyContent: "center", marginHorizontal: 16 },
   homeTokenText: { fontSize: 64 },

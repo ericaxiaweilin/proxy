@@ -12,30 +12,30 @@ import (
 )
 
 var (
-	ErrCampaignNotFound       = errors.New("campaign not found")
-	ErrCampaignNotActive      = errors.New("campaign not active")
-	ErrCampaignExhausted      = errors.New("campaign exhausted")
-	ErrAllocationNotFound     = errors.New("allocation not found")
-	ErrAllocationExhausted    = errors.New("allocation exhausted")
-	ErrOfferNotFound          = errors.New("offer not found")
-	ErrOfferExpired           = errors.New("offer expired")
-	ErrOfferAlreadyClaimed    = errors.New("offer already claimed")
-	ErrClaimNotFound          = errors.New("claim not found")
-	ErrClaimAlreadyRedeemed   = errors.New("claim already redeemed")
-	ErrClaimTokenInvalid      = errors.New("claim token invalid")
-	ErrCapacityExhausted      = errors.New("capacity exhausted")
-	ErrRedemptionDuplicate    = errors.New("redemption duplicate")
-	ErrRedemptionNotFound     = errors.New("redemption not found")
-	ErrVersionConflict        = errors.New("version conflict")
-	ErrNotAuthorized          = errors.New("not authorized")
-	ErrEligibilityFailed      = errors.New("eligibility failed")
+	ErrCampaignNotFound     = errors.New("campaign not found")
+	ErrCampaignNotActive    = errors.New("campaign not active")
+	ErrCampaignExhausted    = errors.New("campaign exhausted")
+	ErrAllocationNotFound   = errors.New("allocation not found")
+	ErrAllocationExhausted  = errors.New("allocation exhausted")
+	ErrOfferNotFound        = errors.New("offer not found")
+	ErrOfferExpired         = errors.New("offer expired")
+	ErrOfferAlreadyClaimed  = errors.New("offer already claimed")
+	ErrClaimNotFound        = errors.New("claim not found")
+	ErrClaimAlreadyRedeemed = errors.New("claim already redeemed")
+	ErrClaimTokenInvalid    = errors.New("claim token invalid")
+	ErrCapacityExhausted    = errors.New("capacity exhausted")
+	ErrRedemptionDuplicate  = errors.New("redemption duplicate")
+	ErrRedemptionNotFound   = errors.New("redemption not found")
+	ErrVersionConflict      = errors.New("version conflict")
+	ErrNotAuthorized        = errors.New("not authorized")
+	ErrEligibilityFailed    = errors.New("eligibility failed")
 )
 
 // Service implements the Benefit Routing Network business logic.
 type Service struct {
-	repo    Repository
-	clock   Clock
-	eligibility Evaluator
+	repo             Repository
+	clock            Clock
+	eligibility      Evaluator
 	merchantVerifier MerchantVerifier
 }
 
@@ -124,7 +124,8 @@ func (s *Service) countRedemptions(ctx context.Context, userID, campaignID strin
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "CreateCampaign", "ActivateCampaign", "PauseCampaign", "AllocateBenefit", "ClaimBenefit", "RedeemBenefit":
+	case "CreateCampaign", "ActivateCampaign", "PauseCampaign", "AllocateBenefit", "ClaimBenefit", "RedeemBenefit",
+		"ListCampaigns", "GetCampaign", "ListClaims", "GetClaim":
 		return true
 	default:
 		return false
@@ -149,9 +150,100 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.HandleClaimBenefit(ctx, e)
 	case "RedeemBenefit":
 		return s.HandleRedeemBenefit(ctx, e)
+	case "ListCampaigns":
+		return s.HandleListCampaigns(ctx, e)
+	case "GetCampaign":
+		return s.HandleGetCampaign(ctx, e)
+	case "ListClaims":
+		return s.HandleListClaims(ctx, e)
+	case "GetClaim":
+		return s.HandleGetClaim(ctx, e)
 	default:
 		return command.Rejected(e, "BENEFIT_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "benefit.unsupported", nil)
 	}
+}
+
+// BENEFIT-READ-001: the mobile BenefitClient (listCampaigns / getCampaign /
+// listClaims / getClaim) has always posted these four command types to
+// /v1/commands/... but Supports() above never registered them — every
+// call was silently REJECTED, so BenefitHubSurface's "我的权益" campaign
+// list has never worked end to end. checkEligibility is not wired here:
+// no UI calls it yet (see benefit-hub.tsx's own comment), so adding it
+// now would be speculative rather than closing an actual gap.
+//
+// ListClaims/GetClaim are scoped to e.Actor.ID, never a client-supplied
+// userID — a claim list is personal redemption history, same rule as
+// every other "trust the actor, not the client's claim" read in this
+// package (see MerchantVerifier above).
+
+type listCampaignsPayload struct {
+	Status *CampaignStatus `json:"status"`
+}
+
+func (s *Service) HandleListCampaigns(ctx context.Context, e command.Envelope) command.Result {
+	var p listCampaignsPayload
+	decode(e.Payload, &p) // payload is optional; absent/invalid just means "no filter"
+	campaigns, err := s.repo.ListCampaigns(ctx, ListCampaignOpts{Status: p.Status})
+	if err != nil {
+		return command.Rejected(e, "CAMPAIGN_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "benefit.campaign_list_failed", nil)
+	}
+	result := command.Accepted(e, "CampaignCollection", e.Actor.ID, 1, "READY", nil)
+	result.Body = map[string]any{"campaigns": campaigns}
+	return result
+}
+
+type getCampaignPayload struct {
+	CampaignID string `json:"campaignId"`
+}
+
+func (s *Service) HandleGetCampaign(ctx context.Context, e command.Envelope) command.Result {
+	var p getCampaignPayload
+	if !decode(e.Payload, &p) || p.CampaignID == "" {
+		return command.Rejected(e, "INVALID_PAYLOAD", "VALIDATION", "AFTER_USER_ACTION", "benefit.invalid_payload", nil)
+	}
+	c, err := s.repo.GetCampaign(ctx, p.CampaignID)
+	if err != nil {
+		return command.Rejected(e, "CAMPAIGN_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "benefit.campaign_not_found", nil)
+	}
+	result := command.Accepted(e, "Campaign", c.ID, c.Version, string(c.Status), nil)
+	result.Body = map[string]any{"campaign": c}
+	return result
+}
+
+type listClaimsPayload struct {
+	Status *ClaimStatus `json:"status"`
+}
+
+func (s *Service) HandleListClaims(ctx context.Context, e command.Envelope) command.Result {
+	var p listClaimsPayload
+	decode(e.Payload, &p)
+	claims, err := s.repo.ListClaimsByUser(ctx, e.Actor.ID, p.Status)
+	if err != nil {
+		return command.Rejected(e, "CLAIM_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "benefit.claim_list_failed", nil)
+	}
+	result := command.Accepted(e, "ClaimCollection", e.Actor.ID, 1, "READY", nil)
+	result.Body = map[string]any{"claims": claims}
+	return result
+}
+
+type getClaimPayload struct {
+	ClaimID string `json:"claimId"`
+}
+
+func (s *Service) HandleGetClaim(ctx context.Context, e command.Envelope) command.Result {
+	var p getClaimPayload
+	if !decode(e.Payload, &p) || p.ClaimID == "" {
+		return command.Rejected(e, "INVALID_PAYLOAD", "VALIDATION", "AFTER_USER_ACTION", "benefit.invalid_payload", nil)
+	}
+	c, err := s.repo.GetClaim(ctx, p.ClaimID)
+	if err != nil || c.UserID != e.Actor.ID {
+		// Not-found and not-yours look identical to the caller — this
+		// must not leak whether a given claimId belongs to someone else.
+		return command.Rejected(e, "CLAIM_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "benefit.claim_not_found", nil)
+	}
+	result := command.Accepted(e, "Claim", c.ID, c.Version, string(c.Status), nil)
+	result.Body = map[string]any{"claim": c}
+	return result
 }
 
 // NewServiceWithClock 给测试用的时钟构造器。
@@ -317,10 +409,10 @@ func (s *Service) HandleAllocateBenefit(ctx context.Context, e command.Envelope)
 		return command.Rejected(e, "ALLOCATION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "benefit.allocation_create_failed", nil)
 	}
 	s.appendEvent(ctx, p.CampaignID, "BenefitAllocated", e.Actor.ID, map[string]any{
-		"allocationId":     a.ID,
-		"distributorType":  a.DistributorType,
-		"distributorId":    a.DistributorID,
-		"quota":            a.Quota,
+		"allocationId":    a.ID,
+		"distributorType": a.DistributorType,
+		"distributorId":   a.DistributorID,
+		"quota":           a.Quota,
 	})
 	return command.Accepted(e, "Allocation", a.ID, 1, "CREATED", nil)
 }
@@ -348,36 +440,37 @@ func (s *Service) HandleClaimBenefit(ctx context.Context, e command.Envelope) co
 	if c.Status != CampaignActive {
 		return command.Rejected(e, "CAMPAIGN_NOT_ACTIVE", "STATE", "AFTER_USER_ACTION", "benefit.campaign_not_active", nil)
 	}
-// R16.7-P1-H: eligibility gate. Fires before the claim is written so a
-// RISK_FLAGGED or SOURCE_NOT_ALLOWED user does not pollute the capacity
-// counter or the claim ledger.
-//
-// BENEFIT-ELIG-001 — 这个门此前是装饰。上面那版注释写着「best-effort defaults
-// (AccountAge=0, DeviceCount=1, AccountCount=1)」，但代码**一个都没设**，
-// 四个信号全是零值。后果是：
-//   - max_redemptions：TotalRedemptions 恒为 0，0 >= N 永不成立 → 封顶形同虚设；
-//   - geoCities：UserCity 恒为 ""，而判断条件是 `len>0 && UserCity != ""` → 地域限制被跳过；
-//   - min_account_age_days：AccountAge 恒为 0 → **所有人**都被判 ACCOUNT_TOO_NEW，
-//     且理由还是错的（运营会以为没人来领，实际是规则根本验不了）；
-//   - RISK_FLAGGED：DeviceCount/AccountCount 恒为 0 → 风控分支不可达。
-// 前两条 fail-open，第三条 fail-closed 但理由误导，第四条纯装饰。
-//
-// 本轮只修**本地算得出来**的那个：TotalRedemptions（BENEFIT-ELIG-001）。
-// UserCity / AccountAge / DeviceCount / AccountCount 需要身份与设备图谱，
-// benefit 域拿不到，保持不填 —— 但它们对应的规则仍然不生效，见
-// docs 说明；等真实信号接入再补。**不要用 0 冒充真实值**，那比留空更糟。
-if s.eligibility != nil {
-	totalRedemptions, err := s.countRedemptions(ctx, e.Actor.ID, p.CampaignID)
-	if err != nil {
-		return command.Rejected(e, "ELIGIBILITY_EVAL_FAILED", "INTERNAL", "SAFE_RETRY", "benefit.eligibility_eval_failed", nil)
-	}
-	result, err := s.eligibility.Evaluate(ctx, &EligibilityContext{
-		UserID:           e.Actor.ID,
-		CampaignID:       p.CampaignID,
-		BenefitID:        p.BenefitID,
-		AccountStatus:    "ACTIVE",
-		TotalRedemptions: totalRedemptions,
-	})
+	// R16.7-P1-H: eligibility gate. Fires before the claim is written so a
+	// RISK_FLAGGED or SOURCE_NOT_ALLOWED user does not pollute the capacity
+	// counter or the claim ledger.
+	//
+	// BENEFIT-ELIG-001 — 这个门此前是装饰。上面那版注释写着「best-effort defaults
+	// (AccountAge=0, DeviceCount=1, AccountCount=1)」，但代码**一个都没设**，
+	// 四个信号全是零值。后果是：
+	//   - max_redemptions：TotalRedemptions 恒为 0，0 >= N 永不成立 → 封顶形同虚设；
+	//   - geoCities：UserCity 恒为 ""，而判断条件是 `len>0 && UserCity != ""` → 地域限制被跳过；
+	//   - min_account_age_days：AccountAge 恒为 0 → **所有人**都被判 ACCOUNT_TOO_NEW，
+	//     且理由还是错的（运营会以为没人来领，实际是规则根本验不了）；
+	//   - RISK_FLAGGED：DeviceCount/AccountCount 恒为 0 → 风控分支不可达。
+	//
+	// 前两条 fail-open，第三条 fail-closed 但理由误导，第四条纯装饰。
+	//
+	// 本轮只修**本地算得出来**的那个：TotalRedemptions（BENEFIT-ELIG-001）。
+	// UserCity / AccountAge / DeviceCount / AccountCount 需要身份与设备图谱，
+	// benefit 域拿不到，保持不填 —— 但它们对应的规则仍然不生效，见
+	// docs 说明；等真实信号接入再补。**不要用 0 冒充真实值**，那比留空更糟。
+	if s.eligibility != nil {
+		totalRedemptions, err := s.countRedemptions(ctx, e.Actor.ID, p.CampaignID)
+		if err != nil {
+			return command.Rejected(e, "ELIGIBILITY_EVAL_FAILED", "INTERNAL", "SAFE_RETRY", "benefit.eligibility_eval_failed", nil)
+		}
+		result, err := s.eligibility.Evaluate(ctx, &EligibilityContext{
+			UserID:           e.Actor.ID,
+			CampaignID:       p.CampaignID,
+			BenefitID:        p.BenefitID,
+			AccountStatus:    "ACTIVE",
+			TotalRedemptions: totalRedemptions,
+		})
 		if err != nil {
 			return command.Rejected(e, "ELIGIBILITY_EVAL_FAILED", "INTERNAL", "SAFE_RETRY", "benefit.eligibility_eval_failed", nil)
 		}
@@ -430,11 +523,11 @@ if s.eligibility != nil {
 }
 
 type RedeemBenefitPayload struct {
-	ClaimToken    string `json:"claimToken"`
-	MerchantID    string `json:"merchantId"`
-	StaffID       string `json:"staffId,omitempty"`
-	EvidenceType  string `json:"evidenceType"`
-	EvidenceRef   string `json:"evidenceRef,omitempty"`
+	ClaimToken     string `json:"claimToken"`
+	MerchantID     string `json:"merchantId"`
+	StaffID        string `json:"staffId,omitempty"`
+	EvidenceType   string `json:"evidenceType"`
+	EvidenceRef    string `json:"evidenceRef,omitempty"`
 	IdempotencyKey string `json:"idempotencyKey"`
 }
 
@@ -575,43 +668,43 @@ func (s *Service) createSettlements(ctx context.Context, r *Redemption, b *Benef
 	// Proxy subsidy
 	if r.ProxySubsidyMinor > 0 {
 		_ = s.repo.CreateSettlement(ctx, &Settlement{
-			ID:            newID("set_"),
-			RedemptionID:  r.ID,
-			CampaignID:    r.CampaignID,
-			ActorType:     SettlementProxy,
-			ActorID:       "proxy",
-			AmountMinor:   r.ProxySubsidyMinor,
-			Currency:      r.Currency,
-			SettledAt:     now,
-			CreatedAt:     now,
+			ID:           newID("set_"),
+			RedemptionID: r.ID,
+			CampaignID:   r.CampaignID,
+			ActorType:    SettlementProxy,
+			ActorID:      "proxy",
+			AmountMinor:  r.ProxySubsidyMinor,
+			Currency:     r.Currency,
+			SettledAt:    now,
+			CreatedAt:    now,
 		})
 	}
 	// Merchant contribution
 	if r.MerchantContribMinor > 0 {
 		_ = s.repo.CreateSettlement(ctx, &Settlement{
-			ID:            newID("set_"),
-			RedemptionID:  r.ID,
-			CampaignID:    r.CampaignID,
-			ActorType:     SettlementMerchant,
-			ActorID:       r.MerchantID,
-			AmountMinor:   r.MerchantContribMinor,
-			Currency:      r.Currency,
-			SettledAt:     now,
-			CreatedAt:     now,
+			ID:           newID("set_"),
+			RedemptionID: r.ID,
+			CampaignID:   r.CampaignID,
+			ActorType:    SettlementMerchant,
+			ActorID:      r.MerchantID,
+			AmountMinor:  r.MerchantContribMinor,
+			Currency:     r.Currency,
+			SettledAt:    now,
+			CreatedAt:    now,
 		})
 	}
 	// Staff reward
 	if r.StaffRewardMinor > 0 && r.StaffID != "" {
 		_ = s.repo.CreateSettlement(ctx, &Settlement{
-			ID:            newID("set_"),
-			RedemptionID:  r.ID,
-			CampaignID:    r.CampaignID,
-			ActorType:     SettlementStaff,
-			ActorID:       r.StaffID,
-			AmountMinor:   r.StaffRewardMinor,
-			Currency:      r.Currency,
-			SettledAt:     now,
-			CreatedAt:     now,
+			ID:           newID("set_"),
+			RedemptionID: r.ID,
+			CampaignID:   r.CampaignID,
+			ActorType:    SettlementStaff,
+			ActorID:      r.StaffID,
+			AmountMinor:  r.StaffRewardMinor,
+			Currency:     r.Currency,
+			SettledAt:    now,
+			CreatedAt:    now,
 		})
 	}
 }

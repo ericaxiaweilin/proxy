@@ -35,6 +35,11 @@ import { color } from "../theme";
 import type { SessionAuthClient } from "../auth-client";
 import type { SecureSessionStore } from "../secure-session";
 import { localApiBaseUrl } from "../native-clients";
+// SCENE-PHOTO-WALL-001: 照片墙 = 发帖时标记了这个场景的帖子里的图。复用
+// components/scene-shop-directory.tsx 已经在用的同一套 helper，不重写一遍
+// 判定逻辑。
+import { LocalNetClient } from "../localnet-client";
+import { scenePhotoWallTiles, SCENE_PHOTO_WALL_EMPTY, type ScenePhotoTile } from "../scene-shop-directory";
 
 // GEO-HONEST-001: 取不到位置时地图的兜底中心。
 //
@@ -53,6 +58,7 @@ function humanAvatarUri(url: string): string | undefined {
 }
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 type SceneFilter = "ALL" | "UNSEEN" | "ACTIVE" | "SAVED" | "VISITED";
 type SceneView = "MAP" | "LIST";
@@ -93,6 +99,9 @@ type RealityScene = {
   source?: string;
   distanceMeters?: number;
   recommendationScore?: number;
+  // SCENE-REVIEW-001: 真实评分聚合，只有 ratingCount > 0 时才存在。
+  rating?: number;
+  ratingCount?: number;
 };
 
 type DynamicSceneAction = { type: "DIRECT_INVITE" | "OPEN_TASK" | "PUBLIC_ACTIVITY"; label: string; state: string; moneyMeaning: string };
@@ -119,7 +128,21 @@ type SceneDetail = {
   truthBoundary: string;
   // SCENE-BADGE-001：绑定本场景的小美（真实映射，不编计数）。
   aiVisits?: Array<{ personaId: string; displayName: string; boundSceneId: string }>;
+  // SCENE-REVIEW-001: 真实评分聚合，只有 ratingCount > 0 时才存在。
+  rating?: number;
+  ratingCount?: number;
 };
+
+// SCENE-COMPANION-001: 认证态真实同行推荐，替代/补充公开的 humans FIXTURE。
+type CompanionSuggestion = { id: string; name: string; avatarUrl: string; signal: "CHECKED_IN_HERE" | "JOINED_ACTIVITY_HERE" };
+function isCompanionSuggestion(value: unknown): value is CompanionSuggestion {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<Record<keyof CompanionSuggestion, unknown>>;
+  return typeof item.id === "string" && typeof item.name === "string" && typeof item.avatarUrl === "string" && (item.signal === "CHECKED_IN_HERE" || item.signal === "JOINED_ACTIVITY_HERE");
+}
+function companionSignalLabel(signal: CompanionSuggestion["signal"]): string {
+  return signal === "CHECKED_IN_HERE" ? "最近来过这里" : "报名过这里的活动";
+}
 
 type FeaturedHuman = { userId: string; name: string; city?: string | undefined; avatarUri?: string | undefined };
 
@@ -147,6 +170,22 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   // BADGE-WALL-001: 本人去过的所有场景（all-time）。undefined = 还没拉到，
   // 进度块直接不画 —— 空数组是“一家没去过”，undefined 是“不知道”，两回事。
   const [badgeHistoryIds, setBadgeHistoryIds] = useState<ReadonlyArray<string> | undefined>(undefined);
+  // SCENE-REVIEW-001: 评价提交表单开关 + 提交中/结果反馈。myReviewStars 只是
+  // 本次会话内刚提交成功的星级回显（没有"查我给这个场景打过几分"的读命令，
+  // 不编一个假的初始值）。
+  const [reviewSheetOpen, setReviewSheetOpen] = useState(false);
+  const [reviewStars, setReviewStars] = useState(0);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewError, setReviewError] = useState<string | undefined>(undefined);
+  const [myReviewStars, setMyReviewStars] = useState<number | undefined>(undefined);
+  // SCENE-COMPANION-001: 认证态真实同行推荐。undefined = 还没拉到/未登录，
+  // 这时渲染回落到 detail.humans 那个诚实标了"占位候选"的 FIXTURE。
+  const [companionSuggestions, setCompanionSuggestions] = useState<ReadonlyArray<CompanionSuggestion> | undefined>(undefined);
+  // SCENE-PHOTO-WALL-001: 照片墙——只有一组"全部"，不做官方/用户精选分类
+  // （全仓没有那条策展管线，编分类不如不分类诚实）。
+  const [wall, setWall] = useState<ReadonlyArray<ScenePhotoTile>>([]);
+  const [wallState, setWallState] = useState<"LOADING" | "READY" | "ERROR" | "SIGNED_OUT">("LOADING");
   // SCENE-EVENT-SIGNUP-001: 这个场景上已发布的活动。列表状态单独存 —— "没有
   // 活动" / "取不到" / "没登录" 是三件不同的事，不能都显示成一句"暂无"。
   const [sceneActivities, setSceneActivities] = useState<ReadonlyArray<SceneActivity>>([]);
@@ -324,6 +363,39 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
     if (!selectedId) { setSceneActivities([]); setSceneActivitiesState("LOADING"); return; }
     loadSceneActivities(selectedId);
   }, [authClient, secureSessionStore, selectedId]);
+
+  // SCENE-COMPANION-001: 换场景就重拉真实同行推荐——未登录时 session 为
+  // undefined，直接留空（渲染回落到 detail.humans 的诚实 FIXTURE）。
+  useEffect(() => {
+    let cancelled = false;
+    setCompanionSuggestions(undefined);
+    if (!selectedId || !session?.principal) return;
+    void sendSceneCommand(authClient, session, "ListSceneCompanionSuggestions", selectedId, { sceneId: selectedId })
+      .then((value) => {
+        if (cancelled) return;
+        const list = Array.isArray(value.suggestions) ? value.suggestions.filter(isCompanionSuggestion) : [];
+        setCompanionSuggestions(list);
+      })
+      .catch(() => { if (!cancelled) setCompanionSuggestions([]); });
+    return () => { cancelled = true; };
+  }, [authClient, session, selectedId]);
+
+  // SCENE-PHOTO-WALL-001: 换场景就重拉照片墙——需要登录（走帖子可见性规则）。
+  const localNet = useMemo(
+    () => (secureSessionStore ? new LocalNetClient({ authClient, secureSessionStore, baseUrl: apiBaseUrl || localApiBaseUrl }) : undefined),
+    [authClient, secureSessionStore, apiBaseUrl],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    setWall([]);
+    if (!selectedId) return;
+    if (!localNet) { setWallState("SIGNED_OUT"); return; }
+    setWallState("LOADING");
+    void localNet.listPostsAtScene(selectedId, 30)
+      .then((model) => { if (!cancelled) { setWall(scenePhotoWallTiles(model)); setWallState("READY"); } })
+      .catch(() => { if (!cancelled) setWallState("ERROR"); });
+    return () => { cancelled = true; };
+  }, [localNet, selectedId]);
   const activityFeed = sceneActivityFeed([...sceneActivities], sceneActivitiesState);
 
   const selectVariant = (variantId: string): void => {
@@ -445,6 +517,32 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       setTriStateMsg("同步失败，已恢复之前的状态，请重试。");
     });
   };
+  // SCENE-REVIEW-001: 提交场景评价。门禁（必须真去过）在服务端；前端只是
+  // 提前隐藏入口，不是唯一防线——SCENE_NOT_VISITED 拒绝时原样报错，不吞。
+  const submitSceneReview = (sceneId: string): void => {
+    if (!session?.principal) {
+      setReviewError("请先登录再提交评价。");
+      return;
+    }
+    if (reviewStars < 1 || reviewStars > 5) {
+      setReviewError("请先选择星级。");
+      return;
+    }
+    setReviewBusy(true);
+    setReviewError(undefined);
+    void sendSceneCommand(authClient, session, "SubmitSceneReview", sceneId, { sceneId, stars: reviewStars, comment: reviewComment.trim() })
+      .then(() => {
+        setMyReviewStars(reviewStars);
+        setReviewSheetOpen(false);
+        setReviewComment("");
+      })
+      .catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : "提交失败，请重试";
+        setReviewError(/SCENE_NOT_VISITED|scene_not_visited/i.test(msg) ? "还没在这个场景打过卡，去过之后才能评价。" : msg);
+      })
+      .finally(() => setReviewBusy(false));
+  };
+
   // SCENE-CHECKIN-001: 「我在这里」。
   //
   // distanceMeters 只在**有当前位置**时才带：没授权定位就不带 —— 声明照样成立，
@@ -659,17 +757,31 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const activeVariant = selected ? detail?.variants.find((item) => item.id === detail.selectedVariant) : undefined;
   const detailBody = selected ? (
       <ScrollView style={[styles.root, rootPad]} contentContainerStyle={styles.detailContent}>
-        <View style={styles.detailTop}><Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.backButton}><Text selectable style={styles.backText}>‹</Text></Pressable><View style={styles.detailTopCopy}>{/* MERCHANT-LOGO-001: 商家标志 —— 有 logo 上图，没有回字母块（和线上店铺管理面同款），不编占位图。 */}<View style={styles.venueRow}>{detail?.logoUrl ? <Image accessibilityLabel={`${detail?.venueName ?? selected.name}商家标志`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-logo:${detail.sceneId}`} source={{ uri: detail.logoUrl }} style={styles.venueLogo} transition={0} /> : <View style={styles.venueLogo}><Text selectable style={styles.venueLogoText}>{(detail?.venueName ?? selected.name).slice(0, 1).toUpperCase()}</Text></View>}<View style={styles.venueCopy}><Text selectable style={styles.detailTopTitle}>{detail?.venueName ?? selected.name}</Text><Text selectable style={styles.detailTopSub}>{activeVariant ? `${activeVariant.name} · ${selected.area}` : `${selected.type} · ${selected.area}`}</Text>{/* SCENE-CATEGORY-001: 顶类徽标 —— 去过/未开放照样显示分类（置灰的是标记，不是身份）。 */}<View style={styles.categoryBadge}><Text selectable style={styles.categoryBadgeText}>{selected.category}</Text></View></View></View></View><View style={styles.topSpacer} /></View>
+        <View style={styles.detailTop}><Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.backButton}><ProxyBackGlyph /></Pressable><View style={styles.detailTopCopy}>{/* MERCHANT-LOGO-001: 商家标志 —— 有 logo 上图，没有回字母块（和线上店铺管理面同款），不编占位图。 */}<View style={styles.venueRow}>{detail?.logoUrl ? <Image accessibilityLabel={`${detail?.venueName ?? selected.name}商家标志`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-logo:${detail.sceneId}`} source={{ uri: detail.logoUrl }} style={styles.venueLogo} transition={0} /> : <View style={styles.venueLogo}><Text selectable style={styles.venueLogoText}>{(detail?.venueName ?? selected.name).slice(0, 1).toUpperCase()}</Text></View>}<View style={styles.venueCopy}><Text selectable style={styles.detailTopTitle}>{detail?.venueName ?? selected.name}</Text><Text selectable style={styles.detailTopSub}>{activeVariant ? `${activeVariant.name} · ${selected.area}` : `${selected.type} · ${selected.area}`}</Text>{/* SCENE-CATEGORY-001: 顶类徽标 —— 去过/未开放照样显示分类（置灰的是标记，不是身份）。 */}<View style={styles.categoryBadge}><Text selectable style={styles.categoryBadgeText}>{selected.category}</Text></View></View></View></View><Pressable accessibilityLabel="分享这个场景" onPress={() => { void Share.share({ message: `${detail?.venueName ?? selected.name} · ${sceneAddressLine(selected)}` }); }} style={styles.backButton}><ProxyIcon color={color.ink} name="shareUp" size={20} /></Pressable></View>
         <View style={styles.hero}>
           {detail?.heroImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.heroMap} transition={0} /> : <MapView initialRegion={{ latitude: selected.latitude, longitude: selected.longitude, latitudeDelta: 0.025, longitudeDelta: 0.025 }} pointerEvents="none" style={styles.heroMap}><Marker coordinate={{ latitude: selected.latitude, longitude: selected.longitude }} pinColor={selected.active ? color.magenta : color.violet} /></MapView>}
           {/* 封面只留：硬件优点（facets，没开 variant 时回落类型）+ 真实计数。
               地址不在主页写 —— 地图上有，重复写就是废话。名字只在上面出现一次，
               这里不再重复标题。 */}
           <View style={styles.heroFacets}>{(activeVariant ? activeVariant.facets : [selected.type]).map((facet) => <View key={facet} style={styles.heroFacet}><Text selectable style={styles.heroFacetText}>{facet}</Text></View>)}</View>
-          {/* 评分数据源还没有（唯一诚实的是收藏/去过/在场计数）—— 有评分管线
-              之前拿计数当"评价"，绝不编分。 */}
+          {/* SCENE-REVIEW-001: 评分只在真的有评价数据（ratingCount > 0）时画，
+              没有就整行不出现——不用 0 或占位星垫底。 */}
+          {(detail?.ratingCount ?? selected.ratingCount ?? 0) > 0 ? (
+            <Text style={styles.sceneRatingLine} selectable>
+              ★ {(detail?.rating ?? selected.rating)?.toFixed(1)} · {detail?.ratingCount ?? selected.ratingCount} 条评价
+            </Text>
+          ) : null}
           <Text style={styles.sceneCounts} selectable>{sceneCountsLine(selected)}</Text>
         </View>
+        {/* SCENE-REVIEW-001: 评价入口只在本人真的打过卡（BADGE-WALL-001 的
+            全量历史里命中这个场景）时才可点——没去过的场景没有评价资格，
+            这条门禁跟提交时服务端的 SCENE_NOT_VISITED 校验对齐，不是纯前端
+            UI 限制。 */}
+        {badgeHistoryIds?.includes(selected.id) ? (
+          <Pressable accessibilityLabel="评价这个场景" onPress={() => setReviewSheetOpen(true)} style={styles.reviewEntry}>
+            <Text selectable style={styles.reviewEntryText}>{myReviewStars ? `你评过 ${myReviewStars} 星 · 改评` : "去过这里 · 评一下"}</Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.venueIntro} selectable>{activeVariant ? `${activeVariant.window} · ${activeVariant.bestFor}` : selected.description}</Text>
         {detail ? (
           <>
@@ -682,6 +794,19 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             <View style={styles.bestGrid}><View style={styles.bestCard}><Text selectable style={styles.bestTitle}>{activeVariant?.bestFor}</Text><Text selectable style={styles.bestSub}>按当前时段、现场状态和可用资源推荐。</Text></View><View style={styles.bestCard}><Text selectable style={styles.bestTitle}>{detail.liveState.state.replaceAll("_", " ")}</Text>{/* GEO-HONEST-001: 没有容量来源时明说"未知"，绝不回落到一个数字。 */}<Text selectable style={styles.bestSub}>{detail.liveState.bestWindow}{detail.liveState.capacityPct === undefined ? " · 容量未知" : ` · 容量 ${detail.liveState.capacityPct}%`}</Text></View></View>
             {whyOpen ? <View style={styles.whyCard}><Text selectable style={styles.whyTitle}>推荐依据</Text><Text selectable style={styles.whyText}>当前时段：{activeVariant?.window}</Text><Text selectable style={styles.whyText}>场景标签：{activeVariant?.facets.join(" · ")}</Text>{/* GEO-HONEST-001: 时效声明只在对数据真有来源时才出现 —— 给编造的数字配一个"有效至"时间戳，比数字本身更误导。 */}<Text selectable style={styles.whyText}>现场状态：{detail.liveState.label}{detail.liveState.freshUntil === undefined ? "（容量数据未接入，故无时效）" : `，数据有效至 ${new Date(detail.liveState.freshUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}</Text><Text selectable style={styles.whyBoundary}>这是场景推荐，不代表真人在场，也不生成到访、订单或履约证明。</Text></View> : null}
             <Text selectable style={styles.sectionTitle}>适合一起的人</Text>
+            {/* SCENE-COMPANION-001: 已登录且真的命中好友信号时，优先画这个真实
+                横滑——只展示，不接 selectedHumanId/DIRECT_INVITE（那条链认的是
+                detail.humans 的 FIXTURE 形状，真实同行推荐这轮先不接邀约，避免
+                用假形状套真数据）。没有真实命中时整段不画，退回下面 FIXTURE。 */}
+            {companionSuggestions && companionSuggestions.length > 0 ? (
+              <HorizontalSwipeRail contentContainerStyle={styles.humanRail} preserveChildPresses threshold={3}>
+                {companionSuggestions.map((person) => <View key={person.id} style={styles.humanPlain}>
+                  <View style={styles.humanRing}>{person.avatarUrl ? <CircularAvatarImage accessibilityLabel={`${person.name}头像`} size={64} uri={person.avatarUrl} /> : <View style={styles.humanAvatarFallback}><Text selectable style={styles.humanAvatarText}>{person.name.slice(0, 1).toUpperCase()}</Text></View>}</View>
+                  <Text selectable style={styles.humanPlainName}>{person.name}</Text>
+                  <Text selectable style={styles.humanPlainSub}>{companionSignalLabel(person.signal)}</Text>
+                </View>)}
+              </HorizontalSwipeRail>
+            ) : null}
             {/* SCENE-HUMANS-EMPTY-001: 选人是付费决策点 —— 没有人时必须说出"没有人"，
                 不能只留标题和一个空横滑（那会被读成"还在加载"）。文案说明它不是一个
                 失败状态，也不是"再等等就会有人"的承诺。 */}
@@ -767,6 +892,27 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
               </View>
             ))}
             {activityMsg ? <Text selectable style={styles.nearbyError}>{activityMsg}</Text> : null}
+            <Text selectable style={styles.sectionTitle}>照片墙</Text>
+            {wallState === "READY" && wall.length > 0 ? (
+              <View style={styles.wallGrid}>
+                {wall.map((tile) => {
+                  const uri = localNet?.resolveMediaUrl(tile.path);
+                  return (
+                    <View key={tile.key} style={styles.wallTile}>
+                      {uri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`wall:${tile.key}`} source={{ uri }} style={styles.wallImage} transition={0} /> : null}
+                      {tile.author ? <Text selectable numberOfLines={1} style={styles.wallAuthor}>{tile.author}</Text> : null}
+                    </View>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text selectable style={styles.activityEmpty}>
+                {wallState === "LOADING" ? "正在读取照片墙…"
+                  : wallState === "ERROR" ? "照片墙暂时取不到，请稍后重试。"
+                    : wallState === "SIGNED_OUT" ? "登录后才能看到这里的照片墙。"
+                      : SCENE_PHOTO_WALL_EMPTY}
+              </Text>
+            )}
             <Text selectable style={styles.sectionTitle}>怎么组织这次现实行动</Text>
             <View style={styles.executionCard}>
               {detail.actions.map((action) => <Pressable key={action.type} onPress={() => { setSelectedAction(action); setActionResult(undefined); setActionExplanation(`${action.label}：${action.moneyMeaning}`); }} style={[styles.executionAction, selectedAction?.type === action.type && styles.executionActionSelected]}><Text selectable style={styles.executionLabel}>{action.label}</Text><Text selectable style={styles.executionState}>{action.type === "DIRECT_INVITE" ? "需本人接受" : action.type === "OPEN_TASK" ? "候选人申请" : "公开报名"}</Text></Pressable>)}
@@ -814,7 +960,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   return (
     <View style={[styles.root, rootPad]}>
       <View style={styles.topBar}>
-        <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.roundButton}><Text selectable style={styles.backText}>‹</Text></Pressable>
+        <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.roundButton}><ProxyBackGlyph /></Pressable>
               <View style={styles.topCopy}><Text selectable style={styles.title}>场景地图</Text><Text selectable style={styles.subtitle}>场景目录 · {scenes.length} 个场景</Text></View>
         <Pressable accessibilityLabel={view === "MAP" ? "切换列表" : "切换地图"} onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={styles.roundButton}><ProxyIcon color={color.ink} name={view === "MAP" ? "storeLines" : "crosshair"} size={21} /></Pressable>
         <Pressable accessibilityLabel={searchOpen ? "关闭搜索" : "搜索场景"} onPress={() => { if (searchOpen) setQuery(""); setSearchOpen((open) => !open); }} style={styles.roundButton}><ProxyIcon color={color.ink} name="search" size={21} /></Pressable>
@@ -946,6 +1092,35 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
           </View>
         </Pressable>
       </Modal>
+      {/* SCENE-REVIEW-001: 评价提交表单——星级 1-5 + 可选评论。真正的门禁在
+          服务端（必须真去过），这个 Modal 只在入口已经判过 badgeHistoryIds
+          命中才可能被打开。 */}
+      <Modal animationType="fade" onRequestClose={() => setReviewSheetOpen(false)} transparent visible={reviewSheetOpen}>
+        <Pressable onPress={() => setReviewSheetOpen(false)} style={styles.badgeScrim}>
+          <Pressable onPress={() => { /* 吞掉冒泡，不让点卡片内部关掉弹层 */ }} style={styles.badgeCard}>
+            <Text selectable style={styles.badgeTitle}>评价这个场景</Text>
+            <View style={styles.reviewStarsRow}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <Pressable accessibilityLabel={`${n} 星`} key={n} onPress={() => setReviewStars(n)}>
+                  <Text selectable style={[styles.reviewStar, n <= reviewStars && styles.reviewStarFilled]}>★</Text>
+                </Pressable>
+              ))}
+            </View>
+            <TextInput
+              multiline
+              onChangeText={setReviewComment}
+              placeholder="想说点什么？（可选）"
+              placeholderTextColor={color.muted}
+              style={styles.reviewCommentInput}
+              value={reviewComment}
+            />
+            {reviewError ? <Text selectable style={styles.nearbyError}>{reviewError}</Text> : null}
+            <Pressable disabled={reviewBusy || reviewStars < 1} onPress={() => selected && submitSceneReview(selected.id)} style={[styles.badgeClose, (reviewBusy || reviewStars < 1) && styles.studioBtnDisabled]}>
+              <Text selectable style={styles.badgeCloseText}>{reviewBusy ? "提交中…" : "提交评价"}</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -1040,7 +1215,18 @@ const styles = StyleSheet.create({
   badgeProgressText: { color: color.muted, fontSize: 11, marginTop: 2 },
   // (社区提交样式已随 UI 整段撤下，commander 重做设计中。)
   sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, minHeight: 82, padding: 14 }, sceneDot: { backgroundColor: color.violet, borderRadius: 9, height: 18, width: 18 }, sceneDotActive: { backgroundColor: color.magenta }, sceneDotMuted: { backgroundColor: color.muted }, sceneCopy: { flex: 1 }, sceneName: { color: color.ink, fontSize: 16, fontWeight: "800" }, sceneMeta: { color: color.muted, fontSize: 12, marginTop: 3 }, sceneSignal: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 5 }, empty: { color: color.muted, paddingTop: 40, textAlign: "center" },
-  detailContent: { paddingBottom: 36, paddingHorizontal: 13 }, detailTop: { alignItems: "center", flexDirection: "row", minHeight: 56 }, backButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 }, detailTopCopy: { flex: 1 }, venueRow: { alignItems: "center", flexDirection: "row", gap: 10 }, venueLogo: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, height: 46, justifyContent: "center", width: 46 }, venueLogoText: { color: color.white, fontSize: 20, fontWeight: "900" }, venueCopy: { flex: 1 }, detailTopTitle: { color: color.ink, fontSize: 17, fontWeight: "900" }, detailTopSub: { color: color.muted, fontSize: 11, marginTop: 2 }, categoryBadge: { alignSelf: "flex-start", backgroundColor: color.violetSoftBg, borderRadius: 999, marginTop: 5, paddingHorizontal: 9, paddingVertical: 3 }, categoryBadgeText: { color: color.violet, fontSize: 11, fontWeight: "800" },   topSpacer: { width: 38 }, backText: { color: color.ink, fontSize: 24, fontWeight: "800", lineHeight: 28 }, hero: { backgroundColor: "#F6F2E9", borderColor: color.line, borderRadius: 20, borderWidth: 1, overflow: "hidden", padding: 15, paddingTop: 242 }, heroMap: { height: 226, left: 0, position: "absolute", right: 0, top: 0 }, statePill: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 14, marginTop: 4, paddingHorizontal: 10, paddingVertical: 6 }, statePillActive: { backgroundColor: color.attentionBg }, stateText: { color: color.muted, fontSize: 11, fontWeight: "800" }, stateTextActive: { color: color.error }, venueIntro: { color: color.muted, fontSize: 13, lineHeight: 20, marginTop: 8, paddingHorizontal: 2 }, sceneCounts: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 10 },
+  detailContent: { paddingBottom: 36, paddingHorizontal: 13 }, detailTop: { alignItems: "center", flexDirection: "row", minHeight: 56 }, backButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 }, detailTopCopy: { flex: 1 }, venueRow: { alignItems: "center", flexDirection: "row", gap: 10 }, venueLogo: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, height: 46, justifyContent: "center", width: 46 }, venueLogoText: { color: color.white, fontSize: 20, fontWeight: "900" }, venueCopy: { flex: 1 }, detailTopTitle: { color: color.ink, fontSize: 17, fontWeight: "900" }, detailTopSub: { color: color.muted, fontSize: 11, marginTop: 2 }, categoryBadge: { alignSelf: "flex-start", backgroundColor: color.violetSoftBg, borderRadius: 999, marginTop: 5, paddingHorizontal: 9, paddingVertical: 3 }, categoryBadgeText: { color: color.violet, fontSize: 11, fontWeight: "800" },   topSpacer: { width: 38 }, hero: { backgroundColor: "#F6F2E9", borderColor: color.line, borderRadius: 20, borderWidth: 1, overflow: "hidden", padding: 15, paddingTop: 242 }, heroMap: { height: 226, left: 0, position: "absolute", right: 0, top: 0 }, statePill: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 14, marginTop: 4, paddingHorizontal: 10, paddingVertical: 6 }, statePillActive: { backgroundColor: color.attentionBg }, stateText: { color: color.muted, fontSize: 11, fontWeight: "800" }, stateTextActive: { color: color.error }, venueIntro: { color: color.muted, fontSize: 13, lineHeight: 20, marginTop: 8, paddingHorizontal: 2 }, sceneCounts: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 10 },
+  sceneRatingLine: { color: "#8C6A00", fontSize: 13, fontWeight: "900", marginTop: 10 },
+  reviewEntry: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 999, marginTop: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  reviewEntryText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  reviewStarsRow: { flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 14 },
+  reviewStar: { color: color.line, fontSize: 34 },
+  reviewStarFilled: { color: "#F5B400" },
+  reviewCommentInput: { backgroundColor: color.surface, borderRadius: 12, color: color.ink, fontSize: 13, marginTop: 14, minHeight: 70, padding: 12, textAlignVertical: "top" },
+  wallGrid: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 4 },
+  wallTile: { aspectRatio: 1, backgroundColor: color.surface, borderRadius: 10, overflow: "hidden", width: "32.4%" },
+  wallImage: { height: "100%", width: "100%" },
+  wallAuthor: { backgroundColor: "rgba(0,0,0,0.45)", bottom: 0, color: color.white, fontSize: 11, fontWeight: "800", left: 0, paddingHorizontal: 6, paddingVertical: 2, position: "absolute", right: 0 },
   heroFacets: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 12 }, heroFacet: { backgroundColor: "#FFF3CB", borderColor: "#E4C35B", borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 6 }, heroFacetText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   aiBindingCard: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderColor: color.violet, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 13 }, aiBindingAvatar: { borderRadius: 30, height: 60, width: 60 }, aiBindingCopy: { flex: 1 }, aiBindingEyebrow: { color: color.violet, fontSize: 11, fontWeight: "900", letterSpacing: 0.6 }, aiBindingTitle: { color: color.ink, fontSize: 14, fontWeight: "900", marginTop: 4 }, aiBindingText: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 5 }, aiProfileButton: { alignSelf: "flex-start", backgroundColor: color.ink, borderRadius: 12, marginTop: 9, paddingHorizontal: 12, paddingVertical: 8 }, aiProfileButtonText: { color: color.white, fontSize: 11, fontWeight: "900" },
   humanBindingCard: { alignItems: "center", backgroundColor: "#FFF8E3", borderColor: "#E4C35B", borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 13 }, humanBindingEyebrow: { color: "#735700", fontSize: 11, fontWeight: "900", letterSpacing: 0.6 },
@@ -1058,15 +1244,15 @@ const styles = StyleSheet.create({
   badgeNoticeText: { color: "#7A4E0F", fontSize: 12, fontWeight: "700" },
   xiaomeiSceneHint: { color: "#5B3FA3", fontSize: 12, marginTop: 6 },
   badgeScrim: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.45)", flex: 1, justifyContent: "center", padding: 22 },
-  badgeCard: { backgroundColor: "color.white", borderRadius: 18, maxHeight: "82%", padding: 18, width: "100%" },
-  badgeTitle: { color: "color.ink", fontSize: 18, fontWeight: "900" },
+  badgeCard: { backgroundColor: color.white, borderRadius: 18, maxHeight: "82%", padding: 18, width: "100%" },
+  badgeTitle: { color: color.ink, fontSize: 18, fontWeight: "900" },
   badgeSub: { color: "#77726B", fontSize: 12, lineHeight: 17, marginTop: 4 },
   badgeList: { marginTop: 10 },
   badgeRow: { alignItems: "center", borderBottomColor: "rgba(20,18,31,0.06)", borderBottomWidth: 1, flexDirection: "row", gap: 12, paddingVertical: 10 },
   badgeRowEarned: { backgroundColor: "#FFF8EC" },
   badgeIcon: { fontSize: 24 },
   badgeCopy: { flex: 1 },
-  badgeName: { color: "color.ink", fontSize: 14, fontWeight: "800" },
+  badgeName: { color: color.ink, fontSize: 14, fontWeight: "800" },
   badgeNameLocked: { color: "#77726B", fontWeight: "700" },
   badgeDesc: { color: "#77726B", fontSize: 11, lineHeight: 15, marginTop: 2 },
   badgeShareCard: { backgroundColor: "#FFF8EC", borderColor: "#F0DFC0", borderRadius: 14, borderWidth: 1, marginTop: 10, padding: 12 },
@@ -1078,6 +1264,6 @@ const styles = StyleSheet.create({
   badgeShareBtn: { alignItems: "center", backgroundColor: "#F4F0FF", borderColor: "#E5DCF5", borderRadius: 999, borderWidth: 1, marginTop: 10, paddingVertical: 10 },
   badgeShareBtnText: { color: "#5B3FA3", fontSize: 13, fontWeight: "800" },
   studioRow: { alignItems: "center", flexDirection: "row", gap: 10, marginTop: 10 }, studioThumb: { borderRadius: 12, height: 56, width: 56 }, studioCopy: { flex: 1 }, studioName: { color: color.ink, fontSize: 13, fontWeight: "900", lineHeight: 18 }, studioSub: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 3 }, studioBtnDisabled: { backgroundColor: color.line, borderColor: color.line },
-  badgeClose: { alignItems: "center", backgroundColor: "color.ink", borderRadius: 999, marginTop: 12, paddingVertical: 11 },
-  badgeCloseText: { color: "color.white", fontSize: 13, fontWeight: "800" }
+  badgeClose: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, marginTop: 12, paddingVertical: 11 },
+  badgeCloseText: { color: color.white, fontSize: 13, fontWeight: "800" }
 });

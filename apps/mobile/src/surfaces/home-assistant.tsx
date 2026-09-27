@@ -14,6 +14,7 @@ import type { SurfacePlan, UISchema } from "@proxy/contracts";
 // GATED 必须有自己的文案，不能落进下面的 return undefined 变成沉默。
 import { parseAssistantStatus } from "@proxy/contracts";
 import { useKeyboardSafeInset } from "../components/use-keyboard-safe-inset";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 interface AssistantMessage {
   id: string;
@@ -201,7 +202,7 @@ export function HomeAssistantSurface({
     <View style={[styles.root, embedded && styles.embeddedRoot, keyboardInset > 0 && { paddingBottom: keyboardInset }]}>
       {!embedded ? <View style={styles.header}>
         <Pressable accessibilityLabel="返回 Home" onPress={onBack} style={styles.backButton}>
-          <Text selectable style={styles.backText}>‹</Text>
+          <ProxyBackGlyph />
         </Pressable>
         <View style={styles.headerCopy}>
           <Text selectable style={styles.headerTitle}>Proxy</Text>
@@ -359,7 +360,6 @@ const styles = StyleSheet.create({
   embeddedCloseText: { color: color.ink, fontSize: 11, fontWeight: "800" },
   header: { alignItems: "center", backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
   backButton: { alignItems: "center", height: 32, justifyContent: "center", width: 30 },
-  backText: { color: color.ink, fontSize: 26, lineHeight: 30 },
   headerCopy: { flex: 1 },
   headerTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
   headerSub: { color: color.muted, fontSize: 11, marginTop: 2 },
@@ -381,10 +381,10 @@ const styles = StyleSheet.create({
   userTime: { color: "rgba(255,255,255,0.6)" },
   systemPill: { alignSelf: "center", backgroundColor: "#EAE4EF", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   systemText: { color: color.muted, fontSize: 11 },
-  statusBox: { backgroundColor: "color.attentionBg", borderColor: color.attentionBorder, borderRadius: 12, borderWidth: 1, padding: 9 },
+  statusBox: { backgroundColor: color.attentionBg, borderColor: color.attentionBorder, borderRadius: 12, borderWidth: 1, padding: 9 },
   statusText: { color: color.error, fontSize: 11, lineHeight: 15 },
   composer: { alignItems: "flex-end", backgroundColor: color.white, borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", gap: 7, paddingHorizontal: 14, paddingVertical: 10 },
-  input: { backgroundColor: "color.homeIntentInputBg", borderColor: "#DDD5E3", borderRadius: 15, borderWidth: 1, color: color.ink, flex: 1, fontSize: 11, lineHeight: 16, maxHeight: 88, minHeight: 42, paddingHorizontal: 11, paddingVertical: 8 },
+  input: { backgroundColor: color.homeIntentInputBg, borderColor: "#DDD5E3", borderRadius: 15, borderWidth: 1, color: color.ink, flex: 1, fontSize: 11, lineHeight: 16, maxHeight: 88, minHeight: 42, paddingHorizontal: 11, paddingVertical: 8 },
   sendButton: { alignItems: "center", backgroundColor: color.magenta, borderRadius: 14, height: 42, justifyContent: "center", width: 42 },
   disabled: { opacity: 0.4 },
   sendText: { color: color.white, fontSize: 20, fontWeight: "900" },

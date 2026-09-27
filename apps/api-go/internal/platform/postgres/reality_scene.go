@@ -111,6 +111,30 @@ func (r *RealitySceneRepository) ListMyCheckinHistory(ctx context.Context, actor
 	return out, rows.Err()
 }
 
+// FilterKnownVisitors 实现见 realityscene.Repository 接口注释：只测已知
+// 候选，不反查名单——ANY($2) 只能命中调用方已经给出的 actor id。
+func (r *RealitySceneRepository) FilterKnownVisitors(ctx context.Context, sceneID string, candidateActorIDs []string) ([]string, error) {
+	if len(candidateActorIDs) == 0 {
+		return []string{}, nil
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx,
+		`SELECT DISTINCT actor_id FROM reality.scene_checkins WHERE scene_id=$1 AND actor_id = ANY($2)`,
+		sceneID, candidateActorIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var actorID string
+		if err := rows.Scan(&actorID); err != nil {
+			return nil, err
+		}
+		out = append(out, actorID)
+	}
+	return out, rows.Err()
+}
+
 // SCENE-CONTRIB-001: 社区提交。
 //
 // 坐标是**用户填的**，这里不做任何反查也不做核实 —— 存进去就是 PENDING +

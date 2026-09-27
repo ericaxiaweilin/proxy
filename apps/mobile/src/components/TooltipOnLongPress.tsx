@@ -107,7 +107,7 @@ const TIP_MAX_WIDTH = 180;
 const styles = StyleSheet.create({
   wrap: { position: "relative" },
   tip: {
-    backgroundColor: "color.ink",
+    backgroundColor: color.ink,
     borderRadius: 10,
     bottom: 46,
     maxWidth: TIP_MAX_WIDTH,

@@ -669,9 +669,16 @@ describe("MSG-SCAN-SHORTCUT-001 messages module only adds friends via scan, not 
     // 逃掉的 bug：me.tsx 以 initialView="ADD_FRIEND" 进这个表面，于是返回
     // 按钮写着「‹ 返回消息」，而 onBack 其实是回「我的」—— 标签在撒谎。
     // 本组件不知道 onBack 通向哪里，所以标签只能由调用方给。
+    //
+    // BACK-GLYPH-001（2026-09-26）：label 现在只写**文字**，字形由公共原语
+    // ProxyBackGlyph 画（原来那个 `‹` 是文本引号不是箭头）。钉的东西没变：
+    // 两个落点必须由调用方分别给，且这个组件自己不许猜。
     expect(crmCode).not.toContain("‹ 返回消息");
-    expect(crmCode).toContain('const backText = directEntry ? (addFriendBackLabel ?? "‹ 返回") : "‹ 返回好友";');
-    expect(meCode).toContain('addFriendBackLabel="‹ 返回我的"');
+    expect(crmCode).toContain('const backText = directEntry ? (addFriendBackLabel ?? "返回") : "返回好友";');
+    // 字形来自公共原语，`‹` 从源码里消失（crmCode 剥过注释，所以这条是真断言）。
+    expect(crmCode).toContain("<ProxyBackGlyph label={backText} />");
+    expect(crmCode).not.toContain("‹");
+    expect(meCode).toContain('addFriendBackLabel="返回我的"');
   });
 
   it("one boolean drives both the label and the behaviour", () => {

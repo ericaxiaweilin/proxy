@@ -113,22 +113,69 @@ export function replyTargetsFromPosts(posts: readonly FeedPost[]): Record<string
 }
 
 /**
- * 这一行的标题。
+ * 这一行的标题，**分段**版（REPLY-TARGET-NAME-INK-001，2026-09-25 用户：
+ * 「你看回复xx 这个xx是灰色 但是原型是黑色的」）。
  *
+ * 原型那一行是「回复了 Linh 的帖子 · 1.2B」，其中**名字是墨色**、其余是次要色。
+ * 整句拼成一个字符串就没法给名字单独上色，所以拆成三段交给调用方分三个
+ * <Text> 渲染（RN 的嵌套 Text 可以各自带 color）。
+ *
+ * 分段规则与 replyTargetLabel 严格同源 —— 后者就是这三段拼起来的，两处不会漂。
+ * 别在别处再手工拼一遍这个句式。
+ */
+export type ReplyTargetParts = {
+  /** 「回复了 」/「你回复了 」；没有可指名的父帖时是整句。 */
+  prefix: string;
+  /** 名字（名字取不到时是中性词，绝不给 id）。取不到父帖时是空串。 */
+  name: string;
+  /** 「 的帖子」。没有名字段时是空串。 */
+  suffix: string;
+};
+
+/**
  * 名字取不到时给中性文案，绝不给 id。OWN-NAME-001 起自己的内容显示用户名
  * 不再是「你」—— 当前资料名优先（viewerDisplayName），其次帖子保存的名字；
  * 「你回复了你」这种自指句式不再出现。
  */
+export function replyTargetParts(
+  viewerMode: "SELF" | "OTHER" | undefined,
+  target: ReplyTarget | undefined,
+  viewerAccountId?: string | undefined,
+  viewerDisplayName?: string | undefined
+): ReplyTargetParts {
+  const self = viewerMode !== "OTHER";
+  if (!target) {
+    return { prefix: self ? "你回复了这条帖子" : "回复了这条帖子", name: "", suffix: "" };
+  }
+  return {
+    prefix: self ? "你回复了 " : "回复了 ",
+    name: resolveAuthorDisplayName(target, viewerAccountId, viewerDisplayName),
+    suffix: " 的帖子"
+  };
+}
+
+/** 整句版本 = 三段拼起来。任何调用方都不该自己拼这个句式。 */
 export function replyTargetLabel(
   viewerMode: "SELF" | "OTHER" | undefined,
   target: ReplyTarget | undefined,
   viewerAccountId?: string | undefined,
   viewerDisplayName?: string | undefined
 ): string {
-  const self = viewerMode !== "OTHER";
-  if (!target) return self ? "你回复了这条帖子" : "回复了这条帖子";
-  const name = resolveAuthorDisplayName(target, viewerAccountId, viewerDisplayName);
-  return self ? `你回复了 ${name} 的帖子` : `回复了 ${name} 的帖子`;
+  const parts = replyTargetParts(viewerMode, target, viewerAccountId, viewerDisplayName);
+  return `${parts.prefix}${parts.name}${parts.suffix}`;
+}
+
+/**
+ * 回复 tab 空态那句副文案（REPLY-EMPTY-VIEWER-001）。
+ *
+ * REPLY-TARGET-001 修的是标题里的「你」，同一屏的空态漏了：访客点开别人的主页、
+ * 那个人一条回复都没有时，屏幕上写着「**你**在其他帖子下面的回复会出现在这里」
+ * —— 跟当初那个 bug 是同一句话、同一个毛病（把别人的东西说成访问者的）。
+ */
+export function repliesEmptyHint(viewerMode: "SELF" | "OTHER" | undefined): string {
+  return viewerMode === "OTHER"
+    ? "这个人回复过的帖子会出现在这里"
+    : "你在其他帖子下面的回复会出现在这里";
 }
 
 /**

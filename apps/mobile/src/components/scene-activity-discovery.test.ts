@@ -30,10 +30,16 @@ describe("scene activity discovery contract", () => {
     expect(source.match(/assets\/scene-activity\/themes\//g)).toHaveLength(11);
   });
 
-  it("opens a real server scene rather than treating a semantic category as a venue", () => {
-    expect(source).toContain("liveSceneFor(detail.scene)");
-    expect(source).toContain("onOpenScene?.(target.id)");
+  // SCENE-CARD-DIRECT-LIST-001: the old Moment "detail" half-sheet (which
+  // called onOpenScene?.(target.id) after resolving a semantic moment.scene
+  // to a real liveSceneFor() match) is gone — every Moment card now opens
+  // the real category list (SceneShopDirectory) directly, and onOpenScene
+  // is only ever forwarded to that component, never called with a semantic
+  // category id treated as if it were a real venue id.
+  it("never calls onOpenScene directly with a semantic category id — only forwards it to the real scene list", () => {
     expect(source).not.toContain("onOpenScene?.(detail.scene)");
+    expect(source).not.toContain("onOpenScene?.(target.id)");
+    expect(source).toContain("{...(onOpenScene ? { onOpenScene } : {})}");
   });
 
   // SCENE-PICKER-FILTER-SINGLE-ROW-003 (2026-09-21, user follow-up + explicit
@@ -122,13 +128,19 @@ describe("scene activity discovery contract", () => {
   // bottom sheet (backdrop tap to dismiss, drag handle, maxHeight "84%") —
   // a left-rail + right-list browsing screen is meant to be used as a full
   // page, not squeezed into a sheet that leaves a sliver of the page behind
-  // it showing. Now a full page with a "‹ 返回" header, matching how every
+  // it showing. Now a full page with a back header, matching how every
   // other full-screen surface in this app closes.
+  //
+  // BACK-GLYPH-001 (2026-09-26): the header's glyph is no longer a `‹`
+  // text character — that was a quotation mark, not an arrow, and it drifted
+  // in shape/weight/baseline with fontSize (11 sizes, 9 colours app-wide).
+  // The pin now asserts the shared primitive instead of a literal character,
+  // which is what makes the character unable to come back.
   it("SCENE-PICKER-WAIMAI-001: the picker is a full page with a back button, not a dismissible bottom sheet", () => {
     const start = source.indexOf("<Modal animationType=\"slide\" onRequestClose={() => setPickerOpen(false)}");
     expect(start).toBeGreaterThan(-1);
     const pickerModal = source.slice(start, source.indexOf("</Modal>", start));
-    expect(pickerModal).toContain("‹ 返回");
+    expect(pickerModal).toContain('<ProxyBackGlyph label="返回" />');
     expect(pickerModal).toContain("styles.pickerPage");
     // No more backdrop-tap-to-dismiss or bottom-sheet framing on this modal.
     expect(pickerModal).not.toContain("styles.backdrop");
@@ -218,9 +230,11 @@ describe("single-row price / time / occasion filter (SCENE-PICKER-FILTER-SINGLE-
 
   it("SCENE-PICKER-FILTER-ANCHORED-004: opens as an anchored dropdown, not a stacked bottom-sheet Modal", () => {
     // Only one <Modal> should remain for this whole component now: the
-    // full-page "动作分类" picker and the Moment detail sheet. The old
-    // per-dimension filter <Modal> (backdrop + slide-up sheet) is gone.
-    expect(source.match(/<Modal /g)).toHaveLength(2);
+    // full-page "动作分类" picker. The old per-dimension filter <Modal>
+    // (backdrop + slide-up sheet) is gone, and so is the Moment detail
+    // half-sheet <Modal> (SCENE-CARD-DIRECT-LIST-001 — every card opens the
+    // real scene list directly instead).
+    expect(source.match(/<Modal /g)).toHaveLength(1);
     expect(source).toContain("styles.filterDropdown");
     expect(source).toContain("styles.filterDropdownScrim");
     expect(source).not.toContain("visible={openFilter !== undefined}");

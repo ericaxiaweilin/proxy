@@ -6,7 +6,7 @@ import { color, Gradient } from "../theme";
 import type { AbilityType, AvailabilityRule, AvailabilityState, AvOverride, MenuRow } from "./me-types";
 import { ABILITY_SCHEMAS, AVAILABILITY_OPTIONS, avFmt, AV_DAY_NAMES, avStateFor } from "./me-types";
 import { styles } from "./me-styles";
-import { FACET_LOGO, KYC_LOGO, OTTER_LOGO } from "../media/asset-sources";
+import { FACET_LOGO, GROWTH_LOGO, KYC_LOGO, OTTER_LOGO } from "../media/asset-sources";
 import { AILogo } from "./ai-management";
 
 export function availabilityLabel(value: AvailabilityState): string {
@@ -444,6 +444,14 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
     ) : (
       <ProxySymbolIcon color={row.grad ? color.white : color.ink} size={26} symbol="spark" />
     )
+  ) : row.icon === "growth-logo" ? (
+    // GROWTH-LOGO-001：我的权益入口行用正牌标（深色圆角方块 + 三根渐变金色
+    // 成长柱），不再回落成通用图标画出半截 "gift" 文字。
+    GROWTH_LOGO ? (
+      <Image accessible={false} resizeMode="cover" source={GROWTH_LOGO} style={styles.serviceLogoFill} />
+    ) : (
+      <ProxySymbolIcon color={row.grad ? color.white : color.ink} size={26} symbol="chart" />
+    )
   ) : row.icon === "voucher" ? (
     <ProxyIcon color={row.grad ? color.white : color.ink} name="cup" size={26} />
   ) : (
@@ -456,7 +464,7 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
           {icon}
         </Gradient>
       ) : (
-        <View style={[styles.serviceIcon, row.icon === "P" && styles.serviceLogoBox, row.icon === "ai-manage" && styles.serviceIconBare, row.icon === "kyc-logo" && KYC_LOGO !== undefined && styles.serviceIconWhite]}>
+        <View style={[styles.serviceIcon, row.icon === "P" && styles.serviceLogoBox, (row.icon === "ai-manage" || (row.icon === "growth-logo" && GROWTH_LOGO !== undefined)) && styles.serviceIconBare, row.icon === "kyc-logo" && KYC_LOGO !== undefined && styles.serviceIconWhite]}>
           {icon}
         </View>
       )}

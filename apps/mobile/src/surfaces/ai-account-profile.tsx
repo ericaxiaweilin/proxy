@@ -8,6 +8,7 @@ import type { EngagementClient } from "../engagement-client";
 import type { SecureSessionStore } from "../secure-session";
 import { mapFollowError } from "./feed-error-map";
 import { color, shadows } from "../theme";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 // An AI profile is a real addressable account surface, but never masquerades
 // as a person or claims the marketplace actions humans can take.
@@ -72,7 +73,7 @@ export function AIAccountProfileSurface({ account, engagement, secureSessionStor
 
 
   return <View style={styles.root}>
-    <View style={styles.header}><Pressable onPress={onBack} style={styles.back}><Text selectable style={styles.backText}>‹ 返回</Text></Pressable><Text selectable style={styles.headerTitle}>AI 主页</Text><View style={styles.spacer} /></View>
+    <View style={styles.header}><Pressable accessibilityLabel="返回" onPress={onBack} style={styles.back}><ProxyBackGlyph /></Pressable><Text selectable style={styles.headerTitle}>AI 主页</Text><View style={styles.spacer} /></View>
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.hero}>
         <View style={styles.avatarRing}>
@@ -107,7 +108,7 @@ export function AIAccountProfileSurface({ account, engagement, secureSessionStor
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
   header: { alignItems: "center", backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", height: 52, paddingHorizontal: 16 },
-  back: { flex: 1 }, backText: { color: color.violet, fontSize: 14, fontWeight: "800" }, headerTitle: { color: color.ink, fontSize: 16, fontWeight: "900" }, spacer: { flex: 1 },
+  back: { flex: 1 }, headerTitle: { color: color.ink, fontSize: 16, fontWeight: "900" }, spacer: { flex: 1 },
   content: { paddingBottom: 36 },
   hero: { alignItems: "center", backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 16, paddingHorizontal: 18, paddingVertical: 22 },
   avatarRing: { borderColor: "#DCCBFF", borderRadius: 999, borderWidth: 3, height: 104, padding: 3, width: 104 },

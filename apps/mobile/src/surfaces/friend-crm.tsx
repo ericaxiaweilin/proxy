@@ -17,6 +17,7 @@ import type { FriendView, RelationshipClient } from "../relationship-client";
 import type { ContentAnalytics, LocalNetClient, MediaImpressionStats, PostImpressionStats, ProfileViewerStat } from "../localnet-client";
 import type { FeedPost } from "@proxy/contracts";
 import { color, shadows } from "../theme";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 type FriendSource = "QR" | "INVITE" | "CONTACTS" | "SOCIAL" | "SEARCH";
 type FriendStatus = "FRIEND" | "PENDING" | "BLOCKED";
@@ -697,10 +698,13 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
       if (directEntry) onBack();
       else setView("LIST");
     };
-    const backText = directEntry ? (addFriendBackLabel ?? "‹ 返回") : "‹ 返回好友";
+    // BACK-GLYPH-001（2026-09-26）：这里只拼**文字**，字形由 ProxyBackGlyph 画。
+    // 两条落点必须各写各的目的地（直接进来的回调用方指定的地方，否则回好友列表）——
+    // 写成裸 `‹` 就是替用户猜目的地，MSG-SCAN-SHORTCUT-001 那条钉守的就是这个。
+    const backText = directEntry ? (addFriendBackLabel ?? "返回") : "返回好友";
     return (
       <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-        <Pressable onPress={handleBack} style={styles.backRow}><Text selectable style={styles.backText}>{backText}</Text></Pressable>
+        <Pressable onPress={handleBack} style={styles.backRow}><ProxyBackGlyph label={backText} /></Pressable>
         <Text selectable style={styles.title}>添加好友</Text>
         <Text selectable style={styles.sub}>通过二维码、邀请、通讯录、社媒或 Proxy 搜索找到你认识的人。</Text>
 
@@ -893,8 +897,8 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   const serverMode = projectedServerFriends.length > 0;
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <Pressable onPress={onBack} style={styles.backRow}><Text selectable style={styles.backText}>‹ 返回我的</Text></Pressable>
-      <Text selectable style={styles.title}>好友关系</Text>
+<Pressable onPress={onBack} style={styles.backRow}><ProxyBackGlyph /></Pressable>
+        <Text selectable style={styles.title}>好友关系</Text>
       <Text selectable style={styles.sub}>关系状态、互动与下一步动作</Text>
       {/*
         ADD-FRIEND-ENTRY-002: 这个"添加好友"按钮曾经是 ADD_FRIEND 唯一的
@@ -1159,7 +1163,7 @@ function FriendDetail({ friend, relationship, onBack, onOpenConversation, onOpen
   }
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <Pressable onPress={onBack} style={styles.backRow}><Text selectable style={styles.backText}>‹ 返回好友</Text></Pressable>
+      <Pressable onPress={onBack} style={styles.backRow}><ProxyBackGlyph /></Pressable>
 
       <View style={styles.detailHead}><View style={styles.avatarLarge}><Text selectable style={styles.avatarLargeText}>{friend.initial}</Text></View><View style={styles.detailHeadCopy}><Text selectable style={styles.detailName}>{friend.name}</Text><Text selectable style={styles.detailProxyId}>{friend.proxyId} · {friend.city} · 已验证</Text><View style={styles.tagRow}>{tags.map((t) => <View key={t} style={styles.tag}><Text selectable style={styles.tagText}>{t}</Text></View>)}</View></View></View>
 
@@ -1213,7 +1217,8 @@ const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 24, paddingHorizontal: 16, paddingTop: 10 },
   backRow: { paddingVertical: 6 },
-  backText: { color: color.magenta, fontSize: 14, fontWeight: "800" },
+  // backText 样式已删：字形和标签都由公共组件 ProxyBackGlyph 画（BACK-GLYPH-001）。
+  // （上面那个同名局部变量 backText 是**标签文案**，不是这个样式。）
   title: { color: color.ink, fontSize: 26, fontWeight: "900", lineHeight: 34, marginTop: 6 },
   sub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 4 },
   sectionHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginBottom: 8, marginTop: 18 },
@@ -1264,7 +1269,7 @@ const styles = StyleSheet.create({
   friendContext: { color: color.muted, fontSize: 11, marginTop: 2 },
   tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 5 },
   tag: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 3 },
-  tagText: { color: "color.factInferredFg", fontSize: 11, fontWeight: "800" },
+  tagText: { color: color.factInferredFg, fontSize: 11, fontWeight: "800" },
   sourceMini: { color: "#9B92A3", fontSize: 11, marginTop: 4 },
   emptyResult: { color: color.muted, fontSize: 11, padding: 16, textAlign: "center" },
   detailHead: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 12, padding: 14, ...shadows.card },
@@ -1281,7 +1286,7 @@ const styles = StyleSheet.create({
   kvRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", paddingVertical: 8 },
   kvLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
   kvValue: { color: color.ink, fontSize: 11, fontWeight: "800", maxWidth: 220, textAlign: "right" },
-  statusPill: { backgroundColor: "color.proxyGreenSoft", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  statusPill: { backgroundColor: color.proxyGreenSoft, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
   statusPillText: { color: "#187A48", fontSize: 11, fontWeight: "800" },
   tagEditable: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   emptyInline: { color: color.muted, fontSize: 11 },
@@ -1310,7 +1315,7 @@ const styles = StyleSheet.create({
   loadError: { color: color.error, fontSize: 11, lineHeight: 15, marginTop: 6 },
   sheetOverlay: { alignItems: "flex-end", backgroundColor: "rgba(17,13,21,0.38)", flex: 1, justifyContent: "flex-end" },
   sheet: { backgroundColor: color.white, borderTopLeftRadius: 18, borderTopRightRadius: 18, maxHeight: "90%", padding: 16, width: "100%" },
-  sheetGrab: { alignSelf: "center", backgroundColor: "color.homeIntentBorder", borderRadius: 999, height: 4, width: 36 },
+  sheetGrab: { alignSelf: "center", backgroundColor: color.homeIntentBorder, borderRadius: 999, height: 4, width: 36 },
   sheetHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 12 },
   sheetTitle: { color: color.ink, fontSize: 15, fontWeight: "900" },
   sheetClose: { color: color.muted, fontSize: 20, paddingHorizontal: 6 },
@@ -1331,7 +1336,7 @@ const styles = StyleSheet.create({
   btnPrimary: { backgroundColor: color.ink, borderColor: color.ink },
   btnText: { color: color.ink, fontSize: 11, fontWeight: "800" },
   btnPrimaryText: { color: color.white, fontSize: 11, fontWeight: "900" },
-  btnGhost: { backgroundColor: "color.white" },
+  btnGhost: { backgroundColor: color.white },
   btnGhostText: { color: color.ink, fontSize: 11, fontWeight: "900" },
   qrName: { alignItems: "center", marginTop: 10 },
   qrNameStrong: { color: color.ink, fontSize: 14, fontWeight: "900" },

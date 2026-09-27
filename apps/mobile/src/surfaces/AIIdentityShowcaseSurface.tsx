@@ -18,7 +18,7 @@
 // 取已授权的那个），不依赖这一屏再传一份「当前分身」下去——原型本来就是单一分身
 // 视角，没有分身切换器。这一屏因此不再需要 AiPersonaClient。
 
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { color } from "../theme";
 import type { PersonaGalleryItem } from "../ai-persona-client";
@@ -29,6 +29,7 @@ import { TwinInsightSection } from "../components/twin-insight-section";
 import { TwinGallerySection } from "../components/twin-gallery-section";
 import { TwinPostComposerSection } from "../components/twin-post-composer-section";
 import { TwinUserModelSection } from "../components/twin-user-model-section";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, ownerName, ownerAvatarUri, authClient, rawGalleryItems, mediaClient, posts, mediaByPost, relationshipClient, createPost, updatePostAudience, onPostPublished, resolveMediaUrl }: {
   onBack: () => void;
@@ -67,7 +68,7 @@ export function AIIdentityShowcaseSurface({ onBack, viewerAccountId, ownerName, 
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.pageHead}>
-          <Text selectable onPress={onBack} style={styles.back}>‹</Text>
+          <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.back}><ProxyBackGlyph /></Pressable>
           <Text selectable style={styles.title}>AI分身中心</Text>
         </View>
         <Text selectable style={styles.subtitle}>图库 · 帖文编排 · 好友运营</Text>
@@ -105,7 +106,9 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: color.appBg },
   content: { paddingHorizontal: 16, paddingBottom: 40 },
   pageHead: { flexDirection: "row", alignItems: "center", paddingVertical: 14, gap: 12 },
-  back: { fontSize: 22, color: color.ink, paddingHorizontal: 6 },
+  // 原来是给 `‹` 那份 Text 用的（fontSize 22 / color ink）；字形现在由公共组件
+  // ProxyBackGlyph 画（BACK-GLYPH-001），这里只留它承担的那点内边距。
+  back: { paddingHorizontal: 6, paddingVertical: 4 },
   title: { fontSize: 22, fontWeight: "800", color: color.ink, letterSpacing: -0.4 },
   subtitle: { fontSize: 12, color: color.muted, marginBottom: 20 },
 });

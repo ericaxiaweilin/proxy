@@ -708,6 +708,76 @@ func TestStaleOpportunityLensDefaultedOnList(t *testing.T) {
 	}
 }
 
+// MARKET-LEGACY-FABRICATED-001: 2026-09-16 那次清扫只改了**写**路径
+// （PublishMarketOpportunity 不再无条件写 Verified=true / 不再写死 Match），
+// 读路径是把 payload 整段 unmarshal 回来照发的 —— 清扫之前落库的行至今还带着
+// 当时的编造值下发，客户端只能照画（卡片上「100% 匹配」、详情页给个人发布者
+// 画「商家身份已验证」）。读路径必须清掉「写路径从来不产出」的形态。
+func TestListStripsLegacyFabricatedJudgment(t *testing.T) {
+	s := New()
+	legacyPersonal := Opportunity{
+		ID: "legacy_personal_001", Title: "旧个人单", Theme: "咖啡", Date: "今晚 19:00",
+		Time: "今晚 19:00 · 2 小时 · 1:1", Location: "咖啡馆", Price: "200,000₫",
+		Owner: "weilinxia511", OwnerID: "acct_legacy", OwnerType: "PERSON",
+		Verified: true, Match: "100%",
+	}
+	realMerchant := Opportunity{
+		ID: "merchant_001", Title: "真商家单", Theme: "商务陪同", Date: "周六",
+		Time: "15:00–20:00", Location: "河内 · 西湖", Price: "1,500,000₫",
+		Owner: "Nova Trading", OwnerID: "acct_merchant", OwnerType: "BUSINESS",
+		Verified: true,
+	}
+	seedShaped := Opportunity{
+		ID: "seed_shaped_001", Title: "种子形态", Theme: "摄影", Date: "周日",
+		Time: "13:30–18:00", Location: "河内", Price: "950,000₫",
+		Owner: "Chen", OwnerID: "acct_seed", OwnerType: "BUSINESS",
+		Verified: false,
+	}
+	if err := s.repository.Seed(t.Context(), []Opportunity{legacyPersonal, realMerchant, seedShaped}); err != nil {
+		t.Fatal(err)
+	}
+	listed := s.HandleContext(t.Context(), marketEnvelope("ListMarketOpportunities", "viewer", nil))
+	if listed.Outcome != "ACCEPTED" {
+		t.Fatalf("list: %+v", listed)
+	}
+	var body struct {
+		Opportunities []Opportunity `json:"opportunities"`
+	}
+	if err := json.Unmarshal([]byte(listed.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Opportunity{}
+	for _, o := range body.Opportunities {
+		byID[o.ID] = o
+	}
+	// 正向：存量编造值必须被清掉。
+	legacy, ok := byID[legacyPersonal.ID]
+	if !ok {
+		t.Fatalf("legacy row missing from the list: %+v", body.Opportunities)
+	}
+	if legacy.Match != "" {
+		t.Errorf("legacy row still serves Match=%q: there is no matching engine, any non-empty value was written before the 2026-09-16 sweep", legacy.Match)
+	}
+	if legacy.Verified {
+		t.Errorf("legacy row still serves Verified=true with ownerType=%q: the publish path only sets Verified together with BUSINESS (merchant stamp)", legacy.OwnerType)
+	}
+	// 反向：清的是"平台不产出的形态"，不是这个字段本身。
+	merchant, ok := byID[realMerchant.ID]
+	if !ok {
+		t.Fatalf("merchant row missing from the list")
+	}
+	if !merchant.Verified {
+		t.Errorf("a BUSINESS row verified through the merchant stamp must keep its badge: %+v", merchant)
+	}
+	seed, ok := byID[seedShaped.ID]
+	if !ok {
+		t.Fatalf("seed-shaped row missing from the list")
+	}
+	if seed.Verified {
+		t.Errorf("the strip must not invent a verification: %+v", seed)
+	}
+}
+
 // AIBOUND-001: Dismiss 之前无 gate；现 AI 主体必须 AI_ACTION_FORBIDDEN，
 // 非 USER 主体必须 MARKET_ACTOR_REQUIRED（与 Publish/Apply 对齐）。
 func TestMarketDismissIsForbiddenForAIActor(t *testing.T) {
@@ -1081,5 +1151,92 @@ func TestConfirmMarketApplicationCarriesScenario(t *testing.T) {
 	}
 	if published, records := publishConfirm("bogus"); published != "" || len(records) != 1 || records[0].Scenario != "" {
 		t.Fatalf("bogus scenario must normalize to empty, got published=%q records=%+v", published, records)
+	}
+}
+
+// CLIENT-RATING-001: a listing's Rating/RatingCount reflect the owner's
+// real aggregate — present when there is data, entirely absent (not a
+// fabricated 0) when there isn't.
+type fakeRatingLookup struct {
+	byUser map[string]struct {
+		avg   float64
+		count int
+	}
+}
+
+func (f *fakeRatingLookup) GetUserRatingAggregate(_ context.Context, userID string) (float64, int, error) {
+	rec, ok := f.byUser[userID]
+	if !ok {
+		return 0, 0, nil
+	}
+	return rec.avg, rec.count, nil
+}
+
+func TestListMarketOpportunitiesAttachesRealRatingOnly(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	published := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "rated_owner", map[string]any{
+		"title": "评分测试", "theme": "咖啡", "date": "周六", "time": "10:00", "location": "河内", "price": "100,000₫", "skills": "中文",
+	}))
+	if published.Outcome != "ACCEPTED" {
+		t.Fatalf("publish: %+v", published)
+	}
+	var pub struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(published.OperationRef), &pub); err != nil {
+		t.Fatal(err)
+	}
+
+	// Before wiring SetRatingLookup at all: no fields, ever.
+	listed := s.HandleContext(t.Context(), marketEnvelope("ListMarketOpportunities", "viewer", nil))
+	var body struct {
+		Opportunities []Opportunity `json:"opportunities"`
+	}
+	if err := json.Unmarshal([]byte(listed.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range body.Opportunities {
+		if item.RatingCount != 0 {
+			t.Fatalf("expected no rating data before SetRatingLookup is wired, got %+v", item)
+		}
+	}
+
+	// Wired, but this owner has zero ratings: still absent, not a fake 0.
+	lookup := &fakeRatingLookup{byUser: map[string]struct {
+		avg   float64
+		count int
+	}{"other_owner": {avg: 4.5, count: 3}}}
+	s.SetRatingLookup(lookup)
+	listed = s.HandleContext(t.Context(), marketEnvelope("ListMarketOpportunities", "viewer", nil))
+	if err := json.Unmarshal([]byte(listed.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range body.Opportunities {
+		if item.ID == pub.Opportunity.ID && item.RatingCount != 0 {
+			t.Fatalf("rated_owner has no ratings yet, expected RatingCount 0, got %+v", item)
+		}
+	}
+
+	// Now this owner has real ratings: the field appears with the real value.
+	lookup.byUser["rated_owner"] = struct {
+		avg   float64
+		count int
+	}{avg: 4.8, count: 12}
+	listed = s.HandleContext(t.Context(), marketEnvelope("ListMarketOpportunities", "viewer", nil))
+	if err := json.Unmarshal([]byte(listed.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range body.Opportunities {
+		if item.ID == pub.Opportunity.ID {
+			found = true
+			if item.RatingCount != 12 || item.Rating != 4.8 {
+				t.Fatalf("expected real rating 4.8/12 to be attached, got %+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("published opportunity not found in listing")
 	}
 }

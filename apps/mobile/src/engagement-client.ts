@@ -63,6 +63,32 @@ export class EngagementClient {
     await this.command("ReplyToPost", { type: "Post", id: postId }, { postId, body: normalized });
   }
 
+  /**
+   * REPOST-POST-001（2026-09-25）：转发。
+   *
+   * 原型每一行操作区是 4 个按钮（♡/💬/↻/⤴），第 3 个就是转发。服务端
+   * `RepostPost` 从 R14 起就完整实现（engagement/service.go 的 repost()，
+   * 含 TestRepostPost_DuplicateAndGhost 的 23505/23503 业务码测试），
+   * 但客户端**一直没有这个方法** ⇒ 手机上无处可转发，`reposts` 恒为 0。
+   * 这不是「服务端还没做」，是客户端少了一根线。
+   *
+   * 幂等：服务端把重复转发判成 **REJECTED / ALREADY_REPOSTED**（不是
+   * Accepted + state，跟 PinPost/UnpinPost 的写法不一样），所以这里自己认这个
+   * 业务码 —— 对用户来说「已经转过了」不是失败，双击不该弹错。其他错误照抛，
+   * 不吞。
+   */
+  public async repostPost(postId: string): Promise<"REPOSTED" | "ALREADY_REPOSTED"> {
+    try {
+      await this.command("RepostPost", { type: "Post", id: postId }, { postId });
+      return "REPOSTED";
+    } catch (err) {
+      if (err instanceof EngagementCommandRejectedError && err.result.error?.errorCode === "ALREADY_REPOSTED") {
+        return "ALREADY_REPOSTED";
+      }
+      throw err;
+    }
+  }
+
   public async getPostEngagement(postId: string): Promise<PostEngagement> {
 	return this.parseEngagement(await this.command("GetPostEngagement", { type: "Post", id: postId }, { postId }));
   }

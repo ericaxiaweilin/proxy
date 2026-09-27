@@ -5,13 +5,13 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { color } from "../theme";
 import type { Campaign, BenefitDefinition, Claim } from "../benefit-client";
 import { BenefitClient } from "../benefit-client";
-import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyEmptyState, ProxyLoading } from "../components/proxy-foundation";
 
 type Screen = "LIST" | "DETAIL" | "CLAIMED" | "ERROR";
 
 const CAMPAIGN_LABELS: Record<string, { label: string; color: string }> = {
   SCENE_IGNITION: { label: "场景点火", color: "#E85D3A" },
-  CREATOR_SEED: { label: "创作者种子", color: "color.proxyPurple" },
+  CREATOR_SEED: { label: "创作者种子", color: color.proxyPurple },
   NEW_TO_SCENE: { label: "新客到店", color: "#059669" },
   REACTIVATION: { label: "召回沉默", color: "#D97706" },
   NEWCOMER: { label: "新城市", color: "#2563EB" },
@@ -172,7 +172,7 @@ export function BenefitClaimScreen({
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <Pressable onPress={onBack} style={styles.backArrow}>
-          <Text selectable style={styles.backArrowText}>‹</Text>
+          <ProxyBackGlyph />
         </Pressable>
         <Text selectable style={styles.title}>可用权益</Text>
       </View>
@@ -225,7 +225,6 @@ const styles = StyleSheet.create({
   container: { padding: 16, backgroundColor: "#FAFAFA" },
   header: { flexDirection: "row", alignItems: "center", marginBottom: 16 },
   backArrow: { marginRight: 8, padding: 4 },
-  backArrowText: { fontSize: 28, color: color.ink },
   title: { fontSize: 20, fontWeight: "600", color: color.ink },
   spinner: { marginVertical: 24 },
   error: { color: "#DC2626", textAlign: "center", marginVertical: 12 },

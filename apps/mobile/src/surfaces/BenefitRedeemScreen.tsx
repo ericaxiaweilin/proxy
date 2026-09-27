@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { color } from "../theme";
 import type { Redemption } from "../benefit-client";
 import { BenefitClient } from "../benefit-client";
-import { ProxyLoading } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyLoading } from "../components/proxy-foundation";
 
 type Screen = "SCAN" | "CONFIRM" | "SUCCESS" | "ERROR";
 
@@ -76,7 +76,7 @@ export function BenefitRedeemScreen({
     <View style={styles.container}>
       <View style={styles.header}>
         <Pressable onPress={onBack} style={styles.backArrow}>
-          <Text selectable style={styles.backArrowText}>‹</Text>
+          <ProxyBackGlyph />
         </Pressable>
         <Text selectable style={styles.title}>扫描核销</Text>
       </View>
@@ -121,7 +121,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, backgroundColor: "#FAFAFA" },
   header: { flexDirection: "row", alignItems: "center", marginBottom: 24 },
   backArrow: { marginRight: 8, padding: 4 },
-  backArrowText: { fontSize: 28, color: color.ink },
   title: { fontSize: 20, fontWeight: "600", color: color.ink },
   scanBox: { backgroundColor: "#FFF", borderRadius: 12, padding: 20, marginBottom: 16 },
   scanHint: { fontSize: 14, color: "#6B7280", marginBottom: 12 },

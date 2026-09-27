@@ -14,6 +14,7 @@ import { ComposerV2Screen } from "./ComposerV2Screen";
   onPublished={async () => { await loadFeed(); }}
   localNet={localNet}
   mediaClient={mediaClient}
+  activityClient={activities}
   initialQuoteId={composerQuoteId}
   posts={posts}
 />
@@ -26,6 +27,8 @@ import { ComposerV2Screen } from "./ComposerV2Screen";
 | 正文 TextInput | `body` | `body` | 0/500，>460 转橘红 |
 | 媒体 1/2/4 宫格 | `media[]` | `mediaRefs[]` | 上传走 `mediaClient.uploadMedia` |
 | 引用帖文卡 | `quoteId` | `contextRefs[]` | `contextType: "QUOTE_POST"` |
+| 拍摄场景 | `scene` | `contextRefs[]` | `contextType: "REALITY_SCENE"` + `relationType: "FEATURED_AT"`；带图发出后进该场景照片墙 |
+| 关联活动 | `activity` | `contextRefs[]` | `contextType: "ACTIVITY"` + `relationType: "REFERS_TO"`，`contextId` 是 `activityId`（**不是**标题）。读端判定见 `apps/mobile/src/activity-ref.ts` |
 | 地点 chip | `place` | body 前缀 `📍 {area}` | 复用 `LocationPickerSheet` |
 | 话题 chip | `topic` | body 前缀（原文） | 3 个建议 |
 | 谁可回复 | `replyPerm` | 仅本地（v1 无此字段）| 待 PRD |

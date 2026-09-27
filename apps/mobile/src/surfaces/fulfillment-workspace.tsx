@@ -13,6 +13,7 @@ import { fixturePlanFor, resolveReadModel } from "../uiplan/fixtures";
 import { planToSpec } from "../uiplan/orchestrator";
 import { isHardDemandCategory, type HardDemandCategory, type UIPlan } from "../uiplan/types";
 import { validateUIPlan } from "../uiplan/validator";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 export interface WorkspaceTarget {
   category: HardDemandCategory;
@@ -201,7 +202,7 @@ export function FulfillmentWorkspace({
     <View style={styles.root}>
       <View style={styles.topBar}>
         <Pressable onPress={onBack} style={styles.backButton}>
-          <Text selectable style={styles.backText}>‹</Text>
+          <ProxyBackGlyph />
         </Pressable>
         <Text selectable numberOfLines={1} style={styles.title}>
           {plan.title}
@@ -361,7 +362,6 @@ const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
   topBar: { alignItems: "center", flexDirection: "row", gap: 6, paddingHorizontal: 12, paddingTop: 2 },
   backButton: { alignItems: "center", height: 30, justifyContent: "center", width: 30 },
-  backText: { color: color.ink, fontSize: 24, lineHeight: 28 },
   title: { color: color.ink, flex: 1, fontSize: 15, fontWeight: "900" },
   flowRow: { paddingHorizontal: 16, paddingTop: 4 },
   flowPill: {

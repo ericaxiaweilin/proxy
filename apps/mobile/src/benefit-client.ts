@@ -1,9 +1,16 @@
 // Benefit client — handles benefit routing network operations:
 // campaign listing, benefit claims, redemptions, and eligibility checks.
+//
+// GROWTH-REAL-SESSION-001（2026-09-24，verified live in the simulator）：
+// actor/principal 之前是硬编码的空 id 占位符 —— 服务端 missingEnvelopeField()
+// （internal/api/command_dispatch.go）在命令分发之前就以 actor.id 拒绝了，
+// BenefitHubSurface 的活动列表这一路从没真正走通过。改成跟 fulfillment-client.ts
+// 一样：读真实 session 的 userAccountId/principal，不再用占位符。
 import type { CommandResult } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import { commandErrorMessage } from "./command-error-message";
+import type { SecureSessionStore, StoredSession } from "./secure-session";
 
 // ──────────────────────────────────────────────────────────────
 // Types
@@ -148,6 +155,7 @@ export class BenefitClient {
   public constructor(
     private readonly input: {
       authClient: BenefitCommandTransport;
+      secureSessionStore: SecureSessionStore;
       now?: () => Date;
     }
   ) {}
@@ -235,18 +243,25 @@ export class BenefitClient {
 
   // ── Internal ──────────────────────────────────────────────
 
+  private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
+    const session = await this.input.secureSessionStore.read();
+    if (!session?.principal) throw new BenefitError("authenticated principal required");
+    return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
+  }
+
   private async command(commandType: string, target: { type: string; id: string }, payload: unknown): Promise<{ result: CommandResult; body: Record<string, unknown> }> {
     this.commandSequence++;
+    const session = await this.requireSession();
     const now = this.input.now?.() ?? new Date();
     const envelope = {
       commandId: `benefit_${Date.now()}_${this.commandSequence}`,
       commandType,
       commandVersion: 1,
-      actor: { type: "INDIVIDUAL", id: "" },
-      principal: { type: "INDIVIDUAL", id: "" },
+      actor: { type: "USER", id: session.userAccountId },
+      principal: session.principal,
       target,
       idempotencyKey: `benefit_${commandType}_${Date.now()}_${this.commandSequence}`,
-      authContext: {},
+      authContext: { sessionId: session.auth.sessionId },
       purpose: "benefit_operation",
       correlationId: `corr_${Date.now()}`,
       requestedAt: now.toISOString(),

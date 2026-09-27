@@ -30,6 +30,7 @@ import { SCENE_ACTIONS } from "../components/scene-activity-discovery";
 import { Image } from "expo-image";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { localApiBaseUrl } from "../native-clients";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 type Step = "moment" | "people" | "specs" | "done";
 
@@ -266,7 +267,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.head}>
         <Pressable accessibilityLabel="返回" onPress={back} style={styles.backBtn}>
-          <Text selectable style={styles.backText}>‹</Text>
+          <ProxyBackGlyph />
         </Pressable>
         <Text selectable style={styles.title}>{step === "done" ? "✓ 需求已发布" : "发布需求"}</Text>
         {step === "done" ? <View style={styles.headSpacer} /> : (
@@ -666,7 +667,6 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 32, paddingHorizontal: 16, paddingTop: 8 },
   head: { alignItems: "center", flexDirection: "row", marginBottom: 8 },
   backBtn: { alignItems: "center", height: 38, justifyContent: "center", width: 38 },
-  backText: { color: color.ink, fontSize: 24, fontWeight: "800", lineHeight: 28 },
   title: { color: color.ink, flex: 1, fontSize: 20, fontWeight: "900", textAlign: "center" },
   draftBtn: { alignItems: "center", height: 38, justifyContent: "center", paddingHorizontal: 6 },
   draftText: { color: color.violet, fontSize: 13, fontWeight: "700" },

@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConversationClient } from "../conversation-client";
 import { resolveHomePersonAccountId, type RecommendPerson } from "../recommend-fixtures";
 import { color, foundation } from "../theme";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 // ROOM-CREATE-001（2026-09-22，用户原型 deepseek_html_20260922_c2625e.html
 // 「创建房间」）：GROUP conversation + 场景元数据，见 conversation-client.ts
@@ -119,7 +120,7 @@ export function RoomCreateSurface({ candidates, conversationClient, initialScene
     <View style={[styles.root, presentation === "overlay" && styles.overlay, { paddingTop: safeArea.top }]}>
       <View style={styles.navBar}>
         <Pressable accessibilityLabel="返回" hitSlop={12} onPress={() => { reset(); onClose(); }} style={styles.navBack}>
-          <Text selectable style={styles.navBackText}>‹</Text>
+          <ProxyBackGlyph />
         </Pressable>
         <Text selectable style={styles.navTitle}>创建房间</Text>
         <Pressable
@@ -222,7 +223,6 @@ const styles = StyleSheet.create({
   overlay: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   navBar: { alignItems: "center", borderBottomColor: color.cardBorder, borderBottomWidth: 1, flexDirection: "row", gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
   navBack: { alignItems: "center", height: 28, justifyContent: "center", width: 24 },
-  navBackText: { color: foundation.ink, fontSize: 24, fontWeight: "600" },
   navTitle: { color: foundation.ink, flex: 1, fontSize: 16, fontWeight: "800" },
   navAction: { backgroundColor: color.chipNeutralBg, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6 },
   navActionReady: { backgroundColor: foundation.ink },

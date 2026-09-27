@@ -187,8 +187,12 @@ commands:
     domain: Identity
   - command: GetBusinessStore
     domain: Business
+  - command: GetCampaign
+    domain: Benefit
   - command: GetCandidateBatch
     domain: Supply
+  - command: GetClaim
+    domain: Benefit
   - command: GetContentAnalytics
     domain: LocalNet
   - command: GetFollowCounts
@@ -203,6 +207,8 @@ commands:
     domain: Scene
   - command: GetMerchantOperatingHome
     domain: Business
+  - command: GetMyGrowthSummary
+    domain: Growth
   - command: GetObservationTemplate
     domain: Outcome
   - command: GetOffer
@@ -215,6 +221,8 @@ commands:
     domain: Identity
   - command: GetProfileByHandle
     domain: Identity
+  - command: GetPurposeConsent
+    domain: LocalNet
   - command: GetReceivedEngagementStats
     domain: Engagement
   - command: GetStoreLines
@@ -249,8 +257,12 @@ commands:
     domain: Fulfillment
   - command: ListBusinessStores
     domain: Business
+  - command: ListCampaigns
+    domain: Benefit
   - command: ListCityCompanionCandidates
     domain: CityCompanion
+  - command: ListClaims
+    domain: Benefit
   - command: ListCommunities
     domain: SocialSpace
   - command: ListContributions
@@ -339,6 +351,8 @@ commands:
     domain: Moderation
   - command: ListRequesterHomeItems
     domain: Demand
+  - command: ListSceneCompanionSuggestions
+    domain: RealityScene
   - command: ListSpendDaily
     domain: Business
   - command: ListStatuses
@@ -438,6 +452,8 @@ commands:
   - command: RecordPostImpression
     domain: LocalNet
   - command: RecordProfileOpen
+    domain: LocalNet
+  - command: RecordPurposeConsent
     domain: LocalNet
   - command: RecordReportDisposition
     domain: Moderation
@@ -549,6 +565,10 @@ commands:
     domain: Contribution
   - command: SubmitEvidence
     domain: Fulfillment
+  - command: SubmitRating
+    domain: Rating
+  - command: SubmitSceneReview
+    domain: SceneReview
   - command: SuggestOpportunityTemplate
     domain: Marketplace
   - command: SuggestStoreRecommendation

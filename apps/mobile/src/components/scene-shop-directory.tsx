@@ -6,9 +6,13 @@
 // 返回逐层收），所以内部用 mode 切，而不是两个 Modal 叠着。
 //
 // ⚠️ 原型上有、这一屏**故意没有**的东西（都有原因，别当成漏做）：
-//   · 评分（`4.8 ★` / `212 条评分`）—— 全仓没有评价域，`reality.scenes`
-//     也没有评分列。SCENE-NO-FABRICATED-001 删掉的「Scene Quality 93」就是
-//     这一类写死的数。
+//   · 评分 —— **2026-09-27 起有了**（SCENE-RATING-CHIP-001）。SCENE-REVIEW-001
+//     的场景评价域已落地、也已接进公开目录，所以卡片 chip 行现在照
+//     「运动 · 羽毛球」的样式画 ★ 评分 / N 人去过 / 城市。规矩不变：只有
+//     ratingCount > 0 才画，没有真实评价就整颗不出现。
+//   · 价格（`₫/时`）与封面营业时间（`18:00-22:00`）—— 运动卡上这两项是演示
+//     值，场景这边**全仓没有生产者**（migrations 与 internal 里没有 price /
+//     openHours 之类的列或字段），所以不搬。要做先得有商家自采数据那条链。
 //   · 「本月热门」/「最近新开」/「出图最多」排序 —— 场景没有图片计数，也
 //     没有开业时间列（只有 updated_at，那是行更新时间）。
 //   · 设施标签（带机位 / 可预约 / 安静）与「营业中」—— 用户已明确：单店详情
@@ -48,21 +52,42 @@ import { localApiBaseUrl, nativeSecureSessionStore, sessionAuthClient } from "..
 import { LocalNetClient } from "../localnet-client";
 import { sendSceneCommand, type AuthenticatedStoredSession } from "../scene-commands";
 import {
-  availableShopSorts, sceneDistanceMeters, shopAreaFacets, shopCardSignal,
-  shopCountText, shopDetailTags, shopDirectoryRows, shopHereLine, shopInfoCells, shopListEndText,
+  availableShopSorts, sceneDistanceMeters, shopAreaFacets, shopCardChips, shopCardSignal,
+  shopCategoryBadge, shopCountText, shopDetailTags, shopDirectoryRows, shopDistanceBar, shopHereLine, shopInfoCells, shopListEndText,
   SCENE_PHOTO_WALL_EMPTY, scenePhotoWallTiles, type ScenePhotoTile,
   shopAddressLine, shopCardDistance, shopHeroDistanceSuffix, shopListLocationLine, isFarAway, sceneActionSubtitle,
   type SceneOrigin, type SceneShopBrief, type ShopSortId,
 } from "../scene-shop-directory";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
+import { ProxyIcon } from "./proxy-icon";
+// SCENE-LOCATION-PICKER-001: 场景卡的区域筛选跟「运动 · 羽毛球」共用同一套
+// 弹出式城市/区域选择器，不再各卡各写一份筛选 UI。
+import { LocationListPicker } from "./location-list-picker";
 
-// SCENE-SHOP-DETAIL-001：详情只读我们需要的那几项 —— 这一屏不做菜单/变体/
-// 徽章/Studio，所以不把整个 SceneDetail 的形状抄过来（抄了就得跟着服务端
-// 一起改）。只认下面这几个字段，缺哪项就少画哪块。
+// SCENE-SHOP-DETAIL-001：详情只读我们需要的那几项 —— 这一屏不做 Studio，
+// 所以不把整个 SceneDetail 的形状抄过来（抄了就得跟着服务端一起改）。
+// 只认下面这几个字段，缺哪项就少画哪块。
+//
+// ⚠️ 这里**故意不**省略 backend 已经发下来的 humans / menu / variants /
+// liveState —— 详见 `SCENE-HOME-DETAIL-001`：详情页要照参考稿画「适合一起
+// 的人」「现在最适合」「这个 Scene 喝什么」三块，每一块都要求真实数据；屏
+// 蔽这些字段就是「有数据不渲染」，下一次人照旧会觉得「缺」。
 type ShopDetail = {
   sceneId: string;
   venueName: string;
   heroImageUrl: string;
   logoUrl?: string | undefined;
+  // SCENE-COMPANION-001：「适合一起的人」—— 已登录且真的命中好友信号时画真实
+  // 横滑；否则退回 detail.humans 这个标了 FIXTURE 占位候选的版本。
+  companionSuggestions?: ReadonlyArray<{ id: string; name: string; avatarUrl: string; signal: "CHECKED_IN_HERE" | "JOINED_ACTIVITY_HERE" }> | undefined;
+  humans: ReadonlyArray<{ id: string; name: string; role: string; availability: string; fitReason: string; sceneFit?: number | undefined; isAI: boolean; source?: string | undefined; avatarUrl: string }>;
+  // SCENE-NOW-BEST-001：「现在最适合」—— 当前时段/容量/状态都来自这块。
+  variants: ReadonlyArray<{ id: string; name: string; window: string; facets: ReadonlyArray<string>; bestFor: string }>;
+  selectedVariant: string;
+  liveState: { state: string; label: string; bestWindow: string; capacityPct?: number | undefined; freshUntil?: string | undefined };
+  // SCENE-MENU-001：「这个 Scene 喝什么」—— 来自服务端真实菜单。
+  menu: ReadonlyArray<{ id: string; name: string; priceLabel: string; sceneFit: string; available: boolean; imageUrl: string }>;
+  fullMenu: ReadonlyArray<{ id: string; name: string; priceLabel: string; sceneFit: string; available: boolean; imageUrl: string }>;
   actions: ReadonlyArray<{ type: string; label: string; state: string; moneyMeaning: string }>;
   aiVisits?: ReadonlyArray<{ personaId: string; displayName: string }> | undefined;
   truthBoundary: string;
@@ -70,15 +95,28 @@ type ShopDetail = {
 
 function isShopDetail(value: unknown): value is ShopDetail {
   if (!value || typeof value !== "object") return false;
-  const item = value as Partial<Record<keyof ShopDetail, unknown>>;
+  const item = value as Record<string, unknown>;
   if (typeof item.sceneId !== "string" || typeof item.venueName !== "string" || typeof item.heroImageUrl !== "string") return false;
   if (item.logoUrl !== undefined && typeof item.logoUrl !== "string") return false;
   if (item.truthBoundary !== undefined && typeof item.truthBoundary !== "string") return false;
   if (!Array.isArray(item.actions)) return false;
-  return item.actions.every((action) => action && typeof action === "object"
-    && typeof (action as { label?: unknown }).label === "string"
-    && typeof (action as { state?: unknown }).state === "string"
-    && typeof (action as { moneyMeaning?: unknown }).moneyMeaning === "string");
+  for (const action of item.actions) {
+    if (!action || typeof action !== "object") return false;
+    const a = action as Record<string, unknown>;
+    if (typeof a.label !== "string" || typeof a.state !== "string" || typeof a.moneyMeaning !== "string") return false;
+  }
+  // 三个新段：缺字段（undefined）= 数据还没拉到，调用方整段不画；空数组 = 数据
+  // 拿到了但确实为空，调用方按空态文案走。两件事不能混。
+  if (item.companionSuggestions !== undefined && !Array.isArray(item.companionSuggestions)) return false;
+  if (!Array.isArray(item.humans)) return false;
+  if (!Array.isArray(item.variants)) return false;
+  if (typeof item.selectedVariant !== "string") return false;
+  if (!item.liveState || typeof item.liveState !== "object") return false;
+  const ls = item.liveState as Record<string, unknown>;
+  if (typeof ls.state !== "string" || typeof ls.label !== "string" || typeof ls.bestWindow !== "string") return false;
+  if (!Array.isArray(item.menu)) return false;
+  if (!Array.isArray(item.fullMenu)) return false;
+  return true;
 }
 
 // 目录记录的收窄 + 归一化。
@@ -115,6 +153,12 @@ function toSceneShopBrief(value: unknown): SceneShopBrief | undefined {
     ...(optional(item.savedCount) !== undefined ? { savedCount: optional(item.savedCount)! } : {}),
     ...(optional(item.plannedCount) !== undefined ? { plannedCount: optional(item.plannedCount)! } : {}),
     ...(optional(item.hereCount) !== undefined ? { hereCount: optional(item.hereCount)! } : {}),
+    // SCENE-RATING-CHIP-001：rating / ratingCount 服务端两个都带 omitempty，
+    // 没评价时整对不出现 —— 所以跟上面几项一样按可选透传。**不在这一层判断
+    // "算不算有评价"**：那是 shopRating 的活（count 当闸），这里只负责别把
+    // 服务端真的发过来的数丢掉。
+    ...(optional(item.rating) !== undefined ? { rating: optional(item.rating)! } : {}),
+    ...(optional(item.ratingCount) !== undefined ? { ratingCount: optional(item.ratingCount)! } : {}),
   };
 }
 
@@ -147,6 +191,9 @@ export function SceneShopDirectory({
   const [origin, setOrigin] = useState<SceneOrigin>();
   const [sortId, setSortId] = useState<ShopSortId>("recommended");
   const [areas, setAreas] = useState<readonly string[]>([]);
+  // SCENE-LOCATION-PICKER-001: 区域选择器是否打开——跟 badminton-companion.tsx
+  // 的 screen 状态机同一个道理，靠 state 切内容，不再套第二个 Modal。
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string>();
   const [detail, setDetail] = useState<ShopDetail>();
   const [detailState, setDetailState] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
@@ -341,7 +388,7 @@ export function SceneShopDirectory({
   };
 
   const detailTags = selected ? shopDetailTags(selected) : [];
-  const infoCells = selected ? shopInfoCells(selected, origin) : [];
+  const infoCells = selected ? shopInfoCells(selected) : [];
   // 详情大图优先用服务端的 heroImageUrl（MEDIA-VERSION 会随媒体变），拿不到
   // 才退回目录里的 imageUrl。两个都没有就是灰底 —— 不编一张占位图。
   const heroUri = detail?.heroImageUrl || (selected ? absoluteNetworkURL(apiBaseUrl ?? "", selected.imageUrl) : undefined);
@@ -349,10 +396,24 @@ export function SceneShopDirectory({
   return (
     <Modal animationType="slide" onRequestClose={() => (selectedId ? setSelectedId(undefined) : onClose())} visible>
       <View style={[styles.page, { paddingTop: safeArea.top }]}>
-        {selectedId === undefined ? (
+        {pickerOpen ? (
+          <LocationListPicker
+            bottomInset={safeArea.bottom}
+            footerLabel={areas.length > 0 ? `已选 ${areas.length} 个区域` : "未选择区域 · 默认显示全部"}
+            markerItem={undefined}
+            onBack={() => setPickerOpen(false)}
+            onClear={() => setAreas([])}
+            onConfirm={() => setPickerOpen(false)}
+            onToggle={toggleArea}
+            searchPlaceholder="搜索区域名称"
+            sections={[{ title: "区域", hint: `${facets.length} 个区域`, items: facets }]}
+            selected={areas}
+            title="选择区域"
+          />
+        ) : selectedId === undefined ? (
           <ScrollView contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
             <View style={styles.topbar}>
-              <Pressable accessibilityLabel="返回" hitSlop={8} onPress={onClose} style={styles.roundButton}><Text selectable style={styles.roundButtonText}>‹</Text></Pressable>
+              <Pressable accessibilityLabel="返回" hitSlop={8} onPress={onClose} style={styles.roundButton}><ProxyBackGlyph /></Pressable>
               <Text selectable style={styles.topbarTitle}>{label}</Text>
               <View style={styles.topbarSpacer} />
             </View>
@@ -362,8 +423,7 @@ export function SceneShopDirectory({
               <Text selectable style={styles.listLocation}>{shopListLocationLine(origin !== undefined, rows.map((row) => row.area), rows.length > 0 && rows.every((row) => isFarAway(sceneDistanceMeters(origin, row))))}</Text>
             </View>
 
-            {/* 排序/筛选条：只放这一趟真的能用的项。没有定位就不给「最近」；
-                只有唯一区域就不给筛选条 —— 点了没反应的 chip 是死按钮。 */}
+            {/* 排序条：只放这一趟真的能用的项。没有定位就不给「最近」。 */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipBar}>
               {sorts.map((sort) => (
                 <Pressable accessibilityLabel={`排序 ${sort.label}`} key={sort.id} onPress={() => setSortId(sort.id)} style={[styles.sortChip, sortId === sort.id && styles.sortChipOn]}>
@@ -371,13 +431,17 @@ export function SceneShopDirectory({
                 </Pressable>
               ))}
             </ScrollView>
-            {facets.length > 0 ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipBar}>
-              {facets.map((area) => (
-                <Pressable accessibilityLabel={`筛选 ${area}`} key={area} onPress={() => toggleArea(area)} style={[styles.filterChip, areas.includes(area) && styles.filterChipOn]}>
-                  <Text selectable style={[styles.filterChipText, areas.includes(area) && styles.filterChipTextOn]}>{areas.includes(area) ? `${area} ×` : area}</Text>
-                </Pressable>
-              ))}
-            </ScrollView> : null}
+            {/* SCENE-LOCATION-PICKER-001: 只有唯一区域就不给这一行——点了没反应
+                的入口是死按钮。弹出的是跟「运动 · 羽毛球」共用的同一个选择器。 */}
+            {facets.length > 1 ? (
+              <Pressable accessibilityLabel="选择区域" onPress={() => setPickerOpen(true)} style={styles.locationRow}>
+                <ProxyIcon color={color.magenta} name="pin" size={16} />
+                <Text selectable numberOfLines={1} style={styles.locationText}>
+                  {areas.length === 0 ? "全部区域" : areas.join("、")}
+                </Text>
+                <Text selectable style={styles.locationMore}>更多 ›</Text>
+              </Pressable>
+            ) : null}
 
             {catalogState === "ERROR" ? <Text selectable style={styles.empty}>场景目录暂时取不到，请稍后重试。</Text>
               : catalogState === "LOADING" ? <Text selectable style={styles.empty}>正在加载附近场景…</Text>
@@ -391,15 +455,25 @@ export function SceneShopDirectory({
                       <View style={styles.cardPhoto}>
                         {photo ? <Image contentFit="cover" source={{ uri: photo }} style={styles.cardImage} /> : <View style={[styles.cardImage, styles.photoPlaceholder]}><Text selectable style={styles.photoPlaceholderText}>{scene.type.slice(0, 2) || "场景"}</Text></View>}
                         {scene.hereCount !== undefined && scene.hereCount > 0 ? <View style={styles.liveDot} /> : null}
+                        {/* SCENE-CATEGORY-BADGE-001：分类角标 —— 真实枚举，缺值不画，
+                            资质/状态类角标不许在这里出现（SCENE-NO-FABRICATED-001）。 */}
+                        {shopCategoryBadge(scene) ? <View style={styles.coverBadge}><Text selectable style={styles.coverBadgeText}>{shopCategoryBadge(scene)}</Text></View> : null}
                       </View>
                       <View style={styles.cardBody}>
                         <View style={styles.cardTitleRow}>
                           <Text selectable numberOfLines={1} style={styles.cardName}>{scene.name}</Text>
-                          <Pressable accessibilityLabel={saved.has(scene.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => { void toggleSaved(scene); }} style={styles.heart}><Text selectable style={[styles.heartText, saved.has(scene.id) && styles.heartTextOn]}>{saved.has(scene.id) ? "♥" : "♡"}</Text></Pressable>
+                          <Pressable accessibilityLabel={saved.has(scene.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => { void toggleSaved(scene); }} style={styles.heart}><ProxyIcon color={color.magenta} filled={saved.has(scene.id)} name="heart" size={20} /></Pressable>
                         </View>
                         {signal || distance ? <Text selectable style={styles.cardSignal}>{[signal, distance].filter(Boolean).join(" · ")}</Text> : null}
                         {address ? <Text selectable numberOfLines={1} style={styles.cardAddress}>{`📍 ${address}`}</Text> : null}
-                        <View style={styles.tagRow}>{shopDetailTags(scene).map((tag) => <View key={tag} style={styles.tag}><Text selectable style={styles.tagText}>{tag}</Text></View>)}</View>
+                        {/* SCENE-RATING-CHIP-001: chip 行照「运动 · 羽毛球」卡 ——
+                            ★ 评分（金）/ N 人去过 / 城市（蓝）三色，再接类型标签。
+                            每一颗都有真实来源，缺哪颗就少哪颗（不画灰占位、不写「—」）。 */}
+                        <View style={styles.tagRow}>{shopCardChips(scene).map((chip) => (
+                          <View key={`${chip.kind}:${chip.text}`} style={[styles.tag, chip.kind === "RATING" && styles.tagRating, chip.kind === "AREA" && styles.tagArea]}>
+                            <Text selectable style={[styles.tagText, chip.kind === "RATING" && styles.tagRatingText, chip.kind === "AREA" && styles.tagAreaText]}>{chip.text}</Text>
+                          </View>
+                        ))}</View>
                         <View style={styles.cardFoot}>
                           <Text selectable style={styles.cardFootText}>{shopHereLine(scene.hereCount)}</Text>
                           <Text selectable style={styles.cardChevron}>›</Text>
@@ -417,7 +491,11 @@ export function SceneShopDirectory({
               {heroUri ? <Image contentFit="cover" source={{ uri: heroUri }} style={styles.heroImage} /> : <View style={[styles.heroImage, styles.photoPlaceholder]}><Text selectable style={styles.heroPlaceholderText}>{selected?.type.slice(0, 2) || "场景"}</Text></View>}
               <View pointerEvents="none" style={styles.heroShade} />
               <View style={styles.heroTopbar}>
-                <Pressable accessibilityLabel="返回" hitSlop={8} onPress={() => setSelectedId(undefined)} style={styles.heroRound}><Text selectable style={styles.heroRoundText}>‹</Text></Pressable>
+                {/* BACK-GLYPH-001：tone="onDark" 不能省 —— 这颗钮的底色是
+                    heroRound 的 rgba(0,0,0,0.55)（压在封面照片上的半透明黑胶囊），
+                    原来的字形是 heroRoundText 的白字。默认 ink 会变成黑底黑箭头 = 看不见。
+                    同一排的 ↑ / ♥ 仍是白字，三个钮必须同色。 */}
+                <Pressable accessibilityLabel="返回" hitSlop={8} onPress={() => setSelectedId(undefined)} style={styles.heroRound}><ProxyBackGlyph tone="onDark" /></Pressable>
                 <View style={styles.heroRight}>
                   <Pressable accessibilityLabel="分享" hitSlop={8} onPress={() => { if (selected) void shareScene(selected); }} style={styles.heroRound}><Text selectable style={styles.heroRoundText}>↑</Text></Pressable>
                   <Pressable accessibilityLabel={selected && saved.has(selected.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => { if (selected) void toggleSaved(selected); }} style={styles.heroRound}><Text selectable style={[styles.heroRoundText, selected && saved.has(selected.id) && styles.heroRoundTextOn]}>{selected && saved.has(selected.id) ? "♥" : "♡"}</Text></Pressable>
@@ -426,9 +504,12 @@ export function SceneShopDirectory({
               <View style={styles.heroCopy}>
                 <Text selectable style={styles.heroTitle}>{detail?.venueName ?? selected?.name ?? ""}</Text>
                 {selected && shopAddressLine(selected) ? <Text selectable numberOfLines={2} style={styles.heroAddress}>{`📍 ${shopAddressLine(selected)}${shopHeroDistanceSuffix(sceneDistanceMeters(origin, selected))}`}</Text> : null}
+                {/* SCENE-HOME-DETAIL-001：详情胶囊只留「类型」（"咖啡 · 动态场景"）——
+                    区名（Bắc Ninh）已经在上面 address 行里出现过了，再贴一颗胶囊
+                    就是同一份信息出现两次。type 仍照搬 detailTags 的第一项。 */}
                 <View style={styles.heroTags}>
                   {hereChecked ? <View style={[styles.tag, styles.tagLive]}><Text selectable style={styles.tagLiveText}>我在这里</Text></View> : null}
-                  {detailTags.map((tag) => <View key={tag} style={styles.heroTag}><Text selectable style={styles.heroTagText}>{tag}</Text></View>)}
+                  {detailTags.filter((tag) => tag !== selected?.area.trim()).slice(0, 2).map((tag) => <View key={tag} style={styles.heroTag}><Text selectable style={styles.heroTagText}>{tag}</Text></View>)}
                 </View>
               </View>
             </View>
@@ -441,11 +522,32 @@ export function SceneShopDirectory({
 
               {detailState === "ERROR" ? <Text selectable style={styles.empty}>这个场景的详情暂时取不到，稍后再试。</Text> : null}
 
-              {/* 能真做的两件事：导航（系统地图深链）和打卡（100 米门禁）。 */}
-              <View style={styles.actions}>
-                <Pressable accessibilityLabel="导航到这里" onPress={() => { if (selected) openNavigation(selected); }} style={styles.actionButton}><Text selectable style={styles.actionText}>导航到这里</Text></Pressable>
-                <Pressable accessibilityLabel="我在这里" disabled={busy === "checkin" || !selected || (!hereChecked && !checkinAllowed)} onPress={() => { if (selected) void persistCheckIn(selected, !hereChecked); }} style={[styles.actionButton, hereChecked && styles.actionButtonOn, (busy === "checkin" || !selected || (!hereChecked && !checkinAllowed)) && styles.actionButtonBusy]}><Text selectable style={[styles.actionText, hereChecked && styles.actionTextOn]}>{hereChecked ? "取消打卡" : "我在这里"}</Text></Pressable>
+              {/* SCENE-HOME-PROTOTYPE-001：原型 deepseek_html_20260927_7fc18d 的 action-row3
+                  是**三颗**并排按钮 —— 收藏（rose，可切「已收藏」）/ 打卡（ink，可切
+                  「已打卡」）/ 导航（白底）。以前这里是「导航 + 我在这里」两颗 + hero
+                  右上角一颗心形，收藏被藏进角落，用户照原型看就是「缺收藏」。
+                  三颗都走真实命令：收藏 = SetRealitySceneSaved 同族，打卡带
+                  SCENE-CHECKIN-100M-001 的 100 米门禁，导航走系统地图深链。 */}
+              <View style={styles.actionRow3}>
+                <Pressable accessibilityLabel={selected && saved.has(selected.id) ? "取消收藏" : "收藏"} disabled={busy === "saved" || !selected} onPress={() => { if (selected) void toggleSaved(selected); }} style={[styles.actSave, selected && saved.has(selected.id) && styles.actSaveOn, (busy === "saved" || !selected) && styles.actionButtonBusy]}>
+                  <ProxyIcon color={selected && saved.has(selected.id) ? color.white : color.magenta} filled={selected?.id !== undefined && saved.has(selected.id)} name="heart" size={15} />
+                  <Text selectable style={[styles.actSaveText, selected && saved.has(selected.id) && styles.actSaveTextOn]}>{selected && saved.has(selected.id) ? "已收藏" : "收藏"}</Text>
+                </Pressable>
+                <Pressable accessibilityLabel={hereChecked ? "取消打卡" : "打卡"} disabled={busy === "checkin" || !selected || (!hereChecked && !checkinAllowed)} onPress={() => { if (selected) void persistCheckIn(selected, !hereChecked); }} style={[styles.actCheckin, hereChecked && styles.actCheckinOn, (busy === "checkin" || !selected || (!hereChecked && !checkinAllowed)) && styles.actionButtonBusy]}>
+                  <ProxyIcon color={color.white} name="check" size={15} />
+                  <Text selectable style={styles.actCheckinText}>{hereChecked ? "已打卡" : "打卡"}</Text>
+                </Pressable>
+                <Pressable accessibilityLabel="导航到这里" onPress={() => { if (selected) openNavigation(selected); }} style={styles.actNav}>
+                  <ProxyIcon color={color.ink} name="arrowUpRight" size={15} />
+                  <Text selectable style={styles.actNavText}>导航</Text>
+                </Pressable>
               </View>
+
+              {/* 原型 dist-bar：距离 + 100 米自动打卡说明。拿不到定位就不画这一条。 */}
+              {selected && shopDistanceBar(selected, origin) ? <View style={styles.distBar}>
+                <ProxyIcon color={color.muted} name="clock" size={14} />
+                <Text selectable style={styles.distBarText}>{shopDistanceBar(selected, origin)}</Text>
+              </View> : null}
               <Text selectable style={styles.checkinHint}>{checkinHint(hereChecked, checkinDistance)}</Text>
 
               {/* 邀约那条链路要选人 + 填报酬 + 两步命令 —— 复制一份就是第二个
@@ -454,6 +556,71 @@ export function SceneShopDirectory({
                 <Text selectable style={styles.primaryActionText}>让小美来这个场景</Text>
                 <Text selectable style={styles.primaryActionSub}>约她出图 / 同行 · 选人、时间、报酬在场景页里定</Text>
               </Pressable>
+
+              {/* SCENE-HOME-DETAIL-001（2026-09-27）：参考稿第 3 屏比对了下面三块，
+                  之前这一屏**故意没画**（缺数据源）。后端已经发下来 humans /
+                  menu / variants / liveState —— 这次接进来。注意：每块都对真实数据
+                  诚实 —— 没有就空态，不许拿 demo 数据糊。 */}
+
+              {detail ? <View style={styles.block}>
+                <Text selectable style={styles.blockTitle}>现在最适合</Text>
+                <View style={styles.bestGrid}>
+                  <View style={styles.bestCard}>
+                    <Text selectable style={styles.bestCardTitle}>{((detail.variants.find((variant) => variant.id === detail.selectedVariant)?.bestFor) ?? "").trim() || "以门店公告为准"}</Text>
+                    <Text selectable style={styles.bestCardSub}>按当前时段、现场状态和可用资源推荐。</Text>
+                  </View>
+                  <View style={styles.bestCard}>
+                    <Text selectable style={styles.bestCardTitle}>{detail.liveState.state.replaceAll("_", " ")}</Text>
+                    {/* GEO-HONEST-001：没有容量来源时明说"未知"，绝不回落到一个数字。 */}
+                    <Text selectable style={styles.bestCardSub}>{detail.liveState.bestWindow}{detail.liveState.capacityPct === undefined ? " · 容量未知" : ` · 容量 ${detail.liveState.capacityPct}%`}</Text>
+                  </View>
+                </View>
+              </View> : null}
+
+              {detail ? <View style={styles.matchCard}>
+                {/* SCENE-HOME-PROTOTYPE-001：原型把「适合一起的人」做成深色
+                    match-card —— 「匹配推荐」金标签 + 标题 + 副题 + 头像横排 +
+                    白底的「看全部」按钮。文案层级照原型，数据仍来自
+                    companionSuggestions（真实好友信号）→ detail.humans（诚实
+                    占位候选）→ 空态，三档不变。
+                    （原型那颗「看全部」跳转按钮**故意不做**：真实 app 没有
+                    那个目的地，做了就是 placeholder-honest-actions.test.ts
+                    钉的死按钮。） */}
+                <View style={styles.matchLabel}><Text selectable style={styles.matchLabelText}>匹配推荐</Text></View>
+                <Text selectable style={styles.matchTitle}>适合一起的人</Text>
+                <Text selectable style={styles.matchSub}>根据时段 · 现场状态 · 内容偏好实时推荐</Text>
+                {detail.companionSuggestions && detail.companionSuggestions.length > 0 ? (
+                  <ScrollView horizontal contentContainerStyle={styles.humanRail} showsHorizontalScrollIndicator={false}>
+                    {detail.companionSuggestions.map((person) => <View key={person.id} style={styles.humanPlain}>
+                      <View style={styles.humanRing}>{person.avatarUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`companion:${person.id}`} source={{ uri: person.avatarUrl }} style={styles.humanAvatarImage} transition={0} /> : <View style={styles.humanAvatarFallback}><Text selectable style={styles.humanAvatarText}>{person.name.slice(0, 1).toUpperCase()}</Text></View>}</View>
+                      <Text selectable style={styles.humanPlainNameLight}>{person.name}</Text>
+                      <Text selectable style={styles.humanPlainSubLight}>{person.signal === "CHECKED_IN_HERE" ? "最近来过这里" : "报名过这里的活动"}</Text>
+                    </View>)}
+                  </ScrollView>
+                ) : detail.humans.length > 0 ? (
+                  <ScrollView horizontal contentContainerStyle={styles.humanRail} showsHorizontalScrollIndicator={false}>
+                    {detail.humans.map((human) => <View key={human.id} style={styles.humanPlain}>
+                      <View style={styles.humanRing}>{human.avatarUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-human:${human.id}`} source={{ uri: human.avatarUrl }} style={styles.humanAvatarImage} transition={0} /> : <View style={styles.humanAvatarFallback}><Text selectable style={styles.humanAvatarText}>{human.name.slice(0, 1).toUpperCase()}</Text></View>}</View>
+                      <Text selectable style={styles.humanPlainNameLight}>{human.name}</Text>
+                      <Text selectable style={styles.humanPlainSubLight}>{`${human.availability}${human.source === "FIXTURE" ? " · 占位候选" : ""}`}</Text>
+                    </View>)}
+                  </ScrollView>
+                ) : (
+                  <Text selectable style={styles.matchSub}>这个场景现在还没有挂出可约时间的人 —— 这不是加载失败，也不是「再等等就会有人」的承诺。可以先收藏这个场景。</Text>
+                )}
+              </View> : null}
+
+              {detail ? <View style={styles.block}>
+                <Text selectable style={styles.blockTitle}>这个 Scene 喝什么</Text>
+                {detail.menu.length > 0 ? <ScrollView horizontal contentContainerStyle={styles.menuRail} showsHorizontalScrollIndicator={false}>
+                  {detail.menu.map((item) => <View key={item.id} style={styles.menuCard}>
+                    <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-menu:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} />
+                    <Text selectable numberOfLines={1} style={styles.menuName}>{item.name}</Text>
+                    <Text selectable style={styles.menuFit}>{`${item.sceneFit} · ${item.available ? "可售" : "售罄"}`}</Text>
+                    <Text selectable style={styles.menuPrice}>{item.priceLabel}</Text>
+                  </View>)}
+                </ScrollView> : <Text selectable style={styles.blockEmpty}>菜单还没回传 —— 这不是加载失败，是后端这条接口还没接进来。</Text>}
+              </View> : null}
 
               {detail && detail.aiVisits && detail.aiVisits.length > 0 ? <View style={styles.block}>
                 <Text selectable style={styles.blockTitle}>绑定这个场景的小美</Text>
@@ -493,7 +660,12 @@ export function SceneShopDirectory({
               </View>
 
               {detail && detail.actions.length > 0 ? <View style={styles.block}>
-                <Text selectable style={styles.blockTitle}>这里能做的事</Text>
+                {/* SCENE-HOME-PROTOTYPE-001：原型把这块叫「你想在这里做什么？」，
+                    三张意图卡（想找人一起来？/ 想找人做事？/ 想参加现成的？）+
+                    脚注「匹配结果仅供参考，实际约见以双方确认为准」。标题跟着原型
+                    改；卡片文案仍来自服务端 detail.actions（label + 状态副标题），
+                    不写死。 */}
+                <Text selectable style={styles.blockTitle}>你想在这里做什么？</Text>
                 {detail.actions.map((action) => <Pressable accessibilityLabel={action.label} key={action.type} onPress={() => { if (selected) onOpenScene?.(selected.id); }} style={styles.actionRow}>
                   <View style={styles.activityCopy}>
                     <Text selectable style={styles.activityTitle}>{action.label}</Text>
@@ -501,6 +673,10 @@ export function SceneShopDirectory({
                   </View>
                   <Text selectable style={styles.cardChevron}>›</Text>
                 </Pressable>)}
+                <View style={styles.intentFootnote}>
+                  <ProxyIcon color={color.muted} name="clock" size={12} />
+                  <Text selectable style={styles.intentFootnoteText}>匹配结果仅供参考，实际约见以双方确认为准</Text>
+                </View>
               </View> : null}
 
               {detail ? <Text selectable style={styles.boundary}>{detail.truthBoundary}</Text> : null}
@@ -518,7 +694,6 @@ const styles = StyleSheet.create({
   scrollBody: { paddingBottom: 40 },
   topbar: { alignItems: "center", flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 8 },
   roundButton: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, height: 40, justifyContent: "center", width: 40 },
-  roundButtonText: { color: color.ink, fontSize: 22, fontWeight: "800", lineHeight: 24 },
   topbarTitle: { color: color.ink, flex: 1, fontSize: 17, fontWeight: "900" },
   topbarSpacer: { width: 40 },
   listHead: { paddingBottom: 12, paddingHorizontal: 16 },
@@ -530,16 +705,21 @@ const styles = StyleSheet.create({
   sortChipOn: { backgroundColor: color.ink, borderColor: color.ink },
   sortChipText: { color: color.muted, fontSize: 12, fontWeight: "800" },
   sortChipTextOn: { color: color.white },
-  filterChip: { backgroundColor: color.surface, borderRadius: 15, paddingHorizontal: 12, paddingVertical: 6 },
-  filterChipOn: { backgroundColor: color.factInferredBg },
-  filterChipText: { color: color.ink, fontSize: 11.5, fontWeight: "800" },
-  filterChipTextOn: { color: color.factInferredFg },
+  // SCENE-LOCATION-PICKER-001: 跟 badminton-companion.tsx 的 locationRow 同款——
+  // 点开的是共用的 LocationListPicker，不再是一行横滑 chip。
+  locationRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 8, marginBottom: 12, marginHorizontal: 16, paddingHorizontal: 14, paddingVertical: 11 },
+  locationText: { color: color.ink, flex: 1, fontSize: 12.5, fontWeight: "800" },
+  locationMore: { color: color.muted, fontSize: 11.5, fontWeight: "800" },
   empty: { color: color.muted, fontSize: 13, lineHeight: 20, paddingHorizontal: 16, paddingVertical: 22 },
   cardList: { gap: 10, paddingHorizontal: 16 },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, padding: 11 },
   cardPhoto: { borderRadius: 13, height: 112, overflow: "hidden", position: "relative", width: 96 },
   cardImage: { backgroundColor: color.surface, height: "100%", width: "100%" },
   liveDot: { backgroundColor: color.mint, borderRadius: 4, height: 8, position: "absolute", right: 6, top: 6, width: 8 },
+  // SCENE-CATEGORY-BADGE-001：封面左上角分类角标。mint 底白字、绝对定位、
+  // 跟 liveDot 共享 112pt 高的封面（top:6 距顶边），左缘跟卡片内边距对齐。
+  coverBadge: { backgroundColor: color.mint, borderRadius: 5, left: 6, paddingHorizontal: 6, paddingVertical: 2, position: "absolute", top: 6 },
+  coverBadgeText: { color: color.white, fontSize: 10, fontWeight: "900", letterSpacing: 0.2 },
   photoPlaceholder: { alignItems: "center", justifyContent: "center" },
   photoPlaceholderText: { color: color.muted, fontSize: 15, fontWeight: "900" },
   heroPlaceholderText: { color: "rgba(255,255,255,0.5)", fontSize: 30, fontWeight: "900" },
@@ -548,12 +728,16 @@ const styles = StyleSheet.create({
   cardTitleRow: { alignItems: "flex-start", flexDirection: "row", gap: 8 },
   cardName: { color: color.ink, flex: 1, fontSize: 14.5, fontWeight: "900" },
   heart: { paddingHorizontal: 2 },
-  heartText: { color: color.muted, fontSize: 16, lineHeight: 18 },
-  heartTextOn: { color: color.magenta },
   cardSignal: { color: color.muted, fontSize: 11, fontWeight: "800", marginTop: 6 },
   tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 8 },
   tag: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
   tagText: { color: color.muted, fontSize: 11, fontWeight: "800" },
+  // SCENE-RATING-CHIP-001: 跟运动卡 rideTagGold / rideTagLime 用同一对 token，
+  // 保证「★ 评分」和「城市」在两张卡上是同一个颜色，不是各挑一个近似色。
+  tagRating: { backgroundColor: color.warn },
+  tagRatingText: { color: color.ink },
+  tagArea: { backgroundColor: color.stateInfoBg },
+  tagAreaText: { color: color.ink },
   tagLive: { backgroundColor: color.factConfirmedBg },
   tagLiveText: { color: color.factConfirmedFg, fontSize: 11, fontWeight: "900" },
   cardFoot: { alignItems: "center", borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 9, paddingTop: 8 },
@@ -585,6 +769,23 @@ const styles = StyleSheet.create({
   infoCell: { alignItems: "center", flex: 1, paddingHorizontal: 6 },
   infoValue: { color: color.ink, fontSize: 14, fontWeight: "900" },
   infoLabel: { color: color.muted, fontSize: 11, fontWeight: "700", marginTop: 4, textAlign: "center" },
+  // SCENE-HOME-PROTOTYPE-001：原型 action-row3 —— 三颗等宽按钮，收藏(rose)/
+// 打卡(ink)/导航(白底)。收藏与打卡都有"已..."的落地态，跟原型 toggleSave /
+// doCheckin 一致。
+actionRow3: { flexDirection: "row", gap: 8, marginTop: 14 },
+  actSave: { alignItems: "center", backgroundColor: color.attentionBg, borderColor: color.attentionBorder, borderRadius: 14, borderWidth: 1, flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", paddingVertical: 14 },
+  actSaveOn: { backgroundColor: color.magenta, borderColor: color.magenta },
+  actSaveText: { color: color.magenta, fontSize: 12.5, fontWeight: "900" },
+  actSaveTextOn: { color: color.white },
+  actCheckin: { alignItems: "center", backgroundColor: color.ink, borderColor: color.ink, borderRadius: 14, borderWidth: 1, flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", paddingVertical: 14 },
+  // 已打卡：原型把按钮翻成 --good 绿底白字（doCheckin 里 btn.style.background）。
+  actCheckinOn: { backgroundColor: color.mint, borderColor: color.mint },
+  actCheckinText: { color: color.white, fontSize: 12.5, fontWeight: "900" },
+  actNav: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", paddingVertical: 14 },
+  actNavText: { color: color.ink, fontSize: 12.5, fontWeight: "900" },
+  // 原型 dist-bar：软底圆角一行，距离 + 100 米自动打卡说明。
+  distBar: { alignItems: "center", backgroundColor: color.surface, borderRadius: 12, flexDirection: "row", gap: 9, marginTop: 10, paddingHorizontal: 14, paddingVertical: 11 },
+  distBarText: { color: color.muted, flex: 1, fontSize: 11.5, fontWeight: "700", lineHeight: 16 },
   actions: { flexDirection: "row", gap: 8, marginTop: 14 },
   actionButton: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, flex: 1, paddingVertical: 15 },
   actionButtonOn: { backgroundColor: color.ink, borderColor: color.ink },
@@ -598,6 +799,41 @@ const styles = StyleSheet.create({
   block: { marginTop: 22 },
   blockTitle: { color: color.ink, fontSize: 14.5, fontWeight: "900", marginBottom: 10 },
   blockEmpty: { color: color.muted, fontSize: 12, lineHeight: 18 },
+  // SCENE-HOME-DETAIL-001：「现在最适合」两张卡（左 variant.bestFor，右 liveState）。
+  bestGrid: { flexDirection: "row", gap: 8 },
+  bestCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, padding: 12 },
+  bestCardTitle: { color: color.ink, fontSize: 13, fontWeight: "900", lineHeight: 18 },
+  bestCardSub: { color: color.muted, fontSize: 11, fontWeight: "700", lineHeight: 15, marginTop: 6 },
+  // SCENE-HOME-DETAIL-001：「适合一起的人」—— 头像横滑，跟运动卡同款圆头像
+  // 放大（64），名字 + 可约状态居中跟在下面。
+  humanRail: { gap: 12, paddingRight: 16 },
+  humanPlain: { alignItems: "center", width: 80 },
+  humanRing: { alignItems: "center", backgroundColor: color.factInferredBg, borderColor: color.line, borderRadius: 32, borderWidth: 2, height: 64, justifyContent: "center", overflow: "hidden", width: 64 },
+  humanAvatarImage: { height: 60, width: 60 },
+  humanAvatarFallback: { alignItems: "center", backgroundColor: color.factInferredBg, borderRadius: 30, height: 60, justifyContent: "center", width: 60 },
+  humanAvatarText: { color: color.factInferredFg, fontSize: 22, fontWeight: "900" },
+  humanPlainName: { color: color.ink, fontSize: 12, fontWeight: "800", marginTop: 6, textAlign: "center" },
+  humanPlainSub: { color: color.muted, fontSize: 11, fontWeight: "700", lineHeight: 14, marginTop: 2, textAlign: "center" },
+  // SCENE-HOME-DETAIL-001：「这个 Scene 喝什么」菜单横滑卡片。
+  menuRail: { gap: 8, paddingRight: 16 },
+  menuCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, padding: 8, width: 132 },
+  menuImage: { backgroundColor: color.surface, borderRadius: 10, height: 92, marginBottom: 6, width: "100%" },
+  menuName: { color: color.ink, fontSize: 12, fontWeight: "900" },
+  menuFit: { color: color.muted, fontSize: 11, fontWeight: "700", marginTop: 2 },
+  menuPrice: { color: color.ink, fontSize: 12, fontWeight: "900", marginTop: 4 },
+  // SCENE-HOME-PROTOTYPE-001：原型 intent-footnote —— 意图卡下面的免责脚注。
+  intentFootnote: { alignItems: "flex-start", flexDirection: "row", gap: 7, paddingTop: 12 },
+  intentFootnoteText: { color: color.muted, flex: 1, fontSize: 11, fontWeight: "700", lineHeight: 16 },
+  // SCENE-HOME-PROTOTYPE-001：原型 match-card —— 深色圆角卡，金底「匹配推荐」
+  // 小标签 + 大标题 + 副题；头像是亮环（暗底上用白/亮字）。
+  matchCard: { backgroundColor: color.deep, borderRadius: 20, marginTop: 22, overflow: "hidden", padding: 16 },
+  matchLabel: { alignSelf: "flex-start", backgroundColor: "rgba(245,180,0,0.18)", borderRadius: 6, marginBottom: 12, paddingHorizontal: 9, paddingVertical: 4 },
+  matchLabelText: { color: "#F5C842", fontSize: 10, fontWeight: "900", letterSpacing: 1.2 },
+  matchTitle: { color: color.white, fontSize: 17, fontWeight: "900", letterSpacing: -0.3, lineHeight: 23, marginBottom: 5 },
+  matchSub: { color: color.darkCardText, fontSize: 11.5, fontWeight: "700", lineHeight: 17, marginBottom: 14 },
+  // 暗底上的亮字版（humanPlainName / humanPlainSub 是给浅色底用的）。
+  humanPlainNameLight: { color: color.white, fontSize: 12, fontWeight: "800", marginTop: 6, textAlign: "center" },
+  humanPlainSubLight: { color: color.darkCardText, fontSize: 11, fontWeight: "700", lineHeight: 14, marginTop: 2, textAlign: "center" },
   personRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   person: { alignItems: "center", width: 76 },
   personAvatar: { alignItems: "center", backgroundColor: color.factInferredBg, borderRadius: 30, height: 60, justifyContent: "center", width: 60 },

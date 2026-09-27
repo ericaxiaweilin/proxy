@@ -10,6 +10,7 @@ import { getAiScenePhoto } from "../media/asset-sources";
 import { fetchAiCatalog, sortCatalogVendors, type AiCatalog } from "../ai-catalog-client";
 import { AiPersonaClient, type TwinConsent } from "../ai-persona-client";
 import { promptLikenessConsent } from "../components/likeness-consent-prompt";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 import {
   AI_CAMERA_ICONS,
   AI_CAMERA_MOVES,
@@ -480,7 +481,7 @@ export function AIManagementSurface({
     <View style={styles.root}>
       <View style={styles.nav}>
         <Pressable accessibilityLabel="返回" hitSlop={12} onPress={onBack} style={styles.navBack}>
-          <Text selectable style={styles.navBackText}>←</Text>
+          <ProxyBackGlyph />
         </Pressable>
         <AILogo active={ready && !paused} />
         <Text selectable style={styles.navTitle}>AI 管理</Text>
@@ -986,8 +987,11 @@ const INK = "#1a1a1a";
 const styles = StyleSheet.create({
   root: { backgroundColor: "#fafafa", flex: 1 },
   nav: { alignItems: "center", flexDirection: "row", gap: 10, paddingBottom: 8, paddingHorizontal: 20, paddingTop: 16 },
+  // BACK-GLYPH-001：navBack 保持 width 24 不动。它原来是给 20pt 的 `←` 留的框，
+  // 现在字形统一成 18pt 高的 SVG（宽约 10.9pt），框宽不变 ⇒ 箭头仍贴左边缘（x 与
+  // 其它页一致），AILogo 和标题的位置一个像素都不动，多出来的 ~9pt 落在箭头和
+  // AILogo 之间被 gap 吸收。**不要**为了让留白好看去改这个宽度 —— 那会把整行左移。
   navBack: { width: 24 },
-  navBackText: { color: INK, fontSize: 20 },
   navTitle: { color: INK, flex: 1, fontSize: 18, fontWeight: "800", letterSpacing: -0.3 },
   logo: { alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6 },
   logoDot: { borderColor: "#fafafa", borderRadius: 5, borderWidth: 2, height: 10, position: "absolute", right: -3, top: -3, width: 10 },

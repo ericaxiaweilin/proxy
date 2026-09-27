@@ -23,7 +23,7 @@ import { MerchantCreatorRecommendations } from "./merchant-creator-recommendatio
 import { localApiBaseUrl } from "../native-clients";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
-import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyEmptyState, ProxyLoading } from "../components/proxy-foundation";
 
 type MerchantPage =
   | "root"
@@ -84,7 +84,7 @@ function detailHead({ onBack, title }: { onBack: () => void; title: string }): R
   return (
     <View style={styles.detailHead}>
       <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.subPageBack}>
-        <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+        <ProxyBackGlyph />
       </Pressable>
       <Text selectable style={styles.detailTitle}>{title}</Text>
     </View>
@@ -545,7 +545,13 @@ export function MerchantMeR21Replacement({
           <Text selectable style={styles.empty}>禁止恋爱诈骗、投资诈骗、假商家、假客服、礼品券诈骗、支付诈骗、骗取验证码、冒充 Proxy、其他欺骗行为（§651-664）。内容审核措施（提醒、降低传播、限制消息、删除内容、暂停功能、冻结交易、暂停/永久封禁账号）依据严重程度、重复违规、现实风险、法律要求执行（§670-689）。</Text>
           <Text selectable style={styles.sectionTitle}>法律依据（越南 2026 生效规则）</Text>
           <Text selectable style={styles.empty}>Decree 248/2026/ND-CP §3（平台登记判断）、§11（卖家验证）、§23（数据保存）；PDP Law 91/2025/QH15 Art.31（明示同意）、Art.32（删除请求、数据保护影响评估、跨境评估）；Decree 328/2026/NĐ-CP §4（假新闻与虚假信息处置：一般 24 小时，国家安全紧急 6 小时）；电子商务平台登记/通知责任在适用时执行（§534-547）。</Text>
-          <Text selectable style={styles.meta}>缺失内容已在 docs/legal/vietnam/Proxy_Operating_Terms_Supplement_2026-08-31.md 补齐（法人信息、法律分类、电商登记、DPIA、跨境数据影响评估、DPO/数据保护部门、真实数据流与第三方处理方清单、越南语正式法律版本、越南执业律师最终审阅）。</Text>
+          {/* 合规修正（2026-09-27）：这里原来写着「缺失内容已在
+              docs/legal/vietnam/Proxy_Operating_Terms_Supplement_2026-08-31.md
+              补齐（…DPIA、跨境数据影响评估、DPO/数据保护部门…）」。**那是假的** ——
+              那份 supplement 的 9 行「当前状态」**全部是「空白」**，一行没补。
+              把未完成的法务事项写成「已补齐」，是仓里最忌讳的那种状态：
+              让缺口看起来像已闭环。改成只陈述两边的事实。 */}
+          <Text selectable style={styles.meta}>平台侧已落地的部分（卖家实名验证、24 小时 / 国家安全紧急 6 小时处置时限、隐私请求入口）在代码与回归门禁里有对应实现。但《运营条款补全清单》(docs/legal/vietnam/Proxy_Operating_Terms_Supplement_2026-08-31.md) 里的 9 项 —— 越南法人信息、法律分类、电商登记、DPIA、跨境数据影响评估、DPO/数据保护部门、第三方处理方清单与 DPA、越南语正式版本、执业律师最终审阅 —— **目前全部仍是「空白」**，尚未补齐，正式上线前必须完成。</Text>
         </ScrollView>
       </View>
     );
@@ -731,7 +737,6 @@ const styles = StyleSheet.create({
   emptyCard: { backgroundColor: "#F6F2F9", borderRadius: 16, gap: 4, marginVertical: 6, padding: 16 },
   emptyTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
   subPageBack: { marginBottom: 10, paddingVertical: 4 },
-  subPageBackText: { color: color.magenta, fontSize: 12, fontWeight: "700" },
   detailHead: { marginBottom: 12 },
   detailTitle: { color: color.ink, fontSize: 24, fontWeight: "900", letterSpacing: -0.7, lineHeight: 30 },
   objectTitle: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 20 },

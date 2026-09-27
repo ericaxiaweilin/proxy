@@ -10,6 +10,7 @@ import { useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 type Scene = {
   id: string;
@@ -115,7 +116,7 @@ export function CoffeeScenesHub(): React.JSX.Element {
     const filtered = PLACEHOLDER_SHOPS.filter((s) => matchesFilter(s, shopFilter));
     return (
       <View>
-        <Pressable onPress={() => setView("HOME")}><Text selectable style={styles.back}>‹ 返回探索</Text></Pressable>
+        <Pressable onPress={() => setView("HOME")} style={styles.back}><ProxyBackGlyph label="返回探索" /></Pressable>
         <Text selectable style={styles.placeholderBanner}>示例数据 · 店铺库还没接后端，界面先搭起来。</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
           {SHOP_FILTERS.map((f) => (
@@ -303,7 +304,9 @@ function ShopCard({ shop }: { shop: Shop }): React.JSX.Element {
 
 const styles = StyleSheet.create({
   placeholderBanner: { color: color.muted, fontSize: 11, fontWeight: "700", marginBottom: 10, marginTop: 2 },
-  back: { color: color.magenta, fontSize: 12, fontWeight: "800", marginBottom: 8, marginTop: 4 },
+  // 原来是给 `‹ 返回咖啡场景` 那份 Text 用的文字样式；现在字形和标签都走公共组件
+  // ProxyBackGlyph（BACK-GLYPH-001），这里只留它承担的那点外边距。
+  back: { marginBottom: 8, marginTop: 4 },
 
   sectionHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginBottom: 10, marginTop: 4 },
   sectionTitle: { color: color.ink, fontSize: 15, fontWeight: "800" },

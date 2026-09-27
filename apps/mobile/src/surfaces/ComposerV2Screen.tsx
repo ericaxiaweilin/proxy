@@ -42,6 +42,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { CreatePostPayload, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type MediaClient } from "../media-client";
+// ACTIVITY-REF-001：关联活动。列表来源与「拍摄场景」同一套路（见 openScenePicker）。
+import type { ActivityClient } from "../activity-client";
 import { type SecureSessionStore } from "../secure-session";
 import { SessionExpiredError } from "../auth-client";
 import {
@@ -114,6 +116,9 @@ type Props = {
   onPublished: () => void | Promise<void>;
   localNet: LocalNetClient;
   mediaClient: MediaClient;
+  // ACTIVITY-REF-001：关联活动要活动读模型。缺省时「关联活动」入口不出现 ——
+  // 不给一个点了没反应的入口（半截接线）。
+  activityClient?: ActivityClient | undefined;
   // R15.37: composet 需要知道当前 session 以供
   //   “未登录不发” + “未登录不点发布” 这两个 UI gate 用。
   secureSessionStore?: SecureSessionStore | undefined;
@@ -130,6 +135,7 @@ export function ComposerV2Screen({
   onPublished,
   localNet,
   mediaClient,
+  activityClient,
   secureSessionStore,
   viewerAccountId,
   initialQuoteId,
@@ -184,9 +190,11 @@ export function ComposerV2Screen({
   const [longTextDraft, setLongTextDraft] = useState("");
 
   // —— Sheet 显隐 ——
-  const [openSheet, setOpenSheet] = useState<null | "reply" | "quote" | "gif" | "topic" | "more" | "location" | "quotePicker" | "pollDuration" | "scene">(null);
+  const [openSheet, setOpenSheet] = useState<null | "reply" | "quote" | "gif" | "topic" | "more" | "location" | "quotePicker" | "pollDuration" | "scene" | "activity">(null);
   // SCENE-PHOTO-WALL-001：在哪个真实场景拍的。带图发出后会出现在该场景详情的照片墙。
   const [scene, setScene] = useState<{ id: string; name: string } | null>(null);
+  // ACTIVITY-REF-001：关联活动。存 id + 标题（标题只用来画 chip，发出的是 id）。
+  const [activity, setActivity] = useState<{ id: string; title: string } | null>(null);
   // COMPOSER-IDENTITY-001：发帖页头部以前写死「Thanh @thanh」+ 画出来的小人 —— 谁发帖都显示别人的名字。
   // 读本账号资料（与 me 页同一个 store）：名字 / handle / 服务端头像；没头像就首字。
   const [author, setAuthor] = useState<{ name: string; handle: string; avatarUri: string | undefined }>();
@@ -206,6 +214,23 @@ export function ComposerV2Screen({
     setOpenSheet("scene");
     setSceneOptions("loading");
     localNet.listTaggableScenes().then(setSceneOptions, () => setSceneOptions("error"));
+  }
+  // ACTIVITY-REF-001：关联活动。列表走活动读模型（仓库里没有 GetActivity，
+  // 只有 listActivities —— 跟 conversation.tsx 的 openActivityPicker 同一条路）。
+  // 「取不到」和「没有活动」分开表达：error 是可重试的，空列表不是。
+  const [activityOptions, setActivityOptions] = useState<Array<{ id: string; title: string; subtitle: string }> | "loading" | "error">("loading");
+  function openActivityPicker(): void {
+    if (!activityClient) return;
+    setOpenSheet("activity");
+    setActivityOptions("loading");
+    activityClient.listActivities().then(
+      (list) => setActivityOptions(list.map((item) => ({
+        id: item.activityId,
+        title: item.title,
+        subtitle: `${item.time} · ${item.venueIcon} ${item.venueName}`
+      }))),
+      () => setActivityOptions("error")
+    );
   }
   const [toast, setToast] = useState<ToastState>({ visible: false, message: "" });
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -542,7 +567,8 @@ export function ComposerV2Screen({
           gifWord,
           poll,
           isGhost24h,
-          realitySceneId: scene?.id ?? null
+          realitySceneId: scene?.id ?? null,
+          activityId: activity?.id ?? null
         },
         quoteTarget,
         {
@@ -559,6 +585,7 @@ export function ComposerV2Screen({
       setQuoteId(null);
       setPlace(null);
       setScene(null);
+      setActivity(null);
       setTopic(null);
       setGifWord(null);
       setPoll({ open: false, options: ["", ""], durationLabel: "1 天" });
@@ -646,8 +673,9 @@ export function ComposerV2Screen({
 
   // —— 视觉装饰 chip 行（地点 / 话题）——
   function renderChips(): React.JSX.Element {
-    const list: Array<{ key: string; label: string; type: "place" | "topic"; onRemove: () => void }> = [];
+    const list: Array<{ key: string; label: string; type: "place" | "topic" | "activity"; onRemove: () => void }> = [];
     if (scene) list.push({ key: "scene", label: `拍摄于 ${scene.name}`, type: "place", onRemove: () => setScene(null) });
+    if (activity) list.push({ key: "activity", label: `活动 · ${activity.title}`, type: "activity", onRemove: () => setActivity(null) });
     if (place) list.push({ key: "place", label: place.area, type: "place", onRemove: () => setPlace(null) });
     if (topic) list.push({ key: "topic", label: topic, type: "topic", onRemove: () => setTopic(null) });
     if (list.length === 0) return <></>;
@@ -657,6 +685,8 @@ export function ComposerV2Screen({
           <Pressable key={c.key} onPress={c.onRemove} style={styles.chipActive}>
             {c.type === "place" ? (
               <ProxyIcon name="route" size={14} color={color.ink} />
+            ) : c.type === "activity" ? (
+              <ProxyIcon name="ticket" size={14} color={color.ink} />
             ) : (
               <Text selectable style={styles.chipHash}>#</Text>
             )}
@@ -1090,6 +1120,17 @@ export function ComposerV2Screen({
             showChevron
             onPress={openScenePicker}
           />
+          {/* ACTIVITY-REF-001：关联活动。没有 activityClient 时整个入口不出现 ——
+              不给一个点了没反应的入口（半截接线）。 */}
+          {activityClient ? (
+            <SheetOption
+              label="关联活动"
+              description={activity ? `已关联：${activity.title}` : "让这条帖文指向一个具体活动，别人点开就能直接报名"}
+              selected={activity !== null}
+              showChevron
+              onPress={openActivityPicker}
+            />
+          ) : null}
           <SheetOption
             label="24h 动态"
             description="24 小时后自动从公开主页移除"
@@ -1109,6 +1150,24 @@ export function ComposerV2Screen({
               description={option.area}
               selected={scene?.id === option.id}
               onPress={() => { setScene({ id: option.id, name: option.name }); setOpenSheet(null); }}
+            />
+          ))}</ScrollView> : null}
+        </Sheet>
+
+        <Sheet visible={openSheet === "activity"} title="关联哪个活动？" onClose={() => setOpenSheet(null)}>
+          {activityOptions === "loading" ? <SheetOption label="正在读取活动…" onPress={() => undefined} /> : null}
+          {activityOptions === "error" ? <SheetOption label="活动列表取不到" description="点这里重试" onPress={openActivityPicker} /> : null}
+          {/* ACTIVITY-REF-001：「一个活动都没有」和「取不到列表」必须长得不一样 ——
+              前者重试一百次也是空的，后者重试有用。 */}
+          {Array.isArray(activityOptions) && activityOptions.length === 0 ? <SheetOption label="当前没有可关联的活动" description="等有人发起活动后再来" onPress={() => undefined} /> : null}
+          {Array.isArray(activityOptions) && activity ? <SheetOption label="取消关联" onPress={() => { setActivity(null); setOpenSheet(null); }} /> : null}
+          {Array.isArray(activityOptions) ? <ScrollView style={{ maxHeight: 420 }}>{activityOptions.map((option) => (
+            <SheetOption
+              key={option.id}
+              label={option.title}
+              description={option.subtitle}
+              selected={activity?.id === option.id}
+              onPress={() => { setActivity({ id: option.id, title: option.title }); setOpenSheet(null); }}
             />
           ))}</ScrollView> : null}
         </Sheet>

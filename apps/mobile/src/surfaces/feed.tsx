@@ -5,15 +5,17 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, AppState, Image, Modal, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Animated, AppState, Image, Modal, PanResponder, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { usePullToRefresh } from "../components/pull-to-refresh";
 import ImageViewing from "react-native-image-viewing";
-import type { FeedMediaItem, FeedPost, PostEngagement, PostPollView, PostReply } from "@proxy/contracts";
+import type { Activity, FeedMediaItem, FeedPost, PostEngagement, PostPollView, PostReply } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type SecureSessionStore, OfflineFallbackSessionError } from "../secure-session";
 import { type AIAccountClient } from "../ai-account-client";
+// ACTIVITY-REF-001：解析活动引用（contextId = activityId）需要活动读模型。
+import type { ActivityClient } from "../activity-client";
 import { localApiBaseUrl } from "../native-clients";
 import { resolveAuthorAvatar, type AvatarAccount, type AvatarHumanAccount, initialAvatarTint } from "../media/author-avatar";
 import { mapEngagementError, mapFollowError } from "./feed-error-map";
@@ -25,6 +27,9 @@ import { FilterChipRail } from "../components/filter-chip-rail";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { isOpportunityPost } from "../feed-content";
+// ACTIVITY-REF-001：活动引用的唯一词表。实体引用（contextId = activityId）
+// 与分类标签（contextId = 人话）必须分开对待 —— 详见 activity-ref.ts 顶部。
+import { contextRefHaystack, contextRefLabels, labelContextRefs, referencedActivityId } from "../activity-ref";
 // v2 重构：深紫黑底 + compositionHint 驱动 fill。Sprint C 替换完成。
 // 旧 AdaptiveMediaCollection / AdaptiveMediaRail / SocialMediaFrame / SinglePostImage
 // 已从本文件迁出 → apps/mobile/src/media/
@@ -35,6 +40,8 @@ import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { readFeedDiskCache, writeFeedDiskCache } from "../feed-disk-cache";
 import { normalizeFeedSearchQuery } from "../feed-search";
 import { mergePostEngagement, mergeReactedPostIds } from "../post-engagement-model";
+import type { ConversationClient, ConversationInboxItem } from "../conversation-client";
+import { dedupeInboxDialogs, resolveAvatarSource } from "../conversation-inbox-model";
 
 // Re-export v2 组件，保持其他 surface （me.tsx 等）从 ./feed 导入的兼容性。
 export { AdaptiveMediaCollection, SinglePostImage, MediaViewer };
@@ -77,6 +84,13 @@ let cachedPostIds: Set<string> = new Set();
 let cachedPostEngagement: Record<string, PostEngagement> = {};
 let cachedLikedPostIds: ReadonlySet<string> = new Set();
 let cachedPostReplies: Record<string, PostReply[]> = {};
+// REPLY-DRAFT-CACHE-001（2026-09-26，用户「我看了 threads 没有取消发送 2 个 不想
+// 发送滑走就行了 存到草稿里了」）：删掉回复编辑器的「取消」按钮后，关闭只剩两条路
+// ——① 发送成功（submitReply 末尾），② swipe-down 把 composer 拖走。两条都得先把当前
+// replyDraft 存到缓存（按 postId 分桶）再清 replyTargetId —— 否则切走再切回来草稿
+// 就丢了，不符合「drafts 还找得到」的体感。关闭=保留非空 / 删除空草稿；发送成功=
+// 删除该 postId 的草稿（已发出去就别再当成草稿了）。
+let cachedReplyDrafts: Record<string, string> = {};
 // TAB-SWITCH-JANK-001: 本 session 是否做过一次网络 fresh 加载。切 tab 是 remount
 // 不是冷启动——remount 有缓存就同步渲染（毫秒级），不再每次 fresh 重拉；冷启动
 // （两级缓存都空）仍走 fresh（FEED-FRESH-002 那条 stale 缓存的教训保留）。
@@ -139,7 +153,9 @@ const AUTHOR_TYPE_META: Record<FeedPost["authorType"], { label: string; reason: 
 };
 
 function scenarioIconForPost(post: FeedPost): ProxyIconName {
-  const text = post.body + " " + post.contextRefs.map((r) => r.contextId).join(" ");
+  // ACTIVITY-REF-001：只用标签文案做关键词判定。实体引用的 contextId 是
+  // activityId，混进来会让任何带 "ai" 之类子串的 id 把帖文判成别的话题。
+  const text = post.body + " " + contextRefHaystack(post);
   if (text.includes("摄影") || text.includes("拍照")) return "camera";
   if (text.includes("咖啡")) return "cup";
   if (text.includes("城市同行") || text.includes("路线") || text.includes("同行")) return "route";
@@ -219,11 +235,14 @@ export function FeedSurface({
   engagement,
   socialSpace,
   secureSessionStore,
+  conversationClient,
   onOpenChat,
   onOpenFeedPrefs,
   viewerAccountId,
   profileClient,
   aiAccountsClient,
+  activityClient,
+  onOpenActivity,
   onOpenRealityScene,
   onOpenProfile,
   onChromeVisibilityChange,
@@ -241,6 +260,9 @@ export function FeedSurface({
   socialSpace: SocialSpaceClient;
   // R15.37: 透传给 composer 以拦截 "未登录发帖"。
   secureSessionStore?: SecureSessionStore | undefined;
+  // FEED-SHARE-TO-USER-001: "分享"弹站内用户列表要真实联系人（收件箱），
+  // 跟 messages.tsx 的"建群"候选人同一个客户端。缺省时分享退回纯原生分享。
+  conversationClient?: ConversationClient | undefined;
   onOpenChat: (author: string) => void;
   onOpenFeedPrefs: () => void;
   // 本人账号 id：用于判定“自己的帖子”并显示真头像；没有则退回名字判断。
@@ -250,6 +272,12 @@ export function FeedSurface({
   profileClient?: ProfileClient | undefined;
   // MEDIA-PIPELINE-001: AI 账号目录，用于解析 AGENT 帖头像；缺省则 AI 帖走首字。
   aiAccountsClient?: AIAccountClient | undefined;
+  // ACTIVITY-REF-001: 活动读模型。用来把帖文里的活动引用（contextId =
+  // activityId）解析成标题/时间/场地。缺省时活动卡片只显示「活动已不可用」，
+  // 不显示 id、也不假装解析成功。
+  activityClient?: ActivityClient | undefined;
+  // 点活动卡片 → 打开该活动详情。缺省则卡片不可点（仍然显示快照）。
+  onOpenActivity?: ((activityId: string) => void) | undefined;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onOpenProfile?: ((profile: { userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]>; avatarUri?: string | undefined }) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -313,7 +341,6 @@ export function FeedSurface({
 	const replyFlushScheduledRef = useRef(false);
 	// TAB-SWITCH-JANK-001: 切进切出抖 tab 时后台刷新节流（见 backgroundRefresh）。
 	const lastBackgroundRefreshAtRef = useRef(0);
-  const [bookmarked, setBookmarked] = useState<ReadonlySet<string>>(new Set());
   const [engagementBusy, setEngagementBusy] = useState<ReadonlySet<string>>(new Set());
   const [engagementError, setEngagementError] = useState<string>();
 	// ENGAGEMENT-CACHE-001: 镜像回模块级缓存。effect 在 commit 之后跑（unmount 时
@@ -323,12 +350,22 @@ export function FeedSurface({
 	useEffect(() => { cachedPostEngagement = postEngagement; }, [postEngagement]);
 	useEffect(() => { cachedPostReplies = postReplies; }, [postReplies]);
   const [engagementNotice, setEngagementNotice] = useState<string>();
+  // FEED-ACTION-ICONS-001 补（2026-09-26，用户「对齐原型 下面的logo」）：转发那
+  // 颗之前在 feed 上根本不画（FEED-ACTION-DEDUP-001 那轮删了），但原型动作行是 4
+  // 颗（♡/💬/↻/⇧）—— 现在补回来。失败要能重试，静默吞掉转发最糟。
+  const [repostFailed, setRepostFailed] = useState<ReadonlySet<string>>(new Set());
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
   const [replying, setReplying] = useState(false);
   // 发布器状态（v2 全面迁出到 ComposerV2Screen；这里只保留触发器）
   const [composerOpen, setComposerOpen] = useState(false);
-  const [composerQuoteId, setComposerQuoteId] = useState<string | null>(null);
+  // FEED-SHARE-TO-USER-001: 分享目标帖子 + 候选人（聊过天的真人，跟"建群"
+  // 同一诚实数据源）+ 发送中状态。候选人按需加载（打开分享面板才拉），
+  // 不在帖子列表渲染时就预取收件箱。
+  const [shareTarget, setShareTarget] = useState<FeedPost | null>(null);
+  const [shareContacts, setShareContacts] = useState<ConversationInboxItem[] | undefined>(undefined);
+  const [shareContactsError, setShareContactsError] = useState(false);
+  const [shareSendingTo, setShareSendingTo] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(Boolean(initialSearchQuery));
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery ?? "");
   // SEARCH-CORPUS-001: 当前生效的搜索词（归一后）。放在这里而不是搜索 effect 里，
@@ -435,6 +472,23 @@ export function FeedSurface({
   }, [feedProfileStore, aiAccountsClient, profileClient, viewerAccountId]);
   // MEDIA-PIPELINE-001: AI 账号目录已在上方并行初始化（启动优化），此处仅保留状态。
   const [aiAccountsById, setAiAccountsById] = useState<ReadonlyMap<string, AvatarAccount>>(new Map());
+
+  // ACTIVITY-REF-001: 活动引用解析表。帖文里只存 activityId，标题/时间/场地都在
+  // 活动读模型里，而仓库里**没有** GetActivity 命令 —— 只能拉一次列表建表，
+  // 不是每帖拉一次。refreshTrigger 变化（发完帖 / 下拉刷新）时重拉。
+  //
+  // 拉不到 = 空表。卡片会显示「活动已不可用」，不会退回去印 activityId 冒充标题：
+  // 「活动没了」和「活动叫这个名字」必须长得不一样。
+  const [activityById, setActivityById] = useState<ReadonlyMap<string, Activity>>(new Map());
+  useEffect(() => {
+    if (!activityClient) return;
+    let active = true;
+    void activityClient.listActivities().then((list) => {
+      if (!active) return;
+      setActivityById(new Map(list.map((item) => [item.activityId, item])));
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [activityClient, refreshTrigger]);
 
   // AVATAR-OTHER-HUMAN-002: 真人作者头像。
   // 真相源是模块级 humanAvatarCache（跨 remount 存活）；这个计数器只是让缓存
@@ -580,11 +634,6 @@ export function FeedSurface({
   const [scrollY, setScrollY] = useState(0);
   const [stickyHeaderVisible, setStickyHeaderVisible] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(0);
-  // 长按减少推荐菜单
-  const [contextMenu, setContextMenu] = useState<{ postId: string; x: number; y: number } | null>(null);
-  const [contextActionBusy, setContextActionBusy] = useState(false);
-  const [reportMode, setReportMode] = useState(false);
-  const [hiddenPosts, setHiddenPosts] = useState<ReadonlySet<string>>(new Set());
   // 新更新提示：后台刷新检测到新帖时显示
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingPosts, setPendingPosts] = useState<FeedPost[]>([]);
@@ -604,7 +653,7 @@ export function FeedSurface({
   // 公共组件，PanResponder 隔离外层 PAGE_SEQUENCE 切页的逻辑一致。
 
   // 发布器状态全部迁出到 ComposerV2Screen（包含上传、草稿、状态机）。
-  // 父组件只管打开/关闭，初始 quoteId 通过 composerQuoteId 透传。
+  // 父组件只管打开/关闭。
 
   const activeVideoId = useMemo(() => {
     if (viewportHeight === 0) return null;
@@ -672,18 +721,64 @@ export function FeedSurface({
   function toggleEmbeddedComposer(): void {
     if (composerOpen) {
       setComposerOpen(false);
-      setComposerQuoteId(null);
       return;
     }
-    setComposerQuoteId(null);
     setComposerOpen(true);
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
   }
 
-  function openComposerFor(quoteId: string): void {
-    setComposerQuoteId(quoteId);
-    setComposerOpen(true);
-    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
+  // FEED-SHARE-TO-USER-001: 打开分享面板即拉一次收件箱。候选人跟 messages.tsx
+  // 的"建群"同一诚实数据源（收件箱里真聊过天的人），过滤规则也一致：
+  // 只留 DM、去掉 AI 账号和唯一的 AI 助手——分享给一个 AI 或一个群没有意义。
+  function openSharePanel(post: FeedPost): void {
+    setShareTarget(post);
+    setShareContactsError(false);
+    if (!conversationClient) return;
+    setShareContacts(undefined);
+    void conversationClient.listConversations()
+      .then((items) => {
+        const humans = dedupeInboxDialogs(items).filter((item) =>
+          item.conversation.conversationType === "DM"
+          && !!item.counterpartyId
+          && item.counterpartyId !== "proxy_ai"
+          && item.counterpartyId !== "user_proxy_ai"
+          && !/^ai_account_/.test(item.counterpartyId)
+        );
+        setShareContacts(humans);
+      })
+      .catch(() => { setShareContacts([]); setShareContactsError(true); });
+  }
+
+  function closeSharePanel(): void {
+    setShareTarget(null);
+    setShareContacts(undefined);
+    setShareContactsError(false);
+    setShareSendingTo(null);
+  }
+
+  function shareViaSystemSheet(post: FeedPost, authorName: string): void {
+    void Share.share({ message: `${post.body}\n\nProxy · ${authorName}` });
+    closeSharePanel();
+  }
+
+  async function sendPostToUser(post: FeedPost, authorName: string, peerUserId: string): Promise<void> {
+    if (!conversationClient || shareSendingTo) return;
+    setShareSendingTo(peerUserId);
+    setEngagementError(undefined);
+    try {
+      await conversationClient.startConversation({
+        originType: "POST",
+        originId: post.postId,
+        participantId: peerUserId,
+        conversationType: "DM",
+        firstMessage: `分享了一条动态：${post.body}\n\nProxy · ${authorName}`,
+      });
+      setEngagementNotice("已分享给对方。");
+      closeSharePanel();
+    } catch (error) {
+      setEngagementError(error instanceof Error && /authenticated principal|real sign-in|signed out/i.test(error.message) ? "分享失败：请登录后重试" : "分享失败，请稍后重试");
+      setShareSendingTo(null);
+    }
   }
 
   const loadFeed = useCallback(async (rawQuery?: string, fresh = false): Promise<void> => {
@@ -992,6 +1087,32 @@ export function FeedSurface({
 	}
 
 	/**
+	 * FEED-ACTION-ICONS-001 补（2026-09-26）：转发。原型动作行第 3 颗（↻）—— 服务端
+	 * `RepostPost` 从 R14 起就有，幂等（重复转发返 REJECTED / ALREADY_REPOSTED，
+	 * 客户端视为成功），这里不再发明新协议。成功后服务端只回事件引用、不回新计数，
+	 * 所以再读一次真值，不去猜 +1。失败要能重试（和 ProfileTabs 一致）：
+	 * `repostFailed` 这个 Set 记下失败过的 postId，行内下方显示一行"重试"。
+	 */
+	async function repost(postId: string): Promise<void> {
+	  const busyKey = `repost:${postId}`;
+	  if (engagementBusy.has(busyKey)) return;
+	  setEngagementBusy((value) => new Set(value).add(busyKey));
+	  setRepostFailed((previous) => {
+		const next = new Set(previous); next.delete(postId); return next;
+	  });
+	  try {
+		await engagement.repostPost(postId);
+		const truth = await engagement.getPostEngagement(postId);
+		setPostEngagement((previous) => mergePostEngagement(previous, [truth]));
+	  } catch (error) {
+		setRepostFailed((previous) => new Set(previous).add(postId));
+		setEngagementError(mapEngagementError(error, "转发没有提交成功，点重试再试。"));
+	  } finally {
+		setEngagementBusy((value) => { const next = new Set(value); next.delete(busyKey); return next; });
+	  }
+	}
+
+	/**
 	 * POLL-VOTE-001 — 投一票，并**整体替换**这条帖子的投票读模型。
 	 *
 	 * 为什么用服务端返回的结果整体替换、而不是在本地给某个选项 +1：
@@ -1023,7 +1144,8 @@ export function FeedSurface({
 
 	async function openReplies(postId: string): Promise<void> {
 	  setReplyTargetId(postId);
-	  setReplyDraft("");
+	  // REPLY-DRAFT-CACHE-001: 取回上次未发的草稿（按 postId 分桶），没有就是空。
+	  setReplyDraft(cachedReplyDrafts[postId] ?? "");
 	  setExpandedReplies((previous) => new Set(previous).add(postId));
 	  try {
 		const listed = await engagement.listPostReplies(postId);
@@ -1032,6 +1154,37 @@ export function FeedSurface({
 		setEngagementError(mapEngagementError(error, "评论暂时无法读取，请稍后重试。"));
 	  }
 	}
+
+  // REPLY-DRAFT-CACHE-001: 关闭回复编辑器 —— 默认保留非空草稿；发送成功后调
+  // closeReply({ keepDraft: false }) 把这条 postId 的草稿删掉。
+  function closeReply(options?: { keepDraft?: boolean }): void {
+    const id = replyTargetId;
+    if (id !== null) {
+      if (options?.keepDraft === false) {
+        delete cachedReplyDrafts[id];
+      } else if (replyDraft.trim()) {
+        cachedReplyDrafts[id] = replyDraft;
+      } else {
+        delete cachedReplyDrafts[id];
+      }
+    }
+    setReplyTargetId(null);
+    setReplyDraft("");
+  }
+
+  // REPLY-DRAFT-CACHE-001: 顶部 drag handle 专用手势 —— 只在拖动距离 > 8px 且
+  // 主要方向是垂直时抢手势；静态 start（点击、聚焦 TextInput）一律不抢，
+  // 这样下面的输入框和发送按钮的 touch 完全不受影响。
+  const replyPanResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_event, gestureState) =>
+      Math.abs(gestureState.dy) > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+    onPanResponderRelease: (_event, gestureState) => {
+      if (gestureState.dy > 80 && replyTargetId !== null) {
+        closeReply();
+      }
+    },
+  }), [replyTargetId, replyDraft]);
 
   async function submitReply(): Promise<void> {
     if (!replyTargetId || !replyDraft.trim() || replying) return;
@@ -1047,8 +1200,8 @@ export function FeedSurface({
 		setPostEngagement((previous) => previous[postId] ? ({ ...previous, [postId]: { ...previous[postId], replies: listResult.value.count } }) : previous);
 	  }
 	  setExpandedReplies((previous) => new Set(previous).add(postId));
-      setReplyTargetId(null);
-      setReplyDraft("");
+      // REPLY-DRAFT-CACHE-001: 发送成功 = 这条草稿已经出去了，别再当草稿保留。
+      closeReply({ keepDraft: false });
     } catch (error) {
       setEngagementError(mapEngagementError(error, "回复没有提交成功，请检查连接后重试。"));
     } finally {
@@ -1056,42 +1209,6 @@ export function FeedSurface({
     }
   }
 
-  async function submitFeedPreference(action: "NOT_INTERESTED" | "REDUCE_TOPIC" | "REDUCE_AUTHOR"): Promise<void> {
-    if (!contextMenu || contextActionBusy) return;
-    const post = posts.find((item) => item.postId === contextMenu.postId);
-    if (!post) return;
-    setContextActionBusy(true);
-    setEngagementError(undefined);
-    setEngagementNotice(undefined);
-    try {
-      await engagement.recordFeedPreference(post.postId, action, post.authorId);
-      if (action === "NOT_INTERESTED") setHiddenPosts((prev) => new Set(prev).add(post.postId));
-      setEngagementNotice(action === "REDUCE_AUTHOR" ? "已记录：将减少推荐此作者。" : action === "REDUCE_TOPIC" ? "已记录：将减少推荐类似内容。" : "已隐藏，并记录到推荐偏好。");
-      setContextMenu(null);
-      setReportMode(false);
-    } catch (error) {
-      setEngagementError(mapEngagementError(error, "偏好没有保存成功，请检查连接后重试。"));
-    } finally {
-      setContextActionBusy(false);
-    }
-  }
-
-  async function submitPostReport(reason: "SPAM" | "HARASSMENT" | "UNSAFE" | "OTHER"): Promise<void> {
-    if (!contextMenu || contextActionBusy) return;
-    setContextActionBusy(true);
-    setEngagementError(undefined);
-    setEngagementNotice(undefined);
-    try {
-      await engagement.reportPost(contextMenu.postId, reason);
-      setEngagementNotice("举报已提交，平台将按审核流程处理。");
-      setContextMenu(null);
-      setReportMode(false);
-    } catch (error) {
-      setEngagementError(mapEngagementError(error, "举报没有提交成功，请检查连接后重试。"));
-    } finally {
-      setContextActionBusy(false);
-    }
-  }
 
   // 发布器 (pickComposerImages / replaceComposerImage / publish) 全部迁出到 ComposerV2Screen。
   // 这里只保留打开入口（toggleEmbeddedComposer）。
@@ -1182,6 +1299,38 @@ export function FeedSurface({
     }
   }
 
+  // FEED-MENU-DEDUP-001（用户：「还是有2个...logo 在一个帖文里 整合下」）：
+  // 帖头 ⋯（PostMenuModal：不感兴趣/举报/屏蔽作者）跟操作行 ···（内嵌
+  // contextMenu：不感兴趣/减少这类内容/少看这个人/举报）是两套独立菜单，
+  // 同一条帖子上露两个"更多"入口，选项还互相有缺——合并成一个，这两条
+  // （减少这类内容/少看这个人）是原来那套独有的，搬进来补全。跟
+  // 不感兴趣/举报/屏蔽作者不同：这两条只是记偏好信号，不摘帖子，所以
+  // 用 engagementNotice 给个"记下了"的反馈，而不是 postMenuError 那条
+  // （那条是给失败用的）。
+  async function handleReduceTopic(): Promise<void> {
+    if (!postMenuPost) return;
+    setPostMenuError(undefined);
+    try {
+      await engagement.recordFeedPreference(postMenuPost.postId, "REDUCE_TOPIC");
+      setEngagementNotice("已记录：将减少推荐类似内容。");
+      closePostMenu();
+    } catch (err) {
+      setPostMenuError(err instanceof Error ? err.message : "操作失败");
+    }
+  }
+
+  async function handleReduceAuthor(): Promise<void> {
+    if (!postMenuPost) return;
+    setPostMenuError(undefined);
+    try {
+      await engagement.recordFeedPreference(postMenuPost.postId, "REDUCE_AUTHOR", postMenuPost.authorId);
+      setEngagementNotice("已记录：将减少推荐此作者。");
+      closePostMenu();
+    } catch (err) {
+      setPostMenuError(err instanceof Error ? err.message : "操作失败");
+    }
+  }
+
   function mediaFor(postId: string): FeedMediaItem[] {
     return (media[postId] ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder);
   }
@@ -1205,7 +1354,7 @@ export function FeedSurface({
       if (!isPostWithinScope(post.createdAt, scope)) return false;
       // 偏好-不想看：主题切词命中正文/上下文/作者即隐藏。
       if (feedPrefs.muted.length > 0) {
-        const haystack = [resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
+        const haystack = [resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName), post.body, ...contextRefLabels(post)]
           .filter((value): value is string => typeof value === "string")
           .join(" ")
           .toLocaleLowerCase();
@@ -1241,10 +1390,10 @@ export function FeedSurface({
       const feedMap: Record<string, (post: FeedPost) => boolean> = {
         friends: (p) => following.has(p.authorId) || isOwnPost(p),
         hanoi: (p) => p.cityScope === "hn",
-        photo: (p) => p.contextRefs.some((r) => r.contextId.includes("摄影") || r.contextId.includes("拍照")),
+        photo: (p) => contextRefLabels(p).some((label) => label.includes("摄影") || label.includes("拍照")),
         opportunity: isOpportunityPost,
         merchant: (p) => p.authorType === "MERCHANT",
-        startup: (p) => p.contextRefs.some((r) => r.contextId.includes("创业") || r.contextId.includes("AI"))
+        startup: (p) => contextRefLabels(p).some((label) => label.includes("创业") || label.includes("AI"))
       };
       const checker = feedMap[selectedCustomFeed];
       if (checker) {
@@ -1252,7 +1401,7 @@ export function FeedSurface({
       } else if (customFeedTokens.length > 0) {
         // AI 生成的自定频道（id=ai_…）：内置 feedMap 没有规则，
         // 用频道名+描述切词做本地过滤；之前直接看全部。
-        const haystack = [resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
+        const haystack = [resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName), post.body, ...contextRefLabels(post)]
           .filter((value): value is string => typeof value === "string")
           .join(" ")
           .toLocaleLowerCase();
@@ -1306,7 +1455,6 @@ export function FeedSurface({
     setFeedPrefs(next);
     writeFeedPrefs(next);
   }, [feedPrefs]);
-  const quoteTarget = composerQuoteId ? posts.find((post) => post.postId === composerQuoteId) : undefined;
   const viewerPost = viewer ? posts.find((post) => post.postId === viewer.postId) : undefined;
   const viewerItems = viewerPost ? mediaFor(viewerPost.postId) : [];
 
@@ -1419,8 +1567,8 @@ export function FeedSurface({
           return (
             <Pressable key={entry.id} onPress={() => setTab(entry.id)} style={styles.tabItem}>
               {/* 尺寸与间距跟同屏上面的分段控件 sectionTab 取同一套（18pt / gap 5）——
-                  两行图标在同一个屏幕上必须是同一个系统。 */}
-              {/* ICON-INK-001（用户：「logo不能发灰 必须黑 对齐 threads 风格」）：
+                  两行图标在同一个屏幕上必须是同一个系统。
+                  ICON-INK-001（用户：「logo不能发灰 必须黑 对齐 threads 风格」）：
                   字形颜色不再跟选中态走 —— 未选中那栏也是 ink。这条**推翻**了
                   SEC-CATEGORY-ICONS-001 当初「图标要跟选中态走」的判断，理由写在
                   sec-category-icons.test.ts 那条钉上。 */}
@@ -1444,7 +1592,7 @@ export function FeedSurface({
           requester-home 复用同一份。feed 这边的 filterRailRef /
           filterRailScrollXRef / filterRailPanResponder 已删除。 */}
       <FilterChipRail
-        items={FILTERS.map((f) => ...(f.icon ? { icon: f.icon } : {}))}
+        items={FILTERS.map((f) => ({ id: f.id, label: f.label, ...(f.icon ? { icon: f.icon } : {}) }))}
         activeId={feedFilter}
         onChange={(id) => {
           setFeedFilter(id as FilterKey);
@@ -1474,13 +1622,13 @@ export function FeedSurface({
 
       {/* 发布器 v2 — 全部状态/上传/草稿都在 ComposerV2Screen 内部，父组件只透传 trigger */}
       <ComposerV2Screen
-        initialQuoteId={composerQuoteId}
         localNet={localNet}
         mediaClient={mediaClient}
+        {...(activityClient ? { activityClient } : {})}
         secureSessionStore={secureSessionStore}
         viewerAccountId={viewerAccountId}
-        onClose={() => { setComposerOpen(false); setComposerQuoteId(null); }}
-        onPublished={async () => { setComposerOpen(false); setComposerQuoteId(null); await loadFeed(undefined, true); }}
+        onClose={() => setComposerOpen(false)}
+        onPublished={async () => { setComposerOpen(false); await loadFeed(undefined, true); }}
         posts={posts}
         visible={composerOpen}
       />
@@ -1512,6 +1660,10 @@ export function FeedSurface({
         <>
           {visible.map((post) => {
           const quoted = findQuote(post);
+          // ACTIVITY-REF-001：活动引用（contextId = activityId）。解析到就画活动
+          // 卡片；解析不到（活动已下架 / 列表没拉到）画一张说明卡，不画裸 id。
+          const activityRefId = referencedActivityId(post);
+          const referencedActivity = activityRefId ? activityById.get(activityRefId) : undefined;
           const items = mediaFor(post.postId);
           const name = resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName);
           // MEDIA-PIPELINE-001: 头像走统一管线（本人/AI 账号/AI 人像/首字）。
@@ -1527,7 +1679,6 @@ export function FeedSurface({
             : undefined;
           const isFollow = following.has(post.authorId);
           const isLiked = liked.has(post.postId);
-		  const isSaved = bookmarked.has(post.postId);
 		  const truth = postEngagement[post.postId];
 		  // FEED-REPLY-002: 评论默认展开前 5 条，超出才折叠；不再「全折叠」。
 		  const replies = postReplies[post.postId] ?? [];
@@ -1541,7 +1692,9 @@ export function FeedSurface({
 		  const shownReplies = visibleReplies(orderedReplies, repliesExpanded);
 		  const collapsedReplies = hiddenReplyCount(replies.length);
 		  const offerReplyToggle = shouldOfferReplyToggle(replies.length);
-          const chips = post.contextRefs.filter((entry) => entry.contextType !== "QUOTE_POST");
+          // ACTIVITY-REF-001：活动实体引用走下面的活动卡片，不进 chip 行 ——
+          // 否则 chip 文案会印出一行裸 activityId。
+          const chips = labelContextRefs(post);
           return (
             <View
               key={post.postId}
@@ -1658,6 +1811,39 @@ export function FeedSurface({
                 </View>
               ) : null}
 
+              {/* ACTIVITY-REF-001 — 活动引用卡片（服务端 contextRef ACTIVITY +
+                  relationType REFERS_TO）。判定是白名单，只有明确带标记的才算引用；
+                  分类标签（AUTO_CLASSIFIED / 老 seed 的人话行）继续走 chip 行。
+                  解析不到时**不画 id**：说清「已不可用」，与「活动叫这个名字」区分开。 */}
+              {activityRefId ? (
+                referencedActivity ? (
+                  <Pressable
+                    accessibilityLabel={`查看活动 ${referencedActivity.title}`}
+                    disabled={!onOpenActivity}
+                    onPress={() => onOpenActivity?.(referencedActivity.activityId)}
+                    style={styles.activityRefCard}
+                  >
+                    <View style={styles.activityRefHead}>
+                      <ProxyIcon color={color.violet} name="ticket" size={14} />
+                      <Text selectable style={styles.activityRefKicker}>活动</Text>
+                      {onOpenActivity ? <Text selectable style={styles.activityRefMore}>查看 ›</Text> : null}
+                    </View>
+                    <Text selectable numberOfLines={2} style={styles.activityRefTitle}>{referencedActivity.title}</Text>
+                    <Text selectable style={styles.activityRefMeta}>
+                      {referencedActivity.time} · {referencedActivity.venueIcon} {referencedActivity.venueName} · 已报名 {referencedActivity.joined}{referencedActivity.capacity === undefined ? "" : `/${referencedActivity.capacity}`}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <View style={styles.activityRefCard}>
+                    <View style={styles.activityRefHead}>
+                      <ProxyIcon color={color.violet} name="ticket" size={14} />
+                      <Text selectable style={styles.activityRefKicker}>活动</Text>
+                    </View>
+                    <Text selectable style={styles.activityRefMissing}>引用的活动已不可用（已结束或已下架）</Text>
+                  </View>
+                )
+              ) : null}
+
               {/* X 式引用帖文（quote card：服务端 contextRef QUOTE_POST） */}
               {quoted ? (
                 <View style={styles.quoteCard}>
@@ -1682,37 +1868,54 @@ export function FeedSurface({
                 />
               ) : null}
 
-              {/* FEED-ACTION-ICONS-001: 喜欢/回复/引用/收藏/分享以前全是纯文字
-                  （"回复 3"/"引用"/"分享"），喜欢那颗心也只是 ♥/♡ 两个字符塞进
+              {/* FEED-ACTION-ICONS-001: 喜欢/回复/分享以前全是纯文字
+                  （"回复 3"/"分享"），喜欢那颗心也只是 ♥/♡ 两个字符塞进
                   Text——不是图标，字重跟着字号变形，且比同一屏其它按钮的图标
                   风格不统一。换成 ProxyIcon，跟真实社交 App 的操作行一致：
-                  喜欢/回复带数字，引用/收藏/分享/更多只是图标，不用文字解释。 */}
+                  喜欢/回复带数字，分享只是图标，不用文字解释。
+                  FEED-ACTION-DEDUP-001（用户：「帖文为什么有重复的...2个
+                  按钮，保持一个，并且移除书签logo和引用logo」）：引用（打开
+                  编辑器预填这条帖子）跟分享都是"把这条帖子传出去"，功能重复；
+                  书签当时写进去了但"收藏"页的动态 tab 还没接读接口，点了收藏
+                  看不到任何效果。两个都删，只留分享。引用本身没有消失——写新帖
+                  时 ComposerV2Screen 自己的"引用"面板还能选任意帖子引用，只是
+                  不再有从这条帖子直接跳转预填的快捷方式。
+                  FEED-MENU-DEDUP-001（用户：「还是有2个...logo 在一个帖文里
+                  整合下」）：这一行原来还有第 4 个"···"，跟帖头右上角的"⋯"
+                  是两套完全独立的菜单（选项还互相有缺）。行内那颗删了，
+                  帖头"⋯"（下面 PostMenuModal）是唯一入口，选项合并成
+                  不感兴趣/减少这类内容/少看这个人/屏蔽作者/举报五项。 */}
+              {/* FEED-ACTION-ICONS-001（用户「对齐原型 下面的logo」）：
+                  原型动作行是 4 颗：♡ / 💬 / ↻ / ⇧。原来这行只有 3 颗（少 ↻），而且
+                  评论用的是 chat（方角气泡，几何跟回复 tab 的 replyBubble 圆气泡不同）、
+                  分享用的是 shareUp（自造上传箭头，跟回复行的 replyShare Feather 路径
+                  不同）—— 都是「几何不一致」。现在按 REPLY-ACTION-ICONS-001 在回复行
+                  立的那套标准来：4 颗都用 replyLike / replyBubble / replyRepost /
+                  replyShare，同源字形、1.8 描边。计数跟 ProfileTabs 一样，没有真相
+                 （engagement 没拉到）就回填 0 —— 跟现状保持一致（不编数字）。 */}
               <View style={styles.postActions}>
-                <Pressable disabled={engagementBusy.has(`like:${post.postId}`)} onPress={() => void toggleLike(post.postId)} style={styles.postAction}>
-                  <ProxyIcon color={isLiked ? color.magenta : color.ink} filled={isLiked} name="heart" size={19} />
+                <Pressable accessibilityLabel={`喜欢 · ${truth?.reactions ?? 0}`} disabled={engagementBusy.has(`like:${post.postId}`)} onPress={() => void toggleLike(post.postId)} style={styles.postAction}>
+                  <ProxyIcon color={isLiked ? color.magenta : color.ink} filled={isLiked} name="replyLike" size={18} />
                   <Text selectable style={[styles.postActionCount, isLiked && styles.postActionOn]}>{truth?.reactions ?? 0}</Text>
                 </Pressable>
-                <Pressable onPress={() => void openReplies(post.postId)} style={styles.postAction}>
-                  <ProxyIcon color={color.ink} name="chat" size={18} />
+                <Pressable accessibilityLabel={`查看评论 · ${truth?.replies ?? 0}`} onPress={() => void openReplies(post.postId)} style={styles.postAction}>
+                  <ProxyIcon color={color.ink} name="replyBubble" size={18} />
                   <Text selectable style={styles.postActionCount}>{truth?.replies ?? 0}</Text>
                 </Pressable>
-                <Pressable onPress={() => openComposerFor(post.postId)} style={styles.postAction}>
-                  <ProxyIcon color={color.ink} name="remix" size={18} />
+                <Pressable accessibilityLabel={`转发 · ${truth?.reposts ?? 0}`} disabled={engagementBusy.has(`repost:${post.postId}`)} onPress={() => void repost(post.postId)} style={styles.postAction}>
+                  <ProxyIcon color={color.ink} name="replyRepost" size={18} />
+                  <Text selectable style={styles.postActionCount}>{truth?.reposts ?? 0}</Text>
                 </Pressable>
-                <Pressable disabled={isSaved || engagementBusy.has(`bookmark:${post.postId}`)} onPress={() => void commitEngagement(`bookmark:${post.postId}`, post.postId, () => engagement.bookmarkPost(post.postId), setBookmarked, bookmarked)} style={styles.postAction}>
-                  <ProxyIcon color={isSaved ? color.violet : color.ink} filled={isSaved} name="bookmark" size={18} />
-                </Pressable>
-                <Pressable onPress={() => void Share.share({ message: `${post.body}\n\nProxy · ${name}` })} style={styles.postAction}>
-                  <ProxyIcon color={color.ink} name="shareUp" size={18} />
-                </Pressable>
-                <Pressable
-                  accessibilityLabel="更多帖子操作"
-                  onPress={() => { setReportMode(false); setContextMenu({ postId: post.postId, x: 0, y: 0 }); }}
-                  style={styles.postAction}
-                >
-                  <Text selectable style={styles.postActionText}>···</Text>
+                <Pressable accessibilityLabel="分享帖子" onPress={() => openSharePanel(post)} style={styles.postAction}>
+                  <ProxyIcon color={color.ink} name="replyShare" size={18} />
                 </Pressable>
               </View>
+              {/* 转发失败要看得见、能重试 —— 和 ProfileTabs.repostFailed 同形。 */}
+              {repostFailed.has(post.postId) ? (
+                <Pressable accessibilityLabel="重试转发" onPress={() => void repost(post.postId)} style={styles.postActionRetry}>
+                  <Text selectable style={styles.postActionRetryText}>转发没有提交成功，点这里重试。</Text>
+                </Pressable>
+              ) : null}
 		  {shownReplies.length > 0 ? (
 			<View style={styles.postReplies}>
 			  {shownReplies.map((reply) => (
@@ -1741,7 +1944,13 @@ export function FeedSurface({
                   （还带「回复帖文」标题），而且整个 feed 没有任何键盘避让 ——
                   键盘一弹正好把贴在底部的输入框盖住。 */}
               {replyTargetId === post.postId ? (
+                // REPLY-DRAFT-CACHE-001：Threads 风格的「可以滑走」 —— 顶部 drag
+                // handle 抢手势（垂直位移 > 8px 才抢，TextInput 的 touch 不受影响），
+                // 下拖超过 80px 触发 closeReply（保留非空草稿）。取消按钮已去掉。
                 <View style={styles.inlineReply}>
+                  <View {...replyPanResponder.panHandlers} style={styles.inlineReplyHandle}>
+                    <View style={styles.inlineReplyHandleBar} />
+                  </View>
                   <TextInput
                     autoFocus
                     maxLength={500}
@@ -1754,14 +1963,6 @@ export function FeedSurface({
                     value={replyDraft}
                   />
                   <View style={styles.inlineReplyActions}>
-                    <Pressable
-                      accessibilityLabel="取消回复"
-                      hitSlop={8}
-                      onPress={() => { setReplyTargetId(null); setReplyDraft(""); }}
-                      style={styles.inlineReplyCancel}
-                    >
-                      <Text selectable style={styles.inlineReplyCancelText}>取消</Text>
-                    </Pressable>
                     <Pressable
                       accessibilityLabel="发送回复"
                       disabled={!replyDraft.trim() || replying}
@@ -1808,35 +2009,6 @@ export function FeedSurface({
         />
       ) : null}
 
-      {/* 长按减少推荐菜单（X 式 ··· 菜单） */}
-      {contextMenu ? (
-        <Modal transparent animationType="fade" onRequestClose={() => setContextMenu(null)}>
-          <Pressable style={styles.menuOverlay} onPress={() => setContextMenu(null)}>
-            <Pressable style={styles.menuContent} onPress={(event) => event.stopPropagation()}>
-              <Text selectable style={styles.menuTitle}>{reportMode ? "举报原因" : "调整推荐"}</Text>
-              {reportMode ? (
-                <>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("SPAM")}><Text selectable style={styles.menuItemText}>垃圾信息或广告</Text></Pressable>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("HARASSMENT")}><Text selectable style={styles.menuItemText}>骚扰或攻击</Text></Pressable>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("UNSAFE")}><Text selectable style={styles.menuItemText}>不安全内容</Text></Pressable>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("OTHER")}><Text selectable style={styles.menuItemText}>其他问题</Text></Pressable>
-                </>
-              ) : (
-                <>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitFeedPreference("NOT_INTERESTED")}><Text selectable style={styles.menuItemText}>不感兴趣</Text></Pressable>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitFeedPreference("REDUCE_TOPIC")}><Text selectable style={styles.menuItemText}>减少这类内容</Text></Pressable>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitFeedPreference("REDUCE_AUTHOR")}><Text selectable style={styles.menuItemText}>少看这个人</Text></Pressable>
-                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => setReportMode(true)}><Text selectable style={styles.menuItemText}>举报</Text></Pressable>
-                </>
-              )}
-              <Pressable style={styles.menuCancel} onPress={() => { setReportMode(false); setContextMenu(null); }}>
-                <Text selectable style={styles.menuCancelText}>取消</Text>
-              </Pressable>
-            </Pressable>
-          </Pressable>
-        </Modal>
-      ) : null}
-
       </>
       )}
 
@@ -1871,6 +2043,26 @@ export function FeedSurface({
       onReport={handleReportPost}
       onNotInterested={handleNotInterested}
       onMuteAuthor={handleMuteAuthor}
+      onReduceTopic={handleReduceTopic}
+      onReduceAuthor={handleReduceAuthor}
+    />
+    {/* FEED-SHARE-TO-USER-001: "分享"弹站内联系人列表（弹用户头像可选），
+        选中直接发一条私信；列表最下面留一条"更多分享方式"给系统原生分享
+        （发外部 App / 复制链接），不砍掉这条现有能力。 */}
+    <SharePostSheet
+      contacts={shareContacts}
+      contactsError={shareContactsError}
+      onClose={closeSharePanel}
+      onPickContact={(peerUserId) => {
+        if (!shareTarget) return;
+        void sendPostToUser(shareTarget, resolveAuthorDisplayName(shareTarget, viewerAccountId, viewerDisplayName), peerUserId);
+      }}
+      onUseSystemShare={() => {
+        if (!shareTarget) return;
+        shareViaSystemSheet(shareTarget, resolveAuthorDisplayName(shareTarget, viewerAccountId, viewerDisplayName));
+      }}
+      sendingTo={shareSendingTo}
+      target={shareTarget}
     />
     {/* R15.69 (restored): 点头像弹 关注/访问个人主页 菜单 (双行上下排) */}
     <Modal transparent animationType="fade" visible={profileActions !== undefined} onRequestClose={() => setProfileActions(undefined)}>
@@ -2084,6 +2276,10 @@ const styles = StyleSheet.create({
     marginTop: 8,
     padding: 10
   },
+  // REPLY-DRAFT-CACHE-001: 顶部 drag handle（Threads 风格的可拖动提示），
+  // 32px 高的可触摸区域 + 中间一根 32×3px 的灰色 pill。
+  inlineReplyHandle: { alignItems: "center", height: 32, justifyContent: "center", marginBottom: 4 },
+  inlineReplyHandleBar: { backgroundColor: color.line, borderRadius: 2, height: 3, width: 32 },
   inlineReplyInput: {
     color: color.ink,
     fontSize: 14,
@@ -2095,8 +2291,6 @@ const styles = StyleSheet.create({
     textAlignVertical: "top"
   },
   inlineReplyActions: { alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "flex-end", marginTop: 6 },
-  inlineReplyCancel: { paddingHorizontal: 6, paddingVertical: 6 },
-  inlineReplyCancelText: { color: color.muted, fontSize: 12, fontWeight: "700" },
   inlineReplySend: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
   inlineReplySendText: { color: color.white, fontSize: 12, fontWeight: "800" },
 
@@ -2240,7 +2434,7 @@ const styles = StyleSheet.create({
     top: 6
   },
   socialMediaFrame: {
-    backgroundColor: "color.ink",
+    backgroundColor: color.ink,
     borderRadius: 14,
     height: "100%",
     overflow: "hidden",
@@ -2257,7 +2451,7 @@ const styles = StyleSheet.create({
   socialMediaAsset: { height: "100%", width: "100%" },
   singleMediaStage: {
     alignItems: "center",
-    backgroundColor: "color.ink",
+    backgroundColor: color.ink,
     borderRadius: 14,
     justifyContent: "center",
     marginVertical: 8,
@@ -2298,6 +2492,24 @@ const styles = StyleSheet.create({
     marginVertical: 7,
     padding: 8
   },
+  // ACTIVITY-REF-001 — 活动引用卡。跟引用卡同一套卡片语言（描边内嵌），
+  // 但用紫色票根标头区分「这是活动，不是帖文」。
+  activityRefCard: {
+    borderColor: "#E8E0EC",
+    borderRadius: 12,
+    borderWidth: 1,
+    marginVertical: 7,
+    padding: 8
+  },
+  activityRefHead: { alignItems: "center", flexDirection: "row", gap: 5 },
+  activityRefKicker: { color: "#6330B2", fontSize: 11, fontWeight: "800" },
+  activityRefMore: { color: "#8A7E93", fontSize: 11, fontWeight: "700", marginLeft: "auto" },
+  activityRefTitle: { color: "#2B2531", fontSize: 13, fontWeight: "800", lineHeight: 18, marginTop: 5 },
+  activityRefMeta: { color: "#5D5365", fontSize: 11, lineHeight: 15, marginTop: 3 },
+  // 「活动已不可用」是**说明**，不是标题 —— 故意不用标题的字号/颜色，
+  // 免得跟真标题长得一样、被当成活动名字读过去。
+  activityRefMissing: { color: "#8A7E93", fontSize: 12, fontStyle: "italic", lineHeight: 16, marginTop: 5 },
+
   // POLL-VOTE-001 — 投票卡片。浅色底 + 描边，跟引用卡同一套卡片语言。
   pollCard: { gap: 6, marginVertical: 7 },
   pollOption: {
@@ -2317,9 +2529,9 @@ const styles = StyleSheet.create({
   pollBar: { backgroundColor: "rgba(133,51,245,0.14)", bottom: 0, left: 0, position: "absolute", top: 0 },
   pollOptionRow: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "space-between" },
   pollOptionLabel: { color: color.ink, flexShrink: 1, fontSize: 14 },
-  pollOptionLabelMine: { color: "color.factInferredFg", fontWeight: "700" },
+  pollOptionLabelMine: { color: color.factInferredFg, fontWeight: "700" },
   pollOptionCount: { color: color.muted, fontSize: 12 },
-  pollOptionCountMine: { color: "color.factInferredFg", fontWeight: "700" },
+  pollOptionCountMine: { color: color.factInferredFg, fontWeight: "700" },
   pollMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
 
   quoteHead: { alignItems: "center", flexDirection: "row", gap: 5 },
@@ -2338,7 +2550,7 @@ const styles = StyleSheet.create({
   quoteMediaLabel: { color: color.muted, fontSize: 11, marginTop: 4 },
 
   postUtility: {
-    backgroundColor: "color.inspireSavedBg",
+    backgroundColor: color.inspireSavedBg,
     borderColor: "#DEEDA9",
     borderRadius: 10,
     borderWidth: 1,
@@ -2361,53 +2573,14 @@ const styles = StyleSheet.create({
 	postReplyBody: { color: color.ink, flex: 1, fontSize: 13, lineHeight: 18 },
 	// FEED-REPLY-002: 展开/收起控件。
 	postRepliesMore: { color: color.muted, fontSize: 12, fontWeight: "700", paddingTop: 2 },
-  postActionText: { color: color.ink, fontSize: 12, fontWeight: "700" },
   postActionCount: { color: color.ink, fontSize: 12, fontWeight: "700" },
   postActionOn: { color: "#6C36C8" },
-
-  // 长按减少推荐菜单（X 式 ··· 菜单）。
-  menuOverlay: {
-    backgroundColor: "rgba(0,0,0,0.4)",
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center"
-  },
-  menuContent: {
-    backgroundColor: color.white,
-    borderRadius: 16,
-    width: "80%",
-    overflow: "hidden"
-  },
-  menuTitle: {
-    color: color.muted,
-    fontSize: 11,
-    fontWeight: "700",
-    padding: 12,
-    paddingBottom: 6
-  },
-  menuItem: {
-    borderColor: "#F0EBF2",
-    borderBottomWidth: 1,
-    padding: 12
-  },
-  menuItemText: {
-    color: color.ink,
-    fontSize: 11,
-    fontWeight: "600"
-  },
-  menuCancel: {
-    backgroundColor: "#F8F5FA",
-    padding: 12,
-    alignItems: "center"
-  },
-  menuCancelText: {
-    color: color.muted,
-    fontSize: 11,
-    fontWeight: "700"
-  },
+  // FEED-ACTION-ICONS-001 补（2026-09-26）：转发失败行内提示。和 ProfileTabs 同一个形状。
+  postActionRetry: { paddingHorizontal: 8, paddingVertical: 6 },
+  postActionRetryText: { color: "#D33D5B", fontSize: 12, fontWeight: "700" },
 
   // 全屏媒体查看器：深色底 color.ink。
-  viewerRoot: { backgroundColor: "color.ink", flex: 1 },
+  viewerRoot: { backgroundColor: color.ink, flex: 1 },
   viewerTop: {
     alignItems: "center",
     flexDirection: "row",
@@ -2511,9 +2684,13 @@ type PostMenuModalProps = {
   onReport: (reason: PostReportReason) => Promise<void> | void;
   onNotInterested: () => Promise<void> | void;
   onMuteAuthor: () => Promise<void> | void;
+  // FEED-MENU-DEDUP-001: 原来是操作行那套独立菜单（contextMenu）独有的两条，
+  // 合并菜单后搬进来——跟不感兴趣/举报/屏蔽作者不同，这两条不摘帖子，只记信号。
+  onReduceTopic: () => Promise<void> | void;
+  onReduceAuthor: () => Promise<void> | void;
 };
 
-function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, onMuteAuthor }: PostMenuModalProps): React.JSX.Element {
+function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, onMuteAuthor, onReduceTopic, onReduceAuthor }: PostMenuModalProps): React.JSX.Element {
   const [showReportReasons, setShowReportReasons] = useState(false);
   if (!open) return <View />;
   return (
@@ -2526,24 +2703,38 @@ function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, 
               <Text selectable style={postMenuStyles.subtitle}>选一项作用于这篇帖子</Text>
               {error ? <Text selectable style={postMenuStyles.error}>{error}</Text> : null}
               <Pressable onPress={() => { void onNotInterested(); }} style={postMenuStyles.row}>
-                <Text selectable style={postMenuStyles.rowIcon}>👎</Text>
+                <ProxyIcon color={color.ink} name="thumbDown" size={26} style={postMenuStyles.rowIconSlot} />
                 <View style={postMenuStyles.rowCopy}>
                   <Text selectable style={postMenuStyles.rowTitle}>不感兴趣</Text>
                   <Text selectable style={postMenuStyles.rowHint}>减少类似内容推送</Text>
                 </View>
               </Pressable>
-              <Pressable onPress={() => setShowReportReasons(true)} style={postMenuStyles.row}>
-                <Text selectable style={postMenuStyles.rowIcon}>⚠️</Text>
+              <Pressable onPress={() => { void onReduceTopic(); }} style={postMenuStyles.row}>
+                <ProxyIcon color={color.ink} name="listMinus" size={26} style={postMenuStyles.rowIconSlot} />
                 <View style={postMenuStyles.rowCopy}>
-                  <Text selectable style={postMenuStyles.rowTitle}>举报</Text>
-                  <Text selectable style={postMenuStyles.rowHint}>按平台规则处理</Text>
+                  <Text selectable style={postMenuStyles.rowTitle}>减少这类内容</Text>
+                  <Text selectable style={postMenuStyles.rowHint}>不摘这条，以后少推类似的</Text>
+                </View>
+              </Pressable>
+              <Pressable onPress={() => { void onReduceAuthor(); }} style={postMenuStyles.row}>
+                <ProxyIcon color={color.ink} name="personMinus" size={26} style={postMenuStyles.rowIconSlot} />
+                <View style={postMenuStyles.rowCopy}>
+                  <Text selectable style={postMenuStyles.rowTitle}>少看这个人</Text>
+                  <Text selectable style={postMenuStyles.rowHint}>不摘这条，以后少推这个作者</Text>
                 </View>
               </Pressable>
               <Pressable onPress={() => { void onMuteAuthor(); }} style={postMenuStyles.row}>
-                <Text selectable style={postMenuStyles.rowIcon}>🚫</Text>
+                <ProxyIcon color={color.ink} name="banCircle" size={26} style={postMenuStyles.rowIconSlot} />
                 <View style={postMenuStyles.rowCopy}>
                   <Text selectable style={postMenuStyles.rowTitle}>屏蔽作者</Text>
                   <Text selectable style={postMenuStyles.rowHint}>不再看 Ta 的任何内容</Text>
+                </View>
+              </Pressable>
+              <Pressable onPress={() => setShowReportReasons(true)} style={postMenuStyles.row}>
+                <ProxyIcon color={color.ink} name="alertTriangle" size={26} style={postMenuStyles.rowIconSlot} />
+                <View style={postMenuStyles.rowCopy}>
+                  <Text selectable style={postMenuStyles.rowTitle}>举报</Text>
+                  <Text selectable style={postMenuStyles.rowHint}>按平台规则处理</Text>
                 </View>
               </Pressable>
               <Pressable onPress={onClose} style={postMenuStyles.cancel}>
@@ -2587,9 +2778,96 @@ const postMenuStyles = StyleSheet.create({
   error: { color: "#dc2626", fontSize: 12, lineHeight: 18, marginBottom: 10, padding: 8, backgroundColor: "rgba(220, 38, 38, 0.08)", borderRadius: 6 },
   row: { flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(0,0,0,0.08)" },
   rowIcon: { fontSize: 18, marginRight: 12 },
+  // FEED-MENU-ICONS-001：菜单行图标的槽。只补右间距 —— ProxyIcon 自己的 frame
+  // 已经是 `alignItems/justifyContent: center` 的 size×size 盒，所以图标在槽里天然居中，
+  // 不用再包一层 View。原型 .menu-icon 的 32×32 盒是给 26pt 的 svg 留白的，但这一行
+  // 的高度由右边两行文字（14+11）撑着，图标盒改 26 不会动版式。
+  // rowIcon 保留给**还没换**的那一个 emoji（分享面板「更多分享方式」那一行）：它是
+  // Text 的字号样式，和这里的图标槽不是一个东西，别合并。
+  // 这里刻意不写出那个 emoji 的字面量 —— 注释里写着它，将来「feed 里不该再有 emoji」
+  // 这类反向钉会被自己的说明喂红（本仓库第四次踩这个坑）。
+  rowIconSlot: { marginRight: 12 },
   rowCopy: { flex: 1 },
   rowTitle: { color: color.ink, fontSize: 14, fontWeight: "500", marginBottom: 2 },
   rowHint: { color: color.muted, fontSize: 11, lineHeight: 16 },
   cancel: { marginTop: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: "rgba(0,0,0,0.12)", alignItems: "center" },
   cancelText: { color: color.ink, fontSize: 13, fontWeight: "500" }
+});
+
+// FEED-SHARE-TO-USER-001: 分享面板——候选人是收件箱里真聊过天的人（跟
+// messages.tsx 的"建群"同一诚实数据源），选中直接发一条私信
+// （originType: "POST"，服务端 conversation.Service 已经认这个 origin，
+// 不用新加后端能力）。系统原生分享作为兜底放在列表最后一行，不砍。
+type SharePostSheetProps = {
+  target: FeedPost | null;
+  contacts: ConversationInboxItem[] | undefined;
+  contactsError: boolean;
+  sendingTo: string | null;
+  onPickContact: (peerUserId: string) => void;
+  onUseSystemShare: () => void;
+  onClose: () => void;
+};
+
+function SharePostSheet({ target, contacts, contactsError, sendingTo, onPickContact, onUseSystemShare, onClose }: SharePostSheetProps): React.JSX.Element {
+  if (!target) return <View />;
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={postMenuStyles.backdrop}>
+        <Pressable onPress={(e) => e.stopPropagation()} style={postMenuStyles.sheet}>
+          <Text selectable style={postMenuStyles.title}>分享给</Text>
+          <Text selectable style={postMenuStyles.subtitle}>选一位聊过天的联系人，直接发一条私信</Text>
+          {contacts === undefined ? (
+            <Text selectable style={sharePostStyles.loading}>加载联系人…</Text>
+          ) : contactsError ? (
+            <Text selectable style={postMenuStyles.error}>联系人读取失败，可以用下面的"更多分享方式"。</Text>
+          ) : contacts.length === 0 ? (
+            <Text selectable style={sharePostStyles.empty}>还没有聊过天的联系人。找个人先聊几句，就能在这里直接分享了。</Text>
+          ) : (
+            <ScrollView style={sharePostStyles.list}>
+              {contacts.map((item) => {
+                const peerUserId = item.counterpartyId as string;
+                const displayName = item.counterpartySnapshot?.displayName?.trim() || "用户";
+                const avatarSource = resolveAvatarSource(item.counterpartySnapshot?.avatarRef?.trim() ?? "", localApiBaseUrl);
+                const busy = sendingTo === peerUserId;
+                return (
+                  <Pressable disabled={sendingTo !== null} key={peerUserId} onPress={() => onPickContact(peerUserId)} style={postMenuStyles.row}>
+                    <View style={sharePostStyles.avatar}>
+                      {avatarSource ? (
+                        <CircularAvatarImage accessibilityLabel={`${displayName}头像`} size={36} uri={avatarSource.uri} />
+                      ) : (
+                        <Text selectable style={sharePostStyles.avatarInitial}>{displayName.charAt(0).toUpperCase()}</Text>
+                      )}
+                    </View>
+                    <View style={postMenuStyles.rowCopy}>
+                      <Text selectable style={postMenuStyles.rowTitle}>{displayName}</Text>
+                    </View>
+                    {busy ? <Text selectable style={sharePostStyles.sending}>发送中…</Text> : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          )}
+          <Pressable onPress={onUseSystemShare} style={postMenuStyles.row}>
+            <Text selectable style={postMenuStyles.rowIcon}>⤴️</Text>
+            <View style={postMenuStyles.rowCopy}>
+              <Text selectable style={postMenuStyles.rowTitle}>更多分享方式</Text>
+              <Text selectable style={postMenuStyles.rowHint}>发到微信 / 复制链接等系统分享面板</Text>
+            </View>
+          </Pressable>
+          <Pressable onPress={onClose} style={postMenuStyles.cancel}>
+            <Text selectable style={postMenuStyles.cancelText}>取消</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const sharePostStyles = StyleSheet.create({
+  loading: { color: color.muted, fontSize: 12, paddingVertical: 16, textAlign: "center" },
+  empty: { color: color.muted, fontSize: 12, lineHeight: 18, paddingVertical: 16, textAlign: "center" },
+  list: { maxHeight: 320 },
+  avatar: { alignItems: "center", backgroundColor: color.surface, borderRadius: 18, height: 36, justifyContent: "center", marginRight: 12, width: 36 },
+  avatarInitial: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  sending: { color: color.muted, fontSize: 11 }
 });

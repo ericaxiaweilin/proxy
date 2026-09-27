@@ -19,6 +19,7 @@ export type ProxyIconName =
   | "arrowUpRight"
   | "arrowUp"
   | "chevronLeft"
+  | "backArrow"
   | "close"
   | "plus"
   | "clock"
@@ -44,6 +45,9 @@ export type ProxyIconName =
   | "qrGrid"
   | "postsGrid"
   | "replyBubble"
+  | "replyLike"
+  | "replyRepost"
+  | "replyShare"
   | "ellipsis"
   | "search"
   | "chart"
@@ -56,6 +60,16 @@ export type ProxyIconName =
   | "scan"
   | "mapFold"
   | "footprint"
+  // FEED-MENU-ICONS-001：帖子「更多操作」菜单的 5 个行图标。此前是 emoji
+  // （👎/🔉/🙈/🚫/⚠️），emoji 的字形/字重/基线全跟着系统字体走 ——
+  // Android 与 iOS 画出来不是一套，字号一改还会变形（和 REPLY-ACTION-ICONS-001
+  // 放弃 ♡/💬 字符的理由一样）。按原型 deepseek_html_20260926_fe2c4b.html
+  // 「方案 B · 在菜单里的效果」那一节的 5 条描边路径原样移植。
+  | "thumbDown"
+  | "listMinus"
+  | "personMinus"
+  | "banCircle"
+  | "alertTriangle"
   // SEC-CATEGORY-ICONS-001：原型 deepseek_html_20260926_9d241a.html 的 02
   // 「推荐 / 关注 / 动态 / 探索 / 分类」把「推荐」「关注」也定义成了有形状的图标
   // （推荐 = 五角星，关注 = 人 + 信号点）。同一套 32 栅格 / 描边 1.9。
@@ -142,10 +156,25 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
   const canvas48 = (children: React.ReactNode): React.JSX.Element => (
     <Svg height={size} viewBox="0 0 48 48" width={size}>{children}</Svg>
   );
-
+  // FEED-MENU-ICONS-001：原型 deepseek_html_20260926_fe2c4b.html 的菜单图标画在
+  // **32 栅格**上、描边 1.9（不是 common 的 2.2，也不是 24 栅格）—— 跟 canvas48
+  // 同一个理由：路径数据原样移植，不改坐标去凑现有网格，免得手抄缩放算错。
+  // 描边按原型 1.9；渲染 26pt 时实际 = 1.9 × 26/32 ≈ 1.54px，比 tab 字形细一档，
+  // 跟原型 .menu-icon svg{width:26px;height:26px;stroke-width:1.9} 一致。
   const common32 = { fill: "none", stroke: color, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, strokeWidth: 1.9 };
   const canvas32 = (children: React.ReactNode): React.JSX.Element => (
     <Svg height={size} viewBox="0 0 32 32" width={size}>{children}</Svg>
+  );
+  // BACK-GLYPH-001：返回箭头专用的**紧 box**。和 chevronLeft 是同一条路径，
+  // 区别只在取景 —— chevronLeft 的 24 格 box 里箭头只占 x 9→15，两侧各 37.5% 是空白。
+  // 返回控件是贴着表头左边缘排的，用带空白的 box 会整体往右缩 ~7pt（38 个表头的左对齐
+  // 会一起漂），所以这里把 viewBox 收到箭头自己身上：
+  //   描边后实际占 x 7.9→16.1、y 4.9→19.1（strokeWidth 2.2 的一半 = 1.1 外扩），
+  //   再各留 0.5 余量免得圆头被裁 ⇒ 从 (7.4, 4.4) 起，宽 9.2、高 15.2。
+  // 这个 box 以 x=12 对称（正好是箭头的中心），所以裸字形贴左边缘、塞进圆里也居中。
+  // 注意 size 这里是**高**：宽按 9.2/15.2 算。
+  const canvasBack = (children: React.ReactNode): React.JSX.Element => (
+    <Svg height={size} viewBox="7.4 4.4 9.2 15.2" width={(size * 9.2) / 15.2}>{children}</Svg>
   );
 
   switch (name) {
@@ -185,6 +214,25 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
     // 消息类入口用着，改它的几何会连带改到别处。
     case "replyBubble":
       return canvas(<Path {...common} d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>);
+    // REPLY-ACTION-ICONS-001（2026-09-25，用户「这几个 logo 没有对齐设计的」）：
+    // 原型回复行底部的 4 个操作图标（♡/💬/↻/⤴）走的是 Feather 那套标准路径，跟
+    // 现有 heart（CSS 拼的 view）/ shareUp（自造上传箭头）几何不一样——所以单独
+    // 加 replyLike / replyRepost / replyShare 三个名字，**不改**现有的 heart /
+    // shareUp：前者用在 feed 卡片和场景卡的「♡ 已收藏」状态（实心是填充画法），
+    // 后者用在帖子分享按钮（自带底框的「上传到云」语义），改了会牵连到别处。
+    // 描边用 1.8（原型 .feed-action svg{stroke-width:1.8}），不走 common 的 2.2 —
+    // — 这一组动作图标本来就比 tab 字形细一档。
+    case "replyLike":
+      // ⚠️ filled 不能省：feed 卡片和个人主页空态都会传 filled，而 replyLike 是这一组里
+      // **唯一**有「已选中」态的（♡→♥）。写死 {...common} 的话 filled 被静默吞掉，
+      // 点赞后就只剩变色、不再变实心 —— 状态反馈少一半。跟 bookmark 同形：
+      // filled ? filledCommon : common。描边恒定 1.8（跟同组 replyBubble 等一致），
+      // 所以 strokeWidth 写在展开**后面**，不让 filledCommon 的 1.4 把它拉细。
+      return canvas(<Path {...(filled ? filledCommon : common)} strokeWidth={1.8} d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>);
+    case "replyRepost":
+      return canvas(<><Path {...common} strokeWidth={1.8} d="M17 1l4 4-4 4"/><Path {...common} strokeWidth={1.8} d="M3 11V9a4 4 0 0 1 4-4h14"/><Path {...common} strokeWidth={1.8} d="M7 23l-4-4 4-4"/><Path {...common} strokeWidth={1.8} d="M21 13v2a4 4 0 0 1-4 4H3"/></>);
+    case "replyShare":
+      return canvas(<><Path {...common} strokeWidth={1.8} d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><Path {...common} strokeWidth={1.8} d="M16 6l-4-4-4 4"/><Path {...common} strokeWidth={1.8} d="M12 2v14"/></>);
     case "chat":
       return canvas(<Path {...common} d="M5 6h14v9H9l-4 3z"/>);
     case "meRing":
@@ -271,6 +319,35 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
       return canvas(<><Path {...common} d="M12 3v12"/><Path {...common} d="M8.2 6.8 12 3l3.8 3.8"/><Path {...common} d="M5 12v6.8A2.2 2.2 0 0 0 7.2 21h9.6a2.2 2.2 0 0 0 2.2-2.2V12"/></>);
     case "aiPersona":
       return canvas(<><Circle {...common} cx="10" cy="8.5" r="3.2"/><Path {...common} d="M4.6 19.4c1.1-3 3.4-4.8 6.2-4.8 1.5 0 2.9.5 4 1.3"/><Path {...common} d="M18 4.5l.7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7.7-2.1z"/></>);
+    // SPORT-BADMINTON-HEADER-002（2026-09-25，用户：「返回 logo 没做好」）：
+    // chevronLeft 以前走的是下面那条「两根旋转方条」的分支（和 close 共用）。
+    // 两根条长 0.62·size，却只错开 23% 高度 —— 45° 下要 ~44% 才能首尾相接，
+    // 于是两条在顶点交叉、左上角戳出一根刺（真机截图放大就是个叉）。
+    // ⚠️ 这个字形在此之前**全仓库只有羽毛球那个功能在用**（别处都用 <Text>‹</Text>），
+    //    所以坏了很久没人看见 —— 新增字形一定要在真机上看一眼，别只跑测试。
+    // 改成原型那条描边路径：原型 .back-btn svg 是 viewBox 0 0 24 24、
+    // width/height 14px、stroke-width 2.5、round cap/join，path 就是 M15 18l-6-6 6-6。
+    // 线重也对得上：common 的 2.2 在 size=16 时渲染成 2.2*(16/24)=1.47px，
+    // 原型的 2.5*(14/24)=1.46px。
+    case "chevronLeft":
+      return canvas(<Path {...common} d="M15 18l-6-6 6-6"/>);
+    // BACK-GLYPH-001：全 App 的返回字形。同一条路径，但取景贴着箭头（见 canvasBack）。
+    // 返回控件一律走这个，不要再写 `<Text>‹</Text>` —— `‹` 是引号不是箭头。
+    case "backArrow":
+      return canvasBack(<Path {...common} d="M15 18l-6-6 6-6"/>);
+    // FEED-MENU-ICONS-001：帖子「更多操作」菜单 5 个行图标。全部按原型
+    // deepseek_html_20260926_fe2c4b.html「方案 B · 在菜单里的效果」原样移植
+    // （32 栅格 / 描边 1.9 / 圆头圆角），只把 currentColor 换成 color。
+    case "thumbDown": // 不感兴趣
+      return canvas32(<><Path {...common32} d="M11 14L11 26L7 26L7 14Z"/><Path {...common32} d="M11 14L16 6.5C16.5 5.5 17.5 5.5 18 6C18.5 6.5 18.5 7.5 18 8.5L17 13L24 13C25.5 13 26.5 14.5 26 16L24 24C23.5 25.5 22.5 26 21 26L11 26"/></>);
+    case "listMinus": // 减少这类内容
+      return canvas32(<Path {...common32} d="M5 10L17 10M5 16L17 16M5 22L17 22M21 16L29 16"/>);
+    case "personMinus": // 少看这个人
+      return canvas32(<><Circle {...common32} cx="12" cy="10.5" r="4.5"/><Path {...common32} d="M4.5 25.5C4.5 20 8 17.5 12 17.5C15 17.5 17 18.5 18.5 20.5"/><Path {...common32} d="M22 25L29 25"/></>);
+    case "banCircle": // 屏蔽作者
+      return canvas32(<><Circle {...common32} cx="16" cy="16" r="11"/><Path {...common32} d="M9.5 9.5L22.5 22.5"/></>);
+    case "alertTriangle": // 举报
+      return canvas32(<><Path {...common32} d="M16 5L28 26L4 26Z"/><Path {...common32} d="M16 13L16 19"/><Circle cx="16" cy="22.5" fill={color} r="1.2" stroke="none"/></>);
     // SEC-CATEGORY-ICONS-001（2026-09-26，用户：「模拟器的 推荐 关注还没有 logo 原型我给你了」）：
     // 原型 02 那节把「推荐」「关注」也定义成了有形状的分类图标，但同一份原型的
     // 03「分段 / Tabs / 胶囊」里这两个 tab 是**纯文字** —— 所以这两个字形一直没有出处可抄，
@@ -529,12 +606,14 @@ export function ProxyIcon({
     );
   }
 
-  if (name === "chevronLeft" || name === "close") {
-    const close = name === "close";
+  // chevronLeft 已搬到 MasterModuleIcon 走真描边路径（SPORT-BADMINTON-HEADER-002）：
+  // 两根 ±45° 方条拼 chevron 时，顶点处两条会交叉戳出一根刺。
+  // close 留在这里：它是个 ×，两根条本来就要**交叉**，没有顶点要接，不存在那个问题。
+  if (name === "close") {
     return (
       <View pointerEvents="none" style={frame}>
-        <View style={[styles.actionLineA, { backgroundColor: color, height: stroke, width: size * 0.62 }, close ? styles.closeLineA : styles.chevronLineA]} />
-        <View style={[styles.actionLineB, { backgroundColor: color, height: stroke, width: size * 0.62 }, close ? styles.closeLineB : styles.chevronLineB]} />
+        <View style={[styles.actionLineA, { backgroundColor: color, height: stroke, width: size * 0.62 }, styles.closeLineA]} />
+        <View style={[styles.actionLineB, { backgroundColor: color, height: stroke, width: size * 0.62 }, styles.closeLineB]} />
       </View>
     );
   }
@@ -815,8 +894,11 @@ const styles = StyleSheet.create({
   arrowUpRight: { left: "50%", position: "absolute", top: "18%", transform: [{ rotate: "45deg" }] },
   actionLineA: { position: "absolute" },
   actionLineB: { position: "absolute" },
-  chevronLineA: { right: "33%", top: "35%", transform: [{ rotate: "-45deg" }] },
-  chevronLineB: { right: "33%", top: "58%", transform: [{ rotate: "45deg" }] },
+  // 那份「两根旋转方条拼 chevron」的样式已删：顶点处两条会交叉戳出一根刺，
+  // chevronLeft 改成真描边路径了（SPORT-BADMINTON-HEADER-002）。
+  // ⚠️ 这里刻意不写出被删掉的那两个样式名：门禁 [SPORT-BADMINTON-HEADER-002] 有一条
+  //    grep 反向钉扫**这个文件的全文、不剥注释**，注释里写着它，那颗钉会被自己的说明喂红
+  //    （REPLY-EMPTY-VIEWER-001 踩过同一个坑，这是第四次）。
   closeLineA: { transform: [{ rotate: "45deg" }] },
   closeLineB: { transform: [{ rotate: "-45deg" }] },
   plusH: { position: "absolute" },

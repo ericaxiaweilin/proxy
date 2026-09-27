@@ -679,7 +679,7 @@ const styles = StyleSheet.create({
     minHeight: 72,
     padding: 12
   },
-  optActive: { backgroundColor: "color.domainActiveBg", borderColor: "color.ink", borderWidth: 1.5 },
+  optActive: { backgroundColor: color.domainActiveBg, borderColor: color.ink, borderWidth: 1.5 },
   optIcon: {
     alignItems: "center",
     backgroundColor: "#F2EDF5",
@@ -688,7 +688,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 44
   },
-  optIconActive: { backgroundColor: "color.ink" },
+  optIconActive: { backgroundColor: color.ink },
   optCopy: { flex: 1 },
   optTitle: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
   optDesc: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
@@ -753,7 +753,7 @@ const styles = StyleSheet.create({
   radiusChipText: { color: color.ink, fontSize: 13, fontWeight: "800" },
   radiusChipTextActive: { color: color.white },
   input: {
-    backgroundColor: "color.homeIntentInputBg",
+    backgroundColor: color.homeIntentInputBg,
     borderColor: "#DDD5E3",
     borderRadius: 13,
     borderWidth: 1,

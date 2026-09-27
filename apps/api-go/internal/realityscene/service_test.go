@@ -1,6 +1,7 @@
 package realityscene
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/relationship"
 )
 
 func envelope(commandType string, payload map[string]any) command.Envelope {
@@ -1091,5 +1093,246 @@ func TestCheckInRejectsReportedDistanceBeyondRadius(t *testing.T) {
 	cancel := envelope("SetRealitySceneCheckIn", map[string]any{"sceneId": "hoankiem", "enabled": false, "distanceMeters": float64(11_761_000)})
 	if r := s.HandleContext(ctx, cancel); r.Outcome != "ACCEPTED" {
 		t.Fatalf("取消打卡不应受距离限制: %q", r.Outcome)
+	}
+}
+
+// SCENE-REVIEW-001: Scene/Detail 的 Rating/RatingCount 只在真的有评价数据
+// （count > 0）时出现——未接线、接线但零聚合都必须两个字段都不在 JSON 里，
+// 绝不用 0 或假均分垫底（跟 marketplace 的 CLIENT-RATING-001 同一条钉法）。
+type fakeSceneRatingLookup struct {
+	byScene map[string]struct {
+		avg   float64
+		count int
+	}
+}
+
+func (f *fakeSceneRatingLookup) GetSceneRatingAggregate(_ context.Context, sceneID string) (float64, int, error) {
+	rec, ok := f.byScene[sceneID]
+	if !ok {
+		return 0, 0, nil
+	}
+	return rec.avg, rec.count, nil
+}
+
+func TestSceneRatingOnlyAppearsWithRealData(t *testing.T) {
+	s := New()
+	ctx := t.Context()
+
+	assertNoRatingKeys := func(label string) {
+		scenes, err := s.ListScenes(ctx)
+		if err != nil {
+			t.Fatalf("%s: ListScenes: %v", label, err)
+		}
+		body, err := json.Marshal(map[string]any{"scenes": scenes})
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", label, err)
+		}
+		var decoded struct {
+			Scenes []map[string]any `json:"scenes"`
+		}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("%s: unmarshal: %v", label, err)
+		}
+		for _, sc := range decoded.Scenes {
+			if sc["id"] != "threebeans" {
+				continue
+			}
+			if _, ok := sc["rating"]; ok {
+				t.Fatalf("%s: rating present without real data: %v", label, sc)
+			}
+			if _, ok := sc["ratingCount"]; ok {
+				t.Fatalf("%s: ratingCount present without real data: %v", label, sc)
+			}
+		}
+		detail, found, err := s.GetDetail(ctx, "threebeans", "", time.Now())
+		if err != nil || !found {
+			t.Fatalf("%s: GetDetail: err=%v found=%v", label, err, found)
+		}
+		if detail.RatingCount != 0 {
+			t.Fatalf("%s: Detail.RatingCount = %d, want 0", label, detail.RatingCount)
+		}
+	}
+
+	// Before SetRatingLookup at all: no fields, ever.
+	assertNoRatingKeys("unwired")
+
+	// Wired, but this scene has zero reviews: still absent, not a fake 0.
+	lookup := &fakeSceneRatingLookup{byScene: map[string]struct {
+		avg   float64
+		count int
+	}{"other_scene": {avg: 4.5, count: 3}}}
+	s.SetRatingLookup(lookup)
+	assertNoRatingKeys("wired-but-zero-data")
+
+	// Now this scene has real reviews: the fields appear with the real value.
+	lookup.byScene["threebeans"] = struct {
+		avg   float64
+		count int
+	}{avg: 4.8, count: 12}
+	scenes, err := s.ListScenes(ctx)
+	if err != nil {
+		t.Fatalf("ListScenes: %v", err)
+	}
+	found := false
+	for _, sc := range scenes {
+		if sc.ID != "threebeans" {
+			continue
+		}
+		found = true
+		if sc.RatingCount != 12 || sc.Rating != 4.8 {
+			t.Fatalf("expected real rating 4.8/12 on ListScenes, got %+v", sc)
+		}
+	}
+	if !found {
+		t.Fatal("threebeans missing from ListScenes")
+	}
+	detail, foundDetail, err := s.GetDetail(ctx, "threebeans", "", time.Now())
+	if err != nil || !foundDetail {
+		t.Fatalf("GetDetail: err=%v found=%v", err, foundDetail)
+	}
+	if detail.RatingCount != 12 || detail.Rating != 4.8 {
+		t.Fatalf("expected real rating 4.8/12 on GetDetail, got %+v", detail)
+	}
+	body, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatalf("marshal detail: %v", err)
+	}
+	if !strings.Contains(string(body), `"rating":4.8`) || !strings.Contains(string(body), `"ratingCount":12`) {
+		t.Fatalf("real rating missing from serialized Detail JSON: %s", body)
+	}
+}
+
+// SCENE-COMPANION-001: "适合一起的人" 的认证态真实信号 —— 只有真的好友，
+// 且在这个场景有真实信号（去过/报名过活动）才出现，绝不是任意陌生人。
+type fakeFriendLister struct {
+	byUser map[string][]relationship.FriendView
+}
+
+func (f *fakeFriendLister) ListActiveFriends(_ context.Context, userID string) ([]relationship.FriendView, error) {
+	return f.byUser[userID], nil
+}
+
+type fakeActivityVisitorFilter struct {
+	byScene map[string]map[string]bool
+}
+
+func (f *fakeActivityVisitorFilter) FilterKnownParticipants(_ context.Context, sceneID string, candidateActorIDs []string) ([]string, error) {
+	known := f.byScene[sceneID]
+	out := []string{}
+	for _, id := range candidateActorIDs {
+		if known[id] {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
+func TestListSceneCompanionSuggestionsRequiresAuthentication(t *testing.T) {
+	s := New()
+	result := s.HandleContext(t.Context(), command.Envelope{
+		CommandType: "ListSceneCompanionSuggestions",
+		Actor:       command.Actor{Type: "PUBLIC", ID: ""},
+		Payload:     map[string]any{"sceneId": "threebeans"},
+	})
+	if result.Outcome != "REJECTED" {
+		t.Fatalf("expected an unauthenticated caller to be rejected, got %s: %+v", result.Outcome, result.Error)
+	}
+}
+
+func TestListSceneCompanionSuggestionsUnwiredReturnsEmpty(t *testing.T) {
+	s := New()
+	result := s.HandleContext(t.Context(), command.Envelope{
+		CommandType: "ListSceneCompanionSuggestions",
+		Actor:       command.Actor{Type: "USER", ID: "viewer_1"},
+		Payload:     map[string]any{"sceneId": "threebeans"},
+	})
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED with an empty list when unwired, got %s: %+v", result.Outcome, result.Error)
+	}
+	var body struct {
+		Suggestions []CompanionSuggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal([]byte(result.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Suggestions) != 0 {
+		t.Fatalf("expected no suggestions when unwired, got %+v", body.Suggestions)
+	}
+}
+
+func TestListSceneCompanionSuggestionsOnlyRealFriendsWithARealSignal(t *testing.T) {
+	s := New()
+	friends := &fakeFriendLister{byUser: map[string][]relationship.FriendView{
+		"viewer_1": {
+			{UserID: "friend_visited", DisplayName: "Linh", AvatarURL: "https://x/linh.jpg"},
+			{UserID: "friend_joined_activity", DisplayName: "Mai", AvatarURL: "https://x/mai.jpg"},
+			{UserID: "friend_no_signal", DisplayName: "Trang", AvatarURL: "https://x/trang.jpg"},
+		},
+	}}
+	s.SetFriendLister(friends)
+	visitors := &fakeActivityVisitorFilter{byScene: map[string]map[string]bool{
+		"threebeans": {"friend_joined_activity": true},
+	}}
+	s.SetActivityVisitorFilter(visitors)
+	ctx := t.Context()
+
+	// friend_visited has real checkin history at threebeans; friend_no_signal
+	// and friend_joined_activity (via the activity path, not checkin) do not.
+	checkinEnv := command.Envelope{
+		CommandType: "SetRealitySceneCheckIn",
+		Actor:       command.Actor{Type: "USER", ID: "friend_visited"},
+		Payload:     map[string]any{"sceneId": "threebeans", "enabled": true},
+	}
+	if r := s.HandleContext(ctx, checkinEnv); r.Outcome != "ACCEPTED" {
+		t.Fatalf("seed checkin: %+v", r)
+	}
+
+	// A stranger (not the viewer's friend) also checked in and joined an
+	// activity here — must never surface, no matter how strong their
+	// signal is, because they are not in the viewer's friend graph.
+	strangerCheckin := command.Envelope{
+		CommandType: "SetRealitySceneCheckIn",
+		Actor:       command.Actor{Type: "USER", ID: "stranger_1"},
+		Payload:     map[string]any{"sceneId": "threebeans", "enabled": true},
+	}
+	if r := s.HandleContext(ctx, strangerCheckin); r.Outcome != "ACCEPTED" {
+		t.Fatalf("seed stranger checkin: %+v", r)
+	}
+	visitors.byScene["threebeans"]["stranger_1"] = true
+
+	result := s.HandleContext(ctx, command.Envelope{
+		CommandType: "ListSceneCompanionSuggestions",
+		Actor:       command.Actor{Type: "USER", ID: "viewer_1"},
+		Payload:     map[string]any{"sceneId": "threebeans"},
+	})
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %s: %+v", result.Outcome, result.Error)
+	}
+	var body struct {
+		Suggestions []CompanionSuggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal([]byte(result.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]CompanionSuggestion{}
+	for _, sug := range body.Suggestions {
+		byID[sug.ID] = sug
+	}
+	if len(body.Suggestions) != 2 {
+		t.Fatalf("expected exactly the 2 friends with a real signal, got %+v", body.Suggestions)
+	}
+	if _, ok := byID["stranger_1"]; ok {
+		t.Fatal("a non-friend stranger leaked into the companion suggestions")
+	}
+	if _, ok := byID["friend_no_signal"]; ok {
+		t.Fatal("a friend with no real signal at this scene leaked into the companion suggestions")
+	}
+	visited, ok := byID["friend_visited"]
+	if !ok || visited.Signal != CompanionSignalCheckedIn || visited.Name != "Linh" {
+		t.Fatalf("friend_visited missing or wrong signal/name: %+v", visited)
+	}
+	joined, ok := byID["friend_joined_activity"]
+	if !ok || joined.Signal != CompanionSignalJoinedActivity || joined.Name != "Mai" {
+		t.Fatalf("friend_joined_activity missing or wrong signal/name: %+v", joined)
 	}
 }

@@ -691,7 +691,12 @@ export const MarketOpportunitySchema = z.object({
   // ORDER-SCENARIO-001: 消费场景 —— ordinary 普通消费 / assistance 城市协助。
   // 发布向导按 moment 家族填（pro → assistance）；订单流程按它分档（城市协助
   // 永远走全流程）。缺省 = 历史数据，按金额档兜底。
-  scenario: z.enum(["ordinary", "assistance"]).optional()
+  scenario: z.enum(["ordinary", "assistance"]).optional(),
+  // CLIENT-RATING-001: 发布者（Owner）的真实评分聚合 —— 由接单方完成订单后
+  // 打分产生。只有 ratingCount > 0 时 server 才下发这两个字段；没有真实评价
+  // 历史时缺省，客户端不能把缺省当成 0 星渲染。
+  rating: z.number().min(0).max(5).optional(),
+  ratingCount: z.number().int().nonnegative().optional()
 });
 export type MarketOpportunity = z.infer<typeof MarketOpportunitySchema>;
 

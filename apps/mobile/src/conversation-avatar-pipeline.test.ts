@@ -4,6 +4,9 @@ import { describe, expect, it } from "vitest";
 const messages = readFileSync(new URL("./surfaces/messages.tsx", import.meta.url), "utf8");
 const conversation = readFileSync(new URL("./surfaces/conversation.tsx", import.meta.url), "utf8");
 const shell = readFileSync(new URL("./shell/app-shell.tsx", import.meta.url), "utf8");
+// FEED-SHARE-TO-USER-001: resolveAvatarSource 的实现搬到了共享模块（动态页
+// 的"分享给"头像列表要同一套归一逻辑），messages.tsx 现在只是调用方。
+const inboxModel = readFileSync(new URL("./conversation-inbox-model.ts", import.meta.url), "utf8");
 
 describe("conversation avatar pipeline", () => {
   it("hydrates human avatars and passes them through every conversation layer", () => {
@@ -32,7 +35,7 @@ describe("conversation avatar pipeline", () => {
     // enrich 回来的 avatarPath 是裸 assets/<id>，直接当 URL 必 404 ——
     // resolveAvatarSource 统一转 thumb 真地址；认不出的不拼，直接首字母。
     expect(messages).toContain("resolveAvatarSource(avatarRef");
-    expect(messages).toContain("/v1/media/thumb/${encodeURIComponent(assetId)}");
+    expect(inboxModel).toContain("/v1/media/thumb/${encodeURIComponent(assetId)}");
     expect(messages).not.toContain("user_\" + item.counterpartyId");
   });
 

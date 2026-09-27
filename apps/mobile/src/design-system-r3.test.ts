@@ -22,7 +22,10 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "personalAvaLetter",    // 头像 1-2 字符装饰
   "personalFaceText",     // 关注者头像堆叠装饰
   "personalLinkText",     // 链接装饰行 (handle 名也是装饰)
-  "personalTopbarIcon",   // 顶栏返回箭头 (装饰)
+  // BACK-GLYPH-001（2026-09-26）：原条目 "personalTopbarIcon"（顶栏返回箭头 21pt 装饰）
+  // 已删 —— 那个样式本身是给 `‹` 那份 Text 用的，字形换成 ProxyBackGlyph 之后它就没了。
+  // 条目删掉前实测过：违规集合与删前**完全一致**（22 条，全在 my-benefits），
+  // 所以它不是「靠子串蹭豁免」的条目（它同时是 personalTopbarIconBtn 的子串）。
   "personalMetaDot",      // 装饰 dot (无 fontSize, 占位)
   "personalFace",         // 头像背景 (无 font)
   "personalAvaAdd",       // 头像 + 浮层 (无 font)
@@ -85,7 +88,28 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "signalSub",
   "inlinePlanEyebrow",
   "aiBadge",
-  "caption"
+  "caption",
+  // SCENE-CATEGORY-BADGE-001 / SCENE-HOME-PROTOTYPE-001: scene-shop-directory
+  // card cover badge and match-card eyebrow — same "short pill/eyebrow over
+  // an image" decoration as sceneMapEyebrow/inlinePlanEyebrow, not body text.
+  "coverBadgeText",
+  "matchLabelText",
+  // GROWTH-REAL-DATA-001: my-benefits.tsx tier/growth dashboard — short
+  // badges, eyebrows and bold value pills, same categories as the R37
+  // priceValue/pillLabel and sceneMapEyebrow entries above (not paragraphs
+  // a user reads start-to-end).
+  "heroBadge",
+  "heroStatLabel",
+  "todayKicker",
+  "todayCount",
+  "benefitLock",
+  "benefitRowValue",
+  "taskGroupLabel",
+  "taskReward",
+  "taskProgress",
+  "taskDoneBadge",
+  "tierCardBadge",
+  "sectionTitleHint"
 ];
 
 describe("Proxy Design System R3 typography", () => {
@@ -217,11 +241,78 @@ describe("Proxy Design System R3 typography", () => {
     expect(source).toContain("const atHandle = props.handle.replace(/^@+/, \"\").trim();");
     // 上下文行（回复了谁 · 时间）和正文仍在，且排在作者块里面
     expect(source).toMatch(/styles\.replyHead\}>[\s\S]*?styles\.replyName[\s\S]*?styles\.replyHandle/);
-    expect(source).toMatch(/styles\.replyMeta[\s\S]*?replyTargetLabel\(/);
+    // 上下文行（回复了谁 · 时间）仍走 reply-target.ts 的共享分段器，且**名字段
+    // 必须单独上墨色**（REPLY-TARGET-NAME-INK-001：原型是「回复了 Linh 的帖子」，
+    // Linh 是黑的）。以前整句一个 <Text>（styles.replyTarget 只有 #94a3b8），
+    // 名字跟着一起变灰 —— 用户 2026-09-25 报的正是这个。
+    expect(source).toMatch(/styles\.replyMeta[\s\S]*?replyTargetParts\(/);
+    expect(source).toMatch(/<Text selectable style=\{styles\.replyTargetName\}>\s*\{targetParts\.name\}\s*<\/Text>/);
+    expect(source).toMatch(/replyTargetName:\s*\{[^}]*color:\s*"#0f172a"/);
     // 圆气泡字形真的存在（不是只改了映射表却没实现字形）
     const icon = readFileSync(join(sourceRoot, "components", "proxy-icon.tsx"), "utf8");
     expect(icon).toMatch(/case\s*"replyBubble":/);
     expect(icon).toContain('d="M21 11.5a8.38 8.38 0 0 1-.9 3.8');
+  });
+
+  // REPLY-ACTION-ICONS-001（2026-09-25，用户「这几个 logo 没有对齐设计的」）：
+  // 原型回复行底部是 4 个 Feather svg（♡/💬/↻/⤴）。守的是**形状就位**：4 个
+  // 字形、放在 replyActions 行里、最后一个 share 顶到行尾（marginLeft:auto）。
+  // 不守 handler / 计数 —— ReplyEntry 没数据，按 PROFILE-REPLIES-VISIBLE-001
+  // 不渲染假按钮、也不渲染假数字，等后端有接口再加 Pressable。
+  it("keeps the reply row action glyphs on the prototype Feather vocabulary", () => {
+    const ptPath = join(sourceRoot, "surfaces", "ProfileTabs.tsx");
+    const source = readFileSync(ptPath, "utf8");
+    const icon = readFileSync(join(sourceRoot, "components", "proxy-icon.tsx"), "utf8");
+    // ProfileTabs 端：replyActions 行容器 + 4 个图标组件 + share 顶到行尾
+    expect(source).toMatch(/replyActions:\s*\{[^}]*flexDirection:\s*"row"/);
+    expect(source).toMatch(/<View style=\{styles\.replyActions\}>/);
+    expect(source).toMatch(/name="replyLike"/);
+    expect(source).toMatch(/name="replyBubble"\s+color=\{props\.color\.muted\}/);
+    expect(source).toMatch(/name="replyRepost"/);
+    expect(source).toMatch(/<View style=\{styles\.replyActionsSpacer\}/);
+    expect(source).toMatch(/name="replyShare"/);
+    // 三个新字形在 proxy-icon 里真存在（含 prototype 路径）
+    expect(icon).toMatch(/case\s*"replyLike":/);
+    expect(icon).toMatch(/case\s*"replyRepost":/);
+    expect(icon).toMatch(/case\s*"replyShare":/);
+    expect(icon).toContain('M20.84 4.61a5.5 5.5 0 0 0-7.78 0');
+    expect(icon).toContain('M17 1l4 4-4 4');
+    expect(icon).toContain('M16 6l-4-4-4 4');
+  });
+
+  // BACK-BTN-INK-001（2026-09-25，用户「< 返回 黑色字体」）：他人主页顶栏的
+  // 返回按钮**应该是黑色不是粉色**：原型的顶栏返回就是 ink 色，brand pink
+  // 只用在主操作（关注 / 已关注）。
+  //
+  // BACK-GLYPH-001（2026-09-26，用户「把所有页面的返回 < 这个logo统一颜色 大小 形状」）：
+  // 这条钉原来还兼职守字形 —— 断言源码里写的是 `{"< 返回"}`（less-than），而不是
+  // `‹ 返回`（curly left angle）。但那**不是统一字形，只是换了一个字符**：`<` 和 `‹`
+  // 都是文本字符，形状/粗细/基线随 fontSize 漂，谁都能再换第三个（全 App 当时就是
+  // 十一种尺寸、九种颜色、三种字符）。现在字形只有一处出处（ProxyBackGlyph 的
+  // chevronLeft 描边路径），所以这条钉改守「用的是公共原语 + 源码里没有手写字符字形」。
+  // 颜色那条原意不变：返回是 ink，不是 magenta —— 现在 tone 默认就是 ink，
+  // magenta 连选项都不是（要显式写 tone="onDark" 才不是黑）。
+  it("keeps the other-profile back button in ink, not brand magenta", () => {
+    const opPath = join(sourceRoot, "surfaces", "other-profile.tsx");
+    const source = readFileSync(opPath, "utf8");
+    // 返回控件走公共原语，且**不显式指定 tone** ⇒ 落到默认 ink。
+    expect(source).toContain('<ProxyBackGlyph label="返回" />');
+    expect(source).not.toMatch(/<ProxyBackGlyph[^>]*tone=/);
+    // 字形出处唯一：源码里不许再有手写的 `< 返回` / `‹ 返回`。
+    expect(source).not.toContain('{"< 返回"}');
+    expect(source).not.toContain("‹");
+    // 也不许再留一份自己的返回文字样式（有 backText 就有第二个颜色出处）。
+    expect(source).not.toMatch(/backText:\s*\{/);
+  });
+
+  // REPLY-ACTION-ICONS-001（配套）：消息按钮 `💬 消息` 改成 replyBubble svg +
+  // 文字，与回复 tab 字形同源，emoji 退场。
+  it("keeps the send-message button using the replyBubble glyph, not the emoji", () => {
+    const ptPath = join(sourceRoot, "surfaces", "ProfileTabs.tsx");
+    const source = readFileSync(ptPath, "utf8");
+    // Pressable 里必须出现 replyBubble 图标组件 + 消息 文字（emoji 不许回来）
+    expect(source).toMatch(/<ProxyIcon name="replyBubble"[^>]*\/>\s*<Text[^>]*>\s*消息\s*<\/Text>/);
+    expect(source).not.toMatch(/>💬\s*消息</);
   });
 
   // R15.67: R2 actions 守门 (ProfileTabs) — 1px 边框 + 10 圆角 (R2 .actions button)

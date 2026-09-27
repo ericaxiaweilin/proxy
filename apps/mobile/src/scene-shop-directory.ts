@@ -11,13 +11,22 @@
 // ⚠️ 这一屏**没有**的东西，和有的东西一样重要。原型列表卡上是
 // 「4.8 ★ · 本月热门」，详情是「4.8 ★ / 212 条评分」+ 一排
 // 「湖边 / 带机位 / 可预约 / 安静」设施标签。本仓：
-//   · 评分 —— `reality.scenes` 没有任何评分列，全仓也没有评价域
-//     （realityscene 包里 grep 不到 Rating/Review）；SCENE-NO-FABRICATED-001
-//     删掉的「Scene Quality 93」就是这一类写死的数。用户已明确「评分肯定
-//     是用户评价」——语义定了，但评价域还没落地，所以**今天不显示评分**，
-//     也不显示「本月热门」「最近新开」这类派生结论。
-//   · 设施标签（带机位/可预约/安静/营业中）—— 用户已明确：单店详情是
-//     商家自己页面上**一个月采一次**的数据，目前先不管。
+//   · 评分 —— **有真实来源，现在显示**（SCENE-RATING-CHIP-001，2026-09-27）。
+//     SCENE-REVIEW-001 落地了「打过卡的人才能评」的场景评价域
+//     （internal/scenereview + migrations/132_scene_reviews.sql），
+//     cmd/api/main.go 里已经 SetRatingLookup 接上，所以公开目录
+//     /v1/reality-scenes 返回的每条场景**本来就带** rating / ratingCount。
+//     在这一屏之前把它丢掉，不是"没有数据源"，是"生产者有、消费者扔"
+//     —— 那正是本仓最忌讳的半截接线。规矩不变：只有 ratingCount > 0 才画，
+//     绝不拿 0 或假均分垫底（服务端两个字段也都是 omitempty）。
+//   · 「本月热门」「最近新开」这类派生结论 —— 场景没有图片计数、也没有开业
+//     时间列（只有 updated_at，那是行更新时间），继续不做。
+//   · 价格 / 营业时间 / 设施标签（带机位/可预约/安静/营业中）—— 全是商家
+//     自己页面上**一个月采一次**的数据，全仓没有生产者（migrations 与
+//     internal 里 grep 不到 price / openHours 之类的列或字段）。用户已明确
+//     「目前先不管」；`active` 又是个静态布尔，拿它渲染营业状态正是
+//     SCENE-NO-FABRICATED-001 删掉「正在发生」的原因。所以运动卡上的
+//     「₫/时」和封面「18:00-22:00」**不搬** —— 那两条在运动卡上也是演示值。
 //   · 「N 位在此出图」—— 真实存在的是 SCENE-CHECKIN-001 的 hereCount
 //     （此刻声明"在这里"的人），不是"出过图的人"。措辞按真实语义写。
 // 排序项和筛选片也**只放数据真的支持的**：一个筛不掉任何东西的 chip 是死
@@ -42,6 +51,14 @@ export type SceneShopBrief = SceneCategoryBrief & {
   plannedCount?: number | undefined;
   /** SCENE-CHECKIN-001：此刻"在这里"的人数（会自己过期）。 */
   hereCount?: number | undefined;
+  /**
+   * SCENE-REVIEW-001 / SCENE-RATING-CHIP-001：真实评分聚合（打过卡的人评的）。
+   *
+   * 服务端两个字段都带 omitempty，count == 0 时整对都不出现 —— 所以这里
+   * 两个都是可选的，而且**必须成对**判断：只看 rating 会把"没数据"看成 0 分。
+   */
+  rating?: number | undefined;
+  ratingCount?: number | undefined;
 };
 
 export type SceneOrigin = { latitude: number; longitude: number };
@@ -145,6 +162,104 @@ export function shopCardSignal(scene: SceneShopBrief): string {
 export function shopHereLine(hereCount: number | undefined): string {
   const here = realCount(hereCount);
   return here > 0 ? `${here} 位此刻在这里` : "此刻无人在这里";
+}
+
+// ---------------------------------------------------------------------------
+// SCENE-RATING-CHIP-001（2026-09-27，用户：「所有场景对齐运动」）
+//
+// 「运动 · 羽毛球」列表卡上有一行数据 chip：★ 评分 / N 单 / 城市。咖啡这一屏
+// 之前只有一排无数据的类型标签。评分现在有真实来源（SCENE-REVIEW-001），
+// 数量那一格场景没有订单域，所以按真实语义换成「N 人去过」。
+// ---------------------------------------------------------------------------
+
+/**
+ * 真实评分聚合。**只有 ratingCount > 0 才返回**，否则 undefined。
+ *
+ * 为什么两个字段必须成对判断：服务端 `rating` / `ratingCount` 都带 omitempty，
+ * 没评价时整对都不出现；反序列化后 `rating` 却可能被读成 0。只看 `rating`
+ * 就会把「还没有人评过」画成「0 分」—— 正是本仓禁止的「没有数据装成有数据」。
+ * 所以 count 是闸，rating 是值，缺一个就当没有。
+ */
+export function shopRating(scene: SceneShopBrief): { stars: string; count: number } | undefined {
+  const count = realCount(scene.ratingCount);
+  if (count <= 0) return undefined;
+  const average = scene.rating;
+  if (typeof average !== "number" || !Number.isFinite(average) || average <= 0) return undefined;
+  return { stars: average.toFixed(1), count };
+}
+
+/** 列表卡上的评分 chip（「★ 4.8」）。没有真实评价返回空串，整颗不画。 */
+export function shopRatingChip(scene: SceneShopBrief): string {
+  const rating = shopRating(scene);
+  return rating ? `★ ${rating.stars}` : "";
+}
+
+/** 详情信息条里的评分格（4.8 / 「12 条评价」）。没有真实评价返回 undefined。 */
+export function shopRatingCell(scene: SceneShopBrief): ShopInfoCell | undefined {
+  const rating = shopRating(scene);
+  return rating ? { value: rating.stars, label: `${rating.count} 条评价` } : undefined;
+}
+
+/**
+ * 列表卡上的「去过」chip。
+ *
+ * 运动卡这一格是「87 单」（完成订单数）—— 场景**没有订单域**，所以不写"单"。
+ * 真实存在的是 SCENE-REAL-COUNTS-001 的 visitedCount（去过的人），措辞就按它
+ * 的真实语义写。0 返回空串，不是「0 人去过」。
+ */
+export function shopVisitedChip(scene: SceneShopBrief): string {
+  const visited = realCount(scene.visitedCount);
+  return visited > 0 ? `${visited} 人去过` : "";
+}
+
+// ---------------------------------------------------------------------------
+// 封面角标：场景分类
+// ---------------------------------------------------------------------------
+
+/**
+ * SCENE-CATEGORY-BADGE-001：封面左上角那枚分类角标（运动卡上是「场馆持证」，
+ * 我们这里没有持证数据 —— 不许写）。能挂的只有真实的 `category` 枚举
+ * （商家 / 景点 / 其他）。缺值或空串返回 **空串**，调用方整颗不画。
+ *
+ * 「场馆持证」「营业中」之类带资质/状态语义的角标**不要**在这里加 —— 它们
+ * 都没有真实数据源，照搬就是把演示数据搬进真实列表（SCENE-NO-FABRICATED-001）。
+ */
+const SCENE_CATEGORY_LABEL: Readonly<Record<string, string>> = {
+  "商家": "商家",
+  "景点": "景点",
+  "其他": "其他",
+};
+
+export function shopCategoryBadge(scene: { category?: string | undefined }): string {
+  const raw = typeof scene.category === "string" ? scene.category.trim() : "";
+  if (!SCENE_CATEGORY_LABEL[raw]) return "";
+  return SCENE_CATEGORY_LABEL[raw];
+}
+
+/** chip 种类 —— 调用方靠它上色，跟运动卡那行三色 chip 一致。 */
+export type ShopCardChipKind = "RATING" | "VISITED" | "AREA" | "TYPE";
+export type ShopCardChip = { kind: ShopCardChipKind; text: string };
+
+/**
+ * 列表卡的 chip 行。顺序照运动卡：评分 → 数量 → 城市，然后才是类型标签。
+ *
+ * 每一颗都必须有真实来源，缺哪个就少哪颗（**不是**画一颗灰的占位，也不是
+ * 写「—」）。文案按文本去重 —— area 单独成一颗之后就从类型标签里去重（同一行
+ * 出现两次「Cầu Giấy」是噪音），同时保证调用方拿 text 当 key 是安全的。
+ */
+export function shopCardChips(scene: SceneShopBrief): readonly ShopCardChip[] {
+  const chips: ShopCardChip[] = [];
+  const seen = new Set<string>();
+  const push = (kind: ShopCardChipKind, text: string): void => {
+    if (text === "" || seen.has(text)) return;
+    seen.add(text);
+    chips.push({ kind, text });
+  };
+  push("RATING", shopRatingChip(scene));
+  push("VISITED", shopVisitedChip(scene));
+  push("AREA", scene.area.trim());
+  for (const tag of shopDetailTags(scene)) push("TYPE", tag);
+  return chips;
 }
 
 // ---------------------------------------------------------------------------
@@ -323,30 +438,35 @@ export function shopDetailTags(scene: SceneShopBrief): readonly string[] {
 export type ShopInfoCell = { value: string; label: string };
 
 /**
- * 详情页那张三格信息条（原型：评分 / 距离 / 在此出图）。
+ * 详情页那张三格信息条 —— **照原型 deepseek_html_20260927_7fc18d 的 stats-card**：
+ * 评分 / 去过 / 收藏（就这三格，就这个顺序）。
  *
- * 只放真的有数的格子，最多 3 格（布局就是三列）；一格都没有时返回空数组，
- * 调用方整条不画。评分那格没有数据源 ⇒ 不占位、不写「—」。
+ * 距离**不在这里** —— 原型把它单独放在动作按钮下面那条 dist-bar 里
+ * （`距离你 X · 到现场 100 米内自动打卡`），所以本函数不再产出距离格。
+ *
+ * 诚实规矩不变：评分只有 ratingCount > 0 才出现（没有真实评价就整格不画，
+ * 不写「—」、不拿 0 分垫底）；去过 / 收藏是真实聚合计数，0 就是 0，照常显示。
  */
-export function shopInfoCells(scene: SceneShopBrief, origin?: SceneOrigin): readonly ShopInfoCell[] {
+export function shopInfoCells(scene: SceneShopBrief): readonly ShopInfoCell[] {
   const cells: ShopInfoCell[] = [];
+  const rating = shopRatingCell(scene);
+  if (rating) cells.push(rating);
+  cells.push({ value: `${realCount(scene.visitedCount)}`, label: "去过" });
+  cells.push({ value: `${realCount(scene.savedCount)}`, label: "收藏" });
+  return cells;
+}
+
+/**
+ * 原型 dist-bar 那一行：距离 + 100 米自动打卡说明。
+ *
+ * 拿不到定位/距离就返回空串（整条不画） —— 不写「距离未知」占位，那条信息
+ * 对"我要不要去"没有帮助，反而像加载失败。
+ */
+export function shopDistanceBar(scene: SceneShopBrief, origin?: SceneOrigin): string {
   const meters = sceneDistanceMeters(origin, scene);
   const distance = formatShopDistance(meters);
-  if (distance) {
-    // SCENE-DISTANCE-FAR-001：太远就说「你不在附近」；3km 内才给步行时长，其余只说直线距离。
-    const minutes = walkMinutes(meters);
-    const label = isFarAway(meters) ? "你不在附近"
-      : minutes !== undefined && (meters ?? 0) <= WALKABLE_METERS ? `步行约 ${minutes} 分钟`
-        : "直线距离";
-    cells.push({ value: distance, label });
-  }
-  const here = realCount(scene.hereCount);
-  if (here > 0) cells.push({ value: `${here} 位`, label: "此刻在这里" });
-  const saved = realCount(scene.savedCount);
-  if (saved > 0) cells.push({ value: `${saved} 人`, label: "收藏了这个场景" });
-  const visited = realCount(scene.visitedCount);
-  if (visited > 0) cells.push({ value: `${visited} 人`, label: "去过这个场景" });
-  return cells.slice(0, 3);
+  if (!distance) return "";
+  return `距离你 ${distance} · 到现场 100 米内自动打卡`;
 }
 
 // ---------------------------------------------------------------------------

@@ -18,7 +18,9 @@ import { useMemo, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { MarketTypeLogo, type MarketOpportunityType } from "../components/market-type-logo";
 import { TYPE_LABEL, type OpportunityType, inferOpportunityTypeForFilter } from "./r37-opportunity-card";
+import { opportunityWhenLabel } from "../market-fixtures";
 import { color } from "../theme";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 export type QuoteSheetOpportunity = {
   id: string;
@@ -82,14 +84,16 @@ export function OpportunityQuoteSheet(props: OpportunityQuoteSheetProps): React.
   };
 
   // prototype 的"今天 15:00 · Cầu Giấy · 正常咖啡交流"是一行小灰字。
-  const contextLine = [opportunity.date, opportunity.time, opportunity.location, opportunity.desc ? opportunity.desc.split(/[，。.；;]/)[0] : undefined].filter(Boolean).join(" · ");
+  // MARKET-WHEN-LABEL-001: date / time 走同一个「什么时候」串 —— 这里以前把两个
+  // 字段各自塞进 join，需求向导发的机会会印成「今晚 19:00 · 今晚 19:00 · 2 小时 · 1:1」。
+  const contextLine = [opportunityWhenLabel(opportunity), opportunity.location, opportunity.desc ? opportunity.desc.split(/[，。.；;]/)[0] : undefined].filter(Boolean).join(" · ");
 
   return (
     <Modal animationType="slide" presentationStyle="formSheet" visible={visible} onRequestClose={onClose}>
       <View style={styles.root}>
         <View style={styles.head}>
           <Pressable onPress={onClose} style={styles.back}>
-            <Text selectable style={styles.backText}>‹</Text>
+            <ProxyBackGlyph />
           </Pressable>
           <Text selectable style={styles.headTitle}>你的报价</Text>
           <View style={styles.headSpacer} />
@@ -162,7 +166,6 @@ const styles = StyleSheet.create({
   root: { backgroundColor: color.white, flex: 1 },
   head: { alignItems: "center", flexDirection: "row", paddingHorizontal: 14, paddingVertical: 10 },
   back: { paddingHorizontal: 6, paddingVertical: 4, width: 32 },
-  backText: { color: color.ink, fontSize: 22, fontWeight: "700" },
   headTitle: { color: color.ink, flex: 1, fontSize: 16, fontWeight: "800", textAlign: "center" },
   headSpacer: { width: 32 },
   body: { paddingHorizontal: 18, paddingTop: 6 },

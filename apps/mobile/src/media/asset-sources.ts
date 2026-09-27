@@ -147,6 +147,18 @@ function loadKycLogo(): AssetImageSource | undefined {
 }
 export const KYC_LOGO = loadKycLogo();
 
+// GROWTH-LOGO-001: 用户给的"我的权益"正牌标（深色圆角方块 + 三根渐变金色
+// 成长柱）。之前 me.tsx 那一行用的是 "gift"，不在 ProxySymbolIcon 的表里，
+// 回落成文字画出了半截 "gif"。
+function loadGrowthLogo(): AssetImageSource | undefined {
+  try {
+    return require("../../assets/growth/growth-logo.png") as AssetImageSource;
+  } catch {
+    return undefined;
+  }
+}
+export const GROWTH_LOGO = loadGrowthLogo();
+
 function getBundledPhoto(key: string): AssetImageSource | undefined {
   try {
     switch (key) {

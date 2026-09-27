@@ -15,16 +15,19 @@
 //   不是公开主页的一栏。
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Image, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
+import { Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import type { FeedMediaItem, FeedPost, PostEngagement, PostReply } from "@proxy/contracts";
 import { ThreadsPostMedia } from "../components/threads-post-media";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
+// ACTIVITY-REF-001：活动实体引用（contextId = activityId）不进 chip 行。
+import { labelContextRefs } from "../activity-ref";
 import type { LocalNetClient } from "../localnet-client";
 import type { EngagementClient } from "../engagement-client";
 import { resolveReplyAuthorDisplayName } from "../feed-author";
 import {
-  replyTargetLabel,
+  repliesEmptyHint,
+  replyTargetParts,
   replyTimestampLabel,
   type ReplyEntry,
   type ReplyTarget
@@ -99,12 +102,28 @@ export interface ProfileTabsProps {
   onOpenScene?: ((sceneId: string) => void) | undefined;
   // 帖子互动：有 handler 才渲染对应按钮，没有不渲染假按钮。
   // 分享走系统分享（无需后端），喜欢走 engagement.reactToPost。
-  onLikePost?: ((postId: string) => void) | undefined;
+  //
+  // PROFILE-ACTION-COUNTS-001：返回类型放宽到「可以回传新的 engagement」。
+  // 动作行现在要显示真实计数（原型是 `♡ 12 💬 3 ↻`），而计数的持有者是
+  // PostsTab（它自己 hydrate postEngagement）。调用方（me.tsx /
+  // other-profile.tsx）本来就在调 `engagement.reactToPost(...)`，而那个方法
+  // **返回新的 PostEngagement** —— 只是以前调用方 `void` 掉了、只拿它做错误
+  // 提示，于是主页的计数永远停在初始值：点完赞数字不动，等于显示一个假数字。
+  // 现在调用方把结果原样 return 出来，PostsTab 直接落库到自己的 state。
+  // 不 return 也合法（那就保持今天的行为，计数不刷新），所以不是破坏性改动。
+  onLikePost?: ((postId: string) => void | Promise<PostEngagement | void>) | undefined;
   // PROFILE-REPLIES-VISIBLE-001: 主页帖子收到的赞数/评论列表。feed 里能看到的
   // 互动，在个人主页上完全看不见 —— PostCard 只有动作按钮，没有计数也没有列表。
   // engagementClient 可选：没传就保持今天的样子（不渲染假按钮/假数字）。
   engagementClient?: EngagementClient | undefined;
-  onReplyPost?: ((postId: string) => void) | undefined;
+  // PROFILE-ACTION-COUNTS-001 收尾（2026-09-25，用户「少了评论logo功能」）：
+  // 这里原来有个 `onReplyPost`，而**全仓没有任何调用方传过它**（`grep -rn onReplyPost
+  // apps/mobile/src` 只命中本文件自己）—— 所以 PostCard 那颗回复按钮（闸门
+  // `{props.onReply ? … : null}`）**从来没画出来过**，动作行只剩 ♡ ↻ ⤴ 三颗。
+  // 现在把它删掉，第 2 颗改成**评论**：原型 `function post(p)` 就是
+  // `<button>${I.reply}<span>${p.replies}</span></button>`（图标 + 评论数），
+  // 语义是「看这条帖子的评论」，正好复用已有的 onToggleReplies 通道
+  // （展开/收起评论列表），不再留一个名字骗人的死 prop。
   resolveMediaUrl: (path: string) => string;
   fallbackLogo: unknown;                      // OTTER_LOGO / ProxyIcon
   // 选项 (颜色)
@@ -115,6 +134,11 @@ export interface ProfileTabsProps {
     appBg: string;
     white: string;
     violet: string;
+    // PROFILE-ACTION-COUNTS-001：动作行「已喜欢」那一下要跟 feed 同一支强调色
+    // （feed 用 theme.color.magenta = #FF2474，原型里点亮的实心心形也是这支红）。
+    // 两个调用方本来就是整个 theme 对象传进来的，所以这里只是把已有的字段
+    // 声明出来，调用方不用改。
+    magenta: string;
   };
   // SELF 主页的操作入口收拢到顶栏「更多 → 主页设置」，徽章墙下面只留 tabs。
   // R15.55: 关注图谱 — 区分自己/他人 profile 行为
@@ -155,6 +179,11 @@ const PROFILE_TAB_ICON: Record<ProfileTabKey, ProxyIconName> = {
 
 export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
   const [tab, setTab] = useState<ProfileTabKey>("POSTS");
+  // PROFILE-ACTION-MORE-001：行动行第三个控件（圆形「···」）的弹层开关。
+  const [moreOpen, setMoreOpen] = useState(false);
+  // 屏蔽作者的结果提示。失败必须说出来（静默成功 = 用户以为屏蔽了其实没有）。
+  const [moreNotice, setMoreNotice] = useState<string | undefined>(undefined);
+  const [moreBusy, setMoreBusy] = useState(false);
 
   // PROFILE-TABS-001: SAVED 只给本人。viewer 身份未知时不给（fail-closed）。
   const tabs = useMemo(() => visibleProfileTabs(props.viewerMode), [props.viewerMode]);
@@ -195,10 +224,31 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
               onPress={props.onSendMessage}
               style={[styles.actionBtn, styles.actionSecondary]}
             >
-              <Text selectable style={styles.actionSecondaryText}>💬 消息</Text>
+              {/* REPLY-ROW-FORMAT-001（2026-09-25，用户「消息 logo 也没改」）：原来
+                  是 `💬 消息` 直接打 emoji，跟新加的 replyBubble（圆气泡 SVG）不
+                  一套。换成 replyBubble + 文字，跟回复 tab 字形同源，圆角统一；按钮
+                  结构没变（依旧 Pressable + onSendMessage handler）。 */}
+              <ProxyIcon name="replyBubble" color={props.color.ink} size={16} />
+              <Text selectable style={styles.actionSecondaryText}> 消息</Text>
+            </Pressable>
+            {/* PROFILE-ACTION-MORE-001（2026-09-25，用户「还没有对齐原型」）：
+                原型行动行是三个控件 —— 关注 / 消息 / 一个圆形「···」。以前只有前两个。
+                字形用 ProxyIcon 的 ellipsis（真图标：三个 View 画点），不是往 Text 里
+                塞 "···" 字符 —— 后者字重和基线跟着字号跑，正是这个仓库把 ♡/♥ 从
+                字符换成图标的原因。菜单里只放真能做的事，见 ProfileMoreSheet。 */}
+            <Pressable
+              accessibilityLabel="更多"
+              disabled={moreBusy}
+              onPress={() => { setMoreNotice(undefined); setMoreOpen(true); }}
+              style={styles.actionMore}
+            >
+              <ProxyIcon color={props.color.ink} name="ellipsis" size={18} />
             </Pressable>
           </>
         </View>
+      ) : null}
+      {props.viewerMode === "OTHER" && moreNotice ? (
+        <Text selectable accessibilityLabel="更多操作结果" style={styles.moreNotice}>{moreNotice}</Text>
       ) : null}
 
       {/* Tabs N 选 1 — IG/Threads 风: 顶部小 icon + 中文 label, active 黑下划线 2px。
@@ -231,7 +281,6 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           onOpenMedia={props.onOpenMedia}
           onOpenScene={props.onOpenScene}
           onLikePost={props.onLikePost}
-          onReplyPost={props.onReplyPost}
           engagementClient={props.engagementClient}
           viewerAccountId={props.viewerAccountId}
           resolveMediaUrl={props.resolveMediaUrl}
@@ -284,7 +333,107 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           color={props.color}
         />
       ) : null}
+
+      {/* PROFILE-ACTION-MORE-001：行动行的「···」菜单。用真 Modal（不是
+          absoluteFill 遮罩）—— 这个组件在调用方是**渲染在 ScrollView 里面**的，
+          普通绝对定位覆盖层会被滚出可视区/被裁掉；ReportSheet 之所以能用遮罩，
+          是因为调用方把它放在 ScrollView 外面。 */}
+      <ProfileMoreSheet
+        busy={moreBusy}
+        client={props.engagementClient}
+        handle={props.profileDraft.handle}
+        name={props.profileDraft.name}
+        onBusy={setMoreBusy}
+        onClose={() => setMoreOpen(false)}
+        onMuteFailed={(message) => setMoreNotice(message)}
+        onMuted={() => {
+          setMoreOpen(false);
+          // MUTE-REVERSIBLE-001：屏蔽之后 Ta 的帖子会被 feed 永久过滤，你再也点不到
+          // Ta 的帖子菜单或头像 —— 所以提示语必须给出**唯一还留着的那条**撤销路径，
+          // 否则用户会以为这是一次不可逆操作（那正是这条注释当初被写歪的地方）。
+          setMoreNotice("已屏蔽该作者。可在「我的 → 动态偏好 → 我屏蔽的人」里解除。");
+        }}
+        open={moreOpen}
+      />
     </View>
+  );
+}
+
+// ---------- ProfileMoreSheet (行动行「···」菜单) ----------
+
+/**
+ * PROFILE-ACTION-MORE-001（2026-09-25，用户「还没有对齐原型」）：主页行动行那个
+ * 圆形「···」按钮打开的菜单。
+ *
+ * 里面**只放真能做的事**，这是刻意的：
+ *   - **没有「举报」**：页头那颗 举报 就是唯一入口。两套菜单各缺几项比一套更糟
+ *     —— FEED-MENU-DEDUP-001 就是为了这个把 feed 帖文里重复的「···」删掉的。
+ *   - **没有「减少推荐」**：服务端只有按**帖子**的 RecordFeedPreference
+ *     （不感兴趣 / 减少这类内容 / 少看这个人），没有按**账号**的对应命令。
+ *     编一条出来点下去只会安静地什么都不发生。
+ * 剩下两项都是真的：
+ *   - 分享主页：走系统分享，不需要后端（原型那张分享卡也写着「只走标准分享」）。
+ *   - 屏蔽作者：engagement.muteAuthor，跟 feed 的「屏蔽作者」是同一个命令。
+ *     `props.client` 缺席（游客 / 没接 engagement）时**这一项整条不画** ——
+ *     一个点下去没反应的菜单项比没有更糟。
+ *
+ * 失败一定说出来：屏蔽是「以后不再看到这个人」的承诺，静默失败会让用户以为
+ * 已经生效（而它同时是 feed 永久过滤，撤销入口会变得很难找）。
+ */
+function ProfileMoreSheet(props: {
+  open: boolean;
+  busy: boolean;
+  client?: EngagementClient | undefined;
+  name: string;
+  handle: string;
+  onBusy: (busy: boolean) => void;
+  onClose: () => void;
+  onMuted: () => void;
+  onMuteFailed: (message: string) => void;
+}): React.JSX.Element {
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  function shareProfile(): void {
+    // handle 在两个调用方里都是账号 id（other-profile 传 target.userId），可能带
+    // 前导 @（ProfileTabs 里回复 tab 就专门剥过）—— 剥掉再拼，别出现 "@@name"。
+    const at = props.handle.replace(/^@+/, "").trim();
+    void Share.share({ message: `Proxy · ${props.name}${at === "" ? "" : ` (@${at})`}` });
+    props.onClose();
+  }
+
+  function mute(): void {
+    const client = props.client;
+    if (!client) return;
+    props.onBusy(true);
+    setError(undefined);
+    void client.muteAuthor(props.handle.replace(/^@+/, "").trim())
+      .then(() => props.onMuted())
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : "";
+        // 登录态问题不能说成网络问题，否则用户会一直重试（同 ReportSheet 口径）。
+        props.onMuteFailed(/session|signed|sign in|auth|401|403/i.test(message) ? "请先登录后再屏蔽。" : "屏蔽没有提交成功，请检查连接后重试。");
+      })
+      .finally(() => props.onBusy(false));
+  }
+
+  return (
+    <Modal animationType="fade" onRequestClose={props.onClose} transparent visible={props.open}>
+      <Pressable accessibilityLabel="关闭更多菜单" onPress={() => { if (!props.busy) props.onClose(); }} style={styles.moreScrim}>
+        <Pressable onPress={() => undefined} style={styles.moreSheet}>
+          <View style={styles.moreGrab} />
+          <Text selectable numberOfLines={1} style={styles.moreTitle}>{props.name}</Text>
+          {error ? <Text selectable accessibilityLabel="更多操作失败" style={styles.moreError}>{error}</Text> : null}
+          <Pressable accessibilityLabel="分享主页" onPress={shareProfile} style={styles.moreItem}>
+            <Text selectable style={styles.moreItemText}>分享主页</Text>
+          </Pressable>
+          {props.client ? (
+            <Pressable accessibilityLabel="屏蔽作者" disabled={props.busy} onPress={mute} style={styles.moreItem}>
+              <Text selectable style={styles.moreItemText}>{props.busy ? "处理中…" : "屏蔽作者"}</Text>
+            </Pressable>
+          ) : null}
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -301,8 +450,11 @@ function PostsTab(props: {
   name: string;
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   onOpenScene?: ((sceneId: string) => void) | undefined;
-  onLikePost?: ((postId: string) => void) | undefined;
-  onReplyPost?: ((postId: string) => void) | undefined;
+  // PROFILE-ACTION-COUNTS-001：返回类型跟 ProfileTabsProps 对齐 —— 调用方
+  // 现在会回传新的 engagement（计数由 PostsTab.toggleLike 落库）。以前这里写成
+  // `=> void`，靠 TS 的「void 返回值可赋值」规则侥幸过关，等于把 toggleLike 依赖的
+  // 契约藏起来了（读这个类型的人会以为根本没有 Promise 参与）。
+  onLikePost?: ((postId: string) => void | Promise<PostEngagement | void>) | undefined;
   resolveMediaUrl: (path: string) => string;
   fallbackLogo: unknown;
   // R15.99: 接 pinnedIds 进来 — ProfileTabs 顶层 hasRealPin 闭包不传进 PostsTab,
@@ -324,6 +476,9 @@ function PostsTab(props: {
   const [expandedReplies, setExpandedReplies] = useState<ReadonlySet<string>>(new Set());
   const [repliesFailed, setRepliesFailed] = useState<Record<string, boolean>>({});
   const hydratedEngagementRef = useRef<Set<string>>(new Set());
+  // PROFILE-ACTION-COUNTS-001：动作行的忙态 / 转发失败态，都按 postId 记。
+  const [actionBusy, setActionBusy] = useState<ReadonlySet<string>>(new Set());
+  const [repostFailed, setRepostFailed] = useState<Record<string, boolean>>({});
   useEffect(() => {
     const client = props.engagementClient;
     if (!client) return;
@@ -364,6 +519,76 @@ function PostsTab(props: {
       .then((listed) => setPostReplies((previous) => ({ ...previous, [postId]: listed.replies })))
       .catch(() => setRepliesFailed((previous) => ({ ...previous, [postId]: true })));
   }
+  /**
+   * PROFILE-ACTION-COUNTS-001：喜欢。
+   *
+   * 提交仍然走调用方的 `onLikePost`（错误提示归它管：me.tsx / other-profile.tsx
+   * 各自有 notice 文案），但**计数由这里落库**。调用方会把它 `reactToPost(...)`
+   * 拿到的新 engagement 原样 return 出来 —— 以前它 `void` 掉、只拿来做错误提示，
+   * 于是主页的计数永远停在 hydrate 那一刻：点完赞数字不动。显示一个不会动的数字
+   * 比不显示数字更糟，因为用户会以为点赞没生效。
+   *
+   * 调用方不 return 也合法（老调用方）—— 那就保持老行为，不刷新。
+   */
+  function toggleLike(postId: string): void {
+    const pending = props.onLikePost?.(postId);
+    if (!pending || typeof (pending as Promise<unknown>).then !== "function") return;
+    setActionBusy((previous) => new Set(previous).add(postId));
+    void (pending as Promise<PostEngagement | void>)
+      .then((next) => { if (next) setPostEngagement((previous) => ({ ...previous, [postId]: next })); })
+      // 提交失败由调用方提示；这里只保证不把失败当成新计数写进去。
+      .catch(() => undefined)
+      .finally(() => setActionBusy((previous) => { const next = new Set(previous); next.delete(postId); return next; }));
+  }
+
+  /**
+   * PROFILE-ACTION-COUNTS-001：转发。原型动作行第 3 个按钮。
+   *
+   * `RepostPost` 从 R14 起服务端就完整实现（含幂等：重复转发返
+   * REJECTED / ALREADY_REPOSTED，客户端那侧已把它当成功），但客户端一直没有这个
+   * 方法 —— 手机上无处可转发，`reposts` 恒为 0。
+   *
+   * 它**不返回**新 engagement（服务端只回事件引用），所以成功后再读一次真实计数，
+   * 不去猜 +1。
+   */
+  function repost(postId: string): void {
+    const client = props.engagementClient;
+    if (!client) return;
+    setRepostFailed((previous) => ({ ...previous, [postId]: false }));
+    setActionBusy((previous) => new Set(previous).add(postId));
+    void client.repostPost(postId)
+      .then(() => client.getPostEngagement(postId))
+      .then((next) => setPostEngagement((previous) => ({ ...previous, [postId]: next })))
+      .catch(() => setRepostFailed((previous) => ({ ...previous, [postId]: true })))
+      .finally(() => setActionBusy((previous) => { const next = new Set(previous); next.delete(postId); return next; }));
+  }
+
+  /**
+   * PROFILE-ACTION-COUNTS-001：一条帖子的动作行 props。
+   *
+   * 抽出来是因为置顶卡和普通卡要用**同一套**绑定 —— 两个调用点各抄一遍的话，
+   * 迟早有一边忘记带 actionBusy 或 repostFailed（这个文件里已经有过一次
+   * 「置顶卡少传一个 prop」的坑）。postId 由调用点给，所以这里不需要碰
+   * props.pinnedPost 那个在闭包里会被 TS 放宽的窄化。
+   */
+  function postCardActions(postId: string): {
+    onLike?: (() => void) | undefined;
+    onRepost?: (() => void) | undefined;
+    actionBusy: boolean;
+    repostFailed: boolean;
+  } {
+    return {
+      onLike: props.onLikePost ? () => toggleLike(postId) : undefined,
+      // 第 2 颗（评论）不在这里 —— 它走 onToggleReplies（见 PostCard 的 💬 按钮），
+      // 因为那一颗要同时知道 repliesExpanded 才能画对无障碍标签。以前这里绑过一个
+      // 没人传的 onReplyPost，绑了等于没绑。
+      // 没有 engagementClient 就没有转发的通道 —— 那一颗整个不画，不画假按钮。
+      onRepost: props.engagementClient ? () => repost(postId) : undefined,
+      actionBusy: actionBusy.has(postId),
+      repostFailed: repostFailed[postId] === true
+    };
+  }
+
   const allMediaEntries = useMemo(() => {
     const out: ProfileMediaEntry[] = [];
     for (const post of props.posts) {
@@ -442,13 +667,15 @@ function PostsTab(props: {
             name={props.name}
             onOpenMedia={props.onOpenMedia}
             onOpenScene={props.onOpenScene}
-            onLikePost={props.onLikePost}
-            onReplyPost={props.onReplyPost}
+            {...postCardActions(props.pinnedPost.postId)}
+            color={props.color}
             engagement={postEngagement[props.pinnedPost.postId]}
             replies={postReplies[props.pinnedPost.postId]}
             repliesExpanded={expandedReplies.has(props.pinnedPost.postId)}
             repliesFailed={repliesFailed[props.pinnedPost.postId] === true}
-            onToggleReplies={() => { const pinned = props.pinnedPost; if (pinned) togglePostReplies(pinned.postId); }}
+            // 没接 engagementClient 就没有评论通道 ⇒ 不传 handler，PostCard 那颗
+            // 💬 整颗不画（不摆一颗按不动的按钮）。见 PROFILE-ACTION-COUNTS-001。
+            onToggleReplies={props.engagementClient ? () => { const pinned = props.pinnedPost; if (pinned) togglePostReplies(pinned.postId); } : undefined}
             replyViewerId={props.viewerAccountId}
             resolveMediaUrl={props.resolveMediaUrl}
           />
@@ -469,13 +696,14 @@ function PostsTab(props: {
             name={props.name}
             onOpenMedia={props.onOpenMedia}
             onOpenScene={props.onOpenScene}
-            onLikePost={props.onLikePost}
-            onReplyPost={props.onReplyPost}
+            {...postCardActions(post.postId)}
+            color={props.color}
             engagement={postEngagement[post.postId]}
             replies={postReplies[post.postId]}
             repliesExpanded={expandedReplies.has(post.postId)}
             repliesFailed={repliesFailed[post.postId] === true}
-            onToggleReplies={() => togglePostReplies(post.postId)}
+            // 同上：评论通道由 engagementClient 决定，没有就不画 💬。
+            onToggleReplies={props.engagementClient ? () => togglePostReplies(post.postId) : undefined}
             replyViewerId={props.viewerAccountId}
             resolveMediaUrl={props.resolveMediaUrl}
           />
@@ -494,8 +722,20 @@ function PostCard(props: {
   name: string;
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   onOpenScene?: ((sceneId: string) => void) | undefined;
-  onLikePost?: ((postId: string) => void) | undefined;
-  onReplyPost?: ((postId: string) => void) | undefined;
+  // PROFILE-ACTION-COUNTS-001：动作行回调由 PostsTab 绑好 postId 再传进来 ——
+  // 它同时负责把新计数写回自己的 state（见 PostsTab.toggleLike / repost），
+  // 所以这里签名是 () => void，不是 (postId) => void。
+  onLike?: (() => void) | undefined;
+  // 第 2 颗（💬 评论）**没有单独的 prop**：它直接走 onToggleReplies（下面
+  // PROFILE-REPLIES-VISIBLE-001 那一组），因为那一颗还要读 repliesExpanded 才能
+  // 把无障碍标签画对（查看评论 / 收起评论）。
+  onRepost?: (() => void) | undefined;
+  // 忙态/失败态也按 postId 记在 PostsTab，这里只收「当前这一条」的。
+  actionBusy?: boolean | undefined;
+  repostFailed?: boolean | undefined;
+  // PROFILE-ACTION-COUNTS-001：动作行要用主题色（ink / magenta），PostCard 以前
+  // 只吃硬编码 hex，没有颜色 prop —— 加了它才能让「已喜欢」跟 feed 用同一支强调色。
+  color: ProfileTabsProps["color"];
   // PROFILE-REPLIES-VISIBLE-001: 收到的计数 + 评论列表（调用方 hydrate 进来）。
   // 全是可选：没传就是今天的样子（只有动作按钮，不编数字）。
   engagement?: PostEngagement | undefined;
@@ -509,6 +749,14 @@ function PostCard(props: {
   const sharePost = (): void => {
     void Share.share({ message: `${props.post.body}\n\nProxy · ${props.name}` });
   };
+  // PROFILE-ACTION-COUNTS-001：已喜欢。`reacted` 是服务端按观察者算的，不猜。
+  // engagement 还没拉到（undefined）时按「未喜欢」画 —— 这只是描边心形，不声称
+  // 任何事；等数据到了会自己变。
+  const liked = props.engagement?.reacted === true;
+  // ACTIVITY-REF-001：chip 行只画**标签**。活动实体引用（contextId = activityId）
+  // 归 feed 的活动卡片，QUOTE_POST 归引用卡片 —— 这里都不重复画，更不能把
+  // activityId 当文案印出来。
+  const contextChips = labelContextRefs(props.post);
   return (
     <View style={styles.postCard}>
       <View style={styles.postHead}>
@@ -529,15 +777,19 @@ function PostCard(props: {
       </View>
       <View style={styles.postBody}>
         <Text selectable style={styles.postText}>{props.post.body}</Text>
-        {props.post.contextRefs.length > 0 ? (
+        {contextChips.length > 0 ? (
           <View style={styles.postContextRow}>
-            {props.post.contextRefs.map((entry) => (
+            {contextChips.map((entry) => (
               <Pressable
-                key={entry.contextId}
+                key={`${entry.contextType}_${entry.contextId}`}
+                // 只有 REALITY_SCENE 的 contextId 真的是场景 id。其余都是人话
+                // 标签，把它喂给 onOpenScene 只会去开一个不存在的场景 ——
+                // 点了没反应，也不报错，正是「通道看着接上了、其实解析不了」。
+                disabled={entry.contextType !== "REALITY_SCENE" || !props.onOpenScene}
                 onPress={() => props.onOpenScene?.(entry.contextId)}
                 style={styles.postContextChip}
               >
-                <Text selectable style={styles.postContextText}>{entry.contextId}</Text>
+                <Text selectable style={styles.postContextText}>{entry.contextType === "REALITY_SCENE" ? "查看场景 ›" : entry.contextId}</Text>
               </Pressable>
             ))}
           </View>
@@ -549,40 +801,98 @@ function PostCard(props: {
             onOpen={(index) => props.onOpenMedia({ postId: props.post.postId, index })}
           />
         ) : null}
+        {/* PROFILE-ACTION-COUNTS-001（2026-09-25，用户「还没有对齐原型」）：
+            原型每一行的操作区是 4 个按钮 —— ♡ 计数 / 💬 计数 / ↻ 计数 / ⤴
+            （见 docs/design/references/Proxy_Profile_Threads_Standalone_R2.html
+            的 function post()：`<button>${I.heart}<span>${p.likes}</span></button>`
+            四项）。我们以前是文字「♡ 喜欢」「💬 回复」「↗ 分享」，跟 feed 早就
+            改好的动作行（FEED-ACTION-ICONS-001）都不是一套。
+
+            三个刻意的选择：
+            1. 字形跟 **feed 同一套**（heart / chat），已喜欢用 filled + magenta
+               —— 同一个「喜欢」在两个页面不能长成两个样子。
+            2. 计数**只在 engagement 拉到之后才画**（`props.engagement ? ... : null`）。
+               没拉到就只画图标，不回填 0 —— 沿用这个文件自己的
+               PROFILE-REPLIES-VISIBLE-001 口径：没数据不编数字。真·0 会照常显示 0。
+            3. 转发（↻）第 3 个按钮：服务端 RepostPost 早就实现，客户端以前没有
+               这个方法，所以它以前**根本画不出来**（画了也没法按）。现在
+               engagementClient.repostPost 补上了，见 PostsTab.repost。 */}
         <View style={styles.postActions}>
-          {props.onLikePost ? (
-            <Pressable onPress={() => props.onLikePost?.(props.post.postId)} style={styles.postAction} accessibilityLabel="喜欢">
-              <Text selectable style={styles.postActionText}>♡ 喜欢</Text>
+          {props.onLike ? (
+            <Pressable accessibilityLabel="喜欢" disabled={props.actionBusy} onPress={props.onLike} style={styles.postAction}>
+              {/* FEED-ACTION-ROW-001：第 1 颗改用 replyLike，跟 💬/↻/⤴ 同一组 Feather
+                  1.8 描边 —— 之前那颗 heart 是 CSS 拼的 View，几何和描边粗细都跟同排
+                  另外 3 颗不一样，看起来「不像原型」。replyLike 的 case 已经支持
+                  filled（跟 bookmark 同形），所以 liked=true 时仍然显示实心 ♥。
+                  baseline 同步：B326 → B327，参考 docs/design/BASELINE_CHANGELOG.md。 */}
+              <ProxyIcon color={liked ? props.color.magenta : props.color.ink} filled={liked} name="replyLike" size={18} />
+              {props.engagement ? (
+                <Text selectable style={[styles.postActionCount, liked && styles.postActionOn]}>{props.engagement.reactions}</Text>
+              ) : null}
             </Pressable>
           ) : null}
-          {props.onReplyPost ? (
-            <Pressable onPress={() => props.onReplyPost?.(props.post.postId)} style={styles.postAction} accessibilityLabel="回复">
-              <Text selectable style={styles.postActionText}>💬 回复</Text>
+          {/* PROFILE-ACTION-COUNTS-001 收尾（2026-09-25，用户「少了评论logo功能」）：
+              第 2 颗 = **评论**。原型 `function post(p)` 是
+              `<button>${I.reply}<span>${p.replies}</span></button>` —— 图标 + 评论数，
+              语义是「看这条帖子的评论」。以前这一颗挂在 `onReplyPost` 上，而那个 prop
+              **全仓没有任何调用方传过** ⇒ 它从来没画出来过（动作行只剩 ♡ ↻ ⤴ 三颗，
+              用户对照原型一眼就看出来了）。
+              现在改走 onToggleReplies（展开/收起评论列表），没接 engagementClient 时
+              整颗不画 —— 没有评论通道就不摆一颗按不动的按钮。 */}
+          {props.onToggleReplies ? (
+            <Pressable
+              accessibilityLabel={props.repliesExpanded ? "收起评论" : "查看评论"}
+              onPress={props.onToggleReplies}
+              style={styles.postAction}
+            >
+              {/* ⚠️ 字形必须是 replyBubble（**圆**气泡），不能用 chat：chat 是方角
+                  气泡（`M5 6h14v9H9l-4 3z`），原型的 `I.reply` 是
+                  `M20 11.5a7.5 7.5 0 1 1-3.2-6.1A7.5 7.5 0 0 1 20 11.5Z` + 尾巴
+                  —— 圆的。同一个错在 PROFILE-TAB-LOGO-001 已经犯过一次（当时把
+                  回复 tab 指到 chat，用户当场指出「回复的 logo 还是不符合原型」），
+                  proxy-icon.tsx 里那条注释就是为它写的。回复行第 2 颗也是
+                  replyBubble（REPLY-ACTION-ICONS-001），两处同一个字形。 */}
+              <ProxyIcon color={props.color.ink} name="replyBubble" size={18} />
+              {props.engagement ? <Text selectable style={styles.postActionCount}>{props.engagement.replies}</Text> : null}
             </Pressable>
           ) : null}
-          <Pressable onPress={sharePost} style={styles.postAction} accessibilityLabel="分享帖子">
-            <Text selectable style={styles.postActionText}>↗ 分享</Text>
+          {props.onRepost ? (
+            <Pressable accessibilityLabel="转发" disabled={props.actionBusy} onPress={props.onRepost} style={styles.postAction}>
+              <ProxyIcon color={props.color.ink} name="replyRepost" size={18} />
+              {props.engagement ? <Text selectable style={styles.postActionCount}>{props.engagement.reposts}</Text> : null}
+            </Pressable>
+          ) : null}
+          {/* 分享顶到行尾：原型的 `.pa` 第 4 个按钮带 margin-left:auto，用户给的
+              设计稿里那个 ⤴ 也确实在最右端（回复行同形状，见 replyActionsSpacer）。 */}
+          <View style={styles.postActionsSpacer} />
+          <Pressable accessibilityLabel="分享帖子" onPress={sharePost} style={styles.postAction}>
+            <ProxyIcon color={props.color.ink} name="replyShare" size={18} />
           </Pressable>
         </View>
-        {/* PROFILE-REPLIES-VISIBLE-001：收到的赞数/评论列表。计数只在拉到后显示
-            （>0 才画，不回填 0）；评论点开才拉，拉失败行内提示。作者名走
-            resolveReplyAuthorDisplayName —— 无名不显示裸 id。 */}
-        {props.onToggleReplies && props.engagement && (props.engagement.reactions > 0 || props.engagement.replies > 0) ? (
-          <Pressable
-            onPress={props.onToggleReplies}
-            style={styles.postReplyToggle}
-            accessibilityLabel={props.repliesExpanded ? "收起评论" : "展开评论"}
-          >
-            <Text selectable style={styles.postReplyToggleText}>
-              {props.engagement.reactions > 0 ? `♡ ${props.engagement.reactions}  ` : ""}💬 {props.engagement.replies} 条评论 {props.repliesExpanded ? "︿" : "﹀"}
-            </Text>
+        {/* 转发失败要能看见、能重试。静默失败在这个位置特别糟：用户以为转发出去
+            了，别人却看不到。 */}
+        {props.repostFailed && props.onRepost ? (
+          <Pressable accessibilityLabel="重试转发" onPress={props.onRepost} style={styles.postActionRetry}>
+            <Text selectable style={styles.postActionRetryText}>转发没有提交成功，点这里重试。</Text>
           </Pressable>
         ) : null}
+        {/* PROFILE-REPLIES-VISIBLE-001：评论列表（点 💬 才拉，拉失败行内提示）。
+            作者名走 resolveReplyAuthorDisplayName —— 无名不显示裸 id。
+            ⚠️ 原来这里还有一行独立的「💬 N 条评论 ﹀」开关。PROFILE-ACTION-COUNTS-001
+            收尾时删掉了：动作行第 2 颗现在**就是**这个开关（原型也是把评论数画在动作
+            行里的），留着这一行等于同屏两个评论入口、隔 8px 说同一个数字。 */}
         {props.repliesExpanded && props.onToggleReplies ? (
           props.repliesFailed ? (
             <Pressable onPress={props.onToggleReplies} style={styles.postReplyToggle} accessibilityLabel="收起评论">
               <Text selectable style={styles.postReplyToggleText}>评论暂时无法读取，点这里收起重试</Text>
             </Pressable>
+          ) : (props.replies ?? []).length === 0 ? (
+            /* 展开成功但一条评论都没有时必须说一句话：否则点完 💬 屏幕上什么都不变，
+               看起来像按钮坏了。只在**确实拉到过**（replies !== undefined）时才敢说，
+               还在读的时候什么都不说 —— 不能把「还没读到」说成「没有」。 */
+            props.replies === undefined ? null : (
+              <Text selectable style={styles.postReplyEmpty}>还没有评论</Text>
+            )
           ) : (
             <View>
               {(props.replies ?? []).map((reply) => (
@@ -628,7 +938,10 @@ function RepliesTab(props: {
     return <ProxyEmptyState title="回复没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />;
   }
   if (props.replies.length === 0) {
-    return <ProxyEmptyState title="还没有回复" sub="你在其他帖子下面的回复会出现在这里" />;
+    // REPLY-EMPTY-VIEWER-001: 这句以前写死成「你在其他帖子下面的回复…」——
+    // 访客点开别人的主页、那个人一条回复都没有时，屏幕上就在说「你」。
+    // 跟 REPLY-TARGET-001 当初那个 bug 同一句话、同一个毛病，只是漏在空态上。
+    return <ProxyEmptyState title="还没有回复" sub={repliesEmptyHint(props.viewerMode)} />;
   }
   // REPLY-ROW-FORMAT-001: handle 可能带也可能不带前导 @（me.tsx 两处都在运行时补
   // @，见 1069/1099 行）。这里先剥掉再统一加一个 —— 否则会出现 "@@name"。
@@ -640,6 +953,11 @@ function RepliesTab(props: {
         // REPLY-TARGET-001: 取不回来的父帖（已删 / 已收紧成仅关注者可见）就是
         // undefined —— 这一行退化成中性文案，不显示 id、不编名字。
         const target = props.targets[reply.parentPostId];
+        // REPLY-TARGET-NAME-INK-001: 名字要单独上墨色，所以取分段版（整句版就是
+        // 这三段拼起来的，见 reply-target.ts）。句式本身仍然只由 reply-target.ts
+        // 定义 —— 这里不拼字符串。调用保持单行：REPLY-TARGET-001 那颗钉是逐行
+        // grep 的，拆成多行会让它变成假红。
+        const targetParts = replyTargetParts(props.viewerMode, target, props.viewerAccountId, props.viewerDisplayName);
         return (
           // key 用 replyId：同一条帖子可以被同一个人回复多次，用父帖 id 会撞。
           <View key={reply.replyId} style={styles.replyCard}>
@@ -658,8 +976,18 @@ function RepliesTab(props: {
                 ) : null}
               </View>
               <View style={styles.replyMeta}>
+                {/* REPLY-TARGET-NAME-INK-001（2026-09-25，用户「你看回复xx 这个xx
+                    是灰色 但是原型是黑色的」）：原型这一行是「回复了 Linh 的帖子」，
+                    名字是墨色、其余是次要色。以前整句一个 <Text>（styles.replyTarget
+                    只有一种颜色），名字跟着一起变灰。现在分三段渲染，只有名字段换成
+                    styles.replyTargetName。文案一个字没改 —— replyTargetParts 拼
+                    出来跟原来的 replyTargetLabel 逐字相同。 */}
                 <Text selectable style={styles.replyTarget}>
-                  {replyTargetLabel(props.viewerMode, target, props.viewerAccountId, props.viewerDisplayName)}
+                  {targetParts.prefix}
+                  {targetParts.name !== "" ? (
+                    <Text selectable style={styles.replyTargetName}>{targetParts.name}</Text>
+                  ) : null}
+                  {targetParts.suffix}
                 </Text>
                 <Text selectable style={styles.replyTime}>· {replyTimestampLabel(reply.createdAt)}</Text>
               </View>
@@ -671,6 +999,25 @@ function RepliesTab(props: {
                   <Text selectable numberOfLines={2} style={styles.replyQuoteText}>{target.excerpt}</Text>
                 </View>
               ) : null}
+              {/* REPLY-ACTION-ICONS-001（2026-09-25，用户「这几个 logo 没有对齐设计的」）：
+                  原型 `.feed-actions{display:flex;align-items:center;gap:16px;margin-top:4px}`
+                  + 4 个 Feather svg（♡/💬/↻/⤴）。我们以前这一行**没画**（PROFILE-
+                  REPLIES-VISIBLE-001 没数据就别画假按钮），但现在图标形状本身就该
+                  对齐原型 —— 至少形状先就位，**不渲染假数字、不挂假 handler**：
+                  ReplyEntry 只有 replyId/parentPostId/body/createdAt，没有赞/评论数，
+                  也没有 like/comment/repost 的接口。所以这一行只是图标**形状占位**，
+                  等后端有数据/接口再加 Pressable + 计数（按 PROFILE-REPLIES-VISIBLE-001
+                  「没传就不渲染假按钮/假数字」）。分享例外 —— 但目前 ReplyEntry 也没
+                  有可分享的 URL，一并空着；Share 由 onOpenPost 那条入口走。
+                  评论复用 replyBubble 字形（跟回复 tab 同源），其他 3 个是新加的
+                  Feather 字形。 */}
+              <View style={styles.replyActions}>
+                <ProxyIcon name="replyLike" color={props.color.muted} size={18} />
+                <ProxyIcon name="replyBubble" color={props.color.muted} size={18} />
+                <ProxyIcon name="replyRepost" color={props.color.muted} size={18} />
+                <View style={styles.replyActionsSpacer} />
+                <ProxyIcon name="replyShare" color={props.color.muted} size={18} />
+              </View>
             </View>
           </View>
         );
@@ -830,6 +1177,20 @@ const styles = StyleSheet.create({
   actionPrimaryText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   actionSecondary: { backgroundColor: "#fff", borderColor: "#dedede" },
   actionSecondaryText: { color: "#111", fontSize: 11, fontWeight: "700" },
+  // PROFILE-ACTION-MORE-001：行动行第三个控件 —— 原型那个圆形「···」。
+  // 高度和描边跟旁边两颗药丸同源（38 / #dedede），但**不吃 flex** ——
+  // 药丸是 flex:1 平分剩余宽度，这颗是固定宽的正圆（原型里它明显更窄）。
+  actionMore: { alignItems: "center", borderColor: "#dedede", borderRadius: 19, borderWidth: 1, height: 38, justifyContent: "center", width: 38 },
+  moreNotice: { color: "#b45309", fontSize: 11, marginBottom: 10, paddingHorizontal: 18 },
+  // 「···」菜单的弹层。数值跟 components/report-sheet.tsx 对齐（同一套视觉语言：
+  // 半透明遮罩 + 底部圆角白卡 + 抓手条），不另造一套。
+  moreScrim: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.35)", justifyContent: "flex-end" },
+  moreSheet: { backgroundColor: "#fff", borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingBottom: 20, paddingHorizontal: 16, paddingTop: 10, width: "100%" },
+  moreGrab: { alignSelf: "center", backgroundColor: "#e2e8f0", borderRadius: 2, height: 4, marginBottom: 12, width: 36 },
+  moreTitle: { color: "#111", fontSize: 15, fontWeight: "800", marginBottom: 6 },
+  moreError: { color: "#b45309", fontSize: 12, paddingBottom: 6 },
+  moreItem: { paddingVertical: 13 },
+  moreItemText: { color: "#111", fontSize: 14 },
   actionLime: { backgroundColor: "#C9FF08", borderColor: "#C9FF08" },
   actionLimeText: { color: "#0f172a", fontSize: 11, fontWeight: "700" },
 
@@ -878,8 +1239,21 @@ const styles = StyleSheet.create({
   postActions: { flexDirection: "row", gap: 16, marginTop: 10 },
   postReplyToggle: { marginTop: 8 },
   postReplyToggleText: { color: "#64748b", fontSize: 12, fontWeight: "600" },
-  postAction: { paddingVertical: 4 },
-  postActionText: { fontSize: 12, color: "#64748b" },
+  // 「还没有评论」：点开 💬 但确实一条都没有时的那句话。跟 postReplyToggleText 同支
+  // 次要色，但**不是**按钮（没有 Pressable 包它，没有下划/箭头）—— 它是一句陈述。
+  postReplyEmpty: { color: "#64748b", fontSize: 12, marginTop: 8 },
+  // PROFILE-ACTION-COUNTS-001：图标 + 计数并排。计数**只在 engagement 到了才渲染**
+  // （见 PostCard），所以这里不设 minWidth —— 没数字时按钮就是纯图标，跟原型第 4 个
+  // （只有 ⤴）同一形状。
+  // 计数文字的颜色/字重照抄 feed 的动作行（postActionCount / postActionOn），
+  // 这样同一个「喜欢」在 feed 和个人主页上长得一样；已喜欢时图标用
+  // props.color.magenta、文字用 #6C36C8，也是照抄 feed 的现状，不另发明一套。
+  postAction: { alignItems: "center", flexDirection: "row", gap: 5, paddingVertical: 4 },
+  postActionCount: { color: "#111", fontSize: 12, fontWeight: "700" },
+  postActionOn: { color: "#6C36C8" },
+  postActionsSpacer: { flex: 1 },
+  postActionRetry: { marginTop: 6 },
+  postActionRetryText: { color: "#b45309", fontSize: 11, fontWeight: "600" },
   // Photo grid
   photoGrid: { flexDirection: "row", flexWrap: "wrap" },
   photoTile: { width: "33.333%", aspectRatio: 1, padding: 1 },
@@ -909,11 +1283,19 @@ const styles = StyleSheet.create({
   replyHandle: { fontSize: 11, color: "#94a3b8", flexShrink: 1 },
   replyMeta: { flexDirection: "row", alignItems: "center", marginTop: 2 },
   replyTarget: { fontSize: 11, color: "#94a3b8" },
+  // REPLY-TARGET-NAME-INK-001: 「回复了 X 的帖子」里的 X 单独上墨色（跟 replyName /
+  // replyText 同一支墨色 #0f172a），其余仍是次要色。嵌套 <Text> 继承父级字号，
+  // 所以这里只给颜色 —— 11pt 的底线由 styles.replyTarget 撑着。
+  replyTargetName: { color: "#0f172a" },
   replyTime: { fontSize: 11, color: "#94a3b8" },
   replyText: { fontSize: 13, color: "#0f172a", marginTop: 4, lineHeight: 18 },
   // REPLY-TARGET-001: 被回复帖子的引用块（Threads 风格）。
   replyQuote: { marginTop: 6, paddingLeft: 8, borderLeftWidth: 2, borderLeftColor: "#e2e8f0" },
   replyQuoteText: { fontSize: 12, color: "#64748b", lineHeight: 17 },
+  // REPLY-ACTION-ICONS-001: 4 个图标 + 间隔 16 + 最后一个 share 用 marginLeft:auto
+  // 顶到行尾（原型 .feed-actions 第四个图标 style="margin-left:auto"）。
+  replyActions: { alignItems: "center", flexDirection: "row", gap: 16, marginTop: 6 },
+  replyActionsSpacer: { flex: 1 },
   // About
   aboutCard: { marginHorizontal: 16, marginVertical: 12, padding: 16, backgroundColor: "#f8fafc", borderRadius: 10 },
   aboutBio: { fontSize: 13, color: "#0f172a", lineHeight: 19 },

@@ -139,7 +139,11 @@ export class FulfillmentClient {
     await this.command("RecordDirectSettlement", { type: "Order", id: orderId }, input as unknown as Record<string, unknown>);
   }
 
-  public async recordOutcome(orderId: string, input: { onTime: boolean; scopeCompleted: boolean; objectiveNote?: string }): Promise<void> {
+  // STORE-STATS-001：storeId 可选 —— 履约方指认「这笔单在我哪家店完成」。
+  // 传了就落进那家店的经营统计（服务端校验必须是真实存在的 ACTIVE 店，否则
+  // UNKNOWN_STORE 驳回）；不传 = 不归因，这一单不计入任何店的统计。
+  // 注意 exactOptionalPropertyTypes：不要传 storeId: undefined，要用条件展开。
+  public async recordOutcome(orderId: string, input: { onTime: boolean; scopeCompleted: boolean; objectiveNote?: string; storeId?: string }): Promise<void> {
     await this.command("RecordOutcome", { type: "Order", id: orderId }, input as unknown as Record<string, unknown>);
   }
 

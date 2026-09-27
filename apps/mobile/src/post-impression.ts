@@ -2,7 +2,8 @@ import { createBehaviorAnalyticsStore, type BehaviorAnalyticsStore } from "./beh
 import type { LocalNetClient } from "./localnet-client";
 
 // TWIN-SIGNALS-001: 曝光埋点 helper。Analytics 不是 Truth：
-// - 开关（隐私与数据 → 动态浏览统计）关了直接短路，一个事件都不造；
+// - 采集前提是**用户显式同意**（隐私与数据 → 动态浏览统计，默认关）；
+//   没同意、没设置过、读失败 —— 一个事件都不造（见 behaviorAnalyticsEnabled）；
 // - 发送失败由 LocalNetClient.recordPostImpression 内部静默，调用方用
 //   void 触发，不用等；
 // - 停留封顶 5 分钟 —— 切后台忘关、息屏都只记 5 分钟，不造垃圾数据。
@@ -34,7 +35,11 @@ async function behaviorAnalyticsEnabled(store?: BehaviorAnalyticsStore): Promise
     // the whole `.read()` call left the Promise branch un-awaited before
     // `.read()` was accessed on it, which doesn't exist on a Promise.
     const activeStore = store ?? await getDefaultStore();
-    return (await activeStore.read()) !== false;
+    // ⛔ 2026-09-27 合规修正：原来是 `!== false`（读不到 / 读失败 = 采集）。
+    // Nghị định 356/2025 Art. 6.3 禁止默认同意机制，Art. 4.1(l) 把社交网络上的
+    // 行为追踪数据列为**敏感个人数据**。所以这里必须 fail-closed：
+    // 只有用户**显式开过**（读到 "1"）才采集，其余一律不采集。
+    return (await activeStore.read()) === true;
   } catch {
     return false;
   }

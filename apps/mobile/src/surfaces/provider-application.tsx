@@ -6,7 +6,7 @@ import * as ImagePicker from "expo-image-picker";
 import { color } from "../theme";
 import { sessionAuthClient } from "../native-clients";
 import type { MediaClient } from "../media-client";
-import { ProxyLoading } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyLoading } from "../components/proxy-foundation";
 import { KYC_LOGO } from "../media/asset-sources";
 import { ProxyIcon } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
@@ -324,7 +324,7 @@ export function OrderPermissionGate({ children, onApply, onBack }: { children: R
   if (state === "granted") return <>{children}</>;
   return (
     <ScrollView contentContainerStyle={s.gatePage}>
-      <Pressable accessibilityLabel="返回" onPress={onBack}><Text selectable style={s.gateBack}>‹ 返回</Text></Pressable>
+      <Pressable accessibilityLabel="返回" onPress={onBack}><ProxyBackGlyph /></Pressable>
       <Text selectable style={s.gateTitle}>AI 分身</Text>
       {state === "loading" ? <ProxyLoading label="正在确认KYC认证状态" tone="muted" /> : <View style={s.card}>
         <Text selectable style={s.cardTitle}>{state === "error" ? "暂时确认不了KYC认证状态" : pending ? "KYC认证审核中" : "完成KYC认证后才能用 AI 分身"}</Text>
@@ -340,7 +340,7 @@ export function OrderPermissionGate({ children, onApply, onBack }: { children: R
 
 const s = StyleSheet.create({
   gatePage: { gap: 12, paddingBottom: 40, paddingHorizontal: 16, paddingTop: 12 },
-  gateBack: { color: color.magenta, fontSize: 13, fontWeight: "800" },
+  // gateBack 已删：字形由公共组件 ProxyBackGlyph 画（BACK-GLYPH-001）。
   gateTitle: { color: color.ink, fontSize: 22, fontWeight: "900" },
   wrap: { gap: 12, paddingBottom: 24 },
   introGap: { gap: 14 },

@@ -11,6 +11,7 @@ import type { ConversationClient, ConversationInboxItem, Meetup } from "../conve
 import type { MediaClient } from "../media-client";
 import type { ProfileClient, ProfileWire } from "../profile-client";
 import { color, foundation } from "../theme";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 // ROOM-CREATE-001（2026-09-22，用户原型 deepseek_html_20260922_c2625e.html
 // 「房间」页）：真实 GROUP conversation 聊天 + 见面邀约状态机（ProposeMeetup
@@ -242,7 +243,7 @@ export function RoomSurface({ conversationId, conversationClient, mediaClient, p
     <View style={[styles.root, presentation === "overlay" && styles.overlay, { paddingTop: safeArea.top }]}>
       <View style={styles.header}>
         <Pressable accessibilityLabel="返回" hitSlop={12} onPress={onClose} style={styles.headerBack}>
-          <Text selectable style={styles.headerBackText}>‹</Text>
+          <ProxyBackGlyph />
         </Pressable>
         <View style={styles.headerInfo}>
           <Text selectable style={styles.headerName} numberOfLines={1}>{roomName}</Text>
@@ -531,7 +532,6 @@ const styles = StyleSheet.create({
   overlay: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   header: { alignItems: "center", borderBottomColor: color.cardBorder, borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 12 },
   headerBack: { alignItems: "center", height: 30, justifyContent: "center", width: 26 },
-  headerBackText: { color: foundation.ink, fontSize: 24, fontWeight: "600" },
   headerInfo: { flex: 1 },
   headerName: { color: foundation.ink, fontSize: 15, fontWeight: "800" },
   headerSub: { color: color.muted, fontSize: 11, marginTop: 2 },

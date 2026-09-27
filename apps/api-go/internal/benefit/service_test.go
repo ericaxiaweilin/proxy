@@ -631,3 +631,95 @@ func TestEligibilityEngineWiredInRedeemPath(t *testing.T) {
 		t.Fatalf("expected ELIGIBILITY_FAILED, got %+v", redeem.Error)
 	}
 }
+
+// BENEFIT-READ-001: ListCampaigns/GetCampaign/ListClaims/GetClaim used to be
+// called by the mobile client but were never registered in Supports() —
+// every call rejected with BENEFIT_UNSUPPORTED. This locks in that the
+// read surface actually works end to end, and that claim reads are scoped
+// to the caller, not a client-supplied userID/claimId.
+func TestListAndGetCampaignsAndClaims(t *testing.T) {
+	repo := NewMemoryRepository()
+	clock := &testClock{now: time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)}
+	svc := NewServiceWithClock(repo, clock)
+	ctx := context.Background()
+
+	create := svc.HandleCreateCampaign(ctx, command.Envelope{
+		Actor: command.Actor{Type: "MERCHANT", ID: "m1"},
+		Payload: map[string]any{
+			"type": "SCENE_IGNITION", "ownerType": "merchant", "ownerId": "m1",
+			"sceneIds": []string{"scene_1"}, "goal": "test", "budgetMinor": 1000,
+			"currency": "VND", "startAt": "2026-09-24T00:00:00Z", "endAt": "2026-09-30T00:00:00Z",
+		},
+	})
+	if create.Outcome != "ACCEPTED" {
+		t.Fatalf("create campaign expected ACCEPTED, got %s: %+v", create.Outcome, create.Error)
+	}
+	campaignID := create.Aggregate.ID
+
+	if !svc.Supports("ListCampaigns") || !svc.Supports("GetCampaign") || !svc.Supports("ListClaims") || !svc.Supports("GetClaim") {
+		t.Fatal("expected the four read commands to be registered in Supports()")
+	}
+
+	list := svc.HandleListCampaigns(ctx, command.Envelope{Actor: command.Actor{Type: "INDIVIDUAL", ID: "u1"}})
+	if list.Outcome != "ACCEPTED" {
+		t.Fatalf("ListCampaigns expected ACCEPTED, got %s: %+v", list.Outcome, list.Error)
+	}
+	campaigns, _ := list.Body["campaigns"].([]Campaign)
+	if len(campaigns) != 1 || campaigns[0].ID != campaignID {
+		t.Fatalf("expected the created campaign back, got %+v", list.Body["campaigns"])
+	}
+
+	get := svc.HandleGetCampaign(ctx, command.Envelope{
+		Actor:   command.Actor{Type: "INDIVIDUAL", ID: "u1"},
+		Payload: map[string]any{"campaignId": campaignID},
+	})
+	if get.Outcome != "ACCEPTED" {
+		t.Fatalf("GetCampaign expected ACCEPTED, got %s: %+v", get.Outcome, get.Error)
+	}
+
+	_ = svc.HandleActivateCampaign(ctx, command.Envelope{
+		Actor:   command.Actor{Type: "MERCHANT", ID: "m1"},
+		Payload: map[string]any{"campaignId": campaignID},
+	})
+	claim := svc.HandleClaimBenefit(ctx, command.Envelope{
+		Actor:   command.Actor{Type: "INDIVIDUAL", ID: "u1"},
+		Payload: map[string]any{"campaignId": campaignID, "benefitId": "b1"},
+	})
+	if claim.Outcome != "ACCEPTED" {
+		t.Fatalf("claim expected ACCEPTED, got %s: %+v", claim.Outcome, claim.Error)
+	}
+	claimID := claim.Aggregate.ID
+
+	// The owning user sees their claim in ListClaims/GetClaim.
+	listClaims := svc.HandleListClaims(ctx, command.Envelope{Actor: command.Actor{Type: "INDIVIDUAL", ID: "u1"}})
+	if listClaims.Outcome != "ACCEPTED" {
+		t.Fatalf("ListClaims expected ACCEPTED, got %s: %+v", listClaims.Outcome, listClaims.Error)
+	}
+	claims, _ := listClaims.Body["claims"].([]Claim)
+	if len(claims) != 1 || claims[0].ID != claimID {
+		t.Fatalf("expected u1's own claim back, got %+v", listClaims.Body["claims"])
+	}
+
+	getClaim := svc.HandleGetClaim(ctx, command.Envelope{
+		Actor:   command.Actor{Type: "INDIVIDUAL", ID: "u1"},
+		Payload: map[string]any{"claimId": claimID},
+	})
+	if getClaim.Outcome != "ACCEPTED" {
+		t.Fatalf("GetClaim expected ACCEPTED for the owner, got %s: %+v", getClaim.Outcome, getClaim.Error)
+	}
+
+	// A different user must not be able to read u1's claim by ID, and
+	// ListClaims must not leak it into someone else's list either.
+	otherGet := svc.HandleGetClaim(ctx, command.Envelope{
+		Actor:   command.Actor{Type: "INDIVIDUAL", ID: "u2"},
+		Payload: map[string]any{"claimId": claimID},
+	})
+	if otherGet.Outcome != "REJECTED" || otherGet.Error == nil || otherGet.Error.ErrorCode != "CLAIM_NOT_FOUND" {
+		t.Fatalf("expected another user's GetClaim to reject as not-found, got %s: %+v", otherGet.Outcome, otherGet.Error)
+	}
+	otherList := svc.HandleListClaims(ctx, command.Envelope{Actor: command.Actor{Type: "INDIVIDUAL", ID: "u2"}})
+	otherClaims, _ := otherList.Body["claims"].([]Claim)
+	if len(otherClaims) != 0 {
+		t.Fatalf("expected u2's claim list to be empty, got %+v", otherClaims)
+	}
+}

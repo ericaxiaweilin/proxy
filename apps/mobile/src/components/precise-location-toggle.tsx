@@ -137,7 +137,7 @@ function _unusedLocaleRef(locale: ToggleLocale): ToggleLocale { return locale; }
 const styles = StyleSheet.create({
   card: {
     padding: 16,
-    backgroundColor: color.surface ?? "color.white",
+    backgroundColor: color.surface ?? color.white,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.line ?? "#E5E5E5",
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.line ?? "#E5E5E5",
     alignItems: "center",
-    backgroundColor: color.surface ?? "color.white",
+    backgroundColor: color.surface ?? color.white,
   },
   choicePressed: { opacity: 0.6 },
   choiceText: { fontSize: 15, color: color.ink ?? "#111111" },

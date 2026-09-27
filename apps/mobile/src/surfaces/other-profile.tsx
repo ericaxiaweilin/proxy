@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
+import type { FeedMediaItem, FeedPost, PostEngagement } from "@proxy/contracts";
 import type { EngagementClient } from "../engagement-client";
 import type { LocalNetClient } from "../localnet-client";
 import type { ModerationClient } from "../moderation-client";
 import { ReportSheet } from "../components/report-sheet";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 import type { SecureSessionStore } from "../secure-session";
 import { color } from "../theme";
 import { ProfileTabs, type ProfileMediaEntry } from "./ProfileTabs";
@@ -178,13 +179,18 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
     return () => { cancelled = true; };
   }, [engagement, localNet, target.userId]);
 
-  async function likePost(postId: string): Promise<void> {
+  // PROFILE-ACTION-COUNTS-001：把 reactToPost 拿到的新 engagement **返回出去**
+  // —— ProfileTabs 的动作行现在显示真实计数，计数的持有者是它自己。以前这里
+  // 只 await 不返回，于是点完赞数字停在旧值上。
+  async function likePost(postId: string): Promise<PostEngagement | undefined> {
     setNotice(undefined);
     try {
-      await engagement.reactToPost(postId, "LIKE", true);
+      const next = await engagement.reactToPost(postId, "LIKE", true);
       setNotice("已点赞");
+      return next;
     } catch {
       setNotice("点赞没有提交成功，请检查连接后重试。");
+      return undefined;
     }
   }
 
@@ -201,7 +207,7 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
   }
 
   return <View style={styles.root}>
-    <View style={styles.header}><Pressable onPress={onBack} style={styles.back}><Text selectable style={styles.backText}>‹ 返回</Text></Pressable><Text selectable style={styles.headerTitle}>{target.name}</Text><Pressable onPress={() => setReporting(true)} style={styles.headerAction} accessibilityLabel="举报这个账号"><Text selectable style={styles.headerActionText}>举报</Text></Pressable></View>
+    <View style={styles.header}><Pressable onPress={onBack} style={styles.back}><ProxyBackGlyph label="返回" /></Pressable><Text selectable style={styles.headerTitle}>{target.name}</Text><Pressable onPress={() => setReporting(true)} style={styles.headerAction} accessibilityLabel="举报这个账号"><Text selectable style={styles.headerActionText}>举报</Text></Pressable></View>
     <ScrollView contentContainerStyle={styles.content}>
       {/* PROFILE-HEAD-PARITY-001: 头部跟「我的 → 个人主页」对齐。参考稿 (Threads R2)
           是名字在左、头像在右的一行；这里以前是反过来的（头像在左、名字在右），
@@ -234,7 +240,7 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
           只是没人喂真图给它，所以每条帖子都落回首字母。不是另一套管线要修，
           是同一套管线里这一路调用方漏接的最后一根线，跟顶部身份区用的
           target.avatarUri 是同一个值。 */}
-      <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} profileAvatarUri={target.avatarUri} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replies={replyEntries} replyTargets={replyTargets} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={(entry) => setViewer(entry)} onLikePost={(postId) => void likePost(postId)} engagementClient={engagement} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" viewerAccountId={viewerAccountId} isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name, target.avatarUri)} />
+      <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} profileAvatarUri={target.avatarUri} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replies={replyEntries} replyTargets={replyTargets} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={(entry) => setViewer(entry)} onLikePost={(postId) => likePost(postId)} engagementClient={engagement} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" viewerAccountId={viewerAccountId} isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name, target.avatarUri)} />
     </ScrollView>
     {viewer && viewedItems.length > 0 ? <MediaViewer items={viewedItems} index={viewer.index} author={target.name} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onNavigate={(index) => setViewer((current) => current ? { ...current, index } : current)} onClose={() => setViewer(undefined)} analytics={localNet} /> : null}
     {/* COMP-REPORT-002: 举报账号。target 用 userId —— 举报要指到账号，
@@ -253,4 +259,4 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
   </View>;
 }
 
-const styles=StyleSheet.create({root:{backgroundColor:color.offWhite,flex:1},header:{alignItems:"center",borderBottomColor:color.line,borderBottomWidth:1,flexDirection:"row",height:50,paddingHorizontal:16},back:{flex:1},backText:{color:color.magenta,fontSize:15,fontWeight:"800"},headerTitle:{color:color.ink,fontSize:17,fontWeight:"900"},headerSpacer:{flex:1},headerAction:{alignItems:"flex-end",flex:1},headerActionText:{color:color.muted,fontSize:14,fontWeight:"700"},content:{paddingBottom:30},head:{alignItems:"flex-start",flexDirection:"row",gap:16,justifyContent:"space-between",paddingHorizontal:18,paddingTop:7},headCopy:{flex:1,minWidth:0},avatarWrap:{height:82,width:82},avatar:{alignItems:"center",backgroundColor:"#EDE4FF",borderColor:"#ececec",borderRadius:41,borderWidth:1,height:82,justifyContent:"center",overflow:"hidden",width:82},avatarPhoto:{height:"100%",width:"100%"},avatarText:{color:"#5B3FB8",fontSize:27,fontWeight:"800"},name:{color:color.ink,fontSize:24,fontWeight:"800",letterSpacing:-0.96,lineHeight:28},handle:{color:"#444",fontSize:11,marginTop:4},introRow:{alignItems:"center",flexDirection:"row",paddingHorizontal:18,paddingTop:10},introText:{color:color.ink,flex:1,fontSize:11,lineHeight:16},statRow:{alignItems:"center",flexDirection:"row",gap:18,justifyContent:"flex-start",marginBottom:15,marginTop:12,paddingHorizontal:18},statText:{color:"#8c8c8c",fontSize:11},statValue:{color:"#111",fontWeight:"800"},notice:{color:color.error,fontSize:12,paddingHorizontal:18,paddingBottom:8}});
+const styles=StyleSheet.create({root:{backgroundColor:color.offWhite,flex:1},header:{alignItems:"center",borderBottomColor:color.line,borderBottomWidth:1,flexDirection:"row",height:50,paddingHorizontal:16},back:{flex:1},headerTitle:{color:color.ink,fontSize:17,fontWeight:"900"},headerSpacer:{flex:1},headerAction:{alignItems:"flex-end",flex:1},headerActionText:{color:color.muted,fontSize:14,fontWeight:"700"},content:{paddingBottom:30},head:{alignItems:"flex-start",flexDirection:"row",gap:16,justifyContent:"space-between",paddingHorizontal:18,paddingTop:7},headCopy:{flex:1,minWidth:0},avatarWrap:{height:82,width:82},avatar:{alignItems:"center",backgroundColor:"#EDE4FF",borderColor:"#ececec",borderRadius:41,borderWidth:1,height:82,justifyContent:"center",overflow:"hidden",width:82},avatarPhoto:{height:"100%",width:"100%"},avatarText:{color:"#5B3FB8",fontSize:27,fontWeight:"800"},name:{color:color.ink,fontSize:24,fontWeight:"800",letterSpacing:-0.96,lineHeight:28},handle:{color:"#444",fontSize:11,marginTop:4},introRow:{alignItems:"center",flexDirection:"row",paddingHorizontal:18,paddingTop:10},introText:{color:color.ink,flex:1,fontSize:11,lineHeight:16},statRow:{alignItems:"center",flexDirection:"row",gap:18,justifyContent:"flex-start",marginBottom:15,marginTop:12,paddingHorizontal:18},statText:{color:"#8c8c8c",fontSize:11},statValue:{color:"#111",fontWeight:"800"},notice:{color:color.error,fontSize:12,paddingHorizontal:18,paddingBottom:8}});

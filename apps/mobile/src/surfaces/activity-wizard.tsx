@@ -20,6 +20,7 @@ import {
   type ActivitySpecs,
   type ActivityTemplate
 } from "../activity-moments";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 type Step = "template" | "settings" | "preview" | "done";
 
@@ -99,7 +100,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onView
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.head}>
         <Pressable accessibilityLabel="返回" onPress={back} style={styles.backBtn}>
-          <Text selectable style={styles.backText}>‹</Text>
+          <ProxyBackGlyph />
         </Pressable>
         <Text selectable style={styles.title}>{step === "done" ? "✓ 活动已创建" : "创建活动"}</Text>
         <View style={styles.headSpacer} />
@@ -277,7 +278,6 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 32, paddingHorizontal: 16, paddingTop: 8 },
   head: { alignItems: "center", flexDirection: "row", marginBottom: 12 },
   backBtn: { alignItems: "center", height: 38, justifyContent: "center", width: 38 },
-  backText: { color: color.ink, fontSize: 24, fontWeight: "800", lineHeight: 28 },
   title: { color: color.ink, flex: 1, fontSize: 20, fontWeight: "900", textAlign: "center" },
   headSpacer: { width: 38 },
   tabs: { flexDirection: "row", gap: 8, marginBottom: 10 },

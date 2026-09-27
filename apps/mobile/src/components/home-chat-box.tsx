@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
   photoMenuTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
   photoMenuSub: { color: color.muted, fontSize: 11, marginTop: 2 },
   photoMenuRemove: { color: color.error, fontSize: 19, lineHeight: 20, width: 13 },
-  photoPreviewRow: { alignItems: "center", backgroundColor: "color.homeIntentInputBg", borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 8, padding: 8 },
+  photoPreviewRow: { alignItems: "center", backgroundColor: color.homeIntentInputBg, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 8, padding: 8 },
   photoPreview: { borderRadius: 10, height: 52, width: 52 },
   photoPreviewCopy: { flex: 1 },
   photoRemoveButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },

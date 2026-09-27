@@ -48,8 +48,16 @@ describe("STORE-HUB-NAV-001 我的店铺的返回只有一个", () => {
     expect(countOf(hubCode, "s.backRow")).toBe(1);
     expect(hubCode).toContain("function HubNav(");
     // 两种落点各一次：列表态退到「我的」，详情态回列表。
-    expect(hubCode).toContain('backLabel="‹ 返回" onBack={onBack}');
-    expect(hubCode).toContain('backLabel="‹ 返回店铺列表"');
+    //
+    // BACK-GLYPH-001（2026-09-26）：label 现在只写**文字**。原来传的是 `"‹ 返回"`
+    // —— `‹` 是文本引号、不是箭头，而且 2026-09-25 那次 PROFILE-QR-003 提交把它
+    // 退成了裸 `"‹"`（只有字形、没有目的地），正是这条钉要防的事：标签不写目的地，
+    // 就是替用户猜。现在字形由公共原语 ProxyBackGlyph 画，`‹` 从源码里消失。
+    expect(hubCode).toContain('backLabel="返回" onBack={onBack}');
+    expect(hubCode).toContain('backLabel="返回店铺列表"');
+    // 字形必须来自公共原语，不许再手写字符字形（剥过注释，所以这条是真断言）。
+    expect(hubCode).toContain("<ProxyBackGlyph label={backLabel} />");
+    expect(hubCode).not.toContain("‹");
     // 详情态的回调必须回列表（setSelectedId(undefined)），不能是 onBack（退出整页）。
     expect(hubCode).toContain("onBack={() => { setSelectedId(undefined); setCopied(false); }}");
   });

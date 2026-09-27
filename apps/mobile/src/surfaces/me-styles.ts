@@ -11,7 +11,19 @@ export const styles = StyleSheet.create({
   content: { paddingBottom: 18, paddingHorizontal: 15, paddingTop: 11 },
   orderPageHead: { alignItems: "center", flexDirection: "row", gap: 10, marginBottom: 12 },
   orderBack: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, height: 40, justifyContent: "center", width: 40 },
-  orderBackText: { color: color.ink, fontSize: 22, fontWeight: "800" },
+  // orderBackText / subPageBackText / personalTopbarIcon / trustedReturnText 已删：
+  // 这 4 个才是给 `‹` 那份 Text 用的字号/颜色（orderBackText 22pt ink、
+  // subPageBackText 12pt **magenta**、personalTopbarIcon 21pt、trustedReturnText 11pt），
+  // 字形和标签现在由公共组件 ProxyBackGlyph 画（BACK-GLYPH-001）。
+  // 删之前逐个查过引用数 = 0 —— 注意这个文件被 7 个 surface 共享，只在 me.tsx 里数
+  // 会得出假结论。
+  // ⚠️⚠️ appBehaviorReturnText **不是**返回字形样式，名字骗人：它是**白字 11pt 的
+  // 动作链接文字**（「刷新」/「在地图上打开这家店」/「改了重新推荐」/「推荐评估队列」），
+  // 由 my-store-recommendations / store-recommendation-manage / store-recommendation-queue
+  // 三个 surface 使用。清扫脚本按名字把它当返回样式删掉后，typecheck 立刻报 7 处
+  // TS2551 —— 所以它回来了，**不要再删**。
+  appBehaviorReturnText: { color: color.white, fontSize: 11, fontWeight: "800" },
+  // ⚠️ lightCtaText 也留着 —— 它同时是「接受 / 拒绝」等按钮的文字样式，还有 10 处引用。
   orderTabs: { marginBottom: 12 },
   orderTab: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, marginRight: 7, paddingHorizontal: 13, paddingVertical: 9 },
   orderTabOn: { backgroundColor: color.ink, borderColor: color.ink },
@@ -289,7 +301,7 @@ export const styles = StyleSheet.create({
   signOutText: { color: "#A84A69", fontSize: 11, fontWeight: "800" },
 
   subPageBack: { marginBottom: 10, paddingVertical: 4 },
-  subPageBackText: { color: color.magenta, fontSize: 12, fontWeight: "700" },
+  
   subPageIcon: {
     alignItems: "center",
     backgroundColor: color.lime,
@@ -368,7 +380,7 @@ export const styles = StyleSheet.create({
   appBehaviorActionPrimaryText: { color: color.white, fontSize: 11, fontWeight: "800" },
   appBehaviorActionDangerText: { color: "#A84A69", fontSize: 11, fontWeight: "800" },
   appBehaviorReturn: { alignItems: "center", backgroundColor: color.magenta, borderRadius: 999, marginTop: 10, paddingVertical: 10 },
-  appBehaviorReturnText: { color: color.white, fontSize: 11, fontWeight: "800" },
+  
 
   detailTitle: { color: color.ink, fontSize: 19, fontWeight: "700", marginTop: 8 },
   detailSub: { color: color.muted, fontSize: 11, lineHeight: 15, marginBottom: 8, marginTop: 3 },
@@ -506,7 +518,7 @@ export const styles = StyleSheet.create({
   trustedInvite: { alignItems: "center", borderRadius: 14, justifyContent: "center", minHeight: 51 },
   trustedInviteText: { color: color.white, fontSize: 11, fontWeight: "900" },
   trustedReturn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, justifyContent: "center", marginTop: 8, minHeight: 51 },
-  trustedReturnText: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  
   diagnosticTitleRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   diagnosticTag: { backgroundColor: "#F3EAFD", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
   diagnosticTagText: { color: "#7039BE", fontSize: 11, fontWeight: "900" },
@@ -898,7 +910,7 @@ export const styles = StyleSheet.create({
     paddingTop: 7
   },
   personalTopbarButton: { alignItems: "center", height: 34, justifyContent: "center", width: 34 },
-  personalTopbarIcon: { color: color.ink, fontSize: 21, fontWeight: "300", lineHeight: 24 },
+  
   personalTopbarTools: { flexDirection: "row", gap: 5 },
   personalTopbarIconBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
 

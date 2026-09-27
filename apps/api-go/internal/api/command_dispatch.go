@@ -293,6 +293,12 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.Location.HandleContext(ctx, envelope)
 	case s.Benefit != nil && s.Benefit.Supports(envelope.CommandType):
 		return s.Benefit.HandleContext(ctx, envelope)
+	case s.Growth != nil && s.Growth.Supports(envelope.CommandType):
+		return s.Growth.HandleContext(ctx, envelope)
+	case s.Rating != nil && s.Rating.Supports(envelope.CommandType):
+		return s.Rating.HandleContext(ctx, envelope)
+	case s.SceneReview != nil && s.SceneReview.Supports(envelope.CommandType):
+		return s.SceneReview.HandleContext(ctx, envelope)
 	case s.Profile != nil && s.Profile.Supports(envelope.CommandType):
 		return s.Profile.HandleContext(ctx, envelope)
 	// COMP-REPORT-001: user report intake. Listed last because ReportTarget

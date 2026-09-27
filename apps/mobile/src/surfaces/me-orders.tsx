@@ -3,6 +3,8 @@ import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-nativ
 import * as ImagePicker from "expo-image-picker";
 import type { Activity } from "@proxy/contracts";
 import { ActivityClient, ActivityCommandRejectedError } from "../activity-client";
+import type { BusinessClient } from "../business-client";
+import { loadStoreOptions, type StoreOption } from "../my-store-options";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import type { MediaClient } from "../media-client";
 import type { ModerationClient } from "../moderation-client";
@@ -13,7 +15,7 @@ import { color } from "../theme";
 import { ActivityDetailSurface } from "./activity-detail";
 import { activityAIPersonaName } from "./activity-detail-model";
 import { styles } from "./me-styles";
-import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyEmptyState, ProxyLoading } from "../components/proxy-foundation";
 import { createSceneFavoritesStore, resolveSavedSceneIds, type SavedSceneEntry } from "../scene-favorites";
 import { savedSceneLookup } from "../components/scene-activity-discovery";
 import { fetchProviderStats, formatRate, permissionLine, type ProviderStatsView } from "../provider-application-client";
@@ -75,7 +77,7 @@ function ProviderOrderPanel({ onOpenApply }: { onOpenApply?: (() => void) | unde
   );
 }
 
-export function MyOrdersSurface({ client, moderation, mediaClient, onBack, onOpenApply }: {
+export function MyOrdersSurface({ client, moderation, mediaClient, business, onBack, onOpenApply }: {
   client: FulfillmentClient;
   // COMP-REPORT-002: 举报这笔交易。钱与线下见面都在这一层 —— 诈骗、
   // 招嫖揽客、人身威胁的暴露面正是订单，不是帖子。
@@ -83,6 +85,9 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack, onOpe
   // ORDER-EXEC-001: 提交证据要传照片，没有 mediaClient 就不画证据入口，
   // 不摆拍不了照的假按钮。
   mediaClient?: MediaClient | undefined;
+  // STORE-STATS-001：完成订单时把这一单归到自己的哪家店。没有 business
+  // 就不画归因选择器（不摆一个选不了的假控件）。
+  business?: BusinessClient | undefined;
   onBack: () => void;
   // ORDER-CENTER-STATS-001：接单面板「去申请 / 查看进度」→ 接单权限申请页。
   onOpenApply?: (() => void) | undefined;
@@ -159,6 +164,21 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack, onOpe
   const [outcomeScope, setOutcomeScope] = useState(true);
   const [outcomeNote, setOutcomeNote] = useState("");
   const [outcomePhoto, setOutcomePhoto] = useState<{ uri: string; mimeType: string; width: number; height: number } | undefined>(undefined);
+  // STORE-STATS-001 归因：履约方完成订单时指认「这笔单在我哪家店完成」。
+  // 取法和「我的店铺」同一套（ACTIVE 企业、逐个账号读失败不中断，见 my-store-options.ts）。
+  // 读失败要单独记 —— 「列表读不出来」和「你确实没有店」不是一回事，前者得说一句，
+  // 不能静默装成没有。
+  const [myStores, setMyStores] = useState<StoreOption[]>([]);
+  const [storesFailed, setStoresFailed] = useState(false);
+  const [outcomeStoreId, setOutcomeStoreId] = useState("");
+  useEffect(() => {
+    if (!business) return;
+    let active = true;
+    void loadStoreOptions(business).then((result) => {
+      if (active) { setMyStores(result.rows); setStoresFailed(result.failed); }
+    });
+    return () => { active = false; };
+  }, [business]);
   const [satisfactionResolved, setSatisfactionResolved] = useState<"FULL" | "PARTIAL" | "NONE">("FULL");
   const [satisfactionRepeat, setSatisfactionRepeat] = useState<"" | "REUSE" | "MAYBE" | "NO">("");
   const [settleAmount, setSettleAmount] = useState("");
@@ -216,10 +236,12 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack, onOpe
     setOutcomePhoto({ uri: asset.uri, mimeType: asset.mimeType ?? "image/jpeg", width: asset.width ?? 0, height: asset.height ?? 0 });
   }
 
-  // 确认完成 = 可选附一张证据照片 + 准时/范围/备注，一次提交。照片先上传拿
-  // mediaAssetId 再调记录结果；没选照片就只记结果，不摆拍不了照的假按钮。
+  // 确认完成 = 可选附一张证据照片 + 准时/范围/备注 + 可选归因到自己的店，一次提交。
+  // 照片先上传拿 mediaAssetId 再调记录结果；没选照片就只记结果，不摆拍不了照的假按钮。
   // 小单在 CONFIRMED 点确认完成时先自动开工（服务端强制过 EXECUTING），
   // 用户只点一次，两次状态翻转都在服务端留痕。
+  // STORE-STATS-001：归因和状态翻转在同一次提交里 —— 分开做会出现「单已完成但归因
+  // 没落」的中间态，而 RecordOutcome 是记录结果的唯一入口，之后没有再改归因的命令。
   async function submitCompletion(orderId: string, lifecycle: string): Promise<void> {
     if (!mediaClient && outcomePhoto) return;
     setActError(undefined);
@@ -232,9 +254,15 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack, onOpe
       if (lifecycle === "CONFIRMED") {
         await client.startExecution(orderId);
       }
-      await runOrderAction("确认完成", orderId, () => client.recordOutcome(orderId, { onTime: outcomeOnTime, scopeCompleted: outcomeScope, ...(outcomeNote.trim() ? { objectiveNote: outcomeNote.trim() } : {}) }));
+      await runOrderAction("确认完成", orderId, () => client.recordOutcome(orderId, {
+        onTime: outcomeOnTime,
+        scopeCompleted: outcomeScope,
+        ...(outcomeNote.trim() ? { objectiveNote: outcomeNote.trim() } : {}),
+        ...(outcomeStoreId ? { storeId: outcomeStoreId } : {}),
+      }));
       setOutcomePhoto(undefined);
       setOutcomeNote("");
+      setOutcomeStoreId("");
     } catch (error) {
       setActError(humanOrderError(error, "完成提交失败，请稍后重试。"));
     } finally {
@@ -265,7 +293,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack, onOpe
     return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
-          <Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}><Text selectable style={styles.subPageBackText}>‹ 返回订单</Text></Pressable>
+          <Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}><ProxyBackGlyph /></Pressable>
           <Text selectable style={styles.detailTitle}>订单详情</Text>
           <View style={styles.orderCard}>
             <View style={styles.orderHead}>
@@ -364,6 +392,32 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack, onOpe
                 style={styles.actInput}
                 accessibilityLabel="结果说明"
               />
+              {/* STORE-STATS-001 归因：只有履约方（AGENT）能指认 —— 店铺统计记的是
+                  「这家店接了多少单」，让需求方替店家决定记给谁不合适。没有店、或
+                  没接 business 客户端，就整块不画（不摆一个选不了的假控件）。 */}
+              {detail.viewerRole === "AGENT" && business ? (
+                storesFailed ? (
+                  <Text selectable style={styles.orderFieldLabel}>店铺列表没读出来，这次先不计入店铺统计。</Text>
+                ) : myStores.length > 0 ? (
+                  <View>
+                    <Text selectable style={styles.orderFieldLabel}>
+                      {outcomeStoreId ? `计入「${myStores.find((store) => store.id === outcomeStoreId)?.name ?? ""}」的经营数据` : "这笔单在我哪家店完成？不选就不计入店铺统计"}
+                    </Text>
+                    <View style={styles.actRow}>
+                      {myStores.map((store) => (
+                        <Pressable
+                          key={store.id}
+                          onPress={() => setOutcomeStoreId((current) => (current === store.id ? "" : store.id))}
+                          style={[styles.actChip, outcomeStoreId === store.id && styles.actChipOn]}
+                          accessibilityLabel={`归到店铺${store.name}`}
+                        >
+                          <Text selectable style={styles.actChipText}>{store.name}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                ) : null
+              ) : null}
               <Pressable
                 disabled={acting !== undefined || evidenceBusy}
                 onPress={() => void submitCompletion(detail.orderId, detail.lifecycle)}
@@ -481,7 +535,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, onBack, onOpe
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.orderPageHead}>
-          <Pressable onPress={onBack} style={styles.orderBack}><Text selectable style={styles.orderBackText}>‹</Text></Pressable>
+          <Pressable onPress={onBack} style={styles.orderBack}><ProxyBackGlyph /></Pressable>
           <Text selectable style={styles.detailTitle}>我的订单</Text>
         </View>
         <ProviderOrderPanel onOpenApply={onOpenApply} />
@@ -622,7 +676,7 @@ export function MyActivitiesSurface({ onBack, moderation }: { onBack: () => void
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.orderPageHead}>
-          <Pressable onPress={onBack} style={styles.orderBack}><Text selectable style={styles.orderBackText}>‹</Text></Pressable>
+          <Pressable onPress={onBack} style={styles.orderBack}><ProxyBackGlyph /></Pressable>
           <Text selectable style={styles.detailTitle}>我的活动</Text>
         </View>
         <View style={styles.activityOwnedTabs}>
@@ -718,7 +772,7 @@ export function FavoritesSurface({ onBack, viewerAccountId }: { onBack: () => vo
   // SCENE-FAVORITE-002：场景区在「全部」和「场景」两个页签都画 —— 有独立页签，
   // 切过去不会空掉。
   const showSceneSection = savedScenes.length > 0 && (tab === "all" || tab === "scene");
-  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text selectable style={styles.orderBackText}>‹</Text></Pressable><Text selectable style={styles.detailTitle}>收藏</Text></View><Text selectable style={styles.savedIntro}>很轻的个人备忘夹。以后还想找到，就放这里。</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['scene','场景'],['merchant','商家'],['creator','Creator'],['post','动态'],['activity','活动']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setTab(id)} style={[styles.orderTab, tab === id && styles.orderTabOn]}><Text selectable style={[styles.orderTabText, tab === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{showSceneSection ? <View><Text selectable style={styles.savedMeta}>场景灵感 · 来自首页收藏</Text>{savedScenes.map((scene) => <View key={scene.id} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text selectable style={styles.savedThumbText}>☆</Text></View><View><Text selectable style={styles.orderTitle}>{scene.title}</Text><Text selectable style={styles.savedMeta}>{scene.meta}</Text></View></View>)}</View> : null}{shown.length ? shown.map((item) => <View key={item.title} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text selectable style={styles.savedThumbText}>☆</Text></View><View><Text selectable style={styles.orderTitle}>{item.title}</Text><Text selectable style={styles.savedMeta}>{item.meta}</Text></View></View>) : (showSceneSection ? null : (tab === "scene" ? <ProxyEmptyState title="还没有收藏场景" sub="首页场景卡片右上角的 🤍 可以加入收藏" /> : <ProxyEmptyState title="还没有收藏列表" sub="动态收藏正在接入，这里不放示例数据。" />))}</ScrollView></View>;
+  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><ProxyBackGlyph /></Pressable><Text selectable style={styles.detailTitle}>收藏</Text></View><Text selectable style={styles.savedIntro}>很轻的个人备忘夹。以后还想找到，就放这里。</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['scene','场景'],['merchant','商家'],['creator','Creator'],['post','动态'],['activity','活动']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setTab(id)} style={[styles.orderTab, tab === id && styles.orderTabOn]}><Text selectable style={[styles.orderTabText, tab === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{showSceneSection ? <View><Text selectable style={styles.savedMeta}>场景灵感 · 来自首页收藏</Text>{savedScenes.map((scene) => <View key={scene.id} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text selectable style={styles.savedThumbText}>☆</Text></View><View><Text selectable style={styles.orderTitle}>{scene.title}</Text><Text selectable style={styles.savedMeta}>{scene.meta}</Text></View></View>)}</View> : null}{shown.length ? shown.map((item) => <View key={item.title} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text selectable style={styles.savedThumbText}>☆</Text></View><View><Text selectable style={styles.orderTitle}>{item.title}</Text><Text selectable style={styles.savedMeta}>{item.meta}</Text></View></View>) : (showSceneSection ? null : (tab === "scene" ? <ProxyEmptyState title="还没有收藏场景" sub="首页场景卡片右上角的 🤍 可以加入收藏" /> : <ProxyEmptyState title="还没有收藏列表" sub="动态收藏正在接入，这里不放示例数据。" />))}</ScrollView></View>;
 }
 
 // 商家活动导流：只列 Origin=MERCHANT 的开放活动（种子 + 商家实发），匿名
@@ -775,7 +829,7 @@ export function MerchantCampaignSurface({ onBack, moderation }: { onBack: () => 
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.orderPageHead}>
-          <Pressable onPress={onBack} style={styles.orderBack}><Text selectable style={styles.orderBackText}>‹</Text></Pressable>
+          <Pressable onPress={onBack} style={styles.orderBack}><ProxyBackGlyph /></Pressable>
           <Text selectable style={styles.detailTitle}>活动导流</Text>
         </View>
         {notice ? <Text selectable style={styles.savedMeta}>{notice}</Text> : null}

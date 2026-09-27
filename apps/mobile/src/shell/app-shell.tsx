@@ -77,6 +77,8 @@ import { RoomSurface } from "../surfaces/room";
 import { AIAccountProfileSurface } from "../surfaces/ai-account-profile";
 import { OtherProfileSurface, type OtherProfileTarget } from "../surfaces/other-profile";
 import { RealitySceneMapSurface } from "../surfaces/reality-scene-map";
+// ACTIVITY-REF-001：动态里的活动引用卡片点开落到这里（带 initialActivityId）。
+import { ActivityDetailSurface } from "../surfaces/activity-detail";
 import { VoucherSurface } from "../surfaces/voucher";
 import { color, shadows } from "../theme";
 import { type ActiveContext } from "../uiplan/types";
@@ -85,6 +87,7 @@ import type { SceneToolId } from "@proxy/contracts";
 import { SCENE_TOOLS } from "@proxy/contracts";
 import { selectShellChromeVisible } from "./app-shell-selectors";
 import { selectMotionProfile } from "./app-shell-selectors";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 // P0 原型的品牌图标，直接使用原始资源，不做裁剪、重绘或视觉加工。
 const OTTER_LOGO = require("../../assets/otter-logo.png");
@@ -343,7 +346,7 @@ export function AppShell({
         const absDy = Math.abs(dy);
         const swipeThreshold = 56;
         const isHorizontalSwipe = absDx > swipeThreshold && absDx > absDy * 1.25;
-        const canSwipeRoot = !rootSwipeBlockedRef.current && !realitySceneOpen && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen;
+        const canSwipeRoot = !rootSwipeBlockedRef.current && !realitySceneOpen && !activityDetailId && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen;
         if (isHorizontalSwipe && canSwipeRoot) {
           const page = currentPageRef.current;
           const idx = PAGE_SEQUENCE.indexOf(page);
@@ -384,6 +387,10 @@ export function AppShell({
   const [followDevice, setFollowDevice] = useState(true);
   const [locationRestoreDone, setLocationRestoreDone] = useState(false);
   const [realitySceneOpen, setRealitySceneOpen] = useState(false);
+  // ACTIVITY-REF-001：从动态里的活动卡片进活动详情。存 id 而不是 boolean ——
+  // 「打开活动详情」必须指向**某一个**活动。以前只有不带 id 的 ACTIVITY_DETAIL
+  // 路由（coming-soon.tsx），点进去只能落到活动列表，不是引用指向的那个活动。
+  const [activityDetailId, setActivityDetailId] = useState<string>();
   const [realitySceneSelection, setRealitySceneSelection] = useState<string>();
   const [realitySceneAI, setRealitySceneAI] = useState<PlatformAIAccount>();
   const [realitySceneHuman, setRealitySceneHuman] = useState<OtherProfileTarget>();
@@ -472,6 +479,7 @@ export function AppShell({
     if (Platform.OS !== "android") return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (handleModuleBack()) return true;
+      if (activityDetailId) { setActivityDetailId(undefined); return true; }
       if (realitySceneOpen) { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneOpen(false); return true; }
       if (voucherOpen) { setVoucherOpen(false); return true; }
       if (tab === "ME" && messageChatAuthor) { setMessageChat(undefined); return true; }
@@ -592,7 +600,7 @@ export function AppShell({
   // body 的目的地」，不是某个 tab 的子页面 —— 所以也要一起收掉导航 chrome。
   // 否则从动态点进他人主页后底栏还在，用户切个 tab 就会被留在一个没人负责关闭的
   // 主页上（它的写入方不在那个 tab，返回键也回不到正确的来源）。
-  const isNavVisible = !realitySceneOpen && !openAIProfile && !openHumanProfile && !meSubPageOpen && selectShellChromeVisible({
+  const isNavVisible = !realitySceneOpen && !activityDetailId && !openAIProfile && !openHumanProfile && !meSubPageOpen && selectShellChromeVisible({
     tab,
     feedChromeVisible,
     homeChromeVisible,
@@ -707,7 +715,14 @@ export function AppShell({
           会立刻让动态入口再次失效，而且不会有任何测试变红。
           ============================================================
         */}
-        {realitySceneOpen ? (
+        {activityDetailId ? (
+          <ActivityDetailSurface
+            client={activities}
+            moderation={moderation}
+            initialActivityId={activityDetailId}
+            onBack={() => setActivityDetailId(undefined)}
+          />
+        ) : realitySceneOpen ? (
           <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} featuredAIAccount={realitySceneAI} featuredHuman={realitySceneHuman} initialSceneId={realitySceneSelection} {...(sceneMapOrigin ? { initialOrigin: sceneMapOrigin } : {})} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} onOpenAIProfile={(account) => { setAIProfileReturnToScene(true); setRealitySceneOpen(false); setOpenAIProfile(account); }} onOpenHumanProfile={(person) => { setHumanProfileReturnToScene(true); setRealitySceneOpen(false); setOpenHumanProfile({ ...person, posts: [], mediaByPost: {} }); }} />
         ) : openAIProfile ? (
           <AIAccountProfileSurface
@@ -946,6 +961,7 @@ export function AppShell({
               mediaClient={media}
               socialSpace={socialSpace}
               secureSessionStore={secureSessionStore}
+              conversationClient={conversation}
               {...(viewerAccountId ? { viewerAccountId } : {})}
               {...(feedSearchSeed ? { initialSearchQuery: feedSearchSeed } : {})}
               onSearchSeedConsumed={() => setFeedSearchSeed(undefined)}
@@ -955,6 +971,10 @@ export function AppShell({
               // MEDIA-PIPELINE-001: AI 账号目录透传，动态解析 AGENT 帖头像。
               aiAccountsClient={aiAccounts}
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
+              // ACTIVITY-REF-001：帖文里的活动引用（contextId = activityId）解析成
+              // 卡片要活动读模型；点卡片进活动详情。两者都从这一层透传下去。
+              activityClient={activities}
+              onOpenActivity={(activityId) => setActivityDetailId(activityId)}
               onOpenProfile={(profile) => setOpenHumanProfile(profile)}
               refreshTrigger={feedRefreshTrigger}
               bottomNavVisible={isNavVisible}
@@ -1123,7 +1143,7 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
   }
   return (
     <View style={styles.composerRoot}>
-      <Pressable onPress={onBack} style={styles.composerBack}><Text selectable style={styles.composerBackText}>‹ 返回</Text></Pressable>
+      <Pressable onPress={onBack} style={styles.composerBack}><ProxyBackGlyph label="返回" /></Pressable>
       <Text selectable style={styles.composerTitle}>{meta?.label ?? tool} · Scene Composer</Text>
       <Text selectable style={styles.composerSub}>P0: 把意图变成可邀请的 Scene — 预算进场景而非买人</Text>
       <View style={styles.composerField}><Text selectable style={styles.composerLabel}>意图</Text><View style={styles.composerInput}><Text selectable style={styles.composerInputText}>例如：周六下午想在西湖拍照 · 2–4人</Text></View></View>
@@ -1712,7 +1732,7 @@ const styles = StyleSheet.create({
 
   composerRoot: { flex: 1, padding: 16, gap: 10, backgroundColor: color.offWhite },
   composerBack: { alignSelf: "flex-start", paddingVertical: 6 },
-  composerBackText: { color: color.muted, fontSize: 14, fontWeight: "700" },
+  // composerBackText 已删：字形和标签都由公共组件 ProxyBackGlyph 画（BACK-GLYPH-001）。
   composerTitle: { color: color.ink, fontSize: 22, fontWeight: "900" },
   composerSub: { color: color.muted, fontSize: 12, lineHeight: 17 },
   composerField: { marginTop: 6, gap: 6 },
@@ -1730,10 +1750,10 @@ const styles = StyleSheet.create({
   invitePreviewHint: { color: color.muted, fontSize: 11 },
   composerCTA: { backgroundColor: color.ink, borderRadius: 14, paddingVertical: 14, alignItems: "center", marginTop: 8 },
   composerCTAText: { color: color.white, fontSize: 14, fontWeight: "900" },
-  guardWarn: { backgroundColor: "color.stateDangerBg", borderColor: "color.stateDangerBorder", borderWidth: 1, borderRadius: 12, padding: 10 },
-  guardWarnText: { color: "color.error", fontSize: 12, fontWeight: "700" },
-  guardOk: { backgroundColor: "color.organicBg", borderColor: "color.mint", borderWidth: 1, borderRadius: 12, padding: 10 },
-  guardOkText: { color: "color.organicFg", fontSize: 12, fontWeight: "700" },
+  guardWarn: { backgroundColor: color.stateDangerBg, borderColor: color.stateDangerBorder, borderWidth: 1, borderRadius: 12, padding: 10 },
+  guardWarnText: { color: color.error, fontSize: 12, fontWeight: "700" },
+  guardOk: { backgroundColor: color.organicBg, borderColor: color.mint, borderWidth: 1, borderRadius: 12, padding: 10 },
+  guardOkText: { color: color.organicFg, fontSize: 12, fontWeight: "700" },
 
   guestMe: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12, backgroundColor: color.offWhite },
   guestMeTitle: { color: color.ink, fontSize: 20, fontWeight: "900" },

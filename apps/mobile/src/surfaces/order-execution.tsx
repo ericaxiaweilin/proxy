@@ -7,7 +7,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { color, shadows } from "../theme";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import { SwipeBackShell } from "../architecture/swipe-back";
-import { ProxyLoading } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyLoading } from "../components/proxy-foundation";
 
 function orderStatus(order: FulfillmentOrder): string {
   const m = { OFFERED: "待确认", CONFIRMED: "已确认", EXECUTING: "进行中", COMPLETED: "已完成", CANCELLED: "已取消" } as const;
@@ -49,7 +49,7 @@ export function OrderExecutionSurface({ client, onBack }: { client: FulfillmentC
     return (
       <SwipeBackShell onExit={() => setDetail(undefined)}>
         <ScrollView style={styles.root} contentContainerStyle={styles.detailContainer}>
-          {onBack ? <Pressable onPress={onBack} style={styles.back}><Text selectable style={styles.backText}>‹ 返回</Text></Pressable> : null}
+          {onBack ? <Pressable onPress={onBack} style={styles.back}><ProxyBackGlyph label="返回" /></Pressable> : null}
           <Text selectable style={styles.title}>订单 {detail.orderId.slice(0, 8)}</Text>
           <Text selectable style={styles.orderMeta}>{orderStatus(detail)} · {orderMoney(detail)}</Text>
           <View style={styles.card}>
@@ -63,7 +63,7 @@ export function OrderExecutionSurface({ client, onBack }: { client: FulfillmentC
 
   return (
     <View style={styles.root}>
-      {onBack ? <Pressable onPress={onBack} style={styles.back}><Text selectable style={styles.backText}>‹ 返回</Text></Pressable> : null}
+      {onBack ? <Pressable onPress={onBack} style={styles.back}><ProxyBackGlyph label="返回" /></Pressable> : null}
       <Text selectable style={styles.title}>订单执行</Text>
       <Text selectable style={styles.sub}>执行 / 打卡 / 证据 / 完成 — 来自 fulfillment 真实读模型（非占位）</Text>
       {orders === undefined && !error ? <ProxyLoading tone="muted" style={styles.loader} /> : null}
@@ -87,7 +87,7 @@ export function OrderExecutionSurface({ client, onBack }: { client: FulfillmentC
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1, padding: 16, paddingTop: 8 },
   back: { alignSelf: "flex-start", paddingVertical: 6 },
-  backText: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  // backText 已删：字形和标签都由公共组件 ProxyBackGlyph 画（BACK-GLYPH-001）。
   title: { color: color.ink, fontSize: 18, fontWeight: "900", marginTop: 4 },
   sub: { color: color.muted, fontSize: 12, lineHeight: 16, marginTop: 4 },
   loader: { marginTop: 24 },

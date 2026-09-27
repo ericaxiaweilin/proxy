@@ -21,6 +21,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/gravity"
+	"github.com/proxy-app/proxy-api/internal/growth"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
@@ -36,6 +37,8 @@ import (
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/profile"
 	"github.com/proxy-app/proxy-api/internal/providerapp"
+	"github.com/proxy-app/proxy-api/internal/rating"
+	"github.com/proxy-app/proxy-api/internal/scenereview"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/relationship"
 	"github.com/proxy-app/proxy-api/internal/safety"
@@ -80,6 +83,15 @@ type Server struct {
 	Location *location.Service
 	// Benefit owns the benefit routing network (R16.11 / Master PRD v1.4 §12 §3).
 	Benefit *benefit.Service
+	// Growth computes the "我的权益" tier/growth-value dashboard, read-only
+	// over Fulfillment's own orders (no separate ledger to keep in sync).
+	Growth *growth.Service
+	// Rating owns CLIENT-RATING-001: provider-rates-client public stars
+	// shown on market listings (see internal/rating package doc).
+	Rating *rating.Service
+	// SceneReview owns SCENE-REVIEW-001: checkin-gated public stars shown
+	// on reality scene (venue) cards (see internal/scenereview package doc).
+	SceneReview *scenereview.Service
 	// LocationRepo is the storage handle the history endpoint reads
 	// from. Kept separate from the Service so tests can inject an
 	// in-memory repository without standing up a service.

@@ -15,6 +15,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/aipersona"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/mockidentity"
+	"github.com/proxy-app/proxy-api/internal/relationship"
 )
 
 type UserState struct {
@@ -112,6 +113,10 @@ type Scene struct {
 	// ImageURL mirrors heroImageFor so list consumers (home rail) render
 	// the same photo as the detail hero without a second fetch (R36.x).
 	ImageURL string `json:"imageUrl"`
+	// SCENE-REVIEW-001: 真实评分聚合（打过卡的人评的），只有 RatingCount > 0
+	// 时才有意义 —— 见 Service.withRating 的"没数据不填"规矩。
+	Rating      float64 `json:"-"`
+	RatingCount int     `json:"-"`
 }
 
 // Detail is the R27 scene read model. A Scene is a time-bound behavior context,
@@ -136,7 +141,10 @@ type Detail struct {
 	Actions         []SceneAction `json:"actions"`
 	TruthBoundary   string        `json:"truthBoundary"`
 	// SCENE-BADGE-001：绑定本场景的小美（真实 persona→boundSceneId 映射，不编计数）。
-	AIVisits        []AIVisit     `json:"aiVisits,omitempty"`
+	AIVisits []AIVisit `json:"aiVisits,omitempty"`
+	// SCENE-REVIEW-001: 真实评分聚合，只有 RatingCount > 0 时才出现。
+	Rating      float64 `json:"rating,omitempty"`
+	RatingCount int     `json:"ratingCount,omitempty"`
 }
 
 // AIVisit 是绑定到本场景的小美（展示名来自平台 persona 目录）。
@@ -247,7 +255,12 @@ func (s Scene) MarshalJSON() ([]byte, error) {
 		PlannedCount int `json:"plannedCount"`
 		// SCENE-CHECKIN-001
 		HereCount int `json:"hereCount"`
-	}{s.ID, s.Name, s.Area, s.Type, s.Category, s.Address, s.Latitude, s.Longitude, s.Best, s.Active, string(s.Source), s.Description, s.DistanceMeters, s.RecommendationScore, s.ImageURL, s.SavedCount, s.VisitedCount, s.PlannedCount, s.HereCount})
+		// SCENE-REVIEW-001: 真实评分聚合，只有 RatingCount > 0 时才有意义。
+		// 两个字段都是 omitempty——没数据时整对都不出现，绝不用 0 垫底
+		// （count==0 时 Rating 恒为 0，omitempty 会连它一起去掉）。
+		Rating      float64 `json:"rating,omitempty"`
+		RatingCount int     `json:"ratingCount,omitempty"`
+	}{s.ID, s.Name, s.Area, s.Type, s.Category, s.Address, s.Latitude, s.Longitude, s.Best, s.Active, string(s.Source), s.Description, s.DistanceMeters, s.RecommendationScore, s.ImageURL, s.SavedCount, s.VisitedCount, s.PlannedCount, s.HereCount, s.Rating, s.RatingCount})
 }
 
 // CheckinTTL 是一次「我在这里」活多久。
@@ -273,6 +286,10 @@ type Repository interface {
 	// 剩下的都是真去过）。给徽章进度用（还差几家），和只看有效期的
 	// ListMyCheckIns 不是一回事。空返回 [] 不是 null。
 	ListMyCheckinHistory(context.Context, string) ([]string, error)
+	// SCENE-COMPANION-001: 只对调用方已经提供的候选 actor id 集合做命中测试，
+	// 不能反查"这个场景有哪些人去过"——结构上防止拿它去枚举陌生人。返回
+	// candidateActorIDs 的子集（去重），不保证顺序。
+	FilterKnownVisitors(ctx context.Context, sceneID string, candidateActorIDs []string) ([]string, error)
 	// SCENE-BADGE-001：已获得徽章（append-only）。
 	EarnBadge(context.Context, string, EarnedBadge) error
 	ListMyEarnedBadges(context.Context, string) ([]EarnedBadge, error)
@@ -396,6 +413,25 @@ func (r *memoryRepository) ListMyCheckinHistory(_ context.Context, actorID strin
 		if c.actorID == actorID && !seen[c.sceneID] {
 			seen[c.sceneID] = true
 			out = append(out, c.sceneID)
+		}
+	}
+	return out, nil
+}
+
+// FilterKnownVisitors 实现见 Repository 接口注释：只测已知候选，不反查名单。
+func (r *memoryRepository) FilterKnownVisitors(_ context.Context, sceneID string, candidateActorIDs []string) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	candidates := map[string]bool{}
+	for _, id := range candidateActorIDs {
+		candidates[id] = true
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, c := range r.checkins {
+		if c.sceneID == sceneID && candidates[c.actorID] && !seen[c.actorID] {
+			seen[c.actorID] = true
+			out = append(out, c.actorID)
 		}
 	}
 	return out, nil
@@ -623,7 +659,40 @@ func launchScenes() []Scene {
 	return scenes
 }
 
-type Service struct{ repo Repository }
+type Service struct {
+	repo     Repository
+	rating   ratingLookup
+	friends  friendLister
+	visitors activityVisitorFilter
+}
+
+// ratingLookup is the narrow read this package needs from scenereview —
+// same "smallest interface that satisfies the caller" convention as
+// marketplace.ratingLookup (CLIENT-RATING-001). count == 0 means "no
+// reviews yet"; callers must not substitute a fabricated average
+// (SCENE-NO-FABRICATED-001).
+type ratingLookup interface {
+	GetSceneRatingAggregate(ctx context.Context, sceneID string) (average float64, count int, err error)
+}
+
+// friendLister is the narrow read this package needs from relationship —
+// SCENE-COMPANION-001 requires the companion list to come only from the
+// viewer's real, mutual friends, never arbitrary strangers who happen to
+// share a real signal at this scene. relationship.FriendView already
+// carries the resolved DisplayName/AvatarURL (relationship.DisplayNameHint),
+// so this package does not need its own name/avatar resolver.
+type friendLister interface {
+	ListActiveFriends(ctx context.Context, userID string) ([]relationship.FriendView, error)
+}
+
+// activityVisitorFilter is the narrow read this package needs from
+// activity — SCENE-COMPANION-001's "candidate-only membership test" design:
+// it can only confirm which of a caller-supplied candidate set has really
+// joined an activity at this scene, never enumerate participants on its
+// own.
+type activityVisitorFilter interface {
+	FilterKnownParticipants(ctx context.Context, sceneID string, candidateActorIDs []string) ([]string, error)
+}
 
 func New() *Service { return NewWithRepository(newMemoryRepository()) }
 func NewWithRepository(repo Repository) *Service {
@@ -632,6 +701,29 @@ func NewWithRepository(repo Repository) *Service {
 	}
 	return &Service{repo: repo}
 }
+
+// SetRatingLookup wires the real, checkin-gated scene review aggregate
+// (SCENE-REVIEW-001). Unwired, Rating/RatingCount simply never appear —
+// same fail-open-to-honest-absence behavior as an aggregate that returns
+// count==0.
+func (s *Service) SetRatingLookup(lookup ratingLookup) {
+	s.rating = lookup
+}
+
+// SetFriendLister wires the real friend graph (SCENE-COMPANION-001).
+// Unwired, ListSceneCompanionSuggestions always returns an empty list —
+// the client's existing honestly-labeled FIXTURE humans render stays the
+// fallback in that case, never a silent stranger-list.
+func (s *Service) SetFriendLister(lister friendLister) {
+	s.friends = lister
+}
+
+// SetActivityVisitorFilter wires the real "joined an activity at this
+// scene" signal (SCENE-COMPANION-001).
+func (s *Service) SetActivityVisitorFilter(filter activityVisitorFilter) {
+	s.visitors = filter
+}
+
 func (s *Service) ListScenes(ctx context.Context) ([]Scene, error) {
 	scenes, err := s.repo.ListScenes(ctx)
 	if err != nil {
@@ -648,7 +740,7 @@ func (s *Service) ListScenes(ctx context.Context) ([]Scene, error) {
 	if err != nil {
 		return nil, err
 	}
-	return withSceneImages(scenes), nil
+	return withSceneImages(s.withRating(ctx, scenes)), nil
 }
 func (s *Service) ListNearbyScenes(ctx context.Context, lat, lng, radiusKM float64, limit int) ([]Scene, error) {
 	scenes, err := s.repo.ListNearbyScenes(ctx, lat, lng, radiusKM, limit)
@@ -659,7 +751,26 @@ func (s *Service) ListNearbyScenes(ctx context.Context, lat, lng, radiusKM float
 	if err != nil {
 		return nil, err
 	}
-	return withSceneImages(scenes), nil
+	return withSceneImages(s.withRating(ctx, scenes)), nil
+}
+
+// withRating 填 Rating/RatingCount —— 跟 withPresence 不同的是查不到不算
+// 硬错误：评分是补充信息，不该因为它一时查不到就把整页场景列表打挂
+// （跟 marketplace.Service 在 ListMarketOpportunities 里对 ratingLookup
+// 的处理一致：err != nil 或 count == 0 都跳过，不填假值，也不中断请求）。
+func (s *Service) withRating(ctx context.Context, scenes []Scene) []Scene {
+	if s.rating == nil {
+		return scenes
+	}
+	for i := range scenes {
+		avg, count, err := s.rating.GetSceneRatingAggregate(ctx, scenes[i].ID)
+		if err != nil || count == 0 {
+			continue
+		}
+		scenes[i].Rating = avg
+		scenes[i].RatingCount = count
+	}
+	return scenes
 }
 
 // withPresence 填 HereCount —— 未过期 check-in 的真聚合数。
@@ -720,6 +831,13 @@ func (s *Service) GetDetail(ctx context.Context, sceneID, requestedVariant strin
 	if !scene.Active && state == "AVAILABLE_NOW" {
 		state, label = "GOOD_SOON", "近期适合"
 	}
+	var ratingAvg float64
+	var ratingCount int
+	if s.rating != nil {
+		if avg, count, err := s.rating.GetSceneRatingAggregate(ctx, scene.ID); err == nil && count > 0 {
+			ratingAvg, ratingCount = avg, count
+		}
+	}
 	return Detail{
 		SceneID: scene.ID, VenueID: venueIDFor(scene), VenueName: scene.Name,
 		HeroImageURL: heroImageFor(scene.ID), MediaVersion: 1,
@@ -737,6 +855,9 @@ func (s *Service) GetDetail(ctx context.Context, sceneID, requestedVariant strin
 		},
 		TruthBoundary: "推荐不预订真人；报名不等于到场；AI 预览不产生到访、出席或订单证据。",
 		AIVisits:      aiVisitsFor(sceneID),
+		// SCENE-REVIEW-001: 只有真的有评价数据才填，count==0 两个字段都留零值
+		// （wire 上 omitempty 会一起消失）。
+		Rating: ratingAvg, RatingCount: ratingCount,
 	}, true, nil
 }
 
@@ -848,7 +969,7 @@ func humansFor(variant string) []Human {
 	}
 }
 func (s *Service) Supports(t string) bool {
-	return t == "ListMyBadges" || t == "ListMyRealitySceneState" || t == "ListMyCheckinHistory" || t == "SetRealitySceneSaved" || t == "SetRealityScenePlanned" || t == "SetPrivateRealitySceneVisited" || t == "SetRealitySceneCheckIn" || t == "ProposeRealityScene" || t == "ConfirmRealitySceneProposal" || t == "ListRealitySceneProposals"
+	return t == "ListMyBadges" || t == "ListMyRealitySceneState" || t == "ListMyCheckinHistory" || t == "SetRealitySceneSaved" || t == "SetRealityScenePlanned" || t == "SetPrivateRealitySceneVisited" || t == "SetRealitySceneCheckIn" || t == "ProposeRealityScene" || t == "ConfirmRealitySceneProposal" || t == "ListRealitySceneProposals" || t == "ListSceneCompanionSuggestions"
 }
 func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
@@ -876,6 +997,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listMyCheckinHistory(ctx, e)
 	case "ListMyRealitySceneState":
 		return s.listMyState(ctx, e)
+	case "ListSceneCompanionSuggestions":
+		return s.listSceneCompanionSuggestions(ctx, e)
 	}
 	sceneID, _ := e.Payload["sceneId"].(string)
 	enabled, ok := e.Payload["enabled"].(bool)
@@ -921,6 +1044,14 @@ func (s *Service) listMyBadges(ctx context.Context, e command.Envelope) command.
 // BADGE-WALL-001: 本人去过的 scene id 清单（给徽章进度用：还差几家）。
 // 和 ListMyCheckIns 不是一回事 —— 那个只看有效期内的（按钮选中态恢复用），
 // 这个不过期过滤。空返回 []，不是错误。
+// ListMyCheckinHistory is the public read seam scenereview.Service calls
+// through its own small checkinHistory interface (SCENE-REVIEW-001) — same
+// "narrow public method, not the whole repo" convention as
+// rating.Service.GetUserRatingAggregate.
+func (s *Service) ListMyCheckinHistory(ctx context.Context, actorID string) ([]string, error) {
+	return s.repo.ListMyCheckinHistory(ctx, actorID)
+}
+
 func (s *Service) listMyCheckinHistory(ctx context.Context, e command.Envelope) command.Result {
 	history, err := s.repo.ListMyCheckinHistory(ctx, e.Actor.ID)
 	if err != nil {
@@ -936,6 +1067,107 @@ func (s *Service) listMyCheckinHistory(ctx context.Context, e command.Envelope) 
 }
 
 // listMyState 回本人对每个场景的 saved / planned / private_visited 状态。
+// CompanionSuggestion is a real person shown in the "同行推荐" block —
+// SCENE-COMPANION-001. Unlike Human (humansFor's public FIXTURE), this
+// carries no fitReason/availability/sceneFit — there is nothing honest to
+// report there, only the real signal that surfaced this person.
+type CompanionSuggestion struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatarUrl"`
+	// Signal ∈ {"CHECKED_IN_HERE","JOINED_ACTIVITY_HERE"}.
+	Signal string `json:"signal"`
+}
+
+const (
+	CompanionSignalCheckedIn      = "CHECKED_IN_HERE"
+	CompanionSignalJoinedActivity = "JOINED_ACTIVITY_HERE"
+)
+
+// maxCompanionCandidates/maxCompanionSuggestions bound both query fan-out
+// and response size — this is a small "people you might want to go with"
+// list, not a roster.
+const maxCompanionCandidates = 30
+const maxCompanionSuggestions = 6
+
+// listSceneCompanionSuggestions answers "适合一起的人" with real people,
+// never strangers: only the viewer's own active friends
+// (relationship.ListActiveFriends) who also have a real, verifiable signal
+// at this specific scene (checked in here, or joined an activity here).
+// HandleContext's actor gate above already requires a real, authenticated
+// USER — this command is never reachable anonymously, unlike the public
+// GetDetail/Humans FIXTURE it supplements.
+func (s *Service) listSceneCompanionSuggestions(ctx context.Context, e command.Envelope) command.Result {
+	sceneID, _ := e.Payload["sceneId"].(string)
+	if sceneID == "" {
+		return command.Rejected(e, "REALITY_SCENE_INPUT_INVALID", "VALIDATION", "AFTER_USER_ACTION", "reality_scene.input_invalid", nil)
+	}
+	suggestions := []CompanionSuggestion{}
+	if s.friends == nil {
+		return companionSuggestionsResult(e, suggestions)
+	}
+	friends, err := s.friends.ListActiveFriends(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "REALITY_SCENE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.read_failed", nil)
+	}
+	if len(friends) > maxCompanionCandidates {
+		friends = friends[:maxCompanionCandidates]
+	}
+	candidateIDs := make([]string, 0, len(friends))
+	byID := map[string]relationship.FriendView{}
+	for _, f := range friends {
+		candidateIDs = append(candidateIDs, f.UserID)
+		byID[f.UserID] = f
+	}
+	if len(candidateIDs) == 0 {
+		return companionSuggestionsResult(e, suggestions)
+	}
+	visited, err := s.repo.FilterKnownVisitors(ctx, sceneID, candidateIDs)
+	if err != nil {
+		return command.Rejected(e, "REALITY_SCENE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.read_failed", nil)
+	}
+	visitedSet := map[string]bool{}
+	for _, id := range visited {
+		visitedSet[id] = true
+	}
+	participantSet := map[string]bool{}
+	if s.visitors != nil {
+		participants, err := s.visitors.FilterKnownParticipants(ctx, sceneID, candidateIDs)
+		if err != nil {
+			return command.Rejected(e, "REALITY_SCENE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.read_failed", nil)
+		}
+		for _, id := range participants {
+			participantSet[id] = true
+		}
+	}
+	// 保持好友列表的原始顺序，不额外排序——命中与否是两个真实布尔集合的
+	// 成员测试，谁先出现在好友表里就先出现在结果里。
+	for _, candidateID := range candidateIDs {
+		if len(suggestions) >= maxCompanionSuggestions {
+			break
+		}
+		var signal string
+		switch {
+		case visitedSet[candidateID]:
+			signal = CompanionSignalCheckedIn
+		case participantSet[candidateID]:
+			signal = CompanionSignalJoinedActivity
+		default:
+			continue
+		}
+		friend := byID[candidateID]
+		suggestions = append(suggestions, CompanionSuggestion{ID: friend.UserID, Name: friend.DisplayName, AvatarURL: friend.AvatarURL, Signal: signal})
+	}
+	return companionSuggestionsResult(e, suggestions)
+}
+
+func companionSuggestionsResult(e command.Envelope, suggestions []CompanionSuggestion) command.Result {
+	r := command.Accepted(e, "SceneCompanionSuggestions", e.Actor.ID, 1, "READY", nil)
+	raw, _ := json.Marshal(map[string]any{"suggestions": suggestions})
+	r.OperationRef = string(raw)
+	return r
+}
+
 func (s *Service) listMyState(ctx context.Context, e command.Envelope) command.Result {
 	states, err := s.repo.ListUserStates(ctx, e.Actor.ID)
 	if err != nil {

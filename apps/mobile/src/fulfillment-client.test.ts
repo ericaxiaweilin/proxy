@@ -145,6 +145,21 @@ describe("FulfillmentClient execution actions (ORDER-EXEC-001)", () => {
     expect(payload).toMatchObject({ onTime: true, scopeCompleted: false, objectiveNote: "差收尾" });
   });
 
+  // STORE-STATS-001 归因：履约方指认「这笔单在我哪家店完成」。
+  // 没指认必须**整条 key 不出现** —— 服务端把空串当"不归因"，但线上契约要求
+  // 是"省略"而不是"传了 undefined"，两者在 wire 上不一样（exactOptionalPropertyTypes）。
+  it("recordOutcome omits storeId entirely when the provider does not attribute", async () => {
+    const seen = await captureCommand((c) => c.recordOutcome("ord_1", { onTime: true, scopeCompleted: true }));
+    const payload = seen.body.payload as Record<string, unknown>;
+    expect("storeId" in payload).toBe(false);
+  });
+
+  it("recordOutcome carries storeId when the provider attributes the order to a store", async () => {
+    const seen = await captureCommand((c) => c.recordOutcome("ord_1", { onTime: true, scopeCompleted: true, storeId: "store_tb1" }));
+    const payload = seen.body.payload as Record<string, unknown>;
+    expect(payload.storeId).toBe("store_tb1");
+  });
+
   it("recordSatisfaction hits RecordSatisfaction with resolved/repeat", async () => {
     const seen = await captureCommand((c) => c.recordSatisfaction("ord_1", { resolved: "PARTIAL", repeatIntent: "MAYBE" }));
     expect(seen.path.endsWith("/RecordSatisfaction")).toBe(true);

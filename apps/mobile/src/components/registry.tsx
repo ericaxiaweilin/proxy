@@ -417,6 +417,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 14
   },
-  waitingStatus: { color: "color.factUnknownFg", fontSize: 11, fontWeight: "800", letterSpacing: 0.6 },
+  waitingStatus: { color: color.factUnknownFg, fontSize: 11, fontWeight: "800", letterSpacing: 0.6 },
   waitingMessage: { color: color.ink, fontSize: 13, marginTop: 4 }
 });

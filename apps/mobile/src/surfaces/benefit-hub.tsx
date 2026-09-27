@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { styles } from "./me-styles";
-import { sessionAuthClient } from "../native-clients";
+import { sessionAuthClient, nativeSecureSessionStore } from "../native-clients";
 import { BenefitClient, BenefitError, type Campaign } from "../benefit-client";
 import { BenefitClaimScreen } from "./BenefitClaimScreen";
-import { ProxyLoading } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyLoading } from "../components/proxy-foundation";
 
 // BENEFIT-WIRE-001: 把已经写好但没人调用的权益链路接进 App。
 //
@@ -32,7 +32,7 @@ function campaignTitle(campaign: Campaign): string {
 }
 
 export function BenefitHubSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
-  const [client] = useState(() => new BenefitClient({ authClient: sessionAuthClient }));
+  const [client] = useState(() => new BenefitClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore }));
   const [campaigns, setCampaigns] = useState<Campaign[] | null>(null);
   const [openId, setOpenId] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -107,8 +107,8 @@ export function BenefitHubSurface({ onBack }: { onBack: () => void }): React.JSX
         </Pressable>
       ))}
 
-      <Pressable onPress={onBack} style={[styles.lightCta, { marginTop: 12 }]}>
-        <Text selectable style={styles.lightCtaText}>返回我的</Text>
+      <Pressable accessibilityLabel="返回我的" onPress={onBack} style={[styles.lightCta, { marginTop: 12 }]}>
+        <ProxyBackGlyph />
       </Pressable>
     </ScrollView>
   );

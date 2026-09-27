@@ -209,6 +209,10 @@ export interface Messages {
   sharing: string;
   shareInviteCta: string;
   backHome: string;
+  // BACK-GLYPH-001：这里的文案**不带字形**。原型 I18N 原文写的是 "‹ 返回"，
+  // 那个 `‹` 是文本引号、不是箭头，字号一改形状/粗细/基线就漂 —— 全 App 十一种
+  // 尺寸、九种颜色就是这么来的。字形现在由 ProxyBackGlyph 画成 SVG 描边路径，
+  // 所以文案里必须去掉 `‹ `，否则会画出两个箭头。
   backShort: string;
   nearbyRecommend: string;
   activityCount: string;
@@ -424,7 +428,7 @@ const ZH: Messages = {
   sharing: "分享中…",
   shareInviteCta: "分享邀请 →",
   backHome: "返回Home",
-  backShort: "‹ 返回",
+  backShort: "返回",
   nearbyRecommend: "附近推荐",
   activityCount: "{n} 次活动记录",
   viewPublicHistory: "查看公开历史活动",
@@ -639,7 +643,7 @@ const VI: Messages = {
   sharing: "Đang chia sẻ…",
   shareInviteCta: "Chia sẻ lời mời →",
   backHome: "Về Trang chủ",
-  backShort: "‹ Quay lại",
+  backShort: "Quay lại",
   nearbyRecommend: "Gợi ý gần đây",
   activityCount: "{n} hoạt động",
   viewPublicHistory: "Xem hoạt động công khai",
@@ -854,7 +858,7 @@ const EN: Messages = {
   sharing: "Sharing…",
   shareInviteCta: "Share invite →",
   backHome: "Back to Home",
-  backShort: "‹ Back",
+  backShort: "Back",
   nearbyRecommend: "Nearby picks",
   activityCount: "{n} activities",
   viewPublicHistory: "View public history",
@@ -1069,7 +1073,7 @@ const LO: Messages = {
   sharing: "ກຳລັງແບ່ງປັນ…",
   shareInviteCta: "ແບ່ງປັນຄຳເຊີນ →",
   backHome: "ກັບໄປໜ້າຫຼັກ",
-  backShort: "‹ ກັບ",
+  backShort: "ກັບ",
   nearbyRecommend: "ແນະນຳໃກ້ໆ",
   activityCount: "{n} ກິດຈະກຳ",
   viewPublicHistory: "ເບິ່ງປະຫວັດສາທາລະນະ",
@@ -1284,7 +1288,7 @@ const KO: Messages = {
   sharing: "공유 중…",
   shareInviteCta: "초대 공유 →",
   backHome: "홈으로 돌아가기",
-  backShort: "‹ 뒤로",
+  backShort: "뒤로",
   nearbyRecommend: "근처 추천",
   activityCount: "활동 {n}회",
   viewPublicHistory: "공개 활동 보기",
@@ -1499,7 +1503,7 @@ const JA: Messages = {
   sharing: "共有中…",
   shareInviteCta: "招待を共有 →",
   backHome: "ホームに戻る",
-  backShort: "‹ 戻る",
+  backShort: "戻る",
   nearbyRecommend: "近くのおすすめ",
   activityCount: "活動記録 {n} 件",
   viewPublicHistory: "公開履歴を見る",

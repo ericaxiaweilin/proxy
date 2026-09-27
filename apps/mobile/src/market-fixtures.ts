@@ -147,14 +147,19 @@ export interface MarketOpportunity {
   // "seeded"; 传了就走 haversine 路径, travelSource="user_distance".
   lat?: number;
   lng?: number;
-  // R37.4 redesign: standard order type (one of 5 approved logos).
+  // R37.4 redesign: standard order type. CLIENT-RATING-001/市场·订单重做:
+  // 扩展成新设计的分类集合（dining/sport_companion/music/chat_companion），
+  // 旧值保留不砍（老种子数据继续能被推断归类）。
   // Optional — fixtures without this fall back to heuristic inference
   // from theme/skills/title in R37OpportunityCard.inferType().
-  opportunityType?: "coffee_photo" | "walk_photo" | "coffee_chinese" | "bilingual_store" | "event_photo" | "other";
+  opportunityType?: "coffee_photo" | "walk_photo" | "coffee_chinese" | "bilingual_store" | "event_photo" | "dining" | "sport_companion" | "music" | "chat_companion" | "other";
   // Scene/operator media pipeline URL. Generated samples are a visual fallback
   // only; server-provided real-scene media always wins when present.
   sceneImageUrl?: string;
   travelSource?: "seeded" | "user_distance" | "unknown";
+  // CLIENT-RATING-001: owner 的真实评分聚合，只有 ratingCount > 0 时才存在。
+  rating?: number;
+  ratingCount?: number;
 }
 
 // MARKET-SEEDED-TRAVEL-001: travel 只有在 travelSource 是 user_distance 时才是
@@ -166,6 +171,43 @@ export interface MarketOpportunity {
 export function travelMinutesFromViewer(opportunity: MarketOpportunity): number | null {
   if (opportunity.travelSource !== "user_distance") return null;
   return opportunity.travel ?? null;
+}
+
+// MARKET-WHEN-LABEL-001: 机会的「什么时候」展示串。
+//
+// wire 上 date / time 是两个字段：date 是日期（种子行与契约测试里是「周六」
+// 「今天」「明天」），time 是时刻（「15:00–20:00」）。展示侧一直按
+// `{date} {time}` 拼。
+//
+// 但需求向导的「时间」是一个自由文本框（surfaces/demand-wizard.tsx 的 TextInput，
+// 默认值取自 MOMENT_TEMPLATES[].defaultTime = 「今晚 19:00」），发布映射
+// （demand-moments.ts buildDemandPublishInput）把这一串**同时**写进了 date 和
+// time —— 于是详情、卡片、合成帖文、报价 sheet、报名明细五处都印两遍：
+// 「今晚 19:00 今晚 19:00 · 2 小时 · 1:1」。
+//
+// 存量行已经这样落库（marketplace.opportunities 里 2026-09-11~15 那几行），
+// 改发布端修不掉它们，所以这里做一次显示层归一：time 已经以 date 开头时不再
+// 重复前缀。单一来源，五个渲染点都调这里 —— 跟 parseOpportunityPrice 同理。
+export function opportunityWhenLabel(opportunity: { date?: string; time?: string }): string {
+  const date = (opportunity.date ?? "").trim();
+  const time = (opportunity.time ?? "").trim();
+  if (time === "") return date;
+  if (date === "" || time.startsWith(date)) return time;
+  return `${date} ${time}`;
+}
+
+// MARKET-LEGACY-VERIFIED-001: 「商家身份已验证」徽章只在服务端**能背**的形态下画。
+//
+// 写路径（apps/api-go/internal/marketplace/service.go）只在 merchantStamp 命中时
+// 同时置 OwnerType=BUSINESS + Verified=true；个人发布者一律 false。但 2026-09-16
+// 那次清扫只改了写路径，读路径把 payload 整段 unmarshal 回来照发
+// （internal/platform/postgres/marketplace.go），于是之前发布的行至今带着
+// ownerType=PERSON + verified=true —— 界面就替一个个人发布者画出了「商家身份已验证」。
+//
+// 种子行的 Verified=false 必须继续保持不画；这里只做一件事：把「个人 owner + 已验证」
+// 这个平台从来不产出的组合挡掉。
+export function merchantVerified(opportunity: { ownerType?: string; verified?: boolean }): boolean {
+  return opportunity.verified === true && opportunity.ownerType === "BUSINESS";
 }
 
 export const OPPORTUNITY_LENS_LABEL: Record<OpportunityLens, string> = {

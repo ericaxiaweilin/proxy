@@ -93,6 +93,47 @@ export function ProxyIconButton({
   );
 }
 
+// BACK-GLYPH-001（2026-09-26，用户：「把所有页面的返回 < 这个logo统一颜色 大小 形状
+// 我看了 很多页面的返回不统一 红的 黑的 大小...」）：全 App **唯一**的返回字形。
+//
+// 统一之前：94 个 `‹` 散在 38 个文件里，字号 11→28 十一种、颜色九种、容器三种。
+// 根因不是"有人偷懒"，是**字形选错了**：`‹` 是单左引号，不是箭头。它的形状/粗细/
+// 垂直基线都跟着 fontSize + fontWeight + 平台字体漂移，所以每个页面都只能各自手调
+// 字号去把它凑成箭头 —— 必然调出一串不一致。原型也一样：R15_15 / R15_18 两份稿里
+// 就有 6 个不同的返回 class（30×30/22px、32×32/圆角11/18px、26×26/圆角9/22px、
+// 34×34/圆角12/20px、34×34/圆角12/15px、18px），我们是逐个照抄才抄花的。
+//
+// 所以这里不复用任何一份旧写法，改成 SVG 描边路径（proxy-icon 的 backArrow，
+// 就是原型 `.back-btn svg` 那条 M15 18l-6-6 6-6）：形状与字号解耦，一个尺寸走天下。
+//
+// 为什么只导出**字形**、不导出整个按钮：容器是页面自己的事（裸字形排在表头里、
+// 圆按钮浮在地图上、38pt 圆在消息页），把 38 个文件的 Pressable 一起换掉会改到
+// 几十处点击区和内边距 —— 那是拿布局风险换整洁。所以这里只统一字形：
+// 形状（chevronLeft 那条路径）、尺寸（foundation.backGlyph）、颜色（下面两个 tone）。
+//
+// tone 只有两个值，多一个就是新的不一致，不许再加：
+//   ink    默认。浅底 / ink 底上的返回
+//   onDark 深底、照片、半透明黑底上的返回（白字形）
+// 统一之前那 9 种颜色里，magenta / violet / #151515 / #11110f / lotus.ink 都只是
+// "某个人当时顺手写的近黑色"，一律收成 ink。
+export type BackTone = "ink" | "onDark";
+
+export function ProxyBackGlyph({ label, tone = "ink" }: { label?: string; tone?: BackTone }): React.JSX.Element {
+  const glyphColor = tone === "onDark" ? foundation.surface : foundation.ink;
+  const glyph = <ProxyIcon color={glyphColor} name="backArrow" size={foundation.backGlyph} />;
+  // label 可选：「字形 + 文字」的返回（如「返回我的」）。文字排版也统一在这里 ——
+  // 统一之前这些标签的 fontSize 是 12/13/14 三种、颜色跟着字形一起花。
+  // 之前有 5 处是把 `‹ ` 拼进字符串当标签传（addFriendBackLabel / backLabel），
+  // 现在字形由本组件画，标签只留文字，别再往标签里拼字形。
+  if (label === undefined) return glyph;
+  return (
+    <View style={styles.backGlyphRow}>
+      {glyph}
+      <Text selectable style={[styles.backGlyphLabel, { color: glyphColor }]}>{label}</Text>
+    </View>
+  );
+}
+
 export function ProxyAvatar({
   accessibilityLabel,
   fallback,
@@ -255,6 +296,10 @@ const styles = StyleSheet.create({
   avatarFallback: { color: foundation.ink, fontSize: foundation.text.sm, fontWeight: "800" },
   avatarImage: { height: "100%", width: "100%" },
   avatarImageAbsolute: { height: "100%", left: 0, position: "absolute", top: 0, width: "100%" },
+  // 字形 + 标签的返回：行内排。backArrow 的 box 是贴着箭头裁的（没有旁白），
+  // 所以间距必须由这里给，不能靠字形的空白 —— gap 4 是唯一的间距值。
+  backGlyphRow: { alignItems: "center", flexDirection: "row", gap: 4 },
+  backGlyphLabel: { fontSize: foundation.text.sm, fontWeight: "800" },
   // BUTTON-SHAPE-ALIGN-001（2026-09-26）：基准形状换成原型 sec-buttons 04 的值。
   // 原型「所有按钮共享同一套圆角、间距、字号、状态反馈」：
   //   .btn { padding:0 20px; height:48px; border-radius:14px; font-size:14px;
