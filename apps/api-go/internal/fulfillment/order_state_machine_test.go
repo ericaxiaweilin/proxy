@@ -73,6 +73,7 @@ func TestSlotOfferCarriesCompensationIntoOrder(t *testing.T) {
 		t.Fatalf("accepted cash order must carry an ALLOW cash eligibility, got %q", order.Snapshot.CashEligibilityStatus)
 	}
 
+	allowSlotOffers(s)
 	over := envelopeFor("CreateSlotOffer", map[string]any{"taskId": "task_big", "slotId": "slot_big", "agentId": "agent_comp", "agreedCompensation": 9000000}, "")
 	if r := s.Handle(over); r.Outcome != "REJECTED" || errorCode(r) != "CASH_ELIGIBILITY_REVIEW" {
 		t.Fatalf("slot offer above the cash pilot limit must be CASH_ELIGIBILITY_REVIEW, got %s %+v", r.Outcome, r.Error)
@@ -190,5 +191,65 @@ func TestTopicInviteOrderHasAllowCashEligibility(t *testing.T) {
 	order, _ := s.repository.GetOrder(context.Background(), r.Aggregate.ID)
 	if order.Snapshot.AgreedCompensation != 0 || order.Snapshot.CashEligibilityStatus != CashEligibilityAllow {
 		t.Fatalf("topic order snapshot: %+v", order.Snapshot)
+	}
+}
+
+// proposeAndAccept: 需求方提出条款变更，服务方接受。返回接受命令的结果。
+func proposeAndAccept(t *testing.T, s *Service, orderID string, changes map[string]any) command.Result {
+	t.Helper()
+	r := s.Handle(envelopeFor("RecordMaterialOrderChange", map[string]any{"description": "变更", "changes": changes}, orderID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("propose: %s %+v", r.Outcome, r.Error)
+	}
+	var view struct {
+		AmendmentID string `json:"amendmentId"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	order, _ := s.repository.GetOrder(context.Background(), orderID)
+	return s.Handle(asActor(envelopeFor("RespondMaterialOrderChange", map[string]any{"amendmentId": view.AmendmentID, "decision": "ACCEPT"}, orderID), order.AgentID))
+}
+
+// allowSlotOffers 给单测接一个放行的档位报价发起权校验（生产由 demand + marketplace 判）。
+func allowSlotOffers(s *Service) {
+	s.SetSlotOfferAuthorizer(func(context.Context, string, string, string, string) (bool, error) { return true, nil })
+}
+
+// ORDER-STORE-STATS-AUTHZ-001：统计含顾客 id，只给店铺成员；没接权限校验就一律拒绝。
+func TestStoreStatsRequireStoreMembership(t *testing.T) {
+	s := New()
+	stats := func(actor string) command.Result {
+		return s.Handle(asActor(envelopeFor("GetStoreOrderStats", map[string]any{"storeId": "store_1"}, ""), actor))
+	}
+	if r := stats("owner"); errorCode(r) != "STORE_ACCESS_NOT_CONFIGURED" {
+		t.Fatalf("unwired access check must fail closed, got %s %+v", r.Outcome, r.Error)
+	}
+	s.SetStoreAccess(func(_ context.Context, storeID, userID string) (bool, error) { return userID == "owner", nil })
+	if r := stats("stranger"); errorCode(r) != "STORE_ACCESS_DENIED" {
+		t.Fatalf("non-member must be STORE_ACCESS_DENIED, got %s %+v", r.Outcome, r.Error)
+	}
+	if r := stats("owner"); r.Outcome != "ACCEPTED" {
+		t.Fatalf("member must read stats: %+v", r.Error)
+	}
+}
+
+// ORDER-SLOT-OWNER-001：以前任何人都能对任意 task/slot 发报价。
+func TestSlotOfferRequiresOwnership(t *testing.T) {
+	s := New()
+	offer := func() command.Result {
+		return s.Handle(envelopeFor("CreateSlotOffer", map[string]any{"taskId": "task_x", "slotId": "slot_x", "agentId": "agent_x", "agreedCompensation": 800000}, ""))
+	}
+	if r := offer(); errorCode(r) != "SLOT_OFFER_AUTHZ_NOT_CONFIGURED" {
+		t.Fatalf("unwired ownership check must fail closed, got %s %+v", r.Outcome, r.Error)
+	}
+	var seen [4]string
+	s.SetSlotOfferAuthorizer(func(_ context.Context, taskID, slotID, requesterID, agentID string) (bool, error) {
+		seen = [4]string{taskID, slotID, requesterID, agentID}
+		return false, nil
+	})
+	if r := offer(); errorCode(r) != "SLOT_OFFER_NOT_ALLOWED" {
+		t.Fatalf("non-owner must be SLOT_OFFER_NOT_ALLOWED, got %s %+v", r.Outcome, r.Error)
+	}
+	if seen != [4]string{"task_x", "slot_x", "user_001", "agent_x"} {
+		t.Fatalf("authorizer must see the real task/slot/requester/agent: %v", seen)
 	}
 }

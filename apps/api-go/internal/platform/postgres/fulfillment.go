@@ -33,30 +33,72 @@ func (r *FulfillmentRepository) CreateOrder(ctx context.Context, order fulfillme
 	return insertOrder(ctx, execerForContext(ctx, r.pool), order)
 }
 
-func (r *FulfillmentRepository) EnsureOrder(ctx context.Context, order fulfillment.Order) error {
+func (r *FulfillmentRepository) EnsureOrder(ctx context.Context, order fulfillment.Order, domainEvents []event.DomainEvent) error {
 	snapshot, amendments, settlement, outcome, err := encodeOrderJSON(order)
 	if err != nil {
 		return err
 	}
-	q := queryerForContext(ctx, r.pool)
-	if _, err = q.Exec(ctx, `
-		INSERT INTO fulfillment.orders (
-			id, requester_id, agent_id, need_id, lifecycle, version,
-			snapshot, amendments, settlement, outcome, created_at, updated_at, store_id
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-		ON CONFLICT (id) DO NOTHING`,
-		order.ID, order.RequesterID, order.AgentID, order.NeedID, order.Lifecycle, order.Version,
-		snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, order.StoreID); err != nil {
-		return err
+	if len(domainEvents) > 0 && r.outbox == nil {
+		return errors.New("fulfillment transactional outbox is not configured")
 	}
-	var requesterID, agentID, needID string
-	if err := q.QueryRow(ctx, `SELECT requester_id, agent_id, need_id FROM fulfillment.orders WHERE id=$1`, order.ID).Scan(&requesterID, &agentID, &needID); err != nil {
-		return err
+	// ORDER-MATERIALIZE-AUDIT-001：插入与出生事件同一事务；已存在（重试）时不重复发事件。
+	return runInTransaction(ctx, r.pool, func(txCtx context.Context, tx pgx.Tx) error {
+		if err := setAuditContext(txCtx, tx, domainEvents); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(txCtx, `
+			INSERT INTO fulfillment.orders (
+				id, requester_id, agent_id, need_id, lifecycle, version,
+				snapshot, amendments, settlement, outcome, created_at, updated_at, store_id
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			ON CONFLICT (id) DO NOTHING`,
+			order.ID, order.RequesterID, order.AgentID, order.NeedID, order.Lifecycle, order.Version,
+			snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, order.StoreID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 1 {
+			for _, domainEvent := range domainEvents {
+				if err := r.outbox.publishWithExec(txCtx, tx, domainEvent); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		var requesterID, agentID, needID string
+		if err := tx.QueryRow(txCtx, `SELECT requester_id, agent_id, need_id FROM fulfillment.orders WHERE id=$1`, order.ID).Scan(&requesterID, &agentID, &needID); err != nil {
+			return err
+		}
+		if requesterID != order.RequesterID || agentID != order.AgentID || needID != order.NeedID {
+			return errors.New("order id conflicts with another materialisation")
+		}
+		return nil
+	})
+}
+
+// setAuditContext 把本事务的「谁 / 哪条命令」写进事务级设置（is_local = true，
+// 事务结束即失效，不会串到连接池里的下一个请求）。fulfillment 的审计触发器
+// （migrations/135_order_audit_and_guard.sql）读取它们写 fulfillment.audit_log。
+// 优先用命令上下文；跨域物化没有命令上下文时退回领域事件的 principal / causation。
+func setAuditContext(ctx context.Context, tx pgx.Tx, domainEvents []event.DomainEvent) error {
+	audit, ok := fulfillment.AuditFromContext(ctx)
+	if !ok && len(domainEvents) > 0 {
+		first := domainEvents[0]
+		audit = fulfillment.AuditContext{ActorID: first.PrincipalID, PrincipalID: first.PrincipalID, CommandType: first.EventType, CommandID: first.CausationID, CorrelationID: first.CorrelationID}
 	}
-	if requesterID != order.RequesterID || agentID != order.AgentID || needID != order.NeedID {
-		return errors.New("order id conflicts with another materialisation")
+	eventTypes := make([]string, 0, len(domainEvents))
+	for _, domainEvent := range domainEvents {
+		eventTypes = append(eventTypes, domainEvent.EventType)
 	}
-	return nil
+	_, err := tx.Exec(ctx, `SELECT
+		set_config('proxy.audit_actor', $1, true),
+		set_config('proxy.audit_principal', $2, true),
+		set_config('proxy.audit_command_type', $3, true),
+		set_config('proxy.audit_command_id', $4, true),
+		set_config('proxy.audit_correlation_id', $5, true),
+		set_config('proxy.audit_events', $6, true)`,
+		audit.ActorID, audit.PrincipalID, audit.CommandType, audit.CommandID, audit.CorrelationID, strings.Join(eventTypes, ","))
+	return err
 }
 
 func insertOrder(ctx context.Context, execer interface {
@@ -82,6 +124,9 @@ func (r *FulfillmentRepository) CreateOrderAndPublish(ctx context.Context, order
 		return errors.New("fulfillment transactional outbox is not configured")
 	}
 	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, transaction pgx.Tx) error {
+		if err := setAuditContext(transactionContext, transaction, domainEvents); err != nil {
+			return err
+		}
 		if err := insertOrder(transactionContext, transaction, order); err != nil {
 			return err
 		}
@@ -163,6 +208,9 @@ func (r *FulfillmentRepository) UpdateOrderAndPublish(ctx context.Context, order
 		return errors.New("fulfillment transactional outbox is not configured")
 	}
 	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, transaction pgx.Tx) error {
+		if err := setAuditContext(transactionContext, transaction, domainEvents); err != nil {
+			return err
+		}
 		if err := updateOrder(transactionContext, transaction, order, expectedVersion); err != nil {
 			return err
 		}
@@ -200,6 +248,9 @@ func (r *FulfillmentRepository) CreateOfferAndPublish(ctx context.Context, o ful
 		return errors.New("fulfillment transactional outbox is not configured")
 	}
 	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, tx pgx.Tx) error {
+		if err := setAuditContext(transactionContext, tx, domainEvents); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(transactionContext, `
 			INSERT INTO fulfillment.offers (id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at, topic_key, note, agreed_compensation, currency)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
@@ -237,18 +288,32 @@ func (r *FulfillmentRepository) GetOffer(ctx context.Context, id string) (fulfil
 }
 
 func (r *FulfillmentRepository) UpdateOffer(ctx context.Context, o fulfillment.Offer, expectedVersion int) error {
-	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		UPDATE fulfillment.offers SET status=$1, version=$2, updated_at=$3
-		WHERE id=$4 AND version=$5`,
-		o.Status, o.Version, o.UpdatedAt, o.ID, expectedVersion,
-	)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() != 1 {
-		return fulfillment.ErrVersionConflict
-	}
-	return nil
+	// 放进事务：审计触发器要读同一事务里的 set_config（ORDER-AUDIT-001）。
+	return runInTransaction(ctx, r.pool, func(txCtx context.Context, tx pgx.Tx) error {
+		if err := setAuditContext(txCtx, tx, nil); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(txCtx, `
+			UPDATE fulfillment.offers SET status=$1, version=$2, updated_at=$3
+			WHERE id=$4 AND version=$5`,
+			o.Status, o.Version, o.UpdatedAt, o.ID, expectedVersion,
+		)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return fulfillment.ErrVersionConflict
+		}
+		return nil
+	})
+}
+
+// WithinTransaction 让 fulfillment.Service 把订单写入、outbox 事件、策略盖章放进
+// 同一个事务（POLICY-STAMP-DURABLE-001）；ctx 里已有事务时复用它。
+func (r *FulfillmentRepository) WithinTransaction(ctx context.Context, operation func(context.Context) error) error {
+	return runInTransaction(ctx, r.pool, func(txCtx context.Context, _ pgx.Tx) error {
+		return operation(txCtx)
+	})
 }
 
 func (r *FulfillmentRepository) ListOffersByAgent(ctx context.Context, agentID string) ([]fulfillment.Offer, error) {
@@ -279,6 +344,9 @@ func (r *FulfillmentRepository) AcceptOfferAndCreateOrder(ctx context.Context, o
 		return errors.New("fulfillment transactional outbox is not configured")
 	}
 	return runInTransaction(ctx, r.pool, func(txCtx context.Context, tx pgx.Tx) error {
+		if err := setAuditContext(txCtx, tx, domainEvents); err != nil {
+			return err
+		}
 		// Lock offer row
 		var currentStatus string
 		var currentVersion int
@@ -442,7 +510,12 @@ func encodeOrderJSON(order fulfillment.Order) ([]byte, []byte, []byte, []byte, e
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("encode order snapshot: %w", err)
 	}
-	amendments, err := json.Marshal(order.Amendments)
+	// 空集合写 []，不写 null（AGENTS.md：Empty wire collections are []）。
+	orderAmendments := order.Amendments
+	if orderAmendments == nil {
+		orderAmendments = []fulfillment.Amendment{}
+	}
+	amendments, err := json.Marshal(orderAmendments)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("encode order amendments: %w", err)
 	}
@@ -463,3 +536,27 @@ func encodeOrderJSON(order fulfillment.Order) ([]byte, []byte, []byte, []byte, e
 }
 
 var _ fulfillment.Repository = (*FulfillmentRepository)(nil)
+
+// ListAudit 读一行订单 / 报价的审计轨迹（ORDER-AUDIT-001；表由触发器写入，只追加）。
+func (r *FulfillmentRepository) ListAudit(ctx context.Context, table, rowID string) ([]fulfillment.AuditEntry, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT operation, COALESCE(old_state, ''), COALESCE(new_state, ''), COALESCE(old_version, 0), COALESCE(new_version, 0),
+		       actor_id, command_type, event_types, override_reason, recorded_at
+		FROM fulfillment.audit_log WHERE table_name=$1 AND row_id=$2 ORDER BY audit_id`, table, rowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	entries := []fulfillment.AuditEntry{}
+	for rows.Next() {
+		var entry fulfillment.AuditEntry
+		if err := rows.Scan(&entry.Operation, &entry.OldState, &entry.NewState, &entry.OldVersion, &entry.NewVersion,
+			&entry.ActorID, &entry.CommandType, &entry.EventTypes, &entry.OverrideReason, &entry.RecordedAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}
+
+var _ fulfillment.AuditReader = (*FulfillmentRepository)(nil)

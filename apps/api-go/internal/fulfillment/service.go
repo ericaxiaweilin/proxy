@@ -79,12 +79,31 @@ type OrderSnapshot struct {
 }
 
 // Amendment 是 Material Change（新版本，不静默覆盖）。
+// ORDER-AMEND-001：一方提出（PROPOSED，Snapshot = 提议的新条款），另一方接受
+// （ACCEPTED：订单快照换成 Snapshot，旧快照存进 PreviousSnapshot）或拒绝
+// （REJECTED：旧条款不变）；提出方可以撤回（WITHDRAWN）；订单完成 / 取消时
+// 未决提议作废（LAPSED）。任何状态的 amendment 都永久留在订单上 —— 每一版
+// 条款都能从这里还原（回滚依据）。Status 为空 = 审计前的历史记录。
 type Amendment struct {
-	AmendmentID string        `json:"amendmentId"`
-	Description string        `json:"description"`
-	Snapshot    OrderSnapshot `json:"snapshot"`
-	CreatedAt   time.Time     `json:"createdAt"`
+	AmendmentID      string         `json:"amendmentId"`
+	Description      string         `json:"description"`
+	Snapshot         OrderSnapshot  `json:"snapshot"`
+	CreatedAt        time.Time      `json:"createdAt"`
+	Status           string         `json:"status,omitempty"`
+	ProposedBy       string         `json:"proposedBy,omitempty"`
+	DecidedBy        string         `json:"decidedBy,omitempty"`
+	DecidedAt        *time.Time     `json:"decidedAt,omitempty"`
+	DecisionReason   string         `json:"decisionReason,omitempty"`
+	PreviousSnapshot *OrderSnapshot `json:"previousSnapshot,omitempty"`
 }
+
+const (
+	AmendmentProposed  = "PROPOSED"
+	AmendmentAccepted  = "ACCEPTED"
+	AmendmentRejected  = "REJECTED"
+	AmendmentWithdrawn = "WITHDRAWN"
+	AmendmentLapsed    = "LAPSED"
+)
 
 // SettlementRecord 是结算记录（Gate H：DIRECT_SETTLEMENT 与 PLATFORM_PAY 隔离）。
 type SettlementRecord struct {
@@ -170,7 +189,8 @@ type Repository interface {
 // TransactionalRepository 由支持事务性 outbox 的存储实现（订单与事件原子提交）。
 type TransactionalRepository interface {
 	Repository
-	EnsureOrder(ctx context.Context, o Order) error
+	// EnsureOrder 幂等物化订单；只有真的插入了新行才发布 domainEvents（同一事务）。
+	EnsureOrder(ctx context.Context, o Order, domainEvents []event.DomainEvent) error
 	CreateOrderAndPublish(ctx context.Context, o Order, domainEvents []event.DomainEvent) error
 	UpdateOrderAndPublish(ctx context.Context, o Order, expectedVersion int, domainEvents []event.DomainEvent) error
 	CreateOfferAndPublish(ctx context.Context, o Offer, domainEvents []event.DomainEvent) error
@@ -190,19 +210,51 @@ type MemoryRepository struct {
 	orders map[string]Order
 	offers map[string]Offer
 	events []event.DomainEvent
+	// offerOrders: offerID → 接单生成的 orderID。档位占用看订单是否 CANCELLED，
+	// 跟 PG 的 uq_orders_slot_active（WHERE lifecycle <> 'CANCELLED'）同语义。
+	offerOrders map[string]string
+	// audit 模拟 PG 触发器写的 fulfillment.audit_log（开发 / 测试环境同语义）。
+	audit []memoryAudit
+}
+
+type memoryAudit struct {
+	table, rowID string
+	entry        AuditEntry
+}
+
+// record 追加一行审计（调用方已持锁）。
+func (r *MemoryRepository) record(ctx context.Context, table, rowID, operation, oldState, newState string, oldVersion, newVersion int) {
+	audit, _ := AuditFromContext(ctx)
+	r.audit = append(r.audit, memoryAudit{table: table, rowID: rowID, entry: AuditEntry{
+		Operation: operation, OldState: oldState, NewState: newState, OldVersion: oldVersion, NewVersion: newVersion,
+		ActorID: audit.ActorID, CommandType: audit.CommandType, RecordedAt: time.Now().UTC(),
+	}})
+}
+
+func (r *MemoryRepository) ListAudit(_ context.Context, table, rowID string) ([]AuditEntry, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []AuditEntry{}
+	for _, row := range r.audit {
+		if row.table == table && row.rowID == rowID {
+			out = append(out, row.entry)
+		}
+	}
+	return out, nil
 }
 
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{orders: make(map[string]Order), offers: make(map[string]Offer)}
+	return &MemoryRepository{orders: make(map[string]Order), offers: make(map[string]Offer), offerOrders: make(map[string]string)}
 }
 
-func (r *MemoryRepository) CreateOrder(_ context.Context, o Order) error {
+func (r *MemoryRepository) CreateOrder(ctx context.Context, o Order) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.orders[o.ID]; exists {
 		return errors.New("order already exists")
 	}
 	r.orders[o.ID] = cloneOrder(o)
+	r.record(ctx, "orders", o.ID, "INSERT", "", o.Lifecycle, 0, o.Version)
 	return nil
 }
 
@@ -210,7 +262,7 @@ func (r *MemoryRepository) CreateOrder(_ context.Context, o Order) error {
 // materialisation. An existing row is success only when it represents the
 // same immutable order identity; an ID collision with different parties or
 // need is rejected.
-func (r *MemoryRepository) EnsureOrder(_ context.Context, o Order) error {
+func (r *MemoryRepository) EnsureOrder(ctx context.Context, o Order, domainEvents []event.DomainEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if existing, ok := r.orders[o.ID]; ok {
@@ -220,10 +272,48 @@ func (r *MemoryRepository) EnsureOrder(_ context.Context, o Order) error {
 		return nil
 	}
 	r.orders[o.ID] = cloneOrder(o)
+	r.events = append(r.events, domainEvents...)
+	r.record(ctx, "orders", o.ID, "INSERT", "", o.Lifecycle, 0, o.Version)
 	return nil
 }
 
-func (r *MemoryRepository) CreateOrderAndPublish(_ context.Context, o Order, domainEvents []event.DomainEvent) error {
+// WithinTransaction 给内存仓同样的「全有或全无」语义：operation 失败时恢复到调用前
+// 的快照（POLICY-STAMP-DURABLE-001：盖章失败时订单迁移与事件一并回滚）。
+// Service 的互斥锁串行化了所有命令，快照期间不会有并发写入。
+func (r *MemoryRepository) WithinTransaction(ctx context.Context, operation func(context.Context) error) error {
+	r.mu.Lock()
+	orders := make(map[string]Order, len(r.orders))
+	for id, order := range r.orders {
+		orders[id] = cloneOrder(order)
+	}
+	offers := make(map[string]Offer, len(r.offers))
+	for id, offer := range r.offers {
+		offers[id] = offer
+	}
+	offerOrders := make(map[string]string, len(r.offerOrders))
+	for id, orderID := range r.offerOrders {
+		offerOrders[id] = orderID
+	}
+	events := append([]event.DomainEvent(nil), r.events...)
+	audit := append([]memoryAudit(nil), r.audit...)
+	r.mu.Unlock()
+	if err := operation(ctx); err != nil {
+		r.mu.Lock()
+		r.orders, r.offers, r.offerOrders, r.events, r.audit = orders, offers, offerOrders, events, audit
+		r.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// Events 返回内存仓已发布的领域事件（测试核对 outbox 用）。
+func (r *MemoryRepository) Events() []event.DomainEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]event.DomainEvent(nil), r.events...)
+}
+
+func (r *MemoryRepository) CreateOrderAndPublish(ctx context.Context, o Order, domainEvents []event.DomainEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.orders[o.ID]; exists {
@@ -231,6 +321,7 @@ func (r *MemoryRepository) CreateOrderAndPublish(_ context.Context, o Order, dom
 	}
 	r.orders[o.ID] = cloneOrder(o)
 	r.events = append(r.events, domainEvents...)
+	r.record(ctx, "orders", o.ID, "INSERT", "", o.Lifecycle, 0, o.Version)
 	return nil
 }
 
@@ -244,7 +335,7 @@ func (r *MemoryRepository) GetOrder(_ context.Context, id string) (Order, error)
 	return cloneOrder(o), nil
 }
 
-func (r *MemoryRepository) UpdateOrder(_ context.Context, o Order, expectedVersion int) error {
+func (r *MemoryRepository) UpdateOrder(ctx context.Context, o Order, expectedVersion int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	current, exists := r.orders[o.ID]
@@ -255,10 +346,11 @@ func (r *MemoryRepository) UpdateOrder(_ context.Context, o Order, expectedVersi
 		return ErrVersionConflict
 	}
 	r.orders[o.ID] = cloneOrder(o)
+	r.record(ctx, "orders", o.ID, "UPDATE", current.Lifecycle, o.Lifecycle, current.Version, o.Version)
 	return nil
 }
 
-func (r *MemoryRepository) UpdateOrderAndPublish(_ context.Context, o Order, expectedVersion int, domainEvents []event.DomainEvent) error {
+func (r *MemoryRepository) UpdateOrderAndPublish(ctx context.Context, o Order, expectedVersion int, domainEvents []event.DomainEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	current, exists := r.orders[o.ID]
@@ -270,6 +362,7 @@ func (r *MemoryRepository) UpdateOrderAndPublish(_ context.Context, o Order, exp
 	}
 	r.orders[o.ID] = cloneOrder(o)
 	r.events = append(r.events, domainEvents...)
+	r.record(ctx, "orders", o.ID, "UPDATE", current.Lifecycle, o.Lifecycle, current.Version, o.Version)
 	return nil
 }
 
@@ -298,23 +391,25 @@ func (r *MemoryRepository) ListOrdersByStore(_ context.Context, storeID string) 
 	return result, nil
 }
 
-func (r *MemoryRepository) CreateOffer(_ context.Context, o Offer) error {
+func (r *MemoryRepository) CreateOffer(ctx context.Context, o Offer) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.offers[o.ID]; exists {
 		return errors.New("offer already exists")
 	}
 	r.offers[o.ID] = o
+	r.record(ctx, "offers", o.ID, "INSERT", "", o.Status, 0, o.Version)
 	return nil
 }
 
-func (r *MemoryRepository) CreateOfferAndPublish(_ context.Context, o Offer, domainEvents []event.DomainEvent) error {
+func (r *MemoryRepository) CreateOfferAndPublish(ctx context.Context, o Offer, domainEvents []event.DomainEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.offers[o.ID]; exists {
 		return errors.New("offer already exists")
 	}
 	r.offers[o.ID] = o
+	r.record(ctx, "offers", o.ID, "INSERT", "", o.Status, 0, o.Version)
 	r.events = append(r.events, domainEvents...)
 	return nil
 }
@@ -329,7 +424,7 @@ func (r *MemoryRepository) GetOffer(_ context.Context, id string) (Offer, error)
 	return o, nil
 }
 
-func (r *MemoryRepository) UpdateOffer(_ context.Context, o Offer, expectedVersion int) error {
+func (r *MemoryRepository) UpdateOffer(ctx context.Context, o Offer, expectedVersion int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	current, exists := r.offers[o.ID]
@@ -340,6 +435,7 @@ func (r *MemoryRepository) UpdateOffer(_ context.Context, o Offer, expectedVersi
 		return ErrVersionConflict
 	}
 	r.offers[o.ID] = o
+	r.record(ctx, "offers", o.ID, "UPDATE", current.Status, o.Status, current.Version, o.Version)
 	return nil
 }
 
@@ -356,7 +452,7 @@ func (r *MemoryRepository) ListOffersByAgent(_ context.Context, agentID string) 
 	return result, nil
 }
 
-func (r *MemoryRepository) AcceptOfferAndCreateOrder(_ context.Context, offer Offer, order Order, expectedOfferVersion int, domainEvents []event.DomainEvent) error {
+func (r *MemoryRepository) AcceptOfferAndCreateOrder(ctx context.Context, offer Offer, order Order, expectedOfferVersion int, domainEvents []event.DomainEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	current, exists := r.offers[offer.ID]
@@ -377,7 +473,7 @@ func (r *MemoryRepository) AcceptOfferAndCreateOrder(_ context.Context, offer Of
 	// WHERE slot_id IS NOT NULL。空串也判重的话，第二个主题订单永远成交不了。
 	if offer.SlotID != "" {
 		for _, o := range r.offers {
-			if o.SlotID == offer.SlotID && o.Status == "ACCEPTED" && o.ID != offer.ID {
+			if o.SlotID == offer.SlotID && o.Status == "ACCEPTED" && o.ID != offer.ID && r.orders[r.offerOrders[o.ID]].Lifecycle != "CANCELLED" {
 				return ErrOfferNotAvailable
 			}
 		}
@@ -385,18 +481,36 @@ func (r *MemoryRepository) AcceptOfferAndCreateOrder(_ context.Context, offer Of
 	// 校验全过才写：失败时不能留下「offer 已接受但没有订单」的半状态。
 	r.offers[offer.ID] = offer
 	r.orders[order.ID] = cloneOrder(order)
+	r.offerOrders[offer.ID] = order.ID
+	r.record(ctx, "offers", offer.ID, "UPDATE", current.Status, offer.Status, current.Version, offer.Version)
+	r.record(ctx, "orders", order.ID, "INSERT", "", order.Lifecycle, 0, order.Version)
 	r.events = append(r.events, domainEvents...)
 	return nil
 }
 
+// cloneOrder 深拷贝订单：commitOrder 拿 before / after 做状态机比对，二者不能共享指针。
 func cloneOrder(o Order) Order {
-	o.Amendments = append([]Amendment(nil), o.Amendments...)
+	o.Amendments = append([]Amendment{}, o.Amendments...) // 空也是 []，不是 null
+	for i := range o.Amendments {
+		if p := o.Amendments[i].PreviousSnapshot; p != nil {
+			copy := *p
+			o.Amendments[i].PreviousSnapshot = &copy
+		}
+		if d := o.Amendments[i].DecidedAt; d != nil {
+			copy := *d
+			o.Amendments[i].DecidedAt = &copy
+		}
+	}
 	if o.Settlement != nil {
 		copy := *o.Settlement
 		o.Settlement = &copy
 	}
 	if o.Outcome != nil {
 		copy := *o.Outcome
+		if copy.Satisfaction != nil {
+			satisfaction := *copy.Satisfaction
+			copy.Satisfaction = &satisfaction
+		}
 		o.Outcome = &copy
 	}
 	return o
@@ -415,6 +529,10 @@ type Service struct {
 	// STORE-STATS-001：店铺存在性查询（RecordOutcome 归因校验用）。不接 = 不校验
 	// （测试 / 无库环境）；生产在 main.go 接 business 仓。
 	storeLookup func(ctx context.Context, storeID string) (active bool, err error)
+	// ORDER-STORE-STATS-AUTHZ-001：谁能读一家店的经营统计（店铺成员）。不接 = 拒绝。
+	storeAccess func(ctx context.Context, storeID, userID string) (bool, error)
+	// ORDER-SLOT-OWNER-001：谁能对 task/slot 发档位报价（任务 / 机会的主人，且对方是报名人）。不接 = 拒绝。
+	slotOfferAuthorizer func(ctx context.Context, taskID, slotID, requesterID, agentID string) (bool, error)
 	// jurisdictionResolver resolves the requester's
 	// jurisdiction (R16.7-P1-E) so the policy decision can
 	// be evaluated under the correct regulatory family. The
@@ -533,10 +651,10 @@ func (s *Service) resolveRequesterJurisdiction(ctx context.Context, requesterID 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "CreateOffer", "CreateSlotOffer", "AcceptSlotOffer", "CreateTopicInvite", "RespondTopicInvite", "GetOffer", "ListAgentOffers",
-		"ListMyOrders", "GetStoreOrderStats",
+		"ListMyOrders", "GetStoreOrderStats", "GetOrderAuditTrail",
 		"CheckInOrder", "SubmitEvidence",
 		"ConfirmCooperation", "StartExecution", "RecordDirectSettlement",
-		"RecordOutcome", "RecordSatisfaction", "RecordMaterialOrderChange",
+		"RecordOutcome", "RecordSatisfaction", "RecordMaterialOrderChange", "RespondMaterialOrderChange",
 		"CancelOrder":
 		return true
 	default:
@@ -551,6 +669,8 @@ func (s *Service) Handle(e command.Envelope) command.Result {
 func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// ORDER-AUDIT-001：命令上下文随 ctx 进仓储，PG 审计触发器据此记录「谁、哪条命令」。
+	ctx = WithAudit(ctx, AuditContext{ActorID: e.Actor.ID, PrincipalID: e.Principal.ID, CommandType: e.CommandType, CommandID: e.CommandID, CorrelationID: e.CorrelationID})
 	switch e.CommandType {
 	case "CreateOffer":
 		return s.createOffer(ctx, e)
@@ -570,6 +690,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listMyOrders(ctx, e)
 	case "GetStoreOrderStats":
 		return s.getStoreOrderStats(ctx, e)
+	case "GetOrderAuditTrail":
+		return s.getOrderAuditTrail(ctx, e)
 	case "CheckInOrder":
 		return s.checkInOrder(ctx, e)
 	case "SubmitEvidence":
@@ -586,6 +708,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.recordSatisfaction(ctx, e)
 	case "RecordMaterialOrderChange":
 		return s.recordMaterialChange(ctx, e)
+	case "RespondMaterialOrderChange":
+		return s.respondMaterialChange(ctx, e)
 	case "CancelOrder":
 		return s.cancelOrder(ctx, e)
 	default:
@@ -614,6 +738,35 @@ func (s *Service) listMyOrders(ctx context.Context, e command.Envelope) command.
 	raw, _ := json.Marshal(map[string]any{"orders": visible})
 	r.OperationRef = string(raw)
 	return r
+}
+
+// ---------- GetOrderAuditTrail (ORDER-AUDIT-001) ----------
+// 订单的完整变更轨迹（谁、哪条命令、前后状态 / 版本），只给订单双方看。
+// 争议、客服、结算核对都以它为准；数据来自存储层审计（PG 触发器写入，只追加）。
+
+func (s *Service) getOrderAuditTrail(ctx context.Context, e command.Envelope) command.Result {
+	order, err := s.repository.GetOrder(ctx, e.Target.ID)
+	if errors.Is(err, ErrOrderNotFound) {
+		return command.Rejected(e, "ORDER_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.order_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
+	}
+	if !isOrderParty(order, e.Actor.ID) {
+		// 非当事人一律「不存在」，不泄露订单是否存在。
+		return command.Rejected(e, "ORDER_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.order_not_found", nil)
+	}
+	reader, ok := s.repository.(AuditReader)
+	if !ok {
+		return command.Rejected(e, "AUDIT_NOT_AVAILABLE", "INTERNAL", "AFTER_USER_ACTION", "fulfillment.audit_not_available", nil)
+	}
+	entries, err := reader.ListAudit(ctx, "orders", order.ID)
+	if err != nil {
+		return command.Rejected(e, "AUDIT_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.audit_read_failed", nil)
+	}
+	return acceptedWithPayload(e, "OrderAuditTrail", order.ID, order.Version, order.Lifecycle, map[string]any{
+		"orderId": order.ID, "entries": entries, "amendments": order.Amendments,
+	}, nil)
 }
 
 // ---------- GetStoreOrderStats ----------
@@ -651,6 +804,17 @@ func (s *Service) getStoreOrderStats(ctx context.Context, e command.Envelope) co
 		}
 	}
 	storeID := strings.TrimSpace(p.StoreID)
+	// ORDER-STORE-STATS-AUTHZ-001：统计里有顾客 id 和满意度，只给这家店的成员看。
+	if s.storeAccess == nil {
+		return command.Rejected(e, "STORE_ACCESS_NOT_CONFIGURED", "INTERNAL", "AFTER_USER_ACTION", "fulfillment.store_access_unconfigured", nil)
+	}
+	allowed, accessErr := s.storeAccess(ctx, storeID, e.Actor.ID)
+	if accessErr != nil {
+		return command.Rejected(e, "STORE_ACCESS_CHECK_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.store_access_check_failed", nil)
+	}
+	if !allowed {
+		return command.Rejected(e, "STORE_ACCESS_DENIED", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.store_access_denied", nil)
+	}
 	orders, err := s.repository.ListOrdersByStore(ctx, storeID)
 	if err != nil {
 		return command.Rejected(e, "ORDER_STATS_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_stats_failed", nil)
@@ -822,8 +986,19 @@ func (s *Service) createSlotOffer(ctx context.Context, e command.Envelope) comma
 	if p.AgreedCompensation <= 0 || p.AgreedCompensation > maxAmountVND {
 		return command.Rejected(e, "INVALID_SLOT_OFFER_AMOUNT", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_slot_offer_amount", nil)
 	}
-	// Only requester (task owner) can offer; for now check actor is USER and not the agent
 	if e.Actor.Type != "USER" || e.Actor.ID == p.AgentID {
+		return command.Rejected(e, "SLOT_OFFER_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.slot_offer_not_allowed", nil)
+	}
+	// ORDER-SLOT-OWNER-001：以前任何用户都能对任意 task/slot 发报价（接单即占档位、
+	// 生成 CONFIRMED 订单）。只有任务 / 机会的主人能发，且对象必须是报名人。
+	if s.slotOfferAuthorizer == nil {
+		return command.Rejected(e, "SLOT_OFFER_AUTHZ_NOT_CONFIGURED", "INTERNAL", "AFTER_USER_ACTION", "fulfillment.slot_offer_authz_unconfigured", nil)
+	}
+	allowed, authzErr := s.slotOfferAuthorizer(ctx, p.TaskID, p.SlotID, e.Actor.ID, p.AgentID)
+	if authzErr != nil {
+		return command.Rejected(e, "SLOT_OFFER_AUTHZ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.slot_offer_authz_failed", nil)
+	}
+	if !allowed {
 		return command.Rejected(e, "SLOT_OFFER_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.slot_offer_not_allowed", nil)
 	}
 	if p.Currency == "" {
@@ -1116,6 +1291,7 @@ func (s *Service) checkInOrder(ctx context.Context, e command.Envelope) command.
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	before := cloneOrder(order)
 	if !isOrderParty(order, e.Actor.ID) {
 		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
 	}
@@ -1129,7 +1305,7 @@ func (s *Service) checkInOrder(ctx context.Context, e command.Envelope) command.
 	order.Lifecycle = "EXECUTING"
 	order.Version++
 	order.UpdatedAt = now
-	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
+	if err := s.commitOrder(ctx, before, order, domainEvents); err != nil {
 		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
@@ -1156,6 +1332,7 @@ func (s *Service) submitEvidence(ctx context.Context, e command.Envelope) comman
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	before := cloneOrder(order)
 	if !isOrderParty(order, e.Actor.ID) {
 		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
 	}
@@ -1168,7 +1345,7 @@ func (s *Service) submitEvidence(ctx context.Context, e command.Envelope) comman
 	// No state change, just event; version bump for audit
 	order.Version++
 	order.UpdatedAt = now
-	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
+	if err := s.commitOrder(ctx, before, order, domainEvents); err != nil {
 		return orderUpdateRejected(e, err, "EVIDENCE_SUBMIT_FAILED", "fulfillment.evidence_failed")
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
@@ -1185,6 +1362,7 @@ func (s *Service) confirmCooperation(ctx context.Context, e command.Envelope) co
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	before := cloneOrder(order)
 	if !isOrderParty(order, e.Actor.ID) {
 		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
 	}
@@ -1229,22 +1407,15 @@ func (s *Service) confirmCooperation(ctx context.Context, e command.Envelope) co
 	order.Version++
 	order.UpdatedAt = s.clock.Now().UTC()
 	domainEvents := []event.DomainEvent{event.New("CooperationConfirmed", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, order.UpdatedAt, map[string]any{
-		"snapshot": order.Snapshot,
+		"snapshot":         order.Snapshot,
+		"policyDecisionId": order.PolicyDecisionID,
 	})}
-	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
+	// R16.7-P1-B (LC-28): the (order, decision, lifecycle) stamp in
+	// `policy.order_decisions` is the system of record. POLICY-STAMP-DURABLE-001:
+	// it is written in the same transaction as the lifecycle change — a lost
+	// stamp rolls the confirmation back instead of being silently dropped.
+	if err := s.commitOrder(ctx, before, order, domainEvents, s.stampFor(order)...); err != nil {
 		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
-	}
-	// R16.7-P1-B (LC-28): record the (order, decision,
-	// lifecycle) tuple. The Order now carries the decision id
-	// in the JSON response; the (order, decision) link in
-	// `policy.order_decisions` is the system of record.
-	if s.policyDecisions != nil && order.PolicyDecisionID != "" {
-		_ = s.policyDecisions.Stamp(ctx, policydecisions.OrderStamp{
-			OrderID:          order.ID,
-			DecisionID:       order.PolicyDecisionID,
-			StampedAt:        order.UpdatedAt,
-			StampedLifecycle: order.Lifecycle,
-		})
 	}
 	// R16.7-P1-B (LC-28): include the stamped decision id in
 	// the response so the mobile client can show "this order
@@ -1273,6 +1444,7 @@ func (s *Service) startExecution(ctx context.Context, e command.Envelope) comman
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	before := cloneOrder(order)
 	if !isOrderParty(order, e.Actor.ID) {
 		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
 	}
@@ -1283,7 +1455,7 @@ func (s *Service) startExecution(ctx context.Context, e command.Envelope) comman
 	order.Version++
 	order.UpdatedAt = s.clock.Now().UTC()
 	domainEvents := []event.DomainEvent{event.New("ExecutionStarted", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, order.UpdatedAt, map[string]any{})}
-	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
+	if err := s.commitOrder(ctx, before, order, domainEvents); err != nil {
 		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
@@ -1311,6 +1483,7 @@ func (s *Service) recordDirectSettlement(ctx context.Context, e command.Envelope
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	before := cloneOrder(order)
 	if !isOrderParty(order, e.Actor.ID) {
 		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
 	}
@@ -1371,7 +1544,7 @@ func (s *Service) recordDirectSettlement(ctx context.Context, e command.Envelope
 		"payeeConfirmed": order.Settlement.PayeeConfirmed,
 		"note":           "DIRECT_SETTLEMENT 不创建 Platform Funding 假记录；双方确认是声明信号，不等于平台物理验证现金",
 	})}
-	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
+	if err := s.commitOrder(ctx, before, order, domainEvents); err != nil {
 		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
@@ -1396,6 +1569,18 @@ func (s *Service) SetStoreLookup(check func(ctx context.Context, storeID string)
 	s.storeLookup = check
 }
 
+// SetStoreAccess 接上店铺经营统计的读权限（ORDER-STORE-STATS-AUTHZ-001）。
+// 不接 = GetStoreOrderStats 一律拒绝（fail closed）；生产在 main.go 接 business。
+func (s *Service) SetStoreAccess(check func(ctx context.Context, storeID, userID string) (bool, error)) {
+	s.storeAccess = check
+}
+
+// SetSlotOfferAuthorizer 接上档位报价的发起权校验（ORDER-SLOT-OWNER-001）。
+// 不接 = CreateSlotOffer 一律拒绝（fail closed）；生产在 main.go 接 demand + marketplace。
+func (s *Service) SetSlotOfferAuthorizer(check func(ctx context.Context, taskID, slotID, requesterID, agentID string) (bool, error)) {
+	s.slotOfferAuthorizer = check
+}
+
 func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command.Result {
 	var p outcomePayload
 	if !decode(e.Payload, &p) {
@@ -1408,6 +1593,7 @@ func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	before := cloneOrder(order)
 	if !isOrderParty(order, e.Actor.ID) {
 		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
 	}
@@ -1438,6 +1624,7 @@ func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command
 		RecordedAt:      now,
 	}
 	order.Lifecycle = "COMPLETED"
+	lapsePendingAmendments(&order, now, "order completed")
 	order.Version++
 	order.UpdatedAt = now
 	domainEvents := []event.DomainEvent{event.New("OutcomeRecorded", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
@@ -1445,7 +1632,7 @@ func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command
 		"scopeCompleted":  p.ScopeCompleted,
 		"materialChanges": p.MaterialChanges,
 	})}
-	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
+	if err := s.commitOrder(ctx, before, order, domainEvents); err != nil {
 		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
@@ -1473,6 +1660,7 @@ func (s *Service) recordSatisfaction(ctx context.Context, e command.Envelope) co
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	before := cloneOrder(order)
 	// MATCH-RANK-001：满意度是「需求方对服务者」的评价，进撮合排序 —— 服务者自己不能给自己打分。
 	if order.RequesterID != e.Actor.ID {
 		return command.Rejected(e, "ONLY_REQUESTER_RATES", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.only_requester_rates", nil)
@@ -1493,24 +1681,85 @@ func (s *Service) recordSatisfaction(ctx context.Context, e command.Envelope) co
 		"repeatIntent": p.RepeatIntent,
 		"note":         "履约事实不要求用户重复打分",
 	})}
-	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
+	if err := s.commitOrder(ctx, before, order, domainEvents); err != nil {
 		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
 }
 
-// ---------- RecordMaterialOrderChange ----------
+// ---------- RecordMaterialOrderChange / RespondMaterialOrderChange ----------
 // Gate G：Material Change 必须产生新版本/amendment，不得静默覆盖。
-// LC-30：Material Change 强制重新 EvaluateBoundary；旧 PolicyDecision
-// 留在审计里，Order.PolicyDecisionID 更新为新 decision 的 id。
+// ORDER-AMEND-001：以前 amendment 只记一句描述，快照原样复制 —— 条款根本改不了，
+// 也不需要对方同意。现在一方提出新条款（PROPOSED），另一方接受才生效；
+// 旧条款存进 amendment.PreviousSnapshot，任何一版都能还原。
+// LC-30：条款真正变更（接受）时强制重新 EvaluateBoundary，并在同一事务内盖章。
+
+type materialChangeTerms struct {
+	StartTime          *string `json:"startTime"`
+	Duration           *string `json:"duration"`
+	MeetingContext     *string `json:"meetingContext"`
+	AgreedCompensation *int64  `json:"agreedCompensation"`
+	IncludedScope      *string `json:"includedScope"`
+	ExcludedScope      *string `json:"excludedScope"`
+	PaymentMethodLabel *string `json:"paymentMethodLabel"`
+}
 
 type materialChangePayload struct {
-	Description string `json:"description"`
+	Description string              `json:"description"`
+	Changes     materialChangeTerms `json:"changes"`
+}
+
+// applyTerms 返回套用变更后的快照，以及哪些字段真的变了。
+func applyTerms(base OrderSnapshot, c materialChangeTerms) (OrderSnapshot, []string) {
+	next := base
+	changed := []string{}
+	setString := func(field string, target *string, value *string) {
+		if value != nil && strings.TrimSpace(*value) != *target {
+			*target = strings.TrimSpace(*value)
+			changed = append(changed, field)
+		}
+	}
+	setString("startTime", &next.StartTime, c.StartTime)
+	setString("duration", &next.Duration, c.Duration)
+	setString("meetingContext", &next.MeetingContext, c.MeetingContext)
+	setString("includedScope", &next.IncludedScope, c.IncludedScope)
+	setString("excludedScope", &next.ExcludedScope, c.ExcludedScope)
+	setString("paymentMethodLabel", &next.PaymentMethodLabel, c.PaymentMethodLabel)
+	if c.AgreedCompensation != nil && *c.AgreedCompensation != next.AgreedCompensation {
+		next.AgreedCompensation = *c.AgreedCompensation
+		changed = append(changed, "agreedCompensation")
+		// 金额变了，现金资格按新金额重新评估（R8 Pillar #6；快照里的旧结论不能沿用）。
+		if next.SettlementMode == "DIRECT_SETTLEMENT" {
+			next.CashEligibilityStatus, next.CashEligibilityReason = assessCashEligibility(next.SettlementMode, next.AgreedCompensation, "")
+		}
+	}
+	return next, changed
+}
+
+func pendingAmendment(order Order) int {
+	for i, amendment := range order.Amendments {
+		if amendment.Status == AmendmentProposed {
+			return i
+		}
+	}
+	return -1
+}
+
+// lapsePendingAmendments 在订单进入终态时作废未决提议（留痕，不删除）。
+func lapsePendingAmendments(order *Order, now time.Time, reason string) {
+	for i := range order.Amendments {
+		if order.Amendments[i].Status == AmendmentProposed {
+			decidedAt := now
+			order.Amendments[i].Status = AmendmentLapsed
+			order.Amendments[i].DecidedAt = &decidedAt
+			order.Amendments[i].DecisionReason = reason
+		}
+	}
 }
 
 func (s *Service) recordMaterialChange(ctx context.Context, e command.Envelope) command.Result {
 	var p materialChangePayload
-	if !decode(e.Payload, &p) || p.Description == "" {
+	if !decode(e.Payload, &p) || strings.TrimSpace(p.Description) == "" {
 		return command.Rejected(e, "INVALID_MATERIAL_CHANGE", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_material_change", nil)
 	}
 	order, err := s.repository.GetOrder(ctx, e.Target.ID)
@@ -1520,90 +1769,178 @@ func (s *Service) recordMaterialChange(ctx context.Context, e command.Envelope) 
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	before := cloneOrder(order)
 	if !isOrderParty(order, e.Actor.ID) {
 		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
 	}
 	if order.Lifecycle != "CONFIRMED" && order.Lifecycle != "EXECUTING" {
 		return command.Rejected(e, "ORDER_NOT_AMENDABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.not_amendable", map[string]any{"lifecycle": order.Lifecycle})
 	}
-	// R16.7-P1-C (LC-30): for a PLATFORM_PAY Order that
-	// already carries a policy decision, a Material Change
-	// forces a fresh evaluation. The new decision may reuse
-	// the existing id (TermsVersion unchanged) or be a new
-	// row (TermsVersion bumped between amendments); in both
-	// cases we record a new (order, decision) stamp at the
-	// current lifecycle so the audit log shows 'this order
-	// was last re-evaluated at amendment T under decision X'.
-	// DIRECT_SETTLEMENT Orders skip the re-evaluation: the
-	// platform never touches the funds, so the regulator
-	// does not need the audit log for amendments either.
-	var reEvaluatedDecisionID string
-	if order.Snapshot.SettlementMode == "PLATFORM_PAY" && s.policyDecisions != nil {
-		jurisdiction := s.resolveRequesterJurisdiction(ctx, order.RequesterID)
-		decision, evalErr := s.policyDecisions.Evaluate(ctx, order.RequesterID, policydecisions.CategoryUserPaidService, jurisdiction)
-		if evalErr != nil {
-			return command.Rejected(e, "POLICY_REEVALUATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.policy_reevaluate_failed", map[string]any{"orderId": order.ID, "error": evalErr.Error()})
-		}
-		previous := order.PolicyDecisionID
-		order.PolicyDecisionID = decision.ID
-		reEvaluatedDecisionID = decision.ID
-		_ = previous // old id stays in policy.order_decisions as a history row
+	if i := pendingAmendment(order); i >= 0 {
+		return command.Rejected(e, "AMENDMENT_PENDING", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.amendment_pending", map[string]any{"amendmentId": order.Amendments[i].AmendmentID})
 	}
-	// Note: when s.policyDecisions is nil we intentionally do
-	// NOT block the amendment. The Order has already been paid
-	// for; rolling back the user's payment because the policy
-	// service is degraded is worse than letting the amendment
-	// through with a stale decision id. Operators see the
-	// missing-stamp anomaly in their audit queries
-	// (TestLC30MaterialChangePermissiveWhenGateUnconfigured
-	// pins this trade-off).
+	proposed, changed := applyTerms(order.Snapshot, p.Changes)
+	if len(changed) == 0 {
+		return command.Rejected(e, "NO_MATERIAL_CHANGE", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.no_material_change", nil)
+	}
+	if rejected, blocked := validateProposedTerms(e, order, proposed, changed); blocked {
+		return rejected
+	}
 	now := s.clock.Now().UTC()
 	amendment := Amendment{
 		AmendmentID: newID("amd_"),
-		Description: p.Description,
-		Snapshot:    order.Snapshot,
+		Description: strings.TrimSpace(p.Description),
+		Snapshot:    proposed,
 		CreatedAt:   now,
+		Status:      AmendmentProposed,
+		ProposedBy:  e.Actor.ID,
 	}
 	order.Amendments = append(order.Amendments, amendment)
 	order.Version++
 	order.UpdatedAt = now
-	eventPayload := map[string]any{
-		"amendmentId": amendment.AmendmentID,
-		"description": p.Description,
-		"note":        "Material Change 产生新版本/amendment，不得静默覆盖",
-	}
-	if reEvaluatedDecisionID != "" {
-		eventPayload["policyDecisionId"] = reEvaluatedDecisionID
-		eventPayload["note"] = eventPayload["note"].(string) + "；LC-30 已重新 EvaluateBoundary"
-	}
-	domainEvents := []event.DomainEvent{event.New("MaterialOrderChangeRecorded", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, eventPayload)}
-	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
+	domainEvents := []event.DomainEvent{event.New("MaterialOrderChangeProposed", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"amendmentId":   amendment.AmendmentID,
+		"description":   amendment.Description,
+		"changedFields": changed,
+		"proposedBy":    e.Actor.ID,
+		"note":          "Material Change 产生新版本/amendment，不得静默覆盖；对方接受后才生效",
+	})}
+	if err := s.commitOrder(ctx, before, order, domainEvents); err != nil {
 		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
-	// LC-30 stamp: record the (order, decision) link at the
-	// current lifecycle so a regulator can recover 'this
-	// order was last re-evaluated at amendment T'. The
-	// existing stamps (OFFERED, CONFIRMED, EXECUTING-1) are
-	// kept untouched — they are history, not state.
-	if s.policyDecisions != nil && reEvaluatedDecisionID != "" {
-		_ = s.policyDecisions.Stamp(ctx, policydecisions.OrderStamp{
-			OrderID:          order.ID,
-			DecisionID:       reEvaluatedDecisionID,
-			StampedAt:        now,
-			StampedLifecycle: order.Lifecycle,
-		})
+	return acceptedWithPayload(e, "Order", order.ID, order.Version, order.Lifecycle, map[string]any{
+		"orderId": order.ID, "amendmentId": amendment.AmendmentID, "status": amendment.Status, "changedFields": changed,
+	}, domainEvents)
+}
+
+// validateProposedTerms 是提出与接受两处共用的条款校验：金额边界、结算后不可
+// 改价、现金资格门。
+func validateProposedTerms(e command.Envelope, order Order, proposed OrderSnapshot, changed []string) (command.Result, bool) {
+	for _, field := range changed {
+		if field != "agreedCompensation" {
+			continue
+		}
+		if proposed.AgreedCompensation <= 0 || proposed.AgreedCompensation > maxAmountVND {
+			return command.Rejected(e, "INVALID_MATERIAL_CHANGE_AMOUNT", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_material_change_amount", nil), true
+		}
+		// 已有结算声明时不能再改价：结算金额是对着旧快照确认的。
+		if order.Settlement != nil {
+			return command.Rejected(e, "AMENDMENT_AFTER_SETTLEMENT", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.amendment_after_settlement", nil), true
+		}
 	}
-	r := command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
-	if reEvaluatedDecisionID != "" {
-		raw, _ := json.Marshal(map[string]any{
-			"orderId":          order.ID,
-			"lifecycle":        order.Lifecycle,
-			"amendmentId":      amendment.AmendmentID,
-			"policyDecisionId": reEvaluatedDecisionID,
-		})
-		r.OperationRef = string(raw)
+	return cashEligibilityGate(e, proposed, "orderId", order.ID)
+}
+
+func changedFields(before, after OrderSnapshot) []string {
+	_, changed := applyTerms(before, materialChangeTerms{
+		StartTime: &after.StartTime, Duration: &after.Duration, MeetingContext: &after.MeetingContext,
+		AgreedCompensation: &after.AgreedCompensation, IncludedScope: &after.IncludedScope,
+		ExcludedScope: &after.ExcludedScope, PaymentMethodLabel: &after.PaymentMethodLabel,
+	})
+	return changed
+}
+
+type respondMaterialChangePayload struct {
+	AmendmentID string `json:"amendmentId"`
+	Decision    string `json:"decision"` // ACCEPT | REJECT | WITHDRAW
+	Reason      string `json:"reason"`
+}
+
+func (s *Service) respondMaterialChange(ctx context.Context, e command.Envelope) command.Result {
+	var p respondMaterialChangePayload
+	if !decode(e.Payload, &p) || p.AmendmentID == "" || (p.Decision != "ACCEPT" && p.Decision != "REJECT" && p.Decision != "WITHDRAW") {
+		return command.Rejected(e, "INVALID_AMENDMENT_RESPONSE", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_amendment_response", nil)
 	}
-	return r
+	order, err := s.repository.GetOrder(ctx, e.Target.ID)
+	if errors.Is(err, ErrOrderNotFound) {
+		return command.Rejected(e, "ORDER_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.order_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
+	}
+	before := cloneOrder(order)
+	if !isOrderParty(order, e.Actor.ID) {
+		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
+	}
+	index := -1
+	for i := range order.Amendments {
+		if order.Amendments[i].AmendmentID == p.AmendmentID {
+			index = i
+		}
+	}
+	if index < 0 {
+		return command.Rejected(e, "AMENDMENT_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.amendment_not_found", nil)
+	}
+	amendment := order.Amendments[index]
+	if amendment.Status != AmendmentProposed {
+		return command.Rejected(e, "AMENDMENT_NOT_PENDING", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.amendment_not_pending", map[string]any{"status": amendment.Status})
+	}
+	if order.Lifecycle != "CONFIRMED" && order.Lifecycle != "EXECUTING" {
+		return command.Rejected(e, "ORDER_NOT_AMENDABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.not_amendable", map[string]any{"lifecycle": order.Lifecycle})
+	}
+	isProposer := amendment.ProposedBy == e.Actor.ID
+	if p.Decision == "WITHDRAW" && !isProposer {
+		return command.Rejected(e, "ONLY_PROPOSER_WITHDRAWS", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.only_proposer_withdraws", nil)
+	}
+	if p.Decision != "WITHDRAW" && isProposer {
+		return command.Rejected(e, "COUNTERPARTY_MUST_DECIDE", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.counterparty_must_decide", nil)
+	}
+	now := s.clock.Now().UTC()
+	decidedAt := now
+	amendment.DecidedBy = e.Actor.ID
+	amendment.DecidedAt = &decidedAt
+	amendment.DecisionReason = strings.TrimSpace(p.Reason)
+	var stamps []policydecisions.OrderStamp
+	eventType := "MaterialOrderChangeRejected"
+	switch p.Decision {
+	case "WITHDRAW":
+		amendment.Status = AmendmentWithdrawn
+		eventType = "MaterialOrderChangeWithdrawn"
+	case "REJECT":
+		amendment.Status = AmendmentRejected
+	case "ACCEPT":
+		// 提出之后状态可能变了（例如对方已登记结算），接受前按当前订单再校验一次。
+		if rejected, blocked := validateProposedTerms(e, order, amendment.Snapshot, changedFields(order.Snapshot, amendment.Snapshot)); blocked {
+			return rejected
+		}
+		if order.Snapshot.SettlementMode == "PLATFORM_PAY" {
+			// LC-30：条款变了必须重新评估；策略服务没接 = 拒绝（旧条款不变），不放行。
+			if s.policyDecisions == nil {
+				return command.Rejected(e, "POLICY_GATE_NOT_CONFIGURED", "INTERNAL", "AFTER_USER_ACTION", "fulfillment.policy_gate_unconfigured", map[string]any{"orderId": order.ID})
+			}
+			decision, evalErr := s.policyDecisions.Evaluate(ctx, order.RequesterID, policydecisions.CategoryUserPaidService, s.resolveRequesterJurisdiction(ctx, order.RequesterID))
+			if evalErr != nil {
+				return command.Rejected(e, "POLICY_REEVALUATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.policy_reevaluate_failed", map[string]any{"orderId": order.ID})
+			}
+			order.PolicyDecisionID = decision.ID
+		}
+		previous := order.Snapshot
+		amendment.PreviousSnapshot = &previous
+		amendment.Status = AmendmentAccepted
+		order.Snapshot = amendment.Snapshot
+		eventType = "MaterialOrderChangeAccepted"
+	}
+	order.Amendments[index] = amendment
+	order.Version++
+	order.UpdatedAt = now
+	if amendment.Status == AmendmentAccepted {
+		stamps = s.stampFor(order)
+	}
+	domainEvents := []event.DomainEvent{event.New(eventType, "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"amendmentId":      amendment.AmendmentID,
+		"status":           amendment.Status,
+		"decidedBy":        e.Actor.ID,
+		"reason":           amendment.DecisionReason,
+		"policyDecisionId": order.PolicyDecisionID,
+	})}
+	if err := s.commitOrder(ctx, before, order, domainEvents, stamps...); err != nil {
+		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
+	}
+	payload := map[string]any{"orderId": order.ID, "amendmentId": amendment.AmendmentID, "status": amendment.Status, "lifecycle": order.Lifecycle}
+	if amendment.Status == AmendmentAccepted && order.PolicyDecisionID != "" {
+		payload["policyDecisionId"] = order.PolicyDecisionID
+	}
+	return acceptedWithPayload(e, "Order", order.ID, order.Version, order.Lifecycle, payload, domainEvents)
 }
 
 // ---------- CancelOrder ----------
@@ -1629,6 +1966,7 @@ func (s *Service) cancelOrder(ctx context.Context, e command.Envelope) command.R
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	before := cloneOrder(order)
 	if !isOrderParty(order, e.Actor.ID) {
 		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
 	}
@@ -1645,6 +1983,7 @@ func (s *Service) cancelOrder(ctx context.Context, e command.Envelope) command.R
 	}
 	now := s.clock.Now().UTC()
 	order.Lifecycle = "CANCELLED"
+	lapsePendingAmendments(&order, now, "order cancelled")
 	order.Version++
 	order.UpdatedAt = now
 	reason := strings.TrimSpace(p.Reason)
@@ -1657,7 +1996,7 @@ func (s *Service) cancelOrder(ctx context.Context, e command.Envelope) command.R
 		"by":      e.Actor.ID,
 		"role":    viewerRole(order, e.Actor.ID),
 	})}
-	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
+	if err := s.commitOrder(ctx, before, order, domainEvents); err != nil {
 		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	r := command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
@@ -1751,12 +2090,239 @@ func offerSnapshot(offer Offer) OrderSnapshot {
 }
 
 // orderUpdateRejected 把仓储写失败翻成命令结果：版本冲突是并发（刷新重试），
-// 其余才是内部错误（ORDER-CONFLICT-CODE-001）。
+// 非法迁移是业务状态，其余才是内部错误（ORDER-CONFLICT-CODE-001）。
 func orderUpdateRejected(e command.Envelope, err error, code, messageKey string) command.Result {
 	if errors.Is(err, ErrVersionConflict) {
 		return command.Rejected(e, "ORDER_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "fulfillment.order_version_conflict", nil)
 	}
+	if errors.Is(err, ErrIllegalTransition) {
+		return command.Rejected(e, "ILLEGAL_ORDER_TRANSITION", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.illegal_transition", map[string]any{"reason": err.Error()})
+	}
+	if errors.Is(err, ErrPolicyStampFailed) {
+		return command.Rejected(e, "POLICY_STAMP_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.policy_stamp_failed", nil)
+	}
 	return command.Rejected(e, code, "INTERNAL", "SAFE_RETRY", messageKey, nil)
+}
+
+// ---------- 订单状态机（ORDER-FSM-001） ----------
+// 唯一的合法迁移表。各命令先按自己的业务规则给出具体拒绝码；commitOrder 在
+// 写库前再用这张表和不变量兜底一次 —— 任何一条命令写错都过不了这里。
+// 数据库侧由 fulfillment.orders 的守卫触发器执行同一张表（migrations/135）。
+var orderTransitions = map[string]map[string]bool{
+	"OFFERED":   {"CONFIRMED": true, "CANCELLED": true},
+	"CONFIRMED": {"EXECUTING": true, "CANCELLED": true},
+	"EXECUTING": {"COMPLETED": true, "CANCELLED": true},
+}
+
+var (
+	ErrIllegalTransition = errors.New("illegal order transition")
+	ErrPolicyStampFailed = errors.New("policy decision stamp failed")
+)
+
+func illegal(reason string) error { return fmt.Errorf("%w: %s", ErrIllegalTransition, reason) }
+
+// checkOrderTransition 校验一次订单写入（before → after）是否合法：
+//   - 身份列（id / 双方 / needId / createdAt）不可变；版本严格 +1；
+//   - 生命周期只能按 orderTransitions 走；CANCELLED 冻结，不再有任何写入；
+//   - amendments 只能追加；已裁决的 amendment 不可改；快照只能随一条
+//     PROPOSED → ACCEPTED 的 amendment 一起变（Gate G：不得静默覆盖）；
+//   - 结算一方确认后不可撤回、金额不可改；结果记录后只有满意度可改。
+func checkOrderTransition(before, after Order) error {
+	if after.ID != before.ID || after.RequesterID != before.RequesterID || after.AgentID != before.AgentID || after.NeedID != before.NeedID || !after.CreatedAt.Equal(before.CreatedAt) {
+		return illegal("identity columns are immutable")
+	}
+	if after.Version != before.Version+1 {
+		return illegal(fmt.Sprintf("version must advance by one (%d -> %d)", before.Version, after.Version))
+	}
+	if before.Lifecycle == "CANCELLED" {
+		return illegal("CANCELLED orders are frozen")
+	}
+	if after.Lifecycle != before.Lifecycle && !orderTransitions[before.Lifecycle][after.Lifecycle] {
+		return illegal(before.Lifecycle + " -> " + after.Lifecycle)
+	}
+	if len(after.Amendments) < len(before.Amendments) {
+		return illegal("amendments are append-only")
+	}
+	acceptedNow := -1
+	for i, prev := range before.Amendments {
+		next := after.Amendments[i]
+		if next.AmendmentID != prev.AmendmentID {
+			return illegal("amendments are append-only")
+		}
+		if prev.Status != AmendmentProposed {
+			if !sameJSON(prev, next) {
+				return illegal("decided amendments are immutable")
+			}
+			continue
+		}
+		if next.Status == AmendmentAccepted {
+			acceptedNow = i
+		}
+	}
+	if !sameJSON(before.Snapshot, after.Snapshot) {
+		if acceptedNow < 0 || !sameJSON(after.Snapshot, after.Amendments[acceptedNow].Snapshot) {
+			return illegal("snapshot changes only through an accepted amendment")
+		}
+	}
+	if prev := before.Settlement; prev != nil {
+		next := after.Settlement
+		if next == nil || next.AgreedAmount != prev.AgreedAmount || (prev.PayerConfirmed && !next.PayerConfirmed) || (prev.PayeeConfirmed && !next.PayeeConfirmed) {
+			return illegal("settlement confirmations cannot be withdrawn or re-priced")
+		}
+	}
+	if prev := before.Outcome; prev != nil {
+		next := after.Outcome
+		if next == nil {
+			return illegal("outcome cannot be removed")
+		}
+		a, b := *prev, *next
+		a.Satisfaction, b.Satisfaction = nil, nil
+		if !sameJSON(a, b) {
+			return illegal("recorded outcome facts are immutable")
+		}
+	}
+	return nil
+}
+
+func sameJSON(a, b any) bool {
+	ra, errA := json.Marshal(a)
+	rb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && string(ra) == string(rb)
+}
+
+// transactionRunner 由支持事务的仓储实现（PG）；内存仓直接执行。
+type transactionRunner interface {
+	WithinTransaction(ctx context.Context, operation func(context.Context) error) error
+}
+
+func (s *Service) inTransaction(ctx context.Context, operation func(context.Context) error) error {
+	if runner, ok := s.repository.(transactionRunner); ok {
+		return runner.WithinTransaction(ctx, operation)
+	}
+	return operation(ctx)
+}
+
+// commitOrder 是订单唯一的写入路径：状态机校验 → 同一事务内写订单 + outbox
+// 事件 + 策略决策盖章（+ 数据库触发器写审计行）。任何一步失败整体回滚。
+func (s *Service) commitOrder(ctx context.Context, before, after Order, domainEvents []event.DomainEvent, stamps ...policydecisions.OrderStamp) error {
+	if err := checkOrderTransition(before, after); err != nil {
+		return err
+	}
+	return s.inTransaction(ctx, func(txCtx context.Context) error {
+		if err := s.repository.UpdateOrderAndPublish(txCtx, after, before.Version, domainEvents); err != nil {
+			return err
+		}
+		for _, stamp := range stamps {
+			if err := s.policyDecisions.Stamp(txCtx, stamp); err != nil {
+				return fmt.Errorf("%w: %v", ErrPolicyStampFailed, err)
+			}
+		}
+		return nil
+	})
+}
+
+// stampFor 返回订单当前策略决策的盖章（没有决策 / 没接策略服务时为空）。
+func (s *Service) stampFor(order Order) []policydecisions.OrderStamp {
+	if s.policyDecisions == nil || order.PolicyDecisionID == "" {
+		return nil
+	}
+	return []policydecisions.OrderStamp{{
+		OrderID:          order.ID,
+		DecisionID:       order.PolicyDecisionID,
+		StampedAt:        order.UpdatedAt,
+		StampedLifecycle: order.Lifecycle,
+	}}
+}
+
+// ---------- 审计上下文（ORDER-AUDIT-001） ----------
+
+// AuditContext 是一次写入的「谁 / 哪条命令」。仓储把它交给数据库审计触发器。
+type AuditContext struct {
+	ActorID       string
+	PrincipalID   string
+	CommandType   string
+	CommandID     string
+	CorrelationID string
+}
+
+// AuditEntry 是一行订单 / 报价审计记录（PG：fulfillment.audit_log，由触发器写入）。
+type AuditEntry struct {
+	Operation      string    `json:"operation"` // INSERT | UPDATE
+	OldState       string    `json:"oldState,omitempty"`
+	NewState       string    `json:"newState,omitempty"`
+	OldVersion     int       `json:"oldVersion,omitempty"`
+	NewVersion     int       `json:"newVersion,omitempty"`
+	ActorID        string    `json:"actorId"`
+	CommandType    string    `json:"commandType"`
+	EventTypes     string    `json:"eventTypes,omitempty"`
+	OverrideReason string    `json:"overrideReason,omitempty"`
+	RecordedAt     time.Time `json:"recordedAt"`
+}
+
+// AuditReader 由能读审计轨迹的仓储实现（PG 与内存仓都实现）。
+type AuditReader interface {
+	ListAudit(ctx context.Context, table, rowID string) ([]AuditEntry, error)
+}
+
+type auditContextKey struct{}
+
+func WithAudit(ctx context.Context, audit AuditContext) context.Context {
+	return context.WithValue(ctx, auditContextKey{}, audit)
+}
+
+// AuditFromContext 读取命令审计上下文；没有命令上下文（跨域物化）时 ok=false，
+// 仓储退回用领域事件的 principal / causation。
+func AuditFromContext(ctx context.Context) (AuditContext, bool) {
+	if ctx == nil {
+		return AuditContext{}, false
+	}
+	audit, ok := ctx.Value(auditContextKey{}).(AuditContext)
+	return audit, ok
+}
+
+// ---------- 跨域物化订单（ORDER-MATERIALIZE-AUDIT-001） ----------
+// 市场报名确认、场景邀约接受会直接生成 CONFIRMED 订单，不经过 ConfirmCooperation。
+// 以前这两条路径不评估现金资格、也不发任何订单事件（审计里看不到订单从哪来）。
+// 现在统一走 MaterializedOrder：金额边界 + 现金门 + OrderMaterialized 事件
+// （只在第一次真正插入时随订单同事务发布，重试不重复）。
+
+var ErrCashEligibility = errors.New("cash eligibility does not allow a confirmed order")
+
+// MaterializedOrder 构造一张由其它域物化的 CONFIRMED 订单。
+func MaterializedOrder(id, requesterID, agentID, needID string, snapshot OrderSnapshot, now time.Time) (Order, error) {
+	if id == "" || requesterID == "" || agentID == "" || requesterID == agentID {
+		return Order{}, errors.New("materialised order needs two distinct parties")
+	}
+	snapshot.Requester, snapshot.Agent = requesterID, agentID
+	if snapshot.SettlementMode == "" {
+		snapshot.SettlementMode = "DIRECT_SETTLEMENT"
+	}
+	if snapshot.Currency == "" {
+		snapshot.Currency = "VND"
+	}
+	if snapshot.AgreedCompensation < 0 || snapshot.AgreedCompensation > maxAmountVND {
+		return Order{}, fmt.Errorf("%w: amount %d out of range", ErrCashEligibility, snapshot.AgreedCompensation)
+	}
+	if snapshot.SettlementMode == "DIRECT_SETTLEMENT" {
+		snapshot.CashEligibilityStatus, snapshot.CashEligibilityReason = assessCashEligibility(snapshot.SettlementMode, snapshot.AgreedCompensation, "")
+		if snapshot.CashEligibilityStatus != CashEligibilityAllow {
+			return Order{}, fmt.Errorf("%w: %s", ErrCashEligibility, snapshot.CashEligibilityReason)
+		}
+	}
+	now = now.UTC()
+	return Order{ID: id, RequesterID: requesterID, AgentID: agentID, NeedID: needID, Lifecycle: "CONFIRMED", Version: 1, Snapshot: snapshot, CreatedAt: now, UpdatedAt: now}, nil
+}
+
+// MaterializedEvent 是物化订单的出生事件：来源域 + 来源 id 进审计。
+func MaterializedEvent(order Order, source, sourceID string) event.DomainEvent {
+	return event.New("OrderMaterialized", "Order", order.ID, order.Version, "system:"+source, sourceID, sourceID, order.CreatedAt, map[string]any{
+		"source":             source,
+		"sourceId":           sourceID,
+		"requesterId":        order.RequesterID,
+		"agentId":            order.AgentID,
+		"agreedCompensation": order.Snapshot.AgreedCompensation,
+		"cashEligibility":    order.Snapshot.CashEligibilityStatus,
+	})
 }
 
 // isValidCashEligibilityStatus 返回字符串是否是 4 态之一。

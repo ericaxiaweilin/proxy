@@ -16,6 +16,12 @@
 #    against a fully-wired server.)
 #  * Two PLATFORM_PAY Orders for the same requester reuse the
 #    same policy decision id.
+#  * ORDER-CONFIRM-AGENT-001: only the agent (a second, real
+#    account) can confirm; the requester's self-confirm is refused.
+#  * ORDER-AMEND-001 / LC-30: a Material Change is proposed by one
+#    party and takes effect (with a re-evaluated, stamped policy
+#    decision) only when the other party accepts it.
+#  * ORDER-AUDIT-001: the parties can read the order's audit trail.
 set -e
 BASE="${PROXY_API_BASE_URL:-http://127.0.0.1:4100}"
 TS=$(date +%s)
@@ -47,7 +53,7 @@ envelope_create_offer() {
   "requestedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "payload":{
     "needId":"e2e-need-${TS}",
-    "agentId":"e2e-agent-${TS}",
+    "agentId":"${agent_user_id}",
     "serviceSku":"cc_8h",
     "needVersion":"v1",
     "routeVersion":"v1",
@@ -98,23 +104,27 @@ status=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: applic
 echo "  OK: unauth CreateOffer → 401"
 
 echo ""
-echo "=== 2. create anonymous session (gives us a real access token) ==="
-anon_payload=$(cat <<EOF
+echo "=== 2. create two anonymous sessions: requester + agent (real accounts) ==="
+# create_session <label> -> prints "<accessToken> <userAccountId>"
+create_session() {
+  local label="$1"
+  local payload
+  payload=$(cat <<EOF
 {
   "commandType":"CreateAnonymousSession",
   "commandVersion":1,
-  "commandId":"anon-${TS}",
-  "idempotencyKey":"anon-${TS}-abcdef",
+  "commandId":"anon-${label}-${TS}",
+  "idempotencyKey":"anon-${label}-${TS}-abcdef",
   "actor":{"type":"USER","id":"ignored"},
   "principal":{"type":"INDIVIDUAL","id":"ignored"},
   "target":{"type":"Session","id":"ignored"},
   "authContext":{"clientIp":"127.0.0.1"},
   "purpose":"e2e_lc28",
-  "correlationId":"anon-${TS}",
+  "correlationId":"anon-${label}-${TS}",
   "causationId":"",
   "requestedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "payload":{
-    "deviceId":"e2e-lc28-${TS}",
+    "deviceId":"e2e-lc28-${label}-${TS}",
     "platform":"IOS",
     "deviceCredential":"01234567890123456789012345678901",
     "dateOfBirth":"2000-01-01",
@@ -124,20 +134,23 @@ anon_payload=$(cat <<EOF
 }
 EOF
 )
-anon_response=$(curl -s -X POST -H "Content-Type: application/json" -d "$anon_payload" "$BASE/v1/commands/CreateAnonymousSession")
-access_token=$(echo "$anon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('auth',{}).get('accessToken',''))")
-user_id=$(echo "$anon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('auth',{}).get('userAccountId',''))")
-[ -n "$access_token" ] || { echo "FAIL: no access token: $anon_response"; exit 1; }
-[ -n "$user_id" ] || { echo "FAIL: no user id: $anon_response"; exit 1; }
-echo "  OK: user=$user_id"
+  curl -s -X POST -H "Content-Type: application/json" -d "$payload" "$BASE/v1/commands/CreateAnonymousSession" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+auth = d.get('auth', {})
+print(auth.get('accessToken', ''), auth.get('userAccountId', ''))"
+}
+read -r access_token user_id <<<"$(create_session requester)"
+read -r agent_access_token agent_user_id <<<"$(create_session agent)"
+[ -n "$access_token" ] && [ -n "$user_id" ] || { echo "FAIL: no requester session"; exit 1; }
+[ -n "$agent_access_token" ] && [ -n "$agent_user_id" ] || { echo "FAIL: no agent session"; exit 1; }
+[ "$user_id" != "$agent_user_id" ] || { echo "FAIL: requester and agent must be different accounts"; exit 1; }
+echo "  OK: requester=$user_id agent=$agent_user_id"
 
 echo ""
 echo "=== 3. PLATFORM_PAY Order: confirm stamps a policyDecisionId ==="
-# The agent is a different USER; we have to act as the requester
-# (the access token is the requester's). The Order's agent is a
-# stand-in id; the LC-28 gate only inspects SettlementMode and
-# evaluates the requester's policy decision, so any non-empty
-# agent id is fine.
+# The requester creates the offer; the agent (a different, real
+# account) confirms it -- ORDER-CONFIRM-AGENT-001.
 R1=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
   -d "$(envelope_create_offer e2e-${TS}-paid e2e-${TS}-paid-abcdef $user_id PLATFORM_PAY "Proxy 钱包")" \
   "$BASE/v1/commands/CreateOffer")
@@ -151,8 +164,15 @@ print(body.get('orderId',''))")
 [ -n "$order_id_paid" ] || { echo "FAIL: no order id from CreateOffer: $R1"; exit 1; }
 echo "  OK: created PLATFORM_PAY order $order_id_paid"
 
-R2=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
-  -d "$(envelope_confirm e2e-${TS}-paid-conf e2e-${TS}-paid-conf-abcdef $user_id $order_id_paid)" \
+R_SELF=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
+  -d "$(envelope_confirm e2e-${TS}-paid-self e2e-${TS}-paid-self-abcdef $user_id $order_id_paid)" \
+  "$BASE/v1/commands/ConfirmCooperation")
+self_code=$(echo "$R_SELF" | python3 -c "import json,sys; d=json.load(sys.stdin); print((d.get('error') or {}).get('errorCode',''))")
+[ "$self_code" = "ONLY_AGENT_CONFIRMS" ] || { echo "FAIL: requester self-confirm must be ONLY_AGENT_CONFIRMS: $R_SELF"; exit 1; }
+echo "  OK: requester self-confirm refused (ONLY_AGENT_CONFIRMS)"
+
+R2=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
+  -d "$(envelope_confirm e2e-${TS}-paid-conf e2e-${TS}-paid-conf-abcdef $agent_user_id $order_id_paid)" \
   "$BASE/v1/commands/ConfirmCooperation")
 confirm_state=$(echo "$R2" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('aggregate',{}).get('state',''))")
 if [ "$confirm_state" != "CONFIRMED" ]; then
@@ -191,8 +211,8 @@ body = json.loads(d.get('operationRef') or '{}')
 print(body.get('orderId',''))")
 [ -n "$order_id_direct" ] || { echo "FAIL: no order id from CreateOffer: $R3"; exit 1; }
 
-R4=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
-  -d "$(envelope_confirm e2e-${TS}-direct-conf e2e-${TS}-direct-conf-abcdef $user_id $order_id_direct)" \
+R4=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
+  -d "$(envelope_confirm e2e-${TS}-direct-conf e2e-${TS}-direct-conf-abcdef $agent_user_id $order_id_direct)" \
   "$BASE/v1/commands/ConfirmCooperation")
 direct_state=$(echo "$R4" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('aggregate',{}).get('state',''))")
 [ "$direct_state" = "CONFIRMED" ] || { echo "FAIL: DIRECT confirm should pass: $R4"; exit 1; }
@@ -220,8 +240,8 @@ body = json.loads(d.get('operationRef') or '{}')
 print(body.get('orderId',''))")
 [ -n "$order_id_paid2" ] || { echo "FAIL: no order id from second CreateOffer: $R5"; exit 1; }
 
-R6=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
-  -d "$(envelope_confirm e2e-${TS}-paid2-conf e2e-${TS}-paid2-conf-abcdef $user_id $order_id_paid2)" \
+R6=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
+  -d "$(envelope_confirm e2e-${TS}-paid2-conf e2e-${TS}-paid2-conf-abcdef $agent_user_id $order_id_paid2)" \
   "$BASE/v1/commands/ConfirmCooperation")
 decision_id_2=$(echo "$R6" | python3 -c "
 import json, sys
@@ -235,9 +255,6 @@ if [ "$decision_id_1" != "$decision_id_2" ]; then
   exit 1
 fi
 echo "  OK: second PLATFORM_PAY Order reused decision id $decision_id_2"
-
-echo ""
-echo "=== lc28-policy-decision-e2e: ALL CASES PASSED ==="
 
 echo ""
 echo "=== 6. Material Change re-evaluates policy decision (LC-30) ==="
@@ -254,8 +271,8 @@ body = json.loads(d.get('operationRef') or '{}')
 print(body.get('orderId',''))")
 [ -n "$order_id_lc30" ] || { echo "FAIL: no order id from CreateOffer: $R7"; exit 1; }
 
-R8=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
-  -d "$(envelope_confirm e2e-${TS}-lc30-conf e2e-${TS}-lc30-conf-abcdef $user_id $order_id_lc30)" \
+R8=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
+  -d "$(envelope_confirm e2e-${TS}-lc30-conf e2e-${TS}-lc30-conf-abcdef $agent_user_id $order_id_lc30)" \
   "$BASE/v1/commands/ConfirmCooperation")
 decision_before=$(echo "$R8" | python3 -c "
 import json, sys
@@ -265,19 +282,20 @@ print(body.get('policyDecisionId',''))")
 [ -n "$decision_before" ] || { echo "FAIL: confirm should stamp a decision: $R8"; exit 1; }
 echo "  OK: pre-amendment policyDecisionId=$decision_before"
 
-# Record a Material Change.
-envelope_amend() {
-  local command_id="$1"
-  local idempotency_key="$2"
+# ORDER-AMEND-001: the requester proposes new terms; they take effect
+# (and LC-30 re-evaluates + stamps) only when the agent accepts.
+envelope_order_command() {
+  local command_type="$1"
+  local command_id="$2"
   local actor_id="$3"
   local order_id="$4"
-  local description="$5"
+  local payload="$5"
   cat <<EOF
 {
-  "commandType":"RecordMaterialOrderChange",
+  "commandType":"${command_type}",
   "commandVersion":1,
   "commandId":"${command_id}",
-  "idempotencyKey":"${idempotency_key}",
+  "idempotencyKey":"${command_id}-abcdef",
   "actor":{"type":"USER","id":"${actor_id}"},
   "principal":{"type":"INDIVIDUAL","id":"${actor_id}"},
   "target":{"type":"Order","id":"${order_id}"},
@@ -285,24 +303,47 @@ envelope_amend() {
   "purpose":"e2e_lc30",
   "correlationId":"${command_id}",
   "requestedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "payload":{"description":"${description}"}
+  "payload":${payload}
 }
 EOF
 }
 R9=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
-  -d "$(envelope_amend e2e-${TS}-lc30-amd e2e-${TS}-lc30-amd-abcdef $user_id $order_id_lc30 "河内西湖 → 老城区")" \
+  -d "$(envelope_order_command RecordMaterialOrderChange e2e-${TS}-lc30-amd $user_id $order_id_lc30 '{"description":"河内西湖 → 老城区","changes":{"meetingContext":"老城区"}}')" \
   "$BASE/v1/commands/RecordMaterialOrderChange")
-if [ "$(echo "$R9" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("outcome",""))')" != "ACCEPTED" ]; then
-  echo "FAIL: amendment must be ACCEPTED: $R9"
-  exit 1
-fi
-decision_after=$(echo "$R9" | python3 -c "
+amendment_id=$(echo "$R9" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 body = json.loads(d.get('operationRef') or '{}')
-print(body.get('policyDecisionId',''))")
+print(body.get('amendmentId','') if d.get('outcome') == 'ACCEPTED' and body.get('status') == 'PROPOSED' else '')")
+[ -n "$amendment_id" ] || { echo "FAIL: proposal must be ACCEPTED as PROPOSED: $R9"; exit 1; }
+echo "  OK: requester proposed amendment $amendment_id"
+
+R10=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
+  -d "$(envelope_order_command RespondMaterialOrderChange e2e-${TS}-lc30-acc $agent_user_id $order_id_lc30 "{\"amendmentId\":\"${amendment_id}\",\"decision\":\"ACCEPT\"}")" \
+  "$BASE/v1/commands/RespondMaterialOrderChange")
+decision_after=$(echo "$R10" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+body = json.loads(d.get('operationRef') or '{}')
+print(body.get('policyDecisionId','') if d.get('outcome') == 'ACCEPTED' and body.get('status') == 'ACCEPTED' else '')")
 if [ -z "$decision_after" ]; then
-  echo "FAIL: amendment response must include a policyDecisionId (LC-30 re-eval): $R9"
+  echo "FAIL: agent acceptance must apply the change with a policyDecisionId (LC-30 re-eval): $R10"
   exit 1
 fi
-echo "  OK: post-amendment policyDecisionId=$decision_after (re-evaluated)"
+echo "  OK: agent accepted; post-amendment policyDecisionId=$decision_after (re-evaluated)"
+
+echo ""
+echo "=== 7. the parties can read the audit trail (ORDER-AUDIT-001) ==="
+R11=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
+  -d "$(envelope_order_command GetOrderAuditTrail e2e-${TS}-lc30-audit $agent_user_id $order_id_lc30 '{}')" \
+  "$BASE/v1/commands/GetOrderAuditTrail")
+trail=$(echo "$R11" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+body = json.loads(d.get('operationRef') or '{}')
+print(','.join(e.get('commandType','') for e in body.get('entries', [])))")
+[ "$trail" = "CreateOffer,ConfirmCooperation,RecordMaterialOrderChange,RespondMaterialOrderChange" ] || { echo "FAIL: unexpected audit trail '$trail': $R11"; exit 1; }
+echo "  OK: audit trail = $trail"
+
+echo ""
+echo "=== lc28-policy-decision-e2e: ALL CASES PASSED ==="

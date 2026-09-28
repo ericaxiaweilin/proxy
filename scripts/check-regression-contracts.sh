@@ -1435,6 +1435,78 @@ fi
 pnpm --dir apps/mobile exec vitest run src/order-actions.test.ts >/dev/null || exit $?
 echo "    ORDER-CONFIRM-AGENT-001/ORDER-OFFER-COMP-001/ORDER-SETTLE-GUARD-001/ORDER-OFFER-READ-001/ORDER-CONFLICT-CODE-001/TOPIC-INVITE-PERSIST-001: PASS"
 
+# 订单严格机制（2026-09-28 第二轮：状态机 / 回滚 / 存储 / 审计）。
+# ORDER-FSM-001: 状态机只有一张迁移表，所有订单写入走 commitOrder 校验。
+require_test "ORDER-FSM-001" "./internal/fulfillment" \
+  "TestOrderTransitionGuard" \
+  "apps/api-go/internal/fulfillment/order_amendment_test.go" || exit $?
+# ORDER-AMEND-001: 条款变更以前只记描述、快照原样复制；现在一方提出、另一方接受才生效，历史可还原。
+require_test "ORDER-AMEND-001" "./internal/fulfillment" \
+  "TestMaterialChangeRequiresCounterpartyAndKeepsHistory" \
+  "apps/api-go/internal/fulfillment/order_amendment_test.go" || exit $?
+require_test "ORDER-AMEND-001" "./internal/fulfillment" \
+  "TestMaterialChangeGuardsMoneyAndLapsesOnTerminal" \
+  "apps/api-go/internal/fulfillment/order_amendment_test.go" || exit $?
+require_test "ORDER-AMEND-001" "./internal/fulfillment" \
+  "TestLC30MaterialChangeFailsClosedWhenGateUnconfigured" \
+  "apps/api-go/internal/fulfillment/service_test.go" || exit $?
+# ORDER-STORE-STATS-AUTHZ-001 / ORDER-SLOT-OWNER-001: 店铺统计与档位报价以前谁都能调；现在 fail closed。
+require_test "ORDER-STORE-STATS-AUTHZ-001" "./internal/fulfillment" \
+  "TestStoreStatsRequireStoreMembership" \
+  "apps/api-go/internal/fulfillment/order_state_machine_test.go" || exit $?
+require_test "ORDER-STORE-STATS-AUTHZ-001" "./internal/business" \
+  "TestStoreMemberAccess" \
+  "apps/api-go/internal/business/store_access_test.go" || exit $?
+require_test "ORDER-SLOT-OWNER-001" "./internal/fulfillment" \
+  "TestSlotOfferRequiresOwnership" \
+  "apps/api-go/internal/fulfillment/order_state_machine_test.go" || exit $?
+require_test "ORDER-SLOT-OWNER-001" "./internal/demand" \
+  "TestTaskSlotOwnedBy" \
+  "apps/api-go/internal/demand/slot_owner_test.go" || exit $?
+require_test "ORDER-SLOT-OWNER-001" "./internal/marketplace" \
+  "TestOfferEligibility" \
+  "apps/api-go/internal/marketplace/offer_eligibility_test.go" || exit $?
+if ! grep -qF 'fulfillmentService.SetStoreAccess(' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'fulfillmentService.SetSlotOfferAuthorizer(' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [ORDER-STORE-STATS-AUTHZ-001/ORDER-SLOT-OWNER-001]: main.go 没接权限校验，两个命令会全部 fail closed。" >&2
+  exit 1
+fi
+# ORDER-MATERIALIZE-AUDIT-001: 市场 / 场景物化订单以前不过现金门、不发出生事件。
+require_test "ORDER-MATERIALIZE-AUDIT-001" "./internal/fulfillment" \
+  "TestMaterializedOrderGatesCashAndPublishesOnce" \
+  "apps/api-go/internal/fulfillment/order_materialize_test.go" || exit $?
+require_test "ORDER-MATERIALIZE-AUDIT-001" "./internal/scene" \
+  "TestRespondInvitation_IneligibleOrderIsBusinessState" \
+  "apps/api-go/internal/scene/invitation_order_eligibility_test.go" || exit $?
+# ORDER-SLOT-RELEASE-001: 内存仓取消订单后档位不释放（PG 释放），两边语义不一致。
+require_test "ORDER-SLOT-RELEASE-001" "./internal/fulfillment" \
+  "TestCancelledSlotOrderReleasesSlot" \
+  "apps/api-go/internal/fulfillment/order_materialize_test.go" || exit $?
+# POLICY-STAMP-DURABLE-001: LC-28 决策生产接的是内存仓（重启即丢），盖章在事务外且错误被丢弃。
+require_test "POLICY-STAMP-DURABLE-001" "./internal/fulfillment" \
+  "TestStampFailureRejectsConfirmation" \
+  "apps/api-go/internal/fulfillment/order_amendment_test.go" || exit $?
+if ! grep -qF 'postgres.NewPolicyDecisionRepository(pool)' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [POLICY-STAMP-DURABLE-001]: 有数据库时 LC-28 策略决策必须落 Postgres，不能接内存仓。" >&2
+  exit 1
+fi
+# ORDER-AUDIT-001: 订单 / 报价写入由数据库触发器写只追加审计；守卫拒绝非法迁移与删除。
+# 以下 Postgres 测试没有库时 SKIP（与其它集成测试一致）。
+require_test "ORDER-AUDIT-001" "./internal/fulfillment" \
+  "TestOrderAuditTrailForParties" \
+  "apps/api-go/internal/fulfillment/order_amendment_test.go" || exit $?
+for audit_test in TestOrderTransitionIsStampedAndAuditedPostgres TestStampFailureRollsBackTransitionPostgres \
+  TestOrderGuardAndAppendOnlyAuditPostgres TestFullLifecyclePassesGuardPostgres TestMaterializedOrderEventOnceAndAuditTrailPostgres; do
+  require_test "ORDER-AUDIT-001" "./internal/platform/postgres" "$audit_test" \
+    "apps/api-go/internal/platform/postgres/order_audit_integration_test.go" || exit $?
+done
+if ! grep -qF 'CREATE TRIGGER orders_guard' apps/api-go/migrations/135_order_audit_and_guard.sql ||
+   ! grep -qF 'CREATE TRIGGER audit_log_append_only' apps/api-go/migrations/135_order_audit_and_guard.sql; then
+  echo "  FAIL [ORDER-AUDIT-001]: 订单守卫 / 审计只追加触发器从迁移里消失了。" >&2
+  exit 1
+fi
+echo "    ORDER-FSM-001/ORDER-AMEND-001/ORDER-STORE-STATS-AUTHZ-001/ORDER-SLOT-OWNER-001/ORDER-MATERIALIZE-AUDIT-001/ORDER-SLOT-RELEASE-001/POLICY-STAMP-DURABLE-001/ORDER-AUDIT-001: PASS"
+
 # LINES-EDITOR-001: the server has had UpsertStoreLines
 # since R18.x b77187a, but the storefront surface was
 # read-only: business owners saw their old lines but had

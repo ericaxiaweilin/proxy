@@ -63,7 +63,7 @@ func seedSettledOrder(t *testing.T, pool *pgxpool.Pool, orderID, requesterID, ag
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO fulfillment.orders
 		(id, requester_id, agent_id, need_id, lifecycle, version, snapshot, amendments, settlement, created_at, updated_at)
-		VALUES ($1,$2,$3,'need_comp_id002','SETTLED',1,'{}','[]','{}',$4,$4)`, orderID, requesterID, agentID, now)
+		VALUES ($1,$2,$3,'need_comp_id002','CONFIRMED',1,'{}','[]','{}',$4,$4)`, orderID, requesterID, agentID, now)
 	if err != nil {
 		t.Fatalf("seed settled order: %v", err)
 	}

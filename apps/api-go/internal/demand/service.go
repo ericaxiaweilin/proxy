@@ -97,6 +97,35 @@ func NewWithRepositoryAndClock(admissionGate, fundingGate Gate, repository Repos
 	return service
 }
 
+// TaskSlotOwnedBy 回答「userID 能不能对 taskID/slotID 发报价」（ORDER-SLOT-OWNER-001）：
+// 任务已提交（COMMITTED）、归 userID 所有，且该档位存在并仍可报价（OPEN / OFFERED）。
+// 任务不存在返回 (false, nil)。
+func (s *Service) TaskSlotOwnedBy(ctx context.Context, taskID, slotID, userID string) (bool, error) {
+	if taskID == "" || slotID == "" || userID == "" {
+		return false, nil
+	}
+	task, err := s.repository.GetTask(ctx, taskID)
+	if errors.Is(err, ErrDraftNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if task.OwnerUserAccountID != userID || task.Lifecycle != "COMMITTED" {
+		return false, nil
+	}
+	slots, err := s.repository.ListTaskSlots(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	for _, slot := range slots {
+		if slot.ID == slotID && (slot.State == "OPEN" || slot.State == "OFFERED") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "CreateTaskDraft", "UpdateTaskDraft", "PreviewTaskDraft", "PublishTask", "ListRequesterHomeItems":

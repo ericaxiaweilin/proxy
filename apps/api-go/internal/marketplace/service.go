@@ -103,6 +103,28 @@ func (s *Service) SetOrderPermission(check func(ctx context.Context, userAccount
 // can leave it nil to exercise the legacy path.
 func (s *Service) SetOrderCreator(c OrderCreator) { s.orderCreator = c }
 
+// OfferEligibility 回答「ownerID 能不能就 opportunityID 给 agentID 发档位报价」
+// （ORDER-SLOT-OWNER-001）：机会归 ownerID 所有，且 agentID 在这个机会上报过名。
+// 机会不存在 / 不归本人返回 (false, nil)。
+func (s *Service) OfferEligibility(ctx context.Context, opportunityID, ownerID, agentID string) (bool, error) {
+	if opportunityID == "" || ownerID == "" || agentID == "" {
+		return false, nil
+	}
+	applications, err := s.repository.ListApplications(ctx, opportunityID, ownerID)
+	if errors.Is(err, ErrOpportunityNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, application := range applications {
+		if application.ApplicantID == agentID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // R16.11 / Master PRD v1.4 §3: 统一物化规则（Materialization Rule）
 // Opportunity -> Invite -> Order -> Activity Participation 必须有唯一业务对象流向。
 // 防止多 Truth：同一响应不能同时生成多个不同类型业务对象。

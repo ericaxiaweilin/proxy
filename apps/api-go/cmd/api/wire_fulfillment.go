@@ -4,8 +4,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/demand"
+	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
@@ -147,34 +150,32 @@ type sceneFulfillmentAdapter struct {
 	repo fulfillment.TransactionalRepository
 }
 
+// ORDER-MATERIALIZE-AUDIT-001：两条跨域物化路径都走 fulfillment.MaterializedOrder
+// （金额边界 + R8 现金门），出生事件 OrderMaterialized 随首次插入同事务发布。
 func (a sceneFulfillmentAdapter) EnsureInvitationOrder(ctx context.Context, record scene.InvitationOrderRecord) error {
-	now := time.Now().UTC()
-	return a.repo.EnsureOrder(ctx, fulfillment.Order{ID: record.ID, RequesterID: record.RequesterID, AgentID: record.AgentID, NeedID: record.SceneID, Lifecycle: "CONFIRMED", Version: 1, Snapshot: fulfillment.OrderSnapshot{Requester: record.RequesterID, Agent: record.AgentID, ServiceSKU: record.ServiceSKU, NeedVersion: record.SceneID, StartTime: record.StartTime, MeetingContext: record.MeetingContext, AgreedCompensation: record.AgreedCompensation, Currency: record.Currency, IncludedScope: record.IncludedScope, SettlementMode: "DIRECT_SETTLEMENT"}, CreatedAt: now, UpdatedAt: now})
+	order, err := fulfillment.MaterializedOrder(record.ID, record.RequesterID, record.AgentID, record.SceneID, fulfillment.OrderSnapshot{
+		ServiceSKU: record.ServiceSKU, NeedVersion: record.SceneID, StartTime: record.StartTime, MeetingContext: record.MeetingContext,
+		AgreedCompensation: record.AgreedCompensation, Currency: record.Currency, IncludedScope: record.IncludedScope,
+	}, time.Now())
+	if errors.Is(err, fulfillment.ErrCashEligibility) {
+		return fmt.Errorf("%w: %w", scene.ErrOrderNotEligible, err)
+	}
+	if err != nil {
+		return err
+	}
+	return a.repo.EnsureOrder(ctx, order, []event.DomainEvent{fulfillment.MaterializedEvent(order, "scene", record.ID)})
 }
 
 func (a marketplaceFulfillmentAdapter) EnsureOrder(ctx context.Context, record marketplace.OrderRecord) error {
-	now := time.Now().UTC()
-	snapshot := fulfillment.OrderSnapshot{
-		Requester:          record.RequesterID,
-		Agent:              record.AgentID,
-		ServiceSKU:         "CITY_COMPANION",
-		NeedVersion:        record.NeedID,
-		AgreedCompensation: 0, // TBD until CreateOffer replaces this
-		Currency:           "VND",
-		SettlementMode:     "DIRECT_SETTLEMENT",
-		Scenario:           record.Scenario,
+	// 市场报价是自由文本（"2,100,000₫" / "面议"），不可靠地换算成金额；订单金额记 0
+	// （面议），真实金额由双方在订单上走条款变更（ORDER-AMEND-001）或结算确认。
+	order, err := fulfillment.MaterializedOrder(record.ID, record.RequesterID, record.AgentID, record.NeedID, fulfillment.OrderSnapshot{
+		ServiceSKU: "CITY_COMPANION", NeedVersion: record.NeedID, Scenario: record.Scenario,
+	}, time.Now())
+	if err != nil {
+		return err
 	}
-	return a.repo.EnsureOrder(ctx, fulfillment.Order{
-		ID:          record.ID,
-		RequesterID: record.RequesterID,
-		AgentID:     record.AgentID,
-		NeedID:      record.NeedID,
-		Lifecycle:   "CONFIRMED",
-		Version:     1,
-		Snapshot:    snapshot,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	})
+	return a.repo.EnsureOrder(ctx, order, []event.DomainEvent{fulfillment.MaterializedEvent(order, "marketplace", record.ID)})
 }
 
 func (a jurisdictionAdapter) Resolve(ctx context.Context, userID string) (fulfillment.JurisdictionResolution, error) {

@@ -82,6 +82,10 @@ func createOffer(t *testing.T, s *Service) string {
 func TestStoreAttributionAndStats(t *testing.T) {
 	s := New()
 	s.SetStoreLookup(func(context.Context, string) (bool, error) { return false, nil })
+	// ORDER-STORE-STATS-AUTHZ-001：测试里 user_001 是 store_tb1 的成员。
+	s.SetStoreAccess(func(_ context.Context, storeID, userID string) (bool, error) {
+		return userID == "user_001", nil
+	})
 	newCompletedOrder := func(t *testing.T, storeID, satisfaction string) string {
 		orderID := createOffer(t, s)
 		if r := confirmAsAgent(s, orderID); r.Outcome != "ACCEPTED" {
@@ -321,6 +325,7 @@ func TestMaterialChangeAmendment(t *testing.T) {
 	}
 	r = s.Handle(envelopeFor("RecordMaterialOrderChange", map[string]any{
 		"description": "集合点改为老城区咖啡店",
+		"changes":     map[string]any{"meetingContext": "老城区咖啡店"},
 	}, orderID))
 	// Confirm 已是 v2，变更后 v3（版本递增 = amendment 记录，不覆盖原快照）
 	if r.Outcome != "ACCEPTED" || r.Aggregate.Version != 3 {
@@ -342,6 +347,7 @@ func TestLifecycleGate(t *testing.T) {
 
 func createSlotOffer(t *testing.T, s *Service, taskID, slotID, agentID string) string {
 	t.Helper()
+	allowSlotOffers(s)
 	r := s.Handle(command.Envelope{
 		CommandID: "cmd_slot_offer", CommandType: "CreateSlotOffer", CommandVersion: 1,
 		Actor: command.Actor{Type: "USER", ID: "user_001"}, Principal: command.Principal{Type: "BUSINESS", ID: "business_001"},
@@ -722,9 +728,9 @@ func TestLC30MaterialChangeReevaluatesPolicyDecisionForPlatformPay(t *testing.T)
 	if originalDecision == "" {
 		t.Fatal("expected stamped decision before amendment")
 	}
-	// Now record a Material Change.
-	r3 := svc.Handle(envelopeFor("RecordMaterialOrderChange", map[string]any{"description": "地点改为河内西湖"}, view.OrderID))
-	if r3.Outcome != "ACCEPTED" {
+	// Now propose a Material Change; the terms change (and LC-30
+	// re-evaluates) only when the counterparty accepts it.
+	if r3 := proposeAndAccept(t, svc, view.OrderID, map[string]any{"meetingContext": "河内西湖"}); r3.Outcome != "ACCEPTED" {
 		t.Fatalf("material change: %s %+v", r3.Outcome, r3.Error)
 	}
 	// Re-read the Order; the policy decision id must still
@@ -765,8 +771,7 @@ func TestLC30MaterialChangeSkipsForDirectSettlement(t *testing.T) {
 	stub.mu.Lock()
 	callsBefore := stub.evaluateCalls
 	stub.mu.Unlock()
-	r3 := svc.Handle(envelopeFor("RecordMaterialOrderChange", map[string]any{"description": "DIRECT change"}, view.OrderID))
-	if r3.Outcome != "ACCEPTED" {
+	if r3 := proposeAndAccept(t, svc, view.OrderID, map[string]any{"meetingContext": "DIRECT change"}); r3.Outcome != "ACCEPTED" {
 		t.Fatalf("material change: %s", r3.Outcome)
 	}
 	stub.mu.Lock()
@@ -777,17 +782,14 @@ func TestLC30MaterialChangeSkipsForDirectSettlement(t *testing.T) {
 	}
 }
 
-func TestLC30MaterialChangePermissiveWhenGateUnconfigured(t *testing.T) {
-	// PLATFORM_PAY Order + nil policy service + Material
-	// Change: the amendment must still go through (the Order
-	// is already paid for; we cannot roll back the user's
-	// payment just because the policy service died). The
-	// existing PolicyDecisionID on the Order is preserved,
-	// and the audit log gets no new stamp. The trade-off is
-	// deliberate: blocking every amendment on a degraded
-	// policy service is worse than letting the amendment
-	// through with a stale decision id. Operators see this
-	// via the missing-stamp anomaly in their audit queries.
+func TestLC30MaterialChangeFailsClosedWhenGateUnconfigured(t *testing.T) {
+	// ORDER-AMEND-001 reverses the old "permissive" trade-off. Its
+	// rationale was "we cannot roll back the user's payment"; but a
+	// rejected amendment rolls nothing back — the order simply keeps
+	// its current, already-stamped terms. Changing the terms of a
+	// PLATFORM_PAY order without an LC-30 re-evaluation is the thing
+	// the regulator asks about, so acceptance now fails closed and
+	// the order (terms, decision id, stamps) is left untouched.
 	svc := New()
 	payload := offerPayload()
 	payload["settlementMode"] = "PLATFORM_PAY"
@@ -802,24 +804,19 @@ func TestLC30MaterialChangePermissiveWhenGateUnconfigured(t *testing.T) {
 		OrderID string `json:"orderId"`
 	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
-	r2 := confirmAsAgent(svc, view.OrderID)
-	if r2.Outcome != "ACCEPTED" {
+	if r2 := confirmAsAgent(svc, view.OrderID); r2.Outcome != "ACCEPTED" {
 		t.Fatalf("confirm: %s", r2.Outcome)
 	}
-	order, _ := svc.repository.GetOrder(context.Background(), view.OrderID)
-	decisionBefore := order.PolicyDecisionID
-	// Simulate the gate being unconfigured for the next call.
+	before, _ := svc.repository.GetOrder(context.Background(), view.OrderID)
 	svc.WithPolicyDecisions(nil)
-	r3 := svc.Handle(envelopeFor("RecordMaterialOrderChange", map[string]any{"description": "test"}, view.OrderID))
-	if r3.Outcome != "ACCEPTED" {
-		t.Fatalf("amendment must be permissive when gate is unconfigured, got %s %+v", r3.Outcome, r3.Error)
+	r3 := proposeAndAccept(t, svc, view.OrderID, map[string]any{"meetingContext": "test"})
+	if r3.Outcome != "REJECTED" || r3.Error == nil || r3.Error.ErrorCode != "POLICY_GATE_NOT_CONFIGURED" {
+		t.Fatalf("acceptance must fail closed without the policy gate, got %s %+v", r3.Outcome, r3.Error)
 	}
-	order, _ = svc.repository.GetOrder(context.Background(), view.OrderID)
-	if order.PolicyDecisionID != decisionBefore {
-		t.Fatalf("decision id must be preserved when re-evaluation is skipped")
+	after, _ := svc.repository.GetOrder(context.Background(), view.OrderID)
+	if after.Snapshot.MeetingContext != before.Snapshot.MeetingContext || after.PolicyDecisionID != before.PolicyDecisionID {
+		t.Fatalf("terms and decision must be unchanged after a failed acceptance")
 	}
-	// The stub's Stamp count must not have grown (no
-	// additional audit row written by this amendment).
 	stampCount := 0
 	for _, s := range stub.stampsForOrder {
 		stampCount += len(s)
@@ -1328,6 +1325,7 @@ func TestCreateTopicInviteValidatesAndClampsTTL(t *testing.T) {
 func TestSlotOfferKeepsFiveMinuteDefault(t *testing.T) {
 	s := New()
 	before := s.clock.Now().UTC()
+	allowSlotOffers(s)
 	result := s.Handle(envelopeFor("CreateSlotOffer", map[string]any{
 		"taskId": "task_1", "slotId": "slot_1", "agentId": "agent_1",
 		"agreedCompensation": 1200000, "currency": "VND",

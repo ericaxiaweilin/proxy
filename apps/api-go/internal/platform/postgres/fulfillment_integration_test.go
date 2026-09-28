@@ -22,6 +22,7 @@ func TestFulfillmentPostgresLifecycle(t *testing.T) {
 	ctx := context.Background()
 	repo := NewFulfillmentRepositoryWithOutbox(pool, NewOutboxRepository(pool))
 	svc := fulfillment.NewWithRepository(repo)
+	allowSlotOffersPG(svc)
 
 	run := time.Now().UnixNano()
 	taskID := "task_ff_pg_" + itoa(run)
@@ -217,6 +218,7 @@ func TestFulfillmentPostgresConcurrentAcceptsOnlyOneOrder(t *testing.T) {
 	ctx := context.Background()
 	repo := NewFulfillmentRepositoryWithOutbox(pool, NewOutboxRepository(pool))
 	svc := fulfillment.NewWithRepository(repo)
+	allowSlotOffersPG(svc)
 
 	run := time.Now().UnixNano()
 	taskID := "task_ff_race_" + itoa(run)

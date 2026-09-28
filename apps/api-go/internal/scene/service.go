@@ -94,6 +94,10 @@ type Service struct {
 	orderCreator InvitationOrderCreator
 }
 
+// ErrOrderNotEligible：邀约对应的订单过不了履约侧的资格门（例如现金金额超出试点
+// 限额，需要人工复核）。这是业务状态，不是「稍后重试」（ORDER-MATERIALIZE-AUDIT-001）。
+var ErrOrderNotEligible = errors.New("invitation order is not eligible")
+
 type InvitationOrderCreator interface {
 	EnsureInvitationOrder(context.Context, InvitationOrderRecord) error
 }
@@ -415,6 +419,9 @@ func (s *Service) materializeInvitationOrder(ctx context.Context, e command.Enve
 		record.Currency = "VND"
 	}
 	if err := s.orderCreator.EnsureInvitationOrder(ctx, record); err != nil {
+		if errors.Is(err, ErrOrderNotEligible) {
+			return command.Rejected(e, "INVITATION_ORDER_NOT_ELIGIBLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "scene.invitation_order_not_eligible", nil), false
+		}
 		return command.Rejected(e, "INVITATION_ORDER_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "scene.invitation_order_failed", nil), false
 	}
 	return command.Result{}, true

@@ -118,6 +118,12 @@ type Decision struct {
 // matches the (user, category, terms, privacy) tuple.
 var ErrNotFound = errors.New("no policy decision for this tuple")
 
+// ErrDecisionExists is returned by Repository.Insert when another
+// evaluation for the same tuple won the race (UNIQUE constraint).
+// Evaluate then re-reads and returns the stored decision, so every
+// caller links to the one immutable row (POLICY-STAMP-DURABLE-001).
+var ErrDecisionExists = errors.New("policy decision already exists for this tuple")
+
 // Repository is the storage contract. The in-memory
 // implementation lives in memory.go; the Postgres one in
 // apps/api-go/internal/platform/postgres/policy_decisions.go.
@@ -242,6 +248,9 @@ func (s *Service) Evaluate(ctx context.Context, userID string, category Category
 		EvaluatedAt:    s.now().UTC(),
 	}
 	if err := s.repo.Insert(ctx, d); err != nil {
+		if errors.Is(err, ErrDecisionExists) {
+			return s.repo.GetByTuple(ctx, userID, category, s.termsVersion, s.privacyVersion, jurisdiction)
+		}
 		return nil, err
 	}
 	return &d, nil

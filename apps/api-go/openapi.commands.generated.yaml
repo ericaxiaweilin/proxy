@@ -213,6 +213,8 @@ commands:
     domain: Outcome
   - command: GetOffer
     domain: Fulfillment
+  - command: GetOrderAuditTrail
+    domain: Fulfillment
   - command: GetPostEngagement
     domain: Engagement
   - command: GetPrivacyRequestStatus
@@ -497,6 +499,8 @@ commands:
     domain: Notification
   - command: RespondInvitation
     domain: Scene
+  - command: RespondMaterialOrderChange
+    domain: Fulfillment
   - command: RespondTopicInvite
     domain: Fulfillment
   - command: ResumeTrustedDeviceSession

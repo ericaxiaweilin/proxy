@@ -1199,6 +1199,27 @@ func (s *Service) MerchantRedemptionIdentity(ctx context.Context, businessID, us
 	return account.Name, true
 }
 
+// StoreMemberAccess 回答「userID 能不能看 storeID 的经营数据」（ORDER-STORE-STATS-AUTHZ-001）：
+// 店存在、所属商户 ACTIVE、本人是该商户 OWNER / ADMIN / OPERATOR 的有效成员。
+// 店不存在返回 (false, nil)；其它读错误原样返回，让调用方报「可重试」而不是「无权」。
+func (s *Service) StoreMemberAccess(ctx context.Context, storeID, userID string) (bool, error) {
+	if storeID == "" || userID == "" {
+		return false, nil
+	}
+	store, err := s.repo.GetStore(ctx, storeID)
+	if err != nil {
+		if err.Error() == "store not found" {
+			return false, nil
+		}
+		return false, err
+	}
+	account, err := s.repo.GetAccount(ctx, store.BusinessID)
+	if err != nil || account.Status != "ACTIVE" {
+		return false, nil
+	}
+	return s.hasRole(ctx, store.BusinessID, userID, "OWNER", "ADMIN", "OPERATOR"), nil
+}
+
 // R16.10-P1-F / Master PRD v1.4 §12: 合规场景分类强制（Category Policy 门禁）
 // 防止业务绕合规：付费一对一私人陪伴/喝酒/亲密陪伴等不能因为换文案进入 Opportunity/Invite。
 var forbiddenOpportunityCategories = map[string]bool{

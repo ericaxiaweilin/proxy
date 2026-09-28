@@ -225,6 +225,8 @@ components:
             - RecordOutcome
             - RecordSatisfaction
             - RecordMaterialOrderChange
+            - RespondMaterialOrderChange
+            - GetOrderAuditTrail
             - ListMarketOpportunities
             - PublishMarketOpportunity
             - ApplyToMarketOpportunity

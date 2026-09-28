@@ -11,14 +11,16 @@ import (
 // TOPIC-INVITE-PERSIST-001：CreateOfferAndPublish 的 INSERT 漏了 topic_key / note，
 // 主题邀约在 PG 模式下落成空主题、空留言（内存仓没这个问题，单测全绿）。
 // ORDER-OFFER-COMP-001：档位报价金额必须落库，接单生成的订单快照带上它。
-// 只用本次运行生成的 id，不删任何行。
+// 只用本次运行生成的 id；结束时只清掉本 run 自己发布的 outbox 消息（cleanupRunOutbox）。
 func TestOfferPersistsTopicAndCompensationPostgres(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	svc := fulfillment.NewWithRepository(NewFulfillmentRepositoryWithOutbox(pool, NewOutboxRepository(pool)))
+	allowSlotOffersPG(svc)
 	repo := NewFulfillmentRepository(pool)
 
 	run := itoa(time.Now().UnixNano())
+	cleanupRunOutbox(t, pool, run)
 	requesterID := "user_offer_persist_" + run
 	agentID := "agent_offer_persist_" + run
 

@@ -345,6 +345,20 @@ func main() {
 			return store.Status == "ACTIVE", nil
 		})
 	}
+	// ORDER-STORE-STATS-AUTHZ-001 / ORDER-SLOT-OWNER-001：两处都是 fail closed ——
+	// 不接就一律拒绝，所以无库模式也要接（business / demand / marketplace 此时已是最终实例）。
+	fulfillmentService.SetStoreAccess(businessService.StoreMemberAccess)
+	fulfillmentService.SetSlotOfferAuthorizer(func(ctx context.Context, taskID, slotID, requesterID, agentID string) (bool, error) {
+		if owned, err := demandService.TaskSlotOwnedBy(ctx, taskID, slotID, requesterID); err != nil || owned {
+			return owned, err
+		}
+		// 市场机会的快速报价：移动端用 opportunityId 当 taskId、"<id>_slot_1" 当 slotId
+		// （apps/mobile/src/market-fixtures.ts buildSlotOfferInput）。
+		if slotID != taskID+"_slot_1" {
+			return false, nil
+		}
+		return marketplaceService.OfferEligibility(ctx, taskID, requesterID, agentID)
+	})
 	// 语义层同理：必须在 PG 替换之后注入，否则配了 DATABASE_URL 时
 	// NewWithRepository 重建的 Service 会丢掉 modelstack，AI 能力被静默降级成
 	// 「永远 AI_NOT_CONFIGURED」—— 而客户端会因此把入口藏起来，从外部看
@@ -505,13 +519,17 @@ func main() {
 	// stamped policy decision. The (user, category, terms,
 	// privacy) tuple is unique inside one process; cross-
 	// process uniqueness is enforced by the UNIQUE constraint
-	// in migration 065 once the PG repository is wired. We
-	// use the in-memory repository for now; the Postgres
-	// implementation is a follow-up so this commit does not
-	// blow up boot ordering. The kill-switch provider is a
-	// thin bridge to server.Compliance so the snapshot on
-	// each decision reflects the live state at decision time.
-	policyRepo := policydecisions.NewMemoryRepository()
+	// in migration 065. POLICY-STAMP-DURABLE-001: with a pool the
+	// decisions and stamps live in Postgres (policy schema), and
+	// stamps share the order transition's transaction; the memory
+	// repository is only for the no-database dev server. The
+	// kill-switch provider is a thin bridge to server.Compliance so
+	// the snapshot on each decision reflects the live state at
+	// decision time.
+	var policyRepo policydecisions.Repository = policydecisions.NewMemoryRepository()
+	if pool != nil {
+		policyRepo = postgres.NewPolicyDecisionRepository(pool)
+	}
 	policySvc := policydecisions.NewService(policyRepo,
 		"terms-1.1",
 		"privacy-1.1",
