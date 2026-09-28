@@ -167,7 +167,8 @@ func TestFulfillmentPostgresLifecycle(t *testing.T) {
 	if traceOrderID == "" {
 		t.Fatalf("CreateOffer: missing orderId, op=%s", r.OperationRef)
 	}
-	r = svc.HandleContext(ctx, ffEnvelope("ConfirmCooperation", map[string]any{}, requesterID, agentID, traceOrderID))
+	// ORDER-CONFIRM-AGENT-001: 确认合作是服务方的同意。
+	r = svc.HandleContext(ctx, ffEnvelope("ConfirmCooperation", map[string]any{}, agentID, agentID, traceOrderID))
 	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "CONFIRMED" {
 		t.Fatalf("ConfirmCooperation: outcome=%s state=%s err=%+v", r.Outcome, r.Aggregate.State, r.Error)
 	}
@@ -177,10 +178,17 @@ func TestFulfillmentPostgresLifecycle(t *testing.T) {
 	}
 	r = svc.HandleContext(ctx, ffEnvelope("RecordDirectSettlement", map[string]any{
 		"agreedAmount": 1200000, "paymentMethodLabel": "线下现金",
-		"payerConfirmed": true, "payeeConfirmed": true,
+		"payerConfirmed": true,
 	}, requesterID, agentID, traceOrderID))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("RecordDirectSettlement: %+v", r.Error)
+	}
+	// ORDER-SETTLE-GUARD-001: 收款方自己确认自己那一侧。
+	r = svc.HandleContext(ctx, ffEnvelope("RecordDirectSettlement", map[string]any{
+		"agreedAmount": 1200000, "payeeConfirmed": true,
+	}, agentID, agentID, traceOrderID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("RecordDirectSettlement countersign: %+v", r.Error)
 	}
 	r = svc.HandleContext(ctx, ffEnvelope("RecordOutcome", map[string]any{
 		"onTime": true, "actualStart": "09:35", "actualEnd": "17:40",

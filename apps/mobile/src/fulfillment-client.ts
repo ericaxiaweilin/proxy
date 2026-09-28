@@ -38,6 +38,12 @@ export type FulfillmentOrder = {
     // 缺省历史数据）。market 路径由机会快照带入；订单流程按它分档。
     scenario?: string | undefined;
   };
+  // ORDER-SETTLE-GUARD-001：线下结算记录。每一方只确认自己那一侧。
+  settlement?: {
+    agreedAmount: number;
+    payerConfirmed: boolean;
+    payeeConfirmed: boolean;
+  } | undefined;
   createdAt: string;
   updatedAt: string;
   viewerRole: "REQUESTER" | "AGENT";

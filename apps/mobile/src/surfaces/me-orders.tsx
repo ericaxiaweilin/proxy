@@ -6,6 +6,7 @@ import { ActivityClient, ActivityCommandRejectedError } from "../activity-client
 import type { BusinessClient } from "../business-client";
 import { loadStoreOptions, type StoreOption } from "../my-store-options";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
+import { canCancelOrder, canConfirmCooperation, settlementView } from "../order-actions";
 import type { MediaClient } from "../media-client";
 import type { ModerationClient } from "../moderation-client";
 import { ReportSheet } from "../components/report-sheet";
@@ -27,10 +28,9 @@ function orderMoney(order: FulfillmentOrder): string { return `${order.snapshot.
 // R18.x CANCEL-001: only OFFERED / CONFIRMED / EXECUTING
 // can be cancelled by either party. COMPLETED is terminal
 // (the cooperation already happened); CANCELLED is itself
-// terminal. UI mirrors the server-side check.
-function canCancel(order: FulfillmentOrder): boolean {
-  return order.lifecycle === "OFFERED" || order.lifecycle === "CONFIRMED" || order.lifecycle === "EXECUTING";
-}
+// terminal. ORDER-SETTLE-GUARD-001: a mutually settled order
+// is no longer cancellable. UI mirrors the server-side check.
+const canCancel = canCancelOrder;
 
 // ORDER-CENTER-STATS-001（原型 33987c「接单中心」；用户：「我的订单模块不是有吗 在那里做」）：
 // 我的订单顶部的接单面板 —— 接单权限状态 + 真实履约记录（已接单 / 按约完成率 / 准时率 / 复邀客户 / 投诉）。
@@ -183,13 +183,16 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
   const [satisfactionRepeat, setSatisfactionRepeat] = useState<"" | "REUSE" | "MAYBE" | "NO">("");
   const [settleAmount, setSettleAmount] = useState("");
   const [settleMethod, setSettleMethod] = useState("");
-  const [settlePayer, setSettlePayer] = useState(false);
-  const [settlePayee, setSettlePayee] = useState(false);
 
   function humanOrderError(error: unknown, fallback: string): string {
     const msg = error instanceof Error ? error.message : "";
     if (/principal|session|signed|sign in|re-authenticate|AUTH|auth/i.test(msg)) return "登录已过期，请重新登录后再操作。";
     if (/NOT_ORDER_PARTY/i.test(msg)) return "只有订单双方能操作这笔订单。";
+    if (/ONLY_AGENT_CONFIRMS/i.test(msg)) return "要由服务方确认合作，等对方确认。";
+    if (/SETTLEMENT_FLAG_NOT_OWNED/i.test(msg)) return "只能确认你自己这一侧的结算。";
+    if (/SETTLEMENT_AMOUNT_MISMATCH/i.test(msg)) return "金额和约定 / 对方登记的不一致，核对后再提交。";
+    if (/ORDER_SETTLED_NOT_CANCELLABLE/i.test(msg)) return "双方已确认结算，这笔订单不能再取消。";
+    if (/VERSION_CONFLICT/i.test(msg)) return "订单刚被对方更新过，刷新后再试。";
     if (/NOT_CHECKINABLE|NOT_EXECUTABLE|EVIDENCE_NOT_ALLOWED|NOT_COMPLETABLE|NOT_COMPLETED|NOT_CONFIRMABLE|NOT_AMENDABLE|SETTLEMENT_NOT_RECORDABLE|MODE_MISMATCH/i.test(msg)) return "当前状态不能做这个操作，下拉刷新看看最新状态。";
     if (/ONLY_REQUESTER_RATES/i.test(msg)) return "只有需求方能评价。";
     if (/CASH_ELIGIBILITY|ELIGIBILITY/i.test(msg)) return "这笔现金单还没过审，先走平台担保或等审核。";
@@ -318,7 +321,11 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
           </View>
           {/* ORDER-EXEC-001：按 lifecycle 出执行动作。服务端按状态 + 身份 double-check，
               这里只做"该出的出"（不该出的不摆假按钮），拒绝码翻人话。 */}
-          {detail.lifecycle === "OFFERED" ? (
+          {/* ORDER-CONFIRM-AGENT-001：确认合作是服务方的同意，需求方只看到等待。 */}
+          {detail.lifecycle === "OFFERED" && !canConfirmCooperation(detail) ? (
+            <Text selectable style={styles.orderNotice}>等待服务方确认合作。</Text>
+          ) : null}
+          {canConfirmCooperation(detail) ? (
             <Pressable
               disabled={acting !== undefined}
               onPress={() => void runOrderAction("确认合作", detail.orderId, () => client.confirmCooperation(detail.orderId))}
@@ -455,44 +462,53 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
               </Pressable>
             </View>
           ) : null}
-          {showSettlement ? (
-            <View style={styles.orderCard}>
-              <Text selectable style={styles.orderTitle}>记录结算（线下直接结算）</Text>
-              <TextInput
-                value={settleAmount}
-                onChangeText={(v) => setSettleAmount(v.replace(/[^0-9]/g, ""))}
-                placeholder={`金额（快照 ${detail.snapshot.agreedCompensation.toLocaleString()} ${detail.snapshot.currency || "VND"}）`}
-                placeholderTextColor={color.muted}
-                keyboardType="numeric"
-                style={styles.actInput}
-                accessibilityLabel="结算金额"
-              />
-              <TextInput
-                value={settleMethod}
-                onChangeText={setSettleMethod}
-                placeholder={detail.snapshot.paymentMethodLabel || "支付方式说明"}
-                placeholderTextColor={color.muted}
-                style={styles.actInput}
-                accessibilityLabel="支付方式"
-              />
-              <View style={styles.actRow}>
-                <Pressable onPress={() => setSettlePayer((v) => !v)} style={[styles.actChip, settlePayer && styles.actChipOn]} accessibilityLabel="付款方已确认">
-                  <Text selectable style={styles.actChipText}>{settlePayer ? "✓ 付款方确认" : "付款方确认"}</Text>
-                </Pressable>
-                <Pressable onPress={() => setSettlePayee((v) => !v)} style={[styles.actChip, settlePayee && styles.actChipOn]} accessibilityLabel="收款方已确认">
-                  <Text selectable style={styles.actChipText}>{settlePayee ? "✓ 收款方确认" : "收款方确认"}</Text>
-                </Pressable>
+          {showSettlement ? (() => {
+            // ORDER-SETTLE-GUARD-001：每一方只确认自己那一侧，提交即声明；金额要对上
+            // 约定（或对方已登记的金额）。以前一方能同时勾「付款方 / 收款方确认」。
+            const settle = settlementView(detail);
+            const expected = settle.recordedAmount ?? detail.snapshot.agreedCompensation;
+            return (
+              <View style={styles.orderCard}>
+                <Text selectable style={styles.orderTitle}>记录结算（线下直接结算）</Text>
+                {settle.mineConfirmed ? (
+                  <Text selectable style={styles.orderNotice}>
+                    {settle.theirsConfirmed ? `双方已确认结算 ${expected.toLocaleString()} ${detail.snapshot.currency || "VND"}。` : `你已作为${settle.myRoleLabel}确认，等待对方确认。`}
+                  </Text>
+                ) : (
+                  <>
+                    {settle.theirsConfirmed ? (
+                      <Text selectable style={styles.orderNotice}>{`对方已登记 ${expected.toLocaleString()} ${detail.snapshot.currency || "VND"}，核对无误后确认。`}</Text>
+                    ) : null}
+                    <TextInput
+                      value={settleAmount}
+                      onChangeText={(v) => setSettleAmount(v.replace(/[^0-9]/g, ""))}
+                      placeholder={`金额（约定 ${expected.toLocaleString()} ${detail.snapshot.currency || "VND"}）`}
+                      placeholderTextColor={color.muted}
+                      keyboardType="numeric"
+                      style={styles.actInput}
+                      accessibilityLabel="结算金额"
+                    />
+                    <TextInput
+                      value={settleMethod}
+                      onChangeText={setSettleMethod}
+                      placeholder={detail.snapshot.paymentMethodLabel || "支付方式说明"}
+                      placeholderTextColor={color.muted}
+                      style={styles.actInput}
+                      accessibilityLabel="支付方式"
+                    />
+                    <Pressable
+                      disabled={acting !== undefined || settleAmount.trim() === ""}
+                      onPress={() => void runOrderAction("记录结算", detail.orderId, () => client.recordSettlement(detail.orderId, { agreedAmount: Number(settleAmount), ...(settleMethod.trim() ? { paymentMethodLabel: settleMethod.trim() } : {}) }))}
+                      style={actBtn}
+                      accessibilityLabel={`以${settle.myRoleLabel}确认结算`}
+                    >
+                      <Text selectable style={actBtnText}>{acting === "记录结算" ? "提交中…" : `以${settle.myRoleLabel}确认结算`}</Text>
+                    </Pressable>
+                  </>
+                )}
               </View>
-              <Pressable
-                disabled={acting !== undefined || settleAmount.trim() === ""}
-                onPress={() => void runOrderAction("记录结算", detail.orderId, () => client.recordSettlement(detail.orderId, { agreedAmount: Number(settleAmount), ...(settleMethod.trim() ? { paymentMethodLabel: settleMethod.trim() } : {}), payerConfirmed: settlePayer, payeeConfirmed: settlePayee }))}
-                style={actBtn}
-                accessibilityLabel="记录结算"
-              >
-                <Text selectable style={actBtnText}>{acting === "记录结算" ? "提交中…" : "记录结算"}</Text>
-              </Pressable>
-            </View>
-          ) : null}
+            );
+          })() : null}
           {actError ? <Text selectable style={styles.orderNotice}>{actError}</Text> : null}
           {canCancel(detail) ? (
             <Pressable

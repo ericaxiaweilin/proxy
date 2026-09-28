@@ -177,11 +177,22 @@ func (r *FulfillmentRepository) UpdateOrderAndPublish(ctx context.Context, order
 
 func (r *FulfillmentRepository) CreateOffer(ctx context.Context, o fulfillment.Offer) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO fulfillment.offers (id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at, topic_key, note)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-		o.ID, o.TaskID, o.SlotID, o.RequesterID, o.AgentID, nullableText(o.BatchID), o.Status, o.ExpiresAt, o.Version, o.CreatedAt, o.UpdatedAt, o.TopicKey, o.Note,
+		INSERT INTO fulfillment.offers (id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at, topic_key, note, agreed_compensation, currency)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		offerInsertArgs(o)...,
 	)
 	return err
+}
+
+// offerInsertArgs 是 offers 两条 INSERT 共用的参数表。TOPIC-INVITE-PERSIST-001：
+// 以前 CreateOfferAndPublish 自己手写一份、漏了 topic_key / note，主题邀约在 PG
+// 模式下落成空主题 —— 两条路径必须同一份列清单。
+func offerInsertArgs(o fulfillment.Offer) []any {
+	currency := o.Currency
+	if currency == "" {
+		currency = "VND"
+	}
+	return []any{o.ID, o.TaskID, o.SlotID, o.RequesterID, o.AgentID, nullableText(o.BatchID), o.Status, o.ExpiresAt, o.Version, o.CreatedAt, o.UpdatedAt, o.TopicKey, o.Note, o.AgreedCompensation, currency}
 }
 
 func (r *FulfillmentRepository) CreateOfferAndPublish(ctx context.Context, o fulfillment.Offer, domainEvents []event.DomainEvent) error {
@@ -190,9 +201,9 @@ func (r *FulfillmentRepository) CreateOfferAndPublish(ctx context.Context, o ful
 	}
 	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(transactionContext, `
-			INSERT INTO fulfillment.offers (id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-			o.ID, o.TaskID, o.SlotID, o.RequesterID, o.AgentID, nullableText(o.BatchID), o.Status, o.ExpiresAt, o.Version, o.CreatedAt, o.UpdatedAt,
+			INSERT INTO fulfillment.offers (id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at, topic_key, note, agreed_compensation, currency)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+			offerInsertArgs(o)...,
 		); err != nil {
 			return err
 		}
@@ -209,9 +220,9 @@ func (r *FulfillmentRepository) GetOffer(ctx context.Context, id string) (fulfil
 	var o fulfillment.Offer
 	var batchID *string
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at, topic_key, note
+		SELECT id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at, topic_key, note, agreed_compensation, currency
 		FROM fulfillment.offers WHERE id=$1`, id).Scan(
-		&o.ID, &o.TaskID, &o.SlotID, &o.RequesterID, &o.AgentID, &batchID, &o.Status, &o.ExpiresAt, &o.Version, &o.CreatedAt, &o.UpdatedAt, &o.TopicKey, &o.Note,
+		&o.ID, &o.TaskID, &o.SlotID, &o.RequesterID, &o.AgentID, &batchID, &o.Status, &o.ExpiresAt, &o.Version, &o.CreatedAt, &o.UpdatedAt, &o.TopicKey, &o.Note, &o.AgreedCompensation, &o.Currency,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fulfillment.Offer{}, fulfillment.ErrOfferNotFound
@@ -242,7 +253,7 @@ func (r *FulfillmentRepository) UpdateOffer(ctx context.Context, o fulfillment.O
 
 func (r *FulfillmentRepository) ListOffersByAgent(ctx context.Context, agentID string) ([]fulfillment.Offer, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at, topic_key, note
+		SELECT id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at, topic_key, note, agreed_compensation, currency
 		FROM fulfillment.offers WHERE agent_id=$1 ORDER BY created_at DESC`, agentID)
 	if err != nil {
 		return nil, err
@@ -252,7 +263,7 @@ func (r *FulfillmentRepository) ListOffersByAgent(ctx context.Context, agentID s
 	for rows.Next() {
 		var o fulfillment.Offer
 		var batchID *string
-		if err := rows.Scan(&o.ID, &o.TaskID, &o.SlotID, &o.RequesterID, &o.AgentID, &batchID, &o.Status, &o.ExpiresAt, &o.Version, &o.CreatedAt, &o.UpdatedAt, &o.TopicKey, &o.Note); err != nil {
+		if err := rows.Scan(&o.ID, &o.TaskID, &o.SlotID, &o.RequesterID, &o.AgentID, &batchID, &o.Status, &o.ExpiresAt, &o.Version, &o.CreatedAt, &o.UpdatedAt, &o.TopicKey, &o.Note, &o.AgreedCompensation, &o.Currency); err != nil {
 			return nil, err
 		}
 		if batchID != nil {

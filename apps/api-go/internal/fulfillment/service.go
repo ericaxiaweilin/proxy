@@ -142,12 +142,16 @@ type Offer struct {
 	// TOPIC-INVITE-001: 主题邀约字段。档位 Offer 这两项为空；主题邀约的
 	// task/slot 为空（无任务可挂）。注意 orders.slot_id 必须存 NULL 而不是 ""，
 	// 否则 uq_orders_slot_active 唯一索引会把所有主题订单卡成只能成交一单。
-	TopicKey  string    `json:"topicKey,omitempty"`
-	Note      string    `json:"note,omitempty"`
-	ExpiresAt time.Time `json:"expiresAt"`
-	Version   int       `json:"version"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	TopicKey string `json:"topicKey,omitempty"`
+	Note     string `json:"note,omitempty"`
+	// ORDER-OFFER-COMP-001: 报价金额随 Offer 落库，接单时进订单快照。
+	// 主题邀约没有金额（0 = 面议）。
+	AgreedCompensation int64     `json:"agreedCompensation"`
+	Currency           string    `json:"currency,omitempty"`
+	ExpiresAt          time.Time `json:"expiresAt"`
+	Version            int       `json:"version"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
 type Repository interface {
@@ -365,27 +369,8 @@ func (r *MemoryRepository) AcceptOfferAndCreateOrder(_ context.Context, offer Of
 	if current.Status != "OFFERED" {
 		return ErrOfferNotAvailable
 	}
-	// slot uniqueness: one slot -> one active order
-	for _, o := range r.orders {
-		if o.Snapshot.Agent == offer.AgentID && o.NeedID == offer.TaskID && o.Settlement == nil && o.Lifecycle != "CANCELLED" {
-			// generic check, but for slot-specific we check slot_id if present
-		}
-		if o.Snapshot.Agent == offer.AgentID && o.ID == order.ID {
-			return errors.New("order already exists")
-		}
-	}
-	// check slot oversell via slot_id in orders if order has slot
-	if order.Snapshot.MeetingContext != "" {
-		// not used
-	}
-	// enforce unique slot_id if order has task/slot
-	for _, o := range r.orders {
-		// if order has SlotID via snapshot? Use order.NeedID as proxy for slot check
-		// For memory, we check if any order already has same SlotID via snapshot not available, so rely on offer SlotID
-		if o.Lifecycle != "CANCELLED" {
-			// if any order for same slot already exists (via offer SlotID), block
-			// We store slot association in order.Snapshot.Scope? Use simple check: same TaskID+AgentID already ordered is not allowed? For now use slot
-		}
+	if _, exists := r.orders[order.ID]; exists {
+		return errors.New("order already exists")
 	}
 	// Check duplicate slot via offers already accepted for same slot.
 	// 空 slot（主题邀约）跳过 —— 对应 PG 那边 uq_orders_slot_active 的
@@ -397,17 +382,8 @@ func (r *MemoryRepository) AcceptOfferAndCreateOrder(_ context.Context, offer Of
 			}
 		}
 	}
-	// update offer
+	// 校验全过才写：失败时不能留下「offer 已接受但没有订单」的半状态。
 	r.offers[offer.ID] = offer
-	if _, exists := r.orders[order.ID]; exists {
-		return errors.New("order already exists")
-	}
-	// slot uniqueness: ensure no other order for same slot
-	for _, o := range r.orders {
-		if o.Lifecycle != "CANCELLED" && o.NeedID == order.NeedID && o.AgentID == order.AgentID && o.Snapshot.ServiceSKU == order.Snapshot.ServiceSKU {
-			// fallback
-		}
-	}
 	r.orders[order.ID] = cloneOrder(order)
 	r.events = append(r.events, domainEvents...)
 	return nil
@@ -855,17 +831,24 @@ func (s *Service) createSlotOffer(ctx context.Context, e command.Envelope) comma
 	}
 	now := s.clock.Now().UTC()
 	offer := Offer{
-		ID:          newID("off_"),
-		TaskID:      p.TaskID,
-		SlotID:      p.SlotID,
-		RequesterID: e.Actor.ID,
-		AgentID:     p.AgentID,
-		BatchID:     p.BatchID,
-		Status:      "OFFERED",
-		ExpiresAt:   now.Add(offerTTLSeconds(p.TTLSeconds, 5*time.Minute)),
-		Version:     1,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:                 newID("off_"),
+		TaskID:             p.TaskID,
+		SlotID:             p.SlotID,
+		RequesterID:        e.Actor.ID,
+		AgentID:            p.AgentID,
+		BatchID:            p.BatchID,
+		Status:             "OFFERED",
+		AgreedCompensation: p.AgreedCompensation,
+		Currency:           p.Currency,
+		ExpiresAt:          now.Add(offerTTLSeconds(p.TTLSeconds, 5*time.Minute)),
+		Version:            1,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	// ORDER-OFFER-COMP-001: 接单即 CONFIRMED，没有人工复核的节拍 —— 过不了现金门的
+	// 报价在创建时就拒掉，不要让服务方接到一张接不了的单。
+	if rejected, blocked := cashEligibilityGate(e, offerSnapshot(offer), "offerId", offer.ID); blocked {
+		return rejected
 	}
 	domainEvents := []event.DomainEvent{event.New("SlotOfferCreated", "Offer", offer.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"taskId": p.TaskID, "slotId": p.SlotID, "agentId": p.AgentID, "expiresAt": offer.ExpiresAt.Format(time.RFC3339),
@@ -917,17 +900,10 @@ func (s *Service) acceptSlotOffer(ctx context.Context, e command.Envelope) comma
 // 差异只在校验段（档位查 slot，主题查 topic），落库走同一条
 // AcceptOfferAndCreateOrder（主题订单的 task/slot 存 NULL，不触发档位唯一索引）。
 func (s *Service) acceptOfferAsOrder(ctx context.Context, e command.Envelope, offer Offer, now time.Time) command.Result {
-	// Build Order snapshot from Offer
-	snapshot := OrderSnapshot{
-		Requester:          offer.RequesterID,
-		Agent:              offer.AgentID,
-		ServiceSKU:         "CITY_COMPANION",
-		NeedVersion:        offer.TaskID,
-		AgreedCompensation: 0,
-		Currency:           "VND",
-		SettlementMode:     "DIRECT_SETTLEMENT",
+	snapshot := offerSnapshot(offer)
+	if rejected, blocked := cashEligibilityGate(e, snapshot, "offerId", offer.ID); blocked {
+		return rejected
 	}
-	// Use offer's compensation if available via lookup? For now use 0 and override if payload has it
 	order := Order{
 		ID:          newID("ord_"),
 		RequesterID: offer.RequesterID,
@@ -939,7 +915,6 @@ func (s *Service) acceptOfferAsOrder(ctx context.Context, e command.Envelope, of
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	// For slot uniqueness we store TaskID as NeedID and rely on DB unique index on slot_id via order's snapshot? Instead we enforce via Offer SlotID uniqueness via repo
 	offer.Status = "ACCEPTED"
 	offer.Version++
 	offer.UpdatedAt = now
@@ -954,6 +929,10 @@ func (s *Service) acceptOfferAsOrder(ctx context.Context, e command.Envelope, of
 		}
 		if errors.Is(err, ErrOfferNotAvailable) {
 			return command.Rejected(e, "SLOT_UNAVAILABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.slot_unavailable", map[string]any{"slotId": offer.SlotID})
+		}
+		// PG 仓在行锁内再判一次过期；这是业务状态，不是「接受失败请重试」。
+		if errors.Is(err, ErrOfferExpired) {
+			return command.Rejected(e, "OFFER_EXPIRED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.offer_expired", map[string]any{"expiresAt": offer.ExpiresAt.Format(time.RFC3339)})
 		}
 		return command.Rejected(e, "ACCEPT_OFFER_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.accept_failed", nil)
 	}
@@ -1084,6 +1063,11 @@ func (s *Service) getOffer(ctx context.Context, e command.Envelope) command.Resu
 	if err != nil {
 		return command.Rejected(e, "OFFER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.offer_read_failed", nil)
 	}
+	// ORDER-OFFER-READ-001: 报价里有留言和需求方 id，只给报价双方看；外人一律
+	// 「不存在」，不泄露这个 offerId 是否存在。
+	if !isOfferParty(offer, e.Actor.ID) && !isOfferParty(offer, e.Principal.ID) {
+		return command.Rejected(e, "OFFER_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.offer_not_found", nil)
+	}
 	// TTL derived status: if OFFERED but expired, report EXPIRED without mutating
 	status := offer.Status
 	if status == "OFFERED" && s.clock.Now().UTC().After(offer.ExpiresAt) {
@@ -1146,7 +1130,7 @@ func (s *Service) checkInOrder(ctx context.Context, e command.Envelope) command.
 	order.Version++
 	order.UpdatedAt = now
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
-		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
+		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
 }
@@ -1185,7 +1169,7 @@ func (s *Service) submitEvidence(ctx context.Context, e command.Envelope) comman
 	order.Version++
 	order.UpdatedAt = now
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
-		return command.Rejected(e, "EVIDENCE_SUBMIT_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.evidence_failed", nil)
+		return orderUpdateRejected(e, err, "EVIDENCE_SUBMIT_FAILED", "fulfillment.evidence_failed")
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
 }
@@ -1207,39 +1191,19 @@ func (s *Service) confirmCooperation(ctx context.Context, e command.Envelope) co
 	if order.Lifecycle != "OFFERED" {
 		return command.Rejected(e, "ORDER_NOT_CONFIRMABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.not_confirmable", map[string]any{"lifecycle": order.Lifecycle})
 	}
+	// ORDER-CONFIRM-AGENT-001: 报价是需求方发的，「确认合作」是服务方的同意。
+	// 以前任一方都能确认，需求方一个人就能把单从 OFFERED 走到 COMPLETED 再打满分，
+	// 满意度进撮合排序和店铺统计。
+	if order.AgentID != e.Actor.ID {
+		return command.Rejected(e, "ONLY_AGENT_CONFIRMS", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.only_agent_confirms", nil)
+	}
 	// R8 Pillar #6: DIRECT_SETTLEMENT 任务必须 Cash Eligibility
 	// = ALLOW 才能 Lock 到 CONFIRMED。其他 3 态 (REVIEW /
 	// PLATFORM_PAY_REQUIRED / BLOCK) 都明确阻断现金单创建。这条
 	// 门控是越南 PDP 91/2025/QH15 + Decree 13/2023/ND-CP
 	// 双重视角的现金交易透明度底线。
-	if order.Snapshot.SettlementMode == "DIRECT_SETTLEMENT" {
-		switch order.Snapshot.CashEligibilityStatus {
-		case CashEligibilityAllow:
-			// pass
-		case CashEligibilityReview:
-			return command.Rejected(e, "CASH_ELIGIBILITY_REVIEW", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.cash_eligibility_review", map[string]any{
-				"orderId": order.ID,
-				"reason":  order.Snapshot.CashEligibilityReason,
-				"hint":    "现金任务状态为 REVIEW, 需人工复核后才能 Lock",
-			})
-		case CashEligibilityPlatformPayRequired:
-			return command.Rejected(e, "CASH_PAYMENT_REQUIRED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.cash_payment_required", map[string]any{
-				"orderId": order.ID,
-				"reason":  order.Snapshot.CashEligibilityReason,
-				"hint":    "现金任务被要求必须改用平台支付",
-			})
-		case CashEligibilityBlock:
-			return command.Rejected(e, "CASH_ELIGIBILITY_BLOCKED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.cash_eligibility_blocked", map[string]any{
-				"orderId": order.ID,
-				"reason":  order.Snapshot.CashEligibilityReason,
-				"hint":    "现金任务被禁止, 需走申诉或换 PLATFORM_PAY",
-			})
-		default:
-			return command.Rejected(e, "CASH_ELIGIBILITY_MISSING", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.cash_eligibility_missing", map[string]any{
-				"orderId": order.ID,
-				"hint":    "现金任务未携带 Cash Eligibility 评估结果",
-			})
-		}
+	if rejected, blocked := cashEligibilityGate(e, order.Snapshot, "orderId", order.ID); blocked {
+		return rejected
 	}
 	// R16.7-P1-B (LC-28): a paid Order (PLATFORM_PAY settlement)
 	// may not enter CONFIRMED without a stamped policy
@@ -1268,7 +1232,7 @@ func (s *Service) confirmCooperation(ctx context.Context, e command.Envelope) co
 		"snapshot": order.Snapshot,
 	})}
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
-		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
+		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	// R16.7-P1-B (LC-28): record the (order, decision,
 	// lifecycle) tuple. The Order now carries the decision id
@@ -1320,7 +1284,7 @@ func (s *Service) startExecution(ctx context.Context, e command.Envelope) comman
 	order.UpdatedAt = s.clock.Now().UTC()
 	domainEvents := []event.DomainEvent{event.New("ExecutionStarted", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, order.UpdatedAt, map[string]any{})}
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
-		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
+		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
 }
@@ -1359,35 +1323,56 @@ func (s *Service) recordDirectSettlement(ctx context.Context, e command.Envelope
 	if order.Snapshot.SettlementMode != "DIRECT_SETTLEMENT" {
 		return command.Rejected(e, "SETTLEMENT_MODE_MISMATCH", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.settlement_mode_mismatch", map[string]any{"mode": order.Snapshot.SettlementMode})
 	}
+	// ORDER-SETTLE-GUARD-001: 每一方只声明自己那一侧（需求方 = 付款方，服务方 =
+	// 收款方）；提交即声明。替对方勾确认直接拒掉。金额先对快照（快照 0 = 面议时
+	// 由先登记的一方定），后到的一方必须对上已登记的金额才算双方确认。
+	isPayer := order.RequesterID == e.Actor.ID
+	if (isPayer && p.PayeeConfirmed) || (!isPayer && p.PayerConfirmed) {
+		return command.Rejected(e, "SETTLEMENT_FLAG_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.settlement_flag_not_owned", nil)
+	}
+	expectedAmount := order.Snapshot.AgreedCompensation
 	if order.Settlement != nil {
-		return command.Rejected(e, "SETTLEMENT_ALREADY_RECORDED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.settlement_exists", nil)
+		expectedAmount = order.Settlement.AgreedAmount
+		if (isPayer && order.Settlement.PayerConfirmed) || (!isPayer && order.Settlement.PayeeConfirmed) {
+			return command.Rejected(e, "SETTLEMENT_ALREADY_RECORDED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.settlement_exists", nil)
+		}
+	}
+	if expectedAmount > 0 && p.AgreedAmount != expectedAmount {
+		return command.Rejected(e, "SETTLEMENT_AMOUNT_MISMATCH", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.settlement_amount_mismatch", map[string]any{"expectedAmount": expectedAmount})
 	}
 	now := s.clock.Now().UTC()
-	record := SettlementRecord{
-		Mode:               "DIRECT_SETTLEMENT",
-		AgreedAmount:       p.AgreedAmount,
-		Currency:           order.Snapshot.Currency,
-		Duration:           order.Snapshot.Duration,
-		IncludedScope:      order.Snapshot.IncludedScope,
-		ExcludedScope:      order.Snapshot.ExcludedScope,
-		PaymentMethodLabel: p.PaymentMethodLabel,
-		Payer:              order.RequesterID,
-		Payee:              order.AgentID,
-		PayerConfirmed:     p.PayerConfirmed,
-		PayeeConfirmed:     p.PayeeConfirmed,
-		ConfirmedAt:        now,
+	eventType := "DirectSettlementCountersigned"
+	if order.Settlement == nil {
+		eventType = "DirectSettlementRecorded"
+		order.Settlement = &SettlementRecord{
+			Mode:               "DIRECT_SETTLEMENT",
+			AgreedAmount:       p.AgreedAmount,
+			Currency:           order.Snapshot.Currency,
+			Duration:           order.Snapshot.Duration,
+			IncludedScope:      order.Snapshot.IncludedScope,
+			ExcludedScope:      order.Snapshot.ExcludedScope,
+			PaymentMethodLabel: p.PaymentMethodLabel,
+			Payer:              order.RequesterID,
+			Payee:              order.AgentID,
+			ConfirmedAt:        now,
+		}
 	}
-	order.Settlement = &record
+	if isPayer {
+		order.Settlement.PayerConfirmed = true
+	} else {
+		order.Settlement.PayeeConfirmed = true
+	}
 	order.Version++
 	order.UpdatedAt = now
-	domainEvents := []event.DomainEvent{event.New("DirectSettlementRecorded", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"agreedAmount":   p.AgreedAmount,
-		"payerConfirmed": p.PayerConfirmed,
-		"payeeConfirmed": p.PayeeConfirmed,
+	domainEvents := []event.DomainEvent{event.New(eventType, "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"agreedAmount":   order.Settlement.AgreedAmount,
+		"role":           viewerRole(order, e.Actor.ID),
+		"payerConfirmed": order.Settlement.PayerConfirmed,
+		"payeeConfirmed": order.Settlement.PayeeConfirmed,
 		"note":           "DIRECT_SETTLEMENT 不创建 Platform Funding 假记录；双方确认是声明信号，不等于平台物理验证现金",
 	})}
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
-		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
+		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
 }
@@ -1461,7 +1446,7 @@ func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command
 		"materialChanges": p.MaterialChanges,
 	})}
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
-		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
+		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
 }
@@ -1509,7 +1494,7 @@ func (s *Service) recordSatisfaction(ctx context.Context, e command.Envelope) co
 		"note":         "履约事实不要求用户重复打分",
 	})}
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
-		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
+		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
 }
@@ -1593,7 +1578,7 @@ func (s *Service) recordMaterialChange(ctx context.Context, e command.Envelope) 
 	}
 	domainEvents := []event.DomainEvent{event.New("MaterialOrderChangeRecorded", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, eventPayload)}
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
-		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
+		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	// LC-30 stamp: record the (order, decision) link at the
 	// current lifecycle so a regulator can recover 'this
@@ -1653,6 +1638,11 @@ func (s *Service) cancelOrder(ctx context.Context, e command.Envelope) command.R
 	if order.Lifecycle == "COMPLETED" {
 		return command.Rejected(e, "ORDER_ALREADY_COMPLETED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.order_already_completed", map[string]any{"lifecycle": order.Lifecycle})
 	}
+	// ORDER-SETTLE-GUARD-001: 双方都确认过线下结算 = 钱已经换手，不能再取消。
+	// 只有一方声明时不锁（否则一方能用假结算把对方锁在订单里）。
+	if order.Settlement != nil && order.Settlement.PayerConfirmed && order.Settlement.PayeeConfirmed {
+		return command.Rejected(e, "ORDER_SETTLED_NOT_CANCELLABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.order_settled_not_cancellable", map[string]any{"lifecycle": order.Lifecycle})
+	}
 	now := s.clock.Now().UTC()
 	order.Lifecycle = "CANCELLED"
 	order.Version++
@@ -1668,7 +1658,7 @@ func (s *Service) cancelOrder(ctx context.Context, e command.Envelope) command.R
 		"role":    viewerRole(order, e.Actor.ID),
 	})}
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
-		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
+		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
 	r := command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
 	raw, _ := json.Marshal(map[string]any{
@@ -1703,6 +1693,71 @@ const (
 	CashEligibilityPlatformPayRequired = "PLATFORM_PAY_REQUIRED"
 	CashEligibilityBlock               = "BLOCK"
 )
+
+// cashEligibilityGate 是 R8 Pillar #6 的锁单门：DIRECT_SETTLEMENT 快照必须是
+// ALLOW 才能进 CONFIRMED。确认合作、创建档位报价、接单三处共用（档位 / 主题
+// 接单直接落 CONFIRMED，不经过 ConfirmCooperation —— ORDER-OFFER-COMP-001）。
+func cashEligibilityGate(e command.Envelope, snapshot OrderSnapshot, refKey, refID string) (command.Result, bool) {
+	if snapshot.SettlementMode != "DIRECT_SETTLEMENT" {
+		return command.Result{}, false
+	}
+	switch snapshot.CashEligibilityStatus {
+	case CashEligibilityAllow:
+		return command.Result{}, false
+	case CashEligibilityReview:
+		return command.Rejected(e, "CASH_ELIGIBILITY_REVIEW", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.cash_eligibility_review", map[string]any{
+			refKey:   refID,
+			"reason": snapshot.CashEligibilityReason,
+			"hint":   "现金任务状态为 REVIEW, 需人工复核后才能 Lock",
+		}), true
+	case CashEligibilityPlatformPayRequired:
+		return command.Rejected(e, "CASH_PAYMENT_REQUIRED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.cash_payment_required", map[string]any{
+			refKey:   refID,
+			"reason": snapshot.CashEligibilityReason,
+			"hint":   "现金任务被要求必须改用平台支付",
+		}), true
+	case CashEligibilityBlock:
+		return command.Rejected(e, "CASH_ELIGIBILITY_BLOCKED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.cash_eligibility_blocked", map[string]any{
+			refKey:   refID,
+			"reason": snapshot.CashEligibilityReason,
+			"hint":   "现金任务被禁止, 需走申诉或换 PLATFORM_PAY",
+		}), true
+	default:
+		return command.Rejected(e, "CASH_ELIGIBILITY_MISSING", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.cash_eligibility_missing", map[string]any{
+			refKey: refID,
+			"hint": "现金任务未携带 Cash Eligibility 评估结果",
+		}), true
+	}
+}
+
+// offerSnapshot 是接单时冻结进订单的快照（Gate G）：金额来自报价本身。
+func offerSnapshot(offer Offer) OrderSnapshot {
+	currency := offer.Currency
+	if currency == "" {
+		currency = "VND"
+	}
+	cashStatus, cashReason := assessCashEligibility("DIRECT_SETTLEMENT", offer.AgreedCompensation, "")
+	return OrderSnapshot{
+		Requester:             offer.RequesterID,
+		Agent:                 offer.AgentID,
+		ServiceSKU:            "CITY_COMPANION",
+		NeedVersion:           offer.TaskID,
+		AgreedCompensation:    offer.AgreedCompensation,
+		Currency:              currency,
+		SettlementMode:        "DIRECT_SETTLEMENT",
+		CashEligibilityStatus: cashStatus,
+		CashEligibilityReason: cashReason,
+	}
+}
+
+// orderUpdateRejected 把仓储写失败翻成命令结果：版本冲突是并发（刷新重试），
+// 其余才是内部错误（ORDER-CONFLICT-CODE-001）。
+func orderUpdateRejected(e command.Envelope, err error, code, messageKey string) command.Result {
+	if errors.Is(err, ErrVersionConflict) {
+		return command.Rejected(e, "ORDER_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "fulfillment.order_version_conflict", nil)
+	}
+	return command.Rejected(e, code, "INTERNAL", "SAFE_RETRY", messageKey, nil)
+}
 
 // isValidCashEligibilityStatus 返回字符串是否是 4 态之一。
 func isValidCashEligibilityStatus(s string) bool {
@@ -1750,6 +1805,10 @@ func assessCashEligibility(settlementMode string, amountVND int64, override stri
 
 func isOrderParty(order Order, actorID string) bool {
 	return order.RequesterID == actorID || order.AgentID == actorID
+}
+
+func isOfferParty(offer Offer, id string) bool {
+	return id != "" && (offer.RequesterID == id || offer.AgentID == id)
 }
 
 func decode(payload map[string]any, target any) bool {

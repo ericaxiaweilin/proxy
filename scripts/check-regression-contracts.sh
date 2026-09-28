@@ -1390,6 +1390,51 @@ if ! grep -q 'cancelOrder' apps/mobile/src/surfaces/me-orders.tsx; then
 fi
 echo "    CANCEL-001: PASS (server CancelOrder + mobile cancelOrder + UI button)"
 
+# 订单管线审计（2026-09-28）。
+# ORDER-CONFIRM-AGENT-001: 需求方能自己「确认合作」，一个人把订单从 OFFERED 走到
+# COMPLETED 再打满分（满意度进撮合排序 / 店铺统计）。确认合作只能由服务方做。
+require_test "ORDER-CONFIRM-AGENT-001" "./internal/fulfillment" \
+  "TestConfirmCooperationRequiresAgent" \
+  "apps/api-go/internal/fulfillment/order_state_machine_test.go" || exit $?
+# ORDER-OFFER-COMP-001: 档位报价金额校验完就丢，接单订单金额 0、现金资格为空、
+# 直接 CONFIRMED 绕过 R8 现金门。金额随 Offer 落库进快照，超限报价创建即拒。
+require_test "ORDER-OFFER-COMP-001" "./internal/fulfillment" \
+  "TestSlotOfferCarriesCompensationIntoOrder" \
+  "apps/api-go/internal/fulfillment/order_state_machine_test.go" || exit $?
+require_test "ORDER-OFFER-COMP-001" "./internal/fulfillment" \
+  "TestTopicInviteOrderHasAllowCashEligibility" \
+  "apps/api-go/internal/fulfillment/order_state_machine_test.go" || exit $?
+# ORDER-SETTLE-GUARD-001: 一方能同时勾付款方 / 收款方确认、金额不对快照、结算后
+# 还能取消。每一方只确认自己那一侧，金额对快照 / 对方登记额，双方确认后不可取消。
+require_test "ORDER-SETTLE-GUARD-001" "./internal/fulfillment" \
+  "TestDirectSettlementEachPartyConfirmsOwnSide" \
+  "apps/api-go/internal/fulfillment/order_state_machine_test.go" || exit $?
+require_test "ORDER-SETTLE-GUARD-001" "./internal/fulfillment" \
+  "TestOneSidedSettlementDoesNotLockCancellation" \
+  "apps/api-go/internal/fulfillment/order_state_machine_test.go" || exit $?
+# ORDER-OFFER-READ-001: GetOffer 不校验身份，任何人拿 offerId 能读留言和需求方 id。
+require_test "ORDER-OFFER-READ-001" "./internal/fulfillment" \
+  "TestGetOfferOnlyVisibleToParties" \
+  "apps/api-go/internal/fulfillment/order_state_machine_test.go" || exit $?
+# ORDER-CONFLICT-CODE-001: 订单版本冲突被报成 INTERNAL，客户端无法区分「刷新重试」。
+require_test "ORDER-CONFLICT-CODE-001" "./internal/fulfillment" \
+  "TestOrderVersionConflictIsReportedAsConcurrency" \
+  "apps/api-go/internal/fulfillment/order_state_machine_test.go" || exit $?
+# TOPIC-INVITE-PERSIST-001: PG 的 CreateOfferAndPublish 漏写 topic_key / note，主题邀约
+# 落成空主题（内存仓没这个问题）。需要 postgres；没有库时该测试 SKIP。
+require_test "TOPIC-INVITE-PERSIST-001" "./internal/platform/postgres" \
+  "TestOfferPersistsTopicAndCompensationPostgres" \
+  "apps/api-go/internal/platform/postgres/fulfillment_offer_persistence_integration_test.go" || exit $?
+if ! grep -q 'ORDER-CONFIRM-AGENT-001' apps/mobile/src/order-actions.test.ts ||
+   ! grep -q 'ORDER-SETTLE-GUARD-001' apps/mobile/src/order-actions.test.ts ||
+   ! grep -q 'canConfirmCooperation(detail)' apps/mobile/src/surfaces/me-orders.tsx ||
+   ! grep -q 'settlementView(detail)' apps/mobile/src/surfaces/me-orders.tsx; then
+  echo "  FAIL [ORDER-CONFIRM-AGENT-001/ORDER-SETTLE-GUARD-001 mobile]: 订单详情又给需求方摆确认按钮 / 让一方勾双方结算。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/order-actions.test.ts >/dev/null || exit $?
+echo "    ORDER-CONFIRM-AGENT-001/ORDER-OFFER-COMP-001/ORDER-SETTLE-GUARD-001/ORDER-OFFER-READ-001/ORDER-CONFLICT-CODE-001/TOPIC-INVITE-PERSIST-001: PASS"
+
 # LINES-EDITOR-001: the server has had UpsertStoreLines
 # since R18.x b77187a, but the storefront surface was
 # read-only: business owners saw their old lines but had
