@@ -559,16 +559,15 @@ export function MarketSurface({
           </ScrollView>
           <View style={styles.sectionHead}>
             <Text selectable style={styles.sectionTitle}>趋势活动</Text>
-            <Text selectable style={styles.sectionHint}>多人 / 兴趣 / 品牌场景</Text>
-          </View>
+                      </View>
           {activityPhase === "LOADING" && activityItems.length === 0 ? (
             <View style={styles.emptyBox}>
               <ProxyLoading tone="brand" />
-              <Text selectable style={styles.emptyText}>正在读取活动读模型（ListActivities）…</Text>
+              <Text selectable style={styles.emptyText}>加载中…</Text>
             </View>
           ) : activityPhase === "ERROR" ? (
             <View style={styles.emptyBox}>
-              <Text selectable style={styles.emptyText}>活动读模型暂时不可用（本地 API 未连接？）。</Text>
+              <Text selectable style={styles.emptyText}>活动暂时加载不出来，请重试。</Text>
               <Pressable onPress={() => void loadActivities()} style={styles.retryBtn}>
                 <Text selectable style={styles.retryText}>重试</Text>
               </Pressable>
@@ -636,8 +635,7 @@ export function MarketSurface({
         <Pressable accessibilityLabel="发布选择面板" onPress={() => undefined} testID="publish-menu-sheet-v1" style={[styles.publishMenuSheet, { marginBottom: bottomNavVisible === false ? 24 : 104 }]}>
           <View style={styles.publishMenuGrab} />
           <Text selectable style={styles.publishMenuTitle}>创建</Text>
-          <Text selectable style={styles.publishMenuHint}>订单按 Moment 向导发布；活动用于多人共同参与。</Text>
-          <View style={styles.publishMenu}>
+                    <View style={styles.publishMenu}>
             <Pressable accessibilityLabel="创建订单" onPress={openDemandWizard} style={styles.publishMenuPrimary}>
               <ProxyIcon color={color.white} name="plus" size={20} /><Text selectable style={styles.publishMenuPrimaryText}>创建订单</Text>
             </Pressable>
@@ -654,7 +652,7 @@ export function MarketSurface({
         <Pressable accessibilityLabel="KYC提示面板" onPress={() => undefined} style={[styles.publishMenuSheet, { marginBottom: bottomNavVisible === false ? 24 : 104 }]}>
           <View style={styles.publishMenuGrab} />
           <Text selectable style={styles.publishMenuTitle}>先完成KYC认证</Text>
-          <Text selectable style={styles.publishMenuHint}>接单需要实名 + 证件 + 履约条款审核，通过后开放接单和 AI 分身。</Text>
+          <Text selectable style={styles.publishMenuHint}>接单前需要先通过 KYC 认证。</Text>
           <View style={styles.publishMenu}>
             <Pressable accessibilityLabel="去KYC认证" onPress={() => { setKycGateOpen(false); onRequireKYC?.(); }} style={styles.publishMenuPrimary}>
               <Text selectable style={styles.publishMenuPrimaryText}>去KYC认证</Text>
@@ -838,26 +836,6 @@ function OpportunityDetail({
             （注释刻意不复述那两个中文字面量，否则守门的 grep 会被注释自己骗绿。） */}
       </View>
 
-      {/* MARKET-QUOTE-SHEET-001: valueBox 之前写一个硬编码的竞争力评分(中等 + 68% 进度条),
-          服务端没返回任何竞争力数据 —— 这是从 0 编出来的数字。换成一句说明,
-          跟 prototype 的"参考报价区间"对齐。
-          MARKET-FAIR-RANGE-CLAIM-001: 这里后来还是留了一句无条件的断言，说客户预算
-          落在 Proxy 的公平区间内 —— 平台没有公平区间引擎（全仓只有这句文案和原型），
-          而且区间只在发布方真填了两框时才有。标题承诺"参考报价区间"却不给区间，
-          等于又替系统许了一个没有依据的承诺。改成按有没有真区间分两种说法。
-          （注释刻意不复述那句原文，否则守门的 grep 会被注释自己骗绿。） */}
-      <View style={styles.valueBox}>
-        <View style={styles.valueHead}>
-          <Text selectable style={styles.valueTitle}>{fairRange ? "参考报价区间" : "报价说明"}</Text>
-          {fairRange ? <Text selectable style={styles.valueBadge}>仅供锚定</Text> : null}
-        </View>
-        <Text selectable style={styles.valueText}>
-          {fairRange
-            ? `区间 ${fairRange} 来自发布方填的两框，只供锚定，不是平台评估的公平价。你点的"报名报价"会进独立 sheet 自己定金额 —— 报价 UI 不在这屏, 不让详情页同时承担读订单和出价两件事。`
-            : `发布方只填了一个价，这单没有区间可锚定。你点的"报名报价"会进独立 sheet 自己定金额 —— 报价 UI 不在这屏, 不让详情页同时承担读订单和出价两件事。`}
-        </Text>
-      </View>
-
       <View style={styles.factGrid}>
         <View style={styles.fact}>
           <Text selectable style={styles.factLabel}>时间</Text>
@@ -886,36 +864,13 @@ function OpportunityDetail({
         </View>
       ) : null}
 
-      <View style={styles.aiBox}>
-        <View style={styles.aiHead}>
-          <Text selectable style={styles.aiTitle}>Proxy · 给小美的判断</Text>
-        </View>
-        <View style={styles.aiChecks}>
-          {/* MARKET-FAKE-JUDGMENT-001: 这一盒以前是三条写死的结论（匹配度 / 出价
-               下限 / 是否值得接），服务端既没有匹配引擎，也不存在"类似履约"数据
-               —— 整盒是编出来的 AI 判断。改成如实说明这一版还没有评估：
-               不删这块位置，但不再伪造结论。 */}
-          <Text selectable style={styles.aiCheck}>这一版还没有评估：匹配度要按你的技能与历史履约算，出价建议要按同类订单算 —— 两样数据目前都没有，所以这里不给出结论。</Text>
-          <Text selectable style={styles.aiCheck}>↗ {viewerTravelMinutes != null ? `通勤约 ${viewerTravelMinutes} 分钟，` : ""}平台托管付款。</Text>
-        </View>
-      </View>
-
       {/* MARKET-QUOTE-SHEET-001: 为什么不直接报价 —— 详情页给"推荐理由"+"区间"，
           真正的报价按钮独立成一屏 sheet, 不让用户在这屏边读边算。 */}
-      <View style={styles.detailWhyBox}>
-        <Text selectable style={styles.detailWhyTitle}>为什么推荐给你</Text>
-        {/* MARKET-FAKE-JUDGMENT-001: 匹配度那条删掉了 —— 服务端没有匹配引擎，
-            以前显示的是发布时写死的常量。
-            MARKET-LEGACY-VERIFIED-001: 认证那条只在服务端能背的形态下画
-            （ownerType=BUSINESS + verified），存量行里 ownerType=PERSON +
-            verified=true 的组合平台从来不产出。
-            SOUL 里那条：一个理由都没有时不许留一个只有标题的空盒 —— 如实说明。 */}
-        {whyRows.length > 0 ? (
-          whyRows.map((row) => <Text key={row} selectable style={styles.detailWhyRow}>{row}</Text>)
-        ) : (
-          <Text selectable style={styles.detailWhyRow}>这一版没有可展示的推荐理由：匹配度要按你的技能与历史履约算，平台目前没有这份数据，这里不给出结论。</Text>
-        )}
-      </View>
+      {whyRows.length > 0 ? (
+        <View style={styles.detailWhyBox}>
+          {whyRows.map((row) => <Text key={row} selectable style={styles.detailWhyRow}>{row}</Text>)}
+        </View>
+      ) : null}
 
       <View style={styles.detailActions}>
         <Pressable onPress={onBack} style={styles.detailActionGhost}>
@@ -941,27 +896,25 @@ function OpportunityDetail({
       />
       {opportunity.ownedByViewer ? (
         <Pressable onPress={onOpenSelect} style={[styles.r4ActionGhost, { marginTop: 7 }]}>
-          <Text selectable style={styles.r4ActionGhostText}>查看客户选人视角 ›</Text>
+          <Text selectable style={styles.r4ActionGhostText}>查看报名的人 ›</Text>
         </Pressable>
       ) : null}
 
       {opportunity.viewerApplicationStatus === "SELECTED" ? (
         <View style={[styles.aiBox, { marginTop: 8 }]}>
-          <Text selectable style={styles.aiTitle}>发布者已选择你的申请</Text>
-          <Text selectable style={styles.aiCheck}>再次核对本次报价与范围后，由你本人确认合作；AI 助理不能代确认。</Text>
+          <Text selectable style={styles.aiTitle}>发布者选了你</Text>
+          <Text selectable style={styles.aiCheck}>核对报价和范围后确认合作。</Text>
           <Pressable disabled={busy} onPress={onConfirm} style={[styles.r4ActionPrimary, { marginTop: 8 }]}>
-            <Text selectable style={styles.r4ActionPrimaryText}>{busy ? "确认中…" : "本人确认合作"}</Text>
+            <Text selectable style={styles.r4ActionPrimaryText}>{busy ? "确认中…" : "确认合作"}</Text>
           </Pressable>
         </View>
       ) : opportunity.viewerApplicationStatus === "CONFIRMED" ? (
-        <Text selectable style={styles.detailHint}>双方已确认合作 · {opportunity.viewerOrderRef}</Text>
+        <Text selectable style={styles.detailHint}>已确认合作 · {opportunity.viewerOrderRef}</Text>
       ) : opportunity.viewerApplicationStatus === "NOT_SELECTED" ? (
         <Text selectable style={styles.detailHint}>本次申请未被选择。</Text>
       ) : null}
 
-      <Text selectable style={styles.detailHint}>价格只属于这次需求。你的主页不会永久显示“小时价”。AI 不替客户压价，也不替你接受。</Text>
-
-      {/* COMP-REPORT-002: 机会 / 邀约举报入口。常驻在详情页底部，不做成
+            {/* COMP-REPORT-002: 机会 / 邀约举报入口。常驻在详情页底部，不做成
           长按菜单 —— 用户读到一条可疑的邀约时，不该还要先猜哪里能举报。 */}
       <Pressable accessibilityLabel={reportTarget.label} onPress={() => { setReportDone(undefined); setReporting(reportTarget); }} style={styles.reportLink}>
         <Text selectable style={styles.reportLinkText}>⚑ {reportTarget.label}</Text>
@@ -1244,9 +1197,7 @@ function PublishTemplatePicker({ marketplace, onBack, onPicked, onCustom }: { ma
       <Text selectable style={styles.detailTitle}>发布需求</Text>
     </View>
     <View style={styles.detailHero}>
-      <Text selectable style={styles.detailHeroKicker}>CREATE DEMAND</Text>
       <Text selectable style={styles.detailHeroTitle}>想约什么？</Text>
-      <Text selectable style={styles.detailHeroSub}>热门直接点；更特别的玩法从主题里选。</Text>
     </View>
     <View style={styles.publishSearchRow}>
       <TextInput
@@ -1564,7 +1515,7 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
             <Text selectable style={styles.r4PriceLabel}>动态报价</Text>
             <Text selectable style={styles.publishQuoteTotal}>{quoteToVND(quote.total)}{enginePricing?.perPair && providers > 1 ? ` · ${providers} 组 × ${quoteToVND(quote.perUnit)}` : ""}</Text>
             <Text selectable style={styles.publishFlowSub}>
-              基础 {baseK}K{quote.addOns.length > 0 ? quote.addOns.map((a) => ` · ${a.label} ${a.amount > 0 ? "+" : ""}${a.amount}K`).join("") : ""} · 偏好环境仅用于匹配，不按行为收费
+              基础 {baseK}K{quote.addOns.length > 0 ? quote.addOns.map((a) => ` · ${a.label} ${a.amount > 0 ? "+" : ""}${a.amount}K`).join("") : ""}
             </Text>
             <Pressable onPress={() => setPriceMin(quoteToVND(quote.total))} style={[styles.r4ActionGhost, { marginTop: 8, alignSelf: "flex-start" }]}>
               <Text selectable style={styles.r4ActionGhostText}>按此报价填入价格框 ›</Text>
@@ -1573,9 +1524,7 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
         </View>
       ) : null}
       <View style={styles.detailHero}>
-        <Text selectable style={styles.detailHeroKicker}>CREATE DEMAND</Text>
         <TextInput onChangeText={setTitle} placeholder="例如：周六想找人一起逛西湖" placeholderTextColor="#D8D4CA" style={[styles.detailHeroTitle, styles.publishInput]} value={title} />
-        <Text selectable style={styles.detailHeroSub}>Proxy 在发布前就告诉客户合理价格，避免把需求故意压成低价再让真人竞价。</Text>
       </View>
       <View style={styles.r4Card}>
         <Text selectable style={styles.r4Title}>你想完成什么</Text>
@@ -1614,19 +1563,12 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
           ) : (
             <Text selectable style={[styles.publishPriceInput, styles.publishPricePlaceholder]}>{moneyFlow === "TBD" ? "金额不公开在卡片上" : "0₫"}</Text>
           )}
-          <Text selectable style={styles.r4PriceLabel}>平台保底：100,000 VND · 上限 10,000,000 VND</Text>
+          <Text selectable style={styles.r4PriceLabel}>付费金额 100,000 – 10,000,000 VND；免费请选“免费任务”</Text>
         </View>
-        <View style={styles.r4Match}>
-          <Text selectable style={styles.r4MatchText}>{moneyFlow === "TBD" ? "金额不公开，由双方面谈确定" : moneyFlow === "FREE" ? "免费任务 · 完整展示给回应者" : "金额完整展示给回应者"} · 有多少人报名要等发布后才知道，这里不预估</Text>
-        </View>
-      </View>
-      <View style={styles.aiBox}>
-        <Text selectable style={styles.aiTitle}>低于 100,000 VND 不能发布</Text>
-        <Text selectable style={styles.aiCheck}>Proxy 对付费机会执行最低保底；免费同行请明确选择“免费任务”。</Text>
       </View>
       <View style={styles.r4Card}>
         <Text selectable style={styles.r4Title}>选人 · 可选</Text>
-        <Text selectable style={styles.publishFlowSub}>不选 = 发布到公开市场；选 TA = 定向邀约，只有 TA 能看到并回应。</Text>
+        <Text selectable style={styles.publishFlowSub}>不选则公开发布；选 TA 则只有 TA 能看到并回应。</Text>
         {targetAgent ? (
           <View style={[styles.publishFlowChip, styles.publishFlowChipOn, { marginTop: 8 }]}>
             <Text selectable style={[styles.publishFlowLabel, styles.publishFlowLabelOn]}>{targetAgent.name}</Text>
@@ -1686,7 +1628,7 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
         {traceId ? null : (
           <>
             <Pressable onPress={onBack} style={styles.r4ActionGhost}>
-              <Text selectable style={styles.r4ActionGhostText}>预览小美视角</Text>
+              <Text selectable style={styles.r4ActionGhostText}>返回</Text>
             </Pressable>
             <Pressable disabled={publishing} onPress={() => void publish()} style={styles.r4ActionPrimary}>
               <Text selectable style={styles.r4ActionPrimaryText}>{publishing ? "发布中…" : targetAgent ? `向 ${targetAgent.name} 发出邀约` : "发布到市场"}</Text>
@@ -1829,18 +1771,14 @@ function SelectWorkbench({ marketplace, fulfillment, profileClient, opportunity,
           </View>
         ))}
       </View>
-      <View style={styles.aiBox}>
-        <Text selectable style={styles.aiTitle}>申请制，不把任何人直接上架</Text>
-        <Text selectable style={styles.aiCheck}>这里只展示真人主动提交的本次报价与范围。没有可靠履约数据时，不伪造推荐排名。</Text>
-      </View>
       {phase === "LOADING" ? <ProxyLoading tone="brand" /> : null}
       {error ? <Text selectable style={styles.marketError}>{error}</Text> : null}
-      {phase === "READY" && candidates.length === 0 ? <Text selectable style={styles.detailHint}>还没有人报名。候选人不会由平台或 AI 自动补位。</Text> : null}
+      {phase === "READY" && candidates.length === 0 ? <Text selectable style={styles.detailHint}>还没有人报名。</Text> : null}
       {phase === "READY" && candidates.length > 0 ? (
         <View style={styles.r4Card}>
           <Text selectable style={styles.r4Title}>快速 Offer 金额 · VND</Text>
           <TextInput keyboardType="number-pad" onChangeText={setOfferAmount} style={styles.publishPriceInput} value={offerAmount} placeholder="例如 1200000" />
-          <Text selectable style={styles.detailHint}>给选中的报名人发 5 分钟 Offer，对方接单后直接生成订单。金额至少 100,000 VND。</Text>
+          <Text selectable style={styles.detailHint}>选中报名的人后发 Offer，5 分钟内对方接受即生成订单。金额至少 100,000 VND。</Text>
         </View>
       ) : null}
       {offerMsg ? <Text selectable style={styles.offerMsg}>{offerMsg}</Text> : null}

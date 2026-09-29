@@ -29,8 +29,9 @@ describe("MARKET-FAKE-JUDGMENT-001", () => {
   });
 
   it("the judgment box no longer states hardcoded conclusions", () => {
-    // 正向：改成如实说明这一版还没有评估。
-    expect(detail).toContain("这一版还没有评估");
+    // 没有匹配引擎 / 同类履约数据 ⇒ 整块判断区不画（连「还没评估」的空盒也是废话）。
+    expect(detail).not.toContain("给小美的判断");
+    expect(detail).not.toContain("这一版还没有评估");
     // 反向：那三条写死的结论不许回来。
     expect(detail).not.toContain("你的组合满足硬条件");
     expect(detail).not.toContain("不建议低于预算");

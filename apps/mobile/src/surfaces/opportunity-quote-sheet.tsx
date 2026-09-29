@@ -7,11 +7,11 @@
 // 和"想好金额"之间来回切, 而且报价区的"参考区间 / 私密度声明 / 锚定说明"
 // 都没有地方放。
 //
-// 这里钉的:
+// 这里钉的（文案越少越好：只留出价所需的信息）:
   //   · 输入用 K VND(prototype 同款), 不直接堆 6 位数 ——
  //     prototype 是「120」+「K VND」两段, 不是 120000。
-//   · 顶部明确写「这不是你的固定价格」—— 参考区间只供锚定, 不能让报价 UI
-//     看起来像是在定一个长期价。
+//   · 参考区间行只带「仅供参考」四个字 —— 区间只供锚定, 不是长期价; 不再
+//     在页面上重复解释（长说明没人读, 还挤掉了输入框）。
 //   · 三个预设从参考区间内插 (low/mid/high), 用户不点预设也要落到 mid。
 
 import { useMemo, useState } from "react";
@@ -24,7 +24,6 @@ import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 export type QuoteSheetOpportunity = {
   id: string;
-  title: string;
   // price 是客户预算的原串(可能含 ₫ / 逗号 / TBD), 服务端权威, client 只解析。
   price: string;
   desc?: string;
@@ -100,25 +99,20 @@ export function OpportunityQuoteSheet(props: OpportunityQuoteSheetProps): React.
         </View>
 
         <View style={styles.body}>
-          <Text selectable style={styles.kicker}>{typeLabel.sub.toUpperCase()} · {hasRange ? `${fairLowK}–${fairHighK}K` : "费用待面谈"}</Text>
-          <Text selectable style={styles.title}>为这一类订单提交你的报价</Text>
-          <View style={styles.divider} />
-
           <View style={styles.typeRow}>
             <MarketTypeLogo type={type} size="FILTER" />
             <View style={styles.typeMeta}>
-              <Text selectable style={styles.typeMetaLabel}>订单类型</Text>
               <Text selectable style={styles.typeMetaTitle}>{typeLabel.label}</Text>
+              {contextLine ? <Text selectable style={styles.context}>{contextLine}</Text> : null}
             </View>
           </View>
 
-          {contextLine ? <Text selectable style={styles.context}>{contextLine}</Text> : null}
-
-          <View style={styles.rangeRow}>
-            <Text selectable style={styles.rangeLabel}>当前参考区间</Text>
-            <Text selectable style={styles.rangeValue}>{hasRange ? `${fairLowK}–${fairHighK}K` : "—"}</Text>
-            {hasRange ? <Text selectable style={styles.rangeNote}>可协商</Text> : null}
-          </View>
+          {hasRange ? (
+            <View style={styles.rangeRow}>
+              <Text selectable style={styles.rangeLabel}>参考区间（仅供参考）</Text>
+              <Text selectable style={styles.rangeValue}>{`${fairLowK}–${fairHighK}K`}</Text>
+            </View>
+          ) : null}
 
           <View style={[styles.bigInput, error && styles.bigInputError]}>
             <TextInput
@@ -137,7 +131,6 @@ export function OpportunityQuoteSheet(props: OpportunityQuoteSheetProps): React.
             />
             <Text selectable style={styles.bigInputUnit}>K VND</Text>
           </View>
-          <Text selectable style={styles.private}>你的报价是私密的 · 客户可接受或继续协商</Text>
 
           {presets.length === 3 ? (
             <View style={styles.presetRow}>
@@ -152,10 +145,8 @@ export function OpportunityQuoteSheet(props: OpportunityQuoteSheetProps): React.
           {error ? <Text selectable style={styles.error}>{error}</Text> : null}
 
           <Pressable disabled={busy} onPress={submit} style={[styles.submit, busy && styles.submitBusy]}>
-            <Text selectable style={styles.submitText}>{busy ? "提交中…" : "提交报名"}</Text>
+            <Text selectable style={styles.submitText}>{busy ? "提交中…" : "提交报价"}</Text>
           </Pressable>
-
-          <Text selectable style={styles.foot}>参考区间只供你锚定, 不是固定价格, 你可以在合理范围内自行报价, Proxy 只在后台做极异常筛查(异常报价)。</Text>
         </View>
       </View>
     </Modal>
@@ -169,23 +160,17 @@ const styles = StyleSheet.create({
   headTitle: { color: color.ink, flex: 1, fontSize: 16, fontWeight: "800", textAlign: "center" },
   headSpacer: { width: 32 },
   body: { paddingHorizontal: 18, paddingTop: 6 },
-  kicker: { color: "#AAA49C", fontSize: 11, fontWeight: "700", letterSpacing: 0.5, marginBottom: 4 },
-  title: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
-  divider: { backgroundColor: color.line, height: StyleSheet.hairlineWidth, marginBottom: 16, marginTop: 12 },
   typeRow: { alignItems: "center", flexDirection: "row", gap: 10, marginBottom: 16 },
   typeMeta: { flex: 1, minWidth: 0 },
-  typeMetaLabel: { color: "#AAA49C", fontSize: 10, fontWeight: "700", letterSpacing: 0.3 },
   typeMetaTitle: { color: color.ink, fontSize: 13, fontWeight: "800", lineHeight: 17, marginTop: 2 },
   context: { color: "#8F8A82", fontSize: 11, lineHeight: 16, marginBottom: 14 },
   rangeRow: { alignItems: "center", flexDirection: "row", marginBottom: 12 },
   rangeLabel: { color: "#AAA49C", flex: 1, fontSize: 11, fontWeight: "700", letterSpacing: 0.3 },
   rangeValue: { color: color.ink, fontSize: 13, fontWeight: "800" },
-  rangeNote: { color: "#8F8A82", fontSize: 11, marginLeft: 8 },
   bigInput: { alignItems: "center", borderColor: color.line, borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 4, minHeight: 84, paddingHorizontal: 16 },
   bigInputError: { borderColor: "#A32D2D" },
   bigInputField: { color: color.ink, fontSize: 42, fontWeight: "900", minWidth: 80, paddingVertical: 12, textAlign: "right" },
   bigInputUnit: { color: "#7A7570", fontSize: 13, fontWeight: "800" },
-  private: { color: "#8F8A82", fontSize: 11, lineHeight: 16, marginTop: 8, textAlign: "center" },
   presetRow: { flexDirection: "row", gap: 10, marginTop: 18 },
   preset: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, flex: 1, paddingVertical: 12 },
   presetOn: { backgroundColor: "#F1ECE3", borderColor: "#1F1B16" },
@@ -195,5 +180,4 @@ const styles = StyleSheet.create({
   submit: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, marginTop: 22, paddingVertical: 14 },
   submitBusy: { opacity: 0.6 },
   submitText: { color: color.white, fontSize: 14, fontWeight: "900" },
-  foot: { color: "#8F8A82", fontSize: 11, lineHeight: 17, marginTop: 12 },
 });

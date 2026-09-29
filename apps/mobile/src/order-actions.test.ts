@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FulfillmentOrder } from "./fulfillment-client";
-import { auditLines, buildTermChange, canCancelOrder, canConfirmCooperation, canProposeTermChange, isMyProposal, pendingTermChange, settlementView, termChangeFormFrom, termDiff } from "./order-actions";
+import { auditLines, buildTermChange, canCancelOrder, canConfirmCooperation, canProposeTermChange, isMyProposal, pendingTermChange, settlementLabel, settlementView, termChangeFormFrom, termDiff } from "./order-actions";
 
 function order(overrides: Partial<FulfillmentOrder>): FulfillmentOrder {
   return {
@@ -77,5 +77,15 @@ describe("ORDER-AMEND-UI-001 / ORDER-AUDIT-UI-001 order changes and history", ()
       ["对方", "确认合作", "待确认 → 已确认"],
       ["平台", "平台更正：ticket-42", "已确认 → 已取消"],
     ]);
+  });
+});
+
+// ORDER-FLOW-COPY-001：订单页以前把 DIRECT_SETTLEMENT / PLATFORM_PAY 原样印给用户。
+describe("ORDER-FLOW-COPY-001 settlement label", () => {
+  it("shows people-language for known modes and never a raw enum", () => {
+    expect(settlementLabel("DIRECT_SETTLEMENT")).toBe("线下直接结算");
+    expect(settlementLabel("PLATFORM_PAY")).toBe("平台担保支付");
+    expect(settlementLabel("")).toBe("待确认");
+    expect(settlementLabel(undefined)).toBe("待确认");
   });
 });

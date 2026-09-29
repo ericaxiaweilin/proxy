@@ -1646,6 +1646,13 @@ if ! grep -qF 'enforceDBRolePosture(ctx, pool)' apps/api-go/cmd/api/main.go ||
 fi
 echo "    PUBLIC-NO-LOOKUP-001/PUBLIC-NO-LOOKUP-AUDIT-001/PUBLIC-NO-LOOKUP-GATE-001/ORDER-BREAKGLASS-ROLE-001/AUDIT-PRIVILEGE-001/DB-ROLE-POSTURE-001: PASS"
 
+# 第六轮（2026-09-29，用户「下单接单的流程 还有页面很多废话 一起修改优化」）。
+# ORDER-FLOW-COPY-001: 下单 / 接单 / 订单页不许再印开发口吻（「报价 UI 不在这屏」「活动读模型」）、
+# 复述页面上已有内容的说明盒、不真实的说明（对线下结算单写「平台托管付款」）和结算方式原始枚举；
+# 到场登记一个输入一次点击。
+pnpm --dir apps/mobile exec vitest run src/order-flow-copy.test.ts src/order-actions.test.ts src/market-fake-judgment.test.ts >/dev/null || exit $?
+echo "    ORDER-FLOW-COPY-001: PASS"
+
 # LINES-EDITOR-001: the server has had UpsertStoreLines
 # since R18.x b77187a, but the storefront surface was
 # read-only: business owners saw their old lines but had
@@ -7752,8 +7759,10 @@ echo "    SUBPAGE-GENERIC-FABRICATED-001: PASS (no generic sub-page renders an i
     echo "  FAIL [MARKET-FAKE-JUDGMENT-001]: 详情页又在拿匹配度造句" >&2
     exit 1
   fi
-  if ! grep -q '这一版还没有评估' apps/mobile/src/surfaces/market.tsx; then
-    echo "  FAIL [MARKET-FAKE-JUDGMENT-001]: 判断区没有如实说明" >&2
+  # ORDER-FLOW-COPY-001：判断区整块删除（原先要求留一句「这一版还没有评估」，那句本身就是
+  # 废话）。守门改为反向：三条写死的结论、判断区标题都不许回来。
+  if grep -qE '你的组合满足硬条件|不建议低于预算|值得考虑|给小美的判断' apps/mobile/src/surfaces/market.tsx; then
+    echo "  FAIL [MARKET-FAKE-JUDGMENT-001]: 判断区又回来了（写死的结论或空盒）" >&2
     exit 1
   fi
   echo "  PASS [MARKET-FAKE-JUDGMENT-001]: no fabricated match score or verification badge"

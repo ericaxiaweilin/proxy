@@ -8,6 +8,13 @@ export function canConfirmCooperation(order: FulfillmentOrder): boolean {
   return order.lifecycle === "OFFERED" && order.viewerRole === "AGENT";
 }
 
+// 结算方式给人看的名字。以前订单页直接把 DIRECT_SETTLEMENT / PLATFORM_PAY 原样印给用户。
+export function settlementLabel(mode: string | undefined): string {
+  if (mode === "DIRECT_SETTLEMENT") return "线下直接结算";
+  if (mode === "PLATFORM_PAY") return "平台担保支付";
+  return mode || "待确认";
+}
+
 export type SettlementView = {
   // 我这一侧（需求方 = 付款方，服务方 = 收款方）是否已确认。
   mineConfirmed: boolean;

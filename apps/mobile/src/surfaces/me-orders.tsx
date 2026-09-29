@@ -6,7 +6,7 @@ import { ActivityClient, ActivityCommandRejectedError } from "../activity-client
 import type { BusinessClient } from "../business-client";
 import { loadStoreOptions, type StoreOption } from "../my-store-options";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
-import { auditLines, buildTermChange, canCancelOrder, canChangePrice, canConfirmCooperation, canProposeTermChange, isMyProposal, pendingTermChange, settlementView, termChangeFormFrom, termDiff, type AuditLine, type TermChangeForm } from "../order-actions";
+import { auditLines, buildTermChange, canCancelOrder, canChangePrice, canConfirmCooperation, canProposeTermChange, isMyProposal, pendingTermChange, settlementLabel, settlementView, termChangeFormFrom, termDiff, type AuditLine, type TermChangeForm } from "../order-actions";
 import type { MediaClient } from "../media-client";
 import type { ModerationClient } from "../moderation-client";
 import { ReportSheet } from "../components/report-sheet";
@@ -76,7 +76,6 @@ function ProviderOrderPanel({ onOpenApply }: { onOpenApply?: (() => void) | unde
           </View>
         ))}
       </View>
-      <Text selectable style={[styles.orderFieldLabel, { marginTop: 10 }]}>按约完成率只算你自己取消的单；客户取消不算你违约。投诉记录不含已驳回的。</Text>
     </View>
   );
 }
@@ -112,7 +111,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
   }, [client]);
   useEffect(() => { const cleanup = reload(); return cleanup; }, [reload]);
   const visible = orders.filter((order) => filter === "all" || filter === "published" && order.viewerRole === "REQUESTER" || filter === "joined" && order.viewerRole === "AGENT" || filter === "done" && order.lifecycle === "COMPLETED" || filter === "cancelled" && order.lifecycle === "CANCELLED");
-  const fields = (order: FulfillmentOrder): Array<[string,string]> => [["服务", order.snapshot.serviceSku || order.needId], ["金额", orderMoney(order)], ["时间", order.snapshot.startTime || "待确认"], ["地点", order.snapshot.meetingContext || "待确认"], ["时长", order.snapshot.duration || "待确认"], ["结算", order.snapshot.settlementMode || "待确认"]];
+  const fields = (order: FulfillmentOrder): Array<[string,string]> => [["服务", order.snapshot.serviceSku || order.needId], ["金额", orderMoney(order)], ["时间", order.snapshot.startTime || "待确认"], ["地点", order.snapshot.meetingContext || "待确认"], ["时长", order.snapshot.duration || "待确认"], ["结算", settlementLabel(order.snapshot.settlementMode)]];
 
   // R18.x CANCEL-001: confirmation prompt + non-fatal
   // server error surfacing. The cancel command mutates the
@@ -125,7 +124,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
     const confirm = await new Promise<boolean>((resolve) => {
       Alert.alert(
         "取消订单？",
-        `${order.snapshot.serviceSku || "Proxy 订单"} · 订单编号 ${displayOrderNo(order)}\n\n取消后不可恢复，双方结算状态以实际协商为准。`,
+        `${order.snapshot.serviceSku || "Proxy 订单"} · ${displayOrderNo(order)}\n\n取消后不能恢复。`,
         [
           { text: "再想想", style: "cancel", onPress: () => resolve(false) },
           { text: "确认取消", style: "destructive", onPress: () => resolve(true) },
@@ -161,7 +160,6 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
   // 成功后重拉列表并同步明细；服务端拒绝码翻译成人话，不直接展示。
   const [acting, setActing] = useState<string | undefined>(undefined);
   const [actError, setActError] = useState<string | undefined>(undefined);
-  const [checkinMarket, setCheckinMarket] = useState("");
   const [checkinPlace, setCheckinPlace] = useState("");
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   const [outcomeOnTime, setOutcomeOnTime] = useState(true);
@@ -324,10 +322,8 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
               </View>
               <Text selectable style={[styles.orderBadge, detail.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(detail)}</Text>
             </View>
-            <Text selectable style={styles.orderNotice}>订单编号是订单全生命周期的唯一识别号，用于支付、退款、客服、争议、结算和记录查询。</Text>
           </View>
           <View style={styles.orderCard}>
-            <Text selectable style={styles.orderTitle}>服务信息</Text>
             <View style={styles.orderGrid}>
               {fields(detail).map(([label, value]) => (
                 <View key={label} style={styles.orderField}>
@@ -341,7 +337,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
               这里只做"该出的出"（不该出的不摆假按钮），拒绝码翻人话。 */}
           {/* ORDER-CONFIRM-AGENT-001：确认合作是服务方的同意，需求方只看到等待。 */}
           {detail.lifecycle === "OFFERED" && !canConfirmCooperation(detail) ? (
-            <Text selectable style={styles.orderNotice}>等待服务方确认合作。</Text>
+            <Text selectable style={styles.orderNotice}>等对方确认合作。</Text>
           ) : null}
           {canConfirmCooperation(detail) ? (
             <Pressable
@@ -356,10 +352,6 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
           {detail.lifecycle === "CONFIRMED" && !isSmallOrder ? (
             <View style={styles.orderCard}>
               <Text selectable style={styles.orderTitle}>到场</Text>
-              {/* 消费场景（PRD Ch11）：到场是信任锚 —— agent 到场举证，requester 也可
-                  按"对方已到场"确认。开工是另一个节拍，服务端保留 StartExecution
-                  能力，UI 只给出场这一条路，步骤不翻倍。 */}
-              <Text selectable style={styles.orderFieldLabel}>碰面地点（默认快照里的地点）</Text>
               <TextInput
                 value={checkinPlace}
                 onChangeText={setCheckinPlace}
@@ -368,18 +360,9 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
                 style={styles.actInput}
                 accessibilityLabel="碰面地点"
               />
-              <Text selectable style={styles.orderFieldLabel}>市场 / 商场名</Text>
-              <TextInput
-                value={checkinMarket}
-                onChangeText={setCheckinMarket}
-                placeholder="如 Complex 01"
-                placeholderTextColor={color.muted}
-                style={styles.actInput}
-                accessibilityLabel="市场编号"
-              />
               <Pressable
-                disabled={acting !== undefined || checkinMarket.trim() === ""}
-                onPress={() => void runOrderAction("到场", detail.orderId, () => client.checkInOrder(detail.orderId, { marketId: checkinMarket.trim(), locationLabel: checkinPlace.trim() || checkinMarket.trim() }))}
+                disabled={acting !== undefined || checkinPlace.trim() === ""}
+                onPress={() => void runOrderAction("到场", detail.orderId, () => client.checkInOrder(detail.orderId, { marketId: checkinPlace.trim(), locationLabel: checkinPlace.trim() }))}
                 style={actBtn}
                 accessibilityLabel="确认到场"
               >
@@ -400,7 +383,6 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
                   <Text selectable style={actBtnText}>{outcomePhoto ? "✓ 已选一张证据照片" : "附证据照片（可选）"}</Text>
                 </Pressable>
               ) : null}
-              <Text selectable style={styles.orderFieldLabel}>准时和范围如实勾选，有话写在说明里</Text>
               <View style={styles.actRow}>
                 <Pressable onPress={() => setOutcomeOnTime((v) => !v)} style={[styles.actChip, outcomeOnTime && styles.actChipOn]} accessibilityLabel="是否准时">
                   <Text selectable style={styles.actChipText}>{outcomeOnTime ? "✓ 准时" : "未准时"}</Text>

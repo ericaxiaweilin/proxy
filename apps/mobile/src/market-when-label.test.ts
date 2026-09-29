@@ -114,8 +114,9 @@ describe("MARKET-HISTORY-CELL-001 / MARKET-FAIR-RANGE-CLAIM-001", () => {
 
   it("no longer asserts a fairness range the platform never computed", () => {
     expect(detail).not.toContain("客户预算落在 Proxy 公平区间内");
-    // 有真区间才说区间，没有就说没有 —— 标题也不许承诺一个不给的区间。
-    expect(detail).toContain('fairRange ? "参考报价区间" : "报价说明"');
+    // 区间只在价格条里、且只在发布方真填了两框时出现；不再另开一个长说明盒。
+    expect(detail).not.toContain("报价说明");
+    expect(detail).toContain("{opportunity.moneyFlow !== \"TBD\" && opportunity.moneyFlow !== \"FREE\" && fairRange ? (");
   });
 });
 
