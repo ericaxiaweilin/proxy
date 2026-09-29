@@ -49,11 +49,11 @@ func (r *FulfillmentRepository) EnsureOrder(ctx context.Context, order fulfillme
 		tag, err := tx.Exec(txCtx, `
 			INSERT INTO fulfillment.orders (
 				id, requester_id, agent_id, need_id, lifecycle, version,
-				snapshot, amendments, settlement, outcome, created_at, updated_at, store_id
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+				snapshot, amendments, settlement, outcome, created_at, updated_at, store_id, order_no
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 			ON CONFLICT (id) DO NOTHING`,
 			order.ID, order.RequesterID, order.AgentID, order.NeedID, order.Lifecycle, order.Version,
-			snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, order.StoreID)
+			snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, order.StoreID, nullableText(order.OrderNo))
 		if err != nil {
 			return err
 		}
@@ -111,10 +111,10 @@ func insertOrder(ctx context.Context, execer interface {
 	_, err = execer.Exec(ctx, `
 		INSERT INTO fulfillment.orders (
 			id, requester_id, agent_id, need_id, lifecycle, version,
-			snapshot, amendments, settlement, outcome, created_at, updated_at, store_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+			snapshot, amendments, settlement, outcome, created_at, updated_at, store_id, order_no
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		order.ID, order.RequesterID, order.AgentID, order.NeedID, order.Lifecycle, order.Version,
-		snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, order.StoreID,
+		snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, order.StoreID, nullableText(order.OrderNo),
 	)
 	return err
 }
@@ -144,11 +144,11 @@ func (r *FulfillmentRepository) GetOrder(ctx context.Context, id string) (fulfil
 	var snapshot, amendments, settlement, outcome []byte
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
 		SELECT id, requester_id, agent_id, need_id, lifecycle, version,
-		       snapshot, amendments, settlement, outcome, created_at, updated_at, store_id
+		       snapshot, amendments, settlement, outcome, created_at, updated_at, store_id, COALESCE(order_no, '')
 		FROM fulfillment.orders
 		WHERE id = $1`, id).Scan(
 		&order.ID, &order.RequesterID, &order.AgentID, &order.NeedID, &order.Lifecycle, &order.Version,
-		&snapshot, &amendments, &settlement, &outcome, &order.CreatedAt, &order.UpdatedAt, &order.StoreID,
+		&snapshot, &amendments, &settlement, &outcome, &order.CreatedAt, &order.UpdatedAt, &order.StoreID, &order.OrderNo,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fulfillment.Order{}, fulfillment.ErrOrderNotFound
@@ -383,9 +383,9 @@ func (r *FulfillmentRepository) AcceptOfferAndCreateOrder(ctx context.Context, o
 		// 否则 uq_orders_slot_active（WHERE slot_id IS NOT NULL）会把第二个
 		// 主题订单当成"同一个档位卖两次"拒掉。档位订单恒有非空 slot，行为不变。
 		if _, err := tx.Exec(txCtx, `
-			INSERT INTO fulfillment.orders (id, requester_id, agent_id, need_id, lifecycle, version, snapshot, amendments, settlement, outcome, created_at, updated_at, task_id, slot_id, offer_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-			order.ID, order.RequesterID, order.AgentID, order.NeedID, order.Lifecycle, order.Version, snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, nullableText(offer.TaskID), nullableText(offer.SlotID), offer.ID,
+			INSERT INTO fulfillment.orders (id, requester_id, agent_id, need_id, lifecycle, version, snapshot, amendments, settlement, outcome, created_at, updated_at, task_id, slot_id, offer_id, order_no)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+			order.ID, order.RequesterID, order.AgentID, order.NeedID, order.Lifecycle, order.Version, snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, nullableText(offer.TaskID), nullableText(offer.SlotID), offer.ID, nullableText(order.OrderNo),
 		); err != nil {
 			// unique violation on slot -> slot unavailable
 			if isUniqueViolation(err) {
@@ -413,7 +413,7 @@ func isUniqueViolation(err error) bool {
 func (r *FulfillmentRepository) Snapshot(ctx context.Context) ([]fulfillment.Order, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT id, requester_id, agent_id, need_id, lifecycle, version,
-		       snapshot, amendments, settlement, outcome, created_at, updated_at, store_id
+		       snapshot, amendments, settlement, outcome, created_at, updated_at, store_id, COALESCE(order_no, '')
 		FROM fulfillment.orders
 		ORDER BY created_at DESC`)
 	if err != nil {
@@ -427,7 +427,7 @@ func (r *FulfillmentRepository) Snapshot(ctx context.Context) ([]fulfillment.Ord
 		var snapshot, amendments, settlement, outcome []byte
 		if err := rows.Scan(
 			&order.ID, &order.RequesterID, &order.AgentID, &order.NeedID, &order.Lifecycle, &order.Version,
-			&snapshot, &amendments, &settlement, &outcome, &order.CreatedAt, &order.UpdatedAt, &order.StoreID,
+			&snapshot, &amendments, &settlement, &outcome, &order.CreatedAt, &order.UpdatedAt, &order.StoreID, &order.OrderNo,
 		); err != nil {
 			return nil, err
 		}
@@ -462,7 +462,7 @@ func (r *FulfillmentRepository) ListOrdersByStore(ctx context.Context, storeID s
 	}
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT id, requester_id, agent_id, need_id, lifecycle, version,
-		       snapshot, amendments, settlement, outcome, created_at, updated_at, store_id
+		       snapshot, amendments, settlement, outcome, created_at, updated_at, store_id, COALESCE(order_no, '')
 		FROM fulfillment.orders
 		WHERE store_id = $1
 		ORDER BY created_at DESC`, storeID)
@@ -477,7 +477,7 @@ func (r *FulfillmentRepository) ListOrdersByStore(ctx context.Context, storeID s
 		var snapshot, amendments, settlement, outcome []byte
 		if err := rows.Scan(
 			&order.ID, &order.RequesterID, &order.AgentID, &order.NeedID, &order.Lifecycle, &order.Version,
-			&snapshot, &amendments, &settlement, &outcome, &order.CreatedAt, &order.UpdatedAt, &order.StoreID,
+			&snapshot, &amendments, &settlement, &outcome, &order.CreatedAt, &order.UpdatedAt, &order.StoreID, &order.OrderNo,
 		); err != nil {
 			return nil, err
 		}

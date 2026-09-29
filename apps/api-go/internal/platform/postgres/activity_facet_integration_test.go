@@ -83,16 +83,16 @@ func TestActivityPostgresLifecycle(t *testing.T) {
 	}
 
 	// 3. Join rules: first ok, duplicate rejected, full at capacity.
-	if _, err := repo.Join(ctx, id, actor); err != nil {
+	if _, _, err := repo.Join(ctx, id, actor, ""); err != nil {
 		t.Fatalf("Join first: %v", err)
 	}
-	if _, err := repo.Join(ctx, id, actor); err != activity.ErrAlreadyJoined {
+	if _, _, err := repo.Join(ctx, id, actor, ""); err != activity.ErrAlreadyJoined {
 		t.Fatalf("Join duplicate must be ErrAlreadyJoined, got %v", err)
 	}
-	if _, err := repo.Join(ctx, id, actor2); err != nil {
+	if _, _, err := repo.Join(ctx, id, actor2, ""); err != nil {
 		t.Fatalf("Join second: %v", err)
 	}
-	if _, err := repo.Join(ctx, id, "user_act_c_"+itoa(run)); err != activity.ErrActivityFull {
+	if _, _, err := repo.Join(ctx, id, "user_act_c_"+itoa(run), ""); err != activity.ErrActivityFull {
 		t.Fatalf("Join at capacity must be ErrActivityFull, got %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestActivityPostgresLifecycle(t *testing.T) {
 	if _, _, err := repo.ToggleInterest(ctx, "act_pg_missing_"+itoa(run), actor); err != activity.ErrActivityNotFound {
 		t.Fatalf("ToggleInterest missing must be ErrActivityNotFound, got %v", err)
 	}
-	if _, err := repo.Join(ctx, "act_pg_missing_"+itoa(run), actor); err != activity.ErrActivityNotFound {
+	if _, _, err := repo.Join(ctx, "act_pg_missing_"+itoa(run), actor, ""); err != activity.ErrActivityNotFound {
 		t.Fatalf("Join missing must be ErrActivityNotFound, got %v", err)
 	}
 

@@ -7,19 +7,20 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/event"
+	"github.com/proxy-app/proxy-api/internal/ordernumber"
 )
 
 // ORDER-MATERIALIZE-AUDIT-001：市场 / 场景物化的 CONFIRMED 订单以前不评估现金资格，
 // 也不发任何订单事件。现在走同一个构造器：超限拒绝、出生事件只在首次插入时发布。
 func TestMaterializedOrderGatesCashAndPublishesOnce(t *testing.T) {
 	now := time.Now()
-	if _, err := MaterializedOrder("ord_big", "req", "agent", "scene_1", OrderSnapshot{AgreedCompensation: 9000000}, now); !errors.Is(err, ErrCashEligibility) {
+	if _, err := MaterializedOrder("ord_big", testOrderNo, "req", "agent", "scene_1", OrderSnapshot{AgreedCompensation: 9000000}, now); !errors.Is(err, ErrCashEligibility) {
 		t.Fatalf("above the cash pilot limit must be ErrCashEligibility, got %v", err)
 	}
-	if _, err := MaterializedOrder("ord_self", "same", "same", "scene_1", OrderSnapshot{}, now); err == nil {
+	if _, err := MaterializedOrder("ord_self", testOrderNo, "same", "same", "scene_1", OrderSnapshot{}, now); err == nil {
 		t.Fatal("an order needs two distinct parties")
 	}
-	order, err := MaterializedOrder("ord_ok", "req", "agent", "scene_1", OrderSnapshot{AgreedCompensation: 150000}, now)
+	order, err := MaterializedOrder("ord_ok", testOrderNo, "req", "agent", "scene_1", OrderSnapshot{AgreedCompensation: 150000}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,3 +66,5 @@ func TestCancelledSlotOrderReleasesSlot(t *testing.T) {
 		t.Fatalf("a cancelled order must release its slot, got %+v", r.Error)
 	}
 }
+
+var testOrderNo = ordernumber.Format(42, time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC))

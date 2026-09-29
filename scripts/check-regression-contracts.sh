@@ -1507,6 +1507,41 @@ if ! grep -qF 'CREATE TRIGGER orders_guard' apps/api-go/migrations/135_order_aud
 fi
 echo "    ORDER-FSM-001/ORDER-AMEND-001/ORDER-STORE-STATS-AUTHZ-001/ORDER-SLOT-OWNER-001/ORDER-MATERIALIZE-AUDIT-001/ORDER-SLOT-RELEASE-001/POLICY-STAMP-DURABLE-001/ORDER-AUDIT-001: PASS"
 
+# 订单编号与 For You 可用插槽（2026-09-29，用户：「for you 的新订单编号没有用上……点击圆圈就是
+# 刷新全部可用插槽……插槽资源冲突……编号更新全数字」）。
+# ORDER-NO-001: 全数字订单编号（yyMMdd + 全局序号 + Luhn），履约订单与活动报名共用一个分配器。
+require_test "ORDER-NO-001" "./internal/ordernumber" \
+  "TestOrderNumberFormatAndUniqueness" \
+  "apps/api-go/internal/ordernumber/ordernumber_test.go" || exit $?
+require_test "ORDER-NO-001" "./internal/fulfillment" \
+  "TestEveryOrderGetsAnAllDigitOrderNumber" \
+  "apps/api-go/internal/fulfillment/order_number_test.go" || exit $?
+# ACT-ORDER-NO-001 / ACT-SEAT-RELEASE-001: 报名有自己的编号；取消释放名额，再报名沿用原编号。
+require_test "ACT-ORDER-NO-001" "./internal/activity" \
+  "TestJoinReturnsOwnAllDigitOrderNumber" \
+  "apps/api-go/internal/activity/participation_order_test.go" || exit $?
+require_test "ACT-SEAT-RELEASE-001" "./internal/activity" \
+  "TestCancelReleasesSeatAndRejoinKeepsNumber" \
+  "apps/api-go/internal/activity/participation_order_test.go" || exit $?
+# ACT-PARTICIPATION-DURABLE-001 / ORDER-NO-001（Postgres；没有库时 SKIP）。
+for number_test in TestOrderNumberSQLMatchesGo TestParticipationDurableSeatReleasePostgres TestFulfillmentOrderNumberPersistedAndImmutablePostgres \
+  TestPostgresBackedServicesDefaultToSharedSequence; do
+  require_test "ACT-PARTICIPATION-DURABLE-001/ORDER-NO-001" "./internal/platform/postgres" "$number_test" \
+    "apps/api-go/internal/platform/postgres/order_number_integration_test.go" || exit $?
+done
+if grep -qF 'NewParticipationStore' apps/api-go/internal/activity/*.go; then
+  echo "  FAIL [ACT-PARTICIPATION-DURABLE-001]: 报名状态又回到进程内存了（重启即丢、取消不释放名额）。" >&2
+  exit 1
+fi
+if ! grep -qF 'activityService.SetOrderNumbers(orderNumbers)' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'fulfillmentService.WithOrderNumbers(orderNumbers)' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [ORDER-NO-001]: 履约与活动必须共用同一个订单编号分配器。" >&2
+  exit 1
+fi
+# HOME-FORYOU-REFRESH-001 / HOME-FORYOU-ORDER-005（移动端纯逻辑 + 契约不剥字段）。
+pnpm --dir apps/mobile exec vitest run src/for-you-slots.test.ts src/for-you-order-number.test.ts >/dev/null || exit $?
+echo "    ORDER-NO-001/ACT-ORDER-NO-001/ACT-SEAT-RELEASE-001/ACT-PARTICIPATION-DURABLE-001/HOME-FORYOU-REFRESH-001: PASS"
+
 # LINES-EDITOR-001: the server has had UpsertStoreLines
 # since R18.x b77187a, but the storefront surface was
 # read-only: business owners saw their old lines but had

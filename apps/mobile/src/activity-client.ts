@@ -1,6 +1,6 @@
 // Activity 客户端：活动读模型（ListActivities）+ 感兴趣/参加命令。
 // 计数服务端权威；operationRef 承载 payload（zod 校验，fail-closed）。
-import type { Activity, CommandResult, ListMyActivitiesPayload } from "@proxy/contracts";
+import type { Activity, CommandResult, JoinActivityPayload, ListMyActivitiesPayload } from "@proxy/contracts";
 import { ActivitySchema, JoinActivityPayloadSchema, ListActivitiesPayloadSchema, ListMyActivitiesPayloadSchema, ToggleActivityInterestPayloadSchema } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
@@ -80,6 +80,15 @@ export function describeJoinError(error: unknown): string {
   return "网络异常，请检查连接后重试";
 }
 
+// ACT-ORDER-NO-001 / HOME-FORYOU-ORDER-004：这单之前就下过（ACTIVITY_ALREADY_JOINED）
+// 时，服务端在 safeDetails.orderNo 里回传既有编号 —— 票本来就在你手上，照样显示。
+export function orderNoFromJoinRejection(error: unknown): string | undefined {
+  if (!(error instanceof ActivityCommandRejectedError)) return undefined;
+  if (error.result.error?.errorCode !== "ACTIVITY_ALREADY_JOINED") return undefined;
+  const orderNo = error.result.error.safeDetails?.["orderNo"];
+  return typeof orderNo === "string" && /^[0-9]{16,}$/.test(orderNo) ? orderNo : undefined;
+}
+
 export class ActivityClient {
   private commandSequence = 0;
 
@@ -109,7 +118,8 @@ export class ActivityClient {
     return ToggleActivityInterestPayloadSchema.parse(this.decodeOperationRef(result));
   }
 
-  public async join(activityId: string): Promise<{ activity: Activity }> {
+  // ACT-ORDER-NO-001：返回里带 participation（含这笔报名自己的全数字订单编号）。
+  public async join(activityId: string): Promise<JoinActivityPayload> {
     const session = await this.requireSession();
     const result = await this.sendCommand(session, "JoinActivity", { type: "Activity", id: activityId }, { activityId });
     return JoinActivityPayloadSchema.parse(this.decodeOperationRef(result));

@@ -258,7 +258,11 @@ func TestMaterializedOrderEventOnceAndAuditTrailPostgres(t *testing.T) {
 	run := itoa(time.Now().UnixNano())
 	cleanupRunOutbox(t, pool, run)
 	repo := NewFulfillmentRepositoryWithOutbox(pool, NewOutboxRepository(pool))
-	order, err := fulfillment.MaterializedOrder("ord_inv_mat_"+run, "user_mat_req_"+run, "user_mat_agent_"+run, "scene_"+run, fulfillment.OrderSnapshot{AgreedCompensation: 150000}, time.Now())
+	orderNo, err := NewOrderNumberAllocator(pool).Next(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, err := fulfillment.MaterializedOrder("ord_inv_mat_"+run, orderNo, "user_mat_req_"+run, "user_mat_agent_"+run, "scene_"+run, fulfillment.OrderSnapshot{AgreedCompensation: 150000}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

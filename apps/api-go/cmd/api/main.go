@@ -32,6 +32,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
+	"github.com/proxy-app/proxy-api/internal/ordernumber"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
@@ -331,7 +332,15 @@ func main() {
 	}
 	// Wire after the optional PostgreSQL replacements. Wiring before this block
 	// leaves marketplace pointing at the discarded in-memory fulfillment repo.
-	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository()})
+	// ORDER-NO-001：全数字订单编号只有一个分配器 —— 履约订单、跨域物化订单、
+	// 活动报名共用，保证不同类型的订单之间也不撞号。有库用 Postgres 序列。
+	var orderNumbers ordernumber.Allocator = ordernumber.NewMemory()
+	if pool != nil {
+		orderNumbers = postgres.NewOrderNumberAllocator(pool)
+	}
+	fulfillmentService.WithOrderNumbers(orderNumbers)
+	activityService.SetOrderNumbers(orderNumbers)
+	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository(), numbers: orderNumbers})
 	// STORE-STATS-001：RecordOutcome 归因校验 —— 必须是真实存在的 ACTIVE 店。
 	// 跟 SetOrderCreator 一样，必须在 PG 替换之后接（否则接到被丢弃的内存实例上）。
 	// 无库模式不接（SetStoreLookup nil = 不校验，测试/内存行为不变）。
@@ -390,7 +399,7 @@ func main() {
 	// FEED-REPLY-001: comments resolve the author name from the profile too —
 	// otherwise the feed can only render the raw account id.
 	engagementService.SetAuthorNameResolver(authorNames)
-	sceneService.SetInvitationOrderCreator(sceneFulfillmentAdapter{repo: fulfillmentService.Repository()})
+	sceneService.SetInvitationOrderCreator(sceneFulfillmentAdapter{repo: fulfillmentService.Repository(), numbers: fulfillmentService.OrderNumbers()})
 	databaseReadyCheck := readyCheck
 	readyCheck = func(ctx context.Context) error {
 		if databaseReadyCheck != nil {

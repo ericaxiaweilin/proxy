@@ -18,6 +18,7 @@ import (
 
 	"github.com/proxy-app/proxy-api/internal/aiboundary"
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/ordernumber"
 )
 
 // Activity 是本地活动（对齐基线 activityCatalog 字段）。
@@ -83,12 +84,16 @@ type Activity struct {
 
 	interestedBy map[string]bool
 	joinedBy     map[string]bool
+	// parts: 内存仓的报名记录（含已取消的，取消不删）。joinedBy 只含占座的人。
+	parts map[string]Participation
 }
 
 // Service 处理活动命令。生产使用 PostgreSQL；New() 保留内存仓储供隔离测试使用。
 type Service struct {
-	repository     Repository
-	participations *ParticipationStore
+	repository Repository
+	// orderNumbers 给每笔报名分配全数字订单编号（ACT-ORDER-NO-001）。生产由
+	// main.go 注入与履约订单共用的分配器；默认进程内计数器（开发 / 单测）。
+	orderNumbers ordernumber.Allocator
 }
 
 var (
@@ -102,7 +107,16 @@ type Repository interface {
 	Create(ctx context.Context, activity Activity) error
 	List(ctx context.Context) ([]Activity, error)
 	ToggleInterest(ctx context.Context, activityID, actorID string) (Activity, bool, error)
-	Join(ctx context.Context, activityID, actorID string) (Activity, error)
+	// Join 报名：占座 + 写报名记录（带 orderNo）同一事务。已有有效报名 ⇒ 返回既有
+	// 记录 + ErrAlreadyJoined；满员 ⇒ ErrActivityFull；之前取消过 ⇒ 重新激活同一条
+	// 记录（沿用原编号，orderNo 参数作废）。
+	Join(ctx context.Context, activityID, actorID, orderNo string) (Activity, Participation, error)
+	// GetParticipation 读报名记录；没有 ⇒ ErrNotJoined。
+	GetParticipation(ctx context.Context, activityID, actorID string) (Participation, error)
+	// TransitionParticipation 在行锁内把报名从 allowedFrom 之一改成 to；当前状态不在
+	// allowedFrom ⇒ ErrParticipationTransition（返回当前记录）。离开占座状态时
+	// 释放名额（joined - 1），同一事务（ACT-SEAT-RELEASE-001）。
+	TransitionParticipation(ctx context.Context, activityID, actorID string, allowedFrom []ParticipationState, to ParticipationState) (Participation, Activity, error)
 
 	// R17.x: “我的活动” 物化路径。
 	// ListByOwner 返回该 actor 作为 owner (Origin=USER 且 ownerId=actor) 创建的活动。
@@ -127,12 +141,18 @@ type MemoryRepository struct {
 func New() *Service {
 	return NewWithRepository(&MemoryRepository{activities: make(map[string]*Activity)})
 }
-func NewWithParticipations(repo Repository, ps *ParticipationStore) *Service {
-	return &Service{repository: repo, participations: ps}
+func NewWithRepository(repository Repository) *Service {
+	orderNumbers := ordernumber.Allocator(ordernumber.NewMemory())
+	// 持久仓储用它自己的序列分配器（与履约订单同一个序列），避免多实例从 1 发号撞号。
+	if source, ok := repository.(interface{ OrderNumbers() ordernumber.Allocator }); ok {
+		orderNumbers = source.OrderNumbers()
+	}
+	return &Service{repository: repository, orderNumbers: orderNumbers}
 }
 
-func NewWithRepository(repository Repository) *Service {
-	return &Service{repository: repository, participations: NewParticipationStore()}
+// SetOrderNumbers 接上与履约订单共用的编号分配器（ACT-ORDER-NO-001）。
+func (s *Service) SetOrderNumbers(allocator ordernumber.Allocator) {
+	s.orderNumbers = allocator
 }
 
 // FilterKnownParticipants is the public read seam realityscene.Service
@@ -406,12 +426,23 @@ func (s *Service) joinActivity(ctx context.Context, e command.Envelope) command.
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
 	}
-	a, err := s.repository.Join(ctx, p.ActivityID, e.Actor.ID)
+	if s.orderNumbers == nil {
+		return command.Rejected(e, "ORDER_NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "activity.order_number_unavailable", nil)
+	}
+	orderNo, err := s.orderNumbers.Next(ctx)
+	if err != nil {
+		return command.Rejected(e, "ORDER_NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "activity.order_number_unavailable", nil)
+	}
+	a, participation, err := s.repository.Join(ctx, p.ActivityID, e.Actor.ID, orderNo)
 	if errors.Is(err, ErrActivityNotFound) {
 		return command.Rejected(e, "ACTIVITY_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.not_found", nil)
 	}
 	if errors.Is(err, ErrAlreadyJoined) {
-		return command.Rejected(e, "ACTIVITY_ALREADY_JOINED", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.already_joined", nil)
+		// HOME-FORYOU-ORDER-004：重复下单也要拿得到自己那张票 —— 返回既有编号。
+		return command.Rejected(e, "ACTIVITY_ALREADY_JOINED", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.already_joined", map[string]any{
+			"orderNo": participation.OrderNo,
+			"state":   string(participation.State),
+		})
 	}
 	if errors.Is(err, ErrActivityFull) {
 		return command.Rejected(e, "ACTIVITY_FULL", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.full", map[string]any{"capacity": a.Capacity})
@@ -419,18 +450,15 @@ func (s *Service) joinActivity(ctx context.Context, e command.Envelope) command.
 	if err != nil {
 		return command.Rejected(e, "ACTIVITY_JOIN_FAILED", "INTERNAL", "SAFE_RETRY", "activity.join_failed", nil)
 	}
-	// ACT-ATTEND-001: 报名成功必须落 participation 记录，后续 cancel/checkin/
-	// noShow 凭它验归属。之前 Join 只改 repository 计数，participation 永远
-	// 为空 → 考勤全是假成功。
-	if s.participations != nil {
-		s.participations.Ensure(p.ActivityID, e.Actor.ID, PartConfirmed)
-	}
-	// ACT-CONTRACT-001: 同上，Join 单条返回也要 normalize。
+	// ACT-ATTEND-001: 报名记录由仓储在同一事务里写（ACT-PARTICIPATION-DURABLE-001），
+	// 后续 cancel/checkin/noShow 凭它验归属。
+	// ACT-CONTRACT-001: Join 单条返回也要 normalize。
 	normalizeActivityForOutput(&a)
 	return acceptedWithPayload(e, "Activity", a.ID, 1, "JOINED", map[string]any{
-		"activity": a,
-		"joined":   true,
-		"note":     "确认参加后开放活动群聊",
+		"activity":      a,
+		"joined":        true,
+		"participation": participation,
+		"note":          "确认参加后开放活动群聊",
 	}, nil)
 }
 
@@ -446,17 +474,15 @@ func (s *Service) cancelActivity(ctx context.Context, e command.Envelope) comman
 		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
 	}
 	// ACT-ATTEND-001: 只能取消自己报过名的活动；没记录=没报名，拒。
-	// UpdateState=false 说明记录在检查后消失（并发），按失败处理，绝不假成功。
-	if s.participations == nil {
-		return command.Rejected(e, "ACTIVITY_CANCEL_FAILED", "INTERNAL", "SAFE_RETRY", "activity.cancel_failed", nil)
+	// ACT-SEAT-RELEASE-001: 取消在行锁内释放名额；已签到 / 已取消的不能再取消
+	// （防止重复取消把别人的名额也「释放」掉）。
+	participation, a, err := s.repository.TransitionParticipation(ctx, p.ActivityID, e.Actor.ID,
+		[]ParticipationState{PartConfirmed, PartRequested, PartWaitlisted}, PartCancelled)
+	if rejected, failed := participationRejected(e, err, participation, "ACTIVITY_CANCEL_NOT_ALLOWED", "activity.cancel_not_allowed", "ACTIVITY_CANCEL_FAILED", "activity.cancel_failed"); failed {
+		return rejected
 	}
-	if _, ok := s.participations.Get(p.ActivityID, e.Actor.ID); !ok {
-		return command.Rejected(e, "ACTIVITY_NOT_JOINED", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.not_joined", nil)
-	}
-	if !s.participations.UpdateState(p.ActivityID, e.Actor.ID, PartCancelled) {
-		return command.Rejected(e, "ACTIVITY_CANCEL_FAILED", "CONCURRENCY", "SAFE_RETRY", "activity.cancel_failed", nil)
-	}
-	return acceptedWithPayload(e, "Activity", p.ActivityID, 1, "CANCELLED", map[string]any{"activityId": p.ActivityID}, nil)
+	normalizeActivityForOutput(&a)
+	return acceptedWithPayload(e, "Activity", p.ActivityID, 1, "CANCELLED", map[string]any{"activityId": p.ActivityID, "activity": a, "participation": participation}, nil)
 }
 func (s *Service) checkinActivity(ctx context.Context, e command.Envelope) command.Result {
 	if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.CheckinActivity) {
@@ -470,20 +496,11 @@ func (s *Service) checkinActivity(ctx context.Context, e command.Envelope) comma
 		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
 	}
 	// ACT-ATTEND-001: 只有 CONFIRMED（已报名且未取消）才能签到。
-	if s.participations == nil {
-		return command.Rejected(e, "ACTIVITY_CHECKIN_FAILED", "INTERNAL", "SAFE_RETRY", "activity.checkin_failed", nil)
+	participation, _, err := s.repository.TransitionParticipation(ctx, p.ActivityID, e.Actor.ID, []ParticipationState{PartConfirmed}, PartAttended)
+	if rejected, failed := participationRejected(e, err, participation, "ACTIVITY_CHECKIN_NOT_ALLOWED", "activity.checkin_not_allowed", "ACTIVITY_CHECKIN_FAILED", "activity.checkin_failed"); failed {
+		return rejected
 	}
-	rec, ok := s.participations.Get(p.ActivityID, e.Actor.ID)
-	if !ok {
-		return command.Rejected(e, "ACTIVITY_NOT_JOINED", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.not_joined", nil)
-	}
-	if rec.State != PartConfirmed {
-		return command.Rejected(e, "ACTIVITY_CHECKIN_NOT_ALLOWED", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.checkin_not_allowed", map[string]any{"state": string(rec.State)})
-	}
-	if !s.participations.UpdateState(p.ActivityID, e.Actor.ID, PartAttended) {
-		return command.Rejected(e, "ACTIVITY_CHECKIN_FAILED", "CONCURRENCY", "SAFE_RETRY", "activity.checkin_failed", nil)
-	}
-	return acceptedWithPayload(e, "Activity", p.ActivityID, 1, "ATTENDED", map[string]any{"activityId": p.ActivityID}, nil)
+	return acceptedWithPayload(e, "Activity", p.ActivityID, 1, "ATTENDED", map[string]any{"activityId": p.ActivityID, "participation": participation}, nil)
 }
 func (s *Service) markNoShow(ctx context.Context, e command.Envelope) command.Result {
 	if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.NoShowActivity) {
@@ -500,20 +517,28 @@ func (s *Service) markNoShow(ctx context.Context, e command.Envelope) command.Re
 	// 有 participation 记录（没报名的人不能给自己记 NO_SHOW 污染考勤）。
 	// 注：组织者代标他人需要 targetUserId 字段 + 组织者鉴权，当前 wire 无此
 	// 字段，保持自助语义，不扩大。
-	if s.participations == nil {
-		return command.Rejected(e, "ACTIVITY_NOSHOW_FAILED", "INTERNAL", "SAFE_RETRY", "activity.noshow_failed", nil)
+	// 爽约只能从「已报名未签到」记；已签到 / 已取消的不能改成爽约。
+	participation, _, err := s.repository.TransitionParticipation(ctx, p.ActivityID, e.Actor.ID, []ParticipationState{PartConfirmed}, PartNoShow)
+	if rejected, failed := participationRejected(e, err, participation, "ACTIVITY_NOSHOW_NOT_ALLOWED", "activity.noshow_not_allowed", "ACTIVITY_NOSHOW_FAILED", "activity.noshow_failed"); failed {
+		return rejected
 	}
-	rec, ok := s.participations.Get(p.ActivityID, e.Actor.ID)
-	if !ok {
-		return command.Rejected(e, "ACTIVITY_NOT_JOINED", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.not_joined", nil)
+	return acceptedWithPayload(e, "Activity", p.ActivityID, 1, "NO_SHOW", map[string]any{"activityId": p.ActivityID, "participation": participation}, nil)
+}
+
+// participationRejected 把报名状态迁移的仓储错误翻成命令结果。
+func participationRejected(e command.Envelope, err error, current Participation, notAllowedCode, notAllowedKey, failedCode, failedKey string) (command.Result, bool) {
+	switch {
+	case err == nil:
+		return command.Result{}, false
+	case errors.Is(err, ErrActivityNotFound):
+		return command.Rejected(e, "ACTIVITY_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.not_found", nil), true
+	case errors.Is(err, ErrNotJoined):
+		return command.Rejected(e, "ACTIVITY_NOT_JOINED", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.not_joined", nil), true
+	case errors.Is(err, ErrParticipationTransition):
+		return command.Rejected(e, notAllowedCode, "BUSINESS_STATE", "AFTER_USER_ACTION", notAllowedKey, map[string]any{"state": string(current.State)}), true
+	default:
+		return command.Rejected(e, failedCode, "INTERNAL", "SAFE_RETRY", failedKey, nil), true
 	}
-	if rec.State == PartCancelled {
-		return command.Rejected(e, "ACTIVITY_NOSHOW_NOT_ALLOWED", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.noshow_not_allowed", map[string]any{"state": string(rec.State)})
-	}
-	if !s.participations.UpdateState(p.ActivityID, e.Actor.ID, PartNoShow) {
-		return command.Rejected(e, "ACTIVITY_NOSHOW_FAILED", "CONCURRENCY", "SAFE_RETRY", "activity.noshow_failed", nil)
-	}
-	return acceptedWithPayload(e, "Activity", p.ActivityID, 1, "NO_SHOW", map[string]any{"activityId": p.ActivityID}, nil)
 }
 
 func (r *MemoryRepository) Seed(_ context.Context, activities []Activity) error {
@@ -569,25 +594,73 @@ func (r *MemoryRepository) ToggleInterest(_ context.Context, activityID, actorID
 	}
 	return *item, interested, nil
 }
-func (r *MemoryRepository) Join(_ context.Context, activityID, actorID string) (Activity, error) {
+func (r *MemoryRepository) Join(_ context.Context, activityID, actorID, orderNo string) (Activity, Participation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	item := r.activities[activityID]
 	if item == nil {
-		return Activity{}, ErrActivityNotFound
+		return Activity{}, Participation{}, ErrActivityNotFound
 	}
 	if item.joinedBy == nil {
 		item.joinedBy = make(map[string]bool)
 	}
-	if item.joinedBy[actorID] {
-		return *item, ErrAlreadyJoined
+	if item.parts == nil {
+		item.parts = make(map[string]Participation)
+	}
+	existing, known := item.parts[actorID]
+	if known && existing.State != PartCancelled {
+		return *item, existing, ErrAlreadyJoined
 	}
 	if item.Capacity > 0 && item.Joined >= item.Capacity {
-		return *item, ErrActivityFull
+		return *item, existing, ErrActivityFull
 	}
+	participation := Participation{ActivityID: activityID, UserID: actorID, State: PartConfirmed, OrderNo: orderNo}
+	if known && existing.OrderNo != "" {
+		participation.OrderNo = existing.OrderNo // 取消后再报名：同一条记录、同一个编号
+	}
+	item.parts[actorID] = participation
 	item.joinedBy[actorID] = true
 	item.Joined++
-	return *item, nil
+	return *item, participation, nil
+}
+
+func (r *MemoryRepository) GetParticipation(_ context.Context, activityID, actorID string) (Participation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item := r.activities[activityID]
+	if item == nil {
+		return Participation{}, ErrActivityNotFound
+	}
+	participation, ok := item.parts[actorID]
+	if !ok {
+		return Participation{}, ErrNotJoined
+	}
+	return participation, nil
+}
+
+func (r *MemoryRepository) TransitionParticipation(_ context.Context, activityID, actorID string, allowedFrom []ParticipationState, to ParticipationState) (Participation, Activity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item := r.activities[activityID]
+	if item == nil {
+		return Participation{}, Activity{}, ErrActivityNotFound
+	}
+	participation, ok := item.parts[actorID]
+	if !ok {
+		return Participation{}, *item, ErrNotJoined
+	}
+	if !stateIn(participation.State, allowedFrom) {
+		return participation, *item, ErrParticipationTransition
+	}
+	if holdsSeat(participation.State) && !holdsSeat(to) {
+		delete(item.joinedBy, actorID)
+		if item.Joined > 0 {
+			item.Joined--
+		}
+	}
+	participation.State = to
+	item.parts[actorID] = participation
+	return participation, *item, nil
 }
 
 // R17.x: 我的活动物化路径。ListByOwner 返回该 actor 作为 owner

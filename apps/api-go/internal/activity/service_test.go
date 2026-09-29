@@ -393,8 +393,8 @@ func TestAttendanceRequiresParticipation(t *testing.T) {
 	if out := s.HandleContext(t.Context(), activityEnvelope("JoinActivity", "user_a", id)); out.Outcome != "ACCEPTED" {
 		t.Fatalf("join: %+v", out)
 	}
-	if _, ok := s.participations.Get(id, "user_a"); !ok {
-		t.Fatalf("join must create a participation record")
+	if _, err := s.repository.GetParticipation(t.Context(), id, "user_a"); err != nil {
+		t.Fatalf("join must create a participation record: %v", err)
 	}
 
 	if out := s.HandleContext(t.Context(), activityEnvelope("CheckinActivity", "user_a", id)); out.Outcome != "ACCEPTED" {
@@ -625,7 +625,7 @@ func TestJoinUpdatesDisplayedPeopleCount(t *testing.T) {
 		t.Fatalf("seed catalog no longer contains user_photo_buddy — this test needs an activity with a small capacity")
 	}
 
-	got, err := svc.repository.Join(context.Background(), target, "user_display")
+	got, _, err := svc.repository.Join(context.Background(), target, "user_display", "")
 	if err != nil {
 		t.Fatalf("Join: %v", err)
 	}

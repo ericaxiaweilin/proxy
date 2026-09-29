@@ -17,6 +17,9 @@ export type SlotOffer = {
 
 export type FulfillmentOrder = {
   orderId: string;
+  // ORDER-NO-001：面向人的全数字订单编号（客服 / 结算 / 争议都用它）。
+  // 服务端回填了历史订单；optional 只为兼容更老的服务端。
+  orderNo?: string | undefined;
   requesterId: string;
   agentId: string;
   needId: string;

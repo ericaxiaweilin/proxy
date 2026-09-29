@@ -15,6 +15,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/clock"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
+	"github.com/proxy-app/proxy-api/internal/ordernumber"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 )
 
@@ -25,7 +26,10 @@ import (
 
 // Order 是订单聚合（含 Confirmation Snapshot）。
 type Order struct {
-	ID          string            `json:"orderId"`
+	ID string `json:"orderId"`
+	// ORDER-NO-001：面向人的全数字订单编号（internal/ordernumber）。客服、结算、
+	// 争议、界面展示都用它；权威主键仍是 ID。一经分配不可改。老订单由迁移 136 回填。
+	OrderNo     string            `json:"orderNo,omitempty"`
 	RequesterID string            `json:"requesterId"`
 	AgentID     string            `json:"agentId"`
 	NeedID      string            `json:"needId"`
@@ -540,6 +544,9 @@ type Service struct {
 	// HQ). nil means the legacy test surface; Evaluate gets
 	// the empty string and falls back to VN-79.
 	jurisdictionResolver jurisdictionResolver
+	// orderNumbers 分配全数字订单编号（ORDER-NO-001）。生产接 Postgres 序列，
+	// 与活动报名共用同一个分配器；默认进程内计数器（开发 / 单测）。
+	orderNumbers ordernumber.Allocator
 }
 
 // jurisdictionResolver is a one-method interface so the
@@ -589,7 +596,7 @@ func NewWithRepository(repository TransactionalRepository) *Service {
 	if repository == nil {
 		repository = NewMemoryRepository()
 	}
-	return &Service{repository: repository, clock: clock.System{}}
+	return &Service{repository: repository, clock: clock.System{}, orderNumbers: defaultOrderNumbers(repository)}
 }
 
 // WithPolicyDecisions wires the LC-28 audit-log writer. The
@@ -602,6 +609,40 @@ func (s *Service) WithPolicyDecisions(pd policydecisionsService) *Service {
 	defer s.mu.Unlock()
 	s.policyDecisions = pd
 	return s
+}
+
+// WithOrderNumbers 接上订单编号分配器（ORDER-NO-001）。main.go 让履约与活动
+// 共用同一个实例，保证两类订单编号不撞号。
+func (s *Service) WithOrderNumbers(allocator ordernumber.Allocator) *Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.orderNumbers = allocator
+	return s
+}
+
+// OrderNumbers 返回当前的编号分配器（跨域物化订单的适配器用同一个）。
+func (s *Service) OrderNumbers() ordernumber.Allocator { return s.orderNumbers }
+
+// OrderNumberSource 由能提供持久编号分配器的仓储实现（PG：共享序列）。
+type OrderNumberSource interface {
+	OrderNumbers() ordernumber.Allocator
+}
+
+// defaultOrderNumbers：持久仓储用它自己的序列分配器；只有内存仓才用进程内计数器。
+// 否则「PG 仓 + 默认计数器」的多个实例都从 1 发号，在同一个库里撞唯一约束。
+func defaultOrderNumbers(repository any) ordernumber.Allocator {
+	if source, ok := repository.(OrderNumberSource); ok {
+		return source.OrderNumbers()
+	}
+	return ordernumber.NewMemory()
+}
+
+// nextOrderNo 分配一个编号；分配失败就拒绝下单，不生成假号。
+func (s *Service) nextOrderNo(ctx context.Context) (string, error) {
+	if s.orderNumbers == nil {
+		return "", ordernumber.ErrUnavailable
+	}
+	return s.orderNumbers.Next(ctx)
 }
 
 // Repository exposes the underlying fulfillment repository so
@@ -925,8 +966,13 @@ func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.R
 		CashEligibilityStatus: cashStatus,
 		CashEligibilityReason: cashReason,
 	}
+	orderNo, err := s.nextOrderNo(ctx)
+	if err != nil {
+		return command.Rejected(e, "ORDER_NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "fulfillment.order_number_unavailable", nil)
+	}
 	order := Order{
 		ID:          newID("ord_"),
+		OrderNo:     orderNo,
 		RequesterID: e.Actor.ID,
 		AgentID:     p.AgentID,
 		NeedID:      p.NeedID,
@@ -947,6 +993,7 @@ func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.R
 	}
 	return acceptedWithPayload(e, "Order", order.ID, 1, order.Lifecycle, map[string]any{
 		"orderId":  order.ID,
+		"orderNo":  order.OrderNo,
 		"snapshot": snapshot,
 	}, domainEvents)
 }
@@ -1079,8 +1126,13 @@ func (s *Service) acceptOfferAsOrder(ctx context.Context, e command.Envelope, of
 	if rejected, blocked := cashEligibilityGate(e, snapshot, "offerId", offer.ID); blocked {
 		return rejected
 	}
+	orderNo, err := s.nextOrderNo(ctx)
+	if err != nil {
+		return command.Rejected(e, "ORDER_NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "fulfillment.order_number_unavailable", nil)
+	}
 	order := Order{
 		ID:          newID("ord_"),
+		OrderNo:     orderNo,
 		RequesterID: offer.RequesterID,
 		AgentID:     offer.AgentID,
 		NeedID:      offer.TaskID,
@@ -1112,7 +1164,7 @@ func (s *Service) acceptOfferAsOrder(ctx context.Context, e command.Envelope, of
 		return command.Rejected(e, "ACCEPT_OFFER_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.accept_failed", nil)
 	}
 	return acceptedWithPayload(e, "Order", order.ID, 1, order.Lifecycle, map[string]any{
-		"orderId": order.ID, "offerId": offer.ID, "slotId": offer.SlotID,
+		"orderId": order.ID, "orderNo": order.OrderNo, "offerId": offer.ID, "slotId": offer.SlotID,
 	}, domainEvents)
 }
 
@@ -2134,6 +2186,9 @@ func checkOrderTransition(before, after Order) error {
 	if after.Version != before.Version+1 {
 		return illegal(fmt.Sprintf("version must advance by one (%d -> %d)", before.Version, after.Version))
 	}
+	if before.OrderNo != "" && after.OrderNo != before.OrderNo {
+		return illegal("order number is immutable")
+	}
 	if before.Lifecycle == "CANCELLED" {
 		return illegal("CANCELLED orders are frozen")
 	}
@@ -2289,9 +2344,12 @@ func AuditFromContext(ctx context.Context) (AuditContext, bool) {
 var ErrCashEligibility = errors.New("cash eligibility does not allow a confirmed order")
 
 // MaterializedOrder 构造一张由其它域物化的 CONFIRMED 订单。
-func MaterializedOrder(id, requesterID, agentID, needID string, snapshot OrderSnapshot, now time.Time) (Order, error) {
+func MaterializedOrder(id, orderNo, requesterID, agentID, needID string, snapshot OrderSnapshot, now time.Time) (Order, error) {
 	if id == "" || requesterID == "" || agentID == "" || requesterID == agentID {
 		return Order{}, errors.New("materialised order needs two distinct parties")
+	}
+	if !ordernumber.Valid(orderNo) {
+		return Order{}, fmt.Errorf("%w: invalid order number %q", ordernumber.ErrUnavailable, orderNo)
 	}
 	snapshot.Requester, snapshot.Agent = requesterID, agentID
 	if snapshot.SettlementMode == "" {
@@ -2310,7 +2368,7 @@ func MaterializedOrder(id, requesterID, agentID, needID string, snapshot OrderSn
 		}
 	}
 	now = now.UTC()
-	return Order{ID: id, RequesterID: requesterID, AgentID: agentID, NeedID: needID, Lifecycle: "CONFIRMED", Version: 1, Snapshot: snapshot, CreatedAt: now, UpdatedAt: now}, nil
+	return Order{ID: id, OrderNo: orderNo, RequesterID: requesterID, AgentID: agentID, NeedID: needID, Lifecycle: "CONFIRMED", Version: 1, Snapshot: snapshot, CreatedAt: now, UpdatedAt: now}, nil
 }
 
 // MaterializedEvent 是物化订单的出生事件：来源域 + 来源 id 进审计。
@@ -2318,6 +2376,7 @@ func MaterializedEvent(order Order, source, sourceID string) event.DomainEvent {
 	return event.New("OrderMaterialized", "Order", order.ID, order.Version, "system:"+source, sourceID, sourceID, order.CreatedAt, map[string]any{
 		"source":             source,
 		"sourceId":           sourceID,
+		"orderNo":            order.OrderNo,
 		"requesterId":        order.RequesterID,
 		"agentId":            order.AgentID,
 		"agreedCompensation": order.Snapshot.AgreedCompensation,

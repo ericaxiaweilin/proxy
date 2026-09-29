@@ -12,6 +12,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
+	"github.com/proxy-app/proxy-api/internal/ordernumber"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/supply"
 	"log"
@@ -143,17 +144,23 @@ type jurisdictionAdapter struct {
 // AcceptSlotOffer) until bilateral negotiation fields (duration,
 // startTime, meetingContext) are recorded via amendments.
 type marketplaceFulfillmentAdapter struct {
-	repo fulfillment.TransactionalRepository
+	repo    fulfillment.TransactionalRepository
+	numbers ordernumber.Allocator
 }
 
 type sceneFulfillmentAdapter struct {
-	repo fulfillment.TransactionalRepository
+	repo    fulfillment.TransactionalRepository
+	numbers ordernumber.Allocator
 }
 
 // ORDER-MATERIALIZE-AUDIT-001：两条跨域物化路径都走 fulfillment.MaterializedOrder
 // （金额边界 + R8 现金门），出生事件 OrderMaterialized 随首次插入同事务发布。
 func (a sceneFulfillmentAdapter) EnsureInvitationOrder(ctx context.Context, record scene.InvitationOrderRecord) error {
-	order, err := fulfillment.MaterializedOrder(record.ID, record.RequesterID, record.AgentID, record.SceneID, fulfillment.OrderSnapshot{
+	orderNo, err := a.numbers.Next(ctx)
+	if err != nil {
+		return err
+	}
+	order, err := fulfillment.MaterializedOrder(record.ID, orderNo, record.RequesterID, record.AgentID, record.SceneID, fulfillment.OrderSnapshot{
 		ServiceSKU: record.ServiceSKU, NeedVersion: record.SceneID, StartTime: record.StartTime, MeetingContext: record.MeetingContext,
 		AgreedCompensation: record.AgreedCompensation, Currency: record.Currency, IncludedScope: record.IncludedScope,
 	}, time.Now())
@@ -169,7 +176,13 @@ func (a sceneFulfillmentAdapter) EnsureInvitationOrder(ctx context.Context, reco
 func (a marketplaceFulfillmentAdapter) EnsureOrder(ctx context.Context, record marketplace.OrderRecord) error {
 	// 市场报价是自由文本（"2,100,000₫" / "面议"），不可靠地换算成金额；订单金额记 0
 	// （面议），真实金额由双方在订单上走条款变更（ORDER-AMEND-001）或结算确认。
-	order, err := fulfillment.MaterializedOrder(record.ID, record.RequesterID, record.AgentID, record.NeedID, fulfillment.OrderSnapshot{
+	// 重试时 EnsureOrder 命中已有订单，这里新取的号作废（空号，序列正常语义），
+	// 订单保留第一次分配的编号。
+	orderNo, err := a.numbers.Next(ctx)
+	if err != nil {
+		return err
+	}
+	order, err := fulfillment.MaterializedOrder(record.ID, orderNo, record.RequesterID, record.AgentID, record.NeedID, fulfillment.OrderSnapshot{
 		ServiceSKU: "CITY_COMPANION", NeedVersion: record.NeedID, Scenario: record.Scenario,
 	}, time.Now())
 	if err != nil {

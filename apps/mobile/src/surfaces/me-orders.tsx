@@ -31,6 +31,10 @@ function orderMoney(order: FulfillmentOrder): string { return `${order.snapshot.
 // terminal. ORDER-SETTLE-GUARD-001: a mutually settled order
 // is no longer cancellable. UI mirrors the server-side check.
 const canCancel = canCancelOrder;
+// ORDER-NO-001：界面上的「订单编号」是全数字编号；只有极老的服务端没发时才退回内部 id。
+function displayOrderNo(order: FulfillmentOrder): string {
+  return order.orderNo || order.orderId;
+}
 
 // ORDER-CENTER-STATS-001（原型 33987c「接单中心」；用户：「我的订单模块不是有吗 在那里做」）：
 // 我的订单顶部的接单面板 —— 接单权限状态 + 真实履约记录（已接单 / 按约完成率 / 准时率 / 复邀客户 / 投诉）。
@@ -121,7 +125,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
     const confirm = await new Promise<boolean>((resolve) => {
       Alert.alert(
         "取消订单？",
-        `${order.snapshot.serviceSku || "Proxy 订单"} · 订单编号 ${order.orderId}\n\n取消后不可恢复，双方结算状态以实际协商为准。`,
+        `${order.snapshot.serviceSku || "Proxy 订单"} · 订单编号 ${displayOrderNo(order)}\n\n取消后不可恢复，双方结算状态以实际协商为准。`,
         [
           { text: "再想想", style: "cancel", onPress: () => resolve(false) },
           { text: "确认取消", style: "destructive", onPress: () => resolve(true) },
@@ -302,7 +306,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
             <View style={styles.orderHead}>
               <View style={styles.orderCopy}>
                 <Text selectable style={styles.orderTitle}>{detail.snapshot.serviceSku || "Proxy 订单"}</Text>
-                <Text selectable style={styles.orderId}>{detail.orderId}</Text>
+                <Text selectable style={styles.orderId}>{displayOrderNo(detail)}</Text>
               </View>
               <Text selectable style={[styles.orderBadge, detail.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(detail)}</Text>
             </View>
@@ -572,7 +576,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
               <View style={styles.orderHead}>
                 <View style={styles.orderCopy}>
                   <Text selectable style={styles.orderTitle}>{item.snapshot.serviceSku || "Proxy 订单"}</Text>
-                  <Text selectable style={styles.orderId}>订单编号：{item.orderId}</Text>
+                  <Text selectable style={styles.orderId}>订单编号：{displayOrderNo(item)}</Text>
                 </View>
                 <Text selectable style={[styles.orderBadge, item.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(item)}</Text>
               </View>

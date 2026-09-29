@@ -875,9 +875,21 @@ export const ToggleActivityInterestPayloadSchema = z.object({
 });
 export type ToggleActivityInterestPayload = z.infer<typeof ToggleActivityInterestPayloadSchema>;
 
+// ACT-ORDER-NO-001: 报名（For You「确认下单」）自己的订单记录。orderNo 是全数字
+// 订单编号（16 位起：yyMMdd + 序号 + Luhn 校验位），与履约订单共用一个分配器。
+// optional：老服务端不发这个字段；不声明的话 zod 会把它静默剥掉，UI 永远拿不到。
+export const ActivityParticipationSchema = z.object({
+  activityId: z.string(),
+  userId: z.string(),
+  state: z.enum(["REQUESTED", "CONFIRMED", "WAITLISTED", "CANCELLED", "ATTENDED", "NO_SHOW"]),
+  orderNo: z.string().regex(/^[0-9]{16,}$/).optional()
+});
+export type ActivityParticipation = z.infer<typeof ActivityParticipationSchema>;
+
 export const JoinActivityPayloadSchema = z.object({
   activity: ActivitySchema,
-  joined: z.boolean()
+  joined: z.boolean(),
+  participation: ActivityParticipationSchema.optional()
 });
 export type JoinActivityPayload = z.infer<typeof JoinActivityPayloadSchema>;
 
