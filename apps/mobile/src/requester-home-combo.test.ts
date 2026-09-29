@@ -3,10 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   NEARBY_BAND,
   buildCombinationPool,
+  detectComboConflicts,
   orderByProximity,
   pickNearby,
   sceneIdOfActivity,
   seedFrom,
+  stripAreaSuffix,
+  activitiesAtCoffeeShops,
+  detectOrderConflict,
+  isCoffeeShopScene,
   type Combo,
   type ComboActivity,
   type ComboPerson,
@@ -135,5 +140,103 @@ describe("HOME-FORYOU-POOL-001 可用组合池", () => {
     expect(seedFrom("u_linh")).toBe(seedFrom("u_linh"));
     expect(seedFrom("u_linh")).not.toBe(seedFrom("u_an"));
     expect(Number.isInteger(seedFrom("u_linh"))).toBe(true);
+  });
+});
+
+/**
+ * HOME-FORYOU-CONFLICT-001。用户报的是「for you」四宫格的"自由切换"
+ * （人/时间/活动/地点各自独立锁定/更换）被"活动是主轴"这条派生规则悄悄
+ * 吃掉了：锁了地点/时间之后再换活动，显示值会跟着活动静默改掉，用户看
+ * 不出冲突。这里钉的是"检测到冲突就报出来"这个纯函数，不是四宫格 UI
+ * 本身（那部分在 requester-home.tsx，用检测结果来禁用「选择」+ 显示提示）。
+ */
+describe("HOME-FORYOU-CONFLICT-001 锁定轴与活动的冲突检测", () => {
+  it("什么都没锁 ⇒ 永远没有冲突，即便活动和「当前显示」的地点/时间不一样", () => {
+    expect(detectComboConflicts(ACTIVITIES[0], SCENES, {})).toEqual([]);
+    expect(detectComboConflicts(undefined, SCENES, { place: SCENES[1], time: "随便" })).toEqual([]);
+  });
+
+  it("锁定的地点和活动真实场地一致 ⇒ 没有冲突", () => {
+    // a_coffee 挂在 sc_bean（见 SCENES/ACTIVITIES 顶部定义）。
+    expect(detectComboConflicts(ACTIVITIES[0], SCENES, { place: SCENES[0] })).toEqual([]);
+  });
+
+  it("锁定的地点和活动真实场地不一致 ⇒ 报 place 冲突，带上双方场地名", () => {
+    // a_coffee 在 sc_bean 办，但地点锁在 sc_lake。
+    const conflicts = detectComboConflicts(ACTIVITIES[0], SCENES, { place: SCENES[1] });
+    expect(conflicts).toEqual([{ slot: "place", lockedSceneName: "Hồ Tây", activitySceneName: "Bean There" }]);
+  });
+
+  it("活动本身没有可判定的场地时，锁地点不报冲突——那种情况本来就退回 placeIndex 兜底", () => {
+    // a_ghost 的 realitySceneId 指向一个不存在的场地，sceneIdOfActivity 返回 undefined。
+    expect(detectComboConflicts(ACTIVITIES[2], SCENES, { place: SCENES[0] })).toEqual([]);
+  });
+
+  it("锁定的时间和活动真实时间不一致 ⇒ 报 time 冲突", () => {
+    const conflicts = detectComboConflicts(ACTIVITIES[0], SCENES, { time: "周日上午" });
+    expect(conflicts).toEqual([{ slot: "time", lockedTime: "周日上午", activityTime: "周六下午" }]);
+  });
+
+  it("地点和时间同时锁定且都冲突 ⇒ 两条都报，顺序固定（place 在前）", () => {
+    const conflicts = detectComboConflicts(ACTIVITIES[0], SCENES, { place: SCENES[1], time: "周日上午" });
+    expect(conflicts).toEqual([
+      { slot: "place", lockedSceneName: "Hồ Tây", activitySceneName: "Bean There" },
+      { slot: "time", lockedTime: "周日上午", activityTime: "周六下午" },
+    ]);
+  });
+
+  it("锁定时间正好等于活动时间 ⇒ 没有冲突（哪怕地点冲突同时存在）", () => {
+    const conflicts = detectComboConflicts(ACTIVITIES[0], SCENES, { place: SCENES[1], time: "周六下午" });
+    expect(conflicts).toEqual([{ slot: "place", lockedSceneName: "Hồ Tây", activitySceneName: "Bean There" }]);
+  });
+});
+
+describe("HOME-FORYOU-DEDUP-001 stripAreaSuffix", () => {
+  it("drops the trailing area when it matches the place tile's area", () => {
+    expect(stripAreaSuffix("Three Beans · Cầu Giấy", "Cầu Giấy")).toBe("Three Beans");
+  });
+  it("keeps the name when the area differs or is missing", () => {
+    expect(stripAreaSuffix("木光咖啡 · 还剑郡", "Cầu Giấy")).toBe("木光咖啡 · 还剑郡");
+    expect(stripAreaSuffix("Three Beans · Cầu Giấy", undefined)).toBe("Three Beans · Cầu Giấy");
+    expect(stripAreaSuffix("Three Beans", "Cầu Giấy")).toBe("Three Beans");
+  });
+});
+
+describe("HOME-FORYOU-SCENE-001 场景格只选挂在真实咖啡店上的活动", () => {
+  const scenes = [
+    { id: "threebeans", name: "Three Beans · Cầu Giấy", area: "Cầu Giấy", imageUrl: "", category: "商家", type: "咖啡 · 动态场景" },
+    { id: "hoankiem", name: "Hồ Hoàn Kiếm", area: "Hoàn Kiếm", imageUrl: "", category: "景点", type: "公共景点 · 湖边" },
+  ];
+  it("recognises coffee-shop scenes by category + type", () => {
+    expect(isCoffeeShopScene(scenes[0]!)).toBe(true);
+    expect(isCoffeeShopScene(scenes[1]!)).toBe(false);
+  });
+  it("keeps activities hosted at a coffee shop, drops unlinked venues and non-shop scenes", () => {
+    const acts = [
+      { activityId: "cup", title: "周日杯测小聚", venueName: "Three Beans · Cầu Giấy", time: "周日", realitySceneId: "threebeans" },
+      { activityId: "byname", title: "拉花体验", venueName: "Three Beans · Cầu Giấy", time: "周六" },
+      { activityId: "lake", title: "湖边散步", venueName: "Hồ Hoàn Kiếm", time: "周六", realitySceneId: "hoankiem" },
+      { activityId: "free", title: "周五一起吃新菜", venueName: "岚庭餐厅 · 西湖", time: "周五" },
+    ];
+    expect(activitiesAtCoffeeShops(acts, scenes).map((a) => a.activityId)).toEqual(["cup", "byname"]);
+  });
+});
+
+describe("HOME-FORYOU-ORDER-GUARD-001 下单前资源冲突检查", () => {
+  const mine = [
+    { activityId: "cup", title: "周日杯测小聚", time: "周日 10:00–11:30", orderNo: "100260927150535000001" },
+    { activityId: "old", title: "已取消那单", time: "周五 18:30–20:30", cancelled: true },
+  ];
+  it("blocks ordering the same activity twice", () => {
+    expect(detectOrderConflict({ activityId: "cup", time: "周日 10:00–11:30" }, mine)).toEqual({ kind: "ALREADY_ORDERED", orderNo: "100260927150535000001" });
+  });
+  it("blocks a different activity in a time slot I already hold", () => {
+    expect(detectOrderConflict({ activityId: "latte", time: " 周日 10:00–11:30 " }, mine)).toEqual({ kind: "TIME_TAKEN", title: "周日杯测小聚", time: "周日 10:00–11:30", orderNo: "100260927150535000001" });
+  });
+  it("ignores cancelled orders, other times and blank times", () => {
+    expect(detectOrderConflict({ activityId: "x", time: "周五 18:30–20:30" }, mine)).toBeUndefined();
+    expect(detectOrderConflict({ activityId: "old", time: "周五 18:30–20:30" }, mine)).toBeUndefined();
+    expect(detectOrderConflict({ activityId: "x", time: "周六 09:00" }, mine)).toBeUndefined();
+    expect(detectOrderConflict({ activityId: "x", time: "" }, mine)).toBeUndefined();
   });
 });

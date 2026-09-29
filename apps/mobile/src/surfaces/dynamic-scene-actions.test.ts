@@ -11,7 +11,10 @@ describe("SCENE-ACTION-MATERIALIZATION-001", () => {
     expect(source).toContain('"PublishActivity"');
     expect(source).toContain("对方接受后生成订单");
     expect(source).toContain("budgetMinor: inviteAmount");
-    expect(source).toContain("给真人小美的报酬（VND）");
+    // DIRECT-INVITE-CONFIRM-001: 报酬标签跟着真正选中的那个人的名字走，
+    // 不能再写死"小美"——邀约对象是 detail.humans 里选中的任何一个人。
+    expect(source).toContain('给{selectedHuman?.name ?? "对方"}的报酬（VND）');
+    expect(source).not.toContain("给真人小美的报酬（VND）");
     expect(source).toContain('currency: "VND"');
     expect(source).toContain("等待真人候选报名");
     // SCENE-OPP-PRICE-001: 公开任务出口没有让用户填过金额，之前硬编码
@@ -40,9 +43,11 @@ describe("SCENE-ACTION-MATERIALIZATION-001", () => {
     expect(source).toContain('cachePolicy="memory-disk"');
     expect(source).toContain('"这个 Scene 喝什么"');
     expect(source).toContain("detail.fullMenu");
-    expect(source).toContain('"为什么"');
-    expect(source).toContain("Reality Evidence · Scene Memory");
-    expect(source).toContain("不生成到访、订单或履约证明");
+    // 2026-09-28 清废话：「为什么」依据卡整块删除，免责长句同步去掉，不许回来。
+    expect(source).not.toContain('"为什么"');
+    expect(source).not.toContain("不生成到访、订单或履约证明");
+    // 2026-09-28 清废话：Reality Evidence 整段删除，不许回来。
+    expect(source).not.toContain("Reality Evidence · Scene Memory");
   });
 
   it("carries the selected scene SKU into every real-world action", () => {

@@ -404,17 +404,23 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
 
+  // SEARCH-REPLY-BUDGET-001：这是一条**单行状态**（11pt），原来撑成 46pt 的
+  // 卡片（minHeight 32 + paddingVertical 7×2）。它插在搜索框下面会把整页往下
+  // 顶 46pt —— For You 的「选择」按钮底边正好落在浮动 dock 上沿（零余量），
+  // 被顶一次就整颗藏到玻璃 dock 后面，看不见也点不到（点在 dock 上会切 tab）。
+  // 现在按**内容高度**收：padding 4×2 + 一行 ~21pt ≈ 29pt，跟下面让出来的
+  // 提示行 + 按钮上边距（31pt）对上，按钮就留在原处。改这里的 padding /
+  // minHeight 必须同步改 requester-home 的 SEARCH-REPLY-BUDGET-001 那一段。
   responseBar: {
     borderTopColor: color.line,
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 13,
-    paddingVertical: 7
+    paddingVertical: 4
   },
   responseInner: {
     alignItems: "center",
     flexDirection: "row",
-    justifyContent: "space-between",
-    minHeight: 32
+    justifyContent: "space-between"
   },
   responseText: {
     color: "#6F6962",

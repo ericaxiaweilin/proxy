@@ -11,7 +11,7 @@ const base: ProviderApplication = {
 
 describe("PROVIDER-APPLY-001 client", () => {
   it("maps every invalid field to plain words", () => {
-    expect(providerApplicationFieldErrors(["profile_avatar", "selfie"])).toEqual(["先在「个人管理」设置头像", "请上传手持证件的自拍"]);
+    expect(providerApplicationFieldErrors(["profile_avatar", "phone_not_verified"])).toEqual(["先在「个人管理」设置头像", "请先验证手机号（获取验证码并输入正确的码）"]);
     expect(providerApplicationFieldErrors(["something_new"])).toEqual(["有信息不合格，请检查后再提交"]);
     expect(providerApplicationErrorText(new ProviderApplicationError("invalid_fields", ["real_name", "birth_date"]))).toBe("请填写 2–40 字的真实姓名；出生日期不对（格式 2001-05-20，需年满 18 岁）");
     expect(providerApplicationErrorText(new Error("x"))).toBe("暂时没连上服务，稍后再试。");
@@ -55,6 +55,19 @@ describe("PROVIDER-APPLY-001 client", () => {
   });
 });
 
+describe("KYC-PHONE-ONLY-001 phone verification client", () => {
+  it("requests a challenge and reports server-side rejection with the right code", async () => {
+    const { requestPhoneVerification, verifyPhoneVerification } = await import("./provider-application-client");
+    const ok = { request: async () => ({ status: 200, json: async () => ({ challengeId: "pphc_1", expiresAt: "2026-09-27T12:00:00Z" }) }) };
+    expect(await requestPhoneVerification(ok, "0912345678")).toEqual({ challengeId: "pphc_1", expiresAt: "2026-09-27T12:00:00Z" });
+    const verified = { request: async () => ({ status: 200, json: async () => ({ verified: true, phone: "+84912345678" }) }) };
+    expect(await verifyPhoneVerification(verified, "pphc_1", "123456")).toBe(true);
+    const rejected = { request: async () => ({ status: 422, json: async () => ({ error: "phone_challenge_invalid" }) }) };
+    await expect(verifyPhoneVerification(rejected, "pphc_1", "000000")).rejects.toMatchObject({ code: "phone_challenge_invalid" });
+    expect(providerApplicationErrorText(new ProviderApplicationError("phone_challenge_invalid"))).toBe("验证码错误或已过期，请重新获取。");
+  });
+});
+
 describe("ORDER-CENTER-STATS-001 order panel", () => {
   it("rates render as — without a denominator, never a fake 0% or 100%", async () => {
     const { formatRate, permissionLine, fetchProviderStats } = await import("./provider-application-client");
@@ -71,8 +84,10 @@ describe("ORDER-PERMISSION-KYC-003 review pipeline", () => {
   it("lists only steps that really happen, and follows the status", async () => {
     const { kycPipeline } = await import("./provider-application-client");
     const titles = kycPipeline(null).map((step) => step.title);
-    expect(titles).toEqual(["资料提交", "运营人工比对", "KYC 通过"]);
+    expect(titles).toEqual(["资料提交", "运营审核", "KYC 通过"]);
     expect(titles.join()).not.toMatch(/Face ID|自动比对/);
+    // KYC-PHONE-ONLY-001：审核步骤描述的是手机验证 + 声明，不再提证件/自拍比对。
+    expect(kycPipeline(null).map((step) => step.hint).join()).not.toMatch(/证件|自拍|身份证/);
     expect(kycPipeline({ ...base, status: "SUBMITTED" }).map((step) => step.state)).toEqual(["done", "active", "pending"]);
     expect(kycPipeline({ ...base, status: "REJECTED" })[2]?.state).toBe("failed");
   });

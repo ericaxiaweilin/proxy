@@ -3,9 +3,12 @@
 // + r157MarketPulse + bottom。无 hero / attention / teaser / rail / quick / reusable。
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html（rhome，HTML 5197-5203）。
 // Experience Runtime 插槽：top_context banner 由 SurfacePlan 驱动（§10 Slots），本地态不被 Delta 覆盖（§15.1）。
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View, type ViewStyle } from "react-native";
 import { Image } from "expo-image";
+import { ActivityOrderSnapshotSchema, type ActivityJoinRecipe, type ActivityOrderSnapshot } from "@proxy/contracts";
+import { ActivityOrderTicket, peopleCountLabel } from "../components/activity-order-ticket";
+import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
@@ -14,6 +17,7 @@ import { buildHomeSearchIndex, matchHomeSearchIntent, shouldSearchServerPeople, 
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
 import { resolveHomePersonAccountId } from "../recommend-fixtures";
+import { meetupDirectionsUrls } from "../meetup-share";
 import { color, shadows } from "../theme";
 // HOME-I18N-001：语言选择。i18n 是模块级 store（不需要 Provider，不动
 // app-shell），preferences 负责落盘，LanguageSheet 是原型那个选择面板。
@@ -32,12 +36,9 @@ import type { MarketplaceClient } from "../marketplace-client";
 import type { ActivityClient } from "../activity-client";
 import { ActivityCommandRejectedError, ActivityProtocolError } from "../activity-client";
 import type { ExperienceClient } from "../experience-client";
-import type { AIAccountClient, PlatformAIAccount } from "../ai-account-client";
 import type { RelationshipClient } from "../relationship-client";
 import type { ProfileClient, ProfileWire } from "../profile-client";
 import { localApiBaseUrl } from "../native-clients";
-import { aiAccountPhoto } from "../ai-persona-presentation";
-import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
@@ -50,9 +51,14 @@ import {
   type RecommendFilter,
   type RecommendPerson
 } from "../recommend-fixtures";
-import { ProxyBackGlyph } from "../components/proxy-foundation";
+import { PhotoScrim, ProxyBackGlyph } from "../components/proxy-foundation";
 
-import { sceneIdOfActivity } from "../requester-home-combo";
+import { activitiesAtCoffeeShops, detectComboConflicts, detectOrderConflict, sceneIdOfActivity, stripAreaSuffix, type ExistingOrder, type OrderConflict } from "../requester-home-combo";
+// SCENE-DISTANCE-BADGE-001（用户：「所有的场景必须标注距离数」）：真实设备定位 +
+// 真实 haversine 距离，跟 hot-scenes.tsx / scene-shop-directory.tsx 同一套口径。
+import { getCurrentFix } from "../device-location";
+import { expoLocationApi } from "../device-location-native";
+import { sceneDistanceMeters, shopCardDistance, type SceneOrigin } from "../scene-shop-directory";
 
 export interface RequesterGoal {
   category: HardDemandCategory;
@@ -121,6 +127,46 @@ function relationshipKeyFor(id: string): string | undefined {
   return resolved.startsWith("u_") ? undefined : resolved;
 }
 
+// FORYOU-LOGO-001（2026-09-27 晚，原型 deepseek_html_20260927_c89beb 新版主 Logo）：
+// 4 个**实心**矩形 + 中心大圆，大圆带白描边环压在四矩形交点上 —— 白环把圆和
+// 矩形分开，图形整体更重。纯 View 摆放，不引 svg 依赖。
+// 几何按原型 100 viewBox 的 40px 变体等比：pad 4 / rect 42 / 第二列 x=54 /
+// 圆角 12；圆 SVG r=16 + 描边 4（描边中心在圆周上）→ RN 用外径 36（r=18）+
+// 白边 4 的圆 View，可见墨芯正好 r=14≈SVG 的内沿。
+function ForYouGlyph({ size }: { size: number }) {
+  const pad = size * 4 / 100;
+  const rect = size * 42 / 100;
+  const off = size * 54 / 100;
+  const dot = size * 36 / 100;
+  const ring = size * 4 / 100;
+  const cell: ViewStyle = { backgroundColor: color.ink, borderRadius: size * 12 / 100, height: rect, position: "absolute", width: rect };
+  return (
+    <View style={{ height: size, width: size }}>
+      <View style={[cell, { left: pad, top: pad }]} />
+      <View style={[cell, { left: off, top: pad }]} />
+      <View style={[cell, { left: pad, top: off }]} />
+      <View style={[cell, { left: off, top: off }]} />
+      <View style={{ backgroundColor: color.ink, borderColor: color.white, borderRadius: dot / 2, borderWidth: ring, height: dot, left: (size - dot) / 2, position: "absolute", top: (size - dot) / 2, width: dot }} />
+    </View>
+  );
+}
+
+// 单边虚线在 iOS 上**画不出来**：RN 只支持四边等宽的 dashed 边框（仓库里那些
+// dashed 空态卡都是 borderWidth 统一才生效的），单边（borderTopWidth /
+// borderBottomWidth）会打 "Unsupported dashed / dotted border style" 并且
+// **整条不画** —— 2026-09-28 模拟器像素级实测：撕票线和 meta 分隔线一起消失，
+// 那两段里一个非白像素都没有。所以虚线用一排小方块自己画，绕开 RN 的 border。
+// ⚠️ 下面门禁里有一条反向钉扫 dashed 边框字面量，所以这段注释也不写那个写法。
+function DashedRule({ ruleColor, style }: { ruleColor: string; style?: ViewStyle }) {
+  return (
+    <View pointerEvents="none" style={[styles.dashedRule, style]}>
+      {Array.from({ length: 24 }, (_, index) => (
+        <View key={index} style={[styles.dashedRuleDash, { backgroundColor: ruleColor }]} />
+      ))}
+    </View>
+  );
+}
+
 export function RequesterHome({
   onEnterWorkspace,
   onOpenMarket,
@@ -134,11 +180,8 @@ export function RequesterHome({
   marketplace,
   activities,
   experiences,
-  aiAccounts,
   relationship,
   profileClient,
-  onMessageAI,
-  onOpenAIProfile,
   onOpenHumanScene,
   onOpenHumanProfile,
   onMessageHuman,
@@ -152,6 +195,7 @@ export function RequesterHome({
   isGuest,
   onCreateScene,
   onOpenSceneMap,
+  onOpenHotScenes,
   sceneApiBaseUrl,
   onChromeVisibilityChange,
   onChooserVisibilityChange,
@@ -173,13 +217,10 @@ export function RequesterHome({
   activities?: ActivityClient;
   // R15.49 — experience count 从 server 拉 (替换 hardcode 24).
   experiences?: ExperienceClient;
-  aiAccounts?: AIAccountClient;
   relationship?: RelationshipClient;
   // HOME-PEOPLE-SEARCH-001: 全站真人搜索。没有它，首页人名搜索只能命中
   // 本地推荐预览，新注册用户永远搜不到。
   profileClient?: ProfileClient;
-  onMessageAI?: (account: PlatformAIAccount) => void;
-  onOpenAIProfile?: (account: PlatformAIAccount) => void;
   onOpenHumanScene?: (person: RecommendPerson, sceneId: string) => void;
   onOpenHumanProfile?: (person: RecommendPerson) => void;
   // HOME-MORE-SHEET-003: 原型的"拼桌/邀约"是先选一句破冰开场白，再带着它
@@ -210,6 +251,9 @@ export function RequesterHome({
   //（PUBLIC 但 secure store 还有 userAccountId），此时拉必失败，弹了纯属噪音。
   onCreateScene?: ((tool: SceneToolId) => void) | undefined;
   onOpenSceneMap?: ((sceneId?: string) => void) | undefined;
+  // HOT-SCENES-PAGE-001：热榜「更多」的真实落点（排序/筛选/网格整页），
+  // 不是 onOpenSceneMap（那个是场景地图总览/详情）。没接就退回旧行为。
+  onOpenHotScenes?: (() => void) | undefined;
   sceneApiBaseUrl?: string | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   onChooserVisibilityChange?: (visible: boolean) => void;
@@ -241,6 +285,81 @@ export function RequesterHome({
   const [activityIndex, setActivityIndex] = useState(() => forYouSeed >> 7);
   const [placeIndex, setPlaceIndex] = useState(() => forYouSeed >> 11);
   const [chooser, setChooser] = useState<"person" | "time" | "activity" | "place" | null>(null);
+  // HOME-FORYOU-SELECT-001（2026-09-28，原型 deepseek_html_20260928_7d0503
+  // 的 combo-cta「选择」）：点一下直接进「确认这个组合」sheet，真的
+  // joinSelected 命令从那里发出——跟 DIRECT-INVITE-CONFIRM-001 同一条
+  // "先选、再确认、命令最后发"的规矩，不能一下单就把钱/名额的事定了。
+  // 用户实测反馈（"点击选择 就变成已选择 中间环节跳过了"）：先前"选择→
+  // 已选择→再点一下才进 sheet"的两段式，在真机上被读成"点了选择却什么
+  // 都没发生"，不是更清楚的确认，是多余的一步——去掉，一次点击直达 sheet。
+  const [joinConfirmOpen, setJoinConfirmOpen] = useState(false);
+  // HOME-FORYOU-ORDER-003（2026-09-28，原型 docs/design/references/
+  // Proxy_MyTickets_20260928_d7fef9.html「我的票券」）：报名成功之后进这一屏，
+  // 不是关掉 sheet 就完了。
+  // ⚠️ 这两步**共用一个 Modal**（`joinConfirmOpen`），`orderDone` 只切内容。
+  // 不许写成两个兄弟 Modal：报名成功那一批 state 里"关 A + 开 B"落在**同一次
+  // 提交**，iOS 在 A 还在 dismiss 的时候会丢掉 B 的 present —— 点了确认下单
+  // 什么都不出现、也不报错。整页 Modal 里再套 Modal 同理会被无声吞掉
+  // （HOME-MORE-SHEET-004；surfaces/badminton-companion.tsx 文件头第 1 条
+  // 把"整页只有一个 Modal，内部换屏只切 state"写成了这个仓库的规矩）。
+  const [orderDone, setOrderDone] = useState(false);
+  // HOME-FORYOU-ORDER-005（用户「这个已下单的☑️ 显示3s可以自动消失 停留在recipe
+  // 而不是持续」）：下单成功后顶部那块绿勾+「已下单」+ 人数/状态只闪 3 秒，
+  // 之后让出 hero 区 —— 留下面的票券本体（订单编号 + 活动/时间/地点/费用 +
+  // 一起的人 + 底部分享/联系）。触发点：orderDone 转 true 的瞬间开 3s 定时器；
+  // 关闭流程或重新提交时清掉。
+  const [orderHeroVisible, setOrderHeroVisible] = useState(false);
+  useEffect(() => {
+    if (!orderDone) {
+      setOrderHeroVisible(false);
+      return;
+    }
+    setOrderHeroVisible(true);
+    const timer = setTimeout(() => setOrderHeroVisible(false), 3000);
+    return () => clearTimeout(timer);
+  }, [orderDone]);
+  const [orderCodeCopied, setOrderCodeCopied] = useState(false);
+  // ORDER-NO-001：个人订单号（纯数字：场地类别码3位+越南日期+每日序号，如 1002609270002）。
+  // JoinActivity 成功 payload 带 orderNo；已下过单走 rejection 的 safeDetails。
+  // 老服务端没有该字段时回落活动 code（ORDER-002 的旧行为）。
+  const [orderNo, setOrderNo] = useState("");
+  // ORDER-RECIPE-001：服务端在下单那一刻存的票面快照（活动当时的样子 + 这次 For You
+  // 的选择）。成功页照它画票，跟「我的订单」是同一份数据；老服务端不下发时退回
+  // 用四宫格手头的数据拼一份（ticketSnapshot）。
+  const [orderSnapshot, setOrderSnapshot] = useState<ActivityOrderSnapshot | undefined>(undefined);
+  // HOME-FORYOU-ORDER-004（用户「点击确认下单 为什么没有下一步的UI」）：这单之前就下过
+  // （JoinActivity 回 ACTIVITY_ALREADY_JOINED）也照样进已下单页——票本来就在你手上，
+  // 只是副标题如实说「之前已经下过」，不假装这次新下了一单。
+  const [orderExisting, setOrderExisting] = useState(false);
+  function closeOrderFlow(): void {
+    setOrderDone(false);
+    setOrderHeroVisible(false);
+    setOrderExisting(false);
+    setOrderCodeCopied(false);
+    setOrderNo("");
+    setJoinConfirmOpen(false);
+  }
+  const [confirmNavMsg, setConfirmNavMsg] = useState<string | undefined>(undefined);
+  function openGridPlaceNavigation(place: { latitude: number; longitude: number }): void {
+    const urls = meetupDirectionsUrls({ lat: place.latitude, lng: place.longitude });
+    if (!urls || (place.latitude === 0 && place.longitude === 0)) {
+      setConfirmNavMsg("这个地点没有可用坐标，打不开导航");
+      return;
+    }
+    setConfirmNavMsg(undefined);
+    const url = Platform.OS === "ios" ? urls.apple : urls.google;
+    void Linking.openURL(url).catch(() => setConfirmNavMsg("打不开导航，请重试"));
+  }
+  // HOME-FORYOU-LOCK-001（2026-09-27，原型 deepseek_html_20260927_548d6b「可换可锁」）：
+  // 每个格子可锁定（金框 + 右上角锁）。锁定后： remix 跳过该轴、chooser 拒开。
+  const [lockedSlots, setLockedSlots] = useState<ReadonlySet<"person" | "time" | "activity" | "place">>(() => new Set());
+  function toggleSlotLock(slot: "person" | "time" | "activity" | "place"): void {
+    setLockedSlots((prev) => {
+      const next = new Set(prev);
+      if (next.has(slot)) next.delete(slot); else next.add(slot);
+      return next;
+    });
+  }
   // HOME-AVATAR-FALLBACK-001: 真人头像挂了回落首字母（图走服务端 thumb；
   // 加载失败不断白圈）。与 ai-assistants-row 的 broken 集同 pattern，按人记。
   const [brokenAvatarIds, setBrokenAvatarIds] = useState<ReadonlySet<string>>(new Set());
@@ -307,7 +426,6 @@ export function RequesterHome({
   }
   // 破冰开场白跟着语言走（原来写死在模块级数组里，切语言不跟着变）。
   const icebreakerLines = ICEBREAKER_LINES[lang] ?? ICEBREAKER_LINES.zh;
-  const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>(BUNDLED_AI_COMPANIONS);
   type HomeRelationshipState = "NONE" | "OUTGOING" | "INCOMING" | "FRIEND";
   const [relationshipStates, setRelationshipStates] = useState<ReadonlyMap<string, HomeRelationshipState>>(() => new Map());
   const [relationshipBusyId, setRelationshipBusyId] = useState<string | undefined>(undefined);
@@ -554,11 +672,9 @@ export function RequesterHome({
     return t("friendLabelAdd", { name });
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    if (aiAccounts) void trackHomeLoad(aiAccounts.listRecommended()).then((accounts) => { if (!cancelled && accounts.length > 0) setRecommendedAI(accounts); }).catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [aiAccounts, homeRefreshNonce]);
+  // SCENE-HOME-HOT-RAIL-001（2026-09-27）：AI 推荐行下架，目录接口的
+  // listRecommended 拉取连同对应 prop 一起从首页摘除。
+  // /v1/ai/assistants 的其他 surface 不受影响。
 
   // R15.34: 算当前 mode 的推荐 feed + 应用筛选过滤
   //   - filter: 多个 chip 可叠加 (附近 AND 最近活跃), 都需满足
@@ -600,7 +716,15 @@ export function RequesterHome({
   // —— category（SCENE-CATEGORY-001 的封闭顶类，决定入口卡写「N 家」还是
   // 「N 个」）和 visitedCount（SCENE-REAL-COUNTS-001 的真实派生计数）。
   // 以前没透传，首页就没法说出任何真实数字。
-  type SceneBrief = { id: string; name: string; area: string; type: string; description: string; best: string; active: boolean; imageUrl: string; category: string; visitedCount: number };
+  // SCENE-RATING-CHIP-001（对齐 deepseek_html_20260928_7d0503「新版首页」的
+  // 热门场景卡）：接口本来就有 rating/ratingCount（SCENE-REVIEW-001），首页
+  // 这份 SceneBrief 之前没透传，跟 HotScenesSurface 已经在用的字段对不齐。
+  // 两个字段必须成对判断——count > 0 才算「有评分」，没数据不冒充 0 分。
+  // SCENE-DISTANCE-BADGE-001：latitude/longitude 加进来才能算距离——服务端
+  // 这两个字段本来就 always-present（无 omitempty），只是这份 SceneBrief
+  // 之前没透传。缺真实坐标就是 NaN，sceneDistanceMeters 的 finite 检查会
+  // 挡住，不会冒充一个假距离。
+  type SceneBrief = { id: string; name: string; area: string; type: string; description: string; best: string; active: boolean; imageUrl: string; category: string; visitedCount: number; latitude: number; longitude: number; rating?: number | undefined; ratingCount?: number | undefined };
   const [sceneBriefs, setSceneBriefs] = useState<SceneBrief[]>([]);
   useEffect(() => {
     if (!sceneApiBaseUrl) return;
@@ -621,12 +745,46 @@ export function RequesterHome({
           imageUrl: typeof s.imageUrl === "string" ? s.imageUrl : "",
           category: typeof s.category === "string" ? s.category : "",
           visitedCount: typeof s.visitedCount === "number" && Number.isFinite(s.visitedCount) ? s.visitedCount : 0,
+          latitude: typeof s.latitude === "number" ? s.latitude : NaN,
+          longitude: typeof s.longitude === "number" ? s.longitude : NaN,
+          ...(typeof s.rating === "number" && Number.isFinite(s.rating) ? { rating: s.rating } : {}),
+          ...(typeof s.ratingCount === "number" && Number.isFinite(s.ratingCount) ? { ratingCount: s.ratingCount } : {}),
         })));
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [sceneApiBaseUrl, homeRefreshNonce]);
   const activeSceneCount = sceneBriefs.filter((s) => s.active).length;
+
+  // SCENE-DISTANCE-BADGE-001：真实设备定位，取不到就没有距离——不编一个位置
+  // （同 hot-scenes.tsx / scene-shop-directory.tsx 的口径）。
+  const [homeOrigin, setHomeOrigin] = useState<SceneOrigin>();
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const fix = await getCurrentFix(expoLocationApi, { requestPermission: true });
+        if (!cancelled && fix) setHomeOrigin({ latitude: fix.latitude, longitude: fix.longitude });
+      } catch { /* 没定位：热门场景卡不带距离角标 */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // SCENE-HOME-HOT-RAIL-001：热榜 = 全部 active 场景按真实 visitedCount 降序取
+  // 前 9（commander 2026-09-27：多做几个卡片）。0 去过的场景照进（真实数字
+  // 照写「0 人去过」），但 TOP N 角标只给**真的有去过人数**的前 3 ——
+  // 0 去过挂 TOP 是冒充热榜。同分按 id 稳定排序，避免刷新时卡片跳位。
+  const hotScenes = useMemo(() => (
+    sceneBriefs
+      .filter((s) => s.active)
+      .sort((a, b) => b.visitedCount - a.visitedCount || a.id.localeCompare(b.id))
+      .slice(0, 9)
+  ), [sceneBriefs]);
+  const hotSceneImageUrl = (scene: SceneBrief): string | undefined => {
+    if (!scene.imageUrl) return undefined;
+    if (/^https?:\/\//i.test(scene.imageUrl)) return scene.imageUrl;
+    return sceneApiBaseUrl ? `${sceneApiBaseUrl.replace(/\/$/, "")}/${scene.imageUrl.replace(/^\//, "")}` : undefined;
+  };
   const previewScene = humanScenePreview ? sceneBriefs.find((scene) => scene.id === humanScenePreview.sceneId) : undefined;
   const previewSceneImage = previewScene?.imageUrl
     ? (/^https?:\/\//i.test(previewScene.imageUrl) ? previewScene.imageUrl : sceneApiBaseUrl ? `${sceneApiBaseUrl.replace(/\/$/, "")}/${previewScene.imageUrl.replace(/^\//, "")}` : undefined)
@@ -647,7 +805,7 @@ export function RequesterHome({
       const at = distinctTimes.indexOf(s.id);
       if (at >= 0) setTimeIndex(at);
     } else if (s.slot === "activity") {
-      const at = storeActivities.findIndex((a) => a.activityId === s.id);
+      const at = sceneActivities.findIndex((a) => a.activityId === s.id);
       if (at >= 0) setActivityIndex(at);
     } else {
       const at = sceneBriefs.findIndex((scene) => scene.id === s.id);
@@ -664,16 +822,24 @@ export function RequesterHome({
   function remixForYou(): void {
     // HOME-FORYOU-POOL-001：「整组换」改成**真随机**重配，而不是四个轴各 +1 轮转。
     // +1 的序列是固定的，用户按几次就看出来了 —— 那和「随机推荐」直接矛盾。
-    if (filteredPeople.length > 1) setPersonIndex(Math.floor(Math.random() * filteredPeople.length));
-    if (storeActivities.length > 1) setActivityIndex(Math.floor(Math.random() * storeActivities.length));
-    if (distinctTimes.length > 1) setTimeIndex(Math.floor(Math.random() * distinctTimes.length));
-    if (sceneBriefs.length > 1) setPlaceIndex(Math.floor(Math.random() * sceneBriefs.length));
+    // HOME-FORYOU-LOCK-001：锁定的轴**跳过**不重掷（原型的「点 ⤨ 只换未锁定的」）。
+    // 注意轴间耦合依旧：活动是主轴，锁「时间/地点」只保住各自的 index，活动
+    // 重掷时它们仍会跟着活动走 —— 想全保就四格都锁。
+    if (!lockedSlots.has("person") && filteredPeople.length > 1) setPersonIndex(Math.floor(Math.random() * filteredPeople.length));
+    if (!lockedSlots.has("activity") && sceneActivities.length > 1) setActivityIndex(Math.floor(Math.random() * sceneActivities.length));
+    if (!lockedSlots.has("time") && distinctTimes.length > 1) setTimeIndex(Math.floor(Math.random() * distinctTimes.length));
+    if (!lockedSlots.has("place") && sceneBriefs.length > 1) setPlaceIndex(Math.floor(Math.random() * sceneBriefs.length));
     showResponse(t("recombo"), t("recomboSub"));
     setSearchQuery("");
     setClarifyChoices(undefined);
   }
 
   function refineHomeSearchSlot(slot: "person" | "time" | "activity" | "place"): void {
+    // HOME-FORYOU-LOCK-001：锁定的格子不接受更换 —— 跟点格子一个口径。
+    if (lockedSlots.has(slot)) {
+      showResponse(t("lockedBlock"), t("lockedBlockSub"));
+      return;
+    }
     setSearchQuery("");
     setClarifyChoices(undefined);
     setChooser(slot);
@@ -727,7 +893,7 @@ export function RequesterHome({
     // 5. 散步 / City Walk -> 改活动
     if (q.includes("散步") || q.includes("City Walk") || q.includes("走走")) {
       setClarifyChoices(undefined);
-      const walkIdx = storeActivities.findIndex((a) => a.title.includes("散步") || a.title.includes("Walk"));
+      const walkIdx = sceneActivities.findIndex((a) => a.title.includes("散步") || a.title.includes("Walk"));
       if (walkIdx >= 0) setActivityIndex(walkIdx);
       showResponse(t("activityToWalk"), t("othersUnchanged"));
       return;
@@ -740,7 +906,7 @@ export function RequesterHome({
       // 按名字找人在改名或存在同名用户时会串到别人身上。
       const linhIdx = filteredPeople.findIndex((p) => p.id === "u_linh");
       if (linhIdx >= 0) setPersonIndex(linhIdx);
-      const coffeeActIdx = storeActivities.findIndex((a) => a.title.includes("咖啡"));
+      const coffeeActIdx = sceneActivities.findIndex((a) => a.title.includes("咖啡"));
       if (coffeeActIdx >= 0) setActivityIndex(coffeeActIdx);
       const beanSceneIdx = sceneBriefs.findIndex((s) => s.name.toLowerCase().includes("bean"));
       if (beanSceneIdx >= 0) setPlaceIndex(beanSceneIdx);
@@ -784,7 +950,16 @@ export function RequesterHome({
 
   // 活动数据只供四宫格“选活动”使用。完整活动发现和报名归市场活动模块，
   // Home 不再复制一条活动列表。
-  type StoreActivityBrief = { activityId: string; title: string; venueName: string; time: string; joined: number; capacity: number; coverImageUrl: string | undefined; realitySceneId: string | undefined };
+  // HOME-FORYOU-ORDER-001：确认下单页要诚实地区分"免费/收费"（用户反馈：
+  // "免费收费只是一个选择啊"，不能预设永远免费）——moneyFlow/priceLabel/
+  // venueSpend/desc/benefit 服务端本来就发了（Activity 契约里就有），
+  // 只是这个精简 brief 类型之前没接，现在补上。
+  // HOME-FORYOU-ORDER-002（用户："for you的确认下单页面还缺了一个订单编号"）：
+  // ORDER-NO-001 之后加入活动有独立的个人订单号（JoinActivity 回 orderNo，
+  // 纯数字：场地类别码3位+越南日期+每日序号，如 1002609270002；重复下单走 safeDetails 带回原号）。
+  // 下单页优先显示个人订单号；老服务端没有该字段时回落活动自己的 code
+  //（PX-A-yymmdd-####，PublishActivity 时生成，老的/种子活动没有就是没有，不补假号）。
+  type StoreActivityBrief = { activityId: string; code: string | undefined; title: string; venueName: string; time: string; people: string; joined: number; capacity: number; coverImageUrl: string | undefined; realitySceneId: string | undefined; priceLabel: string; moneyFlow: string; venueSpend: string; desc: string; benefit: string };
   const [storeActivities, setStoreActivities] = useState<StoreActivityBrief[]>([]);
   useEffect(() => {
     if (!activities) return;
@@ -794,19 +969,72 @@ export function RequesterHome({
         if (cancelled) return;
         const briefs = list.map((a) => ({
           activityId: a.activityId,
+          code: a.code,
           title: a.title,
           venueName: a.venueName,
           time: a.time,
+          people: a.people,
           joined: a.joined,
           capacity: a.capacity ?? 0,
           coverImageUrl: a.coverImageUrl,
           realitySceneId: a.realitySceneId,
+          priceLabel: a.priceLabel,
+          moneyFlow: a.moneyFlow,
+          venueSpend: a.venueSpend,
+          desc: a.desc,
+          benefit: a.benefit,
         }));
         setStoreActivities(briefs);
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [activities, homeRefreshNonce]);
+  // HOME-FORYOU-ORDER-GUARD-001（用户「确认下单后 收到 recipe 再次返回 home 可以同参数
+  // 再次下单 这个违法基本资源冲突逻辑 要做守卫和检查提示」）：Home 知道我手上已有
+  // 哪些单（跟「我的订单」同一个来源 ListMyActivities），四宫格下单前先查冲突。
+  // 未登录 / 读失败就是空列表——服务端照样会拒重复单和同时段单（真正的守卫在那）。
+  type MyForYouOrder = ExistingOrder & { snapshot?: ActivityOrderSnapshot | undefined };
+  const [myOrders, setMyOrders] = useState<MyForYouOrder[]>([]);
+  useEffect(() => {
+    if (!activities) return;
+    let cancelled = false;
+    void activities.listMyActivities()
+      .then((payload) => {
+        if (cancelled) return;
+        setMyOrders(payload.joined.map((a) => {
+          const order = payload.joinOrders.find((o) => o.activityId === a.activityId);
+          return {
+            activityId: a.activityId,
+            title: order?.snapshot?.activity.title ?? a.title,
+            time: order?.snapshot?.activity.time ?? a.time,
+            orderNo: order?.orderNo,
+            cancelled: order?.state === "CANCELLED",
+            snapshot: order?.snapshot,
+          };
+        }));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [activities, homeRefreshNonce]);
+  function rememberMyOrder(activityId: string, orderNumber: string | undefined, snapshot: ActivityOrderSnapshot | undefined): void {
+    const act = storeActivities.find((a) => a.activityId === activityId);
+    setMyOrders((prev) => prev.some((o) => o.activityId === activityId) ? prev : [...prev, {
+      activityId,
+      title: snapshot?.activity.title ?? act?.title ?? "",
+      time: snapshot?.activity.time ?? act?.time ?? "",
+      orderNo: orderNumber,
+      snapshot,
+    }]);
+  }
+  function orderConflictText(conflict: OrderConflict): string {
+    return conflict.kind === "ALREADY_ORDERED"
+      ? t("orderConflictAlready", { orderNo: conflict.orderNo ?? "—" })
+      : t("orderConflictTime", { time: conflict.time, title: conflict.title });
+  }
+
+  // HOME-FORYOU-SCENE-001：四宫格「场景」格只从挂在真实咖啡店场景上的活动里选；
+  // activityIndex 一律索引这份列表（选择器 / 整组换 / 意图预设 / 渲染同一份）。
+  const sceneActivities = useMemo(() => activitiesAtCoffeeShops(storeActivities, sceneBriefs), [storeActivities, sceneBriefs]);
 
   // Home Search/Conversation v3 — 一个输入框同时做实体匹配和模型对话。
   // 索引里的四个分组**来源不一样**，别把它们混为一谈：
@@ -816,7 +1044,7 @@ export function RequesterHome({
   //     本地推荐，够长（≥2 码点）且有 ProfileClient 就再问服务端全站用户，
   //     结果独立展示。只看本地会漏掉新注册用户。
   // 列表为空时 lookup 自然无候选，输入直接走模型对话。
-  const distinctTimes = [...new Set(storeActivities.map((a) => a.time).filter(Boolean))];
+  const distinctTimes = [...new Set(sceneActivities.map((a) => a.time).filter(Boolean))];
   const searchIndex = buildHomeSearchIndex({
     people: filteredPeople.map((p) => ({ id: p.id, name: p.name, bio: p.bio })),
     activities: storeActivities.map((a) => ({ id: a.activityId, title: a.title, venueName: a.venueName })),
@@ -840,6 +1068,12 @@ export function RequesterHome({
           return t("joinAlready");
         case "ACTIVITY_FULL":
           return t("joinFull");
+        case "FOR_YOU_COMPANION_REQUIRED":
+          return t("comboNeedPerson");
+        case "ACTIVITY_TIME_CONFLICT": {
+          const details = error.result.error?.safeDetails ?? {};
+          return t("orderConflictTime", { time: typeof details.time === "string" ? details.time : "", title: typeof details.title === "string" ? details.title : "" });
+        }
         case "ACTIVITY_NOT_FOUND":
           return t("joinGone");
         case "ACTIVITY_ACTOR_REQUIRED":
@@ -860,23 +1094,51 @@ export function RequesterHome({
     return t("networkError");
   }
 
-  async function joinSelected(activityId: string | undefined): Promise<void> {
+  async function joinSelected(activityId: string | undefined, recipe?: ActivityJoinRecipe): Promise<"joined" | "already" | "failed"> {
     setJoinMsg(undefined);
+    setOrderSnapshot(undefined);
     if (!activityId) {
       setJoinMsg(t("pickActivityFirst"));
-      return;
+      return "failed";
     }
     if (!activities) {
       setJoinMsg(t("loginToJoin"));
-      return;
+      return "failed";
+    }
+    // HOME-FORYOU-PERSON-001：For You 下单必须带同行人（服务端同样会拒）。
+    if (recipe?.source === "FOR_YOU" && !recipe.companion) {
+      setJoinMsg(t("comboNeedPerson"));
+      return "failed";
+    }
+    // HOME-FORYOU-ORDER-GUARD-001：提交前再查一次资源冲突（四宫格那一步已经拦过，
+    // 这里防确认页开着期间状态变了）。
+    const target = storeActivities.find((a) => a.activityId === activityId);
+    const conflict = target ? detectOrderConflict({ activityId, time: target.time }, myOrders) : undefined;
+    if (conflict) {
+      setJoinMsg(orderConflictText(conflict));
+      return "failed";
     }
     setJoinBusy(true);
     try {
-      const result = await activities.join(activityId);
+      const result = await activities.join(activityId, recipe);
       setStoreActivities((prev) => prev.map((a) => (a.activityId === activityId ? { ...a, joined: result.activity.joined } : a)));
       setJoinMsg(t("joinedWithCount", { n: result.activity.joined }));
+      setOrderNo(result.orderNo ?? "");
+      setOrderSnapshot(result.snapshot ?? undefined);
+      rememberMyOrder(activityId, result.orderNo, result.snapshot ?? undefined);
+      return "joined";
     } catch (e) {
+      if (e instanceof ActivityCommandRejectedError && e.result.error?.errorCode === "ACTIVITY_ALREADY_JOINED") {
+        const prior = e.result.error?.safeDetails?.orderNo;
+        setOrderNo(typeof prior === "string" ? prior : "");
+        // 重复下单：服务端把当初存的票面带回来，照原样画（不是用这次四宫格的选择）。
+        const priorSnapshot = ActivityOrderSnapshotSchema.safeParse(e.result.error?.safeDetails?.snapshot);
+        setOrderSnapshot(priorSnapshot.success ? priorSnapshot.data : undefined);
+        rememberMyOrder(activityId, typeof prior === "string" ? prior : undefined, priorSnapshot.success ? priorSnapshot.data : undefined);
+        return "already";
+      }
       setJoinMsg(joinErrorMessage(e));
+      return "failed";
     } finally {
       setJoinBusy(false);
     }
@@ -1000,129 +1262,6 @@ export function RequesterHome({
       ) : null}
       {/* 点左侧 AI 标识后在 Home 内展开独立对话输入框；默认输入仍只搜索。 */}
       {conversationPanel ?? null}
-      {/* R15.35: 去掉 “今天想做什么？” 标题 — 是解释性废话，
-          用户已看 chrome 顶部 LocationContext，进来就看到 mode chips，
-          不需要再加一层 招呼。直接让 mode chips 成为第一个交互点。 */}
-
-      {/* R15.34: 推荐人 mode 切换 — 单行路由。
-          6 个 SCENE_TOOLS + 2 个用户列出的额外场景（翻译、陪诊）。
-          默认走 PHOTO。点切 mode 会重置 activeFilters (筛选跟模式走)。 */}
-      <View style={styles.recommendModes}>
-        <FilterChipRail
-          items={RECOMMEND_MODE_ORDER.map((modeId) => {
-            const feed = SCENE_RECOMMEND[modeId];
-            const actionIconId = modeId === "PHOTO" ? "photo" : modeId === "COMPANION" ? "city-walk" : modeId === "COFFEE_MEAL" ? "dining" : modeId === "ACTIVITY" ? "music" : modeId === "TRIP" ? "travel" : modeId === "CREATOR" ? "explore-store" : modeId === "TRANSLATE" || modeId === "HOSPITAL" ? "translation" : modeId === "MEDICAL" ? "urban-support" : "city-walk";
-            return {
-              id: modeId,
-              assetIcon: SCENE_ACTIONS.find((action) => action.id === actionIconId)!.icon,
-              label: feed ? (
-                modeId === "PHOTO" ? t("modePhoto") : modeId === "COMPANION" ? t("modeCompanion") : modeId === "COFFEE_MEAL" ? t("modeMeal") : modeId === "ACTIVITY" ? t("modeActivity") : modeId === "TRIP" ? t("modeTrip") : modeId === "CREATOR" ? t("modeCreator") : modeId === "TRANSLATE" ? t("modeTranslate") : t("modeMedical")
-              ) : modeId
-            };
-          })}
-          activeId={recommendMode}
-          onChange={(id) => {
-            setRecommendMode(id);
-            setActiveFilters([]);
-          }}
-          marginBottom={4}
-          testPrefix="推荐人模式"
-        />
-      </View>
-
-      {/* R15.34: 推荐人 section — 标题 + stories 横滑 + cards 横滑。
-          stories 是小圆形 avatar (首字母 + online 指示点 + 共同好友/场景
-          tag)，cards 是 165×220 portrait card (大首字母 + 距离 + 2 tag)。 */}
-      <View style={styles.peopleHead}>
-        <View style={{ flex: 1 }}>
-          <View style={styles.peopleTitleRow}><Text selectable style={styles.peopleTitle}>{t("title")}</Text><View style={styles.humanBadge}><Text selectable style={styles.humanBadgeText}>{t("humanBadge")}</Text></View></View>
-        </View>
-        {/* HOME-I18N-002（2026-09-23）：语言入口不在首页页头，挪到「更多」整页的
-            「中文」chip（见下方 filterChips）。 */}
-        <Pressable onPress={() => setFilterSheetOpen(true)} style={styles.filterTrigger} accessibilityLabel={t("more")}>
-          <Text selectable style={styles.filterTriggerText}>{t("more")}</Text>
-        </Pressable>
-      </View>
-
-      {/* R34.5 frozen rule: the discovery node itself is only circle avatar + name. */}
-      {/* R15.34.2: 包 HorizontalSwipeRail 隔离 iOS 系统 tab 切换手势 */}
-      <HorizontalSwipeRail
-        style={styles.stories}
-        contentContainerStyle={styles.storiesContent}
-      >
-        {filteredPeople.map((p) => (
-          <Pressable
-            key={`story:${p.id}`}
-            onPress={() => { setPublicHistoryOpen(false); setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId }); }}
-            style={styles.story}
-            // 用 chipOnline 而不是另立一个 online 键：原型里这两个键
-            // （online / chipOnline）6 种语言的取值**完全相同**，留两份只会
-            // 以后改一处漏一处。
-            accessibilityLabel={`${p.name} · ${p.online ? t("chipOnline") : t("offline")}`}
-          >
-            <View style={styles.avatar}>
-              <View style={styles.avatarInner}>
-                {p.photoUri && !brokenAvatarIds.has(p.id) ? <Image source={{ uri: p.photoUri }} style={styles.avatarPhoto} onError={() => markAvatarBroken(p.id)} /> : <Text selectable style={styles.avatarInitials}>{p.initials}</Text>}
-              </View>
-              {p.online ? <View style={styles.onlineDot} /> : null}
-              <Pressable
-                onPress={() => void handleHomeFriend(p.id, p.name)}
-                disabled={relationshipBusyFor(p.id) || relationshipStateFor(p.id) === "OUTGOING" || relationshipStateFor(p.id) === "FRIEND"}
-                style={[styles.addBadge, relationshipStateFor(p.id) === "FRIEND" && styles.addBadgeDone, relationshipStateFor(p.id) === "OUTGOING" && styles.addBadgePending]}
-                accessibilityLabel={relationshipLabel(p.id, p.name)}
-              >
-                <Text selectable style={styles.addBadgeText}>{relationshipGlyph(p.id)}</Text>
-              </Pressable>
-            </View>
-            <Text selectable style={styles.storyName} numberOfLines={1}>{p.name}</Text>
-          </Pressable>
-        ))}
-      </HorizontalSwipeRail>
-
-      {relationshipMsg ? (
-        <Text selectable style={styles.followMsg}>{relationshipMsg}</Text>
-      ) : null}
-
-      {/* AI-ROW-DUPE-001: 首页只保留一行 AI 推荐。曾经在这上面还挂了一条
-          AI 助手横滑行（同一个组件、同一个服务端目录 /v1/ai/assistants），
-          于是页面出现两条一模一样的 AI 生成横滑行。删掉上面那条，
-          留下下面这条带「AI 生成」徽标的「AI 推荐」。再挂回去会被门禁挡下。 */}
-      {recommendedAI.length > 0 ? <View style={styles.aiSection}>
-        <View style={styles.aiSectionHead}>
-          <View><Text selectable style={styles.aiTitle}>{t("aiRecommend")}</Text><Text selectable style={styles.aiSub}>{t("aiRecommendSub")}</Text></View>
-          <View style={styles.aiBadge}><Text selectable style={styles.aiBadgeText}>{t("aiGenerated")}</Text></View>
-        </View>
-        <HorizontalSwipeRail style={styles.aiRail} contentContainerStyle={styles.aiRailContent}>
-          {recommendedAI.map((account) => (
-            <Pressable key={account.accountId} accessibilityLabel={t("viewProfileA11y", { name: account.displayName })} onPress={() => onOpenAIProfile?.(account)} style={styles.aiCard}>
-              <View style={styles.aiAvatarWrap}>
-                <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`ai-avatar:${account.accountId}:${account.avatarVersion ?? 1}`} source={aiAccountPhoto(account)} style={styles.aiAvatar} transition={0} />
-                {/* AI-FRIEND-DEAD-PENDING-001（按钮级合规审计 2026-09-22）：
-                    平台 AI 账号不会 accept 好友申请。旧的 + 号却走真人同一套
-                    SendFriendRequest，于是生成一条永远卡在 PENDING 的死记录，
-                    UI 还诚实地告诉用户「好友申请已发送」。
-
-                    这个位置用户的真实意图是「接触她」；AI 已有完整发消息链，
-                    所以 + 改成消息箭头，直接进对话。不是隐藏按钮，也不是弹一句
-                    "AI 不接受"后什么都不做 —— 后者仍是死动作。
-
-                    服务端 relationship 另有 AI 账号拒绝守卫（AI-FRIEND-REQUEST-001），
-                    防 curl / 老客户端继续造 PENDING；这里解决当前产品语义。 */}
-                <Pressable
-                  onPress={(event) => { event.stopPropagation(); onMessageAI?.(account); }}
-                  disabled={!onMessageAI}
-                  style={styles.addBadge}
-                  accessibilityLabel={t("messageToA11y", { name: account.displayName })}
-                >
-                  <Text selectable style={styles.addBadgeText}>↗</Text>
-                </Pressable>
-              </View>
-              <Text selectable style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
-              <Text selectable style={styles.aiHandle} numberOfLines={1}>{t("aiGenerated")}</Text>
-            </Pressable>
-          ))}
-        </HorizontalSwipeRail>
-      </View> : null}
       {/* R34_12_1 4-Grid: selection stays with discovery content; the unified
           search/model entry itself lives at the top of Home. */}
       {onChat ? (
@@ -1135,45 +1274,112 @@ export function RequesterHome({
             // 现在：场地跟着活动走（口径与活动选择器 :1236 一致），时间直接取活动自己的；
             // 只有活动没有已知场地时，才退回 placeIndex 那条兜底。
             const gridPerson = filteredPeople.length > 0 ? filteredPeople[personIndex % filteredPeople.length] : undefined;
-            const gridActivity = storeActivities.length > 0 ? storeActivities[activityIndex % storeActivities.length] : undefined;
+            const gridActivity = sceneActivities.length > 0 ? sceneActivities[activityIndex % sceneActivities.length] : undefined;
             const gridActivitySceneId = gridActivity ? sceneIdOfActivity(gridActivity, sceneBriefs) : undefined;
-            const gridPlace = (gridActivitySceneId ? sceneBriefs.find((s) => s.id === gridActivitySceneId) : undefined)
-              ?? (sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined);
+            // 可用门禁（圆圈刷新的核心测试点）：活动是唯一“成立”判据——sceneActivities
+            // 只收挂真实咖啡店的活动（activitiesAtCoffeeShops），每个都有已知场地。
+            // 没有可用活动就不配组合：人/地点/时间单独摆出来也组不成一次可约，
+            // 不可用的不能被刷到。时间是个例外：活动本身没写时间时，用池子里别的
+            // 真实活动时间顶一下（时间值本身是真实档位，不影响“可约”）。
+            if (!gridActivity) return null;
+            const gridPlace = gridActivitySceneId ? sceneBriefs.find((s) => s.id === gridActivitySceneId) : undefined;
+            if (!gridPlace) return null;
             const gridTime = gridActivity?.time || (distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined);
-            if (!gridPerson && !gridActivity && !gridPlace && !gridTime) return null;
+            // HOME-FORYOU-CONFLICT-001（用户："自由切换被派生了...如果有资源
+            // 冲突 要的就是提示 点击选择不能下一步 提示换"）：地点/时间只在
+            // 用户**真的锁定**了才拿去跟活动的真实场地/时间比——没锁的轴本来
+            // 就该跟着活动走，那不叫冲突。冲突存在时禁用「选择」+ 显示提示，
+            // 不再让派生悄悄吃掉锁定。
+            const lockedPlaceScene = lockedSlots.has("place") && sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined;
+            const lockedTimeValue = lockedSlots.has("time") && distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined;
+            // 显示冻结：锁定的地点/时间显示锁定的值，不跟活动静默走（上面派生只
+            // 负责未锁定的默认行为 + 冲突判定）。锁了还变就是 CONFLICT-001 说的
+            // “被派生”——冻结之后冲突提示 + 禁用选择才真正有意义。
+            const displayPlace = lockedSlots.has("place") && lockedPlaceScene !== undefined ? lockedPlaceScene : gridPlace;
+            const displayTime = lockedSlots.has("time") && lockedTimeValue !== undefined ? lockedTimeValue : gridTime;
+            const comboConflicts = detectComboConflicts(gridActivity, sceneBriefs, { place: lockedPlaceScene, time: lockedTimeValue });
+            const comboConflictText = comboConflicts.map((conflict) => conflict.slot === "place"
+              ? t("comboConflictPlace", { locked: conflict.lockedSceneName, activity: conflict.activitySceneName ?? "" })
+              : t("comboConflictTime", { locked: conflict.lockedTime, activity: conflict.activityTime })).join(" · ");
+            // HOME-FORYOU-PERSON-001（用户「人呢 没人怎么同行呢 没人怎么进行下一步 逻辑不通
+            // 违背规则」）：For You 是「人 + 时间 + 场景 + 地点」四样一起下单，没人就不是
+            // 一个组合——不许进确认下单，也不许下出一张「没有同行人」的票。
+            // HOME-FORYOU-ORDER-GUARD-001：已经下过这一单 / 这个时间段已经有单，也不能再下。
+            const orderConflict = detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time }, myOrders);
+            const existingOrder = orderConflict?.kind === "ALREADY_ORDERED" ? myOrders.find((o) => o.activityId === gridActivity.activityId && !o.cancelled) : undefined;
+            const comboBlocked = comboConflicts.length > 0 || !gridPerson || orderConflict !== undefined;
+            const comboBlockText = orderConflict ? orderConflictText(orderConflict) : !gridPerson ? t("comboNeedPerson") : comboConflictText;
             const remixAll = (): void => {
-              // HOME-FORYOU-POOL-001: 中心键 = 真随机重配（与 remixForYou 同一条口径）。
-              // 活动是主轴（场地 / 时间都跟着它），所以它必须重掷。
-              if (filteredPeople.length > 1) setPersonIndex(Math.floor(Math.random() * filteredPeople.length));
-              if (storeActivities.length > 1) setActivityIndex(Math.floor(Math.random() * storeActivities.length));
-              if (distinctTimes.length > 1) setTimeIndex(Math.floor(Math.random() * distinctTimes.length));
-              if (sceneBriefs.length > 1) setPlaceIndex(Math.floor(Math.random() * sceneBriefs.length));
+              // HOME-FORYOU-LOCK-001：中心键与 remixForYou 收成**同一条**重配链
+              // （锁定轴跳过的口径只维护一份）。
+              remixForYou();
             };
-            const composed = [gridPerson ? t("withPerson", { name: gridPerson.name }) : "", gridTime ?? "", gridActivity ? gridActivity.title : "", gridPlace ? `@${gridPlace.name}` : ""].filter(Boolean).join(" ");
+            const composed = [gridPerson ? t("withPerson", { name: gridPerson.name }) : "", displayTime ?? "", gridActivity && gridActivity.venueName !== displayPlace?.name ? gridActivity.venueName : "", displayPlace ? `@${displayPlace.name}` : ""].filter(Boolean).join(" ");
+            // HOME-FORYOU-DEDUP-001（用户「three beans cau giay 有重复的 3 个」）：
+            // 场景（店）就是活动的承载场所，店名只在「场景」格出现一次——
+            // 时间格副标题不再抄店名，地点格改显示区域（Cầu Giấy），场景格
+            // 店名去掉跟地点格重复的「· 区域」后缀。
+            const sceneShopName = gridActivity ? stripAreaSuffix(gridActivity.venueName, displayPlace?.area) : "";
+            // ORDER-RECIPE-001：这次下单要存进票面的 For You 选择（能下单时没有锁定冲突，
+            // 地点/时间就是活动真实的那一份）。头像只有远端地址才存得下（打包在 App 里的
+            // 图没有地址），服务端也只收 http(s)。
+            const forYouRecipe: ActivityJoinRecipe = {
+              source: "FOR_YOU",
+              ...(gridTime ? { time: gridTime } : {}),
+              place: { name: gridPlace.name, ...(gridPlace.area ? { area: gridPlace.area } : {}) },
+              ...(gridPerson ? { companion: { id: gridPerson.id, name: gridPerson.name, ...(gridPerson.bio ? { bio: gridPerson.bio } : {}), ...(typeof gridPerson.photoUri === "string" && /^https?:\/\//.test(gridPerson.photoUri) ? { photoUrl: gridPerson.photoUri } : {}) } } : {}),
+            };
+            const ticketSnapshot: ActivityOrderSnapshot = orderSnapshot ?? {
+              orderNo: orderNo || gridActivity.code || gridActivity.activityId,
+              orderedAt: new Date().toISOString(),
+              source: "FOR_YOU",
+              activity: { activityId: gridActivity.activityId, title: gridActivity.title, priceLabel: gridActivity.priceLabel, moneyFlow: gridActivity.moneyFlow, venueSpend: gridActivity.venueSpend, venueName: gridActivity.venueName, time: gridActivity.time, joined: gridActivity.joined, capacity: gridActivity.capacity },
+              ...(forYouRecipe.time ? { time: forYouRecipe.time } : {}),
+              ...(forYouRecipe.place ? { place: forYouRecipe.place } : {}),
+              ...(forYouRecipe.companion ? { companion: forYouRecipe.companion } : {}),
+            };
+            const ticketCompanionPhoto = gridPerson && ticketSnapshot.companion?.id === gridPerson.id && gridPerson.photoUri ? { uri: gridPerson.photoUri } : undefined;
             const tiles = [
-              gridPerson ? { key: `person:${gridPerson.id}`, slot: "person" as const, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: t("tilePersonSub") } : undefined,
-              gridTime ? { key: `time:${gridTime}`, slot: "time" as const, imageUri: gridPlace?.imageUrl, glyph: "◷", label: gridTime, sub: gridPlace ? gridPlace.name : t("tileTime") } : undefined,
-              gridActivity ? { key: `act:${gridActivity.activityId}`, slot: "activity" as const, imageUri: gridPlace?.imageUrl, glyph: "☕", label: gridActivity.title, sub: gridActivity.venueName } : undefined,
-              gridPlace ? { key: `place:${gridPlace.id}`, slot: "place" as const, imageUri: gridPlace.imageUrl, glyph: "●", label: gridPlace.name, sub: t("tilePlace") } : undefined,
+              gridPerson
+                ? { key: `person:${gridPerson.id}`, slot: "person" as const, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: t("tilePersonSub") }
+                : { key: "person:none", slot: "person" as const, imageUri: undefined, glyph: "●", label: t("tileNoPerson"), sub: t("tileNoPersonSub") },
+              displayTime ? { key: `time:${displayTime}`, slot: "time" as const, imageUri: displayPlace?.imageUrl, glyph: "◷", label: displayTime, sub: t("tileTime") } : undefined,
+              gridActivity ? { key: `act:${gridActivity.activityId}`, slot: "activity" as const, imageUri: displayPlace?.imageUrl, glyph: "☕", label: sceneShopName, sub: gridActivity.title } : undefined,
+              displayPlace ? { key: `place:${displayPlace.id}`, slot: "place" as const, imageUri: displayPlace.imageUrl, glyph: "●", label: displayPlace.area || displayPlace.name, sub: t("tilePlace") } : undefined,
             ];
             return (
               <View>
                 <View style={styles.forYouHead}>
                   <View style={{ flex: 1 }}>
-                    <View style={styles.peopleTitleRow}><Text selectable style={styles.peopleTitle}>{t("combo")}</Text><View style={styles.forYouBadge}><Text selectable style={styles.forYouBadgeText}>For You</Text></View></View>
+                    {/* FORYOU-LOGO-001：新版主 Logo 28px + 「为你组合」+ 黑底白字 For You 药丸。 */}
+                    <View style={styles.peopleTitleRow}>
+                      <ForYouGlyph size={28} />
+                      <Text selectable style={styles.peopleTitle}>{t("combo")}</Text>
+                      <View style={styles.forYouBadge}><Text selectable style={styles.forYouBadgeText}>For You</Text></View>
+                    </View>
                     <Text selectable style={styles.peopleSub}>{t("gridSub")}</Text>
                   </View>
                 </View>
                 <View style={styles.gridStage}>
                   <View style={styles.grid4}>
-                    {tiles.map((t) => t ? (
-                      <Pressable key={t.key} onPress={() => setChooser(t.slot)} style={styles.gridTile}>
-                        {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.gridImage} /> : <View style={styles.gridImageMissing}><Text selectable style={styles.gridGlyph}>{t.glyph}</Text></View>}
-                        <View style={styles.gridOverlay}>
-                          <Text selectable style={[styles.gridLabel, !t.imageUri && styles.gridLabelDark]} numberOfLines={1}>{t.label}</Text>
-                          <Text selectable style={[styles.gridSub, !t.imageUri && styles.gridSubDark]} numberOfLines={1}>{t.sub}</Text>
-                        </View>
-                      </Pressable>
+                    {tiles.map((tile) => tile ? (
+                      /* HOME-FORYOU-LOCK-001：外壳必须是 **View**，点击层和锁钮
+                         是兄弟 —— 锁钮嵌在 Pressable 里会被外层吞触摸，锁就永远
+                         切不动（2026-09-27 用户实测踩坑）。 */
+                      <View key={tile.key} style={[styles.gridTile, lockedSlots.has(tile.slot) && styles.gridTileLocked]}>
+                        <Pressable onPress={() => { if (lockedSlots.has(tile.slot)) { showResponse(t("lockedBlock"), t("lockedBlockSub")); return; } setChooser(tile.slot); }} style={styles.gridTileTap}>
+                          {tile.imageUri ? <Image source={{ uri: tile.imageUri }} style={styles.gridImage} /> : <View style={styles.gridImageMissing}><Text selectable style={styles.gridGlyph}>{tile.glyph}</Text></View>}
+                          <View style={styles.gridOverlay}>
+                            <Text selectable style={[styles.gridLabel, !tile.imageUri && styles.gridLabelDark]} numberOfLines={1}>{tile.label}</Text>
+                            <Text selectable style={[styles.gridSub, !tile.imageUri && styles.gridSubDark]} numberOfLines={1}>{tile.sub}</Text>
+                          </View>
+                        </Pressable>
+                        {/* 锁钮：开锁 = 锁环抬起悬空（白）；关锁 = 锁环扣上 + 金底深图。 */}
+                        <Pressable accessibilityLabel={lockedSlots.has(tile.slot) ? t("unlockSlot") : t("lockSlot")} hitSlop={6} onPress={() => toggleSlotLock(tile.slot)} style={[styles.gridLock, lockedSlots.has(tile.slot) && styles.gridLockOn]}>
+                          <View style={[styles.gridLockShackle, lockedSlots.has(tile.slot) ? styles.gridLockShackleOn : styles.gridLockShackleOff]} />
+                          <View style={[styles.gridLockBody, lockedSlots.has(tile.slot) && styles.gridLockBodyOn]} />
+                        </Pressable>
+                      </View>
                     ) : null)}
                   </View>
                   <Pressable
@@ -1187,23 +1393,249 @@ export function RequesterHome({
                     <ProxyIcon color={color.white} name="remix" size={25} />
                   </Pressable>
                 </View>
+                {lockedSlots.size > 0 ? <Text selectable style={styles.gridLockInfo}>{t("lockedHint", { n: lockedSlots.size })}</Text> : null}
                 {composed ? (
                   <View>
-                    <Text selectable style={styles.chainHint}>{t("chainHint")}</Text>
-                    <View style={styles.gridCtaRow}>
-                    <Pressable onPress={() => { setMomentMsg(undefined); setMomentOpen(true); }} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel={t("makeImageA11y")}>
-                      <Text selectable style={styles.gridCtaTextSmall}>{t("makeImage")}</Text>
+                    {/* SEARCH-REPLY-BUDGET-001：搜索/重配的回复条插在搜索框下面，
+                        会把这一块整体往下顶。按钮底边正好在浮动 dock 上沿（零余量），
+                        被顶了就整颗藏到玻璃 dock 后面。所以有回复时**让出上面那行
+                        提示**（双链路提示是常驻说明，回复是当下要说的话，此时后者
+                        更有用），并收掉按钮的上边距 —— 两处共让 ~31pt，正好抵掉
+                        回复条的 ~29pt，按钮留在原处。改这里必须同步改
+                        home-search-dock 的 responseBar / responseInner。 */}
+                    {responseText ? null : <Text selectable style={styles.chainHint}>{t("chainHint")}</Text>}
+                    {/* HOME-FORYOU-LOCK-001 同批（commander 2026-09-27）：格下
+                        三个入口收成一个 —— 保留报名这条和原型「选择 → 确认支付」
+                        对应的交易链；出图 / 发布需求从四宫格摘除（发布需求在
+                        附近场景区仍有入口）。
+                        HOME-FORYOU-SELECT-001（用户三轮反馈：先是"还是报名 不是
+                        选择"，改成两段式"选择→已选择→再点一下"之后又反馈"中间
+                        环节跳过了"——两段式在真机上被读成第一下点击什么都没
+                        发生，去掉；再反馈"选择不是报名而是直接进入下单"——sheet
+                        标题和按钮文案改成跟 DIRECT-INVITE-CONFIRM-001 同一套
+                        "确认下单"词汇，不叫"报名"。一次点击直达「确认下单」
+                        sheet，真的 joinSelected 从 sheet 里的按钮发出，命令
+                        本身没变（这仍是真的加入一场有名额上限的活动，不是
+                        平台代收款的商业订单——"下单"是这个 app 里"敲定一个
+                        真实计划"的通用说法，不是"付了钱"的意思）。 */}
+                    <Pressable
+                      disabled={comboBlocked}
+                      onPress={() => { setJoinMsg(undefined); setOrderDone(false); setOrderCodeCopied(false); setOrderNo(""); setJoinConfirmOpen(true); }}
+                      style={[styles.gridCta, responseText && styles.gridCtaFlush, comboBlocked && styles.gridCtaDisabled]}
+                      accessibilityLabel={comboBlocked ? comboBlockText : t("selectComboCtaA11y")}
+                    >
+                      <Text selectable style={styles.gridCtaTextSmall}>{t("selectComboCta")}</Text>
                     </Pressable>
-                    <Pressable disabled={joinBusy} onPress={() => void joinSelected(gridActivity?.activityId)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel={t("joinCtaA11y")}>
-                      <Text selectable style={styles.gridCtaTextSmall}>{joinBusy ? t("joinInProgress") : t("joinCta")}</Text>
-                    </Pressable>
-                    <Pressable onPress={() => onOpenMarket?.("OPPORTUNITY")} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel={t("publishDemandA11y")}>
-                      <Text selectable style={styles.gridCtaTextSmall}>{t("publishDemand")}</Text>
-                    </Pressable>
-                    </View>
+                    {/* HOME-FORYOU-ORDER-001（用户："这个原型你没有吗 选择-跳出这个
+                        啊"，指向 deepseek_html_20260927_226eac「确认下单」整屏）：
+                        跟 DIRECT-INVITE-CONFIRM-001 同一套版式——人/时间/活动/地点/
+                        费用分块 + 底部合计与提交。每一块都是这一屏已经拿在手里的
+                        真数据；费用块诚实读 gridActivity 真实的 moneyFlow/
+                        priceLabel/venueSpend（用户："免费收费只是一个选择啊"，不
+                        预设永远免费）——今天仓库里的活动全是 FREE + 到店消费，
+                        但字段本来就支持 PAY_TO_JOIN/PAID_TO_ATTEND，读真值就对了，
+                        不用为了"看起来像下单"去编一个人工报酬输入框（那是
+                        DIRECT_INVITE 邀真人才有的形状，这里的人是推荐 fixture，
+                        没有真实收款方）。 */}
+                    {comboBlocked ? <Text selectable style={styles.comboConflictText}>{comboBlockText}</Text> : null}
+                    {existingOrder ? (
+                      <Pressable
+                        accessibilityLabel={t("viewExistingOrder")}
+                        onPress={() => {
+                          // 没存票面的老单：只用活动本身 + 订单号拼，不借当前四宫格的人/地点冒充当时的选择。
+                          setOrderNo(existingOrder.orderNo ?? "");
+                          setOrderSnapshot(existingOrder.snapshot ?? {
+                            orderNo: existingOrder.orderNo ?? gridActivity.code ?? gridActivity.activityId,
+                            orderedAt: "",
+                            activity: { activityId: gridActivity.activityId, title: gridActivity.title, time: gridActivity.time, venueName: gridActivity.venueName, priceLabel: gridActivity.priceLabel, moneyFlow: gridActivity.moneyFlow, venueSpend: gridActivity.venueSpend, joined: gridActivity.joined, capacity: gridActivity.capacity },
+                            time: gridActivity.time,
+                            place: { name: gridActivity.venueName },
+                          });
+                          setOrderExisting(true);
+                          setOrderCodeCopied(false);
+                          setOrderDone(true);
+                          setJoinConfirmOpen(true);
+                        }}
+                        style={styles.viewExistingOrderBtn}
+                      >
+                        <Text selectable style={styles.viewExistingOrderText}>{t("viewExistingOrder")} ›</Text>
+                      </Pressable>
+                    ) : null}
+                    <Modal animationType="slide" onRequestClose={closeOrderFlow} visible={joinConfirmOpen}>
+                      {orderDone ? (
+                        <View style={[styles.confirmPage, styles.orderPage]}>
+                          {/* HOME-FORYOU-ORDER-003：已下单票券页，版式照原型
+                              Proxy_MyTickets_20260928_d7fef9「我的票券」。
+                              原型里**删了两样**，都是没有真能力的东西：
+                              · 二维码：CheckinActivity 只是个普通命令、不认码，
+                                画一个"能扫"的码是假能力（placeholder-honest-actions）。
+                              · 开场前两小时那条：这个 App 没有推送通道
+                                （package.json 里没有 expo-notifications，
+                                全仓没有 Notifications. 调用），写出来是一句
+                                兑现不了的承诺。
+                              ⚠️ 这段注释刻意**不写**那两句被禁的原话 —— 门禁里
+                              有反向钉扫这个文件，注释里写着它会把钉自己喂红
+                              （REPLY-EMPTY-VIEWER-001 踩过同一个坑）。
+                              二维码那个位置换成**订单编号**（用户明确要的）。
+                              底部加日历那个位置同理换成「分享」：没有 expo-calendar，
+                              而且 activity.time 是活动自己写的自由文本、不是可解析
+                              的时间戳，编不出一个真的日历事件。 */}
+                          {orderHeroVisible ? (
+                            <View style={[styles.orderHero, { paddingTop: safeArea.top + 12 }]}>
+                              <View style={styles.orderSuccessIcon}><ProxyIcon color={color.white} name="check" size={24} /></View>
+                              <Text selectable style={styles.orderTitle}>已下单</Text>
+                              <Text selectable style={styles.orderSub}>{orderExisting ? "你之前已经下过这一单" : ticketSnapshot.companion ? `到时候见 · ${ticketSnapshot.companion.name}` : "已加入这场活动"}</Text>
+                              <View style={styles.orderMetaRow}>
+                                <View style={styles.orderMetaItem}>
+                                  <Text selectable style={styles.orderMetaLabel}>人数</Text>
+                                  <Text selectable style={styles.orderMetaValue}>{peopleCountLabel(ticketSnapshot)}</Text>
+                                </View>
+                                <View style={styles.orderMetaItem}>
+                                  <Text selectable style={styles.orderMetaLabel}>状态</Text>
+                                  <Text selectable style={[styles.orderMetaValue, styles.orderMetaValueGood]}>已确认</Text>
+                                </View>
+                              </View>
+                            </View>
+                          ) : null}
+                          {/* HOME-FORYOU-ORDER-006：hero 退场后 ScrollView 从 y=0 开始，
+                              orderTicket 的 -14 上叠会把订单编号 chip 顶进状态栏/
+                              灵动岛底下（屏顶只剩 2pt）。hero 不在时补 safeArea 顶距，
+                              票券落在状态栏下方（净空 safeArea.top+10）；hero 在时
+                              保持原版式（-14 塞进 hero 圆角）。 */}
+                          <ScrollView contentContainerStyle={[styles.confirmScroll, !orderHeroVisible && { paddingTop: safeArea.top + 24 }]} style={styles.confirmScrollFlex}>
+                            <ActivityOrderTicket
+                              companionPhotoSource={ticketCompanionPhoto}
+                              copied={orderCodeCopied}
+                              onCopyOrderNo={() => { void Clipboard.setStringAsync(ticketSnapshot.orderNo).then(() => setOrderCodeCopied(true)).catch(() => undefined); }}
+                              overlapHero
+                              snapshot={ticketSnapshot}
+                            />
+                          </ScrollView>
+                          <View style={[styles.confirmFooter, { paddingBottom: safeArea.bottom + 16 }]}>
+                            <Pressable
+                              onPress={() => { void Share.share({ message: `${gridActivity?.title ?? "活动"} · ${gridTime ?? ""} · ${gridPlace?.name ?? ""}${gridActivity?.code ? ` · ${gridActivity.code}` : ""}` }); }}
+                              style={styles.orderGhostBtn}
+                            >
+                              <Text selectable style={styles.orderGhostBtnText}>分享</Text>
+                            </Pressable>
+                            {gridPerson ? (
+                              <Pressable onPress={() => { closeOrderFlow(); onMessageHuman?.(gridPerson); }} style={[styles.confirmActionCta, { flex: 1.4 }]}>
+                                <Text selectable style={styles.confirmActionCtaText}>联系{gridPerson.name}</Text>
+                              </Pressable>
+                            ) : (
+                              <Pressable onPress={closeOrderFlow} style={[styles.confirmActionCta, { flex: 1.4 }]}>
+                                <Text selectable style={styles.confirmActionCtaText}>完成</Text>
+                              </Pressable>
+                            )}
+                          </View>
+                          {/* HOME-FORYOU-ORDER-007：成功页没有返回入口 —— 确认页有
+                              confirmTopBar 的返回键，这页没有；全屏 Modal iOS 不能
+                              下滑关闭，选了同行人时底部只有「分享/联系」，用户被困住。
+                              绝对定位盖在左上角：hero 在时 onDark（白字形压深底），
+                              退场后 ink（浅底）。位置在票券左上角外侧 —— chip 居中，
+                              左上只有卡片留白，不抢点击区。 */}
+                          <Pressable accessibilityLabel="返回" onPress={closeOrderFlow} style={[styles.orderBackButton, { top: safeArea.top + 6 }]}>
+                            <ProxyBackGlyph tone={orderHeroVisible ? "onDark" : "ink"} />
+                          </Pressable>
+                        </View>
+                      ) : (
+                        <View style={[styles.confirmPage, { paddingTop: safeArea.top }]}>
+                          <View style={styles.confirmTopBar}>
+                            <Pressable accessibilityLabel="返回" onPress={() => setJoinConfirmOpen(false)} style={styles.confirmBackButton}><ProxyBackGlyph /></Pressable>
+                            <Text selectable style={styles.confirmTitle}>{t("confirmJoinTitle")}</Text>
+                            <View style={styles.confirmTopSpacer} />
+                          </View>
+                          <ScrollView contentContainerStyle={styles.confirmScroll} style={styles.confirmScrollFlex}>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.confirmRecapRail}>
+                              {tiles.map((tile) => tile ? (
+                                <View key={`recap:${tile.key}`} style={styles.confirmRecapCard}>
+                                  {tile.imageUri ? <Image source={{ uri: tile.imageUri }} style={styles.confirmRecapImage} /> : <View style={[styles.confirmRecapImage, styles.momentImageMissing]}><Text selectable style={styles.gridGlyph}>{tile.glyph}</Text></View>}
+                                  <PhotoScrim />
+                                  <Text selectable numberOfLines={1} style={styles.confirmRecapName}>{tile.label}</Text>
+                                </View>
+                              ) : null)}
+                            </ScrollView>
+                            <View style={styles.confirmBlock}>
+                              <Text selectable style={styles.confirmBlockTitle}>一起的人</Text>
+                              {gridPerson ? (
+                                <View style={styles.confirmPersonRow}>
+                                  {gridPerson.photoUri ? <Image source={{ uri: gridPerson.photoUri }} style={styles.confirmPersonAvatar} /> : <View style={[styles.confirmPersonAvatar, styles.photoChooserFallback]}><Text selectable style={styles.personChooserInitials}>{gridPerson.initials}</Text></View>}
+                                  <View style={styles.confirmPersonInfo}>
+                                    <Text selectable style={styles.confirmPersonName}>{gridPerson.name}</Text>
+                                    <Text selectable style={styles.confirmBodyText}>{gridPerson.bio}</Text>
+                                  </View>
+                                </View>
+                              ) : <Text selectable style={styles.confirmBodyText}>还没选人</Text>}
+                            </View>
+                            <View style={styles.confirmBlock}>
+                              <Text selectable style={styles.confirmBlockTitle}>时间</Text>
+                              <Text selectable style={styles.confirmRecapLine}>{gridTime ?? "时间待定"}</Text>
+                            </View>
+                            {gridActivity ? (
+                              <View style={styles.confirmBlock}>
+                                <View style={styles.confirmBlockTitleRow}>
+                                  <Text selectable style={styles.confirmBlockTitle}>{gridActivity.title}</Text>
+                                  {gridActivity.people ? <Text selectable style={styles.confirmBlockTag}>{gridActivity.people}</Text> : null}
+                                </View>
+                                {gridActivity.desc ? <Text selectable style={styles.confirmBodyText}>{gridActivity.desc}</Text> : null}
+                                {gridActivity.benefit ? <Text selectable style={styles.confirmMenuLine}>{gridActivity.benefit}</Text> : null}
+                                {gridActivity.code ? <Text selectable style={styles.confirmMenuLine}>活动编号：{gridActivity.code}</Text> : null}
+                              </View>
+                            ) : null}
+                            {gridPlace ? (
+                              <View style={styles.confirmBlock}>
+                                <Text selectable style={styles.confirmBlockTitle}>地点</Text>
+                                <Text selectable style={styles.confirmPersonName}>{gridPlace.name}</Text>
+                                <Text selectable style={styles.confirmBodyText}>{gridPlace.area}</Text>
+                                <Pressable onPress={() => openGridPlaceNavigation(gridPlace)} style={styles.confirmGhostBtn}><Text selectable style={styles.confirmGhostBtnText}>导航去这里</Text></Pressable>
+                                {confirmNavMsg ? <Text selectable style={styles.confirmBodyText}>{confirmNavMsg}</Text> : null}
+                              </View>
+                            ) : null}
+                            {gridActivity && (gridActivity.priceLabel || gridActivity.venueSpend) ? (
+                              <View style={[styles.confirmBlock, styles.confirmFeeBlock]}>
+                                <Text selectable style={styles.confirmBlockTitle}>费用</Text>
+                                {gridActivity.priceLabel ? (
+                                  <View style={styles.confirmFeeRow}>
+                                    <Text selectable style={styles.confirmFeeRowLabel}>报名</Text>
+                                    <Text selectable style={[styles.confirmFeeRowValue, gridActivity.moneyFlow === "FREE" && styles.confirmFeeRowValueGood]}>{gridActivity.priceLabel}</Text>
+                                  </View>
+                                ) : null}
+                                {gridActivity.venueSpend ? (
+                                  <View style={styles.confirmFeeRow}>
+                                    <Text selectable style={styles.confirmFeeRowLabel}>到店消费</Text>
+                                    <Text selectable style={styles.confirmFeeRowValue}>{gridActivity.venueSpend}</Text>
+                                  </View>
+                                ) : null}
+                                {gridActivity.venueSpend ? <Text selectable style={styles.confirmBodyText}>直接付给商家，不经过平台。</Text> : null}
+                              </View>
+                            ) : null}
+                            <View style={styles.confirmNotice}>
+                              <Text selectable style={styles.confirmNoticeTitle}>下单须知</Text>
+                              <Text selectable style={styles.confirmNoticeItem}>报名成功即算加入名额，不代表已到场。</Text>
+                              <Text selectable style={styles.confirmNoticeItem}>推荐的同行人是系统推荐，不代表对方已确认参加。</Text>
+                            </View>
+                          </ScrollView>
+                          {joinMsg && joinConfirmOpen ? <Text selectable style={styles.confirmJoinError}>{joinMsg}</Text> : null}
+                          <View style={[styles.confirmFooter, { paddingBottom: safeArea.bottom + 16 }]}>
+                            <View style={styles.confirmFooterTotal}>
+                              <Text selectable style={styles.confirmFooterTotalLabel}>合计</Text>
+                              <Text selectable style={styles.confirmFooterTotalValue}>{gridActivity?.priceLabel || "免费参加"}</Text>
+                            </View>
+                            <Pressable
+                              accessibilityLabel={t("joinCtaA11y")}
+                              disabled={joinBusy}
+                              onPress={() => { void joinSelected(gridActivity?.activityId, forYouRecipe).then((outcome) => { if (outcome !== "failed") { setOrderExisting(outcome === "already"); setOrderCodeCopied(false); setOrderDone(true); } }); }}
+                              style={styles.confirmActionCta}
+                            >
+                              <Text selectable style={styles.confirmActionCtaText}>{joinBusy ? t("joinInProgress") : t("joinCta")}</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      )}
+                    </Modal>
                   </View>
                 ) : null}
-                {joinMsg ? <Text selectable style={styles.joinMsg}>{joinMsg}</Text> : null}
+                {joinMsg && !joinConfirmOpen ? <Text selectable style={styles.joinMsg}>{joinMsg}</Text> : null}
                 {momentMsg && !momentOpen ? <Text selectable style={styles.joinMsg}>{momentMsg}</Text> : null}
                 {chooser ? (
                   <Modal transparent animationType="fade" visible onRequestClose={() => setChooser(null)}>
@@ -1251,16 +1683,16 @@ export function RequesterHome({
                           </HorizontalSwipeRail>
                         ) : chooser === "activity" ? (
                           <HorizontalSwipeRail contentContainerStyle={styles.photoChooserRail}>
-                            {storeActivities.map((a, i) => {
+                            {sceneActivities.map((a, i) => {
                               const scene = sceneBriefs.find((s) => s.id === a.realitySceneId || s.name === a.venueName);
                               const photo = a.coverImageUrl || scene?.imageUrl;
-                              const selected = i === activityIndex % storeActivities.length;
+                              const selected = i === activityIndex % sceneActivities.length;
                               return (
                                 <Pressable key={a.activityId} onPress={() => { setActivityIndex(i); setChooser(null); }} style={[styles.photoChooserCard, selected && styles.photoChooserCardSelected]}>
                                   {photo ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: photo }} style={styles.photoChooserImage} transition={0} /> : <View style={[styles.photoChooserImage, styles.photoChooserFallback]}><ProxyIcon color={color.muted} name="cup" size={30} /></View>}
                                   <View style={styles.photoChooserCopy}>
-                                    <Text selectable numberOfLines={1} style={styles.photoChooserName}>{a.title}</Text>
-                                    <Text selectable numberOfLines={1} style={styles.photoChooserMeta}>{a.venueName}{a.time ? ` · ${a.time}` : ""}</Text>
+                                    <Text selectable numberOfLines={1} style={styles.photoChooserName}>{a.venueName}</Text>
+                                    <Text selectable numberOfLines={1} style={styles.photoChooserMeta}>{a.title}{a.time ? ` · ${a.time}` : ""}</Text>
                                   </View>
                                   {selected ? <View style={styles.photoChooserSelectedBadge}><ProxyIcon color={color.white} name="check" size={13} /></View> : null}
                                 </Pressable>
@@ -1375,6 +1807,147 @@ export function RequesterHome({
           })()}
         </>
       ) : null}
+      {/* R15.35: 去掉 “今天想做什么？” 标题 — 是解释性废话，
+          用户已看 chrome 顶部 LocationContext，进来就看到 mode chips，
+          不需要再加一层 招呼。直接让 mode chips 成为第一个交互点。 */}
+
+      {/* R15.34: 推荐人 mode 切换 — 单行路由。
+          6 个 SCENE_TOOLS + 2 个用户列出的额外场景（翻译、陪诊）。
+          默认走 PHOTO。点切 mode 会重置 activeFilters (筛选跟模式走)。 */}
+      <View style={styles.recommendModes}>
+        <FilterChipRail
+          items={RECOMMEND_MODE_ORDER.map((modeId) => {
+            const feed = SCENE_RECOMMEND[modeId];
+            const actionIconId = modeId === "PHOTO" ? "photo" : modeId === "COMPANION" ? "city-walk" : modeId === "COFFEE_MEAL" ? "dining" : modeId === "ACTIVITY" ? "music" : modeId === "TRIP" ? "travel" : modeId === "CREATOR" ? "explore-store" : modeId === "TRANSLATE" || modeId === "HOSPITAL" ? "translation" : modeId === "MEDICAL" ? "urban-support" : "city-walk";
+            return {
+              id: modeId,
+              assetIcon: SCENE_ACTIONS.find((action) => action.id === actionIconId)!.icon,
+              label: feed ? (
+                modeId === "PHOTO" ? t("modePhoto") : modeId === "COMPANION" ? t("modeCompanion") : modeId === "COFFEE_MEAL" ? t("modeMeal") : modeId === "ACTIVITY" ? t("modeActivity") : modeId === "TRIP" ? t("modeTrip") : modeId === "CREATOR" ? t("modeCreator") : modeId === "TRANSLATE" ? t("modeTranslate") : t("modeMedical")
+              ) : modeId
+            };
+          })}
+          activeId={recommendMode}
+          onChange={(id) => {
+            setRecommendMode(id);
+            setActiveFilters([]);
+          }}
+          marginBottom={4}
+          testPrefix="推荐人模式"
+        />
+      </View>
+
+      {/* R15.34: 推荐人 section — 标题 + stories 横滑 + cards 横滑。
+          stories 是小圆形 avatar (首字母 + online 指示点 + 共同好友/场景
+          tag)，cards 是 165×220 portrait card (大首字母 + 距离 + 2 tag)。 */}
+      <View style={styles.peopleHead}>
+        <View style={{ flex: 1 }}>
+          <View style={styles.peopleTitleRow}><Text selectable style={styles.peopleTitle}>{t("title")}</Text><View style={styles.humanBadge}><Text selectable style={styles.humanBadgeText}>{t("humanBadge")}</Text></View></View>
+        </View>
+        {/* HOME-I18N-002（2026-09-23）：语言入口不在首页页头，挪到「更多」整页的
+            「中文」chip（见下方 filterChips）。 */}
+        <Pressable onPress={() => setFilterSheetOpen(true)} style={styles.filterTrigger} accessibilityLabel={t("more")}>
+          <Text selectable style={styles.filterTriggerText}>{t("more")}</Text>
+        </Pressable>
+      </View>
+
+      {/* R34.5 frozen rule: the discovery node itself is only circle avatar + name. */}
+      {/* R15.34.2: 包 HorizontalSwipeRail 隔离 iOS 系统 tab 切换手势 */}
+      <HorizontalSwipeRail
+        style={styles.stories}
+        contentContainerStyle={styles.storiesContent}
+      >
+        {filteredPeople.map((p) => (
+          <Pressable
+            key={`story:${p.id}`}
+            onPress={() => { setPublicHistoryOpen(false); setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId }); }}
+            style={styles.story}
+            // 用 chipOnline 而不是另立一个 online 键：原型里这两个键
+            // （online / chipOnline）6 种语言的取值**完全相同**，留两份只会
+            // 以后改一处漏一处。
+            accessibilityLabel={`${p.name} · ${p.online ? t("chipOnline") : t("offline")}`}
+          >
+            <View style={styles.avatar}>
+              <View style={styles.avatarInner}>
+                {p.photoUri && !brokenAvatarIds.has(p.id) ? <Image source={{ uri: p.photoUri }} style={styles.avatarPhoto} onError={() => markAvatarBroken(p.id)} /> : <Text selectable style={styles.avatarInitials}>{p.initials}</Text>}
+              </View>
+              {p.online ? <View style={styles.onlineDot} /> : null}
+              <Pressable
+                onPress={() => void handleHomeFriend(p.id, p.name)}
+                disabled={relationshipBusyFor(p.id) || relationshipStateFor(p.id) === "OUTGOING" || relationshipStateFor(p.id) === "FRIEND"}
+                style={[styles.addBadge, relationshipStateFor(p.id) === "FRIEND" && styles.addBadgeDone, relationshipStateFor(p.id) === "OUTGOING" && styles.addBadgePending]}
+                accessibilityLabel={relationshipLabel(p.id, p.name)}
+              >
+                <Text selectable style={styles.addBadgeText}>{relationshipGlyph(p.id)}</Text>
+              </Pressable>
+            </View>
+            <Text selectable style={styles.storyName} numberOfLines={1}>{p.name}</Text>
+          </Pressable>
+        ))}
+      </HorizontalSwipeRail>
+
+      {relationshipMsg ? (
+        <Text selectable style={styles.followMsg}>{relationshipMsg}</Text>
+      ) : null}
+
+      {/* AI-ROW-DUPE-001: 首页曾经同时渲染两条 AI 行 —— 上面一条 AI 助手
+          横滑行 (AIAssistantsRow)、下面一条「AI 推荐」，都来自 /v1/ai/assistants。
+          2026-09-27 产品决定（commander）：AI 推荐行**整条下架**，换成
+          SCENE-HOME-HOT-RAIL-001 的热门场景横滑。AI-ROW-DUPE-001 仍守着
+          「不许再挂回任何 AI 目录行」。 */}
+      {/* SCENE-HOME-HOT-RAIL-001（原型 deepseek_html_20260927_d56fab）：
+          封面 + 白字标题 + TOP N 角标 + 分类/区域 + 「N 人去过」。排序只按
+          真实 visitedCount 降序；0 去过的照进（真实数字照写）但**不挂角标**
+          —— 没有周榜聚合，「本周热榜 / 实时更新」不许写；评分和头像栈没有
+          生产者，不画（SCENE-NO-FABRICATED-001）。「更多」进场景地图 ——
+          那里有真实的全量目录，不是死按钮。 */}
+      {hotScenes.length > 0 ? <View style={styles.hotSection}>
+        {/* SCENE-HOME-HOT-RAIL-001：头部与真人推荐（peopleHead）同构 —— 标题
+            直接复用 peopleTitle/peopleSub（同字号同左边距），头部容器不加
+            自己的 paddingHorizontal（否则双重缩进没对齐）。「更多」= 灰字 +
+            › 的可点链接（同 filterTrigger 的语言），不是黑药丸。 */}
+        <View style={styles.hotSectionHead}>
+          <View style={{ flex: 1 }}>
+            <Text selectable style={styles.peopleTitle}>{t("hotScenes")}</Text>
+            <Text selectable style={styles.peopleSub}>{t("hotScenesSub")}</Text>
+          </View>
+          <View style={styles.hotTag}><Text selectable style={styles.hotTagText}>{t("hotScenesTag")}</Text></View>
+          <Pressable accessibilityLabel={t("hotScenesMore")} onPress={() => (onOpenHotScenes ?? onOpenSceneMap)?.()} style={styles.hotMore}>
+            <Text selectable style={styles.hotMoreText}>{t("hotScenesMore")}</Text>
+            <Text selectable style={styles.hotMoreChevron}>›</Text>
+          </Pressable>
+        </View>
+        <HorizontalSwipeRail style={styles.hotRail} contentContainerStyle={styles.hotRailContent}>
+          {hotScenes.map((scene, index) => (
+            <Pressable key={scene.id} accessibilityLabel={scene.name} onPress={() => onOpenSceneMap?.(scene.id)} style={styles.hotCard}>
+              <View style={styles.hotCover}>
+                {(() => { const uri = hotSceneImageUrl(scene); return uri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`hot-scene:${scene.id}`} source={{ uri }} style={styles.hotCoverImage} transition={0} /> : <View style={[styles.hotCoverImage, styles.hotCoverFallback]}><Text selectable style={styles.hotCoverFallbackText}>{scene.type.slice(0, 2) || "场景"}</Text></View>; })()}
+                <View style={styles.hotCoverShade} />
+                {index < 3 && scene.visitedCount > 0 ? <View style={[styles.hotBadge, index === 0 && styles.hotBadgeFirst, index === 1 && styles.hotBadgeSecond]}>
+                  <Text selectable style={[styles.hotBadgeText, (index === 0 || index === 1) && styles.hotBadgeTextOn]}>{`TOP ${index + 1}`}</Text>
+                </View> : null}
+                {/* SCENE-DISTANCE-BADGE-001（用户：「所有的场景必须标注距离数」）：
+                    这个横滑之前完全没有距离——加真实定位 + haversine，没坐标/
+                    没定位就不画，不冒充。 */}
+                {(() => { const distance = shopCardDistance(sceneDistanceMeters(homeOrigin, scene)); return distance ? <View style={styles.hotDistanceBadge}><Text selectable style={styles.hotDistanceText}>{distance}</Text></View> : null; })()}
+                <Text selectable style={styles.hotCoverTitle} numberOfLines={2}>{scene.name}</Text>
+              </View>
+              <View style={styles.hotBody}>
+                <Text selectable style={styles.hotMeta} numberOfLines={1}>{[scene.category, scene.area].filter(Boolean).join(" · ") || scene.type}</Text>
+                <View style={styles.hotFoot}>
+                  <Text selectable style={styles.hotCount}>{t("hotScenesVisits", { count: scene.visitedCount })}</Text>
+                  {(scene.ratingCount ?? 0) > 0 && typeof scene.rating === "number" ? (
+                    <View style={styles.hotRatingRow}>
+                      <Text selectable style={styles.hotRatingStar}>★</Text>
+                      <Text selectable style={styles.hotRatingText}>{scene.rating.toFixed(1)}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+            </Pressable>
+          ))}
+        </HorizontalSwipeRail>
+      </View> : null}
 
       {/* “继续进行”是状态机投影，不是常驻导航。只有服务端返回真实草稿/
           订单状态时才出现；0、匿名、初始加载和首次失败均不占首页空间。 */}
@@ -1838,20 +2411,36 @@ const CHIP_LABEL_KEY: Record<string, MessageKey> = {
 };
 
 const styles = StyleSheet.create({
-  aiSection: { marginTop: 8 },
-  aiSectionHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10 },
-  aiTitle: { color: color.ink, fontSize: 17, fontWeight: "900" },
-  aiSub: { color: color.muted, fontSize: 11, marginTop: 3 },
-  aiBadge: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
-  aiBadgeText: { color: color.violet, fontSize: 11, fontWeight: "900" },
-  aiRail: { marginBottom: 10, marginHorizontal: -16 },
-  aiRailContent: { gap: 12, paddingHorizontal: 16 },
-  aiCard: { alignItems: "center", width: 104 },
-  aiAvatar: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, height: 88, width: 88 },
-  aiName: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 7, textAlign: "center" },
-  aiHandle: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 2, textAlign: "center" },
-  aiDescription: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 5, minHeight: 30 },
-  aiProfileLink: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 7 },
+  hotSection: { marginTop: 8 },
+  hotSectionHead: { alignItems: "flex-end", flexDirection: "row", gap: 8, marginBottom: 10, marginTop: 12 },
+  hotTag: { backgroundColor: color.stateWarnBg, borderColor: color.stateWarnBorder, borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 5 },
+  hotTagText: { color: color.factUnknownFg, fontSize: 10.5, fontWeight: "900" },
+  hotMore: { alignItems: "center", flexDirection: "row", paddingHorizontal: 4, paddingVertical: 4 },
+  hotMoreText: { color: color.muted, fontSize: 13, fontWeight: "600" },
+  hotMoreChevron: { color: color.muted, fontSize: 16, fontWeight: "800", marginLeft: 2 },
+  hotRail: { marginBottom: 10, marginHorizontal: -16 },
+  hotRailContent: { gap: 12, paddingHorizontal: 16 },
+  hotCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, overflow: "hidden", width: 156 },
+  hotCover: { height: 104, justifyContent: "flex-end", position: "relative" },
+  hotCoverImage: { height: "100%", position: "absolute", width: "100%" },
+  hotCoverFallback: { alignItems: "center", backgroundColor: color.surface, justifyContent: "center" },
+  hotCoverFallbackText: { color: color.muted, fontSize: 22, fontWeight: "900" },
+  hotCoverShade: { backgroundColor: "rgba(23, 19, 31, 0.42)", bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  hotBadge: { alignItems: "center", backgroundColor: color.white, borderRadius: 6, left: 8, paddingHorizontal: 7, paddingVertical: 3, position: "absolute", top: 8 },
+  hotBadgeFirst: { backgroundColor: color.magenta },
+  hotBadgeSecond: { backgroundColor: color.factUnknownBg },
+  hotBadgeText: { color: color.ink, fontSize: 9.5, fontWeight: "900", letterSpacing: 0.2 },
+  hotBadgeTextOn: { color: color.white },
+  hotDistanceBadge: { alignItems: "center", backgroundColor: "rgba(23,19,31,0.55)", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3, position: "absolute", right: 8, top: 8 },
+  hotDistanceText: { color: color.white, fontSize: 9.5, fontWeight: "900", letterSpacing: 0.2 },
+  hotCoverTitle: { bottom: 10, color: color.white, fontSize: 14.5, fontWeight: "900", left: 12, position: "absolute", right: 12, textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6 },
+  hotBody: { gap: 6, padding: 12, paddingTop: 10 },
+  hotMeta: { color: color.muted, fontSize: 10.5, fontWeight: "700" },
+  hotFoot: { alignItems: "center", borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingTop: 8 },
+  hotCount: { color: color.muted, fontSize: 10.5, fontWeight: "800" },
+  hotRatingRow: { alignItems: "center", flexDirection: "row", gap: 3 },
+  hotRatingStar: { color: "#F5B400", fontSize: 10 },
+  hotRatingText: { color: "#8C6A00", fontSize: 11, fontWeight: "900" },
   sceneWideRail: { gap: 12, paddingRight: 16, paddingVertical: 4 },
   sceneWideCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 5, padding: 10, width: 220 },
   sceneWideImage: { borderRadius: 12, height: 132, width: "100%" },
@@ -1887,7 +2476,24 @@ const styles = StyleSheet.create({
   grid4: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
   gridRemixButton: { alignItems: "center", backgroundColor: "#171715", borderColor: color.offWhite, borderRadius: 29, borderWidth: 2, elevation: 7, height: 58, justifyContent: "center", left: "50%", marginLeft: -29, marginTop: -24, position: "absolute", top: "50%", width: 58, zIndex: 8 },
   gridRemixButtonPressed: { opacity: 0.78, transform: [{ scale: 0.96 }] },
-  gridTile: { borderRadius: 18, height: 172, overflow: "hidden", width: "48.4%" },
+  gridTile: { borderRadius: 18, height: 172, overflow: "hidden", position: "relative", width: "48.4%" },
+  gridTileTap: { height: "100%", width: "100%" },
+  gridTileLocked: { borderColor: "#F5B400", borderWidth: 2.5 },
+  // FORYOU-LOCK-A-001（2026-09-28，原型 deepseek_html_20260928_c004b0 方案A「玻璃质感」）：
+  // 28px 圆角 9，半透明黑底 + 白描边；锁定金底 + 白描边 + 金光晕。RN 侧无 blur
+  // 依赖（真模糊要引 expo-blur，commander 定），玻璃感先靠底色 + 描边还原。
+  // 锁形沿用 View 拼法，开环/闭环区分保留（见下面 shackle Off/On）。
+  gridLock: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.42)", borderColor: "rgba(255,255,255,0.15)", borderRadius: 9, borderWidth: 1, height: 28, justifyContent: "center", position: "absolute", right: 10, top: 10, width: 28, zIndex: 3 },
+  gridLockOn: { backgroundColor: "#F5B400", borderColor: "rgba(255,255,255,0.3)", elevation: 4, shadowColor: "#F5B400", shadowOffset: { height: 2, width: 0 }, shadowOpacity: 0.5, shadowRadius: 6 },
+  // 开锁：锁环抬起 + 右移悬空，和锁体之间有明显缺口；关锁：锁环扣进锁体。
+  // 锁形 = 原型方案A的空心线条锁（14px glyph）：U 形环 + 空心圆角矩形体，描边 1.5；
+  // 开锁 = 环整体抬起 2.5 + 右移（右腿脱离锁体，左腿还连着）；闭锁 = 腿压进锁体 1。
+  gridLockShackle: { borderColor: color.white, borderTopWidth: 1.5, borderLeftWidth: 1.5, borderRightWidth: 1.5, borderTopLeftRadius: 3, borderTopRightRadius: 3, height: 6, marginBottom: -1, width: 7 },
+  gridLockShackleOff: { marginBottom: 1.5, transform: [{ translateX: 1.5 }] },
+  gridLockShackleOn: { borderColor: color.ink },
+  gridLockBody: { backgroundColor: "transparent", borderColor: color.white, borderRadius: 2, borderWidth: 1.5, height: 7, width: 11 },
+  gridLockBodyOn: { borderColor: color.ink },
+  gridLockInfo: { color: color.muted, fontSize: 11, fontWeight: "700", marginTop: 8, textAlign: "center" },
   gridImage: { borderRadius: 18, height: "100%", width: "100%" },
   gridImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 18, height: "100%", justifyContent: "center", width: "100%" },
   gridGlyph: { color: color.muted, fontSize: 30 },
@@ -1896,14 +2502,116 @@ const styles = StyleSheet.create({
   gridLabelDark: { color: color.ink, textShadowColor: "transparent" },
   gridSub: { color: "rgba(255,255,255,0.85)", fontSize: 11, textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 5 },
   gridSubDark: { color: color.muted, textShadowColor: "transparent" },
-  gridCta: { alignItems: "center", backgroundColor: "#171715", borderRadius: 22, flexDirection: "row", justifyContent: "center", marginTop: 10, paddingVertical: 14 },
-  gridCtaHalf: { flex: 1, marginTop: 0, paddingVertical: 9 },
-  gridCtaRow: { flexDirection: "row", gap: 8 },
+  gridCta: { alignItems: "center", backgroundColor: "#171715", borderRadius: 22, flexDirection: "row", gap: 6, justifyContent: "center", marginTop: 10, paddingVertical: 14 },
+  // HOME-FORYOU-CONFLICT-001：锁定轴和活动冲突时，「选择」按钮变灰、点不动。
+  gridCtaDisabled: { backgroundColor: color.line },
+  // SEARCH-REPLY-BUDGET-001：有回复时收掉按钮上边距（配合隐藏的提示行一起
+  // 抵消回复条的高度，见 :1244 那段）。marginTop: 0 而不是删掉 —— 显式写 0
+  // 才不会继承 gridCta 的 10。
+  gridCtaFlush: { marginTop: 0 },
   gridCtaText: { color: color.white, fontSize: 15, fontWeight: "800" },
   gridCtaTextSmall: { color: color.white, fontSize: 13, fontWeight: "800" },
+  comboConflictText: { color: color.error, fontSize: 12, lineHeight: 17, marginTop: 8, textAlign: "center" },
   // 双链路提示：链路 A（直接约她走头像→Scene→主页）vs 链路 B（发布需求等人来）。
   chainHint: { color: color.muted, fontSize: 11, marginTop: 8, textAlign: "center" },
   joinMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },
+  // 确认下单失败（满员/已下架/网络）贴在底栏上方，不再埋在可滚动内容最底下看不见。
+  viewExistingOrderBtn: { alignSelf: "center", paddingHorizontal: 12, paddingVertical: 6 },
+  viewExistingOrderText: { color: color.ink, fontSize: 13, fontWeight: "800", textDecorationLine: "underline" },
+  confirmJoinError: { color: color.error, fontSize: 13, fontWeight: "600", paddingHorizontal: 20, paddingVertical: 8, textAlign: "center" },
+  // HOME-FORYOU-ORDER-001：确认下单整屏，跟 reality-scene-map.tsx 的
+  // DIRECT-INVITE-CONFIRM-001 同一套版式/取值，方便两处视觉一致。
+  confirmPage: { backgroundColor: color.white, flex: 1 },
+  confirmTopBar: { alignItems: "center", flexDirection: "row", minHeight: 56, paddingHorizontal: 13 },
+  confirmBackButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 },
+  // ORDER-007：成功页返回键 —— 38pt 点击区跟 confirmBackButton 同规格；绝对定位
+  // 挂在 orderPage 上（zIndex 压过 hero），top 由内联 safeArea.top+6 给。
+  orderBackButton: { alignItems: "center", height: 38, justifyContent: "center", left: 12, position: "absolute", width: 38, zIndex: 1 },
+  confirmTitle: { color: color.ink, flex: 1, fontSize: 17, fontWeight: "900", textAlign: "center" },
+  confirmTopSpacer: { width: 38 },
+  confirmScrollFlex: { flex: 1 },
+  confirmScroll: { paddingBottom: 24, paddingHorizontal: 16 },
+  confirmRecapRail: { gap: 8, paddingBottom: 4 },
+  confirmRecapCard: { borderRadius: 14, height: 84, overflow: "hidden", position: "relative", width: 84 },
+  confirmRecapImage: { height: "100%", width: "100%" },
+  // PHOTO-SCRIM-001（2026-09-28，用户："为什么还是被标注层遮挡半页图片"）：
+  // 这里原来是 `confirmRecapShade: { backgroundColor: "rgba(0,0,0,0.32)", height: "55%" }`
+  // —— 一块**硬边平涂色带**，把 84×84 照片卡的下半页整块压暗，并在 45% 处留下
+  // 一条横切边。原型 deepseek_html_20260927_226eac 的 `.recap-card::after` 是
+  // `linear-gradient(180deg, transparent 45%, rgba(0,0,0,.7) 100%)`：整张卡覆盖、
+  // 上 45% 全透明。改用全 App 唯一的 <PhotoScrim />（见 proxy-foundation.tsx）。
+  // 文字可读性靠下面的 textShadow 兜底，不再靠底图大面积变黑（同 SCENE-CARD-SHADE-009）。
+  confirmRecapName: { bottom: 6, color: color.white, fontSize: 11, fontWeight: "900", left: 7, position: "absolute", right: 7, textShadowColor: "rgba(0,0,0,0.55)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 4 },
+  confirmBlock: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, marginTop: 12, padding: 14 },
+  confirmBlockTitleRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  confirmBlockTitle: { color: color.ink, fontSize: 13, fontWeight: "900", marginBottom: 10 },
+  confirmBlockTag: { color: color.muted, fontSize: 11, fontWeight: "800" },
+  confirmBodyText: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  confirmPersonRow: { alignItems: "center", flexDirection: "row", gap: 12 },
+  confirmPersonAvatar: { borderRadius: 26, height: 52, width: 52 },
+  confirmPersonInfo: { flex: 1, minWidth: 0 },
+  confirmPersonName: { color: color.ink, fontSize: 14.5, fontWeight: "900" },
+  confirmMenuLine: { color: color.muted, fontSize: 11.5, fontWeight: "700", lineHeight: 17, marginTop: 8 },
+  confirmRecapLine: { color: color.ink, fontSize: 12.5, fontWeight: "800" },
+  confirmGhostBtn: { alignItems: "center", backgroundColor: color.surface, borderRadius: 10, marginTop: 10, paddingVertical: 10 },
+  confirmGhostBtnText: { color: color.ink, fontSize: 12, fontWeight: "900" },
+  confirmFeeBlock: { backgroundColor: "#FFF8E3", borderColor: "#E4C35B" },
+  confirmFeeRow: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "space-between", marginTop: 6 },
+  confirmFeeRowLabel: { color: color.ink, fontSize: 12.5, fontWeight: "700" },
+  confirmFeeRowValue: { color: color.ink, flexShrink: 1, fontSize: 13, fontWeight: "900", textAlign: "right" },
+  confirmFeeRowValueGood: { color: color.proxyGreen },
+  confirmNotice: { backgroundColor: color.surface, borderRadius: 16, marginTop: 12, padding: 14 },
+  confirmNoticeTitle: { color: color.muted, fontSize: 11, fontWeight: "900", letterSpacing: 0.4, marginBottom: 8, textTransform: "uppercase" },
+  confirmNoticeItem: { color: color.ink, fontSize: 11.5, lineHeight: 17, marginTop: 6 },
+  confirmFooter: { borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", gap: 14, paddingHorizontal: 16, paddingTop: 12 },
+  confirmFooterTotal: { flex: 1 },
+  confirmFooterTotalLabel: { color: color.muted, fontSize: 11, fontWeight: "800" },
+  confirmFooterTotalValue: { color: color.ink, fontSize: 20, fontWeight: "900", marginTop: 2 },
+  confirmActionCta: { alignItems: "center", backgroundColor: color.ink, borderRadius: 14, justifyContent: "center", paddingHorizontal: 24, paddingVertical: 14 },
+  confirmActionCtaText: { color: color.white, fontSize: 14, fontWeight: "900" },
+  // HOME-FORYOU-ORDER-003：「已下单」票券页。版式照原型
+  // docs/design/references/Proxy_MyTickets_20260928_d7fef9.html（我的票券）。
+  // ⚠️ orderPage 是这一屏的页面底色，撕票线的冲孔（orderTearHole）读的就是它
+  // —— 两处必须同色，改一个就得改另一个，否则孔会变成两个白点。
+  orderPage: { backgroundColor: color.offWhite, flex: 1 },
+  orderHero: { alignItems: "center", backgroundColor: "#1A1814", borderBottomLeftRadius: 28, borderBottomRightRadius: 28, paddingBottom: 20, paddingHorizontal: 20 },
+  orderSuccessIcon: { alignItems: "center", backgroundColor: color.proxyGreen, borderRadius: 28, height: 56, justifyContent: "center", marginBottom: 14, width: 56 },
+  orderTitle: { color: color.white, fontSize: 22, fontWeight: "900" },
+  orderSub: { color: "rgba(255,255,255,0.6)", fontSize: 12.5, fontWeight: "700", marginTop: 8, textAlign: "center" },
+  orderMetaRow: { flexDirection: "row", gap: 14, marginTop: 18, width: "100%" },
+  orderMetaItem: { flex: 1 },
+  orderMetaLabel: { color: "rgba(255,255,255,0.4)", fontSize: 11, fontWeight: "900", letterSpacing: 0.4, textTransform: "uppercase" },
+  orderMetaValue: { color: color.white, fontSize: 13, fontWeight: "900", marginTop: 4 },
+  orderMetaValueGood: { color: "#7DD99E" },
+  // overflow:"hidden" 不是装饰 —— 撕票线那两个冲孔就是靠它把外半圆裁掉，
+  // 只剩卡片边缘一道 12pt 的缺口（原型 left:-32px 被 .ticket 裁切后同形）。
+  orderTicket: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, marginTop: -14, overflow: "hidden" },
+  // 票券上半（编号 + 提示）单独包一层，因为撕票线必须**通到卡片边缘**才能冲孔，
+  // 不能再待在 orderTicket 的内边距里。
+  orderTicketBody: { paddingHorizontal: 16, paddingTop: 16 },
+  orderCodeChip: { alignItems: "center", alignSelf: "center", backgroundColor: color.surface, borderRadius: 10, flexDirection: "row", gap: 7, paddingHorizontal: 13, paddingVertical: 9 },
+  orderCodeText: { color: color.ink, fontSize: 13.5, fontWeight: "900", letterSpacing: 1 },
+  orderCodeHint: { color: color.muted, fontSize: 11, fontWeight: "700", marginTop: 7, textAlign: "center" },
+  orderTear: { height: 26, position: "relative" },
+  orderTearLine: { left: 22, position: "absolute", right: 22, top: 12 },
+  orderTearHole: { backgroundColor: color.offWhite, borderRadius: 11, height: 22, position: "absolute", top: 2, width: 22 },
+  orderTearHoleLeft: { left: -10 },
+  orderTearHoleRight: { right: -10 },
+  orderMetaBlock: { paddingBottom: 16, paddingHorizontal: 16, paddingTop: 6 },
+  orderMetaRowLine: { flexDirection: "row", gap: 12, justifyContent: "space-between", paddingVertical: 10, position: "relative" },
+  orderMetaRowRule: { bottom: 0, left: 0, position: "absolute", right: 0 },
+  // 单边虚线画不出来（见 DashedRule 上面那段）：虚线是一排小方块。
+  dashedRule: { flexDirection: "row", height: 1.5, justifyContent: "space-between", overflow: "hidden" },
+  dashedRuleDash: { borderRadius: 1, height: 1.5, width: 5 },
+  orderMetaRowLabel: { color: color.muted, fontSize: 11.5, fontWeight: "800", paddingTop: 2 },
+  orderMetaRowValue: { color: color.ink, fontSize: 13, fontWeight: "900", textAlign: "right" },
+  orderPeopleLabel: { alignItems: "baseline", flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
+  orderPeopleTitle: { color: color.muted, fontSize: 11, fontWeight: "900", letterSpacing: 0.4, textTransform: "uppercase" },
+  orderPeopleCount: { color: color.muted, fontSize: 11, fontWeight: "800" },
+  orderReminder: { alignItems: "flex-start", backgroundColor: color.warnBannerBg, borderColor: color.warnBannerBorder, borderRadius: 16, borderWidth: 1.5, flexDirection: "row", gap: 10, marginTop: 12, padding: 14 },
+  orderReminderText: { color: color.warnBannerText, flex: 1, fontSize: 12, fontWeight: "700", lineHeight: 19 },
+  orderGhostBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, justifyContent: "center", paddingVertical: 14 },
+  orderGhostBtnText: { color: color.ink, fontSize: 14, fontWeight: "900" },
   personChooserRail: { gap: 10, paddingBottom: 2, paddingRight: 8 },
   personChooserCard: { backgroundColor: color.offWhite, borderColor: "transparent", borderRadius: 18, borderWidth: 2, overflow: "hidden", position: "relative", width: 142 },
   personChooserCardSelected: { borderColor: color.ink },
@@ -2083,7 +2791,6 @@ const styles = StyleSheet.create({
   addBadgeDone: { backgroundColor: "#18733B" },
   addBadgePending: { backgroundColor: "#66511F" },
   addBadgeText: { color: color.white, fontSize: 16, fontWeight: "900", lineHeight: 20 },
-  aiAvatarWrap: { position: "relative" },
   followMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },
   serverPeopleTitle: { color: color.ink, fontSize: 13, fontWeight: "800", marginTop: 10 },
   serverPeopleRow: { alignItems: "center", flexDirection: "row", gap: 12, marginTop: 8 },
@@ -2093,8 +2800,8 @@ const styles = StyleSheet.create({
   serverPeopleAction: { color: color.violet, fontSize: 12, fontWeight: "800" },
   // 为你组合 For You 独立主题头：4 宫格不再裸奔。
   forYouHead: { marginTop: 18, marginBottom: 4 },
-  forYouBadge: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
-  forYouBadgeText: { color: color.violet, fontSize: 11, fontWeight: "900" },
+  forYouBadge: { backgroundColor: color.ink, borderRadius: 6, paddingHorizontal: 9, paddingVertical: 4 },
+  forYouBadgeText: { color: color.white, fontSize: 11, fontWeight: "900", letterSpacing: 0.2 },
   storyName: { color: color.ink, fontSize: 12, fontWeight: "700", marginTop: 5, textAlign: "center" },
   personReveal: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 7, marginTop: 8, padding: 13, ...shadows.card },
   personRevealHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },

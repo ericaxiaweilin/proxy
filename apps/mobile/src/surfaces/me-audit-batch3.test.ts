@@ -79,3 +79,60 @@ describe("AUDIT-BATCH3-005 follower faces are gone until real avatars exist", ()
     expect(statRow).not.toContain("最近");
   });
 });
+
+// OFFER-ACCEPT-001（P0，用户「我的-我的订单 没有任何订单记录」2026-09-29）：
+// 订单只在 agent 接 Offer 时生成。发 Offer（market 选人工作台）一直在，
+// 但 App 里没有任何地方能**接** Offer —— acceptSlotOffer / listAgentOffers
+// 零调用方 ⇒ 订单永远不生成 ⇒ 我的订单永远空。现在「我的订单」顶部补了
+// 收到的合作邀请面板。这两条针守住：加载与接单动作缺一不可。
+describe("OFFER-ACCEPT-001 我的订单能收到并接受合作邀请", () => {
+  it("loads pending offers and can accept them into orders", () => {
+    // 正向：listAgentOffers 的加载 + acceptSlotOffer 的动作都必须在。
+    expect(ordersCode).toContain("client.listAgentOffers()");
+    expect(ordersCode).toContain("client.acceptSlotOffer(");
+    // 正向：只把还活着的 OFFERED 摆出来（EXPIRED 摆出来也接不了）。
+    expect(ordersCode).toContain('offer.status === "OFFERED"');
+  });
+  it("accept failure lands in a visible notice, not a silent catch", () => {
+    // 正向：接单失败要有可见文案（过期 / 已处理 / 不是你的 / 重试）。
+    expect(ordersCode).toContain("OFFER_EXPIRED");
+    expect(ordersCode).toContain("OFFER_NOT_AVAILABLE");
+    expect(ordersCode).toContain("接单没有成功");
+  });
+});
+
+// HOME-MYORDERS-JOINS-001（用户「我的订单还是空白」2026-09-29）：For You 下单
+// 走 JoinActivity 活动报名，不落履约订单（join is join）—— 但下单成功页发了编号，
+// 我的订单页却看不到，用户预期是断的。修法：把 ListMyActivities.joined 接进
+// 我的订单页，独立「活动报名」区块，编号标「活动编号」跟履约订单分开。
+describe("HOME-MYORDERS-JOINS-001 我的订单必须显示活动报名记录", () => {
+  it("loads joined activities from the same source as 我的活动", () => {
+    // 正向：报名数据来自 ListMyActivities 的 joined（不是编的，也不是履约订单）。
+    expect(ordersCode).toContain("activityClient.listMyActivities()");
+    expect(ordersCode).toContain("setJoinedActs(sortJoinedByOrderTime(payload.joined, byActivity))");
+    // MY-ORDERS-DETAIL-001：同一份响应里带每笔报名自己的订单信息。
+    expect(ordersCode).toContain("payload.joinOrders.map((order) => [order.activityId, order] as const)");
+  });
+  it("renders the 报名 section with the real per-order number, never the shared activity code as one", () => {
+    // MY-ORDERS-DETAIL-001：ORDER-NO-001 之后每笔报名有自己的订单编号 —— 订单编号
+    // 只取 joinOrders 里这一单的 orderNo；活动编号（整场共用）单独一行标明，
+    // 两者不互相顶替。老报名没有订单编号时如实说，不拿活动编号冒充。
+    expect(ordersCode).toContain(">活动报名</Text>");
+    expect(ordersCode).toContain("{order.orderNo}</Text>");
+    expect(ordersCode).toContain("活动编号：{item.code}");
+    expect(ordersCode).not.toContain("活动编号：{item.code || item.activityId}");
+    expect(ordersCode).toContain("订单编号暂未取到");
+    expect(ordersCode).toContain("activityOrderFields(item, order)");
+    // ORDER-RECIPE-001：点一笔报名先开它的票（下单快照，跟成功页同一个组件），
+    // 票里再给「查看活动详情」走活动现在的样子。
+    expect(ordersCode).toContain("setTicketActivityId(item.activityId)");
+    expect(ordersCode).toContain("<ActivityOrderTicket");
+    expect(ordersCode).toContain("orderSnapshotFor(ticketActivity, order)");
+    expect(ordersCode).toContain("setActivityDetailId(ticketActivity.activityId)");
+    expect(ordersCode).toContain("onBack={() => { setActivityDetailId(undefined); reload(); }}");
+  });
+  it("says so when the joins feed fails instead of pretending it is empty", () => {
+    // 反向：读失败要有可见提示（「取不出来」≠「确实没有」），不挡订单主列表。
+    expect(ordersCode).toContain("活动报名记录没读出来");
+  });
+});

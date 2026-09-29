@@ -36,6 +36,11 @@ func analyticsFixture(t *testing.T) (*Service, *clock.Fixed, string, string) {
 	oldPost := create("两个月前的帖子", "media_old")
 	fixed.Advance(60 * 24 * time.Hour)
 	newPost := create("今天好忙", "media_new")
+	// COMP-PURPOSE-CONSENT-001：这个 fixture 描述的是「**已经同意过**的访客」的世界
+	// —— 分析面板本来就是这个前提下的东西。服务端现在要求先有按目的的同意，
+	// 所以这里显式走一遍同意流程（而不是绕过 repository）。
+	// 闸本身的行为（没同意会怎样）在 purpose_consent_test.go 里单独测。
+	grantBehaviorAnalytics(t, s, "viewer_a", "viewer_b", "viewer_c")
 	return s, fixed, oldPost, newPost
 }
 

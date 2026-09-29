@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { ProfileTabs } from "./ProfileTabs";
+import { WalletSurface } from "./wallet";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import { AIManagementSurface } from "./ai-management";
 import * as ImagePicker from "expo-image-picker";
@@ -51,7 +52,9 @@ import type { ModerationClient } from "../moderation-client";
 // BENEFIT-WIRE-001: 权益链路。命令、client、界面早就写好了，但从没被渲染过 ——
 // 这里补的是「入口 + 接线」那一段。
 import { BenefitClient } from "../benefit-client";
+import { GrowthClient } from "../growth-client";
 import { BenefitHubSurface } from "./benefit-hub";
+import { MyGrowthSurface } from "./my-benefits";
 import { BenefitRedeemScreen } from "./BenefitRedeemScreen";
 // STORE-REC-MANAGE-001: 推荐管理整屏（页签 + 列表 + 详情 + 表单）。
 // storeonboarding 的 client 现在只在那一屏里用，me.tsx 不再直接持有它。
@@ -84,7 +87,11 @@ import { FacetHomeSurface } from "../facet/FacetHomeSurface";
 import { FacetClient } from "../facet-client";
 import { sessionAuthClient, localApiBaseUrl, nativeSecureSessionStore, nativeTransport } from "../native-clients";
 import { createSocialSettingsStore } from "../social-settings-store";
-import { createBehaviorAnalyticsStore } from "../behavior-analytics-settings";
+import {
+  BEHAVIOR_ANALYTICS_CONSENT_SOURCE,
+  BEHAVIOR_ANALYTICS_PURPOSE,
+  createBehaviorAnalyticsStore
+} from "../behavior-analytics-settings";
 
 // Extracted modules
 import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSection, MenuTile, PersonalHubTab, SocialVisibility, SocialAccount, AbilityType, AbilityInstance, AvailabilityRule, AvOverride } from "./me-types";
@@ -98,6 +105,7 @@ import { savedSceneLookup } from "../components/scene-activity-discovery";
 import { SUB_PAGE_CONTENT, meSubPage } from "./me-sub-pages";
 import { useMerchantIdentity } from "../use-merchant-identity";
 import { styles } from "./me-styles";
+import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
@@ -240,7 +248,7 @@ const REQUESTER_ME: PersonaConfig = {
         { icon: "clock", label: "能力与可用时间", desc: "能力、主题、区域与空闲时间", route: "available" },
         { icon: "ring", label: "我的活动", desc: "已参加 / 我发起的活动", route: "myactivities" },
         { icon: "star", label: "收藏", desc: "场景灵感、商家、Creator、动态与活动", route: "favorites" },
-        { icon: "gift", label: "我的权益", desc: "可领取的活动权益，领取后到店出示验证码核销", route: "benefits" }
+        { icon: "growth-logo", label: "我的权益", desc: "等级、成长值、成长任务与可领取的活动权益", route: "benefits" }
       ]
     },
     {
@@ -371,6 +379,7 @@ export function MeSurface({
   experienceMode,
   onOpenSwitcher,
   onOpenFeed,
+  onOpenMarket,
   onOpenVouchers,
   onOpenRealitySceneMap,
   onExperienceAction,
@@ -404,6 +413,7 @@ export function MeSurface({
   experienceMode?: "MERGE" | "REPLACE";
   onOpenSwitcher: () => void;
   onOpenFeed: () => void;
+  onOpenMarket?: (() => void) | undefined;
   onOpenVouchers: () => void;
   onOpenRealitySceneMap?: (() => void) | undefined;
   onExperienceAction: (action: ExperienceAction) => void;
@@ -526,8 +536,11 @@ export function MeSurface({
   // 商家二维码要指向真实门店主体：优先用户显式选中的商家，否则用第一个 ACTIVE
   // 店铺（与 liveShopName 同一个账号，避免名字显示店铺、二维码却指向个人主页）。
   const merchantId = merchantIdentity.merchantId ?? merchantIdentity.accounts[0]?.id;
-  // BENEFIT-WIRE-001: 权益 client。构造只吃 authClient，会话从 transport 里走。
-  const [benefitClient] = useState(() => new BenefitClient({ authClient: sessionAuthClient }));
+  // BENEFIT-WIRE-001 / GROWTH-REAL-SESSION-001: 权益 client 需要真实 session
+  // 填 actor/principal，否则服务端在分发前就以 actor.id 拒绝（见 benefit-client.ts）。
+  const [benefitClient] = useState(() => new BenefitClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore }));
+  // GROWTH-REAL-DATA-001: 会员等级/成长值 client，同样需要真实 session。
+  const [growthClient] = useState(() => new GrowthClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore }));
   // 现实资料：之前两个按钮只 count+1，素材数组写死 3 项，超限后点按无变化、
   // 也从不打开 picker。现在存真实条目（label+uri），拍照/上传都走 ImagePicker，
   // 列表随条目增长，无静默上限。
@@ -869,25 +882,60 @@ export function MeSurface({
   useEffect(() => { if (!socialSettingsHydrated.current) return; const value = { accounts: socialAccounts, ...socialSettings, collaborationEnabled: collaboration.enabled, collaborationTypes: collaboration.types, collaborationRate: collaboration.rate, collaborationContact: collaboration.contact }; void socialSettingsStore.write(value); if (!socialSettingsClient) return; const timer = setTimeout(() => { void socialSettingsClient.write(value).catch(() => undefined); }, 250); return () => clearTimeout(timer); }, [socialAccounts, socialSettings, collaboration, socialSettingsClient]);
   const [securityRetention, setSecurityRetention] = useState<7 | 30 | 90 | 365>(30);
   const [screenshotWarn, setScreenshotWarn] = useState(true);
-  // TWIN-SIGNALS-001: 动态浏览统计总闸（默认开）。本机存取，读不到按开处理
-  // （见 behavior-analytics-settings），开关关掉后上报直接短路。
-  const [behaviorAnalytics, setBehaviorAnalytics] = useState(true);
+  // TWIN-SIGNALS-001 合规修正（2026-09-27）：动态浏览统计总闸**默认关**。
+  // 采的是敏感个人数据（NĐ 356/2025 Art. 4.1(l)：社交网络上的行为与活动追踪
+  // 数据），而同法令 Art. 6.3 **禁止默认同意机制** ⇒ 未显式开过一律不采集，
+  // 读失败也不采集（fail-closed，见 behavior-analytics-settings）。
+  //
+  // COMP-PURPOSE-CONSENT-001（同日，架构层）：**服务端才是同意的来源**。
+  // 本地这个布尔只是缓存（让埋点不必每次往返）；真正的闸在服务端
+  // （localnet 的 appendInteraction 按目的查同意，没有就拒收）。
+  // 所以：
+  //   * 挂载时以**服务端状态**为准，本地缓存跟着它走；
+  //   * 拨开关时先写服务端，**成功了才改本地状态** —— 不能出现
+  //     「界面显示已关、服务端没收到」这种状态（那等于用户撤回了一个
+  //     不存在的同意，而服务端继续采）。
+  const [behaviorAnalytics, setBehaviorAnalytics] = useState(false);
+  const [behaviorAnalyticsError, setBehaviorAnalyticsError] = useState<string | undefined>(undefined);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      // 先按本地缓存显示，避免闪烁；随后用服务端状态覆盖。
       try {
         const stored = await behaviorAnalyticsStore.read();
         if (!cancelled && stored !== undefined) setBehaviorAnalytics(stored);
-      } catch { /* 读不到保持默认开 */ }
+      } catch { /* 读不到 = 未同意，保持关 */ }
+      try {
+        const state = await localNet.getPurposeConsentState(BEHAVIOR_ANALYTICS_PURPOSE);
+        if (cancelled) return;
+        // 服务端说了算：active 才叫同意。found=false（从未表过态）也是没同意。
+        setBehaviorAnalytics(state.active);
+        await behaviorAnalyticsStore.write(state.active).catch(() => undefined);
+      } catch {
+        // 服务端读不出来：**保持关**（fail-closed），并把本地缓存也压成关，
+        // 免得本地缓存显示"开"而服务端拒收，用户以为在采。
+        if (cancelled) return;
+        setBehaviorAnalytics(false);
+        await behaviorAnalyticsStore.write(false).catch(() => undefined);
+      }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [localNet]);
   function toggleBehaviorAnalytics(): void {
-    setBehaviorAnalytics((current) => {
-      const next = !current;
-      void behaviorAnalyticsStore.write(next).catch(() => undefined);
-      return next;
-    });
+    const next = !behaviorAnalytics;
+    setBehaviorAnalyticsError(undefined);
+    void (async () => {
+      try {
+        // 先落服务端（这是法律意义上的同意动作），成功了再改本地。
+        await localNet.recordPurposeConsent(BEHAVIOR_ANALYTICS_PURPOSE, next, BEHAVIOR_ANALYTICS_CONSENT_SOURCE);
+        await behaviorAnalyticsStore.write(next);
+        setBehaviorAnalytics(next);
+      } catch {
+        // 写失败 = 同意没有生效。**不改本地状态**，并明确告诉用户 ——
+        // 静默失败在这里是最坏的结果：用户以为关掉了，服务端还在采。
+        setBehaviorAnalyticsError(next ? "开启失败，请重试" : "关闭失败，请重试");
+      }
+    })();
   }
   const [profileDraft, setProfileDraft] = useState({
     name: NEUTRAL_PROFILE.name,
@@ -1461,7 +1509,7 @@ export function MeSurface({
     const contentWrapper = (node: React.JSX.Element): React.JSX.Element => <SwipeBackShell onExit={() => closeSubPage()}>{node}</SwipeBackShell>;
     const content = SUB_PAGE_CONTENT[subPage.route];
 
-    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} moderation={moderation} mediaClient={mediaClient} onOpenApply={() => openSubPage("providerapply")} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} moderation={moderation} mediaClient={mediaClient} business={business} onOpenApply={() => openSubPage("providerapply")} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "myactivities") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyActivitiesSurface onBack={() => setSubPage(undefined)} moderation={moderation} /></SwipeBackShell>;
     if (subPage.route === "merchantcampaign") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MerchantCampaignSurface onBack={() => setSubPage(undefined)} moderation={moderation} /></SwipeBackShell>;
     if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} viewerAccountId={viewerAccountId} /></SwipeBackShell>;
@@ -1542,7 +1590,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.detailTitle}>{subPage.title}</Text>
             <Text selectable style={styles.detailSub}>{subPage.desc}</Text>
@@ -1589,7 +1637,7 @@ export function MeSurface({
               )}
             </View>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.lightCta}>
-              <Text selectable style={styles.lightCtaText}>返回我的</Text>
+              <ProxyBackGlyph />
             </Pressable>
           </ScrollView>
         </View>
@@ -1612,7 +1660,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.appBehaviorTitle}>设置与隐私 · 安全</Text>
             <SecuritySettings
@@ -1633,17 +1681,38 @@ export function MeSurface({
             <Text selectable style={styles.appBehaviorCardDesc}>
               依据《个人数据保护法》91/2025/QH15 第 31 条 (访问权) 与第 32 条 (删除权), 你可以随时下载或删除 Proxy 保存的个人数据。
             </Text>
+            {/* 合规修正（2026-09-27）：这里原来写着「依据 PDP 91/2025/QH15
+                Art. 13, Proxy 已指定 DPO…」并给出 privacy@proxy.vn。
+                那是一句**面向用户的、仓里没有事实支撑的法律断言** ——
+                docs/legal/vietnam/Proxy_Operating_Terms_Supplement_2026-08-31.md
+                第 12 行把「DPO / 数据保护部门」标成「空白」，法律文档正文里
+                也还是占位符 [DPO 信息] / [privacy@...]。同一个仓的另一处
+                （facet-home-model.test.ts:22）甚至专门钉了「不许照抄 DPO 邮箱
+                = 假承诺」。两套说法不能并存。
+                而且 Nghị định 330/2026 Điều 57.2(c) 对「未发布正式的数据保护
+                人员指定文件」罚 2,000–3,000 万 —— 也就是说：没指定却在界面上
+                说已指定，是把一个法律缺口包装成了已完成状态。
+                所以这里只保留仓里真有的东西：下方的隐私请求入口（有服务端
+                记录、可追踪）。DPO 联系方式必须等公司层真的指定并公布后再补，
+                补的时候要连同《服务协议》§53 一起更新。 */}
             <Text selectable style={styles.appBehaviorCardDesc}>
-              如需联系 DPO (数据保护官) 或申诉数据处理问题, 请发邮件至 privacy@proxy.vn (最终地址以《服务协议》§53 为准)。依据 PDP 91/2025/QH15 Art. 13, Proxy 已指定 DPO 负责监管个人数据处理活动及处理用户申诉。
+              如需行使访问权或删除权, 请使用下方的隐私请求入口 —— 那是本 App 内可追踪、有服务端记录的通道。数据保护事务的正式联系渠道以《服务协议》§53 与《隐私政策》公布的信息为准。
             </Text>
-            {/* TWIN-SIGNALS-001 / MEDIA-DWELL-001: 动态浏览统计总闸。默认开
-                （分身偏好靠它），一句话说清记什么、用来干什么，一键可关。
-                这个开关现在也管着"看了哪张照片多久"的更细粒度记录——粒度
-                变细了，说明文案要跟着说清楚，不能让文案还停在"哪条动态"。 */}
+            {/* TWIN-SIGNALS-001 / MEDIA-DWELL-001 合规修正（2026-09-27）：
+                默认关、要显式开。这里采的是敏感个人数据（NĐ 356/2025
+                Art. 4.1(l)：社交网络上的行为与活动追踪数据），同法令
+                Art. 6.3 禁止默认同意机制；Art. 6.1 要求同意须「可验证」，
+                Art. 6.2 举证责任在平台。所以文案要说清「点了才算同意」。
+                同时修掉一处**目的不符**：原来只写「推更对味的内容」，
+                这份数据实际还喂「AI 分身 · 好友洞察」和运营侧的逐人浏览
+                明细（CONTENT-ANALYTICS-001，security.go:239）。用户同意的
+                是他看到的用途，所以用途必须说全 —— NĐ 330/2026
+                Điều 39.1(a) 对「处理与已同意目的不符」罚 2,000–4,000 万。
+                还要点明这是**敏感**数据：NĐ 356 要求征求敏感数据同意时明确告知。 */}
             <View style={styles.socialSettingRow}>
               <View style={styles.socialAccountCopy}>
-                <Text selectable style={styles.socialSettingName}>动态浏览统计</Text>
-                <Text selectable style={styles.socialSettingDesc}>记录你看过哪些动态、多图动态里具体看了哪张照片多久，用于给你推更对味的内容。关掉后不再记录。</Text>
+                <Text selectable style={styles.socialSettingName}>动态浏览统计 · 敏感数据</Text>
+                <Text selectable style={styles.socialSettingDesc}>默认关闭。开启后记录你看过哪些动态、多图动态里具体看了哪张照片多久，用于：① 给你推更对味的内容；② 生成「AI 分身 · 好友洞察」的浏览统计；③ 你自己的帖子显示浏览数据，平台运营侧可查看逐人明细（谁、看了几秒、放大几次），用于内容运营。依据越南个人数据保护法与 356/2025/NĐ-CP，这类行为数据属于敏感个人数据，须由你主动开启。随时可关，关掉后不再记录。</Text>
               </View>
               <Pressable
                 accessibilityRole="switch"
@@ -1655,6 +1724,11 @@ export function MeSurface({
                 <View style={[styles.socialSwitchDot, behaviorAnalytics ? styles.socialSwitchDotOn : null]} />
               </Pressable>
             </View>
+            {/* COMP-PURPOSE-CONSENT-001：同意写服务端失败时必须说出来。
+                「用户以为关掉了、服务端还在采」是这里最坏的失败模式。 */}
+            {behaviorAnalyticsError ? (
+              <Text selectable style={styles.socialSettingDesc}>{behaviorAnalyticsError} —— 开关没有生效，服务端仍在按上一次的同意状态处理。</Text>
+            ) : null}
             <PrivacySettings
               client={resolvePrivacyRequestClient({ authClient: sessionAuthClient })}
             />
@@ -1662,7 +1736,7 @@ export function MeSurface({
               client={resolveLocationConsentClient({ authClient: sessionAuthClient })}
             />
             <Pressable onPress={() => setSubPage(undefined)} style={styles.appBehaviorReturn}>
-              <Text selectable style={styles.appBehaviorReturnText}>返回我的</Text>
+              <ProxyBackGlyph />
             </Pressable>
           </ScrollView>
         </View>
@@ -1674,7 +1748,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.socialAccountsContent}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.socialAccountsTitle}>社媒账户</Text>
             <Text selectable style={styles.socialAccountsSub}>管理你的外部社交平台。账号、链接和公开范围都由你控制。</Text>
@@ -1758,7 +1832,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.detailTitle}>可见范围</Text>
             <View style={styles.visibilityLadder}>
@@ -1802,7 +1876,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.detailTitle}>访问与转化</Text>
             {/* ANALYTICS-HONEST-001 / PROFILE-VISIT-001: "主页访问"这一步已经
@@ -1834,7 +1908,7 @@ export function MeSurface({
     }
 
     if (subPage.route === "addfriend") {
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} profileClient={profileClient} initialView="ADD_FRIEND" addFriendBackLabel="‹ 返回我的" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onBack={() => setSubPage(undefined)} onOpenConversation={(author, peerUserId) => { setSubPage(undefined); onOpenConversation?.(author, peerUserId); }} /></SwipeBackShell>;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} profileClient={profileClient} initialView="ADD_FRIEND" addFriendBackLabel="返回我的" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onBack={() => setSubPage(undefined)} onOpenConversation={(author, peerUserId) => { setSubPage(undefined); onOpenConversation?.(author, peerUserId); }} /></SwipeBackShell>;
     }
 
     if (subPage.route === "available") {
@@ -1844,7 +1918,7 @@ export function MeSurface({
           <View style={styles.root}>
             <ScrollView contentContainerStyle={styles.content}>
               <Pressable onPress={() => setAvailabilityPanel("ABILITIES")} style={styles.subPageBack}>
-                <Text selectable style={styles.subPageBackText}>‹ 返回能力</Text>
+                <ProxyBackGlyph />
               </Pressable>
               <Text selectable style={styles.detailTitle}>可用时间</Text>
               <Text selectable style={styles.availabilityLead}>固定规律只设一次；临时变化点日期覆盖。</Text>
@@ -1891,7 +1965,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => { setAvailabilityPanel("ABILITIES"); setSubPage(undefined); }} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.detailTitle}>能力与可用时间</Text>
             <Text selectable style={styles.detailSub}>维护你愿意接受邀请的能力。</Text>
@@ -1975,46 +2049,11 @@ export function MeSurface({
     }
 
     if (subPage.route === "wallet") {
+      // WALLET-001：钱包整页迁到独立 surface（原型 Proxy_Wallet_20260929_0a2f07），
+      // 余额/套餐/渠道/兑换/记录全部读服务端 GetWallet，不再是“账本未接入”占位。
+      // 现场结算/退款仍在 myorders 独立入口（本页不再重复挂快捷键）。
       return contentWrapper(
-        <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
-            </Pressable>
-            <Text selectable style={styles.subPageTitle}>钱包与结算</Text>
-            <Text selectable style={styles.subPageDesc}>只展示 Proxy 真正经手或需要记录的资金状态。账本接口未接入前不编造余额。</Text>
-
-            <View style={styles.walletDarkCard}>
-              <Text selectable style={styles.walletDarkLabel}>可用余额</Text>
-              <Text selectable style={styles.walletDarkAmount}>—</Text>
-              <Text selectable style={styles.walletDarkHint}>账本未接入，未知不画数</Text>
-            </View>
-
-            <View style={styles.walletCard}>
-              <Text selectable style={styles.walletCardLabel}>待结算收入</Text>
-              <Text selectable style={styles.walletCardValue}>—</Text>
-              <Text selectable style={styles.walletCardHint}>来自平台支付订单（待账本接入）</Text>
-            </View>
-
-            <View style={styles.walletCard}>
-              <Text selectable style={styles.walletCardLabel}>直接结算记录</Text>
-              <Text selectable style={styles.walletCardHint}>个人时间 / 技能服务可由双方直接结算；这里只保留合作确认与双方状态。</Text>
-            </View>
-
-            <Pressable onPress={() => openSubPage("myorders")} style={styles.walletAction} accessibilityLabel="现场结算记录">
-              <Text selectable style={styles.walletActionIcon}>₫</Text>
-              <View style={styles.walletActionBody}>
-                <Text selectable style={styles.walletActionLabel}>现场结算记录</Text>
-                <Text selectable style={styles.walletActionDesc}>查看双方确认状态</Text>
-              </View>
-              <Text selectable style={styles.walletActionArrow}>›</Text>
-            </Pressable>
-
-            <Pressable onPress={() => openSubPage("myorders")} style={styles.walletBtnLight} accessibilityLabel="退款记录">
-              <Text selectable style={styles.walletBtnLightText}>退款记录</Text>
-            </Pressable>
-          </ScrollView>
-        </View>
+        <WalletSurface onBack={() => setSubPage(undefined)} onOpenVouchers={onOpenVouchers} />
       );
     }
 
@@ -2028,7 +2067,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>个人管理</Text>
             <Text selectable style={styles.subPageSub}>基本信息、二维码、状态管理都集中在这里。</Text>
@@ -2130,7 +2169,7 @@ export function MeSurface({
           <ScrollView contentContainerStyle={styles.personalHubContent}>
             <View style={styles.personalTopbar}>
               <Pressable accessibilityLabel="返回" onPress={() => setSubPage(undefined)} style={styles.personalTopbarButton}>
-                <Text selectable style={styles.personalTopbarIcon}>‹</Text>
+                <ProxyBackGlyph />
               </Pressable>
               <View style={styles.personalTopbarTools}>
                 <Pressable accessibilityLabel="分析" style={styles.personalTopbarIconBtn} onPress={() => setInsightsSheetOpen(true)}>
@@ -2273,7 +2312,14 @@ export function MeSurface({
                   console.debug(`[profile] scene chip context: ${sceneId}`);
                 }
               }}
-              onLikePost={engagement ? (postId) => { void engagement.reactToPost(postId, "LIKE", true).then(() => setLikeError(undefined)).catch(() => setLikeError("点赞没有提交成功，请检查连接后重试。")); } : undefined}
+              onLikePost={engagement ? (postId) => engagement.reactToPost(postId, "LIKE", true)
+                // PROFILE-ACTION-COUNTS-001：把 reactToPost 拿到的新 engagement
+                // **return 出去** —— ProfileTabs 的动作行现在显示真实计数，而计数的
+                // 持有者是它自己（postEngagement）。以前这里 `void` 掉了、只拿返回值
+                // 做错误提示，于是点完赞数字停在旧值上：显示一个不会动的数字比不显示
+                // 数字更糟，用户会以为点赞没生效。
+                .then((next) => { setLikeError(undefined); return next; })
+                .catch(() => { setLikeError("点赞没有提交成功，请检查连接后重试。"); return undefined; }) : undefined}
               engagementClient={engagement ?? undefined}
               viewerMode={isSelfProfile ? "SELF" : "OTHER"}
               viewerAccountId={viewerAccountId}
@@ -2411,7 +2457,7 @@ export function MeSurface({
           <View style={styles.root}>
             <ScrollView contentContainerStyle={styles.content}>
               <Pressable onPress={() => closeSubPage()} style={styles.subPageBack}>
-                <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+                <ProxyBackGlyph />
               </Pressable>
               <Text selectable style={styles.subPageTitle}>我的二维码</Text>
               <Text selectable style={styles.qrRealHint}>先设置你的个人主页名，才能生成二维码。</Text>
@@ -2423,7 +2469,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => closeSubPage()} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>{qrHeading}</Text>
 
@@ -2516,7 +2562,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <View style={styles.enterpriseHero}>
               <Text selectable style={styles.enterpriseSkillId}>enterprise_ops</Text>
@@ -2586,7 +2632,7 @@ export function MeSurface({
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text selectable style={styles.subPageBackText}>‹ 返回</Text></Pressable>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><ProxyBackGlyph /></Pressable>
             <Text selectable style={styles.detailTitle}>合作执行网络</Text>
             <Text selectable style={styles.detailSub}>功能预览 · 执行者数据尚未接入</Text>
             <View style={styles.infoNote}>
@@ -2596,7 +2642,7 @@ export function MeSurface({
             <Pressable accessibilityLabel="再次邀请团队" onPress={() => openSubPage("multislot")} style={styles.trustedInviteTouchable}>
               <Gradient from={color.magenta} to={color.violet} style={styles.trustedInvite}><Text selectable style={styles.trustedInviteText}>再次邀请团队</Text></Gradient>
             </Pressable>
-            <Pressable accessibilityLabel="返回我的企业" onPress={() => setSubPage(undefined)} style={styles.trustedReturn}><Text selectable style={styles.trustedReturnText}>返回我的企业</Text></Pressable>
+            <Pressable accessibilityLabel="返回我的企业" onPress={() => setSubPage(undefined)} style={styles.trustedReturn}><ProxyBackGlyph /></Pressable>
           </ScrollView>
         </View>
       );
@@ -2609,7 +2655,7 @@ export function MeSurface({
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text selectable style={styles.subPageBackText}>‹ 返回</Text></Pressable>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><ProxyBackGlyph /></Pressable>
             <Text selectable style={styles.detailTitle}>门店开业</Text>
             <View style={styles.infoNote}>
               <Text selectable style={styles.infoNoteTitle}>名额尚未接入</Text>
@@ -2628,7 +2674,7 @@ export function MeSurface({
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text selectable style={styles.subPageBackText}>‹ 返回</Text></Pressable>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><ProxyBackGlyph /></Pressable>
             <Text selectable style={styles.detailTitle}>今日执行</Text>
             <View style={styles.infoNote}>
               <Text selectable style={styles.infoNoteTitle}>执行看板尚未接入</Text>
@@ -2646,7 +2692,7 @@ export function MeSurface({
         return contentWrapper(
           <View style={styles.root}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>线上店铺</Text>
             <MerchantStorefrontSurface client={business} viewerAccountId={viewerAccountId} />
@@ -2656,7 +2702,7 @@ export function MeSurface({
       return contentWrapper(
         <View style={styles.root}>
           <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-            <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+            <ProxyBackGlyph />
           </Pressable>
           <Text selectable style={styles.subPageTitle}>线上店铺</Text>
           <View style={styles.infoNote}><Text selectable style={styles.infoNoteText}>请在 “商家” Tab 登录后查看</Text></View>
@@ -2706,7 +2752,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>企业 / 店铺资料</Text>
 
@@ -2771,7 +2817,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>推荐评估队列</Text>
             <StoreRecommendationQueue />
@@ -2791,7 +2837,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>推荐管理</Text>
             <Text selectable style={styles.subPageDesc}>把好的场地 / 商家推荐进体系；你推荐的那条走到哪一步、运营评估出什么结论，都在这里看。</Text>
@@ -2808,16 +2854,22 @@ export function MeSurface({
       );
     }
 
-    // BENEFIT-WIRE-001: 权益领取（个人身份）。
+    // BENEFIT-WIRE-001 / GROWTH-REAL-DATA-001: 权益领取（个人身份）+ 等级/成长值。
     if (subPage.route === "benefits") {
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>我的权益</Text>
-            <BenefitHubSurface onBack={() => setSubPage(undefined)} />
+            <MyGrowthSurface
+              benefitClient={benefitClient}
+              growthClient={growthClient}
+              onOpenMarket={onOpenMarket}
+              viewerAvatarUri={profileAvatarUri}
+              viewerDisplayName={profileDraft.name}
+            />
           </ScrollView>
         </View>
       );
@@ -2831,7 +2883,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>权益核销</Text>
             {merchantId ? (
@@ -2859,7 +2911,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>KYC认证</Text>
             <ProviderApplicationSurface avatarUri={profileAvatarUri} displayName={hubProfile.displayName} mediaClient={mediaClient} onEditProfile={() => openSubPage("personalmanage")} />
@@ -2876,7 +2928,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>我推荐的店</Text>
             <StoreRecommendationManage initialTab="mine" onOpenStore={() => openSubPage("merchantstorefront")} onOpenStoreProfile={() => openSubPage("bdashprofile")} tabs={STORE_REC_MANAGE_TABS} />
@@ -2893,7 +2945,7 @@ export function MeSurface({
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+              <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>推荐商铺进体系</Text>
             <Text selectable style={styles.appBehaviorCardDesc}>
@@ -2911,7 +2963,7 @@ export function MeSurface({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-            <Text selectable style={styles.subPageBackText}>‹ 返回</Text>
+            <ProxyBackGlyph />
           </Pressable>
           <Text selectable style={styles.detailTitle}>{subPage.title}</Text>
           <Text selectable style={styles.detailSub}>{subPage.desc}</Text>
@@ -2937,7 +2989,7 @@ export function MeSurface({
             </View>
           ) : null}
           <Pressable onPress={() => setSubPage(undefined)} style={styles.lightCta}>
-            <Text selectable style={styles.lightCtaText}>返回我的</Text>
+            <ProxyBackGlyph />
           </Pressable>
         </ScrollView>
       </View>

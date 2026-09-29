@@ -275,6 +275,8 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.SocialSpace.HandleContext(ctx, envelope)
 	case s.Payment != nil && s.Payment.Supports(envelope.CommandType):
 		return s.Payment.HandleContext(ctx, envelope)
+	case s.Wallet != nil && s.Wallet.Supports(envelope.CommandType):
+		return s.Wallet.HandleContext(ctx, envelope)
 	case s.Outcome != nil && s.Outcome.Supports(envelope.CommandType):
 		return s.Outcome.HandleContext(ctx, envelope)
 	case s.Notification != nil && s.Notification.Supports(envelope.CommandType):

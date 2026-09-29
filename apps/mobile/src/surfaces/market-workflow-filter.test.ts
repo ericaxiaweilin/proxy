@@ -53,3 +53,87 @@ describe("market workflow surface", () => {
     expect(source).not.toContain("申请人 Alice");
   });
 });
+
+describe("ACTIVITY-CREATE-FORM-001 ten-block progressive create form", () => {
+  // 原型 deepseek_html_20260928_34cc3e 全量移植：分类→名称→人数→日期→时间→
+  // 时长→地点→报名→费用→说明 + 进度条 + 场景列表/地图双选 + 成功页。
+  it("gates publish on category, name and a catalog scene", () => {
+    // 无 sceneId 的活动在场景页不可见 —— 门禁必须卡 placeId，不许只认手输文字。
+    expect(activityWizard).toContain("canPublishForm(form)");
+    expect(activityWizard).toContain("placeValid");
+    expect(activityWizard).toContain('t("needPlaceScene")');
+    expect(activityWizard).toContain("formProgress");
+    expect(activityWizard).toContain("progressFill");
+    expect(activityWizard).toContain("await activities.publish(");
+  });
+
+  it("picks scenes from the real catalog on list and the home full-page map", () => {
+    expect(activityWizard).toContain("loadSceneSpots(fetch, localApiBaseUrl)");
+    expect(activityWizard).toContain('setSheet("list")');
+    expect(activityWizard).toContain('setSheet("map")');
+    expect(activityWizard).toContain("t(\"confirmMapPick\")");
+    // 地图不自绘：全页直接复用 home 的 RealitySceneMapSurface，选中经 onPickScene 回来。
+    // 向导里地图顶满：无圆角卡片（flatMap），首页保持卡片原样。
+    expect(activityWizard).toContain("RealitySceneMapSurface");
+    expect(activityWizard).toContain("onPickScene");
+    expect(activityWizard).toContain("flatMap");
+    expect(activityWizard).not.toContain("from \"react-native-maps\"");
+    expect(activityWizard).not.toContain("<Marker");
+    // 全页拉满：容器正好顶满（屏高 − 顶部安全区），多了会滚，少了留空边；
+    // market 头部 + tabs 让位，三处 content padding 清零。
+    expect(activityWizard).toContain("windowHeight - insets.top)");
+    expect(source).toContain("wizardMapOpen ? null : (");
+    expect(source).toContain("wizardMapOpen && styles.contentMapPick");
+    // 导航栏叫创建活动；hero 大标题已删（跟导航重复，废话），只留副标题指路。
+    expect(activityWizard).toContain('style={styles.title}>{t("createNavTitle")}');
+    expect(activityWizard).not.toContain("heroTitle");
+    expect(activityWizard).toContain('style={styles.heroSub}>{t("createSub")}');
+    // 全页地图期间藏底栏（底栏只有一级模块有）：壳级状态，跟 hotScenesOpen 同模式。
+    // 不能走滚动显隐通道 —— 它的“回顶部就显示”会把全页态翻回来。
+    expect(activityWizard).toContain("onMapPickOpenChange?.(true)");
+    expect(source).toContain("setWizardMapOpen(open)");
+    // 列表距离拿不到就不印。
+    expect(activityWizard).toContain("sceneDistanceMeters(origin, spot)");
+  });
+
+  it("maps the range and fee to the server shape without inventing fields", () => {
+    expect(activityWizard).toContain("capacityOfRange(form.peopleMax)");
+    expect(activityWizard).toContain("composeActivityTime(");
+    expect(activityWizard).toContain("buildActivityPublishInput(");
+    // 成功页不许写"已通知附近用户"（推送行为未知），用市场同款已进入市场文案。
+    expect(activityWizard).toContain('t("publishedSub")');
+    expect(activityWizard).not.toContain("已通知附近");
+  });
+
+  it("keeps the prototype people rail (dual slider + pills), not steppers", () => {
+    // ACTIVITY-CREATE-FORM-001：字体任务只许动字体。人数交互必须跟原型一致 ——
+    // 双滑杆（导轨/填充/双拇指/刻度）+ pills 快选，步进器不得回来。
+    expect(activityWizard).toContain("sliderFill");
+    expect(activityWizard).toContain("sliderThumb");
+    expect(activityWizard).toContain("sliderScale");
+    expect(activityWizard).toContain("PEOPLE_PRESETS");
+    expect(activityWizard).toContain('"50+"');
+    expect(activityWizard).toContain('t("peopleMin")');
+    expect(activityWizard).toContain('t("peopleMax")');
+    expect(activityWizard).not.toContain("stepPeople");
+    expect(activityWizard).not.toContain("stepRow");
+    // 滑杆横拖不得触发外层模块翻页：落指即接管（抢在 pager 原生滚动前），
+    // 让位只看方向 —— 纵向交给表单滚动，横向拒绝 pager。
+    expect(activityWizard).toContain("onPanResponderTerminationRequest");
+    expect(activityWizard).toContain("peopleDragDir");
+    expect(activityWizard).toContain("locationX");
+  });
+
+  it("uses the home map logo for the place map button, not an emoji", () => {
+    // MAP-FOOTPRINT-LOGO-001：地点行地图按钮跟首页场景地图入口同款 mapFold。
+    expect(activityWizard).toContain('name="mapFold"');
+    expect(activityWizard).not.toContain("🗺");
+  });
+
+  it("saves real local drafts, never a fake toast", () => {
+    expect(activityWizard).toContain("SecureStore.setItemAsync(DRAFT_KEY");
+    expect(activityWizard).toContain("decodeDraft(");
+    expect(activityWizard).toContain('t("draftSaved")');
+    expect(activityWizard).not.toContain("toast(");
+  });
+});

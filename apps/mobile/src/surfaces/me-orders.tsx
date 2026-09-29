@@ -5,7 +5,7 @@ import type { Activity } from "@proxy/contracts";
 import { ActivityClient, ActivityCommandRejectedError } from "../activity-client";
 import type { BusinessClient } from "../business-client";
 import { loadStoreOptions, type StoreOption } from "../my-store-options";
-import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
+import type { FulfillmentClient, FulfillmentOrder, SlotOffer } from "../fulfillment-client";
 import type { MediaClient } from "../media-client";
 import type { ModerationClient } from "../moderation-client";
 import { ReportSheet } from "../components/report-sheet";
@@ -15,6 +15,10 @@ import { color } from "../theme";
 import { ActivityDetailSurface } from "./activity-detail";
 import { activityAIPersonaName } from "./activity-detail-model";
 import { styles } from "./me-styles";
+import * as Clipboard from "expo-clipboard";
+import type { ActivityJoinOrder } from "@proxy/contracts";
+import { activityOrderFields, formatJoinedAt, joinStateLabel, orderSnapshotFor, sortJoinedByOrderTime } from "../my-activity-orders";
+import { ActivityOrderTicket, peopleCountLabel } from "../components/activity-order-ticket";
 import { ProxyBackGlyph, ProxyEmptyState, ProxyLoading } from "../components/proxy-foundation";
 import { createSceneFavoritesStore, resolveSavedSceneIds, type SavedSceneEntry } from "../scene-favorites";
 import { savedSceneLookup } from "../components/scene-activity-discovery";
@@ -24,6 +28,9 @@ type OrderFilter = "all" | "published" | "joined" | "done" | "cancelled";
 
 function orderStatus(order: FulfillmentOrder): string { return ({ OFFERED: "待确认", CONFIRMED: "已确认", EXECUTING: "进行中", COMPLETED: "已完成", CANCELLED: "已取消" } as const)[order.lifecycle]; }
 function orderMoney(order: FulfillmentOrder): string { return `${order.snapshot.agreedCompensation.toLocaleString()} ${order.snapshot.currency || "VND"}`; }
+// OFFER-ACCEPT-001：Offer 里只有裸 id（requesterId / taskId），服务端没有
+// 带 name/title。截短展示比塞一个查不到的假名诚实。
+function shortId(id: string): string { return id.length > 12 ? `${id.slice(0, 12)}…` : id; }
 // R18.x CANCEL-001: only OFFERED / CONFIRMED / EXECUTING
 // can be cancelled by either party. COMPLETED is terminal
 // (the cooperation already happened); CANCELLED is itself
@@ -100,13 +107,61 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
   const [cancelError, setCancelError] = useState<string | undefined>(undefined);
   const [reporting, setReporting] = useState<string | undefined>(undefined);
   const [reportNotice, setReportNotice] = useState<string | undefined>(undefined);
+  // OFFER-ACCEPT-001（P0，用户「我的-我的订单 没有任何订单记录」2026-09-29）：
+  // 订单只在 agent 接 Offer（AcceptSlotOffer）时生成 —— market.tsx 的「发 Offer」
+  // 是链路上游，但这之前 App 里**没有任何地方能接 Offer**：acceptSlotOffer /
+  // listAgentOffers / getOffer 三个客户端方法零调用方。发出去的 Offer 5 分钟
+  // 过期、永远没人接得了 ⇒ 订单永远不生成 ⇒ 我的订单永远空。这里补上 agent
+  // 侧的收件箱：只列还活着的 OFFERED，接单成功订单立刻出现在下面的列表里。
+  // 读失败不挡订单列表（offer 面板是增值信息，不是这块页面的主数据）。
+  const [pendingOffers, setPendingOffers] = useState<SlotOffer[]>([]);
+  const [acceptingOfferId, setAcceptingOfferId] = useState<string | undefined>(undefined);
+  const [offerNotice, setOfferNotice] = useState<string | undefined>(undefined);
+  // HOME-MYORDERS-JOINS-001（用户「我的订单还是空白」2026-09-29）：For You 下单
+  // 走 JoinActivity —— 是活动报名，不落履约订单（join is join 的钉早已定死两条链）。
+  // 但下单成功页发了编号，我的订单却看不到这笔记录，用户的预期是断的。这里把
+  // 报名记录（ListMyActivities.joined，与「我的活动→已参加」同源）接进来，单独
+  // 一个「活动报名」区块摆在履约订单上面，编号标「活动编号」跟履约订单区分开。
+  // 读失败单独说一句（「取不出来」和「确实没有」分开），不挡下面的订单主列表。
+  const [activityClient] = useState(() => new ActivityClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore }));
+  const [joinedActs, setJoinedActs] = useState<Activity[]>([]);
+  // MY-ORDERS-DETAIL-001：每笔报名自己的订单信息（编号 / 下单时间 / 状态）。
+  const [joinOrders, setJoinOrders] = useState<ReadonlyMap<string, ActivityJoinOrder>>(new Map());
+  const [copiedOrderNo, setCopiedOrderNo] = useState<string | undefined>(undefined);
+  // ORDER-RECIPE-001：点一笔报名打开它的票（跟下单成功页同一个组件、同一份快照）。
+  const [ticketActivityId, setTicketActivityId] = useState<string | undefined>(undefined);
+  const [joinsFailed, setJoinsFailed] = useState(false);
+  const [activityDetailId, setActivityDetailId] = useState<string | undefined>(undefined);
   const reload = useCallback(() => {
     let active = true;
     setPhase("LOADING");
     void client.listMyOrders().then((rows) => { if (active) { setOrders(rows); setPhase("READY"); } }).catch(() => { if (active) setPhase("ERROR"); });
+    void client.listAgentOffers().then((rows) => { if (active) setPendingOffers(rows.filter((offer) => offer.status === "OFFERED")); }).catch(() => { if (active) setPendingOffers([]); });
+    void activityClient.listMyActivities().then((payload) => {
+      if (!active) return;
+      const byActivity = new Map(payload.joinOrders.map((order) => [order.activityId, order] as const));
+      setJoinOrders(byActivity);
+      setJoinedActs(sortJoinedByOrderTime(payload.joined, byActivity));
+      setJoinsFailed(false);
+    }).catch(() => { if (active) setJoinsFailed(true); });
     return () => { active = false; };
-  }, [client]);
+  }, [client, activityClient]);
   useEffect(() => { const cleanup = reload(); return cleanup; }, [reload]);
+  async function acceptOffer(offer: SlotOffer): Promise<void> {
+    if (acceptingOfferId) return;
+    setAcceptingOfferId(offer.offerId);
+    setOfferNotice(undefined);
+    try {
+      await client.acceptSlotOffer(offer.offerId);
+      setOfferNotice("已接单，订单已生成。");
+      reload();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      setOfferNotice(/OFFER_EXPIRED/i.test(message) ? "这份邀请已过期，请让对方重新发送。" : /OFFER_NOT_AVAILABLE/i.test(message) ? "这份邀请已被处理。" : /NOT_OWNED|AUTHORIZATION/i.test(message) ? "这份邀请不是发给当前账号的。" : "接单没有成功，请稍后重试。");
+    } finally {
+      setAcceptingOfferId(undefined);
+    }
+  }
   const visible = orders.filter((order) => filter === "all" || filter === "published" && order.viewerRole === "REQUESTER" || filter === "joined" && order.viewerRole === "AGENT" || filter === "done" && order.lifecycle === "COMPLETED" || filter === "cancelled" && order.lifecycle === "CANCELLED");
   const fields = (order: FulfillmentOrder): Array<[string,string]> => [["服务", order.snapshot.serviceSku || order.needId], ["金额", orderMoney(order)], ["时间", order.snapshot.startTime || "待确认"], ["地点", order.snapshot.meetingContext || "待确认"], ["时长", order.snapshot.duration || "待确认"], ["结算", order.snapshot.settlementMode || "待确认"]];
 
@@ -277,6 +332,69 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
     }
   }, [detail?.orderId]);
 
+  const ticketActivity = ticketActivityId ? joinedActs.find((a) => a.activityId === ticketActivityId) : undefined;
+  if (ticketActivity && !activityDetailId) {
+    const order = joinOrders.get(ticketActivity.activityId);
+    const { snapshot, saved } = orderSnapshotFor(ticketActivity, order);
+    const state = joinStateLabel(order?.state);
+    return (
+      <View style={styles.root}>
+        <ScrollView contentContainerStyle={styles.content}>
+          <View style={styles.orderPageHead}>
+            <Pressable accessibilityLabel="返回我的订单" onPress={() => setTicketActivityId(undefined)} style={styles.orderBack}><ProxyBackGlyph /></Pressable>
+            <Text selectable style={styles.detailTitle}>订单详情</Text>
+          </View>
+          <View style={[styles.orderCard, { marginBottom: 12 }]}>
+            <View style={styles.orderHead}>
+              <View style={styles.orderCopy}>
+                <Text selectable style={styles.orderTitle}>{snapshot.companion ? `到时候见 · ${snapshot.companion.name}` : saved ? "已报名这场活动" : "同行人没有保存"}</Text>
+                <Text selectable style={styles.orderId}>{[snapshot.source === "FOR_YOU" ? "For You 下单" : "活动报名", order ? formatJoinedAt(order.joinedAt) : ""].filter(Boolean).join(" · ")}</Text>
+              </View>
+              <Text selectable style={[styles.orderBadge, state.tone === "ok" && styles.orderBadgeLive]}>{state.label}</Text>
+            </View>
+            <View style={styles.orderGrid}>
+              <View style={styles.orderField}>
+                <Text selectable style={styles.orderFieldLabel}>{saved ? "下单时人数" : "当前人数"}</Text>
+                <Text selectable style={styles.orderFieldValue}>{peopleCountLabel(snapshot)}</Text>
+              </View>
+              {snapshot.activity.code ? (
+                <View style={styles.orderField}>
+                  <Text selectable style={styles.orderFieldLabel}>活动编号</Text>
+                  <Text selectable style={styles.orderFieldValue}>{snapshot.activity.code}</Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+          {!saved ? (
+            <Text selectable style={[styles.orderNotice, { marginBottom: 12 }]}>这笔是票面快照上线前下的单，当时在 For You 里选的同行人、地点区域没有保存，以下按活动现在的信息显示。</Text>
+          ) : null}
+          {snapshot.orderNo ? (
+            <ActivityOrderTicket
+              noCompanionText={!saved ? "下单时选的同行人没有保存（票面快照上线前的订单），找不回来了" : snapshot.source === "FOR_YOU" ? undefined : "这单是直接报名的活动，没有系统推荐的同行人"}
+              copied={copiedOrderNo === snapshot.orderNo}
+              onCopyOrderNo={() => { void Clipboard.setStringAsync(snapshot.orderNo).then(() => setCopiedOrderNo(snapshot.orderNo)).catch(() => undefined); }}
+              snapshot={snapshot}
+            />
+          ) : (
+            <Text selectable style={styles.orderNotice}>订单编号暂未取到，下拉刷新或重新进入再看</Text>
+          )}
+          <Pressable accessibilityLabel="查看活动详情" onPress={() => setActivityDetailId(ticketActivity.activityId)} style={[styles.orderTab, { alignSelf: "stretch", marginTop: 14 }]}>
+            <Text selectable style={[styles.orderTabText, { textAlign: "center" }]}>查看活动详情（活动现在的样子）</Text>
+          </Pressable>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (activityDetailId) {
+    // HOME-MYORDERS-JOINS-001：报名记录的明细复用活动详情面 —— 同一个
+    // ActivityClient；返回时重拉（详情里可能退了报名，列表要跟上）。
+    return (
+      <View style={styles.root}>
+        <ActivityDetailSurface client={activityClient} moderation={moderation} initialActivityId={activityDetailId} onBack={() => { setActivityDetailId(undefined); reload(); }} />
+      </View>
+    );
+  }
   if (detail) {
     // ORDER-TIER-001：流程按金额 + 场景双维度分档 —— 小单步骤多就是阻碍，
     // 步骤多的基本是城市协助。城市协助（scenario === "assistance"）永远走全流程，
@@ -539,6 +657,79 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
           <Text selectable style={styles.detailTitle}>我的订单</Text>
         </View>
         <ProviderOrderPanel onOpenApply={onOpenApply} />
+        {pendingOffers.length > 0 ? (
+          <View style={{ marginBottom: 11 }}>
+            <Text selectable style={[styles.orderFieldLabel, { marginBottom: 7, fontSize: 12, fontWeight: "900", color: color.ink }]}>收到的合作邀请</Text>
+            {offerNotice ? <Text selectable style={styles.orderNotice}>{offerNotice}</Text> : null}
+            {pendingOffers.map((offer) => {
+              const remainingMs = new Date(offer.expiresAt).getTime() - Date.now();
+              const remainingMin = Math.max(0, Math.ceil(remainingMs / 60000));
+              return (
+                <View key={offer.offerId} style={styles.orderCard}>
+                  <View style={styles.orderHead}>
+                    <View style={styles.orderCopy}>
+                      <Text selectable style={styles.orderTitle}>合作邀请 · 来自 {shortId(offer.requesterId)}</Text>
+                      <Text selectable style={styles.orderId}>任务 {shortId(offer.taskId)} · {remainingMin > 0 ? `剩 ${remainingMin} 分钟有效` : "即将过期"}</Text>
+                    </View>
+                    <Text selectable style={styles.orderBadge}>待接受</Text>
+                  </View>
+                  <View style={styles.orderActions}>
+                    <Pressable disabled={acceptingOfferId === offer.offerId} onPress={() => void acceptOffer(offer)} style={[styles.orderAction, styles.orderActionPrimary]}>
+                      <Text selectable style={styles.orderActionPrimaryText}>{acceptingOfferId === offer.offerId ? "接单中…" : "接受并生成订单"}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
+        {joinsFailed ? <Text selectable style={styles.orderNotice}>活动报名记录没读出来，报名是否成功以「我的活动」为准。</Text> : null}
+        {joinedActs.length > 0 ? (
+          <View style={{ marginBottom: 11 }}>
+            <Text selectable style={[styles.orderFieldLabel, { marginBottom: 7, fontSize: 12, fontWeight: "900", color: color.ink }]}>活动报名</Text>
+            <Text selectable style={styles.savedMeta}>For You 下单报的是活动，不是履约订单 —— 记录在这里，钱货两讫的单在下面。</Text>
+            {joinedActs.map((item) => {
+              const order = joinOrders.get(item.activityId);
+              const state = joinStateLabel(order?.state);
+              return (
+                <View key={item.activityId} style={styles.orderCard}>
+                  <Pressable onPress={() => setTicketActivityId(item.activityId)} accessibilityLabel={`查看${item.title}订单详情`}>
+                    <View style={styles.orderHead}>
+                      <View style={styles.orderCopy}>
+                        <Text selectable style={styles.orderTitle}>{item.title}</Text>
+                        <Text selectable style={styles.orderId}>{item.desc ? item.desc : `${item.time} · ${item.venueName}`}</Text>
+                      </View>
+                      <Text selectable style={[styles.orderBadge, state.tone === "ok" && styles.orderBadgeLive]}>{state.label}</Text>
+                    </View>
+                    <View style={styles.orderGrid}>
+                      {activityOrderFields(item, order).map(([label, value]) => (
+                        <View key={label} style={styles.orderField}>
+                          <Text selectable style={styles.orderFieldLabel}>{label}</Text>
+                          <Text selectable style={styles.orderFieldValue}>{value}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </Pressable>
+                  {/* 订单编号单独一行、点一下复制（客服/争议时要报这个号）。老报名没有编号时如实说，
+                      不拿活动编号冒充订单号——活动编号是整场活动共用的。 */}
+                  {order?.orderNo ? (
+                    <Pressable
+                      accessibilityLabel="复制订单编号"
+                      onPress={() => { const no = order.orderNo ?? ""; void Clipboard.setStringAsync(no).then(() => setCopiedOrderNo(no)).catch(() => undefined); }}
+                      style={{ paddingTop: 10 }}
+                    >
+                      <Text selectable style={styles.orderFieldLabel}>订单编号 · {copiedOrderNo === order.orderNo ? "已复制" : "点击复制"}</Text>
+                      <Text selectable style={[styles.orderFieldValue, { letterSpacing: 0.5 }]}>{order.orderNo}</Text>
+                    </Pressable>
+                  ) : (
+                    <Text selectable style={[styles.orderId, { paddingTop: 10 }]}>订单编号暂未取到，下拉刷新或重新进入再看</Text>
+                  )}
+                  {item.code ? <Text selectable style={styles.orderId}>活动编号：{item.code}</Text> : null}
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>
           {([['all','全部'],['published','我发布的'],['joined','我参与的'],['done','已完成'],['cancelled','已取消']] as const).map(([id,label]) => (
             <Pressable key={id} onPress={() => setFilter(id)} style={[styles.orderTab, filter === id && styles.orderTabOn]}>

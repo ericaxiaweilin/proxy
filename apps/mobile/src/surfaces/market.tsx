@@ -134,6 +134,7 @@ export function MarketSurface({
   onOpenExperience,
   onOpenRealityScene,
   onChromeVisibilityChange,
+  onMapPickOpenChange,
   bottomNavVisible,
   userCenter,
   onRequireKYC
@@ -152,6 +153,8 @@ export function MarketSurface({
   onOpenExperience?: ((experienceId: string) => void) | undefined;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
+  // 创建活动的全页选地点地图：打开期间壳藏底栏（跟 hotScenesOpen 同模式）。
+  onMapPickOpenChange?: ((open: boolean) => void) | undefined;
   bottomNavVisible?: boolean;
   // ORDER-APPLY-KYC-GATE-001：没过 KYC 点接单 → 弹提示 → 跳 KYC 页。壳接线（切 ME + 直达 providerapply）。
   onRequireKYC?: (() => void) | undefined;
@@ -201,6 +204,8 @@ export function MarketSurface({
   const [oppDetail, setOppDetail] = useState<MarketOpportunity | null>(null);
   const [oppQuoteMode, setOppQuoteMode] = useState<"budget" | "standard" | "premium" | "custom">("standard");
   const [activityPublishOpen, setActivityPublishOpen] = useState(false);
+  // 创建活动的全页选地点地图打开时，市场头部 + tabs 让位，地图拉满整页。
+  const [wizardMapOpen, setWizardMapOpen] = useState(false);
   // R58 一期：发布需求向导（Moment 模板 → 规格确认 → 成功）。
   const [demandWizardOpen, setDemandWizardOpen] = useState(false);
   const [publishMenuOpen, setPublishMenuOpen] = useState(false);
@@ -439,7 +444,10 @@ export function MarketSurface({
         （横向 padding 清零）之前只给订单 tab，活动 tab 缩进 18，
         同一块 MarketMap 一边顶边一边有缝。地图视图不分 tab 全顶边；
         列表视图保持原样（订单沿用 contentFlat，活动保留 18 padding）。 */}
-    <ScrollView refreshControl={<RefreshControl refreshing={marketPull.refreshing} onRefresh={marketPull.onRefresh} />} style={styles.root} contentContainerStyle={[styles.content, view === "MAP" || pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
+    <ScrollView refreshControl={<RefreshControl refreshing={marketPull.refreshing} onRefresh={marketPull.onRefresh} />} style={styles.root} contentContainerStyle={[styles.content, view === "MAP" || pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }, wizardMapOpen && styles.contentMapPick]} onScroll={onMarketScroll} scrollEventThrottle={16}>
+      {/* 全页选地点时市场头部 + tabs + offer 全部让位，地图拉满。 */}
+      {wizardMapOpen ? null : (
+      <>
       <View style={styles.marketHead}>
         <Text selectable style={styles.marketTitle}>市场</Text>
         <View style={styles.headActions}>
@@ -472,6 +480,8 @@ export function MarketSurface({
           {supplierMatches === undefined ? "供给匹配中…（hn·ZH）" : supplierError ? `供给查询失败：${supplierError}` : `供给匹配 ${supplierMatches.length} 人（hn·ZH 已核验）`}
         </Text>
       ) : null}
+      </>
+      )}
       {demandWizardOpen && pageTab === "OPPORTUNITY" ? (
         <DemandWizard
           marketplace={marketplace}
@@ -487,6 +497,7 @@ export function MarketSurface({
         <ActivityWizard
           activities={activities}
           scenes={activityItems}          onBack={() => setActivityPublishOpen(false)}
+          onMapPickOpenChange={(open) => { setWizardMapOpen(open); onMapPickOpenChange?.(open); }}
           onOpenDemand={() => { setActivityPublishOpen(false); openDemandWizard(); }}
           onReloadScenes={() => void loadActivities()}
           onPublished={(activity) => {
@@ -2205,6 +2216,8 @@ const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 120, paddingHorizontal: 18, paddingTop: 10 },
   contentFlat: { paddingHorizontal: 0 },
+  // 全页选地点：三处缝全部清零（横向 18 + 顶部 10 + 底部 bottomPad），地图顶满。
+  contentMapPick: { paddingBottom: 0, paddingHorizontal: 0, paddingTop: 0 },
   marketHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginVertical: 4, paddingHorizontal: 12 },
   marketTitle: { color: color.ink, fontSize: 30, fontWeight: "800", lineHeight: 36 },
   marketSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },

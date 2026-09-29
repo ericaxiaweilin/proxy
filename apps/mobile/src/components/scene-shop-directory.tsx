@@ -54,7 +54,7 @@ import { sendSceneCommand, type AuthenticatedStoredSession } from "../scene-comm
 import {
   availableShopSorts, sceneDistanceMeters, shopAreaFacets, shopCardChips, shopCardSignal,
   shopCategoryBadge, shopCountText, shopDetailTags, shopDirectoryRows, shopDistanceBar, shopHereLine, shopInfoCells, shopListEndText,
-  SCENE_PHOTO_WALL_EMPTY, scenePhotoWallTiles, type ScenePhotoTile,
+  SCENE_PHOTO_WALL_EMPTY, scenePhotoWallTiles, sceneAssetWallTiles, sceneMerchantWallTiles, type ScenePhotoTile,
   shopAddressLine, shopCardDistance, shopHeroDistanceSuffix, shopListLocationLine, isFarAway, sceneActionSubtitle,
   type SceneOrigin, type SceneShopBrief, type ShopSortId,
 } from "../scene-shop-directory";
@@ -91,6 +91,9 @@ type ShopDetail = {
   actions: ReadonlyArray<{ type: string; label: string; state: string; moneyMeaning: string }>;
   aiVisits?: ReadonlyArray<{ personaId: string; displayName: string }> | undefined;
   truthBoundary: string;
+  // STORE-SCENE-LINK-001：认领了这个场景的店铺真的传过的相册，没认领/没照片
+  // 就是 undefined——不回落到 hero/menu 占位图（那是 sceneAssetWallTiles 的活）。
+  merchantPhotos?: ReadonlyArray<{ mediaAssetId: string; caption?: string | undefined }> | undefined;
 };
 
 function isShopDetail(value: unknown): value is ShopDetail {
@@ -108,6 +111,7 @@ function isShopDetail(value: unknown): value is ShopDetail {
   // 三个新段：缺字段（undefined）= 数据还没拉到，调用方整段不画；空数组 = 数据
   // 拿到了但确实为空，调用方按空态文案走。两件事不能混。
   if (item.companionSuggestions !== undefined && !Array.isArray(item.companionSuggestions)) return false;
+  if (item.merchantPhotos !== undefined && !Array.isArray(item.merchantPhotos)) return false;
   if (!Array.isArray(item.humans)) return false;
   if (!Array.isArray(item.variants)) return false;
   if (typeof item.selectedVariant !== "string") return false;
@@ -458,13 +462,20 @@ export function SceneShopDirectory({
                         {/* SCENE-CATEGORY-BADGE-001：分类角标 —— 真实枚举，缺值不画，
                             资质/状态类角标不许在这里出现（SCENE-NO-FABRICATED-001）。 */}
                         {shopCategoryBadge(scene) ? <View style={styles.coverBadge}><Text selectable style={styles.coverBadgeText}>{shopCategoryBadge(scene)}</Text></View> : null}
+                        {/* SCENE-DISTANCE-BADGE-001（用户：「所有的场景必须标注距离数」，
+                            对齐原型 deepseek_html_20260924_412dba 的 .shop-photo .distance）：
+                            距离原来跟 signal 拼在同一行文字里，signal 有内容、distance 还
+                            没算出来时整颗消失，看着像"这张卡没有距离"。改成封面上独立的
+                            角标，跟 hot-scenes.tsx 的 distanceBadge 同一个位置/口径——没有
+                            真实坐标或还没拿到定位时，这颗角标本身就不画（不垄假距离）。 */}
+                        {distance ? <View style={styles.cardDistanceBadge}><Text selectable style={styles.cardDistanceText}>{distance}</Text></View> : null}
                       </View>
                       <View style={styles.cardBody}>
                         <View style={styles.cardTitleRow}>
                           <Text selectable numberOfLines={1} style={styles.cardName}>{scene.name}</Text>
                           <Pressable accessibilityLabel={saved.has(scene.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => { void toggleSaved(scene); }} style={styles.heart}><ProxyIcon color={color.magenta} filled={saved.has(scene.id)} name="heart" size={20} /></Pressable>
                         </View>
-                        {signal || distance ? <Text selectable style={styles.cardSignal}>{[signal, distance].filter(Boolean).join(" · ")}</Text> : null}
+                        {signal ? <Text selectable style={styles.cardSignal}>{signal}</Text> : null}
                         {address ? <Text selectable numberOfLines={1} style={styles.cardAddress}>{`📍 ${address}`}</Text> : null}
                         {/* SCENE-RATING-CHIP-001: chip 行照「运动 · 羽毛球」卡 ——
                             ★ 评分（金）/ N 人去过 / 城市（蓝）三色，再接类型标签。
@@ -476,7 +487,10 @@ export function SceneShopDirectory({
                         ))}</View>
                         <View style={styles.cardFoot}>
                           <Text selectable style={styles.cardFootText}>{shopHereLine(scene.hereCount)}</Text>
-                          <Text selectable style={styles.cardChevron}>›</Text>
+                          {/* SCENE-HOME-PROTOTYPE-001（2026-09-28）：原来是文本字符 `›`
+                              （原型自己也是这么写的），但字符不是字形 —— 形状/基线随
+                              fontSize 漂、粗细跟 chevronLeft 对不上。换真字形。 */}
+                          <ProxyIcon color={color.muted} name="chevronRight" size={16} />
                         </View>
                       </View>
                     </Pressable>;
@@ -566,13 +580,12 @@ export function SceneShopDirectory({
                 <Text selectable style={styles.blockTitle}>现在最适合</Text>
                 <View style={styles.bestGrid}>
                   <View style={styles.bestCard}>
-                    <Text selectable style={styles.bestCardTitle}>{((detail.variants.find((variant) => variant.id === detail.selectedVariant)?.bestFor) ?? "").trim() || "以门店公告为准"}</Text>
-                    <Text selectable style={styles.bestCardSub}>按当前时段、现场状态和可用资源推荐。</Text>
+                    <Text selectable style={styles.bestCardTitle}>{((detail.variants.find((variant) => variant.id === detail.selectedVariant)?.bestFor) ?? "").trim() || "—"}</Text>
                   </View>
                   <View style={styles.bestCard}>
                     <Text selectable style={styles.bestCardTitle}>{detail.liveState.state.replaceAll("_", " ")}</Text>
-                    {/* GEO-HONEST-001：没有容量来源时明说"未知"，绝不回落到一个数字。 */}
-                    <Text selectable style={styles.bestCardSub}>{detail.liveState.bestWindow}{detail.liveState.capacityPct === undefined ? " · 容量未知" : ` · 容量 ${detail.liveState.capacityPct}%`}</Text>
+                    {/* GEO-HONEST-001：没有容量来源时不编数字，有才印。 */}
+                    <Text selectable style={styles.bestCardSub}>{detail.liveState.bestWindow}{detail.liveState.capacityPct === undefined ? "" : ` · 容量 ${detail.liveState.capacityPct}%`}</Text>
                   </View>
                 </View>
               </View> : null}
@@ -588,7 +601,6 @@ export function SceneShopDirectory({
                     钉的死按钮。） */}
                 <View style={styles.matchLabel}><Text selectable style={styles.matchLabelText}>匹配推荐</Text></View>
                 <Text selectable style={styles.matchTitle}>适合一起的人</Text>
-                <Text selectable style={styles.matchSub}>根据时段 · 现场状态 · 内容偏好实时推荐</Text>
                 {detail.companionSuggestions && detail.companionSuggestions.length > 0 ? (
                   <ScrollView horizontal contentContainerStyle={styles.humanRail} showsHorizontalScrollIndicator={false}>
                     {detail.companionSuggestions.map((person) => <View key={person.id} style={styles.humanPlain}>
@@ -632,31 +644,60 @@ export function SceneShopDirectory({
 
               <View style={styles.block}>
                 <Text selectable style={styles.blockTitle}>这里的活动</Text>
-                {activityFeed.state === "READY" ? activityFeed.items.map((activity) => <View key={activity.activityId} style={styles.activityRow}>
-                  <View style={styles.activityCopy}>
-                    <Text selectable style={styles.activityTitle}>{activity.title}</Text>
-                    <Text selectable style={styles.activityMeta}>{`${activity.time} · ${activity.people}`}</Text>
-                  </View>
-                  <Pressable accessibilityLabel={activitySignupLabel(activity)} disabled={!canSignUp(activity) || busy === activity.activityId} onPress={() => { void joinActivity(activity.activityId); }} style={[styles.activityJoin, (!canSignUp(activity) || busy === activity.activityId) && styles.actionButtonBusy]}>
-                    <Text selectable style={styles.activityJoinText}>{activitySignupLabel(activity)}</Text>
-                  </Pressable>
-                </View>) : <Text selectable style={styles.blockEmpty}>{sceneActivityFeedText(activityFeed)}</Text>}
+                {/* SCENE-HOME-PROTOTYPE-001：原型的 event-scroll 是横滑卡片，
+                    不是竖排行。卡上只画有真实字段的东西——标题/时间/人数/报名
+                    状态；原型每张卡的"进行中/已结束"徽标、头像堆叠、★评分都没
+                    有对应字段（SceneActivity 只有自由文本 time，没有
+                    startsAt/endsAt/status，也没有 participants 头像或活动评分
+                    域），照 GEO-HONEST-001 不画、不猜。"发起新活动"虚线卡复用
+                    下面意图卡同一个 onOpenScene 出口，不是死按钮。 */}
+                {activityFeed.state === "READY" ? (
+                  <ScrollView horizontal contentContainerStyle={styles.eventRail} showsHorizontalScrollIndicator={false}>
+                    {activityFeed.items.map((activity) => <View key={activity.activityId} style={styles.eventCard}>
+                      <Text selectable numberOfLines={2} style={styles.eventTitle}>{activity.title}</Text>
+                      <View style={styles.eventMetaRow}><ProxyIcon color={color.muted} name="clock" size={12} /><Text selectable style={styles.eventMetaText}>{activity.time}</Text></View>
+                      <View style={styles.eventMetaRow}><ProxyIcon color={color.muted} name="peoplePair" size={12} /><Text selectable style={styles.eventMetaText}>{activity.people}</Text></View>
+                      <Pressable accessibilityLabel={activitySignupLabel(activity)} disabled={!canSignUp(activity) || busy === activity.activityId} onPress={() => { void joinActivity(activity.activityId); }} style={[styles.eventJoin, (!canSignUp(activity) || busy === activity.activityId) && styles.actionButtonBusy]}>
+                        <Text selectable style={styles.eventJoinText}>{activitySignupLabel(activity)}</Text>
+                      </Pressable>
+                    </View>)}
+                    {detail && detail.actions.length > 0 ? (
+                      <Pressable accessibilityLabel="发起新活动" onPress={() => { if (selected) onOpenScene?.(selected.id); }} style={styles.eventCreateCard}>
+                        <Text selectable style={styles.eventCreateText}>+ 发起新活动</Text>
+                      </Pressable>
+                    ) : null}
+                  </ScrollView>
+                ) : <Text selectable style={styles.blockEmpty}>{sceneActivityFeedText(activityFeed)}</Text>}
               </View>
 
               <View style={styles.block}>
                 <Text selectable style={styles.blockTitle}>照片墙</Text>
-                {wallState === "READY" && wall.length > 0 ? <View style={styles.wallGrid}>{wall.map((tile) => {
-                  const uri = localNet.resolveMediaUrl(tile.path);
-                  return <View key={tile.key} style={styles.wallTile}>
-                    {uri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`wall:${tile.key}`} source={{ uri }} style={styles.wallImage} transition={0} /> : null}
-                    {tile.author ? <Text selectable numberOfLines={1} style={styles.wallAuthor}>{tile.author}</Text> : null}
-                  </View>;
-                })}</View> : <Text selectable style={styles.blockEmpty}>{
-                  wallState === "LOADING" ? "正在读取照片墙…"
-                    : wallState === "ERROR" ? "照片墙暂时取不到，请稍后重试。"
-                      : wallState === "SIGNED_OUT" ? "登录后才能看到这里的照片墙。"
-                        : SCENE_PHOTO_WALL_EMPTY
-                }</Text>}
+                {/* STORE-SCENE-LINK-001 + SCENE-PHOTO-WALL-002：三层，真实数据
+                    优先——认领了这个场景的店铺相册（商家真的传的）+ 帖子墙
+                    （用户真的发的）叠加展示；两个都空才回落到 hero/menu 占位图。
+                    资产/商家 tile 的 postId 是空串，借它分辨要不要走
+                    localNet.resolveMediaUrl（那是帖子媒体资产 id 专用的解析，
+                    资产图/商家图早就是现成的绝对 URL，直接用）。 */}
+                {(() => {
+                  const merchantTiles = sceneMerchantWallTiles(detail?.merchantPhotos, apiBaseUrl);
+                  const realTiles = [...merchantTiles, ...wall];
+                  const displayTiles = realTiles.length > 0 ? realTiles : sceneAssetWallTiles(detail);
+                  if (displayTiles.length === 0) {
+                    return <Text selectable style={styles.blockEmpty}>{
+                      wallState === "LOADING" ? "正在读取照片墙…"
+                        : wallState === "ERROR" ? "照片墙暂时取不到，请稍后重试。"
+                          : wallState === "SIGNED_OUT" ? "登录后才能看到这里的照片墙。"
+                            : SCENE_PHOTO_WALL_EMPTY
+                    }</Text>;
+                  }
+                  return <View style={styles.wallGrid}>{displayTiles.map((tile) => {
+                    const uri = tile.postId ? localNet.resolveMediaUrl(tile.path) : tile.path;
+                    return <View key={tile.key} style={styles.wallTile}>
+                      {uri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`wall:${tile.key}`} source={{ uri }} style={styles.wallImage} transition={0} /> : null}
+                      {tile.author ? <Text selectable numberOfLines={1} style={styles.wallAuthor}>{tile.author}</Text> : null}
+                    </View>;
+                  })}</View>;
+                })()}
               </View>
 
               {detail && detail.actions.length > 0 ? <View style={styles.block}>
@@ -671,7 +712,7 @@ export function SceneShopDirectory({
                     <Text selectable style={styles.activityTitle}>{action.label}</Text>
                     <Text selectable style={styles.activityMeta}>{sceneActionSubtitle(action)}</Text>
                   </View>
-                  <Text selectable style={styles.cardChevron}>›</Text>
+                  <ProxyIcon color={color.muted} name="chevronRight" size={16} />
                 </Pressable>)}
                 <View style={styles.intentFootnote}>
                   <ProxyIcon color={color.muted} name="clock" size={12} />
@@ -720,6 +761,8 @@ const styles = StyleSheet.create({
   // 跟 liveDot 共享 112pt 高的封面（top:6 距顶边），左缘跟卡片内边距对齐。
   coverBadge: { backgroundColor: color.mint, borderRadius: 5, left: 6, paddingHorizontal: 6, paddingVertical: 2, position: "absolute", top: 6 },
   coverBadgeText: { color: color.white, fontSize: 10, fontWeight: "900", letterSpacing: 0.2 },
+  cardDistanceBadge: { backgroundColor: "rgba(255,255,255,0.92)", borderRadius: 5, bottom: 6, left: 6, paddingHorizontal: 6, paddingVertical: 2, position: "absolute" },
+  cardDistanceText: { color: color.ink, fontSize: 10, fontWeight: "900" },
   photoPlaceholder: { alignItems: "center", justifyContent: "center" },
   photoPlaceholderText: { color: color.muted, fontSize: 15, fontWeight: "900" },
   heroPlaceholderText: { color: "rgba(255,255,255,0.5)", fontSize: 30, fontWeight: "900" },
@@ -742,7 +785,6 @@ const styles = StyleSheet.create({
   tagLiveText: { color: color.factConfirmedFg, fontSize: 11, fontWeight: "900" },
   cardFoot: { alignItems: "center", borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 9, paddingTop: 8 },
   cardFootText: { color: color.muted, fontSize: 11, fontWeight: "800" },
-  cardChevron: { color: color.muted, fontSize: 16 },
   wallGrid: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 10 },
   wallTile: { aspectRatio: 1, backgroundColor: color.surface, borderRadius: 10, overflow: "hidden", width: "32.4%" },
   wallImage: { height: "100%", width: "100%" },
@@ -845,6 +887,16 @@ actionRow3: { flexDirection: "row", gap: 8, marginTop: 14 },
   activityMeta: { color: color.muted, fontSize: 11, fontWeight: "700", lineHeight: 15, marginTop: 3 },
   activityJoin: { backgroundColor: color.ink, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 9 },
   activityJoinText: { color: color.white, fontSize: 11.5, fontWeight: "900" },
+  // SCENE-HOME-PROTOTYPE-001：原型 event-scroll 的横滑事件卡。
+  eventRail: { gap: 10, paddingVertical: 2 },
+  eventCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 6, padding: 12, width: 176 },
+  eventTitle: { color: color.ink, fontSize: 12.5, fontWeight: "900", lineHeight: 17, minHeight: 34 },
+  eventMetaRow: { alignItems: "center", flexDirection: "row", gap: 5 },
+  eventMetaText: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  eventJoin: { alignItems: "center", backgroundColor: color.ink, borderRadius: 10, marginTop: 4, paddingVertical: 8 },
+  eventJoinText: { color: color.white, fontSize: 11, fontWeight: "900" },
+  eventCreateCard: { alignItems: "center", borderColor: color.line, borderRadius: 16, borderStyle: "dashed", borderWidth: 1, justifyContent: "center", minHeight: 120, width: 120 },
+  eventCreateText: { color: color.muted, fontSize: 12, fontWeight: "800", textAlign: "center" },
   actionRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 8, padding: 12 },
   boundary: { color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 20 },
 });

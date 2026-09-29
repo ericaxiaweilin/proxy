@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -43,8 +44,12 @@ type Store struct {
 	Address    string    `json:"address"`
 	// STORE-STATS-001：店铺品类（咖啡厅/SPA/…，店主自填，空 = 没填）。
 	Category   string    `json:"category,omitempty"`
-	Status     string    `json:"status"`
-	CreatedAt  time.Time `json:"createdAt"`
+	// STORE-SCENE-LINK-001：店铺→现实场景的关联（店主自己认领，空 = 没关联）。
+	// 认领之后，场景详情的照片墙才能拉这家店真的传过的照片——之前场景域和
+	// 商家域之间没有这条键，商家传了照片也进不了场景那一侧。
+	RealitySceneID string    `json:"realitySceneId,omitempty"`
+	Status         string    `json:"status"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 // StorePhoto is one entry in a store's album. AssetPath is a Proxy-internal
@@ -202,6 +207,8 @@ type Repository interface {
 	ListStorePhotos(ctx context.Context, storeID string) ([]StorePhoto, error)
 	DeleteStorePhoto(ctx context.Context, storeID, photoID, requesterID string) error
 	GetStorePhoto(ctx context.Context, storeID, photoID string) (StorePhoto, error)
+	// STORE-SCENE-LINK-001：反向查——这个现实场景关联着哪家/哪些店，拉它们的相册。
+	ListStorePhotosByRealitySceneID(ctx context.Context, sceneID string) ([]StorePhoto, error)
 
 	// Store lines (upsert)
 	UpsertStoreLines(ctx context.Context, l StoreLines) error
@@ -389,6 +396,22 @@ func (r *MemoryRepository) ListStorePhotos(_ context.Context, storeID string) ([
 	return result, nil
 }
 
+func (r *MemoryRepository) ListStorePhotosByRealitySceneID(_ context.Context, sceneID string) ([]StorePhoto, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []StorePhoto{}
+	for _, store := range r.stores {
+		if store.RealitySceneID != sceneID {
+			continue
+		}
+		for _, p := range r.storePhotos[store.ID] {
+			result = append(result, p)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].SortOrder < result[j].SortOrder })
+	return result, nil
+}
+
 func (r *MemoryRepository) DeleteStorePhoto(_ context.Context, storeID, photoID, requesterID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -552,7 +575,7 @@ func NewWithRepository(repo Repository) *Service {
 func (s *Service) Supports(t string) bool {
 	switch t {
 	case "CreateBusinessAccount", "ListMyBusinessAccounts", "AddBusinessMember",
-		"CreateBusinessStore", "ListBusinessStores", "GetBusinessStore", "SetStoreCategory", "SpendSummary",
+		"CreateBusinessStore", "ListBusinessStores", "GetBusinessStore", "SetStoreCategory", "LinkStoreToRealityScene", "SpendSummary",
 		"AddStorePhoto", "ListStorePhotos", "DeleteStorePhoto",
 		"UpsertStoreLines", "GetStoreLines",
 		"CreateStoreProduct", "UpdateStoreProduct", "ListStoreProducts", "SetProductAvailability",
@@ -583,6 +606,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.getStore(ctx, e)
 	case "SetStoreCategory":
 		return s.setStoreCategory(ctx, e)
+	case "LinkStoreToRealityScene":
+		return s.linkStoreToRealityScene(ctx, e)
 	case "SpendSummary":
 		return s.spendSummary(ctx, e)
 	case "AddStorePhoto":
@@ -813,6 +838,36 @@ func (s *Service) setStoreCategory(ctx context.Context, e command.Envelope) comm
 	return acceptedWithPayload(e, "Store", store.ID, 1, store.Status, map[string]any{"store": store}, []event.DomainEvent{ev})
 }
 
+// STORE-SCENE-LINK-001：店主自己认领「这家店就是那个现实场景」。不校验
+// sceneId 是否真的在场景目录里存在——业务域和场景域之间没有互相校验的
+// 通道，跟 category 这类自填字段一样的松验证；认领错了店主自己能改回来
+// （传空串 = 取消关联）。
+func (s *Service) linkStoreToRealityScene(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		StoreID string `json:"storeId"`
+		SceneID string `json:"sceneId"`
+	}
+	if !decode(e.Payload, &p) || p.StoreID == "" {
+		p.StoreID = e.Target.ID
+		if p.StoreID == "" {
+			return command.Rejected(e, "INVALID_STORE_ID", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_store_id", nil)
+		}
+	}
+	store, err := s.repo.GetStore(ctx, p.StoreID)
+	if err != nil {
+		return command.Rejected(e, "STORE_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "business.store_not_found", nil)
+	}
+	if !s.hasRole(ctx, store.BusinessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR") {
+		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
+	}
+	store.RealitySceneID = strings.TrimSpace(p.SceneID)
+	if err := s.repo.UpdateStore(ctx, store); err != nil {
+		return command.Rejected(e, "STORE_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_update_failed", nil)
+	}
+	ev2 := event.New("BusinessStoreUpdated", "Store", store.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), nil)
+	return acceptedWithPayload(e, "Store", store.ID, 1, store.Status, map[string]any{"store": store}, []event.DomainEvent{ev2})
+}
+
 func (s *Service) listStores(ctx context.Context, e command.Envelope) command.Result {
 	var p struct {
 		BusinessID string `json:"businessId"`
@@ -931,6 +986,15 @@ func (s *Service) listStorePhotos(ctx context.Context, e command.Envelope) comma
 		return command.Rejected(e, "STORE_PHOTO_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_photo_list_failed", nil)
 	}
 	return acceptedWithPayload(e, "StorePhotoList", p.StoreID, 1, "LISTED", map[string]any{"photos": photos, "count": len(photos)}, nil)
+}
+
+// ListStorePhotosByRealitySceneID is the public read seam realityscene.Service
+// consumes for STORE-SCENE-LINK-001 (same "small direct method, not a full
+// command round-trip" convention as MerchantPublishIdentity below). It is a
+// public, unauthenticated read of already-public store photo captions/media
+// ids — the same data a store's own storefront page shows anyone.
+func (s *Service) ListStorePhotosByRealitySceneID(ctx context.Context, sceneID string) ([]StorePhoto, error) {
+	return s.repo.ListStorePhotosByRealitySceneID(ctx, sceneID)
 }
 
 func (s *Service) deleteStorePhoto(ctx context.Context, e command.Envelope) command.Result {

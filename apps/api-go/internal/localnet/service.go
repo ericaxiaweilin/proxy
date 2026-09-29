@@ -276,6 +276,29 @@ type Repository interface {
 	SnapshotNeeds(ctx context.Context) ([]NeedFromPost, error)
 	AppendInteractionEvent(ctx context.Context, ie InteractionEvent) error
 	ListInteractionEvents(ctx context.Context, actorID string, limit int) ([]InteractionEvent, error)
+	// COMP-PURPOSE-CONSENT-001：按目的的同意的写侧 + 读侧。
+	//
+	// 和上面几条一样放进**必需**接口，但这里还有一层理由：一个**可选**的同意闸
+	// 一旦没人实现就是 nil，nil 闸 = 不设防（fail-open）—— 正是这一条要修的病。
+	// 宁可编译期就逼着每个实现把它接上。
+	//
+	// 注意三个方法的契约差别，别把它们混成「返回 bool」：
+	//   * PurposeConsentState 的 found=false 表示**从未表过态**，
+	//     它既不是「不同意」也不是「读失败」——这三种在 UI 上必须长得不一样。
+	//   * err != nil 表示**查不出来**。调用方必须 fail-closed（拒收事件），
+	//     不能把 err 当成「没有」然后放行，也不能当成「有」然后放行。
+	//
+	// Grant / Withdraw 都是**追加一行动作**，不是改状态：这张表就是审计证据
+	// （Art. 6.2 举证责任在控制者），而本仓没有可持久化的 domain event log。
+	// 撤回一个本来就不存在 / 已撤回的同意不报错（幂等）—— 不能因为
+	// 「撤回失败」把用户的撤回请求拒掉（Art. 5 对撤回有时限要求）。
+	GrantPurposeConsent(ctx context.Context, consent PurposeConsent) error
+	WithdrawPurposeConsent(ctx context.Context, userID, purpose, policyVersion string, at time.Time) error
+	PurposeConsentState(ctx context.Context, userID, purpose, policyVersion string) (PurposeConsent, bool, error)
+	// PurposeConsentHistory 按时间倒序返回该 (user, purpose, version) 的**全部**
+	// 动作。它存在的意义是「举证」：用户说「我从没同意过」时，平台要能拿出
+	// 完整的动作序列，而不是只有一个当前值。
+	PurposeConsentHistory(ctx context.Context, userID, purpose, policyVersion string) ([]PurposeConsent, error)
 	// TWIN-SIGNALS-001: 战绩读侧。按作者聚合自己帖子的曝光 —— 必需接口，
 	// 两个实现（memory + postgres）都必须接上，编译期保证。
 	// CONTENT-ANALYTICS-001: since 之后发的帖子才算（用户侧默认只看近 30 天；服务端事件照存全量）。
@@ -348,6 +371,80 @@ func taggedAtScene(p Post, sceneID string) bool {
 type MentionRepository interface {
 	ListPostsMentioning(ctx context.Context, actorID string, handle string, limit int) ([]Post, error)
 }
+
+// COMP-PURPOSE-CONSENT-001（2026-09-27 越南合规扫描）。
+//
+// 这一组常量解决的是**架构**问题，不是文案问题：
+// 行为追踪的同意闸原来**只在客户端**（apps/mobile 的隐私开关）。客户端的开关
+// 不是闸 —— 客户端可以改、可以绕过、可以在重装后消失，而服务端照收不误。
+// 而 Nghị định 356/2025/NĐ-CP 把举证责任放在**控制者**身上：
+//   * Art. 6.1 同意须是**可验证的形式**；
+//   * Art. 6.2 控制者须**保存**同意，争议时**由控制者举证**；
+//   * Art. 6.3 **禁止默认同意机制**；
+//   * Art. 4.1(l) 社交网络上的「使用行为与活动的数据」= **敏感个人数据**。
+//
+// 所以同意必须落在服务端、必须可撤回、必须在**入库前**被强制。
+// 判据很简单：用户说「我从没同意过」，平台能不能拿出一条带时间戳的记录？
+// 在改动之前，答案是**不能** —— 唯一的记录在用户自己的设备里。
+const (
+	// PurposeBehaviorAnalytics：追踪用户在社交网络上的行为与活动 ——
+	// 看了哪条动态、每张照片停留多久、放大过几次、打开过谁的主页、看过哪个候选人。
+	// NĐ 356/2025 Art. 4.1(l) 把这一类列为**敏感个人数据**。
+	PurposeBehaviorAnalytics = "BEHAVIOR_ANALYTICS"
+
+	// PurposePolicyVersion 是「这个目的」的说明文本版本。
+	// 读活跃同意时按 (user, purpose, policy_version) 过滤，所以**改这个值 =
+	// 所有旧同意立即失效、用户必须重新同意**。这正是「同意与所述目的绑定」的实现。
+	// 改它之前必须先改用户看到的说明文案（me.tsx 的动态浏览统计开关），
+	// 否则就是「用户同意的是一段他没见过的话」。
+	PurposePolicyVersion = "2026-09-27"
+)
+
+// behaviouralTrackingEventTypes 列出**入库前必须先有同意**的事件类型。
+//
+// 判据是 NĐ 356/2025 Art. 4.1(l) 的字面：这些事件都在记录「数据主体在网络空间
+// 服务中的使用行为与活动」。AGENT_SHORTLISTED 不在表里 —— 那是用户自己主动
+// 保存一个候选人（一次明确的用户动作），不是对用户的被动追踪。
+//
+// 用 map 而不是散在 switch 里，是为了让「哪些事件被闸住」可以一眼看全、
+// 也方便钉去遍历它。**新增行为追踪事件时必须往这里加一条**，否则它会
+// 悄悄变成一条不设防的通道 —— 本仓最熟的那种病。
+var behaviouralTrackingEventTypes = map[string]string{
+	"POST_IMPRESSION":  PurposeBehaviorAnalytics,
+	"MEDIA_IMPRESSION": PurposeBehaviorAnalytics,
+	"MEDIA_ZOOM":       PurposeBehaviorAnalytics,
+	"PROFILE_OPEN":     PurposeBehaviorAnalytics,
+	"CANDIDATE_VIEWED": PurposeBehaviorAnalytics,
+}
+
+// PurposeConsent 是**一次**同意动作（授予或撤回），不是「当前状态」。
+//
+// 为什么是动作而不是状态：这张表同时就是审计证据（NĐ 356/2025 Art. 6.2
+// 举证责任在控制者）。而本仓**没有**可持久化的 domain event log ——
+// `Result.EventRefs` 只是一串 id，全仓没有任何地方把它落库。所以
+// 「授予 / 撤回的历史」必须由这张表自己保存：只 INSERT，从不 UPDATE。
+//
+// 「当前是否有效」由调用方从**最新一条**动作推出来（见 PurposeConsentState）。
+type PurposeConsent struct {
+	UserID        string    `json:"userId"`
+	Purpose       string    `json:"purpose"`
+	PolicyVersion string    `json:"policyVersion"`
+	// Action 是这一次动作：GRANT 或 WITHDRAW。
+	Action   string    `json:"action"`
+	ActedAt  time.Time `json:"actedAt"`
+	Source   string    `json:"source"`
+}
+
+// 同意动作的两个取值（和 migrations/133 的 CHECK 约束一致）。
+const (
+	ConsentActionGrant    = "GRANT"
+	ConsentActionWithdraw = "WITHDRAW"
+)
+
+// Active 报告**这一次动作**是不是「授予」。
+// 注意它说的是动作本身，不是「该用户当前有没有同意」——
+// 后者要看最新一条动作（PurposeConsentState 返回的就是最新那条）。
+func (c PurposeConsent) Active() bool { return c.Action == ConsentActionGrant }
 
 // InteractionEvent 是网络交互事件（C1 Event Stream 最小底座）。
 // 读侧事件：PROFILE_OPEN / POST_IMPRESSION / CANDIDATE_VIEWED / AGENT_SHORTLISTED。
@@ -464,6 +561,9 @@ type MemoryRepository struct {
 	needs             []NeedFromPost
 	interactionEvents []InteractionEvent
 	events            []event.DomainEvent
+	// COMP-PURPOSE-CONSENT-001: 同意**动作**日志（append-only，追加序）。
+	// 不是 map[当前状态] —— 这张表同时是审计证据，历史不能丢。
+	purposeConsents []PurposeConsent
 	// POLL-VOTE-001
 	polls map[string]PostPoll          // postID -> poll
 	votes map[string]map[string]string // postID -> voterID -> optionID
@@ -478,6 +578,68 @@ func NewMemoryRepository() *MemoryRepository {
 		votes:           make(map[string]map[string]string),
 		audienceTargets: make(map[string][]string),
 	}
+}
+
+// COMP-PURPOSE-CONSENT-001：授予 / 撤回都是**追加一行动作**，从不改状态、从不删。
+// 这张表就是审计证据 —— 本仓没有可持久化的 domain event log（`Result.EventRefs`
+// 只是一串 id，全仓零落库），所以「他什么时候同意的、什么时候撤的」只能靠这里。
+func (r *MemoryRepository) GrantPurposeConsent(_ context.Context, consent PurposeConsent) error {
+	return r.appendPurposeConsentAction(consent)
+}
+
+// WithdrawPurposeConsent 追加一条 WITHDRAW 动作。幂等：撤回一个本来就不存在
+// 或已撤回的同意不报错 —— 不能因为「撤回失败」把用户的撤回请求拒掉。
+func (r *MemoryRepository) WithdrawPurposeConsent(_ context.Context, userID, purpose, policyVersion string, at time.Time) error {
+	return r.appendPurposeConsentAction(PurposeConsent{
+		UserID:        userID,
+		Purpose:       purpose,
+		PolicyVersion: policyVersion,
+		Action:        ConsentActionWithdraw,
+		ActedAt:       at,
+		Source:        "WITHDRAWAL",
+	})
+}
+
+func (r *MemoryRepository) appendPurposeConsentAction(consent PurposeConsent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.purposeConsents = append(r.purposeConsents, consent)
+	return nil
+}
+
+// PurposeConsentState 返回**最新一条**动作。found=false = 从未表过态。
+func (r *MemoryRepository) PurposeConsentState(_ context.Context, userID, purpose, policyVersion string) (PurposeConsent, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	latest, found := latestPurposeConsent(r.purposeConsents, userID, purpose, policyVersion)
+	return latest, found, nil
+}
+
+// PurposeConsentHistory 按时间倒序返回全部动作（举证用）。
+func (r *MemoryRepository) PurposeConsentHistory(_ context.Context, userID, purpose, policyVersion string) ([]PurposeConsent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]PurposeConsent, 0, len(r.purposeConsents))
+	for i := len(r.purposeConsents) - 1; i >= 0; i-- {
+		c := r.purposeConsents[i]
+		if c.UserID == userID && c.Purpose == purpose && c.PolicyVersion == policyVersion {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// latestPurposeConsent 取最新一条动作。同一时刻按**追加顺序**决胜
+// （切片是追加序，所以从后往前扫，第一个命中的就是最新的）。
+// postgres 侧用 (acted_at DESC, id DESC) 保证同样的确定性。
+func latestPurposeConsent(all []PurposeConsent, userID, purpose, policyVersion string) (PurposeConsent, bool) {
+	for i := len(all) - 1; i >= 0; i-- {
+		c := all[i]
+		if c.UserID == userID && c.Purpose == purpose && c.PolicyVersion == policyVersion {
+			return c, true
+		}
+	}
+	return PurposeConsent{}, false
 }
 
 func (r *MemoryRepository) SavePostPoll(_ context.Context, poll PostPoll) error {
@@ -1294,7 +1456,10 @@ func (s *Service) Supports(commandType string) bool {
 	case "CreatePost", "UpdatePostAudience", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "ListPostsAtScene", "CreateNeedFromPost", "RecordAttribution",
 		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed", "RecordMediaImpression",
 		"ShortlistAgent", "ListInteractionEvents", "ListPostImpressionStats", "ListProfileViewStats", "ListProfileViewers", "ListMediaImpressionStats", "ListMediaActivityForViewer", "VotePostPoll",
-		"RecordMediaZoom", "GetContentAnalytics", "ListPostAudience":
+		"RecordMediaZoom", "GetContentAnalytics", "ListPostAudience",
+		// COMP-PURPOSE-CONSENT-001：按目的的同意。写侧与读侧都要有，
+		// 否则 App 的开关就只是本地状态 —— 而本地状态不是同意。
+		"RecordPurposeConsent", "GetPurposeConsent":
 		return true
 	default:
 		return false
@@ -1335,6 +1500,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.recordMediaImpression(ctx, e)
 	case "RecordMediaZoom":
 		return s.recordMediaZoom(ctx, e)
+	case "RecordPurposeConsent":
+		return s.recordPurposeConsent(ctx, e)
+	case "GetPurposeConsent":
+		return s.getPurposeConsent(ctx, e)
 	case "GetContentAnalytics":
 		return s.getContentAnalytics(ctx, e)
 	case "ListPostAudience":
@@ -2708,7 +2877,50 @@ func (s *Service) shortlistAgent(ctx context.Context, e command.Envelope) comman
 	return s.appendInteraction(ctx, e, "AGENT_SHORTLISTED", "AGENT")
 }
 
+// hasActivePurposeConsent 报告某个用户对某个目的**当前**有没有有效同意。
+//
+// 三种结果必须分清（这是本仓反复踩的那条线）：
+//   - (true,  nil)  有活跃同意；
+//   - (false, nil)  明确没有（从未表过态，或已撤回）—— 都是「不能采」；
+//   - (false, err)  **查不出来**。调用方必须 fail-closed。
+//
+// 读不出来时不能默认「有」（那就是 fail-open，等于没闸），
+// 也不能悄悄默认「没有」然后让调用方以为这是用户的意愿 ——
+// 所以这里把 err 原样交出去，由调用方决定用什么错误码告诉客户端。
+func (s *Service) hasActivePurposeConsent(ctx context.Context, userID, purpose string) (bool, error) {
+	consent, found, err := s.repository.PurposeConsentState(ctx, userID, purpose, PurposePolicyVersion)
+	if err != nil {
+		return false, err
+	}
+	return found && consent.Active(), nil
+}
+
 func (s *Service) appendInteraction(ctx context.Context, e command.Envelope, eventType, defaultTargetType string) command.Result {
+	// COMP-PURPOSE-CONSENT-001：敏感行为追踪事件**入库前**先验同意。
+	//
+	// 放在最前面（在 payload 校验之前）是有意的：一个还没同意的客户端，
+	// 该收到的是「先取得同意」，而不是一个关于 payload 的报错 —— 后者会
+	// 引导它去修 payload，然后重试，然后又被拒。
+	if purpose, gated := behaviouralTrackingEventTypes[eventType]; gated {
+		active, err := s.hasActivePurposeConsent(ctx, e.Actor.ID, purpose)
+		if err != nil {
+			// 读不出来 = 证明不了有同意 = 拒收（Art. 6.2 举证责任在平台）。
+			return command.Rejected(e, "CONSENT_STATE_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "localnet.consent_state_unavailable", map[string]any{
+				"purpose": purpose,
+				"note":    "无法确认同意状态，因此不落库。这是 fail-closed，不是重试就能好 —— 需要先修同意存储。",
+			})
+		}
+		if !active {
+			return command.Rejected(e, "CONSENT_REQUIRED", "COMPLIANCE", "AFTER_USER_ACTION", "localnet.consent_required", map[string]any{
+				"purpose":       purpose,
+				"policyVersion": PurposePolicyVersion,
+				"note": "该事件属于对用户在社交网络上的行为与活动的追踪，是敏感个人数据" +
+					"（Nghị định 356/2025/NĐ-CP Art. 4.1(l)），必须先取得该目的的明确同意。" +
+					"客户端的开关不是闸 —— 服务端在这里强制。",
+			})
+		}
+	}
+
 	var p interactionPayload
 	if !decode(e.Payload, &p) || p.TargetID == "" {
 		return command.Rejected(e, "INVALID_INTERACTION", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_interaction", nil)
@@ -2741,6 +2953,132 @@ func (s *Service) appendInteraction(ctx context.Context, e command.Envelope, eve
 		return command.Rejected(e, "INTERACTION_RECORD_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.interaction_failed", nil)
 	}
 	return command.Accepted(e, "InteractionEvent", ie.EventID, 1, "RECORDED", eventRefs(domainEvents))
+}
+
+// ---------- COMP-PURPOSE-CONSENT-001：按目的的同意（写侧 + 读侧） ----------
+
+// purposeConsentPayload 是授予/撤回的入参。
+//
+// purpose 必须**显式给**，不默认成 BEHAVIOR_ANALYTICS：将来多一个目的时，
+// 旧客户端的一次「开开关」调用不能悄悄变成对另一个目的的同意。
+// （注意这是数据保护意义上的「处理目的」，和 command.Envelope 里那个通用的
+// Purpose 字段不是一回事 —— 那个是命令意图，这里要的是同意指向的目的。）
+type purposeConsentPayload struct {
+	Purpose string `json:"purpose"`
+	Granted bool   `json:"granted"`
+	Source  string `json:"source"`
+}
+
+// recordPurposeConsent 是授予/撤回的同一条命令：入参一样，只是状态转移不同。
+//
+// 为什么授予和撤回不做成两条命令：它们必须共用同一套校验与同一份审计，
+// 拆开就迟早会有一条被漏掉（本仓的「半截接线」就是这么来的）。
+func (s *Service) recordPurposeConsent(ctx context.Context, e command.Envelope) command.Result {
+	var p purposeConsentPayload
+	if !decode(e.Payload, &p) || p.Purpose == "" {
+		return command.Rejected(e, "INVALID_CONSENT", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_consent", map[string]any{
+			"note": "purpose 必须显式给；不默认成任何目的。",
+		})
+	}
+	if e.Actor.ID == "" {
+		return command.Rejected(e, "CONSENT_ACTOR_REQUIRED", "AUTHENTICATION", "AFTER_USER_ACTION", "localnet.consent_actor_required", nil)
+	}
+	now := s.clock.Now().UTC()
+	source := p.Source
+	if source == "" {
+		source = "UNKNOWN"
+	}
+
+	action := ConsentActionWithdraw
+	if p.Granted {
+		action = ConsentActionGrant
+		if err := s.repository.GrantPurposeConsent(ctx, PurposeConsent{
+			UserID:        e.Actor.ID,
+			Purpose:       p.Purpose,
+			PolicyVersion: PurposePolicyVersion,
+			Action:        ConsentActionGrant,
+			ActedAt:       now,
+			Source:        source,
+		}); err != nil {
+			return command.Rejected(e, "CONSENT_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.consent_write_failed", nil)
+		}
+	} else {
+		if err := s.repository.WithdrawPurposeConsent(ctx, e.Actor.ID, p.Purpose, PurposePolicyVersion, now); err != nil {
+			return command.Rejected(e, "CONSENT_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.consent_write_failed", nil)
+		}
+	}
+
+	// 审计**不在**这里：这个仓没有可持久化的 domain event log
+	// （Result.EventRefs 只是一串 id，全仓零落库）。真正的证据是
+	// privacy.purpose_consents 里那一行追加的动作。这里的 eventRefs
+	// 只是跟其它 handler 保持一致的返回形状，别把它当审计。
+	domainEvents := []event.DomainEvent{event.New("PURPOSE_CONSENT_"+action, "PurposeConsent", e.Actor.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"purpose":       p.Purpose,
+		"policyVersion": PurposePolicyVersion,
+		"source":        source,
+	})}
+	return acceptedWithPayload(e, "PurposeConsent", e.Actor.ID, 1, action, map[string]any{
+		"purpose":       p.Purpose,
+		"policyVersion": PurposePolicyVersion,
+		"action":        action,
+		"active":        p.Granted,
+	}, domainEvents)
+}
+
+// getPurposeConsent 是读侧。三种状态**必须能区分**（本仓反复强调的那条线）：
+//
+//	active=true               有活跃同意
+//	active=false, found=true  表过态，已撤回
+//	active=false, found=false 从未表过态
+//
+// 客户端据此显示「已开启 / 已关闭 / 未设置」三种不同的界面。
+// 把三者压成一个布尔，用户就永远分不清「我没开过」和「我开过又关了」，
+// 也就无法判断平台到底有没有在采他的数据。
+func (s *Service) getPurposeConsent(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		Purpose string `json:"purpose"`
+	}
+	if !decode(e.Payload, &p) || p.Purpose == "" {
+		return command.Rejected(e, "INVALID_CONSENT", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_consent", nil)
+	}
+	consent, found, err := s.repository.PurposeConsentState(ctx, e.Actor.ID, p.Purpose, PurposePolicyVersion)
+	if err != nil {
+		return command.Rejected(e, "CONSENT_STATE_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "localnet.consent_state_unavailable", nil)
+	}
+	body := map[string]any{
+		"purpose":       p.Purpose,
+		"policyVersion": PurposePolicyVersion,
+		"found":         found,
+		"active":        found && consent.Active(),
+	}
+	if found {
+		// 只报**最新一次**动作：grantedAt / withdrawnAt 两个字段都给会让人以为
+		// 这是一行状态，而它其实是一条动作。完整历史在 consentHistory 里。
+		body["action"] = consent.Action
+		body["actedAt"] = consent.ActedAt
+	}
+	// 历史一并返回：用户说「我从没同意过」时，这一串就是平台的证据。
+	// 它是 append-only 的，所以长度本身也有意义（授予→撤回→再授予 = 3 条）。
+	history, err := s.repository.PurposeConsentHistory(ctx, e.Actor.ID, p.Purpose, PurposePolicyVersion)
+	if err != nil {
+		return command.Rejected(e, "CONSENT_STATE_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "localnet.consent_state_unavailable", nil)
+	}
+	acts := make([]map[string]any, 0, len(history))
+	for _, act := range history {
+		acts = append(acts, map[string]any{
+			"action":   act.Action,
+			"actedAt":  act.ActedAt,
+			"source":   act.Source,
+		})
+	}
+	body["consentHistory"] = acts
+
+	// 用 acceptedWithPayload（而不是 command.Accepted + Result.Body）：
+	// localnet 域里所有读命令都走 OperationRef 传结构化数据，客户端
+	// （localnet-client.ts）也只实现了 decodeOperationRef 这一条解析路径。
+	// 在这里改用 Body 会造出第二条解析路径 —— 那种「同一个域两种读法」
+	// 正是半截接线的温床。
+	return acceptedWithPayload(e, "PurposeConsent", e.Actor.ID, 1, "STATE", body, nil)
 }
 
 // ListInteractionEvents：事件流查询（按 actor 过滤 + limit）。

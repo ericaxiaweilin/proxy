@@ -472,3 +472,62 @@ func TestStoreCategoryAndContactName(t *testing.T) {
 		t.Fatalf("intruder category write must be rejected: %+v", denied)
 	}
 }
+
+// STORE-SCENE-LINK-001: 店主认领现实场景之后，那家店的相册要能反向按
+// sceneId 查到；没认领的店、或认领了别的场景的店，一张都不该出现。
+func TestLinkStoreToRealitySceneAndPhotoLookup(t *testing.T) {
+	service := New()
+	created := service.Handle(businessEnvelope("owner", "CreateBusinessAccount", "new", map[string]any{"name": "Three Beans"}))
+	var body map[string]any
+	if err := json.Unmarshal([]byte(created.OperationRef), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	businessID, _ := body["businessId"].(string)
+	stored := service.Handle(businessEnvelope("owner", "CreateBusinessStore", "new", map[string]any{
+		"businessId": businessID, "name": "Three Beans · Cầu Giấy", "address": "Cầu Giấy",
+	}))
+	var storeBody map[string]any
+	if err := json.Unmarshal([]byte(stored.OperationRef), &storeBody); err != nil {
+		t.Fatalf("decode store: %v", err)
+	}
+	storeID, _ := storeBody["storeId"].(string)
+
+	// 没认领之前，反向查是空的——不是报错，是真的没有。
+	before, err := service.ListStorePhotosByRealitySceneID(context.Background(), "threebeans")
+	if err != nil || len(before) != 0 {
+		t.Fatalf("expected no photos before linking, got %v err=%v", before, err)
+	}
+
+	// 非 OWNER 认领驳回。
+	denied := service.Handle(businessEnvelope("intruder", "LinkStoreToRealityScene", storeID, map[string]any{
+		"storeId": storeID, "sceneId": "threebeans",
+	}))
+	if denied.Outcome != "REJECTED" {
+		t.Fatalf("intruder link must be rejected: %+v", denied)
+	}
+
+	linked := service.Handle(businessEnvelope("owner", "LinkStoreToRealityScene", storeID, map[string]any{
+		"storeId": storeID, "sceneId": "threebeans",
+	}))
+	if linked.Outcome != "ACCEPTED" {
+		t.Fatalf("link failed: %+v", linked.Error)
+	}
+
+	added := service.Handle(businessEnvelope("owner", "AddStorePhoto", storeID, map[string]any{
+		"storeId": storeID, "assetPath": "store/threebeans-cover.jpg", "caption": "门店主视觉", "mediaAssetId": "ma_threebeans_cover",
+	}))
+	if added.Outcome != "ACCEPTED" {
+		t.Fatalf("photo add failed: %+v", added.Error)
+	}
+
+	after, err := service.ListStorePhotosByRealitySceneID(context.Background(), "threebeans")
+	if err != nil || len(after) != 1 || after[0].MediaAssetID != "ma_threebeans_cover" {
+		t.Fatalf("expected the linked store's photo, got %v err=%v", after, err)
+	}
+
+	// 换一个场景 id 查——认领的是 threebeans，不该出现在别的场景下。
+	other, err := service.ListStorePhotosByRealitySceneID(context.Background(), "longbien")
+	if err != nil || len(other) != 0 {
+		t.Fatalf("expected no photos under an unrelated scene, got %v err=%v", other, err)
+	}
+}

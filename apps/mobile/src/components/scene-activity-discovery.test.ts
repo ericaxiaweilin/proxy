@@ -124,6 +124,38 @@ describe("scene activity discovery contract", () => {
     expect(source).toContain("styles.waimaiRailCount");
   });
 
+  // SCENE-PICKER-RAIL-BLEED-007（2026-09-28，用户："这个list 左边空白间隙太多了
+  // 缩小点间隙 顶部间隙也可以缩小点"）：原型 deepseek_html_20260921_3cf398.html 的
+  // `.body-row` 自己**没有 padding**、左类目 `.sidebar { flex: 0 0 76px }` 是直接贴
+  // 屏幕左缘的（外卖式 rail），只有 `.cards` 和 header / filter-bar 各自带内边距。
+  // 实现却把 `paddingHorizontal: 18` 挂在整页上，于是 rail 被整体推进去 18pt ——
+  // 量截图确认：rail 实际占 x 29.5..175px = 17.2..102.3pt，左缘有 17.2pt 空白。
+  // 修法 = 内边距从整页下放到 header / 筛选栏 / 底部按钮各自承担，rail 归零贴边、
+  // 左边两角改直角；同时筛选栏到列表顶部的空白 16pt（10+6）收到 8pt（6+2）。
+  //
+  // 反向针排在同作用域的正向针之前 —— 否则注入时正向针先开火，反向针永远没被
+  // 执行过，等于没验过的针。
+  it("SCENE-PICKER-RAIL-BLEED-007: 左类目 rail 贴屏幕左缘，列表顶部间隙收到 8pt", () => {
+    const pickerPageStyle = source.slice(source.indexOf("pickerPage: {"), source.indexOf("pickerHead: {"));
+    expect(pickerPageStyle).not.toContain("paddingHorizontal");
+
+    const rowStyle = source.slice(source.indexOf("waimaiRow: {"), source.indexOf("waimaiRail: {"));
+    expect(rowStyle).not.toContain("paddingLeft");
+
+    const railStyle = source.slice(source.indexOf("waimaiRail: {"), source.indexOf("waimaiRailItem: {"));
+    expect(railStyle).not.toContain("borderRadius: 16");
+
+    expect(source).toContain('pickerPage: { backgroundColor: "#F7F4EF", flex: 1 }');
+    expect(source).toContain('pickerHead: { alignItems: "center", flexDirection: "row", gap: 12, paddingBottom: 8, paddingHorizontal: 18, paddingTop: 14 }');
+    expect(source).toContain('pickerActions: { flexDirection: "row", gap: 8, marginTop: 12, paddingHorizontal: 18 }');
+    expect(source).toContain('waimaiRow: { flex: 1, flexDirection: "row", gap: 10, marginTop: 2, paddingRight: 18 }');
+    expect(railStyle).toContain("borderTopLeftRadius: 0");
+    expect(railStyle).toContain("borderBottomLeftRadius: 0");
+
+    const filterRowStyle = source.slice(source.indexOf("filterBarRow: {"), source.indexOf("filterBarBtnWrap: {"));
+    expect(filterRowStyle).toContain("marginBottom: 6");
+  });
+
   // SCENE-PICKER-WAIMAI-001 (2026-09-21): the picker was a partial-height
   // bottom sheet (backdrop tap to dismiss, drag handle, maxHeight "84%") —
   // a left-rail + right-list browsing screen is meant to be used as a full

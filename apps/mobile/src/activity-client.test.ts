@@ -78,3 +78,21 @@ describe("describeJoinError", () => {
     expect(describeJoinError(rejected("ACTIVITY_JOIN_FAILED"))).toContain("稍后重试");
   });
 });
+
+describe("ORDER-NO-001 join returns the personal order number", () => {
+  const activity = { activityId: "activity_1", origin: "USER", ownerId: "user_1", status: "PUBLISHED", title: "周六咖啡拍照局", time: "周六", people: "0 / 6 人", price: "0₫", moneyFlow: "FREE", priceLabel: "免费参加", consumption: "各自承担到店消费", consumptionTerm: "SPLIT", venueIcon: "☕", venueName: "木光咖啡", realitySceneId: "scene_1", venueSpend: "", venueType: "CAFE", venueTypeLabel: "咖啡店", desc: "共同参与", benefit: "", qaCount: 0, interested: 0, joined: 1, capacity: 6, shares: 0, aiStatus: "NONE" };
+  async function joinWith(operationRef: unknown) {
+    const client = new ActivityClient({ secureSessionStore: await authenticatedStore(), authClient: { request: async () => response({ commandId: "c", outcome: "ACCEPTED", aggregate: { type: "Activity", id: "activity_1", version: 1, state: "JOINED" }, eventRefs: [], correlationId: "x", operationRef: JSON.stringify(operationRef) }) } });
+    return client.join("activity_1");
+  }
+
+  it("passes through orderNo when the server sends it", async () => {
+    const result = await joinWith({ activity, joined: true, orderNo: "100260927143022000002" });
+    expect(result.orderNo).toBe("100260927143022000002");
+  });
+
+  it("leaves orderNo undefined for old servers (UI falls back to activity code)", async () => {
+    const result = await joinWith({ activity, joined: true });
+    expect(result.orderNo).toBeUndefined();
+  });
+});

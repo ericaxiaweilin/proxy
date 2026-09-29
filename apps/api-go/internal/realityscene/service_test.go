@@ -1202,6 +1202,57 @@ func TestSceneRatingOnlyAppearsWithRealData(t *testing.T) {
 	}
 }
 
+type fakeMerchantPhotoLister struct {
+	byScene map[string][]MerchantPhotoRef
+}
+
+func (f *fakeMerchantPhotoLister) ListStorePhotosByRealitySceneID(_ context.Context, sceneID string) ([]MerchantPhotoRef, error) {
+	return f.byScene[sceneID], nil
+}
+
+// STORE-SCENE-LINK-001: unwired or zero-photos must never appear as a field;
+// wired with real photos, Detail.MerchantPhotos carries them through.
+func TestGetDetailMerchantPhotos(t *testing.T) {
+	s := New()
+	ctx := context.Background()
+
+	unwired, found, err := s.GetDetail(ctx, "threebeans", "", time.Now())
+	if err != nil || !found {
+		t.Fatalf("GetDetail: err=%v found=%v", err, found)
+	}
+	if unwired.MerchantPhotos != nil {
+		t.Fatalf("unwired: expected nil MerchantPhotos, got %v", unwired.MerchantPhotos)
+	}
+
+	lister := &fakeMerchantPhotoLister{byScene: map[string][]MerchantPhotoRef{}}
+	s.SetMerchantPhotoLister(lister)
+	zeroPhotos, found, err := s.GetDetail(ctx, "threebeans", "", time.Now())
+	if err != nil || !found {
+		t.Fatalf("GetDetail: err=%v found=%v", err, found)
+	}
+	if zeroPhotos.MerchantPhotos != nil {
+		t.Fatalf("wired-but-empty: expected nil MerchantPhotos, got %v", zeroPhotos.MerchantPhotos)
+	}
+
+	lister.byScene["threebeans"] = []MerchantPhotoRef{{MediaAssetID: "ma_cover", Caption: "门店主视觉"}}
+	withPhotos, found, err := s.GetDetail(ctx, "threebeans", "", time.Now())
+	if err != nil || !found {
+		t.Fatalf("GetDetail: err=%v found=%v", err, found)
+	}
+	if len(withPhotos.MerchantPhotos) != 1 || withPhotos.MerchantPhotos[0].MediaAssetID != "ma_cover" {
+		t.Fatalf("expected the wired photo, got %+v", withPhotos.MerchantPhotos)
+	}
+
+	// 换一个场景——没认领的场景不该看到别的场景的相册。
+	otherScene, found, err := s.GetDetail(ctx, "longbien", "", time.Now())
+	if err != nil || !found {
+		t.Fatalf("GetDetail: err=%v found=%v", err, found)
+	}
+	if otherScene.MerchantPhotos != nil {
+		t.Fatalf("unrelated scene: expected nil MerchantPhotos, got %v", otherScene.MerchantPhotos)
+	}
+}
+
 // SCENE-COMPANION-001: "适合一起的人" 的认证态真实信号 —— 只有真的好友，
 // 且在这个场景有真实信号（去过/报名过活动）才出现，绝不是任意陌生人。
 type fakeFriendLister struct {

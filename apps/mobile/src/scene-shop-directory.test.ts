@@ -7,7 +7,7 @@ import {
   recommendationScore, sceneDistanceMeters, shopAreaFacets, shopCardChips, shopCardSignal, shopCategoryBadge, shopCountText,
   shopDetailTags, shopDirectoryRows, shopDistanceBar, shopHereLine, shopInfoCells, shopListEndText,
   shopListLocationLine, shopRating, shopRatingCell, shopRatingChip, shopVisitedChip, sortShops, walkMinutes,
-  isFarAway, scenePhotoWallTiles, sceneActionStateText, sceneActionSubtitle, shopAddressLine, shopCardDistance, shopHeroDistanceSuffix,
+  isFarAway, scenePhotoWallTiles, sceneAssetWallTiles, sceneMerchantWallTiles, sceneActionStateText, sceneActionSubtitle, shopAddressLine, shopCardDistance, shopHeroDistanceSuffix,
   type SceneShopBrief,
 } from "./scene-shop-directory";
 
@@ -334,6 +334,24 @@ const stripComments = (source: string): string =>
 const componentRaw = readFileSync(fileURLToPath(new URL("./components/scene-shop-directory.tsx", import.meta.url)), "utf8");
 const component = stripComments(componentRaw);
 
+// SCENE-HOME-PROTOTYPE-001（2026-09-28）：同一份原型有**两份实现** —— 组件
+// components/scene-shop-directory.tsx，和场景地图的详情面
+// surfaces/reality-scene-map.tsx。以前这条钉只读前者，所以后者一路漂到
+// 「★ 5.0」「☆ 收藏 / ✓ 已打卡 / 导航去这里 ›」这种**文本字符冒充图标**的
+// 写法都没人拦（BACK-GLYPH-001 修的是同一类错）。用户看到的是地图面，
+// 于是报了「场景主页没有对齐原型设计」。两份实现现在一起钉。
+const surface = stripComments(readFileSync(fileURLToPath(new URL("./surfaces/reality-scene-map.tsx", import.meta.url)), "utf8"));
+
+// 从 from 切到它之后第一个 to（两端都不含）。用来把断言**限定在某个区块内**：
+// 同一批文件里还留着几处**没改**的同类写法 —— 行内状态前缀 `✓`（"✓ 已选择" /
+// "✓ 本店已打卡" 这种，全仓十几处约定）和 `更多 ›`（跟 badminton-companion 同款的
+// 位置选择器 idiom）—— 不限定范围就会把「区块已修好」误判成红。
+const sliceBetween = (source: string, from: string, to: string): string => {
+  const start = source.indexOf(from);
+  const end = start < 0 ? -1 : source.indexOf(to, start + from.length);
+  return start < 0 || end < 0 ? "" : source.slice(start, end);
+};
+
 describe("SCENE-SHOP-DIRECTORY-001: the screen consumes the tested module instead of re-deriving", () => {
   it("imports the derivations rather than owning a second copy", () => {
     expect(component).toContain('from "../scene-shop-directory"');
@@ -431,8 +449,10 @@ describe("SCENE-SHOP-POLISH-001（原型 f05cb0：地址行 / 远距离 / 人话
   it("action states are plain words, never raw enum codes", () => {
     expect(sceneActionStateText("REQUIRES_HUMAN_ACCEPTANCE")).toBe("需要对方同意");
     expect(sceneActionStateText("SOMETHING_NEW")).toBe("");
-    expect(sceneActionSubtitle({ state: "ACCEPTS_APPLICATIONS", moneyMeaning: "报酬由你出" })).toBe("接受报名 · 报酬由你出");
-    expect(sceneActionSubtitle({ state: "SOMETHING_NEW", moneyMeaning: "免费" })).toBe("免费");
+    // 用户反馈（"邀请真人 发布机会 报名活动废话很多"）：副标题不再拼 moneyMeaning
+    // 那句免责声明腔，只留状态短句。
+    expect(sceneActionSubtitle({ state: "ACCEPTS_APPLICATIONS", moneyMeaning: "报酬由你出" })).toBe("接受报名");
+    expect(sceneActionSubtitle({ state: "SOMETHING_NEW", moneyMeaning: "免费" })).toBe("");
   });
 });
 
@@ -458,6 +478,43 @@ describe("SCENE-PHOTO-WALL-001 photo wall tiles", () => {
     ]);
     expect(scenePhotoWallTiles(model, 1)).toHaveLength(1);
     expect(scenePhotoWallTiles({ posts: [], media: {} })).toEqual([]);
+  });
+});
+
+describe("SCENE-PHOTO-WALL-002 asset fallback", () => {
+  it("fills an empty post wall with hero and menu photos, deduped and capped, never null", () => {
+    // Three Beans：帖子墙空，但传过主图/菜单/招牌 —— 墙必须拿资产补，不能空白。
+    const detail = {
+      heroImageUrl: "https://cdn/x/hero.jpg",
+      menu: [{ imageUrl: "https://cdn/x/menu1.jpg" }, { imageUrl: " https://cdn/x/menu1.jpg " }, { imageUrl: "" }],
+      fullMenu: [{ imageUrl: "https://cdn/x/sign.jpg" }, { imageUrl: "https://cdn/x/hero.jpg" }],
+    };
+    expect(sceneAssetWallTiles(detail)).toEqual([
+      { key: "asset:hero:1", postId: "", path: "https://cdn/x/hero.jpg", author: "" },
+      { key: "asset:menu:2", postId: "", path: "https://cdn/x/menu1.jpg", author: "" },
+      { key: "asset:menu:3", postId: "", path: "https://cdn/x/sign.jpg", author: "" },
+    ]);
+    expect(sceneAssetWallTiles(detail, 2)).toHaveLength(2);
+    expect(sceneAssetWallTiles(undefined)).toEqual([]);
+    expect(sceneAssetWallTiles({})).toEqual([]);
+    expect(sceneAssetWallTiles({ menu: [], fullMenu: [] })).toEqual([]);
+  });
+});
+
+describe("STORE-SCENE-LINK-001 sceneMerchantWallTiles", () => {
+  it("builds thumb URLs from the wired store's real photos", () => {
+    const photos = [{ mediaAssetId: "ma_cover", caption: "门店主视觉" }, { mediaAssetId: "ma_inside", caption: "" }];
+    expect(sceneMerchantWallTiles(photos, "http://localhost:8080")).toEqual([
+      { key: "merchant:ma_cover", postId: "", path: "http://localhost:8080/v1/media/thumb/ma_cover", author: "门店主视觉" },
+      { key: "merchant:ma_inside", postId: "", path: "http://localhost:8080/v1/media/thumb/ma_inside", author: "" },
+    ]);
+  });
+
+  it("returns nothing when unclaimed, empty, or without a known API base", () => {
+    expect(sceneMerchantWallTiles(undefined, "http://localhost:8080")).toEqual([]);
+    expect(sceneMerchantWallTiles([], "http://localhost:8080")).toEqual([]);
+    expect(sceneMerchantWallTiles([{ mediaAssetId: "ma_cover" }], undefined)).toEqual([]);
+    expect(sceneMerchantWallTiles([{ mediaAssetId: "  " }], "http://localhost:8080")).toEqual([]);
   });
 });
 
@@ -529,5 +586,103 @@ describe("SCENE-HOME-PROTOTYPE-001: detail mirrors the 场景名片 prototype (d
     expect(component).toContain("你想在这里做什么？");
     expect(component).not.toContain("这里能做的事");
     expect(component).toContain("匹配结果仅供参考，实际约见以双方确认为准");
+  });
+  it("surface reality-scene-map draws the three action buttons as glyphs, not as text characters", () => {
+    const row = sliceBetween(surface, "styles.actionRow3", "styles.distBar");
+    expect(row).not.toBe("");
+    // 反向针先判：以前这里写的是「☆ 收藏 / ✓ 已打卡 / 导航去这里 ›」——★/☆/✓/›
+    // 是**文本字符**，形状和垂直基线随字号漂，`filled` 这种状态没地方落
+    // （`☆ 收藏` 变 `★ 已收藏` 只是换了个字符，不是换了一个字形）。
+    expect(row).not.toContain("☆");
+    expect(row).not.toContain("★");
+    expect(row).not.toContain("›");
+    expect(row).not.toContain("✓");
+    // 正向针：三颗各有一个真字形，而且都有「已…」落地态。
+    expect(row).toContain('name="replyLike"');
+    expect(row).toContain('name="check"');
+    expect(row).toContain('name="arrowUpRight"');
+    expect(row).toContain('? "已收藏" : "收藏"');
+    expect(row).toContain('? "已打卡" : "打卡"');
+    expect(row).toContain("styles.action3Save");
+    expect(row).toContain("styles.action3Checkin");
+    expect(row).toContain("styles.action3Nav");
+  });
+  it("surface reality-scene-map draws the stat-card rating as the filled star glyph, not a ★ character", () => {
+    const card = sliceBetween(surface, "const ratingCount =", "styles.reviewEntry");
+    expect(card).not.toBe("");
+    // 反向针先判：以前是文本 "★ 5.0" —— 原型 `.stat-star` 是**实心金**星，
+    // 字符没法填色，也没法跟数字分开放（原型是图标 + 数字两颗，数字 22px）。
+    expect(card).not.toContain("★");
+    expect(card).toContain('filled name="star"');
+    expect(card).toContain("styles.statCellRating");
+  });
+  it("surface reality-scene-map draws the review star picker as filled glyphs, not ★ characters", () => {
+    const picker = sliceBetween(surface, "styles.reviewStarsRow", "styles.reviewCommentInput");
+    expect(picker).not.toBe("");
+    // 反向针先判：以前是文本 "★" 换个 color 冒充「点亮」—— 字符不是字形
+    // （BACK-GLYPH-001 同款）：填不了色，也拿不到实心/描边两种形态。
+    expect(picker).not.toContain("★");
+    expect(picker).toContain('filled={n <= reviewStars} name="star"');
+  });
+  it("surface reality-scene-map draws the earned-badge tick as a glyph, not a ✓ character", () => {
+    const row = sliceBetween(surface, "styles.badgeNameRow", "styles.badgeShareBtn");
+    expect(row).not.toBe("");
+    // 反向针先判：以前把 " ✓" 直接拼进 Text（`{badge.name} ✓`）—— 勾的形状和
+    // 垂直基线跟着 14pt 的字号漂，而且「没点亮」时那个字符还在。改成真字形，
+    // 只有 earned 才画。
+    expect(row).not.toContain("✓");
+    expect(row).toContain('<ProxyIcon color={color.mint} name="check" size={13} />');
+  });
+  it("surface reality-scene-map's pin quick-sheet uses real chevrons, not › characters", () => {
+    // 快打卡弹层那一排（导航 / 看详情）—— 用 pinSheetRow 起、nearbyError 收，
+    // 不要用 styles.actionText 当收尾：那颗在**同一行里排在 chevron 前面**，
+    // 切出来会把 chevron 切掉（第一版就是这么错的）。
+    const sheet = sliceBetween(surface, "styles.pinSheetRow", "styles.nearbyError");
+    expect(sheet).not.toBe("");
+    // 反向针先判：导航那颗尾部拼的是 `›`、看详情那颗整颗就是个 `›`。
+    expect(sheet).not.toContain("›");
+    expect(sheet).toContain('name="arrowUpRight"');
+    expect(sheet).toContain('name="chevronRight"');
+  });
+  it("component scene-shop-directory draws its card-foot and intent chevrons as glyphs", () => {
+    // 卡脚那颗（列表卡右下）原来直接写 `<Text>›</Text>`。
+    const foot = sliceBetween(component, "styles.cardFoot", "styles.listEnd");
+    expect(foot).not.toBe("");
+    expect(foot).not.toContain("›");
+    expect(foot).toContain('<ProxyIcon color={color.muted} name="chevronRight" size={16} />');
+    // 意图卡那颗（「你想在这里做什么？」三张卡右边）原来也是 `<Text>›</Text>`。
+    const intent = sliceBetween(component, "detail.actions.map(", "styles.intentFootnote");
+    expect(intent).not.toBe("");
+    expect(intent).not.toContain("›");
+    expect(intent).toContain('<ProxyIcon color={color.muted} name="chevronRight" size={16} />');
+  });
+  it("surface reality-scene-map uses the prototype's intent-block title and keeps the 匹配推荐 card", () => {
+    expect(surface).not.toContain("怎么组织这次现实行动");
+    expect(surface).toContain("你想在这里做什么？");
+    expect(surface).toContain("styles.matchCard");
+    expect(surface).toContain("匹配推荐");
+    // 死按钮同样不许在地图面上回来。
+    expect(surface).not.toContain("查看全部匹配");
+  });
+  it("surface reality-scene-map carries the prototype's 这里的活动 / 照片墙 sections", () => {
+    expect(surface).toContain("这里的活动");
+    expect(surface).toContain("照片墙");
+    expect(surface).toContain("SCENE_PHOTO_WALL_EMPTY");
+  });
+  it("surface reality-scene-map glues the stats card to the cover so the -26px overlap lands on the photo", () => {
+    // SCENE-HOME-PROTOTYPE-001（2026-09-28）：原型里 `.cover` 后面**直接**就是
+    // `.stats-card{margin:-26px 16px 14px}` —— 那 -26 是拿去压在封面照片上的。
+    // 实现里这两块之间不能夹任何别的区块：以前夹了一行 heroFacets，于是 -26 压
+    // 在那行胶囊上（胶囊被裁掉一半、卡片也没压到照片）。同原型的另一份实现
+    // scene-shop-directory.tsx 也是 hero 紧跟 infoStrip。
+    const coverToCard = sliceBetween(surface, "styles.coverWrap", "styles.statsCard");
+    expect(coverToCard).not.toBe("");
+    // 反向针先判（正向针先判的话，把胶囊挪回来时正向针先开火，这几条永远没被执行过）。
+    expect(coverToCard).not.toContain("styles.heroFacets");
+    expect(coverToCard).not.toContain("styles.venueIntro");
+    expect(coverToCard).not.toContain("styles.sceneCounts");
+    // 正向针：胶囊没被删掉，只是挪到了统计卡**下面**（仍在动作行上面）。
+    expect(surface.indexOf("styles.heroFacets")).toBeGreaterThan(surface.indexOf("styles.statsCard"));
+    expect(surface.indexOf("styles.heroFacets")).toBeLessThan(surface.indexOf("styles.actionRow3"));
   });
 });

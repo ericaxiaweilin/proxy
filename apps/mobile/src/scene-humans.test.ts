@@ -76,9 +76,9 @@ describe("SCENE-HUMANS-EMPTY-001 an empty people list says so", () => {
   });
 
   it("does not promise that waiting will produce someone", () => {
-    // 文案必须说明这不是加载失败，也不等于"再等等就会有人"。
+    // 空态只留一句话（2026-09-28 清废话）：点名没人，不做任何"等等就会有"的承诺。
     const empty = mapCode.slice(mapCode.indexOf("styles.humanEmpty"));
     expect(empty).toContain("还没有挂出可约时间的人");
-    expect(empty).toContain("不是加载失败");
+    expect(empty).not.toContain("再等等就会有人");
   });
 });

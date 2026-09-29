@@ -112,6 +112,27 @@ function isContentAnalytics(value: unknown): value is ContentAnalytics {
   return ["sinceDays", "posts", "impressions", "uniqueViewers", "totalWatchMs", "topPostViews"].every((key) => typeof item[key] === "number");
 }
 
+/**
+ * COMP-PURPOSE-CONSENT-001 — 按目的的同意状态。
+ *
+ * `found` 和 `active` 是**两个**布尔，不是「有没有同意」一个：
+ *   found=false              → 从未表过态（UI 显示「未设置」）
+ *   found=true, active=false → 表过态、已撤回（UI 显示「已关闭」）
+ *   found=true, active=true  → 当前有效（UI 显示「已开启」）
+ * 合成一个布尔就等于把「我没开过」和「我开过又关了」画成同一个样子。
+ */
+export type PurposeConsentState = {
+  purpose: string;
+  policyVersion: string;
+  found: boolean;
+  active: boolean;
+  /** 最新一次动作：GRANT 或 WITHDRAW。found=false 时没有。 */
+  action?: string | undefined;
+  actedAt?: string | undefined;
+  /** 全部动作，倒序。它是平台举证时唯一拿得出手的东西。 */
+  consentHistory: Array<{ action?: string; actedAt?: string; source?: string }>;
+};
+
 export class LocalNetProtocolError extends Error {
   public constructor(message: string) {
     super(message);
@@ -487,6 +508,55 @@ export class LocalNetClient {
     const body = this.decodeOperationRef(result) as { analytics?: unknown };
     if (!isContentAnalytics(body.analytics)) throw new LocalNetProtocolError("分析面板响应缺少 analytics");
     return body.analytics;
+  }
+
+  /**
+   * COMP-PURPOSE-CONSENT-001 — 按目的的同意（授予 / 撤回）。
+   *
+   * ⚠️ 这个方法**不静默**：它和埋点不一样，是用户的一次法律行为。
+   * 失败必须抛出去让界面说清楚 —— 「你以为你关了，其实服务端没收到」
+   * 是这里最不能接受的失败模式（那等于用户撤回了一个不存在的同意，
+   * 而服务端继续采）。
+   *
+   * 服务端会拒绝缺 purpose 的调用，所以 purpose 必须显式传。
+   */
+  public async recordPurposeConsent(purpose: string, granted: boolean, source: string): Promise<void> {
+    if (!purpose) throw new LocalNetProtocolError("同意必须显式指定 purpose");
+    const session = await this.requireSession();
+    await this.sendCommand(
+      session,
+      "RecordPurposeConsent",
+      { type: "PurposeConsent", id: purpose },
+      { purpose, granted, source }
+    );
+  }
+
+  /**
+   * COMP-PURPOSE-CONSENT-001 — 读同意状态。
+   *
+   * 三种结果**必须能区分**（本仓反复强调的那条线）：
+   *   found=false              从未表过态
+   *   found=true, active=false 表过态、已撤回
+   *   found=true, active=true  当前有效
+   * 把三者压成一个布尔，用户就分不清「我没开过」和「我开过又关了」。
+   */
+  public async getPurposeConsentState(purpose: string): Promise<PurposeConsentState> {
+    if (!purpose) throw new LocalNetProtocolError("同意必须显式指定 purpose");
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "GetPurposeConsent", { type: "PurposeConsent", id: purpose }, { purpose });
+    const body = this.decodeOperationRef(result) as Partial<PurposeConsentState>;
+    if (typeof body.found !== "boolean" || typeof body.active !== "boolean") {
+      throw new LocalNetProtocolError("同意状态响应缺少 found/active");
+    }
+    return {
+      purpose,
+      policyVersion: typeof body.policyVersion === "string" ? body.policyVersion : "",
+      found: body.found,
+      active: body.active,
+      action: typeof body.action === "string" ? body.action : undefined,
+      actedAt: typeof body.actedAt === "string" ? body.actedAt : undefined,
+      consentHistory: Array.isArray(body.consentHistory) ? body.consentHistory : [],
+    };
   }
 
   public async createPost(payload: CreatePostPayload, idempotencyKey?: string): Promise<string> {

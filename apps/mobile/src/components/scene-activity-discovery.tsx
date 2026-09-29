@@ -779,8 +779,16 @@ const styles = StyleSheet.create({
   // SCENE-PICKER-WAIMAI-001（2026-09-21）：整页，不再是底部弹层——去掉了
   // maxHeight/圆角/拖拽把手，换成"‹ 返回"的整页 header，跟其余全屏 surface
   // 的返回手感一致。
-  pickerPage: { backgroundColor: "#F7F4EF", flex: 1, paddingHorizontal: 18 },
-  pickerHead: { alignItems: "center", flexDirection: "row", gap: 12, paddingBottom: 8, paddingTop: 14 },
+  // SCENE-PICKER-RAIL-BLEED-007（2026-09-28，用户："这个list 左边空白间隙太多了"）：
+  // 原型 deepseek_html_20260921_3cf398.html 的 `.body-row` 自己**没有 padding**，
+  // 左类目 `.sidebar { flex: 0 0 76px }` 是**直接贴屏幕左缘**的（外卖式 rail），
+  // 只有 `.cards { padding: 12px 14px 12px 12px }` 和 header/filter-bar 各自带
+  // 20px。这里原来把 `paddingHorizontal: 18` 挂在整页上，于是 rail 被整体推进去
+  // 18pt —— 量过截图：rail 实际占 x 29.5..175px = 17.2..102.3pt，即左缘有 17.2pt
+  // 空白，而原型是 0。现在把内边距从整页下放到每一段自己承担（header / 筛选栏 /
+  // 底部按钮各 18，rail 贴边、右列只留 paddingRight），rail 左缘归零。
+  pickerPage: { backgroundColor: "#F7F4EF", flex: 1 },
+  pickerHead: { alignItems: "center", flexDirection: "row", gap: 12, paddingBottom: 8, paddingHorizontal: 18, paddingTop: 14 },
   pickerBack: { paddingVertical: 4 },
   pickerHeadCopy: { flex: 1 },
   pickerTitle: { color: "#151515", fontSize: 20, fontWeight: "900" }, pickerHint: { color: "#777169", fontSize: 11, fontWeight: "700" },
@@ -790,7 +798,9 @@ const styles = StyleSheet.create({
   // 位，不用 <Modal>（两个 <Modal> 叠在一起在这个页面上会互相吃掉点击/
   // 渲染，之前"点金额/时间没反应"就是这个），scrim 是普通 Pressable 用来
   // 点外面收起。
-  filterBarRow: { flexDirection: "row", gap: 6, marginBottom: 10, marginTop: 2, position: "relative", zIndex: 20, elevation: 20 },
+  // marginBottom 10→6 + 下面 waimaiRow 的 marginTop 6→2：筛选栏到列表顶部的
+  // 空白从 16pt 收到 8pt（用户："顶部间隙也可以缩小点"）。
+  filterBarRow: { flexDirection: "row", gap: 6, marginBottom: 6, marginTop: 2, paddingHorizontal: 18, position: "relative", zIndex: 20, elevation: 20 },
   filterBarBtnWrap: { flex: 1, position: "relative" },
   filterBarBtn: { alignItems: "center", backgroundColor: color.white, borderColor: "#E8E1D8", borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 4, justifyContent: "center", paddingVertical: 9 },
   filterBarBtnActive: { backgroundColor: "#151515", borderColor: "#151515" },
@@ -811,12 +821,16 @@ const styles = StyleSheet.create({
   // 的 Moment 列表，不用先在网格里逐个勾选完才看到结果。
   // flex:1（不再是固定 420）——整页有多少高度就用多少，不用再照着底部
   // 弹层 84% 高度那个约束凑一个固定数字。
-  waimaiRow: { flex: 1, flexDirection: "row", gap: 10, marginTop: 6 },
+  // paddingRight 18 = 整页原来的右内边距下放到这里：rail 归零贴左缘，右列卡片
+  // 仍保持 18pt 右边距（用户只说了左边太多，右边不动）。
+  waimaiRow: { flex: 1, flexDirection: "row", gap: 10, marginTop: 2, paddingRight: 18 },
   // SCENE-PICKER-WAIMAI-001 布局坑：垂直 ScrollView 当 flexDirection:"row" 的
   // 子项，只给 style.width 有时不够——量出来实测比 84 宽得多（子项文字内容,
   // 比如英文 "City Walk"，会把宽度撑开）。显式钉住 flexGrow/flexShrink/
   // flexBasis + maxWidth，不给 Yoga 任何"按内容重新算宽度"的空子。
-  waimaiRail: { backgroundColor: "#EFEAE1", borderRadius: 16, flexBasis: 84, flexGrow: 0, flexShrink: 0, maxWidth: 84, width: 84 }, waimaiRailItem: { alignItems: "center", gap: 3, paddingVertical: 12, width: "100%" }, waimaiRailItemActive: { backgroundColor: color.white, borderLeftColor: "#151515", borderLeftWidth: 3 }, waimaiRailIcon: { height: 26, width: 26 }, waimaiRailLabel: { color: "#777169", fontSize: 11, fontWeight: "700", textAlign: "center" }, waimaiRailLabelActive: { color: "#151515", fontWeight: "900" }, waimaiRailCount: { color: "#A39C90", fontSize: 11, fontWeight: "700" },
+  // 左边两个角改成直角：rail 现在贴屏幕左缘，保留 16 的左上/左下圆角会在屏幕边
+  // 上留一个奶油色缺口，看着像渲染坏了；原型那边的 sidebar 也是纯直角面板。
+  waimaiRail: { backgroundColor: "#EFEAE1", borderBottomLeftRadius: 0, borderBottomRightRadius: 16, borderTopLeftRadius: 0, borderTopRightRadius: 16, flexBasis: 84, flexGrow: 0, flexShrink: 0, maxWidth: 84, width: 84 }, waimaiRailItem: { alignItems: "center", gap: 3, paddingVertical: 12, width: "100%" }, waimaiRailItemActive: { backgroundColor: color.white, borderLeftColor: "#151515", borderLeftWidth: 3 }, waimaiRailIcon: { height: 26, width: 26 }, waimaiRailLabel: { color: "#777169", fontSize: 11, fontWeight: "700", textAlign: "center" }, waimaiRailLabelActive: { color: "#151515", fontWeight: "900" }, waimaiRailCount: { color: "#A39C90", fontSize: 11, fontWeight: "700" },
   waimaiList: { flex: 1 },
-  detailGroup: { backgroundColor: color.white, borderRadius: 16, marginBottom: 10, padding: 12 }, detailGroupTitle: { color: "#777169", fontSize: 11, fontWeight: "800", marginBottom: 8 }, detailChipGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, detailChip: { borderColor: "#DED7CE", borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8 }, detailChipActive: { backgroundColor: "#151515", borderColor: "#151515" }, detailChipText: { color: "#151515", fontSize: 11, fontWeight: "700" }, detailChipTextActive: { color: color.white }, medicalBoundary: { color: "#8C5B35", fontSize: 11, lineHeight: 16, marginTop: 9 }, pickerActions: { flexDirection: "row", gap: 8, marginTop: 12 }, pickerReset: { alignItems: "center", backgroundColor: color.white, borderColor: "#151515", borderRadius: 17, borderWidth: 1, flex: 0.7, paddingVertical: 13 }, pickerResetText: { color: "#151515", fontSize: 13, fontWeight: "900" }, pickerDone: { alignItems: "center", backgroundColor: "#151515", borderRadius: 17, flex: 1.3, paddingVertical: 13 }, pickerDoneText: { color: color.white, fontSize: 13, fontWeight: "900" },
+  detailGroup: { backgroundColor: color.white, borderRadius: 16, marginBottom: 10, padding: 12 }, detailGroupTitle: { color: "#777169", fontSize: 11, fontWeight: "800", marginBottom: 8 }, detailChipGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, detailChip: { borderColor: "#DED7CE", borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8 }, detailChipActive: { backgroundColor: "#151515", borderColor: "#151515" }, detailChipText: { color: "#151515", fontSize: 11, fontWeight: "700" }, detailChipTextActive: { color: color.white }, medicalBoundary: { color: "#8C5B35", fontSize: 11, lineHeight: 16, marginTop: 9 }, pickerActions: { flexDirection: "row", gap: 8, marginTop: 12, paddingHorizontal: 18 }, pickerReset: { alignItems: "center", backgroundColor: color.white, borderColor: "#151515", borderRadius: 17, borderWidth: 1, flex: 0.7, paddingVertical: 13 }, pickerResetText: { color: "#151515", fontSize: 13, fontWeight: "900" }, pickerDone: { alignItems: "center", backgroundColor: "#151515", borderRadius: 17, flex: 1.3, paddingVertical: 13 }, pickerDoneText: { color: color.white, fontSize: 13, fontWeight: "900" },
 });

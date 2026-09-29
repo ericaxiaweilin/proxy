@@ -1,6 +1,6 @@
 // Activity 客户端：活动读模型（ListActivities）+ 感兴趣/参加命令。
 // 计数服务端权威；operationRef 承载 payload（zod 校验，fail-closed）。
-import type { Activity, CommandResult, ListMyActivitiesPayload } from "@proxy/contracts";
+import type { Activity, ActivityJoinRecipe, ActivityOrderSnapshot, CommandResult, ListMyActivitiesPayload } from "@proxy/contracts";
 import { ActivitySchema, JoinActivityPayloadSchema, ListActivitiesPayloadSchema, ListMyActivitiesPayloadSchema, ToggleActivityInterestPayloadSchema } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
@@ -109,9 +109,10 @@ export class ActivityClient {
     return ToggleActivityInterestPayloadSchema.parse(this.decodeOperationRef(result));
   }
 
-  public async join(activityId: string): Promise<{ activity: Activity }> {
+  // ORDER-RECIPE-001：recipe 是 For You 下单时选定的组合，服务端存进票面快照。
+  public async join(activityId: string, recipe?: ActivityJoinRecipe): Promise<{ activity: Activity; orderNo?: string | undefined; snapshot?: ActivityOrderSnapshot | null | undefined }> {
     const session = await this.requireSession();
-    const result = await this.sendCommand(session, "JoinActivity", { type: "Activity", id: activityId }, { activityId });
+    const result = await this.sendCommand(session, "JoinActivity", { type: "Activity", id: activityId }, recipe ? { activityId, recipe } : { activityId });
     return JoinActivityPayloadSchema.parse(this.decodeOperationRef(result));
   }
 

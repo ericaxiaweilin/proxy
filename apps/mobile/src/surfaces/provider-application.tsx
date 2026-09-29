@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Defs, LinearGradient, Rect, Stop, Svg } from "react-native-svg";
 import { Image } from "expo-image";
-import * as ImagePicker from "expo-image-picker";
 import { color } from "../theme";
 import { sessionAuthClient } from "../native-clients";
 import type { MediaClient } from "../media-client";
@@ -12,22 +11,26 @@ import { ProxyIcon } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import {
   fetchProviderApplication, kycPipeline, providerApplicationErrorText,
-  phoneDigitsError, formatPhoneInput,
+  phoneDigitsError, formatPhoneInput, requestPhoneVerification, verifyPhoneVerification,
   providerApplicationStatusCard, submitProviderApplication, withdrawProviderApplication,
   type ProviderApplicationInput, type ProviderApplicationView,
 } from "../provider-application-client";
 
 // ORDER-PERMISSION-KYC-001（原型 deepseek_html_20260924_33987c「接单中心 · KYC + 履约管线」）：
-// 开始前 → 1 基础信息 → 2 证件 + 手持证件自拍 + 声明 → 3 履约条款 → 提交 → 运营人工审核。
+// 开始前 → 1 基础信息 → 2 手机验证 → 3 声明 + 履约条款 → 提交 → 运营审核。
 // 任何人都能申请，性别是可选自述、不参与任何判断。
-// 与原型的差异（都是为了不说假话）：
-//   - 没有「Face ID 扫脸 / 真人比对通过」：Face ID 只能证明是手机主人，不能和证件比对 —— 改为手持证件自拍，运营人工比对；
-//   - 没有「获取验证码」：开发环境短信通道没接（sms=false），手机号如实记为「未验证」，运营电话核实；
-//   - 不写「24 小时内出结果 / 自动比对」：审核是人工的，没有时效承诺。
+//
+// KYC-PHONE-ONLY-001（2026-09-27，用户：「证件正面 反面 手持自拍的移除在kyc里 越南合规这个隐私数据困难
+// kyc我们就验证电话号码真实性就好了 签承诺声明不变」）：原第 2 步的 CCCD 正反面 + 手持证件自拍 + 运营人工
+// 比对已删除——那类证件图像 / 生物特征比对在越南算高风险个人数据，而"运营看着像不像"从来也不是可审计的
+// 验证。KYC 改成第 2 步真的发短信验证码、真的校验（走 internal/identity 同一套已配好的短信厂商）。
+// 第 3 步的声明（无犯罪 + 数据使用同意 + 履约条款）机制不变，只是把原来挂在"证件"步骤下的两条声明
+// 一起搬到这里——它们本来就是声明，不是照片。
 
-type Step = "intro" | "basic" | "documents" | "terms";
-type DocSlot = "front" | "back" | "selfie";
-type Doc = { mediaAssetId: string; uri: string };
+type Step = "intro" | "basic" | "phone" | "terms";
+// KYC-PHONE-ONLY-001：验证码这两步靠 busy（"phoneRequest"/"phoneVerify"）标"正在
+// 请求网络"，phoneVerifyState 只用来记两个静止态：还没发过 / 已验证。
+type PhoneVerifyState = "idle" | "sent" | "verified";
 
 // ORDER-PERMISSION-KYC-003（原型 807348；用户：「把会说的语言也放入了 干什么」）：KYC 只认人 ——
 // 第 1 步只有头像、实名、出生年份、性别（可选）、手机号；城市 / 服务区域 / 语言是接单范围和能力，不在 KYC 里。
@@ -40,15 +43,19 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
   const [view, setView] = useState<ProviderApplicationView>();
   const [loadError, setLoadError] = useState<string>();
   const [step, setStep] = useState<Step>("intro");
-  const [busy, setBusy] = useState<"submit" | "withdraw" | DocSlot>();
+  const [busy, setBusy] = useState<"submit" | "withdraw" | "phoneRequest" | "phoneVerify">();
   const [error, setError] = useState<string>();
   const [realName, setRealName] = useState("");
   const [birthDate, setBirthDate] = useState("");
   // KYC-UI-CLEAN-002（用户：「正常的 kyc 到底验证性别出生吗」）：正常 KYC 不采性别 ——
   // 性别不参与实名比对。后端 gender 字段保留兼容但不再收，这里永远发空。
   const [phone, setPhone] = useState("");
-  const [idType, setIdType] = useState<"CCCD" | "PASSPORT">("CCCD");
-  const [docs, setDocs] = useState<Partial<Record<DocSlot, Doc>>>({});
+  // KYC-PHONE-ONLY-001：真的验证码状态机——idle（还没发）→ sent（已发，等输入）→
+  // verifying（正在校验）→ verified（验对了，challengeId 就是能塞进 Submit 的那张挑战单）。
+  const [phoneVerifyState, setPhoneVerifyState] = useState<PhoneVerifyState>("idle");
+  const [phoneChallengeId, setPhoneChallengeId] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [phoneError, setPhoneError] = useState<string>();
   const [noCrime, setNoCrime] = useState(false);
   const [dataConsent, setDataConsent] = useState(false);
   const [emergency, setEmergency] = useState("");
@@ -108,19 +115,34 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
     set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   };
 
-  // 证件 / 自拍上传后保持 OWNER_ONLY（不挂到任何帖子），只有运营控制台能看。
-  const pickDoc = async (slot: DocSlot): Promise<void> => {
-    if (!mediaClient) return;
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.9, selectionLimit: 1 });
-    const asset = result.assets?.[0];
-    if (result.canceled || !asset) return;
-    setBusy(slot);
-    setError(undefined);
+  // KYC-PHONE-ONLY-001：真的发验证码。手机号一变就作废旧的验证结果——
+  // 不然可能出现"验证的是 A 号，Submit 时手机框已经改成 B 号"这种错配
+  // （服务端 Submit 也会重查一遍手机号是否跟挑战单一致，这里是提前告诉用户）。
+  const sendPhoneCode = async (): Promise<void> => {
+    setBusy("phoneRequest");
+    setPhoneError(undefined);
     try {
-      const uploaded = await mediaClient.uploadImage({ uri: asset.uri, mimeType: asset.mimeType ?? "image/jpeg", width: asset.width, height: asset.height });
-      setDocs((current) => ({ ...current, [slot]: { mediaAssetId: uploaded.mediaAssetId, uri: asset.uri } }));
-    } catch {
-      setError("上传失败，请重试。");
+      const challenge = await requestPhoneVerification(sessionAuthClient, phone);
+      setPhoneChallengeId(challenge.challengeId);
+      setPhoneVerifyState("sent");
+      setOtpCode("");
+    } catch (e) {
+      setPhoneError(providerApplicationErrorText(e));
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  const checkPhoneCode = async (): Promise<void> => {
+    if (otpCode.trim() === "") { setPhoneError("请填写验证码"); return; }
+    setBusy("phoneVerify");
+    setPhoneError(undefined);
+    try {
+      const verified = await verifyPhoneVerification(sessionAuthClient, phoneChallengeId, otpCode.trim());
+      if (verified) setPhoneVerifyState("verified");
+      else setPhoneError("验证码不对，请重试");
+    } catch (e) {
+      setPhoneError(providerApplicationErrorText(e));
     } finally {
       setBusy(undefined);
     }
@@ -133,8 +155,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
     try {
       setView(await submitProviderApplication(sessionAuthClient, {
         realName, birthDate: birthDate.trim(), gender: "", phone,
-        idType, idFrontAsset: docs.front?.mediaAssetId ?? "", idBackAsset: idType === "CCCD" ? docs.back?.mediaAssetId ?? "" : "",
-        selfieAsset: docs.selfie?.mediaAssetId ?? "", noCrimeDeclared: noCrime, dataConsent, emergencyContact: emergency,
+        phoneChallengeId, noCrimeDeclared: noCrime, dataConsent, emergencyContact: emergency,
         termsVersion: view.terms.version, termsAccepted: accepted,
       }));
       setStep("intro");
@@ -171,16 +192,6 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
       </View>
     </Pressable>
   );
-  const docTile = (slot: DocSlot, label: string, hint: string) => {
-    const doc = docs[slot];
-    return <Pressable accessibilityLabel={`${label}${doc ? "，已上传" : ""}`} disabled={!mediaClient || busy !== undefined} key={slot} onPress={() => { void pickDoc(slot); }} style={s.doc}>
-      {doc ? <Image contentFit="cover" source={{ uri: doc.uri }} style={s.docImage} /> : <View style={s.docPlus}><ProxyIcon color={color.ink} name="plus" size={22} /></View>}
-      <View style={doc ? s.docLabelOn : s.docLabelEmpty}>
-        <Text selectable style={[s.docTitle, doc && s.docTitleOn, !doc && s.center]}>{busy === slot ? "上传中…" : doc ? `${label} · 已上传` : label}</Text>
-        {!doc ? <Text selectable style={[s.muted, s.center]}>点击上传 · {hint}</Text> : null}
-      </View>
-    </Pressable>;
-  };
   const stepHead = (n: number, title: string, lead: string) => (
     <View style={s.stepHead}>
       <Text selectable style={s.stepNo}>{`${n} / 3`}</Text>
@@ -191,10 +202,10 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
       <Text selectable style={s.muted}>{lead}</Text>
     </View>
   );
-  const nav = (back: Step, next: () => void, nextLabel: string) => (
+  const nav = (back: Step, next: () => void, nextLabel: string, nextDisabled?: boolean) => (
     <View style={s.navRow}>
       <Pressable onPress={() => { setError(undefined); setStep(back); }} style={[s.secondary, s.navBack]}><Text selectable style={s.secondaryText}>上一步</Text></Pressable>
-      <Pressable accessibilityLabel={nextLabel} disabled={busy !== undefined} onPress={next} style={[s.primary, s.navNext, busy !== undefined && s.busy]}><Text selectable style={s.primaryText}>{nextLabel}</Text></Pressable>
+      <Pressable accessibilityLabel={nextLabel} disabled={busy !== undefined || nextDisabled} onPress={next} style={[s.primary, s.navNext, (busy !== undefined || nextDisabled) && s.busy]}><Text selectable style={s.primaryText}>{nextLabel}</Text></Pressable>
     </View>
   );
 
@@ -230,20 +241,20 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
             {KYC_LOGO ? <View style={s.heroLogo}><Image contentFit="cover" source={KYC_LOGO} style={s.heroLogoImage} transition={0} /></View> : null}
             <Text selectable style={s.heroKicker}>KYC · 3 步走完</Text>
             <Text selectable style={s.heroTitle}>轻认证，不卡你</Text>
-            <Text selectable style={s.heroSub}>基础信息 + 证件自拍 + 条款。</Text>
+            <Text selectable style={s.heroSub}>基础信息 + 手机验证 + 条款。</Text>
           </View>
           <View style={s.infoCard}>
             <View style={s.infoRow}>
               <View style={[s.infoTile, s.infoTileTime]}><ProxyIcon color={color.ink} name="clock" size={17} /></View>
               <View style={s.checkCopy}>
                 <Text selectable style={s.checkTitle}>3–5 分钟填完</Text>
-                <Text selectable style={s.muted}>身份证/护照 + 本人手机号</Text>
+                <Text selectable style={s.muted}>本人手机号 + 一条真的验证码</Text>
               </View>
             </View>
             <View style={s.infoRowLast}>
               <View style={[s.infoTile, s.infoTileHuman]}><ProxyIcon color={color.ink} name="user" size={17} /></View>
               <View style={s.checkCopy}>
-                <Text selectable style={s.checkTitle}>运营人工审核</Text>
+                <Text selectable style={s.checkTitle}>运营审核</Text>
                 <Text selectable style={s.muted}>结果显示在这里，不通过可重提</Text>
               </View>
             </View>
@@ -270,27 +281,46 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
         <TextInput accessibilityLabel="出生日期" keyboardType="number-pad" maxLength={10} onChangeText={(v) => { setBirthDate(formatBirthDateInput(v)); setBasicErrors((p) => { const next = { ...p }; delete next.birthDate; return next; }); }} placeholder="20010520" placeholderTextColor={color.muted} style={[s.input, basicErrors.birthDate ? s.inputError : null]} value={birthDate} />
         {basicErrors.birthDate ? <Text selectable style={s.fieldError}>{basicErrors.birthDate}</Text> : null}
         <Text selectable style={s.label}>手机号 *</Text>
-        <TextInput accessibilityLabel="手机号" keyboardType="phone-pad" maxLength={15} onChangeText={(v) => { setPhone(formatPhoneInput(v)); setBasicErrors((p) => { const next = { ...p }; delete next.phone; return next; }); }} placeholder="09xx xxx xxx" placeholderTextColor={color.muted} style={[s.input, basicErrors.phone ? s.inputError : null]} value={phone} />
+        <TextInput accessibilityLabel="手机号" keyboardType="phone-pad" maxLength={15} onChangeText={(v) => {
+          setPhone(formatPhoneInput(v));
+          setBasicErrors((p) => { const next = { ...p }; delete next.phone; return next; });
+          // 手机号一变，之前那次验证就跟这个号不是一回事了——重置，逼着重新走一遍。
+          if (phoneVerifyState !== "idle") { setPhoneVerifyState("idle"); setPhoneChallengeId(""); setOtpCode(""); }
+        }} placeholder="09xx xxx xxx" placeholderTextColor={color.muted} style={[s.input, basicErrors.phone ? s.inputError : null]} value={phone} />
         {basicErrors.phone ? <Text selectable style={s.fieldError}>{basicErrors.phone}</Text> : null}
-        <Text selectable style={s.note}>短信验证码暂未接入：手机号会标为「未验证」，运营审核时电话核实。</Text>
-        {nav("intro", () => { setError(undefined); if (validateBasic()) setStep("documents"); }, "下一步 · 证件认证")}
+        <Text selectable style={s.note}>下一步会给这个号发一条真的验证码。</Text>
+        {nav("intro", () => { setError(undefined); if (validateBasic()) setStep("phone"); }, "下一步 · 手机验证")}
       </View> : null}
 
-      {step === "documents" ? <View style={s.card}>
-        {stepHead(2, "证件认证", "证件 + 手持自拍，运营人工比对。")}
-        <View style={s.chips}>{(["CCCD", "PASSPORT"] as const).map((type) => <Pressable accessibilityLabel={`${type === "CCCD" ? "身份证" : "护照"}${idType === type ? "，已选" : ""}`} key={type} onPress={() => setIdType(type)} style={[s.chip, idType === type && s.chipOn]}><Text selectable style={[s.chipText, idType === type && s.chipTextOn]}>{type === "CCCD" ? "身份证 CCCD" : "护照"}</Text></Pressable>)}</View>
-        {docTile("front", "证件正面", "四角清晰、不反光")}
-        {idType === "CCCD" ? docTile("back", "证件反面", "四角清晰、不反光") : null}
-        {docTile("selfie", "手持证件自拍", "脸和证件都要拍清楚，别用滤镜")}
-        {check(noCrime, setNoCrime, "无犯罪声明", "我承诺无犯罪记录，若违反将立即冻结并配合调查。此声明将电子留档。")}
-        {check(dataConsent, setDataConsent, "同意 KYC 数据使用", "同意平台按《隐私政策》使用证件信息进行实名比对。")}
-        {nav("basic", () => { setError(undefined); setStep("terms"); }, "下一步 · 履约条款")}
+      {step === "phone" ? <View style={s.card}>
+        {stepHead(2, "手机验证", "验证这个号真的是你在用的。")}
+        <View style={s.checkCopy}>
+          <Text selectable style={s.checkTitle}>{phone || "还没填手机号"}</Text>
+          <Text selectable style={s.muted}>{phoneVerifyState === "verified" ? "已验证" : "验证码有效期 5 分钟"}</Text>
+        </View>
+        {phoneVerifyState !== "verified" ? (
+          <Pressable accessibilityLabel={phoneVerifyState === "sent" ? "重新获取验证码" : "获取验证码"} disabled={busy !== undefined || phone.trim() === ""} onPress={() => { void sendPhoneCode(); }} style={[s.secondary, busy === "phoneRequest" && s.busy]}>
+            <Text selectable style={s.secondaryText}>{busy === "phoneRequest" ? "发送中…" : phoneVerifyState === "sent" ? "重新获取验证码" : "获取验证码"}</Text>
+          </Pressable>
+        ) : null}
+        {phoneVerifyState === "sent" ? <>
+          <Text selectable style={s.label}>验证码 *</Text>
+          <TextInput accessibilityLabel="验证码" keyboardType="number-pad" maxLength={6} onChangeText={setOtpCode} placeholder="6 位数字" placeholderTextColor={color.muted} style={s.input} value={otpCode} />
+          <Pressable accessibilityLabel="验证" disabled={busy !== undefined || otpCode.trim() === ""} onPress={() => { void checkPhoneCode(); }} style={[s.primary, busy === "phoneVerify" && s.busy]}>
+            <Text selectable style={s.primaryText}>{busy === "phoneVerify" ? "验证中…" : "验证"}</Text>
+          </Pressable>
+        </> : null}
+        {phoneVerifyState === "verified" ? <Text selectable style={s.note}>✓ 手机号已验证</Text> : null}
+        {phoneError ? <Text selectable style={s.fieldError}>{phoneError}</Text> : null}
+        {nav("basic", () => { setError(undefined); setStep("terms"); }, "下一步 · 声明与条款", phoneVerifyState !== "verified")}
       </View> : null}
 
       {step === "terms" ? <View style={s.card}>
         {stepHead(3, "接受条款，正式接单", "接单后可以随时暂停接单。")}
         <Text selectable style={s.label}>紧急联系人 *（不对客户公开）</Text>
         <TextInput accessibilityLabel="紧急联系人" onChangeText={setEmergency} placeholder="姓名 + 电话" placeholderTextColor={color.muted} style={s.input} value={emergency} />
+        {check(noCrime, setNoCrime, "无犯罪声明", "我承诺无犯罪记录，若违反将立即冻结并配合调查。此声明将电子留档。")}
+        {check(dataConsent, setDataConsent, "同意 KYC 数据使用", "同意平台按《隐私政策》使用手机验证结果与本人资料进行 KYC 审核。")}
         {view.terms ? view.terms.items.map((item) => check(
           accepted.includes(item.id),
           () => toggle(accepted, setAccepted, item.id),
@@ -298,7 +328,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
           item.body,
           item.enforced ? undefined : "这条规则的执行机制还没上线，上线后按此生效。",
         )) : <Text selectable style={s.error}>履约条款暂时读不到，稍后再试。</Text>}
-        {nav("documents", () => { void submit(); }, busy === "submit" ? "提交中…" : "提交 KYC 审核")}
+        {nav("phone", () => { void submit(); }, busy === "submit" ? "提交中…" : "提交 KYC 审核", !noCrime || !dataConsent)}
       </View> : null}
 
       {error ? <Text selectable style={s.error}>{error}</Text> : null}
@@ -367,11 +397,6 @@ const s = StyleSheet.create({
   input: { backgroundColor: color.surface, borderRadius: 12, color: color.ink, fontSize: 14, paddingHorizontal: 12, paddingVertical: 10 },
   inputError: { borderColor: color.magenta, borderWidth: 1.5 },
   fieldError: { color: color.magenta, fontSize: 12, fontWeight: "800", marginTop: 4 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  chip: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  chipOn: { backgroundColor: color.ink },
-  chipText: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  chipTextOn: { color: color.white },
   stepHead: { gap: 4, marginBottom: 4 },
   segRow: { flexDirection: "row", gap: 6, marginVertical: 6 },
   seg: { backgroundColor: color.line, borderRadius: 2, flex: 1, height: 4 },
@@ -388,14 +413,6 @@ const s = StyleSheet.create({
   pipeDotFailed: { backgroundColor: color.magenta },
   pipeBadge: { color: color.muted, fontSize: 12, fontWeight: "900" },
   stepNo: { color: color.muted, fontSize: 11, fontWeight: "900" },
-  doc: { alignItems: "center", backgroundColor: color.surface, borderRadius: 14, gap: 8, height: 132, justifyContent: "center", marginTop: 6, overflow: "hidden", paddingHorizontal: 14 },
-  docPlus: { alignItems: "center", backgroundColor: color.white, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
-  docLabelEmpty: { alignItems: "center", gap: 4, justifyContent: "center" },
-  center: { textAlign: "center" },
-  docImage: { height: "100%", position: "absolute", width: "100%" },
-  docLabelOn: { backgroundColor: "rgba(0,0,0,0.45)", bottom: 0, left: 0, paddingHorizontal: 12, paddingVertical: 6, position: "absolute", right: 0 },
-  docTitle: { color: color.ink, fontSize: 13, fontWeight: "900" },
-  docTitleOn: { color: color.white },
   check: { alignItems: "flex-start", flexDirection: "row", gap: 10, marginTop: 8 },
   checkCopy: { flex: 1, gap: 2 },
   checkTitle: { color: color.ink, fontSize: 13, fontWeight: "900" },

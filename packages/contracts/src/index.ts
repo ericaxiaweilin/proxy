@@ -626,9 +626,67 @@ export type ListActivitiesPayload = z.infer<typeof ListActivitiesPayloadSchema>;
 // actor-scoped 两个数组 — created (我发起的) + joined (我参加的)。
 // 两个数组都是 activityId 唯一排序 (服务侧 created_at DESC);
 // 客户端可以一次走完两个 tab，不需要走两次 server。
+// ORDER-RECIPE-001：一笔报名在下单那一刻的完整票面。activity 由服务端从活动行
+// 取值；time/place/companion 是用户在 For You 四宫格里选定的组合。写入后不变，
+// 下单成功页和「我的订单」照它画同一张票。
+export const RecipeCompanionSchema = z.object({
+  id: z.string().optional(),
+  name: z.string(),
+  bio: z.string().optional(),
+  photoUrl: z.string().optional()
+});
+export const RecipePlaceSchema = z.object({ name: z.string(), area: z.string().optional() });
+export const ActivityJoinRecipeSchema = z.object({
+  source: z.literal("FOR_YOU").optional(),
+  companion: RecipeCompanionSchema.optional(),
+  place: RecipePlaceSchema.optional(),
+  time: z.string().optional()
+});
+export type ActivityJoinRecipe = z.infer<typeof ActivityJoinRecipeSchema>;
+export const ActivityOrderSnapshotSchema = z.object({
+  orderNo: z.string(),
+  orderedAt: z.string(),
+  source: z.string().optional(),
+  activity: z.object({
+    activityId: z.string(),
+    code: z.string().optional(),
+    title: z.string(),
+    desc: z.string().optional(),
+    benefit: z.string().optional(),
+    people: z.string().optional(),
+    time: z.string().optional(),
+    venueIcon: z.string().optional(),
+    venueName: z.string().optional(),
+    venueType: z.string().optional(),
+    realitySceneId: z.string().optional(),
+    priceLabel: z.string().optional(),
+    moneyFlow: z.string().optional(),
+    venueSpend: z.string().optional(),
+    coverImageUrl: z.string().optional(),
+    joined: z.number().int().nonnegative(),
+    capacity: z.number().int().nonnegative().optional()
+  }),
+  time: z.string().optional(),
+  place: RecipePlaceSchema.optional(),
+  companion: RecipeCompanionSchema.optional()
+});
+export type ActivityOrderSnapshot = z.infer<typeof ActivityOrderSnapshotSchema>;
+
+// MY-ORDERS-DETAIL-001：每笔报名自己的订单信息（订单编号 + 下单时间 + 报名状态）。
+// state 取不到时服务端留空（报名行存在 = 已确认）。老服务端不发这个字段，默认空数组。
+export const ActivityJoinOrderSchema = z.object({
+  activityId: z.string(),
+  orderNo: z.string().optional(),
+  joinedAt: z.string(),
+  state: z.enum(["REQUESTED", "CONFIRMED", "WAITLISTED", "CANCELLED", "ATTENDED", "NO_SHOW"]).optional(),
+  snapshot: ActivityOrderSnapshotSchema.optional()
+});
+export type ActivityJoinOrder = z.infer<typeof ActivityJoinOrderSchema>;
+
 export const ListMyActivitiesPayloadSchema = z.object({
   created: z.array(ActivitySchema),
   joined: z.array(ActivitySchema),
+  joinOrders: z.array(ActivityJoinOrderSchema).default([]),
   note: z.string().optional()
 });
 export type ListMyActivitiesPayload = z.infer<typeof ListMyActivitiesPayloadSchema>;
@@ -877,7 +935,12 @@ export type ToggleActivityInterestPayload = z.infer<typeof ToggleActivityInteres
 
 export const JoinActivityPayloadSchema = z.object({
   activity: ActivitySchema,
-  joined: z.boolean()
+  joined: z.boolean(),
+  // ORDER-NO-001：个人订单号（类别-越南日期-每日序号，如 ACT-260927-0002）。
+  // 老服务端不下发，客户端 fallback 到活动 code（见 HOME-FORYOU-ORDER-002）。
+  orderNo: z.string().optional(),
+  // ORDER-RECIPE-001：刚落库的票面快照；老服务端不下发。
+  snapshot: ActivityOrderSnapshotSchema.nullish()
 });
 export type JoinActivityPayload = z.infer<typeof JoinActivityPayloadSchema>;
 
@@ -1034,5 +1097,6 @@ export * from "./twin-insight";
 // 放在 contracts 里而不是各端各写一份字面量，是因为「GATED 不能折叠成
 // FAILED/UNAVAILABLE」是一条跨端的约定：服务端负责发，客户端负责照实说。
 export * from "./conversation";
+export * from "./wallet";
 
 // R15.33: map contracts 撤了 — 独立 map tab 已删。

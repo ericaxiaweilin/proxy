@@ -81,6 +81,8 @@ commands:
     domain: Payment
   - command: ConfirmRealitySceneProposal
     domain: RealityScene
+  - command: ConfirmRecharge
+    domain: Wallet
   - command: ConfirmVoucherPurchase
     domain: Voucher
   - command: ConfirmVoucherRedemption
@@ -167,6 +169,8 @@ commands:
     domain: Marketplace
   - command: DismissOutcomeLearning
     domain: Outcome
+  - command: ExchangeBeans
+    domain: Wallet
   - command: FileAppeal
     domain: Moderation
   - command: FinalizeObservationSet
@@ -235,6 +239,8 @@ commands:
     domain: Voucher
   - command: GetVoucherSettlement
     domain: Voucher
+  - command: GetWallet
+    domain: Wallet
   - command: GrantContributionReward
     domain: Contribution
   - command: GrantExactLocation
@@ -251,6 +257,8 @@ commands:
     domain: Voucher
   - command: JoinActivity
     domain: Activity
+  - command: LinkStoreToRealityScene
+    domain: Business
   - command: ListActivities
     domain: Activity
   - command: ListAgentOffers
@@ -369,6 +377,8 @@ commands:
     domain: Engagement
   - command: ListVouchers
     domain: Voucher
+  - command: ListWalletEntries
+    domain: Wallet
   - command: LookupPasswordlessIdentity
     domain: Identity
   - command: MarkDialogRead

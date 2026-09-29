@@ -107,6 +107,61 @@ func TestEngagementPostgresReplyBookmarkRoundTrip(t *testing.T) {
 	}
 }
 
+// REPLY-IMAGE-001: ReplyToPost 带媒体引用落 PG（media_refs 列，迁移 136），
+// ListRepliesByPost 读回。种子与清理只碰本次运行独有的行。
+func TestEngagementPostgresReplyMediaRoundTrip(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewEngagementRepository(pool)
+	svc := engagement.NewWithRepository(repo)
+
+	stamp := time.Now().Format("150405.000000")
+	postID := "post_eng_media_pg_" + stamp
+	actor := "user_media_pg_" + stamp
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO localnet.posts (id, author_type, author_id, author_display_name, body, visibility, city_scope, status, created_at)
+		VALUES ($1, 'USER', $2, '测试种子', 'media test seed', 'PUBLIC', 'hanoi', 'PUBLISHED', NOW())
+		ON CONFLICT (id) DO NOTHING`, postID, "test_seed_author_"+postID); err != nil {
+		t.Fatalf("seed post: %v", err)
+	}
+	t.Cleanup(func() {
+		for _, stmt := range []string{
+			`DELETE FROM engagement.replies WHERE post_id = $1`,
+			`DELETE FROM localnet.posts WHERE id = $1`,
+		} {
+			if _, err := pool.Exec(context.Background(), stmt, postID); err != nil {
+				t.Logf("cleanup %q: %v", stmt, err)
+			}
+		}
+	})
+
+	r := svc.HandleContext(ctx, rbEnvelope("ReplyToPost", map[string]any{
+		"postId": postID, "body": "",
+		"media": []any{map[string]any{"mediaAssetId": "ma_pg_1", "sortOrder": 0}},
+	}, actor))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("ReplyToPost with media: outcome=%s err=%+v", r.Outcome, r.Error)
+	}
+	r = svc.HandleContext(ctx, rbEnvelope("ListPostReplies", map[string]any{"postId": postID, "limit": 20}, actor))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("ListPostReplies: outcome=%s err=%+v", r.Outcome, r.Error)
+	}
+	var list struct {
+		Replies []engagement.Reply `json:"replies"`
+		Count   int                `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(r.OperationRef), &list); err != nil {
+		t.Fatalf("unmarshal list payload: %v", err)
+	}
+	if list.Count != 1 || len(list.Replies) != 1 {
+		t.Fatalf("expected 1 reply, got %+v", list)
+	}
+	got := list.Replies[0].Media
+	if len(got) != 1 || got[0].MediaAssetID != "ma_pg_1" || got[0].SortOrder != 0 {
+		t.Fatalf("media not round-tripped via PG: %+v", got)
+	}
+}
+
 func rbEnvelope(commandType string, payload map[string]any, actorID string) command.Envelope {
 	return command.Envelope{
 		CommandID:      "cmd_eng_rb_pg_" + commandType,

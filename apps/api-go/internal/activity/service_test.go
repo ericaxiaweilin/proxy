@@ -172,6 +172,22 @@ func TestListMyActivitiesByActor(t *testing.T) {
 	if len(payload.Joined) != 1 || payload.Joined[0].ID != "activity_"+idJoined {
 		t.Fatalf("viewer.joined must be [%s], got %+v", "activity_"+idJoined, payload.Joined)
 	}
+	// MY-ORDERS-DETAIL-001：每笔报名带自己的订单编号和下单时间，且只有本人的。
+	var orders struct {
+		JoinOrders []JoinOrder `json:"joinOrders"`
+	}
+	if err := json.Unmarshal([]byte(out.OperationRef), &orders); err != nil {
+		t.Fatal(err)
+	}
+	if len(orders.JoinOrders) != 1 || orders.JoinOrders[0].ActivityID != "activity_"+idJoined {
+		t.Fatalf("viewer.joinOrders must be the one join, got %+v", orders.JoinOrders)
+	}
+	if len(orders.JoinOrders[0].OrderNo) < 21 || orders.JoinOrders[0].JoinedAt.IsZero() {
+		t.Fatalf("join order must carry a real order number and join time, got %+v", orders.JoinOrders[0])
+	}
+	if orders.JoinOrders[0].State != string(PartConfirmed) {
+		t.Fatalf("fresh join should report CONFIRMED, got %q", orders.JoinOrders[0].State)
+	}
 
 	// owner_1: created 只能是 idCreated。
 	e = activityEnvelope("ListMyActivities", "owner_1", "mine")
@@ -625,7 +641,7 @@ func TestJoinUpdatesDisplayedPeopleCount(t *testing.T) {
 		t.Fatalf("seed catalog no longer contains user_photo_buddy — this test needs an activity with a small capacity")
 	}
 
-	got, err := svc.repository.Join(context.Background(), target, "user_display")
+	got, _, err := svc.repository.Join(context.Background(), target, "user_display", JoinRecipe{})
 	if err != nil {
 		t.Fatalf("Join: %v", err)
 	}

@@ -479,3 +479,30 @@ func privacyRequestByID(t *testing.T, svc *Service, ctx context.Context, userID,
 	}
 	return req
 }
+
+// COMP-RETENTION-FLOOR-001 (2026-09-27 越南合规扫描).
+//
+// RetainedOnErasure 原来把保留下限写成「Decree 248/2026 §23, >=12 months」。
+// 那个数字**低于法律下限**：Law on E-commerce 122/2025/QH15 Art. 16(2)(b) /
+// 17(2)(i) / 18(2)(c) 要求「已订立合同的数据」自合同订立起至少 **3 年**可访问。
+// 一部法令压不低一部法律，所以合同/交易数据适用的是 3 年。
+//
+// 为什么必须留钉：全仓现在**没有任何** retention/purge 任务（migrations 里
+// retention/purge 零命中），所以数据一直留着、并不违规 —— 也就是说这个数字
+// 写错了也不会立刻出问题。它只会在有人照着旧数字写清理任务时才炸。
+// 「现在没事、将来致命」正是钉要守的那一类。
+//
+// 注入验证（2026-09-27）：把常量里的 ">=3 years" 改回 ">=12 months" ⇒ 本条转红。
+func TestRetentionFloorIsThreeYearsNotTwelveMonths(t *testing.T) {
+	if !strings.Contains(RetainedOnErasure, ">=3 years") {
+		t.Errorf("保留下限必须写明 >=3 years（122/2025 合同数据下限），当前值里没有: %q", RetainedOnErasure)
+	}
+	if !strings.Contains(RetainedOnErasure, "122/2025") {
+		t.Errorf("3 年下限必须带上法律依据 122/2025，否则下一个人会以为这是拍脑袋定的: %q", RetainedOnErasure)
+	}
+	// 反向：不许把下限陈述改回 12 个月。字符串里**提到** 12 months 是允许的
+	// （那是"为什么不能用它"的解释），所以这里钉的是下限的写法本身。
+	if strings.Contains(RetainedOnErasure, ">=12 months") {
+		t.Errorf("保留下限被改回 >=12 months —— 那低于 122/2025 的 3 年下限: %q", RetainedOnErasure)
+	}
+}

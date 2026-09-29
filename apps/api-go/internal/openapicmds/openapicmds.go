@@ -59,6 +59,7 @@ var DomainDir = []struct {
 	{"storeonboarding", "StoreOnboarding"},
 	{"supply", "Supply"},
 	{"voucher", "Voucher"},
+	{"wallet", "Wallet"},
 }
 
 // 漏登记的代价（2026-09-14 实测，OPENAPI-DOMAIN-001）：域不在这个清单里，

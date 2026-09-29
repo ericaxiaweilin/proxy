@@ -1,0 +1,1793 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Proxy · 完整原型</title>
+<style>
+:root{
+  --ink:#181613;--muted:#8E887D;--muted-2:#BCB6A8;
+  --line:#EFECE5;--line-2:#F5F2EB;--soft:#F6F5F1;
+  --bg:#F6F5F1;
+  --good:#2E9B58;--good-soft:#E8F4EA;--good-ink:#1E6E3E;
+  --gold:#F5B400;--gold-soft:#FDF6E3;--gold-ink:#8C6A00;
+  --sky:#5B8FD5;--sky-soft:#EAF2FF;--sky-ink:#2D5C9E;
+  --rose:#E85C7A;--rose-soft:#FCEBEF;--rose-ink:#A02848;
+  --warn:#E8A23C;--warn-soft:#FDF1DC;--warn-ink:#8A5A00;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:#D8D4C9;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC",Arial,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+button,input,textarea{font:inherit;color:inherit;border:0;background:transparent;cursor:pointer;outline:none}
+
+.stage{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.phone{width:390px;height:844px;background:#FFF;border-radius:38px;position:relative;overflow:hidden;border:1px solid #D0CCC0;box-shadow:0 30px 60px -30px rgba(0,0,0,.35);display:flex;flex-direction:column}
+
+.screen{position:absolute;inset:0;display:none;flex-direction:column;background:var(--bg);overflow:hidden}
+.screen.active{display:flex}
+
+.status{height:52px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px;font-size:14px;font-weight:800;flex-shrink:0;position:relative;z-index:5}
+
+.scroll{flex:1;overflow-y:auto;scrollbar-width:none;padding-bottom:120px}
+.scroll::-webkit-scrollbar{display:none}
+
+/* ============ 通用 ============ */
+.navbar{display:flex;align-items:center;gap:12px;padding:4px 20px 16px;flex-shrink:0}
+.back{width:36px;height:36px;border-radius:50%;background:#fff;border:1px solid var(--line);display:grid;place-items:center;flex-shrink:0;transition:all .15s}
+.back:active{transform:scale(.94);background:var(--soft)}
+.back svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.nav-title{font-size:16px;font-weight:900;letter-spacing:-.3px;flex:1;text-align:center}
+.nav-action{font-size:13px;font-weight:800;color:var(--muted);padding:6px 12px;border-radius:9px;background:#fff;border:1px solid var(--line);flex-shrink:0}
+.nav-action.ghost{background:transparent;border:0}
+
+.page-head{padding:4px 20px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.page-title{font-size:26px;font-weight:900;letter-spacing:-.7px;flex:1}
+.page-btn{width:40px;height:40px;border-radius:50%;background:#fff;border:1px solid var(--line);display:grid;place-items:center;flex-shrink:0;transition:all .15s}
+.page-btn:active{transform:scale(.94)}
+.page-btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.page-btn.dark{background:#181613;color:#fff;border-color:#181613}
+
+.section-head{display:flex;align-items:baseline;justify-content:space-between;padding:0 20px 12px;gap:8px}
+.section-title{font-size:17px;font-weight:900;letter-spacing:-.4px}
+.section-tag{font-size:9.5px;font-weight:900;padding:3px 6px;border-radius:5px;margin-left:6px}
+.section-tag.hot{background:#FFF1E6;color:#9A4408}
+.section-tag.live{background:var(--good-soft);color:var(--good-ink)}
+.section-more{font-size:11.5px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:2px}
+.section-more svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+
+/* ============ Tabbar ============ */
+.tabbar{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:center;padding:0 16px 18px;pointer-events:none;z-index:50}
+.tabbar-inner{pointer-events:auto;display:flex;align-items:center;gap:4px;padding:8px 14px;border-radius:32px;background:rgba(255,255,255,.96);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);box-shadow:0 12px 36px -12px rgba(0,0,0,.2);border:1px solid var(--line)}
+.tab-item{display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 18px;border-radius:20px;color:var(--muted);position:relative;transition:all .15s;cursor:pointer}
+.tab-item:active{transform:scale(.95)}
+.tab-item svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tab-item .label{font-size:10px;font-weight:800}
+.tab-item.on{color:var(--ink)}
+.tab-item.on svg{stroke-width:2.5}
+.tab-item.on .label{font-weight:900}
+.tab-dot{position:absolute;top:6px;right:12px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--rose);color:#fff;font-size:9px;font-weight:900;display:grid;place-items:center;border:2px solid #fff}
+
+/* ============ 首页 ============ */
+.home-top{padding:4px 20px 14px;flex-shrink:0}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.brand-logo{width:36px;height:36px}
+.brand-name{font-size:22px;font-weight:900;letter-spacing:-.6px;flex:1}
+.brand-search{width:36px;height:36px;border-radius:50%;background:var(--soft);display:grid;place-items:center}
+.brand-search svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+.loc{display:flex;align-items:center;gap:8px}
+.loc-icon{width:26px;height:26px;border-radius:8px;background:var(--soft);display:grid;place-items:center}
+.loc-icon svg{width:13px;height:13px;fill:none;stroke:var(--ink);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.loc-name{font-size:14px;font-weight:900;flex:1}
+.loc-switch{font-size:11.5px;font-weight:900;color:var(--muted);display:flex;align-items:center;gap:3px;padding:4px 8px;border-radius:8px;background:var(--soft)}
+.loc-switch svg{width:9px;height:9px;fill:none;stroke:currentColor;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round}
+
+.combo-wrap{padding:0 20px;margin-bottom:24px}
+.combo-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.combo-logo{width:34px;height:34px}
+.combo-title{font-size:22px;font-weight:900;letter-spacing:-.6px;flex:1}
+.combo-pill{font-size:10px;font-weight:900;padding:5px 9px;border-radius:8px;background:#181613;color:#fff}
+.combo-sub{font-size:12px;font-weight:700;color:var(--muted);margin-bottom:16px;padding-left:44px}
+
+.grid{position:relative;margin-bottom:14px}
+.grid-inner{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cell{position:relative;aspect-ratio:1/1;border-radius:18px;overflow:hidden;background:#181613;transition:transform .18s, box-shadow .2s;cursor:pointer}
+.cell:active{transform:scale(.98)}
+.cell img{width:100%;height:100%;object-fit:cover;display:block;transition:opacity .25s}
+.cell::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.15) 0%,transparent 30%,transparent 45%,rgba(0,0,0,.7) 100%);pointer-events:none}
+.cell.locked{box-shadow:0 0 0 2.5px var(--gold), 0 0 0 5px rgba(245,180,0,.15)}
+.cell-top{position:absolute;top:10px;left:10px;right:10px;z-index:3;display:flex;align-items:center;justify-content:space-between;pointer-events:none}
+.cell-tag{font-size:9.5px;font-weight:900;padding:3px 7px;border-radius:5px;background:rgba(255,255,255,.95);color:var(--ink)}
+.cell-lock{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(10px);color:rgba(255,255,255,.95);pointer-events:auto;transition:all .18s;border:1px solid rgba(255,255,255,.15)}
+.cell-lock svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.cell.locked .cell-lock{background:var(--gold);color:#181613;border-color:rgba(255,255,255,.3);box-shadow:0 4px 12px -2px rgba(245,180,0,.5)}
+.cell-label{position:absolute;left:12px;right:12px;bottom:12px;z-index:2;color:#fff;pointer-events:none}
+.cell-label .t1{font-size:13.5px;font-weight:900;line-height:1.2;text-shadow:0 2px 6px rgba(0,0,0,.6);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cell-label .t2{font-size:10.5px;font-weight:700;color:rgba(255,255,255,.85);text-shadow:0 1px 4px rgba(0,0,0,.5);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grid-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:54px;height:54px;border-radius:50%;background:#181613;display:grid;place-items:center;z-index:10;border:4px solid #FFF;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer;color:#fff;transition:transform .3s}
+.grid-center:active{transform:translate(-50%,-50%) rotate(180deg) scale(.95)}
+.grid-center svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+
+.combo-cta{width:100%;height:52px;border-radius:14px;background:#181613;color:#fff;font-size:14.5px;font-weight:900;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 8px 22px -8px rgba(0,0,0,.35);transition:all .2s}
+.combo-cta:active{transform:scale(.97)}
+.combo-cta.done{background:var(--good)}
+.combo-cta svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+
+.people-scroll{display:flex;gap:14px;overflow-x:auto;scrollbar-width:none;padding:0 20px}
+.people-scroll::-webkit-scrollbar{display:none}
+.person{flex:0 0 auto;text-align:center;width:72px}
+.person-avatar{width:68px;height:68px;border-radius:50%;position:relative;padding:2.5px;background:linear-gradient(135deg,#D4E85A,#A8C730);margin-bottom:8px}
+.person-img{width:100%;height:100%;border-radius:50%;overflow:hidden;border:2.5px solid #fff}
+.person-img img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.person-check{position:absolute;bottom:-2px;right:-2px;width:22px;height:22px;border-radius:50%;background:var(--good);border:2.5px solid #fff;display:grid;place-items:center}
+.person-check svg{width:10px;height:10px;fill:none;stroke:#fff;stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round}
+.person-name{font-size:12px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.scene-scroll{display:flex;gap:10px;overflow-x:auto;scrollbar-width:none;padding:0 20px}
+.scene-scroll::-webkit-scrollbar{display:none}
+.scene{flex:0 0 152px;border-radius:16px;overflow:hidden;background:#FFF;border:1px solid var(--line)}
+.scene-cover{position:relative;aspect-ratio:1/1;overflow:hidden;background:#2A1F18}
+.scene-cover img{width:100%;height:100%;object-fit:cover;display:block}
+.scene-cover::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.15) 0%,transparent 40%,transparent 50%,rgba(0,0,0,.75) 100%)}
+.scene-ph{position:absolute;inset:0;background:linear-gradient(135deg,#B0B4B9,#7F8489);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.scene-ph svg{width:36px;height:36px;fill:none;stroke:rgba(255,255,255,.9);stroke-width:1.6}
+.scene-ph-txt{font-size:11px;font-weight:900;color:rgba(255,255,255,.9)}
+.rank{position:absolute;top:8px;left:8px;z-index:3;font-size:9px;font-weight:900;padding:3px 7px;border-radius:5px;color:#FFF}
+.rank.r1{background:linear-gradient(135deg,#FF6B8A,#E22F56)}
+.rank.r2{background:linear-gradient(135deg,#9AA4B0,#6B7280)}
+.rank.r3{background:linear-gradient(135deg,#C2854E,#8B5A2B)}
+.scene-name{position:absolute;left:10px;right:10px;bottom:8px;z-index:2;color:#FFF;font-size:12.5px;font-weight:900;line-height:1.25;text-shadow:0 2px 8px rgba(0,0,0,.55);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.scene-info{padding:9px 11px 10px;background:#FFF}
+.scene-type{font-size:10.5px;font-weight:800;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:4px}
+.scene-type .strong{color:var(--ink);font-weight:900}
+.scene-type .dot{width:2px;height:2px;border-radius:50%;background:var(--muted-2)}
+.scene-foot{display:flex;align-items:center;justify-content:space-between;padding-top:7px;border-top:1px solid var(--line-2)}
+.scene-count{font-size:10.5px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:3px}
+.scene-count b{color:var(--ink);font-weight:900;font-size:11.5px}
+.scene-count svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2.4;color:var(--muted-2)}
+.scene-score{font-size:10.5px;font-weight:900;color:var(--gold-ink);display:flex;align-items:center;gap:2px}
+.scene-score svg{width:9px;height:9px;fill:var(--gold);stroke:none}
+.scene-score .no{color:var(--muted-2);font-weight:800;font-size:10px}
+
+.actions{padding:0 20px;margin-bottom:24px}
+.actions-title{font-size:17px;font-weight:900;margin-bottom:14px}
+.actions-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.action{display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px 2px;border-radius:14px;transition:all .15s;cursor:pointer}
+.action:active{background:var(--soft)}
+.action-ico{width:44px;height:44px;border-radius:14px;background:var(--soft);display:grid;place-items:center}
+.action-ico svg{width:22px;height:22px;fill:none;stroke:var(--ink);stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.action-name{font-size:10.5px;font-weight:900;white-space:nowrap}
+
+.nearby{padding:0 20px}
+.nearby-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.nearby-title{font-size:17px;font-weight:900}
+.nearby-map{font-size:11.5px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:3px;padding:5px 9px;border-radius:8px;background:var(--soft)}
+.nearby-map svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:2.4}
+.list{display:flex;flex-direction:column;gap:10px}
+.item{display:flex;gap:12px;padding:10px;border-radius:16px;background:#FFF;border:1px solid var(--line);align-items:center;cursor:pointer;transition:all .15s}
+.item:active{transform:scale(.99);background:var(--soft)}
+.item-img{width:64px;height:64px;border-radius:14px;overflow:hidden;flex-shrink:0;background:#2A1F18}
+.item-img img{width:100%;height:100%;object-fit:cover;display:block}
+.item-body{flex:1;min-width:0}
+.item-name{font-size:14px;font-weight:900;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item-meta{font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:5px}
+.item-meta .strong{color:var(--ink);font-weight:900}
+.item-meta .dot{width:2px;height:2px;border-radius:50%;background:var(--muted-2)}
+.item-stat{display:flex;align-items:center;gap:10px;font-size:10.5px;font-weight:800;color:var(--muted)}
+.item-stat b{color:var(--ink);font-weight:900;font-size:11.5px}
+.item-stat .star{color:var(--gold-ink);display:flex;align-items:center;gap:2px}
+.item-stat .star svg{width:10px;height:10px;fill:var(--gold);stroke:none}
+.item-dist{margin-left:auto;font-size:10.5px;font-weight:800;color:var(--muted-2);background:var(--soft);padding:3px 7px;border-radius:5px}
+
+/* ============ 动态 ============ */
+.tabs-line{display:flex;gap:24px;padding:0 20px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.tabs-line .tab{padding:0 0 14px;font-size:15px;font-weight:900;color:var(--muted);position:relative}
+.tabs-line .tab.on{color:var(--ink)}
+.tabs-line .tab.on::after{content:"";position:absolute;bottom:-1px;left:0;right:0;height:2.5px;background:#181613;border-radius:2px}
+
+.filters{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:0 20px 14px}
+.filters::-webkit-scrollbar{display:none}
+.filter{flex-shrink:0;padding:7px 14px;border-radius:18px;background:#FFF;border:1px solid var(--line);font-size:12.5px;font-weight:800;color:var(--muted);white-space:nowrap}
+.filter.on{background:#181613;color:#FFF;border-color:#181613}
+
+.post{padding:16px 20px;border-bottom:1px solid var(--line-2);background:#fff}
+.post-head{display:flex;gap:12px;margin-bottom:12px}
+.post-avatar{width:42px;height:42px;border-radius:50%;background-size:cover;background-position:center;flex-shrink:0;background-color:#E8E4DB}
+.post-user{flex:1;min-width:0}
+.post-name{font-size:14px;font-weight:900;margin-bottom:3px;display:flex;align-items:center;gap:6px}
+.post-name .v{width:12px;height:12px;fill:var(--sky)}
+.post-time{font-size:11.5px;font-weight:700;color:var(--muted)}
+.post-more{color:var(--muted-2);font-weight:900;font-size:14px}
+.post-body{font-size:14.5px;font-weight:600;line-height:1.55;margin-bottom:12px}
+.post-scene{display:flex;gap:10px;padding:10px;border-radius:14px;background:var(--soft);margin-bottom:12px;align-items:center;cursor:pointer}
+.post-scene-img{width:48px;height:48px;border-radius:10px;background-size:cover;background-position:center;flex-shrink:0;background-color:#E8E4DB}
+.post-scene-body{flex:1;min-width:0}
+.post-scene-name{font-size:13px;font-weight:900;margin-bottom:3px}
+.post-scene-meta{font-size:10.5px;font-weight:700;color:var(--muted)}
+.post-scene-arrow{color:var(--muted-2)}
+.post-scene-arrow svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.4}
+.post-foot{display:flex;gap:22px;align-items:center;font-size:13px;font-weight:800;color:var(--muted)}
+.post-foot .act{display:flex;align-items:center;gap:5px;cursor:pointer}
+.post-foot .act svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.9}
+.post-foot .act.liked{color:var(--rose)}
+.post-foot .act.liked svg{fill:var(--rose);stroke:var(--rose)}
+
+/* ============ 消息 ============ */
+.msg-tabs{display:flex;gap:24px;padding:0 20px;border-bottom:1px solid var(--line);margin-bottom:4px}
+.msg-tab{padding:0 0 14px;font-size:15px;font-weight:900;color:var(--muted);position:relative}
+.msg-tab.on{color:var(--ink)}
+.msg-tab.on::after{content:"";position:absolute;bottom:-1px;left:0;right:0;height:2.5px;background:#181613}
+.msg-tab .n{font-size:10.5px;font-weight:900;padding:2px 6px;border-radius:8px;background:var(--soft);color:var(--muted);margin-left:5px}
+.msg-tab.on .n{background:#181613;color:#fff}
+
+.msg-list{padding:6px 0}
+.msg{display:flex;gap:12px;padding:14px 20px;align-items:center;background:#fff;cursor:pointer}
+.msg-avatar{width:52px;height:52px;border-radius:50%;background-size:cover;background-position:center;flex-shrink:0;position:relative;background-color:#E8E4DB}
+.msg-online{position:absolute;bottom:0;right:0;width:14px;height:14px;border-radius:50%;background:var(--good);border:2.5px solid #fff}
+.msg-body{flex:1;min-width:0}
+.msg-name{font-size:14.5px;font-weight:900;margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.msg-name .tag{font-size:9px;font-weight:900;padding:2px 5px;border-radius:3px;background:var(--gold-soft);color:var(--gold-ink)}
+.msg-text{font-size:13px;font-weight:600;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg-right{text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+.msg-time{font-size:11px;font-weight:700;color:var(--muted-2)}
+.msg-unread{background:var(--rose);color:#fff;font-size:10px;font-weight:900;min-width:18px;height:18px;padding:0 5px;border-radius:9px;display:grid;place-items:center}
+
+/* ============ 我的 ============ */
+.me-card{margin:0 20px 16px;padding:18px;border-radius:18px;background:#FFF;border:1px solid var(--line)}
+.me-head{display:flex;gap:14px;align-items:center;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--line-2)}
+.me-avatar{width:60px;height:60px;border-radius:50%;background-size:cover;background-position:center;flex-shrink:0;background-color:#E8E4DB;border:2.5px solid #FFF}
+.me-info{flex:1;min-width:0}
+.me-name{font-size:17px;font-weight:900;margin-bottom:5px}
+.me-handle{font-size:12px;font-weight:700;color:var(--muted)}
+.me-status{font-size:11px;font-weight:900;padding:5px 10px;border-radius:9px;background:var(--good-soft);color:var(--good-ink);display:flex;align-items:center;gap:4px}
+.me-status::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--good)}
+.me-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.me-stat{padding:12px 8px;border-radius:12px;background:var(--soft);text-align:center}
+.me-stat .v{font-size:19px;font-weight:900;margin-bottom:3px}
+.me-stat .l{font-size:10.5px;font-weight:800;color:var(--muted)}
+
+.entry-group{margin:0 20px 16px}
+.entry-title{font-size:12px;font-weight:900;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;padding:0 4px}
+.entry{display:flex;gap:14px;align-items:center;padding:15px 16px;background:#FFF;border:1px solid var(--line);border-radius:16px;margin-bottom:8px;cursor:pointer}
+.entry-ico{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;flex-shrink:0}
+.entry-ico svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2}
+.entry-ico.gold{background:var(--gold-soft);color:var(--gold-ink)}
+.entry-ico.sky{background:var(--sky-soft);color:var(--sky-ink)}
+.entry-ico.rose{background:var(--rose-soft);color:var(--rose-ink)}
+.entry-ico.green{background:var(--good-soft);color:var(--good-ink)}
+.entry-body{flex:1;min-width:0}
+.entry-t{font-size:14px;font-weight:900;margin-bottom:3px;display:flex;align-items:center;gap:7px}
+.entry-t .badge{font-size:10px;font-weight:900;padding:2px 6px;border-radius:4px;background:var(--rose);color:#fff}
+.entry-t .badge.good{background:var(--good-soft);color:var(--good-ink)}
+.entry-s{font-size:11.5px;font-weight:700;color:var(--muted)}
+.entry-arrow{color:var(--muted-2);font-size:18px;font-weight:700}
+
+.order{margin:0 20px 10px;padding:14px;border-radius:16px;background:#FFF;border:1px solid var(--line)}
+.order-top{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+.order-img{width:48px;height:48px;border-radius:50%;background-size:cover;background-position:center;flex-shrink:0;background-color:#E8E4DB}
+.order-body{flex:1;min-width:0}
+.order-name{font-size:14px;font-weight:900;margin-bottom:3px}
+.order-meta{font-size:11.5px;font-weight:700;color:var(--muted)}
+.order-status{font-size:10px;font-weight:900;padding:4px 9px;border-radius:6px}
+.order-status.live{background:var(--good-soft);color:var(--good-ink)}
+.order-foot{display:flex;gap:8px;padding-top:12px;border-top:1px dashed var(--line-2)}
+.order-btn{flex:1;height:36px;border-radius:10px;font-size:12.5px;font-weight:900;display:flex;align-items:center;justify-content:center;gap:5px}
+.order-btn.ghost{background:var(--soft);color:var(--ink)}
+.order-btn.primary{background:#181613;color:#fff}
+
+/* ============ 创建活动 ============ */
+.progress-bar{height:3px;background:var(--soft);margin:0 20px 20px;border-radius:2px;overflow:hidden;flex-shrink:0}
+.progress-fill{height:100%;background:#181613;width:0%;border-radius:2px;transition:width .4s cubic-bezier(.4,0,.2,1)}
+
+.hero{padding:0 20px;margin-bottom:22px}
+.hero-title{font-size:26px;font-weight:900;letter-spacing:-.8px;line-height:1.15;margin-bottom:6px}
+.hero-sub{font-size:12.5px;font-weight:600;color:var(--muted);line-height:1.55}
+
+.block{padding:0 20px;margin-bottom:24px;opacity:.32;pointer-events:none;transition:opacity .35s}
+.block.active,.block.done{opacity:1;pointer-events:auto}
+
+.block-label{display:flex;align-items:baseline;gap:6px;margin-bottom:12px}
+.block-label .name{font-size:13px;font-weight:900}
+.block-label .req{color:var(--rose);font-size:13px}
+.block-label .hint{margin-left:auto;font-size:11px;font-weight:700;color:var(--muted-2)}
+
+.cat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.cat{padding:13px 4px 11px;border-radius:15px;background:#fff;border:1.5px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:6px;transition:all .18s;cursor:pointer}
+.cat.on{background:#181613;color:#fff;border-color:#181613;box-shadow:0 8px 20px -8px rgba(0,0,0,.35)}
+.cat-emoji{font-size:23px;line-height:1}
+.cat-name{font-size:11px;font-weight:900;white-space:nowrap}
+
+.name-input{width:100%;height:58px;padding:0 18px;border-radius:16px;background:#fff;border:1.5px solid var(--line);font-size:16px;font-weight:800;color:var(--ink);transition:border-color .15s}
+.name-input:focus{border-color:#181613;box-shadow:0 0 0 3px rgba(24,22,19,.06)}
+.name-input::placeholder{color:var(--muted-2);font-weight:600}
+
+.suggest-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.suggest{padding:8px 13px;border-radius:18px;background:#fff;border:1.5px solid var(--line);font-size:13px;font-weight:800;color:var(--ink);transition:all .15s;white-space:nowrap}
+.suggest.on{background:#181613;color:#fff;border-color:#181613}
+.suggest .star{opacity:.5;margin-left:2px}
+
+.people-display{display:flex;align-items:baseline;gap:8px;margin-bottom:16px;padding-left:2px}
+.people-value{font-size:30px;font-weight:900;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
+.people-unit{font-size:13px;font-weight:800;color:var(--muted)}
+
+.slider-wrap{position:relative;height:36px;margin-bottom:4px;padding:0 12px;touch-action:pan-y}
+.slider-track{position:absolute;top:50%;left:12px;right:12px;height:5px;background:var(--soft);border-radius:3px;transform:translateY(-50%)}
+.slider-fill{position:absolute;top:50%;height:5px;background:#181613;border-radius:3px;transform:translateY(-50%);transition:left .05s, width .05s}
+.slider-wrap input[type=range]{position:absolute;top:50%;left:0;width:100%;height:36px;background:transparent;-webkit-appearance:none;appearance:none;pointer-events:none;transform:translateY(-50%);margin:0}
+.slider-wrap input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:28px;height:28px;border-radius:50%;background:#fff;border:2.5px solid #181613;box-shadow:0 4px 12px rgba(0,0,0,.18);cursor:grab;pointer-events:auto}
+.slider-wrap input[type=range]::-webkit-slider-thumb:active{transform:scale(1.12);cursor:grabbing}
+.slider-wrap input[type=range]::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:#fff;border:2.5px solid #181613;box-shadow:0 4px 12px rgba(0,0,0,.18);cursor:grab;pointer-events:auto}
+.slider-wrap input#minRange{z-index:2}
+.slider-wrap input#maxRange{z-index:3}
+.slider-scale{display:flex;justify-content:space-between;padding:0 12px;margin-bottom:16px}
+.slider-scale span{font-size:10px;font-weight:800;color:var(--muted-2);font-variant-numeric:tabular-nums}
+
+.pills{display:flex;flex-wrap:wrap;gap:8px}
+.pill{padding:9px 16px;border-radius:20px;background:#fff;border:1.5px solid var(--line);font-size:13.5px;font-weight:800;color:var(--ink);transition:all .15s;white-space:nowrap}
+.pill.on{background:#181613;color:#fff;border-color:#181613;box-shadow:0 6px 16px -6px rgba(0,0,0,.3)}
+
+.row-scroll{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px 20px 4px;margin:0 -20px;scroll-snap-type:x proximity}
+.row-scroll::-webkit-scrollbar{display:none}
+.date-chip{flex-shrink:0;width:58px;padding:11px 4px 9px;border-radius:15px;background:#fff;border:1.5px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:3px;transition:all .18s;scroll-snap-align:start;cursor:pointer}
+.date-chip.on{background:#181613;color:#fff;border-color:#181613;box-shadow:0 8px 20px -8px rgba(0,0,0,.35)}
+.d-week{font-size:10.5px;font-weight:800;opacity:.65}
+.date-chip.on .d-week{opacity:.75}
+.d-day{font-size:19px;font-weight:900;letter-spacing:-.5px;line-height:1;font-variant-numeric:tabular-nums}
+.date-chip.weekend .d-week{color:var(--rose-ink);opacity:.85}
+.date-chip.weekend.on .d-week{color:#fff;opacity:.85}
+
+.time-scroll{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px 20px 4px;margin:0 -20px;scroll-snap-type:x proximity}
+.time-scroll::-webkit-scrollbar{display:none}
+.time-chip{flex-shrink:0;min-width:66px;padding:11px 14px;border-radius:13px;background:#fff;border:1.5px solid var(--line);font-size:15px;font-weight:900;font-variant-numeric:tabular-nums;text-align:center;color:var(--ink);transition:all .18s;scroll-snap-align:start;cursor:pointer}
+.time-chip.on{background:#181613;color:#fff;border-color:#181613;box-shadow:0 8px 18px -8px rgba(0,0,0,.35)}
+.time-chip.disabled{opacity:.28;cursor:not-allowed;text-decoration:line-through}
+
+.place-row{display:flex;gap:8px;align-items:stretch}
+.place-input-wrap{flex:1;position:relative;min-width:0}
+.place-input{width:100%;height:56px;padding:0 44px 0 16px;border-radius:16px;background:#fff;border:1.5px solid var(--line);font-size:15px;font-weight:800;color:var(--ink);transition:border-color .15s}
+.place-input:focus{border-color:#181613;box-shadow:0 0 0 3px rgba(24,22,19,.06)}
+.place-input::placeholder{color:var(--muted-2);font-weight:600}
+.place-clear{position:absolute;right:12px;top:50%;transform:translateY(-50%);width:24px;height:24px;border-radius:50%;background:var(--soft);display:none;place-items:center;color:var(--muted)}
+.place-clear.show{display:grid}
+.place-clear svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.map-btn{flex-shrink:0;width:56px;height:56px;border-radius:16px;background:#fff;border:1.5px solid var(--line);display:grid;place-items:center;color:var(--ink);transition:all .15s}
+.map-btn:active{transform:scale(.95);background:var(--soft)}
+.map-btn svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+
+.selected-scene{margin-top:12px;padding:12px;border-radius:14px;background:#fff;border:1.5px solid var(--good);display:none;align-items:center;gap:12px;position:relative}
+.selected-scene.show{display:flex}
+.selected-scene::before{content:"已选";position:absolute;top:-8px;left:12px;background:var(--good-soft);color:var(--good-ink);font-size:9.5px;font-weight:900;padding:2px 7px;border-radius:4px}
+.selected-scene-img{width:44px;height:44px;border-radius:10px;background-size:cover;background-position:center;flex-shrink:0;background-color:#E8E4DB}
+.selected-scene-body{flex:1;min-width:0}
+.selected-scene-name{font-size:14px;font-weight:900;margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.selected-scene-meta{font-size:11px;font-weight:700;color:var(--muted)}
+.selected-scene-change{font-size:11.5px;font-weight:900;color:var(--ink);padding:6px 10px;border-radius:8px;background:var(--soft);flex-shrink:0}
+
+.hint-row{display:flex;align-items:center;gap:6px;margin-top:10px;font-size:11px;font-weight:700;color:var(--muted-2)}
+.hint-row svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+
+.text-input{width:100%;padding:13px 16px;border-radius:14px;background:#fff;border:1.5px solid var(--line);font-size:13.5px;font-weight:700;color:var(--ink);margin-top:10px;transition:border-color .15s}
+.text-input:focus{border-color:#181613}
+.text-input::placeholder{color:var(--muted-2);font-weight:600}
+.text-area{width:100%;padding:13px 16px;border-radius:14px;background:#fff;border:1.5px solid var(--line);font-size:13.5px;font-weight:700;line-height:1.55;color:var(--ink);min-height:70px;resize:none;font-family:inherit}
+.text-area:focus{border-color:#181613}
+.text-area::placeholder{color:var(--muted-2);font-weight:600}
+
+#customFee{display:none;margin-top:10px}
+#customFee.show{display:block}
+
+.footer{position:absolute;bottom:0;left:0;right:0;padding:14px 20px calc(20px + env(safe-area-inset-bottom));background:linear-gradient(180deg,transparent 0%,rgba(246,245,241,.98) 30%,#F6F5F1 100%);z-index:40}
+.cta{width:100%;height:54px;border-radius:16px;background:#181613;color:#fff;font-size:15px;font-weight:900;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 8px 22px -8px rgba(0,0,0,.35);transition:all .15s}
+.cta:active{transform:scale(.97)}
+.cta:disabled{background:#D6D2C8;color:#8E887D;cursor:not-allowed;box-shadow:none}
+.cta svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+
+/* ============ 成功页 ============ */
+.success-screen{position:absolute;inset:0;background:var(--bg);display:flex;flex-direction:column;z-index:100;transform:translateY(100%);transition:transform .4s cubic-bezier(.4,0,.2,1)}
+.success-screen.show{transform:translateY(0)}
+.success-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 32px;text-align:center}
+.success-icon{width:88px;height:88px;border-radius:50%;background:var(--good-soft);display:grid;place-items:center;margin-bottom:24px;animation:pop .5s cubic-bezier(.34,1.56,.64,1)}
+@keyframes pop{0%{transform:scale(0);opacity:0}100%{transform:scale(1);opacity:1}}
+.success-icon svg{width:44px;height:44px;fill:none;stroke:var(--good);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.success-title{font-size:24px;font-weight:900;margin-bottom:10px}
+.success-sub{font-size:13.5px;font-weight:700;color:var(--muted);line-height:1.6;margin-bottom:8px}
+.success-card{margin:24px 32px 0;padding:14px;border-radius:14px;background:#fff;border:1px solid var(--line);display:flex;gap:12px;align-items:center;text-align:left;width:calc(100% - 64px)}
+.success-card-emoji{width:44px;height:44px;border-radius:12px;background:var(--soft);display:grid;place-items:center;font-size:22px;flex-shrink:0}
+.success-card-body{flex:1;min-width:0}
+.success-card-title{font-size:14px;font-weight:900;margin-bottom:3px}
+.success-card-meta{font-size:11.5px;font-weight:700;color:var(--muted)}
+.success-footer{padding:14px 20px calc(20px + env(safe-area-inset-bottom));display:flex;gap:10px}
+.success-btn{flex:1;height:52px;border-radius:14px;font-size:14.5px;font-weight:900;display:flex;align-items:center;justify-content:center;gap:6px}
+.success-btn.ghost{background:#fff;border:1.5px solid var(--line);color:var(--ink)}
+.success-btn.primary{background:#181613;color:#fff}
+
+/* ============ Sheet 通用 ============ */
+.sheet-mask{position:absolute;inset:0;background:rgba(20,18,14,.5);z-index:200;opacity:0;pointer-events:none;transition:opacity .22s}
+.sheet-mask.show{opacity:1;pointer-events:auto}
+.sheet{position:absolute;bottom:0;left:0;right:0;background:#fff;border-radius:24px 24px 0 0;z-index:201;transform:translateY(110%);transition:transform .32s cubic-bezier(.25,.8,.35,1);max-height:88%;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom);box-shadow:0 -20px 50px -20px rgba(0,0,0,.3)}
+.sheet.show{transform:translateY(0)}
+.sheet-grip{width:36px;height:4px;border-radius:2px;background:var(--line);margin:8px auto 0;flex-shrink:0}
+.sheet-head{padding:14px 20px 12px;display:flex;align-items:center;gap:12px;flex-shrink:0}
+.sheet-title{font-size:17px;font-weight:900;letter-spacing:-.3px;flex:1}
+.sheet-close{width:32px;height:32px;border-radius:50%;background:var(--soft);display:grid;place-items:center;color:var(--muted);font-size:12px;font-weight:900;flex-shrink:0}
+
+.search-bar{padding:0 20px 12px;flex-shrink:0}
+.search-input-wrap{display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;border-radius:12px;background:var(--soft)}
+.search-input-wrap svg{width:16px;height:16px;fill:none;stroke:var(--muted);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.search-input{flex:1;font-size:13.5px;font-weight:700;background:transparent;min-width:0}
+.search-input::placeholder{color:var(--muted-2);font-weight:600}
+
+.filter-chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:0 20px 12px;flex-shrink:0}
+.filter-chips::-webkit-scrollbar{display:none}
+.chip{flex-shrink:0;padding:7px 12px;border-radius:16px;background:#fff;border:1px solid var(--line);font-size:12px;font-weight:800;color:var(--muted);white-space:nowrap;transition:all .15s;cursor:pointer}
+.chip.on{background:#181613;color:#fff;border-color:#181613}
+.chip .n{opacity:.55;font-weight:900;margin-left:4px}
+.chip.on .n{opacity:.7}
+
+.sheet-body{flex:1;overflow-y:auto;padding:0 20px 24px;scrollbar-width:none}
+.sheet-body::-webkit-scrollbar{display:none}
+
+.scene-item{display:flex;gap:12px;align-items:center;padding:12px;border-radius:14px;background:#fff;border:1px solid var(--line);margin-bottom:8px;cursor:pointer;transition:all .15s}
+.scene-item:active{transform:scale(.99);background:var(--soft)}
+.scene-item.on{border-color:#181613;background:var(--soft);box-shadow:0 0 0 1.5px #181613}
+.scene-item-img{width:52px;height:52px;border-radius:12px;background-size:cover;background-position:center;flex-shrink:0;background-color:#E8E4DB}
+.scene-item-body{flex:1;min-width:0}
+.scene-item-name{font-size:14px;font-weight:900;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scene-item-meta{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--muted)}
+.scene-item-meta .strong{color:var(--ink);font-weight:900;flex-shrink:0}
+.scene-item-meta .dist{margin-left:auto;color:var(--muted-2);font-weight:800;flex-shrink:0}
+.scene-item-check{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;flex-shrink:0;color:transparent;transition:all .15s;background:#fff}
+.scene-item.on .scene-item-check{background:var(--ink);border-color:var(--ink);color:#fff}
+.scene-item-check svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+
+/* 地图 */
+.map-container{position:relative;overflow:hidden;background:#DDE8F0;border-radius:0;margin:0 12px 12px;height:480px}
+.map-canvas{position:absolute;inset:0;background:radial-gradient(circle at 30% 20%, rgba(255,255,255,.6), transparent 50%),linear-gradient(135deg, #E8F0E5 0%, #D5E0D8 100%)}
+.map-canvas::before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(180,190,200,.15) 1px, transparent 1px),linear-gradient(90deg, rgba(180,190,200,.15) 1px, transparent 1px);background-size: 32px 32px}
+.map-canvas::after{content:"";position:absolute;left:0;right:0;top:45%;height:60%;background:linear-gradient(transparent 0%, rgba(140,170,200,.35) 30%, rgba(140,170,200,.5) 60%, rgba(140,170,200,.35) 100%);clip-path: polygon(0 20%, 25% 10%, 45% 25%, 60% 15%, 80% 30%, 100% 20%, 100% 100%, 0 100%)}
+.map-pin{position:absolute;transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;z-index:3;cursor:pointer}
+.pin-dot{width:36px;height:36px;border-radius:50%;background:#fff;border:2.5px solid #181613;display:grid;place-items:center;box-shadow:0 6px 16px rgba(0,0,0,.25);font-size:16px;transition:all .15s}
+.map-pin:active .pin-dot{transform:scale(.92)}
+.map-pin.on .pin-dot{background:#181613;color:#fff;border-color:#fff}
+.pin-tail{width:2.5px;height:8px;background:#181613}
+.pin-label{position:absolute;top:calc(100% + 6px);background:#181613;color:#fff;padding:5px 9px;border-radius:7px;font-size:10.5px;font-weight:900;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.2);pointer-events:none}
+.map-top{position:absolute;top:16px;left:16px;right:16px;z-index:10;display:flex;gap:8px}
+.map-search{flex:1;display:flex;align-items:center;gap:10px;padding:0 14px;height:44px;border-radius:12px;background:#fff;box-shadow:0 6px 20px rgba(0,0,0,.12)}
+.map-search svg{width:15px;height:15px;fill:none;stroke:var(--muted);stroke-width:2.2;flex-shrink:0}
+.map-search .txt{font-size:13px;font-weight:700;color:var(--muted-2)}
+.map-loc{width:44px;height:44px;border-radius:12px;background:#fff;display:grid;place-items:center;box-shadow:0 6px 20px rgba(0,0,0,.12);flex-shrink:0}
+.map-loc svg{width:18px;height:18px;fill:none;stroke:var(--ink);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.map-bottom{padding:0 12px 16px;display:flex;flex-direction:column;gap:10px;flex-shrink:0}
+.map-selected{display:flex;gap:12px;align-items:center;padding:14px;border-radius:14px;background:#fff;border:1px solid var(--line)}
+.map-selected-img{width:48px;height:48px;border-radius:12px;background-size:cover;background-position:center;flex-shrink:0;background-color:#E8E4DB}
+.map-selected-body{flex:1;min-width:0}
+.map-selected-name{font-size:14px;font-weight:900;margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.map-selected-meta{font-size:11px;font-weight:700;color:var(--muted)}
+.map-confirm{width:100%;height:50px;border-radius:14px;background:#181613;color:#fff;font-size:14.5px;font-weight:900;display:flex;align-items:center;justify-content:center;gap:6px}
+.map-confirm:active{transform:scale(.97)}
+
+/* Toast */
+.toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#181613;color:#fff;padding:12px 20px;border-radius:12px;font-weight:800;font-size:13px;z-index:9999;box-shadow:0 14px 34px -12px rgba(0,0,0,.45);animation:toastIn .25s;max-width:80vw;text-align:center}
+@keyframes toastIn{from{opacity:0;transform:translate(-50%,-10px)}to{opacity:1;transform:translate(-50%,0)}}
+</style>
+</head>
+<body>
+
+<div class="stage">
+<div class="phone">
+
+  <!-- ================= 首页 ================= -->
+  <div class="screen active" id="s-home">
+    <div class="status"><span>10:40</span><span style="letter-spacing:2px;font-size:9px">●●● ⏸ ▮</span></div>
+
+    <div class="scroll">
+      <div class="home-top">
+        <div class="brand">
+          <svg class="brand-logo" viewBox="0 0 64 64">
+            <rect width="64" height="64" rx="18" fill="#181613"/>
+            <path d="M14 22c0-2 1.8-4 4-4h4c2.2 0 4 2 4 4v3c0 2-1.8 4-4 4h-4c-2.2 0-4-2-4-4v-3z" fill="#fff"/>
+            <path d="M38 22c0-2 1.8-4 4-4h4c2.2 0 4 2 4 4v3c0 2-1.8 4-4 4h-4c-2.2 0-4-2-4-4v-3z" fill="#fff"/>
+            <path d="M14 35c0-2 1.8-4 4-4h4c2.2 0 4 2 4 4v3c0 2-1.8 4-4 4h-4c-2.2 0-4-2-4-4v-3z" fill="#fff"/>
+            <path d="M38 35c0-2 1.8-4 4-4h4c2.2 0 4 2 4 4v3c0 2-1.8 4-4 4h-4c-2.2 0-4-2-4-4v-3z" fill="#fff"/>
+            <circle cx="32" cy="32" r="5" fill="#fff"/>
+          </svg>
+          <div class="brand-name">Proxy</div>
+          <button class="brand-search" onclick="toast('搜索')"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></button>
+        </div>
+        <div class="loc">
+          <div class="loc-icon"><svg viewBox="0 0 24 24"><path d="M12 21s-7-6-7-11a7 7 0 0114 0c0 5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></div>
+          <div class="loc-name">河内 · 还剑湖附近</div>
+          <button class="loc-switch" onclick="toast('切换城市')">切换<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+        </div>
+      </div>
+
+      <!-- 为你组合 -->
+      <div class="combo-wrap">
+        <div class="combo-head">
+          <svg class="combo-logo" viewBox="0 0 64 64">
+            <rect width="64" height="64" rx="14" fill="#181613"/>
+            <rect x="10" y="10" width="15" height="15" rx="3.5" fill="#fff"/>
+            <rect x="39" y="10" width="15" height="15" rx="3.5" fill="#fff"/>
+            <rect x="10" y="39" width="15" height="15" rx="3.5" fill="#fff"/>
+            <rect x="39" y="39" width="15" height="15" rx="3.5" fill="#fff"/>
+            <circle cx="32" cy="32" r="5" fill="#fff"/>
+          </svg>
+          <div class="combo-title">为你组合</div>
+          <div class="combo-pill">For You</div>
+        </div>
+        <div class="combo-sub">点矩形换单项 · 点中心全随机 · 点锁固定</div>
+
+        <div class="grid">
+          <div class="grid-inner">
+            <div class="cell" id="cell-person" onclick="openSheet('person')">
+              <img id="img-person" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&q=80">
+              <div class="cell-top">
+                <span class="cell-tag">人</span>
+                <button class="cell-lock" onclick="toggleLock(event,'person')">
+                  <svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 017.46-2"/></svg>
+                </button>
+              </div>
+              <div class="cell-label">
+                <div class="t1" id="t1-person">Vy</div>
+                <div class="t2" id="t2-person">一起的人</div>
+              </div>
+            </div>
+            <div class="cell" id="cell-time" onclick="openSheet('time')">
+              <img id="img-time" src="https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=400&q=80">
+              <div class="cell-top">
+                <span class="cell-tag">时间</span>
+                <button class="cell-lock" onclick="toggleLock(event,'time')">
+                  <svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 017.46-2"/></svg>
+                </button>
+              </div>
+              <div class="cell-label">
+                <div class="t1" id="t1-time">周日 10:00</div>
+                <div class="t2" id="t2-time">Three Beans</div>
+              </div>
+            </div>
+            <div class="cell" id="cell-event" onclick="openSheet('event')">
+              <img id="img-event" src="https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=400&q=80">
+              <div class="cell-top">
+                <span class="cell-tag">活动</span>
+                <button class="cell-lock" onclick="toggleLock(event,'event')">
+                  <svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 017.46-2"/></svg>
+                </button>
+              </div>
+              <div class="cell-label">
+                <div class="t1" id="t1-event">杯测小聚</div>
+                <div class="t2" id="t2-event">3 款豆子品鉴</div>
+              </div>
+            </div>
+            <div class="cell" id="cell-place" onclick="openSheet('place')">
+              <img id="img-place" src="https://images.unsplash.com/photo-1559925393-8be0ec4767c8?w=400&q=80">
+              <div class="cell-top">
+                <span class="cell-tag">地点</span>
+                <button class="cell-lock" onclick="toggleLock(event,'place')">
+                  <svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 017.46-2"/></svg>
+                </button>
+              </div>
+              <div class="cell-label">
+                <div class="t1" id="t1-place">Three Beans</div>
+                <div class="t2" id="t2-place">Cầu Giấy</div>
+              </div>
+            </div>
+          </div>
+          <div class="grid-center" onclick="reshuffleAll()">
+            <svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20l7-7M21 3l-7 7M8 8H3v5M20 16v5h-5M3 21l7-7"/></svg>
+          </div>
+        </div>
+
+        <button class="combo-cta" id="ctaBtn" onclick="selectCombo()">
+          <span id="ctaText">选择</span>
+          <svg id="ctaIcon" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+
+      <div style="margin-bottom:24px">
+        <div class="section-head">
+          <div><span class="section-title">真人推荐</span><span class="section-tag live">真人</span></div>
+          <button class="section-more">更多<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+        <div class="people-scroll">
+          <div class="person">
+            <div class="person-avatar"><div class="person-img"><img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&q=80"></div><div class="person-check"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg></div></div>
+            <div class="person-name">Linh</div>
+          </div>
+          <div class="person">
+            <div class="person-avatar"><div class="person-img"><img src="https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&q=80"></div><div class="person-check"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg></div></div>
+            <div class="person-name">Minh</div>
+          </div>
+          <div class="person">
+            <div class="person-avatar"><div class="person-img"><img src="https://images.unsplash.com/photo-1502823403499-6ccfcf4fb453?w=200&q=80"></div><div class="person-check"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg></div></div>
+            <div class="person-name">Hana</div>
+          </div>
+          <div class="person">
+            <div class="person-avatar"><div class="person-img"><img src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=200&q=80"></div></div>
+            <div class="person-name">Nam</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:24px">
+        <div class="section-head">
+          <div><span class="section-title">热门场景</span><span class="section-tag hot">本周</span></div>
+          <button class="section-more">更多<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+        <div class="scene-scroll">
+          <div class="scene">
+            <div class="scene-cover">
+              <img src="https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=400&q=80">
+              <div class="rank r1">TOP 1</div>
+              <div class="scene-name">Three Beans · Bắc Ninh</div>
+            </div>
+            <div class="scene-info">
+              <div class="scene-type"><span class="strong">☕ 咖啡店</span><span class="dot"></span><span>Bắc Ninh</span></div>
+              <div class="scene-foot">
+                <div class="scene-count"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg><b>1</b> 去过</div>
+                <div class="scene-score"><svg viewBox="0 0 24 24"><path d="M12 1.5l3.09 6.83 7.41.68-5.6 4.97 1.66 7.27L12 17.85l-6.56 3.4 1.66-7.27-5.6-4.97 7.41-.68z"/></svg>5.0</div>
+              </div>
+            </div>
+          </div>
+          <div class="scene">
+            <div class="scene-cover">
+              <div class="scene-ph"><svg viewBox="0 0 24 24"><path d="M12 21s-7-6-7-11a7 7 0 0114 0c0 5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><div class="scene-ph-txt">景点</div></div>
+              <div class="rank r2">TOP 2</div>
+              <div class="scene-name">Hồ Hoàn Kiếm</div>
+            </div>
+            <div class="scene-info">
+              <div class="scene-type"><span class="strong">🏛 景点</span><span class="dot"></span><span>Hoàn Kiếm</span></div>
+              <div class="scene-foot">
+                <div class="scene-count"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg><b>0</b> 去过</div>
+                <div class="scene-score"><span class="no">暂无</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="scene">
+            <div class="scene-cover">
+              <img src="https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=400&q=80">
+              <div class="rank r3">TOP 3</div>
+              <div class="scene-name">Suối Hoa 咖啡馆</div>
+            </div>
+            <div class="scene-info">
+              <div class="scene-type"><span class="strong">☕ 咖啡店</span><span class="dot"></span><span>Tây Hồ</span></div>
+              <div class="scene-foot">
+                <div class="scene-count"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg><b>128</b> 去过</div>
+                <div class="scene-score"><svg viewBox="0 0 24 24"><path d="M12 1.5l3.09 6.83 7.41.68-5.6 4.97 1.66 7.27L12 17.85l-6.56 3.4 1.66-7.27-5.6-4.97 7.41-.68z"/></svg>4.8</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <div class="actions-title">想做什么</div>
+        <div class="actions-grid">
+          <div class="action"><div class="action-ico"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8zM6 1v3M10 1v3M14 1v3"/></svg></div><div class="action-name">咖啡</div></div>
+          <div class="action"><div class="action-ico"><svg viewBox="0 0 24 24"><path d="M7 2v9M11 2v9M9 2v20M17 2c-1.5 0-2.5 2-2.5 4s.5 3 2 3.5V22"/></svg></div><div class="action-name">用餐</div></div>
+          <div class="action"><div class="action-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="4" r="2"/><path d="M9 8l-2 5h5l1 7M15 8l2 5h-3"/></svg></div><div class="action-name">City Walk</div></div>
+          <div class="action"><div class="action-ico"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg></div><div class="action-name">拍照</div></div>
+          <div class="action"><div class="action-ico"><svg viewBox="0 0 24 24"><circle cx="6" cy="17" r="4"/><circle cx="18" cy="17" r="4"/><path d="M6 17l4-8h6l2 8M10 9h5"/></svg></div><div class="action-name">骑行</div></div>
+          <div class="action"><div class="action-ico"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 15l-5-5-9 9"/></svg></div><div class="action-name">看展</div></div>
+        </div>
+      </div>
+
+      <div class="nearby">
+        <div class="nearby-head">
+          <div class="nearby-title">附近场景</div>
+          <button class="nearby-map"><svg viewBox="0 0 24 24"><path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4z"/><path d="M8 2v16M16 6v16"/></svg>地图</button>
+        </div>
+        <div class="list">
+          <div class="item">
+            <div class="item-img"><img src="https://images.unsplash.com/photo-1559925393-8be0ec4767c8?w=200&q=80"></div>
+            <div class="item-body">
+              <div class="item-name">Suối Hoa 咖啡馆</div>
+              <div class="item-meta"><span class="strong">☕ 咖啡店</span><span class="dot"></span><span>Tây Hồ</span></div>
+              <div class="item-stat"><span><b>128</b> 去过</span><span class="star"><svg viewBox="0 0 24 24"><path d="M12 1.5l3.09 6.83 7.41.68-5.6 4.97 1.66 7.27L12 17.85l-6.56 3.4 1.66-7.27-5.6-4.97 7.41-.68z"/></svg>4.8</span></div>
+            </div>
+            <div class="item-dist">1.2km</div>
+          </div>
+          <div class="item">
+            <div class="item-img"><img src="https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=200&q=80"></div>
+            <div class="item-body">
+              <div class="item-name">Three Beans · Bắc Ninh</div>
+              <div class="item-meta"><span class="strong">☕ 咖啡店</span><span class="dot"></span><span>Bắc Ninh</span></div>
+              <div class="item-stat"><span><b>1</b> 去过</span><span class="star"><svg viewBox="0 0 24 24"><path d="M12 1.5l3.09 6.83 7.41.68-5.6 4.97 1.66 7.27L12 17.85l-6.56 3.4 1.66-7.27-5.6-4.97 7.41-.68z"/></svg>5.0</span></div>
+            </div>
+            <div class="item-dist">2.1km</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabbar">
+      <div class="tabbar-inner">
+        <div class="tab-item on" onclick="goTab('s-home', this)"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10a2 2 0 002 2h10a2 2 0 002-2V10"/></svg><span class="label">首页</span></div>
+        <div class="tab-item" onclick="goTab('s-feed', this)"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span class="label">动态</span></div>
+        <div class="tab-item" onclick="goTab('s-msg', this)"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg><span class="label">消息</span><span class="tab-dot">9+</span></div>
+        <div class="tab-item" onclick="goTab('s-me', this)"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg><span class="label">我的</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 动态 ================= -->
+  <div class="screen" id="s-feed">
+    <div class="status"><span>10:40</span><span style="letter-spacing:2px;font-size:9px">●●● ⏸ ▮</span></div>
+    <div class="scroll">
+      <div class="page-head">
+        <div class="page-title">动态</div>
+        <button class="page-btn"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></button>
+        <button class="page-btn dark" onclick="openCreate()"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+      </div>
+      <div class="tabs-line"><div class="tab on">推荐</div><div class="tab">关注</div></div>
+      <div class="filters">
+        <button class="filter on">全部</button><button class="filter">人</button><button class="filter">场景</button><button class="filter">活动</button>
+      </div>
+      <div class="post">
+        <div class="post-head">
+          <div class="post-avatar" style="background-image:url('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&q=80')"></div>
+          <div class="post-user">
+            <div class="post-name">Linh <svg class="v" viewBox="0 0 24 24"><path d="M12 2l2.4 2.4 3.4-.4 1 3.2 3.2 1-.4 3.4L24 14l-2.4 2.4.4 3.4-3.2 1-1 3.2-3.4-.4L12 26l-2.4-2.4-3.4.4-1-3.2-3.2-1 .4-3.4L0 14l2.4-2.4-.4-3.4 3.2-1 1-3.2 3.4.4z" transform="scale(0.85) translate(2,2)"/></svg></div>
+            <div class="post-time">2 小时前 · 河内</div>
+          </div>
+          <div class="post-more">···</div>
+        </div>
+        <div class="post-body">今天在 Three Beans 待了一下午，光线很好，咖啡馆的拉花也很漂亮。推荐给喜欢安静办公的朋友。</div>
+        <div class="post-scene">
+          <div class="post-scene-img" style="background-image:url('https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=200&q=80')"></div>
+          <div class="post-scene-body">
+            <div class="post-scene-name">Three Beans · Bắc Ninh</div>
+            <div class="post-scene-meta">☕ 咖啡店 · 2.1km</div>
+          </div>
+          <div class="post-scene-arrow"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></div>
+        </div>
+        <div class="post-foot">
+          <div class="act liked"><svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>42</div>
+          <div class="act"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>8</div>
+          <div class="act"><svg viewBox="0 0 24 24"><path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7"/><path d="M16 6l-4-4-4 4M12 2v14"/></svg>分享</div>
+        </div>
+      </div>
+      <div class="post">
+        <div class="post-head">
+          <div class="post-avatar" style="background-image:url('https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&q=80')"></div>
+          <div class="post-user">
+            <div class="post-name">Duy Khang</div>
+            <div class="post-time">4 小时前 · 河内</div>
+          </div>
+          <div class="post-more">···</div>
+        </div>
+        <div class="post-body">周末去 Suối Hoa 拍了组照片，光线特别好。环境也安静，适合一个人待着。</div>
+        <div class="post-scene">
+          <div class="post-scene-img" style="background-image:url('https://images.unsplash.com/photo-1559925393-8be0ec4767c8?w=200&q=80')"></div>
+          <div class="post-scene-body">
+            <div class="post-scene-name">Suối Hoa 咖啡馆</div>
+            <div class="post-scene-meta">☕ 咖啡店 · 1.2km</div>
+          </div>
+          <div class="post-scene-arrow"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></div>
+        </div>
+        <div class="post-foot">
+          <div class="act liked"><svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>18</div>
+          <div class="act"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>3</div>
+          <div class="act"><svg viewBox="0 0 24 24"><path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7"/><path d="M16 6l-4-4-4 4M12 2v14"/></svg>分享</div>
+        </div>
+      </div>
+    </div>
+    <div class="tabbar">
+      <div class="tabbar-inner">
+        <div class="tab-item" onclick="goTab('s-home', this)"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10a2 2 0 002 2h10a2 2 0 002-2V10"/></svg><span class="label">首页</span></div>
+        <div class="tab-item on" onclick="goTab('s-feed', this)"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span class="label">动态</span></div>
+        <div class="tab-item" onclick="goTab('s-msg', this)"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg><span class="label">消息</span><span class="tab-dot">9+</span></div>
+        <div class="tab-item" onclick="goTab('s-me', this)"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg><span class="label">我的</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 消息 ================= -->
+  <div class="screen" id="s-msg">
+    <div class="status"><span>10:40</span><span style="letter-spacing:2px;font-size:9px">●●● ⏸ ▮</span></div>
+    <div class="scroll">
+      <div class="page-head">
+        <div class="page-title">消息</div>
+        <button class="page-btn"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></button>
+      </div>
+      <div class="msg-tabs">
+        <div class="msg-tab on">对话 <span class="n">21</span></div>
+        <div class="msg-tab">群组 <span class="n">5</span></div>
+      </div>
+      <div class="filters">
+        <button class="filter on">全部</button><button class="filter">邀约</button><button class="filter">系统</button>
+      </div>
+      <div class="msg-list">
+        <div class="msg">
+          <div class="msg-avatar" style="background-image:url('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&q=80')"><div class="msg-online"></div></div>
+          <div class="msg-body"><div class="msg-name">Linh</div><div class="msg-text">周日见 👋 你是第一次来 Three Beans 吗？</div></div>
+          <div class="msg-right"><div class="msg-time">10:21</div><div class="msg-unread">2</div></div>
+        </div>
+        <div class="msg">
+          <div class="msg-avatar" style="background-image:url('https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200&q=80')"><div class="msg-online"></div></div>
+          <div class="msg-body"><div class="msg-name">Minh</div><div class="msg-text">周六打匹克球还约吗？</div></div>
+          <div class="msg-right"><div class="msg-time">昨天</div></div>
+        </div>
+        <div class="msg">
+          <div class="msg-avatar" style="background-image:url('https://images.unsplash.com/photo-1502823403499-6ccfcf4fb453?w=200&q=80')"><div class="msg-online"></div></div>
+          <div class="msg-body"><div class="msg-name">Hana <span class="tag">新邀约</span></div><div class="msg-text">嗨嗨～又见面啦 😄</div></div>
+          <div class="msg-right"><div class="msg-time">15:48</div></div>
+        </div>
+        <div class="msg">
+          <div class="msg-avatar" style="background:linear-gradient(135deg,#8FB8E8,#3A6DB5);display:grid;place-items:center;color:#fff;font-weight:900;font-size:18px">用</div>
+          <div class="msg-body"><div class="msg-name">系统通知</div><div class="msg-text">你的订单已确认 · 周日 10:00 Three Beans</div></div>
+          <div class="msg-right"><div class="msg-time">周一</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="tabbar">
+      <div class="tabbar-inner">
+        <div class="tab-item" onclick="goTab('s-home', this)"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10a2 2 0 002 2h10a2 2 0 002-2V10"/></svg><span class="label">首页</span></div>
+        <div class="tab-item" onclick="goTab('s-feed', this)"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span class="label">动态</span></div>
+        <div class="tab-item on" onclick="goTab('s-msg', this)"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg><span class="label">消息</span></div>
+        <div class="tab-item" onclick="goTab('s-me', this)"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg><span class="label">我的</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 我的 ================= -->
+  <div class="screen" id="s-me">
+    <div class="status"><span>10:40</span><span style="letter-spacing:2px;font-size:9px">●●● ⏸ ▮</span></div>
+    <div class="scroll">
+      <div class="page-head">
+        <div class="page-title">我的</div>
+        <button class="page-btn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H8a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg></button>
+      </div>
+      <div class="me-card">
+        <div class="me-head">
+          <div class="me-avatar" style="background-image:url('https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&q=80')"></div>
+          <div class="me-info">
+            <div class="me-name">weilinxia511</div>
+            <div class="me-handle">河内 · @weilinxia511</div>
+          </div>
+          <div class="me-status">可接单</div>
+        </div>
+        <div class="me-stats">
+          <div class="me-stat"><div class="v">3</div><div class="l">进行中</div></div>
+          <div class="me-stat"><div class="v">18</div><div class="l">已完成</div></div>
+          <div class="me-stat"><div class="v">4.9</div><div class="l">评分</div></div>
+        </div>
+      </div>
+      <div class="section-head" style="padding-top:0">
+        <div class="section-title">进行中</div>
+        <button class="section-more">全部<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+      </div>
+      <div class="order">
+        <div class="order-top">
+          <div class="order-img" style="background-image:url('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&q=80')"></div>
+          <div class="order-body">
+            <div class="order-name">Vy · Three Beans</div>
+            <div class="order-meta">周日 10:00 · 杯测小聚</div>
+          </div>
+          <div class="order-status live">进行中</div>
+        </div>
+        <div class="order-foot">
+          <button class="order-btn ghost">详情</button>
+          <button class="order-btn primary">去聊天</button>
+        </div>
+      </div>
+      <div class="entry-group" style="margin-top:20px">
+        <div class="entry-title">主页</div>
+        <div class="entry">
+          <div class="entry-ico green"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg></div>
+          <div class="entry-body"><div class="entry-t">我的主页</div><div class="entry-s">对外展示 · 名片 · 社媒</div></div>
+          <span class="entry-arrow">›</span>
+        </div>
+        <div class="entry">
+          <div class="entry-ico sky"><svg viewBox="0 0 24 24"><path d="M12 21s-7-6-7-11a7 7 0 0114 0c0 5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></div>
+          <div class="entry-body"><div class="entry-t">我常去的场景</div><div class="entry-s">收藏 · 去过</div></div>
+          <span class="entry-arrow">›</span>
+        </div>
+      </div>
+      <div class="entry-group">
+        <div class="entry-title">资产</div>
+        <div class="entry">
+          <div class="entry-ico gold"><svg viewBox="0 0 24 24"><path d="M20 12v10H4V12M2 7h20v5H2zM12 22V7M12 7H7.5a2.5 2.5 0 010-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 000-5C13 2 12 7 12 7z"/></svg></div>
+          <div class="entry-body"><div class="entry-t">礼品券 <span class="badge good">3 张</span></div><div class="entry-s">咖啡券 · 体验券 · 活动券</div></div>
+          <span class="entry-arrow">›</span>
+        </div>
+      </div>
+    </div>
+    <div class="tabbar">
+      <div class="tabbar-inner">
+        <div class="tab-item" onclick="goTab('s-home', this)"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10a2 2 0 002 2h10a2 2 0 002-2V10"/></svg><span class="label">首页</span></div>
+        <div class="tab-item" onclick="goTab('s-feed', this)"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span class="label">动态</span></div>
+        <div class="tab-item" onclick="goTab('s-msg', this)"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg><span class="label">消息</span></div>
+        <div class="tab-item on" onclick="goTab('s-me', this)"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg><span class="label">我的</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 创建活动 ================= -->
+  <div class="screen" id="s-create">
+    <div class="status"><span>11:13</span><span style="letter-spacing:2px;font-size:9px">●●● ⏸ ▮</span></div>
+
+    <div class="navbar">
+      <button class="back" onclick="goTab('s-home', null)"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div class="nav-title">创建活动</div>
+      <button class="nav-action ghost" onclick="toast('已存草稿')">存草稿</button>
+    </div>
+
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+
+    <div class="scroll" id="createScroll">
+
+      <div class="hero">
+        <div class="hero-title">办一场活动</div>
+        <div class="hero-sub">选分类，起个名，然后补齐细节。</div>
+      </div>
+
+      <!-- 1. 分类 -->
+      <div class="block active" id="block-cat">
+        <div class="block-label"><span class="name">活动分类</span><span class="req">*</span></div>
+        <div class="cat-grid" id="catGrid"></div>
+      </div>
+
+      <!-- 2. 名称 -->
+      <div class="block" id="block-name">
+        <div class="block-label">
+          <span class="name">活动名称</span><span class="req">*</span>
+          <span class="hint" id="nameHint"></span>
+        </div>
+        <input class="name-input" id="nameInput" placeholder="选个分类先" maxlength="24" oninput="onNameInput()">
+        <div class="suggest-row" id="suggestRow"></div>
+      </div>
+
+      <!-- 3. 人数 -->
+      <div class="block" id="block-people">
+        <div class="block-label">
+          <span class="name">参与人数</span><span class="req">*</span>
+          <span class="hint">拖动导轨</span>
+        </div>
+        <div class="people-display">
+          <span class="people-value" id="peopleValue">4 – 6</span>
+          <span class="people-unit">人</span>
+        </div>
+        <div class="slider-wrap">
+          <div class="slider-track"></div>
+          <div class="slider-fill" id="fill"></div>
+          <input type="range" id="minRange" min="2" max="50" value="4" step="1">
+          <input type="range" id="maxRange" min="2" max="50" value="6" step="1">
+        </div>
+        <div class="slider-scale">
+          <span>2</span><span>10</span><span>20</span><span>30</span><span>40</span><span>50+</span>
+        </div>
+        <div class="pills">
+          <button class="pill" onclick="pickPeople(this,2,4)">2–4</button>
+          <button class="pill on" onclick="pickPeople(this,4,6)">4–6</button>
+          <button class="pill" onclick="pickPeople(this,6,10)">6–10</button>
+          <button class="pill" onclick="pickPeople(this,10,20)">10–20</button>
+          <button class="pill" onclick="pickPeople(this,20,50)">20+</button>
+        </div>
+      </div>
+
+      <!-- 4. 日期 -->
+      <div class="block" id="block-date">
+        <div class="block-label"><span class="name">日期</span><span class="req">*</span></div>
+        <div class="row-scroll" id="dateScroll"></div>
+      </div>
+
+      <!-- 5. 时间 -->
+      <div class="block" id="block-time">
+        <div class="block-label"><span class="name">开始时间</span><span class="req">*</span></div>
+        <div class="time-scroll" id="timeScroll"></div>
+      </div>
+
+      <!-- 6. 时长 -->
+      <div class="block" id="block-duration">
+        <div class="block-label"><span class="name">时长</span><span class="req">*</span></div>
+        <div class="pills">
+          <button class="pill" onclick="pickDur(this,60)">1 小时</button>
+          <button class="pill on" onclick="pickDur(this,120)">2 小时</button>
+          <button class="pill" onclick="pickDur(this,240)">4 小时</button>
+          <button class="pill" onclick="pickDur(this,'all')">全天</button>
+        </div>
+      </div>
+
+      <!-- 7. 地点 -->
+      <div class="block" id="block-place">
+        <div class="block-label"><span class="name">地点 / Scene</span><span class="req">*</span></div>
+
+        <div class="place-row">
+          <div class="place-input-wrap">
+            <input class="place-input" id="placeInput" placeholder="搜索或输入地点" oninput="onPlaceInput()" onfocus="openSceneList()">
+            <button class="place-clear" id="placeClear" onclick="clearPlace()">
+              <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <button class="map-btn" onclick="openMapSheet()">
+            <svg viewBox="0 0 24 24"><path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4z"/><path d="M8 2v16M16 6v16"/></svg>
+          </button>
+        </div>
+
+        <div class="selected-scene" id="selectedScene">
+          <div class="selected-scene-img" id="selImg"></div>
+          <div class="selected-scene-body">
+            <div class="selected-scene-name" id="selName"></div>
+            <div class="selected-scene-meta" id="selMeta"></div>
+          </div>
+          <button class="selected-scene-change" onclick="openSceneList()">更换</button>
+        </div>
+
+        <div class="pills" id="suggestPills" style="margin-top:12px"></div>
+
+        <div class="hint-row">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+          搜索或从地图上直接选
+        </div>
+      </div>
+
+      <!-- 8. 报名方式 -->
+      <div class="block" id="block-signup">
+        <div class="block-label"><span class="name">报名方式</span></div>
+        <div class="pills">
+          <button class="pill on" onclick="pickOne(this,'signup','自由报名')">自由报名</button>
+          <button class="pill" onclick="pickOne(this,'signup','审核后加入')">审核后加入</button>
+          <button class="pill" onclick="pickOne(this,'signup','仅邀请')">仅邀请</button>
+        </div>
+      </div>
+
+      <!-- 9. 费用 -->
+      <div class="block" id="block-fee">
+        <div class="block-label"><span class="name">费用</span></div>
+        <div class="pills">
+          <button class="pill on" onclick="pickFee(this,'free')">免费</button>
+          <button class="pill" onclick="pickFee(this,'aa')">AA</button>
+          <button class="pill" onclick="pickFee(this,'custom')">自定义</button>
+        </div>
+        <div id="customFee">
+          <input class="text-input" placeholder="输入金额，例如 50,000₫ / 人">
+        </div>
+      </div>
+
+      <!-- 10. 说明 -->
+      <div class="block" id="block-note">
+        <div class="block-label"><span class="name">补充说明</span><span class="hint">可选</span></div>
+        <textarea class="text-area" placeholder="想让大家知道的细节…"></textarea>
+      </div>
+
+    </div>
+
+    <div class="footer">
+      <button class="cta" id="cta" onclick="publish()" disabled>
+        发布活动
+        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+
+    <!-- 成功页 -->
+    <div class="success-screen" id="successScreen">
+      <div class="status"><span>11:13</span><span style="letter-spacing:2px;font-size:9px">●●● ⏸ ▮</span></div>
+      <div class="success-body">
+        <div class="success-icon">
+          <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+        </div>
+        <div class="success-title">活动已发布</div>
+        <div class="success-sub">已通知附近的用户<br>有人报名时会推送给你</div>
+        <div class="success-card">
+          <div class="success-card-emoji" id="scEmoji">☕</div>
+          <div class="success-card-body">
+            <div class="success-card-title" id="scTitle">咖啡拍照</div>
+            <div class="success-card-meta" id="scMeta">周日下午 · 4–6 人 · 免费</div>
+          </div>
+        </div>
+      </div>
+      <div class="success-footer">
+        <button class="success-btn ghost" onclick="closeSuccess()">继续编辑</button>
+        <button class="success-btn primary" onclick="closeSuccess(); goTab('s-home', null);">回到首页</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 场景列表 Sheet ================= -->
+  <div class="sheet-mask" id="listMask" onclick="closeSheet()"></div>
+  <div class="sheet" id="listSheet">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head">
+      <div class="sheet-title">选择场景</div>
+      <button class="sheet-close" onclick="closeSheet()">✕</button>
+    </div>
+    <div class="search-bar">
+      <div class="search-input-wrap">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+        <input class="search-input" id="listSearch" placeholder="搜索场景名、区域、类型" oninput="renderList()">
+      </div>
+    </div>
+    <div class="filter-chips" id="filterChips">
+      <button class="chip on" onclick="pickChip(this,'all')">全部<span class="n">6</span></button>
+      <button class="chip" onclick="pickChip(this,'cafe')">☕ 咖啡<span class="n">3</span></button>
+      <button class="chip" onclick="pickChip(this,'food')">🍜 餐厅<span class="n">1</span></button>
+      <button class="chip" onclick="pickChip(this,'spot')">🏛 景点<span class="n">1</span></button>
+      <button class="chip" onclick="pickChip(this,'sport')">🏸 运动<span class="n">1</span></button>
+    </div>
+    <div class="sheet-body" id="listBody"></div>
+  </div>
+
+  <!-- ================= 地图 Sheet ================= -->
+  <div class="sheet-mask" id="mapMask" onclick="closeSheet()"></div>
+  <div class="sheet" id="mapSheet" style="max-height:92%">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head">
+      <div class="sheet-title">地图上选地点</div>
+      <button class="sheet-close" onclick="closeSheet()">✕</button>
+    </div>
+
+    <div class="map-container">
+      <div class="map-canvas"></div>
+      <div class="map-top">
+        <div class="map-search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+          <span class="txt">搜索位置</span>
+        </div>
+        <button class="map-loc"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+      </div>
+
+      <div class="map-pin on" style="left:32%;top:42%" onclick="pickMapPin(this,'s1')">
+        <div class="pin-dot">☕</div>
+        <div class="pin-tail"></div>
+        <div class="pin-label">Three Beans</div>
+      </div>
+      <div class="map-pin" style="left:62%;top:32%" onclick="pickMapPin(this,'s2')">
+        <div class="pin-dot">☕</div>
+        <div class="pin-tail"></div>
+        <div class="pin-label">Suối Hoa</div>
+      </div>
+      <div class="map-pin" style="left:48%;top:62%" onclick="pickMapPin(this,'s3')">
+        <div class="pin-dot">☕</div>
+        <div class="pin-tail"></div>
+        <div class="pin-label">木光咖啡</div>
+      </div>
+      <div class="map-pin" style="left:75%;top:56%" onclick="pickMapPin(this,'s4')">
+        <div class="pin-dot">🍜</div>
+        <div class="pin-tail"></div>
+        <div class="pin-label">岚庭餐厅</div>
+      </div>
+      <div class="map-pin" style="left:22%;top:70%" onclick="pickMapPin(this,'s5')">
+        <div class="pin-dot">🏛</div>
+        <div class="pin-tail"></div>
+        <div class="pin-label">Hồ Hoàn Kiếm</div>
+      </div>
+    </div>
+
+    <div class="map-bottom">
+      <div class="map-selected">
+        <div class="map-selected-img" id="mapSelImg" style="background-image:url('https://images.unsplash.com/photo-1559925393-8be0ec4767c8?w=200&q=80')"></div>
+        <div class="map-selected-body">
+          <div class="map-selected-name" id="mapSelName">Three Beans · Cầu Giấy</div>
+          <div class="map-selected-meta" id="mapSelMeta">☕ 咖啡店 · 距你 2.1 km</div>
+        </div>
+      </div>
+      <button class="map-confirm" onclick="confirmMapPick()">
+        确认这个地点
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round"><path d="M5 12l5 5L20 7"/></svg>
+      </button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+/* ============================================================
+   页面切换
+   ============================================================ */
+function goScreen(id){
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+function goTab(id, el){
+  goScreen(id);
+  if (el){
+    document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('on'));
+    el.classList.add('on');
+  }
+}
+function openCreate(){
+  resetCreate();
+  goScreen('s-create');
+}
+
+/* ============================================================
+   首页 · 为你组合
+   ============================================================ */
+const HOME_POOL = {
+  person: [
+    { name:'Vy', meta:'一起的人', img:'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&q=80' },
+    { name:'Linh', meta:'出图 · 咖啡', img:'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400&q=80' },
+    { name:'Hana', meta:'陪聊 · 音乐', img:'https://images.unsplash.com/photo-1502823403499-6ccfcf4fb453?w=400&q=80' },
+    { name:'Mai', meta:'摄影 · 户外', img:'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400&q=80' }
+  ],
+  time: [
+    { name:'周日 10:00', meta:'Three Beans', img:'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=400&q=80' },
+    { name:'周六 15:00', meta:'Suối Hoa', img:'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400&q=80' },
+    { name:'周五 18:30', meta:'Workshop', img:'https://images.unsplash.com/photo-1559925393-8be0ec4767c8?w=400&q=80' }
+  ],
+  event: [
+    { name:'杯测小聚', meta:'3 款豆子', img:'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=400&q=80' },
+    { name:'拉花工作坊', meta:'从奶泡到拉花', img:'https://images.unsplash.com/photo-1442512595331-e89e73853f31?w=400&q=80' },
+    { name:'手冲体验', meta:'感受萃取差异', img:'https://images.unsplash.com/photo-1511920170033-f8396924c348?w=400&q=80' }
+  ],
+  place: [
+    { name:'Three Beans', meta:'Cầu Giấy', img:'https://images.unsplash.com/photo-1559925393-8be0ec4767c8?w=400&q=80' },
+    { name:'Suối Hoa', meta:'Tây Hồ', img:'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=400&q=80' },
+    { name:'Workshop', meta:'Hoàn Kiếm', img:'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=400&q=80' }
+  ]
+};
+
+let homeCurrent = {
+  person: HOME_POOL.person[0],
+  time: HOME_POOL.time[0],
+  event: HOME_POOL.event[0],
+  place: HOME_POOL.place[0]
+};
+let homeLocked = { person:false, time:false, event:false, place:false };
+let homeSelected = false;
+
+function homeRenderCell(field){
+  const item = homeCurrent[field];
+  const img = document.getElementById('img-' + field);
+  const t1 = document.getElementById('t1-' + field);
+  const t2 = document.getElementById('t2-' + field);
+  img.style.opacity = '0';
+  setTimeout(() => {
+    img.src = item.img;
+    t1.textContent = item.name;
+    t2.textContent = item.meta;
+    img.style.opacity = '1';
+  }, 80);
+}
+
+function toggleLock(e, field){
+  e.stopPropagation();
+  homeLocked[field] = !homeLocked[field];
+  const cell = document.getElementById('cell-' + field);
+  const btn = cell.querySelector('.cell-lock');
+  if (homeLocked[field]){
+    cell.classList.add('locked');
+    btn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>';
+  } else {
+    cell.classList.remove('locked');
+    btn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 017.46-2"/></svg>';
+  }
+}
+
+function reshuffleAll(){
+  ['person','time','event','place'].forEach(field => {
+    if (!homeLocked[field]){
+      const pool = HOME_POOL[field];
+      const others = pool.filter(x => x.name !== homeCurrent[field].name);
+      homeCurrent[field] = others[Math.floor(Math.random() * others.length)];
+      homeRenderCell(field);
+    }
+  });
+  toast('重新配了一套');
+}
+
+function openSheet(field){
+  if (homeLocked[field]){ toast('已锁定 · 先解锁'); return; }
+  const pool = HOME_POOL[field];
+  const others = pool.filter(x => x.name !== homeCurrent[field].name);
+  homeCurrent[field] = others[Math.floor(Math.random() * others.length)];
+  homeRenderCell(field);
+}
+
+function selectCombo(){
+  const btn = document.getElementById('ctaBtn');
+  const txt = document.getElementById('ctaText');
+  if (homeSelected){ toast('进入确认页'); return; }
+  homeSelected = true;
+  btn.classList.add('done');
+  txt.textContent = '已选择';
+  btn.querySelector('svg').outerHTML = '<svg id="ctaIcon" viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>';
+}
+
+/* ============================================================
+   创建活动
+   ============================================================ */
+const CATS = [
+  { id:'cafe',  emoji:'☕', name:'咖啡', suggests:['咖啡拍照','咖啡*越南语','咖啡探店','咖啡聊天'], hint:'例如：咖啡拍照' },
+  { id:'food',  emoji:'🍜', name:'吃饭', suggests:['晚餐搭子','一起做饭','探店吃饭','午餐拼桌'], hint:'例如：晚餐搭子' },
+  { id:'drink', emoji:'🍻', name:'喝酒', suggests:['微醺局','精酿品鉴','鸡尾酒夜','看球喝酒'], hint:'例如：微醺局' },
+  { id:'sport', emoji:'🏸', name:'运动', suggests:['羽毛球陪打','周末骑行','晨跑搭子','周末徒步'], hint:'例如：羽毛球陪打' },
+  { id:'walk',  emoji:'🚶', name:'散步', suggests:['City Walk','老城区慢走','湖边走走','菜市场逛逛'], hint:'例如：City Walk' },
+  { id:'art',   emoji:'🎨', name:'看展', suggests:['一起看展','独立书店','艺术市集','手作体验'], hint:'例如：一起看展' },
+  { id:'photo', emoji:'📷', name:'拍照', suggests:['街拍搭子','日落打卡','互拍人像','胶片摄影'], hint:'例如：街拍搭子' },
+  { id:'music', emoji:'🎵', name:'音乐', suggests:['周末 KTV','民谣之夜','live house','黑胶分享'], hint:'例如：周末 KTV' },
+];
+
+const WEEKDAYS = ['周日','周一','周二','周三','周四','周五','周六'];
+const DAYS_AHEAD = 14;
+const HOUR_START = 8;
+const HOUR_END = 22;
+
+let createState = {
+  cat: null,
+  name: '',
+  people: '4–6 人',
+  dateIdx: 0,
+  hour: 14,
+  minute: 0,
+  duration: 120,
+  place: '',
+  placeId: null,
+  signup: '自由报名',
+  fee: 'free'
+};
+
+let today = new Date();
+
+function resetCreate(){
+  createState = {
+    cat: null, name: '', people: '4–6 人', dateIdx: 0,
+    hour: 14, minute: 0, duration: 120,
+    place: '', placeId: null, signup: '自由报名', fee: 'free'
+  };
+  // 重置 UI
+  document.getElementById('catGrid').innerHTML = CATS.map(c => `
+    <button class="cat" onclick="pickCat('${c.id}')">
+      <span class="cat-emoji">${c.emoji}</span>
+      <span class="cat-name">${c.name}</span>
+    </button>
+  `).join('');
+  document.getElementById('nameInput').value = '';
+  document.getElementById('nameInput').placeholder = '选个分类先';
+  document.getElementById('nameHint').textContent = '';
+  document.getElementById('suggestRow').innerHTML = '';
+  document.getElementById('progressFill').style.width = '0%';
+  ['block-name','block-people','block-date','block-time','block-duration','block-place','block-signup','block-fee','block-note'].forEach(id => {
+    document.getElementById(id).classList.remove('active','done');
+  });
+  document.getElementById('block-cat').classList.add('active');
+  document.getElementById('cta').disabled = true;
+  document.getElementById('minRange').value = 4;
+  document.getElementById('maxRange').value = 6;
+  document.getElementById('placeInput').value = '';
+  document.getElementById('placeClear').classList.remove('show');
+  document.getElementById('selectedScene').classList.remove('show');
+  document.querySelectorAll('#block-duration .pill').forEach((p,i) => p.classList.toggle('on', i === 1));
+  document.querySelectorAll('#block-signup .pill').forEach((p,i) => p.classList.toggle('on', i === 0));
+  document.querySelectorAll('#block-fee .pill').forEach((p,i) => p.classList.toggle('on', i === 0));
+  document.getElementById('customFee').classList.remove('show');
+  updateSlider(false);
+  renderDates();
+  renderTimes();
+  renderSuggests();
+  document.getElementById('createScroll').scrollTop = 0;
+}
+
+function pickCat(id){
+  createState.cat = id;
+  document.querySelectorAll('#catGrid .cat').forEach(c => c.classList.remove('on'));
+  event_target = window.event && window.event.currentTarget;
+  // 简单的视觉切换
+  document.querySelectorAll('#catGrid .cat').forEach(c => {
+    if (c.onclick.toString().includes(`'${id}'`)) c.classList.add('on');
+  });
+
+  const cat = CATS.find(c => c.id === id);
+  const input = document.getElementById('nameInput');
+  input.placeholder = cat.hint;
+  input.value = '';
+  createState.name = '';
+  document.getElementById('nameHint').textContent = cat.name + ' 类';
+
+  document.getElementById('block-cat').classList.add('done');
+  document.getElementById('block-name').classList.add('active');
+  renderSuggest();
+
+  setTimeout(() => {
+    document.getElementById('createScroll').scrollTo({ top: document.getElementById('block-name').offsetTop - 80, behavior:'smooth' });
+    input.focus();
+  }, 200);
+
+  updateProgress();
+}
+
+function renderSuggest(){
+  if (!createState.cat){ document.getElementById('suggestRow').innerHTML = ''; return; }
+  const cat = CATS.find(c => c.id === createState.cat);
+  const cur = document.getElementById('nameInput').value;
+  document.getElementById('suggestRow').innerHTML = cat.suggests.map(s => {
+    const on = cur === s ? 'on' : '';
+    const label = s.replace('*','<span class="star">*</span>');
+    return `<button class="suggest ${on}" onclick="pickSuggest('${s.replace(/'/g,"\\'")}')">${label}</button>`;
+  }).join('');
+}
+
+function pickSuggest(name){
+  document.getElementById('nameInput').value = name;
+  onNameInput();
+}
+
+function onNameInput(){
+  const val = document.getElementById('nameInput').value.trim();
+  createState.name = val;
+  renderSuggest();
+
+  if (val.length > 0){
+    document.getElementById('block-name').classList.add('done');
+    ['block-people','block-date','block-time','block-duration','block-place','block-signup','block-fee','block-note'].forEach(id => {
+      document.getElementById(id).classList.add('active');
+    });
+    updateSlider(false);
+    setTimeout(() => {
+      document.getElementById('createScroll').scrollTo({ top: document.getElementById('block-people').offsetTop - 80, behavior:'smooth' });
+    }, 200);
+  } else {
+    ['block-people','block-date','block-time','block-duration','block-place','block-signup','block-fee','block-note'].forEach(id => {
+      document.getElementById(id).classList.remove('active','done');
+    });
+  }
+  updateProgress();
+  updateCTA();
+}
+
+/* 人数导轨 */
+const minRange = document.getElementById('minRange');
+const maxRange = document.getElementById('maxRange');
+const fill = document.getElementById('fill');
+const peopleValue = document.getElementById('peopleValue');
+const SLIDER_MIN = 2, SLIDER_MAX = 50;
+
+function updateSlider(fromSlider){
+  let min = +minRange.value;
+  let max = +maxRange.value;
+  if (min >= max){
+    if (fromSlider){
+      const isMinActive = document.activeElement === minRange;
+      if (isMinActive) minRange.value = Math.max(SLIDER_MIN, max - 1);
+      else maxRange.value = Math.min(SLIDER_MAX, min + 1);
+      min = +minRange.value;
+      max = +maxRange.value;
+    } else return;
+  }
+  const minPct = (min - SLIDER_MIN) / (SLIDER_MAX - SLIDER_MIN) * 100;
+  const maxPct = (max - SLIDER_MIN) / (SLIDER_MAX - SLIDER_MIN) * 100;
+  fill.style.left = minPct + '%';
+  fill.style.width = (maxPct - minPct) + '%';
+  const label = max >= SLIDER_MAX ? `${min} – 50+` : `${min} – ${max}`;
+  peopleValue.textContent = label;
+  createState.people = max >= SLIDER_MAX ? `${min}–50+ 人` : `${min}–${max} 人`;
+  if (fromSlider){
+    document.querySelectorAll('#block-people .pill').forEach(p => p.classList.remove('on'));
+  }
+  updateProgress();
+}
+minRange.addEventListener('input', () => updateSlider(true));
+maxRange.addEventListener('input', () => updateSlider(true));
+
+function pickPeople(el, min, max){
+  el.parentElement.querySelectorAll('.pill').forEach(p => p.classList.remove('on'));
+  el.classList.add('on');
+  minRange.value = min;
+  maxRange.value = max;
+  updateSlider(false);
+}
+
+/* 日期 */
+function renderDates(){
+  const c = document.getElementById('dateScroll');
+  let html = '';
+  for (let i = 0; i < DAYS_AHEAD; i++){
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    const weekend = d.getDay() === 0 || d.getDay() === 6;
+    const label = i === 0 ? '今天' : i === 1 ? '明天' : WEEKDAYS[d.getDay()];
+    html += `
+      <button class="date-chip ${i === createState.dateIdx ? 'on' : ''} ${weekend ? 'weekend' : ''}" onclick="pickDate(${i})">
+        <span class="d-week">${label}</span>
+        <span class="d-day">${d.getDate()}</span>
+      </button>
+    `;
+  }
+  c.innerHTML = html;
+  setTimeout(() => {
+    const chips = c.querySelectorAll('.date-chip');
+    if (chips[createState.dateIdx]){
+      const target = chips[createState.dateIdx].offsetLeft - c.offsetWidth / 2 + chips[createState.dateIdx].offsetWidth / 2;
+      c.scrollTo({ left: Math.max(0, target), behavior:'smooth' });
+    }
+  }, 100);
+}
+
+function pickDate(i){
+  createState.dateIdx = i;
+  renderDates();
+  if (!isAvailable(createState.hour, createState.minute)){
+    const next = nextAvailable();
+    if (next){ createState.hour = next.h; createState.minute = next.m; }
+  }
+  renderTimes();
+  updateProgress();
+}
+
+/* 时间 */
+function renderTimes(){
+  const c = document.getElementById('timeScroll');
+  let html = '';
+  for (let h = HOUR_START; h <= HOUR_END; h++){
+    [0, 30].forEach(m => {
+      if (h === HOUR_END && m === 30) return;
+      const isOn = h === createState.hour && m === createState.minute;
+      const available = isAvailable(h, m);
+      const label = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+      html += `<button class="time-chip ${isOn ? 'on' : ''} ${!available ? 'disabled' : ''}" ${!available ? '' : `onclick="pickTime(this, ${h}, ${m})"`}>${label}</button>`;
+    });
+  }
+  c.innerHTML = html;
+  setTimeout(() => {
+    const selected = c.querySelector('.time-chip.on');
+    if (selected){
+      const target = selected.offsetLeft - c.offsetWidth / 2 + selected.offsetWidth / 2;
+      c.scrollTo({ left: Math.max(0, target), behavior:'smooth' });
+    }
+  }, 80);
+}
+
+function pickTime(el, h, m){
+  createState.hour = h;
+  createState.minute = m;
+  document.querySelectorAll('.time-chip').forEach(x => x.classList.remove('on'));
+  el.classList.add('on');
+  const c = document.getElementById('timeScroll');
+  const target = el.offsetLeft - c.offsetWidth / 2 + el.offsetWidth / 2;
+  c.scrollTo({ left: Math.max(0, target), behavior:'smooth' });
+  updateProgress();
+}
+
+function isAvailable(h, m){
+  if (createState.dateIdx !== 0) return true;
+  const now = new Date();
+  return (h * 60 + m) > (now.getHours() * 60 + now.getMinutes() + 15);
+}
+function nextAvailable(){
+  for (let h = HOUR_START; h <= HOUR_END; h++){
+    for (const m of [0, 30]){
+      if (h === HOUR_END && m === 30) continue;
+      if (isAvailable(h, m)) return { h, m };
+    }
+  }
+  return null;
+}
+
+/* 时长 */
+function pickDur(el, val){
+  createState.duration = val;
+  document.querySelectorAll('#block-duration .pill').forEach(p => p.classList.remove('on'));
+  el.classList.add('on');
+  updateProgress();
+}
+
+/* ============================================================
+   地点选择
+   ============================================================ */
+const SCENES = [
+  { id:'s1', name:'Three Beans · Cầu Giấy', type:'cafe', emoji:'☕', tag:'咖啡店', img:'https://images.unsplash.com/photo-1559925393-8be0ec4767c8?w=200&q=80', dist:'2.1km' },
+  { id:'s2', name:'Suối Hoa 咖啡馆', type:'cafe', emoji:'☕', tag:'咖啡店', img:'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=200&q=80', dist:'1.2km' },
+  { id:'s3', name:'木光咖啡 · 还剑郡', type:'cafe', emoji:'☕', tag:'咖啡店', img:'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=200&q=80', dist:'3.4km' },
+  { id:'s4', name:'岚庭餐厅 · 西湖', type:'food', emoji:'🍜', tag:'餐厅', img:'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=200&q=80', dist:'2.8km' },
+  { id:'s5', name:'Hồ Hoàn Kiếm', type:'spot', emoji:'🏛', tag:'景点', img:'https://images.unsplash.com/photo-1509927083803-4bd519298ac4?w=200&q=80', dist:'4.1km' },
+  { id:'s6', name:'Complex 01', type:'sport', emoji:'🏸', tag:'运动', img:'https://images.unsplash.com/photo-1554060503-1dd39b7c0d5e?w=200&q=80', dist:'5.2km' },
+];
+
+const SUGGESTS = ['s3','s4','s1','s6'];
+
+let selectedScene = null;
+let currentFilter = 'all';
+let mapPicked = SCENES[0];
+
+function renderSuggests(){
+  document.getElementById('suggestPills').innerHTML = SUGGESTS.map(id => {
+    const scene = SCENES.find(x => x.id === id);
+    const on = selectedScene && selectedScene.id === id ? 'on' : '';
+    return `<button class="pill ${on}" onclick="pickSuggest('${id}')">${scene.name}</button>`;
+  }).join('');
+}
+
+function pickSuggest(id){
+  const scene = SCENES.find(s => s.id === id);
+  if (scene) selectScene(scene);
+}
+
+function selectScene(scene){
+  selectedScene = scene;
+  createState.place = scene.name;
+  createState.placeId = scene.id;
+
+  document.getElementById('placeInput').value = scene.name;
+  document.getElementById('placeClear').classList.add('show');
+
+  document.getElementById('selImg').style.backgroundImage = `url('${scene.img}')`;
+  document.getElementById('selName').textContent = scene.name;
+  document.getElementById('selMeta').textContent = `${scene.emoji} ${scene.tag} · 距你 ${scene.dist}`;
+  document.getElementById('selectedScene').classList.add('show');
+
+  renderSuggests();
+  updateProgress();
+}
+
+function clearPlace(){
+  selectedScene = null;
+  createState.place = '';
+  createState.placeId = null;
+  document.getElementById('placeInput').value = '';
+  document.getElementById('placeClear').classList.remove('show');
+  document.getElementById('selectedScene').classList.remove('show');
+  renderSuggests();
+}
+
+function onPlaceInput(){
+  const val = document.getElementById('placeInput').value;
+  if (val.length > 0) document.getElementById('placeClear').classList.add('show');
+  else document.getElementById('placeClear').classList.remove('show');
+}
+
+/* 场景列表 */
+function openSceneList(){
+  renderList();
+  document.getElementById('listMask').classList.add('show');
+  document.getElementById('listSheet').classList.add('show');
+}
+
+function renderList(){
+  const q = (document.getElementById('listSearch').value || '').toLowerCase().trim();
+  let filtered = SCENES;
+  if (currentFilter !== 'all') filtered = filtered.filter(s => s.type === currentFilter);
+  if (q) filtered = filtered.filter(s => s.name.toLowerCase().includes(q) || s.tag.includes(q));
+
+  if (filtered.length === 0){
+    document.getElementById('listBody').innerHTML = `
+      <div style="padding:48px 20px;text-align:center;color:var(--muted-2);font-size:13px;font-weight:700">
+        没找到相关场景<br>
+        <span style="font-size:11px">试试其他关键词或地图上直接选</span>
+      </div>
+    `;
+    return;
+  }
+
+  document.getElementById('listBody').innerHTML = filtered.map(s => {
+    const on = selectedScene && selectedScene.id === s.id ? 'on' : '';
+    return `
+      <div class="scene-item ${on}" onclick="pickFromList('${s.id}')">
+        <div class="scene-item-img" style="background-image:url('${s.img}')"></div>
+        <div class="scene-item-body">
+          <div class="scene-item-name">${s.name}</div>
+          <div class="scene-item-meta">
+            <span class="strong">${s.emoji} ${s.tag}</span>
+            <span class="dist">${s.dist}</span>
+          </div>
+        </div>
+        <div class="scene-item-check"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg></div>
+      </div>
+    `;
+  }).join('');
+}
+
+function pickChip(el, filter){
+  document.querySelectorAll('#filterChips .chip').forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+  currentFilter = filter;
+  renderList();
+}
+
+function pickFromList(id){
+  const scene = SCENES.find(s => s.id === id);
+  if (!scene) return;
+  selectScene(scene);
+  closeSheet();
+}
+
+/* 地图 */
+function openMapSheet(){
+  document.getElementById('mapMask').classList.add('show');
+  document.getElementById('mapSheet').classList.add('show');
+}
+
+function pickMapPin(el, id){
+  document.querySelectorAll('.map-pin').forEach(p => p.classList.remove('on'));
+  el.classList.add('on');
+  const scene = SCENES.find(s => s.id === id);
+  if (!scene) return;
+  mapPicked = scene;
+  document.getElementById('mapSelImg').style.backgroundImage = `url('${scene.img}')`;
+  document.getElementById('mapSelName').textContent = scene.name;
+  document.getElementById('mapSelMeta').textContent = `${scene.emoji} ${scene.tag} · 距你 ${scene.dist}`;
+}
+
+function confirmMapPick(){
+  if (mapPicked){
+    selectScene(mapPicked);
+    closeSheet();
+    toast('已选：' + mapPicked.name);
+  }
+}
+
+/* Sheet */
+function closeSheet(){
+  document.querySelectorAll('.sheet-mask').forEach(m => m.classList.remove('show'));
+  document.querySelectorAll('.sheet').forEach(s => s.classList.remove('show'));
+}
+
+/* 报名 / 费用 */
+function pickOne(el, key, val){
+  el.parentElement.querySelectorAll('.pill').forEach(p => p.classList.remove('on'));
+  el.classList.add('on');
+  createState[key] = val;
+}
+function pickFee(el, type){
+  el.parentElement.querySelectorAll('.pill').forEach(p => p.classList.remove('on'));
+  el.classList.add('on');
+  const box = document.getElementById('customFee');
+  if (type === 'custom'){ box.classList.add('show'); createState.fee = 'custom'; }
+  else { box.classList.remove('show'); createState.fee = type; }
+}
+
+/* 进度 */
+function updateProgress(){
+  const done = [
+    createState.cat,
+    createState.name && createState.name.length > 0,
+    createState.people,
+    true,
+    true,
+    createState.duration,
+    createState.place
+  ].filter(Boolean).length;
+  document.getElementById('progressFill').style.width = (done / 7 * 100) + '%';
+}
+
+function updateCTA(){
+  const ok = createState.cat && createState.name && createState.name.length > 0;
+  document.getElementById('cta').disabled = !ok;
+}
+
+/* 发布 */
+function publish(){
+  if (!createState.cat || !createState.name){ toast('先选分类 + 填名称'); return; }
+  const cat = CATS.find(c => c.id === createState.cat);
+  document.getElementById('scEmoji').textContent = cat.emoji;
+  document.getElementById('scTitle').textContent = createState.name;
+
+  const d = new Date(today);
+  d.setDate(today.getDate() + createState.dateIdx);
+  let dayLabel = createState.dateIdx === 0 ? '今天' : createState.dateIdx === 1 ? '明天' : WEEKDAYS[d.getDay()];
+  const startStr = `${String(createState.hour).padStart(2,'0')}:${String(createState.minute).padStart(2,'0')}`;
+  const feeLabel = createState.fee === 'free' ? '免费' : createState.fee === 'aa' ? 'AA' : '自定义';
+  document.getElementById('scMeta').textContent = `${dayLabel} ${startStr} · ${createState.people} · ${feeLabel}`;
+
+  document.getElementById('successScreen').classList.add('show');
+}
+
+function closeSuccess(){
+  document.getElementById('successScreen').classList.remove('show');
+}
+
+/* Toast */
+function toast(msg){
+  const old = document.querySelector('.toast');
+  if (old) old.remove();
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => {
+    el.style.transition = 'opacity .25s, transform .25s';
+    el.style.opacity = '0';
+    el.style.transform = 'translate(-50%,-8px)';
+    setTimeout(() => el.remove(), 250);
+  }, 1400);
+}
+
+/* 初始化 */
+renderDates();
+renderTimes();
+updateSlider(false);
+updateProgress();
+renderSuggests();
+</script>
+
+</body>
+</html>

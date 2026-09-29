@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/activity"
+	"github.com/proxy-app/proxy-api/internal/ordernumber"
 )
 
 type ActivityRepository struct{ pool *pgxpool.Pool }
@@ -93,8 +95,9 @@ func (r *ActivityRepository) ToggleInterest(ctx context.Context, activityID, act
 	return result, interested, err
 }
 
-func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID string) (activity.Activity, error) {
+func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID string, recipe activity.JoinRecipe) (activity.Activity, string, error) {
 	var result activity.Activity
+	var orderNo string
 	err := runInTransaction(ctx, r.pool, func(txCtx context.Context, tx pgx.Tx) error {
 		var payload []byte
 		var interested, joined, capacity int
@@ -105,19 +108,44 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 		if err != nil {
 			return err
 		}
-		var exists bool
-		if err := tx.QueryRow(txCtx, `SELECT EXISTS(SELECT 1 FROM activity.participants WHERE activity_id=$1 AND actor_id=$2)`, activityID, actorID).Scan(&exists); err != nil {
-			return err
-		}
-		if exists {
+		var existingOrderNo *string
+		err = tx.QueryRow(txCtx, `SELECT order_no FROM activity.participants WHERE activity_id=$1 AND actor_id=$2`, activityID, actorID).Scan(&existingOrderNo)
+		if err == nil {
+			if existingOrderNo != nil {
+				orderNo = *existingOrderNo
+			}
 			_ = decodeActivity(payload, interested, joined, capacity, &result)
 			return activity.ErrAlreadyJoined
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
 		}
 		if capacity > 0 && joined >= capacity {
 			_ = decodeActivity(payload, interested, joined, capacity, &result)
 			return activity.ErrActivityFull
 		}
-		if _, err := tx.Exec(txCtx, `INSERT INTO activity.participants (activity_id,actor_id) VALUES ($1,$2)`, activityID, actorID); err != nil {
+		// ORDER-NO-001：同一事务里原子取号（场地类别编码 + 越南本地日期的每日计数器）。
+		// 场地类型从活动 payload 里解（解码失败就按未知走通用码，不拦下单）。
+		// 日期与时分秒取同一时刻，避免跨午夜两调 time.Now 错位。
+		_ = decodeActivity(payload, interested, joined, capacity, &result)
+		category := ordernumber.CategoryForVenueType(result.VenueType)
+		now := time.Now()
+		day := ordernumber.Day(now)
+		var seq int
+		if err := tx.QueryRow(txCtx, `INSERT INTO ordering.daily_sequences (category, day, last_seq) VALUES ($1, $2, 1)
+			ON CONFLICT (category, day) DO UPDATE SET last_seq = ordering.daily_sequences.last_seq + 1
+			RETURNING last_seq`, category, day.Format("2006-01-02")).Scan(&seq); err != nil {
+			return err
+		}
+		orderNo = ordernumber.Format(category, now, seq)
+		// ORDER-RECIPE-001：票面快照跟编号同一事务落库；人数按本单报名之后的值记。
+		afterJoin := result
+		afterJoin.Joined = joined + 1
+		snapshot, err := json.Marshal(activity.BuildOrderSnapshot(afterJoin, orderNo, now, recipe))
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(txCtx, `INSERT INTO activity.participants (activity_id,actor_id,order_no,order_snapshot) VALUES ($1,$2,$3,$4)`, activityID, actorID, orderNo, snapshot); err != nil {
 			return err
 		}
 		joined++
@@ -126,7 +154,7 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 		}
 		return decodeActivity(payload, interested, joined, capacity, &result)
 	})
-	return result, err
+	return result, orderNo, err
 }
 
 // R17.x: 我的活动物化路径。ListByOwner 按 payload->>'ownerId' 过滤
@@ -176,6 +204,58 @@ func (r *ActivityRepository) ListByParticipant(ctx context.Context, actorID stri
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// MY-ORDERS-DETAIL-001：本人每笔报名的订单编号 + 下单时间。
+func (r *ActivityRepository) ListJoinOrders(ctx context.Context, actorID string) ([]activity.JoinOrder, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT activity_id, COALESCE(order_no, ''), joined_at, order_snapshot
+		FROM activity.participants
+		WHERE actor_id = $1
+		ORDER BY joined_at DESC`, actorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []activity.JoinOrder{}
+	for rows.Next() {
+		item, err := scanJoinOrder(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *ActivityRepository) GetJoinOrder(ctx context.Context, activityID, actorID string) (activity.JoinOrder, bool, error) {
+	row := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT activity_id, COALESCE(order_no, ''), joined_at, order_snapshot
+		FROM activity.participants
+		WHERE activity_id = $1 AND actor_id = $2`, activityID, actorID)
+	item, err := scanJoinOrder(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return activity.JoinOrder{}, false, nil
+	}
+	if err != nil {
+		return activity.JoinOrder{}, false, err
+	}
+	return item, true, nil
+}
+
+func scanJoinOrder(row pgx.Row) (activity.JoinOrder, error) {
+	var item activity.JoinOrder
+	var snapshot []byte
+	if err := row.Scan(&item.ActivityID, &item.OrderNo, &item.JoinedAt, &snapshot); err != nil {
+		return item, err
+	}
+	if len(snapshot) > 0 {
+		var snap activity.OrderSnapshot
+		if err := json.Unmarshal(snapshot, &snap); err == nil {
+			item.Snapshot = &snap
+		}
+	}
+	return item, nil
 }
 
 // FilterKnownParticipants 实现见 activity.Repository 接口注释：只测已知
