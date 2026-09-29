@@ -175,6 +175,60 @@ func (r *ActivityRepository) GetParticipation(ctx context.Context, activityID, a
 	return participation, nil
 }
 
+// FindParticipationByNumber 按报名订单编号反查（PUBLIC-NO-LOOKUP-001），走
+// activity_participants_order_no_key 唯一索引。
+func (r *ActivityRepository) FindParticipationByNumber(ctx context.Context, orderNo string) (activity.Participation, activity.Activity, error) {
+	var participation activity.Participation
+	var result activity.Activity
+	var state string
+	var payload []byte
+	var interested, joined, capacity int
+	if orderNo == "" {
+		return activity.Participation{}, activity.Activity{}, activity.ErrNotJoined
+	}
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT p.activity_id, p.actor_id, p.state, COALESCE(p.order_no, ''),
+		       a.payload, a.interested_count, a.joined_count, a.capacity
+		FROM activity.participants p
+		JOIN activity.activities a ON a.id = p.activity_id
+		WHERE p.order_no = $1`, orderNo).Scan(
+		&participation.ActivityID, &participation.UserID, &state, &participation.OrderNo,
+		&payload, &interested, &joined, &capacity)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return activity.Participation{}, activity.Activity{}, activity.ErrNotJoined
+	}
+	if err != nil {
+		return activity.Participation{}, activity.Activity{}, err
+	}
+	participation.State = activity.ParticipationState(state)
+	if err := decodeActivity(payload, interested, joined, capacity, &result); err != nil {
+		return activity.Participation{}, activity.Activity{}, err
+	}
+	return participation, result, nil
+}
+
+// activityByCodeSQL 的谓词要和 activity_code_digits_key 部分唯一索引一致（集成测试
+// 用 EXPLAIN 钉住它走索引）。
+const activityByCodeSQL = `
+	SELECT payload, interested_count, joined_count, capacity
+	FROM activity.activities
+	WHERE payload->>'code' ~ '^[0-9]{16,}$' AND payload->>'code' = $1`
+
+// FindActivityByCode 按全数字活动编号反查（PUBLIC-NO-LOOKUP-001）。谓词里的正则要和
+// activity_code_digits_key 部分唯一索引一致，否则走不了索引；老的 PX-A-… 展示码
+// 不是全数字、也不保证唯一，故意不在这里反查。
+func (r *ActivityRepository) FindActivityByCode(ctx context.Context, code string) (activity.Activity, error) {
+	var result activity.Activity
+	err := scanActivity(queryerForContext(ctx, r.pool).QueryRow(ctx, activityByCodeSQL, code), &result)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return activity.Activity{}, activity.ErrActivityNotFound
+	}
+	if err != nil {
+		return activity.Activity{}, err
+	}
+	return result, nil
+}
+
 // TransitionParticipation（ACT-SEAT-RELEASE-001）：活动行与报名行都加锁；离开占座
 // 状态（取消）时 joined_count - 1，同一事务。以前取消只改内存，名额永远不还。
 func (r *ActivityRepository) TransitionParticipation(ctx context.Context, activityID, actorID string, allowedFrom []activity.ParticipationState, to activity.ParticipationState) (activity.Participation, activity.Activity, error) {
@@ -332,3 +386,4 @@ func decodeActivity(payload []byte, interested, joined, capacity int, result *ac
 }
 
 var _ activity.Repository = (*ActivityRepository)(nil)
+var _ activity.NumberReader = (*ActivityRepository)(nil)

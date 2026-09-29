@@ -207,6 +207,8 @@ var (
 	ErrVersionConflict   = errors.New("order version conflict")
 	ErrOfferExpired      = errors.New("offer expired")
 	ErrOfferNotAvailable = errors.New("offer not available")
+	// ErrNumberLookupUnsupported：仓储没有按订单编号反查的能力（PUBLIC-NO-LOOKUP-001）。
+	ErrNumberLookupUnsupported = errors.New("order number lookup not supported by repository")
 )
 
 type MemoryRepository struct {
@@ -337,6 +339,21 @@ func (r *MemoryRepository) GetOrder(_ context.Context, id string) (Order, error)
 		return Order{}, ErrOrderNotFound
 	}
 	return cloneOrder(o), nil
+}
+
+// GetOrderByNumber 按全数字订单编号反查（PUBLIC-NO-LOOKUP-001）。编号全局唯一，
+// PG 侧由 fulfillment_orders_order_no_key 唯一索引保证；内存仓线性扫描即可。
+func (r *MemoryRepository) GetOrderByNumber(_ context.Context, orderNo string) (Order, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if orderNo != "" {
+		for _, o := range r.orders {
+			if o.OrderNo == orderNo {
+				return cloneOrder(o), nil
+			}
+		}
+	}
+	return Order{}, ErrOrderNotFound
 }
 
 func (r *MemoryRepository) UpdateOrder(ctx context.Context, o Order, expectedVersion int) error {
@@ -2317,6 +2334,36 @@ type AuditEntry struct {
 // AuditReader 由能读审计轨迹的仓储实现（PG 与内存仓都实现）。
 type AuditReader interface {
 	ListAudit(ctx context.Context, table, rowID string) ([]AuditEntry, error)
+}
+
+// OrderNumberReader 由能按编号反查订单的仓储实现（PG 与内存仓都实现）。是可选
+// 接口，不进 Repository —— 其他包里的测试仓不必跟着改。
+type OrderNumberReader interface {
+	GetOrderByNumber(ctx context.Context, orderNo string) (Order, error)
+}
+
+// FindOrderByNumber 是客服 / 运营的**跨当事人**反查入口（PUBLIC-NO-LOOKUP-001）：
+// 按全数字订单编号取回订单和它的存储层审计轨迹。
+//
+// 这里不做任何鉴权 —— 调用方（internal/numberlookup）负责运营门、scope 和每次查询的
+// 审计留痕；订单当事人自己走 GetOrderAuditTrail，那条路径按当事人过滤。
+// 审计轨迹读不出来不影响订单本身（返回空轨迹），因为客服首先要看到订单。
+func (s *Service) FindOrderByNumber(ctx context.Context, orderNo string) (Order, []AuditEntry, error) {
+	reader, ok := s.repository.(OrderNumberReader)
+	if !ok {
+		return Order{}, nil, ErrNumberLookupUnsupported
+	}
+	order, err := reader.GetOrderByNumber(ctx, orderNo)
+	if err != nil {
+		return Order{}, nil, err
+	}
+	entries := []AuditEntry{}
+	if audits, ok := s.repository.(AuditReader); ok {
+		if listed, listErr := audits.ListAudit(ctx, "orders", order.ID); listErr == nil {
+			entries = listed
+		}
+	}
+	return order, entries, nil
 }
 
 type auditContextKey struct{}

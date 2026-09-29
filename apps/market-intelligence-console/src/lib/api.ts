@@ -160,3 +160,32 @@ export async function opPost<T = any>(path: string, body?: unknown): Promise<T> 
   if (!r.ok) throw new Error(`${path} ${r.status}`);
   return (await r.json()) as T;
 }
+
+// PUBLIC-NO-LOOKUP-001：运营写 / 查命令走 /v1/commands/<Type>（命令信封）。服务端用会话覆盖
+// 信封里的 actor / principal，所以这里的身份只是占位。会话过期（401）/ 不是运营或缺 scope
+// （403）与 opFetch 一样广播给 App，页面不用各写一遍。
+export type OpCommandResult = {
+  outcome: string;
+  operationRef?: string;
+  error?: { errorCode: string; safeDetails?: Record<string, unknown> };
+};
+
+export async function opCommand(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<OpCommandResult> {
+  const session = readOpsSession();
+  const id = `ops_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const who = session?.userAccountId ?? "unknown";
+  const r = await fetch(`${BASE}/v1/commands/${commandType}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(session ? { Authorization: `Bearer ${session.accessToken}` } : {}) },
+    body: JSON.stringify({
+      commandId: id, commandType, commandVersion: 1,
+      actor: { type: "USER", id: who }, principal: { type: "INDIVIDUAL", id: who },
+      target, idempotencyKey: `${id}_key`, authContext: {}, purpose: "operator_console",
+      correlationId: id, causationId: "", requestedAt: new Date().toISOString(), payload,
+    }),
+  });
+  if (r.status === 401) { clearOpsSession(); emit({ kind: "auth" }); throw new OpStatusError({ kind: "auth" }); }
+  if (r.status === 403) { emit({ kind: "forbidden" }); throw new OpStatusError({ kind: "forbidden" }); }
+  if (r.status >= 500 && r.status !== 503) throw new Error(`${commandType} ${r.status}`);
+  return (await r.json()) as OpCommandResult;
+}

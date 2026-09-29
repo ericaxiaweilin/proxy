@@ -1,6 +1,9 @@
 package activity
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 // P1 ACT-01: Participation state — Master §13
 type ParticipationState string
@@ -31,7 +34,37 @@ type Participation struct {
 var (
 	ErrNotJoined               = errors.New("activity not joined")
 	ErrParticipationTransition = errors.New("participation state does not allow this transition")
+	// ErrNumberLookupUnsupported：仓储没有按编号反查的能力（PUBLIC-NO-LOOKUP-001）。
+	ErrNumberLookupUnsupported = errors.New("activity number lookup not supported by repository")
 )
+
+// NumberReader 由能按公共编号反查的仓储实现（PG 与内存仓都实现）。是可选接口，
+// 不进 Repository —— 其他包里的测试仓不必跟着改。
+type NumberReader interface {
+	// FindParticipationByNumber：按报名订单编号反查报名和它所属的活动；没有 ⇒ ErrNotJoined。
+	FindParticipationByNumber(ctx context.Context, orderNo string) (Participation, Activity, error)
+	// FindActivityByCode：按全数字活动编号反查；没有 ⇒ ErrActivityNotFound。
+	FindActivityByCode(ctx context.Context, code string) (Activity, error)
+}
+
+// FindParticipationByNumber / FindActivityByCode 是客服 / 运营的跨当事人反查入口
+// （PUBLIC-NO-LOOKUP-001）。这里不做鉴权 —— 调用方（internal/numberlookup）负责运营门
+// 和审计留痕。
+func (s *Service) FindParticipationByNumber(ctx context.Context, orderNo string) (Participation, Activity, error) {
+	reader, ok := s.repository.(NumberReader)
+	if !ok {
+		return Participation{}, Activity{}, ErrNumberLookupUnsupported
+	}
+	return reader.FindParticipationByNumber(ctx, orderNo)
+}
+
+func (s *Service) FindActivityByCode(ctx context.Context, code string) (Activity, error) {
+	reader, ok := s.repository.(NumberReader)
+	if !ok {
+		return Activity{}, ErrNumberLookupUnsupported
+	}
+	return reader.FindActivityByCode(ctx, code)
+}
 
 // holdsSeat：这些状态占着名额（joined 计数）。CANCELLED 释放名额。
 func holdsSeat(state ParticipationState) bool {

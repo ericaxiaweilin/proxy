@@ -252,6 +252,7 @@ components:
             - CreateIncident
             - CreateSafetyBlock
             - CreateOperatorCase
+            - LookupPublicNumber
             - GrantJITAccess
             - CheckJITAccess
             - RecordConsent

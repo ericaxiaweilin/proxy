@@ -154,6 +154,26 @@ type Repository interface {
 	Dismiss(ctx context.Context, viewerID, opportunityID string) error
 }
 
+// NumberReader 由能按公共编号反查机会 / 邀约的仓储实现（PG 与内存仓都实现）。是可选
+// 接口，不进 Repository —— 其他包里的测试仓不必跟着改。
+type NumberReader interface {
+	// GetByNumber：没有 ⇒ ErrOpportunityNotFound。
+	GetByNumber(ctx context.Context, number string) (Opportunity, error)
+}
+
+// ErrNumberLookupUnsupported：仓储没有按编号反查的能力（PUBLIC-NO-LOOKUP-001）。
+var ErrNumberLookupUnsupported = errors.New("opportunity number lookup not supported by repository")
+
+// FindOpportunityByNumber 是客服 / 运营的跨当事人反查入口（PUBLIC-NO-LOOKUP-001）。
+// 不做鉴权 —— 调用方（internal/numberlookup）负责运营门和审计留痕。
+func (s *Service) FindOpportunityByNumber(ctx context.Context, number string) (Opportunity, error) {
+	reader, ok := s.repository.(NumberReader)
+	if !ok {
+		return Opportunity{}, ErrNumberLookupUnsupported
+	}
+	return reader.GetByNumber(ctx, number)
+}
+
 type MemoryRepository struct {
 	mu            sync.Mutex
 	opportunities []Opportunity
@@ -764,6 +784,18 @@ func (r *MemoryRepository) Get(_ context.Context, id string) (Opportunity, error
 	for _, item := range r.opportunities {
 		if item.ID == id {
 			return item, nil
+		}
+	}
+	return Opportunity{}, ErrOpportunityNotFound
+}
+func (r *MemoryRepository) GetByNumber(_ context.Context, number string) (Opportunity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if number != "" {
+		for _, item := range r.opportunities {
+			if item.Number == number {
+				return item, nil
+			}
 		}
 	}
 	return Opportunity{}, ErrOpportunityNotFound

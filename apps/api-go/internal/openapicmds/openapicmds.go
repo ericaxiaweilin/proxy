@@ -46,6 +46,7 @@ var DomainDir = []struct {
 	{"media", "Media"},
 	{"moderation", "Moderation"},
 	{"notification", "Notification"},
+	{"numberlookup", "NumberLookup"},
 	{"outcome", "Outcome"},
 	{"payment", "Payment"},
 	{"profile", "Profile"},

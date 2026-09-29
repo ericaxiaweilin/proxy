@@ -76,6 +76,61 @@ in as any user.
 |------------------------------|----------|-------|
 | `PROXY_OPERATOR_PRINCIPALS`  | no (fail-closed) | comma-separated principal ids allowed to execute privileged commands (capability review, contribution moderation, payout authorization, media readiness override). Unset = every operator command rejected. |
 
+### Customer-service number lookup (PUBLIC-NO-LOOKUP-001)
+
+Users read order / signup / demand / invitation / activity numbers (16+ all-digit
+numbers, one global sequence) to customer service. The operator command
+`LookupPublicNumber` resolves a number back to its entity. It is a cross-party
+read, so it needs the operator gate **and** the `CASE` scope, and it requires a
+written reason. (Today every principal in `PROXY_OPERATOR_PRINCIPALS` holds all
+scopes: the per-principal scope parser `PROXY_OPERATOR_SCOPES` exists in
+`internal/api/operator_scopes.go` but is not wired in `cmd/api/main.go` yet, so
+a customer-service principal added to `PROXY_OPERATOR_PRINCIPALS` also gets every
+other operator power until it is.)
+
+Every lookup (found, not found, bad number) appends one row to
+`operator.number_lookups` in the command's own transaction; if that row cannot
+be written the command returns no data. The console page is "编号查询".
+
+## Database roles (ORDER-ROLE-001)
+
+| Variable                            | Required | Notes |
+|-------------------------------------|----------|-------|
+| `PROXY_ENFORCE_DB_ROLE_SEPARATION`  | no       | `true` / `1`: refuse to start unless the runtime database role satisfies the preconditions below. Unset = log the findings only. |
+
+Order and audit protection is triggers **plus** privileges (migration 138):
+
+* `proxy.guard_override` (the order/offer guard bypass) is honoured only for members of
+  `proxy_breakglass` and superusers. Any other role that sets it and then writes an
+  order gets an error. Never grant `proxy_breakglass` to the application role.
+* `fulfillment.audit_log`, `policy.policy_decisions`, `policy.order_decisions` and
+  `operator.number_lookups` have `UPDATE` / `DELETE` / `TRUNCATE` revoked from `PUBLIC`,
+  their owner and `proxy` (`fulfillment.harden_append_only(regclass)`).
+
+Break-glass correction (a DBA, never the app): grant `proxy_breakglass` to your personal login
+role, then in one transaction set the reason (it lands in `audit_log.override_reason` together
+with your `db_user`):
+
+    BEGIN;
+    SELECT set_config('proxy.guard_override', 'ticket-1234 why', true),
+           set_config('proxy.audit_actor', 'your-name', true);
+    -- the correcting statement
+    COMMIT;
+
+The runtime role must **not** be a superuser, must not be a `proxy_breakglass` member and must
+not be able to rewrite the audit tables. Because migrations currently run as the same role as
+the API (owner == runtime), an owner can still drop the triggers or re-grant itself, so the
+posture check also reports `RUNTIME_OWNS_AUDIT_TABLE`. To fully satisfy it:
+
+1. Create `proxy_owner` (owns the schemas/tables, runs migrations from CI) and `proxy_app`
+   (login role the API uses); leave `PROXY_MIGRATIONS_DIR` unset on the API.
+2. As `proxy_owner`: grant `proxy_app` USAGE on the schemas and SELECT/INSERT/UPDATE (and DELETE
+   only where the code deletes, e.g. own reversals) on the tables, then re-harden the audit
+   tables: `REVOKE UPDATE, DELETE, TRUNCATE ON fulfillment.audit_log, policy.policy_decisions,
+   policy.order_decisions, operator.number_lookups FROM proxy_app;`
+3. Start the API with `PROXY_ENFORCE_DB_ROLE_SEPARATION=true`; the log lines
+   `db role posture: ...` list anything still open.
+
 ## Model Stack (AI)
 
 `apps/api-go` integrates with the platform Model Stack for the

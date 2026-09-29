@@ -140,13 +140,27 @@ func (r *FulfillmentRepository) CreateOrderAndPublish(ctx context.Context, order
 }
 
 func (r *FulfillmentRepository) GetOrder(ctx context.Context, id string) (fulfillment.Order, error) {
+	return r.getOrderWhere(ctx, "id = $1", id)
+}
+
+// GetOrderByNumber 按全数字订单编号反查（PUBLIC-NO-LOOKUP-001），走
+// fulfillment_orders_order_no_key 唯一索引。
+func (r *FulfillmentRepository) GetOrderByNumber(ctx context.Context, orderNo string) (fulfillment.Order, error) {
+	if orderNo == "" {
+		return fulfillment.Order{}, fulfillment.ErrOrderNotFound
+	}
+	return r.getOrderWhere(ctx, "order_no = $1", orderNo)
+}
+
+// getOrderWhere 的 where 只来自本文件里的常量（不拼接用户输入），值一律走参数。
+func (r *FulfillmentRepository) getOrderWhere(ctx context.Context, where string, arg any) (fulfillment.Order, error) {
 	var order fulfillment.Order
 	var snapshot, amendments, settlement, outcome []byte
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
 		SELECT id, requester_id, agent_id, need_id, lifecycle, version,
 		       snapshot, amendments, settlement, outcome, created_at, updated_at, store_id, COALESCE(order_no, '')
 		FROM fulfillment.orders
-		WHERE id = $1`, id).Scan(
+		WHERE `+where, arg).Scan(
 		&order.ID, &order.RequesterID, &order.AgentID, &order.NeedID, &order.Lifecycle, &order.Version,
 		&snapshot, &amendments, &settlement, &outcome, &order.CreatedAt, &order.UpdatedAt, &order.StoreID, &order.OrderNo,
 	)
@@ -560,3 +574,4 @@ func (r *FulfillmentRepository) ListAudit(ctx context.Context, table, rowID stri
 }
 
 var _ fulfillment.AuditReader = (*FulfillmentRepository)(nil)
+var _ fulfillment.OrderNumberReader = (*FulfillmentRepository)(nil)

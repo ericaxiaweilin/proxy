@@ -373,6 +373,8 @@ commands:
     domain: Voucher
   - command: LookupPasswordlessIdentity
     domain: Identity
+  - command: LookupPublicNumber
+    domain: NumberLookup
   - command: MarkDialogRead
     domain: Conversation
   - command: MarkInboxRead

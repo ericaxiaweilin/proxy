@@ -141,6 +141,8 @@ var requiredOperatorScope = map[string]OperatorScope{
 	"ReleaseLegalHold":  ScopeSafety,
 	// CASE
 	"CreateOperatorCase": ScopeCase,
+	// PUBLIC-NO-LOOKUP-001: 客服按编号反查是工单处理的一半（先找到单，才能处理）。
+	"LookupPublicNumber": ScopeCase,
 	// PLATFORM
 	"CreateObservationTemplate": ScopePlatform,
 	"SendInboxNotification":     ScopePlatform,

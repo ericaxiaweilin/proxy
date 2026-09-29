@@ -31,6 +31,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/notification"
+	"github.com/proxy-app/proxy-api/internal/numberlookup"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
 	"github.com/proxy-app/proxy-api/internal/outcome"
@@ -210,6 +211,9 @@ func main() {
 				log.Printf("PROXY_MIGRATIONS_DIR set but inaccessible: %s (skipping auto-apply)", migDir)
 			}
 		}
+		// ORDER-ROLE-001：运行角色是否满足订单守卫 / 审计表的前提（默认只打日志，
+		// PROXY_ENFORCE_DB_ROLE_SEPARATION=true 时不满足就拒绝启动）。
+		enforceDBRolePosture(ctx, pool)
 		idempotencyStore = postgres.NewIdempotencyStore(pool)
 		outboxRepository := postgres.NewOutboxRepository(pool)
 		readyCheck = pool.Ping
@@ -493,6 +497,18 @@ func main() {
 	server.Activity = activityService
 	marketplaceService.SeedDefaults()
 	server.Marketplace = marketplaceService
+	// PUBLIC-NO-LOOKUP-001：客服按全数字公共编号反查（operator 门 + CASE scope）。有库时
+	// 每次查询写 operator.number_lookups（与命令同一事务，写不进去就不返回数据）；没库
+	// 用进程内记录（开发 / 测试）。
+	var lookupRecorder numberlookup.Recorder = numberlookup.NewMemoryRecorder()
+	if pool != nil {
+		lookupRecorder = postgres.NewNumberLookupRecorder(pool)
+	}
+	server.NumberLookup = numberlookup.New(lookupRecorder,
+		numberlookup.OrderFinder(fulfillmentService),
+		numberlookup.ParticipationFinder(activityService),
+		numberlookup.ActivityFinder(activityService),
+		numberlookup.OpportunityFinder(marketplaceService))
 	// R16.7-P1-J: precise location consent ledger. We use the
 	// Postgres repository when the pool is available; otherwise
 	// the in-memory implementation covers tests + local dev.

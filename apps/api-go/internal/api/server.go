@@ -31,6 +31,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/notification"
+	"github.com/proxy-app/proxy-api/internal/numberlookup"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
@@ -110,6 +111,9 @@ type Server struct {
 	// Original design: stores enter the ecosystem when users / AI Xiaomei
 	// recommend them; this is the append-only intake for that flow.
 	StoreOnboarding *storeonboarding.Service
+	// NumberLookup：客服 / 运营按全数字公共编号反查（PUBLIC-NO-LOOKUP-001）。operator 门 +
+	// CASE scope，每次查询留痕。nil = 命令按未实现处理。
+	NumberLookup *numberlookup.Service
 	// PolicyDecisions is the LC-28 audit-log writer. The
 	// fulfillment service uses it to gate the OFFERED →
 	// CONFIRMED transition for PLATFORM_PAY orders. Wired

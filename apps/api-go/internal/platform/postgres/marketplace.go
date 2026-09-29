@@ -109,6 +109,33 @@ func (r *MarketplaceRepository) Get(ctx context.Context, id string) (marketplace
 	return item, nil
 }
 
+// opportunityByNumberSQL 的谓词要和 marketplace_opportunities_number_key 部分唯一索引
+// 一致（集成测试用 EXPLAIN 钉住它走索引）。
+const opportunityByNumberSQL = `
+	SELECT payload, owner_id, responses FROM marketplace.opportunities
+	WHERE payload->>'number' ~ '^[0-9]{16,}$' AND payload->>'number' = $1`
+
+// GetByNumber 按全数字机会 / 邀约编号反查（PUBLIC-NO-LOOKUP-001）。谓词里的正则要和
+// marketplace_opportunities_number_key 部分唯一索引一致，否则走不了索引。
+func (r *MarketplaceRepository) GetByNumber(ctx context.Context, number string) (marketplace.Opportunity, error) {
+	var payload []byte
+	var item marketplace.Opportunity
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, opportunityByNumberSQL, number).
+		Scan(&payload, &item.OwnerID, &item.Responses)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return marketplace.Opportunity{}, marketplace.ErrOpportunityNotFound
+	}
+	if err != nil {
+		return marketplace.Opportunity{}, err
+	}
+	ownerID, responses := item.OwnerID, item.Responses
+	if err := json.Unmarshal(payload, &item); err != nil {
+		return marketplace.Opportunity{}, fmt.Errorf("decode market opportunity: %w", err)
+	}
+	item.OwnerID, item.Responses = ownerID, responses
+	return item, nil
+}
+
 func (r *MarketplaceRepository) Create(ctx context.Context, opportunity marketplace.Opportunity) error {
 	payload, err := json.Marshal(opportunity)
 	if err != nil {
@@ -305,3 +332,4 @@ func (r *MarketplaceRepository) Dismiss(ctx context.Context, viewerID, opportuni
 }
 
 var _ marketplace.Repository = (*MarketplaceRepository)(nil)
+var _ marketplace.NumberReader = (*MarketplaceRepository)(nil)

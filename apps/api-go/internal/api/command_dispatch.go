@@ -309,6 +309,9 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 	// STORE-REC-001: store recommendation intake (独立模块：推荐商铺进体系).
 	case s.StoreOnboarding != nil && s.StoreOnboarding.Supports(envelope.CommandType):
 		return s.StoreOnboarding.HandleContext(ctx, envelope)
+	// PUBLIC-NO-LOOKUP-001: 客服按公共编号反查（operator 门在上面 requiresOperator 处）。
+	case s.NumberLookup != nil && s.NumberLookup.Supports(envelope.CommandType):
+		return s.NumberLookup.HandleContext(ctx, envelope)
 	default:
 		return notImplemented(envelope)
 	}

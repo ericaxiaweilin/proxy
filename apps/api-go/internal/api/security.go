@@ -239,6 +239,13 @@ var operatorCommandTypes = map[string]bool{
 	// 用户侧只拿聚合（ListPostImpressionStats / ListMediaImpressionStats / GetContentAnalytics）。
 	"ListPostAudience":           true,
 	"ListMediaActivityForViewer": true,
+	// PUBLIC-NO-LOOKUP-001（2026-09-29，用户：「没做的就做」—— 客服按编号查订单的入口）：
+	// 按全数字公共编号反查订单 / 报名 / 需求邀约 / 活动。反查是**跨当事人**读：结果里有
+	// 订单双方账号 id、条款、状态和审计轨迹，属于个人信息 —— 只给运营（CASE scope，
+	// 客服工单那一组）。每次查询另外写一行只追加的 operator.number_lookups，留痕写不
+	// 进去就不返回数据（numberlookup 包）。订单当事人自己看自己的单走
+	// GetOrderAuditTrail，不走这条。
+	"LookupPublicNumber": true,
 }
 
 func requiresOperator(commandType string) bool {

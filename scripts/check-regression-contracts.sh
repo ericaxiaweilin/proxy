@@ -1577,6 +1577,75 @@ fi
 pnpm --dir apps/mobile exec vitest run src/order-actions.test.ts src/public-number.test.ts >/dev/null || exit $?
 echo "    PUBLIC-NO-001/OUTBOX-TEST-ISOLATION-001/ORDER-AMEND-UI-001/ORDER-AUDIT-UI-001: PASS"
 
+# 第五轮（2026-09-29，用户「没做的就做」）：客服按编号反查 + 数据库角色分离。
+# PUBLIC-NO-LOOKUP-001: 用户把订单 / 报名 / 需求邀约 / 活动编号念给客服，运营命令
+# LookupPublicNumber 按全数字编号找回实体（校验位先行：抄错一位报「校验位不对」，不是「查无此单」；
+# 一个号查到多个实体拒绝返回；反查 SQL 走索引）。
+require_test "PUBLIC-NO-LOOKUP-001" "./internal/numberlookup" \
+  "TestLookupResolvesEveryPublicNumberKind" \
+  "apps/api-go/internal/numberlookup/service_test.go" || exit $?
+require_test "PUBLIC-NO-LOOKUP-001" "./internal/numberlookup" \
+  "TestLookupDistinguishesTypoFromUnknownNumber" \
+  "apps/api-go/internal/numberlookup/service_test.go" || exit $?
+require_test "PUBLIC-NO-LOOKUP-001" "./internal/numberlookup" \
+  "TestLookupNeverReportsNotFoundWhenADomainCouldNotBeSearched" \
+  "apps/api-go/internal/numberlookup/service_test.go" || exit $?
+require_test "PUBLIC-NO-LOOKUP-001" "./internal/platform/postgres" \
+  "TestPublicNumberLookupPostgres" \
+  "apps/api-go/internal/platform/postgres/number_lookup_integration_test.go" || exit $?
+require_test "PUBLIC-NO-LOOKUP-001" "./internal/platform/postgres" \
+  "TestNumberLookupQueriesUseTheirIndexesPostgres" \
+  "apps/api-go/internal/platform/postgres/number_lookup_integration_test.go" || exit $?
+# PUBLIC-NO-LOOKUP-AUDIT-001: 每次反查（找到 / 没找到 / 号码不对）都在只追加的
+# operator.number_lookups 留一行，与命令同一事务；留痕写不进去就不返回任何数据。
+require_test "PUBLIC-NO-LOOKUP-AUDIT-001" "./internal/numberlookup" \
+  "TestEveryLookupIsAudited" \
+  "apps/api-go/internal/numberlookup/service_test.go" || exit $?
+require_test "PUBLIC-NO-LOOKUP-AUDIT-001" "./internal/numberlookup" \
+  "TestLookupFailsClosedWhenAuditCannotBeWritten" \
+  "apps/api-go/internal/numberlookup/service_test.go" || exit $?
+require_test "PUBLIC-NO-LOOKUP-AUDIT-001" "./internal/platform/postgres" \
+  "TestNumberLookupAuditIsAppendOnlyPostgres" \
+  "apps/api-go/internal/platform/postgres/number_lookup_integration_test.go" || exit $?
+require_test "PUBLIC-NO-LOOKUP-AUDIT-001" "./internal/platform/postgres" \
+  "TestNumberLookupAuditSharesTheCommandTransactionPostgres" \
+  "apps/api-go/internal/platform/postgres/number_lookup_integration_test.go" || exit $?
+# PUBLIC-NO-LOOKUP-GATE-001: 反查是跨当事人读，只给运营且要 CASE scope。
+require_test "PUBLIC-NO-LOOKUP-GATE-001" "./internal/api" \
+  "TestPublicNumberLookupIsOperatorOnlyAndNeedsCaseScope" \
+  "apps/api-go/internal/api/number_lookup_test.go" || exit $?
+if ! grep -qF '"LookupPublicNumber": true' apps/api-go/internal/api/security.go ||
+   ! grep -qF '"LookupPublicNumber": ScopeCase' apps/api-go/internal/api/operator_scopes.go ||
+   ! grep -qF 'server.NumberLookup = numberlookup.New(lookupRecorder' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'opCommand("LookupPublicNumber"' apps/market-intelligence-console/src/pages/NumberLookup.tsx; then
+  echo "  FAIL [PUBLIC-NO-LOOKUP-GATE-001]: 编号反查丢了 operator 门 / CASE scope / 服务端接线 / 控制台入口。" >&2
+  exit 1
+fi
+# ORDER-BREAKGLASS-ROLE-001: proxy.guard_override 只有 proxy_breakglass 成员（含超级用户）才生效，
+# 其他角色设了开关再写订单直接报错；成员身份本身不放行任何东西。
+require_test "ORDER-BREAKGLASS-ROLE-001" "./internal/platform/postgres" \
+  "TestGuardOverrideRequiresBreakGlassRolePostgres" \
+  "apps/api-go/internal/platform/postgres/order_role_integration_test.go" || exit $?
+# AUDIT-PRIVILEGE-001: 四张只追加审计表对 PUBLIC / 属主 / proxy 撤销 UPDATE / DELETE / TRUNCATE，
+# 用非超级用户属主的临时表实测「权限被拒」（触发器之外的第二层）。
+require_test "AUDIT-PRIVILEGE-001" "./internal/platform/postgres" \
+  "TestHardenAppendOnlyRevokesRewritePrivilegesPostgres" \
+  "apps/api-go/internal/platform/postgres/order_role_integration_test.go" || exit $?
+require_test "AUDIT-PRIVILEGE-001" "./internal/platform/postgres" \
+  "TestAuditTablesAreHardenedByMigrationPostgres" \
+  "apps/api-go/internal/platform/postgres/order_role_integration_test.go" || exit $?
+# DB-ROLE-POSTURE-001: 启动姿态检查（超级用户 / 破窗成员 / 能改审计表 / 属主）；
+# PROXY_ENFORCE_DB_ROLE_SEPARATION=true 时任何一条不满足都拒绝启动。
+require_test "DB-ROLE-POSTURE-001" "./internal/platform/postgres" \
+  "TestRolePostureFindingsPostgres" \
+  "apps/api-go/internal/platform/postgres/order_role_integration_test.go" || exit $?
+if ! grep -qF 'enforceDBRolePosture(ctx, pool)' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'PROXY_ENFORCE_DB_ROLE_SEPARATION' apps/api-go/PRODUCTION.md; then
+  echo "  FAIL [DB-ROLE-POSTURE-001]: 启动姿态检查没接进 main.go，或 PRODUCTION.md 没写。" >&2
+  exit 1
+fi
+echo "    PUBLIC-NO-LOOKUP-001/PUBLIC-NO-LOOKUP-AUDIT-001/PUBLIC-NO-LOOKUP-GATE-001/ORDER-BREAKGLASS-ROLE-001/AUDIT-PRIVILEGE-001/DB-ROLE-POSTURE-001: PASS"
+
 # LINES-EDITOR-001: the server has had UpsertStoreLines
 # since R18.x b77187a, but the storefront surface was
 # read-only: business owners saw their old lines but had

@@ -637,6 +637,38 @@ func (r *MemoryRepository) GetParticipation(_ context.Context, activityID, actor
 	return participation, nil
 }
 
+func (r *MemoryRepository) FindParticipationByNumber(_ context.Context, orderNo string) (Participation, Activity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if orderNo != "" {
+		for _, id := range r.order {
+			item := r.activities[id]
+			if item == nil {
+				continue
+			}
+			for _, participation := range item.parts {
+				if participation.OrderNo == orderNo {
+					return participation, *item, nil
+				}
+			}
+		}
+	}
+	return Participation{}, Activity{}, ErrNotJoined
+}
+
+func (r *MemoryRepository) FindActivityByCode(_ context.Context, code string) (Activity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if code != "" {
+		for _, id := range r.order {
+			if item := r.activities[id]; item != nil && item.Code == code {
+				return *item, nil
+			}
+		}
+	}
+	return Activity{}, ErrActivityNotFound
+}
+
 func (r *MemoryRepository) TransitionParticipation(_ context.Context, activityID, actorID string, allowedFrom []ParticipationState, to ParticipationState) (Participation, Activity, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -21,8 +21,9 @@ import { Merchant } from "./pages/Merchant";
 import { Retention } from "./pages/Retention";
 import { Trust } from "./pages/Trust";
 import { Quality } from "./pages/Quality";
+import { NumberLookup } from "./pages/NumberLookup";
 
-type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "retention" | "trust" | "quality" | "workbench" | "providers";
+type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup";
 
 const TITLES: Record<Page, string> = {
   overview: "平台总览",
@@ -44,6 +45,7 @@ const TITLES: Record<Page, string> = {
   retention: "留存与复购",
   trust: "信任与风险",
   providers: "KYC认证审核",
+  numberlookup: "编号查询",
   quality: "数据治理",
   workbench: "交叉分析工作台",
 };
@@ -86,7 +88,7 @@ export function App() {
         </div>
         <div className="navgroup">Market</div>
         <div className="nav">
-          {(["providers", "merchant", "retention", "trust"] as Page[]).map((p) => (
+          {(["providers", "numberlookup", "merchant", "retention", "trust"] as Page[]).map((p) => (
             <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
           ))}
         </div>
@@ -136,9 +138,10 @@ export function App() {
           {page === "retention" && <Retention />}
           {page === "trust" && <Trust />}
           {page === "providers" && <ProviderApplications />}
+          {page === "numberlookup" && <NumberLookup />}
           {page === "quality" && <Quality />}
           {page === "workbench" && <Quality />}
-          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "retention", "trust", "quality", "workbench"].includes(page) && (
+          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "retention", "trust", "quality", "workbench", "numberlookup"].includes(page) && (
             <div className="notice">
               <b>{TITLES[page]}</b> — 已接线 19 页（v9 全量）。
             </div>
