@@ -9,9 +9,9 @@ describe("PUBLIC-NO-001 server-issued opportunity number reaches the client", ()
     posted: "刚刚", skills: "中文", signal: "", signalClass: "", countdown: "", travel: 20, lens: ["NEARBY"], verified: false,
   };
   it("keeps the all-digit number and rejects a client-style PX code", () => {
-    const parsed = MarketOpportunitySchema.safeParse({ ...wire, number: "2609290000001236" });
+    const parsed = MarketOpportunitySchema.safeParse({ ...wire, number: "201260929100022001236" });
     if (!parsed.success) throw new Error(JSON.stringify(parsed.error.issues));
-    expect(parsed.data.number).toBe("2609290000001236");
+    expect(parsed.data.number).toBe("201260929100022001236");
     expect(MarketOpportunitySchema.safeParse({ ...wire, number: "PX-N-260929-AB12" }).success).toBe(false);
   });
 });

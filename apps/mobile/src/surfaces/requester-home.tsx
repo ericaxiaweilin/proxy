@@ -6,6 +6,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View, type ViewStyle } from "react-native";
 import { Image } from "expo-image";
+import { ActivityOrderSnapshotSchema, type ActivityJoinRecipe, type ActivityOrderSnapshot } from "@proxy/contracts";
+import { ActivityOrderTicket, peopleCountLabel } from "../components/activity-order-ticket";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useScrollChrome } from "../shell/scroll-chrome";
@@ -52,7 +54,7 @@ import {
 } from "../recommend-fixtures";
 import { PhotoScrim, ProxyBackGlyph } from "../components/proxy-foundation";
 
-import { activitiesAtCoffeeShops, detectComboConflicts, sceneIdOfActivity, stripAreaSuffix } from "../requester-home-combo";
+import { activitiesAtCoffeeShops, detectComboConflicts, detectOrderConflict, sceneIdOfActivity, stripAreaSuffix, type ExistingOrder, type OrderConflict } from "../requester-home-combo";
 // SCENE-DISTANCE-BADGE-001（用户：「所有的场景必须标注距离数」）：真实设备定位 +
 // 真实 haversine 距离，跟 hot-scenes.tsx / scene-shop-directory.tsx 同一套口径。
 import { getCurrentFix } from "../device-location";
@@ -283,7 +285,7 @@ export function RequesterHome({
   const [timeIndex, setTimeIndex] = useState(() => forYouSeed >> 3);
   const [activityIndex, setActivityIndex] = useState(() => forYouSeed >> 7);
   const [placeIndex, setPlaceIndex] = useState(() => forYouSeed >> 11);
-  const [chooser, setChooser] = useState<"person" | "time" | "activity" | "place" | null>("activity"); // VISUAL-CHECK-TEMP
+  const [chooser, setChooser] = useState<"person" | "time" | "activity" | "place" | null>(null);
   // HOME-FORYOU-SELECT-001（2026-09-28，原型 deepseek_html_20260928_7d0503
   // 的 combo-cta「选择」）：点一下直接进「确认这个组合」sheet，真的
   // joinSelected 命令从那里发出——跟 DIRECT-INVITE-CONFIRM-001 同一条
@@ -302,23 +304,42 @@ export function RequesterHome({
   // （HOME-MORE-SHEET-004；surfaces/badminton-companion.tsx 文件头第 1 条
   // 把"整页只有一个 Modal，内部换屏只切 state"写成了这个仓库的规矩）。
   const [orderDone, setOrderDone] = useState(false);
+  // HOME-FORYOU-ORDER-005（用户「这个已下单的☑️ 显示3s可以自动消失 停留在recipe
+  // 而不是持续」）：下单成功后顶部那块绿勾+「已下单」+ 人数/状态只闪 3 秒，
+  // 之后让出 hero 区 —— 留下面的票券本体（订单编号 + 活动/时间/地点/费用 +
+  // 一起的人 + 底部分享/联系）。触发点：orderDone 转 true 的瞬间开 3s 定时器；
+  // 关闭流程或重新提交时清掉。
+  const [orderHeroVisible, setOrderHeroVisible] = useState(false);
+  useEffect(() => {
+    if (!orderDone) {
+      setOrderHeroVisible(false);
+      return;
+    }
+    setOrderHeroVisible(true);
+    const timer = setTimeout(() => setOrderHeroVisible(false), 3000);
+    return () => clearTimeout(timer);
+  }, [orderDone]);
   const [orderCodeCopied, setOrderCodeCopied] = useState(false);
+  // ORDER-NO-001：个人订单号（纯数字：场地类别码3位+越南日期+每日序号，如 1002609270002）。
+  // JoinActivity 成功 payload 带 orderNo；已下过单走 rejection 的 safeDetails。
+  // 老服务端没有该字段时回落活动 code（ORDER-002 的旧行为）。
+  const [orderNo, setOrderNo] = useState("");
+  // ORDER-RECIPE-001：服务端在下单那一刻存的票面快照（活动当时的样子 + 这次 For You
+  // 的选择）。成功页照它画票，跟「我的订单」是同一份数据；老服务端不下发时退回
+  // 用四宫格手头的数据拼一份（ticketSnapshot）。
+  const [orderSnapshot, setOrderSnapshot] = useState<ActivityOrderSnapshot | undefined>(undefined);
   // HOME-FORYOU-ORDER-004（用户「点击确认下单 为什么没有下一步的UI」）：这单之前就下过
   // （JoinActivity 回 ACTIVITY_ALREADY_JOINED）也照样进已下单页——票本来就在你手上，
   // 只是副标题如实说「之前已经下过」，不假装这次新下了一单。
   const [orderExisting, setOrderExisting] = useState(false);
-  // HOME-FORYOU-ORDER-005（用户「for you 的新订单编号没有用上」）：这一单**自己的**
-  // 全数字订单编号（JoinActivity 回的 participation.orderNo；之前下过单时服务端在
-  // ACTIVITY_ALREADY_JOINED 里回传既有编号）。以前这里显示的是活动的展示码
-  // PX-A-…——同一场活动所有人同一个号，不是订单编号。
-  const [placedOrderNo, setPlacedOrderNo] = useState<string | undefined>(undefined);
   // HOME-FORYOU-REFRESH-001：中心圆圈正在重新拉可用插槽。
   const [slotRefreshing, setSlotRefreshing] = useState(false);
   function closeOrderFlow(): void {
     setOrderDone(false);
+    setOrderHeroVisible(false);
     setOrderExisting(false);
-    setPlacedOrderNo(undefined);
     setOrderCodeCopied(false);
+    setOrderNo("");
     setJoinConfirmOpen(false);
   }
   const [confirmNavMsg, setConfirmNavMsg] = useState<string | undefined>(undefined);
@@ -842,7 +863,7 @@ export function RequesterHome({
     const pick = pickRefreshedActivity(
       freshSceneActivities,
       sceneBriefs,
-      { activityId: lockedSlots.has("activity") ? current?.activityId : undefined, placeSceneId: lockedPlace?.id, time: lockedTime },
+      { activityId: !lockedSlots.has("activity") ? undefined : current?.activityId, placeSceneId: lockedPlace?.id, time: lockedTime },
       joinedByMe,
       current?.activityId,
     );
@@ -986,23 +1007,12 @@ export function RequesterHome({
   // venueSpend/desc/benefit 服务端本来就发了（Activity 契约里就有），
   // 只是这个精简 brief 类型之前没接，现在补上。
   // HOME-FORYOU-ORDER-002（用户："for you的确认下单页面还缺了一个订单编号"）：
-  // 加入活动没有独立的个人订单号（JoinActivity 只回 {activity, joined}），
-  // 唯一真实存在的编号是活动自己的 code（PX-A-yymmdd-####，PublishActivity
-  // 时生成，omitempty——老的/种子活动没有就是没有，不补一个假号）。
+  // ORDER-NO-001 之后加入活动有独立的个人订单号（JoinActivity 回 orderNo，
+  // 纯数字：场地类别码3位+越南日期+每日序号，如 1002609270002；重复下单走 safeDetails 带回原号）。
+  // 下单页优先显示个人订单号；老服务端没有该字段时回落活动自己的 code
+  //（PX-A-yymmdd-####，PublishActivity 时生成，老的/种子活动没有就是没有，不补假号）。
   type StoreActivityBrief = { activityId: string; code: string | undefined; title: string; venueName: string; time: string; people: string; joined: number; capacity: number; coverImageUrl: string | undefined; realitySceneId: string | undefined; priceLabel: string; moneyFlow: string; venueSpend: string; desc: string; benefit: string };
   const [storeActivities, setStoreActivities] = useState<StoreActivityBrief[]>([]);
-  useEffect(() => {
-    if (!activities) return;
-    let cancelled = false;
-    void trackHomeLoad(activities.listActivities())
-      .then((list) => {
-        if (cancelled) return;
-        const briefs = list.map(toStoreActivityBrief);
-        setStoreActivities(briefs);
-      })
-      .catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [activities, homeRefreshNonce]);
   // 首屏加载与中心圆圈刷新（HOME-FORYOU-REFRESH-001）共用同一份映射。
   function toStoreActivityBrief(a: Activity): StoreActivityBrief {
     return {
@@ -1023,6 +1033,61 @@ export function RequesterHome({
       benefit: a.benefit,
     };
   }
+  useEffect(() => {
+    if (!activities) return;
+    let cancelled = false;
+    void trackHomeLoad(activities.listActivities())
+      .then((list) => {
+        if (cancelled) return;
+        const briefs = list.map(toStoreActivityBrief);
+        setStoreActivities(briefs);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [activities, homeRefreshNonce]);
+  // HOME-FORYOU-ORDER-GUARD-001（用户「确认下单后 收到 recipe 再次返回 home 可以同参数
+  // 再次下单 这个违法基本资源冲突逻辑 要做守卫和检查提示」）：Home 知道我手上已有
+  // 哪些单（跟「我的订单」同一个来源 ListMyActivities），四宫格下单前先查冲突。
+  // 未登录 / 读失败就是空列表——服务端照样会拒重复单和同时段单（真正的守卫在那）。
+  type MyForYouOrder = ExistingOrder & { snapshot?: ActivityOrderSnapshot | undefined };
+  const [myOrders, setMyOrders] = useState<MyForYouOrder[]>([]);
+  useEffect(() => {
+    if (!activities) return;
+    let cancelled = false;
+    void activities.listMyActivities()
+      .then((payload) => {
+        if (cancelled) return;
+        setMyOrders(payload.joined.map((a) => {
+          const order = payload.joinOrders.find((o) => o.activityId === a.activityId);
+          return {
+            activityId: a.activityId,
+            title: order?.snapshot?.activity.title ?? a.title,
+            time: order?.snapshot?.activity.time ?? a.time,
+            orderNo: order?.orderNo,
+            cancelled: order?.state === "CANCELLED",
+            snapshot: order?.snapshot,
+          };
+        }));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [activities, homeRefreshNonce]);
+  function rememberMyOrder(activityId: string, orderNumber: string | undefined, snapshot: ActivityOrderSnapshot | undefined): void {
+    const act = storeActivities.find((a) => a.activityId === activityId);
+    setMyOrders((prev) => prev.some((o) => o.activityId === activityId) ? prev : [...prev, {
+      activityId,
+      title: snapshot?.activity.title ?? act?.title ?? "",
+      time: snapshot?.activity.time ?? act?.time ?? "",
+      orderNo: orderNumber,
+      snapshot,
+    }]);
+  }
+  function orderConflictText(conflict: OrderConflict): string {
+    return conflict.kind === "ALREADY_ORDERED"
+      ? t("orderConflictAlready", { orderNo: conflict.orderNo ?? "—" })
+      : t("orderConflictTime", { time: conflict.time, title: conflict.title });
+  }
+
   // HOME-FORYOU-SCENE-001：四宫格「场景」格只从挂在真实咖啡店场景上的活动里选；
   // activityIndex 一律索引这份列表（选择器 / 整组换 / 意图预设 / 渲染同一份）。
   const sceneActivities = useMemo(() => activitiesAtCoffeeShops(storeActivities, sceneBriefs), [storeActivities, sceneBriefs]);
@@ -1059,6 +1124,12 @@ export function RequesterHome({
           return t("joinAlready");
         case "ACTIVITY_FULL":
           return t("joinFull");
+        case "FOR_YOU_COMPANION_REQUIRED":
+          return t("comboNeedPerson");
+        case "ACTIVITY_TIME_CONFLICT": {
+          const details = error.result.error?.safeDetails ?? {};
+          return t("orderConflictTime", { time: typeof details.time === "string" ? details.time : "", title: typeof details.title === "string" ? details.title : "" });
+        }
         case "ACTIVITY_NOT_FOUND":
           return t("joinGone");
         case "ACTIVITY_ACTOR_REQUIRED":
@@ -1079,8 +1150,9 @@ export function RequesterHome({
     return t("networkError");
   }
 
-  async function joinSelected(activityId: string | undefined): Promise<"joined" | "already" | "failed"> {
+  async function joinSelected(activityId: string | undefined, recipe?: ActivityJoinRecipe): Promise<"joined" | "already" | "failed"> {
     setJoinMsg(undefined);
+    setOrderSnapshot(undefined);
     if (!activityId) {
       setJoinMsg(t("pickActivityFirst"));
       return "failed";
@@ -1089,16 +1161,36 @@ export function RequesterHome({
       setJoinMsg(t("loginToJoin"));
       return "failed";
     }
+    // HOME-FORYOU-PERSON-001：For You 下单必须带同行人（服务端同样会拒）。
+    if (recipe?.source === "FOR_YOU" && !recipe.companion) {
+      setJoinMsg(t("comboNeedPerson"));
+      return "failed";
+    }
+    // HOME-FORYOU-ORDER-GUARD-001：提交前再查一次资源冲突（四宫格那一步已经拦过，
+    // 这里防确认页开着期间状态变了）。
+    const target = storeActivities.find((a) => a.activityId === activityId);
+    const conflict = target ? detectOrderConflict({ activityId, time: target.time }, myOrders) : undefined;
+    if (conflict) {
+      setJoinMsg(orderConflictText(conflict));
+      return "failed";
+    }
     setJoinBusy(true);
     try {
-      const result = await activities.join(activityId);
-      setPlacedOrderNo(result.participation?.orderNo);
+      const result = await activities.join(activityId, recipe);
       setStoreActivities((prev) => prev.map((a) => (a.activityId === activityId ? { ...a, joined: result.activity.joined } : a)));
       setJoinMsg(t("joinedWithCount", { n: result.activity.joined }));
+      setOrderNo(result.orderNo ?? "");
+      setOrderSnapshot(result.snapshot ?? undefined);
+      rememberMyOrder(activityId, result.orderNo, result.snapshot ?? undefined);
       return "joined";
     } catch (e) {
       if (e instanceof ActivityCommandRejectedError && e.result.error?.errorCode === "ACTIVITY_ALREADY_JOINED") {
-        setPlacedOrderNo(orderNoFromJoinRejection(e));
+        const prior = e.result.error?.safeDetails?.orderNo;
+        setOrderNo(typeof prior === "string" ? prior : "");
+        // 重复下单：服务端把当初存的票面带回来，照原样画（不是用这次四宫格的选择）。
+        const priorSnapshot = ActivityOrderSnapshotSchema.safeParse(e.result.error?.safeDetails?.snapshot);
+        setOrderSnapshot(priorSnapshot.success ? priorSnapshot.data : undefined);
+        rememberMyOrder(activityId, typeof prior === "string" ? prior : undefined, priorSnapshot.success ? priorSnapshot.data : undefined);
         return "already";
       }
       setJoinMsg(joinErrorMessage(e));
@@ -1240,10 +1332,15 @@ export function RequesterHome({
             const gridPerson = filteredPeople.length > 0 ? filteredPeople[personIndex % filteredPeople.length] : undefined;
             const gridActivity = sceneActivities.length > 0 ? sceneActivities[activityIndex % sceneActivities.length] : undefined;
             const gridActivitySceneId = gridActivity ? sceneIdOfActivity(gridActivity, sceneBriefs) : undefined;
-            const gridPlace = (gridActivitySceneId ? sceneBriefs.find((s) => s.id === gridActivitySceneId) : undefined)
-              ?? (sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined);
+            // 可用门禁（圆圈刷新的核心测试点）：活动是唯一“成立”判据——sceneActivities
+            // 只收挂真实咖啡店的活动（activitiesAtCoffeeShops），每个都有已知场地。
+            // 没有可用活动就不配组合：人/地点/时间单独摆出来也组不成一次可约，
+            // 不可用的不能被刷到。时间是个例外：活动本身没写时间时，用池子里别的
+            // 真实活动时间顶一下（时间值本身是真实档位，不影响“可约”）。
+            if (!gridActivity) return null;
+            const gridPlace = gridActivitySceneId ? sceneBriefs.find((s) => s.id === gridActivitySceneId) : undefined;
+            if (!gridPlace) return null;
             const gridTime = gridActivity?.time || (distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined);
-            if (!gridPerson && !gridActivity && !gridPlace && !gridTime) return null;
             // HOME-FORYOU-CONFLICT-001（用户："自由切换被派生了...如果有资源
             // 冲突 要的就是提示 点击选择不能下一步 提示换"）：地点/时间只在
             // 用户**真的锁定**了才拿去跟活动的真实场地/时间比——没锁的轴本来
@@ -1251,26 +1348,60 @@ export function RequesterHome({
             // 不再让派生悄悄吃掉锁定。
             const lockedPlaceScene = lockedSlots.has("place") && sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined;
             const lockedTimeValue = lockedSlots.has("time") && distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined;
+            // 显示冻结：锁定的地点/时间显示锁定的值，不跟活动静默走（上面派生只
+            // 负责未锁定的默认行为 + 冲突判定）。锁了还变就是 CONFLICT-001 说的
+            // “被派生”——冻结之后冲突提示 + 禁用选择才真正有意义。
+            const displayPlace = lockedSlots.has("place") && lockedPlaceScene !== undefined ? lockedPlaceScene : gridPlace;
+            const displayTime = lockedSlots.has("time") && lockedTimeValue !== undefined ? lockedTimeValue : gridTime;
             const comboConflicts = detectComboConflicts(gridActivity, sceneBriefs, { place: lockedPlaceScene, time: lockedTimeValue });
             const comboConflictText = comboConflicts.map((conflict) => conflict.slot === "place"
               ? t("comboConflictPlace", { locked: conflict.lockedSceneName, activity: conflict.activitySceneName ?? "" })
               : t("comboConflictTime", { locked: conflict.lockedTime, activity: conflict.activityTime })).join(" · ");
+            // HOME-FORYOU-PERSON-001（用户「人呢 没人怎么同行呢 没人怎么进行下一步 逻辑不通
+            // 违背规则」）：For You 是「人 + 时间 + 场景 + 地点」四样一起下单，没人就不是
+            // 一个组合——不许进确认下单，也不许下出一张「没有同行人」的票。
+            // HOME-FORYOU-ORDER-GUARD-001：已经下过这一单 / 这个时间段已经有单，也不能再下。
+            const orderConflict = detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time }, myOrders);
+            const existingOrder = orderConflict?.kind === "ALREADY_ORDERED" ? myOrders.find((o) => o.activityId === gridActivity.activityId && !o.cancelled) : undefined;
+            const comboBlocked = comboConflicts.length > 0 || !gridPerson || orderConflict !== undefined;
+            const comboBlockText = orderConflict ? orderConflictText(orderConflict) : !gridPerson ? t("comboNeedPerson") : comboConflictText;
             const remixAll = (): void => {
               // HOME-FORYOU-LOCK-001：中心键与 remixForYou 收成**同一条**重配链
               // （锁定轴跳过的口径只维护一份）。
               remixForYou();
             };
-            const composed = [gridPerson ? t("withPerson", { name: gridPerson.name }) : "", gridTime ?? "", gridActivity && gridActivity.venueName !== gridPlace?.name ? gridActivity.venueName : "", gridPlace ? `@${gridPlace.name}` : ""].filter(Boolean).join(" ");
+            const composed = [gridPerson ? t("withPerson", { name: gridPerson.name }) : "", displayTime ?? "", gridActivity && gridActivity.venueName !== displayPlace?.name ? gridActivity.venueName : "", displayPlace ? `@${displayPlace.name}` : ""].filter(Boolean).join(" ");
             // HOME-FORYOU-DEDUP-001（用户「three beans cau giay 有重复的 3 个」）：
             // 场景（店）就是活动的承载场所，店名只在「场景」格出现一次——
             // 时间格副标题不再抄店名，地点格改显示区域（Cầu Giấy），场景格
             // 店名去掉跟地点格重复的「· 区域」后缀。
-            const sceneShopName = gridActivity ? stripAreaSuffix(gridActivity.venueName, gridPlace?.area) : "";
+            const sceneShopName = gridActivity ? stripAreaSuffix(gridActivity.venueName, displayPlace?.area) : "";
+            // ORDER-RECIPE-001：这次下单要存进票面的 For You 选择（能下单时没有锁定冲突，
+            // 地点/时间就是活动真实的那一份）。头像只有远端地址才存得下（打包在 App 里的
+            // 图没有地址），服务端也只收 http(s)。
+            const forYouRecipe: ActivityJoinRecipe = {
+              source: "FOR_YOU",
+              ...(gridTime ? { time: gridTime } : {}),
+              place: { name: gridPlace.name, ...(gridPlace.area ? { area: gridPlace.area } : {}) },
+              ...(gridPerson ? { companion: { id: gridPerson.id, name: gridPerson.name, ...(gridPerson.bio ? { bio: gridPerson.bio } : {}), ...(typeof gridPerson.photoUri === "string" && /^https?:\/\//.test(gridPerson.photoUri) ? { photoUrl: gridPerson.photoUri } : {}) } } : {}),
+            };
+            const ticketSnapshot: ActivityOrderSnapshot = orderSnapshot ?? {
+              orderNo: orderNo || gridActivity.code || gridActivity.activityId,
+              orderedAt: new Date().toISOString(),
+              source: "FOR_YOU",
+              activity: { activityId: gridActivity.activityId, title: gridActivity.title, priceLabel: gridActivity.priceLabel, moneyFlow: gridActivity.moneyFlow, venueSpend: gridActivity.venueSpend, venueName: gridActivity.venueName, time: gridActivity.time, joined: gridActivity.joined, capacity: gridActivity.capacity },
+              ...(forYouRecipe.time ? { time: forYouRecipe.time } : {}),
+              ...(forYouRecipe.place ? { place: forYouRecipe.place } : {}),
+              ...(forYouRecipe.companion ? { companion: forYouRecipe.companion } : {}),
+            };
+            const ticketCompanionPhoto = gridPerson && ticketSnapshot.companion?.id === gridPerson.id && gridPerson.photoUri ? { uri: gridPerson.photoUri } : undefined;
             const tiles = [
-              gridPerson ? { key: `person:${gridPerson.id}`, slot: "person" as const, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: t("tilePersonSub") } : undefined,
-              gridTime ? { key: `time:${gridTime}`, slot: "time" as const, imageUri: gridPlace?.imageUrl, glyph: "◷", label: gridTime, sub: t("tileTime") } : undefined,
-              gridActivity ? { key: `act:${gridActivity.activityId}`, slot: "activity" as const, imageUri: gridPlace?.imageUrl, glyph: "☕", label: sceneShopName, sub: gridActivity.title } : undefined,
-              gridPlace ? { key: `place:${gridPlace.id}`, slot: "place" as const, imageUri: gridPlace.imageUrl, glyph: "●", label: gridPlace.area || gridPlace.name, sub: t("tilePlace") } : undefined,
+              gridPerson
+                ? { key: `person:${gridPerson.id}`, slot: "person" as const, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: t("tilePersonSub") }
+                : { key: "person:none", slot: "person" as const, imageUri: undefined, glyph: "●", label: t("tileNoPerson"), sub: t("tileNoPersonSub") },
+              displayTime ? { key: `time:${displayTime}`, slot: "time" as const, imageUri: displayPlace?.imageUrl, glyph: "◷", label: displayTime, sub: t("tileTime") } : undefined,
+              gridActivity ? { key: `act:${gridActivity.activityId}`, slot: "activity" as const, imageUri: displayPlace?.imageUrl, glyph: "☕", label: sceneShopName, sub: gridActivity.title } : undefined,
+              displayPlace ? { key: `place:${displayPlace.id}`, slot: "place" as const, imageUri: displayPlace.imageUrl, glyph: "●", label: displayPlace.area || displayPlace.name, sub: t("tilePlace") } : undefined,
             ];
             return (
               <View>
@@ -1345,10 +1476,10 @@ export function RequesterHome({
                         平台代收款的商业订单——"下单"是这个 app 里"敲定一个
                         真实计划"的通用说法，不是"付了钱"的意思）。 */}
                     <Pressable
-                      disabled={comboConflicts.length > 0}
-                      onPress={() => { setJoinMsg(undefined); setOrderDone(false); setOrderCodeCopied(false); setPlacedOrderNo(undefined); setJoinConfirmOpen(true); }}
-                      style={[styles.gridCta, responseText && styles.gridCtaFlush, comboConflicts.length > 0 && styles.gridCtaDisabled]}
-                      accessibilityLabel={comboConflicts.length > 0 ? comboConflictText : t("selectComboCtaA11y")}
+                      disabled={comboBlocked}
+                      onPress={() => { setJoinMsg(undefined); setOrderDone(false); setOrderCodeCopied(false); setOrderNo(""); setJoinConfirmOpen(true); }}
+                      style={[styles.gridCta, responseText && styles.gridCtaFlush, comboBlocked && styles.gridCtaDisabled]}
+                      accessibilityLabel={comboBlocked ? comboBlockText : t("selectComboCtaA11y")}
                     >
                       <Text selectable style={styles.gridCtaTextSmall}>{t("selectComboCta")}</Text>
                     </Pressable>
@@ -1363,7 +1494,30 @@ export function RequesterHome({
                         不用为了"看起来像下单"去编一个人工报酬输入框（那是
                         DIRECT_INVITE 邀真人才有的形状，这里的人是推荐 fixture，
                         没有真实收款方）。 */}
-                    {comboConflicts.length > 0 ? <Text selectable style={styles.comboConflictText}>{comboConflictText}</Text> : null}
+                    {comboBlocked ? <Text selectable style={styles.comboConflictText}>{comboBlockText}</Text> : null}
+                    {existingOrder ? (
+                      <Pressable
+                        accessibilityLabel={t("viewExistingOrder")}
+                        onPress={() => {
+                          // 没存票面的老单：只用活动本身 + 订单号拼，不借当前四宫格的人/地点冒充当时的选择。
+                          setOrderNo(existingOrder.orderNo ?? "");
+                          setOrderSnapshot(existingOrder.snapshot ?? {
+                            orderNo: existingOrder.orderNo ?? gridActivity.code ?? gridActivity.activityId,
+                            orderedAt: "",
+                            activity: { activityId: gridActivity.activityId, title: gridActivity.title, time: gridActivity.time, venueName: gridActivity.venueName, priceLabel: gridActivity.priceLabel, moneyFlow: gridActivity.moneyFlow, venueSpend: gridActivity.venueSpend, joined: gridActivity.joined, capacity: gridActivity.capacity },
+                            time: gridActivity.time,
+                            place: { name: gridActivity.venueName },
+                          });
+                          setOrderExisting(true);
+                          setOrderCodeCopied(false);
+                          setOrderDone(true);
+                          setJoinConfirmOpen(true);
+                        }}
+                        style={styles.viewExistingOrderBtn}
+                      >
+                        <Text selectable style={styles.viewExistingOrderText}>{t("viewExistingOrder")} ›</Text>
+                      </Pressable>
+                    ) : null}
                     <Modal animationType="slide" onRequestClose={closeOrderFlow} visible={joinConfirmOpen}>
                       {orderDone ? (
                         <View style={[styles.confirmPage, styles.orderPage]}>
@@ -1383,98 +1537,36 @@ export function RequesterHome({
                               底部加日历那个位置同理换成「分享」：没有 expo-calendar，
                               而且 activity.time 是活动自己写的自由文本、不是可解析
                               的时间戳，编不出一个真的日历事件。 */}
-                          <View style={[styles.orderHero, { paddingTop: safeArea.top + 12 }]}>
-                            <View style={styles.orderSuccessIcon}><ProxyIcon color={color.white} name="check" size={24} /></View>
-                            <Text selectable style={styles.orderTitle}>已下单</Text>
-                            <Text selectable style={styles.orderSub}>{orderExisting ? "你之前已经下过这一单" : gridPerson ? `到时候见 · ${gridPerson.name}` : "已加入这场活动"}</Text>
-                            <View style={styles.orderMetaRow}>
-                              <View style={styles.orderMetaItem}>
-                                <Text selectable style={styles.orderMetaLabel}>人数</Text>
-                                <Text selectable style={styles.orderMetaValue}>{gridActivity ? `${gridActivity.joined} ${gridActivity.capacity > 0 ? `/ ${gridActivity.capacity}` : ""} 人` : "—"}</Text>
-                              </View>
-                              <View style={styles.orderMetaItem}>
-                                <Text selectable style={styles.orderMetaLabel}>状态</Text>
-                                <Text selectable style={[styles.orderMetaValue, styles.orderMetaValueGood]}>已确认</Text>
-                              </View>
-                            </View>
-                          </View>
-                          <ScrollView contentContainerStyle={styles.confirmScroll} style={styles.confirmScrollFlex}>
-                            <View style={styles.orderTicket}>
-                              <View style={styles.orderTicketBody}>
-                                <Pressable
-                                  onPress={() => { if (placedOrderNo) { void Clipboard.setStringAsync(placedOrderNo).then(() => setOrderCodeCopied(true)).catch(() => undefined); } }}
-                                  style={styles.orderCodeChip}
-                                >
-                                  <ProxyIcon color={color.ink} name="ticket" size={14} />
-                                  <Text selectable style={styles.orderCodeText}>{placedOrderNo ?? "—"}</Text>
-                                </Pressable>
-                                <Text selectable style={styles.orderCodeHint}>{orderCodeCopied ? "订单编号已复制" : "订单编号 · 点击复制"}</Text>
-                              </View>
-                              {/* 撕票线：原型 .ticket-dashed 是 1.5px 虚线 + 左右各一个
-                                  22pt 的冲孔。孔要**读到页面底色**才算孔，所以下面
-                                  orderTearHole 用的是 orderPage 的底色；票券卡
-                                  overflow:"hidden" 把孔的外半圆裁掉，只剩一道
-                                  12pt 的缺口（跟原型 left:-32px 被卡片裁切后同形）。 */}
-                              <View style={styles.orderTear}>
-                                <DashedRule ruleColor={color.line} style={styles.orderTearLine} />
-                                <View style={[styles.orderTearHole, styles.orderTearHoleLeft]} />
-                                <View style={[styles.orderTearHole, styles.orderTearHoleRight]} />
-                              </View>
-                              <View style={styles.orderMetaBlock}>
-                                <View style={styles.orderMetaRowLine}>
-                                  <DashedRule ruleColor={color.line} style={styles.orderMetaRowRule} />
-                                  <Text selectable style={styles.orderMetaRowLabel}>活动</Text>
-                                  <View style={{ flex: 1, alignItems: "flex-end" }}>
-                                    <Text selectable style={styles.orderMetaRowValue}>{gridActivity?.title ?? "—"}</Text>
-                                    <Text selectable style={styles.confirmBodyText}>报名不等于到场</Text>
-                                  </View>
+                          {orderHeroVisible ? (
+                            <View style={[styles.orderHero, { paddingTop: safeArea.top + 12 }]}>
+                              <View style={styles.orderSuccessIcon}><ProxyIcon color={color.white} name="check" size={24} /></View>
+                              <Text selectable style={styles.orderTitle}>已下单</Text>
+                              <Text selectable style={styles.orderSub}>{orderExisting ? "你之前已经下过这一单" : ticketSnapshot.companion ? `到时候见 · ${ticketSnapshot.companion.name}` : "已加入这场活动"}</Text>
+                              <View style={styles.orderMetaRow}>
+                                <View style={styles.orderMetaItem}>
+                                  <Text selectable style={styles.orderMetaLabel}>人数</Text>
+                                  <Text selectable style={styles.orderMetaValue}>{peopleCountLabel(ticketSnapshot)}</Text>
                                 </View>
-                                <View style={styles.orderMetaRowLine}>
-                                  <DashedRule ruleColor={color.line} style={styles.orderMetaRowRule} />
-                                  <Text selectable style={styles.orderMetaRowLabel}>时间</Text>
-                                  <Text selectable style={styles.orderMetaRowValue}>{gridTime ?? "—"}</Text>
-                                </View>
-                                <View style={styles.orderMetaRowLine}>
-                                  <DashedRule ruleColor={color.line} style={styles.orderMetaRowRule} />
-                                  <Text selectable style={styles.orderMetaRowLabel}>地点</Text>
-                                  <View style={{ flex: 1, alignItems: "flex-end" }}>
-                                    <Text selectable style={styles.orderMetaRowValue}>{gridPlace?.name ?? "—"}</Text>
-                                    {gridPlace?.area ? <Text selectable style={styles.confirmBodyText}>{gridPlace.area}</Text> : null}
-                                  </View>
-                                </View>
-                                <View style={styles.orderMetaRowLine}>
-                                  <Text selectable style={styles.orderMetaRowLabel}>费用</Text>
-                                  <Text selectable style={[styles.orderMetaRowValue, gridActivity?.moneyFlow === "FREE" && styles.confirmFeeRowValueGood]}>{gridActivity?.priceLabel ?? "—"}</Text>
+                                <View style={styles.orderMetaItem}>
+                                  <Text selectable style={styles.orderMetaLabel}>状态</Text>
+                                  <Text selectable style={[styles.orderMetaValue, styles.orderMetaValueGood]}>已确认</Text>
                                 </View>
                               </View>
                             </View>
-                            <View style={styles.confirmBlock}>
-                              {/* 原型 .people-label：左边标签、右边人数。人数读的是
-                                  服务端真实的 joined / capacity，不是编的。 */}
-                              <View style={styles.orderPeopleLabel}>
-                                <Text selectable style={styles.orderPeopleTitle}>一起的人</Text>
-                                {gridActivity ? <Text selectable style={styles.orderPeopleCount}>{gridActivity.joined}{gridActivity.capacity > 0 ? ` / ${gridActivity.capacity}` : ""} 人</Text> : null}
-                              </View>
-                              {gridPerson ? (
-                                <View style={styles.confirmPersonRow}>
-                                  {gridPerson.photoUri ? <Image source={{ uri: gridPerson.photoUri }} style={styles.confirmPersonAvatar} /> : <View style={[styles.confirmPersonAvatar, styles.photoChooserFallback]}><Text selectable style={styles.personChooserInitials}>{gridPerson.initials}</Text></View>}
-                                  <View style={styles.confirmPersonInfo}>
-                                    <Text selectable style={styles.confirmPersonName}>{gridPerson.name} · 系统推荐同行</Text>
-                                    <Text selectable style={styles.confirmBodyText}>{gridPerson.bio}</Text>
-                                  </View>
-                                </View>
-                              ) : <Text selectable style={styles.confirmBodyText}>这场活动还没有推荐同行人</Text>}
-                            </View>
-                            {/* 提醒卡：原型是金底 + info 图标，这里照抄版式。
-                                原型的第二句（开场前两小时推送）**没写进来**
-                                —— 这个 App 没有推送通道（package.json 里没有
-                                expo-notifications），写出来是一句兑现不了的承诺。
-                                （同上面那条：被禁的原话不写进注释，否则门禁里的
-                                反向钉会被这段注释喂红。） */}
-                            <View style={styles.orderReminder}>
-                              <ProxyIcon color={color.warnBannerText} name="infoCircle" size={16} />
-                              <Text selectable style={styles.orderReminderText}>推荐的同行人不代表对方已确认参加。报名成功即算加入名额，不代表已到场。</Text>
-                            </View>
+                          ) : null}
+                          {/* HOME-FORYOU-ORDER-006：hero 退场后 ScrollView 从 y=0 开始，
+                              orderTicket 的 -14 上叠会把订单编号 chip 顶进状态栏/
+                              灵动岛底下（屏顶只剩 2pt）。hero 不在时补 safeArea 顶距，
+                              票券落在状态栏下方（净空 safeArea.top+10）；hero 在时
+                              保持原版式（-14 塞进 hero 圆角）。 */}
+                          <ScrollView contentContainerStyle={[styles.confirmScroll, !orderHeroVisible && { paddingTop: safeArea.top + 24 }]} style={styles.confirmScrollFlex}>
+                            <ActivityOrderTicket
+                              companionPhotoSource={ticketCompanionPhoto}
+                              copied={orderCodeCopied}
+                              onCopyOrderNo={() => { void Clipboard.setStringAsync(ticketSnapshot.orderNo).then(() => setOrderCodeCopied(true)).catch(() => undefined); }}
+                              overlapHero
+                              snapshot={ticketSnapshot}
+                            />
                           </ScrollView>
                           <View style={[styles.confirmFooter, { paddingBottom: safeArea.bottom + 16 }]}>
                             <Pressable
@@ -1493,6 +1585,15 @@ export function RequesterHome({
                               </Pressable>
                             )}
                           </View>
+                          {/* HOME-FORYOU-ORDER-007：成功页没有返回入口 —— 确认页有
+                              confirmTopBar 的返回键，这页没有；全屏 Modal iOS 不能
+                              下滑关闭，选了同行人时底部只有「分享/联系」，用户被困住。
+                              绝对定位盖在左上角：hero 在时 onDark（白字形压深底），
+                              退场后 ink（浅底）。位置在票券左上角外侧 —— chip 居中，
+                              左上只有卡片留白，不抢点击区。 */}
+                          <Pressable accessibilityLabel="返回" onPress={closeOrderFlow} style={[styles.orderBackButton, { top: safeArea.top + 6 }]}>
+                            <ProxyBackGlyph tone={orderHeroVisible ? "onDark" : "ink"} />
+                          </Pressable>
                         </View>
                       ) : (
                         <View style={[styles.confirmPage, { paddingTop: safeArea.top }]}>
@@ -1580,7 +1681,7 @@ export function RequesterHome({
                             <Pressable
                               accessibilityLabel={t("joinCtaA11y")}
                               disabled={joinBusy}
-                              onPress={() => { void joinSelected(gridActivity?.activityId).then((outcome) => { if (outcome !== "failed") { setOrderExisting(outcome === "already"); setOrderCodeCopied(false); setOrderDone(true); } }); }}
+                              onPress={() => { void joinSelected(gridActivity?.activityId, forYouRecipe).then((outcome) => { if (outcome !== "failed") { setOrderExisting(outcome === "already"); setOrderCodeCopied(false); setOrderDone(true); } }); }}
                               style={styles.confirmActionCta}
                             >
                               <Text selectable style={styles.confirmActionCtaText}>{joinBusy ? t("joinInProgress") : t("joinCta")}</Text>
@@ -2472,12 +2573,17 @@ const styles = StyleSheet.create({
   chainHint: { color: color.muted, fontSize: 11, marginTop: 8, textAlign: "center" },
   joinMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },
   // 确认下单失败（满员/已下架/网络）贴在底栏上方，不再埋在可滚动内容最底下看不见。
+  viewExistingOrderBtn: { alignSelf: "center", paddingHorizontal: 12, paddingVertical: 6 },
+  viewExistingOrderText: { color: color.ink, fontSize: 13, fontWeight: "800", textDecorationLine: "underline" },
   confirmJoinError: { color: color.error, fontSize: 13, fontWeight: "600", paddingHorizontal: 20, paddingVertical: 8, textAlign: "center" },
   // HOME-FORYOU-ORDER-001：确认下单整屏，跟 reality-scene-map.tsx 的
   // DIRECT-INVITE-CONFIRM-001 同一套版式/取值，方便两处视觉一致。
   confirmPage: { backgroundColor: color.white, flex: 1 },
   confirmTopBar: { alignItems: "center", flexDirection: "row", minHeight: 56, paddingHorizontal: 13 },
   confirmBackButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 },
+  // ORDER-007：成功页返回键 —— 38pt 点击区跟 confirmBackButton 同规格；绝对定位
+  // 挂在 orderPage 上（zIndex 压过 hero），top 由内联 safeArea.top+6 给。
+  orderBackButton: { alignItems: "center", height: 38, justifyContent: "center", left: 12, position: "absolute", width: 38, zIndex: 1 },
   confirmTitle: { color: color.ink, flex: 1, fontSize: 17, fontWeight: "900", textAlign: "center" },
   confirmTopSpacer: { width: 38 },
   confirmScrollFlex: { flex: 1 },

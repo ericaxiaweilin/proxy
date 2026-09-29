@@ -8,10 +8,25 @@ import (
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
 )
 
-// OrderNumberAllocator 用 Postgres 序列 fulfillment.order_number_seq 分配全数字
-// 订单编号（ORDER-NO-001，migrations/136）。序列全局、永不重置，履约订单与
-// 活动报名共用 —— 多实例部署下也不会撞号。nextval 不随事务回滚，失败的下单
-// 会留下空号，这是序列的正常语义（编号只要求唯一，不要求连续）。
+// nextDailyOrderNumber 在调用方的事务（或连接）里原子取下一个订单编号（ORDER-NO-001）：
+// 每个（类别码, 越南本地日期）一个计数器，ordering.daily_sequences 里
+// INSERT ... ON CONFLICT ... RETURNING 一步取号。放在事务里就随事务回滚，不留空号；
+// 同类别同一天的并发下单会在这一行上排队，编号不重复。
+func nextDailyOrderNumber(ctx context.Context, q sqlQueryer, category string, now time.Time) (string, error) {
+	if !ordernumber.Registered(category) {
+		return "", ordernumber.ErrUnknownCategory
+	}
+	var seq int
+	if err := q.QueryRow(ctx, `INSERT INTO ordering.daily_sequences (category, day, last_seq) VALUES ($1, $2, 1)
+		ON CONFLICT (category, day) DO UPDATE SET last_seq = ordering.daily_sequences.last_seq + 1
+		RETURNING last_seq`, category, ordernumber.Day(now).Format("2006-01-02")).Scan(&seq); err != nil {
+		return "", err
+	}
+	return ordernumber.Format(category, now, seq), nil
+}
+
+// OrderNumberAllocator 用 ordering.daily_sequences 分配全数字订单编号。多实例部署下也不会
+// 撞号。在命令事务里调用时（ctx 带事务）随事务提交 / 回滚。
 type OrderNumberAllocator struct {
 	pool *pgxpool.Pool
 	now  func() time.Time
@@ -21,17 +36,13 @@ func NewOrderNumberAllocator(pool *pgxpool.Pool) *OrderNumberAllocator {
 	return &OrderNumberAllocator{pool: pool, now: time.Now}
 }
 
-func (a *OrderNumberAllocator) Next(ctx context.Context) (string, error) {
-	var sequence int64
-	if err := queryerForContext(ctx, a.pool).QueryRow(ctx, `SELECT nextval('fulfillment.order_number_seq')`).Scan(&sequence); err != nil {
-		return "", err
-	}
-	return ordernumber.Format(sequence, a.now()), nil
+func (a *OrderNumberAllocator) Next(ctx context.Context, category string) (string, error) {
+	return nextDailyOrderNumber(ctx, queryerForContext(ctx, a.pool), category, a.now())
 }
 
 var _ ordernumber.Allocator = (*OrderNumberAllocator)(nil)
 
-// OrderNumbers 让用 PG 仓库构造的 Service 默认就用序列分配器（不是进程内计数器）。
+// OrderNumbers 让用 PG 仓库构造的 Service 默认就用数据库计数器（不是进程内计数器）。
 func (r *FulfillmentRepository) OrderNumbers() ordernumber.Allocator {
 	return NewOrderNumberAllocator(r.pool)
 }

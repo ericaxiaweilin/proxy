@@ -268,3 +268,37 @@ export function activitiesAtCoffeeShops<A extends ComboActivity>(
     return sceneId !== undefined && shopIds.has(sceneId);
   });
 }
+
+/** 我手上已有的一单（ListMyActivities 的 joined + joinOrders 合成）。 */
+export type ExistingOrder = {
+  activityId: string;
+  title: string;
+  time: string;
+  orderNo?: string | undefined;
+  cancelled?: boolean | undefined;
+};
+
+export type OrderConflict =
+  | { kind: "ALREADY_ORDERED"; orderNo?: string | undefined }
+  | { kind: "TIME_TAKEN"; title: string; time: string; orderNo?: string | undefined };
+
+/**
+ * HOME-FORYOU-ORDER-GUARD-001（用户「确认下单后 收到 recipe 再次返回 home 可以同参数
+ * 再次下单 这个违法基本资源冲突逻辑 要做守卫和检查提示」）：下单前的资源冲突检查。
+ *   - 这场活动我已经下过单（没取消）→ ALREADY_ORDERED，不能重复下。
+ *   - 同一个时间段我已经有另一单（没取消）→ TIME_TAKEN，人不能同时在两处。
+ * 时间是活动自己写的自由文本（不是可解析的时间戳），只能按原文相等判断同一档，
+ * 不去猜两段文字是不是重叠。空时间不参与判断。
+ */
+export function detectOrderConflict(
+  activity: { activityId: string; time: string },
+  existing: readonly ExistingOrder[]
+): OrderConflict | undefined {
+  const live = existing.filter((order) => !order.cancelled);
+  const same = live.find((order) => order.activityId === activity.activityId);
+  if (same) return { kind: "ALREADY_ORDERED", orderNo: same.orderNo };
+  const time = activity.time.trim();
+  if (!time) return undefined;
+  const clash = live.find((order) => order.time.trim() === time);
+  return clash ? { kind: "TIME_TAKEN", title: clash.title, time: clash.time, orderNo: clash.orderNo } : undefined;
+}

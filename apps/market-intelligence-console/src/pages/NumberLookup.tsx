@@ -21,7 +21,7 @@ const KIND_LABEL: Record<LookupBody["kind"], string> = {
 
 const ERROR_TEXT: Record<string, string> = {
   LOOKUP_REASON_REQUIRED: "写一句理由（哪张工单 / 为什么查，4–200 字），事后才对得上。",
-  NUMBER_NOT_FOUND: "这个号格式正确、校验位也对，但系统里没有对应的实体。",
+  NUMBER_NOT_FOUND: "这个号格式正确，但系统里没有对应的实体（编号没有校验位，也可能是抄错了一位，请再和用户核对）。",
   NUMBER_AMBIGUOUS: "这个号对应了不止一个实体 —— 数据完整性事故，已留痕，请转工程处理，不要凭猜测处理工单。",
   LOOKUP_INCOMPLETE: "有的业务库暂时无法按编号查询，不能断定「查无此号」。请稍后重试或转工程。",
   LOOKUP_FAILED: "查询没有成功（后端读库失败），可以重试。",
@@ -32,11 +32,7 @@ const ERROR_TEXT: Record<string, string> = {
 
 function explain(result: { error?: { errorCode: string; safeDetails?: Record<string, unknown> } }): string {
   const code = result.error?.errorCode ?? "";
-  if (code === "NUMBER_INVALID") {
-    return result.error?.safeDetails?.hint === "CHECKSUM_MISMATCH"
-      ? "校验位对不上 —— 多半是抄错了一位（或相邻两位写反）。请和用户再核对一遍号码。"
-      : "这不是公共编号（应为 16 位以上纯数字；旧的 PX-… 展示码不在此列）。";
-  }
+  if (code === "NUMBER_INVALID") return "这不是公共编号（应为 21 位以上纯数字；旧的 PX-… 展示码不在此列）。";
   return ERROR_TEXT[code] ?? `没有成功（${code || "未知错误"}）`;
 }
 
@@ -85,7 +81,7 @@ export function NumberLookup() {
         <span>每次查询都会留痕（谁、查了哪个号、理由）</span>
       </div>
       <form className="card" onSubmit={(e) => { e.preventDefault(); void submit(); }} style={{ maxWidth: 560, marginBottom: 12 }}>
-        <input autoFocus onChange={(e) => setNumber(e.target.value)} placeholder="用户报的编号，如 2609 2900 0000 0099（可带空格 / 连字符）" style={{ width: "100%", padding: 8 }} value={number} />
+        <input autoFocus onChange={(e) => setNumber(e.target.value)} placeholder="用户报的编号，如 100 260929 100022 000001（可带空格 / 连字符）" style={{ width: "100%", padding: 8 }} value={number} />
         <input onChange={(e) => setReason(e.target.value)} placeholder="理由 / 工单号（必填），如 ticket-4213 用户来电" style={{ width: "100%", padding: 8, marginTop: 8 }} value={reason} />
         <button disabled={busy || number.trim() === "" || reason.trim().length < 4} style={{ marginTop: 8 }} type="submit">{busy ? "查询中…" : "查询"}</button>
       </form>

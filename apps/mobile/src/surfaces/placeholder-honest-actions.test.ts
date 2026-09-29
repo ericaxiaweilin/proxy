@@ -154,8 +154,22 @@ describe("PLACEHOLDER-001 wallet/income shows unknown instead of invented money"
   });
 
   it("routes wallet records to the real orders surface", () => {
-    expect(me).toContain('openSubPage("myorders")');
-    expect(me).toContain("账本接口未接入前不编造余额");
+    // WALLET-001：钱包整页迁到独立 surface，余额/套餐/渠道/兑换/记录全读
+    // 服务端 GetWallet，不再是“账本未接入”占位；现场结算/退款仍在 myorders
+    // 独立入口（本页不再重复挂快捷键）。
+    expect(me).toContain("WalletSurface");
+    expect(me).toContain('route: "myorders"');
+  });
+
+  it("wallet surface renders server balances, never hardcoded money", () => {
+    const wallet = readFileSync(fileURLToPath(new URL("./wallet.tsx", import.meta.url)), "utf8");
+    for (const fake of ["12,680", "8,420", "860,000", "1,200,000", "2,450,000"]) {
+      expect(wallet).not.toContain(fake);
+    }
+    expect(wallet).toContain("wallet.getWallet()");
+    expect(wallet).toContain("wallet.listEntries(");
+    // 未接入的渠道置灰注明，不存在“点了没反应”。
+    expect(wallet).toContain("providerUnconfigured");
   });
 
   it("wires profile like to engagement with a visible failure", () => {

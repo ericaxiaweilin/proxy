@@ -339,7 +339,9 @@ describe("POST-REACTION-TRUTH-001 / POST-COMMENT-VISIBILITY-001 wire", () => {
 
   it("returns the post comment list used after reply refresh", async () => {
     const replies = [{ replyId: "rep_1", postId: "post_1", actorId: "user_001", body: "hello", createdAt: "2026-09-05T00:00:00Z" }];
-    await expect(clientWith({ postId: "post_1", replies, count: 1 }).listPostReplies("post_1")).resolves.toEqual({ postId: "post_1", replies, count: 1 });
+    // REPLY-IMAGE-001：老评论没有 media 键，契约 default([]) 补齐。
+    const expected = [{ ...replies[0], media: [] as Array<{ mediaAssetId: string; sortOrder: number }> }];
+    await expect(clientWith({ postId: "post_1", replies, count: 1 }).listPostReplies("post_1")).resolves.toEqual({ postId: "post_1", replies: expected, count: 1 });
   });
 });
 
@@ -651,5 +653,42 @@ describe("REPOST-POST-001 the client can actually repost", () => {
       correlationId: env.correlationId
     }));
     await expect(client.repostPost("post_ghost")).rejects.toBeInstanceOf(EngagementCommandRejectedError);
+  });
+});
+
+// ---------- REPLY-IMAGE-001: 图片评论 ----------
+
+describe("EngagementClient.replyToPost with media", () => {
+  function authed(seen: Array<Record<string, unknown>>) {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    void store.write({
+      userAccountId: "user_001",
+      principal: { type: "INDIVIDUAL", id: "user_001" },
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1 }
+    });
+    return new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => {
+      seen.push(init.body as Record<string, unknown>);
+      return { status: 200, json: async () => ({ commandId: "c1", outcome: "ACCEPTED", eventRefs: [], correlationId: "r1" }) };
+    } } });
+  }
+
+  it("sends text-only replies exactly like before (media defaults to [])", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    await authed(seen).replyToPost("post_1", "写得真好");
+    expect(seen[0]?.commandType).toBe("ReplyToPost");
+    expect(seen[0]?.payload).toEqual({ postId: "post_1", body: "写得真好", media: [] });
+  });
+
+  it("sends image-only replies (empty body + media refs)", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    await authed(seen).replyToPost("post_1", "  ", [{ mediaAssetId: "ma_1", sortOrder: 0 }]);
+    expect(seen[0]?.payload).toEqual({ postId: "post_1", body: "", media: [{ mediaAssetId: "ma_1", sortOrder: 0 }] });
+  });
+
+  it("drops refs with empty asset ids, still throws when nothing remains", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const client = authed(seen);
+    await expect(client.replyToPost("post_1", "  ", [{ mediaAssetId: "", sortOrder: 0 }])).rejects.toThrow("reply body is required");
+    expect(seen).toHaveLength(0);
   });
 });

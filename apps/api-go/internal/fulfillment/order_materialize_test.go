@@ -67,4 +67,4 @@ func TestCancelledSlotOrderReleasesSlot(t *testing.T) {
 	}
 }
 
-var testOrderNo = ordernumber.Format(42, time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC))
+var testOrderNo = ordernumber.Format(ordernumber.CategoryService, time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC), 42)

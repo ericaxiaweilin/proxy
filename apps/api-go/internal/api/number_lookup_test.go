@@ -24,7 +24,7 @@ func lookupGateServer(t *testing.T) (*Server, *numberlookup.MemoryRecorder, stri
 	repo := fulfillment.NewMemoryRepository()
 	ff := fulfillment.NewWithRepository(repo)
 	numbers := ordernumber.NewMemory()
-	orderNo, _ := numbers.Next(context.Background())
+	orderNo, _ := numbers.Next(context.Background(), ordernumber.CategoryService)
 	order, err := fulfillment.MaterializedOrder("ord_gate_1", orderNo, "user_req", "user_agent", "need_1", fulfillment.OrderSnapshot{ServiceSKU: "cc", AgreedCompensation: 500_000}, time.Now())
 	if err != nil {
 		t.Fatal(err)

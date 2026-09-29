@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
+	"github.com/proxy-app/proxy-api/internal/ordernumber"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 )
 
@@ -258,7 +259,7 @@ func TestMaterializedOrderEventOnceAndAuditTrailPostgres(t *testing.T) {
 	run := itoa(time.Now().UnixNano())
 	cleanupRunOutbox(t, pool, run)
 	repo := NewFulfillmentRepositoryWithOutbox(pool, NewOutboxRepository(pool))
-	orderNo, err := NewOrderNumberAllocator(pool).Next(ctx)
+	orderNo, err := NewOrderNumberAllocator(pool).Next(ctx, ordernumber.CategoryService)
 	if err != nil {
 		t.Fatal(err)
 	}

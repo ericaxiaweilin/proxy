@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { ProfileTabs } from "./ProfileTabs";
+import { WalletSurface } from "./wallet";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import { AIManagementSurface } from "./ai-management";
 import * as ImagePicker from "expo-image-picker";
@@ -2048,46 +2049,11 @@ export function MeSurface({
     }
 
     if (subPage.route === "wallet") {
+      // WALLET-001：钱包整页迁到独立 surface（原型 Proxy_Wallet_20260929_0a2f07），
+      // 余额/套餐/渠道/兑换/记录全部读服务端 GetWallet，不再是“账本未接入”占位。
+      // 现场结算/退款仍在 myorders 独立入口（本页不再重复挂快捷键）。
       return contentWrapper(
-        <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <ProxyBackGlyph />
-            </Pressable>
-            <Text selectable style={styles.subPageTitle}>钱包与结算</Text>
-            <Text selectable style={styles.subPageDesc}>只展示 Proxy 真正经手或需要记录的资金状态。账本接口未接入前不编造余额。</Text>
-
-            <View style={styles.walletDarkCard}>
-              <Text selectable style={styles.walletDarkLabel}>可用余额</Text>
-              <Text selectable style={styles.walletDarkAmount}>—</Text>
-              <Text selectable style={styles.walletDarkHint}>账本未接入，未知不画数</Text>
-            </View>
-
-            <View style={styles.walletCard}>
-              <Text selectable style={styles.walletCardLabel}>待结算收入</Text>
-              <Text selectable style={styles.walletCardValue}>—</Text>
-              <Text selectable style={styles.walletCardHint}>来自平台支付订单（待账本接入）</Text>
-            </View>
-
-            <View style={styles.walletCard}>
-              <Text selectable style={styles.walletCardLabel}>直接结算记录</Text>
-              <Text selectable style={styles.walletCardHint}>个人时间 / 技能服务可由双方直接结算；这里只保留合作确认与双方状态。</Text>
-            </View>
-
-            <Pressable onPress={() => openSubPage("myorders")} style={styles.walletAction} accessibilityLabel="现场结算记录">
-              <Text selectable style={styles.walletActionIcon}>₫</Text>
-              <View style={styles.walletActionBody}>
-                <Text selectable style={styles.walletActionLabel}>现场结算记录</Text>
-                <Text selectable style={styles.walletActionDesc}>查看双方确认状态</Text>
-              </View>
-              <Text selectable style={styles.walletActionArrow}>›</Text>
-            </Pressable>
-
-            <Pressable onPress={() => openSubPage("myorders")} style={styles.walletBtnLight} accessibilityLabel="退款记录">
-              <Text selectable style={styles.walletBtnLightText}>退款记录</Text>
-            </Pressable>
-          </ScrollView>
-        </View>
+        <WalletSurface onBack={() => setSubPage(undefined)} onOpenVouchers={onOpenVouchers} />
       );
     }
 

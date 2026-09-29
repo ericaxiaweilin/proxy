@@ -5,8 +5,9 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, AppState, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Animated, AppState, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { GlassContainer, GlassView } from "expo-glass-effect";
+import { Image as ExpoImage } from "expo-image";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { usePullToRefresh } from "../components/pull-to-refresh";
 import ImageViewing from "react-native-image-viewing";
@@ -18,6 +19,7 @@ import { type AIAccountClient } from "../ai-account-client";
 import type { ActivityClient } from "../activity-client";
 import { localApiBaseUrl } from "../native-clients";
 import { resolveAuthorAvatar, type AvatarAccount, type AvatarHumanAccount, initialAvatarTint } from "../media/author-avatar";
+import { resolveAssetSource } from "../media/asset-sources";
 import { mapEngagementError, mapFollowError } from "./feed-error-map";
 import { type EngagementClient } from "../engagement-client";
 import type { ProfileClient } from "../profile-client";
@@ -26,6 +28,7 @@ import { ComposerV2Screen } from "./ComposerV2Screen";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
+import { Asset, AssetField, MediaType, Query, requestPermissionsAsync } from "expo-media-library";
 import { isOpportunityPost } from "../feed-content";
 // ACTIVITY-REF-001：活动引用的唯一词表。实体引用（contextId = activityId）
 // 与分类标签（contextId = 人话）必须分开对待 —— 详见 activity-ref.ts 顶部。
@@ -95,9 +98,9 @@ let cachedPostReplies: Record<string, PostReply[]> = {};
 const REPLY_DRAFT_TTL_MS = 10 * 60 * 1000;
 // POST-THREAD-001：评论抽屉「表情」按钮弹出的快捷表情行（点一下插进草稿末尾）。
 const THREAD_QUICK_EMOJI = ["😂", "❤️", "👍", "🔥", "😍", "😭", "🙏", "🎉"] as const;
-// ReplyToPost 只收纯文本 body（没有附件字段），图片/GIF 评论还没有后端能力——
-// 图标照原型画出来，点了如实说明，不假装能发。
-const THREAD_TEXT_ONLY_NOTICE = "评论暂时只能发文字，图片 / GIF 评论还没上线";
+// REPLY-IMAGE-001 之后图片评论已上线（相册选图 + 上传 + 行渲染）；GIF 还没有
+// 后端能力——图标照原型画出来，点了如实说明，不假装能发。
+const THREAD_TEXT_ONLY_NOTICE = "评论暂时只能发文字，GIF 评论还没上线";
 let cachedReplyDrafts: Record<string, { text: string; savedAt: number }> = {};
 // TAB-SWITCH-JANK-001: 本 session 是否做过一次网络 fresh 加载。切 tab 是 remount
 // 不是冷启动——remount 有缓存就同步渲染（毫秒级），不再每次 fresh 重拉；冷启动
@@ -368,6 +371,19 @@ export function FeedSurface({
   const [replying, setReplying] = useState(false);
   const [threadEmojiOpen, setThreadEmojiOpen] = useState(false);
   const [threadNotice, setThreadNotice] = useState<string | null>(null);
+  // REPLY-IMAGE-001: 评论图片。相册多选（上限与契约 PostReply.media 同口径 6 张，
+  // 只收 IMAGE；相机拍摄/GIF 不在首版），选中先本地预览，发送时逐张 uploadImage，
+  // 拿到 mediaAssetId 再调 replyToPost。
+  const [replyAlbumOpen, setReplyAlbumOpen] = useState(false);
+  const [replyAlbumAssets, setReplyAlbumAssets] = useState<Array<{ id: string; width: number; height: number }>>([]);
+  const [replyAlbumOffset, setReplyAlbumOffset] = useState(0);
+  const [replyAlbumHasMore, setReplyAlbumHasMore] = useState(false);
+  const [replyAlbumLoading, setReplyAlbumLoading] = useState(false);
+  const [replyAlbumLoadingMore, setReplyAlbumLoadingMore] = useState(false);
+  const [replyAlbumResolvingId, setReplyAlbumResolvingId] = useState<string | undefined>(undefined);
+  const [replyImages, setReplyImages] = useState<Array<{ uri: string; width: number; height: number; assetId: string; fileName?: string; mimeType?: string }>>([]);
+  const [replyUploading, setReplyUploading] = useState(false);
+  const [replyViewer, setReplyViewer] = useState<{ uris: string[]; index: number } | undefined>(undefined);
   // POST-THREAD-001（用户「输入重复...没有数字按键」排查出来的根因之一）：
   // TextInput 的 autoFocus 塞进 <Modal> 里不总是可靠——键盘弹起会跟 Modal 的
   // slide 动画抢时机，动画还没走完时那次 focus 调用经常被吞掉，表现就是抽屉
@@ -1210,13 +1226,132 @@ export function FeedSurface({
     setThreadNotice(null);
   }
 
+  // REPLY-IMAGE-001 相册：只查 IMAGE，按创建时间倒序分页（对话窗口同款
+  // expo-media-library Query 写法；评论不需要相机位/视频，只要相册照片）。
+  const REPLY_ALBUM_PAGE_SIZE = 60;
+  const REPLY_IMAGE_MAX = 6;
+
+  async function fetchReplyAlbumPage(offset: number): Promise<Array<{ id: string; width: number; height: number }>> {
+    const found = await new Query()
+      .within(AssetField.MEDIA_TYPE, [MediaType.IMAGE])
+      .orderBy({ key: AssetField.CREATION_TIME, ascending: false })
+      .offset(offset)
+      .limit(REPLY_ALBUM_PAGE_SIZE)
+      .exe();
+    const thumbs = await Promise.all(found.map(async (a) => {
+      try {
+        const shape = await a.getShape();
+        return { id: a.id, width: shape?.width ?? 0, height: shape?.height ?? 0 };
+      } catch {
+        return undefined;
+      }
+    }));
+    return thumbs.filter((t): t is { id: string; width: number; height: number } => t !== undefined);
+  }
+
+  async function openReplyAlbum(): Promise<void> {
+    // iOS 键盘是独立系统窗口，盖在应用所有浮层之上——不先收起，相册就被挡在后面。
+    threadInputRef.current?.blur();
+    setThreadNotice(null);
+    const permission = await requestPermissionsAsync();
+    if (!permission.granted) {
+      setThreadNotice("请允许 Proxy 读取照片");
+      return;
+    }
+    setReplyAlbumLoading(true);
+    try {
+      const page = await fetchReplyAlbumPage(0);
+      setReplyAlbumAssets(page);
+      setReplyAlbumOffset(page.length);
+      setReplyAlbumHasMore(page.length === REPLY_ALBUM_PAGE_SIZE);
+      setReplyAlbumOpen(true);
+    } catch {
+      setThreadNotice("相册打不开，请重试");
+    } finally {
+      setReplyAlbumLoading(false);
+    }
+  }
+
+  async function loadMoreReplyAlbumSilently(): Promise<void> {
+    if (replyAlbumLoadingMore || !replyAlbumHasMore) return;
+    setReplyAlbumLoadingMore(true);
+    try {
+      const page = await fetchReplyAlbumPage(replyAlbumOffset);
+      setReplyAlbumAssets((prev) => [...prev, ...page]);
+      setReplyAlbumOffset((prev) => prev + page.length);
+      setReplyAlbumHasMore(page.length === REPLY_ALBUM_PAGE_SIZE);
+    } catch {
+      // 静默失败：滚到底会重新触发，不打断浏览（对话窗口同款语义）。
+    } finally {
+      setReplyAlbumLoadingMore(false);
+    }
+  }
+
+  // 文件名后缀 → MIME（对话窗口同款：iPhone 默认 HEIC，不带 mimeType 会被
+  // 服务端字节检测挡掉，"选完发不出去"的根因）。
+  function replyMimeFromFilename(filename: string | undefined): string | undefined {
+    const ext = filename?.split(".").pop()?.toLowerCase();
+    switch (ext) {
+      case "heic": return "image/heic";
+      case "heif": return "image/heif";
+      case "jpg": case "jpeg": return "image/jpeg";
+      case "png": return "image/png";
+      case "gif": return "image/gif";
+      case "webp": return "image/webp";
+      default: return undefined;
+    }
+  }
+
+  // 点选即 resolve 原图（单张 iCloud 等待跟系统相册一致），多选上限 6 张。
+  async function toggleReplyAlbumAsset(thumb: { id: string; width: number; height: number }): Promise<void> {
+    const selectedIndex = replyImages.findIndex((img) => img.assetId === thumb.id);
+    if (selectedIndex >= 0) {
+      setReplyImages((prev) => prev.filter((_, i) => i !== selectedIndex));
+      return;
+    }
+    if (replyImages.length >= REPLY_IMAGE_MAX) {
+      setThreadNotice("评论最多 6 张图片");
+      return;
+    }
+    if (replyAlbumResolvingId) return;
+    setReplyAlbumResolvingId(thumb.id);
+    setThreadNotice(null);
+    try {
+      const asset = new Asset(thumb.id);
+      const [uri, filename] = await Promise.all([asset.getUri(), asset.getFilename().catch(() => undefined)]);
+      if (!uri) { setThreadNotice("这张照片读取失败，请重试或换一张"); return; }
+      const mimeType = replyMimeFromFilename(filename);
+      setReplyImages((prev) => [...prev, { uri, width: thumb.width, height: thumb.height, assetId: thumb.id, ...(filename ? { fileName: filename } : {}), ...(mimeType ? { mimeType } : {}) }]);
+    } catch {
+      setThreadNotice("这张照片读取失败，请重试或换一张");
+    } finally {
+      setReplyAlbumResolvingId(undefined);
+    }
+  }
+
+  // REPLY-IMAGE-001: 回复图片全屏查看（react-native-image-viewing，原图 play 路由）。
+  function openReplyViewer(reply: PostReply, index: number): void {
+    const uris = (reply.media ?? []).map((m) => localNet.resolveMediaUrl(`/v1/media/play/${encodeURIComponent(m.mediaAssetId)}`)).filter((uri) => uri !== "");
+    if (uris.length === 0) return;
+    setReplyViewer({ uris, index: Math.min(Math.max(index, 0), uris.length - 1) });
+  }
+
   async function submitReply(): Promise<void> {
-    if (!threadPostId || !replyDraft.trim() || replying) return;
+    if (!threadPostId || replying || replyUploading) return;
+    const body = replyDraft.trim();
+    if (!body && replyImages.length === 0) return;
     setReplying(true);
+    setReplyUploading(replyImages.length > 0);
     setEngagementError(undefined);
     try {
 	  const postId = threadPostId;
-	  await engagement.replyToPost(postId, replyDraft);
+      const refs: Array<{ mediaAssetId: string; sortOrder: number }> = [];
+      for (let i = 0; i < replyImages.length; i++) {
+        const img = replyImages[i]!;
+        const uploaded = await mediaClient.uploadImage({ uri: img.uri, width: img.width, height: img.height, ...(img.fileName ? { fileName: img.fileName } : {}), ...(img.mimeType ? { mimeType: img.mimeType } : {}) });
+        refs.push({ mediaAssetId: uploaded.mediaAssetId, sortOrder: i });
+      }
+	  await engagement.replyToPost(postId, body, refs);
 	  const [truthResult, listResult] = await Promise.allSettled([engagement.getPostEngagement(postId), engagement.listPostReplies(postId, 50)]);
 	  if (truthResult.status === "fulfilled") setPostEngagement((previous) => mergePostEngagement(previous, [truthResult.value]));
 	  if (listResult.status === "fulfilled") {
@@ -1226,10 +1361,12 @@ export function FeedSurface({
       // 发出去之后留在详情页（Threads 同款）；这条草稿已经发出去了，删掉。
       delete cachedReplyDrafts[postId];
       setReplyDraft("");
+      setReplyImages([]);
     } catch (error) {
       setEngagementError(mapEngagementError(error, "回复没有提交成功，请检查连接后重试。"));
     } finally {
       setReplying(false);
+      setReplyUploading(false);
     }
   }
 
@@ -1499,6 +1636,25 @@ export function FeedSurface({
 				  {/* FEED-REPLY-001: 显示作者名，绝不回显 actorId。 */}
 				  <Text selectable style={styles.postReplyAuthor}>{resolveReplyAuthorDisplayName(reply, viewerAccountId, viewerDisplayName)}</Text>
 				  <Text selectable style={styles.postReplyBody}>{reply.body}</Text>
+				  {/* REPLY-IMAGE-001: 评论图片缩略图，点开全屏查看器。 */}
+				  {reply.media && reply.media.length > 0 ? (
+				    <View style={styles.replyMediaRow}>
+				      {reply.media.map((m, mediaIndex) => {
+				        const source = resolveAssetSource({ kind: "mediaId", id: m.mediaAssetId }, { baseUrl: localApiBaseUrl });
+				        if (!source || typeof source === "number") return null;
+				        return (
+				          <Pressable
+				            key={`${reply.replyId}:${m.mediaAssetId}:${mediaIndex}`}
+				            accessibilityLabel="查看评论图片"
+				            onPress={() => openReplyViewer(reply, mediaIndex)}
+				            style={styles.replyMediaCell}
+				          >
+				            <Image source={source} style={styles.replyMediaThumb} />
+				          </Pressable>
+				        );
+				      })}
+				    </View>
+				  ) : null}
 				</View>
 			  ))}
 			  {offerReplyToggle && !repliesExpanded ? (
@@ -2009,6 +2165,15 @@ export function FeedSurface({
           analytics={isOwnPostById(viewerPost, viewerAccountId) ? undefined : localNet}
         />
       ) : null}
+      {/* REPLY-IMAGE-001：评论图片全屏查看。 */}
+      {replyViewer ? (
+        <ImageViewing
+          images={replyViewer.uris.map((uri) => ({ uri }))}
+          imageIndex={replyViewer.index}
+          visible
+          onRequestClose={() => setReplyViewer(undefined)}
+        />
+      ) : null}
 
       </>
       )}
@@ -2042,7 +2207,7 @@ export function FeedSurface({
         键盘用系统真键盘——TextInput 聚焦自动弹出，不照抄原型的自绘假键盘。 */}
     <Modal animationType="slide" onRequestClose={closeThread} onShow={focusThreadInput} transparent visible={threadPost !== undefined}>
       <Pressable onPress={closeThread} style={styles.threadBackdrop}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.threadAvoid}>
           <Pressable onPress={(event) => event.stopPropagation()} style={styles.threadSheet}>
             <View style={styles.threadDragHandle} />
             <View style={styles.threadComposerBar}>
@@ -2062,7 +2227,7 @@ export function FeedSurface({
                   maxLength={500}
                   multiline
                   onChangeText={setReplyDraft}
-                  onSubmitEditing={() => { if (replyDraft.trim() && !replying) void submitReply(); }}
+                  onSubmitEditing={() => { if ((replyDraft.trim() || replyImages.length > 0) && !replying && !replyUploading) void submitReply(); }}
                   placeholder={`回复 ${threadAuthorName}…`}
                   placeholderTextColor={color.muted}
                   ref={threadInputRef}
@@ -2070,8 +2235,8 @@ export function FeedSurface({
                   value={replyDraft}
                 />
                 <View style={styles.threadComposerTools}>
-                  <Pressable accessibilityLabel="添加图片" hitSlop={6} onPress={() => setThreadNotice(THREAD_TEXT_ONLY_NOTICE)}>
-                    <ProxyIcon color={color.muted} name="composerImage" size={20} />
+                  <Pressable accessibilityLabel="添加图片" hitSlop={6} onPress={() => void openReplyAlbum()}>
+                    <ProxyIcon color={replyImages.length > 0 ? color.ink : color.muted} name="composerImage" size={20} />
                   </Pressable>
                   <Pressable accessibilityLabel={threadEmojiOpen ? "收起表情" : "表情"} hitSlop={6} onPress={() => setThreadEmojiOpen((open) => !open)}>
                     <ProxyIcon color={threadEmojiOpen ? color.ink : color.muted} name="composerSmile" size={20} />
@@ -2081,17 +2246,98 @@ export function FeedSurface({
                   </Pressable>
                 </View>
                 <Pressable
-                  accessibilityLabel={replying ? "发送中" : "发送回复"}
-                  disabled={!replyDraft.trim() || replying}
+                  accessibilityLabel={replying || replyUploading ? "发送中" : "发送回复"}
+                  disabled={(!replyDraft.trim() && replyImages.length === 0) || replying || replyUploading}
                   onPress={() => void submitReply()}
-                  style={[styles.threadComposerSend, (!replyDraft.trim() || replying) && styles.disabled]}
+                  style={[styles.threadComposerSend, ((!replyDraft.trim() && replyImages.length === 0) || replying || replyUploading) && styles.disabled]}
                 >
-                  {replying ? <ProxyLoading size="small" tone="onDark" /> : <ProxyIcon color={color.white} name="arrowUp" size={16} />}
+                  {replying || replyUploading ? <ProxyLoading size="small" tone="onDark" /> : <ProxyIcon color={color.white} name="arrowUp" size={16} />}
                 </Pressable>
               </View>
+              {replyImages.length > 0 ? (
+                <ScrollView horizontal contentContainerStyle={styles.replyPreviewRow} showsHorizontalScrollIndicator={false}>
+                  {replyImages.map((img, index) => (
+                    <View key={`${img.assetId}:${index}`} style={styles.replyPreviewCell}>
+                      <Image source={{ uri: img.uri }} style={styles.replyPreviewThumb} />
+                      <Pressable
+                        accessibilityLabel={`移除第 ${index + 1} 张图片`}
+                        hitSlop={8}
+                        onPress={() => setReplyImages((prev) => prev.filter((_, i) => i !== index))}
+                        style={styles.replyPreviewRemove}
+                      >
+                        <Text selectable style={styles.replyPreviewRemoveText}>×</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </ScrollView>
+              ) : null}
               {threadNotice ? <Text selectable style={styles.threadNotice}>{threadNotice}</Text> : null}
             </View>
           </Pressable>
+          {/* REPLY-IMAGE-001 相册：只收 IMAGE，多选上限 6 张（对话窗口同款网格语言，
+              不要相机位/视频）。选完点完成回到输入框，预览条里可删。 */}
+          {replyAlbumOpen ? (
+            <Pressable onPress={() => undefined} style={styles.replyAlbumScrim}>
+              <View style={styles.replyAlbumSheet}>
+                <View style={styles.threadDragHandle} />
+                <View style={styles.replyAlbumHead}>
+                  <Pressable accessibilityLabel="关闭相册" onPress={() => setReplyAlbumOpen(false)} style={styles.replyAlbumHeadBtn}>
+                    <Text selectable style={styles.replyAlbumHeadBtnText}>关闭</Text>
+                  </Pressable>
+                  <Text selectable style={styles.replyAlbumTitle}>相册</Text>
+                  <Pressable
+                    accessibilityLabel={replyImages.length > 0 ? `选好了，${replyImages.length} 张` : "选好了"}
+                    disabled={replyImages.length === 0}
+                    onPress={() => setReplyAlbumOpen(false)}
+                    style={styles.replyAlbumHeadBtn}
+                  >
+                    <Text selectable style={[styles.replyAlbumHeadBtnText, replyImages.length === 0 && styles.replyAlbumHeadBtnTextDisabled]}>
+                      {replyImages.length > 0 ? `完成（${replyImages.length}）` : "完成"}
+                    </Text>
+                  </Pressable>
+                </View>
+                {replyAlbumLoading ? (
+                  <ActivityIndicator color={color.ink} style={styles.replyAlbumSpinner} />
+                ) : (
+                  <FlatList
+                    data={replyAlbumAssets}
+                    keyExtractor={(item) => item.id}
+                    numColumns={4}
+                    columnWrapperStyle={styles.replyAlbumRow}
+                    contentContainerStyle={styles.replyAlbumGrid}
+                    onEndReachedThreshold={0.4}
+                    onEndReached={() => void loadMoreReplyAlbumSilently()}
+                    renderItem={({ item }) => {
+                      const order = replyImages.findIndex((img) => img.assetId === item.id);
+                      const resolving = replyAlbumResolvingId === item.id;
+                      return (
+                        <Pressable
+                          accessibilityLabel={order >= 0 ? `已选第 ${order + 1} 张，点按取消` : "选择这张照片"}
+                          disabled={Boolean(replyAlbumResolvingId)}
+                          onPress={() => void toggleReplyAlbumAsset(item)}
+                          style={styles.replyAlbumTile}
+                        >
+                          <ExpoImage accessibilityLabel="相册照片" cachePolicy="memory-disk" contentFit="cover" recyclingKey={`reply-album:${item.id}`} source={{ uri: item.id }} style={styles.replyAlbumThumb} transition={0} />
+                          {order >= 0 ? (
+                            <View pointerEvents="none" style={styles.replyAlbumPicked}>
+                              <Text selectable style={styles.replyAlbumPickedText}>{order + 1}</Text>
+                            </View>
+                          ) : null}
+                          {resolving ? (
+                            <View pointerEvents="none" style={styles.replyAlbumResolving}>
+                              <ActivityIndicator color="#ffffff" />
+                            </View>
+                          ) : null}
+                        </Pressable>
+                      );
+                    }}
+                    ListEmptyComponent={<Text selectable style={styles.replyAlbumEmpty}>相册是空的</Text>}
+                    ListFooterComponent={replyAlbumLoadingMore ? <ActivityIndicator color={color.ink} style={styles.replyAlbumSpinner} /> : null}
+                  />
+                )}
+              </View>
+            </Pressable>
+          ) : null}
         </KeyboardAvoidingView>
       </Pressable>
     </Modal>
@@ -2332,6 +2578,8 @@ const styles = StyleSheet.create({
   // 评论）。遮罩 0.2 透明度黑、sheet 圆角 24（只顶部），高度跟着内容走（拖动
   // 把手 + 一颗输入药丸），不是原型那种给假键盘留位置的固定 60vh。
   threadBackdrop: { backgroundColor: "rgba(0,0,0,0.2)", flex: 1, justifyContent: "flex-end" },
+  // KAV 按标准用法撑满（内容沉底）：抽屉输入条位置不变，相册浮层 absolute 才能铺全屏。
+  threadAvoid: { flex: 1, justifyContent: "flex-end" },
   threadSheet: { backgroundColor: color.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: "hidden" },
   threadDragHandle: { alignSelf: "center", backgroundColor: "#E0E0E0", borderRadius: 2, height: 4, marginBottom: 6, marginTop: 10, width: 40 },
   // 原型的输入区是一颗圆角灰色药丸（input-box），输入框 + 发送键都在里面；
@@ -2356,6 +2604,31 @@ const styles = StyleSheet.create({
   threadEmojiKey: { alignItems: "center", height: 36, justifyContent: "center", width: 36 },
   threadEmojiText: { fontSize: 24 },
   threadNotice: { color: color.muted, fontSize: 12, paddingHorizontal: 16, paddingTop: 6 },
+  // REPLY-IMAGE-001 评论图片：发送前预览条 + 相册浮层 + 回复行缩略图。
+  replyPreviewRow: { gap: 8, paddingHorizontal: 16, paddingTop: 8 },
+  replyPreviewCell: { height: 72, width: 72 },
+  replyPreviewThumb: { borderRadius: 12, height: 72, width: 72 },
+  replyPreviewRemove: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 11, height: 22, justifyContent: "center", position: "absolute", right: -6, top: -6, width: 22 },
+  replyPreviewRemoveText: { color: color.white, fontSize: 14, fontWeight: "800", lineHeight: 16 },
+  replyAlbumScrim: { backgroundColor: "rgba(0,0,0,0.45)", bottom: 0, justifyContent: "flex-end", left: 0, position: "absolute", right: 0, top: 0 },
+  replyAlbumSheet: { backgroundColor: color.white, borderTopLeftRadius: 18, borderTopRightRadius: 18, maxHeight: "78%", paddingBottom: 20 },
+  replyAlbumHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10 },
+  replyAlbumHeadBtn: { minWidth: 64 },
+  replyAlbumHeadBtnText: { color: color.ink, fontSize: 15, fontWeight: "800" },
+  replyAlbumHeadBtnTextDisabled: { color: color.muted },
+  replyAlbumTitle: { color: color.ink, fontSize: 15, fontWeight: "800" },
+  replyAlbumGrid: { paddingHorizontal: 12 },
+  replyAlbumRow: { gap: 8, marginBottom: 8 },
+  replyAlbumTile: { alignItems: "center", aspectRatio: 1, backgroundColor: color.surface, borderRadius: 10, flex: 1, justifyContent: "center", maxWidth: "23.5%", overflow: "hidden" },
+  replyAlbumThumb: { borderRadius: 10, height: "100%", width: "100%" },
+  replyAlbumPicked: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, height: 24, justifyContent: "center", position: "absolute", right: 6, top: 6, width: 24 },
+  replyAlbumPickedText: { color: color.white, fontSize: 12, fontWeight: "800" },
+  replyAlbumResolving: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.35)", bottom: 0, justifyContent: "center", left: 0, position: "absolute", right: 0, top: 0 },
+  replyAlbumSpinner: { marginVertical: 16 },
+  replyAlbumEmpty: { color: color.muted, fontSize: 13, paddingVertical: 24, textAlign: "center" },
+  replyMediaRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
+  replyMediaCell: { borderRadius: 8, height: 72, overflow: "hidden", width: 72 },
+  replyMediaThumb: { height: 72, width: 72 },
 
   // 基线 .preview-tabs（原型 deepseek_html_20260926_9d241a.html「图标系统 · 完整版」
   // 手机内预览那一节，就是本行这一处）：

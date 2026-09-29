@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync(fileURLToPath(new URL("./surfaces/requester-home.tsx", import.meta.url)), "utf8");
+// ORDER-RECIPE-001：已下单票面搬进共用组件（成功页和「我的订单」画同一张票）。
+const ticket = readFileSync(fileURLToPath(new URL("./components/activity-order-ticket.tsx", import.meta.url)), "utf8");
 const profile = readFileSync(fileURLToPath(new URL("./surfaces/ai-account-profile.tsx", import.meta.url)), "utf8");
 const shell = readFileSync(fileURLToPath(new URL("./shell/app-shell.tsx", import.meta.url)), "utf8");
 const scene = readFileSync(fileURLToPath(new URL("./surfaces/reality-scene-map.tsx", import.meta.url)), "utf8");
@@ -307,6 +309,28 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).not.toContain("const gridTime = distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined;");
   });
 
+  it("HOME-FORYOU-CONFLICT-001：锁定的地点/时间显示冻结，不跟活动静默走", () => {
+    // 用户原话“被派生了”：锁只保住 index，显示层照样跟活动走，锁定形同虚设。
+    // 冻结之后冲突才走得通——提示 + 禁用选择（下面那条不断言，只钉冻结本身）。
+    expect(source).toContain("const displayPlace = lockedSlots.has(\"place\") && lockedPlaceScene !== undefined ? lockedPlaceScene : gridPlace;");
+    expect(source).toContain("const displayTime = lockedSlots.has(\"time\") && lockedTimeValue !== undefined ? lockedTimeValue : gridTime;");
+    expect(source).toContain("key: `place:${displayPlace.id}`");
+    expect(source).toContain("key: `time:${displayTime}`");
+    // 反向臂：tile 直接用 gridPlace/gridTime 渲染不许回来（那就是静默跟随）。
+    expect(source).not.toContain("key: `place:${gridPlace.id}`");
+    expect(source).not.toContain("key: `time:${gridTime}`");
+  });
+
+  it("HOME-FORYOU-AVAILABILITY-001：圆圈刷新的组合必须可用——没有可用活动就不配组合", () => {
+    // 用户定的核心测试点：活动是唯一“成立”判据（sceneActivities 只收挂真实
+    // 咖啡店的活动）。没有可用活动时，人/地点/时间单独摆出来也组不成一次可约，
+    // 不可用的不能被刷到——直接不渲染，而不是拿 placeIndex 兜底拼假组合。
+    expect(source).toContain("if (!gridActivity) return null;");
+    expect(source).toContain("if (!gridPlace) return null;");
+    // 反向臂：placeIndex 兜底不许回来（活动没有已知场地时配出来的地点一定对不上）。
+    expect(source).not.toContain("?? (sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined);");
+  });
+
   it("HOME-FORYOU-POOL-001：首屏随机起手，不再所有人都看到第 0 组", () => {
     // 四个 index 原来全 `useState(0)` ⇒ 所有人首屏组合一模一样。
     expect(source).toContain("const [forYouSeed] = useState(() => Math.floor(Math.random() * 0x7fffffff) + 1);");
@@ -356,7 +380,7 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     // 入口收成一个 —— 只留报名这条和原型「选择 → 确认支付」对应的交易链；
     // 出图 / 发布需求从四宫格摘除（发布需求在附近场景区仍有入口）。
     expect(source).toContain('t("joinCta")');
-    expect(source).toContain("joinSelected(gridActivity?.activityId)");
+    expect(source).toContain("joinSelected(gridActivity?.activityId, forYouRecipe)");
     expect(source).toContain('t("chainHint")');
     expect(source).not.toContain('"邀请 →"');
     expect(source).not.toContain("inviteSelected");
@@ -383,7 +407,7 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain('!lockedSlots.has("person") && filteredPeople.length > 1');
     // HOME-FORYOU-REFRESH-001：锁定的活动原样保留（仍可用时），锁定的地点 / 时间作为
     // 筛选条件交给 pickRefreshedActivity，没锁的时间 / 地点才跟着活动对齐。
-    expect(source).toContain('{ activityId: lockedSlots.has("activity") ? current?.activityId : undefined, placeSceneId: lockedPlace?.id, time: lockedTime }');
+    expect(source).toContain('{ activityId: !lockedSlots.has("activity") ? undefined : current?.activityId, placeSceneId: lockedPlace?.id, time: lockedTime }');
     expect(source).toContain('if (!lockedSlots.has("time")) {');
     expect(source).toContain('if (!lockedSlots.has("place")) {');
     // 锁定的格子拒开 chooser（点格子与搜索换项同一口径）。
@@ -488,24 +512,23 @@ describe("HOME-FORYOU-ORDER-003 确认下单之后那一屏", () => {
     expect(flowTag).toBeGreaterThan(-1);
     const between = source.slice(flowTag, chooser);
     expect((between.match(/<Modal[\s>]/g) ?? [])).toHaveLength(1);
-    expect(between).toContain("styles.orderTicket");
+    expect(between).toContain("<ActivityOrderTicket");
     expect(source).not.toContain("setOrderSheetOpen");
   });
 
-  it("订单编号读真实标识，不编一个假号", () => {
-    // HOME-FORYOU-ORDER-005（2026-09-29，用户「for you 的新订单编号没有用上」）：
-    // JoinActivity 现在回这笔报名**自己的**全数字订单编号（participation.orderNo，
-    // 与履约订单共用一个分配器）；之前下过单时服务端在 ACTIVITY_ALREADY_JOINED 里
-    // 回传既有编号。以前这里显示的是活动展示码 PX-A-…——同一场活动所有人同一个
-    // 号，那不是订单编号。拿不到编号（老服务端）就显示「—」，不拿活动码冒充。
-    expect(source).toContain('<Text selectable style={styles.orderCodeText}>{placedOrderNo ?? "—"}</Text>');
-    expect(source).toContain("setPlacedOrderNo(result.participation?.orderNo);");
-    expect(source).toContain("setPlacedOrderNo(orderNoFromJoinRejection(e));");
-    // 反向臂：活动展示码 / 活动 id 不许再当订单编号显示或复制。
-    expect(source).not.toContain("gridActivity?.code || gridActivity?.activityId");
-    expect(source).not.toContain("TK-");
-    expect(source).toContain("订单编号 · 点击复制");
-    expect(source).toContain("订单编号已复制");
+  it("订单编号优先读个人订单号（ORDER-NO-001），老服务端回落活动 code", () => {
+    // JoinActivity 成功 payload 带 orderNo（类别-越南日期-每日序号）；
+    // 重复下单走 safeDetails 带回原号。老服务端没有该字段时才退到活动 code
+    //（PX-A-yymmdd-####）再退 activityId，总比编一个好。
+    // 钉的是**显示出来的那一个**（不是剪贴板那一个）—— 同一段兜底在文件里
+    // 出现两次，只钉子串的话改掉展示用的那份也不会红。
+    // ORDER-RECIPE-001：票上显示的是快照里的 orderNo；快照缺席（老服务端）时成功页
+    // 自己拼的那份才按 orderNo → 活动 code → activityId 回落。
+    expect(ticket).toContain("<Text selectable style={styles.codeText}>{snapshot.orderNo}</Text>");
+    expect(source).toContain("orderNo: orderNo || gridActivity.code || gridActivity.activityId,");
+    expect(source + ticket).not.toContain("TK-");
+    expect(ticket).toContain("订单编号 · 点击复制");
+    expect(ticket).toContain("订单编号已复制");
   });
 
   it("原型里没有真能力的三样不许写进来（二维码 / 推送 / 日历）", () => {
@@ -514,40 +537,153 @@ describe("HOME-FORYOU-ORDER-003 确认下单之后那一屏", () => {
     // 时间戳，编不出真倒计时也编不出真日历事件。写出来都是兑现不了的承诺
     //（placeholder-honest-actions 禁的就是这个）。
     // ⚠️ 这三条是**反向钉**，所以本文件里也不许出现这三句原话。
-    expect(source).not.toContain("到场出示此票");
-    expect(source).not.toContain("推送提醒");
-    expect(source).not.toContain(">加入日历<");
+    for (const file of [source, ticket]) {
+      expect(file).not.toContain("到场出示此票");
+      expect(file).not.toContain("推送提醒");
+      expect(file).not.toContain(">加入日历<");
+    }
   });
 
   it("撕票线的冲孔必须和页面底色同色，否则孔会变成两个白点", () => {
     // 孔是画在票券卡**里面**的实心圆，靠卡的 overflow:"hidden" 把外半圆裁掉
     // 才成为一道缺口。底色和孔色读同一个 token —— 改一个不改另一个就露馅。
     const pageBg = /orderPage: \{ backgroundColor: (\S+?),/.exec(source)?.[1] ?? "";
-    const holeBg = /orderTearHole: \{ backgroundColor: (\S+?),/.exec(source)?.[1] ?? "";
+    const holeBg = /tearHole: \{ backgroundColor: (\S+?),/.exec(ticket)?.[1] ?? "";
     expect(pageBg).not.toBe("");
     expect(holeBg).toBe(pageBg);
-    expect(source).toContain('borderRadius: 18, borderWidth: 1, marginTop: -14, overflow: "hidden" }');
+    expect(ticket).toContain('ticket: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, overflow: "hidden" }');
     // 虚线**不能**用 dashed 边框画：RN(iOS) 只支持四边等宽的 dashed，单边
     //（borderTopWidth / borderBottomWidth）会打 "Unsupported dashed / dotted
     // border style" 并且**整条不画** —— 2026-09-28 模拟器像素级实测：撕票线和
     // meta 分隔线一起消失，那两段里一个非白像素都没有（第一版就是这么写的）。
     // 现在虚线是一排小方块（DashedRule）。这个文件里没有任何等宽 dashed 框，
     // 所以一旦出现 dashed 边框字面量，就是那条画不出来的单边虚线回来了。
-    expect(source).toContain('<DashedRule ruleColor={color.line} style={styles.orderTearLine} />');
-    expect(source).toContain('orderMetaRowRule: { bottom: 0, left: 0, position: "absolute", right: 0 }');
-    expect((source.match(/style=\{styles\.orderMetaRowRule\}/g) ?? [])).toHaveLength(3);
-    expect(source).not.toContain('borderStyle: "dashed"');
+    expect(ticket).toContain('<DashedRule ruleColor={color.line} style={styles.tearLine} />');
+    expect(ticket).toContain('metaRule: { bottom: 0, left: 0, position: "absolute", right: 0 }');
+    expect((ticket.match(/style=\{styles\.metaRule\}/g) ?? []).length).toBeGreaterThanOrEqual(3);
+    expect(source + ticket).not.toContain('borderStyle: "dashed"');
   });
 });
 
 describe("HOME-FORYOU-ORDER-004 确认下单总有下一步", () => {
   it("already-joined still opens the 已下单 page, honestly labelled as an existing order", () => {
-    // HOME-FORYOU-ORDER-005：之前下过的单也要把**既有编号**带到票券页。
-    expect(source).toMatch(/errorCode === "ACTIVITY_ALREADY_JOINED"\) \{\s+setPlacedOrderNo\(orderNoFromJoinRejection\(e\)\);\s+return "already";/);
+    expect(source).toMatch(/errorCode === "ACTIVITY_ALREADY_JOINED"/);
+    // ORDER-NO-001：重复下单把原来那一单的编号从 safeDetails 带回来，照样能进已下单页。
+    expect(source).toContain("e.result.error?.safeDetails?.orderNo");
     expect(source).toContain('if (outcome !== "failed") { setOrderExisting(outcome === "already"); setOrderCodeCopied(false); setOrderDone(true); }');
     expect(source).toContain('orderExisting ? "你之前已经下过这一单"');
   });
   it("real failures render above the footer, not buried at the bottom of the scroll", () => {
     expect(source).toContain('</ScrollView>\n                          {joinMsg && joinConfirmOpen ? <Text selectable style={styles.confirmJoinError}>{joinMsg}</Text> : null}');
+  });
+});
+
+// HOME-FORYOU-ORDER-005（用户「这个已下单的☑️ 显示3s可以自动消失 停留在recipe
+// 而不是持续」2026-09-29）：下单成功那一屏顶部的绿勾 + 「已下单」 + 人数/状态
+// 是给用户的瞬时反馈，不是常驻 hero。3 秒后让出 hero 区，留下面的票券本体
+// （订单编号 + 活动/时间/地点/费用 + 一起的人 + 分享/联系）。
+describe("HOME-FORYOU-ORDER-005 已下单 hero 3s 后让位给票券本体", () => {
+  it("wraps the success hero in orderHeroVisible so it can be dismissed", () => {
+    // 正向：hero <View> 前面紧跟 orderHeroVisible 条件（不能裸挂）。
+    // 用 [\s\S]*? 跨过 {paddingTop:safeArea.top+12} 的换行。
+    expect(source).toMatch(/orderHeroVisible \? \([\s\S]*?<View style=\{\[styles\.orderHero/);
+    // 反向：声明了 orderHeroVisible state 但没人用（白挂状态）。
+    expect(source).toContain("setOrderHeroVisible(true)");
+    expect(source).toContain("setOrderHeroVisible(false)");
+  });
+  it("auto-dismisses after 3000ms via an effect on orderDone", () => {
+    // 正向：3000ms 定时器挂在 orderDone 变化的 effect 里。
+    expect(source).toMatch(/useEffect\(\(\) => \{[\s\S]*?if \(!orderDone\)[\s\S]*?setOrderHeroVisible\(false\)[\s\S]*?return;\s*\}\s*setOrderHeroVisible\(true\);[\s\S]*?const timer = setTimeout\(\(\) => setOrderHeroVisible\(false\), 3000\)/);
+    // 反向：定时器时长必须是 3000，2500/5000 这些值都是错的（用户要的是 3s）。
+    expect(source).not.toMatch(/setTimeout\(\(\) => setOrderHeroVisible\(false\), (?!3000)\d+\)/);
+  });
+  it("also clears orderHeroVisible when the flow is closed", () => {
+    // 关闭流程时 hero 也复位，否则下次重开会出现无原因闪 hero。
+    expect(source).toMatch(/setOrderDone\(false\);[\s\S]{0,60}setOrderHeroVisible\(false\)/);
+  });
+});
+
+// HOME-FORYOU-ORDER-006（用户「顶部的编号被遮挡了 下面空白很多」2026-09-29）：
+// hero 退场后 ScrollView 从 y=0 开始，orderTicket 的 -14 上叠把订单编号 chip
+// 顶进状态栏/灵动岛底下（屏顶只剩 2pt）。修法：hero 不在时给成功页的
+// ScrollView contentContainerStyle 条件补 `paddingTop: safeArea.top + 24`。
+describe("HOME-FORYOU-ORDER-006 hero 退场后票券必须落到状态栏下方", () => {
+  it("adds safe-area top padding to the success scroll only while the hero is dismissed", () => {
+    // 正向：成功页的 ScrollView（紧跟 orderTicket 的那份）contentContainerStyle
+    // 必须带 `!orderHeroVisible && { paddingTop: safeArea.top` 的条件补距。
+    // 锚要钉在 orderTicket 前的那份 ScrollView 上 —— 确认页还有一份同款
+    // ScrollView（不带这个条件），只钉子串会两头都过。
+    expect(source).toMatch(
+      /<ScrollView contentContainerStyle=\{\[styles\.confirmScroll, !orderHeroVisible && \{ paddingTop: safeArea\.top \+ 24 \}\]\}[\s\S]{0,120}<ActivityOrderTicket/,
+    );
+  });
+  it("keeps the hero-present overlap untouched (-14 margin stays on orderTicket)", () => {
+    // 反向：补距只许在 hero 退场分支，不许动 orderTicket 本身的 -14 上叠
+    //（hero 在时票券要塞进圆角底下，改掉会露出一条底色缝）。
+    expect(ticket).toContain("ticketOverlap: { marginTop: -14 }");
+    expect(source).toMatch(/<ActivityOrderTicket[\s\S]{0,800}\n\s+overlapHero\n/);
+    // 反向：确认页（orderDone=false）那份 ScrollView 不许也吃到条件补距 ——
+    // 它有 confirmTopBar 自己管 safeArea，多吃一次顶部就空一截。
+    const confirmScrollCount = source.split("<ScrollView contentContainerStyle={[styles.confirmScroll, !orderHeroVisible").length - 1;
+    expect(confirmScrollCount).toBe(1);
+  });
+});
+
+// HOME-FORYOU-ORDER-007（用户「没有返回按钮」2026-09-29）：成功页没有返回入口，
+// 全屏 Modal iOS 不能下滑关闭，选了同行人时底部只有「分享/联系」—— 用户被困住。
+// 修法：左上角绝对定位返回键，onPress=closeOrderFlow，tone 随 hero 状态切换。
+describe("HOME-FORYOU-ORDER-007 成功页必须有返回键", () => {
+  it("overlays a back button wired to closeOrderFlow on the success page", () => {
+    // 正向：返回键存在、关的是整个下单流程（不是返回确认页）、字形走统一组件。
+    expect(source).toMatch(/accessibilityLabel="返回" onPress=\{closeOrderFlow\} style=\{\[styles\.orderBackButton[\s\S]{0,120}<ProxyBackGlyph tone=\{orderHeroVisible \? "onDark" : "ink"\} \/>/);
+  });
+  it("adapts the glyph tone to the hero state and exists exactly once", () => {
+    // 反向：tone 不许写死 —— hero 深底上 ink 是看不见的，退场后 onDark 是白点。
+    expect(source).toContain('tone={orderHeroVisible ? "onDark" : "ink"}');
+    expect(source).not.toContain('tone={orderHeroVisible ? "ink" : "onDark"}');
+    // 反向：orderBackButton 只许出现一次 —— 确认页有自己的 confirmTopBar，
+    // 再叠一个就是双返回键（JSX 用 1 处 + 样式定义 1 处 = 2）。
+    expect(source.split("orderBackButton").length - 1).toBe(2);
+  });
+});
+
+describe("HOME-FORYOU-PERSON-001 没有人就不是一个 For You 组合", () => {
+  it("disables 选择 and says to pick a companion when there is no person", () => {
+    expect(source).toMatch(/const comboBlocked = comboConflicts\.length > 0 \|\| !gridPerson\b/);
+    expect(source).toContain('!gridPerson ? t("comboNeedPerson") : comboConflictText;');
+    expect(source).toContain("disabled={comboBlocked}");
+    expect(source).toContain('{comboBlocked ? <Text selectable style={styles.comboConflictText}>{comboBlockText}</Text> : null}');
+  });
+  it("keeps a tappable empty 人 tile instead of silently dropping the slot", () => {
+    expect(source).toContain('{ key: "person:none", slot: "person" as const, imageUri: undefined, glyph: "●", label: t("tileNoPerson"), sub: t("tileNoPersonSub") }');
+  });
+  it("refuses a For You order without a companion, client and server", () => {
+    expect(source).toContain('if (recipe?.source === "FOR_YOU" && !recipe.companion) {');
+    expect(source).toContain('case "FOR_YOU_COMPANION_REQUIRED":');
+  });
+  it("the ticket never claims the activity simply has no companion", () => {
+    expect(source + ticket).not.toContain("这场活动还没有推荐同行人");
+  });
+});
+
+describe("HOME-FORYOU-ORDER-GUARD-001 下单前资源冲突守卫", () => {
+  it("loads my existing orders from the same source as 我的订单", () => {
+    expect(source).toContain("void activities.listMyActivities()");
+    expect(source).toContain('cancelled: order?.state === "CANCELLED",');
+  });
+  it("blocks 选择 when this combo is already ordered or the time slot is taken, and says why", () => {
+    expect(source).toContain("const orderConflict = detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time }, myOrders);");
+    expect(source).toContain("const comboBlocked = comboConflicts.length > 0 || !gridPerson || orderConflict !== undefined;");
+    expect(source).toContain('t("orderConflictAlready", { orderNo: conflict.orderNo ?? "—" })');
+    expect(source).toContain('t("orderConflictTime", { time: conflict.time, title: conflict.title })');
+  });
+  it("offers the existing ticket instead of a second order, without borrowing today's grid companion", () => {
+    expect(source).toContain('{t("viewExistingOrder")} ›');
+    expect(source).toContain("setOrderSnapshot(existingOrder.snapshot ?? {");
+  });
+  it("re-checks at submit time and remembers the new order immediately", () => {
+    expect(source).toContain("const conflict = target ? detectOrderConflict({ activityId, time: target.time }, myOrders) : undefined;");
+    expect(source).toContain("rememberMyOrder(activityId, result.orderNo, result.snapshot ?? undefined);");
+    expect(source).toContain('case "ACTIVITY_TIME_CONFLICT": {');
   });
 });

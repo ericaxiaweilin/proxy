@@ -659,7 +659,7 @@ func (s *Service) nextOrderNo(ctx context.Context) (string, error) {
 	if s.orderNumbers == nil {
 		return "", ordernumber.ErrUnavailable
 	}
-	return s.orderNumbers.Next(ctx)
+	return s.orderNumbers.Next(ctx, ordernumber.CategoryService)
 }
 
 // Repository exposes the underlying fulfillment repository so
@@ -2176,7 +2176,7 @@ func orderUpdateRejected(e command.Envelope, err error, code, messageKey string)
 // ---------- 订单状态机（ORDER-FSM-001） ----------
 // 唯一的合法迁移表。各命令先按自己的业务规则给出具体拒绝码；commitOrder 在
 // 写库前再用这张表和不变量兜底一次 —— 任何一条命令写错都过不了这里。
-// 数据库侧由 fulfillment.orders 的守卫触发器执行同一张表（migrations/135）。
+// 数据库侧由 fulfillment.orders 的守卫触发器执行同一张表（migrations/143）。
 var orderTransitions = map[string]map[string]bool{
 	"OFFERED":   {"CONFIRMED": true, "CANCELLED": true},
 	"CONFIRMED": {"EXECUTING": true, "CANCELLED": true},

@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ORDER-ROLE-001（migrations/138）：数据库角色分离。用临时的非超级用户角色实测 ——
+// ORDER-ROLE-001（migrations/146）：数据库角色分离。用临时的非超级用户角色实测 ——
 // 超级用户绕过所有权限检查，只测超级用户等于什么都没测。临时角色 / schema / 表都是本次
 // 运行自己建的（run 后缀），测试结束自己删；订单与审计行按设计不可删除，不清理。
 

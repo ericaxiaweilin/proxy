@@ -1,0 +1,1590 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>钱包 · Wallet</title>
+<style>
+  :root {
+    --bg: #F4F6FB;
+    --card: #FFFFFF;
+    --text: #1A1D26;
+    --sub: #6B7280;
+    --light: #9CA3AF;
+    --line: #EEF1F6;
+    --diamond: #38BDF8;
+    --diamond-d: #0284C7;
+    --diamond-s: #E0F2FE;
+    --bean: #F59E0B;
+    --bean-d: #B45309;
+    --bean-s: #FEF3C7;
+    --ticket: #A855F7;
+    --ticket-d: #7E22CE;
+    --ticket-s: #F3E8FF;
+    --ok: #16A34A;
+    --ok-s: #DCFCE7;
+    --warn: #F97316;
+    --warn-s: #FFF7ED;
+    --bad: #EF4444;
+    --bad-s: #FEE2E2;
+    --r: 14px;
+    --sh: 0 4px 12px rgba(23,27,38,0.06);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #E9EDF5;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+    color: var(--text);
+  }
+  .phone {
+    width: 100%;
+    max-width: 420px;
+    min-height: 100vh;
+    background: var(--bg);
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* ============ 页面容器 ============ */
+  .page {
+    display: none;
+    padding-bottom: 32px;
+    animation: fade .2s ease;
+  }
+  .page.active { display: block; }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+  /* ============ 通用顶部导航 ============ */
+  .nav {
+    background: linear-gradient(160deg, #1B2130, #232B3D);
+    padding: 12px 16px 18px;
+    display: flex;
+    align-items: center;
+    color: #fff;
+  }
+  .nav .back {
+    font-size: 22px;
+    width: 32px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .nav h1 {
+    font-size: 17px;
+    font-weight: 700;
+    flex: 1;
+    text-align: center;
+    margin-right: 32px;
+  }
+  .nav .act {
+    font-size: 12px;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+  }
+
+  /* ============ 通用区块 ============ */
+  .sec { margin: 16px; }
+  .sec-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .sec-title h2 { font-size: 14px; font-weight: 700; }
+  .sec-title .more { font-size: 11px; color: var(--light); }
+
+  .card {
+    background: var(--card);
+    border-radius: var(--r);
+    box-shadow: var(--sh);
+    padding: 14px;
+  }
+
+  /* ============================================================
+     页面 1：钱包首页
+     ============================================================ */
+  .hero {
+    background: linear-gradient(160deg, #1B2130, #232B3D);
+    padding: 0 16px 22px;
+    border-radius: 0 0 24px 24px;
+  }
+  .hero .title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 4px 18px;
+    color: #fff;
+  }
+  .hero .title h1 { font-size: 20px; font-weight: 700; }
+  .hero .title .vip {
+    font-size: 11px;
+    background: linear-gradient(135deg, #FDE68A, #F59E0B);
+    color: #5B3A00;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-weight: 700;
+  }
+
+  /* 三资产卡 */
+  .assets {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 18px;
+    padding: 16px 8px 14px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 6px;
+  }
+  .asset {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    cursor: pointer;
+  }
+  .asset + .asset::before {
+    content: "";
+    position: absolute;
+    left: -3px;
+    top: 12%;
+    height: 76%;
+    width: 1px;
+    background: rgba(255,255,255,0.08);
+  }
+  .asset .ico {
+    width: 34px; height: 34px;
+    border-radius: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    margin-bottom: 8px;
+  }
+  .asset .ico.d { background: rgba(56,189,248,0.18); }
+  .asset .ico.b { background: rgba(245,158,11,0.18); }
+  .asset .ico.t { background: rgba(168,85,247,0.18); }
+  .asset .lb { font-size: 11px; color: rgba(255,255,255,0.55); margin-bottom: 4px; }
+  .asset .vl {
+    font-size: 17px;
+    font-weight: 800;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .asset .sb { font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 3px; min-height: 13px; }
+  .asset .btn {
+    margin-top: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: 999px;
+    border: none;
+    cursor: pointer;
+  }
+  .asset .btn.d { background: var(--diamond); color: #06283D; }
+  .asset .btn.b { background: var(--bean); color: #4A2B00; }
+  .asset .btn.t { background: var(--ticket); color: #fff; }
+
+  /* 提醒条 */
+  .alert {
+    margin: 14px 16px 0;
+    background: var(--warn-s);
+    border: 1px solid #FED7AA;
+    border-radius: var(--r);
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #9A3412;
+    cursor: pointer;
+  }
+  .alert .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--warn);
+    animation: pulse 1.6s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50% { opacity: .4; transform: scale(.8); }
+  }
+  .alert .go {
+    margin-left: auto;
+    color: #EA580C;
+    font-weight: 700;
+    font-size: 11px;
+    background: #FFEDD5;
+    padding: 3px 8px;
+    border-radius: 999px;
+  }
+
+  /* 功能宫格 */
+  .grid4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+  .func {
+    background: var(--card);
+    border-radius: var(--r);
+    padding: 14px 4px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    box-shadow: var(--sh);
+    cursor: pointer;
+    transition: transform .15s;
+  }
+  .func:active { transform: scale(.95); }
+  .func .ico {
+    width: 38px; height: 38px;
+    border-radius: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+  .func .ico.blue { background: var(--diamond-s); }
+  .func .ico.gold { background: var(--bean-s); }
+  .func .ico.purple { background: var(--ticket-s); }
+  .func .ico.green { background: var(--ok-s); }
+  .func .lb { font-size: 11px; font-weight: 500; }
+
+  /* 充值套餐横滑 */
+  .scroll {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .scroll::-webkit-scrollbar { display: none; }
+  .pkg {
+    flex: 0 0 120px;
+    background: var(--card);
+    border-radius: var(--r);
+    padding: 14px 12px;
+    box-shadow: var(--sh);
+    position: relative;
+    border: 1.5px solid transparent;
+    cursor: pointer;
+  }
+  .pkg.hot { border-color: var(--diamond); background: linear-gradient(180deg,#F0F9FF,#fff); }
+  .pkg .tag {
+    position: absolute;
+    top: -1px; right: -1px;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 3px 7px;
+    border-radius: 0 12px 0 10px;
+    background: var(--diamond);
+    color: #06283D;
+  }
+  .pkg .n { font-size: 19px; font-weight: 800; display: flex; align-items: baseline; gap: 3px; }
+  .pkg .n small { font-size: 11px; color: var(--sub); font-weight: 500; }
+  .pkg .bn { font-size: 10px; color: var(--ok); font-weight: 700; margin-top: 4px; min-height: 13px; }
+  .pkg .pr { font-size: 12px; font-weight: 700; margin-top: 8px; }
+
+  /* 活动横幅 */
+  .banner {
+    background: linear-gradient(135deg, #312E81, #6D28D9 55%, #A855F7);
+    border-radius: 18px;
+    padding: 16px 18px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 8px 20px rgba(109,40,217,.25);
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .banner::after {
+    content: "";
+    position: absolute;
+    right: -20px; top: -20px;
+    width: 100px; height: 100px;
+    border-radius: 50%;
+    background: rgba(255,255,255,.1);
+  }
+  .banner h3 { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .banner p { font-size: 11px; opacity: .8; }
+  .banner .go {
+    background: rgba(255,255,255,.2);
+    border: 1px solid rgba(255,255,255,.25);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 999px;
+    z-index: 1;
+  }
+
+  /* ============================================================
+     页面 2：充值页
+     ============================================================ */
+  .topup-hero {
+    margin: 0 16px;
+    background: linear-gradient(135deg, #0C1929, #162D4A 55%, #0C1929);
+    border-radius: 18px;
+    padding: 20px 18px 18px;
+    color: #fff;
+    border: 1px solid rgba(56,189,248,.15);
+    position: relative;
+    overflow: hidden;
+  }
+  .topup-hero::after {
+    content: "";
+    position: absolute;
+    right: -40px; top: -40px;
+    width: 140px; height: 140px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(56,189,248,.25), transparent 70%);
+  }
+  .topup-hero .lb { font-size: 12px; color: rgba(255,255,255,.6); margin-bottom: 10px; }
+  .topup-hero .vl {
+    font-size: 32px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    background: linear-gradient(135deg, #BAE6FD, #38BDF8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .topup-hero .vl small { font-size: 13px; color: rgba(255,255,255,.7); font-weight: 600; -webkit-text-fill-color: rgba(255,255,255,.7); margin-left: 6px; }
+
+  .pkg-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 9px;
+  }
+  .pkg-cell {
+    background: var(--card);
+    border-radius: var(--r);
+    padding: 14px 4px 11px;
+    box-shadow: var(--sh);
+    text-align: center;
+    cursor: pointer;
+    border: 1.5px solid transparent;
+    transition: all .15s;
+    position: relative;
+    overflow: hidden;
+  }
+  .pkg-cell:active { transform: scale(.96); }
+  .pkg-cell.sel { border-color: var(--diamond); box-shadow: 0 0 0 3px rgba(56,189,248,.18); }
+  .pkg-cell.hot { background: linear-gradient(180deg,#F0F9FF,#fff); }
+  .pkg-cell .tag {
+    position: absolute;
+    top: 0; right: 0;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 3px 7px;
+    border-radius: 0 12px 0 10px;
+    color: #fff;
+  }
+  .pkg-cell .tag.hot { background: var(--diamond); color: #06283D; }
+  .pkg-cell .tag.best { background: linear-gradient(135deg,#F59E0B,#D97706); }
+  .pkg-cell .n { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .pkg-cell .n small { font-size: 10px; color: var(--sub); font-weight: 500; }
+  .pkg-cell .bn { font-size: 10px; color: var(--ok); font-weight: 700; min-height: 13px; margin-top: 2px; }
+  .pkg-cell .pr { font-size: 11px; font-weight: 700; color: var(--sub); margin-top: 5px; }
+
+  /* 支付方式 */
+  .pay-item {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 13px 0;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+  }
+  .pay-item:last-child { border-bottom: none; }
+  .pay-item .lg {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 17px;
+    flex-shrink: 0;
+  }
+  .pay-item .lg.momo { background: #FDF2F8; }
+  .pay-item .lg.zalo { background: #EFF6FF; }
+  .pay-item .lg.card { background: #F0FDF4; }
+  .pay-item .lg.iap { background: #F5F3FF; }
+  .pay-item .info { flex: 1; min-width: 0; }
+  .pay-item .info .n { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 5px; margin-bottom: 2px; }
+  .pay-item .info .d { font-size: 10px; color: var(--light); }
+  .pay-item .bdg {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .pay-item .bdg.save { background: var(--ok-s); color: #15803D; }
+  .pay-item .bdg.expensive { background: var(--warn-s); color: var(--warn); }
+  .pay-item .rd {
+    width: 19px; height: 19px;
+    border-radius: 50%;
+    border: 2px solid #D1D5DB;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .pay-item.sel .rd { border-color: var(--diamond); background: var(--diamond); }
+  .pay-item.sel .rd::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+
+  /* ============================================================
+     页面 3：金豆中心
+     ============================================================ */
+  .bean-hero {
+    margin: 0 16px;
+    background: linear-gradient(135deg, #2A2118, #3D2E1A 55%, #2A2118);
+    border-radius: 18px;
+    padding: 20px 18px 18px;
+    color: #fff;
+    border: 1px solid rgba(245,158,11,.15);
+    position: relative;
+    overflow: hidden;
+  }
+  .bean-hero::after {
+    content: "";
+    position: absolute;
+    right: -40px; top: -40px;
+    width: 140px; height: 140px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(245,158,11,.22), transparent 70%);
+  }
+  .bean-hero .lb { font-size: 12px; color: rgba(255,255,255,.6); margin-bottom: 10px; }
+  .bean-hero .vl {
+    font-size: 32px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    background: linear-gradient(135deg, #FDE68A, #F59E0B);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .bean-hero .vl small { font-size: 13px; color: rgba(255,255,255,.7); font-weight: 600; -webkit-text-fill-color: rgba(255,255,255,.7); margin-left: 6px; }
+
+  .notice {
+    margin: 12px 16px 0;
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: #1E40AF;
+    line-height: 1.6;
+    display: flex;
+    gap: 7px;
+  }
+  .notice .ic { flex-shrink: 0; }
+
+  /* 兑换卡 */
+  .ex-card {
+    background: var(--card);
+    border-radius: var(--r);
+    padding: 14px;
+    box-shadow: var(--sh);
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: transform .15s;
+    border: 1.5px solid transparent;
+  }
+  .ex-card:active { transform: scale(.985); }
+  .ex-card.featured { border-color: var(--bean); background: linear-gradient(135deg,#FFFDF7,#fff); }
+  .ex-card .head {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    margin-bottom: 12px;
+  }
+  .ex-card .head .ic {
+    width: 42px; height: 42px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  .ex-card .head .ic.d { background: var(--diamond-s); }
+  .ex-card .head .ic.t { background: var(--ticket-s); }
+  .ex-card .head .ic.v { background: var(--bean-s); }
+  .ex-card .head .tx { flex: 1; }
+  .ex-card .head .tx .t { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+  .ex-card .head .tx .d { font-size: 11px; color: var(--sub); }
+  .ex-card .rate {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #FAFBFD;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .ex-card .rate .l { color: var(--bean-d); }
+  .ex-card .rate .a { color: var(--light); font-size: 12px; }
+  .ex-card .rate .r.d { color: var(--diamond-d); }
+  .ex-card .rate .r.t { color: var(--ticket-d); }
+  .ex-card .rate .r.v { color: var(--bean-d); }
+
+  /* ============================================================
+     页面 4：券包
+     ============================================================ */
+  .tab-row {
+    display: flex;
+    gap: 6px;
+    padding: 12px 16px 0;
+  }
+  .tab-row .tb {
+    flex: 1;
+    padding: 9px 0;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--sub);
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .tab-row .tb.on {
+    background: var(--ticket);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(168,85,247,.3);
+  }
+
+  .tk-list { padding: 12px 16px 0; display: flex; flex-direction: column; gap: 10px; }
+  .tk {
+    background: var(--card);
+    border-radius: var(--r);
+    display: flex;
+    overflow: hidden;
+    box-shadow: var(--sh);
+    position: relative;
+    cursor: pointer;
+  }
+  .tk .left {
+    flex: 0 0 90px;
+    padding: 14px 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    position: relative;
+  }
+  .tk .left.gift { background: linear-gradient(160deg,#A855F7,#7E22CE); }
+  .tk .left.discount { background: linear-gradient(160deg,#F97316,#EA580C); }
+  .tk .left.vip { background: linear-gradient(160deg,#F59E0B,#D97706); }
+  .tk .left::after {
+    content: "";
+    position: absolute;
+    right: -1px; top: 0; bottom: 0;
+    width: 2px;
+    background: repeating-linear-gradient(to bottom, transparent 0, transparent 6px, rgba(255,255,255,.35) 6px, rgba(255,255,255,.35) 10px);
+  }
+  .tk::before, .tk::after {
+    content: "";
+    position: absolute;
+    left: 82px;
+    width: 14px; height: 14px;
+    background: var(--bg);
+    border-radius: 50%;
+    z-index: 1;
+  }
+  .tk::before { top: -7px; }
+  .tk::after { bottom: -7px; }
+  .tk .left .n { font-size: 20px; font-weight: 800; line-height: 1; }
+  .tk .left .n small { font-size: 11px; }
+  .tk .left .u { font-size: 10px; margin-top: 4px; opacity: .85; }
+  .tk .body {
+    flex: 1;
+    padding: 12px 12px 12px 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-width: 0;
+  }
+  .tk .body .t {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .tk .body .t .badge {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--warn-s);
+    color: var(--warn);
+  }
+  .tk .body .d { font-size: 11px; color: var(--sub); line-height: 1.5; margin-bottom: 6px; }
+  .tk .body .m { font-size: 10px; color: var(--light); }
+  .tk .body .m.urgent { color: var(--bad); font-weight: 600; }
+  .tk .act {
+    flex: 0 0 70px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-right: 10px;
+  }
+  .tk .act .btn {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .tk .act .btn.gift { background: linear-gradient(135deg,#A855F7,#7E22CE); }
+  .tk .act .btn.discount { background: linear-gradient(135deg,#F97316,#EA580C); }
+  .tk .act .btn.vip { background: linear-gradient(135deg,#F59E0B,#D97706); }
+  .tk.disabled { opacity: .55; }
+  .tk.disabled .left { background: linear-gradient(160deg,#9CA3AF,#6B7280) !important; }
+
+  /* ============================================================
+     页面 5：交易记录
+     ============================================================ */
+  .filters {
+    display: flex;
+    gap: 7px;
+    padding: 12px 16px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .filters::-webkit-scrollbar { display: none; }
+  .filter {
+    flex: 0 0 auto;
+    font-size: 11px;
+    padding: 6px 13px;
+    border-radius: 999px;
+    background: var(--card);
+    color: var(--sub);
+    border: 1px solid rgba(0,0,0,.06);
+    cursor: pointer;
+    font-weight: 500;
+    transition: all .2s;
+  }
+  .filter.on { background: #1A1D26; color: #fff; border-color: #1A1D26; font-weight: 600; }
+
+  .tx-list { padding: 12px 16px 0; }
+  .tx-group { margin-bottom: 16px; }
+  .tx-date {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--light);
+    padding: 4px 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tx-date::after { content: ""; flex: 1; height: 1px; background: #E5E9F0; }
+
+  .tx {
+    background: var(--card);
+    border-radius: var(--r);
+    padding: 12px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    box-shadow: var(--sh);
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: transform .15s;
+  }
+  .tx:active { transform: scale(.985); }
+  .tx.d { border-left-color: var(--diamond); }
+  .tx.b { border-left-color: var(--bean); }
+  .tx.t { border-left-color: var(--ticket); }
+  .tx .ic {
+    width: 38px; height: 38px;
+    border-radius: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 17px;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .tx .ic.d { background: var(--diamond-s); }
+  .tx .ic.b { background: var(--bean-s); }
+  .tx .ic.t { background: var(--ticket-s); }
+  .tx .ic .badge {
+    position: absolute;
+    bottom: -2px; right: -2px;
+    width: 15px; height: 15px;
+    border-radius: 50%;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.12);
+  }
+  .tx .body { flex: 1; min-width: 0; }
+  .tx .body .t {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 3px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+  .tx .body .t .tag {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .tx .body .t .tag.pending { background: var(--warn-s); color: var(--warn); }
+  .tx .body .t .tag.fail { background: var(--bad-s); color: var(--bad); }
+  .tx .body .d { font-size: 10px; color: var(--light); }
+  .tx .amt { text-align: right; flex-shrink: 0; }
+  .tx .amt .n {
+    font-size: 14px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .tx .amt .n.plus { color: var(--ok); }
+  .tx .amt .n.minus { color: var(--text); }
+  .tx .amt .n.dim { color: var(--light); }
+  .tx .amt .u { font-size: 10px; color: var(--light); margin-top: 2px; }
+
+  /* ============================================================
+     底部操作栏（充值页专用）
+     ============================================================ */
+  .bottom-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 0;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 420px;
+    background: rgba(255,255,255,.96);
+    backdrop-filter: blur(14px);
+    border-top: 1px solid var(--line);
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    z-index: 20;
+    box-shadow: 0 -6px 24px rgba(23,27,38,.06);
+  }
+  .bottom-bar .left { flex: 1; min-width: 0; }
+  .bottom-bar .left .l { font-size: 10px; color: var(--light); margin-bottom: 2px; }
+  .bottom-bar .left .n {
+    font-size: 19px;
+    font-weight: 800;
+    color: var(--diamond-d);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .buy-btn {
+    flex: 0 0 150px;
+    padding: 14px 0;
+    border-radius: 999px;
+    border: none;
+    background: linear-gradient(135deg,#38BDF8,#0284C7);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 8px 20px rgba(2,132,199,.35);
+  }
+  .buy-btn:disabled { background: #E5E7EB; color: var(--light); box-shadow: none; }
+
+  /* ============================================================
+     Toast
+     ============================================================ */
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 40px;
+    transform: translateX(-50%) translateY(20px);
+    background: rgba(23,27,38,.92);
+    color: #fff;
+    font-size: 12px;
+    padding: 10px 18px;
+    border-radius: 999px;
+    opacity: 0;
+    pointer-events: none;
+    transition: all .25s;
+    z-index: 200;
+    white-space: nowrap;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div class="phone">
+
+  <!-- ============================================================
+       页面 1：钱包首页
+       ============================================================ -->
+  <div class="page active" id="page-home">
+    <div class="hero">
+      <div class="title">
+        <h1>我的钱包</h1>
+        <div class="vip">👑 VIP 3</div>
+      </div>
+      <div class="assets">
+        <div class="asset" onclick="go('topup')">
+          <div class="ico d">💎</div>
+          <div class="lb">钻石</div>
+          <div class="vl" id="homeDiamond">12,680</div>
+          <div class="sb">不可提现</div>
+          <button class="btn d">充值</button>
+        </div>
+        <div class="asset" onclick="go('bean')">
+          <div class="ico b">🪙</div>
+          <div class="lb">金豆</div>
+          <div class="vl" id="homeBean">8,420</div>
+          <div class="sb">可兑钻石</div>
+          <button class="btn b">兑换</button>
+        </div>
+        <div class="asset" onclick="go('ticket')">
+          <div class="ico t">🎫</div>
+          <div class="lb">券</div>
+          <div class="vl" id="homeTicket">4张</div>
+          <div class="sb">2张将过期</div>
+          <button class="btn t">查看</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert" onclick="go('ticket')">
+      <span class="dot"></span>
+      <span><b>2张券</b>将在 24 小时内过期</span>
+      <span class="go">去使用</span>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title"><h2>常用功能</h2></div>
+      <div class="grid4">
+        <div class="func" onclick="go('topup')">
+          <div class="ico blue">💎</div>
+          <div class="lb">充值</div>
+        </div>
+        <div class="func" onclick="go('bean')">
+          <div class="ico gold">🔄</div>
+          <div class="lb">兑换</div>
+        </div>
+        <div class="func" onclick="go('ticket')">
+          <div class="ico purple">🎫</div>
+          <div class="lb">券包</div>
+        </div>
+        <div class="func" onclick="go('history')">
+          <div class="ico green">📋</div>
+          <div class="lb">记录</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">
+        <h2>热门充值</h2>
+        <span class="more" onclick="go('topup')">更多 ›</span>
+      </div>
+      <div class="scroll">
+        <div class="pkg hot" onclick="go('topup')">
+          <div class="tag">首充</div>
+          <div class="n">120 <small>钻</small></div>
+          <div class="bn">+20 赠</div>
+          <div class="pr">₫25,000</div>
+        </div>
+        <div class="pkg" onclick="go('topup')">
+          <div class="n">680 <small>钻</small></div>
+          <div class="bn">+80 赠</div>
+          <div class="pr">₫189,000</div>
+        </div>
+        <div class="pkg" onclick="go('topup')">
+          <div class="n">3,280 <small>钻</small></div>
+          <div class="bn">+680 赠</div>
+          <div class="pr">₫899,000</div>
+        </div>
+        <div class="pkg" onclick="go('topup')">
+          <div class="n">12,800 <small>钻</small></div>
+          <div class="bn">+3,800 赠</div>
+          <div class="pr">₫3,299,000</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="banner" onclick="toast('限时活动：金豆兑券 8 折')">
+        <div>
+          <h3>金豆兑券 8 折</h3>
+          <p>限时 3 天 · 券可兑限定礼物</p>
+        </div>
+        <div class="go">立即参与</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       页面 2：钻石充值
+       ============================================================ -->
+  <div class="page" id="page-topup">
+    <div class="nav">
+      <div class="back" onclick="go('home')">‹</div>
+      <h1>充值钻石</h1>
+      <div class="act" onclick="toast('充值说明')">?</div>
+    </div>
+
+    <div class="topup-hero">
+      <div class="lb">💎 钻石余额</div>
+      <div class="vl" id="topupDiamond">12,680<small>钻石</small></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title"><h2>选择套餐</h2></div>
+      <div class="pkg-grid" id="pkgGrid"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title"><h2>支付方式</h2></div>
+      <div class="card" style="padding: 4px 14px;" id="payList">
+        <div class="pay-item sel" data-m="momo" onclick="selPay(this)">
+          <div class="lg momo">🟣</div>
+          <div class="info">
+            <div class="n">MoMo <span class="bdg save">-25%</span></div>
+            <div class="d">Ví điện tử · 越南本地钱包</div>
+          </div>
+          <div class="rd"></div>
+        </div>
+        <div class="pay-item" data-m="zalo" onclick="selPay(this)">
+          <div class="lg zalo">🔵</div>
+          <div class="info">
+            <div class="n">ZaloPay <span class="bdg save">-20%</span></div>
+            <div class="d">Ví ZaloPay · 越南本地钱包</div>
+          </div>
+          <div class="rd"></div>
+        </div>
+        <div class="pay-item" data-m="card" onclick="selPay(this)">
+          <div class="lg card">💳</div>
+          <div class="info">
+            <div class="n">银行卡 <span class="bdg save">-15%</span></div>
+            <div class="d">Visa / Mastercard / ATM</div>
+          </div>
+          <div class="rd"></div>
+        </div>
+        <div class="pay-item" data-m="iap" onclick="selPay(this)">
+          <div class="lg iap">📱</div>
+          <div class="info">
+            <div class="n">应用内购 <span class="bdg expensive">较贵</span></div>
+            <div class="d">App Store / Google Play</div>
+          </div>
+          <div class="rd"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       页面 3：金豆中心
+       ============================================================ -->
+  <div class="page" id="page-bean">
+    <div class="nav">
+      <div class="back" onclick="go('home')">‹</div>
+      <h1>金豆中心</h1>
+      <div class="act" onclick="toast('金豆记录')">记录</div>
+    </div>
+
+    <div class="bean-hero">
+      <div class="lb">🪙 我的金豆</div>
+      <div class="vl" id="beanBalance">8,420<small>金豆</small></div>
+    </div>
+
+    <div class="notice">
+      <span class="ic">ℹ️</span>
+      <div>根据越南法规，金豆<b>不可提现</b>，仅可兑换钻石、券或特权。公会主播收益通过机构结算通道处理。</div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title"><h2>兑换</h2></div>
+
+      <div class="ex-card featured" onclick="openExchange('diamond')">
+        <div class="head">
+          <div class="ic d">💎</div>
+          <div class="tx">
+            <div class="t">兑换钻石</div>
+            <div class="d">钻石用于购买礼物、解锁功能</div>
+          </div>
+        </div>
+        <div class="rate">
+          <span class="l">🪙 3 金豆</span>
+          <span class="a">→</span>
+          <span class="r d">💎 1 钻石</span>
+        </div>
+      </div>
+
+      <div class="ex-card" onclick="openExchange('ticket')">
+        <div class="head">
+          <div class="ic t">🎫</div>
+          <div class="tx">
+            <div class="t">兑换券</div>
+            <div class="d">礼物券 / 折扣券 / 抽奖券</div>
+          </div>
+        </div>
+        <div class="rate">
+          <span class="l">🪙 800 金豆</span>
+          <span class="a">→</span>
+          <span class="r t">🎫 1 张礼物券</span>
+        </div>
+      </div>
+
+      <div class="ex-card" onclick="openExchange('vip')">
+        <div class="head">
+          <div class="ic v">👑</div>
+          <div class="tx">
+            <div class="t">兑换 VIP 特权</div>
+            <div class="d">专属进场特效、标识、弹幕颜色</div>
+          </div>
+        </div>
+        <div class="rate">
+          <span class="l">🪙 5,000 金豆</span>
+          <span class="a">→</span>
+          <span class="r v">👑 VIP 7 天</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="card" onclick="toast('跳转机构结算页面')" style="display:flex;align-items:center;gap:12px;cursor:pointer;">
+        <div style="width:40px;height:40px;border-radius:12px;background:#1E293B;color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;">🏢</div>
+        <div style="flex:1;">
+          <div style="font-size:13px;font-weight:700;margin-bottom:3px;">机构结算通道</div>
+          <div style="font-size:11px;color:var(--sub);">公会主播收益由机构统一结算</div>
+        </div>
+        <div style="color:var(--light);font-size:16px;">›</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       页面 4：券包
+       ============================================================ -->
+  <div class="page" id="page-ticket">
+    <div class="nav">
+      <div class="back" onclick="go('home')">‹</div>
+      <h1>我的券</h1>
+      <div class="act" onclick="toast('券使用说明')">说明</div>
+    </div>
+
+    <div class="tab-row">
+      <button class="tb on" data-t="valid" onclick="switchTicketTab('valid')">可用 4</button>
+      <button class="tb" data-t="expired" onclick="switchTicketTab('expired')">已失效 1</button>
+    </div>
+
+    <div class="tk-list" id="tkList"></div>
+  </div>
+
+  <!-- ============================================================
+       页面 5：交易记录
+       ============================================================ -->
+  <div class="page" id="page-history">
+    <div class="nav">
+      <div class="back" onclick="go('home')">‹</div>
+      <h1>交易记录</h1>
+      <div class="act" onclick="toast('打开客服工单')">客服</div>
+    </div>
+
+    <div class="filters">
+      <div class="filter on" data-f="all" onclick="switchFilter('all')">全部</div>
+      <div class="filter" data-f="d" onclick="switchFilter('d')">钻石</div>
+      <div class="filter" data-f="b" onclick="switchFilter('b')">金豆</div>
+      <div class="filter" data-f="t" onclick="switchFilter('t')">券</div>
+      <div class="filter" data-f="pending" onclick="switchFilter('pending')">处理中</div>
+    </div>
+
+    <div class="tx-list" id="txList"></div>
+  </div>
+
+  <!-- 底部操作栏（仅充值页显示） -->
+  <div class="bottom-bar" id="bottomBar" style="display:none;">
+    <div class="left">
+      <div class="l">应付</div>
+      <div class="n" id="bbPrice">₫0</div>
+    </div>
+    <button class="buy-btn" id="buyBtn" disabled onclick="doPurchase()">立即充值</button>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  /* ============================================================
+     全局状态
+     ============================================================ */
+  const state = {
+    diamond: 12680,
+    bean: 8420,
+    ticket: 4,
+    currentPay: 'momo',
+    selectedPkg: null,
+    ticketTab: 'valid',
+    txFilter: 'all'
+  };
+
+  /* ============================================================
+     页面路由
+     ============================================================ */
+  function go(page) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + page).classList.add('active');
+
+    // 底部栏只在充值页显示
+    const bb = document.getElementById('bottomBar');
+    if (page === 'topup') {
+      bb.style.display = 'flex';
+      renderPackages();
+      refreshBuyBar();
+    } else {
+      bb.style.display = 'none';
+    }
+
+    if (page === 'ticket') renderTickets();
+    if (page === 'history') renderTx();
+    if (page === 'bean') updateBeanDisplay();
+
+    window.scrollTo(0, 0);
+  }
+
+  /* ============================================================
+     资产显示刷新
+     ============================================================ */
+  function refreshAssets() {
+    document.getElementById('homeDiamond').textContent = state.diamond.toLocaleString('en-US');
+    document.getElementById('homeBean').textContent = state.bean.toLocaleString('en-US');
+    document.getElementById('homeTicket').textContent = state.ticket + '张';
+    document.getElementById('topupDiamond').innerHTML = state.diamond.toLocaleString('en-US') + '<small>钻石</small>';
+  }
+
+  function updateBeanDisplay() {
+    document.getElementById('beanBalance').innerHTML = state.bean.toLocaleString('en-US') + '<small>金豆</small>';
+  }
+
+  /* ============================================================
+     充值页：套餐数据
+     ============================================================ */
+  const packages = [
+    { d: 60,    b: 0,     vnd: 0.99,  tag: '' },
+    { d: 300,   b: 20,    vnd: 4.99,  tag: '' },
+    { d: 680,   b: 80,    vnd: 9.99,  tag: 'hot' },
+    { d: 1280,  b: 200,   vnd: 19.99, tag: '' },
+    { d: 3280,  b: 680,   vnd: 49.99, tag: 'hot' },
+    { d: 6480,  b: 1680,  vnd: 99.99, tag: '' },
+    { d: 12800, b: 3800,  vnd: 199.99,tag: 'best' },
+    { d: 32800, b: 10800, vnd: 499.99,tag: '' },
+    { d: 64800, b: 22800, vnd: 999.99,tag: 'best' }
+  ];
+
+  const payMeta = {
+    momo: { name: 'MoMo', discount: 0.25 },
+    zalo: { name: 'ZaloPay', discount: 0.20 },
+    card: { name: '银行卡', discount: 0.15 },
+    iap:  { name: '应用内购', discount: 0, markup: 1.30 }
+  };
+
+  const VND_RATE = 25400;
+
+  function calcPrice(pkg, pay) {
+    const m = payMeta[pay];
+    const base = pkg.vnd * VND_RATE;
+    const markup = m.markup || 1;
+    return Math.round(base * (1 - m.discount) * markup);
+  }
+
+  function fmtVND(n) {
+    return '₫' + Math.round(n).toLocaleString('vi-VN');
+  }
+
+  function renderPackages() {
+    const grid = document.getElementById('pkgGrid');
+    grid.innerHTML = packages.map((p, i) => {
+      const total = p.d + p.b;
+      let tagHtml = '';
+      if (p.tag === 'hot') tagHtml = '<div class="tag hot">HOT</div>';
+      else if (p.tag === 'best') tagHtml = '<div class="tag best">BEST</div>';
+      else if (p.b > 0) tagHtml = `<div class="tag" style="background:var(--ok);">+${Math.round(p.b/p.d*100)}%</div>`;
+
+      return `
+        <div class="pkg-cell ${p.tag === 'hot' ? 'hot' : ''}"
+             data-idx="${i}"
+             onclick="selPkg(${i})">
+          ${tagHtml}
+          <div class="n">${total.toLocaleString('en-US')}<small>钻</small></div>
+          <div class="bn">${p.b > 0 ? '+' + p.b.toLocaleString('en-US') + '赠' : ''}</div>
+          <div class="pr">${fmtVND(calcPrice(p, state.currentPay))}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function selPkg(i) {
+    state.selectedPkg = packages[i];
+    document.querySelectorAll('.pkg-cell').forEach(el => {
+      el.classList.toggle('sel', parseInt(el.dataset.idx, 10) === i);
+    });
+    refreshBuyBar();
+  }
+
+  function selPay(el) {
+    document.querySelectorAll('.pay-item').forEach(p => p.classList.remove('sel'));
+    el.classList.add('sel');
+    state.currentPay = el.dataset.m;
+
+    renderPackages();
+    if (state.selectedPkg) {
+      const idx = packages.indexOf(state.selectedPkg);
+      document.querySelectorAll('.pkg-cell').forEach(el => {
+        el.classList.toggle('sel', parseInt(el.dataset.idx, 10) === idx);
+      });
+    }
+    refreshBuyBar();
+  }
+
+  function refreshBuyBar() {
+    const btn = document.getElementById('buyBtn');
+    const price = document.getElementById('bbPrice');
+
+    if (!state.selectedPkg) {
+      price.textContent = '₫0';
+      btn.disabled = true;
+      btn.textContent = '立即充值';
+      return;
+    }
+
+    const p = state.selectedPkg;
+    const total = p.d + p.b;
+    price.textContent = fmtVND(calcPrice(p, state.currentPay));
+    btn.disabled = false;
+    btn.textContent = `充值 ${total.toLocaleString('en-US')} 钻`;
+  }
+
+  function doPurchase() {
+    const p = state.selectedPkg;
+    if (!p) return;
+    const total = p.d + p.b;
+    state.diamond += total;
+    refreshAssets();
+
+    toast(`充值成功 +${total.toLocaleString('en-US')} 钻石`);
+    state.selectedPkg = null;
+    document.querySelectorAll('.pkg-cell').forEach(el => el.classList.remove('sel'));
+    refreshBuyBar();
+  }
+
+  /* ============================================================
+     金豆兑换
+     ============================================================ */
+  const exPackages = {
+    diamond: [
+      { bean: 300,  give: 100,  unit: '钻石' },
+      { bean: 1500, give: 500,  unit: '钻石' },
+      { bean: 3000, give: 1100, unit: '钻石' },
+      { bean: 9000, give: 3500, unit: '钻石' }
+    ],
+    ticket: [
+      { bean: 800,  give: 1,  unit: '张礼物券' },
+      { bean: 1500, give: 2,  unit: '张礼物券' },
+      { bean: 3600, give: 5,  unit: '张礼物券' },
+      { bean: 7000, give: 10, unit: '张礼物券' }
+    ],
+    vip: [
+      { bean: 5000,  give: 7,  unit: '天 VIP' },
+      { bean: 9000,  give: 14, unit: '天 VIP' },
+      { bean: 16000, give: 30, unit: '天 VIP' }
+    ]
+  };
+
+  function openExchange(type) {
+    const list = exPackages[type];
+    const names = { diamond: '钻石', ticket: '券', vip: 'VIP' };
+
+    // 简化弹层：直接展示可兑换的档位，点击直接兑换
+    const options = list.map((p, i) => {
+      const can = state.bean >= p.bean;
+      return `${p.bean.toLocaleString('en-US')} 金豆 → ${p.give} ${p.unit}${can ? '' : '（金豆不足）'}`;
+    }).join('\n');
+
+    // 用简单的 confirm 逻辑模拟
+    const input = prompt(`兑换${names[type]}\n当前金豆：${state.bean.toLocaleString('en-US')}\n\n可选档位：\n${options}\n\n输入序号兑换（1-${list.length}）：`);
+    if (!input) return;
+    const idx = parseInt(input, 10) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= list.length) {
+      toast('输入无效');
+      return;
+    }
+    const p = list[idx];
+    if (state.bean < p.bean) {
+      toast('金豆不足');
+      return;
+    }
+    state.bean -= p.bean;
+    if (type === 'diamond') state.diamond += p.give;
+    if (type === 'ticket') state.ticket += p.give;
+
+    refreshAssets();
+    updateBeanDisplay();
+    toast(`兑换成功：${p.give} ${p.unit}`);
+  }
+
+  /* ============================================================
+     券包
+     ============================================================ */
+  const tickets = [
+    {
+      id: 'T1', type: 'gift', name: '礼物券',
+      n: 1, u: '次', title: '限定礼物免费送',
+      desc: '可兑换「星光玫瑰」×1',
+      expire: Date.now() + 18 * 3600 * 1000,
+      status: 'valid'
+    },
+    {
+      id: 'T2', type: 'discount', name: '折扣券',
+      n: 8, u: '折', title: '充值满减券',
+      desc: '充值 98 元及以上套餐可用',
+      expire: Date.now() + 23 * 3600 * 1000,
+      status: 'valid'
+    },
+    {
+      id: 'T3', type: 'vip', name: '特权券',
+      n: 3, u: '天', title: 'VIP 体验 3 天',
+      desc: '解锁 VIP 专属进场特效',
+      expire: Date.now() + 6 * 24 * 3600 * 1000,
+      status: 'valid'
+    },
+    {
+      id: 'T4', type: 'gift', name: '礼物券',
+      n: 1, u: '次', title: '限定礼物免费送',
+      desc: '可兑换「樱花雨」×1',
+      expire: Date.now() + 10 * 24 * 3600 * 1000,
+      status: 'valid'
+    },
+    {
+      id: 'T5', type: 'discount', name: '折扣券',
+      n: 9, u: '折', title: '充值满减券',
+      desc: '已过期',
+      expire: Date.now() - 24 * 3600 * 1000,
+      status: 'expired'
+    }
+  ];
+
+  function switchTicketTab(t) {
+    state.ticketTab = t;
+    document.querySelectorAll('.tab-row .tb').forEach(el => {
+      el.classList.toggle('on', el.dataset.t === t);
+    });
+    renderTickets();
+  }
+
+  function renderTickets() {
+    const list = document.getElementById('tkList');
+    let data = tickets.filter(t => t.status === state.ticketTab);
+    data.sort((a, b) => a.expire - b.expire);
+
+    if (data.length === 0) {
+      list.innerHTML = `<div style="padding:60px 20px;text-align:center;color:var(--light);font-size:12px;">暂无券</div>`;
+      return;
+    }
+
+    list.innerHTML = data.map(t => {
+      const urgent = t.expire - Date.now() < 24 * 3600 * 1000 && t.status === 'valid';
+      const hrs = Math.floor((t.expire - Date.now()) / 3600000);
+      let expireText = '';
+      if (t.status === 'expired') expireText = '已过期';
+      else if (hrs < 24) expireText = `${hrs} 小时后过期`;
+      else expireText = `${Math.floor(hrs/24)} 天后过期`;
+
+      const disabled = t.status !== 'valid';
+      return `
+        <div class="tk ${disabled ? 'disabled' : ''}" onclick="useTicket('${t.id}')">
+          <div class="left ${t.type}">
+            <div class="n">${t.n}<small>${t.u}</small></div>
+            <div class="u">${t.name}</div>
+          </div>
+          <div class="body">
+            <div>
+              <div class="t">
+                ${t.title}
+                ${urgent ? '<span class="badge">即将过期</span>' : ''}
+              </div>
+              <div class="d">${t.desc}</div>
+            </div>
+            <div class="m ${urgent ? 'urgent' : ''}">${expireText}</div>
+          </div>
+          <div class="act">
+            ${disabled
+              ? `<span style="font-size:10px;color:var(--light);">${t.status === 'expired' ? '已过期' : '已使用'}</span>`
+              : `<button class="btn ${t.type}">去使用</button>`
+            }
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function useTicket(id) {
+    const t = tickets.find(x => x.id === id);
+    if (!t) return;
+    if (t.status !== 'valid') {
+      toast('该券已失效');
+      return;
+    }
+    toast('已跳转使用：' + t.title);
+  }
+
+  /* ============================================================
+     交易记录
+     ============================================================ */
+  const txs = [
+    // 今天
+    { id: 'A1', c: 'b', title: '收到「星光玫瑰」', desc: '来自「小鹿」· 直播间 888', amt: 320,  unit: '金豆', time: Date.now() - 32*60000, status: 'ok' },
+    { id: 'A2', c: 'd', title: '购买「星光玫瑰」×1', desc: '送给「小鹿」· 直播间 888', amt: -450, unit: '钻石', time: Date.now() - 38*60000, status: 'ok' },
+    { id: 'A3', c: 'd', title: 'MoMo 充值 680 钻', desc: '含赠送 80 钻', amt: 680, unit: '钻石', time: Date.now() - 3*3600000, status: 'ok' },
+    // 昨天
+    { id: 'B1', c: 'd', title: '3,000 金豆 → 1,000 钻石', desc: '按 3:1 汇率兑换', amt: 1000, unit: '钻石', time: Date.now() - 26*3600000, status: 'ok' },
+    { id: 'B2', c: 'b', title: '兑换 1,000 钻石', desc: '按 3:1 汇率兑换', amt: -3000, unit: '金豆', time: Date.now() - 26*3600000, status: 'ok' },
+    { id: 'B3', c: 't', title: '获得「限定礼物券」×1', desc: '周任务奖励 · 有效期 7 天', amt: 1, unit: '张', time: Date.now() - 30*3600000, status: 'ok' },
+    // 更早
+    { id: 'C1', c: 'd', title: 'ZaloPay 充值 3,280 钻', desc: '等待支付通道确认', amt: 3280, unit: '钻石', time: Date.now() - 48*3600000, status: 'pending' },
+    { id: 'C2', c: 't', title: '使用「礼物券」×1', desc: '直播间 888 使用', amt: -1, unit: '张', time: Date.now() - 72*3600000, status: 'ok' },
+    { id: 'C3', c: 'd', title: '购买「豪华礼盒」失败', desc: '钻石余额不足', amt: -8888, unit: '钻石', time: Date.now() - 96*3600000, status: 'fail' }
+  ];
+
+  const curIco = { d: '💎', b: '🪙', t: '🎫' };
+  const typeIco = {
+    '收到「星光玫瑰」': '🎀',
+    '购买「星光玫瑰」×1': '🎁',
+    'MoMo 充值 680 钻': '📥',
+    '3,000 金豆 → 1,000 钻石': '🔄',
+    '兑换 1,000 钻石': '🔄',
+    '获得「限定礼物券」×1': '🎫',
+    'ZaloPay 充值 3,280 钻': '⏳',
+    '使用「礼物券」×1': '✅',
+    '购买「豪华礼盒」失败': '✕'
+  };
+
+  function switchFilter(f) {
+    state.txFilter = f;
+    document.querySelectorAll('.filter').forEach(el => {
+      el.classList.toggle('on', el.dataset.f === f);
+    });
+    renderTx();
+  }
+
+  function renderTx() {
+    const list = document.getElementById('txList');
+    let data = txs.slice();
+
+    if (state.txFilter === 'd') data = data.filter(t => t.c === 'd');
+    else if (state.txFilter === 'b') data = data.filter(t => t.c === 'b');
+    else if (state.txFilter === 't') data = data.filter(t => t.c === 't');
+    else if (state.txFilter === 'pending') data = data.filter(t => t.status === 'pending');
+
+    if (data.length === 0) {
+      list.innerHTML = `<div style="padding:60px 20px;text-align:center;color:var(--light);font-size:12px;">暂无记录</div>`;
+      return;
+    }
+
+    // 分组
+    const groups = { '今天': [], '昨天': [], '更早': [] };
+    data.forEach(t => {
+      const d = new Date(t.time);
+      const now = new Date();
+      const diff = Math.floor((now - d) / 86400000);
+      if (d.toDateString() === now.toDateString()) groups['今天'].push(t);
+      else if (diff === 1) groups['昨天'].push(t);
+      else groups['更早'].push(t);
+    });
+
+    list.innerHTML = Object.keys(groups).map(label => {
+      const arr = groups[label];
+      if (arr.length === 0) return '';
+      return `
+        <div class="tx-group">
+          <div class="tx-date">${label}</div>
+          ${arr.map(t => renderTxItem(t)).join('')}
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderTxItem(t) {
+    const ico = typeIco[t.title] || curIco[t.c];
+    const sign = t.amt > 0 ? '+' : '';
+    let amtCls = 'minus';
+    if (t.status === 'fail') amtCls = 'dim';
+    else if (t.amt > 0) amtCls = 'plus';
+
+    let tag = '';
+    if (t.status === 'pending') tag = '<span class="tag pending">处理中</span>';
+    else if (t.status === 'fail') tag = '<span class="tag fail">失败</span>';
+
+    const d = new Date(t.time);
+    const hh = String(d.getHours()).padStart(2,'0');
+    const mm = String(d.getMinutes()).padStart(2,'0');
+
+    return `
+      <div class="tx ${t.c}" onclick="toast('订单详情：${t.title}')">
+        <div class="ic ${t.c}">
+          ${ico}
+          <span class="badge">${curIco[t.c]}</span>
+        </div>
+        <div class="body">
+          <div class="t">${t.title}${tag}</div>
+          <div class="d">${hh}:${mm} · ${t.desc}</div>
+        </div>
+        <div class="amt">
+          <div class="n ${amtCls}">${sign}${Math.abs(t.amt).toLocaleString('en-US')}</div>
+          <div class="u">${t.unit}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  /* ============================================================
+     Toast
+     ============================================================ */
+  const toastEl = document.getElementById('toast');
+  let toastTimer = null;
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+  }
+
+  /* ============================================================
+     初始化
+     ============================================================ */
+  refreshAssets();
+  renderPackages();
+  renderTickets();
+  renderTx();
+</script>
+</body>
+</html>

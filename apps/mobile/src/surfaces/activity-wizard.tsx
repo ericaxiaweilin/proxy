@@ -457,7 +457,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
         <Pressable accessibilityLabel={t("backShort")} onPress={onBack} style={styles.backBtn}>
           <ProxyBackGlyph />
         </Pressable>
-        <Text selectable style={styles.title}>{t("createTitle")}</Text>
+        <Text selectable style={styles.title}>{t("createNavTitle")}</Text>
         <Pressable accessibilityLabel={t("draftSave")} onPress={() => void saveDraft()} style={styles.draftBtn}>
           <Text selectable style={styles.draftText}>{t("draftSave")}</Text>
         </Pressable>
@@ -465,7 +465,6 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
       <View style={styles.progressBar}>
         <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
       </View>
-      <Text selectable style={styles.heroTitle}>{t("createTitle")}</Text>
       <Text selectable style={styles.heroSub}>{t("createSub")}</Text>
 
       {/* 1. 分类 */}
@@ -818,7 +817,6 @@ const styles = StyleSheet.create({
   // Body 14/500、Meta 12/500、Caption 11/600、Button 14/800；数字加 tabular-nums。
   // 两个例外：name/place 输入框用 16px（iOS 小于 16 自动 zoom）；sheetTitle 20/800
   // 跟仓里现有 sheet 同口径。
-  heroTitle: { color: color.ink, fontSize: 28, fontWeight: "900", letterSpacing: -1, paddingHorizontal: 20 },
   heroSub: { color: color.muted, fontSize: 12, fontWeight: "500", marginBottom: 8, marginTop: 6, paddingHorizontal: 20 },
   block: { marginBottom: 24, opacity: 0.32, paddingHorizontal: 20 },
   blockActive: { opacity: 1 },
@@ -869,7 +867,7 @@ const styles = StyleSheet.create({
   mapBtn: { alignItems: "center", height: 56, justifyContent: "center", width: 48 },
   mapPage: { flex: 1 },
   pickedCard: { alignItems: "center", borderColor: "#2E9B58", borderRadius: 14, borderWidth: 1.5, flexDirection: "row", gap: 12, marginTop: 12, padding: 12 },
-  pickedBadge: { backgroundColor: "#E8F4EA", borderRadius: 4, color: "#1E6E3E", fontSize: 9.5, fontWeight: "900", paddingHorizontal: 7, paddingVertical: 2 },
+  pickedBadge: { backgroundColor: "#E8F4EA", borderRadius: 4, color: "#1E6E3E", fontSize: 11, fontWeight: "900", paddingHorizontal: 7, paddingVertical: 2 },
   pickedBody: { flex: 1 },
   pickedName: { color: color.ink, fontSize: 14, fontWeight: "800" },
   pickedMeta: { color: color.muted, fontSize: 11, fontWeight: "600", marginTop: 3 },

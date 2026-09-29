@@ -583,56 +583,8 @@ export const styles = StyleSheet.create({
   messageUnreadText: { color: color.white, fontSize: 11, fontWeight: "900" },
   messageChev: { color: "#A59EAA", fontSize: 16 },
 
-  walletDarkCard: {
-    backgroundColor: color.ink,
-    borderRadius: 16,
-    marginBottom: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 18
-  },
-  walletDarkLabel: { color: "rgba(255,255,255,0.6)", fontSize: 11, fontWeight: "600" },
-  walletDarkAmount: { color: color.white, fontSize: 24, fontWeight: "900", marginTop: 4 },
-  walletDarkHint: { color: "rgba(255,255,255,0.45)", fontSize: 11, marginTop: 4 },
-  walletCard: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginBottom: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    ...shadows.card
-  },
-  walletCardLabel: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  walletCardValue: { color: color.ink, fontSize: 16, fontWeight: "800", marginTop: 4 },
-  walletCardHint: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },
-  walletAction: {
-    alignItems: "center",
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 14,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    ...shadows.card
-  },
-  walletActionIcon: { backgroundColor: "#F5F1F7", borderRadius: 10, fontSize: 16, height: 36, textAlign: "center", lineHeight: 36, width: 36 },
-  walletActionBody: { flex: 1 },
-  walletActionLabel: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  walletActionDesc: { color: color.muted, fontSize: 11, marginTop: 2 },
+  // 钱包整页已迁到独立 surface（wallet.tsx）；walletActionArrow 还被能力页复用，保留。
   walletActionArrow: { color: color.muted, fontSize: 16 },
-  walletBtnLight: {
-    alignItems: "center",
-    borderColor: color.line,
-    borderRadius: 999,
-    borderWidth: 1,
-    marginTop: 4,
-    paddingVertical: 11
-  },
-  walletBtnLightText: { color: color.ink, fontSize: 11, fontWeight: "700" },
 
   subSection: {
     backgroundColor: color.white,

@@ -84,6 +84,10 @@ describe("ACTIVITY-CREATE-FORM-001 ten-block progressive create form", () => {
     expect(activityWizard).toContain("windowHeight - insets.top)");
     expect(source).toContain("wizardMapOpen ? null : (");
     expect(source).toContain("wizardMapOpen && styles.contentMapPick");
+    // 导航栏叫创建活动；hero 大标题已删（跟导航重复，废话），只留副标题指路。
+    expect(activityWizard).toContain('style={styles.title}>{t("createNavTitle")}');
+    expect(activityWizard).not.toContain("heroTitle");
+    expect(activityWizard).toContain('style={styles.heroSub}>{t("createSub")}');
     // 全页地图期间藏底栏（底栏只有一级模块有）：壳级状态，跟 hotScenesOpen 同模式。
     // 不能走滚动显隐通道 —— 它的“回顶部就显示”会把全页态翻回来。
     expect(activityWizard).toContain("onMapPickOpenChange?.(true)");

@@ -9,7 +9,7 @@ import (
 )
 
 // NumberLookupRecorder 把每次客服反查写进只追加的 operator.number_lookups
-// （PUBLIC-NO-LOOKUP-001，migrations/137）。用 queryerForContext：命令跑在事务里
+// （PUBLIC-NO-LOOKUP-001，migrations/145）。用 queryerForContext：命令跑在事务里
 // （api.executeCommand → WithinTransaction）时，审计行与命令同一事务提交 / 回滚。
 type NumberLookupRecorder struct{ pool *pgxpool.Pool }
 

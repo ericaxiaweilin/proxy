@@ -133,14 +133,15 @@ func TestPublicNumberLookupPostgres(t *testing.T) {
 		t.Fatalf("order lookup must return the trigger-written audit trail: %+v", order.Audit)
 	}
 	// 没查到 / 抄错一位。
-	unknown := ordernumber.Format(900_000_000+time.Now().UnixNano()%99_000_000, time.Now())
+	unknown := ordernumber.Format(ordernumber.CategoryService, time.Now(), 900_000+int(time.Now().UnixNano()%99_000))
 	if r := f.lookup(ctx, f.operator, unknown, "ticket-"+run); r.Error == nil || r.Error.ErrorCode != "NUMBER_NOT_FOUND" {
 		t.Fatalf("unassigned number: %+v", r)
 	}
+	// 没有校验位：抄错一位但结构仍成立的号只会是「查无」。
 	typo := []byte(f.orderNo)
 	typo[len(typo)-1] = '0' + (typo[len(typo)-1]-'0'+3)%10
-	if r := f.lookup(ctx, f.operator, string(typo), "ticket-"+run); r.Error == nil || r.Error.ErrorCode != "NUMBER_INVALID" {
-		t.Fatalf("typo: %+v", r)
+	if r := f.lookup(ctx, f.operator, string(typo), "ticket-"+run); r.Error == nil || r.Error.ErrorCode != "NUMBER_NOT_FOUND" {
+		t.Fatalf("a well-formed mistyped number is simply not found: %+v", r)
 	}
 
 	// 每次查询一行：4 类命中 + 订单再查一次 + 没查到 + 抄错 = 7 行，全部带操作者和理由。
@@ -227,7 +228,7 @@ func TestNumberLookupQueriesUseTheirIndexesPostgres(t *testing.T) {
 		{"opportunity number", opportunityByNumberSQL, "marketplace_opportunities_number_key"},
 		{"activity code", activityByCodeSQL, "activity_code_digits_key"},
 		{"order number", `SELECT id FROM fulfillment.orders WHERE order_no = $1`, "fulfillment_orders_order_no_key"},
-		{"participation number", `SELECT activity_id FROM activity.participants WHERE order_no = $1`, "activity_participants_order_no_key"},
+		{"participation number", `SELECT activity_id FROM activity.participants WHERE order_no = $1`, "ux_participants_order_no"},
 	}
 	for _, tc := range cases {
 		tx, err := pool.Begin(ctx)
@@ -237,7 +238,7 @@ func TestNumberLookupQueriesUseTheirIndexesPostgres(t *testing.T) {
 		if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan = off`); err != nil {
 			t.Fatal(err)
 		}
-		rows, err := tx.Query(ctx, `EXPLAIN `+tc.sql, "2609290000000016")
+		rows, err := tx.Query(ctx, `EXPLAIN `+tc.sql, "200260929100022000001")
 		if err != nil {
 			t.Fatalf("%s: explain: %v", tc.name, err)
 		}

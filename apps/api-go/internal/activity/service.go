@@ -13,10 +13,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/aiboundary"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
+	"github.com/proxy-app/proxy-api/internal/wallet"
 )
 
 // Activity 是本地活动（对齐基线 activityCatalog 字段）。
@@ -90,9 +92,24 @@ type Activity struct {
 // Service 处理活动命令。生产使用 PostgreSQL；New() 保留内存仓储供隔离测试使用。
 type Service struct {
 	repository Repository
-	// orderNumbers 给每笔报名分配全数字订单编号（ACT-ORDER-NO-001）。生产由
-	// main.go 注入与履约订单共用的分配器；默认进程内计数器（开发 / 单测）。
+	// orderNumbers 给活动本身分配全数字编号（Activity.Code）。报名订单编号由仓储在报名事务里
+	// 按场地类别分配（ordernumber 规范），不经过这里。生产由 main.go 注入。
 	orderNumbers ordernumber.Allocator
+	// WALLET-001：签到奖励桥。nil 时不发豆（缺省行为不变）；接上后签到成功
+	// 发放固定数额金豆。发放失败不回滚签到（签到是事实，豆是奖励），调用方
+	// 在 main.go 接线。
+	beansAwarder BeansAwarder
+}
+
+// BeansAwarder 是 wallet.GrantBeans 的最小形状（避免 activity → wallet 整包
+// 依赖之外的耦合；wallet 不反向依赖 activity，无循环）。
+type BeansAwarder interface {
+	GrantBeans(ctx context.Context, userID string, amount int64, reason, refID string) error
+}
+
+// SetBeansAwarder 接入签到发豆（main.go 里接 walletService）。
+func (s *Service) SetBeansAwarder(awarder BeansAwarder) {
+	s.beansAwarder = awarder
 }
 
 var (
@@ -106,10 +123,13 @@ type Repository interface {
 	Create(ctx context.Context, activity Activity) error
 	List(ctx context.Context) ([]Activity, error)
 	ToggleInterest(ctx context.Context, activityID, actorID string) (Activity, bool, error)
-	// Join 报名：占座 + 写报名记录（带 orderNo）同一事务。已有有效报名 ⇒ 返回既有
+	// Join 报名：占座 + 写报名记录（订单编号 + 下单快照）同一事务。订单编号由仓储按场地类别
+	// 分配（ordernumber 规范：类别码 + 越南本地日期时间 + 当天序号）。已有有效报名 ⇒ 返回既有
 	// 记录 + ErrAlreadyJoined；满员 ⇒ ErrActivityFull；之前取消过 ⇒ 重新激活同一条
-	// 记录（沿用原编号，orderNo 参数作废）。
-	Join(ctx context.Context, activityID, actorID, orderNo string) (Activity, Participation, error)
+	// 记录（沿用原编号，快照按这次下单刷新）。
+	// ORDER-RECIPE-001：recipe 是下单上下文（For You 的选择），仓库在同一事务里把
+	// BuildOrderSnapshot 的结果和订单编号一起落库。
+	Join(ctx context.Context, activityID, actorID string, recipe JoinRecipe) (Activity, Participation, error)
 	// GetParticipation 读报名记录；没有 ⇒ ErrNotJoined。
 	GetParticipation(ctx context.Context, activityID, actorID string) (Participation, error)
 	// TransitionParticipation 在行锁内把报名从 allowedFrom 之一改成 to；当前状态不在
@@ -123,6 +143,11 @@ type Repository interface {
 	// 两个方法必须都是 actor-scoped：不能“错”返回为“”"（否则看到“别人的”"）。
 	ListByOwner(ctx context.Context, ownerID string) ([]Activity, error)
 	ListByParticipant(ctx context.Context, actorID string) ([]Activity, error)
+	// MY-ORDERS-DETAIL-001：该 actor 每一笔报名自己的订单信息（编号 + 下单时间），
+	// 「我的订单」逐单展示用。只返回本人的，actor-scoped。
+	ListJoinOrders(ctx context.Context, actorID string) ([]JoinOrder, error)
+	// GetJoinOrder 取本人某一笔报名（编号 + 快照）；没报过名返回 ok=false。
+	GetJoinOrder(ctx context.Context, activityID, actorID string) (JoinOrder, bool, error)
 
 	// SCENE-COMPANION-001: 只对调用方已经提供的候选 actor id 集合做命中测试
 	// （"这些人里谁在这个场景报名过活动"），不能反查"这个场景有哪些人报名
@@ -135,6 +160,23 @@ type MemoryRepository struct {
 	mu         sync.Mutex
 	activities map[string]*Activity
 	order      []string
+	// ORDER-NO-001：内存版订单编号（key = activityID + "|" + actorID）和每日计数器。
+	orderNos map[string]string
+	daySeq   map[string]int
+	joinedAt map[string]time.Time
+	snapshots map[string]OrderSnapshot
+}
+
+// JoinOrder 是一笔活动报名自己的订单信息（MY-ORDERS-DETAIL-001）。
+// State 来自报名状态记录（取消/签到/爽约）；那份记录目前只在内存里，
+// 取不到时留空，客户端按「已确认」显示（报名行存在 = 报名成立）。
+type JoinOrder struct {
+	ActivityID string    `json:"activityId"`
+	OrderNo    string    `json:"orderNo,omitempty"`
+	JoinedAt   time.Time `json:"joinedAt"`
+	State      string    `json:"state,omitempty"`
+	// ORDER-RECIPE-001：下单那一刻的票面；这个功能上线前的报名没有，为 nil。
+	Snapshot *OrderSnapshot `json:"snapshot,omitempty"`
 }
 
 func New() *Service {
@@ -267,7 +309,7 @@ func (s *Service) publishActivity(ctx context.Context, e command.Envelope) comma
 	if s.orderNumbers == nil {
 		return command.Rejected(e, "NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "activity.number_unavailable", nil)
 	}
-	code, codeErr := s.orderNumbers.Next(ctx)
+	code, codeErr := s.orderNumbers.Next(ctx, ordernumber.CategoryActivity)
 	if codeErr != nil {
 		return command.Rejected(e, "NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "activity.number_unavailable", nil)
 	}
@@ -332,9 +374,16 @@ func (s *Service) listMyActivities(ctx context.Context, e command.Envelope) comm
 	for i := range joined {
 		normalizeActivityForOutput(&joined[i])
 	}
+	// MY-ORDERS-DETAIL-001：每笔报名自己的订单信息。读失败不挡「我的活动」主数据，
+	// 返回空列表，客户端对缺的单显示「编号生成前的报名」之类的中性说明。
+	joinOrders, err := s.repository.ListJoinOrders(ctx, e.Actor.ID)
+	if err != nil {
+		joinOrders = []JoinOrder{}
+	}
 	return acceptedWithPayload(e, "Activity", e.Actor.ID, 1, "LISTED", map[string]any{
-		"created": created,
-		"joined":  joined,
+		"created":    created,
+		"joined":     joined,
+		"joinOrders": joinOrders,
 		"note":    "我的活动: created = 我发起的, joined = 我参加的. 都按 created_at 逆序.",
 	}, nil)
 }
@@ -386,6 +435,12 @@ type activityRefPayload struct {
 	ActivityID string `json:"activityId"`
 }
 
+// joinActivityPayload：JoinActivity 在 activityId 之外可选带下单上下文（ORDER-RECIPE-001）。
+type joinActivityPayload struct {
+	ActivityID string     `json:"activityId"`
+	Recipe     JoinRecipe `json:"recipe"`
+}
+
 func (s *Service) toggleInterest(ctx context.Context, e command.Envelope) command.Result {
 	if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.InterestActivity) {
 		return command.Rejected(e, "AI_ACTION_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "ai.action_forbidden", nil)
@@ -418,30 +473,43 @@ func (s *Service) joinActivity(ctx context.Context, e command.Envelope) command.
 	if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.JoinActivity) {
 		return command.Rejected(e, "AI_ACTION_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "ai.action_forbidden", nil)
 	}
-	var p activityRefPayload
+	var p joinActivityPayload
 	if !decode(e.Payload, &p) || p.ActivityID == "" {
 		return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)
 	}
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
 	}
-	if s.orderNumbers == nil {
-		return command.Rejected(e, "ORDER_NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "activity.order_number_unavailable", nil)
+	// HOME-FORYOU-PERSON-001：For You 是「人 + 时间 + 场景 + 地点」一起下单，没有同行人
+	// 就不是一个组合，不许下出一张没人的票。直接报名活动（不带 FOR_YOU）不受影响。
+	if p.Recipe.Source == "FOR_YOU" && (p.Recipe.Companion == nil || strings.TrimSpace(p.Recipe.Companion.Name) == "") {
+		return command.Rejected(e, "FOR_YOU_COMPANION_REQUIRED", "VALIDATION", "AFTER_USER_ACTION", "activity.for_you_companion_required", nil)
 	}
-	orderNo, err := s.orderNumbers.Next(ctx)
-	if err != nil {
-		return command.Rejected(e, "ORDER_NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "activity.order_number_unavailable", nil)
+	// HOME-FORYOU-ORDER-GUARD-001：同一个人同一个时间段只能有一单（人不能同时在两处）。
+	// 同一场活动的重复下单由仓库层 ErrAlreadyJoined 拦；这里拦「另一场活动、同一时间」。
+	if clash, found, err := s.timeClash(ctx, p.ActivityID, e.Actor.ID); err != nil {
+		return command.Rejected(e, "ACTIVITY_JOIN_FAILED", "INTERNAL", "SAFE_RETRY", "activity.join_failed", nil)
+	} else if found {
+		return command.Rejected(e, "ACTIVITY_TIME_CONFLICT", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.time_conflict", map[string]any{
+			"activityId": clash.ID, "title": clash.Title, "time": clash.Time,
+		})
 	}
-	a, participation, err := s.repository.Join(ctx, p.ActivityID, e.Actor.ID, orderNo)
+	a, participation, err := s.repository.Join(ctx, p.ActivityID, e.Actor.ID, p.Recipe)
 	if errors.Is(err, ErrActivityNotFound) {
 		return command.Rejected(e, "ACTIVITY_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.not_found", nil)
 	}
 	if errors.Is(err, ErrAlreadyJoined) {
-		// HOME-FORYOU-ORDER-004：重复下单也要拿得到自己那张票 —— 返回既有编号。
-		return command.Rejected(e, "ACTIVITY_ALREADY_JOINED", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.already_joined", map[string]any{
-			"orderNo": participation.OrderNo,
-			"state":   string(participation.State),
-		})
+		// HOME-FORYOU-ORDER-004 / ORDER-NO-001：重复下单不新开一单，把原来那一单的编号和状态带回去，
+		// 客户端照样能进已下单页。
+		details := map[string]any{"state": string(participation.State)}
+		if participation.OrderNo != "" {
+			details["orderNo"] = participation.OrderNo
+		}
+		// ORDER-RECIPE-001：已下过单时把当初存的票面也带回去，已下单页照原样重画。
+		if prior, ok, _ := s.repository.GetJoinOrder(ctx, p.ActivityID, e.Actor.ID); ok && prior.Snapshot != nil {
+			details["snapshot"] = prior.Snapshot
+		}
+		return command.Rejected(e, "ACTIVITY_ALREADY_JOINED", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.already_joined", details)
 	}
 	if errors.Is(err, ErrActivityFull) {
 		return command.Rejected(e, "ACTIVITY_FULL", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.full", map[string]any{"capacity": a.Capacity})
@@ -456,9 +524,21 @@ func (s *Service) joinActivity(ctx context.Context, e command.Envelope) command.
 	return acceptedWithPayload(e, "Activity", a.ID, 1, "JOINED", map[string]any{
 		"activity":      a,
 		"joined":        true,
+		"orderNo":       participation.OrderNo,
 		"participation": participation,
+		"snapshot":      s.joinSnapshot(ctx, p.ActivityID, e.Actor.ID),
 		"note":          "确认参加后开放活动群聊",
 	}, nil)
+}
+
+// joinSnapshot 读回刚落库的下单快照（成功页照它画票，跟「我的订单」同一份数据）。
+// 读失败返回 nil，客户端退回用下单时手头的数据画，不挡下单成功。
+func (s *Service) joinSnapshot(ctx context.Context, activityID, actorID string) *OrderSnapshot {
+	order, ok, err := s.repository.GetJoinOrder(ctx, activityID, actorID)
+	if err != nil || !ok {
+		return nil
+	}
+	return order.Snapshot
 }
 
 func (s *Service) cancelActivity(ctx context.Context, e command.Envelope) command.Result {
@@ -498,6 +578,12 @@ func (s *Service) checkinActivity(ctx context.Context, e command.Envelope) comma
 	participation, _, err := s.repository.TransitionParticipation(ctx, p.ActivityID, e.Actor.ID, []ParticipationState{PartConfirmed}, PartAttended)
 	if rejected, failed := participationRejected(e, err, participation, "ACTIVITY_CHECKIN_NOT_ALLOWED", "activity.checkin_not_allowed", "ACTIVITY_CHECKIN_FAILED", "activity.checkin_failed"); failed {
 		return rejected
+	}
+	// WALLET-001：签到成功发豆（固定政策数额，见 wallet.CheckinBeans）。
+	// 发放失败不回滚签到：考勤是事实，奖励走审计可查的分录，掉了就是没到账、
+	// 不编一个“已发放”。
+	if s.beansAwarder != nil {
+		_ = s.beansAwarder.GrantBeans(ctx, e.Actor.ID, wallet.CheckinBeans, "CHECKIN_REWARD", p.ActivityID)
 	}
 	return acceptedWithPayload(e, "Activity", p.ActivityID, 1, "ATTENDED", map[string]any{"activityId": p.ActivityID, "participation": participation}, nil)
 }
@@ -593,7 +679,7 @@ func (r *MemoryRepository) ToggleInterest(_ context.Context, activityID, actorID
 	}
 	return *item, interested, nil
 }
-func (r *MemoryRepository) Join(_ context.Context, activityID, actorID, orderNo string) (Activity, Participation, error) {
+func (r *MemoryRepository) Join(_ context.Context, activityID, actorID string, recipe JoinRecipe) (Activity, Participation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	item := r.activities[activityID]
@@ -606,6 +692,7 @@ func (r *MemoryRepository) Join(_ context.Context, activityID, actorID, orderNo 
 	if item.parts == nil {
 		item.parts = make(map[string]Participation)
 	}
+	key := activityID + "|" + actorID
 	existing, known := item.parts[actorID]
 	if known && existing.State != PartCancelled {
 		return *item, existing, ErrAlreadyJoined
@@ -613,13 +700,32 @@ func (r *MemoryRepository) Join(_ context.Context, activityID, actorID, orderNo 
 	if item.Capacity > 0 && item.Joined >= item.Capacity {
 		return *item, existing, ErrActivityFull
 	}
-	participation := Participation{ActivityID: activityID, UserID: actorID, State: PartConfirmed, OrderNo: orderNo}
-	if known && existing.OrderNo != "" {
-		participation.OrderNo = existing.OrderNo // 取消后再报名：同一条记录、同一个编号
+	if r.orderNos == nil {
+		r.orderNos = make(map[string]string)
+		r.daySeq = make(map[string]int)
 	}
+	if r.joinedAt == nil {
+		r.joinedAt = make(map[string]time.Time)
+	}
+	now := time.Now()
+	orderNo := existing.OrderNo // 取消后再报名：同一条记录、同一个编号
+	if !known || orderNo == "" {
+		day := ordernumber.Day(now)
+		category := ordernumber.CategoryForVenueType(item.VenueType)
+		dayKey := category + day.Format("060102")
+		r.daySeq[dayKey]++
+		orderNo = ordernumber.Format(category, now, r.daySeq[dayKey])
+		r.joinedAt[key] = now.UTC()
+	}
+	r.orderNos[key] = orderNo
+	participation := Participation{ActivityID: activityID, UserID: actorID, State: PartConfirmed, OrderNo: orderNo}
 	item.parts[actorID] = participation
 	item.joinedBy[actorID] = true
 	item.Joined++
+	if r.snapshots == nil {
+		r.snapshots = make(map[string]OrderSnapshot)
+	}
+	r.snapshots[key] = BuildOrderSnapshot(*item, orderNo, now, recipe)
 	return *item, participation, nil
 }
 
@@ -712,6 +818,43 @@ func (r *MemoryRepository) ListByOwner(_ context.Context, ownerID string) ([]Act
 	reverseActivityOrder(items)
 	return items, nil
 }
+func (r *MemoryRepository) GetJoinOrder(ctx context.Context, activityID, actorID string) (JoinOrder, bool, error) {
+	orders, err := r.ListJoinOrders(ctx, actorID)
+	if err != nil {
+		return JoinOrder{}, false, err
+	}
+	for _, order := range orders {
+		if order.ActivityID == activityID {
+			return order, true, nil
+		}
+	}
+	return JoinOrder{}, false, nil
+}
+
+func (r *MemoryRepository) ListJoinOrders(_ context.Context, actorID string) ([]JoinOrder, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]JoinOrder, 0)
+	for _, id := range r.order {
+		item := r.activities[id]
+		if item == nil {
+			continue
+		}
+		part, ok := item.parts[actorID]
+		if !ok {
+			continue
+		}
+		key := id + "|" + actorID
+		order := JoinOrder{ActivityID: id, OrderNo: part.OrderNo, JoinedAt: r.joinedAt[key], State: string(part.State)}
+		if snap, ok := r.snapshots[key]; ok {
+			snap := snap
+			order.Snapshot = &snap
+		}
+		out = append(out, order)
+	}
+	return out, nil
+}
+
 func (r *MemoryRepository) ListByParticipant(_ context.Context, actorID string) ([]Activity, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -855,4 +998,37 @@ func defaultCatalog() []*Activity {
 			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_003", AIPersonaName: "平台 AI 小美 · 拍照搭子", AIPersonaAvatar: "🤝", AIPersonaPhoto: "ai-personas/photos/ai_003.png", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 	}
+}
+
+// timeClash 找我手上（没取消的）跟目标活动同一时间段的另一单。活动时间是自由文本，
+// 只按去空白后的原文相等判断同一档，不猜两段文字是否重叠；空时间不参与。
+func (s *Service) timeClash(ctx context.Context, activityID, actorID string) (Activity, bool, error) {
+	all, err := s.repository.List(ctx)
+	if err != nil {
+		return Activity{}, false, err
+	}
+	target := ""
+	for _, a := range all {
+		if a.ID == activityID {
+			target = strings.TrimSpace(a.Time)
+			break
+		}
+	}
+	if target == "" {
+		return Activity{}, false, nil
+	}
+	mine, err := s.repository.ListByParticipant(ctx, actorID)
+	if err != nil {
+		return Activity{}, false, err
+	}
+	for _, a := range mine {
+		if a.ID == activityID || strings.TrimSpace(a.Time) != target {
+			continue
+		}
+		if rec, err := s.repository.GetParticipation(ctx, a.ID, actorID); err == nil && rec.State == PartCancelled {
+			continue // 已取消的不占时间段
+		}
+		return a, true, nil
+	}
+	return Activity{}, false, nil
 }

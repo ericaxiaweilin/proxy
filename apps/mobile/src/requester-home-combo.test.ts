@@ -10,6 +10,7 @@ import {
   seedFrom,
   stripAreaSuffix,
   activitiesAtCoffeeShops,
+  detectOrderConflict,
   isCoffeeShopScene,
   type Combo,
   type ComboActivity,
@@ -218,5 +219,24 @@ describe("HOME-FORYOU-SCENE-001 场景格只选挂在真实咖啡店上的活动
       { activityId: "free", title: "周五一起吃新菜", venueName: "岚庭餐厅 · 西湖", time: "周五" },
     ];
     expect(activitiesAtCoffeeShops(acts, scenes).map((a) => a.activityId)).toEqual(["cup", "byname"]);
+  });
+});
+
+describe("HOME-FORYOU-ORDER-GUARD-001 下单前资源冲突检查", () => {
+  const mine = [
+    { activityId: "cup", title: "周日杯测小聚", time: "周日 10:00–11:30", orderNo: "100260927150535000001" },
+    { activityId: "old", title: "已取消那单", time: "周五 18:30–20:30", cancelled: true },
+  ];
+  it("blocks ordering the same activity twice", () => {
+    expect(detectOrderConflict({ activityId: "cup", time: "周日 10:00–11:30" }, mine)).toEqual({ kind: "ALREADY_ORDERED", orderNo: "100260927150535000001" });
+  });
+  it("blocks a different activity in a time slot I already hold", () => {
+    expect(detectOrderConflict({ activityId: "latte", time: " 周日 10:00–11:30 " }, mine)).toEqual({ kind: "TIME_TAKEN", title: "周日杯测小聚", time: "周日 10:00–11:30", orderNo: "100260927150535000001" });
+  });
+  it("ignores cancelled orders, other times and blank times", () => {
+    expect(detectOrderConflict({ activityId: "x", time: "周五 18:30–20:30" }, mine)).toBeUndefined();
+    expect(detectOrderConflict({ activityId: "old", time: "周五 18:30–20:30" }, mine)).toBeUndefined();
+    expect(detectOrderConflict({ activityId: "x", time: "周六 09:00" }, mine)).toBeUndefined();
+    expect(detectOrderConflict({ activityId: "x", time: "" }, mine)).toBeUndefined();
   });
 });

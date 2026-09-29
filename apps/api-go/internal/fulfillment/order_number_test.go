@@ -68,7 +68,7 @@ func TestEveryOrderGetsAnAllDigitOrderNumber(t *testing.T) {
 	before, _ := s.repository.GetOrder(ctx, created.OrderID)
 	after := cloneOrder(before)
 	after.Version++
-	after.OrderNo = ordernumber.Format(999, before.CreatedAt)
+	after.OrderNo = ordernumber.Format(ordernumber.CategoryService, before.CreatedAt, 999)
 	if err := checkOrderTransition(before, after); err == nil {
 		t.Fatal("an order number must never change")
 	}

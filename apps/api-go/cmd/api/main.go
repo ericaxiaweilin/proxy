@@ -52,6 +52,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/supply"
 	"github.com/proxy-app/proxy-api/internal/usermodel"
 	"github.com/proxy-app/proxy-api/internal/voucher"
+	"github.com/proxy-app/proxy-api/internal/wallet"
 	"log"
 	"net/http"
 	"os"
@@ -138,6 +139,11 @@ func main() {
 	mediaService.SetStoreDir(mediaStoreDir)
 	conversationService.SetMediaAuthorizer(mediaService)
 	contributionService := contribution.New()
+	// WALLET-001：默认内存仓；DATABASE_URL 分支换 PG（与 profileService 同模式）。
+	// SIMULATED 充值渠道只在 WALLET_SIMULATED_RECHARGE=1 时打开（dev 联调），
+	// 默认关闭；真渠道逐个配商户凭证（见 wallet.Providers）。
+	walletService := wallet.New()
+	walletService.SetSimulatedRecharge(os.Getenv("WALLET_SIMULATED_RECHARGE") == "1")
 	// Profile 域（P1，audit 2026-09-04）：默认内存仓；DATABASE_URL 存在时
 	// 在 DB 分支换成 postgres.NewProfileRepository（服务端持久化名片）。
 	profileService := profile.New()
@@ -314,6 +320,8 @@ func main() {
 		mediaService.SetStoreDir(mediaStoreDir)
 		conversationService.SetMediaAuthorizer(mediaService)
 		contributionService = contribution.NewWithRepository(postgres.NewContributionRepository(pool))
+		walletService = wallet.NewWithRepository(postgres.NewWalletRepository(pool))
+		walletService.SetSimulatedRecharge(os.Getenv("WALLET_SIMULATED_RECHARGE") == "1")
 		profileService = profile.NewWithRepository(postgres.NewProfileRepository(pool))
 		socialSpaceService = socialspace.NewWithRepository(postgres.NewSocialSpaceRepository(pool))
 		businessService = business.NewWithRepository(postgres.NewBusinessRepository(pool))
@@ -521,6 +529,8 @@ func main() {
 	server.Voucher = voucherService
 	// Activity 域：启动幂等 seed 基线；DATABASE_URL 存在时写入持久仓储。
 	activityService.SeedDefaults()
+	// WALLET-001：签到发豆桥（签到成功固定奖金豆，失败不回滚考勤）。
+	activityService.SetBeansAwarder(walletService)
 	server.Activity = activityService
 	marketplaceService.SeedDefaults()
 	server.Marketplace = marketplaceService
@@ -747,6 +757,8 @@ func main() {
 	// same verified-identity pattern MerchantPublishIdentity already uses.
 	benefitService.WithMerchantVerifier(businessService)
 	server.Benefit = benefitService
+	// WALLET-001：挂载钱包域（内存默认 / PG 分支已在上面换好）。
+	server.Wallet = walletService
 	// GROWTH-REAL-DATA-001: read-only over fulfillmentService's own Order
 	// store (same repo, same Snapshot() read listMyOrders already uses) —
 	// no separate service construction order to worry about, no new

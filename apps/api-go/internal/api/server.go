@@ -50,6 +50,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/twininsight"
 	"github.com/proxy-app/proxy-api/internal/usermodel"
 	"github.com/proxy-app/proxy-api/internal/voucher"
+	"github.com/proxy-app/proxy-api/internal/wallet"
 )
 
 type Server struct {
@@ -70,6 +71,7 @@ type Server struct {
 	Marketplace   *marketplace.Service
 	SocialSpace   *socialspace.Service
 	Payment       *payment.Service
+	Wallet        *wallet.Service
 	Outcome       *outcome.Service
 	Notification  *notification.Service
 	Safety        *safety.Service

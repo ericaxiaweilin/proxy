@@ -185,7 +185,7 @@ BEGIN
     IF OLD.order_no IS NOT NULL AND NEW.order_no IS DISTINCT FROM OLD.order_no THEN
         PERFORM fulfillment.guard_violation('order_no is immutable (' || OLD.id || ')');
     END IF;
-    IF NEW.order_no IS NOT NULL AND NEW.order_no !~ '^[0-9]{16,}$' THEN
+    IF NEW.order_no IS NOT NULL AND NEW.order_no !~ '^[0-9]{21,}$' THEN
         PERFORM fulfillment.guard_violation('order_no must be all digits (' || NEW.id || ')');
     END IF;
     RETURN NEW;

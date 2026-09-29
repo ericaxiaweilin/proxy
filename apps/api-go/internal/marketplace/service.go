@@ -439,7 +439,7 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		if s.numbers == nil {
 			return command.Rejected(e, "NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "market.number_unavailable", nil)
 		}
-		number, numberErr := s.numbers.Next(ctx)
+		number, numberErr := s.numbers.Next(ctx, ordernumber.CategoryDemand)
 		if numberErr != nil {
 			return command.Rejected(e, "NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "market.number_unavailable", nil)
 		}

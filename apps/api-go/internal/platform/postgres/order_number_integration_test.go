@@ -3,9 +3,12 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/proxy-app/proxy-api/internal/activity"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
@@ -13,18 +16,54 @@ import (
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
 )
 
-// ORDER-NO-001：迁移里的 SQL 编号格式（回填用）必须和 Go 的 ordernumber.Format 逐字一致。
-func TestOrderNumberSQLMatchesGo(t *testing.T) {
+// ORDER-NO-001：编号由数据库里「类别 × 越南本地日期」的计数器原子分配；并发不重号，
+// 事务回滚不留空号（计数器随事务回滚）。
+func TestDailyOrderNumberAllocatorPostgres(t *testing.T) {
 	pool := testPool(t)
-	at := time.Date(2026, 9, 28, 23, 30, 0, 0, time.UTC) // 越南已是 09-29
-	for _, sequence := range []int64{1, 1234, 999_999_999, 1_000_000_000} {
-		var fromSQL string
-		if err := pool.QueryRow(context.Background(), `SELECT fulfillment.format_order_no($1, $2)`, sequence, at).Scan(&fromSQL); err != nil {
-			t.Fatal(err)
+	ctx := context.Background()
+	allocator := NewOrderNumberAllocator(pool)
+
+	seen := map[string]bool{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				number, err := allocator.Next(ctx, ordernumber.CategoryService)
+				mu.Lock()
+				if err != nil || !ordernumber.Valid(number) || seen[number] {
+					t.Errorf("bad or duplicate allocation %q: %v", number, err)
+				}
+				seen[number] = true
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if _, err := allocator.Next(ctx, "999"); err == nil {
+		t.Fatal("an unregistered category must be refused")
+	}
+
+	// 回滚不留空号：事务里取号后回滚，下一次取到的还是同一个号。
+	var inside, after string
+	rollback := errors.New("rollback on purpose")
+	err := runInTransaction(ctx, pool, func(txCtx context.Context, _ pgx.Tx) error {
+		var err error
+		inside, err = allocator.Next(txCtx, ordernumber.CategoryDemand)
+		if err != nil {
+			return err
 		}
-		if want := ordernumber.Format(sequence, at); fromSQL != want {
-			t.Fatalf("sequence %d: SQL %q != Go %q", sequence, fromSQL, want)
-		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatalf("transaction must surface the rollback: %v", err)
+	}
+	after, err = allocator.Next(ctx, ordernumber.CategoryDemand)
+	if err != nil || after != inside {
+		t.Fatalf("a rolled-back allocation must not burn a number: inside=%s after=%s err=%v", inside, after, err)
 	}
 }
 

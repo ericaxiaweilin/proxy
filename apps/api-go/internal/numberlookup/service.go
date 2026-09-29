@@ -9,8 +9,8 @@
 //   - 每次查询都留痕（谁、查了哪个号、写的什么理由、查到什么），写进只追加的
 //     operator.number_lookups，与命令同一事务；**留痕写不进去就不返回任何数据**
 //     （fail-closed）—— 反查能看到订单双方账号和条款，属于个人信息读取；
-//   - 校验位先行：抄错一位的号直接告诉客服「校验位不对，请核对」，而不是「查无此单」，
-//     两种结论对处理下一步完全不同；
+//   - 结构先行：不是编号的东西（旧 PX-* 展示码、位数不对、类别码没登记、日期不存在）直接告诉客服
+//     「这不是公共编号」，而不是「查无此单」，两种结论对处理下一步完全不同；
 //   - 不猜：一个号查到多个实体是数据完整性事故（序列保证不该发生），拒绝返回并留痕。
 package numberlookup
 
@@ -165,11 +165,9 @@ func (s *Service) lookup(ctx context.Context, e command.Envelope) command.Result
 		if err := s.recorder.Record(ctx, entry); err != nil {
 			return auditFailed(e, err)
 		}
-		hint := "NOT_A_PUBLIC_NUMBER"
-		if shapeOK {
-			hint = "CHECKSUM_MISMATCH" // 全数字、长度对，但校验位不对：多半是抄错了
-		}
-		return command.Rejected(e, "NUMBER_INVALID", "VALIDATION", "AFTER_USER_ACTION", "numberlookup.number_invalid", map[string]any{"hint": hint})
+		// 编号没有校验位（ordernumber 规范），只能判结构：全数字、≥21 位、类别码已登记、
+		// 日期时间真实存在。抄错一位但结构仍然成立的号，只会落到 NUMBER_NOT_FOUND。
+		return command.Rejected(e, "NUMBER_INVALID", "VALIDATION", "AFTER_USER_ACTION", "numberlookup.number_invalid", map[string]any{"hint": "NOT_A_PUBLIC_NUMBER"})
 	}
 
 	var hits []Match

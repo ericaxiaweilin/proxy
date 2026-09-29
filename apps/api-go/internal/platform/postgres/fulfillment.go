@@ -78,7 +78,7 @@ func (r *FulfillmentRepository) EnsureOrder(ctx context.Context, order fulfillme
 
 // setAuditContext 把本事务的「谁 / 哪条命令」写进事务级设置（is_local = true，
 // 事务结束即失效，不会串到连接池里的下一个请求）。fulfillment 的审计触发器
-// （migrations/135_order_audit_and_guard.sql）读取它们写 fulfillment.audit_log。
+// （migrations/143_order_audit_and_guard.sql）读取它们写 fulfillment.audit_log。
 // 优先用命令上下文；跨域物化没有命令上下文时退回领域事件的 principal / causation。
 func setAuditContext(ctx context.Context, tx pgx.Tx, domainEvents []event.DomainEvent) error {
 	audit, ok := fulfillment.AuditFromContext(ctx)

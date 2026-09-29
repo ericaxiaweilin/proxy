@@ -36,7 +36,7 @@ func newWorld(t *testing.T) *world {
 
 	repo := fulfillment.NewMemoryRepository()
 	ff := fulfillment.NewWithRepository(repo).WithOrderNumbers(numbers)
-	w.orderNo, _ = numbers.Next(ctx)
+	w.orderNo, _ = numbers.Next(ctx, ordernumber.CategoryService)
 	w.orderID = "ord_lookup_1"
 	order, err := fulfillment.MaterializedOrder(w.orderID, w.orderNo, "user_requester", "user_agent", "need_1", fulfillment.OrderSnapshot{
 		ServiceSKU: "cc", StartTime: "周六 15:00", MeetingContext: "西湖", AgreedCompensation: 1_200_000, Currency: "VND",
@@ -173,23 +173,18 @@ func TestLookupAcceptsSeparatorsInTheNumber(t *testing.T) {
 	}
 }
 
-// 抄错一位 ⇒ 校验位不对（告诉客服「核对号码」），不是「查无此单」；老 PX-* 展示码不是
-// 公共编号；查无此号 ⇒ NUMBER_NOT_FOUND。三种结论客服下一步完全不同。
-func TestLookupDistinguishesTypoFromUnknownNumber(t *testing.T) {
+// 不是编号的东西（旧 PX-* 展示码、位数不对、类别码没登记、日期不存在）⇒ NUMBER_INVALID
+// （告诉客服「这不是公共编号」）；结构成立但没分配过 ⇒ NUMBER_NOT_FOUND。编号没有校验位，
+// 抄错一位结构仍成立的号只会是「查无」，这是用户定的口径的代价。
+func TestLookupDistinguishesMalformedFromUnknownNumber(t *testing.T) {
 	w := newWorld(t)
-	typo := []byte(w.orderNo)
-	typo[len(typo)-2] = '0' + (typo[len(typo)-2]-'0'+1)%10
-	r := w.lookup(string(typo), "ticket-1")
-	if rejected(r) != "NUMBER_INVALID" || r.Error.SafeDetails["hint"] != "CHECKSUM_MISMATCH" {
-		t.Fatalf("a one-digit typo must be reported as a checksum mismatch: %+v", r.Error)
+	for _, bad := range []string{"PX-A-260929-1234", "", "2609290000001236", "999260929100022000001", "100261399100022000001"} {
+		r := w.lookup(bad, "ticket-1")
+		if rejected(r) != "NUMBER_INVALID" || r.Error.SafeDetails["hint"] != "NOT_A_PUBLIC_NUMBER" {
+			t.Fatalf("%q is not a public number: %+v", bad, r.Error)
+		}
 	}
-	if r := w.lookup("PX-A-260929-1234", "ticket-1"); rejected(r) != "NUMBER_INVALID" || r.Error.SafeDetails["hint"] != "NOT_A_PUBLIC_NUMBER" {
-		t.Fatalf("legacy display codes are not public numbers: %+v", r.Error)
-	}
-	if r := w.lookup("", "ticket-1"); rejected(r) != "NUMBER_INVALID" {
-		t.Fatalf("empty number: %+v", r.Error)
-	}
-	unknown := ordernumber.Format(999_999, time.Date(2026, 9, 29, 3, 0, 0, 0, time.UTC))
+	unknown := ordernumber.Format(ordernumber.CategoryService, time.Date(2026, 9, 29, 3, 0, 0, 0, time.UTC), 999_999)
 	if r := w.lookup(unknown, "ticket-1"); rejected(r) != "NUMBER_NOT_FOUND" {
 		t.Fatalf("well-formed but unassigned number: %+v", r.Error)
 	}
@@ -214,7 +209,7 @@ func TestEveryLookupIsAudited(t *testing.T) {
 	w := newWorld(t)
 	w.svc.SetClock(func() time.Time { return time.Date(2026, 9, 29, 4, 0, 0, 0, time.UTC) })
 	w.lookup(w.orderNo, "ticket-77 用户投诉")
-	w.lookup(ordernumber.Format(999_999, time.Date(2026, 9, 29, 3, 0, 0, 0, time.UTC)), "ticket-78")
+	w.lookup(ordernumber.Format(ordernumber.CategoryService, time.Date(2026, 9, 29, 3, 0, 0, 0, time.UTC), 999_999), "ticket-78")
 	w.lookup("123", "ticket-79")
 
 	rows := w.audit.Entries()
@@ -270,7 +265,7 @@ func TestLookupRefusesAmbiguousNumbers(t *testing.T) {
 func TestLookupNeverReportsNotFoundWhenADomainCouldNotBeSearched(t *testing.T) {
 	w := newWorld(t)
 	blind := finderFunc(func(context.Context, string) (Match, bool, error) { return Match{}, false, ErrUnsupported })
-	unknown := ordernumber.Format(999_999, time.Date(2026, 9, 29, 3, 0, 0, 0, time.UTC))
+	unknown := ordernumber.Format(ordernumber.CategoryService, time.Date(2026, 9, 29, 3, 0, 0, 0, time.UTC), 999_999)
 
 	partial := New(w.audit, blind)
 	r := partial.HandleContext(context.Background(), env(CommandType, "cs_agent_1", map[string]any{"number": unknown, "reason": "ticket-1"}))

@@ -1,4 +1,4 @@
-import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList, UserRepliesList, UserBookmarksList, PostEngagement, PostRepliesList, MutedAuthorsList, PostPollView, ReceivedEngagementStats } from "@proxy/contracts";
+import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList, UserRepliesList, UserBookmarksList, PostEngagement, PostRepliesList, MutedAuthorsList, PostPollView, ReceivedEngagementStats, ReplyMediaRef } from "@proxy/contracts";
 import {
   parseFollowCounts,
   parseFollowingState,
@@ -57,10 +57,13 @@ export class EngagementClient {
 	return this.parseEngagement(result);
   }
 
-  public async replyToPost(postId: string, body: string): Promise<void> {
+  // REPLY-IMAGE-001: 评论图片。正文可空（纯图片评论），但正文和图片不能
+  // 同时空；图片走 ReplyMediaRef（与帖文 PostMediaRef 同构，上限 6 由契约钉）。
+  public async replyToPost(postId: string, body: string, media?: ReplyMediaRef[]): Promise<void> {
     const normalized = body.trim();
-    if (!normalized) throw new EngagementProtocolError("reply body is required");
-    await this.command("ReplyToPost", { type: "Post", id: postId }, { postId, body: normalized });
+    const refs = (media ?? []).filter((m) => m.mediaAssetId !== "");
+    if (!normalized && refs.length === 0) throw new EngagementProtocolError("reply body is required");
+    await this.command("ReplyToPost", { type: "Post", id: postId }, { postId, body: normalized, media: refs });
   }
 
   /**

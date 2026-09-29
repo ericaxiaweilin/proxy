@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/activity"
+	"github.com/proxy-app/proxy-api/internal/ordernumber"
 )
 
 type ActivityRepository struct{ pool *pgxpool.Pool }
@@ -93,10 +95,11 @@ func (r *ActivityRepository) ToggleInterest(ctx context.Context, activityID, act
 	return result, interested, err
 }
 
-// Join 报名（ACT-PARTICIPATION-DURABLE-001 / ACT-ORDER-NO-001）：活动行 FOR UPDATE
-// 串行化同一场活动的占座；报名记录（状态 + 订单编号）与 joined_count 同一事务写。
-// 之前取消过的报名重新激活同一行，沿用原编号。
-func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID, orderNo string) (activity.Activity, activity.Participation, error) {
+// Join 报名（ACT-PARTICIPATION-DURABLE-001 / ORDER-NO-001 / ORDER-RECIPE-001）：活动行 FOR UPDATE
+// 串行化同一场活动的占座；报名记录（状态 + 订单编号 + 票面快照）与 joined_count 同一事务写。
+// 订单编号在同一事务里原子取号（场地类别码 + 越南本地日期的每日计数器 ordering.daily_sequences）。
+// 之前取消过的报名重新激活同一行：沿用原编号，票面快照按这次下单刷新。
+func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID string, recipe activity.JoinRecipe) (activity.Activity, activity.Participation, error) {
 	var result activity.Activity
 	var participation activity.Participation
 	err := runInTransaction(ctx, r.pool, func(txCtx context.Context, tx pgx.Tx) error {
@@ -122,21 +125,38 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID, orde
 			_ = decodeActivity(payload, interested, joined, capacity, &result)
 			return activity.ErrActivityFull
 		}
+		_ = decodeActivity(payload, interested, joined, capacity, &result)
+		now := time.Now()
+		orderNo := existing.OrderNo // 取消后再报名：同一条记录、同一个编号
+		if !found || orderNo == "" {
+			// 场地类型从活动 payload 里解（解码失败就按未知走通用码，不拦下单）。
+			// 日期与时分秒取同一时刻，避免跨午夜两调 time.Now 错位。
+			number, err := nextDailyOrderNumber(txCtx, tx, ordernumber.CategoryForVenueType(result.VenueType), now)
+			if err != nil {
+				return err
+			}
+			orderNo = number
+		}
+		// 票面快照跟编号同一事务落库；人数按本单报名之后的值记。
+		afterJoin := result
+		afterJoin.Joined = joined + 1
+		snapshot, err := json.Marshal(activity.BuildOrderSnapshot(afterJoin, orderNo, now, recipe))
+		if err != nil {
+			return err
+		}
 		if found {
-			if err := tx.QueryRow(txCtx, `
+			if _, err := tx.Exec(txCtx, `
 				UPDATE activity.participants
-				SET state='CONFIRMED', order_no=COALESCE(order_no, $3), updated_at=NOW()
-				WHERE activity_id=$1 AND actor_id=$2
-				RETURNING COALESCE(order_no, '')`, activityID, actorID, nullableText(orderNo)).Scan(&participation.OrderNo); err != nil {
+				SET state='CONFIRMED', order_no=COALESCE(order_no, $3), order_snapshot=$4, updated_at=NOW()
+				WHERE activity_id=$1 AND actor_id=$2`, activityID, actorID, orderNo, snapshot); err != nil {
 				return err
 			}
 		} else {
-			if _, err := tx.Exec(txCtx, `INSERT INTO activity.participants (activity_id, actor_id, state, order_no) VALUES ($1,$2,'CONFIRMED',$3)`, activityID, actorID, nullableText(orderNo)); err != nil {
+			if _, err := tx.Exec(txCtx, `INSERT INTO activity.participants (activity_id, actor_id, state, order_no, order_snapshot) VALUES ($1,$2,'CONFIRMED',$3,$4)`, activityID, actorID, orderNo, snapshot); err != nil {
 				return err
 			}
-			participation.OrderNo = orderNo
 		}
-		participation.ActivityID, participation.UserID, participation.State = activityID, actorID, activity.PartConfirmed
+		participation = activity.Participation{ActivityID: activityID, UserID: actorID, State: activity.PartConfirmed, OrderNo: orderNo}
 		joined++
 		if _, err := tx.Exec(txCtx, `UPDATE activity.activities SET joined_count=$1 WHERE id=$2`, joined, activityID); err != nil {
 			return err
@@ -212,7 +232,7 @@ func (r *ActivityRepository) FindParticipationByNumber(ctx context.Context, orde
 const activityByCodeSQL = `
 	SELECT payload, interested_count, joined_count, capacity
 	FROM activity.activities
-	WHERE payload->>'code' ~ '^[0-9]{16,}$' AND payload->>'code' = $1`
+	WHERE payload->>'code' ~ '^[0-9]{21,}$' AND payload->>'code' = $1`
 
 // FindActivityByCode 按全数字活动编号反查（PUBLIC-NO-LOOKUP-001）。谓词里的正则要和
 // activity_code_digits_key 部分唯一索引一致，否则走不了索引；老的 PX-A-… 展示码
@@ -325,6 +345,58 @@ func (r *ActivityRepository) ListByParticipant(ctx context.Context, actorID stri
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// MY-ORDERS-DETAIL-001：本人每笔报名的订单编号 + 下单时间。
+func (r *ActivityRepository) ListJoinOrders(ctx context.Context, actorID string) ([]activity.JoinOrder, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT activity_id, COALESCE(order_no, ''), joined_at, state, order_snapshot
+		FROM activity.participants
+		WHERE actor_id = $1
+		ORDER BY joined_at DESC`, actorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []activity.JoinOrder{}
+	for rows.Next() {
+		item, err := scanJoinOrder(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *ActivityRepository) GetJoinOrder(ctx context.Context, activityID, actorID string) (activity.JoinOrder, bool, error) {
+	row := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT activity_id, COALESCE(order_no, ''), joined_at, state, order_snapshot
+		FROM activity.participants
+		WHERE activity_id = $1 AND actor_id = $2`, activityID, actorID)
+	item, err := scanJoinOrder(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return activity.JoinOrder{}, false, nil
+	}
+	if err != nil {
+		return activity.JoinOrder{}, false, err
+	}
+	return item, true, nil
+}
+
+func scanJoinOrder(row pgx.Row) (activity.JoinOrder, error) {
+	var item activity.JoinOrder
+	var snapshot []byte
+	if err := row.Scan(&item.ActivityID, &item.OrderNo, &item.JoinedAt, &item.State, &snapshot); err != nil {
+		return item, err
+	}
+	if len(snapshot) > 0 {
+		var snap activity.OrderSnapshot
+		if err := json.Unmarshal(snapshot, &snap); err == nil {
+			item.Snapshot = &snap
+		}
+	}
+	return item, nil
 }
 
 // FilterKnownParticipants 实现见 activity.Repository 接口注释：只测已知

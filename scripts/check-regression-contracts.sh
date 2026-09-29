@@ -1500,8 +1500,8 @@ for audit_test in TestOrderTransitionIsStampedAndAuditedPostgres TestStampFailur
   require_test "ORDER-AUDIT-001" "./internal/platform/postgres" "$audit_test" \
     "apps/api-go/internal/platform/postgres/order_audit_integration_test.go" || exit $?
 done
-if ! grep -qF 'CREATE TRIGGER orders_guard' apps/api-go/migrations/135_order_audit_and_guard.sql ||
-   ! grep -qF 'CREATE TRIGGER audit_log_append_only' apps/api-go/migrations/135_order_audit_and_guard.sql; then
+if ! grep -qF 'CREATE TRIGGER orders_guard' apps/api-go/migrations/143_order_audit_and_guard.sql ||
+   ! grep -qF 'CREATE TRIGGER audit_log_append_only' apps/api-go/migrations/143_order_audit_and_guard.sql; then
   echo "  FAIL [ORDER-AUDIT-001]: 订单守卫 / 审计只追加触发器从迁移里消失了。" >&2
   exit 1
 fi
@@ -1524,7 +1524,7 @@ require_test "ACT-SEAT-RELEASE-001" "./internal/activity" \
   "TestCancelReleasesSeatAndRejoinKeepsNumber" \
   "apps/api-go/internal/activity/participation_order_test.go" || exit $?
 # ACT-PARTICIPATION-DURABLE-001 / ORDER-NO-001（Postgres；没有库时 SKIP）。
-for number_test in TestOrderNumberSQLMatchesGo TestParticipationDurableSeatReleasePostgres TestFulfillmentOrderNumberPersistedAndImmutablePostgres \
+for number_test in TestDailyOrderNumberAllocatorPostgres TestParticipationDurableSeatReleasePostgres TestFulfillmentOrderNumberPersistedAndImmutablePostgres \
   TestPostgresBackedServicesDefaultToSharedSequence; do
   require_test "ACT-PARTICIPATION-DURABLE-001/ORDER-NO-001" "./internal/platform/postgres" "$number_test" \
     "apps/api-go/internal/platform/postgres/order_number_integration_test.go" || exit $?
@@ -1585,7 +1585,7 @@ require_test "PUBLIC-NO-LOOKUP-001" "./internal/numberlookup" \
   "TestLookupResolvesEveryPublicNumberKind" \
   "apps/api-go/internal/numberlookup/service_test.go" || exit $?
 require_test "PUBLIC-NO-LOOKUP-001" "./internal/numberlookup" \
-  "TestLookupDistinguishesTypoFromUnknownNumber" \
+  "TestLookupDistinguishesMalformedFromUnknownNumber" \
   "apps/api-go/internal/numberlookup/service_test.go" || exit $?
 require_test "PUBLIC-NO-LOOKUP-001" "./internal/numberlookup" \
   "TestLookupNeverReportsNotFoundWhenADomainCouldNotBeSearched" \
@@ -2264,6 +2264,21 @@ pnpm --dir apps/mobile exec vitest run src/activity-create-form.test.ts || exit 
 pnpm --dir apps/mobile exec vitest run src/surfaces/market-workflow-filter.test.ts -t 'ACTIVITY-CREATE-FORM-001' || exit $?
 echo "    ACTIVITY-CREATE-FORM-001: PASS (ten-block progressive create form)"
 
+# ACTIVITY-CREATE-FORM-001（2026-09-28，原型 deepseek_html_20260928_34cc3e 全量移植）：
+# 十块渐进表单 + 进度条 + 场景列表/地图双选 + 成功页。门禁三条 —— 分类名称场景
+# 三齐才可发布（无 sceneId 不放行）、地图 pin 只落真实坐标、草稿真存本机不许假 toast。
+if ! grep -qF 'describe("ACTIVITY-CREATE-FORM-001' apps/mobile/src/surfaces/market-workflow-filter.test.ts; then
+  echo "  FAIL [ACTIVITY-CREATE-FORM-001]: 十块表单行为断言 describe 块找不到了。" >&2
+  exit 1
+fi
+if ! grep -qF 'canPublishForm(form)' apps/mobile/src/surfaces/activity-wizard.tsx; then
+  echo "  FAIL [ACTIVITY-CREATE-FORM-001]: 发布门禁不在向导里 —— 无场景活动会重新不可见。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/activity-create-form.test.ts || exit $?
+pnpm --dir apps/mobile exec vitest run src/surfaces/market-workflow-filter.test.ts -t 'ACTIVITY-CREATE-FORM-001' || exit $?
+echo "    ACTIVITY-CREATE-FORM-001: PASS (ten-block progressive create form)"
+
 # CHROME-PARITY-001: HOME / MESSAGES 主信息流的滑动显隐从未接线——
 # RequesterHome 内部 handler 代码就绪但壳没传 onChromeVisibilityChange
 # （死代码），MessagesSurface prop 声明在类型里但收不到信号。四主信息流
@@ -2699,7 +2714,7 @@ if grep -qF 'styles.gridCtaHalf' apps/mobile/src/surfaces/requester-home.tsx; th
   echo "  FAIL [HOME-FORYOU-LOCK-001]: 四宫格的多个入口回来了 —— commander 拍板只留报名。" >&2
   exit 1
 fi
-if ! grep -qF 'joinSelected(gridActivity?.activityId)' apps/mobile/src/surfaces/requester-home.tsx; then
+if ! grep -qF 'joinSelected(gridActivity?.activityId' apps/mobile/src/surfaces/requester-home.tsx; then
   echo "  FAIL [HOME-FORYOU-LOCK-001]: 唯一的报名 CTA 不见了。" >&2
   exit 1
 fi
@@ -7534,19 +7549,9 @@ if grep -qF '预计 6–10 位合格回应' apps/mobile/src/surfaces/market.tsx 
   echo "        只说确定的事（金额怎么展示），报名人数留给发布后的真实数据。" >&2
   exit 1
 fi
-# 正向：这行必须随 moneyFlow 变（TBD 不能说「完整展示金额」），并且明确不预估。
-#
-# 钉子要钉在**这行独有**的字串上：只写 'moneyFlow === "TBD" ? "金额不公开' 会被
-# 上一行已有的 {moneyFlow === "TBD" ? "金额不公开在卡片上" : "0₫"} 满足 —— 那行
-# 是改动前就有的，删掉新分支它照样绿（实测过，确实绿）。带上「，由双方面谈确定」
-# 才唯一指向新的这行。
-if ! grep -qF '有多少人报名要等发布后才知道' apps/mobile/src/surfaces/market.tsx ||
-   ! grep -qF '金额不公开，由双方面谈确定' apps/mobile/src/surfaces/market.tsx ||
-   ! grep -qF '免费任务 · 完整展示给回应者' apps/mobile/src/surfaces/market.tsx; then
-  echo "  FAIL [MARKET-PUBLISH-ESTIMATE-001]: 发布页价格说明没接上 moneyFlow ——" >&2
-  echo "        TBD 时金额不公开，这行就不能说「完整展示给回应者」。" >&2
-  exit 1
-fi
+# ORDER-FLOW-COPY-001：那行说明整行删掉了（「金额完整展示给回应者 · 有多少人报名要等发布后
+# 才知道」是复述价格区已经显示的内容）。原来的正向钉「必须随 moneyFlow 变」随之作废；
+# 上面的反向钉（预测常量 / 竞争力评级不许回来）保留，目的不变。
 echo "    MARKET-PUBLISH-ESTIMATE-001: PASS (publish sheet states what is certain, predicts nothing)"
 
 # SCENE-OPP-PRICE-001: 场景「公开任务」出口把**编出来的报酬写进了服务端**。
@@ -8072,8 +8077,12 @@ if grep -qF '客户预算落在 Proxy 公平区间内' apps/mobile/src/surfaces/
   echo "        没有区间引擎，也没有真区间时，不许说「落在公平区间内」。" >&2
   exit 1
 fi
-if ! grep -qF 'fairRange ? "参考报价区间" : "报价说明"' apps/mobile/src/surfaces/market.tsx; then
-  echo "  FAIL [MARKET-FAIR-RANGE-CLAIM-001]: 报价盒子不再按有没有真区间分两种说法 ——" >&2
+# ORDER-FLOW-COPY-001：「报价说明」盒整个删了（价格条已经只在发布方真填两框时才显示区间）。
+# 原来的正向钉「盒子标题按有没有真区间分两种说法」随之作废；改钉：区间只出现在价格条里，
+# 且只在有真区间时；说明盒不许回来。
+if grep -qF '报价说明' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -qF 'opportunity.moneyFlow !== "TBD" && opportunity.moneyFlow !== "FREE" && fairRange ? (' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-FAIR-RANGE-CLAIM-001]: 区间又出现在价格条以外，或价格条不再只在有真区间时显示 ——" >&2
   exit 1
 fi
 echo "    MARKET-FAIR-RANGE-CLAIM-001: PASS (the quote box only claims a range when one was really entered)"

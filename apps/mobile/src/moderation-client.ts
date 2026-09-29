@@ -99,7 +99,7 @@ export function activityReportTargets(activity: {
 // targetAccountId —— 有就是定向邀约（只对被邀的人和发布者可见），
 // 没有就是公开机会。
 //
-// 注意不能用界面上的「需求编号 / 邀约编号」（opportunity.number，16 位全数字
+// 注意不能用界面上的「需求编号 / 邀约编号」（opportunity.number，21 位全数字
 // 展示号，PUBLIC-NO-001）当 targetId：举报接口按实体 id 查，报上去一条查不到
 // 的 id，等于这条举报白报。
 export function opportunityReportTarget(opportunity: {

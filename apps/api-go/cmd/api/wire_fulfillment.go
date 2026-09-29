@@ -156,7 +156,7 @@ type sceneFulfillmentAdapter struct {
 // ORDER-MATERIALIZE-AUDIT-001：两条跨域物化路径都走 fulfillment.MaterializedOrder
 // （金额边界 + R8 现金门），出生事件 OrderMaterialized 随首次插入同事务发布。
 func (a sceneFulfillmentAdapter) EnsureInvitationOrder(ctx context.Context, record scene.InvitationOrderRecord) error {
-	orderNo, err := a.numbers.Next(ctx)
+	orderNo, err := a.numbers.Next(ctx, ordernumber.CategoryService)
 	if err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func (a marketplaceFulfillmentAdapter) EnsureOrder(ctx context.Context, record m
 	// （面议），真实金额由双方在订单上走条款变更（ORDER-AMEND-001）或结算确认。
 	// 重试时 EnsureOrder 命中已有订单，这里新取的号作废（空号，序列正常语义），
 	// 订单保留第一次分配的编号。
-	orderNo, err := a.numbers.Next(ctx)
+	orderNo, err := a.numbers.Next(ctx, ordernumber.CategoryService)
 	if err != nil {
 		return err
 	}

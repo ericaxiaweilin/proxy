@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>我的票券</title>
+<style>
+:root{
+  --ink:#181613;--muted:#8E887D;--muted-2:#BCB6A8;
+  --line:#EFECE5;--line-2:#F5F2EB;--soft:#F6F5F1;
+  --bg:#F6F5F1;
+  --good:#2E9B58;--good-soft:#E8F4EA;--good-ink:#1E6E3E;
+  --gold:#F5B400;--gold-soft:#FDF6E3;--gold-ink:#8C6A00;
+  --sky:#5B8FD5;--sky-soft:#EAF2FF;--sky-ink:#2D5C9E;
+  --rose:#E85C7A;--rose-soft:#FCEBEF;--rose-ink:#A02848;
+  --gold-border:#F0E0B8;
+  --dark-1:#1A1814;--dark-2:#2A2620;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:#D8D4C9;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC",Arial,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit;border:0;background:transparent;cursor:pointer;outline:none}
+
+.stage{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.phone{width:390px;height:844px;background:var(--bg);border-radius:38px;position:relative;overflow:hidden;border:1px solid #D0CCC0;box-shadow:0 30px 60px -30px rgba(0,0,0,.35);display:flex;flex-direction:column}
+
+/* ============ 深色顶部 ============ */
+.success-top{
+  position:relative;
+  background:linear-gradient(180deg,var(--dark-1) 0%,var(--dark-2) 100%);
+  padding:0 24px 46px;
+  color:#fff;
+  overflow:hidden;
+  flex-shrink:0;
+  border-radius:0 0 28px 28px;
+  z-index:10;
+}
+.success-top::before{
+  content:"";
+  position:absolute;
+  top:-60px;right:-40px;
+  width:220px;height:220px;border-radius:50%;
+  background:radial-gradient(circle,rgba(46,155,88,.4),transparent 70%);
+  pointer-events:none;
+}
+.success-top::after{
+  content:"";
+  position:absolute;
+  bottom:-100px;left:-60px;
+  width:200px;height:200px;border-radius:50%;
+  background:radial-gradient(circle,rgba(245,180,0,.18),transparent 70%);
+  pointer-events:none;
+}
+
+.status{
+  height:52px;
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  padding:0 2px 6px;
+  font-size:14px;
+  font-weight:800;
+  color:#fff;
+  position:relative;
+  z-index:2;
+}
+
+.success-inner{position:relative;z-index:2;padding-top:22px}
+
+.success-icon{
+  width:56px;height:56px;
+  border-radius:50%;
+  background:var(--good);
+  display:grid;place-items:center;
+  margin-bottom:22px;
+  box-shadow:0 10px 28px -8px rgba(46,155,88,.6);
+  animation:pop .55s cubic-bezier(.34,1.56,.64,1);
+  position:relative;
+}
+.success-icon::after{
+  content:"";
+  position:absolute;
+  inset:-6px;
+  border-radius:50%;
+  border:1.5px solid rgba(46,155,88,.35);
+  animation:ring 1.6s ease-out infinite;
+}
+@keyframes pop{
+  0%{transform:scale(0);opacity:0}
+  100%{transform:scale(1);opacity:1}
+}
+@keyframes ring{
+  0%{transform:scale(.85);opacity:.9}
+  100%{transform:scale(1.35);opacity:0}
+}
+.success-icon svg{width:26px;height:26px;fill:none;stroke:#fff;stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round}
+
+.success-title{
+  font-size:27px;
+  font-weight:900;
+  letter-spacing:-.8px;
+  line-height:1.15;
+  margin-bottom:10px;
+}
+.success-sub{
+  font-size:13px;
+  font-weight:600;
+  color:rgba(255,255,255,.55);
+  line-height:1.6;
+}
+.success-sub b{color:#fff;font-weight:900}
+
+/* 顶部信息条 */
+.success-meta{
+  margin-top:24px;
+  padding-top:18px;
+  border-top:1px solid rgba(255,255,255,.08);
+  display:flex;
+  gap:12px;
+}
+.success-meta-item{
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+}
+.success-meta-item .k{
+  font-size:10px;
+  font-weight:900;
+  color:rgba(255,255,255,.42);
+  letter-spacing:.06em;
+  text-transform:uppercase;
+}
+.success-meta-item .v{
+  font-size:13px;
+  font-weight:900;
+  letter-spacing:-.15px;
+  color:#fff;
+  font-variant-numeric:tabular-nums;
+}
+.success-meta-item .v small{
+  display:block;
+  font-size:10.5px;
+  font-weight:700;
+  color:rgba(255,255,255,.5);
+  margin-top:2px;
+}
+
+/* ============ 滚动区 ============ */
+.scroll{
+  flex:1;
+  overflow-y:auto;
+  scrollbar-width:none;
+  padding:0 0 130px;
+  margin-top:-24px;
+  position:relative;
+  z-index:5;
+}
+.scroll::-webkit-scrollbar{display:none}
+
+/* ============ 票券卡 ============ */
+.ticket{
+  margin:0 16px 14px;
+  border-radius:22px;
+  background:#fff;
+  box-shadow:0 20px 50px -22px rgba(0,0,0,.22), 0 2px 6px rgba(0,0,0,.04);
+  overflow:hidden;
+  position:relative;
+  border:1px solid var(--line);
+}
+
+.ticket-body{padding:24px 20px 20px;text-align:center}
+
+/* 二维码 */
+.qr-wrap{
+  width:184px;height:184px;
+  margin:0 auto 18px;
+  padding:10px;
+  border-radius:16px;
+  background:#fff;
+  border:1px solid var(--line);
+  position:relative;
+}
+.qr{
+  width:100%;height:100%;
+  position:relative;
+  background:#fff;
+  border-radius:6px;
+  padding:0;
+  overflow:hidden;
+}
+
+/* 三个定位角 */
+.qr-corner{
+  position:absolute;
+  width:36px;height:36px;
+  border:5px solid var(--ink);
+  border-radius:5px;
+}
+.qr-corner::before{
+  content:"";
+  position:absolute;
+  inset:4px;
+  background:var(--ink);
+  border-radius:1px;
+}
+.qr-corner.tl{top:0;left:0}
+.qr-corner.tr{top:0;right:0}
+.qr-corner.bl{bottom:0;left:0}
+
+/* 数据点阵 */
+.qr-data{
+  position:absolute;
+  inset:0;
+  background-image:
+    radial-gradient(circle at 22% 22%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 30% 22%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 22% 30%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 42% 30%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 50% 22%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 58% 30%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 66% 22%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 30% 38%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 46% 38%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 62% 38%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 70% 38%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 22% 46%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 38% 46%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 54% 46%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 70% 46%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 30% 54%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 46% 54%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 62% 54%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 22% 62%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 38% 62%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 54% 62%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 70% 62%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 30% 70%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 46% 70%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 62% 70%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 70% 70%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 22% 78%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 38% 78%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 54% 78%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 70% 78%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 46% 86%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 62% 86%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 78% 46%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 78% 62%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 78% 70%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 78% 30%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 78% 22%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 78% 38%, var(--ink) 1.6px, transparent 2px),
+    radial-gradient(circle at 78% 54%, var(--ink) 1.6px, transparent 2px);
+  background-size:100% 100%;
+}
+
+/* 中心留白 logo */
+.qr-logo{
+  position:absolute;
+  top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  width:44px;height:44px;
+  border-radius:10px;
+  background:#fff;
+  display:grid;place-items:center;
+  border:3px solid #fff;
+  box-shadow:0 0 0 1px var(--line);
+}
+.qr-logo-inner{
+  width:32px;height:32px;
+  border-radius:8px;
+  background:var(--ink);
+  display:grid;place-items:center;
+  color:#fff;
+  font-size:14px;
+  font-weight:900;
+  letter-spacing:-.5px;
+}
+
+/* 票号 */
+.ticket-code{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:7px 14px;
+  border-radius:10px;
+  background:var(--soft);
+  font-size:13.5px;
+  font-weight:900;
+  letter-spacing:.18em;
+  color:var(--ink);
+  font-variant-numeric:tabular-nums;
+  margin-bottom:8px;
+  transition:all .15s;
+}
+.ticket-code:active{transform:scale(.96);background:#EBE8E0}
+.ticket-code svg{
+  width:12px;height:12px;
+  fill:none;stroke:var(--muted);
+  stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;
+  letter-spacing:0;
+}
+.ticket-code-hint{
+  font-size:10.5px;
+  font-weight:700;
+  color:var(--muted-2);
+  letter-spacing:.02em;
+}
+
+/* 撕票线 */
+.ticket-dashed{
+  position:relative;
+  height:26px;
+  margin:0 22px;
+}
+.ticket-dashed::before{
+  content:"";
+  position:absolute;
+  top:50%;left:0;right:0;
+  border-top:1.5px dashed var(--line);
+  transform:translateY(-50%);
+}
+.ticket-dashed::after{
+  content:"";
+  position:absolute;
+  top:50%;left:-32px;
+  width:22px;height:22px;
+  border-radius:50%;
+  background:var(--bg);
+  transform:translateY(-50%);
+  box-shadow:inset -1px 0 0 var(--line);
+}
+.ticket-dashed .right-hole{
+  position:absolute;
+  top:50%;right:-32px;
+  width:22px;height:22px;
+  border-radius:50%;
+  background:var(--bg);
+  transform:translateY(-50%);
+  box-shadow:inset 1px 0 0 var(--line);
+}
+
+/* 票券信息 */
+.ticket-meta{padding:0 22px 22px}
+.meta-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:16px;
+  padding:11px 0;
+  border-bottom:1px dashed var(--line-2);
+}
+.meta-row:last-child{border-bottom:0;padding-bottom:0}
+.meta-row:first-child{padding-top:0}
+.meta-row .k{
+  font-size:11.5px;
+  font-weight:800;
+  color:var(--muted);
+  flex-shrink:0;
+  padding-top:2px;
+}
+.meta-row .v{
+  font-size:13px;
+  font-weight:900;
+  letter-spacing:-.15px;
+  color:var(--ink);
+  text-align:right;
+  line-height:1.4;
+  font-variant-numeric:tabular-nums;
+}
+.meta-row .v.free{color:var(--good-ink)}
+.meta-row .v small{
+  display:block;
+  font-size:10.5px;
+  font-weight:700;
+  color:var(--muted);
+  margin-top:3px;
+  font-variant-numeric:normal;
+  letter-spacing:0;
+}
+
+/* ============ 一起的人 ============ */
+.people-block{
+  margin:0 16px 12px;
+  padding:16px 18px;
+  border-radius:18px;
+  background:#fff;
+  border:1px solid var(--line);
+}
+.people-label{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  margin-bottom:14px;
+}
+.people-label .t{
+  font-size:12px;
+  font-weight:900;
+  color:var(--muted);
+  letter-spacing:.05em;
+  text-transform:uppercase;
+}
+.people-label .n{
+  font-size:11px;
+  font-weight:800;
+  color:var(--muted-2);
+  font-variant-numeric:tabular-nums;
+}
+.people-row{
+  display:flex;
+  align-items:center;
+  gap:14px;
+}
+.people-avatars{display:flex;align-items:center}
+.people-avatars .pa{
+  width:40px;height:40px;
+  border-radius:50%;
+  border:2.5px solid #fff;
+  background-size:cover;background-position:center;
+  flex-shrink:0;
+  margin-left:-12px;
+  background-color:#E8E4DB;
+  box-shadow:0 2px 6px rgba(0,0,0,.06);
+}
+.people-avatars .pa:first-child{margin-left:0}
+.people-avatars .more{
+  width:40px;height:40px;
+  border-radius:50%;
+  background:var(--soft);
+  display:grid;place-items:center;
+  font-size:11px;
+  font-weight:900;
+  color:var(--muted);
+  margin-left:-12px;
+  border:2.5px solid #fff;
+  flex-shrink:0;
+  box-shadow:0 2px 6px rgba(0,0,0,.06);
+}
+.people-info{flex:1;min-width:0}
+.people-name{
+  font-size:13.5px;
+  font-weight:900;
+  letter-spacing:-.2px;
+  margin-bottom:4px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.people-name b{color:var(--sky-ink);font-weight:900}
+.people-sub{font-size:11px;font-weight:700;color:var(--muted)}
+
+/* ============ 提醒 ============ */
+.reminder{
+  margin:0 16px 14px;
+  padding:14px 16px;
+  border-radius:16px;
+  background:linear-gradient(135deg,#FFFDF5,#FFF9E8);
+  border:1.5px solid var(--gold-border);
+  display:flex;
+  gap:10px;
+  align-items:flex-start;
+}
+.reminder svg{
+  width:16px;height:16px;
+  fill:none;stroke:var(--gold-ink);
+  stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;
+  flex-shrink:0;
+  margin-top:1px;
+}
+.reminder-text{
+  font-size:12px;
+  font-weight:700;
+  color:var(--gold-ink);
+  line-height:1.6;
+}
+.reminder-text b{font-weight:900;color:#6B4E00}
+
+/* ============ 底部按钮 ============ */
+.footer{
+  position:absolute;bottom:0;left:0;right:0;
+  padding:14px 16px calc(20px + env(safe-area-inset-bottom));
+  background:linear-gradient(180deg,transparent 0%,rgba(246,245,241,.98) 25%,#F6F5F1 100%);
+  z-index:40;
+  display:flex;
+  gap:10px;
+}
+.footer-btn{
+  flex:1;
+  height:52px;
+  border-radius:14px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  font-size:14px;
+  font-weight:900;
+  letter-spacing:-.15px;
+  transition:all .15s;
+}
+.footer-btn:active{transform:scale(.97)}
+.footer-btn.ghost{background:#fff;border:1.5px solid var(--line);color:var(--ink)}
+.footer-btn.primary{
+  background:#181613;
+  color:#fff;
+  box-shadow:0 8px 22px -8px rgba(0,0,0,.35);
+  flex:1.45;
+}
+.footer-btn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+
+/* Toast */
+.toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#181613;color:#fff;padding:12px 20px;border-radius:12px;font-weight:800;font-size:13px;z-index:9999;box-shadow:0 14px 34px -12px rgba(0,0,0,.45);animation:toastIn .25s;max-width:80vw;text-align:center}
+@keyframes toastIn{from{opacity:0;transform:translate(-50%,-10px)}to{opacity:1;transform:translate(-50%,0)}}
+</style>
+</head>
+<body>
+
+<div class="stage">
+<div class="phone">
+
+  <!-- 深色顶部 -->
+  <div class="success-top">
+    <div class="status"><span>3:02</span><span style="letter-spacing:2px;font-size:9px">●●● ⏸ ▮</span></div>
+    <div class="success-inner">
+      <div class="success-icon">
+        <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+      </div>
+      <div class="success-title">已下单</div>
+      <div class="success-sub">到时候见 · <b>Nam</b><br>活动开始前 2 小时会推送提醒</div>
+    </div>
+
+    <!-- 顶部信息条 -->
+    <div class="success-meta">
+      <div class="success-meta-item">
+        <div class="k">Starts in</div>
+        <div class="v">6 小时 58 分</div>
+      </div>
+      <div class="success-meta-item">
+        <div class="k">Attendees</div>
+        <div class="v">1 / 8 人</div>
+      </div>
+      <div class="success-meta-item">
+        <div class="k">Status</div>
+        <div class="v" style="color:#7DD99E">已确认</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scroll">
+
+    <!-- 票券 -->
+    <div class="ticket">
+      <div class="ticket-body">
+        <div class="qr-wrap">
+          <div class="qr">
+            <div class="qr-corner tl"></div>
+            <div class="qr-corner tr"></div>
+            <div class="qr-corner bl"></div>
+            <div class="qr-data"></div>
+            <div class="qr-logo">
+              <div class="qr-logo-inner">P</div>
+            </div>
+          </div>
+        </div>
+        <div class="ticket-code" onclick="toast('票号已复制')">
+          TK-2619-0913
+          <svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </div>
+        <div class="ticket-code-hint">到场出示此票 · 或报票号</div>
+      </div>
+
+      <div class="ticket-dashed">
+        <div class="right-hole"></div>
+      </div>
+
+      <div class="ticket-meta">
+        <div class="meta-row">
+          <span class="k">活动</span>
+          <span class="v">空间 · 活动<small>报名不等于到场</small></span>
+        </div>
+        <div class="meta-row">
+          <span class="k">时间</span>
+          <span class="v">今天 14:00 – 21:00</span>
+        </div>
+        <div class="meta-row">
+          <span class="k">地点</span>
+          <span class="v">Cầu Long Biên<small>Hồng Hà</small></span>
+        </div>
+        <div class="meta-row">
+          <span class="k">费用</span>
+          <span class="v free">免费参加</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 一起的人 -->
+    <div class="people-block">
+      <div class="people-label">
+        <span class="t">一起的人</span>
+        <span class="n">1 / 8</span>
+      </div>
+      <div class="people-row">
+        <div class="people-avatars">
+          <div class="pa" style="background-image:url('https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=100&q=80')"></div>
+          <div class="pa" style="background-image:url('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&q=80')"></div>
+          <div class="pa" style="background-image:url('https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&q=80')"></div>
+          <div class="more">+5</div>
+        </div>
+        <div class="people-info">
+          <div class="people-name"><b>Nam</b> 已加入</div>
+          <div class="people-sub">等 6 人</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 提醒 -->
+    <div class="reminder">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+      <div class="reminder-text">
+        推荐的同行人 <b>不代表对方已确认参加</b>。<br>
+        活动开始前 2 小时会推送提醒，方便你安排出行。
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 底部 -->
+  <div class="footer">
+    <button class="footer-btn ghost" onclick="toast('已添加到日历')">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+      加入日历
+    </button>
+    <button class="footer-btn primary" onclick="toast('打开聊天')">
+      联系 Nam
+      <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </button>
+  </div>
+
+</div>
+</div>
+
+<script>
+function toast(msg){
+  const old = document.querySelector('.toast');
+  if (old) old.remove();
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => {
+    el.style.transition = 'opacity .25s, transform .25s';
+    el.style.opacity = '0';
+    el.style.transform = 'translate(-50%,-8px)';
+    setTimeout(() => el.remove(), 250);
+  }, 1400);
+}
+</script>
+
+</body>
+</html>
