@@ -561,7 +561,8 @@ export type CreatePostPayload = z.infer<typeof CreatePostPayloadSchema>;
 //     后下发，客户端不允许传空。
 export const ActivitySchema = z.object({
   activityId: z.string().min(1),
-  // R58 展示编号（PX-A-yymmdd-####，展示用；权威主键仍是 activityId）。
+  // 活动编号（展示 / 客服查询；权威主键仍是 activityId）。PUBLIC-NO-001 起由服务端
+  // 共享序列分配、全数字；更早的活动保留 PX-A-yymmdd-####，所以这里不强制全数字。
   code: z.string().min(1).optional(),
   origin: z.enum(["PLATFORM", "MERCHANT", "USER", "TEST"]),
   title: z.string().min(1),
@@ -650,6 +651,9 @@ export type MarketOpportunityMoneyFlow = z.infer<typeof MarketOpportunityMoneyFl
 
 export const MarketOpportunitySchema = z.object({
   id: z.string().min(1),
+  // PUBLIC-NO-001：服务端发布时分配的全数字编号（需求 / 邀约成功页展示、客服查询）。
+  // 以前成功页的 PX-N / PX-O 是客户端随机的假号。老数据没有 ⇒ optional。
+  number: z.string().regex(/^[0-9]{16,}$/).optional(),
   title: z.string().min(1),
   shortTitle: z.string(),
   theme: z.string(),

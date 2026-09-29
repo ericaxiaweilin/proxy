@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/ordernumber"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
 )
 
@@ -543,8 +544,9 @@ func TestPublishActivityR58Fields(t *testing.T) {
 	if a.VenueTypeLabel != "湖边" || a.SignupMode != "REVIEW" || a.Theme != "日落" {
 		t.Fatalf("R58 fields lost: %+v", a)
 	}
-	if len(a.Code) < 12 || a.Code[:5] != "PX-A-" {
-		t.Fatalf("display code malformed: %q", a.Code)
+	// PUBLIC-NO-001：活动编号由共享序列分配、全数字（以前是 PX-A-yymmdd + 哈希取模 9000，会撞号）。
+	if !ordernumber.Valid(a.Code) {
+		t.Fatalf("activity code must be an all-digit server number: %q", a.Code)
 	}
 	// Default signup is OPEN; bad signup/theme/venue rejected.
 	defOut := publish("owner_r58b", "b", map[string]any{"title": "t", "time": "周六", "capacity": 4, "venueName": "v", "venueType": "PARK", "realitySceneId": "s", "consumptionTerm": "SPLIT"})

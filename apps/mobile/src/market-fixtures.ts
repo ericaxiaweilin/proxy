@@ -112,6 +112,8 @@ export type OpportunityLens = "NOW" | "NEARBY" | "BOOKED" | "REMOTE";
 
 export interface MarketOpportunity {
   id: string;
+  // PUBLIC-NO-001：服务端发布时分配的全数字编号（成功页展示 / 客服查询）；老数据没有。
+  number?: string | undefined;
   title: string;
   shortTitle: string;
   theme: string;

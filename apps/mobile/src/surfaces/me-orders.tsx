@@ -6,7 +6,7 @@ import { ActivityClient, ActivityCommandRejectedError } from "../activity-client
 import type { BusinessClient } from "../business-client";
 import { loadStoreOptions, type StoreOption } from "../my-store-options";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
-import { canCancelOrder, canConfirmCooperation, settlementView } from "../order-actions";
+import { auditLines, buildTermChange, canCancelOrder, canChangePrice, canConfirmCooperation, canProposeTermChange, isMyProposal, pendingTermChange, settlementView, termChangeFormFrom, termDiff, type AuditLine, type TermChangeForm } from "../order-actions";
 import type { MediaClient } from "../media-client";
 import type { ModerationClient } from "../moderation-client";
 import { ReportSheet } from "../components/report-sheet";
@@ -187,6 +187,11 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
   const [satisfactionRepeat, setSatisfactionRepeat] = useState<"" | "REUSE" | "MAYBE" | "NO">("");
   const [settleAmount, setSettleAmount] = useState("");
   const [settleMethod, setSettleMethod] = useState("");
+  // ORDER-AMEND-UI-001：提出条款变更的表单（undefined = 收起）。
+  const [termForm, setTermForm] = useState<TermChangeForm | undefined>(undefined);
+  // ORDER-AUDIT-UI-001：变更记录（点开才拉，undefined = 还没看）。
+  const [auditTrail, setAuditTrail] = useState<{ orderId: string; lines: AuditLine[] } | undefined>(undefined);
+  const [auditBusy, setAuditBusy] = useState(false);
 
   function humanOrderError(error: unknown, fallback: string): string {
     const msg = error instanceof Error ? error.message : "";
@@ -199,6 +204,13 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
     if (/VERSION_CONFLICT/i.test(msg)) return "订单刚被对方更新过，刷新后再试。";
     if (/NOT_CHECKINABLE|NOT_EXECUTABLE|EVIDENCE_NOT_ALLOWED|NOT_COMPLETABLE|NOT_COMPLETED|NOT_CONFIRMABLE|NOT_AMENDABLE|SETTLEMENT_NOT_RECORDABLE|MODE_MISMATCH/i.test(msg)) return "当前状态不能做这个操作，下拉刷新看看最新状态。";
     if (/ONLY_REQUESTER_RATES/i.test(msg)) return "只有需求方能评价。";
+    if (/AMENDMENT_PENDING/i.test(msg)) return "已经有一条变更在等处理，先处理完再提。";
+    if (/NO_MATERIAL_CHANGE/i.test(msg)) return "没有改动任何条款。";
+    if (/AMENDMENT_AFTER_SETTLEMENT/i.test(msg)) return "已经登记了结算，不能再改金额。";
+    if (/COUNTERPARTY_MUST_DECIDE/i.test(msg)) return "这条变更是你提的，要等对方处理。";
+    if (/ONLY_PROPOSER_WITHDRAWS/i.test(msg)) return "只有提出方能撤回。";
+    if (/AMENDMENT_NOT_PENDING|AMENDMENT_NOT_FOUND/i.test(msg)) return "这条变更已经处理过了，刷新看看。";
+    if (/MATERIAL_CHANGE_AMOUNT/i.test(msg)) return "金额要在 1 到 10,000,000 VND 之间。";
     if (/CASH_ELIGIBILITY|ELIGIBILITY/i.test(msg)) return "这笔现金单还没过审，先走平台担保或等审核。";
     if (/OUTCOME_ALREADY|ALREADY/i.test(msg)) return "已经操作过了，刷新看看。";
     return fallback;
@@ -222,6 +234,8 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
     try {
       await fn();
       await refreshDetail(orderId);
+      setAuditTrail(undefined); // 刚改过订单，旧的变更记录已过期，收起让用户重新拉
+
     } catch (error) {
       setActError(humanOrderError(error, "操作失败，请检查连接后重试。"));
     } finally {
@@ -513,7 +527,99 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
               </View>
             );
           })() : null}
+          {/* ORDER-AMEND-UI-001：条款变更。一方提出，另一方接受才生效；旧条款保留在
+              变更记录里。提出方只能撤回，另一方接受 / 拒绝。 */}
+          {(() => {
+            const pending = pendingTermChange(detail);
+            if (pending) {
+              const mine = isMyProposal(detail, pending);
+              const diff = termDiff(detail.snapshot, pending.snapshot);
+              return (
+                <View style={styles.orderCard}>
+                  <Text selectable style={styles.orderTitle}>{mine ? "你提出的条款变更 · 等对方处理" : "对方提出了条款变更"}</Text>
+                  <Text selectable style={styles.orderFieldLabel}>{pending.description}</Text>
+                  {diff.map((d) => (
+                    <Text key={d.label} selectable style={styles.orderFieldValue}>{`${d.label}：${d.from} → ${d.to}`}</Text>
+                  ))}
+                  <View style={styles.actRow}>
+                    {mine ? (
+                      <Pressable disabled={acting !== undefined} onPress={() => void runOrderAction("撤回变更", detail.orderId, () => client.respondTermChange(detail.orderId, pending.amendmentId, "WITHDRAW"))} style={actBtn} accessibilityLabel="撤回变更">
+                        <Text selectable style={actBtnText}>{acting === "撤回变更" ? "提交中…" : "撤回"}</Text>
+                      </Pressable>
+                    ) : (
+                      <>
+                        <Pressable disabled={acting !== undefined} onPress={() => void runOrderAction("接受变更", detail.orderId, () => client.respondTermChange(detail.orderId, pending.amendmentId, "ACCEPT"))} style={actBtn} accessibilityLabel="接受变更">
+                          <Text selectable style={actBtnText}>{acting === "接受变更" ? "提交中…" : "接受"}</Text>
+                        </Pressable>
+                        <Pressable disabled={acting !== undefined} onPress={() => void runOrderAction("拒绝变更", detail.orderId, () => client.respondTermChange(detail.orderId, pending.amendmentId, "REJECT"))} style={actBtn} accessibilityLabel="拒绝变更">
+                          <Text selectable style={actBtnText}>{acting === "拒绝变更" ? "提交中…" : "拒绝"}</Text>
+                        </Pressable>
+                      </>
+                    )}
+                  </View>
+                </View>
+              );
+            }
+            if (!canProposeTermChange(detail)) return null;
+            if (!termForm) {
+              return (
+                <Pressable onPress={() => setTermForm(termChangeFormFrom(detail))} style={actBtn} accessibilityLabel="提出条款变更">
+                  <Text selectable style={actBtnText}>提出条款变更</Text>
+                </Pressable>
+              );
+            }
+            const submitTermChange = (): void => {
+              const built = buildTermChange(detail, termForm);
+              if ("error" in built) { setActError(built.error); return; }
+              void runOrderAction("提出变更", detail.orderId, async () => {
+                await client.proposeTermChange(detail.orderId, built.description, built.changes);
+                setTermForm(undefined);
+              });
+            };
+            return (
+              <View style={styles.orderCard}>
+                <Text selectable style={styles.orderTitle}>提出条款变更（对方接受后生效）</Text>
+                <TextInput value={termForm.startTime} onChangeText={(v) => setTermForm({ ...termForm, startTime: v })} placeholder="时间" placeholderTextColor={color.muted} style={styles.actInput} accessibilityLabel="变更后的时间" />
+                <TextInput value={termForm.meetingContext} onChangeText={(v) => setTermForm({ ...termForm, meetingContext: v })} placeholder="地点" placeholderTextColor={color.muted} style={styles.actInput} accessibilityLabel="变更后的地点" />
+                {canChangePrice(detail) ? (
+                  <TextInput value={termForm.agreedCompensation} onChangeText={(v) => setTermForm({ ...termForm, agreedCompensation: v.replace(/[^0-9]/g, "") })} placeholder="金额（VND）" placeholderTextColor={color.muted} keyboardType="numeric" style={styles.actInput} accessibilityLabel="变更后的金额" />
+                ) : (
+                  <Text selectable style={styles.orderNotice}>已经登记了结算，金额不能再改。</Text>
+                )}
+                <TextInput value={termForm.description} onChangeText={(v) => setTermForm({ ...termForm, description: v })} placeholder="变更原因（必填）" placeholderTextColor={color.muted} style={styles.actInput} accessibilityLabel="变更原因" />
+                <View style={styles.actRow}>
+                  <Pressable disabled={acting !== undefined} onPress={submitTermChange} style={actBtn} accessibilityLabel="发出变更">
+                    <Text selectable style={actBtnText}>{acting === "提出变更" ? "提交中…" : "发给对方确认"}</Text>
+                  </Pressable>
+                  <Pressable onPress={() => setTermForm(undefined)} style={actBtn} accessibilityLabel="收起变更">
+                    <Text selectable style={actBtnText}>收起</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })()}
           {actError ? <Text selectable style={styles.orderNotice}>{actError}</Text> : null}
+          {/* ORDER-AUDIT-UI-001：变更记录 —— 谁、什么时候、做了什么、状态怎么变的。
+              数据来自存储层审计（只追加），争议 / 客服以它为准。 */}
+          <View style={styles.orderCard}>
+            <Pressable
+              disabled={auditBusy}
+              onPress={() => {
+                if (auditTrail?.orderId === detail.orderId) { setAuditTrail(undefined); return; }
+                setAuditBusy(true);
+                void client.getAuditTrail(detail.orderId)
+                  .then((entries) => setAuditTrail({ orderId: detail.orderId, lines: auditLines(detail, entries) }))
+                  .catch((error: unknown) => setActError(humanOrderError(error, "变更记录读取失败，请稍后重试。")))
+                  .finally(() => setAuditBusy(false));
+              }}
+              accessibilityLabel="变更记录"
+            >
+              <Text selectable style={styles.orderTitle}>{auditBusy ? "读取中…" : auditTrail?.orderId === detail.orderId ? "变更记录 ▲" : "变更记录 ▼"}</Text>
+            </Pressable>
+            {auditTrail?.orderId === detail.orderId ? auditTrail.lines.map((line, index) => (
+              <Text key={`${line.when}-${index}`} selectable style={styles.orderFieldValue}>{`${line.when} · ${line.who} · ${line.what}${line.state ? ` · ${line.state}` : ""}`}</Text>
+            )) : null}
+          </View>
           {canCancel(detail) ? (
             <Pressable
               disabled={cancellingId === detail.orderId}

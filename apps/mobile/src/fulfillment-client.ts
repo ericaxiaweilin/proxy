@@ -15,6 +15,47 @@ export type SlotOffer = {
   expiresAt: string;
 };
 
+// ORDER-AMEND-001 / ORDER-AMEND-UI-001：条款变更。一方提出（PROPOSED），另一方接受才生效；
+// 旧条款存在 previousSnapshot 里。status 为空 = 审计前的历史记录。
+export type OrderAmendmentStatus = "PROPOSED" | "ACCEPTED" | "REJECTED" | "WITHDRAWN" | "LAPSED";
+export type OrderTerms = {
+  startTime: string;
+  duration: string;
+  meetingContext: string;
+  agreedCompensation: number;
+  currency: string;
+  includedScope: string;
+  excludedScope: string;
+  paymentMethodLabel: string;
+};
+export type OrderAmendment = {
+  amendmentId: string;
+  description: string;
+  snapshot: OrderTerms;
+  createdAt: string;
+  status?: OrderAmendmentStatus | undefined;
+  proposedBy?: string | undefined;
+  decidedBy?: string | undefined;
+  decidedAt?: string | undefined;
+  decisionReason?: string | undefined;
+  previousSnapshot?: OrderTerms | undefined;
+};
+export type OrderTermChanges = Partial<Pick<OrderTerms, "startTime" | "duration" | "meetingContext" | "agreedCompensation" | "includedScope" | "excludedScope" | "paymentMethodLabel">>;
+
+// ORDER-AUDIT-001 / ORDER-AUDIT-UI-001：订单的存储层变更记录（谁、哪条命令、前后状态）。
+export type OrderAuditEntry = {
+  operation: "INSERT" | "UPDATE";
+  oldState?: string | undefined;
+  newState?: string | undefined;
+  oldVersion?: number | undefined;
+  newVersion?: number | undefined;
+  actorId: string;
+  commandType: string;
+  eventTypes?: string | undefined;
+  overrideReason?: string | undefined;
+  recordedAt: string;
+};
+
 export type FulfillmentOrder = {
   orderId: string;
   // ORDER-NO-001：面向人的全数字订单编号（客服 / 结算 / 争议都用它）。
@@ -41,6 +82,7 @@ export type FulfillmentOrder = {
     // 缺省历史数据）。market 路径由机会快照带入；订单流程按它分档。
     scenario?: string | undefined;
   };
+  amendments?: OrderAmendment[] | undefined;
   // ORDER-SETTLE-GUARD-001：线下结算记录。每一方只确认自己那一侧。
   settlement?: {
     agreedAmount: number;
@@ -164,6 +206,24 @@ export class FulfillmentClient {
       throw new Error("store order stats malformed");
     }
     return stats;
+  }
+
+  // ORDER-AMEND-UI-001：提出条款变更（只带真的变了的字段），对方接受才生效。
+  public async proposeTermChange(orderId: string, description: string, changes: OrderTermChanges): Promise<{ amendmentId: string }> {
+    const body = this.body(await this.command("RecordMaterialOrderChange", { type: "Order", id: orderId }, { description, changes } as unknown as Record<string, unknown>));
+    if (typeof body.amendmentId !== "string") throw new Error("amendment payload malformed");
+    return { amendmentId: body.amendmentId };
+  }
+
+  public async respondTermChange(orderId: string, amendmentId: string, decision: "ACCEPT" | "REJECT" | "WITHDRAW", reason?: string): Promise<void> {
+    await this.command("RespondMaterialOrderChange", { type: "Order", id: orderId }, { amendmentId, decision, ...(reason ? { reason } : {}) });
+  }
+
+  // ORDER-AUDIT-UI-001：只有订单双方能读；外人看到 ORDER_NOT_FOUND。
+  public async getAuditTrail(orderId: string): Promise<OrderAuditEntry[]> {
+    const body = this.body(await this.command("GetOrderAuditTrail", { type: "Order", id: orderId }, {}));
+    if (!Array.isArray(body.entries)) throw new Error("audit trail malformed");
+    return body.entries as OrderAuditEntry[];
   }
 
   public async recordSatisfaction(orderId: string, input: { resolved: "FULL" | "PARTIAL" | "NONE"; repeatIntent?: "REUSE" | "MAYBE" | "NO" }): Promise<void> {

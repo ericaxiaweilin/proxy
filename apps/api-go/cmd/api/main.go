@@ -340,6 +340,7 @@ func main() {
 	}
 	fulfillmentService.WithOrderNumbers(orderNumbers)
 	activityService.SetOrderNumbers(orderNumbers)
+	marketplaceService.SetNumbers(orderNumbers)
 	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository(), numbers: orderNumbers})
 	// STORE-STATS-001：RecordOutcome 归因校验 —— 必须是真实存在的 ACTIVE 店。
 	// 跟 SetOrderCreator 一样，必须在 PG 替换之后接（否则接到被丢弃的内存实例上）。

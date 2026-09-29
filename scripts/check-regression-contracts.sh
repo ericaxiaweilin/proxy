@@ -1542,6 +1542,41 @@ fi
 pnpm --dir apps/mobile exec vitest run src/for-you-slots.test.ts src/for-you-order-number.test.ts >/dev/null || exit $?
 echo "    ORDER-NO-001/ACT-ORDER-NO-001/ACT-SEAT-RELEASE-001/ACT-PARTICIPATION-DURABLE-001/HOME-FORYOU-REFRESH-001: PASS"
 
+# 第四轮（2026-09-29，用户「有问题就修」）。
+# PUBLIC-NO-001: 需求 / 邀约 / 活动编号由服务端共享序列分配、全数字（以前成功页是客户端随机
+# 生成的 PX-N / PX-O / PX-A，服务端查不到；活动编码是哈希取模 9000，会撞号）。
+require_test "PUBLIC-NO-001" "./internal/marketplace" \
+  "TestPublishedOpportunityHasServerNumber" \
+  "apps/api-go/internal/marketplace/public_number_test.go" || exit $?
+require_test "PUBLIC-NO-001" "./internal/activity" \
+  "TestPublishActivityR58Fields" \
+  "apps/api-go/internal/activity/service_test.go" || exit $?
+require_test "PUBLIC-NO-001" "./internal/platform/postgres" \
+  "TestPublicNumbersFromSharedSequencePostgres" \
+  "apps/api-go/internal/platform/postgres/order_number_integration_test.go" || exit $?
+if grep -qF 'activityDisplayCode' apps/api-go/internal/activity/service.go ||
+   ! grep -qF 'marketplaceService.SetNumbers(orderNumbers)' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [PUBLIC-NO-001]: 活动哈希编码回来了，或市场没接共享编号分配器。" >&2
+  exit 1
+fi
+# OUTBOX-TEST-ISOLATION-001: outbox 生命周期测试以前固定领 50 条并断言 claimed[0]（可能是别的
+# 测试留下的行），共享库里残留一多就随机失败。改为「领完为止」，断言不变。
+require_test "OUTBOX-TEST-ISOLATION-001" "./internal/platform/postgres" \
+  "TestOutboxPostgresLifecycle" \
+  "apps/api-go/internal/platform/postgres/outbox_integration_test.go" || exit $?
+if grep -qF 'claimed[0].Status' apps/api-go/internal/platform/postgres/outbox_integration_test.go; then
+  echo "  FAIL [OUTBOX-TEST-ISOLATION-001]: 又在断言别的测试留下的 outbox 行。" >&2
+  exit 1
+fi
+# ORDER-AMEND-UI-001 / ORDER-AUDIT-UI-001: 我的订单里能提出 / 接受 / 拒绝 / 撤回条款变更，能看变更记录。
+if ! grep -qF 'client.respondTermChange(detail.orderId, pending.amendmentId, "ACCEPT")' apps/mobile/src/surfaces/me-orders.tsx ||
+   ! grep -qF 'client.getAuditTrail(detail.orderId)' apps/mobile/src/surfaces/me-orders.tsx; then
+  echo "  FAIL [ORDER-AMEND-UI-001/ORDER-AUDIT-UI-001]: 订单详情丢了条款变更或变更记录入口。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/order-actions.test.ts src/public-number.test.ts >/dev/null || exit $?
+echo "    PUBLIC-NO-001/OUTBOX-TEST-ISOLATION-001/ORDER-AMEND-UI-001/ORDER-AUDIT-UI-001: PASS"
+
 # LINES-EDITOR-001: the server has had UpsertStoreLines
 # since R18.x b77187a, but the storefront surface was
 # read-only: business owners saw their old lines but had

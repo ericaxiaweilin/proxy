@@ -15,6 +15,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/aiboundary"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
+	"github.com/proxy-app/proxy-api/internal/ordernumber"
 )
 
 // Service owns the P0 opportunity read model and its user actions. Mobile may
@@ -28,7 +29,10 @@ import (
 // thin interface so tests can run with an in-memory fake without
 // pulling the fulfillment package into the marketplace compile graph.
 type Service struct {
-	repository   Repository
+	repository Repository
+	// numbers 给发布的需求 / 邀约分配全数字编号（PUBLIC-NO-001）。与订单编号同一个
+	// 分配器：一个号只指向一样东西。PG 仓默认用共享序列；main.go 注入同一个实例。
+	numbers      ordernumber.Allocator
 	orderCreator OrderCreator // nil = legacy behaviour (only stamp orderRef)
 	// orderPermission：接单报名只对有接单权限（KYC 通过）的人开（ORDER-APPLY-KYC-GATE-001）。
 	// 不接 = 老行为（测试 / 无库环境）；生产在 main.go 必须接。
@@ -158,7 +162,10 @@ type MemoryRepository struct {
 }
 
 type Opportunity struct {
-	ID         string `json:"id"`
+	ID string `json:"id"`
+	// PUBLIC-NO-001：发布时服务端分配的全数字编号（需求 / 邀约成功页展示、客服查询用）。
+	// 以前成功页的 PX-N / PX-O 是客户端随机生成的，服务端查不到。老数据为空。
+	Number     string `json:"number,omitempty"`
 	Title      string `json:"title"`
 	ShortTitle string `json:"shortTitle"`
 	Theme      string `json:"theme"`
@@ -249,7 +256,16 @@ func New() *Service {
 	return NewWithRepository(&MemoryRepository{applications: make(map[string]map[string]Application), dismissed: make(map[string]bool)})
 }
 
-func NewWithRepository(repository Repository) *Service { return &Service{repository: repository} }
+func NewWithRepository(repository Repository) *Service {
+	numbers := ordernumber.Allocator(ordernumber.NewMemory())
+	if source, ok := repository.(interface{ OrderNumbers() ordernumber.Allocator }); ok {
+		numbers = source.OrderNumbers()
+	}
+	return &Service{repository: repository, numbers: numbers}
+}
+
+// SetNumbers 接上与订单共用的编号分配器（PUBLIC-NO-001）。
+func (s *Service) SetNumbers(allocator ordernumber.Allocator) { s.numbers = allocator }
 
 func (s *Service) SeedDefaults() {
 	travel18, travel24, travel52, travel20 := 18, 24, 52, 20
@@ -400,6 +416,14 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 			return rejected(e, "INVALID_OPPORTUNITY", "market.tbd_opportunity_must_have_no_price")
 		}
 		p.ID = newID("opp_")
+		if s.numbers == nil {
+			return command.Rejected(e, "NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "market.number_unavailable", nil)
+		}
+		number, numberErr := s.numbers.Next(ctx)
+		if numberErr != nil {
+			return command.Rejected(e, "NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "market.number_unavailable", nil)
+		}
+		p.Number = number
 		p.OwnerID = e.Actor.ID
 		// OPP-TARGETED-001: 定向邀约。payload 带 targetUserId = 只发给一个
 		// 人（选人 → 向 TA 发出邀约）。快照进 Opportunity.TargetAccountID

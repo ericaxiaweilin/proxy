@@ -9,6 +9,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/activity"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
+	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
 )
 
@@ -159,5 +160,32 @@ func TestPostgresBackedServicesDefaultToSharedSequence(t *testing.T) {
 	_ = json.Unmarshal([]byte(joined.OperationRef), &view)
 	if joined.Outcome != "ACCEPTED" || !ordernumber.Valid(view.Participation.OrderNo) || seen[view.Participation.OrderNo] {
 		t.Fatalf("activity join must draw from the same sequence: %s %+v %q", joined.Outcome, joined.Error, view.Participation.OrderNo)
+	}
+}
+
+// PUBLIC-NO-001（Postgres）：需求 / 邀约发布时由共享序列分配全数字编号，经 JSONB
+// payload 落库后原样读回；活动编号同样来自共享序列。
+func TestPublicNumbersFromSharedSequencePostgres(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	run := itoa(time.Now().UnixNano())
+	market := marketplace.NewWithRepository(NewMarketplaceRepository(pool))
+	owner := "user_pubno_" + run
+	published := market.HandleContext(ctx, command.Envelope{
+		CommandID: "pub_" + run, CommandType: "PublishMarketOpportunity", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: owner}, Principal: command.Principal{Type: "INDIVIDUAL", ID: owner},
+		Target: command.Target{Type: "Market", ID: "local"}, IdempotencyKey: "idem_pub_" + run, CorrelationID: "corr_pub_" + run, RequestedAt: "2026-09-29T00:00:00Z",
+		Payload: map[string]any{"title": "编号测试 " + run, "theme": "城市同行", "date": "周六", "time": "10:00", "location": "西湖", "price": "500,000₫", "skills": "中文"},
+	})
+	var body struct {
+		Opportunity marketplace.Opportunity `json:"opportunity"`
+	}
+	_ = json.Unmarshal([]byte(published.OperationRef), &body)
+	if published.Outcome != "ACCEPTED" || !ordernumber.Valid(body.Opportunity.Number) {
+		t.Fatalf("publish must assign an all-digit number: %s %+v %s", published.Outcome, published.Error, published.OperationRef)
+	}
+	stored, err := NewMarketplaceRepository(pool).Get(ctx, body.Opportunity.ID)
+	if err != nil || stored.Number != body.Opportunity.Number {
+		t.Fatalf("number must round-trip through Postgres: %q vs %q (%v)", stored.Number, body.Opportunity.Number, err)
 	}
 }

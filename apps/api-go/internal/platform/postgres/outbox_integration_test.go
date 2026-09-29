@@ -68,10 +68,7 @@ func TestOutboxPostgresLifecycle(t *testing.T) {
 	// 3. Claim by worker A. We pull a batch (limit=200) and find OUR
 	// event among the other test rows in the shared cluster. After
 	// this step, our event must be in PROCESSING with attempts=1.
-	claimed, err := repo.Claim(ctx, "worker_A", 200, now.Add(time.Second))
-	if err != nil {
-		t.Fatalf("Claim worker_A: %v", err)
-	}
+	claimed := claimAllPG(t, repo, "worker_A", now.Add(time.Second))
 	foundE1 := false
 	for _, m := range claimed {
 		if m.Event.EventID == e1.EventID {
@@ -84,9 +81,6 @@ func TestOutboxPostgresLifecycle(t *testing.T) {
 	if !foundE1 {
 		t.Fatalf("Claim worker_A must return e1 among %d messages", len(claimed))
 	}
-	if claimed[0].Status != "PROCESSING" || claimed[0].Attempts != 1 {
-		t.Fatalf("Claimed must be PROCESSING/1, got %s/%d", claimed[0].Status, claimed[0].Attempts)
-	}
 	if got, _ := outboxStatusPG(t, pool, e1.EventID); got != "PROCESSING" {
 		t.Fatalf("after Claim, row must be PROCESSING, got %s", got)
 	}
@@ -96,10 +90,7 @@ func TestOutboxPostgresLifecycle(t *testing.T) {
 	// claimed). We filter by eventID rather than asserting len=0,
 	// because other test rows in the shared cluster may also be
 	// claimable.
-	claimedB, err := repo.Claim(ctx, "worker_B", 50, now.Add(time.Second))
-	if err != nil {
-		t.Fatalf("Claim worker_B: %v", err)
-	}
+	claimedB := claimAllPG(t, repo, "worker_B", now.Add(time.Second))
 	for _, m := range claimedB {
 		if m.Event.EventID == e1.EventID {
 			t.Fatalf("concurrent Claim must not return e1, got it from worker_B")
@@ -126,10 +117,7 @@ func TestOutboxPostgresLifecycle(t *testing.T) {
 	if err := repo.Publish(ctx, e2); err != nil {
 		t.Fatalf("Publish e2: %v", err)
 	}
-	claimed, err = repo.Claim(ctx, "worker_A", 50, now.Add(time.Second))
-	if err != nil {
-		t.Fatalf("Claim e2: %v", err)
-	}
+	claimed = claimAllPG(t, repo, "worker_A", now.Add(time.Second))
 	foundE2 := false
 	for _, m := range claimed {
 		if m.Event.EventID == e2.EventID {
@@ -148,10 +136,7 @@ func TestOutboxPostgresLifecycle(t *testing.T) {
 		t.Fatalf("after MarkFailed non-deadletter, want FAILED, got %s", gotStatus)
 	}
 	// Within the backoff window, e2 is NOT re-claimable.
-	claimed, err = repo.Claim(ctx, "worker_A", 50, now.Add(time.Hour))
-	if err != nil {
-		t.Fatalf("Claim during backoff: %v", err)
-	}
+	claimed = claimAllPG(t, repo, "worker_A", now.Add(time.Hour))
 	for _, m := range claimed {
 		if m.Event.EventID == e2.EventID {
 			t.Fatalf("e2 must NOT be claimable during backoff window, got attempts=%d", m.Attempts)
@@ -159,10 +144,7 @@ func TestOutboxPostgresLifecycle(t *testing.T) {
 	}
 	// After the backoff window passes, e2 IS re-claimable and attempts
 	// increments to 2.
-	claimed, err = repo.Claim(ctx, "worker_A", 50, futureAvail.Add(time.Second))
-	if err != nil {
-		t.Fatalf("Claim after backoff: %v", err)
-	}
+	claimed = claimAllPG(t, repo, "worker_A", futureAvail.Add(time.Second))
 	foundRetry := false
 	for _, m := range claimed {
 		if m.Event.EventID == e2.EventID {
@@ -189,10 +171,7 @@ func TestOutboxPostgresLifecycle(t *testing.T) {
 	if gotStatus != "DEAD_LETTER" {
 		t.Fatalf("after MarkFailed deadletter, want DEAD_LETTER, got %s", gotStatus)
 	}
-	claimed, err = repo.Claim(ctx, "worker_A", 10, futureAvail.Add(time.Hour))
-	if err != nil {
-		t.Fatalf("Claim after deadletter: %v", err)
-	}
+	claimed = claimAllPG(t, repo, "worker_A", futureAvail.Add(time.Hour))
 	for _, m := range claimed {
 		if m.Event.EventID == e2.EventID {
 			t.Fatalf("DEAD_LETTER must NOT be re-claimable, got %s", m.Status)
@@ -207,10 +186,7 @@ func TestOutboxPostgresLifecycle(t *testing.T) {
 	if err := repo.Publish(ctx, e3); err != nil {
 		t.Fatalf("Publish e3: %v", err)
 	}
-	claimed, err = repo.Claim(ctx, "worker_A", 50, now.Add(time.Second))
-	if err != nil {
-		t.Fatalf("Claim e3: %v", err)
-	}
+	claimed = claimAllPG(t, repo, "worker_A", now.Add(time.Second))
 	foundE3 := false
 	for _, m := range claimed {
 		if m.Event.EventID == e3.EventID {
@@ -223,10 +199,7 @@ func TestOutboxPostgresLifecycle(t *testing.T) {
 	// Now move time 10 minutes forward (past the 5-min claim TTL) and
 	// have a different worker claim. The stale claim must be released
 	// and e3 must be re-claimable with attempts=2.
-	claimedLater, err := repo.Claim(ctx, "worker_B", 50, now.Add(10*time.Minute))
-	if err != nil {
-		t.Fatalf("Claim after TTL: %v", err)
-	}
+	claimedLater := claimAllPG(t, repo, "worker_B", now.Add(10*time.Minute))
 	foundStale := false
 	for _, m := range claimedLater {
 		if m.Event.EventID == e3.EventID {
@@ -241,7 +214,7 @@ func TestOutboxPostgresLifecycle(t *testing.T) {
 	}
 
 	// 9. MarkSent on a missing event_id must return ErrMessageNotClaimed.
-	err = repo.MarkSent(ctx, "worker_B", "evt_pg_does_not_exist", now)
+	err := repo.MarkSent(ctx, "worker_B", "evt_pg_does_not_exist", now)
 	if err != outbox.ErrMessageNotClaimed {
 		t.Fatalf("MarkSent on missing id must return ErrMessageNotClaimed, got %v", err)
 	}
@@ -282,4 +255,26 @@ func cleanupOutboxPG(t *testing.T, pool *pgxpool.Pool, ids []string) {
 			t.Logf("cleanup outbox %s: %v", id, err)
 		}
 	}
+}
+
+// claimAllPG 在时刻 at 把所有可领取的消息都领完再返回（OUTBOX-TEST-ISOLATION-001）。
+// 共享测试库里有其它测试留下的待投递消息：以前固定领 50 条、再假设本测试的事件
+// 在这 50 条里（还断言 claimed[0] —— 那可能是别人的行），库里一多就随机失败。
+// 「领完」让正向断言（必须领到）和反向断言（必须领不到）都不依赖别人留下多少行；
+// 已领的行 claimed_until > at，同一时刻不会被重复领取，所以循环必然结束。
+func claimAllPG(t *testing.T, repo *OutboxRepository, worker string, at time.Time) []outbox.Message {
+	t.Helper()
+	all := []outbox.Message{}
+	for i := 0; i < 1000; i++ {
+		batch, err := repo.Claim(context.Background(), worker, 200, at)
+		if err != nil {
+			t.Fatalf("Claim %s at %s: %v", worker, at, err)
+		}
+		if len(batch) == 0 {
+			return all
+		}
+		all = append(all, batch...)
+	}
+	t.Fatalf("Claim %s never drained the queue", worker)
+	return nil
 }

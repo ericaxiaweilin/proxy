@@ -9,12 +9,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"hash/fnv"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/proxy-app/proxy-api/internal/aiboundary"
 	"github.com/proxy-app/proxy-api/internal/command"
@@ -24,7 +22,8 @@ import (
 // Activity 是本地活动（对齐基线 activityCatalog 字段）。
 type Activity struct {
 	ID string `json:"activityId"`
-	// Code 是 R58 成功页展示编号（PX-A-yymmdd-####，展示用；权威主键仍是 ID）。
+	// Code 是活动编号（成功页展示 / 客服查询；权威主键仍是 ID）。PUBLIC-NO-001 起由
+	// 共享序列分配、全数字；更早发布的活动保留原来的 PX-A-yymmdd-#### 不改写。
 	Code           string `json:"code,omitempty"`
 	Origin         string `json:"origin"` // PLATFORM | MERCHANT | USER | TEST (AI 不可作 origin — 平台发布主体)
 	Title          string `json:"title"`
@@ -231,15 +230,6 @@ var venueTypeLabels = map[string]string{
 	"PARK": "公园", "LAKE": "湖边", "STREET": "街区", "OTHER": "通用",
 }
 
-// activityDisplayCode 生成 R58 成功页展示编号 PX-A-yymmdd-####。
-// 展示用（复制/报单号），权威主键仍是 Activity.ID；由活动 ID 稳定派生
-// （FNV-1a），同活动多次读取不变，无需序列设施。
-func activityDisplayCode(activityID string, now time.Time) string {
-	sum := fnv.New32a()
-	_, _ = sum.Write([]byte(activityID))
-	return "PX-A-" + now.UTC().Format("060102") + "-" + strconv.Itoa(int(sum.Sum32()%9000)+1000)
-}
-
 func (s *Service) publishActivity(ctx context.Context, e command.Envelope) command.Result {
 	if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.PublishActivity) {
 		return command.Rejected(e, "AI_ACTION_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "ai.action_forbidden", nil)
@@ -272,7 +262,16 @@ func (s *Service) publishActivity(ctx context.Context, e command.Envelope) comma
 		consumption = "发起人承担约定的到店消费"
 	}
 	activityID := "activity_" + e.CommandID
-	a := Activity{ID: activityID, Code: activityDisplayCode(activityID, time.Now().UTC()), Origin: "USER", OwnerID: e.Actor.ID, Status: "PUBLISHED", Title: p.Title, Time: p.Time, People: "0 / " + strconv.Itoa(p.Capacity) + " 人", Capacity: p.Capacity, Price: "0₫", MoneyFlow: "FREE", PriceLabel: "免费参加", Consumption: consumption, ConsumptionTerm: p.ConsumptionTerm, SignupMode: p.SignupMode, Theme: p.Theme, VenueName: p.VenueName, VenueIcon: p.VenueIcon, VenueType: p.VenueType, VenueTypeLabel: venueTypeLabels[p.VenueType], RealitySceneID: p.RealitySceneID, Desc: p.Description, AIStatus: "NONE"}
+	// PUBLIC-NO-001：活动编号由共享序列分配（全数字、全局唯一）。以前是
+	// PX-A-yymmdd + 活动 ID 哈希取模 9000 —— 同一天不同活动会撞号。
+	if s.orderNumbers == nil {
+		return command.Rejected(e, "NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "activity.number_unavailable", nil)
+	}
+	code, codeErr := s.orderNumbers.Next(ctx)
+	if codeErr != nil {
+		return command.Rejected(e, "NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "activity.number_unavailable", nil)
+	}
+	a := Activity{ID: activityID, Code: code, Origin: "USER", OwnerID: e.Actor.ID, Status: "PUBLISHED", Title: p.Title, Time: p.Time, People: "0 / " + strconv.Itoa(p.Capacity) + " 人", Capacity: p.Capacity, Price: "0₫", MoneyFlow: "FREE", PriceLabel: "免费参加", Consumption: consumption, ConsumptionTerm: p.ConsumptionTerm, SignupMode: p.SignupMode, Theme: p.Theme, VenueName: p.VenueName, VenueIcon: p.VenueIcon, VenueType: p.VenueType, VenueTypeLabel: venueTypeLabels[p.VenueType], RealitySceneID: p.RealitySceneID, Desc: p.Description, AIStatus: "NONE"}
 	// MERCHANT-PUBLISH-001: 商家注记（api 层已验成员）→ Origin MERCHANT +
 	// 店名。OwnerID 保留发布人（ListByOwner 按 ownerId 照常找到自己的店单）。
 	// 只认注记，不读 payload。

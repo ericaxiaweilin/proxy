@@ -39,3 +39,7 @@ func (r *FulfillmentRepository) OrderNumbers() ordernumber.Allocator {
 func (r *ActivityRepository) OrderNumbers() ordernumber.Allocator {
 	return NewOrderNumberAllocator(r.pool)
 }
+
+func (r *MarketplaceRepository) OrderNumbers() ordernumber.Allocator {
+	return NewOrderNumberAllocator(r.pool)
+}
