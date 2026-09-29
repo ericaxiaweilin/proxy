@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -39,7 +39,10 @@ import { localApiBaseUrl } from "../native-clients";
 // components/scene-shop-directory.tsx 已经在用的同一套 helper，不重写一遍
 // 判定逻辑。
 import { LocalNetClient } from "../localnet-client";
-import { scenePhotoWallTiles, SCENE_PHOTO_WALL_EMPTY, type ScenePhotoTile } from "../scene-shop-directory";
+import { scenePhotoWallTiles, sceneAssetWallTiles, sceneMerchantWallTiles, sceneActionSubtitle, SCENE_PHOTO_WALL_EMPTY, type ScenePhotoTile } from "../scene-shop-directory";
+// DIRECT-INVITE-SCHEDULE-001: 邀约开始时间不再写死"当前时刻+24小时"——
+// 加一个不依赖第三方日期库的按天/按时段 chip 选择器，见该模块头注。
+import { combineDayAndTime, dayOptions, scheduleRecapLabel, timeSlotOptions, type TimeSlot } from "../direct-invite-schedule";
 
 // GEO-HONEST-001: 取不到位置时地图的兜底中心。
 //
@@ -58,7 +61,7 @@ function humanAvatarUri(url: string): string | undefined {
 }
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
-import { ProxyBackGlyph } from "../components/proxy-foundation";
+import { PhotoScrim, ProxyBackGlyph } from "../components/proxy-foundation";
 
 type SceneFilter = "ALL" | "UNSEEN" | "ACTIVE" | "SAVED" | "VISITED";
 type SceneView = "MAP" | "LIST";
@@ -131,6 +134,9 @@ type SceneDetail = {
   // SCENE-REVIEW-001: 真实评分聚合，只有 ratingCount > 0 时才存在。
   rating?: number;
   ratingCount?: number;
+  // STORE-SCENE-LINK-001：认领了这个场景的店铺真的传过的相册，没认领/没照片
+  // 就是 undefined——不回落到 hero/menu 占位图（那是 sceneAssetWallTiles 的活）。
+  merchantPhotos?: ReadonlyArray<{ mediaAssetId: string; caption?: string | undefined }>;
 };
 
 // SCENE-COMPANION-001: 认证态真实同行推荐，替代/补充公开的 humans FIXTURE。
@@ -146,7 +152,7 @@ function companionSignalLabel(signal: CompanionSuggestion["signal"]): string {
 
 type FeaturedHuman = { userId: string; name: string; city?: string | undefined; avatarUri?: string | undefined };
 
-export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccount, featuredHuman, initialSceneId, initialOrigin, secureSessionStore, onBack, onOpenAIProfile, onOpenHumanProfile }: { apiBaseUrl: string; authClient: SessionAuthClient; featuredAIAccount?: PlatformAIAccount | undefined; featuredHuman?: FeaturedHuman | undefined; initialSceneId?: string | undefined; initialOrigin?: { latitude: number; longitude: number } | undefined; secureSessionStore?: SecureSessionStore | undefined; onBack: () => void; onOpenAIProfile?: (account: PlatformAIAccount) => void; onOpenHumanProfile?: (person: FeaturedHuman) => void }): React.JSX.Element {
+export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccount, featuredHuman, initialSceneId, initialOrigin, secureSessionStore, onBack, onOpenAIProfile, onOpenHumanProfile, onPickScene, pickSceneLabel, flatMap }: { apiBaseUrl: string; authClient: SessionAuthClient; featuredAIAccount?: PlatformAIAccount | undefined; featuredHuman?: FeaturedHuman | undefined; initialSceneId?: string | undefined; initialOrigin?: { latitude: number; longitude: number } | undefined; secureSessionStore?: SecureSessionStore | undefined; onBack: () => void; onOpenAIProfile?: (account: PlatformAIAccount) => void; onOpenHumanProfile?: (person: FeaturedHuman) => void; onPickScene?: ((sceneId: string) => void) | undefined; pickSceneLabel?: string | undefined; flatMap?: boolean | undefined }): React.JSX.Element {
   const [view, setView] = useState<SceneView>("MAP");
   const [filter, setFilter] = useState<SceneFilter>("ALL");
   // 供热：图钉换成真实聚合圈（sceneHeatScore），0 分不渲染。
@@ -186,6 +192,8 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   // （全仓没有那条策展管线，编分类不如不分类诚实）。
   const [wall, setWall] = useState<ReadonlyArray<ScenePhotoTile>>([]);
   const [wallState, setWallState] = useState<"LOADING" | "READY" | "ERROR" | "SIGNED_OUT">("LOADING");
+  // 照片墙大图：点 tile 全屏看，关了就清掉。
+  const [wallViewer, setWallViewer] = useState<{ uri: string; author: string } | undefined>(undefined);
   // SCENE-EVENT-SIGNUP-001: 这个场景上已发布的活动。列表状态单独存 —— "没有
   // 活动" / "取不到" / "没登录" 是三件不同的事，不能都显示成一句"暂无"。
   const [sceneActivities, setSceneActivities] = useState<ReadonlyArray<SceneActivity>>([]);
@@ -260,32 +268,16 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const [selectedHumanId, setSelectedHumanId] = useState<string>();
   const [selectedMenuId, setSelectedMenuId] = useState<string>();
   const [fullMenuOpen, setFullMenuOpen] = useState(false);
-  const [whyOpen, setWhyOpen] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionResult, setActionResult] = useState<string>();
   const [inviteAmountText, setInviteAmountText] = useState("150,000");
-  // SCENE-STUDIO-001: 场景 Studio 出图 —— 选中的时段场景 × 点中的菜单 ×
-  // 绑定本场景的小美，三元素原样拼一张卡，截屏走系统分享（徽章卡同一条
-  // captureRef 链）。选什么出什么：菜单没选 / 本场景没绑定小美，按钮直接
-  // disabled 并明说缺什么，绝不拿默认替身凑数。
-  const studioShareRef = useRef<View>(null);
-  const [studioShareNotice, setStudioShareNotice] = useState<string | undefined>(undefined);
-  const studioXiaomei = featuredAIAccount?.boundSceneId === detail?.sceneId ? featuredAIAccount : undefined;
-  const studioMenu = detail?.menu.find((item) => item.id === selectedMenuId) ?? detail?.fullMenu.find((item) => item.id === selectedMenuId);
-  const studioReady = studioMenu !== undefined && studioXiaomei !== undefined;
-  async function shareStudioCard(): Promise<void> {
-    if (!studioReady || !detail || !studioMenu || !studioXiaomei) return;
-    try {
-      const uri = await captureRef(studioShareRef, { format: "png", quality: 0.9 });
-      await Share.share({
-        url: uri,
-        message: `${detail.venueName} · ${studioMenu.name} × ${studioXiaomei.displayName} —— 在 Proxy 约一场现实见面吧！`,
-      });
-      setStudioShareNotice(undefined);
-    } catch {
-      setStudioShareNotice("分享失败，请重试。");
-    }
-  }
+  // DIRECT-INVITE-CONFIRM-001: 「确认下单」整屏——选完动作只是打开这一屏，
+  // 真正的 CreateScene/CreateInvitation 命令要等这里再按一次确认才发。
+  const [confirmSheetOpen, setConfirmSheetOpen] = useState(false);
+  const scheduleDays = useMemo(() => dayOptions(new Date()), []);
+  const scheduleSlots = useMemo(() => timeSlotOptions(), []);
+  const [scheduleDayOffset, setScheduleDayOffset] = useState(0);
+  const [scheduleSlot, setScheduleSlot] = useState<TimeSlot>(scheduleSlots[2]!);
 
   // 本页挂在 app-shell 的 SafeAreaView（edges top）里面，状态栏已经让出，
   // 这里再加 insets.top 就是双计（59+49 的大空白）。只留内容间距 8。
@@ -348,7 +340,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   useEffect(() => {
     let cancelled = false;
     if (!selectedId) { setDetail(undefined); setDetailError(undefined); return; }
-    setDetail(undefined); setDetailError(undefined); setNavError(undefined); setActionExplanation(undefined); setSelectedAction(undefined); setActionResult(undefined); setFullMenuOpen(false); setWhyOpen(false);
+    setDetail(undefined); setDetailError(undefined); setNavError(undefined); setActionExplanation(undefined); setSelectedAction(undefined); setActionResult(undefined); setFullMenuOpen(false);
     const variant = featuredAIAccount?.boundSceneId === selectedId ? featuredAIAccount.boundSceneVariant : undefined;
     const suffix = variant ? `?variant=${encodeURIComponent(variant)}` : "";
     void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}${suffix}`, { headers: { Accept: "application/json" } })
@@ -403,7 +395,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
     setDetailError(undefined); setActionExplanation(undefined);
     void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}?variant=${encodeURIComponent(variantId)}`, { headers: { Accept: "application/json" } })
       .then(async (response) => { if (!response.ok) throw new Error(`status ${response.status}`); return response.json(); })
-      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); setDetail(value); setSelectedHumanId(value.humans[0]?.id); setSelectedMenuId(value.menu[0]?.id); setFullMenuOpen(false); setWhyOpen(false); })
+      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); setDetail(value); setSelectedHumanId(value.humans[0]?.id); setSelectedMenuId(value.menu[0]?.id); setFullMenuOpen(false); })
       .catch(() => setDetailError("场景切换失败，请重试"));
   };
 
@@ -429,7 +421,6 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
     let createdSceneId: string | undefined;
     try {
       const variant = detail.variants.find((item) => item.id === detail.selectedVariant) ?? detail.variants[0]!;
-      const selectedMenuItem = detail.menu.find((item) => item.id === selectedMenuId);
       if (selectedAction.type === "DIRECT_INVITE") {
         const human = detail.humans.find((item) => item.id === selectedHumanId);
         if (!human) throw new Error("请先选择要邀请的真人");
@@ -437,13 +428,16 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         if (!Number.isInteger(inviteAmount) || inviteAmount < 100 || inviteAmount > 10_000_000) throw new Error("请输入 100–10,000,000 VND 的有效报酬");
         const inviteAmountLabel = `${inviteAmount.toLocaleString("en-US")}₫`;
         const menuItem = detail.menu.find((item) => item.id === selectedMenuId);
-        const startsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        // DIRECT-INVITE-SCHEDULE-001: 真的用用户在「确认下单」屏里选的日期+时段，
+        // 不再写死"当前时刻+24小时"。
+        const startsAt = combineDayAndTime(scheduleDays[scheduleDayOffset]?.iso ?? scheduleDays[0]!.iso, scheduleSlot);
         const created = await sendSceneCommand(authClient, session, "CreateScene", "new", { tool: "DIRECT_INVITE", intent: `${variant.name} · ${variant.bestFor}`, anchor: { venueId: detail.sceneId, venueName: detail.venueName }, participation: "双人见面 · 需双方确认", cost: "HOST_PAY", fundingMode: "HOST", budgetMinor: inviteAmount, currency: "VND", venueId: detail.sceneId, startsAt });
         const sceneId = typeof created.aggregateId === "string" ? created.aggregateId : undefined;
         if (!sceneId) throw new Error("场景创建失败");
         createdSceneId = sceneId;
         await sendSceneCommand(authClient, session, "CreateInvitation", sceneId, { sceneId, inviteeUserId: human.id, card: { what: variant.bestFor, where: detail.venueName, when: `${variant.window}（双方可在聊天中修改）`, who: human.name, hostLabel: "你", compensation: inviteAmountLabel, menuItemId: menuItem?.id, menuItemName: menuItem?.name } });
         setActionResult(`邀请已发送给 ${human.name}${menuItem ? ` · ${menuItem.name}` : ""} · 报酬 ${inviteAmountLabel} · 对方接受后生成订单`);
+        setConfirmSheetOpen(false);
       } else if (selectedAction.type === "OPEN_TASK") {
         const result = await sendSceneCommand(authClient, session, "PublishMarketOpportunity", "new", { title: `${variant.name} · ${variant.bestFor}`, shortTitle: variant.name, theme: variant.facets.join(" / "), date: "近期", time: variant.window, location: detail.venueName, price: "", moneyFlow: "TBD", skills: "Scene fit / UGC", lens: ["NOW", "NEARBY"], menuItemId: selectedMenuItem?.id, menuItemName: selectedMenuItem?.name });
         setActionResult(`机会 ${String(result.aggregateId ?? "")} 已发布 · 报酬由双方面谈确定 · 等待真人候选报名`);
@@ -755,34 +749,134 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   // 卸载/重装原生 MapView，iOS 手势在重装后死亡（滑动/缩放卡死）。
   // 改为详情盖层：地图常驻挂载，进出只显隐盖层，手势不再断。
   const activeVariant = selected ? detail?.variants.find((item) => item.id === detail.selectedVariant) : undefined;
+  const selectedHuman = detail?.humans.find((item) => item.id === selectedHumanId);
+  const publicActivityAction = detail?.actions.find((action) => action.type === "PUBLIC_ACTIVITY");
+  const selectedMenuItem = detail?.menu.find((item) => item.id === selectedMenuId);
+  const inviteDistanceMeters = selected && origin ? metersBetween(origin, selected) : undefined;
   const detailBody = selected ? (
       <ScrollView style={[styles.root, rootPad]} contentContainerStyle={styles.detailContent}>
-        <View style={styles.detailTop}><Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.backButton}><ProxyBackGlyph /></Pressable><View style={styles.detailTopCopy}>{/* MERCHANT-LOGO-001: 商家标志 —— 有 logo 上图，没有回字母块（和线上店铺管理面同款），不编占位图。 */}<View style={styles.venueRow}>{detail?.logoUrl ? <Image accessibilityLabel={`${detail?.venueName ?? selected.name}商家标志`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-logo:${detail.sceneId}`} source={{ uri: detail.logoUrl }} style={styles.venueLogo} transition={0} /> : <View style={styles.venueLogo}><Text selectable style={styles.venueLogoText}>{(detail?.venueName ?? selected.name).slice(0, 1).toUpperCase()}</Text></View>}<View style={styles.venueCopy}><Text selectable style={styles.detailTopTitle}>{detail?.venueName ?? selected.name}</Text><Text selectable style={styles.detailTopSub}>{activeVariant ? `${activeVariant.name} · ${selected.area}` : `${selected.type} · ${selected.area}`}</Text>{/* SCENE-CATEGORY-001: 顶类徽标 —— 去过/未开放照样显示分类（置灰的是标记，不是身份）。 */}<View style={styles.categoryBadge}><Text selectable style={styles.categoryBadgeText}>{selected.category}</Text></View></View></View></View><Pressable accessibilityLabel="分享这个场景" onPress={() => { void Share.share({ message: `${detail?.venueName ?? selected.name} · ${sceneAddressLine(selected)}` }); }} style={styles.backButton}><ProxyIcon color={color.ink} name="shareUp" size={20} /></Pressable></View>
-        <View style={styles.hero}>
-          {detail?.heroImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.heroMap} transition={0} /> : <MapView initialRegion={{ latitude: selected.latitude, longitude: selected.longitude, latitudeDelta: 0.025, longitudeDelta: 0.025 }} pointerEvents="none" style={styles.heroMap}><Marker coordinate={{ latitude: selected.latitude, longitude: selected.longitude }} pinColor={selected.active ? color.magenta : color.violet} /></MapView>}
-          {/* 封面只留：硬件优点（facets，没开 variant 时回落类型）+ 真实计数。
-              地址不在主页写 —— 地图上有，重复写就是废话。名字只在上面出现一次，
-              这里不再重复标题。 */}
-          <View style={styles.heroFacets}>{(activeVariant ? activeVariant.facets : [selected.type]).map((facet) => <View key={facet} style={styles.heroFacet}><Text selectable style={styles.heroFacetText}>{facet}</Text></View>)}</View>
-          {/* SCENE-REVIEW-001: 评分只在真的有评价数据（ratingCount > 0）时画，
-              没有就整行不出现——不用 0 或占位星垫底。 */}
-          {(detail?.ratingCount ?? selected.ratingCount ?? 0) > 0 ? (
-            <Text style={styles.sceneRatingLine} selectable>
-              ★ {(detail?.rating ?? selected.rating)?.toFixed(1)} · {detail?.ratingCount ?? selected.ratingCount} 条评价
-            </Text>
-          ) : null}
-          <Text style={styles.sceneCounts} selectable>{sceneCountsLine(selected)}</Text>
+        {/* SCENE-CARD-001: 封面改盖层——名字/地址/返回/分享叠在图上，不再
+            单独占一整条头栏；商家标志跟着名字走，不再是自己的一行。 */}
+        <View style={styles.coverWrap}>
+          {detail?.heroImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.coverImage} transition={0} /> : <MapView initialRegion={{ latitude: selected.latitude, longitude: selected.longitude, latitudeDelta: 0.025, longitudeDelta: 0.025 }} pointerEvents="none" style={styles.coverImage}><Marker coordinate={{ latitude: selected.latitude, longitude: selected.longitude }} pinColor={selected.active ? color.magenta : color.violet} /></MapView>}
+          <PhotoScrim />
+          <View style={[styles.coverNavRow, { top: insets.top + 10 }]}>
+            <Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.coverNavBtn}><ProxyBackGlyph tone="onDark" /></Pressable>
+            <Pressable accessibilityLabel="分享这个场景" onPress={() => { void Share.share({ message: `${detail?.venueName ?? selected.name} · ${sceneAddressLine(selected)}` }); }} style={styles.coverNavBtn}><ProxyIcon color={color.white} name="shareUp" size={18} /></Pressable>
+          </View>
+          <View style={styles.coverInfo}>
+            {/* MERCHANT-LOGO-001: 商家标志 —— 有 logo 上图，没有回字母块（和线上店铺管理面同款），不编占位图。 */}
+            <View style={styles.venueRow}>
+              {detail?.logoUrl ? <Image accessibilityLabel={`${detail?.venueName ?? selected.name}商家标志`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-logo:${detail.sceneId}`} source={{ uri: detail.logoUrl }} style={styles.venueLogoOnCover} transition={0} /> : <View style={styles.venueLogoOnCover}><Text selectable style={styles.venueLogoText}>{(detail?.venueName ?? selected.name).slice(0, 1).toUpperCase()}</Text></View>}
+              <View style={styles.venueCopy}>
+                <Text selectable style={styles.coverName}>{detail?.venueName ?? selected.name}</Text>
+                <View style={styles.coverAddrRow}><ProxyIcon color={color.white} name="pin" size={12} /><Text selectable style={styles.coverAddr}>{activeVariant ? `${activeVariant.name} · ${selected.area}` : `${selected.type} · ${selected.area}`}</Text></View>
+              </View>
+            </View>
+          </View>
         </View>
-        {/* SCENE-REVIEW-001: 评价入口只在本人真的打过卡（BADGE-WALL-001 的
-            全量历史里命中这个场景）时才可点——没去过的场景没有评价资格，
-            这条门禁跟提交时服务端的 SCENE_NOT_VISITED 校验对齐，不是纯前端
-            UI 限制。 */}
-        {badgeHistoryIds?.includes(selected.id) ? (
+        {/* SCENE-STATS-CARD-001: 三格统计卡——评分/去过/收藏。每一格独立按
+            "真有数据才画"门禁：没有评价就不画评分格，没有真实去过/收藏计数
+            就不画那一格；不拼一个假的三等分。评分格在本人真的打过卡时可点，
+            弹出下面已有的评分提交 Modal（reviewSheetOpen），逻辑不新增。
+            ⚠️ SCENE-HOME-PROTOTYPE-001（2026-09-28）：这张卡必须**紧跟在封面之后**
+            —— 原型 `.stats-card{margin:-26px 16px 14px}` 是直接写在 `.cover` 后面的，
+            那 -26 就是拿去**压在封面照片**上的；同原型的另一份实现
+            scene-shop-directory.tsx 也是 hero 紧跟 infoStrip。以前这里夹了一行
+            heroFacets，-26 于是压在那一行胶囊上：胶囊被裁掉一半、卡片也没压到照片，
+            跟原型不是一回事。分类/硬件优点胶囊已挪到统计卡下面。 */}
+        {(() => {
+          const ratingCount = detail?.ratingCount ?? selected.ratingCount ?? 0;
+          const visitedCount = selected.visitedCount ?? 0;
+          const savedCount = selected.savedCount ?? 0;
+          const cells: ReactNode[] = [];
+          if (ratingCount > 0) {
+            const canReview = badgeHistoryIds?.includes(selected.id) ?? false;
+            // SCENE-HOME-PROTOTYPE-001：原型 `.stat-main` 是「实心金星 + 数字」，
+            // 数字 22px（其它两格 20px，见 `.stat-num` / `.stat-num-sm`）。
+            // 以前这里写的是文本 "★ 5.0" —— 字符不是字形（BACK-GLYPH-001 同款
+            // 判断），星的形状和基线随字号漂，也没法填成原型那种实心金。
+            const ratingBody = <><View style={styles.statCellMain}><ProxyIcon color="#F5B400" filled name="star" size={16} /><Text selectable style={styles.statCellRating}>{(detail?.rating ?? selected.rating)?.toFixed(1)}</Text></View><Text selectable style={styles.statCellLabel}>{ratingCount} 条评价</Text></>;
+            cells.push(canReview
+              ? <Pressable accessibilityLabel="评价这个场景" key="rating" onPress={() => setReviewSheetOpen(true)} style={styles.statCell}>{ratingBody}{myReviewStars ? <Text selectable style={styles.statMyReview}>你评过 {myReviewStars} 星 · 改评</Text> : null}</Pressable>
+              : <View key="rating" style={styles.statCell}>{ratingBody}</View>);
+          }
+          if (visitedCount > 0) cells.push(<View key="visited" style={styles.statCell}><Text selectable style={styles.statCellValue}>{visitedCount}</Text><Text selectable style={styles.statCellLabel}>去过</Text></View>);
+          if (savedCount > 0) cells.push(<View key="saved" style={styles.statCell}><Text selectable style={styles.statCellValue}>{savedCount}</Text><Text selectable style={styles.statCellLabel}>收藏</Text></View>);
+          if (cells.length === 0) return null;
+          return <View style={styles.statsCard}>{cells.map((cell, index) => <Fragment key={index}>{index > 0 ? <View style={styles.statDivider} /> : null}{cell}</Fragment>)}</View>;
+        })()}
+        {/* SCENE-REVIEW-001: 没有任何评价数据、但本人已打过卡时，仍要给一条
+            评价入口——上面的统计卡整段是靠 ratingCount>0 门禁的，这里补上
+            "有资格评但还没有人评过"这一态，不能因为统计卡没画就找不到入口。 */}
+        {(detail?.ratingCount ?? selected.ratingCount ?? 0) === 0 && badgeHistoryIds?.includes(selected.id) ? (
           <Pressable accessibilityLabel="评价这个场景" onPress={() => setReviewSheetOpen(true)} style={styles.reviewEntry}>
             <Text selectable style={styles.reviewEntryText}>{myReviewStars ? `你评过 ${myReviewStars} 星 · 改评` : "去过这里 · 评一下"}</Text>
           </Pressable>
         ) : null}
+        {/* 硬件优点（facets，没开 variant 时回落类型）+ 顶类徽标。
+            SCENE-HOME-PROTOTYPE-001：位置在统计卡**下面**，不能回到封面和统计卡
+            之间（见上面 SCENE-STATS-CARD-001 的说明：那会把 -26 的压边吃掉）。
+            SCENE-CATEGORY-001：去过/未开放照样显示分类，置灰的是标记不是身份。 */}
+        <View style={styles.heroFacets}>
+          <View style={styles.categoryBadge}><Text selectable style={styles.categoryBadgeText}>{selected.category}</Text></View>
+          {(activeVariant ? activeVariant.facets : [selected.type]).map((facet) => <View key={facet} style={styles.heroFacet}><Text selectable style={styles.heroFacetText}>{facet}</Text></View>)}
+        </View>
         <Text style={styles.venueIntro} selectable>{activeVariant ? `${activeVariant.window} · ${activeVariant.bestFor}` : selected.description}</Text>
+        <Text style={styles.sceneCounts} selectable>{sceneCountsLine(selected)}</Text>
+        {/* SCENE-CHECKIN-100M-001: 详情只留两个动作 —— 收藏（意愿）与打卡
+            （到场证明，100m 门禁）。「标记去过 / 去这里 / 我在这里」三个人工
+            声明入口已撤：无验证的手点不产生到场事实；去过由 300m 自动足迹记，
+            计划走活动报名。底层 planned/visited 数据照常加载展示，不断历史。 */}
+        <View style={styles.actionRow3}>
+          {/* SCENE-HOME-PROTOTYPE-001（2026-09-28）：原型 deepseek_html_20260927_7fc18d
+              的 action-row3 是**图标 + 文字**三颗，不是三个文字符号：
+              ♡ 收藏（rose-soft 底 / rose-ink 字）/ ✓ 打卡（ink 底 / 白字）/
+              ➤ 导航（白底 + line 描边）。这里原来拿 ★ / ☆ / ✓ / › 这些**文本字符**
+              冒充图标 —— 跟 BACK-GLYPH-001 修的是同一类错：字符不是字形，形状和
+              垂直基线随字号漂，而且 `filled` 这种状态根本没地方落（`☆ 收藏` 变
+              `★ 已收藏` 只是换了个字符，不是换了一个字形）。
+              现在三颗都走 ProxyIcon，配色跟**同原型的另一份实现**
+              scene-shop-directory.tsx 的 actSave / actCheckin / actNav 对齐
+              （rose → attentionBg + magenta，good → mint，nav → white + line），
+              两张面看同一份原型不能长得不一样。 */}
+          <Pressable accessibilityLabel={saved.has(selected.id) ? "取消收藏" : "收藏"} onPress={() => persistToggle(saved, selected.id, setSaved, "SetRealitySceneSaved")} style={[styles.action3, saved.has(selected.id) ? styles.action3SaveActive : styles.action3Save]}>
+            {/* 心形用 replyLike：原型那颗收藏的心就是 Feather 那条路径
+                （`M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67…`），proxy-icon.tsx 的
+                replyLike case 逐字就是它。heart 是**另一条形状不同**的心（更圆、
+                底部更窄），`filled` 两者都读（heart 的 filled 支持在
+                MasterModuleIcon 的 switch 里，2026-09-19 加的）—— 所以这里挑的是
+                **形状对不对**，不是状态能不能落。
+                ⚠️ proxy-icon.tsx:794 那个 `if (name === "heart")` 是**死代码**
+                （ProxyIcon 先调 MasterModuleIcon，heart 命中它的 switch 就 return 了），
+                别被它误导成"heart 不读 filled"。 */}
+            <ProxyIcon color={saved.has(selected.id) ? color.white : color.magenta} filled={saved.has(selected.id)} name="replyLike" size={15} />
+            <Text selectable style={saved.has(selected.id) ? styles.action3SaveActiveText : styles.action3SaveText}>{saved.has(selected.id) ? "已收藏" : "收藏"}</Text>
+          </Pressable>
+          <Pressable accessibilityLabel={here.has(selected.id) ? "取消打卡" : "打卡"} onPress={() => persistCheckIn(selected)} style={[styles.action3, here.has(selected.id) ? styles.action3CheckinDone : styles.action3Checkin]}>
+            <ProxyIcon color={color.white} name="check" size={15} />
+            <Text selectable style={styles.action3CheckinText}>{here.has(selected.id) ? "已打卡" : "打卡"}</Text>
+          </Pressable>
+          {/* SCENE-NAV-001: 第三颗按钮只管送人过去，不碰收藏/打卡的门禁链。
+              尾部的 `›` 去掉：那颗 chevron 是文本字符，而这里已经有真字形
+              （arrowUpRight，跟 scene-shop-directory 的 actNav 同一颗）。
+              SCENE-HOME-PROTOTYPE-001（2026-09-28）：可见文案收成「导航」—— 原型那颗
+              就写「导航」，兄弟实现 actNav 也早就是「导航」，只有这里多写了「去这里」。
+              无障碍标签仍留「导航去这里」（读屏听完整一点更有用），SCENE-NAV-001 的
+              grep 认的也是它。 */}
+          <Pressable accessibilityLabel="导航去这里" onPress={() => openSceneNavigation(selected)} style={[styles.action3, styles.action3Nav]}>
+            <ProxyIcon color={color.ink} name="arrowUpRight" size={15} />
+            <Text selectable style={styles.action3NavText}>导航</Text>
+          </Pressable>
+        </View>
+        {navError ? <Text selectable style={styles.nearbyError}>{navError}</Text> : null}
+        {/* SCENE-DIST-BAR-001: 距离条复用现有 checkinHint —— 有新鲜定位时说
+            "距离你 X · 到现场 100 米内自动打卡"；没有定位/太远/已打卡这几态
+            仍然是 checkinHint 原文，不为了凑新稿文案改写成两套口径。 */}
+        <View style={styles.distBar}>
+          <ProxyIcon color={color.muted} name="clock" size={14} />
+          <Text selectable style={styles.distBarText}>{origin && originFresh() && !here.has(selected.id) ? `距离你 ${formatDistance(metersBetween(origin, selected))} · 到现场 100 米内自动打卡` : checkinHint(here.has(selected.id), origin && originFresh() ? metersBetween(origin, selected) : undefined)}</Text>
+        </View>
         {detail ? (
           <>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.variantRail}>
@@ -790,59 +884,53 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             </ScrollView>
             {featuredAIAccount?.boundSceneId === detail.sceneId ? <View testID="ai-scene-binding" style={styles.aiBindingCard}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-ai:${featuredAIAccount.accountId}:${featuredAIAccount.avatarVersion ?? 1}`} source={aiAccountPhoto(featuredAIAccount)} style={styles.aiBindingAvatar} transition={0} /><View style={styles.aiBindingCopy}><Text selectable style={styles.aiBindingEyebrow}>AI 小美 × 当前 Scene</Text><Text selectable style={styles.aiBindingTitle}>{featuredAIAccount.displayName} · {featuredAIAccount.boundActivityTitle}</Text><Text selectable style={styles.aiBindingText}>{featuredAIAccount.role}，可围绕这个场景聊天、陪伴和生成 UGC 灵感；不能到场、接单或报名活动。</Text><Pressable accessibilityLabel={`查看${featuredAIAccount.displayName}主页`} onPress={() => onOpenAIProfile?.(featuredAIAccount)} style={styles.aiProfileButton}><Text selectable style={styles.aiProfileButtonText}>查看小美主页</Text></Pressable></View></View> : null}
             {featuredHuman ? <View testID="human-scene-binding" style={styles.humanBindingCard}>{featuredHuman.avatarUri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-person:${featuredHuman.userId}`} source={{ uri: featuredHuman.avatarUri }} style={styles.aiBindingAvatar} transition={0} /> : null}<View style={styles.aiBindingCopy}><Text selectable style={styles.humanBindingEyebrow}>真人 × 当前 Scene</Text><Text selectable style={styles.aiBindingTitle}>{featuredHuman.name}适合这个场景</Text><Text selectable style={styles.aiBindingText}>这是基于场景的真人推荐，尚未代表本人到场或接受邀请。可进入主页了解后，再发起好友或现实活动邀请。</Text><Pressable accessibilityLabel={`查看${featuredHuman.name}主页`} onPress={() => onOpenHumanProfile?.(featuredHuman)} style={styles.aiProfileButton}><Text selectable style={styles.aiProfileButtonText}>查看真人主页</Text></Pressable></View></View> : null}
-            <View style={styles.sectionTitleRow}><Text selectable style={styles.sectionTitle}>现在最适合</Text><Pressable onPress={() => setWhyOpen((open) => !open)}><Text selectable style={styles.sectionLink}>{whyOpen ? "收起依据" : "为什么"}</Text></Pressable></View>
-            <View style={styles.bestGrid}><View style={styles.bestCard}><Text selectable style={styles.bestTitle}>{activeVariant?.bestFor}</Text><Text selectable style={styles.bestSub}>按当前时段、现场状态和可用资源推荐。</Text></View><View style={styles.bestCard}><Text selectable style={styles.bestTitle}>{detail.liveState.state.replaceAll("_", " ")}</Text>{/* GEO-HONEST-001: 没有容量来源时明说"未知"，绝不回落到一个数字。 */}<Text selectable style={styles.bestSub}>{detail.liveState.bestWindow}{detail.liveState.capacityPct === undefined ? " · 容量未知" : ` · 容量 ${detail.liveState.capacityPct}%`}</Text></View></View>
-            {whyOpen ? <View style={styles.whyCard}><Text selectable style={styles.whyTitle}>推荐依据</Text><Text selectable style={styles.whyText}>当前时段：{activeVariant?.window}</Text><Text selectable style={styles.whyText}>场景标签：{activeVariant?.facets.join(" · ")}</Text>{/* GEO-HONEST-001: 时效声明只在对数据真有来源时才出现 —— 给编造的数字配一个"有效至"时间戳，比数字本身更误导。 */}<Text selectable style={styles.whyText}>现场状态：{detail.liveState.label}{detail.liveState.freshUntil === undefined ? "（容量数据未接入，故无时效）" : `，数据有效至 ${new Date(detail.liveState.freshUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}</Text><Text selectable style={styles.whyBoundary}>这是场景推荐，不代表真人在场，也不生成到访、订单或履约证明。</Text></View> : null}
-            <Text selectable style={styles.sectionTitle}>适合一起的人</Text>
-            {/* SCENE-COMPANION-001: 已登录且真的命中好友信号时，优先画这个真实
-                横滑——只展示，不接 selectedHumanId/DIRECT_INVITE（那条链认的是
-                detail.humans 的 FIXTURE 形状，真实同行推荐这轮先不接邀约，避免
-                用假形状套真数据）。没有真实命中时整段不画，退回下面 FIXTURE。 */}
-            {companionSuggestions && companionSuggestions.length > 0 ? (
+            <Text selectable style={styles.sectionTitle}>现在最适合</Text>
+            <View style={styles.bestGrid}><View style={styles.bestCard}><Text selectable style={styles.bestTitle}>{activeVariant?.bestFor}</Text></View><View style={styles.bestCard}><Text selectable style={styles.bestTitle}>{detail.liveState.state.replaceAll("_", " ")}</Text>{/* GEO-HONEST-001: 没有容量来源时不编数字，有才印。 */}<Text selectable style={styles.bestSub}>{detail.liveState.bestWindow}{detail.liveState.capacityPct === undefined ? "" : ` · 容量 ${detail.liveState.capacityPct}%`}</Text></View></View>
+            {/* SCENE-MATCH-CARD-001: 深色卡包住"适合一起的人"——新稿这里有一个
+                "查看全部匹配"按钮，故意不做：这个仓库已经在 scene-shop-directory.tsx
+                踩过同一个坑（"查看全部匹配"没有真实落点，做了就是死按钮，会撞
+                placeholder-honest-actions 的检查），这次同样不接。 */}
+            <View style={styles.matchCard}>
+              <View style={styles.matchLabelPill}><ProxyIcon color="#E8C25A" name="star" size={11} /><Text selectable style={styles.matchLabelText}>匹配推荐</Text></View>
+              <Text selectable style={styles.matchTitle}>适合一起的人</Text>
+              {/* SCENE-COMPANION-001: 已登录且真的命中好友信号时，优先画这个真实
+                  横滑——只展示，不接 selectedHumanId/DIRECT_INVITE（那条链认的是
+                  detail.humans 的 FIXTURE 形状，真实同行推荐这轮先不接邀约，避免
+                  用假形状套真数据）。没有真实命中时整段不画，退回下面 FIXTURE。 */}
+              {companionSuggestions && companionSuggestions.length > 0 ? (
+                <>
+                  <HorizontalSwipeRail contentContainerStyle={styles.humanRail} preserveChildPresses threshold={3}>
+                    {companionSuggestions.map((person) => <View key={person.id} style={styles.humanPlain}>
+                      <View style={styles.humanRing}>{person.avatarUrl ? <CircularAvatarImage accessibilityLabel={`${person.name}头像`} size={64} uri={person.avatarUrl} /> : <View style={styles.humanAvatarFallback}><Text selectable style={styles.humanAvatarText}>{person.name.slice(0, 1).toUpperCase()}</Text></View>}</View>
+                      <Text selectable style={styles.humanPlainNameOnDark}>{person.name}</Text>
+                      <Text selectable style={styles.humanPlainSubOnDark}>{companionSignalLabel(person.signal)}</Text>
+                    </View>)}
+                  </HorizontalSwipeRail>
+                </>
+              ) : null}
+              {/* SCENE-HUMANS-EMPTY-001: 选人是付费决策点 —— 没有人时必须说出"没有人"，
+                  不能只留标题和一个空横滑（那会被读成"还在加载"）。文案说明它不是一个
+                  失败状态，也不是"再等等就会有人"的承诺。 */}
+              {detail.humans.length > 0 ? (
+              // SWIPE-RAIL-001：可约人头像横滑不能触发外层切页。
               <HorizontalSwipeRail contentContainerStyle={styles.humanRail} preserveChildPresses threshold={3}>
-                {companionSuggestions.map((person) => <View key={person.id} style={styles.humanPlain}>
-                  <View style={styles.humanRing}>{person.avatarUrl ? <CircularAvatarImage accessibilityLabel={`${person.name}头像`} size={64} uri={person.avatarUrl} /> : <View style={styles.humanAvatarFallback}><Text selectable style={styles.humanAvatarText}>{person.name.slice(0, 1).toUpperCase()}</Text></View>}</View>
-                  <Text selectable style={styles.humanPlainName}>{person.name}</Text>
-                  <Text selectable style={styles.humanPlainSub}>{companionSignalLabel(person.signal)}</Text>
-                </View>)}
+                {/* SCENE-HUMANS-002: 纯圆头 rail，不要白卡片 —— 和首页同款圆头像放大
+                    （64），名字 + 可约状态居中跟在下面。选中态改用头像外圈紫环
+                    （卡片删了，边框无处可画）；点按仍是“选中邀约对象”，链不断。 */}
+                {detail.humans.map((human) => <Pressable key={human.id} accessibilityLabel={`选择${human.name}`} onPress={() => setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))} style={styles.humanPlain}><View style={[styles.humanRing, selectedHumanId === human.id && styles.humanRingSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <CircularAvatarImage accessibilityLabel={`${human.name}头像`} size={64} uri={humanAvatarUri(human.avatarUrl)!} /> : <View style={styles.humanAvatarFallback}><Text selectable style={styles.humanAvatarText}>{human.name.slice(0, 1).toUpperCase()}</Text></View>}</View><Text selectable style={styles.humanPlainNameOnDark}>{human.name}</Text><Text selectable style={styles.humanPlainSubOnDark}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}{human.source === "FIXTURE" ? " · 占位候选" : ""}</Text></Pressable>)}
+                {/* SCENE-HUMANS-001: 只露圆头像 + 名字 + 可约状态。点按仍是“选中邀约对象”
+                    （DIRECT_INVITE 靠 selectedHumanId 找人，链不断）；role 与 fit% 删掉，
+                    可约原文（本周可约/上午可约…）是服务端真值，原样展示不改写。
+                    SCENE-HUMANS-004: rail 只渲染一遍 —— 上面那一行 map 就是全部，
+                    这里不许再挂第二遍（曾经两遍 identical 并排，每个人出现两次）。 */}
               </HorizontalSwipeRail>
-            ) : null}
-            {/* SCENE-HUMANS-EMPTY-001: 选人是付费决策点 —— 没有人时必须说出"没有人"，
-                不能只留标题和一个空横滑（那会被读成"还在加载"）。文案说明它不是一个
-                失败状态，也不是"再等等就会有人"的承诺。 */}
-            {detail.humans.length > 0 ? (
-            // SWIPE-RAIL-001：可约人头像横滑不能触发外层切页。
-            <HorizontalSwipeRail contentContainerStyle={styles.humanRail} preserveChildPresses threshold={3}>
-              {/* SCENE-HUMANS-002: 纯圆头 rail，不要白卡片 —— 和首页同款圆头像放大
-                  （64），名字 + 可约状态居中跟在下面。选中态改用头像外圈紫环
-                  （卡片删了，边框无处可画）；点按仍是“选中邀约对象”，链不断。 */}
-              {detail.humans.map((human) => <Pressable key={human.id} accessibilityLabel={`选择${human.name}`} onPress={() => setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))} style={styles.humanPlain}><View style={[styles.humanRing, selectedHumanId === human.id && styles.humanRingSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <CircularAvatarImage accessibilityLabel={`${human.name}头像`} size={64} uri={humanAvatarUri(human.avatarUrl)!} /> : <View style={styles.humanAvatarFallback}><Text selectable style={styles.humanAvatarText}>{human.name.slice(0, 1).toUpperCase()}</Text></View>}</View><Text selectable style={styles.humanPlainName}>{human.name}</Text><Text selectable style={styles.humanPlainSub}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}{human.source === "FIXTURE" ? " · 占位候选" : ""}</Text></Pressable>)}
-              {/* SCENE-HUMANS-001: 只露圆头像 + 名字 + 可约状态。点按仍是“选中邀约对象”
-                  （DIRECT_INVITE 靠 selectedHumanId 找人，链不断）；role 与 fit% 删掉，
-                  可约原文（本周可约/上午可约…）是服务端真值，原样展示不改写。
-                  SCENE-HUMANS-004: rail 只渲染一遍 —— 上面那一行 map 就是全部，
-                  这里不许再挂第二遍（曾经两遍 identical 并排，每个人出现两次）。 */}
-            </HorizontalSwipeRail>
-            ) : (
-              <Text selectable style={styles.humanEmpty}>这个场景现在还没有挂出可约时间的人 —— 这不是加载失败，也不是「再等等就会有人」的承诺。可以先收藏这个场景。</Text>
-            )}
+              ) : (
+                <Text selectable style={styles.humanEmptyOnDark}>还没有挂出可约时间的人。</Text>
+              )}
+            </View>
             <View style={styles.sectionTitleRow}><Text selectable style={styles.sectionTitle}>{fullMenuOpen ? `${detail.venueName} · 完整菜单` : "这个 Scene 喝什么"}</Text><Pressable onPress={() => setFullMenuOpen((open) => !open)}><Text selectable style={styles.sectionLink}>{fullMenuOpen ? "只看当前 Scene" : "完整菜单"}</Text></Pressable></View>
             {/* SWIPE-RAIL-001：菜单照片横滑不能触发外层切页。 */}
                 <HorizontalSwipeRail contentContainerStyle={styles.menuRail} preserveChildPresses threshold={3}>{(fullMenuOpen ? detail.fullMenu : detail.menu).map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text selectable numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text selectable style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text selectable style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</HorizontalSwipeRail>
-            {/* SCENE-CHECKIN-100M-001: 详情只留两个动作 —— 收藏（意愿）与打卡
-                （到场证明，100m 门禁）。「标记去过 / 去这里 / 我在这里」三个人工
-                声明入口已撤：无验证的手点不产生到场事实；去过由 300m 自动足迹记，
-                计划走活动报名。底层 planned/visited 数据照常加载展示，不断历史。 */}
-            <View style={styles.actions}>
-              <Pressable onPress={() => persistToggle(saved, selected.id, setSaved, "SetRealitySceneSaved")} style={[styles.action, saved.has(selected.id) && styles.actionSelected]}><Text selectable style={styles.actionText}>{saved.has(selected.id) ? "★ 已收藏" : "☆ 收藏"}</Text></Pressable>
-              <Pressable accessibilityLabel={here.has(selected.id) ? "取消打卡" : "打卡"} onPress={() => persistCheckIn(selected)} style={here.has(selected.id) ? [styles.action, styles.actionSelected] : styles.primaryAction}><Text selectable style={here.has(selected.id) ? styles.actionText : styles.primaryActionText}>{here.has(selected.id) ? "✓ 已打卡" : "打卡"}</Text></Pressable>
-              {/* SCENE-NAV-001: 第三颗按钮只管送人过去，不碰收藏/打卡的门禁链。 */}
-              <Pressable accessibilityLabel="导航去这里" onPress={() => openSceneNavigation(selected)} style={styles.action}><Text selectable style={styles.actionText}>导航去这里 ›</Text></Pressable>
-            </View>
-            {navError ? <Text selectable style={styles.nearbyError}>{navError}</Text> : null}
-            <View style={styles.actions}>
-              <Text selectable style={styles.checkInHint}>{checkinHint(here.has(selected.id), origin && originFresh() ? metersBetween(origin, selected) : undefined)}</Text>
-            </View>
             {/* BADGE-WALL-001: 本店徽章进度 —— 这家能点亮哪些、还差几家点谁的名。
                 到访印记（去过/没去过）来自打卡史，不是有效期内的 here 集合。 */}
             {sceneBadgeRows !== undefined && sceneBadgeRows.length > 0 ? (
@@ -875,75 +963,112 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             {/* SCENE-EVENT-SIGNUP-001: 只能"发起"的详情页等于只能喊话 —— 看
                 不到这个场景上已经有什么局，也没法报名。这里列出来 + 直接报名。 */}
             <Text selectable style={styles.sectionTitle}>这里的活动</Text>
+            {activityFeed.items.length > 0 ? <Text selectable style={styles.sectionHint}>本店 {activityFeed.items.length} 场</Text> : null}
             {sceneActivityFeedText(activityFeed) !== "" ? <Text selectable style={styles.activityEmpty}>{sceneActivityFeedText(activityFeed)}</Text> : null}
-            {activityFeed.items.map((item) => (
-              <View key={item.activityId} style={styles.activityRow}>
-                <View style={styles.activityInfo}>
-                  <Text selectable style={styles.activityTitle}>{item.title}</Text>
-                  <Text selectable style={styles.activityMeta}>{item.time} · {activitySignupLabel(item)}</Text>
-                </View>
-                <Pressable
-                  disabled={!canSignUp(item) || activityBusyId === item.activityId}
-                  onPress={() => joinSceneActivity(item.activityId)}
-                  style={[styles.activityJoin, !canSignUp(item) && styles.activityJoinDisabled]}
-                >
-                  <Text selectable style={styles.activityJoinText}>{activityBusyId === item.activityId ? "报名中…" : canSignUp(item) ? "报名" : "已满"}</Text>
-                </Pressable>
-              </View>
-            ))}
+            {/* SCENE-EVENT-CARD-001: 卡片只画有真实来源的字段——标题/时间/
+                （joined、capacity 推出来的）报名状态。新稿每张卡上的"进行中/
+                已结束"徽标、头像堆叠、★评分都没有对应的真实字段（activity 只有
+                自由文本 time，没有 startsAt/endsAt/status；也没有 participants
+                头像或活动评分域），照 GEO-HONEST-001 的规矩不画，不猜。 */}
+            {activityFeed.items.length > 0 || publicActivityAction !== undefined ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.eventRail}>
+                {activityFeed.items.map((item) => (
+                  <View key={item.activityId} style={styles.eventCard}>
+                    <Text selectable numberOfLines={2} style={styles.eventTitle}>{item.title}</Text>
+                    <View style={styles.eventMetaRow}><ProxyIcon color={color.muted} name="clock" size={12} /><Text selectable style={styles.eventMetaText}>{item.time}</Text></View>
+                    <View style={styles.eventMetaRow}><ProxyIcon color={color.muted} name="peoplePair" size={12} /><Text selectable style={styles.eventMetaText}>{item.people}</Text></View>
+                    <Pressable
+                      disabled={!canSignUp(item) || activityBusyId === item.activityId}
+                      onPress={() => joinSceneActivity(item.activityId)}
+                      style={[styles.eventJoin, !canSignUp(item) && styles.eventJoinDisabled]}
+                    >
+                      <Text selectable style={styles.eventJoinText}>{activityBusyId === item.activityId ? "报名中…" : canSignUp(item) ? activitySignupLabel(item) : "已满"}</Text>
+                    </Pressable>
+                  </View>
+                ))}
+                {publicActivityAction ? (
+                  <Pressable onPress={() => { setSelectedAction(publicActivityAction); setActionResult(undefined); setActionExplanation(`${publicActivityAction.label}：${publicActivityAction.moneyMeaning}`); }} style={styles.eventCreateCard}>
+                    <Text selectable style={styles.eventCreateText}>+ 发起新活动</Text>
+                  </Pressable>
+                ) : null}
+              </ScrollView>
+            ) : null}
             {activityMsg ? <Text selectable style={styles.nearbyError}>{activityMsg}</Text> : null}
             <Text selectable style={styles.sectionTitle}>照片墙</Text>
-            {wallState === "READY" && wall.length > 0 ? (
-              <View style={styles.wallGrid}>
-                {wall.map((tile) => {
-                  const uri = localNet?.resolveMediaUrl(tile.path);
-                  return (
-                    <View key={tile.key} style={styles.wallTile}>
-                      {uri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`wall:${tile.key}`} source={{ uri }} style={styles.wallImage} transition={0} /> : null}
-                      {tile.author ? <Text selectable numberOfLines={1} style={styles.wallAuthor}>{tile.author}</Text> : null}
-                    </View>
-                  );
-                })}
-              </View>
-            ) : (
-              <Text selectable style={styles.activityEmpty}>
-                {wallState === "LOADING" ? "正在读取照片墙…"
-                  : wallState === "ERROR" ? "照片墙暂时取不到，请稍后重试。"
-                    : wallState === "SIGNED_OUT" ? "登录后才能看到这里的照片墙。"
-                      : SCENE_PHOTO_WALL_EMPTY}
-              </Text>
-            )}
-            <Text selectable style={styles.sectionTitle}>怎么组织这次现实行动</Text>
-            <View style={styles.executionCard}>
-              {detail.actions.map((action) => <Pressable key={action.type} onPress={() => { setSelectedAction(action); setActionResult(undefined); setActionExplanation(`${action.label}：${action.moneyMeaning}`); }} style={[styles.executionAction, selectedAction?.type === action.type && styles.executionActionSelected]}><Text selectable style={styles.executionLabel}>{action.label}</Text><Text selectable style={styles.executionState}>{action.type === "DIRECT_INVITE" ? "需本人接受" : action.type === "OPEN_TASK" ? "候选人申请" : "公开报名"}</Text></Pressable>)}
-            </View>
-            {actionExplanation ? <View style={styles.boundaryCard}><Text selectable style={styles.boundaryStrong}>{actionExplanation}</Text><Text selectable style={styles.boundaryText}>{detail.truthBoundary}</Text>{selectedAction?.type === "DIRECT_INVITE" ? <View><Text selectable style={styles.inviteAmountLabel}>给真人小美的报酬（VND）</Text><View style={styles.inviteAmountRow}><TextInput keyboardType="number-pad" onChangeText={setInviteAmountText} placeholder="150,000" style={styles.inviteAmountInput} value={inviteAmountText} /><Text selectable style={styles.inviteCurrency}>VND</Text></View><Text selectable style={styles.boundaryText}>对方接受前会看到该金额；接受后冻结进订单。</Text></View> : null}{selectedAction ? <Pressable disabled={actionBusy} onPress={() => { void commitSceneAction(); }} style={styles.confirmAction}><Text selectable style={styles.confirmActionText}>{actionBusy ? "处理中…" : `确认${selectedAction.label}`}</Text></Pressable> : null}{actionResult ? <Text selectable style={styles.actionResult}>{actionResult}</Text> : null}</View> : null}
-            {/* SCENE-STUDIO-001: 三元素出图卡。场景 hero + 文案来自已选时段，
-                菜单来自点中的那一款，小美来自绑定本场景的账号 —— 缺哪个，
-                卡上就明写缺哪个，按钮同步 disabled，进分享链的永远是卡上
-                摆出来的同一份，不存在"图上一个样、文案另一个样"。 */}
-            <Text selectable style={styles.sectionTitle}>场景 Studio</Text>
-            <View ref={studioShareRef} collapsable={false} style={styles.badgeShareCard}>
-              {detail.heroImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-studio:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.heroMap} transition={0} /> : null}
-              <Text selectable style={styles.studioName}>{detail.venueName} · {activeVariant?.name ?? selected.type}</Text>
-              <Text selectable style={styles.studioSub}>{activeVariant ? `${activeVariant.window} · ${activeVariant.bestFor}` : selected.description}</Text>
-              <View style={styles.studioRow}>
-                {studioMenu ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-studio-sku:${studioMenu.id}`} source={{ uri: studioMenu.imageUrl }} style={styles.studioThumb} transition={0} /> : null}
-                <View style={styles.studioCopy}>
-                  <Text selectable style={styles.studioName}>{studioMenu ? `${studioMenu.name} · ${studioMenu.priceLabel}` : "还没选菜单"}</Text>
-                  <Text selectable style={styles.studioSub}>{studioMenu ? "你亲手点的那一款" : "去上面点一款，选什么出什么"}</Text>
+            {/* STORE-SCENE-LINK-001 + SCENE-PHOTO-WALL-002：认领了这个场景的
+                店铺相册（商家真的传的）+ 帖子墙（用户真的发的）叠加展示；
+                两个都空才回落到场景资产（主图+菜单图）。资产/商家 tile 的
+                postId 是空串，用它分辨要不要走 localNet.resolveMediaUrl（那是
+                帖子媒体资产 id 专用的解析，资产图/商家图早就是现成的绝对 URL）。 */}
+            {(() => {
+              const merchantTiles = sceneMerchantWallTiles(detail?.merchantPhotos, apiBaseUrl);
+              const realTiles = [...merchantTiles, ...wall];
+              const displayTiles = realTiles.length > 0 ? realTiles : sceneAssetWallTiles(detail);
+              if (displayTiles.length === 0) {
+                return (
+                  <Text selectable style={styles.activityEmpty}>
+                    {wallState === "LOADING" ? "正在读取照片墙…"
+                      : wallState === "ERROR" ? "照片墙暂时取不到，请稍后重试。"
+                        : wallState === "SIGNED_OUT" ? "登录后才能看到这里的照片墙。"
+                          : SCENE_PHOTO_WALL_EMPTY}
+                  </Text>
+                );
+              }
+              return (
+                <View style={styles.wallGrid}>
+                  {displayTiles.map((tile) => {
+                    const uri = tile.postId ? localNet?.resolveMediaUrl(tile.path) : tile.path;
+                    return (
+                      <Pressable
+                        key={tile.key}
+                        accessibilityLabel={tile.author ? `查看${tile.author}的照片` : "查看照片"}
+                        accessibilityRole="imagebutton"
+                        disabled={!uri}
+                        onPress={() => { if (uri) setWallViewer({ author: tile.author, uri }); }}
+                        style={styles.wallTile}
+                      >
+                        {uri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`wall:${tile.key}`} source={{ uri }} style={styles.wallImage} transition={0} /> : null}
+                        {tile.author ? <Text selectable numberOfLines={1} style={styles.wallAuthor}>{tile.author}</Text> : null}
+                      </Pressable>
+                    );
+                  })}
                 </View>
-              </View>
-              <View style={styles.studioRow}>
-                {studioXiaomei ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-studio-ai:${studioXiaomei.accountId}:${studioXiaomei.avatarVersion ?? 1}`} source={aiAccountPhoto(studioXiaomei)} style={styles.aiBindingAvatar} transition={0} /> : null}
-                <View style={styles.studioCopy}>
-                  <Text selectable style={styles.studioName}>{studioXiaomei ? studioXiaomei.displayName : "还没有绑定的小美"}</Text>
-                  <Text selectable style={styles.studioSub}>{studioXiaomei ? studioXiaomei.boundActivityTitle : "等小美绑定这个场景再出图"}</Text>
+              );
+            })()}
+            {/* 照片墙大图：黑底 contain 全屏，× 或系统返回关闭。 */}
+            <Modal animationType="fade" onRequestClose={() => setWallViewer(undefined)} transparent visible={wallViewer !== undefined}>
+              <Pressable accessibilityLabel="关闭大图" onPress={() => setWallViewer(undefined)} style={styles.viewerBackdrop}>
+                {wallViewer ? <Image cachePolicy="memory-disk" contentFit="contain" source={{ uri: wallViewer.uri }} style={styles.viewerImage} transition={0} /> : null}
+                <View pointerEvents="box-none" style={styles.viewerChrome}>
+                  <Pressable accessibilityLabel="关闭大图" onPress={() => setWallViewer(undefined)} style={styles.viewerClose}><Text selectable style={styles.viewerCloseText}>×</Text></Pressable>
+                  {wallViewer?.author ? <Text selectable style={styles.viewerAuthor}>{wallViewer.author}</Text> : null}
                 </View>
-              </View>
+              </Pressable>
+            </Modal>
+            {/* SCENE-HOME-PROTOTYPE-001（2026-09-28）：原型 deepseek_html_20260927_7fc18d
+                的意图块标题是「你想在这里做什么？」。同一份原型的另一份实现
+                scene-shop-directory.tsx 已经改过来了（那条钉只盯它），这里漏了 ——
+                两张面看同一份原型，标题不能一个「你想在这里做什么？」、一个
+                「怎么组织这次现实行动」。卡片文案仍来自服务端 detail.actions
+                （label + moneyMeaning），不写死，跟兄弟实现同一条口径。 */}
+            <Text selectable style={styles.sectionTitle}>你想在这里做什么？</Text>
+            <View style={styles.intentList}>
+              {detail.actions.map((action) => <Pressable key={action.type} onPress={() => { setSelectedAction(action); setActionResult(undefined); setActionExplanation(`${action.label}：${action.moneyMeaning}`); }} style={[styles.intentCard, selectedAction?.type === action.type && styles.intentCardSelected]}>
+                <View style={[styles.intentIconWrap, action.type === "DIRECT_INVITE" ? styles.intentIconRose : action.type === "OPEN_TASK" ? styles.intentIconSky : styles.intentIconGold]}>
+                  <ProxyIcon color={color.ink} name={action.type === "DIRECT_INVITE" ? "peoplePair" : action.type === "OPEN_TASK" ? "target" : "ticket"} size={17} />
+                </View>
+                <View style={styles.intentCopy}>
+                  <Text selectable style={styles.intentTitle}>{action.label}</Text>
+                  <Text selectable style={styles.intentSub}>{sceneActionSubtitle(action)}</Text>
+                </View>
+              </Pressable>)}
             </View>
-            <Pressable accessibilityLabel={studioReady ? "生成 Studio 照" : studioMenu === undefined ? "先选一款菜单再出图" : "等小美绑定这个场景再出图"} disabled={!studioReady} onPress={() => void shareStudioCard()} style={[styles.badgeShareBtn, !studioReady && styles.studioBtnDisabled]}><Text selectable style={styles.badgeShareBtnText}>{studioReady ? "生成 Studio 照" : studioMenu === undefined ? "先选一款菜单再出图" : "等小美绑定这个场景再出图"}</Text></Pressable>
-            {studioShareNotice ? <Text selectable style={styles.nearbyError}>{studioShareNotice}</Text> : null}
+            <Text selectable style={styles.intentFootnote}>匹配结果仅供参考，实际约见以双方确认为准。</Text>
+            {/* DIRECT-INVITE-CONFIRM-001: DIRECT_INVITE 不再在这张小卡里直接
+                发命令——先选人，点一下进「确认下单」整屏 recap，命令从那屏发。
+                OPEN_TASK / PUBLIC_ACTIVITY 没有"选定的人 + 直接报酬"这个形状，
+                维持原样：这里直接确认。 */}
+            {actionExplanation ? <View style={styles.boundaryCard}><Text selectable style={styles.boundaryStrong}>{actionExplanation}</Text><Text selectable style={styles.boundaryText}>{detail.truthBoundary}</Text>{selectedAction?.type === "DIRECT_INVITE" ? <Pressable disabled={!selectedHumanId} onPress={() => setConfirmSheetOpen(true)} style={[styles.confirmAction, !selectedHumanId && styles.confirmActionDisabled]}><Text selectable style={styles.confirmActionText}>{selectedHumanId ? "去确认下单" : "先选一个要邀约的人"}</Text></Pressable> : selectedAction ? <Pressable disabled={actionBusy} onPress={() => { void commitSceneAction(); }} style={styles.confirmAction}><Text selectable style={styles.confirmActionText}>{actionBusy ? "处理中…" : `确认${selectedAction.label}`}</Text></Pressable> : null}{actionResult ? <Text selectable style={styles.actionResult}>{actionResult}</Text> : null}</View> : null}
           </>
         ) : detailError ? <Text selectable style={styles.nearbyError}>{detailError}</Text> : <Text selectable style={styles.loadingDetail}>正在加载当前时段的人、菜单与活动方式…</Text>}
         <Text selectable style={styles.sectionTitle}>场景数据</Text>
@@ -952,8 +1077,6 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
           <DataRow label="场景动态" value={sceneCountsLine(selected)} />
           {visitedAt.get(selected.id) ? <DataRow label="最近足迹" value={new Date(visitedAt.get(selected.id)!).toLocaleString()} /> : null}
         </View>
-        <View style={styles.sectionTitleRow}><Text selectable style={styles.sectionTitle}>Reality Evidence · Scene Memory</Text></View>
-        <View style={styles.memoryCard}><Text selectable style={styles.memoryTitle}>{visited.has(selected.id) ? "已私人标记去过" : "暂无已核验现实记录"}</Text><Text selectable style={styles.memoryText}>{visited.has(selected.id) ? "这只是你的私人足迹标记；完成订单、现场核销或上传并通过审核的证据，才会写入 Scene Memory。" : "完成订单、现场核销或上传并通过审核的证据后，这里才会沉淀同行人、消费项目、内容与关系变化。"}</Text></View>
       </ScrollView>
   ) : null;
 
@@ -995,7 +1118,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
           后端提案管线（提案/确认/Source=COMMUNITY）原样保留，等新 UI 直接接。
           下面直接进地图/列表。 */}
       {view === "MAP" ? (
-        <View style={styles.mapWrap}>
+        <View style={[styles.mapWrap, flatMap === true && styles.mapWrapFlat]}>
           {/* 人位晚到时 remount 一次吃新 initialRegion（origin 只接第一次，后续不变）。 */}
           <MapView key={origin ? `${origin.latitude}:${origin.longitude}` : "catalog"} initialRegion={{ latitude: origin?.latitude ?? HANOI_CENTER_FALLBACK.latitude, longitude: origin?.longitude ?? HANOI_CENTER_FALLBACK.longitude, latitudeDelta: origin ? 0.12 : 0.115, longitudeDelta: origin ? 0.12 : 0.115 }} onPress={() => setPinSheetId(undefined)} showsUserLocation={!!origin} style={StyleSheet.absoluteFill}>
             {heat
@@ -1012,7 +1135,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
                     />
                   );
                 })
-              : filtered.map((scene) => <Marker key={scene.id} coordinate={{ latitude: scene.latitude, longitude: scene.longitude }} onPress={() => { setPinSheetId(scene.id); }} pinColor={!scene.active ? color.muted : visited.has(scene.id) ? (scene.category === "商家" ? color.magenta : scene.category === "景点" ? color.violet : color.muted) : color.muted} title={scene.name} description={sceneAddressLine(scene)} />)}
+              : filtered.map((scene) => <Marker key={scene.id} coordinate={{ latitude: scene.latitude, longitude: scene.longitude }} onPress={() => { setPinSheetId(scene.id); }} onCalloutPress={() => { setPinSheetId(scene.id); }} pinColor={!scene.active ? color.muted : visited.has(scene.id) ? (scene.category === "商家" ? color.magenta : scene.category === "景点" ? color.violet : color.muted) : color.muted} title={scene.name} description={sceneAddressLine(scene)} />)}
           </MapView>
           <Pressable
             style={[styles.heatToggle, heat && styles.heatToggleOn]}
@@ -1044,8 +1167,12 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
               </View>
               <Pressable accessibilityLabel="关闭快打卡" onPress={() => setPinSheetId(undefined)} style={styles.pinSheetClose}><Text selectable style={styles.pinSheetCloseText}>×</Text></Pressable>
               <View style={styles.pinSheetRow}>
-                <Pressable accessibilityLabel="导航去这里" onPress={() => openSceneNavigation(pinScene)} style={styles.primaryAction}><Text selectable style={styles.primaryActionText}>导航去这里 ›</Text></Pressable>
-                <Pressable accessibilityLabel="看场景详情" onPress={() => { setPinSheetId(undefined); setSelectedId(pinScene.id); }} style={styles.action}><Text selectable style={styles.actionText}>看详情 ›</Text></Pressable>
+                <Pressable accessibilityLabel="导航去这里" onPress={() => openSceneNavigation(pinScene)} style={styles.primaryAction}><ProxyIcon color={color.white} name="arrowUpRight" size={14} /><Text selectable style={styles.primaryActionText}>导航去这里</Text></Pressable>
+                {/* 创建活动选地点时多一颗确认键（仅 onPickScene 传入时渲染，首页无变化）。 */}
+                {onPickScene ? (
+                  <Pressable accessibilityLabel={pickSceneLabel ?? "设为活动地点"} onPress={() => onPickScene(pinScene.id)} style={styles.primaryAction}><Text selectable style={styles.primaryActionText}>{pickSceneLabel ?? "设为活动地点"}</Text></Pressable>
+                ) : null}
+                <Pressable accessibilityLabel="看场景详情" onPress={() => { setPinSheetId(undefined); setSelectedId(pinScene.id); }} style={styles.action}><Text selectable style={styles.actionText}>看详情</Text><ProxyIcon color={color.ink} name="chevronRight" size={14} /></Pressable>
               </View>
               {navError ? <Text selectable style={styles.nearbyError}>{navError}</Text> : null}
             </View>
@@ -1081,7 +1208,13 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
                   <View key={badge.id} style={[styles.badgeRow, earned && styles.badgeRowEarned]}>
                     <Text selectable style={styles.badgeIcon}>{badge.icon}</Text>
                     <View style={styles.badgeCopy}>
-                      <Text selectable style={[styles.badgeName, !earned && styles.badgeNameLocked]}>{badge.name}{earned ? " ✓" : ""}</Text>
+                      {/* SCENE-HOME-PROTOTYPE-001（2026-09-28）：原来把 " ✓" 直接拼进
+                          Text —— 字符不是字形（BACK-GLYPH-001 同款），勾的形状和垂直
+                          基线跟着 14pt 的字号漂。改成真字形，只有已点亮才画。 */}
+                      <View style={styles.badgeNameRow}>
+                        <Text selectable style={[styles.badgeName, !earned && styles.badgeNameLocked]}>{badge.name}</Text>
+                        {earned ? <ProxyIcon color={color.mint} name="check" size={13} /> : null}
+                      </View>
                     </View>
                   </View>
                 );
@@ -1102,7 +1235,10 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             <View style={styles.reviewStarsRow}>
               {[1, 2, 3, 4, 5].map((n) => (
                 <Pressable accessibilityLabel={`${n} 星`} key={n} onPress={() => setReviewStars(n)}>
-                  <Text selectable style={[styles.reviewStar, n <= reviewStars && styles.reviewStarFilled]}>★</Text>
+                  {/* SCENE-HOME-PROTOTYPE-001（2026-09-28）：以前是文本 "★" 换个 color
+                      冒充「点亮」—— 字符不是字形（BACK-GLYPH-001 同款），填不了色，也
+                      拿不到实心/描边两种形态。改成真字形 + filled，跟统计卡那颗同一颗。 */}
+                  <ProxyIcon color={n <= reviewStars ? "#F5B400" : color.line} filled={n <= reviewStars} name="star" size={32} />
                 </Pressable>
               ))}
             </View>
@@ -1120,6 +1256,81 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             </Pressable>
           </Pressable>
         </Pressable>
+      </Modal>
+      {/* DIRECT-INVITE-CONFIRM-001: 确认下单整屏——人/时间/活动/地点/费用
+          recap，真正发 CreateScene + CreateInvitation 命令的按钮在最下面。
+          每一块都是这一屏已经拿在手里的真数据（选中的人/variant/场景/
+          金额），没有一项是新造的字段；唯一新加的是「时间」这块背后的
+          按天/按时段选择器（见 direct-invite-schedule.ts 头注）。 */}
+      <Modal animationType="slide" onRequestClose={() => setConfirmSheetOpen(false)} visible={confirmSheetOpen}>
+        <View style={[styles.confirmPage, { paddingTop: insets.top }]}>
+          <View style={styles.detailTop}>
+            <Pressable accessibilityLabel="返回" onPress={() => setConfirmSheetOpen(false)} style={styles.backButton}><ProxyBackGlyph /></Pressable>
+            <Text selectable style={styles.confirmTitle}>确认下单</Text>
+            <View style={styles.topSpacer} />
+          </View>
+          <ScrollView contentContainerStyle={styles.confirmScroll} style={styles.confirmScrollFlex}>
+            <View style={styles.confirmBlock}>
+              <Text selectable style={styles.confirmBlockTitle}>一起的人</Text>
+              {selectedHuman ? (
+                <View style={styles.confirmPersonRow}>
+                  {humanAvatarUri(selectedHuman.avatarUrl) !== undefined
+                    ? <CircularAvatarImage accessibilityLabel={`${selectedHuman.name}头像`} size={52} uri={humanAvatarUri(selectedHuman.avatarUrl)!} />
+                    : <View style={styles.humanAvatarFallback}><Text selectable style={styles.humanAvatarText}>{selectedHuman.name.slice(0, 1).toUpperCase()}</Text></View>}
+                  <View style={styles.confirmPersonInfo}>
+                    <Text selectable style={styles.confirmPersonName}>{selectedHuman.name}</Text>
+                    <Text selectable style={styles.confirmBodyText}>{selectedHuman.availability}{selectedHuman.source === "FIXTURE" ? " · 占位候选，尚未接入真实供给" : ""}</Text>
+                  </View>
+                </View>
+              ) : <Text selectable style={styles.confirmBodyText}>还没选人</Text>}
+            </View>
+            <View style={styles.confirmBlock}>
+              <Text selectable style={styles.confirmBlockTitle}>时间</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scheduleChipRail}>
+                {scheduleDays.map((day) => <Pressable key={day.offset} onPress={() => setScheduleDayOffset(day.offset)} style={[styles.scheduleChip, scheduleDayOffset === day.offset && styles.scheduleChipSelected]}><Text selectable style={[styles.scheduleChipText, scheduleDayOffset === day.offset && styles.scheduleChipTextSelected]}>{day.label}</Text></Pressable>)}
+              </ScrollView>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scheduleChipRail}>
+                {scheduleSlots.map((slot) => <Pressable key={slot.label} onPress={() => setScheduleSlot(slot)} style={[styles.scheduleChip, scheduleSlot.label === slot.label && styles.scheduleChipSelected]}><Text selectable style={[styles.scheduleChipText, scheduleSlot.label === slot.label && styles.scheduleChipTextSelected]}>{slot.label}</Text></Pressable>)}
+              </ScrollView>
+              <Text selectable style={styles.confirmRecapLine}>{scheduleRecapLabel(combineDayAndTime(scheduleDays[scheduleDayOffset]?.iso ?? scheduleDays[0]!.iso, scheduleSlot))} 见面</Text>
+            </View>
+            <View style={styles.confirmBlock}>
+              <Text selectable style={styles.confirmBlockTitle}>{activeVariant?.name ?? "现实行动"}</Text>
+              {activeVariant ? <Text selectable style={styles.confirmBodyText}>{activeVariant.bestFor} · {activeVariant.facets.join(" · ")}</Text> : null}
+              {selectedMenuItem ? <Text selectable style={styles.confirmMenuLine}>已选：{selectedMenuItem.name} · {selectedMenuItem.priceLabel}（到店自付，不计入下面的报酬）</Text> : null}
+            </View>
+            <View style={styles.confirmBlock}>
+              <Text selectable style={styles.confirmBlockTitle}>地点</Text>
+              <Text selectable style={styles.confirmPersonName}>{detail?.venueName ?? selected?.name}</Text>
+              {selected ? <Text selectable style={styles.confirmBodyText}>{sceneAddressLine(selected)}{inviteDistanceMeters !== undefined ? ` · 距你 ${formatDistance(inviteDistanceMeters)}` : ""}</Text> : null}
+              {selected ? <Pressable onPress={() => openSceneNavigation(selected)} style={styles.confirmGhostBtn}><Text selectable style={styles.confirmGhostBtnText}>导航去这里</Text></Pressable> : null}
+            </View>
+            <View style={[styles.confirmBlock, styles.confirmFeeBlock]}>
+              <Text selectable style={styles.confirmBlockTitle}>费用</Text>
+              <Text selectable style={styles.inviteAmountLabel}>给{selectedHuman?.name ?? "对方"}的报酬（VND）</Text>
+              <View style={styles.inviteAmountRow}>
+                <TextInput keyboardType="number-pad" onChangeText={setInviteAmountText} placeholder="150,000" style={styles.inviteAmountInput} value={inviteAmountText} />
+                <Text selectable style={styles.inviteCurrency}>VND</Text>
+              </View>
+              <Text selectable style={styles.confirmBodyText}>现场消费（若有）直接付给商家，不经过平台，也不计入这笔报酬。</Text>
+            </View>
+            <View style={styles.confirmNotice}>
+              <Text selectable style={styles.confirmNoticeTitle}>下单须知</Text>
+              <Text selectable style={styles.confirmNoticeItem}>对方接受前会看到这笔报酬；接受后冻结进订单。</Text>
+              {detail?.truthBoundary ? <Text selectable style={styles.confirmNoticeItem}>{detail.truthBoundary}</Text> : null}
+            </View>
+            {actionResult ? <Text selectable style={styles.actionResult}>{actionResult}</Text> : null}
+          </ScrollView>
+          <View style={[styles.confirmFooter, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={styles.confirmFooterTotal}>
+              <Text selectable style={styles.confirmFooterTotalLabel}>合计</Text>
+              <Text selectable style={styles.confirmFooterTotalValue}>{(Number(inviteAmountText.replace(/[^\d]/g, "")) || 0).toLocaleString("en-US")}₫</Text>
+            </View>
+            <Pressable disabled={actionBusy} onPress={() => { void commitSceneAction(); }} style={styles.confirmActionCta}>
+              <Text selectable style={styles.confirmActionCtaText}>{actionBusy ? "处理中…" : "确认下单"}</Text>
+            </Pressable>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -1195,7 +1406,7 @@ const styles = StyleSheet.create({
   // 边框 line、圆角 22（foundation.radius.lg），横向顶边无间隙（无 marginHorizontal，
   // 跟 Market 地图视图一致；页内顶栏/统计/搜索保持 16 缩进）。全屏页保留 flex:1
   // 吃剩余高度，minHeight:330 保底与内联卡等高；position:relative 承接 privacyPill 悬浮。
-  mapWrap: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 22, borderWidth: 1, flex: 1, minHeight: 330, overflow: "hidden", position: "relative" }, privacyPill: { alignSelf: "center", backgroundColor: "rgba(23,19,31,0.84)", borderRadius: 14, bottom: 12, paddingHorizontal: 12, paddingVertical: 7, position: "absolute" }, privacyText: { color: color.white, fontSize: 11, fontWeight: "700" },
+  mapWrap: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 22, borderWidth: 1, flex: 1, minHeight: 330, overflow: "hidden", position: "relative" }, mapWrapFlat: { borderRadius: 0, borderWidth: 0 }, privacyPill: { alignSelf: "center", backgroundColor: "rgba(23,19,31,0.84)", borderRadius: 14, bottom: 12, paddingHorizontal: 12, paddingVertical: 7, position: "absolute" }, privacyText: { color: color.white, fontSize: 11, fontWeight: "700" },
   pinSheet: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, bottom: 48, left: 12, padding: 12, position: "absolute", right: 12 }, pinSheetCopy: { paddingRight: 30 }, pinSheetClose: { alignItems: "center", height: 30, justifyContent: "center", position: "absolute", right: 6, top: 6, width: 30 }, pinSheetCloseText: { color: color.muted, fontSize: 20, fontWeight: "700" }, pinSheetRow: { flexDirection: "row", gap: 8, marginTop: 10 },
   // 供热开关：左上白 pill，生效反转为 ink 底（跟市场定位钮同语言）。
   heatToggle: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, height: 34, justifyContent: "center", left: 10, position: "absolute", top: 10, width: 34 },
@@ -1207,7 +1418,7 @@ const styles = StyleSheet.create({
   // SCENE-MAP-GESTURE-001: 详情盖层（不透明盖住整页，地图在下面常驻）。
   detailOverlay: { backgroundColor: color.offWhite, bottom: 0, left: 0, position: "absolute", right: 0, top: 0, zIndex: 10 },
   list: { flexGrow: 1, gap: 9, paddingBottom: 24, paddingHorizontal: 16 },
-  listScroll: { flex: 1 }, checkInHint: { color: color.muted, flex: 1, fontSize: 11, lineHeight: 16 },
+  listScroll: { flex: 1 },
   badgeProgressBox: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 10, padding: 12 },
   badgeProgressTitle: { color: color.ink, fontSize: 12, fontWeight: "900" },
   badgeProgressRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 8 },
@@ -1215,15 +1426,100 @@ const styles = StyleSheet.create({
   badgeProgressText: { color: color.muted, fontSize: 11, marginTop: 2 },
   // (社区提交样式已随 UI 整段撤下，commander 重做设计中。)
   sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, minHeight: 82, padding: 14 }, sceneDot: { backgroundColor: color.violet, borderRadius: 9, height: 18, width: 18 }, sceneDotActive: { backgroundColor: color.magenta }, sceneDotMuted: { backgroundColor: color.muted }, sceneCopy: { flex: 1 }, sceneName: { color: color.ink, fontSize: 16, fontWeight: "800" }, sceneMeta: { color: color.muted, fontSize: 12, marginTop: 3 }, sceneSignal: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 5 }, empty: { color: color.muted, paddingTop: 40, textAlign: "center" },
-  detailContent: { paddingBottom: 36, paddingHorizontal: 13 }, detailTop: { alignItems: "center", flexDirection: "row", minHeight: 56 }, backButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 }, detailTopCopy: { flex: 1 }, venueRow: { alignItems: "center", flexDirection: "row", gap: 10 }, venueLogo: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, height: 46, justifyContent: "center", width: 46 }, venueLogoText: { color: color.white, fontSize: 20, fontWeight: "900" }, venueCopy: { flex: 1 }, detailTopTitle: { color: color.ink, fontSize: 17, fontWeight: "900" }, detailTopSub: { color: color.muted, fontSize: 11, marginTop: 2 }, categoryBadge: { alignSelf: "flex-start", backgroundColor: color.violetSoftBg, borderRadius: 999, marginTop: 5, paddingHorizontal: 9, paddingVertical: 3 }, categoryBadgeText: { color: color.violet, fontSize: 11, fontWeight: "800" },   topSpacer: { width: 38 }, hero: { backgroundColor: "#F6F2E9", borderColor: color.line, borderRadius: 20, borderWidth: 1, overflow: "hidden", padding: 15, paddingTop: 242 }, heroMap: { height: 226, left: 0, position: "absolute", right: 0, top: 0 }, statePill: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 14, marginTop: 4, paddingHorizontal: 10, paddingVertical: 6 }, statePillActive: { backgroundColor: color.attentionBg }, stateText: { color: color.muted, fontSize: 11, fontWeight: "800" }, stateTextActive: { color: color.error }, venueIntro: { color: color.muted, fontSize: 13, lineHeight: 20, marginTop: 8, paddingHorizontal: 2 }, sceneCounts: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 10 },
-  sceneRatingLine: { color: "#8C6A00", fontSize: 13, fontWeight: "900", marginTop: 10 },
+  detailContent: { paddingBottom: 36, paddingHorizontal: 13 }, detailTop: { alignItems: "center", flexDirection: "row", minHeight: 56 }, backButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 }, venueRow: { alignItems: "center", flexDirection: "row", gap: 10 }, venueLogoText: { color: color.white, fontSize: 20, fontWeight: "900" }, venueCopy: { flex: 1 }, categoryBadge: { alignSelf: "flex-start", backgroundColor: color.violetSoftBg, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 6 }, categoryBadgeText: { color: color.violet, fontSize: 11, fontWeight: "800" },   topSpacer: { width: 38 }, heroMap: { height: 226, left: 0, position: "absolute", right: 0, top: 0 }, statePill: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 14, marginTop: 4, paddingHorizontal: 10, paddingVertical: 6 }, statePillActive: { backgroundColor: color.attentionBg }, stateText: { color: color.muted, fontSize: 11, fontWeight: "800" }, stateTextActive: { color: color.error }, venueIntro: { color: color.muted, fontSize: 13, lineHeight: 20, marginTop: 8, paddingHorizontal: 2 }, sceneCounts: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 10 },
+  // SCENE-CARD-001: 封面盖层 + 三格统计卡 + 三键动作行 + 距离条。
+  // SCENE-COVER-RECT-001（2026-09-28，用户：主图不要 R 角）：封面去圆角，纯矩形
+  // 通顶 bleed（marginHorizontal -13 保留）。overflow hidden 保留，只裁绝对定位子层。
+  coverWrap: { height: 280, marginHorizontal: -13, overflow: "hidden", position: "relative" },
+  coverImage: { height: "100%", width: "100%" },
+  // PHOTO-SCRIM-001（2026-09-28）：这里原来是
+  // `coverShade: { backgroundColor: "rgba(0,0,0,0.28)", height: "55%" }` —— 和
+  // requester-home 确认下单那批卡片同一形状的**硬边平涂色带**：280pt 封面照片的
+  // 下半页被整块压暗，并在 45% 处留一条横切边。原型（场景名片
+  // deepseek_html_20260927_7fc18d）用的是 `linear-gradient(180deg, transparent
+  // 55%, rgba(0,0,0,.25))`。改用全 App 唯一的 <PhotoScrim />。
+  coverNavRow: { flexDirection: "row", gap: 10, left: 16, position: "absolute", right: 16 },
+  coverNavBtn: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.4)", borderRadius: 18, height: 36, justifyContent: "center", width: 36 },
+  // SCENE-HOME-PROTOTYPE-001：原型 `.cover-info` 底部留 22（标题下沿到封面底边）。
+  coverInfo: { bottom: 22, left: 16, position: "absolute", right: 16 },
+  venueLogoOnCover: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.9)", borderRadius: 10, height: 38, justifyContent: "center", width: 38 },
+  // SCENE-HOME-PROTOTYPE-001：原型 `.cover-name` = 24px / letter-spacing -0.6。
+  // PHOTO-SCRIM-001：遮罩按 SCENE-CARD-SHADE-009 调淡之后，名字靠自己的
+  // textShadow 兜底可读性（同 sceneCardTitle 的写法），不靠底图大面积变黑。
+  coverName: { color: color.white, fontSize: 24, fontWeight: "900", letterSpacing: -0.6, textShadowColor: "rgba(0,0,0,0.55)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 4 },
+  coverAddrRow: { alignItems: "center", flexDirection: "row", gap: 5, marginTop: 4 },
+  coverAddr: { color: "rgba(255,255,255,0.92)", fontSize: 12, fontWeight: "700", textShadowColor: "rgba(0,0,0,0.5)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 3 },
+  // SCENE-HOME-PROTOTYPE-001：原型 `.stats-card` = margin:-26px 16px 14px（压在
+  // 封面下沿上）。原来是 -24 / 12，跟原型差 2px，一并照原型的值收齐。
+  statsCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", marginBottom: 14, marginTop: -26, paddingVertical: 14 },
+  statCell: { alignItems: "center", flex: 1 },
+  // SCENE-HOME-PROTOTYPE-001：原型 `.stat-cell+.stat-cell::before` 的分隔线是 36 高。
+  statDivider: { backgroundColor: color.line, height: 36, width: 1 },
+  // 原型 `.stat-main`：星和数字基线对齐、间距 3；评分格 22px（`.stat-num`），
+  // 另外两格 20px（`.stat-num-sm`）。以前一律 16px —— 统计卡的数字是这张卡的
+  // 全部信息量，压到 16 就比原型弱一档。
+  statCellMain: { alignItems: "center", flexDirection: "row", gap: 3, marginBottom: 5 },
+  statCellRating: { color: color.ink, fontSize: 22, fontWeight: "900" },
+  statCellValue: { color: color.ink, fontSize: 20, fontWeight: "900" },
+  // ⚠️ 原型 `.stat-l` 是 10.5px，**低于本仓 11pt 可读底线**（design-system-r3
+  // 的 typography 钉），所以这里保持 11，不照抄原型的 10.5。
+  statCellLabel: { color: color.muted, fontSize: 11, marginTop: 2 },
+  statMyReview: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 2 },
+  actionRow3: { flexDirection: "row", gap: 8, marginTop: 4 },
+  // SCENE-HOME-PROTOTYPE-001：三颗都是「图标 + 文字」⇒ 要 flexDirection row + gap
+  // （原来只有文字，靠居中就够了）。字重 900 跟原型 `.act-btn{font-weight:900}`
+  // 和同原型的 scene-shop-directory actSaveText 一致。
+  action3: { alignItems: "center", borderRadius: 14, flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", minHeight: 48 },
+  // rose-soft / rose-ink → attentionBg / magenta（本仓对「粉」的既有映射，
+  // 见 scene-shop-directory 的 actSave 和 feed 的点赞心）。
+  action3Save: { backgroundColor: color.attentionBg, borderColor: color.attentionBorder, borderWidth: 1 },
+  action3SaveActive: { backgroundColor: color.magenta, borderColor: color.magenta },
+  action3SaveText: { color: color.magenta, fontSize: 13, fontWeight: "900" }, action3SaveActiveText: { color: color.white, fontSize: 13, fontWeight: "900" },
+  action3Checkin: { backgroundColor: color.ink, borderColor: color.ink, borderWidth: 1 },
+  action3CheckinDone: { backgroundColor: color.mint, borderColor: color.mint },
+  action3CheckinText: { color: color.white, fontSize: 13, fontWeight: "900" },
+  action3Nav: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1 }, action3NavText: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  distBar: { alignItems: "center", backgroundColor: color.surface, borderRadius: 12, flexDirection: "row", gap: 7, marginTop: 10, paddingHorizontal: 12, paddingVertical: 9 },
+  distBarText: { color: color.muted, flex: 1, fontSize: 11, lineHeight: 16 },
+  matchCard: { backgroundColor: "#211D18", borderRadius: 18, marginTop: 8, padding: 14 },
+  matchLabelPill: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "rgba(232,194,90,0.16)", borderRadius: 999, flexDirection: "row", gap: 5, paddingHorizontal: 9, paddingVertical: 4 },
+  matchLabelText: { color: "#E8C25A", fontSize: 11, fontWeight: "900" },
+  matchTitle: { color: color.white, fontSize: 16, fontWeight: "900", marginTop: 8 },
+  matchSub: { color: "rgba(255,255,255,0.6)", fontSize: 11, marginBottom: 10, marginTop: 3 },
+  humanPlainNameOnDark: { color: color.white, fontSize: 13, fontWeight: "800", marginTop: 6, textAlign: "center" },
+  humanPlainSubOnDark: { color: "rgba(255,255,255,0.65)", fontSize: 11, marginTop: 2, textAlign: "center" },
+  humanEmptyOnDark: { color: "rgba(255,255,255,0.7)", fontSize: 12, lineHeight: 18, marginTop: 6, paddingRight: 16 },
+  sectionHint: { color: color.muted, fontSize: 11, marginBottom: 6, marginTop: -4 },
+  eventRail: { gap: 10, paddingRight: 16 },
+  eventCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 6, padding: 12, width: 176 },
+  eventTitle: { color: color.ink, fontSize: 13, fontWeight: "800", lineHeight: 18, minHeight: 36 },
+  eventMetaRow: { alignItems: "center", flexDirection: "row", gap: 5 },
+  eventMetaText: { color: color.muted, fontSize: 11 },
+  eventJoin: { alignItems: "center", backgroundColor: color.ink, borderRadius: 10, marginTop: 4, paddingVertical: 8 },
+  eventJoinDisabled: { backgroundColor: color.line },
+  eventJoinText: { color: color.white, fontSize: 11, fontWeight: "900" },
+  eventCreateCard: { alignItems: "center", borderColor: color.line, borderRadius: 16, borderStyle: "dashed", borderWidth: 1, justifyContent: "center", minHeight: 120, width: 120 },
+  eventCreateText: { color: color.muted, fontSize: 12, fontWeight: "800", textAlign: "center" },
+  intentList: { gap: 8 },
+  intentCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 12, padding: 12 },
+  intentCardSelected: { borderColor: color.violet },
+  intentIconWrap: { alignItems: "center", borderRadius: 12, height: 40, justifyContent: "center", width: 40 },
+  intentIconRose: { backgroundColor: "#FBE1E6" }, intentIconSky: { backgroundColor: "#DCEBFB" }, intentIconGold: { backgroundColor: "#FBEBC9" },
+  intentCopy: { flex: 1 },
+  intentTitle: { color: color.ink, fontSize: 14, fontWeight: "900" },
+  intentSub: { color: color.muted, fontSize: 11, marginTop: 3 },
+  intentFootnote: { color: color.muted, fontSize: 11, marginTop: 8, textAlign: "center" },
   reviewEntry: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 999, marginTop: 8, paddingHorizontal: 12, paddingVertical: 7 },
   reviewEntryText: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  reviewStarsRow: { flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 14 },
-  reviewStar: { color: color.line, fontSize: 34 },
-  reviewStarFilled: { color: "#F5B400" },
+  reviewStarsRow: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 14 },
   reviewCommentInput: { backgroundColor: color.surface, borderRadius: 12, color: color.ink, fontSize: 13, marginTop: 14, minHeight: 70, padding: 12, textAlignVertical: "top" },
   wallGrid: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 4 },
+  viewerBackdrop: { backgroundColor: color.ink, flex: 1 },
+  viewerImage: { flex: 1 },
+  viewerChrome: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  viewerClose: { alignItems: "center", height: 44, justifyContent: "center", position: "absolute", right: 8, top: 8, width: 44 },
+  viewerCloseText: { color: color.white, fontSize: 28, fontWeight: "700" },
+  viewerAuthor: { bottom: 28, color: color.white, fontSize: 13, fontWeight: "700", left: 0, position: "absolute", right: 0, textAlign: "center" },
   wallTile: { aspectRatio: 1, backgroundColor: color.surface, borderRadius: 10, overflow: "hidden", width: "32.4%" },
   wallImage: { height: "100%", width: "100%" },
   wallAuthor: { backgroundColor: "rgba(0,0,0,0.45)", bottom: 0, color: color.white, fontSize: 11, fontWeight: "800", left: 0, paddingHorizontal: 6, paddingVertical: 2, position: "absolute", right: 0 },
@@ -1231,15 +1527,15 @@ const styles = StyleSheet.create({
   aiBindingCard: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderColor: color.violet, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 13 }, aiBindingAvatar: { borderRadius: 30, height: 60, width: 60 }, aiBindingCopy: { flex: 1 }, aiBindingEyebrow: { color: color.violet, fontSize: 11, fontWeight: "900", letterSpacing: 0.6 }, aiBindingTitle: { color: color.ink, fontSize: 14, fontWeight: "900", marginTop: 4 }, aiBindingText: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 5 }, aiProfileButton: { alignSelf: "flex-start", backgroundColor: color.ink, borderRadius: 12, marginTop: 9, paddingHorizontal: 12, paddingVertical: 8 }, aiProfileButtonText: { color: color.white, fontSize: 11, fontWeight: "900" },
   humanBindingCard: { alignItems: "center", backgroundColor: "#FFF8E3", borderColor: "#E4C35B", borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 13 }, humanBindingEyebrow: { color: "#735700", fontSize: 11, fontWeight: "900", letterSpacing: 0.6 },
   metrics: { flexDirection: "row", gap: 7, marginTop: 10 }, metric: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, paddingVertical: 11 }, metricValue: { color: color.ink, fontSize: 17, fontWeight: "900" }, metricLabel: { color: color.muted, fontSize: 11, marginTop: 2 },
-  actions: { flexDirection: "row", gap: 8, marginTop: 10 }, action: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, paddingVertical: 13 }, actionSelected: { backgroundColor: color.proxyPurpleSoft }, actionText: { color: color.ink, fontSize: 13, fontWeight: "800" }, primaryAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 16, flex: 1, paddingVertical: 13 }, primaryActionText: { color: color.white, fontSize: 13, fontWeight: "800" },
+  actions: { flexDirection: "row", gap: 8, marginTop: 10 }, action: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, flexDirection: "row", gap: 6, justifyContent: "center", paddingVertical: 13 }, actionText: { color: color.ink, fontSize: 13, fontWeight: "800" }, primaryAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 16, flex: 1, flexDirection: "row", gap: 6, justifyContent: "center", paddingVertical: 13 }, primaryActionText: { color: color.white, fontSize: 13, fontWeight: "800" },
   liveCard: { alignItems: "center", backgroundColor: color.attentionBg, borderRadius: 18, flexDirection: "row", justifyContent: "space-between", marginTop: 12, padding: 15 }, liveLabel: { color: color.error, fontSize: 13, fontWeight: "900" }, liveWindow: { color: color.ink, fontSize: 17, fontWeight: "900", marginTop: 3 }, capacity: { color: color.ink, fontSize: 13, fontWeight: "800" },
   variantRail: { gap: 9, paddingRight: 16 }, variantCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, minHeight: 116, padding: 13, width: 178 }, variantCardSelected: { backgroundColor: color.ink, borderColor: color.ink }, variantName: { color: color.ink, fontSize: 15, fontWeight: "900" }, variantNameSelected: { color: color.white }, variantWindow: { color: color.violet, fontSize: 12, fontWeight: "800", marginTop: 5 }, variantBest: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 8 },
   variantPill: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 13, paddingVertical: 9 }, variantPillSelected: { backgroundColor: color.ink, borderColor: color.ink }, variantPillText: { color: color.ink, fontSize: 12, fontWeight: "700" }, variantPillTextSelected: { color: color.white }, bestGrid: { flexDirection: "row", gap: 9 }, bestCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, minHeight: 105, padding: 13 }, bestTitle: { color: color.ink, fontSize: 14, fontWeight: "900", lineHeight: 19 }, bestSub: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 7 },
   whyCard: { backgroundColor: "#FFF8E3", borderColor: "#E4C35B", borderRadius: 16, borderWidth: 1, marginTop: 9, padding: 13 }, whyTitle: { color: color.ink, fontSize: 13, fontWeight: "900" }, whyText: { color: color.ink, fontSize: 11, lineHeight: 17, marginTop: 5 }, whyBoundary: { borderTopColor: "#E8D99D", borderTopWidth: 1, color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 9, paddingTop: 8 },
-  humanRail: { gap: 9, paddingRight: 16 }, humanPlain: { alignItems: "center", width: 84 }, humanRing: { borderColor: "transparent", borderRadius: 36, borderWidth: 2, padding: 2 }, humanRingSelected: { borderColor: color.violet }, humanAvatarFallback: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderRadius: 32, height: 64, justifyContent: "center", width: 64 }, humanAvatarText: { color: color.violet, fontSize: 22, fontWeight: "900" }, humanPlainName: { color: color.ink, fontSize: 13, fontWeight: "800", marginTop: 6, textAlign: "center" }, humanPlainSub: { color: color.ink, fontSize: 11, marginTop: 2, textAlign: "center" }, humanEmpty: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 2, paddingRight: 16 },
+  humanRail: { gap: 9, paddingRight: 16 }, humanPlain: { alignItems: "center", width: 84 }, humanRing: { borderColor: "transparent", borderRadius: 36, borderWidth: 2, padding: 2 }, humanRingSelected: { borderColor: color.violet }, humanAvatarFallback: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderRadius: 32, height: 64, justifyContent: "center", width: 64 }, humanAvatarText: { color: color.violet, fontSize: 22, fontWeight: "900" },
   sectionTitleRow: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between" }, sectionLink: { color: "#735700", fontSize: 11, fontWeight: "700", marginBottom: 9 }, menuRail: { gap: 10, paddingRight: 16 }, menuCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, overflow: "hidden", paddingBottom: 10, width: 154 }, menuCardSelected: { borderColor: "#D7A600", borderWidth: 2 }, menuImage: { height: 104, width: "100%" }, menuName: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 9, paddingHorizontal: 10 }, menuFit: { color: color.muted, fontSize: 11, marginTop: 3, paddingHorizontal: 10 }, menuPrice: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 7, paddingHorizontal: 10 },
-  executionCard: { flexDirection: "row", gap: 7 }, executionAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 15, flex: 1, minHeight: 68, justifyContent: "center", paddingHorizontal: 5 }, executionActionSelected: { backgroundColor: color.violet }, executionLabel: { color: color.white, fontSize: 12, fontWeight: "900", textAlign: "center" }, executionState: { color: color.muted, fontSize: 11, marginTop: 5 }, boundaryCard: { backgroundColor: color.proxyPurpleSoft, borderRadius: 16, marginTop: 9, padding: 13 }, boundaryStrong: { color: color.ink, fontSize: 12, fontWeight: "800", lineHeight: 18 }, boundaryText: { color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 6 }, inviteAmountLabel: { color: color.ink, fontSize: 12, fontWeight: "800", marginTop: 12 }, inviteAmountRow: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 7 }, inviteAmountInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 11, borderWidth: 1, color: color.ink, flex: 1, fontSize: 15, fontWeight: "900", minHeight: 44, paddingHorizontal: 12 }, inviteCurrency: { color: color.ink, fontSize: 12, fontWeight: "900" }, confirmAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, marginTop: 12, paddingVertical: 11 }, confirmActionText: { color: color.white, fontSize: 13, fontWeight: "900" }, actionResult: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 18, marginTop: 10 }, loadingDetail: { color: color.muted, fontSize: 12, paddingVertical: 22, textAlign: "center" }, activityEmpty: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 6 }, activityRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 8, paddingHorizontal: 12, paddingVertical: 11 }, activityInfo: { flex: 1 }, activityTitle: { color: color.ink, fontSize: 13, fontWeight: "800", lineHeight: 18 }, activityMeta: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 3 }, activityJoin: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 9 }, activityJoinDisabled: { backgroundColor: color.line }, activityJoinText: { color: color.white, fontSize: 12, fontWeight: "900" },
-  sectionTitle: { color: color.ink, fontSize: 18, fontWeight: "900", marginBottom: 8, marginTop: 20 }, dataCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14 }, dataRow: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingVertical: 14 }, dataRowLast: { borderBottomWidth: 0 }, dataLabel: { color: color.ink, fontSize: 13, fontWeight: "700" }, dataValue: { color: color.muted, fontSize: 13 }, memoryCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, padding: 14 }, memoryTitle: { color: color.ink, fontSize: 14, fontWeight: "900" }, memoryText: { color: color.muted, fontSize: 11, lineHeight: 18, marginTop: 7 },
+  boundaryCard: { backgroundColor: color.proxyPurpleSoft, borderRadius: 16, marginTop: 9, padding: 13 }, boundaryStrong: { color: color.ink, fontSize: 12, fontWeight: "800", lineHeight: 18 }, boundaryText: { color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 6 }, inviteAmountLabel: { color: color.ink, fontSize: 12, fontWeight: "800", marginTop: 12 }, inviteAmountRow: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 7 }, inviteAmountInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 11, borderWidth: 1, color: color.ink, flex: 1, fontSize: 15, fontWeight: "900", minHeight: 44, paddingHorizontal: 12 }, inviteCurrency: { color: color.ink, fontSize: 12, fontWeight: "900" }, confirmAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, marginTop: 12, paddingVertical: 11 }, confirmActionText: { color: color.white, fontSize: 13, fontWeight: "900" }, actionResult: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 18, marginTop: 10 }, loadingDetail: { color: color.muted, fontSize: 12, paddingVertical: 22, textAlign: "center" }, activityEmpty: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 6 },
+  sectionTitle: { color: color.ink, fontSize: 18, fontWeight: "900", marginBottom: 8, marginTop: 20 }, dataCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14 }, dataRow: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingVertical: 14 }, dataRowLast: { borderBottomWidth: 0 }, dataLabel: { color: color.ink, fontSize: 13, fontWeight: "700" }, dataValue: { color: color.muted, fontSize: 13 },
   badgeNotice: { backgroundColor: "#FFF4E0", borderRadius: 12, marginHorizontal: 14, marginTop: 8, padding: 10 },
   badgeNoticeText: { color: "#7A4E0F", fontSize: 12, fontWeight: "700" },
   xiaomeiSceneHint: { color: "#5B3FA3", fontSize: 12, marginTop: 6 },
@@ -1254,6 +1550,7 @@ const styles = StyleSheet.create({
   badgeCopy: { flex: 1 },
   badgeName: { color: color.ink, fontSize: 14, fontWeight: "800" },
   badgeNameLocked: { color: "#77726B", fontWeight: "700" },
+  badgeNameRow: { alignItems: "center", flexDirection: "row", gap: 5 },
   badgeDesc: { color: "#77726B", fontSize: 11, lineHeight: 15, marginTop: 2 },
   badgeShareCard: { backgroundColor: "#FFF8EC", borderColor: "#F0DFC0", borderRadius: 14, borderWidth: 1, marginTop: 10, padding: 12 },
   badgeShareBrand: { color: "#7A4E0F", fontSize: 11, fontWeight: "900", letterSpacing: 0.5 },
@@ -1263,7 +1560,39 @@ const styles = StyleSheet.create({
   badgeShareIconLocked: { opacity: 0.28 },
   badgeShareBtn: { alignItems: "center", backgroundColor: "#F4F0FF", borderColor: "#E5DCF5", borderRadius: 999, borderWidth: 1, marginTop: 10, paddingVertical: 10 },
   badgeShareBtnText: { color: "#5B3FA3", fontSize: 13, fontWeight: "800" },
-  studioRow: { alignItems: "center", flexDirection: "row", gap: 10, marginTop: 10 }, studioThumb: { borderRadius: 12, height: 56, width: 56 }, studioCopy: { flex: 1 }, studioName: { color: color.ink, fontSize: 13, fontWeight: "900", lineHeight: 18 }, studioSub: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 3 }, studioBtnDisabled: { backgroundColor: color.line, borderColor: color.line },
+  // studioBtnDisabled 留着：评价提交键还在复用（与 Studio 卡无关，改名会扩散到评价链）。
+  studioBtnDisabled: { backgroundColor: color.line, borderColor: color.line },
   badgeClose: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, marginTop: 12, paddingVertical: 11 },
-  badgeCloseText: { color: color.white, fontSize: 13, fontWeight: "800" }
+  badgeCloseText: { color: color.white, fontSize: 13, fontWeight: "800" },
+  confirmActionDisabled: { backgroundColor: color.line },
+  // DIRECT-INVITE-CONFIRM-001: 确认下单整屏。
+  confirmPage: { backgroundColor: color.white, flex: 1 },
+  confirmTitle: { color: color.ink, flex: 1, fontSize: 17, fontWeight: "900", textAlign: "center" },
+  confirmScrollFlex: { flex: 1 },
+  confirmScroll: { paddingBottom: 24, paddingHorizontal: 16 },
+  confirmBlock: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, marginTop: 12, padding: 14 },
+  confirmBlockTitle: { color: color.ink, fontSize: 13, fontWeight: "900", marginBottom: 10 },
+  confirmBodyText: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  confirmPersonRow: { alignItems: "center", flexDirection: "row", gap: 12 },
+  confirmPersonInfo: { flex: 1, minWidth: 0 },
+  confirmPersonName: { color: color.ink, fontSize: 14.5, fontWeight: "900" },
+  confirmMenuLine: { color: color.muted, fontSize: 11.5, fontWeight: "700", lineHeight: 17, marginTop: 8 },
+  scheduleChipRail: { gap: 8, paddingBottom: 8 },
+  scheduleChip: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8 },
+  scheduleChipSelected: { backgroundColor: color.ink },
+  scheduleChipText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  scheduleChipTextSelected: { color: color.white },
+  confirmRecapLine: { color: color.ink, fontSize: 12.5, fontWeight: "800", marginTop: 4 },
+  confirmGhostBtn: { alignItems: "center", backgroundColor: color.surface, borderRadius: 10, marginTop: 10, paddingVertical: 10 },
+  confirmGhostBtnText: { color: color.ink, fontSize: 12, fontWeight: "900" },
+  confirmFeeBlock: { backgroundColor: color.warnBannerBg, borderColor: color.warnBannerBorder },
+  confirmNotice: { backgroundColor: color.surface, borderRadius: 16, marginTop: 12, padding: 14 },
+  confirmNoticeTitle: { color: color.muted, fontSize: 11, fontWeight: "900", letterSpacing: 0.4, marginBottom: 8, textTransform: "uppercase" },
+  confirmNoticeItem: { color: color.ink, fontSize: 11.5, lineHeight: 17, marginTop: 6 },
+  confirmFooter: { borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", gap: 14, paddingHorizontal: 16, paddingTop: 12 },
+  confirmFooterTotal: { flex: 1 },
+  confirmFooterTotalLabel: { color: color.muted, fontSize: 11, fontWeight: "800" },
+  confirmFooterTotalValue: { color: color.ink, fontSize: 20, fontWeight: "900", marginTop: 2 },
+  confirmActionCta: { alignItems: "center", backgroundColor: color.ink, borderRadius: 14, justifyContent: "center", paddingHorizontal: 24, paddingVertical: 14 },
+  confirmActionCtaText: { color: color.white, fontSize: 14, fontWeight: "900" }
 });

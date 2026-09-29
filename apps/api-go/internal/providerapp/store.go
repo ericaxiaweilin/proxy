@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,19 +17,19 @@ type Postgres struct {
 
 func NewPostgres(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
-const selectColumns = `application_id, user_account_id, display_name, real_name, photos_attested, city,
+const selectColumns = `application_id, user_account_id, display_name, real_name, city,
 	service_areas, languages, capabilities, intro, photo_asset_ids, status, reject_reason, reviewed_by,
 	reviewed_at, agent_id, source, created_at, updated_at,
-	birth_year, gender, phone, phone_verified, id_type, id_front_asset, id_back_asset, selfie_asset,
+	birth_year, gender, phone, phone_verified,
 	no_crime_declared, data_consent, emergency_contact, terms_version, terms_accepted, birth_date`
 
 func scanApplication(row pgx.Row) (*Application, error) {
 	var a Application
 	var areas, langs, caps, photos, accepted []byte
-	err := row.Scan(&a.ID, &a.UserAccountID, &a.DisplayName, &a.RealName, &a.PhotosAttested, &a.City,
+	err := row.Scan(&a.ID, &a.UserAccountID, &a.DisplayName, &a.RealName, &a.City,
 		&areas, &langs, &caps, &a.Intro, &photos, &a.Status, &a.RejectReason, &a.ReviewedBy,
 		&a.ReviewedAt, &a.AgentID, &a.Source, &a.CreatedAt, &a.UpdatedAt,
-		&a.BirthYear, &a.Gender, &a.Phone, &a.PhoneVerified, &a.IDType, &a.IDFrontAsset, &a.IDBackAsset, &a.SelfieAsset,
+		&a.BirthYear, &a.Gender, &a.Phone, &a.PhoneVerified,
 		&a.NoCrime, &a.DataConsent, &a.Emergency, &a.TermsVersion, &accepted, &a.BirthDate)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -70,12 +71,12 @@ func jsonList(values []string) []byte {
 
 func (p *Postgres) Insert(ctx context.Context, a Application) error {
 	_, err := p.pool.Exec(ctx, `INSERT INTO supply.provider_applications (`+selectColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-			$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)`,
-		a.ID, a.UserAccountID, a.DisplayName, a.RealName, a.PhotosAttested, a.City,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
+			$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`,
+		a.ID, a.UserAccountID, a.DisplayName, a.RealName, a.City,
 		jsonList(a.ServiceAreas), jsonList(a.Languages), jsonList(a.Capabilities), a.Intro, jsonList(a.PhotoAssetIDs),
 		a.Status, a.RejectReason, a.ReviewedBy, a.ReviewedAt, a.AgentID, a.Source, a.CreatedAt, a.UpdatedAt,
-		a.BirthYear, a.Gender, a.Phone, a.PhoneVerified, a.IDType, a.IDFrontAsset, a.IDBackAsset, a.SelfieAsset,
+		a.BirthYear, a.Gender, a.Phone, a.PhoneVerified,
 		a.NoCrime, a.DataConsent, a.Emergency, a.TermsVersion, jsonList(a.TermsAccepted), a.BirthDate)
 	return err
 }
@@ -150,33 +151,48 @@ func (p *Postgres) ActivateSupply(ctx context.Context, a Application) (string, e
 	return agentID, nil
 }
 
-// BadPhotos 的 PG 实现：本人上传、IMAGE、非 AI 生成、存在。返回不合格的 id。
-func (p *Postgres) BadPhotos(ctx context.Context, userAccountID string, assetIDs []string) ([]string, error) {
-	rows, err := p.pool.Query(ctx, `SELECT media_asset_id FROM media.media_assets
-		WHERE media_asset_id = ANY($1) AND owner_principal_id = $2 AND media_type = 'IMAGE'
-		  AND NOT COALESCE(ai_generated, false)`, assetIDs, userAccountID)
+// KYC-PHONE-ONLY-001: supply.provider_phone_challenges（migration 128）。
+const phoneChallengeColumns = `id, user_account_id, phone, provider_ref, status, attempts, max_attempts,
+	requested_at, expires_at, verified_at`
+
+func (p *Postgres) CreatePhoneChallenge(ctx context.Context, c PhoneChallenge) error {
+	_, err := p.pool.Exec(ctx, `INSERT INTO supply.provider_phone_challenges (`+phoneChallengeColumns+`)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		c.ID, c.UserAccountID, c.Phone, c.ProviderRef, c.Status, c.Attempts, c.MaxAttempts,
+		c.RequestedAt, c.ExpiresAt, nullableTime(c.VerifiedAt))
+	return err
+}
+
+func (p *Postgres) GetPhoneChallenge(ctx context.Context, id string) (*PhoneChallenge, error) {
+	var c PhoneChallenge
+	var verifiedAt *time.Time
+	err := p.pool.QueryRow(ctx, `SELECT `+phoneChallengeColumns+` FROM supply.provider_phone_challenges WHERE id = $1`, id).
+		Scan(&c.ID, &c.UserAccountID, &c.Phone, &c.ProviderRef, &c.Status, &c.Attempts, &c.MaxAttempts,
+			&c.RequestedAt, &c.ExpiresAt, &verifiedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	ok := map[string]bool{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ok[id] = true
+	if verifiedAt != nil {
+		c.VerifiedAt = *verifiedAt
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	return &c, nil
+}
+
+func (p *Postgres) UpdatePhoneChallenge(ctx context.Context, c PhoneChallenge) error {
+	_, err := p.pool.Exec(ctx, `UPDATE supply.provider_phone_challenges
+		SET status = $2, attempts = $3, verified_at = $4 WHERE id = $1`,
+		c.ID, c.Status, c.Attempts, nullableTime(c.VerifiedAt))
+	return err
+}
+
+func nullableTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
 	}
-	bad := []string{}
-	for _, id := range assetIDs {
-		if !ok[id] {
-			bad = append(bad, id)
-		}
-	}
-	return bad, nil
+	return &t
 }
 
 func trimUserPrefix(id string) string {

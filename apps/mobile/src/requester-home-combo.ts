@@ -184,3 +184,87 @@ export function seedFrom(text: string): number {
   }
   return hash;
 }
+
+// ---------------------------------------------------------------------------
+// HOME-FORYOU-CONFLICT-001（2026-09-28，用户："最大的问题还是自由切换被
+// 派生了 我们是自由切换 如果有资源冲突 要的就是提示 点击选择不能下一步
+// 提示换 目前是派生了"）。
+//
+// `requester-home.tsx` 的四宫格没有走上面这套池子——人/时间/活动/地点
+// 仍是四条独立 index，可以分别锁定、分别换（这是产品要的"自由切换"）。
+// 但"活动是主轴"这条规矩（见文件头注）意味着：锁了地点/时间之后再换活动，
+// 显示的地点/时间会**跟着活动静默改掉**，锁定形同虚设，用户看不出发生了
+// 什么——这就是"被派生了"。
+//
+// 这里不改"自由切换"本身（那是要保留的行为），只加一层诚实的冲突检测：
+// 锁定的地点/时间和当前活动的真实场地/时间不一致时，报出来，调用方据此
+// 阻止进入下一步、提示用户换一个，而不是放任派生把冲突焐没了。
+// ---------------------------------------------------------------------------
+
+export type ComboConflict =
+  | { slot: "place"; lockedSceneName: string; activitySceneName: string | undefined }
+  | { slot: "time"; lockedTime: string; activityTime: string };
+
+/**
+ * 检查锁定的地点/时间是否和当前活动的真实场地/时间冲突。
+ *
+ * 只在"真的锁了"时才检查——没锁的轴本来就该跟着活动走，那不叫冲突，叫
+ * 设计好的默认行为。活动没有可判定的场地（`sceneIdOfActivity` 返回
+ * `undefined`）时也不报地点冲突：那种情况本来就退回 placeIndex 兜底，
+ * 不存在"活动要求某个地点"这件事可比较。
+ */
+export function detectComboConflicts(
+  activity: ComboActivity | undefined,
+  scenes: readonly ComboScene[],
+  locked: { place?: ComboScene | undefined; time?: string | undefined }
+): ComboConflict[] {
+  if (!activity) return [];
+  const out: ComboConflict[] = [];
+  if (locked.place) {
+    const activitySceneId = sceneIdOfActivity(activity, scenes);
+    if (activitySceneId !== undefined && activitySceneId !== locked.place.id) {
+      out.push({
+        slot: "place",
+        lockedSceneName: locked.place.name,
+        activitySceneName: scenes.find((scene) => scene.id === activitySceneId)?.name,
+      });
+    }
+  }
+  if (locked.time && activity.time && locked.time !== activity.time) {
+    out.push({ slot: "time", lockedTime: locked.time, activityTime: activity.time });
+  }
+  return out;
+}
+
+/**
+ * HOME-FORYOU-DEDUP-001：店名常带「· 区域」后缀（"Three Beans · Cầu Giấy"），
+ * 地点格已经单独显示区域，场景格就去掉这段重复的后缀。区域对不上就原样返回。
+ */
+export function stripAreaSuffix(venueName: string, area: string | undefined): string {
+  const trimmedArea = area?.trim();
+  if (!trimmedArea) return venueName;
+  const match = venueName.match(/^(.*?)\s*[·•・]\s*(.+)$/);
+  if (!match || match[2]!.trim() !== trimmedArea || !match[1]!.trim()) return venueName;
+  return match[1]!.trim();
+}
+
+/**
+ * HOME-FORYOU-SCENE-001（用户「商业场所是活动的承载场景 比如xx咖啡店 目前主要做
+ * 咖啡店就可以」）：场景格只从「挂在真实咖啡店场景上的活动」里选。
+ * 没挂到真实场景的活动（自由填写店名，如「岚庭餐厅 · 西湖」）没有承载场景，
+ * 配出来地点对不上，不进四宫格。
+ */
+export function isCoffeeShopScene(scene: { category?: string | undefined; type?: string | undefined }): boolean {
+  return scene.category === "商家" && (scene.type ?? "").includes("咖啡");
+}
+
+export function activitiesAtCoffeeShops<A extends ComboActivity>(
+  activities: readonly A[],
+  scenes: readonly (ComboScene & { category?: string | undefined; type?: string | undefined })[]
+): A[] {
+  const shopIds = new Set(scenes.filter(isCoffeeShopScene).map((scene) => scene.id));
+  return activities.filter((activity) => {
+    const sceneId = sceneIdOfActivity(activity, scenes);
+    return sceneId !== undefined && shopIds.has(sceneId);
+  });
+}

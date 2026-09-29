@@ -1,7 +1,7 @@
 import { type StyleProp, StyleSheet, Text, type ViewStyle, View } from "react-native";
 // Rect 是 SEC-CATEGORY-ICONS-002 的「全部（四宫格）」要用的：原型 02 那格画的是
 // 四个 <rect x y width height rx>，用 Rect 才能把原型的坐标原样搬过来，不用手抄圆弧。
-import Svg, { Circle, Path, Rect } from "react-native-svg";
+import Svg, { Circle, Path, Rect, Text as SvgText } from "react-native-svg";
 
 // Android 的符号回退字体会把 ◎ / ◇ / ○ 等字形压得很小；这里使用固定画布，
 // 让图标的可见面积和原型保持一致，不再依赖字体的 glyph metrics。
@@ -19,6 +19,7 @@ export type ProxyIconName =
   | "arrowUpRight"
   | "arrowUp"
   | "chevronLeft"
+  | "chevronRight"
   | "backArrow"
   | "close"
   | "plus"
@@ -48,6 +49,9 @@ export type ProxyIconName =
   | "replyLike"
   | "replyRepost"
   | "replyShare"
+  | "composerImage"
+  | "composerSmile"
+  | "composerGif"
   | "ellipsis"
   | "search"
   | "chart"
@@ -233,6 +237,15 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
       return canvas(<><Path {...common} strokeWidth={1.8} d="M17 1l4 4-4 4"/><Path {...common} strokeWidth={1.8} d="M3 11V9a4 4 0 0 1 4-4h14"/><Path {...common} strokeWidth={1.8} d="M7 23l-4-4 4-4"/><Path {...common} strokeWidth={1.8} d="M21 13v2a4 4 0 0 1-4 4H3"/></>);
     case "replyShare":
       return canvas(<><Path {...common} strokeWidth={1.8} d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><Path {...common} strokeWidth={1.8} d="M16 6l-4-4-4 4"/><Path {...common} strokeWidth={1.8} d="M12 2v14"/></>);
+    // POST-THREAD-001：评论抽屉输入药丸右侧的三个工具图标，路径照抄原型
+    // proxy_comment_keyboard_v2.html 的 .right-tools（24 栅格、描边 1.6）。
+    // 不复用 image —— 那个名字画的是相机（跟 camera 同一套 View 拼法）。
+    case "composerImage":
+      return canvas(<><Rect {...common} strokeWidth={1.6} x="3" y="3" width="18" height="18" rx="2" ry="2"/><Circle {...common} strokeWidth={1.6} cx="8.5" cy="8.5" r="1.5"/><Path {...common} strokeWidth={1.6} d="M21 15l-5-5L5 21"/></>);
+    case "composerSmile":
+      return canvas(<><Circle {...common} strokeWidth={1.6} cx="12" cy="12" r="10"/><Path {...common} strokeWidth={1.6} d="M8 14s1.5 2 4 2 4-2 4-2"/><Path {...common} strokeWidth={1.6} d="M9 9h.01M15 9h.01"/></>);
+    case "composerGif":
+      return canvas(<><Rect {...common} strokeWidth={1.6} x="2" y="4" width="20" height="16" rx="2" ry="2"/><SvgText fill={color} fontSize="8" fontWeight="bold" stroke="none" textAnchor="middle" x="12" y="15">GIF</SvgText></>);
     case "chat":
       return canvas(<Path {...common} d="M5 6h14v9H9l-4 3z"/>);
     case "meRing":
@@ -290,7 +303,11 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
     case "clock":
       return canvas(<><Circle {...common} cx="12" cy="12" r="7"/><Path {...common} d="M12 8v4l3 2"/></>);
     case "star":
-      return canvas(<Path {...common} d="M12 4l2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 9.2l5-.7z"/>);
+      // SCENE-HOME-PROTOTYPE-001（2026-09-28）：原型的评分星是**实心金**星
+      // （`.stat-star{fill:var(--gold);stroke:none}`），场景卡以前拿文本字符
+      // "★" 顶替 —— 跟 BACK-GLYPH-001 同一类错。要能画实心就得读 filled，
+      // 写死 {...common} 的话 filled 被静默吞掉（和 replyLike / bookmark 一样的坑）。
+      return canvas(<Path {...(filled ? filledCommon : common)} d="M12 4l2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 9.2l5-.7z"/>);
     case "coin":
       return canvas(<><Circle {...common} cx="12" cy="12" r="7"/><Path {...common} d="M9.5 9.5h5M9.5 14.5h5M12 7.5v9"/></>);
     case "settings":
@@ -331,6 +348,13 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
     // 原型的 2.5*(14/24)=1.46px。
     case "chevronLeft":
       return canvas(<Path {...common} d="M15 18l-6-6 6-6"/>);
+    // SCENE-HOME-PROTOTYPE-001（2026-09-28）：右向 chevron。原型
+    // deepseek_html_20260927_7fc18d 里「列表卡尾部」和「意图卡尾部」都是一颗右尖括号，
+    // 但**原型自己写的是文本字符** `<span class="intent-arrow">›</span>`，两份实现
+    // 照抄了 ⇒ 字符不是字形（BACK-GLYPH-001 同款）：形状和垂直基线随 fontSize 漂，
+    // 粗细也跟 chevronLeft 对不上。补一颗真字形 —— 和 chevronLeft 同一条路径的镜像。
+    case "chevronRight":
+      return canvas(<Path {...common} d="M9 18l6-6-6-6"/>);
     // BACK-GLYPH-001：全 App 的返回字形。同一条路径，但取景贴着箭头（见 canvasBack）。
     // 返回控件一律走这个，不要再写 `<Text>‹</Text>` —— `‹` 是引号不是箭头。
     case "backArrow":
@@ -787,16 +811,12 @@ export function ProxyIcon({
     );
   }
 
-  if (name === "heart") {
-    const lobe = size * 0.39;
-    return (
-      <View pointerEvents="none" style={frame}>
-        <View style={[styles.heartLeft, { borderColor: color, borderRadius: lobe / 2, borderWidth: stroke, height: lobe, width: lobe }]} />
-        <View style={[styles.heartRight, { borderColor: color, borderRadius: lobe / 2, borderWidth: stroke, height: lobe, width: lobe }]} />
-        <View style={[styles.heartPoint, { borderBottomColor: color, borderBottomWidth: stroke, borderRightColor: color, borderRightWidth: stroke, height: size * 0.49, top: size * 0.31, width: size * 0.49 }]} />
-      </View>
-    );
-  }
+  // 2026-09-28 删除：这里原来还有一个 `if (name === "heart")`（2026-08-22 的
+  // 「两根圆角方条拼一颗心」写法，配 heartLeft / heartRight / heartPoint 三个 style）。
+  // 它**不可达** —— 上面 MasterModuleIcon 的 switch 里已经有 `case "heart"`（:184，
+  // 走 Feather 那条真描边路径、读 filled），返回非空 ⇒ ProxyIcon 在 :452 就 return 了。
+  // 留着只会误导：我照着它推理过一次，把「heart 不读 filled」写进了别处的注释。
+  // 那三个 style 也一起删了（除这个死分支外没有第二个引用点）。
 
   if (name === "route") {
     const node = size * 0.22;
@@ -944,9 +964,6 @@ const styles = StyleSheet.create({
   storeOuter: { position: "absolute" },
   storeInner: { position: "absolute" },
   storeLine: { position: "absolute" },
-  heartLeft: { left: "16%", position: "absolute", top: "17%" },
-  heartRight: { position: "absolute", right: "16%", top: "17%" },
-  heartPoint: { position: "absolute", transform: [{ rotate: "45deg" }] },
   routeLineA: { left: "17%", position: "absolute", top: "36%", transform: [{ rotate: "32deg" }] },
   routeLineB: { position: "absolute", right: "17%", top: "62%", transform: [{ rotate: "-32deg" }] },
   routeNodeA: { left: "8%", position: "absolute", top: "18%" },

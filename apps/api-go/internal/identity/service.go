@@ -878,12 +878,17 @@ func (s *Service) createSession(ctx context.Context, e command.Envelope) command
 // LC-15 erasure has run. The row itself survives, and that is
 // deliberate: business.accounts.owner_user_id is ON DELETE RESTRICT
 // and the payment / order ledgers reference the account for the
-// statutory retention window (Decree 248/2026 §23, >= 12 months), so
-// hard-deleting the row would either fail or destroy legally-required
-// records. What makes the erasure real rather than cosmetic is that
-// canHoldSession refuses this status: the account cannot authenticate,
-// so no session, no device and no login identifier can ever be
-// reattached to it.
+// statutory retention window — **3 years**, not the 12 months that
+// Decree 248/2026 §23 states for transaction records, because Law on
+// E-commerce 122/2025 Art. 17(2)(i) / 18(2)(c) / 16(2)(b) require
+// concluded-contract data to stay accessible for at least 3 years from
+// conclusion and a Decree cannot lower a Law's floor. See
+// RetainedOnErasure for the full list and for the one boundary that is
+// still open (Cybersecurity Law 116/2025 Art. 25(2)(d)). Hard-deleting
+// the row would either fail or destroy legally-required records. What
+// makes the erasure real rather than cosmetic is that canHoldSession
+// refuses this status: the account cannot authenticate, so no session,
+// no device and no login identifier can ever be reattached to it.
 const AccountStatusErased = "ERASED"
 
 // canHoldSession reports whether an account status may hold a session.

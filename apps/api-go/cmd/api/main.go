@@ -5,6 +5,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/activity"
 	"github.com/proxy-app/proxy-api/internal/aipersona"
+	"github.com/proxy-app/proxy-api/internal/aisystem"
 	"github.com/proxy-app/proxy-api/internal/api"
 	"github.com/proxy-app/proxy-api/internal/benefit"
 	"github.com/proxy-app/proxy-api/internal/bootenv"
@@ -76,6 +77,32 @@ func main() {
 	if warnings := bootenv.Warnings(); len(warnings) > 0 {
 		for _, w := range warnings {
 			log.Printf("BOOT WARNING: %s", w)
+		}
+	}
+
+	// AI-SYSTEM-REGISTER-001：把 AI 系统登记册（internal/aisystem）的体检
+	// 结果打到启动日志。Điều 10.3 要求中/高风险系统的分级结果在**投入使用前**
+	// 报送科技部；仓里今天一条报送都没有，那就不该只在文档里可见。
+	//
+	// 这里**不拦启动**：停掉正在跑的 AI 系统是经营决定（Điều 67.4(b) 的停运
+	// 是**处罚**，不是自助动作），需要时由运维走已有的 kill switch
+	// （AI_MEDIA）闸停。这条日志的作用是让「带缺口在跑」从没人知道变成
+	// 每次启动都看得见。运维查询走 GET /v1/operator/ai/systems。
+	{
+		assessments := aisystem.AssessAll()
+		summary := aisystem.Summarize(assessments)
+		log.Printf("ai system register: %d system(s), %d ready, %d blocked, %d notified to MoST (Điều 10.3)",
+			summary.Total, summary.ReadyForUse, summary.Blocked, summary.NotifiedToMoST)
+		for _, a := range assessments {
+			if a.ReadyForUse {
+				log.Printf("AI SYSTEM OK: %s (%s)", a.ID, a.Tier)
+				continue
+			}
+			codes := make([]string, 0, len(a.Blockers))
+			for _, b := range a.Blockers {
+				codes = append(codes, string(b.Code))
+			}
+			log.Printf("AI SYSTEM GAP: %s (%s): %s", a.ID, a.Tier, strings.Join(codes, ","))
 		}
 	}
 
@@ -604,15 +631,17 @@ func main() {
 		server.Gravity = gravity.NewPostgres(pool)
 		// PROVIDER-APPLY-001：申请成为小美 + 运营审核。资料门与发帖同一道（profileCompleteness）。
 		providerStore := providerapp.NewPostgres(pool)
-		server.ProviderApps = providerapp.NewService(providerStore, providerapp.Deps{
+		server.ProviderApps = providerapp.NewService(providerStore, providerStore, providerapp.Deps{
 			Missing: profileCompleteness,
 			DisplayName: func(ctx context.Context, userAccountID string) string {
 				name, _ := authorNames.ResolveAuthorDisplayName(ctx, userAccountID)
 				return name
 			},
-			Terms:     api.ProviderTermsLoader(),
-			BadPhotos: providerStore.BadPhotos,
-			// 服务者主页照片用本人资料头像（已是公开媒体）；证件 / 自拍永远不进公开资料。
+			Terms: api.ProviderTermsLoader(),
+			// KYC-PHONE-ONLY-001: 同一个已经配好的登录 OTP 供应商（Twilio / eSMS /
+			// SpeedSMS 任一个，见 wire_providers.go），不是另起一套短信通道。
+			Phone: providerPhoneChallengeSender{provider: loginProvider},
+			// 服务者主页照片用本人资料头像（已是公开媒体）；KYC 不再收证件/自拍。
 			Activate: func(ctx context.Context, app providerapp.Application) (string, error) {
 				if path, ok := authorNames.ResolveAuthorAvatarPath(ctx, app.UserAccountID); ok && strings.HasPrefix(path, "assets/") {
 					app.PhotoAssetIDs = []string{strings.TrimPrefix(path, "assets/")}
@@ -742,6 +771,10 @@ func main() {
 	// (memory or Postgres) form by here.
 	realitySceneService.SetFriendLister(relationshipService)
 	realitySceneService.SetActivityVisitorFilter(activityService)
+	// STORE-SCENE-LINK-001: a store that has claimed this scene (LinkStoreToRealityScene)
+	// gets its real photo album onto the scene's photo wall. businessService
+	// already has its final (memory or Postgres) form by here.
+	realitySceneService.SetMerchantPhotoLister(storeScenePhotoAdapter{business: businessService})
 	// VOUCHER-DEFAULTS-001: the voucher wallet no longer mints free vouchers
 	// (see voucher.Service.ensureDefaults) — this is how a user's real,
 	// merchant-funded benefit.Claim rows show up in that same wallet

@@ -253,6 +253,8 @@ commands:
     domain: Voucher
   - command: JoinActivity
     domain: Activity
+  - command: LinkStoreToRealityScene
+    domain: Business
   - command: ListActivities
     domain: Activity
   - command: ListAgentOffers

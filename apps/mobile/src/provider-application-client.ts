@@ -13,7 +13,6 @@ export type ProviderApplication = {
   gender?: string;
   phone?: string;
   phoneVerified: boolean;
-  idType?: "CCCD" | "PASSPORT";
   termsVersion?: string;
   city: string;
   serviceAreas: string[];
@@ -42,10 +41,9 @@ export type ProviderApplicationInput = {
   birthDate: string;
   gender: "";
   phone: string;
-  idType: "CCCD" | "PASSPORT";
-  idFrontAsset: string;
-  idBackAsset: string;
-  selfieAsset: string;
+  // KYC-PHONE-ONLY-001：第 2 步验证码验对了之后拿到的挑战单 id，服务端 Submit
+  // 会重新查一遍（本人 / VERIFIED / 手机号一致），不是"客户端说验证过了就信"。
+  phoneChallengeId: string;
   noCrimeDeclared: boolean;
   dataConsent: boolean;
   emergencyContact: string;
@@ -87,6 +85,31 @@ export const fetchProviderApplication = (client: Requester): Promise<ProviderApp
 export const submitProviderApplication = (client: Requester, input: ProviderApplicationInput): Promise<ProviderApplicationView> => call(client, "/v1/provider-application", { method: "POST", body: input });
 export const withdrawProviderApplication = (client: Requester): Promise<ProviderApplicationView> => call(client, "/v1/provider-application/withdraw", { method: "POST", body: {} });
 
+// KYC-PHONE-ONLY-001：真的发验证码 / 真的验证码校验，取代原来的证件正反面 + 手持自拍。
+export type PhoneChallenge = { challengeId: string; expiresAt: string };
+
+async function callJson(client: Requester, path: string, body: unknown): Promise<Record<string, unknown>> {
+  const response = await client.request(path, { method: "POST", body });
+  const json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (response.status !== 200) {
+    throw new ProviderApplicationError(
+      typeof json.error === "string" ? json.error : `http_${response.status}`,
+      Array.isArray(json.fields) ? json.fields.filter((f): f is string => typeof f === "string") : [],
+    );
+  }
+  return json;
+}
+
+export async function requestPhoneVerification(client: Requester, phone: string): Promise<PhoneChallenge> {
+  const body = await callJson(client, "/v1/provider-application/phone/request", { phone });
+  return { challengeId: String(body.challengeId ?? ""), expiresAt: String(body.expiresAt ?? "") };
+}
+
+export async function verifyPhoneVerification(client: Requester, challengeId: string, code: string): Promise<boolean> {
+  const body = await callJson(client, "/v1/provider-application/phone/verify", { challengeId, code });
+  return body.verified === true;
+}
+
 // 选项码 → 人话（码跟 supply 同一套）。
 export const AREA_LABELS: Readonly<Record<string, string>> = { hn: "河内", bn: "北宁", hcm: "胡志明市", dn: "岘港" };
 export const LANGUAGE_LABELS: Readonly<Record<string, string>> = { VI: "越南语", ZH: "中文", EN: "英语", KO: "韩语", JA: "日语" };
@@ -122,13 +145,10 @@ const FIELD_TEXT: Readonly<Record<string, string>> = {
   real_name: "请填写 2–40 字的真实姓名",
   birth_date: "出生日期不对（格式 2001-05-20，需年满 18 岁）",
   phone: "手机号格式不对",
+  phone_not_verified: "请先验证手机号（获取验证码并输入正确的码）",
   city: "请填写所在城市",
   service_areas: "至少选一个服务区域",
   languages: "至少选一种会说的语言",
-  id_type: "请选择证件类型",
-  id_documents: "请上传证件（身份证要正反面，护照只要正面）",
-  selfie: "请上传手持证件的自拍",
-  documents_not_own_real: "证件和自拍必须是你本人上传的真实照片（不能用 AI 生成的图）",
   no_crime_declared: "请勾选无犯罪声明",
   data_consent: "请同意 KYC 数据使用",
   emergency_contact: "请填写紧急联系人（姓名 + 电话）",
@@ -148,6 +168,8 @@ export function providerApplicationErrorText(error: unknown): string {
     if (error.code === "already_open") return "你已经有一份审核中或已通过的申请。";
     if (error.code === "wrong_status") return "这份申请现在的状态不能这样操作，刷新看看。";
     if (error.code === "access_token_required" || error.code === "invalid_access_token") return "请先登录。";
+    if (error.code === "phone_challenge_invalid") return "验证码错误或已过期，请重新获取。";
+    if (error.code === "phone_provider_not_configured") return "短信通道暂时不可用，请稍后再试。";
   }
   return "暂时没连上服务，稍后再试。";
 }
@@ -198,18 +220,20 @@ export function permissionLine(permission: ProviderStatsView["permission"]): { t
 }
 
 // 审核进度（原型「KYC 审核进度」），只列真实发生的步骤：没有「证件自动比对」「Face ID」—— 这两样没有。
+// KYC-PHONE-ONLY-001：第 2 步是真的手机验证码校验，不是证件 / 自拍比对，
+// 运营看的是基础信息 + 手机是否已验证 + 声明是否签了。
 export type KycPipelineStep = { title: string; state: "done" | "active" | "pending" | "failed"; badge: string; hint: string };
 
 export function kycPipeline(app: ProviderApplication | null): KycPipelineStep[] {
   const status = app?.status;
   const submitted = status === "SUBMITTED" || status === "APPROVED" || status === "REJECTED";
   return [
-    { title: "资料提交", state: submitted ? "done" : "pending", badge: submitted ? "完成" : "待提交", hint: submitted ? "基础信息 + 证件 + 手持证件自拍 + 条款" : "3 步填完后提交" },
+    { title: "资料提交", state: submitted ? "done" : "pending", badge: submitted ? "完成" : "待提交", hint: submitted ? "基础信息 + 手机验证 + 条款" : "3 步填完后提交" },
     {
-      title: "运营人工比对",
+      title: "运营审核",
       state: status === "SUBMITTED" ? "active" : status === "APPROVED" || status === "REJECTED" ? "done" : "pending",
       badge: status === "SUBMITTED" ? "进行中" : status === "APPROVED" || status === "REJECTED" ? "完成" : "等待中",
-      hint: "手持证件自拍 ↔ 证件照 ↔ 主页头像",
+      hint: "核对基础信息、手机验证状态与已签的声明",
     },
     {
       title: "KYC 通过",

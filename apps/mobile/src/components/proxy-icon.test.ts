@@ -44,3 +44,28 @@ describe("SPORT-BADMINTON-HEADER-002 返回字形：真描边路径，不是两�
     expect(icon).toContain("styles.closeLineB");
   });
 });
+
+describe("SCENE-HOME-PROTOTYPE-001 场景名片右向 chevron：真字形，不是文本 ›", () => {
+  it("chevronRight 是 switch 里的一条真分支，不是不可达的 if", () => {
+    // 反向臂在前：`if (name === "chevronRight")` 这种写法**不可达** ——
+    // ProxyIcon 先调 MasterModuleIcon，命中 switch 里的同名 case 就提前 return 了。
+    expect(icon, "chevronRight 又写成不可达的 if 分支了").not.toContain('if (name === "chevronRight")');
+    expect(icon).toContain('case "chevronRight":');
+    // chevronLeft 是 `M15 18l-6-6 6-6`，右向是它的镜像（同一套 18 / 6 折点）——
+    // 照抄镜像，别自己重画一条粗细对不上的。
+    expect(icon).toContain('d="M9 18l6-6-6-6"');
+  });
+
+  it('删掉的 heart 死分支不许回来（跟 switch 里的 case "heart" 同名 ⇒ 永远走不到）', () => {
+    // 2026-08-22 的「两根圆角方条拼一颗心」写法 + heartLeft / heartRight / heartPoint
+    // 三个 style 于 2026-09-28 删除。留着只会误导：我曾照着它推理，把
+    // 「heart 不读 filled」写进了别处的注释（其实 MasterModuleIcon 的 case "heart"
+    // 早就读 filled）。
+    expect(icon, "heart 死分支又回来了").not.toContain('if (name === "heart")');
+    expect(icon).not.toContain("heartLeft");
+    expect(icon).not.toContain("heartRight");
+    expect(icon).not.toContain("heartPoint");
+    // 正向：真字形还在（实心 / 描边靠 filled）。
+    expect(icon).toContain('case "heart":');
+  });
+});

@@ -145,6 +145,9 @@ type Detail struct {
 	// SCENE-REVIEW-001: 真实评分聚合，只有 RatingCount > 0 时才出现。
 	Rating      float64 `json:"rating,omitempty"`
 	RatingCount int     `json:"ratingCount,omitempty"`
+	// STORE-SCENE-LINK-001: 认领了本场景的店铺相册，没有认领/没有照片就是
+	// nil——不回落到 hero/menu 的占位图（那是客户端自己的兜底逻辑）。
+	MerchantPhotos []MerchantPhotoRef `json:"merchantPhotos,omitempty"`
 }
 
 // AIVisit 是绑定到本场景的小美（展示名来自平台 persona 目录）。
@@ -660,10 +663,27 @@ func launchScenes() []Scene {
 }
 
 type Service struct {
-	repo     Repository
-	rating   ratingLookup
-	friends  friendLister
-	visitors activityVisitorFilter
+	repo           Repository
+	rating         ratingLookup
+	friends        friendLister
+	visitors       activityVisitorFilter
+	merchantPhotos merchantPhotoLister
+}
+
+// MerchantPhotoRef is one merchant-uploaded store photo, already resolved
+// to what the client needs to build a thumb URL (STORE-SCENE-LINK-001).
+type MerchantPhotoRef struct {
+	MediaAssetID string `json:"mediaAssetId"`
+	Caption      string `json:"caption,omitempty"`
+}
+
+// merchantPhotoLister is the narrow read this package needs from business —
+// STORE-SCENE-LINK-001: a store that has claimed this scene may have a real
+// photo album (business.store_photos); this is the only way those photos
+// can ever reach the scene's photo wall, since the two domains otherwise
+// share no key. Same "smallest interface" convention as ratingLookup.
+type merchantPhotoLister interface {
+	ListStorePhotosByRealitySceneID(ctx context.Context, sceneID string) ([]MerchantPhotoRef, error)
 }
 
 // ratingLookup is the narrow read this package needs from scenereview —
@@ -716,6 +736,13 @@ func (s *Service) SetRatingLookup(lookup ratingLookup) {
 // fallback in that case, never a silent stranger-list.
 func (s *Service) SetFriendLister(lister friendLister) {
 	s.friends = lister
+}
+
+// SetMerchantPhotoLister wires the real store-photo lookup (STORE-SCENE-
+// LINK-001). Unwired, Detail.MerchantPhotos simply never appears — same
+// fail-open-to-honest-absence behavior as an unwired ratingLookup.
+func (s *Service) SetMerchantPhotoLister(lister merchantPhotoLister) {
+	s.merchantPhotos = lister
 }
 
 // SetActivityVisitorFilter wires the real "joined an activity at this
@@ -838,6 +865,12 @@ func (s *Service) GetDetail(ctx context.Context, sceneID, requestedVariant strin
 			ratingAvg, ratingCount = avg, count
 		}
 	}
+	var merchantPhotos []MerchantPhotoRef
+	if s.merchantPhotos != nil {
+		if photos, err := s.merchantPhotos.ListStorePhotosByRealitySceneID(ctx, scene.ID); err == nil && len(photos) > 0 {
+			merchantPhotos = photos
+		}
+	}
 	return Detail{
 		SceneID: scene.ID, VenueID: venueIDFor(scene), VenueName: scene.Name,
 		HeroImageURL: heroImageFor(scene.ID), MediaVersion: 1,
@@ -858,6 +891,7 @@ func (s *Service) GetDetail(ctx context.Context, sceneID, requestedVariant strin
 		// SCENE-REVIEW-001: 只有真的有评价数据才填，count==0 两个字段都留零值
 		// （wire 上 omitempty 会一起消失）。
 		Rating: ratingAvg, RatingCount: ratingCount,
+		MerchantPhotos: merchantPhotos,
 	}, true, nil
 }
 

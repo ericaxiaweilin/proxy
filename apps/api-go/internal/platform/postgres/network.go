@@ -532,6 +532,87 @@ func (r *LocalNetRepository) AppendInteractionEvent(ctx context.Context, ie loca
 	return err
 }
 
+// COMP-PURPOSE-CONSENT-001：按目的的同意。
+//
+// 这三个方法都**只 INSERT / 只 SELECT** —— 从不 UPDATE、从不 DELETE。
+// 这张表同时就是审计证据（NĐ 356/2025 Art. 6.2 举证责任在控制者），
+// 而这个仓没有可持久化的 domain event log，所以「他什么时候同意的、
+// 什么时候撤的」只能靠这张表自己保存。
+func (r *LocalNetRepository) GrantPurposeConsent(ctx context.Context, consent localnet.PurposeConsent) error {
+	return r.appendPurposeConsentAction(ctx, consent, localnet.ConsentActionGrant)
+}
+
+func (r *LocalNetRepository) WithdrawPurposeConsent(ctx context.Context, userID, purpose, policyVersion string, at time.Time) error {
+	return r.appendPurposeConsentAction(ctx, localnet.PurposeConsent{
+		UserID:        userID,
+		Purpose:       purpose,
+		PolicyVersion: policyVersion,
+		ActedAt:       at,
+		Source:        "WITHDRAWAL",
+	}, localnet.ConsentActionWithdraw)
+}
+
+func (r *LocalNetRepository) appendPurposeConsentAction(ctx context.Context, consent localnet.PurposeConsent, action string) error {
+	// id 必须每次动作唯一 —— 撤回之后重新授予是**新的一行**，不是更新旧行。
+	// 用 (user, purpose, version, action, acted_at) 拼一个稳定 id；
+	// acted_at 到纳秒，两次动作撞在同一纳秒的概率可以忽略，
+	// 真撞了也只会是一次 INSERT 冲突（可见的失败），不会静默改写历史。
+	id := "pc_" + consent.UserID + "_" + consent.Purpose + "_" + consent.PolicyVersion +
+		"_" + action + "_" + consent.ActedAt.UTC().Format(time.RFC3339Nano)
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO privacy.purpose_consents (id, user_id, purpose, policy_version, action, acted_at, source)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (id) DO NOTHING`,
+		id, consent.UserID, consent.Purpose, consent.PolicyVersion, action, consent.ActedAt, consent.Source,
+	)
+	return err
+}
+
+// PurposeConsentState 取**最新一次**动作。found=false = 从未表过态，
+// 它既不是「不同意」也不是「读失败」—— 三种情况在 UI 上必须长得不一样。
+func (r *LocalNetRepository) PurposeConsentState(ctx context.Context, userID, purpose, policyVersion string) (localnet.PurposeConsent, bool, error) {
+	row := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT user_id, purpose, policy_version, action, acted_at, source
+		FROM privacy.purpose_consents
+		WHERE user_id = $1 AND purpose = $2 AND policy_version = $3
+		ORDER BY acted_at DESC, id DESC
+		LIMIT 1`,
+		userID, purpose, policyVersion,
+	)
+	var c localnet.PurposeConsent
+	if err := row.Scan(&c.UserID, &c.Purpose, &c.PolicyVersion, &c.Action, &c.ActedAt, &c.Source); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return localnet.PurposeConsent{}, false, nil
+		}
+		return localnet.PurposeConsent{}, false, err
+	}
+	return c, true, nil
+}
+
+// PurposeConsentHistory 按时间倒序返回全部动作（举证用）。
+func (r *LocalNetRepository) PurposeConsentHistory(ctx context.Context, userID, purpose, policyVersion string) ([]localnet.PurposeConsent, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT user_id, purpose, policy_version, action, acted_at, source
+		FROM privacy.purpose_consents
+		WHERE user_id = $1 AND purpose = $2 AND policy_version = $3
+		ORDER BY acted_at DESC, id DESC`,
+		userID, purpose, policyVersion,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []localnet.PurposeConsent{}
+	for rows.Next() {
+		var c localnet.PurposeConsent
+		if err := rows.Scan(&c.UserID, &c.Purpose, &c.PolicyVersion, &c.Action, &c.ActedAt, &c.Source); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 func (r *LocalNetRepository) ListInteractionEvents(ctx context.Context, actorID string, limit int) ([]localnet.InteractionEvent, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT event_id, event_type, actor_id, target_type, target_id, need_id, created_at
@@ -1516,10 +1597,15 @@ func (r *EngagementRepository) SetReaction(ctx context.Context, re engagement.Re
 }
 
 func (r *EngagementRepository) AddReply(ctx context.Context, re engagement.Reply) error {
+	// REPLY-IMAGE-001：媒体引用与帖文 media_refs 同口径（JSONB，空切片存 "null"）。
+	mediaRefs, err := json.Marshal(re.Media)
+	if err != nil {
+		return fmt.Errorf("encode reply media refs: %w", err)
+	}
 	return insertEngagementRow(ctx, r.pool, `
-		INSERT INTO engagement.replies (reply_id, post_id, actor_id, body, created_at)
-		VALUES ($1,$2,$3,$4,$5)`,
-		[]any{re.ID, re.PostID, re.ActorID, re.Body, re.CreatedAt},
+		INSERT INTO engagement.replies (reply_id, post_id, actor_id, body, media_refs, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6)`,
+		[]any{re.ID, re.PostID, re.ActorID, re.Body, mediaRefs, re.CreatedAt},
 		nil, // replies 无 UNIQUE(post,actor) — 只有 FK 违例需要映射
 	)
 }
@@ -1528,7 +1614,7 @@ func (r *EngagementRepository) ListRepliesByPost(ctx context.Context, postID str
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
-	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `SELECT reply_id, post_id, actor_id, body, created_at FROM engagement.replies WHERE post_id=$1 ORDER BY created_at DESC, reply_id DESC LIMIT $2`, postID, limit)
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `SELECT reply_id, post_id, actor_id, body, media_refs, created_at FROM engagement.replies WHERE post_id=$1 ORDER BY created_at DESC, reply_id DESC LIMIT $2`, postID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1536,8 +1622,14 @@ func (r *EngagementRepository) ListRepliesByPost(ctx context.Context, postID str
 	out := []engagement.Reply{}
 	for rows.Next() {
 		var reply engagement.Reply
-		if err := rows.Scan(&reply.ID, &reply.PostID, &reply.ActorID, &reply.Body, &reply.CreatedAt); err != nil {
+		var mediaRefs []byte
+		if err := rows.Scan(&reply.ID, &reply.PostID, &reply.ActorID, &reply.Body, &mediaRefs, &reply.CreatedAt); err != nil {
 			return nil, err
+		}
+		if len(mediaRefs) > 0 {
+			if err := json.Unmarshal(mediaRefs, &reply.Media); err != nil {
+				return nil, fmt.Errorf("decode reply media refs: %w", err)
+			}
 		}
 		out = append(out, reply)
 	}

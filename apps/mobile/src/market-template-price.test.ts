@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { templatePriceToVND, describeSuggestError, groupCount, requiredProviderCount, momentPriceQuote, quoteToVND, formatTraceId } from "./market-template-price";
+import { templatePriceToVND, describeSuggestError, groupCount, requiredProviderCount, momentPriceQuote, quoteToVND } from "./market-template-price";
 
 // OPP-TEMPLATE-001: 卡片参考价（K 简写）→ 表单价格（完整 VND）。
 // prefill 路径的唯一转换器 — 目录卡换价不改表单逻辑。
@@ -101,16 +101,11 @@ describe("momentPriceQuote", () => {
   });
 });
 
-describe("quoteToVND + formatTraceId", () => {
+// PUBLIC-NO-001：formatTraceId（客户端随机生成 PX-N/PX-O/PX-A 展示号）已删除 ——
+// 成功页编号改由服务端分配（全数字、可查询），见 public-number.test.ts。
+describe("quoteToVND", () => {
   it("converts K totals to full VND strings", () => {
     expect(quoteToVND(280)).toBe("280,000₫");
     expect(quoteToVND(1800)).toBe("1,800,000₫");
-  });
-  it("formats R58 trace ids (PX-N/PX-O + date + 4-char tail)", () => {
-    const at = new Date(2026, 8, 10); // 2026-09-10
-    const open = formatTraceId("N", at);
-    const invite = formatTraceId("O", at);
-    expect(open).toMatch(/^PX-N-260910-[A-Z2-9]{4}$/);
-    expect(invite).toMatch(/^PX-O-260910-[A-Z2-9]{4}$/);
   });
 });

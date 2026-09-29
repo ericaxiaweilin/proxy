@@ -11,7 +11,14 @@ const mapCode = stripComments(map);
 
 describe("SCENE-REVIEW-001 the rating line never fabricates a default", () => {
   it("only renders the rating line when ratingCount is greater than zero", () => {
-    expect(mapCode).toMatch(/\(detail\?\.ratingCount\s*\?\?\s*selected\.ratingCount\s*\?\?\s*0\)\s*>\s*0/);
+    // 2026-09-28：统计卡重构成「每一格各自按真实数据决定画不画」之后，这条闸门
+    // 从内联三元搬到了一个具名局部变量（`const ratingCount = … ?? 0` +
+    // `if (ratingCount > 0)`）。语义没变 —— 仍然没有编造的默认分 —— 但原来那条
+    // 字面量正则匹配不到了，钉就一直是红的（门禁在第一个失败处 exit 1，红着等于
+    // 后面的钉全都不执行）。改成钉**两件事**：取值链仍然诚实回落 0，且渲染仍然
+    // 以 `> 0` 为闸。两臂分开写，任一条被破坏都会红。
+    expect(mapCode).toMatch(/const ratingCount = detail\?\.ratingCount \?\? selected\.ratingCount \?\? 0;/);
+    expect(mapCode).toMatch(/if \(ratingCount > 0\)/);
   });
 
   it("gates the review entry on real checkin history, not a UI-only guess", () => {

@@ -8,13 +8,19 @@
 //	1 基础信息：头像（用主页头像）、实名、出生日期（精确到日，满 18；用户：「出生如果采集肯定也是日期」）、
 //	  手机号 —— KYC 只认人，不收性别（越南 CCCD 第 4 位自带世纪 + 性别，运营看证件时自然知道；系统无任何逻辑消费性别，
 //	  所以不采集也不派生）、不收城市 / 服务区域 / 语言（那是接单范围和能力，用户：「把会说的语言也放入了 干什么」）
-//	2 证件：CCCD（正反面）或护照（正面）+ 手持证件自拍 —— 运营人工比对（用户选定；Face ID 只能证明是手机主人，
-//	  不能和证件比对，所以不用它冒充「真人比对通过」）；无犯罪声明；KYC 数据使用同意
-//	3 履约条款：紧急联系人 + config/provider-terms/terms.json 的全部条款（记录版本）
+//	2 手机验证：真的发短信验证码、真的校验（KYC-PHONE-ONLY-001，2026-09-27）
+//	3 履约条款：紧急联系人 + 无犯罪声明 + KYC 数据使用同意 + config/provider-terms/terms.json 的全部条款（记录版本）
 //	→ 运营控制台审核（通过 / 拒绝并写原因）→ 通过才开 supply.agent_profiles（ACTIVE）并声明语言能力。
 //
-// 资料门跟发帖同一道（用户名 + 平台头像）；证件 / 自拍必须是本人上传、非 AI 生成的图，且是 OWNER_ONLY
-// 媒体 —— 只有运营控制台能看。实名、证件、手机号、紧急联系人只给运营看。
+// KYC-PHONE-ONLY-001（用户：「证件正面 反面 手持自拍的移除在kyc里 越南合规这个隐私数据困难 kyc我们就验证
+// 电话号码真实性就好了 签承诺声明不变」）：原第 2 步的 CCCD 正反面 + 手持证件自拍已删除 —— 越南法律下留存
+// 身份证件图像 / 生物特征比对属高风险个人数据，运营人工比对也从来不是「验证」，只是「像不像」。KYC 改成只认
+// 两件事：手机号是不是真的接得到验证码（真实 OTP，见 PhoneChallengeSender），以及本人签了无犯罪声明 + 数据
+// 使用同意 + 履约条款。已提交的老申请如果带证件资产，migration 128 已经把对应 media.media_assets 行删了；
+// 磁盘上的原始文件字节目前还没有一条通用的删除管线（同一个已知缺口见
+// docs/legal/vietnam/Proxy_Operating_Terms_Supplement_2026-08-31.md 里头像媒体字节那条）。
+//
+// 资料门跟发帖同一道（用户名 + 平台头像）；实名、手机号、紧急联系人只给运营看。
 package providerapp
 
 import (
@@ -23,6 +29,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -49,60 +56,96 @@ var (
 )
 
 type Application struct {
-	ID             string     `json:"applicationId"`
-	UserAccountID  string     `json:"userAccountId"`
-	DisplayName    string     `json:"displayName"`
-	RealName       string     `json:"realName,omitempty"`
-	PhotosAttested bool       `json:"photosAttested"`
-	BirthYear      int        `json:"birthYear,omitempty"`
-	BirthDate      string     `json:"birthDate,omitempty"`
-	Gender         string     `json:"gender,omitempty"`
-	Phone          string     `json:"phone,omitempty"`
-	PhoneVerified  bool       `json:"phoneVerified"`
-	IDType         string     `json:"idType,omitempty"`
-	IDFrontAsset   string     `json:"idFrontAsset,omitempty"`
-	IDBackAsset    string     `json:"idBackAsset,omitempty"`
-	SelfieAsset    string     `json:"selfieAsset,omitempty"`
-	NoCrime        bool       `json:"noCrimeDeclared"`
-	DataConsent    bool       `json:"dataConsent"`
-	Emergency      string     `json:"emergencyContact,omitempty"`
-	TermsVersion   string     `json:"termsVersion,omitempty"`
-	TermsAccepted  []string   `json:"termsAccepted"`
-	City           string     `json:"city"`
-	ServiceAreas   []string   `json:"serviceAreas"`
-	Languages      []string   `json:"languages"`
-	Capabilities   []string   `json:"capabilities"`
-	Intro          string     `json:"intro"`
-	PhotoAssetIDs  []string   `json:"photoAssetIds"`
-	Status         string     `json:"status"`
-	RejectReason   string     `json:"rejectReason,omitempty"`
-	ReviewedBy     string     `json:"reviewedBy,omitempty"`
-	ReviewedAt     *time.Time `json:"reviewedAt,omitempty"`
-	AgentID        string     `json:"agentId,omitempty"`
-	Source         string     `json:"source"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	ID            string     `json:"applicationId"`
+	UserAccountID string     `json:"userAccountId"`
+	DisplayName   string     `json:"displayName"`
+	RealName      string     `json:"realName,omitempty"`
+	BirthYear     int        `json:"birthYear,omitempty"`
+	BirthDate     string     `json:"birthDate,omitempty"`
+	Gender        string     `json:"gender,omitempty"`
+	Phone         string     `json:"phone,omitempty"`
+	PhoneVerified bool       `json:"phoneVerified"`
+	NoCrime       bool       `json:"noCrimeDeclared"`
+	DataConsent   bool       `json:"dataConsent"`
+	Emergency     string     `json:"emergencyContact,omitempty"`
+	TermsVersion  string     `json:"termsVersion,omitempty"`
+	TermsAccepted []string   `json:"termsAccepted"`
+	City          string     `json:"city"`
+	ServiceAreas  []string   `json:"serviceAreas"`
+	Languages     []string   `json:"languages"`
+	Capabilities  []string   `json:"capabilities"`
+	Intro         string     `json:"intro"`
+	PhotoAssetIDs []string   `json:"photoAssetIds"`
+	Status        string     `json:"status"`
+	RejectReason  string     `json:"rejectReason,omitempty"`
+	ReviewedBy    string     `json:"reviewedBy,omitempty"`
+	ReviewedAt    *time.Time `json:"reviewedAt,omitempty"`
+	AgentID       string     `json:"agentId,omitempty"`
+	Source        string     `json:"source"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 // Input 是本人三步填完后一次提交的表单。
+//
+// KYC-PHONE-ONLY-001: PhoneChallengeID 是第 2 步真的把验证码验对了之后拿到的那个
+// PhoneChallenge.ID —— Submit 会重新查一遍这张挑战单（本人 / VERIFIED / 手机号一致 /
+// 没过期太久），不是「客户端说验证过了就信」。
 type Input struct {
-	RealName     string   `json:"realName"`
-	BirthYear    int      `json:"birthYear"`
-	BirthDate    string   `json:"birthDate"`
-	Gender       string   `json:"gender"`
-	Phone        string   `json:"phone"`
-	City         string   `json:"city"`
-	ServiceAreas []string `json:"serviceAreas"`
-	Languages    []string `json:"languages"`
-	IDType       string   `json:"idType"`
-	IDFrontAsset string   `json:"idFrontAsset"`
-	IDBackAsset  string   `json:"idBackAsset"`
-	SelfieAsset  string   `json:"selfieAsset"`
-	NoCrime      bool     `json:"noCrimeDeclared"`
-	DataConsent  bool     `json:"dataConsent"`
-	Emergency    string   `json:"emergencyContact"`
-	TermsVersion string   `json:"termsVersion"`
-	Accepted     []string `json:"termsAccepted"`
+	RealName         string   `json:"realName"`
+	BirthYear        int      `json:"birthYear"`
+	BirthDate        string   `json:"birthDate"`
+	Gender           string   `json:"gender"`
+	Phone            string   `json:"phone"`
+	City             string   `json:"city"`
+	ServiceAreas     []string `json:"serviceAreas"`
+	Languages        []string `json:"languages"`
+	PhoneChallengeID string   `json:"phoneChallengeId"`
+	NoCrime          bool     `json:"noCrimeDeclared"`
+	DataConsent      bool     `json:"dataConsent"`
+	Emergency        string   `json:"emergencyContact"`
+	TermsVersion     string   `json:"termsVersion"`
+	Accepted         []string `json:"termsAccepted"`
+}
+
+// PhoneChallenge 是一次「验证这个手机号是不是真的」的真实 OTP 挑战记录 ——
+// KYC-PHONE-ONLY-001 用它替代证件照 + 手持自拍。跟 identity 包里登录用的
+// LoginChallenge 是同一种形状（Status/Attempts/MaxAttempts/ExpiresAt/ProviderRef），
+// 但故意不复用那张表：登录验证的是「这是已登记的登录凭据」，这里验证的是
+// 「这个还没登记过的手机号现在真的能收到码」，不要求先有一条 LoginIdentity。
+type PhoneChallenge struct {
+	ID            string
+	UserAccountID string
+	Phone         string
+	ProviderRef   string
+	Status        string // PENDING / VERIFIED / LOCKED
+	Attempts      int
+	MaxAttempts   int
+	RequestedAt   time.Time
+	ExpiresAt     time.Time
+	VerifiedAt    time.Time
+}
+
+const (
+	PhoneChallengePending  = "PENDING"
+	PhoneChallengeVerified = "VERIFIED"
+	PhoneChallengeLocked   = "LOCKED"
+)
+
+// PhoneChallengeStore 存 PhoneChallenge（Postgres 实现见 store.go；Memory 实现见下）。
+type PhoneChallengeStore interface {
+	CreatePhoneChallenge(ctx context.Context, c PhoneChallenge) error
+	GetPhoneChallenge(ctx context.Context, id string) (*PhoneChallenge, error)
+	UpdatePhoneChallenge(ctx context.Context, c PhoneChallenge) error
+}
+
+// PhoneChallengeSender 是这个包需要的最小 OTP 发送/校验接口 —— 由
+// identity.LoginChallengeProvider（真实短信厂商，Twilio / eSMS / SpeedSMS 任一个）
+// 在 cmd/api 那层适配满足，本包不直接 import identity（跟 Deps 的其它字段
+// 同一个纪律：不认识具体是哪个域实现的，只认识这个最小形状）。
+type PhoneChallengeSender interface {
+	RequestOTP(ctx context.Context, phoneE164, purpose string) (providerRef string, expiresAt time.Time, err error)
+	VerifyOTP(ctx context.Context, providerRef, code string) (verified bool, err error)
 }
 
 // Terms 是 config/provider-terms/terms.json。
@@ -134,18 +177,21 @@ type Deps struct {
 	DisplayName func(ctx context.Context, userAccountID string) string
 	// Terms 读当前履约条款（文件）。
 	Terms func() (Terms, error)
-	// BadPhotos 返回不合格的照片 id（不是本人的 / 不是图片 / AI 生成的 / 不存在）。
-	BadPhotos func(ctx context.Context, userAccountID string, assetIDs []string) ([]string, error)
+	// Phone 真的发/验 OTP（KYC-PHONE-ONLY-001）。fail-closed：nil 时手机验证
+	// 请求直接拒绝，不会有「假装发了」的静默成功。
+	Phone PhoneChallengeSender
 	// Activate 在审核通过时开 supply 服务者身份，返回 agent_id。
 	Activate func(ctx context.Context, app Application) (string, error)
 }
 
 var (
-	ErrUnavailable     = errors.New("provider_application_unavailable")
-	ErrNotFound        = errors.New("provider_application_not_found")
-	ErrAlreadyOpen     = errors.New("provider_application_already_open")
-	ErrNotReviewable   = errors.New("provider_application_not_reviewable")
-	ErrNotWithdrawable = errors.New("provider_application_not_withdrawable")
+	ErrUnavailable      = errors.New("provider_application_unavailable")
+	ErrNotFound         = errors.New("provider_application_not_found")
+	ErrAlreadyOpen      = errors.New("provider_application_already_open")
+	ErrNotReviewable    = errors.New("provider_application_not_reviewable")
+	ErrNotWithdrawable  = errors.New("provider_application_not_withdrawable")
+	ErrPhoneChallenge   = errors.New("provider_phone_challenge_invalid")
+	ErrPhoneProviderGap = errors.New("provider_phone_challenge_provider_not_ready")
 )
 
 // ValidationError 列出表单里每一处不合格（客户端逐项提示，不是一句「提交失败」）。
@@ -158,17 +204,18 @@ func (e *ValidationError) Error() string {
 }
 
 type Service struct {
-	store Store
-	deps  Deps
-	now   func() time.Time
+	store      Store
+	phoneStore PhoneChallengeStore
+	deps       Deps
+	now        func() time.Time
 }
 
-func NewService(store Store, deps Deps) *Service {
-	return &Service{store: store, deps: deps, now: time.Now}
+func NewService(store Store, phoneStore PhoneChallengeStore, deps Deps) *Service {
+	return &Service{store: store, phoneStore: phoneStore, deps: deps, now: time.Now}
 }
 
 func (s *Service) ready() bool {
-	return s != nil && s.store != nil && s.deps.Missing != nil && s.deps.BadPhotos != nil && s.deps.Activate != nil && s.deps.Terms != nil
+	return s != nil && s.store != nil && s.phoneStore != nil && s.deps.Missing != nil && s.deps.Activate != nil && s.deps.Terms != nil && s.deps.Phone != nil
 }
 
 // Mine：本人最近一份申请（没有 = nil）。
@@ -200,23 +247,29 @@ func (s *Service) Submit(ctx context.Context, userAccountID string, in Input) (*
 	for _, m := range s.deps.Missing(ctx, userAccountID) {
 		fields = append(fields, "profile_"+m)
 	}
-	fields = append(fields, validate(in, terms, now)...)
-	if docs := documentIDs(in); len(docs) > 0 {
-		bad, err := s.deps.BadPhotos(ctx, userAccountID, docs)
+	// KYC-PHONE-ONLY-001: 重新查一遍这张挑战单，不信客户端说"验证过了"——
+	// 必须是本人的、状态是 VERIFIED、手机号跟这次提交的一致、而且验证时间
+	// 没有久到失去意义（30 分钟，跟登录 OTP 的 5 分钟 TTL 不是一个东西：
+	// 那个是"码本身多久过期"，这个是"验证完了但迟迟不提交，还算不算数"）。
+	phoneVerified := false
+	if in.PhoneChallengeID != "" {
+		challenge, err := s.phoneStore.GetPhoneChallenge(ctx, in.PhoneChallengeID)
 		if err != nil {
 			return nil, err
 		}
-		if len(bad) > 0 {
-			fields = append(fields, "documents_not_own_real")
+		if challenge != nil && challenge.UserAccountID == userAccountID && challenge.Status == PhoneChallengeVerified &&
+			challenge.Phone == in.Phone && now.Sub(challenge.VerifiedAt) <= 30*time.Minute {
+			phoneVerified = true
 		}
 	}
+	fields = append(fields, validate(in, terms, now, phoneVerified)...)
 	if len(fields) > 0 {
 		return nil, &ValidationError{Fields: fields}
 	}
 	app := Application{
-		ID: newID(), UserAccountID: userAccountID, RealName: in.RealName, PhotosAttested: true,
-		BirthDate: strings.TrimSpace(in.BirthDate), BirthYear: birthYearOf(in.BirthDate), Gender: in.Gender, Phone: in.Phone,
-		IDType: in.IDType, IDFrontAsset: in.IDFrontAsset, IDBackAsset: in.IDBackAsset, SelfieAsset: in.SelfieAsset,
+		ID: newID(), UserAccountID: userAccountID, RealName: in.RealName,
+		BirthDate: strings.TrimSpace(in.BirthDate), BirthYear: birthYearOf(in.BirthDate), Gender: in.Gender,
+		Phone: in.Phone, PhoneVerified: true,
 		NoCrime: true, DataConsent: true, Emergency: in.Emergency, TermsVersion: terms.Version, TermsAccepted: in.Accepted,
 		City: in.City, ServiceAreas: in.ServiceAreas, Languages: in.Languages, Capabilities: []string{},
 		PhotoAssetIDs: []string{}, Status: StatusSubmitted, Source: "APP", CreatedAt: now, UpdatedAt: now,
@@ -313,12 +366,7 @@ func normalize(in Input) Input {
 	in.City = strings.TrimSpace(in.City)
 	in.ServiceAreas = dedupe(in.ServiceAreas, strings.ToLower)
 	in.Languages = dedupe(in.Languages, strings.ToUpper)
-	in.IDType = strings.ToUpper(strings.TrimSpace(in.IDType))
-	trimAsset := func(v string) string { return strings.TrimPrefix(strings.TrimSpace(v), "assets/") }
-	in.IDFrontAsset, in.IDBackAsset, in.SelfieAsset = trimAsset(in.IDFrontAsset), trimAsset(in.IDBackAsset), trimAsset(in.SelfieAsset)
-	if in.IDType == "PASSPORT" {
-		in.IDBackAsset = "" // 护照没有反面
-	}
+	in.PhoneChallengeID = strings.TrimSpace(in.PhoneChallengeID)
 	in.Emergency = strings.TrimSpace(in.Emergency)
 	in.Accepted = dedupe(in.Accepted, strings.ToLower)
 	return in
@@ -347,17 +395,7 @@ func normalizePhone(v string) string {
 	return out
 }
 
-func documentIDs(in Input) []string {
-	out := []string{}
-	for _, id := range []string{in.IDFrontAsset, in.IDBackAsset, in.SelfieAsset} {
-		if id != "" {
-			out = append(out, id)
-		}
-	}
-	return out
-}
-
-func validate(in Input, terms Terms, now time.Time) []string {
+func validate(in Input, terms Terms, now time.Time, phoneVerified bool) []string {
 	fields := []string{}
 	if n := utf8.RuneCountInString(in.RealName); n < 2 || n > MaxRealName {
 		fields = append(fields, "real_name")
@@ -381,6 +419,9 @@ func validate(in Input, terms Terms, now time.Time) []string {
 	}
 	if digits := strings.TrimPrefix(in.Phone, "+"); len(digits) < 8 || len(digits) > 15 || !strings.HasPrefix(in.Phone, "+") {
 		fields = append(fields, "phone")
+	} else if !phoneVerified {
+		// KYC-PHONE-ONLY-001: 手机号格式对不算数，必须真的收到过验证码并验对。
+		fields = append(fields, "phone_not_verified")
 	}
 	// 城市 / 区域 / 语言是可选的旧字段（KYC 不收）；传了就得是认识的值。
 	if !subset(in.ServiceAreas, AllowedAreas) {
@@ -388,15 +429,6 @@ func validate(in Input, terms Terms, now time.Time) []string {
 	}
 	if !subset(in.Languages, AllowedLanguages) {
 		fields = append(fields, "languages")
-	}
-	if in.IDType != "CCCD" && in.IDType != "PASSPORT" {
-		fields = append(fields, "id_type")
-	}
-	if in.IDFrontAsset == "" || (in.IDType == "CCCD" && in.IDBackAsset == "") {
-		fields = append(fields, "id_documents")
-	}
-	if in.SelfieAsset == "" {
-		fields = append(fields, "selfie")
 	}
 	if !in.NoCrime {
 		fields = append(fields, "no_crime_declared")
@@ -465,13 +497,41 @@ func newID() string {
 	return "papp_" + hex.EncodeToString(b[:])
 }
 
-// Memory 是无数据库时（和单测）的实现。
-type Memory struct {
-	mu   sync.Mutex
-	apps map[string]Application
+func newPhoneChallengeID() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return "pphc_" + hex.EncodeToString(b[:])
 }
 
-func NewMemory() *Memory { return &Memory{apps: map[string]Application{}} }
+// Memory 是无数据库时（和单测）的实现——同时实现 Store 和 PhoneChallengeStore。
+type Memory struct {
+	mu       sync.Mutex
+	apps     map[string]Application
+	phoneChs map[string]PhoneChallenge
+}
+
+func NewMemory() *Memory { return &Memory{apps: map[string]Application{}, phoneChs: map[string]PhoneChallenge{}} }
+
+func (m *Memory) CreatePhoneChallenge(_ context.Context, c PhoneChallenge) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.phoneChs[c.ID] = c
+	return nil
+}
+
+func (m *Memory) GetPhoneChallenge(_ context.Context, id string) (*PhoneChallenge, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.phoneChs[id]
+	if !ok {
+		return nil, nil
+	}
+	return &c, nil
+}
+
+func (m *Memory) UpdatePhoneChallenge(ctx context.Context, c PhoneChallenge) error {
+	return m.CreatePhoneChallenge(ctx, c)
+}
 
 func (m *Memory) Latest(_ context.Context, userAccountID string) (*Application, error) {
 	m.mu.Lock()
@@ -583,13 +643,70 @@ func (s *Service) Get(ctx context.Context, id string) (*Application, error) {
 	return s.store.Get(ctx, id)
 }
 
-// Documents：这份申请里运营可以看的图（证件、自拍、旧版申请照片）。
-func (a Application) Documents() []string {
-	out := []string{}
-	for _, id := range append([]string{a.IDFrontAsset, a.IDBackAsset, a.SelfieAsset}, a.PhotoAssetIDs...) {
-		if id != "" {
-			out = append(out, id)
-		}
+// RequestPhoneVerification：KYC-PHONE-ONLY-001 第 2 步——真的发一条验证码。
+// 不要求这个手机号已经注册成任何东西的登录凭据；谁在申请、发到哪个号，
+// 由 userAccountID + phone 这一次请求自己定。
+func (s *Service) RequestPhoneVerification(ctx context.Context, userAccountID, phone string) (*PhoneChallenge, error) {
+	if !s.ready() {
+		return nil, ErrUnavailable
 	}
-	return out
+	phone = normalizePhone(phone)
+	if digits := strings.TrimPrefix(phone, "+"); len(digits) < 8 || len(digits) > 15 || !strings.HasPrefix(phone, "+") {
+		return nil, &ValidationError{Fields: []string{"phone"}}
+	}
+	providerRef, expiresAt, err := s.deps.Phone.RequestOTP(ctx, phone, "PROVIDER_APPLICATION_PHONE_VERIFY")
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrPhoneProviderGap, err)
+	}
+	now := s.now().UTC()
+	if expiresAt.IsZero() || !expiresAt.After(now) {
+		expiresAt = now.Add(5 * time.Minute)
+	}
+	challenge := PhoneChallenge{
+		ID: newPhoneChallengeID(), UserAccountID: userAccountID, Phone: phone, ProviderRef: providerRef,
+		Status: PhoneChallengePending, MaxAttempts: 5, RequestedAt: now, ExpiresAt: expiresAt.UTC(),
+	}
+	if err := s.phoneStore.CreatePhoneChallenge(ctx, challenge); err != nil {
+		return nil, err
+	}
+	return &challenge, nil
+}
+
+// VerifyPhoneVerification：核对验证码。成功后 challenge.Status 变 VERIFIED——
+// Submit 会重新查一遍这条记录，不会把"验证过了"这件事托付给客户端自己说。
+func (s *Service) VerifyPhoneVerification(ctx context.Context, userAccountID, challengeID, code string) (*PhoneChallenge, error) {
+	if !s.ready() {
+		return nil, ErrUnavailable
+	}
+	challenge, err := s.phoneStore.GetPhoneChallenge(ctx, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	if challenge == nil || challenge.UserAccountID != userAccountID {
+		return nil, ErrNotFound
+	}
+	now := s.now().UTC()
+	if challenge.Status != PhoneChallengePending || challenge.Attempts >= challenge.MaxAttempts || !now.Before(challenge.ExpiresAt) {
+		return nil, ErrPhoneChallenge
+	}
+	verified, err := s.deps.Phone.VerifyOTP(ctx, challenge.ProviderRef, code)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrPhoneProviderGap, err)
+	}
+	if !verified {
+		challenge.Attempts++
+		if challenge.Attempts >= challenge.MaxAttempts {
+			challenge.Status = PhoneChallengeLocked
+		}
+		if err := s.phoneStore.UpdatePhoneChallenge(ctx, *challenge); err != nil {
+			return nil, err
+		}
+		return nil, ErrPhoneChallenge
+	}
+	challenge.Status = PhoneChallengeVerified
+	challenge.VerifiedAt = now
+	if err := s.phoneStore.UpdatePhoneChallenge(ctx, *challenge); err != nil {
+		return nil, err
+	}
+	return challenge, nil
 }

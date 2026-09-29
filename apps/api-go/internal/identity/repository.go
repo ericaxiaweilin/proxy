@@ -186,13 +186,53 @@ func (e ErasedPersonalData) Summary() string {
 // comment) so the audit event and the regression pins can assert on
 // it: the user-facing promise is "永久删除（法律要求保存的记录除外）",
 // and this constant is the "除外".
+//
+// ⚠️ 2026-09-27 合规修正 —— 保留**下限**原来写的是「Decree 248/2026 §23,
+// >=12 months」。那个数字**低于法律下限**：
+//
+//   - Law on E-commerce 122/2025/QH15（2026-07-01 生效）Art. 17(2)(i)
+//     要求中介平台保证「已订立合同的相关信息与数据」自合同订立起**至少 3 年**
+//     可访问；Art. 18(2)(c) 对社交电商要求「合同订立数据」至少 3 年；
+//     Art. 16(2)(b) 对直接经营平台同样 3 年。
+//   - 一部法令（Decree）不能把一部法律（Law）的下限压低，所以合同/交易数据
+//     实际适用的是 **3 年**。12 个月只覆盖「商品服务信息」那一档
+//     （Art. 16(1)(d) / 17(1)(e)）和直播音视频（Art. 22(7)）。
+//
+// 这条修正的**直接目的**是拦住一个未来的错误：现在全仓没有任何清理任务
+// （migrations 里 retention/purge 零命中），所以数据实际一直留着、并不违规；
+// 但谁要是照着「>=12 months」写一个 12 个月的 purge，就会同时违反
+// 122/2025 的 3 年下限。**下限是 3 年。**
+//
+// ⚠️ 还有一处**故意没改**的旧引用，别照抄：
+// migrations/060_privacy_requests.sql 的表头注释写着
+// 「the Vietnamese cybersecurity logging law (116/2025/QH15, 12 months)」。
+// 116/2025/QH15 里**没有** 12 个月这个数字 —— Art. 25(2)(b) 只说日志要
+// "trong thời gian theo quy định của pháp luật"（期限由法律定）。
+// 12 个月的真实出处我在《Operating Terms Supplement》里改挂到
+// Nghị định 333/2026/NĐ-CP，并标了「期限待法务复核」——**那个出处本身也还没
+// 经一手条文核实**，所以这里不复制它。
+// 为什么不直接改 060：它已经 apply 过，而 Migrator 的 drift 判定是**整文件
+// SHA-256**（migrator.go ListMigrations: Drift = StoredChecksum != sha256(文件)），
+// 动一个注释就会在已部署的库上被报成 drift。所以冻结它，改在这里说明。
+//
+// ⚠️ 另有一处**未解决的边界**，不要当成已覆盖：Cybersecurity Law
+// 116/2025/QH15 Art. 25(2)(d) 要求企业在用户**停止使用服务之后**，仍按
+// 法定期限留存一组用户信息与用户生成数据（账号名、服务使用时间、费用支付
+// 信息、访问 IP 等）。本执行器现在会删掉 profiles 并抹掉 age_assertion 的
+// ip/user_agent，也就是说这一组**没有**按该条留存。该条只写
+// "trong thời gian theo quy định của pháp luật"（期限由法律定），具体期限
+// 需法务确认后再决定改不改擦除行为 —— 在那之前这里是**已知缺口**，不是已满足。
 const RetainedOnErasure = "account_row (anonymised to status=ERASED: " +
 	"business.accounts.owner_user_id is ON DELETE RESTRICT and the payment/order " +
 	"ledgers reference it for the statutory window), " +
 	"agent_claim_number (no-gap numbering audit), " +
 	"age_assertion date_of_birth (COMP-AGE-001 minor-protection evidence; ip/user_agent wiped), " +
 	"legal_consent_records (proof the processing was lawful), " +
-	"payment/order/business rows (Decree 248/2026 §23, >=12 months), " +
+	"payment/order/business rows (>=3 years: Law on E-commerce 122/2025 " +
+	"Art. 17(2)(i) / 18(2)(c) / 16(2)(b) require concluded-contract data to stay " +
+	"accessible for at least 3 years from conclusion; this is HIGHER than the " +
+	"12 months in Decree 248/2026 §23, so 3 years governs — never build a " +
+	"12-month purge), " +
 	"privacy_requests + privacy_request_events (this audit trail)"
 
 // ErrPersonalDataEraserUnavailable is returned when a repository does

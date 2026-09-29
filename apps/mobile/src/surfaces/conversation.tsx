@@ -1273,7 +1273,11 @@ export function ConversationSurface({
                 }}
                 style={[styles.locationOpen, styles.locationNav]}
               >
-                <Text style={styles.locationNavText}>导航去这里 ›</Text>
+                <Text style={styles.locationNavText}>导航去这里</Text>
+                {/* SCENE-HOME-PROTOTYPE-001（2026-09-28）：原来尾部拼的是文本字符 `›`
+                    —— 字符不是字形（BACK-GLYPH-001 同款）：形状和垂直基线随 fontSize
+                    漂，粗细也跟别处的 chevronLeft/chevronRight 对不上。换真字形。 */}
+                <ProxyIcon color="#ffffff" name="arrowUpRight" size={13} />
               </Pressable>
             </View>
           </View>
@@ -2103,7 +2107,7 @@ const styles = StyleSheet.create({
   locationCard: { backgroundColor: "#f6f3ee", borderRadius: 9, marginBottom: 6, padding: 10, width: 220 },
   locationTitle: { color: lotus.ink, fontSize: 13, fontWeight: "800", lineHeight: 18 },
   locationCoord: { color: lotus.muted, fontSize: 11, marginTop: 2 },
-  locationOpen: { marginTop: 8, alignSelf: "flex-start", backgroundColor: "#ffffff", borderColor: lotus.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
+  locationOpen: { alignItems: "center", flexDirection: "row", gap: 5, marginTop: 8, alignSelf: "flex-start", backgroundColor: "#ffffff", borderColor: lotus.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
   locationOpenText: { color: lotus.ink, fontSize: 12, fontWeight: "800" },
   locationActionRow: { flexDirection: "row", gap: 8, marginTop: 8 },
   // 导航是主动作：墨底白字（与发送按钮同语言）；查看是次动作：白底墨字。

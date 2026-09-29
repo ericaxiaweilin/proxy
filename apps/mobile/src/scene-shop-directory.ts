@@ -275,9 +275,11 @@ export type ShopSort = { id: ShopSortId; label: string };
  * 有真实数据支撑：
  *   · 出图最多 —— 场景没有图片计数（SCENE-NO-FABRICATED-001 删掉的 posts 就是
  *     它）；hereCount 是"此刻在这里"，不是"出过图"。
- *   · 评分最高 —— 没有评分域（见文件头）。
  *   · 最近新开 —— `reality.scenes` 没有开业时间列，只有 updated_at（那是
  *     行更新时间，不是开业时间）。
+ *   · 评分最高 —— 评分域 2026-09-27 起落地了（SCENE-RATING-CHIP-001）；下面
+ *     这条旧断言曾经对，现在不对。目录页暂不加它（排序项跟着那次改动走），
+ *     热门场景页有评分排序（见 HOT-SCENES-PAGE-001 的 sortHotScenes）。
  * 换成两个**真的有数**的：收藏最多 / 去过最多（SCENE-REAL-COUNTS-001）。
  */
 export const SHOP_SORTS: readonly ShopSort[] = [
@@ -490,6 +492,71 @@ export function shopDirectoryRows<T extends SceneShopBrief>(
 }
 
 // ---------------------------------------------------------------------------
+// HOT-SCENES-PAGE-001（2026-09-27，原型 deepseek_html_20260927_752586「热门场景」）
+// 首页热榜「更多」进的那一页。原型排序菜单是 去过人数 / 评分 / 距离最近 /
+// 最新添加 —— 只搬**真的有数**的三个：
+//   · 去过人数 —— visitedCount（SCENE-REAL-COUNTS-001）。
+//   · 评分 —— SCENE-REVIEW-001 / SCENE-RATING-CHIP-001 的评分域 2026-09-27
+//     已落地（本文件头那条「没有评分域」的旧注释是历史遗留，勿信）。
+//     没人评过的场景排最后，不冒充 0 分；同组内按去过人数稳定。
+//   · 距离最近 —— 复用 sortShops 的 nearest（没定位就不给这一项）。
+//   · 最新添加 —— reality.scenes 没有开业时间列（updated_at 是行更新时间），
+//     和 SHOP_SORTS 的「最近新开」同一条红线，不搬。
+// ---------------------------------------------------------------------------
+
+// SCENE-TYPE-BUCKET-001（用户反馈"分类咖啡店 餐厅 你这实现的不对"）：分类 chip
+// 原来按 Scene.Category 分（商家/景点/其他三桶封闭分类），太粗——两家咖啡店和
+// 一整片湖边公园全挤进同一个"商家"或"景点"桶。Scene.Type 更细（"咖啡 ·
+// 动态场景" / "公共景点 · 湖边" 这种"大类 · 子类"自由文本，服务端没有枚举
+// 约束），取"·"前半段当桶名，就能把咖啡店从"商家"里挑出来单独一个 chip——
+// 仍然是真实数据分出来的桶，不是编的固定列表（真实目录里现在没有餐厅/运动/
+// 娱乐这几类场景，桶名跟着数据自然出现/消失，不硬摆一个空 chip）。
+export function sceneTypeBucket(type: string): string {
+  const trimmed = type.trim();
+  if (trimmed === "") return "";
+  const sep = trimmed.indexOf(" · ");
+  return sep < 0 ? trimmed : trimmed.slice(0, sep).trim();
+}
+
+export type HotSortId = "visited" | "rating" | "nearest";
+
+export function availableHotSorts(hasOrigin: boolean): readonly { id: HotSortId; label: string }[] {
+  const sorts: readonly { id: HotSortId; label: string }[] = [
+    { id: "visited", label: "去过人数" },
+    { id: "rating", label: "评分" },
+    { id: "nearest", label: "距离最近" },
+  ];
+  // 没定位的「最近」是个点了没反应的按钮（同 availableShopSorts 的口径）。
+  return hasOrigin ? sorts : sorts.filter((sort) => sort.id !== "nearest");
+}
+
+/** 原型 TOP 1/2/3 角标 = 「去过人数」排序下的前 3 且 visitedCount > 0（0 去过挂 TOP 是冒充热榜）。 */
+export function hotTopRank(scenes: readonly { id: string; visitedCount: number }[], sceneId: string): number | undefined {
+  const ranked = [...scenes]
+    .filter((scene) => scene.visitedCount > 0)
+    .sort((a, b) => b.visitedCount - a.visitedCount || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const index = ranked.findIndex((scene) => scene.id === sceneId);
+  return index >= 0 && index < 3 ? index : undefined;
+}
+
+export function sortHotScenes<T extends SceneShopBrief>(
+  scenes: readonly T[],
+  sortId: HotSortId,
+  origin?: SceneOrigin,
+): readonly T[] {
+  if (sortId === "nearest") return sortShops(scenes, "nearest", origin);
+  if (sortId === "visited") return sortShops(scenes, "visited", origin);
+  // 评分：ratingCount > 0 才算有评分（rating 和 count 必须成对判断），
+  // 有分的按分数降序，没分的整体排后面、组内按去过人数降序 —— 都以 id 兜底。
+  const ranked = scenes.filter((scene) => (scene.ratingCount ?? 0) > 0 && typeof scene.rating === "number");
+  const unranked = scenes.filter((scene) => !((scene.ratingCount ?? 0) > 0 && typeof scene.rating === "number"));
+  return [
+    ...[...ranked].sort((a, b) => (b.rating as number) - (a.rating as number) || (b.visitedCount ?? 0) - (a.visitedCount ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+    ...[...unranked].sort((a, b) => (b.visitedCount ?? 0) - (a.visitedCount ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // SCENE-SHOP-ADDRESS-001（2026-09-24，原型 deepseek_html_20260924_f05cb0「★ 新增：地址行」）
 // ---------------------------------------------------------------------------
 
@@ -531,14 +598,24 @@ export function sceneActionStateText(state: string): string {
   return ACTION_STATE_TEXT[state] ?? "";
 }
 
-/** 一条「能做的事」的副标题：人话状态 · 钱的含义（缺哪个就只显示另一个）。 */
+/**
+ * 一条「能做的事」的副标题。
+ *
+ * 用户反馈（2026-09-28，"邀请真人 发布机会 报名活动废话很多"）：以前拼的是
+ * 「人话状态 · 钱的含义」，钱的含义那半句（"费用约定，不代表已付款或收入"
+ * 这种）是三张卡拼出来的同款免责声明腔，不是帮用户判断的信息——去掉，只
+ * 留状态这一句真正说清楚"点了会发生什么"的短句。
+ */
 export function sceneActionSubtitle(action: { state: string; moneyMeaning: string }): string {
-  return [sceneActionStateText(action.state), action.moneyMeaning.trim()].filter(Boolean).join(" · ");
+  return sceneActionStateText(action.state);
 }
 
 // ---------------------------------------------------------------------------
-// SCENE-PHOTO-WALL-001：场景照片墙。来源只有「发帖时标记了这个场景」的帖子（服务端 ListPostsAtScene），
-// 每条帖子的每张图一格；视频取封面，音频不上墙。没有就是空墙，不拿别处的图凑。
+// SCENE-PHOTO-WALL-001：场景照片墙。第一来源是「发帖时标记了这个场景」的帖子
+// （服务端 ListPostsAtScene），每条帖子的每张图一格；视频取封面，音频不上墙。
+// SCENE-PHOTO-WALL-002（2026-09-28）：帖子墙为空时回落到场景自己的照片资产
+// （主图 + 菜单图）：传过菜单/招牌的场景墙不可能空白。回落只在空墙时补，不跟
+// 帖子混排抢序；资产无作者，author 留空（墙上不印作者行）。
 // ---------------------------------------------------------------------------
 
 export type ScenePhotoTile = { key: string; postId: string; path: string; author: string };
@@ -563,4 +640,48 @@ export function scenePhotoWallTiles(
   return out;
 }
 
-export const SCENE_PHOTO_WALL_EMPTY = "还没有人在这里发照片 —— 发动态时在「··· → 拍摄场景」选这里，照片就会出现在这。";
+export const SCENE_PHOTO_WALL_EMPTY = "这里还没有照片。";
+
+// SCENE-PHOTO-WALL-002：场景资产兜底。detail 为空/全空返回 []，调用方继续走空墙文案。
+export function sceneAssetWallTiles(
+  detail: { heroImageUrl?: string | undefined; menu?: ReadonlyArray<{ imageUrl?: string | undefined }> | undefined; fullMenu?: ReadonlyArray<{ imageUrl?: string | undefined }> | undefined } | undefined,
+  max = 30,
+): readonly ScenePhotoTile[] {
+  if (!detail) return [];
+  const seen = new Set<string>();
+  const out: ScenePhotoTile[] = [];
+  const push = (kind: string, raw: string | undefined): void => {
+    const path = (raw ?? "").trim();
+    if (!path || seen.has(path)) return;
+    seen.add(path);
+    out.push({ key: `asset:${kind}:${seen.size}`, postId: "", path, author: "" });
+  };
+  push("hero", detail.heroImageUrl);
+  for (const item of detail.menu ?? []) push("menu", item?.imageUrl);
+  for (const item of detail.fullMenu ?? []) push("menu", item?.imageUrl);
+  return out.slice(0, max);
+}
+
+// STORE-SCENE-LINK-001：认领了这个场景的店铺，真的传过的相册（不是 hero/
+// menu 那种兜底占位图）。mediaAssetId 走跟 merchant-storefront.tsx 的
+// thumbUrlFor 同一条 URL 规则——服务端只给资产 id，不在 wire 上拼公网 URL。
+// 没有 apiBaseUrl 就没法拼 URL，跟没有照片一样返回空数组，不猜一个 base。
+export function sceneMerchantWallTiles(
+  merchantPhotos: ReadonlyArray<{ mediaAssetId: string; caption?: string | undefined }> | undefined,
+  apiBaseUrl: string | undefined,
+): readonly ScenePhotoTile[] {
+  if (!merchantPhotos || merchantPhotos.length === 0 || !apiBaseUrl) return [];
+  const base = apiBaseUrl.replace(/\/$/, "");
+  const out: ScenePhotoTile[] = [];
+  for (const photo of merchantPhotos) {
+    const mediaAssetId = (photo.mediaAssetId ?? "").trim();
+    if (!mediaAssetId) continue;
+    out.push({
+      key: `merchant:${mediaAssetId}`,
+      postId: "",
+      path: `${base}/v1/media/thumb/${encodeURIComponent(mediaAssetId)}`,
+      author: photo.caption?.trim() || "",
+    });
+  }
+  return out;
+}

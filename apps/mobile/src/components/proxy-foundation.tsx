@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -11,6 +11,7 @@ import {
   type TextStyle,
   type ViewStyle
 } from "react-native";
+import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
 import { color, foundation } from "../theme";
 import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
 
@@ -291,7 +292,75 @@ export function ProxyEmptyState({
   );
 }
 
+// PHOTO-SCRIM-001（2026-09-28）：压在照片上的文字要的**渐变**遮罩，全 App 唯一实现。
+//
+// 原型里每一处照片遮罩都是同一条 CSS，形状固定为「上暗 → 中段全透明 → 下暗」：
+//   linear-gradient(180deg, <A0> 0%, transparent <a>%, transparent <b>%, <A1> 100%)
+//   A0 常常是 0（确认下单 .recap-card::after = transparent 45% → .7），
+//   也常常是一点小暗（热门场景 .scene-cover::after = .15 0% → transparent 40% →
+//   transparent 50% → .75 100%），因为角标也压在照片顶上。
+// 但实现里反复出现**平涂**版本，而且都不是原型：
+//   - 硬边色带：`backgroundColor: "rgba(0,0,0,α)"` + `height: "55%"` ⇒ 照片下半页
+//     被整块平涂压暗，并在 45% 处留下一条横切边。用户 2026-09-28 原话：
+//     「为什么还是被标注层遮挡半页图片」。
+//   - 整卡平涂：`height: "100%"` / inset:0 一个 alpha ⇒ 整张照片均匀变暗，没有渐变。
+//
+// 为什么不用别的做法（SCENE-CARD-SHADE-007/008 四次复盘的结论，别再走一遍）：
+//   - expo-linear-gradient：装了，但这个 app 有真实原生工程，`expo install` 不会
+//     重编译 ⇒ 真机上整张照片被一层解析失败的原生视图糊住，比平涂还糟。
+//   - 多条纯色横条模拟渐变：横条再多也是离散阶梯，肉眼可见斑马条纹。
+//   - react-native-svg：本来就是长期依赖、已链接进当前二进制，画出来是真矢量
+//     渐变，无条纹、无需重编译 —— 就是下面这个做法。
+//
+// 取值：默认沿用 SCENE-CARD-SHADE-009 用户拍板的那套 —— 上面 62% 完全透明（照片
+// 这块一点不受影响），只有最下面 38% 才起一点暗、封顶 0.48 —— 配文字自己的
+// textShadow 兜底可读性，不靠把底图大面积压黑来换对比度。
+// 顶上也要压角标的版式（热门场景）用 topDarken 给一小口暗，别退回平涂。
+export function PhotoScrim({
+  top = 0.62,
+  maxOpacity = 0.48,
+  topDarken = 0,
+  topEnd,
+  style
+}: {
+  /** 从这个比例往下才开始变暗（0–1）。默认 0.62 = 上面 62% 完全透明。 */
+  top?: number;
+  /** 底部最大不透明度。默认 0.48，别再加到「黑」那一档。 */
+  maxOpacity?: number;
+  /**
+   * 顶边那一口小暗（0–1）。默认 0 = 顶上完全不遮。只有顶上还压着角标/标题、
+   * 需要一点对比度时才给（热门场景原型是 0.15）。别拿它当「整张调暗」用。
+   */
+  topDarken?: number;
+  /**
+   * 从顶边暗淡到全透明的位置（0–1）。默认等于 `top`（即没有中段平台）。
+   * 热门场景原型是 0.40：顶暗到 40% 就没了，40%–50% 全透明，50% 之后才起下暗。
+   */
+  topEnd?: number;
+  style?: StyleProp<ViewStyle>;
+}): React.JSX.Element {
+  // SVG 的 id 是文档级命名空间，多个实例必须各自唯一 —— 否则后画的会用到
+  // 先画的那条渐变。useId 会给出带 `:` 的值（`:r0:`），而 `url(#:r0:)` 在
+  // SVG 里解析不了，所以先把非 [A-Za-z0-9_-] 的字符剔掉。
+  const gradientId = `photoScrim-${useId().replace(/[^A-Za-z0-9_-]/g, "")}`;
+  const plateauEnd = topEnd ?? top;
+  return (
+    <Svg height="100%" pointerEvents="none" style={[styles.photoScrim, style]} width="100%">
+      <Defs>
+        <SvgLinearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+          <Stop offset="0" stopColor="#000000" stopOpacity={topDarken} />
+          <Stop offset={plateauEnd} stopColor="#000000" stopOpacity={0} />
+          <Stop offset={top} stopColor="#000000" stopOpacity={0} />
+          <Stop offset="1" stopColor="#000000" stopOpacity={maxOpacity} />
+        </SvgLinearGradient>
+      </Defs>
+      <Rect fill={`url(#${gradientId})`} height="100%" width="100%" x="0" y="0" />
+    </Svg>
+  );
+}
+
 const styles = StyleSheet.create({
+  photoScrim: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   avatar: { alignItems: "center", backgroundColor: foundation.surfaceSecondary, borderColor: foundation.line, borderRadius: foundation.radius.full, borderWidth: 1, justifyContent: "center", overflow: "hidden" },
   avatarFallback: { color: foundation.ink, fontSize: foundation.text.sm, fontWeight: "800" },
   avatarImage: { height: "100%", width: "100%" },

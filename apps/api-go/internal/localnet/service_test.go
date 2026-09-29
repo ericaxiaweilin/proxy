@@ -1492,6 +1492,8 @@ func TestPostIsExpiredBoundaries(t *testing.T) {
 // （impressions / viewers / totalWatchMs），只能查自己的帖子。
 func TestPostImpressionStatsRoundTrip(t *testing.T) {
 	s := New()
+	// COMP-PURPOSE-CONSENT-001：行为事件现在要先有按目的的同意（服务端强制）。
+	grantBehaviorAnalytics(t, s, "viewer_9", "viewer_7")
 	create := s.Handle(envelopeFor("", "CreatePost", map[string]any{
 		"authorType": "USER", "body": "今晚西湖夜跑，有人一起吗", "visibility": "PUBLIC", "cityScope": "河内",
 	}))
@@ -1557,6 +1559,8 @@ func TestPostImpressionStatsRoundTrip(t *testing.T) {
 //不同的人打开过；只能查自己的，别人的主页数据不暴露。
 func TestProfileViewStatsRoundTrip(t *testing.T) {
 	s := New()
+	// COMP-PURPOSE-CONSENT-001：PROFILE_OPEN 也是行为追踪（谁看了谁的主页）。
+	grantBehaviorAnalytics(t, s, "viewer_1", "viewer_2")
 	open := func(actor, ownerID string) command.Result {
 		e := envelopeFor("", "RecordProfileOpen", map[string]any{"targetId": ownerID})
 		e.Actor = command.Actor{Type: "USER", ID: actor}
@@ -1611,6 +1615,8 @@ func TestProfileViewStatsRoundTrip(t *testing.T) {
 // 时候，按最近访问时间倒序。
 func TestProfileViewersRoundTrip(t *testing.T) {
 	s := New()
+	// COMP-PURPOSE-CONSENT-001：PROFILE_OPEN 也是行为追踪（谁看了谁的主页）。
+	grantBehaviorAnalytics(t, s, "viewer_1", "viewer_2")
 	open := func(actor, ownerID string) command.Result {
 		e := envelopeFor("", "RecordProfileOpen", map[string]any{"targetId": ownerID})
 		e.Actor = command.Actor{Type: "USER", ID: actor}
@@ -1673,6 +1679,8 @@ func TestProfileViewersRoundTrip(t *testing.T) {
 // 照片，曝光数字必须能分开，不能都记成帖子一个总数。
 func TestMediaImpressionStatsRoundTrip(t *testing.T) {
 	s := New()
+	// COMP-PURPOSE-CONSENT-001：逐张照片的停留是敏感行为追踪。
+	grantBehaviorAnalytics(t, s, "viewer_1", "viewer_2")
 	create := s.Handle(envelopeFor("", "CreatePost", map[string]any{
 		"authorType": "USER", "body": "西湖两张照片", "visibility": "PUBLIC", "cityScope": "河内",
 		"mediaRefs": []map[string]any{
@@ -1810,6 +1818,10 @@ func TestProfileViewStatsSinceDaysWindow(t *testing.T) {
 		TargetType: "PROFILE", TargetID: "user_001", CreatedAt: time.Now().UTC().AddDate(0, 0, -40),
 	})
 	svc := NewWithRepository(repo)
+	// COMP-PURPOSE-CONSENT-001：viewer_new 走真实写入路径，所以要先有同意。
+	// （上面那条 40 天前的事件是直接种进 repository 的 —— 它代表"旧制度下已经
+	// 落库的历史数据"，不需要重新过闸。）
+	grantBehaviorAnalytics(t, svc, "viewer_new")
 	open := func(actor string) command.Result {
 		e := envelopeFor("", "RecordProfileOpen", map[string]any{"targetId": "user_001"})
 		e.Actor = command.Actor{Type: "USER", ID: actor}

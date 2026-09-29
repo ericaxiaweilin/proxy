@@ -46,6 +46,16 @@ type Reply struct {
 	// profile 解析，既不落库也不接受客户端提供——客户端拿不到名字时只能
 	// 退化成中性标签，绝不允许把 actorId 当成名字显示给用户。
 	ActorDisplayName string `json:"actorDisplayName,omitempty"`
+	// REPLY-IMAGE-001：评论图片引用（mediaAssetId + sortOrder，与帖文
+	// PostMediaRef 同构）。只存引用，展示 URL 由客户端解析；老评论无此列
+	// 读出来是 nil，序列化时省略，契约侧 default([]) 兜底。
+	Media []ReplyMediaRef `json:"media,omitempty"`
+}
+
+// ReplyMediaRef 是评论的图片引用（REPLY-IMAGE-001）。
+type ReplyMediaRef struct {
+	MediaAssetID string `json:"mediaAssetId"`
+	SortOrder    int    `json:"sortOrder"`
 }
 
 // Repost 是转发。
@@ -935,13 +945,31 @@ func (s *Service) react(ctx context.Context, e command.Envelope) command.Result 
 // ---------- ReplyToPost ----------
 
 type replyPayload struct {
-	PostID string `json:"postId"`
-	Body   string `json:"body"`
+	PostID string          `json:"postId"`
+	Body   string          `json:"body"`
+	Media  []ReplyMediaRef `json:"media"`
+}
+
+// replyMediaLimit 跟帖文 mediaRefs 上限同口径（CreatePost 6 张）。
+const replyMediaLimit = 6
+
+func validReplyMedia(media []ReplyMediaRef) bool {
+	if len(media) > replyMediaLimit {
+		return false
+	}
+	for _, m := range media {
+		if m.MediaAssetID == "" || m.SortOrder < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Service) reply(ctx context.Context, e command.Envelope) command.Result {
 	var p replyPayload
-	if !decode(e.Payload, &p) || p.PostID == "" || p.Body == "" {
+	// REPLY-IMAGE-001：正文可以空（纯图片评论），但正文和图片不能同时空；
+	// 图片走 media 上限 + 单项校验。空正文无图仍是 INVALID_REPLY（老行为不变）。
+	if !decode(e.Payload, &p) || p.PostID == "" || (p.Body == "" && len(p.Media) == 0) || !validReplyMedia(p.Media) {
 		return command.Rejected(e, "INVALID_REPLY", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_reply", nil)
 	}
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
@@ -952,7 +980,7 @@ func (s *Service) reply(ctx context.Context, e command.Envelope) command.Result 
 			return command.Rejected(e, "PROFILE_INCOMPLETE", "BUSINESS_STATE", "AFTER_USER_ACTION", "engagement.profile_incomplete", map[string]any{"missing": missing})
 		}
 	}
-	reply := Reply{ID: newID("rep_"), PostID: p.PostID, ActorID: e.Actor.ID, Body: p.Body, CreatedAt: s.clock.Now().UTC()}
+	reply := Reply{ID: newID("rep_"), PostID: p.PostID, ActorID: e.Actor.ID, Body: p.Body, Media: p.Media, CreatedAt: s.clock.Now().UTC()}
 	domainEvents := []event.DomainEvent{event.New("PostReplied", "Post", p.PostID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, reply.CreatedAt, map[string]any{
 		"replyId": reply.ID,
 		"body":    reply.Body,

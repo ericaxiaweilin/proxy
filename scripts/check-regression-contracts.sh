@@ -2237,10 +2237,32 @@ if ! grep -q 'momentPriceQuote' apps/mobile/src/market-template-price.ts; then
   echo "  FAIL [OPP-CATALOG-001]: dynamic pricing math must stay unit-tested" >&2
   exit 1
 fi
-if ! grep -q 'formatTraceId' apps/mobile/src/surfaces/market.tsx; then
-  echo "  FAIL [R58-TRACE]: success-screen trace id must stay" >&2
+# R58-TRACE → PUBLIC-NO-001：成功页编号必须是服务端编号（16 位全数字），
+# 客户端随机拼的 PX-N/PX-O/PX-A 展示号（formatTraceId）客服查不到，禁止回归。
+if ! grep -q 'setTraceId(opportunity.number' apps/mobile/src/surfaces/market.tsx \
+  || ! grep -q 'setActivityTraceId(created.code' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [R58-TRACE]: success-screen number must come from the server" >&2
   exit 1
 fi
+if grep -q 'formatTraceId' apps/mobile/src/surfaces/market.tsx apps/mobile/src/market-template-price.ts; then
+  echo "  FAIL [PUBLIC-NO-001]: client-generated PX-* trace ids must not return" >&2
+  exit 1
+fi
+
+# ACTIVITY-CREATE-FORM-001（2026-09-28，原型 deepseek_html_20260928_34cc3e 全量移植）：
+# 十块渐进表单 + 进度条 + 场景列表/地图双选 + 成功页。门禁三条 —— 分类名称场景
+# 三齐才可发布（无 sceneId 不放行）、地图 pin 只落真实坐标、草稿真存本机不许假 toast。
+if ! grep -qF 'describe("ACTIVITY-CREATE-FORM-001' apps/mobile/src/surfaces/market-workflow-filter.test.ts; then
+  echo "  FAIL [ACTIVITY-CREATE-FORM-001]: 十块表单行为断言 describe 块找不到了。" >&2
+  exit 1
+fi
+if ! grep -qF 'canPublishForm(form)' apps/mobile/src/surfaces/activity-wizard.tsx; then
+  echo "  FAIL [ACTIVITY-CREATE-FORM-001]: 发布门禁不在向导里 —— 无场景活动会重新不可见。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/activity-create-form.test.ts || exit $?
+pnpm --dir apps/mobile exec vitest run src/surfaces/market-workflow-filter.test.ts -t 'ACTIVITY-CREATE-FORM-001' || exit $?
+echo "    ACTIVITY-CREATE-FORM-001: PASS (ten-block progressive create form)"
 
 # CHROME-PARITY-001: HOME / MESSAGES 主信息流的滑动显隐从未接线——
 # RequesterHome 内部 handler 代码就绪但壳没传 onChromeVisibilityChange
@@ -2531,19 +2553,157 @@ fi
 # assistants row and the lower "AI 推荐" row both read /v1/ai/assistants, so the
 # screen showed two identical horizontal rails both labelled AI 生成. Reading
 # the same server data twice is invisible in code review — it only shows up on
-# the device — so the gate pins the single-row contract in the discovery test
-# instead of trusting the deletion.
-if ! grep -q 'AI-ROW-DUPE-001' apps/mobile/src/requester-home-discovery-contract.test.ts; then
-  echo "  FAIL [AI-ROW-DUPE-001]: the single-AI-row regression test is missing." >&2
+# the device — so the gate pins the row contract in the discovery test instead
+# of trusting the deletion.
+# 2026-09-27 (commander): the remaining AI row was taken down entirely and
+# replaced by the hot-scene rail (SCENE-HOME-HOT-RAIL-001). The pin now guards
+# "no AI catalogue row on home at all" — AIAssistantsRow must never come back.
+if ! grep -qF 'it("AI-ROW-DUPE-001' apps/mobile/src/requester-home-discovery-contract.test.ts; then
+  echo "  FAIL [AI-ROW-DUPE-001]: the no-AI-row regression test is missing." >&2
   exit 1
 fi
 if grep -q '<AIAssistantsRow' apps/mobile/src/surfaces/requester-home.tsx; then
-  echo "  FAIL [AI-ROW-DUPE-001]: requester-home mounts a second AI row again." >&2
-  echo "        Both rows read /v1/ai/assistants, so the screen shows the same five AI twice." >&2
+  echo "  FAIL [AI-ROW-DUPE-001]: requester-home mounts an AI catalogue row again." >&2
+  echo "        The AI row was taken down on 2026-09-27 (commander decision); do not re-add." >&2
   exit 1
 fi
 pnpm --filter @proxy/mobile exec vitest run src/requester-home-discovery-contract.test.ts || exit $?
-echo "    AI-ROW-DUPE-001: PASS (home renders exactly one AI row)"
+echo "    AI-ROW-DUPE-001: PASS (home renders no AI catalogue row; hot-scene rail took its place)"
+
+# SCENE-HOME-HOT-RAIL-001（2026-09-27，原型 deepseek_html_20260927_d56fab「热门
+# 场景」）：首页 AI 推荐行下架后，同位置换热门场景横滑。数据纪律：排序只按
+# 真实 visitedCount 降序、0 去过不进榜（useMemo 过滤条件必须在源码里）；点卡
+# 进 onOpenSceneMap（真实目的地）；「本周热榜 / 实时更新」没有聚合生产者，
+# i18n 字典里不许出现；评分和头像栈没有生产者，样式不许回。
+if ! grep -qF 'it("SCENE-HOME-HOT-RAIL-001' apps/mobile/src/requester-home-discovery-contract.test.ts; then
+  echo "  FAIL [SCENE-HOME-HOT-RAIL-001]: the hot-rail regression test is missing." >&2
+  exit 1
+fi
+if ! grep -qF '.filter((s) => s.active)' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [SCENE-HOME-HOT-RAIL-001]: 热榜不再取全部 active 场景。" >&2
+  exit 1
+fi
+if ! grep -qF 'b.visitedCount - a.visitedCount' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [SCENE-HOME-HOT-RAIL-001]: 排序不再按真实 visitedCount 降序。" >&2
+  exit 1
+fi
+if ! grep -qF '.slice(0, 9)' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [SCENE-HOME-HOT-RAIL-001]: 热榜卡片数不再是 9（commander 2026-09-27：多做几个卡片）。" >&2
+  exit 1
+fi
+# 0 去过挂 TOP 是冒充热榜 —— 角标必须钉在「真的有去过人数」上。
+if ! grep -qF 'index < 3 && scene.visitedCount > 0' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [SCENE-HOME-HOT-RAIL-001]: TOP N 角标不再受 visitedCount > 0 约束 —— 0 去过不许挂角标。" >&2
+  exit 1
+fi
+if ! grep -qF 'onPress={() => onOpenSceneMap?.(scene.id)}' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [SCENE-HOME-HOT-RAIL-001]: 热榜卡不再进场景地图 —— 死按钮不许回来。" >&2
+  exit 1
+fi
+# 「更多」的裸 onOpenSceneMap?.() 会被「附近场景」标题满足 —— 必须锚 hotMore。
+# 2026-09-28 修：这条针原来写死 `onPress={() => onOpenSceneMap?.()}`，但「更多」
+# 后来加了首选通道 onOpenHotScenes（`(onOpenHotScenes ?? onOpenSceneMap)?.()`），
+# 针就成了**永远不会通过的死针**（门禁一直红在这行）。要钉的命题没变：按钮存在、
+# 且**锚在 hotMore 上**地进场景地图 —— 所以按新形态钉，hotMore 这个锚不能丢。
+if ! grep -qF 'onPress={() => (onOpenHotScenes ?? onOpenSceneMap)?.()} style={styles.hotMore}' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [SCENE-HOME-HOT-RAIL-001]: 「更多」按钮不见了（或不再进场景地图）。" >&2
+  exit 1
+fi
+# FORYOU-LOGO-001（2026-09-27 晚，新版原型 deepseek_html_20260927_c89beb 主
+# Logo）：「为你组合」头部 = 4 个实心矩形 + 中心大圆带白描边环 + 黑底白字
+# For You 药丸；旧方案 C（空心描边矩形）和旧紫色药丸不许回来。
+if ! grep -qF 'function ForYouGlyph' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [FORYOU-LOGO-001]: ForYouGlyph 组件不见了。" >&2
+  exit 1
+fi
+if ! grep -qF '<ForYouGlyph size={' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [FORYOU-LOGO-001]: For You 头部不再消费 glyph —— logo 就没人画了。" >&2
+  exit 1
+fi
+# 新版矩形实心 + 新圆角（钉使用形态，不是定义）。
+if ! grep -qE 'function ForYouGlyph' apps/mobile/src/surfaces/requester-home.tsx || \
+   ! grep -A 14 'function ForYouGlyph' apps/mobile/src/surfaces/requester-home.tsx | grep -qF 'backgroundColor: color.ink, borderRadius: size * 12 / 100'; then
+  echo "  FAIL [FORYOU-LOGO-001]: 矩形不是新版实心 + 12/100 圆角。" >&2
+  exit 1
+fi
+# 中心圆白环（钉使用形态）。
+if ! grep -A 14 'function ForYouGlyph' apps/mobile/src/surfaces/requester-home.tsx | grep -qF 'borderColor: color.white, borderRadius: dot / 2, borderWidth: ring'; then
+  echo "  FAIL [FORYOU-LOGO-001]: 中心圆的白描边环丢了。" >&2
+  exit 1
+fi
+# 无底板外壳 / 旧方案 C 空心矩形不许回来。
+if grep -A 16 'function ForYouGlyph' apps/mobile/src/surfaces/requester-home.tsx | grep -qE 'backgroundColor: tone|borderRadius: size \* 20 / 64|borderColor: color\.ink, borderRadius: size \* 4 / 64'; then
+  echo "  FAIL [FORYOU-LOGO-001]: 旧版 glyph（底板外壳 / 方案 C 空心矩形）回来了。" >&2
+  exit 1
+fi
+if grep -qF 'forYouBadge: { backgroundColor: color.proxyPurpleSoft' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [FORYOU-LOGO-001]: 旧紫色 For You 药丸回来了 —— 原型是黑底白字。" >&2
+  exit 1
+fi
+if grep -qE '本周热榜|实时更新' apps/mobile/src/i18n.ts; then
+  echo "  FAIL [SCENE-HOME-HOT-RAIL-001]: i18n 出现了「本周热榜 / 实时更新」—— 没有周榜/实时聚合的生产者，不许宣称。" >&2
+  exit 1
+fi
+if grep -qE 'hotStar|hotAvatar' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [SCENE-HOME-HOT-RAIL-001]: 热榜卡出现了评分 / 头像栈样式 —— 这两样没有数据生产者（SCENE-NO-FABRICATED-001）。" >&2
+  exit 1
+fi
+if ! grep -qF 'hotScenesTag: "按去过人数排"' apps/mobile/src/i18n.ts; then
+  echo "  FAIL [SCENE-HOME-HOT-RAIL-001]: 角标排序口径文案丢了 —— 必须说清「按去过人数排」。" >&2
+  exit 1
+fi
+echo "    SCENE-HOME-HOT-RAIL-001: PASS (热榜 9 卡按真实 visitedCount 排序；TOP N 只给真有去过的前 3；卡与「更多」都进场景地图；无周榜/实时宣称)"
+echo "    FORYOU-LOGO-001: PASS (「为你组合」头部 = 新版实心矩形+白环大圆 glyph + 黑底白字 For You 药丸；旧方案 C/紫药丸不回)"
+
+# HOME-FORYOU-LOCK-001（2026-09-27，原型 deepseek_html_20260927_548d6b「可换可锁」）：
+# 四宫格每格可锁定（右上角锁钮 + 金框），remix 与 chooser 都必须尊重锁；
+# 格下入口收成一个（报名），出图/发布需求从四宫格摘除不许回来。
+if ! grep -qF 'it("HOME-FORYOU-LOCK-001' apps/mobile/src/requester-home-discovery-contract.test.ts; then
+  echo "  FAIL [HOME-FORYOU-LOCK-001]: the lock regression test is missing." >&2
+  exit 1
+fi
+if ! grep -qF 'function toggleSlotLock' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [HOME-FORYOU-LOCK-001]: toggleSlotLock 不见了 —— 锁就没人切换了。" >&2
+  exit 1
+fi
+# remix 必须跳过锁定的轴（四条都要在）。
+for axis in person activity time place; do
+  if ! grep -qF "!lockedSlots.has(\"$axis\")" apps/mobile/src/surfaces/requester-home.tsx; then
+    echo "  FAIL [HOME-FORYOU-LOCK-001]: remix 不再跳过锁定的 $axis 轴。" >&2
+    exit 1
+  fi
+done
+# 锁定的格子拒开 chooser（点格子与搜索换项同一口径）。
+if ! grep -qF 'if (lockedSlots.has(tile.slot)) { showResponse(t("lockedBlock"), t("lockedBlockSub")); return; }' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [HOME-FORYOU-LOCK-001]: 锁定格子不再拒开 chooser。" >&2
+  exit 1
+fi
+# 锁定格子金框 + 锁钮金底（原型 --gold #F5B400）。
+if ! grep -qF 'gridTileLocked: { borderColor: "#F5B400", borderWidth: 2.5 }' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [HOME-FORYOU-LOCK-001]: 锁定金框丢了。" >&2
+  exit 1
+fi
+# 锁钮必须是格子外壳（View）的兄弟 —— 嵌在 Pressable 里会被外层吞触摸。
+if ! grep -qF '<View key={tile.key} style={[styles.gridTile' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [HOME-FORYOU-LOCK-001]: 格子外壳变回 Pressable —— 锁钮嵌进去就切不动了。" >&2
+  exit 1
+fi
+# 开锁 / 关锁图形必须有差别（锁环抬起 vs 扣上）。
+# 钉使用处（三元），不是样式定义 —— 只钉定义的话，把三元删掉定义还在，假绿。
+if ! grep -qF 'lockedSlots.has(tile.slot) ? styles.gridLockShackleOn : styles.gridLockShackleOff' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [HOME-FORYOU-LOCK-001]: 开锁/关锁图形没有差别 —— 锁环抬起态的三元不见了。" >&2
+  exit 1
+fi
+# 格下入口只有一个（报名）；出图/发布需求的半宽行不许回来。
+if grep -qF 'styles.gridCtaHalf' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [HOME-FORYOU-LOCK-001]: 四宫格的多个入口回来了 —— commander 拍板只留报名。" >&2
+  exit 1
+fi
+if ! grep -qF 'joinSelected(gridActivity?.activityId)' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [HOME-FORYOU-LOCK-001]: 唯一的报名 CTA 不见了。" >&2
+  exit 1
+fi
+echo "    HOME-FORYOU-LOCK-001: PASS (四宫格可锁定：remix/chooser 都尊重锁；格下只留报名一个入口)"
 
 # COMP-CHAT-001: a paid engagement must keep an auditable thread. The chat was
 # modelled on a privacy messenger, so every DM defaults to burn-after-read,
@@ -4490,7 +4650,10 @@ fi
 # 「仍然调用同一个共享标签、并带上观察者的账号 id」为止 —— 这正是本钉要守的东西
 # （tab 不许自己拼标签、从而和 feed 对「谁是谁」的说法不一致）。注释同样不复述
 # 那段调用文本，否则删掉真正的调用后这行注释会让钉继续变绿。
-if ! grep -qF 'replyTargetLabel(props.viewerMode, target, props.viewerAccountId' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+# REPLY-TARGET-NAME-INK-001 之后 tab 改用分段器（名字要单独上色），所以针跟着
+# 换到 replyTargetParts —— 它和 replyTargetLabel 是同一个句式（后者就是前者拼的），
+# 本钉守的「用共享实现、不自己拼」没有变松。
+if ! grep -qF 'replyTargetParts(props.viewerMode, target, props.viewerAccountId' apps/mobile/src/surfaces/ProfileTabs.tsx; then
   echo "  FAIL [REPLY-TARGET-001]: the replies tab no longer uses the shared label," >&2
   echo "        so it can disagree with the feed about who someone is." >&2
   exit 1
@@ -6198,7 +6361,7 @@ if ! grep -qF 'relationship={relationship}' apps/mobile/src/shell/app-shell.tsx 
    ! grep -qF '<MessagesSurface' apps/mobile/src/shell/app-shell.tsx ||
    ! grep -qF '<FriendCrmSurface' apps/mobile/src/surfaces/messages.tsx ||
    ! grep -qF 'initialView="ADD_FRIEND"' apps/mobile/src/surfaces/messages.tsx ||
-   ! grep -qF 'addFriendBackLabel="‹ 返回"' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'addFriendBackLabel="返回"' apps/mobile/src/surfaces/messages.tsx ||
    # MSG-SCAN-SHORTCUT-001 改名：关闭这个表面现在是 setScanShortcut(false)
    # （原 setShowAddFriend(false)）。守的是「能退出去」，不是那个旧名字。
    ! grep -qF 'onBack={() => setScanShortcut(false)}' apps/mobile/src/surfaces/messages.tsx; then
@@ -6220,9 +6383,19 @@ if grep -qF '‹ 返回消息' apps/mobile/src/surfaces/friend-crm.tsx; then
   echo "        friend-crm 不知道 onBack 通向哪里，标签只能由调用方传。" >&2
   exit 1
 fi
-if ! grep -qF 'addFriendBackLabel="‹ 返回我的"' apps/mobile/src/surfaces/me.tsx; then
+if ! grep -qF 'addFriendBackLabel="返回我的"' apps/mobile/src/surfaces/me.tsx; then
   echo "  FAIL [ADD-FRIEND-FROM-MESSAGES-001]: Me 入口没说明返回去向 ——" >&2
   echo "        onBack 回「我的」，标签就得写「返回我的」。" >&2
+  exit 1
+fi
+# BACK-GLYPH-001（2026-09-26）：标签里不再带字形。原来写的是 "‹ 返回" / "‹ 返回我的"，
+# 那个 `‹` 是文本引号不是箭头（见 components/proxy-foundation.tsx 的 ProxyBackGlyph）。
+# 字形现在由公共原语画，所以这里多守一条：调用方传进来的 label 必须是**纯文字**，
+# 不许把字形再拼回字符串里 —— 拼回去就会画出两个箭头。
+if grep -qF 'addFriendBackLabel="‹' apps/mobile/src/surfaces/messages.tsx ||
+   grep -qF 'addFriendBackLabel="‹' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [BACK-GLYPH-001]: 返回标签里又拼进了字形 ——" >&2
+  echo "        字形由 ProxyBackGlyph 画，label 只写文字，否则会画出两个箭头。" >&2
   exit 1
 fi
 if ! grep -q 'ADD-FRIEND-FROM-MESSAGES-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
@@ -7814,6 +7987,152 @@ if ! grep -q 'MARKET-PRICE-RANGE-PARSE-001' apps/mobile/src/market-price-range.t
 fi
 echo "    MARKET-PRICE-RANGE-PARSE-001: PASS (a published price range is read as two ends, never concatenated)"
 
+# MARKET-WHEN-LABEL-001: 机会的 date / time 是两个字段 —— date 是日期（种子行与
+# 契约测试里是「周六」「今天」），time 是时刻（「15:00–20:00」）。展示侧一直按
+# `{date} {time}` 拼。
+#
+# 但需求向导的「时间」是一个自由文本框（默认值取自 MOMENT_TEMPLATES[].defaultTime
+# = 「今晚 19:00」），发布映射（demand-moments.ts buildDemandPublishInput）把这一串
+# **同时**写进了 date 和 time —— 于是详情、卡片、合成帖文、报价 sheet、报名明细
+# 五处都印两遍：「今晚 19:00 今晚 19:00 · 2 小时 · 1:1」。
+#
+# 存量行已经这样落库（marketplace.opportunities 里 2026-09-11~15 那几行），改发布端
+# 修不掉它们，所以统一在显示层归一（market-fixtures.opportunityWhenLabel）。
+# 行为测试在 apps/mobile/src/market-when-label.test.ts（纯 .ts，跑得动）。
+if grep -qF '{opportunity.date} {opportunity.time}' apps/mobile/src/surfaces/market.tsx ||
+   grep -qF '{opportunity.date} {opportunity.time}' apps/mobile/src/surfaces/r37-opportunity-card.tsx ||
+   grep -qF '${opportunity.date} ${opportunity.time}' apps/mobile/src/feed-content.ts ||
+   grep -qF '[opportunity.date, opportunity.time' apps/mobile/src/surfaces/opportunity-quote-sheet.tsx; then
+  echo "  FAIL [MARKET-WHEN-LABEL-001]: 又有一处在手拼 date + time ——" >&2
+  echo "        需求向导发的机会两个字段是同一串，拼起来就印两遍。" >&2
+  echo "        走 market-fixtures.opportunityWhenLabel。" >&2
+  exit 1
+fi
+if ! grep -qF 'export function opportunityWhenLabel' apps/mobile/src/market-fixtures.ts ||
+   ! grep -qF 'opportunityWhenLabel' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -qF 'opportunityWhenLabel' apps/mobile/src/surfaces/r37-opportunity-card.tsx ||
+   ! grep -qF 'opportunityWhenLabel' apps/mobile/src/feed-content.ts ||
+   ! grep -qF 'opportunityWhenLabel' apps/mobile/src/surfaces/opportunity-quote-sheet.tsx; then
+  echo "  FAIL [MARKET-WHEN-LABEL-001]: 归一函数在，但有人没接上 ——" >&2
+  echo "        五处各写一遍等于没修（以前就是各写一份）。" >&2
+  exit 1
+fi
+if ! grep -q 'MARKET-WHEN-LABEL-001' apps/mobile/src/market-when-label.test.ts; then
+  echo "  FAIL [MARKET-WHEN-LABEL-001]: 行为测试没有跟着改口径" >&2
+  exit 1
+fi
+echo "    MARKET-WHEN-LABEL-001: PASS (date + time render through one shared 什么时候 string)"
+
+# MARKET-LEGACY-VERIFIED-001: 2026-09-16 那次清扫（MARKET-FAKE-JUDGMENT-001）只改了
+# **写**路径 —— PublishMarketOpportunity 不再无条件写 Verified=true、不再写死 Match。
+# 但读路径（internal/platform/postgres/marketplace.go）是把 payload 整段 unmarshal
+# 回来照发的：清扫之前落库的行至今带着 ownerType=PERSON + verified=true（同一行还
+# 留着写死的 match），卡片据此画「100% 匹配」、详情页给个人发布者画「商家身份已验证」。
+#
+# 读路径必须清掉「写路径从来不产出」的形态，且不许误伤真商家（BUSINESS + verified）
+# 与种子行的 Verified=false。
+require_test "MARKET-LEGACY-VERIFIED-001" "./internal/marketplace" \
+  "TestListStripsLegacyFabricatedJudgment" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
+if ! grep -qF 'stripLegacyFabricatedJudgment' apps/api-go/internal/marketplace/service.go; then
+  echo "  FAIL [MARKET-LEGACY-VERIFIED-001]: 读路径没有清存量编造值 ——" >&2
+  echo "        只修写路径的话，已经落库的行会一直带着假勾和假匹配度下发。" >&2
+  exit 1
+fi
+if ! grep -qF 'export function merchantVerified' apps/mobile/src/market-fixtures.ts ||
+   ! grep -qF 'merchantVerified(opportunity)' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -qF 'merchantVerified(opportunity)' apps/mobile/src/surfaces/r37-opportunity-card.tsx; then
+  echo "  FAIL [MARKET-LEGACY-VERIFIED-001]: 展示侧没有按 ownerType 收口认证徽章 ——" >&2
+  echo "        平台只在商家成员资格验过时置 Verified，个人发布者那个勾没有依据。" >&2
+  exit 1
+fi
+echo "    MARKET-LEGACY-VERIFIED-001: PASS (fabricated legacy match / verification is stripped on read)"
+
+# MARKET-HISTORY-CELL-001: 详情价格条第三格以前是「你的历史 / 约 {budget}」——
+# budget 就是这单自己的 price（market.tsx 里 `const budget = opportunity.price`），
+# 跟左边「完成后你可获得」恒等，永远不可能不同；平台也没有"你的类似履约中位数"
+# 这个数据源。一格恒等复读 + 一个没有来源的历史标签 = 编出来的。
+if grep -qF '你的历史' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-HISTORY-CELL-001]: 详情页又把订单价标成「你的历史」——" >&2
+  echo "        那格的值就是这单的 price，跟旁边那格恒等；平台没有这份历史数据。" >&2
+  exit 1
+fi
+if ! grep -q 'MARKET-HISTORY-CELL-001' apps/mobile/src/market-when-label.test.ts; then
+  echo "  FAIL [MARKET-HISTORY-CELL-001]: 行为测试没有跟着改口径" >&2
+  exit 1
+fi
+echo "    MARKET-HISTORY-CELL-001: PASS (the price strip no longer relabels the order price as history)"
+
+# MARKET-FAIR-RANGE-CLAIM-001: valueBox 曾无条件写一句「客户预算落在 Proxy 公平区间内」。
+# 平台没有公平区间引擎（全仓「公平区间」只有这句文案和原型），而且区间本身只在发布方
+# 真填了两框时才有（parseOpportunityPrice.hasRange）。标题承诺"参考报价区间"却不给区间，
+# 等于又替系统许了一个没有依据的承诺。
+if grep -qF '客户预算落在 Proxy 公平区间内' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-FAIR-RANGE-CLAIM-001]: 详情页又断言了一个平台没算过的公平区间 ——" >&2
+  echo "        没有区间引擎，也没有真区间时，不许说「落在公平区间内」。" >&2
+  exit 1
+fi
+if ! grep -qF 'fairRange ? "参考报价区间" : "报价说明"' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-FAIR-RANGE-CLAIM-001]: 报价盒子不再按有没有真区间分两种说法 ——" >&2
+  exit 1
+fi
+echo "    MARKET-FAIR-RANGE-CLAIM-001: PASS (the quote box only claims a range when one was really entered)"
+
+# MARKET-DETAIL-HERO-MEDIA-001: 详情 hero 是**照片卡**，不是那张深色文字卡。
+# detailHero 带 padding 14，是给「发布需求 / 选人工作台」的深色文字 hero 用的；照片塞
+# 进它里面就是外面一圈 14pt 黑框，底部还要再加 detailHeroPhoto 的 marginBottom 12
+# —— 上/左/右 14pt、底边 26pt 的黑边（2026-09-27 截图实测）。
+if ! grep -qF 'style={styles.detailHeroMedia}' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-DETAIL-HERO-MEDIA-001]: 详情照片卡又套在带 padding 的深色文字 hero 里 ——" >&2
+  echo "        照片会缩在一圈 14pt 黑框里，底边还多 12pt。" >&2
+  exit 1
+fi
+if grep -qF 'detailHeroPhoto: { backgroundColor: "#F1ECE3", borderRadius: 18, height: 196, justifyContent: "flex-end", marginBottom: 12, overflow: "hidden" }' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-DETAIL-HERO-MEDIA-001]: 照片卡又带回了文字 hero 的排版参数 ——" >&2
+  echo "        marginBottom 12 + 容器 padding 14 = 底边 26pt 黑带。" >&2
+  exit 1
+fi
+# 反向钉：清掉的是照片卡上的黑框，不是那个深色文字 hero 本身 ——
+# 发布需求 / 选人工作台还在用它。
+if ! grep -qF 'detailHero: { backgroundColor: color.ink' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-DETAIL-HERO-MEDIA-001]: 深色文字 hero 被一起删掉了 ——" >&2
+  echo "        发布需求 / 选人工作台还在用它。" >&2
+  exit 1
+fi
+if ! grep -q 'MARKET-DETAIL-HERO-MEDIA-001' apps/mobile/src/market-when-label.test.ts; then
+  echo "  FAIL [MARKET-DETAIL-HERO-MEDIA-001]: 行为测试没有跟着改口径" >&2
+  exit 1
+fi
+echo "    MARKET-DETAIL-HERO-MEDIA-001: PASS (the detail hero photo fills its card, no dark matte)"
+
+
+# MARKET-DETAIL-HERO-RATIO-001: 详情 hero 的比例以前是写死的（390 宽的屏上 196 高
+# = 约 2:1），而素材样张是 640x480（4:3）。cover 把 4:3 的图上下裁掉三分之一，
+# 屏幕上只剩中间一条；更糟的是高度钉死、宽高比跟着屏宽跑 —— 平板 / 分屏上会裁得
+# 更狠。同时满宽封面照切了圆角，四个角会露出页面底色。
+# 2026-09-27 截图实测：hero 约 680x322 px，满宽（无内边距），圆角 18。
+if ! grep -qE 'detailHeroPhoto: \{[^}]*aspectRatio: 4 / 3' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-DETAIL-HERO-RATIO-001]: 详情 hero 又没有比例约束了 ——" >&2
+  echo "        素材是 4:3，没约束就会被 cover 裁成横条（屏越宽越扁）。" >&2
+  exit 1
+fi
+if grep -qE 'detailHeroPhoto: \{[^}]*height: [0-9]' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-DETAIL-HERO-RATIO-001]: 详情 hero 又写死了高度 ——" >&2
+  echo "        写死高度 = 比例跟着屏宽跑，宽屏上会裁得更狠。" >&2
+  exit 1
+fi
+if grep -qE 'detailHeroMedia: \{[^}]*borderRadius' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-DETAIL-HERO-RATIO-001]: 满宽封面照又切了圆角 ——" >&2
+  echo "        四个角会露出页面底色，看着像一张贴歪的卡片。" >&2
+  exit 1
+fi
+if ! grep -q 'MARKET-DETAIL-HERO-RATIO-001' apps/mobile/src/market-when-label.test.ts; then
+  echo "  FAIL [MARKET-DETAIL-HERO-RATIO-001]: 行为测试没有跟着改口径" >&2
+  exit 1
+fi
+echo "    MARKET-DETAIL-HERO-RATIO-001: PASS (hero follows the 4:3 asset ratio, square full-bleed)"
+
+
 # MARKET-SEED-FAKE-ACTIVITY-001: 市场种子行不得带凭空的互动量与紧急度。
 #
 # marketplace.SeedDefaults 在**生产 PG 路径**上也会跑（cmd/api/main.go 无条件下调），
@@ -8409,18 +8728,8 @@ if [ "$(grep -o 'detail\.humans\.map' apps/mobile/src/surfaces/reality-scene-map
 fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-humans.test.ts || exit $?
 echo "    SCENE-HUMANS-004: PASS (people rail mounts exactly once)"
-# SCENE-STUDIO-001: 场景 Studio 出图 —— 时段场景 × 点中菜单 × 绑定小美，
-# 三元素拼一张卡走系统分享。选什么出什么：缺元素按钮 disabled + 明说，
-# 不许拿默认替身凑数。
-if ! grep -q 'SCENE-STUDIO-001' apps/mobile/src/scene-studio.test.ts ||
-   ! grep -q 'ref={studioShareRef}' apps/mobile/src/surfaces/reality-scene-map.tsx ||
-   ! grep -q 'disabled={!studioReady}' apps/mobile/src/surfaces/reality-scene-map.tsx; then
-  echo "  FAIL [SCENE-STUDIO-001]: Studio 出图链被动了 ——" >&2
-  echo "        场景×菜单×小美缺一不可，缺了必须明说。" >&2
-  exit 1
-fi
-pnpm --filter @proxy/mobile exec vitest run src/scene-studio.test.ts || exit $?
-echo "    SCENE-STUDIO-001: PASS (scene x menu x xiaomei studio card)"
+# SCENE-STUDIO-001 已移除（2026-09-28，用户：移除场景 Studio）：出图卡、测试、
+# 门禁块同步删除 —— 不是弱化门禁，是功能下线对应的机械清理。
 # SCENE-CATEGORY-001: 场景顶类封闭三态（商家/景点/其他），前端只认这三个。
 #
 # 之前 type 是自由文本，词表无界 —— 后期按分类做的标记颜色、徽标、筛选全都
@@ -9800,6 +10109,51 @@ echo "    AI-MANAGE-003: PASS (chat management governs the represented person; s
 # hydrate 计数、点开拉评论；作者名走 resolveReplyAuthorDisplayName，无名不显示裸 id。
 pnpm --dir apps/mobile exec vitest run src/profile-post-replies.test.ts || exit $?
 echo "    PROFILE-REPLIES-VISIBLE-001: PASS (profile posts show counts + expandable replies)"
+# PROFILE-ACTION-MORE-001 / PROFILE-ACTION-COUNTS-001（2026-09-25，用户报了两次：
+# 「还没有对齐原型」+「少了评论logo功能」）：
+# 他人主页行动行少了原型第三个圆形「···」控件；帖子动作行还是文字「♡ 喜欢 / 💬 回复 /
+# ↗ 分享」，而原型是图标 + 计数（`♡ 12  💬 3  ↻  ⤴`，见 docs/design/references/
+# Proxy_Profile_Threads_Standalone_R2.html 的 function post()）；第 2 颗「评论」
+# **从来没画出来过**（挂在一个全仓没人传的 onReplyPost 上）。补齐之后：
+#   - 「···」菜单必须是**真 Modal**（ProfileTabs 渲染在调用方 ScrollView 里面，
+#     普通绝对定位覆盖层会被滚出可视区/被裁掉）；
+#   - 菜单里只放真能做的事：没有举报（页头那颗是唯一入口）、没有减少推荐
+#     （服务端只有按帖子的 RecordFeedPreference，没有按账号的对应命令）；
+#   - 「屏蔽作者」没接 client 就整条不画；失败必须说出来；
+#   - 计数只在 engagement 拉到后画，不回填 0；
+#   - 第 2 颗 = 评论入口（图标 + 评论数），走 onToggleReplies；没接 engagementClient
+#     就整颗不画（不摆一颗按不动的按钮）；
+#   - 动作行下面那行独立的「💬 N 条评论 ﹀」开关**删掉**了 —— 动作行第 2 颗现在就是
+#     这个开关，留着 = 同屏两个评论入口、隔 8px 说同一个数字。它原来的闸门
+#     reactions>0||replies>0 还会画出「💬 0 条评论 ﹀」这种点开是空列表的假控件。
+# 钉在独立文件里（不塞进 design-system-r3.test.ts）：那个文件当前因别人的
+# my-benefits.tsx 11pt 违规整文件红，而门禁在第一个失败处就 exit 1 —— 塞进去的钉
+# 永远不会被走到，日志里也 grep 不到，反而容易被误读成「没跑=没问题」。
+# ⚠️ 这里只用 grep 守两条**不会出现在注释里**的字面量。像「onReplyPost 不许回来」
+# 那种反向臂必须**先剥掉注释**再查（源码里正躺着解释它为什么被删的注释，裸 grep 会被
+# 自己的说明文字喂饱），所以那条放在 vitest 文件里用 withoutComments() 做。
+# 同理「第 2 颗不许用方角 chat 气泡」也在 vitest 文件里：它必须**限定在动作行内**查。
+# 全文件 grep 今天恰好也能过（ProfileTabs 当前没别处用 chat），但那是巧合 —— 这个
+# 文件里已经有好几处气泡字形（消息按钮、回复行第 2 颗都是 replyBubble），哪天有人给
+# 另一个按钮用回 chat，全文件 grep 就会对着无辜的地方报 FAIL。
+if grep -qF 'props.engagement.reactions > 0 || props.engagement.replies > 0' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [PROFILE-ACTION-COUNTS-001]: 「展开评论」的闸门又回到 reactions>0||replies>0 —— 赞多但零评论时会画出一个点开是空列表的假控件。" >&2
+  exit 1
+fi
+if grep -qF '{props.repliesExpanded ? "︿" : "﹀"}' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [PROFILE-ACTION-COUNTS-001]: 动作行下面那行独立的「💬 N 条评论 ﹀」开关又回来了 —— 同屏两个评论入口、隔 8px 说同一个数字。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/profile-action-row.test.ts || exit $?
+echo "    PROFILE-ACTION-MORE-001 / PROFILE-ACTION-COUNTS-001: PASS (third control + icon/count action row + real comment button, honest menu)"
+# REPOST-POST-001：转发。服务端 RepostPost 从 R14 起就完整实现（含 23505/23503 →
+# ALREADY_REPOSTED / POST_NOT_FOUND 的集成测试），客户端却一直没有方法 ⇒ 手机上无处
+# 可转发、reposts 恒为 0，主页动作行第 3 个按钮根本画不出来。
+require_test "REPOST-POST-001" "./internal/engagement" \
+  "TestRepostPost_DuplicateAndGhost" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+pnpm --dir apps/mobile exec vitest run src/engagement-client.test.ts || exit $?
+echo "    REPOST-POST-001: PASS (client can repost; duplicate is success, ghost post still rejects)"
 # ORDER-EXEC-001: 订单明细以前只有"返回列表" —— OFFERED 卡死，EXECUTING 走不到
 # COMPLETED，COMPLETED 评不了分。明细页按 lifecycle 逐态出真按钮，全部走命令。
 pnpm --dir apps/mobile exec vitest run src/order-exec.test.ts src/fulfillment-client.test.ts || exit $?
@@ -9870,3 +10224,937 @@ if grep -qF 'LANGUAGE_LABELS' apps/mobile/src/surfaces/provider-application.tsx 
   exit 1
 fi
 echo "    ORDER-PERMISSION-KYC-003: PASS"
+
+# STORE-ATTRIB-001: 「店铺经营数据」是原型 2ef163 那一屏的全部内容，而它只数
+# **归因到这家店**的已完成订单。Rev317 做了服务端（RecordOutcome 收 storeId、
+# GetStoreOrderStats 只数归因单），Rev319 把 hub 落到 bdash，但**没有任何客户端
+# 能发出 storeId** —— fulfillment-client.recordOutcome 的入参里没有这个字段，
+# 完成订单的界面也没有指认店铺的地方。后果是 hub 上每个数字永远是 0，而界面看起来
+# 完全正常（空店显示全零 + "暂无评价"，那本身是设计好的诚实空态）。
+# 这一块守「归因入口真的接上了」：客户端能发、界面能选、只有履约方能选、
+# 选中的店真的落到请求里、店铺列表读失败不许静默装成「你没有店」。
+MEORDERS="apps/mobile/src/surfaces/me-orders.tsx"
+FCLIENT="apps/mobile/src/fulfillment-client.ts"
+METSX="apps/mobile/src/surfaces/me.tsx"
+
+# ① 客户端入参能带 storeId。没有它，调用点那个对象字面量会被 excess-property 挡下。
+if ! grep -qF 'storeId?: string' "$FCLIENT"; then
+  echo "  FAIL [STORE-ATTRIB-001]: recordOutcome 又收不到 storeId 了 —— 归因无处可发。" >&2
+  exit 1
+fi
+# ② 完成订单时把选中的店真的发出去。只留选择器不发 = 用户选了不算。
+if ! grep -qF '...(outcomeStoreId ? { storeId: outcomeStoreId } : {})' "$MEORDERS"; then
+  echo "  FAIL [STORE-ATTRIB-001]: 完成订单时没把选中的店发出去，用户选了也不算。" >&2
+  exit 1
+fi
+# ③ 选择器只给履约方（AGENT）。店铺统计记的是「这家店接了多少单」，
+#    让需求方替店家决定记给谁不合适。
+if ! grep -qF 'detail.viewerRole === "AGENT" && business' "$MEORDERS"; then
+  echo "  FAIL [STORE-ATTRIB-001]: 归因选择器的角色闸没了（需求方也会被要求指认店铺）。" >&2
+  exit 1
+fi
+# ④ 选择器真的渲染且可点 —— 钉那条 onPress，不钉样式名（样式名删了照样编译）。
+#    期望 2 处：chip 的 onPress + 提交成功后的复位。
+#    ⚠️ 变量一律用 ${} 括起来：紧跟全角字符时（UTF-8 locale）bash 会把多字节字符
+#    当成变量名的一部分，`set -u` 于是报一个和真实原因无关的 unbound variable，
+#    把 FAIL 信息整个吞掉（这一条被注入实验抓出来过）。
+N_STORE_SELECT=$(grep -cF 'setOutcomeStoreId(' "$MEORDERS")
+if [ "$N_STORE_SELECT" -lt 2 ]; then
+  echo "  FAIL [STORE-ATTRIB-001]: 归因选择器的点击/复位没了（期望 >=2 处，实测 ${N_STORE_SELECT}）。" >&2
+  exit 1
+fi
+# ⑤ 读失败必须和「没有店」分开说。合成一句，用户会以为自己的店没了，然后去重复建店。
+if ! grep -qF '店铺列表没读出来' "$MEORDERS"; then
+  echo "  FAIL [STORE-ATTRIB-001]: 店铺列表读失败又静默了（和「你没有店」长得一样）。" >&2
+  exit 1
+fi
+# ⑥ 取店走可测的那个模块（ACTIVE 过滤 + 逐个账号失败不中断在 my-store-options.ts，
+#    有行为测试）。.tsx 只能靠 grep 钉着，守不住行为，别在那边再抄一份。
+if ! grep -qF 'loadStoreOptions(business)' "$MEORDERS"; then
+  echo "  FAIL [STORE-ATTRIB-001]: 没走 my-store-options 的取店函数。" >&2
+  exit 1
+fi
+if grep -qF 'business.listMyAccounts()' "$MEORDERS"; then
+  echo "  FAIL [STORE-ATTRIB-001]: 又在 .tsx 里内联抄了一遍取店逻辑（绕过行为测试）。" >&2
+  exit 1
+fi
+# ⑦ me.tsx 必须真的把 business 传进来。不传的话选择器永远不渲染，而 ①-⑥ 全绿
+#    —— 它们都是「如果渲染了就能工作」的钉，看不见"根本没渲染"。
+if ! grep -qF 'mediaClient={mediaClient} business={business}' "$METSX"; then
+  echo "  FAIL [STORE-ATTRIB-001]: me.tsx 没把 business 传给 MyOrdersSurface，选择器永不出现。" >&2
+  exit 1
+fi
+# 服务端那一半（本次未改）：只收真实 ACTIVE 店；统计只数 COMPLETED 归因单。
+require_test "STORE-ATTRIB-001" "./internal/fulfillment" "TestStoreAttributionAndStats" "apps/api-go/internal/fulfillment/service_test.go" || exit $?
+# 两个文件分开跑。合成一条时删掉其中一个，vitest 仍会因另一个匹配而 exit 0 ——
+# 注入实验实测过：删掉 my-store-options.test.ts，合并调用照样绿。单文件调用是
+# fail-closed 的（文件不存在即 exit 1），代价是多一次 vitest 启动（~1.7s）。
+pnpm --filter @proxy/mobile exec vitest run src/my-store-options.test.ts || exit $?
+pnpm --filter @proxy/mobile exec vitest run src/fulfillment-client.test.ts || exit $?
+echo "    STORE-ATTRIB-001: PASS (完成订单能归因到自己的店；读失败与没有店分得开)"
+
+# REPLY-TARGET-NAME-INK-001: 「回复了 X 的帖子」里的 X 必须是**墨色**。
+#
+# 用户 2026-09-25 报的：「你看回复xx 这个xx是灰色 但是原型是黑色的」。原型那一行
+# 是「回复了 Linh 的帖子 · 1.2B」—— 名字墨色、其余次要色；我们整句一个 <Text>
+# （styles.replyTarget 只有 #94a3b8），名字于是跟着一起变灰。
+#
+# 修法是把同一句拆成三段（prefix / name / suffix），只有名字段换墨色。所以钉四件事：
+#   ① 句式仍然只由 reply-target.ts 定义（分段器在，且整句版就是它拼的 —— 否则
+#      两处各拼一遍，「回复了 A 的帖子」迟早会漂成两种写法）；
+#   ② 回复行用的是分段器，不是自己拼整句；
+#   ③ 名字段真的被渲染成独立的一段；
+#   ④ 那一段真的是墨色（不是又落回次要色）。
+if ! grep -qF 'export function replyTargetParts(' apps/mobile/src/reply-target.ts; then
+  echo "  FAIL [REPLY-TARGET-NAME-INK-001]: 分段器没了，名字段没法单独上色。" >&2
+  exit 1
+fi
+if ! grep -qF 'return `${parts.prefix}${parts.name}${parts.suffix}`;' apps/mobile/src/reply-target.ts; then
+  echo "  FAIL [REPLY-TARGET-NAME-INK-001]: 整句版不再由分段器拼装 —— 两处各拼一遍，" >&2
+  echo "        同一个句式迟早会漂。" >&2
+  exit 1
+fi
+if ! grep -qF 'replyTargetParts(props.viewerMode, target, props.viewerAccountId' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-TARGET-NAME-INK-001]: 回复行不再用分段器（又自己拼整句了），" >&2
+  echo "        名字段上不了墨色。" >&2
+  exit 1
+fi
+if ! grep -qF 'style={styles.replyTargetName}' apps/mobile/src/surfaces/ProfileTabs.tsx ||
+   ! grep -qF '{targetParts.name}' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-TARGET-NAME-INK-001]: 名字段没有单独渲染 —— 名字会跟着整句一起变灰。" >&2
+  exit 1
+fi
+# 反向 pin 排在正向前面，是有意的：正向针要求「必须是墨色」，如果它先判，那么把颜色
+# 改成次要色时它会先开火，这条反向针就永远没被执行过（= 没验过的针）。反过来先判
+# 「不许是次要色」，两条针就各自可注入、各自见红。顺序别调。
+if grep -qE 'replyTargetName: [{][^}]*color: "#94a3b8"' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-TARGET-NAME-INK-001]: 名字段用了整句的次要色 —— 这正是用户报的那个灰。" >&2
+  exit 1
+fi
+if ! grep -qE 'replyTargetName: [{][^}]*color: "#0f172a"' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-TARGET-NAME-INK-001]: 名字段的颜色不是墨色（#0f172a），名字又变灰了。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/reply-target.test.ts || exit $?
+echo "    REPLY-TARGET-NAME-INK-001: PASS (回复了谁的名字单独上墨色，其余保持次要色)"
+
+# REPLY-EMPTY-VIEWER-001: 回复 tab 的**空态**也必须是观察者相对的。
+#
+# REPLY-TARGET-001 修掉了标题里写死的「你回复了」，但同一屏的空态漏了：访客点开
+# 别人的主页、那个人一条回复都没有时，屏幕上写着「**你**在其他帖子下面的回复会
+# 出现在这里」—— 把别人的东西说成了访问者的，跟当初那个 bug 是同一句话、同一个
+# 毛病（同一个 fix 只改了标题那一半）。现在这句副文案走 repliesEmptyHint(viewerMode)，
+# OTHER 说「这个人回复过的帖子会出现在这里」。
+if ! grep -qF 'export function repliesEmptyHint(' apps/mobile/src/reply-target.ts; then
+  echo "  FAIL [REPLY-EMPTY-VIEWER-001]: 空态副文案不再按观察者取词，访客又会看到「你…」。" >&2
+  exit 1
+fi
+if ! grep -qF 'sub={repliesEmptyHint(props.viewerMode)}' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-EMPTY-VIEWER-001]: 回复空态又写死了一句（没按 viewerMode 取词）。" >&2
+  exit 1
+fi
+# 反向 pin：写死的第一人称那句不许再回到 .tsx 里 —— 它在 OTHER 下是假话。
+# 注意本文件里解释这件事的注释刻意把这句话截断（「…」），否则注释会把这颗钉喂绿。
+if grep -qF '你在其他帖子下面的回复会出现在这里' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-EMPTY-VIEWER-001]: 写死的「你…」空态又回到 ProfileTabs 里了。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/reply-target.test.ts || exit $?
+echo "    REPLY-EMPTY-VIEWER-001: PASS (回复空态按 viewerMode 取词，访客不会被说成「你」)"
+
+# SPORT-BADMINTON-001: home 场景的「运动 · 羽毛球」入口 + 它点进去那张表。
+#
+# 用户：「home 场景加一个运动·羽毛球卡片 点击进入这个 原型给你了 运动的要好好做」。
+# 原型：Downloads/deepseek_html_20260925_e64f86.html（陪打羽毛球：列表 → 选择城市 → 详情）。
+#
+# 后端**没有**「运动陪打人」这个供给模型，查过三条路都不是它：
+#   · internal/citycompanion 是**城市同行**（CITY_COMPANION 能力，候选来自 agent 的
+#     CITY_COMPANION 服务与 seed 池）—— 拿它当陪打供给，就是把城市导游冒充球友；
+#   · internal/socialspace 的 badminton 是**组局**（94 人兴趣圈子），不是按小时计费的供给；
+#   · /v1/reality-scenes 的真实场景目录里没有羽毛球馆。
+# 所以那张表的数据是**演示数据**，顶部常驻提示行标明这一点（同 coffee-scenes 的做法）。
+# 这个块守两件事：入口卡与整页还接在首页上（正向）；首页那张卡上不许出现资质断言（反向）。
+if ! grep -qF 'accessibilityLabel="运动 羽毛球 陪打"' apps/mobile/src/components/scene-activity-discovery.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-001]: 首页那张「运动 · 羽毛球」卡不见了。" >&2
+  exit 1
+fi
+if ! grep -qF '<BadmintonCompanion onClose={() => setBadmintonOpen(false)} visible={badmintonOpen} />' apps/mobile/src/components/scene-activity-discovery.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-001]: 卡片还在，但它点开的整页没有挂上去 —— 点了不会有反应。" >&2
+  exit 1
+fi
+# 反向钉：卡上不许出现资质断言（演示数据没资格在首页把「持证」说成事实）。
+# ⚠️ scene-activity-discovery.tsx 里解释这件事的注释刻意不写那句原话 ——
+#    注释里写着它，这颗钉会被自己的说明喂绿（REPLY-EMPTY-VIEWER-001 踩过同一个坑）。
+if grep -qF '场馆持证' apps/mobile/src/components/scene-activity-discovery.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-001]: 首页那张卡上又出现资质断言了 —— 演示数据不能在首页把它说成事实。" >&2
+  exit 1
+fi
+# 演示数据的提示行必须还在：它是那份数据的免责边界，删它等于把演示执照号说成真的。
+if ! grep -qF 'export const BADMINTON_SAMPLE_NOTICE' apps/mobile/src/surfaces/badminton-companion.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-001]: 演示数据的提示行被删了 —— 那份数据的免责边界就没了。" >&2
+  exit 1
+fi
+# 反向钉：详情页不许写核验结论。本仓库的实名核验是有真实状态的
+# （provider-application-client.ts：还没有完成 / 审核中 / 未通过 / 通过），
+# 给编出来的人写一句「已通过」就是把没人做过的核验写成已完成态。
+# 同样地，那个文件里解释这件事的注释刻意不写这句原话。
+if grep -qF '已通过 KYC' apps/mobile/src/surfaces/badminton-companion.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-001]: 详情页又写「已通过 KYC」了 —— 那是把没人做过的核验写成已完成态。" >&2
+  exit 1
+fi
+# 每个测试文件一条 vitest：合并调用不是 fail-closed
+# （vitest run a b 里删掉 a，只要 b 还在就 exit 0）。
+pnpm --filter @proxy/mobile exec vitest run src/badminton-companion.test.ts || exit $?
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/badminton-companion.test.ts || exit $?
+echo "    SPORT-BADMINTON-001: PASS (运动 · 羽毛球入口卡 + 陪打三屏，演示数据带提示行)"
+
+# SPORT-BADMINTON-HEADER-001: 陪打三屏的表头。
+#
+# 用户：「这个不对 返回logo没有用已有的公共组件 排版也压住时间了」。两条都是看得见的
+# 问题，两条都钉：
+#   · 圆形返回/分享钮必须是公共组件 ProxyIconButton —— 之前手写了一份 Pressable + 圆形
+#     样式，等于把公共原语复制了一遍；
+#   · 详情页那条 topbar 是 absolute，而 **absolute 子节点不继承父级的 paddingTop**
+#     ⇒ 下面 styles.root 那句 `paddingTop: insets.top` 对它无效，两个圆钮正好压在状态栏的
+#     时间和电量上。修法是它自己把 insets.top 加回来（+6 是 topbar 原本的 paddingTop）。
+#   · 顺带：封面角标原本照原型写 top:16，而原型那条 topbar 也挂在同一个顶边 ——
+#     原型里这两样本来就叠着、角标被压掉一半。我们不复刻这个缺陷，角标下移到按钮行下面，
+#     偏移量由公共按钮尺寸算出。
+#
+# 反向钉扫的是那个 .tsx 的**整个文件**（不剥注释），所以文件里的注释刻意不写出那份手写
+# 样式的样式名 —— 写着它，这颗钉会被自己的说明喂红（REPLY-EMPTY-VIEWER-001 踩过同一个坑）。
+# 反向臂写在正向臂前面：注入「改回旧写法」时正向臂会先红，反向臂就永远走不到了。
+if grep -qF '[styles.topbar, styles.topbarOverlay]' apps/mobile/src/surfaces/badminton-companion.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-HEADER-001]: 详情页那条悬浮表头又变回不补安全区的写法了 —— 圆钮会压在状态栏的时间和电量上。" >&2
+  exit 1
+fi
+if grep -qF 'backBtn' apps/mobile/src/surfaces/badminton-companion.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-HEADER-001]: 又出现手写的圆形按钮样式了 —— 圆形图标钮请用公共组件 ProxyIconButton。" >&2
+  exit 1
+fi
+if ! grep -qF 'styles.topbarOverlay, { paddingTop: insets.top + 6 }' apps/mobile/src/surfaces/badminton-companion.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-HEADER-001]: 详情页那条悬浮表头没有让开安全区 —— 返回钮会压在状态栏的时间和电量上。" >&2
+  exit 1
+fi
+# 2026-09-28 修：这条针原来写死整行 `import { ProxyIconButton } from "..."`，
+# 但同一个 import 里后来多了 ProxyBackGlyph ⇒ 字面量对不上，针成了**死针**（门禁一直
+# 红在这行）。要钉的命题没变（图标钮走公共组件、不是手写一份），所以拆成两条**稳定的**
+# needle：符号真的被用 + 公共模块真的被 import。别再把「同一行还 import 了哪些东西」
+# 这种**顺便出现的细节**冻进针里 —— 那是每次顺手加个 import 都要改针。
+if ! grep -qF 'ProxyIconButton' apps/mobile/src/surfaces/badminton-companion.tsx || \
+   ! grep -qF 'from "../components/proxy-foundation"' apps/mobile/src/surfaces/badminton-companion.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-HEADER-001]: 圆形图标钮没有走公共组件 ProxyIconButton —— 又手写了一份。" >&2
+  exit 1
+fi
+# 角标偏移量必须是算式（跟着公共按钮尺寸走）。写死一个数，公共按钮尺寸一变就重新压住角标。
+if ! grep -qF 'const DETAIL_BADGE_TOP = 6 + foundation.control.md + 10;' apps/mobile/src/surfaces/badminton-companion.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-HEADER-001]: 封面角标的偏移量被写死了 —— 公共按钮尺寸一变就会重新压住角标。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/badminton-companion.test.ts || exit $?
+echo "    SPORT-BADMINTON-HEADER-001: PASS (陪打三屏表头：公共圆形按钮 + 让开状态栏安全区 + 角标不叠)"
+
+# SPORT-BADMINTON-HEADER-002: 共享字形 chevronLeft。
+#
+# 用户：「返回 logo没做好」。返回钮画出来不是 chevron，是个**带刺的叉**。
+# 原因：chevronLeft 当时和 close 共用一条分支 —— 两根长 0.62·size 的方条各转 ±45°，
+# 垂直却只错开 23% 高度。45° 下要 ~44% 才能首尾相接，于是两条在顶点交叉、左上角戳出一根刺。
+# 现在它走 MasterModuleIcon 里原型那条真描边路径（原型 .back-btn svg 的 path 原文）。
+#
+# ⚠️ 这是**共享原语**（全 App 的返回字形），不是羽毛球私有的：钉在门禁上，
+#    不能只靠羽毛球那个测试文件顺带看一眼。proxy-icon 在这之前**连测试文件都没有**，
+#    所以一个坏字形能活很久 —— 顺手补了 src/components/proxy-icon.test.ts。
+#
+# 反向钉扫的是 .tsx 的**整个文件**（不剥注释），所以文件里的注释刻意不写出那两个被删掉的
+# 方条样式名 —— 写着它，这颗钉会被自己的说明喂红（REPLY-EMPTY-VIEWER-001 踩过同一个坑）。
+# 反向臂写在正向臂前面：注入「改回旧写法」时正向臂会先红，反向臂就永远走不到了。
+if grep -qF 'name === "chevronLeft"' apps/mobile/src/components/proxy-icon.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-HEADER-002]: chevronLeft 又走回「两根旋转方条」那条分支了 —— 顶点会交叉戳出一根刺。" >&2
+  exit 1
+fi
+if grep -qF 'chevronLineA' apps/mobile/src/components/proxy-icon.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-HEADER-002]: 那套会戳刺的方条样式又回来了。" >&2
+  exit 1
+fi
+if ! grep -qF 'd="M15 18l-6-6 6-6"' apps/mobile/src/components/proxy-icon.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-HEADER-002]: chevronLeft 的描边路径没了 —— 返回钮画不出原型那个箭头。" >&2
+  exit 1
+fi
+# close 必须留在方条分支：它是个 ×，两根条本来就要交叉，没有顶点要接。
+# 顺手把它一起改成描边路径也是错的（会变成两个斜杠拼不出 ×）。
+if ! grep -qF 'if (name === "close") {' apps/mobile/src/components/proxy-icon.tsx; then
+  echo "  FAIL [SPORT-BADMINTON-HEADER-002]: close 的方条分支被动了 —— × 是两根交叉的条，不该跟着一起改。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/components/proxy-icon.test.ts || exit $?
+echo "    SPORT-BADMINTON-HEADER-002: PASS (共享返回字形走真描边路径，close 仍是方条)"
+
+# BACK-GLYPH-001（2026-09-26，用户「把所有页面的返回 < 这个logo统一颜色 大小 形状
+# 我看了 很多页面的返回不统一 红的 黑的 大小...」）
+#
+# 统一之前：94 处返回控件散在 38 个文件里，各自手写一个**文本字符**当箭头 ——
+# fontSize 十一种、颜色九种、字符三种（`‹` / `<` / `←`）。根因是**字形选错了**：
+# `‹`(U+2039) 是单左引号、`<` 是小于号，都不是箭头；它们的形状/粗细/垂直基线随
+# fontSize 漂，所以每页只能各自试一个字号"让它看起来像箭头"。原型本身也不统一
+# （Proxy_R15_15 / R15_18 各有 6 个不同的返回 class），照抄只会把不一致抄进来。
+#
+# 现在字形是 SVG 描边路径（proxy-icon 的 backArrow），尺寸只有 foundation.backGlyph
+# 一个来源，颜色只有 ink / onDark 两个 tone。这一块钉结构 + 跑契约测试；
+# **字符字形的全仓清扫**在 src/back-glyph.test.ts 里（那边剥注释 + 白名单，shell
+# 做不到可靠剥注释，所以不在这一层重复实现）。
+if ! grep -qE 'backGlyph:[[:space:]]*[0-9]+' apps/mobile/src/theme.tsx; then
+  echo "  FAIL [BACK-GLYPH-001]: foundation.backGlyph 这个 token 没了 ——" >&2
+  echo "        它是全 App 返回字形**唯一**的尺寸来源，没有它每个页面又会各写一个字号。" >&2
+  exit 1
+fi
+if ! grep -qF 'size={foundation.backGlyph}' apps/mobile/src/components/proxy-foundation.tsx; then
+  echo "  FAIL [BACK-GLYPH-001]: 字形组件没在读 backGlyph token ——" >&2
+  echo "        自己写尺寸字面量的话，「唯一来源」就是句空话。" >&2
+  exit 1
+fi
+if ! grep -qF 'export function ProxyBackGlyph(' apps/mobile/src/components/proxy-foundation.tsx; then
+  echo "  FAIL [BACK-GLYPH-001]: ProxyBackGlyph 没了 ——" >&2
+  echo "        返回字形必须走这个公共原语，不能每个页面自己画。" >&2
+  exit 1
+fi
+if ! grep -qF 'case "backArrow":' apps/mobile/src/components/proxy-icon.tsx; then
+  echo "  FAIL [BACK-GLYPH-001]: backArrow 字形没了。" >&2
+  exit 1
+fi
+# 紧 box 是返回箭头能在 38 个表头里贴左边缘、又能塞进圆里居中的前提。
+# 换成 chevronLeft 那个 24 格 box（箭头只占 x 9→15）会让所有表头一起往右缩 ~7pt。
+if ! grep -qF 'viewBox="7.4 4.4 9.2 15.2"' apps/mobile/src/components/proxy-icon.tsx; then
+  echo "  FAIL [BACK-GLYPH-001]: backArrow 的紧 box 没了 ——" >&2
+  echo "        用带空白的 24 格 box，返回箭头会离左边缘 ~7pt，全 App 表头一起漂。" >&2
+  exit 1
+fi
+# 反向钉：i18n 的返回文案不许把字形拼回去（拼回去 = 画出两个箭头）。
+# 这条只认那一个精确串，注释里复述不会误伤。
+if grep -qF 'backShort: "‹' apps/mobile/src/i18n.ts; then
+  echo "  FAIL [BACK-GLYPH-001]: i18n 的返回文案里又拼进了字形 ——" >&2
+  echo "        字形由 ProxyBackGlyph 画，文案只写文字，否则会画出两个箭头。" >&2
+  exit 1
+fi
+# 反向钉：原语必须真的被用着。只定义不调用，上面的结构性检查照样全绿。
+# 门槛取 30（当前 42 个文件），是**下限**不是精确值 —— 允许页面增删，挡住"整体删光"。
+BACK_GLYPH_FILES=$(grep -rlF 'ProxyBackGlyph' apps/mobile/src 2>/dev/null | grep -cv '\.test\.' || true)
+if [ "${BACK_GLYPH_FILES}" -lt 30 ]; then
+  echo "  FAIL [BACK-GLYPH-001]: 用 ProxyBackGlyph 的文件只剩 ${BACK_GLYPH_FILES} 个（应 >= 30）——" >&2
+  echo "        原语还在但没人用了，说明返回控件又被各页自己画回去了。" >&2
+  exit 1
+fi
+if [ ! -f apps/mobile/src/back-glyph.test.ts ]; then
+  echo "  FAIL [BACK-GLYPH-001]: 契约测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/back-glyph.test.ts || exit $?
+echo "    BACK-GLYPH-001: PASS (返回字形只有一处出处：backGlyph token + ProxyBackGlyph 原语)"
+
+# ACTIVITY-REF-001: 「帖文引用了一个活动」以前**根本没有这条通道**。
+#
+# 帖文上的 ACTIVITY contextRef 只是服务端分类器贴的**标签**（contextId 是人话：
+# 「晨跑」「拼饭」「手工课」），读端一律把 contextId 当文字用 —— chip 文案、搜索
+# 词堆、话题判定、场景图标关键词。于是「引用某个具体活动」在动态里不可表达。
+#
+# 修法：客户端发的实体引用带 relationType=REFERS_TO，contextId 是真正的
+# activityId；读端走 apps/mobile/src/activity-ref.ts 的白名单判定，把实体引用送去
+# 活动卡片、把标签留在 chip 行。
+#
+# 判定**必须是白名单**（只有显式带 REFERS_TO 才算引用）：internal/localnet/
+# service.go 里有 10 处老 seed 是「ACTIVITY + 人话 contextId + 空 relationType」。
+# 按黑名单（"不是 AUTO_CLASSIFIED 就算引用"）判定会把它们当 activityId 去解析，
+# 解析不到 → chip 集体消失。那是回归，不是修复。
+#
+# 三件事一起钉，缺一条这条通道就是半截的：
+#   ① 写入端真的发出引用 —— 否则卡片永远不渲染（建好了没人调用的死通道）；
+#   ② 读端不再把 contextId 当文字 —— 否则 activityId 会印在 chip 上和搜索词堆里；
+#   ③ 解析不到时不画 id —— 「活动已下架」和「活动叫这个名字」不能长得一样。
+# 顺序有讲究：先查「用了字面量」再查「有没有发引用」。反过来的话，写入端写成
+# 字面量时第一条就 exit 了，字面量这条永远跑不到 —— 一个从没见它红过的钉不算钉。
+if grep -q 'relationType: "REFERS_TO"' apps/mobile/src/composer-publish.ts; then
+  echo "  FAIL [ACTIVITY-REF-001]: 写入端把标记写成了字面量 ——" >&2
+  echo "        必须跟读端共用 activity-ref.ts 的常量，否则改一边、另一边悄悄不认。" >&2
+  exit 1
+fi
+if ! grep -q 'relationType: ACTIVITY_REF_RELATION' apps/mobile/src/composer-publish.ts; then
+  echo "  FAIL [ACTIVITY-REF-001]: 发帖器不再产出活动引用 ——" >&2
+  echo "        没有生产者，动态里的活动卡片永远不会渲染（死通道）。" >&2
+  exit 1
+fi
+if ! grep -q 'const chips = labelContextRefs(post);' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [ACTIVITY-REF-001]: feed 的 chip 行不再走 labelContextRefs ——" >&2
+  echo "        活动实体引用会被印成一行裸 activityId。" >&2
+  exit 1
+fi
+if grep -q 'post.contextRefs.map((entry) => entry.contextId)' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [ACTIVITY-REF-001]: 又有读端直接拿 contextId 当文字拼词堆 ——" >&2
+  echo "        activityId 会进搜索与话题判定，命中用户根本没写过的词。" >&2
+  exit 1
+fi
+if ! grep -q 'referencedActivityId(post)' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [ACTIVITY-REF-001]: feed 不再解析活动引用了 ——" >&2
+  exit 1
+fi
+# 反向钉：解析不到时必须说「不可用」，不许退回印 id。
+if ! grep -q '引用的活动已不可用' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [ACTIVITY-REF-001]: 活动解析不到时的说明文案没了 ——" >&2
+  echo "        「活动已下架」和「活动叫这个名字」必须长得不一样。" >&2
+  exit 1
+fi
+# 反向钉：标记不能等于 AUTO_CLASSIFIED。服务端 mergeClassificationRefs
+# （classification.go）会把 relationType == AUTO_CLASSIFIED 的 ref 当分类标签
+# 丢掉重算 —— 取成这个值，用户发出的活动引用会被静默抹掉，且不报错。
+if grep -qE 'ENTITY_REF_RELATION = "AUTO_CLASSIFIED"' apps/mobile/src/activity-ref.ts; then
+  echo "  FAIL [ACTIVITY-REF-001]: 活动引用标记取成了 AUTO_CLASSIFIED ——" >&2
+  echo "        服务端会把它当分类标签丢掉，用户发的引用静默消失。" >&2
+  exit 1
+fi
+# 反向钉：白名单必须真的是白名单。改成「不是 AUTO_CLASSIFIED 就算引用」是这里
+# 最容易犯的错 —— 那样 service.go 里 10 处老 seed（ACTIVITY + 人话 + 空标记）
+# 会被当成 activityId 去解析，chip 集体消失。
+if ! grep -q 'ref.relationType === ENTITY_REF_RELATION' apps/mobile/src/activity-ref.ts; then
+  echo "  FAIL [ACTIVITY-REF-001]: 实体引用判定不再是白名单 ——" >&2
+  echo "        改成黑名单会把老 seed 的人话 contextId 当 activityId 解析，chip 会消失。" >&2
+  exit 1
+fi
+# 服务端那一半：非 AUTO_CLASSIFIED 的客户端 ref 必须活过重分类。
+require_test "ACTIVITY-REF-001" "./internal/localnet" "TestMergeClassificationRefsKeepsActivityEntityRef" apps/api-go/internal/localnet/classification_test.go || exit $?
+require_test "ACTIVITY-REF-001" "./internal/localnet" "TestMergeClassificationRefsDropsStaleClassificationLabels" apps/api-go/internal/localnet/classification_test.go || exit $?
+if [ ! -f apps/mobile/src/activity-ref.test.ts ]; then
+  echo "  FAIL [ACTIVITY-REF-001]: 契约测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/activity-ref.test.ts || exit $?
+echo "    ACTIVITY-REF-001: PASS (活动引用：写入端发 REFERS_TO，读端走白名单词表，解析不到不画 id)"
+
+# ACTIVITY-DETAIL-HERO-001: 活动详情 hero 整块文字看不见（2026-09-27 截图确认）。
+#
+# 病根不在文字颜色，在渐变参数：`<Gradient from="color.ink" to="#342446">`
+# 传的是 token **名字**，而 Gradient 要的是颜色**值**。
+# theme.tsx 的 Gradient 拿 from 直接 `backgroundColor: from` 并 `lerpHex(from, to, t)`，
+# 而 lerpHex 按 hex 切片 parseInt —— 传 "color.ink" 得到 [NaN,NaN,NaN] ⇒
+# `rgb(NaN,NaN,NaN)` 非法 ⇒ 48 条色带全不渲染 + backgroundColor 也非法
+# ⇒ 整块 hero 静默透明。而块内文字是给深色底设计的（detailTitle / detailPriceStrong /
+# detailAIPersonaName = color.white，desc = #D8D1DF）⇒ 浅色页面上写白字，标题消失。
+#
+# 这个错不报错、不崩溃、类型也查不出来（from 的签名就是 string），只在真机截图
+# 上表现为「文字没了」，极容易被误诊成文字颜色写错。所以要同时钉住
+# 「调用点传值」和「Gradient 把 from 当值用」两头 —— 少一头，钉就只是复述。
+if ! grep -q 'from={color.ink} to="#342446" style={styles.detailHero}' apps/mobile/src/surfaces/tasks.tsx; then
+  echo "  FAIL [ACTIVITY-DETAIL-HERO-001]: 活动详情 hero 的渐变底又没传颜色值 ——" >&2
+  echo "        传 token 名字（\"color.ink\"）会让整块渐变变透明，标题白字直接看不见。" >&2
+  exit 1
+fi
+# 同类错法扫全仓：任何 from/to 拿到 "color.xxx" 字面量都是同一个病。
+# 正确写法是 {color.xxx}（花括号），字面量写法只可能是漏了花括号。
+HERO_TOKEN_AS_VALUE=$(grep -rnE '(from|to)="color\.[A-Za-z]+"' apps/mobile/src 2>/dev/null | grep -v '\.test\.' || true)
+if [ -n "${HERO_TOKEN_AS_VALUE}" ]; then
+  echo "  FAIL [ACTIVITY-DETAIL-HERO-001]: 还有地方把 token 名当颜色值传 ——" >&2
+  echo "${HERO_TOKEN_AS_VALUE}" | sed 's/^/        /' >&2
+  echo "        应写成 {color.xxx}。传名字会静默变成透明/非法颜色，不报错。" >&2
+  exit 1
+fi
+# 反向钉：这两行是「为什么传名字必然透明」的依据。哪天 Gradient 改成能解析
+# token 名，这条会红 —— 提醒重新评估，而不是继续沿用上面的结论。
+if ! grep -q 'backgroundColor: from' apps/mobile/src/theme.tsx; then
+  echo "  FAIL [ACTIVITY-DETAIL-HERO-001]: Gradient 不再直接把 from 当颜色值用了 ——" >&2
+  echo "        上面的结论（传 token 名 = 透明）建立在它直接当值用的前提上，请重看。" >&2
+  exit 1
+fi
+if [ ! -f apps/mobile/src/activity-detail-hero.test.ts ]; then
+  echo "  FAIL [ACTIVITY-DETAIL-HERO-001]: 契约测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/activity-detail-hero.test.ts || exit $?
+echo "    ACTIVITY-DETAIL-HERO-001: PASS (hero 渐变传颜色值；全仓没有把 token 名当值用的调用点)"
+
+# TOKEN-AS-VALUE-001: 把 token 的**名字**当成颜色**值**用 —— 这一整类，不是一个点。
+#
+# `backgroundColor: "color.ink"` 传的是名字（字符串）。RN 的 normalizeColor 对它
+# 返回 null ⇒ 这个样式属性被**静默丢弃**：背景变透明、文字色回退默认黑。
+# 不报错、不警告、类型也查不出来（ViewStyle.backgroundColor 的签名就是 string）。
+#
+# 2026-09-27 之前全仓 55 处（其中 42 处会真的渲染出来）。第一次被看见是活动详情
+# hero 的 `Gradient from="color.ink"`（= ACTIVITY-DETAIL-HERO-001，用户截图「标题
+# 整个看不见」）。更早其实修过一次同类：friend-crm.tsx 的 metricCardActive
+# （见 CRM-HONEST-001 的注释），但当时**没留钉** ⇒ 这一类又长回来了。
+# 所以这条钉必须扫全仓，不能只钉 hero 那一个调用点。
+#
+# 实测依据（可复现，不是推断）：
+#   node -e 'const n=require("<repo>/node_modules/.pnpm/@react-native+normalize-colors@*/node_modules/@react-native/normalize-colors/index.js"); console.log(n("color.ink"), n("#17131F"))'
+#   → null 387129343
+#
+# ⚠️ 顺序：宽的那条（全仓字面量）必须放最前吗？不一定 —— 但每条检查都必须能用
+# **别的注入点**单独证明是活的。门禁在第一个 FAIL 就 exit，两条检查落在同一个
+# 文件/同一种写法上时，改坏一处只会触发靠前的那条，后面那条永远跑不到。
+# 下面第 3/4 条特意用「硬编码 hex」注入（第 1/2 条不认这种写法），才能证明它们活着。
+#
+# 排除项：注释里的 "color.X" 是**证据**（tasks.tsx / friend-crm.tsx 都在讲这个
+# bug），不是违规；测试文件里的正则字符串也不是。所以两条 grep 都排掉 .test.，
+# 且正则要求引号紧跟分隔符 —— 注释里的写法前面是汉字或括号，不会被误伤。
+TAV_LITERAL=$(grep -rnE '[:=][[:space:]]*"color\.[A-Za-z]+"' apps/mobile/src 2>/dev/null | grep -v '\.test\.' || true)
+if [ -n "${TAV_LITERAL}" ]; then
+  echo "  FAIL [TOKEN-AS-VALUE-001]: 又有地方把 token 名当颜色值用了 ——" >&2
+  echo "${TAV_LITERAL}" | sed 's/^/        /' >&2
+  echo "        写成 color.xxx（值），不要写 \"color.xxx\"（名字）。后者被 RN 静默丢弃。" >&2
+  exit 1
+fi
+# ?? 后面的 fallback 也是同一个病：x ?? "color.white" —— 真走到 fallback 就是非法颜色。
+TAV_FALLBACK=$(grep -rnE '\?\?[[:space:]]*"color\.[A-Za-z]+"' apps/mobile/src 2>/dev/null | grep -v '\.test\.' || true)
+if [ -n "${TAV_FALLBACK}" ]; then
+  echo "  FAIL [TOKEN-AS-VALUE-001]: fallback 里把 token 名当颜色值用了 ——" >&2
+  echo "${TAV_FALLBACK}" | sed 's/^/        /' >&2
+  echo "        应写 color.xxx。这里平时走不到，一旦走到就是非法颜色。" >&2
+  exit 1
+fi
+# 站点级：长按 tooltip。底被丢掉之后 tipText 的 #fff 就写在浅色页面上 = 字看不见。
+# 这条用「硬编码 hex」注入验证过（第 1 条不认那种写法，所以这条确实会被跑到）。
+if ! grep -q 'backgroundColor: color.ink,' apps/mobile/src/components/TooltipOnLongPress.tsx; then
+  echo "  FAIL [TOKEN-AS-VALUE-001]: 长按 tooltip 的深色底又没传颜色值 ——" >&2
+  echo "        tip 的底一透明，tipText 的白字就写在浅色页面上，字直接看不见。" >&2
+  exit 1
+fi
+# 站点级：选中态。填充和描边一起丢 ⇒ 选中项和未选中项长得完全一样。
+TAV_OPT_ACTIVE=$(grep -c 'optActive: { backgroundColor: color.domainActiveBg, borderColor: color.ink' apps/mobile/src/components/context-switcher.tsx apps/mobile/src/components/location-picker-sheet.tsx 2>/dev/null | grep -c ':1$' || true)
+if [ "${TAV_OPT_ACTIVE}" != "2" ]; then
+  echo "  FAIL [TOKEN-AS-VALUE-001]: 选中态 optActive 的填充/描边不再是颜色值 ——" >&2
+  echo "        context-switcher 与 location-picker-sheet 两处都要在；丢一个就有一处看不出选中。" >&2
+  exit 1
+fi
+# 反向钉：上面所有结论的前提是「color.xxx 确实是一个合法颜色值」。哪天 theme.tsx
+# 的 token 不再是 6 位 hex（改成 rgb() / 变量 / 语义对象），这条会红 —— 提醒重看
+# 结论，而不是继续沿用。
+if ! grep -qE 'ink: "#[0-9A-Fa-f]{6}"' apps/mobile/src/theme.tsx; then
+  echo "  FAIL [TOKEN-AS-VALUE-001]: theme.tsx 的 color token 不再是 6 位 hex ——" >&2
+  echo "        「传引用=合法颜色、传名字=非法」这个判断建立在此前提上，请重看。" >&2
+  exit 1
+fi
+if [ ! -f apps/mobile/src/token-as-value.test.ts ]; then
+  echo "  FAIL [TOKEN-AS-VALUE-001]: 契约测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/token-as-value.test.ts || exit $?
+echo "    TOKEN-AS-VALUE-001: PASS (全仓没有把 token 名当颜色值；tooltip 底与两个选中态是引用形式)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMP-RETENTION-FLOOR-001（2026-09-27 越南合规扫描）
+# RetainedOnErasure 的保留下限原写成「Decree 248/2026 §23, >=12 months」，
+# **低于法律下限**：Law on E-commerce 122/2025/QH15 Art. 16(2)(b) / 17(2)(i) /
+# 18(2)(c) 要求已订立合同的数据自订立起至少 3 年可访问。法令压不低法律。
+#
+# 这条钉守的是「现在没事、将来致命」：全仓目前没有任何 retention/purge 任务，
+# 所以数据一直留着、并不违规 —— 数字写错了不会立刻出问题，只会在有人照着旧
+# 数字写清理任务时才炸。注入验证：把常量改回 >=12 months ⇒ 本条转红。
+require_test "COMP-RETENTION-FLOOR-001" "./internal/identity" \
+  "TestRetentionFloorIsThreeYearsNotTwelveMonths" \
+  "apps/api-go/internal/identity/privacy_erasure_sweep_test.go" || exit $?
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMP-PURPOSE-CONSENT-001（2026-09-27 越南合规扫描 · **架构层**）
+#
+# 行为追踪的同意闸原来**只在客户端**（apps/mobile 的隐私开关）。客户端的开关
+# 不是闸：可以改、可以绕过、重装就没了，而服务端照收不误 —— 用户在
+# privacy 页面关掉之后，curl 一条 RecordPostImpression 照样落库。
+#
+# 而 Nghị định 356/2025/NĐ-CP 把举证责任放在**控制者**身上：
+#   Art. 6.1 同意须是可验证的形式；Art. 6.2 控制者须保存同意、争议时由其举证；
+#   Art. 6.3 禁止默认同意机制。Art. 4.1(l) 又把社交网络上的「使用行为与活动的
+#   数据」列为**敏感个人数据**。
+# 改动之前，用户说「我从没同意过」，平台拿不出任何记录 —— 唯一的记录在他
+# 自己的设备里。所以同意必须落在服务端、可撤回、并且在**入库前**强制。
+#
+# 这条钉守四件事：
+#   1. 服务端确实有闸：每个被闸的事件类型都拒绝无同意的事件，且**一个都不落库**
+#      （拒绝只发生在返回值上 = 闸只挡了返回值，没挡住写入）；
+#   2. 同意存储读不出来时是 fail-closed，而且用**不同的**错误码
+#      （CONSENT_STATE_UNAVAILABLE ≠ CONSENT_REQUIRED：一个要用户授权，
+#      一个要运维修存储，处置完全不同）；
+#   3. 授予/撤回是**追加**的动作日志（append-only），历史不丢 ——
+#      这张表本身就是审计证据（本仓没有可持久化的 domain event log，
+#      Result.EventRefs 只是一串 id）；
+#   4. 客户端与服务端的 purpose 字面量一致。不一致的后果极其隐蔽：
+#      用户以为开了，服务端仍按 CONSENT_REQUIRED 拒收，而客户端埋点本来就
+#      静默失败 ⇒ 「开了也没数据」且不报任何错。
+require_test "COMP-PURPOSE-CONSENT-001" "./internal/localnet" \
+  "TestBehavioralTrackingIsRefusedWithoutConsent" \
+  "apps/api-go/internal/localnet/purpose_consent_test.go" || exit $?
+require_test "COMP-PURPOSE-CONSENT-001" "./internal/localnet" \
+  "TestConsentStoreFailureIsFailClosed" \
+  "apps/api-go/internal/localnet/purpose_consent_test.go" || exit $?
+require_test "COMP-PURPOSE-CONSENT-001" "./internal/localnet" \
+  "TestConsentActionsArePersistedAsAnAppendOnlyLog" \
+  "apps/api-go/internal/localnet/purpose_consent_test.go" || exit $?
+# 结构性钉：被闸的事件类型集合必须和测试列出的命令集合一一对应 ——
+# 新加一条行为追踪事件却忘了挂闸，或者把某条从闸里删掉，这条都会红。
+require_test "COMP-PURPOSE-CONSENT-001" "./internal/localnet" \
+  "TestEveryGatedEventTypeHasAnEndToEndCase" \
+  "apps/api-go/internal/localnet/purpose_consent_test.go" || exit $?
+
+# 跨语言钉：客户端和服务端的 purpose 字面量必须**完全一致**。
+# 只取「= "字面量"」这种赋值形式，所以注释里提到的符号名不会被误伤。
+PURPOSE_SERVER=$(sed -n 's/.*PurposeBehaviorAnalytics *= *"\([A-Za-z_]*\)".*/\1/p' apps/api-go/internal/localnet/service.go | head -1)
+PURPOSE_CLIENT=$(sed -n 's/.*BEHAVIOR_ANALYTICS_PURPOSE *= *"\([A-Za-z_]*\)".*/\1/p' apps/mobile/src/behavior-analytics-settings.ts | head -1)
+if [ -z "${PURPOSE_SERVER}" ] || [ -z "${PURPOSE_CLIENT}" ]; then
+  echo "  FAIL [COMP-PURPOSE-CONSENT-001]: 有一侧的 purpose 常量找不到了 ——" >&2
+  echo "        server='${PURPOSE_SERVER}' client='${PURPOSE_CLIENT}'" >&2
+  echo "        这个常量是两端唯一的约定，改名/删除都要同时改这一条钉。" >&2
+  exit 1
+fi
+if [ "${PURPOSE_SERVER}" != "${PURPOSE_CLIENT}" ]; then
+  echo "  FAIL [COMP-PURPOSE-CONSENT-001]: 客户端与服务端的 purpose 不一致 ——" >&2
+  echo "        server='${PURPOSE_SERVER}' client='${PURPOSE_CLIENT}'" >&2
+  echo "        后果很隐蔽：用户以为开了，服务端仍按 CONSENT_REQUIRED 拒收，" >&2
+  echo "        而客户端埋点静默失败 ⇒ 「开了也没数据」且不报任何错。" >&2
+  exit 1
+fi
+# 开关必须**写服务端**，不能退回成本地布尔。本地布尔不是同意：
+# 用户以为关掉了、服务端还在采，是这条链路最坏的失败模式。
+if ! grep -q 'recordPurposeConsent' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [COMP-PURPOSE-CONSENT-001]: 动态浏览统计开关不再写服务端了 ——" >&2
+  echo "        只改本地存储等于用户撤回了一个不存在的同意（服务端照采）。" >&2
+  exit 1
+fi
+echo "    COMP-PURPOSE-CONSENT-001: PASS (服务端入库前强制目的性同意；fail-closed 且错误码可区分；同意动作 append-only；两端 purpose 一致；开关写服务端)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMP-SENSITIVE-CONSENT-001 / COMP-DPO-HONEST-001 / COMP-MERCHANT-GAP-HONEST-001
+# 2026-09-27 越南合规扫描。这三条钉的都不是「文案好看」，而是**不许把未完成的
+# 合规事项写成已完成** —— 界面上的法律断言必须和仓里的事实一致。
+#
+#   1. COMP-SENSITIVE-CONSENT-001：逐张照片停留 + 放大次数的采集闸默认开，
+#      读不到 / 读失败按开处理（fail-open）。Nghị định 356/2025/NĐ-CP Art. 4.1(l)
+#      把社交网络上的行为追踪数据列为**敏感个人数据**，同法令 Art. 6.3
+#      **禁止默认同意机制**。现语义：只有用户显式开过（读到 "1"）才采集，
+#      其余（从未设置 / 关掉 / 读失败）一律不采 —— 读失败也不再"送一程"。
+#   2. COMP-DPO-HONEST-001：界面曾宣称「Proxy 已指定 DPO」并给出 privacy@ 邮箱，
+#      但仓里没有任何指定文件（supplement 该行状态是「空白」），法务 review 未勾选。
+#   3. COMP-MERCHANT-GAP-HONEST-001：界面对商家说补全清单「已补齐」，
+#      而那份 supplement 的 9 行状态**全部是空白**。
+#
+# 为什么钉在测试文件里而不是像别处那样直接在本脚本 grep：这三处的**解释性注释
+# 里正当地写着被禁的词**（「原来是 !== false」「原来是默认开」「已指定 DPO」），
+# 本脚本这种 grep 会把注释一起扫进去 ⇒ 负向钉永远红，下一个人只能把钉删掉。
+# 测试文件里先剥注释再断言；正向的文档性断言（法条号 Art. 6.3 / 4.1(l)）跑原始源码。
+#
+# 注入验证（2026-09-27，五处逐个注入、逐个转红、逐个按 sha256 还原）：
+#   开关 useState(false)→(true) ／ 闸 === true→!== false ／
+#   store catch return undefined→return true ／
+#   写回「已指定 DPO」+ privacy@ ／ 写回「已补齐」
+if ! grep -q 'COMP-SENSITIVE-CONSENT-001' apps/mobile/src/compliance-honesty.test.ts ||
+   ! grep -q 'COMP-DPO-HONEST-001' apps/mobile/src/compliance-honesty.test.ts ||
+   ! grep -q 'COMP-MERCHANT-GAP-HONEST-001' apps/mobile/src/compliance-honesty.test.ts; then
+  echo "  FAIL: 越南合规三钉的 ID 或其契约测试文件不见了" >&2
+  exit 1
+fi
+# 行为侧（闸真的一个事件都不造）在 post-impression.test.ts —— 两个文件缺一不可：
+# 只留字符串钉的话，把行为改坏、字符串留着，钉照样绿。
+if [ ! -f apps/mobile/src/post-impression.test.ts ]; then
+  echo "  FAIL [COMP-SENSITIVE-CONSENT-001]: 行为侧契约测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/compliance-honesty.test.ts || exit $?
+pnpm --filter @proxy/mobile exec vitest run src/post-impression.test.ts || exit $?
+echo "    COMP-SENSITIVE-CONSENT-001/COMP-DPO-HONEST-001/COMP-MERCHANT-GAP-HONEST-001: PASS (敏感行为数据须显式同意且 fail-closed；界面不再宣称已指定 DPO；补全清单不再说已补齐)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI-SYSTEM-REGISTER-001（2026-09-27 架构对齐轮·三）
+#
+# 法律依据（逐条可核，原文见 internal/aisystem/register.go 顶部）：
+#   Luật AI 134/2025/QH15 Điều 9.1  按风险分三级（cao / trung bình / thấp）
+#   Luật AI 134/2025/QH15 Điều 10.1 提供方**投入使用前自行分级**并留存档案
+#   Luật AI 134/2025/QH15 Điều 10.3 中/高风险须**投入使用前**报送科技部
+#   Luật AI 134/2025/QH15 Điều 10.5 按等级决定检查/监督方式
+#   Luật AI 134/2025/QH15 Điều 11   透明度（披露 / 机器可读标记 / 真人模拟标注）
+#   Nghị định 330/2026/NĐ-CP Điều 67.2(d) 按风险等级分级并据此设保护措施
+#   Nghị định 330/2026/NĐ-CP Điều 67.2(đ) 用 AI 识别个人须施加保护
+#   Nghị định 330/2026/NĐ-CP Điều 67.3(b) 影响权利的自动决定须允许人工复核
+#
+# 这一条钉守的不是某个功能，而是**登记册本身不能退化**：
+#   1. 未知系统回落成 UNCLASSIFIED，绝不回落成 LOW。把「没登记」当「低风险」
+#      会连带免掉报送、抽检与一切不必要义务 —— 正是 Điều 10.1 要防的事。
+#   2. 等级只能由 Basis（Điều 9.1 的哪一点）推导，不允许独立声明。
+#   3. Required 只看等级与能力，不看 Implemented —— 少做一条不能把要求删掉。
+#   4. 每条声称已实现的措施必须点名落点（Evidence）。
+#   5. 覆盖闸：aiboundary 的每个 AI 主体、aipersona 的每种人格类型都必须
+#      映射到一个已登记分级的系统。新增 AI 主体/人格类型绕不过去。
+#
+# 注入验证（2026-09-27，八处逐个注入、逐个转红、逐个按 sha256 还原）：
+#   TierOf 未知回落 TierLow ／ Assess 未知 Found:true ／
+#   10.3 报送闸 false && ／ 低风险加报送义务 ／
+#   Required 改读 Implemented ／ 删掉一条 Evidence ／
+#   覆盖表删掉 UserTwin ／ kill switch 解除口退回 r.PathValue
+require_test "AI-SYSTEM-REGISTER-001" "./internal/aisystem" \
+  "TestUnknownSystemIsUnclassifiedNotLow" \
+  "apps/api-go/internal/aisystem/register_test.go" || exit $?
+require_test "AI-SYSTEM-REGISTER-001" "./internal/aisystem" \
+  "TestUnknownSystemAssessmentDistinguishesNotFoundFromUnhealthy" \
+  "apps/api-go/internal/aisystem/register_test.go" || exit $?
+require_test "AI-SYSTEM-REGISTER-001" "./internal/aisystem" \
+  "TestMediumAndHighRiskCannotBeReadyWithoutMoSTNotification" \
+  "apps/api-go/internal/aisystem/register_test.go" || exit $?
+require_test "AI-SYSTEM-REGISTER-001" "./internal/aisystem" \
+  "TestLowRiskDoesNotIncurNotificationOrAuditDuties" \
+  "apps/api-go/internal/aisystem/register_test.go" || exit $?
+require_test "AI-SYSTEM-REGISTER-001" "./internal/aisystem" \
+  "TestRequiredIsIndependentOfImplemented" \
+  "apps/api-go/internal/aisystem/register_test.go" || exit $?
+require_test "AI-SYSTEM-REGISTER-001" "./internal/aisystem" \
+  "TestEveryImplementedProtectionNamesItsEvidence" \
+  "apps/api-go/internal/aisystem/register_test.go" || exit $?
+require_test "AI-SYSTEM-REGISTER-001" "./internal/aisystem" \
+  "TestEveryRegisteredSystemIsCoveredByAnAIActorKindOrPersonaType" \
+  "apps/api-go/internal/aisystem/register_test.go" || exit $?
+require_test "AI-SYSTEM-REGISTER-001" "./internal/aisystem" \
+  "TestEveryProtectionHasALawCitation" \
+  "apps/api-go/internal/aisystem/register_test.go" || exit $?
+
+# 登记册必须**真的被读**，否则它就是一份放在代码里的文档 —— 本仓最忌讳的
+# 「通道建好了没有调用方」。三处读口缺一不可：
+#   启动日志（每次启动都能看到缺口）
+#   运维读口 GET /v1/operator/ai/systems（可查）
+if ! grep -q 'aisystem.AssessAll()' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [AI-SYSTEM-REGISTER-001]: 启动日志不再读登记册 ——" >&2
+  echo "        那样「哪个 AI 系统带着哪条缺口在跑」又回到只有文档里才有。" >&2
+  exit 1
+fi
+if ! grep -q 'operator/ai/systems' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [AI-SYSTEM-REGISTER-001]: 运维读口 /v1/operator/ai/systems 没有注册 ——" >&2
+  echo "        登记册没有读口 = 运维查不到，只能靠翻代码。" >&2
+  exit 1
+fi
+if ! grep -q 'operatorAISystemRegister' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [AI-SYSTEM-REGISTER-001]: 路由指向的 handler 变了 —— 请同步这一条钉。" >&2
+  exit 1
+fi
+echo "    AI-SYSTEM-REGISTER-001: PASS (AI 系统闭集登记 + 按 Điều 9.1 推导等级；未知即 UNCLASSIFIED 不回落成低风险；Điều 10.3 报送闸；Required 独立于 Implemented；覆盖闸锁住新增 AI 主体/人格；登记册有启动日志与运维读口)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMP-KILLSWITCH-REARM-001（2026-09-27，本轮顺带修掉的一个真缺陷）
+#
+# 事实：operatorKillSwitchRearm 原来用 r.PathValue("category")，但本仓的
+# http.NewServeMux 上**没有任何带 {name} 的 pattern**（server.go 全部是字面
+# 路径），所以 PathValue 恒为空串，NormalizeCategory("") 必然失败 ——
+# DELETE /v1/operator/legal/kill-switch/{category} 从上线起只会返回 400。
+#
+# 后果不是「少个功能」：法务 kill switch 一旦武装就**再也卸不掉**，只能直接改库。
+# 它是个合规工具，不能只有武装没有解除。
+#
+# 之所以一直没被发现：kill_switch_dispatch_test.go 测的是 svc.Rearm(...)
+# （服务层），没有任何用例穿过 mux 打到这个 HTTP 口。所以这条钉必须走 HTTP。
+require_test "COMP-KILLSWITCH-REARM-001" "./internal/api" \
+  "TestKillSwitchRearmRouteActuallyRearms" \
+  "apps/api-go/internal/api/ai_system_register_test.go" || exit $?
+require_test "COMP-KILLSWITCH-REARM-001" "./internal/api" \
+  "TestKillSwitchRearmRejectsMissingCategory" \
+  "apps/api-go/internal/api/ai_system_register_test.go" || exit $?
+# 顺带把「不许再用 PathValue」钉住：本仓 mux 没有 pattern，用了就是恒空串。
+#
+# 注意先剥注释：这条钉的说明文字里正当地写着 r.PathValue("category")，
+# 不剥就会把注释一起扫进去 ⇒ 钉永远红，下一个人只能把钉删掉。
+# （同一个坑在 COMP-SENSITIVE-CONSENT-001 那批已经踩过一次。）
+if grep -vE '^[[:space:]]*//' apps/api-go/internal/api/kill_switch.go | grep -q 'r\.PathValue('; then
+  echo "  FAIL [COMP-KILLSWITCH-REARM-001]: kill_switch.go 又用上了 r.PathValue ——" >&2
+  echo "        本仓 mux 上没有任何 {name} pattern，PathValue 恒为空串；" >&2
+  echo "        用它会让解除口只回 400（开关武装后卸不掉）。改用 TrimPrefix 手工解析。" >&2
+  exit 1
+fi
+echo "    COMP-KILLSWITCH-REARM-001: PASS (kill switch 解除口穿过 mux 可走通；缺 category 回 400 且说明原因；不再使用恒为空串的 r.PathValue)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCENE-RATING-CHIP-001（2026-09-27，用户：「所有场景对齐运动」）
+#
+# 事实：SCENE-REVIEW-001 的场景评价域（internal/scenereview +
+# migrations/132_scene_reviews.sql）早已落地，cmd/api/main.go 也
+# realitySceneService.SetRatingLookup(sceneReviewService) 接上了，所以公开目录
+# /v1/reality-scenes 返回的每条场景**本来就带** rating / ratingCount。
+#
+# 但 components/scene-shop-directory.tsx 的 toSceneShopBrief 从来没读这两个字段
+# —— 生产者有、消费者扔。于是「运动 · 羽毛球」卡上有 ★ 评分，咖啡这一屏没有，
+# 用户看到的就是两张不一样的卡。
+#
+# 这条钉守三件事，缺一不可：
+#   1) 生产者还在（SetRatingLookup 没被摘掉、ListScenes 还调 withRating）——
+#      摘掉之后接口不报错，只是评分**永远画不出来**，最难发现的那种回归。
+#   2) 消费者还在读（列表卡真的调 shopCardChips(，纯模块真的成对判断）。
+#   3) 没有数据时不装成有数据（0 分 / 「—」/ 假价格 / 假营业时间）。
+if ! grep -qF 'realitySceneService.SetRatingLookup(sceneReviewService)' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [SCENE-RATING-CHIP-001]: main.go 不再把场景评价域接成评分聚合源 ——" >&2
+  echo "        摘掉之后接口不报错，只是 rating/ratingCount 永远不出现，" >&2
+  echo "        列表上的 ★ 评分会静悄悄地消失。" >&2
+  exit 1
+fi
+# 两条列表路径（ListScenes / ListNearbyScenes）都要填评分聚合。
+#
+# 这里钉的是**条数**，不是"存在"：只 grep 一次存在性的话，注入「只摘掉第一条
+# 路径的 withRating」时第二条照样满足它 ⇒ 钉是绿的，但公开目录已经不带评分了。
+# 本轮的注入实验正好把这一点照出来了（Step 2.2 (c2) 的同一个坑）。
+scene_rating_fills=$(grep -cF 's.withRating(ctx, scenes)' apps/api-go/internal/realityscene/service.go || true)
+if [ "${scene_rating_fills:-0}" -lt 2 ]; then
+  echo "  FAIL [SCENE-RATING-CHIP-001]: 填评分聚合的列表路径只剩 ${scene_rating_fills:-0} 条（应为 2：ListScenes / ListNearbyScenes）——" >&2
+  echo "        少掉那条路径就又不带 rating 了，前端拿不到。" >&2
+  exit 1
+fi
+if ! grep -qF 'shopCardChips(' apps/mobile/src/components/scene-shop-directory.tsx; then
+  echo "  FAIL [SCENE-RATING-CHIP-001]: 列表卡不再消费 shopCardChips ——" >&2
+  echo "        又回到「服务端发了、前端扔掉」的半截接线。" >&2
+  exit 1
+fi
+if ! grep -qF 'ratingCount' apps/mobile/src/scene-shop-directory.ts; then
+  echo "  FAIL [SCENE-RATING-CHIP-001]: 纯模块不再成对判断 rating/ratingCount ——" >&2
+  echo "        只看 rating 会把「还没人评过」画成「0 分」。" >&2
+  exit 1
+fi
+# 反向臂：不许把运动卡上的演示值搬过来，也不许写死一个评分。
+#
+# 先剥注释 —— 这个文件的头注释里正当地写着价格符号 / 营业时间 / 「4.8 ★」
+# （解释「运动卡那两项是演示值、为什么不搬」），裸 grep 会被自己的说明文字
+# 喂饱 ⇒ 钉永远红，下一个人只能把钉删掉。同一个坑在 COMP-SENSITIVE-CONSENT-001
+# 和 COMP-KILLSWITCH-REARM-001 之后，这是第三次：凡反向 grep 一律先剥注释。
+scene_card_code=$(grep -vE '^[[:space:]]*//' apps/mobile/src/components/scene-shop-directory.tsx)
+if printf '%s\n' "$scene_card_code" | grep -qF '₫'; then
+  echo "  FAIL [SCENE-RATING-CHIP-001]: 场景卡里出现了价格符号 —— 全仓没有 price 生产者。" >&2
+  exit 1
+fi
+if printf '%s\n' "$scene_card_code" | grep -qF '18:00-22:00'; then
+  echo "  FAIL [SCENE-RATING-CHIP-001]: 场景卡里出现了写死的营业时间 —— 没有 hours 生产者。" >&2
+  exit 1
+fi
+if printf '%s\n' "$scene_card_code" | grep -qE '[0-9]\.[0-9][[:space:]]*★'; then
+  echo "  FAIL [SCENE-RATING-CHIP-001]: 场景卡里写死了一个评分 —— 评分只能来自真实聚合。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/scene-shop-directory.test.ts || exit $?
+echo "    SCENE-RATING-CHIP-001: PASS (列表卡 chip 行对齐运动卡：★ 真实评分 / N 人去过 / 城市 / 类型；评分只在 ratingCount>0 时出现；生产者与消费者两头都在；价格与营业时间没有生产者，不搬)"
+
+# SCENE-CATEGORY-BADGE-001（2026-09-27，SCENE-RATING-CHIP-001 收口后顺手做的）。
+# 封面左上角那枚分类角标：唯一允许的来源是服务端真实枚举（商家/景点/其他），
+# 缺值不画；资质/状态类角标（场馆持证/营业中/...）**不许**在源码里出现。
+if ! grep -qF 'describe("SCENE-CATEGORY-BADGE-001' apps/mobile/src/scene-shop-directory.test.ts; then
+  echo "  FAIL [SCENE-CATEGORY-BADGE-001]: 行为断言 describe 块在 scene-shop-directory.test.ts 里找不到了 —— 角标逻辑就没人测得到了。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/scene-shop-directory.test.ts -t 'SCENE-CATEGORY-BADGE-001' || exit $?
+
+if ! grep -qF 'export function shopCategoryBadge' apps/mobile/src/scene-shop-directory.ts; then
+  echo "  FAIL [SCENE-CATEGORY-BADGE-001]: 纯模块不再导出 shopCategoryBadge —— 角标逻辑就没人测得到了。" >&2
+  exit 1
+fi
+
+# 演示数据里那些「场馆持证」「营业中」类伪资质 / 状态角标**不许**在场景卡源码里
+# 出现。已知合法来源只有 category（"商家" / "景点" / "其他"）。
+# ⚠️ 剥注释连块注释一起剥（同 SCENE-HOME-PROTOTYPE-001 的教训）。
+if perl -0777 -pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' apps/mobile/src/components/scene-shop-directory.tsx \
+    | grep -qE '场馆持证|营业中|持证经营|开业中|hot.*新店|isNew'; then
+  echo "  FAIL [SCENE-CATEGORY-BADGE-001]: 场景卡源码里出现了资质 / 状态类角标 —— SCENE-NO-FABRICATED-001。" >&2
+  exit 1
+fi
+
+# 角标必须是 mint 底白字（跟 liveDot、跟运动卡的 coverBadge 同 token），不是
+# 自己挑的近似色。scoped 到 coverBadge 的样式块（多行检查）—— 单纯 grep
+# color.mint 在文件里会被 liveDot 等其它用法满足，是假绿。
+if ! grep -E '^[[:space:]]*coverBadge: *\{.*backgroundColor: color\.mint' apps/mobile/src/components/scene-shop-directory.tsx >/dev/null; then
+  echo "  FAIL [SCENE-CATEGORY-BADGE-001]: coverBadge 改了底色 —— 应沿用 mint token。" >&2
+  exit 1
+fi
+if ! grep -qF 'styles.coverBadge' apps/mobile/src/components/scene-shop-directory.tsx; then
+  echo "  FAIL [SCENE-CATEGORY-BADGE-001]: 场景卡不再消费 coverBadge 样式 —— 角标就没人画了。" >&2
+  exit 1
+fi
+
+echo "    SCENE-CATEGORY-BADGE-001: PASS (封面分类角标来自服务端 category 枚举；缺值不画；演示数据里的资质/状态角标不许混进真实列表)"
+
+# SCENE-HOME-DETAIL-001（2026-09-27，用户：「主页1 缺少照片墙 收藏 打卡 匹配真人列表
+# 和设计的差太多了」）：详情 modal 必须跟参考稿第 3 屏同结构 —— 现在最适合 /
+# 适合一起的人 / 这个 Scene 喝什么三块，每一块都接服务端真实字段，**不许
+# 写死占位候选**（参考稿上的 Mai / Linh / Trang 是 demo 数据，真实场景
+# 的 humans 来自 detail.humans —— 复制 demo 名字过来就是 SCENE-NO-FABRICATED-001）。
+if ! grep -qF 'describe("SCENE-HOME-DETAIL-001' apps/mobile/src/scene-shop-directory.test.ts; then
+  echo "  FAIL [SCENE-HOME-DETAIL-001]: 行为断言 describe 块在 test 里找不到了 —— 详情三段就没人测得到了。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/scene-shop-directory.test.ts -t 'SCENE-HOME-DETAIL-001' || exit $?
+
+if ! grep -qF '现在最适合' apps/mobile/src/components/scene-shop-directory.tsx; then
+  echo "  FAIL [SCENE-HOME-DETAIL-001]: 详情 modal 没渲染「现在最适合」段 —— 参考稿第 3 屏的结构块。" >&2
+  exit 1
+fi
+if ! grep -qF '适合一起的人' apps/mobile/src/components/scene-shop-directory.tsx; then
+  echo "  FAIL [SCENE-HOME-DETAIL-001]: 详情 modal 没渲染「适合一起的人」段 —— 用户明确点名的「匹配真人列表」。" >&2
+  exit 1
+fi
+if ! grep -qF '这个 Scene 喝什么' apps/mobile/src/components/scene-shop-directory.tsx; then
+  echo "  FAIL [SCENE-HOME-DETAIL-001]: 详情 modal 没渲染「这个 Scene 喝什么」段 —— 参考稿第 3 屏的结构块。" >&2
+  exit 1
+fi
+
+# 三段必须从服务端真实字段读 —— 写一个名字占位就把演示数据搬进真实列表。
+# ⚠️ 剥注释连块注释一起剥（同 SCENE-HOME-PROTOTYPE-001 的教训）。
+if perl -0777 -pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' apps/mobile/src/components/scene-shop-directory.tsx \
+   | grep -qE '"(Mai|Linh|Trang|Hana|Anna|Sara|Proxy Coffee|Bắc Ninh Cafe|L'\''amour Café|The Coffee House)"'; then
+  echo "  FAIL [SCENE-HOME-DETAIL-001]: 详情 modal 里写死了演示人名/店名 —— SCENE-NO-FABRICATED-001。" >&2
+  exit 1
+fi
+
+# Bắc Ninh 区域名不许既出现在 hero 胶囊里，又出现在 address 行里 —— 那就是同一个
+# 信息出现两次（用户原话：「为什么现场场景主页有重复的」）。
+if grep -F 'detailTags.map' apps/mobile/src/components/scene-shop-directory.tsx >/dev/null && \
+   ! grep -F 'detailTags.filter((tag) => tag !== selected?.area.trim())' apps/mobile/src/components/scene-shop-directory.tsx >/dev/null; then
+  echo "  FAIL [SCENE-HOME-DETAIL-001]: heroTags 又退化到不过滤 area —— 跟下面 address 行重复。" >&2
+  exit 1
+fi
+
+echo "    SCENE-HOME-DETAIL-001: PASS (详情 modal 跟参考稿第 3 屏同结构：三段全接 detail 服务端字段；写死占位候选 / area 重复都不许)"
+
+# SCENE-HOME-PROTOTYPE-001（2026-09-27，用户给了原型 deepseek_html_20260927_7fc18d
+# 「场景名片」）：详情页照原型收口 —— 三颗动作按钮（收藏/打卡/导航）、距离单独
+# dist-bar、适合一起的人用深色 match-card、意图块叫「你想在这里做什么？」+ 脚注。
+# 原型的「查看全部匹配」按钮**故意不做** —— 真实 app 没有那个目的地，做了就是
+# placeholder-honest-actions.test.ts 钉的死按钮。
+if ! grep -qF 'describe("SCENE-HOME-PROTOTYPE-001' apps/mobile/src/scene-shop-directory.test.ts; then
+  echo "  FAIL [SCENE-HOME-PROTOTYPE-001]: 行为断言 describe 块在 test 里找不到了。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/scene-shop-directory.test.ts -t 'SCENE-HOME-PROTOTYPE-001' || exit $?
+
+if ! grep -qF 'styles.actionRow3' apps/mobile/src/components/scene-shop-directory.tsx; then
+  echo "  FAIL [SCENE-HOME-PROTOTYPE-001]: 动作行不再是原型三颗按钮（收藏/打卡/导航）。" >&2
+  exit 1
+fi
+
+# SCENE-PHOTO-WALL-002（2026-09-28，用户报：Three Beans 传过主图/菜单/招牌，
+# 照片墙还空白 —— 旧墙只收带场景标记的帖子，资产从没进墙）。帖子墙为空时回落
+# 场景资产（主图+菜单图，去重封顶）；有帖子不动，资产永远不跟帖子混排抢序。
+if ! grep -qF 'describe("SCENE-PHOTO-WALL-002' apps/mobile/src/scene-shop-directory.test.ts; then
+  echo "  FAIL [SCENE-PHOTO-WALL-002]: 资产兜底 describe 块在 test 里找不到了。" >&2
+  exit 1
+fi
+if ! grep -qF 'sceneAssetWallTiles(detail)' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-PHOTO-WALL-002]: 详情页没接资产兜底 —— 空墙还是空白。" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/scene-shop-directory.test.ts -t 'SCENE-PHOTO-WALL-002' || exit $?
+echo "    SCENE-PHOTO-WALL-002: PASS (empty post wall falls back to hero+menu assets)"
+if ! grep -qF 'shopDistanceBar(selected, origin)' apps/mobile/src/components/scene-shop-directory.tsx; then
+  echo "  FAIL [SCENE-HOME-PROTOTYPE-001]: 距离条（dist-bar）不见了 —— 原型把它单独放一行。" >&2
+  exit 1
+fi
+if ! grep -qF '匹配推荐' apps/mobile/src/components/scene-shop-directory.tsx; then
+  echo "  FAIL [SCENE-HOME-PROTOTYPE-001]: 深色 match-card 的「匹配推荐」标签丢了。" >&2
+  exit 1
+fi
+if ! grep -qF '你想在这里做什么？' apps/mobile/src/components/scene-shop-directory.tsx; then
+  echo "  FAIL [SCENE-HOME-PROTOTYPE-001]: 意图块标题改回「这里能做的事」了 —— 原型是「你想在这里做什么？」。" >&2
+  exit 1
+fi
+
+# 反向钉：原型的「查看全部匹配」是死按钮（没有目的地），不许回来。
+# ⚠️ 剥注释必须连 **块注释**（/\* \*/）一起剥 —— `grep -vE '^\s*//'` 只剥行注释，
+# JSX 的 {/* ... */} 块注释会漏过去，而注释里解释"为什么不做这个按钮"时几乎
+# 必然写出这五个字（我已经踩过一次：钉恒红，反向注入 4/6 全是假火）。
+if perl -0777 -pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' apps/mobile/src/components/scene-shop-directory.tsx \
+   | grep -qF '查看全部匹配'; then
+  echo "  FAIL [SCENE-HOME-PROTOTYPE-001]: 「查看全部匹配」按钮回来了 —— 没有目的地，是死按钮。" >&2
+  exit 1
+fi
+
+echo "    SCENE-HOME-PROTOTYPE-001: PASS (详情页照「场景名片」原型：三颗动作按钮 / 独立距离条 / 深色匹配卡 / 意图块 + 脚注；死按钮不回)"

@@ -239,7 +239,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/gravity/recompute", s.operatorConsoleMethod(http.MethodPost, s.operatorGravityRecompute))
 	mux.HandleFunc("/v1/operator/provider-applications", s.operatorConsole(s.operatorProviderApplications))
 	mux.HandleFunc("/v1/operator/provider-applications/review", s.operatorConsoleMethod(http.MethodPost, s.operatorProviderApplicationReview))
-	mux.HandleFunc("/v1/operator/provider-applications/media", s.operatorConsole(s.operatorProviderApplicationMedia))
 	mux.HandleFunc("/v1/media/upload/", s.mediaUpload)
 	mux.HandleFunc("/v1/media/play/", s.mediaFile)
 	mux.HandleFunc("/v1/media/thumb/", s.mediaFile)
@@ -285,6 +284,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/legal/kill-switch", s.operatorKillSwitchKill)
 	mux.HandleFunc("/v1/operator/legal/kill-switch/", s.operatorKillSwitchRearm)
 	mux.HandleFunc("/v1/operator/legal/kill-switches", s.operatorKillSwitchList)
+	// AI-SYSTEM-REGISTER-001: AI 系统登记册（internal/aisystem）的运维读口。
+	// Luật AI 134/2025 Điều 10.1 要求提供方在投入使用前自行分级并留存档案，
+	// Điều 10.3 要求中/高风险的分级结果在投入使用前报送科技部。这两个口把
+	// 「哪个 AI 系统带着哪条缺口在跑」变成一个可查状态，而不是只在文档里。
+	// 运维专用：缺口清单属内部合规信息。
+	mux.HandleFunc("/v1/operator/ai/systems", s.operatorAISystemRegister)
+	mux.HandleFunc("/v1/operator/ai/systems/", s.operatorAISystemItem)
 	// R16.7-P1-K (LC-06) + R16.7-P1-I (LC-07): AI persona
 	// catalog + likeness consent. The /v1/ai/personas prefix
 	// is shared; sub-paths split between create/get/consent

@@ -5,7 +5,7 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, AppState, Image, Modal, PanResponder, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Animated, AppState, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { usePullToRefresh } from "../components/pull-to-refresh";
@@ -84,13 +84,21 @@ let cachedPostIds: Set<string> = new Set();
 let cachedPostEngagement: Record<string, PostEngagement> = {};
 let cachedLikedPostIds: ReadonlySet<string> = new Set();
 let cachedPostReplies: Record<string, PostReply[]> = {};
-// REPLY-DRAFT-CACHE-001（2026-09-26，用户「我看了 threads 没有取消发送 2 个 不想
-// 发送滑走就行了 存到草稿里了」）：删掉回复编辑器的「取消」按钮后，关闭只剩两条路
-// ——① 发送成功（submitReply 末尾），② swipe-down 把 composer 拖走。两条都得先把当前
-// replyDraft 存到缓存（按 postId 分桶）再清 replyTargetId —— 否则切走再切回来草稿
-// 就丢了，不符合「drafts 还找得到」的体感。关闭=保留非空 / 删除空草稿；发送成功=
-// 删除该 postId 的草稿（已发出去就别再当成草稿了）。
-let cachedReplyDrafts: Record<string, string> = {};
+// POST-THREAD-001（2026-09-28，用户「没那么简单 x threads 点击评论 会单独跳全部
+// 评论页 我们照着学吧」）：草稿缓存这一段历史——先是 REPLY-DRAFT-CACHE-001
+// （删掉「取消」按钮，关闭内联输入框=保留非空草稿），再是 REPLY-DRAFT-CACHE-002
+// （草稿带 savedAt，读的时候超过 10 分钟就当过期不回填）。现在整套「就地内联展开
+// 输入框」被替换成 Threads 式独立帖子详情页（见 openThread/closeThread），但草稿
+// 缓存本身的语义不变：离开详情页（closeThread）=保留非空草稿；发送成功=删除该
+// postId 的草稿；读的时候（openThread）超过 10 分钟当过期，不回填、顺手删掉——
+// 不是「定时清理」，是「读的时候才判断」，不需要额外计时器。
+const REPLY_DRAFT_TTL_MS = 10 * 60 * 1000;
+// POST-THREAD-001：评论抽屉「表情」按钮弹出的快捷表情行（点一下插进草稿末尾）。
+const THREAD_QUICK_EMOJI = ["😂", "❤️", "👍", "🔥", "😍", "😭", "🙏", "🎉"] as const;
+// ReplyToPost 只收纯文本 body（没有附件字段），图片/GIF 评论还没有后端能力——
+// 图标照原型画出来，点了如实说明，不假装能发。
+const THREAD_TEXT_ONLY_NOTICE = "评论暂时只能发文字，图片 / GIF 评论还没上线";
+let cachedReplyDrafts: Record<string, { text: string; savedAt: number }> = {};
 // TAB-SWITCH-JANK-001: 本 session 是否做过一次网络 fresh 加载。切 tab 是 remount
 // 不是冷启动——remount 有缓存就同步渲染（毫秒级），不再每次 fresh 重拉；冷启动
 // （两级缓存都空）仍走 fresh（FEED-FRESH-002 那条 stale 缓存的教训保留）。
@@ -354,9 +362,29 @@ export function FeedSurface({
   // 颗之前在 feed 上根本不画（FEED-ACTION-DEDUP-001 那轮删了），但原型动作行是 4
   // 颗（♡/💬/↻/⇧）—— 现在补回来。失败要能重试，静默吞掉转发最糟。
   const [repostFailed, setRepostFailed] = useState<ReadonlySet<string>>(new Set());
-  const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
+  // POST-THREAD-001: 当前打开的评论抽屉（null = 抽屉关着）。
+  const [threadPostId, setThreadPostId] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
   const [replying, setReplying] = useState(false);
+  const [threadEmojiOpen, setThreadEmojiOpen] = useState(false);
+  const [threadNotice, setThreadNotice] = useState<string | null>(null);
+  // POST-THREAD-001（用户「输入重复...没有数字按键」排查出来的根因之一）：
+  // TextInput 的 autoFocus 塞进 <Modal> 里不总是可靠——键盘弹起会跟 Modal 的
+  // slide 动画抢时机，动画还没走完时那次 focus 调用经常被吞掉，表现就是抽屉
+  // 弹出来了、输入框在，但键盘死活不弹，敲什么都没反应。slide 动画结束
+  // （默认 ~300ms）之后再手动 focus 一次兜底，不能只靠 autoFocus 单打一次。
+  const threadInputRef = useRef<TextInput>(null);
+  useEffect(() => {
+    if (threadPostId === null) return;
+    const timer = setTimeout(() => threadInputRef.current?.focus(), 350);
+    return () => clearTimeout(timer);
+  }, [threadPostId]);
+  // Modal onShow 用：slide 动画结束 = 内容挂载完成，此时聚焦最可靠；
+  // 350ms 再补一次。抽屉不关只换帖时 onShow 不重发，靠上面 threadPostId 的 effect。
+  function focusThreadInput(): void {
+    threadInputRef.current?.focus();
+    setTimeout(() => threadInputRef.current?.focus(), 350);
+  }
   // 发布器状态（v2 全面迁出到 ComposerV2Screen；这里只保留触发器）
   const [composerOpen, setComposerOpen] = useState(false);
   // FEED-SHARE-TO-USER-001: 分享目标帖子 + 候选人（聊过天的真人，跟"建群"
@@ -1142,66 +1170,62 @@ export function FeedSurface({
 	  setPendingPosts((previous) => previous.map((post) => (post.postId === postId ? { ...post, poll } : post)));
 	}
 
-	async function openReplies(postId: string): Promise<void> {
-	  setReplyTargetId(postId);
-	  // REPLY-DRAFT-CACHE-001: 取回上次未发的草稿（按 postId 分桶），没有就是空。
-	  setReplyDraft(cachedReplyDrafts[postId] ?? "");
-	  setExpandedReplies((previous) => new Set(previous).add(postId));
-	  try {
-		const listed = await engagement.listPostReplies(postId);
-		setPostReplies((previous) => ({ ...previous, [postId]: listed.replies }));
-	  } catch (error) {
-		setEngagementError(mapEngagementError(error, "评论暂时无法读取，请稍后重试。"));
-	  }
+	// POST-THREAD-001（2026-09-28）：三轮修正。
+	// 第一轮（用户「没那么简单 x threads 点击评论 会单独跳全部评论页 我们照着
+	// 学吧」）：点「评论」以前是就地展开一个内联输入框（REPLY-INLINE-001/
+	// REPLY-DRAFT-CACHE-001/002），改成了跳转一个带返回箭头的整屏页面。
+	// 第二轮（用户「没做对 做的一踏糊涂」+ 原型 proxy_comment_keyboard_v2.html）：
+	// 整屏页面是错的，改成从底部弹起的抽屉（Modal + 遮罩，同 PostMenuModal 那套
+	// 写法），但当时又手多加了"整帖内容 + 全部评论"塞进抽屉。
+	// 第三轮（用户「点击评论 弹出整个帖文和输入框 输入重复...直接输入框」+
+	// 追问后确认用系统真键盘）：原型的评论抽屉本来就只有"拖动把手 + 输入框"，
+	// 没有帖文回顾、没有评论列表——那两样是重复的（帖子已经在背后的动态列表里
+	// 能看到），删掉。键盘也确认用系统真键盘（自带 123/表情/语音），不照抄
+	// 原型里那套自绘 26 键假键盘。openThread 因此不再需要拉全部评论——抽屉
+	// 只负责写新评论，不负责展示旧评论。
+	function openThread(postId: string): void {
+	  setThreadPostId(postId);
+	  const cached = cachedReplyDrafts[postId];
+	  const cachedFresh = cached !== undefined && Date.now() - cached.savedAt < REPLY_DRAFT_TTL_MS;
+	  if (cached !== undefined && !cachedFresh) delete cachedReplyDrafts[postId];
+	  setReplyDraft(cachedFresh ? cached.text : "");
+	  setThreadEmojiOpen(false);
+	  setThreadNotice(null);
 	}
 
-  // REPLY-DRAFT-CACHE-001: 关闭回复编辑器 —— 默认保留非空草稿；发送成功后调
-  // closeReply({ keepDraft: false }) 把这条 postId 的草稿删掉。
-  function closeReply(options?: { keepDraft?: boolean }): void {
-    const id = replyTargetId;
-    if (id !== null) {
-      if (options?.keepDraft === false) {
-        delete cachedReplyDrafts[id];
-      } else if (replyDraft.trim()) {
-        cachedReplyDrafts[id] = replyDraft;
-      } else {
-        delete cachedReplyDrafts[id];
-      }
-    }
-    setReplyTargetId(null);
-    setReplyDraft("");
+  // 把某条 postId 的草稿写回缓存（带时间戳）；空草稿直接删掉，不留一条空
+  // 字符串占位。closeThread 收草稿走这条。
+  function persistReplyDraft(postId: string, text: string): void {
+    if (text.trim()) cachedReplyDrafts[postId] = { text, savedAt: Date.now() };
+    else delete cachedReplyDrafts[postId];
   }
 
-  // REPLY-DRAFT-CACHE-001: 顶部 drag handle 专用手势 —— 只在拖动距离 > 8px 且
-  // 主要方向是垂直时抢手势；静态 start（点击、聚焦 TextInput）一律不抢，
-  // 这样下面的输入框和发送按钮的 touch 完全不受影响。
-  const replyPanResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_event, gestureState) =>
-      Math.abs(gestureState.dy) > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
-    onPanResponderRelease: (_event, gestureState) => {
-      if (gestureState.dy > 80 && replyTargetId !== null) {
-        closeReply();
-      }
-    },
-  }), [replyTargetId, replyDraft]);
+  // 从帖子详情页返回 —— 保留非空草稿（10 分钟内回来还能接着写）。
+  function closeThread(): void {
+    const id = threadPostId;
+    if (id !== null) persistReplyDraft(id, replyDraft);
+    setThreadPostId(null);
+    setReplyDraft("");
+    setThreadEmojiOpen(false);
+    setThreadNotice(null);
+  }
 
   async function submitReply(): Promise<void> {
-    if (!replyTargetId || !replyDraft.trim() || replying) return;
+    if (!threadPostId || !replyDraft.trim() || replying) return;
     setReplying(true);
     setEngagementError(undefined);
     try {
-	  const postId = replyTargetId;
+	  const postId = threadPostId;
 	  await engagement.replyToPost(postId, replyDraft);
-	  const [truthResult, listResult] = await Promise.allSettled([engagement.getPostEngagement(postId), engagement.listPostReplies(postId)]);
+	  const [truthResult, listResult] = await Promise.allSettled([engagement.getPostEngagement(postId), engagement.listPostReplies(postId, 50)]);
 	  if (truthResult.status === "fulfilled") setPostEngagement((previous) => mergePostEngagement(previous, [truthResult.value]));
 	  if (listResult.status === "fulfilled") {
 		setPostReplies((previous) => ({ ...previous, [postId]: listResult.value.replies }));
 		setPostEngagement((previous) => previous[postId] ? ({ ...previous, [postId]: { ...previous[postId], replies: listResult.value.count } }) : previous);
 	  }
-	  setExpandedReplies((previous) => new Set(previous).add(postId));
-      // REPLY-DRAFT-CACHE-001: 发送成功 = 这条草稿已经出去了，别再当草稿保留。
-      closeReply({ keepDraft: false });
+      // 发出去之后留在详情页（Threads 同款）；这条草稿已经发出去了，删掉。
+      delete cachedReplyDrafts[postId];
+      setReplyDraft("");
     } catch (error) {
       setEngagementError(mapEngagementError(error, "回复没有提交成功，请检查连接后重试。"));
     } finally {
@@ -1209,6 +1233,296 @@ export function FeedSurface({
     }
   }
 
+
+  function renderPostCard(post: FeedPost, options: { showReplyPreview: boolean }): React.JSX.Element {
+          const quoted = findQuote(post);
+          // ACTIVITY-REF-001：活动引用（contextId = activityId）。解析到就画活动
+          // 卡片；解析不到（活动已下架 / 列表没拉到）画一张说明卡，不画裸 id。
+          const activityRefId = referencedActivityId(post);
+          const referencedActivity = activityRefId ? activityById.get(activityRefId) : undefined;
+          const items = mediaFor(post.postId);
+          const name = resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName);
+          // MEDIA-PIPELINE-001: 头像走统一管线（本人/AI 账号/AI 人像/首字）。
+          const avatar = resolveAuthorAvatar(
+            { authorType: post.authorType, authorId: post.authorId },
+            { baseUrl: localApiBaseUrl, viewerAccountId, viewerAvatarUri: isOwnPost(post) ? viewerAvatarUri : undefined, avatarSource: isOwnPost(post) ? viewerAvatarUri ? { uri: viewerAvatarUri } : undefined : undefined, aiAccountsById, humanAvatarsById, displayName: name }
+          );
+          const meta = AUTHOR_TYPE_META[post.authorType];
+          // FEED-PROFILE-AVATAR-001：帖子上有头像，点进主页必须同一个 —— 把解出来的
+          // 远端 uri 顺手带给个人主页（只有 {uri} 串能带，打包图 number 带不过去，就不带）。
+          const profileAvatarUri = avatar.kind === "image" && typeof avatar.source === "object" && avatar.source !== null && typeof (avatar.source as { uri?: unknown }).uri === "string"
+            ? (avatar.source as { uri: string }).uri
+            : undefined;
+          const isFollow = following.has(post.authorId);
+          const isLiked = liked.has(post.postId);
+		  const truth = postEngagement[post.postId];
+		  // FEED-REPLY-002: 评论默认展开前 5 条，超出才折叠；不再「全折叠」。
+		  const replies = postReplies[post.postId] ?? [];
+		  const repliesExpanded = expandedReplies.has(post.postId);
+		  // SEARCH-CORPUS-003: 搜索时把命中的评论排到前面，否则「这条为什么在
+		  // 结果里」没有答案 —— 命中的那条可能正好在被折叠的第 17 条。
+		  const replyQuery = normalizeFeedSearchQuery(searchQuery);
+		  const orderedReplies = replyQuery === ""
+		    ? replies
+		    : repliesMatchingFirst(replies, (reply) => reply.body.toLowerCase().includes(replyQuery));
+		  const shownReplies = visibleReplies(orderedReplies, repliesExpanded);
+		  const collapsedReplies = hiddenReplyCount(replies.length);
+		  const offerReplyToggle = shouldOfferReplyToggle(replies.length);
+          // ACTIVITY-REF-001：活动实体引用走下面的活动卡片，不进 chip 行 ——
+          // 否则 chip 文案会印出一行裸 activityId。
+          const chips = labelContextRefs(post);
+          return (
+            <View
+              key={post.postId}
+              style={styles.postCard}
+              onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) { setCardYs((prev) => ({ ...prev, [post.postId]: ly.y })); setCardHeights((prev) => ({ ...prev, [post.postId]: ly.height })); } }}
+            >
+              {/* posthead — R15.69 (restored) 拆头像/名字为 2 个 Pressable:
+                  点头像 弹 关注/访问个人主页 菜单 (openProfileActions),
+                  点名字 直接访问个人主页 (onOpenProfile). */}
+              <View style={styles.postHead}>
+                <Pressable
+                  accessibilityLabel={`${name} 的操作`}
+                  onPress={(event) => void openProfileActions({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media, ...(profileAvatarUri ? { avatarUri: profileAvatarUri } : {}), anchor: { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY } })}
+                  style={styles.postAvatarPressable}
+                >
+                  <View style={styles.postAvatarWrap}>
+                  <View style={styles.postAvatarClip}>
+                    {isOwnPost(post) && !viewerAvatarLoaded && viewerAvatarUri === undefined ? (
+                      // AVATAR-FLASH-001: 头像还没算出来时不画 #111 黑底占位 ——
+                      // 那个"黑头闪一下再换照片"就是它。透明占位同尺寸，不抖。
+                      <View style={[styles.postAvatar, { backgroundColor: "transparent" }]} />
+                    ) : avatar.kind === "image" ? (
+                      <CircularAvatarImage accessibilityLabel={`${name}头像`} size={44} source={avatar.source} />
+                    ) : (
+                      // AVATAR-FALLBACK-TINT-001：没有头像 → 按 id 的柔和底色 + 首字，不再是 #111 黑圆。
+                      <View style={[styles.postAvatar, { backgroundColor: initialAvatarTint(post.authorId).backgroundColor }]}>
+                        <Text selectable style={[styles.postAvatarText, { color: initialAvatarTint(post.authorId).color }]}>{avatar.letter}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.scenarioBadge}>
+                    <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={10} />
+                  </View>
+                </View>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel={`查看 ${name} 的主页`}
+                  onPress={() => onOpenProfile?.({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media, ...(profileAvatarUri ? { avatarUri: profileAvatarUri } : {}) })}
+                  style={styles.postIdentityPressable}
+                >
+                <View style={styles.postIdentity}>
+                  <View style={styles.postNameLine}>
+                    <Text selectable style={styles.postName}>{name}</Text>
+                    <Text selectable style={styles.postMeta}>· {relativeTime(post.createdAt)}</Text>
+                  </View>
+                  {meta.label ? <Text selectable style={styles.postMeta}>{meta.label}</Text> : null}
+                  {meta.aiBadge ? <Text selectable style={styles.aiBadge}>AI生成</Text> : null}
+                </View>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="更多"
+                  onPress={() => openPostMenu(post.postId)}
+                  style={styles.postMenu}
+                >
+                  <Text selectable style={styles.postMenuText}>⋯</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.postBody}>
+                <Text selectable style={styles.postReason}>{meta.reason}</Text>
+                <Text selectable style={styles.postCopy}>{post.body}</Text>
+
+              {/* 服务端媒体（READY Hydrate）：多图横滑轨 / 单图全宽 / 视频内联自动播放（X 式，滑近中心播、滑出停，带声音） */}
+              {/* MEDIA-EDGE-BLEED-002（2026-09-20）：静止态要跟文字缩进对齐，
+                  但横滑之后要能滑到屏幕真正左边缘——单靠"不破出屏幕"做不到，
+                  因为 ScrollView 的可视区本身也会被限制在缩进内，滑多远都露不出
+                  缩进线以外的像素。所以这里恢复 postMediaBleed 破出去（可视区
+                  撑到真正的屏幕左边缘），但把等量的留白（68 = postCard.paddingLeft
+                  14 + postBody.paddingLeft 54）转移到 AdaptiveMediaCollection 内部
+                  的 leadingInset —— 只在静止态（第 1 张）生效，横滑到第 2 张起就
+                  不再补这段留白，卡片能贴到破出去的容器左边缘。单图没有横滑这个
+                  动作，不套 bleed，跟文字一样停在缩进线上。 */}
+              {items.length > 1 ? (
+                <View style={styles.postMediaBleed}>
+                  <AdaptiveMediaCollection
+                    items={items}
+                    currentIndex={mediaPositions[post.postId] ?? 0}
+                    resolveUrl={(path) => localNet.resolveMediaUrl(path)}
+                    onIndexChange={(index) => setMediaPositions((current) => ({ ...current, [post.postId]: index }))}
+                    onOpen={(index) => {
+                      setMediaPositions((current) => ({ ...current, [post.postId]: index }));
+                      setViewer({ postId: post.postId, index });
+                    }}
+                    activeVideoKey={activeVideoId}
+                    onVideoFrame={onVideoFrame}
+                    collectionKey={post.postId}
+                    leadingInset={68}
+                  />
+                </View>
+              ) : items.length === 1 && items[0] ? (
+                <AdaptiveMediaCollection
+                  items={items}
+                  currentIndex={0}
+                  resolveUrl={(path) => localNet.resolveMediaUrl(path)}
+                  onIndexChange={() => {}}
+                  onOpen={(index) => {
+                    setMediaPositions((current) => ({ ...current, [post.postId]: index }));
+                    setViewer({ postId: post.postId, index });
+                  }}
+                  activeVideoKey={activeVideoId}
+                  onVideoFrame={onVideoFrame}
+                  collectionKey={post.postId}
+                />
+              ) : null}
+
+              {/* 基线 .contextrefs：上下文标签 chips（服务端 contextRefs），首个为 strong */}
+              {chips.length > 0 ? (
+                <View style={styles.contextRefs}>
+                  {chips.map((entry, index) => (
+                    <Pressable disabled={entry.contextType !== "REALITY_SCENE" || !onOpenRealityScene} onPress={() => onOpenRealityScene?.(entry.contextId)} key={`${entry.contextType}_${entry.contextId}`} style={[styles.contextRef, index === 0 && styles.contextRefStrong]}>
+                      <Text selectable style={[styles.contextRefText, index === 0 && styles.contextRefTextStrong]}>{entry.contextType === "REALITY_SCENE" ? "查看场景 ›" : entry.contextId}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+
+              {/* ACTIVITY-REF-001 — 活动引用卡片（服务端 contextRef ACTIVITY +
+                  relationType REFERS_TO）。判定是白名单，只有明确带标记的才算引用；
+                  分类标签（AUTO_CLASSIFIED / 老 seed 的人话行）继续走 chip 行。
+                  解析不到时**不画 id**：说清「已不可用」，与「活动叫这个名字」区分开。 */}
+              {activityRefId ? (
+                referencedActivity ? (
+                  <Pressable
+                    accessibilityLabel={`查看活动 ${referencedActivity.title}`}
+                    disabled={!onOpenActivity}
+                    onPress={() => onOpenActivity?.(referencedActivity.activityId)}
+                    style={styles.activityRefCard}
+                  >
+                    <View style={styles.activityRefHead}>
+                      <ProxyIcon color={color.violet} name="ticket" size={14} />
+                      <Text selectable style={styles.activityRefKicker}>活动</Text>
+                      {onOpenActivity ? <Text selectable style={styles.activityRefMore}>查看 ›</Text> : null}
+                    </View>
+                    <Text selectable numberOfLines={2} style={styles.activityRefTitle}>{referencedActivity.title}</Text>
+                    <Text selectable style={styles.activityRefMeta}>
+                      {referencedActivity.time} · {referencedActivity.venueIcon} {referencedActivity.venueName} · 已报名 {referencedActivity.joined}{referencedActivity.capacity === undefined ? "" : `/${referencedActivity.capacity}`}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <View style={styles.activityRefCard}>
+                    <View style={styles.activityRefHead}>
+                      <ProxyIcon color={color.violet} name="ticket" size={14} />
+                      <Text selectable style={styles.activityRefKicker}>活动</Text>
+                    </View>
+                    <Text selectable style={styles.activityRefMissing}>引用的活动已不可用（已结束或已下架）</Text>
+                  </View>
+                )
+              ) : null}
+
+              {/* X 式引用帖文（quote card：服务端 contextRef QUOTE_POST） */}
+              {quoted ? (
+                <View style={styles.quoteCard}>
+                  <View style={styles.quoteHead}>
+                    <View style={styles.quoteAvatar}>
+                      <Text selectable style={styles.quoteAvatarText}>{resolveAuthorDisplayName(quoted, viewerAccountId, viewerDisplayName).charAt(0)}</Text>
+                    </View>
+                    <Text selectable style={styles.quoteAuthor}>{resolveAuthorDisplayName(quoted, viewerAccountId, viewerDisplayName)}</Text>
+                    <Text selectable style={styles.quoteMeta}>引用帖文</Text>
+                  </View>
+                  <Text selectable numberOfLines={2} style={styles.quoteBody}>{quoted.body}</Text>
+                  {mediaFor(quoted.postId)[0] ? <Text selectable style={styles.quoteMediaLabel}>🎞 含媒体附件</Text> : null}
+                </View>
+              ) : null}
+
+              {/* POLL-VOTE-001 — 帖内投票。 */}
+              {post.poll ? (
+                <PollCard
+                  busy={engagementBusy.has(`poll:${post.postId}`)}
+                  poll={post.poll}
+                  onVote={(optionId) => void votePoll(post.postId, optionId)}
+                />
+              ) : null}
+
+              {/* FEED-ACTION-ICONS-001: 喜欢/回复/分享以前全是纯文字
+                  （"回复 3"/"分享"），喜欢那颗心也只是 ♥/♡ 两个字符塞进
+                  Text——不是图标，字重跟着字号变形，且比同一屏其它按钮的图标
+                  风格不统一。换成 ProxyIcon，跟真实社交 App 的操作行一致：
+                  喜欢/回复带数字，分享只是图标，不用文字解释。
+                  FEED-ACTION-DEDUP-001（用户：「帖文为什么有重复的...2个
+                  按钮，保持一个，并且移除书签logo和引用logo」）：引用（打开
+                  编辑器预填这条帖子）跟分享都是"把这条帖子传出去"，功能重复；
+                  书签当时写进去了但"收藏"页的动态 tab 还没接读接口，点了收藏
+                  看不到任何效果。两个都删，只留分享。引用本身没有消失——写新帖
+                  时 ComposerV2Screen 自己的"引用"面板还能选任意帖子引用，只是
+                  不再有从这条帖子直接跳转预填的快捷方式。
+                  FEED-MENU-DEDUP-001（用户：「还是有2个...logo 在一个帖文里
+                  整合下」）：这一行原来还有第 4 个"···"，跟帖头右上角的"⋯"
+                  是两套完全独立的菜单（选项还互相有缺）。行内那颗删了，
+                  帖头"⋯"（下面 PostMenuModal）是唯一入口，选项合并成
+                  不感兴趣/减少这类内容/少看这个人/屏蔽作者/举报五项。 */}
+              {/* FEED-ACTION-ICONS-001（用户「对齐原型 下面的logo」）：
+                  原型动作行是 4 颗：♡ / 💬 / ↻ / ⇧。原来这行只有 3 颗（少 ↻），而且
+                  评论用的是 chat（方角气泡，几何跟回复 tab 的 replyBubble 圆气泡不同）、
+                  分享用的是 shareUp（自造上传箭头，跟回复行的 replyShare Feather 路径
+                  不同）—— 都是「几何不一致」。现在按 REPLY-ACTION-ICONS-001 在回复行
+                  立的那套标准来：4 颗都用 replyLike / replyBubble / replyRepost /
+                  replyShare，同源字形、1.8 描边。计数跟 ProfileTabs 一样，没有真相
+                 （engagement 没拉到）就回填 0 —— 跟现状保持一致（不编数字）。 */}
+              <View style={styles.postActions}>
+                <Pressable accessibilityLabel={`喜欢 · ${truth?.reactions ?? 0}`} disabled={engagementBusy.has(`like:${post.postId}`)} onPress={() => void toggleLike(post.postId)} style={styles.postAction}>
+                  <ProxyIcon color={isLiked ? color.magenta : color.ink} filled={isLiked} name="replyLike" size={18} />
+                  <Text selectable style={[styles.postActionCount, isLiked && styles.postActionOn]}>{truth?.reactions ?? 0}</Text>
+                </Pressable>
+                <Pressable accessibilityLabel={`查看评论 · ${truth?.replies ?? 0}`} onPress={() => openThread(post.postId)} style={styles.postAction}>
+                  <ProxyIcon color={color.ink} name="replyBubble" size={18} />
+                  <Text selectable style={styles.postActionCount}>{truth?.replies ?? 0}</Text>
+                </Pressable>
+                <Pressable accessibilityLabel={`转发 · ${truth?.reposts ?? 0}`} disabled={engagementBusy.has(`repost:${post.postId}`)} onPress={() => void repost(post.postId)} style={styles.postAction}>
+                  <ProxyIcon color={color.ink} name="replyRepost" size={18} />
+                  <Text selectable style={styles.postActionCount}>{truth?.reposts ?? 0}</Text>
+                </Pressable>
+                <Pressable accessibilityLabel="分享帖子" onPress={() => openSharePanel(post)} style={styles.postAction}>
+                  <ProxyIcon color={color.ink} name="replyShare" size={18} />
+                </Pressable>
+              </View>
+              {/* 转发失败要看得见、能重试 —— 和 ProfileTabs.repostFailed 同形。 */}
+              {repostFailed.has(post.postId) ? (
+                <Pressable accessibilityLabel="重试转发" onPress={() => void repost(post.postId)} style={styles.postActionRetry}>
+                  <Text selectable style={styles.postActionRetryText}>转发没有提交成功，点这里重试。</Text>
+                </Pressable>
+              ) : null}
+		  {options.showReplyPreview && shownReplies.length > 0 ? (
+			<View style={styles.postReplies}>
+			  {shownReplies.map((reply) => (
+				<View key={reply.replyId} style={styles.postReply}>
+				  {/* FEED-REPLY-001: 显示作者名，绝不回显 actorId。 */}
+				  <Text selectable style={styles.postReplyAuthor}>{resolveReplyAuthorDisplayName(reply, viewerAccountId, viewerDisplayName)}</Text>
+				  <Text selectable style={styles.postReplyBody}>{reply.body}</Text>
+				</View>
+			  ))}
+			  {offerReplyToggle && !repliesExpanded ? (
+				<Pressable accessibilityLabel="查看全部回复" hitSlop={8} onPress={() => toggleReplies(post.postId)}>
+				  <Text selectable style={styles.postRepliesMore}>查看其余 {collapsedReplies} 条回复</Text>
+				</Pressable>
+			  ) : null}
+			  {offerReplyToggle && repliesExpanded ? (
+				<Pressable accessibilityLabel="收起回复" hitSlop={8} onPress={() => toggleReplies(post.postId)}>
+				  <Text selectable style={styles.postRepliesMore}>收起回复</Text>
+				</Pressable>
+			  ) : null}
+			</View>
+		  ) : null}
+
+
+              {/* FEED-POST-CLEAN-001：帖子卡底部的两个 CTA 按钮已移除 —— 产品要求
+                  所有帖文都不显示，保持清爽。原先只对 AGENT 帖（城市同行）渲染，
+                  所以此前只有部分帖文带这两个按钮。 */}
+
+              </View>
+            </View>
+          );
+  }
 
   // 发布器 (pickComposerImages / replaceComposerImage / publish) 全部迁出到 ComposerV2Screen。
   // 这里只保留打开入口（toggleEmbeddedComposer）。
@@ -1462,6 +1776,17 @@ export function FeedSurface({
     return <CustomFeedHub onBack={() => setCustomFeedHubOpen(false)} onOpenFeed={(id) => { setSelectedCustomFeed(id); setFeedFilter("ALL"); setCustomFeedHubOpen(false); }} />;
   }
 
+  // POST-THREAD-001（2026-09-28，用户「点击评论 弹出整个帖文和输入框 输入
+  // 重复 并且没有数字按键 直接输入框」+ 确认用系统真键盘）：原型
+  // proxy_comment_keyboard_v2.html 的评论抽屉只有「拖动把手 + 输入框」——没有
+  // 帖文回顾、没有评论列表。上一版又手多加了整帖内容 + 全部评论，跟背后动态
+  // 列表里本来就能看到的东西重复，删掉；抽屉只负责写新评论，不负责展示旧的。
+  // 键盘用系统真键盘（自带 123/表情/语音），不照抄原型那套自绘 26 键假键盘；
+  // 右侧图片/表情/GIF 三个工具图标同理不画——ReplyToPost 命令只收纯文本
+  // body，没有附件字段，没有真能力支撑的图标不画。
+  const threadPost = threadPostId ? posts.find((candidate) => candidate.postId === threadPostId) : undefined;
+  const threadAuthorName = threadPost ? resolveAuthorDisplayName(threadPost, viewerAccountId, viewerDisplayName) : "";
+
   const bottomPad = bottomNavVisible === false ? 16 : 120;
   return (
     <View style={styles.root}>
@@ -1473,13 +1798,13 @@ export function FeedSurface({
       onScroll={onFeedScroll}
       onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) setViewportHeight(ly.height); }}
       scrollEventThrottle={16}
-      // REPLY-INLINE-001: 回复框内联在帖子下方，键盘弹起时必须把它顶进可见区。
-      // 以前整个 feed 没有任何键盘避让（也没有 KeyboardAvoidingView），而回复框
-      // 又是一个贴在屏幕底部的 Modal —— 键盘一弹正好把它盖住，用户是在盲打。
+      // 动态列表里唯一会聚焦的输入框是搜索框（r153search）；回复输入框已经
+      // 搬到独立的帖子详情页（POST-THREAD-001），不再需要这个 ScrollView 顶
+      // 它。这三条键盘避让配置留给搜索框继续用：
       //   - automaticallyAdjustKeyboardInsets：键盘出现时收 ScrollView 的
       //     contentInset，聚焦的输入框才会被滚进可见区（只调 inset 不会自动滚）。
       //   - keyboardShouldPersistTaps="handled"：不加这个，键盘开着时第一次点
-      //     「发送」只会被当成“收起键盘”，按钮根本点不动。
+      //     搜索结果里的按钮只会被当成"收起键盘"，按钮根本点不动。
       //   - on-drag：往下拖即可收键盘，符合流媒体 App 的手感。
       automaticallyAdjustKeyboardInsets
       keyboardShouldPersistTaps="handled"
@@ -1658,331 +1983,7 @@ export function FeedSurface({
         </View>
       ) : (
         <>
-          {visible.map((post) => {
-          const quoted = findQuote(post);
-          // ACTIVITY-REF-001：活动引用（contextId = activityId）。解析到就画活动
-          // 卡片；解析不到（活动已下架 / 列表没拉到）画一张说明卡，不画裸 id。
-          const activityRefId = referencedActivityId(post);
-          const referencedActivity = activityRefId ? activityById.get(activityRefId) : undefined;
-          const items = mediaFor(post.postId);
-          const name = resolveAuthorDisplayName(post, viewerAccountId, viewerDisplayName);
-          // MEDIA-PIPELINE-001: 头像走统一管线（本人/AI 账号/AI 人像/首字）。
-          const avatar = resolveAuthorAvatar(
-            { authorType: post.authorType, authorId: post.authorId },
-            { baseUrl: localApiBaseUrl, viewerAccountId, viewerAvatarUri: isOwnPost(post) ? viewerAvatarUri : undefined, avatarSource: isOwnPost(post) ? viewerAvatarUri ? { uri: viewerAvatarUri } : undefined : undefined, aiAccountsById, humanAvatarsById, displayName: name }
-          );
-          const meta = AUTHOR_TYPE_META[post.authorType];
-          // FEED-PROFILE-AVATAR-001：帖子上有头像，点进主页必须同一个 —— 把解出来的
-          // 远端 uri 顺手带给个人主页（只有 {uri} 串能带，打包图 number 带不过去，就不带）。
-          const profileAvatarUri = avatar.kind === "image" && typeof avatar.source === "object" && avatar.source !== null && typeof (avatar.source as { uri?: unknown }).uri === "string"
-            ? (avatar.source as { uri: string }).uri
-            : undefined;
-          const isFollow = following.has(post.authorId);
-          const isLiked = liked.has(post.postId);
-		  const truth = postEngagement[post.postId];
-		  // FEED-REPLY-002: 评论默认展开前 5 条，超出才折叠；不再「全折叠」。
-		  const replies = postReplies[post.postId] ?? [];
-		  const repliesExpanded = expandedReplies.has(post.postId);
-		  // SEARCH-CORPUS-003: 搜索时把命中的评论排到前面，否则「这条为什么在
-		  // 结果里」没有答案 —— 命中的那条可能正好在被折叠的第 17 条。
-		  const replyQuery = normalizeFeedSearchQuery(searchQuery);
-		  const orderedReplies = replyQuery === ""
-		    ? replies
-		    : repliesMatchingFirst(replies, (reply) => reply.body.toLowerCase().includes(replyQuery));
-		  const shownReplies = visibleReplies(orderedReplies, repliesExpanded);
-		  const collapsedReplies = hiddenReplyCount(replies.length);
-		  const offerReplyToggle = shouldOfferReplyToggle(replies.length);
-          // ACTIVITY-REF-001：活动实体引用走下面的活动卡片，不进 chip 行 ——
-          // 否则 chip 文案会印出一行裸 activityId。
-          const chips = labelContextRefs(post);
-          return (
-            <View
-              key={post.postId}
-              style={styles.postCard}
-              onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) { setCardYs((prev) => ({ ...prev, [post.postId]: ly.y })); setCardHeights((prev) => ({ ...prev, [post.postId]: ly.height })); } }}
-            >
-              {/* posthead — R15.69 (restored) 拆头像/名字为 2 个 Pressable:
-                  点头像 弹 关注/访问个人主页 菜单 (openProfileActions),
-                  点名字 直接访问个人主页 (onOpenProfile). */}
-              <View style={styles.postHead}>
-                <Pressable
-                  accessibilityLabel={`${name} 的操作`}
-                  onPress={(event) => void openProfileActions({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media, ...(profileAvatarUri ? { avatarUri: profileAvatarUri } : {}), anchor: { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY } })}
-                  style={styles.postAvatarPressable}
-                >
-                  <View style={styles.postAvatarWrap}>
-                  <View style={styles.postAvatarClip}>
-                    {isOwnPost(post) && !viewerAvatarLoaded && viewerAvatarUri === undefined ? (
-                      // AVATAR-FLASH-001: 头像还没算出来时不画 #111 黑底占位 ——
-                      // 那个"黑头闪一下再换照片"就是它。透明占位同尺寸，不抖。
-                      <View style={[styles.postAvatar, { backgroundColor: "transparent" }]} />
-                    ) : avatar.kind === "image" ? (
-                      <CircularAvatarImage accessibilityLabel={`${name}头像`} size={44} source={avatar.source} />
-                    ) : (
-                      // AVATAR-FALLBACK-TINT-001：没有头像 → 按 id 的柔和底色 + 首字，不再是 #111 黑圆。
-                      <View style={[styles.postAvatar, { backgroundColor: initialAvatarTint(post.authorId).backgroundColor }]}>
-                        <Text selectable style={[styles.postAvatarText, { color: initialAvatarTint(post.authorId).color }]}>{avatar.letter}</Text>
-                      </View>
-                    )}
-                  </View>
-                  <View style={styles.scenarioBadge}>
-                    <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={10} />
-                  </View>
-                </View>
-                </Pressable>
-                <Pressable
-                  accessibilityLabel={`查看 ${name} 的主页`}
-                  onPress={() => onOpenProfile?.({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media, ...(profileAvatarUri ? { avatarUri: profileAvatarUri } : {}) })}
-                  style={styles.postIdentityPressable}
-                >
-                <View style={styles.postIdentity}>
-                  <View style={styles.postNameLine}>
-                    <Text selectable style={styles.postName}>{name}</Text>
-                    <Text selectable style={styles.postMeta}>· {relativeTime(post.createdAt)}</Text>
-                  </View>
-                  {meta.label ? <Text selectable style={styles.postMeta}>{meta.label}</Text> : null}
-                  {meta.aiBadge ? <Text selectable style={styles.aiBadge}>AI生成</Text> : null}
-                </View>
-                </Pressable>
-                <Pressable
-                  accessibilityLabel="更多"
-                  onPress={() => openPostMenu(post.postId)}
-                  style={styles.postMenu}
-                >
-                  <Text selectable style={styles.postMenuText}>⋯</Text>
-                </Pressable>
-              </View>
-
-              <View style={styles.postBody}>
-                <Text selectable style={styles.postReason}>{meta.reason}</Text>
-                <Text selectable style={styles.postCopy}>{post.body}</Text>
-
-              {/* 服务端媒体（READY Hydrate）：多图横滑轨 / 单图全宽 / 视频内联自动播放（X 式，滑近中心播、滑出停，带声音） */}
-              {/* MEDIA-EDGE-BLEED-002（2026-09-20）：静止态要跟文字缩进对齐，
-                  但横滑之后要能滑到屏幕真正左边缘——单靠"不破出屏幕"做不到，
-                  因为 ScrollView 的可视区本身也会被限制在缩进内，滑多远都露不出
-                  缩进线以外的像素。所以这里恢复 postMediaBleed 破出去（可视区
-                  撑到真正的屏幕左边缘），但把等量的留白（68 = postCard.paddingLeft
-                  14 + postBody.paddingLeft 54）转移到 AdaptiveMediaCollection 内部
-                  的 leadingInset —— 只在静止态（第 1 张）生效，横滑到第 2 张起就
-                  不再补这段留白，卡片能贴到破出去的容器左边缘。单图没有横滑这个
-                  动作，不套 bleed，跟文字一样停在缩进线上。 */}
-              {items.length > 1 ? (
-                <View style={styles.postMediaBleed}>
-                  <AdaptiveMediaCollection
-                    items={items}
-                    currentIndex={mediaPositions[post.postId] ?? 0}
-                    resolveUrl={(path) => localNet.resolveMediaUrl(path)}
-                    onIndexChange={(index) => setMediaPositions((current) => ({ ...current, [post.postId]: index }))}
-                    onOpen={(index) => {
-                      setMediaPositions((current) => ({ ...current, [post.postId]: index }));
-                      setViewer({ postId: post.postId, index });
-                    }}
-                    activeVideoKey={activeVideoId}
-                    onVideoFrame={onVideoFrame}
-                    collectionKey={post.postId}
-                    leadingInset={68}
-                  />
-                </View>
-              ) : items.length === 1 && items[0] ? (
-                <AdaptiveMediaCollection
-                  items={items}
-                  currentIndex={0}
-                  resolveUrl={(path) => localNet.resolveMediaUrl(path)}
-                  onIndexChange={() => {}}
-                  onOpen={(index) => {
-                    setMediaPositions((current) => ({ ...current, [post.postId]: index }));
-                    setViewer({ postId: post.postId, index });
-                  }}
-                  activeVideoKey={activeVideoId}
-                  onVideoFrame={onVideoFrame}
-                  collectionKey={post.postId}
-                />
-              ) : null}
-
-              {/* 基线 .contextrefs：上下文标签 chips（服务端 contextRefs），首个为 strong */}
-              {chips.length > 0 ? (
-                <View style={styles.contextRefs}>
-                  {chips.map((entry, index) => (
-                    <Pressable disabled={entry.contextType !== "REALITY_SCENE" || !onOpenRealityScene} onPress={() => onOpenRealityScene?.(entry.contextId)} key={`${entry.contextType}_${entry.contextId}`} style={[styles.contextRef, index === 0 && styles.contextRefStrong]}>
-                      <Text selectable style={[styles.contextRefText, index === 0 && styles.contextRefTextStrong]}>{entry.contextType === "REALITY_SCENE" ? "查看场景 ›" : entry.contextId}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              ) : null}
-
-              {/* ACTIVITY-REF-001 — 活动引用卡片（服务端 contextRef ACTIVITY +
-                  relationType REFERS_TO）。判定是白名单，只有明确带标记的才算引用；
-                  分类标签（AUTO_CLASSIFIED / 老 seed 的人话行）继续走 chip 行。
-                  解析不到时**不画 id**：说清「已不可用」，与「活动叫这个名字」区分开。 */}
-              {activityRefId ? (
-                referencedActivity ? (
-                  <Pressable
-                    accessibilityLabel={`查看活动 ${referencedActivity.title}`}
-                    disabled={!onOpenActivity}
-                    onPress={() => onOpenActivity?.(referencedActivity.activityId)}
-                    style={styles.activityRefCard}
-                  >
-                    <View style={styles.activityRefHead}>
-                      <ProxyIcon color={color.violet} name="ticket" size={14} />
-                      <Text selectable style={styles.activityRefKicker}>活动</Text>
-                      {onOpenActivity ? <Text selectable style={styles.activityRefMore}>查看 ›</Text> : null}
-                    </View>
-                    <Text selectable numberOfLines={2} style={styles.activityRefTitle}>{referencedActivity.title}</Text>
-                    <Text selectable style={styles.activityRefMeta}>
-                      {referencedActivity.time} · {referencedActivity.venueIcon} {referencedActivity.venueName} · 已报名 {referencedActivity.joined}{referencedActivity.capacity === undefined ? "" : `/${referencedActivity.capacity}`}
-                    </Text>
-                  </Pressable>
-                ) : (
-                  <View style={styles.activityRefCard}>
-                    <View style={styles.activityRefHead}>
-                      <ProxyIcon color={color.violet} name="ticket" size={14} />
-                      <Text selectable style={styles.activityRefKicker}>活动</Text>
-                    </View>
-                    <Text selectable style={styles.activityRefMissing}>引用的活动已不可用（已结束或已下架）</Text>
-                  </View>
-                )
-              ) : null}
-
-              {/* X 式引用帖文（quote card：服务端 contextRef QUOTE_POST） */}
-              {quoted ? (
-                <View style={styles.quoteCard}>
-                  <View style={styles.quoteHead}>
-                    <View style={styles.quoteAvatar}>
-                      <Text selectable style={styles.quoteAvatarText}>{resolveAuthorDisplayName(quoted, viewerAccountId, viewerDisplayName).charAt(0)}</Text>
-                    </View>
-                    <Text selectable style={styles.quoteAuthor}>{resolveAuthorDisplayName(quoted, viewerAccountId, viewerDisplayName)}</Text>
-                    <Text selectable style={styles.quoteMeta}>引用帖文</Text>
-                  </View>
-                  <Text selectable numberOfLines={2} style={styles.quoteBody}>{quoted.body}</Text>
-                  {mediaFor(quoted.postId)[0] ? <Text selectable style={styles.quoteMediaLabel}>🎞 含媒体附件</Text> : null}
-                </View>
-              ) : null}
-
-              {/* POLL-VOTE-001 — 帖内投票。 */}
-              {post.poll ? (
-                <PollCard
-                  busy={engagementBusy.has(`poll:${post.postId}`)}
-                  poll={post.poll}
-                  onVote={(optionId) => void votePoll(post.postId, optionId)}
-                />
-              ) : null}
-
-              {/* FEED-ACTION-ICONS-001: 喜欢/回复/分享以前全是纯文字
-                  （"回复 3"/"分享"），喜欢那颗心也只是 ♥/♡ 两个字符塞进
-                  Text——不是图标，字重跟着字号变形，且比同一屏其它按钮的图标
-                  风格不统一。换成 ProxyIcon，跟真实社交 App 的操作行一致：
-                  喜欢/回复带数字，分享只是图标，不用文字解释。
-                  FEED-ACTION-DEDUP-001（用户：「帖文为什么有重复的...2个
-                  按钮，保持一个，并且移除书签logo和引用logo」）：引用（打开
-                  编辑器预填这条帖子）跟分享都是"把这条帖子传出去"，功能重复；
-                  书签当时写进去了但"收藏"页的动态 tab 还没接读接口，点了收藏
-                  看不到任何效果。两个都删，只留分享。引用本身没有消失——写新帖
-                  时 ComposerV2Screen 自己的"引用"面板还能选任意帖子引用，只是
-                  不再有从这条帖子直接跳转预填的快捷方式。
-                  FEED-MENU-DEDUP-001（用户：「还是有2个...logo 在一个帖文里
-                  整合下」）：这一行原来还有第 4 个"···"，跟帖头右上角的"⋯"
-                  是两套完全独立的菜单（选项还互相有缺）。行内那颗删了，
-                  帖头"⋯"（下面 PostMenuModal）是唯一入口，选项合并成
-                  不感兴趣/减少这类内容/少看这个人/屏蔽作者/举报五项。 */}
-              {/* FEED-ACTION-ICONS-001（用户「对齐原型 下面的logo」）：
-                  原型动作行是 4 颗：♡ / 💬 / ↻ / ⇧。原来这行只有 3 颗（少 ↻），而且
-                  评论用的是 chat（方角气泡，几何跟回复 tab 的 replyBubble 圆气泡不同）、
-                  分享用的是 shareUp（自造上传箭头，跟回复行的 replyShare Feather 路径
-                  不同）—— 都是「几何不一致」。现在按 REPLY-ACTION-ICONS-001 在回复行
-                  立的那套标准来：4 颗都用 replyLike / replyBubble / replyRepost /
-                  replyShare，同源字形、1.8 描边。计数跟 ProfileTabs 一样，没有真相
-                 （engagement 没拉到）就回填 0 —— 跟现状保持一致（不编数字）。 */}
-              <View style={styles.postActions}>
-                <Pressable accessibilityLabel={`喜欢 · ${truth?.reactions ?? 0}`} disabled={engagementBusy.has(`like:${post.postId}`)} onPress={() => void toggleLike(post.postId)} style={styles.postAction}>
-                  <ProxyIcon color={isLiked ? color.magenta : color.ink} filled={isLiked} name="replyLike" size={18} />
-                  <Text selectable style={[styles.postActionCount, isLiked && styles.postActionOn]}>{truth?.reactions ?? 0}</Text>
-                </Pressable>
-                <Pressable accessibilityLabel={`查看评论 · ${truth?.replies ?? 0}`} onPress={() => void openReplies(post.postId)} style={styles.postAction}>
-                  <ProxyIcon color={color.ink} name="replyBubble" size={18} />
-                  <Text selectable style={styles.postActionCount}>{truth?.replies ?? 0}</Text>
-                </Pressable>
-                <Pressable accessibilityLabel={`转发 · ${truth?.reposts ?? 0}`} disabled={engagementBusy.has(`repost:${post.postId}`)} onPress={() => void repost(post.postId)} style={styles.postAction}>
-                  <ProxyIcon color={color.ink} name="replyRepost" size={18} />
-                  <Text selectable style={styles.postActionCount}>{truth?.reposts ?? 0}</Text>
-                </Pressable>
-                <Pressable accessibilityLabel="分享帖子" onPress={() => openSharePanel(post)} style={styles.postAction}>
-                  <ProxyIcon color={color.ink} name="replyShare" size={18} />
-                </Pressable>
-              </View>
-              {/* 转发失败要看得见、能重试 —— 和 ProfileTabs.repostFailed 同形。 */}
-              {repostFailed.has(post.postId) ? (
-                <Pressable accessibilityLabel="重试转发" onPress={() => void repost(post.postId)} style={styles.postActionRetry}>
-                  <Text selectable style={styles.postActionRetryText}>转发没有提交成功，点这里重试。</Text>
-                </Pressable>
-              ) : null}
-		  {shownReplies.length > 0 ? (
-			<View style={styles.postReplies}>
-			  {shownReplies.map((reply) => (
-				<View key={reply.replyId} style={styles.postReply}>
-				  {/* FEED-REPLY-001: 显示作者名，绝不回显 actorId。 */}
-				  <Text selectable style={styles.postReplyAuthor}>{resolveReplyAuthorDisplayName(reply, viewerAccountId, viewerDisplayName)}</Text>
-				  <Text selectable style={styles.postReplyBody}>{reply.body}</Text>
-				</View>
-			  ))}
-			  {offerReplyToggle && !repliesExpanded ? (
-				<Pressable accessibilityLabel="查看全部回复" hitSlop={8} onPress={() => toggleReplies(post.postId)}>
-				  <Text selectable style={styles.postRepliesMore}>查看其余 {collapsedReplies} 条回复</Text>
-				</Pressable>
-			  ) : null}
-			  {offerReplyToggle && repliesExpanded ? (
-				<Pressable accessibilityLabel="收起回复" hitSlop={8} onPress={() => toggleReplies(post.postId)}>
-				  <Text selectable style={styles.postRepliesMore}>收起回复</Text>
-				</Pressable>
-			  ) : null}
-			</View>
-		  ) : null}
-
-              {/* REPLY-INLINE-001：回复框内联在这条帖子下方。
-                  点「回复」就地展开一行输入框，无遮罩、无上滑动画。
-                  以前它是一个 <Modal> + justifyContent:"flex-end" 的底部白卡
-                  （还带「回复帖文」标题），而且整个 feed 没有任何键盘避让 ——
-                  键盘一弹正好把贴在底部的输入框盖住。 */}
-              {replyTargetId === post.postId ? (
-                // REPLY-DRAFT-CACHE-001：Threads 风格的「可以滑走」 —— 顶部 drag
-                // handle 抢手势（垂直位移 > 8px 才抢，TextInput 的 touch 不受影响），
-                // 下拖超过 80px 触发 closeReply（保留非空草稿）。取消按钮已去掉。
-                <View style={styles.inlineReply}>
-                  <View {...replyPanResponder.panHandlers} style={styles.inlineReplyHandle}>
-                    <View style={styles.inlineReplyHandleBar} />
-                  </View>
-                  <TextInput
-                    autoFocus
-                    maxLength={500}
-                    multiline
-                    onChangeText={setReplyDraft}
-                    onSubmitEditing={() => { if (replyDraft.trim() && !replying) void submitReply(); }}
-                    placeholder={`回复 ${name}…`}
-                    placeholderTextColor={color.muted}
-                    style={styles.inlineReplyInput}
-                    value={replyDraft}
-                  />
-                  <View style={styles.inlineReplyActions}>
-                    <Pressable
-                      accessibilityLabel="发送回复"
-                      disabled={!replyDraft.trim() || replying}
-                      onPress={() => void submitReply()}
-                      style={[styles.inlineReplySend, (!replyDraft.trim() || replying) && styles.disabled]}
-                    >
-                      <Text selectable style={styles.inlineReplySendText}>{replying ? "发送中…" : "发送"}</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ) : null}
-
-              {/* FEED-POST-CLEAN-001：帖子卡底部的两个 CTA 按钮已移除 —— 产品要求
-                  所有帖文都不显示，保持清爽。原先只对 AGENT 帖（城市同行）渲染，
-                  所以此前只有部分帖文带这两个按钮。 */}
-
-              </View>
-            </View>
-          );
-        })}
+          {visible.map((post) => renderPostCard(post, { showReplyPreview: true }))}
         {loadingMore ? (
           <View style={styles.feedEmpty}>
             <ProxyLoading tone="brand" />
@@ -2034,6 +2035,66 @@ export function FeedSurface({
         <Text selectable style={styles.feedFabText}>{composerOpen ? "×" : "＋"}</Text>
       </Pressable>
     ) : null}
+    {/* POST-THREAD-001：评论抽屉——只有「拖动把手 + 输入框」，跟原型
+        proxy_comment_keyboard_v2.html 一样，不重复回顾帖文/评论列表（背后的
+        动态列表本来就看得到）。跟 PostMenuModal/SharePostSheet 同一套
+        Modal+遮罩写法：点遮罩关闭，点 sheet 内部不关闭（stopPropagation）。
+        键盘用系统真键盘——TextInput 聚焦自动弹出，不照抄原型的自绘假键盘。 */}
+    <Modal animationType="slide" onRequestClose={closeThread} onShow={focusThreadInput} transparent visible={threadPost !== undefined}>
+      <Pressable onPress={closeThread} style={styles.threadBackdrop}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+          <Pressable onPress={(event) => event.stopPropagation()} style={styles.threadSheet}>
+            <View style={styles.threadDragHandle} />
+            <View style={styles.threadComposerBar}>
+              {threadEmojiOpen ? (
+                <View style={styles.threadEmojiRow}>
+                  {THREAD_QUICK_EMOJI.map((emoji) => (
+                    <Pressable accessibilityLabel={`插入 ${emoji}`} key={emoji} onPress={() => setReplyDraft((draft) => draft + emoji)} style={styles.threadEmojiKey}>
+                      <Text style={styles.threadEmojiText}>{emoji}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+              <View style={styles.threadComposerPill}>
+                <TextInput
+                  autoFocus
+                  key={threadPostId ?? "closed"}
+                  maxLength={500}
+                  multiline
+                  onChangeText={setReplyDraft}
+                  onSubmitEditing={() => { if (replyDraft.trim() && !replying) void submitReply(); }}
+                  placeholder={`回复 ${threadAuthorName}…`}
+                  placeholderTextColor={color.muted}
+                  ref={threadInputRef}
+                  style={styles.threadComposerInput}
+                  value={replyDraft}
+                />
+                <View style={styles.threadComposerTools}>
+                  <Pressable accessibilityLabel="添加图片" hitSlop={6} onPress={() => setThreadNotice(THREAD_TEXT_ONLY_NOTICE)}>
+                    <ProxyIcon color={color.muted} name="composerImage" size={20} />
+                  </Pressable>
+                  <Pressable accessibilityLabel={threadEmojiOpen ? "收起表情" : "表情"} hitSlop={6} onPress={() => setThreadEmojiOpen((open) => !open)}>
+                    <ProxyIcon color={threadEmojiOpen ? color.ink : color.muted} name="composerSmile" size={20} />
+                  </Pressable>
+                  <Pressable accessibilityLabel="GIF" hitSlop={6} onPress={() => setThreadNotice(THREAD_TEXT_ONLY_NOTICE)}>
+                    <ProxyIcon color={color.muted} name="composerGif" size={20} />
+                  </Pressable>
+                </View>
+                <Pressable
+                  accessibilityLabel={replying ? "发送中" : "发送回复"}
+                  disabled={!replyDraft.trim() || replying}
+                  onPress={() => void submitReply()}
+                  style={[styles.threadComposerSend, (!replyDraft.trim() || replying) && styles.disabled]}
+                >
+                  {replying ? <ProxyLoading size="small" tone="onDark" /> : <ProxyIcon color={color.white} name="arrowUp" size={16} />}
+                </Pressable>
+              </View>
+              {threadNotice ? <Text selectable style={styles.threadNotice}>{threadNotice}</Text> : null}
+            </View>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Pressable>
+    </Modal>
     {/* R15.45: post menu modal (举报 / 不感兴趣 / 屏蔽作者) */}
     <PostMenuModal
       open={postMenuPostId !== undefined}
@@ -2265,34 +2326,36 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.45 },
   disabledText: { color: color.muted, opacity: 0.45 },
 
-  // REPLY-INLINE-001 — 内联回复框：贴着帖子下方就地展开，不再是底部白卡。
-  // 没有遮罩、没有标题、没有上滑动画，也不占 minHeight 108 那种厚卡片高度；
-  // 单行起步、随输入长高（maxHeight 兜底），手感对齐 Threads / Instagram。
-  inlineReply: {
-    backgroundColor: "#F8F5FA",
-    borderColor: color.line,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginTop: 8,
-    padding: 10
-  },
-  // REPLY-DRAFT-CACHE-001: 顶部 drag handle（Threads 风格的可拖动提示），
-  // 32px 高的可触摸区域 + 中间一根 32×3px 的灰色 pill。
-  inlineReplyHandle: { alignItems: "center", height: 32, justifyContent: "center", marginBottom: 4 },
-  inlineReplyHandleBar: { backgroundColor: color.line, borderRadius: 2, height: 3, width: 32 },
-  inlineReplyInput: {
+  // POST-THREAD-001 — 评论抽屉：从底部弹起的 sheet（对齐原型
+  // proxy_comment_keyboard_v2.html），不是整屏页面、没有返回箭头/标题栏、
+  // 没有帖文回顾/评论列表（那些背后的动态列表本来就看得到，抽屉只负责写新
+  // 评论）。遮罩 0.2 透明度黑、sheet 圆角 24（只顶部），高度跟着内容走（拖动
+  // 把手 + 一颗输入药丸），不是原型那种给假键盘留位置的固定 60vh。
+  threadBackdrop: { backgroundColor: "rgba(0,0,0,0.2)", flex: 1, justifyContent: "flex-end" },
+  threadSheet: { backgroundColor: color.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: "hidden" },
+  threadDragHandle: { alignSelf: "center", backgroundColor: "#E0E0E0", borderRadius: 2, height: 4, marginBottom: 6, marginTop: 10, width: 40 },
+  // 原型的输入区是一颗圆角灰色药丸（input-box），输入框 + 发送键都在里面；
+  // 原型右侧还有图片/表情/GIF 三个工具图标 + 一套自绘 26 键假键盘——确认过
+  // 用系统真键盘（自带 123/表情/语音），且 ReplyToPost 命令只收纯文本 body，
+  // 没有附件字段，这三个图标和假键盘都不画。
+  threadComposerBar: { paddingBottom: 16, paddingHorizontal: 16, paddingTop: 4 },
+  threadComposerPill: { alignItems: "center", backgroundColor: "#F0F0F0", borderRadius: 22, flexDirection: "row", gap: 12, minHeight: 44, paddingLeft: 16, paddingRight: 8, paddingVertical: 6 },
+  threadComposerInput: {
     color: color.ink,
-    fontSize: 14,
+    flex: 1,
+    fontSize: 15,
     lineHeight: 20,
-    maxHeight: 132,
-    minHeight: 40,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    textAlignVertical: "top"
+    maxHeight: 100,
+    minHeight: 24,
+    paddingVertical: 0
   },
-  inlineReplyActions: { alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "flex-end", marginTop: 6 },
-  inlineReplySend: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
-  inlineReplySendText: { color: color.white, fontSize: 12, fontWeight: "800" },
+  threadComposerSend: { alignItems: "center", backgroundColor: color.ink, borderRadius: 16, height: 32, justifyContent: "center", marginLeft: 4, width: 32 },
+  // 原型 .right-tools：图片/表情/GIF 三个 20pt 灰图标，间距 12，靠右贴着发送键。
+  threadComposerTools: { alignItems: "center", flexDirection: "row", gap: 12 },
+  threadEmojiRow: { flexDirection: "row", justifyContent: "space-between", paddingBottom: 8, paddingHorizontal: 4 },
+  threadEmojiKey: { alignItems: "center", height: 36, justifyContent: "center", width: 36 },
+  threadEmojiText: { fontSize: 24 },
+  threadNotice: { color: color.muted, fontSize: 12, paddingHorizontal: 16, paddingTop: 6 },
 
   // 基线 .preview-tabs（原型 deepseek_html_20260926_9d241a.html「图标系统 · 完整版」
   // 手机内预览那一节，就是本行这一处）：

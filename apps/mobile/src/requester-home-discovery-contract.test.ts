@@ -11,6 +11,7 @@ const locationPicker = readFileSync(fileURLToPath(new URL("./components/location
 const mapCanvas = readFileSync(fileURLToPath(new URL("./components/map-canvas.tsx", import.meta.url)), "utf8");
 const searchDock = readFileSync(fileURLToPath(new URL("./components/home-search-dock.tsx", import.meta.url)), "utf8");
 const homeAssistant = readFileSync(fileURLToPath(new URL("./surfaces/home-assistant.tsx", import.meta.url)), "utf8");
+const i18n = readFileSync(fileURLToPath(new URL("./i18n.ts", import.meta.url)), "utf8");
 
 describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("puts the unified search and model conversation before discovery sections", () => {
@@ -41,45 +42,116 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(homeAssistant).toContain('originId: "proxy_ai_home"');
     expect(homeAssistant).toContain("!externalComposer ? <View style={styles.composer}>");
   });
-  it("keeps the labeled human section before the labeled AI section", () => {
+  it("keeps the labeled human section before the hot-scene rail", () => {
     const human = source.indexOf('t("title")');
-    const ai = source.indexOf('t("aiRecommend")');
+    const hot = source.indexOf('t("hotScenes")');
     expect(human).toBeGreaterThan(-1);
-    expect(ai).toBeGreaterThan(human);
+    expect(hot).toBeGreaterThan(human);
     expect(source).toContain('t("humanBadge")');
-    expect(source).toContain('t("aiGenerated")');
   });
 
   // AI-ROW-DUPE-001: 首页曾经同时渲染两条 AI 行 —— 上面一条「小美们」
   // (AIAssistantsRow)、下面一条「AI 推荐」，两者都来自同一个服务端目录
-  // /v1/ai/assistants，视觉上是两条一模一样的 AI 生成横滑行。用户看到的是
-  // "两行一样的 AI 生成"。删掉上面那条，只留「AI 推荐」。
-  it("renders exactly one AI row on home instead of two identical AI rows", () => {
+  // /v1/ai/assistants。2026-09-27 产品决定（commander）：AI 推荐行**整条
+  // 下架**，换成 SCENE-HOME-HOT-RAIL-001 的热门场景横滑。本用例现在守
+  // 「首页一条 AI 目录行都没有」：AIAssistantsRow 不许回来，AI 推荐的
+  // JSX / 样式 / i18n 键不许残留。
+  it("AI-ROW-DUPE-001: renders no AI row on home at all (AI rail taken down 2026-09-27)", () => {
     expect(source).not.toMatch(/<AIAssistantsRow[\s/>]/);
     expect(source).not.toContain('from "../ai-assistants-row"');
     expect(source).not.toContain("小美们");
-    expect((source.match(/t\("aiRecommend"\)/g) ?? [])).toHaveLength(1);
-    expect((source.match(/styles\.aiRail\b/g) ?? [])).toHaveLength(1);
-    expect((source.match(/styles\.aiSection\b/g) ?? [])).toHaveLength(1);
-    // 「AI 生成」只作为徽标 / 卡片副标题出现，不再是一条独立行的标题。
-    expect((source.match(/t\("aiGenerated"\)/g) ?? [])).toHaveLength(2);
-    expect(source).toContain('<Text selectable style={styles.aiTitle}>{t("aiRecommend")}</Text>');
-    expect(source).toContain('styles.aiBadgeText}>{t("aiGenerated")}');
-    expect(source).toContain("styles.aiHandle}");
+    expect((source.match(/t\("aiRecommend"\)/g) ?? [])).toHaveLength(0);
+    expect((source.match(/t\("aiGenerated"\)/g) ?? [])).toHaveLength(0);
+    expect(source).not.toContain("styles.aiRail");
+    expect(source).not.toContain("styles.aiSection");
+    // 目录 prop 及其唯一消费者（listRecommended 拉取）已从首页摘除：
+    // 组件不收 prop，shell 也不再传。
+    expect(source).not.toContain("aiAccounts");
+    expect(shell).not.toContain("onMessageAI={");
+    expect(shell).not.toContain("aiAccounts={aiAccounts}");
+    // 热门场景横滑在原 AI 行的位置接棒。
+    expect((source.match(/t\("hotScenes"\)/g) ?? [])).toHaveLength(1);
+    expect(source).toContain('styles.peopleTitle}>{t("hotScenes")}</Text>');
   });
 
   it("keeps matchmaking above nearby scenes because Scene is a meeting tool, not inventory", () => {
     const human = source.indexOf('t("title")');
-    const ai = source.indexOf('t("aiRecommend")');
+    const hot = source.indexOf('t("hotScenes")');
     const composition = source.indexOf('t("combo")');
     const activeWork = source.indexOf('t("continueSection")');
     const sceneInspiration = source.indexOf('t("nearbyScenes")');
+    // HOME-LAYOUT-002（2026-09-28，原型 deepseek_html_20260928_7d0503「新版首页」，
+    // 用户：「新设计把for you放在真人推荐的位置」）：为你组合从"真人推荐 → 热门场景
+    // → 为你组合"之后挪到最前——搜索 dock 之后、真人推荐之前。下面这条断言链
+    // 因此从"combo 在 hot 之后"翻成"combo 在 human 之前"；combo 仍然排在
+    // continueSection / nearbyScenes 之前的这条"匹配优先于库存罗列"精神不变。
     expect(sceneInspiration).toBeGreaterThan(activeWork);
-    expect(activeWork).toBeGreaterThan(composition);
-    expect(composition).toBeGreaterThan(ai);
-    expect(ai).toBeGreaterThan(human);
+    expect(activeWork).toBeGreaterThan(hot);
+    expect(hot).toBeGreaterThan(human);
+    expect(human).toBeGreaterThan(composition);
     expect(source).toContain("onOpenSceneMap?.()");
     expect((source.match(/<SceneActivityDiscovery/g) ?? [])).toHaveLength(1);
+  });
+
+  // SCENE-HOME-HOT-RAIL-001（原型 deepseek_html_20260927_d56fab「热门场景」）：
+  // 横滑卡 = 封面 + 白字标题 + TOP N 角标 + 分类/区域 + 「N 人去过」。
+  // 数据纪律：排序只按真实 visitedCount 降序、0 去过不进榜；原型里的
+  // 「本周热榜」「实时更新」、头像栈和 ★ 评分没有数据生产者，一律不画。
+  it("SCENE-HOME-HOT-RAIL-001: ranks the hot rail by real visitedCount only and badges only real visits", () => {
+    // commander 2026-09-27：多做几个卡片 → slice 放宽到 9；0 去过的照进
+    // （真实数字照写），但 TOP N 角标只给真的有去过人数的前 3。
+    expect(source).toContain(".filter((s) => s.active)");
+    expect(source).not.toContain(".filter((s) => s.active && s.visitedCount > 0)");
+    expect(source).toContain("b.visitedCount - a.visitedCount");
+    expect(source).toContain(".slice(0, 9)");
+    expect(source).toContain("index < 3 && scene.visitedCount > 0");
+    // 卡片直接进场景详情；「更多」进 HOT-SCENES-PAGE-001 整页（真实目的地，
+    // 不是死按钮）——onOpenHotScenes 没接才退回旧的 onOpenSceneMap。
+    expect(source).toContain("onPress={() => onOpenSceneMap?.(scene.id)}");
+    expect(source).toContain("onPress={() => (onOpenHotScenes ?? onOpenSceneMap)?.()} style={styles.hotMore}");
+    // 对齐真人推荐（2026-09-27 commander 反馈）：标题直接复用 peopleTitle /
+    // peopleSub（同字号同左边距），头部容器不许自带 paddingHorizontal
+    // （页面已有 16 缩进，加了就是双重缩进没对齐）。
+    expect(source).toContain('styles.peopleTitle}>{t("hotScenes")}</Text>');
+    expect(source).toContain('styles.peopleSub}>{t("hotScenesSub")}</Text>');
+    expect(source).not.toContain("hotTitle:");
+    expect(source).not.toContain("hotSub:");
+    expect(source).not.toContain("paddingHorizontal: 16, paddingVertical: 10");
+    // 「更多」= 灰字 + › 的可点链接（同 filterTrigger 的灰），不是黑药丸。
+    expect(source).toContain('hotMoreText: { color: color.muted, fontSize: 13, fontWeight: "600" }');
+    expect(source).toContain("hotMoreChevron");
+    expect(source).not.toContain('hotMore: { alignItems: "center", backgroundColor: color.ink');
+    // 文案诚实性钉在真正会被渲染的 i18n 字典上：没有周榜聚合，不许宣称
+    // 「本周热榜 / 实时更新」；角标只能说清排序口径。
+    expect(i18n).toContain('hotScenesTag: "按去过人数排"');
+    expect(i18n).not.toContain("本周热榜");
+    expect(i18n).not.toContain("实时更新");
+    // 没有生产者的演示元素不许出现在卡片里：评分、头像栈。
+    expect(source).not.toContain("hotStar");
+    expect(source).not.toContain("hotAvatar");
+  });
+
+  it("FORYOU-LOGO-001: the For You header uses the new solid-rect glyph from the logo prototype", () => {
+    // 新版主 Logo（commander 2026-09-27 晚，原型 deepseek_html_20260927_c89beb）：
+    // 4 个实心矩形 + 中心大圆带白描边环（圆压在矩形交点上，白环分隔）。纯 View
+    // 摆放，几何等比 100 viewBox 的 28px 变体（pad 4 / rect 42 / x=54 / 圆角 12；
+    // 圆外径 36 + 白边 4 → 墨芯 r=14 对齐 SVG 描边内沿）。
+    expect(source).toContain("function ForYouGlyph");
+    expect(source).toContain("<ForYouGlyph size={28} />");
+    // 矩形实心：backgroundColor 墨色 + 新版圆角 12/100。
+    expect(source).toMatch(/function ForYouGlyph[\s\S]{0,900}?backgroundColor: color\.ink, borderRadius: size \* 12 \/ 100/);
+    // 中心圆白环：钉使用形态（白描边 + 外径 36）。
+    expect(source).toMatch(/function ForYouGlyph[\s\S]{0,900}?borderColor: color\.white, borderRadius: dot \/ 2, borderWidth: ring/);
+    // 无底板外壳（v1 的 tone 底板 / 外框圆角）不许回来。
+    expect(source).not.toMatch(/function ForYouGlyph[\s\S]{0,900}?backgroundColor: tone/);
+    expect(source).not.toMatch(/function ForYouGlyph[\s\S]{0,900}?borderRadius: size \* 20 \/ 64/);
+    // 旧方案 C 的空心描边矩形不许回来。
+    expect(source).not.toMatch(/function ForYouGlyph[\s\S]{0,900}?borderColor: color\.ink, borderRadius: size \* 4 \/ 64/);
+    // 头部结构 = glyph + 标题 + 黑底白字 For You 药丸（原型 .pill）。
+    expect(source).toContain('forYouBadge: { backgroundColor: color.ink, borderRadius: 6');
+    expect(source).toContain("forYouBadgeText: { color: color.white");
+    // 旧紫色药丸不许残留。
+    expect(source).not.toContain("forYouBadge: { backgroundColor: color.proxyPurpleSoft");
   });
 
   it("keeps human discovery as circle-and-name nodes that preserve the real Scene context", () => {
@@ -160,40 +232,25 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).not.toContain('modeId === "PHOTO" ? "camera"');
   });
 
-  it("keeps AI discovery circular and opens the non-physical AI profile directly", () => {
-    expect(source).toMatch(/aiCard:\s*\{\s*alignItems:\s*"center",\s*width:\s*104\s*\}/);
-    expect(source).toMatch(/aiAvatar:\s*\{[^}]*borderRadius:\s*999[^}]*height:\s*88[^}]*width:\s*88/);
-    expect(source).not.toMatch(/aiCard:\s*\{[^}]*(backgroundColor|borderRadius|borderWidth|shadow)/);
-    expect(source).toContain("onPress={() => onOpenAIProfile?.(account)}");
+  it("keeps the AI profile entry off home and alive from the scene map", () => {
+    // SCENE-HOME-HOT-RAIL-001（2026-09-27）：AI 推荐卡整体下架后，首页不再
+    // 有任何 AI 目录入口（ prop 也不许残留半截声明）。AI 档案的写入方只剩
+    // 场景地图那条链（shell 的 onOpenAIProfile 回调）。
+    expect(source).not.toContain("onOpenAIProfile?.(");
+    expect(source).not.toContain("onMessageAI?.(");
+    expect(shell).toContain('onOpenAIProfile={(account) =>');
+    // AI-FRIEND-DEAD-PENDING-001 的结论保持有效：AI 走完整对话链，不造
+    // 永远 PENDING 的好友申请记录。那条链现在从场景地图 / AI 档案进，
+    // 不再从首页卡片进。
+    expect(source).not.toContain("AI-FRIEND-DEAD-PENDING-001");
     expect(source).not.toContain('testID="ai-scene-preview"');
     expect(source).not.toContain("setSelectedAIAccount");
-    expect(source).not.toContain("onPress={() => onOpenAIScene?.(account)}");
-    // Owner 决议：AI 也是可寻址账户，使用同一套好友关系。
-    // HOME-FRIEND-ID-001（2026-09-22）：调用点传的是解析后的账号 id（key），
-    // 不是本地 fixture id —— 这里跟着改参数名，契约本身（同一套好友关系、
-    // 不走 engagement.followProfile）没变。
+    // 真人关系链不受影响：同一套好友 API、成功回执走 i18n 键。
     expect(source).toContain("relationship.sendFriendRequest(key)");
     expect(source).toContain("relationship.acceptFriendRequest(key)");
     expect(source).toContain("relationship.listMyFriendships()");
-    expect(source).toContain("好友申请已发送");
+    expect(source).toContain('t("friendRequestSent"');
     expect(source).not.toContain("engagement.followProfile");
-    // AI-FRIEND-DEAD-PENDING-001（2026-09-22）：AI 推荐卡上原来那个 + 号走的是
-    // 真人同一套 SendFriendRequest，而平台 AI 永远不会 accept（服务端另有
-    // AI-FRIEND-REQUEST-001 守卫）—— 它是一条永远卡在 PENDING 的死记录，UI 还
-    // 诚实地说「好友申请已发送」。那个位置现在换成「发消息」：AI 有完整对话链，
-    // 点进去真有结果。
-    //
-    // 这条原来是**反向**断言（not.toContain），它挡住的正是 shell 里那个
-    // onMessageAI —— 结果那个 handler 建好了、prop 也声明了，却零调用方，
-    // 正是本仓点名的「半截接线」。现在改成**正向**断言：钉的是「这个入口必须是
-    // 真对话入口」，谁把它换回好友申请、或换成一个不接线的空按钮，都会红。
-    // 「发消息仍从主页进入」没有被推翻 —— AI 主页那个「发消息」还在
-    // （见 placeholder-honest-actions.test.ts 的 PLACEHOLDER-010），
-    // 卡片上这个是同一目标的第二个入口，不是替代。
-    expect(source).toContain("onMessageAI?.(account)");
-    // 没接 handler 时按钮必须 disabled，不留一个点了没反应的假按钮。
-    expect(source).toContain("disabled={!onMessageAI}");
-    expect(shell).toContain("onMessageAI={");
     expect(scene).toContain('testID="human-scene-binding"');
     expect(scene).toContain("onOpenHumanProfile?.(featuredHuman)");
     expect(scene).toContain("尚未代表本人到场或接受邀请");
@@ -222,9 +279,17 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     // —— 固定序列轮转。用户明确要求「随机根据用户的 location 推荐可用资源组合池」，
     // 所以改成真随机重掷；钉跟着改口径（不是把钉删掉，旧口径走下面的反向臂）。
     expect(source).toContain("setPersonIndex(Math.floor(Math.random() * filteredPeople.length))");
-    expect(source).toContain("setActivityIndex(Math.floor(Math.random() * storeActivities.length))");
-    expect(source).toContain("setTimeIndex(Math.floor(Math.random() * distinctTimes.length))");
-    expect(source).toContain("setPlaceIndex(Math.floor(Math.random() * sceneBriefs.length))");
+    // HOME-FORYOU-REFRESH-001（2026-09-29，用户「点击圆圈就是刷新全部可用插槽」）：
+    // 活动轴不再在本地旧列表上全量随机 —— 先重新拉活动，再只在可用插槽里换
+    //（有名额、我没下过单、和锁定的地点/时间不冲突，优先换一个不同的，
+    // for-you-slots.ts 有行为测试）。时间 / 地点跟着选中的活动对齐。
+    expect(source).toContain("function remixForYou(): void {\n    void refreshAvailableSlots();\n  }");
+    expect(source).toContain("fresh = (await activities.listActivities()).map(toStoreActivityBrief);");
+    expect(source).toContain("const pick = pickRefreshedActivity(");
+    // 反向臂：在未过滤的全量列表上随机抽活动 = 会抽到已满 / 已下单 / 与锁冲突的活动。
+    expect(source).not.toContain("setActivityIndex(Math.floor(Math.random() * sceneActivities.length))");
+    expect(source).not.toContain("setTimeIndex(Math.floor(Math.random() * distinctTimes.length))");
+    expect(source).not.toContain("setPlaceIndex(Math.floor(Math.random() * sceneBriefs.length))");
     // 反向臂：固定轮转不许再回来（它的序列可预测，和「随机」直接矛盾）。
     expect(source).not.toContain("(current + 1) % filteredPeople.length");
     expect(source).not.toContain("(current + 1) % sceneBriefs.length");
@@ -286,15 +351,61 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   });
 
   it("names the two order chains honestly: join is join, publish-demand is the other chain", () => {
-    // 4 宫格按钮曾经挂"邀请 →"实际调 join（自己报名）。名实不符已修正：
-    // 报名就是报名，发布需求是另一条链路（进市场机会 Tab）。
+    // 4 宫格按钮曾经挂"邀请 →"实际调 join（自己报名）。名实不符已修正：报名
+    // 就是报名。2026-09-27（commander，原型 548d6b「可换可锁」）：格下三个
+    // 入口收成一个 —— 只留报名这条和原型「选择 → 确认支付」对应的交易链；
+    // 出图 / 发布需求从四宫格摘除（发布需求在附近场景区仍有入口）。
     expect(source).toContain('t("joinCta")');
     expect(source).toContain("joinSelected(gridActivity?.activityId)");
-    expect(source).toContain('t("publishDemand")');
-    expect(source).toContain('onOpenMarket?.("OPPORTUNITY")');
     expect(source).toContain('t("chainHint")');
     expect(source).not.toContain('"邀请 →"');
     expect(source).not.toContain("inviteSelected");
+    // 四宫格只挂一颗 CTA：旧的半宽行（出图/发布需求）不许回来。
+    expect(source).not.toContain("styles.gridCtaHalf");
+    expect(source).not.toContain('t("publishDemand")');
+    expect(source).not.toContain("setMomentOpen(true)");
+    // SEARCH-REPLY-BUDGET-001：搜索回复条撑大就把 For You 的「选择」CTA 顶
+    // 到玻璃 dock 后面、点不动（2026-09-28 模拟器实测）。两侧共同预算 ~30pt：
+    // - responseBar 不能用回 minHeight 32 / paddingVertical 7（会撑成 46pt）
+    // - gridCtaFlush 必须配合 responseText 一起收掉 CTA 上边距
+    expect(searchDock).toContain("paddingVertical: 4");
+    expect(searchDock).not.toContain("minHeight: 32");
+    expect(source).toContain("responseText && styles.gridCtaFlush");
+  });
+
+  // HOME-FORYOU-LOCK-001（原型 deepseek_html_20260927_548d6b「可换可锁」）：
+  // 每格右上角锁钮（锁态金底深字）+ 锁定格子金框 + 锁状态提示行；remix 与
+  // chooser 都必须尊重锁 —— 锁定的轴不重掷、锁定的格子拒开选择器。
+  it("HOME-FORYOU-LOCK-001: locks a For You slot against both the remix and the chooser", () => {
+    expect(source).toContain("lockedSlots");
+    expect(source).toContain("function toggleSlotLock");
+    // remix 跳过锁定的轴（remixForYou 与中心键同一条链）。
+    expect(source).toContain('!lockedSlots.has("person") && filteredPeople.length > 1');
+    // HOME-FORYOU-REFRESH-001：锁定的活动原样保留（仍可用时），锁定的地点 / 时间作为
+    // 筛选条件交给 pickRefreshedActivity，没锁的时间 / 地点才跟着活动对齐。
+    expect(source).toContain('{ activityId: lockedSlots.has("activity") ? current?.activityId : undefined, placeSceneId: lockedPlace?.id, time: lockedTime }');
+    expect(source).toContain('if (!lockedSlots.has("time")) {');
+    expect(source).toContain('if (!lockedSlots.has("place")) {');
+    // 锁定的格子拒开 chooser（点格子与搜索换项同一口径）。
+    expect(source).toContain('if (lockedSlots.has(tile.slot)) { showResponse(t("lockedBlock"), t("lockedBlockSub")); return; }');
+    expect(source).toContain("if (lockedSlots.has(slot)) {");
+    // 锁状态提示行 + 锁钮/金框样式存在。
+    expect(source).toContain('t("lockedHint", { n: lockedSlots.size })');
+    expect(source).toContain("gridTileLocked: { borderColor: \"#F5B400\", borderWidth: 2.5 }");
+    // FORYOU-LOCK-A-001（2026-09-28，原型 c004b0 方案A「玻璃质感」）：28px 圆角 9，
+    // 半透明黑底 + 白描边；锁定金底 + 白描边 + 金光晕。锁形开合区分见下不断言。
+    expect(source).toContain('gridLock: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.42)", borderColor: "rgba(255,255,255,0.15)", borderRadius: 9');
+    expect(source).toContain('gridLockOn: { backgroundColor: "#F5B400", borderColor: "rgba(255,255,255,0.3)"');
+    expect(source).toContain('shadowColor: "#F5B400"');
+    // 锁钮必须是格子外壳（View）的**兄弟**，不许嵌回 Pressable 里 —— 嵌套时
+    // 外层吞触摸，锁永远切不动（2026-09-27 用户实测踩坑）。
+    expect(source).toContain("<View key={tile.key} style={[styles.gridTile");
+    expect(source).not.toContain("<Pressable key={tile.key}");
+    // 开锁 / 关锁图形必须有差别：锁环抬起悬空（off）vs 腿压进锁体（on）。
+    // FORYOU-LOCK-A-001：锁体是空心描边（transparent 底 + 白边），不是实心块。
+    expect(source).toContain("gridLockShackleOff: { marginBottom: 1.5, transform: [{ translateX: 1.5 }] }");
+    expect(source).toContain('gridLockBody: { backgroundColor: "transparent", borderColor: color.white');
+    expect(source).toContain('lockedSlots.has(tile.slot) ? styles.gridLockShackleOn : styles.gridLockShackleOff');
   });
 
   it("reports join failures by cause instead of blaming login", () => {
@@ -355,5 +466,88 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(shell).toContain("storedFollow !== undefined");
     expect(shell).toContain("saveFollowDevice(next)");
     expect(shell).toContain("saveFollowDevice(false)");
+  });
+});
+
+// HOME-FORYOU-ORDER-003（2026-09-28，原型 docs/design/references/
+// Proxy_MyTickets_20260928_d7fef9.html「我的票券」）：确认下单之后那一屏。
+// 用户原话是"接着做完，记得增加订单编号"。
+describe("HOME-FORYOU-ORDER-003 确认下单之后那一屏", () => {
+  it("两步共用一个 Modal —— 不许写成两个兄弟 Modal", () => {
+    // 报名成功那一批 state 里"关 A + 开 B"落在**同一次提交**，iOS 在 A 还在
+    // dismiss 的时候会丢掉 B 的 present：点了确认下单什么都不出现、也不报错。
+    // 仓库的规矩写在 surfaces/badminton-companion.tsx 文件头第 1 条
+    //（整页只有一个 Modal，内部换屏只切 state），HOME-MORE-SHEET-004 踩过。
+    const flow = source.indexOf("visible={joinConfirmOpen}");
+    const chooser = source.indexOf('<Modal transparent animationType="fade"');
+    expect(flow).toBeGreaterThan(-1);
+    expect(chooser).toBeGreaterThan(flow);
+    // 从这一屏自己的 <Modal 开标签量起 —— `visible={...}` 在 `<Modal` **后面**，
+    // 从 flow 起量会漏掉它自己那颗开标签，钉就永远数不到东西（数到 0）。
+    const flowTag = source.lastIndexOf("<Modal", flow);
+    expect(flowTag).toBeGreaterThan(-1);
+    const between = source.slice(flowTag, chooser);
+    expect((between.match(/<Modal[\s>]/g) ?? [])).toHaveLength(1);
+    expect(between).toContain("styles.orderTicket");
+    expect(source).not.toContain("setOrderSheetOpen");
+  });
+
+  it("订单编号读真实标识，不编一个假号", () => {
+    // HOME-FORYOU-ORDER-005（2026-09-29，用户「for you 的新订单编号没有用上」）：
+    // JoinActivity 现在回这笔报名**自己的**全数字订单编号（participation.orderNo，
+    // 与履约订单共用一个分配器）；之前下过单时服务端在 ACTIVITY_ALREADY_JOINED 里
+    // 回传既有编号。以前这里显示的是活动展示码 PX-A-…——同一场活动所有人同一个
+    // 号，那不是订单编号。拿不到编号（老服务端）就显示「—」，不拿活动码冒充。
+    expect(source).toContain('<Text selectable style={styles.orderCodeText}>{placedOrderNo ?? "—"}</Text>');
+    expect(source).toContain("setPlacedOrderNo(result.participation?.orderNo);");
+    expect(source).toContain("setPlacedOrderNo(orderNoFromJoinRejection(e));");
+    // 反向臂：活动展示码 / 活动 id 不许再当订单编号显示或复制。
+    expect(source).not.toContain("gridActivity?.code || gridActivity?.activityId");
+    expect(source).not.toContain("TK-");
+    expect(source).toContain("订单编号 · 点击复制");
+    expect(source).toContain("订单编号已复制");
+  });
+
+  it("原型里没有真能力的三样不许写进来（二维码 / 推送 / 日历）", () => {
+    // CheckinActivity 只是个普通命令、不认码；仓库里没有 expo-notifications、
+    // 没有 expo-calendar；activity.time 是活动自己写的自由文本、不是可解析的
+    // 时间戳，编不出真倒计时也编不出真日历事件。写出来都是兑现不了的承诺
+    //（placeholder-honest-actions 禁的就是这个）。
+    // ⚠️ 这三条是**反向钉**，所以本文件里也不许出现这三句原话。
+    expect(source).not.toContain("到场出示此票");
+    expect(source).not.toContain("推送提醒");
+    expect(source).not.toContain(">加入日历<");
+  });
+
+  it("撕票线的冲孔必须和页面底色同色，否则孔会变成两个白点", () => {
+    // 孔是画在票券卡**里面**的实心圆，靠卡的 overflow:"hidden" 把外半圆裁掉
+    // 才成为一道缺口。底色和孔色读同一个 token —— 改一个不改另一个就露馅。
+    const pageBg = /orderPage: \{ backgroundColor: (\S+?),/.exec(source)?.[1] ?? "";
+    const holeBg = /orderTearHole: \{ backgroundColor: (\S+?),/.exec(source)?.[1] ?? "";
+    expect(pageBg).not.toBe("");
+    expect(holeBg).toBe(pageBg);
+    expect(source).toContain('borderRadius: 18, borderWidth: 1, marginTop: -14, overflow: "hidden" }');
+    // 虚线**不能**用 dashed 边框画：RN(iOS) 只支持四边等宽的 dashed，单边
+    //（borderTopWidth / borderBottomWidth）会打 "Unsupported dashed / dotted
+    // border style" 并且**整条不画** —— 2026-09-28 模拟器像素级实测：撕票线和
+    // meta 分隔线一起消失，那两段里一个非白像素都没有（第一版就是这么写的）。
+    // 现在虚线是一排小方块（DashedRule）。这个文件里没有任何等宽 dashed 框，
+    // 所以一旦出现 dashed 边框字面量，就是那条画不出来的单边虚线回来了。
+    expect(source).toContain('<DashedRule ruleColor={color.line} style={styles.orderTearLine} />');
+    expect(source).toContain('orderMetaRowRule: { bottom: 0, left: 0, position: "absolute", right: 0 }');
+    expect((source.match(/style=\{styles\.orderMetaRowRule\}/g) ?? [])).toHaveLength(3);
+    expect(source).not.toContain('borderStyle: "dashed"');
+  });
+});
+
+describe("HOME-FORYOU-ORDER-004 确认下单总有下一步", () => {
+  it("already-joined still opens the 已下单 page, honestly labelled as an existing order", () => {
+    // HOME-FORYOU-ORDER-005：之前下过的单也要把**既有编号**带到票券页。
+    expect(source).toMatch(/errorCode === "ACTIVITY_ALREADY_JOINED"\) \{\s+setPlacedOrderNo\(orderNoFromJoinRejection\(e\)\);\s+return "already";/);
+    expect(source).toContain('if (outcome !== "failed") { setOrderExisting(outcome === "already"); setOrderCodeCopied(false); setOrderDone(true); }');
+    expect(source).toContain('orderExisting ? "你之前已经下过这一单"');
+  });
+  it("real failures render above the footer, not buried at the bottom of the scroll", () => {
+    expect(source).toContain('</ScrollView>\n                          {joinMsg && joinConfirmOpen ? <Text selectable style={styles.confirmJoinError}>{joinMsg}</Text> : null}');
   });
 });

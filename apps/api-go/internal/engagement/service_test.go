@@ -82,6 +82,52 @@ func TestInvalidReply(t *testing.T) {
 	}
 }
 
+// REPLY-IMAGE-001: 纯图片评论（空正文 + 媒体）放行，且列表读回媒体引用。
+func TestReplyWithMediaOnlyAcceptedAndRoundTripped(t *testing.T) {
+	s := New()
+	r := s.Handle(envelopeFor("ReplyToPost", map[string]any{
+		"postId": "post_media", "body": "",
+		"media": []any{map[string]any{"mediaAssetId": "ma_1", "sortOrder": 0}},
+	}, "post_media"))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("image-only reply: got %s/%+v", r.Outcome, r.Error)
+	}
+	listed := s.Handle(envelopeFor("ListPostReplies", map[string]any{"postId": "post_media", "limit": 20}, "post_media"))
+	var list struct {
+		Replies []Reply `json:"replies"`
+		Count   int     `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(listed.OperationRef), &list); err != nil {
+		t.Fatal(err)
+	}
+	if list.Count != 1 || len(list.Replies) != 1 {
+		t.Fatalf("listed replies: %+v", list)
+	}
+	got := list.Replies[0].Media
+	if len(got) != 1 || got[0].MediaAssetID != "ma_1" || got[0].SortOrder != 0 {
+		t.Fatalf("media not round-tripped: %+v", got)
+	}
+}
+
+func TestReplyRejectsBadMedia(t *testing.T) {
+	s := New()
+	many := make([]any, 0, 7)
+	for i := 0; i < 7; i++ {
+		many = append(many, map[string]any{"mediaAssetId": "ma_x", "sortOrder": i})
+	}
+	for name, payload := range map[string]map[string]any{
+		"too many":   {"postId": "post_1", "body": "x", "media": many},
+		"empty id":   {"postId": "post_1", "body": "x", "media": []any{map[string]any{"mediaAssetId": "", "sortOrder": 0}}},
+		"bad order":  {"postId": "post_1", "body": "x", "media": []any{map[string]any{"mediaAssetId": "ma_1", "sortOrder": -1}}},
+		"empty both": {"postId": "post_1", "body": ""},
+	} {
+		r := s.Handle(envelopeFor("ReplyToPost", payload, ""))
+		if r.Outcome != "REJECTED" || r.Error.ErrorCode != "INVALID_REPLY" {
+			t.Fatalf("%s: want INVALID_REPLY, got %s/%+v", name, r.Outcome, r.Error)
+		}
+	}
+}
+
 func TestPostReactionTruthToggleAndRemountHydration(t *testing.T) {
 	s := New()
 	first := s.Handle(envelopeFor("ReactToPost", map[string]any{"postId": "post_truth"}, "post_truth"))

@@ -4,6 +4,258 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 332 — 2026-09-29
+
+- **下单 / 接单 / 订单页去废话 + 全数字编号 + 订单变更与变更记录入口**
+  （用户指示「下单接单的流程 还有页面很多废话 一起修改优化」）。只做删减与真实性修正，
+  版式、色板、交互模型不变。改动：`surfaces/market.tsx`（**敏感**）、
+  `surfaces/opportunity-quote-sheet.tsx`、`surfaces/me-orders.tsx`（**敏感**）、
+  `surfaces/order-execution.tsx`、`order-actions.ts`（不敏感）。
+  1. **接单详情**：删「报价说明」盒（价格条已有真区间；原文还写着「报价 UI 不在这屏」这种
+     开发口吻）、「给小美的判断」空盒、对线下结算单不成立的「平台托管付款」和底部三句
+     免责套话；推荐理由没有就不画空盒；「本人确认合作」→「确认合作」。
+  2. **报价页**：只留 什么/何时/何地、可选参考区间（「仅供参考」）、金额、预设、提交；
+     按钮「提交报名」→「提交报价」。
+  3. **发布 / 选人页**：删英文 kicker `CREATE DEMAND`、重复的 100,000 保底说明、
+     「申请制…」说明盒；「预览小美视角」（实为返回）改名「返回」。成功页编号是服务端发的
+     全数字编号（`opportunity.number` / 活动 `code`），不再是客户端随机 PX-*。
+  4. **我的订单**：结算方式印人话（`settlementLabel`）而不是 `DIRECT_SETTLEMENT`；
+     删长说明与脚注；到场登记一个输入一次点击；新增条款变更（提出 / 接受 / 拒绝 /
+     撤回）与「变更记录」入口。
+  5. **门禁**：`MARKET-FAKE-JUDGMENT-001` 由「必须留一句还没评估」改为反向（写死的结论与
+     判断区标题不许回来）；新增 `ORDER-FLOW-COPY-001`。
+  客服按公共编号反查（`LookupPublicNumber`）在运营控制台，不属于 App 基线。
+
+## Revision 331 — 2026-09-28
+
+- **场景名片：把 Rev330 列在「没做、留给用户拍板」里的那一批同类文本字符一次清掉**
+  （用户指示「有问题就修 不用给我讲」）。Rev330 的立场是「产品判断留给人拍板」；
+  这次拿到明确授权后，按**同一类缺陷**（`BACK-GLYPH-001`：字符不是字形 ——
+  形状/垂直基线随 `fontSize` 漂、`filled` 这种状态没地方落）扫完。
+  改动：`surfaces/reality-scene-map.tsx`（**敏感**）、
+  `surfaces/conversation.tsx`（**敏感**）、
+  `components/scene-shop-directory.tsx`（不敏感）、`components/proxy-icon.tsx`（不敏感）。
+  1. **图钉快打卡弹层**：`导航去这里 ›` → 真字形 `arrowUpRight`；`看详情 ›` →
+     文字 + `chevronRight`。
+  2. **徽章行**：`{badge.name} ✓`（把 `" ✓"` 拼进 `Text`）→ `badgeNameRow` 里放
+     `ProxyIcon name="check"`，**只有已点亮才画**。
+  3. **评价星级选择器**：文本 `★` 换个 `color` 冒充「点亮」→
+     `ProxyIcon name="star" filled={n <= reviewStars}`（跟统计卡那颗同一颗）——
+     实心 / 描边两种形态这才真的存在。
+  4. **`proxy-icon.tsx` 补右向 chevron**：`case "chevronRight"` =
+     `d="M9 18l6-6-6-6"`（`chevronLeft` 的镜像）。之前**没有**这个字形，所以两处
+     只能写文本 `›`（原型自己写的也是 `<span class="intent-arrow">›</span>` ——
+     原型不是标准）。调用点：`scene-shop-directory.tsx` 的卡脚（`cardChevron`）
+     与意图卡尾部、`reality-scene-map.tsx` 快打卡的「看详情」。`cardChevron`
+     这个 style 已删。
+  5. **删掉 `proxy-icon.tsx` 里不可达的 `heart` 死分支** + `heartLeft` / `heartRight` /
+     `heartPoint` 三个死 style（Rev330 记为「留给用户拍板」，本次授权后删）。它跟
+     `MasterModuleIcon` 的 `case "heart"` 同名 ⇒ 永远走不到；留着会误导推理
+     （Rev330 就是这么把「heart 不读 filled」写进注释的）。
+  6. **会话位置卡**（`conversation.tsx`）：`导航去这里 ›` → 文字 + `arrowUpRight`。
+  7. **动作行第 3 颗可见文案收成「导航」**（原型那颗就写「导航」，兄弟实现 `actNav`
+     也是「导航」，只有地图面多写了「去这里」）。`accessibilityLabel` 仍留
+     「导航去这里」—— 读屏听完整一点更有用，**门禁 `SCENE-NAV-001` 的
+     `grep -q '导航去这里'` 认的也是它，所以门禁脚本这次不用改**。
+     `scene-nav.test.ts` 那条 `toContain("导航去这里 ›")` 随之改成
+     `toContain("style={styles.action3NavText}>导航<")` + 反向针
+     `not.toContain("导航去这里 ›")`。
+  8. **🔴 顺手抓到一个更严重的既有 bug：图钉快打卡弹层在 iOS 上根本打不开。**
+     `SCENE-NAV-PIN-001` 的立意是「点图钉改弹快打卡（导航/详情二选一）」，但
+     `Marker` 同时挂了 `title` / `description` ⇒ iOS 上点图钉只弹**地图自带的原生
+     callout**（标题气泡），`Marker.onPress` **不触发** ⇒ 应用自己的弹层永远不出现，
+     导航出口在模拟器上实测**不可达**。门禁那几条 grep 全绿（它只查源码里有没有
+     `setPinSheetId(scene.id)`），所以这个洞一直没人看见 —— 又一个「钉绿但用户点不动」。
+     修法：给 `Marker` 补 `onCalloutPress={() => { setPinSheetId(scene.id); }}`，
+     **加**一条可达路径；不动 `title` / `description`（它们是图钉的无障碍标签，
+     `AXLabel` = "名字, 地址"，删了读屏用户只剩一堆无名图钉）。
+     ⚠️ 遗留（留给用户拍板，没动）：现在是**两次点击**（点图钉 → 原生气泡 →
+     点气泡 → 弹层）。要收成一次点击，得删 `title` / `description` 并给 `Marker`
+     另配 `accessibilityLabel` —— 那是产品 / 无障碍取舍。
+- **没改、而且是故意的**（记判据，免得下次又当成漏改）：
+  - **行内状态前缀 `✓`**（`"✓ 已选择"` / `"✓ 本店已打卡"` / `"✓ 已添加"` /
+    `"✓ 已关注"` …）：全仓十几处（`i18n.ts` / `registry.tsx` / `market.tsx` /
+    `ProfileTabs` / `feed.tsx` / `native-app.tsx` 的同意勾选框…）**一致的既有约定**，
+    它是行内文字、不是图标 ⇒ 不动。反向针因此**必须 `sliceBetween` 限定区块**，
+    不能整文件 `not.toContain("✓")`。
+  - **`更多 ›`**：`components/scene-shop-directory.tsx` 与
+    `surfaces/badminton-companion.tsx` **两处同款**（后者注释写明「同款」）的
+    位置选择器 idiom ⇒ 只改一处会让两条位置行长得不一样，不动。
+- **钉（6 条新 `it`）**：
+  `scene-shop-directory.test.ts` 新增 4 条，全在 `SCENE-HOME-PROTOTYPE-001` describe 内
+  —— 评价星选择器（反向 `★` + 正向 `filled={n <= reviewStars} name="star"`）、
+  徽章勾（反向 `✓` + 正向 mint `check`）、快打卡弹层（反向 `›` + 正向 `arrowUpRight` /
+  `chevronRight`）、组件卡脚与意图卡 chevron（各反向 `›` + 正向 muted `chevronRight`）；
+  `components/proxy-icon.test.ts` 新增 1 个 describe / 2 条 `it` —— `chevronRight`
+  必须是 `switch` 活分支（反向：不许写成不可达的 `if (name === "chevronRight")`；
+  正向：`case` + 镜像路径）、`heart` 死分支与三个死 style 不许回来；
+  `scene-nav.test.ts` 的 `SCENE-NAV-PIN-001` 新增 1 条 —— 弹层可达性
+  （正向 `onCalloutPress={() => { setPinSheetId(scene.id); }}`；反向：`title` /
+  `description` 不许为了「少一层气泡」删掉）。
+  另外把 `sliceBetween` 的注释里那句「同一文件别处还有 `★` / `›` 历史写法」改成了
+  实情（剩下的是行内 `✓` 与 `更多 ›` 这两类**故意不改**的）。
+- **负向注入 16/16 全部按预期见红**，认臂靠 `at <file>:LINE:COL`：624 / 625 / 633 /
+  634 / 643 / 645 / 651 / 657（`scene-shop-directory.test.ts`）、52 / 53 / 56 / 64 / 65
+  （`proxy-icon.test.ts`）、75 / 79 / 80（`scene-nav.test.ts`）。每条臂只改一处、
+  跑完立即按字节复原；残留探针
+  （`reviewStarChar` / `cardFootChevron` / `chevronRightXX` / `_deadHeartProbe` /
+  `M9 18l6-6-6-7` / `title=""` / `description=""`）事后 grep 为空。
+  ⚠️ 第一版快打卡那条臂**收尾锚写错了**：`sliceBetween(surface, "styles.primaryAction",
+  "styles.actionText")` —— `styles.actionText` 在**同一行里排在 `name="chevronRight"`
+  之前**，切出来正好把 chevron 切掉 ⇒ 针假红。改用
+  `sliceBetween(surface, "styles.pinSheetRow", "styles.nearbyError")`。
+  **写切片锚时要确认收尾锚在源码顺序上真的在被断言内容之后**，不能只看逻辑分组。
+- 验证：`pnpm exec tsc --noEmit` exit 0；三个相关测试文件**逐个单独跑**（fail-closed）：
+  `scene-nav.test.ts` 6/6、`components/proxy-icon.test.ts` 4/4、
+  `scene-shop-directory.test.ts` 60/60。门禁实际那两条命令复跑 ——
+  `vitest run src/scene-shop-directory.test.ts -t 'SCENE-HOME-PROTOTYPE-001'`
+  **13 passed / 47 skipped**（Rev330 时是 8 passed），
+  `vitest run src/scene-nav.test.ts` 6 passed。门禁脚本本身**没改**：
+  `SCENE-NAV-001` 的 `grep -q '导航去这里'` 仍命中 `accessibilityLabel` 与图钉弹层
+  文案，`SCENE-HOME-PROTOTYPE-001` 那几条 grep 读的是
+  `components/scene-shop-directory.tsx`，都没碰 `cardChevron` / `›`。
+- **模拟器实测**（`Proxy iPhone 15 QA` / iOS 26.5，`idb` 驱动 + 截图肉眼核对）：
+  - 首页 → 「打开场景地图」→ 「切换列表」→ `Three Beans · Bắc Ninh` 详情：
+    动作行三颗是**字形 + 文字**（`♥ 已收藏` / `✓ 打卡` / `↗ 导航`），
+    **第三颗可见文案确实是「导航」**（不是「导航去这里」）；统计卡是**金色实心星
+    字形 + 5.0**，卡压住封面照片；`你想在这里做什么？` / 匹配脚注 / 照片墙都在。
+  - 图钉弹层：补 `onCalloutPress` 后点 callout，弹层完整出现 ——
+    `关闭快打卡`(343, 659.7, 30×30)、名字(26, 665.7)、地址(26, 688)、
+    `导航去这里`(26, 712.3, 165.7×43.7)、`看场景详情`(199.7, 712.3, 167.3×43.7)。
+  - ⚠️ 踩过的坑（记下来省下一次）：我一开始把**原生 callout**（Marker 的
+    `title`/`description` 气泡）当成了应用弹层，看到「只有名字+地址、按钮没了」，
+    差点报成「弹层被裁」。**A/B 对照 HEAD 才发现 HEAD 长得一模一样** ⇒ 那是原生
+    气泡不是我们的 View。判定 UI 缺陷前先跟 HEAD 对照，别拿两个不同的东西比。
+
+## Revision 330 — 2026-09-28
+
+- **场景名片：动作行 / 评分星 / 意图块标题对齐原型，并把「场景地图详情面」
+  补进同一条钉**（`SCENE-HOME-PROTOTYPE-001`）。用户报「这个场景主页没有对齐
+  原型设计」。排查结论：原型 `deepseek_html_20260927_7fc18d.html` 在仓库里
+  有**两份实现** —— 组件 `components/scene-shop-directory.tsx`（Rev329 之前
+  就对齐过）和场景地图的详情面 `surfaces/reality-scene-map.tsx`（用户实际
+  看到的那一份）。而 `SCENE-HOME-PROTOTYPE-001` 的源码钉与行为断言**只读
+  前者**，后者一路漂到没人拦。
+- 具体漂移（都已修）：
+  1. **动作行用文本字符冒充图标** —— `★ / ☆ / ✓ / ›` 写死了「☆ 收藏 /
+     ✓ 已打卡 / 导航去这里 ›」。跟 `BACK-GLYPH-001` 是同一类错：字符不是
+     字形，形状和垂直基线随字号漂，`filled` 这种状态没地方落（`☆ 收藏` 变
+     `★ 已收藏` 只是换了个字符，不是换了一个字形）。现在三颗都走 `ProxyIcon`
+     （`replyLike` / `check` / `arrowUpRight`），配色跟兄弟实现
+     `scene-shop-directory.tsx` 的 `actSave` / `actCheckin` / `actNav` 对齐
+     （rose → `attentionBg` + `magenta`，good → `mint`，nav → 白底 + `line`）。
+     ⚠️ 心形用 `replyLike`、不用 `heart`，理由**只是形状**：原型那颗收藏的心
+     就是 Feather 那条路径（`M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67…`），
+     `proxy-icon.tsx` 的 `replyLike` case 逐字就是它；`heart` 是另一条更圆、
+     底部更窄的心。**两个都读 `filled`** —— 我一开始误判成「`heart` 不读
+     `filled`」（读了 `proxy-icon.tsx:794` 那个 `if (name === "heart")`），
+     并把错理由写进了代码注释，已改正。真相是 `ProxyIcon` **两层派发**：
+     先调 `MasterModuleIcon`（`switch`，:180，`case "heart"` 在 :184、**读
+     `filled`**）并在 :452 提前 return ⇒ :794 那个同名 `if` 分支（2026-08-22
+     的 CSS View 心，含 `heartLeft`/`heartRight`/`heartPoint` 三个 style）
+     **不可达**。`git blame` 两处才看清谁新谁旧。死分支**这次没删**（属另一屏
+     的清理，留给用户拍板）。
+     顺带发现 `proxy-icon.tsx` 的 `star` 把 `filled` 吞了（`{...common}` 写死，
+     且它是 `switch` 里的活分支），改成 `{...(filled ? filledCommon : common)}`。
+  2. **评分格是文本 `"★ 5.0"`** —— 原型 `.stat-star` 是**实心金**星（图标 +
+     数字两颗），字符填不了色。现在 `<ProxyIcon color="#F5B400" filled
+     name="star" size={16} />` + 数字独立成 `statCellRating`（22px，原型
+     `.stat-num`）。分隔线 28→36，`statCellValue` 16→20（`.stat-num-sm`）。
+     封面 `coverName` 22→24 + `letterSpacing:-0.6`（`.cover-name`），
+     `coverInfo` bottom 16→22，`statsCard` marginTop -24→-26 / marginBottom
+     12→14。`statCellLabel` 原型是 10.5px，**保留 11** —— 仓库有 11pt 可读性
+     底线（`design-system-r3.test.ts`），原型值低于底线时不跟。
+  3. **意图块标题是「怎么组织这次现实行动」** —— 原型是「你想在这里做什么？」。
+     兄弟实现已经改过来了（那条钉只盯它），地图面漏了。卡片文案仍来自服务端
+     `detail.actions`（label + moneyMeaning），不写死。
+  4. **统计卡没压在封面照片上** —— 原型 `.cover` 后面**直接**就是
+     `.stats-card{margin:-26px 16px 14px}`，那 -26 就是拿去压封面的。实现里
+     cover 和统计卡之间夹了一行 `heroFacets`（分类徽标 + 硬件优点胶囊），
+     于是 -26 压在**那行胶囊**上：胶囊被裁掉一半、卡片也没压到照片。已把
+     `heroFacets` 整块挪到统计卡**下面**（仍在动作行上面），顺序变成
+     `coverWrap → statsCard → reviewEntry → heroFacets → venueIntro →
+     sceneCounts → actionRow3 → distBar`。兄弟实现也是 hero 紧跟 infoStrip。
+- **钉的修补（这次的重点）**：`SCENE-HOME-PROTOTYPE-001` 新增 5 条 `it`，读
+  `surfaces/reality-scene-map.tsx` 源码：动作行三颗字形 + 反向针（不许出现
+  `☆/★/›/✓`）、评分格实心星字形 + 反向针、意图块标题、`匹配推荐` 卡 +
+  `这里的活动` / `照片墙` 区块 + 死按钮「查看全部匹配」不许回来，以及**区块
+  顺序钉**（统计卡必须紧跟封面，`heroFacets` 不许回到两者之间）。断言用
+  `sliceBetween()` **限定在区块内**——同一文件别处还有历史文本字符（图钉快
+  打卡弹层的 `›`、徽章 `✓`、评分选择器的 `★`），不限定范围会把「区块已修好」
+  误判成红。
+- **负向注入（两条钉一起验）**：动作行/评分格那批 5 条（4 条改坏各自开火在
+  预期行 + 1 条 slice 之外的 `★` 必须**不**开火）；顺序钉**单独 7 条**
+  （`heroFacets`/`venueIntro`/`sceneCounts` 各自挪回封面与统计卡之间 → 分别
+  开火在 621/622/623；胶囊整块挪到动作行下面 → 626；胶囊整块删掉 → 625；
+  封面锚点改名 → 619；控制臂「胶囊多一份但仍在统计卡下面」必须**保持绿**）。
+  验完源码 `diff` 与备份**逐字节一致**。
+  副产品一条：`styles.heroFacets` 这类引用在源码里**只出现一次** ——
+  `StyleSheet.create({ heroFacets: … })` 的键是**裸名**，不写 `styles.`
+  前缀。所以「整块删掉」会让 `indexOf` 返回 `-1`，625（`> statsCard`）先开火，
+  626 永远轮不到；626 只能用「挪到动作行下面」这条臂验。写钉时别假设
+  「删掉 = 只剩样式表里那份」。
+- **没做、留给用户拍板的**（都是产品判断，不是机械对齐）：① 原型的
+  `action-row3` 第 3 颗写的是「导航」，两份实现都是「导航去这里」——`导航去这里`
+  被 `SCENE-NAV-001` 钉着（`accessibilityLabel` 与可见文案都是它），改文案要
+  同时动门禁脚本。② 原型没有「现在最适合」段，但 `SCENE-HOME-DETAIL-001`
+  （更早的参考稿第 3 屏）要求它存在 —— 两份原型冲突，不擅自删。③ 原型里
+  `stats-card → action-row3` 之间**没有内容**，实现里还夹着 `venueIntro` +
+  `sceneCounts`（`sceneCountsLine(selected)` 被门禁钉着）+ variant rail
+  （`heroFacets` 那块本次已按原型挪到统计卡下面，见上）。④
+  原型意图卡尾部有 `›` 箭头、照片墙有 `全部/环境/菜单/用户精选` 分类 tab、
+  卡片有官方/用户徽标 —— 前者是文本字符（且兄弟实现 `cardChevron` 也是
+  `›`，跟 `BACK-GLYPH-001` 的立场打架，`ProxyIcon` 里目前没有右向 chevron），
+  后两者 Rev329 已决定不做（没有策展管线）。⑤ 同一文件里还留着同类文本字符：
+  图钉快打卡弹层 `导航去这里 ›` / `看详情 ›`（1122–1123 行）、徽章
+  `{earned ? " ✓" : ""}`（1159 行）、评分选择器 `★`（1180 行）。⑥
+  `proxy-icon.tsx:794–803` 的不可达 `heart` 分支 + `heartLeft`/`heartRight`/
+  `heartPoint` 三个死 style 该删（见上）。
+- 验证：`pnpm run typecheck` exit 0（16 分钟）；**17 个场景相关测试文件逐个单独
+  跑**（每个文件一条 `vitest run`，fail-closed）**255/255 绿、0 失败**；
+  `vitest run src/scene-shop-directory.test.ts -t 'SCENE-HOME-PROTOTYPE-001'`
+  8 passed / 44 skipped；负向注入两组（动作行那批 5 条 + 顺序钉 7 条）全部符合
+  预期，源码复原后逐字节一致。**模拟器实测**（`idb ui describe-all` 读 frame，
+  单位 point）：`场景地图 → 列表 → Three Beans · Bắc Ninh`，覆盖层从 safe-area
+  顶 59 起，`.cover` 280 ⇒ 封面底 = 339；统计卡 `评价这个场景` 格 y=328、卡内
+  上内边距 15 ⇒ **卡顶 = 313 < 339，压住封面 26pt**（正是原型的 -26）；胶囊
+  `商家`/`咖啡 · 动态场景` y=421.7 在卡片（底 ≈390）**下面**、没被裁；动作行三颗
+  `取消收藏`/`打卡`/`导航去这里` 同在 y=523 h=48、x=13/136.7/262.3；`你想在这里
+  做什么？` y=1838、footnote y=2089.7；原型各段相对顺序保持
+  （stats-card → action-row3 → dist-bar → 匹配推荐 → 这里的活动 → 照片墙 →
+  你想在这里做什么？）。全量 `vitest run`：**202 个文件 2007/2013 通过**，
+  6 条失败**没有一条来自本次改动** —— 5 条是全仓扫描测试在 vitest 默认 5s
+  timeout 下的**环境性超时**（同批文件在 tripwire 的 Step 0 环境下 166.81s →
+  1.77s，超时全部消失），1 条是 `surfaces/requester-home.tsx` 里**另一个会话
+  未提交**的 `fontSize: 10.5 / 9.5`（HEAD 该文件 0 处 sub-11pt，worktree 6 处）。
+  **未跑** `scripts/check-regression-contracts.sh` 全量（别人的红钉会让它提前
+  退出，且门禁脚本本身这次没动）—— 但把本范围内的两个块**提出来单独跑了**
+  （头部 22 行 + 各自的块，`cd` 换绝对路径）：`SCENE-HOME-PROTOTYPE-001`
+  （含夹在中间的 `SCENE-PHOTO-WALL-002`）与 `SCENE-NAV-001` + `SCENE-NAV-PIN-001`
+  **都绿**。
+- 🔴 **端到端证明「钉真的盖住了用户看的那个面」**：门禁里
+  `SCENE-HOME-PROTOTYPE-001` 的 4 条源码 grep **全部只读
+  `components/scene-shop-directory.tsx`**（另一份实现）；唯一伸到
+  `surfaces/reality-scene-map.tsx` 的就是那句
+  `vitest run src/scene-shop-directory.test.ts -t 'SCENE-HOME-PROTOTYPE-001'`。
+  所以这次把新断言塞进**同一个 describe 块**之后，覆盖才真的接上。验证方式：
+  把 `☆` 塞回 `reality-scene-map.tsx` 的动作行 ⇒ **门禁块变红，失败落在
+  `scene-shop-directory.test.ts:576`**（`expect(row).not.toContain("☆")`）；
+  改动之前这条注入会让门禁**保持绿**。源码复原后逐字节一致。
+  ⚠️ 提块单独跑时两个坑：① `pnpm` 在 `/opt/homebrew/bin`，把 PATH 收窄成
+  `node bin:/usr/bin:/bin` 会 `rc=127` —— **那是环境错误不是真红**；
+  ② 所以判定「红」必须要求失败文案里出现**钉的 `文件:行号`**，不能只看 `rc != 0`。
+- ⚠️ **`check-design-baseline.mjs` 的「通过」必须带暂存内容才有意义**：它只看
+  `git diff --cached`（第 88–95 行），暂存区为空时 `touched` 必然为空 ⇒ **必然
+  打印 passed**。这个 shell 里共享 `.git/index` 因陈旧锁写不了，所以先用
+  `GIT_INDEX_FILE=/tmp/kake-idx`（`git read-tree HEAD` 起底）把 5 个改动暂存进
+  私有索引，门禁才真正被走到。随后**注入三条臂验它不是空转**：撤掉
+  `BASELINE_CHANGELOG.md` → 红（`baseline-sensitive implementation changed
+  without design acknowledgement: …/reality-scene-map.tsx`）；把
+  `baselineRevision` 改回 328（低于 HEAD 的 329）→ 红（`baselineRevision
+  regressed from 329 to 328`）；控制臂（只暂存两个设计文档、敏感实现不暂存）
+  → 绿。复原后 `CURRENT_BASELINE.json` 逐字节一致。私有索引**没有**回写共享
+  `.git/index`（私有索引提交会让 peer 的下一次提交静默回退本次改动）。
+
 ## Revision 329 — 2026-09-27
 
 - **场景名片重做 + 真实场景评分 + 有隐私边界的同行推荐**（SCENE-REVIEW-001 /

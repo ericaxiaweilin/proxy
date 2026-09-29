@@ -109,19 +109,3 @@ export function quoteToVND(totalK: number): string {
   return `${vnd.toLocaleString("en-US")}₫`;
 }
 
-/**
- * formatTraceId — R58 success-screen trace id: PX-<type>-<yymmdd>-XXXX.
- * type is N (公开需求) / O (定向邀约). Client-side display id for the
- * copy button; the wire keeps the server opportunity id untouched.
- */
-export function formatTraceId(type: "N" | "O" | "A", at: Date = new Date()): string {
-  const yy = String(at.getFullYear()).slice(-2);
-  const mm = String(at.getMonth() + 1).padStart(2, "0");
-  const dd = String(at.getDate()).padStart(2, "0");
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let tail = "";
-  for (let i = 0; i < 4; i += 1) {
-    tail += alphabet[Math.floor(Math.random() * alphabet.length)];
-  }
-  return `PX-${type}-${yy}${mm}${dd}-${tail}`;
-}

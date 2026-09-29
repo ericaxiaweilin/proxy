@@ -157,6 +157,8 @@ func TestLocalNetPostgresLifecycle(t *testing.T) {
 
 	// 10. RecordPostImpression on the post → ACCEPTED + the post
 	// impression count must increment.
+	// COMP-PURPOSE-CONSENT-001：先取同意，否则服务端按 COMPLIANCE 拒收。
+	grantBehaviorAnalyticsPG(t, pool, svc, ctx, authorID)
 	r = svc.HandleContext(ctx, lnEnvelope("RecordPostImpression", map[string]any{
 		"targetId": postID, "viewerPrincipalId": "viewer_pg_" + itoa(run),
 		"marketId": "hn",
@@ -166,6 +168,28 @@ func TestLocalNetPostgresLifecycle(t *testing.T) {
 	}
 
 	cleanupLocalNetPG(t, pool, []string{postID, authorID})
+}
+
+// grantBehaviorAnalyticsPG 走**真实的** RecordPurposeConsent 命令取得同意。
+//
+// COMP-PURPOSE-CONSENT-001：行为追踪事件在服务端要先有按目的的同意。
+// 这里刻意走命令而不是直接 INSERT —— 顺带证明 Postgres 侧的同意写/读是通的
+// （如果哪天 postgres 实现漏了某个方法，这些集成测试会先红）。
+func grantBehaviorAnalyticsPG(t *testing.T, pool *pgxpool.Pool, svc *localnet.Service, ctx context.Context, actorID string) {
+	t.Helper()
+	res := svc.HandleContext(ctx, lnEnvelope("RecordPurposeConsent", map[string]any{
+		"purpose": localnet.PurposeBehaviorAnalytics, "granted": true, "source": "INTEGRATION_TEST",
+	}, actorID))
+	if res.Outcome != "ACCEPTED" {
+		t.Fatalf("grant consent for %s: got %s (%+v)", actorID, res.Outcome, res.Error)
+	}
+	// 同意行是 append-only 的审计数据，测试自己收尾 —— 否则它会一直堆在测试库里，
+	// 而这条表**故意**没有 TTL/清理任务（它是证据）。
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM privacy.purpose_consents WHERE user_id=$1`, actorID)
+	})
 }
 
 func feedContainsPG(t *testing.T, op, postID string) bool {
@@ -250,6 +274,9 @@ func TestProfileViewersPostgresRoundTrip(t *testing.T) {
 			t.Fatalf("RecordProfileOpen(%s): %+v", actor, res.Error)
 		}
 	}
+	// COMP-PURPOSE-CONSENT-001：PROFILE_OPEN 也是行为追踪，先取同意。
+	grantBehaviorAnalyticsPG(t, pool, svc, ctx, viewer1)
+	grantBehaviorAnalyticsPG(t, pool, svc, ctx, viewer2)
 	open(viewer1)
 	open(viewer2)
 	open(viewer1)
@@ -317,6 +344,9 @@ func TestMediaImpressionStatsPostgresRoundTrip(t *testing.T) {
 			t.Fatalf("RecordMediaImpression(%s, %s): %+v", actor, mediaAssetID, res.Error)
 		}
 	}
+	// COMP-PURPOSE-CONSENT-001：逐张照片的停留是敏感行为追踪，先取同意。
+	grantBehaviorAnalyticsPG(t, pool, svc, ctx, "viewer_1_"+itoa(run))
+	grantBehaviorAnalyticsPG(t, pool, svc, ctx, "viewer_2_"+itoa(run))
 	impress("viewer_1_"+itoa(run), mediaA, 900)
 	impress("viewer_1_"+itoa(run), mediaB, 7000)
 	impress("viewer_2_"+itoa(run), mediaB, 3000)

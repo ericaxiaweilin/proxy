@@ -374,9 +374,11 @@ describe("PLACEHOLDER-006 checklist walk gaps", () => {
     expect(orders).not.toMatch(/<Pressable[^>]*>\s*<Text[^>]*>查看明细[\s\S]{0,2000}<Pressable/);
   });
 
-  it("AI rail bleeds to the edges exactly like the human rail", () => {
-    expect(home).toContain("aiRail: { marginBottom: 10, marginHorizontal: -16 }");
-    expect(home).toContain("aiRailContent: { gap: 12, paddingHorizontal: 16 }");
+  it("hot-scene rail bleeds to the edges exactly like the human rail (AI rail removed 2026-09-27)", () => {
+    // SCENE-HOME-HOT-RAIL-001：AI 推荐行下架后，同位置的热门场景横滑继承
+    // 同一条贴边规则（负 margin 出血 + 内边距对齐），视觉不因换数据而破。
+    expect(home).toContain("hotRail: { marginBottom: 10, marginHorizontal: -16 }");
+    expect(home).toContain("hotRailContent: { gap: 12, paddingHorizontal: 16 }");
   });
 });
 

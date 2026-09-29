@@ -134,6 +134,7 @@ export function MarketSurface({
   onOpenExperience,
   onOpenRealityScene,
   onChromeVisibilityChange,
+  onMapPickOpenChange,
   bottomNavVisible,
   userCenter,
   onRequireKYC
@@ -152,6 +153,8 @@ export function MarketSurface({
   onOpenExperience?: ((experienceId: string) => void) | undefined;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
+  // 创建活动的全页选地点地图：打开期间壳藏底栏（跟 hotScenesOpen 同模式）。
+  onMapPickOpenChange?: ((open: boolean) => void) | undefined;
   bottomNavVisible?: boolean;
   // ORDER-APPLY-KYC-GATE-001：没过 KYC 点接单 → 弹提示 → 跳 KYC 页。壳接线（切 ME + 直达 providerapply）。
   onRequireKYC?: (() => void) | undefined;
@@ -201,6 +204,8 @@ export function MarketSurface({
   const [oppDetail, setOppDetail] = useState<MarketOpportunity | null>(null);
   const [oppQuoteMode, setOppQuoteMode] = useState<"budget" | "standard" | "premium" | "custom">("standard");
   const [activityPublishOpen, setActivityPublishOpen] = useState(false);
+  // 创建活动的全页选地点地图打开时，市场头部 + tabs 让位，地图拉满整页。
+  const [wizardMapOpen, setWizardMapOpen] = useState(false);
   // R58 一期：发布需求向导（Moment 模板 → 规格确认 → 成功）。
   const [demandWizardOpen, setDemandWizardOpen] = useState(false);
   const [publishMenuOpen, setPublishMenuOpen] = useState(false);
@@ -439,7 +444,10 @@ export function MarketSurface({
         （横向 padding 清零）之前只给订单 tab，活动 tab 缩进 18，
         同一块 MarketMap 一边顶边一边有缝。地图视图不分 tab 全顶边；
         列表视图保持原样（订单沿用 contentFlat，活动保留 18 padding）。 */}
-    <ScrollView refreshControl={<RefreshControl refreshing={marketPull.refreshing} onRefresh={marketPull.onRefresh} />} style={styles.root} contentContainerStyle={[styles.content, view === "MAP" || pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
+    <ScrollView refreshControl={<RefreshControl refreshing={marketPull.refreshing} onRefresh={marketPull.onRefresh} />} style={styles.root} contentContainerStyle={[styles.content, view === "MAP" || pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }, wizardMapOpen && styles.contentMapPick]} onScroll={onMarketScroll} scrollEventThrottle={16}>
+      {/* 全页选地点时市场头部 + tabs + offer 全部让位，地图拉满。 */}
+      {wizardMapOpen ? null : (
+      <>
       <View style={styles.marketHead}>
         <Text selectable style={styles.marketTitle}>市场</Text>
         <View style={styles.headActions}>
@@ -472,6 +480,8 @@ export function MarketSurface({
           {supplierMatches === undefined ? "供给匹配中…（hn·ZH）" : supplierError ? `供给查询失败：${supplierError}` : `供给匹配 ${supplierMatches.length} 人（hn·ZH 已核验）`}
         </Text>
       ) : null}
+      </>
+      )}
       {demandWizardOpen && pageTab === "OPPORTUNITY" ? (
         <DemandWizard
           marketplace={marketplace}
@@ -487,6 +497,7 @@ export function MarketSurface({
         <ActivityWizard
           activities={activities}
           scenes={activityItems}          onBack={() => setActivityPublishOpen(false)}
+          onMapPickOpenChange={(open) => { setWizardMapOpen(open); onMapPickOpenChange?.(open); }}
           onOpenDemand={() => { setActivityPublishOpen(false); openDemandWizard(); }}
           onReloadScenes={() => void loadActivities()}
           onPublished={(activity) => {
@@ -1036,9 +1047,10 @@ function PublishActivityForm({ activities, marketplace, venueOptions, onBack, on
         realitySceneId: venue.realitySceneId ?? "", desc: desc.trim() || "一起参加活动",
         consumptionTerm: "SPLIT"
       });
-      // R58 TraceID — 活动编号 PX-A：发布成功先留在表单展示成功卡，
-      // “查看活动”才把控制权交回父组件（刷新列表+切tab）。
-      setActivityTraceId(formatTraceId("A"));
+      // R58 成功卡：发布成功先留在表单展示编号，“查看活动”才把控制权交回父组件。
+      // PUBLIC-NO-001：编号是服务端分配的活动编号（全数字、可查询）。以前这里是客户端
+      // 随机生成的 PX-A-…，服务端查不到。老服务端没下发时如实显示「—」。
+      setActivityTraceId(created.code || "—");
       setCreatedActivity(created);
     } catch (e) { setError(e instanceof Error ? e.message : "活动发布失败，请重试"); }
     finally { setBusy(false); }
@@ -1131,7 +1143,7 @@ const CUSTOM_TEMPLATE: OpportunityTemplate = {
 
 // K → VND conversion + suggest error hints live in
 // ../market-template-price (unit-tested there).
-import { templatePriceToVND, describeSuggestError, requiredProviderCount, momentPriceQuote, quoteToVND, formatTraceId } from "../market-template-price";
+import { templatePriceToVND, describeSuggestError, requiredProviderCount, momentPriceQuote, quoteToVND } from "../market-template-price";
 
 // OPP-CATALOG-001 (R58): step-1 picker renders the delivery-style two
 // pane — a category rail (热门/见面/娱乐/出行/主题, server-owned) over
@@ -1429,10 +1441,11 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
         ...(targetAgent ? { targetUserId: targetAgent.agentId } : {}),
         ...(merchant.merchantId ? { merchantId: merchant.merchantId } : {})
       });
-      // R58 TraceID — 需求编号（PX-N）/邀约编号（PX-O），成功页展示+复制。
-      // onPublished 刷新市场列表但不再立即关闭表单：R58 成功页留在
-      // 原地展示编号与概要，“查看市场”退出、“再发一个”重置回选卡。
-      setTraceId(formatTraceId(targetAgent ? "O" : "N"));
+      // R58 成功页：需求编号 / 邀约编号。onPublished 刷新市场列表但不再立即关闭表单：
+      // 成功页留在原地展示编号与概要，“查看市场”退出、“再发一个”重置回选卡。
+      // PUBLIC-NO-001：编号是服务端发布时分配的（全数字、客服可查）。以前是客户端随机
+      // 生成的 PX-N / PX-O，服务端查不到。老服务端没下发时如实显示「—」。
+      setTraceId(opportunity.number || "—");
       onPublished(opportunity);
     } catch (error) {
       // MERCHANT-PUBLISH-001: 无成员资格 publisher 会被 server 403。
@@ -1646,7 +1659,7 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
             {targetAgent ? `已经向 ${targetAgent.name} 发出需求，等待确认。` : "你的需求已经进入市场，符合条件的人可以报名或报价。"}
           </Text>
           <View style={styles.publishTraceBox}>
-            <Text selectable style={styles.publishFlowSub}>{targetAgent ? "订单编号" : "需求编号"}</Text>
+            <Text selectable style={styles.publishFlowSub}>{targetAgent ? "邀约编号" : "需求编号"}</Text>
             <Text selectable style={styles.publishTraceId}>{traceId}</Text>
           </View>
           <View style={styles.publishFlowRow}>
@@ -2143,6 +2156,8 @@ const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 120, paddingHorizontal: 18, paddingTop: 10 },
   contentFlat: { paddingHorizontal: 0 },
+  // 全页选地点：三处缝全部清零（横向 18 + 顶部 10 + 底部 bottomPad），地图顶满。
+  contentMapPick: { paddingBottom: 0, paddingHorizontal: 0, paddingTop: 0 },
   marketHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginVertical: 4, paddingHorizontal: 12 },
   marketTitle: { color: color.ink, fontSize: 30, fontWeight: "800", lineHeight: 36 },
   marketSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },

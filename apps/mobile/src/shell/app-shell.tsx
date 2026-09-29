@@ -77,6 +77,7 @@ import { RoomSurface } from "../surfaces/room";
 import { AIAccountProfileSurface } from "../surfaces/ai-account-profile";
 import { OtherProfileSurface, type OtherProfileTarget } from "../surfaces/other-profile";
 import { RealitySceneMapSurface } from "../surfaces/reality-scene-map";
+import { HotScenesSurface } from "../surfaces/hot-scenes";
 // ACTIVITY-REF-001：动态里的活动引用卡片点开落到这里（带 initialActivityId）。
 import { ActivityDetailSurface } from "../surfaces/activity-detail";
 import { VoucherSurface } from "../surfaces/voucher";
@@ -346,7 +347,7 @@ export function AppShell({
         const absDy = Math.abs(dy);
         const swipeThreshold = 56;
         const isHorizontalSwipe = absDx > swipeThreshold && absDx > absDy * 1.25;
-        const canSwipeRoot = !rootSwipeBlockedRef.current && !realitySceneOpen && !activityDetailId && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen;
+        const canSwipeRoot = !rootSwipeBlockedRef.current && !realitySceneOpen && !hotScenesOpen && !activityDetailId && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen;
         if (isHorizontalSwipe && canSwipeRoot) {
           const page = currentPageRef.current;
           const idx = PAGE_SEQUENCE.indexOf(page);
@@ -387,6 +388,12 @@ export function AppShell({
   const [followDevice, setFollowDevice] = useState(true);
   const [locationRestoreDone, setLocationRestoreDone] = useState(false);
   const [realitySceneOpen, setRealitySceneOpen] = useState(false);
+  // HOT-SCENES-PAGE-001：首页热榜「更多」进的那一整页——跟 realitySceneOpen
+  // 同一个待遇（覆盖整个 body 的目的地，不属于任何一个 tab）。
+  const [hotScenesOpen, setHotScenesOpen] = useState(false);
+  // 创建活动从地点行进的全页场景地图：跟 realitySceneOpen 同一个待遇
+  //（覆盖整个 body 的目的地，底栏只有一级模块有）。
+  const [activityMapPickOpen, setActivityMapPickOpen] = useState(false);
   // ACTIVITY-REF-001：从动态里的活动卡片进活动详情。存 id 而不是 boolean ——
   // 「打开活动详情」必须指向**某一个**活动。以前只有不带 id 的 ACTIVITY_DETAIL
   // 路由（coming-soon.tsx），点进去只能落到活动列表，不是引用指向的那个活动。
@@ -481,6 +488,7 @@ export function AppShell({
       if (handleModuleBack()) return true;
       if (activityDetailId) { setActivityDetailId(undefined); return true; }
       if (realitySceneOpen) { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneOpen(false); return true; }
+      if (hotScenesOpen) { setHotScenesOpen(false); return true; }
       if (voucherOpen) { setVoucherOpen(false); return true; }
       if (tab === "ME" && messageChatAuthor) { setMessageChat(undefined); return true; }
       if (tab === "MESSAGES" && messageChatAuthor) { setMessageChat(undefined); return true; }
@@ -600,7 +608,7 @@ export function AppShell({
   // body 的目的地」，不是某个 tab 的子页面 —— 所以也要一起收掉导航 chrome。
   // 否则从动态点进他人主页后底栏还在，用户切个 tab 就会被留在一个没人负责关闭的
   // 主页上（它的写入方不在那个 tab，返回键也回不到正确的来源）。
-  const isNavVisible = !realitySceneOpen && !activityDetailId && !openAIProfile && !openHumanProfile && !meSubPageOpen && selectShellChromeVisible({
+  const isNavVisible = !realitySceneOpen && !hotScenesOpen && !activityMapPickOpen && !activityDetailId && !openAIProfile && !openHumanProfile && !meSubPageOpen && selectShellChromeVisible({
     tab,
     feedChromeVisible,
     homeChromeVisible,
@@ -724,6 +732,20 @@ export function AppShell({
           />
         ) : realitySceneOpen ? (
           <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} featuredAIAccount={realitySceneAI} featuredHuman={realitySceneHuman} initialSceneId={realitySceneSelection} {...(sceneMapOrigin ? { initialOrigin: sceneMapOrigin } : {})} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} onOpenAIProfile={(account) => { setAIProfileReturnToScene(true); setRealitySceneOpen(false); setOpenAIProfile(account); }} onOpenHumanProfile={(person) => { setHumanProfileReturnToScene(true); setRealitySceneOpen(false); setOpenHumanProfile({ ...person, posts: [], mediaByPost: {} }); }} />
+        ) : hotScenesOpen ? (
+          // HOT-SCENES-PAGE-001：跟 realitySceneOpen 同一个「点场景卡 → 进详情」
+          // 落点——带 sceneId 直达该场景，不带 = 总览（SCENE-MAP-DEFAULT-001 同一条道理）。
+          <HotScenesSurface
+            apiBaseUrl={localApiBaseUrl}
+            onBack={() => setHotScenesOpen(false)}
+            onOpenSceneMap={(sceneId) => {
+              setHotScenesOpen(false);
+              setRealitySceneAI(undefined);
+              setRealitySceneHuman(undefined);
+              setRealitySceneSelection(sceneId);
+              setRealitySceneOpen(true);
+            }}
+          />
         ) : openAIProfile ? (
           <AIAccountProfileSurface
             account={openAIProfile}
@@ -838,13 +860,11 @@ export function AppShell({
               marketplace={marketplace}
               activities={activities}
               experiences={experience}
-              aiAccounts={aiAccounts}
               relationship={relationship}
               {...(isGuest ? { isGuest } : {})}
               // HOME-PEOPLE-SEARCH-001: 首页人名搜全站，没有它新注册用户搜不到。
               profileClient={profile}
               {...(viewerAccountId ? { viewerAccountId } : {})}
-              onOpenAIProfile={setOpenAIProfile}
               onOpenHumanScene={(person, sceneId) => {
                 setRealitySceneAI(undefined);
                 setRealitySceneHuman({ userId: person.id, name: person.name, city: person.bio, avatarUri: person.photoUri, posts: [], mediaByPost: {} });
@@ -893,11 +913,6 @@ export function AppShell({
                 });
                 return "sent";
               }}
-              onMessageAI={(account) => {
-                setMessageChat({ author: account.displayName, aiAccount: account });
-                setPageOverride("MSG_CHAT");
-                setTab("MESSAGES");
-              }}
               onOpenRoomCreate={(candidates, sceneIndex) => { setRoomLayerInMore(true); setRoomCreateSceneIndex(sceneIndex ?? 0); setRoomCreateCandidates(candidates); }}
               loadRooms={() => conversation.listConversations()}
               onOpenRoom={(conversationId) => { setRoomLayerInMore(true); setRoomChatId(conversationId); }}
@@ -917,6 +932,9 @@ export function AppShell({
                 setRealitySceneSelection(sceneId);
                 setRealitySceneOpen(true);
               }}
+              // HOT-SCENES-PAGE-001：热榜「更多」进的是热门场景整页（排序/筛选/
+              // 网格），不是直接跳场景地图——两者是不同的落点。
+              onOpenHotScenes={() => setHotScenesOpen(true)}
               sceneApiBaseUrl={localApiBaseUrl}
               bottomNavVisible={isNavVisible}
             />
@@ -934,6 +952,7 @@ export function AppShell({
               initialTab={marketEntry.tab}
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
               onChromeVisibilityChange={setFeedChromeVisible}
+              onMapPickOpenChange={setActivityMapPickOpen}
               bottomNavVisible={isNavVisible}
               userCenter={sceneMapOrigin ? { lat: sceneMapOrigin.latitude, lng: sceneMapOrigin.longitude } : undefined}
               // ORDER-APPLY-KYC-GATE-001：市场接单没过 KYC → 切「我的」直达 KYC认证。

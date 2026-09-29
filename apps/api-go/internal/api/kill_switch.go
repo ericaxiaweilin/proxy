@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/compliance"
@@ -99,6 +100,19 @@ func (s *Server) operatorKillSwitchKill(w http.ResponseWriter, r *http.Request) 
 
 // operatorKillSwitchRearm handles DELETE
 // /v1/operator/legal/kill-switch/{category}. Operator only.
+//
+// COMP-KILLSWITCH-REARM-001（2026-09-27 修）：这里原来用 r.PathValue("category")。
+// 本仓的 http.NewServeMux 上没有任何带 {name} 的 pattern（server.go 里
+// 全部是字面路径，如 "/v1/operator/legal/kill-switch/"），所以 PathValue
+// **恒为空串**，NormalizeCategory("") 必然失败 —— 这个 DELETE 口从上线起
+// 就只会返回 400 invalid_category。
+//
+// 后果不是「少个功能」：法务 kill switch 一旦被武装就**再也卸不掉**
+// （只能直接改库）。这是一个合规工具，不能只有武装没有解除。
+//
+// 之所以一直没被发现：kill_switch_dispatch_test.go 测的是
+// svc.Rearm(...)（服务层），从来没有一个用例穿过 mux 打到这个 HTTP 口。
+// 修法 + 补钉见同批的 kill_switch_rearm_route_test.go。
 func (s *Server) operatorKillSwitchRearm(w http.ResponseWriter, r *http.Request) {
 	if !methodGuard(w, r, http.MethodDelete) {
 		return
@@ -110,7 +124,12 @@ func (s *Server) operatorKillSwitchRearm(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "compliance_service_unavailable"})
 		return
 	}
-	categoryStr := r.PathValue("category")
+	raw := strings.TrimPrefix(r.URL.Path, "/v1/operator/legal/kill-switch/")
+	categoryStr := strings.Trim(strings.TrimSpace(raw), "/")
+	if categoryStr == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "category_required"})
+		return
+	}
 	category, err := compliance.NormalizeCategory(categoryStr)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_category", "reason": err.Error()})

@@ -135,14 +135,14 @@ func (r *BusinessRepository) ListMembers(ctx context.Context, businessID string)
 
 func (r *BusinessRepository) CreateStore(ctx context.Context, store business.Store) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO business.stores (id, business_id, name, address, status, created_at, category)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`, store.ID, store.BusinessID, store.Name, store.Address, store.Status, store.CreatedAt, store.Category)
+		INSERT INTO business.stores (id, business_id, name, address, status, created_at, category, reality_scene_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, store.ID, store.BusinessID, store.Name, store.Address, store.Status, store.CreatedAt, store.Category, store.RealitySceneID)
 	return err
 }
 
 func (r *BusinessRepository) ListStores(ctx context.Context, businessID string) ([]business.Store, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, business_id, name, address, status, created_at, category
+		SELECT id, business_id, name, address, status, created_at, category, reality_scene_id
 		FROM business.stores WHERE business_id=$1 ORDER BY created_at`, businessID)
 	if err != nil {
 		return nil, err
@@ -151,7 +151,7 @@ func (r *BusinessRepository) ListStores(ctx context.Context, businessID string) 
 	result := []business.Store{}
 	for rows.Next() {
 		var store business.Store
-		if err := rows.Scan(&store.ID, &store.BusinessID, &store.Name, &store.Address, &store.Status, &store.CreatedAt, &store.Category); err != nil {
+		if err := rows.Scan(&store.ID, &store.BusinessID, &store.Name, &store.Address, &store.Status, &store.CreatedAt, &store.Category, &store.RealitySceneID); err != nil {
 			return nil, err
 		}
 		result = append(result, store)
@@ -162,9 +162,9 @@ func (r *BusinessRepository) ListStores(ctx context.Context, businessID string) 
 func (r *BusinessRepository) GetStore(ctx context.Context, storeID string) (business.Store, error) {
 	var store business.Store
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, business_id, name, address, status, created_at, category
+		SELECT id, business_id, name, address, status, created_at, category, reality_scene_id
 		FROM business.stores WHERE id=$1`, storeID).Scan(
-		&store.ID, &store.BusinessID, &store.Name, &store.Address, &store.Status, &store.CreatedAt, &store.Category,
+		&store.ID, &store.BusinessID, &store.Name, &store.Address, &store.Status, &store.CreatedAt, &store.Category, &store.RealitySceneID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return business.Store{}, errors.New("store not found")
@@ -172,13 +172,37 @@ func (r *BusinessRepository) GetStore(ctx context.Context, storeID string) (busi
 	return store, err
 }
 
-// UpdateStore 全量覆盖（STORE-STATS-001；目前只有品类改这里）。
+// UpdateStore 全量覆盖（STORE-STATS-001 品类、STORE-SCENE-LINK-001 场景关联都改这里）。
 func (r *BusinessRepository) UpdateStore(ctx context.Context, store business.Store) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		UPDATE business.stores SET name=$2, address=$3, status=$4, category=$5
+		UPDATE business.stores SET name=$2, address=$3, status=$4, category=$5, reality_scene_id=$6
 		WHERE id=$1`,
-		store.ID, store.Name, store.Address, store.Status, store.Category)
+		store.ID, store.Name, store.Address, store.Status, store.Category, store.RealitySceneID)
 	return err
+}
+
+// STORE-SCENE-LINK-001：反向查——这个现实场景关联着哪些店，拉它们的相册
+// （多家店可能认领同一个场景，按认领店铺、店内排序号、创建时间排列）。
+func (r *BusinessRepository) ListStorePhotosByRealitySceneID(ctx context.Context, sceneID string) ([]business.StorePhoto, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT p.id, p.store_id, p.business_id, p.uploaded_by, p.asset_path, p.caption, p.sort_order, p.media_asset_id, p.created_at
+		FROM business.store_photos p
+		JOIN business.stores s ON s.id = p.store_id
+		WHERE s.reality_scene_id = $1
+		ORDER BY p.store_id, p.sort_order, p.created_at DESC`, sceneID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []business.StorePhoto{}
+	for rows.Next() {
+		var p business.StorePhoto
+		if err := rows.Scan(&p.ID, &p.StoreID, &p.BusinessID, &p.UploadedBy, &p.AssetPath, &p.Caption, &p.SortOrder, &p.MediaAssetID, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, p)
+	}
+	return result, rows.Err()
 }
 
 func (r *BusinessRepository) AddStorePhoto(ctx context.Context, p business.StorePhoto) error {

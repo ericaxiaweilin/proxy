@@ -14,10 +14,12 @@ import (
 
 // PROVIDER-APPLY-001：「申请成为小美」。
 //
-//	GET  /v1/provider-application           本人最近一份申请（没有 = application: null）+ 表单可选值
-//	POST /v1/provider-application           提交
-//	POST /v1/provider-application/withdraw  撤回（只在审核中可撤）
-//	GET  /v1/provider-application/stats     接单权限状态 + 本人履约记录（我的订单顶部面板）
+//	GET  /v1/provider-application               本人最近一份申请（没有 = application: null）+ 表单可选值
+//	POST /v1/provider-application               提交
+//	POST /v1/provider-application/withdraw      撤回（只在审核中可撤）
+//	GET  /v1/provider-application/stats         接单权限状态 + 本人履约记录（我的订单顶部面板）
+//	POST /v1/provider-application/phone/request 发验证码（KYC-PHONE-ONLY-001）
+//	POST /v1/provider-application/phone/verify  验证码校验，成功返回可以带进 Submit 的 challengeId
 //
 // 运营（operatorConsole 同一道门）：
 //
@@ -71,6 +73,37 @@ func (s *Server) routeProviderApplication(w http.ResponseWriter, r *http.Request
 		return
 	case path == "/v1/provider-application/withdraw" && r.Method == http.MethodPost:
 		app, err = s.ProviderApps.Withdraw(r.Context(), userID)
+	case path == "/v1/provider-application/phone/request" && r.Method == http.MethodPost:
+		var body struct {
+			Phone string `json:"phone"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
+			return
+		}
+		challenge, cErr := s.ProviderApps.RequestPhoneVerification(r.Context(), userID, body.Phone)
+		if cErr != nil {
+			writeProviderAppError(w, cErr)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"challengeId": challenge.ID, "expiresAt": challenge.ExpiresAt})
+		return
+	case path == "/v1/provider-application/phone/verify" && r.Method == http.MethodPost:
+		var body struct {
+			ChallengeID string `json:"challengeId"`
+			Code        string `json:"code"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
+			return
+		}
+		challenge, cErr := s.ProviderApps.VerifyPhoneVerification(r.Context(), userID, body.ChallengeID, body.Code)
+		if cErr != nil {
+			writeProviderAppError(w, cErr)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"verified": true, "phone": challenge.Phone})
+		return
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return
@@ -104,6 +137,11 @@ func writeProviderAppError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 	case errors.Is(err, providerapp.ErrUnavailable):
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "provider_application_unavailable"})
+	case errors.Is(err, providerapp.ErrPhoneChallenge):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "phone_challenge_invalid"})
+	case errors.Is(err, providerapp.ErrPhoneProviderGap):
+		log.Printf("provider application: phone provider not ready: %v", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "phone_provider_not_configured"})
 	default:
 		log.Printf("provider application: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "provider_application_failed"})
@@ -162,39 +200,4 @@ func ProviderTermsLoader() func() (providerapp.Terms, error) {
 		}
 		return providerapp.LoadTerms(filepath.Join(dir, "terms.json"))
 	}
-}
-
-// operatorProviderApplicationMedia：运营看申请里的证件 / 自拍（OWNER_ONLY，公开的 /v1/media/thumb 不给）。
-// 只放行这份申请自己引用的图，按申请人本人的图读（media.OwnerImagePath）。
-//
-//	GET /v1/operator/provider-applications/media?applicationId=…&asset=…
-func (s *Server) operatorProviderApplicationMedia(w http.ResponseWriter, r *http.Request) {
-	if s.ProviderApps == nil || s.Media == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "provider_application_unavailable"})
-		return
-	}
-	appID, assetID := r.URL.Query().Get("applicationId"), r.URL.Query().Get("asset")
-	app, err := s.ProviderApps.Get(r.Context(), appID)
-	if err != nil || app == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
-		return
-	}
-	allowed := false
-	for _, id := range app.Documents() {
-		if id == assetID {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
-		return
-	}
-	path, err := s.Media.OwnerImagePath(r.Context(), app.UserAccountID, assetID)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_not_available"})
-		return
-	}
-	w.Header().Set("Cache-Control", "private, no-store")
-	http.ServeFile(w, r, path)
 }

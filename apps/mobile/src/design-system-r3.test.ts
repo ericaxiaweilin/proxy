@@ -109,7 +109,32 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "taskProgress",
   "taskDoneBadge",
   "tierCardBadge",
-  "sectionTitleHint"
+  "sectionTitleHint",
+  // HOT-SCENES-PAGE-001: hot-scenes.tsx card badges — TOP N ribbon, the
+  // distance pill over the cover image, and the ★ glyph itself (a symbol,
+  // not read text) — same category as coverBadgeText/matchLabelText above.
+  "rankText",
+  "distanceText",
+  "ratingStar",
+  // SCENE-DISTANCE-BADGE-001: scene-shop-directory.tsx's own distance pill
+  // over the cover photo, same category as coverBadgeText/distanceText above.
+  "cardDistanceText",
+  // SCENE-RATING-CHIP-001: requester-home.tsx 首页热门场景卡的 ★ 符号，
+  // 跟 hot-scenes.tsx 的 ratingStar 同一类（符号，不是读的文字）。
+  "hotRatingStar",
+  // SCENE-DISTANCE-BADGE-001: requester-home.tsx 首页热门场景卡的距离角标，
+  // 跟 hotBadge/distanceText 同一类（封面上的短徽标，不是读的正文）。
+  "hotDistanceText",
+  // 补登记：上面 hotDistanceText 的注释本来就写着「跟 **hotBadge** 同一类」，但当时
+  // 只登记了 hotDistanceText —— hotBadge/hotBadgeText 是**同一张封面上的另一颗**角标
+  // （左上 TOP N，右上距离），漏登记的那半。它同时就是 hot-scenes.tsx 的 rankText
+  // 那个「TOP N ribbon」，rankText 早在白名单里。
+  "hotBadgeText",
+  // 首页热门场景 section 头的排序态胶囊（文案 `hotScenesTag` =「按去过人数排」）：
+  // 不是正文，是**当前排序模式**的短标签，跟 todayKicker / taskGroupLabel /
+  // sectionTitleHint 同一类；10.5pt 也仍在 README「Bottom Nav 之外无 10pt 以下文本」
+  // 之内（11pt 那条底线原文限定的是「正文」）。
+  "hotTagText"
 ];
 
 describe("Proxy Design System R3 typography", () => {
@@ -374,5 +399,53 @@ describe("DESIGN-CLEANUP-001 token discipline and shared primitives", () => {
     };
     const zombies = baseline.screenReferences.filter((s) => s.status.startsWith("SUPERSEDED"));
     expect(zombies.map((s) => s.scope)).toEqual([]);
+  });
+});
+
+describe("PHOTO-SCRIM-001 照片遮罩必须是渐变，不是平涂色带", () => {
+  const stripComments = (source: string): string =>
+    source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+
+  it("keeps the single PhotoScrim primitive exported from the foundation", () => {
+    const foundation = readFileSync(join(sourceRoot, "components", "proxy-foundation.tsx"), "utf8");
+    expect(foundation, "照片遮罩的唯一实现被删了/改名了").toContain("export function PhotoScrim");
+    // 顶上那一口小暗（热门场景 .scene-cover 是 0.15）必须走参数，不许有人再另写一份平涂。
+    expect(foundation, "topDarken 参数没了，热门场景那条 4 段渐变表达不出来").toContain("topDarken");
+  });
+
+  it("no *Shade / *Scrim style is a flat rgba fill with a percentage height", () => {
+    // 用户 2026-09-28 报「为什么还是被标注层遮挡半页图片」：确认下单的 84×84 照片卡
+    // 用的是 `{ backgroundColor: "rgba(0,0,0,0.32)", height: "55%" }` —— 一块硬边
+    // 平涂色带，照片下半页整块压暗、45% 处留一条横切边。原型是
+    // `linear-gradient(180deg, transparent 45%, rgba(0,0,0,.7) 100%)`。
+    // 同一形状当时还有三处：reality-scene-map 的 280pt 封面（55%）、hot-scenes 的
+    // 方形封面（100%）、以及本屏。
+    //
+    // 为什么只钉「平涂 + 百分比 height」这一种形状（钉的形状 = 它能证明的命题）：
+    //   平涂 + 百分比高度 = 硬边色带 / 整块平涂。这个形状**没有正当用途** —— 弹层
+    //   背板（badgeScrim / moreScrim / filterDropdownScrim）一律走 flex:1 或
+    //   StyleSheet.absoluteFill，从不写百分比高度。所以这条钉零误报、不需要豁免名单，
+    //   而豁免名单是会腐烂的（今天豁免，明天就没人记得为什么）。
+    //   反过来说：inset:0 的**均匀染色**遮罩（humanSceneLinkShade 等）**故意不判**。
+    //   文字压在卡片**顶部**时底部渐变够不着它，均匀染色是正当解法；那种要按具体
+    //   版式逐个看，不能一刀切。
+    //   正确的做法一律是 <PhotoScrim />（components/proxy-foundation.tsx）。
+    const violations: string[] = [];
+    for (const directory of ["components", "surfaces"]) {
+      for (const file of sourceFiles(join(sourceRoot, directory))) {
+        // 必须先剥注释：PHOTO-SCRIM-001 的说明注释里**原文引用**了那些坏写法，
+        // 不剥就会把自己的说明当成违规（这一条是写钉时实测出来的）。
+        const source = stripComments(readFileSync(file, "utf8"));
+        const rel = file.slice(sourceRoot.length + 1);
+        for (const match of source.matchAll(/^\s*([A-Za-z0-9_]*(?:Shade|Scrim)[A-Za-z0-9_]*)\s*:\s*\{([^}]*)\}/gm)) {
+          const key = match[1] ?? "";
+          const body = match[2] ?? "";
+          if (/backgroundColor:\s*"rgba\(/.test(body) && /height:\s*"\d+%"/.test(body)) {
+            violations.push(`${rel} → ${key}`);
+          }
+        }
+      }
+    }
+    expect(violations, `照片遮罩不许是平涂色带，改用 <PhotoScrim />：\n${violations.join("\n")}`).toEqual([]);
   });
 });

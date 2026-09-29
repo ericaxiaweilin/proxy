@@ -20,7 +20,14 @@ describe("SCENE-NAV-001 the scene homepage navigates there", () => {
     expect(mapCode).toContain('Platform.OS === "ios" ? urls.apple : urls.google');
     expect(mapCode).toContain("Linking.openURL(url)");
     expect(mapCode).toContain('accessibilityLabel="导航去这里"');
-    expect(mapCode).toContain("导航去这里 ›");
+    // SCENE-HOME-PROTOTYPE-001（2026-09-28）：可见文案收成「导航」—— 原型那颗就写
+    // 「导航」，兄弟实现 scene-shop-directory 的 actNav 也早就是「导航」，只有这里
+    // 多写了「去这里」。无障碍标签仍留「导航去这里」（上一行），读屏听完整一点更有用。
+    expect(mapCode).toContain("style={styles.action3NavText}>导航<");
+    // 反向针：尾部那颗文本字符 `›` 不许回来 —— 它现在是真字形 arrowUpRight。
+    // 字符不是字形（BACK-GLYPH-001 同款）：形状和垂直基线随 fontSize 漂，
+    // 跟别处的 chevron 也对不上粗细。
+    expect(mapCode).not.toContain("导航去这里 ›");
   });
 
   it("fails closed with distinct messages instead of inventing a point", () => {
@@ -57,5 +64,19 @@ describe("SCENE-NAV-PIN-001 pin tap pops navigation-or-detail choices", () => {
     // 点地图空白、×、系统返回都能收卡 —— 卡赖着不走等于挡地图。
     expect(mapCode).toContain("onPress={() => setPinSheetId(undefined)}");
     expect(mapCode).toContain('accessibilityLabel="关闭快打卡"');
+  });
+
+  it("the sheet is actually reachable on iOS: the marker callout opens it too", () => {
+    // 2026-09-28 模拟器实测：iOS 上带 title/description 的 Marker，点图钉只弹
+    // **原生 callout**（地图自带的标题气泡），`Marker.onPress` 不触发 ⇒ 应用自己的
+    // 快打卡弹层（导航去这里 / 看详情）**永远打不开** —— SCENE-NAV-PIN-001 名存实亡
+    // （门禁那几条 grep 全绿，因为它只查源码里有没有 setPinSheetId(scene.id)）。
+    // 挂上 onCalloutPress 之后，点 callout 才进得来。这条钉守的就是「这条可达路径还在」。
+    expect(mapCode).toContain("onCalloutPress={() => { setPinSheetId(scene.id); }}");
+    // 反向针：title / description 不能为了「只留一层气泡」删掉 —— 它们是图钉的
+    // 无障碍标签（AXLabel = "名字, 地址"），删了读屏用户就只剩一堆无名图钉。
+    // 想改成「一次点击直接开弹层」得先给 Marker 换个 accessibilityLabel，别顺手删。
+    expect(mapCode).toContain("title={scene.name}");
+    expect(mapCode).toContain("description={sceneAddressLine(scene)}");
   });
 });
