@@ -1571,7 +1571,11 @@ if ! grep -qF 'AgentClaimNumber: s.resolveAgentClaimNumber(ctx, p.AgentID)' apps
    ! grep -qF 'AgentClaimNumber: agentClaimNumber(ctx, a.claimNumbers, record.AgentID)' apps/api-go/cmd/api/wire_fulfillment.go ||
    # 两条跨域物化路径（scene 邀约 / marketplace 报价）都要冻结：少一条就有那类订单
    # 的 recipe 里没有编号，而干净库跑测试照样全绿。
-   [ "$(grep -cF 'AgentClaimNumber: agentClaimNumber(ctx, a.claimNumbers, record.AgentID)' apps/api-go/cmd/api/wire_fulfillment.go)" = "2" ] ||
+   # ⚠️ 计数那一条必须写成**否定式**（`!= "2"`）。整条 if 是 `! 存在 || ! 存在 || …`
+   #    的链，每一条都在说「缺了才红」；写成正向断言 `[ … = "2" ]` 会在接线**正确**时
+   #    把整条链短路进失败分支 ⇒ 钉恒红，而且它后面 9000 多行钉一条都跑不到。
+   #    （2026-09-30 实测：六条子句全部命中、钉仍然报缺口；恒红钉藏住整条尾巴。）
+   [ "$(grep -cF 'AgentClaimNumber: agentClaimNumber(ctx, a.claimNumbers, record.AgentID)' apps/api-go/cmd/api/wire_fulfillment.go)" != "2" ] ||
    ! grep -qF 'fulfillmentService.WithAgentClaimNumbers(claimNumbers)' apps/api-go/cmd/api/main.go ||
    ! grep -qF 'func (r *IdentityRepository) AgentClaimNumber(' apps/api-go/internal/platform/postgres/identity.go; then
   echo "  FAIL [ORDER-AGENT-CLAIM-NO-001]: 接单编号写侧链路有缺口 —— 三条下单路径 / 两条物化路径 /" >&2
