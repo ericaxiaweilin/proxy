@@ -865,7 +865,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
           ))}
         </ScrollView>
         {phase === "LOADING" ? <ProxyLoading tone="brand" /> : null}
-        {phase === "ERROR" ? <Text selectable style={styles.personalEmpty}>订单服务暂时不可用，请稍后重试。</Text> : null}
+        {phase === "ERROR" ? <Text selectable style={styles.personalEmpty}>没能打开这些订单，刷新再试试。</Text> : null}
         {phase === "READY" && visible.length === 0 ? <Text selectable style={styles.personalEmpty}>当前分类还没有订单。</Text> : null}
         {cancelError ? <Text selectable style={styles.orderNotice}>{cancelError}</Text> : null}
         {visible.map((item) => (

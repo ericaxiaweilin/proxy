@@ -2983,7 +2983,6 @@ export function MeSurface({
           {!content?.sections ? (
             <View style={styles.infoNote}>
               <Text selectable style={styles.infoNoteTitle}>正在准备这个工作区</Text>
-              <Text selectable style={styles.infoNoteText}>它会沿用此页面的真实业务对象和权限边界，不再以通用占位页替代。</Text>
             </View>
           ) : null}
           <Pressable onPress={() => setSubPage(undefined)} style={styles.lightCta}>

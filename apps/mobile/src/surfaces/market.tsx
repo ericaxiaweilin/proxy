@@ -578,7 +578,7 @@ export function MarketSurface({
             </View>
           ) : activityPhase === "ERROR" ? (
             <View style={styles.emptyBox}>
-              <Text selectable style={styles.emptyText}>活动暂时加载不出来，请重试。</Text>
+              <Text selectable style={styles.emptyText}>没能打开这个活动，刷新再试试。</Text>
               <Pressable onPress={() => void loadActivities()} style={styles.retryBtn}>
                 <Text selectable style={styles.retryText}>重试</Text>
               </Pressable>

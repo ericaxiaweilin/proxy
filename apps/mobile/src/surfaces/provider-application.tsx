@@ -327,7 +327,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
           item.title,
           item.body,
           item.enforced ? undefined : "这条规则的执行机制还没上线，上线后按此生效。",
-        )) : <Text selectable style={s.error}>履约条款暂时读不到，稍后再试。</Text>}
+        )) : <Text selectable style={s.error}>没能加载履约条款，刷新再试。</Text>}
         {nav("phone", () => { void submit(); }, busy === "submit" ? "提交中…" : "提交 KYC 审核", !noCrime || !dataConsent)}
       </View> : null}
 

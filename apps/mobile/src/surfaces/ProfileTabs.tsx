@@ -884,7 +884,7 @@ function PostCard(props: {
         {props.repliesExpanded && props.onToggleReplies ? (
           props.repliesFailed ? (
             <Pressable onPress={props.onToggleReplies} style={styles.postReplyToggle} accessibilityLabel="收起评论">
-              <Text selectable style={styles.postReplyToggleText}>评论暂时无法读取，点这里收起重试</Text>
+              <Text selectable style={styles.postReplyToggleText}>没能加载评论，点这里重试</Text>
             </Pressable>
           ) : (props.replies ?? []).length === 0 ? (
             /* 展开成功但一条评论都没有时必须说一句话：否则点完 💬 屏幕上什么都不变，

@@ -2123,7 +2123,7 @@ export function FeedSurface({
         </View>
       ) : phase === "ERROR" ? (
         <View style={styles.feedEmpty}>
-          <Text selectable style={styles.feedEmptyText}>读模型暂时不可用（本地 API 未连接？）。</Text>
+          <Text selectable style={styles.feedEmptyText}>没能连上，刷新再试试。</Text>
           {lastFeedError ? <Text selectable style={[styles.feedEmptyText, { marginTop: 8, color: color.error }]}>{lastFeedError}</Text> : null}
           <Pressable onPress={() => void loadFeed(undefined, true)} style={styles.retryBtn}>
             <Text selectable style={styles.retryBtnText}>重试</Text>

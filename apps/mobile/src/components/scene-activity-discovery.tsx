@@ -485,7 +485,7 @@ export function SceneActivityDiscovery({
 
       {/* SCENE-HOME-CARDS-RESTORE-001：上午那 8 张大图卡回来了（2 个标签 + "+N" 原地展开）。
           下面入口卡不动，仍是场景目录（列表/详情）的入口。 */}
-      {filtered.length > 0 ? <View style={styles.sceneList}>{filtered.map((moment) => renderMomentCard(moment, true))}</View> : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>暂时没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个筛选条件，看看更多组合。</Text></View>}
+      {filtered.length > 0 ? <View style={styles.sceneList}>{filtered.map((moment) => renderMomentCard(moment, true))}</View> : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个筛选条件，看看更多组合。</Text></View>}
 
       {/* SCENE-HOME-ENTRY-001：入口卡替掉了原来直接铺在首页的 Moment 大图卡
           列表。一张卡 = 一个真的有场景的分类；计数、去过人数、区域全部来自
