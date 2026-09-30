@@ -6,6 +6,21 @@ const root = resolve(import.meta.dirname, "..");
 const manifestPath = resolve(root, "docs/design/CURRENT_BASELINE.json");
 const contractsPath = resolve(root, "docs/design/IMPLEMENTATION_CONTRACTS.json");
 const errors = [];
+
+// DESIGN-STATUS-ENUM-001：这两个 `status` 是**枚举**，但门禁只把它们跟字面量比
+// （`=== "ACTIVE_SCREEN_REFERENCE"` / `=== "PARTIAL"`）。于是**拼错一个字母就等于
+// 把那条检查静默关掉** —— 实测（2026-09-30）：把某个 active scope 的 status 拼错、
+// 顺手 bump `baselineRevision`、再删掉它的 implementation contract，门禁照样
+// `passed`；而 status 拼对时同一份文件报 `active scope has no implementation contract`。
+// 一个字符之差，守卫消失。所以这里显式列出合法取值：新增一种状态**必须**改这里，
+// 那正是我们想要的「被迫做一次决定」，而不是让它悄悄生效。
+const SCREEN_REFERENCE_STATUSES = new Set([
+  "ACTIVE_SCREEN_REFERENCE",
+  "ACTIVE_IMPLEMENTATION_REFERENCE",
+  "FUNCTIONAL_REFERENCE_ONLY"
+]);
+const CONTRACT_STATUSES = new Set(["PARTIAL", "SCAFFOLD_ONLY", "IMPLEMENTED"]);
+
 let manifest;
 
 if (!existsSync(manifestPath)) {
@@ -31,6 +46,9 @@ if (!existsSync(manifestPath)) {
     ["integration.policy", manifest.integration?.policy]
   ];
   for (const [index, entry] of (manifest.screenReferences ?? []).entries()) {
+    if (!SCREEN_REFERENCE_STATUSES.has(entry.status)) {
+      errors.push(`screenReferences[${index}].status is not a known status: ${JSON.stringify(entry.status)} — expected one of ${[...SCREEN_REFERENCE_STATUSES].join(", ")}`);
+    }
     declaredPaths.push([`screenReferences[${index}].file`, entry.file]);
     declaredPaths.push([`screenReferences[${index}].implementationBaseline`, entry.implementationBaseline]);
   }
@@ -83,7 +101,14 @@ if (!existsSync(contractsPath)) {
     for (const file of [...(contract.implementationFiles ?? []), ...(contract.evidenceFiles ?? [])]) {
       if (!existsSync(resolve(root, file))) errors.push(`contract ${contract.scope} file does not exist: ${file}`);
     }
-    if (contract.status === "PARTIAL" && !contract.knownGap) errors.push(`partial contract must describe its gap: ${contract.scope}`);
+    if (!CONTRACT_STATUSES.has(contract.status)) {
+      errors.push(`contract ${contract.scope} has unknown status: ${JSON.stringify(contract.status)} — expected one of ${[...CONTRACT_STATUSES].join(", ")}`);
+    }
+    // 任何「非 IMPLEMENTED」的状态都必须说清缺什么。原来只守 PARTIAL，
+    // 于是 SCAFFOLD_ONLY（按定义就有缺口）可以留空 knownGap 而没人管。
+    if (contract.status !== "IMPLEMENTED" && !contract.knownGap) {
+      errors.push(`contract ${contract.scope} must describe its gap (status ${contract.status})`);
+    }
   }
   for (const scope of activeScopes) {
     if (!contractScopes.has(scope)) errors.push(`active scope has no implementation contract: ${scope}`);
