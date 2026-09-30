@@ -23,3 +23,10 @@ apps/mobile/ios/build/
 apps/mobile/ios/.xcode.env.local
 apps/api-go/media_store/
 apps/api-go/.local/
+
+# UI 原型基准图（scripts/render-prototypes.mjs 的产物）。
+# **不入库**：6.5MB 可再生二进制 —— 跑一次 `node scripts/render-prototypes.mjs`
+# 就重新生成（增量渲染，HTML 没变就跳过）。manifest.json 要入库：它记录
+# 「哪个原型 ↔ 哪张基准图 ↔ 什么指纹」，是比对逻辑的依据。
+docs/design/baseline-images/*.png
+docs/design/visual-diffs/

@@ -1,0 +1,288 @@
+{
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "prototypes": {
+    "Proxy_Activity_Create_Form_20260928_34cc3e": {
+      "source": "docs/design/references/Proxy_Activity_Create_Form_20260928_34cc3e.html",
+      "image": "docs/design/baseline-images/activity_create_form_20260928_34cc3e.png",
+      "fingerprint": "c5ec7636ee398c34",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Auth_Standard_UI_v7": {
+      "source": "docs/design/references/Proxy_Auth_Standard_UI_v7.html",
+      "image": "docs/design/baseline-images/auth_standard_ui_v7.png",
+      "fingerprint": "558d205902f92f88",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_COMPLETE_FiveRoot_FACET_v11": {
+      "source": "docs/design/references/Proxy_COMPLETE_FiveRoot_FACET_v11.html",
+      "image": "docs/design/baseline-images/complete_fiveroot_facet_v11.png",
+      "fingerprint": "fd39f03ba7df174c",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_ForYou_LockIcon_20260928_c004b0": {
+      "source": "docs/design/references/Proxy_ForYou_LockIcon_20260928_c004b0.html",
+      "image": "docs/design/baseline-images/foryou_lockicon_20260928_c004b0.png",
+      "fingerprint": "8655f937fc21c984",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_ForYou_Select_ConfirmOrder_20260927_226eac": {
+      "source": "docs/design/references/Proxy_ForYou_Select_ConfirmOrder_20260927_226eac.html",
+      "image": "docs/design/baseline-images/foryou_select_confirmorder_20260927_226eac.png",
+      "fingerprint": "bb7527d04be9f505",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Invite_UserScene_Engineering_Prototype_v0.2": {
+      "source": "docs/design/references/Proxy_Invite_UserScene_Engineering_Prototype_v0.2.html",
+      "image": "docs/design/baseline-images/invite_userscene_engineering_prototype_v0.2.png",
+      "fingerprint": "83fa8e0d8f6f370a",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Lotus_Messaging_COMPLETE_v8": {
+      "source": "docs/design/references/Proxy_Lotus_Messaging_COMPLETE_v8.html",
+      "image": "docs/design/baseline-images/lotus_messaging_complete_v8.png",
+      "fingerprint": "904e9f4cc33920ed",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Lotus_Messaging_COMPLETE_v9_AUDITED": {
+      "source": "docs/design/references/Proxy_Lotus_Messaging_COMPLETE_v9_AUDITED.html",
+      "image": "docs/design/baseline-images/lotus_messaging_complete_v9_audited.png",
+      "fingerprint": "d7e953f2fa90a1ad",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Market_Opportunity_Filter_R7": {
+      "source": "docs/design/references/Proxy_Market_Opportunity_Filter_R7.html",
+      "image": "docs/design/baseline-images/market_opportunity_filter_r7.png",
+      "fingerprint": "961ea0190fcf1ada",
+      "viewport": {
+        "width": 410,
+        "height": 844
+      },
+      "reviewStageCrop": true
+    },
+    "Proxy_Merchant_Me_Standalone_R21_ActivityVoucherIcon_Fix": {
+      "source": "docs/design/references/Proxy_Merchant_Me_Standalone_R21_ActivityVoucherIcon_Fix.html",
+      "image": "docs/design/baseline-images/merchant_me_standalone_r21_activityvouchericon_fix.png",
+      "fingerprint": "d65dd5ec1af84a4b",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Messaging_R36_1_Secure_Stickers": {
+      "source": "docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html",
+      "image": "docs/design/baseline-images/messaging_r36_1_secure_stickers.png",
+      "fingerprint": "5c8f2b13856ec87b",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_MyTickets_20260928_d7fef9": {
+      "source": "docs/design/references/Proxy_MyTickets_20260928_d7fef9.html",
+      "image": "docs/design/baseline-images/mytickets_20260928_d7fef9.png",
+      "fingerprint": "0d0bf2c10d980e44",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Profile_Threads_Standalone_R2": {
+      "source": "docs/design/references/Proxy_Profile_Threads_Standalone_R2.html",
+      "image": "docs/design/baseline-images/profile_threads_standalone_r2.png",
+      "fingerprint": "d90dafc391e7e496",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_R15_15_Core_IA_Functional_v2": {
+      "source": "docs/design/references/Proxy_R15_15_Core_IA_Functional_v2.html",
+      "image": "docs/design/baseline-images/r15_15_core_ia_functional_v2.png",
+      "fingerprint": "9329bc863ad6b018",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_R15_18_Threads_Profile_Polished": {
+      "source": "docs/design/references/Proxy_R15_18_Threads_Profile_Polished.html",
+      "image": "docs/design/baseline-images/r15_18_threads_profile_polished.png",
+      "fingerprint": "2b724f5fead6d12d",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_User_R34_12_1_End_to_End_Invite_Flow_FIXED": {
+      "source": "docs/design/references/Proxy_User_R34_12_1_End_to_End_Invite_Flow_FIXED.html",
+      "image": "docs/design/baseline-images/user_r34_12_1_end_to_end_invite_flow_fixed.png",
+      "fingerprint": "936f1fc5c3768568",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Voucher_Prototype_R15_12_17_2026-08-21": {
+      "source": "docs/design/references/Proxy_Voucher_Prototype_R15_12_17_2026-08-21.html",
+      "image": "docs/design/baseline-images/voucher_prototype_r15_12_17_2026-08-21.png",
+      "fingerprint": "8f72957cf2f75778",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Wallet_20260929_0a2f07": {
+      "source": "docs/design/references/Proxy_Wallet_20260929_0a2f07.html",
+      "image": "docs/design/baseline-images/wallet_20260929_0a2f07.png",
+      "fingerprint": "03f7ed2a5b4d14c9",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_add_friend_detail": {
+      "source": "docs/design/references/proxy_add_friend_detail.html",
+      "image": "docs/design/baseline-images/proxy_add_friend_detail.png",
+      "fingerprint": "203151f79ab2451a",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_ai_twin_insight_v1": {
+      "source": "docs/design/references/proxy_ai_twin_insight_v1.html",
+      "image": "docs/design/baseline-images/proxy_ai_twin_insight_v1.png",
+      "fingerprint": "8c95d88df2f83887",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_creator_apply_v1": {
+      "source": "docs/design/references/proxy_creator_apply_v1.html",
+      "image": "docs/design/baseline-images/proxy_creator_apply_v1.png",
+      "fingerprint": "b8be865874611143",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_creator_center_match_v3": {
+      "source": "docs/design/references/proxy_creator_center_match_v3.html",
+      "image": "docs/design/baseline-images/proxy_creator_center_match_v3.png",
+      "fingerprint": "4a5089b5b918e79e",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_dock_liquid_glass_v6": {
+      "source": "docs/design/references/proxy_dock_liquid_glass_v6.html",
+      "image": "docs/design/baseline-images/proxy_dock_liquid_glass_v6.png",
+      "fingerprint": "709d5c50de625a77",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_market_intelligence_console_v7_engine_governance": {
+      "source": "docs/design/references/proxy_market_intelligence_console_v7_engine_governance.html",
+      "image": "docs/design/baseline-images/proxy_market_intelligence_console_v7_engine_governance.png",
+      "fingerprint": "3fafa8fd138fd644",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_market_intelligence_console_v9_market_execution": {
+      "source": "docs/design/references/proxy_market_intelligence_console_v9_market_execution.html",
+      "image": "docs/design/baseline-images/proxy_market_intelligence_console_v9_market_execution.png",
+      "fingerprint": "60aa1bc6f413a4d2",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_market_intelligence_modeling_console_v5_tag_center": {
+      "source": "docs/design/references/proxy_market_intelligence_modeling_console_v5_tag_center.html",
+      "image": "docs/design/baseline-images/proxy_market_intelligence_modeling_console_v5_tag_center.png",
+      "fingerprint": "00be4bf1f89a0596",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_my_market_modules_v5": {
+      "source": "docs/design/references/proxy_my_market_modules_v5.html",
+      "image": "docs/design/baseline-images/proxy_my_market_modules_v5.png",
+      "fingerprint": "7f9d37434359a882",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_personal_profile_architecture_v5_threads": {
+      "source": "docs/design/references/proxy_personal_profile_architecture_v5_threads.html",
+      "image": "docs/design/baseline-images/proxy_personal_profile_architecture_v5_threads.png",
+      "fingerprint": "0762a33fea077653",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_social_accounts_v1": {
+      "source": "docs/design/references/proxy_social_accounts_v1.html",
+      "image": "docs/design/baseline-images/proxy_social_accounts_v1.png",
+      "fingerprint": "571b6bcbb19133cd",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_social_contact_collaboration_v2": {
+      "source": "docs/design/references/proxy_social_contact_collaboration_v2.html",
+      "image": "docs/design/baseline-images/proxy_social_contact_collaboration_v2.png",
+      "fingerprint": "a840a537f05a144e",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "proxy_transparent_swipe_dock_v2": {
+      "source": "docs/design/references/proxy_transparent_swipe_dock_v2.html",
+      "image": "docs/design/baseline-images/proxy_transparent_swipe_dock_v2.png",
+      "fingerprint": "709d5c50de625a77",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    }
+  }
+}

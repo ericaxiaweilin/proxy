@@ -11575,3 +11575,73 @@ if [[ -f .env ]]; then
   fi
 fi
 echo "    REGULATORY-P0-GATE: PASS (脚本在位 · 语法正确 · 迁移无漂移；完整 P0 见 regulatory-gate.sh)"
+
+# UI-PROTO-ALIGN-001（2026-09-30）：原型基准图与 token 的基准一致性。
+#
+# 背景：这是「UI 反复对不齐」的第三道、也是最后一道防线。前两道：
+#   - Proxy_App_Design_Tokens_R3.json 管**数值**（spacing / fontSize / radius）
+#   - proxy-ui-review skill 管**文案**（废话 / 自我辩解）
+# 两者都证明不了「渲染出来像不像原型」。而 814 条 grep 钉里视觉比对是 0 条。
+#
+# 这里建立像素基准：scripts/render-prototypes.mjs 把 31 个 HTML 原型渲染成
+# 390×844@2x 的图（实测这些原型零外部依赖，可完全离线 headless 渲染），
+# compare-screens.mjs 拿它跟实现截图打 diff。
+#
+# ⚠️ 钉的是**基准本身的新鲜度与依据**，不是「像不像」—— 后者需要实现截图，
+#    离线门禁里拿不到。这里能保证的是：
+#    1. 渲染脚本在位且语法正确；
+#    2. 每个原型都有对应的基准图条目（新增原型忘了渲 → 红）；
+#    3. manifest 的指纹与 HTML 内容一致（原型改了忘了重渲 → 红）。
+if [[ ! -f scripts/render-prototypes.mjs ]] || [[ ! -f scripts/compare-screens.mjs ]]; then
+  echo "  FAIL [UI-PROTO-ALIGN-001]: 原型渲染/比对脚本不见了 —— 像素基准无人维护。" >&2
+  exit 1
+fi
+node --check scripts/render-prototypes.mjs || { echo "  FAIL [UI-PROTO-ALIGN-001]: render-prototypes.mjs 语法错误。" >&2; exit 1; }
+node --check scripts/compare-screens.mjs  || { echo "  FAIL [UI-PROTO-ALIGN-001]: compare-screens.mjs 语法错误。" >&2; exit 1; }
+proto_count=$(ls docs/design/references/*.html 2>/dev/null | wc -l | tr -d ' ')
+manifest_count=$(python3 -c "
+import json,os
+p='docs/design/baseline-images/manifest.json'
+print(len(json.load(open(p)).get('prototypes',{})) if os.path.exists(p) else 0)" 2>/dev/null || echo 0)
+if [[ "$proto_count" != "$manifest_count" ]]; then
+  echo "  FAIL [UI-PROTO-ALIGN-001]: 有原型没有基准图条目 —— 原型 ${proto_count} 个 / manifest ${manifest_count} 个。" >&2
+  echo "        跑 node scripts/render-prototypes.mjs（新增原型忘了渲染 = 那一屏永远没有比对基准）。" >&2
+  exit 1
+fi
+# 指纹一致性：原型 HTML 改了却没重渲 ⇒ 基准图是旧的 ⇒ 比对结果无意义。
+# 基准图 PNG **不入库**（6.5MB 可再生产物，见 .gitignore），所以干净 clone 里一张都没有
+# 是**正常状态**，不是缺陷。只有「PNG 在、但指纹对不上」才是真问题（原型改了没重渲）——
+# 第一版这里判错，导致每个新 clone 都红（我实测过：把 PNG 全移走 ⇒ 报「指纹过期」，
+# 文案完全指错方向）。所以只在 PNG 确实存在时才查新鲜度，且区分两种缺失。
+if [[ -d docs/design/baseline-images ]] && compgen -G "docs/design/baseline-images/*.png" >/dev/null; then
+  # 取 render-prototypes.mjs --list 自己算出的「缺失或过期 N / M」，而不是数行数 ——
+  # 数行只能看「在不在」，看不了「指纹对不对」（第一版就是这么写的，结果原型 HTML 改了
+  # 也能过门禁，2026-09-30 实测证伪失败）。
+  stale=$(node scripts/render-prototypes.mjs --list 2>/dev/null \
+            | sed -n 's/.*缺失或过期：\([0-9]*\) \/.*/\1/p')
+  [[ -n "$stale" ]] || stale=0
+  if [[ "$stale" != "0" ]]; then
+    echo "  FAIL [UI-PROTO-ALIGN-001]: 有 ${stale} 个原型的基准图过期（HTML 改过但没重渲）——" >&2
+    echo "        比对会拿旧基准打新实现，结论无效。跑 node scripts/render-prototypes.mjs。" >&2
+    exit 1
+  fi
+else
+  echo "    (基准图 PNG 不在仓库里 —— 正常，需要比对时先跑 node scripts/render-prototypes.mjs)"
+fi
+# token 的 scale 必须覆盖原型实测高频 —— 否则门禁会把合规实现判成违规
+# （这正是我第一版 token 的错：照 R3 文档排名建，导致原型 64.2% 的字号被判越界）。
+token_gap=$(node -e '
+const fs=require("fs");
+const tok=JSON.parse(fs.readFileSync("Proxy_App_Design_Tokens_R3.json","utf8"));
+const allowed=new Set(tok.typography.scale);
+const obs=tok.typographyObserved?.counts||{};
+let missing=[];
+for (const [v,n] of Object.entries(obs)) if (n>=60 && !allowed.has(Number(v))) missing.push(`${v}(${n})`);
+console.log(missing.join(" "));
+' 2>/dev/null || echo "")
+if [[ -n "$token_gap" ]]; then
+  echo "  FAIL [UI-PROTO-ALIGN-001]: token 的 typography.scale 没覆盖原型实测高频字号：${token_gap}" >&2
+  echo "        这些是原型真在用的值，不收编 ⇒ 门禁把它们全判成越界 ⇒ 没人看门禁。" >&2
+  exit 1
+fi
+echo "    UI-PROTO-ALIGN-001: PASS (${proto_count} 个原型有基准图 · 指纹新鲜 · token 覆盖实测高频)"
