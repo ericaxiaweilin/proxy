@@ -2465,9 +2465,17 @@ export function RequesterHome({
 
 // HOME-MORE-DIST-001（2026-09-22，照 deepseek_html_20260922_1c2e2c.html 的
 // distance-chip / DISTANCES / rideTimes）：距离半径是可选值，不是写死的 1km。
-// 默认 10km 跟原型一致 —— 本仓 fixture 的距离全在 240m~1.6km，所以默认半径下
-// 一个人都不会被这个控件挡掉；放宽/收紧是用户主动做的。
-const MORE_DISTANCE_KM: ReadonlyArray<number> = [1, 3, 5, 10, 20, 50, 100];
+// 默认 10km 跟原型一致。
+//
+// 2026-09-30 用户要求把档位扩到 1000km（越南南北跨度就这个量级：河内 ↔ 胡志明
+// 直线约 1100km，所以要真的能筛到"另一个城市的人"，必须有 1000 这一档）。
+// 同时补上 200 / 500 —— 原来 [1,3,5,10,20,50,100] 在 50→100 之间是空的，
+// 200/500 补上了中高距离段的空档。
+//
+// 档位是"半径"，语义仍然只有一条：距离未知（distanceM === undefined）的人
+// **任何**半径都不算（PERSON-DISTANCE-ZERO-001）。放宽半径不等于把没有坐标的
+// 人当成就在旁边。
+const MORE_DISTANCE_KM: ReadonlyArray<number> = [1, 3, 5, 10, 20, 50, 100, 200, 500, 1000];
 
 // HOME-MORE-GREET-001（2026-09-23，用户：「线下很近的 2 个人 比如 200m 以内 我们认为处于
 // 同一个窗景」）：同一窗景 = 已知距离 ≤ 200m。距离未知的人不算（跟 PERSON-DISTANCE-ZERO-001

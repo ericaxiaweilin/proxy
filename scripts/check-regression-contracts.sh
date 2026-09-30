@@ -10017,10 +10017,42 @@ if ! grep -qF 'setMoreDistanceOpen((open) => !open)' "$MORE_HOME"; then
 fi
 
 # ③ 档位表 + 每一档可点。只画一条装饰轨道 = 用户选不了任何东西。
-if ! grep -qF 'MORE_DISTANCE_KM: ReadonlyArray<number> = [1, 3, 5, 10, 20, 50, 100]' "$MORE_HOME"; then
-  echo "  FAIL [HOME-MORE-DIST-001]: 距离档位表被改了或不见了。" >&2
+#
+# 原来这里 `grep -qF` 钉的是**整行字面量** `[1, 3, 5, 10, 20, 50, 100]`。2026-09-30
+# 用户要求加 200 / 500 / 1000 档（越南南北跨度约 1100km，没有 1000 档就筛不到
+# 另一个城市的人），行一改这条就红了。
+#
+# **钉字面量就是在钉措辞，不是在钉本意。** 本意是"半径是可选的、递增的、且够远"，
+# 不是"恰好是这七个数"。所以改成验性质：行存在、严格递增、含关键档位。
+# 关键档位（1/10/100/200/500/1000）单列，理由写在这里，改动时不会无声通过。
+if ! grep -qE 'MORE_DISTANCE_KM: ReadonlyArray<number> = \[' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 距离档位表不见了（MORE_DISTANCE_KM 声明缺失）。" >&2
   exit 1
 fi
+_distance_row=$(grep -E 'MORE_DISTANCE_KM: ReadonlyArray<number> = \[' "$MORE_HOME" | head -1)
+_distance_list=$(printf '%s' "$_distance_row" | sed -E 's/.*\[([^]]*)\].*/\1/')
+# 严格递增 —— 档位乱了会让"更近/更远"的语义颠倒
+if ! printf '%s' "$_distance_list" | tr -d ' ' | awk -F, '
+    { for (i=1; i<=NF; i++) { v[i]=$i+0; if (i>1 && v[i] <= v[i-1]) { print "not-ascending"; exit 0 } } }
+    END { }' | grep -q not-ascending; then :; else
+  # awk 没报 not-ascending 才算通过（awk 打印才算有问题）
+  :
+fi
+if printf '%s' "$_distance_list" | tr -d ' ' | awk -F, '
+    { for (i=1; i<=NF; i++) { v[i]=$i+0; if (i>1 && v[i] <= v[i-1]) bad=1 } }
+    END { exit bad?0:1 }'; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 距离档位不是严格递增的（${_distance_list}）——" >&2
+  echo "        档位乱序会让「更远 / 更近」的语义颠倒。" >&2
+  exit 1
+fi
+for _must_km in 1 10 100 200 500 1000; do
+  if ! printf '%s' "$_distance_list" | tr -d ' ' | awk -F, -v k="$_must_km"       '{ for (i=1;i<=NF;i++) if ($i+0==k) found=1 } END { exit found?0:1 }'; then
+    echo "  FAIL [HOME-MORE-DIST-001]: 距离档位缺 ${_must_km}km（当前：${_distance_list}）。" >&2
+    echo "        1/10/100 是原有档位；200/500/1000 是 2026-09-30 用户要求加的 ——" >&2
+    echo "        越南南北跨度约 1100km，没有 1000 档就筛不到另一个城市的人。" >&2
+    exit 1
+  fi
+done
 if ! grep -qF 'onPress={() => setMoreDistanceIndex(index)}' "$MORE_HOME"; then
   echo "  FAIL [HOME-MORE-DIST-001]: 距离档位点了不再选中（退化成装饰轨道）。" >&2
   exit 1
@@ -12158,5 +12190,61 @@ if [ -f "$_pipe_s" ]; then
     echo "    DEV-FEED-PIPELINE-001: PASS (launchd 已加载 · ${_pcnt} 帖 · 句柄唯一 · 头像复用但资产真实 · ${_pf})"
   else
     echo "    DEV-FEED-PIPELINE-001: SKIP (开发库不可达)"
+  fi
+fi
+
+# DEV-DISTANCE-TIERS-001（2026-09-30）：距离分层的每一档都必须有内容。
+#
+# 用户报「真人推荐仍然只有 7 个推荐」。查下来三层原因，第三层是关键：
+#   1. `SCENE_RECOMMEND` 是本地 fixture（apps/mobile/src/recommend-fixtures.ts），
+#      不是服务端数据 —— 所以往库里灌多少用户，那个 rail 都不会多一个。
+#   2. 默认半径 10km，而 fixture 里所有人的距离是 240m~1.6km，全在半径内。
+#   3. **`distanceM === undefined` 的人任何半径都不算**
+#      （PERSON-DISTANCE-ZERO-001，禁止"距离未知 = 就在旁边"）。服务端来的用户
+#      没有坐标就被整条 filter 剔掉 —— 数据在库、界面上一条都不显示。
+#
+# 已做的：MORE_DISTANCE_KM 扩到 1000km（越南南北跨度就这个量级），
+# 并给开发用户铺真实城市坐标。判据钉的是**每一档都非空** ——
+# 第一版只挑了 4 个城市，跑出来 100-200km 和 200-500km 是空档，切到 200km
+# 会一个都筛不到。所以"档位存在"不等于"那一档有内容"。
+if [ -f scripts/dev-distance-tiers.mjs ]; then
+  _tdsn="$(grep -o '^DATABASE_URL=.*' .env 2>/dev/null | sed 's/^DATABASE_URL=//')"
+  if [ -n "${_tdsn}" ] && psql "${_tdsn}" -tAc 'SELECT 1' >/dev/null 2>&1; then
+    # 分层用**独立于脚本**的 psql haversine 现算：只有脚本自己报告自己正确，
+    # 那不叫验证。以河内为原点（读模型的城市基准）。
+    _empty_tiers=$(psql "${_tdsn}" -tAF ',' -c "
+      WITH origin AS (SELECT 21.0278::float8 lat, 105.8342::float8 lng),
+      d AS (
+        SELECT 6371 * 2 * asin(sqrt(
+                 power(sin(radians(a.lat - o.lat)/2),2) +
+                 cos(radians(o.lat))*cos(radians(a.lat))*
+                 power(sin(radians(a.lng - o.lng)/2),2))) AS km
+          FROM supply.agent_profiles a, origin o
+         WHERE a.lat IS NOT NULL AND a.agent_id LIKE 'agent_devpipe_%')
+      SELECT string_agg(b, ',' ORDER BY b) FROM (
+        SELECT 'b1_<100km'    b WHERE NOT EXISTS (SELECT 1 FROM d WHERE km <  100)
+        UNION ALL SELECT 'b2_100-200'  WHERE NOT EXISTS (SELECT 1 FROM d WHERE km >= 100 AND km <  200)
+        UNION ALL SELECT 'b3_200-500'  WHERE NOT EXISTS (SELECT 1 FROM d WHERE km >= 200 AND km <  500)
+        UNION ALL SELECT 'b4_500-1000' WHERE NOT EXISTS (SELECT 1 FROM d WHERE km >= 500 AND km < 1000)
+        UNION ALL SELECT 'b5_>1000'    WHERE NOT EXISTS (SELECT 1 FROM d WHERE km >= 1000)
+      ) z" 2>/dev/null | head -1)
+    if [ -n "${_empty_tiers}" ]; then
+      echo "  FAIL [DEV-DISTANCE-TIERS-001]: 距离分层有空档：${_empty_tiers}" >&2
+      echo "        切到那个半径会一个都筛不到 —— 「档位存在」不等于「那一档有内容」。" >&2
+      echo "        补城市：node scripts/dev-distance-tiers.mjs（TIERS 里按实际距离选点）。" >&2
+      exit 1
+    fi
+    # 移动端档位必须真的包含 200 / 500 / 1000 —— 用户明确要的三个。
+    if ! rg -q 'MORE_DISTANCE_KM: ReadonlyArray<number> = \[[^]]*\b200\b' apps/mobile/src/surfaces/requester-home.tsx 2>/dev/null \
+       || ! rg -q 'MORE_DISTANCE_KM: ReadonlyArray<number> = \[[^]]*\b500\b' apps/mobile/src/surfaces/requester-home.tsx 2>/dev/null \
+       || ! rg -q 'MORE_DISTANCE_KM: ReadonlyArray<number> = \[[^]]*\b1000\b' apps/mobile/src/surfaces/requester-home.tsx 2>/dev/null; then
+      echo "  FAIL [DEV-DISTANCE-TIERS-001]: MORE_DISTANCE_KM 缺 200 / 500 / 1000 档。" >&2
+      echo "        越南南北跨度约 1100km，没有 1000 档就筛不到另一个城市的人。" >&2
+      exit 1
+    fi
+    _tn="$(psql "${_tdsn}" -tAc "SELECT count(*) FROM supply.agent_profiles WHERE lat IS NOT NULL AND agent_id LIKE 'agent_devpipe_%'" 2>/dev/null || echo 0)"
+    echo "    DEV-DISTANCE-TIERS-001: PASS (${_tn} 个用户有真实坐标 · 100/200/500/1000 每一档都有内容 · 移动端档位含 200/500/1000)"
+  else
+    echo "    DEV-DISTANCE-TIERS-001: SKIP (开发库不可达)"
   fi
 fi

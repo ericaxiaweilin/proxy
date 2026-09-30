@@ -177,6 +177,20 @@ if (DRY) {
   const n = sql(`SELECT count(*) FROM localnet.posts WHERE id LIKE 'post_${HANDLE_PREFIX}_%'`);
   const u = sql(`SELECT count(*) FROM identity.user_accounts WHERE id LIKE '${HANDLE_PREFIX}_%'`);
   console.log(`\n  管线累计：${u} 用户 / ${n} 帖`);
+
+  // 顺手给新用户铺分层坐标（100/200/500/1000km），否则新用户 distanceM 未知，
+  // 会被距离筛选**任何半径**都排除（PERSON-DISTANCE-ZERO-001）——
+  // 数据在库里、界面上一条都不显示，正是用户报过的那个形态。
+  // 失败不阻断本 tick：帖已经发出来了，坐标可以下一轮补。
+  const tiers = spawnSync("/usr/bin/env", ["node", `${REPO}/scripts/dev-distance-tiers.mjs`], {
+    encoding: "utf8", timeout: 60000,
+  });
+  if (tiers.status !== 0) {
+    console.error(`  WARN: 铺距离坐标失败（不影响已发出的帖）：${(tiers.stderr || "").slice(0, 160)}`);
+  } else {
+    const line = (tiers.stdout || "").split("\n").find((l) => l.includes("分层完整"));
+    if (line) console.log(`  距离分层：${line.trim()}`);
+  }
   // 句柄唯一性自查（列上有 UNIQUE 索引，撞了插入就会报错，但先自查更清楚）
   const dup = sql(
     `SELECT count(*) FROM (
