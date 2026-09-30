@@ -11472,3 +11472,58 @@ if ! grep -qF 'region.latitude.toFixed(3)' apps/mobile/src/components/map-canvas
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/business-home-operating-flow.test.ts >/dev/null || exit $?
 echo "    UI-HONEST-CAPABILITY-001: PASS (不编数据 · 死代码清理 · 错误可见 · 失败可重试 · 缺能力如实说)"
+
+# REGULATORY-P0-GATE（2026-09-30）：越南 2026 法务 P0 的一条命令核实。
+#
+# 为什么要有这个：R16.7 P0 清单（docs/compliance/R16.7-LEGAL-COMPLIANCE-PLAN.md）里
+# 每条都对应一个 e2e，但它们散在 scripts/ 下、命名不成体系（lc06 / lc28 / p1e / legal /
+# privacy / location-consent / benefit / kill-switch），而且**全都需要一个活的 API**。
+# 没人记得跑 ⇒ 阻断性回归可以静悄悄活很久。2026-09-30 就撞上：迁移 146 撤掉
+# policy_decisions 的 UPDATE 权限后，外键检查要的 FOR KEY SHARE 锁拿不到 ⇒
+# **每一张 PLATFORM_PAY 订单都无法确认**，接口只回 {"error":"command_transaction_failed"}。
+#
+# 这里**不直接跑**它：没有活 API 时（离线开发 / 只跑单测）会让门禁恒红，而那不是
+# 「法务不合规」。所以只钉两件在离线也成立的事：
+#   1. 这个脚本存在且语法正确（否则 P0 无人可跑）；
+#   2. 迁移漂移 = 用旧 schema 验出来的绿不可信 —— 这是脚本自己会判的一项。
+# 真正的 P0 执行：在有活 API 的环境里显式跑 `bash scripts/regulatory-gate.sh`。
+if [[ -n "${PROXY_RUN_REGULATORY:-}" ]]; then
+  echo "  (PROXY_RUN_REGULATORY set — 执行完整法务 P0 核实)"
+  bash scripts/regulatory-gate.sh || { echo "  FAIL [REGULATORY-P0-GATE]: 法务 P0 有红项。" >&2; exit 1; }
+else
+  echo "  (未设 PROXY_RUN_REGULATORY — 跳过需要活 API 的法务 e2e。完整核实：bash scripts/regulatory-gate.sh)"
+fi
+if [[ ! -f scripts/regulatory-gate.sh ]]; then
+  echo "  FAIL [REGULATORY-P0-GATE]: scripts/regulatory-gate.sh 不见了 —— R16.7 P0 无人可跑。" >&2
+  exit 1
+fi
+bash -n scripts/regulatory-gate.sh || {
+  echo "  FAIL [REGULATORY-P0-GATE]: regulatory-gate.sh 语法错误 —— P0 核实脚本本身坏了。" >&2
+  exit 1
+}
+# 迁移漂移必须判红：拿旧 schema 跑出来的绿是假绿。比对前剥 .sql 后缀
+# （schema_migrations.version 不带后缀，我第一次写就栽在这）。
+if [[ -f .env ]]; then
+  # psql 不在默认 PATH（Homebrew keg-only），拿不到就**跳过**而不是判红 ——
+  # 「这台机器没有 psql」不是法务不合规。探测列表照抄本文件里 lc06 那段（3118 行），
+  # 不另造一套。
+  _reg_pg_dir=""
+  for _reg_p in /opt/homebrew/opt/postgresql@15/bin /opt/homebrew/opt/postgresql@16/bin \
+                /opt/homebrew/opt/postgresql/bin /usr/local/opt/postgresql@15/bin \
+                /usr/local/opt/postgresql@16/bin /usr/local/opt/postgresql/bin \
+                /usr/lib/postgresql/15/bin /usr/lib/postgresql/16/bin; do
+    if [ -x "$_reg_p/psql" ]; then _reg_pg_dir="$_reg_p"; break; fi
+  done
+  [[ -n "$_reg_pg_dir" ]] && export PATH="$_reg_pg_dir:$PATH"
+  _dburl=$(grep -o '^DATABASE_URL=.*' .env 2>/dev/null | sed 's/^DATABASE_URL=//')
+  _newest=$(ls apps/api-go/migrations/*.sql 2>/dev/null | sed 's#.*/##; s#\.sql$##' | sort | tail -1)
+  if command -v psql >/dev/null 2>&1 && [[ -n "$_dburl" && -n "$_newest" ]]; then
+    _applied=$(psql "$_dburl" -tAc 'SELECT max(version) FROM public.schema_migrations' 2>/dev/null || echo "")
+    if [[ -n "$_applied" && "$_applied" != "$_newest" ]]; then
+      echo "  FAIL [REGULATORY-P0-GATE]: 迁移漂移 —— 文件最新 ${_newest}，库里 ${_applied}。" >&2
+      echo "        用旧 schema 验出来的法务绿不可信，先把迁移应用掉。" >&2
+      exit 1
+    fi
+  fi
+fi
+echo "    REGULATORY-P0-GATE: PASS (脚本在位 · 语法正确 · 迁移无漂移；完整 P0 见 regulatory-gate.sh)"
