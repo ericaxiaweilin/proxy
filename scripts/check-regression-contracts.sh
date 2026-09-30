@@ -7842,8 +7842,16 @@ if grep -qF '未读通知：2 条' apps/mobile/src/surfaces/merchant-me-r21-repl
   echo "        同一屏还写着「不使用占位数据」，2 条就是占位数据。" >&2
   exit 1
 fi
-if ! grep -qF '未读通知：暂无数据接入' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
-  echo "  FAIL [STATIC-COUNT-001]: 未读通知没有落到「暂无数据接入」" >&2
+# UI-COPY-HONEST-001 把这句改成了「暂无通知」（原措辞「未读通知：暂无数据接入」把「功能
+# 没接」说成了一句像状态的话，而通知接口确实还不存在）。所以这里钉的是**不写数字**
+# 而不是某一句措辞 —— 否则下次换个更诚实的说法又要改门禁。
+# 反向钉：任何「未读通知：<数字> 条」都不许回来。
+if grep -qE '未读通知：[[:space:]]*[0-9]+[[:space:]]*条' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+  echo "  FAIL [STATIC-COUNT-001]: 未读通知又出现写死的数字条数。" >&2
+  exit 1
+fi
+if ! grep -qF '暂无通知' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+  echo "  FAIL [STATIC-COUNT-001]: 通知空态没有落到「暂无通知」" >&2
   exit 1
 fi
 if grep -qF '"12 条 · 本地"' apps/mobile/src/facet/FacetHomeSurface.tsx ||
@@ -7936,7 +7944,7 @@ MESUB=apps/mobile/src/surfaces/me-sub-pages.ts
 METSX=apps/mobile/src/surfaces/me.tsx
 for dead in 'Nguyen A' '检查 #001' '重复出现的问题' '已验证的改善' '英文菜单可用' '8,450,000' '满意度 4.6' 'Identity verified' 'Principal ACTIVE'; do
   if grep -qF "$dead" "$MESUB"; then
-    echo "  FAIL [SUBPAGE-GENERIC-FABRICATED-001]: 编造的表格内容回到了子页面数据文件（$dead）——" >&2
+    echo "  FAIL [SUBPAGE-GENERIC-FABRICATED-001]: 编造的表格内容回到了子页面数据文件（${dead}）——" >&2
     exit 1
   fi
 done
@@ -11645,3 +11653,33 @@ if [[ -n "$token_gap" ]]; then
   exit 1
 fi
 echo "    UI-PROTO-ALIGN-001: PASS (${proto_count} 个原型有基准图 · 指纹新鲜 · token 覆盖实测高频)"
+
+# SHELL-VAR-UNICODE-001（2026-09-30）：`$VAR` 后面紧跟非 ASCII 字符时，bash 会把那个
+# 字符吃进变量名 —— `"API 不在 $BASE（health=..."` 里 `$BASE（` 会被解析成一个叫
+# `BASE（` 的变量，于是 `set -u` 直接报 `unbound variable`。
+#
+# 为什么单独一条门禁：这一天里我在三个脚本上踩了**四次**（check-regression-contracts.sh
+# 两次、regulatory-gate.sh 两次），每一次都要花一轮才定位。而它的表现极具迷惑性 ——
+# 报错信息里出现一个乱码变量名（`BASE�`），一眼看不出是变量名被中文括号污染了。
+#
+# 修法是写成 `${VAR}`。门禁扫全部 scripts/*.sh + *.mjs，找到就红。
+# ⚠️ 先剥注释再扫：这条门禁的说明里就写着 `$BASE（` 这个反例，不剥的话它会喂红自己
+# —— 同一天第三次犯「检查器撞上自己的说明」（前两次：ORDER-AGENT-CLAIM-NO-001 的
+# 计数子句、UI-HONEST-CAPABILITY-001 的权益文案）。
+sh_uni_bad=""
+for sh_f in scripts/*.sh scripts/*.mjs; do
+  [ -f "$sh_f" ] || continue
+  sh_hits=$(perl -0777 -ne '
+      s{/\*.*?\*/}{}gs;
+      s{^\s*#.*$}{}gm;
+      while(/(?<![\$\{])\$([A-Za-z_][A-Za-z0-9_]*)(?=[^\x00-\x7f])/g){ print "$1 " }
+    ' "$sh_f" 2>/dev/null | sort -u | tr -d '\n')
+  [ -n "$sh_hits" ] && sh_uni_bad="${sh_uni_bad}${sh_f}: ${sh_hits}\n"
+done
+if [ -n "$sh_uni_bad" ]; then
+  echo "  FAIL [SHELL-VAR-UNICODE-001]: \$VAR 后面紧跟非 ASCII 字符（会被吃进变量名）:" >&2
+  printf "        %b" "$sh_uni_bad" >&2
+  echo "        改成 \${VAR}。症状是 set -u 报一个乱码变量名（如 BASE(）的 unbound variable。" >&2
+  exit 1
+fi
+echo "    SHELL-VAR-UNICODE-001: PASS (no \$VAR glued to non-ASCII in scripts/)"

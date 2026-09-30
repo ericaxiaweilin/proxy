@@ -33,7 +33,7 @@ skipt() { printf '  \033[33mSKIP\033[0m  %s\n' "$*"; skip=$((skip+1)); }
 
 run_suite() {
   local script="$1" name="$2"
-  [[ -f "scripts/$script" ]] || { skipt "$name（scripts/$script 不存在）"; return; }
+  [[ -f "scripts/$script" ]] || { skipt "${name}（scripts/$script 不存在）"; return; }
   local log; log="$(mktemp)"
   if bash "scripts/$script" >"$log" 2>&1; then
     ok "$name"
@@ -97,13 +97,23 @@ run_suite benefit-eligibility-e2e.sh "权益核销：未知活动/未知券必�
 # 这条**预期可能红**：脚本直接建 USER_TWIN，而数字分身只对有接单权限的人开。
 # 那是正确的门禁（order_permission_required），红的是**测试前置条件没跟上**，
 # 不是产品缺陷。要绿需先给测试账号走 providerapp Submit + Review(approve)。
-# 判据是「脚本有没有先走 providerapp 申请接单权限」，不是「脚本里有没有那个错误码字面量」
-# —— 第一次写成后者，结果判据永远不成立，SKIP 变 RUN，把一个已知的前置缺失报成 P0 红项。
-if grep -qE 'ProviderApplication|providerapp|order-permission|order_permission' \
-     scripts/lc06-ai-media-e2e.sh 2>/dev/null; then
-  run_suite lc06-ai-media-e2e.sh     "AI 分身与肖像授权"
+# lc06 需要一个管理员 DB 句柄来 seed 一份「已通过的接单申请」（数字分身只对有接单
+# 权限的人开，ORDER-PERMISSION-TWIN-001）。2026-09-30 另一路已经把脚本改成自己 seed，
+# 并要求 PROXY_E2E_ADMIN_PSQL —— 所以它现在**能跑**，只是缺环境变量。
+#
+# 这里不把「缺环境变量」报成 P0 红项（那会把每个没配变量的开发者卡在门外），但也
+# **不静默 PASS** —— 明确告诉人要配什么。
+# 该句柄的正确来源是 scripts/e2e-isolated.sh —— 它会起隔离库、生成
+# $WORK/fixture-psql.sh 并 export PROXY_E2E_ADMIN_PSQL（2026-09-30 另一路加的）。
+# 所以**不要**让用户手搓 psql 命令行；要么已经跑过 e2e-isolated（变量在环境里），
+# 要么直接用 `bash scripts/e2e-isolated.sh` 跑整套。
+lc06_env="${PROXY_E2E_ADMIN_PSQL:-}"
+if [[ -z "$lc06_env" ]]; then
+  skipt "AI 分身（lc06）需 PROXY_E2E_ADMIN_PSQL（只用于 seed 已通过的接单申请 —— 审核接口要 operator 身份，而套件的用户 id 是运行时生成的，配不进去）。用 bash scripts/e2e-isolated.sh 跑，它会生成这个句柄"
+elif [[ ! -x "$lc06_env" ]]; then
+  bad "AI 分身（lc06）：PROXY_E2E_ADMIN_PSQL 指向 ${lc06_env}，但它不可执行 —— fixture 句柄坏了，跑出来的红不可信"
 else
-  skipt "AI 分身（lc06）需先申请接单权限 —— 门禁 ORDER-PERMISSION-TWIN-001 生效，属测试前置缺失"
+  run_suite lc06-ai-media-e2e.sh     "AI 分身与肖像授权"
 fi
 
 echo

@@ -283,6 +283,24 @@
         "width": 390,
         "height": 844
       }
+    },
+    "Proxy_Market_Orders_20260926_34df37": {
+      "source": "docs/design/references/Proxy_Market_Orders_20260926_34df37.html",
+      "image": "docs/design/baseline-images/market_orders_20260926_34df37.png",
+      "fingerprint": "310a73bb8d2dbd6a",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Scene_Card_20260927_7fc18d": {
+      "source": "docs/design/references/Proxy_Scene_Card_20260927_7fc18d.html",
+      "image": "docs/design/baseline-images/scene_card_20260927_7fc18d.png",
+      "fingerprint": "f752104355ff7077",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
     }
   }
 }

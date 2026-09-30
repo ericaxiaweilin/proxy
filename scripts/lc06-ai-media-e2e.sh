@@ -299,7 +299,7 @@ fi
 seeded=$("$PROXY_E2E_ADMIN_PSQL" -t -A -c \
   "SELECT count(*) FROM supply.provider_applications WHERE user_account_id='${user_id}' AND status='APPROVED'")
 [ "$seeded" = "1" ] || { echo "FAIL: expected 1 APPROVED application after seeding, got '$seeded'"; exit 1; }
-echo "  OK: 已写入 APPROVED 申请（user=$user_id）"
+echo "  OK: 已写入 APPROVED 申请（user=${user_id}）"
 
 echo
 echo "=== 1. POST /v1/ai/personas (USER_TWIN) ==="
