@@ -199,7 +199,21 @@ export function BenefitClaimScreen({
       ))}
 
       {!busy && benefits.length === 0 ? (
-        <ProxyEmptyState title="暂无可用权益" sub="该活动暂无面向您的权益（权益目录 R1 接入）" cta={{ label: "重新加载", onPress: () => void loadCampaign() }} />
+        // UI-BENEFIT-CATALOG-HONEST-001：benefits 以前在 loadCampaign 里被**无条件
+        // 写成 []**（唯一的写入点，注释说「In R1, this would be a separate
+        // listBenefitsByCampaign call」）—— 也就是说权益目录接口根本不存在。
+        //
+        // 后果不只是「列表空」：handleClaim / selectedBenefit / CLAIMED 成功页整条
+        // 领取链路全部不可达。而空态写「该活动暂无面向您的权益」，把「**功能没做**」
+        // 说成了「**你恰好没有**」—— 真实目录接口失败与目录为空在用户面前完全一样。
+        //
+        // 权益目录接上之前如实说是能力未接入。保留「重新加载」：以后接口真的失败时
+        // 用户仍有一个出口（PLACEHOLDER-002 钉的「失败可重试」原则）。
+        <ProxyEmptyState
+          title="权益领取还没上线"
+          sub="这场活动的权益目录还没接进来 —— 券与折扣仍然可以在「我的 › 券」里用。"
+          cta={{ label: "重新加载", onPress: () => void loadCampaign() }}
+        />
       ) : null}
 
       {myClaims.length > 0 ? (

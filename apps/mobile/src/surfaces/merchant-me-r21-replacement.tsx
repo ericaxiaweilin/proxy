@@ -615,6 +615,30 @@ export function MerchantMeR21Replacement({
         {accounts === undefined && !error ? <ProxyLoading tone="muted" /> : null}
         {error ? <View style={styles.card}><Text selectable style={styles.empty}>加载失败：{error}</Text></View> : null}
 
+        {/* UI-MERCHANT-ACCOUNT-SWITCH-001：一个商家账号可以持有多个经营主体
+            （business account）。activeAccountId 以前只写不读 —— 加载时永远取
+            list[0]，多账号商家**静默只看得到第一个**，界面上没有任何切换器，
+            成员 / 消费 / 门店数据全来自那一个。现在把切换器画出来：数据层本来
+            就是按 accountId 拉的（refresh(accountId)），缺的只是入口。 */}
+        {accounts && accounts.length > 1 ? (
+          <ScrollView contentContainerStyle={styles.accountSwitchRow} horizontal showsHorizontalScrollIndicator={false} style={styles.accountSwitch}>
+            {accounts.map((a) => {
+              const on = a.id === activeAccountId;
+              return (
+                <Pressable
+                  accessibilityLabel={`切换到 ${a.name}`}
+                  accessibilityState={{ selected: on }}
+                  key={a.id}
+                  onPress={() => { if (!on) { setActiveAccountId(a.id); void refresh(a.id); } }}
+                  style={[styles.accountSwitchChip, on && styles.accountSwitchChipOn]}
+                >
+                  <Text selectable style={[styles.accountSwitchChipText, on && styles.accountSwitchChipTextOn]}>{a.name}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+
         <Pressable onPress={() => setPage("store")} style={styles.identity}>
           {merchantAvatarUri(accounts?.[0]?.avatarPath, localApiBaseUrl) ? (
             <Image source={{ uri: merchantAvatarUri(accounts?.[0]?.avatarPath, localApiBaseUrl)! }} style={styles.bizAvatar} />
@@ -719,6 +743,13 @@ const styles = StyleSheet.create({
   h1: { color: color.ink, fontSize: 28, fontWeight: "900", letterSpacing: -1, lineHeight: 34 },
   merchantTag: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 32, justifyContent: "center", paddingHorizontal: 12 },
   merchantTagText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  // UI-MERCHANT-ACCOUNT-SWITCH-001：多经营主体切换器。
+  accountSwitch: { marginTop: 12 },
+  accountSwitchRow: { gap: 8, paddingRight: 16 },
+  accountSwitchChip: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 8 },
+  accountSwitchChipOn: { backgroundColor: color.ink, borderColor: color.ink },
+  accountSwitchChipText: { color: color.muted, fontSize: 13, fontWeight: "700" },
+  accountSwitchChipTextOn: { color: color.white },
   identity: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 24, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 14 },
   bizAvatar: { alignItems: "center", borderRadius: 16, height: 52, justifyContent: "center", width: 52 },
   bizAvatarText: { color: color.white, fontSize: 24, fontWeight: "900" },

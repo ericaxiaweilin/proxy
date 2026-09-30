@@ -11437,5 +11437,38 @@ if grep -qF '"做内容与推广草稿"' apps/mobile/src/surfaces/me.tsx ||
   echo "        承诺了不存在的能力，比不做更糟。" >&2
   exit 1
 fi
+# 7) 多经营主体：activeAccountId 以前只写不读（永远取 list[0]），多账号商家静默只看得到
+#    第一个，界面无切换器 —— 那是一个**缺失的产品能力**，数据层早就按 accountId 拉了。
+# ⚠️ 钉**真实代码**而不是注释标记 —— 2026-09-30 实测：只改 JSX、注释留着，钉照样绿。
+#    （这是同一天第二次犯「钉在注释上而不是代码上」；前一次是 UI-HONEST-CAPABILITY-001
+#    的第一条。两处的修法都是：grep 要落到实际会被执行的那一行。）
+if ! grep -qF 'setActiveAccountId(a.id); void refresh(a.id);' \
+     apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx ||
+   ! grep -qF 'accounts.length > 1' \
+     apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+  echo "  FAIL [UI-HONEST-CAPABILITY-001]: 多经营主体切换器不见了 —— 持有多个账号的商家会静默" >&2
+  echo "        只看得到第一个，成员/消费/门店数据全来自那一个。" >&2
+  exit 1
+fi
+# 8) 权益领取：benefits 被无条件写成 []（权益目录接口不存在）⇒ 整条领取链路不可达，
+#    而空态说「暂无面向您的权益」，把「功能没做」说成了「你恰好没有」。
+# 同上：钉文案本身，不钉注释标记。
+# 再剥一层注释：这条门禁的说明里就把反例文案写了出来（照抄会自喂）。
+# 2026-09-30 同一天第三次踩「grep 撞上自己的说明」—— 前两次分别是
+# UI-HONEST-CAPABILITY-001 第一条和上面的多账号切换器。教训：反向钉必须剥注释。
+bcs_code=$(perl -0777 -pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' apps/mobile/src/surfaces/BenefitClaimScreen.tsx)
+if ! printf '%s\n' "$bcs_code" | grep -qF 'title="权益领取还没上线"' ||
+   printf '%s\n' "$bcs_code" | grep -qF '该活动暂无面向您的权益'; then
+  echo "  FAIL [UI-HONEST-CAPABILITY-001]: 权益空态又说回「该活动暂无面向您的权益」 ——" >&2
+  echo "        权益目录接口还不存在，那是功能未接入，不是用户恰好没有权益。" >&2
+  exit 1
+fi
+# 9) 地图 HUD：region 的注释说「让 HUD 显示当前视野」，但角标只算 cityHint /
+#    exactCoordinate，从不读 region —— 注释描述的行为不存在。
+# 同上：钉真正参与计算的那一行（region 出现在 hudCityText 里）。
+if ! grep -qF 'region.latitude.toFixed(3)' apps/mobile/src/components/map-canvas.tsx; then
+  echo "  FAIL [UI-HONEST-CAPABILITY-001]: 地图角标又不读 region 了 —— 拖到别的城市角标不动。" >&2
+  exit 1
+fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/business-home-operating-flow.test.ts >/dev/null || exit $?
-echo "    UI-HONEST-CAPABILITY-001: PASS (不编数据 · 死代码清理 · 错误可见 · 失败可重试)"
+echo "    UI-HONEST-CAPABILITY-001: PASS (不编数据 · 死代码清理 · 错误可见 · 失败可重试 · 缺能力如实说)"

@@ -243,7 +243,14 @@ export function MapCanvas({
   }, [autoLocate, initialCoordinate?.lat, initialCoordinate?.lng]);
 
   // 角标：未知城市不写死，GPS 回来前诚实显示定位中。
-  const hudCityText = cityHint || (exactCoordinate ? "当前位置" : "正在定位…");
+  //
+  // UI-MAP-HUD-001：region 以前被注释描述为「让 HUD 显示当前视野」，但角标只算
+  // cityHint / exactCoordinate，**从不读 region** —— 于是用户把地图拖到另一个城市，
+  // region 忠实更新、角标纹丝不动，注释描述的行为根本不存在。
+  // 现在真的用上它：cityHint 有值时优先（它更可靠，是真实城市名），
+  // 没有 cityHint 时退到中心坐标 —— 诚实显示「哪一片」而不是「假装知道是哪个城市」。
+  const hudCityText =
+    cityHint || (exactCoordinate ? "当前位置" : region ? `${region.latitude.toFixed(3)}, ${region.longitude.toFixed(3)}` : "正在定位…");
 
   // Skip the map entirely on Android for now (no Google key yet).
   // Render a simple fallback so the rest of the UI doesn't break.

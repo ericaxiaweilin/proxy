@@ -35,7 +35,6 @@ type Account = { id: string; name: string; status: string };
 type Store = { id: string; businessId: string; name: string; address: string; status: string };
 type StorePhoto = { id: string; storeId: string; businessId: string; uploadedBy: string; assetPath: string; caption: string; sortOrder: number; mediaAssetId: string; createdAt: string };
 type StoreLines = { storeId: string; logoAssetPath: string; description: string; hoursJson: string; contactPhone: string; contactEmail: string; updatedAt: string };
-type MemberDirectory = { businessId: string; userId: string; displayName: string; role: string; status: string; joinedAt: string };
 type SpendDaily = { businessId: string; bucketDate: string; orderCount: number; grossMinor: number; newCustomerCount: number; returningCustomerCount: number };
 
 function formatVnd(minor: number): string {
@@ -92,7 +91,6 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   const [editingLogoPath, setEditingLogoPath] = useState<string>("");
   const [savingLinesFor, setSavingLinesFor] = useState<string | undefined>(undefined);
   const [linesError, setLinesError] = useState<string | undefined>(undefined);
-  const [members, setMembers] = useState<Record<string, MemberDirectory[]>>({});
   const [spend, setSpend] = useState<Record<string, { totalOrders: number; totalGrossMinor: number; days: SpendDaily[] } | undefined>>({});
   const [uploadingStoreId, setUploadingStoreId] = useState<string | undefined>(undefined);
   const [products, setProducts] = useState<Record<string, StoreProduct[]>>({});
@@ -147,10 +145,6 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
       setPhotos((prev) => ({ ...prev, ...photoMap }));
       setProducts((prev) => ({ ...prev, ...productMap }));
       setLines((prev) => ({ ...prev, ...linesMap }));
-      try {
-        const dir = await client.listMemberDirectory(accountId);
-        setMembers((prev) => ({ ...prev, [accountId]: dir }));
-      } catch { /* not authorised to read member directory is not a failure */ }
       try {
         const sd = await client.listSpendDaily({ businessId: accountId, sinceDays: 7 });
         setSpend((prev) => ({ ...prev, [accountId]: { totalOrders: sd.totalOrders, totalGrossMinor: sd.totalGrossMinor, days: sd.days } }));
@@ -851,7 +845,6 @@ const styles = StyleSheet.create({
   photoMeta: { color: color.muted, fontSize: 11 },
   deleteButton: { backgroundColor: "#fde7e7", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   deleteButtonText: { color: "#a32020", fontSize: 11, fontWeight: "800" },
-  membersBlock: { gap: 4, paddingTop: 6, borderTopColor: color.line, borderTopWidth: 1 },
   sectionTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   memberRow: { flexDirection: "row", justifyContent: "space-between" },
   memberName: { color: color.ink, fontSize: 12, fontWeight: "700" },
