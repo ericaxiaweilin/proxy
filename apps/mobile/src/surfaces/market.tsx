@@ -540,6 +540,7 @@ export function MarketSurface({
             busy={busy}
             onApply={(quote) => void applyToOpportunity(oppDetail, quote)}
             onConfirm={() => void confirmOpportunity(oppDetail)}
+            opportunityError={opportunityError}
             onOpenSelect={() => {
               const cur = oppDetail;
               setOppDetail(null);
@@ -741,7 +742,8 @@ function OpportunityDetail({
   onOpenSelect,
   onApply,
   onConfirm,
-  busy
+  busy,
+  opportunityError
 }: {
   opportunity: MarketOpportunity;
   moderation: ModerationClient;
@@ -752,6 +754,8 @@ function OpportunityDetail({
   onApply: (quote: string) => void;
   onConfirm: () => void;
   busy: boolean;
+  // UI-QUOTE-ERROR-001：提交失败要在**详情页**看得见，见该处的渲染。
+  opportunityError?: string | undefined;
 }): React.JSX.Element {
   const budget = opportunity.price;
   // MARKET-PRICE-RANGE-PARSE-001: 这一格以前是拿单一预算乘两个系数造出来的区间；
@@ -882,6 +886,13 @@ function OpportunityDetail({
           {whyRows.map((row) => <Text key={row} selectable style={styles.detailWhyRow}>{row}</Text>)}
         </View>
       ) : null}
+
+      {/* UI-QUOTE-ERROR-001：报价失败原来「有通道但看不到」—— applyToOpportunity
+          确实写了 opportunityError，但那一行渲染在**列表页**的 else 分支里；一旦详情页
+          打开（oppDetail 非空）就走不到那个分支，而用户此刻正站在详情页。结果是
+          onSubmit 里 setQuoteOpen(false) 先把 sheet 关了，然后提交失败 → 用户看到
+          「点了报价，什么都没发生」。这里在详情页把同一个错误显示出来。 */}
+      {opportunityError ? <Text selectable style={styles.marketError}>{opportunityError}</Text> : null}
 
       <View style={styles.detailActions}>
         <Pressable onPress={onBack} style={styles.detailActionGhost}>

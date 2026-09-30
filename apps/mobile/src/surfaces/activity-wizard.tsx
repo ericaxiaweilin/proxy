@@ -28,7 +28,7 @@ import { localApiBaseUrl, sessionAuthClient } from "../native-clients";
 import { getCurrentFix } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
 import { sceneDistanceMeters, shopCardDistance, type SceneOrigin } from "../scene-shop-directory";
-import { ProxyBackGlyph } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyLoading } from "../components/proxy-foundation";
 import { ProxyIcon } from "../components/proxy-icon";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RealitySceneMapSurface } from "./reality-scene-map";
@@ -767,8 +767,26 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
               ))}
             </ScrollView>
             <ScrollView style={styles.sheetList} showsVerticalScrollIndicator={false}>
-              {filteredSpots.length === 0 ? (
+              {/* UI-SCENE-LOAD-001：spotsState 以前只写不读 —— loadSceneSpots 失败时
+                  spots 停在 []，这里渲染「没有找到场景」，与「目录确实为空」同屏同文案；
+                  而发布门禁（!placeValid || selectedSpot === undefined）会把用户永远
+                  卡在「需要选一个场景」，**没有任何重试入口**。失败与空是两回事，必须分开。 */}
+              {spotsState === "failed" ? (
+                <View style={styles.sheetEmptyWrap}>
+                  <Text selectable style={styles.sheetEmpty}>{t("sceneCatalogFailed")}</Text>
+                  <Pressable accessibilityRole="button" accessibilityLabel={t("retry")} onPress={() => {
+                    setSpotsState("loading");
+                    void loadSceneSpots(fetch, localApiBaseUrl)
+                      .then((list) => { setSpots(list); setSpotsState("ready"); })
+                      .catch(() => setSpotsState("failed"));
+                  }} style={styles.sheetRetry}>
+                    <Text selectable style={styles.sheetRetryText}>{t("retry")}</Text>
+                  </Pressable>
+                </View>
+              ) : filteredSpots.length === 0 && spotsState === "ready" ? (
                 <Text selectable style={styles.sheetEmpty}>{t("noSceneFound")}{"\n"}{t("noSceneFoundSub")}</Text>
+              ) : filteredSpots.length === 0 ? (
+                <ProxyLoading tone="muted" />
               ) : (
                 filteredSpots.map((s) => {
                   const dist = spotDistance(s);
@@ -894,6 +912,10 @@ const styles = StyleSheet.create({
   filterTextOn: { color: color.white },
   sheetList: { maxHeight: 320 },
   sheetEmpty: { color: color.muted, fontSize: 13, fontWeight: "700", lineHeight: 20, paddingVertical: 32, textAlign: "center" },
+  // UI-SCENE-LOAD-001：读取失败与「没有场景」分开，失败态必须给重试入口。
+  sheetEmptyWrap: { alignItems: "center", gap: 12, paddingVertical: 32 },
+  sheetRetry: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 20, paddingVertical: 10 },
+  sheetRetryText: { color: color.white, fontSize: 13, fontWeight: "800" },
   spotRow: { alignItems: "center", borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 12, marginBottom: 8, padding: 12 },
   spotRowOn: { backgroundColor: color.offWhite, borderColor: color.ink },
   spotImg: { borderRadius: 12, height: 52, width: 52 },

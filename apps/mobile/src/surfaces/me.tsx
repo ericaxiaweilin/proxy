@@ -328,7 +328,7 @@ const BUSINESS_ME: PersonaConfig = {
         { icon: "↗", label: "活动导流", desc: "商家活动 · 可报名", route: "merchantcampaign" },
         { icon: "▤", label: "线上店铺", desc: "实时数据已接入", grad: true, route: "merchantstorefront" },
         { icon: "₫", label: "销售中心", desc: "功能预览 · 实时数据待接入", route: "outcomehistory" },
-        { icon: "✦", label: "经营", desc: "功能预览 · 实时数据待接入", route: "enterpriseops" },
+        { icon: "✦", label: "经营", desc: "门店经营助手", route: "enterpriseops" },
         // STORE-REC-002/004: 评估队列对 BUSINESS 身份也要可达 —— 运营更可能挂在这个
         // 身份下，而此前入口只挂在 REQUESTER 的「企业 / 店铺」组里。
         // 队列本身是 operator-only（服务端白名单），普通商家点进去会看到明确的
@@ -568,11 +568,12 @@ export function MeSurface({
   const [abilitySheet, setAbilitySheet] = useState<{ mode: "ADD" | "EDIT"; type: AbilityType; id?: string }>();
   const [availabilityPanel, setAvailabilityPanel] = useState<"ABILITIES" | "CALENDAR">("ABILITIES");
   const [avRule, setAvRule] = useState<AvailabilityRule>({ days: [0, 1, 2, 3, 4, 5, 6], start: 18, end: 23 });
-  const [avOverrides, setAvOverrides] = useState<Record<string, AvOverride>>({
-    "2026-08-27": { type: "off" },
-    "2026-08-30": { type: "full" },
-    "2026-09-03": { type: "custom", start: 19, end: 22 }
-  });
+  // UI-AVAIL-HONEST-001：这里原来硬编码三条「例外」（2026-08-27 / 08-30 / 09-03），
+  // 那是写下它们那天的未来日期。日历画的是 nextDays(30)（从当天起算），所以三条
+  // 全部落在窗口之外 ⇒ 同一屏上「可用时间 · 3 个例外」与日历里 0 个标记**自相矛盾**，
+  // 而「清除例外」按钮点了只把数字从 3 变 0、格子一格都不动。
+  // 没有持久化来源之前空着：计数与格子必然一致，用户看到的例外都是他自己设的。
+  const [avOverrides, setAvOverrides] = useState<Record<string, AvOverride>>({});
   const [avRuleSheetOpen, setAvRuleSheetOpen] = useState(false);
   const [avDaySheet, setAvDaySheet] = useState<{ key: string; label: string }>();
   const [personalHubTab, setPersonalHubTab] = useState<PersonalHubTab>("FEED");
@@ -2569,17 +2570,17 @@ export function MeSurface({
               <Text selectable style={styles.enterpriseHeroTitle}>企业运营助手</Text>
               <Text selectable style={styles.enterpriseHeroText}>上传现实资料，或直接说"建店、整理商品、做内容、复盘经营"。系统只生成 Draft，业务真源始终要由商家确认。</Text>
             </View>
-            <View style={styles.enterpriseRuntime}>
-              <Text selectable style={styles.enterpriseRuntimeTitle}>Unified Model Runtime</Text>
-              <Text selectable style={styles.enterpriseRuntimeText}>Skill 只声明理解、抽取与写作能力；底层模型由模型底座分发，业务端不绑定具体模型。</Text>
-            </View>
             <View style={styles.enterpriseQuickGrid}>
-              {[
-                ["把店铺数字化", "照片 / 菜单 / 产品 / 品牌资料 → Store Draft"],
-                ["整理商品与菜单", "Catalog Draft / 分类 / 描述 / 素材"],
-                ["做内容与推广草稿", "Post / Benefit / Campaign Draft"],
-                ["复盘门店经营", "基于订单、结果与客流数据给建议"]
-              ].map(([title, desc]) => (
+              {/* UI-ENTERPRISE-HONEST-001：这里原来有 4 张卡（把店铺数字化 / 整理商品与
+                  菜单 / 做内容与推广草稿 / 复盘门店经营），但 4 张共用同一个 onPress，
+                  结果都是同一张标题为「Store Digitization Draft」的清单 —— 点「做内容与
+                  推广草稿」看到的是建店草稿，点「复盘门店经营」看到的也是，里面根本没有
+                  订单/客流数据。副标题承诺了 4 种产物（Store / Catalog / Post / 建议），
+                  代码只产出 1 种。
+
+                  这不是 UI 小瑕疵，是**承诺了不存在的能力**。现在只留真能做的这一张，
+                  能力没做出来之前不加回来 —— 加一张能点的卡片比不加更糟。 */}
+              {[["把店铺数字化", "照片 / 菜单 / 产品 / 品牌资料"]].map(([title, desc]) => (
                 <Pressable key={title} accessibilityLabel={title} onPress={() => setEnterpriseOpsStage("DRAFT_READY")} style={styles.enterpriseQuick}>
                   <Text selectable style={styles.enterpriseQuickTitle}>{title}</Text>
                   <Text selectable style={styles.enterpriseQuickDesc}>{desc}</Text>
@@ -2693,7 +2694,7 @@ export function MeSurface({
               <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>线上店铺</Text>
-            <MerchantStorefrontSurface client={business} viewerAccountId={viewerAccountId} />
+            <MerchantStorefrontSurface client={business} viewerAccountId={viewerAccountId} onStartStoreSetup={() => openSubPage("enterpriseops")} />
           </View>
         );
       }

@@ -110,50 +110,17 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   const [catalogOpenByStore, setCatalogOpenByStore] = useState<Record<string, boolean>>({});
   const [savingProduct, setSavingProduct] = useState(false);
   const [productError, setProductError] = useState<string | undefined>(undefined);
-  // 建店：账号+首店一次建完（之前两处空态互相指“去别处建”，实际无入口）。
-  const [newShopName, setNewShopName] = useState("");
-  const [newStoreName, setNewStoreName] = useState("");
-  const [newStoreAddr, setNewStoreAddr] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | undefined>(undefined);
-  const [creationOpen, setCreationOpen] = useState(false);
+  // UI-STORE-ENTRY-001：这里原来有一整段「建店表单」死代码 —— createShop / addStore
+  // 两个函数**零调用点**，newShopName / newStoreName / newStoreAddr 三个 state 只有
+  // setter 没有读取处，creationOpen 只有声明没有打开的地方，而 createError 被写 3 次
+  // 却**从不渲染**（同文件 error / productError / linesError 都老老实实渲染了）。
+  // 净效果是：网络失败时错误被静默丢弃，用户点了什么都没发生；两个函数是纯死代码。
+  //
+  // 真入口不是这个表单，是 `onStartStoreSetup` → 企业运营助手（me.tsx 的 enterpriseops
+  // 子页）。me.tsx 之前**没传**这个 prop，于是「让企业运营助手帮我创建」按钮恒灰、
+  // 点了没反应，旁边也没有一句说明 —— 那是用户真正能看见的缺陷，已在 me.tsx 接线。
+  // 这段表单因此删除，而不是留着「接线一下就能用」：它的字段来源不明，接上也是新功能。
   const [assetPage, setAssetPage] = useState<{ storeId: string; page: StoreAssetPage } | undefined>(undefined);
-
-  async function createShop(): Promise<void> {
-    if (creating || !newShopName.trim() || !newStoreName.trim()) return;
-    setCreating(true);
-    setCreateError(undefined);
-    try {
-      const { businessId } = await client.createAccount(newShopName.trim());
-      await client.createStore(businessId, newStoreName.trim(), newStoreAddr.trim());
-      const a = await client.listMyAccounts();
-      setAccounts(a);
-      await refreshOne(businessId);
-      setNewShopName("");
-      setNewStoreName("");
-      setNewStoreAddr("");
-    } catch (e) {
-      setCreateError(e instanceof Error ? e.message : "创建失败，请重试");
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  async function addStore(businessId: string): Promise<void> {
-    if (creating || !newStoreName.trim()) return;
-    setCreating(true);
-    setCreateError(undefined);
-    try {
-      await client.createStore(businessId, newStoreName.trim(), newStoreAddr.trim());
-      await refreshOne(businessId);
-      setNewStoreName("");
-      setNewStoreAddr("");
-    } catch (e) {
-      setCreateError(e instanceof Error ? e.message : "添加失败，请重试");
-    } finally {
-      setCreating(false);
-    }
-  }
 
   const refreshOne = useCallback(async (accountId: string) => {
     try {

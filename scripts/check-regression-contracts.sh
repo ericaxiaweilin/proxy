@@ -1767,7 +1767,21 @@ if ! grep -qF 'enforceDBRolePosture(ctx, pool)' apps/api-go/cmd/api/main.go ||
   echo "  FAIL [DB-ROLE-POSTURE-001]: 启动姿态检查没接进 main.go，或 PRODUCTION.md 没写。" >&2
   exit 1
 fi
-echo "    PUBLIC-NO-LOOKUP-001/PUBLIC-NO-LOOKUP-AUDIT-001/PUBLIC-NO-LOOKUP-GATE-001/ORDER-BREAKGLASS-ROLE-001/AUDIT-PRIVILEGE-001/DB-ROLE-POSTURE-001: PASS"
+# ORDER-FK-LOCK-001: 只追加表被撤 UPDATE 之后，**指向它的外键会静默失效** —— 外键校验要在
+# 被引用行上取 FOR KEY SHARE 锁，而它需要 UPDATE（普通 SELECT 不需要）。146 撤掉了属主 proxy
+# 的 UPDATE，于是 065 那条指向 policy.policy_decisions 的外键让 PLATFORM_PAY 付费单永远确认
+# 不了（LC-28 阻断）。修法见迁移 149（换成 BEFORE INSERT 触发器，错误契约仍是 23503），
+# 不是 GRANT UPDATE。这一条以前零覆盖：全仓 grep harden_append_only / FOR KEY SHARE 无命中。
+require_test "ORDER-FK-LOCK-001" "./internal/platform/postgres" \
+  "TestForeignKeyIntoHardenedTablePostgres" \
+  "apps/api-go/internal/platform/postgres/order_decision_ref_integration_test.go" || exit $?
+if ! grep -qF 'order_decisions_decision_ref' apps/api-go/migrations/149_order_decision_ref_without_update.sql ||
+   ! grep -qF "ERRCODE = 'foreign_key_violation'" apps/api-go/migrations/149_order_decision_ref_without_update.sql ||
+   ! grep -qF 'DROP CONSTRAINT IF EXISTS order_decisions_decision_id_fkey' apps/api-go/migrations/149_order_decision_ref_without_update.sql; then
+  echo "  FAIL [ORDER-FK-LOCK-001]: 149 的触发器 / 外键错误码 / 外键 DROP 缺了一段 —— 只删外键不补引用检查，decision_id 就没人管了。" >&2
+  exit 1
+fi
+echo "    PUBLIC-NO-LOOKUP-001/PUBLIC-NO-LOOKUP-AUDIT-001/PUBLIC-NO-LOOKUP-GATE-001/ORDER-BREAKGLASS-ROLE-001/AUDIT-PRIVILEGE-001/DB-ROLE-POSTURE-001/ORDER-FK-LOCK-001: PASS"
 
 # 第六轮（2026-09-29，用户「下单接单的流程 还有页面很多废话 一起修改优化」）。
 # ORDER-FLOW-COPY-001: 下单 / 接单 / 订单页不许再印开发口吻（「报价 UI 不在这屏」「活动读模型」）、
@@ -11351,3 +11365,64 @@ if ! grep -qF 'd="M12 4 20 12 12 20 4 12z"' apps/mobile/src/components/proxy-ico
   exit 1
 fi
 echo "    WALLET-GEM-ICON-001: PASS (钱包钻石 = gem 💎 · diamond 保持菱形给 5 处通用符号)"
+
+# UI-HONEST-CAPABILITY-001（2026-09-30）：治「承诺了不存在的能力」与「错误静默丢弃」。
+# 用户标准：「UI做好 功能做好 对齐法规要求」。这三条是功能层的诚实性，不是文案层。
+#
+# 1) business-home：一键替商家发活动，入参全是编的 —— time 写死「待商家确认具体时段」
+#    （一句提示语被当成活动时间**落库**，别的用户会看到活动时间叫这个）、capacity: 12 /
+#    venueIcon ☕️ / venueType CAFE 与真实门店无关。编容量与 GEO-HONEST-001 同类，只是
+#    这次编的数字会落库、会被别人看到。一键代发已移除。
+# ⚠️ 必须剥注释再比对：这条门禁的说明本身就把两个反例值写了出来（不改实现、只在注释里
+#    引用也会触发）。2026-09-30 踩过：钉恒红，而这正是「假通过 / 假失败都藏住后面」的
+#    那类 bug —— 同一天我已经在 ORDER-AGENT-CLAIM-NO-001 上犯过一次。
+bh_code=$(perl -0777 -pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' apps/mobile/src/surfaces/business-home.tsx)
+if printf '%s\n' "$bh_code" | grep -qF '待商家确认具体时段' ||
+   printf '%s\n' "$bh_code" | grep -qF 'capacity: 12'; then
+  echo "  FAIL [UI-HONEST-CAPABILITY-001]: 商家 Home 的「一键发活动」又回来了 —— 它的时间/容量/场地" >&2
+  echo "        全是编的，活动会真的落库。宁可让商家自己去「发布活动」填。" >&2
+  exit 1
+fi
+# 2) merchant-storefront：建店表单整段是死代码（createShop/addStore 零调用点、
+#    createError 写 3 次从不渲染）；me.tsx 之前**没传** onStartStoreSetup，于是
+#    「让企业运营助手帮我创建」按钮恒灰、点了没反应，旁边还没有一句说明。
+if grep -qF 'async function createShop(' apps/mobile/src/surfaces/merchant-storefront.tsx ||
+   grep -qF 'setCreateError' apps/mobile/src/surfaces/merchant-storefront.tsx; then
+  echo "  FAIL [UI-HONEST-CAPABILITY-001]: 建店表单死代码回来了 —— 两个函数零调用点，createError" >&2
+  echo "        写了从不渲染（失败被静默丢弃）。真入口是企业运营助手。" >&2
+  exit 1
+fi
+if ! grep -qF 'onStartStoreSetup={() => openSubPage("enterpriseops")}' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [UI-HONEST-CAPABILITY-001]: me.tsx 没把线上店铺空态按钮接到企业运营助手 ——" >&2
+  echo "        主路径（我的 › 线上店铺）会看到一个灰掉且点了没反应的按钮。" >&2
+  exit 1
+fi
+# 3) availability：「我的可用时间」硬编码三条过期日期例外，而日历画未来 30 天 ⇒
+#    同一屏「3 个例外」与 0 个标记自相矛盾。
+if grep -qF '"2026-08-27": { type: "off" }' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [UI-HONEST-CAPABILITY-001]: 可用时间又硬编码过期日期例外 —— 计数与日历必然不一致。" >&2
+  exit 1
+fi
+# 4) activity-wizard：场景目录读取失败与「目录为空」必须分开，且失败要有重试入口。
+#    spotsState 以前只写不读 ⇒ 失败时用户永远卡在「需要选一个场景」且无法重试。
+if ! grep -qF 'sceneCatalogFailed' apps/mobile/src/surfaces/activity-wizard.tsx ||
+   ! grep -qF 'spotsState === "failed"' apps/mobile/src/surfaces/activity-wizard.tsx; then
+  echo "  FAIL [UI-HONEST-CAPABILITY-001]: 场景目录读取失败与「没有场景」没分开，或没有重试入口。" >&2
+  exit 1
+fi
+# 5) market：报价提交失败原来「有通道但看不到」—— opportunityError 渲染在列表页的
+#    else 分支，而详情页打开后走不到那个分支，用户正站在详情页却看不到任何提示。
+if ! grep -qF 'UI-QUOTE-ERROR-001' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [UI-HONEST-CAPABILITY-001]: 报价失败在详情页又看不到了（错误只渲染在列表页）。" >&2
+  exit 1
+fi
+# 6) me.tsx 企业运营助手：4 张能力卡共用一个 onPress，结果都是同一张 Store Draft ——
+#    承诺了 Catalog/Post/复盘三种产物，代码只产出一种。
+if grep -qF '"做内容与推广草稿"' apps/mobile/src/surfaces/me.tsx ||
+   grep -qF '"复盘门店经营"' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [UI-HONEST-CAPABILITY-001]: 企业运营助手又挂回几张导向同一个结果的能力卡 ——" >&2
+  echo "        承诺了不存在的能力，比不做更糟。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/business-home-operating-flow.test.ts >/dev/null || exit $?
+echo "    UI-HONEST-CAPABILITY-001: PASS (不编数据 · 死代码清理 · 错误可见 · 失败可重试)"

@@ -385,6 +385,7 @@ export interface Messages {
   sceneCatOther: string;
   noSceneFound: string;
   noSceneFoundSub: string;
+  sceneCatalogFailed: string;
   mapPickTitle: string;
   confirmMapPick: string;
   createSignup: string;
@@ -807,6 +808,7 @@ const ZH: Messages = {
   sceneCatOther: "其他",
   noSceneFound: "没找到相关场景",
   noSceneFoundSub: "试试其他关键词或地图上直接选",
+  sceneCatalogFailed: "场景目录没能加载。可以重试，或者在地图上直接选一个地方。",
   mapPickTitle: "地图上选地点",
   confirmMapPick: "确认这个地点",
   createSignup: "报名方式",
@@ -1225,6 +1227,7 @@ const VI: Messages = {
   sceneCatOther: "Khác",
   noSceneFound: "Không thấy địa điểm phù hợp",
   noSceneFoundSub: "Thử từ khóa khác hoặc chọn trên bản đồ",
+  sceneCatalogFailed: "Không tải được danh mục địa điểm. Thử lại, hoặc chọn trực tiếp trên bản đồ.",
   mapPickTitle: "Chọn trên bản đồ",
   confirmMapPick: "Xác nhận địa điểm này",
   createSignup: "Cách đăng ký",
@@ -1643,6 +1646,7 @@ const EN: Messages = {
   sceneCatOther: "Other",
   noSceneFound: "No matching scenes",
   noSceneFoundSub: "Try other keywords or pick on the map",
+  sceneCatalogFailed: "Could not load the places catalog. Retry, or pick a spot directly on the map.",
   mapPickTitle: "Pick on the map",
   confirmMapPick: "Confirm this place",
   createSignup: "Join mode",
@@ -2061,6 +2065,7 @@ const LO: Messages = {
   sceneCatOther: "ອື່ນໆ",
   noSceneFound: "ບໍ່ພົບສະຖານທີ່",
   noSceneFoundSub: "ລອງຄຳອື່ນຫຼືເລືອກເທິງແຜນທີ່",
+  sceneCatalogFailed: "ບໍ່ສາມາດໂຫຼດລາຍຊື່ສຖານທີ່ໄດ້. ລອງໃໝ່ ຫຼື ເລືອກຈຸດໃນແຜນທີ່.",
   mapPickTitle: "ເລືອກເທິງແຜນທີ່",
   confirmMapPick: "ຢືນຢັນສະຖານທີ່ນີ້",
   createSignup: "ວິທີລົງທະບຽນ",
@@ -2479,6 +2484,7 @@ const KO: Messages = {
   sceneCatOther: "기타",
   noSceneFound: "맞는 장소 없음",
   noSceneFoundSub: "다른 키워드나 지도에서 선택",
+  sceneCatalogFailed: "장소 목록을 불러오지 못했습니다. 다시 시도하거나 지도에서 직접 선택하세요.",
   mapPickTitle: "지도에서 선택",
   confirmMapPick: "이 장소로 결정",
   createSignup: "신청 방식",
@@ -2897,6 +2903,7 @@ const JA: Messages = {
   sceneCatOther: "その他",
   noSceneFound: "該当する場所がありません",
   noSceneFoundSub: "別のキーワードか地図から選択",
+  sceneCatalogFailed: "場所のカタログを読み込めませんでした。再試行するか、地図から直接選んでください。",
   mapPickTitle: "地図から選択",
   confirmMapPick: "この場所に決定",
   createSignup: "申し込み方式",

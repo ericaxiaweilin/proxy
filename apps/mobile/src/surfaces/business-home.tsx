@@ -150,35 +150,20 @@ export function BusinessHome({
   }, [accountName, loadError]);
 
   async function prepareOperatingAction(): Promise<void> {
-    if (!activities || !firstStore || !operatingHome || planBusy) return;
+    if (!operatingHome || planBusy) return;
     if (operatingHome.bestNextDecision.kind === "STOP_TRAFFIC") {
       setPlanResult("已记录停止引流建议；该动作不会创建活动或新增预算。现场承接状态需要由门店经营权限确认。");
       return;
     }
-    setPlanBusy(true);
-    setPlanResult(undefined);
-    try {
-      const selectedSku = menuItems.find((item) => item.available);
-      const created = await activities.publish({
-        title: operatingHome.bestNextDecision.title,
-        time: "待商家确认具体时段",
-        capacity: 12,
-        venueName: firstStore.name,
-        venueIcon: "☕️",
-        venueType: "CAFE",
-        realitySceneId: operatingHome.sceneSupply?.sceneId ?? firstStore.id,
-        desc: `${operatingHome.bestNextDecision.reason}${selectedSku ? ` · 主推 ${selectedSku.name}` : ""}`,
-        consumptionTerm: "SPLIT",
-        merchantId: firstStore.id,
-      });
-      setScenePackages((current) => [{ id: created.activityId, title: created.title, sub: created.time, tag: "准备中", ...(created.coverImageUrl ? { coverImageUrl: created.coverImageUrl } : {}) }, ...current.filter((item) => item.id !== created.activityId)]);
-      setInProgress((current) => [{ id: created.activityId, title: created.title, sub: created.time, tag: "准备中", ...(created.coverImageUrl ? { coverImageUrl: created.coverImageUrl } : {}) }, ...current.filter((item) => item.id !== created.activityId)]);
-      setPlanResult(`已创建「${created.title}」并进入准备；报名不等于到场，只有核验后才计入经营结果。`);
-    } catch (error) {
-      setPlanResult(error instanceof Error ? error.message : "准备失败，请重试");
-    } finally {
-      setPlanBusy(false);
-    }
+    // UI-GEO-HONEST-002：这里以前会真的调活动的发布接口，而入参全是编的 ——
+    //   time: "待商家确认具体时段" —— 一句提示语被当成活动时间**落库**，别的用户会看到
+    //     活动时间叫「待商家确认具体时段」；
+    //   capacity: 12 / venueIcon: "☕️" / venueType: "CAFE" —— 与真实门店无关，
+    //     firstStore 里根本没有这些字段可读，那个「12」在整个 app 里没有任何来源。
+    // 编容量与本仓库反复修掉的 GEO-HONEST-001 是同一类，只是这次编的数字会落库、
+    // 会被别人看到。所以这里不发：活动时间、人数、场地都得由商家自己定，
+    // 「一键替你发」这个能力在有真实来源之前不做。
+    setPlanResult("这一步要先把活动时间、人数和场地定下来。到「发布活动」里填好再发 —— 别让平台替你猜。报名不等于到场，只有核验后才计入经营结果。");
   }
 
   return (
