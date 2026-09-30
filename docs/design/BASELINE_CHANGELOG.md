@@ -4,6 +4,38 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 335 — 2026-09-30
+
+- **命令事务失败不再吞掉真正的拒绝原因**（`DISPATCH-ERROR-HONESTY-001` /
+  `ORDER-ERROR-LOGGED-001`）。改的是 `internal/api/command_dispatch.go`（契约 5、10）与
+  `internal/fulfillment/service.go`（契约 5）—— 两者都**基线敏感**。起因是 LC-28 阻断：
+  PLATFORM_PAY 付费单永远确认不了。
+  1. **真实原因**：146 的 `harden_append_only('policy.policy_decisions')` 把 UPDATE 从属主
+     `proxy` 一起撤了（第 229 行撤属主，所以第 230 行那个 `owner_name <> 'proxy'` 的分支
+     根本不成立）。外键校验要在被引用行上取 `FOR KEY SHARE` 行锁，而它**需要 UPDATE**
+     —— 普通 `SELECT` 不需要。于是 065 第 60 行那条
+     `policy.order_decisions.decision_id REFERENCES policy.policy_decisions(id)`
+     每次写入必然 `permission denied`。修法见迁移 149：换成 `BEFORE INSERT` 触发器，
+     错误契约不变（无效引用仍是 SQLSTATE 23503）。**不是** `GRANT UPDATE` —— 那会让
+     `role_posture` 多报 `RUNTIME_CAN_REWRITE_AUDIT`，在
+     `PROXY_ENFORCE_DB_ROLE_SEPARATION=true` 下 API 直接拒绝启动。
+  2. **为什么排障时看不见**：`executeCommand` 的 err 分支一律回
+     `500 {"error":"command_transaction_failed"}`，而那个 err 是事务被毒掉之后的
+     SQLSTATE 25P02 / `commit unexpectedly resulted in rollback` —— 它指向提交这一步，
+     不指向任何真实故障；`orderUpdateRejected` 的兜底分支又把 err 整个丢掉，日志里一个字都不留。
+  3. **改法**：事务失败时，若命令自己已经判了 `REJECTED`，就回**那个结果**
+     （409 + 真实 errorCode），否则维持 500。判断只放一处 —— 放在 `executeCommand`
+     的 err 分支。在闭包里按 `result.Outcome` 提前 `return nil` 是**无效**的：事务已经
+     中毒，`runInTransaction` 的 `Commit` 照样失败，实测仍然回 500（第一版就是这么写的，
+     被 A/B 探针证伪）。**ACCEPTED / PENDING 不走这条路**：回滚意味着命令没有生效，
+     报成功就是撒谎。
+  4. **日志**：`orderUpdateRejected` 的两条 INTERNAL 分支都写日志；DB 错误文本可能含
+     表名 / 约束名，只进日志、不进 `safeDetails`。
+  5. **门禁**：新增 `ORDER-FK-LOCK-001` —— `TestForeignKeyIntoHardenedTablePostgres`
+     用**非超级用户**临时角色实测「撤 UPDATE 之后，指向该表的外键真的会失败」（超级用户
+     绕过所有权限检查，只测超级用户等于什么都没测），并钉住现行 schema 没有这种外键、
+     守卫触发器在位、无效引用仍是 23503。
+
 ## Revision 334 — 2026-09-30
 
 - **钱包钻石字形修正**（`WALLET-GEM-ICON-001`）

@@ -143,7 +143,20 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	}
 	result, status, err := s.executeCommand(r.Context(), envelope)
 	if err != nil {
-		log.Printf("command transaction failed: command=%s key=%s err=%v", envelope.CommandType, envelope.IdempotencyKey, err)
+		log.Printf("command transaction failed: command=%s key=%s outcome=%s err=%v", envelope.CommandType, envelope.IdempotencyKey, result.Outcome, err)
+		// DISPATCH-ERROR-HONESTY-001：事务失败 ⇒ 本次命令什么都没落库（闭包返回错误和
+		// Commit 失败都会回滚，见 platform/postgres/pool.go 的 runInTransaction）。
+		// 如果 dispatch 自己已经判了 REJECTED，那个结果里带着**真正的原因**（例如策略
+		// 盖章的 permission denied）。这里统一报 500 command_transaction_failed 等于把
+		// 「订单被拒」说成「服务器内部错误」，而 err 本身（SQLSTATE 25P02 current
+		// transaction is aborted / commit unexpectedly resulted in rollback）只指向提交
+		// 这一步，不指向任何真实故障 —— 排障的人会一路查到事务层，查不到策略盖章。
+		// 实测 2026-09-30 LC-28：PLATFORM_PAY 付费单永远确认不了，客户端只看到 500。
+		// ACCEPTED / PENDING 不能走这条路：回滚意味着命令**没有**生效，报成功就是撒谎。
+		if result.Outcome == "REJECTED" {
+			writeResult(w, statusFor(result), result)
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "command_transaction_failed"})
 		return
 	}
@@ -215,6 +228,11 @@ func (s *Server) executeCommand(ctx context.Context, envelope command.Envelope) 
 			result = s.dispatchCommand(operationContext, envelope)
 			if err := s.Idempotency.Complete(operationContext, scope, envelope.IdempotencyKey, command.IdempotencyRecord{Fingerprint: fingerprint, Result: result}); err != nil {
 				log.Printf("idempotency complete failed: command=%s outcome=%s err=%v", envelope.CommandType, result.Outcome, err)
+				// DISPATCH-ERROR-HONESTY-001：这里**不能**按 result.Outcome 决定怎么回话。
+				// 事务已经被前面失败的语句毒掉了，即使这里 return nil，
+				// runInTransaction 的 Commit 一样会失败（实测 err="commit unexpectedly
+				// resulted in rollback"），结果仍然是 500。判断只留一个决策点，放在
+				// executeCommand 的 err 分支里。
 				return err
 			}
 			status = statusFor(result)

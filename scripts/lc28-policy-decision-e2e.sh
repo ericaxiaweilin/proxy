@@ -318,8 +318,15 @@ print(body.get('amendmentId','') if d.get('outcome') == 'ACCEPTED' and body.get(
 [ -n "$amendment_id" ] || { echo "FAIL: proposal must be ACCEPTED as PROPOSED: $R9"; exit 1; }
 echo "  OK: requester proposed amendment $amendment_id"
 
+# LC30-PAYLOAD-QUOTE-001：payload 必须先落到变量里再传。
+# 内联写在嵌套的 "$( … )" 里时，内层的 \" 在外层双引号里已经变成**字面量**，
+# 于是 {"a":"1","b":"2"} 对 bash 来说是个**未加引号的词** —— 而 {a,b} 正是
+# brace expansion 的形状，会被拆成两个词。curl 就收到两个 -d 正文，把第二个
+# 当成 URL，退出码 3（URL malformat）；套件有 set -e，于是**无声退出**，
+# 看起来像「服务端拒绝了」，实际请求根本没发出去。
+accept_payload="{\"amendmentId\":\"${amendment_id}\",\"decision\":\"ACCEPT\"}"
 R10=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
-  -d "$(envelope_order_command RespondMaterialOrderChange e2e-${TS}-lc30-acc $agent_user_id $order_id_lc30 "{\"amendmentId\":\"${amendment_id}\",\"decision\":\"ACCEPT\"}")" \
+  -d "$(envelope_order_command RespondMaterialOrderChange e2e-${TS}-lc30-acc $agent_user_id $order_id_lc30 "$accept_payload")" \
   "$BASE/v1/commands/RespondMaterialOrderChange")
 decision_after=$(echo "$R10" | python3 -c "
 import json, sys

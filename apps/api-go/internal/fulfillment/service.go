@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -2221,8 +2222,18 @@ func orderUpdateRejected(e command.Envelope, err error, code, messageKey string)
 		return command.Rejected(e, "ILLEGAL_ORDER_TRANSITION", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.illegal_transition", map[string]any{"reason": err.Error()})
 	}
 	if errors.Is(err, ErrPolicyStampFailed) {
+		// ORDER-ERROR-LOGGED-001：INTERNAL 类拒绝必须把底层错误写进日志。
+		// 策略盖章失败往往意味着数据库层出了问题（权限、约束、连接），而拒绝码
+		// 本身（POLICY_STAMP_FAILED）看不出是哪一种。
+		log.Printf("order stamp failed: order=%s code=%s err=%v", e.Target.ID, code, err)
 		return command.Rejected(e, "POLICY_STAMP_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.policy_stamp_failed", nil)
 	}
+	// ORDER-ERROR-LOGGED-001：兜底分支以前把 err 整个丢掉 —— 于是数据库层的
+	// 「permission denied for table policy_decisions」在日志里一个字都不留，
+	// 调用方只看到一个 INTERNAL 拒绝码。2026-09-30 的 LC-28 阻断（付费单永远确认
+	// 不了）就是这样隐形的：真实原因既没进日志，也没进响应。
+	// 只记日志、不进 safeDetails：DB 错误文本可能含表名/约束名，不该回给客户端。
+	log.Printf("order update rejected: order=%s code=%s err=%v", e.Target.ID, code, err)
 	return command.Rejected(e, code, "INTERNAL", "SAFE_RETRY", messageKey, nil)
 }
 
