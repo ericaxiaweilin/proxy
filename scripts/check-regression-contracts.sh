@@ -11964,3 +11964,81 @@ if curl -sf --noproxy '*' --max-time 3 http://127.0.0.1:4100/health/live >/dev/n
 else
   echo "    ACCOUNT-MATRIX-001: SKIP (dev API 不在 :4100 —— 这条要活的服务。先起它：launchctl kickstart -k gui/\$(id -u)/com.user.kake-dev-api)"
 fi
+
+# DEV-SEED-SHOPS-001（2026-09-30）：开发种子（20 店 + 30 用户）的两条不变量。
+#
+# 这批数据是**临时**的（用户明确"后期删除"），但下面两件事一旦破掉，删除脚本就不再可靠：
+#
+# 1. **头像必须指向真实存在的 READY 媒体资产。** devseed 用户的 avatar_path 复用
+#    库里已有的 30 个 creator 肖像，**不生成假头像文件** —— 造一批指向不存在文件的
+#    avatar_path，只会让 UI 上出现 30 个破图，而这种"种子里带了坏引用"往往到
+#    删数据那天才会被发现。写脚本时我第一版就填了两个不存在的资产 ID
+#    （ma_creator_bich_/ma_creator_hanh_，是我按名字猜的），灌进去就是 30 个破图。
+#    这条判据就是为拦住那种"看起来对"的猜测。
+# 2. **种子脚本必须幂等且不覆盖。** 跑第二遍不能翻倍，也不能把改过的字段刷回去
+#    （AGENTS.md：seed 路径必须 insert-if-absent，绝不 blind overwrite）。
+_seedsql=apps/api-go/scripts/seed_dev_shops_users.sql
+if [ -f "$_seedsql" ]; then
+  _dsn2="$(grep -o '^DATABASE_URL=.*' .env 2>/dev/null | sed 's/^DATABASE_URL=//')"
+  if [ -n "$_dsn2" ] && command -v psql >/dev/null 2>&1 && psql "$_dsn2" -tAc 'SELECT 1' >/dev/null 2>&1; then
+    # 提取脚本里引用的头像资产，逐个确认存在且 READY。
+    _badav=""
+    while read -r _a; do
+      [ -z "${_a}" ] && continue
+      _n="$(psql "$_dsn2" -tAc "SELECT count(*) FROM media.media_assets WHERE media_asset_id='${_a}' AND processing_status='READY'" 2>/dev/null || echo 0)"
+      [ "${_n}" = "1" ] || _badav="${_badav} ${_a}(匹配${_n})"
+    done < <(grep -o "assets/ma_[A-Za-z0-9_]*" "$_seedsql" 2>/dev/null | sed 's|assets/||' | sort -u)
+    if [ -n "${_badav}" ]; then
+      echo "  FAIL [DEV-SEED-SHOPS-001]: devseed 脚本引用了不存在 / 非 READY 的头像资产：" >&2
+      echo "        ${_badav}" >&2
+      echo "        头像路径指向不存在的文件 = UI 上的一片破图，而且要到删数据那天才会被发现。" >&2
+      echo "        用库里已有的 READY 资产（SELECT media_asset_id FROM media.media_assets" >&2
+      echo "        WHERE processing_status='READY'），不要按名字猜 ID。" >&2
+      exit 1
+    fi
+    # 幂等 + 不覆盖：临时改一个字段，重跑脚本，字段必须保持不变、行数不能翻倍。
+    _probe_id="$(psql "$_dsn2" -tAc "SELECT id FROM business.stores WHERE id LIKE 'store_devseed_%' ORDER BY id LIMIT 1" 2>/dev/null || true)"
+    if [ -n "${_probe_id}" ]; then
+      _orig="$(psql "$_dsn2" -tAc "SELECT address FROM business.stores WHERE id='${_probe_id}'" 2>/dev/null || true)"
+      _before="$(psql "$_dsn2" -tAc "SELECT count(*) FROM business.stores WHERE id LIKE 'store_devseed_%'" 2>/dev/null || echo 0)"
+      psql "$_dsn2" -q -c "UPDATE business.stores SET address='__DEV_SEED_SENTINEL__' WHERE id='${_probe_id}'" >/dev/null 2>&1 || true
+      # 关键：**必须拿到脚本的真实退出码**。第一版写成 `... || true`，
+      # 于是脚本万一因为语法错误整份没跑（例如把 ON CONFLICT DO NOTHING 删掉时
+      # 顺手把 SELECT 的结尾逗号也留下 → "syntax error at or near COMMIT"），
+      # 地址自然"没被覆盖"，判据照样 PASS。**门禁分不清"脚本没生效"和
+      # "脚本正确地没覆盖"** —— 这正是最坏的假绿形态。
+      # 判据自己写坏脚本时，恰恰是最需要它报红的时候。
+      if ! psql "$_dsn2" -q -v ON_ERROR_STOP=1 -f "$_seedsql" >/tmp/devseed-rerun.log 2>&1; then
+        echo "  FAIL [DEV-SEED-SHOPS-001]: 重跑 ${_seedsql} 自己失败了 —— 幂等判据无从判断" >&2
+        echo "        （脚本没跑成功 ≠ 脚本没覆盖）。psql 输出：" >&2
+        head -n 5 /tmp/devseed-rerun.log | sed 's/^/        /' >&2
+        rm -f /tmp/devseed-rerun.log
+        exit 1
+      fi
+      rm -f /tmp/devseed-rerun.log
+      _after_addr="$(psql "$_dsn2" -tAc "SELECT address FROM business.stores WHERE id='${_probe_id}'" 2>/dev/null || true)"
+      _after_n="$(psql "$_dsn2" -tAc "SELECT count(*) FROM business.stores WHERE id LIKE 'store_devseed_%'" 2>/dev/null || echo 0)"
+      # 还原（这条判据自己改了数据，必须自己还原 —— 门禁不该留下痕迹）
+      psql "$_dsn2" -q -c "UPDATE business.stores SET address='${_orig}' WHERE id='${_probe_id}'" >/dev/null 2>&1 || true
+      if [ "${_after_addr}" != "__DEV_SEED_SENTINEL__" ]; then
+        echo "  FAIL [DEV-SEED-SHOPS-001]: 重跑种子把 ${_probe_id}.address 刷回了 '${_after_addr}' ——" >&2
+        echo "        种子必须 insert-if-absent，绝不 blind overwrite（AGENTS.md）。" >&2
+        exit 1
+      fi
+      if [ "${_before}" != "${_after_n}" ]; then
+        echo "  FAIL [DEV-SEED-SHOPS-001]: 重跑种子让 store 数从 ${_before} 变成 ${_after_n} —— 不幂等。" >&2
+        exit 1
+      fi
+    fi
+    _n_users="$(psql "$_dsn2" -tAc "SELECT count(*) FROM identity.profiles WHERE user_account_id LIKE 'user_devseed_%'" 2>/dev/null || echo 0)"
+    _n_stores="$(psql "$_dsn2" -tAc "SELECT count(*) FROM business.stores WHERE id LIKE 'store_devseed_%'" 2>/dev/null || echo 0)"
+    _n_nodata="$(psql "$_dsn2" -tAc "SELECT count(*) FROM business.stores WHERE id LIKE 'store_devseed_%' AND (address='' OR category='')" 2>/dev/null || echo 0)"
+    if [ "${_n_nodata}" != "0" ]; then
+      echo "  FAIL [DEV-SEED-SHOPS-001]: 有 ${_n_nodata} 家 devseed 店缺 address 或 category。" >&2
+      exit 1
+    fi
+    echo "    DEV-SEED-SHOPS-001: PASS (${_n_stores} 店 / ${_n_users} 用户 · 头像全部指向真实 READY 资产 · 重跑幂等且不覆盖 · 地址品类无缺失)"
+  else
+    echo "    DEV-SEED-SHOPS-001: SKIP (开发库不可达 —— 这条要活的 DB)"
+  fi
+fi
