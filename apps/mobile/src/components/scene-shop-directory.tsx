@@ -447,7 +447,7 @@ export function SceneShopDirectory({
               </Pressable>
             ) : null}
 
-            {catalogState === "ERROR" ? <Text selectable style={styles.empty}>场景目录暂时取不到，请稍后重试。</Text>
+            {catalogState === "ERROR" ? <Text selectable style={styles.empty}>目录没能加载，刷新再试试。</Text>
               : catalogState === "LOADING" ? <Text selectable style={styles.empty}>正在加载附近场景…</Text>
                 : rows.length === 0 ? <Text selectable style={styles.empty}>{areas.length > 0 ? "这个区域还没有接入的场景，取消筛选看看。" : `附近还没有接入的${label}场景。`}</Text>
                   : <View style={styles.cardList}>{rows.map((scene) => {
@@ -534,7 +534,7 @@ export function SceneShopDirectory({
 
               {infoCells.length > 0 ? <View style={styles.infoStrip}>{infoCells.map((cell) => <View key={cell.label} style={styles.infoCell}><Text selectable style={styles.infoValue}>{cell.value}</Text><Text selectable style={styles.infoLabel}>{cell.label}</Text></View>)}</View> : null}
 
-              {detailState === "ERROR" ? <Text selectable style={styles.empty}>这个场景的详情暂时取不到，稍后再试。</Text> : null}
+              {detailState === "ERROR" ? <Text selectable style={styles.empty}>没能打开这个场景，刷新再试试。</Text> : null}
 
               {/* SCENE-HOME-PROTOTYPE-001：原型 deepseek_html_20260927_7fc18d 的 action-row3
                   是**三颗**并排按钮 —— 收藏（rose，可切「已收藏」）/ 打卡（ink，可切
@@ -631,7 +631,7 @@ export function SceneShopDirectory({
                     <Text selectable style={styles.menuFit}>{`${item.sceneFit} · ${item.available ? "可售" : "售罄"}`}</Text>
                     <Text selectable style={styles.menuPrice}>{item.priceLabel}</Text>
                   </View>)}
-                </ScrollView> : <Text selectable style={styles.blockEmpty}>菜单还没回传 —— 这不是加载失败，是后端这条接口还没接进来。</Text>}
+                </ScrollView> : <Text selectable style={styles.blockEmpty}>这家店还没有菜单</Text>}
               </View> : null}
 
               {detail && detail.aiVisits && detail.aiVisits.length > 0 ? <View style={styles.block}>
@@ -714,10 +714,6 @@ export function SceneShopDirectory({
                   </View>
                   <ProxyIcon color={color.muted} name="chevronRight" size={16} />
                 </Pressable>)}
-                <View style={styles.intentFootnote}>
-                  <ProxyIcon color={color.muted} name="clock" size={12} />
-                  <Text selectable style={styles.intentFootnoteText}>匹配结果仅供参考，实际约见以双方确认为准</Text>
-                </View>
               </View> : null}
 
               {detail ? <Text selectable style={styles.boundary}>{detail.truthBoundary}</Text> : null}
@@ -863,9 +859,9 @@ actionRow3: { flexDirection: "row", gap: 8, marginTop: 14 },
   menuName: { color: color.ink, fontSize: 12, fontWeight: "900" },
   menuFit: { color: color.muted, fontSize: 11, fontWeight: "700", marginTop: 2 },
   menuPrice: { color: color.ink, fontSize: 12, fontWeight: "900", marginTop: 4 },
-  // SCENE-HOME-PROTOTYPE-001：原型 intent-footnote —— 意图卡下面的免责脚注。
-  intentFootnote: { alignItems: "flex-start", flexDirection: "row", gap: 7, paddingTop: 12 },
-  intentFootnoteText: { color: color.muted, flex: 1, fontSize: 11, fontWeight: "700", lineHeight: 16 },
+  // UI-COPY-HONEST-001：intentFootnote / intentFootnoteText 已删 —— 那条免责脚注
+  // （「匹配结果仅供参考，实际约见以双方确认为准」）原型里根本没有（docs/design/references
+  // 全仓搜不到），是实现自己加的免责套话，对所有场景都一样、没有信息量。样式随之删除。
   // SCENE-HOME-PROTOTYPE-001：原型 match-card —— 深色圆角卡，金底「匹配推荐」
   // 小标签 + 大标题 + 副题；头像是亮环（暗底上用白/亮字）。
   matchCard: { backgroundColor: color.deep, borderRadius: 20, marginTop: 22, overflow: "hidden", padding: 16 },

@@ -277,7 +277,7 @@ export function MarketSurface({
       setOpportunityPhase("READY");
     } catch {
       // TAB-SWITCH-JANK-001: 失败不清缓存——列表照旧，错误行照常提示新鲜度问题。
-      setOpportunityError("订单服务暂时不可用，请检查连接后重试。");
+      setOpportunityError("没能连上，刷新再试试。");
       if (cachedMarketOpportunities.length === 0) {
         setOpportunityItems([]);
         setOpportunityPhase("ERROR");

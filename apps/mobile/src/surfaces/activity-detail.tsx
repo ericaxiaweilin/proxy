@@ -110,7 +110,6 @@ export function ActivityDetailSurface({ client, moderation, initialActivityId, o
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
       <Text selectable style={styles.title}>活动详情</Text>
-      <Text selectable style={styles.sub}>来自 Activity 真实读模型，非占位。</Text>
       {items === undefined && !error ? <ProxyLoading tone="muted" /> : null}
       {error ? <View style={styles.card}><Text selectable style={styles.empty}>加载失败：{error}</Text></View> : null}
       {items?.map((a) => (

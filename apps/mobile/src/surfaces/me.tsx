@@ -1618,7 +1618,7 @@ export function MeSurface({
               ) : memories.length === 0 ? (
                 <View style={styles.prototypeCard}>
                   <Text selectable style={styles.prototypeCardTitle}>还没有记忆</Text>
-                  <Text selectable style={styles.prototypeCardDesc}>场景结束后由发起方记录实际花费与时长，才会生成一条 Memory（host + guest 双视角可见）。App 目前还没有「记录结果」的入口 —— 在它接上之前，这里不会有内容。</Text>
+                  <Text selectable style={styles.prototypeCardDesc}>场景结束后，双方可以一起记录这次的实际花费与花费时长。</Text>
                 </View>
               ) : (
                 memories.map((m) => (
@@ -2608,16 +2608,14 @@ export function MeSurface({
                 <Text selectable style={styles.enterpriseDraftTitle}>Store Digitization Draft</Text>
                 {enterpriseAssets.map((asset) => (
                   <View key={asset.label} style={styles.enterpriseDraftRow}>
-                    <View style={styles.enterpriseDraftCopy}><Text selectable style={styles.enterpriseDraftName}>{asset.label}</Text><Text selectable style={styles.enterpriseDraftMeta}>{asset.uri ? "你上传的现实资料 · 存在本机" : "内置示例条目 · 不是你上传的资料"}</Text></View>
+                    <View style={styles.enterpriseDraftCopy}><Text selectable style={styles.enterpriseDraftName}>{asset.label}</Text><Text selectable style={styles.enterpriseDraftMeta}>{asset.uri ? "你上传的资料" : "示例条目"}</Text></View>
                     <Text selectable style={styles.enterpriseDraftState}>待抽取</Text>
                   </View>
                 ))}
-                <Text selectable style={styles.enterpriseDraftMeta}>菜单项、价格、权益与置信度都由模型层抽取。这个面还没有接模型调用，所以不显示任何抽取结果或百分比。</Text>
               </View>
             ) : null}
             {draftReady && !confirmed ? <Pressable onPress={() => setEnterpriseOpsStage("CONFIRMED")} style={styles.primaryCta}><Text selectable style={styles.primaryCtaText}>确认这些资料</Text></Pressable> : null}
             <Pressable onPress={() => openSubPage("merchantstorefront")} style={styles.primaryCta}><Text selectable style={styles.primaryCtaText}>查看线上店铺</Text></Pressable>
-            <View style={styles.infoNote}><Text selectable style={styles.infoNoteTitle}>Skill Boundary</Text><Text selectable style={styles.infoNoteText}>Source Asset → Model Output → Draft Artifact → Merchant Confirmation → Authorized Domain Command。模型不直接成为 Merchant、Catalog 或 Order 真源。</Text></View>
           </ScrollView>
         </View>
       );
@@ -2634,10 +2632,10 @@ export function MeSurface({
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><ProxyBackGlyph /></Pressable>
             <Text selectable style={styles.detailTitle}>合作执行网络</Text>
-            <Text selectable style={styles.detailSub}>功能预览 · 执行者数据尚未接入</Text>
+            <Text selectable style={styles.detailSub}>功能预览</Text>
             <View style={styles.infoNote}>
               <Text selectable style={styles.infoNoteTitle}>这里还没有执行者</Text>
-              <Text selectable style={styles.infoNoteText}>常用执行者来自真实合作记录：谁接过你的单、有没有到场、有没有按时完成。App 目前没有这个接口，也没有合作次数与按时率字段，所以这里不显示任何名字、评分或百分比。</Text>
+              <Text selectable style={styles.infoNoteText}>接过你的单、按时到场的执行者会出现在这里。</Text>
             </View>
             <Pressable accessibilityLabel="再次邀请团队" onPress={() => openSubPage("multislot")} style={styles.trustedInviteTouchable}>
               <Gradient from={color.magenta} to={color.violet} style={styles.trustedInvite}><Text selectable style={styles.trustedInviteText}>再次邀请团队</Text></Gradient>

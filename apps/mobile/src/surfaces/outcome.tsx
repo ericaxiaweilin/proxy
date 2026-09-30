@@ -47,7 +47,6 @@ export function OutcomeSurface({ client }: { client: OutcomeClient }): React.JSX
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
       <Text selectable style={styles.title}>结果 · Outcome Intelligence</Text>
-      <Text selectable style={styles.sub}>ObservationSet → Delta → Learning 真实链路（M6.5），已接 OutcomeClient，非占位。</Text>
       <View style={styles.card}>
         <Text selectable style={styles.label}>targetId</Text><TextInput value={targetId} onChangeText={setTargetId} style={styles.input} placeholder="真实目标 ID" placeholderTextColor={color.muted} />
         <Text selectable style={styles.label}>templateId</Text><TextInput value={templateId} onChangeText={setTemplateId} style={styles.input} placeholder="真实模板 ID" placeholderTextColor={color.muted} />

@@ -540,7 +540,11 @@ describe("SCENE-HOME-DETAIL-001: the detail modal mirrors the design's three new
   it("renders the '这个 Scene 喝什么' menu block, with an honest empty state when the menu is missing", () => {
     expect(component).toContain("这个 Scene 喝什么");
     expect(component).toContain("detail.menu.map");
-    expect(component).toContain("菜单还没回传");
+    // UI-COPY-HONEST-001：空态说「这家店还没有菜单」，不说「菜单还没回传 —— 这不是
+    // 加载失败，是后端这条接口还没接进来」。后者是把自己的实现状态抖给用户看。
+    expect(component).toContain("这家店还没有菜单");
+    expect(component).not.toContain("菜单还没回传");
+    expect(component).not.toContain("接口还没接进来");
   });
   it("does not hardcode any people names, menu names, or recommendation texts", () => {
     // 这些必须由 detail.humans / detail.menu / detail.variants 带进来 —— 写死一个
@@ -582,10 +586,14 @@ describe("SCENE-HOME-PROTOTYPE-001: detail mirrors the 场景名片 prototype (d
     // placeholder-honest-actions.test.ts 钉的死按钮，所以**故意不做**。
     expect(component).not.toContain("查看全部匹配");
   });
-  it("renames the intent block to 你想在这里做什么？ and adds the prototype footnote", () => {
+  it("renames the intent block to 你想在这里做什么？ and drops the unsourced footnote", () => {
     expect(component).toContain("你想在这里做什么？");
     expect(component).not.toContain("这里能做的事");
-    expect(component).toContain("匹配结果仅供参考，实际约见以双方确认为准");
+    // UI-COPY-HONEST-001：这条脚注原来叫「the prototype footnote」，但原型里**根本没有**
+    // 这行（docs/design/references 全仓搜不到）—— 钉的是个伪原型依据。它又是免责套话
+    // （「以双方确认为准」），对所有场景都一样、没有信息量。删掉，脚注不再回来。
+    expect(component).not.toContain("匹配结果仅供参考");
+    expect(component).not.toContain("实际约见以双方确认为准");
   });
   it("surface reality-scene-map draws the three action buttons as glyphs, not as text characters", () => {
     const row = sliceBetween(surface, "styles.actionRow3", "styles.distBar");
@@ -651,7 +659,9 @@ describe("SCENE-HOME-PROTOTYPE-001: detail mirrors the 场景名片 prototype (d
     expect(foot).not.toContain("›");
     expect(foot).toContain('<ProxyIcon color={color.muted} name="chevronRight" size={16} />');
     // 意图卡那颗（「你想在这里做什么？」三张卡右边）原来也是 `<Text>›</Text>`。
-    const intent = sliceBetween(component, "detail.actions.map(", "styles.intentFootnote");
+    // UI-COPY-HONEST-001 删掉了紧跟其后的 intentFootnote 免责脚注，所以这里的切片
+    // 终点从 styles.intentFootnote 改成收尾的 `</View> : null}`。
+    const intent = sliceBetween(component, "detail.actions.map(", "</View> : null}");
     expect(intent).not.toBe("");
     expect(intent).not.toContain("›");
     expect(intent).toContain('<ProxyIcon color={color.muted} name="chevronRight" size={16} />');
