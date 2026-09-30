@@ -79,11 +79,20 @@ func Format(category string, moment time.Time, seq int) string {
 // Registered 说明类别码是否已登记。
 func Registered(category string) bool { return categories[category] }
 
-// Valid 校验一个编号的结构：全数字、至少 21 位、类别码已登记、日期与时分秒是真实存在的。
-// 没有校验位（用户定的口径），所以抄错一位只有在碰巧让结构失效时才能识别；客服反查
-// 靠「查得到 / 查不到」判断，见 internal/numberlookup。
+// Valid 校验一个编号的形状。**两种形状都放行**：
+//
+//   - 21 位起（现行规范，本包 Format 产出）：全数字 + 类别码已登记 + 日期时分秒真实存在；
+//   - 16~20 位（main 时代已发出的号：yyMMdd + 全局序号 + Luhn 校验位，序号超过 9 位会
+//     自然加宽到 17 位）：全数字 + Luhn 校验位正确。
+//
+// 为什么必须留 16~20 位这条：那些号**已经发到用户手上**（库里回填过、客服工单里抄过）。
+// 收窄成只认 21 位，等于让已发出的号在客服反查（internal/numberlookup 会调本函数）
+// 和 DB 守卫那里变成"非法"，历史数据就写不动、查不到 —— 而干净库跑测试全绿，
+// 抓不到。
+//
+// 真伪（这个号存在吗、属于谁）永远问库，不靠这一层。
 func Valid(number string) bool {
-	if len(number) < 3+6+6+6 {
+	if len(number) < 16 {
 		return false
 	}
 	for _, r := range number {
@@ -91,13 +100,35 @@ func Valid(number string) bool {
 			return false
 		}
 	}
-	if !categories[number[:3]] {
-		return false
+	if len(number) >= 3+6+6+6 {
+		if !categories[number[:3]] {
+			return false
+		}
+		_, err := time.Parse("060102150405", number[3:15])
+		return err == nil
 	}
-	if _, err := time.Parse("060102150405", number[3:15]); err != nil {
-		return false
+	// main 的 Luhn：body = 除末位以外的全部数字，末位是校验位。
+	body, check := number[:len(number)-1], int(number[len(number)-1]-'0')
+	return luhnCheckDigit(body) == check
+}
+
+// luhnCheckDigit 计算 body 的 Luhn 校验位（从右往左，body 最右一位加倍）。
+// 逐字照搬 main 的实现：历史 16 位号就是它生成的，算法改一个字都会让旧号校验不过。
+func luhnCheckDigit(body string) int {
+	sum := 0
+	double := true
+	for i := len(body) - 1; i >= 0; i-- {
+		digit := int(body[i] - '0')
+		if double {
+			digit *= 2
+			if digit > 9 {
+				digit -= 9
+			}
+		}
+		sum += digit
+		double = !double
 	}
-	return true
+	return (10 - sum%10) % 10
 }
 
 // Allocator 分配下一个订单编号。category 是类别码（上面的常量 / CategoryForVenueType），

@@ -228,11 +228,13 @@ func (r *ActivityRepository) FindParticipationByNumber(ctx context.Context, orde
 }
 
 // activityByCodeSQL 的谓词要和 activity_code_digits_key 部分唯一索引一致（集成测试
-// 用 EXPLAIN 钉住它走索引）。
+// 用 EXPLAIN 钉住它走索引）。`{16,}` 和索引谓词同源：历史 16 位编号也要能反查到
+// （见 migrations/147_order_number_legacy_compat.sql —— 收成 `{21,}` 会让索引
+// 谓词不蕴含查询谓词，计划退化成 Seq Scan，而旧号还直接查不到）。
 const activityByCodeSQL = `
 	SELECT payload, interested_count, joined_count, capacity
 	FROM activity.activities
-	WHERE payload->>'code' ~ '^[0-9]{21,}$' AND payload->>'code' = $1`
+	WHERE payload->>'code' ~ '^[0-9]{16,}$' AND payload->>'code' = $1`
 
 // FindActivityByCode 按全数字活动编号反查（PUBLIC-NO-LOOKUP-001）。谓词里的正则要和
 // activity_code_digits_key 部分唯一索引一致，否则走不了索引；老的 PX-A-… 展示码

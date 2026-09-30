@@ -57,7 +57,9 @@ func TestValidChecksStructureNotJustDigits(t *testing.T) {
 		"999260928100022000001", // 类别没登记
 		"100261399100022000001", // 13 月 99 日
 		"100260928256000000001", // 25:60:00
-		"2609290000001236",      // 旧的 16 位（云端早期草案格式）
+		// 16 位是 main 时代已发出的合法形状，这里不合法是因为**校验位错**
+		//（260929000000123 的正确校验位是 8）。见 TestValidAcceptsLegacyAllDigitNumbers。
+		"2609290000001236",
 	} {
 		if Valid(bad) {
 			t.Fatalf("%q must not validate", bad)
@@ -65,6 +67,29 @@ func TestValidChecksStructureNotJustDigits(t *testing.T) {
 	}
 	if wide := Format(CategoryCafe, moment, 1234567); !Valid(wide) {
 		t.Fatalf("a widened sequence must still validate: %q", wide)
+	}
+}
+
+// ORDER-NO-LEGACY-COMPAT-001：main 时代**已经发出去的号**必须继续通过校验。
+// 客服反查（internal/numberlookup 调本函数）和 DB 守卫都靠它；只认 21 位会让
+// 历史号在库里写不动、查不到，而干净库跑测试全绿抓不到。
+func TestValidAcceptsLegacyAllDigitNumbers(t *testing.T) {
+	for _, ok := range []string{
+		"2609290000012342",  // 16 位：main 的 Format(1234) 那一批
+		"26092910000000004", // 17 位：全局序号超过 9 位后自然加宽的形状
+	} {
+		if !Valid(ok) {
+			t.Fatalf("%q 是 main 时代已发出的号，必须通过校验", ok)
+		}
+	}
+	for _, bad := range []string{
+		"260929000001234",  // 15 位：短于任何一套规范
+		"2609290000012343", // 校验位错（正确是 2）
+		"26092900000123a2", // 非数字
+	} {
+		if Valid(bad) {
+			t.Fatalf("%q 必须不通过", bad)
+		}
 	}
 }
 

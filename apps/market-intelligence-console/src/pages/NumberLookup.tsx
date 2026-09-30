@@ -32,7 +32,7 @@ const ERROR_TEXT: Record<string, string> = {
 
 function explain(result: { error?: { errorCode: string; safeDetails?: Record<string, unknown> } }): string {
   const code = result.error?.errorCode ?? "";
-  if (code === "NUMBER_INVALID") return "这不是公共编号（应为 21 位以上纯数字；旧的 PX-… 展示码不在此列）。";
+  if (code === "NUMBER_INVALID") return "这不是公共编号（应为 16 位以上纯数字 —— 旧系统发的 16 位号也算；PX-… 展示码不在此列）。";
   return ERROR_TEXT[code] ?? `没有成功（${code || "未知错误"}）`;
 }
 

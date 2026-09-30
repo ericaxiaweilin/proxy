@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+// 全数字公开编号（订单 / 报名 / 需求 / 邀约 / 活动）的形状。
+//
+// **两种形状都放行** —— 唯一规范是 Go 侧 internal/ordernumber.Valid，这里只是它的镜像：
+//   - 16~20 位：main 时代**已经发出去**的号（yyMMdd + 9 位全局序号 + Luhn 校验位）；
+//   - 21 位起：现行规范（类别码 3 位 + 越南本地 YYMMDDHHMMSS + 当天序号 6 位）。
+//
+// 为什么不能只写 `{21,}`：那些 16 位号已经回填进库、已经抄进客服工单。服务端把它们放进
+// payload.orderNo / payload.number 时，收成 `{21,}` 会让**整个 zod parse 抛错**（不是静默
+// 丢一个字段）⇒ 用户看到报错或空白页。而干净库（没有历史号）全绿，抓不到。
+// 见 migrations/147_order_number_legacy_compat.sql。
+export const PUBLIC_NUMBER_PATTERN = /^[0-9]{16,}$/;
+
 export const ActorTypeSchema = z.enum(["USER", "OPERATOR", "SYSTEM", "PROVIDER"]);
 export type ActorType = z.infer<typeof ActorTypeSchema>;
 
@@ -711,7 +723,7 @@ export const MarketOpportunitySchema = z.object({
   id: z.string().min(1),
   // PUBLIC-NO-001：服务端发布时分配的全数字编号（需求 / 邀约成功页展示、客服查询）。
   // 以前成功页的 PX-N / PX-O 是客户端随机的假号。老数据没有 ⇒ optional。
-  number: z.string().regex(/^[0-9]{21,}$/).optional(),
+  number: z.string().regex(PUBLIC_NUMBER_PATTERN).optional(),
   title: z.string().min(1),
   shortTitle: z.string(),
   theme: z.string(),
@@ -938,13 +950,14 @@ export const ToggleActivityInterestPayloadSchema = z.object({
 export type ToggleActivityInterestPayload = z.infer<typeof ToggleActivityInterestPayloadSchema>;
 
 // ACT-ORDER-NO-001: 报名（For You「确认下单」）自己的订单记录。orderNo 是全数字
-// 订单编号（21 位起：场地类别码 3 位 + 越南本地 YYMMDD + HHMMSS + 当天序号 6 位，见 internal/ordernumber）。
+// 订单编号（16 位起：main 时代的 yyMMdd+序号+Luhn 也算；现行 21 位 = 场地类别码 3 位 +
+// 越南本地 YYMMDD + HHMMSS + 当天序号 6 位，见 internal/ordernumber / PUBLIC_NUMBER_PATTERN）。
 // optional：老服务端不发这个字段；不声明的话 zod 会把它静默剥掉，UI 永远拿不到。
 export const ActivityParticipationSchema = z.object({
   activityId: z.string(),
   userId: z.string(),
   state: z.enum(["REQUESTED", "CONFIRMED", "WAITLISTED", "CANCELLED", "ATTENDED", "NO_SHOW"]),
-  orderNo: z.string().regex(/^[0-9]{21,}$/).optional()
+  orderNo: z.string().regex(PUBLIC_NUMBER_PATTERN).optional()
 });
 export type ActivityParticipation = z.infer<typeof ActivityParticipationSchema>;
 
@@ -954,7 +967,7 @@ export const JoinActivityPayloadSchema = z.object({
   participation: ActivityParticipationSchema.optional(),
   // ORDER-NO-001：本次报名自己的订单编号（同 participation.orderNo，方便客户端直取）。
   // 老服务端不下发；不声明会被 zod 静默剥掉。
-  orderNo: z.string().regex(/^[0-9]{21,}$/).optional(),
+  orderNo: z.string().regex(PUBLIC_NUMBER_PATTERN).optional(),
   // ORDER-RECIPE-001：刚落库的票面快照；老服务端不下发。
   snapshot: ActivityOrderSnapshotSchema.nullish()
 });

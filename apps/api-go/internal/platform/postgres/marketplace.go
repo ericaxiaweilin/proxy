@@ -110,10 +110,11 @@ func (r *MarketplaceRepository) Get(ctx context.Context, id string) (marketplace
 }
 
 // opportunityByNumberSQL 的谓词要和 marketplace_opportunities_number_key 部分唯一索引
-// 一致（集成测试用 EXPLAIN 钉住它走索引）。
+// 一致（集成测试用 EXPLAIN 钉住它走索引）。`{16,}` 和索引谓词同源：历史 16 位编号也要
+// 能反查到（见 migrations/147_order_number_legacy_compat.sql）。
 const opportunityByNumberSQL = `
 	SELECT payload, owner_id, responses FROM marketplace.opportunities
-	WHERE payload->>'number' ~ '^[0-9]{21,}$' AND payload->>'number' = $1`
+	WHERE payload->>'number' ~ '^[0-9]{16,}$' AND payload->>'number' = $1`
 
 // GetByNumber 按全数字机会 / 邀约编号反查（PUBLIC-NO-LOOKUP-001）。谓词里的正则要和
 // marketplace_opportunities_number_key 部分唯一索引一致，否则走不了索引。

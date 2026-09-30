@@ -1542,6 +1542,65 @@ fi
 pnpm --dir apps/mobile exec vitest run src/for-you-slots.test.ts src/for-you-order-number.test.ts >/dev/null || exit $?
 echo "    ORDER-NO-001/ACT-ORDER-NO-001/ACT-SEAT-RELEASE-001/ACT-PARTICIPATION-DURABLE-001/HOME-FORYOU-REFRESH-001: PASS"
 
+# ORDER-NO-LEGACY-COMPAT-001（2026-09-30）：把编号统一成 21 位时，**main 自己声明的
+# 「16 位起」兼容面被一起收窄了**（main 的 136/137/138 原文都是 `{16,}`）。
+# 已经发出去的 16 位号（yyMMdd + 9 位全局序号 + Luhn）还在库里、还在用户和客服手上。
+# 六处判据只要有一处收成 `{21,}`，就是用户可见的故障：
+#   1) DB 守卫 fulfillment.guard_order_no()（BEFORE INSERT OR UPDATE）：存量行**任何
+#      UPDATE 都被判违规** ⇒ 订单状态机 CONFIRMED→EXECUTING 冻住，只剩破窗 override；
+#   2) 两个部分唯一索引的谓词：老库已按 `{16,}` 建过，`CREATE UNIQUE INDEX IF NOT
+#      EXISTS` 会**静默跳过** ⇒ 老库 16 / 新库 21，谓词永久分叉，谁都不报错；
+#   3) 反查 SQL 的谓词（postgres/activity.go、marketplace.go）：查询谓词不蕴含索引谓词
+#      ⇒ 计划退化成 Seq Scan，**而且旧号直接查不到**（客服说「查无此号」，其实号是真的）；
+#   4) 契约 schema（packages/contracts 的 PUBLIC_NUMBER_PATTERN）与客户端判据
+#      （activity-client.ts）：收成 `{21,}` 时 zod 是**整体抛错**，不是丢一个字段。
+# 干净库（没有历史号）全绿 —— 只有这一组钉得住。
+require_test "ORDER-NO-LEGACY-COMPAT-001" "./internal/ordernumber" \
+  "TestValidAcceptsLegacyAllDigitNumbers" \
+  "apps/api-go/internal/ordernumber/ordernumber_test.go" || exit $?
+require_test "ORDER-NO-LEGACY-COMPAT-001" "./internal/platform/postgres" \
+  "TestLegacySixteenDigitOrderNumberStaysWritablePostgres" \
+  "apps/api-go/internal/platform/postgres/order_number_legacy_compat_test.go" || exit $?
+require_test "ORDER-NO-LEGACY-COMPAT-001" "./internal/platform/postgres" \
+  "TestPublicNumberIndexPredicatesConvergedPostgres" \
+  "apps/api-go/internal/platform/postgres/order_number_legacy_compat_test.go" || exit $?
+require_test "ORDER-NO-LEGACY-COMPAT-001" "./internal/platform/postgres" \
+  "TestLegacyPublicNumberLookupFindsOldNumbersPostgres" \
+  "apps/api-go/internal/platform/postgres/order_number_legacy_compat_test.go" || exit $?
+pnpm --dir apps/mobile exec vitest run src/for-you-order-number.test.ts >/dev/null || exit $?
+pnpm --dir packages/contracts exec vitest run src/activity.test.ts >/dev/null || exit $?
+# 147 必须真的**放宽**守卫、并把两个索引 DROP 后重建：`IF NOT EXISTS` 就是原来那个静默
+# 跳过的坑，写回它等于没修。
+if ! grep -qF "!~ '^[0-9]{16,}$'" apps/api-go/migrations/147_order_number_legacy_compat.sql ||
+   ! grep -qF 'DROP INDEX IF EXISTS marketplace.marketplace_opportunities_number_key' apps/api-go/migrations/147_order_number_legacy_compat.sql ||
+   ! grep -qF 'DROP INDEX IF EXISTS activity.activity_code_digits_key' apps/api-go/migrations/147_order_number_legacy_compat.sql ||
+   ! grep -qF "payload->>'number' ~ '^[0-9]{16,}$'" apps/api-go/migrations/147_order_number_legacy_compat.sql ||
+   ! grep -qF "payload->>'code' ~ '^[0-9]{16,}$'" apps/api-go/migrations/147_order_number_legacy_compat.sql; then
+  echo "  FAIL [ORDER-NO-LEGACY-COMPAT-001]: 147 的守卫 / 索引谓词被改回去了，或又退回 IF NOT EXISTS（静默跳过）。" >&2
+  exit 1
+fi
+# 反向钉：**现行的**编号判据里不许再出现 `{21,}`。先剥注释 —— 这些文件的注释里就写着
+# 这个反例，不剥的话把实现整段删掉、注释留着，钉照样 PASS。
+# 故意不含 144/145/146：那是**已经应用过**的迁移，内容不许改，由 147 覆盖。
+legacy_compat_code=$(grep -vE '^[[:space:]]*(//|--|#|\{/\*|\*)' \
+  apps/api-go/migrations/147_order_number_legacy_compat.sql \
+  apps/api-go/internal/platform/postgres/activity.go \
+  apps/api-go/internal/platform/postgres/marketplace.go \
+  packages/contracts/src/index.ts \
+  apps/mobile/src/activity-client.ts)
+if printf '%s\n' "$legacy_compat_code" | grep -q '0-9\]{21,}'; then
+  echo "  FAIL [ORDER-NO-LEGACY-COMPAT-001]: 编号判据又收窄回 {21,} —— 存量 16 位号会写不动 / 查不到 / 解析报错。" >&2
+  exit 1
+fi
+# 客服台的提示语也是判据的一部分：写着「21 位以上」时，客服拿一个旧号来问，会被自己的
+# 界面告知「这不是公共编号」。
+if ! grep -qF '16 位以上纯数字' apps/market-intelligence-console/src/pages/NumberLookup.tsx ||
+   grep -qF '21 位以上纯数字' apps/market-intelligence-console/src/pages/NumberLookup.tsx; then
+  echo "  FAIL [ORDER-NO-LEGACY-COMPAT-001]: 客服台 NUMBER_INVALID 的提示语不对 —— 存量 16 位号会被自己的界面判成「不是编号」。" >&2
+  exit 1
+fi
+echo "    ORDER-NO-LEGACY-COMPAT-001: PASS (两种形状 + 守卫放宽 + 索引谓词收敛 + 反查走索引)"
+
 # 第四轮（2026-09-29，用户「有问题就修」）。
 # PUBLIC-NO-001: 需求 / 邀约 / 活动编号由服务端共享序列分配、全数字（以前成功页是客户端随机
 # 生成的 PX-N / PX-O / PX-A，服务端查不到；活动编码是哈希取模 9000，会撞号）。

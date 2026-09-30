@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ListActivitiesPayloadSchema } from "./index";
+import { JoinActivityPayloadSchema, ListActivitiesPayloadSchema, MarketOpportunitySchema } from "./index";
 
 // Regression tripwire: server 端 activity_facet_integration_test.go
 // seed 的 "Lifecycle Pin" 活动 venueType 是空字符串（"无 venue 限定"），
@@ -452,5 +452,48 @@ describe("ActivitySchema.aiPersonaPhoto (R17.x platform AI 5 personas)", () => {
     };
     const result = ListActivitiesPayloadSchema.safeParse(payload);
     expect(result.success).toBe(false);
+  });
+});
+
+// ORDER-NO-LEGACY-COMPAT-001：编号形状有**两种**，契约必须都收。
+//   - 16~20 位：main 时代已发出的 yyMMdd + 9 位全局序号 + Luhn 校验位；
+//   - 21 位起：现行规范（类别码 3 位 + 越南本地 YYMMDDHHMMSS + 当天序号 6 位）。
+// 收成 `{21,}` 时这些 schema 会让**整个 payload 抛错**（不是丢一个字段）——
+// 干净库（没有历史号）全绿，只有这条钉得住。
+describe("ORDER-NO-LEGACY-COMPAT-001 public numbers accept both shapes", () => {
+  const activity = {
+    activityId: "act_1", origin: "PLATFORM" as const, title: "t", time: "周六", people: "1 / 2 人", price: "0₫",
+    moneyFlow: "FREE" as const, priceLabel: "免费", consumption: "AA", venueIcon: "☕", venueName: "Three Beans",
+    venueSpend: "", venueType: "CAFE" as const, venueTypeLabel: "咖啡", desc: "d", benefit: "b",
+    qaCount: 0, interested: 0, joined: 1, capacity: 2, shares: 0, aiStatus: "NONE" as const,
+  };
+  const legacy = "2609290000012347";      // main 时代 16 位
+  const current = "100260929100022012347"; // 现行 21 位
+
+  it("JoinActivityPayloadSchema keeps both the legacy and the current order number", () => {
+    for (const orderNo of [legacy, current]) {
+      const parsed = JoinActivityPayloadSchema.parse({
+        activity, joined: true,
+        participation: { activityId: "act_1", userId: "u1", state: "CONFIRMED", orderNo },
+        orderNo,
+      });
+      expect(parsed.participation?.orderNo).toBe(orderNo);
+      expect(parsed.orderNo).toBe(orderNo);
+    }
+  });
+
+  it("MarketOpportunitySchema keeps both shapes and still rejects non-numbers", () => {
+    const base = {
+      id: "o1", title: "t", shortTitle: "t", theme: "", date: "", time: "", location: "l",
+      price: "0", moneyFlow: "FREE" as const, priceLabel: "免费", owner: "", ownerType: "PERSON" as const,
+      match: "", responses: 0, posted: "", skills: "", verified: false, lens: ["NOW"] as ("NOW")[],
+      travel: null, signal: "", signalClass: "", countdown: "",
+    };
+    expect(MarketOpportunitySchema.parse({ ...base, number: legacy }).number).toBe(legacy);
+    expect(MarketOpportunitySchema.parse({ ...base, number: current }).number).toBe(current);
+    // 放宽到 16 位不等于"什么都收"：15 位、带字母、老展示码仍旧拒。
+    for (const bad of ["260929000001234", "26092900000123a7", "PX-O-260929-1234"]) {
+      expect(MarketOpportunitySchema.safeParse({ ...base, number: bad }).success).toBe(false);
+    }
   });
 });

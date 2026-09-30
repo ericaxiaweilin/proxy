@@ -1,7 +1,7 @@
 // Activity 客户端：活动读模型（ListActivities）+ 感兴趣/参加命令。
 // 计数服务端权威；operationRef 承载 payload（zod 校验，fail-closed）。
 import type { Activity, ActivityJoinRecipe, CommandResult, JoinActivityPayload, ListMyActivitiesPayload } from "@proxy/contracts";
-import { ActivitySchema, JoinActivityPayloadSchema, ListActivitiesPayloadSchema, ListMyActivitiesPayloadSchema, ToggleActivityInterestPayloadSchema } from "@proxy/contracts";
+import { ActivitySchema, JoinActivityPayloadSchema, ListActivitiesPayloadSchema, ListMyActivitiesPayloadSchema, PUBLIC_NUMBER_PATTERN, ToggleActivityInterestPayloadSchema } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import { requireAuthenticatedServerSession, type SecureSessionStore, type StoredSession } from "./secure-session";
@@ -82,11 +82,13 @@ export function describeJoinError(error: unknown): string {
 
 // ACT-ORDER-NO-001 / HOME-FORYOU-ORDER-004：这单之前就下过（ACTIVITY_ALREADY_JOINED）
 // 时，服务端在 safeDetails.orderNo 里回传既有编号 —— 票本来就在你手上，照样显示。
+// 形状判据用契约里那一份 PUBLIC_NUMBER_PATTERN（16 位起：main 时代的旧号也算），
+// 不要在这里自己写死 `{21,}` —— 旧号被这里挡掉，用户看到的是"没有编号"。
 export function orderNoFromJoinRejection(error: unknown): string | undefined {
   if (!(error instanceof ActivityCommandRejectedError)) return undefined;
   if (error.result.error?.errorCode !== "ACTIVITY_ALREADY_JOINED") return undefined;
   const orderNo = error.result.error.safeDetails?.["orderNo"];
-  return typeof orderNo === "string" && /^[0-9]{21,}$/.test(orderNo) ? orderNo : undefined;
+  return typeof orderNo === "string" && PUBLIC_NUMBER_PATTERN.test(orderNo) ? orderNo : undefined;
 }
 
 export class ActivityClient {
