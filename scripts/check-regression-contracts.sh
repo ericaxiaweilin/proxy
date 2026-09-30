@@ -1781,7 +1781,20 @@ if ! grep -qF 'order_decisions_decision_ref' apps/api-go/migrations/149_order_de
   echo "  FAIL [ORDER-FK-LOCK-001]: 149 的触发器 / 外键错误码 / 外键 DROP 缺了一段 —— 只删外键不补引用检查，decision_id 就没人管了。" >&2
   exit 1
 fi
-echo "    PUBLIC-NO-LOOKUP-001/PUBLIC-NO-LOOKUP-AUDIT-001/PUBLIC-NO-LOOKUP-GATE-001/ORDER-BREAKGLASS-ROLE-001/AUDIT-PRIVILEGE-001/DB-ROLE-POSTURE-001/ORDER-FK-LOCK-001: PASS"
+# POLICY-DECISION-UNIQUE-001: policy.policy_decisions 上必须**恰好一条**唯一约束，且带 jurisdiction。
+# 065 建的那条窄约束（user_id, category_code, terms_version, privacy_version）067 想删但没删掉 ——
+# PostgreSQL 把自动名截断到 63 字符，067 按一个不存在的名字 DROP，静默跳过。两条并存 ⇒ 窄的说了算
+# ⇒ 同一个用户换辖区之后再下 PLATFORM_PAY，策略决策写不进去（23505）⇒ 那一单永远确认不了。
+# 修法见迁移 150；150 自己必须带「最终状态大声校验」，不能退回 IF EXISTS 静默跳过。
+require_test "POLICY-DECISION-UNIQUE-001" "./internal/platform/postgres" \
+  "TestPolicyDecisionsUniqueConstraintIncludesJurisdictionPostgres" \
+  "apps/api-go/internal/platform/postgres/policy_decision_unique_integration_test.go" || exit $?
+if ! grep -qF 'policy_decisions_user_id_category_code_terms_version_privac_key' apps/api-go/migrations/150_policy_decision_unique_without_jurisdiction.sql ||
+   ! grep -qF 'expected exactly 1 unique constraint' apps/api-go/migrations/150_policy_decision_unique_without_jurisdiction.sql; then
+  echo "  FAIL [POLICY-DECISION-UNIQUE-001]: 150 少了要删的约束名，或少了最终状态的大声校验 —— 只写 DROP CONSTRAINT IF EXISTS 就是 067 栽的那个静默跳过。" >&2
+  exit 1
+fi
+echo "    PUBLIC-NO-LOOKUP-001/PUBLIC-NO-LOOKUP-AUDIT-001/PUBLIC-NO-LOOKUP-GATE-001/ORDER-BREAKGLASS-ROLE-001/AUDIT-PRIVILEGE-001/DB-ROLE-POSTURE-001/ORDER-FK-LOCK-001/POLICY-DECISION-UNIQUE-001: PASS"
 
 # 第六轮（2026-09-29，用户「下单接单的流程 还有页面很多废话 一起修改优化」）。
 # ORDER-FLOW-COPY-001: 下单 / 接单 / 订单页不许再印开发口吻（「报价 UI 不在这屏」「活动读模型」）、

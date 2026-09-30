@@ -49,7 +49,7 @@ envelope_create_offer() {
   "requestedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "payload":{
     "needId":"e2e-p1e-need-${TS}",
-    "agentId":"e2e-agent-${TS}",
+    "agentId":"${agent_user_id}",
     "serviceSku":"cc_8h",
     "needVersion":"v1",
     "routeVersion":"v1",
@@ -70,14 +70,15 @@ EOF
 envelope_confirm() {
   local command_id="$1"
   local order_id="$2"
+  local actor_id="$3"
   cat <<EOF
 {
   "commandType":"ConfirmCooperation",
   "commandVersion":1,
   "commandId":"${command_id}",
   "idempotencyKey":"e2e-p1e-${TS}-${command_id}-abcdef",
-  "actor":{"type":"USER","id":"${user_id}"},
-  "principal":{"type":"INDIVIDUAL","id":"${user_id}"},
+  "actor":{"type":"USER","id":"${actor_id}"},
+  "principal":{"type":"INDIVIDUAL","id":"${actor_id}"},
   "target":{"type":"Order","id":"${order_id}"},
   "authContext":{},
   "purpose":"e2e_p1e",
@@ -95,23 +96,31 @@ status=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/v1/identity/jurisdiction"
 echo "  OK: 401 access_token_required"
 
 echo
-echo "=== 2. CreateAnonymousSession ==="
-anon_payload=$(cat <<EOF
+echo "=== 2. CreateAnonymousSession (requester + agent) ==="
+# ORDER-CONFIRM-AGENT-001：只有接单方（order.AgentID == actor）能确认合作。所以下单人和
+# 接单方必须是**两个真实账号**。这里以前写死 "agentId":"e2e-agent-${TS}" 再拿下单人自己的
+# token 去确认 —— 那个合成 id 永远不可能等于任何真实用户，于是第 8 步必然被拒。
+# lc28 早就改成开两个真实匿名账号了，这个套件没跟上。现在跟上了。
+# create_session <label> -> 打印 "<accessToken> <userAccountId>"
+create_session() {
+  local label="$1"
+  local payload
+  payload=$(cat <<EOF
 {
   "commandType":"CreateAnonymousSession",
   "commandVersion":1,
-  "commandId":"anon-${TS}",
-  "idempotencyKey":"anon-${TS}-${NONCE}",
+  "commandId":"anon-${label}-${TS}",
+  "idempotencyKey":"anon-${label}-${TS}-${NONCE}",
   "actor":{"type":"USER","id":"ignored"},
   "principal":{"type":"INDIVIDUAL","id":"ignored"},
   "target":{"type":"Session","id":"ignored"},
   "authContext":{"clientIp":"127.0.0.1"},
   "purpose":"e2e_p1e",
-  "correlationId":"anon-${TS}",
+  "correlationId":"anon-${label}-${TS}",
   "causationId":"",
   "requestedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "payload":{
-    "deviceId":"e2e-p1e-${TS}",
+    "deviceId":"e2e-p1e-${label}-${TS}",
     "platform":"IOS",
     "deviceCredential":"01234567890123456789012345678901",
     "dateOfBirth":"2000-01-01",
@@ -121,12 +130,18 @@ anon_payload=$(cat <<EOF
 }
 EOF
 )
-anon_response=$(curl -s -X POST -H "Content-Type: application/json" -d "$anon_payload" "$BASE/v1/commands/CreateAnonymousSession")
-access_token=$(echo "$anon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('auth',{}).get('accessToken',''))")
-user_id=$(echo "$anon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('auth',{}).get('userAccountId',''))")
-[ -n "$access_token" ] || { echo "FAIL: no access token: $anon_response"; exit 1; }
-[ -n "$user_id" ] || { echo "FAIL: no user id: $anon_response"; exit 1; }
-echo "  OK: user=$user_id"
+  curl -s -X POST -H "Content-Type: application/json" -d "$payload" "$BASE/v1/commands/CreateAnonymousSession" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+auth = d.get('auth', {})
+print(auth.get('accessToken', ''), auth.get('userAccountId', ''))"
+}
+read -r access_token user_id <<<"$(create_session requester)"
+read -r agent_access_token agent_user_id <<<"$(create_session agent)"
+[ -n "$access_token" ] && [ -n "$user_id" ] || { echo "FAIL: no requester session"; exit 1; }
+[ -n "$agent_access_token" ] && [ -n "$agent_user_id" ] || { echo "FAIL: no agent session"; exit 1; }
+[ "$user_id" != "$agent_user_id" ] || { echo "FAIL: requester and agent must be different accounts"; exit 1; }
+echo "  OK: requester=$user_id agent=$agent_user_id"
 
 echo
 echo "=== 3. GET /v1/identity/jurisdiction (default) ==="
@@ -187,8 +202,8 @@ first=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: B
   "$BASE/v1/commands/CreateOffer")
 order1=$(echo "$first" | python3 -c "import json,sys; d=json.load(sys.stdin); body=json.loads(d.get('operationRef') or '{}'); print(body.get('orderId',''))")
 [ -n "$order1" ] || { echo "FAIL: first order id missing: $first"; exit 1; }
-conf1=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
-  -d "$(envelope_confirm e2e-p1e-${TS}-c1 $order1)" \
+conf1=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
+  -d "$(envelope_confirm e2e-p1e-${TS}-c1 $order1 $agent_user_id)" \
   "$BASE/v1/commands/ConfirmCooperation")
 decision1=$(echo "$conf1" | python3 -c "import json,sys; d=json.load(sys.stdin); body=json.loads(d.get('operationRef') or '{}'); print(body.get('policyDecisionId',''))")
 [ -n "$decision1" ] || { echo "FAIL: first decision id missing: $conf1"; exit 1; }
@@ -202,8 +217,8 @@ second=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: 
   "$BASE/v1/commands/CreateOffer")
 order2=$(echo "$second" | python3 -c "import json,sys; d=json.load(sys.stdin); body=json.loads(d.get('operationRef') or '{}'); print(body.get('orderId',''))")
 [ -n "$order2" ] || { echo "FAIL: second order id missing: $second"; exit 1; }
-conf2=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
-  -d "$(envelope_confirm e2e-p1e-${TS}-c2 $order2)" \
+conf2=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
+  -d "$(envelope_confirm e2e-p1e-${TS}-c2 $order2 $agent_user_id)" \
   "$BASE/v1/commands/ConfirmCooperation")
 decision2=$(echo "$conf2" | python3 -c "import json,sys; d=json.load(sys.stdin); body=json.loads(d.get('operationRef') or '{}'); print(body.get('policyDecisionId',''))")
 [ -n "$decision2" ] || { echo "FAIL: second decision id missing: $conf2"; exit 1; }
