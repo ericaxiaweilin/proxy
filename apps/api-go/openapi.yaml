@@ -265,7 +265,11 @@ components:
             - ListBusinessStores
             - SpendSummary
             - DummyOther # placeholder to keep enum open for additive field evolution
-        commandVersion: { type: integer, minimum: 1 }
+        # COMMAND-VERSION-001：枚举而非只写下界。原先是 `minimum: 1`，于是
+        # commandVersion: 9999 符合契约、服务端也照当 v1 执行 —— 客户端以为自己的
+        # 新语义生效了，实际服务端按老规则处理。改成 enum: [1]，与
+        # command_dispatch.go 的 SupportedCommandVersion 一一对应。
+        commandVersion: { type: integer, enum: [1] }
         actor:
           type: object
           required: [type, id]

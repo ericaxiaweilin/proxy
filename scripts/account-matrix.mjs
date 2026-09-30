@@ -210,12 +210,21 @@ for (const [name, raw] of [
   if (missing.code >= 400 && missing.code < 500) ok(`缺 commandVersion → ${missing.code}（4xx 拒绝）`);
   else fail(`缺 commandVersion → ${missing.code}，应当被拒`);
 
-  // 高版本按契约被接受 —— 显式钉住这个决定，免得下次有人再写一个错的断言。
-  const hi = post(anonEnvelope("hiver", { commandVersion: 2 }));
-  if (hi.code >= 200 && hi.code < 300) {
-    ok(`commandVersion=2 → ${hi.code}（按 openapi minimum:1 被接受：加法演进，非缺陷）`);
-  } else {
-    fail(`commandVersion=2 → ${hi.code}，与 openapi 的 minimum:1 不符（契约与实现漂移）`);
+  // 高版本必须被拒（COMMAND-VERSION-001）。原先这里断言"被接受"，那是我按契约
+  // `minimum: 1` 推的 —— 契约只写下界，于是 9999 被当 v1 执行。契约已改成
+  // `enum: [1]`，服务端加了 SupportedCommandVersion 上界，断言随之改成必须拒绝。
+  for (const v of [2, 9999]) {
+    const hi = post(anonEnvelope(`hiver${v}`, { commandVersion: v }));
+    if (hi.code >= 400 && hi.code < 500) {
+      const d = parsed(hi.body)?.error;
+      if (d && d.errorCode === "UNSUPPORTED_COMMAND_VERSION") {
+        ok(`commandVersion=${v} → ${hi.code} UNSUPPORTED_COMMAND_VERSION（客户端据此升级）`);
+      } else {
+        fail(`commandVersion=${v} 被拒但错误码是 ${d && d.errorCode}，应为 UNSUPPORTED_COMMAND_VERSION`);
+      }
+    } else {
+      fail(`commandVersion=${v} → ${hi.code}：当 v1 执行就是静默误读（v2 的 payload 语义会被按老规则处理）`);
+    }
   }
 }
 

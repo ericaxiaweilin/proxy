@@ -420,9 +420,33 @@ func missingEnvelopeField(envelope command.Envelope) string {
 	return ""
 }
 
+// SupportedCommandVersion 是本服务唯一接受的命令契约版本（COMMAND-VERSION-001）。
+//
+// 全仓所有发件方都发 1（内部构造器、api handler、e2e、移动端），所以上界收紧到 1
+// 不会打断任何现有调用方。升级契约时改这一个常量 + openapi 的 enum 即可。
+const SupportedCommandVersion = 1
+
 func validateEnvelope(envelope command.Envelope, routeCommandType string) *command.Result {
 	if field := missingEnvelopeField(envelope); field != "" {
 		result := invalidEnvelope(envelope.CommandID, envelope.CorrelationID, "command.invalid_envelope", map[string]any{"field": field})
+		return &result
+	}
+	// COMMAND-VERSION-001：版本闸门。原先只拒 `CommandVersion <= 0`（当成"缺字段"），
+	// 上界完全没有 —— 客户端发 commandVersion: 9999 会被**当 v1 处理**并正常执行。
+	//
+	// 为什么要补：命令版本是契约的一部分。v2 的 payload 语义若与 v1 不同（新增必填
+	// 字段、改了含义），把它当 v1 跑就是**静默误读** —— 服务返回 200，客户端以为
+	// 自己的新语义生效了，实际服务端按老规则处理了。openapi 里写的是
+	// `commandVersion: { type: integer, minimum: 1 }`，只有下界，契约本身也没表达
+	// "只支持 v1"这件事。两边一起补。
+	//
+	// 单独一个错误码而不是复用 INVALID_COMMAND_ENVELOPE：客户端需要区分
+	// "你发错了"和"你太新了" —— 后者的正确反应是升级客户端，重试没有意义。
+	if envelope.CommandVersion != SupportedCommandVersion {
+		result := command.Rejected(envelope, "UNSUPPORTED_COMMAND_VERSION", "VALIDATION", "NO", "command.unsupported_version", map[string]any{
+			"supportedVersion": SupportedCommandVersion,
+			"receivedVersion":  envelope.CommandVersion,
+		})
 		return &result
 	}
 	if _, err := time.Parse(time.RFC3339, envelope.RequestedAt); err != nil {
