@@ -25,6 +25,10 @@
 #   scripts/e2e-isolated.sh                       # all suites
 #   scripts/e2e-isolated.sh privacy legal         # a subset
 #   scripts/e2e-isolated.sh --keep                # leave the DB up for inspection
+#
+# Suite names are BASENAMES, not filenames: pass `lc06-ai-media`, not
+# `lc06-ai-media-e2e.sh` (both are accepted now, but the base name is the contract).
+# No argument = run the whole compliance set.
 #   E2E_SOURCE_DSN=postgres://... scripts/e2e-isolated.sh
 #   scripts/e2e-isolated.sh --dump-dsn 'postgres://super@host/db'   # remote source
 #
@@ -348,31 +352,67 @@ if [ ${#REQUESTED[@]} -gt 0 ]; then
 fi
 
 FAILED=()
+MISSING=()
+RAN=0
 for suite in "${SUITES[@]}"; do
-  script="scripts/${suite}-e2e.sh"
+  # 拼 scripts/${suite}-e2e.sh。**参数是基名**（`lc06-ai-media`，不是
+  # `lc06-ai-media-e2e.sh`）—— 早先没写清，传完整文件名会拼成
+  # `scripts/lc06-ai-media-e2e.sh-e2e.sh`，找不到就 SKIP，而汇总还报 ALL PASS
+  # （2026-09-30 实测：`e2e-isolated.sh lc06-ai-media-e2e.sh` → "suites run : 1"
+  # / "result : ALL PASS"，实际一个套件都没跑）。现在两种写法都收，都用同一个基名。
+  base="${suite%-e2e.sh}"
+  script="scripts/${base}-e2e.sh"
   if [ ! -f "$script" ]; then
     echo ""
-    echo "--- $suite: SKIP (no $script) ---"
+    echo "--- $base: SKIP (no $script) ---"
+    MISSING+=("$base")
     continue
   fi
   echo ""
-  echo "--- $suite ---"
+  echo "--- $base ---"
+  RAN=$((RAN + 1))
   if PROXY_API_BASE_URL="$BASE" bash "$script"; then
-    echo "  $suite: OK"
+    echo "  $base: OK"
   else
-    echo "  $suite: FAILED"
-    FAILED+=("$suite")
+    echo "  $base: FAILED"
+    FAILED+=("$base")
   fi
 done
 
 echo ""
 echo "=== e2e-isolated summary ==="
-echo "  suites run : ${#SUITES[@]}"
-if [ ${#FAILED[@]} -eq 0 ]; then
-  echo "  result     : ALL PASS"
+echo "  requested  : ${#SUITES[@]}"
+echo "  ran        : $RAN"
+# 汇总必须按**实际跑过的套件数**说话，不是按请求数。
+# 请求了 3 个、实际跑 0 个还报 ALL PASS，是最坏的一类假绿：它让人以为合规 e2e
+# 在这个分支上跑过，而它们给的是零信号。
+if [ ${#MISSING[@]} -gt 0 ]; then
+  echo "  missing    : ${MISSING[*]}"
+fi
+if [ ${#FAILED[@]} -gt 0 ]; then
+  echo "  FAILED     : ${FAILED[*]}"
+fi
+if [ "$RAN" -eq 0 ]; then
+  echo "  result     : NOTHING RAN — 判红"
+  echo ""
+  echo "  请求了 ${#SUITES[@]} 个套件，实际跑下来 0 个。这不是通过，是没跑。"
+  echo "  参数要传**基名**（例：lc06-ai-media），或者不带参数跑全套。"
+  echo "  这些套件本来就是给这个分支提供合规信号的 —— 零执行等于零信号，"
+  echo "  绝不能记成 ALL PASS（2026-09-30 就是这么假绿过一次）。"
+  exit 1
+fi
+if [ ${#FAILED[@]} -eq 0 ] && [ ${#MISSING[@]} -eq 0 ]; then
+  echo "  result     : ALL PASS ($RAN/$RAN)"
   exit 0
 fi
-echo "  FAILED     : ${FAILED[*]}"
+if [ ${#FAILED[@]} -eq 0 ]; then
+  echo "  result     : PARTIAL — $RAN 个跑了且全过，${#MISSING[@]} 个不存在"
+  echo ""
+  echo "  缺的套件没有跑，所以它们的 P0 条目在这一轮**未验证**。"
+  echo "  别把这一轮记成合规通过。"
+  exit 1
+fi
+echo "  result     : FAILED ($RAN ran, ${#FAILED[@]} failed)"
 echo ""
 echo "  These ran against THIS checkout ($(git rev-parse --short HEAD 2>/dev/null || echo '?')),"
 echo "  on $SCRATCH_DB — not against whatever happens to be on :4100."
