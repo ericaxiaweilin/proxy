@@ -13,7 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { HomeSearchDock } from "../components/home-search-dock";
-import { buildHomeSearchIndex, matchHomeSearchIntent, shouldSearchServerPeople, type HomeSearchSuggestion } from "../home-search-intent";
+import { buildHomeSearchIndex, matchHomeSearchIntent, shouldExpireServerPeopleResults, shouldSearchServerPeople, type HomeSearchSuggestion } from "../home-search-intent";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
 import { resolveHomePersonAccountId } from "../recommend-fixtures";
@@ -519,7 +519,13 @@ export function RequesterHome({
   }, [applyLanguage]);
 
   // 查询一改，全站结果即过期：不清掉会把上一个词的人挂在新查询下面。
+  // HOME-PEOPLE-SEARCH-RACE-001：但「提交后清空输入框」不是新查询 —— 那是
+  // 这次搜索的收尾。照旧无条件作废，会把同一次提交刚发出的请求一起废掉
+  //（seq 一变，回来的答案被 runServerPeopleSearch 的守卫丢掉）：结果列表和
+  // 失败态就都永远不出现，用户只看到输入框被擦干净。判据见
+  // home-search-intent.ts 的 shouldExpireServerPeopleResults。
   useEffect(() => {
+    if (!shouldExpireServerPeopleResults(searchQuery)) return;
     serverPeopleSeq.current += 1;
     setServerPeople(undefined);
     setServerPeopleState("idle");
@@ -574,7 +580,10 @@ export function RequesterHome({
     };
   }
 
-  async function runServerPeopleSearch(query: string, speak: boolean): Promise<void> {
+  // localHit：这次查询本地推荐已经命中了（四宫格换过人 / 场景 / 时间）。
+  // 它只影响「什么都没找到」那句文案 —— 本地命中了就不能报「本地推荐和全站
+  // 都没命中」，那是假的。见 HOME-PEOPLE-SEARCH-RACE-001。
+  async function runServerPeopleSearch(query: string, speak: boolean, localHit = false): Promise<void> {
     if (!profileClient) return;
     const seq = (serverPeopleSeq.current += 1);
     setServerPeople(undefined);
@@ -589,6 +598,9 @@ export function RequesterHome({
         setClarifyChoices(undefined);
         if (found.length > 0) {
           showResponse(t("foundPeople", { n: found.length }), t("foundPeopleSub"));
+        } else if (localHit) {
+          // 本地推荐命中了、全站没有同名的人 —— 两件事分开说。
+          showResponse(t("notFoundSiteWideOnly", { q: query }), t("notFoundSiteWideOnlySub"));
         } else {
           showResponse(
             t("notFoundQuery", { q: query }),
@@ -981,12 +993,17 @@ export function RequesterHome({
     // 8b. HOME-PEOPLE-SEARCH-001: 全站真人兜底。本地 people 索引只是推荐
     // 预览，新注册用户不在里面；够长且有 client 就问服务端。本地命中也不拦
     // （同名会藏人），结果区独立展示，不断本地流程。
+    // HOME-PEOPLE-SEARCH-RACE-001：本地命中时**也要**说话。本地命中只换了
+    // 四宫格；服务端一条都没找到时（fixture 里的人本来就不在服务端），用户
+    // 会再次看到「什么都没发生」。文案分开写：本地命中时不能报
+    //「本地推荐没有命中，正在问服务端」（那是假的）。
     if (shouldSearchServerPeople(q, !!profileClient)) {
-      if (!consumedLocal) {
-        setClarifyChoices(undefined);
-        showResponse(t("searchingServer", { q }), t("searchingServerSub"));
-      }
-      void runServerPeopleSearch(q, !consumedLocal);
+      setClarifyChoices(undefined);
+      showResponse(
+        t("searchingServer", { q }),
+        consumedLocal ? t("searchingServerLocalHitSub") : t("searchingServerSub")
+      );
+      void runServerPeopleSearch(q, true, consumedLocal);
       return;
     }
 
@@ -1245,7 +1262,12 @@ export function RequesterHome({
   // 切走时壳会重置，内部替换（如进 Scene Composer）时靠这里复位，避免停在隐藏态。
   const onScroll = useScrollChrome(onChromeVisibilityChange);
   return (
-    <ScrollView refreshControl={<RefreshControl refreshing={homeRefreshing} onRefresh={onHomeRefresh} />} style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
+    <ScrollView refreshControl={<RefreshControl refreshing={homeRefreshing} onRefresh={onHomeRefresh} />} style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16} keyboardShouldPersistTaps="handled">
+      {/* HOME-SEARCH-TAP-001：键盘开着时点「发送」只被当成"收起键盘"，按钮
+          根本点不动（要连点两次才提交）。RN 的 ScrollView 默认
+          keyboardShouldPersistTaps="never"：那次点击被键盘收起吞掉，不会传给
+          子节点。feed 的搜索框早就踩过同一个坑（surfaces/feed.tsx），这里同样
+          改成 handled。 */}
       {topContext ?? null}
       {/* Home Search/Conversation v3（原型 .searchDock）：单行输入默认搜索；
           左侧 AI 标识显式进入消息模块中的唯一 Proxy AI 会话。 */}

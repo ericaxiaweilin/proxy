@@ -15,6 +15,10 @@ const searchDock = readFileSync(fileURLToPath(new URL("./components/home-search-
 const homeAssistant = readFileSync(fileURLToPath(new URL("./surfaces/home-assistant.tsx", import.meta.url)), "utf8");
 const i18n = readFileSync(fileURLToPath(new URL("./i18n.ts", import.meta.url)), "utf8");
 
+// 反向断言必须先剥注释：注释里写一句「旧写法已删」就会把 not.toContain 喂红，
+// 而正向断言只被注释满足则会更糟（骗绿）。两向都用剥过的源码。
+const stripComments = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+
 describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("puts the unified search and model conversation before discovery sections", () => {
     // Home Search/Conversation v3：常驻搜索 dock，AI 标识另进持久会话。
@@ -479,6 +483,39 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(profilePass).toBeLessThan(shell.indexOf("onOpenHumanProfile={(person) => setOpenHumanProfile", homeUse));
     // 旧谎言不许回来：注释曾明写"不是全站用户，这里还没接"。
     expect(source).not.toContain("这里还没接");
+  });
+
+  it("HOME-PEOPLE-SEARCH-RACE-001: submitting a query must not discard the answer it just asked for", () => {
+    // 用户 P0（2026-09-30）：「我在 home 搜索 linh，点击搜索按钮，搜索内容自动
+    // 擦除了，没有弹出任何搜索结果」。上面那条钉是绿的 —— 它只证明符号在，
+    // 没证明结果到得了屏幕。链路：handleSend → onExecute（发请求，seq=S）
+    // → onChangeText("") 清空输入框 → 「查询一改即过期」的 effect 把这次清空
+    // 当成新查询、seq 变 S+1 → 回来的答案被 runServerPeopleSearch 的守卫丢掉
+    //（`if (serverPeopleSeq.current !== seq) return;`）。结果列表、失败态、
+    // 「重试」按钮于是全都渲染不出来，用户只看到输入框被擦干净。
+    const code = stripComments(source);
+    // ① 作废前必须过判据：空查询是这次搜索的收尾，不是新查询。
+    const guard = code.indexOf("if (!shouldExpireServerPeopleResults(searchQuery)) return;");
+    expect(guard).toBeGreaterThan(-1);
+    // ② 判据必须排在 seq 自增前面 —— 顺序反了守卫就形同虚设。
+    const bump = code.indexOf("serverPeopleSeq.current += 1;", guard);
+    expect(bump).toBeGreaterThan(guard);
+    // ③ 本地命中时也要说话。本地命中只换了四宫格；服务端一条都没找到时
+    //    （fixture 里的人本来就不在服务端）用户会再次看到「什么都没发生」。
+    expect(code).toContain("void runServerPeopleSearch(q, true, consumedLocal);");
+    expect(code).not.toContain("void runServerPeopleSearch(q, !consumedLocal);");
+  });
+
+  it("HOME-SEARCH-TAP-001: the send button fires while the keyboard is up", () => {
+    // RN 的 ScrollView 默认 keyboardShouldPersistTaps="never"：键盘开着时
+    // 第一次点「发送」只被当成"收起键盘"，onPress 根本不触发 —— 要连点两次
+    // 才提交。feed 的搜索框踩过同一个坑并留了同样的修法（surfaces/feed.tsx）。
+    const code = stripComments(source);
+    const homeScroll = code
+      .split("\n")
+      .find((line) => line.includes("<ScrollView refreshControl={<RefreshControl refreshing={homeRefreshing}") && line.includes("style={styles.root}"));
+    expect(homeScroll).toBeDefined();
+    expect(homeScroll).toContain('keyboardShouldPersistTaps="handled"');
   });
 
   it("DEVICE-LOCATION-002: the follow toggle survives restarts", () => {

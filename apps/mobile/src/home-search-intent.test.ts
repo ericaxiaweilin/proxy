@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHomeSearchIndex, matchHomeSearchIntent, shouldSearchServerPeople } from "./home-search-intent";
+import { buildHomeSearchIndex, matchHomeSearchIntent, shouldExpireServerPeopleResults, shouldSearchServerPeople } from "./home-search-intent";
 
 function makeIndex() {
   return buildHomeSearchIndex({
@@ -100,5 +100,31 @@ describe("HOME-PEOPLE-SEARCH-001 shouldSearchServerPeople", () => {
     expect(shouldSearchServerPeople("", true)).toBe(false);
     // 一个汉字是 1 个码点：按字节数会把单字放过去，服务端按 rune 拒绝。
     expect(shouldSearchServerPeople("林", true)).toBe(false);
+  });
+});
+
+// HOME-PEOPLE-SEARCH-RACE-001（2026-09-30，用户 P0：「我在 home 搜索 linh，
+// 点击搜索按钮，搜索内容自动擦除了，没有弹出任何搜索结果」）。
+//
+// 提交搜索时输入框会被清空（home-search-dock 的 handleSend 在 onExecute 之后
+// 调 onChangeText("")）。Home 里「查询一改，全站结果即过期」的 effect 原来是
+// **无条件**作废：它把这次清空当成新查询，于是把同一次提交刚发出的请求一起
+// 作废（seq 一变，回来的答案被守卫丢掉）。症状是输入框被擦干净、结果列表和
+// 失败态都不出现，连「重试」按钮都渲染不出来。
+//
+// 这条钉钉的是判据本身：空查询不是新查询，只有非空的新词才让旧结果过期。
+describe("HOME-PEOPLE-SEARCH-RACE-001 shouldExpireServerPeopleResults", () => {
+  it("does NOT expire results when the box is cleared (that is the submit tail, not a new query)", () => {
+    // 这一条就是回归本体：改成无条件作废（return true）这里立刻红。
+    expect(shouldExpireServerPeopleResults("")).toBe(false);
+    expect(shouldExpireServerPeopleResults("   ")).toBe(false);
+  });
+
+  it("DOES expire results when the user types a new term", () => {
+    // 反方向也要钉住，否则把函数改成恒 false 会「修好」上面那条、
+    // 却让上一个词的人永远挂在新查询下面（原注释要防的就是这个）。
+    expect(shouldExpireServerPeopleResults("linh")).toBe(true);
+    expect(shouldExpireServerPeopleResults("  linh  ")).toBe(true);
+    expect(shouldExpireServerPeopleResults("n")).toBe(true);
   });
 });

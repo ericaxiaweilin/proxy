@@ -477,6 +477,11 @@ export interface Messages {
   coffeeComboSub: string;
   searchingServer: string;
   searchingServerSub: string;
+  // HOME-PEOPLE-SEARCH-RACE-001：本地推荐命中了的那条路径要分开说 ——
+  // 「本地推荐没有命中」和「本地推荐和全站都没命中」在那条路径上都是假话。
+  searchingServerLocalHitSub: string;
+  notFoundSiteWideOnly: string;
+  notFoundSiteWideOnlySub: string;
   imageNeedsChat: string;
   notFoundQuerySub2: string;
 }
@@ -896,6 +901,9 @@ const ZH: Messages = {
   coffeeComboSub: "你提到咖啡和轻松聊天，所以优先选择更安静、有窗位的场景。",
   searchingServer: "正在全站找“{q}”…",
   searchingServerSub: "本地推荐没有命中，正在问服务端。",
+  searchingServerLocalHitSub: "本地推荐已套入，同时在全站找同名的人。",
+  notFoundSiteWideOnly: "全站没有找到“{q}”",
+  notFoundSiteWideOnlySub: "本地推荐已经套入，但全站没有同名的人。",
   imageNeedsChat: "图片需要在 Proxy AI 对话中发送",
   notFoundQuerySub2: "换个关键词继续搜索，或点左侧 AI 标识进入模型对话。",
 };
@@ -1315,6 +1323,9 @@ const VI: Messages = {
   coffeeComboSub: "Bạn nhắc đến cà phê và trò chuyện thoải mái, nên tôi ưu tiên nơi yên tĩnh hơn, có chỗ cạnh cửa sổ.",
   searchingServer: "Đang tìm “{q}” trên toàn hệ thống…",
   searchingServerSub: "Gợi ý cục bộ không khớp, đang hỏi máy chủ.",
+  searchingServerLocalHitSub: "Đã áp dụng gợi ý cục bộ, đồng thời đang tìm người cùng tên trên toàn hệ thống.",
+  notFoundSiteWideOnly: "Toàn hệ thống không có “{q}”",
+  notFoundSiteWideOnlySub: "Gợi ý cục bộ đã được áp dụng, nhưng toàn hệ thống không có người cùng tên.",
   imageNeedsChat: "Ảnh cần được gửi trong cuộc trò chuyện Proxy AI",
   notFoundQuerySub2: "Đổi từ khóa để tìm tiếp, hoặc chạm biểu tượng AI bên trái để vào hội thoại với mô hình.",
 };
@@ -1734,6 +1745,9 @@ const EN: Messages = {
   coffeeComboSub: "You mentioned coffee and easy conversation, so I favoured a quieter spot with window seats.",
   searchingServer: "Searching everywhere for “{q}”…",
   searchingServerSub: "Local picks missed — asking the server.",
+  searchingServerLocalHitSub: "Local pick applied — also searching everyone with that name site-wide.",
+  notFoundSiteWideOnly: "No one site-wide matches “{q}”",
+  notFoundSiteWideOnlySub: "The local pick was applied, but nobody site-wide has that name.",
   imageNeedsChat: "Images need to be sent in the Proxy AI chat",
   notFoundQuerySub2: "Try another keyword, or tap the AI mark on the left to open a model chat.",
 };
@@ -2153,6 +2167,9 @@ const LO: Messages = {
   coffeeComboSub: "ທ່ານເວົ້າເຖິງກາເຟ ແລະ ການລົມສະບາຍໆ ຈຶ່ງເລືອກບ່ອນງຽບ ທີ່ມີໂຕະຂ້າງປ່ອງຕ່າງ",
   searchingServer: "ກຳລັງຄົ້ນຫາ “{q}” ທັງໝົດ…",
   searchingServerSub: "ການແນະນຳທ້ອງຖິ່ນບໍ່ພົບ ກຳລັງຖາມເຊີບເວີ",
+  searchingServerLocalHitSub: "ໃສ່ຄຳແນະນຳທ້ອງຖິ່ນແລ້ວ, ພ້ອມກັນຄົ້ນຫາຄົນຊື່ດຽວກັນທັງໝົດ.",
+  notFoundSiteWideOnly: "ທັງໝົດບໍ່ມີ “{q}”",
+  notFoundSiteWideOnlySub: "ໃສ່ຄຳແນະນຳທ້ອງຖິ່ນແລ້ວ, ແຕ່ທັງໝົດບໍ່ມີຄົນຊື່ດຽວກັນ.",
   imageNeedsChat: "ຮູບຕ້ອງສົ່ງໃນການສົນທະນາ Proxy AI",
   notFoundQuerySub2: "ລອງຄຳອື່ນເພື່ອຄົ້ນຫາຕໍ່ ຫຼື ແຕະໄອຄອນ AI ທາງຊ້າຍເພື່ອເຂົ້າສົນທະນາກັບໂມເດລ",
 };
@@ -2572,6 +2589,9 @@ const KO: Messages = {
   coffeeComboSub: "커피와 편안한 대화를 언급하셔서 더 조용하고 창가 자리가 있는 곳을 우선했어요.",
   searchingServer: "전체에서 “{q}” 를 찾는 중…",
   searchingServerSub: "로컬 추천에 없어서 서버에 물어보는 중이에요.",
+  searchingServerLocalHitSub: "로컬 추천을 적용했어요. 같은 이름을 전체에서도 찾는 중이에요.",
+  notFoundSiteWideOnly: "전체에 “{q}” 가 없어요",
+  notFoundSiteWideOnlySub: "로컬 추천은 적용했지만, 전체에는 같은 이름이 없어요.",
   imageNeedsChat: "이미지는 Proxy AI 대화에서 보내야 해요",
   notFoundQuerySub2: "다른 키워드로 계속 검색하거나, 왼쪽 AI 표시를 눌러 모델 대화로 들어가세요.",
 };
@@ -2991,6 +3011,9 @@ const JA: Messages = {
   coffeeComboSub: "コーヒーと気軽な会話というご希望から、より静かで窓際の席がある場所を優先しました。",
   searchingServer: "全体から “{q}” を検索中…",
   searchingServerSub: "ローカル推薦にヒットせず、サーバーに問い合わせています。",
+  searchingServerLocalHitSub: "ローカル推薦を適用しました。同じ名前を全体でも検索中です。",
+  notFoundSiteWideOnly: "全体に “{q}” はありません",
+  notFoundSiteWideOnlySub: "ローカル推薦は適用しましたが、全体には同じ名前の人はいません。",
   imageNeedsChat: "画像は Proxy AI の会話で送信してください",
   notFoundQuerySub2: "別のキーワードで検索を続けるか、左の AI マークをタップしてモデル会話に入ってください。",
 };

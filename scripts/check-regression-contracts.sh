@@ -6881,6 +6881,59 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/home-search-intent.test.ts src/requester-home-discovery-contract.test.ts || exit $?
 echo "    HOME-PEOPLE-SEARCH-001: PASS (home person search falls through to server profiles)"
 
+# HOME-PEOPLE-SEARCH-RACE-001（2026-09-30，用户 P0）：「我在 home 搜索 linh，
+# 点击搜索按钮，搜索内容自动擦除了，没有弹出任何搜索结果」。
+#
+# 提交搜索时 home-search-dock 会清空输入框（onChangeText("")），Home 里那个
+# 「查询一改，全站结果即过期」的 effect 把这次清空当成一次新查询，于是把
+# **同一次提交刚发出的请求**一起作废：seq 一变，回来的答案被守卫丢掉
+#（`if (serverPeopleSeq.current !== seq) return;`）。结果列表、失败态、
+# 「重试」按钮于是全都渲染不出来 —— 用户只看到输入框被擦干净。
+#
+# 上面那条 HOME-PEOPLE-SEARCH-001 在这件事上**是绿的**：它只证明
+# shouldSearchServerPeople / searchProfiles / profileClient={profile} 三个符号
+# 还在，没证明结果到得了屏幕（实测：输入 xyzq 点发送，回复条永远停在
+#「正在全站找“xyzq”…」，9 秒后仍未落地）。所以这里单独钉判据本身。
+# 注意 grep 'HOME-PEOPLE-SEARCH-001' **不会**匹配 'HOME-PEOPLE-SEARCH-RACE-001'，
+# 所以这条钉必须自己写，否则删掉新测试门禁照样绿。
+if ! grep -q 'shouldExpireServerPeopleResults' apps/mobile/src/home-search-intent.ts ||
+   ! grep -q 'if (!shouldExpireServerPeopleResults(searchQuery)) return;' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [HOME-PEOPLE-SEARCH-RACE-001]: 提交搜索又把自己刚发出的请求作废了 ——" >&2
+  echo "        输入框被擦干净、结果列表和失败态都永远不出现。" >&2
+  exit 1
+fi
+# 本地命中时也要说话：本地命中只换了四宫格，而 fixture 里的人本来就不在
+# 服务端 —— 静默那条路径会让用户再次看到「什么都没发生」。先剥 `//` 注释再
+# 反向 grep，否则解释这件事的注释会自己把这条钉喂红。
+if sed -e 's://.*::' apps/mobile/src/surfaces/requester-home.tsx | grep -q 'runServerPeopleSearch(q, !consumedLocal)'; then
+  echo "  FAIL [HOME-PEOPLE-SEARCH-RACE-001]: 本地命中又把服务端搜索变成静默的了 ——" >&2
+  echo "        本地推荐命中的人本来就不在服务端，结果会一条都不出现。" >&2
+  exit 1
+fi
+# 这两个 grep 必须先剥 `//` 注释：测试文件里解释这件事的注释自己也写着
+# HOME-PEOPLE-SEARCH-RACE-001，直接 grep 会被注释喂绿 —— 把测试删掉门禁照样
+# 通过（实测：只把 describe 标题改掉，未剥注释的写法 rc=0）。
+if ! sed -e 's://.*::' apps/mobile/src/home-search-intent.test.ts | grep -q 'HOME-PEOPLE-SEARCH-RACE-001 shouldExpireServerPeopleResults' ||
+   ! sed -e 's://.*::' apps/mobile/src/requester-home-discovery-contract.test.ts | grep -q 'HOME-PEOPLE-SEARCH-RACE-001: submitting a query'; then
+  echo "  FAIL [HOME-PEOPLE-SEARCH-RACE-001]: 判据测试或接线测试不见了" >&2
+  exit 1
+fi
+# HOME-SEARCH-TAP-001：RN 的 ScrollView 默认 keyboardShouldPersistTaps="never"，
+# 键盘开着时第一次点「发送」只被当成"收起键盘"，onPress 根本不触发 —— 要连点
+# 两次才提交（实测：点一次键盘收起、输入框仍是 xyzq）。feed 的搜索框踩过同一个
+# 坑并留了同样的修法（surfaces/feed.tsx）。
+if ! grep -q 'keyboardShouldPersistTaps="handled"' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [HOME-SEARCH-TAP-001]: 首页键盘开着时点「发送」会被当成收起键盘吞掉 ——" >&2
+  echo "        要连点两次才提交。" >&2
+  exit 1
+fi
+# 测试自己也要钉住（同样先剥注释）：否则把测试删掉，上面那条属性 grep 照样绿。
+if ! sed -e 's://.*::' apps/mobile/src/requester-home-discovery-contract.test.ts | grep -q 'HOME-SEARCH-TAP-001: the send button'; then
+  echo "  FAIL [HOME-SEARCH-TAP-001]: 那条「键盘开着也能点发送」的测试不见了" >&2
+  exit 1
+fi
+echo "    HOME-PEOPLE-SEARCH-RACE-001: PASS (submitting a query no longer discards its own answer)"
+
 # CONVO-LIST-001: 已退役（见 MSG-GROUPS-TAB-001）—— Convo 列表页已摘，
 # myConvos 拉取/三态/重试整套跟着消失。listMyConvos 客户端方法保留
 # （服务端契约），messages 表面不再调用，不再要求列表存在.

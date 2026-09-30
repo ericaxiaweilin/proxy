@@ -4,6 +4,58 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 338 — 2026-09-30
+
+- **首页搜索永远不显示结果（用户 P0）**（`HOME-PEOPLE-SEARCH-RACE-001` /
+  `HOME-SEARCH-TAP-001`）。用户原话：「我在 home 搜索 linh，点击搜索按钮，搜索内容
+  自动擦除了，没有弹出任何搜索结果」。
+
+  **先更正一条我自己写错的前提**：这一轮动了 `scripts/check-regression-contracts.sh`，
+  但它在 `IMPLEMENTATION_CONTRACTS.json` 里出现的位置是 **`evidenceFiles`**，
+  **不是 `implementationFiles`** —— 所以它**不在**基线敏感集合里，这次改动
+  **不需要**设计确认。实测确认：把 `BASELINE_CHANGELOG.md` 从暂存区撤下再跑
+  `node scripts/check-design-baseline.mjs`，仍然 `passed`（rc=0）。
+  这条 Revision 仍然记在这里，是因为它是一个用户可见 P0 的根因记录 + 新增了一条
+  门禁钉（`baselineRevision` 随之 +1）；不是为了满足设计确认。
+
+  1. **根因是提交路径把自己刚发出的请求作废了。** `handleSend` 的顺序是
+     `onExecute(text)` → `onChangeText("")`。`onExecute` 里 `runServerPeopleSearch`
+     先自增 `serverPeopleSeq`（记为 S）再 await；紧接着的 `setSearchQuery("")` 提交后
+     触发「查询一改，全站结果即过期」那个 effect，**它把这次清空当成新查询**、把 seq
+     推到 S+1。请求回来了，但守卫 `if (serverPeopleSeq.current !== seq) return;` 直接
+     丢掉答案 —— 结果列表、失败态、「重试」按钮**全都渲染不出来**。用户只看到输入框
+     被擦干净。修法：新增纯判据 `shouldExpireServerPeopleResults(nextQuery)`
+     （空查询 = 本次搜索的收尾，不是新查询），effect 先过它再作废。
+     **实测证据**：修前输入 `xyzq` 点发送，回复条 9 秒后仍停在「正在全站找“xyzq”…」，
+     永不落地；修后 3 秒内变「没有找到“xyzq”」。
+  2. **本地命中时不再静默。** 原来 `speak = !consumedLocal`：本地 fixture 命中时
+     连「正在搜索」都不说，而 fixture 里的人**本来就不在服务端**（种子库里没有），
+     于是服务端 0 命中时用户看到的是「什么都没发生」——和 P0 同一个症状。现在一律
+     说话，并且文案分开写：新增 `searchingServerLocalHitSub` / `notFoundSiteWideOnly` /
+     `notFoundSiteWideOnlySub`（6 语言）。**原来那两句在本地命中时是假话** ——
+     `searchingServerSub` 写「本地推荐没有命中」，`notFoundQuerySub` 写「本地推荐和
+     全站都没命中」，而本地明明命中了。
+  3. **键盘开着时点「发送」只被当成收起键盘**（`HOME-SEARCH-TAP-001`）。RN 的
+     ScrollView 默认 `keyboardShouldPersistTaps="never"`，那次点击被键盘收起吞掉、
+     不传给子节点 —— 要连点两次才提交（实测：点一次键盘收起、输入框仍是 `linh`）。
+     feed 的搜索框早就踩过同一个坑并留了同样的修法，这里照抄成 `handled`。
+  4. **门禁里补一条真钉。** 原来的 `HOME-PEOPLE-SEARCH-001` 在这件事上**是绿的**：
+     它只 grep `shouldSearchServerPeople` / `profileClient.searchProfiles` /
+     `profileClient={profile}` 三个符号，**没证明结果到得了屏幕**。新增块
+     `HOME-PEOPLE-SEARCH-RACE-001`。注意 `grep 'HOME-PEOPLE-SEARCH-001'` **不会**
+     匹配 `'HOME-PEOPLE-SEARCH-RACE-001'`，所以这条钉必须自己写。
+     **两个自己踩到的假守卫**（都已修）：① 钉测试文件存在时直接 grep ID，会被解释
+     这件事的**注释**喂绿（只把 describe 标题改掉，未剥注释的写法 rc=0）⇒ 先
+     `sed 's://.*::'` 剥注释再 grep；② 只钉了实现属性、没钉那条测试本身存在。
+
+  **验证**：隔离 worktree（`/tmp/probe-search`，自有 index，不碰共享树）里 13 条注入
+  臂全部见红 —— 6 条 vitest 臂（判据真值表正/反、守卫被摘、守卫排到自增之后、
+  重新静默、属性被删）+ 7 条门禁块臂，并含一条「禁用串只出现在注释里必须保持绿」
+  的对照臂（证明剥注释的 sed 真的在起作用）。另有一条对照臂证明**空脚本也 exit 0**，
+  所以控制组必须同时校验 PASS 标记，不能只看退出码。模拟器实测三条路径：
+  `linh`→「找到 1 位真人」+ 全站真人列表；`xyzq`→「没有找到」；`beans`（本地命中
+  全站为空）→「全站没有找到“beans”」。三条路径现在都说话。
+
 ## Revision 337 — 2026-09-30
 
 - **「声明了但没人读」这一族，一次收干净**（`DESIGN-BASELINE-UNREAD-FIELDS-001` /

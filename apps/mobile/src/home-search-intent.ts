@@ -141,3 +141,18 @@ export function shouldSearchServerPeople(rawQuery: string, hasClient: boolean): 
   if (!hasClient) return false;
   return [...(rawQuery || "").trim()].length >= 2;
 }
+
+// HOME-PEOPLE-SEARCH-RACE-001（2026-09-30，用户 P0：「我在 home 搜索 linh，
+// 点击搜索按钮，搜索内容自动擦除了，没有弹出任何搜索结果」）。
+//
+// 全站结果只在**用户真的换了查询词**时才作废。清空输入框不是新查询 ——
+// 它是这次搜索的收尾：home-search-dock 的 handleSend 在 onExecute 之后会
+// 调 onChangeText("") 清掉输入框，Home 那个「查询一改，全站结果即过期」的
+// effect 会把这当成一次新查询，于是把**同一次提交刚发出的请求**一起作废。
+// 结果是被 seq 守卫丢掉的（`if (serverPeopleSeq.current !== seq) return`）：
+// 请求发出去了、答案也回来了，但没人写进 state —— 结果列表永远不出现，
+// 失败态也永远不出现（连「重试」按钮都渲染不出来），用户只看到输入框被
+// 擦干净。判据因此是「非空」，不是「变了」。
+export function shouldExpireServerPeopleResults(nextQuery: string): boolean {
+  return nextQuery.trim() !== "";
+}
