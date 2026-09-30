@@ -11806,3 +11806,42 @@ if [ -n "$_mismatch" ]; then
   exit 1
 fi
 echo "    UI-PROTO-CROP-MATCH-001: PASS (reviewStageCrop 标记与原型结构一致)"
+
+# DESIGN-CONTRACT-REFS-001（2026-09-30）：IMPLEMENTATION_CONTRACTS.json 里每个合同的
+# implementationFiles / reference 必须指向**真实存在**的文件。
+#
+# 为什么需要：`check-design-baseline.mjs` 里有一段「文件被 git rm 掉就跳过敏感检查」的
+# 豁免逻辑（删基线敏感实现文件时不该因为文件不存在而报一条没意义的错）。但同一个豁免
+# 也意味着 —— 文件被改名/移走后，合同的实现文件列表会**静默失效**：不报错、不提醒，
+# 于是那份合同实际上不再声明任何实现，而 IMPLEMENTATION_CONTRACTS 还写着「PARTIAL」
+# /「IMPLEMENTED」，看起来一切正常。
+#
+# 顺带把状态枚举钉住（2026-09-30 另一路已为 CURRENT_BASELINE 的两个枚举加了校验，
+# 这里补的是 IMPLEMENTATION_CONTRACTS 的 status —— 它同样是拼错就等于把这条检查关掉的枚举）。
+contract_bad=$(node -e '
+const fs=require("fs");
+const d=JSON.parse(fs.readFileSync("docs/design/IMPLEMENTATION_CONTRACTS.json","utf8"));
+const VALID=new Set(["IMPLEMENTED","PARTIAL","SCAFFOLD_ONLY"]);
+const bad=[];
+for (const c of (d.contracts||[])) {
+  if (!VALID.has(c.status)) bad.push(`非法 status "${c.status}" (scope=${c.scope})`);
+  for (const f of (c.implementationFiles||[])) if (!fs.existsSync(f)) bad.push(`${c.scope} → ${f} 不存在`);
+  if (typeof c.reference==="string" && c.reference && !fs.existsSync(c.reference)) bad.push(`${c.scope} → reference ${c.reference} 不存在`);
+  if (!(c.implementationFiles||[]).length) bad.push(`${c.scope} 没有 implementationFiles（等于没声明实现）`);
+}
+console.log(bad.join("; "));
+' 2>/dev/null || echo "")
+if [ -n "$contract_bad" ]; then
+  echo "  FAIL [DESIGN-CONTRACT-REFS-001]: IMPLEMENTATION_CONTRACTS 声明与仓库实况不符：" >&2
+  echo "        ${contract_bad}" >&2
+  echo "        三种成因：" >&2
+  echo "        · status 不在 {IMPLEMENTED, PARTIAL, SCAFFOLD_ONLY} —— 拼错即等于关掉这条检查" >&2
+  echo "        · implementationFiles / reference 指向的文件不存在 —— 文件改名后合同会静默失效" >&2
+  echo "          （check-design-baseline 的 deleted 豁免让缺文件不报错）" >&2
+  echo "        · implementationFiles 为空 —— 等于这份合同没有声明任何实现" >&2
+  exit 1
+fi
+_contract_n=$(node -e '
+const fs=require("fs");
+console.log((JSON.parse(fs.readFileSync("docs/design/IMPLEMENTATION_CONTRACTS.json","utf8")).contracts||[]).length)' 2>/dev/null || echo 0)
+echo "    DESIGN-CONTRACT-REFS-001: PASS (${_contract_n} 个合同：status 合法 · 实现文件与 reference 均存在)"
