@@ -8,6 +8,17 @@ import Svg, { Circle, Path, Rect, Text as SvgText } from "react-native-svg";
 export type ProxyIconName =
   | "target"
   | "diamond"
+  // WALLET-GEM-ICON-001：宝石（钱包的钻石资产）。**不是 diamond** ——
+  // diamond 画的是 `M12 4 20 12 12 20 4 12z`，四边等长（11.31）的正方形转 45°，
+  // 是个菱形 / 方片轮廓，没有冠部、腰棱、亭部，所以「不像钻石」；而 diamond 还被
+  // 当通用菱形符号复用着（tab bar 市场 / 我的订单 / feed 分类兜底 / 城市选项），
+  // 改它会把那 5 处一起变成宝石 emoji。
+  //
+  // gem 走原型钱包（docs/design/references/Proxy_Wallet_20260929_0a2f07.html:853,886）
+  // 用的 💎 emoji：那条路已经有现成机制（ProxySymbolIcon 下的 Text + 固定画布），
+  // emoji 自带切面和高光，且不受 color prop 影响 —— 彩色宝石被 color 染成纯白/
+  // 纯蓝反而不对。这是仓库里第一次为「必须用 emoji」的字形走这条通道。
+  | "gem"
   | "circle"
   | "ring"
   | "meRing"
@@ -473,22 +484,23 @@ export function ProxyIcon({
     return <View pointerEvents="none" style={frame}>{masterIcon}</View>;
   }
 
-  if (name === "diamond") {
-    const side = size * 0.58;
+  // WALLET-GEM-ICON-001：宝石 = 原型的 💎 emoji，走与 ♡ / ☆ 同一条字符通道
+  // （固定画布 + allowFontScaling=false），emoji 自带切面与高光。
+  //
+  // **刻意不接 color**：彩色宝石被 color 染成纯白（钱包 hero 是白字蓝底）会把宝石
+  // 压成一个色块，比原来的菱形更不像钻石。
+  if (name === "gem") {
     return (
       <View pointerEvents="none" style={frame}>
-        <View
+        <Text
+          allowFontScaling={false}
           style={[
-            styles.diamond,
-            {
-              borderColor: color,
-              borderRadius: size * 0.05,
-              borderWidth: stroke,
-              height: side,
-              width: side
-            }
+            styles.prototypeGlyph,
+            { fontSize: size, includeFontPadding: false, lineHeight: size }
           ]}
-        />
+        >
+          {"💎"}
+        </Text>
       </View>
     );
   }
@@ -890,7 +902,6 @@ export function ProxyIcon({
 const styles = StyleSheet.create({
   frame: { alignItems: "center", justifyContent: "center", position: "relative" },
   prototypeGlyph: { includeFontPadding: false, textAlign: "center", textAlignVertical: "center" },
-  diamond: { position: "absolute", transform: [{ rotate: "45deg" }] },
   circle: { position: "absolute" },
   profileOuter: { alignItems: "center", justifyContent: "center", position: "absolute" },
   profileHead: { position: "absolute", top: "18%" },

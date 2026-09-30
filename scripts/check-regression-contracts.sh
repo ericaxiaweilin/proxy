@@ -11318,3 +11318,36 @@ if perl -0777 -pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' apps/mobile/src/components/
 fi
 
 echo "    SCENE-HOME-PROTOTYPE-001: PASS (详情页照「场景名片」原型：三颗动作按钮 / 独立距离条 / 深色匹配卡 / 意图块 + 脚注；死按钮不回)"
+
+# WALLET-GEM-ICON-001（2026-09-30，用户：「我的钱包 钻石UI怎么不是钻石」）。
+# diamond 的路径是 `M12 4 20 12 12 20 4 12z` —— 四顶点边长全 11.31 的**正方形转 45°**，
+# 也就是菱形 / 方片轮廓，没有钻石的冠部、腰棱、亭部，所以「不像钻石」。
+#
+# 修法是新增 gem 字形（原型钱包的 💎 emoji），**不是**改 diamond：diamond 还被当通用
+# 菱形符号复用着（tab bar 市场 / 我的订单 / feed 分类兜底 / 城市选项 / 草稿卡片），
+# 改它会把那 5 处一起变成宝石 emoji。
+if ! grep -qF 'describe("WALLET-GEM-ICON-001 宝石字形' apps/mobile/src/components/proxy-icon.test.ts; then
+  echo "  FAIL [WALLET-GEM-ICON-001]: 宝石字形的测试 describe 块不见了。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/components/proxy-icon.test.ts src/surfaces/wallet.test.ts || exit $?
+# 钱包两处钻石资产（hero 余额卡 + 充值页余额条）必须都用 gem。
+if [ "$(grep -cF 'name="gem"' apps/mobile/src/surfaces/wallet.tsx)" != "2" ]; then
+  echo "  FAIL [WALLET-GEM-ICON-001]: 钱包的钻石资产不是两处都用 gem —— 漏一处就有" >&2
+  echo "        一处仍显示菱形冒充钻石。" >&2
+  exit 1
+fi
+# gem 必须是 emoji 通道且**不读 color**：彩色宝石被染成纯色块（钱包 hero 是白字蓝底）
+# 比菱形更不像钻石。
+if ! grep -qF 'if (name === "gem") {' apps/mobile/src/components/proxy-icon.tsx ||
+   ! grep -qF '💎' apps/mobile/src/components/proxy-icon.tsx; then
+  echo "  FAIL [WALLET-GEM-ICON-001]: gem 字形不见了 —— 钱包钻石又变回菱形。" >&2
+  exit 1
+fi
+# diamond 保持菱形：它被 5 处当通用符号用，改成宝石 emoji 会波及 tab bar / 我的订单等。
+if ! grep -qF 'd="M12 4 20 12 12 20 4 12z"' apps/mobile/src/components/proxy-icon.tsx; then
+  echo "  FAIL [WALLET-GEM-ICON-001]: diamond 的菱形路径被改了 —— tab bar 市场 / 我的订单 /" >&2
+  echo "        feed 分类兜底 / 城市选项 / 草稿卡片都还在用它。" >&2
+  exit 1
+fi
+echo "    WALLET-GEM-ICON-001: PASS (钱包钻石 = gem 💎 · diamond 保持菱形给 5 处通用符号)"

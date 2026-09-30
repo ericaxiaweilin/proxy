@@ -69,3 +69,44 @@ describe("SCENE-HOME-PROTOTYPE-001 场景名片右向 chevron：真字形，不�
     expect(icon).toContain('case "heart":');
   });
 });
+
+// WALLET-GEM-ICON-001（2026-09-30，用户：「我的钱包 钻石UI怎么不是钻石」）。
+//
+// diamond 画的是 `M12 4 20 12 12 20 4 12z` —— 四个顶点 (12,4)(20,12)(12,20)(4,12)
+// 边长全 11.31，是**正方形转 45°**。它有菱形 / 方片的轮廓，但没有钻石的
+// 冠部、腰棱、亭部，所以看着不像钻石。原型钱包（Proxy_Wallet_20260929_0a2f07.html:853,886）
+// 用的是 💎 emoji。
+//
+// 修法是**新增 gem 字形**而不是改 diamond：diamond 还被当通用菱形符号复用着
+// （tab bar 市场 / 我的订单 / feed 分类兜底 / 城市选项 / 草稿卡片），
+// 改它会把那 5 处一起变成宝石 emoji。
+describe("WALLET-GEM-ICON-001 宝石字形：钱包用 gem，diamond 保持菱形", () => {
+  it("gem 走 💎 emoji 字符通道，且不读 color（彩色宝石被染成纯色块反而更糟）", () => {
+    expect(icon, "gem 字形不见了 —— 钱包钻石又变回菱形").toContain('if (name === "gem") {');
+    expect(icon).toContain("💎");
+    // emoji 自带切面与高光；钱包 hero 是白字蓝底，宝石被 color 染白就是一个色块。
+    // gem 分支里不该出现 borderColor / stroke 这类描边属性。
+    const gemBranch = icon.slice(icon.indexOf('if (name === "gem") {'));
+    const gemBody = gemBranch.slice(0, gemBranch.indexOf("if (name === \"circle\") {"));
+    expect(gemBody).not.toContain("borderColor");
+    expect(gemBody).not.toContain("borderWidth");
+  });
+
+  it("diamond 保持原来的菱形路径（被 tab bar / 我的订单 / feed 兜底等 5 处复用）", () => {
+    expect(icon).toContain('case "diamond":');
+    expect(icon).toContain('d="M12 4 20 12 12 20 4 12z"');
+  });
+
+  it("diamond 那段 View 死实现已删（被 masterIcon 提前 return 遮住，永不执行）", () => {
+    // 它和 switch 里那条路径是两个实现，而 MasterModuleIcon 的提前 return 让
+    // View 版本永远到不了 —— 留着只会让人照着错误的那份推理。
+    expect(icon, "diamond 的死 View 分支又回来了").not.toContain('if (name === "diamond") {');
+    expect(icon, "styles.diamond 已无引用，应一并删除").not.toContain("diamond: {");
+  });
+
+  it("钱包的钻石资产两处都用 gem，不用 diamond", () => {
+    const wallet = stripComments(readFileSync(here("../surfaces/wallet.tsx"), "utf8"));
+    expect(wallet, "钱包钻石资产改回 diamond 了 —— 那不是钻石").not.toContain('name="diamond"');
+    expect(wallet).toContain('name="gem"');
+  });
+});

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 333,
+  "baselineRevision": 334,
   "updatedAt": "2026-09-30",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",

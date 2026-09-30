@@ -248,7 +248,7 @@ export function WalletSurface({ onBack, onOpenVouchers }: {
           {/* hero：三资产（钻石/金豆/券，数全是服务端的）。 */}
           <View style={styles.hero}>
             <Pressable accessibilityLabel={t("diamonds")} onPress={() => go("topup")} style={styles.asset}>
-              <ProxyIcon color={color.white} name="diamond" size={26} />
+              <ProxyIcon color={color.white} name="gem" size={26} />
               <Text selectable style={styles.assetLabel}>{t("diamonds")}</Text>
               <Text selectable style={styles.assetValue}>{diamonds.toLocaleString()}</Text>
               <Text selectable style={styles.assetSub}>{t("diamondsLocked")}</Text>
@@ -347,7 +347,7 @@ export function WalletSurface({ onBack, onOpenVouchers }: {
             </Pressable>
           </View>
           <View style={styles.topupBalance}>
-            <ProxyIcon color={color.ink} name="diamond" size={20} />
+            <ProxyIcon color={color.ink} name="gem" size={20} />
             <Text selectable style={styles.topupBalanceText}>{t("diamondBalance", { n: diamonds.toLocaleString() })}</Text>
           </View>
           <Text selectable style={styles.sectionTitle}>{t("selectPlan")}</Text>

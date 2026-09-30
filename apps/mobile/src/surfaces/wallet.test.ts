@@ -54,7 +54,11 @@ describe("WALLET-001 wallet follows the prototype page flow", () => {
 
   it("uses glyphs, not hand-drawn back arrows or emoji buttons", () => {
     expect(wallet).toContain("ProxyBackGlyph");
-    expect(wallet).toContain('name="diamond"');
+    // WALLET-GEM-ICON-001：钻石资产用 gem（💎），不是 diamond —— diamond 是四边
+    // 等长的正方形转 45°（菱形 / 方片），没有冠部腰棱亭部，看着不像钻石。这里钉住
+    // 「钱包不再用 diamond」，否则把 gem 改回 diamond 不会有任何测试报错。
+    expect(wallet).toContain('name="gem"');
+    expect(wallet).not.toContain('name="diamond"');
     expect(wallet).toContain('name="ticket"');
   });
 });

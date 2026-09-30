@@ -4,6 +4,25 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 334 — 2026-09-30
+
+- **钱包钻石字形修正**（`WALLET-GEM-ICON-001`）
+  （用户：「我的钱包 钻石UI怎么不是钻石」）。
+  1. **为什么不是钻石**：`diamond` 画的是 `M12 4 20 12 12 20 4 12z` —— 四个顶点边长
+     全 11.31 的**正方形转 45°**，是菱形 / 方片轮廓，没有钻石的冠部、腰棱、亭部。
+     原型钱包（`Proxy_Wallet_20260929_0a2f07.html:853,886`）用的是 💎 emoji。
+  2. **新增 `gem` 字形而不改 `diamond`**：`diamond` 还被当**通用菱形符号**复用着 ——
+     tab bar「市场」、我的订单、feed 分类兜底、城市选项、草稿卡片共 5 处。改它会把
+     那 5 处一起变成宝石 emoji。只有钱包的钻石资产该是宝石。
+  3. **`gem` 走 emoji 字符通道且刻意不读 `color`**：彩色宝石自带动切面与高光，被
+     `color` 染成纯色块（钱包 hero 是白字蓝底）反而更像一个方块。这是仓库里第一次为
+     「必须用 emoji」的字形走这条通道。
+  4. **顺带删掉一段死实现**：`diamond` 原有两套实现 —— switch 里的 SVG 路径（实际生效）
+     和一段 View 样式（方框 + `rotate("45deg")`），后者被 `MasterModuleIcon` 的提前
+     `return` 遮住、永不执行。留着只会让人照着错误的那份推理。一并删掉 `styles.diamond`。
+  5. **门禁**：钱包两处钻石资产必须都是 `gem`（计数 2）、`gem` 必须存在且含 💎、
+     `diamond` 菱形路径不许动（它有 5 处使用者）。
+
 ## Revision 333 — 2026-09-30
 
 - **接单编号（技师号）进订单 recipe + 存量回填**（`ORDER-AGENT-CLAIM-NO-001`）
