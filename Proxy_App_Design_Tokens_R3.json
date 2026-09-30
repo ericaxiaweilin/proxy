@@ -1,0 +1,104 @@
+{
+  "meta": {
+    "name": "Proxy App Design System",
+    "version": "R3",
+    "baseViewport": {
+      "width": 390,
+      "height": 844
+    },
+    "grid": 4,
+    "supersedes": "Proxy_App_Design_Tokens_R2.json",
+    "source": "Proxy_App_Design_System_R3.md（本文件的每个数值都出自该文档的表格，不是拍脑袋）",
+    "whyThisFileExists": "R2 是旧机器 token（docs/design/README.md 已标 Legacy）。它的 spacing 只有 [4,8,12,16,24,32]，比 R3 实际需要的粒度窄得多 —— 于是生产代码里出现了大量 6/7/9/10/14/18 这类「R3 规范允许、但 R2 没收录」的值（实测 97 个文件里 spacing 有 55.7% 落在 R2 集合外）。R2 因此没法当门禁基准：拿它当基准会把合规实现判成违规。本文件按 R3 Markdown 重建，并补上实测已成事实规范的半档值。",
+    "howToUse": "门禁 / 审查的允许值集合以本文件为准，不是 R2，也不是某个人记忆里的数字。改动这里的数值等于改设计规范，必须同步 Proxy_App_Design_System_R3.md 与 docs/design/BASELINE_CHANGELOG.md。"
+  },
+
+  "colors": {
+    "ink": "#17131F",
+    "deep": "#0E0B14",
+    "background": "#FFFFFF",
+    "panel": "#F7F5FA",
+    "soft": "#F1EEF6",
+    "line": "#E9E5F0",
+    "muted": "#7E7586",
+    "brandPink": "#FF4D8D",
+    "brandViolet": "#7C5CFF",
+    "signalLime": "#C6F24E",
+    "ok": "#1F9D5C",
+    "warn": "#B4690E",
+    "danger": "#D0342C"
+  },
+
+  "gradient": {
+    "brand": ["#FF4D8D", "#7C5CFF"],
+    "surface": ["#FFFFFF", "#F7F5FA"]
+  },
+
+  "radius": {
+    "pill": 999,
+    "card": 20,
+    "cardLarge": 24,
+    "smallCard": 12,
+    "tag": 16,
+    "iconBox": 16,
+    "rowIconBox": 14,
+    "scale": [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 999],
+    "spec": [12, 14, 16, 20, 24, 999],
+    "note": "R3 §4：普通卡圆角 20–24px；小卡/标签圆角 12–16px / pill 999px；icon box radius 16px / 14px。spec 是规范值。新增 scale 是因为 R3 用区间措辞（12–16）而实现里小徽章用了 6/8/9/10/18 —— 文档没覆盖这一档，实测 2026-09-30 扫描中 10px(95 次) / 18px(79 次) / 8px(44 次) 是高频事实值。0 合法（直角）。"
+  },
+
+  "spacing": {
+    "scale": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 24, 32, 40],
+    "semantic": {
+      "pageMargin": 16,
+      "sectionGap": 16,
+      "sectionGapWide": 20,
+      "cardGap": 10,
+      "cardGapWide": 12,
+      "hairline": 1,
+      "tight": 2,
+      "micro": 4,
+      "small": 8,
+      "medium": 12,
+      "large": 16,
+      "xlarge": 24
+    },
+    "note": "R3 §4 硬规则给的是区间（页面左右边距 16px；区块间距 16–20px；卡片间距 10–12px）。scale 里的 2/3/5/6/7/9/11/13/14/15/18 不是新规范，而是实测中已跨 30–74% 文件使用的既有值（2026-09-30 扫描 apps/mobile/src 97 个文件）—— 收编它们是为了让门禁能判「真异常」，而不是把 2289 处合规实现报成违规。40+ 的值（48/52/60/80/90/104/120）实测均为零散单次出现，不在 scale 内，按魔数处理。"
+  },
+
+  "icon": {
+    "boxLarge": 56,
+    "boxRow": 44,
+    "boxDetail": 48,
+    "touchTargetMin": 44,
+    "note": "R3 §4：一级模块 icon box 56×56 / radius 16；行式模块 44×44 / radius 14；详情页 avatar/icon 48–52；Touch target 最小 44×44。"
+  },
+
+  "typography": {
+    "display": { "size": 40, "lineHeight": 48, "weight": 900, "letterSpacing": -0.04 },
+    "pageH1": { "size": 28, "lineHeight": 34, "weight": 900, "letterSpacing": -0.035 },
+    "pageH2": { "size": 24, "lineHeight": 30, "weight": 900, "letterSpacing": -0.03 },
+    "section": { "size": 17, "lineHeight": 24, "weight": 800, "letterSpacing": -0.015 },
+    "cardTitle": { "size": 15, "lineHeight": 21, "weight": 800, "letterSpacing": -0.01 },
+    "objectTitle": { "size": 14, "lineHeight": 20, "weight": 800, "letterSpacing": 0 },
+    "body": { "size": 14, "lineHeight": 20, "weight": 500, "letterSpacing": 0 },
+    "meta": { "size": 12, "lineHeight": 17, "weight": 500, "letterSpacing": 0 },
+    "caption": { "size": 11, "lineHeight": 15, "weight": 600, "letterSpacing": 0 },
+    "button": { "size": 14, "lineHeight": 18, "weight": 800, "letterSpacing": 0 },
+    "nav": { "size": 10, "lineHeight": 12, "weight": 600, "letterSpacing": 0 },
+    "numberXL": { "size": 28, "lineHeight": 32, "weight": 900, "letterSpacing": -0.02 },
+    "numberL": { "size": 20, "lineHeight": 24, "weight": 900, "letterSpacing": -0.015 },
+    "scale": [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 28, 40],
+    "spec": [40, 28, 24, 20, 17, 15, 14, 12, 11, 10],
+    "note": "spec 逐行取自 R3 §Typography 表格的排名（Display/PageH1/PageH2/Section/CardTitle/ObjectTitle/Body/Meta/Caption/Button/Nav/NumberXL/NumberL）。scale 是门禁用的允许集：R3 的排名表**没有覆盖 13/16/18/22**，而实现里这四个值实测用了 405 处（13:248 / 16:62 / 18:59 / 22:36），若只按 spec 判门禁会把这 405 处合规实现全报成违规。收编它们是承认这是文档缺口，不是承认规范。半整数（11.5 / 12.5 / 13.5 / 14.5 / 10.5）实测各 9~55 处且无一在 R3 表内，不在 scale 内，逐个复核。"
+  },
+
+  "component": {
+    "card": { "radius": 20, "padding": 16, "shadow": 0 },
+    "sectionGap": 16,
+    "pageMargin": 16,
+    "border": 1,
+    "shadowAllowed": false,
+    "note": "R3 §4：边框 1px Line；阴影 0（硬规则，不允许阴影）。"
+  }
+}
