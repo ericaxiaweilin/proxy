@@ -197,7 +197,7 @@ const styles = StyleSheet.create({
   rowSkeleton: { height: 120 },
   rowHead: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 8, marginHorizontal: 16 },
   rowTitle: { color: color.ink, fontSize: 16, fontWeight: "900" },
-  rowGen: { backgroundColor: "#F4F0FF", borderRadius: 6, color: "#5B3FA3", fontSize: 10, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 2 },
+  rowGen: { backgroundColor: "#F4F0FF", borderRadius: 6, color: "#5B3FA3", fontSize: 11, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 2 },
   row: { gap: 12, paddingHorizontal: 16 },
   // 常规圆头像（与真人 stories 同语言，无白卡）：头像 + 角色名。
   story: { alignItems: "center", gap: 4, width: 72 },
@@ -205,7 +205,7 @@ const styles = StyleSheet.create({
   storyToken: { alignItems: "center", borderRadius: 36, height: 72, justifyContent: "center", width: 72 },
   storyTokenText: { fontSize: 28 },
   storyName: { color: color.ink, fontSize: 12, fontWeight: "700", textAlign: "center" },
-  followed: { color: color.muted, fontSize: 10 },
+  followed: { color: color.muted, fontSize: 11 },
   // 个人主页（整页替换行，非底部弹卡）。
   backButton: { alignItems: "center", flexDirection: "row", paddingHorizontal: 16, paddingVertical: 8 },
   // backText 已删：字形和标签都由公共组件 ProxyBackGlyph 画（BACK-GLYPH-001）。

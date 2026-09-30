@@ -1635,7 +1635,7 @@ const styles = StyleSheet.create({
   },
   hintRow: { flexDirection: "row", alignItems: "center", gap: 10, opacity: 0, height: 0, marginBottom: 0, overflow: "hidden" as const },
   hintLine: { width: 22, height: 1, backgroundColor: "transparent" },
-  hintText: { color: "transparent", fontSize: 1, letterSpacing: 0.2, height: 0 },
+  hintText: { color: "transparent", fontSize: 11, letterSpacing: 0.2, height: 0 },
   nav: {
     alignSelf: "stretch",
     backgroundColor: "rgba(255,255,255,0.055)",
@@ -1746,7 +1746,7 @@ const styles = StyleSheet.create({
   navContent: { alignItems: "center", flexDirection: "column", gap: 2, justifyContent: "center" },
   navIcon: { alignItems: "center", height: 26, justifyContent: "center", width: 26 },
   navBadgeDot: { position: "absolute", top: -1, right: -2, width: 7, height: 7, borderRadius: 999, backgroundColor: color.ink, borderColor: "rgba(255,255,255,0.95)", borderWidth: 1.5 },
-  navLabel: { color: "#8d8d92", fontSize: 10.5, fontWeight: "500", lineHeight: 13, letterSpacing: -0.12, textAlign: "center" },
+  navLabel: { color: "#8d8d92", fontSize: 11, fontWeight: "500", lineHeight: 13, letterSpacing: -0.12, textAlign: "center" },
   navLabelActive: { color: "#111111", fontWeight: "600" },
 
   composerRoot: { flex: 1, padding: 16, gap: 10, backgroundColor: color.offWhite },

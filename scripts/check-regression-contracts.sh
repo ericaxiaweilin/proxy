@@ -11845,3 +11845,48 @@ _contract_n=$(node -e '
 const fs=require("fs");
 console.log((JSON.parse(fs.readFileSync("docs/design/IMPLEMENTATION_CONTRACTS.json","utf8")).contracts||[]).length)' 2>/dev/null || echo 0)
 echo "    DESIGN-CONTRACT-REFS-001: PASS (${_contract_n} 个合同：status 合法 · 实现文件与 reference 均存在)"
+
+# UI-TYPOGRAPHY-MIN-001（2026-09-30，用户裁决：「不能太小」）。
+#
+# R3 §Typography 的硬规则是「**Caption 11px 是全 App 最小正文级别**」—— 没有例外。
+# 原型里有 3878 处 font-size < 11px，剥掉 <svg> 后仍是 3878 处，说明**全部是真实可见
+# 文字**（不是设计标注），集中在少数 class 上：
+#   Proxy_R15_18_Threads_Profile_Polished.html 的 .candstate / .confirmtag / .chatonline
+#   —— 候选人状态 / 确认标签 / 在线状态，都是真实界面元素。
+#
+# 所以那些不是「事实规范」，是**原型侧的违规**。我第一版 token 把它们收编进 scale
+# 只是为了不产生门禁噪声 —— 那是错的，等于用门禁把违规合法化。用户裁决后全部移出。
+#
+# 10px 是 R3 明文例外（Nav 10px，仅此处允许），所以仍留在 scale 但标注 navOnly；
+# 原型把它用在 .face / .badge / .chip / .label 等非导航 class 上约 50 处，
+# 那是把例外当档位用。实现侧已一并提到 11。
+# ⚠️ 判据用 `grep -hoE ... | wc -l`（直接数匹配行），**不要**用
+#    `grep -c PAT files... | grep -v ':0:' | wc -l` —— 那个写法在多文件 + alternation 下
+#    滤不干净 `file:0` 行，第一版就是这么恒红的（实测 96 个 `:0` 行没被滤掉）。
+_typo_files=(apps/mobile/src/surfaces/*.tsx apps/mobile/src/components/*.tsx)
+_typo_small=$(grep -hoE 'fontSize: (10\.5|9\.5|9|8\.5|8|7\.5|7|6\.8|6\.5)([^0-9]|$)' "${_typo_files[@]}" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$_typo_small" != "0" ]; then
+  echo "  FAIL [UI-TYPOGRAPHY-MIN-001]: 实现里还有 ${_typo_small} 处 <10.5px 字号 —— R3 规定 11px 是" >&2
+  echo "        全 App 最小正文级别（用户裁决：「不能太小」）。提到 11，lineHeight 同步放大。" >&2
+  grep -nE 'fontSize: (10\.5|9\.5|9|8\.5|8|7\.5|7|6\.8|6\.5)([^0-9]|$)' "${_typo_files[@]}" 2>/dev/null | head -5 >&2
+  exit 1
+fi
+_typo_ten=$(grep -hoE 'fontSize: 10([^0-9]|$)' "${_typo_files[@]}" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$_typo_ten" != "0" ]; then
+  echo "  FAIL [UI-TYPOGRAPHY-MIN-001]: 非导航位置还有 ${_typo_ten} 处 fontSize: 10 —— Nav 10px 是" >&2
+  echo "        「仅底部导航文字」允许的例外，不是通用档位。提到 11。" >&2
+  grep -nE 'fontSize: 10([^0-9]|$)' "${_typo_files[@]}" 2>/dev/null | head -5 >&2
+  exit 1
+fi
+# token 侧：scale 里不许再出现 <11 的值；10 必须同时标在 navOnly。
+_tscale=$(node -e '
+const fs=require("fs");
+const d=JSON.parse(fs.readFileSync("Proxy_App_Design_Tokens_R3.json","utf8"));
+const bad=(d.typography.scale||[]).filter(v=>v<11 && !(d.typography.navOnly||[]).includes(v));
+console.log(bad.join(","));' 2>/dev/null || echo "")
+if [ -n "$_tscale" ]; then
+  echo "  FAIL [UI-TYPOGRAPHY-MIN-001]: token 的 typography.scale 里有未标注的 <11px 值：${_tscale}" >&2
+  echo "        收编它们等于用门禁把违规合法化。要放开规则，先改 R3 文档。" >&2
+  exit 1
+fi
+echo "    UI-TYPOGRAPHY-MIN-001: PASS (实现 0 处 <11px · 0 处非导航 10px · token 无未标注的 <11px)"

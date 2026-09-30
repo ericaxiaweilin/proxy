@@ -2719,7 +2719,7 @@ const styles = StyleSheet.create({
   postNameLine: { alignItems: "center", flexDirection: "row", gap: 6, minWidth: 0 },
   postName: { color: color.ink, fontSize: 13, fontWeight: "700" },
   postMeta: { color: color.muted, fontSize: 11 },
-  aiBadge: { alignSelf: "flex-start", backgroundColor: "#F4F0FF", borderRadius: 6, color: "#5B3FA3", fontSize: 10, fontWeight: "700", marginTop: 2, paddingHorizontal: 6, paddingVertical: 2 },
+  aiBadge: { alignSelf: "flex-start", backgroundColor: "#F4F0FF", borderRadius: 6, color: "#5B3FA3", fontSize: 11, fontWeight: "700", marginTop: 2, paddingHorizontal: 6, paddingVertical: 2 },
   // R15.23: Threads UX 没有 follow 按钮, 改 ⋯ 菜单 (32pt 宽, 19px 文字 #555)
   postMenu: { alignItems: "center", height: 28, justifyContent: "center", width: 32 },
   postMenuText: { color: "#555", fontSize: 19, lineHeight: 22 },

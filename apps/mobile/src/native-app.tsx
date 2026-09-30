@@ -1084,7 +1084,7 @@ const styles = StyleSheet.create({
   brandName: { color: color.ink, fontSize: 30, fontWeight: "900", letterSpacing: 2, marginTop: 16 },
   brandNameLarge: { fontSize: 34 },
   brandSlogan: { color: color.muted, fontSize: 12, letterSpacing: 0.4, marginTop: 6 },
-  brandSloganEn: { color: "#8A8490", fontSize: 9, letterSpacing: 2.2, marginTop: 4, textTransform: "uppercase" },
+  brandSloganEn: { color: "#8A8490", fontSize: 11, letterSpacing: 2.2, marginTop: 4, textTransform: "uppercase" },
   spinner: { marginTop: 22 },
   title: {
     color: color.ink,

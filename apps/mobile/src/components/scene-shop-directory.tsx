@@ -756,9 +756,9 @@ const styles = StyleSheet.create({
   // SCENE-CATEGORY-BADGE-001：封面左上角分类角标。mint 底白字、绝对定位、
   // 跟 liveDot 共享 112pt 高的封面（top:6 距顶边），左缘跟卡片内边距对齐。
   coverBadge: { backgroundColor: color.mint, borderRadius: 5, left: 6, paddingHorizontal: 6, paddingVertical: 2, position: "absolute", top: 6 },
-  coverBadgeText: { color: color.white, fontSize: 10, fontWeight: "900", letterSpacing: 0.2 },
+  coverBadgeText: { color: color.white, fontSize: 11, fontWeight: "900", letterSpacing: 0.2 },
   cardDistanceBadge: { backgroundColor: "rgba(255,255,255,0.92)", borderRadius: 5, bottom: 6, left: 6, paddingHorizontal: 6, paddingVertical: 2, position: "absolute" },
-  cardDistanceText: { color: color.ink, fontSize: 10, fontWeight: "900" },
+  cardDistanceText: { color: color.ink, fontSize: 11, fontWeight: "900" },
   photoPlaceholder: { alignItems: "center", justifyContent: "center" },
   photoPlaceholderText: { color: color.muted, fontSize: 15, fontWeight: "900" },
   heroPlaceholderText: { color: "rgba(255,255,255,0.5)", fontSize: 30, fontWeight: "900" },
@@ -866,7 +866,7 @@ actionRow3: { flexDirection: "row", gap: 8, marginTop: 14 },
   // 小标签 + 大标题 + 副题；头像是亮环（暗底上用白/亮字）。
   matchCard: { backgroundColor: color.deep, borderRadius: 20, marginTop: 22, overflow: "hidden", padding: 16 },
   matchLabel: { alignSelf: "flex-start", backgroundColor: "rgba(245,180,0,0.18)", borderRadius: 6, marginBottom: 12, paddingHorizontal: 9, paddingVertical: 4 },
-  matchLabelText: { color: "#F5C842", fontSize: 10, fontWeight: "900", letterSpacing: 1.2 },
+  matchLabelText: { color: "#F5C842", fontSize: 11, fontWeight: "900", letterSpacing: 1.2 },
   matchTitle: { color: color.white, fontSize: 17, fontWeight: "900", letterSpacing: -0.3, lineHeight: 23, marginBottom: 5 },
   matchSub: { color: color.darkCardText, fontSize: 11.5, fontWeight: "700", lineHeight: 17, marginBottom: 14 },
   // 暗底上的亮字版（humanPlainName / humanPlainSub 是给浅色底用的）。

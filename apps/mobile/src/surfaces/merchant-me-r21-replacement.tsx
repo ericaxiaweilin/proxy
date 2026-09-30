@@ -815,7 +815,7 @@ const styles = StyleSheet.create({
   kpis: { flexDirection: "row", gap: 7, marginTop: 10 },
   kpi: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flex: 1, height: 68, justifyContent: "center", paddingHorizontal: 3 },
   kpiValue: { color: color.ink, fontSize: 14, fontWeight: "900", lineHeight: 20 },
-  caption: { color: color.muted, fontSize: 10, fontWeight: "600", lineHeight: 15 },
+  caption: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15 },
   pageSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
   tabs: { gap: 7, paddingVertical: 14 },
   tab: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 36, justifyContent: "center", paddingHorizontal: 13 },
