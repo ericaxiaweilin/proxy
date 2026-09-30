@@ -1767,6 +1767,18 @@ if ! grep -qF 'enforceDBRolePosture(ctx, pool)' apps/api-go/cmd/api/main.go ||
   echo "  FAIL [DB-ROLE-POSTURE-001]: 启动姿态检查没接进 main.go，或 PRODUCTION.md 没写。" >&2
   exit 1
 fi
+# 2026-09-30：加一条 FK_INTO_READONLY_PARENT —— 「运行角色能 INSERT 子表，却改不了那个
+# 外键指向的父表」的 INSERT 必然失败（外键校验要在父行上取 FOR KEY SHARE，而它需要 UPDATE）。
+# LC-28 就是这一条（policy.order_decisions → policy.policy_decisions，修法见 149），
+# 只是当时没有任何检查能看见它。上面那条 require_test 会跑它，但**跳过也算过**：
+# requireScratchRole 建不出临时角色时整个测试 t.Skipf ⇒ 一条代码被删掉也照样「通过」。
+# 所以这里再钉一次结构。
+if ! grep -qF 'PostureFKIntoReadonlyParent' apps/api-go/internal/platform/postgres/role_posture.go ||
+   ! grep -qF 'fkTrapsFor(ctx, pool, role)' apps/api-go/internal/platform/postgres/role_posture.go; then
+  echo "  FAIL [DB-ROLE-POSTURE-001]: FK_INTO_READONLY_PARENT 没接进启动姿态检查。" >&2
+  echo "        指向「运行角色改不了的父表」的外键，其 INSERT 永远失败，而症状是静默的。" >&2
+  exit 1
+fi
 # ORDER-FK-LOCK-001: 只追加表被撤 UPDATE 之后，**指向它的外键会静默失效** —— 外键校验要在
 # 被引用行上取 FOR KEY SHARE 锁，而它需要 UPDATE（普通 SELECT 不需要）。146 撤掉了属主 proxy
 # 的 UPDATE，于是 065 那条指向 policy.policy_decisions 的外键让 PLATFORM_PAY 付费单永远确认
@@ -3073,7 +3085,43 @@ if grep -qE 'envelope_create_persona "user_\$\{TS\}' scripts/lc06-ai-media-e2e.s
   echo "        CreatePersona looks up user_age_assertions for OwnerID and refuses accounts it cannot find." >&2
   exit 1
 fi
-echo "    LC-06 / LC-07: PASS (provenance columns present in SELECT / INSERT / UPDATE / migration)"
+# 2026-09-30：第二个前置条件 —— USER_TWIN 只对「有接单权限」的人开
+# （ORDER-PERMISSION-TWIN-001，api/aipersona_handlers.go:57）。这条门在 HTTP 层造不出来：
+# 审批端点要 operator 身份，而 operator 白名单是 boot 时从 PROXY_OPERATOR_PRINCIPALS 读的
+# **固定 principal id**，套件的 user id 却是运行时生成的。所以套件直接往库里写一条
+# APPROVED 申请，句柄是 PROXY_E2E_ADMIN_PSQL（e2e-isolated.sh 指向一次性库，
+# gate.sh g3 指向开发库且只接受本地 DSN）。
+#
+# 在这之前套件根本没造这个前置条件，于是它在**任何**接了库的服务上都在第 1 步就挂
+# （`order_permission_required`），后面的用例一条都跑不到 —— 而它在不接库的服务上
+# 「通过」，因为那时 OrderPermission 是 nil、门被整个跳过。两头都是假的。
+#
+# 钉三个方向，少一个洞就回来：
+#   1. 套件必须仍然**断言这道门在**（先 403 再放行）。只造前置条件不测门，
+#      等于把门藏到夹具后面；
+#   2. 套件必须仍然**真的造**那条前置条件，否则第 1 步就挂；
+#   3. 套件必须**删掉**它造的那条 —— g3 模式下那是开发库，不是一次性库。
+#
+# 先剥注释再断言：这三段文字在套件的注释里也出现过（解释为什么这么写），
+# 不剥的话「把断言删了但注释留着」照样能把钉子喂绿 —— 那正是这一族 bug 的成因。
+lc06_suite_code=$(grep -vE '^[[:space:]]*#' scripts/lc06-ai-media-e2e.sh)
+if ! printf '%s\n' "$lc06_suite_code" | grep -qF 'order_permission_required'; then
+  echo "  FAIL [LC-06]: lc06-ai-media-e2e.sh no longer asserts the order-permission gate." >&2
+  echo "        ORDER-PERMISSION-TWIN-001 must be seen to fire (403) BEFORE the fixture grants it," >&2
+  echo "        otherwise the suite just hides the gate behind a seeded approval." >&2
+  exit 1
+fi
+if ! printf '%s\n' "$lc06_suite_code" | grep -qF 'INSERT INTO supply.provider_applications'; then
+  echo "  FAIL [LC-06]: lc06-ai-media-e2e.sh no longer seeds the approved provider application." >&2
+  echo "        Without it step 1 fails with order_permission_required and no later case ever runs." >&2
+  exit 1
+fi
+if ! printf '%s\n' "$lc06_suite_code" | grep -qF 'DELETE FROM supply.provider_applications'; then
+  echo "  FAIL [LC-06]: lc06-ai-media-e2e.sh seeds a fixture row but never deletes it." >&2
+  echo "        Under g3 that row lands in the DEVELOPMENT database and stays there." >&2
+  exit 1
+fi
+echo "    LC-06 / LC-07: PASS (provenance columns in SELECT / INSERT / UPDATE / migration; e2e fixture asserts the order gate, seeds it, and cleans it up)"
 # 闸门必须挡在「实际跑的那条路」上（2026-09-21，同一类问题的第二处）。
 #
 # 上面那几层钉的是「溯源有没有落库」；这一层钉的是「判定有没有被调用」。

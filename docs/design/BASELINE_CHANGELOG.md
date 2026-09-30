@@ -4,6 +4,26 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 336 — 2026-09-30
+
+- **基线自己声明的一条路径已经烂了，而且没人会知道**（`BASELINE-PATH-ROT-001`）。
+  `integration.policy` 写着 `docs/architecture/MULTI_AGENT_BASELINE_CONTROL.md`，
+  但 2026-09-29 的文档归位（`07de8313`）已经把它搬到 `architecture/MULTI_AGENT_BASELINE_CONTROL.md`，
+  `docs/architecture/` 整个目录都不在了。改成新路径。
+- **根因是门禁只校验了一部分字段**：`check-design-baseline.mjs` 原来只查
+  `global.designSystem` / `global.visualReference` / `production.iconRegistry` /
+  `production.theme` 这 4 个，加上 ACTIVE 的 `screenReferences[].file`。
+  `integration.policy`、`production.uiFoundation`、`production.uiFoundationContract`、
+  `screenReferences[].implementationBaseline`、`legacy[]`、以及契约的 `reference`
+  **写了就没人看** —— 于是「指向已删文件的路径」和「好路径」在门禁眼里完全一样。
+  现在全部纳入存在性校验，报错直接点名是哪个字段。
+- **不是新的产品承诺**，只是把「声明了的东西必须真的在」这条既有规则补全。
+  没有动任何 `implementationFiles`；这次 revision 只是让这条修正本身可审计。
+- **没做**：`integration.recoveryBaselineTag`（`baseline/r15.23-command-clean-20260830`）
+  指向一个本地和远端都不存在的 tag。**没有补建** —— 仓库里找不到「command-clean」
+  这个状态的确定提交，而 `architecture/MULTI_AGENT_BASELINE_CONTROL.md` 明确写着
+  baseline tag 只能由 commander 创建；猜一个提交去 `git tag` 就是伪造基线。
+
 ## Revision 335 — 2026-09-30
 
 - **命令事务失败不再吞掉真正的拒绝原因**（`DISPATCH-ERROR-HONESTY-001` /

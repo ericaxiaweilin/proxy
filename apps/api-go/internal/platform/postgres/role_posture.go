@@ -21,6 +21,18 @@ const (
 	PostureCanOverride    = "RUNTIME_CAN_OVERRIDE_GUARDS"
 	PostureCanRewriteLogs = "RUNTIME_CAN_REWRITE_AUDIT"
 	PostureOwnsAuditTable = "RUNTIME_OWNS_AUDIT_TABLE"
+	// PostureFKIntoReadonlyParent：运行角色**能往子表 INSERT**，但那个外键指向的父表
+	// 它**改不了**。这种 INSERT 必然失败 —— 外键校验要在父行上取 `FOR KEY SHARE` 行锁，
+	// 而那个锁需要 UPDATE（普通 SELECT 不需要）。
+	//
+	// 2026-09-30 的 LC-28 就是这一条：146 的 harden_append_only 撤掉了属主 proxy 对
+	// policy.policy_decisions 的 UPDATE，而 065 留了一条
+	// policy.order_decisions.decision_id → policy.policy_decisions(id) 的外键，于是每一次
+	// 策略盖章都 permission denied，PLATFORM_PAY 付费单永远确认不了（修法见迁移 149）。
+	//
+	// 只报「子表运行角色真的能写」的那些：父表改不了、子表它也写不了的外键是休眠的，
+	// 报出来只是噪音，而且这一条在 PROXY_ENFORCE_DB_ROLE_SEPARATION=true 下会拒绝启动。
+	PostureFKIntoReadonlyParent = "FK_INTO_READONLY_PARENT"
 )
 
 // PostureFinding 是一条不满足的前提。
@@ -99,5 +111,40 @@ func rolePostureFor(ctx context.Context, pool *pgxpool.Pool, role string, tables
 	if len(owned) > 0 {
 		findings = append(findings, PostureFinding{PostureOwnsAuditTable, fmt.Sprintf("role %q owns append-only audit tables (%s): an owner can drop their triggers and re-grant itself; run migrations as a separate owner role (PRODUCTION.md, Database roles)", role, strings.Join(owned, ", "))})
 	}
+	traps, err := fkTrapsFor(ctx, pool, role)
+	if err != nil {
+		return nil, err
+	}
+	if len(traps) > 0 {
+		findings = append(findings, PostureFinding{PostureFKIntoReadonlyParent, fmt.Sprintf("role %q can INSERT rows whose foreign key points at a table it cannot UPDATE: %s — the FK check takes FOR KEY SHARE on the parent row, and that lock needs UPDATE, so every such insert fails (see migrations/149)", role, strings.Join(traps, "; "))})
+	}
 	return findings, nil
+}
+
+// fkTrapsFor：列出「运行角色能 INSERT 子表、但改不了父表」的外键。这些 INSERT 必然失败。
+//
+// 这一条是 2026-09-30 那次生产缺陷的通用形式：当时只有 policy.order_decisions 一处，
+// 但任何一张**新**的同类表都会重新制造它，而且症状同样是「看起来写进去了其实没有」。
+// 放在启动检查里，新表在下一次启动就会被点名，不必等到有人发现付费单确认不了。
+func fkTrapsFor(ctx context.Context, pool *pgxpool.Pool, role string) ([]string, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT c.conrelid::regclass::text || ' -> ' || c.confrelid::regclass::text || ' (' || c.conname || ')'
+		FROM pg_constraint c
+		WHERE c.contype = 'f'
+		  AND NOT has_table_privilege($1, c.confrelid, 'UPDATE')
+		  AND has_table_privilege($1, c.conrelid, 'INSERT')
+		ORDER BY 1`, role)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var trap string
+		if err := rows.Scan(&trap); err != nil {
+			return nil, err
+		}
+		out = append(out, trap)
+	}
+	return out, rows.Err()
 }

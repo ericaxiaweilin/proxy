@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 335,
+  "baselineRevision": 336,
   "updatedAt": "2026-09-30",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
@@ -14,7 +14,7 @@
     "uiFoundationContract": "docs/design/Proxy_UI_Foundation_v1.md"
   },
   "integration": {
-    "policy": "docs/architecture/MULTI_AGENT_BASELINE_CONTROL.md",
+    "policy": "architecture/MULTI_AGENT_BASELINE_CONTROL.md",
     "workspaceMode": "SINGLE_WRITER",
     "externalAgentMode": "ISOLATED_WORKTREE",
     "recoveryBaselineTag": "baseline/r15.23-command-clean-20260830"

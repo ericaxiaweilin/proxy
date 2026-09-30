@@ -15,16 +15,32 @@ if (!existsSync(manifestPath)) {
   if (!Number.isInteger(manifest.baselineRevision) || manifest.baselineRevision < 1) {
     errors.push("baselineRevision must be a positive integer");
   }
-  const required = [
-    manifest.global?.designSystem,
-    manifest.global?.visualReference,
-    manifest.production?.iconRegistry,
-    manifest.production?.theme,
-    ...(manifest.screenReferences ?? []).filter((entry) => entry.status === "ACTIVE_SCREEN_REFERENCE").map((entry) => entry.file)
-  ].filter(Boolean);
+  // BASELINE-PATH-ROT-001：基线里声明的**每一条文件路径**都必须真的存在。
+  // 原来只校验 4 个固定字段 + ACTIVE screenReferences[].file，其余字段写了就没人管
+  // —— 2026-09-29 的文档归位（`07de8313`）把 `docs/architecture/*` 搬到 `architecture/*`
+  // 之后，`integration.policy` 一直指着已经不存在的路径，而门禁照过。
+  // 凡是「声明了但没人校验」的路径都会这样烂掉，所以这里改成显式列举 (字段名, 路径)，
+  // 报错时直接说出是**哪个字段**烂了，而不是只给一个文件名。
+  const declaredPaths = [
+    ["global.designSystem", manifest.global?.designSystem],
+    ["global.visualReference", manifest.global?.visualReference],
+    ["production.iconRegistry", manifest.production?.iconRegistry],
+    ["production.theme", manifest.production?.theme],
+    ["production.uiFoundation", manifest.production?.uiFoundation],
+    ["production.uiFoundationContract", manifest.production?.uiFoundationContract],
+    ["integration.policy", manifest.integration?.policy]
+  ];
+  for (const [index, entry] of (manifest.screenReferences ?? []).entries()) {
+    declaredPaths.push([`screenReferences[${index}].file`, entry.file]);
+    declaredPaths.push([`screenReferences[${index}].implementationBaseline`, entry.implementationBaseline]);
+  }
+  for (const [index, entry] of (manifest.legacy ?? []).entries()) {
+    if (typeof entry === "string") declaredPaths.push([`legacy[${index}]`, entry]);
+  }
 
-  for (const file of required) {
-    if (!existsSync(resolve(root, file))) errors.push(`active design reference does not exist: ${file}`);
+  for (const [field, file] of declaredPaths) {
+    if (!file) continue;
+    if (!existsSync(resolve(root, file))) errors.push(`${field} does not exist: ${file}`);
   }
 
   for (const entry of manifest.screenReferences ?? []) {
@@ -61,6 +77,9 @@ if (!existsSync(contractsPath)) {
   for (const contract of contracts.contracts ?? []) {
     contractScopes.add(contract.scope);
     if (!contract.reference || /(^|\/)archive\//.test(contract.reference)) errors.push(`contract ${contract.scope} has invalid reference`);
+    // BASELINE-PATH-ROT-001：reference 原来只查「非空 + 不在 archive」，不查存在 ——
+    // 一条指向已删文件的 reference 和一条好的 reference 在门禁眼里完全一样。
+    else if (!existsSync(resolve(root, contract.reference))) errors.push(`contract ${contract.scope} reference does not exist: ${contract.reference}`);
     for (const file of [...(contract.implementationFiles ?? []), ...(contract.evidenceFiles ?? [])]) {
       if (!existsSync(resolve(root, file))) errors.push(`contract ${contract.scope} file does not exist: ${file}`);
     }

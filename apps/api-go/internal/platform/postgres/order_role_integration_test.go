@@ -258,6 +258,30 @@ func TestRolePostureFindingsPostgres(t *testing.T) {
 		t.Fatalf("after hardening only the ownership finding remains: %v %v", findings, err)
 	}
 
+	// FK_INTO_READONLY_PARENT：运行角色能 INSERT 子表，却改不了那个外键指向的父表 ——
+	// 这种 INSERT 必然失败，因为外键校验要在父行上取 FOR KEY SHARE，而它需要 UPDATE。
+	// 2026-09-30 的 LC-28 正是这个形状（policy.order_decisions → policy.policy_decisions，
+	// 修法见 migrations/149）；这一条把它变成启动时就能看见的发现，任何**新**的同类表
+	// 都不必再等到有人发现「付费单确认不了」。
+	//
+	// 反过来也要成立：把父表的 UPDATE 补上，这一条就必须消失 —— 证明报的是权限形状，
+	// 不是某张表的名字（否则它就是一条永远为真的死针）。
+	fkRole, fkSchema := "t_pf_"+run, "t_pf_"+run
+	requireScratchRole(t, pool, fkRole, "")
+	exec(`CREATE SCHEMA ` + fkSchema)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DROP SCHEMA IF EXISTS `+fkSchema+` CASCADE`) })
+	exec(`CREATE TABLE ` + fkSchema + `.parent (id INT PRIMARY KEY)`)
+	exec(`CREATE TABLE ` + fkSchema + `.child (id INT PRIMARY KEY, parent_id INT REFERENCES ` + fkSchema + `.parent(id))`)
+	exec(`GRANT SELECT, INSERT ON ` + fkSchema + `.child TO ` + fkRole)
+	exec(`GRANT SELECT ON ` + fkSchema + `.parent TO ` + fkRole)
+	if findings, err := RolePosture(ctx, pool, fkRole); err != nil || codes(findings) != PostureFKIntoReadonlyParent {
+		t.Fatalf("a role that can insert a child but cannot update its parent must be reported: %v %v", findings, err)
+	}
+	exec(`GRANT UPDATE ON ` + fkSchema + `.parent TO ` + fkRole)
+	if findings, err := RolePosture(ctx, pool, fkRole); err != nil || len(findings) != 0 {
+		t.Fatalf("once the parent is updatable the FK is satisfiable and must not be reported: %v %v", findings, err)
+	}
+
 	// 超级用户：只报这一条（其余检查对它没有意义）。
 	super := "t_ps_" + run
 	if _, err := pool.Exec(ctx, `CREATE ROLE `+super+` NOLOGIN SUPERUSER`); err != nil {

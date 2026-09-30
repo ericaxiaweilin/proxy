@@ -6,6 +6,10 @@
 #
 # 本脚本覆盖的是 **create 边界 + persona / consent 的 HTTP 面**：
 #   0a. CreateAnonymousSession 建一个带年龄断言的账号（persona 的 owner 用它）。
+#   0b. 没有接单权限时 USER_TWIN 被拒 —— ORDER-PERMISSION-TWIN-001 的门真的在。
+#   0c. 造前置条件：从库里写一条 APPROVED 服务者申请（这个条件 HTTP 层到不了，
+#       原因见下面「前置条件：接单权限」那段）。用 PROXY_E2E_ADMIN_PSQL，由
+#       scripts/e2e-isolated.sh 导出。
 #   1.  POST /v1/ai/personas creates a persona row.
 #   2.  POST /v1/ai/personas/{id}/consents grants a likeness
 #       consent. GET /v1/ai/personas/{id}/consents?subjectId=...
@@ -244,6 +248,58 @@ envelope_has_consent() {
 }
 
 # Tests --------------------------------------------------------------
+
+# --- 前置条件：接单权限（ORDER-PERMISSION-TWIN-001） -------------------------
+#
+# 本套件测的是 AI 媒体标签（LC-06）与肖像同意（LC-07）的 HTTP 面，而两者都挂在
+# USER_TWIN 上；USER_TWIN 又只对「有接单权限」的人开。这个前置条件**到不了** HTTP 层：
+#   * 审批端点是 POST /v1/operator/provider-applications/review，要 operator 身份；
+#   * operator 白名单是 boot 时从 PROXY_OPERATOR_PRINCIPALS 读的**固定 principal id**，
+#     而这里的 user_id 是 CreateAnonymousSession 刚生成的 —— 配不进去；
+#   * 走真实申请流程还要手机 OTP，e2e 环境收不到验证码。
+# 所以只从库里造这一件前置条件。**断言仍然全部走 API**：下面先证明「没权限就是 403」
+# （门真的在），再证明「有权限才开」。
+#
+# 2026-09-30 之前这里什么都没做，于是第 1 步直接 order_permission_required 挂掉 ——
+# 套件看起来在测「USER_TWIN 能不能建」，其实从来没走到过。
+
+if [ -z "${PROXY_E2E_ADMIN_PSQL:-}" ]; then
+  echo "FAIL: PROXY_E2E_ADMIN_PSQL is not set." >&2
+  echo "      This suite needs a fixture handle to seed an approved provider application." >&2
+  echo "      Run it through scripts/e2e-isolated.sh (which exports it), not standalone." >&2
+  exit 1
+fi
+
+echo
+echo "=== 0b. 没有接单权限时，USER_TWIN 必须被拒（ORDER-PERMISSION-TWIN-001） ==="
+out=$(envelope_create_persona "$user_id" "Denied Twin" "USER_TWIN" "")
+err=$(echo "$out" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')
+[ "$err" = "order_permission_required" ] || { echo "FAIL: expected order_permission_required, got: $out"; exit 1; }
+echo "  OK: order_permission_required（门在，不是放行）"
+
+echo
+echo "=== 0c. 造前置条件：一条 APPROVED 的服务者申请 ==="
+# 收工必须把这条前置条件删掉：g3 模式下这个库是**开发库**，不是一次性库 ——
+# 留一条 APPROVED 的假申请会出现在运营的申请列表里，而且每跑一次门禁就多一条。
+# 用 EXIT trap 而不是写在脚本末尾，因为下面每一步都可能 exit 1。
+fixture_cleanup() {
+  [ -n "${PROXY_E2E_ADMIN_PSQL:-}" ] || return 0
+  [ -n "${user_id:-}" ] || return 0
+  "$PROXY_E2E_ADMIN_PSQL" -c \
+    "DELETE FROM supply.provider_applications WHERE application_id = 'papp_e2e_lc06_${TS}'" >/dev/null 2>&1 || true
+}
+trap fixture_cleanup EXIT
+if ! "$PROXY_E2E_ADMIN_PSQL" -v ON_ERROR_STOP=1 -c \
+  "INSERT INTO supply.provider_applications (application_id, user_account_id, display_name, status, reviewed_by, reviewed_at, source)
+   VALUES ('papp_e2e_lc06_${TS}', '${user_id}', 'E2E Provider', 'APPROVED', 'e2e', now(), 'APP')
+   ON CONFLICT DO NOTHING" >/dev/null; then
+  echo "FAIL: seeding the approved application failed"
+  exit 1
+fi
+seeded=$("$PROXY_E2E_ADMIN_PSQL" -t -A -c \
+  "SELECT count(*) FROM supply.provider_applications WHERE user_account_id='${user_id}' AND status='APPROVED'")
+[ "$seeded" = "1" ] || { echo "FAIL: expected 1 APPROVED application after seeding, got '$seeded'"; exit 1; }
+echo "  OK: 已写入 APPROVED 申请（user=$user_id）"
 
 echo
 echo "=== 1. POST /v1/ai/personas (USER_TWIN) ==="
