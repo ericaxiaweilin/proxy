@@ -11934,3 +11934,33 @@ if ! rg -q '/Users/thanhhuyennguyen/proxy` is the integration workspace' AGENTS.
   exit 1
 fi
 echo "    DOC-PATH-DRIFT-001: PASS (活文档无 work/kake 操作性引用 · AGENTS.md 已声明 ~/proxy 为集成区)"
+
+# ACCOUNT-MATRIX-001（2026-09-30）：账户体系的真链路检查（并发 / 幂等 / 畸形 / 超大 body）。
+#
+# 这条检查的历史值得记下来：它原本**不存在**。`proxy-vibe-tester/scripts/account-vibe.mjs`
+# 有一段「真链路 6」，调用 `/tmp/account-matrix.mjs` —— 那个文件随 /tmp 清理消失了，
+# 于是子进程 MODULE_NOT_FOUND 崩掉，而调用处写的是 `node ... | tail -n 10`：
+# 管道的退出码取 tail，崩了也当成功。脚本照样打出「51 cases 通过」并以 0 退出。
+# **六例一次都没跑成，报告说全过。**
+#
+# 现在 scripts/account-matrix.mjs 在仓库里（不放 /tmp），并且：
+#   - 先探 /health/live，API 不在就**大声判红**而不是含糊过去；
+#   - 并发 12 次要求 token 互不相同（会话串扰只在这里露出来）；
+#   - 幂等重放必须收敛到同一会话；
+#   - 4 种畸形输入必须得到 4xx，并额外验证 4MB body 被拒且**服务仍然活着**；
+#   - 版本钉契约真实存在的那道闸门（<= 0 必拒）；高版本按 openapi 的 minimum:1
+#     被接受是加法演进，不是缺陷 —— 断言照契约写，不照想象写。
+if curl -sf --noproxy '*' --max-time 3 http://127.0.0.1:4100/health/live >/dev/null 2>&1; then
+  # 出口码必须跟着结论走：管道 / tail 会吃掉子进程失败，所以脚本内部不接管道。
+  node scripts/account-matrix.mjs >/tmp/account-matrix-gate.log 2>&1 || {
+    echo "  FAIL [ACCOUNT-MATRIX-001]: 账户真链路检查没过 —— 完整输出：" >&2
+    tail -n 20 /tmp/account-matrix-gate.log | sed 's/^/        /' >&2
+    rm -f /tmp/account-matrix-gate.log
+    exit 1
+  }
+  _am_n=$(rg -c '^  OK' /tmp/account-matrix-gate.log 2>/dev/null || echo 0)
+  rm -f /tmp/account-matrix-gate.log
+  echo "    ACCOUNT-MATRIX-001: PASS (${_am_n} 项：并发 12 次 token 唯一 · 幂等收敛 · 4 种畸形 4xx · 4MB 被拒且服务存活 · 版本闸门)"
+else
+  echo "    ACCOUNT-MATRIX-001: SKIP (dev API 不在 :4100 —— 这条要活的服务。先起它：launchctl kickstart -k gui/\$(id -u)/com.user.kake-dev-api)"
+fi
