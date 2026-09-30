@@ -21,7 +21,7 @@
  *   node scripts/compare-screens.mjs --pixel shot.png --for wallet
  *   node scripts/compare-screens.mjs --pixel shot.png --for wallet --threshold 0.1
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -154,23 +154,51 @@ function pixelReport(shotPath, key, threshold) {
   }
   mkdirSync(OUT_DIR, { recursive: true });
   const diffPath = join(OUT_DIR, `${hit.meta.image.split("/").pop().replace(/\.png$/, "")}-vs-shot.png`);
-  let diffText = "";
-  try {
-    diffText = execFileSync(tool, ["compare", "-metric", "AE", basePath, shotPath, diffPath], {
-      stdio: ["ignore", "pipe", "pipe"],
-    }).toString().trim();
-  } catch (e) {
-    // ImageMagick compare 把差异数写 stderr，exit code 非 0 表示有差异
-    diffText = String(e.stderr ?? "").trim();
+  // ⚠️ 必须用 spawnSync 而不是 execFileSync：`compare -metric AE` 把差异数写
+  // **stderr**（ImageMagick 一直如此），而 execFileSync 成功分支只把 stdout 作为
+  // 返回值、stderr 只有在 spawn 层才能取到（e.stderr 是 Error 上的属性，成功时不
+  // 存在）。第一版用 execFileSync + 读 stdout ⇒ 永远拿到空串 ⇒ NaN ⇒ 假绿。
+  // 差异为零时 magick 还会 exit 0，有差异时 exit 1，两者都要读 stderr。
+  const proc = spawnSync(
+    tool,
+    ["compare", "-metric", "AE", basePath, shotPath, diffPath],
+    { encoding: "utf8" }
+  );
+  const diffText = String(proc.stderr ?? "").trim() || String(proc.stdout ?? "").trim();
+  if (proc.error) {
+    console.log(`  [FAIL] 跑 ${tool} 失败：${proc.error.message}`);
+    console.log("=".repeat(78));
+    return 1;
   }
-  const diffPixels = Number(diffText.split(/\s+/)[0]);
+  // ⚠️ ImageMagick v7 的 `-metric AE` 输出是 `0 (0)` 这种带括号形式，v6 是纯数字。
+  //   第一版只取 split(/\s+/)[0]，碰上括号整段作废 → Number("") = NaN，而 NaN 又
+  //   被当成「通过」—— 实测**自己跟自己比报 0.00% PASS**，是假绿，最坏的一类。
+  //   所以两件事：解析兼容括号；解析不出来必须判红，绝不判绿。
+  const metricMatch = /(-?[\d.]+(?:[eE][-+]?\d+)?)/.exec(diffText);
+  const diffPixels = metricMatch ? Number(metricMatch[1]) : NaN;
   const total = a.width * a.height;
-  const ratio = Number.isFinite(diffPixels) ? diffPixels / total : NaN;
-  const pass = Number.isFinite(ratio) ? ratio <= threshold : false;
+  const ratio = diffPixels / total;
+  const pass = Number.isFinite(ratio) && ratio <= threshold;
   console.log("");
-  console.log(`  差异像素 ${diffText}`);
+  // ⚠️ ImageMagick 7.1.x 的 Q16-HDRI 构建对 AE 也返回浮点（实测 `26613.9 (0.0202135)`），
+  // 而 v6 是纯整数。像素个数按定义是整数，所以对外一律取整 —— 直接把 26613.9 打出来
+  // 会让人以为工具坏了。括号里那份是归一化比例，ImageMagick 自己给的。
+  const shownPixels = Number.isFinite(diffPixels) ? Math.round(diffPixels) : null;
+  console.log(`  差异像素 ${shownPixels ?? "解析失败（原始输出 " + JSON.stringify(diffText) + "）"}`);
   console.log(`  差异比例 ${Number.isFinite(ratio) ? (ratio * 100).toFixed(2) + "%" : "n/a"}（阈值 ${(threshold * 100).toFixed(0)}%）`);
-  console.log(`  结论     ${pass ? "PASS" : "DIFF"}`);
+  if (!Number.isFinite(ratio)) {
+    console.log("");
+    console.log("  [FAIL] 无法解析差异像素数 —— 判定无效，不许当成通过。");
+    console.log("         （ImageMagick 输出格式可能变了：手跑 `magick compare -metric AE a.png b.png d.png` 看原始输出）");
+    console.log("=".repeat(78));
+    return 1;
+  }
+  // 浮点像素数说明工具是 HDRI 构建，比例仍可用；但四舍五入后若与原值差太多要提示 ——
+  // 那通常意味着我们匹配到的根本不是 AE 那一列数字。
+  if (Number.isFinite(diffPixels) && Math.abs(diffPixels - Math.round(diffPixels)) > 0.5) {
+    console.log(`  注：${tool} 报的是浮点（HDRI 构建），已取整；原始值 ${diffPixels}`);
+  }
+  console.log(`  结论     ${pass ? "[PASS]" : "[DIFF]"}`);
   console.log(`  diff 图：${diffPath}`);
   writeFileSync(
     join(OUT_DIR, `${hit.meta.image.split("/").pop().replace(/\.png$/, "")}-report.json`),
@@ -180,8 +208,10 @@ function pixelReport(shotPath, key, threshold) {
         baseline: hit.meta.image,
         shot: shotPath,
         size: a,
-        diffPixels,
+        // 整数：AE 是像素个数，HDRI 构建会给浮点，下游按整数用（见上面的注）。
+        diffPixels: Number.isFinite(diffPixels) ? Math.round(diffPixels) : null,
         diffRatio: ratio,
+        rawMetricOutput: diffText,
         threshold,
         pass,
         diffImage: diffPath,

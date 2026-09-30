@@ -11736,3 +11736,44 @@ if [ -n "$sh_uni_bad" ]; then
   exit 1
 fi
 echo "    SHELL-VAR-UNICODE-001: PASS (no \$VAR glued to non-ASCII in scripts/)"
+
+# UI-PROTO-DIFF-HONEST-001（2026-09-30）：compare-screens 的像素比对不许「假绿」。
+#
+# 这是一个实测出来的假绿，值得钉住：`compare -metric AE` 把差异数写 **stderr**，
+# 而 execFileSync 成功分支只返回 stdout ⇒ 永远拿到空串 ⇒ Number("") = NaN ⇒
+# 第一版把 NaN 当成「通过」，于是**自己跟自己比报「0.00% PASS」**。一个专门用来
+# 判断「像不像」的工具，在最该报错的时候报绿 —— 这比没有工具更糟。
+#
+# 所以钉三条：
+#   1. 用 spawnSync（只有它能拿到成功分支的 stderr）；
+#   2. 解析不出来必须判红；
+#   3. 差异像素对外是整数（ImageMagick 7.1 Q16-HDRI 会给浮点，直接打出来像坏了）。
+if ! grep -qF 'spawnSync' scripts/compare-screens.mjs; then
+  echo "  FAIL [UI-PROTO-DIFF-HONEST-001]: 像素比对没用 spawnSync —— execFileSync 拿不到" >&2
+  echo "        stderr 里的差异数，会永远解析失败。实测后果：自己跟自己比报 0.00% PASS。" >&2
+  exit 1
+fi
+if ! grep -qF '无法解析差异像素数' scripts/compare-screens.mjs; then
+  echo "  FAIL [UI-PROTO-DIFF-HONEST-001]: 解析失败时没有判红 —— NaN 被当成通过就是假绿。" >&2
+  exit 1
+fi
+if ! grep -qF 'Math.round(diffPixels)' scripts/compare-screens.mjs; then
+  echo "  FAIL [UI-PROTO-DIFF-HONEST-001]: 差异像素没有取整 —— HDRI 构建返回浮点会让人以为工具坏了。" >&2
+  exit 1
+fi
+# 端到端自检：拿基准跟自己比必须是 0 差异 PASS。这一步真的跑 magick（需要 ImageMagick）；
+# 没有就跳过，不判红 —— 「这台机器没装比对工具」不是代码缺陷。
+if command -v magick >/dev/null 2>&1 || command -v compare >/dev/null 2>&1; then
+  _bl=$(python3 -c "
+import json,os
+p='docs/design/baseline-images/manifest.json'
+print(next((m['image'] for m in json.load(open(p))['prototypes'].values()),'')) if os.path.exists(p) else print('')" 2>/dev/null)
+  if [ -n "$_bl" ] && [ -f "$_bl" ]; then
+    if ! node scripts/compare-screens.mjs --pixel "$_bl" --for "$(basename "$_bl" .png)" >/dev/null 2>&1; then
+      echo "  FAIL [UI-PROTO-DIFF-HONEST-001]: 基准跟自己比都不是 PASS —— 像素比对链路坏了。" >&2
+      echo "        手跑：node scripts/compare-screens.mjs --pixel $_bl --for $(basename "$_bl" .png)" >&2
+      exit 1
+    fi
+  fi
+fi
+echo "    UI-PROTO-DIFF-HONEST-001: PASS (spawnSync 取 stderr · 解析失败判红 · 像素取整 · 自比对通过)"
