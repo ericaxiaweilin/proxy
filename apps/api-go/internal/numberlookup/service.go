@@ -165,8 +165,16 @@ func (s *Service) lookup(ctx context.Context, e command.Envelope) command.Result
 		if err := s.recorder.Record(ctx, entry); err != nil {
 			return auditFailed(e, err)
 		}
-		// 编号没有校验位（ordernumber 规范），只能判结构：全数字、≥21 位、类别码已登记、
-		// 日期时间真实存在。抄错一位但结构仍然成立的号，只会落到 NUMBER_NOT_FOUND。
+		// ordernumber.Valid 的实际判据（别被下面这句注释带偏）：全数字、**≥16 位**；
+		// 21 位及以上查类别码 + 真实日期时间，16–20 位走 main 的 Luhn 校验位。
+		// 16 位这一档就是 ORDER-NO-LEGACY-COMPAT-001 要保的存量号 —— 147/148 放宽
+		// 守卫和索引到 {16,} 就是为了让它们还能查，形状校验把它们拒掉等于前功尽弃。
+		// 抄错一位但结构仍成立的 21 位号只会落到 NUMBER_NOT_FOUND（有校验位的号抄错
+		// 一位则先被 Valid 拦成 NUMBER_INVALID）。
+		//
+		// 端到端覆盖：TestLegacySixteenDigitNumberResolvesThroughLookupServicePostgres
+		// —— 它种真行、从本服务入口反查，并靠错误码区分故障层：
+		// NUMBER_INVALID = 这里的形状校验在拒绝旧号；NUMBER_NOT_FOUND = 仓储层谓词分叉。
 		return command.Rejected(e, "NUMBER_INVALID", "VALIDATION", "AFTER_USER_ACTION", "numberlookup.number_invalid", map[string]any{"hint": "NOT_A_PUBLIC_NUMBER"})
 	}
 

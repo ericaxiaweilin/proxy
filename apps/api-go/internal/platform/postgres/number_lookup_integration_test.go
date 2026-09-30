@@ -157,6 +157,126 @@ func TestPublicNumberLookupPostgres(t *testing.T) {
 	}
 }
 
+// ORDER-NO-LEGACY-COMPAT-001（Postgres，**服务层**）：已发出去的 16 位旧号，
+// 客服必须还能查到 —— 这是 147/148 那轮兼容工作的最终承诺。
+//
+// 仓储层的 TestLegacyPublicNumberLookupFindsOldNumbersPostgres 证明了
+// `GetByNumber` / `FindActivityByCode` 能取回旧行，但**整条客服链路**从没被验过：
+// 线上客服走的是 numberlookup.Service，它在调用任何 finder **之前**先过一道
+// `ordernumber.Valid` 形状校验。只要那道校验对 16 位号说 "不合法"，仓储层修得
+// 再好也没用 —— 客服只会看到 NUMBER_INVALID / NUMBER_NOT_FOUND。
+//
+// 这个用例把「main 时代的旧号」直接种进库，然后从 Service 入口走一遍：
+// 订单、报名、活动、邀约四类都验，并确认审计行照写。
+//
+// 顺带钉住一个容易搞混的点：仓储层的 SQL 只看「全数字 + 长度」，
+// **不校验 Luhn 校验位**；校验位是 `ordernumber.Valid` 在服务层做的。所以
+// 「仓储能查到」和「服务接受这个号」是两个不同的断言，各有各的失败原因。
+func TestLegacySixteenDigitNumberResolvesThroughLookupServicePostgres(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	run := itoa(time.Now().UnixNano())
+
+	// main 时代的真实形状：16 位、yyMMdd + 9 位序号 + Luhn 校验位。
+	// 这四个都过了 ordernumber.Valid（算法是 main 原样搬过来的）。
+	const legacyOppNo = "2609290000012342"
+	const legacyActCode = "2609290000098762"
+	oppID := "opp_legacy_svc_" + run
+	actID := "act_legacy_svc_" + run
+
+	// 这两张表无触发器，插入 + 回滚不留痕。
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	oppPayload, err := json.Marshal(map[string]any{
+		"id": oppID, "number": legacyOppNo, "title": "旧号邀约", "status": "OPEN",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO marketplace.opportunities (id, owner_id, payload, responses)
+		 VALUES ($1,$2,$3::jsonb,0)`, oppID, "user_legacy_owner_"+run, oppPayload); err != nil {
+		t.Fatalf("种旧号邀约失败: %v", err)
+	}
+	// Activity.ID 的 JSONB 键是 activityId，不是 id。
+	actPayload, err := json.Marshal(map[string]any{
+		"activityId": actID, "code": legacyActCode, "title": "旧号活动", "status": "OPEN",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO activity.activities (id, payload, interested_count, joined_count, capacity)
+		 VALUES ($1,$2::jsonb,0,0,10)`, actID, actPayload); err != nil {
+		t.Fatalf("种旧号活动失败: %v", err)
+	}
+	// tx 注入 context，让 finder 在同一个事务里读到未提交的种入行。
+	svcCtx := context.WithValue(ctx, transactionContextKey{}, tx)
+
+	// 复用集成测试那套 finder：Order/Participation 走策略仓储，Activity/Opportunity
+	// 走各自的仓储 —— 和线上客服同一批代码路径。
+	ff := newAuditedService(pool, NewPolicyDecisionRepository(pool))
+	act := activity.NewWithRepository(NewActivityRepository(pool))
+	market := marketplace.NewWithRepository(NewMarketplaceRepository(pool))
+	svc := numberlookup.New(NewNumberLookupRecorder(pool),
+		numberlookup.OrderFinder(ff), numberlookup.ParticipationFinder(act),
+		numberlookup.ActivityFinder(act), numberlookup.OpportunityFinder(market))
+
+	lookup := func(number, reason string) command.Result {
+		return svc.HandleContext(svcCtx, command.Envelope{
+			CommandID: "lookup_legacy_" + reason, CommandType: numberlookup.CommandType, CommandVersion: 1,
+			Actor:    command.Actor{Type: "USER", ID: "cs_legacy_" + run},
+			Principal: command.Principal{Type: "INDIVIDUAL", ID: "cs_legacy_" + run},
+			Target:    command.Target{Type: "PublicNumber", ID: number},
+			IdempotencyKey: "idem_legacy_" + reason, CorrelationID: "corr_legacy_" + run,
+			RequestedAt: "2026-09-29T00:00:00Z",
+			Payload:     map[string]any{"number": number, "reason": reason},
+		})
+	}
+
+	for _, tc := range []struct {
+		name, number string
+		kind         numberlookup.Kind
+		entityID     string
+	}{
+		{"activity", legacyActCode, numberlookup.KindActivity, actID},
+		{"opportunity", legacyOppNo, numberlookup.KindOpportunity, oppID},
+	} {
+		r := lookup(tc.number, "legacy-"+tc.name+"-"+run)
+		// 关键断言：不是 NUMBER_INVALID。形状校验若对 16 位号说"不合法"，
+		// 仓储层修得再好也走不到这里 —— 客服只会看到一句查无此号。
+		if r.Outcome != "ACCEPTED" {
+			t.Fatalf("16 位旧%s号 %s 必须能从客服入口反查到（ordernumber.Valid 不得拒绝它）: %+v",
+				tc.name, tc.number, r.Error)
+		}
+		var out struct {
+			Kind     string `json:"kind"`
+			EntityID string `json:"entityId"`
+		}
+		if err := json.Unmarshal([]byte(r.OperationRef), &out); err != nil {
+			t.Fatalf("decode legacy %s lookup: %v", tc.name, err)
+		}
+		if out.Kind != string(tc.kind) || out.EntityID != tc.entityID {
+			t.Fatalf("旧%s号 %s 解析到 %+v，期望 %s %s", tc.name, tc.number, out, tc.kind, tc.entityID)
+		}
+	}
+
+	// 负面对照：把校验位改掉一位（结构仍成立、仍是 16 位全数字），
+	// 服务层必须判 NUMBER_INVALID —— 旧号是 Luhn 发的，不是随便 16 位数字。
+	typo := []byte(legacyOppNo)
+	typo[len(typo)-1] = byte('0' + (typo[len(typo)-1]-'0'+3)%10)
+	if r := lookup(string(typo), "legacy-typo-"+run); r.Error == nil || r.Error.ErrorCode != "NUMBER_INVALID" {
+		t.Fatalf("校验位错的 16 位号必须判 NUMBER_INVALID（main 的号带 Luhn 校验位）: %+v", r)
+	}
+	// 负面对照：15 位 —— 比旧格式还短一位，仓储层的 {16,} 形状谓词本来就不收。
+	if r := lookup(legacyOppNo[:15], "legacy-short-"+run); r.Error == nil || r.Error.ErrorCode != "NUMBER_INVALID" {
+		t.Fatalf("15 位号必须判 NUMBER_INVALID: %+v", r)
+	}
+}
+
 // PUBLIC-NO-LOOKUP-AUDIT-001：审计行只追加，也没有破窗。
 func TestNumberLookupAuditIsAppendOnlyPostgres(t *testing.T) {
 	pool := testPool(t)
