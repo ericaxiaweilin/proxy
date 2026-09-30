@@ -12095,3 +12095,68 @@ if [ -f "$_seedsql" ]; then
     echo "    DEV-SEED-SHOPS-001: SKIP (开发库不可达 —— 这条要活的 DB)"
   fi
 fi
+
+# DEV-FEED-PIPELINE-001（2026-09-30）：开发用 feed 管线必须真的在产出可见内容。
+#
+# 用户的原话是「for you 没看到新增的用户 店铺」，所以判据不看"脚本存在"，
+# 看三件事：
+#   1. launchd 任务已加载（否则管线根本没在跑）；
+#   2. 句柄唯一 —— 用户明确说「可以用一样的头像，只要不搞一样的用户名」，
+#      而 profiles 上有 UNIQUE(lower(ltrim(handle,'@')))，撞了插入直接报错；
+#   3. **管线的帖子能从 /v1/feed 读出来**。这是唯一真正对应用户诉求的一条 ——
+#      "库里有行"不等于"For You 里看得到"，上一条 DEV-SEED 的教训。
+# 头像复用（30 个 creator 肖像轮转）是允许的，不判红。
+_pipe_s=scripts/dev-feed-pipeline.mjs
+if [ -f "$_pipe_s" ]; then
+  if ! launchctl list 2>/dev/null | grep -q 'com.user.proxy-dev-feed-pipeline'; then
+    echo "  FAIL [DEV-FEED-PIPELINE-001]: dev-feed-pipeline 的 launchd 任务没加载 —— 管线不在跑。" >&2
+    echo "        launchctl bootstrap gui/\$(id -u) ~/Library/LaunchAgents/com.user.proxy-dev-feed-pipeline.plist" >&2
+    exit 1
+  fi
+  _pdsn="$(grep -o '^DATABASE_URL=.*' .env 2>/dev/null | sed 's/^DATABASE_URL=//')"
+  if [ -n "${_pdsn}" ] && psql "${_pdsn}" -tAc 'SELECT 1' >/dev/null 2>&1; then
+    # 句柄唯一这条**不能**靠"查全库有没有重复"来判 —— profiles 上有
+    # UNIQUE(lower(ltrim(handle,'@')))，重复在数据库层压根进不来
+    # （证伪时我注入 @devpipe_dup，psql 直接报 duplicate key，我的判据一句没跑）。
+    # 那样的判据是死代码：它只会在一个不可能发生的状态上报警。
+    #
+    # 真正会发生的失败是**碰撞**：管线的下一个序号算出来已经被人用了，于是
+    # INSERT 撞唯一索引、那个 tick 静默失败。所以判据改成验"序号不会撞" ——
+    # 即 nextSeq() 算出的下一个序号在库里确实不存在。
+    _pnext="$(psql "${_pdsn}" -tAc "SELECT COALESCE(MAX(substring(user_account_id from '[0-9]+$')::int),0)+1
+        FROM identity.profiles WHERE user_account_id LIKE 'devpipe_%'" 2>/dev/null || echo '')"
+    if [ -n "${_pnext}" ] && [ "${_pnext}" != "1" ]; then
+      _pclash="$(psql "${_pdsn}" -tAc "SELECT count(*) FROM identity.profiles
+          WHERE lower(ltrim(handle,'@')) = 'devpipe_${_pnext}'" 2>/dev/null || echo 0)"
+      if [ "${_pclash}" != "0" ]; then
+        echo "  FAIL [DEV-FEED-PIPELINE-001]: 下一个序号 devpipe_${_pnext} 的句柄已被占用（${_pclash} 个）。" >&2
+        echo "        管线会在这一 tick 撞 UNIQUE(lower(ltrim(handle,'@'))) 然后静默失败。" >&2
+        echo "        改 nextSeq() 的起点，或先清掉占位的句柄。" >&2
+        exit 1
+      fi
+    fi
+    _pavail="$(psql "${_pdsn}" -tAc "SELECT count(*) FROM (
+        SELECT split_part(p.avatar_path,'/',2) a FROM identity.profiles p
+         WHERE p.user_account_id LIKE 'devpipe_%'
+           AND NOT EXISTS (SELECT 1 FROM media.media_assets m
+                            WHERE m.media_asset_id = split_part(p.avatar_path,'/',2)
+                              AND m.processing_status='READY')) z" 2>/dev/null || echo 0)"
+    if [ "${_pavail}" != "0" ]; then
+      echo "  FAIL [DEV-FEED-PIPELINE-001]: 有 ${_pavail} 个管线用户的头像指向不存在 / 非 READY 的资产。" >&2
+      echo "        头像允许复用（用户明确同意），但引用的资产必须真实存在。" >&2
+      exit 1
+    fi
+    if curl -sf --noproxy '*' --max-time 8 "http://127.0.0.1:4100/v1/feed?limit=25" 2>/dev/null \
+       | grep -q 'post_devpipe_'; then
+      _pf="feed 可见"
+    else
+      echo "  FAIL [DEV-FEED-PIPELINE-001]: 库里有管线帖子，但 /v1/feed 前 25 条读不到 devpipe。" >&2
+      echo "        这正是用户报的「for you 没看到新增的用户」—— 库里有不等于界面看得到。" >&2
+      exit 1
+    fi
+    _pcnt="$(psql "${_pdsn}" -tAc "SELECT count(*) FROM localnet.posts WHERE id LIKE 'post_devpipe_%'" 2>/dev/null || echo 0)"
+    echo "    DEV-FEED-PIPELINE-001: PASS (launchd 已加载 · ${_pcnt} 帖 · 句柄唯一 · 头像复用但资产真实 · ${_pf})"
+  else
+    echo "    DEV-FEED-PIPELINE-001: SKIP (开发库不可达)"
+  fi
+fi
