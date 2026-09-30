@@ -36,6 +36,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -158,7 +159,10 @@ function reviewStageViewport(htmlPath) {
 
 function renderWithCrop(chrome, proto, outPath, css) {
   const width = reviewStageViewport(proto.html);
-  const injected = join(dirname(proto.html), `.__render_shim__.html`);
+  // shim 放**系统临时目录**，不放原型目录。放同目录是为了保相对路径，但实测这些原型
+  // 零外部依赖（无 CDN / 无外链图片），不需要；而放同目录时一旦渲染失败，finally
+  // 之前崩掉就会留下 __render_shim__.html 污染 git status（还没被 .gitignore 覆盖）。
+  const injected = join(tmpdir(), `render-shim-${process.pid}-${proto.slug}.html`);
   const src = readFileSync(proto.html, "utf8");
   const patched = src.includes("</head>")
     ? src.replace("</head>", `<style>${css}</style></head>`)
