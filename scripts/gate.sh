@@ -165,13 +165,33 @@ gate_g4_drift() {
   # Use the dedicated Python helper. bash subshells + arrays were
   # too slow (each import spawned a subshell; variable scoping
   # meant we couldn't accumulate leaks outside the subshell).
+  #
+  # ⚠️ 下面两条守卫是必须的，不是装饰 —— 空结果和「检查器根本没跑起来」长得一模一样。
+  # 2026-09-30 实测：把 check-untracked-imports.py 移走，python 打
+  #   can't open file '.../check-untracked-imports.py': [Errno 2] No such file or directory
+  # 而本步照样打印 "untracked imports: OK"、g4 照样 "ALL GATES PASS"。
+  # 也不能指望函数开头那两行 `set -e`：gate 函数是被 `if ! gate_g4_drift; then`
+  # 调起的，bash 在这种上下文里会**关掉整个函数体的 errexit**（实测：函数体越过 `false`
+  # 继续往下跑）。`set -o pipefail` 仍然是活的，所以用 `if ! var=$(pipeline)` 才拦得住。
+  local untracked_checker
+  untracked_checker="$(dirname "$0")/check-untracked-imports.py"
+  if [ ! -f "$untracked_checker" ]; then
+    echo "  FAIL: $untracked_checker is missing — the check cannot run, and" >&2
+    echo "        'could not run' must never read the same as 'no leaks'." >&2
+    return 1
+  fi
   local untracked_files
   untracked_files=$(git status --porcelain 2>/dev/null | awk '/^\?\?/ {print $2}')
   local untracked_imports_str
-  untracked_imports_str=$(git ls-files apps/mobile/src apps/api-go 2>/dev/null \
+  if ! untracked_imports_str=$(git ls-files apps/mobile/src apps/api-go 2>/dev/null \
     | grep -E '\.(ts|tsx|go)$' \
     | UNTRACKED_FILES="$untracked_files" \
-      python3 "$(dirname "$0")/check-untracked-imports.py")
+      python3 "$untracked_checker"); then
+    echo "  FAIL: the untracked-import checker pipeline exited non-zero (no source files" >&2
+    echo "        to check, or the checker itself failed) — it did not run to completion," >&2
+    echo "        so an empty result here means nothing." >&2
+    return 1
+  fi
   if [ -n "$untracked_imports_str" ]; then
     echo "  FAIL: tracked file imports an untracked file (would break fresh clone / CI / reset --hard):" >&2
     echo "$untracked_imports_str" >&2
