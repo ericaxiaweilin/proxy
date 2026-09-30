@@ -11777,3 +11777,32 @@ print(next((m['image'] for m in json.load(open(p))['prototypes'].values()),'')) 
   fi
 fi
 echo "    UI-PROTO-DIFF-HONEST-001: PASS (spawnSync 取 stderr · 解析失败判红 · 像素取整 · 自比对通过)"
+
+# UI-PROTO-CROP-MATCH-001（2026-09-30）：manifest 里 reviewStageCrop 标记必须与原型实际
+# 结构一致 —— 否则渲染会静默给出一张**被横向裁掉的废基准图**，而门禁全绿。
+#
+# 场景：某个原型从「单栏手机视图」改成「.proto 三栏评审台」（或反过来）。判据是
+# CSS 里的 grid-template-columns，不是文件名（文件名不承诺结构）。判据变了但没人重渲
+# ⇒ 基准图是旧的（可能被 UI-PROTO-ALIGN-001 的指纹检查抓到），但**重渲之后**渲染路径
+# 也会跟着变 —— 这条门禁盯的就是「重渲后标记对不对」。
+_mismatch=$(node -e '
+const fs=require("fs"), path=require("path");
+const m=JSON.parse(fs.readFileSync("docs/design/baseline-images/manifest.json","utf8"));
+const bad=[];
+for (const [name,meta] of Object.entries(m.prototypes||{})) {
+  const html=path.join("docs/design/references", path.basename(meta.source));
+  if (!fs.existsSync(html)) continue;
+  const isStage=/\.proto\s*\{[^}]*grid-template-columns/.test(fs.readFileSync(html,"utf8"));
+  if (Boolean(meta.reviewStageCrop) !== isStage) {
+    bad.push(`${name} (manifest=${!!meta.reviewStageCrop} 实际=${isStage})`);
+  }
+}
+console.log(bad.join("; "));
+' 2>/dev/null || echo "")
+if [ -n "$_mismatch" ]; then
+  echo "  FAIL [UI-PROTO-CROP-MATCH-001]: 评审台标记与原型实际结构不符：${_mismatch}" >&2
+  echo "        不符意味着渲染时用了错的裁切策略 —— 基准图是被横向切掉的废图。" >&2
+  echo "        重跑 node scripts/render-prototypes.mjs --force。" >&2
+  exit 1
+fi
+echo "    UI-PROTO-CROP-MATCH-001: PASS (reviewStageCrop 标记与原型结构一致)"
