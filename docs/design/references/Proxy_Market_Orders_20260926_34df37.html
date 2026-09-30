@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>市场 · 订单</title>
+<style>
+:root{
+  --app-bg:#F6F5F1;
+  --card:#FFFFFF;
+  --ink:#181613;
+  --muted:#8E887D;
+  --muted-2:#BCB6A8;
+  --line:#EAE6DC;
+  --line-2:#F1EDE3;
+  --gold:#D4AF37;
+  --gold-soft:#FDF6E3;
+  --gold-ink:#8C6A00;
+  --good:#2E9B58;
+  --good-soft:#E8F4EA;
+  --good-ink:#1E6E3E;
+  --bad:#D8544A;
+  --sky:#5B8FD5;
+  --soft:#F2EFE8;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:#D8D4C9;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC",Arial,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit;border:0;background:transparent;cursor:pointer;outline:none}
+
+.stage{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:40px 20px;
+}
+
+/* 手机 */
+.phone{
+  width:100%;
+  max-width:390px;
+  height:844px;
+  background:var(--app-bg);
+  border-radius:38px;
+  position:relative;
+  overflow:hidden;
+  border:1px solid #D0CCC0;
+  box-shadow:0 30px 60px -30px rgba(0,0,0,.35);
+  display:flex;
+  flex-direction:column;
+}
+
+.status{
+  height:36px;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 24px;
+  font-size:12px;font-weight:800;
+  flex-shrink:0;
+}
+
+.top-tabs{
+  display:flex;padding:0 20px;gap:32px;
+  border-bottom:1px solid var(--line);
+  flex-shrink:0;margin-bottom:14px;
+}
+.top-tab{
+  padding:12px 0 14px;
+  font-size:15px;font-weight:900;
+  letter-spacing:-.3px;color:var(--muted);
+  position:relative;
+}
+.top-tab.on{color:var(--ink)}
+.top-tab.on::after{
+  content:"";position:absolute;left:0;right:0;bottom:-1px;
+  height:2px;background:var(--ink);border-radius:2px;
+}
+
+.search-row{padding:0 20px 12px;flex-shrink:0}
+.search-box{
+  display:flex;align-items:center;gap:10px;
+  padding:0 14px;height:42px;border-radius:12px;
+  background:var(--card);border:1.5px solid var(--line);
+}
+.search-box svg{
+  width:15px;height:15px;flex-shrink:0;
+  fill:none;stroke:var(--muted-2);stroke-width:2.4;
+  stroke-linecap:round;stroke-linejoin:round;
+}
+.search-box input{
+  flex:1;font-size:13.5px;font-weight:600;
+  padding:0;min-width:0;
+}
+.search-box input::placeholder{color:var(--muted-2);font-weight:600}
+
+.status-tabs{
+  display:flex;gap:6px;
+  padding:0 20px 10px;
+  overflow-x:auto;scrollbar-width:none;flex-shrink:0;
+}
+.status-tabs::-webkit-scrollbar{display:none}
+.status-tab{
+  flex-shrink:0;
+  display:flex;align-items:center;gap:5px;
+  padding:8px 14px;border-radius:999px;
+  font-size:12.5px;font-weight:800;
+  background:var(--card);border:1px solid var(--line);
+  color:var(--ink);transition:all .15s;
+}
+.status-tab svg{
+  width:12px;height:12px;
+  fill:none;stroke:currentColor;stroke-width:2.4;
+  stroke-linecap:round;stroke-linejoin:round;
+}
+.status-tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+/* 类型筛选 */
+.type-tabs{
+  display:flex;gap:8px;
+  padding:0 20px 14px;
+  overflow-x:auto;scrollbar-width:none;flex-shrink:0;
+}
+.type-tabs::-webkit-scrollbar{display:none}
+.type-tab{
+  flex-shrink:0;
+  width:46px;height:46px;
+  border-radius:14px;
+  background:var(--card);
+  border:1.5px solid var(--line);
+  display:grid;place-items:center;
+  color:var(--ink);
+  transition:all .15s;
+}
+.type-tab svg{
+  width:22px;height:22px;
+  fill:none;stroke:currentColor;stroke-width:1.9;
+  stroke-linecap:round;stroke-linejoin:round;
+}
+.type-tab.on{
+  background:var(--gold-soft);
+  border-color:var(--gold);
+  color:var(--gold-ink);
+}
+.type-tab:active{transform:scale(.94)}
+
+.list{
+  flex:1;overflow-y:auto;
+  padding:0 20px 100px;scrollbar-width:none;
+}
+.list::-webkit-scrollbar{display:none}
+
+/* ============================================================
+ *  订单卡片
+ *  左侧：小美肖像缩略图（96×96）
+ *  右侧：类别图标 + 标题 + 发布者 + 时间地点 + 价格按钮
+ * ============================================================ */
+.card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:10px 12px;
+  margin-bottom:10px;
+  display:flex;gap:12px;
+  cursor:pointer;
+  transition:box-shadow .15s, transform .15s;
+}
+.card:active{
+  transform:scale(.995);
+  box-shadow:0 6px 16px -12px rgba(0,0,0,.2);
+}
+
+/* 肖像缩略图 */
+.card-img{
+  width:96px;height:96px;
+  border-radius:12px;
+  flex-shrink:0;
+  align-self:center;
+  position:relative;
+  overflow:hidden;
+}
+.card-img svg.portrait{
+  width:100%;height:100%;display:block;
+}
+.card-img-badge{
+  position:absolute;
+  bottom:6px;left:6px;
+  font-size:8.5px;font-weight:900;
+  padding:2px 6px;border-radius:4px;
+  background:rgba(0,0,0,.55);color:#fff;
+  letter-spacing:.04em;
+  backdrop-filter:blur(4px);
+  -webkit-backdrop-filter:blur(4px);
+}
+
+/* 内容 */
+.card-body{
+  flex:1;min-width:0;
+  display:flex;flex-direction:column;gap:6px;
+}
+
+/* ============================================================
+ *  第一行：类别图标 + 标题 + 匹配度
+ * ============================================================ */
+.card-head{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+/* ★ 类别图标 · 32×32 圆角方块 */
+.card-category{
+  width:28px;height:28px;
+  border-radius:8px;
+  background:var(--soft);
+  display:grid;place-items:center;
+  flex-shrink:0;
+}
+.card-category svg{
+  width:16px;height:16px;
+  fill:none;
+  stroke:var(--ink);
+  stroke-width:2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+
+/* 类别配色变体 */
+.card-category.coffee{background:#F5EAD8;color:#8C6A00}
+.card-category.coffee svg{stroke:#8C6A00}
+
+.card-category.food{background:#F8E4E0;color:#A04030}
+.card-category.food svg{stroke:#A04030}
+
+.card-category.sport{background:#E2F2E8;color:#1E6E3E}
+.card-category.sport svg{stroke:#1E6E3E}
+
+.card-category.chat{background:#E5EDF8;color:#2D5C9E}
+.card-category.chat svg{stroke:#2D5C9E}
+
+.card-category.music{background:#EFE8F8;color:#5B3AAF}
+.card-category.music svg{stroke:#5B3AAF}
+
+.card-category.photo{background:#FCEBEF;color:#A02848}
+.card-category.photo svg{stroke:#A02848}
+
+/* 标题 */
+.card-title{
+  flex:1;min-width:0;
+  font-size:14.5px;font-weight:900;
+  letter-spacing:-.25px;
+  line-height:1.25;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+/* 匹配度 */
+.card-match{
+  font-size:10px;font-weight:900;
+  padding:3px 7px;border-radius:5px;flex-shrink:0;
+}
+.card-match.high{background:var(--good-soft);color:var(--good-ink)}
+.card-match.mid{background:var(--gold-soft);color:var(--gold-ink)}
+.card-match.low{background:var(--soft);color:var(--muted)}
+
+/* 发布者 */
+.card-pub{
+  display:flex;align-items:center;gap:6px;
+  font-size:12px;font-weight:800;line-height:1;
+}
+.pub-avatar{
+  width:20px;height:20px;border-radius:50%;
+  flex-shrink:0;
+  background:linear-gradient(135deg,#E0D5C8,#B8A692);
+  display:grid;place-items:center;
+  font-size:9px;font-weight:900;color:#5C4A38;
+}
+.pub-name{
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  min-width:0;font-weight:800;
+}
+.pub-verified{width:11px;height:11px;flex-shrink:0}
+.pub-verified svg{width:100%;height:100%;fill:var(--sky)}
+.pub-rating{
+  display:flex;align-items:center;gap:2px;
+  font-size:10.5px;font-weight:800;color:var(--muted);
+  flex-shrink:0;margin-left:auto;
+}
+.pub-rating svg{width:9px;height:9px;fill:var(--gold)}
+
+/* 时间地点 */
+.card-meta{
+  display:flex;align-items:center;gap:6px;
+  font-size:11.5px;font-weight:700;
+  line-height:1.3;white-space:nowrap;overflow:hidden;
+}
+.card-meta .time{display:flex;align-items:center;gap:3px;flex-shrink:0}
+.card-meta .time svg{
+  width:11px;height:11px;
+  fill:none;stroke:var(--muted);stroke-width:2.2;
+  stroke-linecap:round;stroke-linejoin:round;
+}
+.card-meta .sep{width:3px;height:3px;border-radius:50%;background:var(--muted-2);flex-shrink:0}
+.card-meta .place{color:var(--muted);font-weight:600;overflow:hidden;text-overflow:ellipsis;min-width:0}
+
+/* 价格 + 按钮 */
+.card-foot{display:flex;align-items:center;gap:10px;margin-top:auto}
+.card-reward{display:flex;align-items:baseline;gap:2px}
+.card-reward .amount{font-size:17px;font-weight:900;letter-spacing:-.5px;color:var(--ink)}
+.card-reward .unit{font-size:11px;font-weight:800;color:var(--muted)}
+.card-btn{
+  margin-left:auto;
+  padding:8px 14px;border-radius:10px;
+  background:var(--ink);color:#fff;
+  font-size:12.5px;font-weight:900;
+  letter-spacing:-.1px;flex-shrink:0;
+  transition:transform .15s;
+}
+.card-btn:active{transform:scale(.96)}
+
+/* Tabbar */
+.tabbar{
+  position:absolute;bottom:0;left:0;right:0;
+  background:rgba(255,255,255,.96);
+  backdrop-filter:blur(20px);
+  -webkit-backdrop-filter:blur(20px);
+  border-top:1px solid var(--line);
+  display:flex;
+  padding:8px 12px calc(8px + env(safe-area-inset-bottom));
+  z-index:50;
+}
+.tabbar-item{
+  flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:4px 0;color:var(--muted);position:relative;
+}
+.tabbar-item svg{
+  width:22px;height:22px;
+  fill:none;stroke:currentColor;stroke-width:1.9;
+  stroke-linecap:round;stroke-linejoin:round;
+}
+.tabbar-item .label{font-size:9.5px;font-weight:700;letter-spacing:-.1px}
+.tabbar-item.on{color:var(--ink)}
+.tabbar-item.on svg{stroke-width:2.4}
+.tabbar-item.on .label{font-weight:900}
+.tabbar-item .dot{
+  position:absolute;top:0;right:calc(50% - 18px);
+  min-width:16px;height:16px;padding:0 4px;
+  border-radius:8px;background:var(--bad);color:#fff;
+  font-size:9px;font-weight:900;
+  display:grid;place-items:center;
+  border:2px solid #fff;
+}
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="phone">
+
+    <div class="status">
+      <span>2:49</span>
+      <span style="letter-spacing:2px;font-size:9px">●●● ⏸ ▮</span>
+    </div>
+
+    <div class="top-tabs">
+      <div class="top-tab on">订单</div>
+      <div class="top-tab">活动</div>
+    </div>
+
+    <div class="search-row">
+      <div class="search-box">
+        <input placeholder="搜订单..." readonly>
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+      </div>
+    </div>
+
+    <div class="status-tabs">
+      <div class="status-tab on">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        全部
+      </div>
+      <div class="status-tab">
+        <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+        已申请
+      </div>
+      <div class="status-tab">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        已创建
+      </div>
+      <div class="status-tab">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        执行中
+      </div>
+    </div>
+
+    <div class="type-tabs">
+      <button class="type-tab on">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <button class="type-tab">
+        <svg viewBox="0 0 24 24">
+          <rect x="3" y="6" width="18" height="14" rx="3"/>
+          <circle cx="12" cy="13" r="4"/>
+          <path d="M8 6l1.5-2h5L16 6"/>
+        </svg>
+      </button>
+      <button class="type-tab">
+        <svg viewBox="0 0 24 24">
+          <circle cx="15" cy="5" r="2"/>
+          <path d="M4 21l4-6 4 2 2-6"/>
+          <path d="M4 13h5l2-3h4"/>
+          <path d="M18 21l-2-5"/>
+        </svg>
+      </button>
+      <button class="type-tab">
+        <svg viewBox="0 0 24 24">
+          <path d="M4 10h14v6a4 4 0 01-4 4h-6a4 4 0 01-4-4z"/>
+          <path d="M18 12h1.5a2.5 2.5 0 010 5H18"/>
+          <path d="M8 5v2M12 4v3M16 5v2"/>
+        </svg>
+      </button>
+      <button class="type-tab">
+        <svg viewBox="0 0 24 24">
+          <path d="M6 3v5c0 1.5.8 2.5 2 2.5s2-1 2-2.5V3"/>
+          <path d="M8 3v18"/>
+          <path d="M6 3v5M10 3v5"/>
+          <path d="M17 3c-1.5 1-2.5 3-2.5 5.5S15.5 13 17 14v7"/>
+        </svg>
+      </button>
+      <button class="type-tab">
+        <svg viewBox="0 0 24 24">
+          <path d="M20 12a8 8 0 01-8 8 8.5 8.5 0 01-3.5-.7L4 21l1.4-4A8 8 0 1120 12z"/>
+        </svg>
+      </button>
+      <button class="type-tab">
+        <svg viewBox="0 0 24 24">
+          <path d="M9 18V6l11-2v12"/>
+          <circle cx="6" cy="18" r="3"/>
+          <circle cx="17" cy="16" r="3"/>
+        </svg>
+      </button>
+      <button class="type-tab">
+        <svg viewBox="0 0 24 24">
+          <circle cx="5" cy="12" r="1.4" fill="currentColor"/>
+          <circle cx="12" cy="12" r="1.4" fill="currentColor"/>
+          <circle cx="19" cy="12" r="1.4" fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="list">
+
+      <!-- ============================================================
+           卡片 1 · 咖啡 + 中文 · ★ 类别图标：咖啡
+           ============================================================ -->
+      <div class="card">
+        <div class="card-img">
+          <svg class="portrait" viewBox="0 0 96 96" preserveAspectRatio="xMidYMid slice">
+            <defs>
+              <linearGradient id="bg1" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#F8E4D0"/>
+                <stop offset="60%" stop-color="#E4B88E"/>
+                <stop offset="100%" stop-color="#A87850"/>
+              </linearGradient>
+            </defs>
+            <rect width="96" height="96" fill="url(#bg1)"/>
+            <rect x="8" y="55" width="80" height="2" fill="rgba(0,0,0,.08)"/>
+            <g transform="translate(48 54)">
+              <path d="M-18 -20 Q-24 4 -22 40 L-10 40 L-10 -10 Z" fill="#2A1810"/>
+              <path d="M18 -20 Q24 4 22 40 L10 40 L10 -10 Z" fill="#2A1810"/>
+              <path d="M-30 42 Q-28 14 -12 8 L-8 8 Q0 14 8 8 L12 8 Q28 14 30 42 Z" fill="#F8F2E8"/>
+              <path d="M-8 8 Q0 20 8 8" stroke="#D8C8B0" stroke-width="1.2" fill="none"/>
+              <path d="M-6 2 L-6 8 Q0 13 6 8 L6 2 Z" fill="#D8A880"/>
+              <ellipse cx="0" cy="-14" rx="13" ry="16" fill="#E8C4A0"/>
+              <path d="M-14 -14 Q-16 -32 -3 -34 Q11 -36 14 -22 Q15 -10 12 0 Q14 -10 10 -20 Q0 -26 -9 -20 Q-14 -10 -12 0 Q-16 -10 -14 -14 Z" fill="#2A1810"/>
+              <ellipse cx="-4.5" cy="-15" rx="1.3" ry="1.7" fill="#2A1810"/>
+              <ellipse cx="4.5" cy="-15" rx="1.3" ry="1.7" fill="#2A1810"/>
+              <path d="M0 -12 L0 -9" stroke="#C89468" stroke-width="0.8" stroke-linecap="round"/>
+              <path d="M-2.5 -5 Q0 -3 2.5 -5" stroke="#C06060" stroke-width="1.1" fill="none" stroke-linecap="round"/>
+            </g>
+          </svg>
+          <div class="card-img-badge">AI 样张</div>
+        </div>
+        <div class="card-body">
+          <div class="card-head">
+            <!-- ★ 咖啡类别图标 -->
+            <div class="card-category coffee">
+              <svg viewBox="0 0 24 24">
+                <path d="M4 10h14v6a4 4 0 01-4 4h-6a4 4 0 01-4-4z"/>
+                <path d="M18 12h1.5a2.5 2.5 0 010 5H18"/>
+                <path d="M8 5v2M12 4v3M16 5v2"/>
+              </svg>
+            </div>
+            <div class="card-title">咖啡 + 中文</div>
+            <span class="card-match high">96%</span>
+          </div>
+          <div class="card-pub">
+            <div class="pub-avatar">W</div>
+            <span class="pub-name">weilinxia511</span>
+            <span class="pub-verified">
+              <svg viewBox="0 0 24 24"><path d="M12 2l2.4 2.4 3.4-.4 1 3.2 3.2 1-.4 3.4L24 14l-2.4 2.4.4 3.4-3.2 1-1 3.2-3.4-.4L12 26l-2.4-2.4-3.4.4-1-3.2-3.2-1 .4-3.4L0 14l2.4-2.4-.4-3.4 3.2-1 1-3.2 3.4.4z" transform="scale(0.85) translate(2,2)"/></svg>
+            </span>
+            <span class="pub-rating">
+              <svg viewBox="0 0 24 24"><path d="M12 2l3 7 7 1-5 5 1.5 7L12 19l-6.5 3L7 15 2 8l7-1z"/></svg>
+              4.9
+            </span>
+          </div>
+          <div class="card-meta">
+            <span class="time">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              今晚 19:00
+            </span>
+            <span class="sep"></span>
+            <span>2 小时</span>
+            <span class="sep"></span>
+            <span class="place">TALK 咖啡馆</span>
+          </div>
+          <div class="card-foot">
+            <div class="card-reward">
+              <span class="amount">200K</span>
+              <span class="unit">₫</span>
+            </div>
+            <button class="card-btn">我想接</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           卡片 2 · 晚餐 + 中文 · ★ 类别图标：晚餐
+           ============================================================ -->
+      <div class="card">
+        <div class="card-img">
+          <svg class="portrait" viewBox="0 0 96 96" preserveAspectRatio="xMidYMid slice">
+            <defs>
+              <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#3A2830"/>
+                <stop offset="60%" stop-color="#5A3A48"/>
+                <stop offset="100%" stop-color="#2A1A22"/>
+              </linearGradient>
+            </defs>
+            <rect width="96" height="96" fill="url(#bg2)"/>
+            <circle cx="48" cy="20" r="30" fill="rgba(255,200,150,.15)"/>
+            <g transform="translate(48 54)">
+              <path d="M-18 -20 Q-24 4 -22 40 L-10 40 L-10 -10 Z" fill="#1A1008"/>
+              <path d="M18 -20 Q24 4 22 40 L10 40 L10 -10 Z" fill="#1A1008"/>
+              <path d="M-30 42 Q-28 14 -12 8 L-8 8 Q0 14 8 8 L12 8 Q28 14 30 42 Z" fill="#1E1A22"/>
+              <path d="M-8 8 Q0 20 8 8" stroke="#3A2E3A" stroke-width="1.2" fill="none"/>
+              <path d="M-6 2 L-6 8 Q0 13 6 8 L6 2 Z" fill="#D0A078"/>
+              <ellipse cx="0" cy="-14" rx="13" ry="16" fill="#E8C4A0"/>
+              <path d="M-14 -14 Q-16 -32 -3 -34 Q11 -36 14 -22 Q15 -10 12 0 Q14 -10 10 -20 Q0 -26 -9 -20 Q-14 -10 -12 0 Q-16 -10 -14 -14 Z" fill="#1A1008"/>
+              <ellipse cx="-4.5" cy="-15" rx="1.3" ry="1.7" fill="#1A1008"/>
+              <ellipse cx="4.5" cy="-15" rx="1.3" ry="1.7" fill="#1A1008"/>
+              <path d="M0 -12 L0 -9" stroke="#C89468" stroke-width="0.8" stroke-linecap="round"/>
+              <path d="M-2.5 -5 Q0 -3 2.5 -5" stroke="#B04858" stroke-width="1.1" fill="none" stroke-linecap="round"/>
+            </g>
+          </svg>
+          <div class="card-img-badge">AI 样张</div>
+        </div>
+        <div class="card-body">
+          <div class="card-head">
+            <!-- ★ 晚餐类别图标 -->
+            <div class="card-category food">
+              <svg viewBox="0 0 24 24">
+                <path d="M6 3v5c0 1.5.8 2.5 2 2.5s2-1 2-2.5V3"/>
+                <path d="M8 3v18"/>
+                <path d="M6 3v5M10 3v5"/>
+                <path d="M17 3c-1.5 1-2.5 3-2.5 5.5S15.5 13 17 14v7"/>
+              </svg>
+            </div>
+            <div class="card-title">晚餐 + 中文</div>
+            <span class="card-match mid">82%</span>
+          </div>
+          <div class="card-pub">
+            <div class="pub-avatar">H</div>
+            <span class="pub-name">hanoi_local</span>
+            <span class="pub-verified">
+              <svg viewBox="0 0 24 24"><path d="M12 2l2.4 2.4 3.4-.4 1 3.2 3.2 1-.4 3.4L24 14l-2.4 2.4.4 3.4-3.2 1-1 3.2-3.4-.4L12 26l-2.4-2.4-3.4.4-1-3.2-3.2-1 .4-3.4L0 14l2.4-2.4-.4-3.4 3.2-1 1-3.2 3.4.4z" transform="scale(0.85) translate(2,2)"/></svg>
+            </span>
+            <span class="pub-rating">
+              <svg viewBox="0 0 24 24"><path d="M12 2l3 7 7 1-5 5 1.5 7L12 19l-6.5 3L7 15 2 8l7-1z"/></svg>
+              4.7
+            </span>
+          </div>
+          <div class="card-meta">
+            <span class="time">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              明晚 18:30
+            </span>
+            <span class="sep"></span>
+            <span>3 小时</span>
+            <span class="sep"></span>
+            <span class="place">西湖区</span>
+          </div>
+          <div class="card-foot">
+            <div class="card-reward">
+              <span class="amount">350K</span>
+              <span class="unit">₫</span>
+            </div>
+            <button class="card-btn">我想接</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           卡片 3 · 羽毛球陪打 · ★ 类别图标：运动
+           ============================================================ -->
+      <div class="card">
+        <div class="card-img">
+          <svg class="portrait" viewBox="0 0 96 96" preserveAspectRatio="xMidYMid slice">
+            <defs>
+              <linearGradient id="bg3" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#3D8A5F"/>
+                <stop offset="100%" stop-color="#1E3A28"/>
+              </linearGradient>
+            </defs>
+            <rect width="96" height="96" fill="url(#bg3)"/>
+            <path d="M0 58 L96 58" stroke="rgba(255,255,255,.5)" stroke-width="1"/>
+            <path d="M0 62 L96 62" stroke="rgba(255,255,255,.3)" stroke-width="1"/>
+            <g transform="translate(48 54)">
+              <path d="M-14 -14 Q-18 -32 -3 -34 Q11 -36 14 -22 Q15 -12 12 -6 Q13 -14 10 -22 Q0 -26 -9 -20 Q-13 -14 -12 -6 Q-16 -12 -14 -14 Z" fill="#1A1008"/>
+              <circle cx="18" cy="-12" r="6" fill="#1A1008"/>
+              <path d="M-30 42 Q-28 14 -12 8 L-8 8 Q0 14 8 8 L12 8 Q28 14 30 42 Z" fill="#F8E8D0"/>
+              <path d="M-8 8 Q0 18 8 8" stroke="#2E9B58" stroke-width="2.2" fill="none"/>
+              <path d="M-6 2 L-6 8 Q0 13 6 8 L6 2 Z" fill="#D8A880"/>
+              <ellipse cx="0" cy="-14" rx="13" ry="16" fill="#E8C4A0"/>
+              <ellipse cx="-4.5" cy="-15" rx="1.3" ry="1.7" fill="#1A1008"/>
+              <ellipse cx="4.5" cy="-15" rx="1.3" ry="1.7" fill="#1A1008"/>
+              <path d="M0 -12 L0 -9" stroke="#C89468" stroke-width="0.8" stroke-linecap="round"/>
+              <path d="M-2.5 -5 Q0 -3 2.5 -5" stroke="#C06060" stroke-width="1.1" fill="none" stroke-linecap="round"/>
+            </g>
+          </svg>
+          <div class="card-img-badge">AI 样张</div>
+        </div>
+        <div class="card-body">
+          <div class="card-head">
+            <!-- ★ 运动类别图标 -->
+            <div class="card-category sport">
+              <svg viewBox="0 0 24 24">
+                <circle cx="15" cy="5" r="2"/>
+                <path d="M4 21l4-6 4 2 2-6"/>
+                <path d="M4 13h5l2-3h4"/>
+                <path d="M18 21l-2-5"/>
+              </svg>
+            </div>
+            <div class="card-title">羽毛球陪打</div>
+            <span class="card-match mid">78%</span>
+          </div>
+          <div class="card-pub">
+            <div class="pub-avatar">K</div>
+            <span class="pub-name">ken_nguyen</span>
+            <span class="pub-verified">
+              <svg viewBox="0 0 24 24"><path d="M12 2l2.4 2.4 3.4-.4 1 3.2 3.2 1-.4 3.4L24 14l-2.4 2.4.4 3.4-3.2 1-1 3.2-3.4-.4L12 26l-2.4-2.4-3.4.4-1-3.2-3.2-1 .4-3.4L0 14l2.4-2.4-.4-3.4 3.2-1 1-3.2 3.4.4z" transform="scale(0.85) translate(2,2)"/></svg>
+            </span>
+            <span class="pub-rating">
+              <svg viewBox="0 0 24 24"><path d="M12 2l3 7 7 1-5 5 1.5 7L12 19l-6.5 3L7 15 2 8l7-1z"/></svg>
+              4.8
+            </span>
+          </div>
+          <div class="card-meta">
+            <span class="time">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              周六 15:00
+            </span>
+            <span class="sep"></span>
+            <span>2 小时</span>
+            <span class="sep"></span>
+            <span class="place">Bắc Ninh Sports</span>
+          </div>
+          <div class="card-foot">
+            <div class="card-reward">
+              <span class="amount">280K</span>
+              <span class="unit">₫</span>
+            </div>
+            <button class="card-btn">我想接</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           卡片 4 · 线上中文陪聊 · ★ 类别图标：聊天
+           ============================================================ -->
+      <div class="card">
+        <div class="card-img">
+          <svg class="portrait" viewBox="0 0 96 96" preserveAspectRatio="xMidYMid slice">
+            <defs>
+              <linearGradient id="bg4" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#5A4A8A"/>
+                <stop offset="100%" stop-color="#2A1A4A"/>
+              </linearGradient>
+            </defs>
+            <rect width="96" height="96" fill="url(#bg4)"/>
+            <ellipse cx="48" cy="30" rx="40" ry="25" fill="rgba(150,200,255,.15)"/>
+            <g transform="translate(48 54)">
+              <path d="M-18 -20 Q-24 4 -22 40 L-10 40 L-10 -10 Z" fill="#1A1008"/>
+              <path d="M18 -20 Q24 4 22 40 L10 40 L10 -10 Z" fill="#1A1008"/>
+              <path d="M-30 42 Q-28 14 -12 8 L-8 8 Q0 14 8 8 L12 8 Q28 14 30 42 Z" fill="#D8D0E8"/>
+              <path d="M-6 2 L-6 8 Q0 13 6 8 L6 2 Z" fill="#D8A880"/>
+              <ellipse cx="0" cy="-14" rx="13" ry="16" fill="#E8C4A0"/>
+              <path d="M-14 -14 Q-16 -32 -3 -34 Q11 -36 14 -22 Q15 -10 12 0 Q14 -10 10 -20 Q0 -26 -9 -20 Q-14 -10 -12 0 Q-16 -10 -14 -14 Z" fill="#1A1008"/>
+              <ellipse cx="-4.5" cy="-15" rx="1.3" ry="1.7" fill="#1A1008"/>
+              <ellipse cx="4.5" cy="-15" rx="1.3" ry="1.7" fill="#1A1008"/>
+              <path d="M0 -12 L0 -9" stroke="#C89468" stroke-width="0.8" stroke-linecap="round"/>
+              <path d="M-2.5 -5 Q0 -3 2.5 -5" stroke="#C06060" stroke-width="1.1" fill="none" stroke-linecap="round"/>
+            </g>
+          </svg>
+          <div class="card-img-badge">AI 样张</div>
+        </div>
+        <div class="card-body">
+          <div class="card-head">
+            <!-- ★ 聊天类别图标 -->
+            <div class="card-category chat">
+              <svg viewBox="0 0 24 24">
+                <path d="M20 12a8 8 0 01-8 8 8.5 8.5 0 01-3.5-.7L4 21l1.4-4A8 8 0 1120 12z"/>
+              </svg>
+            </div>
+            <div class="card-title">线上中文陪聊</div>
+            <span class="card-match low">65%</span>
+          </div>
+          <div class="card-pub">
+            <div class="pub-avatar">S</div>
+            <span class="pub-name">sunny_vn</span>
+            <span class="pub-rating">
+              <svg viewBox="0 0 24 24"><path d="M12 2l3 7 7 1-5 5 1.5 7L12 19l-6.5 3L7 15 2 8l7-1z"/></svg>
+              4.5
+            </span>
+          </div>
+          <div class="card-meta">
+            <span class="time">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              今晚 21:00
+            </span>
+            <span class="sep"></span>
+            <span>1 小时</span>
+            <span class="sep"></span>
+            <span class="place">线上</span>
+          </div>
+          <div class="card-foot">
+            <div class="card-reward">
+              <span class="amount">150K</span>
+              <span class="unit">₫</span>
+            </div>
+            <button class="card-btn">我想接</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="tabbar">
+      <div class="tabbar-item">
+        <svg viewBox="0 0 24 24"><path d="M3 10l9-7 9 7v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        <span class="label">首页</span>
+      </div>
+      <div class="tabbar-item on">
+        <svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+        <span class="label">市场</span>
+      </div>
+      <div class="tabbar-item">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>
+        <span class="label">动态</span>
+      </div>
+      <div class="tabbar-item">
+        <svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+        <span class="label">消息</span>
+        <span class="dot">9+</span>
+      </div>
+      <div class="tabbar-item">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg>
+        <span class="label">我的</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.type-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.type-tab').forEach(t => t.classList.remove('on'));
+    tab.classList.add('on');
+  });
+});
+
+document.querySelectorAll('.status-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.status-tab').forEach(t => t.classList.remove('on'));
+    tab.classList.add('on');
+  });
+});
+
+document.querySelectorAll('.card-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    btn.textContent = '已申请';
+    btn.style.background = '#2E9B58';
+    setTimeout(() => {
+      btn.textContent = '我想接';
+      btn.style.background = '';
+    }, 1500);
+  });
+});
+</script>
+
+</body>
+</html>

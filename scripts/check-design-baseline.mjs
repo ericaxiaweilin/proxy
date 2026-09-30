@@ -21,6 +21,18 @@ const SCREEN_REFERENCE_STATUSES = new Set([
 ]);
 const CONTRACT_STATUSES = new Set(["PARTIAL", "SCAFFOLD_ONLY", "IMPLEMENTED"]);
 
+// DESIGN-BASELINE-UNREAD-FIELDS-001：下面这些字段原来「写了就没人读」—— 和上面的
+// status 是同一个病。`schemaVersion` / `global.status` / `integration.workspaceMode` /
+// `integration.externalAgentMode` 四个字段**没有任何代码读**，所以它们可以随便写、
+// 写错也没人知道；`integration.recoveryBaselineTag` 更严重：它声明了一个
+// 「出事就回到这里」的恢复点，而实测那个 tag 在本地和远端**都不存在**，门禁照过 ——
+// 恢复计划一直是空的。声明了就得有人确认它还成立，否则它会静默烂掉。
+// 每个取值显式列出：新增一种**必须**改这里，那正是我们想要的「被迫做一次决定」。
+const SCHEMA_VERSIONS = new Set([1]);
+const GLOBAL_STATUSES = new Set(["ACTIVE"]);
+const WORKSPACE_MODES = new Set(["SINGLE_WRITER", "MULTI_WRITER"]);
+const EXTERNAL_AGENT_MODES = new Set(["ISOLATED_WORKTREE"]);
+
 let manifest;
 
 if (!existsSync(manifestPath)) {
@@ -29,6 +41,32 @@ if (!existsSync(manifestPath)) {
   manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   if (!Number.isInteger(manifest.baselineRevision) || manifest.baselineRevision < 1) {
     errors.push("baselineRevision must be a positive integer");
+  }
+  // 下面这一组是 DESIGN-BASELINE-UNREAD-FIELDS-001：把原来没人读的字段逐个接上。
+  if (!SCHEMA_VERSIONS.has(manifest.schemaVersion)) {
+    errors.push(`schemaVersion is not a known schema: ${JSON.stringify(manifest.schemaVersion)} — expected one of ${[...SCHEMA_VERSIONS].join(", ")}`);
+  }
+  if (!GLOBAL_STATUSES.has(manifest.global?.status)) {
+    errors.push(`global.status is not a known status: ${JSON.stringify(manifest.global?.status)} — expected one of ${[...GLOBAL_STATUSES].join(", ")}`);
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(manifest.updatedAt ?? "") || Number.isNaN(Date.parse(manifest.updatedAt))) {
+    errors.push(`updatedAt must be a YYYY-MM-DD date: ${JSON.stringify(manifest.updatedAt)}`);
+  }
+  if (!WORKSPACE_MODES.has(manifest.integration?.workspaceMode)) {
+    errors.push(`integration.workspaceMode is not a known mode: ${JSON.stringify(manifest.integration?.workspaceMode)} — expected one of ${[...WORKSPACE_MODES].join(", ")}`);
+  }
+  if (!EXTERNAL_AGENT_MODES.has(manifest.integration?.externalAgentMode)) {
+    errors.push(`integration.externalAgentMode is not a known mode: ${JSON.stringify(manifest.integration?.externalAgentMode)} — expected one of ${[...EXTERNAL_AGENT_MODES].join(", ")}`);
+  }
+  // RECOVERY-TAG-EXISTS-001：声明的恢复 tag 必须真的能解析。空串 / 缺失视为「没声明」，
+  // 不报错；一旦写了名字，它就必须在。这修的正是「恢复计划是空的而没人知道」。
+  const recoveryTag = manifest.integration?.recoveryBaselineTag;
+  if (recoveryTag) {
+    try {
+      execFileSync("git", ["rev-parse", "-q", "--verify", `refs/tags/${recoveryTag}`], { cwd: root, stdio: "pipe" });
+    } catch {
+      errors.push(`integration.recoveryBaselineTag does not resolve to a tag: ${recoveryTag}`);
+    }
   }
   // BASELINE-PATH-ROT-001：基线里声明的**每一条文件路径**都必须真的存在。
   // 原来只校验 4 个固定字段 + ACTIVE screenReferences[].file，其余字段写了就没人管
@@ -51,6 +89,18 @@ if (!existsSync(manifestPath)) {
     }
     declaredPaths.push([`screenReferences[${index}].file`, entry.file]);
     declaredPaths.push([`screenReferences[${index}].implementationBaseline`, entry.implementationBaseline]);
+    // `version` 原来也是写了没人读的自由字段。
+    if (entry.version !== undefined && (typeof entry.version !== "string" || entry.version.trim() === "")) {
+      errors.push(`screenReferences[${index}].version must be a non-empty string when present`);
+    }
+    // SOURCE-MOCKUP-PATH-001：`implementationStatus` 是一串自由文本，之前它用
+    // **Downloads 里的下载名**（`deepseek_html_2026xxxx_xxxxxx.html`）来指原型 ——
+    // 那个名字在仓库里永远解析不到，而且没有任何东西会去查。现在原型归档到
+    // `docs/design/references/` 之后，用 `sourceMockups[]` 记**仓内路径**并校验存在，
+    // 引用就从「一句无法核实的话」变成「一条会被检查的路径」。
+    for (const [mockupIndex, mockup] of (entry.sourceMockups ?? []).entries()) {
+      declaredPaths.push([`screenReferences[${index}].sourceMockups[${mockupIndex}]`, mockup]);
+    }
   }
   for (const [index, entry] of (manifest.legacy ?? []).entries()) {
     if (typeof entry === "string") declaredPaths.push([`legacy[${index}]`, entry]);
@@ -132,7 +182,14 @@ try {
   const staged = execFileSync("git", ["diff", "--cached", "--name-only"], { cwd: root, encoding: "utf8" }).trim().split("\n").filter(Boolean);
   if (existsSync(contractsPath) && staged.length > 0) {
     const contracts = JSON.parse(readFileSync(contractsPath, "utf8"));
-    const sensitive = new Set((contracts.contracts ?? []).flatMap((contract) => contract.implementationFiles ?? []));
+    // GUARD-SELF-SENSITIVE-001：原来敏感集合**只**来自契约的 implementationFiles，
+    // 而 `scripts/` 一个条目都没有 —— 于是把这道门禁自己掏空（删掉一段检查）
+    // 不需要任何设计确认，门禁也永远不会因此变红。守卫的守卫是空的。
+    // 把本脚本自己算进敏感集合：改它就必须在同一提交里更新基线 + changelog。
+    const sensitive = new Set([
+      "scripts/check-design-baseline.mjs",
+      ...(contracts.contracts ?? []).flatMap((contract) => contract.implementationFiles ?? [])
+    ]);
     const touched = staged.filter((file) => sensitive.has(file));
     const acknowledgement = staged.some((file) => file === "docs/design/CURRENT_BASELINE.json" || file === "docs/design/IMPLEMENTATION_CONTRACTS.json") && staged.includes("docs/design/BASELINE_CHANGELOG.md");
     if (touched.length > 0 && !acknowledgement) errors.push(`baseline-sensitive implementation changed without design acknowledgement: ${touched.join(", ")}`);

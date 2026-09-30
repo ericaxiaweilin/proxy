@@ -11,8 +11,10 @@ there was no single writer, ownership boundary, or integration gate.
 
 ## Operating model
 
-1. The desktop `kake` checkout is the integration workspace and has one writer:
-   the commander.
+1. The desktop `proxy` checkout is the integration workspace and has one writer:
+   the commander. (The older `kake` checkout is a superseded copy of this same
+   history — its HEAD is an ancestor of `origin/main` with zero unique commits.
+   Do not treat it as the integration workspace.)
 2. External agents inspect the integration workspace read-only.
 3. An agent that must edit receives an isolated worktree, branch, objective,
    and explicit file allowlist.

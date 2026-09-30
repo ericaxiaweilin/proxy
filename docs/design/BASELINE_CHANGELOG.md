@@ -4,6 +4,60 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 337 — 2026-09-30
+
+- **「声明了但没人读」这一族，一次收干净**（`DESIGN-BASELINE-UNREAD-FIELDS-001` /
+  `RECOVERY-TAG-EXISTS-001` / `SOURCE-MOCKUP-PATH-001` / `GUARD-SELF-SENSITIVE-001`）。
+  基线里有 5 个字段**没有任何代码读**，所以它们可以随便写、写错也没人知道 ——
+  和 Revision 336 修的 `status` 枚举是同一个病。逐个接上：
+
+  1. **`integration.recoveryBaselineTag` 指向的 tag 根本不存在** —— 本地和远端都没有，
+     而门禁照过。也就是说这条「出事就回到这里」的恢复计划**一直是空的**。
+     Revision 336 当时**正确地拒绝**了「猜一个提交去 `git tag`」（那是伪造基线）。
+     这一轮找到了真实来源：**tag 命名空间没有随基线一起搬过来** ——
+     `~/proxy` 有 **0 个** tag，而 `~/work/kake` 有 **56 个**，且**这 56 个的提交对象
+     在 `~/proxy` 里全部存在**。所以这不是新建，是**找回**：
+     `baseline/r15.23-command-clean-20260830` → `4871b275`
+     （`chore(baseline): enforce single-writer agent control`，是 HEAD 的祖先）。
+     这个提交正是当初建立本集成策略的那一次，语义上就是「集成策略基线」。
+     **门禁现在会校验**：写了名字就必须能 `rev-parse` 到。
+  2. **4 个字段纳入枚举校验**：`schemaVersion`（现为 `1`）、`global.status`（`ACTIVE`）、
+     `integration.workspaceMode`（`SINGLE_WRITER` / `MULTI_WRITER`）、
+     `integration.externalAgentMode`（`ISOLATED_WORKTREE`）。
+     新增一种取值**必须**改门禁 —— 那正是我们想要的「被迫做一次决定」。
+  3. **`updatedAt` 必须是 `YYYY-MM-DD`**；`screenReferences[].version` 写了就必须是非空串。
+  4. **两条原型引用从「无法核实的一句话」变成「会被检查的路径」**。
+     `implementationStatus` 里用 **Downloads 的下载名**指原型
+     （`deepseek_html_20260926_34df37` / `deepseek_html_20260927_7fc18d`）——
+     实测这两个名字在仓库里**任何历史提交中都不存在**（`git log --all` 命中 0），
+     永远解析不到，也没有任何东西会去查。原型还在 `~/Downloads`，按仓库既有约定
+     （`Proxy_<主题>_<YYYYMMDD>_<hash6>.html`）归档进 `docs/design/references/`：
+     `Proxy_Market_Orders_20260926_34df37.html`（标题「市场 · 订单」）与
+     `Proxy_Scene_Card_20260927_7fc18d.html`（标题「场景名片」），**逐字节一致**
+     （sha256 已核）。引用改为 `sourceMockups[]` 仓内路径，**门禁校验其存在**。
+     `implementationStatus` 不再声称 `NOT_YET_ARCHIVED`。
+  5. **`GUARD-SELF-SENSITIVE-001`：守卫的守卫原来是空的。** 敏感集合只来自契约的
+     `implementationFiles`，而那里**一条 `scripts/` 都没有** —— 于是**把这道门禁自己
+     掏空不需要任何设计确认，也永远不会因此变红**。现在本脚本把自己算进敏感集合：
+     改它就必须在同一提交里更新基线 + 本文件。
+  6. **`architecture/MULTI_AGENT_BASELINE_CONTROL.md` 指着一个已经不是基线的 checkout。**
+     第 14 行原文写「The desktop `kake` checkout is the integration workspace」——
+     而 `~/work/kake` 的 HEAD 是 `origin/main` 的祖先、**落后 27 个提交、0 个独有提交**，
+     只是个陈旧副本。改成 `proxy`，并注明 `kake` 已被取代。这份文档由
+     `integration.policy` 引用，是**基线自己指向的操作模型**，所以它指错地方是这一族里
+     最隐蔽的一例。
+
+- **验证**：在**隔离 worktree** 里做 9 组反向注入 —— 上面 4 条枚举 + `updatedAt` +
+  恢复 tag + `version` + `sourceMockups` 路径 + 「门禁自己单独被改」——
+  **每一组都按自己的报错变红**；未注入时全绿。另有一组对照：
+  同一次改动**同时**更新 `BASELINE_CHANGELOG.md` + 基线文件时，告警消失（确认这是
+  一个可满足的要求，而不是一道永远过不去的墙）。
+- **没有动任何 `implementationFiles`**，也没有新增产品承诺 —— 只是把
+  「声明了的东西必须真的在、而且必须有人读」这条既有规则补全到剩下的字段上。
+- **未做**：`~/work/kake` 另外 55 个 tag（`baseline/r15.89…` ~ `r16.8…` 等）
+  的提交对象在 `~/proxy` 里**同样全部存在**，可同法找回；本轮只找回**被声明的那一个**。
+  命令：`git -C ~/work/kake tag -l | xargs -I{} sh -c 'git -C ~/proxy tag {} $(git -C ~/work/kake rev-parse {}^{commit})'`
+
 ## Revision 336 — 2026-09-30
 
 - **基线自己声明的一条路径已经烂了，而且没人会知道**（`BASELINE-PATH-ROT-001`）。

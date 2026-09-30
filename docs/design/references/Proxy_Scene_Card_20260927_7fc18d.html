@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>场景名片</title>
+<style>
+:root{
+  --app-bg:#F6F5F1;--card:#FFF;--ink:#181613;--muted:#8E887D;--muted-2:#BCB6A8;
+  --line:#EAE6DC;--line-2:#F1EDE3;--soft:#F2EFE8;
+  --good:#2E9B58;--good-soft:#E8F4EA;--good-ink:#1E6E3E;
+  --warn:#E8A23C;--warn-soft:#FDF1DC;--warn-ink:#8A5A00;
+  --gold:#F5B400;--gold-soft:#FDF6E3;--gold-ink:#8C6A00;
+  --sky:#5B8FD5;--sky-soft:#EAF2FF;--sky-ink:#2D5C9E;
+  --rose:#E85C7A;--rose-soft:#FCEBEF;--rose-ink:#A02848;
+  --purple:#8B5CF6;--purple-soft:#F1ECFE;--purple-ink:#5B3AAF;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:#D8D4C9;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC",Arial,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit;border:0;background:transparent;cursor:pointer;outline:none}
+
+.stage{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.phone{width:100%;max-width:390px;height:844px;background:var(--app-bg);border-radius:38px;position:relative;overflow:hidden;border:1px solid #D0CCC0;box-shadow:0 30px 60px -30px rgba(0,0,0,.35);display:flex;flex-direction:column}
+
+.status{height:44px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 24px 6px;font-size:13px;font-weight:800;flex-shrink:0;color:#fff;position:absolute;top:0;left:0;right:0;z-index:30;text-shadow:0 1px 4px rgba(0,0,0,.3)}
+
+.scroll{flex:1;overflow-y:auto;scrollbar-width:none;padding-bottom:24px}
+.scroll::-webkit-scrollbar{display:none}
+
+.cover{position:relative;height:280px;overflow:hidden;flex-shrink:0}
+.cover-img{position:absolute;inset:0;background:linear-gradient(135deg,#2A1F18 0%,#4A3520 40%,#6B4A25 100%)}
+.cover-img::after{content:"";position:absolute;inset:0;background:
+  radial-gradient(circle at 20% 30%,rgba(255,180,80,.25),transparent 50%),
+  radial-gradient(circle at 80% 70%,rgba(200,80,80,.2),transparent 50%),
+  linear-gradient(180deg,rgba(0,0,0,.3) 0%,transparent 30%,transparent 50%,rgba(0,0,0,.75) 100%)}
+.cover-img::before{content:"☕";position:absolute;top:50%;left:50%;transform:translate(-50%,-70%);font-size:80px;opacity:.15;z-index:1;filter:blur(1px)}
+
+.cover-nav{position:absolute;top:50px;left:0;right:0;padding:0 16px;display:flex;justify-content:space-between;align-items:center;z-index:10}
+.icon-btn{width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,.4);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:grid;place-items:center;color:#fff;border:1px solid rgba(255,255,255,.15)}
+.icon-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+
+.cover-info{position:absolute;left:0;right:0;bottom:0;padding:0 20px 22px;z-index:5;color:#fff}
+.cover-name{font-size:24px;font-weight:900;letter-spacing:-.6px;line-height:1.15;margin-bottom:6px;text-shadow:0 2px 12px rgba(0,0,0,.5)}
+.cover-addr{font-size:12.5px;font-weight:700;color:rgba(255,255,255,.85);display:flex;align-items:center;gap:5px;text-shadow:0 1px 6px rgba(0,0,0,.5)}
+.cover-addr svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+
+.pad{padding:0 16px}
+
+.stats-card{background:#fff;border-radius:18px;padding:16px 10px;margin:-26px 16px 14px;position:relative;z-index:6;box-shadow:0 14px 36px -18px rgba(0,0,0,.22);display:grid;grid-template-columns:repeat(3,1fr)}
+.stat-cell{text-align:center;position:relative;padding:0 6px}
+.stat-cell + .stat-cell::before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);width:1px;height:36px;background:var(--line-2)}
+.stat-main{display:flex;align-items:baseline;justify-content:center;gap:3px;margin-bottom:5px}
+.stat-star{width:16px;height:16px;fill:var(--gold);stroke:none;flex-shrink:0;align-self:center;filter:drop-shadow(0 1px 2px rgba(245,180,0,.35))}
+.stat-num{font-size:22px;font-weight:900;letter-spacing:-.7px;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
+.stat-num-sm{font-size:20px;font-weight:900;letter-spacing:-.5px;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
+.stat-l{font-size:10.5px;font-weight:800;color:var(--muted);letter-spacing:.02em}
+.stat-l b{color:var(--ink);font-weight:900}
+
+.action-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}
+.act-btn{height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:13px;font-weight:900;letter-spacing:-.1px;transition:all .15s;white-space:nowrap;padding:0 4px}
+.act-btn:active{transform:scale(.96)}
+.act-btn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.act-btn.save{background:var(--rose-soft);color:var(--rose-ink);border:1.5px solid transparent}
+.act-btn.save.on{background:var(--rose);color:#fff}
+.act-btn.save.on svg{fill:#fff;stroke:#fff}
+.act-btn.checkin{background:var(--ink);color:#fff;border:1.5px solid var(--ink)}
+.act-btn.checkin svg{stroke-width:2.6}
+.act-btn.nav{background:#fff;color:var(--ink);border:1.5px solid var(--line)}
+
+.dist-bar{display:flex;align-items:center;gap:9px;padding:11px 14px;border-radius:12px;background:var(--soft);font-size:11.5px;font-weight:700;color:var(--muted);line-height:1.5;margin-bottom:16px}
+.dist-bar svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;color:var(--muted-2)}
+.dist-bar b{color:var(--ink);font-weight:900}
+
+.match-card{background:linear-gradient(160deg,#1E1B16 0%,#2E2A24 100%);color:#fff;border-radius:20px;padding:18px 18px 16px;margin-bottom:20px;position:relative;overflow:hidden}
+.match-card::before{content:"";position:absolute;top:-60px;right:-40px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(232,92,122,.28),transparent 70%)}
+.match-inner{position:relative;z-index:1}
+.match-label{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;padding:4px 9px;border-radius:6px;background:rgba(245,180,0,.18);color:#F5C842;margin-bottom:12px}
+.match-label svg{width:11px;height:11px;fill:currentColor;stroke:none}
+.match-title{font-size:18px;font-weight:900;letter-spacing:-.4px;line-height:1.3;margin-bottom:6px}
+.match-sub{font-size:11.5px;font-weight:700;color:rgba(255,255,255,.55);line-height:1.55;margin-bottom:18px}
+
+.match-avatars{display:flex;gap:12px;margin-bottom:18px}
+.match-person{flex:1;text-align:center;cursor:pointer;transition:transform .15s}
+.match-person:active{transform:scale(.97)}
+.match-avatar{width:60px;height:60px;border-radius:50%;display:grid;place-items:center;font-size:22px;font-weight:900;color:#fff;margin:0 auto 10px;position:relative;border:2px solid rgba(255,255,255,.15)}
+.match-avatar::after{content:"";position:absolute;inset:0;border-radius:50%;background:linear-gradient(180deg,transparent 55%,rgba(0,0,0,.25) 100%)}
+.mv1{background:linear-gradient(135deg,#F5A0B2,#C85878)}
+.mv2{background:linear-gradient(135deg,#8FB8E8,#3A6DB5)}
+.mv3{background:linear-gradient(135deg,#B8D980,#6B9B1E)}
+.match-badge{position:absolute;top:-2px;right:-2px;z-index:2;font-size:8px;font-weight:900;padding:3px 5px;border-radius:8px;background:rgba(0,0,0,.75);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);color:#fff;letter-spacing:.02em;border:1.5px solid rgba(255,255,255,.2)}
+.match-badge.hot{background:var(--gold);color:#1E1B16;border-color:rgba(255,255,255,.4)}
+.match-name{font-size:12.5px;font-weight:900;margin-bottom:3px}
+.match-tag{font-size:10px;font-weight:700;color:rgba(255,255,255,.5);line-height:1.3}
+.match-btn{width:100%;height:44px;border-radius:12px;background:#fff;color:var(--ink);font-size:13px;font-weight:900;display:flex;align-items:center;justify-content:center;gap:6px;transition:transform .15s}
+.match-btn:active{transform:scale(.97)}
+.match-btn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+
+.section{margin-bottom:20px}
+.section-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;padding:0 4px}
+.section-title{font-size:15px;font-weight:900;letter-spacing:-.25px}
+.section-hint{font-size:11.5px;font-weight:800;color:var(--muted)}
+
+/* ===== 历史活动 ===== */
+.event-scroll{display:flex;gap:10px;overflow-x:auto;padding:0 16px 4px;margin:0 -16px 10px;scrollbar-width:none}
+.event-scroll::-webkit-scrollbar{display:none}
+
+.event-card{flex:0 0 200px;background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;cursor:pointer;transition:transform .15s}
+.event-card:active{transform:scale(.98)}
+
+.event-cover{height:88px;position:relative;display:flex;align-items:flex-end;padding:10px 12px;overflow:hidden}
+.event-cover::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 40%,rgba(0,0,0,.5) 100%)}
+.event-cover.ended::before{content:"";position:absolute;inset:0;background:rgba(30,27,22,.35);z-index:1}
+.event-cover-title{position:relative;z-index:2;color:#fff;font-size:13.5px;font-weight:900;letter-spacing:-.2px;line-height:1.25;text-shadow:0 1px 6px rgba(0,0,0,.5)}
+
+/* 状态徽章 */
+.event-badge{position:absolute;top:8px;left:8px;z-index:3;font-size:9px;font-weight:900;padding:3px 7px;border-radius:5px;letter-spacing:.02em;display:flex;align-items:center;gap:3px}
+.event-badge svg{width:9px;height:9px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.event-badge.live{background:var(--good);color:#fff}
+.event-badge.live::before{content:"";width:5px;height:5px;border-radius:50%;background:#fff;animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.event-badge.ended{background:rgba(30,27,22,.7);color:#fff;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.15)}
+
+/* 时间标签移到信息行 */
+.event-time-tag{position:absolute;top:8px;right:8px;z-index:3;font-size:9px;font-weight:900;padding:3px 7px;border-radius:5px;background:rgba(255,255,255,.95);color:var(--ink);letter-spacing:.02em}
+.event-cover.ended .event-time-tag{background:rgba(30,27,22,.6);color:#fff;border:1px solid rgba(255,255,255,.15);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+
+.ec1{background:linear-gradient(135deg,#8B6FBF,#3A2860)}
+.ec2{background:linear-gradient(135deg,#C05C8A,#5A1E3A)}
+.ec3{background:linear-gradient(135deg,#3D8A5F,#1E3A28)}
+.ec4{background:linear-gradient(135deg,#D4A060,#6B3A1A)}
+.ec5{background:linear-gradient(135deg,#5B8FD5,#1E3A66)}
+
+.event-body{padding:11px 12px 12px}
+.event-meta{display:flex;align-items:center;gap:8px;font-size:10.5px;font-weight:700;color:var(--muted);margin-bottom:8px}
+.event-meta .item{display:flex;align-items:center;gap:3px}
+.event-meta svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+
+.event-foot{display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px dashed var(--line-2)}
+.event-avatars{display:flex;align-items:center}
+.event-avatars .pa{width:20px;height:20px;border-radius:50%;border:1.5px solid #fff;flex-shrink:0;display:grid;place-items:center;font-size:8px;font-weight:900;color:#fff}
+.event-avatars .pa + .pa{margin-left:-7px}
+.event-count{font-size:10.5px;font-weight:800;color:var(--muted);margin-left:6px}
+.event-count b{color:var(--ink);font-weight:900}
+.event-star{font-size:11px;font-weight:900;color:var(--gold-ink);display:flex;align-items:center;gap:3px}
+.event-star svg{width:11px;height:11px;fill:var(--gold);stroke:none}
+.event-star.muted{color:var(--muted-2)}
+.event-star.muted svg{fill:var(--muted-2)}
+
+.a-rose{background:linear-gradient(135deg,#F5A0B2,#C85878)}
+.a-sky{background:linear-gradient(135deg,#8FB8E8,#3A6DB5)}
+.a-lime{background:linear-gradient(135deg,#B8D980,#6B9B1E)}
+.a-gold{background:linear-gradient(135deg,#F0D28A,#B8901E)}
+.a-purple{background:linear-gradient(135deg,#B8A8E8,#6B4FB5)}
+
+/* 发起活动 */
+.create-btn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;height:44px;border-radius:12px;background:#fff;border:1.5px dashed var(--line);font-size:12.5px;font-weight:900;color:var(--muted);transition:all .15s}
+.create-btn:active{transform:scale(.99);border-color:var(--muted-2)}
+.create-btn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+
+/* 照片墙 */
+.photo-tabs{display:flex;gap:6px;padding:0 0 12px;overflow-x:auto;scrollbar-width:none}
+.photo-tabs::-webkit-scrollbar{display:none}
+.photo-tab{flex-shrink:0;padding:7px 12px;border-radius:10px;background:#fff;border:1px solid var(--line);font-size:12px;font-weight:800;color:var(--muted);white-space:nowrap;transition:all .15s}
+.photo-tab:active{transform:scale(.97)}
+.photo-tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.photo-tab .n{opacity:.55;font-weight:900;margin-left:4px}
+.photo-tab.on .n{opacity:.7}
+
+.photo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.photo-cell{position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;cursor:pointer;transition:transform .15s}
+.photo-cell:active{transform:scale(.97)}
+.photo-cell::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 55%,rgba(0,0,0,.45) 100%)}
+.photo-cell.span2{grid-column:span 2;grid-row:span 2}
+.photo-img{position:absolute;inset:0;display:grid;place-items:center;font-size:28px;filter:saturate(.95)}
+.photo-cell.span2 .photo-img{font-size:52px}
+.p1{background:linear-gradient(135deg,#3A2818,#6B4A25)}
+.p2{background:linear-gradient(135deg,#4A2E1C,#8B5A30)}
+.p3{background:linear-gradient(135deg,#F5E6C8,#E0C99A)}
+.p4{background:linear-gradient(135deg,#2E1B12,#5A3A20)}
+.p5{background:linear-gradient(135deg,#E8D4B8,#C9A87C)}
+.p6{background:linear-gradient(135deg,#E8B8C8,#C87898)}
+.p7{background:linear-gradient(135deg,#2A3A20,#4A5A30)}
+.p8{background:linear-gradient(135deg,#4A5560,#6B7580)}
+
+.photo-badge{position:absolute;top:7px;right:7px;z-index:2;display:flex;align-items:center;gap:3px;padding:3px 7px;border-radius:5px;background:rgba(0,0,0,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:9px;font-weight:900;color:#fff}
+.photo-badge svg{width:9px;height:9px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.photo-badge.user{padding:2px}
+.photo-badge.user .mini-avatar{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:8.5px;font-weight:900;color:#fff;border:1.5px solid rgba(255,255,255,.4)}
+
+.photo-label{position:absolute;left:8px;bottom:6px;right:8px;z-index:2;color:#fff;font-size:10.5px;font-weight:900;text-shadow:0 1px 4px rgba(0,0,0,.6);display:flex;align-items:center;gap:4px}
+.photo-label svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+
+.photo-hint{display:flex;gap:9px;padding:11px 13px;border-radius:12px;background:var(--soft);font-size:11px;font-weight:700;color:var(--muted);line-height:1.5;margin-top:10px}
+.photo-hint svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;color:var(--muted-2);margin-top:1px}
+.photo-hint b{color:var(--ink);font-weight:900}
+
+/* 意图 */
+.intent-list{display:flex;flex-direction:column;gap:10px}
+.intent-card{display:flex;gap:13px;align-items:center;padding:15px 16px;background:#fff;border:1px solid var(--line);border-radius:16px;cursor:pointer;transition:all .15s}
+.intent-card:active{transform:scale(.985);border-color:var(--muted-2)}
+.intent-ico{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;flex-shrink:0}
+.intent-ico svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.intent-ico.rose{background:var(--rose-soft);color:var(--rose-ink)}
+.intent-ico.sky{background:var(--sky-soft);color:var(--sky-ink)}
+.intent-ico.gold{background:var(--gold-soft);color:var(--gold-ink)}
+.intent-body{flex:1;min-width:0}
+.intent-q{font-size:14px;font-weight:900;letter-spacing:-.25px;margin-bottom:3px;line-height:1.3}
+.intent-a{font-size:11.5px;font-weight:700;color:var(--muted);line-height:1.45}
+.intent-arrow{color:var(--muted-2);font-size:20px;font-weight:700;flex-shrink:0}
+
+.intent-footnote{display:flex;gap:7px;align-items:flex-start;padding:12px 4px 0;font-size:10.5px;font-weight:700;color:var(--muted-2);line-height:1.55}
+.intent-footnote svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;margin-top:1px}
+
+.safe-bottom{height:20px}
+</style>
+</head>
+<body>
+
+<div class="stage">
+<div class="phone">
+
+  <div class="status">
+    <span>9:24</span>
+    <span style="letter-spacing:2px;font-size:9px">●●● ⏸ ▮</span>
+  </div>
+
+  <div class="scroll">
+
+    <div class="cover">
+      <div class="cover-img"></div>
+      <div class="cover-nav">
+        <button class="icon-btn" onclick="alert('返回')">
+          <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <button class="icon-btn" onclick="alert('分享')">
+          <svg viewBox="0 0 24 24"><path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7"/><path d="M16 6l-4-4-4 4M12 2v14"/></svg>
+        </button>
+      </div>
+      <div class="cover-info">
+        <div class="cover-name">Suối Hoa 咖啡馆</div>
+        <div class="cover-addr">
+          <svg viewBox="0 0 24 24"><path d="M12 21s-7-6-7-11a7 7 0 0114 0c0 5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+          109 Lý Chiêu Hoàng · TP Bắc Ninh
+        </div>
+      </div>
+    </div>
+
+    <div class="pad" style="padding-top:0">
+
+      <div class="stats-card">
+        <div class="stat-cell">
+          <div class="stat-main">
+            <svg class="stat-star" viewBox="0 0 24 24"><path d="M12 1.5l3.09 6.83 7.41.68-5.6 4.97 1.66 7.27L12 17.85l-6.56 3.4 1.66-7.27-5.6-4.97 7.41-.68z"/></svg>
+            <span class="stat-num">4.8</span>
+          </div>
+          <div class="stat-l"><b>12</b> 条评价</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-main"><span class="stat-num-sm">47</span></div>
+          <div class="stat-l">去过</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-main"><span class="stat-num-sm">128</span></div>
+          <div class="stat-l">收藏</div>
+        </div>
+      </div>
+
+      <div class="action-row3">
+        <button class="act-btn save" id="btnSave" onclick="toggleSave()">
+          <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+          <span id="btnSaveText">收藏</span>
+        </button>
+        <button class="act-btn checkin" id="btnCheckin" onclick="doCheckin()">
+          <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+          打卡
+        </button>
+        <button class="act-btn nav" onclick="alert('打开导航')">
+          <svg viewBox="0 0 24 24"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
+          导航
+        </button>
+      </div>
+
+      <div class="dist-bar">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
+        <div>距离你 <b>11,730 km</b> · 到现场 100 米内自动打卡</div>
+      </div>
+
+      <div class="match-card">
+        <div class="match-inner">
+          <div class="match-label">
+            <svg viewBox="0 0 24 24"><path d="M12 1.5l3.09 6.83 7.41.68-5.6 4.97 1.66 7.27L12 17.85l-6.56 3.4 1.66-7.27-5.6-4.97 7.41-.68z"/></svg>
+            匹配推荐
+          </div>
+          <div class="match-title">适合一起的人</div>
+          <div class="match-sub">根据时段 · 现场状态 · 内容偏好实时推荐</div>
+
+          <div class="match-avatars">
+            <div class="match-person" onclick="alert('查看 Mai')">
+              <div class="match-avatar mv1">M<span class="match-badge hot">今日有空</span></div>
+              <div class="match-name">Mai</div>
+              <div class="match-tag">出图 · 咖啡探店</div>
+            </div>
+            <div class="match-person" onclick="alert('查看 Linh')">
+              <div class="match-avatar mv2">L<span class="match-badge">可约</span></div>
+              <div class="match-name">Linh</div>
+              <div class="match-tag">同行 · 陪聊</div>
+            </div>
+            <div class="match-person" onclick="alert('查看 Trang')">
+              <div class="match-avatar mv3">T<span class="match-badge">可约</span></div>
+              <div class="match-name">Trang</div>
+              <div class="match-tag">探店 · 短视频</div>
+            </div>
+          </div>
+
+          <button class="match-btn" onclick="alert('查看全部匹配')">
+            查看全部匹配
+            <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- 这里的活动 -->
+      <div class="section">
+        <div class="section-head">
+          <div class="section-title">这里的活动</div>
+          <div class="section-hint">本店 6 场 · 共 175 人参与</div>
+        </div>
+
+        <div class="event-scroll">
+
+          <!-- 进行中 -->
+          <div class="event-card" onclick="alert('查看：今晚 化妆排名赛')">
+            <div class="event-cover ec2">
+              <span class="event-badge live">进行中</span>
+              <span class="event-time-tag">今晚</span>
+              <div class="event-cover-title">化妆排名赛</div>
+            </div>
+            <div class="event-body">
+              <div class="event-meta">
+                <span class="item">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                  19:00 · 2.5 小时
+                </span>
+                <span class="item">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg>
+                  12 人
+                </span>
+              </div>
+              <div class="event-foot">
+                <div class="event-avatars">
+                  <div class="pa a-rose">L</div>
+                  <div class="pa a-sky">M</div>
+                  <div class="pa a-lime">H</div>
+                  <span class="event-count">+9</span>
+                </div>
+                <div class="event-star">
+                  <svg viewBox="0 0 24 24"><path d="M12 1.5l3.09 6.83 7.41.68-5.6 4.97 1.66 7.27L12 17.85l-6.56 3.4 1.66-7.27-5.6-4.97 7.41-.68z"/></svg>
+                  —
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 已结束 1 -->
+          <div class="event-card" onclick="alert('查看：咖啡拉花工作坊')">
+            <div class="event-cover ec1 ended">
+              <span class="event-badge ended">已结束</span>
+              <span class="event-time-tag">上周末</span>
+              <div class="event-cover-title">咖啡拉花工作坊</div>
+            </div>
+            <div class="event-body">
+              <div class="event-meta">
+                <span class="item">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                  10:00 · 2 小时
+                </span>
+                <span class="item">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg>
+                  18 人
+                </span>
+              </div>
+              <div class="event-foot">
+                <div class="event-avatars">
+                  <div class="pa a-rose">L</div>
+                  <div class="pa a-sky">M</div>
+                  <div class="pa a-lime">H</div>
+                  <span class="event-count">+15</span>
+                </div>
+                <div class="event-star">
+                  <svg viewBox="0 0 24 24"><path d="M12 1.5l3.09 6.83 7.41.68-5.6 4.97 1.66 7.27L12 17.85l-6.56 3.4 1.66-7.27-5.6-4.97 7.41-.68z"/></svg>
+                  4.9
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 已结束 2 -->
+          <div class="event-card" onclick="alert('查看：耶加雪菲品鉴会')">
+            <div class="event-cover ec4 ended">
+              <span class="event-badge ended">已结束</span>
+              <span class="event-time-tag">2 周前</span>
+              <div class="event-cover-title">耶加雪菲品鉴会</div>
+            </div>
+            <div class="event-body">
+              <div class="event-meta">
+                <span class="item">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                  19:00 · 1.5 小时
+                </span>
+                <span class="item">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg>
+                  24 人
+                </span>
+              </div>
+              <div class="event-foot">
+                <div class="event-avatars">
+                  <div class="pa a-purple">A</div>
+                  <div class="pa a-gold">K</div>
+                  <div class="pa a-rose">L</div>
+                  <span class="event-count">+21</span>
+                </div>
+                <div class="event-star">
+                  <svg viewBox="0 0 24 24"><path d="M12 1.5l3.09 6.83 7.41.68-5.6 4.97 1.66 7.27L12 17.85l-6.56 3.4 1.66-7.27-5.6-4.97 7.41-.68z"/></svg>
+                  4.8
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 已结束 3 -->
+          <div class="event-card" onclick="alert('查看：民谣之夜')">
+            <div class="event-cover ec2 ended">
+              <span class="event-badge ended">已结束</span>
+              <span class="event-time-tag">3 周前</span>
+              <div class="event-cover-title">民谣之夜</div>
+            </div>
+            <div class="event-body">
+              <div class="event-meta">
+                <span class="item">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                  20:00 · 3 小时
+                </span>
+                <span class="item">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg>
+                  32 人
+                </span>
+              </div>
+              <div class="event-foot">
+                <div class="event-avatars">
+                  <div class="pa a-sky">M</div>
+                  <div class="pa a-gold">S</div>
+                  <span class="event-count">+30</span>
+                </div>
+                <div class="event-star">
+                  <svg viewBox="0 0 24 24"><path d="M12 1.5l3.09 6.83 7.41.68-5.6 4.97 1.66 7.27L12 17.85l-6.56 3.4 1.66-7.27-5.6-4.97 7.41-.68z"/></svg>
+                  4.7
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 已结束 4 -->
+          <div class="event-card" onclick="alert('查看：晨间瑜伽')">
+            <div class="event-cover ec3 ended">
+              <span class="event-badge ended">已结束</span>
+              <span class="event-time-tag">1 个月前</span>
+              <div class="event-cover-title">晨间瑜伽 · 湖畔</div>
+            </div>
+            <div class="event-body">
+              <div class="event-meta">
+                <span class="item">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                  08:00 · 1 小时
+                </span>
+                <span class="item">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg>
+                  14 人
+                </span>
+              </div>
+              <div class="event-foot">
+                <div class="event-avatars">
+                  <div class="pa a-lime">H</div>
+                  <div class="pa a-sky">M</div>
+                  <span class="event-count">+12</span>
+                </div>
+                <div class="event-star">
+                  <svg viewBox="0 0 24 24"><path d="M12 1.5l3.09 6.83 7.41.68-5.6 4.97 1.66 7.27L12 17.85l-6.56 3.4 1.66-7.27-5.6-4.97 7.41-.68z"/></svg>
+                  5.0
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 已结束 5 -->
+          <div class="event-card" onclick="alert('查看：读书会')">
+            <div class="event-cover ec5 ended">
+              <span class="event-badge ended">已结束</span>
+              <span class="event-time-tag">1.5 月前</span>
+              <div class="event-cover-title">咖啡 + 读书会</div>
+            </div>
+            <div class="event-body">
+              <div class="event-meta">
+                <span class="item">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                  15:00 · 2 小时
+                </span>
+                <span class="item">
+                  <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg>
+                  20 人
+                </span>
+              </div>
+              <div class="event-foot">
+                <div class="event-avatars">
+                  <div class="pa a-purple">A</div>
+                  <div class="pa a-rose">L</div>
+                  <span class="event-count">+18</span>
+                </div>
+                <div class="event-star">
+                  <svg viewBox="0 0 24 24"><path d="M12 1.5l3.09 6.83 7.41.68-5.6 4.97 1.66 7.27L12 17.85l-6.56 3.4 1.66-7.27-5.6-4.97 7.41-.68z"/></svg>
+                  4.6
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <button class="create-btn" onclick="alert('发起活动')">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          发起新活动
+        </button>
+      </div>
+
+      <!-- 照片墙 -->
+      <div class="section">
+        <div class="section-head">
+          <div class="section-title">照片墙</div>
+          <div class="section-hint">8 张 · 商家维护</div>
+        </div>
+
+        <div class="photo-tabs">
+          <button class="photo-tab on">全部<span class="n">8</span></button>
+          <button class="photo-tab">环境<span class="n">4</span></button>
+          <button class="photo-tab">菜单<span class="n">2</span></button>
+          <button class="photo-tab">用户精选<span class="n">3</span></button>
+        </div>
+
+        <div class="photo-grid">
+          <div class="photo-cell span2 p1">
+            <div class="photo-img">🏪</div>
+            <div class="photo-badge"><svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/></svg>官方</div>
+            <div class="photo-label">
+              <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 15l-5-5-9 9"/></svg>
+              店铺外观
+            </div>
+          </div>
+          <div class="photo-cell p2">
+            <div class="photo-img">☕</div>
+            <div class="photo-badge"><svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/></svg>官方</div>
+            <div class="photo-label">手冲</div>
+          </div>
+          <div class="photo-cell p3">
+            <div class="photo-img">📋</div>
+            <div class="photo-badge"><svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/></svg>官方</div>
+            <div class="photo-label">菜单</div>
+          </div>
+          <div class="photo-cell p4">
+            <div class="photo-img">🪑</div>
+            <div class="photo-badge"><svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/></svg>官方</div>
+            <div class="photo-label">座位区</div>
+          </div>
+          <div class="photo-cell p5">
+            <div class="photo-img">🎨</div>
+            <div class="photo-badge user"><div class="mini-avatar" style="background:linear-gradient(135deg,#F5A0B2,#C85878)">L</div></div>
+            <div class="photo-label">拉花</div>
+          </div>
+          <div class="photo-cell p6">
+            <div class="photo-img">🍰</div>
+            <div class="photo-badge user"><div class="mini-avatar" style="background:linear-gradient(135deg,#8FB8E8,#3A6DB5)">M</div></div>
+            <div class="photo-label">蛋糕</div>
+          </div>
+          <div class="photo-cell p7">
+            <div class="photo-img">🌿</div>
+            <div class="photo-badge"><svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/></svg>官方</div>
+            <div class="photo-label">室外</div>
+          </div>
+          <div class="photo-cell p8">
+            <div class="photo-img">🚪</div>
+            <div class="photo-badge user"><div class="mini-avatar" style="background:linear-gradient(135deg,#B8D980,#6B9B1E)">H</div></div>
+            <div class="photo-label">门口</div>
+          </div>
+        </div>
+
+        <div class="photo-hint">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
+          <div>外观 / 菜单 / 环境由商家维护；<b>用户精选</b>来自评论中的照片，由商家挑选进入</div>
+        </div>
+      </div>
+
+      <!-- 意图 -->
+      <div class="section">
+        <div class="section-head">
+          <div class="section-title">你想在这里做什么？</div>
+        </div>
+        <div class="intent-list">
+          <div class="intent-card" onclick="alert('邀请')">
+            <div class="intent-ico rose">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/><path d="M19 8h2M20 7v2"/></svg>
+            </div>
+            <div class="intent-body">
+              <div class="intent-q">想找人一起来？</div>
+              <div class="intent-a">从匹配结果里挑 · 你出场景，对方出时间</div>
+            </div>
+            <span class="intent-arrow">›</span>
+          </div>
+          <div class="intent-card" onclick="alert('发布机会')">
+            <div class="intent-ico sky">
+              <svg viewBox="0 0 24 24"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
+            </div>
+            <div class="intent-body">
+              <div class="intent-q">想找人做事？</div>
+              <div class="intent-a">发布机会 · 出价等报名，按完成付</div>
+            </div>
+            <span class="intent-arrow">›</span>
+          </div>
+          <div class="intent-card" onclick="alert('报名活动')">
+            <div class="intent-ico gold">
+              <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M9 15l2 2 4-4"/></svg>
+            </div>
+            <div class="intent-body">
+              <div class="intent-q">想参加现成的？</div>
+              <div class="intent-a">报名活动 · 直接加入，按活动说明付费</div>
+            </div>
+            <span class="intent-arrow">›</span>
+          </div>
+        </div>
+        <div class="intent-footnote">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+          匹配结果仅供参考，实际约见以双方确认为准
+        </div>
+      </div>
+
+      <div class="safe-bottom"></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+function toggleSave(){
+  const btn = document.getElementById('btnSave');
+  const txt = document.getElementById('btnSaveText');
+  btn.classList.toggle('on');
+  txt.textContent = btn.classList.contains('on') ? '已收藏' : '收藏';
+}
+
+let checkedIn = false;
+function doCheckin(){
+  if (checkedIn) return;
+  checkedIn = true;
+  const btn = document.getElementById('btnCheckin');
+  btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>已打卡';
+  btn.style.background = 'var(--good)';
+  btn.style.borderColor = 'var(--good)';
+  alert('打卡成功');
+}
+</script>
+
+</body>
+</html>
