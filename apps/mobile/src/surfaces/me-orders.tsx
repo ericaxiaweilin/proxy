@@ -7,6 +7,9 @@ import type { BusinessClient } from "../business-client";
 import { loadStoreOptions, type StoreOption } from "../my-store-options";
 import type { FulfillmentClient, FulfillmentOrder, SlotOffer } from "../fulfillment-client";
 import { auditLines, buildTermChange, canCancelOrder, canChangePrice, canConfirmCooperation, canProposeTermChange, isMyProposal, pendingTermChange, settlementLabel, settlementView, termChangeFormFrom, termDiff, type AuditLine, type TermChangeForm } from "../order-actions";
+// ORDER-AGENT-CLAIM-NO-001：接单编号展示口径（3 位零填充 / 未分配返空串）复用
+// 个人管理页那一份，两处不能各写一套。
+import { formatClaimNumber } from "../claim-number";
 import type { MediaClient } from "../media-client";
 import type { ModerationClient } from "../moderation-client";
 import { ReportSheet } from "../components/report-sheet";
@@ -166,7 +169,23 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
     }
   }
   const visible = orders.filter((order) => filter === "all" || filter === "published" && order.viewerRole === "REQUESTER" || filter === "joined" && order.viewerRole === "AGENT" || filter === "done" && order.lifecycle === "COMPLETED" || filter === "cancelled" && order.lifecycle === "CANCELLED");
-  const fields = (order: FulfillmentOrder): Array<[string,string]> => [["服务", order.snapshot.serviceSku || order.needId], ["金额", orderMoney(order)], ["时间", order.snapshot.startTime || "待确认"], ["地点", order.snapshot.meetingContext || "待确认"], ["时长", order.snapshot.duration || "待确认"], ["结算", settlementLabel(order.snapshot.settlementMode)]];
+  // ORDER-AGENT-CLAIM-NO-001：接单编号（技师号）进订单字段。**两种角色都画**：
+  // 作为接单方这一行是自己的号，作为需求方看到的是对接单方的号 —— 双方都要能报给
+  // 客服，所以不做角色区分。缺席（formatClaimNumber 返空串）就整行不画 ——
+  // 用户：「不接单 接单编号暂时隐藏」。绝不拿 agentId / 订单编号冒充。
+  const claimNumberField = (order: FulfillmentOrder): Array<[string, string]> => {
+    const claimNo = formatClaimNumber(order.snapshot.agentClaimNumber);
+    return claimNo ? [["接单编号", claimNo]] : [];
+  };
+  const fields = (order: FulfillmentOrder): Array<[string,string]> => [["服务", order.snapshot.serviceSku || order.needId], ["金额", orderMoney(order)], ["时间", order.snapshot.startTime || "待确认"], ["地点", order.snapshot.meetingContext || "待确认"], ["时长", order.snapshot.duration || "待确认"], ["结算", settlementLabel(order.snapshot.settlementMode)], ...claimNumberField(order)];
+  // 卡片只画前 4 个字段（详情页画全部）。接单编号必须在**前 4 个**里 —— 技师号是线下
+  // 核销/对账的凭证，比「时长」这种可协商项更该一眼看到；编号缺失时自动少一格。
+  const cardFields = (order: FulfillmentOrder): Array<[string, string]> => {
+    const claimNo = formatClaimNumber(order.snapshot.agentClaimNumber);
+    return claimNo
+      ? [["接单编号", claimNo], ["服务", order.snapshot.serviceSku || order.needId], ["金额", orderMoney(order)], ["时间", order.snapshot.startTime || "待确认"]]
+      : fields(order);
+  };
 
   // R18.x CANCEL-001: confirmation prompt + non-fatal
   // server error surfacing. The cancel command mutates the
@@ -860,7 +879,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
                 <Text selectable style={[styles.orderBadge, item.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(item)}</Text>
               </View>
               <View style={styles.orderGrid}>
-                {fields(item).slice(0, 4).map(([label, value]) => (
+                {cardFields(item).slice(0, 4).map(([label, value]) => (
                   <View key={label} style={styles.orderField}>
                     <Text selectable style={styles.orderFieldLabel}>{label}</Text>
                     <Text selectable style={styles.orderFieldValue}>{value}</Text>

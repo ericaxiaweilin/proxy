@@ -380,7 +380,14 @@ func main() {
 	fulfillmentService.WithOrderNumbers(orderNumbers)
 	activityService.SetOrderNumbers(orderNumbers)
 	marketplaceService.SetNumbers(orderNumbers)
-	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository(), numbers: orderNumbers})
+	// ORDER-AGENT-CLAIM-NO-001：接单编号（技师号）随订单快照冻结。无库模式不接
+	// （nil = 未分配，客户端隐藏那一行）—— 与其它可选依赖同一套接线规矩。
+	var claimNumbers fulfillment.AgentClaimNumberReader
+	if pool != nil {
+		claimNumbers = postgres.NewIdentityRepository(pool)
+		fulfillmentService.WithAgentClaimNumbers(claimNumbers)
+	}
+	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository(), numbers: orderNumbers, claimNumbers: claimNumbers})
 	// STORE-STATS-001：RecordOutcome 归因校验 —— 必须是真实存在的 ACTIVE 店。
 	// 跟 SetOrderCreator 一样，必须在 PG 替换之后接（否则接到被丢弃的内存实例上）。
 	// 无库模式不接（SetStoreLookup nil = 不校验，测试/内存行为不变）。
@@ -439,7 +446,7 @@ func main() {
 	// FEED-REPLY-001: comments resolve the author name from the profile too —
 	// otherwise the feed can only render the raw account id.
 	engagementService.SetAuthorNameResolver(authorNames)
-	sceneService.SetInvitationOrderCreator(sceneFulfillmentAdapter{repo: fulfillmentService.Repository(), numbers: fulfillmentService.OrderNumbers()})
+	sceneService.SetInvitationOrderCreator(sceneFulfillmentAdapter{repo: fulfillmentService.Repository(), numbers: fulfillmentService.OrderNumbers(), claimNumbers: claimNumbers})
 	databaseReadyCheck := readyCheck
 	readyCheck = func(ctx context.Context) error {
 		if databaseReadyCheck != nil {

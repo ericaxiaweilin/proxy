@@ -4,6 +4,34 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 333 — 2026-09-30
+
+- **接单编号（技师号）进订单 recipe + 存量回填**（`ORDER-AGENT-CLAIM-NO-001`）
+  （用户：「我的订单 每个订单记录recipe没有匹配的用户接单编号 必须要有 因为只要去线下
+  接单赚钱 必须有一个唯一的接单编号」）。
+  1. **为什么原来没有**：接单编号（`identity.agent_claim_numbers`，注册时顺序分配、1 起
+     无跳号、3 位零填充）由 `AGENT-CLAIM-NUMBER-001` 建立，但那条门禁只钉了「注册分配 /
+     profile 携带 / 编辑资料只读展示」三段，**订单侧从来没接过**。订单里 agent 只有
+     `agent_id`（`usr_xxx` 内部主键，线下报不出、对不上号）和 21 位订单编号（双方共用）。
+  2. **写进 snapshot 而不是新列**：`OrderSnapshot` 是 Gate G 冻结的确认快照
+     （写入后不变、变更走 amendment 版本链）。把新字段塞进快照就自动继承这些性质；
+     snapshot 是 JSONB 整块存，**不需要 ALTER TABLE**。
+  3. **必须冻结，不能现查**：客户端现查 profile 拿到的是「现在」的号，事后对不上
+     「当时是谁接的单」。写入点覆盖三条下单路径（报价建单 / 接档位 / 接主题邀约）+
+     两条跨域物化路径（scene 邀约 / marketplace 报价）。
+  4. **显示口径**：复用个人管理页那一份 `formatClaimNumber`（3 位零填充 / 未分配返空串），
+     两处不各写一套。**编号缺席时整行不画**（用户：「不接单 接单编号暂时隐藏」），
+     绝不拿 `agentId` 或订单编号冒充。
+  5. **拿不到编号不挡下单**：编号是线下核销的凭证，不是成交前提 —— 查询器未接 / 存储
+     故障 / 未分配一律快照留 0、fail-open（这是本仓唯一一处刻意 fail-open，其余门禁照旧
+     fail-closed）。
+  6. **存量回填（迁移 148）**：按 `agent_id` 关联补进历史快照，**推进 version**（143 守卫
+     要求每次 UPDATE +1）并走 `proxy.guard_override` 破窗（守卫禁止绕过 amendment 改
+     snapshot，理由与操作者进审计行）。关联不上的保持缺失、不写 0。幂等：已有非零值不动。
+  7. **门禁**：正向钉五条命名测试 + 写侧接线完整性（三条下单路径 / 两条物化路径 / identity
+     查询 / main.go 接线，缺一段就有某类订单的 recipe 没编号而干净库全绿）；反向钉**禁止拿
+     user id 冒充编号**（线下报不出来，比不填更糟）。
+
 ## Revision 332 — 2026-09-29
 
 - **下单 / 接单 / 订单页去废话 + 全数字编号 + 订单变更与变更记录入口**

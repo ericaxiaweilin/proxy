@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 332,
-  "updatedAt": "2026-09-29",
+  "baselineRevision": 333,
+  "updatedAt": "2026-09-30",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
     "visualReference": "Proxy_App_Design_System_R3_Visual.html",

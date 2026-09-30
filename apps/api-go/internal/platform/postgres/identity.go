@@ -130,6 +130,31 @@ func (r *IdentityRepository) EnsurePasswordlessIdentity(ctx context.Context, cha
 	return login, device, created, nil
 }
 
+// AgentClaimNumber 按 user id 查接单编号（技师号）。
+// ORDER-AGENT-CLAIM-NO-001：履约下单时把接单方的这个号冻进订单快照。
+//
+// **查不到返回 0 + nil error**，不是 ErrUserNotFound：0 = 未分配（内存仓注册、老数据、
+// 号未轮到这个账户）是正常状态，调用方按「隐藏这一行」处理。只有真正的查询故障才
+// 返回 error —— 上层同样 fail-open（不挡成交），但不会静默把一次故障当成「没编号」。
+func (r *IdentityRepository) AgentClaimNumber(ctx context.Context, userAccountID string) (int, error) {
+	if userAccountID == "" {
+		return 0, nil
+	}
+	var claimNumber int
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx,
+		`SELECT claim_number FROM identity.agent_claim_numbers WHERE user_account_id = $1`, userAccountID).Scan(&claimNumber)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if claimNumber < 1 || claimNumber > 10000000 {
+		return 0, nil
+	}
+	return claimNumber, nil
+}
+
 // AGENT-CLAIM-NUMBER-001: 注册同事务分配接单编号（1 起、无跳号）。
 // 计数器行 SELECT … FOR UPDATE，同事务回滚则号码一并作废——不存在“占了号但
 // 账户没建成”的空洞。已有号（升级/重试）直接返回，不消耗新号。

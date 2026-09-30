@@ -81,6 +81,10 @@ export type FulfillmentOrder = {
     // ORDER-SCENARIO-001: 消费场景（ordinary 普通消费 / assistance 城市协助 /
     // 缺省历史数据）。market 路径由机会快照带入；订单流程按它分档。
     scenario?: string | undefined;
+    // ORDER-AGENT-CLAIM-NO-001: 接单方的接单编号（技师号，至少 3 位零填充：001/010）。
+    // **这不是 agentId**（usr_xxx 内部主键，线下对不上号）——技师号才是打电话能报的
+    // 那个。缺席 / 0 = 该接单方没编号，客户端隐藏整行，绝不拿 agentId 或订单编号冒充。
+    agentClaimNumber?: number | undefined;
   };
   amendments?: OrderAmendment[] | undefined;
   // ORDER-SETTLE-GUARD-001：线下结算记录。每一方只确认自己那一侧。

@@ -1542,6 +1542,66 @@ fi
 pnpm --dir apps/mobile exec vitest run src/for-you-slots.test.ts src/for-you-order-number.test.ts >/dev/null || exit $?
 echo "    ORDER-NO-001/ACT-ORDER-NO-001/ACT-SEAT-RELEASE-001/ACT-PARTICIPATION-DURABLE-001/HOME-FORYOU-REFRESH-001: PASS"
 
+# ORDER-AGENT-CLAIM-NO-001（2026-09-30，用户：「我的订单 每个订单记录recipe没有匹配的用户接单
+# 编号 必须要有 因为只要去线下接单赚钱 必须有一个唯一的接单编号」）。
+#
+# 接单编号（技师号，identity.agent_claim_numbers）以前**只在 profile 一条链路上**：订单侧
+# 只有 agent_id（usr_xxx 内部主键）和 21 位订单编号（双方共用）。技师号才是线下能报的那个号。
+# 关键是要**冻结进订单快照**，不能让客户端现查 profile —— 现查拿到的是「现在」的号，
+# 事后对不上「当时是谁接的单」。
+require_test "ORDER-AGENT-CLAIM-NO-001" "./internal/fulfillment" \
+  "TestOrderSnapshotFreezesAgentClaimNumber" \
+  "apps/api-go/internal/fulfillment/agent_claim_number_test.go" || exit $?
+require_test "ORDER-AGENT-CLAIM-NO-001" "./internal/fulfillment" \
+  "TestAgentClaimNumberSurvivesReadAndAmendments" \
+  "apps/api-go/internal/fulfillment/agent_claim_number_test.go" || exit $?
+require_test "ORDER-AGENT-CLAIM-NO-001" "./internal/fulfillment" \
+  "TestMissingAgentClaimNumberNeverBlocksOrder" \
+  "apps/api-go/internal/fulfillment/agent_claim_number_test.go" || exit $?
+require_test "ORDER-AGENT-CLAIM-NO-001" "./internal/platform/postgres" \
+  "TestAgentClaimNumberBackfilledIntoOrderSnapshotPostgres" \
+  "apps/api-go/internal/platform/postgres/agent_claim_number_order_integration_test.go" || exit $?
+require_test "ORDER-AGENT-CLAIM-NO-001" "./internal/platform/postgres" \
+  "TestAgentClaimNumberMissingIsZeroNotErrorPostgres" \
+  "apps/api-go/internal/platform/postgres/agent_claim_number_order_integration_test.go" || exit $?
+# 写侧接线：三条下单路径都要冻结（报价建单 / 接档位 / 接主题邀约）+ 两条跨域物化路径。
+# 少一段 = 有一类订单的 recipe 里没有编号，而干净库跑测试照样全绿。
+if ! grep -qF 'AgentClaimNumber: s.resolveAgentClaimNumber(ctx, p.AgentID)' apps/api-go/internal/fulfillment/service.go ||
+   ! grep -qF 'offerSnapshot(offer, s.resolveAgentClaimNumber(ctx, offer.AgentID))' apps/api-go/internal/fulfillment/service.go ||
+   ! grep -qF 'AgentClaimNumber: agentClaimNumber(ctx, a.claimNumbers, record.AgentID)' apps/api-go/cmd/api/wire_fulfillment.go ||
+   # 两条跨域物化路径（scene 邀约 / marketplace 报价）都要冻结：少一条就有那类订单
+   # 的 recipe 里没有编号，而干净库跑测试照样全绿。
+   [ "$(grep -cF 'AgentClaimNumber: agentClaimNumber(ctx, a.claimNumbers, record.AgentID)' apps/api-go/cmd/api/wire_fulfillment.go)" = "2" ] ||
+   ! grep -qF 'fulfillmentService.WithAgentClaimNumbers(claimNumbers)' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'func (r *IdentityRepository) AgentClaimNumber(' apps/api-go/internal/platform/postgres/identity.go; then
+  echo "  FAIL [ORDER-AGENT-CLAIM-NO-001]: 接单编号写侧链路有缺口 —— 三条下单路径 / 两条物化路径 /" >&2
+  echo "        identity 查询 / main.go 接线必须都在，否则某类订单的 recipe 里没有编号。" >&2
+  exit 1
+fi
+# 反向钉：**绝不能拿 user id 冒充编号**。线下报不出 usr_xxx，把它填进编号字段比不填更糟
+# （用户会照着报一个对不上的号）。编号只来自 identity.agent_claim_numbers。
+if grep -qE 'AgentClaimNumber:\s*(len\(|len\(p\.AgentID\)|p\.AgentID|record\.AgentID)' \
+   apps/api-go/internal/fulfillment/service.go apps/api-go/cmd/api/wire_fulfillment.go; then
+  echo "  FAIL [ORDER-AGENT-CLAIM-NO-001]: 接单编号被拿 user id 顶替了 —— 线下报不出来，等于没有。" >&2
+  exit 1
+fi
+# 展示口径复用个人管理页那一份（3 位零填充 / 未分配返空串），两处不能各写一套。
+if ! grep -qF 'formatClaimNumber(order.snapshot.agentClaimNumber)' apps/mobile/src/surfaces/me-orders.tsx ||
+   ! grep -qF 'import { formatClaimNumber } from "../claim-number"' apps/mobile/src/surfaces/me-orders.tsx; then
+  echo "  FAIL [ORDER-AGENT-CLAIM-NO-001]: 我的订单没接接单编号，或没复用共享展示口径。" >&2
+  exit 1
+fi
+# 148 回填：必须真的写进快照 + 推进 version（143 守卫要求每次 UPDATE version+1，
+# 且 snapshot 只能经 amendment 改 ⇒ 回填必须走 proxy.guard_override 破窗）。
+if ! grep -qF "jsonb_set(o.snapshot, '{agentClaimNumber}'" apps/api-go/migrations/148_agent_claim_number_on_orders.sql ||
+   ! grep -qF "version = o.version + 1" apps/api-go/migrations/148_agent_claim_number_on_orders.sql ||
+   ! grep -qF "set_config('proxy.guard_override'" apps/api-go/migrations/148_agent_claim_number_on_orders.sql; then
+  echo "  FAIL [ORDER-AGENT-CLAIM-NO-001]: 148 回填没写快照 / 没推 version / 没走破窗 ——" >&2
+  echo "        历史订单的 recipe 仍然没有接单编号，或回填会被守卫拒。" >&2
+  exit 1
+fi
+echo "    ORDER-AGENT-CLAIM-NO-001: PASS (技师号冻结进订单快照 · 存量回填 · 缺失隐藏不挡下单)"
+
 # ORDER-NO-LEGACY-COMPAT-001（2026-09-30）：把编号统一成 21 位时，**main 自己声明的
 # 「16 位起」兼容面被一起收窄了**（main 的 136/137/138 原文都是 `{16,}`）。
 # 已经发出去的 16 位号（yyMMdd + 9 位全局序号 + Luhn）还在库里、还在用户和客服手上。
@@ -5182,8 +5242,11 @@ echo "    MUTE-REVERSIBLE-001: PASS (mute is reversible end to end, and names pe
 # 弹上来；而 feed 整屏**没有任何键盘避让**（全文没有 KeyboardAvoidingView，
 # ScrollView 也没开 automaticallyAdjustKeyboardInsets）。两条叠在一起的后果是：
 # 键盘一弹起，正好压在那个贴在底部的输入框上 —— 用户是在盲打。
-# 现在的形态：点「回复」→ 在那条帖子正下方就地展开一行输入框，无遮罩、无上滑
-# 动画，键盘弹起时由 ScrollView 的 inset 调整把它顶进可见区。
+# 形态后来又变过一次（POST-THREAD-001，对齐原型）：点「回复」→ 打开**评论抽屉**
+# （只有拖动把手 + 输入框，不重复帖文/评论列表），由 feed-post-thread.test.ts 完整钉住
+# （openThread / setThreadPostId / threadComposer*）。所以这条钉不再断言「就地一行」，
+# 只保留**换形状后仍然成立**的那半句意图：回复框必须锚定在你点的那条帖子上
+# （不能每条都显示、也不能一条都不显示），且键盘弹出时必须被顶进可见区。
 # 这两颗 pin 用行锚定（^空白+prop+空白$）而不是裸 grep -qF：feed.tsx 的注释里
 # 原样写着这两个 prop 的名字来解释它们各自解决什么，裸 grep 会被注释满足 ——
 # 把真正的 prop 从 ScrollView 上删掉，pin 照样是绿的，等于没设防。锚定之后
@@ -5199,13 +5262,19 @@ if ! grep -qE '^[[:space:]]+keyboardShouldPersistTaps="handled"[[:space:]]*$' ap
   echo "        reply can never be submitted." >&2
   exit 1
 fi
-if ! grep -qF 'replyTargetId === post.postId ? (' apps/mobile/src/surfaces/feed.tsx; then
-  echo "  FAIL [REPLY-INLINE-001]: the reply composer is no longer anchored to the" >&2
+# 锚定方式从 `replyTargetId === post.postId ? (` 换成了**按 threadPostId 键控**的输入框：
+# key 绑在 threadPostId 上 ⇒ 换帖即重挂，它仍然只属于一条帖子。
+if ! grep -qF 'key={threadPostId ?? "closed"}' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the reply composer is no longer bound to the" >&2
   echo "        post you tapped — either it shows on every post or on none." >&2
   exit 1
 fi
-if ! grep -qF 'styles.inlineReplyInput' apps/mobile/src/surfaces/feed.tsx; then
-  echo "  FAIL [REPLY-INLINE-001]: the inline reply input style is gone." >&2
+if ! grep -qF 'styles.threadComposerPill' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the reply composer is gone entirely." >&2
+  exit 1
+fi
+if ! grep -qF 'styles.threadComposerInput' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the reply input style is gone." >&2
   exit 1
 fi
 # 反向 pin：底部白卡那套东西一个都不许回来。
@@ -8956,16 +9025,30 @@ echo "    NOTIF-INVITE-OFFER-001: PASS (offer and invitations reach the one who 
 # feed 多图轨＋X 式自动播只能用 Adaptive，个人主页照片墙才用 Threads 网格，
 # 迁过去等于把自动播砍了，两边各守各的 lane，门禁钉住。
 # FEED-ACTION-ICONS-001 之后收藏从文字态（"收藏"/"已收藏"）换成图标实心/描边态，
-# 语义没变：filled 只跟 isSaved 走，旁边没有数字。钉跟着认图标态 —— 钉的是
-# "不显示编出来的聚合数"，不是那两个字。
-if ! grep -q 'filled={isSaved} name="bookmark"' apps/mobile/src/surfaces/feed.tsx ||
-   ! grep -q 'FEED-SAVED-COUNT-001' apps/mobile/src/surfaces/feed-saved-count.test.ts; then
-  echo "  FAIL [FEED-SAVED-COUNT-001]: 收藏数又开始编聚合了 ——" >&2
+# 语义没变：filled 只跟 isSaved 走，旁边没有数字。
+#
+# 2026-09-25 FEED-ACTION-DEDUP-001 之后规则又翻了一次面：书签入口**整个撤了**
+# （写路径 engagement.bookmarkPost 还在，但「收藏」页的动态 tab 没有读接口，点了
+# 看不到任何效果 ⇒ 产品决定撤掉入口，不是漏接线）。所以钉的方向从「图标不许显示
+# 假聚合数」变成「那个半吊子入口不许长回来」—— 行为断言在
+# src/surfaces/feed-saved-count.test.ts（7 条，已随规则改过），这里只做接线：
+# 测试还在 + feed.tsx 里没有书签入口。
+#
+# ⚠️ 这条钉原先要求 feed.tsx **必须**含 `filled={isSaved} name="bookmark"` ——
+# 那正是 FEED-ACTION-DEDUP-001 撤掉的东西。钉编码了**与新规则相反**的方向，从撤掉
+# 那天起恒红；又因为 REPLY-INLINE-001（本脚本更靠前）先 exit 1，它一直没被执行过。
+# 规则翻转时钉要**改写**，不是删掉。
+#
+# 反向针排在正向针前面：正向针先开火会把它挡住。比较前先剔掉整行注释 —— 否则一句
+# 「这里不要写 name="bookmark"」的注释会把反向钉喂红（本仓已踩过五次）。
+if grep -vE '^[[:space:]]*(//|\*)' apps/mobile/src/surfaces/feed.tsx |
+   grep -qE 'name="bookmark"|收藏 \{isSaved \? 1 : 0\}'; then
+  echo "  FAIL [FEED-SAVED-COUNT-001]: 书签入口又长回来了 / 0-1 假聚合回来了 ——" >&2
+  echo "        FEED-ACTION-DEDUP-001 已撤掉这个入口（写入在、读接口没接，点了没效果）。" >&2
   exit 1
 fi
-# 反向钉：拿“我收没收藏”冒充“多少人收藏”的写法不许回来。
-if grep -q '收藏 {isSaved ? 1 : 0}' apps/mobile/src/surfaces/feed.tsx; then
-  echo "  FAIL [FEED-SAVED-COUNT-001]: 0/1 假聚合回来了 ——" >&2
+if ! grep -q 'FEED-SAVED-COUNT-001' apps/mobile/src/surfaces/feed-saved-count.test.ts; then
+  echo "  FAIL [FEED-SAVED-COUNT-001]: 收藏计数那条行为测试没了 ——" >&2
   exit 1
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/feed-saved-count.test.ts || exit $?
@@ -9022,11 +9105,16 @@ if [ -e apps/api-go/internal/ai ] || [ -e apps/api-go/internal/creator ] || [ -e
   echo "        接线了再建包，先建包后接线等于埋雷。" >&2
   exit 1
 fi
-# migration 序号：14 组历史重号（038/039/040 各 3 个，其余 2 个）是 grandfather，
+# migration 序号：15 组历史重号（038/039/040 各 3 个，其余 2 个）是 grandfather，
 # 只许减不许增 —— 新文件再撞号就红。改历史文件名更危险（已 apply 的库会重放），
 # 所以存量不动，新号必须唯一。
+# 109 是后补登记进 grandfather 的：`109_account_status_erased`（LC-15）与 main 的
+# `109_voucher_purchases_instances`（VOUCHER-PURCHASE-001）同号，**两个都已 apply**
+# （2026-09-21 / 09-23）⇒ 重命名等于让已 apply 的库重放，只能登记、不能改号。
+# docs/design/BASELINE_CHANGELOG.md:1000 早就写明「同号是安全的」，只是这份名单漏了它，
+# 于是这条钉从 2026-09-23 起恒红（又被更靠前的 REPLY-INLINE-001 挡着没暴露）。
 DUP_PREFIXES=$(ls apps/api-go/migrations/*.sql | sed 's/.*\///' | cut -c1-3 | sort | uniq -c | sort -rn | awk '$1>1{print $2}' | tr '\n' ' ')
-for known in 040 039 038 078 070 065 044 043 042 041 037 036 035 003; do
+for known in 109 040 039 038 078 070 065 044 043 042 041 037 036 035 003; do
   DUP_PREFIXES=$(echo "$DUP_PREFIXES" | tr ' ' '\n' | grep -v "^${known}$" | tr '\n' ' ')
 done
 if [ -n "$(echo "$DUP_PREFIXES" | tr -d ' ')" ]; then

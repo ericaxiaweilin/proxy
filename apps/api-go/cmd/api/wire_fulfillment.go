@@ -146,11 +146,30 @@ type jurisdictionAdapter struct {
 type marketplaceFulfillmentAdapter struct {
 	repo    fulfillment.TransactionalRepository
 	numbers ordernumber.Allocator
+	// ORDER-AGENT-CLAIM-NO-001：接单编号查询。nil = 没接，快照留 0。
+	claimNumbers fulfillment.AgentClaimNumberReader
 }
 
 type sceneFulfillmentAdapter struct {
 	repo    fulfillment.TransactionalRepository
 	numbers ordernumber.Allocator
+	// ORDER-AGENT-CLAIM-NO-001：接单编号查询。nil = 没接（内存仓 / 未接），
+	// 快照里该字段留 0，客户端隐藏这一行。
+	claimNumbers fulfillment.AgentClaimNumberReader
+}
+
+// agentClaimNumber 取接单方的接单编号（技师号）。
+// 查不到 / 没接查询器 / 越界一律 0（= 未分配），**不拒绝下单**：编号是线下核销的凭证，
+// 不是成交前提。两个 adapter 共用这一份，别各写一套。
+func agentClaimNumber(ctx context.Context, reader fulfillment.AgentClaimNumberReader, userID string) int {
+	if reader == nil || userID == "" {
+		return 0
+	}
+	number, err := reader.AgentClaimNumber(ctx, userID)
+	if err != nil || number < 1 || number > 10000000 {
+		return 0
+	}
+	return number
 }
 
 // ORDER-MATERIALIZE-AUDIT-001：两条跨域物化路径都走 fulfillment.MaterializedOrder
@@ -163,6 +182,8 @@ func (a sceneFulfillmentAdapter) EnsureInvitationOrder(ctx context.Context, reco
 	order, err := fulfillment.MaterializedOrder(record.ID, orderNo, record.RequesterID, record.AgentID, record.SceneID, fulfillment.OrderSnapshot{
 		ServiceSKU: record.ServiceSKU, NeedVersion: record.SceneID, StartTime: record.StartTime, MeetingContext: record.MeetingContext,
 		AgreedCompensation: record.AgreedCompensation, Currency: record.Currency, IncludedScope: record.IncludedScope,
+		// ORDER-AGENT-CLAIM-NO-001：技师号随单冻结。
+		AgentClaimNumber: agentClaimNumber(ctx, a.claimNumbers, record.AgentID),
 	}, time.Now())
 	if errors.Is(err, fulfillment.ErrCashEligibility) {
 		return fmt.Errorf("%w: %w", scene.ErrOrderNotEligible, err)
@@ -184,6 +205,8 @@ func (a marketplaceFulfillmentAdapter) EnsureOrder(ctx context.Context, record m
 	}
 	order, err := fulfillment.MaterializedOrder(record.ID, orderNo, record.RequesterID, record.AgentID, record.NeedID, fulfillment.OrderSnapshot{
 		ServiceSKU: "CITY_COMPANION", NeedVersion: record.NeedID, Scenario: record.Scenario,
+		// ORDER-AGENT-CLAIM-NO-001：技师号随单冻结。
+		AgentClaimNumber: agentClaimNumber(ctx, a.claimNumbers, record.AgentID),
 	}, time.Now())
 	if err != nil {
 		return err

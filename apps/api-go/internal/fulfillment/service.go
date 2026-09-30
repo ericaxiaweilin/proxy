@@ -74,6 +74,16 @@ type OrderSnapshot struct {
 	// 机会快照带入；slot/scene 路径没有该信息，保持空。空 = 历史数据，
 	// 客户端按金额档兜底。
 	Scenario string `json:"scenario,omitempty"`
+	// ORDER-AGENT-CLAIM-NO-001：接单方的接单编号（技师号，identity.agent_claim_numbers，
+	// 注册时顺序分配、1 起无跳号、至少 3 位零填充）。
+	//
+	// **这不是 user id**：Agent 字段是 usr_xxx 这种内部主键，线下对不上号；技师号
+	// 才是「打电话能报、扫一眼能认」的那个号（用户：「类似于按摩店的技师都有数字编号」）。
+	// 所以它必须随订单冻结下来，条款变更也不许改 —— 当场是谁接的单，事后核销要对得上。
+	//
+	// 0 = 该接单方没有编号（内存仓 / 迁移前的历史单 / 编号未分配），客户端按
+	// 「未分配」处理：不画这一行，也绝不拿 user id 或订单编号冒充。
+	AgentClaimNumber int `json:"agentClaimNumber,omitempty"`
 	// R8 Pillar #6: Cash Eligibility 状态机。仅在 SettlementMode
 	// = DIRECT_SETTLEMENT 时生效。ALLOW/REVIEW/PLATFORM_PAY_REQUIRED/
 	// BLOCK 四态之一。PLATFORM_PAY 任务此字段为空串。写入快照后不
@@ -564,6 +574,16 @@ type Service struct {
 	// orderNumbers 分配全数字订单编号（ORDER-NO-001）。生产接 Postgres 序列，
 	// 与活动报名共用同一个分配器；默认进程内计数器（开发 / 单测）。
 	orderNumbers ordernumber.Allocator
+	// agentClaimNumbers 查接单方的接单编号（ORDER-AGENT-CLAIM-NO-001）。生产接
+	// identity.agent_claim_numbers；nil = 查不到（内存仓 / 未接），快照里该字段留 0，
+	// 客户端隐藏这一行。查不到**不拒绝下单** —— 编号是展示用的，缺了不能挡住成交。
+	agentClaimNumbers AgentClaimNumberReader
+}
+
+// AgentClaimNumberReader 按 user id 查接单编号（技师号）。谁查不到返回 0 + nil error
+// （0 = 未分配，是正常状态不是失败）；只有真正的存储故障才返回 error。
+type AgentClaimNumberReader interface {
+	AgentClaimNumber(ctx context.Context, userID string) (int, error)
 }
 
 // jurisdictionResolver is a one-method interface so the
@@ -639,6 +659,34 @@ func (s *Service) WithOrderNumbers(allocator ordernumber.Allocator) *Service {
 
 // OrderNumbers 返回当前的编号分配器（跨域物化订单的适配器用同一个）。
 func (s *Service) OrderNumbers() ordernumber.Allocator { return s.orderNumbers }
+
+// WithAgentClaimNumbers 接上接单编号查询（ORDER-AGENT-CLAIM-NO-001）。main.go 把它
+// 指向 identity 仓，下单冻结快照时把技师号一起冻进去。
+func (s *Service) WithAgentClaimNumbers(reader AgentClaimNumberReader) *Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentClaimNumbers = reader
+	return s
+}
+
+// resolveAgentClaimNumber 取接单方的接单编号。
+//
+// **查不到不是错误**：0 = 未分配 / 没接查询器，客户端隐藏这一行。编号是线下核销的
+// 凭证，不是成交前提 —— 存储故障时也不该把用户挡在门外（fail-open 只在这一处，
+// 其余门禁照旧 fail-closed）。用户：「不接单 接单编号暂时隐藏」。
+func (s *Service) resolveAgentClaimNumber(ctx context.Context, userID string) int {
+	if s.agentClaimNumbers == nil || userID == "" {
+		return 0
+	}
+	number, err := s.agentClaimNumbers.AgentClaimNumber(ctx, userID)
+	if err != nil {
+		return 0
+	}
+	if number < 1 || number > 10000000 {
+		return 0
+	}
+	return number
+}
 
 // OrderNumberSource 由能提供持久编号分配器的仓储实现（PG：共享序列）。
 type OrderNumberSource interface {
@@ -982,6 +1030,8 @@ func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.R
 		// 任务必填 (默认 ALLOW), PLATFORM_PAY 任务空串.
 		CashEligibilityStatus: cashStatus,
 		CashEligibilityReason: cashReason,
+		// ORDER-AGENT-CLAIM-NO-001：接单方的接单编号随单冻结。
+		AgentClaimNumber: s.resolveAgentClaimNumber(ctx, p.AgentID),
 	}
 	orderNo, err := s.nextOrderNo(ctx)
 	if err != nil {
@@ -1086,7 +1136,7 @@ func (s *Service) createSlotOffer(ctx context.Context, e command.Envelope) comma
 	}
 	// ORDER-OFFER-COMP-001: 接单即 CONFIRMED，没有人工复核的节拍 —— 过不了现金门的
 	// 报价在创建时就拒掉，不要让服务方接到一张接不了的单。
-	if rejected, blocked := cashEligibilityGate(e, offerSnapshot(offer), "offerId", offer.ID); blocked {
+	if rejected, blocked := cashEligibilityGate(e, offerSnapshot(offer, 0), "offerId", offer.ID); blocked {
 		return rejected
 	}
 	domainEvents := []event.DomainEvent{event.New("SlotOfferCreated", "Offer", offer.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
@@ -1139,7 +1189,7 @@ func (s *Service) acceptSlotOffer(ctx context.Context, e command.Envelope) comma
 // 差异只在校验段（档位查 slot，主题查 topic），落库走同一条
 // AcceptOfferAndCreateOrder（主题订单的 task/slot 存 NULL，不触发档位唯一索引）。
 func (s *Service) acceptOfferAsOrder(ctx context.Context, e command.Envelope, offer Offer, now time.Time) command.Result {
-	snapshot := offerSnapshot(offer)
+	snapshot := offerSnapshot(offer, s.resolveAgentClaimNumber(ctx, offer.AgentID))
 	if rejected, blocked := cashEligibilityGate(e, snapshot, "offerId", offer.ID); blocked {
 		return rejected
 	}
@@ -2139,7 +2189,7 @@ func cashEligibilityGate(e command.Envelope, snapshot OrderSnapshot, refKey, ref
 }
 
 // offerSnapshot 是接单时冻结进订单的快照（Gate G）：金额来自报价本身。
-func offerSnapshot(offer Offer) OrderSnapshot {
+func offerSnapshot(offer Offer, agentClaimNumber int) OrderSnapshot {
 	currency := offer.Currency
 	if currency == "" {
 		currency = "VND"
@@ -2155,6 +2205,9 @@ func offerSnapshot(offer Offer) OrderSnapshot {
 		SettlementMode:        "DIRECT_SETTLEMENT",
 		CashEligibilityStatus: cashStatus,
 		CashEligibilityReason: cashReason,
+		// ORDER-AGENT-CLAIM-NO-001：接单编号在这一刻冻结（不是报价创建时 —— 报价
+		// 可能挂着没人接，接单才是「当场是谁接的单」成立的那一刻）。
+		AgentClaimNumber: agentClaimNumber,
 	}
 }
 
