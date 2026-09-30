@@ -11901,3 +11901,36 @@ if [ -n "$_tscale" ]; then
   exit 1
 fi
 echo "    UI-TYPOGRAPHY-MIN-001: PASS (实现 0 处 <11px · 原型 0 处 <11px · 0 处非导航 10px · token 无未标注的 <11px)"
+
+# DOC-PATH-DRIFT-001（2026-09-30）：**活文档**里不许把读者指到已废弃的仓库路径。
+#
+# AGENTS.md 曾经写着「`/Users/thanhhuyennguyen/work/kake` 是集成工作区」——
+# 而所有实际工作都在 `~/proxy`。每个 agent 读 AGENTS.md 都会去错仓库：那条规则
+# 本来是为了保护基线（不许在集成区乱改），结果把人导向一棵停在 e958e97、
+# 不含当天任何门禁改动的过期副本。这是唯一一处会**主动造成破坏**的文档漂移。
+#
+# 只扫活文档（AGENTS.md / docs/development / architecture / scripts）。**故意不扫**
+#   - docs/archive/**            —— 归档记录的是"当时的状态"，改它等于篡改历史；
+#   - docs/design/BASELINE_CHANGELOG.md —— 它记的正是"kake 曾经有 56 个 tag、
+#     proxy 有 0 个"这类迁移过程的事实陈述。
+# 判据也只认**操作性引用**（`cd ~/...`、仓库路径声明），历史叙述里提到目录名不算。
+_stale_dir='work/kake'
+_doc_hits=$(rg -n --no-heading -e "cd ~?/?$_stale_dir" \
+  AGENTS.md docs/development architecture scripts 2>/dev/null \
+  | rg -v '^\S+:[0-9]+:\s*(#|>)?\s*(历史|当时|那|已|曾)' \
+  | rg -v '不要|别|never|Never|stale|copy|副本' || true)
+if [ -n "$_doc_hits" ]; then
+  echo "  FAIL [DOC-PATH-DRIFT-001]: 活文档里还在把读者指到已废弃的 ${_stale_dir}/：" >&2
+  echo "        那是 2026-09-30 之前的副本（HEAD e958e97），不含之后的门禁 / 设计改动。" >&2
+  echo "        在那儿验证等于验证一棵过期的树，会得出「这条没问题」的错误结论。" >&2
+  echo "        命中：" >&2
+  echo "$_doc_hits" | head -5 | sed 's/^/        /' >&2
+  exit 1
+fi
+# 反向也钉一下：AGENTS.md 必须明确写出真正的集成工作区，否则上面的禁令没有落点。
+if ! rg -q '/Users/thanhhuyennguyen/proxy` is the integration workspace' AGENTS.md 2>/dev/null; then
+  echo "  FAIL [DOC-PATH-DRIFT-001]: AGENTS.md 没有声明真正的集成工作区（~/proxy）。" >&2
+  echo "        只写「别去 kake」而不说该去哪，等于只留禁令不留出路。" >&2
+  exit 1
+fi
+echo "    DOC-PATH-DRIFT-001: PASS (活文档无 work/kake 操作性引用 · AGENTS.md 已声明 ~/proxy 为集成区)"

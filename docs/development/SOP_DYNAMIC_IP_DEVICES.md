@@ -338,7 +338,7 @@ xcrun devicectl device process launch --device <uuid> --terminate-existing \
 
 ## 8. 当前本机快照（2026-09-12）
 
-- 仓库路径：`/Users/thanhhuyennguyen/work/kake` —— **已不在 `~/Desktop/kake`**。
+- 仓库路径：`/Users/thanhhuyennguyen/proxy` —— 唯一基线。**不要**用 `/Users/thanhhuyennguyen/work/kake`：那是 2026-09-30 之前的副本（HEAD `e958e97`），不含之后的门禁改动，在那儿验证等于验证一棵过期的树。
   搬家后旧绝对路径会残留在 `ios/Pods` 的 `React-VFS.yaml` 引用里，导致
   `xcodebuild` 直接失败（`virtual filesystem overlay file ... not found`）。
   修法：`LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pod install`。
@@ -356,7 +356,7 @@ xcrun devicectl device process launch --device <uuid> --terminate-existing \
 
 ```bash
 # 0) 在 kake 根目录（注意：不是 ~/Desktop/kake）
-cd /Users/thanhhuyennguyen/work/kake
+cd /Users/thanhhuyennguyen/proxy
 
 # 1) 启动模拟器（如未运行）
 pnpm --filter @proxy/mobile android:emulator &

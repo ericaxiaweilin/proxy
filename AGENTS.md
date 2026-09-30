@@ -6,7 +6,12 @@ interactive terminal agents.
 
 ## Integration workspace
 
-- `/Users/thanhhuyennguyen/work/kake` is the integration workspace.
+- `/Users/thanhhuyennguyen/proxy` is the integration workspace — this repository.
+- `/Users/thanhhuyennguyen/work/kake` is a **stale pre-2026-09-30 copy** (HEAD
+  `e958e97`). It does not contain any of the gate or design work done since. Never
+  edit, verify, or run anything there: a green result from that tree says nothing
+  about this one, which is the exact "silently tests the other tree" failure that
+  `scripts/e2e-isolated.sh` exists to prevent.
 - Only the designated commander may edit or commit in this workspace.
 - All other agents are read-only here. Do not run formatters, generators,
   package installers, commits, rebases, or file edits in this workspace.

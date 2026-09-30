@@ -322,7 +322,11 @@ CREATE TABLE ledger.entries (
 ## 附：复核命令
 
 ```bash
-cd ~/work/kake/apps/api-go
+# 唯一基线是 ~/proxy。**不要** cd ~/work/kake —— 那是 2026-09-30 之前的副本，
+# HEAD 停在 e958e97，不含当天之后的任何门禁改动；照着旧路径复核等于在验证一棵
+# 过期的树，还容易得出"这条没问题"的错误结论（scripts/e2e-isolated.sh 头注释里
+# 警告过的 silently-tests-the-other-tree）。
+cd ~/proxy/apps/api-go
 
 # 商户主体存在且持久化（我上次审查漏掉的部分）
 sed -n '1,45p' migrations/023_business_workspace.sql
