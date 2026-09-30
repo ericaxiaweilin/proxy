@@ -11878,6 +11878,17 @@ if [ "$_typo_ten" != "0" ]; then
   grep -nE 'fontSize: 10([^0-9]|$)' "${_typo_files[@]}" 2>/dev/null | head -5 >&2
   exit 1
 fi
+# 原型侧：33 个基准原型是视觉基准图的来源，基准图本身不能编码违规小字。
+# 历史上这里有 3878 处 <11px（其中 3829 处在 CSS 块、49 处在行内 style 属性），
+# 已全部夹到 11px 并重渲染基准图。这条防止原型再退回小字。
+_proto_small=$(grep -rhoE 'font-size:\s*(10\.5|9\.5|9|8\.5|8|7\.5|7|6\.8|6\.5)px' docs/design/references/*.html 2>/dev/null | wc -l | tr -d ' ')
+if [ "$_proto_small" != "0" ]; then
+  echo "  FAIL [UI-TYPOGRAPHY-MIN-001]: 原型里还有 ${_proto_small} 处 <11px 字号（CSS 块与行内 style 都算）。" >&2
+  echo "        用户裁决：「不能太小」—— 11px 是全 App 最小正文级别，装饰性小字也不例外。" >&2
+  echo "        改完必须重跑 node scripts/render-prototypes.mjs，否则基准图与原型不一致。" >&2
+  grep -rnoE 'font-size:\s*(10\.5|9\.5|9|8\.5|8|7\.5|7|6\.8|6\.5)px' docs/design/references/*.html 2>/dev/null | head -5 >&2
+  exit 1
+fi
 # token 侧：scale 里不许再出现 <11 的值；10 必须同时标在 navOnly。
 _tscale=$(node -e '
 const fs=require("fs");
@@ -11889,4 +11900,4 @@ if [ -n "$_tscale" ]; then
   echo "        收编它们等于用门禁把违规合法化。要放开规则，先改 R3 文档。" >&2
   exit 1
 fi
-echo "    UI-TYPOGRAPHY-MIN-001: PASS (实现 0 处 <11px · 0 处非导航 10px · token 无未标注的 <11px)"
+echo "    UI-TYPOGRAPHY-MIN-001: PASS (实现 0 处 <11px · 原型 0 处 <11px · 0 处非导航 10px · token 无未标注的 <11px)"
