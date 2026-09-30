@@ -136,8 +136,17 @@ gate_g4_drift() {
   fi
   echo "  handler files: OK (all canonical files tracked)"
   echo "  workspace hygiene: checking untracked source and misplaced build outputs..."
+  # Same rule as pin hygiene below: "the check could not run" must never read as
+  # "the check passed". If `git status` fails, the filtered result is empty and
+  # this step would report OK over an unknown workspace.
+  local hygiene_status
+  if ! hygiene_status=$(git status --porcelain --untracked-files=all); then
+    echo "  FAIL: git status failed — workspace hygiene cannot be determined," >&2
+    echo "        and an empty result must not read as 'clean'." >&2
+    return 1
+  fi
   local hygiene_failures
-  hygiene_failures=$(git status --porcelain --untracked-files=all | awk '
+  hygiene_failures=$(printf '%s\n' "$hygiene_status" | awk '
     /^\?\?/ {
       path=substr($0,4)
       if (path ~ /\.(go|ts|tsx|js|jsx|mjs|cjs|sql|json|yaml|yml)$/ ||
@@ -180,8 +189,14 @@ gate_g4_drift() {
     echo "        'could not run' must never read the same as 'no leaks'." >&2
     return 1
   fi
+  local untracked_status
+  if ! untracked_status=$(git status --porcelain 2>/dev/null); then
+    echo "  FAIL: git status failed — the untracked set cannot be determined, so this" >&2
+    echo "        check would pass over an unknown set of untracked files." >&2
+    return 1
+  fi
   local untracked_files
-  untracked_files=$(git status --porcelain 2>/dev/null | awk '/^\?\?/ {print $2}')
+  untracked_files=$(printf '%s\n' "$untracked_status" | awk '/^\?\?/ {print $2}')
   local untracked_imports_str
   if ! untracked_imports_str=$(git ls-files apps/mobile/src apps/api-go 2>/dev/null \
     | grep -E '\.(ts|tsx|go)$' \
