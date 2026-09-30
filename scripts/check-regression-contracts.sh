@@ -12037,7 +12037,60 @@ if [ -f "$_seedsql" ]; then
       echo "  FAIL [DEV-SEED-SHOPS-001]: 有 ${_n_nodata} 家 devseed 店缺 address 或 category。" >&2
       exit 1
     fi
-    echo "    DEV-SEED-SHOPS-001: PASS (${_n_stores} 店 / ${_n_users} 用户 · 头像全部指向真实 READY 资产 · 重跑幂等且不覆盖 · 地址品类无缺失)"
+    # ── 帖子（seed_dev_shops_users_posts.sql）────────────────────────────────
+    # 「数据在库里」不等于「界面上看得到」。2026-09-30 灌完 20 店 + 30 用户之后，
+    # 模拟器里**一点变化都没有**，查出来两个原因都不是"没灌进去"：
+    #   · feed 只显示帖子。30 个用户建好了但一条帖子都没有 ⇒ feed 里一个都不出现。
+    #   · ListBusinessStores 是 `WHERE business_id=$1`，只返回**当前登录商家自己的店**
+    #     （设计如此），所以 20 家各有 owner 的新店对当前登录态天然不可见。
+    # 所以必须钉住：每个 devseed 用户至少有一条公开帖子，且帖子能在 feed 里被读到。
+    _n_posts="$(psql "$_dsn2" -tAc "SELECT count(*) FROM localnet.posts WHERE id LIKE 'post_devseed_%'" 2>/dev/null || echo 0)"
+    _n_post_orphans="$(psql "$_dsn2" -tAc "SELECT count(*) FROM localnet.posts p
+        WHERE p.id LIKE 'post_devseed_%'
+          AND NOT EXISTS (SELECT 1 FROM identity.user_accounts u WHERE u.id = p.author_id)" 2>/dev/null || echo 0)"
+    if [ "${_n_post_orphans}" != "0" ]; then
+      echo "  FAIL [DEV-SEED-SHOPS-001]: 有 ${_n_post_orphans} 条 devseed 帖子的作者不是真实账号 —— 会成孤儿行。" >&2
+      exit 1
+    fi
+    # 断链媒体：media_refs 的元素是 {"sortOrder","mediaAssetId"} 对象数组。第一版写成
+    # 裸字符串数组 ["ma_…"]，两种形状混着，读模型取 mediaAssetId 取到 undefined，
+    # 界面就是一片没图的帖子 —— 而自检正是靠这条把它揪出来的。
+    _n_broken_media="$(psql "$_dsn2" -tAc "SELECT count(*)
+        FROM localnet.posts p
+        CROSS JOIN LATERAL jsonb_array_elements(
+          CASE WHEN jsonb_typeof(p.media_refs)='array' THEN p.media_refs ELSE '[]'::jsonb END) m
+        LEFT JOIN media.media_assets a ON a.media_asset_id = m->>'mediaAssetId'
+        WHERE p.id LIKE 'post_devseed_%'
+          AND m->>'mediaAssetId' IS NOT NULL
+          AND a.media_asset_id IS NULL" 2>/dev/null || echo 0)"
+    if [ "${_n_broken_media}" != "0" ]; then
+      echo "  FAIL [DEV-SEED-SHOPS-001]: 有 ${_n_broken_media} 处 media_refs 指向不存在的资产。" >&2
+      echo "        界面表现是帖子无图（读模型拿到 undefined 的 mediaAssetId）。" >&2
+      echo "        media_refs 元素必须是 {\"sortOrder\",N,\"mediaAssetId\",\"ma_…\"} 对象，不是裸字符串。" >&2
+      exit 1
+    fi
+    # 「库里有多少条」不是判据 —— 用户遇到的就是：20 店 + 30 用户全在库里，
+    # 但模拟器一点没变。真正要钉的是**从 HTTP 面上读得到**。所以帖子为 0、
+    # 或者 feed 里读不到 devseed，都判红。
+    #
+    # 第一版只把 feed 是否可见写进 PASS 文案、帖子数为 0 仍判绿 —— 那正是用户
+    # 报「模拟器没更新」时数据库的样子。这类"数据在、界面看不到"必须自己判红。
+    if [ "${_n_posts}" -lt 30 ]; then
+      echo "  FAIL [DEV-SEED-SHOPS-001]: devseed 帖子只有 ${_n_posts} 条（应 30）。" >&2
+      echo "        库里多了用户但没有帖子 ⇒ feed 里一个都看不到，等于没加。" >&2
+      echo "        跑：psql \"\$DATABASE_URL\" -f apps/api-go/scripts/seed_dev_shops_users_posts.sql" >&2
+      exit 1
+    fi
+    if curl -sf --noproxy '*' --max-time 8 "http://127.0.0.1:4100/v1/feed" 2>/dev/null \
+       | grep -q 'post_devseed'; then
+      _feed_ok="feed 已可见"
+    else
+      echo "  FAIL [DEV-SEED-SHOPS-001]: 库里有 ${_n_posts} 条 devseed 帖子，但 /v1/feed 里读不到。" >&2
+      echo "        数据在库 ≠ 界面上看得到 —— 这正是 2026-09-30 用户报的现象。" >&2
+      echo "        查 feed 的 where 条件与排序（created_at DESC），以及 API 是否在跑旧二进制。" >&2
+      exit 1
+    fi
+    echo "    DEV-SEED-SHOPS-001: PASS (${_n_stores} 店 / ${_n_users} 用户 / ${_n_posts} 帖 · 头像与媒体全部指向真实 READY 资产 · 重跑幂等且不覆盖 · ${_feed_ok})"
   else
     echo "    DEV-SEED-SHOPS-001: SKIP (开发库不可达 —— 这条要活的 DB)"
   fi

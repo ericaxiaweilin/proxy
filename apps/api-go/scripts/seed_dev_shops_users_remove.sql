@@ -55,7 +55,8 @@ END $$;
 \echo ''
 \echo '── 将要删除的行（确认无误再继续）──'
 
-SELECT 'business.stores'    AS table_name, count(*) FROM business.stores    WHERE id LIKE 'store_devseed_%'
+SELECT 'localnet.posts'      AS table_name, count(*) FROM localnet.posts      WHERE id LIKE 'post_devseed_%'
+UNION ALL SELECT 'business.stores',              count(*) FROM business.stores              WHERE id LIKE 'store_devseed_%'
 UNION ALL SELECT 'business.accounts',      count(*) FROM business.accounts      WHERE id LIKE 'biz_devseed_%'
 UNION ALL SELECT 'identity.profiles',      count(*) FROM identity.profiles      WHERE user_account_id LIKE 'user_devseed_%'
 UNION ALL SELECT 'identity.user_accounts', count(*) FROM identity.user_accounts WHERE id LIKE 'user_devseed_%'
@@ -71,6 +72,7 @@ BEGIN;
 -- business.accounts 的外键是 ON DELETE RESTRICT，所以必须先删 account；
 -- identity.user_accounts 侧同理（profiles 是 CASCADE，但显式先删更清楚，
 -- 免得依赖 CASCADE 悄悄改变行为）。
+DELETE FROM localnet.posts      WHERE id LIKE 'post_devseed_%';
 DELETE FROM business.stores    WHERE id LIKE 'store_devseed_%';
 DELETE FROM business.accounts  WHERE id LIKE 'biz_devseed_%';
 DELETE FROM identity.profiles   WHERE user_account_id LIKE 'user_devseed_%';
@@ -80,7 +82,8 @@ COMMIT;
 
 \echo ''
 \echo '── 删除后（应全为 0）──'
-SELECT 'business.stores' AS table_name, count(*) FROM business.stores    WHERE id LIKE 'store_devseed_%'
+SELECT 'localnet.posts' AS table_name, count(*) FROM localnet.posts      WHERE id LIKE 'post_devseed_%'
+UNION ALL SELECT 'business.stores',              count(*) FROM business.stores              WHERE id LIKE 'store_devseed_%'
 UNION ALL SELECT 'business.accounts',      count(*) FROM business.accounts      WHERE id LIKE 'biz_devseed_%'
 UNION ALL SELECT 'identity.profiles',      count(*) FROM identity.profiles      WHERE user_account_id LIKE 'user_devseed_%'
 UNION ALL SELECT 'identity.user_accounts', count(*) FROM identity.user_accounts WHERE id LIKE 'user_devseed_%'
