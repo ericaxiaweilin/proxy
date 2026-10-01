@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 338,
-  "updatedAt": "2026-09-30",
+  "baselineRevision": 339,
+  "updatedAt": "2026-10-01",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
     "visualReference": "Proxy_App_Design_System_R3_Visual.html",
@@ -60,7 +60,8 @@
       "version": "PERSONAL_PROFILE_ARCHITECTURE_V5_THREADS",
       "file": "docs/design/references/proxy_personal_profile_architecture_v5_threads.html",
       "status": "ACTIVE_SCREEN_REFERENCE",
-      "implementationStatus": "INVITE_ASK_BUTTON_REMOVED_ACCEPT_DECLINE_WIRED"
+      "implementationStatus": "INVITE_ASK_BUTTON_REMOVED_ACCEPT_DECLINE_WIRED_SETTINGS_HUB_REGROUPED_ACCOUNT_PRIVACY_GENERAL_SUBPAGES_settingssecurity_AND_locationprivacy_FUZZY_REGION_CONSENT_KIND_SEPARATE_FROM_PRECISE_GPS_EMERGENCY_CONTACTS_AND_SAFETY_EVENTS_WIRED_NO_DELIVERY_CLAIM_PROTOTYPE_ROWS_WITHOUT_BACKING_NOT_BUILT_MOCKUP_ARCHIVED_AS_Proxy_Settings_20261001_726714",
+      "sourceMockups": ["docs/design/references/Proxy_Settings_20261001_726714.html"]
     },
     {
       "scope": "social-contact-collaboration",
