@@ -686,10 +686,20 @@ describe("HOME-FORYOU-ORDER-007 成功页必须有返回键", () => {
 
 describe("HOME-FORYOU-PERSON-001 没有人就不是一个 For You 组合", () => {
   it("disables 选择 and says to pick a companion when there is no person", () => {
-    expect(source).toMatch(/const comboBlocked = comboConflicts\.length > 0 \|\| !gridPerson\b/);
-    expect(source).toContain('!gridPerson ? t("comboNeedPerson") : comboConflictText;');
+    // 「没选人就不能下单」这条规则本身没变，变的是 comboBlocked 的表达式。
+    //
+    // 原来钉的是**整条判据的字面量** `comboConflicts.length > 0 || !gridPerson`。
+    // HOME-FORYOU-SLOT-AVAIL-001（用户「点什么都灰」）把判据从
+    // 「任一槽位有冲突就置灰」改成「四个槽位**全部**不可用才置灰」，于是这行不匹配了。
+    //
+    // 但这条测试的本意是「没有同行人 ⇒ 不许进下单」，那仍然必须成立 ——
+    // 所以改成钉本意：缺人时分流到人选择器、提示文案还在、按钮仍用 comboBlocked。
+    expect(source).toMatch(/if \(!gridPerson\) \{ setChooser\("person"\); return; \}/);
+    expect(source).toContain('!gridPerson ? t("comboNeedPerson")');
     expect(source).toContain("disabled={comboBlocked}");
     expect(source).toContain('{comboBlocked ? <Text selectable style={styles.comboConflictText}>{comboBlockText}</Text> : null}');
+    // 缺人仍然算「当前组合不成立」—— 放行按钮 ≠ 放行缺人的组合。
+    expect(source).toMatch(/const currentComboBroken = !gridPerson \|\|/);
   });
   it("keeps a tappable empty 人 tile instead of silently dropping the slot", () => {
     expect(source).toContain('{ key: "person:none", slot: "person" as const, imageUri: undefined, glyph: "●", label: t("tileNoPerson"), sub: t("tileNoPersonSub") }');
@@ -714,9 +724,16 @@ describe("HOME-FORYOU-ORDER-GUARD-001 下单前资源冲突守卫", () => {
     // 钉字面量是在钉措辞 —— 本意是"四宫格那一步会查资源冲突、并用这两种文案
     // 说明为什么被拦"，不是"参数列表恰好长这样"。改成钉本意。
     expect(source).toMatch(/const orderConflict = detectOrderConflict\(\{[^}]*activityId: gridActivity\.activityId/);
+    // HOME-FORYOU-SLOT-AVAIL-001：冲突不再焊死按钮 —— 换一个槽位即可，
+    // 所以按钮只��「四槽全不可用」时禁用（见 for-you-slot-availability.test.ts）。
+    expect(source).toContain("const comboBlocked = !anySlotAvailable;");
     // HOME-FORYOU-ORDER-007：判重必须带上选中的同行人，否则换人也被判成重复下单。
     expect(source).toMatch(/detectOrderConflict\(\{[^}]*companionId: gridPerson\?\.id/);
-    expect(source).toContain("const comboBlocked = comboConflicts.length > 0 || !gridPerson || orderConflict !== undefined;");
+    // HOME-FORYOU-SLOT-AVAIL-001（用户「点什么都灰」）：原来是
+    //   comboConflicts.length > 0 || !gridPerson || orderConflict !== undefined
+    // —— 任一槽位有冲突就整体置灰，于是点什么都灰、用户什么都做不了。
+    // 改成「四槽全部不可用才置灰」，并把冲突分流到对应槽位让用户换一个。
+    expect(source).not.toContain("const comboBlocked = comboConflicts.length > 0 || !gridPerson || orderConflict !== undefined;");
     expect(source).toContain('t("orderConflictAlready", { orderNo: conflict.orderNo ?? "—" })');
     expect(source).toContain('t("orderConflictTime", { time: conflict.time, title: conflict.title })');
   });

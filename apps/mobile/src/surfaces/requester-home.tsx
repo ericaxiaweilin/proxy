@@ -1468,8 +1468,39 @@ export function RequesterHome({
             // HOME-FORYOU-ORDER-GUARD-001：已经下过这一单 / 这个时间段已经有单，也不能再下。
             const orderConflict = detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time, companionId: gridPerson?.id }, myOrders);
             const existingOrder = orderConflict?.kind === "ALREADY_ORDERED" ? myOrders.find((o) => o.activityId === gridActivity.activityId && !o.cancelled) : undefined;
-            const comboBlocked = comboConflicts.length > 0 || !gridPerson || orderConflict !== undefined;
-            const comboBlockText = orderConflict ? orderConflictText(orderConflict) : !gridPerson ? t("comboNeedPerson") : comboConflictText;
+
+            // HOME-FORYOU-SLOT-AVAIL-001（用户：「点什么都灰。理论上我们 for you 是4个
+            // 资源槽 检测冲突 4个全部不可用才灰，有一个可用都不能灰」）：
+            //
+            // 原来这里是 `comboConflicts.length > 0 || !gridPerson || orderConflict` ——
+            // **任何**一个槽位有问题就整体置灰。于是点哪个新人都灰、点哪个时间也灰，
+            // 用户什么都做不了：明明换一个槽位就能凑出一个可用组合，却被告知不行。
+            //
+            // 正确的判据是「**还有没有可用的组合**」，不是「当前这一个组合有没有冲突」。
+            // 冲突只说明"当前这一组不行"，而用户的下一步是**换一个槽位**，不是放弃。
+            // 所以：四个槽位各算一次可用性，**只有一个都拿不出可用值才置灰**。
+            //
+            // · 人：列表里有任何一个（服务端 nearby 或 fixture 都算）
+            // · 时间：distinctTimes 里有一个不与我的订单撞时段
+            // · 场景：sceneBriefs 里有 active 的
+            // · 地点：有可锁定的地点（由 detectComboConflicts 反映）
+            const personAvailable = filteredPeople.length > 0;
+            const timeAvailable = distinctTimes.length > 0
+              && !distinctTimes.every((t) => detectOrderConflict({ activityId: gridActivity.activityId, time: t }, myOrders)?.kind === "TIME_TAKEN");
+            const sceneAvailable = sceneBriefs.some((sc) => sc.active);
+            const placeAvailable = comboConflicts.every((c) => c.slot !== "place");
+
+            // 当前这一个组合有没有冲突 —— 冲突要**说清是哪个槽位**并把用户带到那
+            // 个选择器去，而不是把按钮焊死。
+            const currentComboBroken = !gridPerson || orderConflict !== undefined || comboConflicts.length > 0;
+            const anySlotAvailable = personAvailable || timeAvailable || sceneAvailable || placeAvailable;
+            // 全部槽位都拿不出可用值 ⇒ 真的走不下去，才置灰。
+            const comboBlocked = !anySlotAvailable;
+            // 还有别的槽位可选时，按钮可点；点了会提示"这一组冲突，换一个"并把
+            // 用户送到冲突的那个槽位，而不是直接拒绝。
+            const comboBlockText = !gridPerson ? t("comboNeedPerson")
+              : orderConflict && !timeAvailable && !sceneAvailable && !placeAvailable ? orderConflictText(orderConflict)
+              : comboConflictText || (orderConflict ? orderConflictText(orderConflict) : "");
             const remixAll = (): void => {
               // HOME-FORYOU-LOCK-001：中心键与 remixForYou 收成**同一条**重配链
               // （锁定轴跳过的口径只维护一份）。
@@ -1582,7 +1613,21 @@ export function RequesterHome({
                         真实计划"的通用说法，不是"付了钱"的意思）。 */}
                     <Pressable
                       disabled={comboBlocked}
-                      onPress={() => { setJoinMsg(undefined); setOrderDone(false); setOrderCodeCopied(false); setOrderNo(""); setJoinConfirmOpen(true); }}
+                      onPress={() => {
+                        // HOME-FORYOU-SLOT-AVAIL-001：按钮不再是"有冲突就焊死"，
+                        // 改成"把用户送到冲突的那个槽位去换一个"。
+                        //
+                        // 置灰只在四个槽位**全部**没有可用值时才发生，所以走到这里的
+                        // 时候至少有一个槽位是能换的。直接开确认页会把冲突带过去
+                        // （明明有可用组合却让用户下单失败），所以这里先分流：
+                        // 缺人 → 开人选择器；冲突在时间/地点 → 开对应选择器。
+                        if (!gridPerson) { setChooser("person"); return; }
+                        const timeClash = orderConflict?.kind === "TIME_TAKEN";
+                        const placeClash = comboConflicts.some((c) => c.slot === "place");
+                        if (timeClash) { setChooser("time"); return; }
+                        if (placeClash) { setChooser("place"); return; }
+                        setJoinMsg(undefined); setOrderDone(false); setOrderCodeCopied(false); setOrderNo(""); setJoinConfirmOpen(true);
+                      }}
                       style={[styles.gridCta, responseText && styles.gridCtaFlush, comboBlocked && styles.gridCtaDisabled]}
                       accessibilityLabel={comboBlocked ? comboBlockText : t("selectComboCtaA11y")}
                     >
