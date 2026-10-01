@@ -12391,3 +12391,174 @@ if [ -f apps/api-go/internal/platform/postgres/activity.go ]; then
   fi
   echo "    HOME-FORYOU-ORDER-007: PASS (服务端判重带 companion · 快照可读出行 · 客户端两处都带 · 无快照旧单放行不锁死)"
 fi
+
+# SAFETY-NET-001（2026-10-01）：安全网链路。这条钉守的是**口径**，不是字段映射。
+#
+# 本仓库**没有**任何向任意用户送达的通道：notification.LogPushProvider 只是
+# log.Printf，SMS / SMTP 只服务登录验证码。所以「紧急联系人」这件事只有两句真话：
+#
+#   ① 服务端 eventBody.deliveredToContacts **恒为 false**，而且这个字段必须
+#      **存在** —— 存在才让「字段缺失」不能被读成「已送达」。
+#   ② 客户端必须有一句明说「平台不会自动通知联系人」的免责声明，并且界面真的
+#      渲染它、且渲染在按钮**上面**（按下之前就该看到，不是事后）。
+#   ③ 事件里的坐标只能是粗化后的；没有生效的位置授权时要**丢掉坐标、仍然记事件**
+#      （求助本身绝不能因为一个同意状态而丢失）。
+#
+# 为什么值得一条钉：这三条被改掉时都"看起来很合理" —— 把恒 false 改成读真实值
+# （"更诚实"）、把免责声明删掉（"啰嗦"）、把没同意时的坐标照记（"别丢数据"）。
+# 而代价是用户以为紧急联系人已经收到通知了，于是不去自己打那个电话。
+#
+# 判据：先剥掉整行注释再 grep，否则 Go 里那句
+#   `// DeliveredToContacts is always false` 会把这几个针喂绿。
+safety_strip_comments() { grep -vE '^[[:space:]]*(//|#|\*)'; }
+SAFETY_SERVER="apps/api-go/internal/emergency/service.go"
+SAFETY_CORE="apps/api-go/internal/emergency/emergency.go"
+SAFETY_CARD="apps/mobile/src/components/safety-event-card.tsx"
+SAFETY_CLIENT="apps/mobile/src/emergency-client.ts"
+SAFETY_METSX="apps/mobile/src/surfaces/me.tsx"
+
+# ① 送达：字段必须在，且恒 false。
+if ! safety_strip_comments < "$SAFETY_SERVER" | grep -qF 'DeliveredToContacts bool'; then
+  echo "  FAIL [SAFETY-NET-001]: 事件体里的 deliveredToContacts 字段不见了 ——" >&2
+  echo "        字段缺失会被客户端读成「已送达」，比恒 false 更糟。" >&2
+  exit 1
+fi
+if ! safety_strip_comments < "$SAFETY_SERVER" | grep -qE 'DeliveredToContacts:[[:space:]]*false'; then
+  echo "  FAIL [SAFETY-NET-001]: 服务端不再恒报 deliveredToContacts=false ——" >&2
+  echo "        本仓库没有向任意用户送达的通道（LogPushProvider 只 log.Printf，" >&2
+  echo "        SMS/SMTP 只服务登录验证码）。改成读真实值 = 把「没送出去」说成送出。" >&2
+  exit 1
+fi
+
+# ② 免责声明必须在客户端里，且文案要真的说出「不会自动通知」。
+if ! grep -qF 'export function deliveryDisclaimer' "$SAFETY_CLIENT" ||
+   ! grep -qF '不会自动通知' "$SAFETY_CLIENT"; then
+  echo "  FAIL [SAFETY-NET-001]: 客户端少了「平台不会自动通知紧急联系人」这句 ——" >&2
+  echo "        不写清楚，用户会以为联系人已经收到消息，于是不去自己打电话。" >&2
+  exit 1
+fi
+if ! safety_strip_comments < "$SAFETY_CARD" | grep -qF 'deliveryDisclaimer()'; then
+  echo "  FAIL [SAFETY-NET-001]: 免责声明没有被渲染 ——" >&2
+  echo "        函数在但界面不显示，等于没写。" >&2
+  exit 1
+fi
+
+# ③ 位置：粗化必须在写库前发生；没授权时丢坐标、不丢事件。
+if ! safety_strip_comments < "$SAFETY_CORE" | grep -qF 'func Coarsen(' ||
+   ! safety_strip_comments < "$SAFETY_SERVER" | grep -qF 'coarse := Coarsen(lat, lng)'; then
+  echo "  FAIL [SAFETY-NET-001]: 事件坐标没有经过 Coarsen 就落库 ——" >&2
+  echo "        安全事件里存精确点，就是把敏感位置原样留下。" >&2
+  exit 1
+fi
+if ! safety_strip_comments < "$SAFETY_SERVER" | grep -qF 'NO_LOCATION_CONSENT'; then
+  echo "  FAIL [SAFETY-NET-001]: 「没有位置授权所以丢弃坐标」这个理由不见了 ——" >&2
+  echo "        「取不出来」和「确实没有」必须分开说，否则用户无从判断要不要补授权。" >&2
+  exit 1
+fi
+
+# ④ 接线：三张卡片必须真的从设置页渲染出来，并且位置来源是接上的。
+for need in '<FuzzyLocationCard' '<EmergencyContactsCard' '<SafetyEventCard' 'getFix={emergencyFixSource}'; do
+  if ! grep -qF "$need" "$SAFETY_METSX"; then
+    echo "  FAIL [SAFETY-NET-001]: 设置页没有渲染 ${need} ——" >&2
+    echo "        服务端命令接好了、界面不渲染，等于用户看不到这个功能。" >&2
+    exit 1
+  fi
+done
+
+# ⑤ 两种位置同意必须是**两行**（NĐ 356/2025 Art. 6.3 禁止捆绑同意）。
+if ! safety_strip_comments < "$SAFETY_METSX" | grep -qF '<PreciseLocationCard' ||
+   ! safety_strip_comments < "$SAFETY_METSX" | grep -qF '<FuzzyLocationCard'; then
+  echo "  FAIL [SAFETY-NET-001]: 精确位置与模糊位置没有同时作为独立授权出现 ——" >&2
+  echo "        合成一个开关就是捆绑同意，Art. 6.3 明令禁止。" >&2
+  exit 1
+fi
+
+# ⑥ 迁移：只追加 + 两种 kind。
+if ! grep -qF 'reject_emergency_event_mutation' apps/api-go/migrations/151_emergency_contacts_and_events.sql; then
+  echo "  FAIL [SAFETY-NET-001]: 紧急事件表的只追加触发器不见了 ——" >&2
+  echo "        事件是留痕，能改就等于能篡改。" >&2
+  exit 1
+fi
+if ! grep -qF "CHECK (kind IN ('PRECISE_GPS', 'FUZZY_REGION'))" apps/api-go/migrations/152_fuzzy_region_location_consent.sql; then
+  echo "  FAIL [SAFETY-NET-001]: location_consents 的 kind 又只认 PRECISE_GPS 了 ——" >&2
+  exit 1
+fi
+
+# ⑦ 契约：emergency 域必须在 openapicmds 的清单里，否则它的命令能 dispatch
+#    却不在契约里，而漂移检查照样绿（OPENAPI-DOMAIN-001）。
+if ! grep -qF '{"emergency", "Emergency"}' apps/api-go/internal/openapicmds/openapicmds.go; then
+  echo "  FAIL [SAFETY-NET-001]: emergency 域没登记进 openapicmds ——" >&2
+  echo "        漏登记 = 命令不在契约里，而 openapi 漂移检查看不出来。" >&2
+  exit 1
+fi
+
+require_test "SAFETY-NET-001" "./internal/emergency" \
+  "TestEventNeverClaimsDelivery" \
+  "apps/api-go/internal/emergency/emergency_test.go" || exit $?
+require_test "SAFETY-NET-001" "./internal/emergency" \
+  "TestEventDropsLocationWithoutConsent" \
+  "apps/api-go/internal/emergency/emergency_test.go" || exit $?
+require_test "SAFETY-NET-001" "./internal/emergency" \
+  "TestCoarsenNeverReturnsTheExactPoint" \
+  "apps/api-go/internal/emergency/emergency_test.go" || exit $?
+require_test "SAFETY-NET-001" "./internal/emergency" \
+  "TestUpsertRequiresExplicitAttestation" \
+  "apps/api-go/internal/emergency/emergency_test.go" || exit $?
+pnpm --filter @proxy/mobile exec vitest run src/emergency-client.test.ts || exit $?
+echo "    SAFETY-NET-001: PASS (事件不谎报送达 · 位置粗化且无授权即丢弃 · 联系人需显式声明同意 · 两种位置同意各自独立 · 客户端有免责声明并渲染)"
+
+# HOME-FORYOU-FREE-001（2026-10-01，用户提出）：「小美当前有没有时间」必须有依据。
+#
+# 用户原话：理论上 for you 是 4 个资源槽，点圆圈应该自动刷新到**当前有空**的人。
+# 查下来这条链整个是空的：
+#   · rail 上的「在线点」是 `online: false` 写死的假值；
+#   · 点圆圈走 `Math.random()`，与「有没有空」毫无关系；
+#   · 推荐位从不读 supply.availability_windows。
+# 于是「换个人」看起来像在挑有空的人，其实完全没有依据 —— 和
+# PERSON-DORY-DISTANCE-ZERO-001 造出的 0m 是同一类错误：拿一个和现实无关的量
+# 当承诺。
+#
+# 现在：复用 supply.availability_windows 作唯一事实源（没有另立表 ——
+# 「一个人什么时候有空」只能有一个事实源），free_at 由 Postgres 侧服务端读算。
+#
+# 这条钉的是**三态**与"未知不许被当成有空"：
+#   nil = 没有排期（未知，≠ 有空）· true = 有排期且盖住时段 · false = 有排期但不盖
+# 一律折成两态的实现会把"没排期"显示成"有空"，于是又造一个假承诺。
+if [ -f apps/api-go/internal/platform/postgres/identity.go ]; then
+  # 时段条件必须在 CASE 里判，不能放在 LATERAL JOIN 的 WHERE ——
+  # 放进去会让"有排期但不覆盖该时段"的人取不到行、退化成未知
+  # （实测凌晨时段查出来全员 unknown，而正确答案��� false）。
+  if ! grep -qF 'WHEN w.id IS NULL THEN NULL' apps/api-go/internal/platform/postgres/identity.go; then
+    echo "  FAIL [HOME-FORYOU-FREE-001]: free_at 不再区分「没有排期（未知）」——" >&2
+    echo "        未知会被当成"有空"或"没空"，两者都是假的。" >&2
+    exit 1
+  fi
+  if grep -qF "AND (\$5::timestamptz IS NULL OR (aw.start_at <= \$5 AND aw.end_at >= \$6))" apps/api-go/internal/platform/postgres/identity.go; then
+    echo "  FAIL [HOME-FORYOU-FREE-001]: 时段条件又回到 LATERAL JOIN 的 WHERE 里 ——" >&2
+    echo "        「有排期但不覆盖该时段」会退化成未知，而正确答案是 false。" >&2
+    exit 1
+  fi
+  _rh2=apps/mobile/src/surfaces/requester-home.tsx
+  # 在线点必须来自服务端，只有 freeAt===true 才算在线
+  if ! grep -qF 'online: wire.freeAt === true,' "$_rh2"; then
+    echo "  FAIL [HOME-FORYOU-FREE-001]: 「在线点」不再是服务端算的 free_at ——" >&2
+    echo "        写死的 online:false 是和现实无关的假值。" >&2
+    exit 1
+  fi
+  # 点圆圈必须在「有空的」里轮转
+  if ! grep -qF 'const freeOnes = filteredPeople.filter((p) => p.online);' "$_rh2"; then
+    echo "  FAIL [HOME-FORYOU-FREE-001]: 点圆圈不再在「有空的」那些人里选。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'showResponse(t("noOneFree"), t("noOneFreeSub"))' "$_rh2"; then
+    echo "  FAIL [HOME-FORYOU-FREE-001]: 一个有空的都没有时不再如实说明 ——" >&2
+    echo "        随机换一个人却不说那是随机的，等于又造一个假承诺。" >&2
+    exit 1
+  fi
+  # 时段必须能推出来，但推不出就不许编
+  if ! grep -qF 'function freeSlotForDistinctTime(' "$_rh2"; then
+    echo "  FAIL [HOME-FORYOU-FREE-001]: 活动时间→真实时段的映射没了。" >&2
+    exit 1
+  fi
+  echo "    HOME-FORYOU-FREE-001: PASS (free_at 三态 · 在线点来自服务端 · 点圆圈在有空的里轮转 · 推不出时段不编 · 无排期如实说明)"
+fi

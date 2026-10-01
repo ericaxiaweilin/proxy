@@ -67,9 +67,24 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
     ]
   },
   appbehavior: {
-    title: "应用行为检查",
-    desc: "应用端需要覆盖安全区域、键盘、返回、冷启动、后台恢复、推送、离线重试、深链和通知疲劳。",
+    title: "设置",
+    desc: "账号与安全、位置与隐私、条款与语言。每一项都通往一个真的能打开的地方。",
     icon: "⚙",
+  },
+  // SETTINGS-HUB-001（2026-10-01）：设置页从「一屏内容」改成入口页之后，
+  // 原来那一屏内容（安全设置 / 应用行为检查 / 隐私与数据 / 浏览统计 / 隐私请求）
+  // 原样搬到这个路由下，一个字都没丢 —— 只是多了一层入口。
+  settingssecurity: {
+    title: "账号与安全",
+    desc: "登录设备与会话、数据下载与删除、动态浏览统计。",
+    icon: "gear",
+  },
+  // SAFETY-NET-001：位置与隐私。模糊位置共享 + 紧急联系人 + 安全事件记录，
+  // 三块都接在真服务端命令上（location kind / emergency 域）。
+  locationprivacy: {
+    title: "位置与隐私",
+    desc: "模糊位置共享、紧急联系人与安全事件记录。位置属于敏感个人数据，每一项都要你单独开启。",
+    icon: "⌖",
   },
   repeatincome: {
     title: "我的收入",

@@ -6,7 +6,7 @@
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html
 // （renderRequesterMe / renderBusinessMe / contextline），
 // 切换 Sheet 由 App Shell 共享渲染（ContextSwitcherSheet）。
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Image, Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useModuleBackHandler } from "../components/module-back";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -45,6 +45,18 @@ import { SecuritySettings } from "../components/security-settings";
 import { PrivacySettings } from "../components/privacy-settings";
 import { PreciseLocationCard } from "../components/precise-location-card";
 import { resolveLocationConsentClient } from "../location-consent-client";
+// SAFETY-NET-001：安全网三块（模糊位置同意 / 紧急联系人 / 安全事件）。
+// 三者都接在真服务端命令上，见各自文件头。
+import { resolveEmergencyClient } from "../emergency-client";
+import { FuzzyLocationCard } from "../components/fuzzy-location-card";
+import { EmergencyContactsCard } from "../components/emergency-contacts-card";
+import { SafetyEventCard } from "../components/safety-event-card";
+// SETTINGS-HUB-001：语言面板本来只在首页挂载，设置页到不了；这里把它接进设置。
+// 位置来源同仓库其他 surface（requester-home / hot-scenes / reality-scene-map）
+// 一致：getCurrentFix + expoLocationApi。
+import { LanguageSheet } from "../components/language-sheet";
+import { getCurrentFix } from "../device-location";
+import { expoLocationApi } from "../device-location-native";
 import { resolvePrivacyRequestClient } from "../privacy-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import type { EngagementClient } from "../engagement-client";
@@ -709,6 +721,32 @@ export function MeSurface({
   // FeedPost；被回复的父帖另放一张表，查不到就是缺项。
   // 主页设置弹窗：编辑/分享入口（主页本体 tabs 上方不再重复摆）。
   const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
+  // SETTINGS-HUB-001：语言面板由设置页自己呈现。设置子页是 SwipeBackShell
+  // 内联渲染的（不是 Modal），所以这里用 LanguageSheet 的默认
+  // presentation="modal" 是安全的 —— 不会撞上「iOS 一次只呈现一个 Modal，
+  // 第二个被无声吞掉」那个坑。
+  const [languageSheetOpen, setLanguageSheetOpen] = useState(false);
+  // SAFETY-NET-001：这两个 client 必须 memo 住。
+  //
+  // 卡片内部是 `useEffect(..., [client])`。如果在 JSX 里 inline 构造
+  // （`client={resolveXClient({...})}`），每次渲染都是一个新对象 ⇒ effect
+  // 每次都重跑 ⇒ 拉到数据 setState ⇒ 重渲染 ⇒ 又新建一个 client……
+  // 无限请求。原设置页那处 PreciseLocationCard 的 inline 构造就是这个毛病，
+  // 这里一并改成 memo 的实例。
+  const locationConsentClient = useMemo(
+    () => resolveLocationConsentClient({ authClient: sessionAuthClient }),
+    []
+  );
+  const emergencyClient = useMemo(
+    () => resolveEmergencyClient({ authClient: sessionAuthClient }),
+    []
+  );
+  // 位置来源：拿不到就返回 undefined（不编坐标）。服务端会照记事件、
+  // 丢掉坐标，并在响应里写明 locationOmittedReason。
+  const emergencyFixSource = useCallback(async () => {
+    const fix = await getCurrentFix(expoLocationApi, { requestPermission: true });
+    return fix ? { latitude: fix.latitude, longitude: fix.longitude } : undefined;
+  }, []);
   const [personalReplyEntries, setPersonalReplyEntries] = useState<ReplyEntry[]>([]);
   const [personalReplyTargets, setPersonalReplyTargets] = useState<Record<string, ReplyTarget>>({});
   const [personalSavedPosts, setPersonalSavedPosts] = useState<FeedPost[]>([]);
@@ -1645,7 +1683,104 @@ export function MeSurface({
       );
     }
 
+    // SETTINGS-HUB-001（2026-10-01）：设置页从「一屏内容」改成入口页。
+    //
+    // 原型（docs/design/references/Proxy_Settings_20261001_726714.html）那一屏
+    // 有 10 行，其中 4 行在本仓库**没有任何实现**，所以这里一行都不画：
+    //
+    //   · 盲盒匹配偏好 —— 全仓 blindbox / 盲盒 零命中。那是另一个产品
+    //     （BlindBox 社交）的功能，不是 Proxy 的。
+    //   · 黑名单管理   —— 服务端没有「列出黑名单」的命令。friend-crm 里的
+    //     「拉黑」是**纯本机演示态**（那一页自己写着「仅本机生效」），
+    //     placeholder-honest-actions.test.ts 专门钉了不许给假按钮。
+    //   · 清理缓存     —— 没有任何能算出缓存体积的来源（RN 侧没有这个 API）。
+    //     原型那个「479.93MB / 照片 150MB / 视频 200MB」是编的数字。
+    //   · 深色模式     —— 全仓没有 useColorScheme / colorScheme，主题是固定的。
+    //
+    // 剩下的每一行都通往一个真的能打开的地方，而且都在本文件里有专属渲染分支
+    // （SUBPAGE-GENERIC-FABRICATED-001 会逐条检查这件事）。
     if (subPage.route === "appbehavior") {
+      return contentWrapper(
+        <>
+          <View style={styles.root}>
+            <ScrollView contentContainerStyle={styles.content}>
+              <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+                <ProxyBackGlyph />
+              </Pressable>
+              <Text selectable style={styles.appBehaviorTitle}>设置</Text>
+              <Text selectable style={styles.settingsHubHint}>
+                这里只摆真的能打开的项目。原型里那几项（盲盒匹配偏好 / 黑名单管理 / 清理缓存 / 深色模式）本仓库没有实现，所以不摆出来当死按钮。
+              </Text>
+
+              <Text selectable style={styles.settingsHubGroup}>账号</Text>
+              <Pressable onPress={() => openSubPage("settingssecurity")} style={styles.settingsHubRow}>
+                <Text selectable style={styles.settingsHubRowLabel}>账号与安全</Text>
+                <Text selectable style={styles.settingsHubChevron}>›</Text>
+              </Pressable>
+              <Pressable onPress={() => openSubPage("providerapply")} style={styles.settingsHubRow}>
+                <Text selectable style={styles.settingsHubRowLabel}>手机号认证 (KYC)</Text>
+                <Text selectable style={styles.settingsHubChevron}>›</Text>
+              </Pressable>
+
+              <Text selectable style={styles.settingsHubGroup}>隐私与安全</Text>
+              <Pressable onPress={() => openSubPage("locationprivacy")} style={styles.settingsHubRow}>
+                <Text selectable style={styles.settingsHubRowLabel}>位置与隐私</Text>
+                <Text selectable style={styles.settingsHubChevron}>›</Text>
+              </Pressable>
+
+              <Text selectable style={styles.settingsHubGroup}>通用</Text>
+              <Pressable onPress={() => setLanguageSheetOpen(true)} style={styles.settingsHubRow}>
+                <Text selectable style={styles.settingsHubRowLabel}>语言 / Ngôn ngữ</Text>
+                <Text selectable style={styles.settingsHubChevron}>›</Text>
+              </Pressable>
+
+              <Pressable onPress={() => setSubPage(undefined)} style={styles.appBehaviorReturn}>
+                <ProxyBackGlyph />
+              </Pressable>
+            </ScrollView>
+          </View>
+          {/* 语言面板由本页自己呈现。设置子页是 SwipeBackShell 内联渲染的、
+              不在任何 Modal 里，所以默认的 presentation="modal" 是对的那一种。 */}
+          <LanguageSheet
+            visible={languageSheetOpen}
+            onClose={() => setLanguageSheetOpen(false)}
+          />
+        </>
+      );
+    }
+
+    // SAFETY-NET-001：位置与隐私。三块都接在真服务端命令上：
+    //   · PreciseLocationCard     → /v1/location/consent（PRECISE_GPS）
+    //   · FuzzyLocationCard       → /v1/location/consent（FUZZY_REGION，本次新增）
+    //   · EmergencyContactsCard   → /v1/emergency/contacts
+    //   · SafetyEventCard         → /v1/emergency/events
+    //
+    // 两种位置同意是**分开的两行**，不是一个开关的两档 —— NĐ 356/2025
+    // Art. 6.3 禁止把敏感数据的同意捆绑在一起。
+    if (subPage.route === "locationprivacy") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <ProxyBackGlyph />
+            </Pressable>
+            <Text selectable style={styles.appBehaviorTitle}>位置与隐私</Text>
+            <Text selectable style={styles.settingsHubHint}>
+              位置属于敏感个人数据（PDP 91/2025/QH15 与 NĐ 356/2025）。下面每一项都是单独的一项授权，默认关闭，随时可关；关掉只影响这一项。
+            </Text>
+            <PreciseLocationCard client={locationConsentClient} />
+            <FuzzyLocationCard client={locationConsentClient} />
+            <EmergencyContactsCard client={emergencyClient} />
+            <SafetyEventCard client={emergencyClient} getFix={emergencyFixSource} />
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.appBehaviorReturn}>
+              <ProxyBackGlyph />
+            </Pressable>
+          </ScrollView>
+        </View>
+      );
+    }
+
+    if (subPage.route === "settingssecurity") {
       const checks = [
         ["安全区域", "底部操作不能被系统手势区域遮挡。"],
         ["键盘", "输入需求时保留草稿；键盘出现后仍能滚动并看到继续按钮。"],
@@ -1663,7 +1798,7 @@ export function MeSurface({
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <ProxyBackGlyph />
             </Pressable>
-            <Text selectable style={styles.appBehaviorTitle}>设置与隐私 · 安全</Text>
+            <Text selectable style={styles.appBehaviorTitle}>账号与安全</Text>
             <SecuritySettings
               retentionDays={securityRetention}
               onRetentionChange={setSecurityRetention}
@@ -1733,9 +1868,7 @@ export function MeSurface({
             <PrivacySettings
               client={resolvePrivacyRequestClient({ authClient: sessionAuthClient })}
             />
-            <PreciseLocationCard
-              client={resolveLocationConsentClient({ authClient: sessionAuthClient })}
-            />
+            <PreciseLocationCard client={locationConsentClient} />
             <Pressable onPress={() => setSubPage(undefined)} style={styles.appBehaviorReturn}>
               <ProxyBackGlyph />
             </Pressable>

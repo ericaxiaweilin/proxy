@@ -15,7 +15,20 @@
 
 import type { TransportResponse } from "./auth-client";
 
-export type LocationConsentKind = "PRECISE_GPS";
+export type LocationConsentKind = "PRECISE_GPS" | "FUZZY_REGION";
+
+// 服务端 location.AllKinds。顺序无关，但两张表必须同集合：多一个会 400，
+// 少一个会让用户看不见自己已经授过的那一项。
+export const ALL_LOCATION_CONSENT_KINDS: ReadonlyArray<LocationConsentKind> = [
+  "PRECISE_GPS",
+  "FUZZY_REGION",
+];
+
+// 默认 kind。老客户端（包括本文件的历史调用方 PreciseLocationCard）不带
+// kind 调这三个方法，服务端把「不带」解释成 PRECISE_GPS —— 客户端保持同一
+// 个默认值，两边才不会对不上。**注意：未知 kind 绝不向上取整成精确**，
+// 服务端会直接拒（INVALID_LOCATION_CONSENT_KIND），客户端也不做这种猜测。
+export const DEFAULT_LOCATION_CONSENT_KIND: LocationConsentKind = "PRECISE_GPS";
 
 export type LocationConsentStatus =
   | "NONE"
@@ -74,8 +87,17 @@ export class LocationConsentClient {
   // getStatus fetches the current consent for the authenticated
   // user. When the user has never granted consent, the server
   // returns status=NONE with empty timestamps.
-  async getStatus(): Promise<LocationConsent> {
-    return await this.request<LocationConsent>("GET", "/v1/location/consent");
+  //
+  // kind defaults to PRECISE_GPS so every pre-existing caller keeps
+  // its old behaviour byte for byte; the two kinds are separate
+  // consents (NĐ 356/2025 Art. 6.3 forbids bundling them), so the
+  // caller must say which one it is asking about.
+  async getStatus(
+    kind: LocationConsentKind = DEFAULT_LOCATION_CONSENT_KIND,
+  ): Promise<LocationConsent> {
+    // GET carries the kind as a query parameter, not a body.
+    const path = `/v1/location/consent?kind=${encodeURIComponent(kind)}`;
+    return await this.request<LocationConsent>("GET", path);
   }
 
   // grant opts the user in. The durationSeconds must be one of
@@ -84,7 +106,10 @@ export class LocationConsentClient {
   // not allowed at the API surface (the server uses 0 to mean
   // "use the default" internally, but the mobile client must
   // pick explicitly).
-  async grant(durationSeconds: number): Promise<LocationConsent> {
+  async grant(
+    durationSeconds: number,
+    kind: LocationConsentKind = DEFAULT_LOCATION_CONSENT_KIND,
+  ): Promise<LocationConsent> {
     if (!ALLOWED_DURATION_SECONDS.includes(durationSeconds)) {
       throw new LocationConsentError(
         "INVALID_DURATION",
@@ -95,14 +120,23 @@ export class LocationConsentClient {
     const path = "/v1/location/consent/grant";
     return await this.request<LocationConsent>("POST", path, {
       durationSeconds,
+      kind,
     });
   }
 
   // revoke immediately flips the active grant to REVOKED. If no
   // grant is active, the response still succeeds with
   // wasActive=false — the operation is idempotent.
-  async revoke(): Promise<LocationConsentRevokeResult> {
-    return await this.request<LocationConsentRevokeResult>("POST", "/v1/location/consent/revoke");
+  //
+  // Revoking one kind never touches the other: they are separate rows.
+  async revoke(
+    kind: LocationConsentKind = DEFAULT_LOCATION_CONSENT_KIND,
+  ): Promise<LocationConsentRevokeResult> {
+    return await this.request<LocationConsentRevokeResult>(
+      "POST",
+      "/v1/location/consent/revoke",
+      { kind },
+    );
   }
 
   // history returns the full audit trail for the user, newest

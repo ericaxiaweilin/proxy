@@ -1249,4 +1249,12 @@ export const styles = StyleSheet.create({
   badgeName: { color: color.ink, fontSize: 11, fontWeight: "800", marginTop: 4, textAlign: "center" },
   badgeDesc: { color: color.muted, fontSize: 11, lineHeight: 14, marginTop: 3, textAlign: "center" },
   badgeProgress: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 3 },
+  // SETTINGS-HUB-001：设置入口页的分组标题 / 行 / 提示。
+  // 行高与分隔线跟 socialSettingRow 同口径（15 竖padding + 1px 底线），
+  // 免得同一屏里两种行距。
+  settingsHubHint: { color: color.muted, fontSize: 12.5, lineHeight: 19, marginTop: 6 },
+  settingsHubGroup: { color: color.muted, fontSize: 12, fontWeight: "800", letterSpacing: 0.4, marginBottom: 2, marginTop: 22 },
+  settingsHubRow: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingVertical: 15 },
+  settingsHubRowLabel: { color: color.ink, fontSize: 15.5, fontWeight: "600" },
+  settingsHubChevron: { color: color.muted, fontSize: 20 },
 });

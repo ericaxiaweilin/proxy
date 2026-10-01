@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { TransportResponse } from "./auth-client";
 import {
   ALLOWED_DURATION_SECONDS,
+  ALL_LOCATION_CONSENT_KINDS,
+  DEFAULT_LOCATION_CONSENT_KIND,
   type LocationConsent,
   LocationConsentClient,
   LocationConsentError,
@@ -78,7 +80,7 @@ describe("LocationConsentClient", () => {
       {
         match: (call) =>
           call.init.method === "GET" &&
-          call.path === "/v1/location/consent",
+          call.path === "/v1/location/consent?kind=PRECISE_GPS",
         response: okResponse(consent),
       },
     ]);
@@ -89,7 +91,7 @@ describe("LocationConsentClient", () => {
     expect(got).toEqual(consent);
   });
 
-  it("grant() POSTs to /grant with the duration in the body", async () => {
+  it("grant() POSTs to /grant with the duration and the kind in the body", async () => {
     const consent: LocationConsent = {
       kind: "PRECISE_GPS",
       status: "GRANTED",
@@ -110,16 +112,19 @@ describe("LocationConsentClient", () => {
       authClient: stub,
     });
     const got = await client.grant(1800);
+    // kind 是显式发出去的，不是靠服务端默认值补的：一次同意的请求体必须
+    // 自己说清「同意的是哪一种」。靠默认值推断「用户到底同意了什么」正是
+    // NĐ 356/2025 Art. 6.3 要禁止的那种隐式同意。
     expect(stub.calls).toEqual([
       {
         path: "/v1/location/consent/grant",
-        init: { method: "POST", body: { durationSeconds: 1800 } },
+        init: { method: "POST", body: { durationSeconds: 1800, kind: "PRECISE_GPS" } },
       },
     ]);
     expect(got.durationSeconds).toBe(1800);
   });
 
-  it("revoke() POSTs to /revoke with no body", async () => {
+  it("revoke() POSTs to /revoke carrying the kind it is revoking", async () => {
     const stub = makeStub([
       {
         match: () => true,
@@ -132,8 +137,72 @@ describe("LocationConsentClient", () => {
     const result = await client.revoke();
     expect(stub.calls[0]?.path).toBe("/v1/location/consent/revoke");
     expect(stub.calls[0]?.init.method).toBe("POST");
-    expect(stub.calls[0]?.init.body).toBeUndefined();
+    // 撤销必须指明撤哪一种：两种同意是两行，不指明就等于猜。
+    expect(stub.calls[0]?.init.body).toEqual({ kind: "PRECISE_GPS" });
     expect(result.wasActive).toBe(true);
+  });
+
+  // ── FUZZY_REGION（模糊位置共享）────────────────────────────────────
+  // 新增第二种 kind。它必须和 PRECISE_GPS **各走各的**：合并成一种同意
+  // 就是 NĐ 356/2025 Art. 6.3 禁止的捆绑同意。
+  it("getStatus(FUZZY_REGION) asks about the fuzzy consent, not the precise one", async () => {
+    const transport = makeStub([
+      {
+        match: (call) => call.path === "/v1/location/consent?kind=FUZZY_REGION",
+        response: okResponse({
+          kind: "FUZZY_REGION",
+          status: "NONE",
+          remainingSeconds: 0,
+          durationSeconds: 0,
+        }),
+      },
+    ]);
+    const client = new LocationConsentClient({ authClient: transport });
+    const got = await client.getStatus("FUZZY_REGION");
+    expect(got.kind).toBe("FUZZY_REGION");
+    expect(got.status).toBe("NONE");
+  });
+
+  it("grant(FUZZY_REGION) sends the fuzzy kind, never defaulting upward", async () => {
+    const stub = makeStub([
+      {
+        match: () => true,
+        response: okResponse({
+          kind: "FUZZY_REGION",
+          status: "GRANTED",
+          grantedAt: "2026-10-01T00:00:00Z",
+          expiresAt: "2026-10-01T08:00:00Z",
+          remainingSeconds: 28800,
+          durationSeconds: 28800,
+        }),
+      },
+    ]);
+    const client = new LocationConsentClient({ authClient: stub });
+    await client.grant(28800, "FUZZY_REGION");
+    expect(stub.calls[0]?.init.body).toEqual({
+      durationSeconds: 28800,
+      kind: "FUZZY_REGION",
+    });
+  });
+
+  it("revoke(FUZZY_REGION) does not touch the precise grant", async () => {
+    const stub = makeStub([
+      {
+        match: () => true,
+        response: okResponse({ kind: "FUZZY_REGION", status: "REVOKED", wasActive: true }),
+      },
+    ]);
+    const client = new LocationConsentClient({ authClient: stub });
+    const result = await client.revoke("FUZZY_REGION");
+    expect(stub.calls[0]?.init.body).toEqual({ kind: "FUZZY_REGION" });
+    // 服务端回报的 kind 要被如实透出：硬编码成 PRECISE_GPS 会让界面把
+    // 错误的那一个开关渲染成关闭。
+    expect(result.kind).toBe("FUZZY_REGION");
+  });
+
+  it("the default kind is PRECISE_GPS so old callers keep their meaning", () => {
+    expect(DEFAULT_LOCATION_CONSENT_KIND).toBe("PRECISE_GPS");
+    expect(ALL_LOCATION_CONSENT_KINDS).toEqual(["PRECISE_GPS", "FUZZY_REGION"]);
   });
 
   it("history() GETs /consent/history and returns the rows array", async () => {
@@ -172,7 +241,7 @@ describe("LocationConsentClient", () => {
       {
         match: (call) =>
           call.init.method === "GET" &&
-          call.path === "/v1/location/consent",
+          call.path === "/v1/location/consent?kind=PRECISE_GPS",
         response: okResponse({ kind: "PRECISE_GPS", status: "NONE", remainingSeconds: 0, durationSeconds: 0 }),
       },
     ]);
@@ -181,7 +250,7 @@ describe("LocationConsentClient", () => {
     });
     const got = await client.getStatus();
     expect(got.status).toBe("NONE");
-    expect(stub.calls[0]?.path).toBe("/v1/location/consent");
+    expect(stub.calls[0]?.path).toBe("/v1/location/consent?kind=PRECISE_GPS");
   });
 
   it("wraps a 4xx response in LocationConsentError with the server code", async () => {
@@ -217,7 +286,7 @@ describe("LocationConsentClient", () => {
     const got = await client.getStatus();
     expect(got.status).toBe("NONE");
     expect(stub.calls).toHaveLength(1);
-    expect(stub.calls[0]?.path).toBe("/v1/location/consent");
+    expect(stub.calls[0]?.path).toBe("/v1/location/consent?kind=PRECISE_GPS");
   });
 });
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 )
 
 // SAFETY-NET-001: HTTP surface for the caller's own safety net.
@@ -40,8 +41,16 @@ func (s *Server) emergencyEvents(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		payload := map[string]any{}
+		// The service reads limit with intFromPayload, which accepts
+		// numbers and NOT strings. Passing the raw query value through
+		// would make ?limit= silently do nothing (the service would fall
+		// back to its default) -- a parameter that is accepted and then
+		// ignored is worse than one that is rejected. Parse it here and
+		// only forward a value that actually parsed.
 		if limit := r.URL.Query().Get("limit"); limit != "" {
-			payload["limit"] = limit
+			if n, err := strconv.Atoi(limit); err == nil {
+				payload["limit"] = n
+			}
 		}
 		s.emergencyDispatch(w, r, "ListEmergencyEvents", payload)
 	case http.MethodPost:
