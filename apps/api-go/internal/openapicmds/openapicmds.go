@@ -34,6 +34,7 @@ var DomainDir = []struct {
 	{"contribution", "Contribution"},
 	{"conversation", "Conversation"},
 	{"demand", "Demand"},
+	{"emergency", "Emergency"},
 	{"engagement", "Engagement"},
 	{"experience", "Experience"},
 	{"fulfillment", "Fulfillment"},

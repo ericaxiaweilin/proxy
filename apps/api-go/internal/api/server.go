@@ -16,6 +16,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
+	"github.com/proxy-app/proxy-api/internal/emergency"
 	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/experience"
 	"github.com/proxy-app/proxy-api/internal/facet"
@@ -39,11 +40,11 @@ import (
 	"github.com/proxy-app/proxy-api/internal/profile"
 	"github.com/proxy-app/proxy-api/internal/providerapp"
 	"github.com/proxy-app/proxy-api/internal/rating"
-	"github.com/proxy-app/proxy-api/internal/scenereview"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/relationship"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
+	"github.com/proxy-app/proxy-api/internal/scenereview"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
 	"github.com/proxy-app/proxy-api/internal/storeonboarding"
 	"github.com/proxy-app/proxy-api/internal/supply"
@@ -84,6 +85,12 @@ type Server struct {
 	// It is a separate service so the consent reads / writes do not
 	// pay the load cost of the full identity service.
 	Location *location.Service
+	// Emergency owns the caller's own safety net: emergency contacts and
+	// the append-only emergency-event log (SAFETY-NET-001). Deliberately
+	// a separate domain from Safety, which is operator/moderation
+	// (incidents, legal holds) and is pinned operator-only by
+	// SAFETY-GATE-001.
+	Emergency *emergency.Service
 	// Benefit owns the benefit routing network (R16.11 / Master PRD v1.4 §12 §3).
 	Benefit *benefit.Service
 	// Growth computes the "我的权益" tier/growth-value dashboard, read-only
@@ -277,6 +284,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/location/consent/grant", s.locationConsentGrant)
 	mux.HandleFunc("/v1/location/consent/revoke", s.locationConsentRevoke)
 	mux.HandleFunc("/v1/location/consent/history", s.locationConsentHistory)
+	// SAFETY-NET-001: the caller's own safety net. Two paths carry the
+	// five commands (contacts: GET/POST/DELETE, events: GET/POST); every
+	// one of them is authenticated (requiresAuthentication is
+	// deny-by-default and none of these is on the public allowlist) and
+	// none is operator-gated, because all of them read or write only
+	// the caller's own rows.
+	mux.HandleFunc("/v1/emergency/contacts", s.emergencyContacts)
+	mux.HandleFunc("/v1/emergency/events", s.emergencyEvents)
 	// R16.7-P1-G: remote legal kill switch (LC-16). The public
 	// /v1/legal/status route is read at mobile boot so the client
 	// can show a "service paused" banner and disable regulated

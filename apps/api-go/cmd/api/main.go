@@ -16,6 +16,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
+	"github.com/proxy-app/proxy-api/internal/emergency"
 	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/experience"
 	"github.com/proxy-app/proxy-api/internal/facet"
@@ -572,6 +573,25 @@ func main() {
 		server.Location = locationService
 		server.LocationRepo = locationRepo
 	}
+	// SAFETY-NET-001: the caller's own safety net (emergency contacts +
+	// the append-only emergency-event log).
+	//
+	// The location repository doubles as the consent gate: an emergency
+	// event may only carry a coarse location while a location consent is
+	// actually active. When there is no gate (no pool, no identity) the
+	// service fails CLOSED — it records the event and drops the
+	// coordinates rather than writing a location it cannot justify.
+	var emergencyRepo emergency.Repository
+	if pool != nil {
+		emergencyRepo = postgres.NewEmergencyRepository(pool)
+	} else {
+		emergencyRepo = emergency.NewMemoryRepository()
+	}
+	var emergencyConsent emergency.ConsentGate
+	if server.LocationRepo != nil {
+		emergencyConsent = server.LocationRepo
+	}
+	server.Emergency = emergency.NewService(emergencyRepo, emergencyConsent)
 	// R16.7-P1-G: remote legal kill switch. Same wiring shape
 	// as the location service: Postgres when the pool is
 	// available, in-memory otherwise.

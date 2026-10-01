@@ -159,6 +159,8 @@ commands:
     domain: StoreOnboarding
   - command: DeclareCapability
     domain: Supply
+  - command: DeleteEmergencyContact
+    domain: Emergency
   - command: DeleteMessage
     domain: Conversation
   - command: DeleteStorePhoto
@@ -283,6 +285,10 @@ commands:
     domain: Conversation
   - command: ListDisplayIdentities
     domain: Identity
+  - command: ListEmergencyContacts
+    domain: Emergency
+  - command: ListEmergencyEvents
+    domain: Emergency
   - command: ListFeedPosts
     domain: LocalNet
   - command: ListInbox
@@ -331,6 +337,8 @@ commands:
     domain: Identity
   - command: ListMyStoreRecommendations
     domain: StoreOnboarding
+  - command: ListNearbyProfiles
+    domain: Identity
   - command: ListObservationTemplates
     domain: Outcome
   - command: ListOpportunityTemplates
@@ -449,6 +457,8 @@ commands:
     domain: Contribution
   - command: RecordDirectSettlement
     domain: Fulfillment
+  - command: RecordEmergencyEvent
+    domain: Emergency
   - command: RecordFeedPreference
     domain: Engagement
   - command: RecordMaterialOrderChange
@@ -617,6 +627,8 @@ commands:
     domain: Business
   - command: UpdateTaskDraft
     domain: Demand
+  - command: UpsertEmergencyContact
+    domain: Emergency
   - command: UpsertMemberDirectory
     domain: Business
   - command: UpsertSceneSupplySnapshot

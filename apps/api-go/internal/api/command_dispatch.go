@@ -311,6 +311,11 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.RealityScene.HandleContext(ctx, envelope)
 	case s.Location != nil && s.Location.Supports(envelope.CommandType):
 		return s.Location.HandleContext(ctx, envelope)
+	// SAFETY-NET-001: 用户自己的安全网（紧急联系人 + 紧急事件）。刻意**不**并进
+	// s.Safety —— 那个域是 operator/审核侧（incidents / legal holds），
+	// SAFETY-GATE-001 钉死了它的命令只能 operator 调；这里是普通用户自己的数据。
+	case s.Emergency != nil && s.Emergency.Supports(envelope.CommandType):
+		return s.Emergency.HandleContext(ctx, envelope)
 	case s.Benefit != nil && s.Benefit.Supports(envelope.CommandType):
 		return s.Benefit.HandleContext(ctx, envelope)
 	case s.Growth != nil && s.Growth.Supports(envelope.CommandType):
