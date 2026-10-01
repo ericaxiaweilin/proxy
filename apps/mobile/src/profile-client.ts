@@ -33,6 +33,11 @@ export type ProfileWire = {
   latitude?: number | undefined;
   longitude?: number | undefined;
   distanceM?: number | undefined;
+  // HOME-FORYOU-FREE-001：服务端算出的「这个时段有没有空」，三态。
+  // undefined = 这个人没有排期，**未知**（不是"有空"，也不是"没空"）。
+  freeAt?: boolean | undefined;
+  freeFrom?: string | undefined;
+  freeUntil?: string | undefined;
 };
 
 export class ProfileClient {
@@ -122,7 +127,7 @@ export class ProfileClient {
   // location" is never mistaken for "nobody is around".
   public async listNearby(
     location: { latitude: number; longitude: number },
-    options: { maxDistanceKm?: number; limit?: number } = {}
+    options: { maxDistanceKm?: number; limit?: number; slot?: { startIso: string; endIso: string } } = {}
   ): Promise<ProfileWire[]> {
     const session = await this.requireSession();
     const result = await this.command(session, "ListNearbyProfiles", session.userAccountId, {
@@ -130,6 +135,9 @@ export class ProfileClient {
       longitude: location.longitude,
       ...(options.maxDistanceKm !== undefined ? { maxDistanceKm: options.maxDistanceKm } : {}),
       ...(options.limit !== undefined ? { limit: options.limit } : {}),
+      // HOME-FORYOU-FREE-001：把"想约的时段"一起发过去，服务端才算 free_at。
+      // 不发 slot 时服务端返回 freeAt=undefined（未知），界面不能拿它当"有空"。
+      ...(options.slot ? { slotStart: options.slot.startIso, slotEnd: options.slot.endIso } : {}),
     });
     const body = (result.operationRef ? JSON.parse(result.operationRef) : {}) as { profiles?: ProfileWire[] };
     if (!Array.isArray(body.profiles)) throw new Error("nearby profiles response malformed");

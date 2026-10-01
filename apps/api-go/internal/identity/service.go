@@ -1712,7 +1712,11 @@ func (s *Service) listNearbyProfiles(ctx context.Context, e command.Envelope) co
 		Latitude    *float64 `json:"latitude"`
 		Longitude   *float64 `json:"longitude"`
 		MaxDistanceKm *float64 `json:"maxDistanceKm"`
-		Limit       int      `json:"limit"`
+		// HOME-FORYOU-FREE-001：想约的时段。给了就判断每个人在这个时段有没有空；
+		// 不给就只返回名单，FreeAt 全是 nil（未知）。
+		SlotStart string `json:"slotStart"`
+		SlotEnd   string `json:"slotEnd"`
+		Limit     int    `json:"limit"`
 	}
 	_ = decode(e.Payload, &request)
 	// No viewer coordinates ⇒ no distance can be computed for anybody. An
@@ -1728,7 +1732,20 @@ func (s *Service) listNearbyProfiles(ctx context.Context, e command.Envelope) co
 	if request.MaxDistanceKm != nil && *request.MaxDistanceKm > 0 {
 		maxMeters = *request.MaxDistanceKm * 1000
 	}
-	found, err := s.profileService.ListProfilesNearby(ctx, *request.Latitude, *request.Longitude, maxMeters, request.Limit)
+	// 时段要么两个都给，要么都不给 —— 只给一半会让"空闲"变成一个无法判断的半截
+	// 状态，而 FREE-001 的整条规则都建立在"要么明确、要么未知"上。
+	var slotStart, slotEnd *time.Time
+	if request.SlotStart != "" && request.SlotEnd != "" {
+		parsedStart, startErr := time.Parse(time.RFC3339, request.SlotStart)
+		parsedEnd, endErr := time.Parse(time.RFC3339, request.SlotEnd)
+		if startErr != nil || endErr != nil || !parsedEnd.After(parsedStart) {
+			return command.Rejected(e, "INVALID_SLOT", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_slot", nil)
+		}
+		slotStart, slotEnd = &parsedStart, &parsedEnd
+	} else if request.SlotStart != "" || request.SlotEnd != "" {
+		return command.Rejected(e, "INVALID_SLOT", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_slot", map[string]any{"reason": "slot requires both start and end"})
+	}
+	found, err := s.profileService.ListProfilesNearby(ctx, *request.Latitude, *request.Longitude, maxMeters, slotStart, slotEnd, request.Limit)
 	if err != nil {
 		return command.Rejected(e, "PROFILE_SEARCH_FAILED", "INTERNAL", "SAFE_RETRY", "identity.profile_search_failed", nil)
 	}

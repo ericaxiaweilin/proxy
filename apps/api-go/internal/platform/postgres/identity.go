@@ -1535,7 +1535,7 @@ func (r *IdentityRepository) GetProfileByHandle(ctx context.Context, handle stri
 // Coordinates come from supply.agent_profiles (the map layer already kept them
 // there). A profile without an agent_profile row — or with NULL lat/lng — is
 // NOT returned: "no coordinates" must never read as "0 metres away".
-func (r *IdentityRepository) ListProfilesNearby(ctx context.Context, latitude, longitude, maxDistanceM float64, limit int) ([]identity.Profile, error) {
+func (r *IdentityRepository) ListProfilesNearby(ctx context.Context, latitude, longitude, maxDistanceM float64, slotStart, slotEnd *time.Time, limit int) ([]identity.Profile, error) {
 	if limit <= 0 {
 		return []identity.Profile{}, nil
 	}
@@ -1551,9 +1551,24 @@ func (r *IdentityRepository) ListProfilesNearby(ctx context.Context, latitude, l
 	// "current transaction is aborted (25P02)" —— 真正的错因一行日志都没留下，
 	// 只看到 PROFILE_SEARCH_FAILED。现在占位符连号，并把半径过滤下推到 SQL，
 	// 省掉把超半径的行取回来再在 Go 里丢弃。
+	// HOME-FORYOU-FREE-001：同时取"这个人有没有一段 AVAILABLE 的空档盖住了请求时段"。
+	//
+	// 用 LEFT JOIN + 一个把 NULL 折成三态之一的表达式，而不是 WHERE 里过滤 ——
+	// 过滤会把"没有排期的人"直接删掉，调用方就分不清「没空」和「根本不知道」，
+	// 而推荐位必须能把两者分开（未知不能当"有空"，否则又是一个假承诺）。
+	//
+	// w.start_at/end_at 取**最宽**的那一段（max(end_at)），够不够覆盖请求时段由
+	// free_at 判定；FreeFrom/FreeUntil 就是那一段，供界面如实显示。
 	const query = `
 		SELECT p.user_account_id, p.name, p.handle, p.bio, p.city, p.avatar_path, p.version, p.updated_at,
 			COALESCE(c.claim_number, 0), a.lat, a.lng,
+			w.start_at, w.end_at,
+			CASE
+				WHEN $5::timestamptz IS NULL OR $6::timestamptz IS NULL THEN NULL
+				WHEN w.id IS NULL THEN NULL
+				WHEN w.start_at <= $5 AND w.end_at >= $6 THEN TRUE
+				ELSE FALSE
+			END AS free_at,
 			6371000.0 * 2 * asin(sqrt(
 				power(sin(radians(a.lat - $1) / 2), 2) +
 				cos(radians($1)) * cos(radians(a.lat)) *
@@ -1562,6 +1577,25 @@ func (r *IdentityRepository) ListProfilesNearby(ctx context.Context, latitude, l
 		FROM identity.profiles p
 		JOIN supply.agent_profiles a ON a.user_account_id = p.user_account_id
 		LEFT JOIN identity.agent_claim_numbers c ON c.user_account_id = p.user_account_id
+		-- ⚠️ 这里**不能**把时段条件放进 JOIN 的 WHERE。第一版放了，于是"有排期但不
+		-- 覆盖这个时段"的人 LATERAL 取不到行 → w.id IS NULL → free_at 变成 NULL
+		-- （未知），实测凌晨时段查出来**全员未知**，而正确答案应该是
+		-- false（有排期、那个时段没空）。
+		--
+		-- 三态的来源必须在这里保住：
+		--   w.id IS NULL     ⇒ 这个人根本没有排期 ⇒ **未知**
+		--   w.id 非空 + 覆盖  ⇒ 有空
+		--   w.id 非空 + 不覆盖 ⇒ 没空
+		-- 所以 JOIN 只取"这个人有没有 AVAILABLE 的排期"（取最宽的一段），
+		-- 判不覆盖交给上面那个 CASE。
+		LEFT JOIN LATERAL (
+			SELECT aw.id, aw.start_at, aw.end_at
+			  FROM supply.availability_windows aw
+			 WHERE aw.agent_id = a.agent_id AND aw.status = 'AVAILABLE'
+			   AND aw.end_at > now()
+			 ORDER BY aw.end_at DESC
+			 LIMIT 1
+		) w ON TRUE
 		WHERE a.lat IS NOT NULL AND a.lng IS NOT NULL
 		  AND ($3 < 0 OR (
 			6371000.0 * 2 * asin(sqrt(
@@ -1571,7 +1605,7 @@ func (r *IdentityRepository) ListProfilesNearby(ctx context.Context, latitude, l
 			)) < $3))
 		ORDER BY meters ASC
 		LIMIT $4`
-	rows, err := queryerForContext(ctx, r.pool).Query(ctx, query, latitude, longitude, radius, limit)
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, query, latitude, longitude, radius, limit, slotStart, slotEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -1580,10 +1614,16 @@ func (r *IdentityRepository) ListProfilesNearby(ctx context.Context, latitude, l
 	for rows.Next() {
 		var p identity.Profile
 		var lat, lng, meters *float64
+		// HOME-FORYOU-FREE-001：free_at 三态（NULL / true / false）—— 没有排期的人
+		// 是 NULL（未知），不是 false。扫进 **bool 得 nil，正好把三态保住。
+		var freeAt *bool
+		var freeFrom, freeUntil *time.Time
 		if err := rows.Scan(&p.UserAccountID, &p.Name, &p.Handle, &p.Bio, &p.City,
-			&p.AvatarPath, &p.Version, &p.UpdatedAt, &p.ClaimNumber, &lat, &lng, &meters); err != nil {
+			&p.AvatarPath, &p.Version, &p.UpdatedAt, &p.ClaimNumber, &lat, &lng,
+			&freeFrom, &freeUntil, &freeAt, &meters); err != nil {
 			return nil, err
 		}
+		p.FreeAt, p.FreeFrom, p.FreeUntil = freeAt, freeFrom, freeUntil
 		p.Latitude, p.Longitude = lat, lng
 		// No radius cap requested ⇒ only rows within the cap, when a cap was
 		// given. Applied here (not in SQL) so the two stores share one rule.

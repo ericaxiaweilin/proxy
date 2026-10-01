@@ -274,6 +274,9 @@ export function RequesterHome({
   // HOME-RAIL-SERVER-001：rail 的服务端推荐人。与 serverPeople（搜索结果）是两回事 ——
   // 那是"用户搜了某个名字"，这里是"打开首页就有谁在附近"。
   const [nearbyWire, setNearbyWire] = useState<ReadonlyArray<ProfileWire> | undefined>(undefined);
+  // HOME-FORYOU-FREE-001：连续点圆圈时在"有空的"那些人里依次轮转，而不是每次随机
+  // —— 随机会连着两次给同一个"没空的人"，看起来像没生效。
+  const freePersonCursor = useRef<number>(0);
   const nearbySeq = useRef(0);
   const [serverPeople, setServerPeople] = useState<ReadonlyArray<ProfileWire> | undefined>(undefined);
   const [serverPeopleState, setServerPeopleState] = useState<"idle" | "busy" | "failed">("idle");
@@ -586,7 +589,14 @@ export function RequesterHome({
       ...(typeof wire.distanceM === "number" && Number.isFinite(wire.distanceM) && wire.distanceM >= 0
         ? { distanceM: wire.distanceM }
         : {}),
-      online: false,
+      // HOME-FORYOU-FREE-001：「在线点」以前恒为 false —— 是个和现实无关的假值，
+      // 于是「在线」筛选筛掉所有人、「点圆圈换个人」看起来像在挑有空的人但其实
+      // 完全没有依据。现在它来自服务端算的 free_at（这个时段有没有空）。
+      //
+      // **只有 freeAt === true 才算在线**。false 是"这个时段没空"，
+      // undefined 是"没有排期、未知" —— 两者都不许显示成有空（与距离同一条规矩：
+      // 不知道就不能当成满足条件）。
+      online: wire.freeAt === true,
       mutualFriends: 0,
     };
   }
@@ -844,9 +854,18 @@ export function RequesterHome({
         // 它影响的是"以哪为原点排序"，不是伪造任何人的位置 ——
         // 每个被返回的人的 distanceM 仍然是服务端量到他的真实距离。
         const origin = homeOrigin ?? HANOI_FALLBACK_ORIGIN;
+        // HOME-FORYOU-FREE-001：把**当前已选时段**一起发过去，服务端才算
+        // free_at。不发 slot 的话 freeAt 全是 undefined（未知），于是
+        // 「点圆圈换个人」又退化成随便换一个 —— 那正是这个修复要消灭的行为。
+        //
+        // distinctTimes 是活动自己写的自由文本（"周六 15:00"），不是可解析的
+        // 时间戳，**不能**拿它去构造 RFC3339 时段。所以这里只用"今天/明天"这种
+        // 能从真实墙上时钟推出来的锚点：把时段按钟点落到最近的一个未来窗口上。
+        // 推不出来就不传 slot（= 未知），而不是编一个假时段。
+        const slot = freeSlotForDistinctTime(distinctTimes[0]);
         const found = await profileClient.listNearby(
           { latitude: origin.latitude, longitude: origin.longitude },
-          { maxDistanceKm: moreDistanceKm, limit: 30 }
+          { maxDistanceKm: moreDistanceKm, limit: 30, ...(slot ? { slot } : {}) }
         );
         // 自己不能出现在「附近的真人」里
         const withoutSelf = viewerAccountId ? found.filter((p) => p.userAccountId !== viewerAccountId) : found;
@@ -924,8 +943,28 @@ export function RequesterHome({
     if (slotRefreshing) return;
     setSearchQuery("");
     setClarifyChoices(undefined);
-    // HOME-FORYOU-LOCK-001：锁定的轴跳过不重掷。人不占名额，照旧随机。
-    if (!lockedSlots.has("person") && filteredPeople.length > 1) setPersonIndex(Math.floor(Math.random() * filteredPeople.length));
+    // HOME-FORYOU-FREE-001：换人要换到**当前时段里真的有空的**那个人。
+    //
+    // 原来是 `Math.random()` —— 与「有没有空」毫无关系。于是用户点圆圈、系统
+    // 换一个陌生人，界面上却像是"帮你找了个有空的人"。这是和
+    // PERSON-DISTANCE-ZERO-001 的 0m 同一类错误：拿一个和现实无关的量当承诺。
+    //
+    // 现在优先在 freeAt === true 的人里循环取下一个；一个人都没有时如实保持
+    // 当前选择并在文案里说明（见 freePeopleCount），而不是假装挑了个空的。
+    // HOME-FORYOU-LOCK-001：锁定的轴跳过不重掷 —— 锁了人就不换人。
+    if (!lockedSlots.has("person")) {
+      const freeOnes = filteredPeople.filter((p) => p.online);
+      if (freeOnes.length > 0) {
+        const at = filteredPeople.indexOf(freeOnes[freePersonCursor.current % freeOnes.length]!);
+        if (at >= 0) setPersonIndex(at);
+        freePersonCursor.current += 1;
+      } else if (filteredPeople.length > 1) {
+        // 一个有空的都没有：换人也换不出"有空的"，如实说明而不是随机假装。
+        const next = Math.floor(Math.random() * filteredPeople.length);
+        setPersonIndex(next);
+        showResponse(t("noOneFree"), t("noOneFreeSub"));
+      }
+    }
     const current = sceneActivities.length > 0 ? sceneActivities[activityIndex % sceneActivities.length] : undefined;
     const lockedPlace = lockedSlots.has("place") && sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined;
     const lockedTime = lockedSlots.has("time") && distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined;
@@ -2603,6 +2642,32 @@ export function RequesterHome({
 // 档位是"半径"，语义仍然只有一条：距离未知（distanceM === undefined）的人
 // **任何**半径都不算（PERSON-DISTANCE-ZERO-001）。放宽半径不等于把没有坐标的
 // 人当成就在旁边。
+// freeSlotForDistinctTime 把活动自由文本里的钟点（"周六 15:00"）落成一个真实
+// 的 RFC3339 时段，供服务端算 free_at。
+//
+// 为什么需要它：活动时间是这个仓库自己的自由文本，不是可解析的时间戳。拿它直接
+// 拼 RFC3339 一定是编的 —— 而编一个时段去问"谁有空"，等于把上一轮那个假承诺
+// 换个地方重演一遍。
+//
+// 所以只做**能被墙上时钟验证**的映射：抽出 "HH:MM"，落到今天或明天那个钟点上
+// （今天该钟点已过就落到明天）。抽不出合法钟点就返回 undefined，调用方据此
+// 不传 slot ⇒ free_at 为未知，而不是假数据。
+function freeSlotForDistinctTime(label: string | undefined): { startIso: string; endIso: string } | undefined {
+  if (!label) return undefined;
+  const m = /(\d{1,2}):(\d{2})/.exec(label);
+  if (!m) return undefined;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (!(hour >= 0 && hour <= 23) || !(minute >= 0 && minute <= 59)) return undefined;
+  const start = new Date();
+  start.setHours(hour, minute, 0, 0);
+  // 该钟点今天已经过去 ⇒ 落到明天，而不是返回一个过去的时段（那会让
+  // 「谁有空」变成永远为假的判断）。
+  if (start.getTime() <= Date.now()) start.setDate(start.getDate() + 1);
+  const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
+}
+
 // HANOI_FALLBACK_ORIGIN is where the nearby read is centred when the device has
 // no location (a simulator with no simulated position, or a user who declined
 // the permission). Hanoi is deliberate: the server-side dev coordinates are

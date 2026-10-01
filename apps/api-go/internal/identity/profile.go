@@ -123,6 +123,24 @@ type Profile struct {
 	Longitude *float64 `json:"longitude,omitempty"`
 	// DistanceM 是服务端算出的距离（米），nil = 无法计算（对方无坐标，或请求方无坐标）。
 	DistanceM *float64 `json:"distanceM,omitempty"`
+
+	// HOME-FORYOU-FREE-001：这个人**在请求的那个时段有没有空**。
+	//
+	// 这三个字段和 DistanceM 是同一类东西，都必须由服务端量、客户端不许猜：
+	// 推荐位以前把 `online` 写死成 false、再用 Math.random() 换人，于是
+	//「点圆圈换个人」看起来像在挑"有空的人"，其实完全没有依据 ——
+	// 和 PERSON-DISTANCE-ZERO-001 造出的 0m 是同一类错误：拿一个和现实无关的
+	// 量当承诺。
+	//
+	// FreeAt 是三态的，所以用指针：
+	//   nil  = 没有排期，**未知**（不是"有空"，也不是"没空"）
+	//   true = supply.availability_windows 里有一条 AVAILABLE 的窗口盖住了请求时段
+	//   false= 有排期但不覆盖请求时段
+	//
+	// 未知一律当"不表示有空" —— 与距离那条规矩一致：不知道就不能当成满足条件。
+	FreeAt    *bool     `json:"freeAt,omitempty"`
+	FreeFrom  *time.Time `json:"freeFrom,omitempty"`
+	FreeUntil *time.Time `json:"freeUntil,omitempty"`
 }
 
 func (p Profile) validate() error {
@@ -199,7 +217,11 @@ type ProfileRepository interface {
 	// coordinates — a row without them is never a "nearby" hit).
 	// A viewer with no coordinates of their own cannot compute anyone's
 	// distance: returns an empty slice rather than guessing.
-	ListProfilesNearby(ctx context.Context, latitude, longitude float64, maxDistanceM float64, limit int) ([]Profile, error)
+	//
+	// slotStart/slotEnd 是"这次想约的时段"。传 nil 表示不判断空闲（调用方只想
+	// 要一份附近的名单）。传了就必须真的按 supply.availability_windows 判断 ——
+	// 没有排期的人 FreeAt 为 nil（未知），不是 true。
+	ListProfilesNearby(ctx context.Context, latitude, longitude float64, maxDistanceM float64, slotStart, slotEnd *time.Time, limit int) ([]Profile, error)
 	// PROFILE-SEARCH-001: both stores must agree on the matching rule and on
 	// the ordering, or the in-memory tests will pass against semantics that
 	// production does not have.
@@ -278,7 +300,7 @@ func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
 
 // ListProfilesNearby mirrors the Postgres read — haversine, ascending distance,
 // same cap semantics. See the ProfileRepository contract.
-func (r *MemoryProfileRepository) ListProfilesNearby(_ context.Context, latitude, longitude, maxDistanceM float64, limit int) ([]Profile, error) {
+func (r *MemoryProfileRepository) ListProfilesNearby(_ context.Context, latitude, longitude, maxDistanceM float64, slotStart, slotEnd *time.Time, limit int) ([]Profile, error) {
 	if limit <= 0 {
 		return []Profile{}, nil
 	}
@@ -302,6 +324,13 @@ func (r *MemoryProfileRepository) ListProfilesNearby(_ context.Context, latitude
 		copyProfile := p
 		distance := m
 		copyProfile.DistanceM = &distance
+		// HOME-FORYOU-FREE-001：内存仓没有 availability_windows 表，所以这里
+		// 只能判"未知"。**不能**当成 true —— 未知≠有空（与距离同一条规矩）。
+		// Postgres 那侧是真的查表。
+		if slotStart != nil && slotEnd != nil {
+			unknown := false
+			copyProfile.FreeAt = &unknown
+		}
 		hits = append(hits, scored{profile: copyProfile, meters: m})
 	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].meters < hits[j].meters })
@@ -569,7 +598,7 @@ func (s *ProfileService) SearchProfiles(ctx context.Context, query string, limit
 // ListProfilesNearby is the ProfileService half of the home-rail read
 // (HOME-RAIL-SERVER-001). The limit is clamped the same way SearchProfiles
 // clamps, so the rail cannot ask for an unbounded page.
-func (s *ProfileService) ListProfilesNearby(ctx context.Context, latitude, longitude, maxDistanceM float64, limit int) ([]Profile, error) {
+func (s *ProfileService) ListProfilesNearby(ctx context.Context, latitude, longitude, maxDistanceM float64, slotStart, slotEnd *time.Time, limit int) ([]Profile, error) {
 	if limit <= 0 {
 		limit = DefaultProfileSearchLimit
 	}
@@ -578,7 +607,7 @@ func (s *ProfileService) ListProfilesNearby(ctx context.Context, latitude, longi
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.repo.ListProfilesNearby(ctx, latitude, longitude, maxDistanceM, limit)
+	return s.repo.ListProfilesNearby(ctx, latitude, longitude, maxDistanceM, slotStart, slotEnd, limit)
 }
 
 // maxHandleSuffixAttempts bounds the suffix probe in ProvisionInitialProfile.

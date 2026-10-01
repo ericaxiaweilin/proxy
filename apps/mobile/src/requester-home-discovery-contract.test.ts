@@ -284,7 +284,17 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     // HOME-FORYOU-POOL-001（2026-09-26）：这里原来钉的是四个轴各 `(current + 1) % len`
     // —— 固定序列轮转。用户明确要求「随机根据用户的 location 推荐可用资源组合池」，
     // 所以改成真随机重掷；钉跟着改口径（不是把钉删掉，旧口径走下面的反向臂）。
-    expect(source).toContain("setPersonIndex(Math.floor(Math.random() * filteredPeople.length))");
+    // HOME-FORYOU-FREE-001（2026-10-01）：这条原来钉的是
+    //   `setPersonIndex(Math.floor(Math.random() * filteredPeople.length))`
+    // —— 2026-09-26 用户要求「随机**根据用户 location 推荐可用资源组合池**」，
+    // 当时没有"可用"的依据，随机是唯一能做到的实现手段。
+    //
+    // 现在服务端算得出 free_at（这个时段谁真的有空），本意可以被真正满足：
+    // 优先在「有空的」那些人里轮转，只有一个都没有时才退回随机**并如实说明**。
+    // 继续钉 `Math.random()` 那一行，等于把"随机"当成目的而不是当时的手段 ——
+    // 而随机换人正是用户这次报的问题（看起来像在挑有空的人，其实毫无依据）。
+    expect(source).toContain("const freeOnes = filteredPeople.filter((p) => p.online);");
+    expect(source).toMatch(/freePersonCursor\.current % freeOnes\.length/);
     // HOME-FORYOU-REFRESH-001（2026-09-29，用户「点击圆圈就是刷新全部可用插槽」）：
     // 活动轴不再在本地旧列表上全量随机 —— 先重新拉活动，再只在可用插槽里换
     //（有名额、我没下过单、和锁定的地点/时间不冲突，优先换一个不同的，
@@ -408,7 +418,13 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain("lockedSlots");
     expect(source).toContain("function toggleSlotLock");
     // remix 跳过锁定的轴（remixForYou 与中心键同一条链）。
-    expect(source).toContain('!lockedSlots.has("person") && filteredPeople.length > 1');
+    // HOME-FORYOU-FREE-001 把这一行拆成了 `if (!lockedSlots.has("person")) { … }` ——
+    // 锁了人就不换人这条**规则没变**，只是分支里现在要先挑「有空的」。
+    // 所以这里钉行为而不是钉字面量：锁了人的时候一个人都不换。
+    expect(source).toMatch(/if \(!lockedSlots\.has\("person"\)\) \{/);
+    // 分支内才有换人的动作（否则锁了也会被重掷）
+    const lockBranch = source.slice(source.indexOf('if (!lockedSlots.has("person")) {'));
+    expect(lockBranch.slice(0, 600)).toContain('setPersonIndex(');
     // HOME-FORYOU-REFRESH-001：锁定的活动原样保留（仍可用时），锁定的地点 / 时间作为
     // 筛选条件交给 pickRefreshedActivity，没锁的时间 / 地点才跟着活动对齐。
     expect(source).toContain('{ activityId: !lockedSlots.has("activity") ? undefined : current?.activityId, placeSceneId: lockedPlace?.id, time: lockedTime }');

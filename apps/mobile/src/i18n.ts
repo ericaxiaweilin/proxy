@@ -180,6 +180,10 @@ export interface Messages {
   loginToJoin: string;
   networkError: string;
   pickActivityFirst: string;
+  // HOME-FORYOU-FREE-001：点圆圈换人时一个有空的都找不到时的**如实**文案。
+  // 不能写成"已为你找到有空的人"之类的假话 —— 那正是这个修复要消灭的东西。
+  noOneFree: string;
+  noOneFreeSub: string;
   joinedWithCount: string;
   modePhoto: string;
   modeCompanion: string;
@@ -609,6 +613,8 @@ const ZH: Messages = {
   loginToJoin: "登录后可报名",
   networkError: "网络异常，请检查连接后重试",
   pickActivityFirst: "先选一个活动",
+  noOneFree: "这个时段没有显示有空的人",
+  noOneFreeSub: "已经换过一轮了。要么换个时间，要么换个地点。",
   joinedWithCount: "已报名 · {n} 人参加",
   modePhoto: "拍照",
   modeCompanion: "同行",
@@ -1031,6 +1037,9 @@ const VI: Messages = {
   loginToJoin: "Đăng nhập để đăng ký",
   networkError: "Lỗi mạng, kiểm tra kết nối rồi thử lại",
   pickActivityFirst: "Chọn một hoạt động trước",
+  // HOME-FORYOU-FREE-001: nói thật — không có ai rảnh trong khung giờ này.
+  noOneFree: "Không có ai rảnh trong khung giờ này",
+  noOneFreeSub: "Đã thử đổi một vòng. Hãy đổi giờ hoặc địa điểm.",
   joinedWithCount: "Đã đăng ký · {n} người tham gia",
   modePhoto: "Chụp ảnh",
   modeCompanion: "Đi cùng",
@@ -1453,6 +1462,9 @@ const EN: Messages = {
   loginToJoin: "Sign in to join",
   networkError: "Network error — check your connection and retry",
   pickActivityFirst: "Pick an activity first",
+  // HOME-FORYOU-FREE-001: say it plainly — nobody is free in this slot.
+  noOneFree: "Nobody is free in this time slot",
+  noOneFreeSub: "We tried a full round. Try a different time or place.",
   joinedWithCount: "Joined · {n} attending",
   modePhoto: "Photo",
   modeCompanion: "Companion",
@@ -1875,6 +1887,8 @@ const LO: Messages = {
   loginToJoin: "ເຂົ້າສູ່ລະບົບເພື່ອລົງທະບຽນ",
   networkError: "ເຄືອຂ່າຍຜິດພາດ ກວດການເຊື່ອມຕໍ່ແລ້ວລອງໃໝ່",
   pickActivityFirst: "ເລືອກກິດຈະກຳກ່ອນ",
+  noOneFree: "ບ່ອງຊ່ວງເວລານີ້ບໍ່ມີຄົນວ່າງ",
+  noOneFreeSub: "ລອງແລ້ວຫນึ່ງຮອບ. ລອງປ່ຽນເວລາຫຼືສະຖານທີ່.",
   joinedWithCount: "ລົງທະບຽນແລ້ວ · {n} ຄົນເຂົ້າຮ່ວມ",
   modePhoto: "ຖ່າຍຮູບ",
   modeCompanion: "ໄປນຳ",
@@ -2297,6 +2311,8 @@ const KO: Messages = {
   loginToJoin: "로그인 후 신청할 수 있어요",
   networkError: "네트워크 오류예요. 연결을 확인하고 다시 시도하세요",
   pickActivityFirst: "먼저 활동을 선택하세요",
+  noOneFree: "이 시간대에 비어 있는 사람이 없습니다",
+  noOneFreeSub: "한 바퀴 돌았습니다. 시간이나 장소를 바꿔 보세요.",
   joinedWithCount: "신청 완료 · {n}명 참가",
   modePhoto: "사진",
   modeCompanion: "동행",
@@ -2719,6 +2735,8 @@ const JA: Messages = {
   loginToJoin: "ログインすると申し込めます",
   networkError: "ネットワークエラーです。接続を確認して再試行してください",
   pickActivityFirst: "先に活動を選んでください",
+  noOneFree: "この時間帯に空いている人はいません",
+  noOneFreeSub: "一巡しました。時刻か場所を変えてみてください。",
   joinedWithCount: "申し込み済み · {n} 人参加",
   modePhoto: "撮影",
   modeCompanion: "一緒に行く",
