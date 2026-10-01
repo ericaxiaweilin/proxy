@@ -1231,6 +1231,7 @@ export function RequesterHome({
   // activityIndex 一律索引这份列表（选择器 / 整组换 / 意图预设 / 渲染同一份）。
   const sceneActivities = useMemo(() => activitiesAtCoffeeShops(storeActivities, sceneBriefs), [storeActivities, sceneBriefs]);
 
+
   // Home Search/Conversation v3 — 一个输入框同时做实体匹配和模型对话。
   // 索引里的四个分组**来源不一样**，别把它们混为一谈：
   //   - activities / scenes / times：来自上方已拉取的真实接口列表；
@@ -1240,6 +1241,25 @@ export function RequesterHome({
   //     结果独立展示。只看本地会漏掉新注册用户。
   // 列表为空时 lookup 自然无候选，输入直接走模型对话。
   const distinctTimes = [...new Set(sceneActivities.map((a) => a.time).filter(Boolean))];
+
+  // availableTimes = **可以选**的时间：去掉那些与我的订单撞时段的。
+  //
+  // HOME-FORYOU-SLOT-AVAIL-001（用户报 P0「点选择弹时间、选完还得再点选择」）：
+  // 治本在候选列表，而不是提交时弹选择器。既然撞时段的时间**不该被选到**，那它就不该
+  // 出现在候选里 —— 用户看不到它，就不会有"选了个冲突的、再来处理一遍"这条路径。
+  //
+  // ⚠️ 必须在**组件顶层**用 useMemo，不能放进渲染 JSX 里的那个 `{(() => { ... })()`
+  // 条件 IIFE —— 那个 IIFE 不保证每次渲染都执行，hook 数量会变，React 直接报
+  // "Rendered more hooks than during the previous render"（我第一版就踩了，
+  // 而且 tsc 与 vitest 都查不出来，只有真机/模拟器运行时才炸）。
+  //
+  // 所以这里不依赖 IIFE 内的 gridActivity：撞时段与否只取决于「这个时间文本是否已经
+  // 出现在我的任一订单里」，与当前选的是哪个活动无关 —— 判据本身也更准。
+  const availableTimes = useMemo(() => {
+    if (distinctTimes.length === 0 || myOrders.length === 0) return distinctTimes;
+    const taken = new Set(myOrders.filter((o) => !o.cancelled).map((o) => o.time.trim()).filter(Boolean));
+    return distinctTimes.filter((time) => !taken.has(time.trim()));
+  }, [distinctTimes.join("\u0000"), myOrders]);
 
   const searchIndex = buildHomeSearchIndex({
     people: filteredPeople.map((p) => ({ id: p.id, name: p.name, bio: p.bio })),
@@ -1537,19 +1557,6 @@ export function RequesterHome({
             // 全部槽位都拿不出可用值 ⇒ 真的走不下去，才置灰。
             // availableTimes = **可以选**的时间：去掉那些与我的订单撞时段的。
             //
-            // HOME-FORYOU-SLOT-AVAIL-001（用户报 P0「点选择弹时间、选完还得再点选择」）：
-            // 治本在这里，而不是在提交时弹选择器。既然撞时段的时间**不该被选到**，那它就不该
-            // 出现在候选里 —— 用户看不到它，就不会有"选了个冲突的、再来处理一遍"这条路径。
-            //
-            // 空列表 = 时间这一槽没有任何可用值（组合不成立，comboBlocked 会如实置灰），
-            // 而不是摆一列会失败的选项让用户去踩。
-            const availableTimes = useMemo(
-            () => distinctTimes.filter((time) =>
-            detectOrderConflict({ activityId: gridActivity?.activityId ?? "", time }, myOrders)?.kind !== "TIME_TAKEN"
-            ),
-            // eslint-disable-next-line react-hooks/exhaustive-deps -- myOrders 是本地 state，每次变都重算是应该的
-            [distinctTimes.join("\u0000"), myOrders, gridActivity?.activityId]
-            );
 
             // resolveConflictSlots 把冲突的那一个槽**就地换到下一个可用值**。
             //

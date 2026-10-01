@@ -12585,3 +12585,25 @@ if [ -d "$_mobile_src" ] && [ -f scripts/check-mobile-parses-with-metro.mjs ]; t
   _babel_n=$(node -e 'console.log("ok")' 2>/dev/null && echo "")
   echo "    MOBILE-METRO-PARSE-001: PASS (全部移动端源文件可被 Metro 的 Babel parser 解析)"
 fi
+
+# MOBILE-HOOKS-001（2026-10-01，用户报「你又搞坏了 有报错」）：hook 不许在条件位置。
+#
+# 我把一个 `useMemo` 放进了渲染 JSX 里的 `{(() => { ... })()}` 条件 IIFE。那个 IIFE
+# 不保证每次渲染都执行，hook 数量于是会变，React 直接抛
+#     Rendered more hooks than during the previous render.
+#
+# **tsc 通过、vitest 通过、Babel 解析通过、Metro 打包通过** —— 四道关全绿，
+# 只有真机/模拟器运行时才炸（那天 Metro 日志里 8 条同一个错）。
+#
+# 这是 MOBILE-METRO-PARSE-001 的姊妹条：那条查"Metro 打不了包"，这条查"能打包但
+# React 运行时炸"。两者都是"编译全绿、真机才炸"的形态。
+if [ -f scripts/check-hooks-not-in-conditional.mjs ]; then
+  if ! node scripts/check-hooks-not-in-conditional.mjs; then
+    echo "  FAIL [MOBILE-HOOKS-001]: 有 hook 不在组件顶层（可能位于条件 / IIFE / 回调里）——" >&2
+    echo "        hook 数量在两次渲染之间会变，React 抛「Rendered more hooks than" >&2
+    echo "        during the previous render」。**tsc / vitest / Babel / Metro 全查不出来**，" >&2
+    echo "        只有真机运行时才炸。" >&2
+    exit 1
+  fi
+  echo "    MOBILE-HOOKS-001: PASS (全部 hook 在组件顶层 —— 条件位置会导致运行时 hook 顺序错误)"
+fi
