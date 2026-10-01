@@ -2886,7 +2886,15 @@ const styles = StyleSheet.create({
   grid4: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
   gridRemixButton: { alignItems: "center", backgroundColor: "#171715", borderColor: color.offWhite, borderRadius: 29, borderWidth: 2, elevation: 7, height: 58, justifyContent: "center", left: "50%", marginLeft: -29, marginTop: -24, position: "absolute", top: "50%", width: 58, zIndex: 8 },
   gridRemixButtonPressed: { opacity: 0.78, transform: [{ scale: 0.96 }] },
-  gridTile: { borderRadius: 18, height: 172, overflow: "hidden", position: "relative", width: "48.4%" },
+  // 🔴 HOME-FORYOU-CTA-DOCK-001（2026-10-01，模拟器 idb 实测）：格高 172 时，
+  // 「选择」CTA 落在 y 735..779，而玻璃 dock 的可点区域是 y 735..818 ——
+  // **CTA 整颗被 dock 盖住**，点它实际点到 dock（实测一次点击被带去了动态 tab）。
+  // 这就是用户连报两次的「点击选择没响应」的**第一层真因**；修冲突改错轴是第二层。
+  // 设计意图（SEARCH-REPLY-BUDGET-001 写明）是「按钮底边 = dock 上沿」，所以这里
+  // 把两行格子各收 22pt（172→150）+ CTA 上边距 10→6，共让 ~50pt，
+  // 实测 CTA 回到 y 658..702，与 dock 之间留出 33pt。**改格高必须重测这条**：
+  // 模拟器上量 CTA 与 Tab Bar 的 frame，不许靠目测。
+  gridTile: { borderRadius: 18, height: 150, overflow: "hidden", position: "relative", width: "48.4%" },
   gridTileTap: { height: "100%", width: "100%" },
   gridTileLocked: { borderColor: "#F5B400", borderWidth: 2.5 },
   // FORYOU-LOCK-A-001（2026-09-28，原型 deepseek_html_20260928_c004b0 方案A「玻璃质感」）：
@@ -2912,12 +2920,12 @@ const styles = StyleSheet.create({
   gridLabelDark: { color: color.ink, textShadowColor: "transparent" },
   gridSub: { color: "rgba(255,255,255,0.85)", fontSize: 11, textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 5 },
   gridSubDark: { color: color.muted, textShadowColor: "transparent" },
-  gridCta: { alignItems: "center", backgroundColor: "#171715", borderRadius: 22, flexDirection: "row", gap: 6, justifyContent: "center", marginTop: 10, paddingVertical: 14 },
+  gridCta: { alignItems: "center", backgroundColor: "#171715", borderRadius: 22, flexDirection: "row", gap: 6, justifyContent: "center", marginTop: 6, paddingVertical: 14 },
   // HOME-FORYOU-CONFLICT-001：锁定轴和活动冲突时，「选择」按钮变灰、点不动。
   gridCtaDisabled: { backgroundColor: color.line },
   // SEARCH-REPLY-BUDGET-001：有回复时收掉按钮上边距（配合隐藏的提示行一起
   // 抵消回复条的高度，见 :1244 那段）。marginTop: 0 而不是删掉 —— 显式写 0
-  // 才不会继承 gridCta 的 10。
+  // 才不会继承 gridCta 的 6（原 10，见上面 HOME-FORYOU-CTA-DOCK-001）。
   gridCtaFlush: { marginTop: 0 },
   gridCtaText: { color: color.white, fontSize: 15, fontWeight: "800" },
   gridCtaTextSmall: { color: color.white, fontSize: 13, fontWeight: "800" },
