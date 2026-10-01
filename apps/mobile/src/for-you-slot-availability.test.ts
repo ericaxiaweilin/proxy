@@ -47,6 +47,29 @@ describe("For You 四槽可用性（HOME-FORYOU-SLOT-AVAIL-001）", () => {
     expect(source).toMatch(/\{availableTimes\.map\(\(slot, i\) =>/);
   });
 
+  it("刷新出来的组合本身必须能下单：时间只从可用值里挑", () => {
+    // 用户 2026-10-01 报 P0：「点击选择没响应」。
+    //
+    // 根因是刷新的时间取的是活动自己写的 `picked.time`，不看我有没有单 ——
+    // 于是圆圈刷出一个撞时段的组合 → 点「选择」走进"修冲突"分支 → 修完又
+    // return → 用户永远到不了确认页。
+    //
+    // 治本：刷新时在这个活动的**可用时间**里挑（availableTimes 已滤掉冲突值）。
+    expect(source).toMatch(/const freeForThis = freshTimes\.filter\(\(time\) => freeSet\.has\(time\.trim\(\)\)\);/);
+    expect(source).toMatch(/const preferred = freeForThis\.includes\(picked\.time\)/);
+    // 不许再直接用 picked.time
+    expect(source).not.toMatch(/indexOf\(picked\.time\)/);
+  });
+
+  it("修不好冲突时必须给出路，不能死循环", () => {
+    // 第一版无论修没修好都 return，于是「修不好」的组合（比如这个时间没有替代值）
+    // 会让按钮永远只弹消息、进不去确认页 —— 表现为「点击没响应」。
+    // 现在必须说明白为什么走不通、以及该动哪个轴。
+    expect(source).toMatch(/showResponse\([\s\S]{0,200}slotTimeClash/);
+    expect(source).toMatch(/t\("slotTimeClashSub"\)/);
+    expect(source).toMatch(/t\("slotPlaceClash"\)/);
+  });
+
   it("「缺人」仍然不能进确认页（人是一单的一部分）", () => {
     // 放行按钮 ≠ 放行缺人的组合：没选人依然要去选人。
     expect(source).toContain("const currentComboBroken = !gridPerson || orderConflict !== undefined || comboConflicts.length > 0;");

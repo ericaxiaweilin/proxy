@@ -185,6 +185,10 @@ export interface Messages {
   noOneFree: string;
   slotAutoAdjusted: string;
   slotAutoAdjustedSub: string;
+  slotTimeClash: string;
+  slotTimeClashSub: string;
+  slotPlaceClash: string;
+  slotPlaceClashSub: string;
   noOneFreeSub: string;
   joinedWithCount: string;
   modePhoto: string;
@@ -617,6 +621,10 @@ const ZH: Messages = {
   pickActivityFirst: "先选一个活动",
   noOneFree: "这个时段没有显示有空的人",
   slotAutoAdjusted: "已帮你换掉冲突的时间/地点",
+  slotTimeClash: "这个时间你已经有单了",
+  slotTimeClashSub: "换个时间，或先取消那一单。",
+  slotPlaceClash: "这个地点和活动对不上",
+  slotPlaceClashSub: "解锁「地点」让它跟着活动走。",
   slotAutoAdjustedSub: "再点一次「选择」即可下单。",
   noOneFreeSub: "已经换过一轮了。要么换个时间，要么换个地点。",
   joinedWithCount: "已报名 · {n} 人参加",
@@ -1044,6 +1052,10 @@ const VI: Messages = {
   // HOME-FORYOU-FREE-001: nói thật — không có ai rảnh trong khung giờ này.
   noOneFree: "Không có ai rảnh trong khung giờ này",
   slotAutoAdjusted: "Đã đổi giờ / địa điểm bị trùng",
+  slotTimeClash: "Giờ này bạn đã có đơn",
+  slotTimeClashSub: "Đổi giờ, hoặc hủy đơn cũ trước.",
+  slotPlaceClash: "Địa điểm không khớp hoạt động",
+  slotPlaceClashSub: "Mở khoá « Địa điểm » để nó theo hoạt động.",
   slotAutoAdjustedSub: "Nhấn « Chọn » lần nữa để đặt.",
   noOneFreeSub: "Đã thử đổi một vòng. Hãy đổi giờ hoặc địa điểm.",
   joinedWithCount: "Đã đăng ký · {n} người tham gia",
@@ -1471,6 +1483,10 @@ const EN: Messages = {
   // HOME-FORYOU-FREE-001: say it plainly — nobody is free in this slot.
   noOneFree: "Nobody is free in this time slot",
   slotAutoAdjusted: "Adjusted the conflicting time/place",
+  slotTimeClash: "You already have an order in this slot",
+  slotTimeClashSub: "Pick another time, or cancel that order first.",
+  slotPlaceClash: "This place does not match the activity",
+  slotPlaceClashSub: "Unlock Place so it follows the activity.",
   slotAutoAdjustedSub: "Tap Select again to place the order.",
   noOneFreeSub: "We tried a full round. Try a different time or place.",
   joinedWithCount: "Joined · {n} attending",
@@ -1897,6 +1913,10 @@ const LO: Messages = {
   pickActivityFirst: "ເລືອກກິດຈະກຳກ່ອນ",
   noOneFree: "ບ່ອງຊ່ວງເວລານີ້ບໍ່ມີຄົນວ່າງ",
   slotAutoAdjusted: "ປັດເວລາ/ສະຖານທີ່ຊົນກັບແລ້ວ",
+  slotTimeClash: "ເວລານີ້ທ່ານເທນມີຄຳສັ່ງຊື້ແລ້ວ",
+  slotTimeClashSub: "ເປີີນເວລາ ຫຼື ຍົກເລີກຄຳສັ່ງຊື້ກ່ອນ.",
+  slotPlaceClash: "ສະຖານທີ່ບໍ່ຕົງກັບກິດຈະກຳ",
+  slotPlaceClashSub: "ປົດລັອກ « ສະຖານທີ່ » ໃຫ້ມັນຕາມກິດຈະກຳ.",
   slotAutoAdjustedSub: "ແຕງ ບາດ « ເລືອກ » ອີກເທື່ອີກ.",
   noOneFreeSub: "ລອງແລ້ວຫນึ່ງຮອບ. ລອງປ່ຽນເວລາຫຼືສະຖານທີ່.",
   joinedWithCount: "ລົງທະບຽນແລ້ວ · {n} ຄົນເຂົ້າຮ່ວມ",
@@ -2323,6 +2343,10 @@ const KO: Messages = {
   pickActivityFirst: "먼저 활동을 선택하세요",
   noOneFree: "이 시간대에 비어 있는 사람이 없습니다",
   slotAutoAdjusted: "충돌하는 시간/장소를 바꿨습니다",
+  slotTimeClash: "이 시간대에 이미 주문이 있습니다",
+  slotTimeClashSub: "다른 시간을 고르거나 기존 주문을 취소하세요.",
+  slotPlaceClash: "장소가 활동과 맞지 않습니다",
+  slotPlaceClashSub: "« 장소 » 잠금을 해제하세요.",
   slotAutoAdjustedSub: "다시 « 선택 » 을 누르면 됩니다.",
   noOneFreeSub: "한 바퀴 돌았습니다. 시간이나 장소를 바꿔 보세요.",
   joinedWithCount: "신청 완료 · {n}명 참가",
@@ -2749,6 +2773,10 @@ const JA: Messages = {
   pickActivityFirst: "先に活動を選んでください",
   noOneFree: "この時間帯に空いている人はいません",
   slotAutoAdjusted: "冲突する時間・場所を調整しました",
+  slotTimeClash: "この時間帯には既に注文があります",
+  slotTimeClashSub: "時刻を変えるか、その注文をキャンセルしてください。",
+  slotPlaceClash: "場所が活動と合っていません",
+  slotPlaceClashSub: "「場所」のロックを解除してください。",
   slotAutoAdjustedSub: "もう一度「選択」を押してください。",
   noOneFreeSub: "一巡しました。時刻か場所を変えてみてください。",
   joinedWithCount: "申し込み済み · {n} 人参加",

@@ -1002,7 +1002,23 @@ export function RequesterHome({
     setActivityIndex(pick.index);
     // 没锁的时间 / 地点本来就跟着活动走（渲染时派生）；index 也对齐，解锁那一刻不跳。
     if (!lockedSlots.has("time")) {
-      const at = [...new Set(freshSceneActivities.map((a) => a.time).filter(Boolean))].indexOf(picked.time);
+      // HOME-FORYOU-SLOT-AVAIL-001（用户报 P0「点选择没反应」）：
+      // 刷新出来的组合本身**必须是一个能下单的组合**。
+      //
+      // 原来这里直接取 `picked.time`（活动自己写的时间），不看我有没有单：
+      // 于是圆圈刷出一个撞时段的组合 → 点「选择」走进"修冲突"分支 → 修完又 return
+      // → 用户永远到不了确认页，表现为**点击没反应**。
+      //
+      // 所以现在：先在**这个新活动的可用时间**里找（不撞我的订单），
+      // 找不到就退而用全局的 availableTimes，都没有才不动（让 comboBlocked 如实置灰）。
+      const freshTimes = [...new Set(freshSceneActivities.map((a) => a.time).filter(Boolean))];
+      // 用 availableTimes（组件顶层、由 myOrders 算出）做过滤，不在这里再读 myOrders ——
+      // myOrders 定义在 1146 行，而本函数在 955，直接读会 TDZ 报错。
+      const freeSet = new Set(availableTimes.map((time) => time.trim()));
+      const freeForThis = freshTimes.filter((time) => freeSet.has(time.trim()));
+      const preferred = freeForThis.includes(picked.time) ? picked.time
+        : freeForThis[0] ?? availableTimes[0] ?? picked.time;
+      const at = freshTimes.indexOf(preferred);
       if (at >= 0) setTimeIndex(at);
     }
     if (!lockedSlots.has("place")) {
@@ -1726,11 +1742,21 @@ export function RequesterHome({
                         if (!gridPerson) { setChooser("person"); return; }
                         // 就地修好冲突槽，不打断用户
                         if (orderConflict?.kind === "TIME_TAKEN" || comboConflicts.some((c) => c.slot === "place")) {
+                          // 先试着修好。修好了下一帧就是干净组合，用户再点一次直接下单。
                           setJoinMsg(undefined);
                           resolveConflictSlots();
-                          // 换完这一帧先不要开确认页：setState 是异步的，此刻读到的还是
-                          // 旧值，直接开会带着冲突进确认页。下一次点击就干净地进。
-                          showResponse(t("slotAutoAdjusted"), t("slotAutoAdjustedSub"));
+                          // **绝不开确认页**：此刻读到的还是旧值（setState 异步），开了就是
+                          // 把冲突带进确认页，用户填完提交才失败。
+                          //
+                          // 也不能死循环：第一版无论修没修好都 return，于是"修不好"的组合
+                          // （比如这个时间没有替代值）会让按钮**永远只弹消息、进不去确认页**
+                          // —— 用户报的就是「点击选择没响应」。
+                          //
+                          // 所以这里给一个明确出口：如实说明为什么走不通，并指出该动哪个轴。
+                          showResponse(
+                            orderConflict?.kind === "TIME_TAKEN" ? t("slotTimeClash") : t("slotPlaceClash"),
+                            orderConflict?.kind === "TIME_TAKEN" ? t("slotTimeClashSub") : t("slotPlaceClashSub"),
+                          );
                           return;
                         }
                         setJoinMsg(undefined); setOrderDone(false); setOrderCodeCopied(false); setOrderNo(""); setJoinConfirmOpen(true);
