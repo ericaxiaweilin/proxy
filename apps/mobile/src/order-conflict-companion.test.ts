@@ -28,12 +28,17 @@ describe("detectOrderConflict is companion-aware", () => {
     expect(conflict?.kind).not.toBe("ALREADY_ORDERED");
   });
 
-  it("a legacy order with no companion recorded still blocks (conservative)", () => {
-    // 旧数据的票面快照是 NULL，拿不到同行人 ⇒ 无法证明换了人 ⇒ 判重。
-    // 宁可误报重复，也不能因为缺数据放行重复下单（与服务端一致）。
+  it("a legacy order with NO companion recorded must NOT lock the user out", () => {
+    // 旧数据的票面快照是 NULL，拿不到同行人。第一版写的是"⇒ 判重"，
+    // 结果是把这个用户**永久锁死**：库里所有旧单都没有快照，于是他在任何一个
+    // 自己下过单的活动上，选任何新同行人都被判「已经下过了」—— 而那个人
+    // 根本没下过单。
+    //
+    // 代价不对称：真实重复下单 = 一张票；误判重复 = 永远无法和新人下单。
+    // 所以往放行那边偏。
     const legacy: ExistingOrder[] = [{ activityId: "act_1", title: "杯测", time: "周六 15:00", orderNo: "1002609…" }];
     const conflict = detectOrderConflict({ activityId: "act_1", time: "周六 15:00", companionId: "bob" }, legacy);
-    expect(conflict?.kind).toBe("ALREADY_ORDERED");
+    expect(conflict?.kind).not.toBe("ALREADY_ORDERED");
   });
 
   it("identity is the id, not the name — renaming must not defeat the check", () => {

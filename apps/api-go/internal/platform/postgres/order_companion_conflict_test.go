@@ -38,8 +38,10 @@ func TestCompanionChangedDecidesDuplicate(t *testing.T) {
 			"换了人就是换单 —— 界面上必须能下单，否则新用户永远是灰的"},
 		{"same companion is still a duplicate", withCompanion("alice"), withRecipe("alice"), false,
 			"同一个人再下一单，仍然如实报重复（ORDER-NO-001 的既有行为不变）"},
-		{"first order has no companion, this one has", nil, withRecipe("bob"), false,
-			"拿不到旧快照 ⇒ 无法证明换了人 ⇒ 保守判重。宁可误报，不能让重复下单靠清数据溜过去"},
+		{"old snapshot missing entirely (pre-snapshot order)", nil, withRecipe("bob"), true,
+			"拿不到旧快照 ⇒ 当作换人，允许下单。第一版写的是 false（判重），" +
+				"结果把这个用户永久锁死：库里旧单全都没有快照，于是他在任何自己下过单" +
+				"的活动上选任何新同行人都被判「已经下过了」——而那个人根本没下过单"},
 		{"old snapshot exists but had no companion, now there is one", &activity.OrderSnapshot{}, withRecipe("bob"), false,
 			"旧快照存在但没有同行人字段，仍按判重处理"},
 		{"both have no companion", &activity.OrderSnapshot{}, withRecipe(""), false,

@@ -12369,14 +12369,25 @@ if [ -f apps/api-go/internal/platform/postgres/activity.go ]; then
     echo "  FAIL [HOME-FORYOU-ORDER-007]: myOrders 不再从快照取回同行人 —— 判重无据可依。" >&2
     exit 1
   fi
-  # 旧单缺同行人时必须**保守判重**。这里是最容易写反的一处：
-  # 比 `order.companionId === wanted` 会在旧数据（快照 NULL）时判成"换了人"，
-  # 于是清掉一列历史数据就能绕开判重下单 —— 方向正好反了。
-  if ! grep -qF 'order.companionId === undefined || order.companionId === wanted' apps/mobile/src/requester-home-combo.ts; then
-    echo "  FAIL [HOME-FORYOU-ORDER-007]: 旧单缺同行人时不再保守判重 ——" >&2
-    echo "        拿不到快照无法证明换了人，应判重；写成比较会把缺数据当成"换了人"，" >&2
-    echo "        等于清掉一列历史数据就能绕开判重下单。" >&2
+  # 旧单缺同行人（票面快照是 NULL）时必须**当作换人、允许下单**。
+  #
+  # 这里我第一版钉反了：写的是"缺同行人 ⇒ 判重"，理由是"拿不到证据就保守"。
+  # 那个方向把用户**永久锁死**了 —— 库里 9 条旧单全都没有快照，于是他在任何
+  # 自己下过单的活动上，选任何新同行人都被判「已经下过了」，而那个人根本没
+  # 下过单。用户重启模拟器看到的正是这个。
+  #
+  # 代价不对称：真实重复下单 = 一张票（同 actor 同活动只有一行，服务端沿用原编号
+  # 并刷新票面）；误判重复 = 这个人再也无法和任何新的人下单。所以往放行偏。
+  if ! grep -qF 'order.companionId !== undefined' apps/mobile/src/requester-home-combo.ts; then
+    echo "  FAIL [HOME-FORYOU-ORDER-007]: 旧单缺同行人时又变回判重 ——" >&2
+    echo "        库里旧单全都没有快照，那样会把用户永久锁死：他在任何自己下过单的" >&2
+    echo "        活动上选任何新同行人都被判「已经下过了」，而那个人根本没下过单。" >&2
     exit 1
   fi
-  echo "    HOME-FORYOU-ORDER-007: PASS (服务端判重带 companion · 快照可读出行 · 客户端两处都带 · 旧单缺同行人时保守判重)"
+  # 服务端同理：只有快照存在时才判重，缺快照的旧单走换人路径（沿用原编号）。
+  if ! grep -qF 'existing.Snapshot != nil && !companionChanged' apps/api-go/internal/platform/postgres/activity.go; then
+    echo "  FAIL [HOME-FORYOU-ORDER-007]: 服务端又对无快照旧单判重 —— 永久锁死。" >&2
+    exit 1
+  fi
+  echo "    HOME-FORYOU-ORDER-007: PASS (服务端判重带 companion · 快照可读出行 · 客户端两处都带 · 无快照旧单放行不锁死)"
 fi

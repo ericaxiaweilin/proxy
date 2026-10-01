@@ -21,23 +21,47 @@ import (
 	"time"
 )
 
-// Kind enumerates the precise-location consent categories. Only
-// PRECISE_GPS is in scope for R16.7-P1-J; COARSE_CITY is implicit
+// Kind enumerates the location consent categories. PRECISE_GPS and
+// FUZZY_REGION are both explicit opt-ins; COARSE_CITY is implicit
 // (no consent needed for city-level data) and is not represented
 // here.
+//
+// Why FUZZY_REGION is a separate kind rather than a flag on
+// PRECISE_GPS: the two authorise different disclosures. PRECISE_GPS
+// hands over the exact fix; FUZZY_REGION hands over a grid-rounded
+// point (~1 km) and never the exact fix. Folding them together would
+// make "I agreed to precise" imply "I also agreed to fuzzy", which is
+// exactly the bundled/implied consent NĐ 356/2025 Art. 6.3 forbids.
+// A user can therefore hold one without the other.
 type Kind string
 
 const (
-	KindPreciseGPS Kind = "PRECISE_GPS"
+	KindPreciseGPS  Kind = "PRECISE_GPS"
+	KindFuzzyRegion Kind = "FUZZY_REGION"
 )
+
+// AllKinds is the whitelist in ONE place. NormalizeKind iterates it,
+// and the rejection payload is built from it, so the accepted set and
+// the advertised set cannot drift apart. Keep it in step with the DB
+// CHECK (migrations 062 + 152) and the mobile union type.
+var AllKinds = []Kind{KindPreciseGPS, KindFuzzyRegion}
+
+// KindStrings renders AllKinds for error payloads.
+func KindStrings() []string {
+	out := make([]string, 0, len(AllKinds))
+	for _, k := range AllKinds {
+		out = append(out, string(k))
+	}
+	return out
+}
 
 // Status is the lifecycle of a consent row.
 type Status string
 
 const (
-	StatusGranted  Status = "GRANTED"
-	StatusRevoked  Status = "REVOKED"
-	StatusExpired  Status = "EXPIRED"
+	StatusGranted Status = "GRANTED"
+	StatusRevoked Status = "REVOKED"
+	StatusExpired Status = "EXPIRED"
 )
 
 // AllowedDurations is the menu presented to the user. We deliberately
@@ -162,13 +186,21 @@ type Repository interface {
 // NormalizeKind guards against case-only differences. The mobile
 // client sends "precise_gps" or "PRECISE_GPS" interchangeably
 // depending on the build; we accept both.
+//
+// This whitelist must stay in step with two other places, or a kind
+// will be accepted by one layer and silently rejected by the next:
+// the DB CHECK on location.location_consents.kind (migrations 062 +
+// 152) and LocationConsentKind in
+// apps/mobile/src/location-consent-client.ts. AllKinds above is the
+// single list this function reads.
 func NormalizeKind(s string) (Kind, error) {
-	switch strings.ToUpper(strings.TrimSpace(s)) {
-	case "PRECISE_GPS":
-		return KindPreciseGPS, nil
-	default:
-		return "", fmt.Errorf("unknown location consent kind: %q", s)
+	norm := strings.ToUpper(strings.TrimSpace(s))
+	for _, k := range AllKinds {
+		if string(k) == norm {
+			return k, nil
+		}
 	}
+	return "", fmt.Errorf("unknown location consent kind: %q (allowed: %s)", s, strings.Join(KindStrings(), ", "))
 }
 
 // ValidateDuration returns nil if the duration is in

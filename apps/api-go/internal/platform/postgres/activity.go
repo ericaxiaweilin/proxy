@@ -105,10 +105,26 @@ func (r *ActivityRepository) ToggleInterest(ctx context.Context, activityID, act
 // 判据只看同行人 id（名字会改、照片会失效，id 不会）—— 拿显示名当身份，用户
 // 改个昵称就能绕开判重下单，那等于没有判重。
 //
-// 拿不到已存在那单的快照（老数据 order_snapshot 为 NULL）时返回 false，
-// 即"没法证明换了人" ⇒ 仍然判重。宁可误报重复，也不能因为缺数据放行重复下单。
+// 调用方（Join）已经保证 existing.Snapshot != nil 才会问这个问题，所以这里
+// 只处理"快照在、但同行人不在"的情形：那返回 false（同一单，不算换人）。
+//
+// 快照整个缺失的老单**不该**走到这里 —— 那是永久锁死用户的根源
+// （见 Join 里那段注释）。
 func companionChanged(existing *activity.OrderSnapshot, recipe activity.JoinRecipe) bool {
-	if existing == nil || existing.Companion == nil {
+	if existing == nil {
+		// 旧单没有快照（票面快照功能之前下的）：当"换了人"，允许继续下单。
+		//
+		// 这个分支的取值方向是这个函数里最容易写反的一处。第一版返回 false
+		//（"拿不到证据 ⇒ 保守判重"），后果是**永久锁死**：库里所有旧单都
+		// 没有快照，于是这些用户在任何自己下过单的活动上，选任何新同行人
+		// 都被判「已经下过了」—— 而那个人根本没下过单。
+		//
+		// 代价不对称：真实重复下单 = 一张票（同 actor 同活动只有一行，会沿用
+		// 原编号并刷新票面）；误判重复 = 这个人再也无法和任何新的人下单。
+		return true
+	}
+	if existing.Companion == nil {
+		// 快照在、里面没有同行人 ⇒ 那一单本来就没有同行人 ⇒ 同一单。
 		return false
 	}
 	return existing.Companion.ID != recipeCompanionID(recipe)
@@ -157,10 +173,20 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 		// 同一 companion 重复下单仍然如实报重复（ORDER-NO-001 的既有行为不变）：
 		// 不新开一单，把原编号带回去，客户端照进已下单页。
 		//
-		// 历史行的 order_snapshot 可能为 NULL（迁移前下的单），此时无法证明
-		// 「同行人没变过」，保守判重 —— 宁可说"可能下过"，也不能让同一个人
-		// 靠清掉快照反复下单。
-		if found && existing.State != activity.PartCancelled && !companionChanged(existing.Snapshot, recipe) {
+		// 旧单（order_snapshot 为 NULL，票面快照功能之前下的）怎么办：
+		//
+		// 第一版我写的是「拿不到快照 ⇒ 保守判重」。**那是把方向修反了**，而且
+		// 后果是致命的：库里的旧单全都没有快照，于是**任何同行人都被判成
+		// 「已经下过了」** —— 用户看到新用户在 rail 里是灰的、点下去被告知已下单，
+		// 而那个人根本没下过单。判据"保守"的方向错了：它保护的是旧单不被重复下单，
+		// 代价是**这个人再也无法和任何新同行人下单**，永久锁死。
+		//
+		// 正确做法：旧单没有同行人可比，那就当"这一单的同行人未知"，允许换人
+		// —— 下面的 UPDATE 分支会沿用原编号（order_no=COALESCE）并刷新票面，
+		// 编号不变、审计可追，只把同行人换成新的。这既不产生第二单，
+		// 也不把用户锁死。
+		if found && existing.State != activity.PartCancelled &&
+			existing.Snapshot != nil && !companionChanged(existing.Snapshot, recipe) {
 			participation = existing
 			_ = decodeActivity(payload, interested, joined, capacity, &result)
 			return activity.ErrAlreadyJoined

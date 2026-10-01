@@ -310,15 +310,20 @@ export function detectOrderConflict(
   // 拿不到旧单的同行人（历史数据没有这个字段）时仍然判重 —— 与服务端
   // companionChanged 的保守策略一致：宁可误报重复，也不能因为缺数据放行重复下单。
   const wanted = activity.companionId ?? "";
-  // 旧单的同行人**缺失**（票面快照是 NULL，迁移前下的单）时，无法证明换了人
-  // ⇒ 判重。这与服务端 companionChanged 的保守策略一致。
+  // 同一场活动 + **已知同一个同行人** ⇒ 重复下单。
   //
-  // 注意不能简单比 `order.companionId === wanted`：缺失值是 undefined，
-  // 拿它去比 "bob" 会判成"换了人"，于是**清掉一列历史数据就能绕开判重下单** ——
-  // 方向正好反了，保守的那一侧被写成了放行的那一侧。
+  // 旧单的同行人**缺失**（票面快照是 NULL，票面快照功能之前下的单）时按
+  // "换了人"处理，允许继续下单。第一版我写的是反的（缺失 ⇒ 判重），理由是
+  // "拿不到证据就保守" —— 结果**把这个用户永久锁死了**：库里所有旧单都没有快照，
+  // 于是他在任何一个自己下过单的活动上，选任何新同行人都被判「已经下过了」。
+  // 新同行人根本没下过单，那条提示是假的，而用户再也无法和任何新的人下单。
+  //
+  // 真实重复下单的代价是一张票（服务端同活动同 actor 只有一行，会沿用原编号并
+  // 刷新票面）；误判重复下单的代价是**永久锁死**。两者不对称，所以要往放行那边偏。
   const same = live.find((order) =>
     order.activityId === activity.activityId &&
-    (order.companionId === undefined || order.companionId === wanted)
+    order.companionId !== undefined &&
+    order.companionId === wanted
   );
   if (same) return { kind: "ALREADY_ORDERED", orderNo: same.orderNo };
   const time = activity.time.trim();

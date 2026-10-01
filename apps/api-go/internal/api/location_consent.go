@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
@@ -50,6 +51,11 @@ func (s *Server) locationConsentGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope := buildLocationCommandEnvelope(r, auth, nil, "GetLocationConsentStatus")
+	// GET has no body, so the kind arrives as ?kind=. Absent means the
+	// service's PRECISE_GPS default (older clients send nothing).
+	if kind := strings.TrimSpace(r.URL.Query().Get("kind")); kind != "" {
+		envelope.Payload = map[string]any{"kind": kind}
+	}
 	result := s.Location.HandleContext(r.Context(), envelope)
 	if result.Error != nil {
 		writeCommandError(w, result)
@@ -104,14 +110,24 @@ func (s *Server) locationConsentRevoke(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "location_service_unavailable"})
 		return
 	}
-	envelope := buildLocationCommandEnvelope(r, auth, nil, "RevokeLocationConsent")
+	payload := readLocationPayload(r)
+	envelope := buildLocationCommandEnvelope(r, auth, payload, "RevokeLocationConsent")
 	result := s.Location.HandleContext(r.Context(), envelope)
 	if result.Error != nil {
 		writeCommandError(w, result)
 		return
 	}
+	// Report the kind the SERVICE acted on, not a constant. This used to
+	// hardcode PRECISE_GPS, so revoking a fuzzy grant answered
+	// "PRECISE_GPS" — the client would then render the wrong switch as off.
+	kind, _ := result.Body["kind"].(string)
+	if kind == "" {
+		// The service always echoes the kind. If it ever stops, say so
+		// rather than inventing one.
+		kind = "UNKNOWN"
+	}
 	body := map[string]any{
-		"kind":      string(location.KindPreciseGPS),
+		"kind":      kind,
 		"status":    "REVOKED",
 		"wasActive": result.Body["wasActive"],
 	}
@@ -232,8 +248,15 @@ func buildAuthContextFor(r *http.Request, auth identity.AuthenticatedSession) ma
 }
 
 // readLocationPayload reads the JSON body of a location consent
-// grant request. The shape is always { durationSeconds?: number }
+// request. The shape is { kind?: string, durationSeconds?: number }
 // so we tolerate missing bodies and missing fields.
+//
+// `kind` MUST be forwarded when present: it selects which consent the
+// command acts on (PRECISE_GPS vs FUZZY_REGION). Dropping it here
+// would make every request silently mean PRECISE_GPS — the service
+// would then grant the stronger disclosure the caller did not ask
+// for. Absent/empty is still left absent, so the service applies its
+// documented PRECISE_GPS default for older clients.
 func readLocationPayload(r *http.Request) map[string]any {
 	payload := map[string]any{}
 	if r.Body == nil {
@@ -251,8 +274,8 @@ func readLocationPayload(r *http.Request) map[string]any {
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return payload
 	}
-	if v, ok := parsed["durationSeconds"]; ok {
-		payload["durationSeconds"] = v
+	if v, ok := parsed["kind"]; ok {
+		payload["kind"] = v
 	}
 	if v, ok := parsed["durationSeconds"]; ok {
 		payload["durationSeconds"] = v

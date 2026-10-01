@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BlindBox 社交 - 完整原型（含法律条款）</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #000000;
+    --text-sec: #999999;
+    --divider: #f0f0f0;
+    --btn-bg: #000000;
+    --btn-text: #ffffff;
+    --danger: #ff3b30;
+    --switch-off: #e5e5e5;
+    --switch-on: #000000;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #fafafa; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+  .app-container { width: 100%; max-width: 400px; height: 100vh; max-height: 850px; background: var(--bg); position: relative; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); display: flex; flex-direction: column; }
+  @media (max-width: 480px) { .app-container { height: 100vh; max-height: 100vh; box-shadow: none; } }
+  .view { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg); display: none; flex-direction: column; overflow-y: auto; overflow-x: hidden; padding-bottom: 20px; }
+  .view.active { display: flex; }
+  .header { display: flex; align-items: center; justify-content: space-between; padding: 16px; position: sticky; top: 0; background: rgba(255,255,255,0.95); backdrop-filter: blur(10px); z-index: 10; }
+  .header-icon { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .header-title { font-size: 17px; font-weight: 600; flex: 1; text-align: center; }
+  .profile-sec { display: flex; align-items: center; padding: 20px; margin-bottom: 8px; cursor: pointer; }
+  .avatar { width: 60px; height: 60px; border-radius: 50%; background: #f0f0f0; margin-right: 16px; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #ccc; }
+  .profile-info { flex: 1; }
+  .profile-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .profile-name { font-size: 18px; font-weight: 700; }
+  .badge { background: var(--text); color: var(--bg); font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+  .profile-id { font-size: 13px; color: var(--text-sec); }
+  .list-group { padding: 0 20px; margin-bottom: 24px; }
+  .list-item { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--divider); cursor: pointer; }
+  .list-item:last-child { border-bottom: none; }
+  .item-left { display: flex; align-items: center; }
+  .item-icon { width: 22px; height: 22px; margin-right: 14px; display: flex; align-items: center; justify-content: center; color: var(--text); }
+  .item-title { font-size: 16px; }
+  .item-right { display: flex; align-items: center; }
+  .item-value { font-size: 15px; color: var(--text-sec); margin-right: 8px; }
+  .chevron { width: 16px; height: 16px; color: #ccc; }
+  .toggle { position: relative; width: 44px; height: 24px; background: var(--switch-off); border-radius: 12px; transition: 0.3s; }
+  .toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: #fff; border-radius: 50%; transition: 0.3s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .toggle.active { background: var(--switch-on); }
+  .toggle.active::after { transform: translateX(20px); }
+  .form-container { padding: 20px; flex: 1; }
+  .input-group { margin-bottom: 24px; }
+  .input-group label { display: block; font-size: 13px; color: var(--text-sec); margin-bottom: 8px; }
+  .input-group input { width: 100%; border: none; border-bottom: 1px solid var(--divider); font-size: 16px; padding: 8px 0; outline: none; background: transparent; }
+  .input-group input:focus { border-bottom-color: var(--text); }
+  .footer-btn { padding: 20px; margin-top: auto; }
+  .btn { width: 100%; height: 50px; background: var(--btn-bg); color: var(--btn-text); border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .tag-group { display: flex; flex-wrap: wrap; gap: 10px; }
+  .tag { padding: 8px 16px; border: 1px solid var(--divider); border-radius: 20px; font-size: 14px; cursor: pointer; transition: 0.2s; }
+  .tag.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .doc-content { padding: 0 20px 40px; }
+  .doc-content h1 { font-size: 22px; font-weight: 700; margin: 20px 0 8px; }
+  .doc-content .date { font-size: 13px; color: var(--text-sec); margin-bottom: 24px; }
+  .doc-content h2 { font-size: 16px; font-weight: 600; margin: 24px 0 12px; }
+  .doc-content p { font-size: 15px; line-height: 1.7; color: #444; margin: 0 0 16px; text-align: justify; }
+  .doc-content strong { color: var(--text); }
+  .doc-content ol { padding-left: 20px; margin: 0 0 16px; }
+  .doc-content ol li { font-size: 15px; line-height: 1.7; color: #444; margin-bottom: 8px; }
+  .main-info { padding: 40px 20px 30px; text-align: center; }
+  .storage-number { font-size: 52px; font-weight: 700; letter-spacing: -1.5px; }
+  .storage-unit { font-size: 20px; font-weight: 600; margin-left: 2px; }
+  .storage-subtitle { font-size: 14px; color: var(--text-sec); margin-top: 6px; }
+  .checkbox-circle { position: relative; width: 22px; height: 22px; border: 1.5px solid #ccc; border-radius: 50%; cursor: pointer; flex-shrink: 0; }
+  .checkbox-circle input { opacity: 0; position: absolute; }
+  .checkmark { display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: var(--text); border-radius: 50%; }
+  .checkmark::after { content: ""; position: absolute; left: 8px; top: 4px; width: 5px; height: 10px; border: solid var(--bg); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  .checkbox-circle input:checked + .checkmark { display: block; }
+</style>
+</head>
+<body>
+
+<div class="app-container">
+
+  <!-- ================= 1. 主设置页 ================= -->
+  <div id="view-settings" class="view active">
+    <header class="header">
+      <div class="header-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      </div>
+      <div class="header-title">设置</div>
+      <div style="width:24px;"></div>
+    </header>
+
+    <div class="profile-sec">
+      <div class="avatar">👤</div>
+      <div class="profile-info">
+        <div class="profile-name-row">
+          <div class="profile-name">Duy Khang</div>
+          <div class="badge">已实名</div>
+        </div>
+        <div class="profile-id">ID: 88888888</div>
+      </div>
+      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>
+
+    <div class="list-group">
+      <div class="list-item" onclick="showView('view-kyc')">
+        <div class="item-left">
+          <div class="item-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+          <div class="item-title">账号与安全</div>
+        </div>
+        <div class="item-right"><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+      <div class="list-item" onclick="showView('view-kyc')">
+        <div class="item-left">
+          <div class="item-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+          <div class="item-title">手机号认证 (KYC)</div>
+        </div>
+        <div class="item-right"><span class="item-value" style="color:#000;font-weight:600;">已认证</span><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+    </div>
+
+    <div class="list-group">
+      <div class="list-item" onclick="showView('view-preference')">
+        <div class="item-left">
+          <div class="item-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
+          <div class="item-title">盲盒匹配偏好</div>
+        </div>
+        <div class="item-right"><span class="item-value">文艺、摄影</span><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+      <div class="list-item" onclick="showView('view-location')">
+        <div class="item-left">
+          <div class="item-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></div>
+          <div class="item-title">位置与隐私</div>
+        </div>
+        <div class="item-right"><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+      <div class="list-item" onclick="alert('黑名单管理页面')">
+        <div class="item-left">
+          <div class="item-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></div>
+          <div class="item-title">黑名单管理</div>
+        </div>
+        <div class="item-right"><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+    </div>
+
+    <div class="list-group">
+      <div class="list-item" onclick="showView('view-terms')">
+        <div class="item-left">
+          <div class="item-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div>
+          <div class="item-title">服务协议与隐私政策</div>
+        </div>
+        <div class="item-right"><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+      <div class="list-item" onclick="showView('view-cache')">
+        <div class="item-left">
+          <div class="item-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></div>
+          <div class="item-title">清理缓存</div>
+        </div>
+        <div class="item-right"><span class="item-value">479.93MB</span><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+    </div>
+
+    <div class="list-group">
+      <div class="list-item">
+        <div class="item-left">
+          <div class="item-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div>
+          <div class="item-title">语言 / Ngôn ngữ</div>
+        </div>
+        <div class="item-right"><span class="item-value">Tiếng Việt</span><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+      <div class="list-item">
+        <div class="item-left">
+          <div class="item-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></div>
+          <div class="item-title">深色模式</div>
+        </div>
+        <div class="item-right"><div class="toggle" onclick="this.classList.toggle('active')"></div></div>
+      </div>
+    </div>
+
+    <div class="footer-btn" style="margin-top: auto; margin-bottom: 40px;">
+      <button class="btn" style="background: transparent; border: 1px solid var(--divider); color: var(--danger);" onclick="alert('退出登录')">退出登录</button>
+    </div>
+  </div>
+
+  <!-- ================= 2. 位置与隐私设置页（新增） ================= -->
+  <div id="view-location" class="view">
+    <header class="header">
+      <div class="header-icon" onclick="showView('view-settings')">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      </div>
+      <div class="header-title">位置与隐私</div>
+      <div style="width:24px;"></div>
+    </header>
+    <div class="form-container">
+      <p style="font-size:13px; color:var(--text-sec); line-height:1.6; margin-bottom:24px;">
+        根据越南《个人数据保护法》（PDPL）及第356/2025/ND-CP号法令，个人位置数据属于<strong>敏感个人数据</strong>，平台已采取加密和匿名化措施进行保护。
+      </p>
+
+      <div style="margin-bottom:28px;">
+        <div style="font-size:15px; font-weight:600; margin-bottom:6px;">盲盒匹配时共享模糊位置</div>
+        <div style="font-size:13px; color:var(--text-sec); margin-bottom:12px; line-height:1.5;">开启后，系统仅向匹配对象展示您所在区域（如“北宁省·某工业区附近”），不会展示精确坐标。</div>
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <span style="font-size:14px;">模糊位置共享</span>
+          <div class="toggle active" onclick="this.classList.toggle('active')"></div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:28px;">
+        <div style="font-size:15px; font-weight:600; margin-bottom:6px;">线下见面安全分享</div>
+        <div style="font-size:13px; color:var(--text-sec); margin-bottom:12px; line-height:1.5;">开启后，盲盒开启成功时，系统会自动将您的实时位置发送给您设定的紧急联系人。见面结束后自动停止共享。</div>
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <span style="font-size:14px;">见面时自动分享实时定位</span>
+          <div class="toggle active" onclick="this.classList.toggle('active')"></div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:28px;">
+        <div style="font-size:15px; font-weight:600; margin-bottom:6px;">紧急联系人</div>
+        <div style="font-size:13px; color:var(--text-sec); margin-bottom:12px; line-height:1.5;">添加1-3位信任的联系人。在您使用“一键报警”功能或平台检测到异常时，他们将收到包含您位置信息的紧急通知。</div>
+        <div class="list-group" style="padding:0; margin-bottom:12px;">
+          <div class="list-item" style="padding:12px 0;">
+            <div class="item-left">
+              <div class="avatar" style="width:36px;height:36px;font-size:16px;margin-right:12px;">👩</div>
+              <div>
+                <div style="font-size:15px;font-weight:500;">Nguyễn Thị Hương</div>
+                <div style="font-size:12px;color:var(--text-sec);">+84 912 345 678</div>
+              </div>
+            </div>
+            <div class="item-right"><span style="font-size:13px;color:var(--text-sec);">移除</span></div>
+          </div>
+        </div>
+        <div style="text-align:center; padding:12px 0; border:1.5px dashed #ccc; border-radius:12px; font-size:14px; color:var(--text-sec); cursor:pointer;">+ 添加紧急联系人</div>
+      </div>
+
+      <div style="margin-bottom:28px;">
+        <div style="font-size:15px; font-weight:600; margin-bottom:6px;">数据权限管理</div>
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 0; border-bottom:1px solid var(--divider);">
+          <span style="font-size:14px;">允许后台位置追踪</span>
+          <div class="toggle" onclick="this.classList.toggle('active')"></div>
+        </div>
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 0; border-bottom:1px solid var(--divider);">
+          <span style="font-size:14px;">允许位置数据用于匹配分析</span>
+          <div class="toggle active" onclick="this.classList.toggle('active')"></div>
+        </div>
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 0;">
+          <span style="font-size:14px;">匿名化位置数据用于服务优化</span>
+          <div class="toggle active" onclick="this.classList.toggle('active')"></div>
+        </div>
+      </div>
+
+      <p style="font-size:12px; color:var(--text-sec); line-height:1.6; margin-bottom:16px;">
+        位置数据的安全事件（如泄露、未授权访问）将在发现后<strong>72小时内</strong>同时向越南公安部及您本人发出通知。相关事件记录将在整改完成后至少保存五年。
+      </p>
+    </div>
+  </div>
+
+  <!-- ================= 3. 手机号KYC页 ================= -->
+  <div id="view-kyc" class="view">
+    <header class="header">
+      <div class="header-icon" onclick="showView('view-settings')">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      </div>
+      <div class="header-title">手机号认证</div>
+      <div style="width:24px;"></div>
+    </header>
+    <div class="form-container">
+      <p style="font-size:14px; color:var(--text-sec); line-height:1.6; margin-bottom: 24px;">
+        根据越南第147/2024/ND-CP号法令，社交平台用户必须进行账户验证。我们采用<strong>手机号OTP验证</strong>，绝不收集您的身份证件照片，全面符合最新法律要求。
+      </p>
+      <div class="input-group">
+        <label>手机号码 (Số điện thoại)</label>
+        <input type="tel" placeholder="+84 请输入您的越南手机号">
+      </div>
+      <div class="input-group">
+        <label>验证码 (Mã xác thực)</label>
+        <div style="display:flex; gap:12px; align-items:center;">
+          <input type="text" placeholder="请输入6位验证码" style="flex:1;">
+          <button style="border:none; background:transparent; color:var(--text); font-size:14px; font-weight:600; cursor:pointer;">获取验证码</button>
+        </div>
+      </div>
+    </div>
+    <div class="footer-btn">
+      <button class="btn" onclick="alert('认证成功！返回设置页'); showView('view-settings');">提交认证</button>
+    </div>
+  </div>
+
+  <!-- ================= 4. 盲盒匹配偏好页 ================= -->
+  <div id="view-preference" class="view">
+    <header class="header">
+      <div class="header-icon" onclick="showView('view-settings')">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      </div>
+      <div class="header-title">盲盒匹配偏好</div>
+      <div style="width:24px;"></div>
+    </header>
+    <div class="form-container">
+      <div style="margin-bottom: 32px;">
+        <div style="font-size:16px; font-weight:600; margin-bottom:16px;">我希望盲盒里开出的性格 (可多选)</div>
+        <div class="tag-group">
+          <div class="tag active">文艺安静</div>
+          <div class="tag">搞笑幽默</div>
+          <div class="tag">职场吐槽</div>
+          <div class="tag">运动阳光</div>
+          <div class="tag">游戏搭子</div>
+          <div class="tag active">摄影逛街</div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:16px; font-weight:600; margin-bottom:16px;">绝对不想要 (一票否决)</div>
+        <div class="tag-group">
+          <div class="tag">抽烟</div>
+          <div class="tag active">迟到</div>
+          <div class="tag">推销</div>
+          <div class="tag">过度亲密</div>
+        </div>
+      </div>
+    </div>
+    <div class="footer-btn">
+      <button class="btn" onclick="alert('偏好已保存'); showView('view-settings');">保存偏好</button>
+    </div>
+  </div>
+
+  <!-- ================= 5. 服务协议与隐私政策（完整版） ================= -->
+  <div id="view-terms" class="view">
+    <header class="header">
+      <div class="header-icon" onclick="showView('view-settings')">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      </div>
+      <div class="header-title">隐私政策与条款</div>
+      <div style="width:24px;"></div>
+    </header>
+    <div class="doc-content">
+
+      <h1>BlindBox 用户服务协议与隐私政策</h1>
+      <div class="date">生效日期：2026年10月1日 | 版本号：v2.0</div>
+
+      <h2>第一条 定义与总则</h2>
+      <p>1.1 BlindBox（以下简称“本平台”）是一款基于盲盒机制的线下社交陪伴体验信息撮合平台，运营主体为【公司全称】，注册地址为【越南注册地址】。</p>
+      <p>1.2 本协议是您与本平台之间就注册、使用本平台服务所订立的有效合约。您点击“同意”或实际使用本平台服务，即视为您已阅读、理解并同意接受本协议全部条款的约束。</p>
+      <p>1.3 本平台保留随时修改本协议的权利，修改后的协议将在App内公示。如您在协议修改后继续使用本平台服务，即视为您接受修改后的协议。</p>
+
+      <h2>第二条 服务内容与平台定性</h2>
+      <p>2.1 本平台提供的是<strong>信息撮合和技术服务</strong>，具体包括：盲盒匹配算法、用户身份验证、活动信息展示、支付通道对接、以及安全辅助工具。</p>
+      <p>2.2 <strong>本平台不直接提供、不参与、不担保任何线下陪伴服务本身。</strong>陪伴服务的合同关系存在于用户与服务提供者之间，平台不是该服务合同的当事人。</p>
+      <p>2.3 本平台收取的费用性质为<strong>信息中介服务费</strong>，而非陪伴服务费。</p>
+      <p>2.4 用户在使用本平台前，必须确认已年满18周岁，并已完成手机号实名认证（KYC）。</p>
+
+      <h2>第三条 盲盒活动规则（碰运气促销合规）</h2>
+      <p>3.1 本平台的盲盒属于越南法律规定的<strong>“碰运气促销”（chance-based promotional program）</strong>。根据规定，该活动已依法向越南工贸部（DOIT）或省级工贸厅完成注册。</p>
+      <p>3.2 用户支付固定金额后，随机获得不同级别的<strong>服务权益或场景体验</strong>（例如：额外服务时长、折扣权益、主题场景升级等）。<strong>随机性仅针对服务权益本身，绝不针对服务提供者的外貌、颜值或人格等级进行标价或分级。</strong></p>
+      <p>3.3 中奖结果由系统随机算法生成，开盒过程支持在线见证与记录。每个独立促销活动的奖品总价值低于1亿越南盾时，可进行通知备案；达到1亿越南盾则须完成注册审批。</p>
+      <p>3.4 促销折扣不得超过促销前售价的<strong>50%</strong>。如未中奖，相关资金的处理将严格遵守越南促销法规。</p>
+      <p>3.5 本平台的中奖确定过程支持客户在线见证，系统自动记录开奖时间戳和结果日志，确保随机性透明可追溯。</p>
+
+      <h2>第四条 线下见面安全规范</h2>
+      <p>4.1 所有线下陪伴体验<strong>必须在本平台指定的公共咖啡馆或公共场所进行</strong>。严禁在私人空间（如酒店、公寓、私人会所、KTV包厢）进行见面。</p>
+      <p>4.2 严禁涉及任何形式的色情、涉黄、暴力、赌博行为。一经发现，平台将永久封禁账号，保存相关证据，并依法向越南公安机关举报。</p>
+      <p>4.3 根据越南法律，提供陪伴服务如被认定为涉及卖淫行为，将依据第282/2025/ND-CP号法令受到行政处罚，情节严重的可追究刑事责任。</p>
+      <p>4.4 平台建议用户：优先选择公共场合见面；避免进入密闭空间；必要时由朋友陪同；线上沟通时明确服务边界。</p>
+      <p>4.5 平台已启用“一键报警”和“紧急联系人”功能。开启后，盲盒匹配成功时系统将自动向您的紧急联系人分享实时位置，见面结束后自动停止共享。</p>
+      <p>4.6 本平台对用户线下见面过程中发生的纠纷、人身伤害或财产损失，<strong>不承担直接赔偿责任</strong>，但将协助提供必要的证据支持，并配合有关部门调查。</p>
+
+      <h2>第五条 个人数据保护（PDPL合规）</h2>
+      <p>5.1 本平台依据越南《个人数据保护法》（PDPL）及第356/2025/ND-CP号法令处理您的个人数据。</p>
+      <p>5.2 <strong>收集的数据类型：</strong></p>
+      <ol>
+        <li>基本个人数据：手机号码、姓名（可选）、出生日期（用于年龄验证）、电子邮箱。</li>
+        <li>敏感个人数据：<strong>个人位置数据</strong>（用于盲盒匹配和线下安全保障）、<strong>行为追踪数据</strong>（您在本平台上的社交网络使用行为，包括浏览记录、匹配偏好、互动历史等）。</li>
+      </ol>
+      <p>5.3 <strong>数据收集目的：</strong>身份验证、盲盒匹配、线下安全保障、依法配合监管部门的调查、以及匿名化后的服务优化分析。</p>
+      <p>5.4 <strong>数据安全措施：</strong>敏感个人数据采用加密存储和传输、访问控制规则、数据匿名化处理等措施。电子身份账户的登录凭证（含身份证件图像）不包含在本平台的收集范围内。</p>
+      <p>5.5 <strong>安全事件通知：</strong>如发生涉及个人位置数据或生物识别数据的安全事件，本平台将在发现后<strong>72小时内</strong>同时向越南公安部及受影响用户发出通知。相关事件记录将在整改完成后至少保存五年。</p>
+      <p>5.6 <strong>同意机制：</strong>本平台采用明确的、可验证的同意机制。所有涉及敏感个人数据的处理，均需获得您的单独明示同意。本平台禁止默认同意、默示同意，或通过强制性、误导性设计获取同意。</p>
+      <p>5.7 <strong>数据共享：</strong>未经您的单独明示同意，本平台不会向第三方共享您的个人信息。在匹配成功后向匹配对象披露您的信息（如昵称、标签、模糊位置）之前，本平台将再次获取您的同意。</p>
+      <p>5.8 <strong>数据跨境传输：</strong>如涉及个人数据跨境传输，本平台将完成影响评估，并在60日内向越南公安部备案。</p>
+      <p>5.9 <strong>数据主体权利：</strong>您有权访问、更正、删除您的个人数据；有权撤回同意；有权要求限制处理。行使上述权利请联系【客服邮箱】。</p>
+
+      <h2>第六条 用户行为规范</h2>
+      <p>6.1 用户不得利用本平台从事任何违反越南法律的行为，包括但不限于：诈骗、骚扰、传播违法信息、未经同意拍摄或传播他人影像。</p>
+      <p>6.2 用户不得在平台上发布虚假信息、使用虚假身份或冒用他人身份。</p>
+      <p>6.3 用户不得对服务提供者进行任何形式的性骚扰、肢体接触或言语侮辱。服务提供者有权在遭遇不适行为时立即终止服务，并报告平台。</p>
+      <p>6.4 本平台对所有注册会员实行实名认证，并对骚扰、不当行为和威胁行为实行<strong>零容忍政策</strong>。</p>
+      <p>6.5 用户违反本条款的，平台有权采取以下措施：警告、限制功能、暂停账号、永久封禁、扣除保证金、向公安机关举报。</p>
+
+      <h2>第七条 责任限制与免责声明</h2>
+      <p>7.1 本平台仅承担信息撮合责任，不对以下事项承担责任：</p>
+      <ol>
+        <li>用户线下见面过程中发生的纠纷、人身伤害、财产损失或情感损害；</li>
+        <li>用户之间因服务内容、时间、质量等产生的争议；</li>
+        <li>因不可抗力（自然灾害、疫情、政府行为等）导致的服务中断或损失；</li>
+        <li>因用户自身设备、网络问题导致的服务不可用。</li>
+      </ol>
+      <p>7.2 本平台的赔偿责任上限以您<strong>最近一个月实际支付的服务费用</strong>为上限。</p>
+      <p>7.3 本平台不对服务提供者的行为、言论或服务质量作出保证。用户应自行评估并承担参与线下见面的风险。</p>
+      <p>7.4 根据越南民法典“自甘风险”原则，用户自愿参与线下社交活动，对活动中可能发生的一般风险自行承担责任。</p>
+
+      <h2>第八条 知识产权与争议解决</h2>
+      <p>8.1 本平台的商标、Logo、UI设计、源代码、盲盒匹配算法等知识产权归本平台所有，未经书面许可不得使用。</p>
+      <p>8.2 本协议的订立、履行、解释及争议解决均适用<strong>越南社会主义共和国法律</strong>。</p>
+      <p>8.3 因本协议产生的争议，双方应首先友好协商解决；协商不成的，任何一方可向<strong>越南有管辖权的人民法院</strong>提起诉讼。</p>
+      <p>8.4 如本协议的任何条款被认定为无效或不可执行，不影响其余条款的效力。</p>
+
+      <h2>附则</h2>
+      <p>本协议自您点击“同意”之日起生效。</p>
+      <p>如您对本协议有任何疑问，请通过以下方式联系我们：</p>
+      <p>邮箱：【support@blindbox.vn】</p>
+      <p>地址：【越南注册地址】</p>
+
+    </div>
+  </div>
+
+  <!-- ================= 6. 清理缓存页 ================= -->
+  <div id="view-cache" class="view">
+    <header class="header">
+      <div class="header-icon" onclick="showView('view-settings')">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      </div>
+      <div class="header-title">清理缓存</div>
+      <div style="width:24px;"></div>
+    </header>
+
+    <div class="main-info">
+      <div class="storage-number">479.93<span class="storage-unit">MB</span></div>
+      <div class="storage-subtitle">可释放空间</div>
+    </div>
+
+    <div class="list-group" style="padding: 0 20px;">
+      <div class="list-item">
+        <div class="item-text"><div class="item-title">照片</div><div class="item-desc" style="font-size:13px;color:var(--text-sec);margin-top:4px;">相册缓存、预览图</div></div>
+        <div class="item-right"><span class="item-value">150.00MB</span><label class="checkbox-circle"><input type="checkbox"><span class="checkmark"></span></label></div>
+      </div>
+      <div class="list-item">
+        <div class="item-text"><div class="item-title">视频</div><div class="item-desc" style="font-size:13px;color:var(--text-sec);margin-top:4px;">已下载的视频、录屏文件</div></div>
+        <div class="item-right"><span class="item-value">200.00MB</span><label class="checkbox-circle"><input type="checkbox"><span class="checkmark"></span></label></div>
+      </div>
+      <div class="list-item">
+        <div class="item-text"><div class="item-title">聊天</div><div class="item-desc" style="font-size:13px;color:var(--text-sec);margin-top:4px;">聊天记录、表情包、语音</div></div>
+        <div class="item-right"><span class="item-value">80.00MB</span><label class="checkbox-circle"><input type="checkbox"><span class="checkmark"></span></label></div>
+      </div>
+      <div class="list-item">
+        <div class="item-text"><div class="item-title">其它</div><div class="item-desc" style="font-size:13px;color:var(--text-sec);margin-top:4px;">临时文件、日志、崩溃报告</div></div>
+        <div class="item-right"><span class="item-value">49.93MB</span><label class="checkbox-circle"><input type="checkbox"><span class="checkmark"></span></label></div>
+      </div>
+    </div>
+
+    <div class="footer-btn">
+      <button class="btn">清理 (0MB)</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function showView(viewId) {
+    document.querySelectorAll('.view').forEach(view => view.classList.remove('active'));
+    document.getElementById(viewId).classList.add('active');
+    document.getElementById(viewId).scrollTop = 0;
+  }
+  document.querySelectorAll('.tag').forEach(tag => {
+    tag.addEventListener('click', () => tag.classList.toggle('active'));
+  });
+</script>
+</body>
+</html>

@@ -20,6 +20,7 @@ package location
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
@@ -93,10 +94,45 @@ type ConsentStatus struct {
 	DurationSeconds  int    `json:"durationSeconds"`
 }
 
+// kindFromPayload resolves the consent kind a command is about.
+//
+// An ABSENT or empty kind means PRECISE_GPS: that is the only kind the
+// first mobile client knew about, so defaulting keeps those builds
+// working without a client change.
+//
+// A kind that is PRESENT but not in the whitelist is REJECTED rather
+// than defaulted. Coercing a typo to PRECISE_GPS would grant a
+// strictly stronger disclosure than the caller asked for — the caller
+// asked for a kind we do not have, and the safe answer is "no", not
+// "here is something bigger".
+func kindFromPayload(payload map[string]any) (Kind, error) {
+	raw, ok := payload["kind"]
+	if !ok {
+		return KindPreciseGPS, nil
+	}
+	s, _ := raw.(string)
+	if strings.TrimSpace(s) == "" {
+		return KindPreciseGPS, nil
+	}
+	return NormalizeKind(s)
+}
+
+// rejectUnknownKind renders the shared rejection for a bad kind so all
+// three handlers report the same code and the same allowed list.
+func rejectUnknownKind(envelope command.Envelope) command.Result {
+	return command.Rejected(envelope, "INVALID_LOCATION_CONSENT_KIND", "VALIDATION", "AFTER_USER_ACTION", "location.invalid_consent_kind", map[string]any{
+		"allowedKinds": KindStrings(),
+	})
+}
+
 func (s *Service) getStatus(ctx context.Context, envelope command.Envelope) command.Result {
 	userID := envelope.Actor.ID
 	if userID == "" {
 		return command.Rejected(envelope, "AUTH_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "location.auth_required", nil)
+	}
+	kind, err := kindFromPayload(envelope.Payload)
+	if err != nil {
+		return rejectUnknownKind(envelope)
 	}
 	now := s.now()
 	// Run the expiry sweep first so we never report GRANTED for
@@ -105,12 +141,12 @@ func (s *Service) getStatus(ctx context.Context, envelope command.Envelope) comm
 	if _, err := s.repo.ExpireOverdue(ctx, now); err != nil {
 		return command.Rejected(envelope, "LOCATION_CONSENT_READ_FAILED", "INTERNAL", "SAFE_RETRY", "location.consent_read_failed", nil)
 	}
-	active, err := s.repo.GetActive(ctx, userID, KindPreciseGPS)
+	active, err := s.repo.GetActive(ctx, userID, kind)
 	if err != nil {
 		// ErrConsentNotFound is not an error condition for the
 		// status endpoint; we report NONE.
 		body := ConsentStatus{
-			Kind:             string(KindPreciseGPS),
+			Kind:             string(kind),
 			Status:           "NONE",
 			RemainingSeconds: 0,
 		}
@@ -142,6 +178,10 @@ func (s *Service) grant(ctx context.Context, envelope command.Envelope) command.
 	if userID == "" {
 		return command.Rejected(envelope, "AUTH_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "location.auth_required", nil)
 	}
+	kind, err := kindFromPayload(envelope.Payload)
+	if err != nil {
+		return rejectUnknownKind(envelope)
+	}
 	duration := time.Duration(intFromPayload(envelope.Payload, "durationSeconds")) * time.Second
 	if err := ValidateDuration(duration); err != nil {
 		return command.Rejected(envelope, "INVALID_LOCATION_CONSENT_DURATION", "VALIDATION", "AFTER_USER_ACTION", "location.invalid_consent_duration", map[string]any{
@@ -154,7 +194,7 @@ func (s *Service) grant(ctx context.Context, envelope command.Envelope) command.
 	ip := envelope.AuthContextIP()
 	ua := envelope.AuthContextUA()
 	now := s.now()
-	row, err := s.repo.Grant(ctx, userID, KindPreciseGPS, duration, ip, ua, now)
+	row, err := s.repo.Grant(ctx, userID, kind, duration, ip, ua, now)
 	if err != nil {
 		return command.Rejected(envelope, "LOCATION_CONSENT_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "location.consent_write_failed", nil)
 	}
@@ -174,12 +214,16 @@ func (s *Service) revoke(ctx context.Context, envelope command.Envelope) command
 	if userID == "" {
 		return command.Rejected(envelope, "AUTH_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "location.auth_required", nil)
 	}
-	flipped, err := s.repo.Revoke(ctx, userID, KindPreciseGPS, s.now())
+	kind, err := kindFromPayload(envelope.Payload)
+	if err != nil {
+		return rejectUnknownKind(envelope)
+	}
+	flipped, err := s.repo.Revoke(ctx, userID, kind, s.now())
 	if err != nil {
 		return command.Rejected(envelope, "LOCATION_CONSENT_REVOKE_FAILED", "INTERNAL", "SAFE_RETRY", "location.consent_revoke_failed", nil)
 	}
 	body := map[string]any{
-		"kind":      string(KindPreciseGPS),
+		"kind":      string(kind),
 		"status":    "REVOKED",
 		"wasActive": flipped,
 	}
