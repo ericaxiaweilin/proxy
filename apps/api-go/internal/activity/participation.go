@@ -29,6 +29,12 @@ type Participation struct {
 	UserID     string             `json:"userId"`
 	State      ParticipationState `json:"state"`
 	OrderNo    string             `json:"orderNo,omitempty"`
+	// Snapshot 是这一单落库时存的票面（含同行人 / 地点 / 时间）。
+	//
+	// HOME-FORYOU-ORDER-007：判重需要知道「原来那单的同行人是谁」，而这个字段
+	// 之前根本没被读出来 —— 所以判重只能按 (activity, actor) 判，换一个同行人
+	// 也被说成「已经下过了」。
+	Snapshot *OrderSnapshot `json:"snapshot,omitempty"`
 }
 
 var (

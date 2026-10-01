@@ -709,7 +709,13 @@ describe("HOME-FORYOU-ORDER-GUARD-001 下单前资源冲突守卫", () => {
     expect(source).toContain('cancelled: order?.state === "CANCELLED",');
   });
   it("blocks 选择 when this combo is already ordered or the time slot is taken, and says why", () => {
-    expect(source).toContain("const orderConflict = detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time }, myOrders);");
+    // 原来这里 `toContain` 的是**整行调用字符串**，我给 detectOrderConflict 加了
+    // companionId 参数（HOME-FORYOU-ORDER-007：换同行人 = 换单）之后这行就不匹配了。
+    // 钉字面量是在钉措辞 —— 本意是"四宫格那一步会查资源冲突、并用这两种文案
+    // 说明为什么被拦"，不是"参数列表恰好长这样"。改成钉本意。
+    expect(source).toMatch(/const orderConflict = detectOrderConflict\(\{[^}]*activityId: gridActivity\.activityId/);
+    // HOME-FORYOU-ORDER-007：判重必须带上选中的同行人，否则换人也被判成重复下单。
+    expect(source).toMatch(/detectOrderConflict\(\{[^}]*companionId: gridPerson\?\.id/);
     expect(source).toContain("const comboBlocked = comboConflicts.length > 0 || !gridPerson || orderConflict !== undefined;");
     expect(source).toContain('t("orderConflictAlready", { orderNo: conflict.orderNo ?? "—" })');
     expect(source).toContain('t("orderConflictTime", { time: conflict.time, title: conflict.title })');
@@ -719,7 +725,10 @@ describe("HOME-FORYOU-ORDER-GUARD-001 下单前资源冲突守卫", () => {
     expect(source).toContain("setOrderSnapshot(existingOrder.snapshot ?? {");
   });
   it("re-checks at submit time and remembers the new order immediately", () => {
-    expect(source).toContain("const conflict = target ? detectOrderConflict({ activityId, time: target.time }, myOrders) : undefined;");
+    // 同上：从整行字面量改成"提交前确实又查了一次"，并要求带上同行人
+    // （HOME-FORYOU-ORDER-007）。submit 时这一处查的是 recipe 里带的 companion。
+    expect(source).toMatch(/const conflict = target \? detectOrderConflict\(\{[^}]*activityId/);
+    expect(source).toMatch(/detectOrderConflict\(\{[^}]*companionId: recipe\?\.companion\?\.id/);
     expect(source).toContain("rememberMyOrder(activityId, result.orderNo, result.snapshot ?? undefined);");
     expect(source).toContain('case "ACTIVITY_TIME_CONFLICT": {');
   });

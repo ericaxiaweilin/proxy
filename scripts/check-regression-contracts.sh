@@ -12326,3 +12326,57 @@ if curl -sf --noproxy '*' --max-time 3 http://127.0.0.1:4100/health/live >/dev/n
 else
   echo "    HOME-RAIL-SERVER-001: SKIP (dev API 不在 :4100 —— 这条要活的服务)"
 fi
+
+# HOME-FORYOU-ORDER-007（2026-09-30，用户报的 P0）：换一个同行人 = 换一单。
+#
+# 现象：新用户在 For You 里是**灰色**的，选中后点确认下单被告知
+# 「这一单你已经下过了（订单号 …）」—— 而那个新用户根本没下过单。
+#
+# 根因：判重**三处都不看同行人**。
+#   服务端 activity 仓储：只看 (activity_id, actor_id) 有没有未取消的记录；
+#   客户端 detectOrderConflict：只按 activityId 匹配；
+#   而 For You 下单的语义恰恰是「人 + 时间 + 场景 + 地点」一整套
+#   （见 comboNeedPerson 文案），同行人是订单的一部分，不是附注。
+#
+# 三处都改了，缺一处就是"一半修好"：服务端放行、界面照样不给下单。
+if [ -f apps/api-go/internal/platform/postgres/activity.go ]; then
+  # 服务端：判重必须带 companion
+  if ! grep -qF '!companionChanged(existing.Snapshot, recipe)' apps/api-go/internal/platform/postgres/activity.go; then
+    echo "  FAIL [HOME-FORYOU-ORDER-007]: 服务端判重又只看 (activity, actor) ——" >&2
+    echo "        换一个同行人会被报成重复下单，界面把新用户显示成灰色 + 已下单。" >&2
+    exit 1
+  fi
+  # 判重必须读得到旧单的快照（同行人存在快照里）
+  # ⚠️ 这里**不能**用 grep -qF 配单引号 —— shell 里拼引号极易出错，
+  # 我第一版就写错了，判据把自己的正确代码判成红。改用正则，避开引号转义。
+  if ! grep -qE 'SELECT state, COALESCE\(order_no, .{0,4}\), order_snapshot FROM activity\.participants' apps/api-go/internal/platform/postgres/activity.go; then
+    echo "  FAIL [HOME-FORYOU-ORDER-007]: 读报名记录时不再取 order_snapshot ——" >&2
+    echo "        拿不到旧单的同行人，判重只能退回老行为。" >&2
+    exit 1
+  fi
+  # 客户端：两处调用都要带 companionId
+  _rh=apps/mobile/src/surfaces/requester-home.tsx
+  if ! grep -qF 'companionId: gridPerson?.id' "$_rh"; then
+    echo "  FAIL [HOME-FORYOU-ORDER-007]: 四宫格那一步的判重没带同行人。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'companionId: recipe?.companion?.id' "$_rh"; then
+    echo "  FAIL [HOME-FORYOU-ORDER-007]: 提交前那次判重没带 recipe 里的同行人。" >&2
+    exit 1
+  fi
+  # myOrders 必须从票面快照里取回同行人，否则判重永远看不到"原来那单是谁的"
+  if ! grep -qF 'companionId: order?.snapshot?.companion?.id' "$_rh"; then
+    echo "  FAIL [HOME-FORYOU-ORDER-007]: myOrders 不再从快照取回同行人 —— 判重无据可依。" >&2
+    exit 1
+  fi
+  # 旧单缺同行人时必须**保守判重**。这里是最容易写反的一处：
+  # 比 `order.companionId === wanted` 会在旧数据（快照 NULL）时判成"换了人"，
+  # 于是清掉一列历史数据就能绕开判重下单 —— 方向正好反了。
+  if ! grep -qF 'order.companionId === undefined || order.companionId === wanted' apps/mobile/src/requester-home-combo.ts; then
+    echo "  FAIL [HOME-FORYOU-ORDER-007]: 旧单缺同行人时不再保守判重 ——" >&2
+    echo "        拿不到快照无法证明换了人，应判重；写成比较会把缺数据当成"换了人"，" >&2
+    echo "        等于清掉一列历史数据就能绕开判重下单。" >&2
+    exit 1
+  fi
+  echo "    HOME-FORYOU-ORDER-007: PASS (服务端判重带 companion · 快照可读出行 · 客户端两处都带 · 旧单缺同行人时保守判重)"
+fi

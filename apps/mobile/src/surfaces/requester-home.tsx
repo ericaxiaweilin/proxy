@@ -1157,6 +1157,10 @@ export function RequesterHome({
             title: order?.snapshot?.activity.title ?? a.title,
             time: order?.snapshot?.activity.time ?? a.time,
             orderNo: order?.orderNo,
+            // HOME-FORYOU-ORDER-007：判重要看同行人，所以从票面快照里取回来。
+            // 旧数据的快照是 NULL（迁移前下的单），这里就是 undefined ——
+            // 与服务端 companionChanged 的保守策略一致：判重。
+            companionId: order?.snapshot?.companion?.id,
             cancelled: order?.state === "CANCELLED",
             snapshot: order?.snapshot,
           };
@@ -1172,6 +1176,9 @@ export function RequesterHome({
       title: snapshot?.activity.title ?? act?.title ?? "",
       time: snapshot?.activity.time ?? act?.time ?? "",
       orderNo: orderNumber,
+      // HOME-FORYOU-ORDER-007：刚下的这一单，它的同行人也要记进本地列表，
+      // 否则紧接着再选另一个人下单时，判重看不到"刚下过的那单是谁的"。
+      companionId: snapshot?.companion?.id,
       snapshot,
     }]);
   }
@@ -1262,7 +1269,7 @@ export function RequesterHome({
     // HOME-FORYOU-ORDER-GUARD-001：提交前再查一次资源冲突（四宫格那一步已经拦过，
     // 这里防确认页开着期间状态变了）。
     const target = storeActivities.find((a) => a.activityId === activityId);
-    const conflict = target ? detectOrderConflict({ activityId, time: target.time }, myOrders) : undefined;
+    const conflict = target ? detectOrderConflict({ activityId, time: target.time, companionId: recipe?.companion?.id }, myOrders) : undefined;
     if (conflict) {
       setJoinMsg(orderConflictText(conflict));
       return "failed";
@@ -1459,7 +1466,7 @@ export function RequesterHome({
             // 违背规则」）：For You 是「人 + 时间 + 场景 + 地点」四样一起下单，没人就不是
             // 一个组合——不许进确认下单，也不许下出一张「没有同行人」的票。
             // HOME-FORYOU-ORDER-GUARD-001：已经下过这一单 / 这个时间段已经有单，也不能再下。
-            const orderConflict = detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time }, myOrders);
+            const orderConflict = detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time, companionId: gridPerson?.id }, myOrders);
             const existingOrder = orderConflict?.kind === "ALREADY_ORDERED" ? myOrders.find((o) => o.activityId === gridActivity.activityId && !o.cancelled) : undefined;
             const comboBlocked = comboConflicts.length > 0 || !gridPerson || orderConflict !== undefined;
             const comboBlockText = orderConflict ? orderConflictText(orderConflict) : !gridPerson ? t("comboNeedPerson") : comboConflictText;

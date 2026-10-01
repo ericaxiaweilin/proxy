@@ -276,6 +276,15 @@ export type ExistingOrder = {
   time: string;
   orderNo?: string | undefined;
   cancelled?: boolean | undefined;
+  // HOME-FORYOU-ORDER-007：这一单的同行人 id。
+  //
+  // 没有它，判重只能按 activityId 判 —— 于是「换一个同行人再下同一场活动」被判成
+  // 重复下单，界面把那个新用户显示成灰色 + 「这一单你已经下过了」。而那个新用户
+  // 根本没下过单。服务端（activity 仓储的 companionChanged）已经改成看同行人，
+  // 客户端不改的话服务端放行、界面照样不给下单 —— 一半修好不算修好。
+  //
+  // 只用 id，不用名字：名字会改，改了名就绕开判重等于没有判重。
+  companionId?: string | undefined;
 };
 
 export type OrderConflict =
@@ -291,11 +300,26 @@ export type OrderConflict =
  * 不去猜两段文字是不是重叠。空时间不参与判断。
  */
 export function detectOrderConflict(
-  activity: { activityId: string; time: string },
+  // companionId 是这次要带的同行人（HOME-FORYOU-ORDER-007）。
+  activity: { activityId: string; time: string; companionId?: string | undefined },
   existing: readonly ExistingOrder[]
 ): OrderConflict | undefined {
   const live = existing.filter((order) => !order.cancelled);
-  const same = live.find((order) => order.activityId === activity.activityId);
+  // 同一场活动 + **同一个同行人** ⇒ 重复下单。换了同行人就是新的一单。
+  //
+  // 拿不到旧单的同行人（历史数据没有这个字段）时仍然判重 —— 与服务端
+  // companionChanged 的保守策略一致：宁可误报重复，也不能因为缺数据放行重复下单。
+  const wanted = activity.companionId ?? "";
+  // 旧单的同行人**缺失**（票面快照是 NULL，迁移前下的单）时，无法证明换了人
+  // ⇒ 判重。这与服务端 companionChanged 的保守策略一致。
+  //
+  // 注意不能简单比 `order.companionId === wanted`：缺失值是 undefined，
+  // 拿它去比 "bob" 会判成"换了人"，于是**清掉一列历史数据就能绕开判重下单** ——
+  // 方向正好反了，保守的那一侧被写成了放行的那一侧。
+  const same = live.find((order) =>
+    order.activityId === activity.activityId &&
+    (order.companionId === undefined || order.companionId === wanted)
+  );
   if (same) return { kind: "ALREADY_ORDERED", orderNo: same.orderNo };
   const time = activity.time.trim();
   if (!time) return undefined;

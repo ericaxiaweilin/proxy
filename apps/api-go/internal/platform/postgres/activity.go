@@ -99,6 +99,33 @@ func (r *ActivityRepository) ToggleInterest(ctx context.Context, activityID, act
 // 串行化同一场活动的占座；报名记录（状态 + 订单编号 + 票面快照）与 joined_count 同一事务写。
 // 订单编号在同一事务里原子取号（场地类别码 + 越南本地日期的每日计数器 ordering.daily_sequences）。
 // 之前取消过的报名重新激活同一行：沿用原编号，票面快照按这次下单刷新。
+// companionChanged 报告「这次下单的同行人，与已存在那单的同行人不同」。
+//
+// HOME-FORYOU-ORDER-007：For You 的组合里同行人是订单的一部分，换人就是换单。
+// 判据只看同行人 id（名字会改、照片会失效，id 不会）—— 拿显示名当身份，用户
+// 改个昵称就能绕开判重下单，那等于没有判重。
+//
+// 拿不到已存在那单的快照（老数据 order_snapshot 为 NULL）时返回 false，
+// 即"没法证明换了人" ⇒ 仍然判重。宁可误报重复，也不能因为缺数据放行重复下单。
+func companionChanged(existing *activity.OrderSnapshot, recipe activity.JoinRecipe) bool {
+	if existing == nil || existing.Companion == nil {
+		return false
+	}
+	return existing.Companion.ID != recipeCompanionID(recipe)
+}
+
+// recipeCompanionID 取出本次下单的同行人 id；没有同行人时返回 ""。
+//
+// 空 id 的语义是"这一单没有同行人"。此时只有已存在那单**也没有**同行人才算
+// 同一单；已存在那单有同行人、这次不带，算换人（反向也是）—— 所以这里把
+// "" 也当作一个可比较的身份，而不是"无身份"。
+func recipeCompanionID(recipe activity.JoinRecipe) string {
+	if recipe.Companion == nil {
+		return ""
+	}
+	return recipe.Companion.ID
+}
+
 func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID string, recipe activity.JoinRecipe) (activity.Activity, activity.Participation, error) {
 	var result activity.Activity
 	var participation activity.Participation
@@ -116,7 +143,24 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 		if err != nil {
 			return err
 		}
-		if found && existing.State != activity.PartCancelled {
+		// HOME-FORYOU-ORDER-007：判重**必须看同行人**。
+		//
+		// 原来只要 (activity_id, actor_id) 有未取消的记录就报 ErrAlreadyJoined，
+		// 于是「换一个同行人再下同一场活动」被判成重复下单 —— 界面上那个人是灰的、
+		// 文案写着「这一单你已经下过了（订单号 …）」。用户看到的是新用户（根本没
+		// 下过单），却被告知已经下过了。
+		//
+		// For You 下单的语义就是「人 + 时间 + 场景 + 地点」一整套（见
+		// comboNeedPerson 文案），同行人是这一单的一部分，不是附注。换人 =
+		// 换一单，所以判重必须带上 companion。
+		//
+		// 同一 companion 重复下单仍然如实报重复（ORDER-NO-001 的既有行为不变）：
+		// 不新开一单，把原编号带回去，客户端照进已下单页。
+		//
+		// 历史行的 order_snapshot 可能为 NULL（迁移前下的单），此时无法证明
+		// 「同行人没变过」，保守判重 —— 宁可说"可能下过"，也不能让同一个人
+		// 靠清掉快照反复下单。
+		if found && existing.State != activity.PartCancelled && !companionChanged(existing.Snapshot, recipe) {
 			participation = existing
 			_ = decodeActivity(payload, interested, joined, capacity, &result)
 			return activity.ErrAlreadyJoined
@@ -167,13 +211,16 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 }
 
 func readParticipation(ctx context.Context, q sqlQueryer, activityID, actorID string, lock bool) (activity.Participation, bool, error) {
-	query := `SELECT state, COALESCE(order_no, '') FROM activity.participants WHERE activity_id=$1 AND actor_id=$2`
+	query := `SELECT state, COALESCE(order_no, ''), order_snapshot FROM activity.participants WHERE activity_id=$1 AND actor_id=$2`
 	if lock {
 		query += ` FOR UPDATE`
 	}
 	participation := activity.Participation{ActivityID: activityID, UserID: actorID}
 	var state string
-	err := q.QueryRow(ctx, query, activityID, actorID).Scan(&state, &participation.OrderNo)
+	// order_snapshot 也要读出来：HOME-FORYOU-ORDER-007 的判重要看同行人。
+	// 老数据的这一列可能是 NULL，扫进 **[]byte 得到 nil，不是错误。
+	var snapshotBytes []byte
+	err := q.QueryRow(ctx, query, activityID, actorID).Scan(&state, &participation.OrderNo, &snapshotBytes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return activity.Participation{}, false, nil
 	}
@@ -181,6 +228,15 @@ func readParticipation(ctx context.Context, q sqlQueryer, activityID, actorID st
 		return activity.Participation{}, false, err
 	}
 	participation.State = activity.ParticipationState(state)
+	if len(snapshotBytes) > 0 {
+		var snap activity.OrderSnapshot
+		if err := json.Unmarshal(snapshotBytes, &snap); err != nil {
+			// 快照坏了不该让报名读不出来 —— 读侧只需要"有没有同行人可比对"。
+			// 解不开就当作没有快照（companionChanged 遇 nil 返回 false ⇒ 判重）。
+			return participation, true, nil
+		}
+		participation.Snapshot = &snap
+	}
 	return participation, true, nil
 }
 
