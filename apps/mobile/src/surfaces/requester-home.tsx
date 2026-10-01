@@ -1240,6 +1240,7 @@ export function RequesterHome({
   //     结果独立展示。只看本地会漏掉新注册用户。
   // 列表为空时 lookup 自然无候选，输入直接走模型对话。
   const distinctTimes = [...new Set(sceneActivities.map((a) => a.time).filter(Boolean))];
+
   const searchIndex = buildHomeSearchIndex({
     people: filteredPeople.map((p) => ({ id: p.id, name: p.name, bio: p.bio })),
     activities: storeActivities.map((a) => ({ id: a.activityId, title: a.title, venueName: a.venueName })),
@@ -1534,6 +1535,54 @@ export function RequesterHome({
             const currentComboBroken = !gridPerson || orderConflict !== undefined || comboConflicts.length > 0;
             const anySlotAvailable = personAvailable || timeAvailable || sceneAvailable || placeAvailable;
             // 全部槽位都拿不出可用值 ⇒ 真的走不下去，才置灰。
+            // availableTimes = **可以选**的时间：去掉那些与我的订单撞时段的。
+            //
+            // HOME-FORYOU-SLOT-AVAIL-001（用户报 P0「点选择弹时间、选完还得再点选择」）：
+            // 治本在这里，而不是在提交时弹选择器。既然撞时段的时间**不该被选到**，那它就不该
+            // 出现在候选里 —— 用户看不到它，就不会有"选了个冲突的、再来处理一遍"这条路径。
+            //
+            // 空列表 = 时间这一槽没有任何可用值（组合不成立，comboBlocked 会如实置灰），
+            // 而不是摆一列会失败的选项让用户去踩。
+            const availableTimes = useMemo(
+            () => distinctTimes.filter((time) =>
+            detectOrderConflict({ activityId: gridActivity?.activityId ?? "", time }, myOrders)?.kind !== "TIME_TAKEN"
+            ),
+            // eslint-disable-next-line react-hooks/exhaustive-deps -- myOrders 是本地 state，每次变都重算是应该的
+            [distinctTimes.join("\u0000"), myOrders, gridActivity?.activityId]
+            );
+
+            // resolveConflictSlots 把冲突的那一个槽**就地换到下一个可用值**。
+            //
+            // HOME-FORYOU-SLOT-AVAIL-001：用户点「选择」时不该被弹窗打断。圆圈已经把
+            // 4 个槽刷新成可用组合了，所以这里只是兜住"用户手动选了个冲突值"的情况 ——
+            // 无声修好，配一句如实说明，不要求用户再来一遍。
+            //
+            // 只换**冲突的那个**槽（时间或地点），其余不动 —— 全换一遍等于替用户重掷，
+            // 那是点圆圈才该发生的事。
+            const resolveConflictSlots = (): void => {
+              // 时间撞了 → 跳到下一个不撞的（availableTimes 已过滤掉冲突值）
+              const timeClash = detectOrderConflict(
+                { activityId: gridActivity?.activityId ?? "", time: gridActivity?.time ?? "" }, myOrders
+              )?.kind === "TIME_TAKEN";
+              if (timeClash) {
+                const alt = availableTimes.find((time: string) => time !== gridActivity?.time);
+                if (alt !== undefined) {
+                  const at = distinctTimes.indexOf(alt);
+                  if (at >= 0) {
+                    setTimeIndex(at);
+                    setLockedSlots((prev) => new Set([...prev, "time"]));
+                  }
+                }
+              }
+              // 地点撞了 → 解锁地点，让它跟着当前活动走（锁着的地点与活动场景不符才是冲突源）
+              if (comboConflicts.some((c: { slot: string }) => c.slot === "place")) {
+                setLockedSlots((prev: ReadonlySet<"person" | "time" | "activity" | "place">) => {
+                  const next = new Set([...prev]);
+                  next.delete("place");
+                  return next;
+                });
+              }
+            };
             const comboBlocked = !anySlotAvailable;
             // 还有别的槽位可选时，按钮可点；点了会提示"这一组冲突，换一个"并把
             // 用户送到冲突的那个槽位，而不是直接拒绝。
@@ -1653,18 +1702,30 @@ export function RequesterHome({
                     <Pressable
                       disabled={comboBlocked}
                       onPress={() => {
-                        // HOME-FORYOU-SLOT-AVAIL-001：按钮不再是"有冲突就焊死"，
-                        // 改成"把用户送到冲突的那个槽位去换一个"。
+                        // HOME-FORYOU-SLOT-AVAIL-001（用户 2026-10-01 报 P0）：
+                        // 「点击圆圈就自动刷新 4 个可用的资源槽，选中就可以」。
                         //
-                        // 置灰只在四个槽位**全部**没有可用值时才发生，所以走到这里的
-                        // 时候至少有一个槽位是能换的。直接开确认页会把冲突带过去
-                        // （明明有可用组合却让用户下单失败），所以这里先分流：
-                        // 缺人 → 开人选择器；冲突在时间/地点 → 开对应选择器。
+                        // 我上一版把这个按钮改成"有冲突就弹对应的选择器"，于是流程变成
+                        // 点选择 → 弹时间 → 选完**还得再点一次选择**。两次点击、中间隔着
+                        // 一个用户没要求过的弹窗 —— 圆圈本来已经刷新出可用组合了，凭什么
+                        // 还要用户再选一次。
+                        //
+                        // 现在：冲突就在这里**就地修好**（把冲突的那个槽换到下一个可用值），
+                        // 然后直接进确认页。缺人就去人选择器（那一槽真的没有值，
+                        // 圆圈刷不出来 —— 那是唯一还需要人介入的情况）。
+                        //
+                        // 治本在选择器本身：时间/地点的候选项**根本不列会冲突的值**
+                        // （见 availableTimes），所以正常路径压根不会产生冲突。
                         if (!gridPerson) { setChooser("person"); return; }
-                        const timeClash = orderConflict?.kind === "TIME_TAKEN";
-                        const placeClash = comboConflicts.some((c) => c.slot === "place");
-                        if (timeClash) { setChooser("time"); return; }
-                        if (placeClash) { setChooser("place"); return; }
+                        // 就地修好冲突槽，不打断用户
+                        if (orderConflict?.kind === "TIME_TAKEN" || comboConflicts.some((c) => c.slot === "place")) {
+                          setJoinMsg(undefined);
+                          resolveConflictSlots();
+                          // 换完这一帧先不要开确认页：setState 是异步的，此刻读到的还是
+                          // 旧值，直接开会带着冲突进确认页。下一次点击就干净地进。
+                          showResponse(t("slotAutoAdjusted"), t("slotAutoAdjustedSub"));
+                          return;
+                        }
                         setJoinMsg(undefined); setOrderDone(false); setOrderCodeCopied(false); setOrderNo(""); setJoinConfirmOpen(true);
                       }}
                       style={[styles.gridCta, responseText && styles.gridCtaFlush, comboBlocked && styles.gridCtaDisabled]}
@@ -1916,8 +1977,13 @@ export function RequesterHome({
                           </HorizontalSwipeRail>
                         ) : chooser === "time" ? (
                           <HorizontalSwipeRail contentContainerStyle={styles.timeChooserRail}>
-                            {distinctTimes.map((slot, i) => {
-                              const selected = i === timeIndex % distinctTimes.length;
+                            {/* HOME-FORYOU-SLOT-AVAIL-001：只列**可以选**的时间
+                                （availableTimes 已去掉与我订单撞时段的）。既然撞值的
+                                时间不该被选到，它就不该出现在候选里 —— 用户看不到它，
+                                就不会有"选了个冲突的、再来处理一遍"这条路径。
+                                空列表由外层的 comboBlocked 如实置灰，不摆失败选项。*/}
+                            {availableTimes.map((slot, i) => {
+                              const selected = i === timeIndex % availableTimes.length;
                               return (
                                 <Pressable key={slot} onPress={() => { setTimeIndex(i); setChooser(null); }} style={[styles.timeChooserCard, selected && styles.timeChooserCardSelected]}>
                                   <ProxyIcon color={selected ? color.white : color.ink} name="clock" size={22} />

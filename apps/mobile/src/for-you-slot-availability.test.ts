@@ -30,11 +30,21 @@ describe("For You 四槽可用性（HOME-FORYOU-SLOT-AVAIL-001）", () => {
     expect(source).not.toMatch(/const comboBlocked\s*=\s*.*\|\|\s*!gridPerson\s*\|\|/);
   });
 
-  it("冲突不再焊死按钮，而是把用户送到冲突的那个槽位", () => {
-    // 有可用槽位时按钮可点；点了分流到冲突槽位，而不是带着冲突直接开确认页。
+  it("点「选择」直接进确认页；冲突就地修好，不弹窗打断", () => {
+    // 用户 2026-10-01 报 P0：「点击圆圈就自动刷新 4 个可用的资源槽-选择就可以」，
+    // 而我上一版把按钮改成"有冲突就弹对应选择器"，流程变成
+    //   点选择 → 弹时间 → 选完**还得再点一次选择**。
+    // 圆圈本来就已刷新出可用组合，凭什么还要用户再选一次。
+    //
+    // 现在：冲突**就地修好**（换掉冲突的那个槽），下一帧就能直接下单；
+    // 唯一还需要人介入的是"这一槽真的没有值"（缺人）—— 那才开人选择器。
     expect(source).toMatch(/if \(!gridPerson\) \{ setChooser\("person"\); return; \}/);
-    expect(source).toMatch(/if \(timeClash\) \{ setChooser\("time"\); return; \}/);
-    expect(source).toMatch(/if \(placeClash\) \{ setChooser\("place"\); return; \}/);
+    // 冲突不再弹选择器
+    expect(source).not.toMatch(/if \(timeClash\) \{ setChooser\("time"\); return; \}/);
+    expect(source).not.toMatch(/if \(placeClash\) \{ setChooser\("place"\); return; \}/);
+    expect(source).toContain("resolveConflictSlots();");
+    // 治本：撞时段的时间根本不该出现在候选里
+    expect(source).toMatch(/\{availableTimes\.map\(\(slot, i\) =>/);
   });
 
   it("「缺人」仍然不能进确认页（人是一单的一部分）", () => {

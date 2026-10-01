@@ -2157,7 +2157,7 @@ DEPENDENCIES:
   - "FBLazyVector (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/Libraries/FBLazyVector`)"
   - "hermes-engine (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)"
   - ProxyNativeTabBar (from `../modules/proxy-native-tab-bar/ios`)
-  - ProxyScreenProtection (from `/Users/thanhhuyennguyen/work/kake/apps/mobile/ios/../modules/proxy-screen-protection/ios`)
+  - ProxyScreenProtection (from `/Users/thanhhuyennguyen/proxy/apps/mobile/ios/../modules/proxy-screen-protection/ios`)
   - "RCTDeprecation (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation`)"
   - "RCTRequired (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/Libraries/Required`)"
   - "RCTSwiftUI (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactApple/RCTSwiftUI`)"
@@ -2198,7 +2198,7 @@ DEPENDENCIES:
   - "React-mutationobservernativemodule (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/react/nativemodule/mutationobserver`)"
   - "react-native-maps (from `../../../node_modules/.pnpm/react-native-maps@1.29.0_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@_75902684cc91495259b91bcbfb06881b/node_modules/react-native-maps`)"
   - "react-native-safe-area-context (from `../../../node_modules/.pnpm/react-native-safe-area-context@5.7.0_react-native@0.86.2_@babel+core@7.29.7_supports-co_c12b47d9bf65f88fca95e0f12a866a0c/node_modules/react-native-safe-area-context`)"
-  - react-native-view-shot (from `/Users/thanhhuyennguyen/work/kake/apps/mobile/ios/../node_modules/react-native-view-shot`)
+  - react-native-view-shot (from `/Users/thanhhuyennguyen/proxy/apps/mobile/ios/../node_modules/react-native-view-shot`)
   - "React-NativeModulesApple (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)"
   - "React-networking (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/react/networking`)"
   - "React-oscompat (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/oscompat`)"
@@ -2306,7 +2306,7 @@ EXTERNAL SOURCES:
   ProxyNativeTabBar:
     :path: "../modules/proxy-native-tab-bar/ios"
   ProxyScreenProtection:
-    :path: "/Users/thanhhuyennguyen/work/kake/apps/mobile/ios/../modules/proxy-screen-protection/ios"
+    :path: "/Users/thanhhuyennguyen/proxy/apps/mobile/ios/../modules/proxy-screen-protection/ios"
   RCTDeprecation:
     :path: "../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation"
   RCTRequired:
@@ -2386,7 +2386,7 @@ EXTERNAL SOURCES:
   react-native-safe-area-context:
     :path: "../../../node_modules/.pnpm/react-native-safe-area-context@5.7.0_react-native@0.86.2_@babel+core@7.29.7_supports-co_c12b47d9bf65f88fca95e0f12a866a0c/node_modules/react-native-safe-area-context"
   react-native-view-shot:
-    :path: "/Users/thanhhuyennguyen/work/kake/apps/mobile/ios/../node_modules/react-native-view-shot"
+    :path: "/Users/thanhhuyennguyen/proxy/apps/mobile/ios/../node_modules/react-native-view-shot"
   React-NativeModulesApple:
     :path: "../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios"
   React-networking:
@@ -2485,7 +2485,7 @@ SPEC CHECKSUMS:
   ExpoLocation: cc81013b678d75014ae395cd4707c0136e88cfb1
   ExpoLogBox: 6bb73c341aca22e699bd4da6cc61afc844e1a648
   ExpoMediaLibrary: 341321256621e7bf220b6272c42fedcb095607d0
-  ExpoModulesCore: 863e32cb91dca34ffe9825b91165adc4ec832ad8
+  ExpoModulesCore: 37a0cbd00b82daca9344b63ead4adf9c80b4e35a
   ExpoModulesJSI: b20fefa4cdd9097e7e6b715466d1900b8c5d4711
   ExpoModulesWorklets: 53d4ca8d32225cb3ec4660b9f03496192b4f3cac
   ExpoSecureStore: 94793113049a2d7478dfe1a13aa15081e9f61755
@@ -2494,7 +2494,7 @@ SPEC CHECKSUMS:
   ExpoVideo: b1d9a325ddcd4f3ed8ccb374c01b688e98bc6a04
   ExpoWebBrowser: 9b98d939d5f1c5dd8f523f0a0683056fb1204434
   FBLazyVector: 3c3be9a019176b5699455f7f66c5444b78a411c6
-  hermes-engine: e09f68f6158db2be81404a3b89155eecf0d6d5ed
+  hermes-engine: 72708320b5f7d0b6471953bdc0bad4f603be22b3
   ProxyNativeTabBar: 8c769bb027f5ba481406304e348dd14cf2a32c57
   ProxyScreenProtection: 085f64c68be82c2fcca49fe513ac119091080f56
   RCTDeprecation: bccb6545c26db881ecddfd83a3f9ea82aba1605f

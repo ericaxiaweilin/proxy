@@ -183,6 +183,8 @@ export interface Messages {
   // HOME-FORYOU-FREE-001：点圆圈换人时一个有空的都找不到时的**如实**文案。
   // 不能写成"已为你找到有空的人"之类的假话 —— 那正是这个修复要消灭的东西。
   noOneFree: string;
+  slotAutoAdjusted: string;
+  slotAutoAdjustedSub: string;
   noOneFreeSub: string;
   joinedWithCount: string;
   modePhoto: string;
@@ -614,6 +616,8 @@ const ZH: Messages = {
   networkError: "网络异常，请检查连接后重试",
   pickActivityFirst: "先选一个活动",
   noOneFree: "这个时段没有显示有空的人",
+  slotAutoAdjusted: "已帮你换掉冲突的时间/地点",
+  slotAutoAdjustedSub: "再点一次「选择」即可下单。",
   noOneFreeSub: "已经换过一轮了。要么换个时间，要么换个地点。",
   joinedWithCount: "已报名 · {n} 人参加",
   modePhoto: "拍照",
@@ -1039,6 +1043,8 @@ const VI: Messages = {
   pickActivityFirst: "Chọn một hoạt động trước",
   // HOME-FORYOU-FREE-001: nói thật — không có ai rảnh trong khung giờ này.
   noOneFree: "Không có ai rảnh trong khung giờ này",
+  slotAutoAdjusted: "Đã đổi giờ / địa điểm bị trùng",
+  slotAutoAdjustedSub: "Nhấn « Chọn » lần nữa để đặt.",
   noOneFreeSub: "Đã thử đổi một vòng. Hãy đổi giờ hoặc địa điểm.",
   joinedWithCount: "Đã đăng ký · {n} người tham gia",
   modePhoto: "Chụp ảnh",
@@ -1464,6 +1470,8 @@ const EN: Messages = {
   pickActivityFirst: "Pick an activity first",
   // HOME-FORYOU-FREE-001: say it plainly — nobody is free in this slot.
   noOneFree: "Nobody is free in this time slot",
+  slotAutoAdjusted: "Adjusted the conflicting time/place",
+  slotAutoAdjustedSub: "Tap Select again to place the order.",
   noOneFreeSub: "We tried a full round. Try a different time or place.",
   joinedWithCount: "Joined · {n} attending",
   modePhoto: "Photo",
@@ -1888,6 +1896,8 @@ const LO: Messages = {
   networkError: "ເຄືອຂ່າຍຜິດພາດ ກວດການເຊື່ອມຕໍ່ແລ້ວລອງໃໝ່",
   pickActivityFirst: "ເລືອກກິດຈະກຳກ່ອນ",
   noOneFree: "ບ່ອງຊ່ວງເວລານີ້ບໍ່ມີຄົນວ່າງ",
+  slotAutoAdjusted: "ປັດເວລາ/ສະຖານທີ່ຊົນກັບແລ້ວ",
+  slotAutoAdjustedSub: "ແຕງ ບາດ « ເລືອກ » ອີກເທື່ອີກ.",
   noOneFreeSub: "ລອງແລ້ວຫນึ່ງຮອບ. ລອງປ່ຽນເວລາຫຼືສະຖານທີ່.",
   joinedWithCount: "ລົງທະບຽນແລ້ວ · {n} ຄົນເຂົ້າຮ່ວມ",
   modePhoto: "ຖ່າຍຮູບ",
@@ -2312,6 +2322,8 @@ const KO: Messages = {
   networkError: "네트워크 오류예요. 연결을 확인하고 다시 시도하세요",
   pickActivityFirst: "먼저 활동을 선택하세요",
   noOneFree: "이 시간대에 비어 있는 사람이 없습니다",
+  slotAutoAdjusted: "충돌하는 시간/장소를 바꿨습니다",
+  slotAutoAdjustedSub: "다시 « 선택 » 을 누르면 됩니다.",
   noOneFreeSub: "한 바퀴 돌았습니다. 시간이나 장소를 바꿔 보세요.",
   joinedWithCount: "신청 완료 · {n}명 참가",
   modePhoto: "사진",
@@ -2736,6 +2748,8 @@ const JA: Messages = {
   networkError: "ネットワークエラーです。接続を確認して再試行してください",
   pickActivityFirst: "先に活動を選んでください",
   noOneFree: "この時間帯に空いている人はいません",
+  slotAutoAdjusted: "冲突する時間・場所を調整しました",
+  slotAutoAdjustedSub: "もう一度「選択」を押してください。",
   noOneFreeSub: "一巡しました。時刻か場所を変えてみてください。",
   joinedWithCount: "申し込み済み · {n} 人参加",
   modePhoto: "撮影",

@@ -301,6 +301,15 @@
         "width": 390,
         "height": 844
       }
+    },
+    "Proxy_Settings_20261001_726714": {
+      "source": "docs/design/references/Proxy_Settings_20261001_726714.html",
+      "image": "docs/design/baseline-images/settings_20261001_726714.png",
+      "fingerprint": "ebfab6a85d8608ce",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
     }
   }
 }
