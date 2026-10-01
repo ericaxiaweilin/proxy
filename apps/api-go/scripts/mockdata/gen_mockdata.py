@@ -543,9 +543,9 @@ INSERT INTO localnet.posts
   (id, author_type, author_id, author_display_name, body, media_refs,
    visibility, city_scope, scene_type, status, context_refs, created_at, ephemeral_until)
 SELECT
-  '""" + spec.POST_PREFIX + """' || lpad(g.n::text, 2, '0'),
+  g.post_id,
   'USER',
-  '""" + spec.USER_PREFIX + """' || g.n::text,
+  g.author_id,
   g.display_name,
   g.body,
   g.media_refs,
@@ -558,6 +558,12 @@ SELECT
   NULL
 FROM (VALUES""")
 
+    # id / author_id 由 Python 拼好当字面量，**不在 SQL 里用 lpad 拼**。
+    # 踩过的坑：`lpad('100', 2, '0')` 返回的是 '10' —— lpad 在源串比目标长度长时
+    # 会**截断**，于是第 100 条帖子和第 10 条撞同一个 id，报
+    # "ON CONFLICT DO UPDATE command cannot affect row a second time"。
+    # 同一个表达式还会让 author_id 变成 'user_devseed_1'（少补一个零），
+    # 跟 profiles 里的 'user_devseed_01' 对不上 —— 帖子会挂到不存在的作者上。
     rows = []
     for (n, name, city, _bio) in users:
         if n <= 30:
@@ -568,11 +574,12 @@ FROM (VALUES""")
             body, scene = spec.EXTRA_POSTS[n]
             scope = "hn" if city == "Hà Nội" else "bacninh"
         rows.append(
-            f"  ({n}, {q(name)}, {q(body)}, {q(scope)}, {q(scene)}, 'null'::jsonb)"
+            f"  ({n}, {q(post_id(n))}, {q(user_id(n))}, {q(name)}, {q(body)}, "
+            f"{q(scope)}, {q(scene)}, 'null'::jsonb)"
         )
     L.append(",\n".join(rows))
     L.append("""
-) AS g(n, display_name, body, city_scope, scene_type, media_refs)
+) AS g(n, post_id, author_id, display_name, body, city_scope, scene_type, media_refs)
 -- 固定时间戳，不用 now()：feed 按 created_at DESC 排序，用 now() 会让每次重跑
 -- 把这些帖子顶到最前面（位置一直在变），用固定时间才能既排得进前排又幂等。
 CROSS JOIN LATERAL (SELECT TIMESTAMPTZ '2026-09-28 08:00:00+07'

@@ -12278,6 +12278,34 @@ if curl -sf --noproxy '*' --max-time 3 http://127.0.0.1:4100/health/live >/dev/n
     echo "  FAIL [HOME-RAIL-SERVER-001]: rail 的半径不跟随「距离」控件（切了档位服务端不知道）。" >&2
     exit 1
   fi
+  # 「没有定位」必须**继续请求**，而不是不请求。
+  #
+  # 第一版写的是 `if (!profileClient || !homeOrigin) return` —— 而模拟器默认
+  # 没有定位（getCurrentFix 返回 undefined），于是请求一次都不发，rail 永远
+  # 显示那 7 个 fixture 人物。数据侧和服务端都做对了，界面就是不动：
+  # 「没定位」被当成了「没数据」，这两件事完全不同。
+  #
+  # 现在没有定位就用 HANOI_FALLBACK_ORIGIN 当原点（服务端那批开发坐标正是按
+  # 河内分层的）。所以判据钉两件事：不能再因缺定位提前 return；兜底原点必须存在。
+  # ⚠️ 必须先剥掉注释再判：这个文件里**有一段注释正好写着第一版那句错代码**
+  # （「第一版是 `if (!profileClient || !homeOrigin) return`」），直接 grep 全文
+  # 会命中它 —— 我第一版门禁就是这么自己把自己判红的。判据查的是代码，不是说明。
+  _rail_code=$(sed 's://.*::' "$_rail_ui")
+  if printf '%s' "$_rail_code" | grep -qF '!homeOrigin) return' \
+     || printf '%s' "$_rail_code" | grep -qF '!homeOrigin)' ; then
+    echo "  FAIL [HOME-RAIL-SERVER-001]: rail 又变回「没定位就不请求」——" >&2
+    echo "        模拟器默认没有定位，那样请求一次都不会发，界面永远停在 fixture。" >&2
+    echo "        缺定位要用兜底原点继续请求（见 HANOI_FALLBACK_ORIGIN）。" >&2
+    exit 1
+  fi
+  # 兜底原点必须**真的被用到** —— 只声明不用等于没有。证伪时我把
+  # `homeOrigin ?? HANOI_FALLBACK_ORIGIN` 改成 `homeOrigin!`，常量还在，
+  # 「常量存在」那条判据照样 PASS，所以单靠存在性检查不够。
+  if ! printf '%s' "$_rail_code" | grep -qF 'homeOrigin ?? HANOI_FALLBACK_ORIGIN'; then
+    echo "  FAIL [HOME-RAIL-SERVER-001]: 兜底原点没被使用（只声明不用 = 没有）——" >&2
+    echo "        要的是 homeOrigin ?? HANOI_FALLBACK_ORIGIN。" >&2
+    exit 1
+  fi
   # 服务端实现必须真的算距离：占位符连号 + haversine + 按距离排序
   _rail_sql=apps/api-go/internal/platform/postgres/identity.go
   if ! grep -qF '6371000.0 * 2 * asin(sqrt(' "$_rail_sql"; then

@@ -827,13 +827,25 @@ export function RequesterHome({
   // 半径用「距离」控件的当前档位（moreDistanceKm），这样控件切到 200km
   // 时 rail 真的会多出人，而不是切了控件只改本地 fixture 的过滤。
   useEffect(() => {
-    if (!profileClient || !homeOrigin) return;
+    if (!profileClient) return;
     const seq = (nearbySeq.current += 1);
     let cancelled = false;
     void (async () => {
       try {
+        // **没有定位也照发请求**，只是把原点换成河内（HANOI_FALLBACK_ORIGIN）。
+        //
+        // 第一版是 `if (!profileClient || !homeOrigin) return` —— 模拟器默认
+        // 没有定位（getCurrentFix 返回 undefined），于是请求**一次都不发**，
+        // rail 永远显示那 7 个 fixture 人物。数据侧和服务端都对了，界面就是不动：
+        // 「没定位」被当成了「没数据」，而这两件事完全不同。
+        //
+        // 用河内做兜底原点，是因为服务端那批开发坐标就是按河内分层的
+        // （scripts/dev-distance-tiers.mjs），所以兜底也能看到按距离排好的内容。
+        // 它影响的是"以哪为原点排序"，不是伪造任何人的位置 ——
+        // 每个被返回的人的 distanceM 仍然是服务端量到他的真实距离。
+        const origin = homeOrigin ?? HANOI_FALLBACK_ORIGIN;
         const found = await profileClient.listNearby(
-          { latitude: homeOrigin.latitude, longitude: homeOrigin.longitude },
+          { latitude: origin.latitude, longitude: origin.longitude },
           { maxDistanceKm: moreDistanceKm, limit: 30 }
         );
         // 自己不能出现在「附近的真人」里
@@ -2539,6 +2551,16 @@ export function RequesterHome({
 // 档位是"半径"，语义仍然只有一条：距离未知（distanceM === undefined）的人
 // **任何**半径都不算（PERSON-DISTANCE-ZERO-001）。放宽半径不等于把没有坐标的
 // 人当成就在旁边。
+// HANOI_FALLBACK_ORIGIN is where the nearby read is centred when the device has
+// no location (a simulator with no simulated position, or a user who declined
+// the permission). Hanoi is deliberate: the server-side dev coordinates are
+// tiered around Hanoi (scripts/dev-distance-tiers.mjs), so the rail still shows
+// properly ordered content instead of falling back to the fixture.
+//
+// It changes which point distances are measured FROM. It never invents anyone's
+// position — every returned distanceM is still the server measuring that person.
+const HANOI_FALLBACK_ORIGIN = { latitude: 21.0278, longitude: 105.8342 } as const;
+
 const MORE_DISTANCE_KM: ReadonlyArray<number> = [1, 3, 5, 10, 20, 50, 100, 200, 500, 1000];
 
 // HOME-MORE-GREET-001（2026-09-23，用户：「线下很近的 2 个人 比如 200m 以内 我们认为处于
