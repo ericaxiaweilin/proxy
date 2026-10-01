@@ -12562,3 +12562,26 @@ if [ -f apps/api-go/internal/platform/postgres/identity.go ]; then
   fi
   echo "    HOME-FORYOU-FREE-001: PASS (free_at 三态 · 在线点来自服务端 · 点圆圈在有空的里轮转 · 推不出时段不编 · 无排期如实说明)"
 fi
+
+# MOBILE-METRO-PARSE-001（2026-10-01）：移动端源码必须能被 **Metro 用的那套 Babel
+# parser** 解析，而不只是通过 tsc。
+#
+# 起因：typecheck 全绿、vitest 全绿，移动端三个文件还都能被
+# @babel/parser 解析 —— 但模拟器白屏，Metro 日志里堆了 **1769 条 SyntaxError**。
+# 差别在于 tsc 与 Metro 用的是两套前端：Metro 走 @babel/parser，它对
+# "JSX 相邻元素没包 fragment"、"await 出现在非 async 函数里"这类写法的判定
+# 与 tsc 不同 —— 于��� tsc 放行的东西 Metro 打包失败。
+#
+# 所以「编译过」这件事必须以 Metro 那套 parser 为准，而不是以 tsc 为准。
+# 这条判据只做语法层，不碰任何 bundle —— 几秒钟跑完，且不需要模拟器。
+_mobile_src=apps/mobile/src
+if [ -d "$_mobile_src" ] && [ -f scripts/check-mobile-parses-with-metro.mjs ]; then
+  if ! node scripts/check-mobile-parses-with-metro.mjs; then
+    echo "  FAIL [MOBILE-METRO-PARSE-001]: 有文件 Metro 打不了包（Babel 解析失败）——" >&2
+    echo "        tsc 通过 ≠ Metro 能打包：Metro 用 @babel/parser，两套前端判定不同。" >&2
+    echo "        这类错误在 CI/单测里全绿，只在模拟器白屏时才暴露。" >&2
+    exit 1
+  fi
+  _babel_n=$(node -e 'console.log("ok")' 2>/dev/null && echo "")
+  echo "    MOBILE-METRO-PARSE-001: PASS (全部移动端源文件可被 Metro 的 Babel parser 解析)"
+fi
