@@ -1582,20 +1582,35 @@ export function RequesterHome({
             //
             // 只换**冲突的那个**槽（时间或地点），其余不动 —— 全换一遍等于替用户重掷，
             // 那是点圆圈才该发生的事。
-            const resolveConflictSlots = (): void => {
-              // 时间撞了 → 跳到下一个不撞的（availableTimes 已过滤掉冲突值）
-              const timeClash = detectOrderConflict(
-                { activityId: gridActivity?.activityId ?? "", time: gridActivity?.time ?? "" }, myOrders
-              )?.kind === "TIME_TAKEN";
-              if (timeClash) {
-                const alt = availableTimes.find((time: string) => time !== gridActivity?.time);
-                if (alt !== undefined) {
-                  const at = distinctTimes.indexOf(alt);
-                  if (at >= 0) {
-                    setTimeIndex(at);
-                    setLockedSlots((prev) => new Set([...prev, "time"]));
-                  }
-                }
+            const resolveConflictSlots = (): boolean => {
+              // 🔴 时间/订单冲突是**从活动本身**算出来的，不是从 timeIndex。
+              // `orderConflict`（本文件 :1545）读的是 `gridActivity.activityId` /
+              // `gridActivity.time`，而 `gridActivity` 只由 `activityIndex` 决定。
+              //
+              // 所以原来那句「改 timeIndex + 锁时间」的修法**永远修不好**：
+              // 锁定一个别的时间只会让 `lockedTimeValue` 与活动对不上（反而多出一条
+              // comboConflicts 的 time 冲突），而 `orderConflict` 一动不动 ⇒
+              // 「选择」永远走冲突分支、永远进不去确认页 —— 这就是用户报的
+              // 「点击选择没响应」。它不是弹窗没绑上，是**修了等于没修**。
+              //
+              // 要修就得换**活动**：那才是 activityId 和 time 的来源。换到一场
+              // 与我的订单不冲突的活动，冲突才真的消失。
+              if (orderConflict !== undefined) {
+                const altIndex = sceneActivities.findIndex((a) =>
+                  detectOrderConflict({ activityId: a.activityId, time: a.time, companionId: gridPerson?.id }, myOrders) === undefined
+                );
+                // 一场都不冲突的活动都没有 ⇒ 如实返回 false，交给调用方给出路，
+                // 绝不假装修好了（假装修好 = 下一次点击还是原地）。
+                if (altIndex < 0) return false;
+                setActivityIndex(altIndex);
+                // 时间锁/地点锁会跟新活动对不上，解锁让它们跟着活动走。
+                setLockedSlots((prev: ReadonlySet<"person" | "time" | "activity" | "place">) => {
+                  const next = new Set([...prev]);
+                  next.delete("time");
+                  next.delete("place");
+                  return next;
+                });
+                return true;
               }
               // 地点撞了 → 解锁地点，让它跟着当前活动走（锁着的地点与活动场景不符才是冲突源）
               if (comboConflicts.some((c: { slot: string }) => c.slot === "place")) {
@@ -1604,7 +1619,9 @@ export function RequesterHome({
                   next.delete("place");
                   return next;
                 });
+                return true;
               }
+              return false;
             };
             const comboBlocked = !anySlotAvailable;
             // 还有别的槽位可选时，按钮可点；点了会提示"这一组冲突，换一个"并把
@@ -1742,17 +1759,21 @@ export function RequesterHome({
                         if (!gridPerson) { setChooser("person"); return; }
                         // 就地修好冲突槽，不打断用户
                         if (orderConflict?.kind === "TIME_TAKEN" || comboConflicts.some((c) => c.slot === "place")) {
-                          // 先试着修好。修好了下一帧就是干净组合，用户再点一次直接下单。
                           setJoinMsg(undefined);
-                          resolveConflictSlots();
-                          // **绝不开确认页**：此刻读到的还是旧值（setState 异步），开了就是
-                          // 把冲突带进确认页，用户填完提交才失败。
-                          //
-                          // 也不能死循环：第一版无论修没修好都 return，于是"修不好"的组合
-                          // （比如这个时间没有替代值）会让按钮**永远只弹消息、进不去确认页**
-                          // —— 用户报的就是「点击选择没响应」。
-                          //
-                          // 所以这里给一个明确出口：如实说明为什么走不通，并指出该动哪个轴。
+                          if (resolveConflictSlots()) {
+                            // 修好了 ⇒ 直接进确认页，一次点击到位。
+                            //
+                            // 「绝不开确认页，因为此刻读到的是旧值」这个顾虑是**找错了病因**：
+                            // 上一版真正的毛病是**修法无效**（改 timeIndex 动不了
+                            // orderConflict），不是 setState 时序。修法真的有效时，
+                            // 这里的 setState 与 resolveConflictSlots 里的那几条
+                            // 在**同一个事件里**，React 合成一次渲染 ⇒ 下一帧读到的
+                            // 就是修好的新组合，开页是安全的。
+                            setOrderDone(false); setOrderCodeCopied(false); setOrderNo(""); setJoinConfirmOpen(true);
+                            return;
+                          }
+                          // 修不好 ⇒ 更不能死循环：如实说明为什么走不通、该动哪个轴。
+                          // 绝不打开一个注定失败的确认页 —— 让用户填完提交才失败是骗人。
                           showResponse(
                             orderConflict?.kind === "TIME_TAKEN" ? t("slotTimeClash") : t("slotPlaceClash"),
                             orderConflict?.kind === "TIME_TAKEN" ? t("slotTimeClashSub") : t("slotPlaceClashSub"),

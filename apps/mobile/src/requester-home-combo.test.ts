@@ -228,7 +228,15 @@ describe("HOME-FORYOU-ORDER-GUARD-001 下单前资源冲突检查", () => {
     { activityId: "old", title: "已取消那单", time: "周五 18:30–20:30", cancelled: true },
   ];
   it("blocks ordering the same activity twice", () => {
-    expect(detectOrderConflict({ activityId: "cup", time: "周日 10:00–11:30" }, mine)).toEqual({ kind: "ALREADY_ORDERED", orderNo: "100260927150535000001" });
+    // f8977240：旧单 companionId 缺失时**不**再判 ALREADY_ORDERED（否则旧单会把用户
+    // 永久锁死）。本 fixture 的旧单没有 companionId ⇒ 掉到时间比对 ⇒ TIME_TAKEN。
+    // 仍然拦住（这单确实占了周日这个时段），但**理由**变了 —— 见下面的 flagging 注释。
+    //
+    // ⚠️ 待用户裁决：这样一来 f8977240 想解开的「永久锁死」其实只换了标签：同一场活动
+    // 依然因为"时段被占"被拦。要真正放行同一场 + 新同行人，得把 TIME_TAKEN 的比对
+    // 排除同一 activityId —— 但那会放开"重复下同一场"，与「不能重复下」的原始口径冲突。
+    // 这是产品决定，我没有自己拍板，测试先如实记录现状。
+    expect(detectOrderConflict({ activityId: "cup", time: "周日 10:00–11:30" }, mine)).toEqual({ kind: "TIME_TAKEN", title: "周日杯测小聚", time: "周日 10:00–11:30", orderNo: "100260927150535000001" });
   });
   it("blocks a different activity in a time slot I already hold", () => {
     expect(detectOrderConflict({ activityId: "latte", time: " 周日 10:00–11:30 " }, mine)).toEqual({ kind: "TIME_TAKEN", title: "周日杯测小聚", time: "周日 10:00–11:30", orderNo: "100260927150535000001" });

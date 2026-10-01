@@ -42,7 +42,20 @@ describe("For You 四槽可用性（HOME-FORYOU-SLOT-AVAIL-001）", () => {
     // 冲突不再弹选择器
     expect(source).not.toMatch(/if \(timeClash\) \{ setChooser\("time"\); return; \}/);
     expect(source).not.toMatch(/if \(placeClash\) \{ setChooser\("place"\); return; \}/);
-    expect(source).toContain("resolveConflictSlots();");
+    // 修法必须**真的有效**，而不是"调了就算修了"。
+    //
+    // 🔴 时间与订单的冲突是从 **gridActivity** 算出来的（本文件 :1545 读的是
+    // `gridActivity.activityId` / `gridActivity.time`），而 gridActivity 只由
+    // `activityIndex` 决定 —— **不是** timeIndex。所以「改 timeIndex + 锁时间」
+    // 这条修法永远修不好：锁定别的时间只会让 lockedTimeValue 跟活动对不上
+    // （反而多一条 comboConflicts），而 orderConflict 一动不动 ⇒ 按钮永远走冲突
+    // 分支、永远进不去确认页。用户报的「点击没响应」，真身就是这个。
+    expect(source).toContain("if (resolveConflictSlots()) {");
+    // 要修就得换**活动**：那才是 activityId / time 的来源。
+    expect(source).toContain("sceneActivities.findIndex((a) =>");
+    expect(source).toContain("setActivityIndex(altIndex);");
+    // 不许退回那条「只改 timeIndex」的无效修法
+    expect(source).not.toMatch(/const at = distinctTimes\.indexOf\(alt\);/);
     // 治本：撞时段的时间根本不该出现在候选里
     expect(source).toMatch(/\{availableTimes\.map\(\(slot, i\) =>/);
   });

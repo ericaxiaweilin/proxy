@@ -32,7 +32,13 @@ const ordered: ExistingOrder[] = [{ activityId: "cup", title: "cup", time: SUN, 
 
 describe("FOR-YOU-DERIVE-001 availability", () => {
   it("marks ordered, time-taken and full activities as unavailable", () => {
-    expect(activityStatus(acts[0]!, ordered)).toEqual({ ok: false, reason: "ORDERED", orderNo: "100260927150535000001" });
+    // f8977240 把判重改成「旧单 companionId **已知且相同**」才算 ALREADY_ORDERED
+    // （理由：库里旧单都没有 companion 快照，按"判重"处理会把用户**永久锁死**）。
+    // 本 fixture 的旧单没有 companionId ⇒ 不算重复单 ⇒ 掉到时间比对 ⇒ TIME_TAKEN。
+    //
+    // ⚠️ 结果是：下过单的**同一场**活动现在被说成「这个时段被占了」。它依然被**拦住**，
+    // 只是理由从"下过了"变成"时段被占"。判重口径是产品决定，这里只让测试如实跟上。
+    expect(activityStatus(acts[0]!, ordered)).toEqual({ ok: false, reason: "TIME_TAKEN", orderNo: "100260927150535000001", clashTitle: "cup" });
     expect(activityStatus(acts[1]!, ordered)).toEqual({ ok: false, reason: "TIME_TAKEN", orderNo: "100260927150535000001", clashTitle: "cup" });
     expect(activityStatus(acts[3]!, noOrders)).toEqual({ ok: false, reason: "FULL" });
     expect(activityStatus(acts[2]!, ordered)).toEqual({ ok: true });
@@ -78,7 +84,8 @@ describe("FOR-YOU-DERIVE-001 picker options carry a reason", () => {
   it("time options", () => {
     const options = timeOptions(acts, ordered, {});
     expect(options.map((o) => o.value)).toEqual([SUN, SAT, FRI]);
-    expect(options[0]!.status).toMatchObject({ ok: false, reason: "ORDERED" });
+    // 同上：fixture 旧单无 companionId ⇒ 周日这一档报 TIME_TAKEN，不是 ORDERED。
+    expect(options[0]!.status).toMatchObject({ ok: false, reason: "TIME_TAKEN" });
     expect(options[1]!.status).toEqual({ ok: true });
     expect(options[2]!.status).toEqual({ ok: false, reason: "FULL" });
   });
