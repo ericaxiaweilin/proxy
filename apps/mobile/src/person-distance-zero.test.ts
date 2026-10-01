@@ -17,10 +17,26 @@ import { SCENE_RECOMMEND } from "./recommend-fixtures";
 const home = readFileSync(fileURLToPath(new URL("./surfaces/requester-home.tsx", import.meta.url)), "utf8");
 
 describe("PERSON-DISTANCE-ZERO-001 no invented proximity for real people", () => {
-  it("does not stamp a distance onto server people", () => {
-    // 反向钉：profileWireToPerson 里不许再出现任何 distanceM 赋值。
+  it("never invents a distance for a server person", () => {
+    // 原断言是「profileWireToPerson 里不许出现任何 distanceM 赋值」。
+    //
+    // 它想钉的本意是**不许编造距离**（当年服务端从不返回坐标，于是有人手写
+    // distanceM: 0，让每个人都"在 0 m"、无条件通过任何半径的附近筛选）。
+    // 但写成"不许出现 distanceM"之后，它连**服务端真的量出来的**距离一起禁掉了 ——
+    // 于是 rail 只能退回 7 个 fixture 人物（HOME-RAIL-SERVER-001）。
+    //
+    // 现在钉本意：
+    //   · 必须用 wire.distanceM（服务端返回的），不能自己算、不能写死；
+    //   · 缺失 / NaN / Infinity / 负数 一律不带（保持 undefined），不填 0；
+    //   · 仍然禁止任何字面量 0 落到 distanceM 上。
     const fn = home.slice(home.indexOf("function profileWireToPerson"), home.indexOf("async function runServerPeopleSearch"));
-    expect(fn).not.toMatch(/distanceM\s*:/);
+    // 取值只能来自 wire.distanceM
+    expect(fn).toMatch(/typeof wire\.distanceM === "number"/);
+    // 字面量 0 仍然禁止（那正是"就在你脚下"的假数据）
+    expect(fn).not.toMatch(/distanceM:\s*0\b/);
+    // 必须显式排除非有限值与负数
+    expect(fn).toMatch(/Number\.isFinite\(wire\.distanceM\)/);
+    expect(fn).toMatch(/wire\.distanceM >= 0/);
   });
 
   it("excludes people with no distance from the nearby filter", () => {

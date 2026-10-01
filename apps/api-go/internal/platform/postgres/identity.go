@@ -1524,6 +1524,81 @@ func (r *IdentityRepository) GetProfileByHandle(ctx context.Context, handle stri
 //
 // Ordered by the normalized handle so the result set is stable and matches the
 // in-memory order.
+// ListProfilesNearby answers the home rail (HOME-RAIL-SERVER-001).
+//
+// Distance is computed here, in SQL, with the same haversine the in-memory
+// repository uses. The client cannot do this: it never receives a server user's
+// coordinates through any profile read, which is exactly why
+// PERSON-DISTANCE-ZERO-001 excluded every server user from the rail's
+// "distance is a real radius" filter and left the 7 fixture people on screen.
+//
+// Coordinates come from supply.agent_profiles (the map layer already kept them
+// there). A profile without an agent_profile row — or with NULL lat/lng — is
+// NOT returned: "no coordinates" must never read as "0 metres away".
+func (r *IdentityRepository) ListProfilesNearby(ctx context.Context, latitude, longitude, maxDistanceM float64, limit int) ([]identity.Profile, error) {
+	if limit <= 0 {
+		return []identity.Profile{}, nil
+	}
+	// maxDistanceM <= 0 means no cap, expressed as a negative sentinel the SQL
+	// treats as "no limit" — interpolating SQL text for that would be worse.
+	radius := -1.0
+	if maxDistanceM > 0 {
+		radius = maxDistanceM
+	}
+	//
+	// 占位符必须**连续**：第一版这里是 $1/$2/$4（跳过了 $3），Postgres 直接报
+	// there is no parameter $3，而那条错误在事务里被后续语句盖成
+	// "current transaction is aborted (25P02)" —— 真正的错因一行日志都没留下，
+	// 只看到 PROFILE_SEARCH_FAILED。现在占位符连号，并把半径过滤下推到 SQL，
+	// 省掉把超半径的行取回来再在 Go 里丢弃。
+	const query = `
+		SELECT p.user_account_id, p.name, p.handle, p.bio, p.city, p.avatar_path, p.version, p.updated_at,
+			COALESCE(c.claim_number, 0), a.lat, a.lng,
+			6371000.0 * 2 * asin(sqrt(
+				power(sin(radians(a.lat - $1) / 2), 2) +
+				cos(radians($1)) * cos(radians(a.lat)) *
+				power(sin(radians(a.lng - $2) / 2), 2)
+			)) AS meters
+		FROM identity.profiles p
+		JOIN supply.agent_profiles a ON a.user_account_id = p.user_account_id
+		LEFT JOIN identity.agent_claim_numbers c ON c.user_account_id = p.user_account_id
+		WHERE a.lat IS NOT NULL AND a.lng IS NOT NULL
+		  AND ($3 < 0 OR (
+			6371000.0 * 2 * asin(sqrt(
+				power(sin(radians(a.lat - $1) / 2), 2) +
+				cos(radians($1)) * cos(radians(a.lat)) *
+				power(sin(radians(a.lng - $2) / 2), 2)
+			)) < $3))
+		ORDER BY meters ASC
+		LIMIT $4`
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, query, latitude, longitude, radius, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]identity.Profile, 0, limit)
+	for rows.Next() {
+		var p identity.Profile
+		var lat, lng, meters *float64
+		if err := rows.Scan(&p.UserAccountID, &p.Name, &p.Handle, &p.Bio, &p.City,
+			&p.AvatarPath, &p.Version, &p.UpdatedAt, &p.ClaimNumber, &lat, &lng, &meters); err != nil {
+			return nil, err
+		}
+		p.Latitude, p.Longitude = lat, lng
+		// No radius cap requested ⇒ only rows within the cap, when a cap was
+		// given. Applied here (not in SQL) so the two stores share one rule.
+		if radius > 0 && meters != nil && *meters >= radius {
+			continue
+		}
+		if meters != nil {
+			m := *meters
+			p.DistanceM = &m
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (r *IdentityRepository) SearchProfiles(ctx context.Context, query string, limit int) ([]identity.Profile, error) {
 	needle := strings.ToLower(strings.TrimSpace(query))
 	handleNeedle := identity.NormalizeHandle(query)

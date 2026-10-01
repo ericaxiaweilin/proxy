@@ -27,6 +27,12 @@ export type ProfileWire = {
   // AGENT-CLAIM-NUMBER-001: 接单编号（服务端注册时顺序分配）。缺席/0 = 未分配，
   // 客户端按无编号处理（整行隐藏）。
   claimNumber?: number | undefined;
+  // HOME-RAIL-SERVER-001: server-measured location facts, present only on the
+  // nearby read. Absent means "unknown", never 0 — PERSON-DISTANCE-ZERO-001
+  // forbids rendering "0 m" or passing the row through a radius filter.
+  latitude?: number | undefined;
+  longitude?: number | undefined;
+  distanceM?: number | undefined;
 };
 
 export class ProfileClient {
@@ -100,6 +106,33 @@ export class ProfileClient {
     // is malformed. Collapsing the two is how a UI ends up telling the user
     // 「搜索失败，请重试」 about a person who simply does not exist.
     if (!Array.isArray(body.profiles)) throw new Error("profile search response malformed");
+    return body.profiles;
+  }
+
+  // listNearby returns profiles the SERVER measured as near the given point,
+  // nearest first (HOME-RAIL-SERVER-001).
+  //
+  // Why the viewer passes its coordinates in: the server never tells a client
+  // where other users are, so a client-side distance is impossible — and a
+  // client that faked one (0 for everyone) would put every stranger "at your
+  // feet", which is exactly what PERSON-DISTANCE-ZERO-001 forbids.
+  //
+  // Throws VIEWER_LOCATION_REQUIRED upstream as a rejection: a caller that has
+  // no location gets an error rather than an empty rail, so "I have no
+  // location" is never mistaken for "nobody is around".
+  public async listNearby(
+    location: { latitude: number; longitude: number },
+    options: { maxDistanceKm?: number; limit?: number } = {}
+  ): Promise<ProfileWire[]> {
+    const session = await this.requireSession();
+    const result = await this.command(session, "ListNearbyProfiles", session.userAccountId, {
+      latitude: location.latitude,
+      longitude: location.longitude,
+      ...(options.maxDistanceKm !== undefined ? { maxDistanceKm: options.maxDistanceKm } : {}),
+      ...(options.limit !== undefined ? { limit: options.limit } : {}),
+    });
+    const body = (result.operationRef ? JSON.parse(result.operationRef) : {}) as { profiles?: ProfileWire[] };
+    if (!Array.isArray(body.profiles)) throw new Error("nearby profiles response malformed");
     return body.profiles;
   }
 

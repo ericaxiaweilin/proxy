@@ -162,7 +162,7 @@ func (s *Service) Repository() Repository {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "LookupPasswordlessIdentity", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "ListMySessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession", "AuthenticateWithGoogle",
+	case "ListNearbyProfiles", "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "LookupPasswordlessIdentity", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "ListMySessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession", "AuthenticateWithGoogle",
 		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity",
 		"UpdateProfile", "GetProfile", "GetProfileByHandle", "SearchProfiles",
 		"GetAccountPreferences", "UpdateAccountPreferences",
@@ -227,6 +227,8 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 		return s.getProfileByHandle(ctx, envelope)
 	case "SearchProfiles":
 		return s.searchProfiles(ctx, envelope)
+	case "ListNearbyProfiles":
+		return s.listNearbyProfiles(ctx, envelope)
 	case "GetAccountPreferences":
 		return s.getAccountPreferences(ctx, envelope)
 	case "UpdateAccountPreferences":
@@ -1684,6 +1686,63 @@ func (s *Service) searchProfiles(ctx context.Context, e command.Envelope) comman
 		"query":    query,
 	})
 	result := command.Accepted(e, "ProfileSearch", e.Actor.ID, 1, "LISTED", nil)
+	result.OperationRef = string(raw)
+	return result
+}
+
+// listNearbyProfiles answers the home rail (HOME-RAIL-SERVER-001).
+//
+// Why this read exists: the rail used to render SCENE_RECOMMEND, a local
+// fixture, so the seven people on screen never changed no matter how many
+// users registered. Feeding it server rows requires the server to know WHERE
+// people are — and PERSON-DISTANCE-ZERO-001 excludes coordinate-less people
+// from any radius, so a client-side distance would have been either absent
+// (everyone filtered out) or a fake 0 (everyone "at your feet"). Hence the
+// viewer passes its own coordinates in, and the server computes every
+// distance.
+//
+// Auth: same rule as SearchProfiles — a signed-in viewer. A rail full of
+// strangers is not a public-browse surface, and the caller already has a
+// session before it can render the home screen.
+func (s *Service) listNearbyProfiles(ctx context.Context, e command.Envelope) command.Result {
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "PROFILE_SEARCH_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.profile_search_forbidden", nil)
+	}
+	var request struct {
+		Latitude    *float64 `json:"latitude"`
+		Longitude   *float64 `json:"longitude"`
+		MaxDistanceKm *float64 `json:"maxDistanceKm"`
+		Limit       int      `json:"limit"`
+	}
+	_ = decode(e.Payload, &request)
+	// No viewer coordinates ⇒ no distance can be computed for anybody. An
+	// empty list is the honest answer; returning the whole user table would
+	// invite the client to draw "nearby" cards with no basis.
+	if request.Latitude == nil || request.Longitude == nil {
+		return command.Rejected(e, "VIEWER_LOCATION_REQUIRED", "VALIDATION", "AFTER_USER_ACTION", "identity.viewer_location_required", nil)
+	}
+	if *request.Latitude < -90 || *request.Latitude > 90 || *request.Longitude < -180 || *request.Longitude > 180 {
+		return command.Rejected(e, "INVALID_VIEWER_LOCATION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_viewer_location", nil)
+	}
+	maxMeters := 0.0
+	if request.MaxDistanceKm != nil && *request.MaxDistanceKm > 0 {
+		maxMeters = *request.MaxDistanceKm * 1000
+	}
+	found, err := s.profileService.ListProfilesNearby(ctx, *request.Latitude, *request.Longitude, maxMeters, request.Limit)
+	if err != nil {
+		return command.Rejected(e, "PROFILE_SEARCH_FAILED", "INTERNAL", "SAFE_RETRY", "identity.profile_search_failed", nil)
+	}
+	if found == nil {
+		found = []Profile{}
+	}
+	// operationRef, not Body — same reason as searchProfiles: the mobile
+	// CommandResult parser drops Body, so a Body-only answer reads as "nothing
+	// found, no error".
+	raw, _ := json.Marshal(map[string]any{
+		"profiles": found,
+		"count":    len(found),
+	})
+	result := command.Accepted(e, "NearbyProfileList", e.Actor.ID, 1, "LISTED", nil)
 	result.OperationRef = string(raw)
 	return result
 }

@@ -63,6 +63,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -107,6 +108,21 @@ type Profile struct {
 	// AGENT-CLAIM-NUMBER-001: 接单编号。注册时按顺序分配（1 起、无跳号），
 	// 0 = 未分配（内存仓/老数据过渡态，客户端按“无编号”处理，不展示）。
 	ClaimNumber int `json:"claimNumber"`
+	// HOME-RAIL-SERVER-001：坐标与距离。
+	//
+	// 这两个字段存在的理由是 PERSON-DISTANCE-ZERO-001 —— 没有坐标的人**任何**
+	// 「附近」半径都必须排除，所以客户端之前对服务端真人一律没有 distanceM，
+	// 结果是「真人推荐」rail 上一个服务端用户都进不来（rail 靠
+	// `p.distanceM >= moreDistanceKm * 1000` 过滤，undefined 直接被剔）。
+	// 于是 rail 只能退回本地 fixture，界面上永远是那 7 个人。
+	//
+	// 坐标来自 supply.agent_profiles（那里本来就有地图用的 lat/lng），
+	// 距离由服务端按请求方的坐标现算 —— 不写死、不由客户端猜。
+	// 指针语义：nil = 未知，**绝不能用 0 表示"就在你脚下"**。
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	// DistanceM 是服务端算出的距离（米），nil = 无法计算（对方无坐标，或请求方无坐标）。
+	DistanceM *float64 `json:"distanceM,omitempty"`
 }
 
 func (p Profile) validate() error {
@@ -170,6 +186,20 @@ type ProfileRepository interface {
 	// handle, at most limit rows. A query with no matches returns an empty
 	// slice and a nil error — never ErrProfileNotFound.
 	//
+	// ListProfilesNearby returns profiles that have coordinates, ordered by
+	// ascending distance from (latitude, longitude), at most limit rows.
+	//
+	// HOME-RAIL-SERVER-001: this is the read half that lets the home rail show
+	// real server users instead of the 7 local fixture people. Distance is
+	// computed HERE (haversine in SQL) rather than in the client, because the
+	// client cannot know a server user's coordinates at all — which is exactly
+	// why PERSON-DISTANCE-ZERO-001 excluded every one of them.
+	//
+	// maxDistanceM <= 0 means "no radius cap" (still only rows WITH
+	// coordinates — a row without them is never a "nearby" hit).
+	// A viewer with no coordinates of their own cannot compute anyone's
+	// distance: returns an empty slice rather than guessing.
+	ListProfilesNearby(ctx context.Context, latitude, longitude float64, maxDistanceM float64, limit int) ([]Profile, error)
 	// PROFILE-SEARCH-001: both stores must agree on the matching rule and on
 	// the ordering, or the in-memory tests will pass against semantics that
 	// production does not have.
@@ -229,6 +259,60 @@ func profileMatchesSearch(p Profile, needle string) bool {
 		return true
 	}
 	return strings.Contains(strings.ToLower(p.Name), needle)
+}
+
+// haversineMeters is the one distance formula this repository uses, and the
+// Postgres implementation uses the identical haversine expression in SQL.
+// They must agree: a row sorted differently by the two stores means the unit
+// tests describe behaviour production does not have (same reasoning as
+// profileMatchesSearch above).
+func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
+	const earthRadiusM = 6371000.0
+	toRad := func(d float64) float64 { return d * math.Pi / 180 }
+	dLat := toRad(lat2 - lat1)
+	dLng := toRad(lon2 - lon1)
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(toRad(lat1))*math.Cos(toRad(lat2))*math.Sin(dLng/2)*math.Sin(dLng/2)
+	return 2 * earthRadiusM * math.Asin(math.Sqrt(a))
+}
+
+// ListProfilesNearby mirrors the Postgres read — haversine, ascending distance,
+// same cap semantics. See the ProfileRepository contract.
+func (r *MemoryProfileRepository) ListProfilesNearby(_ context.Context, latitude, longitude, maxDistanceM float64, limit int) ([]Profile, error) {
+	if limit <= 0 {
+		return []Profile{}, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	type scored struct {
+		profile Profile
+		meters  float64
+	}
+	hits := make([]scored, 0, len(r.profiles))
+	for _, p := range r.profiles {
+		// No coordinates on either side ⇒ no distance can be computed. A row
+		// without coordinates is NEVER a "nearby" hit (PERSON-DISTANCE-ZERO-001).
+		if p.Latitude == nil || p.Longitude == nil {
+			continue
+		}
+		m := haversineMeters(latitude, longitude, *p.Latitude, *p.Longitude)
+		if maxDistanceM > 0 && m >= maxDistanceM {
+			continue
+		}
+		copyProfile := p
+		distance := m
+		copyProfile.DistanceM = &distance
+		hits = append(hits, scored{profile: copyProfile, meters: m})
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].meters < hits[j].meters })
+	out := make([]Profile, 0, limit)
+	for _, h := range hits {
+		if len(out) >= limit {
+			break
+		}
+		out = append(out, h.profile)
+	}
+	return out, nil
 }
 
 // SearchProfiles mirrors the Postgres read — same predicate, same ordering
@@ -480,6 +564,21 @@ func (s *ProfileService) SearchProfiles(ctx context.Context, query string, limit
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.repo.SearchProfiles(ctx, query, limit)
+}
+
+// ListProfilesNearby is the ProfileService half of the home-rail read
+// (HOME-RAIL-SERVER-001). The limit is clamped the same way SearchProfiles
+// clamps, so the rail cannot ask for an unbounded page.
+func (s *ProfileService) ListProfilesNearby(ctx context.Context, latitude, longitude, maxDistanceM float64, limit int) ([]Profile, error) {
+	if limit <= 0 {
+		limit = DefaultProfileSearchLimit
+	}
+	if limit > MaxProfileSearchLimit {
+		limit = MaxProfileSearchLimit
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.repo.ListProfilesNearby(ctx, latitude, longitude, maxDistanceM, limit)
 }
 
 // maxHandleSuffixAttempts bounds the suffix probe in ProvisionInitialProfile.

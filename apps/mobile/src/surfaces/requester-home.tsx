@@ -271,6 +271,10 @@ export function RequesterHome({
   // HOME-PEOPLE-SEARCH-001: 全站真人结果（服务端 searchProfiles）。本地
   // people 索引只是推荐预览，新注册用户不在里面；够长且有 client 就问
   // 服务端，结果区独立展示，不断本地流程。
+  // HOME-RAIL-SERVER-001：rail 的服务端推荐人。与 serverPeople（搜索结果）是两回事 ——
+  // 那是"用户搜了某个名字"，这里是"打开首页就有谁在附近"。
+  const [nearbyWire, setNearbyWire] = useState<ReadonlyArray<ProfileWire> | undefined>(undefined);
+  const nearbySeq = useRef(0);
   const [serverPeople, setServerPeople] = useState<ReadonlyArray<ProfileWire> | undefined>(undefined);
   const [serverPeopleState, setServerPeopleState] = useState<"idle" | "busy" | "failed">("idle");
   const [serverPeopleQuery, setServerPeopleQuery] = useState("");
@@ -573,8 +577,15 @@ export function RequesterHome({
         : {}),
       bio: [wire.handle ? `@${wire.handle.replace(/^@+/, "")}` : "", wire.city].filter(Boolean).join(" · "),
       tags: [],
-      // PERSON-DISTANCE-ZERO-001: 不填距离。服务端没有这个人的坐标，
-      // 填 0 会让详情页显示「0 m」并让人无条件通过「附近」筛选。
+      // PERSON-DISTANCE-ZERO-001: 距离只在**服务端真的量过**时才带。
+      // 以前这里恒不填，因为服务端从不返回坐标 —— 于是每个服务端真人都被
+      // 「附近」半径剔掉，rail 上一个都进不来。现在 ListNearbyProfiles 带回
+      // server-measured distanceM（HOME-RAIL-SERVER-001），所以可以带。
+      // 仍是「没有就 undefined」，绝不填 0：0 会渲染成「0 m」并让人
+      // 无条件通过任何半径的附近筛选。
+      ...(typeof wire.distanceM === "number" && Number.isFinite(wire.distanceM) && wire.distanceM >= 0
+        ? { distanceM: wire.distanceM }
+        : {}),
       online: false,
       mutualFriends: 0,
     };
@@ -699,7 +710,28 @@ export function RequesterHome({
   //   - "最近活跃" 过滤：要求 person.tags 里有 "最近活跃" social tag
   //   - 距离：半径来自「距离」控件（HOME-MORE-DIST-001），不再是写死的 1km
   // server 端接上后，filter 逻辑移过去；这里只负责本地预览。
-  const recommendFeed: RecommendFeed = SCENE_RECOMMEND[recommendMode] ?? SCENE_RECOMMEND[RECOMMEND_MODE_ORDER[0]!]!;
+  // HOME-RAIL-SERVER-001：rail 的推荐人**先看服务端**（nearbyPeople，来自
+  // ListNearbyProfiles），服务端没有内容或还没回来时才退回 SCENE_RECOMMEND 的
+  // 本地 fixture。
+  //
+  // 为什么要服务端优先：rail 原来永远是 fixture 里那 7 个人 —— 库里注册多少用户
+  // 界面都不变。服务端优先之后，rail 才是活的。
+  //
+  // 为什么不干脆删掉 fixture：服务端失败/未登录/没有定位时 rail 会空掉，首页
+  // 开天窗比"显示 7 个预览人物"更糟。所以 fixture 降级成兜底，而不是删掉。
+  // 它不再是主来源，注释里那句「server 端接上后 filter 逻辑移过去」到这里生效。
+  // 服务端 nearby 的线 → rail 用的形状。走 profileWireToPerson 所以头像、句柄、
+  // 距离的转换只有一处（HOME-RAIL-SERVER-001）。
+  const nearbyPeople: ReadonlyArray<RecommendPerson> = useMemo(
+    () => (nearbyWire ?? []).map(profileWireToPerson),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- profileWireToPerson 是组件内函数，身份每渲染都变；这里只关心数据本身
+    [nearbyWire]
+  );
+  const baseRecommendFeed: RecommendFeed = SCENE_RECOMMEND[recommendMode] ?? SCENE_RECOMMEND[RECOMMEND_MODE_ORDER[0]!]!;
+  const recommendFeed: RecommendFeed =
+    nearbyPeople.length > 0
+      ? { ...baseRecommendFeed, people: [...nearbyPeople] }
+      : baseRecommendFeed;
   const recommendActionLabel = ({
     PHOTO: t("modePhoto"),
     COMPANION: t("modeCompanion"),
@@ -784,6 +816,38 @@ export function RequesterHome({
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // HOME-RAIL-SERVER-001：拿到定位后向服务端要「附近的真人」，把 rail 从
+  // 固定的 7 个 fixture 人物变成活的。
+  //
+  // 依赖 homeOrigin 而不是自己再取一次定位 —— 同一份定位只有一个来源
+  // （SCENE-DISTANCE-BADGE-001 的热门场景距离角标也用它）。取两次会出现
+  // 「角标说 3km、rail 按另一个点算」的自相矛盾。
+  //
+  // 半径用「距离」控件的当前档位（moreDistanceKm），这样控件切到 200km
+  // 时 rail 真的会多出人，而不是切了控件只改本地 fixture 的过滤。
+  useEffect(() => {
+    if (!profileClient || !homeOrigin) return;
+    const seq = (nearbySeq.current += 1);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const found = await profileClient.listNearby(
+          { latitude: homeOrigin.latitude, longitude: homeOrigin.longitude },
+          { maxDistanceKm: moreDistanceKm, limit: 30 }
+        );
+        // 自己不能出现在「附近的真人」里
+        const withoutSelf = viewerAccountId ? found.filter((p) => p.userAccountId !== viewerAccountId) : found;
+        if (!cancelled && seq === nearbySeq.current) setNearbyWire(withoutSelf);
+      } catch {
+        // 没有定位 / 未登录 / 服务端不可用 —— 保持 undefined 让 rail 退回
+        // fixture。**不显示错误**：首页推荐位不该因为定位失败就弹一条提示，
+        // fixture 兜底本身就是正确答案。
+        if (!cancelled && seq === nearbySeq.current) setNearbyWire(undefined);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [profileClient, homeOrigin, moreDistanceKm, viewerAccountId]);
 
   // SCENE-HOME-HOT-RAIL-001：热榜 = 全部 active 场景按真实 visitedCount 降序取
   // 前 9（commander 2026-09-27：多做几个卡片）。0 去过的场景照进（真实数字

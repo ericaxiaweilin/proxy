@@ -1,56 +1,49 @@
 -- seed_dev_shops_users_posts.sql
 --
--- DEV-ONLY：给 seed_dev_shops_users.sql 那 30 个用户各发 1 条公开帖子（共 30 条）。
+-- DEV-ONLY：给 seed_dev_shops_users.sql 那 100 个用户各发 1 条公开帖子（共 100 条）。
 -- 配套删除见 seed_dev_shops_users_remove.sql（同一个脚本，一起删）。
+--
+-- ⚠️ 本文件由 apps/api-go/scripts/mockdata/gen_mockdata.py 生成。
+--    要改数据请改 mockdata/spec.py，然后重跑生成器。
 --
 -- ## 为什么单独一个文件：数据在库里 ≠ 界面上看得到
 --
--- 2026-09-30 灌完 20 店 + 30 用户之后，用户在模拟器里看不到任何变化。查出来是
+-- 2026-09-30 灌完店铺 + 用户之后，用户在模拟器里看不到任何变化。查出来是
 -- 两个原因，都不是"数据没灌进去"：
 --
--- 1. **feed 只显示帖子，不显示用户。** 30 个用户建好之后 `localnet.posts` 里
+-- 1. **feed 只显示帖子，不显示用户。** 用户建好之后 `localnet.posts` 里
 --    一条他们的帖子都没有，所以 feed 翻到底也不会出现他们 —— 对一个刷信息流的
---    界面来说，"多了 30 个用户但一个都看不见" 等于没加。
+--    界面来说，"多了 100 个用户但一个都看不见" 等于没加。
 -- 2. **`ListBusinessStores` 是 `WHERE business_id=$1`**，只返回**当前登录商家自己
---    的店**。20 家新店各有独立 owner，模拟器里登录的那个账号一家都看不到 ——
---    这是设计如此（商家只该看到自己的店），不是 bug，但它意味着"新增 20 家店"
+--    的店**。30 家新店各有独立 owner，模拟器里登录的那个账号一家都看不到 ——
+--    这是设计如此（商家只该看到自己的店），不是 bug，但它意味着"新增 30 家店"
 --    对当前那个登录态是不可见的。要验证得用其中一个店主的账号登录。
 --
--- 所以这个文件补的是**帖子**：让 30 个用户真正出现在 feed 里，店主的帖子同时
+-- 所以这个文件补的是**帖子**：让 100 个用户真正出现在 feed 里，店主的帖子同时
 -- 也充当"这家店在营业"的可视信号。
 --
 -- ## 时间戳是关键
 --
--- feed 的排序是 `created_at DESC`（见 idx_posts_feed_keyset）。库里现有 107 条帖子
--- 全部停在 2026-09-25 及更早，而这些 devseed 用户是今天才加的。如果 `created_at`
--- 写成 `now()` 就会好；但为了**幂等**（重跑不改变已有行的排序位置），
--- 这里用**固定的过去时间**而不是 now()，落在现有数据之后 —— 既能排到前面，
--- 又重跑不变。
+-- feed 的排序是 `created_at DESC`（见 idx_posts_feed_keyset）。库里现有帖子
+-- 停在更早的日期，而这些 devseed 用户是后加的。如果 `created_at` 写成 `now()`
+-- 就会好；但为了**幂等**（重跑不改变已有行的排序位置），这里用**固定的过去时间**
+-- 而不是 now()，落在现有数据之后 —— 既能排到前面，又重跑不变。
 --
 -- ## 形状照着现有帖子抄，不猜
 --
 -- media_refs 的元素是**对象** `{"sortOrder":0,"mediaAssetId":"ma_…"}`，不是裸字符串 ——
--- 我第一版写成 `["ma_…"]`，两种形状混在一起，读模型解析时会拿到 undefined 的
--- mediaAssetId，界面就是一片没有图的帖子。是自检那条「指向不存在资产」把问题揪出来的：
--- 它报 8 条，而那 8 条其实存在，只是取键取不到。
+-- 第一版写成 `["ma_…"]` 时，两种形状混在一起，读模型解析时会拿到 undefined 的
+-- mediaAssetId，界面就是一片没有图的帖子。是自检那条「指向不存在资产」把问题
+-- 揪出来的：它报 8 条，而那 8 条其实存在，只是取键取不到。
 --
--- 现有 mockcreator 帖子的实测形状：`media_refs` 有两种值 —— 47 条是 JSON `null`
--- （`'null'::jsonb`）、其余是数组；**107 条里没有一条是 SQL NULL**（列是 NOT NULL）。
--- 所以"没图"的帖子要写 `'null'::jsonb`，写裸 NULL 会撞 not-null 约束。
--- 这也是我第一版的错：看 `jsonb_typeof` 读到 "null" 就以为列里是 SQL NULL。、
+-- 「没图」的帖子写 `'null'::jsonb`（列是 NOT NULL，写裸 NULL 会撞约束）。
 -- `author_type='USER'`、`status='PUBLISHED'`、`visibility='PUBLIC'`、
--- `city_scope` 用简写 `hcm` / `hn` / `danang`、`scene_type` 是 `BRUNCH` /
--- `CINEMA` / `OUTDOOR` / `CAFE` 这一类。第一版我照"直觉"写了 `media_refs: []`
--- 和完整城市名 `TP. Hồ Chí Minh` —— 那会让这些帖子在按 city_scope 分城过滤的
--- 读模型里落空。**照着能跑通的数据抄形状，不要凭想象填。**
+-- `city_scope` 用简写 `hn` / `hcm` / `danang` / `hue` / `bacninh`、
+-- `scene_type` 必须落在 CHECK 枚举里（查法见文件末尾）。
+-- **照着能跑通的数据抄形状，不要凭想象填。**
 --
--- 媒体：部分帖子挂库里真实存在的 READY 图片资产（mediaAssetId），
--- 其余 media_refs 留 null —— 与现有帖子一致。
---
--- scene_type **有 CHECK 约束**，枚举只有这九个：UNKNOWN / ROOFTOP / BRUNCH / SPA /
--- CINEMA / PHOTO / NIGHTLIFE / OUTDOOR / COFFEE。第一版我按直觉填了 `CAFE` /
--- `DINNER` / `BREAKFAST` / `COWORK`，四个都不在枚举里，灌进去直接撞约束 ——
--- 枚举要从 pg_constraint 里读，不要猜（查法见文件末尾）。
+-- scene_type 枚举只有这九个：UNKNOWN / ROOFTOP / BRUNCH / SPA / CINEMA /
+-- PHOTO / NIGHTLIFE / OUTDOOR / COFFEE。
 --
 -- 执行：psql "$DATABASE_URL" -f apps/api-go/scripts/seed_dev_shops_users_posts.sql
 --
@@ -61,13 +54,14 @@
 
 BEGIN;
 
+
 INSERT INTO localnet.posts
   (id, author_type, author_id, author_display_name, body, media_refs,
    visibility, city_scope, scene_type, status, context_refs, created_at, ephemeral_until)
 SELECT
   'post_devseed_' || lpad(g.n::text, 2, '0'),
   'USER',
-  'user_devseed_' || lpad(g.n::text, 2, '0'),
+  'user_devseed_' || g.n::text,
   g.display_name,
   g.body,
   g.media_refs,
@@ -79,57 +73,137 @@ SELECT
   ts.created_at,
   NULL
 FROM (VALUES
-  -- 河内店主（01–10）：真实地址 / 真实店名的场景化内容
-  ( 1, 'Nguyễn Thị Bích Ngọc', 'Sáng nay mở quán 6h, cà phê trứng và trà sen. Ai đi ngang Hoàn Kiếm thử một ly nhé.',           'hn',     'COFFEE',     jsonb_build_array(jsonb_build_object('sortOrder', 0, 'mediaAssetId', 'ma_014ca1b45a5b6a2bbfa20f1f'))),
-  ( 2, 'Trần Minh Hạnh',      'Quán trong phố cổ, không có máy lạnh, không có wifi. Ngồi tán gẫu mấy tiếng rồi đi.',            'hn',     'COFFEE',     'null'::jsonb),
-  ( 3, 'Lê Hoàng Anh',        'Cà phê rang xay tại chỗ, giao nội thành trong 2 tiếng. Đặt trước khi quán đông.',                'hn',     'COFFEE',     'null'::jsonb),
-  ( 4, 'Phạm Quỳnh Anh',     'Bistro mở tới khuya. Bữa tối nay có món mới, ngồi trong nhà kính giữa phố.',                    'hn',     'BRUNCH',   jsonb_build_array(jsonb_build_object('sortOrder', 0, 'mediaAssetId', 'ma_028095d623e06ddae7563ed1'))),
-  ( 5, 'Vũ Đức Thành',        'Bàn trong góc sân vường hôm nay ngồi hết từ 8h. WiFi ổn, có ổ cắm.',                          'hn',     'COFFEE',   'null'::jsonb),
-  ( 6, 'Đỗ Thùy Linh',        'Nước mía vừa nấu xong, mát lạnh. Quán mở tới 22h, mùa này uống điên rồi.',                        'hn',     'COFFEE',     jsonb_build_array(jsonb_build_object('sortOrder', 0, 'mediaAssetId', 'ma_0290232d200ee2da43d931e5'))),
-  ( 7, 'Hoàng Kim Yến',       'Bánh cuốn sáng nay còn nóng, 7h bán hết. Phố cổ giờ này chờ lâu nhưng đáng.',                    'hn',     'BRUNCH',   'null'::jsonb),
-  ( 8, 'Hoàng Kim Yến',       'Bàn học tập chiều nay đã kín. Ai tìm chỗ có ổ cắm thì ghé tầng hai nhé.',                        'hn',     'COFFEE',   'null'::jsonb),
-  ( 9, 'Ngô Trà My',          'Ngắm hồ Hoàn Kiếm buổi sáng, cà phê sữa đá nhé. Tầng hai nhìn được hết một góc hồ.',               'hn',     'COFFEE',     jsonb_build_array(jsonb_build_object('sortOrder', 0, 'mediaAssetId', 'ma_09f039b113af99028358d7c5'))),
-  (10, 'Đặng Như Quỳnh',      'Công thức cũ giữ nguyên, trứng và sữa đặc như hồi thập lăm. Bốn mươi năm chưa đổi.',               'hn',     'COFFEE',     'null'::jsonb),
-  -- 胡志明市店主（11–20）
-  (11, 'Trương Thị Mai',      'Quán trong hẻm, ngồi vỉa hè ăn mì Quảng sáng nay. Cuối tuần hơi đông.',                         'hcm',    'BRUNCH',   jsonb_build_array(jsonb_build_object('sortOrder', 0, 'mediaAssetId', 'ma_0ab73d0bf4c02c8a4834d4fc'))),
-  (12, 'Lê Anh Minh',         'Batch mới rang xong, dùng cà phê Đắk Lắk. Hôm nay pha tay không, pha máy cũng được.',          'hcm',    'COFFEE',     'null'::jsonb),
-  (13, 'Phạm Thu Trang',      'Nhạc nhẹ từ 21h, quán nhỏ thôi nhưng nhạc vừa phải. Khuya rảnh nhất.',                          'hcm',    'NIGHTLIFE',jsonb_build_array(jsonb_build_object('sortOrder', 0, 'mediaAssetId', 'ma_0dff0c0ca239e845a7c1b355'))),
-  (14, 'Vũ Hoàng Long',       'Phở sáng, bán đến 10h là hết. Quán bảy mở từ 5h40.',                                       'hcm',    'BRUNCH',jsonb_build_array(jsonb_build_object('sortOrder', 0, 'mediaAssetId', 'ma_10adf897d9f10e5381a0f8e3'))),
-  (15, 'Lê Anh Minh',         'Chiều nay ngồi ngoài vườn mát, uống trà đá. Cây bàng mới trồng thêm bốn cây.',                 'hcm',    'COFFEE',     'null'::jsonb),
-  (16, 'Trần Bảo Nam',        'Jazz cuối tuần bắt đầu 20h. Nhạc cũ, không nhạc sàn.',                                     'hcm',    'NIGHTLIFE','null'::jsonb),
-  (17, 'Phạm Quốc Huy',       'Món nay là canh chua mắm tôm cuối cùng của mùa. Nhà mình làm ăn, không phải quán ăn.',        'hcm',    'BRUNCH',   'null'::jsonb),
-  (18, 'Đỗ Thị Hồng Nhung',   'Trà trái cây mới, đá xay kiểu Đà Lạt. Ship nội quận trước 9h.',                             'hcm',    'COFFEE',     jsonb_build_array(jsonb_build_object('sortOrder', 0, 'mediaAssetId', 'ma_136c12f38e86add5a3bf62c2'))),
-  (19, 'Ngô Thanh Sơn',       'Tầng cao nhìn được cả thành phố tối. Đặt bàn trước để chỗ, cuối tuần kín lắm.',               'hcm',    'NIGHTLIFE','null'::jsonb),
-  (20, 'Hoàng Thị Thảo Nhi',  'Bánh mì ốp lò, 6h bán. Bỏ qua thì 8h là hết, hết là hết không có lần hai.',                   'hcm',    'BRUNCH','null'::jsonb),
-  -- 无店普通用户（21–30）：让 feed 的作者多样性成立
-  (21, 'Lê Quốc Dũng',        'Tìm được quán có wifi và ổ cắm sau ba quán. Ghi lại cho người sau.',                            'hcm',    'COFFEE',     'null'::jsonb),
-  (22, 'Phan Thị Thu Hà',     'Quán ăn gia đình tối nay, không nghe nhạc, không gọi điện thoại. Ăn xong mới yên.',               'hn',     'BRUNCH',   'null'::jsonb),
-  (23, 'Vũ Khánh Duy',        'Sáng sớm đi vòng hồ, gặp sương mù. Đi bộ từ 5h là chuyện thường.',                          'hn',     'OUTDOOR',  'null'::jsonb),
-  (24, 'Trịnh Thùy Linh',     'Đà Nẵng hôm nay nắng gắt, quán nào cũng ổn miễn có máy lạnh.',                             'danang', 'COFFEE',     'null'::jsonb),
-  (25, 'Đỗ Hoàng Sơn',        'Huế sáng nay yên, phố phường chưa đông. Đi dạo từ lúc 5h cho đỡ nắng.',                        'hue',    'OUTDOOR',  'null'::jsonb),
-  (26, 'Nguyễn Thị Bích',     'Chụp phố lúc sáng sớm, không khách nào, chỉ có xe rác.',                                     'hn',     'OUTDOOR',  'null'::jsonb),
-  (27, 'Trương Văn Khoa',     'Cuối tuần lái xe đi Vũng Tàu, hai tiếng. Đường ven biển buổi sáng đẹp lắm.',                  'hcm',    'OUTDOOR',  'null'::jsonb),
-  (28, 'Lê Thị Phương Thanh', 'Nhà gần chợ, sáng nào cũng ăn ở quán đầu ngõ. Chủ quán nhớ mặt từng người.',                    'hcm',    'BRUNCH',   'null'::jsonb),
-  (29, 'Cao Thị Yến',         'Chợ Huế bốn giờ đã đông. Mua mắm tôm về nấu, nồi nước mắm nhà ngoại kéo dài cả buổi.',          'hue',    'OUTDOOR',  'null'::jsonb),
-  (30, 'Phan Anh Tuấn',       'Ngày nào không chạy xe thì ngày đó đi cà phê. Lộ trình cũng là một phần công việc.',               'hn',     'COFFEE',     'null'::jsonb)
+  (1, 'Nguyễn Thị Bích Ngọc', 'Sáng nay mở quán 6h, cà phê cốt dừa và trà sen. Ai đi ngang Cầu Gỗ thử một ly nhé.', 'hn', 'COFFEE', 'null'::jsonb),
+  (2, 'Trần Minh Hạnh', 'Quán nhỏ trên Yên Ninh, không máy lạnh, không wifi. Ngồi tán gẫu mấy tiếng rồi đi.', 'hn', 'COFFEE', 'null'::jsonb),
+  (3, 'Lê Hoàng Anh', 'Cà phê rang xay tại chỗ, giao nội thành trong 2 tiếng. Đặt trước khi quán đông.', 'hn', 'COFFEE', 'null'::jsonb),
+  (4, 'Phạm Quỳnh Anh', 'Cà phê trứng làm theo công thức cũ. Bốn mươi năm chưa đổi.', 'hn', 'COFFEE', 'null'::jsonb),
+  (5, 'Vũ Đức Thành', 'Bàn ngoài sân hôm nay ngồi hết từ 8h. Ai tìm chỗ yên tĩnh thì ghé sớm.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (6, 'Đỗ Thùy Linh', 'Bàn trong góc hôm nay kín từ 8h. Có ổ cắm, ngồi làm việc được.', 'hn', 'COFFEE', 'null'::jsonb),
+  (7, 'Hoàng Kim Yến', 'Bánh ngọt ra lò 7h, bán hết là hết. Phố cổ giờ này chờ hơi lâu nhưng đáng.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (8, 'Bùi Đức Kiên', 'Bàn làm việc chiều nay đã kín. Tầng hai còn chỗ, có ổ cắm.', 'hn', 'COFFEE', 'null'::jsonb),
+  (9, 'Ngô Trà My', 'Ngắm hồ Hoàn Kiếm buổi sáng, cà phê sữa đá. Tầng hai nhìn được một góc hồ.', 'hn', 'COFFEE', 'null'::jsonb),
+  (10, 'Đặng Như Quỳnh', 'Công thức cũ giữ nguyên, trứng và sữa đặc như hồi thập lăm.', 'hn', 'COFFEE', 'null'::jsonb),
+  (11, 'Trương Thị Mai', 'Quán trong ngõ, ngồi vỉa hè sáng nay. Cuối tuần hơi đông.', 'hn', 'COFFEE', 'null'::jsonb),
+  (12, 'Lê Anh Minh', 'Batch mới rang xong, dùng cà phê Đắk Lắk. Hôm nay pha tay không, pha máy cũng được.', 'hn', 'COFFEE', 'null'::jsonb),
+  (13, 'Phạm Thu Trang', 'Nhạc nhẹ từ 21h, quán nhỏ thôi nhưng nhạc vừa phải. Khuya rảnh nhất.', 'hn', 'NIGHTLIFE', 'null'::jsonb),
+  (14, 'Vũ Hoàng Long', 'Món Việt bán cả ngày, trưa đông hơn tối. Không nhận đặt bàn trưa.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (15, 'Nguyễn Thị Lan', 'Chiều nay ngồi ngoài vườn mát, uống trà đá. Cây mới trồng thêm bốn cây.', 'hn', 'COFFEE', 'null'::jsonb),
+  (16, 'Trần Bảo Nam', 'Jazz cuối tuần bắt đầu 20h. Nhạc cũ, không nhạc sàn.', 'hn', 'NIGHTLIFE', 'null'::jsonb),
+  (17, 'Phạm Quốc Huy', 'Món nay là canh chua cuối cùng của mùa. Nhà mình làm ăn, không phải quán ăn.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (18, 'Đỗ Thị Hồng Nhung', 'Trà trái cây mới, đá xay kiểu Đà Lạt. Ship nội thành trước 9h.', 'hn', 'COFFEE', 'null'::jsonb),
+  (19, 'Ngô Thanh Sơn', 'Tầng cao nhìn được cả thành phố buổi tối. Cuối tuần kín, nên gọi trước.', 'bacninh', 'NIGHTLIFE', 'null'::jsonb),
+  (20, 'Hoàng Thị Thảo Nhi', 'Bánh mì nướng, 6h bán. Bỏ qua thì 8h là hết, hết là hết không có lần hai.', 'bacninh', 'BRUNCH', 'null'::jsonb),
+  (21, 'Lê Quốc Dũng', 'Cà phê rang mộc, pha máy. Hạt mới về tuần này.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (22, 'Phan Thị Thu Hà', 'Trà và cà phê, chỗ ngồi ngoài vườn. Buổi chiều mát hơn trong nhà.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (23, 'Vũ Khánh Duy', 'Quán cạnh hồ, sáng sớm có sương. Ngồi ngoài được tới 9h.', 'bacninh', 'OUTDOOR', 'null'::jsonb),
+  (24, 'Trịnh Thùy Linh', 'Quán trong ngõ, ít khách ồn. Ai cần chỗ yên thì đây.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (25, 'Đỗ Hoàng Sơn', 'Cà phê sữa đá là ngon nhất. Đá ít hay nhiều thì nói lúc gọi.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (26, 'Nguyễn Thị Bích', 'Quán nhỏ gần chợ, mở từ 6h. Sáng nào cũng có khách quen.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (27, 'Trương Văn Khoa', 'Quán ăn gia đình mở cả ngày. Cuối tuần nhận đặt tiệc nhỏ.', 'bacninh', 'BRUNCH', 'null'::jsonb),
+  (28, 'Lê Thị Phương Thanh', 'Nhà hàng nhỏ, phục vụ tiệc gia đình. Đặt trước hai ngày là chắc.', 'bacninh', 'BRUNCH', 'null'::jsonb),
+  (29, 'Cao Thị Yến', 'Quán ăn sáng mở từ 6h, 10h là nghỉ. Món theo ngày.', 'bacninh', 'BRUNCH', 'null'::jsonb),
+  (30, 'Phan Anh Tuấn', 'Hải sản tươi về mỗi sáng. Nhận đặt bàn, cuối tuần nên gọi trước.', 'bacninh', 'BRUNCH', 'null'::jsonb),
+  (31, 'An Nhiên', 'Chạy vòng hồ Tây lúc 5h30, sương còn chưa tan. Đi sớm hơn tuần trước.', 'hn', 'OUTDOOR', 'null'::jsonb),
+  (32, 'Bảo Châu', 'Vừa thử một ly single origin Ethiopia, chua nhẹ. Uống nguội ngon hơn nóng.', 'hn', 'COFFEE', 'null'::jsonb),
+  (33, 'Bích Ngọc', 'Chợ phiên cuối tuần nay có nhiều hoa cúc. Mua về cắm được cả tuần.', 'hn', 'OUTDOOR', 'null'::jsonb),
+  (34, 'Cao Minh', 'Đạp xe vòng phố cổ sáng nay, đường vắng. Ghi lại mấy quán mở sớm.', 'hn', 'OUTDOOR', 'null'::jsonb),
+  (35, 'Chi Lan', 'Nấu canh cá thì là kiểu Bắc, ăn với cơm nóng. Mất gần một tiếng.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (36, 'Công Thành', 'Nghe lại đĩa cũ, tiếng viny lách tách. Cuối tuần hay ngồi nghe cả buổi.', 'hn', 'NIGHTLIFE', 'null'::jsonb),
+  (37, 'Diệp Anh', 'Cuộn phim 35mm vừa tráng xong, màu lên đúng như mong. Chụp ở phố cổ.', 'hn', 'PHOTO', 'null'::jsonb),
+  (38, 'Đình Khôi', 'Bia thủ công mới, vị đắng nhẹ. Ngồi ngoài trời tới 11h.', 'hn', 'NIGHTLIFE', 'null'::jsonb),
+  (39, 'Đoàn Trang', 'Bánh mì nướng bơ tỏi, làm ở nhà. Bánh ngọt thì mua ngoài ngon hơn.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (40, 'Đức Anh', 'Tập xong ăn nhẹ, không ăn cơm. Đổi lại thấy người nhẹ hơn.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (41, 'Gia Bảo', 'Thi latte art nội bộ, được giải nhì. Đổ hình trái tim vẫn khó nhất.', 'hn', 'COFFEE', 'null'::jsonb),
+  (42, 'Giang Hương', 'Hiệu sách mới mở gần đây, có chỗ ngồi đọc. Cà phê cũng ổn.', 'hn', 'COFFEE', 'null'::jsonb),
+  (43, 'Hà My', 'Thử ba quán ăn vặt trong một buổi chiều. Quán thứ hai ngon nhất.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (44, 'Hải Đăng', 'Lên sân thượng chụp lúc 17h, ánh sáng đẹp nhất trong ngày.', 'hn', 'PHOTO', 'null'::jsonb),
+  (45, 'Hiền Lê', 'Gốm nung xong mẻ mới, có hai cái bị nứt. Học được cách giữ ẩm.', 'hn', 'UNKNOWN', 'null'::jsonb),
+  (46, 'Hoa Lý', 'Pha trà sen, để nguội rồi mới uống. Nóng quá là mất mùi.', 'hn', 'COFFEE', 'null'::jsonb),
+  (47, 'Hoàng Nam', 'Quán vỉa hè quen, chủ nhớ mặt. Ngồi đây không cần gọi menu.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (48, 'Hồng Ngọc', 'Đồ vintage mua ở chợ trời, sửa lại mặc được. Rẻ hơn mua mới.', 'hn', 'UNKNOWN', 'null'::jsonb),
+  (49, 'Hữu Phúc', 'Làm xong cái kệ gỗ nhỏ, dùng gỗ thừa. Đo sai một lần phải làm lại.', 'hn', 'UNKNOWN', 'null'::jsonb),
+  (50, 'Khánh Linh', 'Brunch cuối tuần, cà phê sữa và bánh mì. Ngồi tới trưa mới về.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (51, 'Kim Ngân', 'Chụp ảnh áo dài ở Văn Miếu, sáng sớm chưa có khách.', 'hn', 'PHOTO', 'null'::jsonb),
+  (52, 'Lâm Giang', 'Cuối tuần đi xa, đèo dốc nhiều. Về tới nhà là ngủ luôn.', 'hn', 'OUTDOOR', 'null'::jsonb),
+  (53, 'Lan Anh', 'Yoga buổi sáng, ăn chay cả ngày. Người nhẹ hơn hẳn.', 'hn', 'OUTDOOR', 'null'::jsonb),
+  (54, 'Lê Quyên', 'Phở bò quán mở từ 5h, tới 9h là hết nước dùng. Phải đi sớm.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (55, 'Linh Đan', 'Vẽ xong bức minh hoạ, mất hai ngày. Sổ tay sắp hết trang.', 'hn', 'UNKNOWN', 'null'::jsonb),
+  (56, 'Mai Phương', 'Sáng nào cũng một quán, đổi quán mỗi tuần. Tuần này thử chỗ mới.', 'hn', 'COFFEE', 'null'::jsonb),
+  (57, 'Minh Anh', 'Chụp chân dung lúc 7h, nắng chếch nên đổ bóng dài. Đẹp hơn trưa.', 'hn', 'PHOTO', 'null'::jsonb),
+  (58, 'Minh Quân', 'Rang xong mẻ mới, để ba ngày cho bay hết khí rồi mới pha.', 'hn', 'COFFEE', 'null'::jsonb),
+  (59, 'Mỹ Duyên', 'Tập nhảy bài mới, động tác nhanh hơn bài trước. Mất cả buổi tối.', 'hn', 'UNKNOWN', 'null'::jsonb),
+  (60, 'Nam Anh', 'Chạy vòng hồ Hoàn Kiếm buổi sáng, vòng này đông người hơn hồ Tây.', 'hn', 'OUTDOOR', 'null'::jsonb),
+  (61, 'Ngọc Hân', 'Bánh ngọt theo mùa, mùa này là bánh hạt dẻ. Chỉ làm tới hết tháng.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (62, 'Nhật Linh', 'Ngồi quán cà phê đọc hết nửa cuốn sách. Không ai giục nên ngồi lâu.', 'hn', 'COFFEE', 'null'::jsonb),
+  (63, 'Phúc Long', 'Sửa xong cái xe, thay dây curoa. Chạy thử một vòng thấy êm.', 'hn', 'UNKNOWN', 'null'::jsonb),
+  (64, 'Phương Linh', 'Cây cảnh mới về, phải đổi chậu. Ban công hết chỗ rồi.', 'hn', 'UNKNOWN', 'null'::jsonb),
+  (65, 'Quang Huy', 'Chơi xong một trận dài, mắt mỏi. Nghỉ một hôm không chơi nữa.', 'hn', 'UNKNOWN', 'null'::jsonb),
+  (66, 'Quỳnh Mai', 'Bánh ngọt và cà phê, chiều nào cũng vậy. Thử quán mới thì thất vọng.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (67, 'Sơn Tùng', 'Thu xong bài mới ở nhà, nghe lại thấy còn ồn. Phải thu lại đoạn cuối.', 'hn', 'UNKNOWN', 'null'::jsonb),
+  (68, 'Tâm Như', 'Xà phòng thủ công mẻ mới, mùi sả chanh. Để ba tuần mới dùng được.', 'hn', 'UNKNOWN', 'null'::jsonb),
+  (69, 'Thanh Hà', 'Dạy nấu một buổi, học viên nấu được phở. Nước dùng trong là khó nhất.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (70, 'Thu Hà', 'Cà phê và chụp ảnh, sáng nay ra được mấy tấm. Ánh sáng chiều dễ chụp hơn.', 'hn', 'PHOTO', 'null'::jsonb),
+  (71, 'Anh Tuấn', 'Bắc Ninh sáng sớm yên hơn Hà Nội nhiều. Quán mở từ 6h.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (72, 'Bảo Ngọc', 'Thử quán bánh ngọt mới mở, được cái rẻ. Vị thì bình thường.', 'bacninh', 'BRUNCH', 'null'::jsonb),
+  (73, 'Cam Tú', 'Pour-over vị chua nhẹ, uống buổi sáng tỉnh hơn cà phê sữa.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (74, 'Diệu Linh', 'Trà hoa cúc pha ấm, để nguội uống dần cả buổi chiều.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (75, 'Đức Huy', 'Rang cà phê tại nhà, mẻ đầu hơi khét. Giảm lửa là ổn.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (76, 'Gia Hân', 'Bánh mì nướng ở nhà, bơ và mật ong. Đơn giản mà nhanh.', 'bacninh', 'BRUNCH', 'null'::jsonb),
+  (77, 'Hải Yến', 'Quán trà ngồi lâu được, không ai giục. Chiều nào cũng có khách quen.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (78, 'Hồng Quân', 'Hát quan họ cuối tuần, đông hơn mọi lần. Mấy cụ ngồi nghe tới hết.', 'bacninh', 'UNKNOWN', 'null'::jsonb),
+  (79, 'Huệ Chi', 'Áo dài may lại, sửa eo một chút. Mặc vừa hơn hẳn.', 'bacninh', 'UNKNOWN', 'null'::jsonb),
+  (80, 'Khắc Minh', 'Chụp ảnh quán cà phê buổi sáng, chưa có khách nên chụp được hết.', 'bacninh', 'PHOTO', 'null'::jsonb),
+  (81, 'Lâm Anh', 'Cà phê sân vườn, ngồi ngoài mát hơn trong nhà. Muỗi nhiều vào chiều tối.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (82, 'Linh Chi', 'Đi thử quán mới mở, không gian rộng. Cà phê thì chưa bằng quán quen.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (83, 'Mai Anh', 'Bánh ngọt và trà, chiều nay ngồi ngoài. Trời mát nên ngồi được lâu.', 'bacninh', 'BRUNCH', 'null'::jsonb),
+  (84, 'Minh Châu', 'Cà phê và sách, đọc xong một chương. Quán yên, ít nhạc.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (85, 'Ngọc Điệp', 'Đan xong cái túi, mất một tuần. Len mua ở chợ, màu không đều lắm.', 'bacninh', 'UNKNOWN', 'null'::jsonb),
+  (86, 'Phương Anh', 'Brunch cuối tuần ở Bắc Ninh, giá rẻ hơn Hà Nội. Chỗ ngồi rộng.', 'bacninh', 'BRUNCH', 'null'::jsonb),
+  (87, 'Quốc Bảo', 'Pha máy buổi sáng, chỉnh lại độ xay. Đắng quá là do xay mịn.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (88, 'Thanh Tùng', 'Cà phê rang mộc, uống đen. Không đường thì thấy được vị hạt.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (89, 'Thu Phương', 'Cắm hoa buổi sáng, còn thừa cành thì để riêng một lọ nhỏ.', 'bacninh', 'UNKNOWN', 'null'::jsonb),
+  (90, 'Trang Anh', 'Chụp ảnh quán cà phê, góc cửa sổ sáng nhất. Buổi chiều ngược sáng.', 'bacninh', 'PHOTO', 'null'::jsonb),
+  (91, 'Tuấn Anh', 'Đi xa cuối tuần, đường vắng. Về muộn nên hôm sau ngủ bù.', 'bacninh', 'OUTDOOR', 'null'::jsonb),
+  (92, 'Vân Anh', 'Bánh ngọt và cà phê sữa, chiều nào cũng vậy. Đổi quán thì thấy lạ miệng.', 'bacninh', 'BRUNCH', 'null'::jsonb),
+  (93, 'Việt Hoàng', 'Rang và pha cà phê, thử tỉ lệ mới. Đậm hơn một chút là vừa.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (94, 'Xuân Mai', 'Trà và hoa, sáng nay cắm một lọ. Mùa này hoa rẻ hơn tháng trước.', 'bacninh', 'UNKNOWN', 'null'::jsonb),
+  (95, 'Yến Nhi', 'Đi cà phê và chụp ảnh, được mấy tấm ưng. Quán mới nên chưa đông.', 'bacninh', 'PHOTO', 'null'::jsonb),
+  (96, 'Đức Thịnh', 'Cà phê sáng và đọc báo. Ngồi ngoài tới 9h thì nắng lên phải vào.', 'bacninh', 'COFFEE', 'null'::jsonb),
+  (97, 'Mai Linh', 'Làm bánh cuối tuần, bán cho mấy nhà quen. Đặt trước mới có.', 'hn', 'BRUNCH', 'null'::jsonb),
+  (98, 'Quốc Anh', 'Đi bộ và chụp phố, sáng sớm vắng. Người bán hàng rong bắt đầu dọn ra.', 'hn', 'PHOTO', 'null'::jsonb),
+  (99, 'Thùy Dương', 'Cà phê và hoa, ghé quán quen rồi ra chợ hoa. Sáng nào cũng vậy.', 'hn', 'COFFEE', 'null'::jsonb),
+  (100, 'Văn Phúc', 'Ngồi quán cả sáng, sửa mấy thứ nhỏ ở nhà. Chiều mới ra ngoài.', 'hn', 'COFFEE', 'null'::jsonb)
+
 ) AS g(n, display_name, body, city_scope, scene_type, media_refs)
 -- 固定时间戳，不用 now()：feed 按 created_at DESC 排序，用 now() 会让每次重跑
 -- 把这些帖子顶到最前面（位置一直在变），用固定时间才能既排得进前排又幂等。
--- 时间落在现有数据（止于 2026-09-25）之后。
-CROSS JOIN LATERAL (SELECT TIMESTAMPTZ '2026-09-27 08:00:00+07'
+CROSS JOIN LATERAL (SELECT TIMESTAMPTZ '2026-09-28 08:00:00+07'
                     + (g.n || ' hours')::interval) AS ts(created_at)
-ON CONFLICT (id) DO NOTHING;
+-- 冲突时更新**内容**但不碰 created_at：feed 按 created_at DESC 排序，
+-- 改时间会让每次重跑都把这些帖子重新洗一遍位置。
+ON CONFLICT (id) DO UPDATE
+  SET author_type         = EXCLUDED.author_type,
+      author_id           = EXCLUDED.author_id,
+      author_display_name = EXCLUDED.author_display_name,
+      body                = EXCLUDED.body,
+      media_refs          = EXCLUDED.media_refs,
+      visibility          = EXCLUDED.visibility,
+      city_scope          = EXCLUDED.city_scope,
+      scene_type          = EXCLUDED.scene_type,
+      status              = EXCLUDED.status;
 
 COMMIT;
 
--- ── 结果自检 ─────────────────────────────────────────────────────────────────
+
+-- ── 结果自检（应当 100 / 100 / 0 / 0）────────────────────────────────────────
 SELECT 'devseed 帖子' AS what, count(*) FROM localnet.posts WHERE id LIKE 'post_devseed_%'
 UNION ALL SELECT '作者确实是 devseed 用户', count(*) FROM localnet.posts p
             JOIN identity.user_accounts u ON u.id = p.author_id WHERE p.id LIKE 'post_devseed_%'
--- jsonb_array_elements 在 media_refs 是 JSON `null`（标量）时报
--- "cannot extract elements from a scalar"，所以先按 jsonb_typeof 过滤掉标量 ——
--- 只对真的是数组的行展开。第一版直接 COALESCE(media_refs,'[]') 也不行：
--- JSON null 不是 SQL NULL，COALESCE 不会替换它。
+UNION ALL SELECT '作者名与 profile 不一致', count(*) FROM localnet.posts p
+            JOIN identity.profiles pr ON pr.user_account_id = p.author_id
+            WHERE p.id LIKE 'post_devseed_%' AND p.author_display_name <> pr.name
+-- jsonb_array_elements 在 media_refs 是 JSON `null`（标量）时会报
+-- "cannot extract elements from a scalar"，所以先按 jsonb_typeof 过滤掉标量。
 UNION ALL SELECT 'media_refs 指向不存在资产',
             (SELECT count(*)
                FROM localnet.posts p

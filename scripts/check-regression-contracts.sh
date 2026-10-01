@@ -12248,3 +12248,53 @@ if [ -f scripts/dev-distance-tiers.mjs ]; then
     echo "    DEV-DISTANCE-TIERS-001: SKIP (开发库不可达)"
   fi
 fi
+
+# HOME-RAIL-SERVER-001（2026-09-30）：首页「真人推荐」必须来自服务端。
+#
+# 用户报「重启模拟器，真人推荐仍然只有 7 个推荐」。三层原因：
+#   1. rail 的数据源是 SCENE_RECOMMEND —— 本地 fixture，库里注册多少人都不会变；
+#   2. 客户端从不向服务端要过"附近的人"；
+#   3. 即使要了也拿不到距离：PERSON-DISTANCE-ZERO-001 排除无坐标的人，
+#      而服务端**从不把坐标发给客户端**，客户端也就无从算距离。
+#
+# 现在加 ListNearbyProfiles（服务端按 haversine 量距离），rail 服务端优先、
+# fixture 降级为兜底（服务端失败/无定位时首页才不至于开天窗）。
+#
+# 这条钉的是**服务端真的量出了距离**，不是"字段存在"：一个恒返回 0 的实现
+# 也能通过"结构对"的检查，而 0 正是 PERSON-DISTANCE-ZERO-001 要消灭的东西。
+if curl -sf --noproxy '*' --max-time 3 http://127.0.0.1:4100/health/live >/dev/null 2>&1; then
+  _rail_ui=apps/mobile/src/surfaces/requester-home.tsx
+  # 客户端必须有服务端来源并优先于 fixture
+  if ! grep -qF 'nearbyPeople.length > 0' "$_rail_ui"; then
+    echo "  FAIL [HOME-RAIL-SERVER-001]: rail 不再服务端优先（fixture 兜底逻辑不见了）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'profileClient.listNearby(' "$_rail_ui"; then
+    echo "  FAIL [HOME-RAIL-SERVER-001]: rail 不再向服务端要附近的真人（listNearby 调用不见了）。" >&2
+    exit 1
+  fi
+  # 半径必须跟着控件走 —— 否则切「距离」只改本地 fixture，界面没反应
+  if ! grep -qF 'maxDistanceKm: moreDistanceKm' "$_rail_ui"; then
+    echo "  FAIL [HOME-RAIL-SERVER-001]: rail 的半径不跟随「距离」控件（切了档位服务端不知道）。" >&2
+    exit 1
+  fi
+  # 服务端实现必须真的算距离：占位符连号 + haversine + 按距离排序
+  _rail_sql=apps/api-go/internal/platform/postgres/identity.go
+  if ! grep -qF '6371000.0 * 2 * asin(sqrt(' "$_rail_sql"; then
+    echo "  FAIL [HOME-RAIL-SERVER-001]: 服务端不再用 haversine 算距离 —— distanceM 会退化成占位值。" >&2
+    echo "        PERSON-DISTANCE-ZERO-001 禁止用 0 表示「就在你脚下」。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'ORDER BY meters ASC' "$_rail_sql"; then
+    echo "  FAIL [HOME-RAIL-SERVER-001]: nearby 不再按距离升序 —— 「最近的」就不是最近的了。" >&2
+    exit 1
+  fi
+  # 无坐标的人必须被排除在结果外（有 JOIN + IS NOT NULL 双重保证）
+  if ! grep -qF 'WHERE a.lat IS NOT NULL AND a.lng IS NOT NULL' "$_rail_sql"; then
+    echo "  FAIL [HOME-RAIL-SERVER-001]: nearby 不再排除无坐标的人 —— 「距离未知」会被当成命中。" >&2
+    exit 1
+  fi
+  echo "    HOME-RAIL-SERVER-001: PASS (rail 服务端优先 + fixture 兜底 · 半径跟随控件 · 服务端 haversine 按距离升序 · 无坐标者排除)"
+else
+  echo "    HOME-RAIL-SERVER-001: SKIP (dev API 不在 :4100 —— 这条要活的服务)"
+fi

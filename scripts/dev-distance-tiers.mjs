@@ -95,7 +95,13 @@ if (!VERIFY) {
   let n = 0;
   users.forEach(([uid, name], i) => {
     const t = TIERS[i % TIERS.length];
-    const agentId = `agent_devpipe_${i + 1}`;
+    // agent_id 必须由 **user_id** 确定性派生，不能用序号 i。
+    // 第一版用 `agent_devpipe_${i+1}`，而 i 是"在列表里的第几个"—— 于是多个
+    // 不同 user_id 映射到同一个 agent_id，被 ON CONFLICT DO NOTHING 吞掉，
+    // 只留下一行的坐标。读侧 JOIN 一放大，一个人出现几十次
+    // （实测 user_devseed_30 有 68 行），而且 city 与坐标对不上，
+    // 算出来的距离是 0.0km —— 正是 PERSON-DISTANCE-ZERO-001 要消灭的那种假数据。
+    const agentId = `agent_${uid}`;
     // 有 profile avatar 的人用头像当第一张照片（同一个人只有一个事实源）
     const avatar = sql(
       `SELECT split_part(avatar_path,'/',2) FROM identity.profiles WHERE user_account_id=${q(uid)}`);
@@ -142,6 +148,20 @@ for (const [, , lat, lng] of rows) {
 }
 console.log(`\n  以河内为原点，共 ${rows.length} 个有坐标的用户：`);
 for (const [k, v] of Object.entries(buckets)) console.log(`    ${k.padEnd(11)} ${v}`);
+// 一人一坐标 —— JOIN 扇出会让同一个人出现几十次（实测 68 次），读侧再算距离
+// 就会配上别人的坐标，得出 0.0km 这种假数据（正是 PERSONSON-DISTANCE-ZERO-001
+// 要消灭的那类"看起来对、其实假"的数据）。
+const dupUids = sql(
+  `SELECT count(*) FROM (
+     SELECT user_account_id FROM supply.agent_profiles
+      WHERE lat IS NOT NULL GROUP BY user_account_id HAVING count(*) > 1) x`);
+if (Number(dupUids) > 0) {
+  console.error(`  FAIL: 有 ${dupUids} 个 user_account_id 挂多行 agent_profiles —— 读侧 JOIN 会扇出`);
+  process.exitCode = 1;
+} else {
+  console.log("  一人一坐标：通过");
+}
+
 console.log(`\n  距离档位（移动端 MORE_DISTANCE_KM）：1 / 3 / 5 / 10 / 20 / 50 / 100 / 200 / 500 / 1000`);
 console.log(`  切到 200km 能看到 200-500 档，切到 1000km 能看到 500-1000 与 >1000 档。`);
 
