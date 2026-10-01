@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { detectOrderConflict, type ExistingOrder } from "./requester-home-combo";
+
 // HOME-FORYOU-SLOT-AVAIL-001（用户：「点什么都灰。理论上我们 for you 是4个资源槽
 // 检测冲突 4个全部不可用才灰，有一个可用都不能灰」）。
 //
@@ -86,5 +88,62 @@ describe("For You 四槽可用性（HOME-FORYOU-SLOT-AVAIL-001）", () => {
   it("「缺人」仍然不能进确认页（人是一单的一部分）", () => {
     // 放行按钮 ≠ 放行缺人的组合：没选人依然要去选人。
     expect(source).toContain("const currentComboBroken = !gridPerson || orderConflict !== undefined || comboConflicts.length > 0;");
+  });
+});
+
+// 上面几条钉的是**形状**（源码里必须有某一行）。形状级钉抓不住这次的病 ——
+// 上一版 `c583809` 也"调用了 resolveConflictSlots"，钉照样绿，而用户照样点不动。
+// 因为那个函数改的是 timeIndex，而冲突判据 `orderConflict` 读的是
+// `gridActivity.activityId` / `gridActivity.time`，只由 **activityIndex** 决定。
+//
+// 所以下面这几条钉的是**行为**：换过去之后冲突到底消不消失。
+// 判据照抄组件里那条谓词（requester-home.tsx 的 resolveConflictSlots）。
+describe("HOME-FORYOU-SLOT-AVAIL-001 修冲突必须真的收敛（行为级）", () => {
+  const SUN = "周日 10:00–11:30";
+  const SAT = "周六 15:00–17:00";
+  // 周日这个时段我已经有一单。
+  const mine: ExistingOrder[] = [
+    { activityId: "cup", title: "周日杯测", time: SUN, orderNo: "100260927150535000001" },
+  ];
+  const acts = [
+    { activityId: "cup", time: SUN }, // 与我的单撞时段
+    { activityId: "latte", time: SUN }, // 同样撞时段
+    { activityId: "buddy", time: SAT }, // 不撞
+  ];
+  // 组件里用的就是这条谓词：找第一场与我的订单不冲突的活动。
+  const altIndexOf = (list: typeof acts): number =>
+    list.findIndex((a) => detectOrderConflict({ activityId: a.activityId, time: a.time }, mine) === undefined);
+
+  it("撞时段的几场里，光换时间是救不回来的 —— 必须换活动", () => {
+    // 旧修法本质上只在"时间"这一轴上挑（availableTimes.find(t => t !== 当前)）。
+    // 而撞的是**整个时段**：这个时段内的每一场都撞，挑到哪一场都没用。
+    const atSun = acts.filter((a) => a.time === SUN);
+    expect(atSun.length).toBeGreaterThan(1);
+    for (const a of atSun) {
+      expect(detectOrderConflict({ activityId: a.activityId, time: a.time }, mine)?.kind).toBe("TIME_TAKEN");
+    }
+    // 只有换到别的时段（= 换一场活动）才真的清掉。
+    const other = acts.find((a) => a.time !== SUN)!;
+    expect(detectOrderConflict({ activityId: other.activityId, time: other.time }, mine)).toBeUndefined();
+  });
+
+  it("换活动之后冲突真的没了（收敛），且换的是另一场", () => {
+    const currentIndex = 0; // cup @ SUN —— 冲突
+    expect(detectOrderConflict({ activityId: acts[currentIndex]!.activityId, time: acts[currentIndex]!.time }, mine)?.kind).toBe("TIME_TAKEN");
+
+    const altIndex = altIndexOf(acts);
+    expect(altIndex).toBeGreaterThanOrEqual(0);
+    expect(altIndex).not.toBe(currentIndex);
+    // 收敛：换过去之后，同一条判据算出来必须是「没冲突」。
+    expect(detectOrderConflict({ activityId: acts[altIndex]!.activityId, time: acts[altIndex]!.time }, mine)).toBeUndefined();
+  });
+
+  it("一场都不冲突时如实返回 -1 —— 不许假装修好了", () => {
+    // 假装修好 = 下一次点击还是原地 = 用户看到的「点击没响应」。
+    const allClash = [
+      { activityId: "cup", time: SUN },
+      { activityId: "latte", time: SUN },
+    ];
+    expect(altIndexOf(allClash)).toBe(-1);
   });
 });
