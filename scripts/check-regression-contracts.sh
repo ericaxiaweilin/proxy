@@ -48,18 +48,16 @@ for _py_dir in scripts .wb-scratch apps/api-go/cmd apps/api-go/internal apps/api
     _py_hits="$_py_hits$_py_f"$'\n'
   done < <(find "$_py_dir" -type f -name '*.py' 2>/dev/null)
 done
-# 欠账白名单：**只准缩，不准加**。下面四个都是已经写进任务卡、等着搬或删的：
-#   · apps/api-go/scripts/mockdata/{spec,gen_mockdata,crop_assets}.py —— 2026-10-01 的开发
-#     数据生成器（产出的 seed SQL 已进仓库、数据也已在库里），搬成 Go 是任务 #8；
+# 欠账白名单：**只准缩，不准加**。2026-10-03 划掉三笔：mockdata 那三个 .py 已删
+# （它们产出的三个 seed SQL 本来就在仓库里、数据也已经在库上，生成器是一次性的，
+# README 里写清了这个决定和去哪儿翻旧账），qr-geometry 的 gen-cases.py 搬成了
+# cmd/qrcases。现在只剩一笔：
 #   · scripts/pins.py —— check-regression-contracts.sh 的**运行器**（跑子集 / 把 1036 条
-#     断言的失败一次报全，而不是第一条就 exit）。它有用，所以不擅自删；要么搬成 Go 要么
-#     由指挥官定。764 行，是这堆里最后一个"每天都在用"的 python。
-# 把它们写死在这里，是为了让这笔债可见、可数，而不是靠"扫不到"假装它不存在。
+#     断言的失败一次报全，而不是第一条就 exit 1）。它每天都在用，删了是丢能力，
+#     搬成 Go 要重写一个 bash 分段器（764 行里全是踩过的坑：字符串里的 if 不能算数、
+#     续行必须保持 1:1 行号）。是要债还是删工具，指挥官定；钉在这里是为了**看得见**。
 # 白名单里的文件一旦不见，下面那条反向检查会红：欠账还掉了就必须把名字划掉。
-_py_debt="apps/api-go/scripts/mockdata/spec.py
-apps/api-go/scripts/mockdata/gen_mockdata.py
-apps/api-go/scripts/mockdata/crop_assets.py
-scripts/pins.py"
+_py_debt="scripts/pins.py"
 _py_unexpected=""
 while IFS= read -r _py_f; do
   [ -n "$_py_f" ] || continue
@@ -12885,6 +12883,48 @@ if [ -f apps/api-go/cmd/devdata/distance_tiers.go ]; then
   fi
 fi
 
+# DEV-AVAILABILITY-001（2026-10-03）：排期必须"此刻成立"，而且必须留得住「未知」这一态。
+#
+# 起因是 devdata availability 自己报的那个红：dev 窗口原本按今天的钟点带写
+# （9–21 / 14–22 / 11–15），于是晚上跑一次，写进去的每一段**当时就已经过期**，
+# 报告里"再跑一次本命令即可"在夜里根本做不到 —— 实测 118 → 383 段越滚越多。
+# 真正的原因不是钟点带本身，而是**行 id 带档位后缀**：档位按 ORDER BY agent_id 的下标
+# 取模分配，管线每 5 分钟多一个人、字典序位数一变，有些人就换档，旧后缀行再也无人更新，
+# 永远留在库里过期。
+#
+# 现在：id 只由 agent 决定（一人一行，换档=同一行改起止），窗口贴 now() 写，
+# 并且由 feed-pipeline 的 tick 顺带滚 —— 所以"库里没有过期 AVAILABLE 行"是**定时器**
+# 该守住的性质，钉在活库上才有意义（工具自己的 --verify 只有人去跑才说话）。
+# 第二条判据是"必须还有人完全没排期"：HOME-FORYOU-FREE-001 的核心是
+# 「未知(nil) ≠ 有空」，如果所有人都被排上，这条规则在开发库里就再也验不到了。
+if [ -f apps/api-go/cmd/devdata/availability.go ]; then
+  _avdsn="$(grep -o '^DATABASE_URL=.*' .env 2>/dev/null | sed 's/^DATABASE_URL=//')"
+  if [ -n "${_avdsn}" ] && psql "${_avdsn}" -tAc 'SELECT 1' >/dev/null 2>&1; then
+    _avexpired="$(psql "${_avdsn}" -tAc "SELECT count(*) FROM supply.availability_windows
+        WHERE status = 'AVAILABLE' AND end_at <= now()" 2>/dev/null || echo '')"
+    _avnone="$(psql "${_avdsn}" -tAc "SELECT count(*) FROM supply.agent_profiles a
+         WHERE a.lat IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM supply.availability_windows w
+                            WHERE w.agent_id = a.agent_id
+                              AND w.status = 'AVAILABLE' AND w.end_at > now())" 2>/dev/null || echo '')"
+    if [ -z "${_avexpired}" ] || [ "${_avexpired}" != "0" ]; then
+      echo "  FAIL [DEV-AVAILABILITY-001]: 库里有 ${_avexpired:-查不到} 段标 AVAILABLE 但已过期 —— 定时器没在滚排期。" >&2
+      echo "        读模型 lateral 带 end_at > now()，所以它们不会把谁显示成「有空」，" >&2
+      echo "        但滚动一停，「此刻谁有空」就会在几个小时内退化成全员未知，而这正是这条钉要拦的。" >&2
+      echo "        手动补一次：go -C apps/api-go run ./cmd/devdata availability" >&2
+      exit 1
+    fi
+    if [ -z "${_avnone}" ] || [ "${_avnone}" = "0" ]; then
+      echo "  FAIL [DEV-AVAILABILITY-001]: 每个带坐标的人都有排期了 —— 「未知 ≠ 有空」这条规则验不到了。" >&2
+      echo "        _none 档故意不给一部分人排期，就是为了留出 nil 这一态（不是漏数据）。" >&2
+      exit 1
+    fi
+    echo "    DEV-AVAILABILITY-001: PASS (过期 AVAILABLE=0 · ${_avnone} 人无排期=nil=未知，不是\"有空\")"
+  else
+    echo "    DEV-AVAILABILITY-001: SKIP (开发库不可达)"
+  fi
+fi
+
 # HOME-RAIL-SERVER-001（2026-09-30）：首页「真人推荐」必须来自服务端。
 #
 # 用户报「重启模拟器，真人推荐仍然只有 7 个推荐」。三层原因：
@@ -13195,9 +13235,31 @@ if [ -f apps/api-go/internal/platform/postgres/identity.go ]; then
     echo "        写死的 online:false 是和现实无关的假值。" >&2
     exit 1
   fi
-  # 点圆圈必须在「有空的」里轮转
-  if ! grep -qF 'const freeOnes = filteredPeople.filter((p) => p.online);' "$_rh2"; then
-    echo "  FAIL [HOME-FORYOU-FREE-001]: 点圆圈不再在「有空的」那些人里选。" >&2
+  # 点圆圈必须在「有空的」里轮转。
+  #
+  # 2026-10-03 重指：原来这里 grep `const freeOnes = filteredPeople.filter((p) => p.online);`
+  # —— 那行内联代码被 HOME-FORYOU-ORDER-009 抽进了 for-you-slots.pickPersonSlot()，并且
+  # 抽过去之后**多了**四条可直接跑的分支（换到有空的 / 都忙但还有别人 / 只剩一个人 /
+  # 名单空）。所以形状判据过期了，而行为判据变强了。
+  # 判据换成两层，缺一层都红：
+  #   ① 调用点确实走 pickPersonSlot（不走 = 又回内联，行为测试就管不到界面了）；
+  #   ② 那条"在在线的人里轮转"的断言**真的在跑并通过** —— 只看文件名在不在是假绿，
+  #      把断言删掉文件也还在。字符串判据抓不住的，让测试自己回答。
+  if ! grep -qF 'pickPersonSlot(filteredPeople' "$_rh2"; then
+    echo "  FAIL [HOME-FORYOU-FREE-001]: 点圆圈不再走 pickPersonSlot ——" >&2
+    echo "        选人逻辑一旦退回 requester-home 内联，for-you-slots 的行为测试就管不到界面了。" >&2
+    exit 1
+  fi
+  _free_pick_test=apps/mobile/src/for-you-009-person-pick.test.ts
+  if ! grep -qF '优先换到在线的人，且在在线的人里轮转' "$_free_pick_test"; then
+    echo "  FAIL [HOME-FORYOU-FREE-001]: 「在有空的人里轮转」这条断言从 $_free_pick_test 里没了 ——" >&2
+    echo "        逻辑搬进 pickPersonSlot 之后，这条断言就是该承诺唯一的落点；删了它，" >&2
+    echo "        「点圆圈=随机换人」这个原始 bug 就没有任何东西挡着。" >&2
+    exit 1
+  fi
+  if ! pnpm --filter @proxy/mobile exec vitest run src/for-you-009-person-pick.test.ts >/dev/null 2>&1; then
+    echo "  FAIL [HOME-FORYOU-FREE-001]: $_free_pick_test 跑不过 —— 轮转行为真的坏了，不是文案问题。" >&2
+    echo "        单独复现：pnpm --filter @proxy/mobile exec vitest run src/for-you-009-person-pick.test.ts" >&2
     exit 1
   fi
   if ! grep -qF 'showResponse(t("noOneFree"), t("noOneFreeSub"))' "$_rh2"; then
@@ -13835,6 +13897,27 @@ if [ -f "$STORE_HUB" ]; then
   fi
   [ "$SC_B" -eq 0 ] || exit 1
   echo "    STORE-CONSOLIDATE-001: PASS (管店只有一个入口 · 四样都在 hub 店详情)"
+fi
+
+# UX-DIRECT-EDIT-001（2026-10-03，用户「藏的太深了 谁能找到」）：
+# 店详情的营业资料节直接给"编辑"按钮，点进去就是表单 —— 不再两级跳。
+if [ -f apps/mobile/src/surfaces/my-stores-hub.tsx ]; then
+  DX_B=0
+  if ! grep -q 'accessibilityLabel="编辑店铺信息"' apps/mobile/src/surfaces/my-stores-hub.tsx; then
+    echo "  FAIL [UX-DIRECT-EDIT-001]: 店详情没有行内编辑按钮 —— 又藏回两级了。" >&2
+    DX_B=1
+  fi
+  if ! grep -q 'autoEditStoreId' apps/mobile/src/surfaces/merchant-storefront.tsx; then
+    echo "  FAIL [UX-DIRECT-EDIT-001]: 原子页不接自动展开 —— 点进去还是要找第二下。" >&2
+    DX_B=1
+  fi
+  # 信号必须真的传过去：state 在 hub、prop 没过去 = 静默失效（吃过一次亏）。
+  if ! grep -q 'autoEditStoreId={autoEditStore ? selected.store.id : undefined}' apps/mobile/src/surfaces/my-stores-hub.tsx; then
+    echo "  FAIL [UX-DIRECT-EDIT-001]: hub 没把信号传给原子页 —— 点进去还要找第二下。" >&2
+    DX_B=1
+  fi
+  [ "$DX_B" -eq 0 ] || exit 1
+  echo "    UX-DIRECT-EDIT-001: PASS (店详情直达编辑表单)"
 fi
 
 # MERCHANT-AVATAR-001（2026-10-02，用户 P0「企业店铺的头像用了用户侧的头像」）：
