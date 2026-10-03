@@ -1540,12 +1540,17 @@ func makeThumbnail(ctx context.Context, input, output string) error {
 
 // clippedOutput 截取 ffmpeg/ffprobe 错误输出前 200 字节。
 // 注意：必须在 TrimSpace 之后再按 trim 后长度截断，否则越界 panic。
+// clippedOutput keeps the END of a subprocess' output. ffmpeg and ffprobe print their
+// banner first and the actual error last, so clipping from the front kept exactly the
+// part nobody needed: a dead-lettered variant job reported 200 characters of version
+// text and threw away "Option autorotate ... cannot be applied to output url", which
+// is what turned a one-line diagnosis into a manual repro in the container.
 func clippedOutput(out []byte) string {
-	tail := strings.TrimSpace(string(out))
-	if len(tail) > 200 {
-		tail = tail[:200]
+	text := strings.TrimSpace(string(out))
+	if len(text) > 400 {
+		text = text[len(text)-400:]
 	}
-	return tail
+	return text
 }
 
 // isSafeLocalPath 拒绝 ffmpeg 协议输入（http:// / concat: / subfile: / data: 等），

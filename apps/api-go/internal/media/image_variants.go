@@ -33,6 +33,25 @@ var imageVariantRecipes = []imageVariantRecipe{
 	{purpose: "PLACEHOLDER", filter: "scale=64:64:force_original_aspect_ratio=decrease,setsar=1,format=yuvj420p"},
 }
 
+// variantFFmpegArgs builds the ffmpeg call for one derived image.
+//
+// MEDIA-VARIANT-AUTOROTATE-001（2026-10-03，服务器上验收时发现）：这里**不传**
+// `-autorotate`，因为这是一个跨版本语义相反的选项。同一份参数实测：
+//   · Alpine 的 ffmpeg 6.1.1：裸 `-autorotate` → exit 234（"cannot be applied to output
+//     url"），`-autorotate 1` → 正常出图；
+//   · 本机 brew 的 ffmpeg 9.0.1：裸 `-autorotate` → 正常，`-autorotate 1` → exit 234
+//     （它把 "1" 当成输出文件名）。
+// 所以"照服务器那样修"会把本机测挂，"照本机那样修"会把容器搞死 —— 两边各自绿一段、
+// 各自莫名 DEAD_LETTER。两边一致的唯一写法是**不写它**：autorotate 默认就是开的，
+// 实测同图同参数下 不写 / 裸写（9.0）/ 带值（6.1）产出的字节数完全一样（7970B）。
+// 要显式控制旋转，得换成两个版本语义一致的表达方式，而不是加一个值。
+func variantFFmpegArgs(originalPath, filter, outputPath string) []string {
+	return []string{
+		"-y", "-i", originalPath, "-frames:v", "1", "-vf", filter,
+		"-map_metadata", "-1", "-q:v", "2", outputPath,
+	}
+}
+
 func generateImageVariants(ctx context.Context, originalPath, storeDir string, asset MediaAsset, now time.Time) ([]MediaVariant, error) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		return nil, errors.New("ffmpeg unavailable for image variants")
@@ -55,10 +74,7 @@ func generateImageVariants(ctx context.Context, originalPath, storeDir string, a
 					_ = os.Remove(temporaryPath)
 				}
 			}()
-			args := []string{
-				"-y", "-autorotate", "-i", originalPath, "-frames:v", "1", "-vf", recipe.filter,
-				"-map_metadata", "-1", "-q:v", "2", temporaryPath,
-			}
+			args := variantFFmpegArgs(originalPath, recipe.filter, temporaryPath)
 			if out, runErr := exec.CommandContext(ctx, "ffmpeg", args...).CombinedOutput(); runErr != nil {
 				return nil, fmt.Errorf("%s variant failed: %w: %s", recipe.purpose, runErr, clippedOutput(out))
 			}
