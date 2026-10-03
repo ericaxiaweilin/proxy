@@ -1,0 +1,115 @@
+# 服务器部署栈：postgres + api + worker，全部在容器里。
+#
+# 为什么不用仓库里的 infrastructure/local/docker-compose.yml：那份把 5432/6379/9000 发到
+# 宿主机，而这台机器上 5432 已经是 engflow-postgres（pgvector）的 —— 照抄会撞端口，
+# 更糟的是 compose 名字里的 proxy 卷/网络可能和别的项目混用。这份是「服务器形态」：
+#   · postgres 不发布到宿主机任何端口，只在 compose 内部网络里；
+#   · API 只绑 Tailscale 网口，公网/LAN 都进不来；
+#   · 卷和网络都带 proxy- 前缀，和 engflow/vone/WeKnora 那几套互不可见。
+#
+# 用法（在服务器上，项目根）：
+#   cp infrastructure/server/env.example infrastructure/server/.env   # 再把密码/KMS 密钥换成真值
+#   docker compose -f infrastructure/server/docker-compose.yml --env-file infrastructure/server/.env up -d --build
+#
+# 空库第一次起：cmd/api 启动时自动 apply migrations（R15.22，需 PROXY_MIGRATIONS_DIR），
+# 所以不需要人工跑 migrate；migrate 容器留着做「漂移核对」。
+name: proxy-server
+
+# 三个进程共用一个镜像，靠 `command:` 区分。这里的**语义必须是完整 argv**：
+# compose 的 command 是「追加给镜像 ENTRYPOINT 的参数」，只有镜像不设 ENTRYPOINT
+# （用 CMD）时它才等于 argv[0]。Dockerfile 里写错成 ENTRYPOINT 的后果实测过：
+# worker 容器变成第二个 API 实例，两个 API 同时对空库跑 migrations，pg_catalog 撞
+# 23505，API 靠 restart:unless-stopped 循环「碰巧」收敛成 healthy —— 起得来但不等于对。
+# 每次改这块都要用 `docker logs` 确认 worker 打的是 worker 的日志，不是第二个 API。
+services:
+  postgres:
+    image: postgres:16-alpine
+    # 不写 ports：5432 归 engflow-postgres，且这套库不该被宿主机其他进程直连。
+    environment:
+      POSTGRES_USER: ${PROXY_PG_USER}
+      POSTGRES_PASSWORD: ${PROXY_PG_PASSWORD}
+      POSTGRES_DB: ${PROXY_PG_DB}
+    volumes:
+      - proxy-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      # api 起来之前必须等它：pg_isready 是真的「能接连接」，不是「进程在」。
+      test: ["CMD-SHELL", "pg_isready -U ${PROXY_PG_USER} -d ${PROXY_PG_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      # 上下文是 Go module 自己，不是整个仓库（apps/mobile 有 1.3G）。
+      context: ../../apps/api-go
+      dockerfile: ../../infrastructure/server/Dockerfile
+    image: proxy-server-api:local
+    command: ["/usr/local/bin/api"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${PROXY_PG_USER}:${PROXY_PG_PASSWORD}@postgres:5432/${PROXY_PG_DB}?sslmode=disable
+      API_HOST: 0.0.0.0
+      API_PORT: "4100"
+      # AI 人设写真由 API 直接 serve 仓库里那 5 张 PNG（代码里刻意不复制第二份，
+      # 见 internal/api/aipersona_handlers.go 的注释）。容器里没有 repo root，
+      # resolveRepoDir() 往上找 6 层也找不到 apps/mobile/assets —— 不给这个变量
+      # 就是「首页头像全黑框 + 成功失败打同一行日志」的老问题。
+      PROXY_AI_PERSONA_ASSETS_DIR: /opt/proxy/ai-personas
+    ports:
+      # 只绑 Tailscale 地址：手机/Mac 走 100.96.188.77:4100 能到，LAN 与公网到不了。
+      # 换机器或 IP 变了改 .env 的 PROXY_BIND_IP 即可。
+      - "${PROXY_BIND_IP}:4100:4100"
+    volumes:
+      - proxy-media-data:/var/lib/proxy/media
+      # 相对路径按 compose 文件所在目录解析 → 仓库根的 apps/mobile/assets/ai-personas。
+      # 这也是同步代码时必须保留仓库相对目录结构的原因。
+      - ../../apps/mobile/assets/ai-personas:/opt/proxy/ai-personas:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    image: proxy-server-api:local
+    # 同镜像不同进程：worker 没有 HTTP 口，Dockerfile 里的 HEALTHCHECK 会一直红，这里关掉。
+    command: ["/usr/local/bin/worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${PROXY_PG_USER}:${PROXY_PG_PASSWORD}@postgres:5432/${PROXY_PG_DB}?sslmode=disable
+      WORKER_ID: server-1
+      # 默认走真实投递；设为 unavailable 可以停掉 outbox 外发而不必停整个 worker。
+      OUTBOX_DELIVERY: ${PROXY_OUTBOX_DELIVERY:-enabled}
+    volumes:
+      # 与 api 同一个卷：上传由 api 落盘，转码/缩略图由 worker 读同一批字节。
+      - proxy-media-data:/var/lib/proxy/media
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # 关键：worker 等 api **healthy** 而不是只等 postgres。空库的 migrations 是 api 在
+      # 启动时 apply 的（R15.22），api 的 /health/ready 只有在迁移完成后才会绿 —— 所以
+      # 「api healthy」就是「schema 已经存在」的探针。实测（2026-10-02 首次部署）：只等
+      # postgres 时 worker 比 api 完成迁移早 4 秒起跑，conversation/burner/privacy/gravity
+      # 四个 sweep 全部 SQLSTATE 42P01（relation does not exist）。
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # 一次性核对工具：docker compose run --rm migrate -status（不常驻，不参与 up）。
+  migrate:
+    image: proxy-server-api:local
+    command: ["/usr/local/bin/migrate", "-status"]
+    environment:
+      DATABASE_URL: postgres://${PROXY_PG_USER}:${PROXY_PG_PASSWORD}@postgres:5432/${PROXY_PG_DB}?sslmode=disable
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  proxy-pg-data:
+  # 媒体原件/变体。api 与 worker 必须挂同一个卷：上传落盘由 api 做，投影/转码由 worker 做，
+  # 分成两个卷就会出现「库里有记录、盘上没字节」那种黑框问题。
+  proxy-media-data:

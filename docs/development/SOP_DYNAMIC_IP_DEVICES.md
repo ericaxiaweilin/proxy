@@ -380,7 +380,7 @@ pnpm --filter @proxy/mobile ios:dev
 bash apps/mobile/scripts/dev-ios-device.sh install
 
 # 5) 验证
-pnpm --filter @proxy/mobile doctor:delivery && node ./scripts/check-design-baseline.mjs
+pnpm --filter @proxy/mobile doctor:delivery && pnpm check:design
 ```
 
 > 推送前：`git add -A && git commit -m "chore: ..."`，有 remote 后 `git push`。
