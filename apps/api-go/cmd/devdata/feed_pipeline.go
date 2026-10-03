@@ -127,9 +127,9 @@ func feedPipeline(ctx context.Context, pool *pgxpool.Pool, out io.Writer, args [
 		fmt.Fprintf(out, "  距离分层：%s\n", verdict)
 	}
 
-	// 排期跟着一起滚。理由和距离分层一样：dev 窗口现在是贴 now() 写的（span 最短 4
-	// 小时），只有每个 tick 都滚，"任何时候打开 for you 都有人是有空的"才成立；把它
-	// 留成一个"要人记得单独跑的命令"，就是一天之后 383 段过期、报告一直红的那个样子。
+	// 排期跟着一起滚。理由和距离分层一样：dev 窗口是贴 now() 按偏移写的，最近的
+	// `_noon` 段只活到 now+3h —— 不每个 tick 滚，"此刻谁有空"就会在几小时内退化成
+	// 全员未知；把它留成"要人记得单独跑的命令"，就是 383 段过期、报告一直红那个样子。
 	availReport := &bytes.Buffer{}
 	if err := seedAvailabilityWindows(ctx, pool, availReport); err != nil {
 		fmt.Fprintf(os.Stderr, "  WARN: 滚动排期失败（不影响已发出的帖）：%s\n", err)

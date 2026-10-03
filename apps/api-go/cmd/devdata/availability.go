@@ -41,31 +41,32 @@ func availability(ctx context.Context, pool *pgxpool.Pool, out io.Writer, args [
 
 const availabilityRollingDays = 14
 
-// scheduleProfile is one band of people. The window is written **relative to now**
-// (leadHours in the past, spanHours into the future), not as fixed clock hours.
+// scheduleProfile is one band of people. startOffsetH / endOffsetH are hours **relative
+// to now** when the tool runs (negative = in the past), not fixed clock hours.
 type scheduleProfile struct {
-	suffix    string
-	leadHours int
-	spanHours int
-	ratio     float64
+	suffix       string
+	startOffsetH int
+	endOffsetH   int
+	ratio        float64
 }
 
 // Each band decides how many of its people really get a schedule; the 0.35 band and
 // the `_none` row are what keep the "unknown" state populated.
 //
-// 2026-10-03：这里原来是「今天的 9:00–21:00 / 14:00–22:00 / 11:00–15:00」这种钟点带
-// （node 版照搬过来的）。跑过一次就露馅：23:15 执行本命令，写进去的每一段**当时就已经
-// 过期**，报告里的「有 N 段已过期 —— 再跑一次本命令即可」在夜里根本救不了，实测
-// 118 → 383 段越跑越多。而它承诺给用户看的现象是真的：排期全过期 ⇒ 推荐位表现为
-// 「刷不出人」且不报错。
+// 2026-10-03 改了两轮，两轮都是真红教出来的：
+//   · 原来写「今天的 9:00–21:00 / 14:00–22:00 / 11:00–15:00」这种钟点带（node 版照搬）。
+//     23:15 跑一次，写进去的每一段**当时就已经过期**，报告里那句"再跑一次本命令即可"
+//     在夜里根本救不了 —— 实测 118 → 383 段越滚越多。
+//   · 第一版修法（三段一律 now-lead..now+span）确实把过期清零了，但**把三态抹平了**：
+//     任何时刻查"一小时后"都是 360/495 有空、0 段"有排期但不覆盖"。false 那一态再没有
+//     人能命中，HOME-FORYOU-FREE-001 的判据就变成空转 —— 为了绿把测试面填平，比红更糟。
 //
-// 改成相对 now 之后，每一段都必然覆盖"现在"，过期数按构造为 0；三个状态依然都在 ——
-// `_none` 那档不给排期（nil=未知），而查的是别的时段时（今晚 22:00 / 明早 8:00）
-// 三段跨度不同，仍然会算出 false（有排期但不覆盖）。
+// 现在的形状：`_am` 此刻有空，`_noon` 一到三小时后有空，`_pm` 四小时后才空，
+// `_none` 压根不排（nil=未知）。任何钟点跑，四个状态都还在，且 end_at 恒 > now()。
 var scheduleProfiles = []scheduleProfile{
-	{"_am", 2, 12, 1.0},
-	{"_pm", 1, 8, 0.9},
-	{"_noon", 3, 4, 0.5},
+	{"_am", -2, 10, 1.0},
+	{"_pm", 4, 12, 0.9},
+	{"_noon", 1, 3, 0.5},
 	{"_none", 0, 0, 0.35},
 }
 
@@ -110,7 +111,7 @@ func seedAvailabilityWindows(ctx context.Context, pool *pgxpool.Pool, out io.Wri
 		if float64((i*7919)%100)/100 >= profile.ratio {
 			continue
 		}
-		if profile.spanHours <= 0 {
+		if profile.endOffsetH <= 0 {
 			continue // the `_none` band writes no window on purpose
 		}
 		// 一人一行，且 id 只由 agent 决定。原来 id 带档位后缀（aw_dev_<agent>_am），
@@ -123,13 +124,13 @@ func seedAvailabilityWindows(ctx context.Context, pool *pgxpool.Pool, out io.Wri
 			INSERT INTO supply.availability_windows
 			  (id, agent_id, start_at, end_at, market_id, status, created_at, updated_at)
 			VALUES ($1, $2,
-			        now() - make_interval(hours => $3::int),
+			        now() + make_interval(hours => $3::int),
 			        now() + make_interval(hours => $4::int),
 			        'dev', 'AVAILABLE', now(), now())
 			ON CONFLICT (id) DO UPDATE
 			  SET start_at = EXCLUDED.start_at, end_at = EXCLUDED.end_at,
 			      status = 'AVAILABLE', updated_at = now()`,
-			id, agentID, profile.leadHours, profile.spanHours)
+			id, agentID, profile.startOffsetH, profile.endOffsetH)
 		if err != nil {
 			return fmt.Errorf("write availability for %s: %w", agentID, err)
 		}
@@ -190,7 +191,7 @@ func verifyAvailability(ctx context.Context, pool *pgxpool.Pool, out io.Writer) 
 	fmt.Fprintf(out, "  已过期（必须为 0）：%d\n", expired)
 	fmt.Fprintf(out, "  带坐标但**没有排期**的用户：%d（这些人的 FreeAt 是 nil=未知，不是\"有空\"）\n", unscheduled)
 	fmt.Fprintln(out, "\n  事实源：supply.availability_windows（free_at 由 Postgres 侧服务端读计算）")
-	fmt.Fprintf(out, "  滚动口径：dev 排期按 now()-lead..now()+span 写（重跑即前滚）；6 条 fixture 铺满 %d 天。\n", availabilityRollingDays)
+	fmt.Fprintf(out, "  滚动口径：dev 窗口按 now()+偏移写（此刻有空 / 稍后有空 / 不排期三种人都在），重跑即前滚；6 条 fixture 铺满 %d 天。\n", availabilityRollingDays)
 
 	// The two failure kinds keep the Node script's prefixes: FAIL is a state that makes
 	// the rail show nobody, WARN is "this tree can no longer exercise the unknown≠free
