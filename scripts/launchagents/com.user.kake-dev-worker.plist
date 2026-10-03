@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  dev-worker —— 本机的 outbox / 媒体处理常驻服务，和 com.user.kake-dev-api 同一套。
+
+  为什么要有它：api 一直是常驻的，worker 从来没有。结果"媒体在本机不处理"变成了
+  事实基线（media 表里几百行 UPLOADING 就是证据），而这条链在单测里全绿（内存仓储
+  不碰真 ffmpeg）、在 CI 里也全绿 —— 只有真上传会暴露。2026-10-03 容器化部署第一次
+  把它跑通之后，本机反而成了唯一没 worker 的环境，所以入口收进仓库：
+  scripts/dev-worker.sh 是唯一启动路径，这个 plist 只是让 launchd 替我们守着它。
+
+  名字沿用 kake- 前缀（不是 proxy-）：com.user.kake-dev-api / -metro 是**真实生效的
+  标签**，见 scripts/launchagents/README.md —— 同一族常驻服务用同一个前缀，
+  `launchctl kickstart` 和文档才指得到东西。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.user.kake-dev-worker</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/thanhhuyennguyen/bin/kake-dev-worker.sh</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <!-- 别让 App Nap 把后台队列处理冻住。 -->
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/thanhhuyennguyen/Library/Logs/kake/dev-worker.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/thanhhuyennguyen/Library/Logs/kake/dev-worker.err.log</string>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/thanhhuyennguyen/proxy</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>LANG</key>
+    <string>en_US.UTF-8</string>
+    <key>LC_ALL</key>
+    <string>en_US.UTF-8</string>
+  </dict>
+</dict>
+</plist>
