@@ -20,11 +20,14 @@ describe("HOME-FORYOU-FREE-001 有空 = 服务端算的，不是随机", () => {
     expect(src).not.toMatch(/^\s*online: false,$/m);
   });
 
-  it("点圆圈在「有空的」那些人里轮转，不再随机", () => {
-    expect(src).toContain("const freeOnes = filteredPeople.filter((p) => p.online);");
-    expect(src).toMatch(/freePersonCursor\.current % freeOnes\.length/);
+  // HOME-FORYOU-ORDER-009：取号规则搬进了 for-you-slots 的 pickPersonSlot，
+  // 「在有空的那些人里轮转」由那边**跑出来**验（见 for-you-009-person-pick.test.ts）。
+  // 这里只钉剩下的两件仍在组件里的事：随机兜底必须同时给出如实文案。
+  it("点圆圈换人的兜底与文案都还在组件里", () => {
     // 随机换人只在「一个有空的都没有」时作为兜底，且必须同时给出如实文案
     expect(src).toMatch(/showResponse\(t\("noOneFree"\), t\("noOneFreeSub"\)\)/);
+    expect(src).toMatch(/showResponse\(t\("onlyOneCandidate"\), t\("onlyOneCandidateSub"\)\)/);
+    expect(src).toContain("pickPersonSlot(filteredPeople, freePersonCursor.current)");
   });
 
   it("nearby 请求带上真实时段；推不出时段就不编", () => {

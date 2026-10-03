@@ -41,8 +41,13 @@ type Activity struct {
 	VenueSpend     string `json:"venueSpend"`
 	VenueType      string `json:"venueType"` // CAFE | RESTAURANT
 	VenueTypeLabel string `json:"venueTypeLabel"`
-	// CoverImageURL 活动封面图（R17.x 预留，omitempty：上传管线接好之前
-	// 不下发，客户端见契约注释）。
+	// ACTIVITY-COVER-001：封面图走媒体管线的资产 id，客户端据此拼 thumb URL
+	// （与门店照片 / 场景照片墙同一套，见 media thumb 路由）。
+	// 不收 URL：收 URL 就等于让客户端指定"我要渲染哪张图"，那是任意外部地址。
+	CoverMediaAssetID string `json:"coverMediaAssetId,omitempty"`
+	// CoverImageURL 是 R17.x 的预留字段：至今**没有任何写入者**。
+	// 留着是为了不破坏既有 wire 形状（两个客户端 surface 已经在读它），
+	// 但它不是封面图的来源 —— 别再拿它当唯一事实源。
 	CoverImageURL   string `json:"coverImageUrl,omitempty"`
 	Desc            string `json:"desc"`
 	Benefit         string `json:"benefit"`
@@ -99,6 +104,9 @@ type Service struct {
 	// 发放固定数额金豆。发放失败不回滚签到（签到是事实，豆是奖励），调用方
 	// 在 main.go 接线。
 	beansAwarder BeansAwarder
+	// MERCHANT-OUTCOME-PROJECTION-001：经营结果投影桥。订单（报名/取消）投影到
+	// 商家 spend_daily；nil 时不投影（缺省行为不变），生产由 main.go 接 business 仓。
+	orderProjector OrderProjector
 }
 
 // BeansAwarder 是 wallet.GrantBeans 的最小形状（避免 activity → wallet 整包
@@ -110,6 +118,19 @@ type BeansAwarder interface {
 // SetBeansAwarder 接入签到发豆（main.go 里接 walletService）。
 func (s *Service) SetBeansAwarder(awarder BeansAwarder) {
 	s.beansAwarder = awarder
+}
+
+// OrderProjector 是经营结果投影的最小形状（MERCHANT-OUTCOME-PROJECTION-001）：
+// 一笔活动订单成立/取消时，投影到该场景被门店认领后的商家 spend_daily。
+// sceneID 为空或场景没被任何门店认领时由实现方决定不投影；activity 域不
+// 认识 business 域，归因全部留在实现里。
+type OrderProjector interface {
+	ProjectActivityOrder(ctx context.Context, sceneID, activityID, actorID string, counted bool) error
+}
+
+// SetOrderProjector 接入订单投影（main.go 里接 business 的 PG 仓）。
+func (s *Service) SetOrderProjector(projector OrderProjector) {
+	s.orderProjector = projector
 }
 
 var (
@@ -264,6 +285,34 @@ type publishActivityPayload struct {
 	SignupMode string `json:"signupMode"`
 	// R58: 主题（日落/奥黛/胶片/本地人…），可选。
 	Theme string `json:"theme"`
+	// ACTIVITY-COVER-001：活动封面图的**媒体资产 id**，不是 URL。
+	//
+	// 为什么不收 URL：门店照片那条链（business.AddStorePhoto）传的是
+	// mediaAssetId，客户端再用共享 helper 拼 thumb URL。理由是同一个 ——
+	// 服务端不该成为"客户端随便塞一个 URL 我就照着渲染"的转发点，那会让
+	// 活动的封面指向任意外部地址。资产 id 只能落在自家媒体管线上。
+	CoverMediaAssetID string `json:"coverMediaAssetId"`
+}
+
+// ACTIVITY-COVER-001：封面资产 id 的形状校验。
+//
+// 这个值会被客户端拼成 `/v1/media/thumb/<id>` 的 URL 去取，所以必须是个
+// 不含分隔符的裸 token：含 "/" 的能被拼成别的路径，含 "://" 的能被拼成
+// 任意外部地址。媒体管线自己发的 id 都是 ma_ / mv_ 前缀，这里不锁死具体
+// 形态（媒体域的 id 规则不是活动域该管的事），只保证它**安全可拼**。
+func isValidCoverAssetID(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '_', r == '-', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // venueTypeLabels 扩展 R58 户外场地；未知类型不进白名单（publish 拒绝）。
@@ -285,6 +334,11 @@ func (s *Service) publishActivity(ctx context.Context, e command.Envelope) comma
 	}
 	if _, ok := venueTypeLabels[p.VenueType]; !ok {
 		return command.Rejected(e, "ACTIVITY_VENUE_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "activity.venue_unsupported", nil)
+	}
+	// ACTIVITY-COVER-001：封面可以不给，给了就必须是能安全拼成 thumb URL 的
+	// 裸 token。错在这里直接拒，而不是存下来等客户端去拼出一个奇怪的路径。
+	if p.CoverMediaAssetID != "" && !isValidCoverAssetID(p.CoverMediaAssetID) {
+		return command.Rejected(e, "ACTIVITY_COVER_INVALID", "VALIDATION", "AFTER_USER_ACTION", "activity.cover_invalid", nil)
 	}
 	if p.SignupMode == "" {
 		p.SignupMode = "OPEN"
@@ -313,7 +367,7 @@ func (s *Service) publishActivity(ctx context.Context, e command.Envelope) comma
 	if codeErr != nil {
 		return command.Rejected(e, "NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "activity.number_unavailable", nil)
 	}
-	a := Activity{ID: activityID, Code: code, Origin: "USER", OwnerID: e.Actor.ID, Status: "PUBLISHED", Title: p.Title, Time: p.Time, People: "0 / " + strconv.Itoa(p.Capacity) + " 人", Capacity: p.Capacity, Price: "0₫", MoneyFlow: "FREE", PriceLabel: "免费参加", Consumption: consumption, ConsumptionTerm: p.ConsumptionTerm, SignupMode: p.SignupMode, Theme: p.Theme, VenueName: p.VenueName, VenueIcon: p.VenueIcon, VenueType: p.VenueType, VenueTypeLabel: venueTypeLabels[p.VenueType], RealitySceneID: p.RealitySceneID, Desc: p.Description, AIStatus: "NONE"}
+	a := Activity{ID: activityID, Code: code, Origin: "USER", OwnerID: e.Actor.ID, Status: "PUBLISHED", Title: p.Title, Time: p.Time, People: "0 / " + strconv.Itoa(p.Capacity) + " 人", Capacity: p.Capacity, Price: "0₫", MoneyFlow: "FREE", PriceLabel: "免费参加", Consumption: consumption, ConsumptionTerm: p.ConsumptionTerm, SignupMode: p.SignupMode, Theme: p.Theme, VenueName: p.VenueName, VenueIcon: p.VenueIcon, VenueType: p.VenueType, VenueTypeLabel: venueTypeLabels[p.VenueType], RealitySceneID: p.RealitySceneID, Desc: p.Description, AIStatus: "NONE", CoverMediaAssetID: p.CoverMediaAssetID}
 	// MERCHANT-PUBLISH-001: 商家注记（api 层已验成员）→ Origin MERCHANT +
 	// 店名。OwnerID 保留发布人（ListByOwner 按 ownerId 照常找到自己的店单）。
 	// 只认注记，不读 payload。
@@ -521,6 +575,10 @@ func (s *Service) joinActivity(ctx context.Context, e command.Envelope) command.
 	// 后续 cancel/checkin/noShow 凭它验归属。
 	// ACT-CONTRACT-001: Join 单条返回也要 normalize。
 	normalizeActivityForOutput(&a)
+	// MERCHANT-OUTCOME-PROJECTION-001：订单成立即投影商家经营结果（spend_daily）。
+	// 投影失败不回滚下单（同签到发豆的理由：下单是事实，投影是派生），
+	// 归因（场景→认领门店→商家）留在实现方。
+	s.projectOrder(ctx, a.RealitySceneID, a.ID, e.Actor.ID, true)
 	return acceptedWithPayload(e, "Activity", a.ID, 1, "JOINED", map[string]any{
 		"activity":      a,
 		"joined":        true,
@@ -539,6 +597,16 @@ func (s *Service) joinSnapshot(ctx context.Context, activityID, actorID string) 
 		return nil
 	}
 	return order.Snapshot
+}
+
+// projectOrder 把一笔订单的成立/取消投给商家侧（MERCHANT-OUTCOME-PROJECTION-001）。
+// 没接投影器或活动没挂现实场景 ⇒ 与商家无关，直接跳过。错误吞掉是刻意的：
+// 派生数据掉了可以重算，不能反过来挡用户的下单/取消。
+func (s *Service) projectOrder(ctx context.Context, sceneID, activityID, actorID string, counted bool) {
+	if s.orderProjector == nil || sceneID == "" {
+		return
+	}
+	_ = s.orderProjector.ProjectActivityOrder(ctx, sceneID, activityID, actorID, counted)
 }
 
 func (s *Service) cancelActivity(ctx context.Context, e command.Envelope) command.Result {
@@ -560,7 +628,9 @@ func (s *Service) cancelActivity(ctx context.Context, e command.Envelope) comman
 	if rejected, failed := participationRejected(e, err, participation, "ACTIVITY_CANCEL_NOT_ALLOWED", "activity.cancel_not_allowed", "ACTIVITY_CANCEL_FAILED", "activity.cancel_failed"); failed {
 		return rejected
 	}
-	normalizeActivityForOutput(&a)
+	// MERCHANT-OUTCOME-PROJECTION-001：取消要把当初记的那一笔从经营结果里扣回去。
+	// TransitionParticipation 只允许占座态 → CANCELLED，一笔报名最多扣一次。
+	s.projectOrder(ctx, a.RealitySceneID, p.ActivityID, e.Actor.ID, false)
 	return acceptedWithPayload(e, "Activity", p.ActivityID, 1, "CANCELLED", map[string]any{"activityId": p.ActivityID, "activity": a, "participation": participation}, nil)
 }
 func (s *Service) checkinActivity(ctx context.Context, e command.Envelope) command.Result {

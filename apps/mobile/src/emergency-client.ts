@@ -23,6 +23,7 @@
 //   · deliveryDisclaimer() —— 我们**没有**做什么（不会自动通知任何人）
 
 import type { TransportResponse } from "./auth-client";
+import { DEFAULT_LANGUAGE, translate, type Language } from "./i18n";
 
 // 服务端 emergency.MaxContacts。第 4 位联系人会被服务端拒
 // （EMERGENCY_CONTACT_LIMIT_REACHED），客户端在这里先拦一次只是为了
@@ -305,45 +306,58 @@ function normaliseEvent(raw: unknown): EmergencyEvent | null {
 //   113 警察 / 114 消防 / 115 急救。
 // 这里**只**提供号码与拨号，不提供任何「已报警」的措辞 —— 拨出去之后
 // 发生什么，平台不知道。
-export const VN_EMERGENCY_NUMBERS: ReadonlyArray<{ number: string; label: string }> = [
-  { number: "113", label: "警察" },
-  { number: "114", label: "消防" },
-  { number: "115", label: "急救" },
-];
+// I18N-SAFETY-002：label 也进字典。号码本身不变（113/114/115 是越南真实的
+// 报警/消防/急救号），变的只是这几个字 —— 中文界面写「警察」，英文界面写
+// "Police"。号码那一位对任何语言都一样，所以只译 label。
+export function vnEmergencyNumbers(lang: Language = DEFAULT_LANGUAGE): ReadonlyArray<{ number: string; label: string }> {
+  return [
+    { number: "113", label: translate(lang, "emergencyNumberPolice") },
+    { number: "114", label: translate(lang, "emergencyNumberFire") },
+    { number: "115", label: translate(lang, "emergencyNumberMedical") }
+  ];
+}
 
 // 位置已记录时的说法。故意把「粗化到多大范围」写出来：这是安全功能，
 // 让用户以为平台知道精确位置、实际只知道一个格子，方向是错的。
-export function coarseLocationLabel(event: EmergencyEvent): string {
+export function coarseLocationLabel(event: EmergencyEvent, lang: Language = DEFAULT_LANGUAGE): string {
   if (!event.locationRecorded) {
     if (event.locationOmittedReason === "NO_LOCATION_CONSENT") {
-      return "未记录位置：当时没有生效的位置授权，坐标已丢弃";
+      return translate(lang, "safetyLocOmittedNoConsent");
     }
-    return "未记录位置";
+    return translate(lang, "safetyLocOmitted");
   }
   const meters = event.coarsePrecisionM;
-  if (typeof meters !== "number") return "已记录模糊位置";
-  return `已记录模糊位置：精度约 ${formatMeters(meters)}（不是精确坐标）`;
+  if (typeof meters !== "number") return translate(lang, "safetyLocCoarse");
+  return translate(lang, "safetyLocCoarseRange", { range: formatMeters(meters, lang) });
 }
 
-function formatMeters(meters: number): string {
-  if (meters < 1000) return `${Math.round(meters)} 米`;
-  return `${(meters / 1000).toFixed(1)} 公里`;
+function formatMeters(meters: number, lang: Language): string {
+  if (meters < 1000) return translate(lang, "distMeters", { n: Math.round(meters) });
+  return translate(lang, "distKm", { n: (meters / 1000).toFixed(1) });
 }
 
 // handOffLabel 说「我们真的做了什么」。三样都是有据可查的本地动作：
 // 事件行、拨号盘、短信交接次数。
-export function handOffLabel(event: EmergencyEvent): string {
-  const parts: string[] = ["已记录这条事件"];
+export function handOffLabel(event: EmergencyEvent, lang: Language = DEFAULT_LANGUAGE): string {
+  const parts: string[] = [translate(lang, "handOffRecorded")];
   if (event.dialerOpened) {
-    parts.push(event.dialedNumber ? `已打开拨号盘（${event.dialedNumber}）` : "已打开拨号盘");
+    parts.push(event.dialedNumber
+      ? translate(lang, "handOffDialerNumber", { number: event.dialedNumber })
+      : translate(lang, "handOffDialer"));
   }
-  if (event.smsHandoffCount > 0) parts.push(`已转交短信 ${event.smsHandoffCount} 次`);
+  if (event.smsHandoffCount > 0) {
+    parts.push(translate(lang, "handOffSms", { n: event.smsHandoffCount }));
+  }
+  // 分隔符 · 不随语言变：它是三个短句之间的视觉分隔，不是词。
   return parts.join(" · ");
 }
 
 // deliveryDisclaimer 说「我们没有做什么」。这句话的存在理由是本仓库
 // 根本没有向任意用户送达的通道；不写清楚，用户会以为紧急联系人已经
 // 收到通知了 —— 那是最坏的一种假承诺（他因此不去自己打电话）。
-export function deliveryDisclaimer(): string {
-  return "平台目前不会自动通知你的紧急联系人：这里只做记录，并协助你拨打或转交短信。请自己确认对方已收到。";
+// SAFETY-NET-001 钉的就是这句的存在：**平台不会自动通知任何人**。不写清楚，
+// 用户会以为紧急联系人已经收到消息，于是不去自己打那个电话 —— 那是这个功能
+// 最坏的失败模式。所以它必须出现在界面上，而且六种语言都得说同一件事。
+export function deliveryDisclaimer(lang: Language = DEFAULT_LANGUAGE): string {
+  return translate(lang, "safetyDeliveryDisclaimer");
 }

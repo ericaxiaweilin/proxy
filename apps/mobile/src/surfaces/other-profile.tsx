@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import type { FeedMediaItem, FeedPost, PostEngagement } from "@proxy/contracts";
 import type { EngagementClient } from "../engagement-client";
 import type { LocalNetClient } from "../localnet-client";
@@ -52,6 +53,10 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
   const [following, setFollowing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
+  // PROFILE-COPY-UID-001（2026-10-02，用户「帖文主页为什么不能手动复制用户ID，
+  // 支持长按复制」）：selectable 靠系统原生选词，时灵时不灵。改显式长按复制，
+  // 和店名复制同一套（Clipboard + 一句明确反馈）。
+  const [copiedUid, setCopiedUid] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [resolvedPosts, setResolvedPosts] = useState<FeedPost[]>(target.posts);
   const [resolvedMedia, setResolvedMedia] = useState<Record<string, FeedMediaItem[]>>(target.mediaByPost);
@@ -217,7 +222,20 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
       <View style={styles.head}>
         <View style={styles.headCopy}>
           <Text selectable numberOfLines={1} style={styles.name}>{target.name}</Text>
-          <Text selectable numberOfLines={1} style={styles.handle}>@{target.userId}</Text>
+          <Pressable
+            accessibilityLabel={`复制用户 ID ${target.userId}`}
+            accessibilityHint="长按复制"
+            delayLongPress={350}
+            onLongPress={() => {
+              void Clipboard.setStringAsync(target.userId).then(
+                () => setCopiedUid(true),
+                () => setCopiedUid(false),
+              );
+            }}
+          >
+            <Text selectable numberOfLines={1} style={styles.handle}>@{target.userId}</Text>
+          </Pressable>
+          {copiedUid ? <Text selectable style={styles.copiedHint}>已复制用户 ID</Text> : null}
         </View>
         <View style={styles.avatarWrap}>
           <View style={styles.avatar}>{target.avatarUri ? <Image source={{ uri: target.avatarUri }} style={styles.avatarPhoto} /> : <Text selectable style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text>}</View>
@@ -259,4 +277,4 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
   </View>;
 }
 
-const styles=StyleSheet.create({root:{backgroundColor:color.offWhite,flex:1},header:{alignItems:"center",borderBottomColor:color.line,borderBottomWidth:1,flexDirection:"row",height:50,paddingHorizontal:16},back:{flex:1},headerTitle:{color:color.ink,fontSize:17,fontWeight:"900"},headerSpacer:{flex:1},headerAction:{alignItems:"flex-end",flex:1},headerActionText:{color:color.muted,fontSize:14,fontWeight:"700"},content:{paddingBottom:30},head:{alignItems:"flex-start",flexDirection:"row",gap:16,justifyContent:"space-between",paddingHorizontal:18,paddingTop:7},headCopy:{flex:1,minWidth:0},avatarWrap:{height:82,width:82},avatar:{alignItems:"center",backgroundColor:"#EDE4FF",borderColor:"#ececec",borderRadius:41,borderWidth:1,height:82,justifyContent:"center",overflow:"hidden",width:82},avatarPhoto:{height:"100%",width:"100%"},avatarText:{color:"#5B3FB8",fontSize:27,fontWeight:"800"},name:{color:color.ink,fontSize:24,fontWeight:"800",letterSpacing:-0.96,lineHeight:28},handle:{color:"#444",fontSize:11,marginTop:4},introRow:{alignItems:"center",flexDirection:"row",paddingHorizontal:18,paddingTop:10},introText:{color:color.ink,flex:1,fontSize:11,lineHeight:16},statRow:{alignItems:"center",flexDirection:"row",gap:18,justifyContent:"flex-start",marginBottom:15,marginTop:12,paddingHorizontal:18},statText:{color:"#8c8c8c",fontSize:11},statValue:{color:"#111",fontWeight:"800"},notice:{color:color.error,fontSize:12,paddingHorizontal:18,paddingBottom:8}});
+const styles=StyleSheet.create({root:{backgroundColor:color.offWhite,flex:1},header:{alignItems:"center",borderBottomColor:color.line,borderBottomWidth:1,flexDirection:"row",height:50,paddingHorizontal:16},back:{flex:1},headerTitle:{color:color.ink,fontSize:17,fontWeight:"900"},headerSpacer:{flex:1},headerAction:{alignItems:"flex-end",flex:1},headerActionText:{color:color.muted,fontSize:14,fontWeight:"700"},content:{paddingBottom:30},head:{alignItems:"flex-start",flexDirection:"row",gap:16,justifyContent:"space-between",paddingHorizontal:18,paddingTop:7},headCopy:{flex:1,minWidth:0},avatarWrap:{height:82,width:82},avatar:{alignItems:"center",backgroundColor:"#EDE4FF",borderColor:"#ececec",borderRadius:41,borderWidth:1,height:82,justifyContent:"center",overflow:"hidden",width:82},avatarPhoto:{height:"100%",width:"100%"},avatarText:{color:"#5B3FB8",fontSize:27,fontWeight:"800"},name:{color:color.ink,fontSize:24,fontWeight:"800",letterSpacing:-0.96,lineHeight:28},handle:{color:"#444",fontSize:11,marginTop:4},copiedHint:{color:"#347657",fontSize:11,fontWeight:"800",marginTop:2},introRow:{alignItems:"center",flexDirection:"row",paddingHorizontal:18,paddingTop:10},introText:{color:color.ink,flex:1,fontSize:11,lineHeight:16},statRow:{alignItems:"center",flexDirection:"row",gap:18,justifyContent:"flex-start",marginBottom:15,marginTop:12,paddingHorizontal:18},statText:{color:"#8c8c8c",fontSize:11},statValue:{color:"#111",fontWeight:"800"},notice:{color:color.error,fontSize:12,paddingHorizontal:18,paddingBottom:8}});

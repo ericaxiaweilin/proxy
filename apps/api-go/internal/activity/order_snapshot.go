@@ -57,8 +57,13 @@ type OrderSnapshotActivity struct {
 	MoneyFlow      string `json:"moneyFlow,omitempty"`
 	VenueSpend     string `json:"venueSpend,omitempty"`
 	CoverImageURL  string `json:"coverImageUrl,omitempty"`
-	Joined         int    `json:"joined"`
-	Capacity       int    `json:"capacity,omitempty"`
+	// ACTIVITY-COVER-001：封面资产 id 进快照。票券是**历史记录**（票面快照是
+	// 判重与展示的事实源，HOME-FORYOU-ORDER-007），活动后来换了封面不能改写
+	// 已经发出去的票 —— 所以这里存的是下单那一刻的资产 id。
+	// CoverImageURL 一并留着：它是 R17.x 的死字段，形状不变。
+	CoverMediaAssetID string `json:"coverMediaAssetId,omitempty"`
+	Joined            int    `json:"joined"`
+	Capacity          int    `json:"capacity,omitempty"`
 }
 
 // OrderSnapshot 是一笔报名在下单那一刻的完整票面（recipe）。
@@ -111,7 +116,7 @@ func BuildOrderSnapshot(a Activity, orderNo string, orderedAt time.Time, recipe 
 		Activity: OrderSnapshotActivity{
 			ActivityID: a.ID, Code: a.Code, Title: a.Title, Desc: a.Desc, Benefit: a.Benefit, People: a.People,
 			Time: a.Time, VenueIcon: a.VenueIcon, VenueName: a.VenueName, VenueType: a.VenueType, RealitySceneID: a.RealitySceneID,
-			PriceLabel: a.PriceLabel, MoneyFlow: a.MoneyFlow, VenueSpend: a.VenueSpend, CoverImageURL: a.CoverImageURL,
+			PriceLabel: a.PriceLabel, MoneyFlow: a.MoneyFlow, VenueSpend: a.VenueSpend, CoverImageURL: a.CoverImageURL, CoverMediaAssetID: a.CoverMediaAssetID,
 			Joined: a.Joined, Capacity: a.Capacity,
 		},
 		Time:      r.Time,

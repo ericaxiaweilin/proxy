@@ -12,15 +12,24 @@
 // instead of the bogus '12.6tr VND' / '148 订单' fallbacks.
 
 import { useCallback, useEffect, useState } from "react";
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+// ACTIVITY-COVER-001：与横滑卡 / 门店相册同一套图片渲染。
+import { Image } from "expo-image";
 import { color, Gradient, shadows } from "../theme";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import type { BusinessClient } from "../business-client";
-import { merchantAvatarUri } from "../business-client";
-import type { SupplyClient, SupplierCandidate } from "../supply-client";
+import type { FulfillmentClient } from "../fulfillment-client";
+import type { ProfileClient } from "../profile-client";
+// STORE-CONSOLIDATE-001：店详情页改走统一 hub（和 me.tsx 的 bdash/线上店铺同一页）。
+import { MyStoresHub } from "./my-stores-hub";
+import type { SupplyClient, SupplierCandidate, AgentPassport } from "../supply-client";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
-import { MerchantCreatorRecommendations } from "./merchant-creator-recommendations";
+import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
+// CREATOR-SOCIAL-001：社媒 canonical 链接与平台中文名（和服务端封闭集合对齐）。
+import { socialPlatformLabel, socialProfileUrl } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
+// ACTIVITY-COVER-001：活动封面 thumb URL 走共享 helper。
+import { activityCoverUri } from "../media-thumb-url";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
 import { ProxyBackGlyph, ProxyEmptyState, ProxyLoading } from "../components/proxy-foundation";
@@ -46,7 +55,9 @@ type MerchantPage =
 type Account = { id: string; name: string; status: string; avatarPath?: string | undefined };
 type MemberDirectory = { businessId: string; userId: string; displayName: string; role: string; status: string; joinedAt: string };
 type SpendDaily = { businessId: string; bucketDate: string; orderCount: number; grossMinor: number; newCustomerCount: number; returningCustomerCount: number };
-type ActivityItem = Pick<Activity, "activityId" | "title" | "time" | "people" | "priceLabel" | "venueName" | "joined" | "capacity" | "status" | "realitySceneId">;
+// ACTIVITY-COVER-001：加上 coverMediaAssetId —— 商家列表要能看到自己活动的封面。
+// 之前这个 Pick 里根本没有封面字段，所以商家侧永远画不出图（不是没传，是没读）。
+type ActivityItem = Pick<Activity, "activityId" | "title" | "time" | "people" | "priceLabel" | "venueName" | "joined" | "capacity" | "status" | "realitySceneId" | "coverMediaAssetId" | "coverImageUrl">;
 
 // R27 merchant scene ops (r27-preview): the flagship scene's live state,
 // menu and humans come from the public scene projection; own activities
@@ -128,6 +139,10 @@ export function MerchantMeR21Replacement({
   onOpenVouchers,
   onOpenSwitcher,
   onSignOut,
+  fulfillment,
+  profile,
+  onOpenStoreCreate,
+  onOpenCreatorProfile,
 }: {
   business?: BusinessClient | undefined;
   supply?: SupplyClient | undefined;
@@ -136,6 +151,13 @@ export function MerchantMeR21Replacement({
   onOpenVouchers: () => void;
   onOpenSwitcher: () => void;
   onSignOut: () => void;
+  // CREATOR-HOME-001：列表点头像进帖文主页（OtherProfileSurface）。
+  onOpenCreatorProfile?: ((userId: string, name: string, avatarUri?: string | undefined) => void) | undefined;
+  // STORE-CONSOLIDATE-001：店详情页改走统一 hub，需要 hub 的三个客户端。
+  // me.tsx 里 bdash 那一路就是这么传的，这里照抄。
+  fulfillment?: FulfillmentClient | undefined;
+  profile?: ProfileClient | undefined;
+  onOpenStoreCreate?: (() => void) | undefined;
 }): React.JSX.Element {
   const [page, setPage] = useState<MerchantPage>("root");
   const [accounts, setAccounts] = useState<Account[] | undefined>(undefined);
@@ -146,6 +168,20 @@ export function MerchantMeR21Replacement({
   const [spendTotal, setSpendTotal] = useState<{ totalOrders: number; totalGrossMinor: number }>({ totalOrders: 0, totalGrossMinor: 0 });
   const [creators, setCreators] = useState<SupplierCandidate[]>([]);
   const [selectedCreator, setSelectedCreator] = useState<SupplierCandidate | undefined>(undefined);
+  // CREATOR-PROFILE-001：详情页的护照（头像/简介/能力/档期）。进详情才拉，
+  // 列表页不预拉 —— 20 个人的 passport 全拉一遍又慢又浪费。
+  const [creatorPassport, setCreatorPassport] = useState<AgentPassport | undefined>(undefined);
+  const [creatorPassportFailed, setCreatorPassportFailed] = useState(false);
+  useEffect(() => {
+    if (!selectedCreator || !supply) { setCreatorPassport(undefined); setCreatorPassportFailed(false); return; }
+    let active = true;
+    setCreatorPassport(undefined);
+    setCreatorPassportFailed(false);
+    supply.getAgentPassport(selectedCreator.agentId)
+      .then((pp) => { if (active) setCreatorPassport(pp); })
+      .catch(() => { if (active) setCreatorPassportFailed(true); });
+    return () => { active = false; };
+  }, [selectedCreator, supply]);
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<ActivityItem | undefined>(undefined);
   const [sceneDetail, setSceneDetail] = useState<SceneBrief | undefined>(undefined);
@@ -285,12 +321,60 @@ export function MerchantMeR21Replacement({
           {(creatorView === "MATCH" || creatorView === "CREATORS") && visibleCreators.length === 0 ? (
             <View style={styles.emptyCard}><Text selectable style={styles.emptyTitle}>暂时没有匹配的 Creator</Text><Text selectable style={styles.empty}>工作台仍可使用；待供给数据进入后，候选会显示在这里。</Text></View>
           ) : null}
-          {(creatorView === "MATCH" || creatorView === "CREATORS") ? visibleCreators.map((creator) => (
+          {/* CREATOR-PROFILE-001: tapping avatar goes to homepage (whole row presses). */}
+          {/* CREATOR-HOME-001: avatar goes to posts homepage, not ops detail. */}
+          {(creatorView === "MATCH" || creatorView === "CREATORS") ? visibleCreators.map((creator) => {
+            const avatarUri = resolveCreatorPhoto(creator.photos[0]);
+            return (
             <Pressable
               key={creator.agentId}
-              onPress={() => { setSelectedCreator(creator); setPage("creatorDetail"); }}
-              style={styles.card}
+              accessibilityLabel={`查看${creator.name}的个人主页`}
+              testID={`creator-home-entry-${creator.agentId}`}
+              onPress={() => {
+                // CREATOR-HOME-001:整行点进经营详情；头像有自己独立的 Pressable
+                // （下面）进帖文主页。两个入口，两种去向，不混。
+                setSelectedCreator(creator); setPage("creatorDetail");
+              }}
+              style={styles.creatorRow}
             >
+              {/* CREATOR-AVATAR-001（2026-10-01，用户「creator list 不能只是文本list
+                  要有头像啊」）：这一列以前只有姓名 / 类型 / 语言 / 报价四行纯文字，
+                  photos 只被当成一个数字印在「到店 N 媒体」里 —— 同一份
+                  SupplierCandidate 数据在 merchant-creator-recommendations 的横滑卡
+                  上是画头像的。商家挑人靠的是脸，这里少了它就变成一份通讯录。
+                  没有照片的人显示「待完善照片」，不拿首字母或图标假装有头像。 */}
+              {/* CREATOR-HOME-001:头像独立可点，进帖文主页（个人主页）。
+                  userId 有就精确，没有靠名字回填 —— 两种都有帖子看。
+                  外层整行进的是经营详情，别混。 */}
+              <Pressable
+                accessibilityLabel={`${creator.name}的个人主页头像`}
+                testID={`creator-avatar-entry-${creator.agentId}`}
+                onPress={() => {
+                  if (!onOpenCreatorProfile) return;
+                  onOpenCreatorProfile(
+                    creator.userAccountId || creator.agentId,
+                    creator.name,
+                    avatarUri,
+                  );
+                }}
+              >
+              {avatarUri ? (
+                <Image
+                  cachePolicy="memory-disk"
+                  contentFit="cover"
+                  recyclingKey={`merchant-me-creator:${creator.agentId}`}
+                  source={{ uri: avatarUri }}
+                  style={styles.creatorAvatar}
+                  transition={0}
+                />
+              ) : (
+                <View style={styles.creatorAvatarMissing} testID={`creator-avatar-missing-${creator.agentId}`}>
+                  <ProxyIcon color={color.muted} name="user" size={18} />
+                  <Text selectable style={styles.creatorAvatarMissingText}>待完善照片</Text>
+                </View>
+              )}
+              </Pressable>
+              <View style={styles.flex}>
               <Text selectable style={styles.cardTitle}>{creator.name}</Text>
               <Text selectable style={styles.meta}>
                 {creator.serviceType} · {creator.languages.join(" / ") || "—"} ·{" "}
@@ -299,23 +383,138 @@ export function MerchantMeR21Replacement({
               <Text selectable style={styles.meta}>
                 {creator.referencePrice} {creator.currency} · 到店 {creator.photos.length} 媒体
               </Text>
+              </View>
             </Pressable>
-          )) : null}
+            );
+          }) : null}
         </ScrollView>
       </View>
     );
   }
 
+  // CREATOR-PROFILE-001（2026-10-02，用户「最佳匹配的creator 不能看个人主页
+  // 也看不到关联的社媒账户」）：详情页原来只有计数 + 占位行 —— 没有头像、没有简介、
+  // 没有能力、没有档期，更没有社媒。现在是系统性的个人页：头像/简介/照片墙（passport，
+  // 进详情才拉）、能力（已验证打标）、档期、报价；社媒如实空态（数据模型里没有
+  // 这个字段，不编 handles）。
   if (page === "creatorDetail" && selectedCreator) {
+    const heroPhoto = creatorPassport?.profile.photos[0] ?? selectedCreator.photos[0];
+    const heroUri = resolveCreatorPhoto(heroPhoto);
+    const verifiedCaps = creatorPassport?.capabilities.filter((c) => c.verified) ?? [];
+    const upcoming = (creatorPassport?.availability ?? []).filter((w) => w.endAt >= new Date().toISOString().slice(0, 10)).slice(0, 3);
     return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("creator"), title: selectedCreator.name })}
+          {/* CREATOR-PROFILE-001：这是商家侧的 Creator 个人主页（头像/简介/能力/
+              档期/社媒都在这一页）。列表点进来即到，不再需要第二个"查看主页"入口。 */}
+          {/* CREATOR-PROFILE-001：站内个人主页入口（Proxy 站内这页本身），
+              和下面站外平台入口并列 —— 商家要分清"站内看"和"出站看"。 */}
+          {/* CREATOR-HOME-001: ops page, not posts homepage. */}
+          <Text selectable style={styles.homeEyebrow}>Creator 主页 · 经营</Text>
+          {/* 个人头：头像 + 名字 + 简介。简介空就不画那一行，不拿服务类型凑字数。 */}
+          <View style={styles.creatorHero}>
+            {/* CREATOR-HOME-001：详情大头像也可点进帖文主页（和列表头像同一条）。
+                之前这里是纯展示，点着没反应 —— 用户在详情页想看帖子只能退回列表重进。 */}
+            <Pressable
+              accessibilityLabel={`${selectedCreator.name}的帖文主页头像`}
+              testID={`creator-hero-entry-${selectedCreator.agentId}`}
+              onPress={() => {
+                if (!onOpenCreatorProfile) return;
+                onOpenCreatorProfile(
+                  selectedCreator.userAccountId || selectedCreator.agentId,
+                  selectedCreator.name,
+                  heroUri,
+                );
+              }}
+            >
+            {heroUri ? (
+              <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`creator-hero:${selectedCreator.agentId}`} source={{ uri: heroUri }} style={styles.creatorHeroAvatar} transition={0} />
+            ) : (
+              <View style={styles.creatorHeroAvatarMissing}><Text selectable style={styles.creatorHeroInitial}>{selectedCreator.name.slice(0, 1)}</Text></View>
+            )}
+            </Pressable>
+            <View style={styles.flex}>
+              <Text selectable style={styles.cardTitle}>{selectedCreator.name}</Text>
+              {(creatorPassport?.profile.bio.trim() || "") !== "" ? (
+                <Text selectable style={styles.meta}>{creatorPassport?.profile.bio}</Text>
+              ) : null}
+              <Text selectable style={styles.meta}>
+                {selectedCreator.serviceType} · {(selectedCreator.languages.length ? selectedCreator.languages : creatorPassport?.profile.languages ?? []).join(" / ") || "—"} ·{" "}
+                {selectedCreator.eligibility.eligible ? "✓ 可邀请" : "✗ 不符合资格"}
+              </Text>
+              <Text selectable style={styles.meta}>
+                {selectedCreator.referencePrice} {selectedCreator.currency}
+              </Text>
+            </View>
+          </View>
+          {creatorPassportFailed ? (
+            <Text selectable style={styles.meta}>个人资料没读出来，稍后再试 —— 下面是列表里的基本信息。</Text>
+          ) : null}
+          {/* 能力：已验证的打标，没验证的不冒充。 */}
+          {creatorPassport && creatorPassport.capabilities.length > 0 ? (<>
+            <View style={styles.secHead}><Text selectable style={styles.secTitle}>能力</Text></View>
+            <View style={styles.chipRow}>
+              {creatorPassport.capabilities.map((c) => (
+                <View key={c.capability} style={styles.capChip}>
+                  <Text selectable style={styles.capText}>{c.capability}{c.verified ? " ✓" : ""}</Text>
+                </View>
+              ))}
+            </View>
+          </>) : null}
+          {/* 档期：只显示还没过的，最多 3 条。没有就是没有，不编"随时可约"。 */}
+          {creatorPassport && upcoming.length > 0 ? (<>
+            <View style={styles.secHead}><Text selectable style={styles.secTitle}>可约档期</Text></View>
+            {upcoming.map((w) => (
+              <Text selectable key={w.id} style={styles.meta}>{w.startAt.slice(0, 10)} → {w.endAt.slice(0, 10)} · {w.marketId || "全城"}</Text>
+            ))}
+          </>) : null}
+          {/* CREATOR-SOCIAL-001：社媒区。有就列出来（平台名 + 用户名，可点的
+              跳 canonical 主页），没有就如实空。visibility 是服务端按看的人过滤
+              过的 —— 这里看到的就是该看的，不再二次过滤。 */}
+          {/* CREATOR-SOCIAL-001：社媒区三态 —— 加载中 / 读失败 / 有数据 / 真空。
+              以前失败和空长一个样（都是"尚未关联"），用户分不清"没数据"还是
+              "没读出来"，我也分不清。这次分开，读失败就说读失败。 */}
+          <View style={styles.secHead}><Text selectable style={styles.secTitle}>社媒账户</Text></View>
+          {!creatorPassport && !creatorPassportFailed ? (
+            <Text selectable style={styles.meta}>正在读取社媒信息…</Text>
+          ) : creatorPassportFailed ? (
+            <Text selectable style={styles.meta} testID={`creator-social-failed-${selectedCreator.agentId}`}>社媒信息没读出来，稍后再试。</Text>
+          ) : (creatorPassport?.profile.socials ?? []).length > 0 ? (
+            (creatorPassport?.profile.socials ?? []).map((item) => {
+              const url = socialProfileUrl(item.platform, item.handle);
+              return (
+                <View key={item.platform} style={styles.socialRow}>
+                  <View style={styles.socialMain}>
+                    <Text selectable style={styles.socialText}>{socialPlatformLabel(item.platform)} · {item.handle}</Text>
+                  </View>
+                  {/* 平台个人主页入口：有 canonical 链接就给明确按钮，
+                      没有（如 Zalo 无公开页）就不画按钮，不画假入口。 */}
+                  {/* CREATOR-SOCIAL-001：这里的"主页"指平台上的个人主页（站外的
+                      TikTok/IG…），不是本页（本页就是站内个人主页）。
+                      之前按钮只写"看主页 ›"，和站内页撞名 —— 用户分不清点下去是
+                      跳出去还是留在站内。所以按钮写全：平台名 + 外跳箭头。 */}
+                  {url ? (
+                    <Pressable
+                      accessibilityLabel={`打开${socialPlatformLabel(item.platform)}个人主页（站外）`}
+                      onPress={() => void Linking.openURL(url)}
+                      style={styles.socialGo}
+                      testID={`creator-social-go-${selectedCreator.agentId}-${item.platform}`}
+                    >
+                      <Text selectable style={styles.socialGoText}>{socialPlatformLabel(item.platform)}主页 ↗</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              );
+            })
+          ) : (
+            <Text selectable style={styles.meta} testID={`creator-social-empty-${selectedCreator.agentId}`}>尚未关联社媒账户</Text>
+          )}
           {summary({
             meta: selectedCreator.eligibility.eligible ? "可邀请" : "暂不可邀请",
             stats: [
               [selectedCreator.photos.length.toString(), "到店"],
-              [selectedCreator.languages.length.toString(), "带客"],
+              [verifiedCaps.length > 0 ? verifiedCaps.length.toString() : "—", "已验证能力"],
               [selectedCreator.serviceType, "服务"],
               [selectedCreator.referencePrice.toString(), "报价"],
             ],
@@ -368,17 +567,29 @@ export function MerchantMeR21Replacement({
           {activityItems.length === 0 ? (
             <ProxyEmptyState title="暂无开放活动" sub="创建的活动会在这里进入报名、执行与复盘流程。" />
           ) : null}
-          {activityItems.map((a) => (
+          {activityItems.map((a) => {
+            // 抽成局部量：两次调用拿不到类型收窄，uri 会退化成 string|undefined。
+            const coverUri = activityCoverUri(a, localApiBaseUrl);
+            return (
             <Pressable
               key={a.activityId}
               onPress={() => { setSelectedActivity(a); setPage("activityDetail"); }}
               style={styles.activityCard}
             >
-              <View style={styles.activityTop}><View style={styles.rowCopy}><Text selectable style={styles.objectTitle}>{a.title}</Text><Text selectable style={styles.meta}>{a.time} · {a.venueName}</Text></View><IconBox icon="spark" /></View>
+              <View style={styles.activityTop}>
+                {/* ACTIVITY-COVER-001：商家看自己发布的活动时要有封面。
+                    没有就显示占位，不拿场景图冒充 —— 那是另一个场景的图。 */}
+                {coverUri ? (
+                  <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-activity:${a.activityId}`} source={{ uri: coverUri }} style={styles.activityCover} transition={0} />
+                ) : (
+                  <View style={styles.activityCoverEmpty}><ProxyIcon color={color.muted} name="camera" size={18} /></View>
+                )}
+                <View style={styles.rowCopy}><Text selectable style={styles.objectTitle}>{a.title}</Text><Text selectable style={styles.meta}>{a.time} · {a.venueName}</Text></View><IconBox icon="spark" /></View>
               {a.capacity ? <View style={styles.progress}><View style={[styles.progressFill, { width: `${Math.min(100, (a.joined / a.capacity) * 100)}%` }]} /></View> : null}
               <View style={styles.chips}><View style={styles.chip}><Text selectable style={styles.chipText}>报名 {a.joined}{a.capacity ? `/${a.capacity}` : ""}</Text></View><View style={styles.chip}><Text selectable style={styles.chipText}>{a.priceLabel}</Text></View><View style={styles.chip}><Text selectable style={styles.chipText}>{a.status ?? "已发布"}</Text></View></View>
             </Pressable>
-          ))}
+            );
+          })}
         </ScrollView>
       </View>
     );
@@ -418,9 +629,35 @@ export function MerchantMeR21Replacement({
         </View>
       );
     }
+    // STORE-CONSOLIDATE-001（2026-10-02，用户选收编）：BUSINESS 上下文的"线上店铺"
+    // 页改走统一 hub —— 和 me.tsx 里 bdash / merchantstorefront 是同一页。
+    // 三个客户端齐了才进 hub，缺一个就给 honest 空态（不能拿半个 hub 糊弄）。
+    if (!fulfillment || !profile) {
+      return (
+        <View style={styles.root}>
+          {detailHead({ onBack: () => setPage("root"), title: "线上店铺" })}
+          <View style={styles.card}><Text selectable style={styles.empty}>店铺服务没接上，稍后再试。</Text></View>
+        </View>
+      );
+    }
+    // STORE-HUB-SCROLL-001（2026-10-02，用户「还是显示不完整 不能下滑动」）：
+    // 这一支原来是这个文件里**唯一**没套 ScrollView 的页面 —— 其余每一页都是
+    // `<View style={root}><ScrollView contentContainerStyle={styles.content}>`。
+    // hub 自己是纯 View（列表/详情都不带滚动容器，滚动归宿主），所以在这里
+    // 直接渲染 = 整页没有滚动容器：内容超过一屏就被屏幕底边裁掉，而且底部
+    // 735–818pt 那条悬浮 Tab Bar 还压在最后一段内容上，怎么划都到不了。
     return (
       <View style={styles.root}>
-        <MerchantStorefrontSurface client={business} header={detailHead({ onBack: () => setPage("root"), title: "线上店铺" })} viewerAccountId={viewerAccountId} showcaseActivities={activityItems.map((a) => ({ id: a.activityId, title: a.title }))} onOpenVouchers={onOpenVouchers} onStartStoreSetup={() => setPage("ops")} />
+        <ScrollView contentContainerStyle={styles.content}>
+          <MyStoresHub
+            business={business}
+            fulfillment={fulfillment}
+            profile={profile}
+            onOpenStoreCreate={onOpenStoreCreate ?? (() => setPage("ops"))}
+            onOpenVouchers={onOpenVouchers}
+            onBack={() => setPage("root")}
+          />
+        </ScrollView>
       </View>
     );
   }
@@ -640,13 +877,14 @@ export function MerchantMeR21Replacement({
         ) : null}
 
         <Pressable onPress={() => setPage("store")} style={styles.identity}>
-          {merchantAvatarUri(accounts?.[0]?.avatarPath, localApiBaseUrl) ? (
-            <Image source={{ uri: merchantAvatarUri(accounts?.[0]?.avatarPath, localApiBaseUrl)! }} style={styles.bizAvatar} />
-          ) : (
-            <Gradient from="#45208A" to="#8033F0" style={styles.bizAvatar}>
-              <Text selectable style={styles.bizAvatarText}>B</Text>
-            </Gradient>
-          )}
+          {/* MERCHANT-AVATAR-001（2026-10-02，用户 P0「企业店铺的头像用了用户侧的头像」）：
+              这里以前直接画 `accounts[0].avatarPath` —— 而服务端是把店主**个人**头像
+              JOIN 进来的，于是店的身份卡上是店主的脸。现在服务端已不再填这个字段，
+              这里也不再信任它：店没有上传 logo/照片之前，老实显示店名首字。
+              店的视觉只能来自店自己的资产，绝不能拿用户的脸冒充。 */}
+          <Gradient from="#45208A" to="#8033F0" style={styles.bizAvatar}>
+            <Text selectable style={styles.bizAvatarText}>{(accounts?.[0]?.name.trim().slice(0, 1) || "店").toUpperCase()}</Text>
+          </Gradient>
           <View style={styles.rowCopy}>
             <Text selectable style={styles.cardTitle}>{accounts?.[0]?.name ?? "还没有店铺"}</Text>
             <Text selectable style={styles.meta}>{accounts?.[0] ? `${accounts?.[0]?.status ?? ""} · ${members.length} 经营人员` : "创建后解锁相册 · 信息 · 成员 · 数据"}</Text>
@@ -759,7 +997,34 @@ const styles = StyleSheet.create({
   sectionHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginBottom: 6, marginTop: 14 },
   sectionTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
   sectionHint: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15 },
+  // CREATOR-PROFILE-001：详情个人头 + 能力 chips。
+  creatorHero: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 12, marginVertical: 4, padding: 12 },
+  creatorHeroAvatar: { backgroundColor: color.surface, borderRadius: 999, height: 58, width: 58 },
+  creatorHeroAvatarMissing: { alignItems: "center", backgroundColor: color.surface, borderRadius: 999, height: 58, justifyContent: "center", width: 58 },
+  creatorHeroInitial: { color: color.muted, fontSize: 20, fontWeight: "900" },
+  secHead: { marginTop: 12 },
+  secTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
+  capChip: { backgroundColor: "#F1FFD0", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
+  capText: { color: "#4D6200", fontSize: 11, fontWeight: "800" },
+  // CREATOR-PROFILE-001：个人主页眉题。
+  homeEyebrow: { color: color.muted, fontSize: 11, fontWeight: "800", letterSpacing: 1, marginTop: 4 },
+  // CREATOR-SOCIAL-001：社媒行（可点的有 ›）。
+  socialRow: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingVertical: 9 },
+  socialMain: { flex: 1, minWidth: 0 },
+  socialText: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  // CREATOR-SOCIAL-001：平台主页入口按钮。
+  socialGo: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  socialGoText: { color: color.white, fontSize: 11, fontWeight: "800" },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, padding: 12, marginVertical: 4, ...shadows.card, gap: 2 },
+  // CREATOR-AVATAR-001：头像 58px 方图 + 右侧文字，横排 —— 列表行看着像「一批人」
+  // 而不是「一串字」。与 merchant-creator-recommendations 的横滑卡共用同一套解析。
+  creatorRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 12, marginVertical: 4, padding: 12, ...shadows.card },
+  // CREATOR-AVATAR-001：头像是圆圈（999），不是方块R角。
+  creatorAvatar: { backgroundColor: color.surface, borderRadius: 999, height: 64, width: 64 },
+  creatorAvatarMissing: { alignItems: "center", backgroundColor: color.surface, borderRadius: 999, gap: 2, height: 64, justifyContent: "center", width: 64 },
+  creatorAvatarMissingText: { color: color.muted, fontSize: 11, fontWeight: "800" },
+  flex: { flex: 1, minWidth: 0 },
   sceneHero: { borderRadius: 14, height: 168, marginTop: 4, width: "100%" },
   cardTitle: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
   cardTitleWhite: { color: color.white, fontSize: 15, fontWeight: "800", lineHeight: 21 },
@@ -781,6 +1046,9 @@ const styles = StyleSheet.create({
   rowList: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginTop: 10, paddingHorizontal: 14 },
   row: { alignItems: "center", borderTopColor: color.line, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 10, minHeight: 66 },
   activityCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginTop: 10, padding: 14 },
+  // ACTIVITY-COVER-001：64px 封面缩略图，和文字并排。
+  activityCover: { backgroundColor: color.surface, borderRadius: 12, height: 64, width: 64 },
+  activityCoverEmpty: { alignItems: "center", backgroundColor: color.surface, borderRadius: 12, height: 64, justifyContent: "center", width: 64 },
   activityTop: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
   progress: { backgroundColor: "#F2EDF5", borderColor: color.line, borderRadius: 99, borderWidth: 1, height: 9, marginTop: 10, overflow: "hidden" },
   progressFill: { backgroundColor: color.magenta, borderRadius: 99, height: 9 },

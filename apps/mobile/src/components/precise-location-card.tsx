@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { color } from "../theme";
+import { getLanguage, translate, type MessageKey } from "../i18n";
 import {
   type LocationConsent,
   type LocationConsentClient,
@@ -26,10 +27,37 @@ export type PreciseLocationCardProps = {
   skipInitialFetch?: boolean;
 };
 
+// I18N-SAFETY-002：这三句原来写死**越南语**，而同一屏下方的 fuzzy-location-card
+// 写死中文。于是「位置与隐私」这一屏在中越之间混排 —— 一个中文用户在中文
+// 界面里会读到三句越南语的错误提示。
+//
+// 拆成「原因」而不是「句子」是为了渲染时再翻译（HOME-I18N-001 的形状）：
+// 错误还挂在屏幕上的时候切语言，那句话必须跟着换。存串的话它停在旧语言。
+//
+// 服务端 message（raw）**不**翻译：那是服务端返回的原文，客户端不该编造另一
+// 种说法。客户端只对自己这三条负责。
+type ErrorCause =
+  | { kind: "key"; key: MessageKey }
+  | { kind: "raw"; raw: string };
+
+function errorCauseFor(e: unknown): ErrorCause {
+  if (e instanceof LocationConsentError) {
+    if (e.httpStatus === 401) return { kind: "key", key: "consentSessionExpired" };
+    if (e.httpStatus === 400) return { kind: "key", key: "consentRejected" };
+    return { kind: "raw", raw: e.message };
+  }
+  if (e instanceof Error) return { kind: "raw", raw: e.message };
+  return { kind: "key", key: "consentGenericError" };
+}
+
+function errorText(cause: ErrorCause): string {
+  return cause.kind === "raw" ? cause.raw : translate(getLanguage(), cause.key);
+}
+
 export function PreciseLocationCard({ client, skipInitialFetch }: PreciseLocationCardProps): React.JSX.Element {
   const [consent, setConsent] = useState<LocationConsent | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorCause | null>(null);
 
   useEffect(() => {
     if (skipInitialFetch) return;
@@ -39,7 +67,7 @@ export function PreciseLocationCard({ client, skipInitialFetch }: PreciseLocatio
         const next = await client.getStatus();
         if (!cancelled) setConsent(next);
       } catch (e) {
-        if (!cancelled) setError(messageFor(e));
+        if (!cancelled) setError(errorCauseFor(e));
       }
     })();
     return () => {
@@ -54,7 +82,7 @@ export function PreciseLocationCard({ client, skipInitialFetch }: PreciseLocatio
       const next = await client.grant(durationSeconds);
       setConsent(next);
     } catch (e) {
-      setError(messageFor(e));
+      setError(errorCauseFor(e));
     } finally {
       setBusy(false);
     }
@@ -71,7 +99,7 @@ export function PreciseLocationCard({ client, skipInitialFetch }: PreciseLocatio
       const next = await client.getStatus();
       setConsent(next);
     } catch (e) {
-      setError(messageFor(e));
+      setError(errorCauseFor(e));
     } finally {
       setBusy(false);
     }
@@ -84,20 +112,10 @@ export function PreciseLocationCard({ client, skipInitialFetch }: PreciseLocatio
         busy={busy}
         onGrant={handleGrant}
         onRevoke={handleRevoke}
-        {...(error ? { errorMessage: error } : {})}
+        {...(error ? { errorMessage: errorText(error) } : {})}
       />
     </View>
   );
-}
-
-function messageFor(e: unknown): string {
-  if (e instanceof LocationConsentError) {
-    if (e.httpStatus === 401) return "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
-    if (e.httpStatus === 400) return "Yêu cầu không hợp lệ. Vui lòng thử lại.";
-    return e.message;
-  }
-  if (e instanceof Error) return e.message;
-  return "Đã xảy ra lỗi. Vui lòng thử lại.";
 }
 
 const styles = StyleSheet.create({

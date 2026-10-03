@@ -38,6 +38,7 @@ export type ProxyIconName =
   | "star"
   | "coin"
   | "cup"
+  | "flame"
   | "ticket"
   | "wallet"
   | "settings"
@@ -113,7 +114,43 @@ export type ProxyIconName =
   | "allGrid"
   | "peoplePair"
   | "clockDot"
-  | "hexGroup";
+  | "hexGroup"
+  // SETTINGS-HUB-ROW-ICONS-001（2026-10-01）：设置入口页的行图标来自原型
+  // deepseek_html_20261001_726714.html 的 .item-icon（24 栅格 / 描边 1.5），
+  // 路径数据原样移植，描边走 common（和同文件其余 24 栅格字形同一来源）。
+  // 这一行此前是裸 label + ›，用户连着两轮报「还是没有logo」。
+  //
+  // SETTINGS-HUB-ALL-NINE-001（2026-10-01）：原型那一屏是 **9** 行，不是 4 行。
+  // 上一轮只搬了 4 个字形（lock / shield / pin / globe），另外 5 个当时连同整行
+  // 一起没做，于是「原型有 logo」对不上。下面 5 个是同一批 .item-icon 的路径
+  // 原样移植。
+  | "lock"
+  | "shield"
+  | "globe"
+  | "heartSolid"
+  | "blockCircle"
+  | "fileText"
+  | "trash"
+  | "moon"
+  // MARKET-TAB-PENTAGON-001（2026-10-01，用户「把市场的logo换成这个」）：市场 tab 的
+  // 字形。**不是 diamond** —— diamond 是四边等长（11.31）的正方形转 45°，而且被
+  // 5 处复用（tab bar 市场 / 我的订单 / feed 分类兜底 / 城市选项 / 草稿卡片，见上面
+  // gem 那段），改它会把那 5 处一起换掉。这个是用户给的五边形，坐标原样搬：
+  // <polygon points="12 3 21 15 18 21 6 21 3 15">
+  | "pentagon"
+  // NOTIF-BELL-001（2026-10-01，用户「新增了铃铛提醒」）：首页顶栏的铃铛。
+  // 原型（docs/design/references/Proxy_Home_Notifications_20261001_7b9953.html）的
+  // 两条子路径原样搬，坐标一个不改：铃身从 (18,8) 起、经 A6 6 画到左下，
+  // 收在 h18s-3-2-3-9；下摆那条是 M13.73 21a2 2 0 0 1-3.46 0。
+  //
+  // ⚠️ 这里**故意不抄 d="…" 的原文，也不抄那条 case 标签**。门禁是按文本 grep 的、
+  //    不剥注释，注释里带着同一串会让对应的钉被注释喂绿（踩过两次：
+  //    inject-notif-bell-pin.py 替换第一处时命中的都是注释，钉照样绿）。
+  //    要照抄原文就去看 switch 里那条 bell 分支本身，别往注释里搬。
+  //
+  // 原型这条 svg 的 stroke-width 是 **1.8**（不是 common 的 2.2）—— 跟 canvas32 /
+  // common32 同一个理由：按原型的线宽走，不为了凑现有网格把描边加粗。
+  | "bell";
 
 const symbolMap: Partial<Record<string, ProxyIconName>> = {
   "home": "home",
@@ -180,6 +217,9 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
   const canvas32 = (children: React.ReactNode): React.JSX.Element => (
     <Svg height={size} viewBox="0 0 32 32" width={size}>{children}</Svg>
   );
+  // NOTIF-BELL-001：原型顶栏铃铛的描边是 1.8（原型 .header-icon svg 上写死的
+  // stroke-width="1.8"）。跟 common32 一样，为单个字形保留它自己的线宽。
+  const commonBell = { fill: "none", stroke: color, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, strokeWidth: 1.8 };
   // BACK-GLYPH-001：返回箭头专用的**紧 box**。和 chevronLeft 是同一条路径，
   // 区别只在取景 —— chevronLeft 的 24 格 box 里箭头只占 x 9→15，两侧各 37.5% 是空白。
   // 返回控件是贴着表头左边缘排的，用带空白的 box 会整体往右缩 ~7pt（38 个表头的左对齐
@@ -214,6 +254,16 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
       return canvas(<><Path {...common} d="M4 10.5 12 4l8 6.5"/><Path {...common} d="M6.5 10v9h11v-9"/></>);
     case "diamond":
       return canvas(<Path {...common} d="M12 4 20 12 12 20 4 12z"/>);
+    // MARKET-TAB-PENTAGON-001：用户给的 <polygon points="12 3 21 15 18 21 6 21 3 15">
+    // 顶点坐标一个不改，按本文件 diamond 的写法搬成闭合 Path（M → 隐式 L → z）。
+    // 描边跟 common 走（fill:none + strokeWidth 2.2），跟其余 4 个 tab 字形同一套线宽，
+    // 不写成实心 —— 底栏五颗里只有它实心会像另一个控件。
+    case "pentagon":
+      return canvas(<Path {...common} d="M12 3 21 15 18 21 6 21 3 15z"/>);
+    // NOTIF-BELL-001：原型顶栏铃铛（两条子路径照抄，铃身 + 下摆的锤）。
+    // 描边用 commonBell（1.8，跟原型一致），fill 仍是 none —— 是描边铃铛不是实心。
+    case "bell":
+      return canvas(<><Path {...commonBell} d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><Path {...commonBell} d="M13.73 21a2 2 0 0 1-3.46 0"/></>);
     case "target":
       return canvas(<><Circle {...common} cx="12" cy="12" r="7"/><Circle {...common} cx="12" cy="12" r="3"/></>);
     // PROFILE-TAB-LOGO-001（2026-09-25，原型 deepseek_html_20260925_4e54a0.html）：
@@ -266,6 +316,10 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
       return canvas(<Circle {...common} cx="12" cy="12" r="7"/>);
     case "cup":
       return canvas(<><Path {...common} d="M6 9h10v5a4 4 0 0 1-4 4h-2a4 4 0 0 1-4-4z"/><Path {...common} d="M16 10h2a2.5 2.5 0 0 1 0 5h-2"/><Path {...common} d="M8 5c0 1-1 1.4-1 2M12 5c0 1-1 1.4-1 2M16 5c0 1-1 1.4-1 2"/></>);
+    // MENU-HOT-001：火焰图标，路径照抄原型 deepseek_html_20261003_59d0d3
+    // 的 hot-badge-v2（viewBox 0 0 24 24 同源，不用重描）。
+    case "flame":
+      return canvas(<Path {...common} d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>);
     case "profileRing":
       return canvas(<><Circle {...common} cx="12" cy="12" r="8"/><Circle {...common} cx="12" cy="9" r="2.6"/><Path {...common} d="M7.7 17c1-2.8 2.9-4.2 4.3-4.2s3.3 1.4 4.3 4.2"/></>);
     case "arrowUpRight":
@@ -323,6 +377,29 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
       return canvas(<><Circle {...common} cx="12" cy="12" r="7"/><Path {...common} d="M9.5 9.5h5M9.5 14.5h5M12 7.5v9"/></>);
     case "settings":
       return canvas(<><Circle {...common} cx="12" cy="12" r="3"/><Path {...common} d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4"/></>);
+    // SETTINGS-HUB-ROW-ICONS-001：原型 .item-icon 的三个字形，路径原样移植
+    // （lock = 矩形锁体 + 弧形锁环；shield = 盾；globe = 经纬球）。
+    case "lock":
+      return canvas(<><Rect {...common} height="11" rx="2" width="18" x="3" y="11"/><Path {...common} d="M7 11V7a5 5 0 0 1 10 0v4"/></>);
+    case "shield":
+      return canvas(<Path {...common} d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>);
+    case "globe":
+      return canvas(<><Circle {...common} cx="12" cy="12" r="10"/><Path {...common} d="M2 12h20"/><Path {...common} d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></>);
+    // SETTINGS-HUB-ALL-NINE-001：以下五个来自原型 Proxy_Settings_20261001_726714.html
+    // 同一批 .item-icon。viewBox 与描边和上面几个同口径（24 栅格 / 描边 1.5，
+    // 渲染在 22px 时约 2.0）。路径数据原样移植，不改坐标去凑现有网格 ——
+    // 改了形状就不是原型那个形状了。
+    case "heartSolid":
+      // 原型这条是 fill（实心），不是 stroke —— 描边心形跟「偏好」语义不符。
+      return canvas(<Path fill={color} stroke="none" d="M12 21s-9-5.6-9-11a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 5.4-9 11-9 11z"/>);
+    case "blockCircle":
+      return canvas(<><Circle {...common} cx="12" cy="12" r="9"/><Path {...common} d="m5.6 5.6 12.8 12.8"/></>);
+    case "fileText":
+      return canvas(<><Path {...common} d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><Path {...common} d="M14 2v6h6"/><Path {...common} d="M8 13h8M8 17h8"/></>);
+    case "trash":
+      return canvas(<><Path {...common} d="M3 6h18"/><Path {...common} d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><Path {...common} d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/></>);
+    case "moon":
+      return canvas(<Path {...common} d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>);
     case "ticket":
       return canvas(<><Path {...common} d="M5 8h14v3a2 2 0 0 0 0 4v3H5v-3a2 2 0 0 0 0-4z"/><Path {...common} d="M12 8v10"/></>);
     case "storeLines":

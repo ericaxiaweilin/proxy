@@ -578,7 +578,7 @@ func (s *Service) Supports(t string) bool {
 		"CreateBusinessStore", "ListBusinessStores", "GetBusinessStore", "SetStoreCategory", "LinkStoreToRealityScene", "SpendSummary",
 		"AddStorePhoto", "ListStorePhotos", "DeleteStorePhoto",
 		"UpsertStoreLines", "GetStoreLines",
-		"CreateStoreProduct", "UpdateStoreProduct", "ListStoreProducts", "SetProductAvailability",
+		"CreateStoreProduct", "UpdateStoreProduct", "ListStoreProducts", "SetProductAvailability", "SetProductHot",
 		"ListMemberDirectory", "UpsertMemberDirectory",
 		"ListSpendDaily", "UpsertSpendDaily", "GetMerchantOperatingHome", "RecordAggregatedDemandSignal", "UpsertSceneSupplySnapshot":
 		return true
@@ -628,6 +628,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listProducts(ctx, e)
 	case "SetProductAvailability":
 		return s.setProductAvailability(ctx, e)
+	case "SetProductHot":
+		return s.setProductHot(ctx, e)
 	case "ListMemberDirectory":
 		return s.listMemberDirectory(ctx, e)
 	case "UpsertMemberDirectory":

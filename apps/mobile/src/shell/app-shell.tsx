@@ -36,6 +36,8 @@ import { expoLocationApi } from "../device-location-native";
 import { type ConversationClient } from "../conversation-client";
 import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
+// I18N-SETTINGS-001：底栏 / 页头 chrome 的文案从这里取。见 rootTabs() 的注释。
+import { useI18n, type MessageKey } from "../i18n";
 import { type DemandClient } from "../demand-client";
 import { type VoucherClient } from "../voucher-client";
 import { type EngagementClient } from "../engagement-client";
@@ -51,7 +53,7 @@ import { type MediaClient } from "../media-client";
 import { type SocialSpaceClient } from "../socialspace-client";
 import { type FulfillmentClient } from "../fulfillment-client";
 import { type PaymentClient } from "../payment-client";
-import { type NotificationClient } from "../notification-client";
+import { type InboxItem, type NotificationClient } from "../notification-client";
 import { type BusinessClient } from "../business-client";
 import { type ProfileClient } from "../profile-client";
 import { type SessionClient } from "../session-client";import { type AIAccountClient, type PlatformAIAccount } from "../ai-account-client";
@@ -81,7 +83,7 @@ import { HotScenesSurface } from "../surfaces/hot-scenes";
 // ACTIVITY-REF-001：动态里的活动引用卡片点开落到这里（带 initialActivityId）。
 import { ActivityDetailSurface } from "../surfaces/activity-detail";
 import { VoucherSurface } from "../surfaces/voucher";
-import { color, shadows } from "../theme";
+import { color, foundation, shadows } from "../theme";
 import { type ActiveContext } from "../uiplan/types";
 import { type MarketTab } from "../market-fixtures";
 import type { SceneToolId } from "@proxy/contracts";
@@ -89,6 +91,9 @@ import { SCENE_TOOLS } from "@proxy/contracts";
 import { selectShellChromeVisible } from "./app-shell-selectors";
 import { selectMotionProfile } from "./app-shell-selectors";
 import { ProxyBackGlyph } from "../components/proxy-foundation";
+// NOTIF-BELL-001：角标文案 / 未读计数是纯函数（放 .ts 才能被 vitest import）。
+import { badgeText, unreadCount } from "../notification-bell";
+import { NotificationCenterSurface } from "../surfaces/notification-center";
 
 // P0 原型的品牌图标，直接使用原始资源，不做裁剪、重绘或视觉加工。
 const OTTER_LOGO = require("../../assets/otter-logo.png");
@@ -115,13 +120,24 @@ const ROOT_TO_FIRST_PAGE: Record<RootTab, PageId> = {
   MESSAGES: "MSG_FRIENDS", ME: "ME"
 };
 
-function rootTabs(): ReadonlyArray<{ id: RootTab; icon: ProxyIconName; label: string; badge?: string }> {
+// I18N-SETTINGS-001（2026-10-01）：底栏标签原来在这里写死中文 —— 换语言之后
+// **每个 tab 上都还是中文**，用户第一眼看到的五个字永远不跟着走。改成按当前
+// 语言取字典。
+//
+// 形状保持不变（id / icon / badge 全是常量），只有 label 从常量变成 t() 的结果。
+// 注意这是**渲染时**取：t 必须在组件里调（RootNav 里 useI18n），
+// 不能在模块顶层求值 —— 顶层求值发生在首次 import 时，那时还没有语言。
+function rootTabs(t: (key: MessageKey) => string): ReadonlyArray<{ id: RootTab; icon: ProxyIconName; label: string; badge?: string }> {
   return [
-    { id: "HOME", icon: "home", label: "首页" },
-    { id: "MARKET", icon: "diamond", label: "市场" },
-    { id: "FEED", icon: "target", label: "动态" },
-    { id: "MESSAGES", icon: "chat", label: "消息", badge: "9+" },
-    { id: "ME", icon: "meRing", label: "我的" }
+    { id: "HOME", icon: "home", label: t("tabHome") },
+    // MARKET-TAB-PENTAGON-001（2026-10-01，用户「把市场的logo换成这个」）：市场这一格
+    // 的 logo 从通用菱形 diamond 换成用户给的五边形 pentagon。**只换这一格** ——
+    // diamond 还被「我的订单 / feed 分类兜底 / 城市选项 / 草稿卡片」复用着（见
+    // proxy-icon.tsx 里 gem 那段注释），改 diamond 的字形会波及那 4 处。
+    { id: "MARKET", icon: "pentagon", label: t("tabMarket") },
+    { id: "FEED", icon: "target", label: t("tabFeed") },
+    { id: "MESSAGES", icon: "chat", label: t("tabMessages"), badge: "9+" },
+    { id: "ME", icon: "meRing", label: t("tabMe") }
   ];
 }
 
@@ -191,12 +207,26 @@ export function AppShell({
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
   const compactWidth = width < 375;
+  // I18N-SETTINGS-001：访客页与身份切换面板的文案。必须挂在组件顶层 ——
+  // 放条件里就是 hooks-not-in-conditional 门禁要抓的东西。
+  const { t } = useI18n();
   const [tab, setTab] = useState<RootTab>("HOME");
   // LEGAL-BANNER-001: 法律 kill 状态。开机拉一次，每次回前台刷新一次。
   // 拉失败静默（不知道≠没事，但拦界面更糟），下次回前台再试；用户手动关掉
   // 只管当次会话（组件自己在无 kill 时返回 null）。
   const [legalStatusState, setLegalStatusState] = useState<LegalStatus | null>(null);
   const [legalDismissed, setLegalDismissed] = useState(false);
+  // NOTIF-BELL-001（2026-10-01，用户：「新增了铃铛提醒」）：首页顶栏的铃铛 + 通知中心。
+  //
+  // 这里补的是一跳**断了的接线**，不是新开一条通道：`notification` 这个 prop 在
+  // native-app.tsx 里早就实例化好传下来了（`new NotificationClient({...})`），
+  // AppShell 却只把它写进类型（下面 `notification: NotificationClient`）、
+  // 从来没读过一次。服务端那半边也齐：`internal/notification` 的
+  // ListInbox / MarkInboxRead / SendInboxNotification 都在，现网
+  // `notification.inbox_items` 有 845 行真数据（OfferCreated 698 / TaskPublished 60 /
+  // SlotOfferCreated 43 / OfferAccepted 42 / OrderCreated 2）。缺的只有用户能看见的那一头。
+  const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
+  const [inboxItems, setInboxItems] = useState<ReadonlyArray<InboxItem>>([]);
   useEffect(() => {
     let cancelled = false;
     const refresh = (): void => {
@@ -206,6 +236,23 @@ export function AppShell({
     const sub = AppState.addEventListener("change", (next) => { if (next === "active") void refresh(); });
     return () => { cancelled = true; sub.remove(); };
   }, [legalStatus]);
+  // NOTIF-BELL-001：拉 inbox 算角标。三个时机都拉：进首页（铃铛只在首页出现）、
+  // 通知中心关闭（用户可能在里面标了已读，角标必须跟着降）、以及 notification 换实例。
+  //
+  // 拉失败**保持上一次的角标**，不清零 —— 清零等于对用户说「你没有未读」，
+  // 而事实是「不知道」。宁可显示一个旧数字，也不显示一个假的 0。
+  useEffect(() => {
+    if (tab !== "HOME") return;
+    let cancelled = false;
+    void notification.listInbox()
+      .then((next) => {
+        if (!cancelled) setInboxItems(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [notification, notificationCenterOpen, tab]);
   const [context, setContext] = useState<ActiveContext>("REQUESTER");
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget>();
   const [feedChatAuthor, setFeedChatAuthor] = useState<string>();
@@ -668,7 +715,15 @@ export function AppShell({
             （"市场"/"动态"/"消息"/"我的"），品牌 logo+字标再叠一遍是纯重复——
             5 个 tab 里有 4 个顶部堆两层标题。品牌头只在首页留（首页没有自己的
             标题行，需要它标识"这是 Proxy"）。*/}
-        {isNavVisible && tab === "HOME" ? <Header compact={compactWidth} /> : null}
+        {/* NOTIF-BELL-001: 角标数的是 inboxItems 里的真未读数（0 条 ⇒ badgeText 回
+            undefined ⇒ 不画角标），不是原型那个写死的 "9+"。 */}
+        {isNavVisible && tab === "HOME" ? (
+          <Header
+            badge={badgeText(unreadCount(inboxItems))}
+            compact={compactWidth}
+            onOpenNotifications={() => setNotificationCenterOpen(true)}
+          />
+        ) : null}
         {/* 首页的本地范围说明属于 root Chrome 且只在首页出现 —— 消息页不再重复
             （MSG-LOCATION-DUPE-001：入口只在 Home 留一个）；“我的”根页由 Me Surface
             自己渲染，避免泄漏到其详情页。 */}
@@ -810,6 +865,9 @@ export function AppShell({
             <BusinessHome
               onOpenMarket={() => openMarket({ tab: "OPPORTUNITY" })}
               onOpenMe={() => setTab("ME")}
+              // CREATOR-HOME-001：横滑卡点人脸进 Proxy 公开主页（平台现成的
+              // OtherProfileSurface，feed 点头像走的同一条），不是弹框。
+              onOpenCreatorProfile={(userId, name, avatarUri) => setOpenHumanProfile({ userId, name, ...(avatarUri ? { avatarUri } : {}), posts: [], mediaByPost: {} })}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
               bottomNavVisible={isNavVisible}
               business={business}
@@ -1026,9 +1084,9 @@ export function AppShell({
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>
-            <Text selectable style={styles.guestMeTitle}>需要登录</Text>
-            <Text selectable style={styles.guestMeSub}>访客可浏览首页/市场/动态，个人资料、关系与订单需登录后查看</Text>
-            <Pressable onPress={onSignOut} style={styles.guestMeCTA}><Text selectable style={styles.guestMeCTAText}>去登录 / 注册</Text></Pressable>
+            <Text selectable style={styles.guestMeTitle}>{t("guestMeTitle")}</Text>
+            <Text selectable style={styles.guestMeSub}>{t("guestMeSub")}</Text>
+            <Pressable onPress={onSignOut} style={styles.guestMeCTA}><Text selectable style={styles.guestMeCTAText}>{t("guestMeCta")}</Text></Pressable>
           </View>
         ) : voucherOpen ? (
             <VoucherSurface client={vouchers} context={context} onBack={() => setVoucherOpen(false)} />
@@ -1064,6 +1122,8 @@ export function AppShell({
               onOpenFeed={() => selectTab("FEED")}
               onOpenMarket={() => selectTab("MARKET")}
               onOpenVouchers={() => setVoucherOpen(true)}
+              // CREATOR-HOME-001：经营列表点头像进帖文主页（和 feed 横滑卡同一条）。
+              onOpenCreatorProfile={(userId, name, avatarUri) => setOpenHumanProfile({ userId, name, ...(avatarUri ? { avatarUri } : {}), posts: [], mediaByPost: {} })}
               onOpenRealitySceneMap={() => { setRealitySceneSelection(undefined); setRealitySceneOpen(true); }}
               onExperienceAction={executeExperienceAction}
               onOpenConversation={(author, peerUserId) => {
@@ -1088,8 +1148,8 @@ export function AppShell({
           onSelect={setContext}
           open={switcherOpen}
           options={[
-            { id: "REQUESTER", icon: "meRing", title: "用户", desc: "找服务、看订单、参加活动，也可以开放自己的服务能力" },
-            { id: "BUSINESS", icon: "storeLines", title: "商家", desc: "经营店铺、找服务、发布订单与活动" }
+            { id: "REQUESTER", icon: "meRing", title: t("ctxRequesterTitle"), desc: t("ctxRequesterDesc") },
+            { id: "BUSINESS", icon: "storeLines", title: t("ctxBusinessTitle"), desc: t("ctxBusinessDesc") }
           ]}
         />
         <LocationPickerSheet
@@ -1108,6 +1168,21 @@ export function AppShell({
           }}
           open={locationSheetOpen}
         />
+        {/* NOTIF-BELL-001: 通知中心。默认 presentation="modal" —— 首页不在任何 Modal
+            里，直接包 Modal 是安全的（跟 LocationPickerSheet 同一层）。 */}
+        {/* NOTIF-DEEPLINK-ROUTE-001：通知里那条深链**有对应页面**时才跳。
+            归属在服务端判过了（resolveDeepLink），这里只负责落页：
+            进「我的」页，再开那一条子页 —— 和首页 KYC 那个入口同一条路径。 */}
+        <NotificationCenterSurface
+          client={notification}
+          onClose={() => setNotificationCenterOpen(false)}
+          onNavigate={(route) => {
+            setNotificationCenterOpen(false);
+            setTab("ME");
+            setMeOpenSubPage(meSubPage(route) ?? undefined);
+          }}
+          visible={notificationCenterOpen}
+        />
         {renderRoomLayers("modal")}
       </View>
       </SafeAreaView>
@@ -1124,13 +1199,35 @@ export function AppShell({
 // 双计（实测品牌行 y=127 = 59 状态栏 + 59 重复）。此前几次「顶栏让出状态栏时间 /
 // 高度随安全区长」的改动都发生在 insets 恒为 0 的环境里，等于没生效，只在真值到位后
 // 变成双计。安全区只在 SafeAreaView 一处生效，顶栏保持基线 52/46 高。
-function Header({ compact }: { compact: boolean }): React.JSX.Element {
+// NOTIF-BELL-001（2026-10-01，用户：「新增了铃铛提醒」）：顶栏右端加一颗铃铛。
+// 原型（docs/design/references/Proxy_Home_Notifications_20261001_7b9953.html）里
+// logo / 位置 / 切换 / 铃铛 是**同一行**；本仓库把「位置 + 切换」拆成了下面独立的
+// LocationContext 一行（HEADER-HOME-ONLY-001 / MSG-LOCATION-DUPE-001 定的），
+// 所以铃铛落在品牌这一行的右端 —— 位置跟原型一致（右上角），不动那两行结构。
+//
+// 角标由调用方算好传进来（badgeText(unreadCount(...))），这里不自己数 ——
+// 0 条时传 undefined，**不画角标**，而不是画一个 "0"。
+function Header({ badge, compact, onOpenNotifications }: { badge?: string | undefined; compact: boolean; onOpenNotifications: () => void }): React.JSX.Element {
+  const { t } = useI18n();
   return (
     <View style={[styles.header, compact && styles.headerCompact]}>
       <View style={styles.headerBrand}>
         <Image resizeMode="contain" source={OTTER_LOGO} style={[styles.headerLogo, compact && styles.headerLogoCompact]} />
         <Text selectable style={[styles.headerName, compact && styles.headerNameCompact]}>Proxy</Text>
       </View>
+      <Pressable
+        accessibilityLabel={t("notifBellA11y")}
+        accessibilityRole="button"
+        onPress={onOpenNotifications}
+        style={({ pressed }) => [styles.headerBell, pressed && styles.headerBellPressed]}
+      >
+        <ProxyIcon color={color.ink} name="bell" size={24} />
+        {badge ? (
+          <View style={styles.headerBellBadge}>
+            <Text selectable style={styles.headerBellBadgeText}>{badge}</Text>
+          </View>
+        ) : null}
+      </Pressable>
     </View>
   );
 }
@@ -1191,20 +1288,28 @@ function LocationContext({
 }): React.JSX.Element {
   // DEVICE-LOCATION-001：副标题要能区分「跟随中」「定位中」「没授权」「不可用」——
   // 四者不许长得一样，更不许失败态伪装成成功的样子。
+  // I18N-SETTINGS-001：这四句状态原来写死中文。四态不许长得一样这条约束不变
+  // （那是 DEVICE-LOCATION-001 钉的），只是每态换成对应语言的键。
+  const { t } = useI18n();
   const deviceSub =
-    deviceState.kind === "acquiring" ? "正在定位… · 拿到位置后自动更新"
-    : deviceState.kind === "permission_denied" ? "定位未授权 · 点「切换⌄」手动选或重新授权"
-    : deviceState.kind === "unavailable" ? `定位不可用 · ${deviceState.message}`
+    deviceState.kind === "acquiring" ? t("locStateAcquiring")
+    : deviceState.kind === "permission_denied" ? t("locStateDenied")
+    : deviceState.kind === "unavailable" ? t("locStateUnavailable", { message: deviceState.message })
     : "";
+  // UI-COPY-HONEST-001（2026-10-01，用户：「home 首页的废话 你正在看的本地范围xxx
+  // 移除 很多废话要移除」）：原来无论有没有事要說都渲染一行字幕 ——
+  // 「你正在看的本地范围 · 仅城市 / 区域」/「跟随你的位置 · 移动后自动更新 · 仅城市 / 区域」
+  // 都在解释一件用户没问的事，而且「切换⌄」按钮就在旁边，不该再用文字教用户怎么用。
+  //
+  // 现在**没有值得说的事就不渲染这一行**：只有定位中 / 未授权 / 不可用 /
+  // 手动选的地图点（那四件事用户确实需要知道）才出字幕。
   const sub = location.kind === "CUSTOM"
-    ? `地图选点 · 覆盖范围 ${formatRadius(location.custom.radiusMeters)}`
-    : location.kind === "DEVICE"
-      ? (deviceSub || "跟随你的位置 · 移动后自动更新 · 仅城市 / 区域")
-      : (deviceSub || "你正在看的本地范围 · 仅城市 / 区域");
+    ? t("locScopeMapPick", { radius: formatRadius(location.custom.radiusMeters) })
+    : deviceSub;
   return (
     <View style={styles.locationRow}>
     <Pressable
-      accessibilityLabel="打开场景地图"
+      accessibilityLabel={t("locOpenMapA11y")}
       accessibilityRole="button"
       onPress={onOpenSceneMap}
       style={({ pressed }) => [styles.locationMain, pressed && styles.locationRowPressed]}
@@ -1216,12 +1321,14 @@ function LocationContext({
       </View>
       <View style={styles.locationCopy}>
         <Text selectable numberOfLines={2} style={styles.locationCity}>{formatLocationTitle(location)}</Text>
-        <Text selectable numberOfLines={1} style={styles.locationSub}>
-          {sub}
-        </Text>
+        {sub ? (
+          <Text selectable numberOfLines={1} style={styles.locationSub}>
+            {sub}
+          </Text>
+        ) : null}
       </View>
     </Pressable>
-      <Pressable accessibilityLabel="切换本地范围" accessibilityRole="button" onPress={onSwitchLocation} style={styles.locationSwitchButton}><Text selectable style={styles.locationSwitch}>切换⌄</Text></Pressable>
+      <Pressable accessibilityLabel={t("locSwitchScopeA11y")} accessibilityRole="button" onPress={onSwitchLocation} style={styles.locationSwitchButton}><Text selectable style={styles.locationSwitch}>{t("locSwitch")}</Text></Pressable>
     </View>
   );
 }
@@ -1240,7 +1347,10 @@ function RootNav({
   onCommitPage: (page: PageId) => void;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
-  const tabs = rootTabs();
+  // I18N-SETTINGS-001：语言变化时整排 tab 标签重取。这里是**渲染时**取，
+  // 不是模块顶层 —— 顶层在 import 时就求值完了，那时还没有语言状态。
+  const { t } = useI18n();
+  const tabs = rootTabs(t);
   const [measuredWidth, setMeasuredWidth] = useState(0);
   const [pressing, setPressing] = useState(false);
   const [liquidMotion, setLiquidMotion] = useState(0);
@@ -1589,6 +1699,24 @@ const styles = StyleSheet.create({
   headerLogoCompact: { borderRadius: 10, height: 36, width: 36 },
   headerName: { color: color.ink, fontSize: 28, fontWeight: "900", lineHeight: 34 },
   headerNameCompact: { fontSize: 26, lineHeight: 32 },
+  // NOTIF-BELL-001：铃铛 + 角标。原型那条角标是 top:-4 / right:-6 的红底白字胶囊；
+  // 这里贴着铃铛右上角，并用顶栏底色描一圈 —— 不描的话红胶囊会跟铃铛的描边糊在一起。
+  headerBell: { alignItems: "center", height: 24, justifyContent: "center", width: 24 },
+  headerBellPressed: { opacity: 0.6 },
+  headerBellBadge: {
+    alignItems: "center",
+    backgroundColor: foundation.danger,
+    borderColor: color.offWhite,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    minWidth: 16,
+    paddingHorizontal: 4,
+    position: "absolute",
+    right: -8,
+    top: -6
+  },
+  headerBellBadgeText: { color: color.white, fontSize: 10, fontWeight: "900", lineHeight: 13 },
   locationRow: {
     alignItems: "center",
     flexDirection: "row",

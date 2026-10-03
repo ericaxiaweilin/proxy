@@ -653,6 +653,43 @@ func launchScenes() []Scene {
 	// 21.1861461,106.0742127 —— 与 threebeans_bn 相距约 560 m，两个场景
 	// 同时落在 Bắc Ninh 市中心步行范围内。
 		{ID: "nguyenphilan", Name: "Công viên Nguyên Phi Ỷ Lan", Area: "Bắc Ninh", Type: "公共景点 · 公园", Address: "Công viên Nguyên Phi Ỷ Lan, Phường Kinh Bắc, TP Bắc Ninh", Latitude: 21.1861461, Longitude: 106.0742127, Best: "全天开放", Active: true, Description: "Bắc Ninh 市中心的公共公园，傍晚人最多。", Category: "景点"},
+		// ——— CATALOG-EXPAND-001（2026-10-01，用户：「核心就是要有30个店铺 10个公共景点」）——
+		//
+		// 这一批的坐标**逐条用 Nominatim 反查过**，不是估的。反查有两个层级：
+		//   · POI 级：OSM 里有这家店的节点 → 坐标精确到店（河内老城 11 家 + 河内景点 2 家）；
+		//   · 地址级：OSM 没有这家店的节点（Bắc Ninh 的 bún chả 店都是这种情况），
+		//     退到街道/门牌级 → 坐标是那个门牌点，**不是店面**。
+		//
+		// 两级的差别写在 Description 里是因为它影响用户怎么用这个点：POI 级可以
+		// 当成"到了"，地址级只能当成"在这一带"。藏着这个差别，用户按导航走过去
+		// 发现差几十米，会当成 App 数据不准。
+		//
+		// 查不到的**没有**硬塞进来。CATALOG 期间用 Nominatim 反查过 22 家，MISS 的
+		// 包括 Bún Chả Đắc Kim（连获四年 Michelin Selected）、Tuyết Bún Chả 34、
+		// Phở Gà Nguyệt、Đền Ngọc Sơn —— 都是越南最有名的馆子，OSM 上确实
+		// 没有节点。宁可少几条，也不写一个查不到出处的坐标。
+		//
+		// —— 河内 · 咖啡（POI 级）——
+		{ID: "cafe_giang", Name: "Cà Phê Giảng", Area: "Hoàn Kiếm", Type: "咖啡 · 店招", Address: "39 Nguyễn Hữu Huân, Khu phố cổ, Phường Hoàn Kiếm, Hà Nội", Latitude: 21.0342713, Longitude: 105.8544991, Best: "07:00–22:00", Active: true, Description: "1946 年 Nguyễn Văn Giang 创立，鸡蛋咖啡的诞生地。窄巷里的两层老店，二楼木阁楼。坐标精确到店。", Category: "商家"},
+		{ID: "cafe_dinh", Name: "Cà Phê Dinh", Area: "Hoàn Kiếm", Type: "咖啡 · 店招", Address: "13 Đinh Tiên Hoàng, Khu phố cổ, Phường Hoàn Kiếm, Hà Nội", Latitude: 21.0319988, Longitude: 105.8523858, Best: "07:00–22:00", Active: true, Description: "Giảng 的次子所开，同一配方；藏在丝绸店楼上，二楼阳台看得见还剑湖。坐标精确到店。", Category: "商家"},
+		{ID: "cafe_phoco", Name: "Cafè Phố Cổ", Area: "Hoàn Kiếm", Type: "咖啡 · 店招", Address: "11 Hàng Gai, Khu phố cổ, Phường Hoàn Kiếm, Hà Nội", Latitude: 21.0322358, Longitude: 105.8510679, Best: "07:00–23:00", Active: true, Description: "穿过丝绸店上四段窄楼梯，是老城俯瞰屋顶迷宫最出名的位置之一。坐标精确到店。", Category: "商家"},
+		{ID: "cafe_note", Name: "The Note Coffee", Area: "Hoàn Kiếm", Type: "咖啡 · 店招", Address: "64 Lương Văn Can, Khu phố cổ, Phường Hoàn Kiếm, Hà Nội", Latitude: 21.0316214, Longitude: 105.8508446, Best: "06:30–23:00", Active: true, Description: "墙面与天花板贴满来自世界各地的便利贴。老城周末夜市的起点。坐标精确到店。", Category: "商家"},
+		{ID: "cafe_loadingt", Name: "Cà Phê Loading T", Area: "Hoàn Kiếm", Type: "咖啡 · 店招", Address: "8 Chân Cầm, Khu phố cổ, Phường Hoàn Kiếm, Hà Nội", Latitude: 21.0305248, Longitude: 105.8485873, Best: "07:00–22:00", Active: true, Description: "法区小巷里的打字机与旧家具，被 CNN 的咖啡榜单收录过。坐标精确到店。", Category: "商家"},
+		// —— 河内 · 餐厅（POI 级，含米其林收录的）——
+		{ID: "buncha_ta", Name: "Bún Chả Tà", Area: "Hoàn Kiếm", Type: "餐厅 · 米其林 Bib Gourmand", Address: "21 Nguyễn Hữu Huân, Phường Ly Thái Tổ, Hoàn Kiếm, Hà Nội", Latitude: 21.0343571, Longitude: 105.8544931, Best: "08:00–22:00", Active: true, Description: "米其林 Bib Gourmand 收录的老牌 bún chả，肥瘦比挑得好，烤肉饼多汁。坐标精确到店。", Category: "商家"},
+		{ID: "buncha_huonglien", Name: "Bún Chả Hương Liên", Area: "Hai Bà Trưng", Type: "餐厅 · 米其林推荐", Address: "24 Lê Văn Huu, Phường Phan Chu Trinh, Hai Bà Trưng, Hà Nội", Latitude: 21.0180504, Longitude: 105.8538843, Best: "08:00–20:30", Active: true, Description: "2016 年奥巴马与波登来过的那家，墙上还挂着当时的照片。坐标精确到店。", Category: "商家"},
+		{ID: "buncha_chan", Name: "Bún Chả Chan", Area: "Hai Bà Trưng", Type: "餐厅 · 米其林 Bib Gourmand", Address: "114 Mai Hắc Đế, Phường Vân Hồ, Hai Bà Trưng, Hà Nội", Latitude: 21.0102216, Longitude: 105.8506706, Best: "以现场公告为准", Active: true, Description: "bún chả 配猪骨熬的汤，汤单独喝也常见。坐标精确到店。", Category: "商家"},
+		{ID: "pho_batdan", Name: "Phở Gia Truyền Bát Đàn", Area: "Hoàn Kiếm", Type: "餐厅 · 米其林 Bib Gourmand", Address: "49 Bát Đàn, Phường Cửa Đông, Hoàn Kiếm, Hà Nội", Latitude: 21.0336377, Longitude: 105.8463792, Best: "06:00–10:00 · 18:00–20:30", Active: true, Description: "老城 Bát Đàn 街的牛河粉，只做早市与晚市两段，旁边配炸油条。坐标精确到店。", Category: "商家"},
+		{ID: "pho_thin", Name: "Phở Thìn", Area: "Hai Bà Trưng", Type: "餐厅 · 河粉", Address: "13 Lò Đúc, Phường Hai Bà Trưng, Hà Nội", Latitude: 21.0170351, Longitude: 105.8559963, Best: "05:30–21:30", Active: true, Description: "1979 年开的小店，牛肉先用蒜爆香再入汤，味比常规河粉更深。坐标精确到店。", Category: "商家"},
+		{ID: "buncha_74hangquat", Name: "Bún Chả 74 Hàng Quạt", Area: "Hoàn Kiếm", Type: "餐厅 · 巷子", Address: "74 Hàng Quạt, Phường Hoàn Kiếm, Hà Nội", Latitude: 21.0324643, Longitude: 105.8489735, Best: "10:00–14:00", Active: true, Description: "还剑湖西北巷子里的炭火烤肉，烤肉过程全程在眼前。坐标精确到店。", Category: "商家"},
+		// —— 河内 · 公共景点（POI 级）——
+		{ID: "chua_motcot", Name: "Chùa Một Cột · Liên Hoa Đài", Area: "Ba Đình", Type: "公共景点 · 寺庙", Address: "Chùa Một Cột, Phố Ông Ích Khiêm, Phường Ba Đình, Hà Nội", Latitude: 21.0358555, Longitude: 105.8336143, Best: "06:00–18:00", Active: true, Description: "1049 年黎利太宗所建的单柱木亭，立在莲池之上，形如莲出水。坐标精确到景点。", Category: "景点"},
+		{ID: "lang_hcm", Name: "Lăng Chủ tịch Hồ Chí Minh", Area: "Ba Đình", Type: "公共景点 · 纪念地", Address: "1 Đường Hùng Vương, Phường Ba Đình, Hà Nội", Latitude: 21.0367831, Longitude: 105.8346888, Best: "08:00–11:00 · 周二至周日", Active: true, Description: "1973–1975 年建成的陵墓，1973 年起建、1975 年安放遗体；参观有 dress code 与时段限制。坐标精确到景点。", Category: "景点"},
+		// —— Bắc Ninh · 餐厅（地址级：OSM 无店铺节点，坐标是门牌点）——
+		{ID: "buncha_dungrau", Name: "Bún Chả Dũng Râu", Area: "Từ Sơn", Type: "餐厅 · bún chả", Address: "72 Trần Phú, Phường Từ Sơn, TP Bắc Ninh", Latitude: 21.1172886, Longitude: 105.9575573, Best: "以现场公告为准", Active: true, Description: "Từ Sơn 的 bún chả，炭火烤肉饼配米粉，份量大。坐标是街道门牌点，不是店面。", Category: "商家"},
+		{ID: "buncha_thuhien", Name: "Bún Chả Thu Hiền", Area: "Từ Sơn", Type: "餐厅 · bún chả", Address: "Đường Lê Quang Đạo, Khu đô thị Phú Điền, Từ Sơn, TP Bắc Ninh", Latitude: 21.1167452, Longitude: 105.9624094, Best: "以现场公告为准", Active: true, Description: "Lê Quang Đạo 一带的 bún chả，chấm 与 chan 两种吃法都有。坐标是街道点，不是店面。", Category: "商家"},
+		{ID: "buncha_ketnghia", Name: "Bún Chả Kết Nghĩa", Area: "Kinh Bắc", Type: "餐厅 · bún chả", Address: "151 Nguyễn Văn Cừ, Phường Kinh Bắc, TP Bắc Ninh", Latitude: 21.1711352, Longitude: 106.0479433, Best: "06:00–14:00", Active: true, Description: "早上六点到下午两点的 bún chả，炭火烤肉，水准酸甜蘸汁。坐标是门牌点，不是店面。", Category: "商家"},
+		{ID: "buncha_mydo", Name: "Bún Chả Mỹ Độ", Area: "Kinh Bắc", Type: "餐厅 · bún chả", Address: "75 Hồ Ngọc Lân, Phường Kinh Bắc, TP Bắc Ninh", Latitude: 21.1849344, Longitude: 106.0705472, Best: "以现场公告为准", Active: true, Description: "Kinh Bắc 一带的 bún chả，除传统肉饼外另有 nem 款。坐标是门牌点，不是店面。", Category: "商家"},
 	}
 	// 这张表里的每一条坐标/地址都是查过的 —— 统一标 OSM，而不是留空让客户端
 	// 猜。用户提交的场景走另一条路（Source=COMMUNITY），不会混进这张表。

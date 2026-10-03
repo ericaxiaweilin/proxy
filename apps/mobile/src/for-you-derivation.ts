@@ -1,6 +1,19 @@
 // FOR-YOU-DERIVE-001（用户「这个 for you 的资源槽冲突 派生架构做好了吗」→「开始吧」）：
 // For You 四宫格的唯一派生层。
 //
+// 2026-10-02 审计结论：本文件当前是**设计好、测好、但没有接线** ——
+// 全仓只有 for-you-derivation.test.ts import 它，requester-home.tsx 一行都没用。
+// 同样的"已下单避让"现在活在三处（for-you-slots.ts）：
+//   pickRefreshedActivity（圆圈刷新，ORDER-009）、
+//   resolveActivityIndexAvoidingOrders（首屏，ORDER-010）、
+//   pickPersonSlot（换人，ORDER-009）。
+// 而本文件的 timeOptions / sceneOptions / activityOptions（含 LOCKED_OUT 状态位）
+// 是那三处**没有**的东西：一套"选项带状态、点不了的直接标原因"的选择器模型。
+//
+// 所以别删它（删了等于丢掉这套选择器设计），也别在 for-you-slots 里再写第四份
+// "已下单避让" —— 要动选择器就从这里接线（FOR-YOU-DERIVE-001 原定的位置）。
+// 接线完成后把这段标记删掉。
+//
 // 以前四个格子是四条互相独立的 index（人 / 时间 / 活动 / 地点）：
 //   - 活动其实是唯一真的轴，时间和地点都是从活动身上抄下来的；
 //   - 换「时间」只改一个没人读的 index（不锁时什么都不变，锁了只会冒一条冲突提示）；

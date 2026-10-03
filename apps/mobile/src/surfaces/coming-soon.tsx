@@ -32,6 +32,10 @@ export function ComingSoonSurface({ surface, fulfillment, outcome, business, act
   if (surface === "OUTCOME" && outcome) {
     return <OutcomeSurface client={outcome} />;
   }
+  // STORE-CONSOLIDATE-001：系统级 fallback（不是用户入口）。用户可见的管店入口
+  // 只有 MyStoresHub（me.tsx 的 bdash / merchantstorefront、merchant-me-r21 的
+  // store 页）。这里留着是因为 ComingSoonSurface 拿不到 fulfillment/profile，
+  // 渲染不了 hub —— 删了它，这个 surface id 就彻底没东西了。
   if (surface === "MERCHANT_STOREFRONT" && business) {
     return <MerchantStorefrontSurface client={business} />;
   }

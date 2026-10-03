@@ -590,9 +590,13 @@ export const ActivitySchema = z.object({
   venueSpend: z.string(),
   venueType: z.enum(["CAFE", "RESTAURANT", "PARK", "LAKE", "STREET", "OTHER", ""]),
   venueTypeLabel: z.string(),
-  // 活动封面图（R17.x 预留）：HTTPS URL，上传管线接好之前 server 不下发，
+  // 活动封面图（R17.x 预留）：HTTPS URL，server 至今**没有任何写入者**，
   // 客户端无此字段时必须显示诚实占位（不得用假图冒充实拍）。
   coverImageUrl: z.string().min(1).optional(),
+  // ACTIVITY-COVER-001：封面图的**媒体资产 id**（不是 URL）。商家发活动时
+  // 先走媒体管线上传，服务端存这个 id，客户端据此拼 `/v1/media/thumb/<id>`。
+  // 收 id 不收 URL：收 URL 等于让客户端指定"渲染哪张图"，那是任意外部地址。
+  coverMediaAssetId: z.string().optional(),
   desc: z.string(),
   benefit: z.string(),
   qaCount: z.number().int().nonnegative(),
@@ -676,6 +680,8 @@ export const ActivityOrderSnapshotSchema = z.object({
     moneyFlow: z.string().optional(),
     venueSpend: z.string().optional(),
     coverImageUrl: z.string().optional(),
+    // ACTIVITY-COVER-001：票面快照里的封面资产 id（下单那一刻的，不是活动现在的）。
+    coverMediaAssetId: z.string().optional(),
     joined: z.number().int().nonnegative(),
     capacity: z.number().int().nonnegative().optional()
   }),

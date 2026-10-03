@@ -34,6 +34,9 @@ export type PublishActivityInput = {
   // MERCHANT-PUBLISH-001: 以商家名义发布时带店 id（server 验成员后盖章）。
   // 个人发布不传。
   merchantId?: string;
+  // ACTIVITY-COVER-001: 封面图的**媒体资产 id**，不是 URL —— 先用 MediaClient
+  // 上传拿到 mediaAssetId 再传这里。服务端只认能安全拼成 thumb URL 的裸 token。
+  coverMediaAssetId?: string;
 };
 
 export class ActivityProtocolError extends Error {

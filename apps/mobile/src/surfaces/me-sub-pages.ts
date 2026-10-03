@@ -71,6 +71,15 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
     desc: "账号与安全、位置与隐私、条款与语言。每一项都通往一个真的能打开的地方。",
     icon: "⚙",
   },
+  // SETTINGS-BLOCKLIST-001：黑名单有专属渲染分支（me.tsx 的 subPage.route ===
+  // "blocklist"），所以这里只登记路由，不登记 sections ——
+  // 登记了 sections 反而会走通用兜底那条路（SUBPAGE-GENERIC-FABRICATED-001
+  // 钉的就是这个：每一行都要么有专属分支，要么诚实空态）。
+  blocklist: {
+    title: "黑名单",
+    desc: "本机名单，可解封。",
+    icon: "blockCircle",
+  },
   // SETTINGS-HUB-001（2026-10-01）：设置页从「一屏内容」改成入口页之后，
   // 原来那一屏内容（安全设置 / 应用行为检查 / 隐私与数据 / 浏览统计 / 隐私请求）
   // 原样搬到这个路由下，一个字都没丢 —— 只是多了一层入口。

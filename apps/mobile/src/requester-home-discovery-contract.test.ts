@@ -293,8 +293,10 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     // 优先在「有空的」那些人里轮转，只有一个都没有时才退回随机**并如实说明**。
     // 继续钉 `Math.random()` 那一行，等于把"随机"当成目的而不是当时的手段 ——
     // 而随机换人正是用户这次报的问题（看起来像在挑有空的人，其实毫无依据）。
-    expect(source).toContain("const freeOnes = filteredPeople.filter((p) => p.online);");
-    expect(source).toMatch(/freePersonCursor\.current % freeOnes\.length/);
+    // HOME-FORYOU-ORDER-009：换人取号已搬进 pickPersonSlot（纯函数，行为测试在
+    // for-you-009-person-pick.test.ts），组件侧只保留「轮转游标推进 + 文案」。
+    expect(source).toContain("pickPersonSlot(filteredPeople, freePersonCursor.current)");
+    expect(source).toContain("freePersonCursor.current += 1;");
     // HOME-FORYOU-REFRESH-001（2026-09-29，用户「点击圆圈就是刷新全部可用插槽」）：
     // 活动轴不再在本地旧列表上全量随机 —— 先重新拉活动，再只在可用插槽里换
     //（有名额、我没下过单、和锁定的地点/时间不冲突，优先换一个不同的，
@@ -363,7 +365,12 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
 
   it("chooses activities and places from photo rails and time from horizontal cards", () => {
     expect(source).toContain("styles.photoChooserRail");
-    expect(source).toContain("a.coverImageUrl || scene?.imageUrl");
+    // ACTIVITY-COVER-001：活动封面先走媒体资产（activityCoverUri 统一拼 thumb
+    // URL），没有才退回场景图。原来的 `a.coverImageUrl || scene?.imageUrl` 钉的
+    // 是**死字段** coverImageUrl —— 它至今没有任何写入者，所以每个活动都只能拿到
+    // 场景图。顺序不能反：不能让那个没人写的字段压过真正有生产者的资产 id。
+    expect(source).toContain("activityCoverUri(a, localApiBaseUrl) || scene?.imageUrl");
+    expect(source).not.toContain("a.coverImageUrl || scene?.imageUrl");
     expect(source).toContain("styles.photoChooserImage");
     expect(source).toContain("styles.timeChooserRail");
     expect(source).toContain("styles.timeChooserCard");
@@ -467,7 +474,9 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(locationPicker).not.toMatch(/坐标 \$\{lat\.toFixed/);
     expect(locationPicker).not.toMatch(/\(\{eLat\.toFixed/);
     expect(locationPicker).not.toContain("自定义坐标</Text>");
-    expect(shell).toContain("地图选点 · 覆盖范围");
+    // I18N-SETTINGS-001：这句话进了字典，所以 shell 里是键而不是中文字面量。
+    // 钉的仍然是「覆盖范围由 formatRadius 给出，坐标不进 UI」。
+    expect(shell).toContain('t("locScopeMapPick", { radius: formatRadius(location.custom.radiusMeters) })');
     expect(shell).not.toMatch(/lat\.toFixed\(4\).*lng\.toFixed\(4\)/);
     expect(mapCanvas).not.toContain("当前 grid 坐标");
   });
@@ -585,10 +594,16 @@ describe("HOME-FORYOU-ORDER-003 确认下单之后那一屏", () => {
   });
 
   it("原型里没有真能力的三样不许写进来（二维码 / 推送 / 日历）", () => {
-    // CheckinActivity 只是个普通命令、不认码；仓库里没有 expo-notifications、
-    // 没有 expo-calendar；activity.time 是活动自己写的自由文本、不是可解析的
-    // 时间戳，编不出真倒计时也编不出真日历事件。写出来都是兑现不了的承诺
+    // CheckinActivity 只是个普通命令、不认码；仓库里没有 expo-calendar；
+    // activity.time 是活动自己写的自由文本、不是可解析的时间戳，编不出真倒计时
+    // 也编不出真日历事件。写出来都是兑现不了的承诺
     //（placeholder-honest-actions 禁的就是这个）。
+    //
+    // ⚠️ 推送这一条的理由 2026-10-02 变了，结论没变：expo-notifications **已经**
+    // 装上了（NOTIF-PUSH-001，服务端 APNs/FCM 发送器 + 设备令牌注册也齐了），
+    // 但这张**静态票面**仍然承诺不了推送 —— 用户可以拒授权、可以在系统设置里
+    // 关掉，票上印一行「推送提醒」就是印了一句我们保证不了的话。
+    // 真要提醒，入口应该在设置页（那里能显示真实的授权状态），不是在票上。
     // ⚠️ 这三条是**反向钉**，所以本文件里也不许出现这三句原话。
     for (const file of [source, ticket]) {
       expect(file).not.toContain("到场出示此票");
@@ -712,7 +727,10 @@ describe("HOME-FORYOU-PERSON-001 没有人就不是一个 For You 组合", () =>
     // 所以改成钉本意：缺人时分流到人选择器、提示文案还在、按钮仍用 comboBlocked。
     expect(source).toMatch(/if \(!gridPerson\) \{ setChooser\("person"\); return; \}/);
     expect(source).toContain('!gridPerson ? t("comboNeedPerson")');
-    expect(source).toContain("disabled={comboBlocked}");
+    // HOME-FORYOU-ORDER-008（2026-10-01）：置灰判据仍然是 comboBlocked，只多了
+    // 一个例外 —— 「这一场我已经有票」时按钮必须可点（那张票与槽位可用性无关，
+    // 用户报的「点击选择不能下一步」里，按钮点不动和点得动但没出口是两回事）。
+    expect(source).toContain("disabled={comboBlocked && !existingOrder}");
     expect(source).toContain('{comboBlocked ? <Text selectable style={styles.comboConflictText}>{comboBlockText}</Text> : null}');
     // 缺人仍然算「当前组合不成立」—— 放行按钮 ≠ 放行缺人的组合。
     expect(source).toMatch(/const currentComboBroken = !gridPerson \|\|/);
@@ -754,8 +772,19 @@ describe("HOME-FORYOU-ORDER-GUARD-001 下单前资源冲突守卫", () => {
     expect(source).toContain('t("orderConflictTime", { time: conflict.time, title: conflict.title })');
   });
   it("offers the existing ticket instead of a second order, without borrowing today's grid companion", () => {
-    expect(source).toContain('{t("viewExistingOrder")} ›');
-    expect(source).toContain("setOrderSnapshot(existingOrder.snapshot ?? {");
+    // HOME-FORYOU-ORDER-008（2026-10-01，用户「点击 for you 的选择 不能下一步」）：
+    // 原来这里钉的是一个**次级按钮**的字面量（`{t("viewExistingOrder")} ›`）。
+    // 那个按钮已经并进 CTA —— 有票时 CTA 本身就是「查看这张订单」。
+    // 钉的是**本意**（屏幕上必须有一个通往那张票的入口），不是"按钮恰好长这样"。
+    expect(source).toContain('{existingOrder ? t("viewExistingOrder") : t("selectComboCta")}');
+    expect(source).toContain("if (existingOrder) { openExistingOrder(existingOrder); return; }");
+    // 老单没有票面快照时，兜底快照只用**活动本身**拼，不借今天四宫格的人冒充
+    // 当时的选择（同行人一律不填 —— 服务端快照为空就如实说"这笔订单没有同行人记录"）。
+    const fallbackStart = source.indexOf("setOrderSnapshot(order.snapshot ?? {");
+    expect(fallbackStart).toBeGreaterThan(-1);
+    const fallback = source.slice(fallbackStart, source.indexOf("setOrderDone(true);", fallbackStart));
+    expect(fallback).toContain("place: { name: gridActivity.venueName },");
+    expect(fallback).not.toContain("gridPerson");
   });
   it("re-checks at submit time and remembers the new order immediately", () => {
     // 同上：从整行字面量改成"提交前确实又查了一次"，并要求带上同行人

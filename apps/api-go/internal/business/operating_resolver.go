@@ -13,6 +13,11 @@ type AggregatedDemandSignal struct {
 	HighProbabilityArrivals int       `json:"highProbabilityArrivals"`
 	Confidence              float64   `json:"confidence"`
 	RecordedAt              time.Time `json:"recordedAt"`
+	// MERCHANT-SIGNAL-SEED-001：MEASURED = 真从服务端记录算出来的；
+	// SEED_TEST = seed_merchant_operating_signals.sql 种入的静态测试数据。
+	// 下不下发给客户端由各自决定，但**必须可读** —— 一列没人读的 source
+	// 等于没有，等于下次有人把测试数据当实测发出去也拦不住。
+	Source string `json:"source,omitempty"`
 }
 
 type SceneSupplySnapshot struct {
@@ -24,6 +29,8 @@ type SceneSupplySnapshot struct {
 	AcceptingTraffic    bool      `json:"acceptingTraffic"`
 	Confidence          float64   `json:"confidence"`
 	RecordedAt          time.Time `json:"recordedAt"`
+	// MERCHANT-SIGNAL-SEED-001：同 AggregatedDemandSignal.Source。
+	Source string `json:"source,omitempty"`
 }
 
 type ResolvedOperatingState struct {

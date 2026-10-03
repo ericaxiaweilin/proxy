@@ -341,7 +341,9 @@ describe("formatRemaining", () => {
     expect(formatRemaining(7200, "vi")).toBe("còn 2 giờ");
   });
   it("renders expired in vi", () => {
-    expect(formatRemaining(0, "vi")).toBe("đã hết hạn");
+    // I18N-SAFETY-002：这三句进了字典，句首大写（「đã」→「Đã」）与同组
+    // consentOff「Đang tắt」对齐。原来那句小写开头的写法是这张卡孤立的。
+    expect(formatRemaining(0, "vi")).toBe("Đã hết hạn");
   });
   it("renders minutes in zh", () => {
     expect(formatRemaining(900, "zh")).toBe("剩余 15 分钟");

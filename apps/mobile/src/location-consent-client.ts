@@ -14,6 +14,7 @@
 // the old baseUrl+raw-fetch wiring 404'd AND 401'd on device.
 
 import type { TransportResponse } from "./auth-client";
+import { DEFAULT_LANGUAGE, translate, type Language } from "./i18n";
 
 export type LocationConsentKind = "PRECISE_GPS" | "FUZZY_REGION";
 
@@ -212,15 +213,22 @@ export function isActiveConsent(
 }
 
 // formatRemaining returns a human-readable string for the
-// remaining seconds, e.g. "29 分钟" or "8 小时". The function
+// remaining seconds, e.g. "còn 29 phút" or "剩余 8 小时". The function
 // intentionally rounds DOWN so the UI never overpromises.
-export function formatRemaining(seconds: number, locale: "vi" | "zh" = "vi"): string {
-  if (seconds <= 0) return locale === "vi" ? "đã hết hạn" : "已过期";
-  if (seconds < 60) return locale === "vi" ? `còn ${seconds} giây` : `剩余 ${seconds} 秒`;
+//
+// I18N-SAFETY-002：参数原来收 `"vi" | "zh"`。那个二元类型跟 i18n.ts 的六种
+// 语言**毫无关系** —— lo / ko / ja 只能落到 vi 或 zh 二选一，于是那一屏在
+// 老挝语/韩文/日文用户眼里是「越南语或中文」。现在收真正的 Language，
+// 六种语言都有自己那一句。
+//
+// 默认值从 "vi" 改成 DEFAULT_LANGUAGE（zh）：原默认是越南语，而整个 App 的
+// 默认语言是中文（i18n.ts 的 DEFAULT_LANGUAGE）。两者不一致本身就是这处
+// 病的一部分。
+export function formatRemaining(seconds: number, lang: Language = DEFAULT_LANGUAGE): string {
+  if (seconds <= 0) return translate(lang, "consentExpired");
+  if (seconds < 60) return translate(lang, "consentRemainingSeconds", { n: seconds });
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return locale === "vi" ? `còn ${minutes} phút` : `剩余 ${minutes} 分钟`;
-  }
+  if (minutes < 60) return translate(lang, "consentRemainingMinutes", { n: minutes });
   const hours = Math.floor(minutes / 60);
-  return locale === "vi" ? `còn ${hours} giờ` : `剩余 ${hours} 小时`;
+  return translate(lang, "consentRemainingHours", { n: hours });
 }

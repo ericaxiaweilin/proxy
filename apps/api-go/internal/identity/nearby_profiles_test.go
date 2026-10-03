@@ -39,7 +39,7 @@ func TestListProfilesNearbyOrdersByMeasuredDistance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := repo.ListProfilesNearby(t.Context(), 21.0278, 105.8342, 0, 10)
+	got, err := repo.ListProfilesNearby(t.Context(), 21.0278, 105.8342, 0, nil, nil, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestListProfilesNearbyOrdersByMeasuredDistance(t *testing.T) {
 		}
 	}
 	// 500 km cap: mid(≈420) and near survive, far(≈600) and furthest do not.
-	capped, err := repo.ListProfilesNearby(t.Context(), 21.0278, 105.8342, 500_000, 10)
+	capped, err := repo.ListProfilesNearby(t.Context(), 21.0278, 105.8342, 500_000, nil, nil, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestListProfilesNearbyOrdersByMeasuredDistance(t *testing.T) {
 	// recording because the naive version of it — "radius means strictly
 	// greater than zero away" — would push everyone standing on the viewer out
 	// of their own neighbourhood.)
-	one_m, err := repo.ListProfilesNearby(t.Context(), 21.0278, 105.8342, 1, 10)
+	one_m, err := repo.ListProfilesNearby(t.Context(), 21.0278, 105.8342, 1, nil, nil, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestListProfilesNearbyOrdersByMeasuredDistance(t *testing.T) {
 		t.Fatalf("a 1 m cap must keep only the co-located person, got %v", ids(one_m))
 	}
 	// Limit is honoured.
-	one, err := repo.ListProfilesNearby(t.Context(), 21.0278, 105.8342, 0, 1)
+	one, err := repo.ListProfilesNearby(t.Context(), 21.0278, 105.8342, 0, nil, nil, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -280,6 +280,9 @@ func TestLegacySixteenDigitNumberResolvesThroughLookupServicePostgres(t *testing
 // PUBLIC-NO-LOOKUP-AUDIT-001：审计行只追加，也没有破窗。
 func TestNumberLookupAuditIsAppendOnlyPostgres(t *testing.T) {
 	pool := testPool(t)
+	// 缺 proxy_breakglass 前置的库里直接 skip（和 order_role 那套同一口径）——
+	// 硬跑只会得到"权限不够"的红，分辨不出审计逻辑问题。
+	requireBreakGlassRole(t, pool)
 	ctx := context.Background()
 	run := itoa(time.Now().UnixNano())
 	f := newLookupFixture(t, pool, run)

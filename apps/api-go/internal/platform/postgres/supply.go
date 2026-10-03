@@ -30,25 +30,27 @@ func NewSupplyRepositoryWithOutbox(pool *pgxpool.Pool, outboxRepository *OutboxR
 // ---------- AgentProfile ----------
 
 func (r *SupplyRepository) CreateProfile(ctx context.Context, p supply.AgentProfile) error {
-	photos, languages, areas, err := encodeProfileJSON(p)
+	photos, languages, areas, socials, err := encodeProfileJSON(p)
 	if err != nil {
 		return err
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO supply.agent_profiles (agent_id, name, bio, photos, languages, service_areas, status, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		p.AgentID, p.Name, p.Bio, photos, languages, areas, p.Status, p.CreatedAt, p.UpdatedAt,
+		INSERT INTO supply.agent_profiles (agent_id, name, bio, photos, languages, service_areas, status, created_at, updated_at, socials)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		p.AgentID, p.Name, p.Bio, photos, languages, areas, p.Status, p.CreatedAt, p.UpdatedAt, socials,
 	)
 	return err
 }
 
 func (r *SupplyRepository) GetProfile(ctx context.Context, agentID string) (supply.AgentProfile, error) {
 	var p supply.AgentProfile
-	var photos, languages, areas []byte
+	var photos, languages, areas, socials []byte
+	// CREATOR-HOME-001：user_account_id 一起读出来（agent→user 链路，给公开主页用）。
+	// 为空就是没关联，不编一个。
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT agent_id, name, bio, photos, languages, service_areas, status, created_at, updated_at
+		SELECT agent_id, name, bio, photos, languages, service_areas, status, created_at, updated_at, COALESCE(socials, '[]'), COALESCE(user_account_id, '')
 		FROM supply.agent_profiles WHERE agent_id = $1`, agentID).Scan(
-		&p.AgentID, &p.Name, &p.Bio, &photos, &languages, &areas, &p.Status, &p.CreatedAt, &p.UpdatedAt,
+		&p.AgentID, &p.Name, &p.Bio, &photos, &languages, &areas, &p.Status, &p.CreatedAt, &p.UpdatedAt, &socials, &p.UserAccountID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return supply.AgentProfile{}, supply.ErrProfileNotFound
@@ -59,37 +61,59 @@ func (r *SupplyRepository) GetProfile(ctx context.Context, agentID string) (supp
 	_ = json.Unmarshal(photos, &p.Photos)
 	_ = json.Unmarshal(languages, &p.Languages)
 	_ = json.Unmarshal(areas, &p.ServiceAreas)
+	_ = json.Unmarshal(socials, &p.Socials)
+	if p.Socials == nil {
+		p.Socials = []supply.AgentSocial{}
+	}
 	return p, nil
 }
 
 func (r *SupplyRepository) UpdateProfile(ctx context.Context, p supply.AgentProfile) error {
-	photos, languages, areas, err := encodeProfileJSON(p)
+	photos, languages, areas, socials, err := encodeProfileJSON(p)
 	if err != nil {
 		return err
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
 		UPDATE supply.agent_profiles
-		SET name=$1, bio=$2, photos=$3, languages=$4, service_areas=$5, status=$6, updated_at=$7
-		WHERE agent_id=$8`,
-		p.Name, p.Bio, photos, languages, areas, p.Status, p.UpdatedAt, p.AgentID,
+		SET name=$1, bio=$2, photos=$3, languages=$4, service_areas=$5, status=$6, updated_at=$7, socials=$8
+		WHERE agent_id=$9`,
+		p.Name, p.Bio, photos, languages, areas, p.Status, p.UpdatedAt, socials, p.AgentID,
 	)
 	return err
 }
 
-func encodeProfileJSON(p supply.AgentProfile) ([]byte, []byte, []byte, error) {
+func encodeProfileJSON(p supply.AgentProfile) ([]byte, []byte, []byte, []byte, error) {
 	photos, err := json.Marshal(p.Photos)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("encode photos: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("encode photos: %w", err)
 	}
 	languages, err := json.Marshal(p.Languages)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("encode languages: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("encode languages: %w", err)
 	}
 	areas, err := json.Marshal(p.ServiceAreas)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("encode service areas: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("encode service areas: %w", err)
 	}
-	return photos, languages, areas, nil
+	socials, err := json.Marshal(p.Socials)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("encode socials: %w", err)
+	}
+	return nonNullJSONArray(photos), nonNullJSONArray(languages),
+		nonNullJSONArray(areas), nonNullJSONArray(socials), nil
+}
+
+// PROFILE-JSONB-EMPTY-ARRAY-NULL-001：json.Marshal 对 **nil 切片**产出 "null"，
+// 写进 JSONB 就是 jsonb_typeof='null' —— 而 157 的 agent_profiles_socials_ck 只认
+// 'array'，于是「一个还没关联任何社媒的普通新建 Creator」直接插不进去（集成测试
+// TestSellerRealNameAttestationRoundTrip 实测 SQLSTATE 23514）。读侧早就用
+// COALESCE(socials,'[]') 兜了，写侧没有 —— 空集合在协议里是 [] 而不是 null 是仓库
+// 的数据不变量，四个数组列一起兜，不让下一个加 CHECK 的人再踩一遍。
+func nonNullJSONArray(encoded []byte) []byte {
+	if len(encoded) == 0 || string(encoded) == "null" {
+		return []byte("[]")
+	}
+	return encoded
 }
 
 // ---------- AgentService ----------

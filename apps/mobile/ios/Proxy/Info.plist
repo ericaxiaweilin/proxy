@@ -62,13 +62,13 @@
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your location</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Proxy 在你打开“切换本地范围”时用一次位置，把地图中心定到你附近，帮你快速放坐标。我们不后台追踪。</string>
+	<string>Proxy 在你使用 App 期间读取大致位置（城市/区域级别），让首页、动态与机会的本地范围跟着你走。位置只用于本机筛选，不在后台获取。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Proxy 使用麦克风将你的语音转换为输入文字。</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to detect your current motion activity</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>保存二维码到相册。</string>
+	<string>Allow $(PRODUCT_NAME) to save photos</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Proxy 读取你主动选择的照片并添加到需求或对话。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

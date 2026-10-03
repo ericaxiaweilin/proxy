@@ -21,6 +21,9 @@ import (
 func TestMigrator_Startup_NewMigrationApplied(t *testing.T) {
 	m, _, dir := setupMigratorTest(t)
 	ctx := context.Background()
+	// 共享测试库里本来就有 170+ 条真 migration，AppliedCount 的绝对值永远对不上。
+	// 这里只能断言增量：这次的 2 条跑完，总数多了 2。
+	before, _ := m.AppliedCount(ctx)
 	// 第一个 migration
 	writeMigration(t, dir, "001_init.sql", "SELECT 1;\n")
 	if _, _, err := m.Apply(ctx, false); err != nil {
@@ -40,10 +43,10 @@ func TestMigrator_Startup_NewMigrationApplied(t *testing.T) {
 		t.Fatalf("pending should be empty, got %d", len(pending))
 	}
 
-	// 计数: 2 applied
-	appliedCount, _ := m.AppliedCount(ctx)
-	if appliedCount != 2 {
-		t.Fatalf("want 2 applied, got %d", appliedCount)
+	// 计数: 这次多了 2（不是"一共 2"—— 后者只在空库成立）。
+	after, _ := m.AppliedCount(ctx)
+	if after-before != 2 {
+		t.Fatalf("want +2 applied, got +%d", after-before)
 	}
 }
 
@@ -127,6 +130,10 @@ func TestMigrator_Startup_SkipsAlreadyApplied(t *testing.T) {
 func TestMigrator_Startup_PreservesChecksumAcrossRuns(t *testing.T) {
 	m, _, dir := setupMigratorTest(t)
 	ctx := context.Background()
+	// foo_x 是本测试专用的固定表名：上次崩溃会残留，先清掉再建。
+	// （固定名是故意的 —— drift 断言要改同一个文件比指纹，run 级唯一表名反而测不到。）
+	pool := testPool(t)
+	pool.Exec(ctx, `DROP TABLE IF EXISTS public.foo_x`)
 	writeMigration(t, dir, "001_init.sql", "CREATE TABLE public.foo_x (id int);\n")
 	if _, _, err := m.Apply(ctx, false); err != nil {
 		t.Fatalf("apply: %v", err)

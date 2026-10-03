@@ -24,7 +24,10 @@ import type { Activity } from "@proxy/contracts";
 import { useI18n, type MessageKey } from "../i18n";
 import { color } from "../theme";
 import { buildActivityPublishInput } from "../activity-moments";
-import { localApiBaseUrl, sessionAuthClient } from "../native-clients";
+import * as ImagePicker from "expo-image-picker";
+import { MediaClient } from "../media-client";
+import { activityCoverUri, mediaThumbUrl } from "../media-thumb-url";
+import { localApiBaseUrl, nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { getCurrentFix } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
 import { sceneDistanceMeters, shopCardDistance, type SceneOrigin } from "../scene-shop-directory";
@@ -114,6 +117,23 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
   onReloadScenes: () => void;
   onMapPickOpenChange?: ((open: boolean) => void) | undefined;
 }): React.JSX.Element {
+  // ACTIVITY-COVER-001（2026-10-01，用户「做活动 商家活动吧 活动图片资产」）：
+  // 封面图走**媒体管线**上传，拿到 mediaAssetId 再随发布命令带上去 —— 与门店
+  // 相册、场景照片墙同一套（R36.x PHOTO-001：只有 READY+PUBLIC 的资产才能
+  // 远端展示，否则别人设备永远看不到）。
+  //
+  // 为什么发 id 不发 URL：服务端存 URL 就等于接受"客户端指定渲染哪张图"，
+  // 那是任意外部地址。存资产 id，URL 由客户端用共享 helper 拼。
+  const wizardMedia = useMemo(() => new MediaClient({
+    authClient: sessionAuthClient,
+    secureSessionStore: nativeSecureSessionStore,
+    baseUrl: localApiBaseUrl,
+  }), []);
+  const [coverAssetId, setCoverAssetId] = useState<string | undefined>(undefined);
+  const [coverBusy, setCoverBusy] = useState(false);
+  // ACTIVITY-COVER-001：预览用共享 helper 拼的 thumb URL，和发布后别处看到的
+  // 是同一套解析，不在这里另写一份。
+  const coverUri = mediaThumbUrl(coverAssetId, localApiBaseUrl);
   const { t, lang } = useI18n();
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -337,6 +357,41 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
     }
   }
 
+  /** ACTIVITY-COVER-001：选一张图 → 走媒体管线上传 → 只留 mediaAssetId。 */
+  async function pickCover(): Promise<void> {
+    if (coverBusy) return;
+    setCoverBusy(true);
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError("需要照片权限才能给活动配封面。");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 1,
+        allowsMultipleSelection: false,
+        selectionLimit: 1,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
+      });
+      if (result.canceled || !result.assets[0]) return;
+      const asset = result.assets[0];
+      const uploaded = await wizardMedia.uploadImage({
+        uri: asset.uri,
+        width: asset.width,
+        height: asset.height,
+        ...(asset.fileName ? { fileName: asset.fileName } : {}),
+        ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+      });
+      setCoverAssetId(uploaded.mediaAssetId);
+      setError(undefined);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "封面上传失败，请重试。");
+    } finally {
+      setCoverBusy(false);
+    }
+  }
+
   async function publish(): Promise<void> {
     if (publishing) return;
     if (form.cat === undefined || form.name.trim() === "") {
@@ -386,7 +441,8 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
         },
         selectedSpot.id,
       );
-      const created = await activities.publish(input);
+      // ACTIVITY-COVER-001：封面资产 id 随发布一起走（没有就不带这个键）。
+      const created = await activities.publish(coverAssetId ? { ...input, coverMediaAssetId: coverAssetId } : input);
       await SecureStore.deleteItemAsync(DRAFT_KEY).catch(() => undefined);
       setResult(created);
       setResultMeta(`${dayLabel} ${form.hour.toString().padStart(2, "0")}:${form.minute.toString().padStart(2, "0")} · ${peopleLabel} ${t("peopleUnit")} · ${feeLabel}`);
@@ -732,6 +788,27 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
         />
       </View>
 
+      {/* ACTIVITY-COVER-001：封面选择器。有图就显示缩略图 + 换一张 / 移除，
+          没有就显示"加封面"。空着也能发布 —— 封面是可选的，不该拦住活动本身。 */}
+      <View style={styles.coverBox}>
+        {coverUri ? (
+          <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: coverUri }} style={styles.coverPreview} transition={0} />
+        ) : (
+          <View style={styles.coverEmpty}><ProxyIcon color={color.muted} name="camera" size={22} /></View>
+        )}
+        <View style={styles.coverActions}>
+          <Text selectable style={styles.coverLabel}>{coverUri ? "活动封面" : "加一张封面（可选）"}</Text>
+          <View style={styles.coverRow}>
+            <Pressable accessibilityLabel="更换封面" disabled={coverBusy} onPress={() => void pickCover()} style={styles.coverBtn}>
+              <Text selectable style={styles.coverBtnText}>{coverBusy ? "上传中…" : coverUri ? "换一张" : "选择图片"}</Text>
+            </Pressable>
+            {coverUri ? <Pressable accessibilityLabel="移除封面" disabled={coverBusy} onPress={() => setCoverAssetId(undefined)} style={styles.coverBtnGhost}>
+              <Text selectable style={styles.coverBtnGhostText}>移除</Text>
+            </Pressable> : null}
+          </View>
+        </View>
+      </View>
+
       {error ? <Text selectable style={styles.error}>{error}</Text> : null}
       {draftMsg && !error ? <Text selectable style={styles.draftMsg}>{draftMsg}</Text> : null}
       <Pressable
@@ -823,6 +900,17 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
 }
 
 const styles = StyleSheet.create({
+  // ACTIVITY-COVER-001：封面选择器。78px 缩略图 + 说明 + 两个按钮；空着也能发。
+  coverBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 12 },
+  coverPreview: { backgroundColor: color.surface, borderRadius: 12, height: 78, width: 78 },
+  coverEmpty: { alignItems: "center", backgroundColor: color.surface, borderRadius: 12, height: 78, justifyContent: "center", width: 78 },
+  coverActions: { flex: 1, gap: 7, minWidth: 0 },
+  coverLabel: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  coverRow: { flexDirection: "row", gap: 8 },
+  coverBtn: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  coverBtnText: { color: color.white, fontSize: 11, fontWeight: "800" },
+  coverBtnGhost: { borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 7 },
+  coverBtnGhostText: { color: color.muted, fontSize: 11, fontWeight: "800" },
   content: { paddingBottom: 40, paddingTop: 8 },
   head: { alignItems: "center", flexDirection: "row", paddingHorizontal: 16, paddingVertical: 8 },
   backBtn: { alignItems: "center", height: 38, justifyContent: "center", width: 38 },

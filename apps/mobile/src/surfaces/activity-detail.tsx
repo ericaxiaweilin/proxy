@@ -6,6 +6,9 @@ import { color, shadows } from "../theme";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
 import { activityAIDisclosure, activityAIPersonaName, activityMoneySummary } from "./activity-detail-model";
+// ACTIVITY-COVER-001：封面图走媒体资产（与门店相册同一套 thumb 路由）。
+import { activityCoverUri } from "../media-thumb-url";
+import { localApiBaseUrl } from "../native-clients";
 // COMP-REPORT-002: 活动与（商家主办的）主办商家都要可举报。
 import { ReportSheet } from "../components/report-sheet";
 import { activityReportTargets, type ModerationClient, type ReportTarget } from "../moderation-client";
@@ -51,13 +54,15 @@ export function ActivityDetailSurface({ client, moderation, initialActivityId, o
   }, [client, initialActivityId]);
   if (selected) {
     const aiDisclosure = activityAIDisclosure(selected);
+    // ACTIVITY-COVER-001：商家传的封面资产优先；都没有就不画图（下方有如实占位）。
+    const coverUri = activityCoverUri(selected, localApiBaseUrl);
     const showPersona = selected.aiStatus !== "NONE" && selected.aiPersonaId;
     return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.container}>
           <Pressable accessibilityLabel="返回" onPress={() => { if (onBack) onBack(); else setSelected(undefined); }}><ProxyBackGlyph /></Pressable>
-          {selected.coverImageUrl ? (
-            <Image source={{ uri: selected.coverImageUrl }} style={styles.cover} />
+          {coverUri ? (
+            <Image source={{ uri: coverUri }} style={styles.cover} />
           ) : showPersona ? (
             <View style={styles.coverPlaceholder}>
               <View style={[styles.personaToken, { backgroundColor: personaColor(selected.aiPersonaId) }]}>

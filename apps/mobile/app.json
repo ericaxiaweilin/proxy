@@ -58,6 +58,7 @@
           "speechRecognitionPermission": "Proxy 使用系统语音识别将你的语音转换为输入文字。"
         }
       ],
+      "expo-notifications",
       "./plugins/with-screen-protection"
     ]
   }

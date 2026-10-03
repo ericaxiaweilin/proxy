@@ -35,11 +35,13 @@ import { buildCreatePostPayload, newPublishIdempotencyKey } from "../composer-pu
 import type { MarketplaceClient } from "../marketplace-client";
 import type { ActivityClient } from "../activity-client";
 import { ActivityCommandRejectedError, ActivityProtocolError, orderNoFromJoinRejection } from "../activity-client";
-import { pickRefreshedActivity } from "../for-you-slots";
+import { pickPersonSlot, pickRefreshedActivity, resolveActivityIndexAvoidingOrders } from "../for-you-slots";
 import type { ExperienceClient } from "../experience-client";
 import type { RelationshipClient } from "../relationship-client";
 import type { ProfileClient, ProfileWire } from "../profile-client";
 import { localApiBaseUrl } from "../native-clients";
+// ACTIVITY-COVER-001：媒体 thumb URL 单一来源（门店相册 / 场景照片墙 / 活动封面共用）。
+import { activityCoverUri, mediaThumbUrl } from "../media-thumb-url";
 import { type Activity, type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
@@ -571,13 +573,17 @@ export function RequesterHome({
     const avatarAssetId = wire.avatarPath.startsWith("assets/")
       ? wire.avatarPath.slice("assets/".length).trim()
       : "";
+    // ACTIVITY-COVER-001：头像 thumb URL 收成一处；avatar- 前缀是占位不是资产。
+    const avatarThumb = avatarAssetId !== "" && !avatarAssetId.startsWith("avatar-")
+      ? mediaThumbUrl(avatarAssetId, localApiBaseUrl)
+      : undefined;
     return {
       id: wire.userAccountId,
       name,
       initials: first.toUpperCase(),
-      ...(avatarAssetId !== "" && !avatarAssetId.startsWith("avatar-")
-        ? { photoUri: `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(avatarAssetId)}` }
-        : {}),
+      // 抽成局部量：exactOptionalPropertyTypes 下 photoUri 不接受显式 undefined，
+      // 所以"有没有图"要先落成变量再决定要不要这个键。
+      ...(avatarThumb ? { photoUri: avatarThumb } : {}),
       bio: [wire.handle ? `@${wire.handle.replace(/^@+/, "")}` : "", wire.city].filter(Boolean).join(" · "),
       tags: [],
       // PERSON-DISTANCE-ZERO-001: 距离只在**服务端真的量过**时才带。
@@ -850,7 +856,7 @@ export function RequesterHome({
         // 「没定位」被当成了「没数据」，而这两件事完全不同。
         //
         // 用河内做兜底原点，是因为服务端那批开发坐标就是按河内分层的
-        // （scripts/dev-distance-tiers.mjs），所以兜底也能看到按距离排好的内容。
+        // （apps/api-go/cmd/devdata/distance_tiers.go），所以兜底也能看到按距离排好的内容。
         // 它影响的是"以哪为原点排序"，不是伪造任何人的位置 ——
         // 每个被返回的人的 distanceM 仍然是服务端量到他的真实距离。
         const origin = homeOrigin ?? HANOI_FALLBACK_ORIGIN;
@@ -953,15 +959,23 @@ export function RequesterHome({
     // 当前选择并在文案里说明（见 freePeopleCount），而不是假装挑了个空的。
     // HOME-FORYOU-LOCK-001：锁定的轴跳过不重掷 —— 锁了人就不换人。
     if (!lockedSlots.has("person")) {
-      const freeOnes = filteredPeople.filter((p) => p.online);
-      if (freeOnes.length > 0) {
-        const at = filteredPeople.indexOf(freeOnes[freePersonCursor.current % freeOnes.length]!);
-        if (at >= 0) setPersonIndex(at);
+      // HOME-FORYOU-ORDER-009：取号规则搬进 for-you-slots 的 pickPersonSlot，
+      // 四条分支（换到有空的 / 都忙但还有别人 / 只剩一个人 / 名单空）都能直接
+      // 跑出来验。原来这里是内联的 if/else，候选为 0 或 1 时两个 else 都没有 ——
+      // 既不换人也不说话，点圆圈像死的。
+      const personPick = pickPersonSlot(filteredPeople, freePersonCursor.current);
+      if (personPick.kind === "free") {
         freePersonCursor.current += 1;
-      } else if (filteredPeople.length > 1) {
+      }
+      if (personPick.kind !== "noCandidates") setPersonIndex(personPick.index);
+      if (personPick.kind === "noneFreeButOthers") {
         // 一个有空的都没有：换人也换不出"有空的"，如实说明而不是随机假装。
-        const next = Math.floor(Math.random() * filteredPeople.length);
-        setPersonIndex(next);
+        showResponse(t("noOneFree"), t("noOneFreeSub"));
+      } else if (personPick.kind === "onlyCandidate") {
+        // 名单里就他一个，而且他不在线 —— 他已经是当前这一格了，换不出去。
+        // 说清是哪一种，而不是让人对着一个不动的界面猜。
+        showResponse(t("onlyOneCandidate"), t("onlyOneCandidateSub"));
+      } else if (personPick.kind === "noCandidates") {
         showResponse(t("noOneFree"), t("noOneFreeSub"));
       }
     }
@@ -975,10 +989,24 @@ export function RequesterHome({
       try {
         fresh = (await activities.listActivities()).map(toStoreActivityBrief);
         setStoreActivities(fresh);
-        if (!isGuest) {
-          // 读不到「我的活动」不阻塞换组：下单时服务端仍会判重（ACTIVITY_ALREADY_JOINED）。
-          joinedByMe = await activities.listMyActivities().then((mine) => new Set(mine.joined.map((a) => a.activityId))).catch(() => new Set<string>());
-        }
+        // HOME-FORYOU-ORDER-009（2026-10-01，用户 P0：「点击圆圈 不是选择 是查看这张
+        // 订单 我只有几个用户有订单」）：
+        //
+        // 原来这里**另拉一次** listMyActivities 来算 joinedByMe，而它和决定 CTA 文案的
+        // myOrders 是两个来源。那次拉取失败时 `.catch(() => new Set<string>())` 静默变成
+        // 空集 —— 于是刷新以为"你没下过单"，挑回那场你已经有票的活动；
+        // 而 `existingOrder` 读的是 myOrders，仍然为真 ⇒ CTA 一直显示「查看这张订单」，
+        // 点进去就是订单页。访客态更直接：`if (!isGuest)` 压根不拉，joinedByMe 恒为空集。
+        //
+        // 症状只出现在**已经下过单**的人身上（所以用户说"只有几个用户有订单"），
+        // 而"点圆圈想换人却总是进订单"读起来像随机故障，其实是两个来源打架。
+        //
+        // 现在单一事实源：joinedByMe 直接由 myOrders 派生。myOrders 在 mount 时拉过
+        // （见下面的 useEffect），它就是 CTA 用的那份 —— 两个判据从此不可能不一致。
+        //
+        // 读 myOrders 不存在 TDZ：refreshAvailableSlots 只被事件处理器调用
+        // （remixForYou 的三个 onPress），渲染期不会执行到这里，绑定早已初始化。
+        joinedByMe = new Set(myOrders.map((o) => o.activityId));
       } catch {
         // 拉不到新数据：用手上的列表换，但如实告诉用户名额可能已变。
         showResponse(t("slotRefreshFailed"), t("slotRefreshFailedSub"));
@@ -1159,7 +1187,7 @@ export function RequesterHome({
   // 纯数字：场地类别码3位+越南日期+每日序号，如 1002609270002；重复下单走 safeDetails 带回原号）。
   // 下单页优先显示个人订单号；老服务端没有该字段时回落活动自己的 code
   //（PX-A-yymmdd-####，PublishActivity 时生成，老的/种子活动没有就是没有，不补假号）。
-  type StoreActivityBrief = { activityId: string; code: string | undefined; title: string; venueName: string; time: string; people: string; joined: number; capacity: number; coverImageUrl: string | undefined; realitySceneId: string | undefined; priceLabel: string; moneyFlow: string; venueSpend: string; desc: string; benefit: string };
+  type StoreActivityBrief = { activityId: string; code: string | undefined; title: string; venueName: string; time: string; people: string; joined: number; capacity: number; coverImageUrl: string | undefined; coverMediaAssetId: string | undefined; realitySceneId: string | undefined; priceLabel: string; moneyFlow: string; venueSpend: string; desc: string; benefit: string };
   const [storeActivities, setStoreActivities] = useState<StoreActivityBrief[]>([]);
   // 首屏加载与中心圆圈刷新（HOME-FORYOU-REFRESH-001）共用同一份映射。
   function toStoreActivityBrief(a: Activity): StoreActivityBrief {
@@ -1173,6 +1201,7 @@ export function RequesterHome({
       joined: a.joined,
       capacity: a.capacity ?? 0,
       coverImageUrl: a.coverImageUrl,
+      coverMediaAssetId: a.coverMediaAssetId,
       realitySceneId: a.realitySceneId,
       priceLabel: a.priceLabel,
       moneyFlow: a.moneyFlow,
@@ -1214,7 +1243,8 @@ export function RequesterHome({
             orderNo: order?.orderNo,
             // HOME-FORYOU-ORDER-007：判重要看同行人，所以从票面快照里取回来。
             // 旧数据的快照是 NULL（迁移前下的单），这里就是 undefined ——
-            // 与服务端 companionChanged 的保守策略一致：判重。
+            // 服务端同一口径：缺快照 / 缺同行人**不算**重复（activity.go 的 Join
+            // 要求 existing.Snapshot != nil 才判重），客户端也按「换了人」放行。
             companionId: order?.snapshot?.companion?.id,
             cancelled: order?.state === "CANCELLED",
             snapshot: order?.snapshot,
@@ -1246,6 +1276,28 @@ export function RequesterHome({
   // HOME-FORYOU-SCENE-001：四宫格「场景」格只从挂在真实咖啡店场景上的活动里选；
   // activityIndex 一律索引这份列表（选择器 / 整组换 / 意图预设 / 渲染同一份）。
   const sceneActivities = useMemo(() => activitiesAtCoffeeShops(storeActivities, sceneBriefs), [storeActivities, sceneBriefs]);
+
+  // HOME-FORYOU-ORDER-010（2026-10-01，用户 P0：「for you 的选择变成查看这张订单」）：
+  // activityIndex 初始是种子下标、**不看订单**，sceneActivities 也不排除已下单的 ——
+  // 于是首屏可能正停在一张你已经有票的活动上，`existingOrder` 为真，CTA 一直是
+  // 「查看这张订单」，「选择」那条路整个看不见。
+  //
+  // ORDER-009 让**圆圈刷新**避开已下单的，但没人会为了绕开这个状态先去点圆圈；
+  // 首屏这一下只能在这里补。myOrders 是 mount 之后异步到的，所以到齐才动 ——
+  // 到齐前不动，是为了不拿"还不知道有没有单"当"没有单"。
+  //
+  // 一个可挪的都没有时保持不动（resolveActivityIndexAvoidingOrders 返回原下标），
+  // 那时「查看这张订单」就是实话。锁了活动轴也不挪 —— 锁了就不换，和圆圈同一口径。
+  useEffect(() => {
+    if (myOrders.length === 0) return;
+    if (lockedSlots.has("activity")) return;
+    const next = resolveActivityIndexAvoidingOrders(
+      sceneActivities,
+      new Set(myOrders.map((o) => o.activityId)),
+      activityIndex,
+    );
+    if (next !== activityIndex) setActivityIndex(next);
+  }, [myOrders, sceneActivities, activityIndex, lockedSlots]);
 
 
   // Home Search/Conversation v3 — 一个输入框同时做实体匹配和模型对话。
@@ -1543,7 +1595,22 @@ export function RequesterHome({
             // 一个组合——不许进确认下单，也不许下出一张「没有同行人」的票。
             // HOME-FORYOU-ORDER-GUARD-001：已经下过这一单 / 这个时间段已经有单，也不能再下。
             const orderConflict = detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time, companionId: gridPerson?.id }, myOrders);
-            const existingOrder = orderConflict?.kind === "ALREADY_ORDERED" ? myOrders.find((o) => o.activityId === gridActivity.activityId && !o.cancelled) : undefined;
+            // HOME-FORYOU-ORDER-008（2026-10-01，用户「点击 for you 的选择 不能下一步」）：
+            // 只要我在这**同一场活动**上有未取消的单，这一格就永远下不了单 —— 守卫
+            // 不放行是**已裁决**的（requester-home-combo.ts:321 起：服务端
+            // (activity, actor) 只有一行，同场再下单会沿用原编号并刷新票面，等于
+            // 无声改写原同行人正等着的那张票）。但「下不了单」≠「没有下一步」：
+            // **那张票本身**就是下一步。
+            //
+            // 原来只在 ALREADY_ORDERED（同活动 + 同行人对得上）时才认这单。
+            // 同行人对不上时（旧单票面快照为空 = 迁移前下的单，或用户换了同行人）
+            // existingOrder 是 undefined ⇒ 点「选择」只弹一句冲突文案，
+            // 屏幕上**没有任何能走的入口** —— 这就是"不能下一步"。
+            //
+            // 2026-10-01 实测（模拟器 + 真库）：这个账号把三家咖啡店场景下的活动
+            // **三场全下过**（tb_matcha_night / tb_sun_cupping / tb_sat_buddy），
+            // resolveConflictSlots 找不到任何不冲突的替代活动 ⇒ 必然落到死路。
+            const existingOrder = myOrders.find((o) => o.activityId === gridActivity.activityId && !o.cancelled);
 
             // HOME-FORYOU-SLOT-AVAIL-001（用户：「点什么都灰。理论上我们 for you 是4个
             // 资源槽 检测冲突 4个全部不可用才灰，有一个可用都不能灰」）：
@@ -1633,6 +1700,25 @@ export function RequesterHome({
               // HOME-FORYOU-LOCK-001：中心键与 remixForYou 收成**同一条**重配链
               // （锁定轴跳过的口径只维护一份）。
               remixForYou();
+            };
+            // HOME-FORYOU-ORDER-008：这一格我已经有票 ⇒ **看那张票**才是下一步。
+            // 只有这一个入口（原来「选择」CTA 与一个次级按钮各写一遍同样的
+            // 打开逻辑 —— 两处各写一遍 = 迟早只改一处，所以并成这一条路径）。
+            // 没存票面的老单：只用活动本身 + 订单号拼，
+            // 不借当前四宫格的人/地点冒充当时的选择。
+            const openExistingOrder = (order: MyForYouOrder): void => {
+              setOrderNo(order.orderNo ?? "");
+              setOrderSnapshot(order.snapshot ?? {
+                orderNo: order.orderNo ?? gridActivity.code ?? gridActivity.activityId,
+                orderedAt: "",
+                activity: { activityId: gridActivity.activityId, title: gridActivity.title, time: gridActivity.time, venueName: gridActivity.venueName, priceLabel: gridActivity.priceLabel, moneyFlow: gridActivity.moneyFlow, venueSpend: gridActivity.venueSpend, joined: gridActivity.joined, capacity: gridActivity.capacity },
+                time: gridActivity.time,
+                place: { name: gridActivity.venueName },
+              });
+              setOrderExisting(true);
+              setOrderCodeCopied(false);
+              setOrderDone(true);
+              setJoinConfirmOpen(true);
             };
             const composed = [gridPerson ? t("withPerson", { name: gridPerson.name }) : "", displayTime ?? "", gridActivity && gridActivity.venueName !== displayPlace?.name ? gridActivity.venueName : "", displayPlace ? `@${displayPlace.name}` : ""].filter(Boolean).join(" ");
             // HOME-FORYOU-DEDUP-001（用户「three beans cau giay 有重复的 3 个」）：
@@ -1740,8 +1826,14 @@ export function RequesterHome({
                         平台代收款的商业订单——"下单"是这个 app 里"敲定一个
                         真实计划"的通用说法，不是"付了钱"的意思）。 */}
                     <Pressable
-                      disabled={comboBlocked}
+                      disabled={comboBlocked && !existingOrder}
                       onPress={() => {
+                        // HOME-FORYOU-ORDER-008（用户 2026-10-01：「点击 for you 的选择
+                        // 不能下一步」）：这一场我已经有票 ⇒ 下一步是**看那张票**。
+                        // 守卫不放行（同活动不再下单，理由见上面 existingOrder 的注释），
+                        // 所以这里既不能再走「确认下单」，也不能只弹一句没有出口的
+                        // 冲突文案 —— 那正是用户看到的"点了没反应"。
+                        if (existingOrder) { openExistingOrder(existingOrder); return; }
                         // HOME-FORYOU-SLOT-AVAIL-001（用户 2026-10-01 报 P0）：
                         // 「点击圆圈就自动刷新 4 个可用的资源槽，选中就可以」。
                         //
@@ -1774,18 +1866,28 @@ export function RequesterHome({
                           }
                           // 修不好 ⇒ 更不能死循环：如实说明为什么走不通、该动哪个轴。
                           // 绝不打开一个注定失败的确认页 —— 让用户填完提交才失败是骗人。
+                          //
+                          // HOME-FORYOU-CONFLICT-DETAIL-001（2026-10-01）：主文案用**详细**
+                          // 冲突文案（哪一单/哪个值挡的），不用泛化的「这个时间你已经有单了」。
+                          // 同一个冲突，CTA 的 a11y 标签（comboBlockText）和格子上方的
+                          // 提示（1630-1631）早就用详细版，唯独这条回复条用泛化版 ——
+                          // 「换个时间，或先取消那一单」的前提是知道挡着的是**哪一单**。
+                          // 详细文案各语言都有（orderConflictTime / comboConflictPlace），
+                          // 这里只是把已有能力接到用户第一眼看的地方。
                           showResponse(
-                            orderConflict?.kind === "TIME_TAKEN" ? t("slotTimeClash") : t("slotPlaceClash"),
+                            orderConflict?.kind === "TIME_TAKEN" ? orderConflictText(orderConflict) : comboConflictText,
                             orderConflict?.kind === "TIME_TAKEN" ? t("slotTimeClashSub") : t("slotPlaceClashSub"),
                           );
                           return;
                         }
                         setJoinMsg(undefined); setOrderDone(false); setOrderCodeCopied(false); setOrderNo(""); setJoinConfirmOpen(true);
                       }}
-                      style={[styles.gridCta, responseText && styles.gridCtaFlush, comboBlocked && styles.gridCtaDisabled]}
-                      accessibilityLabel={comboBlocked ? comboBlockText : t("selectComboCtaA11y")}
+                      style={[styles.gridCta, responseText && styles.gridCtaFlush, comboBlocked && !existingOrder && styles.gridCtaDisabled]}
+                      accessibilityLabel={existingOrder ? t("viewExistingOrder") : comboBlocked ? comboBlockText : t("selectComboCtaA11y")}
                     >
-                      <Text selectable style={styles.gridCtaTextSmall}>{t("selectComboCta")}</Text>
+                      {/* HOME-FORYOU-ORDER-008：有票时按钮就是「查看这张订单」——
+                          按钮上的字必须是它真的会做的事。 */}
+                      <Text selectable style={styles.gridCtaTextSmall}>{existingOrder ? t("viewExistingOrder") : t("selectComboCta")}</Text>
                     </Pressable>
                     {/* HOME-FORYOU-ORDER-001（用户："这个原型你没有吗 选择-跳出这个
                         啊"，指向 deepseek_html_20260927_226eac「确认下单」整屏）：
@@ -1799,29 +1901,9 @@ export function RequesterHome({
                         DIRECT_INVITE 邀真人才有的形状，这里的人是推荐 fixture，
                         没有真实收款方）。 */}
                     {comboBlocked ? <Text selectable style={styles.comboConflictText}>{comboBlockText}</Text> : null}
-                    {existingOrder ? (
-                      <Pressable
-                        accessibilityLabel={t("viewExistingOrder")}
-                        onPress={() => {
-                          // 没存票面的老单：只用活动本身 + 订单号拼，不借当前四宫格的人/地点冒充当时的选择。
-                          setOrderNo(existingOrder.orderNo ?? "");
-                          setOrderSnapshot(existingOrder.snapshot ?? {
-                            orderNo: existingOrder.orderNo ?? gridActivity.code ?? gridActivity.activityId,
-                            orderedAt: "",
-                            activity: { activityId: gridActivity.activityId, title: gridActivity.title, time: gridActivity.time, venueName: gridActivity.venueName, priceLabel: gridActivity.priceLabel, moneyFlow: gridActivity.moneyFlow, venueSpend: gridActivity.venueSpend, joined: gridActivity.joined, capacity: gridActivity.capacity },
-                            time: gridActivity.time,
-                            place: { name: gridActivity.venueName },
-                          });
-                          setOrderExisting(true);
-                          setOrderCodeCopied(false);
-                          setOrderDone(true);
-                          setJoinConfirmOpen(true);
-                        }}
-                        style={styles.viewExistingOrderBtn}
-                      >
-                        <Text selectable style={styles.viewExistingOrderText}>{t("viewExistingOrder")} ›</Text>
-                      </Pressable>
-                    ) : null}
+                    {/* HOME-FORYOU-ORDER-008：原来这里还有一个「查看这张订单 ›」
+                        次级按钮，现在 CTA 本身在有票时就是它（同一个入口写两遍
+                        = 迟早只改一处，而且两颗一模一样的按钮并排是噪音）。 */}
                     <Modal animationType="slide" onRequestClose={closeOrderFlow} visible={joinConfirmOpen}>
                       {orderDone ? (
                         <View style={[styles.confirmPage, styles.orderPage]}>
@@ -2051,7 +2133,8 @@ export function RequesterHome({
                           <HorizontalSwipeRail contentContainerStyle={styles.photoChooserRail}>
                             {sceneActivities.map((a, i) => {
                               const scene = sceneBriefs.find((s) => s.id === a.realitySceneId || s.name === a.venueName);
-                              const photo = a.coverImageUrl || scene?.imageUrl;
+                              // ACTIVITY-COVER-001：活动封面优先用商家传的媒体资产；都没有才退回场景图。
+const photo = activityCoverUri(a, localApiBaseUrl) || scene?.imageUrl;
                               const selected = i === activityIndex % sceneActivities.length;
                               return (
                                 <Pressable key={a.activityId} onPress={() => { setActivityIndex(i); setChooser(null); }} style={[styles.photoChooserCard, selected && styles.photoChooserCardSelected]}>
@@ -2791,7 +2874,7 @@ function freeSlotForDistinctTime(label: string | undefined): { startIso: string;
 // HANOI_FALLBACK_ORIGIN is where the nearby read is centred when the device has
 // no location (a simulator with no simulated position, or a user who declined
 // the permission). Hanoi is deliberate: the server-side dev coordinates are
-// tiered around Hanoi (scripts/dev-distance-tiers.mjs), so the rail still shows
+// tiered around Hanoi (cmd/devdata distance-tiers), so the rail still shows
 // properly ordered content instead of falling back to the fixture.
 //
 // It changes which point distances are measured FROM. It never invents anyone's
@@ -2934,8 +3017,6 @@ const styles = StyleSheet.create({
   chainHint: { color: color.muted, fontSize: 11, marginTop: 8, textAlign: "center" },
   joinMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },
   // 确认下单失败（满员/已下架/网络）贴在底栏上方，不再埋在可滚动内容最底下看不见。
-  viewExistingOrderBtn: { alignSelf: "center", paddingHorizontal: 12, paddingVertical: 6 },
-  viewExistingOrderText: { color: color.ink, fontSize: 13, fontWeight: "800", textDecorationLine: "underline" },
   confirmJoinError: { color: color.error, fontSize: 13, fontWeight: "600", paddingHorizontal: 20, paddingVertical: 8, textAlign: "center" },
   // HOME-FORYOU-ORDER-001：确认下单整屏，跟 reality-scene-map.tsx 的
   // DIRECT-INVITE-CONFIRM-001 同一套版式/取值，方便两处视觉一致。

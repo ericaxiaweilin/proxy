@@ -152,7 +152,9 @@ func main() {
 	businessService := business.New()
 	relationshipService := relationship.New()
 	paymentService := payment.New()
-	notificationService := notification.NewWithPushProvider(nil, configuredNotificationPush())
+	// NOTIF-PUSH-001：内存模式没有 PG，也就没有设备令牌表 —— 传 nil 给
+	// 分发器（它会在拿不到 lister 时不推），这里只记日志。
+	notificationService := notification.NewWithPushProvider(nil, configuredNotificationPush(nil))
 	safetyService := safety.New()
 	// COMP-REPORT-001: 举报受理。法律文件 §38 承诺可举报八类目标，
 	// 之前只有 engagement.ReportPost（POST）一类接得上。
@@ -325,7 +327,8 @@ func main() {
 		walletService.SetSimulatedRecharge(os.Getenv("WALLET_SIMULATED_RECHARGE") == "1")
 		profileService = profile.NewWithRepository(postgres.NewProfileRepository(pool))
 		socialSpaceService = socialspace.NewWithRepository(postgres.NewSocialSpaceRepository(pool))
-		businessService = business.NewWithRepository(postgres.NewBusinessRepository(pool))
+		businessRepository := postgres.NewBusinessRepository(pool)
+		businessService = business.NewWithRepository(businessRepository)
 		// R36.x MENU-001: storefront photo/menu uploads go through the
 		// media pipeline; attaching them to a store publishes the
 		// assets to PUBLIC so thumb/play URLs resolve.
@@ -335,7 +338,10 @@ func main() {
 		identityService.SetProfileMediaAuthorizer(mediaService)
 		relationshipService = relationship.NewWithRepository(postgres.NewRelationshipRepository(pool))
 		paymentService = payment.NewWithRepository(postgres.NewPaymentRepository(pool, outboxRepository))
-		notificationService = notification.NewWithPushProvider(postgres.NewNotificationRepository(pool), configuredNotificationPush())
+		// NOTIF-PUSH-001：推送通道要能把「收件人」翻译成「哪几台设备」，
+		// 所以分发器必须拿到 **PG 的** notification 仓（内存仓没有设备令牌）。
+		notificationRepository := postgres.NewNotificationRepository(pool)
+		notificationService = notification.NewWithPushProvider(notificationRepository, configuredNotificationPush(notificationRepository))
 		safetyService = safety.NewWithRepository(postgres.NewSafetyRepository(pool))
 		moderationService = moderation.NewWithRepository(postgres.NewModerationRepository(pool))
 		storeOnboardingService = storeonboarding.NewWithRepository(postgres.NewStoreOnboardingRepository(pool))
@@ -351,6 +357,8 @@ func main() {
 		sceneReviewService = scenereview.New(postgres.NewSceneReviewRepository(pool), realitySceneService)
 		marketplaceService = marketplace.NewWithRepository(postgres.NewMarketplaceRepository(pool))
 		activityService = activity.NewWithRepository(postgres.NewActivityRepository(pool))
+		// MERCHANT-OUTCOME-PROJECTION-001：活动订单投影商家经营结果（spend_daily）。
+		activityService.SetOrderProjector(businessRepository)
 		facetService = facet.NewWithRepository(postgres.NewFacetRepository(pool))
 		facetService.SeedDefaults()
 		experienceService = experience.NewWithRepository(postgres.NewExperienceRepository(pool))

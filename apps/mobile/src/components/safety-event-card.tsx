@@ -22,11 +22,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { color } from "../theme";
+import { getLanguage, translate, useI18n, type Language, type MessageKey } from "../i18n";
 import {
   type EmergencyClient,
   type EmergencyEvent,
   EmergencyError,
-  VN_EMERGENCY_NUMBERS,
+  vnEmergencyNumbers,
   coarseLocationLabel,
   deliveryDisclaimer,
   handOffLabel,
@@ -45,15 +46,18 @@ export function SafetyEventCard({
 }): React.JSX.Element {
   const [events, setEvents] = useState<EmergencyEvent[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // I18N-SAFETY-002：错误存**原因**、渲染时再翻译（HOME-I18N-001 的形状）。
+  // notice 存键不存串，同理：记下事件后切语言，那句提示也要跟着换。
+  const { lang, t } = useI18n();
+  const [error, setError] = useState<ErrorCause | null>(null);
+  const [notice, setNotice] = useState<MessageKey | null>(null);
 
   const reload = useCallback(async () => {
     try {
       const page = await client.listEvents(10);
       setEvents(page.events);
     } catch (e) {
-      setError(messageFor(e));
+      setError(errorCauseFor(e));
     }
   }, [client]);
 
@@ -65,7 +69,7 @@ export function SafetyEventCard({
         const page = await client.listEvents(10);
         if (!cancelled) setEvents(page.events);
       } catch (e) {
-        if (!cancelled) setError(messageFor(e));
+        if (!cancelled) setError(errorCauseFor(e));
       }
     })();
     return () => {
@@ -96,14 +100,10 @@ export function SafetyEventCard({
         ...(fix ? { latitude: fix.latitude, longitude: fix.longitude } : {}),
         ...extra,
       });
-      setNotice(
-        event.locationRecorded
-          ? "已记录这条事件，并记录了粗化后的位置。"
-          : "已记录这条事件。位置没有记录 —— 需要先开启位置授权。",
-      );
+      setNotice(event.locationRecorded ? "safetyNoticeWithLocation" : "safetyNoticeNoLocation");
       await reload();
     } catch (e) {
-      setError(messageFor(e));
+      setError(errorCauseFor(e));
     } finally {
       setBusy(false);
     }
@@ -116,24 +116,22 @@ export function SafetyEventCard({
     try {
       await Linking.openURL(`tel:${number}`);
     } catch {
-      setError(`打不开拨号盘，请手动拨打 ${number}。`);
+      setError({ kind: "key", key: "safetyDialerFailed", vars: { number } });
     }
   };
 
   return (
     <View style={styles.wrap}>
-      <Text selectable style={styles.title}>安全事件</Text>
-      <Text selectable style={styles.desc}>
-        一键求助只做两件事：把这一刻记下来，并帮你打开拨号盘。见面签到记录一次「我到了」。
-      </Text>
+      <Text selectable style={styles.title}>{t("safetyTitle")}</Text>
+      <Text selectable style={styles.desc}>{t("safetyDesc")}</Text>
       {/* 免责声明放在按钮**上面**：用户按下之前就该看到，而不是事后。 */}
-      <Text selectable style={styles.disclaimer}>{deliveryDisclaimer()}</Text>
+      <Text selectable style={styles.disclaimer}>{deliveryDisclaimer(lang)}</Text>
 
       <View style={styles.dialRow}>
-        {VN_EMERGENCY_NUMBERS.map((row) => (
+        {vnEmergencyNumbers(lang).map((row) => (
           <Pressable
             key={row.number}
-            accessibilityLabel={`拨打 ${row.number}（${row.label}）`}
+            accessibilityLabel={t("safetyDialA11y", { number: row.number, label: row.label })}
             disabled={busy}
             onPress={() => void dial(row.number)}
             style={[styles.dialBtn, busy ? styles.btnDisabled : null]}
@@ -149,23 +147,23 @@ export function SafetyEventCard({
         onPress={() => void record("MEETUP_CHECKIN")}
         style={[styles.secondaryBtn, busy ? styles.btnDisabled : null]}
       >
-        <Text selectable style={styles.secondaryBtnText}>记录一次见面签到</Text>
+        <Text selectable style={styles.secondaryBtnText}>{t("safetyCheckin")}</Text>
       </Pressable>
 
-      {notice ? <Text selectable style={styles.notice}>{notice}</Text> : null}
-      {error ? <Text selectable style={styles.error}>{error}</Text> : null}
+      {notice ? <Text selectable style={styles.notice}>{t(notice)}</Text> : null}
+      {error ? <Text selectable style={styles.error}>{errorText(error)}</Text> : null}
 
-      <Text selectable style={styles.logTitle}>最近记录</Text>
+      <Text selectable style={styles.logTitle}>{t("safetyLogTitle")}</Text>
       {events.length === 0 ? (
-        <Text selectable style={styles.empty}>还没有记录。</Text>
+        <Text selectable style={styles.empty}>{t("safetyLogEmpty")}</Text>
       ) : (
         events.map((event) => (
           <View key={event.eventId} style={styles.eventRow}>
             <Text selectable style={styles.eventKind}>
-              {event.kind === "SOS" ? "求助" : "见面签到"} · {shortTime(event.occurredAt)}
+              {t(event.kind === "SOS" ? "safetyKindSos" : "safetyKindCheckin")} · {shortTime(event.occurredAt, lang)}
             </Text>
-            <Text selectable style={styles.eventLine}>{handOffLabel(event)}</Text>
-            <Text selectable style={styles.eventLine}>{coarseLocationLabel(event)}</Text>
+            <Text selectable style={styles.eventLine}>{handOffLabel(event, lang)}</Text>
+            <Text selectable style={styles.eventLine}>{coarseLocationLabel(event, lang)}</Text>
             {event.note ? <Text selectable style={styles.eventLine}>{event.note}</Text> : null}
           </View>
         ))
@@ -174,29 +172,37 @@ export function SafetyEventCard({
   );
 }
 
-function shortTime(iso: string): string {
+function shortTime(iso: string, lang: Language): string {
   const ms = Date.parse(iso);
-  if (Number.isNaN(ms)) return "时间未知";
+  if (Number.isNaN(ms)) return translate(lang, "safetyTimeUnknown");
   const d = new Date(ms);
   const pad = (n: number): string => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function messageFor(e: unknown): string {
+type ErrorCause =
+  | { kind: "key"; key: MessageKey; vars?: Record<string, string | number> }
+  | { kind: "raw"; raw: string };
+
+function errorCauseFor(e: unknown): ErrorCause {
   if (e instanceof EmergencyError) {
     switch (e.code) {
       case "INVALID_EMERGENCY_LOCATION":
-        return "位置数据不完整，这条没有记录。";
+        return { kind: "key", key: "safetyErrLocationIncomplete" };
       case "INVALID_EMERGENCY_EVENT":
-        return "这条记录没被接受，请重试。";
+        return { kind: "key", key: "safetyErrRejected" };
       case "AUTH_REQUIRED":
-        return "登录已过期，请重新登录。";
+        return { kind: "key", key: "consentSessionExpired" };
       default:
-        return `记录失败（${e.code}）。`;
+        return { kind: "key", key: "safetyErrFailed", vars: { code: e.code } };
     }
   }
-  if (e instanceof Error) return e.message;
-  return "出错了，请稍后重试。";
+  if (e instanceof Error) return { kind: "raw", raw: e.message };
+  return { kind: "key", key: "consentGenericError" };
+}
+
+function errorText(cause: ErrorCause): string {
+  return cause.kind === "raw" ? cause.raw : translate(getLanguage(), cause.key, cause.vars);
 }
 
 const styles = StyleSheet.create({

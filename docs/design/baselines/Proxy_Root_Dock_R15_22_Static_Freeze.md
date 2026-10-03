@@ -12,7 +12,7 @@
 - 生产实现：`apps/mobile/src/shell/app-shell.tsx`
 - 冻结时生产实现 SHA-256：`4a864917d2b1e734f7ea066a136de7a13ba96eb03884aa96bdb83ce2e50821e6`
 - Icon Registry：`apps/mobile/src/components/proxy-icon.tsx`
-- 自动检查：`node scripts/check-liquid-dock-baseline.mjs`
+- 自动检查：`REPO_ROOT="$PWD" go -C apps/api-go run ./cmd/gatecheck liquid-dock`
 
 ## 已审核并冻结
 

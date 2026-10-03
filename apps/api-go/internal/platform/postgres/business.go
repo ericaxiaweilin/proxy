@@ -10,21 +10,21 @@ import (
 )
 
 func (r *BusinessRepository) UpsertAggregatedDemandSignal(ctx context.Context, s business.AggregatedDemandSignal) error {
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `INSERT INTO business.aggregated_demand_signals (business_id,total_matching_demand,confirmed_arrivals,high_probability_arrivals,confidence,recorded_at) VALUES ($1,$2,$3,$4,$5,$6)`, s.BusinessID, s.TotalMatchingDemand, s.ConfirmedArrivals, s.HighProbabilityArrivals, s.Confidence, s.RecordedAt)
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `INSERT INTO business.aggregated_demand_signals (business_id,total_matching_demand,confirmed_arrivals,high_probability_arrivals,confidence,recorded_at,source) VALUES ($1,$2,$3,$4,$5,$6,COALESCE(NULLIF($7,''),'MEASURED'))`, s.BusinessID, s.TotalMatchingDemand, s.ConfirmedArrivals, s.HighProbabilityArrivals, s.Confidence, s.RecordedAt, s.Source)
 	return err
 }
 func (r *BusinessRepository) LatestAggregatedDemandSignal(ctx context.Context, id string) (business.AggregatedDemandSignal, error) {
 	var s business.AggregatedDemandSignal
-	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `SELECT business_id,total_matching_demand,confirmed_arrivals,high_probability_arrivals,confidence,recorded_at FROM business.aggregated_demand_signals WHERE business_id=$1 ORDER BY recorded_at DESC LIMIT 1`, id).Scan(&s.BusinessID, &s.TotalMatchingDemand, &s.ConfirmedArrivals, &s.HighProbabilityArrivals, &s.Confidence, &s.RecordedAt)
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `SELECT business_id,total_matching_demand,confirmed_arrivals,high_probability_arrivals,confidence,recorded_at,source FROM business.aggregated_demand_signals WHERE business_id=$1 ORDER BY recorded_at DESC LIMIT 1`, id).Scan(&s.BusinessID, &s.TotalMatchingDemand, &s.ConfirmedArrivals, &s.HighProbabilityArrivals, &s.Confidence, &s.RecordedAt, &s.Source)
 	return s, err
 }
 func (r *BusinessRepository) UpsertSceneSupplySnapshot(ctx context.Context, s business.SceneSupplySnapshot) error {
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `INSERT INTO business.scene_supply_snapshots (business_id,store_id,scene_id,current_capacity_pct,forecast_capacity_pct,accepting_traffic,confidence,recorded_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, s.BusinessID, s.StoreID, s.SceneID, s.CurrentCapacityPct, s.ForecastCapacityPct, s.AcceptingTraffic, s.Confidence, s.RecordedAt)
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `INSERT INTO business.scene_supply_snapshots (business_id,store_id,scene_id,current_capacity_pct,forecast_capacity_pct,accepting_traffic,confidence,recorded_at,source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE(NULLIF($9,''),'MEASURED'))`, s.BusinessID, s.StoreID, s.SceneID, s.CurrentCapacityPct, s.ForecastCapacityPct, s.AcceptingTraffic, s.Confidence, s.RecordedAt, s.Source)
 	return err
 }
 func (r *BusinessRepository) LatestSceneSupplySnapshot(ctx context.Context, id string) (business.SceneSupplySnapshot, error) {
 	var s business.SceneSupplySnapshot
-	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `SELECT business_id,store_id,scene_id,current_capacity_pct,forecast_capacity_pct,accepting_traffic,confidence,recorded_at FROM business.scene_supply_snapshots WHERE business_id=$1 ORDER BY recorded_at DESC LIMIT 1`, id).Scan(&s.BusinessID, &s.StoreID, &s.SceneID, &s.CurrentCapacityPct, &s.ForecastCapacityPct, &s.AcceptingTraffic, &s.Confidence, &s.RecordedAt)
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `SELECT business_id,store_id,scene_id,current_capacity_pct,forecast_capacity_pct,accepting_traffic,confidence,recorded_at,source FROM business.scene_supply_snapshots WHERE business_id=$1 ORDER BY recorded_at DESC LIMIT 1`, id).Scan(&s.BusinessID, &s.StoreID, &s.SceneID, &s.CurrentCapacityPct, &s.ForecastCapacityPct, &s.AcceptingTraffic, &s.Confidence, &s.RecordedAt, &s.Source)
 	return s, err
 }
 
@@ -81,12 +81,17 @@ func (r *BusinessRepository) GetMembership(ctx context.Context, businessID, user
 }
 
 func (r *BusinessRepository) ListAccountsForUser(ctx context.Context, userID string) ([]business.Account, error) {
+	// MERCHANT-AVATAR-001（2026-10-02，用户 P0「企业店铺的头像用了用户侧的头像」）：
+	// 这里以前 LEFT JOIN identity.profiles 取 owner 的个人头像填进
+	// Account.AvatarPath —— 于是企业/店铺身份卡上显示的是**店主的脸**。
+	// 店主的脸不是店的脸：business.accounts 本来就没有 avatar 列，
+	// 店的视觉只能来自店自己的资产（store_lines.logo_asset_path / 店铺照片），
+	// 都没有就老实显示首字。绝不能拿用户的个人头像冒充。
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT a.id, a.owner_user_id, a.name, a.status, a.created_at,
-			COALESCE(p.avatar_path, '')
+			''
 		FROM business.accounts a
 		JOIN business.memberships m ON m.business_id=a.id
-		LEFT JOIN identity.profiles p ON p.user_account_id=a.owner_user_id
 		WHERE m.user_id=$1 AND m.status='ACTIVE' AND a.status='ACTIVE'
 		ORDER BY a.created_at DESC`, userID)
 	if err != nil {
@@ -369,6 +374,62 @@ func (r *BusinessRepository) AddSpend(ctx context.Context, businessID, orderID s
 	return err
 }
 
+// ProjectActivityOrder 是 activity.OrderProjector 的 PG 实现
+// （MERCHANT-OUTCOME-PROJECTION-001）。归因链：活动挂的现实场景 → 认领该场景的
+// 门店（stores.reality_scene_id，店主自己认领，不猜不回填）→ 门店所属商家。
+// 场景没被任何门店认领 ⇒ 这单不属于任何商家的经营结果，静默不投影。
+//
+// gross_minor 恒为 0：支付还没接，成交金额没有事实来源，不编数。
+// 新客/复访：同一场景下本人是否还有别的未取消报名（不含本活动）——有 ⇒ 复访。
+// 取消扣回扣的是**下单那天**的桶（joined_at::date），不是取消那天；
+// 新客/复访按扣回时刻的近似判定并 GREATEST 夹到 0，宁可少扣不可扣成负数。
+func (r *BusinessRepository) ProjectActivityOrder(ctx context.Context, sceneID, activityID, actorID string, counted bool) error {
+	var businessID string
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx,
+		`SELECT business_id FROM business.stores WHERE reality_scene_id=$1 ORDER BY id LIMIT 1`, sceneID).Scan(&businessID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if counted {
+		_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
+			INSERT INTO business.spend_daily AS sd (business_id, bucket_date, order_count, gross_minor, new_customer_count, returning_customer_count)
+			SELECT $4, CURRENT_DATE, 1, 0,
+			       CASE WHEN b.returning THEN 0 ELSE 1 END,
+			       CASE WHEN b.returning THEN 1 ELSE 0 END
+			FROM (SELECT EXISTS (
+				SELECT 1 FROM activity.participants p
+				JOIN activity.activities a ON a.id = p.activity_id
+				WHERE p.actor_id = $3 AND p.activity_id <> $2 AND p.state <> 'CANCELLED'
+				  AND a.payload->>'realitySceneId' = $1) AS returning) b
+			ON CONFLICT (business_id, bucket_date) DO UPDATE SET
+				order_count = sd.order_count + 1,
+				new_customer_count = sd.new_customer_count + EXCLUDED.new_customer_count,
+				returning_customer_count = sd.returning_customer_count + EXCLUDED.returning_customer_count`,
+			sceneID, activityID, actorID, businessID)
+		return err
+	}
+	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO business.spend_daily AS sd (business_id, bucket_date, order_count, gross_minor, new_customer_count, returning_customer_count)
+		SELECT $4, j.d, -1, 0,
+		       CASE WHEN j.has_other THEN 0 ELSE -1 END,
+		       CASE WHEN j.has_other THEN -1 ELSE 0 END
+		FROM (SELECT p.joined_at::date AS d, EXISTS (
+			SELECT 1 FROM activity.participants p2
+			JOIN activity.activities a2 ON a2.id = p2.activity_id
+			WHERE p2.actor_id = p.actor_id AND p2.activity_id <> p.activity_id AND p2.state <> 'CANCELLED'
+			  AND a2.payload->>'realitySceneId' = $1) AS has_other
+		      FROM activity.participants p WHERE p.activity_id = $2 AND p.actor_id = $3) j
+		ON CONFLICT (business_id, bucket_date) DO UPDATE SET
+			order_count = GREATEST(sd.order_count - 1, 0),
+			new_customer_count = GREATEST(sd.new_customer_count + EXCLUDED.new_customer_count, 0),
+			returning_customer_count = GREATEST(sd.returning_customer_count + EXCLUDED.returning_customer_count, 0)`,
+		sceneID, activityID, actorID, businessID)
+	return err
+}
+
 func (r *BusinessRepository) SpendSummary(ctx context.Context, businessID string) (int64, error) {
 	var total int64
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
@@ -378,18 +439,18 @@ func (r *BusinessRepository) SpendSummary(ctx context.Context, businessID string
 
 func (r *BusinessRepository) CreateProduct(ctx context.Context, p business.StoreProduct) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO business.store_products (id, store_id, business_id, name, description, price_minor, currency, category, scene, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-		p.ID, p.StoreID, p.BusinessID, p.Name, p.Description, p.PriceMinor, p.Currency, p.Category, p.Scene, p.PhotoAssetPath, p.MediaAssetID, p.Available, p.SortOrder, p.CreatedAt, p.UpdatedAt)
+		INSERT INTO business.store_products (id, store_id, business_id, name, description, price_minor, currency, category, scene, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at, is_hot)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+		p.ID, p.StoreID, p.BusinessID, p.Name, p.Description, p.PriceMinor, p.Currency, p.Category, p.Scene, p.PhotoAssetPath, p.MediaAssetID, p.Available, p.SortOrder, p.CreatedAt, p.UpdatedAt, p.IsHot)
 	return err
 }
 
 func (r *BusinessRepository) GetProduct(ctx context.Context, productID string) (business.StoreProduct, error) {
 	var p business.StoreProduct
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, store_id, business_id, name, description, price_minor, currency, category, scene, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at
+		SELECT id, store_id, business_id, name, description, price_minor, currency, category, scene, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at, COALESCE(is_hot, false)
 		FROM business.store_products WHERE id=$1`, productID).Scan(
-		&p.ID, &p.StoreID, &p.BusinessID, &p.Name, &p.Description, &p.PriceMinor, &p.Currency, &p.Category, &p.Scene, &p.PhotoAssetPath, &p.MediaAssetID, &p.Available, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt,
+		&p.ID, &p.StoreID, &p.BusinessID, &p.Name, &p.Description, &p.PriceMinor, &p.Currency, &p.Category, &p.Scene, &p.PhotoAssetPath, &p.MediaAssetID, &p.Available, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt, &p.IsHot,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return business.StoreProduct{}, errors.New("product not found")
@@ -401,15 +462,15 @@ func (r *BusinessRepository) UpdateProduct(ctx context.Context, p business.Store
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		UPDATE business.store_products SET
 			name=$2, description=$3, price_minor=$4, currency=$5, category=$6, scene=$7, photo_asset_path=$8,
-			media_asset_id=$9, available=$10, sort_order=$11, updated_at=$12
+			media_asset_id=$9, available=$10, sort_order=$11, updated_at=$12, is_hot=$13
 		WHERE id=$1`,
-		p.ID, p.Name, p.Description, p.PriceMinor, p.Currency, p.Category, p.Scene, p.PhotoAssetPath, p.MediaAssetID, p.Available, p.SortOrder, p.UpdatedAt)
+		p.ID, p.Name, p.Description, p.PriceMinor, p.Currency, p.Category, p.Scene, p.PhotoAssetPath, p.MediaAssetID, p.Available, p.SortOrder, p.UpdatedAt, p.IsHot)
 	return err
 }
 
 func (r *BusinessRepository) ListProducts(ctx context.Context, storeID string) ([]business.StoreProduct, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, store_id, business_id, name, description, price_minor, currency, category, scene, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at
+		SELECT id, store_id, business_id, name, description, price_minor, currency, category, scene, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at, COALESCE(is_hot, false)
 		FROM business.store_products WHERE store_id=$1 ORDER BY sort_order, created_at`, storeID)
 	if err != nil {
 		return nil, err
@@ -419,7 +480,7 @@ func (r *BusinessRepository) ListProducts(ctx context.Context, storeID string) (
 	for rows.Next() {
 		var p business.StoreProduct
 		if err := rows.Scan(
-			&p.ID, &p.StoreID, &p.BusinessID, &p.Name, &p.Description, &p.PriceMinor, &p.Currency, &p.Category, &p.Scene, &p.PhotoAssetPath, &p.MediaAssetID, &p.Available, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt,
+			&p.ID, &p.StoreID, &p.BusinessID, &p.Name, &p.Description, &p.PriceMinor, &p.Currency, &p.Category, &p.Scene, &p.PhotoAssetPath, &p.MediaAssetID, &p.Available, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt, &p.IsHot,
 		); err != nil {
 			return nil, err
 		}

@@ -100,6 +100,8 @@ PODS:
   - ExpoModulesWorklets (57.0.10):
     - ExpoModulesCore
     - ExpoModulesJSI
+  - ExpoNotifications (57.0.21):
+    - ExpoModulesCore
   - ExpoSecureStore (57.0.1):
     - ExpoModulesCore
   - ExpoSpeechRecognition (56.0.1):
@@ -2149,6 +2151,7 @@ DEPENDENCIES:
   - "ExpoModulesCore (from `../../../node_modules/.pnpm/expo-modules-core@57.0.10_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1___9845b473173f4cdf4ecf880a57783fff/node_modules/expo-modules-core/ExpoModulesCore.podspec`)"
   - "ExpoModulesJSI (from `../../../node_modules/.pnpm/expo-modules-jsi@57.0.4_patch_hash=a78d1a4c55dadc7e20e76b76bfdfdca2a3419cdf107a542a8981_88216104a3087e678fb3ceac78a09733/node_modules/expo-modules-jsi/apple`)"
   - "ExpoModulesWorklets (from `../../../node_modules/.pnpm/expo-modules-core@57.0.10_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1___9845b473173f4cdf4ecf880a57783fff/node_modules/expo-modules-core/ExpoModulesWorklets.podspec`)"
+  - "ExpoNotifications (from `../../../node_modules/.pnpm/expo-notifications@57.0.21_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports_f38a7f5b215048617f5b33689175ab8e/node_modules/expo-notifications/ios`)"
   - "ExpoSecureStore (from `../../../node_modules/.pnpm/expo-secure-store@57.0.1_expo@57.0.12/node_modules/expo-secure-store/ios`)"
   - "ExpoSpeechRecognition (from `../../../node_modules/.pnpm/expo-speech-recognition@56.0.1_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supp_106c999af36e86e2c96298f748ee76e4/node_modules/expo-speech-recognition/ios`)"
   - "ExpoSystemUI (from `../../../node_modules/.pnpm/expo-system-ui@57.0.2_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-colo_e3c1f808f544aa20c981f86a59a4769d/node_modules/expo-system-ui/ios`)"
@@ -2288,6 +2291,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.pnpm/expo-modules-jsi@57.0.4_patch_hash=a78d1a4c55dadc7e20e76b76bfdfdca2a3419cdf107a542a8981_88216104a3087e678fb3ceac78a09733/node_modules/expo-modules-jsi/apple"
   ExpoModulesWorklets:
     :podspec: "../../../node_modules/.pnpm/expo-modules-core@57.0.10_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1___9845b473173f4cdf4ecf880a57783fff/node_modules/expo-modules-core/ExpoModulesWorklets.podspec"
+  ExpoNotifications:
+    :path: "../../../node_modules/.pnpm/expo-notifications@57.0.21_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports_f38a7f5b215048617f5b33689175ab8e/node_modules/expo-notifications/ios"
   ExpoSecureStore:
     :path: "../../../node_modules/.pnpm/expo-secure-store@57.0.1_expo@57.0.12/node_modules/expo-secure-store/ios"
   ExpoSpeechRecognition:
@@ -2488,6 +2493,7 @@ SPEC CHECKSUMS:
   ExpoModulesCore: 37a0cbd00b82daca9344b63ead4adf9c80b4e35a
   ExpoModulesJSI: b20fefa4cdd9097e7e6b715466d1900b8c5d4711
   ExpoModulesWorklets: 53d4ca8d32225cb3ec4660b9f03496192b4f3cac
+  ExpoNotifications: d432d5b2904f700a6a2dc29eca52e531c4cc1611
   ExpoSecureStore: 94793113049a2d7478dfe1a13aa15081e9f61755
   ExpoSpeechRecognition: 119acf84448579e53f841d040aad76982f945e2d
   ExpoSystemUI: ff3142b323ae7b4d11dc0b1dc4acfa30d92be7dc

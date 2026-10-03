@@ -32,8 +32,19 @@ export class NotificationClient {
 
   public async listInbox(): Promise<InboxItem[]> {
     const body = this.body(await this.command("ListInbox", { type: "Inbox", id: "list" }, {}));
-    if (!Array.isArray(body.items)) throw new Error("inbox malformed");
-    return body.items as InboxItem[];
+    // NOTIF-EMPTY-LIST-001：`items` 缺失或为 null 表示**空收件箱**，不是协议破损。
+    //
+    // 服务端（Go）把 nil 切片序列化成 `null` 而不是 `[]` —— 这条路径上一版
+    // 直接 `if (!Array.isArray(body.items)) throw`，于是**收件箱为空的用户**
+    // 看到的是「通知没取到，下拉重试」的失败态，而不是「还没有通知」的空态。
+    // 现网只有 2 个收件人有行，其余全部命中，所以这个 bug 对绝大多数用户
+    // 都是 100% 复现的。
+    //
+    // 服务端已修（空列表发 `[]`）。这里同时放宽：真正的破损是「items 存在但不是
+    // 数组」（比如是个对象或字符串），那仍然抛 —— 别把「服务端换了协议」也一起吞掉。
+    const items = body.items ?? [];
+    if (!Array.isArray(items)) throw new Error("inbox malformed");
+    return items as InboxItem[];
   }
 
   public async markRead(inboxId: string): Promise<void> {

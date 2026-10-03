@@ -5,6 +5,14 @@ import { fileURLToPath } from "node:url";
 
 import { detectOrderConflict, type ExistingOrder } from "./requester-home-combo";
 
+// 剥注释再判「不许出现」：源码里的注释会解释「为什么不许用泛化文案」，
+// 复述被禁的词本身不是用它们（与本仓其它 stripComments 同款）。
+function stripComments(s: string): string {
+  return s
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+}
+
 // HOME-FORYOU-SLOT-AVAIL-001（用户：「点什么都灰。理论上我们 for you 是4个资源槽
 // 检测冲突 4个全部不可用才灰，有一个可用都不能灰」）。
 //
@@ -80,9 +88,20 @@ describe("For You 四槽可用性（HOME-FORYOU-SLOT-AVAIL-001）", () => {
     // 第一版无论修没修好都 return，于是「修不好」的组合（比如这个时间没有替代值）
     // 会让按钮永远只弹消息、进不去确认页 —— 表现为「点击没响应」。
     // 现在必须说明白为什么走不通、以及该动哪个轴。
-    expect(source).toMatch(/showResponse\([\s\S]{0,200}slotTimeClash/);
+    //
+    // HOME-FORYOU-CONFLICT-DETAIL-001：主文案必须是**详细**冲突文案
+    // （哪一单/哪个值挡的 —— orderConflictText / comboConflictText），不许退回
+    // 泛化的 t("slotTimeClash") / t("slotPlaceClash")：泛化版不告诉用户挡着的是
+    // 哪一单，「先取消那一单」就没法执行。副文案（slotTimeClashSub /
+    // slotPlaceClashSub）保持「该怎么办」。
+    expect(source).toMatch(
+      /showResponse\(\s*orderConflict\?\.kind === "TIME_TAKEN" \? orderConflictText\(orderConflict\) : comboConflictText,/,
+    );
     expect(source).toMatch(/t\("slotTimeClashSub"\)/);
-    expect(source).toMatch(/t\("slotPlaceClash"\)/);
+    expect(source).toMatch(/t\("slotPlaceClashSub"\)/);
+    // 反向臂：泛化主文案不许回来（剥注释后数出现次数 —— 本测试文件自身的
+    // 注释里会提到这些词，所以用 stripComments 后的 source 判断）。
+    expect(stripComments(source)).not.toMatch(/t\("slotTimeClash"\)|t\("slotPlaceClash"\)/);
   });
 
   it("「缺人」仍然不能进确认页（人是一单的一部分）", () => {

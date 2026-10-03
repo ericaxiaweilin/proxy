@@ -40,6 +40,66 @@ type AgentProfile struct {
 	Status       string    `json:"status"`       // DRAFT | ACTIVE | SUSPENDED
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
+	// CREATOR-SOCIAL-001：关联社媒（展示用附属属性，migration 157）。
+	Socials []AgentSocial `json:"socials,omitempty"`
+	// CREATOR-HOME-001（2026-10-02，用户「不能进入proxy账户的个人公共主页」）：
+	// 平台早有公开主页（OtherProfileSurface，feed 点头像走的就是它），
+	// 商家横滑卡要点人脸进主页，必须给移动端 agent→user 的链路。
+	// user_account_id 列本来就在表里，只是 wire 上没透出来。
+	UserAccountID string `json:"userAccountId,omitempty"`
+}
+
+// AgentSocial 是一条关联社媒。只存用户名不存 URL —— 显示时的 canonical 链接
+// 由客户端按平台拼（tiktok.com/@handle 等），服务端不接受任意外部地址
+// （那是钓鱼链接的入口）。
+type AgentSocial struct {
+	// 平台，封闭集合（见 isValidSocialPlatform）。
+	Platform string `json:"platform"`
+	// 用户名，不含 @，不含 URL，不含空白。
+	Handle string `json:"handle"`
+	// 可见性，封闭集合（见 SOCIAL-VISIBILITY-001）。
+	Visibility string `json:"visibility"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+
+// CREATOR-SOCIAL-001：平台封闭集合。加新平台要改这里 + migration CHECK + 客户端
+// 链接拼法，三处一起（漏一处就会出现"存得进、显示不出"或反过来）。
+var validSocialPlatforms = map[string]bool{
+	"tiktok": true, "zalo": true, "instagram": true, "facebook": true,
+}
+
+// CREATOR-SOCIAL-001：可见性封闭集合。
+//   public   —— 所有人可见（含未登录的公开浏览）；
+//   merchants —— 仅已验商家 + 本人可见（默认，见 LinkAgentSocial）；
+//   private  —— 仅本人可见（商家页永远看不到这条，不是"隐藏后还能看到"）。
+var validSocialVisibilities = map[string]bool{
+	"public": true, "merchants": true, "private": true,
+}
+
+func isValidSocialPlatform(platform string) bool {
+	return validSocialPlatforms[platform]
+}
+
+func isValidSocialVisibility(visibility string) bool {
+	return validSocialVisibilities[visibility]
+}
+
+// CREATOR-SOCIAL-001：handle 形状。只允许字母数字下划线点横杠（各平台用户名的
+// 最大公约数），1..64 字符。含 ://、/、空白、@ 的一律拒 ——
+// 这些要么是 URL 冒充用户名，要么是拼链接时会坏掉的字符。
+func isValidSocialHandle(handle string) bool {
+	if len(handle) == 0 || len(handle) > 64 {
+		return false
+	}
+	for _, r := range handle {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '_', r == '.', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // AgentService 是 Agent 提供的一项服务（当前类别：CITY_COMPANION）。
@@ -116,6 +176,8 @@ type AvailabilitySnapshot struct {
 // Candidate 是有限候选集成员（快照，之后 Agent 变化不改历史）。
 type Candidate struct {
 	AgentID        string               `json:"agentId"`
+	// CREATOR-HOME-001：同上，候选列表直接带 userAccountId，省一次 passport 查询。
+	UserAccountID  string               `json:"userAccountId,omitempty"`
 	Name           string               `json:"name"`
 	Languages      []string             `json:"languages"`
 	ServiceType    string               `json:"serviceType"`
@@ -485,6 +547,7 @@ func cloneProfile(p AgentProfile) AgentProfile {
 	p.Photos = append([]string(nil), p.Photos...)
 	p.Languages = append([]string(nil), p.Languages...)
 	p.ServiceAreas = append([]string(nil), p.ServiceAreas...)
+	p.Socials = append([]AgentSocial(nil), p.Socials...)
 	return p
 }
 
@@ -542,6 +605,7 @@ func NewWithRepository(repository TransactionalRepository) *Service {
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "CreateAgentProfile", "UpdateAgentProfile", "GetAgentProfile", "GetAgentPassport",
+		"LinkAgentSocial", "UnlinkAgentSocial",
 		"CreateAgentService", "UpdateAgentService",
 		"DeclareCapability", "VerifyCapability", "AttestSellerRealName",
 		"SetAvailabilityWindow", "BlockAvailabilityWindow", "QuerySuppliers",
@@ -588,6 +652,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.getCandidateBatch(ctx, e)
 	case "GetAgentPassport":
 		return s.getAgentPassport(ctx, e)
+	case "LinkAgentSocial":
+		return s.linkAgentSocial(ctx, e)
+	case "UnlinkAgentSocial":
+		return s.unlinkAgentSocial(ctx, e)
 	default:
 		return command.Rejected(e, "SUPPLY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "supply.unsupported_command", nil)
 	}
@@ -762,9 +830,15 @@ func (s *Service) getAgentPassport(ctx context.Context, e command.Envelope) comm
 			passportStatus = "PENDING_VERIFICATION"
 		}
 	}
+	// SOCIAL-VISIBILITY-001：社媒按看的人过滤。profile 本体不动（动了就污染了
+	// 写回路径），只在 payload 里放过滤后的副本。
+	viewerIsSelf := e.Actor.ID != "" && e.Actor.ID == agentID
+	visibleSocials := socialsVisibleToViewer(profile.Socials, viewerIsSelf, merchantViewer(e))
+	profileForViewer := profile
+	profileForViewer.Socials = visibleSocials
 	return acceptedWithPayload(e, "AgentPassport", agentID, 1, passportStatus, map[string]any{
 		"agentId":      agentID,
-		"profile":      profile,
+		"profile":      profileForViewer,
 		"service":      svc,
 		"capabilities": caps,
 		"verificationSummary": map[string]any{
@@ -779,6 +853,135 @@ func (s *Service) getAgentPassport(ctx context.Context, e command.Envelope) comm
 		"locationPrecision": string(passportLocationPrecision),
 		"redactions":        []string{"profile.photos precise EXIF removed", "location precise coordinates redacted to marketId"},
 	}, nil)
+}
+
+// ---------- AgentSocial ----------
+//
+// CREATOR-SOCIAL-001：关联社媒的绑定/解绑。只能本人操作自己的（p.AgentID 必须
+// 等于 principal，updateProfile 同一口径 —— 不是本人的连碰都不能碰）。
+//
+// SOCIAL-VISIBILITY-001（可见性规则）：
+//   · 本人（actor == agent）→ 全可见（含 private），管的是自己的；
+//   · 已验商家（AuthContext 里有 api 层验过的 merchantID）→ public + merchants；
+//   · 其他人 → 只 public。
+// merchantID 是 api 层验过成员才盖的章（MERCHANT-PUBLISH-001 同一套），
+// 不是调用方自称 —— 自称的不认。
+
+func socialsVisibleToViewer(socials []AgentSocial, viewerIsSelf, viewerIsMerchant bool) []AgentSocial {
+	out := []AgentSocial{}
+	for _, item := range socials {
+		switch item.Visibility {
+		case "public":
+			out = append(out, item)
+		case "merchants":
+			if viewerIsSelf || viewerIsMerchant {
+				out = append(out, item)
+			}
+		case "private":
+			if viewerIsSelf {
+				out = append(out, item)
+			}
+		}
+	}
+	if out == nil {
+		out = []AgentSocial{}
+	}
+	return out
+}
+
+func merchantViewer(e command.Envelope) bool {
+	if e.AuthContext == nil {
+		return false
+	}
+	id, _ := e.AuthContext["merchantID"].(string)
+	return id != ""
+}
+
+func (s *Service) linkAgentSocial(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		AgentID    string `json:"agentId"`
+		Platform   string `json:"platform"`
+		Handle     string `json:"handle"`
+		Visibility string `json:"visibility"`
+	}
+	if !decode(e.Payload, &p) || p.AgentID == "" {
+		return command.Rejected(e, "INVALID_AGENT_SOCIAL", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_social", nil)
+	}
+	if p.AgentID != e.Principal.ID {
+		return command.Rejected(e, "AGENT_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.agent_not_owned", nil)
+	}
+	if !isValidSocialPlatform(p.Platform) {
+		return command.Rejected(e, "SOCIAL_PLATFORM_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "supply.social_platform_unsupported", nil)
+	}
+	if !isValidSocialHandle(p.Handle) {
+		return command.Rejected(e, "SOCIAL_HANDLE_INVALID", "VALIDATION", "AFTER_USER_ACTION", "supply.social_handle_invalid", nil)
+	}
+	visibility := p.Visibility
+	if visibility == "" {
+		// 默认 merchants：找活的人挂社媒就是给商家看的；公开 feed 不默认暴露。
+		visibility = "merchants"
+	}
+	if !isValidSocialVisibility(visibility) {
+		return command.Rejected(e, "SOCIAL_VISIBILITY_INVALID", "VALIDATION", "AFTER_USER_ACTION", "supply.social_visibility_invalid", nil)
+	}
+	profile, err := s.repository.GetProfile(ctx, p.AgentID)
+	if errors.Is(err, ErrProfileNotFound) {
+		return command.Rejected(e, "AGENT_PROFILE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.profile_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "PROFILE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.profile_read_failed", nil)
+	}
+	now := s.clock.Now().UTC()
+	replaced := false
+	for i := range profile.Socials {
+		if profile.Socials[i].Platform == p.Platform {
+			// 同平台再绑 = 换绑，不是叠加 —— 不然一个人能挂 5 个 TikTok，
+			// 商家看到的"已关联"就没意义了。
+			profile.Socials[i] = AgentSocial{Platform: p.Platform, Handle: p.Handle, Visibility: visibility, CreatedAt: now}
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		profile.Socials = append(profile.Socials, AgentSocial{Platform: p.Platform, Handle: p.Handle, Visibility: visibility, CreatedAt: now})
+	}
+	profile.UpdatedAt = now
+	if err := s.repository.UpdateProfile(ctx, profile); err != nil {
+		return command.Rejected(e, "PROFILE_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.profile_write_failed", nil)
+	}
+	return acceptedWithPayload(e, "AgentProfile", p.AgentID, 1, "SOCIAL_LINKED", map[string]any{"socials": profile.Socials}, nil)
+}
+
+func (s *Service) unlinkAgentSocial(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		AgentID  string `json:"agentId"`
+		Platform string `json:"platform"`
+	}
+	if !decode(e.Payload, &p) || p.AgentID == "" || p.Platform == "" {
+		return command.Rejected(e, "INVALID_AGENT_SOCIAL", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_social", nil)
+	}
+	if p.AgentID != e.Principal.ID {
+		return command.Rejected(e, "AGENT_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.agent_not_owned", nil)
+	}
+	profile, err := s.repository.GetProfile(ctx, p.AgentID)
+	if errors.Is(err, ErrProfileNotFound) {
+		return command.Rejected(e, "AGENT_PROFILE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.profile_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "PROFILE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.profile_read_failed", nil)
+	}
+	kept := profile.Socials[:0]
+	for _, item := range profile.Socials {
+		if item.Platform != p.Platform {
+			kept = append(kept, item)
+		}
+	}
+	profile.Socials = kept
+	profile.UpdatedAt = s.clock.Now().UTC()
+	if err := s.repository.UpdateProfile(ctx, profile); err != nil {
+		return command.Rejected(e, "PROFILE_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.profile_write_failed", nil)
+	}
+	return acceptedWithPayload(e, "AgentProfile", p.AgentID, 1, "SOCIAL_UNLINKED", map[string]any{"socials": profile.Socials}, nil)
 }
 
 // ---------- AgentService ----------
@@ -1358,6 +1561,7 @@ func (s *Service) createCandidateBatch(ctx context.Context, e command.Envelope) 
 		svc, _ := s.repository.GetService(ctx, profile.AgentID, "CITY_COMPANION")
 		candidates = append(candidates, Candidate{
 			AgentID:        profile.AgentID,
+			UserAccountID:  profile.UserAccountID,
 			Name:           profile.Name,
 			Languages:      profile.Languages,
 			ServiceType:    "CITY_COMPANION",

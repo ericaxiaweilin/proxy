@@ -59,7 +59,9 @@ describe("STORE-HUB-NAV-001 我的店铺的返回只有一个", () => {
     expect(hubCode).toContain("<ProxyBackGlyph label={backLabel} />");
     expect(hubCode).not.toContain("‹");
     // 详情态的回调必须回列表（setSelectedId(undefined)），不能是 onBack（退出整页）。
-    expect(hubCode).toContain("onBack={() => { setSelectedId(undefined); setCopied(false); }}");
+    // STORE-ASSET-SCOPE-001：同一次返回顺手把资产子视图也清掉 —— 否则从店 A 的子视图
+    // 退回列表、再进店 B，会直接落在 B 的「菜单与价格」上。
+    expect(hubCode).toContain("onBack={() => { setSelectedId(undefined); setCopied(false); setShowAssets(undefined); }}");
   });
 
   it("标题只有一处出处，且就是子页登记的那个", () => {
@@ -71,11 +73,18 @@ describe("STORE-HUB-NAV-001 我的店铺的返回只有一个", () => {
 });
 
 describe("STORE-HUB-NAV-001 建店闭环", () => {
-  // STORE-HUB-MOVE-001（用户：建店/二维码归推荐管理）：hub 里不再摆建店/资料行 ——
-  // 空态一个建店 CTA（直连建店流程），体系接入两行（建店/二维码）在推荐管理。
+  // STORE-CONSOLIDATE-001（2026-10-02，用户「管理别人看到你的店 有重复的ab版本」
+  // 选收编）：建店不再绕 merchantstorefront —— 那边现在就是 hub 本体，绕一圈回到
+  // 原地。空态 CTA 直连企业运营助手（建店本来就是助手的事）。
+  // 注意这是对 STORE-HUB-MOVE-001 的**反转**：原来"建店/二维码归推荐管理"，
+  // 现在 hub 自己就是唯一的管店入口，所以建店也从这里直连助手。
   it("hub 只有空态一个建店入口，列表态不摆建店/资料行", () => {
-    expect(meCode).toContain('onOpenStoreCreate={() => openSubPage("merchantstorefront")}');
-    // 三处：props 解构 + 类型 + 空态 CTA。列表态不再摆建店/资料行。
+    expect(meCode).toContain('onOpenStoreCreate={() => openSubPage("enterpriseops")}');
+    expect(meCode).not.toContain('onOpenStoreCreate={() => openSubPage("merchantstorefront")}');
+    // 三处：hub props（解构+类型）+ 空态 CTA 的 onPress。空态 CTA 走的是传进来的
+    // prop，不在 hub 里硬编码目标 —— 所以这里是 3 不是 4。
+    // （原来第 4 处是资产子视图的 onStartStoreSetup：STORE-ASSET-SCOPE-001 之后子视图
+    // 只画被选中的那一家，空态在那一屏根本渲染不出来，传了也是死 prop。）
     expect(countOf(hubCode, "onOpenStoreCreate")).toBe(3);
     expect(hubCode).toContain('accessibilityLabel="建店"');
     expect(hubCode).not.toContain("建店 / 添加门店");

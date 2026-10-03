@@ -127,12 +127,26 @@ func configuredDemandGates() (demand.Gate, demand.Gate) {
 	return demand.CatalogAdmissionGate, demand.FundingGate
 }
 
-func configuredNotificationPush() notification.PushProvider {
-	if v := strings.TrimSpace(os.Getenv("NOTIFICATION_PUSH")); strings.EqualFold(v, "off") || strings.EqualFold(v, "disabled") {
-		log.Printf("notification push: disabled (NOTIFICATION_PUSH=off)")
-		return nil
-	}
-	return notification.LogPushProvider{}
+// configuredNotificationPush 是 notification.PushProviderFromEnv 的一层日志包装。
+//
+// 判断逻辑搬进 notification 包，是因为 cmd/worker 也需要同一个决定：
+// 推送通道是**部署级**的，API 和 worker 各判一次就会出现「一边认为开着、
+// 一边认为关着」这种谁都看不见的分叉。worker 现在直接调
+// notification.PushProviderFromEnv(os.Getenv, repo)。
+//
+// tokens 是分发器用来把「收件人」翻译成「哪几台设备」的口。没有它，
+// 推送通道就是空壳（这正是改之前的状态）。
+//
+// 返回 nil 表示**真的关掉**（NOTIFICATION_PUSH=off）。以前
+// notification.NewWithPushProvider 会把 nil 兜成 LogPushProvider，
+// 所以这个开关从来没生效过。
+//
+// NOTIF-PUSH-001：现在还会把选择结果**原样记进启动日志**。三档必须能分辨：
+// 关掉 / 没配凭据（只记日志）/ 真的会出门推。上一版的日志三种情况长得一样。
+func configuredNotificationPush(tokens notification.DeviceTokenLister) notification.PushProvider {
+	provider, note := notification.PushProviderFromEnv(os.Getenv, tokens)
+	log.Printf("%s", note)
+	return provider
 }
 
 func wireIdentityEmailResolver(svc *identity.Service) {

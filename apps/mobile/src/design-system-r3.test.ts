@@ -36,6 +36,10 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   // R15.76: R1 AI Identity System PRD — 头像下 AI 徽章 (frontstage 透明度义务).
   //   9pt "AI" 字符跟 personalAvaLetter 同类装饰.
   "aiAuthorBadgeText",
+  // MENU-HOT-001: HOT 徽字 10pt（原型 deepseek_html_20261003_59d0d3 hot-badge-v2
+  // 定死 10px）。徽的含义由颜色/火焰/形状 + 旁边 16pt 菜名承载，
+  // 和 aiAuthorBadgeText 同类装饰，不是正文。
+  "hotBadgeText",
   // R37 market redesign (Proxy_Market_R37_4_Exact_Approved_Order_Logos.html):
   //   high-density opportunity card and type palette. The 6.5-10.5pt scale
   //   is matched to the approved visual (390px phone frame), not the

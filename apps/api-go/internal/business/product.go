@@ -29,6 +29,10 @@ type StoreProduct struct {
 	PhotoAssetPath string    `json:"photoAssetPath"`
 	MediaAssetID   string    `json:"mediaAssetId"`
 	Available      bool      `json:"available"`
+	// MENU-HOT-001：商家亲手标的 HOT（migration 158）。默认 false。
+	// 不是算出来的 —— 订单只记到店不记单品，全仓没有"某道菜卖多少"的数据，
+	// 用店级销量颁 HOT 等于编造归因。
+	IsHot          bool      `json:"isHot"`
 	SortOrder      int       `json:"sortOrder"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
@@ -74,6 +78,7 @@ func (s *Service) createProduct(ctx context.Context, e command.Envelope) command
 		PhotoAssetPath string `json:"photoAssetPath"`
 		MediaAssetID   string `json:"mediaAssetId"`
 		SortOrder      int    `json:"sortOrder"`
+		IsHot          bool   `json:"isHot"`
 	}
 	if !decode(e.Payload, &p) || p.StoreID == "" || strings.TrimSpace(p.Name) == "" || p.PriceMinor < 0 {
 		return command.Rejected(e, "INVALID_PRODUCT", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_product", nil)
@@ -99,6 +104,7 @@ func (s *Service) createProduct(ctx context.Context, e command.Envelope) command
 		PhotoAssetPath: p.PhotoAssetPath,
 		MediaAssetID:   p.MediaAssetID,
 		Available:      true,
+		IsHot:          p.IsHot,
 		SortOrder:      p.SortOrder,
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -127,6 +133,7 @@ func (s *Service) updateProduct(ctx context.Context, e command.Envelope) command
 		PhotoAssetPath string `json:"photoAssetPath"`
 		MediaAssetID   string `json:"mediaAssetId"`
 		SortOrder      int    `json:"sortOrder"`
+		IsHot          bool   `json:"isHot"`
 	}
 	if !decode(e.Payload, &p) || p.ProductID == "" || p.StoreID == "" || strings.TrimSpace(p.Name) == "" || p.PriceMinor < 0 {
 		return command.Rejected(e, "INVALID_PRODUCT", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_product", nil)
@@ -156,6 +163,7 @@ func (s *Service) updateProduct(ctx context.Context, e command.Envelope) command
 		PhotoAssetPath: p.PhotoAssetPath,
 		MediaAssetID:   p.MediaAssetID,
 		Available:      existing.Available,
+		IsHot:          p.IsHot,
 		SortOrder:      p.SortOrder,
 		CreatedAt:      existing.CreatedAt,
 		UpdatedAt:      now,
@@ -227,6 +235,39 @@ func (s *Service) setProductAvailability(ctx context.Context, e command.Envelope
 		return command.Rejected(e, "PRODUCT_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "business.product_update_failed", nil)
 	}
 	ev := event.New("StoreProductAvailabilityChanged", "StoreProduct", updated.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, nil)
+	return acceptedWithPayload(e, "StoreProduct", updated.ID, 1, "ACTIVE", map[string]any{"productId": updated.ID, "product": updated}, []event.DomainEvent{ev})
+}
+
+// MENU-HOT-001：一键打标/摘标（只改 isHot，不碰其它字段）。
+// 商家在列表上点一下就行，不用进编辑表单走完整 update。
+func (s *Service) setProductHot(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		ProductID string `json:"productId"`
+		StoreID   string `json:"storeId"`
+		IsHot     bool   `json:"isHot"`
+	}
+	if !decode(e.Payload, &p) || p.ProductID == "" || p.StoreID == "" {
+		return command.Rejected(e, "INVALID_PRODUCT", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_product", nil)
+	}
+	businessID, ok := s.resolveProductBusiness(ctx, p.StoreID)
+	if !ok {
+		return command.Rejected(e, "STORE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "business.store_not_found", nil)
+	}
+	if !s.hasRole(ctx, businessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR") {
+		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
+	}
+	existing, err := s.repo.GetProduct(ctx, p.ProductID)
+	if err != nil || existing.StoreID != p.StoreID {
+		return command.Rejected(e, "PRODUCT_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "business.product_not_found", nil)
+	}
+	now := s.clock.Now().UTC()
+	updated := existing
+	updated.IsHot = p.IsHot
+	updated.UpdatedAt = now
+	if err := s.repo.UpdateProduct(ctx, updated); err != nil {
+		return command.Rejected(e, "PRODUCT_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "business.product_update_failed", nil)
+	}
+	ev := event.New("StoreProductHotChanged", "StoreProduct", updated.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, nil)
 	return acceptedWithPayload(e, "StoreProduct", updated.ID, 1, "ACTIVE", map[string]any{"productId": updated.ID, "product": updated}, []event.DomainEvent{ev})
 }
 

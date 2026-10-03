@@ -49,6 +49,15 @@
         "height": 844
       }
     },
+    "Proxy_Home_Notifications_20261001_7b9953": {
+      "source": "docs/design/references/Proxy_Home_Notifications_20261001_7b9953.html",
+      "image": "docs/design/baseline-images/home_notifications_20261001_7b9953.png",
+      "fingerprint": "69791e0bf5308aa6",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
     "Proxy_Invite_UserScene_Engineering_Prototype_v0.2": {
       "source": "docs/design/references/Proxy_Invite_UserScene_Engineering_Prototype_v0.2.html",
       "image": "docs/design/baseline-images/invite_userscene_engineering_prototype_v0.2.png",
@@ -85,6 +94,15 @@
         "height": 844
       },
       "reviewStageCrop": true
+    },
+    "Proxy_Market_Orders_20260926_34df37": {
+      "source": "docs/design/references/Proxy_Market_Orders_20260926_34df37.html",
+      "image": "docs/design/baseline-images/market_orders_20260926_34df37.png",
+      "fingerprint": "5b7e7789d2b158bb",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
     },
     "Proxy_Merchant_Me_Standalone_R21_ActivityVoucherIcon_Fix": {
       "source": "docs/design/references/Proxy_Merchant_Me_Standalone_R21_ActivityVoucherIcon_Fix.html",
@@ -135,6 +153,24 @@
       "source": "docs/design/references/Proxy_R15_18_Threads_Profile_Polished.html",
       "image": "docs/design/baseline-images/r15_18_threads_profile_polished.png",
       "fingerprint": "e588e1361f877f54",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Scene_Card_20260927_7fc18d": {
+      "source": "docs/design/references/Proxy_Scene_Card_20260927_7fc18d.html",
+      "image": "docs/design/baseline-images/scene_card_20260927_7fc18d.png",
+      "fingerprint": "f9fb7d3183bec491",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Settings_20261001_726714": {
+      "source": "docs/design/references/Proxy_Settings_20261001_726714.html",
+      "image": "docs/design/baseline-images/settings_20261001_726714.png",
+      "fingerprint": "ebfab6a85d8608ce",
       "viewport": {
         "width": 390,
         "height": 844
@@ -279,33 +315,6 @@
       "source": "docs/design/references/proxy_transparent_swipe_dock_v2.html",
       "image": "docs/design/baseline-images/proxy_transparent_swipe_dock_v2.png",
       "fingerprint": "709d5c50de625a77",
-      "viewport": {
-        "width": 390,
-        "height": 844
-      }
-    },
-    "Proxy_Market_Orders_20260926_34df37": {
-      "source": "docs/design/references/Proxy_Market_Orders_20260926_34df37.html",
-      "image": "docs/design/baseline-images/market_orders_20260926_34df37.png",
-      "fingerprint": "5b7e7789d2b158bb",
-      "viewport": {
-        "width": 390,
-        "height": 844
-      }
-    },
-    "Proxy_Scene_Card_20260927_7fc18d": {
-      "source": "docs/design/references/Proxy_Scene_Card_20260927_7fc18d.html",
-      "image": "docs/design/baseline-images/scene_card_20260927_7fc18d.png",
-      "fingerprint": "f9fb7d3183bec491",
-      "viewport": {
-        "width": 390,
-        "height": 844
-      }
-    },
-    "Proxy_Settings_20261001_726714": {
-      "source": "docs/design/references/Proxy_Settings_20261001_726714.html",
-      "image": "docs/design/baseline-images/settings_20261001_726714.png",
-      "fingerprint": "ebfab6a85d8608ce",
       "viewport": {
         "width": 390,
         "height": 844

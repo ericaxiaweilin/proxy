@@ -85,3 +85,81 @@ export function pickRefreshedActivity(
   const index = pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))]!;
   return { kind: "picked", index, changed: activities[index]!.activityId !== currentActivityId };
 }
+
+// ---------------------------------------------------------------------------
+// HOME-FORYOU-ORDER-009（2026-10-01，用户 P0：「点击圆圈 不是选择 是查看这张订单
+// 我只有几个用户有订单」）
+//
+// 圆圈重掷「人」这一格时，候选人数为 0 / 1 的两条分支原来一个 else 都没有：
+// 既不换人，也不给任何提示 —— 点圆圈像死的。而这恰恰是「库里只有几个人有距离
+// 数据」时最常见的形态（PERSON-DISTANCE-ZERO-001：无坐标真人不进名单）。
+//
+// 这里把它从 requester-home 里原样搬出来成纯函数，好让三条分支都能**跑出来**
+// 验，而不是在源码里 grep 那几个 if —— grep 只能证明「字面量还在」，证明不了
+// 「只有一个人时真的会说话」。
+export type PersonSlotPick =
+  /** 换到了一个有空的（online）人。 */
+  | { kind: "free"; index: number }
+  /** 一个有空的都没有，但名单里多于一人：随便换，并如实说明换不出「有空的」。 */
+  | { kind: "noneFreeButOthers"; index: number }
+  /** 名单里恰好一个人且他不在线 —— 他已经是当前选择，换不出去，如实说明。 */
+  | { kind: "onlyCandidate"; index: number }
+  /** 名单是空的：没有可选的人，如实说明。 */
+  | { kind: "noCandidates" };
+
+/**
+ * 圆圈重掷人的取号规则。
+ *
+ * `free` 分支在 online 的人里按 cursor **轮转**（HOME-FORYOU-FREE-001）—— 原来这里
+ * 是 `Math.random()`，与「有没有空」毫无关系。轮转也让连点两次不会给同一个人。
+ *
+ * @param people 已经过滤好的候选名单（半径 / 语言 / 在线等筛选都在外面做完了）。
+ * @param cursor 轮转游标，只在真的换到人时前进。
+ */
+export function pickPersonSlot(
+  people: ReadonlyArray<{ id: string; online: boolean }>,
+  cursor: number,
+  random: () => number = Math.random
+): PersonSlotPick {
+  const freeIndexes = people.flatMap((p, index) => (p.online ? [index] : []));
+  if (freeIndexes.length > 0) {
+    // 用**当前**游标取，再由调用方前进 —— 第一次点必须落在第一个有空的身上。
+    // （写成 cursor+1 会跳过第一个人，那是我搬这段时自己引入的 off-by-one。）
+    const offset = ((cursor % freeIndexes.length) + freeIndexes.length) % freeIndexes.length;
+    return { kind: "free", index: freeIndexes[offset]! };
+  }
+  if (people.length === 0) return { kind: "noCandidates" };
+  if (people.length === 1) return { kind: "onlyCandidate", index: 0 };
+  const index = Math.min(people.length - 1, Math.max(0, Math.floor(random() * people.length)));
+  return { kind: "noneFreeButOthers", index };
+}
+
+/**
+ * HOME-FORYOU-ORDER-010（2026-10-01，用户 P0：「for you 的选择变成查看这张订单」）：
+ * **初次**落在哪一场活动上，要避开你已经下过单的那几场。
+ *
+ * activityIndex 初始是 `forYouSeed >> 7` —— 一个种子下标，**不看订单**；
+ * sceneActivities 也不排除已下单的。于是首屏（以及每次 myOrders 才异步到齐之前）
+ * 完全可能停在一张你已经有票的活动上，`existingOrder` 为真 ⇒ CTA 一直显示
+ * 「查看这张订单」，「选择」那条路整个看不见。圆圈刷新能换走，但用户得先意识到
+ * 「我该点那个圆圈」—— 而这正是报上来的那个不可用的状态。
+ *
+ * 注意：单靠"刷新时避开"（ORDER-009）不够，因为**首屏**这一下没人点圆圈。
+ * myOrders 是 mount 之后才到的，所以这一步只能等它到齐再做 —— 到齐了就挪开。
+ *
+ * 一个可挪的都没有时**保持不动**：那时「查看这张订单」就是实话，不该乱跳。
+ */
+export function resolveActivityIndexAvoidingOrders(
+  activities: ReadonlyArray<{ activityId: string }>,
+  joinedByMe: ReadonlySet<string>,
+  currentIndex: number
+): number {
+  if (activities.length < 2) return 0;
+  const current = ((currentIndex % activities.length) + activities.length) % activities.length;
+  if (!joinedByMe.has(activities[current]!.activityId)) return current;
+  for (let step = 1; step < activities.length; step += 1) {
+    const candidate = (current + step) % activities.length;
+    if (!joinedByMe.has(activities[candidate]!.activityId)) return candidate;
+  }
+  return current;
+}

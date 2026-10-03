@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proxy - 盲盒社交（完整版）</title>
+<style>
+  :root {
+    --bg: #f6f6f6;
+    --card-bg: #ffffff;
+    --text: #000000;
+    --text-sec: #999999;
+    --divider: #f0f0f0;
+    --btn-bg: #000000;
+    --btn-text: #ffffff;
+    --badge-bg: #ff3b30;
+    --nav-active-bg: #f0f0f0;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #ececec; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+  
+  .app-container {
+    width: 100%; max-width: 400px; height: 100vh; max-height: 850px;
+    background: var(--bg); position: relative; overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    display: flex; flex-direction: column; padding-bottom: 80px;
+  }
+  @media (max-width: 480px) { .app-container { height: 100vh; max-height: 100vh; box-shadow: none; padding-bottom: 80px; } }
+
+  /* 页面切换 */
+  .view { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg); display: none; flex-direction: column; overflow-y: auto; overflow-x: hidden; padding-bottom: 20px; }
+  .view.active { display: flex; }
+
+  /* 顶部导航 */
+  .header { display: flex; align-items: center; padding: 16px; gap: 12px; }
+  .logo-icon { width: 36px; height: 36px; border-radius: 10px; background: #000; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 20px; }
+  .logo-text { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+  .location-bar { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+  .location-text { font-size: 13px; color: var(--text-sec); }
+  .switch-link { font-size: 13px; color: var(--text); display: flex; align-items: center; gap: 2px; cursor: pointer; }
+  .header-icon { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
+
+  /* 搜索框 */
+  .search-box { background: #fff; margin: 8px 16px 16px; border-radius: 30px; padding: 12px 16px; display: flex; align-items: center; gap: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
+  .search-input { flex: 1; border: none; outline: none; font-size: 15px; background: transparent; }
+  .search-input::placeholder { color: #bbb; }
+  .search-icon { width: 20px; height: 20px; color: #bbb; display: flex; align-items: center; justify-content: center; }
+  .search-btn { width: 32px; height: 32px; border-radius: 50%; background: #e5e5e5; display: flex; align-items: center; justify-content: center; color: #fff; }
+  .search-btn.active { background: #000; }
+
+  /* For You 区块 */
+  .foryou-header { padding: 0 16px 12px; display: flex; align-items: center; gap: 8px; }
+  .foryou-icon { width: 24px; height: 24px; color: #000; }
+  .foryou-title { font-size: 20px; font-weight: 800; }
+  .foryou-badge { background: #000; color: #fff; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 6px; text-transform: uppercase; }
+  .foryou-desc { padding: 0 16px 16px; font-size: 13px; color: var(--text-sec); line-height: 1.4; }
+
+  /* 四格卡片 */
+  .grid-container { position: relative; padding: 0 16px; margin-bottom: 12px; }
+  .grid-row { display: flex; gap: 10px; margin-bottom: 10px; }
+  .grid-item { flex: 1; height: 140px; border-radius: 16px; overflow: hidden; position: relative; background: #ddd; display: flex; align-items: flex-end; padding: 12px; color: #fff; }
+  .grid-item img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.9; }
+  .grid-item .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(transparent 40%, rgba(0,0,0,0.7)); }
+  .grid-info { position: relative; z-index: 2; width: 100%; }
+  .grid-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+  .grid-sub { font-size: 11px; opacity: 0.8; }
+  .lock-icon { position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; background: rgba(0,0,0,0.5); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; z-index: 3; }
+
+  /* 中间洗牌按钮 */
+  .shuffle-btn {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 48px; height: 48px; background: #000; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; color: #fff;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3); z-index: 10; cursor: pointer;
+    border: 3px solid #fff;
+  }
+  .shuffle-btn svg { width: 22px; height: 22px; }
+  @keyframes spin { 100% { transform: translate(-50%, -50%) rotate(360deg); } }
+  .shuffle-btn:active { animation: spin 0.5s ease; }
+
+  /* 底部文案与按钮 */
+  .action-desc { padding: 0 16px 12px; font-size: 12px; color: var(--text-sec); line-height: 1.5; }
+  .action-desc strong { color: #000; }
+  .main-btn { margin: 0 16px 16px; height: 50px; background: #000; color: #fff; border: none; border-radius: 25px; font-size: 16px; font-weight: 700; cursor: pointer; }
+
+  /* 分类滚动条 */
+  .category-scroll { display: flex; gap: 12px; padding: 0 16px 16px; overflow-x: auto; scrollbar-width: none; }
+  .category-scroll::-webkit-scrollbar { display: none; }
+  .cat-item { display: flex; align-items: center; gap: 6px; background: #fff; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.02); cursor: pointer; }
+  .cat-item.active { background: #000; color: #fff; }
+
+  /* 底部悬浮导航栏 */
+  .bottom-nav {
+    position: absolute; bottom: 20px; left: 16px; right: 16px; height: 66px;
+    background: rgba(255,255,255,0.95); backdrop-filter: blur(10px);
+    border-radius: 33px; box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+    display: flex; justify-content: space-around; align-items: center; z-index: 100; padding: 0 4px;
+  }
+  .nav-item {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    width: 60px; height: 54px; border-radius: 27px; cursor: pointer; color: #000;
+    transition: all 0.2s ease; position: relative;
+  }
+  .nav-item.active { background: var(--nav-active-bg); }
+  .nav-item svg { width: 22px; height: 22px; margin-bottom: 2px; }
+  .nav-item span { font-size: 10px; font-weight: 500; }
+  .badge { position: absolute; top: 4px; right: 10px; background: var(--badge-bg); color: #fff; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 10px; border: 1.5px solid #fff; line-height: 1.2; }
+
+  /* 通用列表样式 */
+  .list-group { padding: 0 16px; }
+  .list-item { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--divider); cursor: pointer; }
+  .list-item:last-child { border-bottom: none; }
+  .item-left { display: flex; align-items: center; }
+  .item-title { font-size: 16px; }
+  .chevron { width: 16px; height: 16px; color: #ccc; }
+  .profile-sec { display: flex; align-items: center; padding: 20px 16px; }
+  .avatar { width: 60px; height: 60px; border-radius: 50%; background: #f0f0f0; margin-right: 16px; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #ccc; }
+  .profile-name { font-size: 18px; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="app-container">
+
+  <!-- ================= 1. 首页 (Home) ================= -->
+  <div id="view-home" class="view active" style="background: var(--bg);">
+    <div class="header">
+      <div class="logo-icon">🐱</div>
+      <div style="flex:1;">
+        <div class="logo-text">Proxy</div>
+        <div class="location-bar">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          <span class="location-text">河内 · 还剑湖附近</span>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div class="switch-link">切换 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div>
+        <!-- 🔔 铃铛：带 9+ 角标，点击后角标消失，进入通知中心 -->
+        <div class="header-icon" onclick="openNotifications()" style="position: relative;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+          </svg>
+          <!-- 9+ 角标 -->
+          <div id="bell-badge" style="position: absolute; top: -4px; right: -6px; background: #ff3b30; color: #fff; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 10px; border: 1.5px solid #f6f6f6; line-height: 1.2;">9+</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="search-box">
+      <div class="search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
+      <input class="search-input" type="text" placeholder="想找谁、去哪、做什么？">
+      <div class="search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>
+      <div class="search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></div>
+      <div class="search-btn active"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+    </div>
+
+    <div class="foryou-header">
+      <svg class="foryou-icon" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>
+      <span class="foryou-title">为你组合</span>
+      <span class="foryou-badge">For You</span>
+    </div>
+    <div class="foryou-desc">选人 · 定时间 · 配活动场景，一键出图或邀约</div>
+
+    <div class="grid-container">
+      <div class="grid-row">
+        <div class="grid-item">
+          <img src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=300&q=80" alt="Person">
+          <div class="overlay"></div>
+          <div class="grid-info"><div class="grid-title">Dev 20</div><div class="grid-sub">一起的人 · 点更换</div></div>
+          <div class="lock-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+        </div>
+        <div class="grid-item">
+          <img src="https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=300&q=80" alt="Time">
+          <div class="overlay"></div>
+          <div class="grid-info"><div class="grid-title">周日 10:00-11:30</div><div class="grid-sub">时间</div></div>
+          <div class="lock-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+        </div>
+      </div>
+      <div class="grid-row">
+        <div class="grid-item">
+          <img src="https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=300&q=80" alt="Activity">
+          <div class="overlay"></div>
+          <div class="grid-info"><div class="grid-title">Three Beans</div><div class="grid-sub">周日杯测小聚</div></div>
+          <div class="lock-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+        </div>
+        <div class="grid-item">
+          <img src="https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=300&q=80" alt="Location">
+          <div class="overlay"></div>
+          <div class="grid-info"><div class="grid-title">Cầu Giấy</div><div class="grid-sub">地点</div></div>
+          <div class="lock-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+        </div>
+      </div>
+      <div class="shuffle-btn" onclick="alert('换一批匹配')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+      </div>
+    </div>
+
+    <div class="action-desc">直接约她：<strong>点头像进 Scene 主页聊</strong> · 想等人来：<strong>发布需求等小美接单</strong></div>
+    <button class="main-btn">查看这张订单</button>
+
+    <div class="category-scroll">
+      <div class="cat-item active"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> 拍照</div>
+      <div class="cat-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> 同行</div>
+      <div class="cat-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg> 吃饭</div>
+      <div class="cat-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> 活动</div>
+    </div>
+  </div>
+
+  <!-- ================= 2. 通知中心页 ================= -->
+  <div id="view-notifications" class="view" style="background: #fff;">
+    <div class="header" style="justify-content: space-between; border-bottom: 1px solid #f0f0f0;">
+      <div class="header-icon" onclick="showView('view-home')"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></div>
+      <div style="font-size: 17px; font-weight: 600;">通知</div>
+      <div style="width: 24px;"></div>
+    </div>
+    <div style="display:flex; gap:16px; padding: 0 16px 16px; border-bottom: 1px solid var(--divider); margin-bottom: 8px; margin-top: 8px;">
+      <span style="font-size:14px; font-weight:600; color:#000; border-bottom: 2px solid #000; padding-bottom:4px;">全部</span>
+      <span style="font-size:14px; color:#999; padding-bottom:4px;">互动</span>
+      <span style="font-size:14px; color:#999; padding-bottom:4px;">匹配</span>
+      <span style="font-size:14px; color:#999; padding-bottom:4px;">系统</span>
+    </div>
+    <div class="list-group">
+      <div class="list-item" style="align-items: flex-start; padding: 16px 0;">
+        <div class="avatar" style="width:44px; height:44px; font-size:18px; margin-right:12px; background:#f0f0f0;">👩</div>
+        <div style="flex:1;">
+          <div style="font-size:15px; line-height:1.4; margin-bottom:4px;"><strong>Nguyễn Thị Hương</strong> 接受了你的盲盒邀请，明晚 19:00 在 Three Beans 咖啡馆见！</div>
+          <div style="font-size:12px; color:#999;">2分钟前</div>
+        </div>
+        <div style="width: 8px; height: 8px; background: var(--badge-bg); border-radius: 50%; margin-top: 6px;"></div>
+      </div>
+      <div class="list-item" style="align-items: flex-start; padding: 16px 0;">
+        <div class="avatar" style="width:44px; height:44px; font-size:18px; margin-right:12px; background:#f0f0f0;">📦</div>
+        <div style="flex:1;">
+          <div style="font-size:15px; line-height:1.4; margin-bottom:4px;">你的盲盒已成功开启，匹配到一位 <strong>“摄影文艺”</strong> 标签的搭子。快去看看吧！</div>
+          <div style="font-size:12px; color:#999;">15分钟前</div>
+        </div>
+        <div style="width: 8px; height: 8px; background: var(--badge-bg); border-radius: 50%; margin-top: 6px;"></div>
+      </div>
+      <div class="list-item" style="align-items: flex-start; padding: 16px 0; opacity: 0.6;">
+        <div class="avatar" style="width:44px; height:44px; font-size:18px; margin-right:12px; background:#f0f0f0;">⚙️</div>
+        <div style="flex:1;">
+          <div style="font-size:15px; line-height:1.4; margin-bottom:4px;">系统提示：您的手机号KYC实名认证已通过，现在可以开始匹配盲盒了。</div>
+          <div style="font-size:12px; color:#999;">昨天 14:30</div>
+        </div>
+      </div>
+      <div class="list-item" style="align-items: flex-start; padding: 16px 0; opacity: 0.6;">
+        <div class="avatar" style="width:44px; height:44px; font-size:18px; margin-right:12px; background:#f0f0f0;">❤️</div>
+        <div style="flex:1;">
+          <div style="font-size:15px; line-height:1.4; margin-bottom:4px;">你的动态收到了 12 个赞。</div>
+          <div style="font-size:12px; color:#999;">昨天 09:15</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 3. 设置页 (我的) ================= -->
+  <div id="view-settings" class="view" style="background: #fff;">
+    <div class="header" style="justify-content: center; border-bottom: 1px solid #f0f0f0;">
+      <div style="font-size: 17px; font-weight: 600;">我的</div>
+    </div>
+    <div class="profile-sec">
+      <div class="avatar">👤</div>
+      <div>
+        <div class="profile-name">Duy Khang</div>
+        <div style="font-size: 13px; color: #999;">已实名 · ID: 88888888</div>
+      </div>
+    </div>
+    <div class="list-group">
+      <div class="list-item"><div class="item-left"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-right: 14px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span class="item-title">账号与安全</span></div><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      <div class="list-item"><div class="item-left"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-right: 14px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span class="item-title">手机号认证 (KYC)</span></div><div style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 13px; font-weight: 600;">已认证</span><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div></div>
+    </div>
+    <div class="list-group">
+      <div class="list-item"><div class="item-left"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-right: 14px;"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><span class="item-title">盲盒匹配偏好</span></div><div style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 13px; color: #999;">文艺、摄影</span><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div></div>
+      <div class="list-item"><div class="item-left"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-right: 14px;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg><span class="item-title">位置与隐私</span></div><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+    </div>
+    <div class="list-group">
+      <div class="list-item"><div class="item-left"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-right: 14px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span class="item-title">服务协议与隐私政策</span></div><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div>
+      <div class="list-item"><div class="item-left"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-right: 14px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span class="item-title">清理缓存</span></div><div style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 13px; color: #999;">479.93MB</span><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></div></div>
+    </div>
+  </div>
+
+  <!-- ================= 底部悬浮导航栏 ================= -->
+  <nav class="bottom-nav">
+    <div class="nav-item active" onclick="switchTab(this, 'view-home')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+      <span>首页</span>
+    </div>
+    <div class="nav-item" onclick="switchTab(this, 'view-home')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 3 21 15 18 21 6 21 3 15"></polygon></svg>
+      <span>市场</span>
+    </div>
+    <div class="nav-item" onclick="switchTab(this, 'view-home')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="4"></circle></svg>
+      <span>动态</span>
+    </div>
+    <div class="nav-item" onclick="switchTab(this, 'view-home')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+      <span>消息</span>
+      <div class="badge">9+</div>
+    </div>
+    <div class="nav-item" onclick="switchTab(this, 'view-settings')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+      <span>我的</span>
+    </div>
+  </nav>
+
+</div>
+
+<script>
+  // 页面切换逻辑
+  function showView(viewId) {
+    document.querySelectorAll('.view').forEach(view => view.classList.remove('active'));
+    document.getElementById(viewId).classList.add('active');
+    document.getElementById(viewId).scrollTop = 0;
+  }
+
+  // 底部导航点击逻辑
+  function switchTab(element, viewId) {
+    document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+    element.classList.add('active');
+    showView(viewId);
+  }
+
+  // 🔔 铃铛点击逻辑：消除首页角标，跳转通知中心
+  function openNotifications() {
+    // 1. 隐藏首页铃铛上的 9+ 角标
+    const badge = document.getElementById('bell-badge');
+    if (badge) badge.style.display = 'none';
+    
+    // 2. 切换到通知中心页面
+    showView('view-notifications');
+  }
+
+  // 分类标签点击效果
+  document.querySelectorAll('.cat-item').forEach(item => {
+    item.addEventListener('click', () => {
+      document.querySelectorAll('.cat-item').forEach(c => c.classList.remove('active'));
+      item.classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>

@@ -14,6 +14,11 @@ import { color, shadows } from "../theme";
 import { retainStorePhoto, storePhotoUri, type RetainedStorePhoto } from "../expo-composer-draft-store";
 import type { BusinessClient, StoreProduct } from "../business-client";
 import { MediaClient } from "../media-client";
+// STORE-LOGO-001：店徽显示走既有解析器（assets/ 前缀 → thumb URL）。
+import { merchantAvatarUri } from "../business-client";
+// MENU-HOT-001：HOT 徽组件。
+import { HotBadge } from "../components/hot-badge";
+import { mediaThumbUrl } from "../media-thumb-url";
 import { localApiBaseUrl, nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { ProxyIcon } from "../components/proxy-icon";
 import { ProxyBackGlyph, ProxyEmptyState, ProxyLoading } from "../components/proxy-foundation";
@@ -26,10 +31,12 @@ const storefrontMedia = new MediaClient({
   baseUrl: localApiBaseUrl,
 });
 
+// ACTIVITY-COVER-001：媒体 thumb URL 的拼法收成一处（media-thumb-url.ts）——
+// 场景照片墙、门店相册、活动封面三处原本各写各的。
 function thumbUrlFor(mediaAssetId: string): string | undefined {
-  if (!mediaAssetId) return undefined;
-  return `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(mediaAssetId)}`;
+  return mediaThumbUrl(mediaAssetId, localApiBaseUrl);
 }
+
 
 type Account = { id: string; name: string; status: string };
 type Store = { id: string; businessId: string; name: string; address: string; status: string };
@@ -54,7 +61,16 @@ function linesAsHoursObject(hoursJson: string): Record<string, string> {
 
 type StoreAssetPage = "root" | "menu" | "photos" | "details";
 
-export function MerchantStorefrontSurface({ client, viewerAccountId, header, showcaseActivities, onOpenVouchers, onStartStoreSetup }: { client: BusinessClient; viewerAccountId?: string | undefined; header?: ReactNode; showcaseActivities?: Array<{ id: string; title: string }>; onOpenVouchers?: () => void; onStartStoreSetup?: () => void }): React.JSX.Element {
+// STORE-ASSET-SCOPE-001（2026-10-02，用户「这个还是有重复的」）：
+// 这一页作为**独立整页**时，外壳（主体抬头 / 门店身份卡 / 分享 / 店铺二维码 /
+// 经营数字 / 资产列表 / 活动 / Creator / 口径说明）就是它的内容；但 hub 把它当
+// 「资产编辑子视图」嵌进店详情时，那些外壳和 hub 店详情是同一批东西的**第二份**：
+// 同一个店名在一屏里出现三次（返回条 / 身份卡 / 主体抬头），二维码卡、经营数字、
+// 券、Creator 两边各一份，而且这里还按 accounts.map 把**别的主体别的门店**一起铺出来。
+// 所以给子视图一个作用域：只画被选中的那一家、只画它要编辑的那一节。
+export type StoreAssetScope = { storeId: string; page: "menu" | "photos" | "details" };
+
+export function MerchantStorefrontSurface({ client, viewerAccountId, header, showcaseActivities, onOpenVouchers, onStartStoreSetup, scope }: { client: BusinessClient; viewerAccountId?: string | undefined; header?: ReactNode; showcaseActivities?: Array<{ id: string; title: string }>; onOpenVouchers?: () => void; onStartStoreSetup?: () => void; scope?: StoreAssetScope | undefined }): React.JSX.Element {
   const [accounts, setAccounts] = useState<Account[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   // STORE-QR-001：店铺二维码此前只是一个 qrGrid 图标 + 「扫码进入…可用于店内
@@ -103,6 +119,8 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   const [editingProductCategory, setEditingProductCategory] = useState("");
   const [editingProductScene, setEditingProductScene] = useState("");
   const [editingProductPhoto, setEditingProductPhoto] = useState("");
+  // MENU-HOT-001：编辑态的 HOT 开关。
+  const [editingProductHot, setEditingProductHot] = useState(false);
   // R25 对齐：SKU 详情当前选中 + 完整目录展开态（按店各自独立）。
   const [selectedProductByStore, setSelectedProductByStore] = useState<Record<string, string | undefined>>({});
   const [catalogOpenByStore, setCatalogOpenByStore] = useState<Record<string, boolean>>({});
@@ -291,6 +309,45 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
     setEditingProductCategory(current?.category ?? "");
     setEditingProductScene(current?.scene ?? "");
     setEditingProductPhoto(current?.mediaAssetId ?? "");
+    setEditingProductHot(current?.isHot ?? false);
+  }
+
+  // STORE-LOGO-001（2026-10-02，用户「商家侧的头像为什么不能更换」）：
+  // 店徽原来只有一个 editingLogoPath 的 state，没有任何输入框/选择器连到它 ——
+  // 商家在界面上根本换不了。现在走媒体管线上传，存 `assets/<id>`：
+  // 与 merchantAvatarUri 的解析口径一致，服务端 isValidAssetPath 本来就认前缀。
+  const [savingLogo, setSavingLogo] = useState(false);
+  async function pickLogoPhoto(): Promise<void> {
+    setLinesError(undefined);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setLinesError("需要照片权限才能上传店徽。");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.85,
+      allowsMultipleSelection: false,
+      selectionLimit: 1,
+    });
+    const asset = result.canceled ? undefined : result.assets[0];
+    if (!asset) return;
+    setSavingLogo(true);
+    try {
+      const uploaded = await storefrontMedia.uploadImage({
+        uri: asset.uri,
+        width: asset.width,
+        height: asset.height,
+        ...(asset.fileName ? { fileName: asset.fileName } : {}),
+        ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+      });
+      // 存资产引用，不是 URL：显示时由 merchantAvatarUri 统一拼 thumb。
+      setEditingLogoPath(`assets/${uploaded.mediaAssetId}`);
+    } catch (e) {
+      setLinesError(e instanceof Error ? e.message : "店徽上传失败，请重试。");
+    } finally {
+      setSavingLogo(false);
+    }
   }
 
   // 菜品照片：选中即走媒体管线上传，拿到 mediaAssetId 后才可保存，
@@ -327,6 +384,20 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
     }
   }
 
+  // MENU-HOT-001：一键打标/摘标（只改 isHot）。失败就报错，不静默。
+  async function toggleProductHot(storeId: string, product: StoreProduct): Promise<void> {
+    setProductError(undefined);
+    try {
+      const saved = await client.setProductHot(product.id, storeId, !product.isHot);
+      setProducts((prev) => ({
+        ...prev,
+        [storeId]: (prev[storeId] ?? []).map((item) => item.id === product.id ? saved.product : item),
+      }));
+    } catch (e) {
+      setProductError(e instanceof Error ? e.message : "HOT 标记失败，请重试。");
+    }
+  }
+
   async function saveProduct(storeId: string): Promise<void> {
     setProductError(undefined);
     const name = editingProductName.trim();
@@ -345,14 +416,14 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
         const made = await client.createProduct({
           storeId, name, priceMinor: price,
           description: editingProductDesc, category: editingProductCategory, scene: editingProductScene,
-          mediaAssetId: editingProductPhoto,
+          mediaAssetId: editingProductPhoto, isHot: editingProductHot,
         });
         setProducts((prev) => ({ ...prev, [storeId]: [...(prev[storeId] ?? []), made.product] }));
       } else {
         const saved = await client.updateProduct({
           productId: editingProductId, storeId, name, priceMinor: price,
           description: editingProductDesc, category: editingProductCategory, scene: editingProductScene,
-          mediaAssetId: editingProductPhoto,
+          mediaAssetId: editingProductPhoto, isHot: editingProductHot,
         });
         setProducts((prev) => ({
           ...prev,
@@ -436,13 +507,16 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
         </View>
       ) : null}
       {accounts?.map((a) => {
-        const aStores = stores[a.id] ?? [];
+        const allStores = stores[a.id] ?? [];
+        const aStores = scope ? allStores.filter((s) => s.id === scope.storeId) : allStores;
+        // 子视图只属于一家店：别的主体/别的门店在这一屏里没有位置。
+        if (scope && aStores.length === 0) return null;
         const aSpend = spend[a.id];
         const newCustomers = aSpend?.days.reduce((sum, day) => sum + day.newCustomerCount, 0) ?? 0;
         const returningCustomers = aSpend?.days.reduce((sum, day) => sum + day.returningCustomerCount, 0) ?? 0;
         return (
           <View key={a.id} style={styles.accountCard}>
-            <View style={styles.accountHead}><Text selectable style={styles.accountName}>管理别人看到你的店</Text><Text selectable style={styles.accountMeta}>{a.name} · {aStores.length} 家门店</Text></View>
+            {scope ? null : <View style={styles.accountHead}><Text selectable style={styles.accountName}>管理别人看到你的店</Text><Text selectable style={styles.accountMeta}>{a.name} · {aStores.length} 家门店</Text></View>}
             {aStores.length === 0 ? (
               <View style={styles.card}>
                 <ProxyEmptyState title="尚未建立经营门店" sub="把门店照片、菜单或文件交给企业运营助手，先生成草稿再确认，不需要从空白表单开始。" cta={{ label: "交给企业运营助手", onPress: () => onStartStoreSetup?.(), disabled: !onStartStoreSetup }} />
@@ -453,9 +527,13 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
               const sLines = lines[s.id];
               const sProducts = products[s.id] ?? [];
               const sAvailable = sProducts.filter((p) => p.available);
-              const currentPage = assetPage?.storeId === s.id ? assetPage.page : "root";
+              // 子视图的页由宿主定（hub 的「管理菜品 / 管理照片 / 编辑资料」），
+              // 不再有自己的资产列表中间页 —— 那一层和 hub 店详情是同一批入口。
+              const currentPage: StoreAssetPage = scope ? scope.page
+                : assetPage?.storeId === s.id ? assetPage.page : "root";
               return (
                 <View key={s.id} style={styles.storeCard}>
+                  {scope ? null : <>
                   <View style={styles.storeHero}>
                     {(() => {
                       const cover = sPhotos.find((p) => p.mediaAssetId);
@@ -489,8 +567,9 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                   </View>
 
                   <View style={styles.metricStrip}>{[[(aSpend?.totalOrders ?? 0).toString(), "近7天订单"], [aSpend ? formatVnd(aSpend.totalGrossMinor) : "—", "成交额"], [newCustomers.toString(), "新客"], [returningCustomers.toString(), "复购"]].map(([value, label]) => <View key={label} style={styles.metricItem}><Text selectable numberOfLines={1} style={styles.metricValue}>{value}</Text><Text selectable style={styles.metricLabel}>{label}</Text></View>)}</View>
+                  </>}
 
-                  {currentPage === "root" ? <View style={styles.assetSection}>
+                  {scope ? null : currentPage === "root" ? <View style={styles.assetSection}>
                     <Text selectable style={styles.assetSectionTitle}>店铺资产</Text>
                     <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "menu" })} style={styles.assetRow}><View style={styles.assetIcon}><Text selectable style={styles.assetIconText}>菜</Text></View><View style={styles.photoRowMain}><Text selectable style={styles.assetTitle}>菜单与价格</Text><Text selectable style={styles.assetMeta}>{sProducts.length} 个项目 · 在售 {sAvailable.length}</Text></View><Text selectable style={styles.assetChevron}>›</Text></Pressable>
                     <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "photos" })} style={styles.assetRow}><View style={styles.assetIcon}><Text selectable style={styles.assetIconText}>图</Text></View><View style={styles.photoRowMain}><Text selectable style={styles.assetTitle}>照片与内容</Text><Text selectable style={styles.assetMeta}>{sPhotos.length} 张店铺照片</Text></View><Text selectable style={styles.assetChevron}>›</Text></Pressable>
@@ -514,7 +593,11 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                       {sAvailable.slice(0, 6).map((p) => (
                         <Pressable key={p.id} onPress={() => setSelectedProductByStore((prev) => ({ ...prev, [s.id]: p.id }))} style={styles.worthCard}>
                           {thumbUrlFor(p.mediaAssetId) ? <Image source={{ uri: thumbUrlFor(p.mediaAssetId) }} style={styles.worthImage} /> : <View style={styles.worthImageMissing}><ProxyIcon color={color.muted} name="storefront" size={24} /></View>}
-                          <Text selectable style={styles.worthName} numberOfLines={1}>{p.name}</Text>
+                          {/* MENU-HOT-001：HOT 徽。 */}
+                          <View style={styles.worthNameRow}>
+                            <Text selectable style={styles.worthName} numberOfLines={1}>{p.name}</Text>
+                            {p.isHot ? <HotBadge /> : null}
+                          </View>
                           <Text selectable style={styles.priceRed}>{formatVnd(p.priceMinor)}</Text>
                           {p.scene ? <Text selectable style={styles.scenePill} numberOfLines={1}>{p.scene}</Text> : null}
                         </Pressable>
@@ -548,7 +631,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                             </Pressable>
                           ))}
                         </View>
-                      )) : sProducts.map((p) => <View key={p.id} style={styles.photoRow}>{thumbUrlFor(p.mediaAssetId) ? <Image source={{ uri: thumbUrlFor(p.mediaAssetId) }} style={styles.productThumb} /> : <View style={styles.productThumb}><ProxyIcon color={color.ink} name="storefront" size={20} /></View>}<View style={styles.photoRowMain}><Text selectable style={styles.productName}>{p.name}{p.available ? "" : " · 已下架"}</Text><Text selectable style={styles.photoMeta}>{formatVnd(p.priceMinor)}{p.description ? ` · ${p.description}` : ""}</Text></View><Pressable onPress={() => startEditProduct(s.id, p)} style={styles.rowAction}><Text selectable style={styles.rowActionText}>编辑</Text></Pressable></View>)}
+                      )) : sProducts.map((p) => <View key={p.id} style={styles.photoRow}>{thumbUrlFor(p.mediaAssetId) ? <Image source={{ uri: thumbUrlFor(p.mediaAssetId) }} style={styles.productThumb} /> : <View style={styles.productThumb}><ProxyIcon color={color.ink} name="storefront" size={20} /></View>}<View style={styles.photoRowMain}><Text selectable style={styles.productName}>{p.name}{p.available ? "" : " · 已下架"}</Text><Text selectable style={styles.photoMeta}>{formatVnd(p.priceMinor)}{p.description ? ` · ${p.description}` : ""}</Text></View>{p.isHot ? <View style={styles.rowHot}><HotBadge /></View> : null}<Pressable accessibilityLabel={p.isHot ? `取消${p.name}的HOT` : `把${p.name}标为HOT`} onPress={() => void toggleProductHot(s.id, p)} style={styles.rowAction}><Text selectable style={styles.rowActionText}>{p.isHot ? "摘HOT" : "HOT"}</Text></Pressable><Pressable onPress={() => startEditProduct(s.id, p)} style={styles.rowAction}><Text selectable style={styles.rowActionText}>编辑</Text></Pressable></View>)}
                     </>);
                   })()}
                   {(() => {
@@ -598,6 +681,16 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                       <Pressable onPress={() => void pickProductPhoto()} disabled={savingProduct} style={[styles.uploadButton, savingProduct ? styles.uploadButtonBusy : null]}>
                         <Text selectable style={styles.uploadButtonText}>{editingProductPhoto ? "换一张" : "+ 上传照片"}</Text>
                       </Pressable>
+                      {/* MENU-HOT-001：HOT 开关。商家亲手标，不是从销量算的。 */}
+                      <Pressable
+                        accessibilityLabel={editingProductHot ? "取消 HOT" : "标为 HOT"}
+                        onPress={() => setEditingProductHot((v) => !v)}
+                        style={[styles.hotToggle, editingProductHot && styles.hotToggleOn]}
+                      >
+                        <Text selectable style={[styles.hotToggleText, editingProductHot && styles.hotToggleTextOn]}>
+                          {editingProductHot ? "HOT · 点按取消" : "标为 HOT"}
+                        </Text>
+                      </Pressable>
                       {productError ? <Text selectable style={styles.errorText}>{productError}</Text> : null}
                       <View style={styles.linesEditActions}><Pressable onPress={() => { setEditingProductFor(undefined); setEditingProductId(undefined); }} style={[styles.createBtn, styles.linesEditCancel]}><Text selectable style={styles.createBtnText}>取消</Text></Pressable><Pressable disabled={savingProduct} onPress={() => void saveProduct(s.id)} style={styles.createBtn}><Text selectable style={styles.createBtnText}>{savingProduct ? "保存中…" : "保存"}</Text></Pressable></View>
                     </View>
@@ -606,6 +699,17 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                   {/* Store details editor is contextual, never the default storefront. */}
                   {currentPage === "details" && editingLinesFor === s.id ? (
                     <View style={styles.linesEditForm}>
+                      {/* STORE-LOGO-001：店徽选择器。有就预览 + 换一张，没有就上传。
+                          空着也能保存 —— 店徽是可选的，不该拦住简介电话那些项。 */}
+                      <Text selectable style={styles.linesEditLabel}>店徽</Text>
+                      {merchantAvatarUri(editingLogoPath || undefined, localApiBaseUrl) ? (
+                        <Image source={{ uri: merchantAvatarUri(editingLogoPath || undefined, localApiBaseUrl) }} style={styles.logoPreview} />
+                      ) : (
+                        <View style={styles.logoEmpty}><ProxyIcon color={color.muted} name="storefront" size={22} /></View>
+                      )}
+                      <Pressable onPress={() => void pickLogoPhoto()} disabled={savingLogo} style={[styles.uploadButton, savingLogo ? styles.uploadButtonBusy : null]}>
+                        <Text selectable style={styles.uploadButtonText}>{savingLogo ? "上传中…" : editingLogoPath ? "换一张" : "+ 上传店徽"}</Text>
+                      </Pressable>
                       <Text selectable style={styles.linesEditLabel}>店铺简介</Text>
                       <TextInput
                         value={editingDescription}
@@ -666,8 +770,11 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         </Pressable>
                       </View>
                     </View>
-                  ) : currentPage === "details" ? (
+                  ) : currentPage === "details" ? (<>
+                    <Text selectable style={styles.buildStamp}>build 1003-hotlogo</Text>
                     <Pressable
+                      accessibilityRole="button"
+                      hitSlop={12}
                       onPress={() => startEditLines(s.id, sLines)}
                       style={styles.linesEditToggle}
                     >
@@ -675,6 +782,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         {sLines ? "编辑主页 / 联系方式 / 营业时间" : "填写主页 / 联系方式 / 营业时间"}
                       </Text>
                     </Pressable>
+                  </>
                   ) : null}
 
                   {currentPage === "photos" ?
@@ -726,7 +834,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                   ))}</View>
                   <View style={styles.managerPanel}><View style={styles.photoHead}><Text selectable style={styles.photoHeadTitle}>Creator 权益</Text><Text selectable style={styles.photoHeadMeta}>联营与内容合作</Text></View><Text selectable style={styles.empty}>设置 Creator 到店体验、内容合作与专属权益；对外的展示页还没做，配好之后暂时只有你自己看得到。</Text></View></> : null}
                   {currentPage === "details" ? <View style={styles.managerPanel}><View style={styles.photoHead}><Text selectable style={styles.photoHeadTitle}>营业资料</Text><Text selectable style={styles.photoHeadMeta}>公开展示</Text></View>{sLines ? <View style={styles.linesBlock}><Text selectable style={styles.linesDescription}>{sLines.description || "店铺简介待完善"}</Text><Text selectable style={styles.linesContact}>{[sLines.contactPhone, sLines.contactEmail].filter(Boolean).join(" · ") || "联系方式待完善"}</Text><Text selectable style={styles.linesHours}>{Object.entries(linesAsHoursObject(sLines.hoursJson)).map(([k, v]) => k === "营业时间" ? v : `${k} ${v}`).join(" · ") || "营业时间待完善"}</Text></View> : <Text selectable style={styles.empty}>店铺简介、联系方式和营业时间待完善</Text>}</View> : null}
-                  <View style={styles.scopeNote}><Text selectable style={styles.scopeNoteText}>线上店铺只负责对外展示。订单、客户、退款和经营分析分别进入对应经营模块，不在这里重复做后台。</Text></View>
+                  {scope ? null : <View style={styles.scopeNote}><Text selectable style={styles.scopeNoteText}>线上店铺只负责对外展示。订单、客户、退款和经营分析分别进入对应经营模块，不在这里重复做后台。</Text></View>}
                 </View>
               );
             })}
@@ -804,9 +912,14 @@ const styles = StyleSheet.create({
   metricValue: { color: color.ink, fontSize: 13, fontWeight: "900" },
   metricLabel: { color: color.muted, fontSize: 11, marginTop: 3 },
   // R18.x LINES-EDITOR-001
+  // 构建指纹戳（调包新旧一眼定，稳定后删掉）。
+  buildStamp: { color: "#B8B0AA", fontSize: 11, marginBottom: 2 },
   linesEditToggle: { paddingVertical: 6 },
   linesEditToggleText: { color: color.ink, fontSize: 12, fontWeight: "800" },
   linesEditForm: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 12, borderWidth: 1, gap: 6, padding: 10 },
+  // STORE-LOGO-001：店徽预览 72px 方图。
+  logoPreview: { backgroundColor: color.surface, borderRadius: 14, height: 72, width: 72 },
+  logoEmpty: { alignItems: "center", backgroundColor: color.surface, borderRadius: 14, height: 72, justifyContent: "center", width: 72 },
   linesEditLabel: { color: color.muted, fontSize: 11, fontWeight: "800", marginTop: 4 },
   linesEditTextarea: { minHeight: 60, textAlignVertical: "top" },
   linesEditActions: { flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 6 },
@@ -815,6 +928,13 @@ const styles = StyleSheet.create({
   photoHeadTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   photoHeadMeta: { color: color.muted, fontSize: 11 },
   uploadButton: { alignSelf: "flex-start", backgroundColor: color.lime, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  // MENU-HOT-001：HOT 开关（关=灰框，开=红橙底白字，照原型）。
+  hotToggle: { alignItems: "center", borderColor: color.line, borderRadius: 999, borderWidth: 1, marginTop: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  hotToggleOn: { backgroundColor: "#FF3B30", borderColor: "#FF3B30" },
+  hotToggleText: { color: "#6D666C", fontSize: 11, fontWeight: "800" },
+  hotToggleTextOn: { color: color.white },
+  // MENU-HOT-001：行内 HOT 徽占位。
+  rowHot: { justifyContent: "center" },
   uploadButtonBusy: { opacity: 0.5 },
   uploadButtonText: { color: color.ink, fontSize: 12, fontWeight: "800" },
   photoRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: color.white, borderColor: color.line, borderRadius: 8, borderWidth: 1, padding: 8 },
@@ -827,7 +947,8 @@ const styles = StyleSheet.create({
   worthCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, gap: 4, padding: 8, width: 148 },
   worthImage: { borderRadius: 10, height: 112, width: "100%" },
   worthImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 10, height: 112, justifyContent: "center", width: "100%" },
-  worthName: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  worthNameRow: { alignItems: "center", flexDirection: "row", gap: 6 },
+  worthName: { color: color.ink, flexShrink: 1, fontSize: 13, fontWeight: "800" },
   priceRed: { color: "#a9231f", fontSize: 13, fontWeight: "900" },
   scenePill: { alignSelf: "flex-start", backgroundColor: "#FFF0F6", borderRadius: 999, color: "#7A0033", fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 7, paddingVertical: 3 },
   metaPill: { alignSelf: "flex-start", backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 999, borderWidth: 1, color: color.muted, fontSize: 11, fontWeight: "700", overflow: "hidden", paddingHorizontal: 7, paddingVertical: 3 },

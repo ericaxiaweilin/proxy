@@ -309,7 +309,12 @@ func TestListMyBusinessAccountsCarriesOwnerAvatar(t *testing.T) {
 		ON CONFLICT (user_account_id) DO UPDATE SET avatar_path=EXCLUDED.avatar_path`, owner); err != nil {
 		t.Fatalf("seed owner profile: %v", err)
 	}
-	if got := accountAvatar(); got != "assets/ma_test_avatar" {
-		t.Fatalf("avatarPath must carry the owner profile pointer, got %q", got)
+	// MERCHANT-AVATAR-001（2026-10-02，用户 P0「企业店铺的头像用了用户侧的头像」）：
+	// 这一段原来断言 avatarPath 必须带上店主个人头像 —— 那正是被报的 bug 本身。
+	// 店主有脸，店没有：business account 的 AvatarPath 必须保持为空，
+	// 客户端才走店名首字 fallback，而不是画一张属于用户的脸。
+	if got := accountAvatar(); got != "" {
+		t.Fatalf("avatarPath must NOT carry the owner profile pointer, got %q — "+
+			"the store card would show the owner's face", got)
 	}
 }

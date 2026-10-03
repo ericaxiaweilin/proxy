@@ -307,8 +307,9 @@ export function detectOrderConflict(
   const live = existing.filter((order) => !order.cancelled);
   // 同一场活动 + **同一个同行人** ⇒ 重复下单。换了同行人就是新的一单。
   //
-  // 拿不到旧单的同行人（历史数据没有这个字段）时仍然判重 —— 与服务端
-  // companionChanged 的保守策略一致：宁可误报重复，也不能因为缺数据放行重复下单。
+  // 拿不到旧单的同行人（历史数据没有这个字段）时**不判重**：按「换了人」放行。
+  // 服务端同一口径 —— activity.go 的 Join 要求 existing.Snapshot != nil 才判重，
+  // companionChanged 遇 nil 也返回 true。理由见下（这里写反过一次，会永久锁死用户）。
   const wanted = activity.companionId ?? "";
   // 同一场活动 + **已知同一个同行人** ⇒ 重复下单。
   //

@@ -1,6 +1,6 @@
 // 个人轻 CRM — 好友不是消息列表的子集，而是独立的个人关系资产。
 // 接线 /Users/thanhhuyennguyen/Downloads/proxy_add_friend_detail.html 的 5 种加好友 + 轻 CRM 详情
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { CameraView, scanFromURLAsync, useCameraPermissions } from "expo-camera";
@@ -18,6 +18,8 @@ import type { ContentAnalytics, LocalNetClient, MediaImpressionStats, PostImpres
 import type { FeedPost } from "@proxy/contracts";
 import { color, shadows } from "../theme";
 import { ProxyBackGlyph } from "../components/proxy-foundation";
+// SETTINGS-BLOCKLIST-001：拉黑写进本机名单（落盘），设置页读同一份。
+import { blockUser, getBlocklist, isBlocked, subscribeBlocklist } from "../blocked-users-store";
 
 type FriendSource = "QR" | "INVITE" | "CONTACTS" | "SOCIAL" | "SEARCH";
 type FriendStatus = "FRIEND" | "PENDING" | "BLOCKED";
@@ -173,7 +175,22 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   // 拉黑移除全部在本地流转，与服务端行走同一套 UI，保证每个按钮可点、
   // 每次点按都有可验证的状态变化。
   const [sentIds, setSentIds] = useState<Record<string, boolean>>({});
+  // SETTINGS-BLOCKLIST-001：名单在 blocked-users-store（落盘 + 模块级 store），
+  // 设置页的「黑名单管理」读的是同一份。此前这里只有一个组件内 useState ——
+  // 页面一卸载名单就没了，用户在设置页根本看不到自己拉黑过谁，那等于没拉。
+  //
+  // CRM_FRIENDS 里已被拉黑的人要在进页面时就消失（不然重进 App 又冒出来）。
   const [localFriends, setLocalFriends] = useState<CrmFriend[]>(CRM_FRIENDS);
+  // 订阅名单：设置页那边解封之后，这一页要**当场**把人放回来。
+  //
+  // 快照返回拼接字符串而不是数组 —— useSyncExternalStore 要求快照引用稳定，
+  // 每次返回一个新数组会无限重渲染（这仓已经吃过 useSyncExternalStore 快照
+  // 不稳定的亏）。字符串相等即同一份名单。
+  const blockedKey = useSyncExternalStore(
+    subscribeBlocklist,
+    () => getBlocklist().map((b) => b.userId).join("\u0001"),
+    () => ""
+  );
   // 社媒账号自动保存开关：本地展示态，点按真实翻转（以前只弹 toast，开关不动）。
   const [autoSaveSocial, setAutoSaveSocial] = useState(true);
   // R18.x FRIEND-001: replace the hardcoded PENDING_REQUESTS
@@ -366,7 +383,15 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
 
   // 本机演示列表由 localFriends 派生：接受请求会加人，拉黑会减人。
   // 必须放在 filteredAdv/visibleAdv 之前声明（memo 按顺序执行）。
-  const advFriends = useMemo(() => enrichFriends(localFriends), [localFriends]);
+  // 可见列表 = 本机列表 ∩ 「没被拉黑」。名单一变就重算，所以：
+  //   · 在这里拉黑 → 人当场消失；
+  //   · 在设置页解封 → 人当场回来。
+  // 两个方向都只由 blocked-users-store 一个事实源决定，不会各自漂移。
+  const visibleFriends = useMemo(
+    () => localFriends.filter((f) => !isBlocked(f.id)),
+    [localFriends, blockedKey]
+  );
+  const advFriends = useMemo(() => enrichFriends(visibleFriends), [visibleFriends]);
 
   const filteredAdv = useMemo(() => {
     if (crmTab === "ALL") return advFriends;
@@ -462,7 +487,10 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
 
   // 本机演示拉黑：立即从本地列表移除并返回列表。
   function removeDemoFriend(id: string): void {
-    setLocalFriends((prev) => prev.filter((f) => f.id !== id));
+    // 真写盘 + 真通知订阅者：设置页那一行的计数会当场变。
+    // 列表不用在这里手动 filter —— visibleFriends 按名单过滤（见下），
+    // 否则「解封后又冒出来」和「拉黑后没消失」两个方向都会各自漂移。
+    blockUser(id, CRM_FRIENDS.find((f) => f.id === id)?.name ?? id);
     setSelected(undefined);
     setView("LIST");
     showToast("已拉黑");
@@ -1152,6 +1180,9 @@ function FriendDetail({ friend, relationship, onBack, onOpenConversation, onOpen
     setBlocking(true);
     try {
       await relationship.blockFriend(friend.userId);
+      // 服务端成功 ≠ 就不记本机名单了：设置页的「黑名单管理」是**本机**名单
+      // （服务端没有列出黑名单的命令），所以这条要自己写一份。
+      blockUser(friend.userId, friend.name);
       showToast("已拉黑");
       onBack();
     } catch (error) {

@@ -8,6 +8,7 @@ import {
   isActiveConsent,
   type LocationConsent,
 } from "../location-consent-client";
+import { DEFAULT_LANGUAGE, translate, type Language } from "../i18n";
 
 export {
   ALLOWED_DURATION_SECONDS,
@@ -16,27 +17,35 @@ export {
   type LocationConsent,
 };
 
-export type ToggleLocale = "vi" | "zh";
+// I18N-SAFETY-002：ToggleLocale 原来是 `"vi" | "zh"` —— 一条与 i18n.ts 的六种
+// 语言**完全无关**的第二条语言轴。同一屏上 precise-location-toggle 走这条轴
+// （而且整张卡写死越南语），fuzzy-location-card 却写死中文。现在只剩一种：
+// Language。留着这个 type 别名是为了不改动 import 它的调用点，但它不再是
+// 「只能是越南语或中文」—— 它就是那六种。
+export type ToggleLocale = Language;
 
 // labelForDuration turns a duration in seconds into a short
 // human label, e.g. "30 phút" / "8 giờ". The function is also
 // used by the duration-choice chip row in the toggle.
+//
+// 默认值从 "vi" 改成 DEFAULT_LANGUAGE：App 的默认语言是中文（i18n.ts），
+// 不是越南语。
 export function labelForDuration(
   seconds: number,
-  locale: ToggleLocale = "vi",
+  lang: Language = DEFAULT_LANGUAGE,
 ): string {
   if (seconds === 30 * 60) {
-    return locale === "vi" ? "30 phút" : "30 分钟";
+    return translate(lang, "consentDurationMinutes", { n: 30 });
   }
   if (seconds === 8 * 60 * 60) {
-    return locale === "vi" ? "8 giờ" : "8 小时";
+    return translate(lang, "consentDurationHours", { n: 8 });
   }
   return `${Math.round(seconds / 60)}m`;
 }
 
 // summariseConsent produces a one-line status string for the
-// toggle header. The caller passes the locale so the same
-// helper works for vi and zh builds.
+// toggle header. The caller passes the language so the same
+// helper works for every locale.
 //
 // `now` is threaded through to isActiveConsent() so a test that
 // fixes `now` (e.g. NOW = Date.parse("2026-09-04T10:00:00Z"))
@@ -46,11 +55,11 @@ export function labelForDuration(
 export function summariseConsent(
   consent: LocationConsent | null | undefined,
   now: number = Date.now(),
-  locale: ToggleLocale = "vi",
+  lang: Language = DEFAULT_LANGUAGE,
 ): string {
-  if (!consent) return locale === "vi" ? "Đang tải..." : "加载中…";
+  if (!consent) return translate(lang, "consentLoading");
   if (!isActiveConsent(consent, now)) {
-    return locale === "vi" ? "Đang tắt" : "已关闭";
+    return translate(lang, "consentOff");
   }
   let remaining = consent.remainingSeconds;
   if (remaining <= 0 && consent.expiresAt) {
@@ -58,9 +67,7 @@ export function summariseConsent(
     remaining = Math.max(0, Math.floor(ms / 1000));
   }
   if (remaining <= 0) {
-    return locale === "vi" ? "Sắp hết hạn" : "即将过期";
+    return translate(lang, "consentExpiring");
   }
-  return locale === "vi"
-    ? `Đang bật · ${formatRemaining(remaining, locale)}`
-    : `已开启 · ${formatRemaining(remaining, locale)}`;
+  return translate(lang, "consentActive", { remaining: formatRemaining(remaining, lang) });
 }

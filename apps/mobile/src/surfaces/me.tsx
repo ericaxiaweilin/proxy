@@ -7,7 +7,7 @@
 // （renderRequesterMe / renderBusinessMe / contextline），
 // 切换 Sheet 由 App Shell 共享渲染（ContextSwitcherSheet）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useModuleBackHandler } from "../components/module-back";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SwipeBackShell } from "../architecture/swipe-back";
@@ -31,11 +31,10 @@ import { createLastSignInStore } from "../last-signin-store";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, Memory, RegisteredExperienceRoute } from "@proxy/contracts";
 import type { PersonaGalleryItem } from "../ai-persona-client";
-import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
+import { ProxyIcon, ProxySymbolIcon, type ProxyIconName } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { MerchantMeR21Replacement } from "./merchant-me-r21-replacement";
 import { MyStoresHub } from "./my-stores-hub";
-import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { StoreRecommendationQueue } from "./store-recommendation-queue";
 import { CreatorInvitationCard } from "./creator-application";
 import { FriendCrmSurface } from "./friend-crm";
@@ -55,7 +54,19 @@ import { SafetyEventCard } from "../components/safety-event-card";
 // 位置来源同仓库其他 surface（requester-home / hot-scenes / reality-scene-map）
 // 一致：getCurrentFix + expoLocationApi。
 import { LanguageSheet } from "../components/language-sheet";
+// I18N-SETTINGS-001：设置页与「位置与隐私」子页的文案。见 useI18n() 那行注释。
+import { useI18n } from "../i18n";
 import { getCurrentFix } from "../device-location";
+// SETTINGS-BLOCKLIST-001：本机黑名单（服务端没有「列出黑名单」的命令，见 store 头注释）。
+import { blockUser, getBlocklist, subscribeBlocklist, unblockUser } from "../blocked-users-store";
+// SETTINGS-LEGALDOCS-001：条款查看器从 native-app 抽成共用组件，两处用同一份实现。
+import { LegalDocViewer } from "../components/legal-doc-viewer";
+import { type LegalDocKind } from "../legal-doc";
+import { useSyncExternalStore } from "react";
+// SETTINGS-HUB-CACHE-CLEAR-001：清理缓存走真文件系统，不写死原型里那组编的 MB 数。
+// CACHE-CLEAR-MATURE-001：清操作系统指定的缓存目录（Paths.cache）+ 可重建的 feed 快照。
+// 白名单见 clearable-cache.ts 的头注释 —— Paths.document 下的用户数据绝不在内。
+import { cacheFootprint, clearCaches, formatBytes, type CacheFootprint } from "../clearable-cache";
 import { expoLocationApi } from "../device-location-native";
 import { resolvePrivacyRequestClient } from "../privacy-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
@@ -118,6 +129,10 @@ import { SUB_PAGE_CONTENT, meSubPage } from "./me-sub-pages";
 import { useMerchantIdentity } from "../use-merchant-identity";
 import { styles } from "./me-styles";
 import { ProxyBackGlyph } from "../components/proxy-foundation";
+// CREATOR-SOCIAL-001：社媒绑定区组件。
+import { SocialLinkSection } from "../components/social-link-section";
+// CREATOR-PROFILE-001：passport 照片解析（和商家侧同一套）。
+import { resolveCreatorPhoto } from "./merchant-creator-recommendations";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
@@ -338,7 +353,10 @@ const BUSINESS_ME: PersonaConfig = {
         { icon: "◎", label: "Creator 经营", desc: "功能预览 · 实时数据待接入", grad: true, route: "trustedteam" },
         { icon: "券", label: "券", desc: "查看真实券状态", route: "vouchers" },
         { icon: "↗", label: "活动导流", desc: "商家活动 · 可报名", route: "merchantcampaign" },
-        { icon: "▤", label: "线上店铺", desc: "实时数据已接入", grad: true, route: "merchantstorefront" },
+        // STORE-CONSOLIDATE-001（2026-10-02）：「线上店铺」入口已并入「我的店铺」
+        // （企业 / 店铺组，bdash → MyStoresHub）。两个 tile 点进去是同一页，留着就是
+        // 用户看到的"重复的2个"。路由 merchantstorefront 保留（深链 + 店内导航还指它，
+        // 渲染的也是 hub），删的只是这个菜单 tile。
         { icon: "₫", label: "销售中心", desc: "功能预览 · 实时数据待接入", route: "outcomehistory" },
         { icon: "✦", label: "经营", desc: "门店经营助手", route: "enterpriseops" },
         // STORE-REC-002/004: 评估队列对 BUSINESS 身份也要可达 —— 运营更可能挂在这个
@@ -383,6 +401,67 @@ type ProfileSearchHit = {
   body: string;
 };
 
+// SETTINGS-HUB-ALL-NINE-001：设置页里**接不通**的那几行长这样。
+//
+// 为什么不干脆不画：上一轮就是这么做的（4 行整行拿掉），用户的反应是
+// 「丢失了 黑名单管理 服务协议与隐私政策 清理缓存 深色模式 盲盒匹配偏好」——
+// 从用户视角，界面上根本没有的东西和「有但点不动」一样是丢失，而且更没法反馈。
+//
+// 为什么不用一个按了弹 toast 的按钮：placeholder-honest-actions.test.ts
+// （PLACEHOLDER-001）钉的就是这个 —— 占位按钮必须走真实逻辑，不能只弹演示
+// toast。所以这一行**禁用**（onPress 不存在），并且明写「暂不可用」。
+//
+// 它也不是死代码：哪一行从"暂不可用"变成"可按"，src/settings-hub-all-nine.test.ts
+// 会逼着补上真实接线（测试逐行钉接通状态）。
+// SETTINGS-BLOCKLIST-001：黑名单入口。**真能打开**，而且能看到自己拉黑过谁 ——
+// 上一版把它整行摆成「暂不可用」，理由是"服务端没有列出黑名单的命令"。那条
+// 理由成立，但它推不出"整行不做"：PLACEHOLDER-001 明写「无后端走本地演示
+// 状态机」是允许的，只要点了真生效。
+//
+// 所以这里是本机名单（blocked-users-store.ts 真落盘），并在界面上写明它只存
+// 这台设备 —— 说成云端同步就是撒谎。
+function BlocklistRow({ onPress }: { onPress: () => void }): React.JSX.Element {
+  const { t } = useI18n();
+  // useSyncExternalStore：friend-crm 里拉黑一个人，这行的计数要当场变 ——
+  // 用 useState 的话两处各存一份，改一处另一处不知道。
+  const blocked = useSyncExternalStore(subscribeBlocklist, getBlocklist, getBlocklist);
+  return (
+    <Pressable onPress={onPress} style={styles.settingsHubRow}>
+      <View style={styles.settingsHubRowMain}>
+        <ProxyIcon color={color.ink} name="blockCircle" size={22} />
+        <View style={styles.settingsHubRowCopy}>
+          <Text selectable style={styles.settingsHubRowLabel}>{t("settingsRowBlocklist")}</Text>
+          {blocked.length > 0 ? (
+            <Text selectable style={styles.settingsHubRowSub}>{t("blocklistCount", { n: blocked.length })}</Text>
+          ) : null}
+        </View>
+      </View>
+      <Text selectable style={styles.settingsHubChevron}>›</Text>
+    </Pressable>
+  );
+}
+
+function SettingsRowUnavailable({
+  icon,
+  label
+}: {
+  icon: ProxyIconName;
+  label: string;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  return (
+    <View accessibilityState={{ disabled: true }} style={styles.settingsHubRow}>
+      <View style={styles.settingsHubRowMain}>
+        <ProxyIcon color={color.brandSmall} name={icon} size={22} />
+        <View style={styles.settingsHubRowCopy}>
+          <Text selectable style={[styles.settingsHubRowLabel, styles.settingsHubRowLabelMuted]}>{label}</Text>
+          <Text selectable style={styles.settingsHubRowSub}>{t("settingsRowUnavailable")}</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export function MeSurface({
   context,
   localNet,
@@ -393,6 +472,7 @@ export function MeSurface({
   onOpenFeed,
   onOpenMarket,
   onOpenVouchers,
+  onOpenCreatorProfile,
   onOpenRealitySceneMap,
   onExperienceAction,
   onOpenConversation,
@@ -427,6 +507,8 @@ export function MeSurface({
   onOpenFeed: () => void;
   onOpenMarket?: (() => void) | undefined;
   onOpenVouchers: () => void;
+  // CREATOR-HOME-001：经营列表点头像进帖文主页。
+  onOpenCreatorProfile?: ((userId: string, name: string, avatarUri?: string | undefined) => void) | undefined;
   onOpenRealitySceneMap?: (() => void) | undefined;
   onExperienceAction: (action: ExperienceAction) => void;
   onOpenConversation?: (author: string, peerUserId?: string) => void;
@@ -506,6 +588,11 @@ export function MeSurface({
     return () => { cancelled = true; };
   }, [subPage?.route, scene]);
   const [passportError, setPassportError] = useState<string | undefined>(undefined);
+  // CREATOR-SOCIAL-001：本人的社媒（读 passport 顺带）。加/删走下面 SocialLinkSection。
+  const [mySocials, setMySocials] = useState<Array<{ platform: string; handle: string; visibility: string }>>([]);
+  const [myAgentId, setMyAgentId] = useState<string | undefined>(undefined);
+  const [myBio, setMyBio] = useState("");
+  const [myPhotos, setMyPhotos] = useState<string[]>([]);
   useEffect(() => {
     if (!supply) return;
     let cancelled = false;
@@ -528,6 +615,12 @@ export function MeSurface({
         }));
       }
       if ((p.availability?.length ?? 0) > 0) setAvailability("AVAILABLE");
+      // CREATOR-SOCIAL-001：自己的社媒列表（passport 里带出来，存一份给绑定区用）。
+      setMySocials(p.profile?.socials ?? []);
+      if (p.profile?.agentId) setMyAgentId(p.profile.agentId);
+      // CREATOR-PROFILE-001：自己的头像和简介也存一份，给"商家看到的主页"预览用。
+      setMyBio(typeof p.profile?.bio === "string" ? p.profile.bio : "");
+      setMyPhotos(Array.isArray(p.profile?.photos) ? p.profile.photos.filter((x): x is string => typeof x === "string").slice(0, 1) : []);
     }).catch((e) => { if (!cancelled) setPassportError(e instanceof Error ? e.message : String(e)); });
     return () => { cancelled = true; };
   }, [supply]);
@@ -726,6 +819,56 @@ export function MeSurface({
   // presentation="modal" 是安全的 —— 不会撞上「iOS 一次只呈现一个 Modal，
   // 第二个被无声吞掉」那个坑。
   const [languageSheetOpen, setLanguageSheetOpen] = useState(false);
+  // SETTINGS-HUB-CACHE-CLEAR-001：undefined = 还没量到（这一行先显示"暂不可用"，
+  // 免得先闪一个 0 MB 骗人）。量到之后才显示真实体积 + 可点的清理。
+  // CACHE-CLEAR-MATURE-001：undefined = 还没量到（这一行先不显示数字 ——
+  // 先闪一个 0 KB 是在骗人）。
+  const [cache, setCache] = useState<CacheFootprint | undefined>(undefined);
+  const [cacheNotice, setCacheNotice] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    try {
+      setCache(cacheFootprint());
+    } catch {
+      // 量不到也是量不到。不假装是 0。
+      setCache({ totalBytes: 0, roots: [] });
+    }
+  }, [subPage]);
+
+  function handleClearCache(): void {
+    // 删除不可逆 —— 成熟做法是先确认，而且确认框里要写清**不会**删什么。
+    // 用户看到「清理草稿」会点下去吗？不会。所以这句话不是客套。
+    Alert.alert(
+      t("settingsRowClearCache"),
+      t("settingsCacheConfirmBody", {
+        size: formatBytes(cache?.totalBytes ?? 0),
+        keep: t("settingsCacheKeptList")
+      }),
+      [
+        { text: t("cancel"), style: "cancel" },
+        {
+          text: t("settingsCacheConfirmCta"),
+          onPress: () => {
+            const result = clearCaches();
+            // 失败就明说失败，不报「省了多少」—— 部分没删掉却报一个漂亮的
+            // 数字，用户会以为清干净了。
+            setCacheNotice(result.ok ? t("settingsCacheClearedWith", { size: formatBytes(result.freedBytes) }) : t("settingsCacheClearFailed"));
+            // 重新量：清完界面上的体积必须跟着变。
+            try {
+              setCache(cacheFootprint());
+            } catch {
+              setCache(undefined);
+            }
+          }
+        }
+      ]
+    );
+  }
+
+  const [legalDocKind, setLegalDocKind] = useState<LegalDocKind | undefined>(undefined);
+  const blocklist = useSyncExternalStore(subscribeBlocklist, getBlocklist, getBlocklist);
+  // I18N-SETTINGS-001：设置页自己的文案进字典。**语言入口这一行**原来写死
+  // 「语言 / Ngôn ngữ」—— 两种语言拼在一起，仍然不是用户当前的那种语言。
+  const { t } = useI18n();
   // SAFETY-NET-001：这两个 client 必须 memo 住。
   //
   // 卡片内部是 `useEffect(..., [client])`。如果在 JSX 里 inline 构造
@@ -1302,6 +1445,11 @@ export function MeSurface({
         onOpenVouchers={onOpenVouchers}
         onOpenSwitcher={onOpenSwitcher}
         onSignOut={onSignOut}
+        {...(onOpenCreatorProfile ? { onOpenCreatorProfile } : {})}
+        // STORE-CONSOLIDATE-001：BUSINESS 上下文的店详情页也要走统一 hub.
+        {...(fulfillment ? { fulfillment } : {})}
+        {...(profileClient ? { profile: profileClient } : {})}
+        onOpenStoreCreate={() => openSubPage("enterpriseops")}
       />
     );
   }
@@ -1686,19 +1834,31 @@ export function MeSurface({
     // SETTINGS-HUB-001（2026-10-01）：设置页从「一屏内容」改成入口页。
     //
     // 原型（docs/design/references/Proxy_Settings_20261001_726714.html）那一屏
-    // 有 10 行，其中 4 行在本仓库**没有任何实现**，所以这里一行都不画：
+    // 有 **9** 行。当时按「没有实现就不画」只摆了 4 行，注释里列了 4 条理由 ——
+    // SETTINGS-HUB-ALL-NINE-001（2026-10-01，用户：「丢失了 黑名单管理 服务协议
+    // 与隐私政策 清理缓存 深色模式 盲盒匹配偏好」）把 9 行全摆回来了。
     //
-    //   · 盲盒匹配偏好 —— 全仓 blindbox / 盲盒 零命中。那是另一个产品
-    //     （BlindBox 社交）的功能，不是 Proxy 的。
-    //   · 黑名单管理   —— 服务端没有「列出黑名单」的命令。friend-crm 里的
-    //     「拉黑」是**纯本机演示态**（那一页自己写着「仅本机生效」），
-    //     placeholder-honest-actions.test.ts 专门钉了不许给假按钮。
-    //   · 清理缓存     —— 没有任何能算出缓存体积的来源（RN 侧没有这个 API）。
-    //     原型那个「479.93MB / 照片 150MB / 视频 200MB」是编的数字。
-    //   · 深色模式     —— 全仓没有 useColorScheme / colorScheme，主题是固定的。
+    // 但**摆回来 ≠ 全都接通了**，所以这一版把每行的真实状态分开写：
     //
-    // 剩下的每一行都通往一个真的能打开的地方，而且都在本文件里有专属渲染分支
-    // （SUBPAGE-GENERIC-FABRICATED-001 会逐条检查这件事）。
+    //   · 账号与安全 / 手机号认证 / 位置与隐私 / 语言 —— 真能打开（有专属分支）。
+    //   · 清理缓存 —— **上一版说这里没有能算出体积的来源，那是错的**：
+    //     expo-file-system 的 Directory.size / .delete() 都能用，App 自己也
+    //     有一个 proxy-feed-cache 目录（feed-disk-cache.ts）。原型里那个
+    //     「479.93MB / 照片 150MB」是编的数字，所以体积一律现问文件系统。
+    //   · 服务协议与隐私政策 —— 上一版完全没提它，但它**有**一个能跑的
+    //     LegalDocViewer（native-app.tsx），只是设置页没给入口。
+    //   · 黑名单管理 —— 上一版说「服务端没有列出黑名单的命令」属实，但据此
+    //     整行不画是错的：placeholder-honest-actions.test.ts 明写「无后端走本地
+    //     演示状态机」是允许的，只要点了真生效。
+    //   · 深色模式 —— **真的做不了局部**：`color` 是静态 const，98 个文件在模块
+    //     import 期就把它抄进 StyleSheet.create（而 RN 在 __DEV__ 下还会
+    //     Object.freeze），运行时改 color 不会让任何样式变。真做 = 全 App 换肤。
+    //   · 盲盒匹配偏好 —— 全仓零命中，仓里的说法是「那是另一个产品」。
+    //
+    // 所以：接得通的接通，接不通的**明确写「暂不可用」并禁用**，不摆一个按了
+    // 没反应的按钮（UI-HONEST-CAPABILITY-001）。逐行的接通状态由
+    // src/settings-hub-all-nine.test.ts 钉住 —— 那一行一旦从"暂不可用"变成
+    // "可按"，测试会逼着补上真实接线。
     if (subPage.route === "appbehavior") {
       return contentWrapper(
         <>
@@ -1707,38 +1867,93 @@ export function MeSurface({
               <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
                 <ProxyBackGlyph />
               </Pressable>
-              <Text selectable style={styles.appBehaviorTitle}>设置</Text>
+              <Text selectable style={styles.appBehaviorTitle}>{t("settingsTitle")}</Text>
               <Text selectable style={styles.settingsHubHint}>
-                这里只摆真的能打开的项目。原型里那几项（盲盒匹配偏好 / 黑名单管理 / 清理缓存 / 深色模式）本仓库没有实现，所以不摆出来当死按钮。
+                {t("settingsHubHint")}
               </Text>
 
-              <Text selectable style={styles.settingsHubGroup}>账号</Text>
+              <Text selectable style={styles.settingsHubGroup}>{t("settingsGroupAccount")}</Text>
               <Pressable onPress={() => openSubPage("settingssecurity")} style={styles.settingsHubRow}>
-                <Text selectable style={styles.settingsHubRowLabel}>账号与安全</Text>
+                <View style={styles.settingsHubRowMain}>
+                  <ProxyIcon name="lock" color={color.ink} size={22} />
+                  <Text selectable style={styles.settingsHubRowLabel}>{t("settingsRowAccountSecurity")}</Text>
+                </View>
                 <Text selectable style={styles.settingsHubChevron}>›</Text>
               </Pressable>
               <Pressable onPress={() => openSubPage("providerapply")} style={styles.settingsHubRow}>
-                <Text selectable style={styles.settingsHubRowLabel}>手机号认证 (KYC)</Text>
+                <View style={styles.settingsHubRowMain}>
+                  <ProxyIcon name="shield" color={color.ink} size={22} />
+                  <Text selectable style={styles.settingsHubRowLabel}>{t("settingsRowKyc")}</Text>
+                </View>
                 <Text selectable style={styles.settingsHubChevron}>›</Text>
               </Pressable>
 
-              <Text selectable style={styles.settingsHubGroup}>隐私与安全</Text>
+              <SettingsRowUnavailable icon="heartSolid" label={t("settingsRowBlindBox")} />
+
+              <Text selectable style={styles.settingsHubGroup}>{t("settingsGroupPrivacy")}</Text>
               <Pressable onPress={() => openSubPage("locationprivacy")} style={styles.settingsHubRow}>
-                <Text selectable style={styles.settingsHubRowLabel}>位置与隐私</Text>
+                <View style={styles.settingsHubRowMain}>
+                  <ProxyIcon name="pin" color={color.ink} size={22} />
+                  <Text selectable style={styles.settingsHubRowLabel}>{t("settingsRowLocationPrivacy")}</Text>
+                </View>
                 <Text selectable style={styles.settingsHubChevron}>›</Text>
               </Pressable>
+              <BlocklistRow onPress={() => openSubPage("blocklist")} />
 
-              <Text selectable style={styles.settingsHubGroup}>通用</Text>
-              <Pressable onPress={() => setLanguageSheetOpen(true)} style={styles.settingsHubRow}>
-                <Text selectable style={styles.settingsHubRowLabel}>语言 / Ngôn ngữ</Text>
+              <Text selectable style={styles.settingsHubGroup}>{t("settingsGroupGeneral")}</Text>
+              <Pressable onPress={() => setLegalDocKind("terms")} style={styles.settingsHubRow}>
+                <View style={styles.settingsHubRowMain}>
+                  <ProxyIcon name="fileText" color={color.ink} size={22} />
+                  <Text selectable style={styles.settingsHubRowLabel}>{t("settingsRowLegalDocs")}</Text>
+                </View>
                 <Text selectable style={styles.settingsHubChevron}>›</Text>
               </Pressable>
+              {/* CACHE-CLEAR-MATURE-001：这一行**曾经是个死行** ——
+                  我写了 handleClearCache 却把它渲染成 <View>，从没绑到 onPress 上。
+                  函数存在 ≠ 点了有反应，那正是本仓反复修的「定义了没人调」。
+                  门禁当时只查「handleClearCache 这个名字在不在」，于是照样绿 ——
+                  所以现在钉的是**绑定**：`onPress={handleClearCache}`。
+
+                  范围按成熟做法：Paths.cache（操作系统指定的缓存目录，iOS 存储紧张时
+                  清的就是它）+ 可重建的 feed 快照。绝不碰 Paths.document 下的
+                  草稿 / 头像 / 黑名单 —— 白名单钉在 clearable-cache.ts 里。 */}
+              <Pressable onPress={handleClearCache} style={styles.settingsHubRow}>
+                <View style={styles.settingsHubRowMain}>
+                  <ProxyIcon name="trash" color={color.ink} size={22} />
+                  <View style={styles.settingsHubRowCopy}>
+                    <Text selectable style={styles.settingsHubRowLabel}>{t("settingsRowClearCache")}</Text>
+                    {/* 量不到 / 量到 0 / 量到体积，三种状态说三句不同的话。 */}
+                    <Text selectable style={styles.settingsHubRowSub}>
+                      {!cache
+                        ? ""
+                        : cache.totalBytes <= 0
+                          ? t("settingsCacheEmpty")
+                          : t("settingsCacheCurrentSize", { size: formatBytes(cache.totalBytes) })}
+                    </Text>
+                  </View>
+                </View>
+              </Pressable>
+              {/* 清完必须说一句话 —— 静默成功的清理等于「不知道有没有生效」。 */}
+              {cacheNotice ? (
+                <Text selectable style={styles.settingsHubRowSub}>{cacheNotice}</Text>
+              ) : null}
+              <Pressable onPress={() => setLanguageSheetOpen(true)} style={styles.settingsHubRow}>
+                <View style={styles.settingsHubRowMain}>
+                  <ProxyIcon name="globe" color={color.ink} size={22} />
+                  <Text selectable style={styles.settingsHubRowLabel}>{t("language")}</Text>
+                </View>
+                <Text selectable style={styles.settingsHubChevron}>›</Text>
+              </Pressable>
+              <SettingsRowUnavailable icon="moon" label={t("settingsRowDarkMode")} />
 
               <Pressable onPress={() => setSubPage(undefined)} style={styles.appBehaviorReturn}>
                 <ProxyBackGlyph />
               </Pressable>
             </ScrollView>
           </View>
+          {/* SETTINGS-LEGALDOCS-001：条款查看器。挂在这一层而不是语言面板旁边 ——
+              它是一个 Modal，盖在设置枢纽上面，关掉后仍在设置页。 */}
+          {legalDocKind ? <LegalDocViewer kind={legalDocKind} onClose={() => setLegalDocKind(undefined)} /> : null}
           {/* 语言面板由本页自己呈现。设置子页是 SwipeBackShell 内联渲染的、
               不在任何 Modal 里，所以默认的 presentation="modal" 是对的那一种。 */}
           <LanguageSheet
@@ -1757,6 +1972,50 @@ export function MeSurface({
     //
     // 两种位置同意是**分开的两行**，不是一个开关的两档 —— NĐ 356/2025
     // Art. 6.3 禁止把敏感数据的同意捆绑在一起。
+    // SETTINGS-BLOCKLIST-001：黑名单子页。真名单、真解封。
+    //
+    // 「仅本机生效」这句话是**写在界面上的**，不是写在注释里的：服务端确实
+    // 没有「列出黑名单」的命令（api-go 全仓零命中），所以这份名单不会跟着
+    // 用户换设备。藏着这件事，用户会以为拉黑是全局的。
+    if (subPage.route === "blocklist") {
+      return contentWrapper(
+        <>
+          <View style={styles.root}>
+            <ScrollView contentContainerStyle={styles.content}>
+              <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+                <ProxyBackGlyph />
+              </Pressable>
+              <Text selectable style={styles.appBehaviorTitle}>{t("blocklistTitle")}</Text>
+              <Text selectable style={styles.settingsHubHint}>{t("blocklistLocalOnly")}</Text>
+              {blocklist.length === 0 ? (
+                <Text selectable style={styles.settingsHubRowSub}>{t("blocklistEmpty")}</Text>
+              ) : (
+                blocklist.map((entry) => (
+                  <View key={entry.userId} style={styles.settingsHubRow}>
+                    <View style={styles.settingsHubRowCopy}>
+                      <Text selectable style={styles.settingsHubRowLabel}>{entry.displayName}</Text>
+                      <Text selectable style={styles.settingsHubRowSub}>{entry.blockedAt.slice(0, 10)}</Text>
+                    </View>
+                    {/* 解封是真删：unblockUser 落盘 + 通知订阅者，这一行当场消失。 */}
+                    <Pressable
+                      onPress={() => { unblockUser(entry.userId); }}
+                      style={styles.settingsHubRowMain}
+                    >
+                      <Text selectable style={styles.settingsHubRowLabelMuted}>{t("blocklistUnblock")}</Text>
+                    </Pressable>
+                  </View>
+                ))
+              )}
+              <Pressable onPress={() => setSubPage(undefined)} style={styles.appBehaviorReturn}>
+                <ProxyBackGlyph />
+              </Pressable>
+            </ScrollView>
+          </View>
+          {legalDocKind ? <LegalDocViewer kind={legalDocKind} onClose={() => setLegalDocKind(undefined)} /> : null}
+        </>
+      );
+    }
+
     if (subPage.route === "locationprivacy") {
       return contentWrapper(
         <View style={styles.root}>
@@ -1764,9 +2023,9 @@ export function MeSurface({
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <ProxyBackGlyph />
             </Pressable>
-            <Text selectable style={styles.appBehaviorTitle}>位置与隐私</Text>
+            <Text selectable style={styles.appBehaviorTitle}>{t("locationPrivacyTitle")}</Text>
             <Text selectable style={styles.settingsHubHint}>
-              位置属于敏感个人数据（PDP 91/2025/QH15 与 NĐ 356/2025）。下面每一项都是单独的一项授权，默认关闭，随时可关；关掉只影响这一项。
+              {t("locationPrivacyHint")}
             </Text>
             <PreciseLocationCard client={locationConsentClient} />
             <FuzzyLocationCard client={locationConsentClient} />
@@ -1798,7 +2057,7 @@ export function MeSurface({
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <ProxyBackGlyph />
             </Pressable>
-            <Text selectable style={styles.appBehaviorTitle}>账号与安全</Text>
+            <Text selectable style={styles.appBehaviorTitle}>{t("settingsRowAccountSecurity")}</Text>
             <SecuritySettings
               retentionDays={securityRetention}
               onRetentionChange={setSecurityRetention}
@@ -2127,6 +2386,25 @@ export function MeSurface({
             ))}
             <View style={styles.addAbilityRow}>{(["同行", "翻译", "拍照"] as AbilityType[]).map((type) => <Pressable key={type} accessibilityLabel={`添加${type}`} onPress={() => setAbilitySheet({ mode: "ADD", type })} style={styles.addAbilityChip}><Text selectable style={styles.addAbilityChipText}>＋ {type}</Text></Pressable>)}</View>
 
+            {/* CREATOR-SOCIAL-001：社媒绑定区。平台走 chips（封闭集合），用户名手填，
+                可见性默认"仅商家可见"。提交走 supply.linkAgentSocial（只能绑自己的，
+                服务端按 principal 校验）。 */}
+            {supply && myAgentId ? (
+              <SocialLinkSection
+                agentId={myAgentId}
+                socials={mySocials}
+                supply={supply}
+                onChanged={setMySocials}
+                onError={(e) => setPassportError(e)}
+                preview={{
+                  name: profileDraft.name || "我",
+                  bio: myBio,
+                  // passport photos 是服务端路径形态（/v1/media/thumb/...），
+                  // resolveCreatorPhoto 认 / 开头走服务端解析。
+                  photoUri: myPhotos[0] ? resolveCreatorPhoto(myPhotos[0]) : undefined,
+                }}
+              />
+            ) : null}
             <Pressable
               onPress={() => openSubPage("personalhub")}
               style={[styles.primaryCta, abilities.length === 0 && { opacity: 0.5 }]}
@@ -2819,15 +3097,24 @@ export function MeSurface({
       );
     }
 
+    // STORE-CONSOLIDATE-001（2026-10-02，用户「管理别人看到你的店 有重复的ab版本」
+    // 选收编）：「线上店铺」入口直接进「我的店铺」统一 hub，不再渲染第二套管店页。
+    // 二维码 / 菜品 / 券 / Creator 四样都已搬进 MyStoresHub 店详情（券和 Creator 是
+    // 直接搬，二维码是单店组件，菜品是只看列表 + 编辑走原子页子视图）。
     if (subPage.route === "merchantstorefront") {
-      if (business) {
+      if (business && fulfillment && profileClient) {
         return contentWrapper(
           <View style={styles.root}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <ProxyBackGlyph />
-            </Pressable>
-            <Text selectable style={styles.subPageTitle}>线上店铺</Text>
-            <MerchantStorefrontSurface client={business} viewerAccountId={viewerAccountId} onStartStoreSetup={() => openSubPage("enterpriseops")} />
+            <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+              <MyStoresHub
+                business={business}
+                fulfillment={fulfillment}
+                profile={profileClient}
+                onOpenStoreCreate={() => openSubPage("enterpriseops")}
+                onOpenVouchers={onOpenVouchers}
+                onBack={() => setSubPage(undefined)}
+              />
+            </ScrollView>
           </View>
         );
       }
@@ -2856,7 +3143,10 @@ export function MeSurface({
                 business={business}
                 fulfillment={fulfillment}
                 profile={profileClient}
-                onOpenStoreCreate={() => openSubPage("merchantstorefront")}
+                // STORE-CONSOLIDATE-001：建店直接进企业运营助手，不再绕
+                // merchantstorefront（一是那边现在就是 hub 本体，绕一圈回到原地；
+                // 二是建店本来就是助手的事，见 merchant-storefront 的空态）。
+                onOpenStoreCreate={() => openSubPage("enterpriseops")}
                 onBack={() => setSubPage(undefined)}
               />
             ) : (

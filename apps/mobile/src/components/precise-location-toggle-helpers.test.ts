@@ -35,8 +35,10 @@ describe("labelForDuration", () => {
 
 describe("summariseConsent", () => {
   it("returns the loading placeholder when consent is null", () => {
-    expect(summariseConsent(null, NOW, "vi")).toBe("Đang tải...");
-    expect(summariseConsent(undefined, NOW, "vi")).toBe("Đang tải...");
+    // I18N-SAFETY-002：三个点（...）换成单个省略号（…），与字典里其余所有
+    // 「正在…」句式一致；原来这张卡是全 App 唯一用三个点的。
+    expect(summariseConsent(null, NOW, "vi")).toBe("Đang tải…");
+    expect(summariseConsent(undefined, NOW, "vi")).toBe("Đang tải…");
   });
   it("returns Đang tắt when status is REVOKED", () => {
     const c: LocationConsent = {

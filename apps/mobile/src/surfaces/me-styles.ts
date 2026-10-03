@@ -1255,6 +1255,13 @@ export const styles = StyleSheet.create({
   settingsHubHint: { color: color.muted, fontSize: 12.5, lineHeight: 19, marginTop: 6 },
   settingsHubGroup: { color: color.muted, fontSize: 12, fontWeight: "800", letterSpacing: 0.4, marginBottom: 2, marginTop: 22 },
   settingsHubRow: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingVertical: 15 },
+  // SETTINGS-HUB-ROW-ICONS-001：行图标 + 文字的左组。原型的 .item-icon 是 22px
+  // 全出血方块、右边距 12 —— 这里用 gap 12 对齐同一个节奏。
+  settingsHubRowMain: { alignItems: "center", flexDirection: "row", gap: 12 },
+  // SETTINGS-HUB-ALL-NINE-001：副标题那半（「暂不可用」/「当前占用 12.4 MB」）
+  settingsHubRowCopy: { flex: 1 },
+  settingsHubRowSub: { color: color.muted, fontSize: 12, marginTop: 2 },
+  settingsHubRowLabelMuted: { color: color.muted },
   settingsHubRowLabel: { color: color.ink, fontSize: 15.5, fontWeight: "600" },
   settingsHubChevron: { color: color.muted, fontSize: 20 },
 });

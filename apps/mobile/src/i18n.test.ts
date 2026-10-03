@@ -78,18 +78,59 @@ describe("HOME-I18N-001 dictionary completeness", () => {
     }
   });
 
-  // 这条才是真正会抓 bug 的：键齐不代表翻译了。
+// 这条才是真正会抓 bug 的：键齐不代表翻译了。
+  //
+  // I18N-SAFETY-002 修正（2026-10-01）：原来只有一个判据 —— 非中文语言的值
+  // 等于中文值就红。那条判据对拉丁字母语言是对的，但**对 ko / ja 是错的**：
+  // 日语里「保存」「警察」「消防」「削除」就是这几个字，与中文逐字相同才是
+  // 正确译法。加 safety 卡那批键时它第一次真的红了，暴露的是判据本身的洞，
+  // 不是翻译的洞 —— 而当时最容易的「修法」是把那几个键改成假译（把日语的
+  // 「保存」硬写成「セーブ」之类），那就是把门禁改成迎合实现。
+  //
+  // 现在按文字系统分两种判据，两条都比原来严：
+  //   · vi / en / lo（拉丁字母）：值等于中文值 ⇒ 一定是忘了翻。红。
+  //   · ko / ja：值等于中文值**且**是整句（≥ 6 个汉字）⇒ 整句照抄。红。
+  //     短词相同不算：那是两种语言共用的词，不是漏翻。
   it("leaves no Chinese copy in any non-Chinese language", () => {
     const offenders: string[] = [];
-    for (const code of CODES) {
+    const isLatinScript = (code: string): boolean => code === "vi" || code === "en" || code === "lo";
+    // 6 = 一个短句的长度。低于它的「相同」是共用词，高于它的是整句照抄。
+    const SENTENCE_CJK = 6;
+    for (const code of LANGUAGES.map((o) => o.code)) {
       if (code === "zh") continue;
       for (const key of KEYS) {
-        if (I18N[code][key] === I18N.zh[key] && CJK.test(I18N.zh[key])) {
-          offenders.push(`${code}.${key} = ${I18N.zh[key]}`);
+        const zhValue: string = I18N.zh[key];
+        if (I18N[code][key] !== zhValue) continue;
+        if (!CJK.test(zhValue)) continue;
+        const cjkCount = (zhValue.match(/[\u4e00-\u9fff]/g) ?? []).length;
+        const copiedWholeSentence = cjkCount >= SENTENCE_CJK;
+        if (isLatinScript(code) || copiedWholeSentence) {
+          offenders.push(`${code}.${key} = ${zhValue}`);
         }
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  // 上面那条按「共用词 / 整句照抄」分了家；这一条把分界写死：日语与中文
+  // 逐字相同的那几个键，必须是**已知的两语言共用词**，不多不少。
+  // 有人给某个键随手抄一段中文进 ja，这张清单会红；而清单本身被人加长
+  // 来放行新抄的，它跟上面那条一起变红。
+  it("only shares known words verbatim with Chinese in ja/ko", () => {
+    const SHARED_WORDS = new Set([
+      "保存", "保存中…", "警察", "消防", "削除", "送信", "設定", "確認"
+    ]);
+    for (const code of LANGUAGES.map((o) => o.code).filter((c): c is "ja" | "ko" => c === "ja" || c === "ko")) {
+      for (const key of KEYS) {
+        const zhValue: string = I18N.zh[key];
+        if (I18N[code][key] !== zhValue) continue;
+        if (!CJK.test(zhValue)) continue;
+        expect(
+          SHARED_WORDS.has(zhValue),
+          `${code}.${key} is verbatim Chinese (${zhValue}) and is not on the shared-word list`
+        ).toBe(true);
+      }
+    }
   });
 
   it("actually changes the copy when the language changes", () => {

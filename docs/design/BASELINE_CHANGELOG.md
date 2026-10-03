@@ -4,6 +4,450 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 347 — 2026-10-02
+
+- **推送真的发得出去，而且收件箱空的时候不再装成「加载失败」**
+  （`NOTIF-PUSH-001` / `NOTIF-EMPTY-LIST-001` / `NOTIF-DEEPLINK-001`，用户原话：
+  「做啊 系统通知管线必须做好啊 不要问」）。Revision 346 把**写侧**收成了一条管线，
+  但那条管线末端是空的：没有真发送器、没有目标、深链校验是个桩。这一版补的就是末端。
+
+  **① `NOTIF-EMPTY-LIST-001` —— 设备上「通知没取到，下拉重试」的真因。**
+  这不是界面 bug，是**序列化契约**：`notification.inbox_items` 有 845 行但只有
+  **2 个收件人**有行，其余用户的 `PG ListInbox` 返回 **nil 切片** →
+  `listInbox` 塞进 `map[string]any{"items": nil}` → `json.Marshal` 把 nil 写成
+  **`null`**（不是 `[]`）→ 客户端读的是 `Array.isArray(body.items)`，`null` 过不了
+  这关 → 抛 `inbox malformed` → 面板显示**加载失败**态，而真相是「这个用户还没有
+  任何通知」。对绝大多数用户 **100% 复现**，而两端各自看代码都觉得没问题。
+  三层都修了，因为只修一层等于把契约挂在某一个实现的自觉上：
+
+  | 层 | 文件 | 改动 |
+  |---|---|---|
+  | PG 读口（根因） | `internal/platform/postgres/notification.go` | `var items []…` → `items := []notification.InboxItem{}` |
+  | 命令面契约 | `internal/notification/service.go` `listInbox` | `if items == nil { items = []InboxItem{} }` |
+  | 客户端容忍 | `apps/mobile/src/notification-client.ts` | `body.items ?? []`；**但** `items` 存在却非数组时仍然抛 |
+
+  「空列表」和「没有列表」不是一回事：前者是数据，后者是协议破损。反向臂专门钉住
+  后者不许被一起吞掉。
+
+  **② `NOTIF-PUSH-001` —— 真 APNs + FCM，以及「什么才算一次成功的推送」。**
+  Revision 346 之前只有 `LogPushProvider`（只 `log.Printf`），所以「推送成功」和
+  「推送从来没离开过这台机器」在日志上**长得一模一样**。新增：
+
+  - `push.go`：`PushDispatcher` 按收件人取 ACTIVE 令牌、按 Platform 路由；
+    **未知平台不猜**（猜 IOS 会把 Android 令牌发给 APNs，换来看不懂的 400）；
+    **没有设备不是错误**（真实世界里这是常态）；部分失败要把 `sent/total` 写进错误
+    （「3 台里推成 2 台」和「一台都没推成」必须能区分）。
+  - `push_apns.go`：ES256 provider JWT + HTTP/2（stdlib 即可，`net/http` 自动协商）。
+    签名必须是**裸 r‖s（64 字节）**——DER 编码会被 Apple 拒成
+    `403 InvalidProviderToken`，而错误信息**完全不提示是编码问题**。provider token
+    必须缓存（~50 min），否则 Apple 会以 `TooManyProviderTokenUpdates` 限流。
+  - `push_fcm.go`：FCM HTTP v1 + jwt-bearer 换 OAuth2 access token（RS256）。
+    死令牌的信号是 `error.details[].errorCode == "UNREGISTERED"`，**不是** HTTP 状态码。
+  - **令牌退役只认 `Unregistered`**：退役是不可逆的（`status='INACTIVE'`），
+    把 APNs 的一次 500 当成死令牌 = 用户**永久**收不到推送，且没有任何一步会去修它。
+  - `PushProviderFromEnv` 的三档说明：`off` / 没配凭据 / **配了但用不了**（这一档
+    以前会静默退回日志，看起来和「推送正常」一样）。
+  - **客户端**：`apps/mobile/src/push-registration.ts` + `native-app.tsx` 里真的调用
+    `registerDevice`。在这之前 `notification.device_tokens` 是 **0 行**，因为
+    `NotificationClient.registerDevice` 全仓零调用方 —— 推送管线再完整也没有**目标**。
+    新增依赖 `expo-notifications`（SDK 57 对齐版 `~57.0.21`）+ `app.json` 的
+    config plugin（它负责加 `aps-environment` entitlement）。
+    ⚠️ 原生模块是编译进二进制的，所以加载它走**动态 import + try/catch**：二进制还没
+    重建时降级成「暂时收不到推送」，而不是让**整个 app** 启动崩掉。
+
+  **③ `NOTIF-DEEPLINK-001` —— 把 `simplified: allow` 的桩换成真校验。**
+  `resolveDeepLink` 以前对**任何**非空字符串返回 `resolved=true`。那不是「简化」，
+  是没有校验：它是一台**枚举预言机**（谁都能逐个试 `/offers/off_xxx` 问「这条链接
+  存在吗」），而且 `javascript:…` / `//evil.com/x` 也算「格式合法」。现在两道闸：
+
+  1. **形状白名单**（`isResolvableDeepLink`，和 `cmd/worker/main.go` 的
+     `inboxForEvent` 成对）：只认 `/tasks|offers|orders|vouchers|invitations/<id>`，
+     且 `proxy://` 前缀会被归一成站内路径（app.json 的 scheme 是 `proxy`，
+     原生层交上来的是那种写法）。归一之后**只认那一个字符串** —— 查库用它，
+     回给客户端的也用它。
+  2. **归属查库**（`Repository.HasInboxDeepLink`，PG 用 `EXISTS`）：这条链接必须
+     出现在**调用者自己的**收件箱里。深链只被投递给事件指定的收件人，所以
+     「它在我自己的收件箱里」≈「它被发给了我」。查询失败**fail-closed**（拒绝）。
+
+  边界要说清楚：归属这一层证明的是「这条链接被投递给过我」，**不是**「这个资源
+  归我」。资源级 ACL 属于各自领域（offer/order/task 的读口），深链只是个路由，
+  真正的门在目标页面的数据接口上。
+
+  **新增门禁**（`scripts/check-regression-contracts.sh` 末尾三块，各带注入证明）：
+  `NOTIF-EMPTY-LIST-001`（10 条臂）、`NOTIF-PUSH-001`、`NOTIF-DEEPLINK-001`。
+
+  **尚未完成（别当成已实现）**：
+  - 原生包**没有重建**。`expo-notifications` 只在 `package.json` / `app.json` 里，
+    设备上的二进制还没有这个模块 —— 所以推送暂时仍不会真的送达。`registerForPush`
+    会记一行 `[proxy.push] device token not registered (skipped): push-module-unavailable`。
+    重建（`pnpm --filter @proxy/mobile ios`）之后**不需要改代码**，那个分支自然不再走。
+  - `notification.device_tokens` 仍然是 **0 行**（同上）。
+  - api（`:4100`）与 worker **没有重启**，所以服务端这些改动还没上线。工作树里有
+    并行写者的未提交改动，重启会把它们一起带上线，所以没有擅自重启。
+  - 设备上的收件箱空态**没有复验**（需要真机）。
+  - 深链的归属校验目前**没有客户端调用方**（`notification-center` 仍然只做标已读，
+    不驱动跳转）—— 服务端闸门已就位，接线是下一步。
+
+## Revision 346 — 2026-10-01
+
+- **通知只有一条写入管线**（`NOTIF-PIPELINE-001`，用户原话：「有问题就解决
+  建立统一的通知管线」）。这是**服务端**改动，`apps/mobile/` 一行没动 ——
+  但它是 `home-notifications` 这个 scope 欠的那一半：界面早就把真 inbox 画出来了，
+  而写 inbox 的两条路径**各做一半**。
+
+  **改之前的状态**（`internal/notification` 只有 `service.go` + `orchestrator.go`）：
+
+  | | 落库 | 推送 | 幂等 |
+  |---|---|---|---|
+  | outbox worker（`cmd/worker/main.go` 的 `businessInboxDelivery`） | ✅ 自己拼 SQL 直连 `notification.inbox_items` | ❌ 那条路上 `PushProvider` 根本不存在 | ✅ `"inbox_"+EventID` + `ON CONFLICT` |
+  | 命令 `SendInboxNotification`（`service.go` 的 `sendInbox`） | ✅ 走 `Repository` | ✅ | ❌ **随机 item id** |
+
+  两条路径各自看起来都是对的，合起来才是真相：**现网 845 行真数据全部来自 worker
+  那条路，而那条路从来不推送** —— 也就是说真实事件一条推送都没发过。命令那条路
+  形态完整，但它是 operator-only 的后台口，App 侧零调用。更要紧的是它们**会各自
+  漂移**：同一个「写一条通知」的动作，两边对「重复投递算不算一条」的答案相反。
+
+  **现在**：`internal/notification/pipeline.go` 是唯一的写入口
+  `Pipeline.Emit(ctx, Notification) → (item, created, err)`。两个生产者只差一个
+  幂等键（`EventDedupeKey(e.EventID)` / `CommandDedupeKey(idempotencyKey)`），
+  item id 由键 **确定性**推出来（sha256 前 16 字节，定长 32 hex），所以重放撞主键
+  ⇒ 不新增行、**也不二次推送**。顺序是刻意的：校验 → 定 id → 落库 →
+  **只有真的新增了才推送**。
+
+  一起改掉的四处：
+
+  1. `cmd/worker/main.go` 的直连 SQL（注释写着 `bypass service to avoid auth`）
+     换成 `notification.Producer.Emit`。那个「绕过 service 以免鉴权」的理由不再成立：
+     绕开的是**命令层的 operator 鉴权**，而管线本身不带鉴权 —— 鉴权留在命令面，
+     写侧对两个生产者一视同仁。
+  2. `Repository.CreateInboxItem`（无脑 INSERT）换成 `InsertInboxItemOnce`，
+     返回值就是 `RowsAffected()==1`。以前那个 `ON CONFLICT` **只存在于 worker 的
+     直连 SQL 里** —— 同一语义两处实现。现在它是接口上唯一的 inbox 写侧。
+  3. `SendInboxNotification` 以前**不幂等**（随机 id）：同一个 `idempotencyKey`
+     重试一次就多一行。对一个超时重发很常见的后台口来说这是必然发生的。
+     顺带：幂等命中时**不再发域事件**（重试不是「又发生了一件事」）。
+  4. **`NOTIFICATION_PUSH=off` 以前是个空开关**：`configuredNotificationPush()`
+     返回 `nil`，而 `NewWithPushProvider` 里有 `if push == nil { push = LogPushProvider{} }`
+     —— nil 当场被换成 LogPushProvider，关掉的部署照样在推。现在显式 nil 就是
+     **真的关掉**（`TestNewWithPushProviderHonoursExplicitNil` 钉住）。
+     推送通道的判定也搬进 `notification.PushProviderFromEnv`，API 与 worker 共用
+     —— 各判一次就会出现「API 认为开着、worker 认为关着」这种谁都看不见的分叉。
+
+  删掉了 `internal/notification/orchestrator.go`（13 行的 `Orchestrator.ShouldNotify`，
+  **零调用方**）。它是第三套重叠的去重（另两套是 `inbox.processed_events` 和
+  item 主键），而且 `seen map` 无上限、进程活得越久越大 —— 接上它就是引入一个
+  内存泄漏。反向臂禁止它回来。
+
+  **钉**：门禁块 `NOTIF-PIPELINE-001`（9 条正向臂 + 4 条反向臂 + 7 条 `require_test`）
+  \+ 新增 `internal/notification/pipeline_test.go`（12 例）、`cmd/worker/main_test.go`
+  的接线臂、`platform/postgres/notification_integration_test.go` 的 SQL 幂等臂。
+  负向注入 **14 例全 RED**（含 1 例「注释免疫」：那段说明注释本身在引用被删掉的旧
+  SQL，脚本不剥注释，所以反向臂走 `_notif_code_lines` 先滤掉 `//` / `*` / `/*`
+  开头的行 —— 否则钉会被自己的说明文档喂红）。反向臂的注入刻意用**能编译**的
+  写法（`_ = "…"` 字面量）：直接注入到编译不过的话，block 会因为 `go test` 失败
+  变红，那就证明不了那条 grep 臂本身有效。
+
+  **未解 / 没做**（不是漏了）：
+
+  - **没有真实推送通道**。`PushProvider` 只有 `LogPushProvider`（只记日志），
+    APNs/FCM 从未接。管线现在是「推送就绪但通道为空」—— 这是诚实的状态，
+    不是「推送已实现」。
+  - **`notification.device_tokens` 是 0 行**。`NotificationClient.registerDevice`
+    （`notification-client.ts:29`）在 `apps/mobile/src` 里**零调用方**，所以 App
+    从来没注册过设备令牌。即使接上真实推送通道，也没有 token 可推。这需要
+    APNs/FCM 的原生模块 + 真机（模拟器拿不到 push token），本轮不伪造一个。
+  - `resolveDeepLink` 仍是桩（`// Simulate permission check … (simplified: allow)`，
+    无归属校验），客户端也仍未接它 —— 两处一致地保持不接。
+  - **改动要重启进程才生效**：运行中的 api（:4100）与 worker 都是旧代码。
+    本轮**没有**重启 —— 工作树里有并行写者的未提交改动，重启会把它们一起带上线，
+    那是他们的决定。
+
+## Revision 345 — 2026-10-01
+
+- **更正 Revision 344 的方向：通知面板是「竖向右半页」，不是「底部半屏」**
+  （`NOTIF-PANEL-001`，替代 344 里的 `NOTIF-SHEET-001`；
+  `apps/mobile/src/surfaces/notification-center.tsx`）。用户原话：
+  「没改好 你这改的是下半页提醒 我要的是竖向右半页提醒」。
+
+  344 做成了 **bottom sheet**（贴底 + 宽度铺满 + 高度取窗口一半）；用户要的是
+  **右侧竖栏**（贴右 + 宽度取窗口一半 + 上下通高）。**「半页」说的是宽度方向**，
+  不是高度方向；「竖向」是说面板上下通高。344 把方向读反了。
+
+  这一轮改了四处（都是方向，不是换皮）：
+
+  1. 宽度来源从 `windowHeight × SHEET_HEIGHT_RATIO` 改成
+     `windowWidth × PANEL_WIDTH_RATIO`（0.5）。高度**不给显式值** —— row 容器的
+     交叉轴默认 `stretch`，面板自然上下通高。
+  2. 遮罩从「列 + 贴底」翻成「行 + 贴右」：`flexDirection: row` +
+     `justifyContent: flex-end`。**这里有个具体的坑**：row 容器的交叉轴是**竖直**的，
+     所以写成 `alignItems: flex-end` 会把面板**压到底部**去 —— 那正是 344 的错法。
+     钉里专门有一条反向臂禁掉它。
+  3. 圆角从「顶左 + 顶右」改成「顶左 + 底左」—— 面板贴右，右边贴屏幕边缘不圆。
+  4. 表头标题从**居中**改成**左对齐**：面板只有半屏宽，居中标题加左右占位太浪费。
+
+  顺带把 ID 从 `NOTIF-SHEET-001` 改成 `NOTIF-PANEL-001` —— 「SHEET」指的是被否掉的
+  底部弹层，留着这个 ID 会让下一个人以为它描述的就是 bottom sheet。
+
+- **钉**：`notification-bell.test.ts` 的 `NOTIF-PANEL-001`（6 条：宽度来源 / 遮罩是
+  row 且靠主轴末端 / 圆角只在左边 / 列表可滚 / 表头是 × 不是返回字形 / 两处
+  `accessible={false}`）+ 门禁块 `NOTIF-PANEL-001`。**每条正向臂都配了反例臂**，
+  专门守住 344 那几种错法（按高度算 / 贴底 / 圆角在顶 / `alignItems` 贴边）。
+  负向注入 **15 例**（含 6 条反向臂）全部 RED、字节级还原。
+
+- **门禁有两条臂改成「限定在遮罩块内」查**：`flexDirection: "row"` 在**表头样式里
+  也有一份**，全文件 `grep -qF` 的话，把遮罩翻成 `column` 这条钉照样绿（假绿）。
+  现在用 `grep -A4 'backdrop: {' | grep -qF …` 把窗口收在 backdrop 块内；vitest 那边用
+  `center.slice(indexOf("backdrop: {"), indexOf("panel: {"))` 切块后断言。
+  这是「N 处合法出现 ⇒ contains 不是钉」那个坑的又一例。
+
+- **设备实测**（`idb ui describe-all`）：面板内元素都落在 `x ≥ 196`（= 393 × 0.5），
+  标题 `{{210,13.7},{137,20.3}}`、× 在 `{{355,12},{24,24}}`、正文竖直居中于 y ≈ 433
+  （面板通高 0–852）。即**右半 + 通高**，与「竖向右半页」一致。
+
+## Revision 344 — 2026-10-01
+
+- **⚠️ 本轮方向被否掉，见 Revision 345**：344 做成了**底部**半屏（bottom sheet），
+  用户要的是**竖向右半页**。下面这段留作记录（含那个方向教训），实现已被 345 取代。
+
+- **通知中心从全屏页改成半页底部弹层**（`NOTIF-SHEET-001`；
+  `apps/mobile/src/surfaces/notification-center.tsx`）。用户原话：「没做完整
+  提醒只弹出半页就可以 不用完整 参考bigo」。
+
+  这是对 Revision 342 那页的**形态**修改，不是补功能。三处结构变化：
+
+  1. 全屏 `offWhite` 页（`flex: 1`）→ 白色 sheet + 半透明遮罩（`rgba(0,0,0,0.32)`、
+     `justifyContent: "flex-end"`）。高度 = 窗口高度 × `SHEET_HEIGHT_RATIO`（0.5）。
+     **固定高度**而不是 `maxHeight`：用户要的是「弹出半页」，不是「内容多高就多高」。
+  2. 表头的**返回字形换成关闭的 ×**。弹层不是"更深一层"，返回箭头语义不对；而且
+     `ProxyBackGlyph` 的注释写明它是全 App **唯一**的返回字形（BACK-GLYPH-001），
+     拿来当关闭用会污染那个统一。
+  3. 列表 `ScrollView` 加 `style={styles.scroll}`（`flex: 1`）—— 固定高度的面板里
+     不 flex 的话内容会把面板撑破。
+
+  沿用仓里已验证的写法：遮罩 + 内层 no-op `Pressable` 挡冒泡（跟
+  `LocationPickerSheet` 一样，它是**带 ScrollView** 的面板）。**没有**用
+  `LanguageSheet` 的 `onStartShouldSetResponder` —— 那个会抢走 touch start，
+  面板里的列表就滚不动了。
+
+  动画仍用 `animationType="fade"`（跟仓里两个 sheet 一致）。RN 的 `slide` 会把整块
+  Modal 一起上推、遮罩跟着从下往上「擦」出来；要做真·滑入得自己写 Animated 面板，
+  本轮不做。
+
+- **钉**：`notification-bell.test.ts` 新增 `NOTIF-SHEET-001`（5 条：高度来源 /
+  贴底 + 遮罩关闭 / 列表可滚 / 表头是 × 不是返回字形 / 两处 `accessible={false}`）+
+  门禁块 `NOTIF-SHEET-001`。负向注入 10 例（含三条**反向臂**的单独注入）全部 RED、
+  字节级还原。
+
+- **设备上实测的 a11y 缺陷（本轮一并修掉）**：改完之后用 `idb ui describe-all` 看
+  AX 树，整棵树**只剩两个元素** —— application 和一个 label 为「取消」的
+  `AXGenericElement`，把整屏都盖住。标题、× 和每一条通知**都不在树里**，读屏用户
+  打开面板只能听到一个「取消」。
+  根因：RN 里带 `accessibilityLabel` 的 `Pressable` 会变成 **a11y 叶子**，子节点
+  全部被吞。遮罩和内层那个 no-op 容器都是这种 Pressable，所以两层各吞一次。
+  修法：两处都加 `accessible={false}`（只影响 a11y 暴露，不影响点击）。
+  修完 AX 树变成：`AXStaticText "通知"` + `AXButton "关闭" {{353,452},{24,24}}` +
+  `AXStaticText "通知没取到，下拉重试"`，各自独立可达。
+  **顺带量到了高度**：面板那层元素的 frame 是 `{{0,426},{393,426}}`，426/852 =
+  **正好一半**，跟 `SHEET_HEIGHT_RATIO = 0.5` 对得上（不是靠眼睛估的）。
+
+- **已知未解（不在本轮范围）**：设备上打开面板，正文是失败态「通知没取到，下拉重试」。
+  已排除的：API 不在 8080 而在 **4100**（`api *:4100`，`apps/api-go` 的 `go run ./cmd/api`），
+  进程活着；app 侧 base URL 是 `http://127.0.0.1:4100`（`native-clients.ts:25`）。
+  用真 session 直接打 `/v1/commands/ListInbox` 会被 **`ACCESS_TOKEN_REQUIRED`（401）**
+  拒掉 —— 也就是这个命令要 Bearer 访问令牌，光有 sessionId 不够。所以面板的失败态是
+  **会话/令牌层**的问题，不是面板本身；面板在 `listInbox` 失败时显示失败态、不伪造数据，
+  这个行为是对的。真正的原因（模拟器上那个 dev 会话的令牌是否有效/过期）没继续往下查。
+
+- **门禁的形态说明**：`check-regression-contracts.sh` **不剥注释**，所以门禁块里只放
+  **正向臂**，且挑的串已用脚本核过**不出现在该文件注释里**。两条**反向臂**
+  （不许 `maxHeight`、不许 `ProxyBackGlyph`）**故意**只放在 `notification-bell.test.ts`
+  —— 这两个词正是注释里用来解释取舍的，放门禁会被自己的说明文档判违规（跟
+  Revision 342 那条 `resolveDeepLink` 同一个理由）。
+
+## Revision 343 — 2026-10-01
+
+- **更正 Revision 341 的适用范围：五边形只在 Android 生效，iOS 底栏是原生 UIKit**
+  （`MARKET-TAB-PENTAGON-001` 的补记）。Revision 341 写的是「市场 tab 的 logo 换成用户给
+  的五边形」，**没有写平台限定** —— 在 iOS 上这句话是假的，市场那一格仍然是菱形。
+
+  链路：`app-shell.tsx:1504` 是 `if (Platform.OS === "ios") { return <ProxyNativeTabBarView …> }`
+  —— JS 那套 dock（`tabs.map` → `ProxyIcon name={entry.icon}`，`:1643`）在 iOS 上**根本不会
+  被渲染**，只有 Android 走它。iOS 的五颗字形、五个 label、角标全部写死在
+  `apps/mobile/modules/proxy-native-tab-bar/ios/ProxyNativeTabBarView.swift`：
+  `:21` `let labels = ["首页","市场","动态","消息","我的"]`、
+  `:26` `item.badgeValue = "9+"`、`:112` `case 1: // diamond`（`M12 4 20 12 12 20 4 12z`，
+  与 `proxy-icon.tsx` 的 diamond 同形）。该文件最后一次改动是 2026-08-30 的
+  `7d829b08 fix(ios): freeze single native tab bar baseline`，**早于** 2026-10-01 的五边形
+  决定 —— 所以这是「决定没有传导到原生层」，不是有人回退。
+
+  设备上的铁证：「消息」角标在截图里是 **"9+" 文字**。`app-shell.tsx` 的 `RootNav` 对
+  `entry.badge` 只画一个 7×7 圆点（`styles.navBadgeDot`，`:1863`）—— `rootTabs:139` 虽然
+  写的是 `badge: "9+"`，但那个字符串**只被当真假值用**，值本身从不显示。所以 JS dock
+  画不出 "9+" 这三个字符；能画出来的是 Swift 的 `item.badgeValue`。这就是设备上跑原生
+  dock 的直接证据。（注意别把这条说成「"9+" 字面量只在 Swift 里」——`rootTabs:139` 也有
+  一份，还被 `i18n-shell-settings.test.ts:135` 钉着，那是既有的、另一回事。）
+
+- **因此 `market-tab-pentagon.test.ts` + 门禁块的覆盖面要如实理解**：它们钉的是 JS 字形与
+  `rootTabs` 的 MARKET 项，也就是 **Android 路径**。它们全绿**推不出** iOS 上也换了。这是
+  「钉全绿 ≠ 用户看得见」的又一例，但与 Revision 341 那次不同源：那次是钉本身被骗（注释
+  喂绿），这次钉是对的，只是**钉的层不是设备上跑的那层**。
+
+- **原生 dock 有两个独立的既有问题，本轮只记录、不改**（两条都要用户拍板；而且改完必须
+  **重建原生包**才可能生效，Metro 热更推不动 Swift —— 只改 Swift 不重建，等于交付一个
+  设备上看不见的改动）：
+
+  1. `:26` 的 `badgeValue = "9+"` 是**写死的假数**。Revision 342 刚把 JS 侧改成按
+     `ListInbox` 真未读数计数（`badgeText(unreadCount(inboxItems))`，0 条不出角标），
+     iOS 底栏却恒定显示 "9+" —— 两个平台对同一个「未读」给出互相矛盾的答案，且 iOS 那个
+     是编的。这与 `NOTIF-BELL-001` 不冲突：铃铛角标在 JS 层，取的是真数。
+  2. `:21` 五个 label 是**写死的中文**，不吃 i18n。`rootTabs()` 已经把 label 改成
+     `t("tabMarket")` 这类取值，但 iOS 底栏拿不到 —— 切到 VI / EN / JA 时底栏仍是中文。
+
+- **门禁盲区**：`scripts/check-liquid-dock-baseline.mjs` 只钉「原生视图存在 / iOS 分支存在 /
+  Android 兜底存在 / 用 UITabBar」这类**结构**，**不钉**字形、label、角标内容 —— 上面两条
+  它一条都拦不住。`docs/design/` 下此前**没有任何**文件提到原生底栏（grep `ProxyNativeTabBar`
+  在 docs/ 下 0 命中），即这一层此前不在基线治理范围内。本轮把 Swift 视图补进 `root-dock`
+  合同的 `implementationFiles`，让它从今往后进敏感集合。
+
+- 本轮**不改任何代码**：`baselineRevision` 342 → 343 的作用是把这一层的存在、它与 JS 的
+  分歧、以及两个已知缺口写进基线记录，避免下一个人照着 Revision 341 继续相信 iOS 已经换了。
+
+## Revision 342 — 2026-10-01
+
+- **首页顶栏加铃铛 + 通知中心**（`NOTIF-BELL-001`；`apps/mobile/src/shell/app-shell.tsx`、
+  `components/proxy-icon.tsx`、`surfaces/notification-center.tsx`、`notification-bell.ts`、
+  `i18n.ts`）。用户原话「新增了铃铛提醒」，随附新原型
+  `deepseek_html_20261001_7b9953.html`（已归档为
+  `docs/design/references/Proxy_Home_Notifications_20261001_7b9953.html`，SHA-256
+  `a7fad053…`）。原型的首页顶栏多了一颗带 `9+` 角标的铃铛，点开是一页「通知」。
+
+  `app-shell.tsx` 是**基线敏感**文件（`root-dock` / `activity` /
+  `merchant-operating-home-r35` / `business` 四份合同），所以这一轮留设计确认，
+  记在 `root-dock` 的 `knownGap` 里。
+
+- **这一轮补的是一跳断了的接线，不是新开通道**。`notification` 这个 prop 在
+  `native-app.tsx:163` 早就 `new NotificationClient({...})` 实例化并传进 `AppShell`，
+  而 `AppShell` 只把它写进类型（`notification: NotificationClient`）、**从来没读过
+  一次**（改动前 `grep -n notification app-shell.tsx` 只有 import / 解构 / 类型三行）。
+  服务端那半边也是齐的：`internal/notification` 的 ListInbox / MarkInboxRead /
+  SendInboxNotification 都在，现网 `notification.inbox_items` 有 **845 行**真数据
+  （OfferCreated 698 / TaskPublished 60 / SlotOfferCreated 43 / OfferAccepted 42 /
+  OrderCreated 2）。缺的只有用户能看见的那一头。
+
+- **角标是数出来的**：`badgeText(unreadCount(inboxItems))` —— 1–9 原样、>9 收成 `9+`、
+  0 条**不画角标**（`badgeText` 回 `undefined`）。原型那颗 `9+` 是设计稿的示意数字，
+  没有照抄。拉 inbox 失败时**保持上一次的角标**，不清零：清零等于对用户说
+  「你没有未读」，而事实是「不知道」。
+
+- **没有照抄原型那四条示意数据**。原型列表里的 Nguyễn Thị Hương 接受盲盒邀请 /
+  盲盒已开启 / KYC 已通过 / 动态收到 12 个赞，后端一条都没有 —— 渲染它们就是把
+  「用户真的收到过这些通知」画到界面上。通知中心只渲染 `ListInbox` 回来的真数据，
+  一条都没有就显示空态（这个开发账号的 inbox 目前就是 0 行）。
+
+- **没有实现原型那排 tab（全部 / 互动 / 匹配 / 系统）**。服务端
+  `notification.inbox_items.type` 的真实取值是 OfferCreated / TaskPublished /
+  SlotOfferCreated / OfferAccepted / OrderCreated，跟那四个 tab 名不是一套东西，
+  把 5 个 type 硬塞进 4 个 tab 就是编分类。所以只有一列「全部」，按时间倒序。
+
+- **点一条是标已读，不是跳转**。`deep_link` 里存的是 `/offers/ord_…`，但 App 侧
+  没有这个路由，服务端 `ResolveDeepLink` 也还是个桩
+  （`internal/notification/service.go`：`// Simulate permission check … (simplified: allow)`，
+  连归属校验都没有）。拿一个不校验归属的桩去驱动跳转 = 把别人订单的链接也放行，
+  所以**故意不接**，等那个函数真做了归属校验再接。界面动作是 `MarkInboxRead`；
+  标已读失败就让它保持未读，不本地抹掉圆点假装成功。
+
+- **字形**：`proxy-icon.tsx` 新增 `bell`，原型两条子路径原样搬，描边按原型
+  `stroke-width="1.8"`（跟 `canvas32` / `common32` 同一个理由，不为了凑现有网格加粗）。
+  铃铛落在品牌那一行的右端 —— 原型是「logo / 位置 / 切换 / 铃铛」同一行，本仓库
+  把「位置 + 切换」拆成了独立的 `LocationContext` 一行（`HEADER-HOME-ONLY-001` /
+  `MSG-LOCATION-DUPE-001` 定的），所以位置跟原型一致（右上角）而不动那两行结构。
+
+- **钉**：`notification-bell.test.ts`（未读数 / 角标分档 / 相对时间五档 + 脏数据 /
+  排序不改原数组 / **AppShell 真的读了那个 prop** / 角标不是字面量 / 字形与路径 /
+  不接 resolveDeepLink / 原型示意数据一条都不许出现 / 那排 tab 不许凭空出现 /
+  文案全走字典）+ 门禁块 `NOTIF-BELL-001`。负向注入 8 例（含「注释里抄一份同样的
+  路径」那一例）全部 RED、字节级还原。
+
+- **钉的形态踩了两个坑，记下来**：门禁块是**文本 grep、不剥注释**，所以注释里抄一份
+  同样的 `d="…"` 会把「路径被改」那条钉喂绿（第一次注入就命中了注释，钉照样绿）。
+  铃铛路径那条因此改成**计数制**（恰好 1 处）；同时把联合类型那段注释里的
+  `d="…"` 原文和 `case "bell":` 标签**都删掉**，只留描述。注意这跟
+  `SETTINGS-HUB-ROW-ICONS-001` 的教训不冲突 —— 那边反对的是数**共享样式**
+  （行数会长），这里是数一段**只该出现一次的路径数据**。
+
+- **自查补丁**：`surfaces/notification-center.tsx` 的 `unreadTag`（「未读」）原来写的是
+  `fontSize: 10`，被 `design-system-r3.test.ts` 的「可读文本 ≥ 11pt」判红。改成 **11**，
+  **不**登记进 R2 装饰白名单 —— 那是要读的文字，登记进去等于自己把底线调低。
+  （同一批里 `app-shell.tsx` 的 `headerBellBadgeText` 也是 10pt，但那是**角标里的数字**、
+  属于装饰类，且该测试只扫 `components/` + `surfaces/`，不扫 `shell/`，所以不涉及。）
+
+## Revision 341 — 2026-10-01
+
+- **市场 tab 的 logo 换成用户给的五边形**（`MARKET-TAB-PENTAGON-001`；
+  `apps/mobile/src/shell/app-shell.tsx`、`components/proxy-icon.tsx`）。用户原话
+  「把市场的logo换成这个」，给的形状是
+  `<svg viewBox="0 0 24 24"><polygon points="12 3 21 15 18 21 6 21 3 15"></polygon></svg>`。
+
+  `app-shell.tsx` 是**基线敏感**文件 —— 它同时列在 `root-dock` / `activity` /
+  `merchant-operating-home-r35` / `business` **四份**合同的 `implementationFiles` 里，
+  所以这一轮必须留设计确认（本轮记在 `root-dock` 的 `knownGap` 里）。
+
+- **没有改 `diamond`，而是新增 `pentagon` 字形**：`diamond` 画的是
+  `M12 4 20 12 12 20 4 12z`（四边等长 11.31 = 正方形转 45°），而且**被 5 处复用**
+  ——tab bar 市场 / 我的订单 / feed 分类兜底 / 城市选项 / 草稿卡片。改它的字形会把这
+  5 处一起换掉；`WALLET-GEM-ICON-001` 还专门钉了它的路径不许变（同一段注释在
+  `proxy-icon.tsx` 的 `gem` 那里已经写过一次，这次是同一个坑的第二次确认）。
+  所以只把 MARKET 这一格指向新字形，其余 4 处不动。
+
+- **形状按原坐标搬，只改取景与描边**：`<polygon points="12 3 21 15 18 21 6 21 3 15">`
+  → `d="M12 3 21 15 18 21 6 21 3 15z"`（顶点坐标一个不改，写法跟同文件的 `diamond` 一致）。
+  描边跟 `common` 走（`fill:none` + `strokeWidth 2.2`），**不写成实心** —— 底栏五颗
+  字形是同一套线宽，只有它实心会像另一个控件。
+
+- **钉**：`market-tab-pentagon.test.ts`（字形存在 + 顶点坐标 + MARKET 指向 pentagon +
+  `diamond` 路径未被改动 + 其余 4 处仍在用 diamond）+ 门禁块。负向注入见下。
+
+- **⚠️ 后续更正（见 Revision 343）**：上面这条**只在 Android 成立**。iOS 底栏是原生
+  `UITabBar`（`ProxyNativeTabBarView.swift`），JS 那套 dock 在 iOS 上不渲染，市场那格
+  仍是 Swift 里写死的 `case 1: // diamond`。本轮的钉钉的是 Android 路径。
+
+## Revision 340 — 2026-10-01
+
+- **设置入口页的每一行补上原型行图标**（`SETTINGS-HUB-ROW-ICONS-001`；
+  `apps/mobile/src/surfaces/me.tsx`、`me-styles.ts`、`components/proxy-icon.tsx`）。
+  原型 `Proxy_Settings_20261001_726714.html`（Revision 339 已归档）每一行都有
+  `.item-icon`（24 栅格 / 描边 1.5 / 22px 全出血），而 339 落地的入口页是
+  **裸 label + `›`** —— 用户连着两轮报「还是没有logo」。
+
+- **第一轮改错了仓库**（留档）：图标先加进了 `~/work/kake`，那是过期 checkout
+  （`AGENTS.md` 明写 HEAD `e958e97`，不含 2026-09-30 之后的任何工作）；运行中的
+  app 由**本仓库**的 Metro 供包，所以钉、测试、注入全绿而用户屏幕上一个字都没变。
+  判据：用 bundle 请求报错里的 `originModulePath` 确认 Metro 的 project root，
+  再 `grep -r` 目标锚点确认要改的页面在哪个树 —— 改动生效的证据链必须含这一环。
+
+- **做了什么**：`proxy-icon.tsx` 的联合类型 + switch 补 `lock` / `shield` / `globe`
+  （路径按原型 `.item-icon` 的 svg 原样移植；`pin` 是既有字形，未改几何）；
+  四行（账号与安全 / 手机号认证 KYC / 位置与隐私 / 语言）各渲染一枚 22px 描边图标，
+  图标与 label 同包在左组 `settingsHubRowMain`（对齐原型 22px + 12 边距）。
+
+- **没有做**：339 记录的 6 行「无后端支撑」仍然没有实现 —— 这一轮只补图标，
+  不新增入口，也不把任何「按了没反应」的行摆出来。
+
+- **钉的形状改过一次，值得记**：`SETTINGS-HUB-ROW-ICONS-001` 起初数
+  `settingsHubRowMain` 的出现次数（恰好 4）。`SETTINGS-HUB-ALL-NINE-001` 把原型
+  9 行摆回来之后，连「暂不可用」行也复用这个左组 ⇒ 计数变 6，**钉假红**（别人的
+  合法改动）。已改成钉「图标 + **它自己那一行**的 label」配对：加多少行都不影响，
+  删图标、换字形、把 label 换成别行的都红。
+
+- **验证**：负向注入 7/7 全火（clean 绿 + 删图标 / 换字形 / 换 label / 删 case ×2 /
+  删测试文件全红），SHA-256 字节级还原；Metro 的 Babel 解析 512 文件 0 失败；
+  模拟器 bundle `/apps/mobile/src/index.bundle` 返回 200 且能 grep 到新代码。
+
+- **范围说明**：同一天另有一个 in-flight 轮次（`SETTINGS-HUB-ALL-NINE-001`：把原型
+  9 行连同诚实的「暂不可用」态一起摆回、清理缓存接上真实文件系统体积）也在改
+  `me.tsx`。那是**另一条**设计变更，落地时需要它自己的 Revision 记录；本条只记
+  行图标这一件事。
+
 ## Revision 339 — 2026-10-01
 
 - **设置页接上安全网：位置与隐私**（`me.tsx` / `me-sub-pages.ts` / `me-styles.ts`）。

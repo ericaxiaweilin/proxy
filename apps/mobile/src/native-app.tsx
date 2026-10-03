@@ -8,7 +8,8 @@ import { type Transport, SessionAuthClient } from "./auth-client";
 import { ConversationClient } from "./conversation-client";
 import { DemandClient } from "./demand-client";
 import { LoginClient, LoginCommandRejectedError, otpRetryAfterSeconds } from "./login-client";
-import { LegalDocClient, type LegalDoc, type LegalDocKind } from "./legal-doc";
+import { type LegalDocKind } from "./legal-doc";
+import { LegalDocViewer } from "./components/legal-doc-viewer";
 import { LegalDocRenderer } from "./legal-doc-render";
 import { LegalStatusClient } from "./legal-status-client";
 import { formatVietnamesePhoneForDisplay, normalizeVietnamesePhone, vietnamesePhoneReady } from "./vn-phone";
@@ -42,6 +43,8 @@ import { color, Gradient, shadows } from "./theme";
 import { sessionAuthClient, localApiBaseUrl, nativeSecureSessionStore } from "./native-clients";
 import { SECURE_SESSION_STORAGE_KEY } from "./secure-session";
 import { getOrCreateDeviceIdentity, rotateDeviceIdentity, INSTALLATION_DEVICE_ID_KEY } from "./device-credential";
+// NOTIF-PUSH-001: 设备令牌注册（纯逻辑 + 原生模块的降级包装），见该文件头注释。
+import { registerForPush } from "./push-registration";
 import { ProxyButton, ProxyLoading } from "./components/proxy-foundation";
 
 const APP_VERSION = "1.0.0";
@@ -248,6 +251,39 @@ export function ProxyApp(): React.JSX.Element {
     };
   }, [phase]);
 
+  // NOTIF-PUSH-001: 真的登录之后，把这台设备登记成可推送的目标。
+  //
+  // 这是整条推送管线**缺的那一跳**：服务端 PushDispatcher 会按收件人取
+  // notification.device_tokens 里 ACTIVE 的行再路由到 APNs / FCM，但那张表
+  // 一直是 0 行 —— NotificationClient.registerDevice 全仓零调用方。没有这一跳，
+  // 推送管线再完整也没有目标。
+  //
+  // 只在 AUTHENTICATED 跑，不在 PUBLIC（游客）：令牌要挂在**收件人**上，
+  // 而游客不是收件人。
+  //
+  // 取不到令牌 / 没授权 / 原生模块还没进二进制 —— 都只记一行日志，不影响启动。
+  // 详情见 push-registration.ts（那里的 return 值永不抛）。
+  useEffect(() => {
+    if (phase !== "AUTHENTICATED") return;
+    let cancelled = false;
+    void (async () => {
+      const identity = await getOrCreateDeviceIdentity(nativeSecureStorageDriver).catch(() => undefined);
+      if (cancelled || !identity) return;
+      const outcome = await registerForPush({
+        client: notificationClient,
+        os: Platform.OS,
+        deviceId: identity.deviceId,
+        signedIn: true
+      });
+      if (outcome.status !== "registered") {
+        console.log(`[proxy.push] device token not registered (${outcome.status}): ${outcome.reason}`);
+      }
+    })().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [phase]);
+
   if (phase === "BOOTSTRAPPING") return <BootScreen />;
   if (phase === "AUTHENTICATED" || phase === "PUBLIC") {
     return (
@@ -317,59 +353,6 @@ function BrandMark({ large = false, showSlogan = true }: { large?: boolean; show
 // in a scrollable modal. The user must be able to actually read the
 // text BEFORE the consent checkbox is enabled; we explicitly do not
 // rely on a "the link works" promise or an external browser.
-function LegalDocViewer({ kind, onClose }: { kind: LegalDocKind; onClose: () => void }): React.JSX.Element {
-  const [doc, setDoc] = useState<LegalDoc | null>(null);
-  const [error, setError] = useState<string | undefined>();
-  const [busy, setBusy] = useState(true);
-  useEffect(() => {
-    let cancelled = false;
-    setBusy(true);
-    setError(undefined);
-    setDoc(null);
-    new LegalDocClient({ baseUrl: localApiBaseUrl })
-      .load(kind)
-      .then((loaded) => {
-        if (!cancelled) setDoc(loaded);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        if (!cancelled) setBusy(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [kind]);
-  return (
-    <Modal animationType="slide" onRequestClose={onClose} transparent={false} visible>
-      <View style={styles.legalScreen}>
-        <View style={styles.legalHeader}>
-          <Text selectable style={styles.legalHeaderTitle}>{kind === "terms" ? "服务使用协议" : "隐私政策"} (v{doc?.version ?? "1.1"})</Text>
-          <Pressable disabled={busy} onPress={onClose} style={styles.legalCloseBtn}><Text selectable style={styles.legalCloseBtnText}>关闭</Text></Pressable>
-        </View>
-        {busy ? (
-          <View style={styles.legalBusy}><ProxyLoading tone="violet" label="加载中…" /></View>
-        ) : error ? (
-          <View style={styles.legalErrorBlock}>
-            <Text selectable style={styles.legalErrorTitle}>无法加载条款</Text>
-            <Text selectable style={styles.legalErrorBody}>{error}</Text>
-            <Text selectable style={styles.legalErrorHint}>请检查网络或稍后再试。条款未成功加载前，不能勾选同意。</Text>
-          </View>
-        ) : doc ? (
-          <ScrollView contentContainerStyle={styles.legalScroll}>
-            <Text selectable style={styles.legalTitle}>{doc.title}</Text>
-            <Text selectable style={styles.legalMeta}>适用地区：{doc.locale} · 更新日期：{doc.updatedAt.slice(0, 10)}</Text>
-            {/* R15.x+: 用 LegalDocRenderer 替换平铺 Text — 渲染 serif
-                + 15pt + 1.6 lineHeight + heading + 列表 + TOC。 */}
-            <LegalDocRenderer content={doc.content} />
-            <Text selectable style={styles.legalFooter}>本版本仍属于产品法律草案。正式发布前，应由当地执业律师依据实际法人、许可证/登记状态、技术架构、支付模式和数据流进行最终法律审阅。</Text>
-          </ScrollView>
-        ) : null}
-      </View>
-    </Modal>
-  );
-}
 
 function loginChallengeErrorMessage(error: unknown, channel: "SMS" | "EMAIL"): string {
   const code = error instanceof LoginCommandRejectedError ? error.result.error?.errorCode : undefined;

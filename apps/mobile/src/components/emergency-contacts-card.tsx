@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { color } from "../theme";
+import { getLanguage, translate, useI18n, type MessageKey } from "../i18n";
 import {
   MAX_EMERGENCY_CONTACTS,
   type EmergencyClient,
@@ -32,7 +33,9 @@ export function EmergencyContactsCard({
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [limit, setLimit] = useState(MAX_EMERGENCY_CONTACTS);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorCause | null>(null);
+  // I18N-SAFETY-002：存键 / 存原因，渲染时翻译，别把串存进 state。
+  const { t } = useI18n();
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -48,7 +51,7 @@ export function EmergencyContactsCard({
       setLimit(page.limit);
       setError(null);
     } catch (e) {
-      setError(messageFor(e));
+      setError(errorCauseFor(e));
     }
   }, [client]);
 
@@ -63,7 +66,7 @@ export function EmergencyContactsCard({
           setLimit(page.limit);
         }
       } catch (e) {
-        if (!cancelled) setError(messageFor(e));
+        if (!cancelled) setError(errorCauseFor(e));
       }
     })();
     return () => {
@@ -75,7 +78,7 @@ export function EmergencyContactsCard({
 
   const submit = async () => {
     if (!attested) {
-      setError("请先确认已获得该联系人同意 —— 没有这一条，服务端不会保存。");
+      setError({ kind: "key", key: "emergencyAttestRequired" });
       return;
     }
     setBusy(true);
@@ -96,7 +99,7 @@ export function EmergencyContactsCard({
       setFormOpen(false);
       await reload();
     } catch (e) {
-      setError(messageFor(e));
+      setError(errorCauseFor(e));
     } finally {
       setBusy(false);
     }
@@ -109,7 +112,7 @@ export function EmergencyContactsCard({
       await client.deleteContact(contactId);
       await reload();
     } catch (e) {
-      setError(messageFor(e));
+      setError(errorCauseFor(e));
     } finally {
       setBusy(false);
     }
@@ -117,10 +120,8 @@ export function EmergencyContactsCard({
 
   return (
     <View style={styles.wrap}>
-      <Text selectable style={styles.title}>紧急联系人</Text>
-      <Text selectable style={styles.desc}>
-        最多 {limit} 位，按优先级联系。这是你自己的安全网名单 —— 平台目前不会自动通知他们，只在你主动求助时协助你拨号或转交短信。
-      </Text>
+      <Text selectable style={styles.title}>{t("emergencyTitle")}</Text>
+      <Text selectable style={styles.desc}>{t("emergencyDesc", { n: limit })}</Text>
 
       {contacts.map((c) => (
         <View key={c.contactId} style={styles.contactRow}>
@@ -132,29 +133,29 @@ export function EmergencyContactsCard({
             <Text selectable style={styles.contactPhone}>{c.phone}</Text>
           </View>
           <Pressable
-            accessibilityLabel={`移除 ${c.displayName}`}
+            accessibilityLabel={t("emergencyRemoveA11y", { name: c.displayName })}
             disabled={busy}
             onPress={() => void remove(c.contactId)}
             style={styles.removeBtn}
           >
-            <Text selectable style={styles.removeText}>移除</Text>
+            <Text selectable style={styles.removeText}>{t("emergencyRemove")}</Text>
           </Pressable>
         </View>
       ))}
 
       {contacts.length === 0 ? (
-        <Text selectable style={styles.empty}>还没有紧急联系人。</Text>
+        <Text selectable style={styles.empty}>{t("emergencyEmpty")}</Text>
       ) : null}
 
       {atLimit && !formOpen ? (
         <Text selectable style={styles.hint}>
-          已达上限（{limit} 位）。要先移除一位才能再加。
+          {t("emergencyLimitHint", { n: limit })}
         </Text>
       ) : null}
 
       {formOpen ? (
         <View style={styles.form}>
-          <Text selectable style={styles.label}>称呼</Text>
+          <Text selectable style={styles.label}>{t("emergencyNameLabel")}</Text>
           <TextInput
             onChangeText={setName}
             placeholder="例如：Nguyễn Thị Hương"
@@ -162,7 +163,7 @@ export function EmergencyContactsCard({
             style={styles.input}
             value={name}
           />
-          <Text selectable style={styles.label}>手机号（国际格式）</Text>
+          <Text selectable style={styles.label}>{t("emergencyPhoneLabel")}</Text>
           <TextInput
             autoCapitalize="none"
             keyboardType="phone-pad"
@@ -172,10 +173,10 @@ export function EmergencyContactsCard({
             style={styles.input}
             value={phone}
           />
-          <Text selectable style={styles.label}>关系（可选）</Text>
+          <Text selectable style={styles.label}>{t("emergencyRelationLabel")}</Text>
           <TextInput
             onChangeText={setRelation}
-            placeholder="家人 / 朋友 / 同事"
+            placeholder={t("emergencyRelationPlaceholder")}
             placeholderTextColor={color.muted}
             style={styles.input}
             value={relation}
@@ -190,9 +191,7 @@ export function EmergencyContactsCard({
             <View style={[styles.checkbox, attested ? styles.checkboxOn : null]}>
               {attested ? <Text selectable style={styles.checkboxMark}>✓</Text> : null}
             </View>
-            <Text selectable style={styles.attestText}>
-              我已告知并取得该联系人的同意，把他/她的姓名和电话存进我的紧急联系人名单。
-            </Text>
+            <Text selectable style={styles.attestText}>{t("emergencyAttest")}</Text>
           </Pressable>
           <View style={styles.formActions}>
             <Pressable
@@ -200,7 +199,7 @@ export function EmergencyContactsCard({
               onPress={() => void submit()}
               style={[styles.primaryBtn, busy || !name.trim() || !phone.trim() || !attested ? styles.btnDisabled : null]}
             >
-              <Text selectable style={styles.primaryBtnText}>{busy ? "保存中…" : "保存"}</Text>
+              <Text selectable style={styles.primaryBtnText}>{t(busy ? "emergencySaving" : "emergencySave")}</Text>
             </Pressable>
             <Pressable
               disabled={busy}
@@ -210,40 +209,48 @@ export function EmergencyContactsCard({
               }}
               style={styles.secondaryBtn}
             >
-              <Text selectable style={styles.secondaryBtnText}>取消</Text>
+              <Text selectable style={styles.secondaryBtnText}>{t("cancel")}</Text>
             </Pressable>
           </View>
         </View>
       ) : !atLimit ? (
         <Pressable disabled={busy} onPress={() => setFormOpen(true)} style={styles.addBtn}>
-          <Text selectable style={styles.addBtnText}>＋ 添加紧急联系人</Text>
+          <Text selectable style={styles.addBtnText}>{t("emergencyAdd")}</Text>
         </Pressable>
       ) : null}
 
-      {error ? <Text selectable style={styles.error}>{error}</Text> : null}
+      {error ? <Text selectable style={styles.error}>{errorText(error)}</Text> : null}
     </View>
   );
 }
 
-function messageFor(e: unknown): string {
+type ErrorCause =
+  | { kind: "key"; key: MessageKey; vars?: Record<string, string | number> }
+  | { kind: "raw"; raw: string };
+
+function errorCauseFor(e: unknown): ErrorCause {
   if (e instanceof EmergencyError) {
     switch (e.code) {
       case "EMERGENCY_CONTACT_LIMIT_REACHED":
-        return `最多只能有 ${MAX_EMERGENCY_CONTACTS} 位紧急联系人，请先移除一位。`;
+        return { kind: "key", key: "emergencyErrLimit", vars: { n: MAX_EMERGENCY_CONTACTS } };
       case "EMERGENCY_CONTACT_PERMISSION_NOT_ATTESTED":
-        return "需要先确认已获得该联系人同意。";
+        return { kind: "key", key: "emergencyErrNotAttested" };
       case "INVALID_EMERGENCY_CONTACT":
-        return "信息不完整或手机号格式不对（需要国际格式，例如 +84912345678）。";
+        return { kind: "key", key: "emergencyErrInvalid" };
       case "EMERGENCY_CONTACT_NOT_FOUND":
-        return "这位联系人已经不在名单里了，请刷新后重试。";
+        return { kind: "key", key: "emergencyErrNotFound" };
       case "AUTH_REQUIRED":
-        return "登录已过期，请重新登录。";
+        return { kind: "key", key: "consentSessionExpired" };
       default:
-        return `保存失败（${e.code}）。`;
+        return { kind: "key", key: "emergencyErrSaveFailed", vars: { code: e.code } };
     }
   }
-  if (e instanceof Error) return e.message;
-  return "出错了，请稍后重试。";
+  if (e instanceof Error) return { kind: "raw", raw: e.message };
+  return { kind: "key", key: "consentGenericError" };
+}
+
+function errorText(cause: ErrorCause): string {
+  return cause.kind === "raw" ? cause.raw : translate(getLanguage(), cause.key, cause.vars);
 }
 
 const styles = StyleSheet.create({

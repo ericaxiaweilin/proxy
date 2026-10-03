@@ -144,9 +144,16 @@ func TestMigrator_StatusAndCounts(t *testing.T) {
 	if pending != 2 {
 		t.Fatalf("want 2 pending, got %d", pending)
 	}
-	applied, _ := m.AppliedCount(ctx)
-	if applied != 0 {
-		t.Fatalf("want 0 applied, got %d", applied)
+	// 共享测试库里本来就有 170+ 条真 migration，AppliedCount 的绝对值永远不是 0。
+	// 这里要断的是"我们这两个文件还没被 apply"，不是"账本是空的"。
+	statuses, err := m.ListMigrations(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, st := range statuses {
+		if (st.Version == "001_init" || st.Version == "002_more") && st.Applied {
+			t.Fatalf("%s should not be applied yet", st.Version)
+		}
 	}
 
 	if _, _, err := m.Apply(ctx, false); err != nil {
@@ -154,10 +161,11 @@ func TestMigrator_StatusAndCounts(t *testing.T) {
 	}
 
 	pending, _ = m.PendingCount(ctx)
-	applied, _ = m.AppliedCount(ctx)
+	// AppliedCount 同样是全账本口径 —— 这里不断绝对值，只确认这次 apply 之后
+	// pending 清零且无 drift（apply 本身成功的话，这两项与账本里原有多少条无关）。
 	drift, _ := m.DriftCount(ctx)
-	if pending != 0 || applied != 2 || drift != 0 {
-		t.Fatalf("counts: pending=%d applied=%d drift=%d (want 0/2/0)", pending, applied, drift)
+	if pending != 0 || drift != 0 {
+		t.Fatalf("counts: pending=%d drift=%d (want 0/0)", pending, drift)
 	}
 }
 

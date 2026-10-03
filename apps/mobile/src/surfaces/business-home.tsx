@@ -9,7 +9,7 @@
 // 可供给场景 (Scene Package placeholder for now), member_directory
 // 取待处理 / 经营数字.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
@@ -22,10 +22,34 @@ import type { BusinessClient, MerchantOperatingHome, StoreProduct } from "../bus
 import type { ActivityClient } from "../activity-client";
 import type { SupplyClient } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
-import { MerchantCreatorRecommendations } from "./merchant-creator-recommendations";
+// MERCHANT-HOME-004：枚举中文映射（纯模块，可行为测试）。
+import { decisionKindLabel, demandSupplyStateLabel } from "../merchant-home-labels";
+// MERCHANT-HOME-002：封面 thumb URL 走共享 helper（与发活动/票券同一套）。
+import { activityCoverUri, mediaThumbUrl } from "../media-thumb-url";
+// STORE-LOGO-001：店徽解析。
+import { merchantAvatarUri } from "../business-client";
+// MENU-HOT-001：HOT 徽。
+import { HotBadge } from "../components/hot-badge";
+// CREATOR-RAIL-HOME-001：横滑卡点人进个人主页弹窗（头像/简介/社媒）。
+import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
+import { socialPlatformLabel, socialProfileUrl, type AgentPassport, type SupplierCandidate } from "../supply-client";
 import { ProxyLoading } from "../components/proxy-foundation";
 
-type OperatingSceneCard = { id: string; title: string; sub: string; tag: string; coverImageUrl?: string };
+// MERCHANT-HOME-002（2026-10-02）：场景卡要能看到活动封面。以前 toCard 只读
+// 那个**没有任何写入者**的 coverImageUrl，所以商家侧的"高价值场景 / 正在进行"
+// 永远画不出封面（不是没传，是没读）。
+type OperatingSceneCard = { id: string; title: string; sub: string; tag: string; coverImageUrl?: string; coverMediaAssetId?: string };
+
+// MERCHANT-HOME-002：场景卡封面。抽成函数是因为 JSX 里要调两次
+// （判空一次、source 一次），不抽就没有类型收窄。
+function scenePackageUri(pkg: OperatingSceneCard): string | undefined {
+  return activityCoverUri(pkg, localApiBaseUrl);
+}
+
+// MERCHANT-HOME-003：菜单图同样走共享 helper（判空 + source 两次调用要收窄）。
+function menuSkuUri(m: { mediaAssetId?: string | undefined }): string | undefined {
+  return mediaThumbUrl(m.mediaAssetId, localApiBaseUrl);
+}
 
 function formatVnd(minor: number): string {
   const vnd = Math.round(minor / 1000);
@@ -37,6 +61,7 @@ function formatVnd(minor: number): string {
 export function BusinessHome({
   onOpenMarket,
   onOpenMe,
+  onOpenCreatorProfile,
   onChat,
   onChromeVisibilityChange,
   bottomNavVisible,
@@ -46,6 +71,8 @@ export function BusinessHome({
 }: {
   onOpenMarket: (tab: MarketTab) => void;
   onOpenMe: () => void;
+  // CREATOR-HOME-001：打开某 Creator 的 Proxy 公开主页（app-shell 的真页面）。
+  onOpenCreatorProfile?: ((userId: string, name: string, avatarUri?: string | undefined) => void) | undefined;
   onChat?: ((text: string, mode?: HomeIntentMode, attachment?: HomeAttachment) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
@@ -54,11 +81,18 @@ export function BusinessHome({
   supply?: SupplyClient | undefined;
 }): React.JSX.Element {
   const [intentMode, setIntentMode] = useState<HomeIntentMode>();
-  const [accountName, setAccountName] = useState<string | undefined>(undefined);
+  // MERCHANT-ACCOUNT-SWITCH-001：一个店主可以有多家经营主体。以前这里只留
+  // accountName（字符串），整页被钉死在 listMyAccounts 的第一条上，
+  // 另一家主体的经营结果永远看不到 —— 不是没数据，是没入口。
+  const [accounts, setAccounts] = useState<Array<{ id: string; name: string }>>([]);
+  const [accountId, setAccountId] = useState<string | undefined>(undefined);
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [storeCount, setStoreCount] = useState<number>(0);
   const [firstStore, setFirstStore] = useState<{ id: string; name: string; address: string; status: string } | undefined>(undefined);
   const [memberCount, setMemberCount] = useState<number>(0);
   const [menuItems, setMenuItems] = useState<StoreProduct[]>([]);
+  // STORE-LOGO-001：首店徽（lines.logoAssetPath）。身份卡优先级 logo → 菜品图 → 首字。
+  const [storeLogoPath, setStoreLogoPath] = useState<string | undefined>(undefined);
   const [pendingItems, setPendingItems] = useState<Array<{ icon: ProxyIconName; title: string; meta?: string }>>([]);
   const [spendSummary, setSpendSummary] = useState<{ totalOrders: number; totalGrossMinor: number }>({ totalOrders: 0, totalGrossMinor: 0 });
   const [scenePackages, setScenePackages] = useState<OperatingSceneCard[]>([]);
@@ -69,38 +103,71 @@ export function BusinessHome({
   const [planResult, setPlanResult] = useState<string>();
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
 
+  // 经营主体列表只取一次：切店不需要重新问一遍“我有哪些店”。
   useEffect(() => {
     if (!business) return;
     let cancelled = false;
     (async () => {
       try {
-        const accounts = await business.listMyAccounts();
+        const list = (await business.listMyAccounts()).filter((account) => account.status === "ACTIVE");
         if (cancelled) return;
-        const first = accounts[0];
-        setAccountName(first?.name);
-        if (!first) {
-          setPendingItems([]);
-          setScenePackages([]);
-          return;
-        }
+        setAccounts(list.map((account) => ({ id: account.id, name: account.name })));
+        setAccountId((current) => (current && list.some((account) => account.id === current) ? current : list[0]?.id));
+        setAccountsLoaded(true);
+      } catch (e) {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [business]);
+
+  useEffect(() => {
+    if (!business || accountId === undefined) return;
+    let cancelled = false;
+    (async () => {
+      const id = accountId;
+      // 换主体时先清空上一家的数字：把 A 店的订单显示在 B 店头上，
+      // 比整页空白更糟。
+      setPendingItems([]);
+      setScenePackages([]);
+      setInProgress([]);
+      setOperatingHome(undefined);
+      setFirstStore(undefined);
+      setMenuItems([]);
+      setSpendSummary({ totalOrders: 0, totalGrossMinor: 0 });
+      try {
+        // MERCHANT-HOME-001（2026-10-02）：经营主页一个接口失败不能拖垮整页。
+        // 以前 getMerchantOperatingHome 是 Promise.all 里**唯一没有 .catch 的** ——
+        // 它一抛错，stores / memberDir / spend 的结果一起被丢掉，
+        // 门店、成员、成交、菜单全都不显示，整页只剩 loadError。
+        // 经营信号读不到 ≠ 整家店不存在：home 拿不到就 undefined，
+        // 渲染侧本来就对 undefined 做了整套 fallback（"待接入/不可用/加载中"）。
         const [stores, memberDir, spend, home] = await Promise.all([
-          business.listStores(first.id).catch(() => []),
-          business.listMemberDirectory(first.id).catch(() => []),
-          business.listSpendDaily({ businessId: first.id, sinceDays: 7 }).catch(() => ({ totalOrders: 0, totalGrossMinor: 0, days: [], sinceDays: 7 })),
-          business.getMerchantOperatingHome(first.id),
+          business.listStores(id).catch(() => []),
+          business.listMemberDirectory(id).catch(() => []),
+          business.listSpendDaily({ businessId: id, sinceDays: 7 }).catch(() => ({ totalOrders: 0, totalGrossMinor: 0, days: [], sinceDays: 7 })),
+          business.getMerchantOperatingHome(id).catch(() => undefined),
         ]);
         if (cancelled) return;
         setStoreCount(stores.length);
         const head = stores[0];
         setFirstStore(head ? { id: head.id, name: head.name, address: head.address, status: head.status } : undefined);
         setSpendSummary({ totalOrders: spend.totalOrders, totalGrossMinor: spend.totalGrossMinor });
-        setOperatingHome(home);
+        // home 可能为 undefined（上面 catch 住的）—— setOperatingHome(undefined)
+        // 就是"保持经营信号待接入"，不能把之前的旧值清掉，更不能让整页报错。
+        if (home !== undefined) setOperatingHome(home);
         setMemberCount(memberDir.length);
         if (head) {
           try {
             const menu = await business.listProducts(head.id);
             if (!cancelled) setMenuItems(menu);
           } catch { /* menu optional */ }
+        }
+        if (head) {
+          try {
+            const lines = await business.getStoreLines(head.id);
+            if (!cancelled) setStoreLogoPath(lines.logoAssetPath || undefined);
+          } catch { /* logo optional */ }
         }
         const items: Array<{ icon: ProxyIconName; title: string; meta?: string }> = [];
         if (stores.length === 0) {
@@ -126,7 +193,10 @@ export function BusinessHome({
                 title: entry.title,
                 sub: entry.time,
                 tag: entry.moneyFlow === "FREE" ? "可参与" : "可报名",
-                ...(entry.coverImageUrl ? { coverImageUrl: entry.coverImageUrl } : {}),
+                // MERCHANT-HOME-002：封面读活字段。coverImageUrl 是 R17.x 死字段，
+                // 真正有生产者的是 coverMediaAssetId（ACTIVITY-COVER-001）。
+                ...(entry.coverMediaAssetId ? { coverMediaAssetId: entry.coverMediaAssetId }
+                  : entry.coverImageUrl ? { coverImageUrl: entry.coverImageUrl } : {}),
               });
               setScenePackages(list.slice(0, 2).map(toCard));
               setInProgress(list.filter((entry) => entry.origin === "MERCHANT" && entry.status !== "CANCELLED" && (!head || !entry.merchantName || entry.merchantName === head.name)).slice(0, 3).map((entry) => ({ ...toCard(entry), tag: "进行中" })));
@@ -138,16 +208,15 @@ export function BusinessHome({
       }
     })();
     return () => { cancelled = true; };
-  }, [business, activities]);
+  }, [business, activities, accountId]);
+
 
   // SCROLL-CHROME-001: shared controller (see shell/scroll-chrome.ts).
   const onScroll = useScrollChrome(onChromeVisibilityChange);
 
-  const showLoading = business !== undefined && accountName === undefined && !loadError;
-  const homeTitle = useMemo(() => {
-    if (loadError) return "商家";
-    return accountName ?? "商家";
-  }, [accountName, loadError]);
+  const currentAccount = accounts.find((account) => account.id === accountId);
+  const showLoading = business !== undefined && !accountsLoaded && !loadError;
+  const homeTitle = loadError ? "商家" : currentAccount?.name ?? "商家";
 
   async function prepareOperatingAction(): Promise<void> {
     if (!operatingHome || planBusy) return;
@@ -174,16 +243,36 @@ export function BusinessHome({
           <Text selectable style={styles.homeTopLoc}>
             {loadError ? `加载失败：${loadError}` : storeCount > 0 ? `${storeCount} 个门店 · ${spendSummary.totalOrders} 单` : "暂无门店 — 在「我的 › 商家」创建"}
           </Text>
+          {/* MERCHANT-ACCOUNT-SWITCH-001：多家经营主体时给出切换入口。
+              经营结果按主体算，把 A 店的数据印在 B 店标题下不是简化，是错。 */}
+          {accounts.length > 1 ? (
+            <View style={styles.accountSwitcher}>
+              {accounts.map((account) => {
+                const active = account.id === accountId;
+                return (
+                  <Pressable key={account.id} onPress={() => setAccountId(account.id)} style={active ? styles.accountChipActive : styles.accountChip}>
+                    <Text selectable style={active ? styles.accountChipTextActive : styles.accountChipText}>{account.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
         </View>
       </View>
 
       {firstStore ? (
         <Pressable onPress={() => onOpenMe()} style={styles.identityCard}>
           {(() => {
+            // STORE-LOGO-001：身份卡视觉优先级 logo → 菜品图 → 首字。
+            // logo 是店自己传的店徽；菜品图只是"有图"，不能冒充店徽。
+            const logoUri = merchantAvatarUri(storeLogoPath, localApiBaseUrl);
             const dish = menuItems.find((m) => m.available && m.mediaAssetId);
-            const dishUri = dish ? `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(dish.mediaAssetId)}` : undefined;
-            return dishUri
-              ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: dishUri }} style={styles.identityPhoto} transition={0} />
+            // MERCHANT-HOME-003：门店菜品图的手拼改走共享 helper（原本散在三处）。
+            const dishUri = dish ? mediaThumbUrl(dish.mediaAssetId, localApiBaseUrl) : undefined;
+            // 抽成局部量：直接写 (logoUri ?? dishUri) 两次拿不到收窄。
+            const identityUri = logoUri ?? dishUri;
+            return identityUri
+              ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: identityUri }} style={styles.identityPhoto} transition={0} />
               : <View style={styles.identityAvatar}>
                 <Text selectable style={styles.identityAvatarText}>{firstStore.name.slice(0, 1).toUpperCase()}</Text>
               </View>;
@@ -211,7 +300,7 @@ export function BusinessHome({
       <View style={styles.controlPlane} testID="merchant-control-plane">
         <View style={styles.controlCell}><Text selectable style={styles.controlLabel}>现在</Text><Text selectable style={styles.controlValue}>{operatingHome?.sceneSupply ? `${operatingHome.sceneSupply.currentCapacityPct}%` : operatingHome?.operatingPulse.state === "ACTIVE" ? "经营中" : "待接入"}</Text></View>
         <View style={styles.controlCell}><Text selectable style={styles.controlLabel}>预测</Text><Text selectable style={styles.controlValue}>{operatingHome?.sceneSupply ? `${operatingHome.sceneSupply.forecastCapacityPct}%` : "不可用"}</Text></View>
-        <View style={styles.controlCell}><Text selectable style={styles.controlLabel}>决策</Text><Text selectable numberOfLines={1} style={styles.controlValue}>{operatingHome?.bestNextDecision.kind ?? "NO_ACTION"}</Text></View>
+        <View style={styles.controlCell}><Text selectable style={styles.controlLabel}>决策</Text><Text selectable numberOfLines={1} style={styles.controlValue}>{decisionKindLabel(operatingHome?.bestNextDecision.kind)}</Text></View>
         <View style={styles.controlCell}><Text selectable style={styles.controlLabel}>预期</Text><Text selectable style={styles.controlValue}>{operatingHome?.forecast.status === "AVAILABLE" ? `V${operatingHome.forecast.version}` : "待建立"}</Text></View>
       </View>
 
@@ -230,12 +319,16 @@ export function BusinessHome({
         <Text selectable style={styles.sectionHint}>实时状态 → 未来状态</Text>
       </View>
       <View style={styles.balanceCard} testID="merchant-demand-supply">
-        <View style={styles.balanceHead}><Text selectable style={styles.balanceTitle}>需求 × 供给</Text><Text selectable style={styles.unknownPill}>{operatingHome?.demandSupply.state ?? "信号不足"}</Text></View>
+        <View style={styles.balanceHead}><Text selectable style={styles.balanceTitle}>需求 × 供给</Text><Text selectable style={styles.unknownPill}>{demandSupplyStateLabel(operatingHome?.demandSupply.state)}</Text></View>
         {operatingHome?.aggregatedDemand && operatingHome.sceneSupply ? <>
           <View style={styles.signalRow}><View style={styles.signalCell}><Text selectable style={styles.signalLabel}>聚合需求</Text><Text selectable style={styles.signalValue}>{operatingHome.aggregatedDemand.totalMatchingDemand}</Text><Text selectable style={styles.signalSub}>确认 {operatingHome.aggregatedDemand.confirmedArrivals} · 高概率 {operatingHome.aggregatedDemand.highProbabilityArrivals}</Text></View><View style={styles.signalCell}><Text selectable style={styles.signalLabel}>Scene Supply</Text><Text selectable style={styles.signalValue}>{operatingHome.sceneSupply.forecastCapacityPct}%</Text><Text selectable style={styles.signalSub}>当前 {operatingHome.sceneSupply.currentCapacityPct}% · {operatingHome.sceneSupply.acceptingTraffic ? "可承接" : "停止引流"}</Text></View></View>
           <Text selectable style={styles.balanceBody}>Proxy 判断：{operatingHome.demandSupply.reason}</Text>
         </> : <Text selectable style={styles.balanceBody}>尚未获得通过隐私阈值的聚合需求与 Scene 容量数据。</Text>}
         <Text selectable style={styles.balanceMeta}>{operatingHome?.demandSupply.privacyThresholdPassed ? `置信度 ${Math.round(operatingHome.demandSupply.confidence * 100)}% · 仅展示隐私聚合信号` : "不会用历史销售冒充附近客流，也不会生成虚假精确预测。"}</Text>
+        {/* MERCHANT-SIGNAL-SEED-001：种入的测试数据（source=SEED_TEST）必须自报家门。
+            上面那句「不会用历史销售冒充附近客流」是这块的承诺 —— 一旦上面那些数字
+            是 seed 进来的，那句话就必须在旁边被推翻一次，而不是靠读代码的人记得。 */}
+        {operatingHome?.aggregatedDemand?.source === "SEED_TEST" || operatingHome?.sceneSupply?.source === "SEED_TEST" ? <Text selectable style={styles.balanceMeta} testID="merchant-signal-seeded">测试数据 · 以下信号为种入的样例，不是实测</Text> : null}
         {operatingHome ? <Text selectable style={styles.balanceMeta}>门店 {operatingHome.operatingPulse.storeCount} · 成员 {operatingHome.operatingPulse.memberCount} · {operatingHome.operatingPulse.freshness}</Text> : null}
       </View>
 
@@ -244,7 +337,7 @@ export function BusinessHome({
         <Text selectable style={styles.sectionHint}>低置信策略</Text>
       </View>
       <View style={styles.decisionCard} testID="merchant-best-next-decision">
-        <View style={styles.decisionKind}><Text selectable style={styles.decisionKindText}>{operatingHome?.bestNextDecision.kind ?? "NO_ACTION"}</Text></View>
+        <View style={styles.decisionKind}><Text selectable style={styles.decisionKindText}>{decisionKindLabel(operatingHome?.bestNextDecision.kind)}</Text></View>
         <Text selectable style={styles.decisionTitle}>{operatingHome?.bestNextDecision.title ?? "等待经营信号"}</Text>
         <Text selectable style={styles.decisionBody}>{operatingHome?.bestNextDecision.reason ?? "数据加载完成前不建议执行动作"}</Text>
         {operatingHome?.bestNextDecision.requiresApproval ? <Pressable onPress={() => { setPlanOpen((open) => !open); setPlanResult(undefined); }} style={styles.decisionAction}><Text selectable style={styles.decisionActionText}>{planOpen ? "收起方案" : "看方案并确认商业条件"}</Text></Pressable> : <Text selectable style={styles.noActionNote}>无需老板处理 · 信号变化时再提醒</Text>}
@@ -282,14 +375,31 @@ export function BusinessHome({
           <View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>暂无开放场景 — server 列表为空</Text></View>
         </Pressable>
       ) : null}
-      {scenePackages.map((pkg) => (
+      {scenePackages.map((pkg) => {
+        const coverUri = scenePackageUri(pkg);
+        return (
         <Pressable key={pkg.id} onPress={() => onOpenMarket("OPPORTUNITY")} style={styles.scenePackageCard}>
-          {pkg.coverImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-scene:${pkg.id}`} source={{ uri: pkg.coverImageUrl }} style={styles.scenePackageImage} transition={0} /> : <View style={styles.scenePackageFallback}><ProxyIcon color={color.muted} name="cup" size={24} /></View>}
+          {coverUri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-scene:${pkg.id}`} source={{ uri: coverUri }} style={styles.scenePackageImage} transition={0} /> : <View style={styles.scenePackageFallback}><ProxyIcon color={color.muted} name="cup" size={24} /></View>}
           <View style={styles.scenePackageBody}><View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>{pkg.title}</Text><Text selectable style={styles.subtle}>{pkg.sub}</Text></View><View style={styles.actionMetricTag}><Text selectable style={styles.actionMetricTagText}>{pkg.tag}</Text></View></View>
         </Pressable>
-      ))}
+        );
+      })}
 
-      <MerchantCreatorRecommendations supply={supply} onOpenAll={() => onOpenMarket("OPPORTUNITY")} />
+      {/* CREATOR-HOME-001：有 userAccountId 就进真主页（平台 OtherProfileSurface）；
+          没有（没关联账号）才退回弹窗。弹窗不是摆设，是未关联账号的唯一入口。 */}
+      {/* CREATOR-HOME-001：卡片点人永远进帖文主页，不赌 userAccountId。
+          有号精确命中，没有靠名字回填帖文（backfill 按 authorId 或名字），
+          两种都有帖子看。以前在这里分叉，没号就弹框 —— 运行时的号一旦缺失，
+          用户看到的就是框而不是主页。 */}
+      <MerchantCreatorRecommendations
+        supply={supply}
+        onOpenAll={() => onOpenMarket("OPPORTUNITY")}
+        onOpenCreator={(c) => {
+          if (!onOpenCreatorProfile) return;
+          const photoUri = resolveCreatorPhoto(c.photos[0]);
+          onOpenCreatorProfile(c.userAccountId || c.agentId, c.name, photoUri);
+        }}
+      />
 
       <View style={styles.sectionHead}>
         <Text selectable style={styles.sectionTitle}>招牌与在售</Text>
@@ -303,13 +413,20 @@ export function BusinessHome({
       ) : (
         // SWIPE-RAIL-001：菜单照片横滑不能触发外层切页。
         <HorizontalSwipeRail contentContainerStyle={styles.menuRail} preserveChildPresses threshold={3}>
-          {menuItems.filter((m) => m.available).slice(0, 6).map((m) => (
+          {menuItems.filter((m) => m.available).slice(0, 6).map((m) => {
+            const skuUri = menuSkuUri(m);
+            return (
             <Pressable key={m.id} onPress={() => onOpenMe()} style={styles.menuCard}>
-              {m.mediaAssetId ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-sku:${m.id}`} source={{ uri: `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(m.mediaAssetId)}` }} style={styles.menuImage} transition={0} /> : <View style={styles.menuImageMissing}><ProxyIcon color={color.muted} name="storefront" size={22} /></View>}
-              <Text selectable style={styles.menuName} numberOfLines={1}>{m.name}</Text>
+              {skuUri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-sku:${m.id}`} source={{ uri: skuUri }} style={styles.menuImage} transition={0} /> : <View style={styles.menuImageMissing}><ProxyIcon color={color.muted} name="storefront" size={22} /></View>}
+              {/* MENU-HOT-001：HOT 徽（商家亲手标的）。 */}
+              <View style={styles.menuNameRow}>
+                <Text selectable style={styles.menuName} numberOfLines={1}>{m.name}</Text>
+                {m.isHot ? <HotBadge /> : null}
+              </View>
               <Text selectable style={styles.menuPrice}>{formatVnd(m.priceMinor)}</Text>
             </Pressable>
-          ))}
+            );
+          })}
         </HorizontalSwipeRail>
       )}
 
@@ -355,9 +472,13 @@ export function BusinessHome({
         <Text selectable style={styles.resumeHint}>更多在「我的」›</Text>
       </Pressable>
 
+      {/* STORE-CONSOLIDATE-001（2026-10-02）：拿掉这里的"线上店铺" ——
+          管店入口只剩「我的 › 我的店铺」一个。这里的快捷行点下去只是 onOpenMe
+          （落到"我的"页，还要再找一次），留着就是用户看到的"重复的2个"。
+          剩下两个（结果复盘/客户）同样都只调 onOpenMe，名不副实，但那是另一条，
+          不在这里扩大范围。 */}
       <View style={styles.quickRow}>
         {[
-          { icon: "storefront" as ProxyIconName, label: "线上店铺" },
           { icon: "arrowUpRight" as ProxyIconName, label: "结果复盘" },
           { icon: "target" as ProxyIconName, label: "客户" },
         ].map((entry) => (
@@ -384,6 +505,11 @@ const styles = StyleSheet.create({
   homeTopCopy: { flex: 1 },
   homeTopTitle: { color: color.ink, fontSize: 28, fontWeight: "900", lineHeight: 34 },
   homeTopLoc: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 2 },
+  accountSwitcher: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  accountChip: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 5 },
+  accountChipActive: { backgroundColor: color.ink, borderColor: color.ink, borderRadius: 14, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 5 },
+  accountChipText: { color: color.muted, fontSize: 12, fontWeight: "700" },
+  accountChipTextActive: { color: color.white, fontSize: 12, fontWeight: "800" },
   identityCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 11, marginTop: 8, padding: 12, ...shadows.card },
   identityAvatar: { alignItems: "center", backgroundColor: "#45208A", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
   identityAvatarText: { color: color.white, fontSize: 18, fontWeight: "900" },
@@ -397,7 +523,8 @@ const styles = StyleSheet.create({
   menuCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 4, padding: 8, width: 132 },
   menuImage: { borderRadius: 10, height: 96, width: "100%" },
   menuImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 10, height: 96, justifyContent: "center", width: "100%" },
-  menuName: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  menuNameRow: { alignItems: "center", flexDirection: "row", gap: 6 },
+  menuName: { color: color.ink, flexShrink: 1, fontSize: 13, fontWeight: "800" },
   menuPrice: { color: "#a9231f", fontSize: 12, fontWeight: "900" },
   sectionHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginBottom: 6, marginTop: 10 },
   sectionTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
@@ -438,6 +565,7 @@ const styles = StyleSheet.create({
   quickRow: { flexDirection: "row", gap: 7 },
   quickCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, flex: 1, gap: 8, padding: 12 },
   quickIcon: { alignItems: "center", height: 26, justifyContent: "center", width: 26 },
+  flex: { flex: 1, minWidth: 0 },
   quickLabel: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 20 },
   resultCard: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1, borderRadius: 16, padding: 12, marginTop: 10, gap: 4, ...shadows.card },
   resultTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },

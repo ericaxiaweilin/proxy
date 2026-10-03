@@ -22,6 +22,7 @@ import {
   type ToggleLocale,
 } from "./precise-location-toggle-helpers";
 import { ProxyLoading } from "./proxy-foundation";
+import { DEFAULT_LANGUAGE, useI18n } from "../i18n";
 
 export type PreciseLocationToggleProps = {
   // The current consent state. null = loading or unknown.
@@ -35,12 +36,18 @@ export type PreciseLocationToggleProps = {
   onRevoke: () => void;
   // The most recent error, if any. Cleared on the next render.
   errorMessage?: string;
-  // Locale for the remaining-time string. Defaults to "vi".
+  // Language for the copy and the remaining-time string.
+  // I18N-SAFETY-002：默认从 "vi" 改成 App 的默认语言（中文）—— 原来默认越南语，
+  // 而整个 App 的 DEFAULT_LANGUAGE 是中文，两边不一致本身就是这处病的一部分。
   locale?: ToggleLocale;
 };
 
 export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.JSX.Element {
-  const { consent, busy, onGrant, onRevoke, errorMessage, locale = "vi" } = props;
+  const { consent, busy, onGrant, onRevoke, errorMessage } = props;
+  // 不写 props.locale ?? DEFAULT_LANGUAGE：这一屏有 useI18n()，语言状态就在
+  // 那里。props.locale 保留是因为别处可能显式传（老调用点），有值就用它。
+  const { lang, t } = useI18n();
+  const locale = props.locale ?? lang ?? DEFAULT_LANGUAGE;
   const [pickingDuration, setPickingDuration] = useState(false);
 
   const active = useMemo(() => isActiveConsent(consent), [consent]);
@@ -73,8 +80,8 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
   if (pickingDuration) {
     return (
       <View style={styles.card}>
-        <Text selectable style={styles.title}>Chia sẻ vị trí chính xác</Text>
-        <Text selectable style={styles.subtitle}>Bạn muốn cho phép trong bao lâu?</Text>
+        <Text selectable style={styles.title}>{t("consentShareTitle")}</Text>
+        <Text selectable style={styles.subtitle}>{t("consentDurationQuestion")}</Text>
         <View style={styles.row}>
           {ALLOWED_DURATION_SECONDS.map((d) => (
             <Pressable
@@ -99,7 +106,7 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
           onPress={() => setPickingDuration(false)}
           disabled={busy}
         >
-          <Text selectable style={styles.cancel}>Hủy</Text>
+          <Text selectable style={styles.cancel}>{t("cancel")}</Text>
         </Pressable>
       </View>
     );
@@ -109,14 +116,14 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <View style={styles.headerText}>
-          <Text selectable style={styles.title}>Vị trí chính xác</Text>
+          <Text selectable style={styles.title}>{t("consentTitle")}</Text>
           <Text selectable style={styles.subtitle}>{summary}</Text>
         </View>
         {busy ? (
           <ProxyLoading tone="onLight" />
         ) : (
           <Switch
-            accessibilityLabel="Bật hoặc tắt vị trí chính xác"
+            accessibilityLabel={t("consentSwitchA11y")}
             value={active}
             onValueChange={handleToggle}
             disabled={busy}
@@ -124,15 +131,10 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
         )}
       </View>
       {errorMessage ? <Text selectable style={styles.error}>{errorMessage}</Text> : null}
-      <Text selectable style={styles.footnote}>
-        Theo PDP Việt Nam 91/2025/QH15 Art. 4 & 12 — vị trí chính xác là dữ liệu nhạy cảm.
-        Bạn có thể thu hồi bất kỳ lúc nào.
-      </Text>
+      <Text selectable style={styles.footnote}>{t("consentFootnote")}</Text>
     </View>
   );
 }
-
-function _unusedLocaleRef(locale: ToggleLocale): ToggleLocale { return locale; }
 
 const styles = StyleSheet.create({
   card: {

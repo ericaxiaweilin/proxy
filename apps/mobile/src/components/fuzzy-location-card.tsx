@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { color } from "../theme";
+import { getLanguage, translate, useI18n, type Language, type MessageKey } from "../i18n";
 import {
   ALLOWED_DURATION_SECONDS,
   type LocationConsent,
@@ -25,7 +26,9 @@ const KIND = "FUZZY_REGION" as const;
 // 粗化网格。服务端 emergency/location 的 Coarsen 用的是 0.01° 网格：
 // 在河内纬度上边长约 1.1 公里（经度按 cos(lat) 收窄）。
 // 这里说的是**网格量级**，不是精度承诺 —— 界面上不许把它写成「精确到 X 米」。
-const COARSE_GRID_NOTE = "坐标会被粗化到约 1 公里的网格后再使用";
+function coarseGridNote(lang: Language): string {
+  return translate(lang, "fuzzyCoarseNote");
+}
 
 export function FuzzyLocationCard({
   client,
@@ -34,9 +37,11 @@ export function FuzzyLocationCard({
   client: LocationConsentClient;
   skipInitialFetch?: boolean;
 }): React.JSX.Element {
+  // I18N-SAFETY-002：错误存**原因**、渲染时再翻译（HOME-I18N-001 的形状）。
+  const { lang, t } = useI18n();
   const [consent, setConsent] = useState<LocationConsent | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorCause | null>(null);
 
   useEffect(() => {
     if (skipInitialFetch) return;
@@ -46,7 +51,7 @@ export function FuzzyLocationCard({
         const next = await client.getStatus(KIND);
         if (!cancelled) setConsent(next);
       } catch (e) {
-        if (!cancelled) setError(messageFor(e));
+        if (!cancelled) setError(errorCauseFor(e));
       }
     })();
     return () => {
@@ -62,7 +67,7 @@ export function FuzzyLocationCard({
     try {
       setConsent(await client.grant(durationSeconds, KIND));
     } catch (e) {
-      setError(messageFor(e));
+      setError(errorCauseFor(e));
     } finally {
       setBusy(false);
     }
@@ -77,7 +82,7 @@ export function FuzzyLocationCard({
       // 记着的那一行，不是我们以为的那一行。
       setConsent(await client.getStatus(KIND));
     } catch (e) {
-      setError(messageFor(e));
+      setError(errorCauseFor(e));
     } finally {
       setBusy(false);
     }
@@ -85,39 +90,39 @@ export function FuzzyLocationCard({
 
   return (
     <View style={styles.wrap}>
-      <Text selectable style={styles.title}>模糊位置共享（粗化区域）</Text>
+      <Text selectable style={styles.title}>{t("fuzzyTitle")}</Text>
       {/* 这里刻意**不**照抄原型的「盲盒匹配时共享给匹配对象」——
           本仓库没有盲盒匹配这个功能（全仓 blindbox/盲盒 零命中），
           而且目前也**没有**任何「把区域展示给匹配对象」的消费方。
           写出来就是一句没有实现支撑的承诺。
           这项同意当下真正的作用只有一条，就在下面写清。 */}
       <Text selectable style={styles.desc}>
-        开启后，安全事件（一键求助 / 见面签到）才能记录你所在的大致区域。{COARSE_GRID_NOTE}。
+        {t("fuzzyDescSafety", { note: coarseGridNote(lang) })}
       </Text>
       <Text selectable style={styles.desc}>
-        未开启时事件照样记录，但坐标会被丢弃，记录里会写明「当时没有生效的位置授权」。
+        {t("fuzzyDescWhenOff")}
       </Text>
       <Text selectable style={styles.desc}>
-        这是与「精确位置」分开的一项授权：关掉它不影响你已经单独给过的精确位置授权，反过来也一样。
+        {t("fuzzyDescSeparate")}
       </Text>
 
       <View style={styles.row}>
         <View style={styles.stateBox}>
           <Text selectable style={styles.stateLabel}>
-            {active ? "已开启" : consent?.status === "REVOKED" ? "已关闭" : "未开启"}
+            {active ? t("consentOn") : consent?.status === "REVOKED" ? t("consentOff") : t("consentNotOn")}
           </Text>
           {active && consent ? (
             <Text selectable style={styles.stateHint}>
-              {formatRemaining(consent.remainingSeconds, "zh")}
+              {formatRemaining(consent.remainingSeconds, lang)}
             </Text>
           ) : (
-            <Text selectable style={styles.stateHint}>默认关闭，需要你主动开启</Text>
+            <Text selectable style={styles.stateHint}>{t("fuzzyOffHint")}</Text>
           )}
         </View>
         <Pressable
           accessibilityRole="switch"
           accessibilityState={{ checked: active, disabled: busy }}
-          accessibilityLabel="模糊位置共享开关"
+          accessibilityLabel={t("fuzzySwitchA11y")}
           disabled={busy}
           onPress={() => void (active ? handleRevoke() : handleGrant(ALLOWED_DURATION_SECONDS[1]!))}
           style={[styles.switch, active ? styles.switchOn : null, busy ? styles.switchBusy : null]}
@@ -128,21 +133,29 @@ export function FuzzyLocationCard({
 
       {error ? (
         <Text selectable style={styles.error}>
-          {error} —— 开关没有生效，服务端仍按上一次的授权状态处理。
+          {errorText(error)} {t("consentStaleSuffix")}
         </Text>
       ) : null}
     </View>
   );
 }
 
-function messageFor(e: unknown): string {
+type ErrorCause =
+  | { kind: "key"; key: MessageKey }
+  | { kind: "raw"; raw: string };
+
+function errorCauseFor(e: unknown): ErrorCause {
   if (e instanceof LocationConsentError) {
-    if (e.httpStatus === 401) return "登录已过期，请重新登录";
-    if (e.httpStatus === 400) return "请求不被接受，请稍后重试";
-    return e.message;
+    if (e.httpStatus === 401) return { kind: "key", key: "consentSessionExpired" };
+    if (e.httpStatus === 400) return { kind: "key", key: "consentRejected" };
+    return { kind: "raw", raw: e.message };
   }
-  if (e instanceof Error) return e.message;
-  return "出错了，请稍后重试";
+  if (e instanceof Error) return { kind: "raw", raw: e.message };
+  return { kind: "key", key: "consentGenericError" };
+}
+
+function errorText(cause: ErrorCause): string {
+  return cause.kind === "raw" ? cause.raw : translate(getLanguage(), cause.key);
 }
 
 const styles = StyleSheet.create({

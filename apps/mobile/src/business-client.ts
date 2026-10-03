@@ -13,8 +13,10 @@ export interface MerchantOperatingHome {
   demandSupply: { state: "INSUFFICIENT_SIGNAL" | "SUPPLY_EXCESS" | "BALANCED" | "DEMAND_RISING" | "CAPACITY_TIGHT" | "OVER_CAPACITY_RISK"; confidence: number; privacyThresholdPassed: boolean; reason: string };
   forecast: { status: "UNAVAILABLE" | "AVAILABLE"; confidence: number; version: number; assumptions: string[] };
   bestNextDecision: { kind: "NO_ACTION" | "LOW_PEAK_FILL" | "STOP_TRAFFIC" | "SCENE_ADJUSTMENT" | "MENU_ADJUSTMENT" | "BENEFIT" | "CREATOR" | "ACTIVITY" | "PARTNER_COLLAB" | "RECOVERY"; title: string; reason: string; requiresApproval: boolean };
-  aggregatedDemand?: { totalMatchingDemand: number; confirmedArrivals: number; highProbabilityArrivals: number; confidence: number; recordedAt: string };
-  sceneSupply?: { storeId: string; sceneId: string; currentCapacityPct: number; forecastCapacityPct: number; acceptingTraffic: boolean; confidence: number; recordedAt: string };
+  // source: MERCHANT-SIGNAL-SEED-001 —— MEASURED=实测，SEED_TEST=种入的测试数据。
+  // 页面据此打「测试数据」标记，不让测试数字冒充算出来的经营信号。
+  aggregatedDemand?: { totalMatchingDemand: number; confirmedArrivals: number; highProbabilityArrivals: number; confidence: number; recordedAt: string; source?: string };
+  sceneSupply?: { storeId: string; sceneId: string; currentCapacityPct: number; forecastCapacityPct: number; acceptingTraffic: boolean; confidence: number; recordedAt: string; source?: string };
 }
 
 export interface StorePhoto {
@@ -41,6 +43,8 @@ export interface StoreProduct {
   photoAssetPath: string;
   mediaAssetId: string;
   available: boolean;
+  // MENU-HOT-001：商家亲手标的 HOT（默认 false）。
+  isHot: boolean;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -237,6 +241,7 @@ export class BusinessClient {
     photoAssetPath?: string;
     mediaAssetId?: string;
     sortOrder?: number;
+    isHot?: boolean;
   }): Promise<{ productId: string; product: StoreProduct }> {
     const body = this.body(await this.command("CreateStoreProduct", { type: "Store", id: input.storeId }, {
       storeId: input.storeId,
@@ -265,6 +270,7 @@ export class BusinessClient {
     photoAssetPath?: string;
     mediaAssetId?: string;
     sortOrder?: number;
+    isHot?: boolean;
   }): Promise<{ product: StoreProduct }> {
     const body = this.body(await this.command("UpdateStoreProduct", { type: "StoreProduct", id: input.productId }, {
       productId: input.productId,
@@ -287,6 +293,18 @@ export class BusinessClient {
     const body = this.body(await this.command("ListStoreProducts", { type: "Store", id: storeId }, { storeId }));
     if (!Array.isArray(body.products)) throw new Error("store products malformed");
     return body.products as StoreProduct[];
+  }
+
+  // MENU-HOT-001：一键打标/摘标（只改标记）。
+  public async setProductHot(productId: string, storeId: string, isHot: boolean): Promise<{ product: StoreProduct }> {
+    const body = this.body(await this.command("SetProductHot", { type: "StoreProduct", id: productId }, {
+      productId,
+      storeId,
+      isHot,
+    }));
+    const product = body.product as StoreProduct | undefined;
+    if (!product?.id) throw new Error("store product hot response malformed");
+    return { product };
   }
 
   public async setProductAvailability(productId: string, storeId: string, available: boolean): Promise<{ product: StoreProduct }> {
