@@ -261,6 +261,8 @@ commands:
     domain: Voucher
   - command: JoinActivity
     domain: Activity
+  - command: LinkAgentSocial
+    domain: Supply
   - command: LinkStoreToRealityScene
     domain: Business
   - command: ListActivities
@@ -569,6 +571,8 @@ commands:
     domain: RealityScene
   - command: SetProductAvailability
     domain: Business
+  - command: SetProductHot
+    domain: Business
   - command: SetRealitySceneCheckIn
     domain: RealityScene
   - command: SetRealityScenePlanned
@@ -605,6 +609,8 @@ commands:
     domain: Activity
   - command: UnfollowProfile
     domain: Engagement
+  - command: UnlinkAgentSocial
+    domain: Supply
   - command: UnmuteAuthor
     domain: Engagement
   - command: UnpinPost

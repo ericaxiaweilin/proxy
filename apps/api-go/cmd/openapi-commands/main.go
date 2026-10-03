@@ -1,4 +1,4 @@
-// Command: generate_openapi_commands.go
+// Command openapi-commands:
 //
 // Thin CLI wrapper around internal/openapicmds. Walks every
 // apps/api-go/internal/<domain>/service.go, collects the
@@ -53,7 +53,12 @@ func main() {
 			os.Exit(1)
 		}
 		if strings.TrimSpace(string(onDisk)) != strings.TrimSpace(out) {
-			fmt.Fprintln(os.Stderr, "openapi commands drift detected: re-run `go run ./scripts/generate_openapi_commands.go` and commit.")
+			// 提示里写的必须是**现在真能跑的那条命令**。这里原来指
+			// `./scripts/generate_openapi_commands.go` —— 那个文件早就不在了，于是照着
+			// 提示做的人只会再撞一次"no such file"，而红色的真因（片段没重生成）一个字
+			// 都没说。同一类错误在门禁里已经出现过两次（/tmp/account-matrix.mjs、
+			// 指向被删 .mjs 的补城市提示）。
+			fmt.Fprintln(os.Stderr, "openapi commands drift detected: apps/api-go/openapi.commands.generated.yaml 与代码里的 command 分支不一致。重生成并连同改动一起提交：go -C apps/api-go run ./cmd/openapi-commands")
 			os.Exit(2)
 		}
 		fmt.Printf("openapi commands: %d entries, drift check passed\n", len(commands))
