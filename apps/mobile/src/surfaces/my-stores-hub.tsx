@@ -103,6 +103,9 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate,
   // STORE-ASSET-SCOPE-001：从「开/关」改成「进哪一节」—— 中间那层资产列表删掉，
   // 因为它整页都是店详情已有内容的第二份（且会连带列出别的主体、别的门店）。
   const [showAssets, setShowAssets] = useState<HubAssetPage | undefined>(undefined);
+  // UX-DIRECT-EDIT-001：为 true 时子视图打开即展开编辑表单（跳过中间那下）。
+  // 关子视图时清掉，下次进默认收起。
+  const [autoEditStore, setAutoEditStore] = useState(false);
   const [category, setCategory] = useState("");
   const [sort, setSort] = useState<"none" | "recent" | "rate">("none");
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
@@ -230,7 +233,7 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate,
               load() 按 id 保留选中，不会跳页。 */}
           <HubNav
             backLabel={`返回${selected.store.name}`}
-            onBack={() => { setShowAssets(undefined); void load(); }}
+            onBack={() => { setShowAssets(undefined); setAutoEditStore(false); void load(); }}
             title={HUB_ASSET_TITLE[showAssets]}
           />
           {/* STORE-ASSET-SCOPE-001：给原子页一个作用域（这一家店 + 要编的那一节）。
@@ -238,7 +241,16 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate,
               用户这次指的"重复"。 */}
           <MerchantStorefrontSurface
             client={business}
+            // UI-HONEST-CAPABILITY-001：空态那两个「交给企业运营助手」的 CTA 是
+            // `disabled: !onStartStoreSetup` —— STORE-CONSOLIDATE-001 把管店入口搬进
+            // 这个 hub 时只把 onOpenStoreCreate 传给了 hub 自己，没有转发给 storefront，
+            // 于是用户站在主路径（我的 › 线上店铺）上看到的是一个恒灰、点了没反应的按钮。
+            // me.tsx 与 merchant-me 两个调用点都已经把它接到 enterpriseops 了，缺的就是这一行。
+            onStartStoreSetup={onOpenStoreCreate}
             scope={{ storeId: selected.store.id, page: showAssets }}
+            // UX-DIRECT-EDIT-001：这行丢过一次（state 还在但 prop 没过去，
+            // 自动展开静默失效）。门禁钉住它。
+            autoEditStoreId={autoEditStore ? selected.store.id : undefined}
           />
         </View>
       );
@@ -259,6 +271,7 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate,
           onCopyAddress={() => void copyAddress(selected.store.address)}
           onOpenVouchers={onOpenVouchers}
           onManageProducts={(page) => setShowAssets(page)}
+          onEditDetails={() => { setAutoEditStore(true); setShowAssets("details"); }}
         />
       </View>
     );
@@ -378,7 +391,7 @@ function HubNav({ backLabel, onBack, title }: {
   );
 }
 
-function StoreDetail({ row, copied, requesterNames, business, onCategorySaved, onCopyAddress, onOpenVouchers, onManageProducts }: {
+function StoreDetail({ row, copied, requesterNames, business, onCategorySaved, onCopyAddress, onOpenVouchers, onManageProducts, onEditDetails }: {
   row: HubShop;
   copied: boolean;
   requesterNames: ReadonlyMap<string, string>;
@@ -391,6 +404,10 @@ function StoreDetail({ row, copied, requesterNames, business, onCategorySaved, o
   // STORE-ASSET-SCOPE-001：入口直接说清进哪一节（menu / photos / details），
   // 不再统一跳一个"资产管理"列表 —— 那一页是店详情内容的第二份。
   onManageProducts: (page: HubAssetPage) => void;
+  // UX-DIRECT-EDIT-001（2026-10-03，用户「藏的太深了 谁能找到」）：
+  // 店详情的营业资料节直接给"编辑"按钮，点进去就是表单 —— 不再让用户先点
+  // "编辑经营资料"进子视图、再在里面找"编辑主页"点第二下。
+  onEditDetails: () => void;
 }): React.JSX.Element {
   const cover = coverForStore(row.store.category?.trim() || row.store.name);
   // STORE-LOGO-001：店徽（lines.logoAssetPath）。空就是没传，走首字 fallback。
@@ -473,11 +490,19 @@ function StoreDetail({ row, copied, requesterNames, business, onCategorySaved, o
       {row.statsFailed ? <Text selectable style={s.error}>接单数据没读出来，稍后再试。</Text> : null}
 
       <View style={s.secHead}>
+        <View style={s.secHeadRow}>
         <Text selectable style={s.secTitle}>店铺信息</Text>
+        <Pressable accessibilityLabel="编辑店铺信息" onPress={onEditDetails} style={s.secEdit}>
+          <Text selectable style={s.secEditText}>编辑</Text>
+        </Pressable>
+      </View>
         {/* STORE-ASSET-SCOPE-001：编辑简介 / 联系方式 / 营业时间的入口。它原来只在
             "资产管理"那层（旧资产列表的"店铺照片与经营资料"）—— 中间页删掉后这条
             能力不能跟着没，所以挂在它改的那一节上。 */}
-        <Pressable accessibilityLabel="编辑经营资料" onPress={() => onManageProducts("details")} style={s.sectionEdit}>
+        {/* UX-DIRECT-EDIT-001：这个入口也直达表单（和上面"编辑店铺信息"同一条）。
+            留两个入口但行为必须一致 —— 不然用户点的那个决定了他要跳几下，
+            这正是"还是编辑-编辑主页"的来源。 */}
+        <Pressable accessibilityLabel="编辑经营资料" onPress={onEditDetails} style={s.sectionEdit}>
           <Text selectable style={s.sectionEditText}>编辑</Text>
         </Pressable>
       </View>
@@ -714,6 +739,10 @@ const s = StyleSheet.create({
   photoThumb: { backgroundColor: "#F4F0EA", borderRadius: 10, height: 104, width: "31%" },
   photoThumbEmpty: { alignItems: "center", backgroundColor: "#F4F0EA", borderRadius: 10, height: 104, justifyContent: "center", width: "31%" },
   photoThumbText: { color: "#8A8380", fontSize: 14, fontWeight: "900" },
+  // UX-DIRECT-EDIT-001：节标题行 + 行内编辑按钮。
+  secHeadRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  secEdit: { borderColor: "#E8E4E0", borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
+  secEditText: { color: "#1C191D", fontSize: 11, fontWeight: "800" },
   footerBtns: { flexDirection: "row", gap: 10, marginTop: 12 },
   ghostBtn: { alignItems: "center", borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, paddingVertical: 13 },
   ghostText: { color: color.ink, fontSize: 14, fontWeight: "900" },

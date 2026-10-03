@@ -57,13 +57,15 @@ describe("STORE-ASSET-SCOPE-001", () => {
 
   it("keeps an entry for every section the removed middle page used to offer", () => {
     // 删中间页最容易顺手删掉能力：三个目的地必须各有一个入口，且指名去哪一节。
+    // UX-DIRECT-EDIT-001：details 入口走 onEditDetails（直达表单），不再是
+    // onManageProducts("details")（进子视图还要找第二下）。入口还在，行为升级了。
     for (const call of [
       'onManageProducts("menu")',
       'onManageProducts("photos")',
-      'onManageProducts("details")',
     ]) {
       expect(hub).toContain(call);
     }
+    expect(hub).toContain("onEditDetails");
     // 营业资料（简介 / 联系方式 / 营业时间）的编辑入口挂在「店铺信息」那一节上。
     expect(hub).toContain('accessibilityLabel="编辑经营资料"');
   });
@@ -74,5 +76,34 @@ describe("STORE-ASSET-SCOPE-001", () => {
     expect(pick).toContain("setShowAssets(undefined)");
     const detailBack = hub.slice(hub.indexOf('backLabel="返回店铺列表"'));
     expect(detailBack.slice(0, 160)).toContain("setShowAssets(undefined)");
+  });
+});
+
+// UI-HONEST-CAPABILITY-001（2026-10-03 补）：入口搬进 hub 之后，空态 CTA 断了一环。
+//
+// merchant-storefront 的两个空态按钮写的是 `disabled: !onStartStoreSetup` —— 这个
+// prop 不传，按钮就**永远灰着且点了没反应**，正是这条 ID 当初要治的病。
+// STORE-CONSOLIDATE-001 把管店入口搬进 MyStoresHub 时，me.tsx / merchant-me 都把
+// `onOpenStoreCreate`（→ 企业运营助手）传给了 hub，但 hub 没往下转发给嵌进来的
+// storefront，于是主路径（我的 › 线上店铺 › 还没有线上店铺）又看到一个死按钮。
+// 判据钉的是**整条链**，不是某个文件里的一行字面量：上一版门禁就是只查 me.tsx 里
+// 那句字面量，链子换了形状它就一直红，而真正该管的"按钮有没有接上"没人管。
+describe("UI-HONEST-CAPABILITY-001 建店入口必须从 hub 接到 storefront 的空态", () => {
+  const me = readFileSync(new URL("./me.tsx", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+
+  it("hub 把建店入口转给 storefront 的 onStartStoreSetup", () => {
+    const call = hub.slice(hub.indexOf("<MerchantStorefrontSurface"), hub.indexOf("/>", hub.indexOf("<MerchantStorefrontSurface")));
+    expect(call).toContain("onStartStoreSetup={onOpenStoreCreate}");
+  });
+
+  it("两个调用点都把 onOpenStoreCreate 接到企业运营助手（不是 undefined）", () => {
+    // me.tsx 有两处 hub（merchantstorefront 与 bdash），漏一处就是那条路径上按钮死。
+    const wired = me.match(/onOpenStoreCreate=\{\(\) => openSubPage\("enterpriseops"\)\}/g) ?? [];
+    expect(wired.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("storefront 仍然用 disabled 表达「没接上」，而不是悄悄画个能点的空按钮", () => {
+    expect(face).toContain("disabled: !onStartStoreSetup");
   });
 });

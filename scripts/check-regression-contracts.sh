@@ -12159,9 +12159,19 @@ if grep -qF 'async function createShop(' apps/mobile/src/surfaces/merchant-store
   echo "        写了从不渲染（失败被静默丢弃）。真入口是企业运营助手。" >&2
   exit 1
 fi
-if ! grep -qF 'onStartStoreSetup={() => openSubPage("enterpriseops")}' apps/mobile/src/surfaces/me.tsx; then
-  echo "  FAIL [UI-HONEST-CAPABILITY-001]: me.tsx 没把线上店铺空态按钮接到企业运营助手 ——" >&2
-  echo "        主路径（我的 › 线上店铺）会看到一个灰掉且点了没反应的按钮。" >&2
+# 2026-10-03 重指：原来这里查的是 me.tsx 里那句字面量
+# `onStartStoreSetup={() => openSubPage("enterpriseops")}`。STORE-CONSOLIDATE-001 把
+# 管店入口搬进 MyStoresHub 之后，那句话在仓库里**任何地方都不存在了** —— 但真正要保的
+# 性质（空态那个「交给企业运营助手」按钮不能是死的）也一起没人管了。判据钉在字面量上，
+# 链子换个形状它就恒红，而红久了人就学会跳过它。现在钉整条链并跑行为测试。
+if ! grep -qF 'onStartStoreSetup={onOpenStoreCreate}' apps/mobile/src/surfaces/my-stores-hub.tsx; then
+  echo "  FAIL [UI-HONEST-CAPABILITY-001]: hub 没把建店入口转给 storefront 的空态 ——" >&2
+  echo "        空态按钮写的是 disabled: !onStartStoreSetup，不转就是恒灰、点了没反应。" >&2
+  exit 1
+fi
+if ! pnpm --filter @proxy/mobile exec vitest run src/surfaces/store-asset-scope.test.ts >/dev/null 2>&1; then
+  echo "  FAIL [UI-HONEST-CAPABILITY-001]: store-asset-scope 跑不过（含「建店入口整条链」三条判据）——" >&2
+  echo "        单独复现：pnpm --filter @proxy/mobile exec vitest run src/surfaces/store-asset-scope.test.ts" >&2
   exit 1
 fi
 # 3) availability：「我的可用时间」硬编码三条过期日期例外，而日历画未来 30 天 ⇒
@@ -12196,7 +12206,13 @@ fi
 # ⚠️ 钉**真实代码**而不是注释标记 —— 2026-09-30 实测：只改 JSX、注释留着，钉照样绿。
 #    （这是同一天第二次犯「钉在注释上而不是代码上」；前一次是 UI-HONEST-CAPABILITY-001
 #    的第一条。两处的修法都是：grep 要落到实际会被执行的那一行。）
-if ! grep -qF 'setActiveAccountId(a.id); void refresh(a.id);' \
+# ⚠️ 判据用**分开的语义片段**，不用一整行字面量：2026-10-03 这条就死在格式上 ——
+#    把 onPress 的单行 `setActiveAccountId(a.id); void refresh(a.id);` 拆成多行并在
+#    中间加了"先清掉上一家数字"，行为变强了，而这句字面量 grep 直接红。
+#    钉在排版上，等于每次美化代码都要重来一次判据。
+if ! grep -qF 'setActiveAccountId(a.id)' \
+     apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx ||
+   ! grep -qF 'void refresh(a.id)' \
      apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx ||
    ! grep -qF 'accounts.length > 1' \
      apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
