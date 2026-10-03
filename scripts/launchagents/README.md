@@ -6,7 +6,7 @@
 
 | plist | 作用 | 备注 |
 |---|---|---|
-| `com.user.proxy-dev-feed-pipeline.plist` | 开发用 feed 管线，每 5 分钟一条帖文 | DEV-ONLY。「后期删除」时删这个 + `scripts/dev-feed-pipeline.mjs` 即可 |
+| `com.user.proxy-dev-feed-pipeline.plist` | 开发用 feed 管线，每 5 分钟一条帖文 | DEV-ONLY。「后期删除」时删这个 + `apps/api-go/cmd/devdata/feed_pipeline.go` 即可 |
 
 ## 安装 / 卸载
 

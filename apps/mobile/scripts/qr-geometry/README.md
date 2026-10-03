@@ -7,8 +7,8 @@ Run this after touching **any** geometry constant in
 apps/mobile/scripts/qr-geometry/run.sh
 ```
 
-Needs `node` (repo deps installed), `python3` with Pillow, and `swift`
-(Xcode command line tools). Override the interpreter with `PYTHON=...`.
+Needs `go` (step 2), `node` (step 1 only, for the app's own qrcode package) and `swift`
+(Xcode command line tools). Override the Go binary with `GO=/path/to/go`.
 
 ## Why this exists
 
@@ -27,7 +27,13 @@ A sweep rendered from python matrices validates a code the app will never draw.
 `export-matrices.mjs` uses the app's own library for exactly this reason.
 
 **2. Rendering with a re-implementation instead of the component's own output.**
-`gen-cases.py` mirrors the component's maths, which is still a re-implementation.
+`cmd/qrcases` mirrors the component's maths, which is still a re-implementation. It does
+not copy the constants any more: it parses `DOT_RADIUS`, `DOT_INSET`, `FINDER_RADIUS`,
+`FINDER_HOLE_INSET`, `FINDER_CORE_RADIUS`, `LOGO_RATIO` and `LOGO_RING_RATIO` out of
+`proxy-qr-code.tsx` at run time, so renaming one stops the sweep instead of quietly
+drawing the old shape (`TestEveryGeometryConstantMustBeParsable`). The Python step-2
+script kept the seven numbers by hand, and that drift is what this trap names.
+
 For the strongest check, dump the real `<path d="...">` the component builds and
 rasterise *that*:
 
@@ -49,6 +55,31 @@ parsing the SVG.
 - `_1x` failures are a 1x-device-only concern. `captureRef` saves at **device scale**
   (`react-native-view-shot@5.1.1` `ios/RNViewShot.mm:139` — `rendererFormat.scale = 0`),
   so a 104pt code lands in the album as 312px on a 3x phone.
+
+## Step 2 on Go — current result (2026-10-02)
+
+`gen-cases.py` was replaced by `apps/api-go/cmd/qrcases` (the repo has no python in its
+stack). Same grid, same filenames, same 144 cases; the rasteriser now samples 4× and
+box-filters, and the badge is composited **over** the dots the way the component stacks
+its `View` over the `Svg`. Two things that only showed up once the maths was measured
+rather than trusted:
+
+- the first port painted dots before the badge, so the logo never actually covered the
+  centre. `TestBadgeCutsAWhiteRingAroundTheLogo` is what caught it.
+- the ink area of a shipping dot is `0.87² − (4−π)·0.22² = 0.715` module², which is the
+  number `proxy-qr-code.tsx` records — the tests compare against it, so a square or
+  full-module renderer fails instead of silently rendering "close enough".
+
+Result of `./run.sh` on the current vCard payloads:
+
+- **140 / 144 decode.** The four failures are `store_88px_{00,20,24,28}_1x` — one payload
+  (v12, 65×65) at one 1x size, where a module is 1.35px. The `ratio=00` control fails too,
+  so the logo costs nothing here, and all four `_3x` counterparts pass. That is the same
+  failure family the Rev 219 baseline recorded (132/144).
+- Round trip verified per payload, not by count: 48/48 `profile` rows decode to
+  `FN:Huyen Nguyen` + `X-PROXY-HANDLE:huyen`, 44/48 `store` rows to `FN:Bonsaidon Seafood
+  Buffet` + `X-PROXY-STORE:8f3c1d92…`, 48/48 `invite` rows to the legacy URL — the four
+  misses are exactly the failures above, so no row decoded to *somebody else's* card.
 
 ## Payloads changed: vCard, not a URL (2026-09-16, PROFILE-QR-002)
 

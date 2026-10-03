@@ -1,25 +1,38 @@
-# mockdata — 开发数据生成管线
+# mockdata — 开发数据集（已落地）
 
-DEV-ONLY。产出 **100 个用户 + 30 家店 + 100 条帖文**，覆盖 Hà Nội 与 Bắc Ninh，
+DEV-ONLY。**100 个用户 + 30 家店 + 100 条帖文**，覆盖 Hà Nội 与 Bắc Ninh，
 咖啡店 + 餐厅。用户明确说了「开发后就删除了」，配套删除脚本见下。
 
-## 一条命令跑完
+## 2026-10-02：生成器（python）已移除
+
+这三个文件以前由 `spec.py` + `gen_mockdata.py` + `crop_assets.py` 生成。栈里没有
+Python（后端 Go、前端 RN/TS，用户 2026-10-02 明令禁止，门禁
+`TOOLCHAIN-NO-PYTHON-001` 现在就钉这件事），所以生成器删了，**产物留下**：
+数据的事实源从此就是仓库里那三个 `.sql`（内容已经灌进开发库，也已经在版本库里），
+媒体字节已经在 media store。需要翻旧账用
+`git show 21dddb25:apps/api-go/scripts/mockdata/spec.py`。
+
+**这不等于"以后要新数据请重跑这里"** —— 新的开发数据走 Go：
+
+```bash
+go -C apps/api-go run ./cmd/devdata feed-pipeline     # 逐个 tick 长内容
+go -C apps/api-go run ./cmd/devdata distance-tiers    # 铺分层坐标
+go -C apps/api-go run ./cmd/devdata availability      # 铺排期
+```
+
+`cmd/devdata` 是 insert-if-absent 的滚动工具，和本目录的一次性收敛式灌库**口径不同**，
+别混着用（下面的"幂等口径"一节讲了为什么这批数据当初必须覆盖）。
+
+## 灌 / 验证
 
 ```bash
 cd <repo root>
 
-# 1) 由 spec.py 生成三个 SQL（幂等，随时重跑）
-python3 apps/api-go/scripts/mockdata/gen_mockdata.py
-
-# 2) 把 contact sheet 裁成媒体资产文件，落进 media store
-#    ⚠️ 需要 Pillow，用带 PIL 的解释器
-python apps/api-go/scripts/mockdata/crop_assets.py
-
-# 3) 灌（先用户/店，再帖子）
+# 灌（先用户/店，再帖子）。三个 .sql 是产物，也是现在的事实源。
 psql "$DATABASE_URL" -f apps/api-go/scripts/seed_dev_shops_users.sql
 psql "$DATABASE_URL" -f apps/api-go/scripts/seed_dev_shops_users_posts.sql
 
-# 4) 读回验证
+# 读回验证（计数 / 引用完整性 / 字节 / HTTP 路由）
 bash apps/api-go/scripts/mockdata/verify_mockdata.sh
 ```
 
@@ -35,15 +48,15 @@ rm ~/Developer/kake-data/media_store/devseed_*.jpg
 
 | 文件 | 作用 |
 |---|---|
-| `spec.py` | **唯一事实源**：用户 / 店铺 / 帖文的数据都在这里 |
-| `gen_mockdata.py` | 由 spec.py 生成下面三个 .sql |
-| `crop_assets.py` | contact sheet → 媒体资产文件（70 头像 + 28 店面 + 12 ai-scenes） |
 | `verify_mockdata.sh` | 读回验证（计数 / 引用完整性 / 字节 / HTTP 路由） |
-| `../seed_dev_shops_users.sql` | 生成物：100 用户 + 30 店 + 媒体资产 + 成员 |
-| `../seed_dev_shops_users_posts.sql` | 生成物：100 条帖文 |
-| `../seed_dev_shops_users_remove.sql` | 生成物：反做 |
+| `../seed_dev_shops_users.sql` | 100 用户 + 30 店 + 媒体资产 + 成员（**现在的事实源**） |
+| `../seed_dev_shops_users_posts.sql` | 100 条帖文 |
+| `../seed_dev_shops_users_remove.sql` | 反做（先 SQL 后磁盘，顺序不能反） |
 
-**要改数据就改 `spec.py`，别直接改那三个 .sql** —— 下次生成会覆盖。
+以前这里写着「要改数据就改 `spec.py`，别直接改那三个 .sql —— 下次生成会覆盖」。
+生成器已经不在了，所以**没有"下次生成"**：改数据就直接改 SQL，并且把
+`verify_mockdata.sh` 的计数段跟着对上，否则读回验证会报一个对不上的数（那是故意的，
+它验的就是"库里 = 这批数据描述的形状"）。
 
 ## 三个「故意不做」，别顺手补上
 
@@ -65,7 +78,7 @@ rm ~/Developer/kake-data/media_store/devseed_*.jpg
 
 ## 幂等口径：**收敛式 upsert**，不是 insert-if-absent
 
-固定 ID + `ON CONFLICT DO UPDATE`，跑完必到 `spec.py` 描述的形状。
+固定 ID + `ON CONFLICT DO UPDATE`，跑完必到那批数据当初描述的形状（现在写成 SQL 了）。
 
 这里**故意偏离** AGENTS.md 的「seed 路径必须 insert-if-absent，绝不 blind
 overwrite」：那条规则的适用对象是**产品基线种子**（boot 时灌的那三个），覆盖等于

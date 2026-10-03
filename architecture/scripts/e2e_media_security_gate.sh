@@ -15,7 +15,7 @@ post_cmd() {
   fi
 }
 
-uuid() { python3 -c "import uuid; print(uuid.uuid4().hex[:16])"; }
+uuid() { uuidgen | tr 'A-Z' 'a-z' | tr -d '-' | cut -c1-16; }
 
 PASS=0
 FAIL=0
@@ -47,8 +47,8 @@ SESS=$(post_cmd "CreateAnonymousSession" "{
   \"correlationId\":\"e2e_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"deviceId\":\"e2e_dev_$(uuid)\",\"platform\":\"IOS\"}
 }")
-TOKEN=$(echo "$SESS" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['accessToken'])")
-USER_ID=$(echo "$SESS" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['userAccountId'])")
+TOKEN=$(echo "$SESS" | jq -re '.auth.accessToken')
+USER_ID=$(echo "$SESS" | jq -re '.auth.userAccountId')
 
 for FIX in single-portrait-half-4x5 single-portrait-full-9x16 single-landscape-half-4x3 \
   single-landscape-full-3x1 group-portrait-2-1x1 group-portrait-4-1x1 \
@@ -69,7 +69,7 @@ do
     \"correlationId\":\"e2e_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
     \"payload\":{\"mediaType\":\"IMAGE\",\"originalStorageKey\":\"$KEY\",\"mimeType\":\"image/jpeg\",\"width\":$W,\"height\":$H}
   }" "$TOKEN")
-  ASSET_ID=$(echo "$INIT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('aggregate',{}).get('id',''))")
+  ASSET_ID=$(echo "$INIT" | jq -r '.aggregate.id? // empty')
 
   UPL_CODE=$(curl -sS -X PUT "http://127.0.0.1:${PORT}/v1/media/upload/${ASSET_ID}" \
     -H "Content-Type: application/octet-stream" -H "Upload-Offset: 0" \
@@ -85,7 +85,7 @@ do
     \"correlationId\":\"e2e_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
     \"payload\":{\"mediaAssetId\":\"$ASSET_ID\",\"originalStorageKey\":\"$KEY\",\"contentLengthBytes\":$(stat -f%z "$FIX_PATH"),\"contentSha256\":\"e2e\"}
   }" "$TOKEN")
-  OUT=$(echo "$COMP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('outcome',''))")
+  OUT=$(echo "$COMP" | jq -r '.outcome? // empty')
 
   if [[ "$UPL_CODE" == "204" && "$OUT" == "ACCEPTED" ]]; then
     echo "  ✓ $FIX  upload=$UPL_CODE  complete=$OUT"
@@ -126,7 +126,7 @@ SESS2=$(post_cmd "CreateAnonymousSession" "{
   \"correlationId\":\"e2e_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"deviceId\":\"e2e_dev2_$(uuid)\",\"platform\":\"IOS\"}
 }")
-TOKEN2=$(echo "$SESS2" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['accessToken'])")
+TOKEN2=$(echo "$SESS2" | jq -re '.auth.accessToken')
 
 # Init from user 1, try upload as user 2
 INIT_X=$(post_cmd "CreateMediaAsset" "{
@@ -138,7 +138,7 @@ INIT_X=$(post_cmd "CreateMediaAsset" "{
   \"correlationId\":\"e2e_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"mediaType\":\"IMAGE\",\"originalStorageKey\":\"e2e_x_$(uuid).jpg\",\"mimeType\":\"image/jpeg\",\"width\":1200,\"height\":1500}
 }" "$TOKEN")
-ASSET_X=$(echo "$INIT_X" | python3 -c "import json,sys; print(json.load(sys.stdin)['aggregate']['id'])")
+ASSET_X=$(echo "$INIT_X" | jq -re '.aggregate.id')
 
 CROSS_CODE=$(curl -sS -X PUT "http://127.0.0.1:${PORT}/v1/media/upload/${ASSET_X}" \
   -H "Content-Type: application/octet-stream" -H "Upload-Offset: 0" \
@@ -168,7 +168,7 @@ HTML_INIT=$(post_cmd "CreateMediaAsset" "{
   \"correlationId\":\"e2e_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"mediaType\":\"IMAGE\",\"originalStorageKey\":\"e2e_html_$(uuid).jpg\",\"mimeType\":\"image/jpeg\",\"width\":100,\"height\":100}
 }" "$TOKEN")
-HTML_ASSET=$(echo "$HTML_INIT" | python3 -c "import json,sys; print(json.load(sys.stdin)['aggregate']['id'])")
+HTML_ASSET=$(echo "$HTML_INIT" | jq -re '.aggregate.id')
 
 HTML_CODE=$(curl -sS -X PUT "http://127.0.0.1:${PORT}/v1/media/upload/${HTML_ASSET}" \
   -H "Content-Type: application/octet-stream" -H "Upload-Offset: 0" \
@@ -189,7 +189,7 @@ BOMB_INIT=$(post_cmd "CreateMediaAsset" "{
   \"correlationId\":\"e2e_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"mediaType\":\"IMAGE\",\"originalStorageKey\":\"e2e_bomb_$(uuid).jpg\",\"mimeType\":\"image/jpeg\",\"width\":100000,\"height\":100000}
 }" "$TOKEN")
-BOMB_ASSET=$(echo "$BOMB_INIT" | python3 -c "import json,sys; print(json.load(sys.stdin)['aggregate']['id'])")
+BOMB_ASSET=$(echo "$BOMB_INIT" | jq -re '.aggregate.id')
 
 curl -sS -X PUT "http://127.0.0.1:${PORT}/v1/media/upload/${BOMB_ASSET}" \
   -H "Content-Type: application/octet-stream" -H "Upload-Offset: 0" \
@@ -217,7 +217,7 @@ PROC=$(post_cmd "ProcessMediaAsset" "{
   \"correlationId\":\"e2e_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"mediaAssetId\":\"$BOMB_ASSET\"}
 }" "$TOKEN")
-PROC_OUT=$(echo "$PROC" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('outcome','') or d.get('state',{}))" 2>/dev/null || echo "ERR")
+PROC_OUT=$(echo "$PROC" | jq -r 'if (.outcome // "") != "" then .outcome else ((.state // {}) | tojson) end' 2>/dev/null || echo "ERR")
 echo "  bomb process: $PROC_OUT"
 echo ""
 echo "=== 风控策略测试完毕 ==="

@@ -86,7 +86,7 @@ send_cmd() {
 # ── 4. ListFeedPosts WITHOUT auth (anonymous browse, Pass 1 allowlist) ──
 echo "[pass3-smoke] ListFeedPosts anonymous (expect 200/202 ACCEPTED or empty list)"
 LIST_ANON=$(send_cmd "" "ListFeedPosts" "{}" "{\"type\":\"Feed\",\"id\":\"local\"}")
-LIST_ANON_OUTCOME=$(echo "${LIST_ANON}" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('outcome',''))" 2>/dev/null || echo "ERR")
+LIST_ANON_OUTCOME=$(echo "${LIST_ANON}" | jq -r '.outcome? // empty' 2>/dev/null || echo "ERR")
 if [[ "${LIST_ANON_OUTCOME}" != "ACCEPTED" && "${LIST_ANON_OUTCOME}" != "PENDING" ]]; then
   echo "[pass3-smoke] FAIL: ListFeedPosts anonymous expected ACCEPTED/PENDING, got ${LIST_ANON_OUTCOME}" >&2
   echo "${LIST_ANON}" >&2
@@ -97,7 +97,7 @@ echo "[pass3-smoke] ListFeedPosts anonymous → ${LIST_ANON_OUTCOME}"
 # ── 5. CreateScene WITHOUT auth (must be rejected — Pass 1 authz) ──
 echo "[pass3-smoke] CreateScene without auth (expect REJECTED SCENE_NOT_AUTHENTICATED or similar)"
 CREATE_NO_AUTH=$(send_cmd "" "CreateScene" "{\"tool\":\"PHOTO\",\"intent\":\"smoke\",\"participation\":\"OPEN_SIGNUP\",\"cost\":\"HOST_SPONSORED\",\"startsAt\":\"2026-09-05T16:00:00Z\"}" "{\"type\":\"Scene\",\"id\":\"new\"}")
-CREATE_NO_AUTH_OUTCOME=$(echo "${CREATE_NO_AUTH}" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('outcome',''))" 2>/dev/null || echo "ERR")
+CREATE_NO_AUTH_OUTCOME=$(echo "${CREATE_NO_AUTH}" | jq -r '.outcome? // empty' 2>/dev/null || echo "ERR")
 if [[ "${CREATE_NO_AUTH_OUTCOME}" != "REJECTED" ]]; then
   echo "[pass3-smoke] FAIL: CreateScene without auth expected REJECTED, got ${CREATE_NO_AUTH_OUTCOME}" >&2
   echo "${CREATE_NO_AUTH}" >&2
@@ -111,9 +111,9 @@ echo "[pass3-smoke] CreateScene anonymous → ${CREATE_NO_AUTH_OUTCOME} (authz g
 # static user_001. We send a placeholder Bearer to prove the route is wired.
 echo "[pass3-smoke] CreateScene with placeholder Bearer (expect ACCEPTED DRAFT)"
 CREATE_WITH_AUTH=$(send_cmd "smoke_test_token" "CreateScene" "{\"tool\":\"PHOTO\",\"intent\":\"西湖拍照 smoke\",\"anchor\":{\"type\":\"VENUE\",\"id\":\"v_smoke\"},\"participation\":\"OPEN_SIGNUP\",\"cost\":\"HOST_SPONSORED\",\"startsAt\":\"2026-09-05T16:00:00Z\"}" "{\"type\":\"Scene\",\"id\":\"new\"}")
-CREATE_OUTCOME=$(echo "${CREATE_WITH_AUTH}" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('outcome',''))" 2>/dev/null || echo "ERR")
-CREATE_AGG_STATE=$(echo "${CREATE_WITH_AUTH}" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print((d.get('aggregate') or {}).get('state',''))" 2>/dev/null || echo "")
-CREATE_AGG_ID=$(echo "${CREATE_WITH_AUTH}" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print((d.get('aggregate') or {}).get('id',''))" 2>/dev/null || echo "")
+CREATE_OUTCOME=$(echo "${CREATE_WITH_AUTH}" | jq -r '.outcome? // empty' 2>/dev/null || echo "ERR")
+CREATE_AGG_STATE=$(echo "${CREATE_WITH_AUTH}" | jq -r '(.aggregate // {}).state? // empty' 2>/dev/null || echo "")
+CREATE_AGG_ID=$(echo "${CREATE_WITH_AUTH}" | jq -r '(.aggregate // {}).id? // empty' 2>/dev/null || echo "")
 
 # Note: in-memory mode does NOT run a real authenticator, so the request
 # may either be accepted (no auth required in this code path) or rejected

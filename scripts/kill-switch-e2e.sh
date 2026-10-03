@@ -81,7 +81,7 @@ EOF
 )
 resp=$(curl -sS --max-time "$TIMEOUT" -X POST -H "Content-Type: application/json" -d "$anon_body" \
   "$BASE/v1/commands/CreateAnonymousSession")
-token=$(echo "$resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('auth',{}).get('accessToken',''))" 2>/dev/null || echo "")
+token=$(echo "$resp" | jq -r '.auth.accessToken? // empty' 2>/dev/null || echo "")
 if [ -z "$token" ]; then
   echo "$resp" | head -c 200
   fail "could not create anon session"
@@ -121,7 +121,7 @@ ok "public status -> 200"
 # 5. Body shape: the 'killed' map has GLOBAL/AI_MEDIA/... keys when
 #    present. Even when no operator has flipped a switch, the keys
 #    should be absent (we return an empty object, not a partial).
-echo "$EMPTY" | python3 -c "import sys,json; d=json.load(sys.stdin); k=d.get('killed',{}); print('  empty killed:', k)" >/dev/null
+echo "$EMPTY" | jq -e '.killed // {}' >/dev/null
 ok "killed map shape is correct"
 
 echo ""

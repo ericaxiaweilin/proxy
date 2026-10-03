@@ -130,11 +130,7 @@ create_session() {
 }
 EOF
 )
-  curl -s -X POST -H "Content-Type: application/json" -d "$payload" "$BASE/v1/commands/CreateAnonymousSession" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-auth = d.get('auth', {})
-print(auth.get('accessToken', ''), auth.get('userAccountId', ''))"
+  curl -s -X POST -H "Content-Type: application/json" -d "$payload" "$BASE/v1/commands/CreateAnonymousSession" | jq -r '"\(.auth?.accessToken // "") \(.auth?.userAccountId // "")"'
 }
 read -r access_token user_id <<<"$(create_session requester)"
 read -r agent_access_token agent_user_id <<<"$(create_session agent)"
@@ -147,9 +143,9 @@ echo
 echo "=== 3. GET /v1/identity/jurisdiction (default) ==="
 out=$(curl -s -H "Authorization: Bearer $access_token" "$BASE/v1/identity/jurisdiction")
 echo "  resp: $out"
-country=$(echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('jurisdiction',{}).get('country',''))")
-region=$(echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('jurisdiction',{}).get('region',''))")
-source=$(echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('source',''))")
+country=$(echo "$out" | jq -r '.jurisdiction.country? // empty')
+region=$(echo "$out" | jq -r '.jurisdiction.region? // empty')
+source=$(echo "$out" | jq -r '.source? // empty')
 [ "$country" = "VN" ] || { echo "FAIL: expected country=VN, got $country"; exit 1; }
 [ "$region" = "79" ] || { echo "FAIL: expected region=79, got $region"; exit 1; }
 [ "$source" = "DEFAULT" ] || { echo "FAIL: expected source=DEFAULT, got $source"; exit 1; }
@@ -160,8 +156,8 @@ echo "=== 4. PATCH to VN-HN ==="
 out=$(curl -s -X PATCH -H "Authorization: Bearer $access_token" -H "Content-Type: application/json" \
   -d '{"jurisdiction":"VN-HN"}' "$BASE/v1/identity/jurisdiction")
 echo "  resp: $out"
-region=$(echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('jurisdiction',{}).get('region',''))")
-source=$(echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('source',''))")
+region=$(echo "$out" | jq -r '.jurisdiction.region? // empty')
+source=$(echo "$out" | jq -r '.source? // empty')
 [ "$region" = "HN" ] || { echo "FAIL: expected region=HN, got $region"; exit 1; }
 [ "$source" = "USER_SELF" ] || { echo "FAIL: expected source=USER_SELF, got $source"; exit 1; }
 echo "  OK: now VN-HN with source=USER_SELF"
@@ -170,7 +166,7 @@ echo
 echo "=== 5. PATCH to VN-DNG ==="
 out=$(curl -s -X PATCH -H "Authorization: Bearer $access_token" -H "Content-Type: application/json" \
   -d '{"jurisdiction":"VN-DNG"}' "$BASE/v1/identity/jurisdiction")
-region=$(echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('jurisdiction',{}).get('region',''))")
+region=$(echo "$out" | jq -r '.jurisdiction.region? // empty')
 [ "$region" = "DNG" ] || { echo "FAIL: expected region=DNG, got $region"; exit 1; }
 echo "  OK: now VN-DNG"
 
@@ -179,7 +175,7 @@ echo "=== 6. PATCH to KR-11 (unsupported country) ==="
 out=$(curl -s -X PATCH -H "Authorization: Bearer $access_token" -H "Content-Type: application/json" \
   -d '{"jurisdiction":"KR-11"}' "$BASE/v1/identity/jurisdiction")
 echo "  resp: $out"
-err=$(echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('error',''))")
+err=$(echo "$out" | jq -r '.error? // empty')
 [ "$err" = "invalid_jurisdiction" ] || { echo "FAIL: expected error=invalid_jurisdiction, got $err"; exit 1; }
 echo "  OK: rejected with invalid_jurisdiction"
 
@@ -188,7 +184,7 @@ echo "=== 7. PATCH to VN-XX (unknown region) ==="
 out=$(curl -s -X PATCH -H "Authorization: Bearer $access_token" -H "Content-Type: application/json" \
   -d '{"jurisdiction":"VN-XX"}' "$BASE/v1/identity/jurisdiction")
 echo "  resp: $out"
-err=$(echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('error',''))")
+err=$(echo "$out" | jq -r '.error? // empty')
 [ "$err" = "invalid_jurisdiction" ] || { echo "FAIL: expected error=invalid_jurisdiction, got $err"; exit 1; }
 echo "  OK: rejected with invalid_jurisdiction"
 
@@ -200,12 +196,12 @@ curl -s -X PATCH -H "Authorization: Bearer $access_token" -H "Content-Type: appl
 first=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
   -d "$(envelope_create_offer e2e-p1e-${TS}-1 $user_id PLATFORM_PAY 'Proxy 钱包')" \
   "$BASE/v1/commands/CreateOffer")
-order1=$(echo "$first" | python3 -c "import json,sys; d=json.load(sys.stdin); body=json.loads(d.get('operationRef') or '{}'); print(body.get('orderId',''))")
+order1=$(echo "$first" | jq -r '((.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | .orderId? // empty)')
 [ -n "$order1" ] || { echo "FAIL: first order id missing: $first"; exit 1; }
 conf1=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
   -d "$(envelope_confirm e2e-p1e-${TS}-c1 $order1 $agent_user_id)" \
   "$BASE/v1/commands/ConfirmCooperation")
-decision1=$(echo "$conf1" | python3 -c "import json,sys; d=json.load(sys.stdin); body=json.loads(d.get('operationRef') or '{}'); print(body.get('policyDecisionId',''))")
+decision1=$(echo "$conf1" | jq -r '((.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | .policyDecisionId? // empty)')
 [ -n "$decision1" ] || { echo "FAIL: first decision id missing: $conf1"; exit 1; }
 echo "  OK: first Order under VN-HN, decisionId=$decision1"
 
@@ -215,12 +211,12 @@ curl -s -X PATCH -H "Authorization: Bearer $access_token" -H "Content-Type: appl
 second=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
   -d "$(envelope_create_offer e2e-p1e-${TS}-2 $user_id PLATFORM_PAY 'Proxy 钱包')" \
   "$BASE/v1/commands/CreateOffer")
-order2=$(echo "$second" | python3 -c "import json,sys; d=json.load(sys.stdin); body=json.loads(d.get('operationRef') or '{}'); print(body.get('orderId',''))")
+order2=$(echo "$second" | jq -r '((.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | .orderId? // empty)')
 [ -n "$order2" ] || { echo "FAIL: second order id missing: $second"; exit 1; }
 conf2=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
   -d "$(envelope_confirm e2e-p1e-${TS}-c2 $order2 $agent_user_id)" \
   "$BASE/v1/commands/ConfirmCooperation")
-decision2=$(echo "$conf2" | python3 -c "import json,sys; d=json.load(sys.stdin); body=json.loads(d.get('operationRef') or '{}'); print(body.get('policyDecisionId',''))")
+decision2=$(echo "$conf2" | jq -r '((.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | .policyDecisionId? // empty)')
 [ -n "$decision2" ] || { echo "FAIL: second decision id missing: $conf2"; exit 1; }
 [ "$decision1" != "$decision2" ] || { echo "FAIL: same jurisdiction expected different decision ids, both $decision1"; exit 1; }
 echo "  OK: second Order under VN-DNG, decisionId=$decision2 (distinct from $decision1)"

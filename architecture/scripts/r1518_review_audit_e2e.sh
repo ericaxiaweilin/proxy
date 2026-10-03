@@ -25,7 +25,7 @@ check() {
   fi
 }
 
-uuid() { python3 -c "import uuid; print(uuid.uuid4().hex[:16])"; }
+uuid() { uuidgen | tr 'A-Z' 'a-z' | tr -d '-' | cut -c1-16; }
 post_cmd() {
   local path="$1" body="$2" auth="${3:-}"
   if [[ -n "$auth" ]]; then
@@ -58,8 +58,8 @@ SESS_U=$(post_cmd "CreateAnonymousSession" "{
   \"correlationId\":\"u_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"deviceId\":\"u_$(uuid)\",\"platform\":\"IOS\"}
 }")
-TOKEN=$(echo "$SESS_U" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['accessToken'])")
-USER_ID=$(echo "$SESS_U" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['userAccountId'])")
+TOKEN=$(echo "$SESS_U" | jq -re '.auth.accessToken')
+USER_ID=$(echo "$SESS_U" | jq -re '.auth.userAccountId')
 echo "user: $USER_ID"
 
 # Test 1: 非 operator 调用 ListMediaReviewDecisions → 403 (server gate)
@@ -73,7 +73,7 @@ RES=$(post_cmd "ListMediaReviewDecisions" "{
   \"correlationId\":\"r1518_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{}
 }" "$TOKEN")
-ERR=$(echo "$RES" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('error',{}).get('errorCode',''))" 2>/dev/null)
+ERR=$(echo "$RES" | jq -r '.error.errorCode? // empty' 2>/dev/null)
 check "non-operator rejected" "OPERATOR_PRIVILEGE_REQUIRED" "$ERR"
 echo ""
 
@@ -101,7 +101,7 @@ SESS_OP=$(post_cmd "CreateAnonymousSession" "{
   \"correlationId\":\"op_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"deviceId\":\"op_$(uuid)\",\"platform\":\"IOS\"}
 }")
-OP_PRINCIPAL_ID=$(echo "$SESS_OP" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['userAccountId'])")
+OP_PRINCIPAL_ID=$(echo "$SESS_OP" | jq -re '.auth.userAccountId')
 echo "operator principal: $OP_PRINCIPAL_ID"
 
 # Restart with operator in allowlist
@@ -123,8 +123,8 @@ SESS_U=$(post_cmd "CreateAnonymousSession" "{
   \"correlationId\":\"u2_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"deviceId\":\"u2_$(uuid)\",\"platform\":\"IOS\"}
 }")
-TOKEN=$(echo "$SESS_U" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['accessToken'])")
-USER_ID=$(echo "$SESS_U" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['userAccountId'])")
+TOKEN=$(echo "$SESS_U" | jq -re '.auth.accessToken')
+USER_ID=$(echo "$SESS_U" | jq -re '.auth.userAccountId')
 echo "fresh user: $USER_ID"
 
 # OP_TOKEN: 需要 new session — 但 userAccountId 会变,跟 OP_PRINCIPAL_ID 不一致。
@@ -146,8 +146,8 @@ SESS_U3=$(post_cmd "CreateAnonymousSession" "{
   \"correlationId\":\"u3_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"deviceId\":\"u3_$(uuid)\",\"platform\":\"IOS\"}
 }")
-USER_ID3=$(echo "$SESS_U3" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['userAccountId'])")
-TOKEN=$(echo "$SESS_U3" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['accessToken'])")
+USER_ID3=$(echo "$SESS_U3" | jq -re '.auth.userAccountId')
+TOKEN=$(echo "$SESS_U3" | jq -re '.auth.accessToken')
 # USER_ID3 是新 ID, 不在 allowlist (= 上一个 USER_ID) 里.
 # server 边界 /v1/commands 重置 envelope.Principal = session principal.ID = USER_ID3
 # 跟 allowlist 不匹配 → 403

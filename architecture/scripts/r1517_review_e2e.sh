@@ -33,7 +33,7 @@ check() {
   fi
 }
 
-uuid() { python3 -c "import uuid; print(uuid.uuid4().hex[:16])"; }
+uuid() { uuidgen | tr 'A-Z' 'a-z' | tr -d '-' | cut -c1-16; }
 post_cmd() {
   local path="$1" body="$2" auth="${3:-}"
   if [[ -n "$auth" ]]; then
@@ -74,8 +74,8 @@ SESS_U=$(post_cmd "CreateAnonymousSession" "{
   \"correlationId\":\"u_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"deviceId\":\"u_$(uuid)\",\"platform\":\"IOS\"}
 }")
-TOKEN=$(echo "$SESS_U" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['accessToken'])")
-USER_ID=$(echo "$SESS_U" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['userAccountId'])")
+TOKEN=$(echo "$SESS_U" | jq -re '.auth.accessToken')
+USER_ID=$(echo "$SESS_U" | jq -re '.auth.userAccountId')
 echo "user: $USER_ID"
 
 # Test 1: 未设 allowlist env → 任何调用 → 403
@@ -89,7 +89,7 @@ RES=$(post_cmd "ReviewMediaAsset" "{
   \"correlationId\":\"r1517_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"reason\":\"REJECT_NUDITY\"}
 }" "$TOKEN")
-ERR=$(echo "$RES" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('error',{}).get('errorCode',''))" 2>/dev/null)
+ERR=$(echo "$RES" | jq -r '.error.errorCode? // empty' 2>/dev/null)
 check "no-allowlist" "OPERATOR_PRIVILEGE_REQUIRED" "$ERR"
 echo ""
 
@@ -108,8 +108,8 @@ SESS_U2=$(post_cmd "CreateAnonymousSession" "{
   \"correlationId\":\"u2_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"deviceId\":\"u2_$(uuid)\",\"platform\":\"IOS\"}
 }")
-TOKEN=$(echo "$SESS_U2" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['accessToken'])")
-USER_ID=$(echo "$SESS_U2" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['userAccountId'])")
+TOKEN=$(echo "$SESS_U2" | jq -re '.auth.accessToken')
+USER_ID=$(echo "$SESS_U2" | jq -re '.auth.userAccountId')
 # 这时候 USER_ID != allowlist env (allowlist 是旧 USER_ID)。所以这个 user 不是 operator
 # 实际 — 我们要的是 USER_ID 在 allowlist。重新 kill+restart with 这个新 ID
 restart_with "$USER_ID"
@@ -125,8 +125,8 @@ SESS_U3=$(post_cmd "CreateAnonymousSession" "{
   \"correlationId\":\"u3_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"deviceId\":\"u3_$(uuid)\",\"platform\":\"IOS\"}
 }")
-TOKEN=$(echo "$SESS_U3" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['accessToken'])")
-USER_ID=$(echo "$SESS_U3" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['userAccountId'])")
+TOKEN=$(echo "$SESS_U3" | jq -re '.auth.accessToken')
+USER_ID=$(echo "$SESS_U3" | jq -re '.auth.userAccountId')
 # 还是不一致 — 又要再 kill+restart!
 restart_with "$USER_ID"
 SESS_U4=$(post_cmd "CreateAnonymousSession" "{
@@ -139,8 +139,8 @@ SESS_U4=$(post_cmd "CreateAnonymousSession" "{
   \"correlationId\":\"u4_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"deviceId\":\"u4_$(uuid)\",\"platform\":\"IOS\"}
 }")
-TOKEN=$(echo "$SESS_U4" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['accessToken'])")
-USER_ID=$(echo "$SESS_U4" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['userAccountId'])")
+TOKEN=$(echo "$SESS_U4" | jq -re '.auth.accessToken')
+USER_ID=$(echo "$SESS_U4" | jq -re '.auth.userAccountId')
 # 还是不一致 — 鸡生蛋问题
 # 最终方案: USER_ID 跟 allowlist 一致的"在"上次 env 设时拿到的
 # 但每次 session 都重新 mint
@@ -169,7 +169,7 @@ RES=$(post_cmd "ReviewMediaAsset" "{
   \"correlationId\":\"r1517_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"reason\":\"REJECT_NUDITY\"}
 }" "$TOKEN")
-ERR=$(echo "$RES" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('error',{}).get('errorCode',''))" 2>/dev/null)
+ERR=$(echo "$RES" | jq -r '.error.errorCode? // empty' 2>/dev/null)
 check "non-allowlisted" "OPERATOR_PRIVILEGE_REQUIRED" "$ERR"
 echo ""
 

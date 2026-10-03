@@ -134,11 +134,7 @@ create_session() {
 }
 EOF
 )
-  curl -s -X POST -H "Content-Type: application/json" -d "$payload" "$BASE/v1/commands/CreateAnonymousSession" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-auth = d.get('auth', {})
-print(auth.get('accessToken', ''), auth.get('userAccountId', ''))"
+  curl -s -X POST -H "Content-Type: application/json" -d "$payload" "$BASE/v1/commands/CreateAnonymousSession" | jq -r '"\(.auth?.accessToken // "") \(.auth?.userAccountId // "")"'
 }
 read -r access_token user_id <<<"$(create_session requester)"
 read -r agent_access_token agent_user_id <<<"$(create_session agent)"
@@ -154,40 +150,28 @@ echo "=== 3. PLATFORM_PAY Order: confirm stamps a policyDecisionId ==="
 R1=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
   -d "$(envelope_create_offer e2e-${TS}-paid e2e-${TS}-paid-abcdef $user_id PLATFORM_PAY "Proxy 钱包")" \
   "$BASE/v1/commands/CreateOffer")
-order_id_paid=$(echo "$R1" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-if d.get('outcome') != 'ACCEPTED':
-  print('', end=''); sys.stderr.write('create offer rejected: '+str(d.get('error',{}))); sys.exit(1)
-body = json.loads(d.get('operationRef') or '{}')
-print(body.get('orderId',''))")
+order_id_paid=$(echo "$R1" | jq -r 'if (.outcome // "") != "ACCEPTED" then error("create offer rejected: " + ((.error // {}) | tojson)) else ((.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | .orderId? // empty) end')
 [ -n "$order_id_paid" ] || { echo "FAIL: no order id from CreateOffer: $R1"; exit 1; }
 echo "  OK: created PLATFORM_PAY order $order_id_paid"
 
 R_SELF=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
   -d "$(envelope_confirm e2e-${TS}-paid-self e2e-${TS}-paid-self-abcdef $user_id $order_id_paid)" \
   "$BASE/v1/commands/ConfirmCooperation")
-self_code=$(echo "$R_SELF" | python3 -c "import json,sys; d=json.load(sys.stdin); print((d.get('error') or {}).get('errorCode',''))")
+self_code=$(echo "$R_SELF" | jq -r '(.error // {}).errorCode? // empty')
 [ "$self_code" = "ONLY_AGENT_CONFIRMS" ] || { echo "FAIL: requester self-confirm must be ONLY_AGENT_CONFIRMS: $R_SELF"; exit 1; }
 echo "  OK: requester self-confirm refused (ONLY_AGENT_CONFIRMS)"
 
 R2=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
   -d "$(envelope_confirm e2e-${TS}-paid-conf e2e-${TS}-paid-conf-abcdef $agent_user_id $order_id_paid)" \
   "$BASE/v1/commands/ConfirmCooperation")
-confirm_state=$(echo "$R2" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('aggregate',{}).get('state',''))")
+confirm_state=$(echo "$R2" | jq -r '.aggregate.state? // empty')
 if [ "$confirm_state" != "CONFIRMED" ]; then
-  err=$(echo "$R2" | python3 -c "import json,sys; d=json.load(sys.stdin); print(str(d.get('error',{})))")
+  err=$(echo "$R2" | jq -r '(.error // {}) | tojson')
   echo "FAIL: PLATFORM_PAY confirm should be CONFIRMED, got $confirm_state err=$err"
   exit 1
 fi
 # Extract the policyDecisionId from the operationRef body.
-decision_id_1=$(echo "$R2" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-body = json.loads(d.get('operationRef') or '{}')
-# The body might be the full Order, or it might be wrapped.
-order = body.get('order') or body
-print(order.get('policyDecisionId',''))")
+decision_id_1=$(echo "$R2" | jq -r '(.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | (.order // .) | .policyDecisionId? // empty')
 if [ -z "$decision_id_1" ]; then
   # The wire shape may also expose the decision via the OrderAggregate
   # details. Fall back to the order snapshot if needed.
@@ -204,24 +188,15 @@ echo "=== 4. DIRECT_SETTLEMENT Order: confirm does NOT stamp a policy decision =
 R3=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
   -d "$(envelope_create_offer e2e-${TS}-direct e2e-${TS}-direct-abcdef $user_id DIRECT_SETTLEMENT "线下现金")" \
   "$BASE/v1/commands/CreateOffer")
-order_id_direct=$(echo "$R3" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-body = json.loads(d.get('operationRef') or '{}')
-print(body.get('orderId',''))")
+order_id_direct=$(echo "$R3" | jq -r '(.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | .orderId? // empty')
 [ -n "$order_id_direct" ] || { echo "FAIL: no order id from CreateOffer: $R3"; exit 1; }
 
 R4=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
   -d "$(envelope_confirm e2e-${TS}-direct-conf e2e-${TS}-direct-conf-abcdef $agent_user_id $order_id_direct)" \
   "$BASE/v1/commands/ConfirmCooperation")
-direct_state=$(echo "$R4" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('aggregate',{}).get('state',''))")
+direct_state=$(echo "$R4" | jq -r '.aggregate.state? // empty')
 [ "$direct_state" = "CONFIRMED" ] || { echo "FAIL: DIRECT confirm should pass: $R4"; exit 1; }
-direct_decision=$(echo "$R4" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-body = json.loads(d.get('operationRef') or '{}')
-order = body.get('order') or body
-print(order.get('policyDecisionId',''))")
+direct_decision=$(echo "$R4" | jq -r '(.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | (.order // .) | .policyDecisionId? // empty')
 if [ -n "$direct_decision" ]; then
   echo "FAIL: DIRECT_SETTLEMENT Order must not have a policyDecisionId, got $direct_decision"
   exit 1
@@ -233,22 +208,13 @@ echo "=== 5. a second PLATFORM_PAY Order reuses the same decision id ==="
 R5=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
   -d "$(envelope_create_offer e2e-${TS}-paid2 e2e-${TS}-paid2-abcdef $user_id PLATFORM_PAY "Proxy 钱包")" \
   "$BASE/v1/commands/CreateOffer")
-order_id_paid2=$(echo "$R5" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-body = json.loads(d.get('operationRef') or '{}')
-print(body.get('orderId',''))")
+order_id_paid2=$(echo "$R5" | jq -r '(.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | .orderId? // empty')
 [ -n "$order_id_paid2" ] || { echo "FAIL: no order id from second CreateOffer: $R5"; exit 1; }
 
 R6=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
   -d "$(envelope_confirm e2e-${TS}-paid2-conf e2e-${TS}-paid2-conf-abcdef $agent_user_id $order_id_paid2)" \
   "$BASE/v1/commands/ConfirmCooperation")
-decision_id_2=$(echo "$R6" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-body = json.loads(d.get('operationRef') or '{}')
-order = body.get('order') or body
-print(order.get('policyDecisionId',''))")
+decision_id_2=$(echo "$R6" | jq -r '(.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | (.order // .) | .policyDecisionId? // empty')
 [ -n "$decision_id_2" ] || { echo "FAIL: second PLATFORM_PAY confirm should stamp a decision: $R6"; exit 1; }
 if [ "$decision_id_1" != "$decision_id_2" ]; then
   echo "FAIL: expected reuse of decision id $decision_id_1, got $decision_id_2"
@@ -262,23 +228,13 @@ echo "=== 6. Material Change re-evaluates policy decision (LC-30) ==="
 R7=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
   -d "$(envelope_create_offer e2e-${TS}-lc30 e2e-${TS}-lc30-abcdef $user_id PLATFORM_PAY "Proxy 钱包")" \
   "$BASE/v1/commands/CreateOffer")
-order_id_lc30=$(echo "$R7" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-if d.get('outcome') != 'ACCEPTED':
-  print('', end=''); sys.stderr.write('create offer rejected: '+str(d.get('error',{}))); sys.exit(1)
-body = json.loads(d.get('operationRef') or '{}')
-print(body.get('orderId',''))")
+order_id_lc30=$(echo "$R7" | jq -r 'if (.outcome // "") != "ACCEPTED" then error("create offer rejected: " + ((.error // {}) | tojson)) else ((.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | .orderId? // empty) end')
 [ -n "$order_id_lc30" ] || { echo "FAIL: no order id from CreateOffer: $R7"; exit 1; }
 
 R8=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
   -d "$(envelope_confirm e2e-${TS}-lc30-conf e2e-${TS}-lc30-conf-abcdef $agent_user_id $order_id_lc30)" \
   "$BASE/v1/commands/ConfirmCooperation")
-decision_before=$(echo "$R8" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-body = json.loads(d.get('operationRef') or '{}')
-print(body.get('policyDecisionId',''))")
+decision_before=$(echo "$R8" | jq -r '(.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | .policyDecisionId? // empty')
 [ -n "$decision_before" ] || { echo "FAIL: confirm should stamp a decision: $R8"; exit 1; }
 echo "  OK: pre-amendment policyDecisionId=$decision_before"
 
@@ -310,11 +266,7 @@ EOF
 R9=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
   -d "$(envelope_order_command RecordMaterialOrderChange e2e-${TS}-lc30-amd $user_id $order_id_lc30 '{"description":"河内西湖 → 老城区","changes":{"meetingContext":"老城区"}}')" \
   "$BASE/v1/commands/RecordMaterialOrderChange")
-amendment_id=$(echo "$R9" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-body = json.loads(d.get('operationRef') or '{}')
-print(body.get('amendmentId','') if d.get('outcome') == 'ACCEPTED' and body.get('status') == 'PROPOSED' else '')")
+amendment_id=$(echo "$R9" | jq -r '((.operationRef // "") | (if . == "" then "{}" else . end) | fromjson?) as $b | if (.outcome // "") == "ACCEPTED" and ($b.status // "") == "PROPOSED" then ($b.amendmentId? // empty) else empty end')
 [ -n "$amendment_id" ] || { echo "FAIL: proposal must be ACCEPTED as PROPOSED: $R9"; exit 1; }
 echo "  OK: requester proposed amendment $amendment_id"
 
@@ -328,11 +280,7 @@ accept_payload="{\"amendmentId\":\"${amendment_id}\",\"decision\":\"ACCEPT\"}"
 R10=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
   -d "$(envelope_order_command RespondMaterialOrderChange e2e-${TS}-lc30-acc $agent_user_id $order_id_lc30 "$accept_payload")" \
   "$BASE/v1/commands/RespondMaterialOrderChange")
-decision_after=$(echo "$R10" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-body = json.loads(d.get('operationRef') or '{}')
-print(body.get('policyDecisionId','') if d.get('outcome') == 'ACCEPTED' and body.get('status') == 'ACCEPTED' else '')")
+decision_after=$(echo "$R10" | jq -r '((.operationRef // "") | (if . == "" then "{}" else . end) | fromjson?) as $b | if (.outcome // "") == "ACCEPTED" and ($b.status // "") == "ACCEPTED" then ($b.policyDecisionId? // empty) else empty end')
 if [ -z "$decision_after" ]; then
   echo "FAIL: agent acceptance must apply the change with a policyDecisionId (LC-30 re-eval): $R10"
   exit 1
@@ -344,11 +292,7 @@ echo "=== 7. the parties can read the audit trail (ORDER-AUDIT-001) ==="
 R11=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $agent_access_token" \
   -d "$(envelope_order_command GetOrderAuditTrail e2e-${TS}-lc30-audit $agent_user_id $order_id_lc30 '{}')" \
   "$BASE/v1/commands/GetOrderAuditTrail")
-trail=$(echo "$R11" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-body = json.loads(d.get('operationRef') or '{}')
-print(','.join(e.get('commandType','') for e in body.get('entries', [])))")
+trail=$(echo "$R11" | jq -r '(.operationRef // "") | (if . == "" then "{}" else . end) | fromjson? | ([.entries[]?.commandType // empty] | join(","))')
 [ "$trail" = "CreateOffer,ConfirmCooperation,RecordMaterialOrderChange,RespondMaterialOrderChange" ] || { echo "FAIL: unexpected audit trail '$trail': $R11"; exit 1; }
 echo "  OK: audit trail = $trail"
 

@@ -30,6 +30,13 @@ if [ ${#GATES_REQUESTED[@]} -eq 0 ]; then
   GATES_REQUESTED=(g1 g2 g3 g4)
 fi
 
+# The toolchain gates are one Go command (apps/api-go/cmd/gatecheck). node is not
+# part of this stack, and REPO_ROOT must be passed explicitly because `go -C` runs the
+# child with cwd = apps/api-go —— without it every relative path would resolve wrong.
+gatecheck() {
+  REPO_ROOT="$PWD" go -C apps/api-go run ./cmd/gatecheck "$@"
+}
+
 # gate_<name>() returns the exit code of the actual command. The
 # caller uses `$?` immediately after the call so there is no chance
 # of an `echo` clobbering the value. Each gate's stdout / stderr is
@@ -158,8 +165,8 @@ gate_g4_drift() {
   set -e
   set -o pipefail
   echo "=== G4: drift (migrations, openapi, untracked handlers) ==="
-  node scripts/check-design-baseline.mjs || return $?
-  node scripts/check-liquid-dock-baseline.mjs || return $?
+  gatecheck design-baseline || return $?
+  gatecheck liquid-dock || return $?
   if [ -d "apps/api-go/migrations" ]; then
     local count
     count=$(ls apps/api-go/migrations/*.sql | wc -l | tr -d ' ')
@@ -217,19 +224,21 @@ gate_g4_drift() {
   # any source file imported from a tracked file must itself
   # be tracked.
   echo "  untracked imports: checking no tracked file imports an untracked file..."
-  # Use the dedicated Python helper. bash subshells + arrays were
-  # too slow (each import spawned a subshell; variable scoping
-  # meant we couldn't accumulate leaks outside the subshell).
+  # The checker is a Go command (apps/api-go/cmd/untracked-imports): the stack is
+  # Go + RN/TS, and bash subshells + arrays were too slow (each import spawned a
+  # subshell; variable scoping meant we couldn't accumulate leaks outside it).
   #
   # ⚠️ 下面两条守卫是必须的，不是装饰 —— 空结果和「检查器根本没跑起来」长得一模一样。
-  # 2026-09-30 实测：把 check-untracked-imports.py 移走，python 打
-  #   can't open file '.../check-untracked-imports.py': [Errno 2] No such file or directory
+  # 2026-09-30 实测：把检查器移走，解释器打
+  #   can't open file '.../check-untracked-imports': [Errno 2] No such file or directory
   # 而本步照样打印 "untracked imports: OK"、g4 照样 "ALL GATES PASS"。
   # 也不能指望函数开头那两行 `set -e`：gate 函数是被 `if ! gate_g4_drift; then`
   # 调起的，bash 在这种上下文里会**关掉整个函数体的 errexit**（实测：函数体越过 `false`
   # 继续往下跑）。`set -o pipefail` 仍然是活的，所以用 `if ! var=$(pipeline)` 才拦得住。
+  local untracked_repo_root
+  untracked_repo_root="$(git rev-parse --show-toplevel)"
   local untracked_checker
-  untracked_checker="$(dirname "$0")/check-untracked-imports.py"
+  untracked_checker="$untracked_repo_root/apps/api-go/cmd/untracked-imports/main.go"
   if [ ! -f "$untracked_checker" ]; then
     echo "  FAIL: $untracked_checker is missing — the check cannot run, and" >&2
     echo "        'could not run' must never read the same as 'no leaks'." >&2
@@ -246,8 +255,8 @@ gate_g4_drift() {
   local untracked_imports_str
   if ! untracked_imports_str=$(git ls-files apps/mobile/src apps/api-go 2>/dev/null \
     | grep -E '\.(ts|tsx|go)$' \
-    | UNTRACKED_FILES="$untracked_files" \
-      python3 "$untracked_checker"); then
+    | UNTRACKED_FILES="$untracked_files" REPO_ROOT="$untracked_repo_root" \
+      go -C "$untracked_repo_root/apps/api-go" run ./cmd/untracked-imports); then
     echo "  FAIL: the untracked-import checker pipeline exited non-zero (no source files" >&2
     echo "        to check, or the checker itself failed) — it did not run to completion," >&2
     echo "        so an empty result here means nothing." >&2

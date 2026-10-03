@@ -27,7 +27,7 @@ check() {
   fi
 }
 
-uuid() { python3 -c "import uuid; print(uuid.uuid4().hex[:16])"; }
+uuid() { uuidgen | tr 'A-Z' 'a-z' | tr -d '-' | cut -c1-16; }
 post_cmd() {
   local path="$1" body="$2" auth="${3:-}"
   if [[ -n "$auth" ]]; then
@@ -60,8 +60,8 @@ SESS_U=$(post_cmd "CreateAnonymousSession" "{
   \"correlationId\":\"u_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"deviceId\":\"u_$(uuid)\",\"platform\":\"IOS\"}
 }")
-TOKEN=$(echo "$SESS_U" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['accessToken'])")
-USER_ID=$(echo "$SESS_U" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['userAccountId'])")
+TOKEN=$(echo "$SESS_U" | jq -re '.auth.accessToken')
+USER_ID=$(echo "$SESS_U" | jq -re '.auth.userAccountId')
 echo "user: $USER_ID"
 
 # Test 1: 非 operator 调用 → 403
@@ -75,7 +75,7 @@ RES=$(post_cmd "AmendMediaReviewDecision" "{
   \"correlationId\":\"r1519_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"decisionId\":\"mrd_anything\",\"amendReason\":\"NOTE_CORRECTION\",\"amendNote\":\"x\"}
 }" "$TOKEN")
-ERR=$(echo "$RES" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('error',{}).get('errorCode',''))" 2>/dev/null)
+ERR=$(echo "$RES" | jq -r '.error.errorCode? // empty' 2>/dev/null)
 check "non-operator rejected" "OPERATOR_PRIVILEGE_REQUIRED" "$ERR"
 echo ""
 

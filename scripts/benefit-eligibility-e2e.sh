@@ -55,7 +55,7 @@ EOF
 )
 resp=$(curl -sS --max-time "$TIMEOUT" -X POST -H "Content-Type: application/json" -d "$anon_body" \
   "$BASE/v1/commands/CreateAnonymousSession")
-token=$(echo "$resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('auth',{}).get('accessToken',''))" 2>/dev/null || echo "")
+token=$(echo "$resp" | jq -r '.auth.accessToken? // empty' 2>/dev/null || echo "")
 if [ -z "$token" ]; then
   echo "$resp" | head -c 200
   fail "could not create anon session"
@@ -94,8 +94,8 @@ if [ "$status" != "409" ]; then
   cat /tmp/ben-claim-1.out | head -c 300
   fail "ClaimBenefit expected 409 envelope, got $status"
 fi
-outcome=$(python3 -c "import sys,json; d=json.load(open('/tmp/ben-claim-1.out')); print(d.get('outcome',''))" 2>/dev/null)
-errorcode=$(python3 -c "import sys,json; d=json.load(open('/tmp/ben-claim-1.out')); print((d.get('error') or {}).get('errorCode',''))" 2>/dev/null)
+outcome=$(jq -r '.outcome? // empty' '/tmp/ben-claim-1.out' 2>/dev/null)
+errorcode=$(jq -r '(.error // {}).errorCode? // empty' '/tmp/ben-claim-1.out' 2>/dev/null)
 if [ "$outcome" != "REJECTED" ] || [ "$errorcode" != "CAMPAIGN_NOT_FOUND" ]; then
   cat /tmp/ben-claim-1.out | head -c 300
   fail "expected REJECTED/CAMPAIGN_NOT_FOUND, got outcome=$outcome code=$errorcode"
@@ -135,8 +135,8 @@ if [ "$status" != "409" ]; then
   cat /tmp/ben-redeem-1.out | head -c 300
   fail "RedeemBenefit expected 409 envelope, got $status"
 fi
-outcome=$(python3 -c "import sys,json; d=json.load(open('/tmp/ben-redeem-1.out')); print(d.get('outcome',''))" 2>/dev/null)
-errorcode=$(python3 -c "import sys,json; d=json.load(open('/tmp/ben-redeem-1.out')); print((d.get('error') or {}).get('errorCode',''))" 2>/dev/null)
+outcome=$(jq -r '.outcome? // empty' '/tmp/ben-redeem-1.out' 2>/dev/null)
+errorcode=$(jq -r '(.error // {}).errorCode? // empty' '/tmp/ben-redeem-1.out' 2>/dev/null)
 if [ "$outcome" != "REJECTED" ] || [ "$errorcode" != "CLAIM_NOT_FOUND" ]; then
   cat /tmp/ben-redeem-1.out | head -c 300
   fail "expected REJECTED/CLAIM_NOT_FOUND, got outcome=$outcome code=$errorcode"

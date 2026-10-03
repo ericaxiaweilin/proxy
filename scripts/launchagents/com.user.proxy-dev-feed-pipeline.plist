@@ -3,8 +3,12 @@
 <!--
   dev-feed-pipeline — 开发用 feed 管线，每 5 分钟发一条文本帖文（并滚动补一个新用户）。
 
-  DEV-ONLY：这是纯开发辅助，删掉这个 plist + scripts/dev-feed-pipeline.mjs 就完事，
-  不影响产品代码。用户要求「后期删除」，所以它独立于 app 与启动种子。
+  DEV-ONLY：这是纯开发辅助，删掉这个 plist + apps/api-go/cmd/devdata 里的 feed-pipeline
+  就完事，不影响产品代码。用户要求「后期删除」，所以它独立于 app 与启动种子。
+
+  go 用绝对路径：launchd 不读 shell profile，PATH 只有下面 EnvironmentVariables 那一份，
+  写 `go` 会在每个 tick 变成 "command not found" —— 而这正是 DEV-FEED-PIPELINE-001
+  那条「最新一帖必须新鲜」要抓的静默失败。
 
   StartInterval 而不是 StartCalendarInterval：管线的目的是"一直有新内容"，
   机器睡眠/错过的 tick 会在唤醒后补跑，StartCalendarInterval 则会跳过整点。
@@ -22,7 +26,7 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>cd /Users/thanhhuyennguyen/proxy &amp;&amp; /usr/bin/env node scripts/dev-feed-pipeline.mjs &gt;&gt; "$HOME/Library/Logs/proxy/dev-feed-pipeline.log" 2&gt;&amp;1</string>
+    <string>cd /Users/thanhhuyennguyen/proxy &amp;&amp; /opt/homebrew/bin/go -C apps/api-go run ./cmd/devdata feed-pipeline &gt;&gt; "$HOME/Library/Logs/proxy/dev-feed-pipeline.log" 2&gt;&amp;1</string>
   </array>
 
   <key>StartInterval</key>

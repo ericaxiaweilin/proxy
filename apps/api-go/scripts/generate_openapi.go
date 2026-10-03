@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 )
 
 func main() {
@@ -48,10 +50,26 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	// YAML syntax check via python3 -c yaml.safe_load
-	cmd := exec.Command("python3", "-c", "import yaml,sys; yaml.safe_load(open(sys.argv[1]))", openAPIPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "yaml parse failed: %v %s\n", err, out)
+	// YAML syntax check. This used to shell out to
+	// `python3 -c "import yaml; yaml.safe_load(...)"` — the one place the gate still
+	// required a Python interpreter, and it failed *open* on a machine without one
+	// (exec error → the same red as a malformed spec, so nobody noticed the real
+	// dependency). yaml.v3 parses the same document: it rejects tabs, unterminated
+	// quotes and duplicate mapping keys, all of which PyYAML also rejects.
+	var parsed any
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	if err := decoder.Decode(&parsed); err != nil {
+		fmt.Fprintf(os.Stderr, "yaml parse failed for %s: %v\n", openAPIPath, err)
+		os.Exit(1)
+	}
+	if parsed == nil {
+		fmt.Fprintf(os.Stderr, "yaml parse produced no document for %s\n", openAPIPath)
+		os.Exit(1)
+	}
+	// A spec is a mapping with the fields the needles above are checked against; a
+	// bare scalar or list parses fine, so "it parsed" alone is not enough.
+	if _, ok := parsed.(map[string]any); !ok {
+		fmt.Fprintf(os.Stderr, "yaml parse failed for %s: top level is %T, want a mapping\n", openAPIPath, parsed)
 		os.Exit(1)
 	}
 	if *check {

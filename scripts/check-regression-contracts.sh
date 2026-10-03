@@ -7,6 +7,13 @@ cd "$(dirname "$0")/.."
 
 echo "  regression contracts: running escaped-bug tripwires..."
 
+# The toolchain gates are one Go command (apps/api-go/cmd/gatecheck). node is not
+# part of this stack, and REPO_ROOT must be passed explicitly because `go -C` runs the
+# child with cwd = apps/api-go —— without it every relative path would resolve wrong.
+gatecheck() {
+  REPO_ROOT="$PWD" go -C apps/api-go run ./cmd/gatecheck "$@"
+}
+
 require_test() {
   local bug_id="$1"
   local package="$2"
@@ -20,6 +27,121 @@ require_test() {
   go -C apps/api-go test -count=1 -run "^${test_name}$" "$package" || return $?
   echo "    $bug_id: PASS ($test_name)"
 }
+
+# TOOLCHAIN-NO-PYTHON-001（2026-10-02，用户："我们后端是 go 前端是 rn+typesc 没有 python
+# 把所有 python 全部移除 禁止 python"）：栈里没有 Python。
+#
+# 为什么必须钉：这一天里 python 出现过三次不同的形态 —— shell 里内联
+# `python3 - <<PY` 解析 JSON、`scripts/*.py` 当一次性工具、甚至**门禁自己**用
+# `exec.Command("python3", "-c", "import yaml ...")` 校验 openapi.yaml（在
+# generate_openapi.go，门禁天天跑的那条）。最后那条最危险：它让"门禁在绿"这件事
+# 依赖一个不属于本栈的解释器，而且解释器不在时它报的红和"YAML 写坏了"长得一模一样。
+#
+# 判据是三条，且每条都带"扫到 0 个文件就红"的防漏检查 —— 一个什么都没读到就报绿的
+# 扫描器，和没有扫描器等价。
+_py_scan_files=0
+_py_hits=""
+for _py_dir in scripts .wb-scratch apps/api-go/cmd apps/api-go/internal apps/api-go/scripts/generate_openapi.go apps/mobile/src; do
+  [ -e "$_py_dir" ] || continue
+  while IFS= read -r _py_f; do
+    _py_scan_files=$((_py_scan_files + 1))
+    _py_hits="$_py_hits$_py_f"$'\n'
+  done < <(find "$_py_dir" -type f -name '*.py' 2>/dev/null)
+done
+# 欠账白名单：**只准缩，不准加**。下面四个都是已经写进任务卡、等着搬或删的：
+#   · apps/api-go/scripts/mockdata/{spec,gen_mockdata,crop_assets}.py —— 2026-10-01 的开发
+#     数据生成器（产出的 seed SQL 已进仓库、数据也已在库里），搬成 Go 是任务 #8；
+#   · scripts/pins.py —— check-regression-contracts.sh 的**运行器**（跑子集 / 把 1036 条
+#     断言的失败一次报全，而不是第一条就 exit）。它有用，所以不擅自删；要么搬成 Go 要么
+#     由指挥官定。764 行，是这堆里最后一个"每天都在用"的 python。
+# 把它们写死在这里，是为了让这笔债可见、可数，而不是靠"扫不到"假装它不存在。
+# 白名单里的文件一旦不见，下面那条反向检查会红：欠账还掉了就必须把名字划掉。
+_py_debt="apps/api-go/scripts/mockdata/spec.py
+apps/api-go/scripts/mockdata/gen_mockdata.py
+apps/api-go/scripts/mockdata/crop_assets.py
+scripts/pins.py"
+_py_unexpected=""
+while IFS= read -r _py_f; do
+  [ -n "$_py_f" ] || continue
+  case "$_py_debt" in
+    *"$_py_f"*) ;;
+    *) _py_unexpected="$_py_unexpected$_py_f"$'\n' ;;
+  esac
+done <<PYHITS
+$_py_hits
+PYHITS
+if [ -n "$_py_unexpected" ]; then
+  echo "  FAIL [TOOLCHAIN-NO-PYTHON-001]: 栈里又出现了 python 文件 ——" >&2
+  printf "        %b" "$_py_unexpected" | sed 's/^/        /' >&2
+  echo "        栈只有 Go + RN/TS。一次性脚本用 bash/perl/awk/jq，或者写成 cmd/ 下的 Go 命令。" >&2
+  exit 1
+fi
+for _py_f in $_py_debt; do
+  if [ ! -f "$_py_f" ]; then
+    echo "  FAIL [TOOLCHAIN-NO-PYTHON-001]: 欠账白名单里的 $_py_f 已经不在了 ——" >&2
+    echo "        还掉的债要划掉名字，不然这条门禁下次扫不到任何东西也不会红。" >&2
+    exit 1
+  fi
+done
+
+# 解释器调用：门禁跑到的 shell 脚本 + 门禁跑到的 Go 命令里都不许 exec python。
+# 先剥注释行：这条门禁自己的说明里写着 "python3"，不剥就会撞上自己的例子（同一天
+# 第三次犯，见 SHELL-VAR-UNICODE-001 的注释）。
+_py_call_hits=""
+for _py_sh in scripts/*.sh apps/api-go/scripts/*.sh apps/mobile/scripts/qr-geometry/*.sh infrastructure/**/*.sh; do
+  [ -f "$_py_sh" ] || continue
+  _py_scan_files=$((_py_scan_files + 1))
+  if grep -nE '^[[:space:]]*([a-zA-Z_]+=[^;]*[[:space:]]*)?(python3?|/usr/bin/(env[[:space:]]+)?python3?)([[:space:]]|-)' "$_py_sh" \
+     | grep -vE '^[0-9]+:[[:space:]]*#' >/dev/null 2>&1; then
+    _py_call_hits="$_py_call_hits$_py_sh"$'\n'
+  fi
+done
+if grep -rnE 'exec\.Command\("python' apps/api-go/cmd apps/api-go/internal apps/api-go/scripts --include='*.go' >/dev/null 2>&1; then
+  _py_call_hits="$_py_call_hits(go exec.Command) apps/api-go ——"
+  echo "  FAIL [TOOLCHAIN-NO-PYTHON-001]: Go 代码里又 exec python 了：" >&2
+  grep -rnE 'exec\.Command\("python' apps/api-go/cmd apps/api-go/internal apps/api-go/scripts --include='*.go' >&2
+  echo "        openapi 的 YAML 校验现在用 gopkg.in/yaml.v3（2026-10-02），别再换回去。" >&2
+  exit 1
+fi
+if [ -n "$_py_call_hits" ]; then
+  echo "  FAIL [TOOLCHAIN-NO-PYTHON-001]: 工具链里还在调 python 解释器：" >&2
+  printf "        %b" "$_py_call_hits" | sed 's/^/        /' >&2
+  echo "        解析用 jq/yq 或 Go 命令；一次性处理用 perl/awk。" >&2
+  exit 1
+fi
+if [ "$_py_scan_files" -eq 0 ]; then
+  echo "  FAIL [TOOLCHAIN-NO-PYTHON-001]: 一条文件都没扫到 —— 扫描器空转不等于没有 python。" >&2
+  exit 1
+fi
+echo "    TOOLCHAIN-NO-PYTHON-001: PASS (扫了 $_py_scan_files 项；python 只剩欠账白名单 $(echo "$_py_debt" | tr '\n' ' ')，工具链不 exec python)"
+
+# TOOLCHAIN-NO-OWN-JS-001（node 的对应条，用户："也不能有 node 这也是禁止的技术"，
+# 随后定的口径是**只清工具链**）：门禁不再用 node 跑，但 RN 本身离不开 node ——
+# tsc / vitest / Metro / expo 是包管理器装的构建链工具，不在禁止范围。
+# 所以这条钉的不是"仓库里不许有 .mjs"，而是"**我们自己手写的** JS 工具脚本"：
+# 白名单只有两个，且都写明了为什么不能换：
+#   · check-mobile-parses-with-metro.mjs —— 必须用 Metro 自己那套 @babel/parser 验语法
+#     （tsc 放行而 Metro 打包失败是真发生过的：模拟器白屏 + 1769 条 SyntaxError）；
+#   · qr-geometry/export-matrices.mjs —— 必须用 App 自己那份 qrcode 库导矩阵，换编码器
+#     就换一批 mask（实测同一 payload 841 个模块里 299 个不同），扫的就不是 App 会画的码。
+# 白名单外的 .mjs 一律红；同时保留"内联 node -e 当工具"的红（那是同一种债的另一种写法）。
+for _js_f in $(find scripts apps/mobile/scripts apps/api-go -type f \( -name '*.mjs' -o -name '*.cjs' \) -not -path '*/node_modules/*' 2>/dev/null | LC_ALL=C sort); do
+  _py_scan_files=$((_py_scan_files + 1))
+  case "$_js_f" in
+    scripts/check-mobile-parses-with-metro.mjs|apps/mobile/scripts/qr-geometry/export-matrices.mjs) ;;
+    *)
+      echo "  FAIL [TOOLCHAIN-NO-OWN-JS-001]: 多出一个手写的 JS 工具脚本 $_js_f ——" >&2
+      echo "        工具链是 Go（apps/api-go/cmd/...）。只有 Metro 的 babel parser 和 QR 的" >&2
+      echo "        同款编码器这两件事**必须**在 node 里做，别的都不算理由。" >&2
+      exit 1 ;;
+  esac
+done
+if grep -nE '^[[:space:]]*([a-zA-Z_]+=[^;]*[[:space:]]*)?node[[:space:]]+-e' scripts/*.sh >/dev/null 2>&1; then
+  echo "  FAIL [TOOLCHAIN-NO-OWN-JS-001]: scripts/*.sh 里又用 node -e 当解析工具了 ——" >&2
+  echo "        用 jq 或 Go 命令。" >&2
+  exit 1
+fi
+echo "    TOOLCHAIN-NO-OWN-JS-001: PASS (手写 .mjs 只剩 Metro 检查器与 QR 编码器导出这两个豁免)"
 
 # AUTH-OTP-001: EMAIL/SMS delivery silently depended on an unwired global
 # recipient lookup. The address must travel service -> provider -> transport.
@@ -122,7 +244,34 @@ if ! grep -q 'AUTH-LOGIN-HINT-001' apps/mobile/src/login-client.test.ts ||
 fi
 pnpm --filter @proxy/mobile exec vitest run src/login-client.test.ts || exit $?
 echo "    AUTH-LOGIN-HINT-001: PASS (login hints unregistered instead of silent registration)"
-node scripts/check-media-pipeline.mjs || exit $?
+gatecheck media-pipeline || exit $?
+# 上面那道 gatecheck 只会绿，不会证明自己会红：它扫的是 git 索引里的东西，
+# 而「索引里没有文件」和「文件里没有违规」在调用处看起来一模一样。
+#
+# 这三个 Go 测试钉的是 gatecheck media-pipeline **自己会不会报**：
+#   · 新增的 require() 资源表（R1）
+#   · 新增的手拼 baseUrl（R2）
+#   · feed 头部绕过 resolveAuthorAvatar（R3，就是那个「真人有头像却画首字」的现场）
+# 外加两条反空洞钉： grandfathering 只豁免 HEAD 里已有的那一行（新行必须报，
+# 且只报新行），以及整棵 apps/ 被删掉时必须红而不是「没东西可报＝通过」。
+#
+# 为什么测试自己要先 `git add`：门禁用 git grep 只扫**已跟踪**文件，新写的文件
+# 不 add 就根本进不了扫描 —— 少这一步，测试会因为「没看见」而假绿。
+require_test "MEDIA-PIPELINE-001" "./cmd/gatecheck" \
+  "TestMediaPipelineRejectsNewAssetRequireTableOutsideMedia" \
+  "apps/api-go/cmd/gatecheck/check_media_pipeline_test.go" || exit $?
+require_test "MEDIA-PIPELINE-001" "./cmd/gatecheck" \
+  "TestMediaPipelineRejectsNewHandBuiltMediaUrl" \
+  "apps/api-go/cmd/gatecheck/check_media_pipeline_test.go" || exit $?
+require_test "MEDIA-PIPELINE-001" "./cmd/gatecheck" \
+  "TestMediaPipelineRejectsFeedHeaderBypassingAvatarLayer" \
+  "apps/api-go/cmd/gatecheck/check_media_pipeline_test.go" || exit $?
+require_test "MEDIA-PIPELINE-001" "./cmd/gatecheck" \
+  "TestMediaPipelineGrandfersExistingDebtOnly" \
+  "apps/api-go/cmd/gatecheck/check_media_pipeline_test.go" || exit $?
+require_test "MEDIA-PIPELINE-001" "./cmd/gatecheck" \
+  "TestMediaPipelineFailsWhenNothingWasScanned" \
+  "apps/api-go/cmd/gatecheck/check_media_pipeline_test.go" || exit $?
 if ! grep -q 'MEDIA-PIPELINE-001' apps/mobile/src/media/asset-sources.test.ts ||
    ! grep -q 'MEDIA-PIPELINE-001' apps/mobile/src/media/author-avatar.test.ts; then
   echo "  FAIL [MEDIA-PIPELINE-001]: unified media pipeline tests are missing" >&2
@@ -1212,9 +1361,18 @@ require_test "PRODUCT-001" "./internal/platform/postgres" \
 # BusinessClient (不是 hardcoded '48 张')。'me.tsx > merchantstorefront'
 # route 之前是 Bonsaidon 假数据, 现在路由到 MerchantStorefrontSurface
 # + 真接 BusinessClient. tripwire 验证 client 能 round-trip photos。
+#
+# STORE-CONSOLIDATE-001 之后这一跳变成了 me.tsx → MyStoresHub →
+# MerchantStorefrontSurface（资产子视图）。门禁跟着改指两跳，意图不变：
+# 商家入口必须真的能到达那套带上传/删除的 surface —— 任何一跳断了都判红。
 pnpm --dir apps/mobile exec vitest run src/business-client.test.ts || exit $?
-if ! grep -q 'MerchantStorefrontSurface' apps/mobile/src/surfaces/me.tsx; then
-  echo "  FAIL [STORE-PHOTO-001 mobile]: me.tsx lost the MerchantStorefrontSurface wire" >&2
+if ! grep -q 'MyStoresHub' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [STORE-PHOTO-001 mobile]: me.tsx 不再把店入口路由到 MyStoresHub（收编后的正主）。" >&2
+  exit 1
+fi
+if ! grep -q 'MerchantStorefrontSurface' apps/mobile/src/surfaces/my-stores-hub.tsx; then
+  echo "  FAIL [STORE-PHOTO-001 mobile]: MyStoresHub lost the MerchantStorefrontSurface wire ——" >&2
+  echo "        商家入口到不了真资产页（上传/删除/详情都在那）。" >&2
   exit 1
 fi
 if ! grep -q 'pickAndUploadPhoto\|addStorePhoto' apps/mobile/src/surfaces/merchant-storefront.tsx; then
@@ -1237,7 +1395,9 @@ if ! grep -q '菜单 / 服务' apps/mobile/src/surfaces/merchant-storefront.tsx 
    ! grep -q '当前礼券' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q 'onStartStoreSetup' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '线上店铺只负责对外展示' apps/mobile/src/surfaces/merchant-storefront.tsx || \
-   ! grep -q 'header={detailHead' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+   ! grep -q 'MyStoresHub' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+  # （STORE-CONSOLIDATE-001：BUSINESS 上下文的店页从「嵌 surface + header={detailHead}」
+  # 改为路由到 MyStoresHub；到没到真 surface 由上面 STORE-PHOTO-001 的两跳钉管。）
   echo "  FAIL [MERCHANT-STOREFRONT-R21-001]: storefront lost the stable R21 operating shell" >&2
   exit 1
 fi
@@ -2699,6 +2859,22 @@ require_test "MEDIA-FILE-001" "./internal/media" \
 require_test "MEDIA-FILE-001" "./internal/api" \
   "TestResolveRepoDirFindsAssetsFromNestedWorkingDir" \
   "apps/api-go/internal/api/aipersona_assets_test.go" || exit $?
+# MEDIA-VARIANT-AUTOROTATE-001（2026-10-03，服务器验收）：容器里上传的照片永远出不来。
+# `-autorotate` 是一个跨版本语义相反的选项 —— Alpine ffmpeg 6.1.1 要带值（裸写 exit 234），
+# brew ffmpeg 9.0.1 不能带值（带值把 "1" 当输出文件名，同样 exit 234）。任何一边的
+# "正确写法"都会弄挂另一边，唯一一致的做法是**不传**（默认就是开的，实测字节一致）。
+# 另一半教训是诊断可见性：jobs 里存的错误被"从头截 200 字节"截成了 ffmpeg 版本号，
+# 真错在尾部被丢掉 —— clippedOutput 现在留尾。
+require_test "MEDIA-VARIANT-AUTOROTATE-001" "./internal/media" \
+  "TestVariantFFmpegArgsOmitCrossVersionAutorotate" \
+  "apps/api-go/internal/media/image_variants_autorotate_test.go" || exit $?
+require_test "MEDIA-VARIANT-AUTOROTATE-001" "./internal/media" \
+  "TestClippedOutputKeepsTheTail" \
+  "apps/api-go/internal/media/image_variants_autorotate_test.go" || exit $?
+# 真跑 ffmpeg 的那两个（本机 9.0.1 上会实际生成变体）：形状钉之外还得有执行证据。
+require_test "MEDIA-VARIANT-AUTOROTATE-001" "./internal/media" \
+  "TestWatermarkBurnedIntoVariant" \
+  "apps/api-go/internal/media/watermark_test.go" || exit $?
 for client_file in media-fallback.tsx AdaptiveMediaCollection.tsx SocialMediaFrame.tsx; do
   if ! grep -q 'media-unavailable-v1\|isMediaUnavailable\|UnavailableMedia' "apps/mobile/src/media/${client_file}"; then
     echo "  FAIL [MEDIA-FILE-001]: apps/mobile/src/media/${client_file} lost the labelled media placeholder." >&2
@@ -2720,10 +2896,10 @@ if curl -sf --noproxy '*' --max-time 3 http://127.0.0.1:4100/health/ready >/dev/
   # And the end-to-end view: every media URL the feed actually hands out must
   # resolve. A 404 here is precisely the black frame the user reported.
   # NO_PROXY: some dev shells export an HTTP_PROXY that blackholes 127.0.0.1.
-  NO_PROXY='*' no_proxy='*' node scripts/check-feed-media-urls.mjs || exit $?
+  NO_PROXY='*' no_proxy='*' gatecheck feed-media-urls || exit $?
   echo "    MEDIA-FILE-001: PASS (feed media URLs all resolve)"
 else
-  echo "    MEDIA-FILE-001: SKIP (dev API is down — live checks need postgres; run go -C apps/api-go run ./cmd/media-audit --check-files and node scripts/check-feed-media-urls.mjs)"
+  echo "    MEDIA-FILE-001: SKIP (dev API is down — live checks need postgres; run go -C apps/api-go run ./cmd/media-audit --check-files and REPO_ROOT=\$PWD go -C apps/api-go run ./cmd/gatecheck feed-media-urls)"
 fi
 
 # AI-ROW-DUPE-001: Home rendered the same AI catalogue twice. The upper AI
@@ -3752,6 +3928,24 @@ require_test "COMP-SELLER-001" "./internal/platform/postgres" \
 require_test "COMP-SELLER-001" "./internal/api" \
   "TestSellerRealNameAttestationRequiresOperator" \
   "apps/api-go/internal/api/server_test.go" || exit $?
+
+# PROFILE-JSONB-EMPTY-ARRAY-NULL-001（2026-10-02）：写侧 encodeProfileJSON 用
+# json.Marshal 编码 **nil 切片**得到 "null"，写进 JSONB 后 jsonb_typeof='null'，
+# 直接违反 migration 157 的 agent_profiles_socials_ck（只认 'array'）—— 于是
+# 「一个还没关联社媒的普通新建 Creator」每次创建都失败。上面那条
+# TestSellerRealNameAttestationRoundTrip 报 SQLSTATE 23514 就是它，不是实名的锅。
+# 读侧早就 COALESCE(socials,'[]') 兜住了，写侧没有；空集合必须是 [] 是仓库的
+# 数据不变量。头两条不需要数据库（本机 / CI / 门禁都能钉形状），第三条防归一化
+# 误伤有内容的数组。
+require_test "PROFILE-JSONB-EMPTY-ARRAY-NULL-001" "./internal/platform/postgres" \
+  "TestEncodeProfileJSONEmptySlicesEncodeAsArrays" \
+  "apps/api-go/internal/platform/postgres/profile_jsonb_encoding_test.go" || exit $?
+require_test "PROFILE-JSONB-EMPTY-ARRAY-NULL-001" "./internal/platform/postgres" \
+  "TestEncodeProfileJSONExplicitEmptyMatchesNil" \
+  "apps/api-go/internal/platform/postgres/profile_jsonb_encoding_test.go" || exit $?
+require_test "PROFILE-JSONB-EMPTY-ARRAY-NULL-001" "./internal/platform/postgres" \
+  "TestEncodeProfileJSONKeepsNonEmptyArrays" \
+  "apps/api-go/internal/platform/postgres/profile_jsonb_encoding_test.go" || exit $?
 
 # 写入口必须是契约的一部分：接口上没有它，就没有任何实现会被要求提供它。
 if ! grep -qF 'AttestSellerRealName(ctx context.Context, v SellerRealNameVerification) error' \
@@ -6467,6 +6661,40 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
 echo "    PROFILE-QR-003: PASS (real scan parse + distinct honest errors, fake demo stays dead)"
 
+# QR-GEOMETRY-SWEEP-001（2026-10-02）：QR 几何扫描必须真的在扫"组件画的那个形状"。
+#
+# 这个目录存在的理由就两条，第二条一直没人钉住：扫描器的第 2 步（gen-cases.py）把
+# 组件的 7 个几何常数**手抄**了一份，注释写着"改了那边要记得改这里"。有一天两边不
+# 一致了 —— 组件画 0.87 模块的圆角点，脚本画的是方的 —— 扫描仍然报「144 例全过」。
+# 一次"全绿"的扫描验的是一个 App 根本不会画出来的码。
+#
+# 第 2 步现在是 Go 命令 apps/api-go/cmd/qrcases，常数**从组件里读**，不再手抄；
+# 渲染结果再拿数值去对：点边长、相邻点之间的纯白缝、墨面积
+# （0.87²-(4-π)·0.22² = 0.715 模块² —— 就是组件注释里那个数）。
+# 下面三个测试就是这个形状的钉：改名一个常数要红，把点画成方的要红，徽标画在点
+# 下层也要红（三条都在移植当天真的红过一次）。
+if [ ! -f apps/api-go/cmd/qrcases/raster.go ]; then
+  echo "  FAIL [QR-GEOMETRY-SWEEP-001]: 扫描器 apps/api-go/cmd/qrcases 不见了 ——" >&2
+  echo "        「跑不起来」不等于「几何没问题」，判红。" >&2
+  exit 1
+fi
+require_test "QR-GEOMETRY-SWEEP-001" "./cmd/qrcases" \
+  "TestEveryGeometryConstantMustBeParsable" \
+  "apps/api-go/cmd/qrcases/qrcases_test.go" || exit $?
+require_test "QR-GEOMETRY-SWEEP-001" "./cmd/qrcases" \
+  "TestRenderedDotsMatchTheComponentsMaths" \
+  "apps/api-go/cmd/qrcases/qrcases_test.go" || exit $?
+require_test "QR-GEOMETRY-SWEEP-001" "./cmd/qrcases" \
+  "TestBadgeCutsAWhiteRingAroundTheLogo" \
+  "apps/api-go/cmd/qrcases/qrcases_test.go" || exit $?
+# 扫描器的第 2 步不许再退回任何 JS/Python 运行时；第 1 步留在 node 是有原因的
+# （必须用 App 自己那份 qrcode 库导矩阵，换编码器就换了一批 mask，见 README 陷阱 1）。
+if grep -qE '^[[:space:]]*(python3?|uv run)' apps/mobile/scripts/qr-geometry/run.sh; then
+  echo "  FAIL [QR-GEOMETRY-SWEEP-001]: run.sh 又用 python 渲染了 —— 栈里没有 python。" >&2
+  exit 1
+fi
+echo "    QR-GEOMETRY-SWEEP-001: PASS (常数从组件读、形状用数值对、徽标压在点之上)"
+
 # HANDLE-UNIQUE-001: handle 的唯一性曾只写在 profile.go 的注释里
 # （"uniqueness is per-tenant, enforced by repository on create"）。
 # 039_profile.sql 建的是普通索引而非唯一索引，两个 repository 也都不查冲突，
@@ -8524,10 +8752,21 @@ echo "    MARKET-DETAIL-HERO-RATIO-001: PASS (hero follows the 4:3 asset ratio, 
     exit 1
   fi
   # 钉**断言本身**，不是「文件里出现过这个 ID」。
-  if ! /usr/bin/grep -q 'does not stamp a distance onto server people' "$TEST"; then
-    echo "  FAIL [PERSON-DISTANCE-ZERO-001]: 「不给真人盖距离」的断言不见了" >&2
-    exit 1
-  fi
+  # 2026-10-01：这三条断言的 it 标题被改写过（"does not stamp a distance onto
+  # server people" → "never invents a distance for a server person"），钉的还是
+  # 旧字面量，于是这条门禁在 HEAD 上就已经红了 —— 和被钉的代码无关。断言本身
+  # 一个没少，这里跟着实际标题改回钉断言。
+  ORDER_DIST_B=0
+  for ORDER_DIST_TITLE in \
+      'never invents a distance for a server person' \
+      'excludes people with no distance from the nearby filter' \
+      'renders an honest placeholder instead of a fake zero distance'; do
+    if ! /usr/bin/grep -qF "$ORDER_DIST_TITLE" "$TEST"; then
+      echo "  FAIL [PERSON-DISTANCE-ZERO-001]: 断言不见了 —— \"$ORDER_DIST_TITLE\"" >&2
+      ORDER_DIST_B=1
+    fi
+  done
+  [ "$ORDER_DIST_B" -eq 0 ] || exit 1
   # 反向钉：不能为了不编就把 demo 列表的距离也删了。
   if ! /usr/bin/grep -q 'keeps the distance on the demo recommendation list' "$TEST"; then
     echo "  FAIL [PERSON-DISTANCE-ZERO-001]: 「demo 列表的距离还在」的反向钉不见了 ——" >&2
@@ -10237,6 +10476,347 @@ echo "    HOME-I18N-001: PASS (every language round-trips through pref_language)
 pnpm --dir apps/mobile exec vitest run src/requester-home-discovery-contract.test.ts || exit $?
 echo "    HOME-I18N-001: PASS (home copy still resolves through the same keys)"
 
+# I18N-SETTINGS-001（2026-10-01）：底栏 / 页头 chrome / 「设置」入口页的多语言。
+#
+# 这一轮的病与 HOME-I18N-001 是**另一种**：字典 427 个键、六语言齐、typecheck
+# 全绿、门禁也全绿 —— 但 app-shell 的底栏五个标签、首页那句本地范围说明、
+# 访客页、身份切换面板、设置页所有行，全是硬编码中文。字典管不到"某个表面
+# 有没有去查它"，于是「换语言」这件事对用户几乎不可见：唯一跟着走的只有首页。
+#
+# 最扎人的一处：设置页里**语言那一行自己**写死「语言 / Ngôn ngữ」—— 中文 +
+# 越南语拼一起，对任何一种当前语言都不对。于是「换回来」比「换过去」还难。
+#
+# 这里钉的不是"某个键存在"（那 typecheck 已经管了），是三件别的：
+#   ① 接线：rootTabs / 访客页 / 身份切换 / 本地范围 / 设置页真的在调 t()；
+#   ② 形状：底栏的五个 id、五个图标、消息的 9+ 角标一个没少 —— 换语言不许
+#      顺手改了导航结构；
+#   ③ 负向：这些中文串不许再留在**剥完注释**的源码里（剥注释是因为注释里正当
+#      引用着旧文案；不剥的话这条钉永远红，然后下一个人只能删钉）。
+I18N_SHELL_CHROME=apps/mobile/src/shell/app-shell.tsx
+I18N_ME_SURFACE=apps/mobile/src/surfaces/me.tsx
+
+for tabkey in tabHome tabMarket tabFeed tabMessages tabMe; do
+  if ! grep -qF "t(\"$tabkey\")" "$I18N_SHELL_CHROME"; then
+    echo "  FAIL [I18N-SETTINGS-001]: 底栏标签 $tabkey 不再从字典取（写死中文 = 换语言后底栏不动）。" >&2
+    exit 1
+  fi
+done
+# 底栏标签必须在渲染时取：模块顶层求值发生在 import 时，那时还没有语言状态。
+if ! grep -qF 'function rootTabs(t: (key: MessageKey) => string)' "$I18N_SHELL_CHROME" ||
+   ! grep -qF 'const tabs = rootTabs(t);' "$I18N_SHELL_CHROME"; then
+  echo "  FAIL [I18N-SETTINGS-001]: rootTabs 又变回不接参数的常量表了（标签会是 import 那一刻的语言）。" >&2
+  exit 1
+fi
+# 导航结构不许被"顺手"改掉：id / icon / badge 保持常量。
+if ! grep -qE '\{ id: "HOME", icon: "home", label: t\("tabHome"\) \}' "$I18N_SHELL_CHROME" ||
+   ! grep -qE '\{ id: "ME", icon: "meRing", label: t\("tabMe"\) \}' "$I18N_SHELL_CHROME" ||
+   ! grep -qF 'badge: "9+"' "$I18N_SHELL_CHROME"; then
+  echo "  FAIL [I18N-SETTINGS-001]: 底栏的 id / 图标 / 9+ 角标被这一轮改动了（只该换文案）。" >&2
+  exit 1
+fi
+# 访客页 / 身份切换 / 本地范围（含无障碍标签）。
+# UI-COPY-HONEST-001：首页本地范围那句「你正在看的本地范围 · 仅城市 / 区域」
+# 是用户点名要删的废话（2026-10-01）。它和「跟随你的位置 · 移动后自动更新」两个键
+# 已经从字典里**删掉**，所以这里判负：键不许回来，而且没有值得说的事时那行
+# 字幕根本不许渲染。
+for filler in 'locScopeBrowsing' 'locScopeDevice'; do
+  if grep -qF "\"$filler\"" apps/mobile/src/i18n.ts apps/mobile/src/shell/app-shell.tsx; then
+    echo "  FAIL [UI-COPY-HONEST-001]: $filler 又回来了 —— 那是用户点名删掉的首页废话。" >&2
+    echo "        「切换⌄」按钮就在旁边，不该再用文字教用户怎么用。" >&2
+    exit 1
+  fi
+done
+if ! grep -qF 'const sub = location.kind === "CUSTOM"' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF ': deviceSub;' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [UI-COPY-HONEST-001]: 本地范围字幕又变回「总有话说」了 ——" >&2
+  echo "        没有值得说的事时必须不渲染那一行，否则删了键也还在屏幕上占位。" >&2
+  exit 1
+fi
+
+for shellkey in guestMeTitle guestMeSub guestMeCta \
+               ctxRequesterTitle ctxRequesterDesc ctxBusinessTitle ctxBusinessDesc \
+               locScopeMapPick \
+               locStateAcquiring locStateDenied locStateUnavailable \
+               locSwitch locOpenMapA11y locSwitchScopeA11y; do
+  if ! grep -qF "\"$shellkey\"" "$I18N_SHELL_CHROME"; then
+    echo "  FAIL [I18N-SETTINGS-001]: app-shell 不再读 ${shellkey}（硬编码中文 = 该文案不跟语言走）。" >&2
+    exit 1
+  fi
+done
+# 本地范围那句话必须由 formatRadius 出半径，坐标不许进 UI（沿用首页那条契约的形状）。
+if ! grep -qF 't("locScopeMapPick", { radius: formatRadius(location.custom.radiusMeters) })' "$I18N_SHELL_CHROME"; then
+  echo "  FAIL [I18N-SETTINGS-001]: 地图选点那句的范围不再由 formatRadius 给出。" >&2
+  exit 1
+fi
+# 设置页：语言入口自己必须是翻译，不能再拼两种语言。
+if grep -qF '>语言 / Ngôn ngữ<' "$I18N_ME_SURFACE" ||
+   ! grep -qF 't("language")' "$I18N_ME_SURFACE"; then
+  echo "  FAIL [I18N-SETTINGS-001]: 设置页「语言」行不是翻译（原来写死「语言 / Ngôn ngữ」，换回来比换过去更难）。" >&2
+  exit 1
+fi
+for setkey in settingsTitle settingsHubHint settingsGroupAccount settingsRowAccountSecurity \
+              settingsRowKyc settingsGroupPrivacy settingsRowLocationPrivacy settingsGroupGeneral \
+              locationPrivacyTitle locationPrivacyHint; do
+  if ! grep -qF "t(\"$setkey\")" "$I18N_ME_SURFACE"; then
+    echo "  FAIL [I18N-SETTINGS-001]: 设置页不再读 ${setkey}。" >&2
+    exit 1
+  fi
+done
+# 字典侧：六语言齐全、没漏翻、底栏五个标签互不相同、占位符不漏、拉丁字母三种
+# 语言里不许冒汉字。正面 + 负向都在 src/i18n-shell-settings.test.ts 里。
+pnpm --dir apps/mobile exec vitest run src/i18n-shell-settings.test.ts || exit $?
+echo "    I18N-SETTINGS-001: PASS (tab bar, header chrome and the settings hub all follow the language)"
+
+# SETTINGS-HUB-ALL-NINE-001（2026-10-01，用户：「丢失了 黑名单管理 服务协议与隐私政策
+# 清理缓存 深色模式 盲盒匹配偏好」）。
+#
+# 上一轮（SETTINGS-HUB-001）按「没有实现就不画」只摆了 4 行，注释里列了 4 条理由。
+# 这一轮把原型的 9 行全摆回来 —— 但**摆回来 ≠ 接通**，所以门禁钉的是两条：
+#
+#   ① 9 行的图标一个不少，且每个字形在 proxy-icon.tsx 里**真的有形状**。
+#      这条不是形式主义：MasterModuleIcon 的 `default:` 是 `return null`，
+#      「类型里声明了、switch 里没实现」= 图标位置静默空白、**零报错**。
+#      这个仓已经吃过好几次这种亏（search / crosshair / chart 都"有"过名字没形状），
+#      而用户看到的现象恰好就是「原型有 logo、模拟器没有」。
+#   ② 接不通的那几行必须禁用 + 明写「暂不可用」，不许摆按了没反应的按钮
+#      （PLACEHOLDER-001 / UI-HONEST-CAPABILITY-001），也不许"干脆不画"
+#      —— 上一轮就是"不画"，用户的反应是「丢失了」。
+#
+# 逐行的接通状态由 src/settings-hub-all-nine.test.ts 钉住。
+SETTINGS_HUB_ICON=apps/mobile/src/components/proxy-icon.tsx
+SETTINGS_HUB_ME=apps/mobile/src/surfaces/me.tsx
+SETTINGS_HUB_CACHE=apps/mobile/src/feed-disk-cache.ts
+
+# ① 九行齐全 + 顺序跟原型一致。
+hub_head=$(grep -nF 'subPage.route === "appbehavior"' "$SETTINGS_HUB_ME" | head -1 | cut -d: -f1)
+hub_tail=$(grep -nF 'subPage.route === "locationprivacy"' "$SETTINGS_HUB_ME" | head -1 | cut -d: -f1)
+if [ -z "$hub_head" ] || [ -z "$hub_tail" ] || [ "$hub_tail" -le "$hub_head" ]; then
+  echo "  FAIL [SETTINGS-HUB-ALL-NINE-001]: 找不到设置枢纽的渲染分支。" >&2
+  exit 1
+fi
+hub_body=$(sed -n "${hub_head},${hub_tail}p" "$SETTINGS_HUB_ME")
+# 黑名单那一行是 <BlocklistRow />，图标写在组件里（它自读 getBlocklist 显示计数），
+# 所以九行里有八行是 ProxyIcon / SettingsRowUnavailable 两种形态。
+for icon in lock shield heartSolid pin fileText trash globe moon; do
+  if ! printf '%s' "$hub_body" | grep -qE "(ProxyIcon[^>]*name=\"$icon\"|SettingsRowUnavailable icon=\"$icon\")"; then
+    echo "  FAIL [SETTINGS-HUB-ALL-NINE-001]: 设置枢纽少了「${icon}」这一行（原型是 9 行）。" >&2
+    echo "        整行拿掉 = 用户视角的「丢失」，而且连反馈都没法给。" >&2
+    exit 1
+  fi
+  # 字形必须真的有形状：有名字、没 case ⇒ MasterModuleIcon 落进 default 返回
+  # null ⇒ 图标位置空白且**不报任何错**。
+  if ! grep -qF "case \"$icon\":" "$SETTINGS_HUB_ICON"; then
+    echo "  FAIL [SETTINGS-HUB-ALL-NINE-001]: $icon 只有名字没有形状（switch 里没有实现）——" >&2
+    echo "        MasterModuleIcon 的 default 分支是 return null，结果就是「原型有 logo、" >&2
+    echo "        模拟器没有」且没有任何报错。history 里 search / crosshair / chart 都这样过。" >&2
+    exit 1
+  fi
+done
+
+# ②「暂不可用」态不许带 onPress（那就是一个死按钮），也不许指向空子页。
+if ! printf '%s' "$hub_body" | grep -qF 'SettingsRowUnavailable'; then
+  echo "  FAIL [SETTINGS-HUB-ALL-NINE-001]: 接不通的那几行不见了 —— 要么摆成禁用 + 说明" >&2
+  echo "        「暂不可用」，要么真接线；不许既不画也不说。" >&2
+  exit 1
+fi
+
+# ⚠️ 剥注释必须**逐文件**做，不能把几个文件 cat 在一起再剥。
+#    剥块注释要靠 `/*` 与 `*/` 配对；拼成一个流之后，A 文件里一个孤立的 `*/`
+#    会去配 B 文件里的 `/*`，中间的真代码被整段吃掉 —— 我第一版就是这么写的，
+#    结果冒出「Alert.alert( 不存在」这种明显胡说八道的 FAIL。门禁自己骗人比
+#    门禁骗红更糟：它会让人去改一段根本没坏的代码。
+settings_strip_comments() {
+  perl -0pe 's{/\*.*?\*/}{}gs' "$1" | sed 's|//.*||'
+}
+settings_hub_code() {
+  settings_strip_comments "$SETTINGS_HUB_ME"
+  settings_strip_comments "$SETTINGS_HUB_CACHE"
+}
+
+# ③ CACHE-CLEAR-MATURE-001：清缓存按成熟做法 —— 清操作系统指定的缓存目录，
+#    不碰用户数据目录。白名单钉死。
+#
+#    为什么这条必须写进门禁而不是注释：本仓在 Paths.document 下有 6 个目录，
+#    其中 5 个是用户数据 —— feed 偏好 / 自定义源 / **发帖草稿 + 照片** /
+#    头像 / 黑名单。清理功能一旦手抖扫到 Paths.document，那就是数据丢失，
+#    而 AGENTS.md 那条「用户业务数据不许被代码硬删」正好覆盖这里。
+CACHE_CLEAR_SRC=apps/mobile/src/clearable-cache.ts
+if ! test -f "$CACHE_CLEAR_SRC"; then
+  echo "  FAIL [CACHE-CLEAR-MATURE-001]: 找不到 clearable-cache.ts —— 清理缓存的实现不许散落回各个 store 文件。" >&2
+  exit 1
+fi
+settings_cache_code() { settings_strip_comments "$CACHE_CLEAR_SRC"; }
+if ! settings_cache_code | grep -qF 'Paths.cache'; then
+  echo "  FAIL [CACHE-CLEAR-MATURE-001]: 清理范围里没有 Paths.cache ——" >&2
+  echo "        那才是操作系统指定的缓存目录（iOS 存储紧张时清的就是它）。" >&2
+  exit 1
+fi
+for userdata in proxy-feed-prefs proxy-custom-feeds proxy-composer-draft proxy-store-photos proxy-profile proxy-local; do
+  if settings_cache_code | grep -qF "$userdata"; then
+    echo "  FAIL [CACHE-CLEAR-MATURE-001]: $userdata 出现在可清理白名单里 ——" >&2
+    echo "        那是用户数据。草稿 / 照片 / 头像 / 黑名单被删掉就是数据丢失。" >&2
+    exit 1
+  fi
+done
+# 旧版那三个函数必须已经搬走，不许留在 feed-disk-cache.ts 里各搞一套范围。
+if settings_hub_code | grep -qF 'clearFeedDiskCache'; then
+  echo "  FAIL [CACHE-CLEAR-MATURE-001]: 旧的 clearFeedDiskCache 还在 ——" >&2
+  echo "        它只清 proxy-feed-cache 一个目录，而行名叫「清理缓存」：标签与范围不符。" >&2
+  exit 1
+fi
+# 删除不可逆 ⇒ 必须先确认，且确认框要写清**不会**删什么。
+if ! settings_hub_code | grep -qF 'Alert.alert('; then
+  echo "  FAIL [CACHE-CLEAR-MATURE-001]: 清理缓存没有确认步骤 —— 删除不可逆。" >&2
+  exit 1
+fi
+# 部分失败不许报「省了多少」—— 用户会以为清干净了。
+if ! settings_cache_code | grep -qF 'freedBytes: ok ? Math.max(0, before.totalBytes - after.totalBytes) : 0'; then
+  echo "  FAIL [CACHE-CLEAR-MATURE-001]: 部分失败时仍然报告了释放空间 ——" >&2
+  exit 1
+fi
+
+# SETTINGS-HUB-CACHE-CLEAR-001 补钉：清理缓存那一行必须真的绑到 onPress。
+#
+# 上一版把这一行渲染成 <View>：handleClearCache 写了，但从没绑到按下事件上 ——
+# 用户看到的正是「没实现 点击没响应」。而当时那条钉只查「函数名在不在」，
+# 函数在文件里就绿。**查存在 ≠ 查被调用**，这是本仓反复修的那个洞。
+if ! settings_hub_code | grep -qF 'onPress={handleClearCache}'; then
+  echo "  FAIL [SETTINGS-HUB-CACHE-CLEAR-001]: 清理缓存这一行没有绑 onPress ——" >&2
+  echo "        handleClearCache 写了但没人调，点击就没反应。查「函数在不在」不够，" >&2
+  echo "        必须查它被绑到了按下事件上。" >&2
+  exit 1
+fi
+# 绑上了还不够：清完必须说一句话。静默成功的清理和「没生效」分不清。
+if ! settings_hub_code | grep -qF 'setCacheNotice('; then
+  echo "  FAIL [SETTINGS-HUB-CACHE-CLEAR-001]: 清理之后没有任何反馈 ——" >&2
+  echo "        静默成功的清理正是用户不敢信这个功能的原因。" >&2
+  exit 1
+fi
+
+# SETTINGS-BLOCKLIST-001：黑名单必须只有一个事实源。
+#
+# friend-crm 的「拉黑」此前是组件内 useState —— 页面一卸载名单就没了，而设置页
+# 读的是另一份。于是「我拉黑过谁」这件事在两个页面各有一份真相，而两份都
+# 不完整。PLACEHOLDER-001 允许本机状态机，但前提是**真的连着**。
+CRM_SRC=apps/mobile/src/surfaces/friend-crm.tsx
+crm_code() { settings_strip_comments "$CRM_SRC"; }
+if ! crm_code | grep -qF 'blockUser(' ||
+   ! crm_code | grep -qF 'localFriends.filter((f) => !isBlocked(f.id))' ||
+   ! crm_code | grep -qF 'subscribeBlocklist'; then
+  echo "  FAIL [SETTINGS-BLOCKLIST-001]: friend-crm 的拉黑没接到共享名单 store ——" >&2
+  echo "        组件内 state 的名单在设置页看不到、卸载就没，等于没有名单。" >&2
+  exit 1
+fi
+# 服务端拉黑成功也要写一份本机名单：设置页那一页是本机名单（服务端没有列出
+# 黑名单的命令），不写就看不到自己拉黑过谁。
+if ! crm_code | grep -qF 'blockUser(friend.userId, friend.name)'; then
+  echo "  FAIL [SETTINGS-BLOCKLIST-001]: 服务端拉黑成功后没有写进本机名单 ——" >&2
+  echo "        设置页读的是本机名单，不写等于这次拉黑在设置页不可见。" >&2
+  exit 1
+fi
+# 过滤必须发生在**派生**层，不能在拉黑那一刻顺手 filter：后者只处理一个方向，
+# 在设置页解封之后人再也回不来。
+if ! crm_code | grep -qF 'enrichFriends(visibleFriends)' ||
+   ! crm_code | grep -qF '[localFriends, blockedKey]'; then
+  echo "  FAIL [SETTINGS-BLOCKLIST-001]: 好友列表没有按名单在派生层过滤 ——" >&2
+  echo "        在拉黑处 filter 掉的话，解封之后人回不来。" >&2
+  exit 1
+fi
+# 设置页那一侧也必须在订阅名单，否则计数不会变。
+if ! settings_hub_code | grep -qF 'subscribeBlocklist'; then
+  echo "  FAIL [SETTINGS-BLOCKLIST-001]: 设置页没有订阅名单 store —— 计数不会变。" >&2
+  exit 1
+fi
+
+pnpm --dir apps/mobile exec vitest run src/settings-hub-all-nine.test.ts || exit $?
+echo "    SETTINGS-HUB-ALL-NINE-001: PASS (all nine prototype rows carry a real glyph; unwired ones say so)"
+echo "    SETTINGS-BLOCKLIST-001 / SETTINGS-LEGALDOCS-001: PASS (both rows are real features now)"
+
+# I18N-SAFETY-002（2026-10-01）：设置 → 位置与隐私 那一屏。
+#
+# 这一屏原先有**三套互不相干的语言来源**：
+#   1. precise-location-toggle.tsx 整张卡写死**越南语**，而它正下方的
+#      fuzzy-location-card.tsx 写死中文 —— 同一屏中越混排；
+#   2. formatRemaining() 收一个 `locale: "vi" | "zh"` —— 这条二元语言轴跟
+#      i18n.ts 的六种语言毫无关系，lo/ko/ja 只能落到二选一；
+#   3. emergency-client.ts 的展示口径与 vnEmergencyNumbers 的 label 写死中文。
+#
+# 字典当时 427 键、六语言齐全、门禁全绿 —— 字典管不到「某个表面有没有去查它」。
+# 后果是这一屏在英文用户眼里中越混排，在 lo/ko/ja 用户眼里是「越南语或中文」。
+#
+# 这里钉的不是「某个键存在」（typecheck 已经管了）：
+#   ① 那条 `vi | zh` 的第二条语言轴**不再存在** —— 它最隐蔽，看起来「支持
+#      多语言」实际只有两种；
+#   ② 免责声明在**每一种语言**里都还否定「自动通知」（SAFETY-NET-001 的延续）；
+#   ③ 报警号码 113/114/115 在六种语言里**一模一样** —— 译文案时最危险的错法
+#      是顺手把号码也「译」了，那会让紧急功能指向不存在的号码；
+#   ④ 错误/提示存**原因**、渲染时翻译（HOME-I18N-001 的形状）。
+SAFETY_I18N_DICT=apps/mobile/src/i18n.ts
+# SAFETY_CLIENT / SAFETY_CARD 是下面 SAFETY-NET-001 那一节定义的，跑得比这里晚。
+# 本节自己先定义一份：**不要**依赖后面的变量 —— 顺序一变这里就会静默变成
+# grep 空串然后永远通过（脚本里已经吃过好几次「检查没跑却读成通过」的亏）。
+SAFETY_I18N_CLIENT=apps/mobile/src/emergency-client.ts
+SAFETY_I18N_SAFETY_CARD=apps/mobile/src/components/safety-event-card.tsx
+SAFETY_I18N_CONSENT=apps/mobile/src/location-consent-client.ts
+SAFETY_I18N_HELPERS=apps/mobile/src/components/precise-location-toggle-helpers.ts
+SAFETY_I18N_TOGGLE=apps/mobile/src/components/precise-location-toggle.tsx
+SAFETY_I18N_FUZZY=apps/mobile/src/components/fuzzy-location-card.tsx
+SAFETY_I18N_EMC=apps/mobile/src/components/emergency-contacts-card.tsx
+
+# ① 第二条语言轴必须消失。判负跑在剥完注释的源码上：注释里正当解释着
+#    「原来是 vi|zh」，那些说明不该被逼着删。
+for pair in "$SAFETY_I18N_CONSENT:location-consent-client.ts" "$SAFETY_I18N_HELPERS:precise-location-toggle-helpers.ts"; do
+  f="${pair%%:*}"; label="${pair##*:}"
+  if sed 's|//.*||' "$f" | grep -qE ':\s*"vi"\s*\|\s*"zh"'; then
+    echo "  FAIL [I18N-SAFETY-002]: $label 又把语言写成了 \"vi\" | \"zh\" ——" >&2
+    echo "        那条轴与 i18n.ts 的六种语言无关：lo/ko/ja 只能落到二选一。" >&2
+    exit 1
+  fi
+done
+
+# ② 免责声明：函数在、调的是字典、六种语言都还否定自动通知。最后一条在
+#    src/i18n-safety-net.test.ts 里逐语言核对否定词。
+if ! grep -qF 'translate(lang, "safetyDeliveryDisclaimer")' "$SAFETY_I18N_CLIENT" ||
+   ! grep -qF 'deliveryDisclaimer(lang)' "$SAFETY_I18N_SAFETY_CARD"; then
+  echo "  FAIL [I18N-SAFETY-002]: 安全事件的免责声明不再走字典 / 不再被渲染 ——" >&2
+  exit 1
+fi
+
+# ③ 报警号码不许被「顺手翻译」。这三个号是越南真实的报警/消防/急救号，
+#    译了就会让紧急功能指向不存在的号码。
+if ! grep -qF '{ number: "113", label: translate(lang, "emergencyNumberPolice") }' "$SAFETY_I18N_CLIENT" ||
+   ! grep -qF '{ number: "114", label: translate(lang, "emergencyNumberFire") }' "$SAFETY_I18N_CLIENT" ||
+   ! grep -qF '{ number: "115", label: translate(lang, "emergencyNumberMedical") }' "$SAFETY_I18N_CLIENT"; then
+  echo "  FAIL [I18N-SAFETY-002]: 报警号码那一段被改了 —— 号码必须原样，只译 label。" >&2
+  exit 1
+fi
+
+# ④ 那张写死越南语的卡不许把越南语搬回来。
+for viet in 'Chia sẻ vị trí chính xác' 'Bạn muốn cho phép trong bao lâu?' 'Vị trí chính xác' 'Đang tải'; do
+  if sed 's|//.*||' "$SAFETY_I18N_TOGGLE" | grep -qF "$viet"; then
+    echo "  FAIL [I18N-SAFETY-002]: 精确位置那张卡又写死了越南语「${viet}」——" >&2
+    echo "        它正下方的模糊位置卡是中文，同一屏不能中越混排。" >&2
+    exit 1
+  fi
+done
+
+# ⑤ 四张卡都读字典，且错误存原因不存串。
+for f in "$SAFETY_I18N_TOGGLE" "$SAFETY_I18N_FUZZY" "$SAFETY_I18N_EMC" $SAFETY_I18N_SAFETY_CARD; do
+  if sed 's|//.*||' "$f" | grep -qE 'setError\(t\('; then
+    echo "  FAIL [I18N-SAFETY-002]: $(basename "$f") 把翻译好的串存进了 state ——" >&2
+    echo "        存串 ⇒ 错误还挂在屏幕上时切语言，那句话停在旧语言。" >&2
+    exit 1
+  fi
+done
+if ! grep -qF 'vnEmergencyNumbers(lang)' $SAFETY_I18N_SAFETY_CARD; then
+  echo "  FAIL [I18N-SAFETY-002]: 安全事件卡不再按当前语言取拨号标签。" >&2
+  exit 1
+fi
+
+# 字典侧 + 六语言逐条核对（含号码一致、免责声明否定式）。
+pnpm --dir apps/mobile exec vitest run src/i18n-safety-net.test.ts src/i18n.test.ts || exit $?
+echo "    I18N-SAFETY-002: PASS (location consent and the safety net speak one language axis, six ways)"
+
 # HOME-MORE-ROOMS-001（2026-09-23，原型 deepseek_html_20260923_2308b7.html，用户：
 # 「聊天房点击 list 直接弹出已有的房和创建房卡片 目前的不对」）：
 # 「更多」整页的「聊天房」chip 是本页的视图切换 —— 列表换成「开房大卡 + 正在进行的房间」，
@@ -11676,29 +12256,32 @@ echo "    REGULATORY-P0-GATE: PASS (脚本在位 · 语法正确 · 迁移无漂
 #   - proxy-ui-review skill 管**文案**（废话 / 自我辩解）
 # 两者都证明不了「渲染出来像不像原型」。而 814 条 grep 钉里视觉比对是 0 条。
 #
-# 这里建立像素基准：scripts/render-prototypes.mjs 把 31 个 HTML 原型渲染成
+# 这里建立像素基准：gatecheck 的 render-prototypes 子命令把 HTML 原型渲染成
 # 390×844@2x 的图（实测这些原型零外部依赖，可完全离线 headless 渲染），
-# compare-screens.mjs 拿它跟实现截图打 diff。
+# compare-screens 子命令拿它跟实现截图打 diff。
 #
 # ⚠️ 钉的是**基准本身的新鲜度与依据**，不是「像不像」—— 后者需要实现截图，
 #    离线门禁里拿不到。这里能保证的是：
-#    1. 渲染脚本在位且语法正确；
+#    1. 渲染/比对工具在位且**编译得过**（node --check 的等价物，而且更强：
+#       go build 连类型错误一起抓）；
 #    2. 每个原型都有对应的基准图条目（新增原型忘了渲 → 红）；
 #    3. manifest 的指纹与 HTML 内容一致（原型改了忘了重渲 → 红）。
-if [[ ! -f scripts/render-prototypes.mjs ]] || [[ ! -f scripts/compare-screens.mjs ]]; then
-  echo "  FAIL [UI-PROTO-ALIGN-001]: 原型渲染/比对脚本不见了 —— 像素基准无人维护。" >&2
+for gc_src in cmd/gatecheck/check_render_prototypes.go cmd/gatecheck/check_compare_screens.go; do
+  if [[ ! -f "apps/api-go/$gc_src" ]]; then
+    echo "  FAIL [UI-PROTO-ALIGN-001]: 原型渲染/比对工具不见了（apps/api-go/${gc_src}）—— 像素基准无人维护。" >&2
+    exit 1
+  fi
+done
+if ! go -C apps/api-go build ./cmd/gatecheck/ >/dev/null 2>&1; then
+  echo "  FAIL [UI-PROTO-ALIGN-001]: gatecheck 编译不过 —— 渲染/比对工具跑不起来。" >&2
+  go -C apps/api-go build ./cmd/gatecheck/ >&2
   exit 1
 fi
-node --check scripts/render-prototypes.mjs || { echo "  FAIL [UI-PROTO-ALIGN-001]: render-prototypes.mjs 语法错误。" >&2; exit 1; }
-node --check scripts/compare-screens.mjs  || { echo "  FAIL [UI-PROTO-ALIGN-001]: compare-screens.mjs 语法错误。" >&2; exit 1; }
 proto_count=$(ls docs/design/references/*.html 2>/dev/null | wc -l | tr -d ' ')
-manifest_count=$(python3 -c "
-import json,os
-p='docs/design/baseline-images/manifest.json'
-print(len(json.load(open(p)).get('prototypes',{})) if os.path.exists(p) else 0)" 2>/dev/null || echo 0)
+manifest_count=$(jq -r '(.prototypes // {}) | length' docs/design/baseline-images/manifest.json 2>/dev/null || echo 0)
 if [[ "$proto_count" != "$manifest_count" ]]; then
   echo "  FAIL [UI-PROTO-ALIGN-001]: 有原型没有基准图条目 —— 原型 ${proto_count} 个 / manifest ${manifest_count} 个。" >&2
-  echo "        跑 node scripts/render-prototypes.mjs（新增原型忘了渲染 = 那一屏永远没有比对基准）。" >&2
+  echo "        跑 gatecheck render-prototypes（新增原型忘了渲染 = 那一屏永远没有比对基准）。" >&2
   exit 1
 fi
 # 指纹一致性：原型 HTML 改了却没重渲 ⇒ 基准图是旧的 ⇒ 比对结果无意义。
@@ -11707,31 +12290,44 @@ fi
 # 第一版这里判错，导致每个新 clone 都红（我实测过：把 PNG 全移走 ⇒ 报「指纹过期」，
 # 文案完全指错方向）。所以只在 PNG 确实存在时才查新鲜度，且区分两种缺失。
 if [[ -d docs/design/baseline-images ]] && compgen -G "docs/design/baseline-images/*.png" >/dev/null; then
-  # 取 render-prototypes.mjs --list 自己算出的「缺失或过期 N / M」，而不是数行数 ——
+  # 取 render-prototypes --list 自己算出的「缺失或过期 N / M」，而不是数行数 ——
   # 数行只能看「在不在」，看不了「指纹对不对」（第一版就是这么写的，结果原型 HTML 改了
   # 也能过门禁，2026-09-30 实测证伪失败）。
-  stale=$(node scripts/render-prototypes.mjs --list 2>/dev/null \
-            | sed -n 's/.*缺失或过期：\([0-9]*\) \/.*/\1/p')
-  [[ -n "$stale" ]] || stale=0
+  # ⚠️ 拿不到这一行必须判红：`|| true` + 空串 = 「检查没跑」和「基准全新鲜」长得一样。
+  if ! stale_list=$(gatecheck render-prototypes --list 2>/dev/null); then
+    echo "  FAIL [UI-PROTO-ALIGN-001]: render-prototypes --list 跑不起来 —— 基准新鲜度无法判定。" >&2
+    exit 1
+  fi
+  stale=$(printf "%s\n" "$stale_list" | sed -n 's/.*缺失或过期：\([0-9]*\) \/.*/\1/p')
+  [[ -n "$stale" ]] || {
+    echo "  FAIL [UI-PROTO-ALIGN-001]: --list 的输出里没有「缺失或过期」这一行 —— 输出格式变了，" >&2
+    echo "        这条门禁读不到数字就等于没在检查。" >&2
+    exit 1
+  }
   if [[ "$stale" != "0" ]]; then
     echo "  FAIL [UI-PROTO-ALIGN-001]: 有 ${stale} 个原型的基准图过期（HTML 改过但没重渲）——" >&2
-    echo "        比对会拿旧基准打新实现，结论无效。跑 node scripts/render-prototypes.mjs。" >&2
+    echo "        比对会拿旧基准打新实现，结论无效。跑 gatecheck render-prototypes。" >&2
     exit 1
   fi
 else
-  echo "    (基准图 PNG 不在仓库里 —— 正常，需要比对时先跑 node scripts/render-prototypes.mjs)"
+  echo "    (基准图 PNG 不在仓库里 —— 正常，需要比对时先跑 gatecheck render-prototypes)"
 fi
 # token 的 scale 必须覆盖原型实测高频 —— 否则门禁会把合规实现判成违规
 # （这正是我第一版 token 的错：照 R3 文档排名建，导致原型 64.2% 的字号被判越界）。
-token_gap=$(node -e '
-const fs=require("fs");
-const tok=JSON.parse(fs.readFileSync("Proxy_App_Design_Tokens_R3.json","utf8"));
-const allowed=new Set(tok.typography.scale);
-const obs=tok.typographyObserved?.counts||{};
-let missing=[];
-for (const [v,n] of Object.entries(obs)) if (n>=60 && !allowed.has(Number(v))) missing.push(`${v}(${n})`);
-console.log(missing.join(" "));
-' 2>/dev/null || echo "")
+# ⚠️ jq 报错必须判红：`|| echo ""` 会让「读不到 token 文件」和「覆盖完全」同色。
+if ! token_gap=$(jq -r '
+  (.typography.scale // []) as $s
+  | [ (.typographyObserved.counts // {}) | to_entries[]
+      | select(.value >= 60)
+      | (.key | tonumber) as $v
+      | select(($s | index($v)) == null)
+      | "\(.key)(\(.value))" ]
+  | join(" ")
+' Proxy_App_Design_Tokens_R3.json 2>&1); then
+  echo "  FAIL [UI-PROTO-ALIGN-001]: 读不了 Proxy_App_Design_Tokens_R3.json 的 typography —— 覆盖检查没跑起来：" >&2
+  printf "        %s\n" "$token_gap" >&2
+  exit 1
+fi
 if [[ -n "$token_gap" ]]; then
   echo "  FAIL [UI-PROTO-ALIGN-001]: token 的 typography.scale 没覆盖原型实测高频字号：${token_gap}" >&2
   echo "        这些是原型真在用的值，不收编 ⇒ 门禁把它们全判成越界 ⇒ 没人看门禁。" >&2
@@ -11776,39 +12372,63 @@ echo "    SHELL-VAR-UNICODE-001: PASS (no \$VAR glued to non-ASCII in scripts/)"
 # 第一版把 NaN 当成「通过」，于是**自己跟自己比报「0.00% PASS」**。一个专门用来
 # 判断「像不像」的工具，在最该报错的时候报绿 —— 这比没有工具更糟。
 #
-# 所以钉三条：
-#   1. 用 spawnSync（只有它能拿到成功分支的 stderr）；
+# 所以钉四条（工具搬进 Go 后仍逐条对应，一条没少）：
+#   1. 差异数从 **stderr** 取（对应 node 版必须用 spawnSync 而非 execFileSync）；
 #   2. 解析不出来必须判红；
-#   3. 差异像素对外是整数（ImageMagick 7.1 Q16-HDRI 会给浮点，直接打出来像坏了）。
-if ! grep -qF 'spawnSync' scripts/compare-screens.mjs; then
-  echo "  FAIL [UI-PROTO-DIFF-HONEST-001]: 像素比对没用 spawnSync —— execFileSync 拿不到" >&2
-  echo "        stderr 里的差异数，会永远解析失败。实测后果：自己跟自己比报 0.00% PASS。" >&2
+#   3. 差异像素对外是整数（ImageMagick 7.1 Q16-HDRI 会给浮点，直接打出来像坏了）；
+#   4. 比对工具「非零退出」是**有差异**，不是**跑不起来**（2026-10-02 搬 Go 时我自己
+#      踩的：cmd.Run() 的 error 一律当致命，于是每个真差异都印 [FAIL] 跑 magick 失败
+#      —— 一个专门用来报差异的工具从此只会报错。node 的 spawnSync 只把**启动失败**
+#      放进 proc.error，这个语义必须显式钉住，不然下次换运行时又会丢。）
+if ! grep -qF 'cmd.Stderr = &metricStderr' apps/api-go/cmd/gatecheck/check_compare_screens.go; then
+  echo "  FAIL [UI-PROTO-DIFF-HONEST-001]: 像素比对没从 stderr 取差异数 —— magick 把 AE 写在" >&2
+  echo "        stderr，只看 stdout 会永远解析失败。实测后果：自己跟自己比报 0.00% PASS。" >&2
   exit 1
 fi
-if ! grep -qF '无法解析差异像素数' scripts/compare-screens.mjs; then
+if ! grep -qF '无法解析差异像素数' apps/api-go/cmd/gatecheck/check_compare_screens.go; then
   echo "  FAIL [UI-PROTO-DIFF-HONEST-001]: 解析失败时没有判红 —— NaN 被当成通过就是假绿。" >&2
   exit 1
 fi
-if ! grep -qF 'Math.round(diffPixels)' scripts/compare-screens.mjs; then
+if ! grep -qF 'math.Round(diffPixels)' apps/api-go/cmd/gatecheck/check_compare_screens.go; then
   echo "  FAIL [UI-PROTO-DIFF-HONEST-001]: 差异像素没有取整 —— HDRI 构建返回浮点会让人以为工具坏了。" >&2
   exit 1
 fi
+if ! grep -qF 'couldNotStart(runErr)' apps/api-go/cmd/gatecheck/check_compare_screens.go; then
+  echo "  FAIL [UI-PROTO-DIFF-HONEST-001]: 没区分「启动失败」与「退出码非零」—— 每个真差异都会被" >&2
+  echo "        当成工具坏掉。跑 /usr/bin/false 拿到的 *exec.ExitError 必须走差异分支。" >&2
+  exit 1
+fi
+require_test "UI-PROTO-DIFF-HONEST-001" "./cmd/gatecheck" \
+  "TestUnparseableMetricIsNeverWithinThreshold" \
+  "apps/api-go/cmd/gatecheck/check_pixel_pipeline_test.go" || exit $?
+require_test "UI-PROTO-DIFF-HONEST-001" "./cmd/gatecheck" \
+  "TestNonZeroExitIsNotASpawnFailure" \
+  "apps/api-go/cmd/gatecheck/check_pixel_pipeline_test.go" || exit $?
 # 端到端自检：拿基准跟自己比必须是 0 差异 PASS。这一步真的跑 magick（需要 ImageMagick）；
 # 没有就跳过，不判红 —— 「这台机器没装比对工具」不是代码缺陷。
 if command -v magick >/dev/null 2>&1 || command -v compare >/dev/null 2>&1; then
-  _bl=$(python3 -c "
-import json,os
-p='docs/design/baseline-images/manifest.json'
-print(next((m['image'] for m in json.load(open(p))['prototypes'].values()),'')) if os.path.exists(p) else print('')" 2>/dev/null)
+  _bl=$(jq -r '[(.prototypes // {}) | .[] | .image? // empty] | (first // "")' docs/design/baseline-images/manifest.json 2>/dev/null)
   if [ -n "$_bl" ] && [ -f "$_bl" ]; then
-    if ! node scripts/compare-screens.mjs --pixel "$_bl" --for "$(basename "$_bl" .png)" >/dev/null 2>&1; then
+    if ! gatecheck compare-screens --pixel "$_bl" --for "$(basename "$_bl" .png)" >/dev/null 2>&1; then
       echo "  FAIL [UI-PROTO-DIFF-HONEST-001]: 基准跟自己比都不是 PASS —— 像素比对链路坏了。" >&2
-      echo "        手跑：node scripts/compare-screens.mjs --pixel $_bl --for $(basename "$_bl" .png)" >&2
+      echo "        手跑：gatecheck compare-screens --pixel $_bl --for $(basename "$_bl" .png)" >&2
       exit 1
+    fi
+    # 反向自检：改一个像素就必须报出非零差异数。只测「相等 → 0」会漏掉整条读取链路
+    # 全废的情形（永远报 0 也同样 PASS 自比对）。
+    _shot=/tmp/ui-proto-diff-selfshot-$$.png
+    if magick "$_bl" -fill black -draw "rectangle 2,2 60,60" "$_shot" 2>/dev/null; then
+      _mut=$(gatecheck compare-screens --pixel "$_shot" --for "$(basename "$_bl" .png)" --threshold 0.0001 2>/dev/null || true)
+      rm -f "$_shot"
+      if ! printf "%s" "$_mut" | grep -qE '差异像素 [1-9][0-9]*'; then
+        echo "  FAIL [UI-PROTO-DIFF-HONEST-001]: 画了 3400 个像素的方块，比对却没报出非零差异数" >&2
+        echo "        （读到的原始输出是空或 0）—— 差异数根本不是从 magick 那里拿来的。" >&2
+        exit 1
+      fi
     fi
   fi
 fi
-echo "    UI-PROTO-DIFF-HONEST-001: PASS (spawnSync 取 stderr · 解析失败判红 · 像素取整 · 自比对通过)"
+echo "    UI-PROTO-DIFF-HONEST-001: PASS (stderr 取差异数 · 解析失败判红 · 像素取整 · 非零退出算差异不算崩溃 · 自比对 0 差异且画块能报非零)"
 
 # UI-PROTO-CROP-MATCH-001（2026-09-30）：manifest 里 reviewStageCrop 标记必须与原型实际
 # 结构一致 —— 否则渲染会静默给出一张**被横向裁掉的废基准图**，而门禁全绿。
@@ -11817,24 +12437,12 @@ echo "    UI-PROTO-DIFF-HONEST-001: PASS (spawnSync 取 stderr · 解析失败�
 # CSS 里的 grid-template-columns，不是文件名（文件名不承诺结构）。判据变了但没人重渲
 # ⇒ 基准图是旧的（可能被 UI-PROTO-ALIGN-001 的指纹检查抓到），但**重渲之后**渲染路径
 # 也会跟着变 —— 这条门禁盯的就是「重渲后标记对不对」。
-_mismatch=$(node -e '
-const fs=require("fs"), path=require("path");
-const m=JSON.parse(fs.readFileSync("docs/design/baseline-images/manifest.json","utf8"));
-const bad=[];
-for (const [name,meta] of Object.entries(m.prototypes||{})) {
-  const html=path.join("docs/design/references", path.basename(meta.source));
-  if (!fs.existsSync(html)) continue;
-  const isStage=/\.proto\s*\{[^}]*grid-template-columns/.test(fs.readFileSync(html,"utf8"));
-  if (Boolean(meta.reviewStageCrop) !== isStage) {
-    bad.push(`${name} (manifest=${!!meta.reviewStageCrop} 实际=${isStage})`);
-  }
-}
-console.log(bad.join("; "));
-' 2>/dev/null || echo "")
-if [ -n "$_mismatch" ]; then
-  echo "  FAIL [UI-PROTO-CROP-MATCH-001]: 评审台标记与原型实际结构不符：${_mismatch}" >&2
+# 判据与渲染器共用同一个函数（gatecheck 的 isReviewStage），所以「检查用的规则」和
+# 「渲染用的规则」不会再各写一份然后分叉 —— 那才是这个标记最原始的坑。
+if ! gatecheck crop-markers >/dev/null; then
+  echo "  FAIL [UI-PROTO-CROP-MATCH-001]: 评审台标记与原型实际结构不符（明细见上一行）。" >&2
   echo "        不符意味着渲染时用了错的裁切策略 —— 基准图是被横向切掉的废图。" >&2
-  echo "        重跑 node scripts/render-prototypes.mjs --force。" >&2
+  echo "        重跑 gatecheck render-prototypes --force。" >&2
   exit 1
 fi
 echo "    UI-PROTO-CROP-MATCH-001: PASS (reviewStageCrop 标记与原型结构一致)"
@@ -11850,33 +12458,25 @@ echo "    UI-PROTO-CROP-MATCH-001: PASS (reviewStageCrop 标记与原型结构�
 #
 # 顺带把状态枚举钉住（2026-09-30 另一路已为 CURRENT_BASELINE 的两个枚举加了校验，
 # 这里补的是 IMPLEMENTATION_CONTRACTS 的 status —— 它同样是拼错就等于把这条检查关掉的枚举）。
-contract_bad=$(node -e '
-const fs=require("fs");
-const d=JSON.parse(fs.readFileSync("docs/design/IMPLEMENTATION_CONTRACTS.json","utf8"));
-const VALID=new Set(["IMPLEMENTED","PARTIAL","SCAFFOLD_ONLY"]);
-const bad=[];
-for (const c of (d.contracts||[])) {
-  if (!VALID.has(c.status)) bad.push(`非法 status "${c.status}" (scope=${c.scope})`);
-  for (const f of (c.implementationFiles||[])) if (!fs.existsSync(f)) bad.push(`${c.scope} → ${f} 不存在`);
-  if (typeof c.reference==="string" && c.reference && !fs.existsSync(c.reference)) bad.push(`${c.scope} → reference ${c.reference} 不存在`);
-  if (!(c.implementationFiles||[]).length) bad.push(`${c.scope} 没有 implementationFiles（等于没声明实现）`);
-}
-console.log(bad.join("; "));
-' 2>/dev/null || echo "")
-if [ -n "$contract_bad" ]; then
-  echo "  FAIL [DESIGN-CONTRACT-REFS-001]: IMPLEMENTATION_CONTRACTS 声明与仓库实况不符：" >&2
-  echo "        ${contract_bad}" >&2
-  echo "        三种成因：" >&2
-  echo "        · status 不在 {IMPLEMENTED, PARTIAL, SCAFFOLD_ONLY} —— 拼错即等于关掉这条检查" >&2
-  echo "        · implementationFiles / reference 指向的文件不存在 —— 文件改名后合同会静默失效" >&2
-  echo "          （check-design-baseline 的 deleted 豁免让缺文件不报错）" >&2
-  echo "        · implementationFiles 为空 —— 等于这份合同没有声明任何实现" >&2
+# 纯数据判断（status 枚举、空 implementationFiles）交给 jq，文件存在性交给 bash。
+# 原来这里是 `node -e '…' 2>/dev/null || echo ""` —— JSON 读不进去时输出空串，于是
+# 「合同文件坏了/不存在」和「一切正常」完全同色。现在读不进去直接判红。
+# 这段现在住在 scripts/check-design-contract-refs.sh（独立可执行 + 自带变异自测）。
+# 搬出去的原因本身就是这条钉要防的病：它内联在 12k 行的脚本里时，谁也没法单独把它
+# 跑红，于是它坏掉（jq 少了输入文件参数 + bash 把 tab 当 IFS 空白吞掉空字段，存在性
+# 循环整段变死代码）而这里照绿。
+if ! bash scripts/check-design-contract-refs.sh; then
+  echo "        ↑ 合同声明与仓库实况不符 —— 见 scripts/check-design-contract-refs.sh" >&2
   exit 1
 fi
-_contract_n=$(node -e '
-const fs=require("fs");
-console.log((JSON.parse(fs.readFileSync("docs/design/IMPLEMENTATION_CONTRACTS.json","utf8")).contracts||[]).length)' 2>/dev/null || echo 0)
-echo "    DESIGN-CONTRACT-REFS-001: PASS (${_contract_n} 个合同：status 合法 · 实现文件与 reference 均存在)"
+# BASH-IFS-TAB-COLLAPSE-001（2026-10-02）：门禁自己也要有「点它一下它会痛」的证据。
+# 上一段绿 **不构成**证据 —— 它绿过一次而 95 条路径一条都没查。这里拿真变异输入
+# （status 拼错 / 路径指向不存在的文件 / implementationFiles 空或非数组 / contracts 缺失
+# / JSON 截断，共 15 条）逐条要求变红，任何一条不痛就说明检查已经空转，判红。
+if ! bash scripts/check-design-contract-refs.sh --selftest; then
+  echo "        ↑ 变异测试失败：检查对已知破坏无反应 = 空守卫（BASH-IFS-TAB-COLLAPSE-001）" >&2
+  exit 1
+fi
 
 # UI-TYPOGRAPHY-MIN-001（2026-09-30，用户裁决：「不能太小」）。
 #
@@ -11917,16 +12517,20 @@ _proto_small=$(grep -rhoE 'font-size:\s*(10\.5|9\.5|9|8\.5|8|7\.5|7|6\.8|6\.5)px
 if [ "$_proto_small" != "0" ]; then
   echo "  FAIL [UI-TYPOGRAPHY-MIN-001]: 原型里还有 ${_proto_small} 处 <11px 字号（CSS 块与行内 style 都算）。" >&2
   echo "        用户裁决：「不能太小」—— 11px 是全 App 最小正文级别，装饰性小字也不例外。" >&2
-  echo "        改完必须重跑 node scripts/render-prototypes.mjs，否则基准图与原型不一致。" >&2
+  echo "        改完必须重跑 gatecheck render-prototypes，否则基准图与原型不一致。" >&2
   grep -rnoE 'font-size:\s*(10\.5|9\.5|9|8\.5|8|7\.5|7|6\.8|6\.5)px' docs/design/references/*.html 2>/dev/null | head -5 >&2
   exit 1
 fi
 # token 侧：scale 里不许再出现 <11 的值；10 必须同时标在 navOnly。
-_tscale=$(node -e '
-const fs=require("fs");
-const d=JSON.parse(fs.readFileSync("Proxy_App_Design_Tokens_R3.json","utf8"));
-const bad=(d.typography.scale||[]).filter(v=>v<11 && !(d.typography.navOnly||[]).includes(v));
-console.log(bad.join(","));' 2>/dev/null || echo "")
+if ! _tscale=$(jq -r '
+  (.typography.scale // []) as $s
+  | (.typography.navOnly // []) as $nav
+  | [ $s[] as $v | select($v < 11) | select(($nav | index($v)) == null) | ($v | tostring) ]
+  | join(",")
+' Proxy_App_Design_Tokens_R3.json 2>&1); then
+  echo "  FAIL [UI-TYPOGRAPHY-MIN-001]: 读不了 Proxy_App_Design_Tokens_R3.json 的 typography —— ${_tscale}" >&2
+  exit 1
+fi
 if [ -n "$_tscale" ]; then
   echo "  FAIL [UI-TYPOGRAPHY-MIN-001]: token 的 typography.scale 里有未标注的 <11px 值：${_tscale}" >&2
   echo "        收编它们等于用门禁把违规合法化。要放开规则，先改 R3 文档。" >&2
@@ -11975,7 +12579,8 @@ echo "    DOC-PATH-DRIFT-001: PASS (活文档无 work/kake 操作性引用 · AG
 # 管道的退出码取 tail，崩了也当成功。脚本照样打出「51 cases 通过」并以 0 退出。
 # **六例一次都没跑成，报告说全过。**
 #
-# 现在 scripts/account-matrix.mjs 在仓库里（不放 /tmp），并且：
+# 现在它是仓库里的 Go 命令（apps/api-go/cmd/account-matrix，2026-10-02 从
+# scripts/account-matrix.mjs 搬过来 —— 门禁的工具链只有 Go，不留 node），并且：
 #   - 先探 /health/live，API 不在就**大声判红**而不是含糊过去；
 #   - 并发 12 次要求 token 互不相同（会话串扰只在这里露出来）；
 #   - 幂等重放必须收敛到同一会话；
@@ -11984,7 +12589,7 @@ echo "    DOC-PATH-DRIFT-001: PASS (活文档无 work/kake 操作性引用 · AG
 #     被接受是加法演进，不是缺陷 —— 断言照契约写，不照想象写。
 if curl -sf --noproxy '*' --max-time 3 http://127.0.0.1:4100/health/live >/dev/null 2>&1; then
   # 出口码必须跟着结论走：管道 / tail 会吃掉子进程失败，所以脚本内部不接管道。
-  node scripts/account-matrix.mjs >/tmp/account-matrix-gate.log 2>&1 || {
+  go -C apps/api-go run ./cmd/account-matrix >/tmp/account-matrix-gate.log 2>&1 || {
     echo "  FAIL [ACCOUNT-MATRIX-001]: 账户真链路检查没过 —— 完整输出：" >&2
     tail -n 20 /tmp/account-matrix-gate.log | sed 's/^/        /' >&2
     rm -f /tmp/account-matrix-gate.log
@@ -12138,7 +12743,23 @@ fi
 #   3. **管线的帖子能从 /v1/feed 读出来**。这是唯一真正对应用户诉求的一条 ——
 #      "库里有行"不等于"For You 里看得到"，上一条 DEV-SEED 的教训。
 # 头像复用（30 个 creator 肖像轮转）是允许的，不判红。
-_pipe_s=scripts/dev-feed-pipeline.mjs
+#
+# 2026-10-02：管线从 scripts/dev-feed-pipeline.mjs 搬进 Go（cmd/devdata），门禁的工具链
+# 里不留 node。守卫条件跟着换成 Go 命令的源文件 —— **这条必须跟着换**：守卫写的是
+# `[ -f 脚本 ]`，脚本一删整块检查就静默跳过、门禁照样绿，正是本仓反复踩的"空绿"。
+# 搬运过程里**真找出来**的一个 bug（不是预防性的）：launchd 那行是
+# `go -C apps/api-go run ./cmd/devdata feed-pipeline`，`-C` 会把子进程的 cwd 落在
+# apps/api-go 里，于是基于 cwd 找 `.env` 的版本读不到 DATABASE_URL —— 每个 tick
+# 都死在"读不到 DATABASE_URL"，而上面几条历史判据一条都不会红。node 版之所以没这
+# 个问题，是因为它写了绝对默认路径（PROXY_ROOT || "/Users/.../proxy"）——那是巧合，
+# 不是设计，所以这里用测试把**形状**钉住，而不是钉住那个巧合。
+require_test "DEV-FEED-PIPELINE-001" "./cmd/devdata" \
+  "TestRepoRootResolvesFromModuleSubdirectory" \
+  "apps/api-go/cmd/devdata/main_test.go" || exit $?
+require_test "DEV-FEED-PIPELINE-001" "./cmd/devdata" \
+  "TestDatabaseURLReadsRepoEnvFromModuleDirectory" \
+  "apps/api-go/cmd/devdata/main_test.go" || exit $?
+_pipe_s=apps/api-go/cmd/devdata/feed_pipeline.go
 if [ -f "$_pipe_s" ]; then
   if ! launchctl list 2>/dev/null | grep -q 'com.user.proxy-dev-feed-pipeline'; then
     echo "  FAIL [DEV-FEED-PIPELINE-001]: dev-feed-pipeline 的 launchd 任务没加载 —— 管线不在跑。" >&2
@@ -12186,8 +12807,22 @@ if [ -f "$_pipe_s" ]; then
       echo "        这正是用户报的「for you 没看到新增的用户」—— 库里有不等于界面看得到。" >&2
       exit 1
     fi
+    # 最新一帖必须**新鲜**（定时器每 5 分钟一条，给到 20 分钟）。
+    #
+    # 为什么单独钉这一条：launchd 任务"已加载"不等于"还在产出"。2026-10-02 管线搬进
+    # Go 之后，plist 若还指着被删掉的 .mjs，每个 tick 都会静默失败 —— 而上面几条判据
+    # （launchctl 里有 / 库里几百帖 / feed 前 25 条读得到 devpipe）全是**对历史数据**
+    # 的判断，一条都不会红。只有"最近还在长"抓得住这种失效，所以必须有。
+    _page="$(psql "${_pdsn}" -tAc "SELECT round(extract(epoch FROM now() - max(created_at)) / 60)::int
+        FROM localnet.posts WHERE id LIKE 'post_devpipe_%'" 2>/dev/null || echo '')"
+    if [ -z "${_page}" ] || [ "${_page}" -gt 20 ]; then
+      echo "  FAIL [DEV-FEED-PIPELINE-001]: 最新一条管线帖是 ${_page:-无} 分钟前的 —— 定时器没在产出新内容。" >&2
+      echo "        看 plist 实际跑的那行命令还在不在：launchctl list | grep dev-feed，" >&2
+      echo "        以及 ~/Library/Logs/proxy/dev-feed-pipeline.err.log。" >&2
+      exit 1
+    fi
     _pcnt="$(psql "${_pdsn}" -tAc "SELECT count(*) FROM localnet.posts WHERE id LIKE 'post_devpipe_%'" 2>/dev/null || echo 0)"
-    echo "    DEV-FEED-PIPELINE-001: PASS (launchd 已加载 · ${_pcnt} 帖 · 句柄唯一 · 头像复用但资产真实 · ${_pf})"
+    echo "    DEV-FEED-PIPELINE-001: PASS (launchd 已加载 · ${_pcnt} 帖 · 最近 ${_page} 分钟前还在长 · 句柄唯一 · 头像复用但资产真实 · ${_pf})"
   else
     echo "    DEV-FEED-PIPELINE-001: SKIP (开发库不可达)"
   fi
@@ -12207,7 +12842,7 @@ fi
 # 并给开发用户铺真实城市坐标。判据钉的是**每一档都非空** ——
 # 第一版只挑了 4 个城市，跑出来 100-200km 和 200-500km 是空档，切到 200km
 # 会一个都筛不到。所以"档位存在"不等于"那一档有内容"。
-if [ -f scripts/dev-distance-tiers.mjs ]; then
+if [ -f apps/api-go/cmd/devdata/distance_tiers.go ]; then
   _tdsn="$(grep -o '^DATABASE_URL=.*' .env 2>/dev/null | sed 's/^DATABASE_URL=//')"
   if [ -n "${_tdsn}" ] && psql "${_tdsn}" -tAc 'SELECT 1' >/dev/null 2>&1; then
     # 分层用**独立于脚本**的 psql haversine 现算：只有脚本自己报告自己正确，
@@ -12231,7 +12866,8 @@ if [ -f scripts/dev-distance-tiers.mjs ]; then
     if [ -n "${_empty_tiers}" ]; then
       echo "  FAIL [DEV-DISTANCE-TIERS-001]: 距离分层有空档：${_empty_tiers}" >&2
       echo "        切到那个半径会一个都筛不到 —— 「档位存在」不等于「那一档有内容」。" >&2
-      echo "        补城市：node scripts/dev-distance-tiers.mjs（TIERS 里按实际距离选点）。" >&2
+      echo "        补城市：改 apps/api-go/cmd/devdata/distance_tiers.go 的 tiers（按实际距离选点），" >&2
+      echo "        再跑 go -C apps/api-go run ./cmd/devdata distance-tiers。" >&2
       exit 1
     fi
     # 移动端档位必须真的包含 200 / 500 / 1000 —— 用户明确要的三个。
@@ -12431,13 +13067,27 @@ if ! safety_strip_comments < "$SAFETY_SERVER" | grep -qE 'DeliveredToContacts:[[
 fi
 
 # ② 免责声明必须在客户端里，且文案要真的说出「不会自动通知」。
+#
+# I18N-SAFETY-002（2026-10-01）：那句中文**搬进了字典**（i18n.ts 的
+# safetyDeliveryDisclaimer，safety-event-card 调用 deliveryDisclaimer(lang)）。
+# 所以判据跟着搬 —— 但**只许跟着搬，不许变松**：原来这里只查中文一份，现在
+# 查的是「函数还在 + 函数确实调了字典 + 六种语言每一种都还否定自动通知」。
+# 后两条由 src/i18n-safety-net.test.ts 钉（它逐语言核对否定词，而不是只看键
+# 在不在 —— 把同一句中文塞进六份也能骗过「键都在」）。
+#
+# ⚠️ 这条不许被改回「只看中文那份」：那正是翻译最容易稀释掉的东西。
 if ! grep -qF 'export function deliveryDisclaimer' "$SAFETY_CLIENT" ||
-   ! grep -qF '不会自动通知' "$SAFETY_CLIENT"; then
+   ! grep -qF 'translate(lang, "safetyDeliveryDisclaimer")' "$SAFETY_CLIENT"; then
   echo "  FAIL [SAFETY-NET-001]: 客户端少了「平台不会自动通知紧急联系人」这句 ——" >&2
   echo "        不写清楚，用户会以为联系人已经收到消息，于是不去自己打电话。" >&2
   exit 1
 fi
-if ! safety_strip_comments < "$SAFETY_CARD" | grep -qF 'deliveryDisclaimer()'; then
+if ! grep -qF 'safetyDeliveryDisclaimer: "平台目前不会自动通知你的紧急联系人' apps/mobile/src/i18n.ts; then
+  echo "  FAIL [SAFETY-NET-001]: 免责声明的中文原文不在字典里了 ——" >&2
+  echo "        翻译可以搬走，但那句「不会自动通知」不能在搬走的过程中丢掉。" >&2
+  exit 1
+fi
+if ! safety_strip_comments < "$SAFETY_CARD" | grep -qF 'deliveryDisclaimer(lang)'; then
   echo "  FAIL [SAFETY-NET-001]: 免责声明没有被渲染 ——" >&2
   echo "        函数在但界面不显示，等于没写。" >&2
   exit 1
@@ -12582,7 +13232,6 @@ if [ -d "$_mobile_src" ] && [ -f scripts/check-mobile-parses-with-metro.mjs ]; t
     echo "        这类错误在 CI/单测里全绿，只在模拟器白屏时才暴露。" >&2
     exit 1
   fi
-  _babel_n=$(node -e 'console.log("ok")' 2>/dev/null && echo "")
   echo "    MOBILE-METRO-PARSE-001: PASS (全部移动端源文件可被 Metro 的 Babel parser 解析)"
 fi
 
@@ -12597,13 +13246,1706 @@ fi
 #
 # 这是 MOBILE-METRO-PARSE-001 的姊妹条：那条查"Metro 打不了包"，这条查"能打包但
 # React 运行时炸"。两者都是"编译全绿、真机才炸"的形态。
-if [ -f scripts/check-hooks-not-in-conditional.mjs ]; then
-  if ! node scripts/check-hooks-not-in-conditional.mjs; then
+# 检查器本体是 Go 命令（gatecheck hooks-not-in-conditional）。原来的写法是
+# `if [ -f scripts/check-hooks-not-in-conditional.mjs ]` —— 文件不在就整条静默跳过，
+# 于是「删掉检查器」和「检查通过」长得一模一样。现在缺文件判红。
+if [ ! -f apps/api-go/cmd/gatecheck/check_hooks.go ]; then
+  echo "  FAIL [MOBILE-HOOKS-001]: 检查器 apps/api-go/cmd/gatecheck/check_hooks.go 不存在 —— " >&2
+  echo "        「跑不起来」不等于「没有违规」，判红。" >&2
+  exit 1
+fi
+if ! gatecheck hooks-not-in-conditional; then
     echo "  FAIL [MOBILE-HOOKS-001]: 有 hook 不在组件顶层（可能位于条件 / IIFE / 回调里）——" >&2
     echo "        hook 数量在两次渲染之间会变，React 抛「Rendered more hooks than" >&2
     echo "        during the previous render」。**tsc / vitest / Babel / Metro 全查不出来**，" >&2
     echo "        只有真机运行时才炸。" >&2
     exit 1
+fi
+echo "    MOBILE-HOOKS-001: PASS (全部 hook 在组件顶层 —— 条件位置会导致运行时 hook 顺序错误)"
+
+# 上面那条在**当前仓库**跑绿只说明「现在没违规」，不说明检查器还活着。所以这里
+# 用 fixture 树把它逼红：条件 IIFE 里放一个 useMemo 必须红、扫到 0 个文件或 0 处
+# hook 调用必须红（读错树 ≠ 通过，和 BASH-IFS-TAB-COLLAPSE-001 同一类空守卫）、
+# 干净树必须绿。搬 Go 时这三条都是实测出来的：第一版 fixture 缩进 4 判绿（阈值
+# 是 >4），空 src 目录判绿 —— 于是加了 candidates 空输入守卫。
+require_test "MOBILE-HOOKS-001" "./cmd/gatecheck" \
+  "TestHooksGateFlagsConditionalIIFEHook" \
+  "apps/api-go/cmd/gatecheck/check_hooks_test.go" || exit $?
+require_test "MOBILE-HOOKS-001" "./cmd/gatecheck" \
+  "TestHooksGateRejectsEmptyScan" \
+  "apps/api-go/cmd/gatecheck/check_hooks_test.go" || exit $?
+require_test "MOBILE-HOOKS-001" "./cmd/gatecheck" \
+  "TestHooksGateAcceptsTopLevelHooks" \
+  "apps/api-go/cmd/gatecheck/check_hooks_test.go" || exit $?
+
+# DEPRECATION-01：同样给 deprecated-routes 补「能变红」的钉。历史 bug 就是这个
+# node 脚本「文件不在就打 SKIP 然后 exit 0」—— 删掉它守护的那个屏幕反而算通过。
+require_test "DEPRECATION-01" "./cmd/gatecheck" \
+  "TestDeprecatedRoutesGateRejectsMissingScreen" \
+  "apps/api-go/cmd/gatecheck/check_deprecated_routes_test.go" || exit $?
+require_test "DEPRECATION-01" "./cmd/gatecheck" \
+  "TestDeprecatedRoutesGateRejectsExperienceTab" \
+  "apps/api-go/cmd/gatecheck/check_deprecated_routes_test.go" || exit $?
+require_test "DEPRECATION-01" "./cmd/gatecheck" \
+  "TestDeprecatedRoutesGateRejectsQrInPersonalHub" \
+  "apps/api-go/cmd/gatecheck/check_deprecated_routes_test.go" || exit $?
+require_test "DEPRECATION-01" "./cmd/gatecheck" \
+  "TestDeprecatedRoutesGateAcceptsCleanScreens" \
+  "apps/api-go/cmd/gatecheck/check_deprecated_routes_test.go" || exit $?
+
+# DOCK-NATIVE-FREEZE-001：liquid-dock 也是同一形态的钉（gatecheck liquid-dock 本身
+# 只在 pnpm check:liquid-dock 里跑，全量门禁过去从不执行它 —— 搬 Go 时顺手补上）。
+# 钉的是「检查器还活着」：删掉原生视图、把 iOS 分支改成别的平台、拆掉 Android 玻璃
+# 兜底，三种都必须红。
+require_test "DOCK-NATIVE-FREEZE-001" "./cmd/gatecheck" \
+  "TestLiquidDockGateRejectsDeletedNativeView" \
+  "apps/api-go/cmd/gatecheck/check_liquid_dock_test.go" || exit $?
+require_test "DOCK-NATIVE-FREEZE-001" "./cmd/gatecheck" \
+  "TestLiquidDockGateRejectsMissingNativeBranch" \
+  "apps/api-go/cmd/gatecheck/check_liquid_dock_test.go" || exit $?
+require_test "DOCK-NATIVE-FREEZE-001" "./cmd/gatecheck" \
+  "TestLiquidDockGateRejectsRemovedAndroidFallback" \
+  "apps/api-go/cmd/gatecheck/check_liquid_dock_test.go" || exit $?
+
+# SETTINGS-HUB-ROW-ICONS-001（2026-10-01，用户连报两轮「还是没有logo」）：
+# 设置入口页（SETTINGS-HUB-001，me.tsx 的 appbehavior 分支）的四行此前是
+# 裸 label + ›，而原型 deepseek_html_20261001_726714.html 每行都有 .item-icon。
+# 教训：第一轮把图标加进了过期 checkout（~/work/kake），运行中的 app 由本仓库
+# 的 Metro 供包 —— 改对了文件也没用。这里钉「图标 + 它自己那行的 label」**配对**
+# （见下面为什么不再数 settingsHubRowMain 的次数），删任何一个图标都红；
+# 「联合类型里声明了但 switch 没实现」和「emoji 顶替描边图标」也红。
+HUB_ROW_ICONS_ME=apps/mobile/src/surfaces/me.tsx
+HUB_ROW_ICONS_ICON=apps/mobile/src/components/proxy-icon.tsx
+if [ -f "$HUB_ROW_ICONS_ME" ] && [ -f "$HUB_ROW_ICONS_ICON" ]; then
+  if [ ! -f apps/mobile/src/settings-hub-row-icons.test.ts ]; then
+    echo "  FAIL [SETTINGS-HUB-ROW-ICONS-001]: the settings hub row icons regression test is missing." >&2
+    exit 1
   fi
-  echo "    MOBILE-HOOKS-001: PASS (全部 hook 在组件顶层 —— 条件位置会导致运行时 hook 顺序错误)"
+  for _icon_name in lock shield pin globe; do
+    _n=$(grep -cF "name=\"$_icon_name\"" "$HUB_ROW_ICONS_ME" || true)
+    if [ "$_n" -ne 1 ]; then
+      echo "  FAIL [SETTINGS-HUB-ROW-ICONS-001]: 设置入口页的行图标丢了（name=\"$_icon_name\" 出现 $_n 次，应恰好 1 次）。" >&2
+      exit 1
+    fi
+  done
+  # 图标必须紧挨着**它自己那一行**的 label（配对钉）。
+  # 原来这里数 `settingsHubRowMain` 的出现次数（4 → 5）—— 那是在数一个**共享样式**，
+  # 而设置页的行只会越加越多（9 行全摆回来后，连「暂不可用」行也复用这个左组），
+  # 别人多加一行合法、钉却红了：假红比不钉更糟。改成钉配对之后，加多少行都不影响。
+  for _pair in "lock:settingsRowAccountSecurity" "shield:settingsRowKyc" "pin:settingsRowLocationPrivacy" "globe:language"; do
+    _icon=${_pair%%:*}
+    _key=${_pair##*:}
+    if ! grep -qE "<ProxyIcon name=\"$_icon\" color=\{color\.ink\} size=\{22\} />" "$HUB_ROW_ICONS_ME" ||
+       ! grep -qF "t(\"$_key\")" "$HUB_ROW_ICONS_ME"; then
+      echo "  FAIL [SETTINGS-HUB-ROW-ICONS-001]: $_icon 这一行的图标或 label 不见了（应为「$_icon + t(\"$_key\")」配对）。" >&2
+      exit 1
+    fi
+  done
+  for _case_name in lock shield globe pin; do
+    if ! grep -qF "case \"$_case_name\":" "$HUB_ROW_ICONS_ICON"; then
+      echo "  FAIL [SETTINGS-HUB-ROW-ICONS-001]: ProxyIcon 的 switch 里没有 case \"$_case_name\":（声明不实现 = 渲染 null 的假绿）。" >&2
+      exit 1
+    fi
+  done
+  pnpm --dir apps/mobile exec vitest run src/settings-hub-row-icons.test.ts || exit $?
+  echo "    SETTINGS-HUB-ROW-ICONS-001: PASS (设置入口页四行各带一个原型描边行图标)"
+fi
+
+# HOME-FORYOU-ORDER-008（2026-10-01，用户「点击 for you 的选择 不能下一步」）：
+# 同一场活动我已经有票时，「选择」原来只弹一句冲突文案 —— 因为
+# resolveConflictSlots() 只会**就地换一场不冲突的活动**，而这个账号把三家咖啡店
+# 场景下的活动全下过了，换不出来（altIndex = -1）⇒ 屏幕上没有任何能走的入口。
+#
+# 守卫不放行是**已裁决**的（服务端 (activity, actor) 只有一行，同场再下单会沿用
+# 原编号刷新票面 = 无声改写原同行人那张票），所以修法不是放行，而是**出路**：
+# CTA 变成「查看这张订单」并打开那张票。这条钉住出路真的接着、且窄口径没回来。
+ORDER008_ME=apps/mobile/src/surfaces/requester-home.tsx
+if [ -f "$ORDER008_ME" ]; then
+  if [ ! -f apps/mobile/src/for-you-existing-order-cta.test.ts ]; then
+    echo "  FAIL [HOME-FORYOU-ORDER-008]: the existing-order CTA regression test is missing." >&2
+    exit 1
+  fi
+  if ! grep -qF 'const existingOrder = myOrders.find((o) => o.activityId === gridActivity.activityId && !o.cancelled);' "$ORDER008_ME"; then
+    echo "  FAIL [HOME-FORYOU-ORDER-008]: existingOrder 不再按「同一场活动有未取消的单」认 ——" >&2
+    echo "        同行人对不上时它会变 undefined，屏幕上又没有入口了（就是这次的病）。" >&2
+    exit 1
+  fi
+  if grep -qF 'const existingOrder = orderConflict?.kind === "ALREADY_ORDERED"' "$ORDER008_ME"; then
+    echo "  FAIL [HOME-FORYOU-ORDER-008]: 窄口径回来了（只在 ALREADY_ORDERED 时才认这单）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'if (existingOrder) { openExistingOrder(existingOrder); return; }' "$ORDER008_ME"; then
+    echo "  FAIL [HOME-FORYOU-ORDER-008]: 「选择」不再在有票时打开那张票（下一步没了）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'disabled={comboBlocked && !existingOrder}' "$ORDER008_ME"; then
+    echo "  FAIL [HOME-FORYOU-ORDER-008]: 有票时按钮会被「四个槽都不可用」置灰 —— 那张票与槽位可用性无关。" >&2
+    exit 1
+  fi
+  if ! grep -qF '{existingOrder ? t("viewExistingOrder") : t("selectComboCta")}' "$ORDER008_ME"; then
+    echo "  FAIL [HOME-FORYOU-ORDER-008]: 按钮上的字不再跟着行为走（有票时必须是「查看这张订单」）。" >&2
+    exit 1
+  fi
+  pnpm --dir apps/mobile exec vitest run src/for-you-existing-order-cta.test.ts || exit $?
+  echo "    HOME-FORYOU-ORDER-008: PASS (有票时「选择」给的是那张票，不是一句没有出口的冲突文案)"
+fi
+
+# HOME-FORYOU-ORDER-009（2026-10-01，用户 P0：「点击圆圈 不是选择 是查看这张订单
+# 我只有几个用户有订单」）：
+#
+# 「我已下过单」原本有**两个来源**：
+#   · myOrders      —— state，mount 时拉一次，决定 CTA 是不是「查看这张订单」；
+#   · joinedByMe    —— refreshAvailableSlots 里**另拉一次** listMyActivities，
+#                      决定刷新挑活动时避开谁。
+# 那次另拉失败时 `.catch(() => new Set<string>())` **静默**变成空集，访客态更是
+# `if (!isGuest)` 压根不拉、恒为空集 ⇒ 刷新以为"你没下过单"，挑回你已有票的那场；
+# 而 CTA 读的 myOrders 仍为真 ⇒ 按钮一直显示「查看这张订单」，点进去就是订单页。
+# 症状只出现在**已经下过单**的人身上，所以用户看到的是"只有几个用户有订单"，
+# 而"点圆圈想换人却总是进订单"读起来像随机故障。
+#
+# 单一事实源：joinedByMe 直接由 myOrders 派生，两个判据从此不可能不一致。
+# 另外 `else if (filteredPeople.length > 1)` 之外原来没有 else —— 候选只剩 0/1 个时
+# 既不换人也不说话，点圆圈像死的；现在给如实反馈。
+ORDER009_ME=apps/mobile/src/surfaces/requester-home.tsx
+ORDER009_TEST=apps/mobile/src/for-you-009-person-pick.test.ts
+if [ -f "$ORDER009_ME" ] && [ -f "$ORDER009_TEST" ]; then
+  # 钉住「刷新路径不再另拉我的活动」。查的是**去掉注释后**的代码 —— 否则修复
+  # 说明里那句「`if (!isGuest)` 压根不拉」会被当成代码，条目自己把自己判红。
+  # 块注释和行注释都要去（sed 那版只去「以引号结尾的行注释」，留了一堆残骸）。
+  ORDER009_SRC=$(perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' "$ORDER009_ME")
+  ORDER009_B=0
+  if printf '%s' "$ORDER009_SRC" | grep -Eq 'joinedByMe[[:space:]]*=[[:space:]]*await[[:space:]]+activities\.listMyActivities'; then
+    echo "  FAIL [HOME-FORYOU-ORDER-009]: joinedByMe 又开始另拉一次 listMyActivities ——" >&2
+    echo "        两个来源打架，刷新会挑回你已有票的活动，CTA 永远是「查看这张订单」。" >&2
+    ORDER009_B=1
+  fi
+  if printf '%s' "$ORDER009_SRC" | grep -Eq 'if[[:space:]]*\([[:space:]]*!isGuest[[:space:]]*\)[^;]{0,240}joinedByMe'; then
+    echo "  FAIL [HOME-FORYOU-ORDER-009]: joinedByMe 又按 isGuest 跳过 ——" >&2
+    echo "        访客态下 joinedByMe 恒为空集，刷新永远认为你没下过单。" >&2
+    ORDER009_B=1
+  fi
+  if ! printf '%s' "$ORDER009_SRC" | grep -Eq 'joinedByMe[[:space:]]*=[[:space:]]*new Set\(myOrders\.map'; then
+    echo "  FAIL [HOME-FORYOU-ORDER-009]: joinedByMe 没有从 myOrders 派生 ——" >&2
+    ORDER009_B=1
+  fi
+  # 钉住"只剩一个人时也给反馈"，别退回静默。候选为 0 和为 1 是两回事，文案不能混。
+  if ! printf '%s' "$ORDER009_SRC" | grep -q 'onlyOneCandidate'; then
+    echo "  FAIL [HOME-FORYOU-ORDER-009]: 只剩一个候选时又变回静默无响应 ——" >&2
+    ORDER009_B=1
+  fi
+  # 钉住**四条分支真的调了纯函数**：上一版只钉 `onlyOneCandidate` 这个字面量，
+  # 结果 pickPersonSlot 写出来了却没人用，测试照样绿 —— 这个仓吃过好几次这种亏。
+  for ORDER009_KIND in free noneFreeButOthers onlyCandidate noCandidates; do
+    if ! printf '%s' "$ORDER009_SRC" | grep -q "personPick.kind === \"$ORDER009_KIND\""; then
+      echo "  FAIL [HOME-FORYOU-ORDER-009]: 分支 \"$ORDER009_KIND\" 没有经过 pickPersonSlot ——" >&2
+      echo "        取号规则搬出去了却没接上，等于还留在原地。" >&2
+      ORDER009_B=1
+    fi
+  done
+  if ! printf '%s' "$ORDER009_SRC" | grep -q 'pickPersonSlot(filteredPeople'; then
+    echo "  FAIL [HOME-FORYOU-ORDER-009]: 组件不再用 pickPersonSlot —— 自己又写了一遍 if。" >&2
+    ORDER009_B=1
+  fi
+  if [ ! -f apps/mobile/src/i18n.ts ] || ! grep -q 'onlyOneCandidateSub:' apps/mobile/src/i18n.ts; then
+    echo "  FAIL [HOME-FORYOU-ORDER-009]: onlyOneCandidate 文案在 i18n 里缺 —— 别让门禁靠英文兜底。" >&2
+    ORDER009_B=1
+  fi
+  [ "$ORDER009_B" -eq 0 ] || exit 1
+  echo "    HOME-FORYOU-ORDER-009: PASS (刷新与 CTA 共用一份「我已下过单」· 候选只剩一人时如实反馈)"
+fi
+
+# HOME-FORYOU-ORDER-010（2026-10-01，用户 P0：「for you 的选择变成查看这张订单」）：
+#
+# ORDER-009 修的是**圆圈刷新**那一下。可用户报的是**首屏**就变成「查看这张订单」
+# ——没人会为了绕开这个状态先去点圆圈。
+#
+# 根因：activityIndex 初始是 `forYouSeed >> 7`，一个种子下标、**不看订单**；
+# sceneActivities 也不排除已下单的。myOrders 还是 mount 之后异步到的。于是首屏
+# 停在��张你已经有票的活动上 → existingOrder 为真 → CTA 一直是「查看这张订单」，
+# 「选择」那条路整个看不见。
+#
+# 修法：myOrders 到齐后（且没锁活动轴）用 resolveActivityIndexAvoidingOrders 挪开。
+# 一个可挪的都没有时**保持不动** —— 那时「查看这张订单」是实话。
+ORDER010_ME=apps/mobile/src/surfaces/requester-home.tsx
+ORDER010_SLOTS=apps/mobile/src/for-you-slots.ts
+if [ -f "$ORDER010_ME" ] && [ -f "$ORDER010_SLOTS" ]; then
+  ORDER010_SRC=$(perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' "$ORDER010_ME")
+  ORDER010_B=0
+  if ! printf '%s' "$ORDER010_SRC" | grep -q 'resolveActivityIndexAvoidingOrders'; then
+    echo "  FAIL [HOME-FORYOU-ORDER-010]: 首屏又不管订单了 —— 停在已下单的活动上，" >&2
+    echo "        CTA 会一直显示「查看这张订单」，「选择」那条路看不见。" >&2
+    ORDER010_B=1
+  fi
+  # 钉住「等 myOrders 到齐才动」，不能拿"还不知道有没有单"当"没有单"——
+  # 那会把首屏指到一个其实已经有票的活动上。
+  if ! printf '%s' "$ORDER010_SRC" | grep -q 'if (myOrders.length === 0) return;'; then
+    echo "  FAIL [HOME-FORYOU-ORDER-010]: 不等订单到齐就挪选中项 ——" >&2
+    ORDER010_B=1
+  fi
+  # 锁了活动轴就不挪，和圆圈同一口径。
+  if ! printf '%s' "$ORDER010_SRC" | grep -q 'if (lockedSlots.has("activity")) return;'; then
+    echo "  FAIL [HOME-FORYOU-ORDER-010]: 锁了活动轴仍然被自动换掉 ——" >&2
+    ORDER010_B=1
+  fi
+  if ! grep -q 'export function resolveActivityIndexAvoidingOrders' "$ORDER010_SLOTS"; then
+    echo "  FAIL [HOME-FORYOU-ORDER-010]: resolveActivityIndexAvoidingOrders 不存在了 ——" >&2
+    ORDER010_B=1
+  fi
+  if [ ! -f apps/mobile/src/for-you-009-person-pick.test.ts ]; then
+    echo "  FAIL [HOME-FORYOU-ORDER-010]: 行为测试文件不见了 ——" >&2
+    ORDER010_B=1
+  fi
+  [ "$ORDER010_B" -eq 0 ] || exit 1
+  echo "    HOME-FORYOU-ORDER-010: PASS (首屏选中项避开已下单 · 全都下过单时保持不动)"
+fi
+
+# MERCHANT-SIGNAL-SEED-001（2026-10-01，用户「经营脉搏 未来需求…都是空的 做数据」）：
+#
+# 根因：business.aggregated_demand_signals 与 business.scene_supply_snapshots 有
+# migration、有 upsert、有读取，但**真实链路里没有任何生产者**。resolver 永远拿到
+# nil ⇒ 经营脉搏恒为 INSUFFICIENT_SIGNAL、未来需求恒为 UNAVAILABLE。
+#
+# 测试期修法是种入静态测试数据。钉住四件事：
+#   1. confidence 只有一个定义（SampleConfidence = n/(n+阈值)），SQL 里的字面量
+#      必须等于它 —— 靠 Go 测试 signal_seed_parity_test.go 盯，这里钉那个测试在。
+#   2. 不许把测试数据种到**真人商家**头上（biz_threebeans_bn 是 weilinxia511 自己
+#      会看到的经营数字）。只落在 devseed 测试账号。
+#   3. source 列必须真的被读出来 —— 只写不读的列等于没有，下次照样能拿测试数字
+#      冒充实测。
+#   4. 种入的信号必须真能解锁结论（否则页面还是空的，等于这次改动没做到）。
+MERCHANT_SEED_SQL=apps/api-go/scripts/seed_merchant_operating_signals.sql
+MERCHANT_SEED_MIG=apps/api-go/migrations/155_merchant_signal_source.sql
+if [ -f "$MERCHANT_SEED_SQL" ] && [ -f "$MERCHANT_SEED_MIG" ]; then
+  MS_B=0
+  if [ ! -f apps/api-go/internal/business/signal_seed_parity_test.go ]; then
+    echo "  FAIL [MERCHANT-SIGNAL-SEED-001]: parity 测试不见了 —— seed 的 confidence 会与" >&2
+    echo "        SampleConfidence 各写各的，改了一处另一处静默漂移。" >&2
+    MS_B=1
+  fi
+  if [ ! -f apps/api-go/internal/business/signal_confidence.go ]; then
+    echo "  FAIL [MERCHANT-SIGNAL-SEED-001]: SampleConfidence 的定义不见了。" >&2
+    MS_B=1
+  fi
+  # 测试期数据不许落到真人商家头上。查的是**去掉 SQL 注释后**的文件：
+  # seed 顶部那段注释正是在解释"为什么不选 biz_threebeans_bn"，连注释一起 grep
+  # 会让这条门禁自己把自己判红（同一个坑：修复说明里复述被禁的写法）。
+  MERCHANT_SEED_CODE=$(sed 's/--.*$//' "$MERCHANT_SEED_SQL")
+  if printf '%s' "$MERCHANT_SEED_CODE" | grep -q "biz_threebeans_bn"; then
+    echo "  FAIL [MERCHANT-SIGNAL-SEED-001]: seed 里出现了 biz_threebeans_bn ——" >&2
+    echo "        那是真人商家（weilinxia511 会看到自己的经营数字），不许塞测试数据。" >&2
+    MS_B=1
+  fi
+  # source 列必须被读出来。只 INSERT 不 SELECT 的列 = 没有这回事。
+  if ! grep -q 'recorded_at,source FROM business.aggregated_demand_signals' apps/api-go/internal/platform/postgres/business.go; then
+    echo "  FAIL [MERCHANT-SIGNAL-SEED-001]: demand 的 source 没被读出来 —— 测试数据会冒充实测。" >&2
+    MS_B=1
+  fi
+  if ! grep -q 'recorded_at,source FROM business.scene_supply_snapshots' apps/api-go/internal/platform/postgres/business.go; then
+    echo "  FAIL [MERCHANT-SIGNAL-SEED-001]: supply 的 source 没被读出来 —— 测试数据会冒充实测。" >&2
+    MS_B=1
+  fi
+  # 页面必须自报家门：那块印着"不会用历史销售冒充附近客流"。
+  if ! grep -q 'merchant-signal-seeded' apps/mobile/src/surfaces/business-home.tsx; then
+    echo "  FAIL [MERCHANT-SIGNAL-SEED-001]: 页面不标「测试数据」 ——" >&2
+    echo "        种进来的数字会冒充算出来的经营信号。" >&2
+    MS_B=1
+  fi
+  if [ ! -f apps/mobile/src/merchant-signal-seeded-badge.test.ts ]; then
+    echo "  FAIL [MERCHANT-SIGNAL-SEED-001]: 标记的行为测试不见了。" >&2
+    MS_B=1
+  fi
+  # 2026-10-02 补齐：6 家店 × 5 种状态。新增一家就掉一张，没人会发现 ——
+  # 所以这里数 demand 行的去重 biz 数，少于 6 就红。
+  MS_BIZ=$(grep -o "'biz_devseed_[0-9]*'" "$MERCHANT_SEED_SQL" | sort -u | wc -l | tr -d ' ')
+  if [ "$MS_BIZ" -lt 6 ]; then
+    echo "  FAIL [MERCHANT-SIGNAL-SEED-001]: seed 只覆盖 $MS_BIZ 家店 ——" >&2
+    echo "        有店的经营页会退回空。加店要连 parity 测试的期望表一起加。" >&2
+    MS_B=1
+  fi
+  [ "$MS_B" -eq 0 ] || exit 1
+  echo "    MERCHANT-SIGNAL-SEED-001: PASS (经营脉搏/未来需求有数据 · confidence 单一来源 · 测试数据自报家门)"
+fi
+
+# CREATOR-AVATAR-001（2026-10-01，用户「creator中心 creator list 不能只是文本list
+# 要有头像啊」）：
+#
+# 同一份 SupplierCandidate（含 photos: string[]）在两个面里画法不一样：横滑卡
+# （merchant-creator-recommendations）画头像，Creator 经营列表
+# （merchant-me-r21-replacement）只把 photos.length 印成「到店 N 媒体」四个��� ——
+# 商家挑 Creator 靠的是脸，那一列少了头像就只是一份通讯录。
+#
+# 钉住两件事：列表那一支必须画照片；照片解析只能有一个实现（各写一份的话，
+# "为什么这边有图那边没有"会变成没法回答的问题）。
+CREATOR_LIST_ME=apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx
+CREATOR_LIST_RAIL=apps/mobile/src/surfaces/merchant-creator-recommendations.tsx
+if [ -f "$CREATOR_LIST_ME" ] && [ -f "$CREATOR_LIST_RAIL" ]; then
+  CA_B=0
+  if [ ! -f apps/mobile/src/creator-avatar-in-list.test.ts ]; then
+    echo "  FAIL [CREATOR-AVATAR-001]: 行为测试不见了。" >&2
+    CA_B=1
+  fi
+  # 只看 visibleCreators.map 那一支：整份文件里出现过 <Image> 说明不了什么。
+  CA_BRANCH=$(awk '/visibleCreators\.map\(\(creator\) =>/{f=1} f{print} f&&/^          \)\) : null\}|style=\{styles\.creatorRow\}/{n++} n>0&&/^          \}\)/{exit}' "$CREATOR_LIST_ME")
+  if ! printf '%s' "$CA_BRANCH" | grep -q 'source={{ uri: avatarUri }}'; then
+    echo "  FAIL [CREATOR-AVATAR-001]: Creator 列表又退回纯文字 ——" >&2
+    echo "        photos 只剩一个数字，商家挑人看不到脸。" >&2
+    CA_B=1
+  fi
+  if ! printf '%s' "$CA_BRANCH" | grep -q 'creatorAvatarMissing'; then
+    echo "  FAIL [CREATOR-AVATAR-001]: 没有照片的人没有如实占位 —— 别用图标假装有头像。" >&2
+    CA_B=1
+  fi
+  # 照片解析必须共用一个实现。
+  if ! grep -q 'export function resolveCreatorPhoto' "$CREATOR_LIST_RAIL"; then
+    echo "  FAIL [CREATOR-AVATAR-001]: resolveCreatorPhoto 不再导出 —— 两个面无法共用。" >&2
+    CA_B=1
+  fi
+  if ! grep -q 'resolveCreatorPhoto' "$CREATOR_LIST_ME"; then
+    echo "  FAIL [CREATOR-AVATAR-001]: 列表不再用共享的照片解析器。" >&2
+    CA_B=1
+  fi
+  if grep -qE '^function resolveCreatorPhoto' "$CREATOR_LIST_ME"; then
+    echo "  FAIL [CREATOR-AVATAR-001]: 列表里自己又实现了一份照片解析 —— 单一事实源没了。" >&2
+    CA_B=1
+  fi
+  [ "$CA_B" -eq 0 ] || exit 1
+  echo "    CREATOR-AVATAR-001: PASS (Creator 列表有头像 · 照片解析单一来源 · 无照片如实占位)"
+fi
+
+# VOUCHER-PRESET-001（2026-10-01，用户「商家的发卷 现在要输入一堆 改为预设好 默认
+# 标准值。商家点击创建就可以」）：
+#
+# 现场不是"默认值没设全"：类型 / 面值 / 数量 / 有效期本来就有默认值。真正把商家挡住
+# 的是「适用范围」初始是空串，而 issue() 硬要求 scope.trim() —— 于是点「创建」只得到
+# 一句「请填写权益价值、数量和适用范围」。一张标准咖啡券是商家最常发的东西。
+#
+# 钉住：预设表存在且每个类型都有；默认预设的适用范围非空（否则又回到填表）；
+# issue() 不再要求 scope；核销规则来自预设而不是藏在代码里；换类型会跟着换预设。
+VOUCHER_PRESETS_TS=apps/mobile/src/voucher-presets.ts
+VOUCHER_UI=apps/mobile/src/surfaces/voucher.tsx
+if [ -f "$VOUCHER_PRESETS_TS" ] && [ -f "$VOUCHER_UI" ]; then
+  VP_B=0
+  if [ ! -f apps/mobile/src/voucher-preset-defaults.test.ts ]; then
+    echo "  FAIL [VOUCHER-PRESET-001]: 行为测试不见了。" >&2
+    VP_B=1
+  fi
+  # 适用范围一旦被清空，商家就被打回填表 —— 这是这条修复的全部内容。
+  if ! grep -q 'scopeName: "本店"' "$VOUCHER_PRESETS_TS"; then
+    echo "  FAIL [VOUCHER-PRESET-001]: 预设没有默认适用范围 —— 商家又得先填表。" >&2
+    VP_B=1
+  fi
+  # 三个类型都得有预设，否则"换类型"变成另一种卡住。
+  for VP_FAMILY in COFFEE EXPERIENCE ACTIVITY; do
+    if ! grep -q "family: \"$VP_FAMILY\"" "$VOUCHER_PRESETS_TS"; then
+      echo "  FAIL [VOUCHER-PRESET-001]: $VP_FAMILY 没有标准预设。" >&2
+      VP_B=1
+    fi
+  done
+  if grep -qE '!scope\.trim\(\)' "$VOUCHER_UI"; then
+    echo "  FAIL [VOUCHER-PRESET-001]: issue() 又开始硬要求适用范围 ——" >&2
+    echo "        商家点「创建」只会看到「请填写…适用范围」。" >&2
+    VP_B=1
+  fi
+  if ! grep -q 'scope.trim() || preset.scopeName' "$VOUCHER_UI"; then
+    echo "  FAIL [VOUCHER-PRESET-001]: 适用范围留空时没有回落到预设。" >&2
+    VP_B=1
+  fi
+  # 核销规则不许再藏在 issue() 里 —— 商家看到的券要对得上他拿到的东西。
+  if grep -qE 'redeemTimeWindow:\s*family === "COFFEE"' "$VOUCHER_UI"; then
+    echo "  FAIL [VOUCHER-PRESET-001]: 核销时段又写死在代码里 —— 界面上看不到。" >&2
+    VP_B=1
+  fi
+  if ! grep -q '按标准预设的核销规则' "$VOUCHER_UI"; then
+    echo "  FAIL [VOUCHER-PRESET-001]: 预设的核销规则没有显示给商家。" >&2
+    VP_B=1
+  fi
+  # 换类型必须换预设，否则只改类型、留着上一套数值。
+  if ! grep -q 'applyPreset(defaultPresetForFamily(next).id)' "$VOUCHER_UI"; then
+    echo "  FAIL [VOUCHER-PRESET-001]: 换类型不再跟随换预设 —— 数值会串。" >&2
+    VP_B=1
+  fi
+  [ "$VP_B" -eq 0 ] || exit 1
+  echo "    VOUCHER-PRESET-001: PASS (商家点创建即可发券 · 标准预设可见可改 · 核销规则不藏)"
+fi
+
+# ACTIVITY-COVER-001（2026-10-01，用户「做活动 商家活动吧 活动图片资产」）：
+#
+# 活动封面此前是一个**没有写入者**的字段：Activity.CoverImageURL 在 R17.x 就预留了，
+# 两个客户端 surface 都在读它，而全仓没有任何一处会设置它 —— 每张活动的封面都是空的。
+#
+# 现在封面走媒体管线的**资产 id**：商家先上传拿 mediaAssetId，发布时带上来，客户端据此
+# 拼 `/v1/media/thumb/<id>`（与门店相册 / 场景照片墙同一套）。
+#
+# 钉住四件事：
+#   1. 服务端收 id 且**校验形状** —— 这个值会被拼成 URL，含 "://" 就能指向任意外部地址。
+#   2. 封面是可选的 —— 不传也必须能发布，否则"没配图"变成"发不出活动"。
+#   3. thumb URL 只有一处拼法（这个拼法原本散在三处，媒体路由改一次要改三个地方）。
+#   4. 商家发活动时真的能选图上传（只读字段不算接通）。
+ACTIVITY_COVER_GO=apps/api-go/internal/activity/service.go
+ACTIVITY_COVER_UI=apps/mobile/src/surfaces/activity-wizard.tsx
+if [ -f "$ACTIVITY_COVER_GO" ] && [ -f "$ACTIVITY_COVER_UI" ]; then
+  AC_B=0
+  if [ ! -f apps/api-go/internal/activity/cover_asset_test.go ]; then
+    echo "  FAIL [ACTIVITY-COVER-001]: 服务端行为测试不见了。" >&2
+    AC_B=1
+  fi
+  if [ ! -f apps/mobile/src/activity-cover-uri.test.ts ]; then
+    echo "  FAIL [ACTIVITY-COVER-001]: thumb URL 的行为测试不见了。" >&2
+    AC_B=1
+  fi
+  # 收 id 不收 URL：不校验形状的话，https:// 开头就能指定渲染哪张图。
+  if ! grep -q 'isValidCoverAssetID(p.CoverMediaAssetID)' "$ACTIVITY_COVER_GO"; then
+    echo "  FAIL [ACTIVITY-COVER-001]: 封面资产 id 不再校验形状 ——" >&2
+    echo "        它会被拼成 URL，含 :// 就能指向任意外部地址。" >&2
+    AC_B=1
+  fi
+  # 传了必须落在活动上，否则商家传了图、别人那边还是空的。
+  if ! grep -q 'CoverMediaAssetID: p.CoverMediaAssetID' "$ACTIVITY_COVER_GO"; then
+    echo "  FAIL [ACTIVITY-COVER-001]: 发布时不记录封面资产 id —— 字段又变成没有写入者。" >&2
+    AC_B=1
+  fi
+  # thumb URL 单一来源：组件里不该再自己拼。
+  if [ ! -f apps/mobile/src/media-thumb-url.ts ]; then
+    echo "  FAIL [ACTIVITY-COVER-001]: 共享 thumb URL helper 不见了。" >&2
+    AC_B=1
+  fi
+  if grep -q 'v1/media/thumb/' "$ACTIVITY_COVER_UI"; then
+    echo "  FAIL [ACTIVITY-COVER-001]: 活动发布面里自己拼了 thumb URL —— 单一来源没了。" >&2
+    AC_B=1
+  fi
+  # 商家得真能选图上传，否则这条只是加了字段。
+  if ! grep -q 'pickCover' "$ACTIVITY_COVER_UI"; then
+    echo "  FAIL [ACTIVITY-COVER-001]: 发活动面没有选图入口 —— 商家传不了封面。" >&2
+    AC_B=1
+  fi
+  if ! grep -q 'coverMediaAssetId: coverAssetId' "$ACTIVITY_COVER_UI"; then
+    echo "  FAIL [ACTIVITY-COVER-001]: 发布时没把封面资产带上。" >&2
+    AC_B=1
+  fi
+  [ "$AC_B" -eq 0 ] || exit 1
+  echo "    ACTIVITY-COVER-001: PASS (活动封面走媒体资产 · 形状校验 · thumb URL 单一来源 · 可选)"
+fi
+
+# MERCHANT-HOME-001/002/004（2026-10-02，用户「核心修商用侧 home主页很多问题」）：
+#
+# 001 是 P0：getMerchantOperatingHome 是 Promise.all 里**唯一没有 .catch 的** ——
+# 它一抛错，门店 / 成员 / 成交 / 菜单的结果一起被丢掉，整页只剩 loadError。
+# 经营信号读不到 ≠ 整家店不存在。
+#
+# 002：toCard 只读那个**没有任何写入者**的 coverImageUrl，所以商家侧的
+# "高价值场景 / 正在进行"永远画不出封面（不是没传，是没读）。
+#
+# 004：controlPlane 的「决策」格和 balanceHead 的状态 pill 直接显示英文枚举
+# （NO_ACTION / DEMAND_RISING / INSUFFICIENT_SIGNAL）—— 商家看到的是一串代号。
+MERCHANT_HOME_UI=apps/mobile/src/surfaces/business-home.tsx
+if [ -f "$MERCHANT_HOME_UI" ]; then
+  MH_B=0
+  if [ ! -f apps/mobile/src/merchant-home-fixes.test.ts ]; then
+    echo "  FAIL [MERCHANT-HOME]: 行为测试不见了。" >&2
+    MH_B=1
+  fi
+  if ! grep -q 'getMerchantOperatingHome(first.id).catch(() => undefined)' "$MERCHANT_HOME_UI"; then
+    echo "  FAIL [MERCHANT-HOME-001]: 经营信号又开始拖垮整页 ——" >&2
+    echo "        一个接口失败，门店/成员/成交/菜单全都不显示。" >&2
+    MH_B=1
+  fi
+  if ! grep -q 'if (home !== undefined) setOperatingHome(home);' "$MERCHANT_HOME_UI"; then
+    echo "  FAIL [MERCHANT-HOME-001]: home 为 undefined 时的处理不见了。" >&2
+    MH_B=1
+  fi
+  if ! grep -q 'coverMediaAssetId: entry.coverMediaAssetId' "$MERCHANT_HOME_UI"; then
+    echo "  FAIL [MERCHANT-HOME-002]: 场景卡又退回只读死字段 —— 商家侧永远没封面。" >&2
+    MH_B=1
+  fi
+  if grep -q 'v1/media/thumb/' "$MERCHANT_HOME_UI"; then
+    echo "  FAIL [MERCHANT-HOME]: business-home 里又自己拼了 thumb URL —— 单一来源没了。" >&2
+    MH_B=1
+  fi
+  if ! grep -q 'decisionKindLabel(operatingHome?.bestNextDecision.kind)' "$MERCHANT_HOME_UI"; then
+    echo "  FAIL [MERCHANT-HOME-004]: 决策又直接显示英文枚举。" >&2
+    MH_B=1
+  fi
+  if ! grep -q 'demandSupplyStateLabel(operatingHome?.demandSupply.state)' "$MERCHANT_HOME_UI"; then
+    echo "  FAIL [MERCHANT-HOME-004]: 供需状态又直接显示英文枚举。" >&2
+    MH_B=1
+  fi
+  if [ ! -f apps/mobile/src/merchant-home-labels.ts ]; then
+    echo "  FAIL [MERCHANT-HOME-004]: 中文映射的纯模块不见了。" >&2
+    MH_B=1
+  fi
+  [ "$MH_B" -eq 0 ] || exit 1
+  echo "    MERCHANT-HOME: PASS (单接口失败不拖垮整页 · 场景卡有封面 · 枚举有中文名)"
+fi
+
+# STORE-CONSOLIDATE-001（2026-10-02，用户「管理别人看到你的店 有重复的ab版本」选收编）：
+#
+# "我的"里有两个管店入口 —— 「线上店铺」（merchantstorefront →
+# MerchantStorefrontSurface，标题就叫"管理别人看到你的店"）和「我的店铺」
+# （bdash → MyStoresHub）。菜单、照片、营业资料两边都能管；而且同一个
+# MerchantStorefrontSurface 还在 merchant-me-r21 里又被嵌了一遍。
+#
+# 收编后唯一的管店入口是 MyStoresHub。二维码 / 菜品 / 券 / Creator 四样都在
+# 店详情里。merchantstorefront 路由改渲染 hub，不再是第二套管店页。
+# 注意这是对 STORE-HUB-MOVE-001 的**反转**（原来"建店/二维码归推荐管理"），
+# 相关旧断言已同步改掉，不是悄悄绕过。
+STORE_HUB=apps/mobile/src/surfaces/my-stores-hub.tsx
+if [ -f "$STORE_HUB" ]; then
+  SC_B=0
+  if [ ! -f apps/mobile/src/store-consolidate.test.ts ]; then
+    echo "  FAIL [STORE-CONSOLIDATE-001]: 行为测试不见了。" >&2
+    SC_B=1
+  fi
+  # 菜单里只许剩一个管店入口。路由保留给深链，删的是 tile ——
+  # 之前只改了路由渲染，两个 tile 还在，用户看到的还是"重复的2个"。
+  if grep -q 'label: "线上店铺"' apps/mobile/src/surfaces/me.tsx; then
+    echo "  FAIL [STORE-CONSOLIDATE-001]: 线上店铺 tile 又回来了 ——" >&2
+    echo "        和我的店铺点进去是同一页，用户看到的是重复的2个入口。" >&2
+    SC_B=1
+  fi
+  # merchantstorefront 路由必须渲染 hub，不能再挂第二套管店页。
+  if ! grep -q 'subPage.route === "merchantstorefront"' apps/mobile/src/surfaces/me.tsx; then
+    echo "  FAIL [STORE-CONSOLIDATE-001]: merchantstorefront 路由不见了。" >&2
+    SC_B=1
+  fi
+  ME_ROUTE=$(awk '/subPage.route === "merchantstorefront"/,/subPage.route === "bdashprofile"/' apps/mobile/src/surfaces/me.tsx)
+  if ! printf '%s' "$ME_ROUTE" | grep -q '<MyStoresHub'; then
+    echo "  FAIL [STORE-CONSOLIDATE-001]: 线上店铺入口又指回第二套管店页 —— 重复入口回来了。" >&2
+    SC_B=1
+  fi
+  if printf '%s' "$ME_ROUTE" | grep -q '<MerchantStorefrontSurface'; then
+    echo "  FAIL [STORE-CONSOLIDATE-001]: 线上店铺路由里还有旧 surface —— 收编不彻底。" >&2
+    SC_B=1
+  fi
+  # 四样必须在 hub 店详情里。
+  for SC_ITEM in onOpenVouchers StoreQrCard onManageProducts 'Creator 权益'; do
+    if ! grep -q "$SC_ITEM" "$STORE_HUB"; then
+      echo "  FAIL [STORE-CONSOLIDATE-001]: $SC_ITEM 不在统一 hub 里 —— 搬漏了。" >&2
+      SC_B=1
+    fi
+  done
+  # BUSINESS 上下文也不能再嵌第三套。
+  BIZ_STORE=$(awk '/if \(page === "store"\)/,/^  \}/' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx)
+  if ! printf '%s' "$BIZ_STORE" | grep -q '<MyStoresHub'; then
+    echo "  FAIL [STORE-CONSOLIDATE-001]: BUSINESS 店页不是统一 hub。" >&2
+    SC_B=1
+  fi
+  if printf '%s' "$BIZ_STORE" | grep -q '<MerchantStorefrontSurface'; then
+    echo "  FAIL [STORE-CONSOLIDATE-001]: BUSINESS 店页还嵌着旧 surface。" >&2
+    SC_B=1
+  fi
+  [ "$SC_B" -eq 0 ] || exit 1
+  echo "    STORE-CONSOLIDATE-001: PASS (管店只有一个入口 · 四样都在 hub 店详情)"
+fi
+
+# MERCHANT-AVATAR-001（2026-10-02，用户 P0「企业店铺的头像用了用户侧的头像」）：
+#
+# ListAccountsForUser 以前 LEFT JOIN identity.profiles，把店主**个人**头像填进
+# Account.AvatarPath —— 企业/店铺身份卡上显示的是店主的脸。店主的脸不是店的脸。
+#
+# 钉住两端：服务端不再 JOIN 用户头像；客户端不再画 accounts.avatarPath。
+MERCHANT_AVATAR_GO=apps/api-go/internal/platform/postgres/business.go
+MERCHANT_AVATAR_UI=apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx
+if [ -f "$MERCHANT_AVATAR_GO" ] && [ -f "$MERCHANT_AVATAR_UI" ]; then
+  MA_B=0
+  if [ ! -f apps/api-go/internal/platform/postgres/business_avatar_test.go ]; then
+    echo "  FAIL [MERCHANT-AVATAR-001]: 真库行为测试不见了。" >&2
+    MA_B=1
+  fi
+  if [ ! -f apps/mobile/src/merchant-avatar.test.ts ]; then
+    echo "  FAIL [MERCHANT-AVATAR-001]: 客户端行为测试不见了。" >&2
+    MA_B=1
+  fi
+  # 服务端：不许再把 identity.profiles 的头像 JOIN 进 business account。
+  # 查的是去注释 SQL —— 修复说明里会复述被禁的写法，那是解释不是代码。
+  MA_SQL=$(sed 's/--.*$//' "$MERCHANT_AVATAR_GO")
+  if printf '%s' "$MA_SQL" | grep -q 'identity.profiles p ON p.user_account_id=a.owner_user_id'; then
+    echo "  FAIL [MERCHANT-AVATAR-001]: 店主个人头像又被 JOIN 进企业账号 ——" >&2
+    echo "        店卡上会显示店主的脸。" >&2
+    MA_B=1
+  fi
+  # 客户端：不许再画 accounts.avatarPath。
+  if grep -q 'accounts?.\[0\]?.avatarPath' "$MERCHANT_AVATAR_UI"; then
+    echo "  FAIL [MERCHANT-AVATAR-001]: 店卡又开始画用户侧头像。" >&2
+    MA_B=1
+  fi
+  [ "$MA_B" -eq 0 ] || exit 1
+  echo "    MERCHANT-AVATAR-001: PASS (店头像不用用户头像 · 服务端不 JOIN · 客户端不画)"
+fi
+
+# STORE-LOGO-001（2026-10-02，用户「商家侧的头像为什么不能更换」）：
+#
+# editingLogoPath 这个 state 存在，但没有任何输入框/选择器连到它 ——
+# 商家在界面上根本换不了。现在营业资料编辑里有"更换店徽"，走媒体管线上传，
+# 存 `assets/<id>`（与 merchantAvatarUri 解析口径一致，服务端本来就认前缀）。
+# 显示优先级：logo → 店照片/菜品图 → 首字。绝不拿用户头像冒充（MERCHANT-AVATAR-001）。
+STORE_LOGO_UI=apps/mobile/src/surfaces/merchant-storefront.tsx
+if [ -f "$STORE_LOGO_UI" ]; then
+  SL_B=0
+  if [ ! -f apps/mobile/src/store-logo.test.ts ]; then
+    echo "  FAIL [STORE-LOGO-001]: 行为测试不见了。" >&2
+    SL_B=1
+  fi
+  # 上传入口必须在：没有 pickLogoPhoto 就等于换不了。
+  if ! grep -q 'pickLogoPhoto' "$STORE_LOGO_UI"; then
+    echo "  FAIL [STORE-LOGO-001]: 店徽选择器不见了 —— 商家又换不了头像。" >&2
+    SL_B=1
+  fi
+  # 存资产引用，不是 URL。
+  if ! grep -q 'setEditingLogoPath(`assets/${uploaded.mediaAssetId}`)' "$STORE_LOGO_UI"; then
+    echo "  FAIL [STORE-LOGO-001]: 店徽不存资产引用 —— 显示解析对不上。" >&2
+    SL_B=1
+  fi
+  # hub 店详情画 logo。
+  if ! grep -q 'merchantAvatarUri(row.lines?.logoAssetPath' apps/mobile/src/surfaces/my-stores-hub.tsx; then
+    echo "  FAIL [STORE-LOGO-001]: hub 店详情不画店徽。" >&2
+    SL_B=1
+  fi
+  [ "$SL_B" -eq 0 ] || exit 1
+  echo "    STORE-LOGO-001: PASS (店徽可换 · 存资产引用 · hub/主页按优先级显示)"
+fi
+
+# CREATOR-PROFILE-001（2026-10-02，用户「最佳匹配的creator 不能看个人主页
+# 也看不到关联的社媒账户」）：
+#
+# 详情页原来只有计数 + 占位行。passport（头像/简介/能力/档期）服务端明明发了，
+# 移动端 getAgentPassport 却是裸 cast，连 photos 都没进类型 —— 发了也白发。
+# 社媒：数据模型里没有这个字段，如实空，不编 handles。
+CREATOR_PROFILE_UI=apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx
+if [ -f "$CREATOR_PROFILE_UI" ]; then
+  CP_B=0
+  if [ ! -f apps/mobile/src/creator-profile.test.ts ]; then
+    echo "  FAIL [CREATOR-PROFILE-001]: 行为测试不见了。" >&2
+    CP_B=1
+  fi
+  # passport 必须解析留住照片，不能裸 cast。
+  if ! grep -q 'parseAgentPassport' apps/mobile/src/supply-client.ts; then
+    echo "  FAIL [CREATOR-PROFILE-001]: passport 又退回裸 cast —— 照片会被丢掉。" >&2
+    CP_B=1
+  fi
+  # 详情页必须有人头（头像+简介），不能只有计数。
+  if ! grep -q 'creatorHeroAvatar' "$CREATOR_PROFILE_UI"; then
+    echo "  FAIL [CREATOR-PROFILE-001]: 详情页又没有个人头了。" >&2
+    CP_B=1
+  fi
+  # 社媒不得编账号。
+  if grep -qE 'tiktok|zalo|微信|instagram|小红书' "$CREATOR_PROFILE_UI"; then
+    echo "  FAIL [CREATOR-PROFILE-001]: 详情页出现了编造的社媒账号。" >&2
+    CP_B=1
+  fi
+  if ! grep -q '尚未关联社媒账户' "$CREATOR_PROFILE_UI"; then
+    echo "  FAIL [CREATOR-PROFILE-001]: 社媒空态不见了。" >&2
+    CP_B=1
+  fi
+  [ "$CP_B" -eq 0 ] || exit 1
+  echo "    CREATOR-PROFILE-001: PASS (详情是系统性个人页 · passport 留住照片 · 社媒如实空)"
+fi
+
+# CREATOR-PROFILE-001 round 2（2026-10-02，用户「头像是圆圈不是方块R角，
+# 点击头像进主页；平台proxy个人主页入口 creator也要」）：
+#
+# 头像圆圈（999）不是方块；列表点头像进个人主页（有入口标记）；
+# Creator 自己在绑定区看到只读预览（商家视角长这样）。
+if [ -f apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx ]; then
+  CA2_B=0
+  # 四个头像位全圆。钉数值不钉"有圆角"—— borderRadius:13 也是"有圆角"但不是圆。
+  for CA_KEY in "creatorAvatar:" "creatorAvatarMissing:" "creatorHeroAvatar:" "creatorHeroAvatarMissing:"; do
+    CA_SNIP=$(grep -A 0 "$CA_KEY" apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx | head -1)
+    if ! printf '%s' "$CA_SNIP" | grep -q 'borderRadius: 999'; then
+      echo "  FAIL [CREATOR-PROFILE-001]: $CA_KEY 不是圆 —— 头像是圆圈不是方块。" >&2
+      CA2_B=1
+    fi
+  done
+  if ! grep -q 'creator-home-entry-' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+    echo "  FAIL [CREATOR-PROFILE-001]: 头像进主页的入口标记不见了。" >&2
+    CA2_B=1
+  fi
+  # 详情大头像也要能点（和列表头像同一条）。
+  if ! grep -q 'creator-hero-entry-' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+    echo "  FAIL [CREATOR-PROFILE-001]: 详情大头像点不动。" >&2
+    CA2_B=1
+  fi
+  if ! grep -q 'creator-home-preview' apps/mobile/src/components/social-link-section.tsx; then
+    echo "  FAIL [CREATOR-PROFILE-001]: Creator 自己的主页预览不见了。" >&2
+    CA2_B=1
+  fi
+  [ "$CA2_B" -eq 0 ] || exit 1
+  echo "    CREATOR-PROFILE-001r2: PASS (头像全圆 · 可点进主页 · Creator 有自预览)"
+fi
+
+# CREATOR-RAIL-HOME-001（2026-10-02，用户「点击creator头像 不能弹出入口」）：
+#
+# 商家主页横滑卡（Creator 推荐）点人脸/卡片，以前直接 onOpenAll —— 进 Market
+# 机会大盘。点的是 Linh 的脸，落到的是市场，跟这个人一点关系没有。
+# 现在卡片点人进个人主页弹窗（头像圆圈 + 简介 + 社媒平台入口），
+# "查看全部 ›" 才进 Market。
+RAIL_HOME_UI=apps/mobile/src/surfaces/business-home.tsx
+RAIL_COMP=apps/mobile/src/surfaces/merchant-creator-recommendations.tsx
+if [ -f "$RAIL_HOME_UI" ] && [ -f "$RAIL_COMP" ]; then
+  RH_B=0
+  if [ ! -f apps/mobile/src/creator-rail-home.test.ts ]; then
+    echo "  FAIL [CREATOR-RAIL-HOME-001]: 行为测试不见了。" >&2
+    RH_B=1
+  fi
+  # 卡片必须走个人主页入口，不能直跳大盘。
+  if ! grep -q 'onOpenCreator' "$RAIL_COMP"; then
+    echo "  FAIL [CREATOR-RAIL-HOME-001]: 横滑卡又直跳 Market —— 点脸到不了人。" >&2
+    RH_B=1
+  fi
+  if ! grep -q 'rail-creator-home-' "$RAIL_COMP"; then
+    echo "  FAIL [CREATOR-RAIL-HOME-001]: 卡片入口标记不见了。" >&2
+    RH_B=1
+  fi
+  # business-home 卡片点人永远进帖文主页（不再分叉弹框）。
+  if ! grep -q 'onOpenCreatorProfile(c.userAccountId || c.agentId' "$RAIL_HOME_UI"; then
+    echo "  FAIL [CREATOR-RAIL-HOME-001]: 卡片点人又分叉了 —— 没号就到不了主页。" >&2
+    RH_B=1
+  fi
+  # 弹窗已删（无条件进主页后它是死代码）。还留着就是没清干净。
+  if grep -q 'setRailCreator' "$RAIL_HOME_UI"; then
+    echo "  FAIL [CREATOR-RAIL-HOME-001]: 死弹窗还在 —— 卡片只有一条路，它没用了。" >&2
+    RH_B=1
+  fi
+  [ "$RH_B" -eq 0 ] || exit 1
+  echo "    CREATOR-RAIL-HOME-001: PASS (横滑卡点人进帖文主页 · 无分叉)"
+fi
+
+# CREATOR-HOME-001（2026-10-02，用户「不能进入proxy账户的个人公共主页」）：
+#
+# 平台早有公开主页（OtherProfileSurface，feed 点头像走的就是它）。
+# agent→user 链路（agent_profiles.user_account_id）以前 wire 上没透出来，
+# 所以横滑卡点人只能弹框，到不了真主页。
+# 现在：有 userAccountId 走真主页，没关联才退回弹窗。
+if grep -q 'UserAccountID string `json:"userAccountId,omitempty"`' apps/api-go/internal/supply/service.go; then
+  CH_B=0
+  # 候选列表也要带（省一次 passport 查询）。
+  if ! grep -q 'UserAccountID  string' apps/api-go/internal/supply/service.go; then
+    echo "  FAIL [CREATOR-HOME-001]: 候选列表不带 userAccountId。" >&2
+    CH_B=1
+  fi
+  # 移动端类型 + 解析不断链。
+  if ! grep -q 'userAccountId' apps/mobile/src/supply-client.ts; then
+    echo "  FAIL [CREATOR-HOME-001]: 移动端丢了 userAccountId。" >&2
+    CH_B=1
+  fi
+  # app-shell 必须接到真页面，不能只加 prop 没人调。
+  if ! grep -q 'onOpenCreatorProfile={(userId, name, avatarUri) => setOpenHumanProfile' apps/mobile/src/shell/app-shell.tsx; then
+    echo "  FAIL [CREATOR-HOME-001]: 没接到真主页 —— 点人还是到不了公开页。" >&2
+    CH_B=1
+  fi
+  [ "$CH_B" -eq 0 ] || exit 1
+  echo "    CREATOR-HOME-001: PASS (agent→user 链路透出 · 点人脸进真主页)"
+fi
+
+# CREATOR-HOME-001 三分法（2026-10-02，用户「你要分清 个人主页 creator主页 个人管理」）：
+#   个人主页 = 帖文主页（OtherProfileSurface，有帖文）—— 点头象进这里；
+#   creator主页 = 经营详情（能力/档期/报价/邀请）—— 不叫个人主页；
+#   个人管理 = MyStoresHub 等 —— 独立，不管显示。
+# 经营列表点头像：有 userAccountId 走真帖文主页，没有才进经营详情。
+ME_MERCHANT=apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx
+if [ -f "$ME_MERCHANT" ]; then
+  CH3_B=0
+  if ! grep -q 'creator.userAccountId && onOpenCreatorProfile' "$ME_MERCHANT"; then
+    echo "  FAIL [CREATOR-HOME-001]: 列表点头像不进帖文主页。" >&2
+    CH3_B=1
+  fi
+  # 经营详情不许再叫个人主页。
+  if grep -q '个人主页 · 站内' "$ME_MERCHANT"; then
+    echo "  FAIL [CREATOR-HOME-001]: 经营详情又叫个人主页 —— 指鹿为马回来了。" >&2
+    CH3_B=1
+  fi
+  if ! grep -q 'Creator 主页 · 经营' "$ME_MERCHANT"; then
+    echo "  FAIL [CREATOR-HOME-001]: 经营详情没有正名。" >&2
+    CH3_B=1
+  fi
+  [ "$CH3_B" -eq 0 ] || exit 1
+  echo "    CREATOR-HOME-001t: PASS (点头像进帖文主页 · 经营详情已正名)"
+fi
+
+# PROFILE-COPY-UID-001（2026-10-02，用户「帖文主页为什么不能手动复制用户ID，
+# 支持长按复制」）：selectable 靠系统原生选词时灵时不灵。显式长按复制 +
+# 明确反馈（和店名复制同一套）。
+COPY_UID_UI=apps/mobile/src/surfaces/other-profile.tsx
+if [ -f "$COPY_UID_UI" ]; then
+  CU_B=0
+  if [ ! -f apps/mobile/src/profile-copy-uid.test.ts ]; then
+    echo "  FAIL [PROFILE-COPY-UID-001]: 行为测试不见了。" >&2
+    CU_B=1
+  fi
+  if ! grep -q 'Clipboard.setStringAsync(target.userId)' "$COPY_UID_UI"; then
+    echo "  FAIL [PROFILE-COPY-UID-001]: 长按复制不见了 —— 又退回靠原生选词。" >&2
+    CU_B=1
+  fi
+  if ! grep -q '已复制用户 ID' "$COPY_UID_UI"; then
+    echo "  FAIL [PROFILE-COPY-UID-001]: 复制反馈不见了。" >&2
+    CU_B=1
+  fi
+  [ "$CU_B" -eq 0 ] || exit 1
+  echo "    PROFILE-COPY-UID-001: PASS (长按复制用户ID · 有明确反馈)"
+fi
+
+# MENU-HOT-001（2026-10-02，用户给原型「给商家菜单 某些打hot标」）：
+#
+# HOT 是商家亲手标的，不是从销量算的 —— 订单只记到店不记单品，全仓没有
+# "某道菜卖多少"的数据。用店级销量给单品颁 HOT 等于编造归因。
+# 徽样式照抄原型 hot-badge-v2（火焰 + HOT 白字，红橙渐变 pill）。
+HOT_GO=apps/api-go/internal/business/product.go
+HOT_MIG=apps/api-go/migrations/158_store_product_hot.sql
+if [ -f "$HOT_GO" ] && [ -f "$HOT_MIG" ]; then
+  HOT_B=0
+  if [ ! -f apps/api-go/internal/business/product_hot_test.go ]; then
+    echo "  FAIL [MENU-HOT-001]: 后端行为测试不见了。" >&2
+    HOT_B=1
+  fi
+  if [ ! -f apps/mobile/src/menu-hot-badge.test.ts ]; then
+    echo "  FAIL [MENU-HOT-001]: 前端行为测试不见了。" >&2
+    HOT_B=1
+  fi
+  # 开关命令必须接线。只加字段不给命令 = 商家标不了。
+  if ! grep -q '"SetProductHot"' apps/api-go/internal/business/service.go; then
+    echo "  FAIL [MENU-HOT-001]: SetProductHot 没接线 —— 商家打不了标。" >&2
+    HOT_B=1
+  fi
+  # 三处展示必须都在。少一处就是"有的面有徽有的面没有"。
+  for HOT_F in apps/mobile/src/surfaces/business-home.tsx apps/mobile/src/surfaces/my-stores-hub.tsx apps/mobile/src/surfaces/merchant-storefront.tsx; do
+    if ! grep -q '<HotBadge />' "$HOT_F"; then
+      echo "  FAIL [MENU-HOT-001]: $HOT_F 没有 HOT 徽。" >&2
+      HOT_B=1
+    fi
+  done
+  # 火焰图标路径照抄原型，不重描（重描就走样）。
+  if ! grep -q 'M8.5 14.5A2.5 2.5' apps/mobile/src/components/proxy-icon.tsx; then
+    echo "  FAIL [MENU-HOT-001]: 火焰图标路径不对 —— 和原型不是同一个。" >&2
+    HOT_B=1
+  fi
+  [ "$HOT_B" -eq 0 ] || exit 1
+  echo "    MENU-HOT-001: PASS (商家亲手打标 · 三处 display 都有徽 · 火焰照原型)"
+fi
+
+# CREATOR-SOCIAL-001（2026-10-02，用户「最佳匹配的creator 不能看个人主页
+# 也看不到关联的社媒账户」后半段）：
+#
+# 数据模型里本来没有社媒字段。现在 AgentProfile 有 socials（migration 157，
+# JSONB），绑定/解绑只能本人（按 principal），可见性 public/merchants/private
+# 按看的人过滤（本人全见 / 已验商家见 public+merchants / 其他人只 public，
+# merchantID 是 api 层验过的章，不是自称）。
+# handle 只存用户名不存 URL（显示时按平台拼 canonical）；平台/可见性封闭集合。
+SOCIAL_GO=apps/api-go/internal/supply/service.go
+SOCIAL_MIG=apps/api-go/migrations/157_agent_socials.sql
+if [ -f "$SOCIAL_GO" ] && [ -f "$SOCIAL_MIG" ]; then
+  CS_B=0
+  if [ ! -f apps/api-go/internal/supply/agent_social_test.go ]; then
+    echo "  FAIL [CREATOR-SOCIAL-001]: 后端行为测试不见了。" >&2
+    CS_B=1
+  fi
+  # 命令必须接线。加了函数没进 Supports/Handle 等于没写（这个仓的老病）。
+  for CS_CMD in LinkAgentSocial UnlinkAgentSocial; do
+    if ! grep -q "\"$CS_CMD\"" "$SOCIAL_GO"; then
+      echo "  FAIL [CREATOR-SOCIAL-001]: $CS_CMD 没接线。" >&2
+      CS_B=1
+    fi
+  done
+  # 可见性必须按看的人过滤，不能全量下发。
+  if ! grep -q 'socialsVisibleToViewer' "$SOCIAL_GO"; then
+    echo "  FAIL [CREATOR-SOCIAL-001]: passport 不按可见性过滤 —— private 会漏给所有人。" >&2
+    CS_B=1
+  fi
+  # 移动端：详情显示 + 本人可绑。
+  if ! grep -q 'socialProfileUrl(item.platform, item.handle)' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+    echo "  FAIL [CREATOR-SOCIAL-001]: 商家详情不显示社媒。" >&2
+    CS_B=1
+  fi
+  if ! grep -q 'linkAgentSocial' apps/mobile/src/supply-client.ts; then
+    echo "  FAIL [CREATOR-SOCIAL-001]: 绑定入口不见了 —— 社媒永远空。" >&2
+    CS_B=1
+  fi
+  if ! grep -q 'SocialLinkSection' apps/mobile/src/surfaces/me.tsx; then
+    echo "  FAIL [CREATOR-SOCIAL-001]: Creator 侧绑定区不见了。" >&2
+    CS_B=1
+  fi
+  [ "$CS_B" -eq 0 ] || exit 1
+  echo "    CREATOR-SOCIAL-001: PASS (社媒可绑 · 可见性按人过滤 · 商家详情显示)"
+fi
+
+# MARKET-TAB-PENTAGON-001（2026-10-01，用户「把市场的logo换成这个」）：
+# 用户给的是一枚五边形
+#   <svg viewBox="0 0 24 24"><polygon points="12 3 21 15 18 21 6 21 3 15"></polygon></svg>
+# 底栏 MARKET 这一格原来用通用菱形 diamond。
+#
+# 为什么**不改 diamond**：diamond 画的是 `M12 4 20 12 12 20 4 12z` —— 四个顶点
+# (12,4)(20,12)(12,20)(4,12)，边长全 11.31，是「正方形转 45°」。它被当通用菱形
+# 符号复用在 5 处（底栏 MARKET / 我的订单 / feed 分类兜底 / 城市选项 / 首页聊天框
+# ORDER 机会），而且它的路径被 WALLET-GEM-ICON-001 钉死。改它会把这 5 处一起换掉，
+# 并撞掉那条钉 —— 所以新开一个 pentagon 字形，只把 MARKET 指过去。
+#
+# 这条钉守的是**接线**：字形在 switch 里（只声明联合类型 `| "pentagon"` 而不实现
+# = 渲染 null 的假绿）、顶点坐标一字不改、**只有** MARKET 指向它、diamond 原封不动。
+MARKET_PENTAGON_ICON=apps/mobile/src/components/proxy-icon.tsx
+MARKET_PENTAGON_SHELL=apps/mobile/src/shell/app-shell.tsx
+if [ -f "$MARKET_PENTAGON_ICON" ] && [ -f "$MARKET_PENTAGON_SHELL" ]; then
+  if [ ! -f apps/mobile/src/market-tab-pentagon.test.ts ]; then
+    echo "  FAIL [MARKET-TAB-PENTAGON-001]: the market-tab pentagon regression test is missing." >&2
+    exit 1
+  fi
+  if ! grep -qF 'case "pentagon":' "$MARKET_PENTAGON_ICON"; then
+    echo "  FAIL [MARKET-TAB-PENTAGON-001]: ProxyIcon 的 switch 里没有 case \"pentagon\":（声明不实现 = 渲染 null 的假绿）。" >&2
+    exit 1
+  fi
+  if grep -qF 'if (name === "pentagon") {' "$MARKET_PENTAGON_ICON"; then
+    echo "  FAIL [MARKET-TAB-PENTAGON-001]: pentagon 写成了不可达的 if 分支（被 MasterModuleIcon 的提前 return 遮住）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'd="M12 3 21 15 18 21 6 21 3 15z"' "$MARKET_PENTAGON_ICON"; then
+    echo "  FAIL [MARKET-TAB-PENTAGON-001]: 五边形顶点坐标被改了（应原样照抄用户给的 points=\"12 3 21 15 18 21 6 21 3 15\"）。" >&2
+    exit 1
+  fi
+  if ! grep -qF '{ id: "MARKET", icon: "pentagon", label: t("tabMarket") }' "$MARKET_PENTAGON_SHELL"; then
+    echo "  FAIL [MARKET-TAB-PENTAGON-001]: 底栏 MARKET 不再指向 pentagon（市场 logo 换回去了）。" >&2
+    exit 1
+  fi
+  if grep -qF '{ id: "MARKET", icon: "diamond"' "$MARKET_PENTAGON_SHELL"; then
+    echo "  FAIL [MARKET-TAB-PENTAGON-001]: MARKET 又和 diamond 配对了。" >&2
+    exit 1
+  fi
+  _pentagon_uses=$(grep -cF 'icon: "pentagon"' "$MARKET_PENTAGON_SHELL" || true)
+  if [ "$_pentagon_uses" -ne 1 ]; then
+    echo "  FAIL [MARKET-TAB-PENTAGON-001]: 五边形出现在 $_pentagon_uses 处（应恰好 1 处 —— 抄到别处 = 图标跟错行）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'd="M12 4 20 12 12 20 4 12z"' "$MARKET_PENTAGON_ICON"; then
+    echo "  FAIL [MARKET-TAB-PENTAGON-001]: diamond 的路径被动过了 —— 它还被另外 4 处复用着。" >&2
+    exit 1
+  fi
+  pnpm --dir apps/mobile exec vitest run src/market-tab-pentagon.test.ts || exit $?
+  echo "    MARKET-TAB-PENTAGON-001: PASS (市场 tab 的字形是用户给的五边形，diamond 未被改动)"
+fi
+
+# NOTIF-BELL-001（2026-10-01，用户「新增了铃铛提醒」）：
+# 原型 docs/design/references/Proxy_Home_Notifications_20261001_7b9953.html 的首页
+# 顶栏多了一颗铃铛（角标写死 "9+"），点开是一页「通知」，列表里四条示意数据。
+#
+# 这条钉守的是**接线的两头**，不是那页长什么样：
+#   1. AppShell 真的读 `notification` 这个 prop。它原来是**死的** —— native-app.tsx
+#      里早就 `new NotificationClient(...)` 传下来了，AppShell 只把它写进类型、
+#      从没调过一次。服务端 notification 域（ListInbox / MarkInboxRead）和移动端
+#      notification-client.ts 都齐了，缺的只有用户能看见的这一头。
+#   2. 角标是 `badgeText(unreadCount(inboxItems))` **数**出来的，不是原型那个写死的
+#      "9+"；0 条时 badgeText 回 undefined ⇒ 不画角标，而不是画一个 "0"。
+#   3. 界面里不许出现原型那四条示意数据（后端一条都没有），也不许把
+#      `resolveDeepLink` 接上 —— 服务端那个函数还是桩（internal/notification/service.go：
+#      `// Simulate permission check … (simplified: allow)`），连归属校验都没有，
+#      接上它 = 把别人订单的 deep link 也放行。
+NOTIF_BELL_SHELL=apps/mobile/src/shell/app-shell.tsx
+NOTIF_BELL_CENTER=apps/mobile/src/surfaces/notification-center.tsx
+NOTIF_BELL_ICON=apps/mobile/src/components/proxy-icon.tsx
+if [ -f "$NOTIF_BELL_SHELL" ] && [ -f "$NOTIF_BELL_CENTER" ] && [ -f "$NOTIF_BELL_ICON" ]; then
+  if [ ! -f apps/mobile/src/notification-bell.test.ts ]; then
+    echo "  FAIL [NOTIF-BELL-001]: the notification-bell regression test is missing." >&2
+    exit 1
+  fi
+  if ! grep -qF 'notification.listInbox()' "$NOTIF_BELL_SHELL"; then
+    echo "  FAIL [NOTIF-BELL-001]: AppShell 不再读 notification prop —— 铃铛又变回一个没有数据的装饰。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'badgeText(unreadCount(inboxItems))' "$NOTIF_BELL_SHELL"; then
+    echo "  FAIL [NOTIF-BELL-001]: 顶栏角标不再由未读数算出（原型那个写死的 9+ 回来了）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'name="bell"' "$NOTIF_BELL_SHELL"; then
+    echo "  FAIL [NOTIF-BELL-001]: 顶栏不再画铃铛。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'case "bell":' "$NOTIF_BELL_ICON"; then
+    echo "  FAIL [NOTIF-BELL-001]: ProxyIcon 的 switch 里没有 case \"bell\":（声明不实现 = 渲染 null 的假绿）。" >&2
+    exit 1
+  fi
+  # 计数制，不是「出现过」制：这个脚本不剥注释，只要注释里也抄一份同样的
+  # d="…"，「路径被改」那条钉就会被注释喂绿（踩过一次）。要求**恰好 1 处**，
+  # 而且下面再逐条确认那 1 处就是原型那两条。
+  _bell_paths=$(grep -cF 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9' "$NOTIF_BELL_ICON" || true)
+  if [ "$_bell_paths" -ne 1 ]; then
+    echo "  FAIL [NOTIF-BELL-001]: 铃铛铃身那条路径出现 $_bell_paths 处（应恰好 1 处 —— 注释里抄一份同样会让钉被喂绿）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'd="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"' "$NOTIF_BELL_ICON"; then
+    echo "  FAIL [NOTIF-BELL-001]: 铃铛的路径被改了（应原样照抄原型的两条子路径）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'd="M13.73 21a2 2 0 0 1-3.46 0"' "$NOTIF_BELL_ICON"; then
+    echo "  FAIL [NOTIF-BELL-001]: 铃铛下摆那条路径不见了。" >&2
+    exit 1
+  fi
+  # 「不许接 resolveDeepLink」那条**故意**不在这里 grep：这个脚本不剥注释，
+  # 而 notification-center.tsx 的注释里正引用着服务端那个桩（说明为什么不接它），
+  # grep 会把自己的说明文档当成违规。那条钉在 notification-bell.test.ts 里，
+  # 那边先剥注释再断言，下面这行 vitest 会把它一起跑掉。
+  pnpm --dir apps/mobile exec vitest run src/notification-bell.test.ts || exit $?
+  echo "    NOTIF-BELL-001: PASS (首页铃铛读的是真 inbox，角标是数出来的)"
+fi
+
+# NOTIF-PANEL-001（2026-10-01，用户「没做完整 提醒只弹出半页就可以 不用完整 参考bigo」，
+# 随后更正「没改好 你这改的是下半页提醒 我要的是竖向右半页提醒」）：
+# 通知中心从**全屏页**改成**竖向右半页侧栏**（贴右、占宽度一半、上下通高）。
+#
+# 这条钉的是**结构**，而且重点在**「半页」的方向** —— 第一版做成了底部半屏
+# （按**高度**算 / 贴底 / 圆角在顶），被用户否掉。所以下面挑的串专门守住"宽度 + 贴右"。
+#
+# ⚠️ 本脚本不剥注释，所以这里只放**正向臂**，而且挑的串都不出现在
+#    notification-center.tsx 的注释里（已用脚本核过）。几条**反向臂**
+#    （不许 windowHeight / SHEET_HEIGHT_RATIO / maxHeight / borderTopRightRadius /
+#    ProxyBackGlyph / alignItems 贴边）故意不放在这里 —— 这些词正是那份注释里用来
+#    解释取舍的，grep 会把说明文档当成违规。它们在 notification-bell.test.ts 的
+#    NOTIF-PANEL-001 里，那边先剥注释再断言，下面这行 vitest 会一起跑掉。
+if [ -f "$NOTIF_BELL_CENTER" ]; then
+  if ! grep -qF 'const PANEL_WIDTH_RATIO = 0.5;' "$NOTIF_BELL_CENTER"; then
+    echo "  FAIL [NOTIF-PANEL-001]: 半页宽度那个比例常量不见了（面板宽度的唯一来源）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'Math.round(windowWidth * PANEL_WIDTH_RATIO)' "$NOTIF_BELL_CENTER"; then
+    echo "  FAIL [NOTIF-PANEL-001]: 面板宽度不再按窗口宽度算 —— 又变回按高度算（底部半屏）。" >&2
+    exit 1
+  fi
+  # 这两条必须**限定在遮罩那一段**里查：`flexDirection: "row"` 在表头样式里也有一份，
+  # 全文件 grep 的话遮罩翻成 column 也照样绿（假绿）。用 grep -A 把窗口收在 backdrop 块内。
+  if ! grep -A4 'backdrop: {' "$NOTIF_BELL_CENTER" | grep -qF 'flexDirection: "row"'; then
+    echo "  FAIL [NOTIF-PANEL-001]: 遮罩不再是横向布局 —— 面板没法贴右（会掉到底部）。" >&2
+    exit 1
+  fi
+  if ! grep -A5 'backdrop: {' "$NOTIF_BELL_CENTER" | grep -qF 'justifyContent: "flex-end"'; then
+    echo "  FAIL [NOTIF-PANEL-001]: 面板不再贴主轴末端 —— 贴右靠的就是这一条。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'borderBottomLeftRadius: 24' "$NOTIF_BELL_CENTER"; then
+    echo "  FAIL [NOTIF-PANEL-001]: 左侧圆角不见了 —— 面板贴右时圆角该在左边。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'onPress={() => undefined}' "$NOTIF_BELL_CENTER"; then
+    echo "  FAIL [NOTIF-PANEL-001]: 面板内层的 no-op 挡板没了 —— 点面板本身会把侧栏关掉。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'style={styles.scroll}' "$NOTIF_BELL_CENTER"; then
+    echo "  FAIL [NOTIF-PANEL-001]: 面板里 ScrollView 没有 flex —— 内容会把面板撑破。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'name="close"' "$NOTIF_BELL_CENTER"; then
+    echo "  FAIL [NOTIF-PANEL-001]: 表头不再是关闭的 ×（侧栏不该用返回箭头）。" >&2
+    exit 1
+  fi
+  pnpm --dir apps/mobile exec vitest run src/notification-bell.test.ts || exit $?
+  echo "    NOTIF-PANEL-001: PASS (通知是竖向右半页侧栏：贴右 + 占宽度一半 + 列表可滚)"
+fi
+
+# NOTIF-PIPELINE-001（2026-10-01，用户「有问题就解决 建立统一的通知管线」）：
+# 通知只有**一条**写入管线，两个生产者（outbox worker 与 SendInboxNotification 命令）
+# 都经过 notification.Pipeline.Emit。
+#
+# 改之前这个域有两条互不相干、各做一半的写路径：
+#   · worker（cmd/worker/main.go 的 businessInboxDelivery）自己拼 SQL 直连
+#     notification.inbox_items 落库 —— 现网 845 行真数据**全部**来自它 ——
+#     但**从来不推送**（PushProvider 在那条路上根本不存在）。
+#   · 命令 sendInbox 有推送、有 Repository，但用**随机 item id** ⇒ 不幂等，
+#     而且 App 侧零调用。
+# 合起来看：真实事件一条推送都没发过，而两条路径各自看起来都是对的。
+# 更隐蔽的是它们会**各自漂移** —— 「重复投递算不算一条」两边答案相反。
+#
+# ⚠️ 本脚本不剥注释，所以反向臂全部走 `_notif_code_lines`：它把以 // 、* 、/*
+#    开头的行滤掉再看。这不是洁癖 —— 上面那段注释本身就在引用被删掉的
+#    旧 SQL（那是这条钉存在的理由），不滤的话钉会被自己的说明文档喂红。
+#    正因如此，这里**只查代码行**；「注释里的说明」不构成违规。
+_notif_code_lines() {
+  # grep -n 先给每行加行号，第二条 grep 才能用「行首是不是注释起始」判断。
+  grep -n '^' "$1" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*(//|\*|/\*)' || true
+}
+NOTIF_WORKER=apps/api-go/cmd/worker/main.go
+NOTIF_SERVICE=apps/api-go/internal/notification/service.go
+NOTIF_PIPELINE=apps/api-go/internal/notification/pipeline.go
+NOTIF_PG_REPO=apps/api-go/internal/platform/postgres/notification.go
+if [ -f "$NOTIF_WORKER" ] && [ -f "$NOTIF_SERVICE" ] && [ -f "$NOTIF_PIPELINE" ]; then
+  # ---- 正向臂：两个生产者都接到管线上 ----
+  if ! grep -qF 'producer.Emit(ctx, notification.Notification{' "$NOTIF_WORKER"; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: worker 不再经过统一管线写通知 ——" >&2
+    echo "        它一旦自己写 SQL，推送就又只剩命令那半知道（真实事件静默）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'notification.EventDedupeKey(e.EventID)' "$NOTIF_WORKER"; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: worker 丢了事件的幂等键 ——" >&2
+    echo "        outbox 会重放整批，没有它重放就是用户 inbox 里的第二条「订单已成立」。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'notification.NewPipeline(' "$NOTIF_WORKER"; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: worker 没有建管线（推送通道在 worker 侧不存在了）。" >&2
+    exit 1
+  fi
+  # 用正则而不是写死 `PushProviderFromEnv(os.Getenv)`：这个函数 2026-10-02 多了一个
+  # 参数（`tokens DeviceTokenLister` —— 推送要按收件人找设备令牌），写死旧签名的钉
+  # 会在一次**正确**的改动后假红。钉的是「worker 用的是同一个判定函数」，
+  # 不是它的参数列表。
+  if ! grep -qE 'notification\.PushProviderFromEnv\(os\.Getenv[,)]' "$NOTIF_WORKER"; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: worker 不再用与 API 同一个推送通道判定 ——" >&2
+    echo "        两边各判一次就会出现「API 认为推送开着、worker 认为关着」这种看不见的分叉。" >&2
+    exit 1
+  fi
+  if ! grep -qF 's.pipeline.Emit(ctx, Notification{' "$NOTIF_SERVICE"; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: sendInbox 不再走管线（命令侧又变回第二条写路径）。" >&2
+    exit 1
+  fi
+  # 用 [[:space:]]* 而不是写死空格：gofmt 会按最长的字段名重新填充整段，
+  # 写死空格的钉会在一次无关的格式化后突然变红（SAFETY-GATE-001 踩过）。
+  if ! grep -qE 'DedupeKey:[[:space:]]*CommandDedupeKey\(dedupe\),' "$NOTIF_SERVICE"; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: 命令侧丢了幂等键 ——" >&2
+    echo "        重试一次就多一行（对超时重发很常见的后台口来说那是必然发生的）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'func (p *Pipeline) Emit(ctx context.Context, n Notification) (InboxItem, bool, error) {' "$NOTIF_PIPELINE"; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: 管线唯一的写入口 Emit 的签名变了。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'return tag.RowsAffected() == 1, nil' "$NOTIF_PG_REPO"; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: PG 的 inbox 写入不再回答「这次插没插进去」——" >&2
+    echo "        管线靠它决定推不推送，写死 true 会让重放也推（用户收到两条一样的）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'ON CONFLICT (id) DO NOTHING' "$NOTIF_PG_REPO"; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: PG 的 inbox 写入丢了 ON CONFLICT —— 幂等没了。" >&2
+    exit 1
+  fi
+
+  # ---- 反向臂：第二条写路径不许回来 ----
+  if _notif_code_lines "$NOTIF_WORKER" | grep -qF 'INSERT INTO notification.inbox_items'; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: worker 又在自己写 SQL 落库了 ——" >&2
+    echo "        那条路不推送。请把映射结果交给 notification.Producer。" >&2
+    exit 1
+  fi
+  if [ -f apps/api-go/internal/notification/orchestrator.go ]; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: notification.Orchestrator 又回来了 ——" >&2
+    echo "        它是第三套重叠的去重（另两套是 inbox.processed_events 和 item 主键），" >&2
+    echo "        而且 seen map 无上限、进程活得越久越大。别把它接上，直接删。" >&2
+    exit 1
+  fi
+  if _notif_code_lines "$NOTIF_SERVICE" | grep -qF 'CreateInboxItem('; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: 无脑 INSERT 的 CreateInboxItem 又回来了 ——" >&2
+    echo "        Repository 的 inbox 写侧只该有 InsertInboxItemOnce（它回答 created）。" >&2
+    exit 1
+  fi
+  # 不写死单行形式：gofmt 会把 `if push == nil { push = LogPushProvider{} }`
+  # 拆成多行，写死单行的话多行版重引入就抓不到了。
+  if _notif_code_lines "$NOTIF_SERVICE" | grep -qE 'push = LogPushProvider\{\}'; then
+    echo "  FAIL [NOTIF-PIPELINE-001]: NewWithPushProvider 又开始把 nil 兜成 LogPushProvider ——" >&2
+    echo "        那样 NOTIFICATION_PUSH=off 就是个空开关（曾经真的空转过）。" >&2
+    exit 1
+  fi
+
+  # ---- 行为臂：幂等与「只有新增才推送」在 Go 侧断言（注释已剥） ----
+  require_test "NOTIF-PIPELINE-001" "./internal/notification" \
+    "TestPipelineEmitWritesOneRowAndPushesOnce" \
+    "apps/api-go/internal/notification/pipeline_test.go" || exit $?
+  require_test "NOTIF-PIPELINE-001" "./internal/notification" \
+    "TestPipelineEmitIsIdempotentByDedupeKey" \
+    "apps/api-go/internal/notification/pipeline_test.go" || exit $?
+  require_test "NOTIF-PIPELINE-001" "./internal/notification" \
+    "TestPipelineEmitRejectsIncompleteNotifications" \
+    "apps/api-go/internal/notification/pipeline_test.go" || exit $?
+  require_test "NOTIF-PIPELINE-001" "./internal/notification" \
+    "TestNewWithPushProviderHonoursExplicitNil" \
+    "apps/api-go/internal/notification/pipeline_test.go" || exit $?
+  require_test "NOTIF-PIPELINE-001" "./internal/notification" \
+    "TestSendInboxIsIdempotentPerIdempotencyKey" \
+    "apps/api-go/internal/notification/pipeline_test.go" || exit $?
+  # 接线臂：映射对了但没接上管线，用户依然收不到推送 —— 而那种回归在
+  # inboxForEvent 的单测里完全看不见（函数本身仍然全绿）。
+  require_test "NOTIF-PIPELINE-001" "./cmd/worker" \
+    "TestWorkerDeliveryGoesThroughPipeline" \
+    "apps/api-go/cmd/worker/main_test.go" || exit $?
+  # SQL 臂：内存仓的幂等是 map 查询，PG 的是 ON CONFLICT + RowsAffected，
+  # 两个实现的失败方式完全不同（后者写错是抛 duplicate key）。
+  require_test "NOTIF-PIPELINE-001" "./internal/platform/postgres" \
+    "TestNotificationInboxInsertIsIdempotent" \
+    "apps/api-go/internal/platform/postgres/notification_integration_test.go" || exit $?
+  echo "    NOTIF-PIPELINE-001: PASS (通知只有一条管线：worker 与命令都走 Pipeline.Emit，幂等 + 只有新增才推送)"
+fi
+
+# NOTIF-EMPTY-LIST-001（2026-10-02，设备上「通知没取到，下拉重试」）：
+# **空收件箱**必须编码成 `[]`，不是 `null`。
+#
+# 这是全仓最广的一个 bug：`json.Marshal` 把 nil 切片写成 `null`，而客户端读的是
+# `Array.isArray(body.items)` ⇒ `null` 过不了这关 ⇒ 客户端抛 "inbox malformed" ⇒
+# 面板显示的是**加载失败**态，而真相是「这个用户还没有任何通知」。
+# 现网 notification.inbox_items 有 845 行但只有 **2 个收件人**，其余全部命中 ——
+# 也就是说对绝大多数用户 100% 复现，而两端各自看代码都觉得没问题。
+#
+# 三处都必须钉住：PG 的读口（根因）、命令面的归一（换第三个实现也不复发）、
+# 客户端的容忍（老服务端还在发 null 时也不能白屏）。
+NOTIF_MOBILE_CLIENT=apps/mobile/src/notification-client.ts
+if [ -f "$NOTIF_PG_REPO" ] && [ -f "$NOTIF_SERVICE" ] && [ -f "$NOTIF_MOBILE_CLIENT" ]; then
+  # ---- 正向臂 ----
+  if ! grep -qF 'items := []notification.InboxItem{}' "$NOTIF_PG_REPO"; then
+    echo "  FAIL [NOTIF-EMPTY-LIST-001]: PG 的 ListInbox 不再把结果初始化成非 nil 空切片 ——" >&2
+    echo "        nil 会被 json.Marshal 写成 null，收件箱为空的用户会看到「通知没取到」。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'items = []InboxItem{}' "$NOTIF_SERVICE"; then
+    echo "  FAIL [NOTIF-EMPTY-LIST-001]: 命令面不再兜空切片 ——" >&2
+    echo "        只修 PG 等于把契约挂在某一个实现的自觉上，换第三个 Repository 就复发。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'const items = body.items ?? [];' "$NOTIF_MOBILE_CLIENT"; then
+    echo "  FAIL [NOTIF-EMPTY-LIST-001]: 客户端不再容忍 items 缺席/null ——" >&2
+    echo "        「空」和「破损」被当成一回事，空收件箱又会显示成加载失败。" >&2
+    exit 1
+  fi
+  # ---- 反向臂：根因不许回来 ----
+  if _notif_code_lines "$NOTIF_PG_REPO" | grep -qF 'var items []notification.InboxItem'; then
+    echo "  FAIL [NOTIF-EMPTY-LIST-001]: PG 的 ListInbox 又变回 nil 切片了（null 回来了）。" >&2
+    exit 1
+  fi
+  # 真正的破损是「items 存在但不是数组」，那仍然要抛 —— 别把协议破损也一起吞掉。
+  if ! grep -qF 'if (!Array.isArray(items)) throw new Error("inbox malformed");' "$NOTIF_MOBILE_CLIENT"; then
+    echo "  FAIL [NOTIF-EMPTY-LIST-001]: 客户端不再区分「空」和「破损」——" >&2
+    echo "        body.items 是个对象/字符串时也被当成空列表，协议换了也没人知道。" >&2
+    exit 1
+  fi
+  require_test "NOTIF-EMPTY-LIST-001" "./internal/notification" \
+    "TestListInboxEmptyInboxSerialisesAsArray" \
+    "apps/api-go/internal/notification/pipeline_test.go" || exit $?
+  require_test "NOTIF-EMPTY-LIST-001" "./internal/platform/postgres" \
+    "TestNotificationEmptyInboxSerialisesAsArrayNotNull" \
+    "apps/api-go/internal/platform/postgres/notification_integration_test.go" || exit $?
+  echo "    NOTIF-EMPTY-LIST-001: PASS (空收件箱发 [] 不发 null：PG 读口 + 命令面 + 客户端三层都钉住)"
+fi
+
+# NOTIF-PUSH-001（2026-10-02，用户「系统通知管线必须做好」）：
+# 推送必须是**真的**发得出去，而不是只在日志里看起来像发出去了。
+#
+# 改之前：只有 LogPushProvider（只 log.Printf），device_tokens **0 行**（因为
+# NotificationClient.registerDevice 全仓零调用方），所以「推送成功」和「推送
+# 从来没离开过这台机器」在日志上长得一模一样。
+#
+# 现在钉四件事：① 两个真发送器在；② 按平台路由、未知平台不猜；③ 只有
+# Unregistered 才退役令牌（瞬时故障退役 = 用户永久收不到推送）；④ 客户端真的
+# 会去取令牌并注册（否则服务端再完整也没有目标）。
+NOTIF_PUSH=apps/api-go/internal/notification/push.go
+NOTIF_PUSH_APNS=apps/api-go/internal/notification/push_apns.go
+NOTIF_PUSH_FCM=apps/api-go/internal/notification/push_fcm.go
+NOTIF_MOBILE_PUSH=apps/mobile/src/push-registration.ts
+NOTIF_MOBILE_APP=apps/mobile/src/native-app.tsx
+if [ -f "$NOTIF_PUSH" ] && [ -f "$NOTIF_PUSH_APNS" ] && [ -f "$NOTIF_PUSH_FCM" ]; then
+  # ---- 正向臂 ----
+  if ! grep -qF 'apns-topic' "$NOTIF_PUSH_APNS"; then
+    echo "  FAIL [NOTIF-PUSH-001]: APNs 发送器不见了（推送又只剩日志）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'messages:send' "$NOTIF_PUSH_FCM"; then
+    echo "  FAIL [NOTIF-PUSH-001]: FCM 发送器不见了（Android 收不到任何东西）。" >&2
+    exit 1
+  fi
+  # ES256 的签名必须是**裸 r‖s（64 字节）**，DER 编码会被 Apple 拒成
+  # 403 InvalidProviderToken，而且错误信息完全不提示是编码问题。
+  if ! grep -qF 'r.FillBytes(sig[:32])' "$NOTIF_PUSH_APNS" || ! grep -qF 's.FillBytes(sig[32:])' "$NOTIF_PUSH_APNS"; then
+    echo "  FAIL [NOTIF-PUSH-001]: APNs 的 JWT 签名不再是裸 r‖s ——" >&2
+    echo "        用 DER 编码会被 Apple 拒成 403 InvalidProviderToken（且不提示原因）。" >&2
+    exit 1
+  fi
+  # 退役必须只认 Unregistered：瞬时故障退役是**不可逆**的，用户从此收不到推送。
+  if ! grep -qF 'errors.Is(err, ErrDeviceTokenUnregistered) && d.retire(ctx, token.ID)' "$NOTIF_PUSH"; then
+    echo "  FAIL [NOTIF-PUSH-001]: 令牌退役不再限定 Unregistered ——" >&2
+    echo "        APNs 抖一下就把好令牌标成 INACTIVE，用户永久收不到推送且没人会去修。" >&2
+    exit 1
+  fi
+  # ---- 反向臂：只有日志的「假推送」不许回来 ----
+  if ! grep -qF 'PushProviderFromEnv' "$NOTIF_PIPELINE"; then
+    echo "  FAIL [NOTIF-PUSH-001]: 推送通道的选择逻辑不见了（NOTIFICATION_PUSH 开关失效）。" >&2
+    exit 1
+  fi
+  if _notif_code_lines "$NOTIF_PIPELINE" | grep -qE 'push = LogPushProvider\{\}'; then
+    echo "  FAIL [NOTIF-PUSH-001]: 又把 nil 兜成 LogPushProvider 了 ——" >&2
+    echo "        那样 NOTIFICATION_PUSH=off 只是个空开关，关掉的部署照样在往日志里推。" >&2
+    exit 1
+  fi
+  # ---- 客户端臂：没有这一跳，device_tokens 永远是 0 行 ----
+  if [ -f "$NOTIF_MOBILE_PUSH" ] && [ -f "$NOTIF_MOBILE_APP" ]; then
+    if ! grep -qF 'registerForPush({' "$NOTIF_MOBILE_APP"; then
+      echo "  FAIL [NOTIF-PUSH-001]: app 不再注册设备令牌 ——" >&2
+      echo "        device_tokens 会退回 0 行，服务端推送管线再完整也没有目标。" >&2
+      exit 1
+    fi
+    if ! grep -qF 'reason: "missing-token"' "$NOTIF_MOBILE_PUSH"; then
+      echo "  FAIL [NOTIF-PUSH-001]: 客户端不再拦空令牌 ——" >&2
+      echo "        空令牌会让服务端以为有设备可推，于是每条通知都推一次、每次都失败。" >&2
+      exit 1
+    fi
+    if ! grep -qF 'return null;' "$NOTIF_MOBILE_PUSH"; then
+      echo "  FAIL [NOTIF-PUSH-001]: 原生模块缺席时不再降级成 null ——" >&2
+      echo "        二进制没重建时顶层 import 会让**整个 app** 启动崩掉，不只是推送用不了。" >&2
+      exit 1
+    fi
+  fi
+  require_test "NOTIF-PUSH-001" "./internal/notification" \
+    "TestDispatcherRoutesEachDeviceToItsPlatformSender" \
+    "apps/api-go/internal/notification/push_test.go" || exit $?
+  require_test "NOTIF-PUSH-001" "./internal/notification" \
+    "TestDispatcherDoesNotGuessAnUnknownPlatform" \
+    "apps/api-go/internal/notification/push_test.go" || exit $?
+  require_test "NOTIF-PUSH-001" "./internal/notification" \
+    "TestDispatcherDoesNotRetireTokensOnATransientFailure" \
+    "apps/api-go/internal/notification/push_test.go" || exit $?
+  require_test "NOTIF-PUSH-001" "./internal/notification" \
+    "TestAPNsProviderTokenIsAValidES256JWT" \
+    "apps/api-go/internal/notification/push_test.go" || exit $?
+  require_test "NOTIF-PUSH-001" "./internal/notification" \
+    "TestAPNsSendClassifiesDeadTokens" \
+    "apps/api-go/internal/notification/push_test.go" || exit $?
+  echo "    NOTIF-PUSH-001: PASS (真 APNs/FCM 发送器 + 按平台路由 + 只退役失效令牌 + 客户端真的注册设备)"
+fi
+
+# NOTIF-DEEPLINK-001（2026-10-02）：ResolveDeepLink 必须有**归属**校验。
+#
+# 改之前是 `// Simulate permission check … (simplified: allow)` —— 任何非空字符串
+# 都返回 resolved=true。那不是「简化」，是没有校验：
+#   ① 它是一台**枚举预言机**：谁都能逐个试 /offers/off_xxx 问「这条链接存在吗」；
+#   ② 形状不设限：`javascript:…` / `//evil.com/x` 也算「格式合法」。
+# 现在两条都堵上：形状白名单（和 cmd/worker 的 inboxForEvent 成对）+ 归属查库
+# （这条链接必须出现在**调用者自己的**收件箱里）。
+NOTIF_DEEPLINK_TEST=apps/api-go/internal/notification/service_deeplink_test.go
+if [ -f "$NOTIF_SERVICE" ] && [ -f "$NOTIF_PG_REPO" ]; then
+  # ---- 正向臂 ----
+  if ! grep -qF 's.repo.HasInboxDeepLink(ctx, recipientID, link)' "$NOTIF_SERVICE"; then
+    echo "  FAIL [NOTIF-DEEPLINK-001]: ResolveDeepLink 不再查归属 ——" >&2
+    echo "        它会退回成枚举预言机：任何人都能问出别人的深链存不存在。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'DEEPLINK_NOT_OWNED' "$NOTIF_SERVICE"; then
+    echo "  FAIL [NOTIF-DEEPLINK-001]: 归属失败不再是一个明确的拒绝码。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'func isResolvableDeepLink(' "$NOTIF_SERVICE"; then
+    echo "  FAIL [NOTIF-DEEPLINK-001]: 深链的形状白名单不见了 ——" >&2
+    echo "        `javascript:…` / `//evil.com/x` 会被当成合法的站内路径交给客户端。" >&2
+    exit 1
+  fi
+  # 归属查询必须**按收件人**过滤。少了 recipient 这一半，SQL 仍然合法、仍然返回
+  # 结果，只是谁的链接都能过 —— 而这种洞在内存实现上完全看不见。
+  if ! grep -qF 'WHERE recipient_id=$1 AND deep_link=$2' "$NOTIF_PG_REPO"; then
+    echo "  FAIL [NOTIF-DEEPLINK-001]: PG 的归属查询丢了收件人过滤（谁的链接都能过）。" >&2
+    exit 1
+  fi
+  # ---- 反向臂：桩不许回来 ----
+  if _notif_code_lines "$NOTIF_SERVICE" | grep -qiF 'simplified: allow'; then
+    echo "  FAIL [NOTIF-DEEPLINK-001]: `simplified: allow` 的桩回来了 ——" >&2
+    echo "        那等于对所有非空字符串放行，归属校验形同虚设。" >&2
+    exit 1
+  fi
+  # fail-closed：查库失败必须拒绝，不能因为「查不出来」就放行。
+  if _notif_code_lines "$NOTIF_SERVICE" | grep -qE 'DEEPLINK_LOOKUP_FAILED'; then
+    :
+  else
+    echo "  FAIL [NOTIF-DEEPLINK-001]: 归属查询失败不再是一个明确的拒绝 ——" >&2
+    echo "        fail-open 会让「数据库查不出来」变成「放行」。" >&2
+    exit 1
+  fi
+  if [ -f "$NOTIF_DEEPLINK_TEST" ]; then
+    require_test "NOTIF-DEEPLINK-001" "./internal/notification" \
+      "TestResolveDeepLinkRejectsSomeoneElsesLink" \
+      "$NOTIF_DEEPLINK_TEST" || exit $?
+    require_test "NOTIF-DEEPLINK-001" "./internal/notification" \
+      "TestResolveDeepLinkRejectsLinksThatAreNotOursToRoute" \
+      "$NOTIF_DEEPLINK_TEST" || exit $?
+    require_test "NOTIF-DEEPLINK-001" "./internal/notification" \
+      "TestResolveDeepLinkFailsClosedWhenTheOwnershipLookupErrors" \
+      "$NOTIF_DEEPLINK_TEST" || exit $?
+  fi
+  require_test "NOTIF-DEEPLINK-001" "./internal/platform/postgres" \
+    "TestNotificationHasInboxDeepLinkIsScopedToTheRecipient" \
+    "apps/api-go/internal/platform/postgres/notification_integration_test.go" || exit $?
+  echo "    NOTIF-DEEPLINK-001: PASS (深链跳转要过形状白名单 + 归属校验，且查询失败 fail-closed)"
+fi
+
+# NOTIF-EVENT-PRODUCER-001（2026-10-02，用户「有问题就修 缺数据就做」）：
+# inboxForEvent 里映射的**每一个事件名都必须真的有人发**。
+#
+# 扫出来的时候（2026-10-02）switch 里有 `OrderCreated` / `VoucherRedeemed` /
+# `VoucherSettled`，而全仓非测试代码里 `event.New(` 一个都没有 ——
+# 「订单已成立」和「凭证动态」这两类通知**从来没发出去过**。
+# 而那时 switch 看起来完全正常、四条映射单测全绿 —— 它们测的是「映射对不对」，
+# 不是「事件存不存在」。
+#
+# 顺带修掉的第二个洞：`OfferAccepted` 的 Aggregate 是 **offer**，却和 OrderCreated
+# 共用 `/orders/` + AggregateID ⇒ 发出去的是 `/orders/off_…`（错链，点进去没这个资源）。
+# 现在订单通知只由 `OrderCreatedFromOffer`（Aggregate 才是 order）出。
+NOTIF_EVENT_MAP=apps/api-go/cmd/worker/main.go
+if [ -f "$NOTIF_EVENT_MAP" ]; then
+  # 映射表里不许再出现这三个永不触发的名字（加回来 = 通知又变成零）。
+  for dead in OrderCreated VoucherRedeemed VoucherSettled; do
+    if grep -qE "^[[:space:]]*case \"${dead}\"" "$NOTIF_EVENT_MAP"; then
+      echo "  FAIL [NOTIF-EVENT-PRODUCER-001]: inboxForEvent 又映射了永不触发的 ${dead} ——" >&2
+      echo "        全仓非测试代码没有 event.New(\"${dead}\")，这条通知永远发不出去。" >&2
+      exit 1
+    fi
+  done
+  if ! grep -qF 'case "OrderCreatedFromOffer":' "$NOTIF_EVENT_MAP"; then
+    echo "  FAIL [NOTIF-EVENT-PRODUCER-001]: 订单通知不再由 OrderCreatedFromOffer 出 ——" >&2
+    echo "        真实事件名就是这个（OrderCreated 从来没人发），改回去 = 订单通知归零。" >&2
+    exit 1
+  fi
+  require_test "NOTIF-EVENT-PRODUCER-001" "./cmd/worker" \
+    "TestInboxForEventOnlyMapsEventTypesThatAreActuallyEmitted" \
+    "apps/api-go/cmd/worker/main_test.go" || exit $?
+  require_test "NOTIF-EVENT-PRODUCER-001" "./cmd/worker" \
+    "TestInboxForEventPointsTheOrderLinkAtTheOrder" \
+    "apps/api-go/cmd/worker/main_test.go" || exit $?
+  echo "    NOTIF-EVENT-PRODUCER-001: PASS (映射表里每个事件名都有真生产者，订单深链指订单自己)"
+fi
+
+# NOTIF-DEEPLINK-ROUTE-001（2026-10-02）：通知能跳了，但**只跳到真存在的页面**，
+# 而且跳转前必须过服务端归属。
+#
+# 服务端放行的五个前缀里，只有 /orders（我的订单）和 /invitations（我的场景）
+# 在 App 里有屏幕。/tasks /vouchers /offers 没有 —— 把它们指到「看起来差不多」
+# 的页面就是编目的地：用户点进去看到的不是通知里说的那件事。
+NOTIF_ROUTE=apps/mobile/src/notif-deeplink-route.ts
+NOTIF_CENTER=apps/mobile/src/surfaces/notification-center.tsx
+if [ -f "$NOTIF_ROUTE" ] && [ -f "$NOTIF_CENTER" ]; then
+  # 反向臂：这三个前缀不许出现在路由表里（编目的地）。
+  for fake in /tasks /vouchers /offers; do
+    if grep -qE "^[[:space:]]*\"${fake}\"" "$NOTIF_ROUTE"; then
+      echo "  FAIL [NOTIF-DEEPLINK-ROUTE-001]: 路由表把 ${fake} 映射出去了 ——" >&2
+      echo "        App 里没有这一页，点进去看到的不是通知里说的那件事（编目的地）。" >&2
+      exit 1
+    fi
+  done
+  if ! grep -qF 'deepLinkRouteFor' "$NOTIF_CENTER"; then
+    echo "  FAIL [NOTIF-DEEPLINK-ROUTE-001]: 通知中心不再判「有没有这一页」就开始跳。" >&2
+    exit 1
+  fi
+  # 归属校验：只有服务端说「这条链接投递过你」才跳（改个 id 不能跳别人的）。
+  if ! grep -qF 'if (resolved) onNavigate(route)' "$NOTIF_CENTER"; then
+    echo "  FAIL [NOTIF-DEEPLINK-ROUTE-001]: 跳转不再等归属校验的结果 ——" >&2
+    echo "        改个 id 就能跳到别人的东西去。" >&2
+    exit 1
+  fi
+  # 路由表自己的单测（notif-deeplink-route.test.ts）由 vitest 跑：
+  # require_test 只能跑 Go 包，不在这里重复钉一遍。
+  echo "    NOTIF-DEEPLINK-ROUTE-001: PASS (只跳真存在的页面，且跳转前过服务端归属)"
+fi
+
+# MERCHANT-OUTCOME-PROJECTION-001（2026-10-02，用户「商家侧什么都没有 空空的。
+# 没接支付但我们可以做数据」）：
+#
+# 根因：经营结果读 business.spend_daily，但真实链路里没有任何生产者 —— 订单
+# （活动报名）从来不会投进这张表，0 订单/0 成交/0 复访是恒定的，不是数据少。
+#
+# 修法是投影桥：activity 域在下单/取消时把这一笔投给「场景→认领门店→商家」；
+# 支付没接，gross 恒为 0（成交金额没有事实来源就不编数）。钉三件事：
+#   1. 接线在 —— 只在有 PG 的分支接（内存模式没有 spend_daily 可投）。
+#      漏接 = 生产上数字恒 0，和没修一样，而且单测全绿抓不住。
+#   2. 下单和取消两条路都投 —— 只投不扣，取消过的单会永久虚增经营结果。
+#   3. 行为测试在（内存契约 + PG 端到端）。
+ACT_SVC=apps/api-go/internal/activity/service.go
+MOP_B=0
+if ! grep -qF 'activityService.SetOrderProjector(businessRepository)' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [MERCHANT-OUTCOME-PROJECTION-001]: 投影桥没接线 ——" >&2
+  echo "        订单不会投进 spend_daily，经营结果会回到恒 0。" >&2
+  MOP_B=1
+fi
+if [ "$(grep -c 's.projectOrder(' "$ACT_SVC" 2>/dev/null)" -lt 2 ]; then
+  echo "  FAIL [MERCHANT-OUTCOME-PROJECTION-001]: 下单/取消两条路不再都投（projectOrder 调用 <2）——" >&2
+  echo "        只投不扣，取消的单会永久虚增经营结果。" >&2
+  MOP_B=1
+fi
+if [ ! -f apps/api-go/internal/activity/order_projection_test.go ] || [ ! -f apps/api-go/internal/platform/postgres/merchant_order_projection_integration_test.go ]; then
+  echo "  FAIL [MERCHANT-OUTCOME-PROJECTION-001]: 投影的行为测试文件不见了。" >&2
+  MOP_B=1
+fi
+#   4. 接线前的历史报名靠 migration 156 从事实表补投（幂等、不覆盖已有桶，
+#      由 TestMerchantSpendBackfillFromParticipants 钉）；文件不见了 = 老商家
+#      的经营结果回到恒 0，而且没有任何测试会响。
+if [ ! -f apps/api-go/migrations/156_backfill_merchant_spend_daily.sql ]; then
+  echo "  FAIL [MERCHANT-OUTCOME-PROJECTION-001]: 156 补投迁移不见了 —— 接线前的历史订单永远不在经营结果里。" >&2
+  MOP_B=1
+fi
+if [ "$MOP_B" -eq 0 ]; then
+  echo "    MERCHANT-OUTCOME-PROJECTION-001: PASS (订单→spend_daily 投影桥已接线，下单/取消都投，gross 不编数)"
+else
+  exit 1
+fi
+
+# MERCHANT-ACCOUNT-SWITCH-001（2026-10-02，用户「没看到改动在模拟器有什么效果」）：
+#
+# 根因不是数据没投进去 —— 是经营主页整页钉在 listMyAccounts 的第一条
+# （服务端 ORDER BY created_at DESC = 最新建的那家）。同一个店主的另一家主体
+# 上真实存在的订单，在 app 里没有任何入口能看到：页面报「0 订单」，库里躺着 3 天
+# 的成交。这类「只认第一条」的错，接口全绿、单测全绿，只有真人打开 app 才发现。
+BH=apps/mobile/src/surfaces/business-home.tsx
+if ! grep -q 'accounts.length > 1' "$BH" || \
+   ! grep -q 'business.getMerchantOperatingHome(id)' "$BH" || \
+   grep -q 'accounts\[0\]' "$BH"; then
+  echo "  FAIL [MERCHANT-ACCOUNT-SWITCH-001]: 经营主页又回到只认第一个经营主体 ——" >&2
+  echo "        多家主体的店主会看到 0 订单，而数据其实一直在库里。" >&2
+  exit 1
+fi
+if [ ! -f apps/mobile/src/surfaces/business-home-account-switch.test.ts ]; then
+  echo "  FAIL [MERCHANT-ACCOUNT-SWITCH-001]: 切换主体的行为测试文件不见了。" >&2
+  exit 1
+fi
+echo "    MERCHANT-ACCOUNT-SWITCH-001: PASS (多主体可切换，四个经营读接口都跟着选中的主体走)"
+
+# NOTIF-PUSH-NATIVE-GUARD-001（2026-10-02，用户在模拟器上连报两次红屏）：
+#
+# 「原生模块没进二进制就降级成 null」这条降级**自己把 app 打挂了**。JS 侧探不到
+# 「这个原生模块在不在二进制里」，两条看起来能用的路都是假的：
+#   ① try/catch —— 模块顶层 require 抛的是 Metro 的 fatal error，不走 try/catch；
+#   ② RN 的 TurboModuleRegistry.get —— Expo 的模块不在那张注册表里，探出来是
+#     假阳性的"有"，真 import 时炸在 `new NativeEventEmitter(null)`。
+# 所以这条路只能由**构建期**开关把关：EXPO_PUBLIC_PUSH 没设成 1 就绝不 import。
+# 钉：开关必须在 import 之前，且不许再用 TurboModuleRegistry 假装探得到。
+PUSH=apps/mobile/src/push-registration.ts
+gate_line=$(grep -n 'EXPO_PUBLIC_PUSH' "$PUSH" 2>/dev/null | head -1 | cut -d: -f1)
+import_line=$(grep -n 'await import("expo-notifications")' "$PUSH" 2>/dev/null | head -1 | cut -d: -f1)
+if [ -z "$gate_line" ] || [ -z "$import_line" ] || [ "$gate_line" -gt "$import_line" ]; then
+  echo "  FAIL [NOTIF-PUSH-NATIVE-GUARD-001]: 推送的原生模块入口没被构建期开关挡住 ——" >&2
+  echo "        二进制里没有 ExpoNotifications 时，Metro 的 fatal error 会盖住整个 app。" >&2
+  exit 1
+fi
+if grep -vE '^[[:space:]]*(\*|//|/\*)' "$PUSH" | grep -q 'TurboModuleRegistry'; then
+  echo "  FAIL [NOTIF-PUSH-NATIVE-GUARD-001]: 又用 TurboModuleRegistry 探 Expo 模块 ——" >&2
+  echo "        那张注册表里没有 Expo 的模块，探出来是假阳性，真 import 时才炸。" >&2
+  exit 1
+fi
+echo "    NOTIF-PUSH-NATIVE-GUARD-001: PASS (构建期开关挡住 import，二进制没重建时不碰原生推送)"
+
+# STORE-HUB-SCROLL-001（2026-10-02，用户「还是显示不完整 不能下滑动」）：
+#
+# 根因：BUSINESS 上下文的「线上店铺」页是这个文件里**唯一**没套 ScrollView 的
+# 页面分支（其余 13 页都是 `<View style={root}><ScrollView contentContainerStyle=
+# {styles.content}>`），而它渲染的 MyStoresHub 是纯 View —— 列表/详情都不带滚动
+# 容器，滚动归宿主。两边都以为对方管滚动 = 整页没有滚动容器：内容超过一屏就被
+# 屏幕底边裁掉，底部 735–818pt 那条悬浮 Tab Bar 还压在最后一段内容上，怎么划
+# 都到不了（复购客户、店铺二维码那些字段其实一直渲染着，只是看不见）。
+#
+# 这类"嵌套/缺失滚动容器"的错：接口全绿、类型全绿、单测全绿，只有真人在设备上
+# 划一下才发现。所以钉的是分支形状，不是文件里有没有 ScrollView（这个文件本来
+# 就有 16 处，全局 grep 会在修复前一样通过）。
+R21=apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx
+HUB=apps/mobile/src/surfaces/my-stores-hub.tsx
+if [ -f "$R21" ] && [ -f "$HUB" ]; then
+  # 剥注释：修复说明里引用了 `<ScrollView contentContainerStyle={styles.content}>`
+  # 这个写法本身，不剥的话条目会拿说明当代码，把自己判绿。
+  R21_SRC=$(perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' "$R21")
+  STORE_BRANCH=$(printf '%s' "$R21_SRC" | awk '/if \(page === "store"\)/,/if \(page === "sales"\)/')
+  R21_B=0
+  if ! printf '%s' "$STORE_BRANCH" | grep -q '<ScrollView contentContainerStyle={styles.content}>'; then
+    echo "  FAIL [STORE-HUB-SCROLL-001]: 「线上店铺」页又回到没有滚动容器 ——" >&2
+    echo "        内容超过一屏就被屏幕底边裁掉，划不动，底部悬浮 Tab Bar 压住最后一段。" >&2
+    R21_B=1
+  fi
+  # ScrollView 必须**包住** hub：先开 ScrollView，再开 MyStoresHub，最后收掉。
+  if ! printf '%s' "$STORE_BRANCH" | perl -0ne 'exit(1) unless /<ScrollView\b.*?<MyStoresHub\b.*?<\/ScrollView>/gs'; then
+    echo "  FAIL [STORE-HUB-SCROLL-001]: 店铺页的 ScrollView 没有包住 MyStoresHub ——" >&2
+    echo "        滚动容器和内容错位，页面上半截照样划不动。" >&2
+    R21_B=1
+  fi
+  # 反向钉：hub 自己不许长出竖滚 —— 宿主已经在滚了，滚中套滚会把同一个手势吃掉，
+  # 症状和这次的"划不动"一模一样（flex:1 的内层 ScrollView 在自动高度父级里不滚）。
+  HUB_SRC=$(perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' "$HUB")
+  VERT_HUB=$(printf '%s' "$HUB_SRC" \
+    | perl -0ne 'while (m/<ScrollView\b[^>]*>/gs) { my $t = $&; print "$t\n" unless $t =~ /\bhorizontal\b/; }')
+  if [ -n "$VERT_HUB" ]; then
+    echo "  FAIL [STORE-HUB-SCROLL-001]: MyStoresHub 自己长出了竖向 ScrollView ——" >&2
+    echo "        宿主（这个页 / me.tsx 的 bdash）已经在滚了，滚中套滚会把 gestures 吃掉：" >&2
+    printf '%s\n' "$VERT_HUB" | sed 's/^/          /' >&2
+    R21_B=1
+  fi
+  # 底部留白必须避开悬浮 dock 带（735–818pt）：常量，不能跟着 chrome 开关变
+  # （见 scroll-chrome.ts 的 hide/show ↔ contentOffset 抖动）。
+  if ! printf '%s' "$R21_SRC" | grep -Eq 'content: \{[^}]*paddingBottom: (1[0-9][0-9]|[2-9][0-9]{3,})'; then
+    echo "  FAIL [STORE-HUB-SCROLL-001]: 店铺页底部留白小于 100pt ——" >&2
+    echo "        最后一段内容会永久压在悬浮 Tab Bar 底下。" >&2
+    R21_B=1
+  fi
+  if [ ! -f apps/mobile/src/surfaces/merchant-store-page-scroll.test.ts ]; then
+    echo "  FAIL [STORE-HUB-SCROLL-001]: 店铺页滚动的测试文件不见了。" >&2
+    R21_B=1
+  fi
+  if [ "$R21_B" -eq 0 ]; then
+    echo "    STORE-HUB-SCROLL-001: PASS (店铺页有滚动容器且包住 hub，底部避开悬浮 dock)"
+  else
+    exit 1
+  fi
+fi
+
+# STORE-ASSET-SCOPE-001（2026-10-02，用户「这个还是有重复的」+ 实机截图）：
+#
+# STORE-CONSOLIDATE-001 收编「线上店铺」时，资产编辑子视图是**整页嵌**
+# MerchantStorefrontSurface。那一页作为独立整页时，外壳就是它的内容（主体抬头
+# 「管理别人看到你的店」、门店身份卡、分享、店铺二维码、经营数字条、资产列表、
+# 活动/Offer、Creator 权益、口径说明）；嵌进店详情之后，这些全部变成店详情已有
+# 内容的第二份 —— 同一个店名一屏三次（返回条 / 身份卡 / 主体抬头），二维码卡和
+# 经营数字各两份，券和 Creator 各两份；而且它按 accounts.map 渲染，在「返回某一家
+# 店」的页面里把别的主体、别的门店一起铺出来。
+#
+# 修法是给原子页一个作用域（只画被选中的那一家 + 要编的那一节），外壳归 hub。
+# 钉三组：① 作用域真的在（hub 传、原子页按它过滤门店）；② 外壳每一块都被 scope
+# 挡住（少挡一块 = 那一块又出现两份；身份卡/分享/二维码/数字条夹着 JSX 注释，
+# 所以钉"同一段被同一个片段挡住"而不是逐块 grep）；③ 中间页删掉后三个目的地
+# 各自还有入口（"去重"不能变成"把能力删了"）。
+FACE=apps/mobile/src/surfaces/merchant-storefront.tsx
+HUB_SHOP=apps/mobile/src/surfaces/my-stores-hub.tsx
+if [ -f "$FACE" ] && [ -f "$HUB_SHOP" ]; then
+  SAS_B=0
+  # ① 作用域
+  if ! grep -qF 'scope={{ storeId: selected.store.id, page: showAssets }}' "$HUB_SHOP"; then
+    echo "  FAIL [STORE-ASSET-SCOPE-001]: hub 又整页嵌原子页（没传作用域）——" >&2
+    echo "        资产子视图会重新画出店详情已有的一整排内容。" >&2
+    SAS_B=1
+  fi
+  if ! grep -qF 'allStores.filter((s) => s.id === scope.storeId)' "$FACE"; then
+    echo "  FAIL [STORE-ASSET-SCOPE-001]: 原子页收下作用域却不再按它过滤门店 ——" >&2
+    echo "        「返回某一家店」的页面里会列出别的主体、别的门店。" >&2
+    SAS_B=1
+  fi
+  # ② 外壳三处直钉 + 一段片段钉
+  for GUARD in '{scope ? null : <View style={styles.accountHead}>' \
+               '{scope ? null : currentPage === "root" ? <View style={styles.assetSection}>' \
+               '{scope ? null : <View style={styles.scopeNote}>'; do
+    if ! grep -qF "$GUARD" "$FACE"; then
+      echo "  FAIL [STORE-ASSET-SCOPE-001]: 外壳少挡了一块 —— ${GUARD}" >&2
+      SAS_B=1
+    fi
+  done
+  FRAG_OPEN=$(grep -n -F '{scope ? null : <>' "$FACE" | head -1 | cut -d: -f1)
+  FRAG_CLOSE=$(grep -n -F '</>}' "$FACE" | head -1 | cut -d: -f1)
+  if [ -z "$FRAG_OPEN" ] || [ -z "$FRAG_CLOSE" ] || [ "$FRAG_OPEN" -ge "$FRAG_CLOSE" ]; then
+    echo "  FAIL [STORE-ASSET-SCOPE-001]: 门店身份卡/分享/二维码/经营数字那一段没有整体被 scope 挡住 ——" >&2
+    echo "        它们和店详情是同一批东西的第二份（店名一屏出现三次就是这么来的）。" >&2
+    SAS_B=1
+  else
+    for MARKER in 'style={styles.storeHero}>' 'style={styles.qrCard}>' 'style={styles.metricStrip}>'; do
+      LN=$(grep -n -F "$MARKER" "$FACE" | head -1 | cut -d: -f1)
+      if [ -z "$LN" ] || [ "$LN" -lt "$FRAG_OPEN" ] || [ "$LN" -gt "$FRAG_CLOSE" ]; then
+        echo "  FAIL [STORE-ASSET-SCOPE-001]: $MARKER 跑出了被 scope 挡住的那一段 —— 子视图里又画一份。" >&2
+        SAS_B=1
+      fi
+    done
+  fi
+  # ③ 能力不丢：三个目的地各有一个入口，营业资料的编辑挂在它改的那一节上。
+  #    （剥注释：说明文字里引用过「资产管理」这几个字，不剥就是拿注释当代码判绿。）
+  HUB_SHOP_SRC=$(perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' "$HUB_SHOP")
+  for ENTRY in 'onManageProducts("menu")' 'onManageProducts("photos")' 'onManageProducts("details")' 'accessibilityLabel="编辑经营资料"'; do
+    if ! printf '%s' "$HUB_SHOP_SRC" | grep -qF "$ENTRY"; then
+      echo "  FAIL [STORE-ASSET-SCOPE-001]: 中间页删掉后少了入口 —— $ENTRY" >&2
+      echo "        去重不能把能力一起去掉。" >&2
+      SAS_B=1
+    fi
+  done
+  if printf '%s' "$HUB_SHOP_SRC" | grep -qF '资产管理'; then
+    echo "  FAIL [STORE-ASSET-SCOPE-001]: hub 里又出现「资产管理」中间页 —— 那一页整页是店详情的第二份。" >&2
+    SAS_B=1
+  fi
+  if [ ! -f apps/mobile/src/surfaces/store-asset-scope.test.ts ]; then
+    echo "  FAIL [STORE-ASSET-SCOPE-001]: 资产子视图作用域的测试文件不见了。" >&2
+    SAS_B=1
+  fi
+  if [ "$SAS_B" -eq 0 ]; then
+    echo "    STORE-ASSET-SCOPE-001: PASS (资产子视图只画被选中的那一家那一节，外壳不再重复)"
+  else
+    exit 1
+  fi
 fi

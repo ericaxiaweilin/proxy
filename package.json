@@ -12,10 +12,10 @@
     "test:go": "go -C apps/api-go test ./...",
     "build:go": "mkdir -p apps/api-go/.build && go -C apps/api-go build -o .build/proxy-api ./cmd/api && go -C apps/api-go build -o .build/proxy-worker ./cmd/worker",
     "check:openapi": "go -C apps/api-go run ./scripts/generate_openapi.go --check",
-    "check:design": "node ./scripts/check-design-baseline.mjs",
-    "check:liquid-dock": "node ./scripts/check-liquid-dock-baseline.mjs",
+    "check:design": "REPO_ROOT=\"$PWD\" go -C apps/api-go run ./cmd/gatecheck design-baseline",
+    "check:liquid-dock": "REPO_ROOT=\"$PWD\" go -C apps/api-go run ./cmd/gatecheck liquid-dock",
     "check": "pnpm check:design && pnpm check:liquid-dock && pnpm check:deprecated && pnpm typecheck && pnpm test && pnpm test:go && pnpm build:go && pnpm build && pnpm check:openapi",
-    "check:deprecated": "node ./scripts/check-deprecated-routes.mjs"
+    "check:deprecated": "REPO_ROOT=\"$PWD\" go -C apps/api-go run ./cmd/gatecheck deprecated-routes"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",

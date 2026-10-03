@@ -34,16 +34,12 @@ echo "  $cc"
 echo "  OK"
 
 echo "6) Parse JSON envelope"
-python3 -c "
-import json
-d = json.load(open('/tmp/terms.json'))
-assert d['kind'] == 'terms', f'kind={d[\"kind\"]}'
-assert d['version'] == '1.1', f'version={d[\"version\"]}'
-assert d['locale'] == 'vi-VN', f'locale={d[\"locale\"]}'
-assert '服务使用协议' in d['title'], f'title={d[\"title\"]}'
-assert len(d['content']) > 5000, f'content length={len(d[\"content\"])}'
-assert len(d['contentSha256']) == 64, f'sha256={d[\"contentSha256\"]}'
-print(f'  OK: kind={d[\"kind\"]} version={d[\"version\"]} content={len(d[\"content\"])} chars')
-"
+jq -re 'if .kind != "terms" then error("kind=\(.kind)")
+  elif .version != "1.1" then error("version=\(.version)")
+  elif .locale != "vi-VN" then error("locale=\(.locale)")
+  elif ((.title // "") | contains("服务使用协议") | not) then error("title=\(.title)")
+  elif ((.content // "") | length) <= 5000 then error("content length=\((.content // "") | length)")
+  elif ((.contentSha256 // "") | length) != 64 then error("sha256=\(.contentSha256)")
+  else "  OK: kind=\(.kind) version=\(.version) content=\(.content | length) chars" end' /tmp/terms.json
 
 echo "ALL PASS"

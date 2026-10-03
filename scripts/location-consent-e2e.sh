@@ -92,8 +92,8 @@ IDEM_KEY="loc-e2e-idem-$(date +%s)-$$"
 ENVELOPE=$(create_anon_envelope "$CORR_ID" "$IDEM_KEY")
 note "issuing CreateAnonymousSession"
 RESP=$(issue_command "" "$ENVELOPE")
-TOKEN=$(printf "%s" "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('auth',{}).get('accessToken',''))")
-USER_ID=$(printf "%s" "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('aggregate',{}).get('id',''))")
+TOKEN=$(printf "%s" "$RESP" | jq -r '.auth.accessToken? // empty')
+USER_ID=$(printf "%s" "$RESP" | jq -r '.aggregate.id? // empty')
 if [ -z "$TOKEN" ]; then
   echo "$RESP" | head -c 400
   fail "could not extract access token; server did not return auth.accessToken"
@@ -121,7 +121,7 @@ ok "GET /v1/location/consent without auth -> 401"
 # 3. Initial status is NONE
 note "checking initial status"
 INIT=$(curl -sS --max-time "$TIMEOUT" -H "Authorization: Bearer $TOKEN" "$BASE/v1/location/consent")
-INIT_STATUS=$(printf "%s" "$INIT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))")
+INIT_STATUS=$(printf "%s" "$INIT" | jq -r '.status? // empty')
 if [ "$INIT_STATUS" != "NONE" ]; then
   fail "expected initial status NONE, got $INIT_STATUS (body=$INIT)"
 fi
@@ -131,7 +131,7 @@ ok "initial status=NONE"
 # delta after the grants. The user is fresh per run, but the
 # table is not truncated between runs, so an absolute count
 # would drift.
-HIST_BASELINE=$(curl -sS --max-time "$TIMEOUT" -H "Authorization: Bearer $TOKEN" "$BASE/v1/location/consent/history" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('rows',[])))")
+HIST_BASELINE=$(curl -sS --max-time "$TIMEOUT" -H "Authorization: Bearer $TOKEN" "$BASE/v1/location/consent/history" | jq -r '(.rows // []) | length')
 ok "history baseline=$HIST_BASELINE rows"
 
 # 4. Grant with 30 min
@@ -140,8 +140,8 @@ GRANT=$(curl -sS --max-time "$TIMEOUT" -X POST "$BASE/v1/location/consent/grant"
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"durationSeconds": 1800}')
-GRANT_STATUS=$(printf "%s" "$GRANT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))")
-GRANT_DUR=$(printf "%s" "$GRANT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('durationSeconds',''))")
+GRANT_STATUS=$(printf "%s" "$GRANT" | jq -r '.status? // empty')
+GRANT_DUR=$(printf "%s" "$GRANT" | jq -r '.durationSeconds? // empty')
 if [ "$GRANT_STATUS" != "GRANTED" ] || [ "$GRANT_DUR" != "1800" ]; then
   fail "grant expected GRANTED 1800s, got $GRANT_STATUS $GRANT_DUR (body=$GRANT)"
 fi
@@ -150,8 +150,8 @@ ok "grant succeeded: status=GRANTED, duration=1800s"
 # 5. Status now shows remaining
 note "checking post-grant status"
 POST=$(curl -sS --max-time "$TIMEOUT" -H "Authorization: Bearer $TOKEN" "$BASE/v1/location/consent")
-POST_STATUS=$(printf "%s" "$POST" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))")
-POST_REMAIN=$(printf "%s" "$POST" | python3 -c "import sys,json; print(json.load(sys.stdin).get('remainingSeconds',0))")
+POST_STATUS=$(printf "%s" "$POST" | jq -r '.status? // empty')
+POST_REMAIN=$(printf "%s" "$POST" | jq -r '.remainingSeconds? // 0')
 if [ "$POST_STATUS" != "GRANTED" ] || [ "$POST_REMAIN" -lt 1700 ]; then
   fail "post-grant expected GRANTED + remaining >=1700, got $POST_STATUS $POST_REMAIN (body=$POST)"
 fi
@@ -174,7 +174,7 @@ REGRANT=$(curl -sS --max-time "$TIMEOUT" -X POST "$BASE/v1/location/consent/gran
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"durationSeconds": 28800}')
-REGRANT_DUR=$(printf "%s" "$REGRANT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('durationSeconds',''))")
+REGRANT_DUR=$(printf "%s" "$REGRANT" | jq -r '.durationSeconds? // empty')
 if [ "$REGRANT_DUR" != "28800" ]; then
   fail "re-grant expected 28800s, got $REGRANT_DUR (body=$REGRANT)"
 fi
@@ -183,7 +183,7 @@ ok "re-grant duration=28800s"
 # 8. History shows both rows
 note "checking history"
 HIST=$(curl -sS --max-time "$TIMEOUT" -H "Authorization: Bearer $TOKEN" "$BASE/v1/location/consent/history")
-HIST_COUNT=$(printf "%s" "$HIST" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('rows',[])))")
+HIST_COUNT=$(printf "%s" "$HIST" | jq -r '(.rows // []) | length')
 EXPECTED_COUNT=$((HIST_BASELINE + 2))
 if [ "$HIST_COUNT" != "$EXPECTED_COUNT" ]; then
   fail "history expected $EXPECTED_COUNT rows (baseline $HIST_BASELINE + 2 grants), got $HIST_COUNT (body=$HIST)"
@@ -194,8 +194,11 @@ ok "history shows $HIST_COUNT rows (baseline $HIST_BASELINE + 2 new)"
 note "revoking"
 REV=$(curl -sS --max-time "$TIMEOUT" -X POST "$BASE/v1/location/consent/revoke" \
   -H "Authorization: Bearer $TOKEN")
-WAS_ACTIVE=$(printf "%s" "$REV" | python3 -c "import sys,json; print(json.load(sys.stdin).get('wasActive',''))")
-if [ "$WAS_ACTIVE" != "True" ]; then
+# `| tostring` instead of `// empty`: a real `false` must stay visible as
+# "false" (jq's `//` swallows falsy values), and a missing key becomes "null" —
+# either way it is not "true", which is what the assertion below checks.
+WAS_ACTIVE=$(printf "%s" "$REV" | jq -r '.wasActive | tostring')
+if [ "$WAS_ACTIVE" != "true" ]; then
   fail "revoke expected wasActive=true, got $WAS_ACTIVE (body=$REV)"
 fi
 ok "revoke flipped wasActive=true"
@@ -203,7 +206,7 @@ ok "revoke flipped wasActive=true"
 # 10. Status is NONE again
 note "post-revoke status"
 AFTER=$(curl -sS --max-time "$TIMEOUT" -H "Authorization: Bearer $TOKEN" "$BASE/v1/location/consent")
-AFTER_STATUS=$(printf "%s" "$AFTER" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))")
+AFTER_STATUS=$(printf "%s" "$AFTER" | jq -r '.status? // empty')
 if [ "$AFTER_STATUS" != "NONE" ]; then
   fail "post-revoke expected NONE, got $AFTER_STATUS (body=$AFTER)"
 fi
@@ -215,13 +218,13 @@ CORR2="loc-e2e2-$(date +%s)-$$"
 IDEM2="loc-e2e-idem2-$(date +%s)-$$"
 ENVELOPE2=$(create_anon_envelope "$CORR2" "$IDEM2")
 RESP2=$(issue_command "" "$ENVELOPE2")
-TOKEN2=$(printf "%s" "$RESP2" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('auth',{}).get('accessToken',''))")
-USER2=$(printf "%s" "$RESP2" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('aggregate',{}).get('id',''))")
+TOKEN2=$(printf "%s" "$RESP2" | jq -r '.auth.accessToken? // empty')
+USER2=$(printf "%s" "$RESP2" | jq -r '.aggregate.id? // empty')
 if [ -z "$TOKEN2" ]; then
   fail "could not create second user"
 fi
 ok "second user created: $USER2"
-USER2_STATUS=$(curl -sS --max-time "$TIMEOUT" -H "Authorization: Bearer $TOKEN2" "$BASE/v1/location/consent" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))")
+USER2_STATUS=$(curl -sS --max-time "$TIMEOUT" -H "Authorization: Bearer $TOKEN2" "$BASE/v1/location/consent" | jq -r '.status? // empty')
 if [ "$USER2_STATUS" != "NONE" ]; then
   fail "second user expected NONE, got $USER2_STATUS"
 fi

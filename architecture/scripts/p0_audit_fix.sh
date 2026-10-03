@@ -16,7 +16,7 @@ post_cmd() {
   fi
 }
 
-uuid() { python3 -c "import uuid; print(uuid.uuid4().hex[:16])"; }
+uuid() { uuidgen | tr 'A-Z' 'a-z' | tr -d '-' | cut -c1-16; }
 PASS=0; FAIL=0
 trap 'echo ""; echo "PASS: $PASS  FAIL: $FAIL"' EXIT
 
@@ -34,8 +34,8 @@ SESS=$(post_cmd "CreateAnonymousSession" "{
   \"correlationId\":\"p0_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"deviceId\":\"p0_$(uuid)\",\"platform\":\"IOS\"}
 }")
-TOKEN=$(echo "$SESS" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['accessToken'])")
-USER_ID=$(echo "$SESS" | python3 -c "import json,sys; print(json.load(sys.stdin)['auth']['userAccountId'])")
+TOKEN=$(echo "$SESS" | jq -re '.auth.accessToken')
+USER_ID=$(echo "$SESS" | jq -re '.auth.userAccountId')
 echo "user: $USER_ID"
 echo ""
 
@@ -62,7 +62,7 @@ do
     \"correlationId\":\"p0_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
     \"payload\":{\"mediaType\":\"IMAGE\",\"originalStorageKey\":\"$KEY\",\"mimeType\":\"image/jpeg\",\"width\":$W,\"height\":$H}
   }" "$TOKEN")
-  ASSET_ID=$(echo "$INIT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('aggregate',{}).get('id',''))")
+  ASSET_ID=$(echo "$INIT" | jq -r '.aggregate.id? // empty')
 
   UPL_CODE=$(curl -sS -X PUT "http://127.0.0.1:${PORT}/v1/media/upload/${ASSET_ID}" \
     -H "Content-Type: application/octet-stream" -H "Upload-Offset: 0" \
@@ -78,7 +78,7 @@ do
     \"correlationId\":\"p0_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
     \"payload\":{\"mediaAssetId\":\"$ASSET_ID\",\"originalStorageKey\":\"$KEY\",\"contentLengthBytes\":$(stat -f%z "$FIX_PATH"),\"contentSha256\":\"p0\"}
   }" "$TOKEN")
-  OUT=$(echo "$COMP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('outcome',''))")
+  OUT=$(echo "$COMP" | jq -r '.outcome? // empty')
 
   if [[ "$UPL_CODE" == "204" && "$OUT" == "ACCEPTED" ]]; then
     echo "  ✓ $FIX → $ASSET_ID"
@@ -137,9 +137,9 @@ for i in 0 1 2 3; do
       \"contextRefs\":[{\"contextType\":\"SERVICE\",\"contextId\":\"p0-test\"}]
     }
   }" "$TOKEN")
-  OUT=$(echo "$POST" | python3 -c "import json,sys; print(json.load(sys.stdin).get('outcome',''))" 2>/dev/null)
-  ERR=$(echo "$POST" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('error',{}).get('errorCode',''))" 2>/dev/null)
-  POST_ID=$(echo "$POST" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('aggregate',{}).get('id',''))" 2>/dev/null)
+  OUT=$(echo "$POST" | jq -r '.outcome? // empty' 2>/dev/null)
+  ERR=$(echo "$POST" | jq -r '.error.errorCode? // empty' 2>/dev/null)
+  POST_ID=$(echo "$POST" | jq -r '.aggregate.id? // empty' 2>/dev/null)
   if [[ "$OUT" == "ACCEPTED" && -n "$POST_ID" ]]; then
     echo "  ✓ $KEY ($AUTHOR_TYPE:$AUTHOR_NAME, $SCENE) → post=$POST_ID"
     echo "$POST_ID" > "$TMPDIR/post_$KEY"
@@ -163,14 +163,7 @@ LIST=$(post_cmd "ListFeedPosts" "{
   \"payload\":{}
 }")
 echo "$LIST" > "$TMPDIR/feed.json"
-FEED_COUNT=$(python3 -c "
-import json
-d = json.load(open('$TMPDIR/feed.json'))
-op = d.get('operationRef','{}')
-if isinstance(op, str):
-    op = json.loads(op)
-print(len(op.get('posts',[])))
-" 2>/dev/null || echo "0")
+FEED_COUNT=$(jq -r '(.operationRef // "{}") | (if type == "string" then (fromjson? // {}) else . end) | (.posts // []) | length' "$TMPDIR/feed.json" 2>/dev/null || echo "0")
 echo "  feed 包含 $FEED_COUNT 帖"
 
 if [[ "$FEED_COUNT" -ge 4 ]]; then
@@ -179,15 +172,7 @@ if [[ "$FEED_COUNT" -ge 4 ]]; then
   for KEY in "${POST_KEYS[@]}"; do
     PID=$(cat "$TMPDIR/post_$KEY" 2>/dev/null)
     if [[ -n "$PID" ]]; then
-      FOUND=$(python3 -c "
-import json
-d = json.load(open('$TMPDIR/feed.json'))
-op = d.get('operationRef','{}')
-if isinstance(op, str):
-    op = json.loads(op)
-posts = op.get('posts',[])
-print('YES' if any(p.get('postId','')=='$PID' for p in posts) else 'NO')
-" 2>/dev/null)
+      FOUND=$(jq -r --arg pid "$PID" '(.operationRef // "{}") | (if type == "string" then (fromjson? // {}) else . end) | (if ([.posts // [] | .[] | select(.postId == $pid)] | length) > 0 then "YES" else "NO" end)' "$TMPDIR/feed.json" 2>/dev/null)
       if [[ "$FOUND" == "YES" ]]; then
         echo "  ✓ $KEY post $PID 在 feed"
         PASS=$((PASS+1))
@@ -214,14 +199,7 @@ LIST_HCMC=$(post_cmd "ListFeedPosts" "{
   \"correlationId\":\"p0_$(uuid)\",\"requestedAt\":\"2026-08-28T00:00:00Z\",
   \"payload\":{\"viewingCity\":\"胡志明市\"}
 }")
-HCMC_COUNT=$(echo "$LIST_HCMC" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-op = d.get('operationRef','{}')
-if isinstance(op, str):
-    op = json.loads(op)
-print(len(op.get('posts',[])))
-" 2>/dev/null || echo "0")
+HCMC_COUNT=$(echo "$LIST_HCMC" | jq -r '(.operationRef // "{}") | (if type == "string" then (fromjson? // {}) else . end) | (.posts // []) | length' 2>/dev/null || echo "0")
 echo "  viewingCity=胡志明市 → $HCMC_COUNT 帖"
 if [[ "$HCMC_COUNT" -ge 4 ]]; then
   echo "  ✓ empty cityScope fixture post 仍过 HCMC 过滤 (R15.14 tripwire 工作)"
@@ -234,18 +212,7 @@ echo ""
 
 echo "── Step 5: SceneType 验证 (R15.15 P1: listFeed 走 per-(city,sceneType) cache) ──"
 echo "  4 个 post 场景:"
-python3 -c "
-import json
-d = json.load(open('$TMPDIR/feed.json'))
-op = d.get('operationRef','{}')
-if isinstance(op, str):
-    op = json.loads(op)
-posts = op.get('posts',[])
-for p in posts:
-    if 'p0_post_' in p.get('postId',''):
-        media = p.get('mediaRefs', [])
-        print(f'    - {p[\"postId\"]} authorType={p.get(\"authorType\",\"\")} sceneType={p.get(\"sceneType\",\"\")} media={len(media)} refs')
-" 2>/dev/null
+jq -r '(.operationRef // "{}") | (if type == "string" then (fromjson? // {}) else . end) | (.posts // [])[] | select((.postId // "") | contains("p0_post_")) | "    - \(.postId) authorType=\(.authorType // "") sceneType=\(.sceneType // "") media=\((.mediaRefs // []) | length) refs"' "$TMPDIR/feed.json" 2>/dev/null
 
 echo ""
 echo "=== P0 audit fix 完成 ==="

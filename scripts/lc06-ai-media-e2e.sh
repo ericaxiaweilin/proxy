@@ -80,8 +80,8 @@ anon_payload=$(cat <<EOF
 EOF
 )
 anon_response=$(curl -s -X POST -H "Content-Type: application/json" -d "$anon_payload" "$BASE/v1/commands/CreateAnonymousSession")
-access_token=$(echo "$anon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('auth',{}).get('accessToken',''))")
-user_id=$(echo "$anon_response" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('auth',{}).get('userAccountId',''))")
+access_token=$(echo "$anon_response" | jq -r '.auth.accessToken? // empty')
+user_id=$(echo "$anon_response" | jq -r '.auth.userAccountId? // empty')
 [ -n "$access_token" ] || { echo "FAIL: no access token: $anon_response"; exit 1; }
 [ -n "$user_id" ] || { echo "FAIL: no user id: $anon_response"; exit 1; }
 echo "  OK: user=$user_id"
