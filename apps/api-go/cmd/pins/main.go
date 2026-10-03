@@ -49,7 +49,10 @@ import (
 //	5 = the Go port (RE2-safe keyword scanning, no rule change)
 //	6 = helpers moved into the prologue, so a narrowed run no longer blanks the
 //	    `require_test` definition its selected step calls
-const segmenterVersion = 6
+//	7 = variable names are no longer lowercase-only, so depClosure can see the gate's
+//	    uppercase locals (`UI=`, `MH_B=0`, …) instead of letting a narrowed run die on
+//	    `set -u` with "unbound variable"
+const segmenterVersion = 7
 
 func main() {
 	os.Exit(run(os.Args[1:]))

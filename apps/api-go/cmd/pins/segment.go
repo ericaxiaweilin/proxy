@@ -107,6 +107,70 @@ func codeLines(text string) []string {
 	return out
 }
 
+// codeMask marks every byte of text that sits in CODE position — outside comments and
+// outside single/double quotes. Same state machine as codeLines, but length-preserving,
+// so a mask index maps straight back to a byte offset in the original text.
+//
+// The neutraliser needs this and codeLines cannot serve: codeLines collapses quoted runs
+// to one space, which destroys the offsets. Without a mask, rewriting `exit 1` hits the
+// awk program at line 10347 of the gate (`... { print "not-ascending"; exit 0 }` inside
+// single quotes) and every comment that quotes a past incident's `exit 1`.
+func codeMask(text string) []bool {
+	mask := make([]bool, len(text))
+	const (
+		stateCode = iota
+		stateSingle
+		stateDouble
+		stateComment
+	)
+	state := stateCode
+	b := []byte(text)
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if c == '\n' {
+			if state == stateComment {
+				state = stateCode
+			}
+			continue
+		}
+		switch state {
+		case stateComment:
+			continue
+		case stateSingle:
+			if c == '\'' {
+				state = stateCode
+			}
+			continue
+		case stateDouble:
+			if c == '\\' {
+				i++ // the escaped byte is inside the string whatever it is
+				continue
+			}
+			if c == '"' {
+				state = stateCode
+			}
+			continue
+		}
+		switch c {
+		case '#':
+			state = stateComment
+		case '\'':
+			state = stateSingle
+		case '"':
+			state = stateDouble
+		case '\\':
+			if i+1 < len(b) && b[i+1] == '\n' {
+				i++
+				continue
+			}
+			mask[i] = true
+		default:
+			mask[i] = true
+		}
+	}
+	return mask
+}
+
 // isKeywordBoundary reproduces the `(?<![\w-])` / `(?![\w-])` guards of the Python
 // regexes: Go's RE2 has no look-around, so the neighbours are checked explicitly.
 func isKeywordBoundary(b []byte, at, end int) bool {

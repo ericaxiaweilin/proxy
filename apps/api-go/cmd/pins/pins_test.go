@@ -147,7 +147,7 @@ func TestTempScriptNeverMovesALineNumber(t *testing.T) {
 	if strings.TrimSpace(got[5]) != "" {
 		t.Errorf("a skipped step survived: %q", got[5])
 	}
-	if got[len(got)-1] != `echo ">>> TOTAL-FAILURES=$_FAILED"` {
+	if got[len(got)-1] != `echo ">>> TOTAL-FAILURES=${_FAILED:-0}"` {
 		t.Errorf("total line not appended last: %q", got[len(got)-1])
 	}
 }
@@ -266,6 +266,12 @@ func TestAssignNameRejectsComparisons(t *testing.T) {
 		{`x="$y"`, `x`},
 		{`if x; then`, ``},
 		{`1foo=bar`, ``},
+		// The gate's locals are mostly uppercase (`UI=`, `MH_B=0`, `ORDER_DIST_B=0`).
+		// Missing them is what made a narrowed run die on `set -u` — see assignName.
+		{`  UI=apps/mobile/src/surfaces/requester-home.tsx`, `UI`},
+		{`MH_B=0`, `MH_B`},
+		{`ORDER_DIST_B=1`, `ORDER_DIST_B`},
+		{`UI==x`, ``},
 	}
 	for _, c := range cases {
 		if got := assignName(c.line); got != c.want {
@@ -343,6 +349,43 @@ func TestDepClosurePullsEveryAssignerOfAnAccumulatedCounter(t *testing.T) {
 	}
 	if _, ok := got[2]; ok {
 		t.Errorf("step 2 is unrelated to `n` and must stay out; closure = %v", sortedKeys(got))
+	}
+}
+
+// TOOLCHAIN-PINS-UPPERVAR-001: the gate's locals are uppercase (`UI=`, `TEST=`, `MH_B=0`,
+// `ORDER_DIST_B=0`) and depClosure used to be blind to them, because both the assignment
+// and the read regexes were copied from a Python original that matched `[a-z_]` only.
+// Measured 2026-10-03: `--all --only PERSON-DISTANCE-ZERO-001` aborted at line 8779 with
+// `UI: unbound variable` — the step assigning `UI=` was never pulled in, so the tool
+// invented a failure. Before the verdict backstop existed, that abort scored as a PASS.
+func TestDepClosureSeesUppercaseVariables(t *testing.T) {
+	assigner := indexStep("  UI=apps/mobile/src/surfaces/requester-home.tsx\n  TEST=apps/mobile/src/x.test.ts")
+	reader := indexStep(`  if /usr/bin/grep -q 'distanceM: 0' "$UI"; then echo bad; fi`)
+
+	has := func(list []string, want string) bool {
+		for _, v := range list {
+			if v == want {
+				return true
+			}
+		}
+		return false
+	}
+	for _, name := range []string{"UI", "TEST"} {
+		if !has(assigner.Assigns, name) {
+			t.Fatalf("assigner.Assigns = %v, want it to include %s", assigner.Assigns, name)
+		}
+	}
+	if !has(reader.Reads, "UI") {
+		t.Fatalf("reader.Reads = %v, want it to include UI", reader.Reads)
+	}
+
+	steps := []stepIndex{assigner, {Assigns: []string{"ZZ"}}, reader}
+	got := depClosure(steps, map[int]struct{}{2: {}})
+	if _, ok := got[0]; !ok {
+		t.Errorf("the step assigning UI must be pulled in; closure = %v", sortedKeys(got))
+	}
+	if _, ok := got[1]; ok {
+		t.Errorf("a step assigning an unrelated name must stay out; closure = %v", sortedKeys(got))
 	}
 }
 
@@ -439,5 +482,174 @@ func TestBuildIndexCacheIsKeyedToSegmenterVersion(t *testing.T) {
 	}
 	if len(second.Steps) != len(first.Steps) {
 		t.Errorf("cached index disagrees: %d steps vs %d", len(second.Steps), len(first.Steps))
+	}
+}
+
+// TOOLCHAIN-PINS-EXITFORMS-001: the false green this tool must never produce again.
+//
+// The neutraliser used to recognise exactly two shapes — a line that was precisely
+// `exit 1`, and one containing `|| exit $?`. The gate's dominant hand-written idiom is
+// neither: it is `[ "$X_B" -eq 0 ] || exit 1` (22 of them) plus inline `; exit 1; fi`
+// and `exit 1 ;;` inside case clauses. Those really exited, so the step died before the
+// trailer, no marker was printed, and the runner scored the run as
+// "PASS — no selected pin failed".
+//
+// Measured 2026-10-03 on a clean HEAD: MERCHANT-HOME-001, CREATOR-HOME-001 and
+// STORE-ASSET-SCOPE-001 had been red since the commit that introduced them, and every
+// subset run called them a pass. The bug was inherited verbatim from the Python runner —
+// the port was faithful, including to the hole.
+func TestNeutraliseCoversEveryFailureExitShape(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	lines := strings.Split(strings.Join([]string{
+		`#!/bin/bash`,                       // 1
+		`set -u`,                            // 2
+		`X_B=1`,                             // 3
+		`echo "  FAIL [PIN-A]: broken" >&2`, // 4
+		`[ "$X_B" -eq 0 ] || exit 1`,        // 5
+		`if ! grep -q nope /dev/null; then echo "  FAIL [PIN-B]: gone" >&2; exit 1; fi`, // 6
+		`case "$X_B" in`, // 7
+		`  1) echo "  FAIL [PIN-C]: case" >&2; exit 1 ;;`, // 8
+		`esac`,                   // 9
+		`echo "reached the end"`, // 10
+	}, "\n"), "\n")
+
+	rc, stdout, stderr := runScript(t.TempDir(), tempScript(lines, []span{{0, len(lines) - 1}}, ".", true))
+	if rc != 0 {
+		t.Fatalf("neutralised run exited %d — an `exit` survived the rewrite:\n%s\n%s", rc, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "reached the end") {
+		t.Fatalf("the step aborted before its last line, so every pin after it never ran:\n%s", stdout)
+	}
+	markers := collectMarkers(stdout)
+	if len(markers) != 3 {
+		t.Fatalf("markers = %d (%+v), want 3 — one per exit shape (lines 5, 6, 8)", len(markers), markers)
+	}
+	for i, want := range []int{5, 6, 8} {
+		if markers[i].lineno != want || markers[i].kind != "PIN" {
+			t.Errorf("marker %d = %+v, want PIN@%d", i, markers[i], want)
+		}
+	}
+	if !strings.Contains(stdout, ">>> TOTAL-FAILURES=3") {
+		t.Errorf("TOTAL-FAILURES wrong or missing: %q", stdout)
+	}
+	if ok, why := auditRun(rc, stdout, markers); !ok {
+		t.Errorf("auditRun rejected a healthy neutralised run: %s", why)
+	}
+}
+
+func TestNeutraliseLeavesSuccessAndNonCodeExitsAlone(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	lines := strings.Split(strings.Join([]string{
+		`#!/bin/bash`, // 1
+		`set -u`,      // 2
+		`# a comment that mentions exit 1 is prose, not code`, // 3
+		`awk 'END { exit 1 }' /dev/null`,                      // 4 single-quoted awk program
+		`echo "exit 1"`,                                       // 5 inside double quotes
+		`if false; then exit 0; fi`,                           // 6 success exit
+		`echo still here`,                                     // 7
+	}, "\n"), "\n")
+
+	text := tempScript(lines, []span{{0, len(lines) - 1}}, ".", true)
+	got := strings.Split(text, "\n")
+	// Rewriting any of these breaks something: the awk program's exit code is its
+	// return value, the comment is documentation, the echo argument is a literal, and
+	// `exit 0` is a clean early return that would become a reported failure.
+	for _, i := range []int{2, 3, 4, 5} {
+		if got[i] != lines[i] {
+			t.Errorf("line %d was rewritten:\n  before %q\n  after  %q", i+1, lines[i], got[i])
+		}
+	}
+	rc, stdout, stderr := runScript(t.TempDir(), text)
+	if rc != 0 {
+		t.Fatalf("run exited %d:\n%s\n%s", rc, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "still here") || !strings.Contains(stdout, ">>> TOTAL-FAILURES=0") {
+		t.Errorf("unexpected output: %q", stdout)
+	}
+	if len(collectMarkers(stdout)) != 0 {
+		t.Errorf("a success/quoted/commented exit produced a marker: %q", stdout)
+	}
+}
+
+// TOOLCHAIN-PINS-VERDICT-001: markers are not the only evidence, and treating them as
+// such is what made the hole above invisible. A run that never printed its trailer
+// aborted; a run whose counted failures outnumber its attributed markers lost one; a
+// run that exited non-zero despite neutralisation did not run to completion. None of
+// the three may be scored as a pass.
+func TestAuditRunRefusesToCallAnAbortedRunAPass(t *testing.T) {
+	if ok, why := auditRun(1, "some output, no trailer\n", nil); ok {
+		t.Error("a run with no TOTAL-FAILURES trailer must not be trusted")
+	} else if !strings.Contains(why, "trailer") {
+		t.Errorf("reason should name the missing trailer, got %q", why)
+	}
+	if ok, _ := auditRun(0, ">>> TOTAL-FAILURES=2\n", []marker{{lineno: 5, kind: "PIN"}}); ok {
+		t.Error("2 counted failures but only 1 attributed must not be trusted")
+	}
+	if ok, _ := auditRun(3, ">>> TOTAL-FAILURES=0\n", nil); ok {
+		t.Error("a non-zero exit must not be trusted even with a clean trailer")
+	}
+	if ok, why := auditRun(0, ">>> TOTAL-FAILURES=1\n", []marker{{lineno: 5, kind: "PIN"}}); !ok {
+		t.Errorf("a consistent run was rejected: %s", why)
+	}
+	if ok, why := auditRun(0, ">>> TOTAL-FAILURES=0\n", nil); !ok {
+		t.Errorf("a clean run was rejected: %s", why)
+	}
+}
+
+// The report has to name the pin. With the `[ "$X_B" -eq 0 ] || exit 1` idiom the echoes
+// sit behind `fi` lines, so the old backward walk stopped immediately and printed
+// "(no message)" — a line number and nothing a human could act on.
+func TestStaticFailureMetaNamesThePinBehindStructuralNoise(t *testing.T) {
+	lines := strings.Split(strings.Join([]string{
+		`if ! grep -q a f; then`,             // 1
+		`  echo "  FAIL [PIN-X]: first" >&2`, // 2
+		`  B=1`,                              // 3
+		`fi`,                                 // 4
+		`if ! grep -q b f; then`,             // 5
+		`  echo "  FAIL [PIN-X-002]: second" >&2`, // 6
+		`  B=1`,                    // 7
+		`fi`,                       // 8
+		`[ "$B" -eq 0 ] || exit 1`, // 9
+	}, "\n"), "\n")
+
+	meta := staticFailureMeta(lines)
+	m, ok := meta[9]
+	if !ok {
+		t.Fatal("line 9 emits a marker, so it must have meta")
+	}
+	if m.kind != "PIN" {
+		t.Errorf("kind = %q, want PIN", m.kind)
+	}
+	for _, id := range []string{"PIN-X-002", "PIN-X"} {
+		if !strings.Contains(m.message, id) {
+			t.Errorf("message %q does not name %s — the report must say which pin went red", m.message, id)
+		}
+	}
+	if strings.Contains(m.message, "(no message)") {
+		t.Errorf("message fell back to (no message): %q", m.message)
+	}
+}
+
+func TestEmittedFailuresCarriesTheGatesOwnWords(t *testing.T) {
+	out := strings.Join([]string{
+		"    SOME-PIN: PASS (ok)",
+		"  FAIL [PIN-A]: first line ——",
+		"        continuation of the same failure",
+		"    OTHER-PIN: PASS (ok)",
+		"",
+	}, "\n")
+	got := emittedFailures(out, "")
+	if len(got) != 1 {
+		t.Fatalf("emittedFailures = %d blocks (%q), want 1", len(got), got)
+	}
+	if !strings.Contains(got[0], "continuation of the same failure") {
+		t.Errorf("the continuation line was dropped: %q", got[0])
+	}
+	if strings.Contains(got[0], "PASS") {
+		t.Errorf("a PASS line was folded into the failure: %q", got[0])
 	}
 }

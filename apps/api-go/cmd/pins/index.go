@@ -36,7 +36,9 @@ var (
 	pathRe  = regexp.MustCompile(`\b(?:apps|packages|scripts|docs|i18n|contracts)/[A-Za-z0-9_./-]+\.(?:go|ts|tsx|js|jsx|mjs|cjs|py|sh|sql|json|md|ya?ml)\b`)
 	goPkgRe = regexp.MustCompile(`\./([A-Za-z0-9_./-]+)`)
 	srcRe   = regexp.MustCompile(`\bsrc/[A-Za-z0-9_./-]+\.tsx?\b`)
-	varRe   = regexp.MustCompile(`\$\{?([a-z_][a-z0-9_]*)\}?`)
+	// Uppercase included for the same reason as assignName: `$UI`, `$TEST`, `$MH_B` are
+	// reads the closure has to see, or a narrowed run dies on `set -u`.
+	varRe = regexp.MustCompile(`\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?`)
 	// IDs appear in two shapes in the pin script: bracketed (`echo "  FAIL [ORDER-X-001]"`)
 	// and quoted as the first argument of `require_test "ORDER-X-001" ...`. Missing the
 	// second shape leaves most require_test steps showing "(no PIN-ID)".
@@ -53,15 +55,24 @@ func sortedUnique(in map[string]struct{}) []string {
 	return out
 }
 
-// assignName mirrors `^\s*([a-z_][a-z0-9_]*)=(?!=)` — the trailing lookahead is
+// assignName mirrors `^\s*([A-Za-z_][A-Za-z0-9_]*)=(?!=)` — the trailing lookahead is
 // spelled out because RE2 has none.
+//
+// Uppercase names are included on purpose. The Python original matched `[a-z_]` only,
+// and the gate is full of uppercase locals (`UI=`, `TEST=`, `MH_B=0`, `ORDER_DIST_B=0`,
+// `V2_UI=`). Missing them means depClosure cannot pull the step that assigns them, so a
+// narrowed run hits `set -u` and dies with "unbound variable" — the tool inventing a
+// failure, which is the one thing it must never do. Measured 2026-10-03:
+// `--all --only PERSON-DISTANCE-ZERO-001` aborted at line 8779 on `$UI` for exactly this
+// reason. Over-including a step is harmless (it just runs more); under-including is not.
 func assignName(line string) string {
 	i := 0
 	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
 		i++
 	}
 	start := i
-	if i < len(line) && (line[i] == '_' || (line[i] >= 'a' && line[i] <= 'z')) {
+	if i < len(line) && (line[i] == '_' ||
+		(line[i] >= 'a' && line[i] <= 'z') || (line[i] >= 'A' && line[i] <= 'Z')) {
 		i++
 		for i < len(line) && isWordByte(line[i]) && line[i] != '-' {
 			i++
