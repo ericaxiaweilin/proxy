@@ -8977,18 +8977,52 @@ if ! grep -q 'never pre-fills settlement states the server did not return' apps/
 fi
 echo "    VOUCHER-SETTLEMENT-FAKE-STATE-001: PASS (settlement shows real states only; no success screen for unredeemed vouchers)"
 
-# MERCHANT-ACCOUNT-AVATAR-001: 个人主页有头，商家账户卡永远字母。
+# MERCHANT-ACCOUNT-AVATAR-001: 商家侧的身份视觉必须**用上店自己的资产**。
 #
-# 店主 identity.profiles.avatar_path 明明有值（与个人主页同一张图），但
-# ListMyBusinessAccounts 读模型里根本没有头像字段 —— 商家卡只能画首字。
-# 现在服务端 LEFT JOIN 带出来，客户端按远端指针走 thumb 解析；没设头像的
-# 给空，画 fallback，不许编。
-if ! grep -q 'AvatarPath' apps/api-go/internal/business/service.go ||
-   ! grep -q 'identity.profiles' apps/api-go/internal/platform/postgres/business.go ||
-   ! grep -q 'merchantAvatarUri' apps/mobile/src/business-client.ts ||
-   ! grep -q 'merchantAvatarUri(' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
-  echo "  FAIL [MERCHANT-ACCOUNT-AVATAR-001]: 商家账户头像没接上店主头像 ——" >&2
-  echo "        个人主页有头，账户卡还是字母。" >&2
+# 这条 ID 生于 2026-10-01：当时店主 identity.profiles.avatar_path 明明有值，而
+# ListMyBusinessAccounts 读模型里连头像字段都没有，商家卡永远画首字 —— "个人主页有头，
+# 账户卡还是字母"。当时的修法是服务端 JOIN 店主头像带出来。
+#
+# 2026-10-02 用户把这个修法报成 P0（MERCHANT-AVATAR-001：「企业店铺的头像用了用户侧的
+# 头像」）：店主的脸不是店的脸。服务端不再 JOIN，店卡也不再画 accounts.avatarPath。
+# 于是这条 ID 原来的四条 grep 里，最后一条（要 merchant-me 界面调用
+# `merchantAvatarUri(`）变成**永远不可能成立** —— 它钉的正是后来被推翻的那个做法。
+#
+# 所以这里不是"删钉让它绿"，是把该 ID 的**持久意图**重述成今天仍然成立的形状：
+# 有店自己的资产（store_lines.logo_asset_path，STORE-LOGO-001 让商家能换店徽）就必须
+# 用上，不能装看不见只画字母；同时反向钉住"不许再拿用户侧头像冒充店脸"。
+# 两个方向都在，这条 ID 才有意义。
+MERCHANT_AVATAR_HOME=apps/mobile/src/surfaces/business-home.tsx
+MERCHANT_AVATAR_HUB=apps/mobile/src/surfaces/my-stores-hub.tsx
+if ! grep -q 'merchantAvatarUri' apps/mobile/src/business-client.ts; then
+  echo "  FAIL [MERCHANT-ACCOUNT-AVATAR-001]: 解析店侧资产指针的 merchantAvatarUri 不见了 ——" >&2
+  echo "        它是\"店徽 → 菜品图 → 首字\"这条优先级的唯一入口。" >&2
+  exit 1
+fi
+_ma_used=0
+if grep -q 'merchantAvatarUri(storeLogoPath' "$MERCHANT_AVATAR_HOME"; then
+  _ma_used=$((_ma_used + 1))
+else
+  echo "  FAIL [MERCHANT-ACCOUNT-AVATAR-001]: 商家首页身份卡不再解析店徽了（$MERCHANT_AVATAR_HOME 里没有" >&2
+  echo "        merchantAvatarUri(storeLogoPath…)）—— 店有 logo 也只画字母，就是这条 ID 最初要治的病。" >&2
+  exit 1
+fi
+if grep -q 'merchantAvatarUri(row.lines?.logoAssetPath' "$MERCHANT_AVATAR_HUB"; then
+  _ma_used=$((_ma_used + 1))
+else
+  echo "  FAIL [MERCHANT-ACCOUNT-AVATAR-001]: 店铺列表/详情又不认店徽了（$MERCHANT_AVATAR_HUB）。" >&2
+  echo "        同一个视觉在两处口径不一致，就会出现\"首页有徽、点进去没徽\"。" >&2
+  exit 1
+fi
+if [ "$_ma_used" -lt 2 ]; then
+  echo "  FAIL [MERCHANT-ACCOUNT-AVATAR-001]: 店徽只在一个界面生效（命中 $_ma_used/2）—— 优先级链路是断的。" >&2
+  exit 1
+fi
+# 反向：店卡绝不许再画用户侧头像（与 MERCHANT-AVATAR-001 同一件事，钉在这个 ID 里是因为
+# 这个 ID 就是从那句错的判据改过来的，得有人记住"为什么反了"）。
+if grep -q 'accounts?\.\[0\]?.avatarPath' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+  echo "  FAIL [MERCHANT-ACCOUNT-AVATAR-001]: 店卡又开始画 accounts[0].avatarPath ——" >&2
+  echo "        那字段是店主的个人头像，不是店的。见 MERCHANT-AVATAR-001。" >&2
   exit 1
 fi
 if ! grep -q 'MERCHANT-ACCOUNT-AVATAR-001' apps/api-go/internal/platform/postgres/business_integration_test.go ||
@@ -8996,9 +9030,10 @@ if ! grep -q 'MERCHANT-ACCOUNT-AVATAR-001' apps/api-go/internal/platform/postgre
   echo "  FAIL [MERCHANT-ACCOUNT-AVATAR-001]: 头像透传测试不见了" >&2
   exit 1
 fi
-go -C apps/api-go test -count=1 -run '^TestListMyBusinessAccountsCarriesOwnerAvatar$' ./internal/platform/postgres/ || exit $?
+# 用例名在 2026-10-02 反转成 NeverCarriesOwnerAvatar（原名 CarriesOwnerAvatar 与内容相反）。
+go -C apps/api-go test -count=1 -run '^TestListMyBusinessAccountsNeverCarriesOwnerAvatar$' ./internal/platform/postgres/ || exit $?
 pnpm --filter @proxy/mobile exec vitest run src/business-client.test.ts || exit $?
-echo "    MERCHANT-ACCOUNT-AVATAR-001: PASS (merchant card shows the owner portrait)"
+echo "    MERCHANT-ACCOUNT-AVATAR-001: PASS (店徽在两处都真的上卡 · 不拿店主脸冒充店脸)"
 
 # MEETUP-SHARE-001: 好友位置消息掉回 raw 文本。
 #

@@ -238,7 +238,11 @@ func bizEnvelope(commandType string, payload map[string]any, actorID string) com
 // MERCHANT-ACCOUNT-AVATAR-001: 商家账户卡永远字母 —— ListMyBusinessAccounts
 // 不带店主头像。个人主页有头（identity.profiles.avatar_path），账户读模型没
 // JOIN 过来。现在带出来；没设头像的店主给 ""，客户端画 fallback，不许编。
-func TestListMyBusinessAccountsCarriesOwnerAvatar(t *testing.T) {
+// 名字在 2026-10-02 反转过一次：MERCHANT-AVATAR-001（用户 P0「企业店铺的头像用了
+// 用户侧的头像」）之后，这个用例断言的是 AvatarPath **必须为空**，而它原来叫
+// CarriesOwnerAvatar。名字和内容相反比没名字更糟 —— 读的人会以为店卡画店主的脸是
+// 被要求的。两个 ID 都留在函数体注释里。
+func TestListMyBusinessAccountsNeverCarriesOwnerAvatar(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	repo := NewBusinessRepository(pool)
