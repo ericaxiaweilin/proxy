@@ -39,7 +39,7 @@ CONTRACTS_JSON="${CONTRACTS_JSON:-docs/design/IMPLEMENTATION_CONTRACTS.json}"
 if [ "${1:-}" = "--selftest" ]; then
   SELFReal="docs/design/IMPLEMENTATION_CONTRACTS.json"
   if [ ! -f "$SELFReal" ]; then
-    echo "SELFTEST ABORT: 不在 repo 根目录（找不到 $SELFReal）—— 变异测试无法判定。" >&2
+    echo "SELFTEST ABORT: 不在 repo 根目录（找不到 ${SELFReal}）—— 变异测试无法判定。" >&2
     exit 1
   fi
   selftmp=$(mktemp -d)

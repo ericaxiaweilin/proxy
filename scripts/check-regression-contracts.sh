@@ -40,24 +40,47 @@ require_test() {
 # 判据是三条，且每条都带"扫到 0 个文件就红"的防漏检查 —— 一个什么都没读到就报绿的
 # 扫描器，和没有扫描器等价。
 _py_scan_files=0
-_py_hits=""
-for _py_dir in scripts .wb-scratch apps/api-go/cmd apps/api-go/internal apps/api-go/scripts/generate_openapi.go apps/mobile/src; do
-  [ -e "$_py_dir" ] || continue
-  while IFS= read -r _py_f; do
-    _py_scan_files=$((_py_scan_files + 1))
-    _py_hits="$_py_hits$_py_f"$'\n'
-  done < <(find "$_py_dir" -type f -name '*.py' 2>/dev/null)
-done
-# 欠账白名单：**只准缩，不准加**。2026-10-03 划掉三笔：mockdata 那三个 .py 已删
-# （它们产出的三个 seed SQL 本来就在仓库里、数据也已经在库上，生成器是一次性的，
-# README 里写清了这个决定和去哪儿翻旧账），qr-geometry 的 gen-cases.py 搬成了
-# cmd/qrcases。现在只剩一笔：
-#   · scripts/pins.py —— check-regression-contracts.sh 的**运行器**（跑子集 / 把 1036 条
-#     断言的失败一次报全，而不是第一条就 exit 1）。它每天都在用，删了是丢能力，
-#     搬成 Go 要重写一个 bash 分段器（764 行里全是踩过的坑：字符串里的 if 不能算数、
-#     续行必须保持 1:1 行号）。是要债还是删工具，指挥官定；钉在这里是为了**看得见**。
-# 白名单里的文件一旦不见，下面那条反向检查会红：欠账还掉了就必须把名字划掉。
-_py_debt="scripts/pins.py"
+# 扫**整个仓库**，不再只扫当年欠债的那几个目录：白名单清空以后还只扫那几个目录，判据
+# 就成了"那几个目录里干净"，往 docs/ 或 infrastructure/ 放一个 .py 都能绿。排除的只有
+# 第三方与构建产物（node_modules / dist / build / DerivedData / .venv / __pycache__）。
+# find 的退出码单独收：`2>/dev/null` 会把"根本没能扫"（不在仓库根、find 被换掉）一起
+# 吞掉，那样扫描器空转照样报绿 —— 和没有扫描器等价。
+_py_found="$(find . -type f -name '*.py' \
+  -not -path '*.git/*' -not -path '*node_modules/*' -not -path '*dist/*' \
+  -not -path '*build/*' -not -path '*DerivedData/*' -not -path '*.venv/*' \
+  -not -path '*__pycache__/*' 2>/dev/null | sed 's|^\./||' | LC_ALL=C sort)"
+_py_find_rc=$?
+if [ "$_py_find_rc" -ne 0 ]; then
+  echo "  FAIL [TOOLCHAIN-NO-PYTHON-001]: python 扫描没能跑完 (find exit $_py_find_rc) ——" >&2
+  echo "        扫不动不等于没有。在这条门禁里吞掉扫描失败就是把它变成摆设。" >&2
+  exit 1
+fi
+_py_hits="$_py_found"$'\n'
+_py_scan_files=$((_py_scan_files + $(printf '%s\n' "$_py_found" | grep -c .)))
+# 欠账白名单：**只准缩，不准加**。2026-10-03 清零，最后一笔是运行器的那个 python 文件
+# （已删除，此处不留路径，免得 step 索引指向一个不存在的文件）——
+# check-regression-contracts.sh 的运行器（跑子集 / 把全部断言的失败一次报全，而不是
+# 第一条就 exit 1）。它没有删掉，是搬成了 apps/api-go/cmd/pins：764 行里全是踩过的坑
+# （字符串里的 `if` 不能算数、续行必须保持 1:1 行号、子集运行要带上赋值 step 否则
+# `set -u` 会编出假红），所以搬运是逐条对过之后才删的 python：
+#   · 对等阶段（Go v5，规则与 python 完全一致）：同一份门禁脚本上 `--list` 的 2244 个
+#     step 输出与 python **逐字节相同**（行区间、PIN-ID、引用路径全对）；`--all` /
+#     `--changed` / `--changed --fail-fast` / `--step` / `--verbose` 在同一份注入失败的
+#     合成脚本上退出码、标记行号、报告正文、PASS 计数、touches 全相同。有意不同只有三处：
+#     banner 的工具名；`--all` 打绝对路径（python 对树外脚本打成一路往上跑的相对路径，
+#     读不出是哪棵树）；`--changed`/`--step` 多一行 pin script 路径 —— 门禁说"绿了"必须
+#     同时说清是哪棵树，AGENTS.md 点名的事故就是"悄悄跑了另一棵树"。
+#   · 之后 Go v6 **有意不再与 python 对等**，因为对等阶段量的正是 python 自己的两处假红：
+#     ① prologue 只到第一个顶层 `}`，于是 `require_test` 的定义被排除在子集运行之外 ——
+#        实测 `--only AUTH-OTP-001` 报 `require_test: command not found`，把两条健康的
+#        钉判成红；② 变量闭包只认"第一个赋值 step"，累加计数器（`_py_scan_files`）就漏掉
+#        中间的自增，实测 `--only TOOLCHAIN-NO-PYTHON` 判出"一条文件都没扫到"的假红。
+#        两处都在 cmd/pins 里修掉并各配一条具名测试 + 变异验证。
+#   · RE2 没有 look-around，`(?<![\w-])if` 换成显式扫字节；cmd/pins/pins_test.go 里每条
+#     不变量都做了变异验证（把 runScript 换成 `bash -c` 会报 @4/@7 而不是 @5/@8）。
+# 白名单为空 = 仓库里出现任何 .py 都直接红。将来真要再欠一笔，必须先在这里写下名字
+# 和"为什么换不掉"，否则第一条判据就会红 —— 要的是看得见的债，不是默认许可。
+_py_debt=""
 _py_unexpected=""
 while IFS= read -r _py_f; do
   [ -n "$_py_f" ] || continue
@@ -111,7 +134,23 @@ if [ "$_py_scan_files" -eq 0 ]; then
   echo "  FAIL [TOOLCHAIN-NO-PYTHON-001]: 一条文件都没扫到 —— 扫描器空转不等于没有 python。" >&2
   exit 1
 fi
-echo "    TOOLCHAIN-NO-PYTHON-001: PASS (扫了 $_py_scan_files 项；python 只剩欠账白名单 $(echo "$_py_debt" | tr '\n' ' ')，工具链不 exec python)"
+echo "    TOOLCHAIN-NO-PYTHON-001: PASS (扫了 $_py_scan_files 项；全仓库 .py = $(printf '%b' "$_py_hits" | grep -c . )，白名单为空，工具链不 exec python)"
+
+# 运行器本身换成 Go 之后，它踩过的每个坑都各有一条具名测试兜着 —— 否则"搬过去了"这件事
+# 只有人口述，下一次重写又会踩回来（这几条的判据都做过变异验证：把 runScript 换成
+# `bash -c`、把跳过的 step 直接删行、把 look-around 换成朴素 \b，都会立刻红）。
+require_test "TOOLCHAIN-PINS-SEGMENT-001" "./cmd/pins" \
+  "TestCodeLinesKeepsEveryLineAndBlanksQuotedKeywords" \
+  "apps/api-go/cmd/pins/pins_test.go" || exit $?
+require_test "TOOLCHAIN-PINS-KEYWORD-001" "./cmd/pins" \
+  "TestKeywordBoundaryDoesNotMatchInsideWords" \
+  "apps/api-go/cmd/pins/pins_test.go" || exit $?
+require_test "TOOLCHAIN-PINS-LINENO-001" "./cmd/pins" \
+  "TestNeutralisedRunReportsTheOriginalLineNumbers" \
+  "apps/api-go/cmd/pins/pins_test.go" || exit $?
+require_test "TOOLCHAIN-PINS-DEPCLOSURE-001" "./cmd/pins" \
+  "TestDepClosureAddsOnlyEarlierAssigners" \
+  "apps/api-go/cmd/pins/pins_test.go" || exit $?
 
 # TOOLCHAIN-NO-OWN-JS-001（node 的对应条，用户："也不能有 node 这也是禁止的技术"，
 # 随后定的口径是**只清工具链**）：门禁不再用 node 跑，但 RN 本身离不开 node ——
@@ -9010,7 +9049,7 @@ fi
 if grep -q 'merchantAvatarUri(row.lines?.logoAssetPath' "$MERCHANT_AVATAR_HUB"; then
   _ma_used=$((_ma_used + 1))
 else
-  echo "  FAIL [MERCHANT-ACCOUNT-AVATAR-001]: 店铺列表/详情又不认店徽了（$MERCHANT_AVATAR_HUB）。" >&2
+  echo "  FAIL [MERCHANT-ACCOUNT-AVATAR-001]: 店铺列表/详情又不认店徽了（${MERCHANT_AVATAR_HUB}）。" >&2
   echo "        同一个视觉在两处口径不一致，就会出现\"首页有徽、点进去没徽\"。" >&2
   exit 1
 fi
@@ -12321,9 +12360,13 @@ for gc_src in cmd/gatecheck/check_render_prototypes.go cmd/gatecheck/check_compa
     exit 1
   fi
 done
-if ! go -C apps/api-go build ./cmd/gatecheck/ >/dev/null 2>&1; then
+# `-o /dev/null`：`go -C` 会把子进程 cwd 定在 apps/api-go，裸 `go build` 就每次门禁往
+# 仓库里丢一个 9.3MB 的 `apps/api-go/gatecheck` 二进制 —— 编译校验一点没少，但交接时
+# 多出一个未跟踪的构建产物（AGENTS.md 明确拒收），而且它还会混进 `pins --changed` 的
+# 未跟踪文件列表里冒充"你改了它"。
+if ! go -C apps/api-go build -o /dev/null ./cmd/gatecheck/ 2>/dev/null; then
   echo "  FAIL [UI-PROTO-ALIGN-001]: gatecheck 编译不过 —— 渲染/比对工具跑不起来。" >&2
-  go -C apps/api-go build ./cmd/gatecheck/ >&2
+  go -C apps/api-go build -o /dev/null ./cmd/gatecheck/ >&2
   exit 1
 fi
 proto_count=$(ls docs/design/references/*.html 2>/dev/null | wc -l | tr -d ' ')
@@ -12545,20 +12588,60 @@ fi
 #    `grep -c PAT files... | grep -v ':0:' | wc -l` —— 那个写法在多文件 + alternation 下
 #    滤不干净 `file:0` 行，第一版就是这么恒红的（实测 96 个 `:0` 行没被滤掉）。
 _typo_files=(apps/mobile/src/surfaces/*.tsx apps/mobile/src/components/*.tsx)
-_typo_small=$(grep -hoE 'fontSize: (10\.5|9\.5|9|8\.5|8|7\.5|7|6\.8|6\.5)([^0-9]|$)' "${_typo_files[@]}" 2>/dev/null | wc -l | tr -d ' ')
-if [ "$_typo_small" != "0" ]; then
-  echo "  FAIL [UI-TYPOGRAPHY-MIN-001]: 实现里还有 ${_typo_small} 处 <10.5px 字号 —— R3 规定 11px 是" >&2
-  echo "        全 App 最小正文级别（用户裁决：「不能太小」）。提到 11，lineHeight 同步放大。" >&2
-  grep -nE 'fontSize: (10\.5|9\.5|9|8\.5|8|7\.5|7|6\.8|6\.5)([^0-9]|$)' "${_typo_files[@]}" 2>/dev/null | head -5 >&2
+# 判据在 2026-10-03 换成「数值比较 + 装饰白名单」，白名单**从权威清单读**（App 自己的
+# design-system-r3.test.ts 里的 R2_DECORATION_WHITELIST），不在这里再抄一份。理由就是
+# 这次的红：这条门禁 2026-09-30 写的时候按字面值枚举禁 `fontSize: 10`；2026-10-03
+# MENU-HOT-001 把 10pt 徽字判成装饰（徽的语义由颜色/火焰/旁边 16pt 菜名承载）并进了
+# R3 白名单，vitest 那条绿、这条还红 —— 同一个仓库里一条要 11、一条钉 10，两条门禁
+# 各说各话。镜像一份清单必然漂移，所以直接读同一份。
+# ⚠️ 枚举字面值还有个真漏洞：它抓不住没被枚举到的值。合成用例实测 ——
+#   navLabel=10 → 红、hotBadgeText=10 → 白名单豁免、decimalSlip=10.2 → 红（老写法漏掉）、
+#   fine=11 → 绿。
+_typo_wl="$(awk '/^const R2_DECORATION_WHITELIST/{f=1;next} f&&/^\];/{f=0} f' \
+  apps/mobile/src/design-system-r3.test.ts | grep -oE '"[A-Za-z_][A-Za-z0-9_]*"' | tr -d '"' | sort -u | tr '\n' ' ')"
+if [ -z "$_typo_wl" ]; then
+  echo "  FAIL [UI-TYPOGRAPHY-MIN-001]: 读不到 R2_DECORATION_WHITELIST ——" >&2
+  echo "        白名单读空就等于「所有装饰一律禁」，那是假红；清单改名/搬家必须同步这里。" >&2
   exit 1
 fi
-_typo_ten=$(grep -hoE 'fontSize: 10([^0-9]|$)' "${_typo_files[@]}" 2>/dev/null | wc -l | tr -d ' ')
-if [ "$_typo_ten" != "0" ]; then
-  echo "  FAIL [UI-TYPOGRAPHY-MIN-001]: 非导航位置还有 ${_typo_ten} 处 fontSize: 10 —— Nav 10px 是" >&2
-  echo "        「仅底部导航文字」允许的例外，不是通用档位。提到 11。" >&2
-  grep -nE 'fontSize: 10([^0-9]|$)' "${_typo_files[@]}" 2>/dev/null | head -5 >&2
+_typo_bad=""
+_typo_scanned=0
+for _typo_f in "${_typo_files[@]}"; do
+  [ -f "$_typo_f" ] || continue
+  _typo_scanned=$((_typo_scanned + 1))
+  # 每个文件单独一趟：NR 跨文件累加会把行号算到几千行开外，报出来的位置指不到东西。
+  _typo_hits="$(TYPO_WL="$_typo_wl" awk '
+    BEGIN { n = split(ENVIRON["TYPO_WL"], a, " "); for (i = 1; i <= n; i++) wl[a[i]] = 1 }
+    function keyof(i,  j, s) {
+      for (j = i; j > 0 && j > i - 15; j--) {
+        s = lines[j]
+        if (s ~ /^  [A-Za-z_][A-Za-z0-9_]*:[ \t]*\{/) { sub(/^  /, "", s); sub(/:.*/, "", s); return s }
+      }
+      return ""
+    }
+    { lines[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        if (match(lines[i], /fontSize:[ \t]*[0-9]+(\.[0-9]+)?/)) {
+          v = substr(lines[i], RSTART, RLENGTH); sub(/fontSize:[ \t]*/, "", v)
+          if (v + 0 < 11) { k = keyof(i); if (!(k in wl)) print i ":" k "=" v }
+        }
+      }
+    }' "$_typo_f")"
+  [ -n "$_typo_hits" ] && _typo_bad="${_typo_bad}${_typo_f}: $(printf '%s' "$_typo_hits" | tr '\n' ' ')"$'\n'
+done
+if [ "$_typo_scanned" -eq 0 ]; then
+  echo "  FAIL [UI-TYPOGRAPHY-MIN-001]: 一个 .tsx 都没扫到 —— 扫描器空转不等于字号合规。" >&2
   exit 1
 fi
+if [ -n "$_typo_bad" ]; then
+  echo "  FAIL [UI-TYPOGRAPHY-MIN-001]: 实现里有正文级 fontSize < 11px（R3：11px 是全 App 最小" >&2
+  echo "        正文级别，用户裁决「不能太小」）。样式名不在 R2 装饰白名单里的都要提到 11，" >&2
+  echo "        lineHeight 同步放大。命中位置（文件: 行:样式名=字号）：" >&2
+  printf "        %b" "$_typo_bad" | head -5 >&2
+  exit 1
+fi
+echo "    UI-TYPOGRAPHY-MIN-001: PASS (${_typo_scanned} 个 .tsx 全扫 · 装饰白名单 $(printf '%s' "$_typo_wl" | wc -w | tr -d ' ') 条取自 design-system-r3.test.ts)"
 # 原型侧：33 个基准原型是视觉基准图的来源，基准图本身不能编码违规小字。
 # 历史上这里有 3878 处 <11px（其中 3829 处在 CSS 块、49 处在行内 style 属性），
 # 已全部夹到 11px 并重渲染基准图。这条防止原型再退回小字。
@@ -12767,16 +12850,52 @@ if [ -f "$_seedsql" ]; then
       echo "        跑：psql \"\$DATABASE_URL\" -f apps/api-go/scripts/seed_dev_shops_users_posts.sql" >&2
       exit 1
     fi
-    if curl -sf --noproxy '*' --max-time 8 "http://127.0.0.1:4100/v1/feed" 2>/dev/null \
-       | grep -q 'post_devseed'; then
-      _feed_ok="feed 已可见"
-    else
-      echo "  FAIL [DEV-SEED-SHOPS-001]: 库里有 ${_n_posts} 条 devseed 帖子，但 /v1/feed 里读不到。" >&2
-      echo "        数据在库 ≠ 界面上看得到 —— 这正是 2026-09-30 用户报的现象。" >&2
-      echo "        查 feed 的 where 条件与排序（created_at DESC），以及 API 是否在跑旧二进制。" >&2
+    # 判据在 2026-10-03 换掉。原写法只看 `/v1/feed` **第一页**里有没有 post_devseed ——
+    # 量的不是"读得到"，是"排在最前"。而开发管线（com.user.proxy-dev-feed-pipeline）每
+    # 5 分钟就多一条新帖：实测此刻库里 439 条 devpipe 压着 100 条 devseed，种子帖按
+    # created_at DESC 注定掉出第一页 ⇒ 这条每天被自己的夹具弄红。红了要修的是过期的
+    # 判据，不是数据（用户口径：有红就要修，含过期判据）。
+    #
+    # 新判据走**完整游标**，要求"库里有几条 PUBLISHED 种子帖，HTTP 面就必须吐出几条"：
+    # 比原来强（原来命中 1 条就绿），并且与排序无关。实测 626 条 / 13 页 / 100 条种子帖
+    # 全部可见。走到上限还没走穷就判红并说清是上限问题 —— 不许"没走完"被当成"都看到了"。
+    _n_pub="$(psql "$_dsn2" -tAc "SELECT count(*) FROM localnet.posts WHERE id LIKE 'post_devseed_%' AND status='PUBLISHED'" 2>/dev/null || echo 0)"
+    _feed_ids=""
+    _feed_pages=0
+    _feed_cursor=""
+    _feed_exhausted=0
+    while [ "$_feed_pages" -lt 60 ]; do
+      _feed_args=(-sf --noproxy '*' --max-time 10 -G "http://127.0.0.1:4100/v1/feed" --data-urlencode "limit=50")
+      [ -n "$_feed_cursor" ] && _feed_args+=(--data-urlencode "cursor=$_feed_cursor")
+      _feed_page="$(curl "${_feed_args[@]}" 2>/dev/null || true)"
+      if [ -z "$_feed_page" ]; then
+        break
+      fi
+      _feed_ids="${_feed_ids}$(printf '%s' "$_feed_page" \
+        | grep -o '"postId":"post_devseed_[0-9]*' | sed 's/.*:"//')"
+      _feed_ids="${_feed_ids}"$'\n'
+      _feed_pages=$((_feed_pages + 1))
+      _feed_cursor="$(printf '%s' "$_feed_page" | grep -oE '"nextCursor":"[^"]+"' | sed 's/.*:"//; s/"$//')"
+      if [ -z "$_feed_cursor" ] || printf '%s' "$_feed_page" | grep -q '"hasMore":false'; then
+        _feed_exhausted=1
+        break
+      fi
+    done
+    _feed_n="$(printf '%s' "$_feed_ids" | grep 'post_devseed_' | sort -u | wc -l | tr -d ' ')"
+    if [ "$_feed_exhausted" != "1" ]; then
+      echo "  FAIL [DEV-SEED-SHOPS-001]: /v1/feed 走到 ${_feed_pages} 页还没走穷（上限 60 页）。" >&2
+      echo "        这条不能在没有看完的情况下判绿 —— 要么开发管线已经长到这个上限，" >&2
+      echo "        要么游标没有收敛（nextCursor 一直在变）。两种都得有人看一眼。" >&2
       exit 1
     fi
-    echo "    DEV-SEED-SHOPS-001: PASS (${_n_stores} 店 / ${_n_users} 用户 / ${_n_posts} 帖 · 头像与媒体全部指向真实 READY 资产 · 重跑幂等且不覆盖 · ${_feed_ok})"
+    if [ "${_feed_n}" -lt "${_n_pub}" ]; then
+      echo "  FAIL [DEV-SEED-SHOPS-001]: 库里有 ${_n_pub} 条 PUBLISHED 种子帖，走完 feed 全部分页" >&2
+      echo "        （${_feed_pages} 页）只读到 ${_feed_n} 条。" >&2
+      echo "        数据在库 ≠ 界面上看得到 —— 这正是 2026-09-30 用户报的现象。" >&2
+      echo "        查 feed 的 where 条件（visibility / status / city_scope）与 API 是否在跑旧二进制。" >&2
+      exit 1
+    fi
+    echo "    DEV-SEED-SHOPS-001: PASS (${_n_stores} 店 / ${_n_users} 用户 / ${_n_posts} 帖 · 头像与媒体全部指向真实 READY 资产 · 重跑幂等且不覆盖 · feed 走完 ${_feed_pages} 页 ${_feed_n}/${_n_pub} 条种子帖全可见)"
   else
     echo "    DEV-SEED-SHOPS-001: SKIP (开发库不可达 —— 这条要活的 DB)"
   fi

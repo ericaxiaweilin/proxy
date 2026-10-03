@@ -40,22 +40,20 @@
 --
 -- ## 幂等：**收敛式 upsert**，不是 insert-if-absent
 --
--- 固定 ID + `ON CONFLICT DO UPDATE`，可重复执行，且**跑完必到同一个形状**。
+-- 固定 ID + `ON CONFLICT DO NOTHING`，可重复执行：跑第一遍建形，跑第二遍一个字段都不动。
 --
--- 这里**故意偏离** AGENTS.md 的 "seed 路径必须 insert-if-absent，绝不 blind
--- overwrite"，理由要说清楚，免得后来人以为写错了：
+-- ⚠️ 这里以前写的是"故意偏离 AGENTS.md 用 DO UPDATE"，2026-10-03 作废。当时的论点是：
+--    2026-09-30 那版旧 devseed（20 店 / HCMC）已经灌在库里，insert-if-absent 会让旧行
+--    原样留着，变成"一半旧数据 + 一半新数据"，比覆盖更难查。论点的前半段是对的，
+--    结论是错的 —— 正确的解法是**先删再灌**（seed_dev_shops_users_remove.sql），
+--    而不是让一次 INSERT 悄悄抹掉用户在 App 里改过的行。DEV-SEED-SHOPS-001 的哨兵探测
+--    就是为这件事红的：改了地址、重跑种子、地址回去了。
 --
---   · insert-if-absent 的适用对象是**产品基线种子**（boot 时灌的那三个）——
---     那些行的内容属于产品，覆盖等于篡改。
---   · 本文件是**一次性的开发数据**，用户明确说"开发后就删除了"。它存在的唯一
---     意义就是"库里有这么一批可预期的行"。而 2026-09-30 已经有一版旧的
---     devseed 灌进了开发库（20 店 / 30 用户，HCMC 为主）—— 此时 insert-if-absent
---     会让旧行**原样留着**，结果是「一半旧数据 + 一半新数据」，用户 01–30 顶着
---     旧的城市和简介去当河内/北宁店的店主。那种状态比覆盖更难查。
---   · 覆盖范围**只限 devseed_ 前缀的行**，碰不到任何真实数据。
+--   · insert-if-absent 适用对象包括本文件：只要是"可能有人已经在库里改过"的行就适用。
+--   · 覆盖范围只限 devseed_ 前缀 —— 这句仍然成立，但它不构成覆盖的理由。
 --
--- 所以：跑一次 = 收敛到 spec.py 描述的形状；跑两次 = 同一个形状。
--- 想清空就上 seed_dev_shops_users_remove.sql。
+-- 所以：跑一次 = 缺什么补什么；跑两次 = 一模一样。
+-- 想清空/重灌就上 seed_dev_shops_users_remove.sql，然后重跑本文件。
 --
 -- ⚠️ 时间戳是唯一的例外：帖文的 `created_at` 在冲突时**不更新**（见 posts 文件），
 --    否则每次重跑都会把这些帖子的排序位置重洗一遍。
@@ -575,13 +573,14 @@ INSERT INTO business.stores
   ('store_devseed_28', 'biz_devseed_28', 'Hanwon', '10B Nguyễn Đăng Đạo, Tiền An, TP Bắc Ninh', 'ACTIVE', 'Buffet nướng / Hàn', '', now()),
   ('store_devseed_29', 'biz_devseed_29', 'Bao Dimsum', '67 Ngọc Hân Công Chúa, Ninh Xá, TP Bắc Ninh', 'ACTIVE', 'Dimsum / Trung Hoa', '', now()),
   ('store_devseed_30', 'biz_devseed_30', 'Cua Ngon 93', '46 Lương Thế Vinh, Tiền Ninh Vệ, TP Bắc Ninh', 'ACTIVE', 'Hải sản', '', now())
-ON CONFLICT (id) DO UPDATE
-  SET business_id      = EXCLUDED.business_id,
-      name             = EXCLUDED.name,
-      address          = EXCLUDED.address,
-      status           = EXCLUDED.status,
-      category         = EXCLUDED.category,
-      reality_scene_id = EXCLUDED.reality_scene_id;
+ON CONFLICT (id) DO NOTHING;
+-- 这里原来是 `DO UPDATE SET ... address = EXCLUDED.address, status = EXCLUDED.status, ...`
+-- —— 每次重跑都把店名/地址/营业状态刷回种子值。DEV-SEED-SHOPS-001 用哨兵值探出来了：
+-- 把 store_devseed_01.address 改成标记后重跑，地址被换回了种子值。那正是 AGENTS.md
+-- 「seed 路径必须 insert-if-absent，绝不 blind overwrite」要拦的东西 —— 商家在 App 里
+-- 改过一行地址，跑一次开发种子就没了，而且看不出是谁干的。
+-- 想要"重新收敛到种子的形状"，走 seed_dev_shops_users_remove.sql 再灌，
+-- 而不是让 INSERT 顺手覆盖用户改过的行。
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 成员关系：店主 OWNER（用户 01–30）+ 店员 OPERATOR（用户 31–60，一店一人）

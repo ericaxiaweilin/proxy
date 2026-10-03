@@ -15,7 +15,7 @@ func main() {
 	check := flag.Bool("check", false, "check drift")
 	flag.Parse()
 	// OpenAPI is currently hand-authored but must be validated.
-	// Generate step validates YAML syntax via python yaml and checks that
+	// The generate step validates YAML syntax with yaml.v3 and checks that
 	// the committed openapi.yaml matches the canonical source (itself).
 	// This intentionally fails CI if the spec is missing or malformed.
 	openAPIPath := "openapi.yaml"
