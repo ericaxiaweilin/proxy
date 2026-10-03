@@ -151,6 +151,18 @@ require_test "TOOLCHAIN-PINS-LINENO-001" "./cmd/pins" \
 require_test "TOOLCHAIN-PINS-DEPCLOSURE-001" "./cmd/pins" \
   "TestDepClosureAddsOnlyEarlierAssigners" \
   "apps/api-go/cmd/pins/pins_test.go" || exit $?
+# 2026-10-03：运行器有过一个假绿 —— 中和器只认裸 `exit 1` 和 `|| exit $?`，
+# 而门禁里手写的判据大多用 `[ "$X_B" -eq 0 ] || exit 1`（22 处）和内联 `; exit 1; fi`。
+# 这些没被中和，step 真的退出、不打 marker，运行器就报 "PASS — no selected pin failed"。
+# 后果是实的：MERCHANT-HOME-001 / CREATOR-HOME-001 / STORE-ASSET-SCOPE-001 从进仓那天
+# 起就是红的，没人看见。这个洞是从 python 原版逐字继承来的（搬运是忠实的，连洞一起）。
+# 两条钉：一条钉"每种失败退出写法都会被中和"，一条钉"判决不许只看 marker"。
+require_test "TOOLCHAIN-PINS-EXITFORMS-001" "./cmd/pins" \
+  "TestNeutraliseCoversEveryFailureExitShape" \
+  "apps/api-go/cmd/pins/pins_test.go" || exit $?
+require_test "TOOLCHAIN-PINS-VERDICT-001" "./cmd/pins" \
+  "TestAuditRunRefusesToCallAnAbortedRunAPass" \
+  "apps/api-go/cmd/pins/pins_test.go" || exit $?
 
 # TOOLCHAIN-NO-OWN-JS-001（node 的对应条，用户："也不能有 node 这也是禁止的技术"，
 # 随后定的口径是**只清工具链**）：门禁不再用 node 跑，但 RN 本身离不开 node ——
@@ -13976,8 +13988,18 @@ if [ -f "$MERCHANT_HOME_UI" ]; then
     echo "  FAIL [MERCHANT-HOME]: 行为测试不见了。" >&2
     MH_B=1
   fi
-  if ! grep -q 'getMerchantOperatingHome(first.id).catch(() => undefined)' "$MERCHANT_HOME_UI"; then
+  # 判据钉的是「每个 getMerchantOperatingHome 调用点都带 .catch」，不是某一行原文。
+  # 原来钉的是 `getMerchantOperatingHome(first.id).catch(() => undefined)`，而实现里
+  # 的循环变量一直叫 id —— 这条从进仓（45247fb2）那天起就没匹配上过。之所以没人发现：
+  # 运行器只中和裸 `exit 1` 和 `|| exit $?`，本块用的是 `[ "$MH_B" -eq 0 ] || exit 1`，
+  # 于是它真的退出、不打 marker，runner 报 "PASS — no selected pin failed"。
+  # 见 TOOLCHAIN-PINS-EXITFORMS-001。剥注释再数，免得说明文字里的函数名算成调用点。
+  MH_SRC=$(perl -0pe 's{//[^\n]*}{}g' "$MERCHANT_HOME_UI")
+  MH_CALLS=$(printf '%s' "$MH_SRC" | grep -oF 'getMerchantOperatingHome(' | wc -l | tr -d ' ')
+  MH_CAUGHT=$(printf '%s' "$MH_SRC" | grep -oE 'getMerchantOperatingHome\([^)]*\)[[:space:]]*\.catch\(\(\) => undefined\)' | wc -l | tr -d ' ')
+  if [ "$MH_CALLS" -eq 0 ] || [ "$MH_CALLS" != "$MH_CAUGHT" ]; then
     echo "  FAIL [MERCHANT-HOME-001]: 经营信号又开始拖垮整页 ——" >&2
+    echo "        ${MH_CALLS} 个调用点里只有 ${MH_CAUGHT} 个带 .catch(() => undefined)；" >&2
     echo "        一个接口失败，门店/成员/成交/菜单全都不显示。" >&2
     MH_B=1
   fi
@@ -14127,8 +14149,10 @@ fi
 
 # STORE-LOGO-001（2026-10-02，用户「商家侧的头像为什么不能更换」）：
 #
-# editingLogoPath 这个 state 存在，但没有任何输入框/选择器连到它 ——
-# 商家在界面上根本换不了。现在营业资料编辑里有"更换店徽"，走媒体管线上传，
+# 判据钉的是**能力**，不是某一个控件名。第一版钉 `pickLogoPhoto`（详情表单里的上传
+# 选择器）；2026-10-03 上传入口统一到「照片与内容」页之后那个函数被删了，能力也
+# 跟着一起没了 —— logoAssetPath 只剩原样回存，新店永远拿不到店徽、老店换不掉。
+# 现在店徽从相册行上「设为店徽」来设，判据跟着改钉这条路。
 # 存 `assets/<id>`（与 merchantAvatarUri 解析口径一致，服务端本来就认前缀）。
 # 显示优先级：logo → 店照片/菜品图 → 首字。绝不拿用户头像冒充（MERCHANT-AVATAR-001）。
 STORE_LOGO_UI=apps/mobile/src/surfaces/merchant-storefront.tsx
@@ -14138,14 +14162,31 @@ if [ -f "$STORE_LOGO_UI" ]; then
     echo "  FAIL [STORE-LOGO-001]: 行为测试不见了。" >&2
     SL_B=1
   fi
-  # 上传入口必须在：没有 pickLogoPhoto 就等于换不了。
-  if ! grep -q 'pickLogoPhoto' "$STORE_LOGO_UI"; then
-    echo "  FAIL [STORE-LOGO-001]: 店徽选择器不见了 —— 商家又换不了头像。" >&2
+  # ① 设店徽的动作存在，而且真的被界面上某个按钮调到（只定义不接线 = 死能力，
+  #    UX-DIRECT-EDIT-001 就是这么丢过一次：state 在、prop 没传过去）。
+  if ! grep -qF 'async function setStoreLogoFromPhoto' "$STORE_LOGO_UI"; then
+    echo "  FAIL [STORE-LOGO-001]: 设店徽的动作不见了 —— 商家又换不了头像。" >&2
     SL_B=1
   fi
-  # 存资产引用，不是 URL。
-  if ! grep -q 'setEditingLogoPath(`assets/${uploaded.mediaAssetId}`)' "$STORE_LOGO_UI"; then
+  if ! grep -qF 'setStoreLogoFromPhoto(s.id, p)' "$STORE_LOGO_UI"; then
+    echo "  FAIL [STORE-LOGO-001]: 相册行上没有接到「设为店徽」—— 动作定义了但点不到。" >&2
+    SL_B=1
+  fi
+  # ② 存资产引用，不是 URL。
+  if ! grep -qF 'assets/${photo.mediaAssetId}' "$STORE_LOGO_UI"; then
     echo "  FAIL [STORE-LOGO-001]: 店徽不存资产引用 —— 显示解析对不上。" >&2
+    SL_B=1
+  fi
+  # ③ upsertStoreLines 是整行覆盖：每个调用点都必须走 linesPayload 合并口径。
+  #    少一个就等于"改一个字段、冲掉其余全部"—— 详情表单保存把设施/对接人姓名
+  #    冲成空就是这么来的（HEAD 上就有，2026-10-03 查出来）。
+  SL_UPSERTS=$(grep -oF 'client.upsertStoreLines(' "$STORE_LOGO_UI" | wc -l | tr -d ' ')
+  # 数的是**调用点** `linesPayload(storeId,`，不是 `linesPayload(storeId` —— 后者会把
+  # 函数定义 `function linesPayload(storeId: string, ...)` 一起数进来，于是 3 > 2 恒红。
+  SL_MERGED=$(grep -oF 'linesPayload(storeId,' "$STORE_LOGO_UI" | wc -l | tr -d ' ')
+  if [ "$SL_UPSERTS" -eq 0 ] || [ "$SL_UPSERTS" != "$SL_MERGED" ]; then
+    echo "  FAIL [STORE-LOGO-001]: ${SL_UPSERTS} 个 upsertStoreLines 调用点里只有 ${SL_MERGED} 个走合并口径 ——" >&2
+    echo "        整行覆盖的接口只传部分字段，等于把没传的字段清空。" >&2
     SL_B=1
   fi
   # hub 店详情画 logo。
@@ -14154,7 +14195,9 @@ if [ -f "$STORE_LOGO_UI" ]; then
     SL_B=1
   fi
   [ "$SL_B" -eq 0 ] || exit 1
-  echo "    STORE-LOGO-001: PASS (店徽可换 · 存资产引用 · hub/主页按优先级显示)"
+  # 上面几条是源码结构；这一跑是行为测试（店徽解析口径 + 合并口径的字段清单）。
+  pnpm --filter @proxy/mobile exec vitest run src/store-logo.test.ts || exit $?
+  echo "    STORE-LOGO-001: PASS (相册行可设店徽 · 存资产引用 · 整行覆盖走合并 · hub 画店徽)"
 fi
 
 # CREATOR-PROFILE-001（2026-10-02，用户「最佳匹配的creator 不能看个人主页
@@ -14297,8 +14340,17 @@ fi
 ME_MERCHANT=apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx
 if [ -f "$ME_MERCHANT" ]; then
   CH3_B=0
-  if ! grep -q 'creator.userAccountId && onOpenCreatorProfile' "$ME_MERCHANT"; then
-    echo "  FAIL [CREATOR-HOME-001]: 列表点头像不进帖文主页。" >&2
+  # 点头像进帖文主页。判据钉的是**行为**：头像有自己那个可点入口，且 userId 缺失时
+  # 用 agentId 回填（实现里是 `creator.userAccountId || creator.agentId`，两种都有
+  # 帖子看）。原来钉的是 `creator.userAccountId && onOpenCreatorProfile` —— 那是"有才
+  # 进主页、没有就进经营详情"的旧分支设计，代码从来没这么写过，所以这条从进仓起恒红
+  # （被运行器的 `|| exit 1` 假绿盖住，见 TOOLCHAIN-PINS-EXITFORMS-001）。
+  if ! grep -qF 'creator-avatar-entry-' "$ME_MERCHANT"; then
+    echo "  FAIL [CREATOR-HOME-001]: 列表点头像不进帖文主页 —— 头像没有自己的入口。" >&2
+    CH3_B=1
+  fi
+  if ! grep -qF 'creator.userAccountId || creator.agentId' "$ME_MERCHANT"; then
+    echo "  FAIL [CREATOR-HOME-001]: 头像入口不再回填 userId —— 没有 userAccountId 的人点进去是死路。" >&2
     CH3_B=1
   fi
   # 经营详情不许再叫个人主页。
@@ -14397,6 +14449,102 @@ if [ -f "$HOT_GO" ] && [ -f "$HOT_MIG" ]; then
   [ "$HOT_B" -eq 0 ] || exit 1
   echo "    MENU-HOT-001: PASS (商家亲手打标 · 三处 display 都有徽 · 火焰照原型)"
 fi
+
+# STORE-EDIT-V2-001 round 2（用户给公告模板 + "周1-7默认时间"）：
+# 5 条双语模板点选填入；新店默认 07:00-22:00 全开（有行按行解析，不覆盖意愿）。
+V2_UI=apps/mobile/src/surfaces/merchant-storefront.tsx
+if grep -q 'ANNOUNCE_TEMPLATES' "$V2_UI"; then
+  V2B_B=0
+  for V2_TPL in "今日休息" "调整营业" "备货售罄" "限时优惠" "新品上市"; do
+    if ! grep -q "$V2_TPL" "$V2_UI"; then
+      echo "  FAIL [STORE-EDIT-V2-001]: 公告模板缺 ${V2_TPL}。" >&2
+      V2B_B=1
+    fi
+  done
+  if ! grep -q 'open: "07:00", close: "22:00", enabled: true' "$V2_UI"; then
+    echo "  FAIL [STORE-EDIT-V2-001]: 默认营业时间不见了。" >&2
+    V2B_B=1
+  fi
+  [ "$V2B_B" -eq 0 ] || exit 1
+  echo "    STORE-EDIT-V2-001r2: PASS (5 模板 · 默认时间)"
+fi
+
+# STORE-EDIT-V2-WIRE-001（2026-10-03）：client 入参类型里声明了的字段，必须真的出现在
+# 命令 payload 里。
+#
+# 公告 / 社媒当时是死字段：upsertStoreLines 的 input 类型有 announcement / socials，
+# UI 也传了，Go service 也认，唯独 this.command(...) 的 payload 里没带这两个键 ——
+# 服务端永远收到空值。两端测试都绕过了 client：Go 测试直连 service，移动端测试只
+# grep UI 源码，所以两头全绿。判据钉在 client 这一层的结构上：解析入参类型的字段名，
+# 逐个去 payload 的键里找。加字段忘了接线就会红，跟字段叫什么无关。
+BC_WIRE=apps/mobile/src/business-client.ts
+if [ -f "$BC_WIRE" ]; then
+  VW_B=0
+  VW_FIELDS=$(awk '
+    /public async upsertStoreLines\(input: \{/ { inf=1; next }
+    inf && /\}\): Promise<StoreLinesWire> \{/ { inf=0 }
+    inf && /^[[:space:]]+[A-Za-z_][A-Za-z0-9_]*\??:/ {
+      s=$0; sub(/^[[:space:]]+/, "", s); sub(/\??:.*/, "", s); print s
+    }' "$BC_WIRE")
+  VW_KEYS=$(awk '
+    /this\.command\("UpsertStoreLines"/ { inp=1; next }
+    inp && /\}\)\);/ { inp=0 }
+    inp && /^[[:space:]]+[A-Za-z_][A-Za-z0-9_]*:/ {
+      s=$0; sub(/^[[:space:]]+/, "", s); sub(/:.*/, "", s); print s
+    }' "$BC_WIRE")
+  # 解析不出东西 = 判据自己失效了，必须红，不能静默判绿（vacuous green）。
+  if [ -z "$VW_FIELDS" ] || [ -z "$VW_KEYS" ]; then
+    echo "  FAIL [STORE-EDIT-V2-WIRE-001]: 解析不出 upsertStoreLines 的入参字段或 payload 键 ——" >&2
+    echo "        判据本身失效了（fields=$(printf '%s' "$VW_FIELDS" | wc -l | tr -d ' ') keys=$(printf '%s' "$VW_KEYS" | wc -l | tr -d ' ')）。" >&2
+    VW_B=1
+  fi
+  for VW_F in $VW_FIELDS; do
+    if ! printf '%s\n' "$VW_KEYS" | grep -qx "$VW_F"; then
+      echo "  FAIL [STORE-EDIT-V2-WIRE-001]: 入参类型有 ${VW_F}，命令 payload 里没带 ——" >&2
+      echo "        类型对得上、UI 也传了，服务端永远收到空值。" >&2
+      VW_B=1
+    fi
+  done
+  [ "$VW_B" -eq 0 ] || exit 1
+  # 结构检查之外再跑一遍行为测试：抓的是 client 真发出去的 payload 字节，
+  # 不是源码里有没有那个键名（grep 判绿过一次的坑，不再踩第二遍）。
+  pnpm --filter @proxy/mobile exec vitest run src/business-client.test.ts || exit $?
+  echo "    STORE-EDIT-V2-WIRE-001: PASS (入参字段逐个都在 payload 里 · 行为测试也过)"
+fi
+
+# STORE-V2-COVERAGE-001（2026-10-03）：新加的测试文件必须被门禁**跑到**。
+#
+# `pins --changed` 会点名报覆盖洞：STORE-PHOTO-CAT-001 / STORE-SHARE-001 / NAV-L2-001
+# 三条线的测试文件写好了、本地也绿，但没有任何 pin 引用它们 —— 门禁从来没执行过。
+# 测试没被跑到，和测试不存在是同一件事；而"我本地跑过了"不是门禁。
+# 同理 migration 159/160：文件在、列名在 Go 里也对得上，才算这条线接完了。
+V2C_B=0
+# 全路径写出来是给 pins 归属用的（它按仓库相对路径匹配改动文件）；喂给 vitest 时
+# 再剥掉 apps/mobile/ 前缀，因为 --filter 已经把 cwd 定到那个包了。
+for V2C_T in apps/mobile/src/store-photo-category.test.ts apps/mobile/src/store-share.test.ts apps/mobile/src/nav-level2.test.ts apps/mobile/src/surfaces/store-hub-nav.test.ts; do
+  if [ ! -f "$V2C_T" ]; then
+    echo "  FAIL [STORE-V2-COVERAGE-001]: 测试文件不见了 —— ${V2C_T}" >&2
+    V2C_B=1
+    continue
+  fi
+  pnpm --filter @proxy/mobile exec vitest run "${V2C_T#apps/mobile/}" || V2C_B=1
+done
+# migration 159（公告 + 社媒）/ 160（照片分类）：文件在，且 Go 侧真的读写这些列。
+for V2C_M in apps/api-go/migrations/159_store_lines_announcement_socials.sql apps/api-go/migrations/160_store_photo_category.sql; do
+  if [ ! -f "$V2C_M" ]; then
+    echo "  FAIL [STORE-V2-COVERAGE-001]: 迁移文件不见了 —— ${V2C_M}" >&2
+    V2C_B=1
+  fi
+done
+V2C_REPO=apps/api-go/internal/platform/postgres/business.go
+for V2C_COL in announcement socials category; do
+  if ! grep -q "$V2C_COL" "$V2C_REPO"; then
+    echo "  FAIL [STORE-V2-COVERAGE-001]: 迁移加了列 ${V2C_COL}，仓储层却没读写它 —— 死列。" >&2
+    V2C_B=1
+  fi
+done
+[ "$V2C_B" -eq 0 ] || exit 1
+echo "    STORE-V2-COVERAGE-001: PASS (4 个测试文件门禁真跑 · 159/160 的列不是死列)"
 
 # CREATOR-SOCIAL-001（2026-10-02，用户「最佳匹配的creator 不能看个人主页
 # 也看不到关联的社媒账户」后半段）：
@@ -15229,8 +15377,14 @@ if [ -f "$FACE" ] && [ -f "$HUB_SHOP" ]; then
   fi
   # ③ 能力不丢：三个目的地各有一个入口，营业资料的编辑挂在它改的那一节上。
   #    （剥注释：说明文字里引用过「资产管理」这几个字，不剥就是拿注释当代码判绿。）
+  #    details 那个入口钉的是**导航调用** setShowAssets("details")，不是
+  #    onManageProducts("details")：UX-DIRECT-EDIT-001 之后"编辑店铺信息/编辑经营资料"
+  #    两个按钮都走 onEditDetails → setAutoEditStore(true) + setShowAssets("details")，
+  #    onManageProducts 只剩 menu / photos 两个目的地。原来钉的字符串从进仓起就不存在
+  #    （被运行器的 `|| exit 1` 假绿盖住，见 TOOLCHAIN-PINS-EXITFORMS-001），
+  #    而"details 到得了"这件事一直是真的 —— 判据钉错了载体，不是能力丢了。
   HUB_SHOP_SRC=$(perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' "$HUB_SHOP")
-  for ENTRY in 'onManageProducts("menu")' 'onManageProducts("photos")' 'onManageProducts("details")' 'accessibilityLabel="编辑经营资料"'; do
+  for ENTRY in 'onManageProducts("menu")' 'onManageProducts("photos")' 'setShowAssets("details")' 'accessibilityLabel="编辑经营资料"'; do
     if ! printf '%s' "$HUB_SHOP_SRC" | grep -qF "$ENTRY"; then
       echo "  FAIL [STORE-ASSET-SCOPE-001]: 中间页删掉后少了入口 —— $ENTRY" >&2
       echo "        去重不能把能力一起去掉。" >&2

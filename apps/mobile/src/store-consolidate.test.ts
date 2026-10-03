@@ -83,3 +83,41 @@ describe("STORE-CONSOLIDATE-001 管店只有一个入口", () => {
     expect(me).not.toContain('onOpenStoreCreate={() => openSubPage("merchantstorefront")}');
   });
 });
+
+// UX-DIRECT-EDIT-001（2026-10-03，用户「藏的太深了 谁能找到」）：
+// 店详情的营业资料节直接给"编辑"按钮，点进去就是表单 —— 不再让用户先点
+// "编辑经营资料"进子视图、再在里面找"编辑主页"点第二下。
+describe("UX-DIRECT-EDIT-001 店详情直达编辑表单", () => {
+  const hub = read("./surfaces/my-stores-hub.tsx");
+
+  it("营业资料节有行内编辑按钮", () => {
+    expect(hub).toContain('accessibilityLabel="编辑店铺信息"');
+    expect(hub).toContain("onEditDetails");
+  });
+
+  it("两个编辑入口都直达表单（行为一致，不看点的是哪个）", () => {
+    const hub = read("./surfaces/my-stores-hub.tsx");
+    // "编辑店铺信息"和"编辑经营资料"都调 onEditDetails —— 留两个入口但行为必须
+    // 一致，不然用户点的那个决定了他要跳几下（"还是编辑-编辑主页"的来源）。
+    expect(hub.match(/onPress=\{onEditDetails\}/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+
+  it("autoEdit 信号真的传到原子页（state 在 hub，prop 必须过去）", () => {
+    // 这行丢过一次：state 和 setter 都在，但调用处没传 prop，自动展开静默失效。
+    // 症状就是"还是要点击编辑主页"。
+    expect(hub).toContain("autoEditStoreId={autoEditStore ? selected.store.id : undefined}");
+  });
+
+  it("点进去自动展开表单（只开一次，关掉不再弹）", () => {
+    expect(hub).toContain("autoEditStore");
+    const atomic = read("./surfaces/merchant-storefront.tsx");
+    expect(atomic).toContain("autoEditStoreId");
+    expect(atomic).toContain("autoEditDoneRef");
+  });
+
+  it("等行到了再开，不拿空表单糊弄", () => {
+    const atomic = read("./surfaces/merchant-storefront.tsx");
+    // 空表单先开的话用户看到空白以为没数据，手快还会覆盖服务端值。
+    expect(atomic).toContain("if (current === undefined) return;");
+  });
+});

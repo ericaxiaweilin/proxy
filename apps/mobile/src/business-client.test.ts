@@ -144,6 +144,36 @@ describe("BusinessClient", () => {
     expect(read.description).toBe("海鲜自助");
   });
 
+  // STORE-EDIT-V2-WIRE-001（2026-10-03）：入参类型里声明了的字段，必须真的进 payload。
+  // 公告 / 社媒一度是死字段 —— 类型有、UI 也传了、Go service 也认，唯独 this.command()
+  // 的 payload 里没带这两个键，服务端永远收到空值。Go 测试直连 service、移动端测试只
+  // grep UI 源码，两端都绕过了 client，所以两头全绿。这条抓的是真发出去的字节。
+  it("upsertStoreLines 真的把公告和社媒发出去", async () => {
+    const store = makeStore();
+    await writeSession(store);
+    const captured: Array<Record<string, unknown>> = [];
+    const client = new BusinessClient({
+      secureSessionStore: store,
+      authClient: { request: async (_path: string, init: { method: "POST"; body: unknown }) => {
+        captured.push((init.body as { payload: Record<string, unknown> }).payload);
+        return { status: 200, json: async () => envelope("UpsertStoreLines", { type: "Store", id: "store_1" }, {
+          lines: { storeId: "store_1", logoAssetPath: "", description: "", hoursJson: "{}", contactPhone: "", contactEmail: "", updatedAt: "2026-10-03T00:00:00Z" },
+        }) };
+      } },
+    });
+    await client.upsertStoreLines({
+      storeId: "store_1",
+      announcement: "本周五下午茶买一送一！",
+      socials: { zalo: "https://zalo.me/123" },
+      contactName: "陈老板",
+      wifi: "FAST",
+    });
+    expect(captured[0]?.["announcement"]).toBe("本周五下午茶买一送一！");
+    expect(captured[0]?.["socials"]).toEqual({ zalo: "https://zalo.me/123" });
+    expect(captured[0]?.["contactName"]).toBe("陈老板");
+    expect(captured[0]?.["wifi"]).toBe("FAST");
+  });
+
   it("rejects signed-out session with OfflineFallbackSessionError", async () => {
     const store = makeStore();
     await writeSession(store, { signedOut: true });

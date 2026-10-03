@@ -12,7 +12,8 @@ import { QrZoomOverlay } from "../components/qr-zoom-overlay";
 import { describeError, saveImageToAlbum } from "../image-export";
 import { color, shadows } from "../theme";
 import { retainStorePhoto, storePhotoUri, type RetainedStorePhoto } from "../expo-composer-draft-store";
-import type { BusinessClient, StoreProduct } from "../business-client";
+import type { BusinessClient, StoreLinesWire, StoreProduct } from "../business-client";
+import type { ConversationClient, ConversationInboxItem } from "../conversation-client";
 import { MediaClient } from "../media-client";
 // STORE-LOGO-001：店徽显示走既有解析器（assets/ 前缀 → thumb URL）。
 import { merchantAvatarUri } from "../business-client";
@@ -40,8 +41,14 @@ function thumbUrlFor(mediaAssetId: string): string | undefined {
 
 type Account = { id: string; name: string; status: string };
 type Store = { id: string; businessId: string; name: string; address: string; status: string };
-type StorePhoto = { id: string; storeId: string; businessId: string; uploadedBy: string; assetPath: string; caption: string; sortOrder: number; mediaAssetId: string; createdAt: string };
-type StoreLines = { storeId: string; logoAssetPath: string; description: string; hoursJson: string; contactPhone: string; contactEmail: string; updatedAt: string };
+type StorePhoto = { id: string; storeId: string; businessId: string; uploadedBy: string; assetPath: string; caption: string; sortOrder: number; mediaAssetId: string; category?: string | undefined; createdAt: string };
+// STORE-LOGO-001：营业资料直接用线上契约那一份类型，不在这里复制一份窄的 ——
+// 复制的那份漏了 contactName / 设施 / 公告 / 社媒，于是「设店徽」这类只改一个字段
+// 的写入会把其余字段一起冲成空（upsert 是整行覆盖）。
+type StoreLines = StoreLinesWire;
+// upsertStoreLines 的入参形状，从 client 推导 —— 客户端加字段时这里自动跟上，
+// 不会再出现"类型里声明了、payload 里没带"那种两头都绿的漏法。
+type StoreLinesInput = Parameters<BusinessClient["upsertStoreLines"]>[0];
 type SpendDaily = { businessId: string; bucketDate: string; orderCount: number; grossMinor: number; newCustomerCount: number; returningCustomerCount: number };
 
 function formatVnd(minor: number): string {
@@ -51,6 +58,38 @@ function formatVnd(minor: number): string {
   return `${vnd} VND`;
 }
 
+const WEEK_DAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"] as const;
+const WEEK_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+function defaultHoursDays(): Array<{ day: string; open: string; close: string; enabled: boolean }> {
+  return (["周一", "周二", "周三", "周四", "周五", "周六", "周日"] as const).map((day) => ({ day, open: "07:00", close: "22:00", enabled: true }));
+}
+function parseHoursDays(hoursJson: string): Array<{ day: string; open: string; close: string; enabled: boolean }> {
+  const blank = WEEK_DAYS.map((day) => ({ day, open: "", close: "", enabled: false }));
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(hoursJson) as unknown;
+  } catch { return blank; }
+  if (!parsed || typeof parsed !== "object") return blank;
+  const obj = parsed as Record<string, unknown>;
+  const daily = typeof obj["每天"] === "string" ? obj["每天"] : undefined;
+  return WEEK_DAYS.map((day, i) => {
+    const raw = typeof obj[WEEK_KEYS[i]!] === "string" ? (obj[WEEK_KEYS[i]!] as string) : daily;
+    if (!raw) return { day, open: "", close: "", enabled: false };
+    const m = raw.match(/^(\d{1,2}:\d{2})\s*[-–~～]\s*(\d{1,2}:\d{2})$/);
+    if (!m) return { day, open: "", close: "", enabled: false };
+    return { day, open: m[1]!, close: m[2]!, enabled: true };
+  });
+}
+function serializeHoursDays(days: Array<{ day: string; open: string; close: string; enabled: boolean }>): string {
+  const out: Record<string, string> = {};
+  const keys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  days.forEach((d, i) => {
+    if (d.enabled && d.open.trim() !== "" && d.close.trim() !== "") {
+      out[keys[i]!] = `${d.open.trim()}-${d.close.trim()}`;
+    }
+  });
+  return JSON.stringify(out);
+}
 function linesAsHoursObject(hoursJson: string): Record<string, string> {
   try {
     const parsed = JSON.parse(hoursJson) as unknown;
@@ -70,7 +109,8 @@ type StoreAssetPage = "root" | "menu" | "photos" | "details";
 // 所以给子视图一个作用域：只画被选中的那一家、只画它要编辑的那一节。
 export type StoreAssetScope = { storeId: string; page: "menu" | "photos" | "details" };
 
-export function MerchantStorefrontSurface({ client, viewerAccountId, header, showcaseActivities, onOpenVouchers, onStartStoreSetup, scope }: { client: BusinessClient; viewerAccountId?: string | undefined; header?: ReactNode; showcaseActivities?: Array<{ id: string; title: string }>; onOpenVouchers?: () => void; onStartStoreSetup?: () => void; scope?: StoreAssetScope | undefined }): React.JSX.Element {
+export function MerchantStorefrontSurface({ client, viewerAccountId, header, showcaseActivities, onOpenVouchers, onStartStoreSetup, scope, autoEditStoreId, conversationClient }: { client: BusinessClient; viewerAccountId?: string | undefined; header?: ReactNode; showcaseActivities?: Array<{ id: string; title: string }>; onOpenVouchers?: () => void; onStartStoreSetup?: () => void; scope?: StoreAssetScope | undefined;
+  autoEditStoreId?: string | undefined; conversationClient?: ConversationClient | undefined }): React.JSX.Element {
   const [accounts, setAccounts] = useState<Account[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   // STORE-QR-001：店铺二维码此前只是一个 qrGrid 图标 + 「扫码进入…可用于店内
@@ -83,6 +123,49 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   const [storeQrNotice, setStoreQrNotice] = useState<{ storeId: string; text: string } | undefined>(undefined);
   // 放大层当前展示的店铺。存 id+name 而不是只存 id —— 关掉列表数据后标题还得在。
   const [zoomedStore, setZoomedStore] = useState<{ id: string; name: string } | undefined>(undefined);
+  // STORE-SHARE-001：分享给站内好友 —— 店铺 vCard（X-PROXY-STORE）走 CONTACT
+  // 消息发到选中的会话，对方在对话里看到同一张店名片。系统分享保留，走更多入口。
+  const [shareFor, setShareFor] = useState<string | undefined>(undefined);
+  const [shareInbox, setShareInbox] = useState<ConversationInboxItem[] | undefined>(undefined);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [sendingTo, setSendingTo] = useState<string | undefined>(undefined);
+  const [shareMsg, setShareMsg] = useState<{ storeId: string; text: string } | undefined>(undefined);
+  async function openSharePicker(storeId: string): Promise<void> {
+    setShareMsg(undefined);
+    if (!conversationClient) {
+      setShareMsg({ storeId, text: "站内分享需要登录会话，先去「消息」页登录再回来。" });
+      setShareFor(storeId);
+      setShareInbox([]);
+      return;
+    }
+    setShareFor(storeId);
+    setShareLoading(true);
+    try {
+      setShareInbox(await conversationClient.listConversations());
+    } catch (e) {
+      setShareMsg({ storeId, text: e instanceof Error ? e.message : String(e) });
+      setShareInbox([]);
+    } finally {
+      setShareLoading(false);
+    }
+  }
+  async function sendStoreToConversation(storeId: string, storeName: string, conversationId: string, peerName: string): Promise<void> {
+    if (!conversationClient) return;
+    const vcard = buildContactCard({ name: storeName, storeId });
+    if (!vcard) {
+      setShareMsg({ storeId, text: "这家店信息不全，名片拼不出来，分享不了。" });
+      return;
+    }
+    setSendingTo(conversationId);
+    try {
+      await conversationClient.sendContactMessage(conversationId, vcard);
+      setShareMsg({ storeId, text: `已分享给 ${peerName}，对方在对话里能看到这家店。` });
+    } catch (e) {
+      setShareMsg({ storeId, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSendingTo(undefined);
+    }
+  }
   const storeZoomShotRef = useRef<View>(null);
   function storeQrRefFor(storeId: string): { current: View | null } {
     const existing = storeQrRefs.current[storeId];
@@ -100,15 +183,39 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   // (no modal): editing toggles a few TextInputs and a
   // 保存 button, mirrors the photo uploader pattern.
   const [editingLinesFor, setEditingLinesFor] = useState<string | undefined>(undefined);
+  const autoEditDoneRef = useRef(false);
+  useEffect(() => {
+    if (!autoEditStoreId || autoEditDoneRef.current) return;
+    const current = lines[autoEditStoreId];
+    if (current === undefined) return;
+    autoEditDoneRef.current = true;
+    startEditLines(autoEditStoreId, current);
+  }, [autoEditStoreId, lines]);
   const [editingDescription, setEditingDescription] = useState<string>("");
   const [editingContactPhone, setEditingContactPhone] = useState<string>("");
   const [editingContactEmail, setEditingContactEmail] = useState<string>("");
   const [editingHoursJson, setEditingHoursJson] = useState<string>("");
-  const [editingLogoPath, setEditingLogoPath] = useState<string>("");
+  const [hoursDays, setHoursDays] = useState<Array<{ day: string; open: string; close: string; enabled: boolean }>>([]);
+  const [hoursTouched, setHoursTouched] = useState(false);
+  const [editingHoursRaw, setEditingHoursRaw] = useState("{}");
+  const [editingSocialZalo, setEditingSocialZalo] = useState("");
+  const [editingSocialFacebook, setEditingSocialFacebook] = useState("");
+  const [editingSocialTiktok, setEditingSocialTiktok] = useState("");
+  const [editingAnnouncement, setEditingAnnouncement] = useState("");
+  const [announceTpl, setAnnounceTpl] = useState<number | undefined>(undefined);
+  const ANNOUNCE_TEMPLATES = [
+    ["😴 今日休息", "今天休息，暂停营业一天，明天见！ / Nghỉ hôm nay, hẹn gặp lại ngày mai!"],
+    ["⏰ 调整营业", "因特殊情况，今日营业时间调整为 10:00 - 18:00 / Hôm nay mở cửa từ 10:00 - 18:00"],
+    ["🚫 备货售罄", "今日备货已售罄，感谢支持，明天请早！ / Hôm nay đã hết hàng, cảm ơn và hẹn gặp lại!"],
+    ["🔥 限时优惠", "【限时特惠】下午2-5点，全场第二杯半价！ / Giảm giá giờ vàng: Mua 1 tặng 1!"],
+    ["✨ 新品上市", "新品上市！欢迎来品尝我们的特色饮品。 / Món mới ra mắt, mời bạn ghé thử!"],
+  ] as const;
   const [savingLinesFor, setSavingLinesFor] = useState<string | undefined>(undefined);
   const [linesError, setLinesError] = useState<string | undefined>(undefined);
   const [spend, setSpend] = useState<Record<string, { totalOrders: number; totalGrossMinor: number; days: SpendDaily[] } | undefined>>({});
   const [uploadingStoreId, setUploadingStoreId] = useState<string | undefined>(undefined);
+  // 相册上传分类：environment（店铺环境）| menu（菜单菜品），按店各自独立，默认环境。
+  const [photoCatByStore, setPhotoCatByStore] = useState<Record<string, "environment" | "menu">>({});
   const [products, setProducts] = useState<Record<string, StoreProduct[]>>({});
   // R36.x MENU-001: 菜单新增/编辑表单状态。"new" 表示新增，否则为被编辑商品 id。
   const [editingProductFor, setEditingProductFor] = useState<string | undefined>(undefined);
@@ -187,7 +294,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
     return () => { cancelled = true; };
   }, [client, refreshOne]);
 
-  async function pickAndUploadPhoto(storeId: string): Promise<void> {
+  async function pickAndUploadPhoto(storeId: string, category: "environment" | "menu"): Promise<void> {
     setError(undefined);
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
@@ -232,6 +339,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
         caption: asset.fileName ?? "",
         sortOrder: Date.now() % 1000,
         mediaAssetId: uploaded.mediaAssetId,
+        category,
       });
       retained.photoId = created.id;
       setPhotos((prev) => ({
@@ -271,24 +379,88 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
     setEditingContactEmail(current?.contactEmail ?? "");
     setEditingHoursJson(Object.entries(linesAsHoursObject(current?.hoursJson ?? "{}"))
       .map(([day, hours]) => day === "营业时间" ? hours : `${day} ${hours}`).join(" · "));
-    setEditingLogoPath(current?.logoAssetPath ?? "");
+    setEditingHoursRaw(current?.hoursJson ?? "{}");
+    const parsed = current ? parseHoursDays(current.hoursJson ?? "{}") : defaultHoursDays();
+    setHoursDays(parsed.some((d) => d.enabled) ? parsed : defaultHoursDays());
+    setHoursTouched(false);
+    setEditingSocialZalo(current?.socials?.zalo ?? "");
+    setEditingSocialFacebook(current?.socials?.facebook ?? "");
+    setEditingSocialTiktok(current?.socials?.tiktok ?? "");
+    setEditingAnnouncement(current?.announcement ?? "");
+    setAnnounceTpl(undefined);
+  }
+
+  // upsertStoreLines 是**整行覆盖**：只传改动的那几个字段，等于把没传的字段清空。
+  // 这个坑已经咬过一次 —— 详情表单保存从来不传设施（wifi/smoking/acTempC/power/
+  // quiet/seating）和对接人姓名，商家改一句简介就把这些全冲成空（HEAD 上就是这样）。
+  // 「设店徽」要是照抄那个写法，会把简介/营业时间/公告一起冲掉。
+  // 所以两处都走这一个合并口径：以库里那行为底，只覆盖显式给的字段。
+  function linesPayload(storeId: string, overrides: Partial<Omit<StoreLinesInput, "storeId">>): StoreLinesInput {
+    const c = lines[storeId];
+    return {
+      storeId,
+      logoAssetPath: c?.logoAssetPath ?? "",
+      description: c?.description ?? "",
+      hoursJson: c?.hoursJson ?? "{}",
+      contactPhone: c?.contactPhone ?? "",
+      contactEmail: c?.contactEmail ?? "",
+      contactName: c?.contactName ?? "",
+      wifi: c?.wifi ?? "",
+      smoking: c?.smoking ?? "",
+      acTempC: c?.acTempC ?? 0,
+      power: c?.power ?? "",
+      quiet: c?.quiet ?? "",
+      seating: c?.seating ?? "",
+      announcement: c?.announcement ?? "",
+      socials: c?.socials ?? {},
+      ...overrides,
+    };
+  }
+
+  // STORE-LOGO-001：把相册里的某张照片设为店徽。上传入口统一到相册页是对的，
+  // 但「换店徽」这个能力不能跟着上传入口一起消失 —— 详情表单删掉选择器之后，
+  // logoAssetPath 只剩原样回存，新店永远拿不到店徽、老店也换不掉。这条 pin 当初
+  // 就是为用户那句「商家侧的头像为什么不能更换」钉的。
+  // 存资产引用 `assets/<mediaAssetId>`，与 merchantAvatarUri 的解析口径一致。
+  const [savingLogoFor, setSavingLogoFor] = useState<string | undefined>(undefined);
+  async function setStoreLogoFromPhoto(storeId: string, photo: StorePhoto): Promise<void> {
+    if (!photo.mediaAssetId) {
+      setLinesError("这张照片还没有媒体资产，设不了店徽 —— 删掉重传一次。");
+      return;
+    }
+    setLinesError(undefined);
+    setSavingLogoFor(storeId);
+    try {
+      const saved = await client.upsertStoreLines(
+        linesPayload(storeId, { logoAssetPath: `assets/${photo.mediaAssetId}` }),
+      );
+      setLines((prev) => ({ ...prev, [storeId]: saved }));
+    } catch (e) {
+      setLinesError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingLogoFor(undefined);
+    }
   }
 
   async function saveLines(storeId: string): Promise<void> {    setLinesError(undefined);
     // Validate hours JSON before sending: business server
     // will reject empty / non-object hoursJson, but a
     // local pre-check gives the user a clearer error.
-    const hoursJson = JSON.stringify(editingHoursJson.trim() ? { 营业时间: editingHoursJson.trim() } : {});
+    const hoursJson = hoursTouched ? serializeHoursDays(hoursDays) : editingHoursRaw;
+    const socials: Record<string, string> = {};
+    if (editingSocialZalo.trim() !== "") socials.zalo = editingSocialZalo.trim();
+    if (editingSocialFacebook.trim() !== "") socials.facebook = editingSocialFacebook.trim();
+    if (editingSocialTiktok.trim() !== "") socials.tiktok = editingSocialTiktok.trim();
     setSavingLinesFor(storeId);
     try {
-      const saved = await client.upsertStoreLines({
-        storeId,
-        logoAssetPath: editingLogoPath,
+      const saved = await client.upsertStoreLines(linesPayload(storeId, {
         description: editingDescription,
         hoursJson,
         contactPhone: editingContactPhone,
         contactEmail: editingContactEmail,
-      });
+        announcement: editingAnnouncement.trim(),
+        socials,
+      }));
       setLines((prev) => ({ ...prev, [storeId]: saved }));
       setEditingLinesFor(undefined);
     } catch (e) {
@@ -312,44 +484,8 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
     setEditingProductHot(current?.isHot ?? false);
   }
 
-  // STORE-LOGO-001（2026-10-02，用户「商家侧的头像为什么不能更换」）：
-  // 店徽原来只有一个 editingLogoPath 的 state，没有任何输入框/选择器连到它 ——
-  // 商家在界面上根本换不了。现在走媒体管线上传，存 `assets/<id>`：
-  // 与 merchantAvatarUri 的解析口径一致，服务端 isValidAssetPath 本来就认前缀。
-  const [savingLogo, setSavingLogo] = useState(false);
-  async function pickLogoPhoto(): Promise<void> {
-    setLinesError(undefined);
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setLinesError("需要照片权限才能上传店徽。");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      quality: 0.85,
-      allowsMultipleSelection: false,
-      selectionLimit: 1,
-    });
-    const asset = result.canceled ? undefined : result.assets[0];
-    if (!asset) return;
-    setSavingLogo(true);
-    try {
-      const uploaded = await storefrontMedia.uploadImage({
-        uri: asset.uri,
-        width: asset.width,
-        height: asset.height,
-        ...(asset.fileName ? { fileName: asset.fileName } : {}),
-        ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
-      });
-      // 存资产引用，不是 URL：显示时由 merchantAvatarUri 统一拼 thumb。
-      setEditingLogoPath(`assets/${uploaded.mediaAssetId}`);
-    } catch (e) {
-      setLinesError(e instanceof Error ? e.message : "店徽上传失败，请重试。");
-    } finally {
-      setSavingLogo(false);
-    }
-  }
-
+  // 店铺照片入口只在相册页（照片与内容）保留，经营资料页只做预览，不重复上传。
+  // logoAssetPath 仍随表单原样回存，不丢已有值。
   // 菜品照片：选中即走媒体管线上传，拿到 mediaAssetId 后才可保存，
   // 保证列表里一定能远端展示（R36.x PHOTO-001）。
   async function pickProductPhoto(): Promise<void> {
@@ -531,8 +667,43 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
               // 不再有自己的资产列表中间页 —— 那一层和 hub 店详情是同一批入口。
               const currentPage: StoreAssetPage = scope ? scope.page
                 : assetPage?.storeId === s.id ? assetPage.page : "root";
+              // STORE-SHARE-001：选人面板抽出来 —— 非作用域页挂头图下，
+              // hub 进来的作用域页挂营业资料上，两边同一份。
+              const renderSharePanel = () => (
+                <View style={styles.sharePanel}>
+                  <View style={styles.photoHead}>
+                    <Text selectable style={styles.photoHeadTitle}>发给站内好友</Text>
+                    <Pressable onPress={() => { setShareFor(undefined); setShareMsg(undefined); }} style={styles.rowAction}><Text selectable style={styles.rowActionText}>收起</Text></Pressable>
+                  </View>
+                  {shareLoading ? <Text selectable style={styles.empty}>正在拉会话列表…</Text> : null}
+                  {!shareLoading && (shareInbox ?? []).length === 0 && !(shareMsg && shareMsg.storeId === s.id) ? (
+                    <Text selectable style={styles.empty}>还没有站内会话 — 先去「消息」页和好友聊一句再回来分享。</Text>
+                  ) : null}
+                  {(shareInbox ?? []).map((item) => {
+                    const convId = item.conversation.conversationId;
+                    const peer = item.counterpartySnapshot?.displayName?.trim() || "站内好友";
+                    return (
+                      <Pressable
+                        key={convId}
+                        disabled={sendingTo === convId}
+                        onPress={() => void sendStoreToConversation(s.id, s.name, convId, peer)}
+                        style={styles.assetRow}
+                      >
+                        <View style={styles.photoRowMain}>
+                          <Text selectable style={styles.assetTitle}>{peer}</Text>
+                          <Text selectable style={styles.assetMeta}>
+                            {sendingTo === convId ? "发送中…" : item.latestMessage?.messageType === "CONTACT" ? "最近：名片" : item.latestMessage?.body ? item.latestMessage.body.slice(0, 20) : "点开发这家店的名片"}
+                          </Text>
+                        </View>
+                        <Text selectable style={styles.assetChevron}>›</Text>
+                      </Pressable>
+                    );
+                  })}
+                  {shareMsg && shareMsg.storeId === s.id ? <Text selectable style={styles.storeQrNotice}>{shareMsg.text}</Text> : null}
+                </View>
+              );
               return (
-                <View key={s.id} style={styles.storeCard}>
+                <View key={s.id} style={currentPage === "details" && editingLinesFor === s.id ? styles.storeCardPlain : styles.storeCard}>
                   {scope ? null : <>
                   <View style={styles.storeHero}>
                     {(() => {
@@ -548,7 +719,8 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                       拼出来的店铺主页链接。没有域名/公开页之后它就只剩一个卖域名的落地页可分享，
                       所以撤掉，只留「分享店铺」——分享的是**搜得到的店名**。
                       （域名不写在这里，原因见上面 copyStoreName 的注释。） */}
-                  <View style={styles.heroActions}><Pressable onPress={() => void Share.share({ message: `${s.name} · 在 Proxy 里搜这家店就能找到。` })} style={styles.shareButton} accessibilityLabel="分享店铺"><Text selectable style={styles.shareButtonText}>分享店铺</Text></Pressable></View>
+                  <View style={styles.heroActions}><Pressable onPress={() => void openSharePicker(s.id)} style={styles.shareButton} accessibilityLabel="发给站内好友"><Text selectable style={styles.shareButtonText}>发给站内好友</Text></Pressable><Pressable onPress={() => void Share.share({ message: `${s.name} · 在 Proxy 里搜这家店就能找到。` })} style={styles.previewButton} accessibilityLabel="分享到站外"><Text selectable style={styles.previewButtonText}>分享到站外</Text></Pressable></View>
+                  {shareFor === s.id ? renderSharePanel() : null}
                   <View style={styles.qrCard}>
                     <View ref={storeQrRefFor(s.id)} collapsable={false} style={styles.qrShot}>
                       <Pressable accessibilityLabel="放大店铺二维码" accessibilityRole="button" onPress={() => setZoomedStore({ id: s.id, name: s.name })}>
@@ -699,17 +871,48 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                   {/* Store details editor is contextual, never the default storefront. */}
                   {currentPage === "details" && editingLinesFor === s.id ? (
                     <View style={styles.linesEditForm}>
-                      {/* STORE-LOGO-001：店徽选择器。有就预览 + 换一张，没有就上传。
-                          空着也能保存 —— 店徽是可选的，不该拦住简介电话那些项。 */}
-                      <Text selectable style={styles.linesEditLabel}>店徽</Text>
-                      {merchantAvatarUri(editingLogoPath || undefined, localApiBaseUrl) ? (
-                        <Image source={{ uri: merchantAvatarUri(editingLogoPath || undefined, localApiBaseUrl) }} style={styles.logoPreview} />
-                      ) : (
-                        <View style={styles.logoEmpty}><ProxyIcon color={color.muted} name="storefront" size={22} /></View>
-                      )}
-                      <Pressable onPress={() => void pickLogoPhoto()} disabled={savingLogo} style={[styles.uploadButton, savingLogo ? styles.uploadButtonBusy : null]}>
-                        <Text selectable style={styles.uploadButtonText}>{savingLogo ? "上传中…" : editingLogoPath ? "换一张" : "+ 上传店徽"}</Text>
-                      </Pressable>
+                      {/* 店铺照片只做预览：上传、分类统一在「照片与内容」页，logo 原样回存。 */}
+                      <View style={styles.sectionPhoto}>
+                      <View style={styles.photoPad}>
+                      <Text selectable style={styles.formSectionTitle}>店铺照片</Text>
+                      </View>
+                      {(() => {
+                        const cover = sPhotos.find((p) => p.mediaAssetId);
+                        const coverUri = cover
+                          ? thumbUrlFor(cover.mediaAssetId)
+                          : merchantAvatarUri(sLines?.logoAssetPath || undefined, localApiBaseUrl);
+                        return coverUri ? (
+                          <Image source={{ uri: coverUri }} style={styles.storePhotoFlush} />
+                        ) : (
+                          <View style={styles.storePhotoEmptyFlush}><ProxyIcon color={color.muted} name="storefront" size={26} /></View>
+                        );
+                      })()}
+                      <View style={styles.photoPad}>
+                      <Text selectable style={styles.photoMeta}>店铺照片在「照片与内容」页统一上传、分类，换店徽也在那里（每张照片行上有「设为店徽」），这里只做预览。</Text>
+                      </View>
+                      </View>
+                      <View style={styles.sectionCard}>
+                      <Text selectable style={styles.formSectionTitle}>基本信息</Text>
+                      <Text selectable style={styles.linesEditLabel}>店铺公告（一句话，顾客进店先看到） <Text selectable style={styles.counter}>{editingAnnouncement.length}/100</Text></Text>
+                      <View style={styles.chipRow}>
+                        {ANNOUNCE_TEMPLATES.map(([label, body], i) => (
+                          <Pressable
+                            key={label}
+                            onPress={() => { setAnnounceTpl(i); setEditingAnnouncement(body); }}
+                            style={[styles.chip, announceTpl === i && styles.chipOn]}
+                          >
+                            <Text selectable style={[styles.chipText, announceTpl === i && styles.chipTextOn]}>{label}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      <TextInput
+                        value={editingAnnouncement}
+                        onChangeText={(text) => { setEditingAnnouncement(text.slice(0, 100)); setAnnounceTpl(undefined); }}
+                        placeholder="例如 今日备货已售罄，明天请早"
+                        placeholderTextColor={color.muted}
+                        multiline
+                        style={[styles.createInput, styles.linesEditTextarea]}
+                      />
                       <Text selectable style={styles.linesEditLabel}>店铺简介</Text>
                       <TextInput
                         value={editingDescription}
@@ -719,6 +922,9 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         multiline
                         style={[styles.createInput, styles.linesEditTextarea]}
                       />
+                      </View>
+                      <View style={styles.sectionCard}>
+                      <Text selectable style={styles.formSectionTitle}>联系方式与社媒</Text>
                       <Text selectable style={styles.linesEditLabel}>联系手机</Text>
                       <TextInput
                         value={editingContactPhone}
@@ -738,15 +944,68 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         autoCapitalize="none"
                         style={styles.createInput}
                       />
-                      <Text selectable style={styles.linesEditLabel}>营业时间</Text>
+                      <Text selectable style={styles.linesEditLabel}>Zalo（可选）</Text>
                       <TextInput
-                        value={editingHoursJson}
-                        onChangeText={setEditingHoursJson}
-                        placeholder="例如 周一至周日 09:00–22:00"
+                        value={editingSocialZalo}
+                        onChangeText={setEditingSocialZalo}
+                        placeholder="zalo 号码或链接"
                         placeholderTextColor={color.muted}
                         autoCapitalize="none"
                         style={styles.createInput}
                       />
+                      <Text selectable style={styles.linesEditLabel}>Facebook（可选）</Text>
+                      <TextInput
+                        value={editingSocialFacebook}
+                        onChangeText={setEditingSocialFacebook}
+                        placeholder="facebook 主页链接"
+                        placeholderTextColor={color.muted}
+                        autoCapitalize="none"
+                        style={styles.createInput}
+                      />
+                      <Text selectable style={styles.linesEditLabel}>TikTok（可选）</Text>
+                      <TextInput
+                        value={editingSocialTiktok}
+                        onChangeText={setEditingSocialTiktok}
+                        placeholder="tiktok 主页链接"
+                        placeholderTextColor={color.muted}
+                        autoCapitalize="none"
+                        style={styles.createInput}
+                      />
+                      </View>
+                      <View style={styles.sectionCard}>
+                      <Text selectable style={styles.formSectionTitle}>营业时间 · 默认 07:00–22:00 全周营业</Text>
+                      {hoursDays.map((d, idx) => (
+                        <View key={d.day} style={styles.dayRow}>
+                          <Text selectable style={styles.dayLabel}>{d.day}</Text>
+                          <View style={styles.timeInputs}>
+                            <TextInput
+                              value={d.open}
+                              onChangeText={(v) => { setHoursDays((prev) => prev.map((x, i) => i === idx ? { ...x, open: v } : x)); setHoursTouched(true); }}
+                              placeholder="--:--"
+                              placeholderTextColor={color.muted}
+                              style={[styles.timeInput, !d.enabled && styles.timeDisabled]}
+                              editable={d.enabled}
+                            />
+                            <Text selectable style={styles.timeSep}>-</Text>
+                            <TextInput
+                              value={d.close}
+                              onChangeText={(v) => { setHoursDays((prev) => prev.map((x, i) => i === idx ? { ...x, close: v } : x)); setHoursTouched(true); }}
+                              placeholder="--:--"
+                              placeholderTextColor={color.muted}
+                              style={[styles.timeInput, !d.enabled && styles.timeDisabled]}
+                              editable={d.enabled}
+                            />
+                            <Pressable
+                              accessibilityLabel={`${d.day}${d.enabled ? "休息" : "营业"}`}
+                              onPress={() => { setHoursDays((prev) => prev.map((x, i) => i === idx ? { ...x, enabled: !x.enabled } : x)); setHoursTouched(true); }}
+                              style={[styles.toggle, d.enabled && styles.toggleOn]}
+                            >
+                              <View style={[styles.knob, d.enabled && styles.knobOn]} />
+                            </Pressable>
+                          </View>
+                        </View>
+                      ))}
+                      </View>
                       {linesError ? <Text selectable style={styles.errorText}>{linesError}</Text> : null}
                       <View style={styles.linesEditActions}>
                         <Pressable
@@ -755,23 +1014,23 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                             setEditingLinesFor(undefined);
                             setLinesError(undefined);
                           }}
-                          style={[styles.createBtn, styles.linesEditCancel]}
+                          style={styles.cancelBtn}
                         >
-                          <Text selectable style={styles.createBtnText}>取消</Text>
+                          <Text selectable style={styles.cancelBtnText}>取消</Text>
                         </Pressable>
                         <Pressable
                           disabled={savingLinesFor === s.id}
                           onPress={() => void saveLines(s.id)}
-                          style={[styles.createBtn, savingLinesFor === s.id && styles.createBtnBusy]}
+                          style={[styles.saveBtn, savingLinesFor === s.id && styles.saveBtnBusy]}
                         >
-                          <Text selectable style={styles.createBtnText}>
-                            {savingLinesFor === s.id ? "保存中…" : "保存"}
+                          <Text selectable style={styles.saveBtnText}>
+                            {savingLinesFor === s.id ? "保存中…" : "保存修改"}
                           </Text>
                         </Pressable>
                       </View>
                     </View>
                   ) : currentPage === "details" ? (<>
-                    <Text selectable style={styles.buildStamp}>build 1003-hotlogo</Text>
+                    <Text selectable style={styles.buildStamp}>build 1011-sharescope</Text>
                     <Pressable
                       accessibilityRole="button"
                       hitSlop={12}
@@ -790,8 +1049,24 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                     <Text selectable style={styles.photoHeadTitle}>照片与视频</Text>
                     <Text selectable style={styles.photoHeadMeta}>环境 · 菜品 · 活动 · {sPhotos.length} 张</Text>
                   </View>
+                  <View style={styles.chipRow}>
+                    {(["environment", "menu"] as const).map((c) => {
+                      const active = (photoCatByStore[s.id] ?? "environment") === c;
+                      return (
+                        <Pressable
+                          key={c}
+                          onPress={() => setPhotoCatByStore((prev) => ({ ...prev, [s.id]: c }))}
+                          style={[styles.chip, active && styles.chipOn]}
+                        >
+                          <Text selectable style={[styles.chipText, active && styles.chipTextOn]}>
+                            {c === "environment" ? "店铺环境" : "菜单菜品"}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
                   <Pressable
-                    onPress={() => pickAndUploadPhoto(s.id)}
+                    onPress={() => pickAndUploadPhoto(s.id, photoCatByStore[s.id] ?? "environment")}
                     disabled={uploadingStoreId === s.id}
                     style={[styles.uploadButton, uploadingStoreId === s.id ? styles.uploadButtonBusy : null]}
                   >
@@ -808,9 +1083,23 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                       <View style={styles.photoRowMain}>
                         <Text selectable style={styles.productName} numberOfLines={1}>{p.caption || "店铺照片"}</Text>
                         <Text selectable style={styles.photoMeta}>
-                          {new Date(p.createdAt).toLocaleDateString()}
+                          {p.category === "menu" ? "菜品" : "环境"} · {new Date(p.createdAt).toLocaleDateString()}
                         </Text>
                       </View>
+                      {p.mediaAssetId && sLines?.logoAssetPath === `assets/${p.mediaAssetId}` ? (
+                        <Text selectable style={styles.logoCurrentTag}>当前店徽</Text>
+                      ) : p.mediaAssetId ? (
+                        <Pressable
+                          accessibilityLabel="设为店徽"
+                          disabled={savingLogoFor === s.id}
+                          onPress={() => void setStoreLogoFromPhoto(s.id, p)}
+                          style={styles.logoPickButton}
+                        >
+                          <Text selectable style={styles.logoPickButtonText}>
+                            {savingLogoFor === s.id ? "设置中…" : "设为店徽"}
+                          </Text>
+                        </Pressable>
+                      ) : null}
                       {viewerAccountId && viewerAccountId === p.uploadedBy ? (
                         <Pressable onPress={() => deletePhoto(s.id, p.id)} style={styles.deleteButton}>
                           <Text selectable style={styles.deleteButtonText}>删除</Text>
@@ -833,7 +1122,11 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                     </View>
                   ))}</View>
                   <View style={styles.managerPanel}><View style={styles.photoHead}><Text selectable style={styles.photoHeadTitle}>Creator 权益</Text><Text selectable style={styles.photoHeadMeta}>联营与内容合作</Text></View><Text selectable style={styles.empty}>设置 Creator 到店体验、内容合作与专属权益；对外的展示页还没做，配好之后暂时只有你自己看得到。</Text></View></> : null}
-                  {currentPage === "details" ? <View style={styles.managerPanel}><View style={styles.photoHead}><Text selectable style={styles.photoHeadTitle}>营业资料</Text><Text selectable style={styles.photoHeadMeta}>公开展示</Text></View>{sLines ? <View style={styles.linesBlock}><Text selectable style={styles.linesDescription}>{sLines.description || "店铺简介待完善"}</Text><Text selectable style={styles.linesContact}>{[sLines.contactPhone, sLines.contactEmail].filter(Boolean).join(" · ") || "联系方式待完善"}</Text><Text selectable style={styles.linesHours}>{Object.entries(linesAsHoursObject(sLines.hoursJson)).map(([k, v]) => k === "营业时间" ? v : `${k} ${v}`).join(" · ") || "营业时间待完善"}</Text></View> : <Text selectable style={styles.empty}>店铺简介、联系方式和营业时间待完善</Text>}</View> : null}
+                  {scope && currentPage === "details" ? (
+                    <View style={styles.heroActions}><Pressable onPress={() => void openSharePicker(s.id)} style={styles.shareButton} accessibilityLabel="发给站内好友"><Text selectable style={styles.shareButtonText}>发给站内好友</Text></Pressable><Pressable onPress={() => void Share.share({ message: `${s.name} · 在 Proxy 里搜这家店就能找到。` })} style={styles.previewButton} accessibilityLabel="分享到站外"><Text selectable style={styles.previewButtonText}>分享到站外</Text></Pressable></View>
+                  ) : null}
+                  {scope && shareFor === s.id ? renderSharePanel() : null}
+                  {currentPage === "details" ? <View style={editingLinesFor === s.id ? [styles.managerPanel, styles.managerPanelFlat] : styles.managerPanel}><View style={styles.photoHead}><Text selectable style={styles.photoHeadTitle}>营业资料</Text><Text selectable style={styles.photoHeadMeta}>公开展示</Text></View>{sLines ? <View style={styles.linesBlock}>{sLines.announcement ? <Text selectable style={styles.linesAnnouncement}>📢 {sLines.announcement}</Text> : null}<Text selectable style={styles.linesDescription}>{sLines.description || "店铺简介待完善"}</Text><Text selectable style={styles.linesContact}>{[sLines.contactPhone, sLines.contactEmail].filter(Boolean).join(" · ") || "联系方式待完善"}</Text><Text selectable style={styles.linesHours}>{Object.entries(linesAsHoursObject(sLines.hoursJson)).map(([k, v]) => k === "营业时间" ? v : `${k} ${v}`).join(" · ") || "营业时间待完善"}</Text></View> : <Text selectable style={styles.empty}>店铺简介、联系方式和营业时间待完善</Text>}</View> : null}
                   {scope ? null : <View style={styles.scopeNote}><Text selectable style={styles.scopeNoteText}>线上店铺只负责对外展示。订单、客户、退款和经营分析分别进入对应经营模块，不在这里重复做后台。</Text></View>}
                 </View>
               );
@@ -876,6 +1169,8 @@ const styles = StyleSheet.create({
   accountName: { color: color.ink, fontSize: 16, fontWeight: "900" },
   accountMeta: { color: color.muted, fontSize: 11 },
   storeCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, padding: 14, gap: 8, ...shadows.card },
+  // 编辑资料态：整栏顶到屏幕边，左右零留白。
+  storeCardPlain: { gap: 12, marginHorizontal: -16 },
   summary: { backgroundColor: color.deep, borderRadius: 24, padding: 15 },
   summaryTitle: { color: color.white, fontSize: 15, fontWeight: "800", lineHeight: 21 },
   summaryMeta: { color: "#D7D0DD", fontSize: 12, lineHeight: 17, marginTop: 4 },
@@ -895,9 +1190,11 @@ const styles = StyleSheet.create({
   storeMeta: { color: color.muted, fontSize: 11 },
   linesBlock: { gap: 2, paddingVertical: 4 },
   linesDescription: { color: color.ink, fontSize: 12 },
+  linesAnnouncement: { color: color.ink, fontSize: 13, fontWeight: "800" },
   linesContact: { color: color.muted, fontSize: 11 },
   linesHours: { color: color.muted, fontSize: 11 },
   managerPanel: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 8, marginTop: 4, padding: 12 },
+  managerPanelFlat: { borderLeftWidth: 0, borderRadius: 0, borderRightWidth: 0 },
   assetSection: { gap: 0, marginTop: 8 },
   assetSectionTitle: { color: color.ink, fontSize: 18, fontWeight: "900", paddingHorizontal: 4, paddingVertical: 12 },
   assetRow: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 12, minHeight: 82, paddingHorizontal: 4, paddingVertical: 12 },
@@ -916,13 +1213,43 @@ const styles = StyleSheet.create({
   buildStamp: { color: "#B8B0AA", fontSize: 11, marginBottom: 2 },
   linesEditToggle: { paddingVertical: 6 },
   linesEditToggleText: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  linesEditForm: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 12, borderWidth: 1, gap: 6, padding: 10 },
+  linesEditForm: { gap: 14 },
+  // 编辑资料按原型分段：整栏色带，不再有圆角边框和侧边距。
+  sectionCard: { backgroundColor: color.white, gap: 6, padding: 14 },
+  sectionPhoto: { backgroundColor: color.white, paddingBottom: 14 },
+  photoPad: { paddingHorizontal: 14 },
+  formSectionTitle: { color: color.muted, fontSize: 12, fontWeight: "800", letterSpacing: 0.5, marginBottom: 4 },
+  counter: { color: color.muted, fontSize: 11, fontWeight: "400" },
+  storePhotoPreview: { borderRadius: 12, height: 180, width: "100%" },
+  storePhotoFlush: { height: 200, width: "100%" },
+  storePhotoEmptyFlush: { alignItems: "center", backgroundColor: color.surface, height: 200, justifyContent: "center", width: "100%" },
+  storePhotoEmpty: { alignItems: "center", backgroundColor: color.surface, borderRadius: 12, height: 180, justifyContent: "center", width: "100%" },
   // STORE-LOGO-001：店徽预览 72px 方图。
   logoPreview: { backgroundColor: color.surface, borderRadius: 14, height: 72, width: 72 },
   logoEmpty: { alignItems: "center", backgroundColor: color.surface, borderRadius: 14, height: 72, justifyContent: "center", width: 72 },
   linesEditLabel: { color: color.muted, fontSize: 11, fontWeight: "800", marginTop: 4 },
   linesEditTextarea: { minHeight: 60, textAlignVertical: "top" },
-  linesEditActions: { flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 6 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
+  chip: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  chipOn: { backgroundColor: color.ink, borderColor: color.ink },
+  chipText: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  chipTextOn: { color: color.white },
+  dayRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", paddingVertical: 5 },
+  dayLabel: { color: color.ink, fontSize: 12, fontWeight: "800", width: 44 },
+  timeInputs: { alignItems: "center", flexDirection: "row", gap: 6 },
+  timeInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 12, paddingHorizontal: 8, paddingVertical: 6, width: 64 },
+  timeDisabled: { opacity: 0.4 },
+  timeSep: { color: color.muted, fontSize: 12 },
+  toggle: { alignItems: "flex-start", backgroundColor: color.line, borderRadius: 999, height: 24, justifyContent: "center", paddingHorizontal: 3, width: 44 },
+  toggleOn: { alignItems: "flex-end", backgroundColor: "#22C55E" },
+  knob: { backgroundColor: color.white, borderRadius: 999, height: 18, width: 18 },
+  knobOn: { backgroundColor: color.white },
+  linesEditActions: { alignItems: "center", flexDirection: "row", gap: 10, marginTop: 10, paddingHorizontal: 16 },
+  saveBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 25, flex: 1, height: 50, justifyContent: "center" },
+  saveBtnBusy: { opacity: 0.6 },
+  saveBtnText: { color: color.white, fontSize: 16, fontWeight: "600" },
+  cancelBtn: { alignItems: "center", height: 50, justifyContent: "center", paddingHorizontal: 14 },
+  cancelBtnText: { color: color.muted, fontSize: 15, fontWeight: "600" },
   linesEditCancel: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1 },
   photoHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   photoHeadTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
@@ -966,6 +1293,10 @@ const styles = StyleSheet.create({
   photoMeta: { color: color.muted, fontSize: 11 },
   deleteButton: { backgroundColor: "#fde7e7", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   deleteButtonText: { color: "#a32020", fontSize: 11, fontWeight: "800" },
+  // STORE-LOGO-001：相册行上「设为店徽」。和删除同尺寸，避免两个动作抢视觉。
+  logoPickButton: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 8, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 4 },
+  logoPickButtonText: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  logoCurrentTag: { color: color.muted, fontSize: 11, fontWeight: "800" },
   sectionTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   memberRow: { flexDirection: "row", justifyContent: "space-between" },
   memberName: { color: color.ink, fontSize: 12, fontWeight: "700" },
@@ -984,6 +1315,8 @@ const styles = StyleSheet.create({
   storeCover: { borderRadius: 18, height: 58, width: 58 },
   storeHeroCopy: { flex: 1, minWidth: 0 },
   heroActions: { flexDirection: "row", gap: 8 },
+  // STORE-SHARE-001：站内分享选人面板，复用资产行样式，会话即好友。
+  sharePanel: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 14, borderWidth: 1, gap: 4, marginTop: 8, padding: 10 },
   previewButton: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, flex: 1, paddingVertical: 11 },
   previewButtonText: { color: color.white, fontSize: 12, fontWeight: "800" },
   shareButton: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, flex: 1, paddingVertical: 11 },

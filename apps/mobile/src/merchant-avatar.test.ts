@@ -20,7 +20,9 @@ describe("MERCHANT-AVATAR-001 店头像不用用户侧头像", () => {
   });
 
   it(" fallback 是店名首字，不是写死的字母也不是人脸", () => {
-    expect(src).toContain('accounts?.[0]?.name.trim().slice(0, 1)');
+    // 账号变量名从 accounts[0] 变成 activeAccount（多账号）—— 测试只钉行为：
+    // 取店名首字、大写、空则"店"，不钉变量名（钉了就是给重命名上锁）。
+    expect(src).toMatch(/\.name\.trim\(\)\.slice\(0, 1\)/);
     // 以前 fallback 是写死的 "B" —— 每家店都是同一个字母，等于没信息。
     expect(src).not.toMatch(/bizAvatarText\}>"B"</);
   });

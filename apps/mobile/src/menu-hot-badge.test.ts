@@ -54,3 +54,28 @@ describe("MENU-HOT-001 打标/摘标走显式命令", () => {
     expect(ui).toContain("标为 HOT");
   });
 });
+
+// STORE-EDIT-V2-001 round 2（用户给公告模板 HTML + "周1-7默认时间"）：
+// 5 条双语模板点选填入；新店默认 07:00-22:00 全开，有行按行解析。
+describe("STORE-EDIT-V2-001 公告模板与默认时间", () => {
+  const src = readFileSync(fileURLToPath(new URL("./surfaces/merchant-storefront.tsx", import.meta.url)), "utf8");
+
+  it("5 条模板原文在，点选填入并 100 封顶", () => {
+    for (const t of ["今日休息", "调整营业", "备货售罄", "限时优惠", "新品上市"]) {
+      expect(src, t).toContain(t);
+    }
+    expect(src).toContain("Nghỉ hôm nay");
+    expect(src).toContain("setEditingAnnouncement(text.slice(0, 100))");
+    // 手改取消选中态。
+    expect(src).toContain("setAnnounceTpl(undefined)");
+  });
+
+  it("解析出来一天都没开就给默认（保存没动过走原文，不丢数据）", () => {
+    expect(src).toContain("parsed.some((d) => d.enabled) ? parsed : defaultHoursDays()");
+  });
+
+  it("新店默认 07:00-22:00 全开，有行按行解析", () => {
+    expect(src).toContain('open: "07:00", close: "22:00", enabled: true');
+    expect(src).toContain("current ? parseHoursDays");
+  });
+});

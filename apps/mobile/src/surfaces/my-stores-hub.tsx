@@ -36,6 +36,7 @@ import { Defs, LinearGradient, Rect, Stop, Svg } from "react-native-svg";
 import * as Clipboard from "expo-clipboard";
 import { color } from "../theme";
 import type { BusinessClient, BusinessStoreWire, StoreLinesWire, StoreProduct, StorePhoto } from "../business-client";
+import type { ConversationClient } from "../conversation-client";
 // STORE-CONSOLIDATE-001：菜品图走共享 helper。
 import { mediaThumbUrl } from "../media-thumb-url";
 // STORE-LOGO-001：店徽解析走既有口径。
@@ -83,7 +84,7 @@ type HubShop = {
   statsFailed: boolean;
 };
 
-export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate, onOpenVouchers, onBack }: {
+export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate, onOpenVouchers, onBack, conversationClient }: {
   business: BusinessClient;
   fulfillment: FulfillmentClient;
   profile: ProfileClient;
@@ -94,6 +95,8 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate,
   // 「线上店铺」入口并进这一页，券入口要能从店详情点出去 —— 不然券就没地方去了。
   onOpenVouchers?: (() => void) | undefined;
   onBack: () => void;
+  // STORE-SHARE-001：站内分享店铺用（没有就只剩系统分享，不画死按钮）。
+  conversationClient?: ConversationClient | undefined;
 }): React.JSX.Element {
   const [shops, setShops] = useState<HubShop[] | null>(null);
   const [listFailed, setListFailed] = useState(false);
@@ -251,6 +254,7 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate,
             // UX-DIRECT-EDIT-001：这行丢过一次（state 还在但 prop 没过去，
             // 自动展开静默失效）。门禁钉住它。
             autoEditStoreId={autoEditStore ? selected.store.id : undefined}
+            {...(conversationClient ? { conversationClient } : {})}
           />
         </View>
       );

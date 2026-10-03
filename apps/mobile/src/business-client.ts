@@ -19,6 +19,7 @@ export interface MerchantOperatingHome {
   sceneSupply?: { storeId: string; sceneId: string; currentCapacityPct: number; forecastCapacityPct: number; acceptingTraffic: boolean; confidence: number; recordedAt: string; source?: string };
 }
 
+// STORE-PHOTO-CAT-001：category environment（环境）| menu（菜品）。
 export interface StorePhoto {
   id: string;
   storeId: string;
@@ -28,6 +29,7 @@ export interface StorePhoto {
   caption: string;
   sortOrder: number;
   mediaAssetId: string;
+  category?: string | undefined;
   createdAt: string;
 }
 export interface StoreProduct {
@@ -84,6 +86,10 @@ export type StoreLinesWire = {
   contactEmail: string;
   // STORE-STATS-001：对接人姓名（跟电话配对，空 = 没填）。
   contactName?: string;
+  // STORE-EDIT-V2-001：店铺公告与社媒。服务端一直发这两个字段（migration 159），
+  // 契约里却没有 —— 于是 UI 只能靠本地复制一份窄类型去读它，写回去时又漏了 payload。
+  announcement?: string;
+  socials?: Record<string, string>;
   updatedAt: string;
 } & StoreAmenities;
 
@@ -164,13 +170,16 @@ export class BusinessClient {
     caption?: string;
     sortOrder?: number;
     mediaAssetId?: string;
+    // STORE-PHOTO-CAT-001：environment（环境）| menu（菜品），不传按 environment。
+    category?: string;
   }): Promise<StorePhoto> {
     const body = this.body(await this.command("AddStorePhoto", { type: "Store", id: input.storeId }, {
       storeId: input.storeId,
       assetPath: input.assetPath,
       caption: input.caption ?? "",
-      sortOrder: input.sortOrder ?? 0,
-      mediaAssetId: input.mediaAssetId ?? "",
+        sortOrder: input.sortOrder ?? 0,
+        mediaAssetId: input.mediaAssetId ?? "",
+        category: input.category ?? "environment",
     }));
     const photo = body.photo as StorePhoto | undefined;
     if (!photo?.id) throw new Error("store photo create response malformed");
@@ -205,6 +214,9 @@ export class BusinessClient {
     power?: string;
     quiet?: string;
     seating?: string;
+    // STORE-EDIT-V2-001：公告 + 店铺社媒。
+    announcement?: string;
+    socials?: Record<string, string>;
   }): Promise<StoreLinesWire> {
     const body = this.body(await this.command("UpsertStoreLines", { type: "Store", id: input.storeId }, {
       storeId: input.storeId,
@@ -220,6 +232,11 @@ export class BusinessClient {
       power: input.power ?? "",
       quiet: input.quiet ?? "",
       seating: input.seating ?? "",
+      // STORE-EDIT-V2-001：公告与店铺社媒。这两个字段一度只在 input 类型里声明、
+      // 没进 payload —— 类型对得上、UI 也传了，服务端却永远收到空值，而 Go 测试
+      // 直连 service、移动端测试只 grep 源码，两边都绿（见 STORE-EDIT-V2-WIRE-001）。
+      announcement: input.announcement ?? "",
+      socials: input.socials ?? {},
     }));
     const lines = body.lines as StoreLinesWire;
     if (!lines?.storeId) throw new Error("store lines upsert response malformed");

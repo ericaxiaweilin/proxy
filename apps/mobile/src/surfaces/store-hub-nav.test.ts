@@ -85,7 +85,10 @@ describe("STORE-HUB-NAV-001 建店闭环", () => {
     // prop，不在 hub 里硬编码目标 —— 所以这里是 3 不是 4。
     // （原来第 4 处是资产子视图的 onStartStoreSetup：STORE-ASSET-SCOPE-001 之后子视图
     // 只画被选中的那一家，空态在那一屏根本渲染不出来，传了也是死 prop。）
-    expect(countOf(hubCode, "onOpenStoreCreate")).toBe(3);
+    // 4 处：props 解构 + 类型 + 空态 CTA + 转发给子视图。
+    // 第 4 处是 UI-HONEST-CAPABILITY-001 加的：子视图空态 CTA（交给企业运营助手）
+    // 没有它就恒灰死按钮。不是重复入口，是同一条路传下去。
+    expect(countOf(hubCode, "onOpenStoreCreate")).toBe(4);
     expect(hubCode).toContain('accessibilityLabel="建店"');
     expect(hubCode).not.toContain("建店 / 添加门店");
     expect(hubCode).not.toContain("店铺资料与二维码");

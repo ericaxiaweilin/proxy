@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -64,7 +65,22 @@ type StorePhoto struct {
 	Caption      string    `json:"caption"`
 	SortOrder    int       `json:"sortOrder"`
 	MediaAssetID string    `json:"mediaAssetId"`
+	// STORE-PHOTO-CAT-001：照片分类 environment（环境）| menu（菜品）。
+	Category     string    `json:"category,omitempty"`
 	CreatedAt    time.Time `json:"createdAt"`
+}
+
+// STORE-PHOTO-CAT-001：分类封闭集合。加新分类要 migration + 客户端两处一起。
+var validPhotoCategories = map[string]bool{
+	"environment": true, "menu": true,
+}
+
+func normalizePhotoCategory(raw string) string {
+	if validPhotoCategories[raw] {
+		return raw
+	}
+	// 空/非法一律归 environment —— 历史照片没标过类，默认按环境处理，不编造。
+	return "environment"
 }
 
 // StoreLines is the editable storefront profile. LogoAssetPath follows the
@@ -78,6 +94,10 @@ type StoreLines struct {
 	HoursJSON     string    `json:"hoursJson"`
 	ContactPhone  string    `json:"contactPhone"`
 	ContactEmail  string    `json:"contactEmail"`
+	// STORE-EDIT-V2-001：店铺公告（100 字内促销/通知）和店铺社媒（店官网链接）。
+	// 公告和简介是两个字段（"这周有什么事" vs "这家店是什么"）。
+	Announcement  string            `json:"announcement,omitempty"`
+	Socials       map[string]string `json:"socials,omitempty"`
 	// STORE-STATS-001：对接人姓名（跟电话配对，空 = 没填）。
 	ContactName   string    `json:"contactName,omitempty"`
 	// STORE-AMENITIES-001: 门店设施属性（商家自填：网速/吸烟/空调/插座/噪音/
@@ -938,6 +958,7 @@ func (s *Service) addStorePhoto(ctx context.Context, e command.Envelope) command
 		Caption      string `json:"caption"`
 		SortOrder    int    `json:"sortOrder"`
 		MediaAssetID string `json:"mediaAssetId"`
+		Category     string `json:"category"`
 	}
 	if !decode(e.Payload, &p) || p.StoreID == "" || p.AssetPath == "" {
 		return command.Rejected(e, "INVALID_STORE_PHOTO", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_store_photo", nil)
@@ -953,7 +974,7 @@ func (s *Service) addStorePhoto(ctx context.Context, e command.Envelope) command
 		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
 	}
 	now := s.clock.Now().UTC()
-	photo := StorePhoto{ID: newID("photo_"), StoreID: p.StoreID, BusinessID: store.BusinessID, UploadedBy: e.Actor.ID, AssetPath: p.AssetPath, Caption: p.Caption, SortOrder: p.SortOrder, MediaAssetID: p.MediaAssetID, CreatedAt: now}
+	photo := StorePhoto{ID: newID("photo_"), StoreID: p.StoreID, BusinessID: store.BusinessID, UploadedBy: e.Actor.ID, AssetPath: p.AssetPath, Caption: p.Caption, SortOrder: p.SortOrder, MediaAssetID: p.MediaAssetID, Category: normalizePhotoCategory(p.Category), CreatedAt: now}
 	if err := s.repo.AddStorePhoto(ctx, photo); err != nil {
 		return command.Rejected(e, "STORE_PHOTO_ADD_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_photo_add_failed", nil)
 	}
@@ -1030,6 +1051,9 @@ func (s *Service) upsertStoreLines(ctx context.Context, e command.Envelope) comm
 		HoursJSON     string `json:"hoursJson"`
 		ContactPhone  string `json:"contactPhone"`
 		ContactEmail  string `json:"contactEmail"`
+		// STORE-EDIT-V2-001：公告 + 店铺社媒（见 migration 159）。
+		Announcement  string            `json:"announcement"`
+		Socials       map[string]string `json:"socials"`
 		// STORE-STATS-001：对接人姓名（跟电话配对）。
 		ContactName   string `json:"contactName"`
 		Wifi          string `json:"wifi"`
@@ -1044,6 +1068,25 @@ func (s *Service) upsertStoreLines(ctx context.Context, e command.Envelope) comm
 	}
 	if p.LogoAssetPath != "" && !isValidAssetPath(p.LogoAssetPath) {
 		return command.Rejected(e, "INVALID_ASSET_PATH", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_asset_path", nil)
+	}
+	// STORE-EDIT-V2-001：公告 100 字封顶（原型 maxlength=100），超了整单拒 ——
+	// 静默截断会让商家以为发出去了 100 字，顾客只看到 80 字。
+	if len([]rune(p.Announcement)) > 100 {
+		return command.Rejected(e, "INVALID_ANNOUNCEMENT", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_announcement", nil)
+	}
+	cleanSocials := map[string]string{}
+	for platform, raw := range p.Socials {
+		if !validStoreSocialPlatforms[platform] {
+			return command.Rejected(e, "INVALID_SOCIAL_PLATFORM", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_social_platform", nil)
+		}
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		if !isValidStoreSocialURL(trimmed) {
+			return command.Rejected(e, "INVALID_SOCIAL_URL", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_social_url", nil)
+		}
+		cleanSocials[platform] = trimmed
 	}
 	// STORE-AMENITIES-001: 设施属性封闭词表 + 空调温度范围。有一项非法整单拒绝，
 	// 不静默丢字段（丢了商家以为存上了，展示却没有）。
@@ -1063,7 +1106,7 @@ func (s *Service) upsertStoreLines(ctx context.Context, e command.Envelope) comm
 		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
 	}
 	now := s.clock.Now().UTC()
-	lines := StoreLines{StoreID: p.StoreID, BusinessID: store.BusinessID, LogoAssetPath: p.LogoAssetPath, Description: p.Description, HoursJSON: p.HoursJSON, ContactPhone: p.ContactPhone, ContactEmail: p.ContactEmail, ContactName: strings.TrimSpace(p.ContactName), Wifi: wifi, Smoking: smoking, AcTempC: p.AcTempC, Power: power, Quiet: quiet, Seating: seating, UpdatedBy: e.Actor.ID, UpdatedAt: now}
+	lines := StoreLines{StoreID: p.StoreID, BusinessID: store.BusinessID, LogoAssetPath: p.LogoAssetPath, Description: p.Description, HoursJSON: p.HoursJSON, ContactPhone: p.ContactPhone, ContactEmail: p.ContactEmail, ContactName: strings.TrimSpace(p.ContactName), Wifi: wifi, Smoking: smoking, AcTempC: p.AcTempC, Power: power, Quiet: quiet, Seating: seating, Announcement: strings.TrimSpace(p.Announcement), Socials: cleanSocials, UpdatedBy: e.Actor.ID, UpdatedAt: now}
 	if err := s.repo.UpsertStoreLines(ctx, lines); err != nil {
 		return command.Rejected(e, "STORE_LINES_UPSERT_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_lines_upsert_failed", nil)
 	}
@@ -1308,6 +1351,27 @@ func decode(payload map[string]any, target any) bool {
 // full external URL or free-text. Guards against free-form input that
 // could later be used to render arbitrary content (XSS) or pull a
 // public URL that violates the AI-rendered-not-real-photo rule.
+// STORE-EDIT-V2-001：店铺社媒校验。键封闭（zalo/facebook/tiktok），
+/// 值必须是 https URL（http 明文和非 URL 一律拒 —— 店官网链接也是外跳入口）。
+// 空值在调用方丢掉（不进这里）；未知键直接整单拒，不静默丢字段。
+var validStoreSocialPlatforms = map[string]bool{
+	"zalo": true, "facebook": true, "tiktok": true,
+}
+
+func isValidStoreSocialURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "https" || u.Host == "" {
+		return false
+	}
+	if strings.ContainsAny(u.Host, " \t\n") {
+		return false
+	}
+	return true
+}
+
 func isValidAssetPath(p string) bool {
 	if len(p) == 0 || len(p) > 256 {
 		return false

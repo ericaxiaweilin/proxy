@@ -1122,6 +1122,8 @@ export function AppShell({
               onOpenFeed={() => selectTab("FEED")}
               onOpenMarket={() => selectTab("MARKET")}
               onOpenVouchers={() => setVoucherOpen(true)}
+              // STORE-SHARE-001：站内分享店铺用。
+              conversationClient={conversation}
               // CREATOR-HOME-001：经营列表点头像进帖文主页（和 feed 横滑卡同一条）。
               onOpenCreatorProfile={(userId, name, avatarUri) => setOpenHumanProfile({ userId, name, ...(avatarUri ? { avatarUri } : {}), posts: [], mediaByPost: {} })}
               onOpenRealitySceneMap={() => { setRealitySceneSelection(undefined); setRealitySceneOpen(true); }}

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -190,7 +191,7 @@ func (r *BusinessRepository) UpdateStore(ctx context.Context, store business.Sto
 // （多家店可能认领同一个场景，按认领店铺、店内排序号、创建时间排列）。
 func (r *BusinessRepository) ListStorePhotosByRealitySceneID(ctx context.Context, sceneID string) ([]business.StorePhoto, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT p.id, p.store_id, p.business_id, p.uploaded_by, p.asset_path, p.caption, p.sort_order, p.media_asset_id, p.created_at
+		SELECT p.id, p.store_id, p.business_id, p.uploaded_by, p.asset_path, p.caption, p.sort_order, p.media_asset_id, p.created_at, COALESCE(p.category, 'environment')
 		FROM business.store_photos p
 		JOIN business.stores s ON s.id = p.store_id
 		WHERE s.reality_scene_id = $1
@@ -202,7 +203,7 @@ func (r *BusinessRepository) ListStorePhotosByRealitySceneID(ctx context.Context
 	result := []business.StorePhoto{}
 	for rows.Next() {
 		var p business.StorePhoto
-		if err := rows.Scan(&p.ID, &p.StoreID, &p.BusinessID, &p.UploadedBy, &p.AssetPath, &p.Caption, &p.SortOrder, &p.MediaAssetID, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.StoreID, &p.BusinessID, &p.UploadedBy, &p.AssetPath, &p.Caption, &p.SortOrder, &p.MediaAssetID, &p.CreatedAt, &p.Category); err != nil {
 			return nil, err
 		}
 		result = append(result, p)
@@ -212,15 +213,15 @@ func (r *BusinessRepository) ListStorePhotosByRealitySceneID(ctx context.Context
 
 func (r *BusinessRepository) AddStorePhoto(ctx context.Context, p business.StorePhoto) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO business.store_photos (id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, media_asset_id, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		p.ID, p.StoreID, p.BusinessID, p.UploadedBy, p.AssetPath, p.Caption, p.SortOrder, p.MediaAssetID, p.CreatedAt)
+		INSERT INTO business.store_photos (id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, media_asset_id, created_at, category)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		p.ID, p.StoreID, p.BusinessID, p.UploadedBy, p.AssetPath, p.Caption, p.SortOrder, p.MediaAssetID, p.CreatedAt, p.Category)
 	return err
 }
 
 func (r *BusinessRepository) ListStorePhotos(ctx context.Context, storeID string) ([]business.StorePhoto, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, media_asset_id, created_at
+		SELECT id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, media_asset_id, created_at, COALESCE(category, 'environment')
 		FROM business.store_photos WHERE store_id=$1 ORDER BY sort_order, created_at DESC`, storeID)
 	if err != nil {
 		return nil, err
@@ -264,9 +265,17 @@ func (r *BusinessRepository) GetStorePhoto(ctx context.Context, storeID, photoID
 }
 
 func (r *BusinessRepository) UpsertStoreLines(ctx context.Context, l business.StoreLines) error {
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO business.store_lines (store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, contact_name, updated_by, updated_at, wifi, smoking, ac_temp_c, power, quiet, seating)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+	socials := l.Socials
+	if socials == nil {
+		socials = map[string]string{}
+	}
+	socialsJSON, err := json.Marshal(socials)
+	if err != nil {
+		return err
+	}
+	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO business.store_lines (store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, contact_name, updated_by, updated_at, wifi, smoking, ac_temp_c, power, quiet, seating, announcement, socials)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 		ON CONFLICT (store_id) DO UPDATE SET
 			logo_asset_path=EXCLUDED.logo_asset_path,
 			description=EXCLUDED.description,
@@ -281,24 +290,34 @@ func (r *BusinessRepository) UpsertStoreLines(ctx context.Context, l business.St
 			ac_temp_c=EXCLUDED.ac_temp_c,
 			power=EXCLUDED.power,
 			quiet=EXCLUDED.quiet,
-			seating=EXCLUDED.seating`,
+			seating=EXCLUDED.seating,
+			announcement=EXCLUDED.announcement,
+			socials=EXCLUDED.socials`,
 		l.StoreID, l.BusinessID, l.LogoAssetPath, l.Description, l.HoursJSON, l.ContactPhone, l.ContactEmail, l.ContactName, l.UpdatedBy, l.UpdatedAt,
-		l.Wifi, l.Smoking, l.AcTempC, l.Power, l.Quiet, l.Seating)
+		l.Wifi, l.Smoking, l.AcTempC, l.Power, l.Quiet, l.Seating, l.Announcement, socialsJSON)
 	return err
 }
 
 func (r *BusinessRepository) GetStoreLines(ctx context.Context, storeID string) (business.StoreLines, error) {
 	var l business.StoreLines
+	var socialsJSON []byte
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, contact_name, updated_by, updated_at, wifi, smoking, ac_temp_c, power, quiet, seating
+		SELECT store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, contact_name, updated_by, updated_at, wifi, smoking, ac_temp_c, power, quiet, seating, announcement, COALESCE(socials, '{}')
 		FROM business.store_lines WHERE store_id=$1`, storeID).Scan(
 		&l.StoreID, &l.BusinessID, &l.LogoAssetPath, &l.Description, &l.HoursJSON, &l.ContactPhone, &l.ContactEmail, &l.ContactName, &l.UpdatedBy, &l.UpdatedAt,
-		&l.Wifi, &l.Smoking, &l.AcTempC, &l.Power, &l.Quiet, &l.Seating,
+		&l.Wifi, &l.Smoking, &l.AcTempC, &l.Power, &l.Quiet, &l.Seating, &l.Announcement, &socialsJSON,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return business.StoreLines{StoreID: storeID}, nil
 	}
-	return l, err
+	if err != nil {
+		return l, err
+	}
+	_ = json.Unmarshal(socialsJSON, &l.Socials)
+	if l.Socials == nil {
+		l.Socials = map[string]string{}
+	}
+	return l, nil
 }
 
 func (r *BusinessRepository) UpsertMemberDirectory(ctx context.Context, m business.MemberDirectory) error {

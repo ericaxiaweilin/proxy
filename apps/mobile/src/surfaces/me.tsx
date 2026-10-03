@@ -72,6 +72,7 @@ import { resolvePrivacyRequestClient } from "../privacy-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import type { EngagementClient } from "../engagement-client";
 import type { ModerationClient } from "../moderation-client";
+import type { ConversationClient } from "../conversation-client";
 // BENEFIT-WIRE-001: 权益链路。命令、client、界面早就写好了，但从没被渲染过 ——
 // 这里补的是「入口 + 接线」那一段。
 import { BenefitClient } from "../benefit-client";
@@ -477,6 +478,8 @@ export function MeSurface({
   onExperienceAction,
   onOpenConversation,
   onSignOut,
+  // STORE-SHARE-001：站内分享店铺用，透传给 MyStoresHub → 店铺页。
+  conversationClient,
   onChromeVisibilityChange,
   onSubPageOpenChange,
   bottomNavVisible,
@@ -513,6 +516,8 @@ export function MeSurface({
   onExperienceAction: (action: ExperienceAction) => void;
   onOpenConversation?: (author: string, peerUserId?: string) => void;
   onSignOut: () => void;
+  // STORE-SHARE-001：站内分享店铺用，透传给 MyStoresHub → 店铺页。
+  conversationClient?: ConversationClient | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   /** BRAND-CHROME-L1-001: 子页（个人主页等）是盖住整个 body 的目的地，不是
    * 「我的」根页的一部分 —— 品牌 logo/字标和底部 tab bar 只属于 1 级模块，
@@ -550,12 +555,15 @@ export function MeSurface({
     [viewerAccountId]
   );
   const [subPage, setSubPage] = useState<MeSubPage>();
+  // NAV-L2-001：BUSINESS 上下文直接 return，不走 subPage —— hub 内部导航
+  // 靠这个状态上报，和 subPage 取或。
+  const [merchantSubOpen, setMerchantSubOpen] = useState(false);
   // BRAND-CHROME-L1-001: 子页打开/关闭都要让外壳知道 —— 卸载时（切走 tab）
   // 也要把标记还原，否则外壳收着品牌顶栏走到别的 tab。
   useEffect(() => {
-    onSubPageOpenChange?.(subPage !== undefined);
+    onSubPageOpenChange?.(subPage !== undefined || merchantSubOpen);
     return () => onSubPageOpenChange?.(false);
-  }, [subPage, onSubPageOpenChange]);
+  }, [subPage, merchantSubOpen, onSubPageOpenChange]);
   // 消费外部请求。MeSurface 在切走 tab 时会被卸载，所以这里用「请求 + 消费」
   // 而不是「初始值」：消费后调用方清空请求，下次重进 Me 不会又弹回子页。
   useEffect(() => {
@@ -1446,6 +1454,7 @@ export function MeSurface({
         onOpenSwitcher={onOpenSwitcher}
         onSignOut={onSignOut}
         {...(onOpenCreatorProfile ? { onOpenCreatorProfile } : {})}
+        onSubPageOpenChange={setMerchantSubOpen}
         // STORE-CONSOLIDATE-001：BUSINESS 上下文的店详情页也要走统一 hub.
         {...(fulfillment ? { fulfillment } : {})}
         {...(profileClient ? { profile: profileClient } : {})}
@@ -3113,6 +3122,7 @@ export function MeSurface({
                 onOpenStoreCreate={() => openSubPage("enterpriseops")}
                 onOpenVouchers={onOpenVouchers}
                 onBack={() => setSubPage(undefined)}
+                {...(conversationClient ? { conversationClient } : {})}
               />
             </ScrollView>
           </View>
@@ -3148,6 +3158,7 @@ export function MeSurface({
                 // 二是建店本来就是助手的事，见 merchant-storefront 的空态）。
                 onOpenStoreCreate={() => openSubPage("enterpriseops")}
                 onBack={() => setSubPage(undefined)}
+                {...(conversationClient ? { conversationClient } : {})}
               />
             ) : (
               <View style={styles.infoNote}>
