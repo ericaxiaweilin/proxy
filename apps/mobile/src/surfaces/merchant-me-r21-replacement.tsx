@@ -143,6 +143,7 @@ export function MerchantMeR21Replacement({
   profile,
   onOpenStoreCreate,
   onOpenCreatorProfile,
+  onSubPageOpenChange,
 }: {
   business?: BusinessClient | undefined;
   supply?: SupplyClient | undefined;
@@ -151,6 +152,10 @@ export function MerchantMeR21Replacement({
   onOpenVouchers: () => void;
   onOpenSwitcher: () => void;
   onSignOut: () => void;
+  // NAV-L2-001（2026-10-03，用户「底栏只有1级页面有，为什么编辑页面也有底栏」）：
+  // BUSINESS 上下文直接 return，不走 me.tsx 的 subPage —— 里面再钻多深都没人上报，
+  // 底栏一直以为还在一级。root 之外全是二级，打开就要上报。
+  onSubPageOpenChange?: ((open: boolean) => void) | undefined;
   // CREATOR-HOME-001：列表点头像进帖文主页（OtherProfileSurface）。
   onOpenCreatorProfile?: ((userId: string, name: string, avatarUri?: string | undefined) => void) | undefined;
   // STORE-CONSOLIDATE-001：店详情页改走统一 hub，需要 hub 的三个客户端。
@@ -160,6 +165,11 @@ export function MerchantMeR21Replacement({
   onOpenStoreCreate?: (() => void) | undefined;
 }): React.JSX.Element {
   const [page, setPage] = useState<MerchantPage>("root");
+  // NAV-L2-001：见 props 注释。卸载时还原，避免标记漏在 true。
+  useEffect(() => {
+    onSubPageOpenChange?.(page !== "root");
+    return () => onSubPageOpenChange?.(false);
+  }, [page, onSubPageOpenChange]);
   const [accounts, setAccounts] = useState<Account[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [activeAccountId, setActiveAccountId] = useState<string | undefined>(undefined);
@@ -188,6 +198,12 @@ export function MerchantMeR21Replacement({
   const [sceneActivities, setSceneActivities] = useState<ActivityItem[]>([]);
   const [creatorView, setCreatorView] = useState<"MATCH" | "CREATORS" | "COLLABS" | "RESULTS">("MATCH");
   const [creatorQuery, setCreatorQuery] = useState("");
+
+  // MERCHANT-ACCOUNT-SWITCH-001（2026-10-03 补完）：切换器画出来了、成员与经营数据也
+  // 按选中的 accountId 重拉了，但界面上 11 处标签仍然读 `accounts[0]` —— 点第二家时
+  // 芯片会选中，名字 / 状态 / 头像却还是第一家。数据跟着主体走、标签不跟着走，等于
+  // 装了开关没接线路。首帧 activeAccountId 还是 undefined，所以兜底取 list[0]。
+  const activeAccount = accounts?.find((account) => account.id === activeAccountId) ?? accounts?.[0];
 
   const refresh = useCallback(async (accountId: string) => {
     if (!business) return;
@@ -538,7 +554,7 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "券 / 客户" })}
-          {summary({ title: `${accounts?.[0]?.name ?? "商家"} · 权益`, meta: "可核验、可追溯", stats: [["—", "进行中"], ["—", "已领取"], ["—", "已核销"], ["—", "到店"]] })}
+          {summary({ title: `${activeAccount?.name ?? "商家"} · 权益`, meta: "可核验、可追溯", stats: [["—", "进行中"], ["—", "已领取"], ["—", "已核销"], ["—", "到店"]] })}
           <View style={styles.actions}><Pressable onPress={onOpenVouchers} style={styles.primary}><Text selectable style={styles.primaryText}>打开券中心</Text></Pressable><Pressable onPress={() => setPage("activity")} style={styles.secondary}><Text selectable style={styles.secondaryText}>查看关联活动</Text></Pressable></View>
           <SimpleRows onPress={setPage} rows={[["券管理", "创建、上下架与有效期"], ["核销记录", "扫码核销 · 订单留痕"], ["客户归因", "领取、到店与复购"], ["活动关联", `${activityItems.length} 个开放活动`, "activity"]]} />
           {sectionHead("经营人员", `${members.length} 人`)}
@@ -799,7 +815,7 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("proxy"), title: "认证与资格" })}
-          <Text selectable style={styles.cardTitle}>状态：{accounts?.[0]?.status ?? "待获取"}</Text>
+          <Text selectable style={styles.cardTitle}>状态：{activeAccount?.status ?? "待获取"}</Text>
           <Text selectable style={styles.empty}>商家验证：需要提交营业执照、食品安全证书（F&B）、税号。平台角色判断依据 Decree 248/2026 §3：提供交易撮合 + 支付处理 + 商家入驻审核 = 电子商务平台，须完成平台登记（platform_registration_number）。</Text>
           <Text selectable style={styles.meta}>缺失：platform_registration 字段 + e-commerce_platform_notice UI 提示（已记录在运营条款补充文档）。</Text>
         </ScrollView>
@@ -824,8 +840,8 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "Proxy 数据" })}
-          {summary({ title: `${accounts?.[0]?.name ?? "商家"} · Proxy`, meta: "平台关系", stats: [["—", "未读通知"], ["—", "开放能力"], [accounts?.[0]?.status ?? "—", "接入"], [members.length.toString(), "成员"]] })}
-          <SimpleRows onPress={setPage} rows={[["平台通知", "订单、活动与系统消息", "proxy-notices"], ["政策与规则", "Creator · 券 · 活动 · 内容", "proxy-policy"], ["认证与资格", accounts?.[0]?.status ?? "待获取", "proxy-verify"], ["成员与权限", `${members.length} 位成员`, "ops"], ["平台结算", "合作、券成本与活动支出", "sales"], ["接入与连接", "店铺 · QR · 核销 · 数据同步", "store"], ["支持与申诉", "查看处理中问题", "proxy-support"]]} />
+          {summary({ title: `${activeAccount?.name ?? "商家"} · Proxy`, meta: "平台关系", stats: [["—", "未读通知"], ["—", "开放能力"], [activeAccount?.status ?? "—", "接入"], [members.length.toString(), "成员"]] })}
+          <SimpleRows onPress={setPage} rows={[["平台通知", "订单、活动与系统消息", "proxy-notices"], ["政策与规则", "Creator · 券 · 活动 · 内容", "proxy-policy"], ["认证与资格", activeAccount?.status ?? "待获取", "proxy-verify"], ["成员与权限", `${members.length} 位成员`, "ops"], ["平台结算", "合作、券成本与活动支出", "sales"], ["接入与连接", "店铺 · QR · 核销 · 数据同步", "store"], ["支持与申诉", "查看处理中问题", "proxy-support"]]} />
           {sectionHead("业务健康度", "spend_daily · server 实际")}
           {spendDays.length === 0 ? (
             <View style={styles.card}><Text selectable style={styles.empty}>暂无数据 — server 列表为空</Text></View>
@@ -866,7 +882,16 @@ export function MerchantMeR21Replacement({
                   accessibilityLabel={`切换到 ${a.name}`}
                   accessibilityState={{ selected: on }}
                   key={a.id}
-                  onPress={() => { if (!on) { setActiveAccountId(a.id); void refresh(a.id); } }}
+                  onPress={() => {
+                    if (on) return;
+                    setActiveAccountId(a.id);
+                    // 换主体时先把上一家的数字清掉：A 店的成员数与经营结果印在 B 店
+                    // 标题下面，比暂时空着更糟 —— 那是一条没发生过的读数。
+                    setMembers([]);
+                    setSpendDays([]);
+                    setSpendTotal({ totalOrders: 0, totalGrossMinor: 0 });
+                    void refresh(a.id);
+                  }}
                   style={[styles.accountSwitchChip, on && styles.accountSwitchChipOn]}
                 >
                   <Text selectable style={[styles.accountSwitchChipText, on && styles.accountSwitchChipTextOn]}>{a.name}</Text>
@@ -883,14 +908,14 @@ export function MerchantMeR21Replacement({
               这里也不再信任它：店没有上传 logo/照片之前，老实显示店名首字。
               店的视觉只能来自店自己的资产，绝不能拿用户的脸冒充。 */}
           <Gradient from="#45208A" to="#8033F0" style={styles.bizAvatar}>
-            <Text selectable style={styles.bizAvatarText}>{(accounts?.[0]?.name.trim().slice(0, 1) || "店").toUpperCase()}</Text>
+            <Text selectable style={styles.bizAvatarText}>{(activeAccount?.name.trim().slice(0, 1) || "店").toUpperCase()}</Text>
           </Gradient>
           <View style={styles.rowCopy}>
-            <Text selectable style={styles.cardTitle}>{accounts?.[0]?.name ?? "还没有店铺"}</Text>
-            <Text selectable style={styles.meta}>{accounts?.[0] ? `${accounts?.[0]?.status ?? ""} · ${members.length} 经营人员` : "创建后解锁相册 · 信息 · 成员 · 数据"}</Text>
+            <Text selectable style={styles.cardTitle}>{activeAccount?.name ?? "还没有店铺"}</Text>
+            <Text selectable style={styles.meta}>{activeAccount ? `${activeAccount?.status ?? ""} · ${members.length} 经营人员` : "创建后解锁相册 · 信息 · 成员 · 数据"}</Text>
           </View>
           <View style={styles.storeButton}>
-            <Text selectable style={styles.storeButtonText}>{accounts?.[0] ? "查看店铺" : "创建店铺"}</Text>
+            <Text selectable style={styles.storeButtonText}>{activeAccount ? "查看店铺" : "创建店铺"}</Text>
           </View>
         </Pressable>
 
@@ -933,7 +958,7 @@ export function MerchantMeR21Replacement({
             ["target", "Creator 经营", `${creators.length} 位可邀请 Creator`, true, "creator"],
             ["ticket", "客户 / 券", `${members.length} 位经营人员`, false, "voucher"],
             ["arrowUpRight", "活动导流", `${activityItems.length} 个开放活动`, false, "activity"],
-            ["storeLines", "线上店铺", accounts?.[0]?.status ?? "查看店铺", true, "store"],
+            ["storeLines", "线上店铺", activeAccount?.status ?? "查看店铺", true, "store"],
             ["cup", "场景运营", "Three Beans · 实况", true, "scene"],
           ] as const).map(([icon, title, meta, brand, destination]) => (
             <Pressable key={title} onPress={() => setPage(destination)} style={styles.module}>

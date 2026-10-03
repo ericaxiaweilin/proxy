@@ -42,3 +42,37 @@ describe("MERCHANT-ACCOUNT-SWITCH-001", () => {
     expect(reset).toContain("setFirstStore(undefined)");
   });
 });
+
+// MERCHANT-ACCOUNT-SWITCH-001（2026-10-03 补的第二块）：同一个 bug 的**另一半**。
+//
+// 上面那组只查了 business-home.tsx（HOME 页）。用户在模拟器里实际站的却是"我的"
+// 那个面（merchant-me-r21-replacement.tsx）—— 那边切换器画出来了、数据也按 accountId
+// 重拉了，但界面上 11 处标签还写死 `accounts?.[0]`：点第二家，芯片亮的是新主体，
+// 名字/状态/头像还是第一家。钉在一个文件上的形状判据，抓不到另一个文件里同样的病。
+describe("MERCHANT-ACCOUNT-SWITCH-001 「我的」面也必须跟着选中的主体走", () => {
+  const meSource = readFileSync(new URL("./merchant-me-r21-replacement.tsx", import.meta.url), "utf8");
+  const meCode = meSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+
+  it("列表第一条只许出现在 activeAccount 的兜底里，标签一律不读它", () => {
+    const reads = meCode.split("\n").filter((line) => line.includes("accounts?.[0]"));
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toContain("const activeAccount =");
+    expect(meCode).not.toContain("accounts[0]");
+  });
+
+  it("当前主体是从 activeAccountId 推出来的（不是又写死一个下标）", () => {
+    expect(meCode).toContain("accounts?.find((account) => account.id === activeAccountId)");
+    // 首帧 activeAccountId 还是 undefined，兜底必须是"最新那家"而不是空白。
+    expect(meCode).toContain("?? accounts?.[0]");
+  });
+
+  it("换主体时先清掉上一家的读数", () => {
+    const press = meCode.slice(meCode.indexOf("if (on) return;"), meCode.indexOf("void refresh(a.id)"));
+    expect(press).toContain("setMembers([])");
+    expect(press).toContain("setSpendTotal({ totalOrders: 0, totalGrossMinor: 0 })");
+  });
+
+  it("切换器仍然只在真有多家主体时出现", () => {
+    expect(meCode).toContain("accounts.length > 1");
+  });
+});

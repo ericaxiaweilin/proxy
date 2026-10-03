@@ -14201,6 +14201,30 @@ if [ -f "$COPY_UID_UI" ]; then
   echo "    PROFILE-COPY-UID-001: PASS (长按复制用户ID · 有明确反馈)"
 fi
 
+# NAV-L2-001（2026-10-03，用户「底栏只有1级页面有，为什么编辑页面也有底栏」）：
+#
+# 底栏只有一级模块有。me.tsx 的 subPage 上报只管个人上下文 —— BUSINESS 上下文
+# 直接 return，不走 subPage，里面钻多深都没人上报。
+# 修法：hub 非 root 页自己上报，me.tsx 取或。
+NAV_HUB=apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx
+if [ -f "$NAV_HUB" ]; then
+  NV_B=0
+  if [ ! -f apps/mobile/src/nav-level2.test.ts ]; then
+    echo "  FAIL [NAV-L2-001]: 行为测试不见了。" >&2
+    NV_B=1
+  fi
+  if ! grep -q 'onSubPageOpenChange?.(page !== "root")' "$NAV_HUB"; then
+    echo "  FAIL [NAV-L2-001]: hub 不上报非 root 页 —— 底栏又以为还在一级。" >&2
+    NV_B=1
+  fi
+  if ! grep -q 'merchantSubOpen' apps/mobile/src/surfaces/me.tsx; then
+    echo "  FAIL [NAV-L2-001]: me.tsx 没并 hub 信号。" >&2
+    NV_B=1
+  fi
+  [ "$NV_B" -eq 0 ] || exit 1
+  echo "    NAV-L2-001: PASS (二级页藏底栏 · 卸载还原)"
+fi
+
 # MENU-HOT-001（2026-10-02，用户给原型「给商家菜单 某些打hot标」）：
 #
 # HOT 是商家亲手标的，不是从销量算的 —— 订单只记到店不记单品，全仓没有
@@ -14903,7 +14927,32 @@ if [ ! -f apps/mobile/src/surfaces/business-home-account-switch.test.ts ]; then
   echo "  FAIL [MERCHANT-ACCOUNT-SWITCH-001]: 切换主体的行为测试文件不见了。" >&2
   exit 1
 fi
-echo "    MERCHANT-ACCOUNT-SWITCH-001: PASS (多主体可切换，四个经营读接口都跟着选中的主体走)"
+# 2026-10-03 补：同一个 bug 在**另一个面**上又活了一次。上面那组只查 business-home
+# （HOME 页的经营台），而用户在模拟器里站的"我的"面（merchant-me-r21-replacement）
+# 里，切换器画出来了、数据也按 accountId 重拉了，但界面上 11 处标签仍然读
+# `accounts?.[0]` —— 点第二家，芯片亮的是新主体，名字/状态/头像还是第一家。
+# "钉在一个文件上的形状判据，抓不到另一个文件里同样的病"，所以这里补第二块面。
+MM=apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx
+# 剥注释再查：修复说明里会复述被禁的 `accounts[0]` 写法，那是解释不是代码。
+mm_code=$(sed 's|//.*$||' "$MM")
+mm_reads=$(printf '%s\n' "$mm_code" | grep -c 'accounts?\.\[0\]' || true)
+if [ "$mm_reads" -gt 1 ]; then
+  echo "  FAIL [MERCHANT-ACCOUNT-SWITCH-001]: 「我的」面还有 $mm_reads 处标签读 accounts?.[0] ——" >&2
+  echo "        切换器只改高亮，名字/状态/头像不动，等于装了开关没接线路。" >&2
+  echo "        唯一允许的一处是 activeAccount 的兜底（?? accounts?.[0]）。" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$mm_code" | grep -q 'accounts?.find((account) => account.id === activeAccountId)'; then
+  echo "  FAIL [MERCHANT-ACCOUNT-SWITCH-001]: 「我的」面不再从 activeAccountId 推当前主体。" >&2
+  exit 1
+fi
+# 文件在 ≠ 断言还在：这个测试里有一组反向判据（not.toContain），删掉断言文件也还在。
+if ! pnpm --filter @proxy/mobile exec vitest run src/surfaces/business-home-account-switch.test.ts >/dev/null 2>&1; then
+  echo "  FAIL [MERCHANT-ACCOUNT-SWITCH-001]: 切换主体的行为测试跑不过 ——" >&2
+  echo "        单独复现：pnpm --filter @proxy/mobile exec vitest run src/surfaces/business-home-account-switch.test.ts" >&2
+  exit 1
+fi
+echo "    MERCHANT-ACCOUNT-SWITCH-001: PASS (两个面都跟着选中的主体走 · 行为测试真的跑过)"
 
 # NOTIF-PUSH-NATIVE-GUARD-001（2026-10-02，用户在模拟器上连报两次红屏）：
 #
