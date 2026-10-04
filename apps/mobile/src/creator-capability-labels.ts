@@ -78,6 +78,46 @@ export function formatFansCount(count: number | undefined): string {
   return `${Number.isInteger(w) ? `${w}` : w.toFixed(1)}w`;
 }
 
+import { formatReferencePrice } from "./creator-pricing";
+
+// MERCHANT-CREATOR-INVITE-001：邀约出价区间。min==max 视为一口价，直接走
+// 报价格式化；全 0（没填）印「出价待商议」—— 0 不是免费，是没开价。
+// 区间只印一次币种（1–1.5tr VND）；短数字和报价同一套口径（VND 百万 tr）。
+export function formatPriceRange(min: number | undefined, max: number | undefined, currency: string): string {
+  const lo = typeof min === "number" && min > 0 ? Math.floor(min) : 0;
+  const hi = typeof max === "number" && max > 0 ? Math.floor(max) : 0;
+  if (lo <= 0 && hi <= 0) return "出价待商议";
+  if (lo === hi || lo <= 0) return formatReferencePrice(Math.max(lo, hi), currency);
+  if (hi <= lo) return formatReferencePrice(lo, currency);
+  return `${shortAmount(lo, currency)}–${shortAmount(hi, currency)} ${currency}`;
+}
+
+function shortAmount(value: number, currency: string): string {
+  const thousands = Math.round(value / 1_000);
+  // 和 formatReferencePrice 同一条线：够得着 1000K 的走百万位，不印「1000K」。
+  if (thousands >= 1_000) {
+    const unit = currency === "VND" ? "tr" : "M";
+    return `${trimNum(value / 1_000_000)}${unit}`;
+  }
+  if (value >= 1_000) return `${thousands}K`;
+  return `${value}`;
+}
+
+function trimNum(value: number): string {
+  return `${Math.round(value * 10) / 10}`;
+}
+
+// MERCHANT-CREATOR-INVITE-001：合作目的中文。未知值返回空串（标签不渲染）——
+// 目的封闭集前后端对齐，加目的要一起加，不许单边编新值。
+export function labelInvitationPurpose(purpose: string | undefined): string {
+  switch (purpose) {
+    case "SALES": return "冲销量";
+    case "UGC": return "UGC产出";
+    case "TRAFFIC": return "拉人气";
+    case "OTHER": return "其他合作";
+    default: return "";
+  }
+}
 // MERCHANT-CREATOR-TAGS-001：服务量是真实成交单数（服务端 rating.completedOrders
 // ← matching.Signals.Completed ← Postgres 订单表）。无记录为 0，如实印
 // 「服务 0 单」，不编「新入驻已接 N 单」这类话术。

@@ -191,9 +191,12 @@ export function parseSupplierCandidates(value: unknown): SupplierCandidate[] {
 }
 
 // MERCHANT-CREATOR-INVITE-001：定向邀约。商家发（带 merchantId，网关验成员
-// 身份后盖章）、creator 收（按 principal == agentId 鉴权）。状态只有
-// PENDING 能流转；ACCEPTED/DECLINED/CANCELLED/EXPIRED 是终态展示。
-export type CollabInvitationStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "CANCELLED" | "EXPIRED";
+// 身份后盖章）、creator 收（按 principal == agentID 鉴权）。
+// 出价是区间不是一口价：min==max=一口价，全 0=出价待商议；negotiable=false
+// 的单不许还价。PENDING 是 creator 的回合，COUNTERED 回到商家手里轮流出价。
+export type CollabInvitationStatus = "PENDING" | "COUNTERED" | "ACCEPTED" | "DECLINED" | "CANCELLED" | "EXPIRED";
+
+export type CollabInvitationPurpose = "SALES" | "UGC" | "TRAFFIC" | "OTHER";
 
 export type CollabInvitation = {
   id: string;
@@ -202,16 +205,29 @@ export type CollabInvitation = {
   serviceType: string;
   startAt?: string | undefined;
   durationH: number;
-  priceVnd: number;
-  currency: string;
+  priceMinVnd: number;
+  priceMaxVnd: number;
+  negotiable: boolean;
+  purpose: CollabInvitationPurpose | "";
   message: string;
   status: CollabInvitationStatus;
+  termsVersion: number;
+  counterBy?: string | undefined;
+  currency: string;
   createdAt: string;
   respondedAt?: string | undefined;
   expiresAt: string;
 };
 
-const INVITATION_STATUSES: ReadonlySet<string> = new Set(["PENDING", "ACCEPTED", "DECLINED", "CANCELLED", "EXPIRED"]);
+export type CollabInvitationTerms = {
+  priceMinVnd: number;
+  priceMaxVnd: number;
+  negotiable: boolean;
+  purpose: CollabInvitationPurpose | "";
+  message?: string | undefined;
+};
+
+const INVITATION_STATUSES: ReadonlySet<string> = new Set(["PENDING", "COUNTERED", "ACCEPTED", "DECLINED", "CANCELLED", "EXPIRED"]);
 
 export function parseCollabInvitation(value: unknown): CollabInvitation | undefined {
   if (!value || typeof value !== "object") return undefined;
@@ -227,10 +243,15 @@ export function parseCollabInvitation(value: unknown): CollabInvitation | undefi
     serviceType: typeof item.serviceType === "string" ? item.serviceType : "",
     ...(typeof item.startAt === "string" && item.startAt !== "" ? { startAt: item.startAt } : {}),
     durationH: typeof item.durationH === "number" ? item.durationH : 0,
-    priceVnd: typeof item.priceVnd === "number" ? item.priceVnd : 0,
-    currency: typeof item.currency === "string" ? item.currency : "VND",
+    priceMinVnd: typeof item.priceMinVnd === "number" && item.priceMinVnd > 0 ? Math.floor(item.priceMinVnd) : 0,
+    priceMaxVnd: typeof item.priceMaxVnd === "number" && item.priceMaxVnd > 0 ? Math.floor(item.priceMaxVnd) : 0,
+    negotiable: item.negotiable !== false,
+    purpose: item.purpose === "SALES" || item.purpose === "UGC" || item.purpose === "TRAFFIC" || item.purpose === "OTHER" ? item.purpose : "",
     message: typeof item.message === "string" ? item.message : "",
     status: item.status as CollabInvitationStatus,
+    termsVersion: typeof item.termsVersion === "number" ? item.termsVersion : 1,
+    ...(typeof item.counterBy === "string" && item.counterBy !== "" ? { counterBy: item.counterBy } : {}),
+    currency: typeof item.currency === "string" ? item.currency : "VND",
     createdAt: item.createdAt,
     ...(typeof item.respondedAt === "string" && item.respondedAt !== "" ? { respondedAt: item.respondedAt } : {}),
     expiresAt: item.expiresAt,
@@ -313,9 +334,13 @@ export class SupplyClient {
 
   // MERCHANT-CREATOR-INVITE-001：商家发定向邀约。merchantId 进 payload，
   // 网关验成员身份后盖章（伪造别人 merchantId 到不了 service）。
-  public async inviteCreator(input: { merchantId: string; agentId: string; priceVnd?: number; message?: string }): Promise<CollabInvitation> {
-    const payload: Record<string, unknown> = { merchantId: input.merchantId, agentId: input.agentId, serviceType: "CITY_COMPANION" };
-    if (input.priceVnd !== undefined) payload.priceVnd = input.priceVnd;
+  // 出价是区间（min==max 即一口价）；purpose 必填三选一+其他。
+  public async inviteCreator(input: { merchantId: string; agentId: string } & CollabInvitationTerms): Promise<CollabInvitation> {
+    const payload: Record<string, unknown> = {
+      merchantId: input.merchantId, agentId: input.agentId, serviceType: "CITY_COMPANION",
+      priceMinVnd: input.priceMinVnd, priceMaxVnd: input.priceMaxVnd,
+      negotiable: input.negotiable, purpose: input.purpose,
+    };
     if (input.message !== undefined) payload.message = input.message;
     const body = this.body(await this.command("InviteCreator", { type: "CollabInvitation", id: "new" }, payload));
     const parsed = parseCollabInvitation(body.invitation);
@@ -339,8 +364,19 @@ export class SupplyClient {
     return parseCollabInvitations(body.invitations);
   }
 
-  public async respondInvitation(input: { invitationId: string; decision: "ACCEPTED" | "DECLINED" }): Promise<CollabInvitation> {
-    const body = this.body(await this.command("RespondCollabInvitation", { type: "CollabInvitation", id: input.invitationId }, { invitationId: input.invitationId, decision: input.decision }));
+  public async respondInvitation(input: { invitationId: string; decision: "ACCEPTED" | "DECLINED" | "COUNTERED"; merchantId?: string | undefined } & Partial<CollabInvitationTerms>): Promise<CollabInvitation> {
+    const payload: Record<string, unknown> = { invitationId: input.invitationId, decision: input.decision };
+    // 商家回合（COUNTERED 的接受/拒绝/再议）带 merchantId，网关验成员身份后盖章；
+    // creator 侧不带，走 Principal.ID == agentID 口径。
+    if (input.merchantId) payload.merchantId = input.merchantId;
+    if (input.decision === "COUNTERED") {
+      payload.priceMinVnd = input.priceMinVnd ?? 0;
+      payload.priceMaxVnd = input.priceMaxVnd ?? 0;
+      payload.negotiable = input.negotiable ?? true;
+      payload.purpose = input.purpose ?? "";
+      if (input.message !== undefined) payload.message = input.message;
+    }
+    const body = this.body(await this.command("RespondCollabInvitation", { type: "CollabInvitation", id: input.invitationId }, payload));
     const parsed = parseCollabInvitation(body.invitation);
     if (!parsed) throw new SupplyProtocolError("invitation malformed");
     return parsed;

@@ -22,12 +22,12 @@ import type { FulfillmentClient } from "../fulfillment-client";
 import type { ProfileClient } from "../profile-client";
 // STORE-CONSOLIDATE-001：店详情页改走统一 hub（和 me.tsx 的 bdash/线上店铺同一页）。
 import { MyStoresHub } from "./my-stores-hub";
-import type { SupplyClient, SupplierCandidate, AgentPassport, CollabInvitation } from "../supply-client";
+import type { SupplyClient, SupplierCandidate, AgentPassport, CollabInvitation, CollabInvitationPurpose } from "../supply-client";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
 // CREATOR-LIST-CARD-001：报价格式化与横滑卡共用同一个纯模块实现 —— 同一个人不许两个价。
 import { formatReferencePrice } from "../creator-pricing";
-import { creatorRatingLabel, formatFansCount, formatRatePercent, formatServiceVolume, labelMarket, labelLanguage, labelVertical } from "../creator-capability-labels";
+import { creatorRatingLabel, formatFansCount, formatPriceRange, formatRatePercent, formatServiceVolume, labelInvitationPurpose, labelMarket, labelLanguage, labelVertical } from "../creator-capability-labels";
 // CREATOR-SOCIAL-001：社媒 canonical 链接与平台中文名（和服务端封闭集合对齐）。
 import { socialPlatformLabel, socialProfileUrl } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
@@ -203,8 +203,15 @@ export function MerchantMeR21Replacement({
   const [creatorQuery, setCreatorQuery] = useState("");
   const [myInvitation, setMyInvitation] = useState<CollabInvitation | undefined>(undefined);
   const [inviteFormOpen, setInviteFormOpen] = useState(false);
-  const [invitePrice, setInvitePrice] = useState("");
+  const [inviteMin, setInviteMin] = useState("");
+  const [inviteMax, setInviteMax] = useState("");
+  const [inviteNegotiable, setInviteNegotiable] = useState(true);
+  const [invitePurpose, setInvitePurpose] = useState<"" | CollabInvitationPurpose>("");
   const [inviteMessage, setInviteMessage] = useState("");
+  const [counterOpen, setCounterOpen] = useState(false);
+  const [counterMin, setCounterMin] = useState("");
+  const [counterMax, setCounterMax] = useState("");
+  const [counterMessage, setCounterMessage] = useState("");
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteError, setInviteError] = useState<string | undefined>(undefined);
 
@@ -214,21 +221,46 @@ export function MerchantMeR21Replacement({
   // 装了开关没接线路。首帧 activeAccountId 还是 undefined，所以兜底取 list[0]。
   const activeAccount = accounts?.find((account) => account.id === activeAccountId) ?? accounts?.[0];
 
-  // MERCHANT-CREATOR-INVITE-001：发出 / 撤回定向邀约。merchantId 永远取当前
-  // activeAccount（网关验成员身份后盖章，不读客户端自报的别的东西）。
+  // MERCHANT-CREATOR-INVITE-001：发出 / 还价 / 接受 / 拒绝 / 撤回定向邀约。
+  // merchantId 永远取当前 activeAccount（网关验成员身份后盖章）。
+  // 出价是区间：两端都空 = 出价待商议；只填一端 = 以那端为一口价；
+  // 低>高直接拦（服务端也会拒，双保险）。
+  const normalizeRange = (minText: string, maxText: string): { ok: true; min: number; max: number } | { ok: false; error: string } => {
+    const digits = (text: string): number => {
+      if (text.trim() === "") return -1;
+      const n = Number(text.replace(/[^\d]/g, ""));
+      return Number.isInteger(n) && n >= 0 ? n : -2;
+    };
+    let min = digits(minText);
+    let max = digits(maxText);
+    if (min === -1 && max === -1) return { ok: true, min: 0, max: 0 };
+    if (min === -2 || max === -2) return { ok: false, error: "出价填 VND 数字" };
+    if (min === -1) min = max;
+    if (max === -1) max = min;
+    if (min > max) return { ok: false, error: "下限不能高于上限" };
+    if (max > 10_000_000) return { ok: false, error: "出价超过上限（10,000,000 VND）" };
+    return { ok: true, min, max };
+  };
+
+  const checkMessage = (): string | undefined => {
+    if ([...inviteMessage].length > 200 || [...counterMessage].length > 200) return "留言 200 字以内";
+    return undefined;
+  };
+
   const sendInvite = async (): Promise<void> => {
     if (!supply || !selectedCreator || !activeAccount || inviteSending) return;
-    const price = Number(invitePrice.replace(/[^\d]/g, ""));
-    if (!Number.isInteger(price) || price <= 0) {
-      setInviteError("出价填一下（VND 数字）");
+    if (invitePurpose === "") {
+      setInviteError("选一下合作目的（她要知道你为什么找她）");
       return;
     }
-    if (price > 10_000_000) {
-      setInviteError("出价超过上限（10,000,000 VND）");
+    const range = normalizeRange(inviteMin, inviteMax);
+    if (!range.ok) {
+      setInviteError(range.error);
       return;
     }
-    if ([...inviteMessage].length > 200) {
-      setInviteError("留言 200 字以内");
+    const msgError = checkMessage();
+    if (msgError) {
+      setInviteError(msgError);
       return;
     }
     setInviteSending(true);
@@ -237,13 +269,59 @@ export function MerchantMeR21Replacement({
       const inv = await supply.inviteCreator({
         merchantId: activeAccount.id,
         agentId: selectedCreator.agentId,
-        priceVnd: price,
+        priceMinVnd: range.min,
+        priceMaxVnd: range.max,
+        negotiable: inviteNegotiable,
+        purpose: invitePurpose,
         ...(inviteMessage.trim() !== "" ? { message: inviteMessage.trim() } : {}),
       });
       setMyInvitation(inv);
       setInviteFormOpen(false);
     } catch (e) {
       setInviteError(e instanceof Error ? e.message : "邀请没发出去，稍后重试");
+    } finally {
+      setInviteSending(false);
+    }
+  };
+
+  // 商家回合（COUNTERED）：接受她的还价 / 拒绝 / 再议一个区间回去。
+  const settleCounter = async (decision: "ACCEPTED" | "DECLINED" | "COUNTERED"): Promise<void> => {
+    if (!supply || !activeAccount || !myInvitation || inviteSending) return;
+    if (decision === "COUNTERED") {
+      const range = normalizeRange(counterMin, counterMax);
+      if (!range.ok) {
+        setInviteError(range.error);
+        return;
+      }
+      const msgError = checkMessage();
+      if (msgError) {
+        setInviteError(msgError);
+        return;
+      }
+    }
+    setInviteSending(true);
+    setInviteError(undefined);
+    try {
+      const inv = await supply.respondInvitation({
+        invitationId: myInvitation.id,
+        decision,
+        merchantId: activeAccount.id,
+        ...(decision === "COUNTERED" ? (() => {
+          const range = normalizeRange(counterMin, counterMax);
+          if (!range.ok) return {};
+          return {
+            priceMinVnd: range.min,
+            priceMaxVnd: range.max,
+            negotiable: myInvitation.negotiable,
+            purpose: myInvitation.purpose,
+            ...(counterMessage.trim() !== "" ? { message: counterMessage.trim() } : {}),
+          };
+        })() : {}),
+      });
+      setMyInvitation(inv);
+      setCounterOpen(false);
+    } catch (e) {
+      setInviteError(e instanceof Error ? e.message : "操作没成功，稍后重试");
     } finally {
       setInviteSending(false);
     }
@@ -264,21 +342,30 @@ export function MerchantMeR21Replacement({
 
   // MERCHANT-CREATOR-INVITE-001：定向邀约（商家→这位 creator）。
   // myInvitation 是我发给这个人的最新一单（查 sent 按 agentId 找，不是全量展示）；
-  // 表单出价默认她的参考价，留言可选（200 字内）。
+  // 表单出价区间默认她的参考价（一口价起手，可谈），目的每次重选，留言可选。
   useEffect(() => {
     setInviteFormOpen(false);
     setInviteError(undefined);
     setInviteSending(false);
+    setCounterOpen(false);
     if (!selectedCreator || !supply || !activeAccount) {
       setMyInvitation(undefined);
-      setInvitePrice("");
+      setInviteMin("");
+      setInviteMax("");
       setInviteMessage("");
       return;
     }
     const agentId = selectedCreator.agentId;
     const merchantId = activeAccount.id;
-    setInvitePrice(selectedCreator.referencePrice > 0 ? String(selectedCreator.referencePrice) : "");
+    const ref = selectedCreator.referencePrice > 0 ? String(selectedCreator.referencePrice) : "";
+    setInviteMin(ref);
+    setInviteMax(ref);
+    setInviteNegotiable(true);
+    setInvitePurpose("");
     setInviteMessage("");
+    setCounterMin("");
+    setCounterMax("");
+    setCounterMessage("");
     let active = true;
     supply.listSentInvitations({ merchantId }).then((invs) => {
       if (!active) return;
@@ -696,12 +783,23 @@ export function MerchantMeR21Replacement({
             title: `${selectedCreator.name}${(selectedCreator.socials ?? [])[0]?.handle ? ` @${((selectedCreator.socials ?? [])[0]?.handle ?? "")}` : ""}`,
           })}
           <SimpleRows onPress={setPage} rows={[["最近到店", "等待真实履约记录"], ["当前权益", "查看关联券", "voucher"], ["当前邀请", "查看活动与邀请", "activity"], ["合作结果", "查看销售归因", "sales"]]} />
-          {/* MERCHANT-CREATOR-INVITE-001：定向邀约区。没邀过 → 邀请合作；
-              表单出价默认她的参考价（可改），留言可选；发出去是 PENDING，
-              她在自己那头接受/拒绝（服务端鉴权：只能本人回）。
+          <SimpleRows onPress={setPage} rows={[["最近到店", "等待真实履约记录"], ["当前权益", "查看关联券", "voucher"], ["当前邀请", "查看活动与邀请", "activity"], ["合作结果", "查看销售归因", "sales"]]} />
+          {/* MERCHANT-CREATOR-INVITE-001：定向邀约区。出价是区间不是一口价
+              （两端都空 = 出价待商议，只填一端 = 以那端为一口价）；目的必选
+              （冲销量/UGC产出/拉人气/其他）；可谈的单她能还价，还回来是
+              COUNTERED 轮到我（接受/再议/拒绝）。一口价标了不谈就别谈。
               「查看活动报名」不占按钮位 —— 上面 SimpleRows 里已经有了。 */}
+          {myInvitation && (myInvitation.status === "PENDING" || myInvitation.status === "COUNTERED") ? (
+            <Text selectable style={styles.meta}>
+              {`${labelInvitationPurpose(myInvitation.purpose) !== "" ? `${labelInvitationPurpose(myInvitation.purpose)} · ` : ""}${formatPriceRange(myInvitation.priceMinVnd, myInvitation.priceMaxVnd, myInvitation.currency)} · ${myInvitation.negotiable ? "可谈" : "一口价"}`}
+            </Text>
+          ) : null}
           {myInvitation?.status === "PENDING" ? (
             <Text selectable style={styles.meta} testID={`creator-invite-pending-${selectedCreator.agentId}`}>已邀请 · 待对方回复（{myInvitation.expiresAt.slice(0, 10)} 前有效）</Text>
+          ) : myInvitation?.status === "COUNTERED" ? (
+            <Text selectable style={styles.meta} testID={`creator-invite-countered-${selectedCreator.agentId}`}>
+              {`她还价了${myInvitation.message !== "" ? `：${myInvitation.message}` : ""}（第 ${myInvitation.termsVersion} 版）`}
+            </Text>
           ) : myInvitation?.status === "ACCEPTED" ? (
             <Text selectable style={styles.meta} testID={`creator-invite-accepted-${selectedCreator.agentId}`}>对方已接受合作邀请 · 进合作记录</Text>
           ) : myInvitation?.status === "DECLINED" ? (
@@ -711,13 +809,41 @@ export function MerchantMeR21Replacement({
           ) : myInvitation?.status === "CANCELLED" ? (
             <Text selectable style={styles.meta}>已撤回这次邀请 · 可以再约</Text>
           ) : null}
-          {inviteFormOpen && (!myInvitation || myInvitation.status !== "PENDING") ? (
+          {inviteFormOpen && (!myInvitation || (myInvitation.status !== "PENDING" && myInvitation.status !== "COUNTERED")) ? (
             <View style={styles.card}>
               <Text selectable style={styles.cardTitle}>邀请 {selectedCreator.name} 合作</Text>
-              <Text selectable style={styles.meta}>出价（VND，默认她的参考价）</Text>
-              <TextInput keyboardType="number-pad" onChangeText={setInvitePrice} placeholder={String(selectedCreator.referencePrice)} placeholderTextColor={color.muted} style={styles.searchInput} value={invitePrice} />
+              <Text selectable style={styles.meta}>出价区间（VND，都空 = 出价待商议）</Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <TextInput keyboardType="number-pad" onChangeText={setInviteMin} placeholder="下限" placeholderTextColor={color.muted} style={styles.searchInput} value={inviteMin} />
+                <TextInput keyboardType="number-pad" onChangeText={setInviteMax} placeholder="上限" placeholderTextColor={color.muted} style={styles.searchInput} value={inviteMax} />
+              </View>
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                <Pressable onPress={() => setInviteNegotiable(true)} style={[styles.creatorTag, inviteNegotiable && styles.creatorTagPrimary]} accessibilityLabel="可谈"><Text selectable style={inviteNegotiable ? styles.creatorTagPrimaryText : styles.creatorTagText}>可谈</Text></Pressable>
+                <Pressable onPress={() => setInviteNegotiable(false)} style={[styles.creatorTag, !inviteNegotiable && styles.creatorTagPrimary]} accessibilityLabel="一口价"><Text selectable style={!inviteNegotiable ? styles.creatorTagPrimaryText : styles.creatorTagText}>一口价</Text></Pressable>
+              </View>
+              <Text selectable style={styles.meta}>合作目的（必选）</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {(["SALES", "UGC", "TRAFFIC", "OTHER"] as const).map((purpose) => (
+                  <Pressable key={purpose} onPress={() => setInvitePurpose(purpose)} style={[styles.creatorTag, invitePurpose === purpose && styles.creatorTagPrimary]} accessibilityLabel={`目的${labelInvitationPurpose(purpose)}`}>
+                    <Text selectable style={invitePurpose === purpose ? styles.creatorTagPrimaryText : styles.creatorTagText}>{labelInvitationPurpose(purpose)}</Text>
+                  </Pressable>
+                ))}
+              </View>
               <Text selectable style={styles.meta}>给她的留言（可选，200 字内）</Text>
               <TextInput multiline onChangeText={setInviteMessage} placeholder="比如：周末探店 + 晚餐，时间可商量" placeholderTextColor={color.muted} style={styles.searchInput} value={inviteMessage} />
+              {inviteError ? <Text selectable style={styles.meta}>{inviteError}</Text> : null}
+            </View>
+          ) : null}
+          {counterOpen && myInvitation?.status === "COUNTERED" ? (
+            <View style={styles.card}>
+              <Text selectable style={styles.cardTitle}>再议一个价回去</Text>
+              <Text selectable style={styles.meta}>出价区间（VND）</Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <TextInput keyboardType="number-pad" onChangeText={setCounterMin} placeholder={String(myInvitation.priceMinVnd)} placeholderTextColor={color.muted} style={styles.searchInput} value={counterMin} />
+                <TextInput keyboardType="number-pad" onChangeText={setCounterMax} placeholder={String(myInvitation.priceMaxVnd)} placeholderTextColor={color.muted} style={styles.searchInput} value={counterMax} />
+              </View>
+              <Text selectable style={styles.meta}>给她的留言（可选）</Text>
+              <TextInput multiline onChangeText={setCounterMessage} placeholder="比如：这个数我们能接，档期你定" placeholderTextColor={color.muted} style={styles.searchInput} value={counterMessage} />
               {inviteError ? <Text selectable style={styles.meta}>{inviteError}</Text> : null}
             </View>
           ) : null}
@@ -725,6 +851,12 @@ export function MerchantMeR21Replacement({
             {myInvitation?.status === "PENDING" ? (<>
               <Pressable onPress={() => { setCreatorView("COLLABS"); setPage("creator"); }} style={styles.primary} accessibilityLabel="查看合作记录"><Text selectable style={styles.primaryText}>查看记录</Text></Pressable>
               <Pressable disabled={inviteSending} onPress={() => void cancelInvite()} style={styles.secondary} accessibilityLabel="撤回邀请"><Text selectable style={styles.secondaryText}>{inviteSending ? "处理中…" : "撤回邀请"}</Text></Pressable>
+            </>) : myInvitation?.status === "COUNTERED" && !counterOpen ? (<>
+              <Pressable disabled={inviteSending} onPress={() => void settleCounter("ACCEPTED")} style={styles.primary} accessibilityLabel="接受她的还价"><Text selectable style={styles.primaryText}>{inviteSending ? "处理中…" : "接受还价"}</Text></Pressable>
+              <Pressable disabled={inviteSending} onPress={() => { setCounterMin(String(myInvitation.priceMinVnd)); setCounterMax(String(myInvitation.priceMaxVnd)); setCounterMessage(""); setCounterOpen(true); }} style={styles.secondary} accessibilityLabel="再议价格"><Text selectable style={styles.secondaryText}>再议</Text></Pressable>
+            </>) : myInvitation?.status === "COUNTERED" && counterOpen ? (<>
+              <Pressable disabled={inviteSending} onPress={() => void settleCounter("COUNTERED")} style={styles.primary} accessibilityLabel="发出还价"><Text selectable style={styles.primaryText}>{inviteSending ? "发送中…" : "发出还价"}</Text></Pressable>
+              <Pressable disabled={inviteSending} onPress={() => { setCounterOpen(false); setInviteError(undefined); }} style={styles.secondary} accessibilityLabel="收起还价表单"><Text selectable style={styles.secondaryText}>收起</Text></Pressable>
             </>) : inviteFormOpen ? (<>
               <Pressable disabled={inviteSending} onPress={() => void sendInvite()} style={styles.primary} accessibilityLabel="发出合作邀请"><Text selectable style={styles.primaryText}>{inviteSending ? "发送中…" : "发出邀请"}</Text></Pressable>
               <Pressable disabled={inviteSending} onPress={() => { setInviteFormOpen(false); setInviteError(undefined); }} style={styles.secondary} accessibilityLabel="收起邀请表单"><Text selectable style={styles.secondaryText}>收起</Text></Pressable>
@@ -736,6 +868,12 @@ export function MerchantMeR21Replacement({
               <Pressable onPress={() => { setCreatorView("COLLABS"); setPage("creator"); }} style={styles.secondary} accessibilityLabel="查看记录"><Text selectable style={styles.secondaryText}>查看记录</Text></Pressable>
             </>)}
           </View>
+          {/* COUNTERED 是商家回合：接受/再议在上面，拒绝走这里 —— 行里只摆得下两个主按钮。 */}
+          {myInvitation?.status === "COUNTERED" ? (
+            <Pressable disabled={inviteSending} onPress={() => void settleCounter("DECLINED")} accessibilityLabel="拒绝她的还价">
+              <Text selectable style={styles.meta}>谈不拢，拒绝这次合作</Text>
+            </Pressable>
+          ) : null}
         </ScrollView>
       </View>
     );

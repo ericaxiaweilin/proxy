@@ -190,14 +190,20 @@ describe("CREATOR-LIST-CARD-001 详情页同一套语言", () => {
   });
 
   it("MERCHANT-CREATOR-INVITE-001 详情有邀请合作入口，走真命令不画假按钮", () => {
-    // 发/查/撤三个真命令在组件顶部（effect + handler），按钮/表单/状态行
+    // 发/查/撤/还价四个真命令在组件顶部（effect + handler），按钮/表单/状态行
     // 在详情分支里 —— 分开断言，别把 handler 搬进详情分支凑数。
     expect(me).toContain("supply.inviteCreator(");
     expect(me).toContain("supply.listSentInvitations(");
     expect(me).toContain("supply.cancelInvitation(");
+    expect(me).toContain('supply.respondInvitation({');
     expect(detail).toContain("邀请合作");
     expect(detail).toContain("creator-invite-open-");
     expect(detail).toContain("creator-invite-pending-");
+    expect(detail).toContain("creator-invite-countered-");
     expect(detail).toContain("creator-invite-accepted-");
+    // 出价是区间 + 目的必选 + 可谈开关，还价往返都在详情里。
+    expect(detail).toContain("formatPriceRange(");
+    expect(detail).toContain("labelInvitationPurpose(");
+    expect(detail).toContain("再议");
   });
 });

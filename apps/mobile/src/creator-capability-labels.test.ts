@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { creatorRatingLabel, formatCreatorGrade, formatCreatorScore, formatFansCount, formatRatePercent, formatServiceVolume, labelCapability, labelMarket, labelServiceType, labelSocial, labelVertical, visibleCapabilityTags } from "./creator-capability-labels";
+import { creatorRatingLabel, formatCreatorGrade, formatCreatorScore, formatFansCount, formatPriceRange, formatRatePercent, formatServiceVolume, labelCapability, labelInvitationPurpose, labelMarket, labelServiceType, labelSocial, labelVertical, visibleCapabilityTags } from "./creator-capability-labels";
 
 describe("creator-capability-labels (MERCHANT-CREATOR-TAGS-001)", () => {
   it("已知编码转中文", () => {
@@ -62,6 +62,23 @@ describe("creator-capability-labels (MERCHANT-CREATOR-TAGS-001)", () => {
     expect(formatRatePercent(0.955)).toBe("96%");
     expect(formatRatePercent(0)).toBe("");
     expect(formatRatePercent(undefined)).toBe("");
+  });
+
+  it("邀约出价印区间：一口价走报价口径，没填不编免费", () => {
+    expect(formatPriceRange(800000, 1500000, "VND")).toBe("800K–1.5tr VND");
+    expect(formatPriceRange(1200000, 1200000, "VND")).toBe("1.2tr VND");
+    expect(formatPriceRange(0, 0, "VND")).toBe("出价待商议");
+    expect(formatPriceRange(undefined, undefined, "VND")).toBe("出价待商议");
+    expect(formatPriceRange(900, 900, "VND")).toBe("900 VND");
+  });
+
+  it("合作目的封闭集：三选一+其他，未知值不渲染", () => {
+    expect(labelInvitationPurpose("SALES")).toBe("冲销量");
+    expect(labelInvitationPurpose("UGC")).toBe("UGC产出");
+    expect(labelInvitationPurpose("TRAFFIC")).toBe("拉人气");
+    expect(labelInvitationPurpose("OTHER")).toBe("其他合作");
+    expect(labelInvitationPurpose("陪聊")).toBe("");
+    expect(labelInvitationPurpose(undefined)).toBe("");
   });
   it("垂类只明示三类，其余返回空", () => {
     expect(labelVertical("RESTAURANT")).toBe("餐饮");

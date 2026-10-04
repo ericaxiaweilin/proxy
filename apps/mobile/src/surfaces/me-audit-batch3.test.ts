@@ -115,6 +115,15 @@ describe("MERCHANT-CREATOR-INVITE-001 我的订单能收到并回复定向邀约
     expect(ordersCode).toContain("NOT_PENDING");
     expect(ordersCode).toContain("操作没有成功");
   });
+  it("counter offer only exists on negotiable invitations, fixed price has no counter button", () => {
+    // 可谈的单才有还价按钮 + 还价表单；一口价只有接受/婉拒。
+    expect(ordersCode).toContain("COUNTERED");
+    expect(ordersCode).toContain("invite.negotiable");
+    expect(ordersCode).toContain("还价");
+    // 出价印区间 + 目的 + 可谈/一口价，一行说清楚。
+    expect(ordersCode).toContain("formatPriceRange(");
+    expect(ordersCode).toContain("labelInvitationPurpose(");
+  });
 });
 
 // HOME-MYORDERS-JOINS-001（用户「我的订单还是空白」2026-09-29）：For You 下单

@@ -24,12 +24,14 @@ var merchantPublishCommands = map[string]bool{
 	// VOUCHER-ISSUE-001: 商户发行券定义。merchant_id 只从标注取，
 	// 见 voucher.issueDefinition；伪造 payload 到不了 service。
 	"IssueVoucherDefinition": true,
-	// MERCHANT-CREATOR-INVITE-001：定向邀约三件套。merchant_id 同样只从标注取 ——
-	// InviteCreator/Cancel/List(sent) 的 merchantID 读 AuthContext，不读 payload，
-	// 伪造别人 merchantId 发邀约到不了 service。
-	"InviteCreator":          true,
-	"CancelCollabInvitation": true,
-	"ListCollabInvitations":  true,
+	// MERCHANT-CREATOR-INVITE-001：定向邀约四件套。merchant_id 同样只从标注取 ——
+	// InviteCreator/Cancel/List(sent)/Respond(COUNTERED 商家回合) 的 merchantID
+	// 读 AuthContext，不读 payload，伪造别人 merchantId 发邀约到不了 service。
+	// creator 侧的调用不带 merchantId（无 claim 原样过，respond 走 agent 口径）。
+	"InviteCreator":            true,
+	"CancelCollabInvitation":   true,
+	"ListCollabInvitations":    true,
+	"RespondCollabInvitation":  true,
 }
 
 // resolveMerchantPublish verifies an optional payload merchantId for

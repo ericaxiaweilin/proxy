@@ -7,6 +7,7 @@ import type { BusinessClient } from "../business-client";
 import { loadStoreOptions, type StoreOption } from "../my-store-options";
 import type { FulfillmentClient, FulfillmentOrder, SlotOffer } from "../fulfillment-client";
 import { SupplyClient, type CollabInvitation } from "../supply-client";
+import { formatPriceRange, labelInvitationPurpose } from "../creator-capability-labels";
 import { auditLines, buildTermChange, canCancelOrder, canChangePrice, canConfirmCooperation, canProposeTermChange, isMyProposal, pendingTermChange, settlementLabel, settlementView, termChangeFormFrom, termDiff, type AuditLine, type TermChangeForm } from "../order-actions";
 // ORDER-AGENT-CLAIM-NO-001：接单编号展示口径（3 位零填充 / 未分配返空串）复用
 // 个人管理页那一份，两处不能各写一套。
@@ -130,6 +131,10 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
   const [supply] = useState(() => new SupplyClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore }));
   const [receivedInvites, setReceivedInvites] = useState<CollabInvitation[]>([]);
   const [respondingInviteId, setRespondingInviteId] = useState<string | undefined>(undefined);
+  const [counteringInviteId, setCounteringInviteId] = useState<string | undefined>(undefined);
+  const [counterMin, setCounterMin] = useState("");
+  const [counterMax, setCounterMax] = useState("");
+  const [counterMessage, setCounterMessage] = useState("");
   const [inviteNotice, setInviteNotice] = useState<string | undefined>(undefined);
   // HOME-MYORDERS-JOINS-001（用户「我的订单还是空白」2026-09-29）：For You 下单
   // 走 JoinActivity —— 是活动报名，不落履约订单（join is join 的钉早已定死两条链）。
@@ -160,18 +165,56 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
     return () => { active = false; };
   }, [client, activityClient, supply]);
   // MERCHANT-CREATOR-INVITE-001：回定向邀约。接受/拒绝都是终态，成功就地刷新；
-  // 过期/被处理过的点下去服务端直接拒，原样透出，不编状态。
-  async function respondInvite(invite: CollabInvitation, decision: "ACCEPTED" | "DECLINED"): Promise<void> {
+  // 还价（COUNTERED）只在可谈的单上出现 —— 一口价的单没有还价按钮，
+  // 标了不谈就别谈。过期/被处理过的点下去服务端直接拒，原样透出，不编状态。
+  async function respondInvite(invite: CollabInvitation, decision: "ACCEPTED" | "DECLINED" | "COUNTERED", counter?: { min: string; max: string; message: string }): Promise<void> {
     if (respondingInviteId) return;
+    if (decision === "COUNTERED") {
+      const min = counter?.min.trim() === "" ? 0 : Number((counter?.min ?? "").replace(/[^\d]/g, ""));
+      const max = counter?.max.trim() === "" ? 0 : Number((counter?.max ?? "").replace(/[^\d]/g, ""));
+      if (!Number.isInteger(min) || !Number.isInteger(max) || (min <= 0 && max <= 0)) {
+        setInviteNotice("还价填一下（VND 数字）");
+        return;
+      }
+      const lo = counter?.min.trim() === "" ? max : min;
+      const hi = counter?.max.trim() === "" ? min : max;
+      if (lo > hi) {
+        setInviteNotice("还价下限不能高于上限");
+        return;
+      }
+      if (hi > 10_000_000) {
+        setInviteNotice("还价超过上限（10,000,000 VND）");
+        return;
+      }
+      if ([...(counter?.message ?? "")].length > 200) {
+        setInviteNotice("留言 200 字以内");
+        return;
+      }
+    }
     setRespondingInviteId(invite.id);
     setInviteNotice(undefined);
     try {
-      await supply.respondInvitation({ invitationId: invite.id, decision });
-      setInviteNotice(decision === "ACCEPTED" ? "已接受合作邀请，对方会收到确认。" : "已婉拒这次合作邀请。");
+      if (decision === "COUNTERED") {
+        const min = counter?.min.trim() === "" ? 0 : Number((counter?.min ?? "").replace(/[^\d]/g, ""));
+        const max = counter?.max.trim() === "" ? 0 : Number((counter?.max ?? "").replace(/[^\d]/g, ""));
+        const lo = counter?.min.trim() === "" ? max : min;
+        const hi = counter?.max.trim() === "" ? min : max;
+        await supply.respondInvitation({
+          invitationId: invite.id, decision,
+          priceMinVnd: lo, priceMaxVnd: hi, negotiable: invite.negotiable,
+          purpose: invite.purpose === "" ? "OTHER" : invite.purpose,
+          ...(counter?.message.trim() ? { message: counter.message.trim() } : {}),
+        });
+        setInviteNotice("已还价，等对方回复。");
+      } else {
+        await supply.respondInvitation({ invitationId: invite.id, decision });
+        setInviteNotice(decision === "ACCEPTED" ? "已接受合作邀请，对方会收到确认。" : "已婉拒这次合作邀请。");
+      }
+      setCounteringInviteId(undefined);
       reload();
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      setInviteNotice(/NOT_PENDING|EXPIRED/i.test(message) ? "这份邀请已过期或被处理，请让对方重新发送。" : /NOT_OWNED|AUTHORIZATION/i.test(message) ? "这份邀请不是发给当前账号的。" : "操作没有成功，请稍后重试。");
+      setInviteNotice(/NOT_PENDING|EXPIRED/i.test(message) ? "这份邀请已过期或被处理，请让对方重新发送。" : /NOT_OWNED|AUTHORIZATION|YOUR_TURN/i.test(message) ? "这份邀请现在还轮不到你处理。" : /NOT_NEGOTIABLE/i.test(message) ? "这单一口价，不能还价。" : "操作没有成功，请稍后重试。");
     } finally {
       setRespondingInviteId(undefined);
     }
@@ -834,17 +877,16 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
                 </View>
               );
             })}
-            {/* MERCHANT-CREATOR-INVITE-001：商家定向邀约卡。出价有就印数，
-                没出价印「出价待商议」（0 = 没填，不是免费）；留言有就印，
-                没有不编一句；有效期印到日期。接受/婉拒都是终态。 */}
+            {/* MERCHANT-CREATOR-INVITE-001：商家定向邀约卡。出价印区间
+                （一口价/待商议如实印，不编）；目的/可谈一起印，她才好决策；
+                可谈的单才有还价按钮，一口价只能接受或婉拒。 */}
             {receivedInvites.map((invite) => (
               <View key={invite.id} style={styles.orderCard} testID={`collab-invite-${invite.id}`}>
                 <View style={styles.orderHead}>
                   <View style={styles.orderCopy}>
                     <Text selectable style={styles.orderTitle}>定向合作邀请 · 来自商家 {shortId(invite.merchantId)}</Text>
                     <Text selectable style={styles.orderId}>
-                      {invite.priceVnd > 0 ? `出价 ${invite.priceVnd.toLocaleString()} ${invite.currency}` : "出价待商议"}
-                      {` · ${invite.expiresAt.slice(0, 10)} 前有效`}
+                      {`${labelInvitationPurpose(invite.purpose) !== "" ? `${labelInvitationPurpose(invite.purpose)} · ` : ""}${formatPriceRange(invite.priceMinVnd, invite.priceMaxVnd, invite.currency)} · ${invite.negotiable ? "可谈" : "一口价"} · ${invite.expiresAt.slice(0, 10)} 前有效`}
                     </Text>
                     {invite.message !== "" ? (
                       <Text selectable style={styles.orderId}>留言：{invite.message}</Text>
@@ -852,10 +894,28 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
                   </View>
                   <Text selectable style={styles.orderBadge}>待回复</Text>
                 </View>
+                {counteringInviteId === invite.id ? (
+                  <View style={{ marginTop: 8 }}>
+                    <TextInput keyboardType="number-pad" onChangeText={setCounterMin} placeholder={`下限（对方开 ${invite.priceMinVnd || "—"}）`} placeholderTextColor="#6D6771" style={{ borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 6, paddingHorizontal: 10, paddingVertical: 8 }} value={counterMin} />
+                    <TextInput keyboardType="number-pad" onChangeText={setCounterMax} placeholder={`上限（对方开 ${invite.priceMaxVnd || "—"}）`} placeholderTextColor="#6D6771" style={{ borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 6, paddingHorizontal: 10, paddingVertical: 8 }} value={counterMax} />
+                    <TextInput multiline onChangeText={setCounterMessage} placeholder="给商家带句话（可选）" placeholderTextColor="#6D6771" style={{ borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 6, paddingHorizontal: 10, paddingVertical: 8 }} value={counterMessage} />
+                  </View>
+                ) : null}
                 <View style={styles.orderActions}>
                   <Pressable disabled={respondingInviteId === invite.id} onPress={() => void respondInvite(invite, "ACCEPTED")} style={[styles.orderAction, styles.orderActionPrimary]}>
                     <Text selectable style={styles.orderActionPrimaryText}>{respondingInviteId === invite.id ? "处理中…" : "接受合作"}</Text>
                   </Pressable>
+                  {invite.negotiable ? (
+                    counteringInviteId === invite.id ? (
+                      <Pressable disabled={respondingInviteId === invite.id} onPress={() => void respondInvite(invite, "COUNTERED", { min: counterMin, max: counterMax, message: counterMessage })} style={[styles.orderAction]}>
+                        <Text selectable style={styles.orderActionText}>{respondingInviteId === invite.id ? "处理中…" : "发出还价"}</Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable disabled={respondingInviteId === invite.id} onPress={() => { setCounteringInviteId(invite.id); setCounterMin(String(invite.priceMinVnd)); setCounterMax(String(invite.priceMaxVnd)); setCounterMessage(""); }} style={[styles.orderAction]}>
+                        <Text selectable style={styles.orderActionText}>还价</Text>
+                      </Pressable>
+                    )
+                  ) : null}
                   <Pressable disabled={respondingInviteId === invite.id} onPress={() => void respondInvite(invite, "DECLINED")} style={[styles.orderAction]}>
                     <Text selectable style={styles.orderActionText}>{respondingInviteId === invite.id ? "处理中…" : "婉拒"}</Text>
                   </Pressable>
