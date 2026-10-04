@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSupplierCandidates, parseSupplyBody, SupplyProtocolError } from "./supply-client";
+import { parseCollabInvitations, parseSupplierCandidates, parseSupplyBody, SupplyProtocolError } from "./supply-client";
 
 describe("merchant creator recommendations", () => {
   it("MERCHANT-CREATOR-001 keeps real photo, availability and eligibility evidence", () => {
@@ -38,6 +38,19 @@ describe("merchant creator recommendations", () => {
     expect(parsed[0]?.rating).toEqual({ total: 87.5, hasTrackRecord: true, satisfactionRate: 0.9, fulfillmentRate: 1, completedOrders: 12 });
     const legacy = parseSupplierCandidates([{ agentId: "c8", name: "H", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {} }]);
     expect(legacy[0]?.rating).toBeUndefined();
+  });
+  it("MERCHANT-CREATOR-INVITE-001 邀约解析：缺件/坏状态直接丢掉", () => {
+    const parsed = parseCollabInvitations([
+      { id: "ci_1", merchantId: "m1", agentId: "a1", serviceType: "CITY_COMPANION", status: "PENDING", createdAt: "2026-10-04T00:00:00Z", expiresAt: "2026-10-07T00:00:00Z" },
+      { id: "", merchantId: "m1", agentId: "a1", status: "PENDING", createdAt: "x", expiresAt: "y" },
+      { id: "ci_2", merchantId: "m1", agentId: "a1", status: "WEIRD", createdAt: "x", expiresAt: "y" },
+      null,
+    ]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.id).toBe("ci_1");
+    expect(parsed[0]?.priceVnd).toBe(0);
+    expect(parsed[0]?.currency).toBe("VND");
+    expect(parseCollabInvitations(undefined)).toEqual([]);
   });
   it("MERCHANT-CREATOR-TAGS-001 keeps vertical tags raw, drops junk", () => {
     const parsed = parseSupplierCandidates([{ agentId: "c5", name: "E", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, verticalTags: ["RESTAURANT", "KTV", 7, ""] }]);

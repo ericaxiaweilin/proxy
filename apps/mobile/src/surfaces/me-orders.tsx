@@ -6,6 +6,7 @@ import { ActivityClient, ActivityCommandRejectedError } from "../activity-client
 import type { BusinessClient } from "../business-client";
 import { loadStoreOptions, type StoreOption } from "../my-store-options";
 import type { FulfillmentClient, FulfillmentOrder, SlotOffer } from "../fulfillment-client";
+import { SupplyClient, type CollabInvitation } from "../supply-client";
 import { auditLines, buildTermChange, canCancelOrder, canChangePrice, canConfirmCooperation, canProposeTermChange, isMyProposal, pendingTermChange, settlementLabel, settlementView, termChangeFormFrom, termDiff, type AuditLine, type TermChangeForm } from "../order-actions";
 // ORDER-AGENT-CLAIM-NO-001：接单编号展示口径（3 位零填充 / 未分配返空串）复用
 // 个人管理页那一份，两处不能各写一套。
@@ -123,6 +124,13 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
   const [pendingOffers, setPendingOffers] = useState<SlotOffer[]>([]);
   const [acceptingOfferId, setAcceptingOfferId] = useState<string | undefined>(undefined);
   const [offerNotice, setOfferNotice] = useState<string | undefined>(undefined);
+  // MERCHANT-CREATOR-INVITE-001：商家定向邀约的 creator 收件箱 —— 和上面的
+  // SlotOffer 同一个「收到的合作邀请」区块，两种邀约并列。读失败不挡订单主列表。
+  // 注意只有本人能看到（服务端按 Principal.ID == agentID 校验），不是谁都能代收。
+  const [supply] = useState(() => new SupplyClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore }));
+  const [receivedInvites, setReceivedInvites] = useState<CollabInvitation[]>([]);
+  const [respondingInviteId, setRespondingInviteId] = useState<string | undefined>(undefined);
+  const [inviteNotice, setInviteNotice] = useState<string | undefined>(undefined);
   // HOME-MYORDERS-JOINS-001（用户「我的订单还是空白」2026-09-29）：For You 下单
   // 走 JoinActivity —— 是活动报名，不落履约订单（join is join 的钉早已定死两条链）。
   // 但下单成功页发了编号，我的订单却看不到这笔记录，用户的预期是断的。这里把
@@ -143,13 +151,31 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
     setPhase("LOADING");
     void client.listMyOrders().then((rows) => { if (active) { setOrders(rows); setPhase("READY"); } }).catch(() => { if (active) setPhase("ERROR"); });
     void client.listAgentOffers().then((rows) => { if (active) setPendingOffers(rows.filter((offer) => offer.status === "OFFERED")); }).catch(() => { if (active) setPendingOffers([]); });
+    void supply.listReceivedInvitations().then((rows) => { if (active) setReceivedInvites(rows.filter((inv) => inv.status === "PENDING")); }).catch(() => { if (active) setReceivedInvites([]); });
     void activityClient.listMyActivities().then((payload) => {
       if (!active) return;
       setJoinedEntries(joinEntries(payload.joined, payload.joinOrders));
       setJoinsFailed(false);
     }).catch(() => { if (active) setJoinsFailed(true); });
     return () => { active = false; };
-  }, [client, activityClient]);
+  }, [client, activityClient, supply]);
+  // MERCHANT-CREATOR-INVITE-001：回定向邀约。接受/拒绝都是终态，成功就地刷新；
+  // 过期/被处理过的点下去服务端直接拒，原样透出，不编状态。
+  async function respondInvite(invite: CollabInvitation, decision: "ACCEPTED" | "DECLINED"): Promise<void> {
+    if (respondingInviteId) return;
+    setRespondingInviteId(invite.id);
+    setInviteNotice(undefined);
+    try {
+      await supply.respondInvitation({ invitationId: invite.id, decision });
+      setInviteNotice(decision === "ACCEPTED" ? "已接受合作邀请，对方会收到确认。" : "已婉拒这次合作邀请。");
+      reload();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      setInviteNotice(/NOT_PENDING|EXPIRED/i.test(message) ? "这份邀请已过期或被处理，请让对方重新发送。" : /NOT_OWNED|AUTHORIZATION/i.test(message) ? "这份邀请不是发给当前账号的。" : "操作没有成功，请稍后重试。");
+    } finally {
+      setRespondingInviteId(undefined);
+    }
+  }
   useEffect(() => { const cleanup = reload(); return cleanup; }, [reload]);
   async function acceptOffer(offer: SlotOffer): Promise<void> {
     if (acceptingOfferId) return;
@@ -783,10 +809,11 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
           <Text selectable style={styles.detailTitle}>我的订单</Text>
         </View>
         <ProviderOrderPanel onOpenApply={onOpenApply} />
-        {pendingOffers.length > 0 ? (
+        {pendingOffers.length > 0 || receivedInvites.length > 0 ? (
           <View style={{ marginBottom: 11 }}>
             <Text selectable style={[styles.orderFieldLabel, { marginBottom: 7, fontSize: 12, fontWeight: "900", color: color.ink }]}>收到的合作邀请</Text>
             {offerNotice ? <Text selectable style={styles.orderNotice}>{offerNotice}</Text> : null}
+            {inviteNotice ? <Text selectable style={styles.orderNotice}>{inviteNotice}</Text> : null}
             {pendingOffers.map((offer) => {
               const remainingMs = new Date(offer.expiresAt).getTime() - Date.now();
               const remainingMin = Math.max(0, Math.ceil(remainingMs / 60000));
@@ -807,6 +834,34 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
                 </View>
               );
             })}
+            {/* MERCHANT-CREATOR-INVITE-001：商家定向邀约卡。出价有就印数，
+                没出价印「出价待商议」（0 = 没填，不是免费）；留言有就印，
+                没有不编一句；有效期印到日期。接受/婉拒都是终态。 */}
+            {receivedInvites.map((invite) => (
+              <View key={invite.id} style={styles.orderCard} testID={`collab-invite-${invite.id}`}>
+                <View style={styles.orderHead}>
+                  <View style={styles.orderCopy}>
+                    <Text selectable style={styles.orderTitle}>定向合作邀请 · 来自商家 {shortId(invite.merchantId)}</Text>
+                    <Text selectable style={styles.orderId}>
+                      {invite.priceVnd > 0 ? `出价 ${invite.priceVnd.toLocaleString()} ${invite.currency}` : "出价待商议"}
+                      {` · ${invite.expiresAt.slice(0, 10)} 前有效`}
+                    </Text>
+                    {invite.message !== "" ? (
+                      <Text selectable style={styles.orderId}>留言：{invite.message}</Text>
+                    ) : null}
+                  </View>
+                  <Text selectable style={styles.orderBadge}>待回复</Text>
+                </View>
+                <View style={styles.orderActions}>
+                  <Pressable disabled={respondingInviteId === invite.id} onPress={() => void respondInvite(invite, "ACCEPTED")} style={[styles.orderAction, styles.orderActionPrimary]}>
+                    <Text selectable style={styles.orderActionPrimaryText}>{respondingInviteId === invite.id ? "处理中…" : "接受合作"}</Text>
+                  </Pressable>
+                  <Pressable disabled={respondingInviteId === invite.id} onPress={() => void respondInvite(invite, "DECLINED")} style={[styles.orderAction]}>
+                    <Text selectable style={styles.orderActionText}>{respondingInviteId === invite.id ? "处理中…" : "婉拒"}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))}
           </View>
         ) : null}
         {joinsFailed ? <Text selectable style={styles.orderNotice}>活动报名记录没读出来，报名是否成功以「我的活动」为准。</Text> : null}

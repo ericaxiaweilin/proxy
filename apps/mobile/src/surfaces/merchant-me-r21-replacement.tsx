@@ -22,7 +22,7 @@ import type { FulfillmentClient } from "../fulfillment-client";
 import type { ProfileClient } from "../profile-client";
 // STORE-CONSOLIDATE-001：店详情页改走统一 hub（和 me.tsx 的 bdash/线上店铺同一页）。
 import { MyStoresHub } from "./my-stores-hub";
-import type { SupplyClient, SupplierCandidate, AgentPassport } from "../supply-client";
+import type { SupplyClient, SupplierCandidate, AgentPassport, CollabInvitation } from "../supply-client";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
 // CREATOR-LIST-CARD-001：报价格式化与横滑卡共用同一个纯模块实现 —— 同一个人不许两个价。
@@ -201,12 +201,94 @@ export function MerchantMeR21Replacement({
   const [sceneActivities, setSceneActivities] = useState<ActivityItem[]>([]);
   const [creatorView, setCreatorView] = useState<"MATCH" | "CREATORS" | "COLLABS" | "RESULTS">("MATCH");
   const [creatorQuery, setCreatorQuery] = useState("");
+  const [myInvitation, setMyInvitation] = useState<CollabInvitation | undefined>(undefined);
+  const [inviteFormOpen, setInviteFormOpen] = useState(false);
+  const [invitePrice, setInvitePrice] = useState("");
+  const [inviteMessage, setInviteMessage] = useState("");
+  const [inviteSending, setInviteSending] = useState(false);
+  const [inviteError, setInviteError] = useState<string | undefined>(undefined);
 
   // MERCHANT-ACCOUNT-SWITCH-001（2026-10-03 补完）：切换器画出来了、成员与经营数据也
   // 按选中的 accountId 重拉了，但界面上 11 处标签仍然读 `accounts[0]` —— 点第二家时
   // 芯片会选中，名字 / 状态 / 头像却还是第一家。数据跟着主体走、标签不跟着走，等于
   // 装了开关没接线路。首帧 activeAccountId 还是 undefined，所以兜底取 list[0]。
   const activeAccount = accounts?.find((account) => account.id === activeAccountId) ?? accounts?.[0];
+
+  // MERCHANT-CREATOR-INVITE-001：发出 / 撤回定向邀约。merchantId 永远取当前
+  // activeAccount（网关验成员身份后盖章，不读客户端自报的别的东西）。
+  const sendInvite = async (): Promise<void> => {
+    if (!supply || !selectedCreator || !activeAccount || inviteSending) return;
+    const price = Number(invitePrice.replace(/[^\d]/g, ""));
+    if (!Number.isInteger(price) || price <= 0) {
+      setInviteError("出价填一下（VND 数字）");
+      return;
+    }
+    if (price > 10_000_000) {
+      setInviteError("出价超过上限（10,000,000 VND）");
+      return;
+    }
+    if ([...inviteMessage].length > 200) {
+      setInviteError("留言 200 字以内");
+      return;
+    }
+    setInviteSending(true);
+    setInviteError(undefined);
+    try {
+      const inv = await supply.inviteCreator({
+        merchantId: activeAccount.id,
+        agentId: selectedCreator.agentId,
+        priceVnd: price,
+        ...(inviteMessage.trim() !== "" ? { message: inviteMessage.trim() } : {}),
+      });
+      setMyInvitation(inv);
+      setInviteFormOpen(false);
+    } catch (e) {
+      setInviteError(e instanceof Error ? e.message : "邀请没发出去，稍后重试");
+    } finally {
+      setInviteSending(false);
+    }
+  };
+
+  const cancelInvite = async (): Promise<void> => {
+    if (!supply || !activeAccount || !myInvitation || inviteSending) return;
+    setInviteSending(true);
+    try {
+      await supply.cancelInvitation({ merchantId: activeAccount.id, invitationId: myInvitation.id });
+      setMyInvitation({ ...myInvitation, status: "CANCELLED" });
+    } catch {
+      // 撤回失败不编状态：留在 PENDING，下次进来重新读服务端。
+    } finally {
+      setInviteSending(false);
+    }
+  };
+
+  // MERCHANT-CREATOR-INVITE-001：定向邀约（商家→这位 creator）。
+  // myInvitation 是我发给这个人的最新一单（查 sent 按 agentId 找，不是全量展示）；
+  // 表单出价默认她的参考价，留言可选（200 字内）。
+  useEffect(() => {
+    setInviteFormOpen(false);
+    setInviteError(undefined);
+    setInviteSending(false);
+    if (!selectedCreator || !supply || !activeAccount) {
+      setMyInvitation(undefined);
+      setInvitePrice("");
+      setInviteMessage("");
+      return;
+    }
+    const agentId = selectedCreator.agentId;
+    const merchantId = activeAccount.id;
+    setInvitePrice(selectedCreator.referencePrice > 0 ? String(selectedCreator.referencePrice) : "");
+    setInviteMessage("");
+    let active = true;
+    supply.listSentInvitations({ merchantId }).then((invs) => {
+      if (!active) return;
+      const mine = invs
+        .filter((inv) => inv.agentId === agentId)
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
+      setMyInvitation(mine);
+    }).catch(() => { /* 邀约查失败不挡主页：按钮照常可点，状态行空着 */ });
+    return () => { active = false; };
+  }, [selectedCreator, supply, activeAccount]);
 
   const refresh = useCallback(async (accountId: string) => {
     if (!business) return;
@@ -614,11 +696,45 @@ export function MerchantMeR21Replacement({
             title: `${selectedCreator.name}${(selectedCreator.socials ?? [])[0]?.handle ? ` @${((selectedCreator.socials ?? [])[0]?.handle ?? "")}` : ""}`,
           })}
           <SimpleRows onPress={setPage} rows={[["最近到店", "等待真实履约记录"], ["当前权益", "查看关联券", "voucher"], ["当前邀请", "查看活动与邀请", "activity"], ["合作结果", "查看销售归因", "sales"]]} />
+          {/* MERCHANT-CREATOR-INVITE-001：定向邀约区。没邀过 → 邀请合作；
+              表单出价默认她的参考价（可改），留言可选；发出去是 PENDING，
+              她在自己那头接受/拒绝（服务端鉴权：只能本人回）。
+              「查看活动报名」不占按钮位 —— 上面 SimpleRows 里已经有了。 */}
+          {myInvitation?.status === "PENDING" ? (
+            <Text selectable style={styles.meta} testID={`creator-invite-pending-${selectedCreator.agentId}`}>已邀请 · 待对方回复（{myInvitation.expiresAt.slice(0, 10)} 前有效）</Text>
+          ) : myInvitation?.status === "ACCEPTED" ? (
+            <Text selectable style={styles.meta} testID={`creator-invite-accepted-${selectedCreator.agentId}`}>对方已接受合作邀请 · 进合作记录</Text>
+          ) : myInvitation?.status === "DECLINED" ? (
+            <Text selectable style={styles.meta}>对方婉拒了这次合作 · 可以再约</Text>
+          ) : myInvitation?.status === "EXPIRED" ? (
+            <Text selectable style={styles.meta}>上次邀请已过期 · 可以再约</Text>
+          ) : myInvitation?.status === "CANCELLED" ? (
+            <Text selectable style={styles.meta}>已撤回这次邀请 · 可以再约</Text>
+          ) : null}
+          {inviteFormOpen && (!myInvitation || myInvitation.status !== "PENDING") ? (
+            <View style={styles.card}>
+              <Text selectable style={styles.cardTitle}>邀请 {selectedCreator.name} 合作</Text>
+              <Text selectable style={styles.meta}>出价（VND，默认她的参考价）</Text>
+              <TextInput keyboardType="number-pad" onChangeText={setInvitePrice} placeholder={String(selectedCreator.referencePrice)} placeholderTextColor={color.muted} style={styles.searchInput} value={invitePrice} />
+              <Text selectable style={styles.meta}>给她的留言（可选，200 字内）</Text>
+              <TextInput multiline onChangeText={setInviteMessage} placeholder="比如：周末探店 + 晚餐，时间可商量" placeholderTextColor={color.muted} style={styles.searchInput} value={inviteMessage} />
+              {inviteError ? <Text selectable style={styles.meta}>{inviteError}</Text> : null}
+            </View>
+          ) : null}
           <View style={styles.actions}>
-            {/* 诚实文案：这里只是进活动列表看报名，真定向邀请（指定 Creator
-                进指定场次）需要房主场景 + 邀请命令，链路未接前不挂邀请字样。 */}
-            <Pressable onPress={() => setPage("activity")} style={styles.primary} accessibilityLabel="查看活动报名"><Text selectable style={styles.primaryText}>查看活动报名</Text></Pressable>
-            <Pressable onPress={() => { setCreatorView("COLLABS"); setPage("creator"); }} style={styles.secondary}><Text selectable style={styles.secondaryText}>查看记录</Text></Pressable>
+            {myInvitation?.status === "PENDING" ? (<>
+              <Pressable onPress={() => { setCreatorView("COLLABS"); setPage("creator"); }} style={styles.primary} accessibilityLabel="查看合作记录"><Text selectable style={styles.primaryText}>查看记录</Text></Pressable>
+              <Pressable disabled={inviteSending} onPress={() => void cancelInvite()} style={styles.secondary} accessibilityLabel="撤回邀请"><Text selectable style={styles.secondaryText}>{inviteSending ? "处理中…" : "撤回邀请"}</Text></Pressable>
+            </>) : inviteFormOpen ? (<>
+              <Pressable disabled={inviteSending} onPress={() => void sendInvite()} style={styles.primary} accessibilityLabel="发出合作邀请"><Text selectable style={styles.primaryText}>{inviteSending ? "发送中…" : "发出邀请"}</Text></Pressable>
+              <Pressable disabled={inviteSending} onPress={() => { setInviteFormOpen(false); setInviteError(undefined); }} style={styles.secondary} accessibilityLabel="收起邀请表单"><Text selectable style={styles.secondaryText}>收起</Text></Pressable>
+            </>) : myInvitation?.status === "ACCEPTED" ? (<>
+              <Pressable onPress={() => { setCreatorView("COLLABS"); setPage("creator"); }} style={styles.primary} accessibilityLabel="查看合作记录"><Text selectable style={styles.primaryText}>查看记录</Text></Pressable>
+              <Pressable onPress={() => setPage("activity")} style={styles.secondary} accessibilityLabel="查看活动报名"><Text selectable style={styles.secondaryText}>查看活动报名</Text></Pressable>
+            </>) : (<>
+              <Pressable disabled={!supply || !activeAccount} onPress={() => setInviteFormOpen(true)} style={styles.primary} accessibilityLabel="邀请合作" testID={`creator-invite-open-${selectedCreator.agentId}`}><Text selectable style={styles.primaryText}>邀请合作</Text></Pressable>
+              <Pressable onPress={() => { setCreatorView("COLLABS"); setPage("creator"); }} style={styles.secondary} accessibilityLabel="查看记录"><Text selectable style={styles.secondaryText}>查看记录</Text></Pressable>
+            </>)}
           </View>
         </ScrollView>
       </View>

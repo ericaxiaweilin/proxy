@@ -101,6 +101,22 @@ describe("OFFER-ACCEPT-001 我的订单能收到并接受合作邀请", () => {
   });
 });
 
+// MERCHANT-CREATOR-INVITE-001：商家定向邀约的 creator 收件箱 —— 和 SlotOffer
+// 同一个「收到的合作邀请」区块。只摆 PENDING，接受/婉拒两个动作，失败有文案。
+describe("MERCHANT-CREATOR-INVITE-001 我的订单能收到并回复定向邀约", () => {
+  it("loads pending invitations and can accept or decline them", () => {
+    expect(ordersCode).toContain("supply.listReceivedInvitations()");
+    expect(ordersCode).toContain('inv.status === "PENDING"');
+    expect(ordersCode).toContain("supply.respondInvitation(");
+    expect(ordersCode).toContain("接受合作");
+    expect(ordersCode).toContain("婉拒");
+  });
+  it("respond failure lands in a visible notice, not a silent catch", () => {
+    expect(ordersCode).toContain("NOT_PENDING");
+    expect(ordersCode).toContain("操作没有成功");
+  });
+});
+
 // HOME-MYORDERS-JOINS-001（用户「我的订单还是空白」2026-09-29）：For You 下单
 // 走 JoinActivity 活动报名，不落履约订单（join is join）—— 但下单成功页发了编号，
 // 我的订单页却看不到，用户预期是断的。修法：把 ListMyActivities.joined 接进

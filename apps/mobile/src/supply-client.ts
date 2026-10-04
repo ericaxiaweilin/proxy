@@ -190,6 +190,61 @@ export function parseSupplierCandidates(value: unknown): SupplierCandidate[] {
   });
 }
 
+// MERCHANT-CREATOR-INVITE-001：定向邀约。商家发（带 merchantId，网关验成员
+// 身份后盖章）、creator 收（按 principal == agentId 鉴权）。状态只有
+// PENDING 能流转；ACCEPTED/DECLINED/CANCELLED/EXPIRED 是终态展示。
+export type CollabInvitationStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "CANCELLED" | "EXPIRED";
+
+export type CollabInvitation = {
+  id: string;
+  merchantId: string;
+  agentId: string;
+  serviceType: string;
+  startAt?: string | undefined;
+  durationH: number;
+  priceVnd: number;
+  currency: string;
+  message: string;
+  status: CollabInvitationStatus;
+  createdAt: string;
+  respondedAt?: string | undefined;
+  expiresAt: string;
+};
+
+const INVITATION_STATUSES: ReadonlySet<string> = new Set(["PENDING", "ACCEPTED", "DECLINED", "CANCELLED", "EXPIRED"]);
+
+export function parseCollabInvitation(value: unknown): CollabInvitation | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown>;
+  if (typeof item.id !== "string" || item.id === "") return undefined;
+  if (typeof item.merchantId !== "string" || typeof item.agentId !== "string") return undefined;
+  if (typeof item.status !== "string" || !INVITATION_STATUSES.has(item.status)) return undefined;
+  if (typeof item.createdAt !== "string" || typeof item.expiresAt !== "string") return undefined;
+  return {
+    id: item.id,
+    merchantId: item.merchantId,
+    agentId: item.agentId,
+    serviceType: typeof item.serviceType === "string" ? item.serviceType : "",
+    ...(typeof item.startAt === "string" && item.startAt !== "" ? { startAt: item.startAt } : {}),
+    durationH: typeof item.durationH === "number" ? item.durationH : 0,
+    priceVnd: typeof item.priceVnd === "number" ? item.priceVnd : 0,
+    currency: typeof item.currency === "string" ? item.currency : "VND",
+    message: typeof item.message === "string" ? item.message : "",
+    status: item.status as CollabInvitationStatus,
+    createdAt: item.createdAt,
+    ...(typeof item.respondedAt === "string" && item.respondedAt !== "" ? { respondedAt: item.respondedAt } : {}),
+    expiresAt: item.expiresAt,
+  };
+}
+
+export function parseCollabInvitations(value: unknown): CollabInvitation[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const parsed = parseCollabInvitation(entry);
+    return parsed ? [parsed] : [];
+  });
+}
+
 export class SupplyClient {
   private seq = 0;
   public constructor(
@@ -254,6 +309,41 @@ export class SupplyClient {
     for (const k of Object.keys(payload)) if (payload[k] === undefined) delete payload[k];
     const body = this.body(await this.command("QuerySuppliers", { type: "AgentProfile", id: "query" }, payload));
     return parseSupplierCandidates(body.suppliers ?? body.candidates).slice(0, input.limit ?? 20);
+  }
+
+  // MERCHANT-CREATOR-INVITE-001：商家发定向邀约。merchantId 进 payload，
+  // 网关验成员身份后盖章（伪造别人 merchantId 到不了 service）。
+  public async inviteCreator(input: { merchantId: string; agentId: string; priceVnd?: number; message?: string }): Promise<CollabInvitation> {
+    const payload: Record<string, unknown> = { merchantId: input.merchantId, agentId: input.agentId, serviceType: "CITY_COMPANION" };
+    if (input.priceVnd !== undefined) payload.priceVnd = input.priceVnd;
+    if (input.message !== undefined) payload.message = input.message;
+    const body = this.body(await this.command("InviteCreator", { type: "CollabInvitation", id: "new" }, payload));
+    const parsed = parseCollabInvitation(body.invitation);
+    if (!parsed) throw new SupplyProtocolError("invitation malformed");
+    return parsed;
+  }
+
+  public async listSentInvitations(input: { merchantId: string }): Promise<CollabInvitation[]> {
+    const body = this.body(await this.command("ListCollabInvitations", { type: "CollabInvitation", id: "query" }, { merchantId: input.merchantId, role: "sent" }));
+    return parseCollabInvitations(body.invitations);
+  }
+
+  public async cancelInvitation(input: { merchantId: string; invitationId: string }): Promise<void> {
+    await this.command("CancelCollabInvitation", { type: "CollabInvitation", id: input.invitationId }, { merchantId: input.merchantId, invitationId: input.invitationId });
+  }
+
+  // MERCHANT-CREATOR-INVITE-001：creator 收邀约 + 回复。principal 就是 agent 本人，
+  // 服务端按 Principal.ID == agentID 校验 —— 调这个方法的面必须保证是本人视角。
+  public async listReceivedInvitations(): Promise<CollabInvitation[]> {
+    const body = this.body(await this.command("ListCollabInvitations", { type: "CollabInvitation", id: "query" }, { role: "received" }));
+    return parseCollabInvitations(body.invitations);
+  }
+
+  public async respondInvitation(input: { invitationId: string; decision: "ACCEPTED" | "DECLINED" }): Promise<CollabInvitation> {
+    const body = this.body(await this.command("RespondCollabInvitation", { type: "CollabInvitation", id: input.invitationId }, { invitationId: input.invitationId, decision: input.decision }));
+    const parsed = parseCollabInvitation(body.invitation);
+    if (!parsed) throw new SupplyProtocolError("invitation malformed");
+    return parsed;
   }
 
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {

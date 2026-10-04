@@ -188,4 +188,16 @@ describe("CREATOR-LIST-CARD-001 详情页同一套语言", () => {
     expect(detail).not.toContain("✓ 可邀请");
     expect(detail).not.toContain("✗ 不符合资格");
   });
+
+  it("MERCHANT-CREATOR-INVITE-001 详情有邀请合作入口，走真命令不画假按钮", () => {
+    // 发/查/撤三个真命令在组件顶部（effect + handler），按钮/表单/状态行
+    // 在详情分支里 —— 分开断言，别把 handler 搬进详情分支凑数。
+    expect(me).toContain("supply.inviteCreator(");
+    expect(me).toContain("supply.listSentInvitations(");
+    expect(me).toContain("supply.cancelInvitation(");
+    expect(detail).toContain("邀请合作");
+    expect(detail).toContain("creator-invite-open-");
+    expect(detail).toContain("creator-invite-pending-");
+    expect(detail).toContain("creator-invite-accepted-");
+  });
 });
