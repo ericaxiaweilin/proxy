@@ -36,16 +36,17 @@ const listEnd = me.indexOf('if (page === "', listStart);
 const listBranch = me.slice(listStart, listEnd > 0 ? listEnd : undefined);
 
 describe("CREATOR-LIST-CARD-001 报价只有一个格式化实现", () => {
-  it("边界：没有报价 / 千位以下 / K / M 都不把数说高说低", () => {
+  it("边界：没有报价 / 千位以下 / K / tr 都不把数说高说低", () => {
     expect(formatReferencePrice(0, "VND")).toBe("报价待沟通");
     expect(formatReferencePrice(-1, "VND")).toBe("报价待沟通");
     // 900 不是「1K」—— 先判阈值再四舍五入，否则报价被说高。
     expect(formatReferencePrice(900, "VND")).toBe("900 VND");
     expect(formatReferencePrice(1_200, "VND")).toBe("1K VND");
-    expect(formatReferencePrice(1_200_000, "VND")).toBe("1.2M VND");
-    // 999_999 进位到 1000K；印 1.0M 更好读，但绝不许印「1000K」。
-    expect(formatReferencePrice(999_999, "VND")).toBe("1.0M VND");
-    // 币种跟着数据走，不写死 VND。
+    // 越南盾百万位印 tr（triệu），不印 M。
+    expect(formatReferencePrice(1_200_000, "VND")).toBe("1.2tr VND");
+    // 999_999 进位到 1000K；印 1.0tr 更好读，但绝不许印「1000K」。
+    expect(formatReferencePrice(999_999, "VND")).toBe("1.0tr VND");
+    // 币种跟着数据走，不写死 VND；非 VND 暂时印 M（汇率兑换以后再做）。
     expect(formatReferencePrice(1_200_000, "USD")).toBe("1.2M USD");
   });
 
