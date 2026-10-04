@@ -1,6 +1,7 @@
 package api
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -50,6 +51,46 @@ func (g *StaticOperatorGate) IsOperator(_ command.Actor, principal command.Princ
 		return true
 	}
 	return false
+}
+
+// AllowlistedPrincipals returns the env-derived allowlist, sorted, for the operator-access
+// page. Read-only on purpose: this exposes who is an operator, it does not let a caller
+// become one. Granting stays in env (PROXY_OPERATOR_PRINCIPALS) — a web console that could
+// mint operator rights would be a self-escalation path, and there is no MFA/JIT yet.
+func (g *StaticOperatorGate) AllowlistedPrincipals() []string {
+	if g == nil {
+		return nil
+	}
+	out := make([]string, 0, len(g.principalIDs))
+	for id := range g.principalIDs {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ConfiguredScopes returns the per-principal scope narrowing from PROXY_OPERATOR_SCOPES.
+// A principal absent from the result is not narrowed and therefore holds the full
+// vocabulary (the pre-scope behaviour) — the distinction matters, because "no entry" and
+// "entry with zero scopes" are opposite outcomes: the first allows everything, the second
+// denies everything.
+func (g *StaticOperatorGate) ConfiguredScopes() map[string][]OperatorScope {
+	out := map[string][]OperatorScope{}
+	if g == nil {
+		return out
+	}
+	for id, set := range g.scoped {
+		names := make([]string, 0, len(set))
+		for scope := range set {
+			names = append(names, string(scope))
+		}
+		sort.Strings(names)
+		out[id] = make([]OperatorScope, 0, len(names))
+		for _, n := range names {
+			out[id] = append(out[id], OperatorScope(n))
+		}
+	}
+	return out
 }
 
 // operatorCommandTypes are privileged commands that must never be reachable by

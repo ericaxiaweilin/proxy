@@ -33,6 +33,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/numberlookup"
+	"github.com/proxy-app/proxy-api/internal/operatoraudit"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
@@ -141,6 +142,9 @@ type Server struct {
 	Gravity gravity.Store
 	// ProviderApps：接单权限申请 + 运营审核（ORDER-PERMISSION-001）。nil = 端点返回 503。
 	ProviderApps *providerapp.Service
+	// Audit：运营动作审计（OPS-AUDIT-001）。nil = 没配库，运营写口照样执行，
+	// 但 /v1/operator/access 会报 audit.connected=false —— 缺口可见，不是静默。
+	Audit *operatoraudit.Recorder
 	// OrderPermission：有没有接单权限。AI 分身（建分身、模型读本人照片）只对有权限的人开
 	// （ORDER-PERMISSION-TWIN-001）。nil = 没接（测试 / 无库），生产 main.go 必须接。
 	OrderPermission func(ctx context.Context, userAccountID string) (bool, error)
@@ -248,6 +252,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/gravity/recompute", s.operatorConsoleMethod(http.MethodPost, s.operatorGravityRecompute))
 	mux.HandleFunc("/v1/operator/provider-applications", s.operatorConsole(s.operatorProviderApplications))
 	mux.HandleFunc("/v1/operator/provider-applications/review", s.operatorConsoleMethod(http.MethodPost, s.operatorProviderApplicationReview))
+	// OPS-ACCESS-001: 运营权限自己的可观测面 —— 词汇表 / 当前配置 / 我生效的 scope /
+	// 审计计数与最近动作。只读，授权仍然只在 env 里改。走 anyScope 门（是运营就能看
+	// 自己有什么权限），理由见 operatorConsoleAnyScope。
+	mux.HandleFunc("/v1/operator/access", s.operatorConsoleAnyScope(s.operatorAccess))
 	mux.HandleFunc("/v1/media/upload/", s.mediaUpload)
 	mux.HandleFunc("/v1/media/play/", s.mediaFile)
 	mux.HandleFunc("/v1/media/thumb/", s.mediaFile)

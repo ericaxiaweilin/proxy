@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/proxy-app/proxy-api/internal/operatoraudit"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 )
 
@@ -32,6 +33,21 @@ func (s *Server) operatorConsole(handler http.HandlerFunc) http.HandlerFunc {
 
 // operatorConsoleMethod：同一道门，给少数运营写操作（如「立即重算引力」）用 POST。
 func (s *Server) operatorConsoleMethod(method string, handler http.HandlerFunc) http.HandlerFunc {
+	return s.operatorConsoleGated(method, ScopeAnalytics, handler)
+}
+
+// operatorConsoleAnyScope：是运营就放行，不要求某个具体 scope。
+//
+// 只给「看自己的权限」这一类端点用（OPS-ACCESS-001）。控制台其余读口一律要 ANALYTICS，
+// 那是有道理的 —— 它们给的是逐人浏览明细。但权限页要是也卡在 ANALYTICS 上，一个被
+// 收窄成只有 PAYMENTS 的运营连自己有什么权限都看不到，只能去猜；「不知道自己有什么
+// 权限」正是权限模型失效的样子。它暴露的是 scope 词汇表和白名单里的 principal id，
+// 都是内部标识，不是用户数据。
+func (s *Server) operatorConsoleAnyScope(handler http.HandlerFunc) http.HandlerFunc {
+	return s.operatorConsoleGated(http.MethodGet, "", handler)
+}
+
+func (s *Server) operatorConsoleGated(method string, required OperatorScope, handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != method {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
@@ -51,13 +67,54 @@ func (s *Server) operatorConsoleMethod(method string, handler http.HandlerFunc) 
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_access_token"})
 			return
 		}
-		if !s.Operator.IsOperator(auth.Actor, auth.Principal, auth.AuthContext) ||
-			!s.Operator.ScopesFor(auth.Actor, auth.Principal, auth.AuthContext)[ScopeAnalytics] {
+		if !s.Operator.IsOperator(auth.Actor, auth.Principal, auth.AuthContext) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator_privilege_required"})
+			return
+		}
+		if required != "" && !s.Operator.ScopesFor(auth.Actor, auth.Principal, auth.AuthContext)[required] {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator_privilege_required"})
 			return
 		}
 		handler(w, r)
 	}
+}
+
+// operatorIdentity recovers who is acting, for the audit row. The console gate has already
+// proved the caller is an operator with ANALYTICS; this only re-reads the token to get the
+// ids. Empty when it cannot be read — the row is still written with "unknown", because an
+// action whose actor is unknown is worse to drop than to record vaguely.
+func (s *Server) operatorIdentity(r *http.Request) (actorID, principalID string) {
+	raw, ok := bearerToken(r.Header.Get("Authorization"))
+	if !ok || s.Authenticator == nil {
+		return "", ""
+	}
+	auth, err := s.Authenticator.Authenticate(r.Context(), raw)
+	if err != nil {
+		return "", ""
+	}
+	return auth.Actor.ID, auth.Principal.ID
+}
+
+// auditWrite records one operator action. Safe on a nil receiver / nil Audit: the action
+// still happened, and dropping it silently is the exact gap OPS-AUDIT-001 exists to close,
+// so Recorder counts the miss instead (see operatoraudit.Recorder).
+func (s *Server) auditWrite(r *http.Request, action, scope string, e operatoraudit.Entry) {
+	if s.Audit == nil {
+		return
+	}
+	actorID, principalID := s.operatorIdentity(r)
+	if actorID == "" {
+		actorID = "unknown"
+	}
+	e.OperatorID = actorID
+	e.PrincipalID = principalID
+	e.Action = action
+	// The scope recorded is the one the console door actually checked (ANALYTICS for every
+	// /v1/operator/* route), not the domain the action belongs to — an audit row must name
+	// the authority that was exercised, not the authority someone wished had been.
+	e.Scope = scope
+	e.RequestID = r.Header.Get("X-Request-Id")
+	s.Audit.Record(r.Context(), e)
 }
 
 // notConnected：这个页面要的数据在规格里有，但后端还没有对应模块。

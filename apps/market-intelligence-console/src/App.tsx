@@ -22,8 +22,9 @@ import { Retention } from "./pages/Retention";
 import { Trust } from "./pages/Trust";
 import { Quality } from "./pages/Quality";
 import { NumberLookup } from "./pages/NumberLookup";
+import { Access } from "./pages/Access";
 
-type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup";
+type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access";
 
 const TITLES: Record<Page, string> = {
   overview: "平台总览",
@@ -48,6 +49,7 @@ const TITLES: Record<Page, string> = {
   numberlookup: "编号查询",
   quality: "数据治理",
   workbench: "交叉分析工作台",
+  access: "运营权限",
 };
 
 export function App() {
@@ -98,6 +100,14 @@ export function App() {
             <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
           ))}
         </div>
+        {/* OPS-ACCESS-001：谁能做什么，得能看见。放在最后是因为它讲的是这个控制台
+            自己的权限模型，不是业务数据。 */}
+        <div className="navgroup">运营权限</div>
+        <div className="nav">
+          {(["access"] as Page[]).map((p) => (
+            <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
+          ))}
+        </div>
         <div className="sidebar-foot">
           Internal only · Market Intelligence + Decision Engine<br />
           隔离文件夹：apps/market-intelligence-console<br />
@@ -139,9 +149,10 @@ export function App() {
           {page === "trust" && <Trust />}
           {page === "providers" && <ProviderApplications />}
           {page === "numberlookup" && <NumberLookup />}
+          {page === "access" && <Access />}
           {page === "quality" && <Quality />}
           {page === "workbench" && <Quality />}
-          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "retention", "trust", "quality", "workbench", "numberlookup"].includes(page) && (
+          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "retention", "trust", "quality", "workbench", "numberlookup", "access"].includes(page) && (
             <div className="notice">
               <b>{TITLES[page]}</b> — 已接线 19 页（v9 全量）。
             </div>

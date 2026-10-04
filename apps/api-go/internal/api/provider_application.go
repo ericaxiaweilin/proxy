@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/proxy-app/proxy-api/internal/operatoraudit"
 	"github.com/proxy-app/proxy-api/internal/providerapp"
 )
 
@@ -185,9 +186,27 @@ func (s *Server) operatorProviderApplicationReview(w http.ResponseWriter, r *htt
 	}
 	app, err := s.ProviderApps.Review(r.Context(), body.ApplicationID, reviewer, body.Decision == "APPROVE", body.Reason)
 	if err != nil {
+		s.auditWrite(r, "PROVIDER_APPLICATION_REVIEW", string(ScopeAnalytics), operatoraudit.Entry{
+			Outcome:    operatoraudit.OutcomeError,
+			TargetKind: "ProviderApplication",
+			TargetID:   body.ApplicationID,
+			Detail:     map[string]any{"decision": body.Decision, "domain": "provider_application"},
+		})
 		writeProviderAppError(w, err)
 		return
 	}
+	// OPS-AUDIT-001：审核结论此前只落在 supply.provider_applications 的 reviewed_by /
+	// reviewed_at 上 —— 改判一次就覆盖了上一次，谁在中间做过什么决定查不出来。
+	s.auditWrite(r, "PROVIDER_APPLICATION_REVIEW", string(ScopeAnalytics), operatoraudit.Entry{
+		Outcome:    operatoraudit.OutcomeOK,
+		TargetKind: "ProviderApplication",
+		TargetID:   body.ApplicationID,
+		Detail: map[string]any{
+			"decision": body.Decision,
+			"reason":   body.Reason,
+			"domain":   "provider_application",
+		},
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"application": app})
 }
 

@@ -34,6 +34,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/numberlookup"
+	"github.com/proxy-app/proxy-api/internal/operatoraudit"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
 	"github.com/proxy-app/proxy-api/internal/outcome"
@@ -676,6 +677,8 @@ func main() {
 	if pool != nil {
 		server.OpsMetrics = opsmetrics.NewPostgres(pool)
 		server.Gravity = gravity.NewPostgres(pool)
+		// OPS-AUDIT-001：运营动作审计（operator.action_log，migration 161，只追加）。
+		server.Audit = operatoraudit.NewRecorder(operatoraudit.NewPostgres(pool))
 		// PROVIDER-APPLY-001：申请成为小美 + 运营审核。资料门与发帖同一道（profileCompleteness）。
 		providerStore := providerapp.NewPostgres(pool)
 		server.ProviderApps = providerapp.NewService(providerStore, providerStore, providerapp.Deps{
@@ -833,7 +836,22 @@ func main() {
 	// Operator 门禁白名单（env PROXY_OPERATOR_PRINCIPALS，逗号分隔 principal id）。
 	// 未配置时 fail-closed：特权命令（审核/发奖/能力核验/媒体就绪覆盖）一律拒绝。
 	if operatorPrincipals := os.Getenv("PROXY_OPERATOR_PRINCIPALS"); operatorPrincipals != "" {
-		server.Operator = api.NewStaticOperatorGate(strings.Split(operatorPrincipals, ","))
+		gate := api.NewStaticOperatorGate(strings.Split(operatorPrincipals, ","))
+		// OPS-SCOPE-002：按人配 scope，格式 "op_alice:PAYMENTS,MARKETPLACE;op_bob:*"。
+		// 解析器 ParsePrincipalScopes 和它的测试早就在 operator_scopes.go 里，只是从没
+		// 被接上 —— 于是白名单里每个人恒持全部 12 个 scope，"运营权限可拆分"停在词汇表
+		// 上，36 条门命令的 required scope 映射也就只是装饰。
+		// 未配 = 老行为（白名单内全 scope），所以接线本身零行为变更；配了才收紧。
+		// 坏条目 / 未知 scope 名一律跳过并告警：往小了给，绝不静默放大权限。
+		scoped, scopeWarnings := api.ParsePrincipalScopes(os.Getenv("PROXY_OPERATOR_SCOPES"))
+		for _, w := range scopeWarnings {
+			log.Printf("proxy api go: PROXY_OPERATOR_SCOPES: %s", w)
+		}
+		if len(scoped) > 0 {
+			gate.WithPrincipalScopes(scoped)
+			log.Printf("proxy api go: operator scopes narrowed for %d principal(s)", len(scoped))
+		}
+		server.Operator = gate
 	}
 	address := ":" + port
 	if simulatedLogin {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/gravity"
+	"github.com/proxy-app/proxy-api/internal/operatoraudit"
 )
 
 // GRAVITY-001：运营控制台「意图与撮合」页的真实数据 —— 引力状态（spec §6-§7 / §11 / §21）。
@@ -59,8 +60,20 @@ func (s *Server) operatorGravityRecompute(w http.ResponseWriter, r *http.Request
 	n, err := gravity.Recompute(r.Context(), s.Gravity, time.Now().UTC())
 	if err != nil {
 		log.Printf("operator gravity recompute: %v", err)
+		s.auditWrite(r, "GRAVITY_RECOMPUTE", string(ScopeAnalytics), operatoraudit.Entry{
+			Outcome:    operatoraudit.OutcomeError,
+			TargetKind: "GravityModel",
+			Detail:     map[string]any{"error": "gravity_recompute_failed"},
+		})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "gravity_recompute_failed"})
 		return
 	}
+	// OPS-AUDIT-001：重算会改写 decision.user_event_states 里所有人的引力状态，
+	// 而它此前完全不留痕 —— 谁在什么时候把全平台的撮合输入重算了一遍，无从查起。
+	s.auditWrite(r, "GRAVITY_RECOMPUTE", string(ScopeAnalytics), operatoraudit.Entry{
+		Outcome:    operatoraudit.OutcomeOK,
+		TargetKind: "GravityModel",
+		Detail:     map[string]any{"states": n},
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"dataSource": OperatorLiveSource, "states": n})
 }

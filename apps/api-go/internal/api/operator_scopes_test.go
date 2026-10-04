@@ -14,7 +14,7 @@ import (
 // 2. Vocabulary：required 的 scope 必须出自 allOperatorScopes —— 杜绝手滑
 //    写错 scope 名导致"要求了一个谁都没有的 scope"（fail-closed 变 fail-永远拒，
 //    静默断运营）或"引用了不存在的域"。
-// 3. Parity：白名单内 allowlisted=true 时，36 条门命令的放行结果必须与今天
+// 3. Parity：白名单内 allowlisted=true 时，所有门命令的放行结果必须与今天
 //    （纯 IsOperator）逐条一致 —— 本 slice 零行为变更的证据。非 allowlisted
 //    一律不过；非门命令不受本表影响。
 

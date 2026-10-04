@@ -1,6 +1,7 @@
 package api
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -11,21 +12,23 @@ import (
 // 拆成"这个 operator 有哪几个域的 scope"。
 //
 // 背景（PRD Ch.18 §11/§12 + AC-OPS-05/AC-OPS-06）：今天 StaticOperatorGate 是
-// 全有全无 —— 进了 PROXY_OPERATOR_PRINCIPALS 白名单的人能调 36 条特权命令里
-// 的每一条（放款、封号、法务保全、看全量推荐理由……）。§12 要求权限可拆分
+// 全有全无 —— 进了 PROXY_OPERATOR_PRINCIPALS 白名单的人能调每一条特权命令
+// （放款、封号、法务保全、看全量推荐理由……）。§12 要求权限可拆分
 // （Marketplace / Safety / Payments / Identity / Graph + CASE/TASK/MATCH…），
 // AC-OPS-05 要求每个 Team 只看到职责所需的数据。
 //
 // 本 slice 只做不改变任何现行放行的地基（零行为变更），让下一步"按人配 scope"
 // 是一个纯配置改动，而不是又一次授权模型重写：
 //  1. scope 词汇（§12 分组 + 命令现实补的 AUTHORITY/MODERATION/PLATFORM/ANALYTICS）；
-//  2. 36 条门命令 → 唯一 required scope（编译期可数、测试钉住不漏）；
+//  2. 每条门命令 → 唯一 required scope（编译期可数、测试钉住不漏）；
 //  3. ScopesForPrincipal：白名单内 = 全 scope（= 今天的行为），之外 = 空；
 //  4. dispatch 在 IsOperator 通过后再过一道 AuthorizeOperatorCommand —— 今天恒
 //     通过，但从此"加新门命令却忘配 scope"会在测试里炸，而不是在线上敞开。
 //
-// Per-principal scope 配置（env 格式 + main.go 接线 + bootenv 文案）是明确的
-// 下一步，不在本 slice —— 见 ScopesForPrincipal 注释。
+// Per-principal scope 配置（OPS-ACCESS-001，2026-10-04）已经落地：env 格式是
+// ParsePrincipalScopes，接线在 cmd/api/main.go 读 PROXY_OPERATOR_SCOPES，可观测面是
+// GET /v1/operator/access。未配 = 本 slice 原来的行为（白名单内全 scope）。
+// 不写死门命令条数：这个数字一直变（注释里曾写 36，实际早已 43），写数字就是等着烂。
 
 // OperatorScope 是 §12 权限词汇的域级 scope。命令只认 scope，不认人。
 type OperatorScope string
@@ -82,7 +85,7 @@ var allOperatorScopes = []OperatorScope{
 	ScopeAnalytics,
 }
 
-// requiredOperatorScope: 36 条门命令各自唯一的 required scope。
+// requiredOperatorScope: 每条门命令各自唯一的 required scope。
 // 与 security.go 的 operatorCommandTypes 严格 1:1 —— 一边加一边必须加。
 var requiredOperatorScope = map[string]OperatorScope{
 	// CAPABILITY
@@ -157,6 +160,43 @@ var requiredOperatorScope = map[string]OperatorScope{
 func RequiredOperatorScope(commandType string) (OperatorScope, bool) {
 	scope, ok := requiredOperatorScope[commandType]
 	return scope, ok
+}
+
+// operatorScopeDescription is what each scope actually lets someone do, in the words the
+// console shows. It is a second listing of the vocabulary, so a test pins it to
+// allOperatorScopes in BOTH directions: a scope with no description renders blank in the
+// console (an operator cannot tell what they are being granted), and a description for a
+// scope that no longer exists documents a power nobody has.
+var operatorScopeDescription = map[OperatorScope]string{
+	ScopeCase:         "运营工单：创建 / 查看 / 指派 / 解决，以及按编号反查订单、报名、机会、活动",
+	ScopeMarketplace:  "市场运营：店铺推荐评估、活动与配额管理、券采购",
+	ScopeSafety:       "安全处置：事件、封禁、法务保全、临时授权（JIT）",
+	ScopePayments:     "资金动作：支付确认 / 退款 / 放款保全 / 券发行与结算",
+	ScopeIdentity:     "身份核验：实名核验（回答「这个人是谁」，与能力核验分开）",
+	ScopeAuthority:    "有权机关：司法调证请求的受理与响应（fail-closed）",
+	ScopeModeration:   "内容与社区治理：媒体评审、举报处置、申诉复核",
+	ScopeCapability:   "能力核验：回答「会不会」，决定谁有资格接单",
+	ScopeContribution: "贡献评审与激励：准入、领域、奖励门、发放",
+	ScopeMedia:        "媒体就绪裁决",
+	ScopePlatform:     "平台级共享词表与系统通知渠道（模板 / 收件箱代写）",
+	ScopeAnalytics:    "行为轨迹回放与归因：看的是「谁看了谁」，只能给需要归因回放的角色",
+}
+
+// commandsByScope groups the gated commands by the scope that unlocks them. Derived from
+// requiredOperatorScope at call time, never listed a second time: a hand-written copy is
+// exactly how a page comes to describe permissions the code does not enforce.
+func commandsByScope() map[OperatorScope][]string {
+	out := make(map[OperatorScope][]string, len(allOperatorScopes))
+	for _, scope := range allOperatorScopes {
+		out[scope] = []string{}
+	}
+	for commandType, scope := range requiredOperatorScope {
+		out[scope] = append(out[scope], commandType)
+	}
+	for scope := range out {
+		sort.Strings(out[scope])
+	}
+	return out
 }
 
 // ScopesForPrincipal 返回某 principal 持有的 scope 集合（无配置时的后备）。
