@@ -129,8 +129,8 @@ export type SupplierCandidate = {
   verifiedCapabilities?: string[];
   // MERCHANT-CREATOR-TAGS-001：粉丝数没有聚合来源；商家看到的是已关联
   // 社媒账号（platform + handle + 自填粉丝数，可见性已在服务端按调用方过滤）。
-  // 老服务端不带该字段时解析为 []，调用方按“无社媒”处理。
-  socials?: Array<{ platform: string; handle: string; followerCount?: number }>;
+  // followerCount 必有（缺失记 0=未披露）。老服务端不带 socials 字段时为空数组。
+  socials?: Array<{ platform: string; handle: string; followerCount: number }>;
   // MERCHANT-CREATOR-TAGS-001：创作者自声明内容垂类（展示过滤在客户端）。
   // 老服务端不带该字段时解析为 []。
   verticalTags?: string[];
@@ -156,15 +156,13 @@ export function parseSupplierCandidates(value: unknown): SupplierCandidate[] {
       photos: Array.isArray(item.photos) ? item.photos.filter((photo): photo is string => typeof photo === "string" && photo.length > 0) : [],
       languages: Array.isArray(item.languages) ? item.languages.filter((language): language is string => typeof language === "string") : [],
       verticalTags: Array.isArray(item.verticalTags) ? item.verticalTags.filter((tag): tag is string => typeof tag === "string" && tag.length > 0) : [],
-      socials: Array.isArray(item.socials) ? item.socials.flatMap((entry): Array<{ platform: string; handle: string; followerCount?: number }> => {
+      socials: Array.isArray(item.socials) ? item.socials.flatMap((entry): Array<{ platform: string; handle: string; followerCount: number }> => {
         if (!entry || typeof entry !== "object") return [];
         const record = entry as Record<string, unknown>;
         if (typeof record.platform !== "string" || typeof record.handle !== "string" || record.handle === "") return [];
-        return [{
-          platform: record.platform,
-          handle: record.handle,
-          ...(typeof record.followerCount === "number" && record.followerCount > 0 ? { followerCount: Math.floor(record.followerCount) } : {}),
-        }];
+        // 粉丝数字段必有：缺失/非法一律记 0（未披露），调用方不再需要判空。
+        const count = typeof record.followerCount === "number" && record.followerCount > 0 ? Math.floor(record.followerCount) : 0;
+        return [{ platform: record.platform, handle: record.handle, followerCount: count }];
       }) : [],
       verifiedCapabilities: Array.isArray(item.verifiedCapabilities) ? item.verifiedCapabilities.filter((capability): capability is string => typeof capability === "string" && capability.length > 0) : [],
       serviceType: typeof item.serviceType === "string" ? item.serviceType : "",

@@ -73,7 +73,10 @@ func TestMerchantCreatorSeedTagsForMerchantCards(t *testing.T) {
 	if !strings.Contains(socials["agent_linh"], `"handle":"linh_hanoi"`) {
 		t.Fatalf("linh seed socials must carry tiktok linh_hanoi, got %s", socials["agent_linh"])
 	}
-	if len(socials) != 1 {
-		t.Fatalf("only linh has seed socials, got %d agents", len(socials))
+	// 商家页要求人人有粉丝量字段：6 个种子达人必须全有社媒账号。
+	for _, id := range []string{"agent_linh", "agent_mai", "agent_an", "agent_thao", "agent_yen", "agent_minh"} {
+		if socials[id] == "" {
+			t.Fatalf("seed socials missing for %s: every seeded creator must carry one", id)
+		}
 	}
 }

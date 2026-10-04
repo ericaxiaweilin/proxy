@@ -27,12 +27,12 @@ describe("creator-capability-labels (MERCHANT-CREATOR-TAGS-001)", () => {
     expect(labelSocial("tiktok", "linh_hanoi")).toBe("🎵 @linh_hanoi");
     expect(labelSocial("zalo", "")).toBe("");
   });
-  it("粉丝数自填格式化：万级缩写，无数不渲染", () => {
+  it("粉丝数必有：0 也照印（未披露），调用方不许判空隐藏", () => {
     expect(formatFansCount(24000)).toBe("2.4w");
     expect(formatFansCount(10000)).toBe("1w");
     expect(formatFansCount(950)).toBe("950");
-    expect(formatFansCount(0)).toBe("");
-    expect(formatFansCount(undefined)).toBe("");
+    expect(formatFansCount(0)).toBe("0");
+    expect(formatFansCount(undefined)).toBe("0");
   });
   it("垂类只明示三类，其余返回空", () => {
     expect(labelVertical("RESTAURANT")).toBe("餐饮");

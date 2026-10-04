@@ -31,8 +31,15 @@ func merchantCreatorSeedServices() []merchantCreatorSeedService {
 }
 
 func merchantCreatorSeedSocials() map[string]string {
+	// 演示种子：6 个人人有 tiktok 公开账号 + 自填粉丝数（商家页要求人人有粉丝量字段）。
+	// 真实创作者在绑定社媒时自填；这里是种子演示数据，对账以线上为准。
 	return map[string]string{
 		"agent_linh": `[{"platform":"tiktok","handle":"linh_hanoi","visibility":"public","followerCount":24000}]`,
+		"agent_mai":  `[{"platform":"tiktok","handle":"mai_hanoi","visibility":"public","followerCount":18000}]`,
+		"agent_an":   `[{"platform":"tiktok","handle":"an_hanoi","visibility":"public","followerCount":12000}]`,
+		"agent_thao": `[{"platform":"tiktok","handle":"thao_hanoi","visibility":"public","followerCount":8000}]`,
+		"agent_yen":  `[{"platform":"tiktok","handle":"yen_hanoi","visibility":"public","followerCount":15000}]`,
+		"agent_minh": `[{"platform":"tiktok","handle":"minh_saigon","visibility":"public","followerCount":22000}]`,
 	}
 }
 

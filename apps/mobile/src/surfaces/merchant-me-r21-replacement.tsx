@@ -423,7 +423,7 @@ export function MerchantMeR21Replacement({
                 <View style={[styles.creatorEligibility, creator.eligibility.eligible ? styles.creatorEligibilityOn : styles.creatorEligibilityOff]}>
                   <Text selectable style={[styles.creatorEligibilityText, creator.eligibility.eligible ? styles.creatorEligibilityTextOn : styles.creatorEligibilityTextOff]}>{creator.eligibility.eligible ? "✓ 可邀请" : "✗ 不符合资格"}</Text>
                 </View>
-                {formatFansCount(creator.socials?.[0]?.followerCount) !== "" ? <Text selectable numberOfLines={1} style={styles.creatorStat}>{`粉丝 ${formatFansCount(creator.socials?.[0]?.followerCount)}`}</Text> : null}
+                {<Text selectable numberOfLines={1} style={styles.creatorStat}>{`粉丝 ${formatFansCount(creator.socials?.[0]?.followerCount)}`}</Text>}
                 <Text selectable numberOfLines={1} style={styles.creatorStat}>{`到店 ${creator.photos.length} 媒体`}</Text>
               </View>
               </View>

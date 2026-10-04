@@ -1431,19 +1431,20 @@ func (s *Service) verifiedCapabilityCodes(ctx context.Context, agentID string) [
 	return codes
 }
 
-// visibleSocialSummaries 给 QuerySuppliers 用：只吐 platform/handle（+ 有就带
-// 自填粉丝数），不含 visibility/时间戳。空返回 [] 不返回 null（wire 契约）。
+// visibleSocialSummaries 给 QuerySuppliers 用：platform/handle 必带，
+// followerCount 必带（自填，未披露记 0 —— 商家页“每个 creator 必须有粉丝量
+// 字段，没有就是 bug”）；不含 visibility/时间戳。空返回 [] 不返回 null。
 func visibleSocialSummaries(socials []AgentSocial, viewerIsSelf, viewerIsMerchant bool) []map[string]any {
 	out := []map[string]any{}
 	for _, item := range socialsVisibleToViewer(socials, viewerIsSelf, viewerIsMerchant) {
 		if item.Platform == "" || item.Handle == "" {
 			continue
 		}
-		summary := map[string]any{"platform": item.Platform, "handle": item.Handle}
-		if item.FollowerCount > 0 {
-			summary["followerCount"] = item.FollowerCount
+		count := item.FollowerCount
+		if count < 0 {
+			count = 0
 		}
-		out = append(out, summary)
+		out = append(out, map[string]any{"platform": item.Platform, "handle": item.Handle, "followerCount": count})
 	}
 	return out
 }

@@ -21,15 +21,15 @@ describe("merchant creator recommendations", () => {
   it("MERCHANT-CREATOR-TAGS-001 keeps socials, drops malformed entries", () => {
     const parsed = parseSupplierCandidates([{ agentId: "c3", name: "C", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, socials: [{ platform: "tiktok", handle: "linh_hanoi" }, { platform: "x" }, null, "s"] }]);
     expect(parsed).toHaveLength(1);
-    expect(parsed[0]?.socials).toEqual([{ platform: "tiktok", handle: "linh_hanoi" }]);
+    expect(parsed[0]?.socials).toEqual([{ platform: "tiktok", handle: "linh_hanoi", followerCount: 0 }]);
     const absent = parseSupplierCandidates([{ agentId: "c4", name: "D", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {} }]);
     expect(absent[0]?.socials).toEqual([]);
   });
-  it("MERCHANT-CREATOR-TAGS-001 社媒粉丝数自填透出，非正数丢弃", () => {
-    const parsed = parseSupplierCandidates([{ agentId: "c6", name: "F", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, socials: [{ platform: "tiktok", handle: "linh_hanoi", followerCount: 24000 }, { platform: "zalo", handle: "x", followerCount: -5 }] }]);
+  it("MERCHANT-CREATOR-TAGS-001 社媒粉丝数字段必有，缺失记 0", () => {
+    const parsed = parseSupplierCandidates([{ agentId: "c6", name: "F", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, socials: [{ platform: "tiktok", handle: "linh_hanoi", followerCount: 24000 }, { platform: "zalo", handle: "x" }] }]);
     expect(parsed[0]?.socials).toEqual([
       { platform: "tiktok", handle: "linh_hanoi", followerCount: 24000 },
-      { platform: "zalo", handle: "x" },
+      { platform: "zalo", handle: "x", followerCount: 0 },
     ]);
   });
   it("MERCHANT-CREATOR-TAGS-001 keeps vertical tags raw, drops junk", () => {

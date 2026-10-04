@@ -68,10 +68,10 @@ export function labelSocial(platform: string, handle: string): string {
 }
 
 // MERCHANT-CREATOR-TAGS-001：粉丝数是创作者自填（和报价一个性质），
-// 商家点账号去平台自验。>=10000 印成 x.xw（如 2.4w，整数去尾零），
-// 以下印原数；<=0 或非数返回空字符串（不渲染）。
+// 商家点账号去平台自验。每个 creator 必有该字段（缺失记 0=未披露），
+// 所以这里 0 也照印 —— “没有就是 bug”，调用方不许再判空隐藏。
 export function formatFansCount(count: number | undefined): string {
-  if (typeof count !== "number" || !(count > 0)) return "";
+  if (typeof count !== "number" || !(count >= 0)) return "0";
   const n = Math.floor(count);
   if (n < 10000) return `${n}`;
   const w = n / 10000;
