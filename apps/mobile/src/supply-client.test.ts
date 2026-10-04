@@ -9,6 +9,35 @@ describe("merchant creator recommendations", () => {
   it("drops malformed records instead of inventing creators", () => {
     expect(parseSupplierCandidates([{ name: "fake" }, null, "creator"])).toEqual([]);
   });
+
+  it("MERCHANT-CREATOR-TAGS-001 keeps verified capabilities, drops junk", () => {
+    const withCaps = parseSupplierCandidates([{ agentId: "c1", name: "A", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, verifiedCapabilities: ["ZH", "PHOTOGRAPHY", 42, ""] }]);
+    expect(withCaps).toHaveLength(1);
+    expect(withCaps[0]?.verifiedCapabilities).toEqual(["ZH", "PHOTOGRAPHY"]);
+    const withoutCaps = parseSupplierCandidates([{ agentId: "c2", name: "B", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {} }]);
+    expect(withoutCaps).toHaveLength(1);
+    expect(withoutCaps[0]?.verifiedCapabilities).toEqual([]);
+  });
+  it("MERCHANT-CREATOR-TAGS-001 keeps socials, drops malformed entries", () => {
+    const parsed = parseSupplierCandidates([{ agentId: "c3", name: "C", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, socials: [{ platform: "tiktok", handle: "linh_hanoi" }, { platform: "x" }, null, "s"] }]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.socials).toEqual([{ platform: "tiktok", handle: "linh_hanoi" }]);
+    const absent = parseSupplierCandidates([{ agentId: "c4", name: "D", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {} }]);
+    expect(absent[0]?.socials).toEqual([]);
+  });
+  it("MERCHANT-CREATOR-TAGS-001 keeps vertical tags raw, drops junk", () => {
+    const parsed = parseSupplierCandidates([{ agentId: "c5", name: "E", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, verticalTags: ["RESTAURANT", "KTV", 7, ""] }]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.verticalTags).toEqual(["RESTAURANT", "KTV"]);
+  });
+  it("MERCHANT-CREATOR-TAGS-001 keeps verified capabilities, drops junk", () => {
+    const withCaps = parseSupplierCandidates([{ agentId: "c1", name: "A", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, verifiedCapabilities: ["ZH", "PHOTOGRAPHY", 42, ""] }]);
+    expect(withCaps).toHaveLength(1);
+    expect(withCaps[0]?.verifiedCapabilities).toEqual(["ZH", "PHOTOGRAPHY"]);
+    const withoutCaps = parseSupplierCandidates([{ agentId: "c2", name: "B", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {} }]);
+    expect(withoutCaps).toHaveLength(1);
+    expect(withoutCaps[0]?.verifiedCapabilities).toEqual([]);
+  });
 });
 
 // SUPPLY-BODY-001: 服务端 payload 解析失败必须**抛**，不能返回空对象 ——

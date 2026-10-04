@@ -118,6 +118,163 @@ func setupAgent(t *testing.T, s *Service, agentID, name string, languages []stri
 
 // B 完成标准：3 个真实测试 Agent → 不同 Capability/Verification/Availability
 // → 发 City Companion Need → 只返回真正符合条件的人。
+// MERCHANT-CREATOR-TAGS-001：商家标签只印 VERIFIED 未过期的能力。
+// QuerySuppliers 必须把同一套 verifiedCapabilitySet 带出来，声明了但没
+// 验证过的（DRIVING）不许出现；顺序固定保证快照可比。
+func TestQuerySuppliersCarriesVerifiedCapabilities(t *testing.T) {
+	s := New()
+	setupAgent(t, s, "agent_tagged", "Tagged", []string{"ZH", "VI"}, "hn", 1200000)
+	for _, cap := range []string{"PHOTOGRAPHY", "DRIVING"} {
+		r := s.Handle(envelopeForPrincipal("DeclareCapability", map[string]any{
+			"agentId": "agent_tagged", "capability": cap,
+		}, "", "agent_tagged"))
+		if r.Outcome != "ACCEPTED" {
+			t.Fatalf("declare %s: %s", cap, r.Outcome)
+		}
+	}
+	r := s.Handle(envelopeForPrincipal("VerifyCapability", map[string]any{
+		"agentId": "agent_tagged", "capability": "PHOTOGRAPHY", "method": "INTERVIEW", "decision": "APPROVE",
+	}, "", "agent_tagged"))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("verify PHOTOGRAPHY: %s", r.Outcome)
+	}
+	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	r = s.Handle(envelopeFor("QuerySuppliers", map[string]any{
+		"marketId": "hn", "startAt": start, "durationH": 8,
+		"serviceType": "CITY_COMPANION", "languages": []string{"ZH"},
+	}, ""))
+	var view struct {
+		Suppliers []map[string]any `json:"suppliers"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	if len(view.Suppliers) != 1 {
+		t.Fatalf("want exactly agent_tagged, got %d suppliers", len(view.Suppliers))
+	}
+	raw, ok := view.Suppliers[0]["verifiedCapabilities"]
+	if !ok {
+		t.Fatal("MERCHANT-CREATOR-TAGS-001: suppliers entry must carry verifiedCapabilities")
+	}
+	got := []string{}
+	for _, v := range raw.([]any) {
+		got = append(got, v.(string))
+	}
+	want := []string{"PHOTOGRAPHY", "VI", "ZH"}
+	if len(got) != len(want) {
+		t.Fatalf("want verified caps %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("want verified caps %v, got %v", want, got)
+		}
+	}
+}
+
+// MERCHANT-CREATOR-TAGS-001：粉丝数没有聚合来源，商家看到的是已关联账号。
+// QuerySuppliers 给商家带 public + merchants 可见的 platform/handle；
+// private 的不许漏出去；无社媒印 [] 不印 null。
+func TestQuerySuppliersCarriesMerchantVisibleSocials(t *testing.T) {
+	s := New()
+	setupAgent(t, s, "agent_social", "Social", []string{"ZH"}, "hn", 1200000)
+	link := func(platform, handle, visibility string) {
+		r := s.Handle(envelopeForPrincipal("LinkAgentSocial", map[string]any{
+			"agentId": "agent_social", "platform": platform, "handle": handle, "visibility": visibility,
+		}, "", "agent_social"))
+		if r.Outcome != "ACCEPTED" {
+			t.Fatalf("link %s: %s", platform, r.Outcome)
+		}
+	}
+	link("tiktok", "linh_hanoi", "public")
+	link("instagram", "linh.ig", "private")
+	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	query := func(merchantID string) []map[string]any {
+		env := envelopeFor("QuerySuppliers", map[string]any{
+			"marketId": "hn", "startAt": start, "durationH": 8,
+			"serviceType": "CITY_COMPANION", "languages": []string{"ZH"},
+		}, "")
+		if merchantID != "" {
+			env.AuthContext = map[string]any{"merchantID": merchantID}
+		}
+		r := s.Handle(env)
+		var view struct {
+			Suppliers []map[string]any `json:"suppliers"`
+		}
+		_ = json.Unmarshal([]byte(r.OperationRef), &view)
+		if len(view.Suppliers) != 1 {
+			t.Fatalf("want exactly agent_social, got %d suppliers", len(view.Suppliers))
+		}
+		return view.Suppliers
+	}
+	got := query("merchant_1")
+	socials, ok := got[0]["socials"].([]any)
+	if !ok {
+		t.Fatalf("MERCHANT-CREATOR-TAGS-001: suppliers entry must carry socials array, got %v", got[0]["socials"])
+	}
+	if len(socials) != 1 {
+		t.Fatalf("merchant sees public only, want 1 social, got %v", socials)
+	}
+	first, _ := socials[0].(map[string]any)
+	if first["platform"] != "tiktok" || first["handle"] != "linh_hanoi" {
+		t.Fatalf("wrong social content: %v", socials[0])
+	}
+	if _, hasVis := first["visibility"]; hasVis {
+		t.Fatalf("visibility must not leak to client: %v", first)
+	}
+}
+
+// MERCHANT-CREATOR-TAGS-001：垂直分类走创作者自声明，服务端原样透出
+// （含不明示类目也不过滤——过滤是展示层的事）；空印 []。
+func TestQuerySuppliersCarriesVerticalTags(t *testing.T) {
+	s := New()
+	r := s.Handle(envelopeForPrincipal("CreateAgentProfile", map[string]any{
+		"agentId": "agent_vert", "name": "Vert", "photos": []string{}, "languages": []string{"ZH"}, "serviceAreas": []string{"hn"},
+	}, "", "agent_vert"))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("create profile: %s", r.Outcome)
+	}
+	r = s.Handle(envelopeForPrincipal("CreateAgentService", map[string]any{
+		"agentId": "agent_vert", "serviceType": "CITY_COMPANION", "referencePrice": 900000,
+		"currency": "VND", "markets": []string{"hn"}, "verticalTags": []string{"RESTAURANT", "KTV", "", "RESTAURANT"},
+	}, "", "agent_vert"))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("create service: %s (%+v)", r.Outcome, r.Error)
+	}
+	markSellersVerified(s, "agent_vert")
+	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	_ = s.Handle(envelopeForPrincipal("SetAvailabilityWindow", map[string]any{
+		"agentId": "agent_vert", "startAt": start,
+		"endAt": time.Now().Add(34 * time.Hour).UTC().Format(time.RFC3339), "marketId": "hn",
+	}, "", "agent_vert"))
+	r = s.Handle(envelopeFor("QuerySuppliers", map[string]any{
+		"marketId": "hn", "startAt": start, "durationH": 8,
+		"serviceType": "CITY_COMPANION", "languages": []string{},
+	}, ""))
+	var view struct {
+		Suppliers []map[string]any `json:"suppliers"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	if len(view.Suppliers) != 1 {
+		t.Fatalf("want exactly agent_vert, got %d", len(view.Suppliers))
+	}
+	raw, ok := view.Suppliers[0]["verticalTags"].([]any)
+	if !ok {
+		t.Fatalf("suppliers entry must carry verticalTags array, got %v", view.Suppliers[0]["verticalTags"])
+	}
+	got := []string{}
+	for _, v := range raw {
+		got = append(got, v.(string))
+	}
+	// 去重+去空+封顶3，原样透出（含 KTV——展示层才过滤）。
+	want := []string{"RESTAURANT", "KTV"}
+	if len(got) != len(want) {
+		t.Fatalf("want verticals %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("want verticals %v, got %v", want, got)
+		}
+	}
+}
+
 func TestSupplyQueryReturnsOnlyEligible(t *testing.T) {
 	s := New()
 	// Linh：河内，中文+越南语 VERIFIED，有窗口

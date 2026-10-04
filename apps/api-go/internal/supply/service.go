@@ -58,7 +58,7 @@ type AgentSocial struct {
 	// 用户名，不含 @，不含 URL，不含空白。
 	Handle string `json:"handle"`
 	// 可见性，封闭集合（见 SOCIAL-VISIBILITY-001）。
-	Visibility string `json:"visibility"`
+	Visibility string    `json:"visibility"`
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
@@ -69,9 +69,10 @@ var validSocialPlatforms = map[string]bool{
 }
 
 // CREATOR-SOCIAL-001：可见性封闭集合。
-//   public   —— 所有人可见（含未登录的公开浏览）；
-//   merchants —— 仅已验商家 + 本人可见（默认，见 LinkAgentSocial）；
-//   private  —— 仅本人可见（商家页永远看不到这条，不是"隐藏后还能看到"）。
+//
+//	public   —— 所有人可见（含未登录的公开浏览）；
+//	merchants —— 仅已验商家 + 本人可见（默认，见 LinkAgentSocial）；
+//	private  —— 仅本人可见（商家页永远看不到这条，不是"隐藏后还能看到"）。
 var validSocialVisibilities = map[string]bool{
 	"public": true, "merchants": true, "private": true,
 }
@@ -104,13 +105,18 @@ func isValidSocialHandle(handle string) bool {
 
 // AgentService 是 Agent 提供的一项服务（当前类别：CITY_COMPANION）。
 type AgentService struct {
-	AgentID        string    `json:"agentId"`
-	ServiceType    string    `json:"serviceType"` // CITY_COMPANION（未来扩类别不改核心表）
-	Status         string    `json:"status"`      // DRAFT | ACTIVE | PAUSED | RETIRED
-	ReferencePrice int64     `json:"referencePrice"`
-	Currency       string    `json:"currency"`
-	Markets        []string  `json:"markets"` // market_id 列表
-	UpdatedAt      time.Time `json:"updatedAt"`
+	AgentID        string   `json:"agentId"`
+	ServiceType    string   `json:"serviceType"` // CITY_COMPANION（未来扩类别不改核心表）
+	Status         string   `json:"status"`      // DRAFT | ACTIVE | PAUSED | RETIRED
+	ReferencePrice int64    `json:"referencePrice"`
+	Currency       string   `json:"currency"`
+	Markets        []string `json:"markets"` // market_id 列表
+	// MERCHANT-CREATOR-TAGS-001：创作者自声明的内容垂类（如餐厅/咖啡店/旅游，
+	// 也可能是 KTV/SPA 等不明示类目）。展示过滤在客户端封闭名单里做，
+	// 服务端只做长度与数量上限，不过滤内容 —— “能链接不能明面讲”：
+	// 数据层如实透出，展示层决定说什么。
+	VerticalTags []string  `json:"verticalTags,omitempty"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 // Capability 是能力（declared 与 verified 分离）。
@@ -175,7 +181,7 @@ type AvailabilitySnapshot struct {
 
 // Candidate 是有限候选集成员（快照，之后 Agent 变化不改历史）。
 type Candidate struct {
-	AgentID        string               `json:"agentId"`
+	AgentID string `json:"agentId"`
 	// CREATOR-HOME-001：同上，候选列表直接带 userAccountId，省一次 passport 查询。
 	UserAccountID  string               `json:"userAccountId,omitempty"`
 	Name           string               `json:"name"`
@@ -553,6 +559,7 @@ func cloneProfile(p AgentProfile) AgentProfile {
 
 func cloneService(s AgentService) AgentService {
 	s.Markets = append([]string(nil), s.Markets...)
+	s.VerticalTags = append([]string(nil), s.VerticalTags...)
 	return s
 }
 
@@ -993,6 +1000,25 @@ type servicePayload struct {
 	ReferencePrice int64    `json:"referencePrice"`
 	Currency       string   `json:"currency"`
 	Markets        []string `json:"markets"`
+	VerticalTags   []string `json:"verticalTags"`
+}
+
+// cleanVerticalTags：去空白、去重、封顶 3 个；不过滤内容（展示过滤在客户端）。
+func cleanVerticalTags(tags []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, tag := range tags {
+		code := strings.TrimSpace(tag)
+		if code == "" || seen[code] {
+			continue
+		}
+		seen[code] = true
+		out = append(out, code)
+		if len(out) >= 3 {
+			break
+		}
+	}
+	return out
 }
 
 func (s *Service) createService(ctx context.Context, e command.Envelope) command.Result {
@@ -1019,6 +1045,7 @@ func (s *Service) createService(ctx context.Context, e command.Envelope) command
 		ReferencePrice: p.ReferencePrice,
 		Currency:       p.Currency,
 		Markets:        p.Markets,
+		VerticalTags:   cleanVerticalTags(p.VerticalTags),
 		UpdatedAt:      s.clock.Now().UTC(),
 	}
 	domainEvents := []event.DomainEvent{event.New("AgentServiceCreated", "AgentService", p.AgentID+"|"+p.ServiceType, 1, e.Principal.ID, e.CorrelationID, e.CommandID, svc.UpdatedAt, map[string]any{
@@ -1059,6 +1086,9 @@ func (s *Service) updateService(ctx context.Context, e command.Envelope) command
 	}
 	if p.Markets != nil {
 		svc.Markets = p.Markets
+	}
+	if p.VerticalTags != nil {
+		svc.VerticalTags = cleanVerticalTags(p.VerticalTags)
 	}
 	svc.UpdatedAt = s.clock.Now().UTC()
 	domainEvents := []event.DomainEvent{event.New("AgentServiceUpdated", "AgentService", p.AgentID+"|"+p.ServiceType, 1, e.Principal.ID, e.CorrelationID, e.CommandID, svc.UpdatedAt, map[string]any{
@@ -1359,6 +1389,53 @@ func (s *Service) blockWindow(ctx context.Context, e command.Envelope) command.R
 
 // ---------- Eligibility Gate + Supply Query ----------
 
+func (s *Service) verifiedCapabilitySet(ctx context.Context, agentID string) map[string]bool {
+	verified := map[string]bool{}
+	verifications, _ := s.repository.GetVerifications(ctx, agentID)
+	now := s.clock.Now().UTC()
+	for _, v := range verifications {
+		if v.Status == "VERIFIED" && v.ExpiresAt.After(now) {
+			verified[v.Capability] = true
+		}
+	}
+	// 兼容：若无 verification 记录但 capability.verified 已置位（内存测试旧数据），仍视为有效，直到下次验证写入。
+	if len(verifications) == 0 {
+		caps, _ := s.repository.GetCapabilities(ctx, agentID)
+		for _, c := range caps {
+			if c.Verified {
+				verified[c.Capability] = true
+			}
+		}
+	}
+	return verified
+}
+
+// verifiedCapabilityCodes 给商家侧标签用：只放 VERIFIED 且未过期的能力编码，
+// 排序后返回保证快照稳定。和 evaluateEligibility 用同一套判定，不会有
+// “这边能排上、那边标签没有”的分叉。
+func (s *Service) verifiedCapabilityCodes(ctx context.Context, agentID string) []string {
+	set := s.verifiedCapabilitySet(ctx, agentID)
+	codes := make([]string, 0, len(set))
+	for code := range set {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	return codes
+}
+
+// visibleSocialSummaries 给 QuerySuppliers 用：只吐 platform/handle，
+// 不含 visibility/时间戳。空返回 [] 不返回 null（wire 契约）。
+func visibleSocialSummaries(socials []AgentSocial, viewerIsSelf, viewerIsMerchant bool) []map[string]any {
+	out := []map[string]any{}
+	for _, item := range socialsVisibleToViewer(socials, viewerIsSelf, viewerIsMerchant) {
+		if item.Platform == "" || item.Handle == "" {
+			continue
+		}
+		out = append(out, map[string]any{"platform": item.Platform, "handle": item.Handle})
+	}
+	return out
+}
+
 func (s *Service) evaluateEligibility(ctx context.Context, agentID string, q SupplyQuery) (EligibilitySnapshot, error) {
 	var snap EligibilitySnapshot
 	snap.AgentID = agentID
@@ -1381,23 +1458,7 @@ func (s *Service) evaluateEligibility(ctx context.Context, agentID string, q Sup
 	}
 	// Capability 硬要求：语言 + 能力都要 VERIFIED 且未过期
 	// 必须以 capability_verifications 的未过期 VERIFIED 记录为准，不能仅靠 capabilities.verified 布尔（过期后需失效）。
-	verified := map[string]bool{}
-	verifications, _ := s.repository.GetVerifications(ctx, agentID)
-	now := s.clock.Now().UTC()
-	for _, v := range verifications {
-		if v.Status == "VERIFIED" && v.ExpiresAt.After(now) {
-			verified[v.Capability] = true
-		}
-	}
-	// 兼容：若无 verification 记录但 capability.verified 已置位（内存测试旧数据），仍视为有效，直到下次验证写入。
-	if len(verifications) == 0 {
-		caps, _ := s.repository.GetCapabilities(ctx, agentID)
-		for _, c := range caps {
-			if c.Verified {
-				verified[c.Capability] = true
-			}
-		}
-	}
+	verified := s.verifiedCapabilitySet(ctx, agentID)
 	snap.CapabilitiesOK = true
 	for _, lang := range q.Languages {
 		if !verified[lang] {
@@ -1485,11 +1546,27 @@ func (s *Service) querySuppliers(ctx context.Context, e command.Envelope) comman
 			}
 		}
 		results = append(results, map[string]any{
-			"agentId":        profile.AgentID,
-			"name":           profile.Name,
-			"photos":         profile.Photos,
-			"languages":      profile.Languages,
-			"serviceType":    p.ServiceType,
+			"agentId":     profile.AgentID,
+			"name":        profile.Name,
+			"photos":      profile.Photos,
+			"languages":   profile.Languages,
+			"serviceType": p.ServiceType,
+			// MERCHANT-CREATOR-TAGS-001：商家标签只印 VERIFIED 未过期的能力，
+			// 和准入判定同一套 verifiedCapabilitySet，不会各说各话。
+			// 空数组按契约印 [] 不印 null。
+			"verifiedCapabilities": s.verifiedCapabilityCodes(ctx, profile.AgentID),
+			// MERCHANT-CREATOR-TAGS-001：粉丝数没有聚合来源，商家看到的是已关联
+			// 社媒账号（去平台自验）。只给调用方可见的（public + 已验商家），
+			// 只带 platform/handle。
+			"socials": visibleSocialSummaries(profile.Socials, false, merchantViewer(e)),
+			// verticalTags 原样透出（含不明示类目）；展示过滤在客户端封闭名单。
+			// 空按契约印 [] 不印 null。
+			"verticalTags": func() []string {
+				if svc.VerticalTags == nil {
+					return []string{}
+				}
+				return svc.VerticalTags
+			}(),
 			"referencePrice": svc.ReferencePrice,
 			"currency":       svc.Currency,
 			"eligibility":    snap,

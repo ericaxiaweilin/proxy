@@ -1,0 +1,83 @@
+// MERCHANT-CREATOR-TAGS-001：能力编码 → 商家侧中文标签的唯一实现。
+//
+// 为什么单独一个文件：和 creator-pricing.ts 同一个理由 —— 没有 RN 依赖，
+// 边界能被单元测试真的断言，而不是只 grep 源码。
+// 标签文案抄 skill-workspace.tsx 的静态 SKILLS 目录（运营 Source of Truth）；
+// 目录里没有的编码原样透出（那是服务端给的真值，不编一个假中文盖住它）。
+const KNOWN_CAPABILITY_LABELS: Record<string, string> = {
+  ZH: "中文",
+  EN: "英语",
+  VI: "越南语",
+  PHOTOGRAPHY: "摄影",
+  HOSTING: "主持",
+  GUIDE: "城市向导",
+  TRANSLATION: "同传/陪同翻译",
+  EVENT_OPS: "活动执行",
+};
+
+/** 能力编码转商家侧标签。未知编码原样返回，不编造。 */
+export function labelCapability(code: string): string {
+  return KNOWN_CAPABILITY_LABELS[code] ?? code;
+}
+
+/** 商家列表卡要印的标签：已验证能力转中文，最多 max 个（默认 2）。 */
+export function visibleCapabilityTags(codes: string[] | undefined, max = 2): string[] {
+  if (!Array.isArray(codes)) return [];
+  return codes
+    .filter((code): code is string => typeof code === "string" && code.length > 0)
+    .slice(0, Math.max(0, max))
+    .map(labelCapability);
+}
+
+// MERCHANT-CREATOR-TAGS-001：商家必看三标签 —— 类型 / 服务范围 / 粉丝。
+// 类型是 serviceType 枚举的展示名，范围是 marketId→城市，粉丝数没有聚合
+// 来源所以印已关联社媒账号（去平台自验）。未知编码原样透出，不编造。
+
+const SERVICE_TYPE_LABELS: Record<string, string> = {
+  CITY_COMPANION: "本地生活",
+};
+
+/** 服务类型转中文。未知类型原样返回。 */
+export function labelServiceType(code: string): string {
+  return SERVICE_TYPE_LABELS[code] ?? code;
+}
+
+const MARKET_LABELS: Record<string, string> = {
+  hn: "河内",
+  hcm: "胡志明",
+};
+
+/** marketId 转城市中文。未知市场原样返回。空返回空字符串（调用方不渲染）。 */
+export function labelMarket(marketId: string | undefined): string {
+  if (!marketId) return "";
+  return MARKET_LABELS[marketId] ?? marketId;
+}
+
+const SOCIAL_EMOJI: Record<string, string> = {
+  tiktok: "🎵",
+  instagram: "📷",
+  facebook: "📘",
+  zalo: "💬",
+};
+
+/** 社媒账号转标签，如 `🎵 @linh_hanoi`。handle 为空返回空字符串（不渲染）。 */
+export function labelSocial(platform: string, handle: string): string {
+  if (!handle) return "";
+  const mark = SOCIAL_EMOJI[platform] ?? "🔗";
+  return `${mark} @${handle}`;
+}
+
+// MERCHANT-CREATOR-TAGS-001：展示用垂类封闭名单。餐厅与咖啡并入“餐饮”；
+// KTV/SPA 这类只允许被关联（匹配、详情、跳转都可以用），绝不明示 ——
+// 不在名单里的编码在这里直接返回空字符串，调用方不渲染。这是产品红线。
+const DISPLAY_VERTICAL_LABELS: Record<string, string> = {
+  RESTAURANT: "餐饮",
+  CAFE: "餐饮",
+  TOUR: "旅游",
+  SPORT: "运动",
+};
+
+/** 内容垂类转展示标签。不在展示名单的一律返回空（不明示）。 */
+export function labelVertical(code: string): string {
+  return DISPLAY_VERTICAL_LABELS[code] ?? "";
+}

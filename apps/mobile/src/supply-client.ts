@@ -124,6 +124,16 @@ export type SupplierCandidate = {
   name: string;
   photos: string[];
   languages: string[];
+  // MERCHANT-CREATOR-TAGS-001：只含 VERIFIED 未过期的能力编码（服务端 verifiedCapabilityCodes）。
+  // 老服务端不带该字段时解析为 []，调用方按“无标签”处理。
+  verifiedCapabilities?: string[];
+  // MERCHANT-CREATOR-TAGS-001：粉丝数没有聚合来源；商家看到的是已关联
+  // 社媒账号（platform + handle，可见性已在服务端按调用方过滤）。
+  // 老服务端不带该字段时解析为 []，调用方按“无社媒”处理。
+  socials?: Array<{ platform: string; handle: string }>;
+  // MERCHANT-CREATOR-TAGS-001：创作者自声明内容垂类（展示过滤在客户端）。
+  // 老服务端不带该字段时解析为 []。
+  verticalTags?: string[];
   serviceType: string;
   referencePrice: number;
   currency: string;
@@ -145,6 +155,15 @@ export function parseSupplierCandidates(value: unknown): SupplierCandidate[] {
       name: item.name,
       photos: Array.isArray(item.photos) ? item.photos.filter((photo): photo is string => typeof photo === "string" && photo.length > 0) : [],
       languages: Array.isArray(item.languages) ? item.languages.filter((language): language is string => typeof language === "string") : [],
+      verticalTags: Array.isArray(item.verticalTags) ? item.verticalTags.filter((tag): tag is string => typeof tag === "string" && tag.length > 0) : [],
+      socials: Array.isArray(item.socials) ? item.socials.flatMap((entry): Array<{ platform: string; handle: string }> => {
+        if (!entry || typeof entry !== "object") return [];
+        const record = entry as Record<string, unknown>;
+        return typeof record.platform === "string" && typeof record.handle === "string" && record.handle !== ""
+          ? [{ platform: record.platform, handle: record.handle }]
+          : [];
+      }) : [],
+      verifiedCapabilities: Array.isArray(item.verifiedCapabilities) ? item.verifiedCapabilities.filter((capability): capability is string => typeof capability === "string" && capability.length > 0) : [],
       serviceType: typeof item.serviceType === "string" ? item.serviceType : "",
       referencePrice: typeof item.referencePrice === "number" ? item.referencePrice : 0,
       currency: typeof item.currency === "string" ? item.currency : "VND",

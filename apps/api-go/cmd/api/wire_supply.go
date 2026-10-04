@@ -12,22 +12,52 @@ import (
 	"time"
 )
 
+type merchantCreatorSeedService struct {
+	agentID   string
+	price     int64
+	markets   []string
+	verticals []string
+}
+
+func merchantCreatorSeedServices() []merchantCreatorSeedService {
+	return []merchantCreatorSeedService{
+		{"agent_linh", 1200000, []string{"hn"}, []string{"TOUR"}},
+		{"agent_mai", 1000000, []string{"hn"}, []string{"RESTAURANT"}},
+		{"agent_an", 900000, []string{"hn"}, []string{"RESTAURANT"}},
+		{"agent_thao", 1300000, []string{"hn"}, nil},
+		{"agent_yen", 1050000, []string{"hn"}, []string{"RESTAURANT"}},
+		{"agent_minh", 1100000, []string{"hcm"}, []string{"TOUR"}},
+	}
+}
+
+func merchantCreatorSeedSocials() map[string]string {
+	return map[string]string{
+		"agent_linh": `[{"platform":"tiktok","handle":"linh_hanoi","visibility":"public"}]`,
+	}
+}
+
 func seedPostgresSupply(pool *pgxpool.Pool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	now := time.Now().UTC()
 	// Agent Profile
 	profiles := merchantCreatorSeedProfiles()
+	// Agent Profile。Linh 关联了 TikTok 公开账号（原型 @linh_hanoi），
+	// 商家页粉丝标签的数据来源；其他人暂无关联账号，对应空态。
 	for _, p := range profiles {
 		photos, _ := json.Marshal([]string{creatorAvatarPath(p.agentID)})
 		languages, _ := json.Marshal(p.languages)
 		areas, _ := json.Marshal(p.areas)
+		socials := merchantCreatorSeedSocials()[p.agentID]
+		if socials == "" {
+			socials = "[]"
+		}
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO supply.agent_profiles (agent_id, name, bio, photos, languages, service_areas, status, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE',$7,$7)
+			INSERT INTO supply.agent_profiles (agent_id, name, bio, photos, languages, service_areas, status, socials, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE',$7,$8,$8)
 			ON CONFLICT (agent_id) DO UPDATE SET name=EXCLUDED.name, bio=EXCLUDED.bio,
-				photos=EXCLUDED.photos, languages=EXCLUDED.languages, service_areas=EXCLUDED.service_areas, status='ACTIVE', updated_at=EXCLUDED.updated_at`,
-			p.agentID, p.name, p.bio, photos, languages, areas, now); err != nil {
+				photos=EXCLUDED.photos, languages=EXCLUDED.languages, service_areas=EXCLUDED.service_areas, status='ACTIVE', socials=EXCLUDED.socials, updated_at=EXCLUDED.updated_at`,
+			p.agentID, p.name, p.bio, photos, languages, areas, socials, now); err != nil {
 			return err
 		}
 		// IDENTITY-ID-001: mock Creator 同样必须是「有系统 id 的账号」，不能只有手写
@@ -53,27 +83,21 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 			return err
 		}
 	}
-	// Agent Service（CITY_COMPANION）
-	services := []struct {
-		agentID string
-		price   int64
-		markets []string
-	}{
-		{"agent_linh", 1200000, []string{"hn"}},
-		{"agent_mai", 1000000, []string{"hn"}},
-		{"agent_an", 900000, []string{"hn"}},
-		{"agent_thao", 1300000, []string{"hn"}},
-		{"agent_yen", 1050000, []string{"hn"}},
-		{"agent_minh", 1100000, []string{"hcm"}},
-	}
-	for _, svc := range services {
+	// Agent Service（CITY_COMPANION）。verticals 是创作者自声明内容垂类，
+	// 展示只印封闭三类（餐饮/旅游/运动），由 MERCHANT-CREATOR-TAGS-001 钉住。
+	for _, svc := range merchantCreatorSeedServices() {
 		markets, _ := json.Marshal(svc.markets)
+		verticals := svc.verticals
+		if verticals == nil {
+			verticals = []string{}
+		}
+		verticalTags, _ := json.Marshal(verticals)
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO supply.agent_services (agent_id, service_type, status, reference_price, currency, markets, updated_at)
-			VALUES ($1,'CITY_COMPANION','ACTIVE',$2,'VND',$3,$4)
+			INSERT INTO supply.agent_services (agent_id, service_type, status, reference_price, currency, markets, vertical_tags, updated_at)
+			VALUES ($1,'CITY_COMPANION','ACTIVE',$2,'VND',$3,$4,$5)
 			ON CONFLICT (agent_id, service_type) DO UPDATE SET status='ACTIVE',
-				reference_price=EXCLUDED.reference_price, markets=EXCLUDED.markets, updated_at=EXCLUDED.updated_at`,
-			svc.agentID, svc.price, markets, now); err != nil {
+				reference_price=EXCLUDED.reference_price, markets=EXCLUDED.markets, vertical_tags=EXCLUDED.vertical_tags, updated_at=EXCLUDED.updated_at`,
+			svc.agentID, svc.price, markets, verticalTags, now); err != nil {
 			return err
 		}
 	}

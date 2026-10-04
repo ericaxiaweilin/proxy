@@ -123,21 +123,33 @@ func (r *SupplyRepository) CreateService(ctx context.Context, s supply.AgentServ
 	if err != nil {
 		return err
 	}
+	verticalTags, err := json.Marshal(nonNullVerticalTags(s.VerticalTags))
+	if err != nil {
+		return err
+	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO supply.agent_services (agent_id, service_type, status, reference_price, currency, markets, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		s.AgentID, s.ServiceType, s.Status, s.ReferencePrice, s.Currency, markets, s.UpdatedAt,
+		INSERT INTO supply.agent_services (agent_id, service_type, status, reference_price, currency, markets, vertical_tags, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		s.AgentID, s.ServiceType, s.Status, s.ReferencePrice, s.Currency, markets, verticalTags, s.UpdatedAt,
 	)
 	return err
 }
 
+// nonNullVerticalTags：nil 切片 marshal 成 "null" 会违反 JSONB 数组约定，统一成 []。
+func nonNullVerticalTags(tags []string) []string {
+	if tags == nil {
+		return []string{}
+	}
+	return tags
+}
+
 func (r *SupplyRepository) GetService(ctx context.Context, agentID, serviceType string) (supply.AgentService, error) {
 	var s supply.AgentService
-	var markets []byte
+	var markets, verticalTags []byte
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT agent_id, service_type, status, reference_price, currency, markets, updated_at
+		SELECT agent_id, service_type, status, reference_price, currency, markets, COALESCE(vertical_tags, '[]'), updated_at
 		FROM supply.agent_services WHERE agent_id=$1 AND service_type=$2`, agentID, serviceType).Scan(
-		&s.AgentID, &s.ServiceType, &s.Status, &s.ReferencePrice, &s.Currency, &markets, &s.UpdatedAt,
+		&s.AgentID, &s.ServiceType, &s.Status, &s.ReferencePrice, &s.Currency, &markets, &verticalTags, &s.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return supply.AgentService{}, supply.ErrServiceNotFound
@@ -146,6 +158,7 @@ func (r *SupplyRepository) GetService(ctx context.Context, agentID, serviceType 
 		return supply.AgentService{}, err
 	}
 	_ = json.Unmarshal(markets, &s.Markets)
+	_ = json.Unmarshal(verticalTags, &s.VerticalTags)
 	return s, nil
 }
 
@@ -154,11 +167,15 @@ func (r *SupplyRepository) UpdateService(ctx context.Context, s supply.AgentServ
 	if err != nil {
 		return err
 	}
+	verticalTags, err := json.Marshal(nonNullVerticalTags(s.VerticalTags))
+	if err != nil {
+		return err
+	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
 		UPDATE supply.agent_services
-		SET status=$1, reference_price=$2, currency=$3, markets=$4, updated_at=$5
-		WHERE agent_id=$6 AND service_type=$7`,
-		s.Status, s.ReferencePrice, s.Currency, markets, s.UpdatedAt, s.AgentID, s.ServiceType,
+		SET status=$1, reference_price=$2, currency=$3, markets=$4, vertical_tags=$5, updated_at=$6
+		WHERE agent_id=$7 AND service_type=$8`,
+		s.Status, s.ReferencePrice, s.Currency, markets, verticalTags, s.UpdatedAt, s.AgentID, s.ServiceType,
 	)
 	return err
 }
@@ -246,8 +263,8 @@ UPDATE supply.seller_real_name_verifications
    SET status = 'EXPIRED', updated_at = $2
  WHERE agent_id = $1 AND status = 'VERIFIED'`
 
-// NULLIF($3,'') / NULLIF($7,'')：user_account_id 与 tax_code 在 084 里可空，
-// 语义是「尚未取得 / 未绑定」。空串不是「有值」—— tax_code='' 会让读的人
+// NULLIF($3,”) / NULLIF($7,”)：user_account_id 与 tax_code 在 084 里可空，
+// 语义是「尚未取得 / 未绑定」。空串不是「有值」—— tax_code=” 会让读的人
 // 以为税务身份已绑定，而结算恰恰按这一列判定。
 const insertSellerRealNameSQL = `
 INSERT INTO supply.seller_real_name_verifications

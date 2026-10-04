@@ -49,3 +49,31 @@ func TestMerchantCreatorAvailabilityRollsAcrossClientQuery(t *testing.T) {
 		t.Fatal("MERCHANT-CREATOR-LIVE-002: availability did not roll with boot time")
 	}
 }
+
+// MERCHANT-CREATOR-TAGS-001：种子垂类与社媒账号是模拟器里三标签的数据来源。
+// 垂类只允许封闭三类进展示（RESTAURANT/CAFE/TOUR/SPORT），社媒 Linh 必须有
+// public tiktok（原型 @linh_hanoi），其余人暂无。
+func TestMerchantCreatorSeedTagsForMerchantCards(t *testing.T) {
+	byAgent := map[string]merchantCreatorSeedService{}
+	for _, svc := range merchantCreatorSeedServices() {
+		byAgent[svc.agentID] = svc
+	}
+	allowed := map[string]bool{"RESTAURANT": true, "CAFE": true, "TOUR": true, "SPORT": true}
+	for id, svc := range byAgent {
+		for _, tag := range svc.verticals {
+			if !allowed[tag] {
+				t.Fatalf("seed vertical %q for %s is not displayable; keep it out of seed or extend the display list first", tag, id)
+			}
+		}
+	}
+	if got := byAgent["agent_linh"].verticals; len(got) != 1 || got[0] != "TOUR" {
+		t.Fatalf("linh seed verticals = %v, want [TOUR]", got)
+	}
+	socials := merchantCreatorSeedSocials()
+	if !strings.Contains(socials["agent_linh"], `"handle":"linh_hanoi"`) {
+		t.Fatalf("linh seed socials must carry tiktok linh_hanoi, got %s", socials["agent_linh"])
+	}
+	if len(socials) != 1 {
+		t.Fatalf("only linh has seed socials, got %d agents", len(socials))
+	}
+}
