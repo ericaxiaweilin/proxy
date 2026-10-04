@@ -67,19 +67,23 @@ describe("CREATOR-LIST-CARD-001 报价只有一个格式化实现", () => {
 });
 
 describe("CREATOR-LIST-CARD-001 列表卡只用真实字段", () => {
-  it("标签来自 serviceType / languages，不是编出来的分类", () => {
-    expect(listBranch).toContain("creator.serviceType");
+  it("标签来自垂类 / 语言 / 地址，不是编出来的分类", () => {
+    expect(listBranch).toContain("creator.verticalTags");
     expect(listBranch).toContain("creator.languages.slice(0, 2)");
+    expect(listBranch).toContain("creator.availability?.marketId");
     // 语言多于两个折成 +N，不把真实值丢掉也不撑破卡片。
     expect(listBranch).toContain("creator.languages.length > 2");
   });
 
-  it("MERCHANT-CREATOR-TAGS-001 标签行只放三类：垂类/范围/社媒", () => {
+  it("MERCHANT-CREATOR-TAGS-001 标签行只放三类：垂类/语言/地址", () => {
     // 能力标签位已让给垂类（verifiedCapabilities 数据照常解析，见 supply-client.test.ts）。
     expect(listBranch).toContain("creator.verticalTags");
     expect(listBranch).toContain("creator.availability?.marketId");
-    expect(listBranch).toContain("creator.socials");
+    expect(listBranch).toContain("creator.languages");
     expect(listBranch).not.toContain("visibleCapabilityTags(");
+    // 服务类型和社媒账号不占标签位：前者和查询条件重复，后者贴在名字后面。
+    expect(listBranch).not.toContain("labelServiceType(");
+    expect(listBranch).not.toContain("labelSocial(");
     // 稿子里的假分类（本地生活/探店达人/KTV/SPA/美食探店/夜生活）不许硬编码进列表分支。
     expect(listBranch).not.toMatch(/本地生活|探店达人|美食探店|夜生活/);
   });
@@ -91,11 +95,14 @@ describe("CREATOR-LIST-CARD-001 列表卡只用真实字段", () => {
     expect(listBranch).not.toMatch(/KTV|SPA/);
   });
 
-  it("MERCHANT-CREATOR-TAGS-001 范围与社媒标签来自真实字段", () => {
-    expect(listBranch).toContain("creator.availability?.marketId");
+  it("MERCHANT-CREATOR-TAGS-001 handle 贴名字后面，不占标签位", () => {
+    // Thao @thao_hanoi 挨在一起：handle 来自已关联账号（socials[0]），
+    // 没有关联账号就只印名字，不编。
     expect(listBranch).toContain("creator.socials");
-    expect(listBranch).toContain("formatFansCount(");
+    expect(listBranch).toMatch(/@\{.*handle/);
+    expect(listBranch).toContain("creatorHandle");
     // 粉丝数没有聚合来源：不许出现写死的粉丝数字。
+    expect(listBranch).toContain("formatFansCount(");
     expect(listBranch).not.toMatch(/粉丝\s*\d|2\.4w|1\.8w|1\.2w/);
   });
 
@@ -109,8 +116,11 @@ describe("CREATOR-LIST-CARD-001 列表卡只用真实字段", () => {
     expect(listBranch).toContain("creatorRatingLabel(creator.rating)");
   });
 
-  it("到店素材数还是真实读数，没有被统计数字顶掉", () => {
-    expect(listBranch).toContain("creator.photos.length");
+  it("服务量是真实成交单数，不编；头像本身就是到店照片，不重复印数", () => {
+    // 服务量走 rating.completedOrders（Postgres 真实订单数），只许走
+    // formatServiceVolume 格式化；卡上不再印「到店 X 媒体」。
+    expect(listBranch).toContain("formatServiceVolume(creator.rating?.completedOrders)");
+    expect(listBranch).not.toContain("到店");
   });
 
   it("不编原型卡上的均播；评分只许走服务端 Total，粉丝只许走自填格式化", () => {

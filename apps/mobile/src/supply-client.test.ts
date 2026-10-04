@@ -34,8 +34,8 @@ describe("merchant creator recommendations", () => {
   });
 
   it("MERCHANT-CREATOR-TAGS-001 评价分透出服务端 Total，非数不编", () => {
-    const parsed = parseSupplierCandidates([{ agentId: "c7", name: "G", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, rating: { total: 87.5, hasTrackRecord: true, satisfactionRate: 0.9, fulfillmentRate: 1 } }]);
-    expect(parsed[0]?.rating).toEqual({ total: 87.5, hasTrackRecord: true, satisfactionRate: 0.9, fulfillmentRate: 1 });
+    const parsed = parseSupplierCandidates([{ agentId: "c7", name: "G", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, rating: { total: 87.5, hasTrackRecord: true, satisfactionRate: 0.9, fulfillmentRate: 1, completedOrders: 12 } }]);
+    expect(parsed[0]?.rating).toEqual({ total: 87.5, hasTrackRecord: true, satisfactionRate: 0.9, fulfillmentRate: 1, completedOrders: 12 });
     const legacy = parseSupplierCandidates([{ agentId: "c8", name: "H", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {} }]);
     expect(legacy[0]?.rating).toBeUndefined();
   });

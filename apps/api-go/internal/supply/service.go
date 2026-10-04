@@ -1609,12 +1609,15 @@ func (s *Service) querySuppliers(ctx context.Context, e command.Envelope) comman
 			"currency":       svc.Currency,
 			// 评价分（见上）：Total 0..100；satisfactionRate/fulfillmentRate
 			// 无记录时为 0，调用方看 hasTrackRecord 决定印分数还是印「新人」。
+			// completedOrders 是真实成交单量（matching.Signals.Completed，
+			// Postgres 订单表查出来的），商家页「服务量」的数据来源；无记录为 0。
 			"rating": map[string]any{
 				"total":            bd.Total,
 				"satisfaction":     bd.Satisfaction,
 				"hasTrackRecord":   bd.HasTrackRecord,
 				"satisfactionRate": bd.SatisfactionRate,
 				"fulfillmentRate":  bd.FulfillmentRate,
+				"completedOrders":  signals[profile.AgentID].Completed,
 			},
 			"eligibility":  snap,
 			"availability": availability,

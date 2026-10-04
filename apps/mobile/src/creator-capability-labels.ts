@@ -78,6 +78,13 @@ export function formatFansCount(count: number | undefined): string {
   return `${Number.isInteger(w) ? `${w}` : w.toFixed(1)}w`;
 }
 
+// MERCHANT-CREATOR-TAGS-001：服务量是真实成交单数（服务端 rating.completedOrders
+// ← matching.Signals.Completed ← Postgres 订单表）。无记录为 0，如实印
+// 「服务 0 单」，不编「新入驻已接 N 单」这类话术。
+export function formatServiceVolume(completedOrders: number | undefined): string {
+  const n = typeof completedOrders === "number" && completedOrders > 0 ? Math.floor(completedOrders) : 0;
+  return `服务 ${n} 单`;
+}
 // MERCHANT-CREATOR-TAGS-001：评价分/等级分有真实来源 —— 服务端 matching.Score
 // 的 Total（0..100；履约40/评价30/经验15/响应10/预算5）。
 // 等级只是展示映射（分档阈值调这里），分永远是服务端算出来的，不手写。

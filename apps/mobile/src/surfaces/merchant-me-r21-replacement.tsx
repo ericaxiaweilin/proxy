@@ -27,7 +27,7 @@ import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
 // CREATOR-LIST-CARD-001：报价格式化与横滑卡共用同一个纯模块实现 —— 同一个人不许两个价。
 import { formatReferencePrice } from "../creator-pricing";
-import { creatorRatingLabel, formatFansCount, labelMarket, labelLanguage, labelServiceType, labelSocial, labelVertical } from "../creator-capability-labels";
+import { creatorRatingLabel, formatFansCount, formatServiceVolume, labelMarket, labelLanguage, labelVertical } from "../creator-capability-labels";
 // CREATOR-SOCIAL-001：社媒 canonical 链接与平台中文名（和服务端封闭集合对齐）。
 import { socialPlatformLabel, socialProfileUrl } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
@@ -400,35 +400,32 @@ export function MerchantMeR21Replacement({
                   状态位（creator.eligibility）照常解析，只是不再展示。 */}
               </Pressable>
               <View style={styles.flex}>
-              <Text selectable numberOfLines={1} style={styles.creatorCardName}>{creator.name}</Text>
-              {/* 标签只放真实字段：服务类型 + 语言（超过两个折成 +N）。
-                  原型卡上的「本地生活 / 探店达人」是稿子里的假分类，
-                  SupplierCandidate 里没有这一层，不编。 */}
+              {/* MERCHANT-CREATOR-TAGS-001：名字和社媒 handle 挨在一起
+                 （Thao @thao_hanoi）—— handle 是已关联账号的真实用户名，
+                  不是标签行里那个占位的深底胶囊。没有关联账号就只印名字。 */}
+              <Text selectable numberOfLines={1} style={styles.creatorCardName}>{creator.name}{(creator.socials ?? [])[0]?.handle ? <Text style={styles.creatorHandle}> @{((creator.socials ?? [])[0]?.handle ?? "")}</Text> : null}</Text>
+              {/* MERCHANT-CREATOR-TAGS-001：标签行只放三样 —— 内容大类
+                  （餐饮/旅游/运动，KTV/SPA 等只关联不明示）+ 语言（超两个折 +N）
+                  + 地址（availability.marketId）。服务类型和社媒账号不占标签位：
+                  前者和查询条件重复，后者已经贴在名字后面了。 */}
               <View style={styles.creatorTagRow}>
-                {creator.serviceType.trim() !== "" ? <View style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{labelServiceType(creator.serviceType)}</Text></View> : null}
+                {(creator.verticalTags ?? []).map(labelVertical).filter((label) => label !== "").slice(0, 1).map((label) => <View key={label} style={[styles.creatorTag, styles.creatorTagPrimary]}><Text selectable style={styles.creatorTagPrimaryText}>{label}</Text></View>)}
                 {creator.languages.slice(0, 2).map((language) => <View key={language} style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{labelLanguage(language)}</Text></View>)}
                 {creator.languages.length > 2 ? <View style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{`+${creator.languages.length - 2}`}</Text></View> : null}
-                {/* MERCHANT-CREATOR-TAGS-001：内容垂类（餐饮/旅游/运动）。
-                    KTV/SPA 等只关联不明示，labelVertical 直接返回空串不渲染。 */}
-                {(creator.verticalTags ?? []).map(labelVertical).filter((label) => label !== "").slice(0, 1).map((label) => <View key={label} style={[styles.creatorTag, styles.creatorTagPrimary]}><Text selectable style={styles.creatorTagPrimaryText}>{label}</Text></View>)}
-                {/* MERCHANT-CREATOR-TAGS-001：服务范围（城市）+ 粉丝（已关联社媒账号）。
-                    城市来自 availability.marketId，账号是服务端可见性过滤后的 socials；
-                    都没有就不渲染。粉丝数没有聚合来源，不编数字，去平台自验。 */}
                 {labelMarket(creator.availability?.marketId) !== "" ? <View style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{labelMarket(creator.availability?.marketId)}</Text></View> : null}
-                {(creator.socials ?? []).slice(0, 1).map((social) => labelSocial(social.platform, social.handle)).filter((label) => label !== "").map((label) => <View key={label} style={[styles.creatorTag, styles.creatorTagDark]}><Text selectable style={styles.creatorTagDarkText}>{label}</Text></View>)}
               </View>
-              {/* MERCHANT-CREATOR-TAGS-001：stats 首位是评价分/等级 —— 服务端
-                  matching.Score 算出来的 Total（0..100）。有成交记录印
-                  「S · 87.5分」这类；新人印「新人 · 暂无评价」。老服务端不带
-                  rating 时 creatorRatingLabel 返回空串，不渲染（不编）。 */}
+              {/* MERCHANT-CREATOR-TAGS-001：stats 行三样 —— 粉丝（创作者自填）/
+                  服务量（真实成交单数）/ 评价指数（服务端 Total，有记录才印分，
+                  新人印「新人 · 暂无评价」）。报价在右列。到店媒体数不在卡上：
+                  头像本身就是到店照片，数不重复印。 */}
               <View style={styles.creatorStatRow}>
+                {<Text selectable numberOfLines={1} style={styles.creatorStat}>{`粉丝 ${formatFansCount(creator.socials?.[0]?.followerCount)}`}</Text>}
+                <Text selectable numberOfLines={1} style={styles.creatorStat}>{formatServiceVolume(creator.rating?.completedOrders)}</Text>
                 {creatorRatingLabel(creator.rating) !== "" ? (
                   <View style={[styles.creatorEligibility]}>
                     <Text selectable style={[styles.creatorEligibilityText]}>{creatorRatingLabel(creator.rating)}</Text>
                   </View>
                 ) : null}
-                {<Text selectable numberOfLines={1} style={styles.creatorStat}>{`粉丝 ${formatFansCount(creator.socials?.[0]?.followerCount)}`}</Text>}
-                <Text selectable numberOfLines={1} style={styles.creatorStat}>{`到店 ${creator.photos.length} 媒体`}</Text>
               </View>
               </View>
               {/* 右列：报价 + 主操作。报价走共享的 formatReferencePrice —— 和横滑卡
@@ -1113,10 +1110,13 @@ const styles = StyleSheet.create({
   creatorAvatarHit: { position: "relative" },
   creatorOnlineDot: { backgroundColor: color.proxyGreen, borderColor: color.white, borderRadius: 999, borderWidth: 2, bottom: 2, height: 14, position: "absolute", right: 2, width: 14 },
   creatorCardName: { color: color.ink, fontSize: 16, fontWeight: "800", lineHeight: 22 },
+  // MERCHANT-CREATOR-TAGS-001：名字后面贴的 @handle（Thao @thao_hanoi）——
+  // 同一个人，弱化显示，不占标签位。
+  creatorHandle: { color: color.muted, fontSize: 13, fontWeight: "500" },
   creatorTagRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 6 },
   creatorTag: { backgroundColor: color.surface, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   // MERCHANT-CREATOR-TAGS-001：标签按类配色。垂类是商家第一眼（亮底），
-  // 社媒是粉丝入口（深底），语言范围保持中性灰。颜色全部出自 R3 tokens。
+  // 语言范围保持中性灰。颜色全部出自 R3 tokens。
   creatorTagPrimary: { backgroundColor: color.factConfirmedBg, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   creatorTagPrimaryText: { color: color.factConfirmedFg, fontSize: 11, fontWeight: "700" },
   creatorTagDark: { backgroundColor: color.ink, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },

@@ -134,7 +134,8 @@ export type SupplierCandidate = {
   // MERCHANT-CREATOR-TAGS-001：评价分有真实来源 —— 服务端 matching.Score
   // 算出来的 Total（0..100；履约40/评价30/经验15/响应10/预算5）。
   // 无成交记录时 Total 取先验值、hasTrackRecord=false，UI 印「新人」不编分。
-  rating?: { total: number; hasTrackRecord: boolean; satisfactionRate: number; fulfillmentRate: number };
+  // completedOrders 是真实成交单量（Postgres 订单表），商家页「服务量」来源。
+  rating?: { total: number; hasTrackRecord: boolean; satisfactionRate: number; fulfillmentRate: number; completedOrders: number };
   // MERCHANT-CREATOR-TAGS-001：创作者自声明内容垂类（展示过滤在客户端）。
   // 老服务端不带该字段时解析为 []。
   verticalTags?: string[];
@@ -162,6 +163,7 @@ export function parseSupplierCandidates(value: unknown): SupplierCandidate[] {
       hasTrackRecord: ratingRaw.hasTrackRecord === true,
       satisfactionRate: typeof ratingRaw.satisfactionRate === "number" ? ratingRaw.satisfactionRate : 0,
       fulfillmentRate: typeof ratingRaw.fulfillmentRate === "number" ? ratingRaw.fulfillmentRate : 0,
+      completedOrders: typeof ratingRaw.completedOrders === "number" && ratingRaw.completedOrders > 0 ? Math.floor(ratingRaw.completedOrders) : 0,
     } : undefined;
     return [{ agentId: item.agentId,
       ...(typeof item.userAccountId === "string" && item.userAccountId !== "" ? { userAccountId: item.userAccountId } : {}),

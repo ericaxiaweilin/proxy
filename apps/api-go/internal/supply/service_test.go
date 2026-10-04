@@ -260,6 +260,10 @@ func TestQuerySuppliersCarriesRealRating(t *testing.T) {
 	if _, ok := raw["satisfactionRate"]; !ok {
 		t.Fatalf("rating must carry satisfactionRate (0 when no reviews), got %v", raw)
 	}
+	// 服务量是真实成交单量；无记录为 0，调用方如实印「服务 0 单」。
+	if raw["completedOrders"] != float64(0) {
+		t.Fatalf("no-record agent must report completedOrders=0, got %v", raw["completedOrders"])
+	}
 }
 
 // MERCHANT-CREATOR-TAGS-001：垂直分类走创作者自声明，服务端原样透出
