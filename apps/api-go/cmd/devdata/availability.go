@@ -81,7 +81,7 @@ func seedAvailabilityWindows(ctx context.Context, pool *pgxpool.Pool, out io.Wri
 	rows, err := pool.Query(ctx, `
 		SELECT agent_id FROM supply.agent_profiles
 		 WHERE lat IS NOT NULL
-		   AND (agent_id LIKE 'agent_devpipe_%' OR agent_id LIKE 'agent_user_devseed_%')
+		   AND agent_id LIKE 'agent_user_devseed_%'
 		 ORDER BY agent_id`)
 	if err != nil {
 		return fmt.Errorf("list scheduled agents: %w", err)

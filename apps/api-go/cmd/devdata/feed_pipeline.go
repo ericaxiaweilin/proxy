@@ -14,8 +14,11 @@ import (
 )
 
 // feedPipeline is the port of scripts/dev-feed-pipeline.mjs: one plain-text post per
-// tick (launchd runs it every five minutes) plus a rolling new dev user, so the For
-// You rail keeps having fresh content.
+// tick (launchd runs it every five minutes), so the feed keeps having fresh content.
+//
+// FOR-YOU-CANDIDATES-001（2026-10-04）：不再每个 tick 新建一个用户。作者从已有的
+// devpipe 用户里按帖子序号轮流取；一个都没有时才建第一个。以前每 5 分钟多一个
+// "Dev N"，又都铺了 0km 的坐标，For You / 真人推荐「最近的 N 个」被它们占满。
 //
 // Why text-only: posting through the real API has to satisfy the media owner
 // constraints — UpdateProfile's avatar must be owner-matched, moderation APPROVED and
@@ -54,7 +57,11 @@ func feedPipeline(ctx context.Context, pool *pgxpool.Pool, out io.Writer, args [
 	}
 	fmt.Fprintf(out, "=== dev feed pipeline · %d tick%s ===\n", ticks, suffix)
 
-	start, err := nextSequence(ctx, pool)
+	start, err := nextPostSequence(ctx, pool)
+	if err != nil {
+		return err
+	}
+	authors, err := pipelineAuthors(ctx, pool)
 	if err != nil {
 		return err
 	}
@@ -62,9 +69,15 @@ func feedPipeline(ctx context.Context, pool *pgxpool.Pool, out io.Writer, args [
 	created := 0
 	for i := 0; i < ticks; i++ {
 		seq := start + i
-		user, err := seedUser(ctx, pool, seq, dryRun)
-		if err != nil {
-			return err
+		var user pipelineUser
+		if len(authors) == 0 {
+			// 第一次跑、库里一个管线用户都没有：建一个当作者。
+			if user, err = seedUser(ctx, pool, 1, dryRun); err != nil {
+				return err
+			}
+			authors = append(authors, user.id)
+		} else {
+			user = pipelineUser{id: authors[seq%len(authors)], reused: true}
 		}
 		post, err := seedPost(ctx, pool, seq, user.id, dryRun)
 		if err != nil {
@@ -73,11 +86,11 @@ func feedPipeline(ctx context.Context, pool *pgxpool.Pool, out io.Writer, args [
 		tag := "已建用户"
 		switch {
 		case user.reused:
-			tag = "复用已有用户"
+			tag = "作者"
 		case dryRun:
 			tag = "将建用户"
 		}
-		if !user.reused {
+		if post.body != "" { // seedPost 只在真的新发时填 body；已存在的序号按幂等跳过
 			created++
 		}
 		avatar := user.avatar
@@ -114,12 +127,9 @@ func feedPipeline(ctx context.Context, pool *pgxpool.Pool, out io.Writer, args [
 	}
 	fmt.Fprintf(out, "\n  管线累计：%d 用户 / %d 帖\n", userCount, postCount)
 
-	// New users need coordinates: without them the distance filter excludes the person
-	// at *every* radius (PERSON-DISTANCE-ZERO-001), so the rows exist in the database
-	// and nothing shows in the UI — the exact shape the user reported. A failure here
-	// does not abort the tick: the post is already out, coordinates can wait for the
-	// next round. The Node version shelled out to a second script; this calls the same
-	// function and keeps its report out of the tick output except for the verdict line.
+	// 距离分层（只铺 devseed 的坐标）每个 tick 顺手复核一次：新跑的 seed_dev_shops_users
+	// 加进来的 devseed 用户没有坐标就筛不到（PERSON-DISTANCE-ZERO-001）。失败不中断这个
+	// tick：帖子已经发出去了，坐标下一轮再铺。
 	tierReport := &bytes.Buffer{}
 	if err := distanceTiers(ctx, pool, tierReport, nil); err != nil {
 		fmt.Fprintf(os.Stderr, "  WARN: 铺距离坐标失败（不影响已发出的帖）：%s\n", err)
@@ -201,17 +211,37 @@ var postBodies = []struct {
 
 var pipelineCities = []string{"Hà Nội", "TP. Hồ Chí Minh", "Đà Nẵng", "Huế"}
 
-// nextSequence reads the highest existing devpipe_ suffix. The column lives on
-// identity.profiles, not identity.user_accounts — the first version queried the wrong
-// table and failed on "column user_account_id does not exist".
-func nextSequence(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+// nextPostSequence reads the highest existing post_devpipe_ suffix. Posts carry their
+// own sequence now that a tick no longer creates a user (FOR-YOU-CANDIDATES-001).
+func nextPostSequence(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	var current int
 	if err := pool.QueryRow(ctx, `
-		SELECT COALESCE(MAX(substring(user_account_id from '[0-9]+$')::int), 0)
-		  FROM identity.profiles WHERE user_account_id LIKE $1`, feedHandlePrefix+`_%`).Scan(&current); err != nil {
-		return 0, fmt.Errorf("read the next pipeline sequence: %w", err)
+		SELECT COALESCE(MAX(substring(id from '[0-9]+$')::int), 0)
+		  FROM localnet.posts WHERE id LIKE $1`, "post_"+feedHandlePrefix+`_%`).Scan(&current); err != nil {
+		return 0, fmt.Errorf("read the next pipeline post sequence: %w", err)
 	}
 	return current + 1, nil
+}
+
+// pipelineAuthors lists the existing devpipe users, the authors a tick rotates over.
+func pipelineAuthors(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT user_account_id FROM identity.profiles
+		 WHERE user_account_id LIKE $1
+		 ORDER BY substring(user_account_id from '[0-9]+$')::int`, feedHandlePrefix+`_%`)
+	if err != nil {
+		return nil, fmt.Errorf("list pipeline authors: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan pipeline author: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 type pipelineUser struct {

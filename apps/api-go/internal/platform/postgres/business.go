@@ -440,7 +440,9 @@ func (r *BusinessRepository) ProjectActivityOrder(ctx context.Context, sceneID, 
 			JOIN activity.activities a2 ON a2.id = p2.activity_id
 			WHERE p2.actor_id = p.actor_id AND p2.activity_id <> p.activity_id AND p2.state <> 'CANCELLED'
 			  AND a2.payload->>'realitySceneId' = $1) AS has_other
-		      FROM activity.participants p WHERE p.activity_id = $2 AND p.actor_id = $3) j
+		      FROM activity.participants p WHERE p.activity_id = $2 AND p.actor_id = $3
+		      -- FOR-YOU-SLOT-001：同一场活动可以有多单（约不同的小美），扣回一笔就只取一行。
+		      ORDER BY p.joined_at LIMIT 1) j
 		ON CONFLICT (business_id, bucket_date) DO UPDATE SET
 			order_count = GREATEST(sd.order_count - 1, 0),
 			new_customer_count = GREATEST(sd.new_customer_count + EXCLUDED.new_customer_count, 0),

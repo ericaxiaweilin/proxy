@@ -137,7 +137,35 @@ var (
 	ErrActivityNotFound = errors.New("activity not found")
 	ErrAlreadyJoined    = errors.New("activity already joined")
 	ErrActivityFull     = errors.New("activity full")
+	// ErrCompanionSlotTaken（FOR-YOU-SLOT-001）：这个小美在这个时段已经有一单（谁约的都算）。
+	ErrCompanionSlotTaken = errors.New("companion time slot taken")
 )
+
+// FOR-YOU-SLOT-001（2026-10-04）：For You 的资源单位是「小美 × 时段」。
+//   - 一单 = 我 + 小美 + 时段 + 场景；约不同的小美是不同的单。
+//   - 小美的一个时段只接一单，跨所有下单人独占。
+//   - 下单人自己同一时段可以约多个小美（用户裁决：只锁小美的时间）。
+//   - 活动 / 咖啡店是场景载体：For You 单不扣活动名额（店的承载上限后期再做，现在不限）。
+
+// CompanionIDOf 取下单上下文里的同行人 id；直接报名没有同行人，返回 ""。
+func CompanionIDOf(recipe JoinRecipe) string {
+	if recipe.Companion == nil {
+		return ""
+	}
+	return strings.TrimSpace(recipe.Companion.ID)
+}
+
+// SlotKey 把活动时间文本规整成时段键（去首尾空白、压缩空白）。活动时间目前就是展示
+// 文本（如「周五 19:00–20:30」），两场活动的时段文本相同才算同一时段。
+func SlotKey(activityTime string) string {
+	return strings.Join(strings.Fields(activityTime), " ")
+}
+
+// CompanionSlot 是一个已被约走的「小美 × 时段」。只说「这个时段她没空」，不说谁约的。
+type CompanionSlot struct {
+	CompanionID string `json:"companionId"`
+	Time        string `json:"time"`
+}
 
 type Repository interface {
 	Seed(ctx context.Context, activities []Activity) error
@@ -152,11 +180,11 @@ type Repository interface {
 	// BuildOrderSnapshot 的结果和订单编号一起落库。
 	Join(ctx context.Context, activityID, actorID string, recipe JoinRecipe) (Activity, Participation, error)
 	// GetParticipation 读报名记录；没有 ⇒ ErrNotJoined。
-	GetParticipation(ctx context.Context, activityID, actorID string) (Participation, error)
+	GetParticipation(ctx context.Context, activityID, actorID, companionID string) (Participation, error)
 	// TransitionParticipation 在行锁内把报名从 allowedFrom 之一改成 to；当前状态不在
 	// allowedFrom ⇒ ErrParticipationTransition（返回当前记录）。离开占座状态时
 	// 释放名额（joined - 1），同一事务（ACT-SEAT-RELEASE-001）。
-	TransitionParticipation(ctx context.Context, activityID, actorID string, allowedFrom []ParticipationState, to ParticipationState) (Participation, Activity, error)
+	TransitionParticipation(ctx context.Context, activityID, actorID, companionID string, allowedFrom []ParticipationState, to ParticipationState) (Participation, Activity, error)
 
 	// R17.x: “我的活动” 物化路径。
 	// ListByOwner 返回该 actor 作为 owner (Origin=USER 且 ownerId=actor) 创建的活动。
@@ -168,7 +196,10 @@ type Repository interface {
 	// 「我的订单」逐单展示用。只返回本人的，actor-scoped。
 	ListJoinOrders(ctx context.Context, actorID string) ([]JoinOrder, error)
 	// GetJoinOrder 取本人某一笔报名（编号 + 快照）；没报过名返回 ok=false。
-	GetJoinOrder(ctx context.Context, activityID, actorID string) (JoinOrder, bool, error)
+	GetJoinOrder(ctx context.Context, activityID, actorID, companionID string) (JoinOrder, bool, error)
+	// ListBookedCompanionSlots（FOR-YOU-SLOT-001）：这些小美里，哪些时段已经有未取消的单。
+	// 只对调用方给出的 companion id 做命中测试，返回时段，不返回下单人。
+	ListBookedCompanionSlots(ctx context.Context, companionIDs []string) ([]CompanionSlot, error)
 
 	// SCENE-COMPANION-001: 只对调用方已经提供的候选 actor id 集合做命中测试
 	// （"这些人里谁在这个场景报名过活动"），不能反查"这个场景有哪些人报名
@@ -193,6 +224,8 @@ type MemoryRepository struct {
 // 取不到时留空，客户端按「已确认」显示（报名行存在 = 报名成立）。
 type JoinOrder struct {
 	ActivityID string    `json:"activityId"`
+	// FOR-YOU-SLOT-001：同一场活动可以有多单（约不同的小美），按 (activityId, companionId) 区分。
+	CompanionID string   `json:"companionId,omitempty"`
 	OrderNo    string    `json:"orderNo,omitempty"`
 	JoinedAt   time.Time `json:"joinedAt"`
 	State      string    `json:"state,omitempty"`
@@ -237,7 +270,7 @@ func (s *Service) SeedDefaults() {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "ListActivities", "ListMyActivities", "PublishActivity", "ToggleActivityInterest", "JoinActivity", "CancelActivity", "CheckinActivity", "MarkNoShow":
+	case "ListActivities", "ListMyActivities", "ListCompanionBookedSlots", "PublishActivity", "ToggleActivityInterest", "JoinActivity", "CancelActivity", "CheckinActivity", "MarkNoShow":
 		return true
 	default:
 		return false
@@ -254,6 +287,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listActivities(ctx, e)
 	case "ListMyActivities":
 		return s.listMyActivities(ctx, e)
+	case "ListCompanionBookedSlots":
+		return s.listCompanionBookedSlots(ctx, e)
 	case "PublishActivity":
 		return s.publishActivity(ctx, e)
 	case "ToggleActivityInterest":
@@ -399,6 +434,48 @@ func (s *Service) listActivities(ctx context.Context, e command.Envelope) comman
 	}, nil)
 }
 
+// ---------- ListCompanionBookedSlots ----------
+//
+// FOR-YOU-SLOT-001：For You 四宫格要知道「这个小美在这个时段还有没有空」——她的时段
+// 被任何人约走了，这个组合就不可约。只回答调用方给出的这批小美，只给时段，不给下单人。
+type companionSlotsPayload struct {
+	CompanionIDs []string `json:"companionIds"`
+}
+
+const maxCompanionSlotQuery = 200
+
+func (s *Service) listCompanionBookedSlots(ctx context.Context, e command.Envelope) command.Result {
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
+	}
+	var p companionSlotsPayload
+	if !decode(e.Payload, &p) {
+		return command.Rejected(e, "INVALID_COMPANION_IDS", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_companion_ids", nil)
+	}
+	ids := make([]string, 0, len(p.CompanionIDs))
+	seen := map[string]bool{}
+	for _, id := range p.CompanionIDs {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	if len(ids) > maxCompanionSlotQuery {
+		return command.Rejected(e, "INVALID_COMPANION_IDS", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_companion_ids", map[string]any{"max": maxCompanionSlotQuery})
+	}
+	slots := []CompanionSlot{}
+	if len(ids) > 0 {
+		found, err := s.repository.ListBookedCompanionSlots(ctx, ids)
+		if err != nil {
+			return command.Rejected(e, "ACTIVITY_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "activity.list_failed", nil)
+		}
+		slots = found
+	}
+	return acceptedWithPayload(e, "Activity", e.Actor.ID, 1, "LISTED", map[string]any{"slots": slots}, nil)
+}
+
 // ---------- ListMyActivities ----------
 //
 // R17.x: 补上“我的活动”这条物化路径。客户端在 me.tsx
@@ -487,6 +564,8 @@ func deriveActivityPeople(a *Activity) {
 
 type activityRefPayload struct {
 	ActivityID string `json:"activityId"`
+	// FOR-YOU-SLOT-001：For You 单要带同行人才能定位是哪一单；直接报名的单不带。
+	CompanionID string `json:"companionId,omitempty"`
 }
 
 // joinActivityPayload：JoinActivity 在 activityId 之外可选带下单上下文（ORDER-RECIPE-001）。
@@ -539,9 +618,13 @@ func (s *Service) joinActivity(ctx context.Context, e command.Envelope) command.
 	if p.Recipe.Source == "FOR_YOU" && (p.Recipe.Companion == nil || strings.TrimSpace(p.Recipe.Companion.Name) == "") {
 		return command.Rejected(e, "FOR_YOU_COMPANION_REQUIRED", "VALIDATION", "AFTER_USER_ACTION", "activity.for_you_companion_required", nil)
 	}
-	// HOME-FORYOU-ORDER-GUARD-001：同一个人同一个时间段只能有一单（人不能同时在两处）。
-	// 同一场活动的重复下单由仓库层 ErrAlreadyJoined 拦；这里拦「另一场活动、同一时间」。
-	if clash, found, err := s.timeClash(ctx, p.ActivityID, e.Actor.ID); err != nil {
+	companionID := CompanionIDOf(p.Recipe)
+	// HOME-FORYOU-ORDER-GUARD-001：直接报名（不带同行人）时，同一个人同一时段只能有一单。
+	// FOR-YOU-SLOT-001：For You 单锁的是**小美**的时段（仓库层 ErrCompanionSlotTaken），
+	// 下单人自己同一时段可以约多个小美，所以不查下单人的时段。
+	if companionID != "" {
+		// For You 单：不查下单人自己的时段。
+	} else if clash, found, err := s.timeClash(ctx, p.ActivityID, e.Actor.ID); err != nil {
 		return command.Rejected(e, "ACTIVITY_JOIN_FAILED", "INTERNAL", "SAFE_RETRY", "activity.join_failed", nil)
 	} else if found {
 		return command.Rejected(e, "ACTIVITY_TIME_CONFLICT", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.time_conflict", map[string]any{
@@ -560,10 +643,15 @@ func (s *Service) joinActivity(ctx context.Context, e command.Envelope) command.
 			details["orderNo"] = participation.OrderNo
 		}
 		// ORDER-RECIPE-001：已下过单时把当初存的票面也带回去，已下单页照原样重画。
-		if prior, ok, _ := s.repository.GetJoinOrder(ctx, p.ActivityID, e.Actor.ID); ok && prior.Snapshot != nil {
+		if prior, ok, _ := s.repository.GetJoinOrder(ctx, p.ActivityID, e.Actor.ID, companionID); ok && prior.Snapshot != nil {
 			details["snapshot"] = prior.Snapshot
 		}
 		return command.Rejected(e, "ACTIVITY_ALREADY_JOINED", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.already_joined", details)
+	}
+	if errors.Is(err, ErrCompanionSlotTaken) {
+		return command.Rejected(e, "COMPANION_SLOT_TAKEN", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.companion_slot_taken", map[string]any{
+			"companionId": companionID, "time": a.Time,
+		})
 	}
 	if errors.Is(err, ErrActivityFull) {
 		return command.Rejected(e, "ACTIVITY_FULL", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.full", map[string]any{"capacity": a.Capacity})
@@ -584,15 +672,15 @@ func (s *Service) joinActivity(ctx context.Context, e command.Envelope) command.
 		"joined":        true,
 		"orderNo":       participation.OrderNo,
 		"participation": participation,
-		"snapshot":      s.joinSnapshot(ctx, p.ActivityID, e.Actor.ID),
+		"snapshot":      s.joinSnapshot(ctx, p.ActivityID, e.Actor.ID, companionID),
 		"note":          "确认参加后开放活动群聊",
 	}, nil)
 }
 
 // joinSnapshot 读回刚落库的下单快照（成功页照它画票，跟「我的订单」同一份数据）。
 // 读失败返回 nil，客户端退回用下单时手头的数据画，不挡下单成功。
-func (s *Service) joinSnapshot(ctx context.Context, activityID, actorID string) *OrderSnapshot {
-	order, ok, err := s.repository.GetJoinOrder(ctx, activityID, actorID)
+func (s *Service) joinSnapshot(ctx context.Context, activityID, actorID, companionID string) *OrderSnapshot {
+	order, ok, err := s.repository.GetJoinOrder(ctx, activityID, actorID, companionID)
 	if err != nil || !ok {
 		return nil
 	}
@@ -623,7 +711,7 @@ func (s *Service) cancelActivity(ctx context.Context, e command.Envelope) comman
 	// ACT-ATTEND-001: 只能取消自己报过名的活动；没记录=没报名，拒。
 	// ACT-SEAT-RELEASE-001: 取消在行锁内释放名额；已签到 / 已取消的不能再取消
 	// （防止重复取消把别人的名额也「释放」掉）。
-	participation, a, err := s.repository.TransitionParticipation(ctx, p.ActivityID, e.Actor.ID,
+	participation, a, err := s.repository.TransitionParticipation(ctx, p.ActivityID, e.Actor.ID, p.CompanionID,
 		[]ParticipationState{PartConfirmed, PartRequested, PartWaitlisted}, PartCancelled)
 	if rejected, failed := participationRejected(e, err, participation, "ACTIVITY_CANCEL_NOT_ALLOWED", "activity.cancel_not_allowed", "ACTIVITY_CANCEL_FAILED", "activity.cancel_failed"); failed {
 		return rejected
@@ -645,7 +733,7 @@ func (s *Service) checkinActivity(ctx context.Context, e command.Envelope) comma
 		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
 	}
 	// ACT-ATTEND-001: 只有 CONFIRMED（已报名且未取消）才能签到。
-	participation, _, err := s.repository.TransitionParticipation(ctx, p.ActivityID, e.Actor.ID, []ParticipationState{PartConfirmed}, PartAttended)
+	participation, _, err := s.repository.TransitionParticipation(ctx, p.ActivityID, e.Actor.ID, p.CompanionID, []ParticipationState{PartConfirmed}, PartAttended)
 	if rejected, failed := participationRejected(e, err, participation, "ACTIVITY_CHECKIN_NOT_ALLOWED", "activity.checkin_not_allowed", "ACTIVITY_CHECKIN_FAILED", "activity.checkin_failed"); failed {
 		return rejected
 	}
@@ -673,7 +761,7 @@ func (s *Service) markNoShow(ctx context.Context, e command.Envelope) command.Re
 	// 注：组织者代标他人需要 targetUserId 字段 + 组织者鉴权，当前 wire 无此
 	// 字段，保持自助语义，不扩大。
 	// 爽约只能从「已报名未签到」记；已签到 / 已取消的不能改成爽约。
-	participation, _, err := s.repository.TransitionParticipation(ctx, p.ActivityID, e.Actor.ID, []ParticipationState{PartConfirmed}, PartNoShow)
+	participation, _, err := s.repository.TransitionParticipation(ctx, p.ActivityID, e.Actor.ID, p.CompanionID, []ParticipationState{PartConfirmed}, PartNoShow)
 	if rejected, failed := participationRejected(e, err, participation, "ACTIVITY_NOSHOW_NOT_ALLOWED", "activity.noshow_not_allowed", "ACTIVITY_NOSHOW_FAILED", "activity.noshow_failed"); failed {
 		return rejected
 	}
@@ -749,6 +837,8 @@ func (r *MemoryRepository) ToggleInterest(_ context.Context, activityID, actorID
 	}
 	return *item, interested, nil
 }
+func memoryPartKey(actorID, companionID string) string { return actorID + "|" + companionID }
+
 func (r *MemoryRepository) Join(_ context.Context, activityID, actorID string, recipe JoinRecipe) (Activity, Participation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -762,12 +852,29 @@ func (r *MemoryRepository) Join(_ context.Context, activityID, actorID string, r
 	if item.parts == nil {
 		item.parts = make(map[string]Participation)
 	}
-	key := activityID + "|" + actorID
-	existing, known := item.parts[actorID]
+	companionID := CompanionIDOf(recipe)
+	partKey := memoryPartKey(actorID, companionID)
+	key := activityID + "|" + partKey
+	existing, known := item.parts[partKey]
 	if known && existing.State != PartCancelled {
 		return *item, existing, ErrAlreadyJoined
 	}
-	if item.Capacity > 0 && item.Joined >= item.Capacity {
+	if companionID != "" {
+		// FOR-YOU-SLOT-001：小美的这个时段被任何人约走了（任何一场活动）就不能再约。
+		slot := SlotKey(item.Time)
+		for _, id := range r.order {
+			other := r.activities[id]
+			if other == nil || SlotKey(other.Time) != slot {
+				continue
+			}
+			for _, part := range other.parts {
+				if part.CompanionID == companionID && part.State != PartCancelled {
+					return *item, existing, ErrCompanionSlotTaken
+				}
+			}
+		}
+	} else if item.Capacity > 0 && item.Joined >= item.Capacity {
+		// For You 单不扣活动名额（店是场景载体，承载上限后期再做）；直接报名照旧看名额。
 		return *item, existing, ErrActivityFull
 	}
 	if r.orderNos == nil {
@@ -788,8 +895,8 @@ func (r *MemoryRepository) Join(_ context.Context, activityID, actorID string, r
 		r.joinedAt[key] = now.UTC()
 	}
 	r.orderNos[key] = orderNo
-	participation := Participation{ActivityID: activityID, UserID: actorID, State: PartConfirmed, OrderNo: orderNo}
-	item.parts[actorID] = participation
+	participation := Participation{ActivityID: activityID, UserID: actorID, State: PartConfirmed, OrderNo: orderNo, CompanionID: companionID}
+	item.parts[partKey] = participation
 	item.joinedBy[actorID] = true
 	item.Joined++
 	if r.snapshots == nil {
@@ -799,14 +906,14 @@ func (r *MemoryRepository) Join(_ context.Context, activityID, actorID string, r
 	return *item, participation, nil
 }
 
-func (r *MemoryRepository) GetParticipation(_ context.Context, activityID, actorID string) (Participation, error) {
+func (r *MemoryRepository) GetParticipation(_ context.Context, activityID, actorID, companionID string) (Participation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	item := r.activities[activityID]
 	if item == nil {
 		return Participation{}, ErrActivityNotFound
 	}
-	participation, ok := item.parts[actorID]
+	participation, ok := item.parts[memoryPartKey(actorID, companionID)]
 	if !ok {
 		return Participation{}, ErrNotJoined
 	}
@@ -845,28 +952,39 @@ func (r *MemoryRepository) FindActivityByCode(_ context.Context, code string) (A
 	return Activity{}, ErrActivityNotFound
 }
 
-func (r *MemoryRepository) TransitionParticipation(_ context.Context, activityID, actorID string, allowedFrom []ParticipationState, to ParticipationState) (Participation, Activity, error) {
+func (r *MemoryRepository) TransitionParticipation(_ context.Context, activityID, actorID, companionID string, allowedFrom []ParticipationState, to ParticipationState) (Participation, Activity, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	item := r.activities[activityID]
 	if item == nil {
 		return Participation{}, Activity{}, ErrActivityNotFound
 	}
-	participation, ok := item.parts[actorID]
+	partKey := memoryPartKey(actorID, companionID)
+	participation, ok := item.parts[partKey]
 	if !ok {
 		return Participation{}, *item, ErrNotJoined
 	}
 	if !stateIn(participation.State, allowedFrom) {
 		return participation, *item, ErrParticipationTransition
 	}
-	if holdsSeat(participation.State) && !holdsSeat(to) {
-		delete(item.joinedBy, actorID)
+	previous := participation.State
+	participation.State = to
+	item.parts[partKey] = participation
+	if holdsSeat(previous) && !holdsSeat(to) {
 		if item.Joined > 0 {
 			item.Joined--
 		}
+		// 这个人在这场活动上还有别的有效单（约了别的小美）就仍算参加。
+		still := false
+		for k, part := range item.parts {
+			if strings.HasPrefix(k, actorID+"|") && holdsSeat(part.State) {
+				still = true
+			}
+		}
+		if !still {
+			delete(item.joinedBy, actorID)
+		}
 	}
-	participation.State = to
-	item.parts[actorID] = participation
 	return participation, *item, nil
 }
 
@@ -888,13 +1006,13 @@ func (r *MemoryRepository) ListByOwner(_ context.Context, ownerID string) ([]Act
 	reverseActivityOrder(items)
 	return items, nil
 }
-func (r *MemoryRepository) GetJoinOrder(ctx context.Context, activityID, actorID string) (JoinOrder, bool, error) {
+func (r *MemoryRepository) GetJoinOrder(ctx context.Context, activityID, actorID, companionID string) (JoinOrder, bool, error) {
 	orders, err := r.ListJoinOrders(ctx, actorID)
 	if err != nil {
 		return JoinOrder{}, false, err
 	}
 	for _, order := range orders {
-		if order.ActivityID == activityID {
+		if order.ActivityID == activityID && order.CompanionID == companionID {
 			return order, true, nil
 		}
 	}
@@ -910,17 +1028,46 @@ func (r *MemoryRepository) ListJoinOrders(_ context.Context, actorID string) ([]
 		if item == nil {
 			continue
 		}
-		part, ok := item.parts[actorID]
-		if !ok {
+		for partKey, part := range item.parts {
+			if part.UserID != actorID {
+				continue
+			}
+			key := id + "|" + partKey
+			order := JoinOrder{ActivityID: id, CompanionID: part.CompanionID, OrderNo: part.OrderNo, JoinedAt: r.joinedAt[key], State: string(part.State)}
+			if snap, ok := r.snapshots[key]; ok {
+				snap := snap
+				order.Snapshot = &snap
+			}
+			out = append(out, order)
+		}
+	}
+	return out, nil
+}
+
+func (r *MemoryRepository) ListBookedCompanionSlots(_ context.Context, companionIDs []string) ([]CompanionSlot, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	wanted := map[string]bool{}
+	for _, id := range companionIDs {
+		wanted[id] = true
+	}
+	seen := map[string]bool{}
+	out := []CompanionSlot{}
+	for _, id := range r.order {
+		item := r.activities[id]
+		if item == nil {
 			continue
 		}
-		key := id + "|" + actorID
-		order := JoinOrder{ActivityID: id, OrderNo: part.OrderNo, JoinedAt: r.joinedAt[key], State: string(part.State)}
-		if snap, ok := r.snapshots[key]; ok {
-			snap := snap
-			order.Snapshot = &snap
+		for _, part := range item.parts {
+			if part.CompanionID == "" || !wanted[part.CompanionID] || part.State == PartCancelled {
+				continue
+			}
+			slot := CompanionSlot{CompanionID: part.CompanionID, Time: SlotKey(item.Time)}
+			if k := slot.CompanionID + "|" + slot.Time; !seen[k] {
+				seen[k] = true
+				out = append(out, slot)
+			}
 		}
-		out = append(out, order)
 	}
 	return out, nil
 }
@@ -1095,7 +1242,7 @@ func (s *Service) timeClash(ctx context.Context, activityID, actorID string) (Ac
 		if a.ID == activityID || strings.TrimSpace(a.Time) != target {
 			continue
 		}
-		if rec, err := s.repository.GetParticipation(ctx, a.ID, actorID); err == nil && rec.State == PartCancelled {
+		if rec, err := s.repository.GetParticipation(ctx, a.ID, actorID, ""); err == nil && rec.State == PartCancelled {
 			continue // 已取消的不占时间段
 		}
 		return a, true, nil

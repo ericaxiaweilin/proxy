@@ -59,6 +59,11 @@ func newLookupFixture(t *testing.T, pool *pgxpool.Pool, run string) *lookupFixtu
 		t.Fatalf("publish activity: %s %+v", published.Outcome, published.Error)
 	}
 	f.activityID, f.activityCode = pub.Activity.ID, pub.Activity.Code
+	// TEST-HYGIENE-002（2026-10-04）：PublishActivity 只会发 USER 活动；这个测试可能连着
+	// 共享开发库，测完把它标成 TEST，免得「编号反查 …」出现在首页 / 市场的活动列表里。
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `UPDATE activity.activities SET payload = jsonb_set(payload, '{origin}', '"TEST"') WHERE id = $1`, f.activityID)
+	})
 	joined := act.HandleContext(ctx, env("JoinActivity", "user_nl_guest_"+run, command.Target{Type: "Activity", ID: f.activityID}, map[string]any{"activityId": f.activityID}))
 	var join struct {
 		Participation activity.Participation `json:"participation"`

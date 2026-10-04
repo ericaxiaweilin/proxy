@@ -293,17 +293,17 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     // 优先在「有空的」那些人里轮转，只有一个都没有时才退回随机**并如实说明**。
     // 继续钉 `Math.random()` 那一行，等于把"随机"当成目的而不是当时的手段 ——
     // 而随机换人正是用户这次报的问题（看起来像在挑有空的人，其实毫无依据）。
-    // HOME-FORYOU-ORDER-009：换人取号已搬进 pickPersonSlot（纯函数，行为测试在
-    // for-you-009-person-pick.test.ts），组件侧只保留「轮转游标推进 + 文案」。
-    expect(source).toContain("pickPersonSlot(filteredPeople, freePersonCursor.current)");
-    expect(source).toContain("freePersonCursor.current += 1;");
-    // HOME-FORYOU-REFRESH-001（2026-09-29，用户「点击圆圈就是刷新全部可用插槽」）：
-    // 活动轴不再在本地旧列表上全量随机 —— 先重新拉活动，再只在可用插槽里换
-    //（有名额、我没下过单、和锁定的地点/时间不冲突，优先换一个不同的，
-    // for-you-slots.ts 有行为测试）。时间 / 地点跟着选中的活动对齐。
+    // FOR-YOU-SLOT-001：换人不再单独轮转 —— 圆圈在「人 × 活动」可约组合里整组挑，
+    // 同档里优先在线的人（shufflePick；行为测试在 for-you-derivation.test.ts）。
+    // HOME-FORYOU-REFRESH-001 → FOR-YOU-DERIVE-001：先重新拉活动，再由派生层
+    // shufflePick 只在可约的活动里换（有名额、我没下过、时段不撞、满足锁，优先换
+    // 不同的一场；行为测试在 for-you-derivation.test.ts）。时间 / 地点由活动决定。
     expect(source).toContain("function remixForYou(): void {\n    void refreshAvailableSlots();\n  }");
     expect(source).toContain("fresh = (await activities.listActivities()).map(toStoreActivityBrief);");
-    expect(source).toContain("const pick = pickRefreshedActivity(");
+    expect(source).toContain("const picked = shufflePick(freshFY, filteredPeople, { myOrders, busy: freshBusy }, lockValues, { personId: fyPerson?.id, activity: fyCurrent });");
+    // 刷新也重拉「哪些小美哪些时段已被约」（谁约的都算）。
+    expect(source).toContain("freshBusy = toBusySlots(await activities.listCompanionBookedSlots(filteredPeople.map((p) => p.id)));");
+    expect(source).not.toContain("pickRefreshedActivity");
     // 反向臂：在未过滤的全量列表上随机抽活动 = 会抽到已满 / 已下单 / 与锁冲突的活动。
     expect(source).not.toContain("setActivityIndex(Math.floor(Math.random() * sceneActivities.length))");
     expect(source).not.toContain("setTimeIndex(Math.floor(Math.random() * distinctTimes.length))");
@@ -318,30 +318,39 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     // 用户：「这属于 n*n 维度覆盖…推荐**可用**资源组合池」。
     // 原实现 place / time 是另外两条独立轴各自取模，于是能配出两种不可能的组合：
     // ① 活动不在那个场地办；② 时间不是那场活动的时间。现在活动是主轴。
-    expect(source).toContain("sceneIdOfActivity");
-    expect(source).toContain("const gridActivitySceneId = gridActivity ? sceneIdOfActivity(gridActivity, sceneBriefs) : undefined;");
-    expect(source).toContain("const gridTime = gridActivity?.time ||");
+    // FOR-YOU-DERIVE-001：场地 / 时间都取自 fyCurrent（toForYouActivities 已把场景 id 算好）。
+    expect(source).toContain("toForYouActivities(sceneActivities, sceneBriefs)");
+    expect(source).toContain("const gridPlace = sceneBriefs.find((s) => s.id === fyCurrent.sceneId);");
+    expect(source).toContain("const gridTime = gridActivity.time || undefined;");
     // 反向臂：time 那条独立取模不许回来（它就是「时间不是那场活动的时间」的来源）。
     expect(source).not.toContain("const gridTime = distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined;");
   });
 
-  it("HOME-FORYOU-CONFLICT-001：锁定的地点/时间显示冻结，不跟活动静默走", () => {
-    // 用户原话“被派生了”：锁只保住 index，显示层照样跟活动走，锁定形同虚设。
-    // 冻结之后冲突才走得通——提示 + 禁用选择（下面那条不断言，只钉冻结本身）。
-    expect(source).toContain("const displayPlace = lockedSlots.has(\"place\") && lockedPlaceScene !== undefined ? lockedPlaceScene : gridPlace;");
-    expect(source).toContain("const displayTime = lockedSlots.has(\"time\") && lockedTimeValue !== undefined ? lockedTimeValue : gridTime;");
+  it("FOR-YOU-DERIVE-001：锁是约束，不是冻结的显示值", () => {
+    // HOME-FORYOU-CONFLICT-001 原来把锁定的地点 / 时间「显示冻结」，于是格子上的
+    // 时间可以和那场活动的真实时间对不上，再靠一条冲突提示兜底。现在锁记下的是
+    // 当前活动的值（lockValueFor），之后的刷新 / 选择只在满足锁的活动里挑 ——
+    // 格子显示的永远是那一场活动本身的时间和地点。
+    expect(source).toContain("lockValueFor(axis, fyCurrent, fyPerson?.id)");
+    expect(source).toContain("const displayPlace = gridPlace;");
+    expect(source).toContain("const displayTime = gridTime;");
     expect(source).toContain("key: `place:${displayPlace.id}`");
     expect(source).toContain("key: `time:${displayTime}`");
-    // 反向臂：tile 直接用 gridPlace/gridTime 渲染不许回来（那就是静默跟随）。
-    expect(source).not.toContain("key: `place:${gridPlace.id}`");
-    expect(source).not.toContain("key: `time:${gridTime}`");
+    // 选择器每一项带状态，点不了的标原因；地点只列咖啡店。
+    expect(source).toContain("timeOptions(fyActivities, fyCtx, lockValues)");
+    expect(source).toContain("activityOptions(fyActivities, fyCtx, lockValues)");
+    expect(source).toContain("sceneOptions(coffeeSceneIds, fyActivities, fyCtx, lockValues)");
+    // 换时间 / 换地点 = 重新派生活动，不是改一个没人读的下标。
+    expect(source).toContain("deriveAndSelect(pickForTime(slot, fyCurrent, fyActivities, fyCtx, lockValues))");
+    expect(source).toContain("deriveAndSelect(pickForScene(sceneId, fyCurrent, fyActivities, fyCtx, lockValues))");
+    expect(source).not.toMatch(/setTimeIndex|setPlaceIndex|setActivityIndex/);
   });
 
   it("HOME-FORYOU-AVAILABILITY-001：圆圈刷新的组合必须可用——没有可用活动就不配组合", () => {
     // 用户定的核心测试点：活动是唯一“成立”判据（sceneActivities 只收挂真实
     // 咖啡店的活动）。没有可用活动时，人/地点/时间单独摆出来也组不成一次可约，
     // 不可用的不能被刷到——直接不渲染，而不是拿 placeIndex 兜底拼假组合。
-    expect(source).toContain("if (!gridActivity) return null;");
+    expect(source).toContain("if (!gridActivity || !fyCurrent) return null;");
     expect(source).toContain("if (!gridPlace) return null;");
     // 反向臂：placeIndex 兜底不许回来（活动没有已知场地时配出来的地点一定对不上）。
     expect(source).not.toContain("?? (sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined);");
@@ -424,19 +433,12 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("HOME-FORYOU-LOCK-001: locks a For You slot against both the remix and the chooser", () => {
     expect(source).toContain("lockedSlots");
     expect(source).toContain("function toggleSlotLock");
-    // remix 跳过锁定的轴（remixForYou 与中心键同一条链）。
-    // HOME-FORYOU-FREE-001 把这一行拆成了 `if (!lockedSlots.has("person")) { … }` ——
-    // 锁了人就不换人这条**规则没变**，只是分支里现在要先挑「有空的」。
-    // 所以这里钉行为而不是钉字面量：锁了人的时候一个人都不换。
-    expect(source).toMatch(/if \(!lockedSlots\.has\("person"\)\) \{/);
-    // 分支内才有换人的动作（否则锁了也会被重掷）
-    const lockBranch = source.slice(source.indexOf('if (!lockedSlots.has("person")) {'));
-    expect(lockBranch.slice(0, 600)).toContain('setPersonIndex(');
-    // HOME-FORYOU-REFRESH-001：锁定的活动原样保留（仍可用时），锁定的地点 / 时间作为
-    // 筛选条件交给 pickRefreshedActivity，没锁的时间 / 地点才跟着活动对齐。
-    expect(source).toContain('{ activityId: !lockedSlots.has("activity") ? undefined : current?.activityId, placeSceneId: lockedPlace?.id, time: lockedTime }');
-    expect(source).toContain('if (!lockedSlots.has("time")) {');
-    expect(source).toContain('if (!lockedSlots.has("place")) {');
+    // FOR-YOU-SLOT-001：四格的锁都是约束 —— 锁住那一刻记下人 / 时间 / 地点 / 活动的值
+    // （lockValueFor，人也算），圆圈只在满足锁的组合里挑（shufflePick 的 locks）。
+    // 锁了人 ⇒ 只在这个人的可约活动里换；锁了活动 ⇒ 只换人。行为测试在
+    // for-you-derivation.test.ts（「respects a locked person」）。
+    expect(source).toContain('const key = slot === "person" ? "personId" : slot === "time" ? "time" : slot === "place" ? "sceneId" : "activityId";');
+    expect(source).not.toContain('if (slot === "person") return;');
     // 锁定的格子拒开 chooser（点格子与搜索换项同一口径）。
     expect(source).toContain('if (lockedSlots.has(tile.slot)) { showResponse(t("lockedBlock"), t("lockedBlockSub")); return; }');
     expect(source).toContain("if (lockedSlots.has(slot)) {");
@@ -730,10 +732,11 @@ describe("HOME-FORYOU-PERSON-001 没有人就不是一个 For You 组合", () =>
     // HOME-FORYOU-ORDER-008（2026-10-01）：置灰判据仍然是 comboBlocked，只多了
     // 一个例外 —— 「这一场我已经有票」时按钮必须可点（那张票与槽位可用性无关，
     // 用户报的「点击选择不能下一步」里，按钮点不动和点得动但没出口是两回事）。
-    expect(source).toContain("disabled={comboBlocked && !existingOrder}");
-    expect(source).toContain('{comboBlocked ? <Text selectable style={styles.comboConflictText}>{comboBlockText}</Text> : null}');
+    // 缺人时按钮不置灰 —— 点下去就开人选择器，这才是下一步。
+    expect(source).toContain("disabled={comboBlocked && !existingOrder && gridPerson !== undefined}");
+    expect(source).toContain('{comboBlocked ? <Text selectable numberOfLines={2} style={styles.comboConflictText}>{comboBlockText}</Text> : null}');
     // 缺人仍然算「当前组合不成立」—— 放行按钮 ≠ 放行缺人的组合。
-    expect(source).toMatch(/const currentComboBroken = !gridPerson \|\|/);
+    expect(source).toContain("const comboBlocked = !fyStatus.ok || !gridPerson;");
   });
   it("keeps a tappable empty 人 tile instead of silently dropping the slot", () => {
     expect(source).toContain('{ key: "person:none", slot: "person" as const, imageUri: undefined, glyph: "●", label: t("tileNoPerson"), sub: t("tileNoPersonSub") }');
@@ -750,7 +753,10 @@ describe("HOME-FORYOU-PERSON-001 没有人就不是一个 For You 组合", () =>
 describe("HOME-FORYOU-ORDER-GUARD-001 下单前资源冲突守卫", () => {
   it("loads my existing orders from the same source as 我的订单", () => {
     expect(source).toContain("void activities.listMyActivities()");
-    expect(source).toContain('cancelled: order?.state === "CANCELLED",');
+    // FOR-YOU-SLOT-001：一单一项（joinOrders），带这一单约的小美。
+    expect(source).toContain("setMyOrders(payload.joinOrders.map((order) => {");
+    expect(source).toContain('cancelled: order.state === "CANCELLED",');
+    expect(source).toContain("companionId: order.companionId || undefined,");
   });
   it("blocks 选择 when this combo is already ordered or the time slot is taken, and says why", () => {
     // 原来这里 `toContain` 的是**整行调用字符串**，我给 detectOrderConflict 加了
@@ -758,18 +764,13 @@ describe("HOME-FORYOU-ORDER-GUARD-001 下单前资源冲突守卫", () => {
     // 钉字面量是在钉措辞 —— 本意是"四宫格那一步会查资源冲突、并用这两种文案
     // 说明为什么被拦"，不是"参数列表恰好长这样"。改成钉本意。
     expect(source).toMatch(/const orderConflict = detectOrderConflict\(\{[^}]*activityId: gridActivity\.activityId/);
-    // HOME-FORYOU-SLOT-AVAIL-001：冲突不再焊死按钮 —— 换一个槽位即可，
-    // 所以按钮只��「四槽全不可用」时禁用（见 for-you-slot-availability.test.ts）。
-    expect(source).toContain("const comboBlocked = !anySlotAvailable;");
-    // HOME-FORYOU-ORDER-007：判重必须带上选中的同行人，否则换人也被判成重复下单。
-    expect(source).toMatch(/detectOrderConflict\(\{[^}]*companionId: gridPerson\?\.id/);
-    // HOME-FORYOU-SLOT-AVAIL-001（用户「点什么都灰」）：原来是
-    //   comboConflicts.length > 0 || !gridPerson || orderConflict !== undefined
-    // —— 任一槽位有冲突就整体置灰，于是点什么都灰、用户什么都做不了。
-    // 改成「四槽全部不可用才置灰」，并把冲突分流到对应槽位让用户换一个。
-    expect(source).not.toContain("const comboBlocked = comboConflicts.length > 0 || !gridPerson || orderConflict !== undefined;");
+    // FOR-YOU-SLOT-001：这一组下不了（这一组我下过 / 她这个时段被约走了）就置灰并说原因；
+    // 选择器里这些项本来就标了原因、点不了，圆圈只刷可约的 —— 不会「点什么都灰」。
+    expect(source).toContain("const comboBlocked = !fyStatus.ok || !gridPerson;");
+    // 判重带上这一组的小美和「已被约走的时段」（谁约的都算）。
+    expect(source).toContain("detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time, companionId: gridPerson?.id }, myOrders, busySlots)");
     expect(source).toContain('t("orderConflictAlready", { orderNo: conflict.orderNo ?? "—" })');
-    expect(source).toContain('t("orderConflictTime", { time: conflict.time, title: conflict.title })');
+    expect(source).toContain('t("orderConflictPersonBusy", { name: personName ?? "TA", time: conflict.time })');
   });
   it("offers the existing ticket instead of a second order, without borrowing today's grid companion", () => {
     // HOME-FORYOU-ORDER-008（2026-10-01，用户「点击 for you 的选择 不能下一步」）：
@@ -787,11 +788,10 @@ describe("HOME-FORYOU-ORDER-GUARD-001 下单前资源冲突守卫", () => {
     expect(fallback).not.toContain("gridPerson");
   });
   it("re-checks at submit time and remembers the new order immediately", () => {
-    // 同上：从整行字面量改成"提交前确实又查了一次"，并要求带上同行人
-    // （HOME-FORYOU-ORDER-007）。submit 时这一处查的是 recipe 里带的 companion。
-    expect(source).toMatch(/const conflict = target \? detectOrderConflict\(\{[^}]*activityId/);
-    expect(source).toMatch(/detectOrderConflict\(\{[^}]*companionId: recipe\?\.companion\?\.id/);
-    expect(source).toContain("rememberMyOrder(activityId, result.orderNo, result.snapshot ?? undefined);");
-    expect(source).toContain('case "ACTIVITY_TIME_CONFLICT": {');
+    // 提交前确实又查了一次（按 活动 × 小美 × 时段 判，FOR-YOU-SLOT-001）。
+    expect(source).toContain("detectOrderConflict({ activityId, time: target.time, companionId }, myOrders, busySlots)");
+    expect(source).toContain("rememberMyOrder(activityId, result.orderNo, result.snapshot ?? undefined, companionId);");
+    // 她这个时段刚被别人约走了：服务端 COMPANION_SLOT_TAKEN，说人话并记进本地。
+    expect(source).toContain('case "COMPANION_SLOT_TAKEN": {');
   });
 });

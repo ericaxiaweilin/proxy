@@ -410,7 +410,7 @@ func TestAttendanceRequiresParticipation(t *testing.T) {
 	if out := s.HandleContext(t.Context(), activityEnvelope("JoinActivity", "user_a", id)); out.Outcome != "ACCEPTED" {
 		t.Fatalf("join: %+v", out)
 	}
-	if _, err := s.repository.GetParticipation(t.Context(), id, "user_a"); err != nil {
+	if _, err := s.repository.GetParticipation(t.Context(), id, "user_a", ""); err != nil {
 		t.Fatalf("join must create a participation record: %v", err)
 	}
 

@@ -109,9 +109,9 @@ describe("HOME-MYORDERS-JOINS-001 我的订单必须显示活动报名记录", (
   it("loads joined activities from the same source as 我的活动", () => {
     // 正向：报名数据来自 ListMyActivities 的 joined（不是编的，也不是履约订单）。
     expect(ordersCode).toContain("activityClient.listMyActivities()");
-    expect(ordersCode).toContain("setJoinedActs(sortJoinedByOrderTime(payload.joined, byActivity))");
-    // MY-ORDERS-DETAIL-001：同一份响应里带每笔报名自己的订单信息。
-    expect(ordersCode).toContain("payload.joinOrders.map((order) => [order.activityId, order] as const)");
+    // MY-ORDERS-DETAIL-001 / FOR-YOU-SLOT-001：同一份响应里带每笔报名自己的订单信息，
+    // 一张票一项（同一场活动约了不同的小美是不同的单）。
+    expect(ordersCode).toContain("setJoinedEntries(joinEntries(payload.joined, payload.joinOrders));");
   });
   it("renders the 报名 section with the real per-order number, never the shared activity code as one", () => {
     // MY-ORDERS-DETAIL-001：ORDER-NO-001 之后每笔报名有自己的订单编号 —— 订单编号
@@ -125,7 +125,7 @@ describe("HOME-MYORDERS-JOINS-001 我的订单必须显示活动报名记录", (
     expect(ordersCode).toContain("activityOrderFields(item, order)");
     // ORDER-RECIPE-001：点一笔报名先开它的票（下单快照，跟成功页同一个组件），
     // 票里再给「查看活动详情」走活动现在的样子。
-    expect(ordersCode).toContain("setTicketActivityId(item.activityId)");
+    expect(ordersCode).toContain("onPress={() => setTicketKey(key)}");
     expect(ordersCode).toContain("<ActivityOrderTicket");
     expect(ordersCode).toContain("orderSnapshotFor(ticketActivity, order)");
     expect(ordersCode).toContain("setActivityDetailId(ticketActivity.activityId)");

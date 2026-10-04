@@ -67,9 +67,13 @@ var tiers = []tier{
 var tierLanguages = [][]string{{"vi"}, {"vi", "zh"}, {"vi", "en"}, {"vi", "zh", "en"}}
 
 func seedTiers(ctx context.Context, pool *pgxpool.Pool, out io.Writer) error {
+	// FOR-YOU-CANDIDATES-001（2026-10-04，用户「为什么后面新增的用户没有选」）：只给
+	// devseed（100 个有真名 / 肖像的开发用户）铺坐标。devpipe（"Dev N"）是 feed 管线的
+	// 发帖作者，不开接单资料 —— 以前它们也铺坐标，管线每 5 分钟多一个，几百个 "Dev N"
+	// 堆在 0km 上，把 For You / 真人推荐「最近的 N 个」名额全占了。
 	rows, err := pool.Query(ctx, `
 		SELECT user_account_id, name FROM identity.profiles
-		 WHERE user_account_id LIKE 'devpipe_%' OR user_account_id LIKE 'user_devseed_%'
+		 WHERE user_account_id LIKE 'user_devseed_%'
 		 ORDER BY user_account_id`)
 	if err != nil {
 		return fmt.Errorf("list dev users: %w", err)
@@ -89,7 +93,7 @@ func seedTiers(ctx context.Context, pool *pgxpool.Pool, out io.Writer) error {
 		return fmt.Errorf("read dev users: %w", err)
 	}
 	if len(users) == 0 {
-		return fmt.Errorf("没有 devpipe_/devseed_ 用户可铺坐标 —— 先跑 devdata feed-pipeline 或 seed_dev_shops_users")
+		return fmt.Errorf("没有 user_devseed_ 用户可铺坐标 —— 先跑 seed_dev_shops_users")
 	}
 
 	seeded := 0
@@ -157,7 +161,7 @@ func verifyTiers(ctx context.Context, pool *pgxpool.Pool, out io.Writer) error {
 		SELECT a.lat, a.lng
 		  FROM supply.agent_profiles a
 		  JOIN identity.profiles p ON p.user_account_id = a.user_account_id
-		 WHERE a.lat IS NOT NULL AND a.agent_id LIKE 'agent_devpipe_%'`)
+		 WHERE a.lat IS NOT NULL AND a.agent_id LIKE 'agent_user_devseed_%'`)
 	if err != nil {
 		return fmt.Errorf("read tier rows: %w", err)
 	}

@@ -1,7 +1,7 @@
 // Activity 客户端：活动读模型（ListActivities）+ 感兴趣/参加命令。
 // 计数服务端权威；operationRef 承载 payload（zod 校验，fail-closed）。
-import type { Activity, ActivityJoinRecipe, CommandResult, JoinActivityPayload, ListMyActivitiesPayload } from "@proxy/contracts";
-import { ActivitySchema, JoinActivityPayloadSchema, ListActivitiesPayloadSchema, ListMyActivitiesPayloadSchema, PUBLIC_NUMBER_PATTERN, ToggleActivityInterestPayloadSchema } from "@proxy/contracts";
+import type { Activity, ActivityJoinRecipe, CommandResult, CompanionBookedSlot, JoinActivityPayload, ListMyActivitiesPayload } from "@proxy/contracts";
+import { ActivitySchema, JoinActivityPayloadSchema, ListActivitiesPayloadSchema, ListCompanionBookedSlotsPayloadSchema, ListMyActivitiesPayloadSchema, PUBLIC_NUMBER_PATTERN, ToggleActivityInterestPayloadSchema } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import { requireAuthenticatedServerSession, type SecureSessionStore, type StoredSession } from "./secure-session";
@@ -104,7 +104,7 @@ export class ActivityClient {
     // 24/46/18 随 R15.22 WIP 被改为 API 加载 — server 端 ListActivities 不限
     // actor type, 仅需 optional session, 不再要 requireSession.
     const result = await this.sendCommand(undefined, "ListActivities", { type: "Activity", id: "local" }, {});
-    return ListActivitiesPayloadSchema.parse(this.decodeOperationRef(result)).activities;
+    return parseActivityList(this.decodeOperationRef(result));
   }
 
   // R17.x: 我的活动物化路径。返回 actor-scoped created + joined
@@ -114,7 +114,23 @@ export class ActivityClient {
   public async listMyActivities(): Promise<ListMyActivitiesPayload> {
     const session = await this.requireSession();
     const result = await this.sendCommand(session, "ListMyActivities", { type: "Activity", id: "mine" }, {});
-    return ListMyActivitiesPayloadSchema.parse(this.decodeOperationRef(result));
+    // ACT-LIST-TOLERANT-001：created / joined 也逐条校验——报过名的脏活动不能让
+    // 「我的订单」和 For You 的下单守卫一起读不出来。
+    const raw = this.decodeOperationRef(result) as { created?: unknown; joined?: unknown } | undefined;
+    return ListMyActivitiesPayloadSchema.parse({
+      ...(raw ?? {}),
+      created: parseActivityList({ activities: Array.isArray(raw?.created) ? raw.created : [] }),
+      joined: parseActivityList({ activities: Array.isArray(raw?.joined) ? raw.joined : [] }),
+    });
+  }
+
+  // FOR-YOU-SLOT-001：这批小美里哪些时段已经被约走了（任何人约的都算）。For You 四宫格
+  // 用它判断「这个人在这个时段还有没有空」。
+  public async listCompanionBookedSlots(companionIds: readonly string[]): Promise<CompanionBookedSlot[]> {
+    if (companionIds.length === 0) return [];
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "ListCompanionBookedSlots", { type: "Activity", id: "companion-slots" }, { companionIds: [...companionIds] });
+    return ListCompanionBookedSlotsPayloadSchema.parse(this.decodeOperationRef(result)).slots;
   }
 
   public async toggleInterest(activityId: string): Promise<{ activity: Activity; interested: boolean }> {
@@ -210,4 +226,27 @@ export class ActivityClient {
     this.commandSequence += 1;
     return `mobile_activity_${prefix}_${Date.now().toString(36)}_${this.commandSequence.toString(36)}`;
   }
+}
+
+/**
+ * ACT-LIST-TOLERANT-001（用户「最近 for you 特别烂 搞坏了」2026-10-04）：活动列表以前
+ * 整包 zod 校验——只要有**一条**活动不合规，整个列表就解析失败，调用方 catch 掉之后
+ * 拿到的是空列表：For You 四宫格整块消失，市场活动也一起空。实测根因：共享开发库里
+ * 被集成测试写进去 36 条脏活动，其中 6 条 origin 是空串。现在逐条校验，不合规的
+ * 那几条丢掉（打一条 warn），其余照常显示。
+ */
+export function parseActivityList(raw: unknown): Activity[] {
+  const list = raw && typeof raw === "object" && Array.isArray((raw as { activities?: unknown }).activities)
+    ? (raw as { activities: unknown[] }).activities
+    : undefined;
+  if (!list) return ListActivitiesPayloadSchema.parse(raw).activities;
+  const out: Activity[] = [];
+  let dropped = 0;
+  for (const item of list) {
+    const parsed = ActivitySchema.safeParse(item);
+    if (parsed.success) out.push(parsed.data);
+    else dropped += 1;
+  }
+  if (dropped > 0 && typeof console !== "undefined") console.warn(`ListActivities: dropped ${dropped} malformed activit${dropped === 1 ? "y" : "ies"}`);
+  return out;
 }

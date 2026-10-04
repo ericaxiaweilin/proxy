@@ -93,6 +93,12 @@ const (
 	MaxProfileSearchQuery     = 60
 	DefaultProfileSearchLimit = 20
 	MaxProfileSearchLimit     = 50
+	// MaxNearbyProfileLimit（FOR-YOU-CANDIDATES-001）：附近的人是 For You 的候选池，半径
+	// 内的人都该能进来；50 封顶时半径内的人一多就按距离被截掉。
+	MaxNearbyProfileLimit = 500
+	// NearbyCandidateRadiusM（FOR-YOU-CANDIDATES-001）：For You 候选 = 这个半径内的全部人。
+	// 用户：「30km 在越南有摩托车属于可接受的距离」。
+	NearbyCandidateRadiusM = 30000.0
 )
 
 // Profile is the user-facing identity exposed on the home tab.
@@ -296,6 +302,25 @@ func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
 	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
 		math.Cos(toRad(lat1))*math.Cos(toRad(lat2))*math.Sin(dLng/2)*math.Sin(dLng/2)
 	return 2 * earthRadiusM * math.Asin(math.Sqrt(a))
+}
+
+// ProfileLocationWriter（FOR-YOU-CANDIDATES-001）：把本人当前位置写到自己的资料上，
+// 供「附近的人」算距离。单独一个小接口，不扩大 ProfileRepository（测试里的假仓不用跟着改）。
+type ProfileLocationWriter interface {
+	UpdateProfileLocation(ctx context.Context, userAccountID string, latitude, longitude float64) error
+}
+
+func (r *MemoryProfileRepository) UpdateProfileLocation(_ context.Context, userAccountID string, latitude, longitude float64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.profiles[userAccountID]
+	if !ok {
+		return ErrProfileNotFound
+	}
+	lat, lng := latitude, longitude
+	p.Latitude, p.Longitude = &lat, &lng
+	r.profiles[userAccountID] = p
+	return nil
 }
 
 // ListProfilesNearby mirrors the Postgres read — haversine, ascending distance,
@@ -595,6 +620,20 @@ func (s *ProfileService) SearchProfiles(ctx context.Context, query string, limit
 	return s.repo.SearchProfiles(ctx, query, limit)
 }
 
+// ErrProfileLocationUnsupported：仓储不支持写位置（不该发生在生产配置里）。
+var ErrProfileLocationUnsupported = errors.New("profile location not supported by this repository")
+
+// UpdateMyLocation 写本人位置（只能写自己的）。坐标范围由调用方校验。
+func (s *ProfileService) UpdateMyLocation(ctx context.Context, userAccountID string, latitude, longitude float64) error {
+	writer, ok := s.repo.(ProfileLocationWriter)
+	if !ok {
+		return ErrProfileLocationUnsupported
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return writer.UpdateProfileLocation(ctx, userAccountID, latitude, longitude)
+}
+
 // ListProfilesNearby is the ProfileService half of the home-rail read
 // (HOME-RAIL-SERVER-001). The limit is clamped the same way SearchProfiles
 // clamps, so the rail cannot ask for an unbounded page.
@@ -602,8 +641,8 @@ func (s *ProfileService) ListProfilesNearby(ctx context.Context, latitude, longi
 	if limit <= 0 {
 		limit = DefaultProfileSearchLimit
 	}
-	if limit > MaxProfileSearchLimit {
-		limit = MaxProfileSearchLimit
+	if limit > MaxNearbyProfileLimit {
+		limit = MaxNearbyProfileLimit
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

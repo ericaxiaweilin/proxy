@@ -164,7 +164,7 @@ func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "ListNearbyProfiles", "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "LookupPasswordlessIdentity", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "ListMySessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession", "AuthenticateWithGoogle",
 		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity",
-		"UpdateProfile", "GetProfile", "GetProfileByHandle", "SearchProfiles",
+		"UpdateProfile", "GetProfile", "GetProfileByHandle", "SearchProfiles", "UpdateMyLocation",
 		"GetAccountPreferences", "UpdateAccountPreferences",
 		"GetAiEngineSettings", "UpdateAiEngineSettings",
 		"RequestPrivacyExport", "RequestPrivacyDelete", "CancelPrivacyRequest", "GetPrivacyRequestStatus", "ListPrivacyRequests":
@@ -229,6 +229,8 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 		return s.searchProfiles(ctx, envelope)
 	case "ListNearbyProfiles":
 		return s.listNearbyProfiles(ctx, envelope)
+	case "UpdateMyLocation":
+		return s.updateMyLocation(ctx, envelope)
 	case "GetAccountPreferences":
 		return s.getAccountPreferences(ctx, envelope)
 	case "UpdateAccountPreferences":
@@ -1752,6 +1754,11 @@ func (s *Service) listNearbyProfiles(ctx context.Context, e command.Envelope) co
 	if found == nil {
 		found = []Profile{}
 	}
+	// FOR-YOU-CANDIDATES-001：位置现在可能是对方的实时定位 —— 只返回服务端算好的距离，
+	// 坐标一律不发给别人。
+	for i := range found {
+		found[i].Latitude, found[i].Longitude = nil, nil
+	}
 	// operationRef, not Body — same reason as searchProfiles: the mobile
 	// CommandResult parser drops Body, so a Body-only answer reads as "nothing
 	// found, no error".
@@ -1762,6 +1769,31 @@ func (s *Service) listNearbyProfiles(ctx context.Context, e command.Envelope) co
 	result := command.Accepted(e, "NearbyProfileList", e.Actor.ID, 1, "LISTED", nil)
 	result.OperationRef = string(raw)
 	return result
+}
+
+// updateMyLocation（FOR-YOU-CANDIDATES-001）：App 拿到真实定位后把本人位置写到自己的
+// 资料上，「附近的人」才能把这个人算进 30km 候选。只能写自己的（actor = 资料主人）；
+// 兜底原点（河内）不许上报 —— 那不是这个人的位置。
+func (s *Service) updateMyLocation(ctx context.Context, e command.Envelope) command.Result {
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "PROFILE_LOCATION_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.profile_location_forbidden", nil)
+	}
+	var request struct {
+		Latitude  *float64 `json:"latitude"`
+		Longitude *float64 `json:"longitude"`
+	}
+	_ = decode(e.Payload, &request)
+	if request.Latitude == nil || request.Longitude == nil ||
+		*request.Latitude < -90 || *request.Latitude > 90 || *request.Longitude < -180 || *request.Longitude > 180 {
+		return command.Rejected(e, "INVALID_LOCATION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_location", nil)
+	}
+	if err := s.profileService.UpdateMyLocation(ctx, e.Actor.ID, *request.Latitude, *request.Longitude); err != nil {
+		if errors.Is(err, ErrProfileNotFound) {
+			return command.Rejected(e, "PROFILE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "identity.profile_not_found", nil)
+		}
+		return command.Rejected(e, "PROFILE_LOCATION_FAILED", "INTERNAL", "SAFE_RETRY", "identity.profile_location_failed", nil)
+	}
+	return command.Accepted(e, "Profile", e.Actor.ID, 1, "LOCATION_UPDATED", nil)
 }
 
 // listMySessions answers the device-management card in Settings ("设备管理").

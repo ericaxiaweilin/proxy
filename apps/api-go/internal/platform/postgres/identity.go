@@ -1559,9 +1559,34 @@ func (r *IdentityRepository) ListProfilesNearby(ctx context.Context, latitude, l
 	//
 	// w.start_at/end_at 取**最宽**的那一段（max(end_at)），够不够覆盖请求时段由
 	// free_at 判定；FreeFrom/FreeUntil 就是那一段，供界面如实显示。
+	// FOR-YOU-CANDIDATES-001（2026-10-04）：不再要求先开通接单资料（默认人人可接单）。
+	// 位置优先取本人上报的实时位置（identity.profiles.lat/lng），没有再退到接单资料的
+	// 服务坐标；两边都没有的人不进「附近」（距离未知 ≠ 很近）。接单资料按人只取一行
+	// （LATERAL LIMIT 1），避免同一个人有多行接单资料时被扇出成多个候选。
 	const query = `
-		SELECT p.user_account_id, p.name, p.handle, p.bio, p.city, p.avatar_path, p.version, p.updated_at,
-			COALESCE(c.claim_number, 0), a.lat, a.lng,
+		WITH located AS (
+			SELECT p.user_account_id, p.name, p.handle, p.bio, p.city, p.avatar_path, p.version, p.updated_at,
+				COALESCE(p.lat, ag.lat) AS lat, COALESCE(p.lng, ag.lng) AS lng, ag.agent_id
+			FROM identity.profiles p
+			LEFT JOIN LATERAL (
+				SELECT a.lat, a.lng, a.agent_id
+				  FROM supply.agent_profiles a
+				 WHERE a.user_account_id = p.user_account_id
+				 ORDER BY (a.lat IS NULL), a.updated_at DESC
+				 LIMIT 1
+			) ag ON TRUE
+		),
+		measured AS (
+			SELECT l.*, 6371000.0 * 2 * asin(sqrt(
+				power(sin(radians(l.lat - $1) / 2), 2) +
+				cos(radians($1)) * cos(radians(l.lat)) *
+				power(sin(radians(l.lng - $2) / 2), 2)
+			)) AS meters
+			FROM located l
+			WHERE l.lat IS NOT NULL AND l.lng IS NOT NULL
+		)
+		SELECT m.user_account_id, m.name, m.handle, m.bio, m.city, m.avatar_path, m.version, m.updated_at,
+			COALESCE(c.claim_number, 0), m.lat, m.lng,
 			w.start_at, w.end_at,
 			CASE
 				WHEN $5::timestamptz IS NULL OR $6::timestamptz IS NULL THEN NULL
@@ -1569,41 +1594,21 @@ func (r *IdentityRepository) ListProfilesNearby(ctx context.Context, latitude, l
 				WHEN w.start_at <= $5 AND w.end_at >= $6 THEN TRUE
 				ELSE FALSE
 			END AS free_at,
-			6371000.0 * 2 * asin(sqrt(
-				power(sin(radians(a.lat - $1) / 2), 2) +
-				cos(radians($1)) * cos(radians(a.lat)) *
-				power(sin(radians(a.lng - $2) / 2), 2)
-			)) AS meters
-		FROM identity.profiles p
-		JOIN supply.agent_profiles a ON a.user_account_id = p.user_account_id
-		LEFT JOIN identity.agent_claim_numbers c ON c.user_account_id = p.user_account_id
-		-- ⚠️ 这里**不能**把时段条件放进 JOIN 的 WHERE。第一版放了，于是"有排期但不
-		-- 覆盖这个时段"的人 LATERAL 取不到行 → w.id IS NULL → free_at 变成 NULL
-		-- （未知），实测凌晨时段查出来**全员未知**，而正确答案应该是
-		-- false（有排期、那个时段没空）。
-		--
-		-- 三态的来源必须在这里保住：
-		--   w.id IS NULL     ⇒ 这个人根本没有排期 ⇒ **未知**
-		--   w.id 非空 + 覆盖  ⇒ 有空
-		--   w.id 非空 + 不覆盖 ⇒ 没空
-		-- 所以 JOIN 只取"这个人有没有 AVAILABLE 的排期"（取最宽的一段），
-		-- 判不覆盖交给上面那个 CASE。
+			m.meters
+		FROM measured m
+		LEFT JOIN identity.agent_claim_numbers c ON c.user_account_id = m.user_account_id
+		-- ⚠️ 时段条件**不能**放进 JOIN 的 WHERE（见 HOME-FORYOU-FREE-001 的三态）：
+		--   w.id IS NULL ⇒ 没有排期（未知）；w 覆盖 ⇒ 有空；不覆盖 ⇒ 没空。
 		LEFT JOIN LATERAL (
 			SELECT aw.id, aw.start_at, aw.end_at
 			  FROM supply.availability_windows aw
-			 WHERE aw.agent_id = a.agent_id AND aw.status = 'AVAILABLE'
+			 WHERE aw.agent_id = m.agent_id AND aw.status = 'AVAILABLE'
 			   AND aw.end_at > now()
 			 ORDER BY aw.end_at DESC
 			 LIMIT 1
 		) w ON TRUE
-		WHERE a.lat IS NOT NULL AND a.lng IS NOT NULL
-		  AND ($3 < 0 OR (
-			6371000.0 * 2 * asin(sqrt(
-				power(sin(radians(a.lat - $1) / 2), 2) +
-				cos(radians($1)) * cos(radians(a.lat)) *
-				power(sin(radians(a.lng - $2) / 2), 2)
-			)) < $3))
-		ORDER BY meters ASC
+		WHERE ($3 < 0 OR m.meters < $3)
+		ORDER BY m.meters ASC
 		LIMIT $4`
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, query, latitude, longitude, radius, limit, slotStart, slotEnd)
 	if err != nil {
@@ -1682,6 +1687,20 @@ func (r *IdentityRepository) SearchProfiles(ctx context.Context, query string, l
 // updated_at on conflict, so concurrent updates from the same
 // actor (rare but possible on slow networks) see monotonically
 // increasing versions.
+// UpdateProfileLocation（FOR-YOU-CANDIDATES-001）：本人上报的实时位置。
+func (r *IdentityRepository) UpdateProfileLocation(ctx context.Context, userAccountID string, latitude, longitude float64) error {
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE identity.profiles SET lat = $2, lng = $3, location_updated_at = now()
+		 WHERE user_account_id = $1`, userAccountID, latitude, longitude)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return identity.ErrProfileNotFound
+	}
+	return nil
+}
+
 func (r *IdentityRepository) UpsertProfile(ctx context.Context, p identity.Profile) (identity.Profile, error) {
 	row := queryerForContext(ctx, r.pool).QueryRow(ctx, `
 		WITH up AS (

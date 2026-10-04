@@ -279,6 +279,8 @@ commands:
     domain: Benefit
   - command: ListCommunities
     domain: SocialSpace
+  - command: ListCompanionBookedSlots
+    domain: Activity
   - command: ListContributions
     domain: Contribution
   - command: ListConversationMessages
@@ -622,6 +624,8 @@ commands:
   - command: UpdateAgentService
     domain: Supply
   - command: UpdateAiEngineSettings
+    domain: Identity
+  - command: UpdateMyLocation
     domain: Identity
   - command: UpdatePostAudience
     domain: LocalNet

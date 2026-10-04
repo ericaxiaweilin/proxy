@@ -125,6 +125,12 @@ export class ProfileClient {
   // Throws VIEWER_LOCATION_REQUIRED upstream as a rejection: a caller that has
   // no location gets an error rather than an empty rail, so "I have no
   // location" is never mistaken for "nobody is around".
+  // FOR-YOU-CANDIDATES-001：本人真实定位写到自己的资料上（服务端只用来算距离）。
+  public async updateMyLocation(location: { latitude: number; longitude: number }): Promise<void> {
+    const session = await this.requireSession();
+    await this.command(session, "UpdateMyLocation", session.userAccountId, { latitude: location.latitude, longitude: location.longitude });
+  }
+
   public async listNearby(
     location: { latitude: number; longitude: number },
     options: { maxDistanceKm?: number; limit?: number; slot?: { startIso: string; endIso: string } } = {}

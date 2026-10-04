@@ -269,66 +269,59 @@ export function activitiesAtCoffeeShops<A extends ComboActivity>(
   });
 }
 
-/** 我手上已有的一单（ListMyActivities 的 joined + joinOrders 合成）。 */
+/** 我手上已有的一单（ListMyActivities 的 joinOrders，一单一项）。 */
 export type ExistingOrder = {
   activityId: string;
   title: string;
   time: string;
   orderNo?: string | undefined;
   cancelled?: boolean | undefined;
-  // HOME-FORYOU-ORDER-007：这一单的同行人 id。
-  //
-  // 没有它，判重只能按 activityId 判 —— 于是「换一个同行人再下同一场活动」被判成
-  // 重复下单，界面把那个新用户显示成灰色 + 「这一单你已经下过了」。而那个新用户
-  // 根本没下过单。服务端（activity 仓储的 companionChanged）已经改成看同行人，
-  // 客户端不改的话服务端放行、界面照样不给下单 —— 一半修好不算修好。
-  //
-  // 只用 id，不用名字：名字会改，改了名就绕开判重等于没有判重。
+  // FOR-YOU-SLOT-001：这一单约的小美。同一场活动约不同的小美是不同的单；
+  // 直接报名（不带同行人）的老单这里是 undefined。
   companionId?: string | undefined;
 };
 
+/** 时段键：活动时间文本去首尾空白、压缩空白（与服务端 activity.SlotKey 同一口径）。 */
+export function slotKey(time: string): string {
+  return time.split(/\s+/).filter(Boolean).join(" ");
+}
+
+/** 已被约走的「小美 × 时段」集合（ListCompanionBookedSlots，谁约的都算）。 */
+export type BusySlots = ReadonlySet<string>;
+export function busyKey(companionId: string, time: string): string {
+  return `${companionId}|${slotKey(time)}`;
+}
+
+export function toBusySlots(slots: readonly { companionId: string; time: string }[]): BusySlots {
+  return new Set(slots.map((slot) => busyKey(slot.companionId, slot.time)));
+}
+
 export type OrderConflict =
   | { kind: "ALREADY_ORDERED"; orderNo?: string | undefined }
-  | { kind: "TIME_TAKEN"; title: string; time: string; orderNo?: string | undefined };
+  | { kind: "COMPANION_BUSY"; time: string };
 
 /**
- * HOME-FORYOU-ORDER-GUARD-001（用户「确认下单后 收到 recipe 再次返回 home 可以同参数
- * 再次下单 这个违法基本资源冲突逻辑 要做守卫和检查提示」）：下单前的资源冲突检查。
- *   - 这场活动我已经下过单（没取消）→ ALREADY_ORDERED，不能重复下。
- *   - 同一个时间段我已经有另一单（没取消）→ TIME_TAKEN，人不能同时在两处。
- * 时间是活动自己写的自由文本（不是可解析的时间戳），只能按原文相等判断同一档，
- * 不去猜两段文字是不是重叠。空时间不参与判断。
+ * FOR-YOU-SLOT-001（2026-10-04，用户：「for you 是 4 个自由资源槽，核心服务于小美真人……
+ * 20 个真人 × 3 个时间段 = 最大 60 个可以用，现在只有 9 个，设计逻辑有缺陷」）。
+ * 资源单位是「小美 × 时段」：
+ *   - 这一组 (活动, 小美) 我已经下过单（没取消）→ ALREADY_ORDERED，去看那张票；
+ *   - 这个小美在这个时段已经被约走了（谁约的都算，包括我约她的另一场）→ COMPANION_BUSY；
+ *   - 我自己同一时段约多个小美不算冲突（用户裁决：只锁小美的时间）。
+ * 时间是活动自己写的自由文本，按规整后的原文相等判断同一时段（slotKey）。
  */
 export function detectOrderConflict(
-  // companionId 是这次要带的同行人（HOME-FORYOU-ORDER-007）。
-  activity: { activityId: string; time: string; companionId?: string | undefined },
-  existing: readonly ExistingOrder[]
+  combo: { activityId: string; time: string; companionId?: string | undefined },
+  existing: readonly ExistingOrder[],
+  busy: BusySlots = new Set()
 ): OrderConflict | undefined {
   const live = existing.filter((order) => !order.cancelled);
-  // 同一场活动 + **同一个同行人** ⇒ 重复下单。换了同行人就是新的一单。
-  //
-  // 拿不到旧单的同行人（历史数据没有这个字段）时**不判重**：按「换了人」放行。
-  // 服务端同一口径 —— activity.go 的 Join 要求 existing.Snapshot != nil 才判重，
-  // companionChanged 遇 nil 也返回 true。理由见下（这里写反过一次，会永久锁死用户）。
-  const wanted = activity.companionId ?? "";
-  // 同一场活动 + **已知同一个同行人** ⇒ 重复下单。
-  //
-  // 旧单的同行人**缺失**（票面快照是 NULL，票面快照功能之前下的单）时按
-  // "换了人"处理，允许继续下单。第一版我写的是反的（缺失 ⇒ 判重），理由是
-  // "拿不到证据就保守" —— 结果**把这个用户永久锁死了**：库里所有旧单都没有快照，
-  // 于是他在任何一个自己下过单的活动上，选任何新同行人都被判「已经下过了」。
-  // 新同行人根本没下过单，那条提示是假的，而用户再也无法和任何新的人下单。
-  //
-  // 真实重复下单的代价是一张票（服务端同活动同 actor 只有一行，会沿用原编号并
-  // 刷新票面）；误判重复下单的代价是**永久锁死**。两者不对称，所以要往放行那边偏。
-  const same = live.find((order) =>
-    order.activityId === activity.activityId &&
-    order.companionId !== undefined &&
-    order.companionId === wanted
-  );
+  const same = live.find((order) => order.activityId === combo.activityId && (order.companionId ?? "") === (combo.companionId ?? ""));
   if (same) return { kind: "ALREADY_ORDERED", orderNo: same.orderNo };
-  const time = activity.time.trim();
-  if (!time) return undefined;
-  const clash = live.find((order) => order.time.trim() === time);
-  return clash ? { kind: "TIME_TAKEN", title: clash.title, time: clash.time, orderNo: clash.orderNo } : undefined;
+  const companionId = combo.companionId;
+  const time = slotKey(combo.time);
+  if (!companionId || !time) return undefined;
+  const taken = busy.has(busyKey(companionId, time))
+    || live.some((order) => order.companionId === companionId && slotKey(order.time) === time);
+  return taken ? { kind: "COMPANION_BUSY", time: combo.time } : undefined;
 }
+

@@ -21,7 +21,7 @@ import { activityAIPersonaName } from "./activity-detail-model";
 import { styles } from "./me-styles";
 import * as Clipboard from "expo-clipboard";
 import type { ActivityJoinOrder } from "@proxy/contracts";
-import { activityOrderFields, formatJoinedAt, joinStateLabel, orderSnapshotFor, sortJoinedByOrderTime } from "../my-activity-orders";
+import { activityOrderFields, formatJoinedAt, joinStateLabel, orderSnapshotFor, joinEntries, type JoinEntry } from "../my-activity-orders";
 import { ActivityOrderTicket, peopleCountLabel } from "../components/activity-order-ticket";
 import { ProxyBackGlyph, ProxyEmptyState, ProxyLoading } from "../components/proxy-foundation";
 import { createSceneFavoritesStore, resolveSavedSceneIds, type SavedSceneEntry } from "../scene-favorites";
@@ -130,12 +130,12 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
   // 一个「活动报名」区块摆在履约订单上面，编号标「活动编号」跟履约订单区分开。
   // 读失败单独说一句（「取不出来」和「确实没有」分开），不挡下面的订单主列表。
   const [activityClient] = useState(() => new ActivityClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore }));
-  const [joinedActs, setJoinedActs] = useState<Activity[]>([]);
-  // MY-ORDERS-DETAIL-001：每笔报名自己的订单信息（编号 / 下单时间 / 状态）。
-  const [joinOrders, setJoinOrders] = useState<ReadonlyMap<string, ActivityJoinOrder>>(new Map());
+  // MY-ORDERS-DETAIL-001 / FOR-YOU-SLOT-001：一张票一项（同一场活动可以约不同的小美、
+  // 下多单），每项带这一单自己的订单信息（编号 / 下单时间 / 状态 / 票面）。
+  const [joinedEntries, setJoinedEntries] = useState<JoinEntry[]>([]);
   const [copiedOrderNo, setCopiedOrderNo] = useState<string | undefined>(undefined);
   // ORDER-RECIPE-001：点一笔报名打开它的票（跟下单成功页同一个组件、同一份快照）。
-  const [ticketActivityId, setTicketActivityId] = useState<string | undefined>(undefined);
+  const [ticketKey, setTicketKey] = useState<string | undefined>(undefined);
   const [joinsFailed, setJoinsFailed] = useState(false);
   const [activityDetailId, setActivityDetailId] = useState<string | undefined>(undefined);
   const reload = useCallback(() => {
@@ -145,9 +145,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
     void client.listAgentOffers().then((rows) => { if (active) setPendingOffers(rows.filter((offer) => offer.status === "OFFERED")); }).catch(() => { if (active) setPendingOffers([]); });
     void activityClient.listMyActivities().then((payload) => {
       if (!active) return;
-      const byActivity = new Map(payload.joinOrders.map((order) => [order.activityId, order] as const));
-      setJoinOrders(byActivity);
-      setJoinedActs(sortJoinedByOrderTime(payload.joined, byActivity));
+      setJoinedEntries(joinEntries(payload.joined, payload.joinOrders));
       setJoinsFailed(false);
     }).catch(() => { if (active) setJoinsFailed(true); });
     return () => { active = false; };
@@ -370,16 +368,17 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
     }
   }, [detail?.orderId]);
 
-  const ticketActivity = ticketActivityId ? joinedActs.find((a) => a.activityId === ticketActivityId) : undefined;
-  if (ticketActivity && !activityDetailId) {
-    const order = joinOrders.get(ticketActivity.activityId);
+  const ticketEntry = ticketKey ? joinedEntries.find((e) => e.key === ticketKey) : undefined;
+  const ticketActivity = ticketEntry?.activity;
+  if (ticketEntry && ticketActivity && !activityDetailId) {
+    const order = ticketEntry.order;
     const { snapshot, saved } = orderSnapshotFor(ticketActivity, order);
     const state = joinStateLabel(order?.state);
     return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.orderPageHead}>
-            <Pressable accessibilityLabel="返回我的订单" onPress={() => setTicketActivityId(undefined)} style={styles.orderBack}><ProxyBackGlyph /></Pressable>
+            <Pressable accessibilityLabel="返回我的订单" onPress={() => setTicketKey(undefined)} style={styles.orderBack}><ProxyBackGlyph /></Pressable>
             <Text selectable style={styles.detailTitle}>订单详情</Text>
           </View>
           <View style={[styles.orderCard, { marginBottom: 12 }]}>
@@ -811,16 +810,15 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
           </View>
         ) : null}
         {joinsFailed ? <Text selectable style={styles.orderNotice}>活动报名记录没读出来，报名是否成功以「我的活动」为准。</Text> : null}
-        {joinedActs.length > 0 ? (
+        {joinedEntries.length > 0 ? (
           <View style={{ marginBottom: 11 }}>
             <Text selectable style={[styles.orderFieldLabel, { marginBottom: 7, fontSize: 12, fontWeight: "900", color: color.ink }]}>活动报名</Text>
             <Text selectable style={styles.savedMeta}>For You 下单报的是活动，不是履约订单 —— 记录在这里，钱货两讫的单在下面。</Text>
-            {joinedActs.map((item) => {
-              const order = joinOrders.get(item.activityId);
+            {joinedEntries.map(({ key, activity: item, order }) => {
               const state = joinStateLabel(order?.state);
               return (
-                <View key={item.activityId} style={styles.orderCard}>
-                  <Pressable onPress={() => setTicketActivityId(item.activityId)} accessibilityLabel={`查看${item.title}订单详情`}>
+                <View key={key} style={styles.orderCard}>
+                  <Pressable onPress={() => setTicketKey(key)} accessibilityLabel={`查看${item.title}订单详情`}>
                     <View style={styles.orderHead}>
                       <View style={styles.orderCopy}>
                         <Text selectable style={styles.orderTitle}>{item.title}</Text>

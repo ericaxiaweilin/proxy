@@ -227,23 +227,13 @@ describe("HOME-FORYOU-ORDER-GUARD-001 下单前资源冲突检查", () => {
     { activityId: "cup", title: "周日杯测小聚", time: "周日 10:00–11:30", orderNo: "100260927150535000001" },
     { activityId: "old", title: "已取消那单", time: "周五 18:30–20:30", cancelled: true },
   ];
-  it("blocks ordering the same activity twice", () => {
-    // f8977240：旧单 companionId 缺失时**不**再判 ALREADY_ORDERED（否则旧单会把用户
-    // 永久锁死）。本 fixture 的旧单没有 companionId ⇒ 掉到时间比对 ⇒ TIME_TAKEN。
-    // 仍然拦住（这单确实占了周日这个时段），但**理由**变了。
-    //
-    // 已裁决（2026-10-01，我拍板，依据在 requester-home-combo.ts 321-322 的注释）：
-    // 同一场活动 + 新同行人，**维持** TIME_TAKEN 拦截，不把同一 activityId 从时间
-    // 比对里排除。理由：服务端 (activity, actor) 只有一行，同场再下单会**沿用原
-    // 编号并刷新票面** —— 也就是无声改写原同行人正等着的那张票，而不是"多下一单"。
-    // 放行的正确路径是显式的：先取消旧单（真状态转移），再带新同行人下单。
-    // 客户端现在把挡路的**那一单**说清楚（HOME-FORYOU-CONFLICT-DETAIL-001，
-    // orderConflictTime 带时段 + 标题），「先取消那一单」从口号变成可执行。
-    // f8977240 真正修的病（companionId 缺失 ⇒ 误判"没换人" ⇒ 永久锁死）依然修着。
-    expect(detectOrderConflict({ activityId: "cup", time: "周日 10:00–11:30" }, mine)).toEqual({ kind: "TIME_TAKEN", title: "周日杯测小聚", time: "周日 10:00–11:30", orderNo: "100260927150535000001" });
+  it("blocks ordering the same (activity, companion) twice", () => {
+    // FOR-YOU-SLOT-001：一单 = (活动, 我, 小美)。老的直接报名单没有小美，只挡同样没带小美的那一单。
+    expect(detectOrderConflict({ activityId: "cup", time: "周日 10:00–11:30" }, mine)).toEqual({ kind: "ALREADY_ORDERED", orderNo: "100260927150535000001" });
+    expect(detectOrderConflict({ activityId: "cup", time: "周日 10:00–11:30", companionId: "mai" }, mine)).toBeUndefined();
   });
-  it("blocks a different activity in a time slot I already hold", () => {
-    expect(detectOrderConflict({ activityId: "latte", time: " 周日 10:00–11:30 " }, mine)).toEqual({ kind: "TIME_TAKEN", title: "周日杯测小聚", time: "周日 10:00–11:30", orderNo: "100260927150535000001" });
+  it("does not block me at a time slot I already hold (only the companion's slot is exclusive)", () => {
+    expect(detectOrderConflict({ activityId: "latte", time: " 周日 10:00–11:30 ", companionId: "mai" }, mine)).toBeUndefined();
   });
   it("ignores cancelled orders, other times and blank times", () => {
     expect(detectOrderConflict({ activityId: "x", time: "周五 18:30–20:30" }, mine)).toBeUndefined();

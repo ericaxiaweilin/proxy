@@ -87,12 +87,24 @@ export function activityOrderFields(activity: Activity, order: ActivityJoinOrder
   return fields;
 }
 
-/** 按下单时间倒序；没有订单信息的（老数据）排在最后，保持原相对顺序。 */
-export function sortJoinedByOrderTime(activities: readonly Activity[], orders: ReadonlyMap<string, ActivityJoinOrder>): Activity[] {
-  const time = (a: Activity): number => {
-    const o = orders.get(a.activityId);
-    const ms = o ? Date.parse(o.joinedAt) : NaN;
+/**
+ * FOR-YOU-SLOT-001：一张票一项。同一场活动可以有多单（约了不同的小美），所以「我的订单」
+ * 按单列，不按活动列。取消了的单不列（与 ListMyActivities.joined 只含未取消的口径一致）；
+ * 老数据没有订单信息的活动仍列一项（order 为 undefined，如实说编号没取到）。
+ * 按下单时间倒序；没有下单时间的排在最后，保持原相对顺序。
+ */
+export type JoinEntry = { key: string; activity: Activity; order: ActivityJoinOrder | undefined };
+
+export function joinEntries(activities: readonly Activity[], orders: readonly ActivityJoinOrder[]): JoinEntry[] {
+  const entries: JoinEntry[] = [];
+  for (const activity of activities) {
+    const mine = orders.filter((o) => o.activityId === activity.activityId && o.state !== "CANCELLED");
+    if (mine.length === 0) entries.push({ key: activity.activityId, activity, order: undefined });
+    for (const order of mine) entries.push({ key: `${activity.activityId}|${order.companionId ?? ""}`, activity, order });
+  }
+  const time = (e: JoinEntry): number => {
+    const ms = e.order ? Date.parse(e.order.joinedAt) : NaN;
     return Number.isFinite(ms) ? ms : -Infinity;
   };
-  return [...activities].map((a, i) => ({ a, i })).sort((x, y) => time(y.a) - time(x.a) || x.i - y.i).map(({ a }) => a);
+  return entries.map((e, i) => ({ e, i })).sort((x, y) => time(y.e) - time(x.e) || x.i - y.i).map(({ e }) => e);
 }

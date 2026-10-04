@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -9,104 +10,75 @@ import (
 	"github.com/proxy-app/proxy-api/internal/activity"
 )
 
-// HOME-FORYOU-ORDER-007：换一个同行人 = 换一单，不能被报成「已经下过了」。
-//
-// 逃逸经过：判重只看 (activity_id, actor_id) 有没有未取消的记录，界面上就出现
-// 「这个新用户是灰的 + 这一单你已经下过了（订单号 …）」—— 而那个新用户根本没
-// 下过单。对 For You 来说，下单语义是「人 + 时间 + 场景 + 地点」一整套，
-// 同行人是订单的一部分，不是附注。
-func TestCompanionChangedDecidesDuplicate(t *testing.T) {
-	withCompanion := func(id string) *activity.OrderSnapshot {
-		return &activity.OrderSnapshot{Companion: &activity.RecipeCompanion{ID: id, Name: "n"}}
-	}
-	withRecipe := func(id string) activity.JoinRecipe {
-		r := activity.JoinRecipe{}
-		if id != "" {
-			r.Companion = &activity.RecipeCompanion{ID: id, Name: "n"}
-		}
-		return r
-	}
-
-	cases := []struct {
-		name     string
-		existing *activity.OrderSnapshot
-		recipe   activity.JoinRecipe
-		changed  bool
-		why      string
-	}{
-		{"different companion is a new order", withCompanion("alice"), withRecipe("bob"), true,
-			"换了人就是换单 —— 界面上必须能下单，否则新用户永远是灰的"},
-		{"same companion is still a duplicate", withCompanion("alice"), withRecipe("alice"), false,
-			"同一个人再下一单，仍然如实报重复（ORDER-NO-001 的既有行为不变）"},
-		{"old snapshot missing entirely (pre-snapshot order)", nil, withRecipe("bob"), true,
-			"拿不到旧快照 ⇒ 当作换人，允许下单。第一版写的是 false（判重），" +
-				"结果把这个用户永久锁死：库里旧单全都没有快照，于是他在任何自己下过单" +
-				"的活动上选任何新同行人都被判「已经下过了」——而那个人根本没下过单"},
-		{"old snapshot exists but had no companion, now there is one", &activity.OrderSnapshot{}, withRecipe("bob"), false,
-			"旧快照存在但没有同行人字段，仍按判重处理"},
-		{"both have no companion", &activity.OrderSnapshot{}, withRecipe(""), false,
-			"两单都没同行人 ⇒ 同一单"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := companionChanged(tc.existing, tc.recipe); got != tc.changed {
-				t.Fatalf("companionChanged = %v, want %v (%s)", got, tc.changed, tc.why)
-			}
-		})
-	}
-}
-
-// 身份只能看 id —— 名字和照片是会变的，拿显示名当身份等于判重形同虚设：
-// 用户改个昵称就能对同一场活动再下一单。
-func TestCompanionIdentityIsTheIDNotTheName(t *testing.T) {
-	renamed := &activity.OrderSnapshot{Companion: &activity.RecipeCompanion{ID: "bob", Name: "Bobby"}}
-	sameIDOtherName := activity.JoinRecipe{Companion: &activity.RecipeCompanion{ID: "bob", Name: "Robert"}}
-	if companionChanged(renamed, sameIDOtherName) {
-		t.Fatal("same id with a different display name must count as the SAME companion — otherwise renaming defeats the duplicate check")
-	}
-}
-
-// HOME-FORYOU-ORDER-007（Postgres 集成）：换了同行人之后，同一场活动**必须能再下一单**。
-//
-// 上一版测试只测了 companionChanged 这个纯函数 —— 证伪时我把判重里的
-// `&& !companionChanged(...)` 去掉，测试照样 PASS。也就是说"函数对了但没接上去"
-// 这种最常见的错误是查不出来的。这里走真实仓储：真下单、再换人下单。
-func TestJoinWithDifferentCompanionIsNotADuplicatePostgres(t *testing.T) {
+// FOR-YOU-SLOT-001（2026-10-04，用户：「for you 是 4 个自由资源槽，核心服务于小美真人……
+// 20 个真人 × 3 个时段 = 60 个可用，现在只有 9 个」）。资源单位是「小美 × 时段」：
+//   - 约不同的小美是不同的单：各自一行、各自编号、各自票面，旧票不被改写；
+//   - 同一组 (活动, 我, 小美) 再下 ⇒ ErrAlreadyJoined，带回原编号；
+//   - 小美的一个时段被任何人约走 ⇒ 别人（任何一场同时段活动）都约不到她；
+//   - 下单人自己同一时段可以约多个小美；
+//   - For You 单不受活动名额限制（店是场景载体，承载上限后期再做）。
+func TestForYouCompanionTimeSlotOrdersPostgres(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	run := strconv.FormatInt(time.Now().UnixNano(), 10)
-
-	// 一个真实存在的活动，容量够两人。
-	activityID := "act_companion_" + run
 	repo := NewActivityRepository(pool)
-	seed := activity.Activity{
-		ID: activityID, Title: "同行人换单测试 " + run, Time: "周六 15:00",
-		People: "2", Capacity: 5, MoneyFlow: "FREE", PriceLabel: "Free",
-		VenueName: "西湖", VenueType: "PARK", Status: "PUBLISHED",
-	}
-	if err := repo.Seed(ctx, []activity.Activity{seed}); err != nil {
-		t.Fatalf("seed activity: %v", err)
-	}
-	actor := "user_companion_" + run
 
-	// 第一单：同行人 alice。
-	first := activity.JoinRecipe{Companion: &activity.RecipeCompanion{ID: "alice_" + run, Name: "Alice"}}
-	if _, _, err := repo.Join(ctx, activityID, actor, first); err != nil {
+	// Origin TEST：这个仓储测试可能连着共享开发库（DATABASE_URL 优先），TEST 不进
+	// ListActivities，不会污染首页 / 市场。Capacity 1：验证 For You 单不扣名额。
+	slot := "周六 15:00–17:00 #" + run
+	seed := func(id, venue string) activity.Activity {
+		return activity.Activity{
+			ID: id, Origin: "TEST", Title: "小美时段测试 " + run, Time: slot,
+			People: "1", Capacity: 1, MoneyFlow: "FREE", PriceLabel: "Free",
+			VenueName: venue, VenueType: "CAFE", Status: "PUBLISHED",
+		}
+	}
+	shopA, shopB := "act_slot_a_"+run, "act_slot_b_"+run
+	if err := repo.Seed(ctx, []activity.Activity{seed(shopA, "店A"), seed(shopB, "店B")}); err != nil {
+		t.Fatalf("seed activities: %v", err)
+	}
+	me, other := "user_slot_me_"+run, "user_slot_other_"+run
+	recipe := func(id, name string) activity.JoinRecipe {
+		return activity.JoinRecipe{Source: "FOR_YOU", Companion: &activity.RecipeCompanion{ID: id + "_" + run, Name: name}}
+	}
+
+	_, alice, err := repo.Join(ctx, shopA, me, recipe("alice", "Alice"))
+	if err != nil {
 		t.Fatalf("first order must succeed: %v", err)
 	}
-
-	// 同一个同行人再下单 —— 仍然报重复（既有 ORDER-NO-001 行为不变）。
-	if _, _, err := repo.Join(ctx, activityID, actor, first); err == nil {
-		t.Fatal("the SAME companion must still be a duplicate — the duplicate check must not be lost")
-	}
-
-	// 换同行人 bob —— 必须能下单成功。这正是界面上那个 P0：换了人却被告「已经下过了」。
-	second := activity.JoinRecipe{Companion: &activity.RecipeCompanion{ID: "bob_" + run, Name: "Bob"}}
-	_, part, err := repo.Join(ctx, activityID, actor, second)
+	_, bob, err := repo.Join(ctx, shopA, me, recipe("bob", "Bob"))
 	if err != nil {
-		t.Fatalf("a DIFFERENT companion must be a new order, got %v — this is the greyed-out 新用户 bug", err)
+		t.Fatalf("same activity, same time, a different companion is a new order (and ignores capacity): %v", err)
 	}
-	if part.OrderNo == "" {
-		t.Fatal("the new order must carry an order number")
+	if bob.OrderNo == "" || bob.OrderNo == alice.OrderNo {
+		t.Fatalf("each companion order needs its own number: alice=%q bob=%q", alice.OrderNo, bob.OrderNo)
+	}
+
+	_, again, err := repo.Join(ctx, shopA, me, recipe("alice", "Alice"))
+	if !errors.Is(err, activity.ErrAlreadyJoined) || again.OrderNo != alice.OrderNo {
+		t.Fatalf("same (activity, me, companion) must be the same order: err=%v no=%q", err, again.OrderNo)
+	}
+	order, ok, err := repo.GetJoinOrder(ctx, shopA, me, "alice_"+run)
+	if err != nil || !ok || order.Snapshot == nil || order.Snapshot.Companion == nil || order.Snapshot.Companion.ID != "alice_"+run {
+		t.Fatalf("alice's ticket must stay alice's: ok=%v err=%v order=%+v", ok, err, order)
+	}
+
+	if _, _, err := repo.Join(ctx, shopB, other, recipe("alice", "Alice")); !errors.Is(err, activity.ErrCompanionSlotTaken) {
+		t.Fatalf("alice is booked at this time slot, nobody else can book her then (any shop): err=%v", err)
+	}
+	slots, err := repo.ListBookedCompanionSlots(ctx, []string{"alice_" + run, "carol_" + run})
+	if err != nil || len(slots) != 1 || slots[0].CompanionID != "alice_"+run || slots[0].Time != slot {
+		t.Fatalf("booked slots must list exactly alice@slot: err=%v slots=%+v", err, slots)
+	}
+
+	if _, _, err := repo.TransitionParticipation(ctx, shopA, me, "alice_"+run,
+		[]activity.ParticipationState{activity.PartConfirmed}, activity.PartCancelled); err != nil {
+		t.Fatalf("cancel alice order: %v", err)
+	}
+	if _, _, err := repo.Join(ctx, shopB, other, recipe("alice", "Alice")); err != nil {
+		t.Fatalf("after the cancel alice's slot is free again: %v", err)
+	}
+	if bobOrder, ok, _ := repo.GetJoinOrder(ctx, shopA, me, "bob_"+run); !ok || bobOrder.State != "CONFIRMED" {
+		t.Fatalf("cancelling the alice order must not touch the bob order: %+v", bobOrder)
 	}
 }

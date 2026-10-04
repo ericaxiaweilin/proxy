@@ -86,7 +86,7 @@ func TestParticipationDurableSeatReleasePostgres(t *testing.T) {
 	run := itoa(time.Now().UnixNano())
 	repo := NewActivityRepository(pool)
 	activityID := "act_seat_" + run
-	if err := repo.Create(ctx, activity.Activity{ID: activityID, Title: "Seat test", Time: "周六", People: "0 / 1 人", Price: "0₫", Consumption: "AA", VenueIcon: "☕", VenueName: "Three Beans", Desc: "d", Benefit: "b", Capacity: 1, Origin: "USER", OwnerID: "owner_" + run}); err != nil {
+	if err := repo.Create(ctx, activity.Activity{ID: activityID, Title: "Seat test", Time: "周六", People: "0 / 1 人", Price: "0₫", Consumption: "AA", VenueIcon: "☕", VenueName: "Three Beans", Desc: "d", Benefit: "b", Capacity: 1, Origin: "TEST", OwnerID: "owner_" + run}); err != nil {
 		t.Fatal(err)
 	}
 	numbers := NewOrderNumberAllocator(pool)
@@ -189,7 +189,7 @@ func TestPostgresBackedServicesDefaultToSharedSequence(t *testing.T) {
 	}
 	act := activity.NewWithRepository(NewActivityRepository(pool))
 	activityID := "act_seq_" + run
-	if err := NewActivityRepository(pool).Create(ctx, activity.Activity{ID: activityID, Title: "Seq", Time: "周六", People: "0 人", Price: "0₫", Consumption: "AA", VenueIcon: "☕", VenueName: "Three Beans", Desc: "d", Benefit: "b", Capacity: 3, Origin: "USER", OwnerID: "owner_" + run}); err != nil {
+	if err := NewActivityRepository(pool).Create(ctx, activity.Activity{ID: activityID, Title: "Seq", Time: "周六", People: "0 人", Price: "0₫", Consumption: "AA", VenueIcon: "☕", VenueName: "Three Beans", Desc: "d", Benefit: "b", Capacity: 3, Origin: "TEST", OwnerID: "owner_" + run}); err != nil {
 		t.Fatal(err)
 	}
 	joined := act.HandleContext(ctx, activityCommand("JoinActivity", "user_seq_join_"+run, activityID))

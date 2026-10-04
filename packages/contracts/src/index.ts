@@ -695,6 +695,8 @@ export type ActivityOrderSnapshot = z.infer<typeof ActivityOrderSnapshotSchema>;
 // state 取不到时服务端留空（报名行存在 = 已确认）。老服务端不发这个字段，默认空数组。
 export const ActivityJoinOrderSchema = z.object({
   activityId: z.string(),
+  // FOR-YOU-SLOT-001：同一场活动可以有多单（约不同的小美），按 (activityId, companionId) 区分。
+  companionId: z.string().optional(),
   orderNo: z.string().optional(),
   joinedAt: z.string(),
   state: z.enum(["REQUESTED", "CONFIRMED", "WAITLISTED", "CANCELLED", "ATTENDED", "NO_SHOW"]).optional(),
@@ -709,6 +711,12 @@ export const ListMyActivitiesPayloadSchema = z.object({
   note: z.string().optional()
 });
 export type ListMyActivitiesPayload = z.infer<typeof ListMyActivitiesPayloadSchema>;
+
+// FOR-YOU-SLOT-001：For You 的资源单位是「小美 × 时段」。ListCompanionBookedSlots 只回答
+// 调用方给出的这批小美里，哪些时段已经被约走了（谁约的都算，但不说是谁）。
+export const CompanionBookedSlotSchema = z.object({ companionId: z.string(), time: z.string() });
+export type CompanionBookedSlot = z.infer<typeof CompanionBookedSlotSchema>;
+export const ListCompanionBookedSlotsPayloadSchema = z.object({ slots: z.array(CompanionBookedSlotSchema).default([]) });
 
 // MarketOpportunitySchema：机会读模型 wire 契约。
 //

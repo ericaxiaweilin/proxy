@@ -35,7 +35,7 @@ import { buildCreatePostPayload, newPublishIdempotencyKey } from "../composer-pu
 import type { MarketplaceClient } from "../marketplace-client";
 import type { ActivityClient } from "../activity-client";
 import { ActivityCommandRejectedError, ActivityProtocolError, orderNoFromJoinRejection } from "../activity-client";
-import { pickPersonSlot, pickRefreshedActivity, resolveActivityIndexAvoidingOrders } from "../for-you-slots";
+import { activityStatus, activityOptions, lockValueFor, personOptions, pickForPerson, pickForScene, pickForTime, resolveSelected, sceneOptions, shufflePick, timeOptions, toForYouActivities, type FYContext, type FYLocks, type FYStatus } from "../for-you-derivation";
 import type { ExperienceClient } from "../experience-client";
 import type { RelationshipClient } from "../relationship-client";
 import type { ProfileClient, ProfileWire } from "../profile-client";
@@ -56,7 +56,7 @@ import {
 } from "../recommend-fixtures";
 import { PhotoScrim, ProxyBackGlyph } from "../components/proxy-foundation";
 
-import { activitiesAtCoffeeShops, detectComboConflicts, detectOrderConflict, sceneIdOfActivity, stripAreaSuffix, type ExistingOrder, type OrderConflict } from "../requester-home-combo";
+import { activitiesAtCoffeeShops, busyKey, detectOrderConflict, isCoffeeShopScene, stripAreaSuffix, toBusySlots, type BusySlots, type ExistingOrder, type OrderConflict } from "../requester-home-combo";
 // SCENE-DISTANCE-BADGE-001（用户：「所有的场景必须标注距离数」）：真实设备定位 +
 // 真实 haversine 距离，跟 hot-scenes.tsx / scene-shop-directory.tsx 同一套口径。
 import { getCurrentFix } from "../device-location";
@@ -276,9 +276,6 @@ export function RequesterHome({
   // HOME-RAIL-SERVER-001：rail 的服务端推荐人。与 serverPeople（搜索结果）是两回事 ——
   // 那是"用户搜了某个名字"，这里是"打开首页就有谁在附近"。
   const [nearbyWire, setNearbyWire] = useState<ReadonlyArray<ProfileWire> | undefined>(undefined);
-  // HOME-FORYOU-FREE-001：连续点圆圈时在"有空的"那些人里依次轮转，而不是每次随机
-  // —— 随机会连着两次给同一个"没空的人"，看起来像没生效。
-  const freePersonCursor = useRef<number>(0);
   const nearbySeq = useRef(0);
   const [serverPeople, setServerPeople] = useState<ReadonlyArray<ProfileWire> | undefined>(undefined);
   const [serverPeopleState, setServerPeopleState] = useState<"idle" | "busy" | "failed">("idle");
@@ -291,9 +288,13 @@ export function RequesterHome({
   // 它派生（useState 惰性初始化，只算一次，不会每次 render 都跳）。
   const [forYouSeed] = useState(() => Math.floor(Math.random() * 0x7fffffff) + 1);
   const [personIndex, setPersonIndex] = useState(() => forYouSeed);
-  const [timeIndex, setTimeIndex] = useState(() => forYouSeed >> 3);
-  const [activityIndex, setActivityIndex] = useState(() => forYouSeed >> 7);
-  const [placeIndex, setPlaceIndex] = useState(() => forYouSeed >> 11);
+  // FOR-YOU-DERIVE-001（2026-10-04 接线）：时间 / 场景 / 地点都由**选中的那场活动**派生
+  // （for-you-derivation.ts），只存一个活动 id；以前三条独立 index 互相打架——换时间
+  // 不生效、锁了和活动对不上、渲染里再偷偷改活动——这是 For You 一连串 P0 的根。
+  // 没选过（undefined）时由 resolveSelected 按 seed 从可约的里挑，myOrders 到齐会自动重挑。
+  const [selectedActivityId, setSelectedActivityId] = useState<string | undefined>(undefined);
+  // 锁 = 约束：锁住那一刻记下那一格的值，其它格的选项和整组换只在满足锁的活动里挑。
+  const [lockValues, setLockValues] = useState<FYLocks>({});
   const [chooser, setChooser] = useState<"person" | "time" | "activity" | "place" | null>(null);
   // HOME-FORYOU-SELECT-001（2026-09-28，原型 deepseek_html_20260928_7d0503
   // 的 combo-cta「选择」）：点一下直接进「确认这个组合」sheet，真的
@@ -366,10 +367,18 @@ export function RequesterHome({
   // 每个格子可锁定（金框 + 右上角锁）。锁定后： remix 跳过该轴、chooser 拒开。
   const [lockedSlots, setLockedSlots] = useState<ReadonlySet<"person" | "time" | "activity" | "place">>(() => new Set());
   function toggleSlotLock(slot: "person" | "time" | "activity" | "place"): void {
+    const wasLocked = lockedSlots.has(slot);
     setLockedSlots((prev) => {
       const next = new Set(prev);
       if (next.has(slot)) next.delete(slot); else next.add(slot);
       return next;
+    });
+    const axis = slot === "place" ? "scene" : slot;
+    const key = slot === "person" ? "personId" : slot === "time" ? "time" : slot === "place" ? "sceneId" : "activityId";
+    setLockValues((prev) => {
+      const next: FYLocks = { ...prev };
+      delete next[key];
+      return wasLocked || !fyCurrent ? next : { ...next, ...lockValueFor(axis, fyCurrent, fyPerson?.id) };
     });
   }
   // HOME-AVATAR-FALLBACK-001: 真人头像挂了回落首字母（图走服务端 thumb；
@@ -827,7 +836,13 @@ export function RequesterHome({
     void (async () => {
       try {
         const fix = await getCurrentFix(expoLocationApi, { requestPermission: true });
-        if (!cancelled && fix) setHomeOrigin({ latitude: fix.latitude, longitude: fix.longitude });
+        if (!cancelled && fix) {
+          setHomeOrigin({ latitude: fix.latitude, longitude: fix.longitude });
+          // FOR-YOU-CANDIDATES-001：默认人人可接单 —— 把**真实定位**写到自己的资料上，
+          // 别人「附近 30km」才算得到你。只上报真实 fix，河内兜底原点绝不上报；
+          // 失败不打扰（下次进首页再报）。服务端只拿它算距离，不把坐标发给别人。
+          void profileClient?.updateMyLocation({ latitude: fix.latitude, longitude: fix.longitude }).catch(() => undefined);
+        }
       } catch { /* 没定位：热门场景卡不带距离角标 */ }
     })();
     return () => { cancelled = true; };
@@ -871,7 +886,9 @@ export function RequesterHome({
         const slot = freeSlotForDistinctTime(distinctTimes[0]);
         const found = await profileClient.listNearby(
           { latitude: origin.latitude, longitude: origin.longitude },
-          { maxDistanceKm: moreDistanceKm, limit: 30, ...(slot ? { slot } : {}) }
+          // FOR-YOU-CANDIDATES-001：半径内的人全部进候选池（服务端附近上限 500 只是安全阀），
+          // 不再只取最近 N 个。
+          { maxDistanceKm: moreDistanceKm, limit: 500, ...(slot ? { slot } : {}) }
         );
         // 自己不能出现在「附近的真人」里
         const withoutSelf = viewerAccountId ? found.filter((p) => p.userAccountId !== viewerAccountId) : found;
@@ -916,16 +933,13 @@ export function RequesterHome({
     setSearchQuery("");
     if (s.slot === "person") {
       const at = filteredPeople.findIndex((p) => p.id === s.id);
-      if (at >= 0) setPersonIndex(at);
+      if (at >= 0) selectPerson(at);
     } else if (s.slot === "time") {
-      const at = distinctTimes.indexOf(s.id);
-      if (at >= 0) setTimeIndex(at);
+      deriveAndSelect(pickForTime(s.id, fyCurrent, fyActivities, fyCtx, lockValues));
     } else if (s.slot === "activity") {
-      const at = sceneActivities.findIndex((a) => a.activityId === s.id);
-      if (at >= 0) setActivityIndex(at);
+      if (fyActivities.some((a) => a.activityId === s.id)) setSelectedActivityId(s.id);
     } else {
-      const at = sceneBriefs.findIndex((scene) => scene.id === s.id);
-      if (at >= 0) setPlaceIndex(at);
+      deriveAndSelect(pickForScene(s.id, fyCurrent, fyActivities, fyCtx, lockValues));
     }
   }
 
@@ -935,12 +949,10 @@ export function RequesterHome({
   }
 
   // 整组换（remix）— 与原型及四宫格 remix 按钮完全对齐
-  // HOME-FORYOU-REFRESH-001（用户「点击圆圈就是刷新全部可用插槽」）：换组 = 先重新
-  // 拉活动（别人刚报满的、我刚下过单的都要反映出来），再只在「有名额、我没下过单、
-  // 和锁定的地点 / 时间不冲突」的活动里换一个**不同的**（for-you-slots.ts）。
-  // 以前是在本地旧列表上对每条轴 Math.random()：会抽到已满 / 已下单的活动，会无视
-  // 锁定的地点 / 时间当场制造冲突（「选择」被禁用），还会抽回同一个。
-  // 一个可用的都没有就如实说，不配一个下单必失败的组合。
+  // HOME-FORYOU-REFRESH-001 / FOR-YOU-SLOT-001（用户「点击圆圈就是刷新全部可用插槽」）：
+  // 换组 = 先重新拉活动和「哪些小美哪些时段已被约」，再在满足锁的可约组合（人 × 活动）
+  // 里换一组，尽量四格都换（for-you-derivation.ts 的 shufflePick）。
+  // 一组可约的都没有就如实说，不配一个下单必失败的组合。
   function remixForYou(): void {
     void refreshAvailableSlots();
   }
@@ -949,111 +961,41 @@ export function RequesterHome({
     if (slotRefreshing) return;
     setSearchQuery("");
     setClarifyChoices(undefined);
-    // HOME-FORYOU-FREE-001：换人要换到**当前时段里真的有空的**那个人。
-    //
-    // 原来是 `Math.random()` —— 与「有没有空」毫无关系。于是用户点圆圈、系统
-    // 换一个陌生人，界面上却像是"帮你找了个有空的人"。这是和
-    // PERSON-DISTANCE-ZERO-001 的 0m 同一类错误：拿一个和现实无关的量当承诺。
-    //
-    // 现在优先在 freeAt === true 的人里循环取下一个；一个人都没有时如实保持
-    // 当前选择并在文案里说明（见 freePeopleCount），而不是假装挑了个空的。
-    // HOME-FORYOU-LOCK-001：锁定的轴跳过不重掷 —— 锁了人就不换人。
-    if (!lockedSlots.has("person")) {
-      // HOME-FORYOU-ORDER-009：取号规则搬进 for-you-slots 的 pickPersonSlot，
-      // 四条分支（换到有空的 / 都忙但还有别人 / 只剩一个人 / 名单空）都能直接
-      // 跑出来验。原来这里是内联的 if/else，候选为 0 或 1 时两个 else 都没有 ——
-      // 既不换人也不说话，点圆圈像死的。
-      const personPick = pickPersonSlot(filteredPeople, freePersonCursor.current);
-      if (personPick.kind === "free") {
-        freePersonCursor.current += 1;
-      }
-      if (personPick.kind !== "noCandidates") setPersonIndex(personPick.index);
-      if (personPick.kind === "noneFreeButOthers") {
-        // 一个有空的都没有：换人也换不出"有空的"，如实说明而不是随机假装。
-        showResponse(t("noOneFree"), t("noOneFreeSub"));
-      } else if (personPick.kind === "onlyCandidate") {
-        // 名单里就他一个，而且他不在线 —— 他已经是当前这一格了，换不出去。
-        // 说清是哪一种，而不是让人对着一个不动的界面猜。
-        showResponse(t("onlyOneCandidate"), t("onlyOneCandidateSub"));
-      } else if (personPick.kind === "noCandidates") {
-        showResponse(t("noOneFree"), t("noOneFreeSub"));
-      }
-    }
-    const current = sceneActivities.length > 0 ? sceneActivities[activityIndex % sceneActivities.length] : undefined;
-    const lockedPlace = lockedSlots.has("place") && sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined;
-    const lockedTime = lockedSlots.has("time") && distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined;
+    // FOR-YOU-SLOT-001（用户：「点击圆圈 能自动刷新的只有人物 其它时间 场所 地点没有
+    // 刷新」）：整组换 = 重新拉活动 + 重新拉「哪些小美哪些时段已被约」，再在满足锁的
+    // **可约组合（人 × 活动）**里随机挑一组，优先四格都换（shufflePick 打分），同档里
+    // 优先在线的人（HOME-FORYOU-FREE-001）。锁住的人 / 活动 / 时间 / 地点作为约束。
+    // 一组可约的都没有就如实说，不配一个下单必失败的组合。
     let fresh = storeActivities;
-    let joinedByMe: ReadonlySet<string> = new Set<string>();
+    let freshBusy = busySlots;
     if (activities) {
       setSlotRefreshing(true);
       try {
         fresh = (await activities.listActivities()).map(toStoreActivityBrief);
         setStoreActivities(fresh);
-        // HOME-FORYOU-ORDER-009（2026-10-01，用户 P0：「点击圆圈 不是选择 是查看这张
-        // 订单 我只有几个用户有订单」）：
-        //
-        // 原来这里**另拉一次** listMyActivities 来算 joinedByMe，而它和决定 CTA 文案的
-        // myOrders 是两个来源。那次拉取失败时 `.catch(() => new Set<string>())` 静默变成
-        // 空集 —— 于是刷新以为"你没下过单"，挑回那场你已经有票的活动；
-        // 而 `existingOrder` 读的是 myOrders，仍然为真 ⇒ CTA 一直显示「查看这张订单」，
-        // 点进去就是订单页。访客态更直接：`if (!isGuest)` 压根不拉，joinedByMe 恒为空集。
-        //
-        // 症状只出现在**已经下过单**的人身上（所以用户说"只有几个用户有订单"），
-        // 而"点圆圈想换人却总是进订单"读起来像随机故障，其实是两个来源打架。
-        //
-        // 现在单一事实源：joinedByMe 直接由 myOrders 派生。myOrders 在 mount 时拉过
-        // （见下面的 useEffect），它就是 CTA 用的那份 —— 两个判据从此不可能不一致。
-        //
-        // 读 myOrders 不存在 TDZ：refreshAvailableSlots 只被事件处理器调用
-        // （remixForYou 的三个 onPress），渲染期不会执行到这里，绑定早已初始化。
-        joinedByMe = new Set(myOrders.map((o) => o.activityId));
       } catch {
-        // 拉不到新数据：用手上的列表换，但如实告诉用户名额可能已变。
         showResponse(t("slotRefreshFailed"), t("slotRefreshFailedSub"));
+      }
+      try {
+        freshBusy = toBusySlots(await activities.listCompanionBookedSlots(filteredPeople.map((p) => p.id)));
+        setBusySlots(freshBusy);
+      } catch {
+        // 读不到就沿用上一次的；服务端下单时照样会拒被约走的时段（COMPANION_SLOT_TAKEN）。
       } finally {
         setSlotRefreshing(false);
       }
     }
-    const freshSceneActivities = activitiesAtCoffeeShops(fresh, sceneBriefs);
-    const pick = pickRefreshedActivity(
-      freshSceneActivities,
-      sceneBriefs,
-      { activityId: !lockedSlots.has("activity") ? undefined : current?.activityId, placeSceneId: lockedPlace?.id, time: lockedTime },
-      joinedByMe,
-      current?.activityId,
-    );
-    if (pick.kind === "none") {
-      showResponse(pick.reason === "LOCKED_ACTIVITY_UNAVAILABLE" ? t("slotLockedUnavailable") : t("slotNoneAvailable"), t("slotNoneAvailableSub"));
+    const freshFY = toForYouActivities(activitiesAtCoffeeShops(fresh, sceneBriefs), sceneBriefs);
+    const picked = shufflePick(freshFY, filteredPeople, { myOrders, busy: freshBusy }, lockValues, { personId: fyPerson?.id, activity: fyCurrent });
+    if (!picked) {
+      showResponse(filteredPeople.length === 0 ? t("noOneFree") : t("noFreeCombo"), t("slotNoneAvailableSub"));
       return;
     }
-    const picked = freshSceneActivities[pick.index]!;
-    setActivityIndex(pick.index);
-    // 没锁的时间 / 地点本来就跟着活动走（渲染时派生）；index 也对齐，解锁那一刻不跳。
-    if (!lockedSlots.has("time")) {
-      // HOME-FORYOU-SLOT-AVAIL-001（用户报 P0「点选择没反应」）：
-      // 刷新出来的组合本身**必须是一个能下单的组合**。
-      //
-      // 原来这里直接取 `picked.time`（活动自己写的时间），不看我有没有单：
-      // 于是圆圈刷出一个撞时段的组合 → 点「选择」走进"修冲突"分支 → 修完又 return
-      // → 用户永远到不了确认页，表现为**点击没反应**。
-      //
-      // 所以现在：先在**这个新活动的可用时间**里找（不撞我的订单），
-      // 找不到就退而用全局的 availableTimes，都没有才不动（让 comboBlocked 如实置灰）。
-      const freshTimes = [...new Set(freshSceneActivities.map((a) => a.time).filter(Boolean))];
-      // 用 availableTimes（组件顶层、由 myOrders 算出）做过滤，不在这里再读 myOrders ——
-      // myOrders 定义在 1146 行，而本函数在 955，直接读会 TDZ 报错。
-      const freeSet = new Set(availableTimes.map((time) => time.trim()));
-      const freeForThis = freshTimes.filter((time) => freeSet.has(time.trim()));
-      const preferred = freeForThis.includes(picked.time) ? picked.time
-        : freeForThis[0] ?? availableTimes[0] ?? picked.time;
-      const at = freshTimes.indexOf(preferred);
-      if (at >= 0) setTimeIndex(at);
+    if (picked.personId !== undefined) {
+      const at = filteredPeople.findIndex((p) => p.id === picked.personId);
+      if (at >= 0) setPersonIndex(at);
     }
-    if (!lockedSlots.has("place")) {
-      const sceneId = sceneIdOfActivity(picked, sceneBriefs);
-      const at = sceneBriefs.findIndex((scene) => scene.id === sceneId);
-      if (at >= 0) setPlaceIndex(at);
-    }
+    setSelectedActivityId(picked.activityId);
     showResponse(t("recombo"), t("recomboSub"));
   }
 
@@ -1107,8 +1049,8 @@ export function RequesterHome({
     // 4. 晚上 / 今晚 -> 只改时间
     if (q.includes("晚上") || q.includes("今晚")) {
       setClarifyChoices(undefined);
-      const eveningIdx = distinctTimes.findIndex((t) => t.includes("晚"));
-      if (eveningIdx >= 0) setTimeIndex(eveningIdx);
+      const evening = distinctTimes.find((time) => time.includes("晚"));
+      if (evening) deriveAndSelect(pickForTime(evening, fyCurrent, fyActivities, fyCtx, lockValues));
       showResponse(t("timeToTonight"), t("othersUnchanged"));
       return;
     }
@@ -1116,8 +1058,8 @@ export function RequesterHome({
     // 5. 散步 / City Walk -> 改活动
     if (q.includes("散步") || q.includes("City Walk") || q.includes("走走")) {
       setClarifyChoices(undefined);
-      const walkIdx = sceneActivities.findIndex((a) => a.title.includes("散步") || a.title.includes("Walk"));
-      if (walkIdx >= 0) setActivityIndex(walkIdx);
+      const walk = fyActivities.find((a) => (a.title.includes("散步") || a.title.includes("Walk")) && activityStatus(a, fyCtx).ok);
+      if (walk) setSelectedActivityId(walk.activityId);
       showResponse(t("activityToWalk"), t("othersUnchanged"));
       return;
     }
@@ -1128,11 +1070,12 @@ export function RequesterHome({
       // IDENTITY-ID-001: 按身份 id 匹配，不再用显示名子串 —— 用户名可编辑、可重复，
       // 按名字找人在改名或存在同名用户时会串到别人身上。
       const linhIdx = filteredPeople.findIndex((p) => p.id === "u_linh");
+      const coffeeCtx: FYContext = linhIdx >= 0 ? { ...fyCtx, personId: filteredPeople[linhIdx]!.id } : fyCtx;
       if (linhIdx >= 0) setPersonIndex(linhIdx);
-      const coffeeActIdx = sceneActivities.findIndex((a) => a.title.includes("咖啡"));
-      if (coffeeActIdx >= 0) setActivityIndex(coffeeActIdx);
-      const beanSceneIdx = sceneBriefs.findIndex((s) => s.name.toLowerCase().includes("bean"));
-      if (beanSceneIdx >= 0) setPlaceIndex(beanSceneIdx);
+      // 场景格本来就只收咖啡店的活动，挑一场这个人能约的就是「咖啡」组合。
+      const coffee = fyActivities.find((a) => a.title.includes("咖啡") && activityStatus(a, coffeeCtx).ok)
+        ?? fyActivities.find((a) => activityStatus(a, coffeeCtx).ok);
+      if (coffee) setSelectedActivityId(coffee.activityId);
       showResponse(t("coffeeCombo"), t("coffeeComboSub"));
       return;
     }
@@ -1234,70 +1177,95 @@ export function RequesterHome({
     void activities.listMyActivities()
       .then((payload) => {
         if (cancelled) return;
-        setMyOrders(payload.joined.map((a) => {
-          const order = payload.joinOrders.find((o) => o.activityId === a.activityId);
+        // FOR-YOU-SLOT-001：一单一项（同一场活动可以约不同的小美、各是一单），带这一单的小美。
+        setMyOrders(payload.joinOrders.map((order) => {
+          const a = payload.joined.find((item) => item.activityId === order.activityId);
           return {
-            activityId: a.activityId,
-            title: order?.snapshot?.activity.title ?? a.title,
-            time: order?.snapshot?.activity.time ?? a.time,
-            orderNo: order?.orderNo,
-            // HOME-FORYOU-ORDER-007：判重要看同行人，所以从票面快照里取回来。
-            // 旧数据的快照是 NULL（迁移前下的单），这里就是 undefined ——
-            // 服务端同一口径：缺快照 / 缺同行人**不算**重复（activity.go 的 Join
-            // 要求 existing.Snapshot != nil 才判重），客户端也按「换了人」放行。
-            companionId: order?.snapshot?.companion?.id,
-            cancelled: order?.state === "CANCELLED",
-            snapshot: order?.snapshot,
+            activityId: order.activityId,
+            title: order.snapshot?.activity.title ?? a?.title ?? "",
+            time: order.snapshot?.activity.time ?? a?.time ?? "",
+            orderNo: order.orderNo,
+            companionId: order.companionId || undefined,
+            cancelled: order.state === "CANCELLED",
+            snapshot: order.snapshot,
           };
         }));
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [activities, homeRefreshNonce]);
-  function rememberMyOrder(activityId: string, orderNumber: string | undefined, snapshot: ActivityOrderSnapshot | undefined): void {
+  function rememberMyOrder(activityId: string, orderNumber: string | undefined, snapshot: ActivityOrderSnapshot | undefined, companionId: string | undefined): void {
     const act = storeActivities.find((a) => a.activityId === activityId);
-    setMyOrders((prev) => prev.some((o) => o.activityId === activityId) ? prev : [...prev, {
+    const time = snapshot?.activity.time ?? act?.time ?? "";
+    setMyOrders((prev) => prev.some((o) => o.activityId === activityId && o.companionId === companionId && !o.cancelled) ? prev : [...prev, {
       activityId,
       title: snapshot?.activity.title ?? act?.title ?? "",
-      time: snapshot?.activity.time ?? act?.time ?? "",
+      time,
       orderNo: orderNumber,
-      // HOME-FORYOU-ORDER-007：刚下的这一单，它的同行人也要记进本地列表，
-      // 否则紧接着再选另一个人下单时，判重看不到"刚下过的那单是谁的"。
-      companionId: snapshot?.companion?.id,
+      companionId,
       snapshot,
     }]);
+    if (companionId) markBusy(companionId, time);
   }
-  function orderConflictText(conflict: OrderConflict): string {
+  // FOR-YOU-SLOT-001：已被约走的「小美 × 时段」（谁约的都算）。名单变了 / 首页刷新时重拉；
+  // 圆圈刷新也会重拉一次。读失败就当暂时不知道——服务端下单时照样会拒。
+  const [busySlots, setBusySlots] = useState<BusySlots>(() => new Set());
+  const peopleIdsKey = filteredPeople.map((p) => p.id).join(",");
+  useEffect(() => {
+    if (!activities || peopleIdsKey === "") return;
+    let cancelled = false;
+    void activities.listCompanionBookedSlots(peopleIdsKey.split(","))
+      .then((slots) => { if (!cancelled) setBusySlots(toBusySlots(slots)); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [activities, peopleIdsKey, homeRefreshNonce]);
+  function markBusy(companionId: string, time: string): void {
+    setBusySlots((prev) => {
+      const key = busyKey(companionId, time);
+      return prev.has(key) ? prev : new Set(prev).add(key);
+    });
+  }
+  function orderConflictText(conflict: OrderConflict, personName: string | undefined): string {
     return conflict.kind === "ALREADY_ORDERED"
       ? t("orderConflictAlready", { orderNo: conflict.orderNo ?? "—" })
-      : t("orderConflictTime", { time: conflict.time, title: conflict.title });
+      : t("orderConflictPersonBusy", { name: personName ?? "TA", time: conflict.time });
   }
 
   // HOME-FORYOU-SCENE-001：四宫格「场景」格只从挂在真实咖啡店场景上的活动里选；
-  // activityIndex 一律索引这份列表（选择器 / 整组换 / 意图预设 / 渲染同一份）。
+  // 派生层（fyActivities）就建在这份列表上（选择器 / 整组换 / 意图预设 / 渲染同一份）。
   const sceneActivities = useMemo(() => activitiesAtCoffeeShops(storeActivities, sceneBriefs), [storeActivities, sceneBriefs]);
 
-  // HOME-FORYOU-ORDER-010（2026-10-01，用户 P0：「for you 的选择变成查看这张订单」）：
-  // activityIndex 初始是种子下标、**不看订单**，sceneActivities 也不排除已下单的 ——
-  // 于是首屏可能正停在一张你已经有票的活动上，`existingOrder` 为真，CTA 一直是
-  // 「查看这张订单」，「选择」那条路整个看不见。
-  //
-  // ORDER-009 让**圆圈刷新**避开已下单的，但没人会为了绕开这个状态先去点圆圈；
-  // 首屏这一下只能在这里补。myOrders 是 mount 之后异步到的，所以到齐才动 ——
-  // 到齐前不动，是为了不拿"还不知道有没有单"当"没有单"。
-  //
-  // 一个可挪的都没有时保持不动（resolveActivityIndexAvoidingOrders 返回原下标），
-  // 那时「查看这张订单」就是实话。锁了活动轴也不挪 —— 锁了就不换，和圆圈同一口径。
-  useEffect(() => {
-    if (myOrders.length === 0) return;
-    if (lockedSlots.has("activity")) return;
-    const next = resolveActivityIndexAvoidingOrders(
-      sceneActivities,
-      new Set(myOrders.map((o) => o.activityId)),
-      activityIndex,
-    );
-    if (next !== activityIndex) setActivityIndex(next);
-  }, [myOrders, sceneActivities, activityIndex, lockedSlots]);
+  // FOR-YOU-DERIVE-001：派生层入口。fyActivities = 场景格可选的活动（都挂在真实咖啡店上）；
+  // fyCurrent = 当前组合的那场活动。没选过时 resolveSelected 从**可约**的里按 seed 挑
+  // （myOrders 异步到齐后自动重算，不用 effect 偷偷改 index——ORDER-010 那条 effect 已删）；
+  // 用户选过就尊重他选的，哪怕刚下完单变成不可约（那时 CTA 是「查看这张订单」）。
+  const fyActivities = useMemo(() => toForYouActivities(sceneActivities, sceneBriefs), [sceneActivities, sceneBriefs]);
+  // FOR-YOU-SLOT-001：能不能约要看人 —— 资源单位是「小美 × 时段」。
+  const fyPerson = filteredPeople.length > 0 ? filteredPeople[personIndex % filteredPeople.length] : undefined;
+  const fyCtx: FYContext = { myOrders, busy: busySlots, personId: fyPerson?.id };
+  const fyCurrent = resolveSelected(fyActivities, selectedActivityId, fyCtx, forYouSeed >> 7);
+  // 换人：当前这场对新的人约不了（她这个时段被约走了 / 这一组我下过）就换到她能约的一场。
+  function selectPerson(index: number): void {
+    const person = filteredPeople[index];
+    if (!person) return;
+    setPersonIndex(index);
+    const next = pickForPerson(fyCurrent, fyActivities, { ...fyCtx, personId: person.id }, lockValues);
+    if (next) setSelectedActivityId(next);
+  }
+  const coffeeSceneIds = useMemo(() => sceneBriefs.filter(isCoffeeShopScene).map((scene) => scene.id), [sceneBriefs]);
+  function deriveAndSelect(activityId: string | undefined): void {
+    if (activityId) setSelectedActivityId(activityId);
+    else showResponse(t("noAvailableCombo"), t("slotNoneAvailableSub"));
+  }
+  function fyReasonText(status: FYStatus): string {
+    if (status.ok) return "";
+    switch (status.reason) {
+      case "ORDERED": return t("optOrdered");
+      case "PERSON_BUSY": return t("optPersonBusy");
+      case "LOCKED_OUT": return t("optLockedOut");
+      default: return t("optNone");
+    }
+  }
 
 
   // Home Search/Conversation v3 — 一个输入框同时做实体匹配和模型对话。
@@ -1310,24 +1278,6 @@ export function RequesterHome({
   // 列表为空时 lookup 自然无候选，输入直接走模型对话。
   const distinctTimes = [...new Set(sceneActivities.map((a) => a.time).filter(Boolean))];
 
-  // availableTimes = **可以选**的时间：去掉那些与我的订单撞时段的。
-  //
-  // HOME-FORYOU-SLOT-AVAIL-001（用户报 P0「点选择弹时间、选完还得再点选择」）：
-  // 治本在候选列表，而不是提交时弹选择器。既然撞时段的时间**不该被选到**，那它就不该
-  // 出现在候选里 —— 用户看不到它，就不会有"选了个冲突的、再来处理一遍"这条路径。
-  //
-  // ⚠️ 必须在**组件顶层**用 useMemo，不能放进渲染 JSX 里的那个 `{(() => { ... })()`
-  // 条件 IIFE —— 那个 IIFE 不保证每次渲染都执行，hook 数量会变，React 直接报
-  // "Rendered more hooks than during the previous render"（我第一版就踩了，
-  // 而且 tsc 与 vitest 都查不出来，只有真机/模拟器运行时才炸）。
-  //
-  // 所以这里不依赖 IIFE 内的 gridActivity：撞时段与否只取决于「这个时间文本是否已经
-  // 出现在我的任一订单里」，与当前选的是哪个活动无关 —— 判据本身也更准。
-  const availableTimes = useMemo(() => {
-    if (distinctTimes.length === 0 || myOrders.length === 0) return distinctTimes;
-    const taken = new Set(myOrders.filter((o) => !o.cancelled).map((o) => o.time.trim()).filter(Boolean));
-    return distinctTimes.filter((time) => !taken.has(time.trim()));
-  }, [distinctTimes.join("\u0000"), myOrders]);
 
   const searchIndex = buildHomeSearchIndex({
     people: filteredPeople.map((p) => ({ id: p.id, name: p.name, bio: p.bio })),
@@ -1345,7 +1295,7 @@ export function RequesterHome({
   // 报名失败说人话：以前所有失败都报"登录后重试"，登录着的用户被误导。
   // 按错因分流——没登录/掉登录才提登录；报过名/满员/活动没了说具体事；
   // 其他归网络或稍后重试。错误码口径见 activity/service.go joinActivity。
-  function joinErrorMessage(error: unknown): string {
+  function joinErrorMessage(error: unknown, personName?: string | undefined): string {
     if (error instanceof ActivityCommandRejectedError) {
       switch (error.result.error?.errorCode) {
         case "ACTIVITY_ALREADY_JOINED":
@@ -1354,9 +1304,9 @@ export function RequesterHome({
           return t("joinFull");
         case "FOR_YOU_COMPANION_REQUIRED":
           return t("comboNeedPerson");
-        case "ACTIVITY_TIME_CONFLICT": {
+        case "COMPANION_SLOT_TAKEN": {
           const details = error.result.error?.safeDetails ?? {};
-          return t("orderConflictTime", { time: typeof details.time === "string" ? details.time : "", title: typeof details.title === "string" ? details.title : "" });
+          return t("orderConflictPersonBusy", { name: personName ?? "TA", time: typeof details.time === "string" ? details.time : "" });
         }
         case "ACTIVITY_NOT_FOUND":
           return t("joinGone");
@@ -1397,9 +1347,10 @@ export function RequesterHome({
     // HOME-FORYOU-ORDER-GUARD-001：提交前再查一次资源冲突（四宫格那一步已经拦过，
     // 这里防确认页开着期间状态变了）。
     const target = storeActivities.find((a) => a.activityId === activityId);
-    const conflict = target ? detectOrderConflict({ activityId, time: target.time, companionId: recipe?.companion?.id }, myOrders) : undefined;
+    const companionId = recipe?.companion?.id;
+    const conflict = target ? detectOrderConflict({ activityId, time: target.time, companionId }, myOrders, busySlots) : undefined;
     if (conflict) {
-      setJoinMsg(orderConflictText(conflict));
+      setJoinMsg(orderConflictText(conflict, recipe?.companion?.name));
       return "failed";
     }
     setJoinBusy(true);
@@ -1409,7 +1360,7 @@ export function RequesterHome({
       setJoinMsg(t("joinedWithCount", { n: result.activity.joined }));
       setOrderNo(result.orderNo ?? "");
       setOrderSnapshot(result.snapshot ?? undefined);
-      rememberMyOrder(activityId, result.orderNo, result.snapshot ?? undefined);
+      rememberMyOrder(activityId, result.orderNo, result.snapshot ?? undefined, companionId);
       return "joined";
     } catch (e) {
       if (e instanceof ActivityCommandRejectedError && e.result.error?.errorCode === "ACTIVITY_ALREADY_JOINED") {
@@ -1418,10 +1369,12 @@ export function RequesterHome({
         // 重复下单：服务端把当初存的票面带回来，照原样画（不是用这次四宫格的选择）。
         const priorSnapshot = ActivityOrderSnapshotSchema.safeParse(e.result.error?.safeDetails?.snapshot);
         setOrderSnapshot(priorSnapshot.success ? priorSnapshot.data : undefined);
-        rememberMyOrder(activityId, typeof prior === "string" ? prior : undefined, priorSnapshot.success ? priorSnapshot.data : undefined);
+        rememberMyOrder(activityId, typeof prior === "string" ? prior : undefined, priorSnapshot.success ? priorSnapshot.data : undefined, companionId);
         return "already";
       }
-      setJoinMsg(joinErrorMessage(e));
+      // 她这个时段刚被别人约走了：记进本地，四宫格立刻显示不可约。
+      if (e instanceof ActivityCommandRejectedError && e.result.error?.errorCode === "COMPANION_SLOT_TAKEN" && companionId && target) markBusy(companionId, target.time);
+      setJoinMsg(joinErrorMessage(e, recipe?.companion?.name));
       return "failed";
     } finally {
       setJoinBusy(false);
@@ -1556,146 +1509,31 @@ export function RequesterHome({
       {onChat ? (
         <>
           {(() => {
-            // HOME-FORYOU-POOL-001：**活动是主轴** —— 它自己带着场地和时间。
-            // 原来 place / time 是另外两条独立轴各自取模，于是能配出两种不可能的组合：
-            // ① 活动**不在**那个场地办（活动挂 realitySceneId，场地是另一条轴）；
-            // ② 时间**不是**那场活动的时间（distinctTimes 本就是从活动时间派生的）。
-            // 现在：场地跟着活动走（口径与活动选择器 :1236 一致），时间直接取活动自己的；
-            // 只有活动没有已知场地时，才退回 placeIndex 那条兜底。
-            const gridPerson = filteredPeople.length > 0 ? filteredPeople[personIndex % filteredPeople.length] : undefined;
-            const gridActivity = sceneActivities.length > 0 ? sceneActivities[activityIndex % sceneActivities.length] : undefined;
-            const gridActivitySceneId = gridActivity ? sceneIdOfActivity(gridActivity, sceneBriefs) : undefined;
-            // 可用门禁（圆圈刷新的核心测试点）：活动是唯一“成立”判据——sceneActivities
-            // 只收挂真实咖啡店的活动（activitiesAtCoffeeShops），每个都有已知场地。
-            // 没有可用活动就不配组合：人/地点/时间单独摆出来也组不成一次可约，
-            // 不可用的不能被刷到。时间是个例外：活动本身没写时间时，用池子里别的
-            // 真实活动时间顶一下（时间值本身是真实档位，不影响“可约”）。
-            if (!gridActivity) return null;
-            const gridPlace = gridActivitySceneId ? sceneBriefs.find((s) => s.id === gridActivitySceneId) : undefined;
+            // HOME-FORYOU-POOL-001 / FOR-YOU-DERIVE-001：活动是主轴，它自己带着场地和时间；
+            // 人是独立轴。时间 / 场景 / 地点三格都由 fyCurrent 派生（见 for-you-derivation.ts）。
+            const gridPerson = fyPerson;
+            // FOR-YOU-DERIVE-001：当前组合 = 人 + fyCurrent 那场活动；时间 / 场景 / 地点
+            // 全部从活动派生，没有第二套 index 可以和它对不上。
+            const gridActivity = fyCurrent ? sceneActivities.find((a) => a.activityId === fyCurrent.activityId) : undefined;
+            if (!gridActivity || !fyCurrent) return null;
+            const gridPlace = sceneBriefs.find((s) => s.id === fyCurrent.sceneId);
             if (!gridPlace) return null;
-            const gridTime = gridActivity?.time || (distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined);
-            // HOME-FORYOU-CONFLICT-001（用户："自由切换被派生了...如果有资源
-            // 冲突 要的就是提示 点击选择不能下一步 提示换"）：地点/时间只在
-            // 用户**真的锁定**了才拿去跟活动的真实场地/时间比——没锁的轴本来
-            // 就该跟着活动走，那不叫冲突。冲突存在时禁用「选择」+ 显示提示，
-            // 不再让派生悄悄吃掉锁定。
-            const lockedPlaceScene = lockedSlots.has("place") && sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined;
-            const lockedTimeValue = lockedSlots.has("time") && distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined;
-            // 显示冻结：锁定的地点/时间显示锁定的值，不跟活动静默走（上面派生只
-            // 负责未锁定的默认行为 + 冲突判定）。锁了还变就是 CONFLICT-001 说的
-            // “被派生”——冻结之后冲突提示 + 禁用选择才真正有意义。
-            const displayPlace = lockedSlots.has("place") && lockedPlaceScene !== undefined ? lockedPlaceScene : gridPlace;
-            const displayTime = lockedSlots.has("time") && lockedTimeValue !== undefined ? lockedTimeValue : gridTime;
-            const comboConflicts = detectComboConflicts(gridActivity, sceneBriefs, { place: lockedPlaceScene, time: lockedTimeValue });
-            const comboConflictText = comboConflicts.map((conflict) => conflict.slot === "place"
-              ? t("comboConflictPlace", { locked: conflict.lockedSceneName, activity: conflict.activitySceneName ?? "" })
-              : t("comboConflictTime", { locked: conflict.lockedTime, activity: conflict.activityTime })).join(" · ");
-            // HOME-FORYOU-PERSON-001（用户「人呢 没人怎么同行呢 没人怎么进行下一步 逻辑不通
-            // 违背规则」）：For You 是「人 + 时间 + 场景 + 地点」四样一起下单，没人就不是
-            // 一个组合——不许进确认下单，也不许下出一张「没有同行人」的票。
-            // HOME-FORYOU-ORDER-GUARD-001：已经下过这一单 / 这个时间段已经有单，也不能再下。
-            const orderConflict = detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time, companionId: gridPerson?.id }, myOrders);
-            // HOME-FORYOU-ORDER-008（2026-10-01，用户「点击 for you 的选择 不能下一步」）：
-            // 只要我在这**同一场活动**上有未取消的单，这一格就永远下不了单 —— 守卫
-            // 不放行是**已裁决**的（requester-home-combo.ts:321 起：服务端
-            // (activity, actor) 只有一行，同场再下单会沿用原编号并刷新票面，等于
-            // 无声改写原同行人正等着的那张票）。但「下不了单」≠「没有下一步」：
-            // **那张票本身**就是下一步。
-            //
-            // 原来只在 ALREADY_ORDERED（同活动 + 同行人对得上）时才认这单。
-            // 同行人对不上时（旧单票面快照为空 = 迁移前下的单，或用户换了同行人）
-            // existingOrder 是 undefined ⇒ 点「选择」只弹一句冲突文案，
-            // 屏幕上**没有任何能走的入口** —— 这就是"不能下一步"。
-            //
-            // 2026-10-01 实测（模拟器 + 真库）：这个账号把三家咖啡店场景下的活动
-            // **三场全下过**（tb_matcha_night / tb_sun_cupping / tb_sat_buddy），
-            // resolveConflictSlots 找不到任何不冲突的替代活动 ⇒ 必然落到死路。
-            const existingOrder = myOrders.find((o) => o.activityId === gridActivity.activityId && !o.cancelled);
-
-            // HOME-FORYOU-SLOT-AVAIL-001（用户：「点什么都灰。理论上我们 for you 是4个
-            // 资源槽 检测冲突 4个全部不可用才灰，有一个可用都不能灰」）：
-            //
-            // 原来这里是 `comboConflicts.length > 0 || !gridPerson || orderConflict` ——
-            // **任何**一个槽位有问题就整体置灰。于是点哪个新人都灰、点哪个时间也灰，
-            // 用户什么都做不了：明明换一个槽位就能凑出一个可用组合，却被告知不行。
-            //
-            // 正确的判据是「**还有没有可用的组合**」，不是「当前这一个组合有没有冲突」。
-            // 冲突只说明"当前这一组不行"，而用户的下一步是**换一个槽位**，不是放弃。
-            // 所以：四个槽位各算一次可用性，**只有一个都拿不出可用值才置灰**。
-            //
-            // · 人：列表里有任何一个（服务端 nearby 或 fixture 都算）
-            // · 时间：distinctTimes 里有一个不与我的订单撞时段
-            // · 场景：sceneBriefs 里有 active 的
-            // · 地点：有可锁定的地点（由 detectComboConflicts 反映）
-            const personAvailable = filteredPeople.length > 0;
-            const timeAvailable = distinctTimes.length > 0
-              && !distinctTimes.every((t) => detectOrderConflict({ activityId: gridActivity.activityId, time: t }, myOrders)?.kind === "TIME_TAKEN");
-            const sceneAvailable = sceneBriefs.some((sc) => sc.active);
-            const placeAvailable = comboConflicts.every((c) => c.slot !== "place");
-
-            // 当前这一个组合有没有冲突 —— 冲突要**说清是哪个槽位**并把用户带到那
-            // 个选择器去，而不是把按钮焊死。
-            const currentComboBroken = !gridPerson || orderConflict !== undefined || comboConflicts.length > 0;
-            const anySlotAvailable = personAvailable || timeAvailable || sceneAvailable || placeAvailable;
-            // 全部槽位都拿不出可用值 ⇒ 真的走不下去，才置灰。
-            // availableTimes = **可以选**的时间：去掉那些与我的订单撞时段的。
-            //
-
-            // resolveConflictSlots 把冲突的那一个槽**就地换到下一个可用值**。
-            //
-            // HOME-FORYOU-SLOT-AVAIL-001：用户点「选择」时不该被弹窗打断。圆圈已经把
-            // 4 个槽刷新成可用组合了，所以这里只是兜住"用户手动选了个冲突值"的情况 ——
-            // 无声修好，配一句如实说明，不要求用户再来一遍。
-            //
-            // 只换**冲突的那个**槽（时间或地点），其余不动 —— 全换一遍等于替用户重掷，
-            // 那是点圆圈才该发生的事。
-            const resolveConflictSlots = (): boolean => {
-              // 🔴 时间/订单冲突是**从活动本身**算出来的，不是从 timeIndex。
-              // `orderConflict`（本文件 :1545）读的是 `gridActivity.activityId` /
-              // `gridActivity.time`，而 `gridActivity` 只由 `activityIndex` 决定。
-              //
-              // 所以原来那句「改 timeIndex + 锁时间」的修法**永远修不好**：
-              // 锁定一个别的时间只会让 `lockedTimeValue` 与活动对不上（反而多出一条
-              // comboConflicts 的 time 冲突），而 `orderConflict` 一动不动 ⇒
-              // 「选择」永远走冲突分支、永远进不去确认页 —— 这就是用户报的
-              // 「点击选择没响应」。它不是弹窗没绑上，是**修了等于没修**。
-              //
-              // 要修就得换**活动**：那才是 activityId 和 time 的来源。换到一场
-              // 与我的订单不冲突的活动，冲突才真的消失。
-              if (orderConflict !== undefined) {
-                const altIndex = sceneActivities.findIndex((a) =>
-                  detectOrderConflict({ activityId: a.activityId, time: a.time, companionId: gridPerson?.id }, myOrders) === undefined
-                );
-                // 一场都不冲突的活动都没有 ⇒ 如实返回 false，交给调用方给出路，
-                // 绝不假装修好了（假装修好 = 下一次点击还是原地）。
-                if (altIndex < 0) return false;
-                setActivityIndex(altIndex);
-                // 时间锁/地点锁会跟新活动对不上，解锁让它们跟着活动走。
-                setLockedSlots((prev: ReadonlySet<"person" | "time" | "activity" | "place">) => {
-                  const next = new Set([...prev]);
-                  next.delete("time");
-                  next.delete("place");
-                  return next;
-                });
-                return true;
-              }
-              // 地点撞了 → 解锁地点，让它跟着当前活动走（锁着的地点与活动场景不符才是冲突源）
-              if (comboConflicts.some((c: { slot: string }) => c.slot === "place")) {
-                setLockedSlots((prev: ReadonlySet<"person" | "time" | "activity" | "place">) => {
-                  const next = new Set([...prev]);
-                  next.delete("place");
-                  return next;
-                });
-                return true;
-              }
-              return false;
-            };
-            const comboBlocked = !anySlotAvailable;
-            // 还有别的槽位可选时，按钮可点；点了会提示"这一组冲突，换一个"并把
-            // 用户送到冲突的那个槽位，而不是直接拒绝。
-            const comboBlockText = !gridPerson ? t("comboNeedPerson")
-              : orderConflict && !timeAvailable && !sceneAvailable && !placeAvailable ? orderConflictText(orderConflict)
-              : comboConflictText || (orderConflict ? orderConflictText(orderConflict) : "");
+            const gridTime = gridActivity.time || undefined;
+            const displayPlace = gridPlace;
+            const displayTime = gridTime;
+            // 这一组能不能下：活动可约（没满 / 我没下过这场 / 这个时段我没别的单）+ 有同行人。
+            // 不可约时说清是哪一种；「已下过这场」的下一步就是看那张票（ORDER-008 的 CTA 保留）。
+            const fyStatus = activityStatus(fyCurrent, fyCtx);
+            const orderConflict = detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time, companionId: gridPerson?.id }, myOrders, busySlots);
+            // 有票 = 这一组 (活动, 这个小美) 我下过。没选人时谈不上「这一组」。
+            const existingOrder = gridPerson ? myOrders.find((o) => o.activityId === gridActivity.activityId && o.companionId === gridPerson.id && !o.cancelled) : undefined;
+            const anyAvailable = personOptions(filteredPeople, fyActivities, fyCtx, lockValues).some((o) => o.status.ok);
+            const comboBlocked = !fyStatus.ok || !gridPerson;
+            // 一场能约的都没有时只说这一句（替换而不是追加：三行会落到玻璃 dock 底下，
+            // 2026-10-04 模拟器实测；CTA 已经是「查看这张订单」，订单号不必再重复）。
+            const comboBlockText = !fyStatus.ok
+              ? (!anyAvailable ? t("noFreeCombo") : orderConflict ? orderConflictText(orderConflict, gridPerson?.name) : fyReasonText(fyStatus))
+              : !gridPerson ? t("comboNeedPerson") : "";
             const remixAll = (): void => {
               // HOME-FORYOU-LOCK-001：中心键与 remixForYou 收成**同一条**重配链
               // （锁定轴跳过的口径只维护一份）。
@@ -1826,60 +1664,17 @@ export function RequesterHome({
                         平台代收款的商业订单——"下单"是这个 app 里"敲定一个
                         真实计划"的通用说法，不是"付了钱"的意思）。 */}
                     <Pressable
-                      disabled={comboBlocked && !existingOrder}
+                      disabled={comboBlocked && !existingOrder && gridPerson !== undefined}
                       onPress={() => {
-                        // HOME-FORYOU-ORDER-008（用户 2026-10-01：「点击 for you 的选择
-                        // 不能下一步」）：这一场我已经有票 ⇒ 下一步是**看那张票**。
-                        // 守卫不放行（同活动不再下单，理由见上面 existingOrder 的注释），
-                        // 所以这里既不能再走「确认下单」，也不能只弹一句没有出口的
-                        // 冲突文案 —— 那正是用户看到的"点了没反应"。
+                        // FOR-YOU-DERIVE-001：按钮只做它字面上的事。
+                        //   · 这场我已经有票 ⇒「查看这张订单」（ORDER-008）；
+                        //   · 缺人 ⇒ 去选人（唯一需要用户补的一格）；
+                        //   · 其它不可约（时段被占 / 满了）⇒ 按钮置灰 + 下面一行说清原因，
+                        //     换哪一格由选择器里每个选项旁的状态告诉用户——不再在点击时
+                        //     偷偷改活动 / 解锁（resolveConflictSlots 已删）。
                         if (existingOrder) { openExistingOrder(existingOrder); return; }
-                        // HOME-FORYOU-SLOT-AVAIL-001（用户 2026-10-01 报 P0）：
-                        // 「点击圆圈就自动刷新 4 个可用的资源槽，选中就可以」。
-                        //
-                        // 我上一版把这个按钮改成"有冲突就弹对应的选择器"，于是流程变成
-                        // 点选择 → 弹时间 → 选完**还得再点一次选择**。两次点击、中间隔着
-                        // 一个用户没要求过的弹窗 —— 圆圈本来已经刷新出可用组合了，凭什么
-                        // 还要用户再选一次。
-                        //
-                        // 现在：冲突就在这里**就地修好**（把冲突的那个槽换到下一个可用值），
-                        // 然后直接进确认页。缺人就去人选择器（那一槽真的没有值，
-                        // 圆圈刷不出来 —— 那是唯一还需要人介入的情况）。
-                        //
-                        // 治本在选择器本身：时间/地点的候选项**根本不列会冲突的值**
-                        // （见 availableTimes），所以正常路径压根不会产生冲突。
                         if (!gridPerson) { setChooser("person"); return; }
-                        // 就地修好冲突槽，不打断用户
-                        if (orderConflict?.kind === "TIME_TAKEN" || comboConflicts.some((c) => c.slot === "place")) {
-                          setJoinMsg(undefined);
-                          if (resolveConflictSlots()) {
-                            // 修好了 ⇒ 直接进确认页，一次点击到位。
-                            //
-                            // 「绝不开确认页，因为此刻读到的是旧值」这个顾虑是**找错了病因**：
-                            // 上一版真正的毛病是**修法无效**（改 timeIndex 动不了
-                            // orderConflict），不是 setState 时序。修法真的有效时，
-                            // 这里的 setState 与 resolveConflictSlots 里的那几条
-                            // 在**同一个事件里**，React 合成一次渲染 ⇒ 下一帧读到的
-                            // 就是修好的新组合，开页是安全的。
-                            setOrderDone(false); setOrderCodeCopied(false); setOrderNo(""); setJoinConfirmOpen(true);
-                            return;
-                          }
-                          // 修不好 ⇒ 更不能死循环：如实说明为什么走不通、该动哪个轴。
-                          // 绝不打开一个注定失败的确认页 —— 让用户填完提交才失败是骗人。
-                          //
-                          // HOME-FORYOU-CONFLICT-DETAIL-001（2026-10-01）：主文案用**详细**
-                          // 冲突文案（哪一单/哪个值挡的），不用泛化的「这个时间你已经有单了」。
-                          // 同一个冲突，CTA 的 a11y 标签（comboBlockText）和格子上方的
-                          // 提示（1630-1631）早就用详细版，唯独这条回复条用泛化版 ——
-                          // 「换个时间，或先取消那一单」的前提是知道挡着的是**哪一单**。
-                          // 详细文案各语言都有（orderConflictTime / comboConflictPlace），
-                          // 这里只是把已有能力接到用户第一眼看的地方。
-                          showResponse(
-                            orderConflict?.kind === "TIME_TAKEN" ? orderConflictText(orderConflict) : comboConflictText,
-                            orderConflict?.kind === "TIME_TAKEN" ? t("slotTimeClashSub") : t("slotPlaceClashSub"),
-                          );
-                          return;
-                        }
+                        if (comboBlocked) { showResponse(comboBlockText, t("slotNoneAvailableSub")); return; }
                         setJoinMsg(undefined); setOrderDone(false); setOrderCodeCopied(false); setOrderNo(""); setJoinConfirmOpen(true);
                       }}
                       style={[styles.gridCta, responseText && styles.gridCtaFlush, comboBlocked && !existingOrder && styles.gridCtaDisabled]}
@@ -1900,7 +1695,7 @@ export function RequesterHome({
                         不用为了"看起来像下单"去编一个人工报酬输入框（那是
                         DIRECT_INVITE 邀真人才有的形状，这里的人是推荐 fixture，
                         没有真实收款方）。 */}
-                    {comboBlocked ? <Text selectable style={styles.comboConflictText}>{comboBlockText}</Text> : null}
+                    {comboBlocked ? <Text selectable numberOfLines={2} style={styles.comboConflictText}>{comboBlockText}</Text> : null}
                     {/* HOME-FORYOU-ORDER-008：原来这里还有一个「查看这张订单 ›」
                         次级按钮，现在 CTA 本身在有票时就是它（同一个入口写两遍
                         = 迟早只改一处，而且两颗一模一样的按钮并排是噪音）。 */}
@@ -2088,14 +1883,17 @@ export function RequesterHome({
                         <Text selectable style={styles.sheetTitle}>{chooser === "person" ? t("choosePerson") : chooser === "time" ? t("chooseTime") : chooser === "activity" ? t("chooseActivity") : t("choosePlace")}</Text>
                         {chooser === "person" ? (
                           <HorizontalSwipeRail contentContainerStyle={styles.personChooserRail}>
-                            {filteredPeople.map((p, i) => {
+                            {personOptions(filteredPeople, fyActivities, fyCtx, lockValues).map(({ status }, i) => {
+                              const p = filteredPeople[i]!;
                               const selected = i === personIndex % filteredPeople.length;
+                              // FOR-YOU-SLOT-001：她在满足锁的活动里一个空时段都没有 ⇒ 置灰并说原因。
                               return (
                                 <Pressable
-                                  accessibilityLabel={t("chooseA11y", { name: p.name })}
+                                  accessibilityLabel={status.ok ? t("chooseA11y", { name: p.name }) : `${p.name} · ${fyReasonText(status)}`}
+                                  disabled={!status.ok && !selected}
                                   key={p.id}
-                                  onPress={() => { setPersonIndex(i); setChooser(null); }}
-                                  style={[styles.personChooserCard, selected && styles.personChooserCardSelected]}
+                                  onPress={() => { selectPerson(i); setChooser(null); }}
+                                  style={[styles.personChooserCard, selected && styles.personChooserCardSelected, !status.ok && !selected && styles.chooserOptionDisabled]}
                                 >
                                   {p.photoUri && !brokenAvatarIds.has(p.id) ? (
                                     <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: p.photoUri }} style={styles.personChooserPhoto} transition={0} onError={() => markAvatarBroken(p.id)} />
@@ -2105,6 +1903,7 @@ export function RequesterHome({
                                   <View style={styles.personChooserCopy}>
                                     <Text selectable numberOfLines={1} style={styles.personChooserName}>{p.name}</Text>
                                     <Text selectable numberOfLines={1} style={styles.personChooserBio}>{p.bio}</Text>
+                                    {!status.ok ? <Text selectable numberOfLines={1} style={styles.chooserOptionReason}>{fyReasonText(status)}</Text> : null}
                                   </View>
                                   {selected ? <View style={styles.personChooserSelectedBadge}><ProxyIcon color={color.white} name="check" size={13} /></View> : null}
                                 </Pressable>
@@ -2113,35 +1912,49 @@ export function RequesterHome({
                           </HorizontalSwipeRail>
                         ) : chooser === "time" ? (
                           <HorizontalSwipeRail contentContainerStyle={styles.timeChooserRail}>
-                            {/* HOME-FORYOU-SLOT-AVAIL-001：只列**可以选**的时间
-                                （availableTimes 已去掉与我订单撞时段的）。既然撞值的
-                                时间不该被选到，它就不该出现在候选里 —— 用户看不到它，
-                                就不会有"选了个冲突的、再来处理一遍"这条路径。
-                                空列表由外层的 comboBlocked 如实置灰，不摆失败选项。*/}
-                            {availableTimes.map((slot, i) => {
-                              const selected = i === timeIndex % availableTimes.length;
+                            {/* FOR-YOU-DERIVE-001：每个时间档都列出来，旁边写清能不能约、为什么
+                                （已下过单 / 这个时间你已有一单 / 已满 / 跟锁定的不匹配）——以前
+                                是把不能约的直接藏掉，全藏光时弹出一个空白的「选时间」。
+                                点一个可约的时间 = 换到那个时间的一场可约活动（尽量同一家店）。 */}
+                            {timeOptions(fyActivities, fyCtx, lockValues).map(({ value: slot, status }) => {
+                              const selected = fyCurrent !== undefined && slot === fyCurrent.time.trim();
                               return (
-                                <Pressable key={slot} onPress={() => { setTimeIndex(i); setChooser(null); }} style={[styles.timeChooserCard, selected && styles.timeChooserCardSelected]}>
+                                <Pressable
+                                  accessibilityLabel={status.ok ? slot : `${slot} · ${fyReasonText(status)}`}
+                                  disabled={!status.ok && !selected}
+                                  key={slot}
+                                  onPress={() => { if (!selected) deriveAndSelect(pickForTime(slot, fyCurrent, fyActivities, fyCtx, lockValues)); setChooser(null); }}
+                                  style={[styles.timeChooserCard, selected && styles.timeChooserCardSelected, !status.ok && !selected && styles.chooserOptionDisabled]}
+                                >
                                   <ProxyIcon color={selected ? color.white : color.ink} name="clock" size={22} />
                                   <Text selectable numberOfLines={2} style={[styles.timeChooserValue, selected && styles.timeChooserValueSelected]}>{slot}</Text>
-                                  <Text selectable style={[styles.timeChooserHint, selected && styles.timeChooserHintSelected]}>{selected ? t("currentChoice") : t("chooseSlot")}</Text>
+                                  <Text selectable style={[styles.timeChooserHint, selected && styles.timeChooserHintSelected]}>{selected ? t("currentChoice") : status.ok ? t("chooseSlot") : fyReasonText(status)}</Text>
                                 </Pressable>
                               );
                             })}
                           </HorizontalSwipeRail>
                         ) : chooser === "activity" ? (
                           <HorizontalSwipeRail contentContainerStyle={styles.photoChooserRail}>
-                            {sceneActivities.map((a, i) => {
+                            {activityOptions(fyActivities, fyCtx, lockValues).map(({ value: id, status }) => {
+                              const a = sceneActivities.find((candidate) => candidate.activityId === id);
+                              if (!a) return null;
                               const scene = sceneBriefs.find((s) => s.id === a.realitySceneId || s.name === a.venueName);
                               // ACTIVITY-COVER-001：活动封面优先用商家传的媒体资产；都没有才退回场景图。
-const photo = activityCoverUri(a, localApiBaseUrl) || scene?.imageUrl;
-                              const selected = i === activityIndex % sceneActivities.length;
+                              const photo = activityCoverUri(a, localApiBaseUrl) || scene?.imageUrl;
+                              const selected = id === fyCurrent?.activityId;
                               return (
-                                <Pressable key={a.activityId} onPress={() => { setActivityIndex(i); setChooser(null); }} style={[styles.photoChooserCard, selected && styles.photoChooserCardSelected]}>
+                                <Pressable
+                                  accessibilityLabel={status.ok ? a.title : `${a.title} · ${fyReasonText(status)}`}
+                                  disabled={!status.ok && !selected}
+                                  key={id}
+                                  onPress={() => { setSelectedActivityId(id); setChooser(null); }}
+                                  style={[styles.photoChooserCard, selected && styles.photoChooserCardSelected, !status.ok && !selected && styles.chooserOptionDisabled]}
+                                >
                                   {photo ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: photo }} style={styles.photoChooserImage} transition={0} /> : <View style={[styles.photoChooserImage, styles.photoChooserFallback]}><ProxyIcon color={color.muted} name="cup" size={30} /></View>}
                                   <View style={styles.photoChooserCopy}>
                                     <Text selectable numberOfLines={1} style={styles.photoChooserName}>{a.venueName}</Text>
                                     <Text selectable numberOfLines={1} style={styles.photoChooserMeta}>{a.title}{a.time ? ` · ${a.time}` : ""}</Text>
+                                    {!status.ok ? <Text selectable numberOfLines={1} style={styles.chooserOptionReason}>{fyReasonText(status)}</Text> : null}
                                   </View>
                                   {selected ? <View style={styles.photoChooserSelectedBadge}><ProxyIcon color={color.white} name="check" size={13} /></View> : null}
                                 </Pressable>
@@ -2150,14 +1963,27 @@ const photo = activityCoverUri(a, localApiBaseUrl) || scene?.imageUrl;
                           </HorizontalSwipeRail>
                         ) : (
                           <HorizontalSwipeRail contentContainerStyle={styles.photoChooserRail}>
-                            {sceneBriefs.map((s, i) => {
-                              const selected = i === placeIndex % sceneBriefs.length;
+                            {/* FOR-YOU-DERIVE-001：地点只列咖啡店（场景格只收咖啡店的活动，列
+                                Hanoi Train Street 这种办不了活动的地方只会选出冲突）；没有活动的
+                                店也列出来、标「暂无可约活动」，不藏。点一家 = 换到那家的一场
+                                可约活动（尽量同一个时间）。 */}
+                            {sceneOptions(coffeeSceneIds, fyActivities, fyCtx, lockValues).map(({ value: sceneId, status }) => {
+                              const s = sceneBriefs.find((scene) => scene.id === sceneId);
+                              if (!s) return null;
+                              const selected = sceneId === fyCurrent?.sceneId;
                               return (
-                                <Pressable key={s.id} onPress={() => { setPlaceIndex(i); setChooser(null); }} style={[styles.photoChooserCard, selected && styles.photoChooserCardSelected]}>
+                                <Pressable
+                                  accessibilityLabel={status.ok ? s.name : `${s.name} · ${fyReasonText(status)}`}
+                                  disabled={!status.ok && !selected}
+                                  key={s.id}
+                                  onPress={() => { if (!selected) deriveAndSelect(pickForScene(sceneId, fyCurrent, fyActivities, fyCtx, lockValues)); setChooser(null); }}
+                                  style={[styles.photoChooserCard, selected && styles.photoChooserCardSelected, !status.ok && !selected && styles.chooserOptionDisabled]}
+                                >
                                   {s.imageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: s.imageUrl }} style={styles.photoChooserImage} transition={0} /> : <View style={[styles.photoChooserImage, styles.photoChooserFallback]}><ProxyIcon color={color.muted} name="storefront" size={30} /></View>}
                                   <View style={styles.photoChooserCopy}>
                                     <Text selectable numberOfLines={1} style={styles.photoChooserName}>{s.name}</Text>
                                     <Text selectable numberOfLines={1} style={styles.photoChooserMeta}>{s.area}{s.type ? ` · ${s.type}` : ""}</Text>
+                                    {!status.ok ? <Text selectable numberOfLines={1} style={styles.chooserOptionReason}>{fyReasonText(status)}</Text> : null}
                                   </View>
                                   {selected ? <View style={styles.photoChooserSelectedBadge}><ProxyIcon color={color.white} name="check" size={13} /></View> : null}
                                 </Pressable>
@@ -2881,7 +2707,7 @@ function freeSlotForDistinctTime(label: string | undefined): { startIso: string;
 // position — every returned distanceM is still the server measuring that person.
 const HANOI_FALLBACK_ORIGIN = { latitude: 21.0278, longitude: 105.8342 } as const;
 
-const MORE_DISTANCE_KM: ReadonlyArray<number> = [1, 3, 5, 10, 20, 50, 100, 200, 500, 1000];
+const MORE_DISTANCE_KM: ReadonlyArray<number> = [1, 3, 5, 10, 20, 30, 50, 100, 200, 500, 1000];
 
 // HOME-MORE-GREET-001（2026-09-23，用户：「线下很近的 2 个人 比如 200m 以内 我们认为处于
 // 同一个窗景」）：同一窗景 = 已知距离 ≤ 200m。距离未知的人不算（跟 PERSON-DISTANCE-ZERO-001
@@ -2890,7 +2716,9 @@ const SAME_SCENE_RADIUS_M = 200;
 function isSameScene(person: RecommendPerson): boolean {
   return person.distanceM !== undefined && person.distanceM <= SAME_SCENE_RADIUS_M;
 }
-const MORE_DISTANCE_DEFAULT_INDEX = 3; // = 10km
+// FOR-YOU-CANDIDATES-001（2026-10-04，用户：「30km 在越南有摩托车属于可接受的距离」）：
+// For You / 真人推荐的候选默认 = 30km 内的全部人。
+const MORE_DISTANCE_DEFAULT_INDEX = 5; // = 30km
 
 // HOME-I18N-001：骑行时间原来写死在这（中文），现在跟着语言走 —— 取 i18n 的
 // rideTimes（原型 I18N 里那 7 档，6 种语言都齐）。
@@ -3129,6 +2957,9 @@ const styles = StyleSheet.create({
   photoChooserCopy: { gap: 2, paddingHorizontal: 10, paddingVertical: 9 },
   photoChooserName: { color: color.ink, fontSize: 15, fontWeight: "900" },
   photoChooserMeta: { color: color.muted, fontSize: 11 },
+  // FOR-YOU-DERIVE-001：选择器里约不了的选项（已下过单 / 时段被占 / 已满 / 跟锁不匹配）。
+  chooserOptionDisabled: { opacity: 0.45 },
+  chooserOptionReason: { color: color.error, fontSize: 11, fontWeight: "700", marginTop: 3 },
   photoChooserSelectedBadge: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, height: 26, justifyContent: "center", position: "absolute", right: 7, top: 7, width: 26 },
   timeChooserRail: { gap: 10, paddingBottom: 2, paddingRight: 8 },
   timeChooserCard: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 9, minHeight: 126, padding: 14, width: 142 },

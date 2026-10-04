@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Activity, ActivityJoinOrder } from "@proxy/contracts";
-import { activityOrderFields, formatJoinedAt, joinStateLabel, orderSnapshotFor, sortJoinedByOrderTime } from "./my-activity-orders";
+import { activityOrderFields, formatJoinedAt, joinStateLabel, orderSnapshotFor, joinEntries } from "./my-activity-orders";
 
 const activity = (over: Partial<Activity> = {}): Activity => ({
   activityId: "a1",
@@ -46,12 +46,24 @@ describe("MY-ORDERS-DETAIL-001 我的订单 · 活动报名明细", () => {
   });
 
   it("sorts newest order first, keeping orderless rows last", () => {
-    const orders = new Map<string, ActivityJoinOrder>([
-      ["old", { activityId: "old", joinedAt: "2026-09-20T00:00:00Z" }],
-      ["new", { activityId: "new", joinedAt: "2026-09-28T00:00:00Z" }],
-    ]);
+    const orders: ActivityJoinOrder[] = [
+      { activityId: "old", joinedAt: "2026-09-20T00:00:00Z" },
+      { activityId: "new", joinedAt: "2026-09-28T00:00:00Z" },
+    ];
     const list = [activity({ activityId: "none" }), activity({ activityId: "old" }), activity({ activityId: "new" })];
-    expect(sortJoinedByOrderTime(list, orders).map((a) => a.activityId)).toEqual(["new", "old", "none"]);
+    expect(joinEntries(list, orders).map((e) => e.activity.activityId)).toEqual(["new", "old", "none"]);
+  });
+
+  // FOR-YOU-SLOT-001：同一场活动约了不同的小美是不同的单 —— 一张票一项，取消的不列。
+  it("lists one entry per order, so two companions on one activity are two tickets", () => {
+    const orders: ActivityJoinOrder[] = [
+      { activityId: "tb", companionId: "mai", orderNo: "1", joinedAt: "2026-10-04T01:00:00Z" },
+      { activityId: "tb", companionId: "linh", orderNo: "2", joinedAt: "2026-10-04T02:00:00Z" },
+      { activityId: "tb", companionId: "trang", orderNo: "3", joinedAt: "2026-10-04T03:00:00Z", state: "CANCELLED" },
+    ];
+    const entries = joinEntries([activity({ activityId: "tb" })], orders);
+    expect(entries.map((e) => e.order?.orderNo)).toEqual(["2", "1"]);
+    expect(new Set(entries.map((e) => e.key)).size).toBe(2);
   });
 });
 

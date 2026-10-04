@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/activity"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
@@ -99,48 +100,6 @@ func (r *ActivityRepository) ToggleInterest(ctx context.Context, activityID, act
 // 串行化同一场活动的占座；报名记录（状态 + 订单编号 + 票面快照）与 joined_count 同一事务写。
 // 订单编号在同一事务里原子取号（场地类别码 + 越南本地日期的每日计数器 ordering.daily_sequences）。
 // 之前取消过的报名重新激活同一行：沿用原编号，票面快照按这次下单刷新。
-// companionChanged 报告「这次下单的同行人，与已存在那单的同行人不同」。
-//
-// HOME-FORYOU-ORDER-007：For You 的组合里同行人是订单的一部分，换人就是换单。
-// 判据只看同行人 id（名字会改、照片会失效，id 不会）—— 拿显示名当身份，用户
-// 改个昵称就能绕开判重下单，那等于没有判重。
-//
-// 调用方（Join）已经保证 existing.Snapshot != nil 才会问这个问题，所以这里
-// 只处理"快照在、但同行人不在"的情形：那返回 false（同一单，不算换人）。
-//
-// 快照整个缺失的老单**不该**走到这里 —— 那是永久锁死用户的根源
-// （见 Join 里那段注释）。
-func companionChanged(existing *activity.OrderSnapshot, recipe activity.JoinRecipe) bool {
-	if existing == nil {
-		// 旧单没有快照（票面快照功能之前下的）：当"换了人"，允许继续下单。
-		//
-		// 这个分支的取值方向是这个函数里最容易写反的一处。第一版返回 false
-		//（"拿不到证据 ⇒ 保守判重"），后果是**永久锁死**：库里所有旧单都
-		// 没有快照，于是这些用户在任何自己下过单的活动上，选任何新同行人
-		// 都被判「已经下过了」—— 而那个人根本没下过单。
-		//
-		// 代价不对称：真实重复下单 = 一张票（同 actor 同活动只有一行，会沿用
-		// 原编号并刷新票面）；误判重复 = 这个人再也无法和任何新的人下单。
-		return true
-	}
-	if existing.Companion == nil {
-		// 快照在、里面没有同行人 ⇒ 那一单本来就没有同行人 ⇒ 同一单。
-		return false
-	}
-	return existing.Companion.ID != recipeCompanionID(recipe)
-}
-
-// recipeCompanionID 取出本次下单的同行人 id；没有同行人时返回 ""。
-//
-// 空 id 的语义是"这一单没有同行人"。此时只有已存在那单**也没有**同行人才算
-// 同一单；已存在那单有同行人、这次不带，算换人（反向也是）—— 所以这里把
-// "" 也当作一个可比较的身份，而不是"无身份"。
-func recipeCompanionID(recipe activity.JoinRecipe) string {
-	if recipe.Companion == nil {
-		return ""
-	}
-	return recipe.Companion.ID
-}
 
 func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID string, recipe activity.JoinRecipe) (activity.Activity, activity.Participation, error) {
 	var result activity.Activity
@@ -155,44 +114,36 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 		if err != nil {
 			return err
 		}
-		existing, found, err := readParticipation(txCtx, tx, activityID, actorID, true)
+		companionID := activity.CompanionIDOf(recipe)
+		existing, found, err := readParticipation(txCtx, tx, activityID, actorID, companionID, true)
 		if err != nil {
 			return err
 		}
-		// HOME-FORYOU-ORDER-007：判重**必须看同行人**。
-		//
-		// 原来只要 (activity_id, actor_id) 有未取消的记录就报 ErrAlreadyJoined，
-		// 于是「换一个同行人再下同一场活动」被判成重复下单 —— 界面上那个人是灰的、
-		// 文案写着「这一单你已经下过了（订单号 …）」。用户看到的是新用户（根本没
-		// 下过单），却被告知已经下过了。
-		//
-		// For You 下单的语义就是「人 + 时间 + 场景 + 地点」一整套（见
-		// comboNeedPerson 文案），同行人是这一单的一部分，不是附注。换人 =
-		// 换一单，所以判重必须带上 companion。
-		//
-		// 同一 companion 重复下单仍然如实报重复（ORDER-NO-001 的既有行为不变）：
-		// 不新开一单，把原编号带回去，客户端照进已下单页。
-		//
-		// 旧单（order_snapshot 为 NULL，票面快照功能之前下的）怎么办：
-		//
-		// 第一版我写的是「拿不到快照 ⇒ 保守判重」。**那是把方向修反了**，而且
-		// 后果是致命的：库里的旧单全都没有快照，于是**任何同行人都被判成
-		// 「已经下过了」** —— 用户看到新用户在 rail 里是灰的、点下去被告知已下单，
-		// 而那个人根本没下过单。判据"保守"的方向错了：它保护的是旧单不被重复下单，
-		// 代价是**这个人再也无法和任何新同行人下单**，永久锁死。
-		//
-		// 正确做法：旧单没有同行人可比，那就当"这一单的同行人未知"，允许换人
-		// —— 下面的 UPDATE 分支会沿用原编号（order_no=COALESCE）并刷新票面，
-		// 编号不变、审计可追，只把同行人换成新的。这既不产生第二单，
-		// 也不把用户锁死。
-		if found && existing.State != activity.PartCancelled &&
-			existing.Snapshot != nil && !companionChanged(existing.Snapshot, recipe) {
+		// FOR-YOU-SLOT-001（2026-10-04，推翻 HOME-FORYOU-ORDER-ONE-001）：一单 =
+		// (活动, 我, 同行人)。约不同的小美是不同的单，各自一行、各自一个编号、各自一张
+		// 票面——不再像 ORDER-007 那样改写已有那一行。同一组再下 ⇒ ErrAlreadyJoined。
+		if found && existing.State != activity.PartCancelled {
 			participation = existing
 			_ = decodeActivity(payload, interested, joined, capacity, &result)
 			return activity.ErrAlreadyJoined
 		}
-		if capacity > 0 && joined >= capacity {
-			_ = decodeActivity(payload, interested, joined, capacity, &result)
+		_ = decodeActivity(payload, interested, joined, capacity, &result)
+		slotKey := activity.SlotKey(result.Time)
+		if companionID != "" {
+			// 小美的这个时段被任何人、任何一场活动约走了 ⇒ 不可约。并发由
+			// ux_participants_companion_slot 唯一索引兜底（见下面 INSERT 的错误映射）。
+			var taken bool
+			if err := tx.QueryRow(txCtx, `
+				SELECT EXISTS (SELECT 1 FROM activity.participants
+				 WHERE companion_id=$1 AND slot_key=$2 AND state <> 'CANCELLED')`, companionID, slotKey).Scan(&taken); err != nil {
+				return err
+			}
+			if taken {
+				return activity.ErrCompanionSlotTaken
+			}
+		} else if capacity > 0 && joined >= capacity {
+			// For You 单不扣活动名额（咖啡店是场景载体，承载上限后期再做，现在不限）；
+			// 直接报名照旧看名额。
 			return activity.ErrActivityFull
 		}
 		_ = decodeActivity(payload, interested, joined, capacity, &result)
@@ -215,18 +166,21 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 			return err
 		}
 		if found {
+			// 取消过的同一组 (活动, 我, 同行人) 重新下：沿用原编号。
 			if _, err := tx.Exec(txCtx, `
 				UPDATE activity.participants
-				SET state='CONFIRMED', order_no=COALESCE(order_no, $3), order_snapshot=$4, updated_at=NOW()
-				WHERE activity_id=$1 AND actor_id=$2`, activityID, actorID, orderNo, snapshot); err != nil {
-				return err
+				SET state='CONFIRMED', order_no=COALESCE(order_no, $4), order_snapshot=$5, slot_key=$6, updated_at=NOW()
+				WHERE activity_id=$1 AND actor_id=$2 AND companion_id=$3`, activityID, actorID, companionID, orderNo, snapshot, slotKey); err != nil {
+				return mapCompanionSlotViolation(err)
 			}
 		} else {
-			if _, err := tx.Exec(txCtx, `INSERT INTO activity.participants (activity_id, actor_id, state, order_no, order_snapshot) VALUES ($1,$2,'CONFIRMED',$3,$4)`, activityID, actorID, orderNo, snapshot); err != nil {
-				return err
+			if _, err := tx.Exec(txCtx, `
+				INSERT INTO activity.participants (activity_id, actor_id, companion_id, slot_key, state, order_no, order_snapshot)
+				VALUES ($1,$2,$3,$4,'CONFIRMED',$5,$6)`, activityID, actorID, companionID, slotKey, orderNo, snapshot); err != nil {
+				return mapCompanionSlotViolation(err)
 			}
 		}
-		participation = activity.Participation{ActivityID: activityID, UserID: actorID, State: activity.PartConfirmed, OrderNo: orderNo}
+		participation = activity.Participation{ActivityID: activityID, UserID: actorID, State: activity.PartConfirmed, OrderNo: orderNo, CompanionID: companionID}
 		joined++
 		if _, err := tx.Exec(txCtx, `UPDATE activity.activities SET joined_count=$1 WHERE id=$2`, joined, activityID); err != nil {
 			return err
@@ -236,17 +190,27 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 	return result, participation, err
 }
 
-func readParticipation(ctx context.Context, q sqlQueryer, activityID, actorID string, lock bool) (activity.Participation, bool, error) {
-	query := `SELECT state, COALESCE(order_no, ''), order_snapshot FROM activity.participants WHERE activity_id=$1 AND actor_id=$2`
+// mapCompanionSlotViolation：并发下两人同时约同一个小美的同一时段，后到的那个撞
+// ux_participants_companion_slot —— 那是「她这个时段已经被约了」，不是内部错误。
+func mapCompanionSlotViolation(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "ux_participants_companion_slot" {
+		return activity.ErrCompanionSlotTaken
+	}
+	return err
+}
+
+func readParticipation(ctx context.Context, q sqlQueryer, activityID, actorID, companionID string, lock bool) (activity.Participation, bool, error) {
+	query := `SELECT state, COALESCE(order_no, ''), order_snapshot FROM activity.participants WHERE activity_id=$1 AND actor_id=$2 AND companion_id=$3`
 	if lock {
 		query += ` FOR UPDATE`
 	}
-	participation := activity.Participation{ActivityID: activityID, UserID: actorID}
+	participation := activity.Participation{ActivityID: activityID, UserID: actorID, CompanionID: companionID}
 	var state string
-	// order_snapshot 也要读出来：HOME-FORYOU-ORDER-007 的判重要看同行人。
+	// order_snapshot 也要读出来：重复下单时要把原票面带回去（HOME-FORYOU-ORDER-ONE-001）。
 	// 老数据的这一列可能是 NULL，扫进 **[]byte 得到 nil，不是错误。
 	var snapshotBytes []byte
-	err := q.QueryRow(ctx, query, activityID, actorID).Scan(&state, &participation.OrderNo, &snapshotBytes)
+	err := q.QueryRow(ctx, query, activityID, actorID, companionID).Scan(&state, &participation.OrderNo, &snapshotBytes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return activity.Participation{}, false, nil
 	}
@@ -258,7 +222,7 @@ func readParticipation(ctx context.Context, q sqlQueryer, activityID, actorID st
 		var snap activity.OrderSnapshot
 		if err := json.Unmarshal(snapshotBytes, &snap); err != nil {
 			// 快照坏了不该让报名读不出来 —— 读侧只需要"有没有同行人可比对"。
-			// 解不开就当作没有快照（companionChanged 遇 nil 返回 false ⇒ 判重）。
+			// 解不开就当作没有快照（读侧只用它带回原票面，不参与判重）。
 			return participation, true, nil
 		}
 		participation.Snapshot = &snap
@@ -266,8 +230,8 @@ func readParticipation(ctx context.Context, q sqlQueryer, activityID, actorID st
 	return participation, true, nil
 }
 
-func (r *ActivityRepository) GetParticipation(ctx context.Context, activityID, actorID string) (activity.Participation, error) {
-	participation, found, err := readParticipation(ctx, queryerForContext(ctx, r.pool), activityID, actorID, false)
+func (r *ActivityRepository) GetParticipation(ctx context.Context, activityID, actorID, companionID string) (activity.Participation, error) {
+	participation, found, err := readParticipation(ctx, queryerForContext(ctx, r.pool), activityID, actorID, companionID, false)
 	if err != nil {
 		return activity.Participation{}, err
 	}
@@ -289,12 +253,12 @@ func (r *ActivityRepository) FindParticipationByNumber(ctx context.Context, orde
 		return activity.Participation{}, activity.Activity{}, activity.ErrNotJoined
 	}
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT p.activity_id, p.actor_id, p.state, COALESCE(p.order_no, ''),
+		SELECT p.activity_id, p.actor_id, p.companion_id, p.state, COALESCE(p.order_no, ''),
 		       a.payload, a.interested_count, a.joined_count, a.capacity
 		FROM activity.participants p
 		JOIN activity.activities a ON a.id = p.activity_id
 		WHERE p.order_no = $1`, orderNo).Scan(
-		&participation.ActivityID, &participation.UserID, &state, &participation.OrderNo,
+		&participation.ActivityID, &participation.UserID, &participation.CompanionID, &state, &participation.OrderNo,
 		&payload, &interested, &joined, &capacity)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return activity.Participation{}, activity.Activity{}, activity.ErrNotJoined
@@ -335,7 +299,7 @@ func (r *ActivityRepository) FindActivityByCode(ctx context.Context, code string
 
 // TransitionParticipation（ACT-SEAT-RELEASE-001）：活动行与报名行都加锁；离开占座
 // 状态（取消）时 joined_count - 1，同一事务。以前取消只改内存，名额永远不还。
-func (r *ActivityRepository) TransitionParticipation(ctx context.Context, activityID, actorID string, allowedFrom []activity.ParticipationState, to activity.ParticipationState) (activity.Participation, activity.Activity, error) {
+func (r *ActivityRepository) TransitionParticipation(ctx context.Context, activityID, actorID, companionID string, allowedFrom []activity.ParticipationState, to activity.ParticipationState) (activity.Participation, activity.Activity, error) {
 	var result activity.Activity
 	var participation activity.Participation
 	err := runInTransaction(ctx, r.pool, func(txCtx context.Context, tx pgx.Tx) error {
@@ -348,7 +312,7 @@ func (r *ActivityRepository) TransitionParticipation(ctx context.Context, activi
 		if err != nil {
 			return err
 		}
-		current, found, err := readParticipation(txCtx, tx, activityID, actorID, true)
+		current, found, err := readParticipation(txCtx, tx, activityID, actorID, companionID, true)
 		if err != nil {
 			return err
 		}
@@ -363,7 +327,7 @@ func (r *ActivityRepository) TransitionParticipation(ctx context.Context, activi
 		if !allowed {
 			return activity.ErrParticipationTransition
 		}
-		if _, err := tx.Exec(txCtx, `UPDATE activity.participants SET state=$3, updated_at=NOW() WHERE activity_id=$1 AND actor_id=$2`, activityID, actorID, string(to)); err != nil {
+		if _, err := tx.Exec(txCtx, `UPDATE activity.participants SET state=$4, updated_at=NOW() WHERE activity_id=$1 AND actor_id=$2 AND companion_id=$3`, activityID, actorID, companionID, string(to)); err != nil {
 			return err
 		}
 		seatHeld := func(state activity.ParticipationState) bool {
@@ -411,9 +375,8 @@ func (r *ActivityRepository) ListByParticipant(ctx context.Context, actorID stri
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT a.payload, a.interested_count, a.joined_count, a.capacity
 		FROM activity.activities a
-		JOIN activity.participants p ON p.activity_id = a.id
-		WHERE p.actor_id = $1
-		  AND p.state <> 'CANCELLED'
+		WHERE EXISTS (SELECT 1 FROM activity.participants p
+		               WHERE p.activity_id = a.id AND p.actor_id = $1 AND p.state <> 'CANCELLED')
 		  AND COALESCE(a.payload->>'origin', '') <> 'TEST'
 		ORDER BY a.created_at DESC`, actorID)
 	if err != nil {
@@ -434,7 +397,7 @@ func (r *ActivityRepository) ListByParticipant(ctx context.Context, actorID stri
 // MY-ORDERS-DETAIL-001：本人每笔报名的订单编号 + 下单时间。
 func (r *ActivityRepository) ListJoinOrders(ctx context.Context, actorID string) ([]activity.JoinOrder, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT activity_id, COALESCE(order_no, ''), joined_at, state, order_snapshot
+		SELECT activity_id, companion_id, COALESCE(order_no, ''), joined_at, state, order_snapshot
 		FROM activity.participants
 		WHERE actor_id = $1
 		ORDER BY joined_at DESC`, actorID)
@@ -453,11 +416,11 @@ func (r *ActivityRepository) ListJoinOrders(ctx context.Context, actorID string)
 	return out, rows.Err()
 }
 
-func (r *ActivityRepository) GetJoinOrder(ctx context.Context, activityID, actorID string) (activity.JoinOrder, bool, error) {
+func (r *ActivityRepository) GetJoinOrder(ctx context.Context, activityID, actorID, companionID string) (activity.JoinOrder, bool, error) {
 	row := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT activity_id, COALESCE(order_no, ''), joined_at, state, order_snapshot
+		SELECT activity_id, companion_id, COALESCE(order_no, ''), joined_at, state, order_snapshot
 		FROM activity.participants
-		WHERE activity_id = $1 AND actor_id = $2`, activityID, actorID)
+		WHERE activity_id = $1 AND actor_id = $2 AND companion_id = $3`, activityID, actorID, companionID)
 	item, err := scanJoinOrder(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return activity.JoinOrder{}, false, nil
@@ -471,7 +434,7 @@ func (r *ActivityRepository) GetJoinOrder(ctx context.Context, activityID, actor
 func scanJoinOrder(row pgx.Row) (activity.JoinOrder, error) {
 	var item activity.JoinOrder
 	var snapshot []byte
-	if err := row.Scan(&item.ActivityID, &item.OrderNo, &item.JoinedAt, &item.State, &snapshot); err != nil {
+	if err := row.Scan(&item.ActivityID, &item.CompanionID, &item.OrderNo, &item.JoinedAt, &item.State, &snapshot); err != nil {
 		return item, err
 	}
 	if len(snapshot) > 0 {
@@ -481,6 +444,32 @@ func scanJoinOrder(row pgx.Row) (activity.JoinOrder, error) {
 		}
 	}
 	return item, nil
+}
+
+// ListBookedCompanionSlots（FOR-YOU-SLOT-001）：这批小美里哪些时段已有未取消的单。
+// 只命中调用方给出的 companion id；只返回时段，不返回下单人。
+func (r *ActivityRepository) ListBookedCompanionSlots(ctx context.Context, companionIDs []string) ([]activity.CompanionSlot, error) {
+	out := []activity.CompanionSlot{}
+	if len(companionIDs) == 0 {
+		return out, nil
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT DISTINCT companion_id, slot_key
+		FROM activity.participants
+		WHERE companion_id = ANY($1) AND state <> 'CANCELLED'
+		ORDER BY companion_id, slot_key`, companionIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var slot activity.CompanionSlot
+		if err := rows.Scan(&slot.CompanionID, &slot.Time); err != nil {
+			return nil, err
+		}
+		out = append(out, slot)
+	}
+	return out, rows.Err()
 }
 
 // FilterKnownParticipants 实现见 activity.Repository 接口注释：只测已知

@@ -1,59 +1,43 @@
 import { describe, expect, it } from "vitest";
 
-import { detectOrderConflict, type ExistingOrder } from "./requester-home-combo";
+import { busyKey, detectOrderConflict, type ExistingOrder } from "./requester-home-combo";
 
-// HOME-FORYOU-ORDER-007：换一个同行人 = 换一单。
-//
-// 用户报的是 P0：新用户在 For You 里是**灰色**的、点确认下单被告知
-// 「这一单你已经下过了（订单号 …）」，而那个新用户根本没下过单。
-// 根因是判重只看 activityId —— 同行人是 For You 组合（人+时间+场景+地点）
-// 的一部分，换人就是换单。
-//
-// 服务端（postgres activity 仓储的 companionChanged）已经改成看同行人；
-// 客户端不改的话服务端放行、界面照样不给下单。
-describe("detectOrderConflict is companion-aware", () => {
-  const base: ExistingOrder[] = [
-    { activityId: "act_1", title: "杯测", time: "周六 15:00", orderNo: "1002609…", companionId: "alice" },
+// FOR-YOU-SLOT-001（2026-10-04，推翻 HOME-FORYOU-ORDER-ONE-001）：资源单位是「小美 × 时段」。
+//   - 一单 = (活动, 我, 小美)。换一个小美是新的一单（服务端各自一行、各自编号、各自票面，
+//     不像 ORDER-007 那样改写旧票）。
+//   - 小美的一个时段只接一单，谁约的都算 ⇒ COMPANION_BUSY。
+//   - 我自己同一时段约多个小美不算冲突（用户裁决：只锁小美的时间）。
+describe("detectOrderConflict: person × time slot", () => {
+  const SAT = "周六 15:00–17:00";
+  const mine: ExistingOrder[] = [
+    { activityId: "act_1", title: "杯测", time: SAT, orderNo: "100260927150535000001", companionId: "alice" },
   ];
 
-  it("same activity + same companion is a duplicate", () => {
-    const conflict = detectOrderConflict({ activityId: "act_1", time: "周六 15:00", companionId: "alice" }, base);
-    expect(conflict?.kind).toBe("ALREADY_ORDERED");
+  it("same activity with the same companion is already ordered", () => {
+    expect(detectOrderConflict({ activityId: "act_1", time: SAT, companionId: "alice" }, mine)).toEqual({ kind: "ALREADY_ORDERED", orderNo: "100260927150535000001" });
   });
 
-  it("same activity + a DIFFERENT companion is a new order — this is the greyed-out bug", () => {
-    const conflict = detectOrderConflict({ activityId: "act_1", time: "周六 15:00", companionId: "bob" }, base);
-    // No duplicate. A time clash is a different question and may still fire, but
-    // it must not be ALREADY_ORDERED.
-    expect(conflict?.kind).not.toBe("ALREADY_ORDERED");
+  it("same activity with another companion is a new order", () => {
+    expect(detectOrderConflict({ activityId: "act_1", time: SAT, companionId: "bob" }, mine)).toBeUndefined();
   });
 
-  it("a legacy order with NO companion recorded must NOT lock the user out", () => {
-    // 旧数据的票面快照是 NULL，拿不到同行人。第一版写的是"⇒ 判重"，
-    // 结果是把这个用户**永久锁死**：库里所有旧单都没有快照，于是他在任何一个
-    // 自己下过单的活动上，选任何新同行人都被判「已经下过了」—— 而那个人
-    // 根本没下过单。
-    //
-    // 代价不对称：真实重复下单 = 一张票；误判重复 = 永远无法和新人下单。
-    // 所以往放行那边偏。
-    const legacy: ExistingOrder[] = [{ activityId: "act_1", title: "杯测", time: "周六 15:00", orderNo: "1002609…" }];
-    const conflict = detectOrderConflict({ activityId: "act_1", time: "周六 15:00", companionId: "bob" }, legacy);
-    expect(conflict?.kind).not.toBe("ALREADY_ORDERED");
+  it("my companion at the same slot in another activity is busy", () => {
+    expect(detectOrderConflict({ activityId: "act_2", time: ` ${SAT} `, companionId: "alice" }, mine)).toEqual({ kind: "COMPANION_BUSY", time: ` ${SAT} ` });
   });
 
-  it("identity is the id, not the name — renaming must not defeat the check", () => {
-    const renamed: ExistingOrder[] = [
-      { activityId: "act_1", title: "杯测", time: "周六 15:00", orderNo: "1", companionId: "bob" },
-    ];
-    const conflict = detectOrderConflict({ activityId: "act_1", time: "周六 15:00", companionId: "bob" }, renamed);
-    expect(conflict?.kind).toBe("ALREADY_ORDERED");
+  it("a companion booked by someone else at that slot is busy", () => {
+    const busy = new Set([busyKey("carol", SAT)]);
+    expect(detectOrderConflict({ activityId: "act_9", time: SAT, companionId: "carol" }, [], busy)?.kind).toBe("COMPANION_BUSY");
+    expect(detectOrderConflict({ activityId: "act_9", time: "周日 10:00", companionId: "carol" }, [], busy)).toBeUndefined();
+  });
+
+  it("I am not blocked by my own other orders at the same time", () => {
+    expect(detectOrderConflict({ activityId: "act_2", time: SAT, companionId: "bob" }, mine)).toBeUndefined();
   });
 
   it("cancelled orders never block", () => {
-    const cancelled: ExistingOrder[] = [
-      { activityId: "act_1", title: "杯测", time: "周六 15:00", orderNo: "1", companionId: "bob", cancelled: true },
-    ];
-    const conflict = detectOrderConflict({ activityId: "act_1", time: "周六 15:00", companionId: "bob" }, cancelled);
-    expect(conflict).toBeUndefined();
+    const cancelled: ExistingOrder[] = [{ ...mine[0]!, cancelled: true }];
+    expect(detectOrderConflict({ activityId: "act_1", time: SAT, companionId: "alice" }, cancelled)).toBeUndefined();
+    expect(detectOrderConflict({ activityId: "act_2", time: SAT, companionId: "alice" }, cancelled)).toBeUndefined();
   });
 });

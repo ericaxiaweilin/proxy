@@ -29,6 +29,9 @@ type Participation struct {
 	UserID     string             `json:"userId"`
 	State      ParticipationState `json:"state"`
 	OrderNo    string             `json:"orderNo,omitempty"`
+	// FOR-YOU-SLOT-001：这一单的同行人（小美）。直接报名、不带同行人的单为空。
+	// 报名主键是 (活动, 我, 同行人)：约不同的小美是不同的单。
+	CompanionID string `json:"companionId,omitempty"`
 	// Snapshot 是这一单落库时存的票面（含同行人 / 地点 / 时间）。
 	//
 	// HOME-FORYOU-ORDER-007：判重需要知道「原来那单的同行人是谁」，而这个字段

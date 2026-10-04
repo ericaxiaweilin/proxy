@@ -1748,7 +1748,7 @@ if ! grep -qF 'activityService.SetOrderNumbers(orderNumbers)' apps/api-go/cmd/ap
   exit 1
 fi
 # HOME-FORYOU-REFRESH-001 / HOME-FORYOU-ORDER-005（移动端纯逻辑 + 契约不剥字段）。
-pnpm --dir apps/mobile exec vitest run src/for-you-slots.test.ts src/for-you-order-number.test.ts >/dev/null || exit $?
+pnpm --dir apps/mobile exec vitest run src/for-you-derivation.test.ts src/for-you-order-number.test.ts >/dev/null || exit $?
 echo "    ORDER-NO-001/ACT-ORDER-NO-001/ACT-SEAT-RELEASE-001/ACT-PARTICIPATION-DURABLE-001/HOME-FORYOU-REFRESH-001: PASS"
 
 # ORDER-AGENT-CLAIM-NO-001（2026-09-30，用户：「我的订单 每个订单记录recipe没有匹配的用户接单
@@ -10380,9 +10380,10 @@ if ! grep -qF 'onPress={() => setMoreDistanceIndex(index)}' "$MORE_HOME"; then
   echo "  FAIL [HOME-MORE-DIST-001]: 距离档位点了不再选中（退化成装饰轨道）。" >&2
   exit 1
 fi
-# 反向：默认档必须是 10km（跟原型一致）。默认值漂了，用户看到的初始半径就变了。
-if ! grep -qF 'MORE_DISTANCE_DEFAULT_INDEX = 3' "$MORE_HOME"; then
-  echo "  FAIL [HOME-MORE-DIST-001]: 默认半径档位不再是 3（=10km）。" >&2
+# 反向：默认档必须是 30km（FOR-YOU-CANDIDATES-001，2026-10-04 用户：「30km 在越南有摩托车
+# 属于可接受的距离」）。默认值漂了，For You 的候选池就变了。
+if ! grep -qF 'MORE_DISTANCE_DEFAULT_INDEX = 5; // = 30km' "$MORE_HOME" || ! grep -qE 'MORE_DISTANCE_KM: ReadonlyArray<number> = \[1, 3, 5, 10, 20, 30,' "$MORE_HOME"; then
+  echo "  FAIL [HOME-MORE-DIST-001]: 默认半径档位不再是 30km。" >&2
   exit 1
 fi
 
@@ -13035,7 +13036,7 @@ if [ -f apps/api-go/cmd/devdata/distance_tiers.go ]; then
                  cos(radians(o.lat))*cos(radians(a.lat))*
                  power(sin(radians(a.lng - o.lng)/2),2))) AS km
           FROM supply.agent_profiles a, origin o
-         WHERE a.lat IS NOT NULL AND a.agent_id LIKE 'agent_devpipe_%')
+         WHERE a.lat IS NOT NULL AND a.agent_id LIKE 'agent_user_devseed_%')
       SELECT string_agg(b, ',' ORDER BY b) FROM (
         SELECT 'b1_<100km'    b WHERE NOT EXISTS (SELECT 1 FROM d WHERE km <  100)
         UNION ALL SELECT 'b2_100-200'  WHERE NOT EXISTS (SELECT 1 FROM d WHERE km >= 100 AND km <  200)
@@ -13058,7 +13059,8 @@ if [ -f apps/api-go/cmd/devdata/distance_tiers.go ]; then
       echo "        越南南北跨度约 1100km，没有 1000 档就筛不到另一个城市的人。" >&2
       exit 1
     fi
-    _tn="$(psql "${_tdsn}" -tAc "SELECT count(*) FROM supply.agent_profiles WHERE lat IS NOT NULL AND agent_id LIKE 'agent_devpipe_%'" 2>/dev/null || echo 0)"
+    # FOR-YOU-CANDIDATES-001：只有 devseed 铺坐标（"Dev N" 只当 feed 作者，不进附近的人）。
+    _tn="$(psql "${_tdsn}" -tAc "SELECT count(*) FROM supply.agent_profiles WHERE lat IS NOT NULL AND agent_id LIKE 'agent_user_devseed_%'" 2>/dev/null || echo 0)"
     echo "    DEV-DISTANCE-TIERS-001: PASS (${_tn} 个用户有真实坐标 · 100/200/500/1000 每一档都有内容 · 移动端档位含 200/500/1000)"
   else
     echo "    DEV-DISTANCE-TIERS-001: SKIP (开发库不可达)"
@@ -13185,69 +13187,31 @@ else
   echo "    HOME-RAIL-SERVER-001: SKIP (dev API 不在 :4100 —— 这条要活的服务)"
 fi
 
-# HOME-FORYOU-ORDER-007（2026-09-30，用户报的 P0）：换一个同行人 = 换一单。
-#
-# 现象：新用户在 For You 里是**灰色**的，选中后点确认下单被告知
-# 「这一单你已经下过了（订单号 …）」—— 而那个新用户根本没下过单。
-#
-# 根因：判重**三处都不看同行人**。
-#   服务端 activity 仓储：只看 (activity_id, actor_id) 有没有未取消的记录；
-#   客户端 detectOrderConflict：只按 activityId 匹配；
-#   而 For You 下单的语义恰恰是「人 + 时间 + 场景 + 地点」一整套
-#   （见 comboNeedPerson 文案），同行人是订单的一部分，不是附注。
-#
-# 三处都改了，缺一处就是"一半修好"：服务端放行、界面照样不给下单。
+# FOR-YOU-SLOT-001（2026-10-04，用户：「for you 是 4 个自由资源槽，核心服务于小美真人……
+# 20 个真人 × 3 个时段 = 最大 60 个可以用，现在只有 9 个，设计逻辑有缺陷」）。
+# 资源单位是「小美 × 时段」：一单 = (活动, 我, 小美)，换小美是新的一单（各自一行，不改写
+# 旧票）；小美的一个时段只接一单，谁约的都算；我自己同一时段可以约多个小美；店不扣名额。
 if [ -f apps/api-go/internal/platform/postgres/activity.go ]; then
-  # 服务端：判重必须带 companion
-  if ! grep -qF '!companionChanged(existing.Snapshot, recipe)' apps/api-go/internal/platform/postgres/activity.go; then
-    echo "  FAIL [HOME-FORYOU-ORDER-007]: 服务端判重又只看 (activity, actor) ——" >&2
-    echo "        换一个同行人会被报成重复下单，界面把新用户显示成灰色 + 已下单。" >&2
-    exit 1
+  SLOT_B=0
+  if ! grep -qF 'ux_participants_companion_slot' apps/api-go/migrations/162_companion_time_slot_orders.sql; then
+    echo "  FAIL [FOR-YOU-SLOT-001]: 「小美 × 时段」独占索引没了 —— 并发下同一时段会被约两次。" >&2
+    SLOT_B=1
   fi
-  # 判重必须读得到旧单的快照（同行人存在快照里）
-  # ⚠️ 这里**不能**用 grep -qF 配单引号 —— shell 里拼引号极易出错，
-  # 我第一版就写错了，判据把自己的正确代码判成红。改用正则，避开引号转义。
-  if ! grep -qE 'SELECT state, COALESCE\(order_no, .{0,4}\), order_snapshot FROM activity\.participants' apps/api-go/internal/platform/postgres/activity.go; then
-    echo "  FAIL [HOME-FORYOU-ORDER-007]: 读报名记录时不再取 order_snapshot ——" >&2
-    echo "        拿不到旧单的同行人，判重只能退回老行为。" >&2
-    exit 1
+  if ! grep -qF 'WHERE activity_id=$1 AND actor_id=$2 AND companion_id=$3' apps/api-go/internal/platform/postgres/activity.go; then
+    echo "  FAIL [FOR-YOU-SLOT-001]: 报名不再按 (活动, 我, 小美) 定位 —— 换小美会改写旧票。" >&2
+    SLOT_B=1
   fi
-  # 客户端：两处调用都要带 companionId
-  _rh=apps/mobile/src/surfaces/requester-home.tsx
-  if ! grep -qF 'companionId: gridPerson?.id' "$_rh"; then
-    echo "  FAIL [HOME-FORYOU-ORDER-007]: 四宫格那一步的判重没带同行人。" >&2
-    exit 1
+  if ! grep -qF 'return activity.ErrCompanionSlotTaken' apps/api-go/internal/platform/postgres/activity.go; then
+    echo "  FAIL [FOR-YOU-SLOT-001]: 服务端不再拒「她这个时段已被约」。" >&2
+    SLOT_B=1
   fi
-  if ! grep -qF 'companionId: recipe?.companion?.id' "$_rh"; then
-    echo "  FAIL [HOME-FORYOU-ORDER-007]: 提交前那次判重没带 recipe 里的同行人。" >&2
-    exit 1
+  if ! grep -qF 'detectOrderConflict({ activityId, time: target.time, companionId }, myOrders, busySlots)' apps/mobile/src/surfaces/requester-home.tsx; then
+    echo "  FAIL [FOR-YOU-SLOT-001]: 下单前的判重不再看「小美 × 时段」。" >&2
+    SLOT_B=1
   fi
-  # myOrders 必须从票面快照里取回同行人，否则判重永远看不到"原来那单是谁的"
-  if ! grep -qF 'companionId: order?.snapshot?.companion?.id' "$_rh"; then
-    echo "  FAIL [HOME-FORYOU-ORDER-007]: myOrders 不再从快照取回同行人 —— 判重无据可依。" >&2
-    exit 1
-  fi
-  # 旧单缺同行人（票面快照是 NULL）时必须**当作换人、允许下单**。
-  #
-  # 这里我第一版钉反了：写的是"缺同行人 ⇒ 判重"，理由是"拿不到证据就保守"。
-  # 那个方向把用户**永久锁死**了 —— 库里 9 条旧单全都没有快照，于是他在任何
-  # 自己下过单的活动上，选任何新同行人都被判「已经下过了」，而那个人根本没
-  # 下过单。用户重启模拟器看到的正是这个。
-  #
-  # 代价不对称：真实重复下单 = 一张票（同 actor 同活动只有一行，服务端沿用原编号
-  # 并刷新票面）；误判重复 = 这个人再也无法和任何新的人下单。所以往放行偏。
-  if ! grep -qF 'order.companionId !== undefined' apps/mobile/src/requester-home-combo.ts; then
-    echo "  FAIL [HOME-FORYOU-ORDER-007]: 旧单缺同行人时又变回判重 ——" >&2
-    echo "        库里旧单全都没有快照，那样会把用户永久锁死：他在任何自己下过单的" >&2
-    echo "        活动上选任何新同行人都被判「已经下过了」，而那个人根本没下过单。" >&2
-    exit 1
-  fi
-  # 服务端同理：只有快照存在时才判重，缺快照的旧单走换人路径（沿用原编号）。
-  if ! grep -qF 'existing.Snapshot != nil && !companionChanged' apps/api-go/internal/platform/postgres/activity.go; then
-    echo "  FAIL [HOME-FORYOU-ORDER-007]: 服务端又对无快照旧单判重 —— 永久锁死。" >&2
-    exit 1
-  fi
-  echo "    HOME-FORYOU-ORDER-007: PASS (服务端判重带 companion · 快照可读出行 · 客户端两处都带 · 无快照旧单放行不锁死)"
+  [ "$SLOT_B" -eq 0 ] || exit 1
+  pnpm --dir apps/mobile exec vitest run src/order-conflict-companion.test.ts src/for-you-derivation.test.ts >/dev/null || exit $?
+  echo "    FOR-YOU-SLOT-001: PASS (资源 = 小美 × 时段 · 换小美是新单 · 她的时段独占 · 我可同时段约多人)"
 fi
 
 # SAFETY-NET-001（2026-10-01）：安全网链路。这条钉守的是**口径**，不是字段映射。
@@ -13417,36 +13381,18 @@ if [ -f apps/api-go/internal/platform/postgres/identity.go ]; then
     echo "        写死的 online:false 是和现实无关的假值。" >&2
     exit 1
   fi
-  # 点圆圈必须在「有空的」里轮转。
-  #
-  # 2026-10-03 重指：原来这里 grep `const freeOnes = filteredPeople.filter((p) => p.online);`
-  # —— 那行内联代码被 HOME-FORYOU-ORDER-009 抽进了 for-you-slots.pickPersonSlot()，并且
-  # 抽过去之后**多了**四条可直接跑的分支（换到有空的 / 都忙但还有别人 / 只剩一个人 /
-  # 名单空）。所以形状判据过期了，而行为判据变强了。
-  # 判据换成两层，缺一层都红：
-  #   ① 调用点确实走 pickPersonSlot（不走 = 又回内联，行为测试就管不到界面了）；
-  #   ② 那条"在在线的人里轮转"的断言**真的在跑并通过** —— 只看文件名在不在是假绿，
-  #      把断言删掉文件也还在。字符串判据抓不住的，让测试自己回答。
-  if ! grep -qF 'pickPersonSlot(filteredPeople' "$_rh2"; then
-    echo "  FAIL [HOME-FORYOU-FREE-001]: 点圆圈不再走 pickPersonSlot ——" >&2
-    echo "        选人逻辑一旦退回 requester-home 内联，for-you-slots 的行为测试就管不到界面了。" >&2
+  # 点圆圈优先「有空的」人（FOR-YOU-SLOT-001 之后：圆圈在「人 × 活动」可约组合里整组挑，
+  # 同档里优先 online 的人 —— shufflePick 的打分，行为测试在 for-you-derivation.test.ts）。
+  if ! grep -qF 'shufflePick(freshFY, filteredPeople,' "$_rh2"; then
+    echo "  FAIL [HOME-FORYOU-FREE-001]: 圆圈不再把带 online 的名单交给派生层 ——" >&2
     exit 1
   fi
-  _free_pick_test=apps/mobile/src/for-you-009-person-pick.test.ts
-  if ! grep -qF '优先换到在线的人，且在在线的人里轮转' "$_free_pick_test"; then
-    echo "  FAIL [HOME-FORYOU-FREE-001]: 「在有空的人里轮转」这条断言从 $_free_pick_test 里没了 ——" >&2
-    echo "        逻辑搬进 pickPersonSlot 之后，这条断言就是该承诺唯一的落点；删了它，" >&2
-    echo "        「点圆圈=随机换人」这个原始 bug 就没有任何东西挡着。" >&2
+  if ! grep -qF 'prefers online people within the best tier' apps/mobile/src/for-you-derivation.test.ts; then
+    echo "  FAIL [HOME-FORYOU-FREE-001]: 「优先有空的人」这条行为断言没了。" >&2
     exit 1
   fi
-  if ! pnpm --filter @proxy/mobile exec vitest run src/for-you-009-person-pick.test.ts >/dev/null 2>&1; then
-    echo "  FAIL [HOME-FORYOU-FREE-001]: $_free_pick_test 跑不过 —— 轮转行为真的坏了，不是文案问题。" >&2
-    echo "        单独复现：pnpm --filter @proxy/mobile exec vitest run src/for-you-009-person-pick.test.ts" >&2
-    exit 1
-  fi
-  if ! grep -qF 'showResponse(t("noOneFree"), t("noOneFreeSub"))' "$_rh2"; then
-    echo "  FAIL [HOME-FORYOU-FREE-001]: 一个有空的都没有时不再如实说明 ——" >&2
-    echo "        随机换一个人却不说那是随机的，等于又造一个假承诺。" >&2
+  if ! grep -qF 't("noOneFree")' "$_rh2"; then
+    echo "  FAIL [HOME-FORYOU-FREE-001]: 没有人可选时不再如实说明。" >&2
     exit 1
   fi
   # 时段必须能推出来，但推不出就不许编
@@ -13454,7 +13400,7 @@ if [ -f apps/api-go/internal/platform/postgres/identity.go ]; then
     echo "  FAIL [HOME-FORYOU-FREE-001]: 活动时间→真实时段的映射没了。" >&2
     exit 1
   fi
-  echo "    HOME-FORYOU-FREE-001: PASS (free_at 三态 · 在线点来自服务端 · 点圆圈在有空的里轮转 · 推不出时段不编 · 无排期如实说明)"
+  echo "    HOME-FORYOU-FREE-001: PASS (free_at 三态 · 在线点来自服务端 · 点圆圈优先有空的人 · 推不出时段不编 · 无排期如实说明)"
 fi
 
 # MOBILE-METRO-PARSE-001（2026-10-01）：移动端源码必须能被 **Metro 用的那套 Babel
@@ -13609,8 +13555,8 @@ if [ -f "$ORDER008_ME" ]; then
     echo "  FAIL [HOME-FORYOU-ORDER-008]: the existing-order CTA regression test is missing." >&2
     exit 1
   fi
-  if ! grep -qF 'const existingOrder = myOrders.find((o) => o.activityId === gridActivity.activityId && !o.cancelled);' "$ORDER008_ME"; then
-    echo "  FAIL [HOME-FORYOU-ORDER-008]: existingOrder 不再按「同一场活动有未取消的单」认 ——" >&2
+  if ! grep -qF 'const existingOrder = gridPerson ? myOrders.find((o) => o.activityId === gridActivity.activityId && o.companionId === gridPerson.id && !o.cancelled) : undefined;' "$ORDER008_ME"; then
+    echo "  FAIL [HOME-FORYOU-ORDER-008]: existingOrder 不再按「这一组 (活动, 小美) 有未取消的单」认 ——" >&2
     echo "        同行人对不上时它会变 undefined，屏幕上又没有入口了（就是这次的病）。" >&2
     exit 1
   fi
@@ -13622,7 +13568,7 @@ if [ -f "$ORDER008_ME" ]; then
     echo "  FAIL [HOME-FORYOU-ORDER-008]: 「选择」不再在有票时打开那张票（下一步没了）。" >&2
     exit 1
   fi
-  if ! grep -qF 'disabled={comboBlocked && !existingOrder}' "$ORDER008_ME"; then
+  if ! grep -qF 'disabled={comboBlocked && !existingOrder && gridPerson !== undefined}' "$ORDER008_ME"; then
     echo "  FAIL [HOME-FORYOU-ORDER-008]: 有票时按钮会被「四个槽都不可用」置灰 —— 那张票与槽位可用性无关。" >&2
     exit 1
   fi
@@ -13668,79 +13614,40 @@ if [ -f "$ORDER009_ME" ] && [ -f "$ORDER009_TEST" ]; then
     echo "        访客态下 joinedByMe 恒为空集，刷新永远认为你没下过单。" >&2
     ORDER009_B=1
   fi
-  if ! printf '%s' "$ORDER009_SRC" | grep -Eq 'joinedByMe[[:space:]]*=[[:space:]]*new Set\(myOrders\.map'; then
-    echo "  FAIL [HOME-FORYOU-ORDER-009]: joinedByMe 没有从 myOrders 派生 ——" >&2
+  # FOR-YOU-DERIVE-001 / FOR-YOU-SLOT-001：刷新直接把 myOrders 交给派生层（不再自造
+  # joinedByMe 集合）；人和活动同一组挑出（pickPersonSlot 已删）。
+  if ! printf '%s' "$ORDER009_SRC" | grep -qF 'shufflePick(freshFY, filteredPeople, { myOrders, busy: freshBusy }'; then
+    echo "  FAIL [HOME-FORYOU-ORDER-009]: 圆圈刷新没有用 myOrders / 已被约的时段判可约 ——" >&2
     ORDER009_B=1
   fi
-  # 钉住"只剩一个人时也给反馈"，别退回静默。候选为 0 和为 1 是两回事，文案不能混。
-  if ! printf '%s' "$ORDER009_SRC" | grep -q 'onlyOneCandidate'; then
-    echo "  FAIL [HOME-FORYOU-ORDER-009]: 只剩一个候选时又变回静默无响应 ——" >&2
-    ORDER009_B=1
-  fi
-  # 钉住**四条分支真的调了纯函数**：上一版只钉 `onlyOneCandidate` 这个字面量，
-  # 结果 pickPersonSlot 写出来了却没人用，测试照样绿 —— 这个仓吃过好几次这种亏。
-  for ORDER009_KIND in free noneFreeButOthers onlyCandidate noCandidates; do
-    if ! printf '%s' "$ORDER009_SRC" | grep -q "personPick.kind === \"$ORDER009_KIND\""; then
-      echo "  FAIL [HOME-FORYOU-ORDER-009]: 分支 \"$ORDER009_KIND\" 没有经过 pickPersonSlot ——" >&2
-      echo "        取号规则搬出去了却没接上，等于还留在原地。" >&2
-      ORDER009_B=1
-    fi
-  done
-  if ! printf '%s' "$ORDER009_SRC" | grep -q 'pickPersonSlot(filteredPeople'; then
-    echo "  FAIL [HOME-FORYOU-ORDER-009]: 组件不再用 pickPersonSlot —— 自己又写了一遍 if。" >&2
-    ORDER009_B=1
-  fi
-  if [ ! -f apps/mobile/src/i18n.ts ] || ! grep -q 'onlyOneCandidateSub:' apps/mobile/src/i18n.ts; then
-    echo "  FAIL [HOME-FORYOU-ORDER-009]: onlyOneCandidate 文案在 i18n 里缺 —— 别让门禁靠英文兜底。" >&2
+  if ! pnpm --dir apps/mobile exec vitest run src/for-you-009-person-pick.test.ts >/dev/null 2>&1; then
+    echo "  FAIL [HOME-FORYOU-ORDER-009]: for-you-009-person-pick.test.ts 跑不过。" >&2
     ORDER009_B=1
   fi
   [ "$ORDER009_B" -eq 0 ] || exit 1
-  echo "    HOME-FORYOU-ORDER-009: PASS (刷新与 CTA 共用一份「我已下过单」· 候选只剩一人时如实反馈)"
+  echo "    HOME-FORYOU-ORDER-009: PASS (刷新与 CTA 共用一份「我已下过单」· 人和活动同一组挑)"
 fi
 
-# HOME-FORYOU-ORDER-010（2026-10-01，用户 P0：「for you 的选择变成查看这张订单」）：
-#
-# ORDER-009 修的是**圆圈刷新**那一下。可用户报的是**首屏**就变成「查看这张订单」
-# ——没人会为了绕开这个状态先去点圆圈。
-#
-# 根因：activityIndex 初始是 `forYouSeed >> 7`，一个种子下标、**不看订单**；
-# sceneActivities 也不排除已下单的。myOrders 还是 mount 之后异步到的。于是首屏
-# 停在��张你已经有票的活动上 → existingOrder 为真 → CTA 一直是「查看这张订单」，
-# 「选择」那条路整个看不见。
-#
-# 修法：myOrders 到齐后（且没锁活动轴）用 resolveActivityIndexAvoidingOrders 挪开。
-# 一个可挪的都没有时**保持不动** —— 那时「查看这张订单」是实话。
-ORDER010_ME=apps/mobile/src/surfaces/requester-home.tsx
-ORDER010_SLOTS=apps/mobile/src/for-you-slots.ts
-if [ -f "$ORDER010_ME" ] && [ -f "$ORDER010_SLOTS" ]; then
-  ORDER010_SRC=$(perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' "$ORDER010_ME")
-  ORDER010_B=0
-  if ! printf '%s' "$ORDER010_SRC" | grep -q 'resolveActivityIndexAvoidingOrders'; then
-    echo "  FAIL [HOME-FORYOU-ORDER-010]: 首屏又不管订单了 —— 停在已下单的活动上，" >&2
-    echo "        CTA 会一直显示「查看这张订单」，「选择」那条路看不见。" >&2
-    ORDER010_B=1
+# HOME-FORYOU-ORDER-010 → FOR-YOU-DERIVE-001（2026-10-04）：首屏 / 圆圈 / 选择器的
+# 「避开已下单」不再各写一份（resolveActivityIndexAvoidingOrders / pickRefreshedActivity 已删），
+# 全部由 for-you-derivation.ts 派生：resolveSelected 首屏只落在可约的活动上，
+# shufflePick 只刷可约的，选择器每一项带状态与原因。
+DERIVE_ME=apps/mobile/src/surfaces/requester-home.tsx
+if [ -f "$DERIVE_ME" ] && [ -f apps/mobile/src/for-you-derivation.ts ]; then
+  DERIVE_B=0
+  for _anchor in 'resolveSelected(fyActivities, selectedActivityId, fyCtx' 'shufflePick(freshFY, filteredPeople,' 'timeOptions(fyActivities, fyCtx, lockValues)' 'sceneOptions(coffeeSceneIds, fyActivities, fyCtx, lockValues)' 'personOptions(filteredPeople, fyActivities, fyCtx, lockValues)'; do
+    if ! grep -qF "$_anchor" "$DERIVE_ME"; then
+      echo "  FAIL [FOR-YOU-DERIVE-001]: requester-home 不再经派生层：缺 $_anchor" >&2
+      DERIVE_B=1
+    fi
+  done
+  if grep -qE 'setActivityIndex|setTimeIndex|setPlaceIndex' "$DERIVE_ME"; then
+    echo "  FAIL [FOR-YOU-DERIVE-001]: 四条独立下标回来了 —— 时间 / 地点会和活动对不上。" >&2
+    DERIVE_B=1
   fi
-  # 钉住「等 myOrders 到齐才动」，不能拿"还不知道有没有单"当"没有单"——
-  # 那会把首屏指到一个其实已经有票的活动上。
-  if ! printf '%s' "$ORDER010_SRC" | grep -q 'if (myOrders.length === 0) return;'; then
-    echo "  FAIL [HOME-FORYOU-ORDER-010]: 不等订单到齐就挪选中项 ——" >&2
-    ORDER010_B=1
-  fi
-  # 锁了活动轴就不挪，和圆圈同一口径。
-  if ! printf '%s' "$ORDER010_SRC" | grep -q 'if (lockedSlots.has("activity")) return;'; then
-    echo "  FAIL [HOME-FORYOU-ORDER-010]: 锁了活动轴仍然被自动换掉 ——" >&2
-    ORDER010_B=1
-  fi
-  if ! grep -q 'export function resolveActivityIndexAvoidingOrders' "$ORDER010_SLOTS"; then
-    echo "  FAIL [HOME-FORYOU-ORDER-010]: resolveActivityIndexAvoidingOrders 不存在了 ——" >&2
-    ORDER010_B=1
-  fi
-  if [ ! -f apps/mobile/src/for-you-009-person-pick.test.ts ]; then
-    echo "  FAIL [HOME-FORYOU-ORDER-010]: 行为测试文件不见了 ——" >&2
-    ORDER010_B=1
-  fi
-  [ "$ORDER010_B" -eq 0 ] || exit 1
-  echo "    HOME-FORYOU-ORDER-010: PASS (首屏选中项避开已下单 · 全都下过单时保持不动)"
+  [ "$DERIVE_B" -eq 0 ] || exit 1
+  pnpm --dir apps/mobile exec vitest run src/for-you-derivation.test.ts src/for-you-009-person-pick.test.ts >/dev/null || exit $?
+  echo "    FOR-YOU-DERIVE-001: PASS (首屏 / 圆圈 / 选择器都从派生层取 · 只落在可约的活动上)"
 fi
 
 # MERCHANT-SIGNAL-SEED-001（2026-10-01，用户「经营脉搏 未来需求…都是空的 做数据」）：

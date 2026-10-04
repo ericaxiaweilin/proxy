@@ -27,7 +27,8 @@ const source = readFileSync(fileURLToPath(new URL("./surfaces/requester-home.tsx
 
 describe("HOME-FORYOU-ORDER-008 有票时「选择」必须给出下一步", () => {
   it("形状：existingOrder 按「同一场活动有未取消的单」认，不再依赖同行人对不对得上", () => {
-    expect(source).toContain("const existingOrder = myOrders.find((o) => o.activityId === gridActivity.activityId && !o.cancelled);");
+    // FOR-YOU-SLOT-001：有票 = 这一组 (活动, 这个小美) 我下过；约别的小美是另一单。
+    expect(source).toContain("const existingOrder = gridPerson ? myOrders.find((o) => o.activityId === gridActivity.activityId && o.companionId === gridPerson.id && !o.cancelled) : undefined;");
     // 反向臂：旧的窄口径（只在 ALREADY_ORDERED 时才认这单）不许回来 ——
     // 同行人对不上时它会让 existingOrder 变 undefined，屏幕上就没有入口了。
     expect(source).not.toMatch(/const existingOrder = orderConflict\?\.kind === "ALREADY_ORDERED"/);
@@ -41,26 +42,24 @@ describe("HOME-FORYOU-ORDER-008 有票时「选择」必须给出下一步", () 
     // 按钮上的字必须是它真的会做的事。
     expect(source).toContain('{existingOrder ? t("viewExistingOrder") : t("selectComboCta")}');
     // 有票时不许因为「四个槽都不可用」而点不动 —— 那张票与槽位可用性无关。
-    expect(source).toContain("disabled={comboBlocked && !existingOrder}");
+    // 缺人时也不置灰：点下去开人选择器（HOME-FORYOU-PERSON-001）。
+    expect(source).toContain("disabled={comboBlocked && !existingOrder && gridPerson !== undefined}");
     // 同一入口写两遍迟早只改一处：次级按钮已并进 CTA，只剩这一个调用点
     // （定义 `const openExistingOrder = (…` 不含 "openExistingOrder(" 这个子串）。
     expect(source.split("openExistingOrder(existingOrder)").length - 1).toBe(1);
   });
 
-  it("行为：同活动 + 同行人对不上 ⇒ 仍然是 TIME_TAKEN（出路 ≠ 放行）", () => {
-    // 钉住「没有放宽守卫」。这条绿 + 上一条绿 = 拦住下单的同时给了出路。
+  it("行为：同活动、同一个小美 ⇒ ALREADY_ORDERED；换一个小美 ⇒ 是新的一单（FOR-YOU-SLOT-001）", () => {
     const mine: ExistingOrder[] = [
-      { activityId: "tb_sun_cupping", title: "周日杯测小聚", time: "周日 10:00–11:30", orderNo: "100260927150535000001" },
+      { activityId: "tb_sun_cupping", title: "周日杯测小聚", time: "周日 10:00–11:30", orderNo: "100260927150535000001", companionId: "mai" },
     ];
-    const conflict = detectOrderConflict(
-      { activityId: "tb_sun_cupping", time: "周日 10:00–11:30", companionId: "dev_20" },
-      mine,
-    );
-    expect(conflict?.kind).toBe("TIME_TAKEN");
+    expect(detectOrderConflict({ activityId: "tb_sun_cupping", time: "周日 10:00–11:30", companionId: "mai" }, mine)?.kind).toBe("ALREADY_ORDERED");
+    expect(detectOrderConflict({ activityId: "tb_sun_cupping", time: "周日 10:00–11:30", companionId: "linh" }, mine)).toBeUndefined();
   });
 
-  it("行为：这个账号的池子里换不出不冲突的活动 —— 死路是真的（所以必须有别的出路）", () => {
-    // 真库里的三场咖啡店活动 + 该账号的真实订单（三场全下过，票面同行人均为空）。
+  it("行为：2026-10-04 那个「全都下过了」的账号不再是死路（FOR-YOU-SLOT-001）", () => {
+    // 真库里这个账号的老单都是直接报名（没有同行人）。按「一场活动一单」它把三场
+    // 全占了、For You 只剩「查看这张订单」；按「小美 × 时段」它们不占任何小美的时段。
     const pool = [
       { activityId: "tb_matcha_night", time: "周五 19:00–20:30" },
       { activityId: "tb_sun_cupping", time: "周日 10:00–11:30" },
@@ -71,10 +70,8 @@ describe("HOME-FORYOU-ORDER-008 有票时「选择」必须给出下一步", () 
       { activityId: "tb_sun_cupping", title: "周日杯测小聚", time: "周日 10:00–11:30" },
       { activityId: "tb_sat_buddy", title: "周六咖啡拍照搭子", time: "周六 15:00–17:00" },
     ];
-    // 组件里 resolveConflictSlots 用的就是这条谓词：找第一场不冲突的活动。
-    const altIndex = pool.findIndex((a) => detectOrderConflict({ activityId: a.activityId, time: a.time }, mine) === undefined);
-    expect(altIndex).toBe(-1);
-    // 而「同一场活动我有一单」这条判据成立 ⇒ CTA 必须指向那张票。
-    expect(mine.some((o) => o.activityId === "tb_sun_cupping" && !o.cancelled)).toBe(true);
+    for (const a of pool) {
+      expect(detectOrderConflict({ ...a, companionId: "mai" }, mine), a.activityId).toBeUndefined();
+    }
   });
 });

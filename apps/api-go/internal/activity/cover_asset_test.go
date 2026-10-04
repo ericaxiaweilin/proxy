@@ -119,7 +119,7 @@ func TestOrderSnapshotCarriesCoverMediaAssetID(t *testing.T) {
 	if got := s.HandleContext(t.Context(), joined); got.Outcome != "ACCEPTED" {
 		t.Fatalf("join failed: %+v", got)
 	}
-	snap := s.joinSnapshot(t.Context(), activity.ID, "user_b")
+	snap := s.joinSnapshot(t.Context(), activity.ID, "user_b", "")
 	if snap == nil {
 		t.Fatal("join snapshot must exist and carry the activity")
 	}
