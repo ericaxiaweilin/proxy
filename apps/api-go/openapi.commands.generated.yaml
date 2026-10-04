@@ -23,6 +23,8 @@ commands:
     domain: Business
   - command: AddStorePhoto
     domain: Business
+  - command: AdjustMerchantCreatorPromo
+    domain: Supply
   - command: AllocateBenefit
     domain: Benefit
   - command: AmendMediaReviewDecision
@@ -37,6 +39,8 @@ commands:
     domain: Identity
   - command: BeginPasswordlessAuthentication
     domain: Identity
+  - command: BindPromoBenefit
+    domain: Supply
   - command: BlockAvailabilityWindow
     domain: Supply
   - command: BlockFriend
@@ -47,6 +51,8 @@ commands:
     domain: Identity
   - command: CancelActivity
     domain: Activity
+  - command: CancelCollabInvitation
+    domain: Supply
   - command: CancelOrder
     domain: Fulfillment
   - command: CancelPrivacyRequest
@@ -61,6 +67,10 @@ commands:
     domain: Activity
   - command: ClaimBenefit
     domain: Benefit
+  - command: ClaimPromoCode
+    domain: Supply
+  - command: ClaimPromoCoupon
+    domain: Supply
   - command: CompleteCityCompanion
     domain: CityCompanion
   - command: CompleteMediaUpload
@@ -165,6 +175,10 @@ commands:
     domain: Conversation
   - command: DeleteStorePhoto
     domain: Business
+  - command: DisablePromoBenefit
+    domain: Supply
+  - command: DisablePromoCode
+    domain: Supply
   - command: DiscardStandInDraft
     domain: Conversation
   - command: DismissMarketOpportunity
@@ -211,6 +225,8 @@ commands:
     domain: Media
   - command: GetMemory
     domain: Scene
+  - command: GetMerchantCreatorPromoBasis
+    domain: Supply
   - command: GetMerchantOperatingHome
     domain: Business
   - command: GetMyGrowthSummary
@@ -229,6 +245,8 @@ commands:
     domain: Identity
   - command: GetProfileByHandle
     domain: Identity
+  - command: GetPromoStats
+    domain: Supply
   - command: GetPurposeConsent
     domain: LocalNet
   - command: GetReceivedEngagementStats
@@ -255,8 +273,12 @@ commands:
     domain: Location
   - command: IgnoreFriendRequest
     domain: Relationship
+  - command: InviteCreator
+    domain: Supply
   - command: IsFollowing
     domain: Engagement
+  - command: IssueMerchantCreatorPromo
+    domain: Supply
   - command: IssueVoucherDefinition
     domain: Voucher
   - command: JoinActivity
@@ -277,6 +299,8 @@ commands:
     domain: CityCompanion
   - command: ListClaims
     domain: Benefit
+  - command: ListCollabInvitations
+    domain: Supply
   - command: ListCommunities
     domain: SocialSpace
   - command: ListCompanionBookedSlots
@@ -313,6 +337,8 @@ commands:
     domain: Media
   - command: ListMemberDirectory
     domain: Business
+  - command: ListMerchantCreatorPromos
+    domain: Supply
   - command: ListMutedAuthors
     domain: Engagement
   - command: ListMyActivities
@@ -331,8 +357,12 @@ commands:
     domain: Scene
   - command: ListMyMemories
     domain: Scene
+  - command: ListMyMerchantPromos
+    domain: Supply
   - command: ListMyOrders
     domain: Fulfillment
+  - command: ListMyPromoCoupons
+    domain: Supply
   - command: ListMyRealitySceneState
     domain: RealityScene
   - command: ListMyScenes
@@ -367,6 +397,8 @@ commands:
     domain: LocalNet
   - command: ListProfileViewers
     domain: LocalNet
+  - command: ListPromoAssets
+    domain: Supply
   - command: ListRealitySceneProposals
     domain: RealityScene
   - command: ListReportQueue
@@ -436,6 +468,8 @@ commands:
   - command: PublishTask
     domain: Demand
   - command: QuerySuppliers
+    domain: Supply
+  - command: QuotePromoCode
     domain: Supply
   - command: ReactToPost
     domain: Engagement
@@ -523,6 +557,8 @@ commands:
     domain: Identity
   - command: ResolveDeepLink
     domain: Notification
+  - command: RespondCollabInvitation
+    domain: Supply
   - command: RespondInvitation
     domain: Scene
   - command: RespondMaterialOrderChange
@@ -561,6 +597,8 @@ commands:
     domain: Conversation
   - command: SendStandInDraft
     domain: Conversation
+  - command: SetAutoPromoBenefit
+    domain: Supply
   - command: SetAvailabilityWindow
     domain: Supply
   - command: SetCommunityMembership

@@ -102,6 +102,14 @@ describe("merchant promo codes (MERCHANT-CREATOR-PROMO-001)", () => {
     expect(parsePromoCode({ code: "", agentId: "a1", createdAt: "x" })).toBeUndefined();
     expect(parsePromoBenefit({ merchantId: "m1", code: "LINH88", faceValueVnd: 50000, scopeName: "全场" })?.faceValueVnd).toBe(50000);
     expect(parsePromoBenefit({ merchantId: "m1", code: "" })).toBeUndefined();
+    // 门槛 + 调整原因：带了就读，老服务端不带时门槛按 0（无门槛）、备注为空。
+    const withTerms = parsePromoBenefit({ merchantId: "m1", code: "MAI50", faceValueVnd: 50000, minSpendVnd: 200000, note: "设个门槛", scopeName: "全场" });
+    expect(withTerms?.minSpendVnd).toBe(200000);
+    expect(withTerms?.note).toBe("设个门槛");
+    const legacy = parsePromoBenefit({ merchantId: "m1", code: "LINH88", faceValueVnd: 50000, scopeName: "全场" });
+    expect(legacy?.minSpendVnd).toBe(0);
+    expect(legacy?.note).toBe("");
+    expect(parsePromoAutoBenefit({ merchantId: "m1", enabled: true, faceValueVnd: 20000, minSpendVnd: 100000 })?.minSpendVnd).toBe(100000);
     expect(parsePromoQuote({ id: "pq_1", merchantId: "m1", code: "LINH88", quotedAt: "x", firstVisit: true })?.firstVisit).toBe(true);
     expect(parsePromoQuote({ id: "", merchantId: "m1", code: "X", quotedAt: "x" })).toBeUndefined();
   });

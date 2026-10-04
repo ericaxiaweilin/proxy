@@ -11,13 +11,15 @@
 // All numbers come from server; empty states show honest placeholders
 // instead of the bogus '12.6tr VND' / '148 订单' fallbacks.
 
+import { pickActiveMerchant, setActiveMerchantId, subscribeActiveMerchant } from "../active-merchant-store";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 // ACTIVITY-COVER-001：与横滑卡 / 门店相册同一套图片渲染。
 import { Image } from "expo-image";
 import { color, Gradient, shadows } from "../theme";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
-import type { BusinessClient } from "../business-client";
+import type { BusinessClient, BusinessStoreWire } from "../business-client";
+import { loadOwnMerchantActivities, primaryStoreScene } from "../merchant-home-activities";
 import type { FulfillmentClient } from "../fulfillment-client";
 import type { ProfileClient } from "../profile-client";
 // STORE-CONSOLIDATE-001：店详情页改走统一 hub（和 me.tsx 的 bdash/线上店铺同一页）。
@@ -205,7 +207,8 @@ export function MerchantMeR21Replacement({
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<ActivityItem | undefined>(undefined);
   const [sceneDetail, setSceneDetail] = useState<SceneBrief | undefined>(undefined);
-  const [sceneActivities, setSceneActivities] = useState<ActivityItem[]>([]);
+  // 当前商家账号的门店：活动导流 / 场景运营都按它认「本店」。
+  const [myStores, setMyStores] = useState<BusinessStoreWire[]>([]);
   const [creatorView, setCreatorView] = useState<"MATCH" | "CREATORS" | "COLLABS" | "RESULTS">("MATCH");
   const [creatorQuery, setCreatorQuery] = useState("");
   const [myInvitation, setMyInvitation] = useState<CollabInvitation | undefined>(undefined);
@@ -238,6 +241,15 @@ export function MerchantMeR21Replacement({
   // 芯片会选中，名字 / 状态 / 头像却还是第一家。数据跟着主体走、标签不跟着走，等于
   // 装了开关没接线路。首帧 activeAccountId 还是 undefined，所以兜底取 list[0]。
   const activeAccount = accounts?.find((account) => account.id === activeAccountId) ?? accounts?.[0];
+  // MERCHANT-ACTIVE-ACCOUNT-001：首页切了账号，这里跟着切（同一个人看到的永远是同一家店）。
+  useEffect(() => subscribeActiveMerchant((id) => {
+    if (!id || id === activeAccountId || !accounts?.some((account) => account.id === id)) return;
+    setActiveAccountId(id);
+    setMembers([]);
+    setSpendDays([]);
+    setSpendTotal({ totalOrders: 0, totalGrossMinor: 0 });
+    void refresh(id);
+  }), [accounts, activeAccountId]);
 
   // MERCHANT-CREATOR-PROMO-001：RESULTS 页的归因收入/新客从报码行里数出来；
   // 券核销/完成合作还是 "—"，有数再接。读失败不挡整页。
@@ -429,6 +441,7 @@ export function MerchantMeR21Replacement({
   const refresh = useCallback(async (accountId: string) => {
     if (!business) return;
     try {
+      setMyStores(await business.listStores(accountId).catch(() => [] as BusinessStoreWire[]));
       const memberResult = await business.listMemberDirectory(accountId).catch(() => []);
       setMembers(memberResult);
       const spendResult = await business.listSpendDaily({ businessId: accountId, sinceDays: 30 }).catch(() => ({ days: [] as SpendDaily[], totalOrders: 0, totalGrossMinor: 0, sinceDays: 30 }));
@@ -447,9 +460,11 @@ export function MerchantMeR21Replacement({
         const list = await business.listMyAccounts();
         if (cancelled) return;
         setAccounts(list);
-        if (list[0]) {
-          setActiveAccountId(list[0].id);
-          await refresh(list[0].id);
+        // MERCHANT-ACTIVE-ACCOUNT-001：默认是商家端共用的当前账号（上次选的那家），不是列表第一个。
+        const picked = pickActiveMerchant(list.map((account) => account.id));
+        if (picked) {
+          setActiveAccountId(picked);
+          await refresh(picked);
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -475,29 +490,35 @@ export function MerchantMeR21Replacement({
     return () => { cancelled = true; };
   }, [supply]);
 
+  // MERCHANT-HOME-OWN-ACTIVITIES-001：活动导流和首页走同一个取数入口（本账号门店的活动），
+  // 不再读「我本人发过的活动」—— 那跟当前选的是哪家店无关，切账号也不变。
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      if (!activities) return;
-      try {
-        const { created: list } = await activities.listMyActivities();
-        if (!cancelled) {
-          const items = list.map((entry) => ({ activityId: entry.activityId, title: entry.title, time: entry.time, people: entry.people, priceLabel: entry.priceLabel, venueName: entry.venueName, joined: entry.joined, capacity: entry.capacity, status: entry.status, realitySceneId: entry.realitySceneId })).slice(0, 25);
-          setActivityItems(items);
-          if (items[0]) setSelectedActivity(items[0]);
-        }
-      } catch (e) {
-        if (!cancelled) setError((prev) => prev ?? (e instanceof Error ? e.message : String(e)));
-      }
-    })();
+    if (!activities) return () => { cancelled = true; };
+    loadOwnMerchantActivities(activities, myStores)
+      .then((list) => {
+        if (cancelled) return;
+        const items: ActivityItem[] = list.slice(0, 25).map((entry) => ({
+          activityId: entry.activityId, title: entry.title, time: entry.time, people: entry.people,
+          priceLabel: entry.priceLabel, venueName: entry.venueName, joined: entry.joined, capacity: entry.capacity,
+          status: entry.status, realitySceneId: entry.realitySceneId,
+          coverMediaAssetId: entry.coverMediaAssetId, coverImageUrl: entry.coverImageUrl,
+        }));
+        setActivityItems(items);
+        setSelectedActivity(items[0]);
+      })
+      .catch((e: unknown) => { if (!cancelled) setError((prev) => prev ?? (e instanceof Error ? e.message : String(e))); });
     return () => { cancelled = true; };
-  }, [activities]);
+  }, [activities, myStores]);
 
-  // R27 merchant scene ops: flagship scene projection (public) + scene
-  // activities (public list, filtered by realitySceneId). No mock KPIs.
+  // R27 场景运营：读当前账号门店认领的场景（以前写死 threebeans，切到别的账号也显示 Three Beans）。
+  const storeScene = primaryStoreScene(myStores);
+  const storeSceneId = storeScene?.sceneId;
   useEffect(() => {
     let cancelled = false;
-    void fetch(`${localApiBaseUrl.replace(/\/$/, "")}/v1/scenes/threebeans`, { headers: { Accept: "application/json" } })
+    setSceneDetail(undefined);
+    if (!storeSceneId) return () => { cancelled = true; };
+    void fetch(`${localApiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(storeSceneId)}`, { headers: { Accept: "application/json" } })
       .then((r) => (r.ok ? r.json() : undefined))
       .then((body) => {
         if (cancelled || !body || typeof body !== "object") return;
@@ -506,8 +527,8 @@ export function MerchantMeR21Replacement({
         const menu = Array.isArray(d.menu) ? (d.menu as Array<Record<string, unknown>>) : [];
         const humans = Array.isArray(d.humans) ? (d.humans as Array<Record<string, unknown>>) : [];
         setSceneDetail({
-          sceneId: String(d.sceneId ?? "threebeans"),
-          name: String(d.venueName ?? "Three Beans · Cầu Giấy"),
+          sceneId: String(d.sceneId ?? storeSceneId),
+          name: String(d.venueName ?? storeScene?.storeName ?? ""),
           window: typeof live?.bestWindow === "string" ? live.bestWindow : "",
           liveState: typeof live?.state === "string" ? live.state : "",
           liveLabel: typeof live?.label === "string" ? live.label : "",
@@ -528,20 +549,8 @@ export function MerchantMeR21Replacement({
         });
       })
       .catch(() => undefined);
-    if (!activities) return () => { cancelled = true; };
-    void activities.listActivities()
-      .then((list) => {
-        if (cancelled) return;
-        setSceneActivities(list.map((entry) => ({
-          activityId: entry.activityId, title: entry.title, time: entry.time,
-          people: entry.people, priceLabel: entry.priceLabel, venueName: entry.venueName,
-          joined: entry.joined, capacity: entry.capacity, status: entry.status,
-          realitySceneId: entry.realitySceneId,
-        })));
-      })
-      .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [activities]);
+  }, [storeSceneId, storeScene?.storeName]);
 
   if (page === "creator") {
     const visibleCreators = creators.filter((creator) => `${creator.name} ${creator.serviceType} ${creator.languages.join(" ")}`.toLowerCase().includes(creatorQuery.trim().toLowerCase()));
@@ -1002,7 +1011,7 @@ export function MerchantMeR21Replacement({
           {summary({ title: "活动导流", meta: `${activityItems.length} 个开放活动`, stats: [[activityItems.length.toString(), "档期"], ["—", "已报名"], ["—", "缺口"], ["—", "到店"]] })}
           {sectionHead("活动列表", `${activityItems.length} 个开放活动`) }
           {activityItems.length === 0 ? (
-            <ProxyEmptyState title="暂无开放活动" sub="创建的活动会在这里进入报名、执行与复盘流程。" />
+            <ProxyEmptyState title="本店暂无活动" sub="本店门店（含认领的现实场景）上的活动会在这里进入报名、执行与复盘流程。" />
           ) : null}
           {activityItems.map((a) => {
             // 抽成局部量：两次调用拿不到类型收窄，uri 会退化成 string|undefined。
@@ -1141,8 +1150,18 @@ export function MerchantMeR21Replacement({
           <MerchantPromoSurface
             supply={supply}
             merchantId={activeAccount.id}
-            creators={creators.filter((c) => c.promoCode).map((c) => ({ agentId: c.agentId, name: c.name, promoCode: c.promoCode ?? "" }))}
+            merchantName={activeAccount.name}
+            marketId="hn"
+            // MERCHANT-CREATOR-PROMO-002：人才库里的每位 creator 都能生成本店专属码（一人一码），
+            // 不再只限于自己认领过全局码的人。
+            creators={creators.map((c) => ({ agentId: c.agentId, name: c.name, photoUri: resolveCreatorPhoto(c.photos[0]) }))}
             onBack={() => setPage("creator")}
+            onOpenStore={() => setPage("store")}
+            // 「选择下单」：进这位 creator 的主页，走现有的「邀请合作」下单流程。
+            onSelectCreator={(agentId) => {
+              const picked = creators.find((c) => c.agentId === agentId);
+              if (picked) { setSelectedCreator(picked); setPage("creatorDetail"); } else { setPage("creator"); }
+            }}
           />
         </ScrollView>
       </View>
@@ -1171,7 +1190,7 @@ export function MerchantMeR21Replacement({
   }
 
   if (page === "scene") {
-    const sceneActs = sceneActivities.filter((a) => a.realitySceneId === "threebeans");
+    const sceneActs = storeSceneId ? activityItems.filter((a) => a.realitySceneId === storeSceneId) : [];
     const joinedTotal = sceneActs.reduce((sum, a) => sum + a.joined, 0);
     return (
       <View style={styles.root}>
@@ -1185,10 +1204,10 @@ export function MerchantMeR21Replacement({
               [joinedTotal.toString(), "已参加"],
               [spendTotal.totalOrders.toString(), "近单"],
             ],
-            title: sceneDetail?.name ?? "Three Beans · Cầu Giấy",
+            title: sceneDetail?.name || storeScene?.storeName || "本店还没关联现实场景",
           })}
           <SimpleRows onPress={setPage} rows={[["活动导流", `${sceneActs.length} 个本场景活动`, "activity"], ["菜单与价格", "进线上店铺管理", "store"], ["销售结果", `${spendTotal.totalOrders} 个订单`, "sales"]]} />
-          {sectionHead("本场景活动", "realitySceneId = threebeans")}
+          {sectionHead("本场景活动", storeSceneId ? `realitySceneId = ${storeSceneId}` : "门店未关联场景")}
           {sceneActs.length === 0 ? (
             <View style={styles.card}><Text selectable style={styles.empty}>本场景暂无活动 — 去活动页创建一个</Text></View>
           ) : null}
@@ -1331,6 +1350,7 @@ export function MerchantMeR21Replacement({
                   onPress={() => {
                     if (on) return;
                     setActiveAccountId(a.id);
+                    setActiveMerchantId(a.id);
                     // 换主体时先把上一家的数字清掉：A 店的成员数与经营结果印在 B 店
                     // 标题下面，比暂时空着更糟 —— 那是一条没发生过的读数。
                     setMembers([]);
@@ -1405,7 +1425,7 @@ export function MerchantMeR21Replacement({
             ["ticket", "客户 / 券", `${members.length} 位经营人员`, false, "voucher"],
             ["arrowUpRight", "活动导流", `${activityItems.length} 个开放活动`, false, "activity"],
             ["storeLines", "线上店铺", activeAccount?.status ?? "查看店铺", true, "store"],
-            ["cup", "场景运营", "Three Beans · 实况", true, "scene"],
+            ["cup", "场景运营", storeScene ? `${storeScene.storeName} · 实况` : "门店未关联场景", true, "scene"],
           ] as const).map(([icon, title, meta, brand, destination]) => (
             <Pressable key={title} onPress={() => setPage(destination)} style={styles.module}>
               <IconBox brand={brand} icon={icon} />

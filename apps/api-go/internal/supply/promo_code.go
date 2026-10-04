@@ -47,18 +47,22 @@ type PromoCode struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// PromoBenefit 是商家对某个码的优惠承诺：直减 faceValueVND，scopeName 写适用范围
-// （比如"全场饮品"），validUntil 是 YYYY-MM-DD。同一商家对同一码同时只认一条。
+// PromoBenefit 是商家对某个码的优惠承诺：直减 faceValueVND，门槛 minSpendVND
+// （0 = 无门槛），scopeName 写适用范围（比如"全场饮品"），validUntil 是
+// YYYY-MM-DD。同一商家对同一码同时只认一条。
+// Note 是调整原因（可选，商家手填，团队回看用——比如"她粉丝偏年轻，降低门槛"）。
 // Source 记这条哪来的：MANUAL（逐个绑）/ AUTO（自动档报码时建的）——
 // 账上能分清，商家才知道哪些是自己点的、哪些是自动进来的。
 type PromoBenefit struct {
 	MerchantID   string    `json:"merchantId"`
 	Code         string    `json:"code"`
 	FaceValueVND int64     `json:"faceValueVnd"`
+	MinSpendVND  int64     `json:"minSpendVnd"`
 	ScopeName    string    `json:"scopeName"`
 	ValidUntil   string    `json:"validUntil"`
 	Status       string    `json:"status"` // ACTIVE | DISABLED
 	Source       string    `json:"source"` // MANUAL | AUTO
+	Note         string    `json:"note,omitempty"`
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
@@ -69,6 +73,7 @@ type PromoAutoBenefit struct {
 	MerchantID   string    `json:"merchantId"`
 	Enabled      bool      `json:"enabled"`
 	FaceValueVND int64     `json:"faceValueVnd"`
+	MinSpendVND  int64     `json:"minSpendVnd"`
 	ScopeName    string    `json:"scopeName"`
 	ValidityDays int       `json:"validityDays"`
 	UpdatedAt    time.Time `json:"updatedAt"`
@@ -85,7 +90,12 @@ type PromoQuote struct {
 	AmountVND   int64     `json:"amountVnd"`
 	DiscountVND int64     `json:"discountVnd"`
 	FirstVisit  bool      `json:"firstVisit"`
-	QuotedAt    time.Time `json:"quotedAt"`
+	// MERCHANT-CREATOR-PROMO-002：凭券核销时记下顾客和券（新客由系统判定，source=SYSTEM）；
+	// 匿名输码核销这两项为空，新客按店员勾选（source=CLERK）。
+	CustomerID       string    `json:"customerId,omitempty"`
+	IssueID          string    `json:"couponId,omitempty"`
+	FirstVisitSource string    `json:"firstVisitSource,omitempty"`
+	QuotedAt         time.Time `json:"quotedAt"`
 }
 
 // activePromoCodeFor：QuerySuppliers 给商家带码 —— 该 agent 的 ACTIVE 码，
@@ -207,8 +217,10 @@ func (s *Service) disablePromoCode(ctx context.Context, e command.Envelope) comm
 type bindPromoBenefitPayload struct {
 	Code         string `json:"code"`
 	FaceValueVND int64  `json:"faceValueVnd"`
+	MinSpendVND  int64  `json:"minSpendVnd"`
 	ScopeName    string `json:"scopeName"`
 	ValidUntil   string `json:"validUntil"`
+	Note         string `json:"note"`
 }
 
 // bindPromoBenefit：商家对某个码承诺优惠。merchantID 只读 AuthContext 标注。
@@ -240,6 +252,17 @@ func (s *Service) bindPromoBenefit(ctx context.Context, e command.Envelope) comm
 	if p.FaceValueVND <= 0 || p.FaceValueVND > maxPromoBenefitVND {
 		return command.Rejected(e, "INVALID_PROMO_VALUE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_value", nil)
 	}
+	// 门槛 0 = 无门槛；有门槛不能超过单笔上限，也不能低于面额的量级约束 ——
+	// 只拦离谱的（门槛 < 面额：满 3 万减 5 万这种商家自己亏的单，拦掉）。
+	if p.MinSpendVND < 0 || p.MinSpendVND > maxAmountVND {
+		return command.Rejected(e, "INVALID_PROMO_THRESHOLD", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_threshold", nil)
+	}
+	if p.MinSpendVND > 0 && p.MinSpendVND < p.FaceValueVND {
+		return command.Rejected(e, "INVALID_PROMO_THRESHOLD", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_threshold", nil)
+	}
+	if len([]rune(p.Note)) > maxInvitationMessage {
+		return command.Rejected(e, "INVALID_PROMO_NOTE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_note", nil)
+	}
 	scope := strings.TrimSpace(p.ScopeName)
 	if scope == "" {
 		return command.Rejected(e, "INVALID_PROMO_SCOPE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_scope", nil)
@@ -263,14 +286,15 @@ func (s *Service) bindPromoBenefit(ctx context.Context, e command.Envelope) comm
 	}
 	benefit := PromoBenefit{
 		MerchantID: merchantID, Code: code, FaceValueVND: p.FaceValueVND,
+		MinSpendVND: p.MinSpendVND,
 		ScopeName: scope, ValidUntil: p.ValidUntil, Status: "ACTIVE",
-		Source: "MANUAL", CreatedAt: now,
+		Source: "MANUAL", Note: strings.TrimSpace(p.Note), CreatedAt: now,
 	}
 	if err := s.repository.SavePromoBenefit(ctx, benefit); err != nil {
 		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
 	}
 	domainEvents := []event.DomainEvent{event.New("PromoBenefitBound", "PromoBenefit", merchantID+"/"+code, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"merchantId": merchantID, "code": code, "faceValueVnd": p.FaceValueVND,
+		"merchantId": merchantID, "code": code, "faceValueVnd": p.FaceValueVND, "minSpendVnd": p.MinSpendVND,
 	})}
 	return acceptedWithPayload(e, "PromoBenefit", merchantID+"/"+code, 1, "BOUND", map[string]any{"benefit": benefit}, domainEvents)
 }
@@ -308,6 +332,7 @@ func (s *Service) disablePromoBenefit(ctx context.Context, e command.Envelope) c
 type setAutoPromoBenefitPayload struct {
 	Enabled      bool   `json:"enabled"`
 	FaceValueVND int64  `json:"faceValueVnd"`
+	MinSpendVND  int64  `json:"minSpendVnd"`
 	ScopeName    string `json:"scopeName"`
 	ValidityDays int    `json:"validityDays"`
 }
@@ -334,10 +359,14 @@ func (s *Service) setAutoPromoBenefit(ctx context.Context, e command.Envelope) c
 		if p.ValidityDays < 1 || p.ValidityDays > 365 {
 			return command.Rejected(e, "INVALID_PROMO_VALIDITY", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_validity", nil)
 		}
+		// 门槛口径与手工绑定一致：0 = 无门槛；有门槛就不能低于面额（满 3 万减 5 万是商家自己亏）。
+		if p.MinSpendVND < 0 || p.MinSpendVND > maxAmountVND || (p.MinSpendVND > 0 && p.MinSpendVND < p.FaceValueVND) {
+			return command.Rejected(e, "INVALID_PROMO_THRESHOLD", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_threshold", nil)
+		}
 	}
 	now := s.clock.Now().UTC()
 	auto := PromoAutoBenefit{
-		MerchantID: merchantID, Enabled: p.Enabled, FaceValueVND: p.FaceValueVND,
+		MerchantID: merchantID, Enabled: p.Enabled, FaceValueVND: p.FaceValueVND, MinSpendVND: p.MinSpendVND,
 		ScopeName: strings.TrimSpace(p.ScopeName), ValidityDays: p.ValidityDays, UpdatedAt: now,
 	}
 	if err := s.repository.SaveAutoPromoBenefit(ctx, auto); err != nil {
@@ -354,7 +383,7 @@ func (s *Service) autoBindPromoBenefit(ctx context.Context, merchantID, code str
 		return PromoBenefit{}, ErrPromoNotBound
 	}
 	benefit := PromoBenefit{
-		MerchantID: merchantID, Code: code, FaceValueVND: auto.FaceValueVND,
+		MerchantID: merchantID, Code: code, FaceValueVND: auto.FaceValueVND, MinSpendVND: auto.MinSpendVND,
 		ScopeName:  auto.ScopeName,
 		ValidUntil: now.AddDate(0, 0, auto.ValidityDays).Format("2006-01-02"),
 		Status:     "ACTIVE", Source: "AUTO", CreatedAt: now,
@@ -367,6 +396,7 @@ func (s *Service) autoBindPromoBenefit(ctx context.Context, merchantID, code str
 
 type quotePromoCodePayload struct {
 	Code       string `json:"code"`
+	CouponID   string `json:"couponId"`
 	AmountVND  int64  `json:"amountVnd"`
 	FirstVisit bool   `json:"firstVisit"`
 }
@@ -386,11 +416,15 @@ func (s *Service) quotePromoCode(ctx context.Context, e command.Envelope) comman
 		return command.Rejected(e, "INVITATION_MERCHANT_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.invitation_merchant_required", nil)
 	}
 	code := normalizePromoCode(p.Code)
-	if !promoCodeRe.MatchString(code) {
-		return command.Rejected(e, "INVALID_PROMO_CODE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_code", nil)
-	}
 	if p.AmountVND < 0 || p.AmountVND > maxAmountVND {
 		return command.Rejected(e, "INVALID_PROMO_AMOUNT", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_amount", nil)
+	}
+	// MERCHANT-CREATOR-PROMO-002：凭券（couponId）或商家×creator 专属码（带 "-"）走新链路。
+	if strings.TrimSpace(p.CouponID) != "" || pairCodeRe.MatchString(code) {
+		return s.quotePairPromo(ctx, e, merchantID, code, strings.TrimSpace(p.CouponID), p.AmountVND, p.FirstVisit)
+	}
+	if !promoCodeRe.MatchString(code) {
+		return command.Rejected(e, "INVALID_PROMO_CODE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_code", nil)
 	}
 	promo, err := s.repository.GetPromoCode(ctx, code)
 	if errors.Is(err, ErrPromoCodeNotFound) {
@@ -418,6 +452,13 @@ func (s *Service) quotePromoCode(ctx context.Context, e command.Envelope) comman
 	if benefit.Status != "ACTIVE" || benefit.ValidUntil < now.Format("2006-01-02") {
 		return command.Rejected(e, "PROMO_BENEFIT_EXPIRED", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.promo_benefit_expired", nil)
 	}
+	// 门槛：满 minSpendVND 才减。店员没填消费额（0）又有门槛 —— 拒，并把门槛带回去，
+	// 让店员先问清这单多少钱；不能默认放行（那等于门槛形同虚设），也不能默认拒（说不清为什么）。
+	if benefit.MinSpendVND > 0 && p.AmountVND < benefit.MinSpendVND {
+		return command.Rejected(e, "PROMO_BELOW_MIN_SPEND", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.promo_below_min_spend", map[string]any{
+			"minSpendVnd": benefit.MinSpendVND, "amountVnd": p.AmountVND, "faceValueVnd": benefit.FaceValueVND,
+		})
+	}
 	recent, err := s.repository.ListPromoQuotesByMerchant(ctx, merchantID)
 	if err != nil {
 		return command.Rejected(e, "PROMO_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_read_failed", nil)
@@ -442,7 +483,7 @@ func (s *Service) quotePromoCode(ctx context.Context, e command.Envelope) comman
 	return acceptedWithPayload(e, "PromoQuote", quote.ID, 1, "QUOTED", map[string]any{
 		"quote": quote,
 		"benefit": map[string]any{
-			"faceValueVnd": benefit.FaceValueVND, "scopeName": benefit.ScopeName,
+			"faceValueVnd": benefit.FaceValueVND, "scopeName": benefit.ScopeName, "minSpendVnd": benefit.MinSpendVND,
 		},
 	}, domainEvents)
 }

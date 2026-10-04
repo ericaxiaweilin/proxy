@@ -18,6 +18,7 @@ import type { ContentAnalytics, LocalNetClient, MediaImpressionStats, PostImpres
 import type { FeedPost } from "@proxy/contracts";
 import { color, shadows } from "../theme";
 import { ProxyBackGlyph } from "../components/proxy-foundation";
+import { PromoCouponClaim } from "../components/promo-coupon-claim";
 // SETTINGS-BLOCKLIST-001：拉黑写进本机名单（落盘），设置页读同一份。
 import { blockUser, getBlocklist, isBlocked, subscribeBlocklist } from "../blocked-users-store";
 
@@ -296,7 +297,7 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   // 查到 / 没这个人 / 查询失败 / 没有登录态 / 这是店铺名片，谁也不许长得像谁：
   // 把「查不到」显示成「查询失败」会让人一直重试，把「没登录」显示成
   // 「查不到」会让人以为码坏了，把「店铺名片」显示成「查无此人」会让人以为店关了。
-  const [scanLookup, setScanLookup] = useState<"found" | "missing" | "failed" | "no-client" | "store">();
+  const [scanLookup, setScanLookup] = useState<"found" | "missing" | "failed" | "no-client" | "store" | "promo">();
   const [scanMatch, setScanMatch] = useState<ProfileWire>();
   const [scanBusy, setScanBusy] = useState(false);
   // 相机每帧可能触发多次 barcode 事件：ref 锁住重复解析（state 更新是异步的）。
@@ -599,6 +600,11 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
       setScanLookup("store");
       return;
     }
+    // MERCHANT-CREATOR-PROMO-002：扫到达人专属码 —— 不是加好友，是领券（PromoCouponClaim）。
+    if (parsed.kind === "promo") {
+      setScanLookup("promo");
+      return;
+    }
     if (!profileClient) {
       setScanLookup("no-client");
       return;
@@ -784,7 +790,7 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
           </View>
           {scanned ? (
             <View style={styles.scanHit}>
-              <Text selectable style={styles.scanHitTitle}>已识别{scanned.kind === "store" ? "店铺名片" : "个人名片"}{scanned.name ? ` · ${scanned.name}` : ""}</Text>
+              <Text selectable style={styles.scanHitTitle}>已识别{scanned.kind === "store" ? "店铺名片" : scanned.kind === "promo" ? "达人专属码" : "个人名片"}{scanned.name ? ` · ${scanned.name}` : ""}</Text>
               <Text selectable style={styles.scanHitSub}>{scannedCaption(scanned)}</Text>
               {scanBusy ? <Text selectable style={styles.scanHitNote}>正在查找这个人…</Text> : null}
               {scanLookup === "found" && scanMatch ? (
@@ -812,6 +818,7 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
                   所以这里只说清楚「这不是个人名片」。
                   （这个注释刻意不写出那条指路原文 —— 测试对这条文案有反向钉，
                   写在注释里会让钉在正确的树上误报。） */}
+              {scanLookup === "promo" && scanned.kind === "promo" ? <PromoCouponClaim code={scanned.code} /> : null}
               {scanLookup === "store" ? <Text selectable style={styles.scanHitNote}>这是「{scanned.name}」的店铺名片，不是个人名片 —— 加好友要扫对方个人的二维码。App 目前不支持用店铺名片加好友。</Text> : null}
             </View>
           ) : null}

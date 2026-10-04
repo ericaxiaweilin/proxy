@@ -40,6 +40,13 @@ var merchantPublishCommands = map[string]bool{
 	"ListPromoAssets":     true,
 	"GetPromoStats":       true,
 	"SetAutoPromoBenefit": true,
+	// MERCHANT-CREATOR-PROMO-002：商家 × creator 专属码的商家侧四件套。顾客领券
+	// （ClaimPromoCoupon / ListMyPromoCoupons）和 creator 看码（ListMyMerchantPromos）不带
+	// merchantId，原样过。
+	"IssueMerchantCreatorPromo":    true,
+	"AdjustMerchantCreatorPromo":   true,
+	"ListMerchantCreatorPromos":    true,
+	"GetMerchantCreatorPromoBasis": true,
 }
 
 // resolveMerchantPublish verifies an optional payload merchantId for

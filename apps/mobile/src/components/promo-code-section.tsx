@@ -3,7 +3,8 @@ import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { color } from "../theme";
 import { ProxyQrCode } from "./proxy-qr-code";
-import { promoQrValue, type PromoCode, type PromoStats, type SupplyClient } from "../supply-client";
+import { promoQrValue, type MerchantCreatorPromo, type PairPromoStats, type PromoCode, type PromoStats, type SupplyClient } from "../supply-client";
+import { formatPromoTerms, formatWan } from "../merchant-promo-format";
 
 // MERCHANT-CREATOR-PROMO-001：专属营销码认领区（Creator 给自己认码）。
 //
@@ -20,6 +21,9 @@ export function PromoCodeSection({ agentId, supply, onError }: {
   const [codes, setCodes] = useState<PromoCode[]>([]);
   const [stats, setStats] = useState<PromoStats | undefined>(undefined);
   const [draft, setDraft] = useState("");
+  // MERCHANT-CREATOR-PROMO-002：各家店给我发的专属码（一店一码）+ 每个码的战绩。
+  const [pairPromos, setPairPromos] = useState<Array<{ promo: MerchantCreatorPromo; stats: PairPromoStats }>>([]);
+  const [openCode, setOpenCode] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async (): Promise<void> => {
@@ -32,6 +36,11 @@ export function PromoCodeSection({ agentId, supply, onError }: {
       setStats(computed);
     } catch (e) {
       onError(e instanceof Error ? e.message : "专属码没读出来");
+    }
+    try {
+      setPairPromos((await supply.listMyMerchantPromos({ agentId })).promos);
+    } catch {
+      // 各家店的码没读出来不挡个人码这一块。
     }
   }, [supply, agentId, onError]);
   useEffect(() => { void reload(); }, [reload]);
@@ -76,7 +85,7 @@ export function PromoCodeSection({ agentId, supply, onError }: {
               码体就是 PROXY-PROMO:码，报码框认它（也认手抄的裸码）。 */}
           <View style={styles.qrRow} testID="creator-promo-qr">
             <ProxyQrCode size={132} value={promoQrValue(active.code)} />
-            <Text selectable style={[styles.hint, styles.qrHint]}>顾客到店，店员扫这个码即报码拿优惠 —— 每一笔都记到你头上。</Text>
+            <Text selectable style={[styles.hint, styles.qrHint]}>这是你的个人码。商家给你发专属码时会用它做前缀（比如 {active.code}-WORKSHOP），你在各家店的码都带着自己的名字。</Text>
           </View>
           <Text selectable style={styles.stats}>
             {`带来 ${stats?.quotes ?? 0} 单 · 新客 ${stats?.firstVisits ?? 0} 人 · 归因 ${(stats?.attributedVnd ?? 0).toLocaleString()} VND`}
@@ -102,11 +111,33 @@ export function PromoCodeSection({ agentId, supply, onError }: {
           </Pressable>
         </>
       )}
+      <Text selectable style={[styles.title, { marginTop: 10 }]}>各家店给我的专属码</Text>
+      {pairPromos.length === 0 ? (
+        <Text selectable style={styles.hint}>还没有商家给你发专属码。商家在「Creator 经营 → 带到店新客」里给你生成后，会出现在这里。</Text>
+      ) : pairPromos.map(({ promo, stats: st }) => (
+        <Pressable key={promo.code} onPress={() => setOpenCode((cur) => (cur === promo.code ? undefined : promo.code))} style={styles.pairRow} accessibilityLabel={`查看${promo.merchantName}专属码`} testID={`creator-pair-promo-${promo.code}`}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+            <Text selectable style={styles.pairCode}>{promo.code}</Text>
+            <Text selectable style={styles.pairTerms}>{promo.terms.displayText || formatPromoTerms(promo.terms.minSpendVnd, promo.terms.faceValueVnd)}</Text>
+          </View>
+          <Text selectable style={styles.hint}>{`${promo.merchantName || "商家"} · ${promo.terms.validUntil ? `至 ${promo.terms.validUntil}` : "长期有效"}${promo.status === "ACTIVE" ? "" : " · 已停用"}`}</Text>
+          <Text selectable style={styles.stats}>{`新客 ${st.newCustomers} · 核销 ${st.redeemed} · 发券 ${st.issued} · 消费 ${formatWan(st.spendVnd)}`}</Text>
+          {openCode === promo.code ? (
+            <View style={styles.qrRow}>
+              <ProxyQrCode size={132} value={promoQrValue(promo.code)} />
+              <Text selectable style={[styles.hint, styles.qrHint]}>贴在你给这家店做的内容里：顾客用 Proxy 扫一扫领券，到店出示券核销，每一位新客都记到你头上。</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      ))}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  pairRow: { backgroundColor: "#F9F9FB", borderRadius: 12, gap: 3, marginTop: 6, padding: 10 },
+  pairCode: { color: color.ink, fontSize: 13, fontWeight: "900", letterSpacing: 0.5 },
+  pairTerms: { color: "#FF3B30", fontSize: 13, fontWeight: "900" },
   box: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, gap: 6, marginTop: 12, padding: 12 },
   title: { color: color.ink, fontSize: 13, fontWeight: "800" },
   code: { color: color.ink, fontSize: 22, fontWeight: "900", letterSpacing: 1, marginTop: 2 },

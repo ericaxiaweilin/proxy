@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>带到店新客 - 可手动调整折扣</title>
+<style>
+:root {
+  --bg: #F4F5F7; --text-main: #111; --text-sub: #86868b;
+  --accent: #d0f55c; --ok: #34C759; --danger: #FF3B30; --warn: #FF9500; --border: #eaeaea;
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.04);
+  --shadow-md: 0 8px 24px rgba(0,0,0,0.06);
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+body { margin:0; padding:20px; background:var(--bg); color:var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  display:flex; justify-content:center; min-height:100vh;}
+.phone-mock { width:100%; max-width: 420px; background: var(--bg); border-radius: 32px;
+  padding: 24px; box-shadow: var(--shadow-md); position: relative; overflow: hidden; min-height: 800px;}
+
+.page { display: none; }
+.page.active { display: block; animation: slideIn 0.25s ease; }
+@keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+.header h1 { margin: 0 0 8px 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+.header p { margin: 0 0 20px 0; color: var(--text-sub); font-size: 13px; }
+.tabs { display: flex; gap: 8px; margin-bottom: 24px; }
+.tab { padding: 8px 18px; border-radius: 999px; font-size: 14px; font-weight: 600;
+  border: 1px solid var(--border); background: #fff; color: var(--text-main); cursor: pointer;}
+.tab.active { background: #1A1A1E; color: #fff; border-color: #1A1A1E; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid-card { background: #fff; border: 1px solid var(--border); border-radius: 20px; padding: 18px; cursor: pointer;}
+.grid-card .icon { width: 40px; height: 40px; border-radius: 12px; background: var(--accent);
+  display: grid; place-items: center; font-size: 18px; margin-bottom: 14px; font-weight: bold;}
+.grid-card h3 { margin: 0 0 6px 0; font-size: 15px; font-weight: 700; }
+.grid-card p { margin: 0; font-size: 12px; color: var(--text-sub); }
+
+.sub-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.back-btn { width: 40px; height: 40px; border-radius: 50%; background: #fff; border: 1px solid var(--border);
+  display: grid; place-items: center; cursor: pointer; flex: none; box-shadow: var(--shadow-sm);}
+.back-btn svg { width: 18px; height: 18px; }
+.sub-header-text h1 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+.sub-header-text p { margin: 2px 0 0 0; font-size: 11px; color: var(--text-sub); }
+
+.dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+.dash-item { background: #fff; border: 1px solid var(--border); border-radius: 20px; padding: 16px;
+  display: flex; flex-direction: column; align-items: center; text-align: center; cursor: pointer; position: relative;}
+.dash-item.has-drill::after { content: '›'; position: absolute; top: 12px; right: 14px; color: #ccc; font-size: 16px;}
+.dash-value { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+.dash-label { font-size: 12px; color: var(--text-sub); font-weight: 500; }
+
+.section-title { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+.section-title h2 { margin: 0; font-size: 16px; font-weight: 800; }
+.section-title span { font-size: 12px; color: var(--text-sub); }
+
+.collab-card { background: #fff; border-radius: 20px; border: 1px solid var(--border);
+  padding: 16px; margin-bottom: 12px; box-shadow: var(--shadow-sm);}
+.collab-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;}
+.collab-creator { display: flex; align-items: center; gap: 10px; }
+.collab-creator img { width: 40px; height: 40px; border-radius: 50%; }
+.creator-info-text .creator-name { font-size: 15px; font-weight: 800; }
+.creator-info-text .creator-handle { font-size: 11px; color: var(--text-sub); }
+
+.discount-display { display: flex; flex-direction: column; align-items: flex-end; }
+.discount-value { font-size: 22px; font-weight: 900; color: var(--danger); letter-spacing: -0.5px; line-height: 1;}
+.discount-value small { font-size: 10px; font-weight: 700; color: var(--text-sub); display: block; margin-bottom: 2px;}
+.discount-detail { font-size: 10px; color: var(--text-sub); margin-top: 4px; }
+
+/* 折扣状态标签 */
+.discount-status {
+  display: inline-block; font-size: 9px; font-weight: 700;
+  padding: 2px 6px; border-radius: 4px; margin-top: 4px;
+}
+.discount-status.auto { background: rgba(100,210,255,0.15); color: #0071e3; }
+.discount-status.manual { background: rgba(255,149,0,0.15); color: #b36b00; }
+
+.reason-line { display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text-sub); margin-bottom: 12px;
+  padding: 8px 10px; background: #f9f9fb; border-radius: 10px;}
+.reason-line .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--ok); flex: none;}
+
+.qr-box { display: flex; align-items: center; gap: 12px;
+  background: #f9f9fb; border-radius: 12px; padding: 10px; margin-bottom: 12px; cursor: pointer;}
+.qr-code-img { width: 44px; height: 44px; background: #fff; border-radius: 8px;
+  display: grid; place-items: center; border: 1px solid #eee; flex: none;}
+.qr-info { flex: 1; min-width: 0; }
+.qr-code-text { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; }
+.qr-sub { font-size: 10px; color: var(--text-sub); margin-top: 3px; }
+.qr-arrow { color: #ccc; font-size: 16px; }
+
+.code-stats { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; text-align: center;
+  border-top: 1px solid #f0f0f0; padding-top: 12px; }
+.code-stat-item { display: flex; flex-direction: column; cursor: pointer; padding: 4px 0; border-radius: 8px;}
+.code-stat-value { font-size: 15px; font-weight: 800; }
+.code-stat-label { font-size: 10px; color: var(--text-sub); margin-top: 3px; }
+.highlight-new { color: var(--ok); }
+.highlight-money { color: var(--danger); }
+
+/* 底部操作栏 */
+.card-actions {
+  display: flex; gap: 8px; margin-top: 12px; padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+.btn-card-action {
+  flex: 1; padding: 10px; border-radius: 10px; font-size: 12px; font-weight: 700;
+  border: 1px solid var(--border); background: #fff; cursor: pointer;
+}
+.btn-card-action.primary { background: var(--accent); border-color: var(--accent); color: #111;}
+
+/* 编辑面板 */
+.edit-panel {
+  background: #fff; border-radius: 20px; border: 1px solid var(--border);
+  padding: 20px; margin-bottom: 14px;
+}
+.edit-panel h3 { margin: 0 0 6px 0; font-size: 16px; }
+.edit-panel .sub { font-size: 12px; color: var(--text-sub); margin-bottom: 18px; }
+
+.form-item { margin-bottom: 18px; }
+.form-item label { display: block; font-size: 12px; font-weight: 700; margin-bottom: 8px; color: #333;}
+.form-item input, .form-item select {
+  width: 100%; height: 44px; border: 1px solid var(--border); border-radius: 12px;
+  padding: 0 14px; font-size: 14px; outline: none; background: #f9f9fb;
+}
+.form-item input:focus { border-color: var(--accent); background: #fff; }
+
+/* 优惠类型切换 */
+.segmented { display: flex; background: #f0f0f5; border-radius: 12px; padding: 4px; }
+.segmented button {
+  flex: 1; padding: 8px; border: none; background: transparent; border-radius: 9px;
+  font-size: 12px; font-weight: 700; cursor: pointer; color: var(--text-sub);
+}
+.segmented button.active { background: #fff; color: #111; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+
+/* 大按钮 */
+.btn-primary-lg {
+  width: 100%; height: 48px; border-radius: 14px; background: #1A1A1E; color: #fff;
+  font-size: 15px; font-weight: 700; border: none; cursor: pointer;
+}
+.btn-secondary-lg {
+  width: 100%; height: 48px; border-radius: 14px; background: transparent; color: #111;
+  font-size: 14px; font-weight: 600; border: 1px solid var(--border); cursor: pointer; margin-top: 10px;
+}
+
+/* 快捷模板 */
+.template-row {
+  display: flex; gap: 8px; margin-bottom: 16px;
+}
+.template-btn {
+  flex: 1; padding: 10px 8px; border-radius: 10px; border: 1px solid var(--border);
+  background: #fff; font-size: 11px; font-weight: 700; cursor: pointer; text-align: center;
+}
+.template-btn.active { border-color: var(--accent); background: rgba(208,245,92,0.15); }
+
+/* 明细列表 */
+.list-item { background: #fff; border-radius: 16px; padding: 14px; margin-bottom: 10px;
+  display: flex; justify-content: space-between; align-items: center;
+  border: 1px solid var(--border); cursor: pointer;}
+.list-item-left { flex: 1; min-width: 0; }
+.list-item-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+.list-item-sub { font-size: 11px; color: var(--text-sub); }
+.list-item-right { display: flex; align-items: center; gap: 8px; flex: none; }
+.list-item-arrow { color: #ccc; font-size: 16px; }
+
+/* 详情 */
+.detail-card { background: #fff; border-radius: 20px; padding: 20px; border: 1px solid var(--border); margin-bottom: 14px; }
+.detail-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f5f5f5;}
+.detail-row:last-child { border-bottom: none; }
+.detail-label { font-size: 13px; color: var(--text-sub); }
+.detail-value { font-size: 13px; font-weight: 700; text-align: right;}
+.detail-value.big { font-size: 18px; color: var(--danger); }
+.badge-status { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 700;}
+.badge-status.ok { background: rgba(52,199,89,0.15); color: #1a9e69; }
+.badge-status.auto { background: rgba(100,210,255,0.15); color: #0071e3; }
+</style>
+</head>
+<body>
+
+<div class="phone-mock">
+
+  <!-- 主页 -->
+  <div class="page active" id="page-main">
+    <div class="header">
+      <h1>Creator 经营</h1>
+      <p>围绕真实经营目标匹配、邀请，并追踪到店与消费结果。</p>
+    </div>
+    <div class="tabs">
+      <button class="tab active">智能匹配</button>
+      <button class="tab">Creator</button>
+      <button class="tab">合作</button>
+      <button class="tab">结果</button>
+    </div>
+    <div class="grid">
+      <div class="grid-card" onclick="goPage('page-new-customer')">
+        <div class="icon">◻</div><h3>带到店新客</h3><p>到店、带客、核销</p>
+      </div>
+      <div class="grid-card" onclick="goPage('page-content')">
+        <div class="icon">◎</div><h3>生产内容</h3><p>探店、短视频、UGC</p>
+      </div>
+      <div class="grid-card" onclick="goPage('page-exposure')">
+        <div class="icon">↗</div><h3>扩大本地曝光</h3><p>覆盖与互动</p>
+      </div>
+      <div class="grid-card" onclick="goPage('page-coupon')">
+        <div class="icon">▽</div><h3>推广券与活动</h3><p>领取、预约、核销</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 带到店新客：可手动调整折扣 -->
+  <div class="page" id="page-new-customer">
+    <div class="sub-header">
+      <button class="back-btn" onclick="goPage('page-main')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="sub-header-text">
+        <h1>带到店新客</h1>
+        <p>餐饮专属折扣 · 可逐个达人调整</p>
+      </div>
+    </div>
+
+    <div class="dashboard-grid">
+      <div class="dash-item has-drill"><div class="dash-value">1,850</div><div class="dash-label">本店到店新客</div></div>
+      <div class="dash-item has-drill"><div class="dash-value">2,300</div><div class="dash-label">本店累计核销</div></div>
+      <div class="dash-item"><div class="dash-value">5,000</div><div class="dash-label">本店累计发券</div></div>
+      <div class="dash-item"><div class="dash-value">37%</div><div class="dash-label">核销转化率</div></div>
+    </div>
+
+    <div class="section-title">
+      <h2>达人专属折扣</h2>
+      <span>按新客数排序</span>
+    </div>
+
+    <!-- 达人 A：系统自动，未调整 -->
+    <div class="collab-card">
+      <div class="collab-header">
+        <div class="collab-creator">
+          <img src="https://i.pravatar.cc/150?img=1" alt="An">
+          <div class="creator-info-text">
+            <div class="creator-name">An</div>
+            <div class="creator-handle">@an_hanoi</div>
+          </div>
+        </div>
+        <div class="discount-display">
+          <div class="discount-value"><small>满50万减</small>10万</div>
+          <div class="discount-detail">VND · 本店专享</div>
+          <span class="discount-status auto">🤖 系统建议</span>
+        </div>
+      </div>
+
+      <div class="reason-line">
+        <span class="dot"></span>
+        基于 1.2w 粉丝 + 餐饮垂直度高 + 历史复购 35% 自动生成
+      </div>
+
+      <div class="qr-box" onclick="showQR('An @an_hanoi', 'QR-AN-WORKSHOP', '满50万减10万 VND')">
+        <div class="qr-code-img">
+          <svg width="28" height="28" viewBox="0 0 40 40" fill="none">
+            <rect x="0" y="0" width="12" height="12" fill="#111"/>
+            <rect x="28" y="0" width="12" height="12" fill="#111"/>
+            <rect x="0" y="28" width="12" height="12" fill="#111"/>
+            <rect x="16" y="16" width="8" height="8" fill="#111"/>
+            <rect x="28" y="28" width="12" height="12" fill="#111"/>
+          </svg>
+        </div>
+        <div class="qr-info">
+          <div class="qr-code-text">QR-AN-WORKSHOP</div>
+          <div class="qr-sub">点击查看码详情</div>
+        </div>
+        <span class="qr-arrow">›</span>
+      </div>
+
+      <div class="code-stats">
+        <div class="code-stat-item"><div class="code-stat-value highlight-new">280</div><div class="code-stat-label">新客</div></div>
+        <div class="code-stat-item"><div class="code-stat-value">320</div><div class="code-stat-label">核销</div></div>
+        <div class="code-stat-item"><div class="code-stat-value">500</div><div class="code-stat-label">发券</div></div>
+        <div class="code-stat-item"><div class="code-stat-value highlight-money">¥2.8w</div><div class="code-stat-label">消费</div></div>
+      </div>
+
+      <!-- 卡片底部操作栏 -->
+      <div class="card-actions">
+        <button class="btn-card-action" onclick="goPage('page-discount-detail')">查看依据</button>
+        <button class="btn-card-action primary" onclick="editCreatorDiscount('An', '满50万减10万', 500000, 100000, 'auto')">调整折扣</button>
+      </div>
+    </div>
+
+    <!-- 达人 B：已手动调整 -->
+    <div class="collab-card">
+      <div class="collab-header">
+        <div class="collab-creator">
+          <img src="https://i.pravatar.cc/150?img=5" alt="Linh">
+          <div class="creator-info-text">
+            <div class="creator-name">Linh</div>
+            <div class="creator-handle">@linh_hanoi</div>
+          </div>
+        </div>
+        <div class="discount-display">
+          <div class="discount-value"><small>无门槛减</small>5万</div>
+          <div class="discount-detail">VND · 首次到店</div>
+          <span class="discount-status manual">✋ 手动调整</span>
+        </div>
+      </div>
+
+      <div class="reason-line">
+        <span class="dot" style="background:#FF9500;"></span>
+        系统建议 8%，已被商家手动改为 5% 无门槛
+      </div>
+
+      <div class="qr-box" onclick="showQR('Linh @linh_hanoi', 'QR-LINH-WORKSHOP', '无门槛减5万 VND')">
+        <div class="qr-code-img">
+          <svg width="28" height="28" viewBox="0 0 40 40" fill="none">
+            <rect x="0" y="0" width="12" height="12" fill="#111"/>
+            <rect x="28" y="0" width="12" height="12" fill="#111"/>
+            <rect x="0" y="28" width="12" height="12" fill="#111"/>
+            <rect x="16" y="16" width="8" height="8" fill="#111"/>
+            <rect x="28" y="28" width="12" height="12" fill="#111"/>
+          </svg>
+        </div>
+        <div class="qr-info">
+          <div class="qr-code-text">QR-LINH-WORKSHOP</div>
+          <div class="qr-sub">点击查看码详情</div>
+        </div>
+        <span class="qr-arrow">›</span>
+      </div>
+
+      <div class="code-stats">
+        <div class="code-stat-item"><div class="code-stat-value highlight-new">520</div><div class="code-stat-label">新客</div></div>
+        <div class="code-stat-item"><div class="code-stat-value">650</div><div class="code-stat-label">核销</div></div>
+        <div class="code-stat-item"><div class="code-stat-value">1,000</div><div class="code-stat-label">发券</div></div>
+        <div class="code-stat-item"><div class="code-stat-value highlight-money">¥4.5w</div><div class="code-stat-label">消费</div></div>
+      </div>
+
+      <div class="card-actions">
+        <button class="btn-card-action" onclick="goPage('page-discount-detail')">查看依据</button>
+        <button class="btn-card-action primary" onclick="editCreatorDiscount('Linh', '无门槛减5万', 0, 50000, 'manual')">调整折扣</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 折扣编辑页（核心） -->
+  <div class="page" id="page-discount-edit">
+    <div class="sub-header">
+      <button class="back-btn" onclick="goPage('page-new-customer')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="sub-header-text">
+        <h1>调整折扣</h1>
+        <p id="edit-creator-name">An · @an_hanoi</p>
+      </div>
+    </div>
+
+    <!-- 快捷模板 -->
+    <div class="edit-panel">
+      <h3>快捷模板</h3>
+      <p class="sub">一键套用，也可下方手动微调</p>
+      <div class="template-row">
+        <button class="template-btn" onclick="applyTemplate(0, 30000, '无门槛')">无门槛减3万</button>
+        <button class="template-btn" onclick="applyTemplate(300000, 50000, '满30万减5万')">满30万减5万</button>
+        <button class="template-btn" onclick="applyTemplate(500000, 100000, '满50万减10万')">满50万减10万</button>
+      </div>
+    </div>
+
+    <!-- 折扣配置 -->
+    <div class="edit-panel">
+      <h3>折扣配置</h3>
+      <p class="sub">修改后的折扣会立即绑定到该达人的专属码</p>
+
+      <div class="form-item">
+        <label>使用门槛（VND）</label>
+        <input type="number" id="edit-threshold" value="500000" placeholder="0 表示无门槛">
+      </div>
+
+      <div class="form-item">
+        <label>优惠面额（VND）</label>
+        <input type="number" id="edit-amount" value="100000">
+      </div>
+
+      <div class="form-item">
+        <label>折扣展示文案</label>
+        <input type="text" id="edit-display" value="满50万减10万">
+      </div>
+
+      <div class="form-item">
+        <label>生效范围</label>
+        <select>
+          <option>仅本店 · 餐饮类</option>
+          <option>本店全部品类</option>
+        </select>
+      </div>
+
+      <div class="form-item">
+        <label>有效期</label>
+        <select>
+          <option>30 天</option>
+          <option>60 天</option>
+          <option>90 天</option>
+          <option>长期有效</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 调整原因（可选） -->
+    <div class="edit-panel">
+      <h3>调整原因（可选）</h3>
+      <p class="sub">记录留痕，方便团队回看</p>
+      <div class="form-item">
+        <input type="text" placeholder="例如：该达人粉丝画像偏年轻，降低门槛" style="background:#fff;">
+      </div>
+    </div>
+
+    <button class="btn-primary-lg" onclick="saveDiscount()">保存并应用</button>
+    <button class="btn-secondary-lg" onclick="goPage('page-new-customer')">取消</button>
+  </div>
+
+  <!-- 折扣依据 -->
+  <div class="page" id="page-discount-detail">
+    <div class="sub-header">
+      <button class="back-btn" onclick="goPage('page-new-customer')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="sub-header-text">
+        <h1>折扣依据</h1>
+        <p>An · 满50万减10万</p>
+      </div>
+    </div>
+
+    <div class="detail-card">
+      <div class="detail-row">
+        <span class="detail-label">建议折扣</span>
+        <span class="detail-value big">10%</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">生成方式</span>
+        <span class="detail-value"><span class="badge-status auto">🤖 自动生成</span></span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">生效范围</span>
+        <span class="detail-value">仅本店 · 餐饮类</span>
+      </div>
+    </div>
+
+    <div class="detail-card" style="background:#f9f9fb;">
+      <div style="font-size:12px; color: var(--text-sub); margin-bottom:10px; font-weight:600;">参考维度</div>
+      <div class="detail-row"><span class="detail-label">粉丝量级</span><span class="detail-value">1.2w（中腰部）</span></div>
+      <div class="detail-row"><span class="detail-label">内容垂直度</span><span class="detail-value">餐饮 95%</span></div>
+      <div class="detail-row"><span class="detail-label">历史复购率</span><span class="detail-value">35%</span></div>
+      <div class="detail-row"><span class="detail-label">同品类平均折扣</span><span class="detail-value">9.8%</span></div>
+      <div class="detail-row"><span class="detail-label">系统建议</span><span class="detail-value" style="color:var(--danger)">10%</span></div>
+    </div>
+  </div>
+
+  <!-- 其它页面 -->
+  <div class="page" id="page-content">
+    <div class="sub-header">
+      <button class="back-btn" onclick="goPage('page-main')"><svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div class="sub-header-text"><h1>生产内容</h1><p>探店短视频</p></div>
+    </div>
+  </div>
+  <div class="page" id="page-exposure">
+    <div class="sub-header">
+      <button class="back-btn" onclick="goPage('page-main')"><svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div class="sub-header-text"><h1>扩大曝光</h1><p>覆盖追踪</p></div>
+    </div>
+  </div>
+  <div class="page" id="page-coupon">
+    <div class="sub-header">
+      <button class="back-btn" onclick="goPage('page-main')"><svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div class="sub-header-text"><h1>推广券与活动</h1><p>核销追踪</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- 二维码弹窗 -->
+<div class="modal-overlay" id="qrModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 100;">
+  <div style="background: #fff; width: 300px; border-radius: 24px; padding: 24px; text-align: center;">
+    <h3 id="modalCreatorName" style="margin: 0 0 6px 0; font-size: 18px;">An @an_hanoi</h3>
+    <div id="modalCouponValue" style="font-size: 14px; color: #FF3B30; font-weight: 800; margin: 6px 0 16px 0;">满50万减10万 VND</div>
+    <div style="width: 180px; height: 180px; background: #111; border-radius: 16px; margin: 0 auto 20px auto; display: grid; place-items: center; color: #fff; font-size: 12px; padding: 10px; text-align: center;" id="modalCodeText">QR-AN-WORKSHOP</div>
+    <button style="width:100%; height:48px; border-radius:14px; background:#1A1A1E; color:#fff; font-size:15px; font-weight:700; border:none; cursor:pointer;" onclick="closeQR()">关闭</button>
+  </div>
+</div>
+
+<script>
+  let editingCreator = null;
+
+  function goPage(pageId) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById(pageId).classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // 打开某个达人的折扣编辑页
+  function editCreatorDiscount(creatorName, display, threshold, amount, status) {
+    editingCreator = creatorName;
+    document.getElementById('edit-creator-name').innerText = creatorName + ' · ' + (creatorName === 'An' ? '@an_hanoi' : '@linh_hanoi');
+    document.getElementById('edit-threshold').value = threshold;
+    document.getElementById('edit-amount').value = amount;
+    document.getElementById('edit-display').value = display;
+    goPage('page-discount-edit');
+  }
+
+  // 快捷模板
+  function applyTemplate(threshold, amount, display) {
+    document.getElementById('edit-threshold').value = threshold;
+    document.getElementById('edit-amount').value = amount;
+    document.getElementById('edit-display').value = display;
+  }
+
+  function saveDiscount() {
+    const threshold = document.getElementById('edit-threshold').value;
+    const amount = document.getElementById('edit-amount').value;
+    const display = document.getElementById('edit-display').value;
+    alert(`已保存 ${editingCreator} 的折扣：\n${display}\n（门槛 ${threshold} VND，面额 ${amount} VND）\n\n该折扣将立即绑定到专属码，并标记为「手动调整」`);
+    goPage('page-new-customer');
+  }
+
+  function showQR(creatorName, codeText, couponValue) {
+    document.getElementById('modalCreatorName').innerText = creatorName;
+    document.getElementById('modalCodeText').innerText = codeText;
+    document.getElementById('modalCouponValue').innerText = couponValue;
+    document.getElementById('qrModal').style.display = 'flex';
+  }
+  function closeQR() {
+    document.getElementById('qrModal').style.display = 'none';
+  }
+
+  document.querySelectorAll('.tabs .tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>

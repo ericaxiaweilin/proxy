@@ -315,6 +315,8 @@ func main() {
 		supplyService.SetSellerIdentityLookup(postgres.NewSellerRealNameRepository(pool))
 		// MATCH-RANK-001: 撮合排序读真实履约 / 需求方评价 / 引力响应（不读任何曝光数据）。
 		supplyService.SetRankingSignals(matching.NewPostgres(pool))
+		// MERCHANT-CREATOR-PROMO-002：专属码的品类读商家自己的门店资料（不让商家再选一遍）。
+		supplyService.SetMerchantStoreLookup(postgres.NewMerchantStoreRepository(pool))
 		mediaService = media.NewWithReviewDecisionRepository(
 			postgres.NewMediaRepository(pool),
 			postgres.NewMediaReviewDecisionRepository(pool),

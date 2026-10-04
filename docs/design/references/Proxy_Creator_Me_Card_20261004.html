@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="zh-CN" data-page-node-id="57q1TUlEYRW0QFyMDFUVke">
+<head data-page-node-id="bN6iDIfQTYTIsEQo450x0F">
+<meta charset="utf-8" data-page-node-id="3NvVcHOQbCfr6KDvIXJvz7"/>
+<meta name="viewport" content="width=device-width,initial-scale=1" data-page-node-id="UTUiGanVzXYDkz5kaeoyp5"/>
+<title>PAO0 · Creator 经营</title>
+<style>
+:root {
+  --bg: #F5F6F8;
+  --text-main: #1A1A1E;
+  --text-sub: #7A7A84;
+  --card-bg: #FFFFFF;
+  --accent: #D4FF4A; /* 亮绿 */
+  --accent-hover: #C2ED36;
+  --ok: #34C759;
+  --dark-card-start: #1C1C21;
+  --dark-card-end: #2A2A32;
+  --border: rgba(0,0,0,0.06);
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.02);
+  --shadow-md: 0 8px 24px rgba(0,0,0,0.04);
+  --shadow-lg: 0 16px 40px rgba(0,0,0,0.08);
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+body {
+  margin:0; padding:20px; background:var(--bg); color:var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  display:flex; justify-content:center; min-height:100vh;
+  line-height: 1.5; overflow-x: hidden;
+}
+
+/* 手机壳模拟 */
+.phone-mock {
+  width:100%; max-width: 420px; background: var(--bg); border-radius: 40px;
+  padding: 24px; box-shadow: var(--shadow-lg); position: relative; overflow: hidden;
+}
+/* 背景微弱光晕 */
+.phone-mock::before {
+  content:''; position:absolute; top:-50px; left:-50px; width:200px; height:200px;
+  background: radial-gradient(circle, rgba(212,255,74,0.1) 0%, rgba(255,255,255,0) 70%);
+  border-radius:50%; z-index:0; pointer-events:none;
+}
+.phone-mock > * { position: relative; z-index: 1; }
+
+/* ================= 页面切换逻辑 ================= */
+.page { display: none; animation: fadeIn 0.3s ease; }
+.page.active { display: block; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ================= 列表页 (List) ================= */
+.header { margin-bottom: 24px; }
+.header h1 { margin: 0 0 8px 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+.header p { margin: 0; color: var(--text-sub); font-size: 13px; font-weight: 500;}
+.filter-tabs { display: flex; gap: 8px; margin-top: 20px; overflow-x: auto; padding-bottom: 4px;}
+.filter-tab {
+  padding: 8px 18px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--border); background: #fff; color: var(--text-main); cursor: pointer; white-space: nowrap;
+}
+.filter-tab.active { background: #1A1A1E; color: #fff; border-color: #1A1A1E; }
+
+.list-container { margin-top: 20px; }
+.list-title-bar { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px; }
+.list-title-bar h2 { margin: 0; font-size: 18px; font-weight: 800; }
+.list-title-bar span { font-size: 12px; color: var(--text-sub); font-weight: 600;}
+
+/* 达人列表卡片 */
+.creator-card {
+  display: flex; align-items: center; gap: 14px; padding: 16px;
+  background: #fff; border-radius: 20px; border: 1px solid var(--border);
+  margin-bottom: 12px; box-shadow: var(--shadow-sm);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer;
+}
+.creator-card:active { transform: scale(0.97); box-shadow: var(--shadow-md); border-color: #c2ea49; }
+.creator-avatar-wrap { position: relative; flex: none; }
+.creator-avatar { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.status-dot { position: absolute; bottom: 2px; right: 2px; width: 14px; height: 14px; background: var(--ok); border: 2px solid #fff; border-radius: 50%; }
+.creator-info { flex: 1; min-width: 0; }
+.creator-name { font-size: 17px; font-weight: 800; margin-bottom: 4px; }
+.creator-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.creator-tag { font-size: 10px; padding: 3px 8px; border-radius: 6px; background: #f0f0f5; color: #555; font-weight: 600; }
+.creator-tag.highlight { background: rgba(52, 199, 89, 0.15); color: #1a9e69; }
+.creator-stats { font-size: 11px; color: var(--text-sub); display: flex; gap: 10px; font-weight: 500;}
+.creator-stats b { color: var(--text-main); }
+.creator-action { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none; }
+.creator-price { font-size: 15px; font-weight: 800; white-space: nowrap; }
+.creator-price span { font-size: 11px; color: var(--text-sub); font-weight: 500; }
+.btn-invite {
+  background: var(--accent); color: #111; border: none; padding: 8px 18px;
+  border-radius: 12px; font-weight: 800; font-size: 13px; cursor: pointer;
+  transition: all 0.2s; box-shadow: 0 2px 8px rgba(212, 255, 74, 0.3);
+}
+
+/* ================= 详情页 (Detail) ================= */
+.nav-bar { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+.back-btn {
+  width: 40px; height: 40px; border-radius: 50%; background: var(--card-bg);
+  display: grid; place-items: center; box-shadow: var(--shadow-sm); cursor: pointer;
+  border: 1px solid var(--border); transition: all 0.2s;
+}
+.back-btn:active { transform: scale(0.92); background: #f0f0f5; }
+.back-btn svg { width: 20px; height: 20px; stroke: var(--text-main); }
+.page-title { font-size: 22px; font-weight: 800; margin: 0; letter-spacing: -0.5px; }
+.page-sub { font-size: 12px; color: var(--text-sub); font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase; margin-top: 2px; }
+
+.profile-card {
+  background: var(--card-bg); border-radius: 24px; padding: 24px;
+  box-shadow: var(--shadow-md); border: 1px solid rgba(255,255,255,0.8); margin-bottom: 28px;
+}
+.profile-header { display: flex; gap: 16px; align-items: center; margin-bottom: 20px; }
+.avatar-wrap { position: relative; }
+.avatar { width: 76px; height: 76px; border-radius: 50%; object-fit: cover; border: 3px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.status-dot-lg { position: absolute; bottom: 4px; right: 4px; width: 14px; height: 14px; background: var(--ok); border: 2px solid #fff; border-radius: 50%; animation: pulse 2s infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0); } 100% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0); } }
+.profile-info h1 { margin: 0 0 8px 0; font-size: 22px; font-weight: 800; letter-spacing: -0.4px; }
+.profile-desc { font-size: 13px; color: var(--text-sub); line-height: 1.5; margin-bottom: 10px; font-weight: 500;}
+.profile-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { font-size: 11px; padding: 5px 10px; border-radius: 8px; background: #F0F0F5; color: #555; font-weight: 600; transition: all 0.2s;}
+.tag.highlight { background: rgba(52, 199, 89, 0.15); color: #1a9e69; }
+
+.price-bar { display: flex; justify-content: space-between; align-items: center; padding-top: 20px; border-top: 1px dashed rgba(0,0,0,0.08); }
+.price-label { font-size: 12px; color: var(--text-sub); font-weight: 600; margin-bottom: 2px;}
+.price-value { font-size: 22px; font-weight: 800; color: var(--text-main); letter-spacing: -0.5px; }
+.price-value span { font-size: 12px; color: var(--text-sub); font-weight: 500; }
+.btn-invite-lg {
+  background: var(--accent); color: #111; border: none; padding: 12px 28px;
+  border-radius: 16px; font-weight: 800; font-size: 14px; cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 4px 12px rgba(212, 255, 74, 0.4);
+}
+.btn-invite-lg:active { transform: scale(0.96); }
+
+.section-title { font-size: 13px; font-weight: 800; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 12px 4px; }
+.skills-wrap { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 28px; }
+.skill-tag {
+  font-size: 12px; padding: 8px 16px; border-radius: 12px; background: var(--card-bg);
+  border: 1px solid var(--border); color: var(--text-main); font-weight: 600;
+  display: flex; align-items: center; gap: 6px; box-shadow: var(--shadow-sm);
+}
+.skill-tag.checked { border-color: rgba(212, 255, 74, 0.8); background: rgba(212, 255, 74, 0.1); }
+.skill-tag svg { width: 14px; height: 14px; stroke: var(--ok); }
+
+.social-card {
+  background: var(--card-bg); border-radius: 20px; padding: 16px 20px; border: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px;
+  box-shadow: var(--shadow-sm); transition: all 0.2s;
+}
+.social-card:active { transform: scale(0.98); }
+.social-info { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.social-btn { background: #1C1C21; color: #fff; border: none; padding: 10px 18px; border-radius: 12px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s;}
+.social-btn:active { transform: scale(0.94); }
+
+.dashboard-card {
+  background: linear-gradient(145deg, var(--dark-card-start) 0%, var(--dark-card-end) 100%);
+  border-radius: 24px; padding: 24px; color: #fff; margin-bottom: 28px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);
+}
+.dash-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.dash-title { font-size: 16px; font-weight: 800; letter-spacing: 0.2px; }
+.dash-status { font-size: 11px; padding: 5px 12px; border-radius: 999px; background: rgba(212, 255, 74, 0.15); color: var(--accent); font-weight: 700; border: 1px solid rgba(212, 255, 74, 0.2);}
+.dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.dash-item { background: rgba(255,255,255,0.06); border-radius: 18px; padding: 18px 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; border: 1px solid rgba(255,255,255,0.03); }
+.dash-value { font-size: 22px; font-weight: 800; margin-bottom: 4px; white-space: nowrap; letter-spacing: -0.5px;}
+.dash-label { font-size: 11px; color: #A1A1A6; font-weight: 500; }
+
+.menu-list { background: var(--card-bg); border-radius: 24px; overflow: hidden; box-shadow: var(--shadow-md); border: 1px solid rgba(255,255,255,0.8); }
+.menu-item { padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.2s; }
+.menu-item:last-child { border-bottom: none; }
+.menu-item:active { background: #F8F8FA; }
+.menu-item-left { flex: 1; display: flex; align-items: center; gap: 16px; }
+.menu-icon { width: 36px; height: 36px; border-radius: 10px; background: #F0F0F5; display: grid; place-items: center; color: var(--text-main); }
+.menu-item-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+.menu-item-desc { font-size: 12px; color: var(--text-sub); font-weight: 500;}
+.menu-arrow { color: #C0C0C8; font-size: 18px; font-weight: 300; padding-left: 12px; transition: transform 0.2s;}
+.menu-item:active .menu-arrow { transform: translateX(4px); }
+.empty-state { font-size: 12px; color: var(--text-sub); font-weight: 500;}
+</style>
+</head>
+<body data-page-node-id="JhHx7pxHvOsv9ZGUHYHpMl">
+
+<div class="phone-mock" data-page-node-id="K4WtyuDo3Gp3HQeVEXFHtc">
+  
+  <!-- ================= 页面 1：创作者列表 ================= -->
+  <div id="page-list" class="page active" data-page-node-id="pT4DsrkFmi4EkYoGO6CMVT">
+    <div class="header" data-page-node-id="MPHppcvFiWOw9d02VKXIDG">
+      <h1 data-page-node-id="sa7IvEAgPeYcRRLJzGqWs5">Creator 经营</h1>
+      <p data-page-node-id="vVkPZn7DnLjmqyNNFRMTaE">围绕真实经营目标匹配、邀请，并追踪到店与消费结果。</p>
+      <div class="filter-tabs" data-page-node-id="rVT4EnM77EGVb9pF2AQxUI">
+        <div class="filter-tab active" data-page-node-id="ES5CowOXuBbD8lcB1j6g82">智能匹配</div>
+        <div class="filter-tab" data-page-node-id="sjrEekMYkuYuybbfp2HGRI">Creator</div>
+        <div class="filter-tab" data-page-node-id="j7X2zNdOuqR1ZM0FwsC6Md">合作中</div>
+        <div class="filter-tab" data-page-node-id="8ACgDQKVBBGQFMhqUSzK5b">已完成</div>
+      </div>
+    </div>
+
+    <div class="list-container" data-page-node-id="vpkbDtvQBqRF0KYUzvDJBJ">
+      <div class="list-title-bar" data-page-node-id="Bru251DDBnFAgsXazAizHM">
+        <h2 data-page-node-id="SfJriRfbZWXgY94heXuAPM">最佳匹配</h2>
+        <span data-page-node-id="7HG0sVtQeZmO0HxzEZ4PmM">5 位符合条件</span>
+      </div>
+
+      <!-- 达人卡片 1：An -->
+      <div class="creator-card" onclick="showDetail('An')" data-page-node-id="rBjdwhhXHDKWiF8V1z6nZH">
+        <div class="creator-avatar-wrap" data-page-node-id="IhcjHSyHxAWTQkwv6sgWWV">
+          <img class="creator-avatar" src="https://i.pravatar.cc/150?img=1" alt="An" data-page-node-id="foifRvE3vwHFfxaZuWQxeW">
+          <div class="status-dot" data-page-node-id="Z4vMfM4nKVE24AaBKt4sLL"></div>
+        </div>
+        <div class="creator-info" data-page-node-id="B6fuNN0EHOJdIwL11iNmcS">
+          <div class="creator-name" data-page-node-id="NhsHhi3CTQsVhDyNUFFnbg">An</div>
+          <div class="creator-tags" data-page-node-id="xXVTu9jXO6J9yG7VgZdMaK">
+            <span class="creator-tag" data-page-node-id="aDNMP9mLvNzqw9Jk3EbeDa">本地生活</span>
+            <span class="creator-tag" data-page-node-id="FTFWnrd8OtpmEVdCabaEBO">探店达人</span>
+            <span class="creator-tag" data-page-node-id="xoiN3XrsCW7fPu7NIFLBiO">VI / ZH</span>
+          </div>
+          <div class="creator-stats" data-page-node-id="GiCsmd2K8PnVZJbBYs1sbk">
+            <span data-page-node-id="f2b15o7d23CcCKjWTOXZra">⭐ <b data-page-node-id="ahITVpyDWFju4p1dhLxgOJ">4.9</b></span>
+            <span data-page-node-id="Ec5Gtn1P8nGTipF9lgM2zC">粉丝 <b data-page-node-id="GuSnHcNeaCAMHMJANpHxzr">2.4w</b></span>
+            <span data-page-node-id="gDPwtiAWRce5HMrTrcMwCH">均播 <b data-page-node-id="L9HYehazJESpXD5osBqht1">5.2w</b></span>
+          </div>
+        </div>
+        <div class="creator-action" data-page-node-id="tX2sjNSwjHI80k8rTSq7aE">
+          <div class="creator-price" data-page-node-id="qCz8hch8dJXzGI3A7tFRn1">¥900k<span data-page-node-id="BNdLeH0FW9XGtKXHelUtn0">/次</span></div>
+          <button class="btn-invite" data-page-node-id="3zqvhzpZJM2OgwKJInz46R">查看主页</button>
+        </div>
+      </div>
+
+      <!-- 达人卡片 2：Linh -->
+      <div class="creator-card" onclick="showDetail('Linh')" data-page-node-id="Dm8u4MeZZKNlDlbhCrZHhj">
+        <div class="creator-avatar-wrap" data-page-node-id="1KWXP66SH2FYz3jB07DMdO">
+          <img class="creator-avatar" src="https://i.pravatar.cc/150?img=5" alt="Linh" data-page-node-id="3cW59K3OWLvRn9Y56Icyj0">
+          <div class="status-dot" data-page-node-id="4tU23NTXpzQszSdep2S8AX"></div>
+        </div>
+        <div class="creator-info" data-page-node-id="SIjT0eccTbwSKbThTebFda">
+          <div class="creator-name" data-page-node-id="8W6BY0dX7YdQHUcYvsFcqd">Linh</div>
+          <div class="creator-tags" data-page-node-id="j25BCZq4s8QC7uDA8nSqWY">
+            <span class="creator-tag" data-page-node-id="Z1qQOVjizHAKcRcoJ7HjNn">KTV/SPA</span>
+            <span class="creator-tag" data-page-node-id="FZoxjgJnnq8IcYfSI4fIXG">短视频</span>
+            <span class="creator-tag" data-page-node-id="g39BpODY8bQmv5FmcQvgwm">VI / ZH</span>
+          </div>
+          <div class="creator-stats" data-page-node-id="BKU8uk4af4nBfczah6vFMH">
+            <span data-page-node-id="RLlqVMGUAjNcJCHr2aockz">⭐ <b data-page-node-id="bNuT9NUqtcsoVWwGSG9yZB">4.8</b></span>
+            <span data-page-node-id="3eUkhyqgzRFxCnScPKdYmK">粉丝 <b data-page-node-id="rvLRE6REl9DNuH9YCAHiAO">1.8w</b></span>
+            <span data-page-node-id="cpXcUBioNbtmYrsQwAuzig">均播 <b data-page-node-id="nLBD7l5cn9I53jOXVA6szW">3.8w</b></span>
+          </div>
+        </div>
+        <div class="creator-action" data-page-node-id="jfEhpARxMzUuwo5IWhxZ4Y">
+          <div class="creator-price" data-page-node-id="MJOxmIggAMCkhEzgH30LBO">¥1.2m<span data-page-node-id="MXyDC6FlmT461ngVlnmnYT">/次</span></div>
+          <button class="btn-invite" data-page-node-id="6ypAWoUcgxUppmBxkDAT8M">查看主页</button>
+        </div>
+      </div>
+
+      <!-- 达人卡片 3：Mai -->
+      <div class="creator-card" onclick="showDetail('Mai')" data-page-node-id="Zkf9CCqKyS2ePTJ0qjHQ0z">
+        <div class="creator-avatar-wrap" data-page-node-id="zEweV50hy0F4WQjozeOsAp">
+          <img class="creator-avatar" src="https://i.pravatar.cc/150?img=9" alt="Mai" data-page-node-id="DEdXsSjcOOHBhlWD3tHLTp">
+          <div class="status-dot" data-page-node-id="eXHkrOET9n35duioTNFSwG"></div>
+        </div>
+        <div class="creator-info" data-page-node-id="m1De9FecUnVyAVYXJTU8Og">
+          <div class="creator-name" data-page-node-id="aGVn9abodkahdVv60cGgUg">Mai</div>
+          <div class="creator-tags" data-page-node-id="QTlcg3cMs3rUfBOhzgiSkF">
+            <span class="creator-tag" data-page-node-id="1iWfrFhiogoRCH4yv7h2FJ">美食探店</span>
+            <span class="creator-tag" data-page-node-id="51V2iqBATg1r5NrDw86szG">夜生活</span>
+            <span class="creator-tag" data-page-node-id="0NqMhXt8G5FHyj2KkqOCyD">VI / EN</span>
+          </div>
+          <div class="creator-stats" data-page-node-id="CULTjmBSKrel7btNiBWKEt">
+            <span data-page-node-id="4C1f1KiiC9eeskAuJNIFuO">⭐ <b data-page-node-id="0EG4fF1aQ69H7HTFn260R7">4.7</b></span>
+            <span data-page-node-id="C3uDVfHc5aUd9nDmakK2LG">粉丝 <b data-page-node-id="z0qaWWMLUnQC9WC36ZCEQm">1.2w</b></span>
+            <span data-page-node-id="gs7hGiL1vllxK2pLGH9Voa">均播 <b data-page-node-id="UZHYzhf1jKXZI9sQmrUGJr">2.5w</b></span>
+          </div>
+        </div>
+        <div class="creator-action" data-page-node-id="DvgRRctgw67fi3BJKrBuNW">
+          <div class="creator-price" data-page-node-id="cQk5fVP5O6HHbnYttXKtcr">¥1.0m<span data-page-node-id="l7yq1Y4NRYMQ1wrBpNnsYh">/次</span></div>
+          <button class="btn-invite" data-page-node-id="DT8dgCakZgPPZWTZI6GVqJ">查看主页</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 页面 2：达人详情页（精修版） ================= -->
+  <div id="page-detail" class="page" data-page-node-id="HoAVCAZycA4LjUsUssAkqB">
+    <div class="nav-bar" data-page-node-id="hQUFpBbE8wWQL167ZxMcLF">
+      <button class="back-btn" onclick="showList()" data-page-node-id="B8bBGb2bBZsWNikdHXIumI">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="pEgN1ZLAzBh8JGplYrsjWE"><path d="M15 18l-6-6 6-6" data-page-node-id="BTrVeODGW1608LZJThxkcc"/></svg>
+      </button>
+      <div data-page-node-id="Gr2VG6VtK3qVClFNrGgQdI">
+        <h1 class="page-title" id="detail-name" data-page-node-id="C1C1ayofyNvOdOrDrKI4br">Linh</h1>
+        <div class="page-sub" data-page-node-id="5d92miwWNsvAYKnKeLOVdE">Creator 主页 · 经营</div>
+      </div>
+    </div>
+
+    <div class="profile-card" data-page-node-id="Cmi0hmO6p7t2LocFA2ZeOk">
+      <div class="profile-header" data-page-node-id="iHP3n1Ia1I5CTCGIJw4yCa">
+        <div class="avatar-wrap" data-page-node-id="wyh9hr0kNCL3Z4iZ2MDh96">
+          <img class="avatar" id="detail-avatar" src="https://i.pravatar.cc/150?img=5" alt="Linh" data-page-node-id="ywqPQexzVfuGtGvrgisDVb">
+          <div class="status-dot-lg" data-page-node-id="lQqu3g5KkUq2CoohAkx8fN"></div>
+        </div>
+        <div class="profile-info" data-page-node-id="4jBBLbljTiEoFcj3oR1OGJ">
+          <h1 id="detail-name-2" data-page-node-id="AiY11MD1NXjGiCflR4NupN">Linh</h1>
+          <div class="profile-desc" data-page-node-id="0pcWzrVVZVWAwz5QCE5wbH">河内本地向导，中文流利，擅长摄影</div>
+          <div class="profile-tags" data-page-node-id="qo82KRfneV1ej5NAGRd8aM">
+            <span class="tag" data-page-node-id="5Rsz1QtTVGyGqJkZl1yODD">本地向导</span>
+            <span class="tag" data-page-node-id="IiZ0aGt11a9sLxXUV8bVuB">双语探店</span>
+            <span class="tag" data-page-node-id="Nq3kxpGFL4gGIHNnaK5c7B">摄影达人</span>
+            <span class="tag highlight" data-page-node-id="lFDLBQuuWNeNbK7k42JDmS">✓ 可邀请</span>
+          </div>
+        </div>
+      </div>
+      <div class="price-bar" data-page-node-id="SD0W161miu5nHCYsHlhyAh">
+        <div data-page-node-id="vyzRjtNiAGio2WoROurKQe">
+          <div class="price-label" data-page-node-id="qpTfBWcrxvVX1u0phZSwLJ">参考报价</div>
+          <div class="price-value" data-page-node-id="tiNdTRc7pgRQ7NHB4cXKTc">¥1.2m <span data-page-node-id="t0w9lEpAlgIM2mxnjaAlYo">/次</span></div>
+        </div>
+        <button class="btn-invite-lg" onclick="inviteCreator()" data-page-node-id="hBTqb4Ea07QrJirM2kKly4">邀请合作</button>
+      </div>
+    </div>
+
+    <h3 class="section-title" data-page-node-id="yVIvQhyGTsMRlA1DATIihW">能力认证</h3>
+    <div class="skills-wrap" data-page-node-id="j4Pi0Eq81VQuFUgmOqnmGk">
+      <div class="skill-tag checked" data-page-node-id="Wse4Y7teU79uZNZnkRIq60">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="jFabHoXcRGvFY7BsD2LdXe"><polyline points="20 6 9 17 4 12" data-page-node-id="7z338NXYyGCyvhn4TEistq"></polyline></svg>
+        摄影
+      </div>
+      <div class="skill-tag checked" data-page-node-id="u6dBBpfSwlV34Hlnx1XqV7">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="wC25jYY2b2q73ivGMiGlIl"><polyline points="20 6 9 17 4 12" data-page-node-id="nNHJcUq9yOU0bQC9pCZdZc"></polyline></svg>
+        中文
+      </div>
+      <div class="skill-tag checked" data-page-node-id="Vu0jjVFyqZGV6samNPZ5Df">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="IfOwzbwGEGvWXbBHpHBRME"><polyline points="20 6 9 17 4 12" data-page-node-id="F9QNL336IDApIGh19mLFda"></polyline></svg>
+        越南语
+      </div>
+    </div>
+
+    <h3 class="section-title" data-page-node-id="XL9yuSKx7cNMeOabFVonK9">社媒账户</h3>
+    <div class="social-card" data-page-node-id="VHzFVZv8pdIx9BwENZTy7f">
+      <div class="social-info" data-page-node-id="Grg39E6EiHQrXRkhd7iHqY">
+        <span style="font-size: 18px;" data-page-node-id="NNB3oQG2jNJ9EQ72RhIdsd">🎵</span>
+        <span data-page-node-id="KhCsIpsgWHQDto2ecRkJyq">TikTok</span>
+        <span style="color:var(--text-sub); font-weight:500; font-size: 13px;" data-page-node-id="uOVL4qQQqeiDl4iIGDsayj">@linh_hanoi</span>
+      </div>
+      <button class="social-btn" onclick="openTikTok()" data-page-node-id="a6Ax0V6PV2iOGx0xLjyerr">主页 ↗</button>
+    </div>
+
+    <div class="dashboard-card" data-page-node-id="oRY70COGwzAmxtaYYFm2VE">
+      <div class="dash-header" data-page-node-id="5tE5mt1ypWggf2II2jb7WR">
+        <div class="dash-title" data-page-node-id="jgt3nkTGWKXPd2Ebj5687h">Linh · 商业数据</div>
+        <div class="dash-status" data-page-node-id="rskrFzNhPppIYYB2iVBmZB">可邀请</div>
+      </div>
+      <div class="dash-grid" data-page-node-id="9xCPA2mQ5FT6NYm2KNxNWA">
+        <div class="dash-item" data-page-node-id="yFmt9kpy1DLj3yHkpwNHhd">
+          <div class="dash-value" data-page-node-id="jLehERLeFkkJe0xP1QhMUH">1</div>
+          <div class="dash-label" data-page-node-id="OJItI3wgpFxLeFDVQF9xXT">到店履历</div>
+        </div>
+        <div class="dash-item" data-page-node-id="H7FSscE6fgTt86VKbYi0eC">
+          <div class="dash-value" data-page-node-id="fGBZWgYoPxq1A5qYf13KbY">3</div>
+          <div class="dash-label" data-page-node-id="gCIMCXLoHEnHjzQS05vDzc">已验证能力</div>
+        </div>
+        <div class="dash-item" data-page-node-id="BvxpKNGrXtJybTme9ehGLb">
+          <div class="dash-value" data-page-node-id="N5BB0MNZKwkfug5W8IHx12">本地向导</div>
+          <div class="dash-label" data-page-node-id="KgWcqGYlxLBfrBq3JEVg6D">核心服务</div>
+        </div>
+        <div class="dash-item" data-page-node-id="UKTJc4BCT3Jt7LUqJzCiqA">
+          <div class="dash-value" data-page-node-id="rWxQZGbvpA3ima2xbMhqqo">¥1.2m</div>
+          <div class="dash-label" data-page-node-id="MLri2G7M0CEgQ4ujregVXd">参考报价</div>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="section-title" style="margin-top: 24px;" data-page-node-id="67LlBpCOCazXoKy3SCsnEh">合作管理</h3>
+    <div class="menu-list" data-page-node-id="1MxN43S0z1jFPXc6BfKe93">
+      <div class="menu-item" onclick="goToList('最近到店')" data-page-node-id="CxaYYalXmLlNNT9PAERBPN">
+        <div class="menu-item-left" data-page-node-id="cB3tg1nwFxGfENOgoY73aH">
+          <div class="menu-icon" data-page-node-id="j7GgmV26AnrKmcFGImviBB">🏪</div>
+          <div data-page-node-id="EAQ9KTGagGtO1fFBG0P9RH">
+            <div class="menu-item-title" data-page-node-id="v5RCvtrsZoAg0njCIpfLlt">最近到店</div>
+            <div class="empty-state" data-page-node-id="La8QC6v74c4jlyHnRTJn0t">等待真实履约记录</div>
+          </div>
+        </div>
+        <div class="menu-arrow" data-page-node-id="MmhkXgSV67avua1ewU61mz">›</div>
+      </div>
+      <div class="menu-item" onclick="goToList('当前权益')" data-page-node-id="lS8dWFvEpSqV2hHYEnyGOs">
+        <div class="menu-item-left" data-page-node-id="i7zFDDOCAiZQq101BtSV9p">
+          <div class="menu-icon" data-page-node-id="SXCK2GF1r3N20ekHQhrxT2">🎫</div>
+          <div data-page-node-id="2AXGcNf7rH5pakh69gAqSh">
+            <div class="menu-item-title" data-page-node-id="jqAxxwqgTNlrarGeyUkG7i">当前权益</div>
+            <div class="menu-item-desc" data-page-node-id="lItCpk2JGGeYnOTbnCWB4p">查看关联券</div>
+          </div>
+        </div>
+        <div class="menu-arrow" data-page-node-id="cqOtQ77hgguEHfsecWF9jQ">›</div>
+      </div>
+      <div class="menu-item" onclick="goToList('当前邀请')" data-page-node-id="9RpI5YTXi29OqTrbxn5lRn">
+        <div class="menu-item-left" data-page-node-id="LhpqUNZmLp0gyXqOclntpf">
+          <div class="menu-icon" data-page-node-id="0tvSB9LG2rFqXFEjoUmmYF">📨</div>
+          <div data-page-node-id="MdJpP5tcBjlQas04oyaEgI">
+            <div class="menu-item-title" data-page-node-id="fFF0GZekaWjQybtlpoW8DM">当前邀请</div>
+            <div class="menu-item-desc" data-page-node-id="ViJmbr8KYPOQs55b0tLqb0">查看活动与邀请</div>
+          </div>
+        </div>
+        <div class="menu-arrow" data-page-node-id="WOfBdheCKbTaLzKkqbhYHX">›</div>
+      </div>
+      <div class="menu-item" onclick="goToList('合作结果')" data-page-node-id="agnmWtNCKTULA54YCh8Kdm">
+        <div class="menu-item-left" data-page-node-id="gZJd5sESBYrlsgI5DpPZP3">
+          <div class="menu-icon" data-page-node-id="g2BRcNneTrTL9BPnw9cdA0">📈</div>
+          <div data-page-node-id="BLcBD6jVTV5J3ef8EZVYPT">
+            <div class="menu-item-title" data-page-node-id="wYnH7wiZuPWaZDh6j7DEaU">合作结果</div>
+            <div class="menu-item-desc" data-page-node-id="HI3d0619HuSoTXGxFxr4iw">查看销售归因</div>
+          </div>
+        </div>
+        <div class="menu-arrow" data-page-node-id="YcOE5pVvZUwCLzdyGVavCN">›</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // 页面切换逻辑
+  function showDetail(creatorName) {
+    // 动态更新详情页的名字（这里可以做更多动态数据填充，演示只改名字）
+    document.getElementById('detail-name').textContent = creatorName;
+    document.getElementById('detail-name-2').textContent = creatorName;
+    
+    // 切换 class
+    document.getElementById('page-list').classList.remove('active');
+    document.getElementById('page-detail').classList.add('active');
+    // 滚动到顶部
+    document.querySelector('.phone-mock').scrollTop = 0;
+  }
+
+  function showList() {
+    document.getElementById('page-detail').classList.remove('active');
+    document.getElementById('page-list').classList.add('active');
+  }
+
+  // 交互反馈
+  function inviteCreator() {
+    alert('已发送合作邀请！');
+  }
+
+  function openTikTok() {
+    alert('跳转至 TikTok 主页');
+  }
+
+  function goToList(name) {
+    alert(`进入【${name}】详情列表页`);
+  }
+</script>
+
+</body>
+</html>

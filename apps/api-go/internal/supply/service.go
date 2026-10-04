@@ -271,6 +271,23 @@ type Repository interface {
 	// MERCHANT-CREATOR-PROMO-001：自动档（商家默认优惠，一家一行，upsert）。
 	SaveAutoPromoBenefit(ctx context.Context, a PromoAutoBenefit) error
 	GetAutoPromoBenefit(ctx context.Context, merchantID string) (PromoAutoBenefit, error)
+	// MERCHANT-CREATOR-PROMO-002：商家 × creator 专属码 / 调整留痕 / 发券。
+	SaveMerchantCreatorPromo(ctx context.Context, p MerchantCreatorPromo) error
+	UpdateMerchantCreatorPromo(ctx context.Context, p MerchantCreatorPromo) error
+	GetMerchantCreatorPromo(ctx context.Context, code string) (MerchantCreatorPromo, error)
+	GetMerchantCreatorPromoByPair(ctx context.Context, merchantID, agentID string) (MerchantCreatorPromo, error)
+	ListMerchantCreatorPromosByMerchant(ctx context.Context, merchantID string) ([]MerchantCreatorPromo, error)
+	ListMerchantCreatorPromosByAgent(ctx context.Context, agentID string) ([]MerchantCreatorPromo, error)
+	ListMerchantCreatorPromosByCategory(ctx context.Context, category string) ([]MerchantCreatorPromo, error)
+	SavePromoChange(ctx context.Context, c PromoChange) error
+	ListPromoChanges(ctx context.Context, code string) ([]PromoChange, error)
+	// SavePromoIssue：同一顾客同一码已领过 ⇒ ErrPromoAlreadyIssued。
+	SavePromoIssue(ctx context.Context, i PromoIssue) error
+	GetPromoIssue(ctx context.Context, id string) (PromoIssue, error)
+	GetPromoIssueByCustomer(ctx context.Context, code, customerID string) (PromoIssue, error)
+	ListPromoIssuesByMerchant(ctx context.Context, merchantID string) ([]PromoIssue, error)
+	ListPromoIssuesByAgent(ctx context.Context, agentID string) ([]PromoIssue, error)
+	ListPromoIssuesByCustomer(ctx context.Context, customerID string) ([]PromoIssue, error)
 }
 
 // TransactionalRepository 由支持事务性 outbox 的存储实现（事件与状态原子提交）。
@@ -308,6 +325,10 @@ type MemoryRepository struct {
 	promoBenefits map[string]PromoBenefit
 	promoQuotes   map[string]PromoQuote
 	promoAuto     map[string]PromoAutoBenefit
+	// MERCHANT-CREATOR-PROMO-002（懒初始化，见 promo_pair_memory.go）。
+	pairPromos   map[string]MerchantCreatorPromo
+	promoChanges []PromoChange
+	promoIssues  map[string]PromoIssue
 	events        []event.DomainEvent
 }
 
@@ -797,6 +818,8 @@ type Service struct {
 	// = 候选集为空。这是刻意的 fail-closed，不是 bug：宁可撮合不着，
 	// 也不能在「明知卖家匿名」的状态下收款。
 	sellerIdentity SellerIdentityLookup
+	// MERCHANT-CREATOR-PROMO-002：商家门店资料（店名 + 品类），专属码按它定品类。
+	merchantStores MerchantStoreLookup
 	// MATCH-RANK-001：撮合排序的真实信号。nil = 没接 → 全员按先验分 + 价格排（不假装有履约记录）。
 	rankingSignals matching.SignalSource
 }
@@ -846,7 +869,9 @@ func (s *Service) Supports(commandType string) bool {
 		"InviteCreator", "RespondCollabInvitation", "CancelCollabInvitation", "ListCollabInvitations",
 		"ClaimPromoCode", "DisablePromoCode", "BindPromoBenefit", "DisablePromoBenefit",
 		"QuotePromoCode", "ListPromoAssets", "GetPromoStats",
-		"SetAutoPromoBenefit":
+		"SetAutoPromoBenefit",
+		"IssueMerchantCreatorPromo", "AdjustMerchantCreatorPromo", "ListMerchantCreatorPromos", "GetMerchantCreatorPromoBasis",
+		"ClaimPromoCoupon", "ListMyPromoCoupons", "ListMyMerchantPromos":
 		return true
 	default:
 		return false
@@ -917,6 +942,20 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.getPromoStats(ctx, e)
 	case "SetAutoPromoBenefit":
 		return s.setAutoPromoBenefit(ctx, e)
+	case "IssueMerchantCreatorPromo":
+		return s.issueMerchantCreatorPromo(ctx, e)
+	case "AdjustMerchantCreatorPromo":
+		return s.adjustMerchantCreatorPromo(ctx, e)
+	case "ListMerchantCreatorPromos":
+		return s.listMerchantCreatorPromos(ctx, e)
+	case "GetMerchantCreatorPromoBasis":
+		return s.getMerchantCreatorPromoBasis(ctx, e)
+	case "ClaimPromoCoupon":
+		return s.claimPromoCoupon(ctx, e)
+	case "ListMyPromoCoupons":
+		return s.listMyPromoCoupons(ctx, e)
+	case "ListMyMerchantPromos":
+		return s.listMyMerchantPromos(ctx, e)
 	default:
 		return command.Rejected(e, "SUPPLY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "supply.unsupported_command", nil)
 	}

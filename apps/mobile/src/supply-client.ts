@@ -286,11 +286,15 @@ export type PromoBenefit = {
   merchantId: string;
   code: string;
   faceValueVnd: number;
+  // 门槛：满多少才减（0 = 无门槛）。老服务端不带时按 0。
+  minSpendVnd: number;
   scopeName: string;
   validUntil: string;
   status: string;
   // 绑定来源：MANUAL（逐个绑）/ AUTO（自动档报码时建的）。老服务端不带时按 MANUAL。
   source: string;
+  // 调整原因（商家手填，团队回看用），可空。
+  note: string;
   createdAt: string;
 };
 
@@ -334,10 +338,12 @@ export function parsePromoBenefit(value: unknown): PromoBenefit | undefined {
     merchantId: item.merchantId,
     code: item.code,
     faceValueVnd: typeof item.faceValueVnd === "number" && item.faceValueVnd > 0 ? Math.floor(item.faceValueVnd) : 0,
+    minSpendVnd: typeof item.minSpendVnd === "number" && item.minSpendVnd > 0 ? Math.floor(item.minSpendVnd) : 0,
     scopeName: typeof item.scopeName === "string" ? item.scopeName : "",
     validUntil: typeof item.validUntil === "string" ? item.validUntil : "",
     status: typeof item.status === "string" ? item.status : "",
     source: item.source === "AUTO" ? "AUTO" : "MANUAL",
+    note: typeof item.note === "string" ? item.note : "",
     createdAt: typeof item.createdAt === "string" ? item.createdAt : "",
   };
 }
@@ -364,6 +370,7 @@ export type PromoAutoBenefit = {
   merchantId: string;
   enabled: boolean;
   faceValueVnd: number;
+  minSpendVnd: number;
   scopeName: string;
   validityDays: number;
 };
@@ -376,6 +383,7 @@ export function parsePromoAutoBenefit(value: unknown): PromoAutoBenefit | undefi
     merchantId: item.merchantId,
     enabled: item.enabled === true,
     faceValueVnd: typeof item.faceValueVnd === "number" && item.faceValueVnd > 0 ? Math.floor(item.faceValueVnd) : 0,
+    minSpendVnd: typeof item.minSpendVnd === "number" && item.minSpendVnd > 0 ? Math.floor(item.minSpendVnd) : 0,
     scopeName: typeof item.scopeName === "string" ? item.scopeName : "",
     validityDays: typeof item.validityDays === "number" && item.validityDays > 0 ? Math.floor(item.validityDays) : 0,
   };
@@ -388,11 +396,136 @@ export function promoQrValue(code: string): string {
   return `PROXY-PROMO:${code.trim().toUpperCase()}`;
 }
 
+// MERCHANT-CREATOR-PROMO-002：也认商家 × creator 专属码（AN-WORKSHOP，带横杠）。
+export const PAIR_PROMO_CODE_RE = /^[A-Z0-9]{2,10}-[A-Z0-9]{2,10}(-[2-9])?$/;
+
 export function parsePromoQr(text: string): string | undefined {
   const raw = text.trim();
   const code = raw.startsWith("PROXY-PROMO:") ? raw.slice("PROXY-PROMO:".length) : raw;
   const normalized = code.trim().toUpperCase();
-  return /^[A-Z0-9]{4,16}$/.test(normalized) ? normalized : undefined;
+  return /^[A-Z0-9]{4,16}$/.test(normalized) || PAIR_PROMO_CODE_RE.test(normalized) ? normalized : undefined;
+}
+
+// 顾客券包里那张券的二维码：店员扫它核销，新客由系统按顾客身份判定。
+export function couponQrValue(couponId: string): string {
+  return `PROXY-COUPON:${couponId.trim()}`;
+}
+
+export function parseCouponQr(text: string): string | undefined {
+  const raw = text.trim();
+  if (!raw.startsWith("PROXY-COUPON:")) return undefined;
+  const id = raw.slice("PROXY-COUPON:".length).trim();
+  return /^[A-Za-z0-9_-]{4,64}$/.test(id) ? id : undefined;
+}
+
+// ---------------------------------------------------------------- MERCHANT-CREATOR-PROMO-002
+
+export type PairPromoTerms = {
+  minSpendVnd: number;
+  faceValueVnd: number;
+  displayText: string;
+  scope: "STORE_CATEGORY" | "STORE_ALL";
+  category: string;
+  // 空 = 长期有效。
+  validUntil: string;
+};
+
+export type PromoBasisItem = { key: string; label: string; value: string; available: boolean; effectBp: number };
+
+export type PromoSuggestion = { percentBp: number; minSpendVnd: number; faceValueVnd: number; basis: PromoBasisItem[] };
+
+export type MerchantCreatorPromo = {
+  code: string;
+  merchantId: string;
+  merchantName: string;
+  agentId: string;
+  creatorName: string;
+  terms: PairPromoTerms;
+  status: string;
+  mode: "SUGGESTED" | "MANUAL";
+  suggestion: PromoSuggestion;
+  note: string;
+};
+
+export type PairPromoStats = { issued: number; redeemed: number; couponRedeem: number; newCustomers: number; spendVnd: number; discountVnd: number };
+
+export type PromoChange = { id: string; before: PairPromoTerms; after: PairPromoTerms; mode: string; note: string; changedAt: string };
+
+export type PairPromoView = { promo: MerchantCreatorPromo; stats: PairPromoStats; lastChange?: PromoChange | undefined };
+
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
+
+export function parsePairPromoTerms(value: unknown): PairPromoTerms {
+  const t = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  return {
+    minSpendVnd: Math.max(0, Math.floor(num(t.minSpendVnd))),
+    faceValueVnd: Math.max(0, Math.floor(num(t.faceValueVnd))),
+    displayText: str(t.displayText),
+    scope: t.scope === "STORE_CATEGORY" ? "STORE_CATEGORY" : "STORE_ALL",
+    category: str(t.category),
+    validUntil: str(t.validUntil),
+  };
+}
+
+export function parsePromoSuggestion(value: unknown): PromoSuggestion {
+  const v = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const basis = Array.isArray(v.basis) ? v.basis.flatMap((raw: unknown) => {
+    if (!raw || typeof raw !== "object") return [];
+    const b = raw as Record<string, unknown>;
+    return typeof b.key === "string" ? [{ key: b.key, label: str(b.label), value: str(b.value), available: b.available === true, effectBp: num(b.effectBp) }] : [];
+  }) : [];
+  return { percentBp: num(v.percentBp), minSpendVnd: num(v.minSpendVnd), faceValueVnd: num(v.faceValueVnd), basis };
+}
+
+export function parseMerchantCreatorPromo(value: unknown): MerchantCreatorPromo | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const p = value as Record<string, unknown>;
+  if (typeof p.code !== "string" || p.code === "" || typeof p.agentId !== "string") return undefined;
+  return {
+    code: p.code,
+    merchantId: str(p.merchantId),
+    merchantName: str(p.merchantName),
+    agentId: p.agentId,
+    creatorName: str(p.creatorName),
+    terms: parsePairPromoTerms(p.terms),
+    status: str(p.status) || "ACTIVE",
+    mode: p.mode === "MANUAL" ? "MANUAL" : "SUGGESTED",
+    suggestion: parsePromoSuggestion(p.suggestion),
+    note: str(p.note),
+  };
+}
+
+export function parsePairPromoStats(value: unknown): PairPromoStats {
+  const v = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  return { issued: num(v.issued), redeemed: num(v.redeemed), couponRedeem: num(v.couponRedeem), newCustomers: num(v.newCustomers), spendVnd: num(v.spendVnd), discountVnd: num(v.discountVnd) };
+}
+
+function parsePromoChange(value: unknown): PromoChange | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const c = value as Record<string, unknown>;
+  return { id: str(c.id), before: parsePairPromoTerms(c.before), after: parsePairPromoTerms(c.after), mode: str(c.mode), note: str(c.note), changedAt: str(c.changedAt) };
+}
+
+export function parsePairPromoViews(value: unknown): PairPromoView[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw: unknown) => {
+    if (!raw || typeof raw !== "object") return [];
+    const v = raw as Record<string, unknown>;
+    const promo = parseMerchantCreatorPromo(v.promo);
+    if (!promo) return [];
+    const lastChange = parsePromoChange(v.lastChange);
+    return [lastChange ? { promo, stats: parsePairPromoStats(v.stats), lastChange } : { promo, stats: parsePairPromoStats(v.stats) }];
+  });
+}
+
+export type PromoCoupon = { couponId: string; code: string; merchantId: string; agentId: string; issuedAt: string; promo: MerchantCreatorPromo | undefined; redeemed: boolean };
+
+export function parsePromoCoupon(value: unknown, promo: unknown, redeemed: unknown): PromoCoupon | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const c = value as Record<string, unknown>;
+  if (typeof c.couponId !== "string" || c.couponId === "") return undefined;
+  return { couponId: c.couponId, code: str(c.code), merchantId: str(c.merchantId), agentId: str(c.agentId), issuedAt: str(c.issuedAt), promo: parseMerchantCreatorPromo(promo), redeemed: redeemed === true };
 }
 
 export function parsePromoStats(value: unknown): PromoStats {
@@ -546,10 +679,11 @@ export class SupplyClient {
     await this.command("DisablePromoBenefit", { type: "PromoBenefit", id: input.code }, { merchantId: input.merchantId, code: input.code });
   }
 
-  public async bindPromoBenefit(input: { merchantId: string; code: string; faceValueVnd: number; scopeName: string; validUntil: string }): Promise<PromoBenefit> {
+  public async bindPromoBenefit(input: { merchantId: string; code: string; faceValueVnd: number; minSpendVnd?: number; scopeName: string; validUntil: string; note?: string }): Promise<PromoBenefit> {
     const body = this.body(await this.command("BindPromoBenefit", { type: "PromoBenefit", id: "new" }, {
       merchantId: input.merchantId, code: input.code, faceValueVnd: input.faceValueVnd,
-      scopeName: input.scopeName, validUntil: input.validUntil,
+      minSpendVnd: input.minSpendVnd ?? 0, scopeName: input.scopeName, validUntil: input.validUntil,
+      ...(input.note ? { note: input.note } : {}),
     }));
     const parsed = parsePromoBenefit(body.benefit);
     if (!parsed) throw new SupplyProtocolError("promo benefit malformed");
@@ -567,9 +701,10 @@ export class SupplyClient {
   }
 
   // MERCHANT-CREATOR-PROMO-001：自动档。开一次，以后没绑过的码来报码自动建绑定。
-  public async setAutoPromoBenefit(input: { merchantId: string; enabled: boolean; faceValueVnd?: number; scopeName?: string; validityDays?: number }): Promise<PromoAutoBenefit> {
+  public async setAutoPromoBenefit(input: { merchantId: string; enabled: boolean; faceValueVnd?: number; minSpendVnd?: number; scopeName?: string; validityDays?: number }): Promise<PromoAutoBenefit> {
     const payload: Record<string, unknown> = { merchantId: input.merchantId, enabled: input.enabled };
     if (input.faceValueVnd !== undefined) payload.faceValueVnd = input.faceValueVnd;
+    if (input.minSpendVnd !== undefined) payload.minSpendVnd = input.minSpendVnd;
     if (input.scopeName !== undefined) payload.scopeName = input.scopeName;
     if (input.validityDays !== undefined) payload.validityDays = input.validityDays;
     const body = this.body(await this.command("SetAutoPromoBenefit", { type: "PromoAutoBenefit", id: "mine" }, payload));
@@ -578,8 +713,9 @@ export class SupplyClient {
     return parsed;
   }
 
-  public async quotePromoCode(input: { merchantId: string; code: string; amountVnd?: number; firstVisit?: boolean }): Promise<{ quote: PromoQuote; faceValueVnd: number; scopeName: string }> {
+  public async quotePromoCode(input: { merchantId: string; code: string; couponId?: string; amountVnd?: number; firstVisit?: boolean }): Promise<{ quote: PromoQuote; faceValueVnd: number; minSpendVnd: number; scopeName: string }> {
     const payload: Record<string, unknown> = { merchantId: input.merchantId, code: input.code };
+    if (input.couponId) payload.couponId = input.couponId;
     if (input.amountVnd !== undefined) payload.amountVnd = input.amountVnd;
     if (input.firstVisit !== undefined) payload.firstVisit = input.firstVisit;
     const body = this.body(await this.command("QuotePromoCode", { type: "PromoQuote", id: "new" }, payload));
@@ -589,8 +725,74 @@ export class SupplyClient {
     return {
       quote,
       faceValueVnd: typeof benefit.faceValueVnd === "number" ? benefit.faceValueVnd : 0,
+      minSpendVnd: typeof benefit.minSpendVnd === "number" && benefit.minSpendVnd > 0 ? benefit.minSpendVnd : 0,
       scopeName: typeof benefit.scopeName === "string" ? benefit.scopeName : "",
     };
+  }
+
+  // ---------------------------------------------------------------- MERCHANT-CREATOR-PROMO-002
+
+  // 品类不由客户端传：服务端读本店门店资料。merchantName 只在门店资料读不到时用作码里的店名段。
+  public async issueMerchantCreatorPromo(input: { merchantId: string; agentId: string; merchantName: string }): Promise<MerchantCreatorPromo> {
+    const body = this.body(await this.command("IssueMerchantCreatorPromo", { type: "MerchantCreatorPromo", id: "new" }, { ...input }));
+    const parsed = parseMerchantCreatorPromo(body.promo);
+    if (!parsed) throw new SupplyProtocolError("merchant creator promo malformed");
+    return parsed;
+  }
+
+  public async adjustMerchantCreatorPromo(input: {
+    merchantId: string; code: string; applySuggestion?: boolean; minSpendVnd?: number; faceValueVnd?: number;
+    displayText?: string; scope?: "STORE_CATEGORY" | "STORE_ALL"; validityDays?: number; note?: string; disable?: boolean;
+  }): Promise<MerchantCreatorPromo> {
+    const body = this.body(await this.command("AdjustMerchantCreatorPromo", { type: "MerchantCreatorPromo", id: input.code }, { ...input }));
+    const parsed = parseMerchantCreatorPromo(body.promo);
+    if (!parsed) throw new SupplyProtocolError("merchant creator promo malformed");
+    return parsed;
+  }
+
+  // 打开就自动给本店市场里还没有码的 creator 发码（服务端做，商家不用逐个生成）。
+  public async listMerchantCreatorPromos(input: { merchantId: string; marketId: string; merchantName: string }): Promise<{ promos: PairPromoView[]; totals: PairPromoStats; conversionBp: number; storeCategory: string; storeCategoryRaw: string }> {
+    const body = this.body(await this.command("ListMerchantCreatorPromos", { type: "MerchantCreatorPromo", id: "query" }, { merchantId: input.merchantId, marketId: input.marketId, merchantName: input.merchantName }));
+    return {
+      promos: parsePairPromoViews(body.promos), totals: parsePairPromoStats(body.totals),
+      conversionBp: typeof body.conversionBp === "number" ? body.conversionBp : -1,
+      storeCategory: typeof body.storeCategory === "string" ? body.storeCategory : "",
+      storeCategoryRaw: typeof body.storeCategoryRaw === "string" ? body.storeCategoryRaw : "",
+    };
+  }
+
+  public async merchantCreatorPromoBasis(input: { merchantId: string; code: string }): Promise<{ suggestion: PromoSuggestion; changes: PromoChange[] }> {
+    const body = this.body(await this.command("GetMerchantCreatorPromoBasis", { type: "MerchantCreatorPromo", id: input.code }, { merchantId: input.merchantId, code: input.code }));
+    const changes = Array.isArray(body.changes) ? body.changes.flatMap((c: unknown) => { const parsed = parsePromoChange(c); return parsed ? [parsed] : []; }) : [];
+    return { suggestion: parsePromoSuggestion(body.suggestion), changes };
+  }
+
+  // 顾客扫 creator 的专属码领券（每人每码一张，再领返回原来那张）。
+  public async claimPromoCoupon(input: { code: string }): Promise<{ coupon: PromoCoupon; alreadyClaimed: boolean }> {
+    const body = this.body(await this.command("ClaimPromoCoupon", { type: "PromoIssue", id: "new" }, { code: input.code }));
+    const coupon = parsePromoCoupon(body.coupon, body.promo, false);
+    if (!coupon) throw new SupplyProtocolError("promo coupon malformed");
+    return { coupon, alreadyClaimed: body.alreadyClaimed === true };
+  }
+
+  public async listMyPromoCoupons(): Promise<PromoCoupon[]> {
+    const body = this.body(await this.command("ListMyPromoCoupons", { type: "PromoIssue", id: "mine" }, {}));
+    return Array.isArray(body.coupons) ? body.coupons.flatMap((raw: unknown) => {
+      const v = (raw ?? {}) as Record<string, unknown>;
+      const parsed = parsePromoCoupon(v.coupon, v.promo, v.redeemed);
+      return parsed ? [parsed] : [];
+    }) : [];
+  }
+
+  // creator 看自己在每家店的专属码和战绩。
+  public async listMyMerchantPromos(input: { agentId: string }): Promise<{ promos: Array<{ promo: MerchantCreatorPromo; stats: PairPromoStats }>; totals: PairPromoStats }> {
+    const body = this.body(await this.command("ListMyMerchantPromos", { type: "MerchantCreatorPromo", id: input.agentId }, { agentId: input.agentId }));
+    const promos = Array.isArray(body.promos) ? body.promos.flatMap((raw: unknown) => {
+      const v = (raw ?? {}) as Record<string, unknown>;
+      const promo = parseMerchantCreatorPromo(v.promo);
+      return promo ? [{ promo, stats: parsePairPromoStats(v.stats) }] : [];
+    }) : [];
+    return { promos, totals: parsePairPromoStats(body.totals) };
   }
 
   public async merchantPromoStats(input: { merchantId: string }): Promise<PromoStats> {

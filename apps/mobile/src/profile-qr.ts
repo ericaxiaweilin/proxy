@@ -170,7 +170,9 @@ export function parseContactCard(raw: string): ParsedContactCard | null {
 // 码还在别人相册里**，不能因为换了格式就认不出来），最后接受裸 `@handle`（用户手打的）。
 export type ScannedQr =
   | { kind: "person"; handle: string; name: string }
-  | { kind: "store"; storeId: string; name: string };
+  | { kind: "store"; storeId: string; name: string }
+  // MERCHANT-CREATOR-PROMO-002：达人在某家店的专属码（PROXY-PROMO:AN-WORKSHOP）—— 扫到就领券。
+  | { kind: "promo"; code: string; name: string };
 
 /** 旧的裸 `proxy.app/...` 归一成 https 全量；未知形状原样透传，绝不瞎改。 */
 export function toQrPayload(value: string): string {
@@ -205,6 +207,10 @@ export function parseScannedQr(value: string): ScannedQr | null {
   const v = value.trim();
   if (!v) return null;
 
+  // 只认「商家 × 达人」专属码（带横杠）：达人的个人码不能直接领券（不知道是哪家店的）。
+  const promo = /^PROXY-PROMO:([A-Z0-9]{2,10}-[A-Z0-9]{2,10}(?:-[2-9])?)$/i.exec(v);
+  if (promo?.[1]) return { kind: "promo", code: promo[1].toUpperCase(), name: "" };
+
   const card = parseContactCard(v);
   if (card) {
     if (card.handle) return { kind: "person", handle: card.handle, name: card.name };
@@ -227,5 +233,6 @@ export function parseScannedQr(value: string): ScannedQr | null {
 
 /** 码下方展示 / 复制的那串。人给 `@handle`（**这个才是 App 搜得到的**），店铺给店名。 */
 export function scannedCaption(scanned: ScannedQr): string {
+  if (scanned.kind === "promo") return scanned.code;
   return scanned.kind === "person" ? `@${scanned.handle}` : scanned.name;
 }
