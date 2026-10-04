@@ -449,7 +449,7 @@ func (r *SupplyRepository) GetCandidateBatch(ctx context.Context, batchID string
 
 func (r *SupplyRepository) ProfilesSnapshot(ctx context.Context) ([]supply.AgentProfile, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT agent_id, name, bio, photos, languages, service_areas, status, created_at, updated_at
+		SELECT agent_id, name, bio, photos, languages, service_areas, status, created_at, updated_at, COALESCE(socials, '[]'), COALESCE(user_account_id, '')
 		FROM supply.agent_profiles ORDER BY agent_id`)
 	if err != nil {
 		return nil, err
@@ -459,12 +459,17 @@ func (r *SupplyRepository) ProfilesSnapshot(ctx context.Context) ([]supply.Agent
 	for rows.Next() {
 		var p supply.AgentProfile
 		var photos, languages, areas []byte
-		if err := rows.Scan(&p.AgentID, &p.Name, &p.Bio, &photos, &languages, &areas, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var socialsJSON, userAccountID string
+		if err := rows.Scan(&p.AgentID, &p.Name, &p.Bio, &photos, &languages, &areas, &p.Status, &p.CreatedAt, &p.UpdatedAt, &socialsJSON, &userAccountID); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(photos, &p.Photos)
 		_ = json.Unmarshal(languages, &p.Languages)
 		_ = json.Unmarshal(areas, &p.ServiceAreas)
+		_ = json.Unmarshal([]byte(socialsJSON), &p.Socials)
+		if userAccountID != "" {
+			p.UserAccountID = userAccountID
+		}
 		result = append(result, p)
 	}
 	return result, rows.Err()
@@ -472,7 +477,7 @@ func (r *SupplyRepository) ProfilesSnapshot(ctx context.Context) ([]supply.Agent
 
 func (r *SupplyRepository) ServicesSnapshot(ctx context.Context) ([]supply.AgentService, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT agent_id, service_type, status, reference_price, currency, markets, updated_at
+		SELECT agent_id, service_type, status, reference_price, currency, markets, COALESCE(vertical_tags, '[]'), updated_at
 		FROM supply.agent_services ORDER BY agent_id`)
 	if err != nil {
 		return nil, err
@@ -481,11 +486,12 @@ func (r *SupplyRepository) ServicesSnapshot(ctx context.Context) ([]supply.Agent
 	result := []supply.AgentService{}
 	for rows.Next() {
 		var s supply.AgentService
-		var markets []byte
-		if err := rows.Scan(&s.AgentID, &s.ServiceType, &s.Status, &s.ReferencePrice, &s.Currency, &markets, &s.UpdatedAt); err != nil {
+		var markets, verticalTags []byte
+		if err := rows.Scan(&s.AgentID, &s.ServiceType, &s.Status, &s.ReferencePrice, &s.Currency, &markets, &verticalTags, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(markets, &s.Markets)
+		_ = json.Unmarshal(verticalTags, &s.VerticalTags)
 		result = append(result, s)
 	}
 	return result, rows.Err()
