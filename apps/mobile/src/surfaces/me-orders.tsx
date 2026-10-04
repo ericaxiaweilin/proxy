@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import type { Activity } from "@proxy/contracts";
@@ -8,6 +8,8 @@ import { loadStoreOptions, type StoreOption } from "../my-store-options";
 import type { FulfillmentClient, FulfillmentOrder, SlotOffer } from "../fulfillment-client";
 import { SupplyClient, type CollabInvitation } from "../supply-client";
 import { formatInviteDateTime, formatPriceRange, labelInvitationPurpose } from "../creator-capability-labels";
+import { InviteSchedulePicker, matchDaySlot } from "../components/invite-schedule-picker";
+import { combineDayAndTime, dayOptions, timeSlotOptions, type TimeSlot } from "../direct-invite-schedule";
 import { auditLines, buildTermChange, canCancelOrder, canChangePrice, canConfirmCooperation, canProposeTermChange, isMyProposal, pendingTermChange, settlementLabel, settlementView, termChangeFormFrom, termDiff, type AuditLine, type TermChangeForm } from "../order-actions";
 // ORDER-AGENT-CLAIM-NO-001：接单编号展示口径（3 位零填充 / 未分配返空串）复用
 // 个人管理页那一份，两处不能各写一套。
@@ -132,10 +134,14 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
   const [receivedInvites, setReceivedInvites] = useState<CollabInvitation[]>([]);
   const [respondingInviteId, setRespondingInviteId] = useState<string | undefined>(undefined);
   const [counteringInviteId, setCounteringInviteId] = useState<string | undefined>(undefined);
+  // 还价时间走共用的 InviteSchedulePicker（和商家侧同一套 day/slot chips）。
+  const counterDays = useMemo(() => dayOptions(new Date()), []);
+  const counterSlots = useMemo(() => timeSlotOptions(), []);
   const [counterMin, setCounterMin] = useState("");
   const [counterMax, setCounterMax] = useState("");
-  const [counterDate, setCounterDate] = useState("");
-  const [counterDuration, setCounterDuration] = useState("");
+  const [counterDay, setCounterDay] = useState(1);
+  const [counterSlot, setCounterSlot] = useState<TimeSlot>(counterSlots[2]!);
+  const [counterDurationH, setCounterDurationH] = useState(8);
   const [counterMessage, setCounterMessage] = useState("");
   const [inviteNotice, setInviteNotice] = useState<string | undefined>(undefined);
   // HOME-MYORDERS-JOINS-001（用户「我的订单还是空白」2026-09-29）：For You 下单
@@ -170,10 +176,8 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
   // 还价（COUNTERED）只在可谈的单上出现 —— 一口价的单没有还价按钮，
   // 标了不谈就别谈。时间也能一起改（空着 = 维持上版时间，不清零）。
   // 过期/被处理过的点下去服务端直接拒，原样透出，不编状态。
-  async function respondInvite(invite: CollabInvitation, decision: "ACCEPTED" | "DECLINED" | "COUNTERED", counter?: { min: string; max: string; date: string; duration: string; message: string }): Promise<void> {
+  async function respondInvite(invite: CollabInvitation, decision: "ACCEPTED" | "DECLINED" | "COUNTERED", counter?: { min: string; max: string; message: string }): Promise<void> {
     if (respondingInviteId) return;
-    let counterStartAt: string | undefined;
-    let counterDurationH = 0;
     if (decision === "COUNTERED") {
       const min = counter?.min.trim() === "" ? 0 : Number((counter?.min ?? "").replace(/[^\d]/g, ""));
       const max = counter?.max.trim() === "" ? 0 : Number((counter?.max ?? "").replace(/[^\d]/g, ""));
@@ -190,22 +194,6 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
       if (hi > 10_000_000) {
         setInviteNotice("还价超过上限（10,000,000 VND）");
         return;
-      }
-      if ((counter?.date.trim() ?? "") !== "") {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(counter?.date.trim() ?? "") || Number.isNaN(Date.parse(`${counter?.date.trim()}T00:00:00+07:00`))) {
-          setInviteNotice("日期按 YYYY-MM-DD 填");
-          return;
-        }
-        counterStartAt = `${counter?.date.trim()}T00:00:00+07:00`;
-        counterDurationH = 8;
-        if ((counter?.duration.trim() ?? "") !== "") {
-          const n = Number((counter?.duration ?? "").replace(/[^\d]/g, ""));
-          if (!Number.isInteger(n) || n < 1 || n > 24) {
-            setInviteNotice("时长填 1–24 小时");
-            return;
-          }
-          counterDurationH = n;
-        }
       }
       if ([...(counter?.message ?? "")].length > 200) {
         setInviteNotice("留言 200 字以内");
@@ -225,7 +213,8 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
           priceMinVnd: lo, priceMaxVnd: hi, negotiable: invite.negotiable,
           purpose: invite.purpose === "" ? "OTHER" : invite.purpose,
           ...(counter?.message.trim() ? { message: counter.message.trim() } : {}),
-          ...(counterStartAt ? { startAt: counterStartAt, durationH: counterDurationH } : {}),
+          startAt: combineDayAndTime(counterDays[counterDay]?.iso ?? counterDays[1]!.iso, counterSlot),
+          durationH: counterDurationH,
         });
         setInviteNotice("已还价，等对方回复。");
       } else {
@@ -919,11 +908,10 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
                 </View>
                 {counteringInviteId === invite.id ? (
                   <View style={{ marginTop: 8 }}>
-                    <TextInput keyboardType="number-pad" onChangeText={setCounterMin} placeholder={`下限（对方开 ${invite.priceMinVnd || "—"}）`} placeholderTextColor="#6D6771" style={{ borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 6, paddingHorizontal: 10, paddingVertical: 8 }} value={counterMin} />
-                    <TextInput keyboardType="number-pad" onChangeText={setCounterMax} placeholder={`上限（对方开 ${invite.priceMaxVnd || "—"}）`} placeholderTextColor="#6D6771" style={{ borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 6, paddingHorizontal: 10, paddingVertical: 8 }} value={counterMax} />
-                    <TextInput onChangeText={setCounterDate} placeholder="合作日期 YYYY-MM-DD（空着维持上版）" placeholderTextColor="#6D6771" style={{ borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 6, paddingHorizontal: 10, paddingVertical: 8 }} value={counterDate} />
-                    <TextInput keyboardType="number-pad" onChangeText={setCounterDuration} placeholder="时长（小时，空着维持上版）" placeholderTextColor="#6D6771" style={{ borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 6, paddingHorizontal: 10, paddingVertical: 8 }} value={counterDuration} />
-                    <TextInput multiline onChangeText={setCounterMessage} placeholder="给商家带句话（可选）" placeholderTextColor="#6D6771" style={{ borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 6, paddingHorizontal: 10, paddingVertical: 8 }} value={counterMessage} />
+                    <TextInput keyboardType="number-pad" onChangeText={setCounterMin} placeholder={`下限（对方开 ${invite.priceMinVnd || "—"}）`} placeholderTextColor="#6D6771" style={{ backgroundColor: color.white, borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 6, paddingHorizontal: 10, paddingVertical: 8 }} value={counterMin} />
+                    <TextInput keyboardType="number-pad" onChangeText={setCounterMax} placeholder={`上限（对方开 ${invite.priceMaxVnd || "—"}）`} placeholderTextColor="#6D6771" style={{ backgroundColor: color.white, borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 6, paddingHorizontal: 10, paddingVertical: 8 }} value={counterMax} />
+                    <InviteSchedulePicker days={counterDays} slots={counterSlots} durations={[2, 4, 8, 12]} dayOffset={counterDay} slot={counterSlot} durationH={counterDurationH} onDay={setCounterDay} onSlot={setCounterSlot} onDuration={setCounterDurationH} startAtIso={combineDayAndTime(counterDays[counterDay]?.iso ?? counterDays[1]!.iso, counterSlot)} />
+                    <TextInput multiline onChangeText={setCounterMessage} placeholder="给商家带句话（可选）" placeholderTextColor="#6D6771" style={{ backgroundColor: color.white, borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 13, marginTop: 6, paddingHorizontal: 10, paddingVertical: 8 }} value={counterMessage} />
                   </View>
                 ) : null}
                 <View style={styles.orderActions}>
@@ -932,11 +920,11 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
                   </Pressable>
                   {invite.negotiable ? (
                     counteringInviteId === invite.id ? (
-                      <Pressable disabled={respondingInviteId === invite.id} onPress={() => void respondInvite(invite, "COUNTERED", { min: counterMin, max: counterMax, date: counterDate, duration: counterDuration, message: counterMessage })} style={[styles.orderAction]}>
+                      <Pressable disabled={respondingInviteId === invite.id} onPress={() => void respondInvite(invite, "COUNTERED", { min: counterMin, max: counterMax, message: counterMessage })} style={[styles.orderAction]}>
                         <Text selectable style={styles.orderActionText}>{respondingInviteId === invite.id ? "处理中…" : "发出还价"}</Text>
                       </Pressable>
                     ) : (
-                      <Pressable disabled={respondingInviteId === invite.id} onPress={() => { setCounteringInviteId(invite.id); setCounterMin(String(invite.priceMinVnd)); setCounterMax(String(invite.priceMaxVnd)); setCounterDate(invite.startAt ? invite.startAt.slice(0, 10) : ""); setCounterDuration(invite.durationH > 0 ? String(invite.durationH) : ""); setCounterMessage(""); }} style={[styles.orderAction]}>
+                      <Pressable disabled={respondingInviteId === invite.id} onPress={() => { setCounteringInviteId(invite.id); setCounterMin(String(invite.priceMinVnd)); setCounterMax(String(invite.priceMaxVnd)); const matched = matchDaySlot(counterDays, counterSlots, invite.startAt); setCounterDay(matched.day); setCounterSlot(matched.slot); setCounterDurationH(invite.durationH > 0 ? invite.durationH : 8); setCounterMessage(""); }} style={[styles.orderAction]}>
                         <Text selectable style={styles.orderActionText}>还价</Text>
                       </Pressable>
                     )

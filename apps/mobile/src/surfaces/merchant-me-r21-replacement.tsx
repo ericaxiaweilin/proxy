@@ -11,7 +11,7 @@
 // All numbers come from server; empty states show honest placeholders
 // instead of the bogus '12.6tr VND' / '148 订单' fallbacks.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 // ACTIVITY-COVER-001：与横滑卡 / 门店相册同一套图片渲染。
 import { Image } from "expo-image";
@@ -25,6 +25,8 @@ import { MyStoresHub } from "./my-stores-hub";
 import type { SupplyClient, SupplierCandidate, AgentPassport, CollabInvitation, CollabInvitationPurpose } from "../supply-client";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
+import { InviteSchedulePicker, matchDaySlot } from "../components/invite-schedule-picker";
+import { combineDayAndTime, dayOptions, timeSlotOptions, type TimeSlot } from "../direct-invite-schedule";
 // CREATOR-LIST-CARD-001：报价格式化与横滑卡共用同一个纯模块实现 —— 同一个人不许两个价。
 import { formatReferencePrice } from "../creator-pricing";
 import { creatorRatingLabel, formatFansCount, formatInviteDateTime, formatPriceRange, formatRatePercent, formatServiceVolume, labelInvitationPurpose, labelMarket, labelLanguage, labelVertical } from "../creator-capability-labels";
@@ -207,14 +209,21 @@ export function MerchantMeR21Replacement({
   const [inviteMax, setInviteMax] = useState("");
   const [inviteNegotiable, setInviteNegotiable] = useState(true);
   const [invitePurpose, setInvitePurpose] = useState<"" | CollabInvitationPurpose>("");
-  const [inviteDate, setInviteDate] = useState("");
-  const [inviteDuration, setInviteDuration] = useState("");
+  // MERCHANT-CREATOR-INVITE-001：合作时间走共用的 InviteSchedulePicker
+  //（day chips + 固定时段 chips + 时长 chips），不手填日期。
+  // 默认明天 13:00 开始 8 小时；打开表单时她有未来 7 天内的可约档期就切过去。
+  const inviteDays = useMemo(() => dayOptions(new Date()), []);
+  const inviteSlots = useMemo(() => timeSlotOptions(), []);
+  const [inviteDay, setInviteDay] = useState(1);
+  const [inviteSlot, setInviteSlot] = useState<TimeSlot>(inviteSlots[2]!);
+  const [inviteDurationH, setInviteDurationH] = useState(8);
   const [inviteMessage, setInviteMessage] = useState("");
   const [counterOpen, setCounterOpen] = useState(false);
   const [counterMin, setCounterMin] = useState("");
   const [counterMax, setCounterMax] = useState("");
-  const [counterDate, setCounterDate] = useState("");
-  const [counterDuration, setCounterDuration] = useState("");
+  const [counterDay, setCounterDay] = useState(1);
+  const [counterSlot, setCounterSlot] = useState<TimeSlot>(inviteSlots[2]!);
+  const [counterDurationH, setCounterDurationH] = useState(8);
   const [counterMessage, setCounterMessage] = useState("");
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteError, setInviteError] = useState<string | undefined>(undefined);
@@ -229,21 +238,16 @@ export function MerchantMeR21Replacement({
   // merchantId 永远取当前 activeAccount（网关验成员身份后盖章）。
   // 出价是区间：两端都空 = 出价待商议；只填一端 = 以那端为一口价；
   // 低>高直接拦（服务端也会拒，双保险）。
-  // 时间：日期手填 YYYY-MM-DD（按越南 +07:00 当天 0 点发出，不猜几点），
-  // 时长默认 8 小时；日期空着 = 时间待商议，不编"随时可约"。
-  const composeInviteTime = (dateText: string, durText: string): { ok: true; startAt?: string; durationH?: number } | { ok: false; error: string } => {
-    if (dateText.trim() === "") return { ok: true };
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText.trim()) || Number.isNaN(Date.parse(`${dateText.trim()}T00:00:00+07:00`))) {
-      return { ok: false, error: "日期按 YYYY-MM-DD 填（比如 2026-10-12）" };
-    }
-    let durationH = 8;
-    if (durText.trim() !== "") {
-      const n = Number(durText.replace(/[^\d]/g, ""));
-      if (!Number.isInteger(n) || n < 1 || n > 24) return { ok: false, error: "时长填 1–24 小时" };
-      durationH = n;
-    }
-    return { ok: true, startAt: `${dateText.trim()}T00:00:00+07:00`, durationH };
-  };
+  // 时间从 InviteSchedulePicker 来（day + 时段 + 时长 chips），直接拼 RFC3339，
+  // 不手填不猜 —— combineDayAndTime 和场景邀约同一套。
+  const inviteStartAt = (): string => combineDayAndTime(
+    inviteDays[inviteDay]?.iso ?? inviteDays[1]!.iso,
+    inviteSlot,
+  );
+  const counterStartAt = (): string => combineDayAndTime(
+    inviteDays[counterDay]?.iso ?? inviteDays[1]!.iso,
+    counterSlot,
+  );
   const normalizeRange = (minText: string, maxText: string): { ok: true; min: number; max: number } | { ok: false; error: string } => {
     const digits = (text: string): number => {
       if (text.trim() === "") return -1;
@@ -277,11 +281,6 @@ export function MerchantMeR21Replacement({
       setInviteError(range.error);
       return;
     }
-    const inviteTime = composeInviteTime(inviteDate, inviteDuration);
-    if (!inviteTime.ok) {
-      setInviteError(inviteTime.error);
-      return;
-    }
     const msgError = checkMessage();
     if (msgError) {
       setInviteError(msgError);
@@ -298,7 +297,8 @@ export function MerchantMeR21Replacement({
         negotiable: inviteNegotiable,
         purpose: invitePurpose,
         ...(inviteMessage.trim() !== "" ? { message: inviteMessage.trim() } : {}),
-        ...(inviteTime.startAt ? { startAt: inviteTime.startAt, durationH: inviteTime.durationH ?? 8 } : {}),
+        startAt: inviteStartAt(),
+        durationH: inviteDurationH,
       });
       setMyInvitation(inv);
       setInviteFormOpen(false);
@@ -312,19 +312,12 @@ export function MerchantMeR21Replacement({
   // 商家回合（COUNTERED）：接受她的还价 / 拒绝 / 再议一个区间回去（价和时间都能改）。
   const settleCounter = async (decision: "ACCEPTED" | "DECLINED" | "COUNTERED"): Promise<void> => {
     if (!supply || !activeAccount || !myInvitation || inviteSending) return;
-    let counterTime: { startAt?: string; durationH?: number } | undefined;
     if (decision === "COUNTERED") {
       const range = normalizeRange(counterMin, counterMax);
       if (!range.ok) {
         setInviteError(range.error);
         return;
       }
-      const composed = composeInviteTime(counterDate, counterDuration);
-      if (!composed.ok) {
-        setInviteError(composed.error);
-        return;
-      }
-      counterTime = composed;
       const msgError = checkMessage();
       if (msgError) {
         setInviteError(msgError);
@@ -347,7 +340,8 @@ export function MerchantMeR21Replacement({
             negotiable: myInvitation.negotiable,
             purpose: myInvitation.purpose,
             ...(counterMessage.trim() !== "" ? { message: counterMessage.trim() } : {}),
-            ...(counterTime?.startAt ? { startAt: counterTime.startAt, durationH: counterTime.durationH ?? 8 } : {}),
+            startAt: counterStartAt(),
+            durationH: counterDurationH,
           };
         })() : {}),
       });
@@ -360,6 +354,9 @@ export function MerchantMeR21Replacement({
     }
   };
 
+  // 打开邀约表单时把时间默认到 reality：如果她未来 7 天内有可约档期，
+  // 默认切到那一天（upcoming 是 passport 的真实档期）；否则默认明天。
+  // 还价预填同理：从当前 terms 的 startAt 反查 day/slot，时间改了才动。
   const cancelInvite = async (): Promise<void> => {
     if (!supply || !activeAccount || !myInvitation || inviteSending) return;
     setInviteSending(true);
@@ -385,8 +382,6 @@ export function MerchantMeR21Replacement({
       setMyInvitation(undefined);
       setInviteMin("");
       setInviteMax("");
-      setInviteDate("");
-      setInviteDuration("");
       setInviteMessage("");
       return;
     }
@@ -397,13 +392,12 @@ export function MerchantMeR21Replacement({
     setInviteMax(ref);
     setInviteNegotiable(true);
     setInvitePurpose("");
-    setInviteDate("");
-    setInviteDuration("");
+    setInviteDay(1);
+    setInviteSlot(inviteSlots[2]!);
+    setInviteDurationH(8);
     setInviteMessage("");
     setCounterMin("");
     setCounterMax("");
-    setCounterDate("");
-    setCounterDuration("");
     setCounterMessage("");
     let active = true;
     supply.listSentInvitations({ merchantId }).then((invs) => {
@@ -821,8 +815,10 @@ export function MerchantMeR21Replacement({
             ],
             title: `${selectedCreator.name}${(selectedCreator.socials ?? [])[0]?.handle ? ` @${((selectedCreator.socials ?? [])[0]?.handle ?? "")}` : ""}`,
           })}
-          <SimpleRows onPress={setPage} rows={[["最近到店", "等待真实履约记录"], ["当前权益", "查看关联券", "voucher"], ["当前邀请", "查看活动与邀请", "activity"], ["合作结果", "查看销售归因", "sales"]]} />
-          <SimpleRows onPress={setPage} rows={[["最近到店", "等待真实履约记录"], ["当前权益", "查看关联券", "voucher"], ["当前邀请", "查看活动与邀请", "activity"], ["合作结果", "查看销售归因", "sales"]]} />
+          {/* MERCHANT-CREATOR-INVITE-001：详情页不摆 SimpleRows 那四行
+              （最近到店/当前权益/当前邀请/合作结果）—— 最近到店是空占位，
+              后三个和上面的邀约区/查看记录/活动入口重复，摆两遍就是凑数。
+              voucher/activity/sales 各自的主页还在，入口没丢。 */}
           {/* MERCHANT-CREATOR-INVITE-001：定向邀约区。出价是区间不是一口价
               （两端都空 = 出价待商议，只填一端 = 以那端为一口价）；目的必选
               （冲销量/UGC产出/拉人气/其他）；可谈的单她能还价，还回来是
@@ -860,8 +856,8 @@ export function MerchantMeR21Replacement({
               <Text selectable style={styles.cardTitle}>邀请 {selectedCreator.name} 合作</Text>
               <Text selectable style={styles.meta}>出价区间（VND，都空 = 出价待商议）</Text>
               <View style={{ flexDirection: "row", gap: 8 }}>
-                <TextInput keyboardType="number-pad" onChangeText={setInviteMin} placeholder="下限" placeholderTextColor={color.muted} style={styles.searchInput} value={inviteMin} />
-                <TextInput keyboardType="number-pad" onChangeText={setInviteMax} placeholder="上限" placeholderTextColor={color.muted} style={styles.searchInput} value={inviteMax} />
+                <TextInput keyboardType="number-pad" onChangeText={setInviteMin} placeholder="下限" placeholderTextColor={color.muted} style={styles.inviteInput} value={inviteMin} />
+                <TextInput keyboardType="number-pad" onChangeText={setInviteMax} placeholder="上限" placeholderTextColor={color.muted} style={styles.inviteInput} value={inviteMax} />
               </View>
               <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
                 <Pressable onPress={() => setInviteNegotiable(true)} style={[styles.creatorTag, inviteNegotiable && styles.creatorTagPrimary]} accessibilityLabel="可谈"><Text selectable style={inviteNegotiable ? styles.creatorTagPrimaryText : styles.creatorTagText}>可谈</Text></Pressable>
@@ -876,12 +872,9 @@ export function MerchantMeR21Replacement({
                 ))}
               </View>
               <Text selectable style={styles.meta}>给她的留言（可选，200 字内）</Text>
-              <TextInput multiline onChangeText={setInviteMessage} placeholder="比如：周末探店 + 晚餐，时间可商量" placeholderTextColor={color.muted} style={styles.searchInput} value={inviteMessage} />
-              <Text selectable style={styles.meta}>合作时间（日期 YYYY-MM-DD，空着 = 时间待商议）</Text>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                <TextInput onChangeText={setInviteDate} placeholder="2026-10-12" placeholderTextColor={color.muted} style={styles.searchInput} value={inviteDate} />
-                <TextInput keyboardType="number-pad" onChangeText={setInviteDuration} placeholder="时长（小时，默认8）" placeholderTextColor={color.muted} style={styles.searchInput} value={inviteDuration} />
-              </View>
+              <TextInput multiline onChangeText={setInviteMessage} placeholder="比如：周末探店 + 晚餐，时间可商量" placeholderTextColor={color.muted} style={styles.inviteInput} value={inviteMessage} />
+              <Text selectable style={styles.meta}>合作时间</Text>
+              <InviteSchedulePicker days={inviteDays} slots={inviteSlots} durations={[2, 4, 8, 12]} dayOffset={inviteDay} slot={inviteSlot} durationH={inviteDurationH} onDay={setInviteDay} onSlot={setInviteSlot} onDuration={setInviteDurationH} startAtIso={inviteStartAt()} />
               {inviteError ? <Text selectable style={styles.meta}>{inviteError}</Text> : null}
             </View>
           ) : null}
@@ -890,16 +883,13 @@ export function MerchantMeR21Replacement({
               <Text selectable style={styles.cardTitle}>再议一个价回去</Text>
               <Text selectable style={styles.meta}>出价区间（VND）</Text>
               <View style={{ flexDirection: "row", gap: 8 }}>
-                <TextInput keyboardType="number-pad" onChangeText={setCounterMin} placeholder={String(myInvitation.priceMinVnd)} placeholderTextColor={color.muted} style={styles.searchInput} value={counterMin} />
-                <TextInput keyboardType="number-pad" onChangeText={setCounterMax} placeholder={String(myInvitation.priceMaxVnd)} placeholderTextColor={color.muted} style={styles.searchInput} value={counterMax} />
+                <TextInput keyboardType="number-pad" onChangeText={setCounterMin} placeholder={String(myInvitation.priceMinVnd)} placeholderTextColor={color.muted} style={styles.inviteInput} value={counterMin} />
+                <TextInput keyboardType="number-pad" onChangeText={setCounterMax} placeholder={String(myInvitation.priceMaxVnd)} placeholderTextColor={color.muted} style={styles.inviteInput} value={counterMax} />
               </View>
-              <Text selectable style={styles.meta}>合作时间（空着 = 维持上版时间）</Text>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                <TextInput onChangeText={setCounterDate} placeholder="2026-10-12" placeholderTextColor={color.muted} style={styles.searchInput} value={counterDate} />
-                <TextInput keyboardType="number-pad" onChangeText={setCounterDuration} placeholder="时长（小时）" placeholderTextColor={color.muted} style={styles.searchInput} value={counterDuration} />
-              </View>
+              <Text selectable style={styles.meta}>合作时间</Text>
+              <InviteSchedulePicker days={inviteDays} slots={inviteSlots} durations={[2, 4, 8, 12]} dayOffset={counterDay} slot={counterSlot} durationH={counterDurationH} onDay={setCounterDay} onSlot={setCounterSlot} onDuration={setCounterDurationH} startAtIso={counterStartAt()} />
               <Text selectable style={styles.meta}>给她的留言（可选）</Text>
-              <TextInput multiline onChangeText={setCounterMessage} placeholder="比如：这个数我们能接，档期你定" placeholderTextColor={color.muted} style={styles.searchInput} value={counterMessage} />
+              <TextInput multiline onChangeText={setCounterMessage} placeholder="比如：这个数我们能接，档期你定" placeholderTextColor={color.muted} style={styles.inviteInput} value={counterMessage} />
               {inviteError ? <Text selectable style={styles.meta}>{inviteError}</Text> : null}
             </View>
           ) : null}
@@ -909,7 +899,16 @@ export function MerchantMeR21Replacement({
               <Pressable disabled={inviteSending} onPress={() => void cancelInvite()} style={styles.secondary} accessibilityLabel="撤回邀请"><Text selectable style={styles.secondaryText}>{inviteSending ? "处理中…" : "撤回邀请"}</Text></Pressable>
             </>) : myInvitation?.status === "COUNTERED" && !counterOpen ? (<>
               <Pressable disabled={inviteSending} onPress={() => void settleCounter("ACCEPTED")} style={styles.primary} accessibilityLabel="接受她的还价"><Text selectable style={styles.primaryText}>{inviteSending ? "处理中…" : "接受还价"}</Text></Pressable>
-              <Pressable disabled={inviteSending} onPress={() => { setCounterMin(String(myInvitation.priceMinVnd)); setCounterMax(String(myInvitation.priceMaxVnd)); setCounterDate(myInvitation.startAt ? myInvitation.startAt.slice(0, 10) : ""); setCounterDuration(myInvitation.durationH > 0 ? String(myInvitation.durationH) : ""); setCounterMessage(""); setCounterOpen(true); }} style={styles.secondary} accessibilityLabel="再议价格"><Text selectable style={styles.secondaryText}>再议</Text></Pressable>
+              <Pressable disabled={inviteSending} onPress={() => {
+                const matched = matchDaySlot(inviteDays, inviteSlots, myInvitation.startAt);
+                setCounterMin(String(myInvitation.priceMinVnd));
+                setCounterMax(String(myInvitation.priceMaxVnd));
+                setCounterDay(matched.day);
+                setCounterSlot(matched.slot);
+                setCounterDurationH(myInvitation.durationH > 0 ? myInvitation.durationH : 8);
+                setCounterMessage("");
+                setCounterOpen(true);
+              }} style={styles.secondary} accessibilityLabel="再议价格"><Text selectable style={styles.secondaryText}>再议</Text></Pressable>
             </>) : myInvitation?.status === "COUNTERED" && counterOpen ? (<>
               <Pressable disabled={inviteSending} onPress={() => void settleCounter("COUNTERED")} style={styles.primary} accessibilityLabel="发出还价"><Text selectable style={styles.primaryText}>{inviteSending ? "发送中…" : "发出还价"}</Text></Pressable>
               <Pressable disabled={inviteSending} onPress={() => { setCounterOpen(false); setInviteError(undefined); }} style={styles.secondary} accessibilityLabel="收起还价表单"><Text selectable style={styles.secondaryText}>收起</Text></Pressable>
@@ -920,7 +919,11 @@ export function MerchantMeR21Replacement({
               <Pressable onPress={() => { setCreatorView("COLLABS"); setPage("creator"); }} style={styles.primary} accessibilityLabel="查看合作记录"><Text selectable style={styles.primaryText}>查看记录</Text></Pressable>
               <Pressable onPress={() => setPage("activity")} style={styles.secondary} accessibilityLabel="查看活动报名"><Text selectable style={styles.secondaryText}>查看活动报名</Text></Pressable>
             </>) : (<>
-              <Pressable disabled={!supply || !activeAccount} onPress={() => setInviteFormOpen(true)} style={styles.primary} accessibilityLabel="邀请合作" testID={`creator-invite-open-${selectedCreator.agentId}`}><Text selectable style={styles.primaryText}>邀请合作</Text></Pressable>
+              <Pressable disabled={!supply || !activeAccount} onPress={() => {
+                const first = upcoming.map((w) => w.startAt.slice(0, 10)).find((iso) => inviteDays.some((day) => day.iso === iso));
+                setInviteDay(first ? inviteDays.find((day) => day.iso === first)?.offset ?? 1 : 1);
+                setInviteFormOpen(true);
+              }} style={styles.primary} accessibilityLabel="邀请合作" testID={`creator-invite-open-${selectedCreator.agentId}`}><Text selectable style={styles.primaryText}>邀请合作</Text></Pressable>
               <Pressable onPress={() => { setCreatorView("COLLABS"); setPage("creator"); }} style={styles.secondary} accessibilityLabel="查看记录"><Text selectable style={styles.secondaryText}>查看记录</Text></Pressable>
             </>)}
           </View>
@@ -1477,6 +1480,9 @@ const styles = StyleSheet.create({
   // MERCHANT-CREATOR-INVITE-001：邀约出价单独成行 —— 談判桌上最显眼的数，
   // 比列表报价再大一号，不缩在灰字里。
   invitePrice: { color: color.ink, fontSize: 19, fontWeight: "900", letterSpacing: -0.3, lineHeight: 25 },
+  // MERCHANT-CREATOR-INVITE-001：邀约表单输入框 —— 白卡上的输入框要有边框，
+  // 不能拿搜索框那套灰底丸子凑数，不然整张表单灰蒙蒙。
+  inviteInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, color: color.ink, flex: 1, fontSize: 14, paddingHorizontal: 12, paddingVertical: 10 },
   creatorGo: { backgroundColor: color.lime, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8 },
   creatorGoText: { color: color.ink, fontSize: 12, fontWeight: "900" },
   // CREATOR-AVATAR-001：头像是圆圈（999），不是方块R角。

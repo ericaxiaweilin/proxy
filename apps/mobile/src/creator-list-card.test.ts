@@ -196,6 +196,10 @@ describe("CREATOR-LIST-CARD-001 详情页同一套语言", () => {
     expect(me).toContain("supply.listSentInvitations(");
     expect(me).toContain("supply.cancelInvitation(");
     expect(me).toContain('supply.respondInvitation({');
+    // 时间不用手填：day/slot chips 走现成的 direct-invite-schedule（组件顶部）；
+    // 默认明天（有可约档期就切过去），不留空等用户现想。
+    expect(me).toContain("dayOptions(");
+    expect(me).toContain("combineDayAndTime(");
     expect(detail).toContain("邀请合作");
     expect(detail).toContain("creator-invite-open-");
     expect(detail).toContain("creator-invite-pending-");
@@ -205,10 +209,13 @@ describe("CREATOR-LIST-CARD-001 详情页同一套语言", () => {
     expect(detail).toContain("formatPriceRange(");
     expect(detail).toContain("labelInvitationPurpose(");
     expect(detail).toContain("再议");
-    // 合作时间进表单（日期+时长），展示走 formatInviteDateTime；
+    // 合作时间进表单，展示走 formatInviteDateTime；
     // 金额单独成行放大（invitePrice），不缩在灰字里。
     expect(detail).toContain("formatInviteDateTime(");
-    expect(detail).toContain("setInviteDate");
+    expect(detail).toContain("InviteSchedulePicker");
     expect(detail).toContain("styles.invitePrice");
+    // 详情页不摆 SimpleRows 那四行（最近到店空占位 + 三个重复入口）。
+    expect(detail).not.toContain("最近到店");
+    expect(detail).not.toContain("当前权益");
   });
 });
