@@ -13,7 +13,9 @@
 
 import { pickActiveMerchant, setActiveMerchantId, subscribeActiveMerchant } from "../active-merchant-store";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+// MERCHANT-ACTIVITY-DETAIL-001：推广活动要真能复制链接 / 出真码，不是摆两个图标。
+import * as Clipboard from "expo-clipboard";
 // ACTIVITY-COVER-001：与横滑卡 / 门店相册同一套图片渲染。
 import { Image } from "expo-image";
 import { color, Gradient, shadows } from "../theme";
@@ -41,10 +43,16 @@ import { activityCoverUri } from "../media-thumb-url";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
 import { ProxyBackGlyph, ProxyEmptyState, ProxyLoading } from "../components/proxy-foundation";
+// MERCHANT-ACTIVITY-DETAIL-001：活动二维码走共享二维码组件（和门店码 / 专属码同一套）。
+import { ProxyQrCode } from "../components/proxy-qr-code";
 
 type MerchantPage =
   | "root"
   | "creator"
+  // MERCHANT-CREATOR-CONTENT-001（2026-10-04）：生产内容从经营目标卡进。
+  // 以前这张卡是张死 View（点不进去），因为后面没有这一页；现在有了，
+  // 页上的每一行都来自真实的定向邀约记录（ListCollabInvitations role=sent）。
+  | "content"
   | "creatorDetail"
   | "voucher"
   | "voucherDetail"
@@ -66,7 +74,13 @@ type MemberDirectory = { businessId: string; userId: string; displayName: string
 type SpendDaily = { businessId: string; bucketDate: string; orderCount: number; grossMinor: number; newCustomerCount: number; returningCustomerCount: number };
 // ACTIVITY-COVER-001：加上 coverMediaAssetId —— 商家列表要能看到自己活动的封面。
 // 之前这个 Pick 里根本没有封面字段，所以商家侧永远画不出图（不是没传，是没读）。
-type ActivityItem = Pick<Activity, "activityId" | "title" | "time" | "people" | "priceLabel" | "venueName" | "joined" | "capacity" | "status" | "realitySceneId" | "coverMediaAssetId" | "coverImageUrl">;
+type ActivityItem = Pick<Activity, "activityId" | "title" | "time" | "people" | "priceLabel" | "venueName" | "joined" | "capacity" | "status" | "realitySceneId" | "coverMediaAssetId" | "coverImageUrl"
+  // MERCHANT-ACTIVITY-DETAIL-001（2026-10-04）：活动详情页要显示的那几个读数 ——
+  // 感兴趣 / 评论 / 分享 / 权益 / 付费方式 —— 全是活动契约里本来就有的字段
+  // （ActivitySchema.interested / qaCount / shares / benefit / moneyFlow /
+  // consumptionTerm）。以前这个 Pick 里根本没有它们，所以商家侧一个都印不出来，
+  // 不是没传，是没读。
+  | "interested" | "qaCount" | "shares" | "benefit" | "desc" | "consumption" | "moneyFlow" | "consumptionTerm" | "signupMode" | "venueTypeLabel">;
 
 // R27 merchant scene ops (r27-preview): the flagship scene's live state,
 // menu and humans come from the public scene projection; own activities
@@ -100,13 +114,22 @@ function formatVnd(minor: number): string {
   return `${vnd} VND`;
 }
 
-function detailHead({ onBack, title }: { onBack: () => void; title: string }): React.JSX.Element {
+// MERCHANT-ACTIVITY-DETAIL-001（2026-10-04）：原型那页的顶栏是「返回 + 标题 + 状态眉题
+// + 右侧动作键」。以前 detailHead 只有返回 + 标题，活动详情只能把「报名中」这种
+// 状态词塞进正文。现在 sub / right 都是可选的，其余页面调用方式不变。
+function detailHead({ onBack, title, sub, right }: { onBack: () => void; title: string; sub?: string | undefined; right?: React.ReactNode }): React.JSX.Element {
   return (
     <View style={styles.detailHead}>
       <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.subPageBack}>
         <ProxyBackGlyph />
       </Pressable>
-      <Text selectable style={styles.detailTitle}>{title}</Text>
+      <View style={styles.detailHeadRow}>
+        <View style={styles.detailHeadText}>
+          <Text selectable style={styles.detailTitle}>{title}</Text>
+          {sub ? <Text selectable style={styles.detailSub}>{sub}</Text> : null}
+        </View>
+        {right ? <View style={styles.detailHeadActions}>{right}</View> : null}
+      </View>
     </View>
   );
 }
@@ -206,10 +229,18 @@ export function MerchantMeR21Replacement({
   }, [selectedCreator, supply]);
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<ActivityItem | undefined>(undefined);
+  // MERCHANT-ACTIVITY-DETAIL-001：推广活动的分享面板。两格：share（四个去向）/
+  // qr（二维码）。分享链接与码都是本页现算的真值，不是占位串。
+  const [activitySheet, setActivitySheet] = useState<"share" | "qr" | undefined>(undefined);
+  const [activityLinkCopied, setActivityLinkCopied] = useState(false);
   const [sceneDetail, setSceneDetail] = useState<SceneBrief | undefined>(undefined);
   // 当前商家账号的门店：活动导流 / 场景运营都按它认「本店」。
   const [myStores, setMyStores] = useState<BusinessStoreWire[]>([]);
   const [creatorView, setCreatorView] = useState<"MATCH" | "CREATORS" | "COLLABS" | "RESULTS">("MATCH");
+  // MERCHANT-CREATOR-CONTENT-001：生产内容页的真实数据源 —— 本店发出的定向邀约
+  // （ListCollabInvitations role=sent）。purpose=UGC 那一类就是内容生产合作，
+  // 页上每一行都是服务端返回的邀约，不是页面里写死的样例。
+  const [contentInvites, setContentInvites] = useState<CollabInvitation[] | undefined>(undefined);
   const [creatorQuery, setCreatorQuery] = useState("");
   const [myInvitation, setMyInvitation] = useState<CollabInvitation | undefined>(undefined);
   const [inviteFormOpen, setInviteFormOpen] = useState(false);
@@ -261,6 +292,27 @@ export function MerchantMeR21Replacement({
     }).catch(() => { /* 归因没读出来 RESULTS 照显示 "—"，不挡整页 */ });
     return () => { active = false; };
   }, [page, creatorView, supply, activeAccount]);
+
+  // MERCHANT-CREATOR-CONTENT-001：进生产内容页才拉邀约（同一批数据在 creatorDetail
+  // 里已经为了单个人拉过一次，不重复预拉）。读失败照进空态，不挡整页。
+  useEffect(() => {
+    if (page !== "content" || !supply || !activeAccount) return;
+    let active = true;
+    setContentInvites(undefined);
+    supply.listSentInvitations({ merchantId: activeAccount.id })
+      .then((invs) => {
+        if (!active) return;
+        // 新的在前；同一个人只留最新一单 —— 旧的那单已经被这单取代了，
+        // 全量铺开会把同一个人重复数成好几条内容合作。
+        const latestPerAgent = new Map<string, CollabInvitation>();
+        for (const inv of [...invs].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))) {
+          if (!latestPerAgent.has(inv.agentId)) latestPerAgent.set(inv.agentId, inv);
+        }
+        setContentInvites([...latestPerAgent.values()]);
+      })
+      .catch(() => { if (active) setContentInvites([]); });
+    return () => { active = false; };
+  }, [page, supply, activeAccount]);
 
   // MERCHANT-CREATOR-INVITE-001：发出 / 还价 / 接受 / 拒绝 / 撤回定向邀约。
   // merchantId 永远取当前 activeAccount（网关验成员身份后盖章）。
@@ -503,6 +555,11 @@ export function MerchantMeR21Replacement({
           priceLabel: entry.priceLabel, venueName: entry.venueName, joined: entry.joined, capacity: entry.capacity,
           status: entry.status, realitySceneId: entry.realitySceneId,
           coverMediaAssetId: entry.coverMediaAssetId, coverImageUrl: entry.coverImageUrl,
+          // MERCHANT-ACTIVITY-DETAIL-001：详情页那几个读数的来源（见 ActivityItem 的 Pick 注释）。
+          interested: entry.interested, qaCount: entry.qaCount, shares: entry.shares,
+          benefit: entry.benefit, desc: entry.desc, consumption: entry.consumption,
+          moneyFlow: entry.moneyFlow, consumptionTerm: entry.consumptionTerm,
+          signupMode: entry.signupMode, venueTypeLabel: entry.venueTypeLabel,
         }));
         setActivityItems(items);
         setSelectedActivity(items[0]);
@@ -561,10 +618,12 @@ export function MerchantMeR21Replacement({
           <Text selectable style={styles.pageSub}>围绕真实经营目标匹配、邀请，并追踪到店与消费结果。</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>{([['MATCH','智能匹配'],['CREATORS','Creator'],['COLLABS','合作'],['RESULTS','结果']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setCreatorView(id)} style={[styles.tab, creatorView === id && styles.tabOn]}><Text selectable style={[styles.tabText, creatorView === id && styles.tabTextOn]}>{label}</Text></Pressable>)}</ScrollView>
           {creatorView === "MATCH" ? <><View style={styles.goalGrid}>{([['storefront','带来到店新客','到店、带客、核销'],['target','生产内容','探店、短视频、UGC'],['arrowUpRight','扩大本地曝光','覆盖与互动'],['ticket','推广券与活动','领取、预约、核销']] as const).map(([icon,title,hint]) => {
-            // 经营目标卡去向：曝光→销售归因看结果，推广券→券中心发券；
-            // 带新客=专属营销码链路（下一趟），生产内容以后再说 —— 这两张先不挂动作，
-            // 不摆点不进去的假按钮。
-            const go = title === '带来到店新客' ? (): void => setPage("promo") : title === '扩大本地曝光' ? (): void => setPage("sales") : title === '推广券与活动' ? (): void => onOpenVouchers() : undefined;
+            // 经营目标卡去向：曝光→销售归因看结果，推广券→券中心发券，
+            // 带新客=专属营销码链路，生产内容=真实邀约页（MERCHANT-CREATOR-CONTENT-001，
+            // 2026-10-04 接上 —— 这一页以前不存在，卡是张点不进去的死 View）。
+            // 四张都有去向了；下面 View 分支留着当以后新增「还没做」卡时的默认形状，
+            // 点不进去的按钮不许摆出来骗点击。
+            const go = title === '带来到店新客' ? (): void => setPage("promo") : title === '生产内容' ? (): void => setPage("content") : title === '扩大本地曝光' ? (): void => setPage("sales") : title === '推广券与活动' ? (): void => onOpenVouchers() : undefined;
             const body = <><View style={styles.goalIcon}><ProxyIcon color={color.ink} name={icon} size={23} /></View><Text selectable style={styles.cardTitle}>{title}</Text><Text selectable style={styles.caption}>{hint}</Text></>;
             return go ? <Pressable key={title} onPress={go} style={styles.goalCard} accessibilityLabel={title}>{body}</Pressable> : <View key={title} style={styles.goalCard}>{body}</View>;
           })}</View>{sectionHead("最佳匹配", `${creators.length} 位符合条件`)}</> : null}
@@ -1128,6 +1187,84 @@ export function MerchantMeR21Replacement({
           {spendDays.length === 0 ? (
             <View style={styles.card}><Text selectable style={styles.empty}>暂无销售数据 — server 列表为空</Text></View>
           ) : null}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // MERCHANT-CREATOR-CONTENT-001（2026-10-04）：生产内容。
+  // 原型 deepseek_html_20261004_e74898 / 设计稿 Proxy_Creator_Promo_20261004 的
+  // page-content 只有一行眉题「探店短视频」，没有正文；这一页的正文按原型语气补齐，
+  // 数据全部来自服务端邀约记录 —— 一行都不许是页面里写死的样例。
+  if (page === "content") {
+    const invites = contentInvites ?? [];
+    const live = invites.filter((inv) => inv.status === "PENDING" || inv.status === "COUNTERED" || inv.status === "ACCEPTED");
+    const settled = invites.filter((inv) => inv.status === "DECLINED" || inv.status === "CANCELLED" || inv.status === "EXPIRED");
+    return (
+      <View style={styles.root}>
+        <ScrollView contentContainerStyle={styles.content}>
+          {detailHead({ onBack: () => setPage("creator"), title: "生产内容", sub: "探店、短视频、UGC" })}
+          <View style={styles.search}>
+            <ProxyIcon color={color.muted} name="target" size={18} />
+            <Text selectable style={styles.searchHint}>从人才库挑人发一条 UGC 产出邀约，这里看进度。</Text>
+          </View>
+          {contentInvites === undefined ? <ProxyLoading tone="muted" /> : (
+            <>
+              {summary({
+                title: "内容合作",
+                meta: `${invites.length} 单真实邀约 · 本店发出`,
+                stats: [
+                  [invites.length.toString(), "内容邀约"],
+                  [live.length.toString(), "进行中"],
+                  [settled.length.toString(), "已结束"],
+                  // 交付物（成片/发布链接）这份数据模型里没有字段：邀约只到「接受」，
+                  // 没有「已交付」事件。没数就是没数，不拿「进行中」顶替，也不编。
+                  ["—", "已交付成片"],
+                ],
+              })}
+              {sectionHead("内容邀约", `${invites.length} 单`)}
+              {invites.length === 0 ? (
+                <ProxyEmptyState
+                  title="还没有内容合作"
+                  sub="到 Creator 人才库挑人，发一条 UGC 产出邀约；她会带着档期和报价回你。"
+                />
+              ) : null}
+              {invites.map((inv) => {
+                const purposeLabel = labelInvitationPurpose(inv.purpose);
+                const statusLabel = labelInvitationStatus(inv.status);
+                const when = formatInviteDateTime(inv.startAt, inv.durationH);
+                return (
+                  // 不做成可点的行：这一行只拿得到 agentId，解析不出这个人 ——
+                  // 点了去哪儿都得靠猜。宁可不可点，不摆一个跳去人才库列表的假入口。
+                  // （要约人回页，进她的 creatorDetail 那一路。）
+                  <View key={inv.id} style={styles.contentCollabCard} accessibilityLabel={`内容邀约 ${statusLabel}`}>
+                    <View style={styles.rowCopy}>
+                      <Text selectable numberOfLines={1} style={styles.contentCollabTitle}>
+                        {purposeLabel !== "" ? purposeLabel : labelServiceType(inv.serviceType)}
+                      </Text>
+                      {when !== "" ? <Text selectable style={styles.meta}>{when}</Text> : null}
+                      <Text selectable style={styles.meta}>
+                        {`${formatPriceRange(inv.priceMinVnd, inv.priceMaxVnd, inv.currency)}${inv.negotiable ? " · 可谈" : " · 一口价"}`}
+                      </Text>
+                    </View>
+                    {statusLabel !== "" ? (
+                      <View style={[styles.creatorEligibility, inv.status === "ACCEPTED" ? styles.creatorEligibilityOn : styles.creatorEligibilityOff]}>
+                        <Text selectable style={[styles.creatorEligibilityText, inv.status === "ACCEPTED" ? styles.creatorEligibilityTextOn : styles.creatorEligibilityTextOff]}>{statusLabel}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
+              <View style={styles.actions}>
+                <Pressable accessibilityLabel="去 Creator 人才库挑人" onPress={() => setPage("creator")} style={styles.primary}>
+                  <Text selectable style={styles.primaryText}>去人才库挑人</Text>
+                </Pressable>
+                <Pressable accessibilityLabel="查看推广券与活动" onPress={() => onOpenVouchers()} style={styles.secondary}>
+                  <Text selectable style={styles.secondaryText}>推广券与活动</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
         </ScrollView>
       </View>
     );
