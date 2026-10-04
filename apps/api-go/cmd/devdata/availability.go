@@ -54,12 +54,13 @@ type scheduleProfile struct {
 // the `_none` row are what keep the "unknown" state populated.
 //
 // 2026-10-03 改了两轮，两轮都是真红教出来的：
-//   · 原来写「今天的 9:00–21:00 / 14:00–22:00 / 11:00–15:00」这种钟点带（node 版照搬）。
-//     23:15 跑一次，写进去的每一段**当时就已经过期**，报告里那句"再跑一次本命令即可"
-//     在夜里根本救不了 —— 实测 118 → 383 段越滚越多。
-//   · 第一版修法（三段一律 now-lead..now+span）确实把过期清零了，但**把三态抹平了**：
-//     任何时刻查"一小时后"都是 360/495 有空、0 段"有排期但不覆盖"。false 那一态再没有
-//     人能命中，HOME-FORYOU-FREE-001 的判据就变成空转 —— 为了绿把测试面填平，比红更糟。
+//
+//	· 原来写「今天的 9:00–21:00 / 14:00–22:00 / 11:00–15:00」这种钟点带（node 版照搬）。
+//	  23:15 跑一次，写进去的每一段**当时就已经过期**，报告里那句"再跑一次本命令即可"
+//	  在夜里根本救不了 —— 实测 118 → 383 段越滚越多。
+//	· 第一版修法（三段一律 now-lead..now+span）确实把过期清零了，但**把三态抹平了**：
+//	  任何时刻查"一小时后"都是 360/495 有空、0 段"有排期但不覆盖"。false 那一态再没有
+//	  人能命中，HOME-FORYOU-FREE-001 的判据就变成空转 —— 为了绿把测试面填平，比红更糟。
 //
 // 现在的形状：`_am` 此刻有空，`_noon` 一到三小时后有空，`_pm` 四小时后才空，
 // `_none` 压根不排（nil=未知）。任何钟点跑，四个状态都还在，且 end_at 恒 > now()。
@@ -103,7 +104,24 @@ func seedAvailabilityWindows(ctx context.Context, pool *pgxpool.Pool, out io.Wri
 		return fmt.Errorf("没有带坐标的开发用户 —— 先跑 devdata distance-tiers")
 	}
 
-	written := 0
+	// 本轮该写的人（先算出来，再据此收尾上一轮的残骸）。
+	//
+	// 为什么要收尾（2026-10-04 实测）：档位按**下标**分配（scheduleProfiles[i%…]），
+	// 下标来自「带坐标的用户按 id 排序」这张会变的表 —— 管线每 5 分钟多一个人，
+	// 字典序里位数一变，某些人就换档、或被比例/`_none` 档跳过。**没轮到的人不会
+	// 被覆盖**，上一轮那行就留着：状态还是 AVAILABLE、起止早已过去。于是 verify 永远
+	// 报 expired>0，而报告里那句「重跑本命令即可」是假的（实测重跑后仍 41 段过期）。
+	//
+	// 收尾范围限定 `aw_dev_` 前缀（只收尾自己写过的东西）；只改状态不删行（BLOCKED 是
+	// 这个域本来就有的合法状态，见文件头 AVAILABLE/BLOCKED/BOOKED）。读模型 lateral 带
+	// end_at > now()，所以残骸本来就不影响谁「有空」，留着只是让门禁变噪音 ——
+	// 而噪音的门禁等于没有门禁。
+	type plannedWindow struct {
+		id           string
+		startOffsetH int
+		endOffsetH   int
+	}
+	planned := make([]plannedWindow, 0, len(agents))
 	for i, agentID := range agents {
 		profile := scheduleProfiles[i%len(scheduleProfiles)]
 		// Deterministic per-agent share of the band; the multiplier is a prime so the
@@ -114,12 +132,30 @@ func seedAvailabilityWindows(ctx context.Context, pool *pgxpool.Pool, out io.Wri
 		if profile.endOffsetH <= 0 {
 			continue // the `_none` band writes no window on purpose
 		}
+		planned = append(planned, plannedWindow{id: "aw_dev_" + agentID, startOffsetH: profile.startOffsetH, endOffsetH: profile.endOffsetH})
+	}
+	keep := make([]string, 0, len(planned))
+	for _, w := range planned {
+		keep = append(keep, w.id)
+	}
+	if swept, err := pool.Exec(ctx, `
+		UPDATE supply.availability_windows
+		   SET status = 'BLOCKED', updated_at = now()
+		 WHERE id LIKE 'aw_dev_%'
+		   AND status = 'AVAILABLE'
+		   AND NOT (id = ANY($1::text[]))`, keep); err != nil {
+		return fmt.Errorf("sweep stale dev windows: %w", err)
+	} else if n := int(swept.RowsAffected()); n > 0 {
+		fmt.Fprintf(out, "  收尾 %d 段本轮没人接手的 dev 行（AVAILABLE→BLOCKED，不删）\n", n)
+	}
+
+	written := 0
+	for _, w := range planned {
 		// 一人一行，且 id 只由 agent 决定。原来 id 带档位后缀（aw_dev_<agent>_am），
 		// 而档位是按 ORDER BY agent_id 的下标取模分配的 —— 管线每 5 分钟多一个人，
 		// 字典序里位数一变，某些人的下标就换档，于是**旧后缀行永远留在库里过期**。
 		// 实测攒到 216 段：报告里"再跑一次"根本救不了那种行，因为它已经不是任何人的
 		// 当前行了。id 不带档位之后，换档就是同一行改起止时间，不留残骸。
-		id := "aw_dev_" + agentID
 		result, err := pool.Exec(ctx, `
 			INSERT INTO supply.availability_windows
 			  (id, agent_id, start_at, end_at, market_id, status, created_at, updated_at)
@@ -130,9 +166,9 @@ func seedAvailabilityWindows(ctx context.Context, pool *pgxpool.Pool, out io.Wri
 			ON CONFLICT (id) DO UPDATE
 			  SET start_at = EXCLUDED.start_at, end_at = EXCLUDED.end_at,
 			      status = 'AVAILABLE', updated_at = now()`,
-			id, agentID, profile.startOffsetH, profile.endOffsetH)
+			w.id, strings.TrimPrefix(w.id, "aw_dev_"), w.startOffsetH, w.endOffsetH)
 		if err != nil {
-			return fmt.Errorf("write availability for %s: %w", agentID, err)
+			return fmt.Errorf("write availability for %s: %w", w.id, err)
 		}
 		written += int(result.RowsAffected())
 	}

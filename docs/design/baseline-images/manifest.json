@@ -34,7 +34,16 @@
     "Proxy_Creator_Me_Card_20261004": {
       "source": "docs/design/references/Proxy_Creator_Me_Card_20261004.html",
       "image": "docs/design/baseline-images/creator_me_card_20261004.png",
-      "fingerprint": "ea6e8e3be87a9be0",
+      "fingerprint": "e5a833ee09f39bda",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    "Proxy_Creator_Promo_20261004_bc214e": {
+      "source": "docs/design/references/Proxy_Creator_Promo_20261004_bc214e.html",
+      "image": "docs/design/baseline-images/creator_promo_20261004_bc214e.png",
+      "fingerprint": "5c4713038f8b0b67",
       "viewport": {
         "width": 390,
         "height": 844

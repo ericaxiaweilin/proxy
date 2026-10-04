@@ -67,8 +67,10 @@ body { margin:0; padding:20px; background:var(--bg); color:var(--text-main);
 .discount-detail { font-size: 10px; color: var(--text-sub); margin-top: 4px; }
 
 /* 折扣状态标签 */
+/* 2026-10-04: 9px → 11px。R3 硬规则「Caption 11px 是全 App 最小正文级别，
+   没有例外」，UI-TYPOGRAPHY-MIN-001 会红。改完必须重跑 render-prototypes。 */
 .discount-status {
-  display: inline-block; font-size: 9px; font-weight: 700;
+  display: inline-block; font-size: 11px; font-weight: 700;
   padding: 2px 6px; border-radius: 4px; margin-top: 4px;
 }
 .discount-status.auto { background: rgba(100,210,255,0.15); color: #0071e3; }

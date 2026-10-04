@@ -363,29 +363,107 @@ gate_g4_drift() {
     return 1
   fi
   local unguarded
-  # Join backslash continuations BEFORE matching. A guard written on the
-  # continuation line is still a guard; matching line-by-line would red a
-  # correct invocation (this file used exactly that shape before the fix
-  # above), and a check that reddens on correct code is one people learn to
-  # bypass. Comment lines are skipped for the same reason: documenting the
-  # bug must not trip the check that guards against it.
+  # 判据在下面这段 awk 里，语义而不是形状：「这次调用的失败能不能走到 exit」。
+  # 旧版逐行正则只认 `|| exit`，把三**已经正确守住退出码**的写法判成漏网 ——
+  #   1) `if ! pnpm ...; then ... exit 1; fi`（块里 exit 就是守住）
+  #   2) `if ! pnpm ...; then B=1; fi` + 块尾 `[ "$B" -eq 0 ] || exit 1`
+  #   3) `... || B=1` 记进变量、稍后 exit 消费
+  #   4) `echo "单独复现：pnpm ... exec vitest run ..."` —— 只是提示怎么复现，
+  #      根本不是一次调用（旧版把引号里的字面量当成了调用）
+  # 「会对正确代码报红的检查，人会学会绕过它」——这句是本仓自己的注释，所以这次
+  # 修检查而不是改正确的代码。仍然严格：裸调用、if 块里既不 exit 也不记变量、
+  # 变量记了没人 exit，一律照红（7 个变异用例验过牙：3 红 4 绿）。
+  # 引号内文字先剥掉（真调用里 pnpm 在引号外）；续行先拼接（守卫写在续行上也是
+  # 守卫）；if 块要看到配对的 fi 才算守住。
   unguarded=$(awk '
-    {
-      if (buf == "") start = NR
-      buf = buf $0
-      if ($0 ~ /\\$/) { buf = buf " "; next }
-      is_inv = (buf ~ /^[[:space:]]*require_test[[:space:]]/) || (buf ~ /pnpm/ && buf ~ /(exec vitest run|test --run|test -- --run)/)
-      if (buf !~ /^[[:space:]]*#/ && is_inv && buf !~ /\|\|[[:space:]]*exit/) {
-        printf "%d: %s\n", start, buf
-      }
-      buf = ""
+# Pin hygiene: find invocations whose failure is swallowed.
+#
+# 2026-10-04 重写（gate.sh G4 长期红着的真因）：旧版逐行正则、只认 `|| exit`，
+# 于是把三**已经正确守住退出码**的写法判成漏网 ——
+#   1) `if ! pnpm ...; then ... exit 1; fi`（块里 exit 就是守住）
+#   2) `if ! pnpm ...; then B=1; fi` + 块尾 `[ "$B" -eq 0 ] || exit 1`
+#   3) `... || B=1` 记进变量、稍后 exit 消费
+#   4) `echo "  单独复现：pnpm ... exec vitest run ..."` —— 那只是提示怎么复现，
+#      根本不是一次调用（旧版把引号里的字面量当成了调用）
+# 「会对正确代码报红的检查，人会学会绕过它」—— 所以按语义判「失败能不能走到
+# exit」，不按形状猜。
+#
+# 仍然严格：裸调用、if 块里既不 exit 也不记变量、变量记了没人 exit，一律照红。
+# 已用 7 个变异用例验过牙（3 红 4 绿）。判据要点：引号内文字先剥掉（真调用里
+# pnpm 在引号外）；续行先拼接（守卫写在续行上也是守卫）；if 块要看到配对的 fi。
+function strip_quoted(line,   out, i, c, q) {
+  out = ""; q = ""
+  for (i = 1; i <= length(line); i++) {
+    c = substr(line, i, 1)
+    if (q != "") { if (c == q) q = ""; continue }
+    if (c == "\"" || c == SQ) { q = c; continue }
+    out = out c
+  }
+  return out
+}
+function is_invocation(code) {
+  if (code ~ /^[[:space:]]*require_test[[:space:]]/) return 1
+  if (code ~ /pnpm/ && code ~ /(exec[[:space:]]+vitest[[:space:]]+run|test[[:space:]]+--run|test[[:space:]]+--[[:space:]]+--run)/) return 1
+  return 0
+}
+BEGIN { SQ = sprintf("%c", 39) }
+{ lines[NR] = $0 }
+END {
+  n = NR
+  for (i = 1; i <= n; i++) {
+    line = lines[i]
+    if (line ~ /^[[:space:]]*#/ || line ~ /^[[:space:]]*$/) continue
+    buf = line; start = i
+    while (buf ~ /\\$/ && i < n) {
+      i++
+      sub(/\\$/, "", buf)
+      buf = buf " " lines[i]
     }
-    END {
-      is_inv = (buf ~ /^[[:space:]]*require_test[[:space:]]/) || (buf ~ /pnpm/ && buf ~ /(exec vitest run|test --run|test -- --run)/)
-      if (buf != "" && buf !~ /^[[:space:]]*#/ && is_inv && buf !~ /\|\|[[:space:]]*exit/) {
-        printf "%d: %s\n", NR, buf
+    code = strip_quoted(buf)
+    if (!is_invocation(code)) continue
+    if (code ~ /\|\|[[:space:]]*exit/) continue
+    if (match(code, /\|\|[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=/)) {
+      var = substr(code, RSTART, RLENGTH)
+      sub(/^.*\|[[:space:]]*/, "", var)
+      sub(/=.*$/, "", var)
+      consumed = 0
+      for (j = i + 1; j <= n; j++) {
+        if (lines[j] ~ ("\\$\\{?" var "\\}?") && lines[j] ~ /exit/) { consumed = 1; break }
       }
+      if (consumed) continue
+      printf "%d: %s\n", start, buf
+      continue
     }
+    if (code ~ /^[[:space:]]*if[[:space:]]/) {
+      depth = 1; has_exit = 0; block_vars = ""
+      for (j = i + 1; j <= n && depth > 0; j++) {
+        c2 = strip_quoted(lines[j])
+        if (c2 ~ /^[[:space:]]*fi[[:space:]]*(;|$)/) depth--
+        else if (c2 ~ /^[[:space:]]*(if|for|while|until|case)[[:space:]]/) depth++
+        if (c2 ~ /(^|[^_[:alnum:]])exit([^_[:alnum:]]|$)/) has_exit = 1
+        if (match(c2, /(^|[;&|[:space:]])[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=/)) {
+          v2 = substr(c2, RSTART, RLENGTH); sub(/^.*[;&|[:space:]]/, "", v2); sub(/[[:space:]]*=.*$/, "", v2)
+          if (v2 != "") block_vars = block_vars " " v2
+        }
+      }
+      if (depth == 0 && has_exit) continue
+      if (depth == 0 && block_vars != "") {
+        vars_consumed = 0
+        nv = split(block_vars, arr, " ")
+        for (v = 1; v <= nv; v++) {
+          for (j = i + 1; j <= n; j++) {
+            if (lines[j] ~ ("\\$\\{?" arr[v] "\\}?") && lines[j] ~ /exit/) { vars_consumed = 1; break }
+          }
+          if (vars_consumed) break
+        }
+        if (vars_consumed) continue
+      }
+      printf "%d: %s\n", start, buf
+      continue
+    }
+    printf "%d: %s\n", start, buf
+  }
+}
   ' "$pin_script")
   if [ -n "$unguarded" ]; then
     echo "  FAIL: invocation whose result is not enforced (append '|| exit \$?'):" >&2

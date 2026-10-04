@@ -1554,6 +1554,13 @@ echo "    MERCHANT-R21-001: PASS (hardcoded merchant-me-r21.tsx replaced with th
 # MERCHANT-ME-VISUAL-001: replacing the old hardcoded R21 surface must not
 # flatten the merchant module architecture into anonymous text-only cards.
 # Keep the established icon/logo affordances while all counts remain server-backed.
+#
+# 2026-10-04: 「本店活动」那条判据从 `listMyActivities` 换成
+# `loadOwnMerchantActivities` —— MERCHANT-HOME-OWN-ACTIVITIES-001 把「只认本店
+# 的活动」抽成了纯模块（active-merchant + 门店认领的场景/场地名过滤），调用点
+# 从内联的 `activities.listMyActivities()` 换成了 `loadOwnMerchantActivities(...)`。
+# 行为没变（仍是服务端数据 + 本店过滤，有 merchant-home-activities.test.ts 钉着），
+# 变的是调用形状 —— 判据要跟着行为走，不能抱着一句写死的字面量。
 if ! grep -q 'OTTER_LOGO' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
    ! grep -q 'function IconBox' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
    ! grep -q '<ProxyIcon' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
@@ -1562,7 +1569,7 @@ if ! grep -q 'OTTER_LOGO' apps/mobile/src/surfaces/merchant-me-r21-replacement.t
    ! grep -q 'style={styles.today}' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
    ! grep -q 'style={styles.kpis}' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
    ! grep -q '智能匹配' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
-   ! grep -q 'listMyActivities' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
+   ! grep -q 'loadOwnMerchantActivities' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
    ! grep -q 'function SimpleRows' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
    ! grep -q '活动导流' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
    ! grep -q '平台结算' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
