@@ -99,24 +99,29 @@ describe("CREATOR-LIST-CARD-001 列表卡只用真实字段", () => {
     expect(listBranch).not.toMatch(/粉丝\s*\d|2\.4w|1\.8w|1\.2w/);
   });
 
-  it("可邀请态来自服务端 eligibility，两种态都画", () => {
-    expect(listBranch).toContain("creator.eligibility.eligible");
-    expect(listBranch).toContain("✓ 可邀请");
-    expect(listBranch).toContain("✗ 不符合资格");
-    // 头像右下那颗点只在真能邀请时画 —— 不在线不许装在线。
-    expect(listBranch).toMatch(
-      /creator\.eligibility\.eligible \? <View pointerEvents="none" style=\{styles\.creatorOnlineDot\} \/> : null/
-    );
+  it("MERCHANT-CREATOR-TAGS-001 「可邀请」标签已下掉，换成真实评价分", () => {
+    // 列表本来就只含 Eligible 的，再贴 ✓可邀请是同义反复；而且“可邀请”
+    // 没有公开判定标准 —— 下掉，换服务端 matching.Score 的 Total。
+    expect(listBranch).not.toContain("✓ 可邀请");
+    expect(listBranch).not.toContain("✗ 不符合资格");
+    expect(listBranch).not.toContain("creatorOnlineDot");
+    // 评价分胶囊只许走 creatorRatingLabel（服务端 Total），这一支里必须出现。
+    expect(listBranch).toContain("creatorRatingLabel(creator.rating)");
   });
 
   it("到店素材数还是真实读数，没有被统计数字顶掉", () => {
     expect(listBranch).toContain("creator.photos.length");
   });
 
-  it("不编原型卡上的评分 / 均播；粉丝只许走自填格式化", () => {
-    // 评分和均播没有任何来源 —— 出现即有人在编。
-    expect(me).not.toMatch(/均播|⭐|评分/);
+  it("不编原型卡上的均播；评分只许走服务端 Total，粉丝只许走自填格式化", () => {
+    // 均播依然没有任何来源 —— 出现即有人在编。
+    expect(me).not.toMatch(/均播|⭐/);
     expect(me).not.toMatch(/4\.9|5\.2w/);
+    // 评分现在有真来源（QuerySuppliers.rating ← matching.Score），但只许走
+    // creatorRatingLabel 这一条路：等级/分数的具体字样（S/新人/87.5分这类）
+    // 只能活在纯模块里，surface 里出现字面量就是有人在手写分数。
+    expect(me).toContain("creatorRatingLabel(");
+    expect(me).not.toMatch(/["']S ·|["']A ·|["']B ·|["']C ·|新人 · 暂无评价|分["']/);
     // 粉丝数现在是创作者自填（formatFansCount 统一格式化），但写死的
     // 具体数字（2.4w 这类字面量）依然不许出现 —— 数只能来自数据。
     expect(me).not.toMatch(/粉丝\s*[0-9]/);

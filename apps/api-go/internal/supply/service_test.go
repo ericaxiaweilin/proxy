@@ -228,6 +228,40 @@ func TestQuerySuppliersCarriesMerchantVisibleSocials(t *testing.T) {
 	}
 }
 
+// MERCHANT-CREATOR-TAGS-001：「可邀请」标签已下掉（结果集本来就只含 Eligible，
+// 再贴标是同义反复），换成真实评价分 —— matching.Score 算出来的 Total。
+// 无成交记录时取先验值（53），hasTrackRecord=false，调用方印「新人」不编分。
+func TestQuerySuppliersCarriesRealRating(t *testing.T) {
+	s := New()
+	setupAgent(t, s, "agent_rated", "Rated", []string{"ZH"}, "hn", 1200000)
+	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	r := s.Handle(envelopeFor("QuerySuppliers", map[string]any{
+		"marketId": "hn", "startAt": start, "durationH": 8,
+		"serviceType": "CITY_COMPANION", "languages": []string{"ZH"},
+	}, ""))
+	var view struct {
+		Suppliers []map[string]any `json:"suppliers"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	if len(view.Suppliers) != 1 {
+		t.Fatalf("want exactly agent_rated, got %d suppliers", len(view.Suppliers))
+	}
+	raw, ok := view.Suppliers[0]["rating"].(map[string]any)
+	if !ok {
+		t.Fatalf("MERCHANT-CREATOR-TAGS-001: suppliers entry must carry rating, got %v", view.Suppliers[0]["rating"])
+	}
+	// 无记录 = 先验 Total：40*0.8 + 30*0.6 + 0 + 10*0.3 = 53。
+	if raw["total"] != float64(53) {
+		t.Fatalf("no-record agent must score the prior total 53, got %v", raw["total"])
+	}
+	if raw["hasTrackRecord"] != false {
+		t.Fatalf("no-record agent must report hasTrackRecord=false, got %v", raw["hasTrackRecord"])
+	}
+	if _, ok := raw["satisfactionRate"]; !ok {
+		t.Fatalf("rating must carry satisfactionRate (0 when no reviews), got %v", raw)
+	}
+}
+
 // MERCHANT-CREATOR-TAGS-001：垂直分类走创作者自声明，服务端原样透出
 // （含不明示类目也不过滤——过滤是展示层的事）；空印 []。
 func TestQuerySuppliersCarriesVerticalTags(t *testing.T) {

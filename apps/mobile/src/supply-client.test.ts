@@ -26,11 +26,18 @@ describe("merchant creator recommendations", () => {
     expect(absent[0]?.socials).toEqual([]);
   });
   it("MERCHANT-CREATOR-TAGS-001 社媒粉丝数字段必有，缺失记 0", () => {
-    const parsed = parseSupplierCandidates([{ agentId: "c6", name: "F", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, socials: [{ platform: "tiktok", handle: "linh_hanoi", followerCount: 24000 }, { platform: "zalo", handle: "x" }] }]);
-    expect(parsed[0]?.socials).toEqual([
+    const socials = parseSupplierCandidates([{ agentId: "c6", name: "F", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, socials: [{ platform: "tiktok", handle: "linh_hanoi", followerCount: 24000 }, { platform: "zalo", handle: "x" }] }]);
+    expect(socials[0]?.socials).toEqual([
       { platform: "tiktok", handle: "linh_hanoi", followerCount: 24000 },
       { platform: "zalo", handle: "x", followerCount: 0 },
     ]);
+  });
+
+  it("MERCHANT-CREATOR-TAGS-001 评价分透出服务端 Total，非数不编", () => {
+    const parsed = parseSupplierCandidates([{ agentId: "c7", name: "G", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, rating: { total: 87.5, hasTrackRecord: true, satisfactionRate: 0.9, fulfillmentRate: 1 } }]);
+    expect(parsed[0]?.rating).toEqual({ total: 87.5, hasTrackRecord: true, satisfactionRate: 0.9, fulfillmentRate: 1 });
+    const legacy = parseSupplierCandidates([{ agentId: "c8", name: "H", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {} }]);
+    expect(legacy[0]?.rating).toBeUndefined();
   });
   it("MERCHANT-CREATOR-TAGS-001 keeps vertical tags raw, drops junk", () => {
     const parsed = parseSupplierCandidates([{ agentId: "c5", name: "E", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, verticalTags: ["RESTAURANT", "KTV", 7, ""] }]);

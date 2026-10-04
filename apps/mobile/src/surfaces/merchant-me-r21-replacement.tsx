@@ -27,7 +27,7 @@ import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
 // CREATOR-LIST-CARD-001：报价格式化与横滑卡共用同一个纯模块实现 —— 同一个人不许两个价。
 import { formatReferencePrice } from "../creator-pricing";
-import { formatFansCount, labelMarket, labelLanguage, labelServiceType, labelSocial, labelVertical } from "../creator-capability-labels";
+import { creatorRatingLabel, formatFansCount, labelMarket, labelLanguage, labelServiceType, labelSocial, labelVertical } from "../creator-capability-labels";
 // CREATOR-SOCIAL-001：社媒 canonical 链接与平台中文名（和服务端封闭集合对齐）。
 import { socialPlatformLabel, socialProfileUrl } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
@@ -393,10 +393,11 @@ export function MerchantMeR21Replacement({
                   <Text selectable style={styles.creatorAvatarMissingText}>待完善照片</Text>
                 </View>
               )}
-              {/* CREATOR-LIST-CARD-001：头像右下那颗点只在**服务端判定可邀请**时画。
-                  eligibility 是能力 / 时间 / 同城三项算出来的，不是"在线"—— 所以它
-                  旁边永远有「✓ 可邀请」那行字，点只是让这一行更好扫，不替它说话。 */}
-              {creator.eligibility.eligible ? <View pointerEvents="none" style={styles.creatorOnlineDot} /> : null}
+              {/* MERCHANT-CREATOR-TAGS-001：「可邀请」标签已下掉 —— 这批列表
+                  本来就只含服务端 Eligible 的，再贴标是同义反复；而且“可邀请”
+                  没有公开的判定标准，贴上去商家也不知道是什么意思。
+                  头像右下那颗点跟着一起下掉（它就是那个标签的配饰）。
+                  状态位（creator.eligibility）照常解析，只是不再展示。 */}
               </Pressable>
               <View style={styles.flex}>
               <Text selectable numberOfLines={1} style={styles.creatorCardName}>{creator.name}</Text>
@@ -416,13 +417,16 @@ export function MerchantMeR21Replacement({
                 {labelMarket(creator.availability?.marketId) !== "" ? <View style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{labelMarket(creator.availability?.marketId)}</Text></View> : null}
                 {(creator.socials ?? []).slice(0, 1).map((social) => labelSocial(social.platform, social.handle)).filter((label) => label !== "").map((label) => <View key={label} style={[styles.creatorTag, styles.creatorTagDark]}><Text selectable style={styles.creatorTagDarkText}>{label}</Text></View>)}
               </View>
-              {/* 原型卡这一行是「⭐评分 / 粉丝 2.4w / 均播 5.2w」—— 评分和均播这份
-                  数据里根本没有，不编。粉丝数是创作者自填（和报价一个性质），
-                  有就印，没有就不画这一段。 */}
+              {/* MERCHANT-CREATOR-TAGS-001：stats 首位是评价分/等级 —— 服务端
+                  matching.Score 算出来的 Total（0..100）。有成交记录印
+                  「S · 87.5分」这类；新人印「新人 · 暂无评价」。老服务端不带
+                  rating 时 creatorRatingLabel 返回空串，不渲染（不编）。 */}
               <View style={styles.creatorStatRow}>
-                <View style={[styles.creatorEligibility, creator.eligibility.eligible ? styles.creatorEligibilityOn : styles.creatorEligibilityOff]}>
-                  <Text selectable style={[styles.creatorEligibilityText, creator.eligibility.eligible ? styles.creatorEligibilityTextOn : styles.creatorEligibilityTextOff]}>{creator.eligibility.eligible ? "✓ 可邀请" : "✗ 不符合资格"}</Text>
-                </View>
+                {creatorRatingLabel(creator.rating) !== "" ? (
+                  <View style={[styles.creatorEligibility]}>
+                    <Text selectable style={[styles.creatorEligibilityText]}>{creatorRatingLabel(creator.rating)}</Text>
+                  </View>
+                ) : null}
                 {<Text selectable numberOfLines={1} style={styles.creatorStat}>{`粉丝 ${formatFansCount(creator.socials?.[0]?.followerCount)}`}</Text>}
                 <Text selectable numberOfLines={1} style={styles.creatorStat}>{`到店 ${creator.photos.length} 媒体`}</Text>
               </View>
@@ -495,17 +499,18 @@ export function MerchantMeR21Replacement({
                 </Text>
               </View>
             </View>
-            {/* CREATOR-LIST-CARD-001：原型 .price-bar —— 虚线上边、左「参考报价」、
-                右状态胶囊。可邀请与否在这一页说一次就够，不再在名字下面重复第二遍；
-                报价也走共享的 formatReferencePrice，和列表卡印同一个字符串。 */}
+            {/* MERCHANT-CREATOR-TAGS-001：右状态胶囊原来是「可邀请」—— 已换成
+                评价分/等级（和列表卡同一套 creatorRatingLabel）。 */}
             <View style={styles.creatorPriceBar}>
               <View style={styles.flex}>
                 <Text selectable style={styles.creatorPriceLabel}>参考报价</Text>
                 <Text selectable style={styles.creatorPriceValue}>{formatReferencePrice(selectedCreator.referencePrice, selectedCreator.currency)}</Text>
               </View>
-              <View style={[styles.creatorEligibility, selectedCreator.eligibility.eligible ? styles.creatorEligibilityOn : styles.creatorEligibilityOff]}>
-                <Text selectable style={[styles.creatorEligibilityText, selectedCreator.eligibility.eligible ? styles.creatorEligibilityTextOn : styles.creatorEligibilityTextOff]}>{selectedCreator.eligibility.eligible ? "✓ 可邀请" : "✗ 不符合资格"}</Text>
-              </View>
+              {creatorRatingLabel(selectedCreator.rating) !== "" ? (
+                <View style={[styles.creatorEligibility]}>
+                  <Text selectable style={[styles.creatorEligibilityText]}>{creatorRatingLabel(selectedCreator.rating)}</Text>
+                </View>
+              ) : null}
             </View>
           </View>
           {creatorPassportFailed ? (
@@ -571,7 +576,7 @@ export function MerchantMeR21Replacement({
             <Text selectable style={styles.meta} testID={`creator-social-empty-${selectedCreator.agentId}`}>尚未关联社媒账户</Text>
           )}
           {summary({
-            meta: selectedCreator.eligibility.eligible ? "可邀请" : "暂不可邀请",
+            meta: creatorRatingLabel(selectedCreator.rating) === "" ? "暂无评价" : creatorRatingLabel(selectedCreator.rating),
             stats: [
               [selectedCreator.photos.length.toString(), "到店"],
               [verifiedCaps.length > 0 ? verifiedCaps.length.toString() : "—", "已验证能力"],
@@ -999,7 +1004,7 @@ export function MerchantMeR21Replacement({
         {sectionHead("经营")}
         <View style={styles.moduleGrid}>
           {([
-            ["target", "Creator 经营", `${creators.length} 位可邀请 Creator`, true, "creator"],
+            ["target", "Creator 经营", `${creators.length} 位 Creator`, true, "creator"],
             ["ticket", "客户 / 券", `${members.length} 位经营人员`, false, "voucher"],
             ["arrowUpRight", "活动导流", `${activityItems.length} 个开放活动`, false, "activity"],
             ["storeLines", "线上店铺", activeAccount?.status ?? "查看店铺", true, "store"],

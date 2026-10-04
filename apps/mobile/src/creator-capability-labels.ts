@@ -78,6 +78,34 @@ export function formatFansCount(count: number | undefined): string {
   return `${Number.isInteger(w) ? `${w}` : w.toFixed(1)}w`;
 }
 
+// MERCHANT-CREATOR-TAGS-001：评价分/等级分有真实来源 —— 服务端 matching.Score
+// 的 Total（0..100；履约40/评价30/经验15/响应10/预算5）。
+// 等级只是展示映射（分档阈值调这里），分永远是服务端算出来的，不手写。
+// 无成交记录（hasTrackRecord=false）一律印「新人」：先验分是系统的保守估计，
+// 不是她的成绩，不给她定级，也不把先验分当成绩印。
+export function formatCreatorGrade(total: number | undefined, hasTrackRecord: boolean): string {
+  if (!hasTrackRecord) return "新人";
+  if (typeof total !== "number" || !(total >= 0)) return "新人";
+  if (total >= 85) return "S";
+  if (total >= 70) return "A";
+  if (total >= 55) return "B";
+  return "C";
+}
+
+// Total 带两位小数（53 / 87.5），展示去尾零。
+export function formatCreatorScore(total: number | undefined): string {
+  if (typeof total !== "number" || !(total >= 0)) return "—";
+  return `${Math.round(total * 10) / 10}`;
+}
+
+// 整行标签：有记录印「S · 87.5分」，新人印「新人 · 暂无评价」。
+// 老服务端不带 rating 时返回空串，调用方不渲染胶囊（不编）。
+export function creatorRatingLabel(rating: { total: number; hasTrackRecord: boolean } | undefined): string {
+  if (!rating) return "";
+  if (!rating.hasTrackRecord) return "新人 · 暂无评价";
+  return `${formatCreatorGrade(rating.total, true)} · ${formatCreatorScore(rating.total)}分`;
+}
+
 // MERCHANT-CREATOR-TAGS-001：语言一律写全称。中国用户不认 VI/ZH 这类缩写。
 const LANGUAGE_LABELS: Record<string, string> = {
   ZH: "中文",

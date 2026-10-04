@@ -131,6 +131,10 @@ export type SupplierCandidate = {
   // 社媒账号（platform + handle + 自填粉丝数，可见性已在服务端按调用方过滤）。
   // followerCount 必有（缺失记 0=未披露）。老服务端不带 socials 字段时为空数组。
   socials?: Array<{ platform: string; handle: string; followerCount: number }>;
+  // MERCHANT-CREATOR-TAGS-001：评价分有真实来源 —— 服务端 matching.Score
+  // 算出来的 Total（0..100；履约40/评价30/经验15/响应10/预算5）。
+  // 无成交记录时 Total 取先验值、hasTrackRecord=false，UI 印「新人」不编分。
+  rating?: { total: number; hasTrackRecord: boolean; satisfactionRate: number; fulfillmentRate: number };
   // MERCHANT-CREATOR-TAGS-001：创作者自声明内容垂类（展示过滤在客户端）。
   // 老服务端不带该字段时解析为 []。
   verticalTags?: string[];
@@ -150,6 +154,15 @@ export function parseSupplierCandidates(value: unknown): SupplierCandidate[] {
     const eligibility = item.eligibility && typeof item.eligibility === "object" ? item.eligibility as Record<string, unknown> : {};
     const availability = item.availability && typeof item.availability === "object" ? item.availability as Record<string, unknown> : undefined;
     const parsedAvailability = availability && typeof availability.startAt === "string" && typeof availability.endAt === "string" && typeof availability.marketId === "string" ? { startAt: availability.startAt, endAt: availability.endAt, marketId: availability.marketId } : undefined;
+    // 评价分：total 必须是数（服务端 matching.Score 的真实输出），不是数
+    // 说明是老服务端 —— 不编，调用方按「无评分」处理（不渲染胶囊）。
+    const ratingRaw = item.rating && typeof item.rating === "object" ? item.rating as Record<string, unknown> : undefined;
+    const parsedRating = ratingRaw && typeof ratingRaw.total === "number" ? {
+      total: ratingRaw.total,
+      hasTrackRecord: ratingRaw.hasTrackRecord === true,
+      satisfactionRate: typeof ratingRaw.satisfactionRate === "number" ? ratingRaw.satisfactionRate : 0,
+      fulfillmentRate: typeof ratingRaw.fulfillmentRate === "number" ? ratingRaw.fulfillmentRate : 0,
+    } : undefined;
     return [{ agentId: item.agentId,
       ...(typeof item.userAccountId === "string" && item.userAccountId !== "" ? { userAccountId: item.userAccountId } : {}),
       name: item.name,
@@ -169,6 +182,7 @@ export function parseSupplierCandidates(value: unknown): SupplierCandidate[] {
       referencePrice: typeof item.referencePrice === "number" ? item.referencePrice : 0,
       currency: typeof item.currency === "string" ? item.currency : "VND",
       ...(parsedAvailability ? { availability: parsedAvailability } : {}),
+      ...(parsedRating ? { rating: parsedRating } : {}),
       eligibility: { eligible: eligibility.eligible === true, capabilitiesOk: eligibility.capabilitiesOk === true, availabilityOk: eligibility.availabilityOk === true, marketOk: eligibility.marketOk === true },
     }];
   });

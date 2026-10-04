@@ -49,8 +49,8 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 	now := time.Now().UTC()
 	// Agent Profile
 	profiles := merchantCreatorSeedProfiles()
-	// Agent Profile。Linh 关联了 TikTok 公开账号（原型 @linh_hanoi），
-	// 商家页粉丝标签的数据来源；其他人暂无关联账号，对应空态。
+	// Agent Profile。6 个种子达人全部关联了 TikTok 公开账号（原型 @linh_hanoi），
+	// 商家页粉丝标签的数据来源；真人入驻时由创作者自己绑定。
 	for _, p := range profiles {
 		photos, _ := json.Marshal([]string{creatorAvatarPath(p.agentID)})
 		languages, _ := json.Marshal(p.languages)

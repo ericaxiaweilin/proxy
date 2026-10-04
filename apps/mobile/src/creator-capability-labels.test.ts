@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatFansCount, labelCapability, labelMarket, labelServiceType, labelSocial, labelVertical, visibleCapabilityTags } from "./creator-capability-labels";
+import { creatorRatingLabel, formatCreatorGrade, formatCreatorScore, formatFansCount, labelCapability, labelMarket, labelServiceType, labelSocial, labelVertical, visibleCapabilityTags } from "./creator-capability-labels";
 
 describe("creator-capability-labels (MERCHANT-CREATOR-TAGS-001)", () => {
   it("已知编码转中文", () => {
@@ -33,6 +33,22 @@ describe("creator-capability-labels (MERCHANT-CREATOR-TAGS-001)", () => {
     expect(formatFansCount(950)).toBe("950");
     expect(formatFansCount(0)).toBe("0");
     expect(formatFansCount(undefined)).toBe("0");
+  });
+
+  it("评价分/等级只做展示映射：分档阈值 S85/A70/B55，无记录一律新人", () => {
+    expect(formatCreatorGrade(92, true)).toBe("S");
+    expect(formatCreatorGrade(85, true)).toBe("S");
+    expect(formatCreatorGrade(70, true)).toBe("A");
+    expect(formatCreatorGrade(55, true)).toBe("B");
+    expect(formatCreatorGrade(54.9, true)).toBe("C");
+    // 无成交记录不给先验分定级 —— 哪怕 Total 有数。
+    expect(formatCreatorGrade(53, false)).toBe("新人");
+    expect(formatCreatorGrade(95, false)).toBe("新人");
+    expect(formatCreatorScore(92)).toBe("92");
+    expect(formatCreatorScore(87.5)).toBe("87.5");
+    expect(creatorRatingLabel({ total: 92, hasTrackRecord: true })).toBe("S · 92分");
+    expect(creatorRatingLabel({ total: 53, hasTrackRecord: false })).toBe("新人 · 暂无评价");
+    expect(creatorRatingLabel(undefined)).toBe("");
   });
   it("垂类只明示三类，其余返回空", () => {
     expect(labelVertical("RESTAURANT")).toBe("餐饮");

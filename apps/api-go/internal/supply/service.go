@@ -1540,7 +1540,12 @@ func (s *Service) querySuppliers(ctx context.Context, e command.Envelope) comman
 		return command.Rejected(e, "SUPPLY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.read_failed", nil)
 	}
 	q := SupplyQuery{MarketID: p.MarketID, StartAt: start, DurationH: p.DurationH, ServiceType: p.ServiceType, Languages: p.Languages, Capabilities: p.Capabilities, GenderPref: p.GenderPref}
-	results := []map[string]any{}
+	type eligibleSupplier struct {
+		profile AgentProfile
+		snap    EligibilitySnapshot
+		svc     AgentService
+	}
+	eligible := []eligibleSupplier{}
 	for _, profile := range profiles {
 		if profile.Status != "ACTIVE" {
 			continue
@@ -1550,6 +1555,26 @@ func (s *Service) querySuppliers(ctx context.Context, e command.Envelope) comman
 			continue
 		}
 		svc, _ := s.repository.GetService(ctx, profile.AgentID, p.ServiceType)
+		eligible = append(eligible, eligibleSupplier{profile: profile, snap: snap, svc: svc})
+	}
+	// MERCHANT-CREATOR-TAGS-001：评价分有真实来源 —— internal/matching.Score
+	// 算出来的 Total（履约40/评价30/经验15/响应10/预算5；无成交记录时
+	// 取先验值，hasTrackRecord=false 让调用方如实印「新人」而不是编分数）。
+	// 注意「可邀请」标签已下掉：这批结果本来就只含 Eligible 的，
+	// 再贴一个 ✓可邀请等于同义反复，所以状态位只留给服务端过滤用，不再展示。
+	ids := make([]string, 0, len(eligible))
+	prices := map[string]int64{}
+	for _, c := range eligible {
+		ids = append(ids, c.profile.AgentID)
+		prices[c.profile.AgentID] = c.svc.ReferencePrice
+	}
+	signals := s.rankSignals(ctx, ids)
+	results := []map[string]any{}
+	for _, c := range eligible {
+		profile := c.profile
+		snap := c.snap
+		svc := c.svc
+		bd := matching.Score(signals[profile.AgentID], prices[profile.AgentID], 0)
 		windows, _ := s.repository.OverlappingWindows(ctx, profile.AgentID, start, start.Add(time.Duration(p.DurationH)*time.Hour))
 		var availability any
 		for _, window := range windows {
@@ -1582,8 +1607,17 @@ func (s *Service) querySuppliers(ctx context.Context, e command.Envelope) comman
 			}(),
 			"referencePrice": svc.ReferencePrice,
 			"currency":       svc.Currency,
-			"eligibility":    snap,
-			"availability":   availability,
+			// 评价分（见上）：Total 0..100；satisfactionRate/fulfillmentRate
+			// 无记录时为 0，调用方看 hasTrackRecord 决定印分数还是印「新人」。
+			"rating": map[string]any{
+				"total":            bd.Total,
+				"satisfaction":     bd.Satisfaction,
+				"hasTrackRecord":   bd.HasTrackRecord,
+				"satisfactionRate": bd.SatisfactionRate,
+				"fulfillmentRate":  bd.FulfillmentRate,
+			},
+			"eligibility":  snap,
+			"availability": availability,
 		})
 		if len(results) >= maxSupplierResults {
 			break
