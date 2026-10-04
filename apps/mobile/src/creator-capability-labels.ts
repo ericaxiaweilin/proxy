@@ -67,6 +67,17 @@ export function labelSocial(platform: string, handle: string): string {
   return `${mark} @${handle}`;
 }
 
+// MERCHANT-CREATOR-TAGS-001：粉丝数是创作者自填（和报价一个性质），
+// 商家点账号去平台自验。>=10000 印成 x.xw（如 2.4w，整数去尾零），
+// 以下印原数；<=0 或非数返回空字符串（不渲染）。
+export function formatFansCount(count: number | undefined): string {
+  if (typeof count !== "number" || !(count > 0)) return "";
+  const n = Math.floor(count);
+  if (n < 10000) return `${n}`;
+  const w = n / 10000;
+  return `${Number.isInteger(w) ? `${w}` : w.toFixed(1)}w`;
+}
+
 // MERCHANT-CREATOR-TAGS-001：语言一律写全称。中国用户不认 VI/ZH 这类缩写。
 const LANGUAGE_LABELS: Record<string, string> = {
   ZH: "中文",

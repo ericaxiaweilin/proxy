@@ -175,15 +175,19 @@ func TestQuerySuppliersCarriesVerifiedCapabilities(t *testing.T) {
 func TestQuerySuppliersCarriesMerchantVisibleSocials(t *testing.T) {
 	s := New()
 	setupAgent(t, s, "agent_social", "Social", []string{"ZH"}, "hn", 1200000)
-	link := func(platform, handle, visibility string) {
-		r := s.Handle(envelopeForPrincipal("LinkAgentSocial", map[string]any{
+	link := func(platform, handle, visibility string, followers ...int64) {
+		payload := map[string]any{
 			"agentId": "agent_social", "platform": platform, "handle": handle, "visibility": visibility,
-		}, "", "agent_social"))
+		}
+		if len(followers) > 0 {
+			payload["followerCount"] = followers[0]
+		}
+		r := s.Handle(envelopeForPrincipal("LinkAgentSocial", payload, "", "agent_social"))
 		if r.Outcome != "ACCEPTED" {
 			t.Fatalf("link %s: %s", platform, r.Outcome)
 		}
 	}
-	link("tiktok", "linh_hanoi", "public")
+	link("tiktok", "linh_hanoi", "public", 24000)
 	link("instagram", "linh.ig", "private")
 	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
 	query := func(merchantID string) []map[string]any {
@@ -215,6 +219,9 @@ func TestQuerySuppliersCarriesMerchantVisibleSocials(t *testing.T) {
 	first, _ := socials[0].(map[string]any)
 	if first["platform"] != "tiktok" || first["handle"] != "linh_hanoi" {
 		t.Fatalf("wrong social content: %v", socials[0])
+	}
+	if first["followerCount"] != float64(24000) {
+		t.Fatalf("self-declared fan count must pass through, got %v", first["followerCount"])
 	}
 	if _, hasVis := first["visibility"]; hasVis {
 		t.Fatalf("visibility must not leak to client: %v", first)

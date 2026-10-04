@@ -58,8 +58,11 @@ type AgentSocial struct {
 	// 用户名，不含 @，不含 URL，不含空白。
 	Handle string `json:"handle"`
 	// 可见性，封闭集合（见 SOCIAL-VISIBILITY-001）。
-	Visibility string    `json:"visibility"`
-	CreatedAt  time.Time `json:"createdAt"`
+	Visibility string `json:"visibility"`
+	// MERCHANT-CREATOR-TAGS-001：粉丝数是创作者自填（和报价一个性质），
+	// 商家点 handle 去平台自验。0 = 未披露，不展示。
+	FollowerCount int64     `json:"followerCount,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 // CREATOR-SOCIAL-001：平台封闭集合。加新平台要改这里 + migration CHECK + 客户端
@@ -906,10 +909,11 @@ func merchantViewer(e command.Envelope) bool {
 
 func (s *Service) linkAgentSocial(ctx context.Context, e command.Envelope) command.Result {
 	var p struct {
-		AgentID    string `json:"agentId"`
-		Platform   string `json:"platform"`
-		Handle     string `json:"handle"`
-		Visibility string `json:"visibility"`
+		AgentID       string `json:"agentId"`
+		Platform      string `json:"platform"`
+		Handle        string `json:"handle"`
+		Visibility    string `json:"visibility"`
+		FollowerCount int64  `json:"followerCount"`
 	}
 	if !decode(e.Payload, &p) || p.AgentID == "" {
 		return command.Rejected(e, "INVALID_AGENT_SOCIAL", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_social", nil)
@@ -940,17 +944,21 @@ func (s *Service) linkAgentSocial(ctx context.Context, e command.Envelope) comma
 	}
 	now := s.clock.Now().UTC()
 	replaced := false
+	followerCount := p.FollowerCount
+	if followerCount < 0 {
+		followerCount = 0
+	}
 	for i := range profile.Socials {
 		if profile.Socials[i].Platform == p.Platform {
 			// 同平台再绑 = 换绑，不是叠加 —— 不然一个人能挂 5 个 TikTok，
 			// 商家看到的"已关联"就没意义了。
-			profile.Socials[i] = AgentSocial{Platform: p.Platform, Handle: p.Handle, Visibility: visibility, CreatedAt: now}
+			profile.Socials[i] = AgentSocial{Platform: p.Platform, Handle: p.Handle, Visibility: visibility, FollowerCount: followerCount, CreatedAt: now}
 			replaced = true
 			break
 		}
 	}
 	if !replaced {
-		profile.Socials = append(profile.Socials, AgentSocial{Platform: p.Platform, Handle: p.Handle, Visibility: visibility, CreatedAt: now})
+		profile.Socials = append(profile.Socials, AgentSocial{Platform: p.Platform, Handle: p.Handle, Visibility: visibility, FollowerCount: followerCount, CreatedAt: now})
 	}
 	profile.UpdatedAt = now
 	if err := s.repository.UpdateProfile(ctx, profile); err != nil {
@@ -1423,15 +1431,19 @@ func (s *Service) verifiedCapabilityCodes(ctx context.Context, agentID string) [
 	return codes
 }
 
-// visibleSocialSummaries 给 QuerySuppliers 用：只吐 platform/handle，
-// 不含 visibility/时间戳。空返回 [] 不返回 null（wire 契约）。
+// visibleSocialSummaries 给 QuerySuppliers 用：只吐 platform/handle（+ 有就带
+// 自填粉丝数），不含 visibility/时间戳。空返回 [] 不返回 null（wire 契约）。
 func visibleSocialSummaries(socials []AgentSocial, viewerIsSelf, viewerIsMerchant bool) []map[string]any {
 	out := []map[string]any{}
 	for _, item := range socialsVisibleToViewer(socials, viewerIsSelf, viewerIsMerchant) {
 		if item.Platform == "" || item.Handle == "" {
 			continue
 		}
-		out = append(out, map[string]any{"platform": item.Platform, "handle": item.Handle})
+		summary := map[string]any{"platform": item.Platform, "handle": item.Handle}
+		if item.FollowerCount > 0 {
+			summary["followerCount"] = item.FollowerCount
+		}
+		out = append(out, summary)
 	}
 	return out
 }

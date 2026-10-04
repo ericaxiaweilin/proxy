@@ -94,6 +94,7 @@ describe("CREATOR-LIST-CARD-001 列表卡只用真实字段", () => {
   it("MERCHANT-CREATOR-TAGS-001 范围与社媒标签来自真实字段", () => {
     expect(listBranch).toContain("creator.availability?.marketId");
     expect(listBranch).toContain("creator.socials");
+    expect(listBranch).toContain("formatFansCount(");
     // 粉丝数没有聚合来源：不许出现写死的粉丝数字。
     expect(listBranch).not.toMatch(/粉丝\s*\d|2\.4w|1\.8w|1\.2w/);
   });
@@ -112,10 +113,15 @@ describe("CREATOR-LIST-CARD-001 列表卡只用真实字段", () => {
     expect(listBranch).toContain("creator.photos.length");
   });
 
-  it("不编原型卡上的评分 / 粉丝 / 均播", () => {
-    // 这三个数 SupplierCandidate 里没有 —— 出现即有人在编。
-    expect(me).not.toMatch(/粉丝|均播|⭐|评分/);
-    expect(me).not.toMatch(/4\.9|2\.4w|5\.2w/);
+  it("不编原型卡上的评分 / 均播；粉丝只许走自填格式化", () => {
+    // 评分和均播没有任何来源 —— 出现即有人在编。
+    expect(me).not.toMatch(/均播|⭐|评分/);
+    expect(me).not.toMatch(/4\.9|5\.2w/);
+    // 粉丝数现在是创作者自填（formatFansCount 统一格式化），但写死的
+    // 具体数字（2.4w 这类字面量）依然不许出现 —— 数只能来自数据。
+    expect(me).not.toMatch(/粉丝\s*[0-9]/);
+    expect(me).not.toMatch(/["']2\.4w["']/);
+    expect(me).toContain("formatFansCount(");
   });
 
   it("卡片样式是原型的那一套（圆角卡 + 标签胶囊 + 报价列 + 柠檬主操作）", () => {

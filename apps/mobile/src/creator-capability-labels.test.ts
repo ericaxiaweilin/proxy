@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { labelCapability, labelMarket, labelServiceType, labelSocial, labelVertical, visibleCapabilityTags } from "./creator-capability-labels";
+import { formatFansCount, labelCapability, labelMarket, labelServiceType, labelSocial, labelVertical, visibleCapabilityTags } from "./creator-capability-labels";
 
 describe("creator-capability-labels (MERCHANT-CREATOR-TAGS-001)", () => {
   it("已知编码转中文", () => {
@@ -26,6 +26,13 @@ describe("creator-capability-labels (MERCHANT-CREATOR-TAGS-001)", () => {
   it("社媒账号转标签，无 handle 不渲染", () => {
     expect(labelSocial("tiktok", "linh_hanoi")).toBe("🎵 @linh_hanoi");
     expect(labelSocial("zalo", "")).toBe("");
+  });
+  it("粉丝数自填格式化：万级缩写，无数不渲染", () => {
+    expect(formatFansCount(24000)).toBe("2.4w");
+    expect(formatFansCount(10000)).toBe("1w");
+    expect(formatFansCount(950)).toBe("950");
+    expect(formatFansCount(0)).toBe("");
+    expect(formatFansCount(undefined)).toBe("");
   });
   it("垂类只明示三类，其余返回空", () => {
     expect(labelVertical("RESTAURANT")).toBe("餐饮");

@@ -32,7 +32,7 @@ func merchantCreatorSeedServices() []merchantCreatorSeedService {
 
 func merchantCreatorSeedSocials() map[string]string {
 	return map[string]string{
-		"agent_linh": `[{"platform":"tiktok","handle":"linh_hanoi","visibility":"public"}]`,
+		"agent_linh": `[{"platform":"tiktok","handle":"linh_hanoi","visibility":"public","followerCount":24000}]`,
 	}
 }
 

@@ -27,7 +27,7 @@ import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
 // CREATOR-LIST-CARD-001：报价格式化与横滑卡共用同一个纯模块实现 —— 同一个人不许两个价。
 import { formatReferencePrice } from "../creator-pricing";
-import { labelMarket, labelLanguage, labelServiceType, labelSocial, labelVertical } from "../creator-capability-labels";
+import { formatFansCount, labelMarket, labelLanguage, labelServiceType, labelSocial, labelVertical } from "../creator-capability-labels";
 // CREATOR-SOCIAL-001：社媒 canonical 链接与平台中文名（和服务端封闭集合对齐）。
 import { socialPlatformLabel, socialProfileUrl } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
@@ -416,14 +416,14 @@ export function MerchantMeR21Replacement({
                 {labelMarket(creator.availability?.marketId) !== "" ? <View style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{labelMarket(creator.availability?.marketId)}</Text></View> : null}
                 {(creator.socials ?? []).slice(0, 1).map((social) => labelSocial(social.platform, social.handle)).filter((label) => label !== "").map((label) => <View key={label} style={[styles.creatorTag, styles.creatorTagDark]}><Text selectable style={styles.creatorTagDarkText}>{label}</Text></View>)}
               </View>
-              {/* 原型卡这一行是「⭐评分 / 粉丝 2.4w / 均播 5.2w」—— 这三个数这份数据里
-                  根本没有，编出来就是上一轮那个 P0 的同一类问题。换成商家真正用来
-                  挑人的两项真实读数：能不能邀请（服务端 eligibility）、有没有到店素材。
-                  报价在右边那一列，不在这里重复。 */}
+              {/* 原型卡这一行是「⭐评分 / 粉丝 2.4w / 均播 5.2w」—— 评分和均播这份
+                  数据里根本没有，不编。粉丝数是创作者自填（和报价一个性质），
+                  有就印，没有就不画这一段。 */}
               <View style={styles.creatorStatRow}>
                 <View style={[styles.creatorEligibility, creator.eligibility.eligible ? styles.creatorEligibilityOn : styles.creatorEligibilityOff]}>
                   <Text selectable style={[styles.creatorEligibilityText, creator.eligibility.eligible ? styles.creatorEligibilityTextOn : styles.creatorEligibilityTextOff]}>{creator.eligibility.eligible ? "✓ 可邀请" : "✗ 不符合资格"}</Text>
                 </View>
+                {formatFansCount(creator.socials?.[0]?.followerCount) !== "" ? <Text selectable numberOfLines={1} style={styles.creatorStat}>{`粉丝 ${formatFansCount(creator.socials?.[0]?.followerCount)}`}</Text> : null}
                 <Text selectable numberOfLines={1} style={styles.creatorStat}>{`到店 ${creator.photos.length} 媒体`}</Text>
               </View>
               </View>
