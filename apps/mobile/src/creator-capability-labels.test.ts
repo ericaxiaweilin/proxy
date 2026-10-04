@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { creatorRatingLabel, formatCreatorGrade, formatCreatorScore, formatFansCount, formatServiceVolume, labelCapability, labelMarket, labelServiceType, labelSocial, labelVertical, visibleCapabilityTags } from "./creator-capability-labels";
+import { creatorRatingLabel, formatCreatorGrade, formatCreatorScore, formatFansCount, formatRatePercent, formatServiceVolume, labelCapability, labelMarket, labelServiceType, labelSocial, labelVertical, visibleCapabilityTags } from "./creator-capability-labels";
 
 describe("creator-capability-labels (MERCHANT-CREATOR-TAGS-001)", () => {
   it("已知编码转中文", () => {
@@ -55,6 +55,13 @@ describe("creator-capability-labels (MERCHANT-CREATOR-TAGS-001)", () => {
     expect(formatServiceVolume(12)).toBe("服务 12 单");
     expect(formatServiceVolume(0)).toBe("服务 0 单");
     expect(formatServiceVolume(undefined)).toBe("服务 0 单");
+  });
+
+  it("比率只印正数百分比，无评价不印 0%", () => {
+    expect(formatRatePercent(0.9)).toBe("90%");
+    expect(formatRatePercent(0.955)).toBe("96%");
+    expect(formatRatePercent(0)).toBe("");
+    expect(formatRatePercent(undefined)).toBe("");
   });
   it("垂类只明示三类，其余返回空", () => {
     expect(labelVertical("RESTAURANT")).toBe("餐饮");

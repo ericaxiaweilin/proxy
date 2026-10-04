@@ -169,4 +169,23 @@ describe("CREATOR-LIST-CARD-001 详情页同一套语言", () => {
     // 未验证的不许被打上已验证的样子。
     expect(detail).toMatch(/c\.verified && styles\.capChipVerified/);
   });
+
+  it("MERCHANT-CREATOR-TAGS-001 详情头和列表卡同一套语言，明细只印真实发生", () => {
+    // 头：名字+@handle 挨在一起，标签行 大类/语言/地址，stats 粉丝/服务量/评价。
+    expect(detail).toContain("creatorHandle");
+    expect(detail).toContain("selectedCreator.verticalTags");
+    expect(detail).toContain("selectedCreator.languages");
+    expect(detail).toContain("selectedCreator.availability?.marketId");
+    expect(detail).toContain("formatServiceVolume(selectedCreator.rating?.completedOrders)");
+    expect(detail).toContain("creatorRatingLabel(selectedCreator.rating)");
+    // 服务类型和社媒胶囊不许回流到详情头。
+    expect(detail).not.toContain("labelServiceType(");
+    expect(detail).not.toContain("labelSocial(");
+    // 评价明细：好评率/履约率只许走 formatRatePercent（无评价不印 0%），
+    // 新人如实说没记录；社媒行粉丝数和列表对表，不许出现手写数字。
+    expect(detail).toContain("formatRatePercent(");
+    expect(detail).toContain("fanCountFor(");
+    expect(detail).not.toContain("✓ 可邀请");
+    expect(detail).not.toContain("✗ 不符合资格");
+  });
 });

@@ -27,7 +27,7 @@ import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
 // CREATOR-LIST-CARD-001：报价格式化与横滑卡共用同一个纯模块实现 —— 同一个人不许两个价。
 import { formatReferencePrice } from "../creator-pricing";
-import { creatorRatingLabel, formatFansCount, formatServiceVolume, labelMarket, labelLanguage, labelVertical } from "../creator-capability-labels";
+import { creatorRatingLabel, formatFansCount, formatRatePercent, formatServiceVolume, labelMarket, labelLanguage, labelVertical } from "../creator-capability-labels";
 // CREATOR-SOCIAL-001：社媒 canonical 链接与平台中文名（和服务端封闭集合对齐）。
 import { socialPlatformLabel, socialProfileUrl } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
@@ -451,8 +451,12 @@ export function MerchantMeR21Replacement({
   if (page === "creatorDetail" && selectedCreator) {
     const heroPhoto = creatorPassport?.profile.photos[0] ?? selectedCreator.photos[0];
     const heroUri = resolveCreatorPhoto(heroPhoto);
-    const verifiedCaps = creatorPassport?.capabilities.filter((c) => c.verified) ?? [];
     const upcoming = (creatorPassport?.availability ?? []).filter((w) => w.endAt >= new Date().toISOString().slice(0, 10)).slice(0, 3);
+    // 社媒粉丝数对照表：passport 的社媒区只带账号，粉丝数从列表同源的
+    // selectedCreator.socials 里按 platform+handle 对出来 —— 同一份数据，
+    // 详情和列表不会印出两个数。
+    const fanCountFor = (platform: string, handle: string): number | undefined =>
+      (selectedCreator.socials ?? []).find((s) => s.platform === platform && s.handle === handle)?.followerCount;
     return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
@@ -487,27 +491,37 @@ export function MerchantMeR21Replacement({
               )}
               </Pressable>
               <View style={styles.flex}>
-                <Text selectable style={styles.creatorCardName}>{selectedCreator.name}</Text>
+                {/* MERCHANT-CREATOR-TAGS-001：详情头和列表卡同一套语言 ——
+                    名字+@handle 挨在一起，标签行只放 大类/语言/地址
+                   （详情不折 +N，语言全列出来），stats 行 粉丝/服务量/评价。
+                    简介有就印，没有就不画那一行。 */}
+                <Text selectable numberOfLines={1} style={styles.creatorCardName}>{selectedCreator.name}{(selectedCreator.socials ?? [])[0]?.handle ? <Text style={styles.creatorHandle}> @{((selectedCreator.socials ?? [])[0]?.handle ?? "")}</Text> : null}</Text>
                 {(creatorPassport?.profile.bio.trim() || "") !== "" ? (
                   <Text selectable style={styles.meta}>{creatorPassport?.profile.bio}</Text>
                 ) : null}
-                <Text selectable style={styles.meta}>
-                  {selectedCreator.serviceType} · {(selectedCreator.languages.length ? selectedCreator.languages : creatorPassport?.profile.languages ?? []).join(" / ") || "—"}
-                </Text>
+                <View style={styles.creatorTagRow}>
+                  {(selectedCreator.verticalTags ?? []).map(labelVertical).filter((label) => label !== "").map((label) => <View key={label} style={[styles.creatorTag, styles.creatorTagPrimary]}><Text selectable style={styles.creatorTagPrimaryText}>{label}</Text></View>)}
+                  {(selectedCreator.languages.length ? selectedCreator.languages : creatorPassport?.profile.languages ?? []).map((language) => <View key={language} style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{labelLanguage(language)}</Text></View>)}
+                  {labelMarket(selectedCreator.availability?.marketId) !== "" ? <View style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{labelMarket(selectedCreator.availability?.marketId)}</Text></View> : null}
+                </View>
+                <View style={styles.creatorStatRow}>
+                  {<Text selectable numberOfLines={1} style={styles.creatorStat}>{`粉丝 ${formatFansCount(selectedCreator.socials?.[0]?.followerCount)}`}</Text>}
+                  <Text selectable numberOfLines={1} style={styles.creatorStat}>{formatServiceVolume(selectedCreator.rating?.completedOrders)}</Text>
+                  {creatorRatingLabel(selectedCreator.rating) !== "" ? (
+                    <View style={[styles.creatorEligibility]}>
+                      <Text selectable style={[styles.creatorEligibilityText]}>{creatorRatingLabel(selectedCreator.rating)}</Text>
+                    </View>
+                  ) : null}
+                </View>
               </View>
             </View>
-            {/* MERCHANT-CREATOR-TAGS-001：右状态胶囊原来是「可邀请」—— 已换成
-                评价分/等级（和列表卡同一套 creatorRatingLabel）。 */}
+            {/* MERCHANT-CREATOR-TAGS-001：参考报价条只管报价 —— 评价胶囊已经
+                在上面的 stats 行里了，这里不再重复第二遍。 */}
             <View style={styles.creatorPriceBar}>
               <View style={styles.flex}>
                 <Text selectable style={styles.creatorPriceLabel}>参考报价</Text>
                 <Text selectable style={styles.creatorPriceValue}>{formatReferencePrice(selectedCreator.referencePrice, selectedCreator.currency)}</Text>
               </View>
-              {creatorRatingLabel(selectedCreator.rating) !== "" ? (
-                <View style={[styles.creatorEligibility]}>
-                  <Text selectable style={[styles.creatorEligibilityText]}>{creatorRatingLabel(selectedCreator.rating)}</Text>
-                </View>
-              ) : null}
             </View>
           </View>
           {creatorPassportFailed ? (
@@ -524,6 +538,20 @@ export function MerchantMeR21Replacement({
               ))}
             </View>
           </>) : null}
+          {/* MERCHANT-CREATOR-TAGS-001：客户评价区 —— 明细只印真实发生的：
+              好评率（有客户打分才印，没人评过不印 0%）、履约率、累计服务单数，
+              全是服务端 rating 里的数。有记录才给分项；新人如实说没记录，
+              不拿先验分当成绩展示。 */}
+          <View style={styles.secHead}><Text selectable style={styles.secTitle}>客户评价</Text></View>
+          {selectedCreator.rating?.hasTrackRecord ? (
+            <Text selectable style={styles.meta}>
+              {formatRatePercent(selectedCreator.rating.satisfactionRate) !== "" ? `好评率 ${formatRatePercent(selectedCreator.rating.satisfactionRate)} · ` : "暂无客户打分 · "}
+              {formatRatePercent(selectedCreator.rating.fulfillmentRate) !== "" ? `履约率 ${formatRatePercent(selectedCreator.rating.fulfillmentRate)} · ` : ""}
+              {`累计服务 ${selectedCreator.rating.completedOrders} 单`}
+            </Text>
+          ) : (
+            <Text selectable style={styles.meta}>新人 · 暂无成交记录，平台还没有她的客户评价。</Text>
+          )}
           {/* 档期：只显示还没过的，最多 3 条。没有就是没有，不编"随时可约"。 */}
           {creatorPassport && upcoming.length > 0 ? (<>
             <View style={styles.secHead}><Text selectable style={styles.secTitle}>可约档期</Text></View>
@@ -548,7 +576,10 @@ export function MerchantMeR21Replacement({
               return (
                 <View key={item.platform} style={styles.socialRow}>
                   <View style={styles.socialMain}>
-                    <Text selectable style={styles.socialText}>{socialPlatformLabel(item.platform)} · {item.handle}</Text>
+                    {/* MERCHANT-CREATOR-TAGS-001：社媒行带上自填粉丝数
+                        （和列表 stats 行同一个数，对表 fanCountFor，不会两边两个数）。
+                        没填就是 0 —— 未披露，不隐藏。 */}
+                    <Text selectable style={styles.socialText}>{socialPlatformLabel(item.platform)} · {item.handle}{fanCountFor(item.platform, item.handle) !== undefined ? ` · 粉丝 ${formatFansCount(fanCountFor(item.platform, item.handle))}` : ""}</Text>
                   </View>
                   {/* 平台个人主页入口：有 canonical 链接就给明确按钮，
                       没有（如 Zalo 无公开页）就不画按钮，不画假入口。 */}
@@ -575,12 +606,12 @@ export function MerchantMeR21Replacement({
           {summary({
             meta: creatorRatingLabel(selectedCreator.rating) === "" ? "暂无评价" : creatorRatingLabel(selectedCreator.rating),
             stats: [
-              [selectedCreator.photos.length.toString(), "到店"],
-              [verifiedCaps.length > 0 ? verifiedCaps.length.toString() : "—", "已验证能力"],
-              [selectedCreator.serviceType, "服务"],
-              [selectedCreator.referencePrice.toString(), "报价"],
+              [`粉丝 ${formatFansCount(selectedCreator.socials?.[0]?.followerCount)}`, "粉丝"],
+              [formatServiceVolume(selectedCreator.rating?.completedOrders), "服务量"],
+              [selectedCreator.rating?.hasTrackRecord && formatRatePercent(selectedCreator.rating.satisfactionRate) !== "" ? `好评 ${formatRatePercent(selectedCreator.rating.satisfactionRate)}` : "新人", "好评率"],
+              [formatReferencePrice(selectedCreator.referencePrice, selectedCreator.currency), "参考报价"],
             ],
-            title: `${selectedCreator.name} · ${selectedCreator.serviceType}`,
+            title: `${selectedCreator.name}${(selectedCreator.socials ?? [])[0]?.handle ? ` @${((selectedCreator.socials ?? [])[0]?.handle ?? "")}` : ""}`,
           })}
           <SimpleRows onPress={setPage} rows={[["最近到店", "等待真实履约记录"], ["当前权益", "查看关联券", "voucher"], ["当前邀请", "查看活动与邀请", "activity"], ["合作结果", "查看销售归因", "sales"]]} />
           <View style={styles.actions}>

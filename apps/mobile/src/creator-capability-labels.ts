@@ -85,6 +85,13 @@ export function formatServiceVolume(completedOrders: number | undefined): string
   const n = typeof completedOrders === "number" && completedOrders > 0 ? Math.floor(completedOrders) : 0;
   return `服务 ${n} 单`;
 }
+// MERCHANT-CREATOR-TAGS-001：0..1 的比率印成百分比。<=0 或非数返回空串 ——
+// 无评价不印 0%，0% 会被读成“差评”，跟“没人评过”是两回事。
+export function formatRatePercent(rate: number | undefined): string {
+  if (typeof rate !== "number" || !(rate > 0)) return "";
+  return `${Math.round(rate * 100)}%`;
+}
+
 // MERCHANT-CREATOR-TAGS-001：评价分/等级分有真实来源 —— 服务端 matching.Score
 // 的 Total（0..100；履约40/评价30/经验15/响应10/预算5）。
 // 等级只是展示映射（分档阈值调这里），分永远是服务端算出来的，不手写。
