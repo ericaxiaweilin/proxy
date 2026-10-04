@@ -439,7 +439,14 @@ func cmdAll(root, pinScript string, index pinIndex, only string) int {
 	passes := len(passRe.FindAllString(out+errOut, -1))
 
 	fmt.Println(strings.Repeat("=", 78))
-	fmt.Println("pins --all   (every step, no early exit)")
+	// The header must not claim "every step" when --only filtered it down: a run that
+	// can be cited as evidence has to say what it actually covered at a glance, and
+	// "pins --all" over a 2244-step script is the full gate.
+	if only != "" {
+		fmt.Println("pins --all --only   (filtered subset, no early exit)")
+	} else {
+		fmt.Println("pins --all   (EVERY step — this is the full gate, no early exit)")
+	}
 	fmt.Println(strings.Repeat("=", 78))
 	// The ABSOLUTE path, not the repo-relative one the Python printed: "which worktree
 	// did these 2251 steps come from" must not be a question you can ask.
