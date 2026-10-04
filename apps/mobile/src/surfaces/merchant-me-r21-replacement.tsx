@@ -535,7 +535,14 @@ export function MerchantMeR21Replacement({
           {detailHead({ onBack: () => setPage("root"), title: "Creator 经营" })}
           <Text selectable style={styles.pageSub}>围绕真实经营目标匹配、邀请，并追踪到店与消费结果。</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>{([['MATCH','智能匹配'],['CREATORS','Creator'],['COLLABS','合作'],['RESULTS','结果']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setCreatorView(id)} style={[styles.tab, creatorView === id && styles.tabOn]}><Text selectable style={[styles.tabText, creatorView === id && styles.tabTextOn]}>{label}</Text></Pressable>)}</ScrollView>
-          {creatorView === "MATCH" ? <><View style={styles.goalGrid}>{([['storefront','带来到店新客','到店、带客、核销'],['target','生产内容','探店、短视频、UGC'],['arrowUpRight','扩大本地曝光','覆盖与互动'],['ticket','推广券与活动','领取、预约、核销']] as const).map(([icon,title,hint]) => <View key={title} style={styles.goalCard}><View style={styles.goalIcon}><ProxyIcon color={color.ink} name={icon} size={23} /></View><Text selectable style={styles.cardTitle}>{title}</Text><Text selectable style={styles.caption}>{hint}</Text></View>)}</View>{sectionHead("最佳匹配", `${creators.length} 位符合条件`)}</> : null}
+          {creatorView === "MATCH" ? <><View style={styles.goalGrid}>{([['storefront','带来到店新客','到店、带客、核销'],['target','生产内容','探店、短视频、UGC'],['arrowUpRight','扩大本地曝光','覆盖与互动'],['ticket','推广券与活动','领取、预约、核销']] as const).map(([icon,title,hint]) => {
+            // 经营目标卡去向：曝光→销售归因看结果，推广券→券中心发券；
+            // 带新客=专属营销码链路（下一趟），生产内容以后再说 —— 这两张先不挂动作，
+            // 不摆点不进去的假按钮。
+            const go = title === '扩大本地曝光' ? (): void => setPage("sales") : title === '推广券与活动' ? (): void => onOpenVouchers() : undefined;
+            const body = <><View style={styles.goalIcon}><ProxyIcon color={color.ink} name={icon} size={23} /></View><Text selectable style={styles.cardTitle}>{title}</Text><Text selectable style={styles.caption}>{hint}</Text></>;
+            return go ? <Pressable key={title} onPress={go} style={styles.goalCard} accessibilityLabel={title}>{body}</Pressable> : <View key={title} style={styles.goalCard}>{body}</View>;
+          })}</View>{sectionHead("最佳匹配", `${creators.length} 位符合条件`)}</> : null}
           {creatorView === "CREATORS" ? <><View style={styles.search}><ProxyIcon color={color.muted} name="search" size={18} /><TextInput onChangeText={setCreatorQuery} placeholder="搜索 Creator、能力或语言" placeholderTextColor={color.muted} style={styles.searchInput} value={creatorQuery} /></View>{sectionHead("Creator 人才库", `${visibleCreators.length} 位`)}</> : null}
           {creatorView === "COLLABS" ? <>{sectionHead("合作状态", "来自真实邀请与合作记录")}<SimpleRows rows={[["待回复", "等待合作邀请数据"], ["进行中", "等待履约数据"], ["已完成", "等待完成记录"]]} /></> : null}
           {creatorView === "RESULTS" ? <>{summary({ title: "Creator 贡献", meta: "近 30 天 · 真实归因", stats: [["—","归因收入"],["—","券核销"],["—","新客"],["—","完成合作"]] })}</> : null}

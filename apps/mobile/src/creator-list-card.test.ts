@@ -76,8 +76,7 @@ describe("CREATOR-LIST-CARD-001 列表卡只用真实字段", () => {
     expect(listBranch).toContain("creator.languages.length > 2");
   });
 
-  it("MERCHANT-CREATOR-TAGS-001 标签行只放三类：垂类/语言/地址", () => {
-    // 能力标签位已让给垂类（verifiedCapabilities 数据照常解析，见 supply-client.test.ts）。
+  it("MERCHANT-CREATOR-TAGS-001 标签行只放三类：垂类/语言/地址", () => {    // 能力标签位已让给垂类（verifiedCapabilities 数据照常解析，见 supply-client.test.ts）。
     expect(listBranch).toContain("creator.verticalTags");
     expect(listBranch).toContain("creator.availability?.marketId");
     expect(listBranch).toContain("creator.languages");
@@ -217,5 +216,17 @@ describe("CREATOR-LIST-CARD-001 详情页同一套语言", () => {
     // 详情页不摆 SimpleRows 那四行（最近到店空占位 + 三个重复入口）。
     expect(detail).not.toContain("最近到店");
     expect(detail).not.toContain("当前权益");
+  });
+});
+
+describe("经营目标卡去向", () => {
+  it("曝光进销售归因，推广券进券中心；带新客和生产内容不挂假按钮", () => {
+    // 有去向的两张是 Pressable（点得进去），没去向的两张保持 View ——
+    // 点不进去的按钮不许摆出来骗点击。
+    expect(me).toContain('title === \'扩大本地曝光\' ? (): void => setPage("sales")');
+    expect(me).toContain('title === \'推广券与活动\' ? (): void => onOpenVouchers()');
+    // 没去向的两张保持 View（注释被 strip 掉，断实现：三元兜底是 undefined + View 分支）。
+    expect(me).toContain(": undefined;");
+    expect(me).toContain(" : <View key={title}");
   });
 });
