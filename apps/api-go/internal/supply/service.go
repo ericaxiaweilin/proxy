@@ -249,6 +249,13 @@ type Repository interface {
 	ServicesSnapshot(ctx context.Context) ([]AgentService, error)
 	WindowsSnapshot(ctx context.Context) ([]AvailabilityWindow, error)
 	BatchesSnapshot(ctx context.Context) ([]CandidateBatch, error)
+	// MERCHANT-CREATOR-INVITE-001：定向邀约的存取。SaveInvitation 只建新的
+	// （同 ID 覆盖写算调用方 bug，不在这里拦）；状态流转走 UpdateInvitation。
+	SaveInvitation(ctx context.Context, inv CollabInvitation) error
+	GetInvitation(ctx context.Context, id string) (CollabInvitation, error)
+	UpdateInvitation(ctx context.Context, inv CollabInvitation) error
+	ListInvitationsByMerchant(ctx context.Context, merchantID string) ([]CollabInvitation, error)
+	ListInvitationsByAgent(ctx context.Context, agentID string) ([]CollabInvitation, error)
 }
 
 // TransactionalRepository 由支持事务性 outbox 的存储实现（事件与状态原子提交）。
@@ -281,6 +288,7 @@ type MemoryRepository struct {
 	realNames     map[string][]SellerRealNameVerification
 	windows       map[string]AvailabilityWindow
 	batches       map[string]CandidateBatch
+	invitations   map[string]CollabInvitation
 	events        []event.DomainEvent
 }
 
@@ -293,6 +301,7 @@ func NewMemoryRepository() *MemoryRepository {
 		realNames:     make(map[string][]SellerRealNameVerification),
 		windows:       make(map[string]AvailabilityWindow),
 		batches:       make(map[string]CandidateBatch),
+		invitations:   make(map[string]CollabInvitation),
 	}
 }
 
@@ -508,6 +517,60 @@ func (r *MemoryRepository) GetCandidateBatch(_ context.Context, batchID string) 
 	return b, nil
 }
 
+// MERCHANT-CREATOR-INVITE-001：内存邀约存取（单测 + 非 PG 路径）。
+func (r *MemoryRepository) SaveInvitation(_ context.Context, inv CollabInvitation) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.invitations[inv.ID] = inv
+	return nil
+}
+
+func (r *MemoryRepository) GetInvitation(_ context.Context, id string) (CollabInvitation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	inv, exists := r.invitations[id]
+	if !exists {
+		return CollabInvitation{}, ErrInvitationNotFound
+	}
+	return inv, nil
+}
+
+func (r *MemoryRepository) UpdateInvitation(_ context.Context, inv CollabInvitation) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.invitations[inv.ID]; !exists {
+		return ErrInvitationNotFound
+	}
+	r.invitations[inv.ID] = inv
+	return nil
+}
+
+func (r *MemoryRepository) ListInvitationsByMerchant(_ context.Context, merchantID string) ([]CollabInvitation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []CollabInvitation{}
+	for _, inv := range r.invitations {
+		if inv.MerchantID == merchantID {
+			result = append(result, inv)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+func (r *MemoryRepository) ListInvitationsByAgent(_ context.Context, agentID string) ([]CollabInvitation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []CollabInvitation{}
+	for _, inv := range r.invitations {
+		if inv.AgentID == agentID {
+			result = append(result, inv)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
 func (r *MemoryRepository) ProfilesSnapshot(_ context.Context) ([]AgentProfile, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -619,7 +682,8 @@ func (s *Service) Supports(commandType string) bool {
 		"CreateAgentService", "UpdateAgentService",
 		"DeclareCapability", "VerifyCapability", "AttestSellerRealName",
 		"SetAvailabilityWindow", "BlockAvailabilityWindow", "QuerySuppliers",
-		"CreateCandidateBatch", "GetCandidateBatch":
+		"CreateCandidateBatch", "GetCandidateBatch",
+		"InviteCreator", "RespondCollabInvitation", "CancelCollabInvitation", "ListCollabInvitations":
 		return true
 	default:
 		return false
@@ -666,6 +730,14 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.linkAgentSocial(ctx, e)
 	case "UnlinkAgentSocial":
 		return s.unlinkAgentSocial(ctx, e)
+	case "InviteCreator":
+		return s.inviteCreator(ctx, e)
+	case "RespondCollabInvitation":
+		return s.respondCollabInvitation(ctx, e)
+	case "CancelCollabInvitation":
+		return s.cancelCollabInvitation(ctx, e)
+	case "ListCollabInvitations":
+		return s.listCollabInvitations(ctx, e)
 	default:
 		return command.Rejected(e, "SUPPLY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "supply.unsupported_command", nil)
 	}
