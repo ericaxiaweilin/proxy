@@ -28,10 +28,17 @@ var merchantPublishCommands = map[string]bool{
 	// InviteCreator/Cancel/List(sent)/Respond(COUNTERED 商家回合) 的 merchantID
 	// 读 AuthContext，不读 payload，伪造别人 merchantId 发邀约到不了 service。
 	// creator 侧的调用不带 merchantId（无 claim 原样过，respond 走 agent 口径）。
-	"InviteCreator":            true,
-	"CancelCollabInvitation":   true,
-	"ListCollabInvitations":    true,
-	"RespondCollabInvitation":  true,
+	"InviteCreator":           true,
+	"CancelCollabInvitation":  true,
+	"ListCollabInvitations":   true,
+	"RespondCollabInvitation": true,
+	// MERCHANT-CREATOR-PROMO-001：专属营销码商家侧四件套（绑定/停绑/报码/
+	// 查绑定查报码查统计）。creator 侧的认领/查码不带 merchantId，原样过。
+	"BindPromoBenefit":    true,
+	"DisablePromoBenefit": true,
+	"QuotePromoCode":      true,
+	"ListPromoAssets":     true,
+	"GetPromoStats":       true,
 }
 
 // resolveMerchantPublish verifies an optional payload merchantId for

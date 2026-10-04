@@ -256,6 +256,18 @@ type Repository interface {
 	UpdateInvitation(ctx context.Context, inv CollabInvitation) error
 	ListInvitationsByMerchant(ctx context.Context, merchantID string) ([]CollabInvitation, error)
 	ListInvitationsByAgent(ctx context.Context, agentID string) ([]CollabInvitation, error)
+	// MERCHANT-CREATOR-PROMO-001：专属营销码存取（码/绑定/报码行）。
+	SavePromoCode(ctx context.Context, c PromoCode) error
+	GetPromoCode(ctx context.Context, code string) (PromoCode, error)
+	UpdatePromoCode(ctx context.Context, c PromoCode) error
+	ListPromoCodesByAgent(ctx context.Context, agentID string) ([]PromoCode, error)
+	SavePromoBenefit(ctx context.Context, b PromoBenefit) error
+	GetPromoBenefit(ctx context.Context, merchantID, code string) (PromoBenefit, error)
+	UpdatePromoBenefit(ctx context.Context, b PromoBenefit) error
+	ListPromoBenefitsByMerchant(ctx context.Context, merchantID string) ([]PromoBenefit, error)
+	SavePromoQuote(ctx context.Context, q PromoQuote) error
+	ListPromoQuotesByMerchant(ctx context.Context, merchantID string) ([]PromoQuote, error)
+	ListPromoQuotesByAgent(ctx context.Context, agentID string) ([]PromoQuote, error)
 }
 
 // TransactionalRepository 由支持事务性 outbox 的存储实现（事件与状态原子提交）。
@@ -289,6 +301,9 @@ type MemoryRepository struct {
 	windows       map[string]AvailabilityWindow
 	batches       map[string]CandidateBatch
 	invitations   map[string]CollabInvitation
+	promoCodes    map[string]PromoCode
+	promoBenefits map[string]PromoBenefit
+	promoQuotes   map[string]PromoQuote
 	events        []event.DomainEvent
 }
 
@@ -302,6 +317,9 @@ func NewMemoryRepository() *MemoryRepository {
 		windows:       make(map[string]AvailabilityWindow),
 		batches:       make(map[string]CandidateBatch),
 		invitations:   make(map[string]CollabInvitation),
+		promoCodes:    make(map[string]PromoCode),
+		promoBenefits: make(map[string]PromoBenefit),
+		promoQuotes:   make(map[string]PromoQuote),
 	}
 }
 
@@ -571,6 +589,126 @@ func (r *MemoryRepository) ListInvitationsByAgent(_ context.Context, agentID str
 	return result, nil
 }
 
+// MERCHANT-CREATOR-PROMO-001：内存营销码存取（单测 + 非 PG 路径）。
+// benefits 键是 merchantID + "\x00" + code（同一商家对同一码一条）。
+func promoBenefitKey(merchantID, code string) string {
+	return merchantID + "\x00" + code
+}
+
+func (r *MemoryRepository) SavePromoCode(_ context.Context, c PromoCode) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.promoCodes[c.Code] = c
+	return nil
+}
+
+func (r *MemoryRepository) GetPromoCode(_ context.Context, code string) (PromoCode, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, exists := r.promoCodes[code]
+	if !exists {
+		return PromoCode{}, ErrPromoCodeNotFound
+	}
+	return c, nil
+}
+
+func (r *MemoryRepository) UpdatePromoCode(_ context.Context, c PromoCode) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.promoCodes[c.Code]; !exists {
+		return ErrPromoCodeNotFound
+	}
+	r.promoCodes[c.Code] = c
+	return nil
+}
+
+func (r *MemoryRepository) ListPromoCodesByAgent(_ context.Context, agentID string) ([]PromoCode, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []PromoCode{}
+	for _, c := range r.promoCodes {
+		if c.AgentID == agentID {
+			result = append(result, c)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+func (r *MemoryRepository) SavePromoBenefit(_ context.Context, b PromoBenefit) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.promoBenefits[promoBenefitKey(b.MerchantID, b.Code)] = b
+	return nil
+}
+
+func (r *MemoryRepository) GetPromoBenefit(_ context.Context, merchantID, code string) (PromoBenefit, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	b, exists := r.promoBenefits[promoBenefitKey(merchantID, code)]
+	if !exists {
+		return PromoBenefit{}, ErrPromoNotBound
+	}
+	return b, nil
+}
+
+func (r *MemoryRepository) UpdatePromoBenefit(_ context.Context, b PromoBenefit) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := promoBenefitKey(b.MerchantID, b.Code)
+	if _, exists := r.promoBenefits[key]; !exists {
+		return ErrPromoNotBound
+	}
+	r.promoBenefits[key] = b
+	return nil
+}
+
+func (r *MemoryRepository) ListPromoBenefitsByMerchant(_ context.Context, merchantID string) ([]PromoBenefit, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []PromoBenefit{}
+	for _, b := range r.promoBenefits {
+		if b.MerchantID == merchantID {
+			result = append(result, b)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+func (r *MemoryRepository) SavePromoQuote(_ context.Context, q PromoQuote) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.promoQuotes[q.ID] = q
+	return nil
+}
+
+func (r *MemoryRepository) ListPromoQuotesByMerchant(_ context.Context, merchantID string) ([]PromoQuote, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []PromoQuote{}
+	for _, q := range r.promoQuotes {
+		if q.MerchantID == merchantID {
+			result = append(result, q)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].QuotedAt.After(result[j].QuotedAt) })
+	return result, nil
+}
+
+func (r *MemoryRepository) ListPromoQuotesByAgent(_ context.Context, agentID string) ([]PromoQuote, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []PromoQuote{}
+	for _, q := range r.promoQuotes {
+		if q.AgentID == agentID {
+			result = append(result, q)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].QuotedAt.After(result[j].QuotedAt) })
+	return result, nil
+}
+
 func (r *MemoryRepository) ProfilesSnapshot(_ context.Context) ([]AgentProfile, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -683,7 +821,9 @@ func (s *Service) Supports(commandType string) bool {
 		"DeclareCapability", "VerifyCapability", "AttestSellerRealName",
 		"SetAvailabilityWindow", "BlockAvailabilityWindow", "QuerySuppliers",
 		"CreateCandidateBatch", "GetCandidateBatch",
-		"InviteCreator", "RespondCollabInvitation", "CancelCollabInvitation", "ListCollabInvitations":
+		"InviteCreator", "RespondCollabInvitation", "CancelCollabInvitation", "ListCollabInvitations",
+		"ClaimPromoCode", "DisablePromoCode", "BindPromoBenefit", "DisablePromoBenefit",
+		"QuotePromoCode", "ListPromoAssets", "GetPromoStats":
 		return true
 	default:
 		return false
@@ -738,6 +878,20 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.cancelCollabInvitation(ctx, e)
 	case "ListCollabInvitations":
 		return s.listCollabInvitations(ctx, e)
+	case "ClaimPromoCode":
+		return s.claimPromoCode(ctx, e)
+	case "DisablePromoCode":
+		return s.disablePromoCode(ctx, e)
+	case "BindPromoBenefit":
+		return s.bindPromoBenefit(ctx, e)
+	case "DisablePromoBenefit":
+		return s.disablePromoBenefit(ctx, e)
+	case "QuotePromoCode":
+		return s.quotePromoCode(ctx, e)
+	case "ListPromoAssets":
+		return s.listPromoAssets(ctx, e)
+	case "GetPromoStats":
+		return s.getPromoStats(ctx, e)
 	default:
 		return command.Rejected(e, "SUPPLY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "supply.unsupported_command", nil)
 	}
