@@ -22,9 +22,10 @@ import type { FulfillmentClient } from "../fulfillment-client";
 import type { ProfileClient } from "../profile-client";
 // STORE-CONSOLIDATE-001：店详情页改走统一 hub（和 me.tsx 的 bdash/线上店铺同一页）。
 import { MyStoresHub } from "./my-stores-hub";
-import type { SupplyClient, SupplierCandidate, AgentPassport, CollabInvitation, CollabInvitationPurpose } from "../supply-client";
+import type { SupplyClient, SupplierCandidate, AgentPassport, CollabInvitation, CollabInvitationPurpose, PromoStats } from "../supply-client";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
+import { MerchantPromoSurface } from "./merchant-promo";
 import { InviteSchedulePicker, matchDaySlot } from "../components/invite-schedule-picker";
 import { combineDayAndTime, dayOptions, timeSlotOptions, type TimeSlot } from "../direct-invite-schedule";
 // CREATOR-LIST-CARD-001：报价格式化与横滑卡共用同一个纯模块实现 —— 同一个人不许两个价。
@@ -49,6 +50,7 @@ type MerchantPage =
   | "activityDetail"
   | "store"
   | "sales"
+  | "promo"
   | "ops"
   | "proxy"
   | "proxy-notices"
@@ -183,6 +185,9 @@ export function MerchantMeR21Replacement({
   const [spendTotal, setSpendTotal] = useState<{ totalOrders: number; totalGrossMinor: number }>({ totalOrders: 0, totalGrossMinor: 0 });
   const [creators, setCreators] = useState<SupplierCandidate[]>([]);
   const [selectedCreator, setSelectedCreator] = useState<SupplierCandidate | undefined>(undefined);
+  // MERCHANT-CREATOR-PROMO-001：专属码归因合计 —— state 放这里，effect 放
+  // activeAccount 后面（TDZ：effect 闭包里读后面声明的 const 会炸）。
+  const [promoStats, setPromoStats] = useState<PromoStats | undefined>(undefined);
   // CREATOR-PROFILE-001：详情页的护照（头像/简介/能力/档期）。进详情才拉，
   // 列表页不预拉 —— 20 个人的 passport 全拉一遍又慢又浪费。
   const [creatorPassport, setCreatorPassport] = useState<AgentPassport | undefined>(undefined);
@@ -233,6 +238,17 @@ export function MerchantMeR21Replacement({
   // 芯片会选中，名字 / 状态 / 头像却还是第一家。数据跟着主体走、标签不跟着走，等于
   // 装了开关没接线路。首帧 activeAccountId 还是 undefined，所以兜底取 list[0]。
   const activeAccount = accounts?.find((account) => account.id === activeAccountId) ?? accounts?.[0];
+
+  // MERCHANT-CREATOR-PROMO-001：RESULTS 页的归因收入/新客从报码行里数出来；
+  // 券核销/完成合作还是 "—"，有数再接。读失败不挡整页。
+  useEffect(() => {
+    if (page !== "creator" || !supply || !activeAccount) return;
+    let active = true;
+    supply.merchantPromoStats({ merchantId: activeAccount.id }).then((computed) => {
+      if (active) setPromoStats(computed);
+    }).catch(() => { /* 归因没读出来 RESULTS 照显示 "—"，不挡整页 */ });
+    return () => { active = false; };
+  }, [page, creatorView, supply, activeAccount]);
 
   // MERCHANT-CREATOR-INVITE-001：发出 / 还价 / 接受 / 拒绝 / 撤回定向邀约。
   // merchantId 永远取当前 activeAccount（网关验成员身份后盖章）。
@@ -539,13 +555,13 @@ export function MerchantMeR21Replacement({
             // 经营目标卡去向：曝光→销售归因看结果，推广券→券中心发券；
             // 带新客=专属营销码链路（下一趟），生产内容以后再说 —— 这两张先不挂动作，
             // 不摆点不进去的假按钮。
-            const go = title === '扩大本地曝光' ? (): void => setPage("sales") : title === '推广券与活动' ? (): void => onOpenVouchers() : undefined;
+            const go = title === '带来到店新客' ? (): void => setPage("promo") : title === '扩大本地曝光' ? (): void => setPage("sales") : title === '推广券与活动' ? (): void => onOpenVouchers() : undefined;
             const body = <><View style={styles.goalIcon}><ProxyIcon color={color.ink} name={icon} size={23} /></View><Text selectable style={styles.cardTitle}>{title}</Text><Text selectable style={styles.caption}>{hint}</Text></>;
             return go ? <Pressable key={title} onPress={go} style={styles.goalCard} accessibilityLabel={title}>{body}</Pressable> : <View key={title} style={styles.goalCard}>{body}</View>;
           })}</View>{sectionHead("最佳匹配", `${creators.length} 位符合条件`)}</> : null}
           {creatorView === "CREATORS" ? <><View style={styles.search}><ProxyIcon color={color.muted} name="search" size={18} /><TextInput onChangeText={setCreatorQuery} placeholder="搜索 Creator、能力或语言" placeholderTextColor={color.muted} style={styles.searchInput} value={creatorQuery} /></View>{sectionHead("Creator 人才库", `${visibleCreators.length} 位`)}</> : null}
           {creatorView === "COLLABS" ? <>{sectionHead("合作状态", "来自真实邀请与合作记录")}<SimpleRows rows={[["待回复", "等待合作邀请数据"], ["进行中", "等待履约数据"], ["已完成", "等待完成记录"]]} /></> : null}
-          {creatorView === "RESULTS" ? <>{summary({ title: "Creator 贡献", meta: "近 30 天 · 真实归因", stats: [["—","归因收入"],["—","券核销"],["—","新客"],["—","完成合作"]] })}</> : null}
+          {creatorView === "RESULTS" ? <>{summary({ title: "Creator 贡献", meta: "近 30 天 · 真实归因", stats: [[promoStats ? `${promoStats.attributedVnd.toLocaleString()} VND` : "—","归因收入"],["—","券核销"],[promoStats ? promoStats.firstVisits.toString() : "—","新客（店员确认）"],["—","完成合作"]] })}</> : null}
           {(creatorView === "MATCH" || creatorView === "CREATORS") && visibleCreators.length === 0 ? (
             <View style={styles.emptyCard}><Text selectable style={styles.emptyTitle}>暂时没有匹配的 Creator</Text><Text selectable style={styles.empty}>工作台仍可使用；待供给数据进入后，候选会显示在这里。</Text></View>
           ) : null}
@@ -1095,6 +1111,26 @@ export function MerchantMeR21Replacement({
           {spendDays.length === 0 ? (
             <View style={styles.card}><Text selectable style={styles.empty}>暂无销售数据 — server 列表为空</Text></View>
           ) : null}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (page === "promo") {
+    if (!supply || !activeAccount) {
+      return (
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            {detailHead({ onBack: () => setPage("creator"), title: "专属营销码" })}
+            <Text selectable style={styles.meta}>账号数据没读出来，稍后再试。</Text>
+          </ScrollView>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.root}>
+        <ScrollView contentContainerStyle={styles.content}>
+          <MerchantPromoSurface supply={supply} merchantId={activeAccount.id} onBack={() => setPage("creator")} />
         </ScrollView>
       </View>
     );

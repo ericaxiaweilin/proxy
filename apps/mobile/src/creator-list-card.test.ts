@@ -230,3 +230,14 @@ describe("经营目标卡去向", () => {
     expect(me).toContain(" : <View key={title}");
   });
 });
+
+describe("专属营销码入口 (MERCHANT-CREATOR-PROMO-001)", () => {
+  it("带新客卡进 promo 页，promo 页调真命令", () => {
+    expect(me).toContain('title === \'带来到店新客\' ? (): void => setPage("promo")');
+    expect(me).toContain('if (page === "promo")');
+    expect(me).toContain("<MerchantPromoSurface");
+    // RESULTS 的归因收入/新客从报码统计来，不再是死 "—"。
+    expect(me).toContain("merchantPromoStats(");
+    expect(me).toContain("promoStats ? promoStats.firstVisits.toString()");
+  });
+});

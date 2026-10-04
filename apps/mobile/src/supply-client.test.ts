@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCollabInvitations, parseSupplierCandidates, parseSupplyBody, SupplyProtocolError } from "./supply-client";
+import { parseCollabInvitations, parsePromoBenefit, parsePromoCode, parsePromoQuote, parsePromoStats, parseSupplierCandidates, parseSupplyBody, SupplyProtocolError } from "./supply-client";
 
 describe("merchant creator recommendations", () => {
   it("MERCHANT-CREATOR-001 keeps real photo, availability and eligibility evidence", () => {
@@ -96,3 +96,19 @@ describe("parseSupplyBody (server payload decoding)", () => {
   });
 });
 
+describe("merchant promo codes (MERCHANT-CREATOR-PROMO-001)", () => {
+  it("parses code/benefit/quote, drops malformed entries", () => {
+    expect(parsePromoCode({ code: "LINH88", agentId: "a1", status: "ACTIVE", createdAt: "x" })?.code).toBe("LINH88");
+    expect(parsePromoCode({ code: "", agentId: "a1", createdAt: "x" })).toBeUndefined();
+    expect(parsePromoBenefit({ merchantId: "m1", code: "LINH88", faceValueVnd: 50000, scopeName: "全场" })?.faceValueVnd).toBe(50000);
+    expect(parsePromoBenefit({ merchantId: "m1", code: "" })).toBeUndefined();
+    expect(parsePromoQuote({ id: "pq_1", merchantId: "m1", code: "LINH88", quotedAt: "x", firstVisit: true })?.firstVisit).toBe(true);
+    expect(parsePromoQuote({ id: "", merchantId: "m1", code: "X", quotedAt: "x" })).toBeUndefined();
+  });
+  it("parses stats, unknown shape falls back to zeros", () => {
+    const stats = parsePromoStats({ byCode: { LINH88: { quotes: 2, firstVisits: 1, attributedVnd: 300000, discountGivenVnd: 100000 } }, quotes: 2, firstVisits: 1, attributedVnd: 300000, discountGivenVnd: 100000 });
+    expect(stats.quotes).toBe(2);
+    expect(stats.byCode.LINH88?.attributedVnd).toBe(300000);
+    expect(parsePromoStats(undefined)).toEqual({ byCode: {}, quotes: 0, firstVisits: 0, attributedVnd: 0, discountGivenVnd: 0 });
+  });
+});

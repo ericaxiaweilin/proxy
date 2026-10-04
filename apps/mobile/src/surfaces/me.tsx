@@ -132,6 +132,7 @@ import { styles } from "./me-styles";
 import { ProxyBackGlyph } from "../components/proxy-foundation";
 // CREATOR-SOCIAL-001：社媒绑定区组件。
 import { SocialLinkSection } from "../components/social-link-section";
+import { PromoCodeSection } from "../components/promo-code-section";
 // CREATOR-PROFILE-001：passport 照片解析（和商家侧同一套）。
 import { resolveCreatorPhoto } from "./merchant-creator-recommendations";
 
@@ -2412,6 +2413,15 @@ export function MeSurface({
                   // resolveCreatorPhoto 认 / 开头走服务端解析。
                   photoUri: myPhotos[0] ? resolveCreatorPhoto(myPhotos[0]) : undefined,
                 }}
+              />
+            ) : null}
+            {/* MERCHANT-CREATOR-PROMO-001：专属营销码认领区。码她自己选好记的，
+                战绩（带来几单/新客几人）当场就能看到，不用切商家号去验证。 */}
+            {supply && myAgentId ? (
+              <PromoCodeSection
+                agentId={myAgentId}
+                supply={supply}
+                onError={(e) => setPassportError(e)}
               />
             ) : null}
             <Pressable

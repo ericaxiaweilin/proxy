@@ -268,6 +268,117 @@ export function parseCollabInvitations(value: unknown): CollabInvitation[] {
   });
 }
 
+// MERCHANT-CREATOR-PROMO-001：专属营销码。creator 认领自己的码（memorable，
+// 全局唯一）；商家绑定优惠（直减，商家承诺）；店员报码落归因行。
+export type PromoCode = {
+  code: string;
+  agentId: string;
+  status: string;
+  createdAt: string;
+};
+
+export type PromoBenefit = {
+  merchantId: string;
+  code: string;
+  faceValueVnd: number;
+  scopeName: string;
+  validUntil: string;
+  status: string;
+  createdAt: string;
+};
+
+export type PromoQuote = {
+  id: string;
+  merchantId: string;
+  agentId: string;
+  code: string;
+  amountVnd: number;
+  discountVnd: number;
+  firstVisit: boolean;
+  quotedAt: string;
+};
+
+export type PromoStats = {
+  byCode: Record<string, { quotes: number; firstVisits: number; attributedVnd: number; discountGivenVnd: number }>;
+  quotes: number;
+  firstVisits: number;
+  attributedVnd: number;
+  discountGivenVnd: number;
+};
+
+export function parsePromoCode(value: unknown): PromoCode | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown>;
+  if (typeof item.code !== "string" || item.code === "") return undefined;
+  if (typeof item.agentId !== "string" || typeof item.createdAt !== "string") return undefined;
+  return {
+    code: item.code,
+    agentId: item.agentId,
+    status: typeof item.status === "string" ? item.status : "",
+    createdAt: item.createdAt,
+  };
+}
+
+export function parsePromoBenefit(value: unknown): PromoBenefit | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown>;
+  if (typeof item.merchantId !== "string" || typeof item.code !== "string" || item.code === "") return undefined;
+  return {
+    merchantId: item.merchantId,
+    code: item.code,
+    faceValueVnd: typeof item.faceValueVnd === "number" && item.faceValueVnd > 0 ? Math.floor(item.faceValueVnd) : 0,
+    scopeName: typeof item.scopeName === "string" ? item.scopeName : "",
+    validUntil: typeof item.validUntil === "string" ? item.validUntil : "",
+    status: typeof item.status === "string" ? item.status : "",
+    createdAt: typeof item.createdAt === "string" ? item.createdAt : "",
+  };
+}
+
+export function parsePromoQuote(value: unknown): PromoQuote | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown>;
+  if (typeof item.id !== "string" || item.id === "") return undefined;
+  if (typeof item.merchantId !== "string" || typeof item.code !== "string") return undefined;
+  if (typeof item.quotedAt !== "string") return undefined;
+  return {
+    id: item.id,
+    merchantId: item.merchantId,
+    agentId: typeof item.agentId === "string" ? item.agentId : "",
+    code: item.code,
+    amountVnd: typeof item.amountVnd === "number" && item.amountVnd > 0 ? Math.floor(item.amountVnd) : 0,
+    discountVnd: typeof item.discountVnd === "number" && item.discountVnd > 0 ? Math.floor(item.discountVnd) : 0,
+    firstVisit: item.firstVisit === true,
+    quotedAt: item.quotedAt,
+  };
+}
+
+export function parsePromoStats(value: unknown): PromoStats {
+  const fallback: PromoStats = { byCode: {}, quotes: 0, firstVisits: 0, attributedVnd: 0, discountGivenVnd: 0 };
+  if (!value || typeof value !== "object") return fallback;
+  const item = value as Record<string, unknown>;
+  const num = (v: unknown): number => (typeof v === "number" && v > 0 ? Math.floor(v) : 0);
+  const byCode: PromoStats["byCode"] = {};
+  if (item.byCode && typeof item.byCode === "object") {
+    for (const [code, entry] of Object.entries(item.byCode as Record<string, unknown>)) {
+      if (!entry || typeof entry !== "object") continue;
+      const record = entry as Record<string, unknown>;
+      byCode[code] = {
+        quotes: num(record.quotes),
+        firstVisits: num(record.firstVisits),
+        attributedVnd: num(record.attributedVnd),
+        discountGivenVnd: num(record.discountGivenVnd),
+      };
+    }
+  }
+  return {
+    byCode,
+    quotes: num(item.quotes),
+    firstVisits: num(item.firstVisits),
+    attributedVnd: num(item.attributedVnd),
+    discountGivenVnd: num(item.discountGivenVnd),
+  };
+}
+
 export class SupplyClient {
   private seq = 0;
   public constructor(
@@ -359,6 +470,76 @@ export class SupplyClient {
 
   public async cancelInvitation(input: { merchantId: string; invitationId: string }): Promise<void> {
     await this.command("CancelCollabInvitation", { type: "CollabInvitation", id: input.invitationId }, { merchantId: input.merchantId, invitationId: input.invitationId });
+  }
+
+  // MERCHANT-CREATOR-PROMO-001：专属营销码 client。认领/查码走 creator 本人口径；
+  // 绑定/报码/查绑定查报码走 merchantId（网关盖章，和邀约同一套）。
+  public async claimPromoCode(input: { agentId: string; code: string }): Promise<PromoCode> {
+    const body = this.body(await this.command("ClaimPromoCode", { type: "PromoCode", id: "new" }, { agentId: input.agentId, code: input.code }));
+    const parsed = parsePromoCode(body.promoCode);
+    if (!parsed) throw new SupplyProtocolError("promo code malformed");
+    return parsed;
+  }
+
+  public async listMyPromoCodes(): Promise<PromoCode[]> {
+    const body = this.body(await this.command("ListPromoAssets", { type: "PromoCode", id: "query" }, { role: "my" }));
+    if (!Array.isArray(body.promoCodes)) return [];
+    return body.promoCodes.flatMap((entry: unknown) => {
+      const parsed = parsePromoCode(entry);
+      return parsed ? [parsed] : [];
+    });
+  }
+
+  public async myPromoStats(): Promise<PromoStats> {
+    const body = this.body(await this.command("GetPromoStats", { type: "PromoStats", id: "mine" }, { role: "mine" }));
+    return parsePromoStats(body.stats);
+  }
+
+  public async disablePromoCode(input: { code: string }): Promise<void> {
+    await this.command("DisablePromoCode", { type: "PromoCode", id: input.code }, { code: input.code });
+  }
+
+  public async disablePromoBenefit(input: { merchantId: string; code: string }): Promise<void> {
+    await this.command("DisablePromoBenefit", { type: "PromoBenefit", id: input.code }, { merchantId: input.merchantId, code: input.code });
+  }
+
+  public async bindPromoBenefit(input: { merchantId: string; code: string; faceValueVnd: number; scopeName: string; validUntil: string }): Promise<PromoBenefit> {
+    const body = this.body(await this.command("BindPromoBenefit", { type: "PromoBenefit", id: "new" }, {
+      merchantId: input.merchantId, code: input.code, faceValueVnd: input.faceValueVnd,
+      scopeName: input.scopeName, validUntil: input.validUntil,
+    }));
+    const parsed = parsePromoBenefit(body.benefit);
+    if (!parsed) throw new SupplyProtocolError("promo benefit malformed");
+    return parsed;
+  }
+
+  public async listMerchantBenefits(input: { merchantId: string }): Promise<PromoBenefit[]> {
+    const body = this.body(await this.command("ListPromoAssets", { type: "PromoBenefit", id: "query" }, { merchantId: input.merchantId, role: "bound" }));
+    if (!Array.isArray(body.benefits)) return [];
+    return body.benefits.flatMap((entry: unknown) => {
+      const parsed = parsePromoBenefit(entry);
+      return parsed ? [parsed] : [];
+    });
+  }
+
+  public async quotePromoCode(input: { merchantId: string; code: string; amountVnd?: number; firstVisit?: boolean }): Promise<{ quote: PromoQuote; faceValueVnd: number; scopeName: string }> {
+    const payload: Record<string, unknown> = { merchantId: input.merchantId, code: input.code };
+    if (input.amountVnd !== undefined) payload.amountVnd = input.amountVnd;
+    if (input.firstVisit !== undefined) payload.firstVisit = input.firstVisit;
+    const body = this.body(await this.command("QuotePromoCode", { type: "PromoQuote", id: "new" }, payload));
+    const quote = parsePromoQuote(body.quote);
+    const benefit = (body.benefit ?? {}) as Record<string, unknown>;
+    if (!quote) throw new SupplyProtocolError("promo quote malformed");
+    return {
+      quote,
+      faceValueVnd: typeof benefit.faceValueVnd === "number" ? benefit.faceValueVnd : 0,
+      scopeName: typeof benefit.scopeName === "string" ? benefit.scopeName : "",
+    };
+  }
+
+  public async merchantPromoStats(input: { merchantId: string }): Promise<PromoStats> {
+    const body = this.body(await this.command("GetPromoStats", { type: "PromoStats", id: "query" }, { merchantId: input.merchantId, role: "merchant" }));
+    return parsePromoStats(body.stats);
   }
 
   // MERCHANT-CREATOR-INVITE-001：creator 收邀约 + 回复。principal 就是 agent 本人，
