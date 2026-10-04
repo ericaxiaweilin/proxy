@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { creatorRatingLabel, formatCreatorGrade, formatCreatorScore, formatFansCount, formatPriceRange, formatRatePercent, formatServiceVolume, labelCapability, labelInvitationPurpose, labelMarket, labelServiceType, labelSocial, labelVertical, visibleCapabilityTags } from "./creator-capability-labels";
+import { creatorRatingLabel, formatCreatorGrade, formatCreatorScore, formatFansCount, formatInviteDateTime, formatPriceRange, formatRatePercent, formatServiceVolume, labelCapability, labelInvitationPurpose, labelMarket, labelServiceType, labelSocial, labelVertical, visibleCapabilityTags } from "./creator-capability-labels";
 
 describe("creator-capability-labels (MERCHANT-CREATOR-TAGS-001)", () => {
   it("已知编码转中文", () => {
@@ -79,6 +79,13 @@ describe("creator-capability-labels (MERCHANT-CREATOR-TAGS-001)", () => {
     expect(labelInvitationPurpose("OTHER")).toBe("其他合作");
     expect(labelInvitationPurpose("陪聊")).toBe("");
     expect(labelInvitationPurpose(undefined)).toBe("");
+  });
+
+  it("合作时间只印真实约定的，没约不编随时可约", () => {
+    expect(formatInviteDateTime("2026-10-12T00:00:00+07:00", 8)).toBe("10月12日 · 8小时");
+    expect(formatInviteDateTime("2026-10-12T00:00:00+07:00", 0)).toBe("10月12日");
+    expect(formatInviteDateTime(undefined, 8)).toBe("");
+    expect(formatInviteDateTime("下周末", 8)).toBe("");
   });
   it("垂类只明示三类，其余返回空", () => {
     expect(labelVertical("RESTAURANT")).toBe("餐饮");

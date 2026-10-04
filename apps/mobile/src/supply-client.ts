@@ -225,6 +225,8 @@ export type CollabInvitationTerms = {
   negotiable: boolean;
   purpose: CollabInvitationPurpose | "";
   message?: string | undefined;
+  startAt?: string | undefined;
+  durationH?: number | undefined;
 };
 
 const INVITATION_STATUSES: ReadonlySet<string> = new Set(["PENDING", "COUNTERED", "ACCEPTED", "DECLINED", "CANCELLED", "EXPIRED"]);
@@ -342,6 +344,8 @@ export class SupplyClient {
       negotiable: input.negotiable, purpose: input.purpose,
     };
     if (input.message !== undefined) payload.message = input.message;
+    if (input.startAt !== undefined) payload.startAt = input.startAt;
+    if (input.durationH !== undefined) payload.durationH = input.durationH;
     const body = this.body(await this.command("InviteCreator", { type: "CollabInvitation", id: "new" }, payload));
     const parsed = parseCollabInvitation(body.invitation);
     if (!parsed) throw new SupplyProtocolError("invitation malformed");
@@ -375,6 +379,8 @@ export class SupplyClient {
       payload.negotiable = input.negotiable ?? true;
       payload.purpose = input.purpose ?? "";
       if (input.message !== undefined) payload.message = input.message;
+      if (input.startAt !== undefined) payload.startAt = input.startAt;
+      if (input.durationH !== undefined) payload.durationH = input.durationH;
     }
     const body = this.body(await this.command("RespondCollabInvitation", { type: "CollabInvitation", id: input.invitationId }, payload));
     const parsed = parseCollabInvitation(body.invitation);

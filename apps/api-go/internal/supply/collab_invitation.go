@@ -85,42 +85,59 @@ func invitationMerchantID(e command.Envelope) string {
 }
 
 // invitationTerms 是 wire 上的出价条件：邀约和还价共用同一套校验。
+// 时间也在 terms 里 —— 谈合作谈的不只是钱，档期不对价再合适也白搭，
+// 所以还价可以连时间一起改（version++ 照记）。
 type invitationTerms struct {
 	PriceMinVND int64  `json:"priceMinVnd"`
 	PriceMaxVND int64  `json:"priceMaxVnd"`
 	Negotiable  bool   `json:"negotiable"`
 	Purpose     string `json:"purpose"`
 	Message     string `json:"message"`
+	StartAt     string `json:"startAt"`
+	DurationH   int    `json:"durationH"`
 }
 
 // validateTerms：区间必须 min<=max（相等=一口价，全 0=出价待商议）；
 // 单边不超过 maxAmountVND；目的必须封闭集里选（逼商家说清楚为什么找她，
-// creator 才好决策）；留言 200 字封顶。
-func validateTerms(e command.Envelope, t invitationTerms) *command.Result {
+// creator 才好决策）；留言 200 字封顶；时长 0..24 小时；
+// 开始时间给了一定要是 RFC3339（给错直接拒，不猜是几点）。
+// 返回解析好的开始时间（没给就是零值，调用方按「时间待商议」处理）。
+func validateTerms(e command.Envelope, t invitationTerms) (time.Time, *command.Result) {
 	if t.PriceMinVND < 0 || t.PriceMaxVND < 0 || t.PriceMinVND > maxAmountVND || t.PriceMaxVND > maxAmountVND {
 		r := command.Rejected(e, "INVALID_INVITATION_PRICE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_invitation_price", nil)
-		return &r
+		return time.Time{}, &r
 	}
 	if t.PriceMinVND > t.PriceMaxVND {
 		r := command.Rejected(e, "INVALID_INVITATION_RANGE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_invitation_range", nil)
-		return &r
+		return time.Time{}, &r
 	}
 	if !validPurposes[t.Purpose] {
 		r := command.Rejected(e, "INVALID_INVITATION_PURPOSE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_invitation_purpose", nil)
-		return &r
+		return time.Time{}, &r
 	}
 	if len([]rune(t.Message)) > maxInvitationMessage {
 		r := command.Rejected(e, "INVALID_INVITATION_MESSAGE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_invitation_message", nil)
-		return &r
+		return time.Time{}, &r
 	}
-	return nil
+	if t.DurationH < 0 || t.DurationH > 24 {
+		r := command.Rejected(e, "INVALID_INVITATION_DURATION", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_invitation_duration", nil)
+		return time.Time{}, &r
+	}
+	var startAt time.Time
+	if t.StartAt != "" {
+		parsed, parseErr := time.Parse(time.RFC3339, t.StartAt)
+		if parseErr != nil {
+			r := command.Rejected(e, "INVALID_INVITATION_START", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_invitation_start", nil)
+			return time.Time{}, &r
+		}
+		startAt = parsed
+	}
+	return startAt, nil
 }
 
 type inviteCreatorPayload struct {
 	AgentID     string `json:"agentId"`
 	ServiceType string `json:"serviceType"`
-	StartAt     string `json:"startAt"`
-	DurationH   int    `json:"durationH"`
 	Currency    string `json:"currency"`
 	invitationTerms
 }
@@ -149,23 +166,13 @@ func (s *Service) inviteCreator(ctx context.Context, e command.Envelope) command
 	if profile.Status != "ACTIVE" {
 		return command.Rejected(e, "AGENT_NOT_INVITABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.agent_not_invitable", nil)
 	}
-	if bad := validateTerms(e, p.invitationTerms); bad != nil {
+	startAt, bad := validateTerms(e, p.invitationTerms)
+	if bad != nil {
 		return *bad
 	}
 	serviceType := p.ServiceType
 	if serviceType == "" {
 		serviceType = "CITY_COMPANION"
-	}
-	var startAt time.Time
-	if p.StartAt != "" {
-		parsed, parseErr := time.Parse(time.RFC3339, p.StartAt)
-		if parseErr != nil {
-			return command.Rejected(e, "INVALID_INVITATION_START", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_invitation_start", nil)
-		}
-		startAt = parsed
-	}
-	if p.DurationH < 0 || p.DurationH > 24 {
-		return command.Rejected(e, "INVALID_INVITATION_DURATION", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_invitation_duration", nil)
 	}
 	currency := p.Currency
 	if currency == "" {
@@ -268,7 +275,8 @@ func (s *Service) respondCollabInvitation(ctx context.Context, e command.Envelop
 		if !inv.Negotiable {
 			return command.Rejected(e, "INVITATION_NOT_NEGOTIABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.invitation_not_negotiable", nil)
 		}
-		if bad := validateTerms(e, p.invitationTerms); bad != nil {
+		counterStartAt, bad := validateTerms(e, p.invitationTerms)
+		if bad != nil {
 			return *bad
 		}
 		next.PriceMinVND = p.PriceMinVND
@@ -276,6 +284,12 @@ func (s *Service) respondCollabInvitation(ctx context.Context, e command.Envelop
 		next.Negotiable = p.Negotiable
 		next.Purpose = p.Purpose
 		next.Message = p.Message
+		// 时间只在还价带了时间条件时才替换 —— 没带就是"时间维持上版"，
+		// 不许用零值把原档期清掉（v1 不支持单独清除时间，想改期就填新的）。
+		if p.StartAt != "" || p.DurationH != 0 {
+			next.StartAt = counterStartAt
+			next.DurationH = p.DurationH
+		}
 		next.TermsVersion = inv.TermsVersion + 1
 		next.CounterBy = by
 		if inv.Status == InvitationPending {

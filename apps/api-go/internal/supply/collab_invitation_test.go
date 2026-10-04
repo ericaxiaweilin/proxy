@@ -72,6 +72,30 @@ func invitePayload(agentID string) map[string]any {
 	}
 }
 
+// 还价可以连时间一起改：档期不对价再合适也白搭，改完 version 照记。
+func TestInviteCounterAdjustsTime(t *testing.T) {
+	s := New()
+	setupAgent(t, s, "agent_time", "Time", []string{"ZH"}, "hn", 1200000)
+	inv := inviteAs(t, s, invitePayload("agent_time"), "merchant_1")
+	id, _ := inv["id"].(string)
+	if inv["durationH"] != float64(8) {
+		t.Fatalf("invite must carry durationH, got %v", inv["durationH"])
+	}
+	newStart := time.Now().Add(72 * time.Hour).UTC().Format(time.RFC3339)
+	_, countered := respondAs(t, s, map[string]any{
+		"invitationId": id, "decision": "COUNTERED",
+		"priceMinVnd": 1000000, "priceMaxVnd": 1300000, "negotiable": true,
+		"purpose": "UGC", "message": "改到下周",
+		"startAt": newStart, "durationH": 4,
+	}, "agent_time", "")
+	if countered["status"] != "COUNTERED" {
+		t.Fatalf("counter must flip to COUNTERED, got %v", countered["status"])
+	}
+	if countered["startAt"] != newStart || countered["durationH"] != float64(4) {
+		t.Fatalf("counter must replace time terms, got %v", countered)
+	}
+}
+
 func TestInviteCreatorNegotiatedLifecycle(t *testing.T) {
 	s := New()
 	setupAgent(t, s, "agent_invited", "Invited", []string{"ZH"}, "hn", 1200000)
@@ -164,6 +188,22 @@ func TestInviteCreatorTermsGuards(t *testing.T) {
 	env.AuthContext = map[string]any{"merchantID": "merchant_9"}
 	if r := s.Handle(env); r.Outcome == "ACCEPTED" {
 		t.Fatal("off-list purpose must be rejected")
+	}
+	// 开始时间写错格式直接拒，不猜是几点。
+	badStart := good("agent_guarded")
+	badStart["startAt"] = "下周末"
+	env = envelopeFor("InviteCreator", badStart, "")
+	env.AuthContext = map[string]any{"merchantID": "merchant_9"}
+	if r := s.Handle(env); r.Outcome == "ACCEPTED" {
+		t.Fatal("malformed startAt must be rejected")
+	}
+	// 时长超过 24 小时直接拒。
+	badDur := good("agent_guarded")
+	badDur["durationH"] = 48
+	env = envelopeFor("InviteCreator", badDur, "")
+	env.AuthContext = map[string]any{"merchantID": "merchant_9"}
+	if r := s.Handle(env); r.Outcome == "ACCEPTED" {
+		t.Fatal("duration over 24h must be rejected")
 	}
 	// 同一商家对同一人同时只能一张活单。
 	inviteAs(t, s, good("agent_guarded"), "merchant_9")

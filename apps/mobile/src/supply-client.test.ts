@@ -41,7 +41,7 @@ describe("merchant creator recommendations", () => {
   });
   it("MERCHANT-CREATOR-INVITE-001 邀约解析：区间+目的+可谈，缺件/坏状态直接丢掉", () => {
     const parsed = parseCollabInvitations([
-      { id: "ci_1", merchantId: "m1", agentId: "a1", serviceType: "CITY_COMPANION", status: "PENDING", priceMinVnd: 800000, priceMaxVnd: 1500000, negotiable: true, purpose: "UGC", createdAt: "2026-10-04T00:00:00Z", expiresAt: "2026-10-07T00:00:00Z" },
+      { id: "ci_1", merchantId: "m1", agentId: "a1", serviceType: "CITY_COMPANION", status: "PENDING", priceMinVnd: 800000, priceMaxVnd: 1500000, negotiable: true, purpose: "UGC", startAt: "2026-10-12T00:00:00+07:00", durationH: 8, createdAt: "2026-10-04T00:00:00Z", expiresAt: "2026-10-07T00:00:00Z" },
       { id: "ci_2", merchantId: "m1", agentId: "a1", serviceType: "CITY_COMPANION", status: "COUNTERED", priceMinVnd: 1000000, priceMaxVnd: 1000000, negotiable: false, purpose: "SALES", termsVersion: 2, counterBy: "a1", createdAt: "2026-10-04T00:00:00Z", expiresAt: "2026-10-07T00:00:00Z" },
       { id: "", merchantId: "m1", agentId: "a1", status: "PENDING", createdAt: "x", expiresAt: "y" },
       { id: "ci_3", merchantId: "m1", agentId: "a1", status: "WEIRD", createdAt: "x", expiresAt: "y" },
@@ -51,6 +51,8 @@ describe("merchant creator recommendations", () => {
     expect(parsed[0]?.priceMinVnd).toBe(800000);
     expect(parsed[0]?.priceMaxVnd).toBe(1500000);
     expect(parsed[0]?.purpose).toBe("UGC");
+    expect(parsed[0]?.startAt).toBe("2026-10-12T00:00:00+07:00");
+    expect(parsed[0]?.durationH).toBe(8);
     expect(parsed[1]?.status).toBe("COUNTERED");
     expect(parsed[1]?.negotiable).toBe(false);
     expect(parsed[1]?.termsVersion).toBe(2);

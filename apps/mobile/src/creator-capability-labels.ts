@@ -107,6 +107,18 @@ function trimNum(value: number): string {
   return `${Math.round(value * 10) / 10}`;
 }
 
+// MERCHANT-CREATOR-INVITE-001：合作时间展示。startAt 是 RFC3339，
+// 印 M月d日（10月12日）；durationH>0 跟印时长。没给时间返回空串 ——
+// 没约时间不编"随时可约"，调用方那一行直接不画。
+export function formatInviteDateTime(startAt: string | undefined, durationH: number | undefined): string {
+  if (typeof startAt !== "string" || startAt === "") return "";
+  const date = new Date(startAt);
+  if (Number.isNaN(date.getTime())) return "";
+  const label = `${date.getMonth() + 1}月${date.getDate()}日`;
+  const hours = typeof durationH === "number" && durationH > 0 ? Math.floor(durationH) : 0;
+  return hours > 0 ? `${label} · ${hours}小时` : label;
+}
+
 // MERCHANT-CREATOR-INVITE-001：合作目的中文。未知值返回空串（标签不渲染）——
 // 目的封闭集前后端对齐，加目的要一起加，不许单边编新值。
 export function labelInvitationPurpose(purpose: string | undefined): string {

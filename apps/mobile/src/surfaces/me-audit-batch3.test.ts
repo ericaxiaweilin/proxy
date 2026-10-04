@@ -123,6 +123,9 @@ describe("MERCHANT-CREATOR-INVITE-001 我的订单能收到并回复定向邀约
     // 出价印区间 + 目的 + 可谈/一口价，一行说清楚。
     expect(ordersCode).toContain("formatPriceRange(");
     expect(ordersCode).toContain("labelInvitationPurpose(");
+    // 合作时间展示 + 还价可改时间（空着维持上版，不清零）。
+    expect(ordersCode).toContain("formatInviteDateTime(");
+    expect(ordersCode).toContain("setCounterDate");
   });
 });
 

@@ -205,5 +205,10 @@ describe("CREATOR-LIST-CARD-001 详情页同一套语言", () => {
     expect(detail).toContain("formatPriceRange(");
     expect(detail).toContain("labelInvitationPurpose(");
     expect(detail).toContain("再议");
+    // 合作时间进表单（日期+时长），展示走 formatInviteDateTime；
+    // 金额单独成行放大（invitePrice），不缩在灰字里。
+    expect(detail).toContain("formatInviteDateTime(");
+    expect(detail).toContain("setInviteDate");
+    expect(detail).toContain("styles.invitePrice");
   });
 });
