@@ -25,6 +25,9 @@ import { MyStoresHub } from "./my-stores-hub";
 import type { SupplyClient, SupplierCandidate, AgentPassport } from "../supply-client";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
+// CREATOR-LIST-CARD-001：报价格式化与横滑卡共用同一个纯模块实现 —— 同一个人不许两个价。
+import { formatReferencePrice } from "../creator-pricing";
+import { labelMarket, labelServiceType, labelSocial, labelVertical } from "../creator-capability-labels";
 // CREATOR-SOCIAL-001：社媒 canonical 链接与平台中文名（和服务端封闭集合对齐）。
 import { socialPlatformLabel, socialProfileUrl } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
@@ -373,6 +376,7 @@ export function MerchantMeR21Replacement({
                     avatarUri,
                   );
                 }}
+                style={styles.creatorAvatarHit}
               >
               {avatarUri ? (
                 <Image
@@ -389,16 +393,46 @@ export function MerchantMeR21Replacement({
                   <Text selectable style={styles.creatorAvatarMissingText}>待完善照片</Text>
                 </View>
               )}
+              {/* CREATOR-LIST-CARD-001：头像右下那颗点只在**服务端判定可邀请**时画。
+                  eligibility 是能力 / 时间 / 同城三项算出来的，不是"在线"—— 所以它
+                  旁边永远有「✓ 可邀请」那行字，点只是让这一行更好扫，不替它说话。 */}
+              {creator.eligibility.eligible ? <View pointerEvents="none" style={styles.creatorOnlineDot} /> : null}
               </Pressable>
               <View style={styles.flex}>
-              <Text selectable style={styles.cardTitle}>{creator.name}</Text>
-              <Text selectable style={styles.meta}>
-                {creator.serviceType} · {creator.languages.join(" / ") || "—"} ·{" "}
-                {creator.eligibility.eligible ? "✓ 可邀请" : "✗ 不符合资格"}
-              </Text>
-              <Text selectable style={styles.meta}>
-                {creator.referencePrice} {creator.currency} · 到店 {creator.photos.length} 媒体
-              </Text>
+              <Text selectable numberOfLines={1} style={styles.creatorCardName}>{creator.name}</Text>
+              {/* 标签只放真实字段：服务类型 + 语言（超过两个折成 +N）。
+                  原型卡上的「本地生活 / 探店达人」是稿子里的假分类，
+                  SupplierCandidate 里没有这一层，不编。 */}
+              <View style={styles.creatorTagRow}>
+                {creator.serviceType.trim() !== "" ? <View style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{labelServiceType(creator.serviceType)}</Text></View> : null}
+                {creator.languages.slice(0, 2).map((language) => <View key={language} style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{language}</Text></View>)}
+                {creator.languages.length > 2 ? <View style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{`+${creator.languages.length - 2}`}</Text></View> : null}
+                {/* MERCHANT-CREATOR-TAGS-001：内容垂类（餐饮/旅游/运动）。
+                    KTV/SPA 等只关联不明示，labelVertical 直接返回空串不渲染。 */}
+                {(creator.verticalTags ?? []).map(labelVertical).filter((label) => label !== "").slice(0, 1).map((label) => <View key={label} style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{label}</Text></View>)}
+                {/* MERCHANT-CREATOR-TAGS-001：服务范围（城市）+ 粉丝（已关联社媒账号）。
+                    城市来自 availability.marketId，账号是服务端可见性过滤后的 socials；
+                    都没有就不渲染。粉丝数没有聚合来源，不编数字，去平台自验。 */}
+                {labelMarket(creator.availability?.marketId) !== "" ? <View style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{labelMarket(creator.availability?.marketId)}</Text></View> : null}
+                {(creator.socials ?? []).slice(0, 1).map((social) => labelSocial(social.platform, social.handle)).filter((label) => label !== "").map((label) => <View key={label} style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{label}</Text></View>)}
+              </View>
+              {/* 原型卡这一行是「⭐评分 / 粉丝 2.4w / 均播 5.2w」—— 这三个数这份数据里
+                  根本没有，编出来就是上一轮那个 P0 的同一类问题。换成商家真正用来
+                  挑人的两项真实读数：能不能邀请（服务端 eligibility）、有没有到店素材。
+                  报价在右边那一列，不在这里重复。 */}
+              <View style={styles.creatorStatRow}>
+                <View style={[styles.creatorEligibility, creator.eligibility.eligible ? styles.creatorEligibilityOn : styles.creatorEligibilityOff]}>
+                  <Text selectable style={[styles.creatorEligibilityText, creator.eligibility.eligible ? styles.creatorEligibilityTextOn : styles.creatorEligibilityTextOff]}>{creator.eligibility.eligible ? "✓ 可邀请" : "✗ 不符合资格"}</Text>
+                </View>
+                <Text selectable numberOfLines={1} style={styles.creatorStat}>{`到店 ${creator.photos.length} 媒体`}</Text>
+              </View>
+              </View>
+              {/* 右列：报价 + 主操作。报价走共享的 formatReferencePrice —— 和横滑卡
+                  同一个人必须印同一个字符串。「查看主页」指下面那页
+                  （眉题就是「Creator 主页 · 经营」），点整行也是去那里。 */}
+              <View style={styles.creatorAction}>
+                <Text selectable numberOfLines={1} style={styles.creatorPrice}>{formatReferencePrice(creator.referencePrice, creator.currency)}</Text>
+                <View style={styles.creatorGo}><Text selectable style={styles.creatorGoText}>查看主页</Text></View>
               </View>
             </Pressable>
             );
@@ -430,38 +464,48 @@ export function MerchantMeR21Replacement({
           <Text selectable style={styles.homeEyebrow}>Creator 主页 · 经营</Text>
           {/* 个人头：头像 + 名字 + 简介。简介空就不画那一行，不拿服务类型凑字数。 */}
           <View style={styles.creatorHero}>
-            {/* CREATOR-HOME-001：详情大头像也可点进帖文主页（和列表头像同一条）。
-                之前这里是纯展示，点着没反应 —— 用户在详情页想看帖子只能退回列表重进。 */}
-            <Pressable
-              accessibilityLabel={`${selectedCreator.name}的帖文主页头像`}
-              testID={`creator-hero-entry-${selectedCreator.agentId}`}
-              onPress={() => {
-                if (!onOpenCreatorProfile) return;
-                onOpenCreatorProfile(
-                  selectedCreator.userAccountId || selectedCreator.agentId,
-                  selectedCreator.name,
-                  heroUri,
-                );
-              }}
-            >
-            {heroUri ? (
-              <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`creator-hero:${selectedCreator.agentId}`} source={{ uri: heroUri }} style={styles.creatorHeroAvatar} transition={0} />
-            ) : (
-              <View style={styles.creatorHeroAvatarMissing}><Text selectable style={styles.creatorHeroInitial}>{selectedCreator.name.slice(0, 1)}</Text></View>
-            )}
-            </Pressable>
-            <View style={styles.flex}>
-              <Text selectable style={styles.cardTitle}>{selectedCreator.name}</Text>
-              {(creatorPassport?.profile.bio.trim() || "") !== "" ? (
-                <Text selectable style={styles.meta}>{creatorPassport?.profile.bio}</Text>
-              ) : null}
-              <Text selectable style={styles.meta}>
-                {selectedCreator.serviceType} · {(selectedCreator.languages.length ? selectedCreator.languages : creatorPassport?.profile.languages ?? []).join(" / ") || "—"} ·{" "}
-                {selectedCreator.eligibility.eligible ? "✓ 可邀请" : "✗ 不符合资格"}
-              </Text>
-              <Text selectable style={styles.meta}>
-                {selectedCreator.referencePrice} {selectedCreator.currency}
-              </Text>
+            <View style={styles.creatorHeroTop}>
+              {/* CREATOR-HOME-001：详情大头像也可点进帖文主页（和列表头像同一条）。
+                  之前这里是纯展示，点着没反应 —— 用户在详情页想看帖子只能退回列表重进。 */}
+              <Pressable
+                accessibilityLabel={`${selectedCreator.name}的帖文主页头像`}
+                testID={`creator-hero-entry-${selectedCreator.agentId}`}
+                onPress={() => {
+                  if (!onOpenCreatorProfile) return;
+                  onOpenCreatorProfile(
+                    selectedCreator.userAccountId || selectedCreator.agentId,
+                    selectedCreator.name,
+                    heroUri,
+                  );
+                }}
+              >
+              {heroUri ? (
+                <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`creator-hero:${selectedCreator.agentId}`} source={{ uri: heroUri }} style={styles.creatorHeroAvatar} transition={0} />
+              ) : (
+                <View style={styles.creatorHeroAvatarMissing}><Text selectable style={styles.creatorHeroInitial}>{selectedCreator.name.slice(0, 1)}</Text></View>
+              )}
+              </Pressable>
+              <View style={styles.flex}>
+                <Text selectable style={styles.creatorCardName}>{selectedCreator.name}</Text>
+                {(creatorPassport?.profile.bio.trim() || "") !== "" ? (
+                  <Text selectable style={styles.meta}>{creatorPassport?.profile.bio}</Text>
+                ) : null}
+                <Text selectable style={styles.meta}>
+                  {selectedCreator.serviceType} · {(selectedCreator.languages.length ? selectedCreator.languages : creatorPassport?.profile.languages ?? []).join(" / ") || "—"}
+                </Text>
+              </View>
+            </View>
+            {/* CREATOR-LIST-CARD-001：原型 .price-bar —— 虚线上边、左「参考报价」、
+                右状态胶囊。可邀请与否在这一页说一次就够，不再在名字下面重复第二遍；
+                报价也走共享的 formatReferencePrice，和列表卡印同一个字符串。 */}
+            <View style={styles.creatorPriceBar}>
+              <View style={styles.flex}>
+                <Text selectable style={styles.creatorPriceLabel}>参考报价</Text>
+                <Text selectable style={styles.creatorPriceValue}>{formatReferencePrice(selectedCreator.referencePrice, selectedCreator.currency)}</Text>
+              </View>
+              <View style={[styles.creatorEligibility, selectedCreator.eligibility.eligible ? styles.creatorEligibilityOn : styles.creatorEligibilityOff]}>
+                <Text selectable style={[styles.creatorEligibilityText, selectedCreator.eligibility.eligible ? styles.creatorEligibilityTextOn : styles.creatorEligibilityTextOff]}>{selectedCreator.eligibility.eligible ? "✓ 可邀请" : "✗ 不符合资格"}</Text>
+              </View>
             </View>
           </View>
           {creatorPassportFailed ? (
@@ -472,8 +516,8 @@ export function MerchantMeR21Replacement({
             <View style={styles.secHead}><Text selectable style={styles.secTitle}>能力</Text></View>
             <View style={styles.chipRow}>
               {creatorPassport.capabilities.map((c) => (
-                <View key={c.capability} style={styles.capChip}>
-                  <Text selectable style={styles.capText}>{c.capability}{c.verified ? " ✓" : ""}</Text>
+                <View key={c.capability} style={[styles.capChip, c.verified && styles.capChipVerified]}>
+                  <Text selectable style={[styles.capText, c.verified && styles.capTextVerified]}>{c.capability}{c.verified ? " ✓" : ""}</Text>
                 </View>
               ))}
             </View>
@@ -1023,15 +1067,26 @@ const styles = StyleSheet.create({
   sectionTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
   sectionHint: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15 },
   // CREATOR-PROFILE-001：详情个人头 + 能力 chips。
-  creatorHero: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 12, marginVertical: 4, padding: 12 },
+  // CREATOR-LIST-CARD-001：改成原型 .profile-card 的两段式 —— 上段头像/名字/简介，
+  // 下段 .price-bar（虚线上边 + 参考报价 + 状态胶囊）。所以这里是**列**容器。
+  creatorHero: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, gap: 12, marginVertical: 4, padding: 14 },
+  creatorHeroTop: { alignItems: "center", flexDirection: "row", gap: 12 },
+  creatorPriceBar: { alignItems: "center", borderStyle: "dashed", borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", gap: 10, paddingTop: 12 },
+  creatorPriceLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  creatorPriceValue: { color: color.ink, fontSize: 22, fontWeight: "900", letterSpacing: -0.5, lineHeight: 28 },
   creatorHeroAvatar: { backgroundColor: color.surface, borderRadius: 999, height: 58, width: 58 },
   creatorHeroAvatarMissing: { alignItems: "center", backgroundColor: color.surface, borderRadius: 999, height: 58, justifyContent: "center", width: 58 },
   creatorHeroInitial: { color: color.muted, fontSize: 20, fontWeight: "900" },
   secHead: { marginTop: 12 },
   secTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
-  capChip: { backgroundColor: "#F1FFD0", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
-  capText: { color: "#4D6200", fontSize: 11, fontWeight: "800" },
+  // CREATOR-LIST-CARD-001：已验证的芯片用原型 .skill-tag.checked 的样子
+  // （浅黄绿底 + 橄榄绿边），没验证的留白底灰边 —— 之前两态同色同底，
+  // 只差一个 ✓ 字符，扫一眼看不出谁被验过。
+  capChip: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  capChipVerified: { backgroundColor: color.inspireSavedBg, borderColor: color.inspireSavedBorder },
+  capText: { color: "#62596B", fontSize: 11, fontWeight: "800" },
+  capTextVerified: { color: color.ink },
   // CREATOR-PROFILE-001：个人主页眉题。
   homeEyebrow: { color: color.muted, fontSize: 11, fontWeight: "800", letterSpacing: 1, marginTop: 4 },
   // CREATOR-SOCIAL-001：社媒行（可点的有 ›）。
@@ -1044,7 +1099,31 @@ const styles = StyleSheet.create({
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, padding: 12, marginVertical: 4, ...shadows.card, gap: 2 },
   // CREATOR-AVATAR-001：头像 58px 方图 + 右侧文字，横排 —— 列表行看着像「一批人」
   // 而不是「一串字」。与 merchant-creator-recommendations 的横滑卡共用同一套解析。
-  creatorRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 12, marginVertical: 4, padding: 12, ...shadows.card },
+  // CREATOR-LIST-CARD-001（2026-10-04，用户「商家侧-我的 creator list 展示形式 这次
+  // 比较亮眼 之前太素了」）：一行从「三段文字的通讯录条目」换成一张卡 —— 圆头像
+  // （服务端判定可邀请时带一颗点）+ 名字 + 真实标签 + 真实读数 + 右列报价与主操作。
+  // 原型卡上的「⭐评分 / 粉丝 2.4w / 均播 5.2w」这份数据里没有，一个都没抄。
+  creatorRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, flexDirection: "row", gap: 12, marginVertical: 5, padding: 14, ...shadows.card },
+  // 头像的定位上下文：那颗点要贴在头像右下角。
+  creatorAvatarHit: { position: "relative" },
+  creatorOnlineDot: { backgroundColor: color.proxyGreen, borderColor: color.white, borderRadius: 999, borderWidth: 2, bottom: 2, height: 14, position: "absolute", right: 2, width: 14 },
+  creatorCardName: { color: color.ink, fontSize: 16, fontWeight: "800", lineHeight: 22 },
+  creatorTagRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 6 },
+  creatorTag: { backgroundColor: color.surface, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  creatorTagText: { color: "#62596B", fontSize: 11, fontWeight: "700" },
+  creatorStatRow: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 8 },
+  creatorEligibility: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  creatorEligibilityOn: { backgroundColor: color.proxyGreenSoft },
+  creatorEligibilityOff: { backgroundColor: color.stateDangerBg },
+  creatorEligibilityText: { fontSize: 11, fontWeight: "800" },
+  creatorEligibilityTextOn: { color: "#137C6C" },
+  creatorEligibilityTextOff: { color: color.error },
+  creatorStat: { color: color.muted, fontSize: 11, fontWeight: "600" },
+  // 右列：报价在上、主操作在下。flexShrink:0 —— 名字再长也不许把报价压扁。
+  creatorAction: { alignItems: "flex-end", flexShrink: 0, gap: 8 },
+  creatorPrice: { color: color.ink, fontSize: 15, fontWeight: "900" },
+  creatorGo: { backgroundColor: color.lime, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8 },
+  creatorGoText: { color: color.ink, fontSize: 12, fontWeight: "900" },
   // CREATOR-AVATAR-001：头像是圆圈（999），不是方块R角。
   creatorAvatar: { backgroundColor: color.surface, borderRadius: 999, height: 64, width: 64 },
   creatorAvatarMissing: { alignItems: "center", backgroundColor: color.surface, borderRadius: 999, gap: 2, height: 64, justifyContent: "center", width: 64 },

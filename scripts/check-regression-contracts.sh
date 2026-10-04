@@ -402,6 +402,12 @@ pnpm --filter @proxy/mobile test --run src/supply-client.test.ts || exit $?
 require_test "MERCHANT-CREATOR-001" "./internal/supply" \
   "TestSupplyQueryReturnsOnlyEligible" \
   "apps/api-go/internal/supply/service_test.go" || exit $?
+# MERCHANT-CREATOR-TAGS-001：商家标签只印 VERIFIED 未过期的能力。
+# QuerySuppliers 必须把 verifiedCapabilitySet 同一套判定带出来（声明了但没验证
+# 的不许出现），顺序固定。mobile 侧 type/parse/label 三处各自有单元测试兜底。
+require_test "MERCHANT-CREATOR-TAGS-001" "./internal/supply" \
+  "TestQuerySuppliersCarriesVerifiedCapabilities" \
+  "apps/api-go/internal/supply/service_test.go" || exit $?
 
 # MERCHANT-CREATOR-LIVE-002: boot seed must keep a live, photo-ready
 # Creator pool so the merchant Creator rail (server-side
@@ -520,10 +526,30 @@ require_test "OPS-REAL-001" "./internal/api" "TestOperatorConsoleIsOperatorOnly"
   "apps/api-go/internal/api/operator_console_test.go" || exit $?
 require_test "OPS-REAL-001" "./internal/api" "TestOperatorConsoleNeverServesFixtureNumbers" \
   "apps/api-go/internal/api/operator_console_test.go" || exit $?
-if grep -E 'mux\.HandleFunc\("/v1/operator/[a-z-]+"' apps/api-go/internal/api/server.go | grep -v '/v1/operator/legal' | grep -qvE 'operatorConsole(Method)?\('; then
+# 每一条 /v1/operator/* 路由都必须过某个已知的运营门。枚举是闭集的：
+# operatorConsole（读，要 ANALYTICS）、operatorConsoleMethod（写，要 ANALYTICS）、
+# operatorConsoleAnyScope（OPS-ACCESS-001：只给「看自己的权限」，是运营即可）。
+# 加第四个门要在这里显式列出来，同时它得有自己的具名测试 —— 这里 widen 的是**类名
+# 枚举**，不是"有没有门"这件事本身，所以不构成放松。
+if grep -E 'mux\.HandleFunc\("/v1/operator/[a-z-]+"' apps/api-go/internal/api/server.go | grep -v '/v1/operator/legal' | grep -qvE 'operatorConsole(Method|AnyScope)?\('; then
   echo "  FAIL [OPS-REAL-001]: 有 /v1/operator/* 路由没走 operatorConsole —— 运营数据又能被任何人读到。" >&2
   exit 1
 fi
+# OPS-SCOPE-WIRED-001（2026-10-04）：per-principal scope 必须真的被接上。
+# ParsePrincipalScopes、WithPrincipalScopes、12 个 scope 的词汇表、门命令→scope 的映射
+# 全部写好并且有测试，但 cmd/api/main.go 只读了 PROXY_OPERATOR_PRINCIPALS ——
+# 于是 PROXY_OPERATOR_SCOPES 是一份**看起来存在、运行时完全无效**的配置，
+# 白名单里人人恒持全部 scope，"权限可拆分"停在文档里。
+if ! grep -q 'PROXY_OPERATOR_SCOPES' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [OPS-SCOPE-WIRED-001]: PROXY_OPERATOR_SCOPES 没在 cmd/api/main.go 里读 ——" >&2
+  echo "        按人配 scope 是死配置：解析器和测试都在，运行时却人人持全部 scope。" >&2
+  exit 1
+fi
+if ! grep -q 'WithPrincipalScopes' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [OPS-SCOPE-WIRED-001]: 读了 PROXY_OPERATOR_SCOPES 却没调 WithPrincipalScopes —— 读进来不用等于没读。" >&2
+  exit 1
+fi
+echo "    OPS-SCOPE-WIRED-001: PASS (per-principal scope 接上 main.go，不再是死配置)"
 if grep -rn 'fetch("/v1/operator' apps/market-intelligence-console/src >/dev/null; then
   echo "  FAIL [OPS-REAL-001]: 控制台页面绕过 opFetch 直接 fetch —— 不带运营会话，也不认 NOT_CONNECTED。" >&2
   exit 1
@@ -535,6 +561,52 @@ for t in TestRegularNoonChatterHasHighGravityBeforeNoonAndLowAtNight TestSparseO
 done
 require_test "GRAVITY-001" "./internal/api" "TestOperatorGravityIsOperatorOnlyAndLive" \
   "apps/api-go/internal/api/operator_console_test.go" || exit $?
+# OPS-ACCESS-001：运营权限要看得见，而且页面上说的必须就是代码在执行的。
+# 词汇表里每个 scope 解锁哪些命令，从 requiredOperatorScope 现算（抄一份就会漂）；
+# 「没配条目」（持全部）与「配成空集」（全拒）必须分得开 —— 这两个在界面上长得一样
+# 的话，运营会以为自己被收紧了、或以为自己有权限。
+for t in TestOperatorScopeDescriptionsCoverTheVocabulary TestCommandsByScopeIsDerivedNotCopied TestOperatorAccessIsOperatorOnlyButNeedsNoSpecificScope TestOperatorAccessDescribesTheEnforcedModel; do
+  require_test "OPS-ACCESS-001" "./internal/api" "$t" \
+    "apps/api-go/internal/api/operator_access_test.go" || exit $?
+done
+# OPS-AUDIT-001：运营写操作要留痕，表要只追加，写失败要计数而不是静默。
+# 之前 gravity「立即重算」和接单审核都不留痕：重算会改写所有人的引力状态（撮合输入），
+# 而审核结论会被下一次改判就地覆盖。
+if [ ! -f apps/api-go/migrations/161_operator_action_log.sql ]; then
+  echo "  FAIL [OPS-AUDIT-001]: operator.action_log 的迁移不见了 —— 运营动作没有落点。" >&2
+  exit 1
+fi
+if ! grep -q 'action_log_append_only' apps/api-go/migrations/161_operator_action_log.sql \
+   || ! grep -q 'action_log_no_truncate' apps/api-go/migrations/161_operator_action_log.sql; then
+  echo "  FAIL [OPS-AUDIT-001]: 只追加触发器少了 —— 能被改的审计不叫审计。" >&2
+  exit 1
+fi
+# 每个运营写口都必须真的记账。数的是 handler 里的 auditWrite 调用点：
+# 新增一个 POST /v1/operator/* 却忘了接审计，这里就会红。
+OA_OPS_POSTS=$(grep -cE 'operatorConsoleMethod\(http\.MethodPost' apps/api-go/internal/api/server.go)
+OA_AUDITED=$(grep -c 's\.auditWrite(r, "' apps/api-go/internal/api/operator_gravity.go apps/api-go/internal/api/provider_application.go | awk -F: '{s+=$2} END {print s+0}')
+if [ "$OA_OPS_POSTS" -gt "$OA_AUDITED" ]; then
+  echo "  FAIL [OPS-AUDIT-001]: $OA_OPS_POSTS 个运营写口只有 $OA_AUDITED 个接了审计 —— 剩下的没人能追溯。" >&2
+  exit 1
+fi
+for t in TestOperatorWritesAreAudited TestAuditWriteFailureIsCountedNotSwallowed TestAuditReportsNotConnectedWithoutAStore; do
+  require_test "OPS-AUDIT-001" "./internal/api" "$t" \
+    "apps/api-go/internal/api/operator_access_test.go" || exit $?
+done
+for t in TestRecorderCountsFailuresWithoutFailingTheCaller TestRecorderWithoutAStoreIsNotConnected TestNilRecorderIsSafe TestRecordStampsActedAtAndNeverInventsDetail; do
+  require_test "OPS-AUDIT-001" "./internal/operatoraudit" "$t" \
+    "apps/api-go/internal/operatoraudit/operatoraudit_test.go" || exit $?
+done
+# 权限页必须真的在控制台里能打开：只写后端不算交付（界面看不见 = 没做）。
+if ! grep -q '"access"' apps/market-intelligence-console/src/App.tsx; then
+  echo "  FAIL [OPS-ACCESS-001]: 控制台侧栏没有「运营权限」入口 —— 后端做好了但没人看得见。" >&2
+  exit 1
+fi
+if [ ! -f apps/market-intelligence-console/src/pages/Access.tsx ]; then
+  echo "  FAIL [OPS-ACCESS-001]: 权限页文件不见了。" >&2
+  exit 1
+fi
+echo "    OPS-ACCESS-001 / OPS-AUDIT-001: PASS (权限可见且与代码一致 · 运营写口只追加留痕 · 写失败计数不静默)"
 # MATCH-RANK-001：撮合排序只用真实履约 / 需求方评价 / 经验 / 引力响应 / 预算适配；新人按先验、不编履约率；
 # 响应只打破接近的平局、压不过可靠度；不读任何曝光信号（PRD R15.2 Popularity ≠ Qualification）；
 # 满意度真的落库、服务者不能给自己打分。
@@ -3068,10 +3140,40 @@ if ! grep -qF 'function toggleSlotLock' apps/mobile/src/surfaces/requester-home.
   echo "  FAIL [HOME-FORYOU-LOCK-001]: toggleSlotLock 不见了 —— 锁就没人切换了。" >&2
   exit 1
 fi
-# remix 必须跳过锁定的轴（四条都要在）。
-for axis in person activity time place; do
-  if ! grep -qF "!lockedSlots.has(\"$axis\")" apps/mobile/src/surfaces/requester-home.tsx; then
-    echo "  FAIL [HOME-FORYOU-LOCK-001]: remix 不再跳过锁定的 $axis 轴。" >&2
+# remix 必须尊重锁。
+#
+# 2026-10-04 修正：这里原来钉的是 requester-home.tsx 里四个字面量
+# `!lockedSlots.has("<axis>")` —— 那是**旧的实现形状**。remix 改成把锁当约束对象
+# 传进 shufflePick 之后，**行为一个字没变**，那四个字面量却全没了，于是这条钉假红；
+# 而门禁是顺序 exit 1 的，它又把后面一万多行整条门禁一起挡掉（用户实测口径：
+# 「逻辑没问题，是 case 有问题」）。
+#
+# 现在钉**真链路**，不钉某一种写法：
+#   remix(requester-home) --lockValues--> shufflePick --matchesLocks--> 四个轴
+# 每轴的语义落点是 matchesLocks / shufflePick 里的约束字段；端到端行为由
+# requester-home-discovery-contract.test.ts 的 it("HOME-FORYOU-LOCK-001") 断言
+# （上面已钉它存在，门禁也会真跑那个文件）。
+if ! grep -qF 'shufflePick(' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [HOME-FORYOU-LOCK-001]: remix 不再走 shufflePick —— 锁没有落点了。" >&2
+  exit 1
+fi
+if ! grep -qF 'lockValues' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [HOME-FORYOU-LOCK-001]: remix 不再把 lockValues 传下去 —— 锁形同虚设。" >&2
+  exit 1
+fi
+if ! grep -qF 'locks: FYLocks' apps/mobile/src/for-you-derivation.ts; then
+  echo "  FAIL [HOME-FORYOU-LOCK-001]: shufflePick 不再接收 locks —— 锁进不了筛选。" >&2
+  exit 1
+fi
+if ! grep -qF 'matchesLocks(a, locks)' apps/mobile/src/for-you-derivation.ts; then
+  echo "  FAIL [HOME-FORYOU-LOCK-001]: shufflePick 不再用 matchesLocks 筛候选 —— 锁定的轴会被换掉。" >&2
+  exit 1
+fi
+# 四个轴都要真的受约束（person 走 personId 过滤，其余三个在 matchesLocks 内）。
+# 少一个轴 = 那个轴锁了也会被 remix 换掉。
+for axis in activityId time sceneId personId; do
+  if ! grep -qF "locks.$axis" apps/mobile/src/for-you-derivation.ts; then
+    echo "  FAIL [HOME-FORYOU-LOCK-001]: $axis 轴不再受锁约束 —— 锁了也会被 remix 换掉。" >&2
     exit 1
   fi
 done
@@ -13761,6 +13863,87 @@ if [ -f "$CREATOR_LIST_ME" ] && [ -f "$CREATOR_LIST_RAIL" ]; then
   fi
   [ "$CA_B" -eq 0 ] || exit 1
   echo "    CREATOR-AVATAR-001: PASS (Creator 列表有头像 · 照片解析单一来源 · 无照片如实占位)"
+fi
+
+# CREATOR-LIST-CARD-001（2026-10-04，用户「给你替换 proxy 的商家侧-我的 creator list
+# 展示形式 这次比较亮眼 之前太素了」）：
+#
+# 「我的 → Creator 经营」的列表原来是原型 proxy_creator_center_match_v3.html 的
+# .creator-row —— 一行三段文字的通讯录条目。换成新原型
+# （docs/design/references/Proxy_Creator_Me_Card_20261004.html）的 .creator-card
+# 之后，两件事必须钉住：
+#
+#   1. **报价只有一个格式化实现。** 横滑卡和经营列表读的是同一个
+#      SupplierCandidate.referencePrice，各写一份就会出现「同一个人两个价」——
+#      和上面 CREATOR-AVATAR-001 钉照片解析是同一个理由。实现放在
+#      apps/mobile/src/creator-pricing.ts（纯模块，没有 RN 依赖，边界能被真的断言）。
+#
+#   2. **卡片上不许出现这份数据里没有的数字。** 新原型卡上写着「⭐4.9 / 粉丝 2.4w /
+#      均播 5.2w」，SupplierCandidate 里一个都没有。照抄上去就是「没有账户的人进真人
+#      推荐」那类 P0 的同一件事：让编造的东西看起来像真实读数。换上去的是服务端算的
+#      eligibility（能力 / 时间 / 同城）和真实的到店素材数。
+#
+# ⚠️ 第 2 条的**反向断言不放在这里**。shell 剥不掉这个文件里的多行 {/* */} JSX 注释
+#    （本段的说明里就写着那三个词，裸 grep 会被自己的文档喂红 —— 仓里踩过四次）。
+#    按本仓既有分工（见 BACK-GLYPH 那条：shell 做不到可靠剥注释就不在这一层重复实现），
+#    它由 apps/mobile/src/creator-list-card.test.ts 用真正的 strip 断言。这里只钉
+#    「测试还在」以及正向的结构。
+CREATOR_PRICING_TS=apps/mobile/src/creator-pricing.ts
+CREATOR_LIST_ME=apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx
+CREATOR_LIST_RAIL=apps/mobile/src/surfaces/merchant-creator-recommendations.tsx
+if [ -f "$CREATOR_PRICING_TS" ] && [ -f "$CREATOR_LIST_ME" ] && [ -f "$CREATOR_LIST_RAIL" ]; then
+  CLC_B=0
+  if [ ! -f apps/mobile/src/creator-list-card.test.ts ]; then
+    echo "  FAIL [CREATOR-LIST-CARD-001]: 行为测试不见了。" >&2
+    CLC_B=1
+  fi
+  # 报价格式化的唯一实现：定义在纯模块里，两个面都 import 它。
+  # 模式必须锚到 `(`：裸子串 'export function formatReferencePrice' 会被
+  # 'formatReferencePriceX' **吸收**（负向注入实测：重命名后缀，钉照样绿）。
+  if ! grep -qE 'export function formatReferencePrice\(' "$CREATOR_PRICING_TS"; then
+    echo "  FAIL [CREATOR-LIST-CARD-001]: 报价格式化的唯一实现不见了。" >&2
+    CLC_B=1
+  fi
+  for CLC_UI in "$CREATOR_LIST_RAIL" "$CREATOR_LIST_ME"; do
+    if ! grep -q 'formatReferencePrice' "$CLC_UI" || ! grep -q 'creator-pricing' "$CLC_UI"; then
+      echo "  FAIL [CREATOR-LIST-CARD-001]: $CLC_UI 不再用共享的报价格式化。" >&2
+      CLC_B=1
+    fi
+    if grep -qE '^[[:space:]]*(export )?function formatReferencePrice' "$CLC_UI"; then
+      echo "  FAIL [CREATOR-LIST-CARD-001]: $CLC_UI 里自己又实现了一份报价格式化 —— 单一事实源没了。" >&2
+      CLC_B=1
+    fi
+  done
+  # 卡片必须真的画出来（不是只有样式表）：只看 visibleCreators.map 那一支，
+  # 整份文件里出现过 styles.creatorTag 说明不了什么。
+  #
+  # ⚠️ 每个模式都必须**带右边界**（[^A-Za-z0-9_]）。第一版用的是裸子串，
+  #    负向注入时三条臂全是**假绿**：把 `styles.creatorTag}` 改成
+  #    `styles.creatorTagX}` 之后，裸子串仍然命中同一行里的
+  #    `styles.creatorTagText` —— 判据被自己的兄弟样式吸收了。
+  CLC_BRANCH=$(awk '/visibleCreators\.map\(\(creator\) =>/{f=1} f{print} f&&/style=\{styles\.creatorRow\}/{n++} n>0&&/^          \}\)/{exit}' "$CREATOR_LIST_ME")
+  if ! printf '%s' "$CLC_BRANCH" | grep -qE 'styles\.creatorTag[^A-Za-z0-9_]'; then
+    echo "  FAIL [CREATOR-LIST-CARD-001]: 列表卡不再画标签胶囊 —— 又退回纯文字通讯录。" >&2
+    CLC_B=1
+  fi
+  if ! printf '%s' "$CLC_BRANCH" | grep -qE 'styles\.creatorEligibility[^A-Za-z0-9_]'; then
+    echo "  FAIL [CREATOR-LIST-CARD-001]: 列表卡不再画可邀请胶囊。" >&2
+    CLC_B=1
+  fi
+  if ! printf '%s' "$CLC_BRANCH" | grep -qE 'styles\.creatorAction[^A-Za-z0-9_]'; then
+    echo "  FAIL [CREATOR-LIST-CARD-001]: 列表卡不再画右列报价与主操作。" >&2
+    CLC_B=1
+  fi
+  if ! printf '%s' "$CLC_BRANCH" | grep -qE 'creator\.eligibility\.eligible[^A-Za-z0-9_]'; then
+    echo "  FAIL [CREATOR-LIST-CARD-001]: 列表卡不再读服务端 eligibility —— 可邀请态没依据了。" >&2
+    CLC_B=1
+  fi
+  if ! printf '%s' "$CLC_BRANCH" | grep -qE 'creator\.serviceType[^A-Za-z0-9_]'; then
+    echo "  FAIL [CREATOR-LIST-CARD-001]: 列表卡不再用真实的服务类型字段。" >&2
+    CLC_B=1
+  fi
+  [ "$CLC_B" -eq 0 ] || exit 1
+  echo "    CREATOR-LIST-CARD-001: PASS (列表卡有真实标签与可邀请态 · 报价单一实现 · 无编造统计)"
 fi
 
 # VOUCHER-PRESET-001（2026-10-01，用户「商家的发卷 现在要输入一堆 改为预设好 默认
