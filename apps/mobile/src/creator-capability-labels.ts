@@ -198,3 +198,20 @@ const DISPLAY_VERTICAL_LABELS: Record<string, string> = {
 export function labelVertical(code: string): string {
   return DISPLAY_VERTICAL_LABELS[code] ?? "";
 }
+
+// MERCHANT-CREATOR-CONTENT-001：邀约状态中文。生产内容页要按状态给每一单标色，
+// 之前只有 creatorDetail 里几个三元在页面里现写 —— 同一个状态在两页两个词。
+// 集合与 CollabInvitationStatus 封闭集对齐；未知值返回空串（不渲染标签）。
+const INVITATION_STATUS_LABELS: Record<string, string> = {
+  PENDING: "待回复",
+  COUNTERED: "待我回应",
+  ACCEPTED: "已接受",
+  DECLINED: "已婉拒",
+  CANCELLED: "已撤回",
+  EXPIRED: "已过期",
+};
+
+/** 邀约状态转展示标签。未知状态返回空（标签不渲染，不拿「进行中」顶替）。 */
+export function labelInvitationStatus(status: string | undefined): string {
+  return INVITATION_STATUS_LABELS[status ?? ""] ?? "";
+}

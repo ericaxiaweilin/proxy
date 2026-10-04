@@ -43,8 +43,6 @@ import { activityCoverUri } from "../media-thumb-url";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
 import { ProxyBackGlyph, ProxyEmptyState, ProxyLoading } from "../components/proxy-foundation";
-// MERCHANT-ACTIVITY-DETAIL-001：活动二维码走共享二维码组件（和门店码 / 专属码同一套）。
-import { ProxyQrCode } from "../components/proxy-qr-code";
 
 type MerchantPage =
   | "root"
@@ -80,7 +78,7 @@ type ActivityItem = Pick<Activity, "activityId" | "title" | "time" | "people" | 
   // （ActivitySchema.interested / qaCount / shares / benefit / moneyFlow /
   // consumptionTerm）。以前这个 Pick 里根本没有它们，所以商家侧一个都印不出来，
   // 不是没传，是没读。
-  | "interested" | "qaCount" | "shares" | "benefit" | "desc" | "consumption" | "moneyFlow" | "consumptionTerm" | "signupMode" | "venueTypeLabel">;
+  | "interested" | "qaCount" | "shares" | "benefit" | "desc" | "consumption" | "moneyFlow" | "consumptionTerm" | "signupMode" | "venueTypeLabel" | "code">;
 
 // R27 merchant scene ops (r27-preview): the flagship scene's live state,
 // menu and humans come from the public scene projection; own activities
@@ -161,6 +159,43 @@ function summary({ title, meta, stats }: { title: string; meta: string; stats: A
 }
 
 function SimpleRows({ rows, onPress }: { rows: Array<[string, string, MerchantPage?]>; onPress?: (page: MerchantPage) => void }): React.JSX.Element {  return <View style={styles.rowList}>{rows.map(([title, meta, destination]) => <Pressable key={title} disabled={!destination} onPress={() => destination && onPress?.(destination)} style={styles.row}><View style={styles.rowCopy}><Text selectable style={styles.objectTitle}>{title}</Text><Text selectable style={styles.meta}>{meta}</Text></View>{destination ? <Text selectable style={styles.chev}>›</Text> : null}</Pressable>)}</View>;
+}
+
+// MERCHANT-ACTIVITY-DETAIL-001（2026-10-04）：推广活动复制出去的文本。
+// 原型上写的是「复制活动链接」和「生成活动二维码」，但这两件今天都做不出来，
+// 而且做出来也是假的：App 只注册了 proxy:// 这一个 scheme（apps/mobile/app.json），
+// 没有 universal-link 域名，扫码器也只认人 / 店 / 专属码三种载荷
+// （profile-qr.ts 的 ScannedQr）。硬拼一条 https://proxy.app/activity/... 就是
+// 编一条点不开的链接 —— 比不做更坏。所以这里复制的是**真实存在**的活动信息，
+// 商家直接粘进 Zalo / Facebook。标题、时间、地点、编号全是服务端给的。
+function activityShareText(activity: ActivityItem): string {
+  return [
+    activity.title,
+    activity.code !== undefined && activity.code !== "" ? `活动编号 ${activity.code}` : "",
+    activity.time,
+    `${activity.venueName} · ${activity.priceLabel}`,
+  ].filter((line) => line !== "").join("\n");
+}
+
+// MERCHANT-ACTIVITY-DETAIL-001：活动状态眉题。只 PUBLISHED / CANCELLED 两个值，
+// 别把「报名中」当成真状态 —— 它其实是「已发布且没取消」，报名早就截止的状态
+// 在这份数据里区分不出来，所以眉题就叫「已发布」，不冒充「报名中」。
+function activityStatusLabel(status: string | undefined): string {
+  return status === "CANCELLED" ? "已取消" : "已发布";
+}
+
+// 参与费用：moneyFlow 说的是钱往哪走，priceLabel 是具体那串金额。
+// 免费就是免费，不拿 priceLabel 顶着（免费活动的 priceLabel 往往是「0 VND」）。
+function activityFeeLabel(activity: ActivityItem): string {
+  if (activity.moneyFlow === "FREE") return "免费";
+  return activity.priceLabel !== "" ? activity.priceLabel : "—";
+}
+
+// 付费方式：SPLIT = 各自消费，HOST_COVERS = 主办方承担。契约没给就不显示。
+function activitySettlementLabel(term: string | undefined): string {
+  if (term === "SPLIT") return "各自消费";
+  if (term === "HOST_COVERS") return "主办方承担";
+  return "—";
 }
 
 export function MerchantMeR21Replacement({
@@ -559,7 +594,7 @@ export function MerchantMeR21Replacement({
           interested: entry.interested, qaCount: entry.qaCount, shares: entry.shares,
           benefit: entry.benefit, desc: entry.desc, consumption: entry.consumption,
           moneyFlow: entry.moneyFlow, consumptionTerm: entry.consumptionTerm,
-          signupMode: entry.signupMode, venueTypeLabel: entry.venueTypeLabel,
+          signupMode: entry.signupMode, venueTypeLabel: entry.venueTypeLabel, code: entry.code,
         }));
         setActivityItems(items);
         setSelectedActivity(items[0]);
