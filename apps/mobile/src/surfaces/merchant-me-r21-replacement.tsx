@@ -27,7 +27,7 @@ import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
 // CREATOR-LIST-CARD-001：报价格式化与横滑卡共用同一个纯模块实现 —— 同一个人不许两个价。
 import { formatReferencePrice } from "../creator-pricing";
-import { labelMarket, labelServiceType, labelSocial, labelVertical } from "../creator-capability-labels";
+import { labelMarket, labelLanguage, labelServiceType, labelSocial, labelVertical } from "../creator-capability-labels";
 // CREATOR-SOCIAL-001：社媒 canonical 链接与平台中文名（和服务端封闭集合对齐）。
 import { socialPlatformLabel, socialProfileUrl } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
@@ -405,16 +405,16 @@ export function MerchantMeR21Replacement({
                   SupplierCandidate 里没有这一层，不编。 */}
               <View style={styles.creatorTagRow}>
                 {creator.serviceType.trim() !== "" ? <View style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{labelServiceType(creator.serviceType)}</Text></View> : null}
-                {creator.languages.slice(0, 2).map((language) => <View key={language} style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{language}</Text></View>)}
+                {creator.languages.slice(0, 2).map((language) => <View key={language} style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{labelLanguage(language)}</Text></View>)}
                 {creator.languages.length > 2 ? <View style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{`+${creator.languages.length - 2}`}</Text></View> : null}
                 {/* MERCHANT-CREATOR-TAGS-001：内容垂类（餐饮/旅游/运动）。
                     KTV/SPA 等只关联不明示，labelVertical 直接返回空串不渲染。 */}
-                {(creator.verticalTags ?? []).map(labelVertical).filter((label) => label !== "").slice(0, 1).map((label) => <View key={label} style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{label}</Text></View>)}
+                {(creator.verticalTags ?? []).map(labelVertical).filter((label) => label !== "").slice(0, 1).map((label) => <View key={label} style={[styles.creatorTag, styles.creatorTagPrimary]}><Text selectable style={styles.creatorTagPrimaryText}>{label}</Text></View>)}
                 {/* MERCHANT-CREATOR-TAGS-001：服务范围（城市）+ 粉丝（已关联社媒账号）。
                     城市来自 availability.marketId，账号是服务端可见性过滤后的 socials；
                     都没有就不渲染。粉丝数没有聚合来源，不编数字，去平台自验。 */}
                 {labelMarket(creator.availability?.marketId) !== "" ? <View style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{labelMarket(creator.availability?.marketId)}</Text></View> : null}
-                {(creator.socials ?? []).slice(0, 1).map((social) => labelSocial(social.platform, social.handle)).filter((label) => label !== "").map((label) => <View key={label} style={styles.creatorTag}><Text selectable style={styles.creatorTagText}>{label}</Text></View>)}
+                {(creator.socials ?? []).slice(0, 1).map((social) => labelSocial(social.platform, social.handle)).filter((label) => label !== "").map((label) => <View key={label} style={[styles.creatorTag, styles.creatorTagDark]}><Text selectable style={styles.creatorTagDarkText}>{label}</Text></View>)}
               </View>
               {/* 原型卡这一行是「⭐评分 / 粉丝 2.4w / 均播 5.2w」—— 这三个数这份数据里
                   根本没有，编出来就是上一轮那个 P0 的同一类问题。换成商家真正用来
@@ -1110,6 +1110,12 @@ const styles = StyleSheet.create({
   creatorCardName: { color: color.ink, fontSize: 16, fontWeight: "800", lineHeight: 22 },
   creatorTagRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 6 },
   creatorTag: { backgroundColor: color.surface, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  // MERCHANT-CREATOR-TAGS-001：标签按类配色。垂类是商家第一眼（亮底），
+  // 社媒是粉丝入口（深底），语言范围保持中性灰。颜色全部出自 R3 tokens。
+  creatorTagPrimary: { backgroundColor: color.factConfirmedBg, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  creatorTagPrimaryText: { color: color.factConfirmedFg, fontSize: 11, fontWeight: "700" },
+  creatorTagDark: { backgroundColor: color.ink, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  creatorTagDarkText: { color: color.white, fontSize: 11, fontWeight: "700" },
   creatorTagText: { color: "#62596B", fontSize: 11, fontWeight: "700" },
   creatorStatRow: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 8 },
   creatorEligibility: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },

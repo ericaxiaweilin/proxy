@@ -67,6 +67,18 @@ export function labelSocial(platform: string, handle: string): string {
   return `${mark} @${handle}`;
 }
 
+// MERCHANT-CREATOR-TAGS-001：语言一律写全称。中国用户不认 VI/ZH 这类缩写。
+const LANGUAGE_LABELS: Record<string, string> = {
+  ZH: "中文",
+  VI: "越南语",
+  EN: "英语",
+};
+
+/** 语言编码转全称。未知编码原样透出。 */
+export function labelLanguage(code: string): string {
+  return LANGUAGE_LABELS[code] ?? code;
+}
+
 // MERCHANT-CREATOR-TAGS-001：展示用垂类封闭名单。餐厅与咖啡并入“餐饮”；
 // KTV/SPA 这类只允许被关联（匹配、详情、跳转都可以用），绝不明示 ——
 // 不在名单里的编码在这里直接返回空字符串，调用方不渲染。这是产品红线。
