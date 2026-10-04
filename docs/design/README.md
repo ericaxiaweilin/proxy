@@ -19,7 +19,8 @@
 | 范围 | 版本 | 文件 | 状态 |
 |---|---|---|---|
 | 商家「我的」 | R21 Activity Voucher Icon Fix | [`references/Proxy_Merchant_Me_Standalone_R21_ActivityVoucherIcon_Fix.html`](./references/Proxy_Merchant_Me_Standalone_R21_ActivityVoucherIcon_Fix.html) | 当前页面参考；不得覆盖 R3 全局 Logo、字体、颜色和图标规则 |
-| 商家 Creator 经营 | Creator Center Match v3 | [`references/proxy_creator_center_match_v3.html`](./references/proxy_creator_center_match_v3.html) | 仅作为功能、字段和流程参考；UI/UX 必须沿用当前 R3 与商家模块 |
+| 商家 Creator 经营 | Creator Me Card 20261004 | [`references/Proxy_Creator_Me_Card_20261004.html`](./references/Proxy_Creator_Me_Card_20261004.html) | 当前页面参考（列表卡 / 详情报价条）；原型上的评分·粉丝·均播与「邀请合作」**未实现**，卡片改用服务端 eligibility 与「查看主页」 |
+| 商家 Creator 经营（旧稿） | Creator Center Match v3 | [`references/proxy_creator_center_match_v3.html`](./references/proxy_creator_center_match_v3.html) | 已被上一行取代；保留作为功能、字段和流程参考 |
 | 个人主页 | Personal Profile Architecture v5 · Threads Direction | [`references/proxy_personal_profile_architecture_v5_threads.html`](./references/proxy_personal_profile_architecture_v5_threads.html) | 当前页面参考；不再要求用户维护参数化资料字段 |
 | 社媒与联系 / 合作 | Social Contact Collaboration v2 | [`references/proxy_social_contact_collaboration_v2.html`](./references/proxy_social_contact_collaboration_v2.html) | 当前页面参考；个人只开放合作，商家发起邀请 |
 | 旧 Creator 申请 | Creator Apply v1 | [`references/proxy_creator_apply_v1.html`](./references/proxy_creator_apply_v1.html) | 历史参考，不再作为生产入口；申请流程已移除并改为邀请 |

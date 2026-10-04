@@ -66,15 +66,22 @@
     },
     {
       "scope": "merchant-creator-center",
-      "reference": "docs/design/references/proxy_creator_center_match_v3.html",
+      "reference": "docs/design/references/Proxy_Creator_Me_Card_20261004.html",
       "implementationFiles": [
-        "apps/mobile/src/surfaces/me.tsx"
+        "apps/mobile/src/surfaces/me.tsx",
+        "apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx",
+        "apps/mobile/src/surfaces/merchant-creator-recommendations.tsx",
+        "apps/mobile/src/creator-pricing.ts"
       ],
       "evidenceFiles": [
+        "apps/mobile/src/creator-list-card.test.ts",
+        "apps/mobile/src/creator-avatar-in-list.test.ts",
+        "apps/mobile/src/creator-profile.test.ts",
+        "apps/mobile/src/creator-rail-home.test.ts",
         "apps/mobile/src/design-system-r3.test.ts"
       ],
-      "status": "SCAFFOLD_ONLY",
-      "knownGap": "The Match, Browse, My Creators, Collaborations and Results navigation model is not implemented; the current Me route only exposes adjacent creator-management cards."
+      "status": "PARTIAL",
+      "knownGap": "The four-tab Creator 经营 navigation (智能匹配 / Creator / 合作 / 结果) renders against real SupplyClient data and the list is now a card per creator (avatar / tags / server eligibility / price / CTA). 合作 and 结果 are honest empty states — no collaboration or attribution read model exists yet. 邀请合作 is deliberately absent until the targeted-invite command lands, so the card CTA opens the creator's 经营 detail page instead."
     },
     {
       "scope": "market",

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 347,
-  "updatedAt": "2026-10-01",
+  "baselineRevision": 348,
+  "updatedAt": "2026-10-04",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
     "visualReference": "Proxy_App_Design_System_R3_Visual.html",
@@ -60,9 +60,11 @@
     },
     {
       "scope": "merchant-creator-center",
-      "version": "CREATOR_CENTER_MATCH_V3",
-      "file": "docs/design/references/proxy_creator_center_match_v3.html",
-      "status": "FUNCTIONAL_REFERENCE_ONLY"
+      "version": "CREATOR_ME_CARD_20261004",
+      "file": "docs/design/references/Proxy_Creator_Me_Card_20261004.html",
+      "status": "ACTIVE_SCREEN_REFERENCE",
+      "implementationStatus": "CREATOR_LIST_IS_A_CARD_PER_ROW_CIRCLE_AVATAR_WITH_ELIGIBILITY_DOT_NAME_SERVICE_TYPE_AND_LANGUAGE_PILLS_SERVER_ELIGIBILITY_PILL_VISIT_MEDIA_COUNT_REFERENCE_PRICE_AND_LIME_HOMEPAGE_CTA_DETAIL_PAGE_HAS_A_PRICE_BAR_AND_SPLIT_VERIFIED_UNVERIFIED_CAPABILITY_CHIPS_REFERENCE_PRICE_HAS_A_SINGLE_SHARED_PURE_IMPLEMENTATION_IN_CREATOR_PRICING_TS_USED_BY_BOTH_THE_HOME_RAIL_AND_THE_MERCHANT_LIST_NO_FABRICATED_RATING_FOLLOWER_OR_AVERAGE_VIEW_COUNTS_THE_OLD_MATCH_V3_ROW_PROTOTYPE_REMAINS_A_FUNCTIONAL_REFERENCE_ONLY",
+      "sourceMockups": ["docs/design/references/Proxy_Creator_Me_Card_20261004.html"]
     },
     {
       "scope": "personal-profile",

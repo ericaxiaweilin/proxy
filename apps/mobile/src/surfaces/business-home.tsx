@@ -9,6 +9,9 @@
 // 可供给场景 (Scene Package placeholder for now), member_directory
 // 取待处理 / 经营数字.
 
+import { pickActiveMerchant, setActiveMerchantId, subscribeActiveMerchant } from "../active-merchant-store";
+import { sortMenuForHome } from "../active-merchant";
+import { ownMerchantActivities } from "../merchant-home-activities";
 import { useEffect, useRef, useState } from "react";
 import { NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
@@ -40,6 +43,11 @@ import { ProxyLoading } from "../components/proxy-foundation";
 // 永远画不出封面（不是没传，是没读）。
 type OperatingSceneCard = { id: string; title: string; sub: string; tag: string; coverImageUrl?: string; coverMediaAssetId?: string };
 
+// 活动没传封面时退回门店主视觉（店主在「线上店铺」传的那张），不是灰块。
+function sceneCardCover(pkg: OperatingSceneCard, storeCoverAssetId: string | undefined): string | undefined {
+  return scenePackageUri(pkg) ?? mediaThumbUrl(storeCoverAssetId, localApiBaseUrl);
+}
+
 // MERCHANT-HOME-002：场景卡封面。抽成函数是因为 JSX 里要调两次
 // （判空一次、source 一次），不抽就没有类型收窄。
 function scenePackageUri(pkg: OperatingSceneCard): string | undefined {
@@ -62,6 +70,7 @@ export function BusinessHome({
   onOpenMarket,
   onOpenMe,
   onOpenCreatorProfile,
+  onOpenActivity,
   onChat,
   onChromeVisibilityChange,
   bottomNavVisible,
@@ -73,6 +82,8 @@ export function BusinessHome({
   onOpenMe: () => void;
   // CREATOR-HOME-001：打开某 Creator 的 Proxy 公开主页（app-shell 的真页面）。
   onOpenCreatorProfile?: ((userId: string, name: string, avatarUri?: string | undefined) => void) | undefined;
+  // MERCHANT-HOME-OWN-ACTIVITIES-001：点本店活动卡进活动详情页（不是跳市场）。
+  onOpenActivity?: ((activityId: string) => void) | undefined;
   onChat?: ((text: string, mode?: HomeIntentMode, attachment?: HomeAttachment) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
@@ -91,6 +102,9 @@ export function BusinessHome({
   const [firstStore, setFirstStore] = useState<{ id: string; name: string; address: string; status: string } | undefined>(undefined);
   const [memberCount, setMemberCount] = useState<number>(0);
   const [menuItems, setMenuItems] = useState<StoreProduct[]>([]);
+  const [storeCoverAssetId, setStoreCoverAssetId] = useState<string | undefined>(undefined);
+  // 菜单一共几道（含下架的）：区分「一道菜都没有」和「有菜但没有在售的」。
+  const [menuTotal, setMenuTotal] = useState(0);
   // STORE-LOGO-001：首店徽（lines.logoAssetPath）。身份卡优先级 logo → 菜品图 → 首字。
   const [storeLogoPath, setStoreLogoPath] = useState<string | undefined>(undefined);
   const [pendingItems, setPendingItems] = useState<Array<{ icon: ProxyIconName; title: string; meta?: string }>>([]);
@@ -112,7 +126,8 @@ export function BusinessHome({
         const list = (await business.listMyAccounts()).filter((account) => account.status === "ACTIVE");
         if (cancelled) return;
         setAccounts(list.map((account) => ({ id: account.id, name: account.name })));
-        setAccountId((current) => (current && list.some((account) => account.id === current) ? current : list[0]?.id));
+        // MERCHANT-ACTIVE-ACCOUNT-001：默认是商家端共用的当前账号（上次选的那家），不是列表第一个。
+        setAccountId((current) => (current && list.some((account) => account.id === current) ? current : pickActiveMerchant(list.map((account) => account.id))));
         setAccountsLoaded(true);
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e));
@@ -120,6 +135,11 @@ export function BusinessHome({
     })();
     return () => { cancelled = true; };
   }, [business]);
+
+  // 别的商家页面（我的 / 专属码）切了账号，首页跟着切。
+  useEffect(() => subscribeActiveMerchant((id) => {
+    if (id) setAccountId((current) => (current === id ? current : id));
+  }), []);
 
   useEffect(() => {
     if (!business || accountId === undefined) return;
@@ -134,6 +154,8 @@ export function BusinessHome({
       setOperatingHome(undefined);
       setFirstStore(undefined);
       setMenuItems([]);
+      setMenuTotal(0);
+      setStoreCoverAssetId(undefined);
       setSpendSummary({ totalOrders: 0, totalGrossMinor: 0 });
       try {
         // MERCHANT-HOME-001（2026-10-02）：经营主页一个接口失败不能拖垮整页。
@@ -157,11 +179,22 @@ export function BusinessHome({
         // 就是"保持经营信号待接入"，不能把之前的旧值清掉，更不能让整页报错。
         if (home !== undefined) setOperatingHome(home);
         setMemberCount(memberDir.length);
+        // 招牌与在售：读这个账号**所有**门店的菜单（以前只读第一家门店，菜加在第二家就看不到），
+        // HOT 排前面。最多看 5 家店，防一次请求太多。
+        if (stores.length > 0) {
+          const menus = await Promise.all(stores.slice(0, 5).map((store) => business.listProducts(store.id).catch(() => [] as StoreProduct[])));
+          if (!cancelled) {
+            setMenuItems(sortMenuForHome(menus.flat()));
+            setMenuTotal(menus.flat().length);
+          }
+        }
         if (head) {
           try {
-            const menu = await business.listProducts(head.id);
-            if (!cancelled) setMenuItems(menu);
-          } catch { /* menu optional */ }
+            // 门店主视觉（排序最前的那张门店照片）：活动没封面时当卡片封面。
+            const photos = await business.listStorePhotos(head.id);
+            const cover = [...photos].sort((x, y) => x.sortOrder - y.sortOrder).find((p) => p.mediaAssetId);
+            if (!cancelled) setStoreCoverAssetId(cover?.mediaAssetId || undefined);
+          } catch { /* cover optional */ }
         }
         if (head) {
           try {
@@ -198,8 +231,13 @@ export function BusinessHome({
                 ...(entry.coverMediaAssetId ? { coverMediaAssetId: entry.coverMediaAssetId }
                   : entry.coverImageUrl ? { coverImageUrl: entry.coverImageUrl } : {}),
               });
-              setScenePackages(list.slice(0, 2).map(toCard));
-              setInProgress(list.filter((entry) => entry.origin === "MERCHANT" && entry.status !== "CANCELLED" && (!head || !entry.merchantName || entry.merchantName === head.name)).slice(0, 3).map((entry) => ({ ...toCard(entry), tag: "进行中" })));
+              // MERCHANT-HOME-OWN-ACTIVITIES-001：只看本店的活动（按门店认领的场景 / 门店名认），
+              // 不再是全平台列表的前两条。
+              const own = ownMerchantActivities(list, stores.map((store) => ({ name: store.name, realitySceneId: store.realitySceneId })));
+              setScenePackages(own.slice(0, 2).map(toCard));
+              // 正在进行：只显示本商家动作（本店发起的），上面已经展示的不重复。
+              const shown = new Set(own.slice(0, 2).map((entry) => entry.activityId));
+              setInProgress(own.filter((entry) => entry.origin === "MERCHANT" && !shown.has(entry.activityId)).slice(0, 3).map((entry) => ({ ...toCard(entry), tag: "进行中" })));
             }
           } catch { /* activities optional */ }
         }
@@ -250,7 +288,7 @@ export function BusinessHome({
               {accounts.map((account) => {
                 const active = account.id === accountId;
                 return (
-                  <Pressable key={account.id} onPress={() => setAccountId(account.id)} style={active ? styles.accountChipActive : styles.accountChip}>
+                  <Pressable key={account.id} onPress={() => { setAccountId(account.id); setActiveMerchantId(account.id); }} style={active ? styles.accountChipActive : styles.accountChip}>
                     <Text selectable style={active ? styles.accountChipTextActive : styles.accountChipText}>{account.name}</Text>
                   </Pressable>
                 );
@@ -370,15 +408,16 @@ export function BusinessHome({
       </View>
       {showLoading ? <ProxyLoading tone="muted" /> : null}
       {scenePackages.length === 0 && !showLoading ? (
-        <Pressable onPress={() => onOpenMarket("OPPORTUNITY")} style={styles.actionCard}>
+        <Pressable onPress={() => onOpenMarket("ACTIVITY")} style={styles.actionCard}>
           <View style={styles.actionIcon}><ProxyIcon color={color.ink} name="storefront" size={20} /></View>
-          <View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>暂无开放场景 — server 列表为空</Text></View>
+          <View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>本店还没有活动</Text><Text selectable style={styles.subtle}>发一个活动，让顾客在 For You 里约到你的店</Text></View>
         </Pressable>
       ) : null}
       {scenePackages.map((pkg) => {
-        const coverUri = scenePackageUri(pkg);
+        const coverUri = sceneCardCover(pkg, storeCoverAssetId);
         return (
-        <Pressable key={pkg.id} onPress={() => onOpenMarket("OPPORTUNITY")} style={styles.scenePackageCard}>
+        // 点卡片进这个活动的详情页（没有素材也一样进详情，不是跳市场）。
+        <Pressable key={pkg.id} onPress={() => (onOpenActivity ? onOpenActivity(pkg.id) : onOpenMarket("ACTIVITY"))} style={styles.scenePackageCard}>
           {coverUri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-scene:${pkg.id}`} source={{ uri: coverUri }} style={styles.scenePackageImage} transition={0} /> : <View style={styles.scenePackageFallback}><ProxyIcon color={color.muted} name="cup" size={24} /></View>}
           <View style={styles.scenePackageBody}><View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>{pkg.title}</Text><Text selectable style={styles.subtle}>{pkg.sub}</Text></View><View style={styles.actionMetricTag}><Text selectable style={styles.actionMetricTagText}>{pkg.tag}</Text></View></View>
         </Pressable>
@@ -408,12 +447,12 @@ export function BusinessHome({
       {menuItems.length === 0 ? (
         <Pressable onPress={() => onOpenMe()} style={styles.actionCard}>
           <View style={styles.actionIcon}><ProxyIcon color={color.ink} name="storefront" size={20} /></View>
-          <View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>还没有菜单</Text><Text selectable style={styles.subtle}>去线上店铺加第一道菜</Text></View>
+          <View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>{menuTotal > 0 ? "菜单里没有在售的菜" : "还没有菜单"}</Text><Text selectable style={styles.subtle}>{menuTotal > 0 ? `${menuTotal} 道菜都已下架，去线上店铺上架` : "去线上店铺加第一道菜"}</Text></View>
         </Pressable>
       ) : (
         // SWIPE-RAIL-001：菜单照片横滑不能触发外层切页。
         <HorizontalSwipeRail contentContainerStyle={styles.menuRail} preserveChildPresses threshold={3}>
-          {menuItems.filter((m) => m.available).slice(0, 6).map((m) => {
+          {menuItems.slice(0, 6).map((m) => {
             const skuUri = menuSkuUri(m);
             return (
             <Pressable key={m.id} onPress={() => onOpenMe()} style={styles.menuCard}>
@@ -432,7 +471,7 @@ export function BusinessHome({
 
       {inProgress.length ? <>
         <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>正在进行</Text><Text selectable style={styles.sectionHint}>只显示本商家动作</Text></View>
-        {inProgress.map((item) => <Pressable key={item.id} onPress={() => onOpenMarket("ACTIVITY")} style={styles.progressCard}><View style={styles.progressDot} /><View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>{item.title}</Text><Text selectable style={styles.subtle}>{item.sub} · 报名不等于到场</Text></View><Text selectable style={styles.progressState}>{item.tag}</Text></Pressable>)}
+        {inProgress.map((item) => <Pressable key={item.id} onPress={() => (onOpenActivity ? onOpenActivity(item.id) : onOpenMarket("ACTIVITY"))} style={styles.progressCard}><View style={styles.progressDot} /><View style={styles.actionCopy}><Text selectable style={styles.actionTitle}>{item.title}</Text><Text selectable style={styles.subtle}>{item.sub} · 报名不等于到场</Text></View><Text selectable style={styles.progressState}>{item.tag}</Text></Pressable>)}
       </> : null}
 
       <View style={styles.sectionHead}>

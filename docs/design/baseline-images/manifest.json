@@ -31,6 +31,15 @@
         "height": 844
       }
     },
+    "Proxy_Creator_Me_Card_20261004": {
+      "source": "docs/design/references/Proxy_Creator_Me_Card_20261004.html",
+      "image": "docs/design/baseline-images/creator_me_card_20261004.png",
+      "fingerprint": "ea6e8e3be87a9be0",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
     "Proxy_ForYou_LockIcon_20260928_c004b0": {
       "source": "docs/design/references/Proxy_ForYou_LockIcon_20260928_c004b0.html",
       "image": "docs/design/baseline-images/foryou_lockicon_20260928_c004b0.png",

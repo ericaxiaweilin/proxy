@@ -100,6 +100,8 @@ export type BusinessStoreWire = {
   address: string;
   // STORE-STATS-001：店铺品类（店主自填，空 = 没填）。
   category?: string;
+  // STORE-SCENE-LINK-001：门店认领的现实场景（服务端一直在发，类型之前没声明）。
+  realitySceneId?: string;
   status: string;
   // 入驻时间（建店行创建时间）。
   createdAt?: string;

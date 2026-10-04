@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import type { SupplierCandidate, SupplyClient } from "../supply-client";
+// CREATOR-LIST-CARD-001：报价格式化的唯一实现（纯模块，可单元测试）。
+import { formatReferencePrice } from "../creator-pricing";
 import { localApiBaseUrl } from "../native-clients";
 import { resolveAssetSource } from "../media/asset-sources";
 import { color } from "../theme";
@@ -25,6 +27,14 @@ export function resolveCreatorPhoto(photo: string | undefined): string | undefin
   return typeof source === "object" ? source.uri : undefined;
 }
 
+// CREATOR-LIST-CARD-001（2026-10-04，用户「商家侧-我的 creator list 展示形式 这次比较
+// 亮眼 之前太素了」）：报价的格式化也只有一个实现，理由和 resolveCreatorPhoto 一样 ——
+// 同一个 SupplierCandidate.referencePrice 在横滑卡上印「1200K VND」、在 Creator 经营
+// 列表上印「1200000 VND」，同一个人两个价，商家只能猜哪个是错的。
+//
+// 实现在 ../creator-pricing.ts：那是个**没有 RN 依赖**的纯模块，所以它的边界
+// （0 / 900 / 1200 / 1200000 / 999999）能被单元测试真的断言，而不是只 grep 源码。
+
 // CREATOR-RAIL-HOME-001（2026-10-02，用户「点击creator头像 不能弹出入口」）：
 // 横滑卡点下去原来直接 onOpenAll（进 Market 机会列表）—— 点的是 Linh 的脸，
 // 落到的是市场大盘，跟这个人一点关系没有。-card 点人就该到人。
@@ -44,7 +54,7 @@ export function MerchantCreatorRecommendations({ supply, marketId = "hn", onOpen
     {state === "ERROR" ? <Pressable onPress={onOpenAll} style={styles.message}><Text selectable style={styles.messageTitle}>没能连上，刷新再试试。</Text><Text selectable style={styles.hint}>进入 Creator 经营可重新加载</Text></Pressable> : null}
     {state === "EMPTY" ? <Pressable onPress={onOpenAll} style={styles.message}><Text selectable style={styles.messageTitle}>附近暂时没有可推荐的 Creator</Text><Text selectable style={styles.hint}>仅展示已激活、时间可用且通过能力校验的真实供给</Text></Pressable> : null}
     {/* SWIPE-RAIL-001：Creator 照片横滑不能触发外层切页。 */}
-    {state === "READY" ? <HorizontalSwipeRail contentContainerStyle={styles.rail} preserveChildPresses threshold={3}>{creators.map((creator) => { const photoUri = resolveCreatorPhoto(creator.photos[0]); return <Pressable key={creator.agentId} accessibilityLabel={`查看${creator.name}的个人主页`} testID={`rail-creator-home-${creator.agentId}`} onPress={() => { if (onOpenCreator) onOpenCreator(creator); else onOpenAll(); }} style={styles.card}>{photoUri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-creator:${creator.agentId}`} source={{ uri: photoUri }} style={styles.photo} transition={0} /> : <View style={styles.photoMissing}><Text selectable style={styles.photoMissingText}>待完善照片</Text></View>}<Text selectable numberOfLines={1} style={styles.name}>{creator.name}</Text><Text selectable numberOfLines={1} style={styles.meta}>{creator.languages.length ? creator.languages.join(" · ") : "已验证 Creator"}</Text><View style={styles.reasons}><Text selectable style={styles.reason}>同城</Text><Text selectable style={styles.reason}>时间可约</Text></View><Text selectable style={styles.price}>{creator.referencePrice > 0 ? `${Math.round(creator.referencePrice / 1000)}K ${creator.currency}` : "报价待沟通"}</Text></Pressable>;})}</HorizontalSwipeRail> : null}
+    {state === "READY" ? <HorizontalSwipeRail contentContainerStyle={styles.rail} preserveChildPresses threshold={3}>{creators.map((creator) => { const photoUri = resolveCreatorPhoto(creator.photos[0]); return <Pressable key={creator.agentId} accessibilityLabel={`查看${creator.name}的个人主页`} testID={`rail-creator-home-${creator.agentId}`} onPress={() => { if (onOpenCreator) onOpenCreator(creator); else onOpenAll(); }} style={styles.card}>{photoUri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-creator:${creator.agentId}`} source={{ uri: photoUri }} style={styles.photo} transition={0} /> : <View style={styles.photoMissing}><Text selectable style={styles.photoMissingText}>待完善照片</Text></View>}<Text selectable numberOfLines={1} style={styles.name}>{creator.name}</Text><Text selectable numberOfLines={1} style={styles.meta}>{creator.languages.length ? creator.languages.join(" · ") : "已验证 Creator"}</Text><View style={styles.reasons}><Text selectable style={styles.reason}>同城</Text><Text selectable style={styles.reason}>时间可约</Text></View><Text selectable style={styles.price}>{formatReferencePrice(creator.referencePrice, creator.currency)}</Text></Pressable>;})}</HorizontalSwipeRail> : null}
   </View>;
 }
 const styles = StyleSheet.create({ section: { marginTop: 18 }, head: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 10 }, title: { color: color.ink, fontSize: 17, fontWeight: "800" }, hint: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 2 }, more: { color: "#6830DA", fontSize: 12, fontWeight: "800" }, rail: { gap: 10, paddingRight: 16 }, card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, padding: 10, width: 164 }, photo: { borderRadius: 14, height: 112, width: "100%" }, photoMissing: { alignItems: "center", backgroundColor: color.surface, borderRadius: 14, height: 112, justifyContent: "center" }, photoMissingText: { color: color.muted, fontSize: 11, fontWeight: "700" }, name: { color: color.ink, fontSize: 15, fontWeight: "800", marginTop: 9 }, meta: { color: color.muted, fontSize: 11, marginTop: 2 }, reasons: { flexDirection: "row", gap: 5, marginTop: 8 }, reason: { backgroundColor: "#F1FFD0", borderRadius: 999, color: "#4D6200", fontSize: 11, fontWeight: "800", paddingHorizontal: 7, paddingVertical: 4 }, price: { color: color.ink, fontSize: 12, fontWeight: "800", marginTop: 8 }, message: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderStyle: "dashed", borderWidth: 1, padding: 16 }, messageTitle: { color: color.ink, fontSize: 13, fontWeight: "800" } });

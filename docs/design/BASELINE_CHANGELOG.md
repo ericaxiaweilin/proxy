@@ -4,6 +4,51 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 348 — 2026-10-04
+
+- **商家侧「我的 → Creator 经营」的列表从通讯录条目换成卡片**
+  （`CREATOR-LIST-CARD-001`，用户原话：「给你替换 proxy 的商家侧-我的 creator list
+  展示形式 这次比较亮眼 之前太素了」，附新原型
+  `docs/design/references/Proxy_Creator_Me_Card_20261004.html`）。
+
+  旧稿 `proxy_creator_center_match_v3.html` 的 `.creator-row` 是一行三段文字
+  （姓名 / 类型·语言·资格 / 报价·媒体数）。新稿的 `.creator-card` 是：圆头像
+  （可邀请时带一颗点）+ 名字 + 标签胶囊 + 读数行 + 右列报价与柠檬色主操作。
+  实现落在 `apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx`；
+  `merchant-creator-center` 的 `reference` 随之指向新稿，旧稿保留在
+  `references/` 里（仍是有效的功能参考）。
+
+  **有三处没有照抄原型，因为照抄就是假读数：**
+
+  | 原型上有 | 这份数据里有吗 | 换成了什么 |
+  |---|---|---|
+  | ⭐4.9 / 粉丝 2.4w / 均播 5.2w | 没有（`SupplierCandidate` 无评分 / 粉丝 / 播放字段） | 服务端算的 `eligibility`（能力 / 时间 / 同城）+ 真实的到店素材数 |
+  | 「本地生活 / 探店达人」分类标签 | 没有 | `serviceType` + `languages`（多于两个折成 `+N`） |
+  | 「邀请合作」主按钮 | 定向邀请命令未接 | 卡片 CTA 是「查看主页」，进 creator主页（经营详情）；文案里没有邀请字样 |
+
+  原型上的头像**在线点**改成了**可邀请点**：只在服务端 `eligibility.eligible` 为真时
+  画，且旁边永远有「✓ 可邀请」那行字 —— 一颗孤零零的绿点说不出它依据什么。
+  列表整行的无障碍标签也从「个人主页」改成「Creator 主页」：它进的是经营详情，
+  按 CREATOR-HOME-001 的三分法，那不是个人主页。
+
+- **报价的格式化收成一个实现**（新文件 `apps/mobile/src/creator-pricing.ts`）。
+  同一个 `SupplierCandidate.referencePrice` 在横滑卡上印「1200K VND」、在经营列表上
+  印「1200000 VND」—— 同一个人两个价，商家只能猜哪个是错的。和 `resolveCreatorPhoto`
+  同一个理由：单一事实源。放在**纯模块**里而不是 surface 里，是因为 surface 依赖
+  react-native，测试环境解析不了它的依赖图，纯函数只能退化成 grep 源码；现在边界
+  （0 / 900 / 1200 / 1200000 / 999999）是真的被断言的。顺手修掉一个会**把报价说高**
+  的边界：先判 `>= 1000` 再四舍五入，否则 900 会被印成「1K VND」。
+
+- **详情页用同一套语言**：个人头下加 `.price-bar`（虚线上边 + 参考报价 + 状态胶囊），
+  能力芯片区分已验证（浅黄绿底 + 橄榄绿边）与未验证（白底灰边）—— 之前两态同色同底，
+  只差一个 `✓` 字符，扫一眼看不出谁被验过。可邀请与否在这一页只说一次，不再重复第二遍。
+
+- **`merchant-creator-center` 合同订正（原来就是错的）**：`implementationFiles` 只列了
+  `apps/mobile/src/surfaces/me.tsx`，而 Creator 经营实现在
+  `merchant-me-r21-replacement.tsx`（`me.tsx` 只是路由），`creator-pricing.ts` 与
+  横滑卡同属这条线。`status` 由 `SCAFFOLD_ONLY` 改为 `PARTIAL`，`knownGap` 改成当前
+  真实缺口：合作 / 结果两页仍是如实空态（没有合作与归因读模型），定向邀请未接。
+
 ## Revision 347 — 2026-10-02
 
 - **推送真的发得出去，而且收件箱空的时候不再装成「加载失败」**

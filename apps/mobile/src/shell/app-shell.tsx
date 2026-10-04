@@ -868,6 +868,7 @@ export function AppShell({
               // CREATOR-HOME-001：横滑卡点人脸进 Proxy 公开主页（平台现成的
               // OtherProfileSurface，feed 点头像走的同一条），不是弹框。
               onOpenCreatorProfile={(userId, name, avatarUri) => setOpenHumanProfile({ userId, name, ...(avatarUri ? { avatarUri } : {}), posts: [], mediaByPost: {} })}
+              onOpenActivity={(activityId) => setActivityDetailId(activityId)}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
               bottomNavVisible={isNavVisible}
               business={business}

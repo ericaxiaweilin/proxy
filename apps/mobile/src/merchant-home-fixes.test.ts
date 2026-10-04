@@ -47,7 +47,10 @@ describe("MERCHANT-HOME-002 商家场景卡读活字段的封面", () => {
 
   it("渲染走共享 helper，不在 JSX 里手拼 URL", () => {
     const branch = src.slice(src.indexOf("scenePackages.map((pkg)"));
-    expect(branch).toContain("scenePackageUri(pkg)");
+    // MERCHANT-HOME-OWN-ACTIVITIES-001：卡片封面走 sceneCardCover —— 先活动自己的封面
+    // （scenePackageUri），没有再退门店主视觉，都是共享 helper，不手拼 URL。
+    expect(branch).toContain("sceneCardCover(pkg, storeCoverAssetId)");
+    expect(src).toContain("return scenePackageUri(pkg) ?? mediaThumbUrl(storeCoverAssetId, localApiBaseUrl);");
     expect(branch).not.toContain("v1/media/thumb/");
   });
 
