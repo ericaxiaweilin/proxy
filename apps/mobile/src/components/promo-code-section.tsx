@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { color } from "../theme";
-import type { PromoCode, PromoStats, SupplyClient } from "../supply-client";
+import { ProxyQrCode } from "./proxy-qr-code";
+import { promoQrValue, type PromoCode, type PromoStats, type SupplyClient } from "../supply-client";
 
 // MERCHANT-CREATOR-PROMO-001：专属营销码认领区（Creator 给自己认码）。
 //
@@ -71,7 +72,12 @@ export function PromoCodeSection({ agentId, supply, onError }: {
       {active ? (
         <>
           <Text selectable style={styles.code} testID="creator-promo-code">{active.code}</Text>
-          <Text selectable style={styles.hint}>挂在你的 UGC 里，顾客到店报这个码拿专属优惠 —— 每一笔都记到你头上。</Text>
+          {/* 专属码二维码：UGC 里挂这个图，顾客到店店员扫码即报码 ——
+              码体就是 PROXY-PROMO:码，报码框认它（也认手抄的裸码）。 */}
+          <View style={styles.qrRow} testID="creator-promo-qr">
+            <ProxyQrCode size={132} value={promoQrValue(active.code)} />
+            <Text selectable style={[styles.hint, styles.qrHint]}>顾客到店，店员扫这个码即报码拿优惠 —— 每一笔都记到你头上。</Text>
+          </View>
           <Text selectable style={styles.stats}>
             {`带来 ${stats?.quotes ?? 0} 单 · 新客 ${stats?.firstVisits ?? 0} 人 · 归因 ${(stats?.attributedVnd ?? 0).toLocaleString()} VND`}
           </Text>
@@ -104,6 +110,8 @@ const styles = StyleSheet.create({
   box: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, gap: 6, marginTop: 12, padding: 12 },
   title: { color: color.ink, fontSize: 13, fontWeight: "800" },
   code: { color: color.ink, fontSize: 22, fontWeight: "900", letterSpacing: 1, marginTop: 2 },
+  qrRow: { alignItems: "center", flexDirection: "row", gap: 12, marginTop: 8 },
+  qrHint: { flex: 1, minWidth: 0 },
   hint: { color: color.muted, fontSize: 11, lineHeight: 16 },
   stats: { color: color.ink, fontSize: 12, fontWeight: "700", marginTop: 2 },
   label: { color: color.muted, fontSize: 11, fontWeight: "800", marginTop: 4 },

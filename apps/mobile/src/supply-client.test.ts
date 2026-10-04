@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCollabInvitations, parsePromoBenefit, parsePromoCode, parsePromoQuote, parsePromoStats, parseSupplierCandidates, parseSupplyBody, SupplyProtocolError } from "./supply-client";
+import { parseCollabInvitations, parsePromoAutoBenefit, parsePromoBenefit, parsePromoCode, parsePromoQr, parsePromoQuote, parsePromoStats, parseSupplierCandidates, parseSupplyBody, promoQrValue, SupplyProtocolError } from "./supply-client";
 
 describe("merchant creator recommendations", () => {
   it("MERCHANT-CREATOR-001 keeps real photo, availability and eligibility evidence", () => {
@@ -110,5 +110,24 @@ describe("merchant promo codes (MERCHANT-CREATOR-PROMO-001)", () => {
     expect(stats.quotes).toBe(2);
     expect(stats.byCode.LINH88?.attributedVnd).toBe(300000);
     expect(parsePromoStats(undefined)).toEqual({ byCode: {}, quotes: 0, firstVisits: 0, attributedVnd: 0, discountGivenVnd: 0 });
+  });
+  it("parses promo auto benefit, supplier promo code and QR payload", () => {
+    expect(parsePromoAutoBenefit({ merchantId: "m1", enabled: true, faceValueVnd: 30000, scopeName: "全场", validityDays: 30 })?.enabled).toBe(true);
+    expect(parsePromoAutoBenefit(undefined)).toBeUndefined();
+    expect(promoQrValue("linh88")).toBe("PROXY-PROMO:LINH88");
+    expect(parsePromoQr("PROXY-PROMO:LINH88")).toBe("LINH88");
+    expect(parsePromoQr("linh88")).toBe("LINH88");
+    // 纯数字也算形状合法（码本来就可以是数字）—— 存在不存在服务端说了算；
+    // 带符号的才算误扫，直接拒。
+    expect(parsePromoQr("13900000000")).toBe("13900000000");
+    expect(parsePromoQr("hi!")).toBeUndefined();
+    expect(parsePromoQr("hi")).toBeUndefined();
+  });
+  it("parses supplier promo code, source defaults to MANUAL", () => {
+    const parsed = parseSupplierCandidates([{ agentId: "c9", name: "I", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {}, promoCode: "LINH88" }]);
+    expect(parsed[0]?.promoCode).toBe("LINH88");
+    const absent = parseSupplierCandidates([{ agentId: "c10", name: "J", photos: [], languages: [], serviceType: "", referencePrice: 0, currency: "VND", eligibility: {} }]);
+    expect(absent[0]?.promoCode).toBeUndefined();
+    expect(parsePromoBenefit({ merchantId: "m1", code: "X", faceValueVnd: 1 })?.source).toBe("MANUAL");
   });
 });

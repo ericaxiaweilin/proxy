@@ -35,6 +35,8 @@ describe("MERCHANT-CREATOR-PROMO-001 creator 认领区挂本人视角", () => {
   it("me.tsx 挂 PromoCodeSection，agentId 取 myAgentId", () => {
     expect(me).toContain("<PromoCodeSection");
     expect(me).toContain("agentId={myAgentId}");
+    expect(section).toContain("ProxyQrCode");
+    expect(section).toContain("promoQrValue(");
   });
   it("认领区调认领/查码/查统计，码展示用 testID 钉住", () => {
     expect(section).toContain("supply.claimPromoCode(");
@@ -44,5 +46,22 @@ describe("MERCHANT-CREATOR-PROMO-001 creator 认领区挂本人视角", () => {
     // 战绩只许读 stats，不许出现写死的单数。
     expect(section).toContain("stats?.quotes");
     expect(section).not.toMatch(/带来 \d+ 单/);
+  });
+});
+
+describe("MERCHANT-CREATOR-PROMO-001 自动档 + 扫码 + 选人", () => {
+  it("自动档调真命令，扫码只填框不直接落", () => {
+    expect(promo).toContain("supply.setAutoPromoBenefit(");
+    expect(promo).toContain("CameraView");
+    expect(promo).toContain("parsePromoQr(");
+    // 扫到只填框（setQuoteCode），减多少钱还是点报码才落 —— 两步确认。
+    expect(promo).toContain("setQuoteCode(code)");
+    expect(promo).toContain("onBarcodeScanned");
+  });
+  it("绑定选人即选码，列表标出来源", () => {
+    expect(promo).toContain("creators.map((creator)");
+    expect(promo).toContain("setBindCode(creator.promoCode)");
+    expect(promo).toContain("AUTO");
+    expect(promo).toContain("setAutoPromoBenefit");
   });
 });

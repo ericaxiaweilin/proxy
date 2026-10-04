@@ -1,30 +1,44 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { color, foundation } from "../theme";
 import { ProxyBackGlyph } from "../components/proxy-foundation";
-import type { PromoBenefit, PromoQuote, PromoStats, SupplyClient } from "../supply-client";
+import type { PromoAutoBenefit, PromoBenefit, PromoStats, SupplyClient } from "../supply-client";
+import { parsePromoQr } from "../supply-client";
 
-// MERCHANT-CREATOR-PROMO-001：商家侧专属营销码管理 —— 绑定优惠 + 店员报码 +
-// 看战绩。 brought in as its own surface（merchant-me 已经 1500+ 行，不再塞）。
+// MERCHANT-CREATOR-PROMO-001：商家侧专属营销码管理 —— 自动档 + 绑定优惠 +
+// 店员报码（扫码/手输）+ 看战绩。brought in as its own surface（merchant-me
+// 已经 1500+ 行，不再塞）。
 //
-// 四块：①战绩头（报码单数/店员确认新客/归因金额/让利金额，全是报码行里数出来的）；
-// ②绑定优惠（码 + 直减金额 + 适用范围 + 有效期）；③报码核销（输码+金额+新客勾）；
-// ④按码战绩榜。优惠是商家承诺（平台记录、收银台执行），第一版不碰 voucher 域。
-export function MerchantPromoSurface({ supply, merchantId, onBack }: {
+// 四块：①战绩头（报码行里数出来的）；②自动档（开一次，以后免逐个绑）；
+// ③绑定优惠（选人即选码，也允许手填码）；④报码核销（扫码/输码+金额+新客勾）。
+// 优惠是商家承诺（平台记录、收银台执行），第一版不碰 voucher 域。
+export function MerchantPromoSurface({ supply, merchantId, creators, onBack }: {
   supply: SupplyClient;
   merchantId: string;
+  // 人才库里有码的人（agentId + 名字 + 专属码）：绑定时选人即选码，不用手抄。
+  creators: Array<{ agentId: string; name: string; promoCode: string }>;
   onBack: () => void;
 }): React.JSX.Element {
   const [benefits, setBenefits] = useState<PromoBenefit[]>([]);
+  const [auto, setAuto] = useState<PromoAutoBenefit | undefined>(undefined);
   const [stats, setStats] = useState<PromoStats | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   // 绑定表单
   const [bindCode, setBindCode] = useState("");
+  const [bindCreatorName, setBindCreatorName] = useState("");
   const [bindValue, setBindValue] = useState("");
   const [bindScope, setBindScope] = useState("");
   const [bindDays, setBindDays] = useState(30);
   const [bindSending, setBindSending] = useState(false);
   const [bindError, setBindError] = useState<string | undefined>(undefined);
+  // 自动档表单
+  const [autoEnabled, setAutoEnabled] = useState(false);
+  const [autoValue, setAutoValue] = useState("");
+  const [autoScope, setAutoScope] = useState("");
+  const [autoDays, setAutoDays] = useState(30);
+  const [autoSending, setAutoSending] = useState(false);
+  const [autoError, setAutoError] = useState<string | undefined>(undefined);
   // 报码表单
   const [quoteCode, setQuoteCode] = useState("");
   const [quoteAmount, setQuoteAmount] = useState("");
@@ -32,15 +46,24 @@ export function MerchantPromoSurface({ supply, merchantId, onBack }: {
   const [quoteSending, setQuoteSending] = useState(false);
   const [quoteError, setQuoteError] = useState<string | undefined>(undefined);
   const [quoteResult, setQuoteResult] = useState<string | undefined>(undefined);
+  const [scanning, setScanning] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   const reload = useCallback(async (): Promise<void> => {
     setLoadError(undefined);
     try {
-      const [list, computed] = await Promise.all([
+      const [listed, computed] = await Promise.all([
         supply.listMerchantBenefits({ merchantId }),
         supply.merchantPromoStats({ merchantId }),
       ]);
-      setBenefits(list);
+      setBenefits(listed.benefits);
+      setAuto(listed.autoBenefit);
+      if (listed.autoBenefit) {
+        setAutoEnabled(listed.autoBenefit.enabled);
+        setAutoValue(listed.autoBenefit.faceValueVnd > 0 ? String(listed.autoBenefit.faceValueVnd) : "");
+        setAutoScope(listed.autoBenefit.scopeName);
+        setAutoDays(listed.autoBenefit.validityDays > 0 ? listed.autoBenefit.validityDays : 30);
+      }
       setStats(computed);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "专属码数据没读出来");
@@ -74,6 +97,7 @@ export function MerchantPromoSurface({ supply, merchantId, onBack }: {
         scopeName: bindScope.trim(), validUntil: validUntilOf(bindDays),
       });
       setBindCode("");
+      setBindCreatorName("");
       setBindValue("");
       setBindScope("");
       await reload();
@@ -82,6 +106,54 @@ export function MerchantPromoSurface({ supply, merchantId, onBack }: {
     } finally {
       setBindSending(false);
     }
+  };
+
+  // 自动档保存：开着要有完整的默认（金额+范围+天数），关掉只传 enabled=false。
+  const saveAuto = async (): Promise<void> => {
+    if (autoSending) return;
+    if (autoEnabled) {
+      const faceValue = Number(autoValue.replace(/[^\d]/g, ""));
+      if (!Number.isInteger(faceValue) || faceValue <= 0) {
+        setAutoError("默认直减金额填一下（VND 数字）");
+        return;
+      }
+      if (autoScope.trim() === "") {
+        setAutoError("默认适用范围写一下");
+        return;
+      }
+    }
+    setAutoSending(true);
+    setAutoError(undefined);
+    try {
+      const faceValue = Number(autoValue.replace(/[^\d]/g, ""));
+      await supply.setAutoPromoBenefit({
+        merchantId,
+        enabled: autoEnabled,
+        ...(autoEnabled ? {
+          faceValueVnd: Number.isInteger(faceValue) && faceValue > 0 ? faceValue : 0,
+          scopeName: autoScope.trim(),
+          validityDays: autoDays,
+        } : {}),
+      });
+      await reload();
+    } catch (e) {
+      setAutoError(e instanceof Error ? e.message : "自动档没保存成功，稍后重试");
+    } finally {
+      setAutoSending(false);
+    }
+  };
+
+  // 扫码报码：扫 creator 的专属码二维码（PROXY-PROMO:码），形状不对直接说，
+  // 不把乱码填进输入框。扫到只填框，减多少钱还是点"报码"才落（两步确认）。
+  const handleScanned = (data: string): void => {
+    const code = parsePromoQr(data);
+    if (!code) {
+      setQuoteError("扫到的不是专属码，重扫她的码");
+      return;
+    }
+    setQuoteError(undefined);
+    setQuoteCode(code);
+    setScanning(false);
   };
 
   const quote = async (): Promise<void> => {
@@ -134,10 +206,40 @@ export function MerchantPromoSurface({ supply, merchantId, onBack }: {
         <View style={s.stat}><Text selectable style={s.statValue}>{stats ? vnd(stats.attributedVnd) : "—"}</Text><Text selectable style={s.statLabel}>归因金额</Text></View>
         <View style={s.stat}><Text selectable style={s.statValue}>{stats ? vnd(stats.discountGivenVnd) : "—"}</Text><Text selectable style={s.statLabel}>让利金额</Text></View>
       </View>
+      {/* 自动档：开一次，以后没绑过的码来报码自动按默认建绑定 ——
+          不用逐个码手工绑。关掉只停以后自动建，已经建出来的不受影响。 */}
+      <Text selectable style={s.secTitle}>自动归因</Text>
+      <Text selectable style={s.hint}>{auto?.enabled ? `开着：没绑过的码来报码，自动按默认减 ${auto.faceValueVnd.toLocaleString()} VND（${auto.scopeName}）` : "没开：每个码都要手工绑优惠才认。"}</Text>
+      <Pressable onPress={() => setAutoEnabled((v) => !v)} style={[s.chip, autoEnabled && s.chipOn]} accessibilityLabel="自动归因开关">
+        <Text selectable style={[s.chipText, autoEnabled && s.chipTextOn]}>{autoEnabled ? "✓ 自动归因开" : "自动归因关"}</Text>
+      </Pressable>
+      {autoEnabled ? (<>
+        <TextInput keyboardType="number-pad" onChangeText={setAutoValue} placeholder="默认直减 VND" placeholderTextColor={color.muted} style={s.input} value={autoValue} />
+        <TextInput onChangeText={setAutoScope} placeholder="默认适用范围" placeholderTextColor={color.muted} style={s.input} value={autoScope} />
+        <View style={s.chipRow}>
+          {[30, 60, 90].map((days) => (
+            <Pressable key={days} onPress={() => setAutoDays(days)} style={[s.chip, autoDays === days && s.chipOn]} accessibilityLabel={`默认有效期${days}天`}>
+              <Text selectable style={[s.chipText, autoDays === days && s.chipTextOn]}>{`${days}天`}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </>) : null}
+      {autoError ? <Text selectable style={s.error}>{autoError}</Text> : null}
+      <Pressable disabled={autoSending} onPress={() => void saveAuto()} style={s.primary} accessibilityLabel="保存自动档"><Text selectable style={s.primaryText}>{autoSending ? "保存中…" : "保存自动档"}</Text></Pressable>
       {/* 绑定优惠 */}
       <Text selectable style={s.secTitle}>绑定优惠</Text>
-      <Text selectable style={s.hint}>码是 creator 认领的（比如 LINH88），你认她这个码，给直减 + 范围 + 有效期。</Text>
-      <TextInput onChangeText={setBindCode} placeholder="专属码（比如 LINH88）" placeholderTextColor={color.muted} style={s.input} value={bindCode} autoCapitalize="characters" />
+      <Text selectable style={s.hint}>从人才库选人即选码（她的专属码自动填上），再给直减 + 范围 + 有效期；人不在库里就手填码。</Text>
+      {creators.length > 0 ? (
+        <View style={s.chipRow}>
+          {creators.map((creator) => (
+            <Pressable key={creator.agentId} onPress={() => { setBindCode(creator.promoCode); setBindCreatorName(creator.name); }} style={[s.chip, bindCode === creator.promoCode && creator.promoCode !== "" && s.chipOn]} accessibilityLabel={`绑定${creator.name}的码`}>
+              <Text selectable style={[s.chipText, bindCode === creator.promoCode && creator.promoCode !== "" && s.chipTextOn]}>{`${creator.name} · ${creator.promoCode}`}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+      {bindCreatorName !== "" ? <Text selectable style={s.meta}>绑给 {bindCreatorName}（{bindCode}）</Text> : null}
+      <TextInput onChangeText={(text) => { setBindCode(text); setBindCreatorName(""); }} placeholder="专属码（比如 LINH88）" placeholderTextColor={color.muted} style={s.input} value={bindCode} autoCapitalize="characters" />
       <TextInput keyboardType="number-pad" onChangeText={setBindValue} placeholder="直减金额 VND（比如 50000）" placeholderTextColor={color.muted} style={s.input} value={bindValue} />
       <TextInput onChangeText={setBindScope} placeholder="适用范围（比如：全场饮品）" placeholderTextColor={color.muted} style={s.input} value={bindScope} />
       <View style={s.chipRow}>
@@ -149,22 +251,49 @@ export function MerchantPromoSurface({ supply, merchantId, onBack }: {
       </View>
       {bindError ? <Text selectable style={s.error}>{bindError}</Text> : null}
       <Pressable disabled={bindSending} onPress={() => void bind()} style={s.primary} accessibilityLabel="绑定优惠"><Text selectable style={s.primaryText}>{bindSending ? "绑定中…" : "绑定优惠"}</Text></Pressable>
-      {/* 已绑列表 */}
+      {/* 已绑列表：来源标出来（手动绑的 / 自动进来的），账上分得清。 */}
       {benefits.map((benefit) => (
         <View key={`${benefit.merchantId}/${benefit.code}`} style={s.card}>
           <Text selectable style={s.cardTitle}>{benefit.code}</Text>
           <Text selectable style={s.meta}>
-            {`直减 ${benefit.faceValueVnd.toLocaleString()} VND · ${benefit.scopeName} · 至 ${benefit.validUntil} · ${benefit.status === "ACTIVE" ? "生效中" : "已停用"}`}
+            {`直减 ${benefit.faceValueVnd.toLocaleString()} VND · ${benefit.scopeName} · 至 ${benefit.validUntil} · ${benefit.status === "ACTIVE" ? "生效中" : "已停用"} · ${benefit.source === "AUTO" ? "自动" : "手动"}`}
           </Text>
           <Text selectable style={s.meta}>
             {`战绩 ${stats?.byCode[benefit.code]?.quotes ?? 0} 单 · 新客 ${stats?.byCode[benefit.code]?.firstVisits ?? 0} 人 · 归因 ${vnd(stats?.byCode[benefit.code]?.attributedVnd ?? 0)}`}
           </Text>
         </View>
       ))}
-      {/* 报码核销 */}
+      {/* 报码核销：扫她的码二维码，或手输码。扫到只填框，点报码才落（两步确认）。 */}
       <Text selectable style={s.secTitle}>报码核销</Text>
       <Text selectable style={s.hint}>顾客报码，输码 + 单子金额，问一句是不是第一次来（新客就勾上，顾客自述，平台不核身份）。</Text>
-      <TextInput onChangeText={setQuoteCode} placeholder="专属码" placeholderTextColor={color.muted} style={s.input} value={quoteCode} autoCapitalize="characters" />
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <View style={{ flex: 1 }}>
+          <TextInput onChangeText={setQuoteCode} placeholder="专属码" placeholderTextColor={color.muted} style={s.input} value={quoteCode} autoCapitalize="characters" />
+        </View>
+        <Pressable onPress={() => setScanning((v) => !v)} style={[s.chip, scanning && s.chipOn]} accessibilityLabel="扫码报码">
+          <Text selectable style={[s.chipText, scanning && s.chipTextOn]}>扫码</Text>
+        </Pressable>
+      </View>
+      {scanning ? (
+        cameraPermission?.granted ? (
+          <View style={s.cameraWrap}>
+            <CameraView
+              style={s.cameraView}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+              onBarcodeScanned={(result) => handleScanned(result.data)}
+            />
+            <Text selectable style={s.hint}>对准她的专属码二维码即可识别</Text>
+          </View>
+        ) : (
+          <View>
+            <Text selectable style={s.hint}>{cameraPermission ? "需要相机权限才能扫码" : "相机权限未决定"}</Text>
+            {!cameraPermission?.granted ? (
+              <Pressable onPress={() => void requestCameraPermission()} style={s.primary} accessibilityLabel="允许使用相机"><Text selectable style={s.primaryText}>允许使用相机</Text></Pressable>
+            ) : null}
+          </View>
+        )
+      ) : null}
       <TextInput keyboardType="number-pad" onChangeText={setQuoteAmount} placeholder="单子金额 VND（可空）" placeholderTextColor={color.muted} style={s.input} value={quoteAmount} />
       <Pressable onPress={() => setQuoteFirstVisit((v) => !v)} style={[s.chip, quoteFirstVisit && s.chipOn]} accessibilityLabel="新客">
         <Text selectable style={[s.chipText, quoteFirstVisit && s.chipTextOn]}>{quoteFirstVisit ? "✓ 新客（顾客自述首访）" : "新客？"}</Text>
@@ -200,4 +329,6 @@ const s = StyleSheet.create({
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 8, padding: 12 },
   cardTitle: { color: color.ink, fontSize: 16, fontWeight: "800" },
   meta: { color: color.muted, fontSize: 12, marginTop: 2 },
+  cameraWrap: { marginTop: 8 },
+  cameraView: { borderRadius: 12, height: 220, overflow: "hidden" },
 });

@@ -241,3 +241,14 @@ describe("专属营销码入口 (MERCHANT-CREATOR-PROMO-001)", () => {
     expect(me).toContain("promoStats ? promoStats.firstVisits.toString()");
   });
 });
+
+describe("专属码进详情 (MERCHANT-CREATOR-PROMO-001)", () => {
+  const start = me.indexOf('page === "creatorDetail"');
+  const next = me.indexOf('if (page === "', start + 10);
+  const detailPage = me.slice(start, next > 0 ? next : undefined);
+
+  it("详情展示她的专属码，人才库透出 promoCode", () => {
+    expect(detailPage).toContain("creator-promo-code-");
+    expect(detailPage).toContain("selectedCreator.promoCode");
+  });
+});

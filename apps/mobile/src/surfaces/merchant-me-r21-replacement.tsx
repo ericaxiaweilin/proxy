@@ -790,6 +790,14 @@ export function MerchantMeR21Replacement({
           {/* CREATOR-SOCIAL-001：社媒区三态 —— 加载中 / 读失败 / 有数据 / 真空。
               以前失败和空长一个样（都是"尚未关联"），用户分不清"没数据"还是
               "没读出来"，我也分不清。这次分开，读失败就说读失败。 */}
+          {/* MERCHANT-CREATOR-PROMO-001：她的专属码。商家在这里看到码，
+              去专属码管理页绑定优惠，顾客报码即归因到她头上。没认领就不画这一节。 */}
+          {selectedCreator.promoCode ? (<>
+            <View style={styles.secHead}><Text selectable style={styles.secTitle}>专属营销码</Text></View>
+            <Text selectable style={styles.meta} testID={`creator-promo-code-${selectedCreator.agentId}`}>
+              {`${selectedCreator.promoCode} · 绑定优惠后，顾客报码拿专属优惠`}
+            </Text>
+          </>) : null}
           <View style={styles.secHead}><Text selectable style={styles.secTitle}>社媒账户</Text></View>
           {!creatorPassport && !creatorPassportFailed ? (
             <Text selectable style={styles.meta}>正在读取社媒信息…</Text>
@@ -1130,7 +1138,12 @@ export function MerchantMeR21Replacement({
     return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
-          <MerchantPromoSurface supply={supply} merchantId={activeAccount.id} onBack={() => setPage("creator")} />
+          <MerchantPromoSurface
+            supply={supply}
+            merchantId={activeAccount.id}
+            creators={creators.filter((c) => c.promoCode).map((c) => ({ agentId: c.agentId, name: c.name, promoCode: c.promoCode ?? "" }))}
+            onBack={() => setPage("creator")}
+          />
         </ScrollView>
       </View>
     );

@@ -136,6 +136,9 @@ export type SupplierCandidate = {
   // 无成交记录时 Total 取先验值、hasTrackRecord=false，UI 印「新人」不编分。
   // completedOrders 是真实成交单量（Postgres 订单表），商家页「服务量」来源。
   rating?: { total: number; hasTrackRecord: boolean; satisfactionRate: number; fulfillmentRate: number; completedOrders: number };
+  // MERCHANT-CREATOR-PROMO-001：creator 的 ACTIVE 专属码（码是传播物，
+  // 商家可见是设计）。没有码是 ""，调用方按无码处理。
+  promoCode?: string;
   // MERCHANT-CREATOR-TAGS-001：创作者自声明内容垂类（展示过滤在客户端）。
   // 老服务端不带该字段时解析为 []。
   verticalTags?: string[];
@@ -185,6 +188,8 @@ export function parseSupplierCandidates(value: unknown): SupplierCandidate[] {
       currency: typeof item.currency === "string" ? item.currency : "VND",
       ...(parsedAvailability ? { availability: parsedAvailability } : {}),
       ...(parsedRating ? { rating: parsedRating } : {}),
+      // 专属码：非空字符串才带出来，别的形状一律按无码。
+      ...(typeof item.promoCode === "string" && item.promoCode !== "" ? { promoCode: item.promoCode } : {}),
       eligibility: { eligible: eligibility.eligible === true, capabilitiesOk: eligibility.capabilitiesOk === true, availabilityOk: eligibility.availabilityOk === true, marketOk: eligibility.marketOk === true },
     }];
   });
@@ -284,6 +289,8 @@ export type PromoBenefit = {
   scopeName: string;
   validUntil: string;
   status: string;
+  // 绑定来源：MANUAL（逐个绑）/ AUTO（自动档报码时建的）。老服务端不带时按 MANUAL。
+  source: string;
   createdAt: string;
 };
 
@@ -330,6 +337,7 @@ export function parsePromoBenefit(value: unknown): PromoBenefit | undefined {
     scopeName: typeof item.scopeName === "string" ? item.scopeName : "",
     validUntil: typeof item.validUntil === "string" ? item.validUntil : "",
     status: typeof item.status === "string" ? item.status : "",
+    source: item.source === "AUTO" ? "AUTO" : "MANUAL",
     createdAt: typeof item.createdAt === "string" ? item.createdAt : "",
   };
 }
@@ -350,6 +358,41 @@ export function parsePromoQuote(value: unknown): PromoQuote | undefined {
     firstVisit: item.firstVisit === true,
     quotedAt: item.quotedAt,
   };
+}
+
+export type PromoAutoBenefit = {
+  merchantId: string;
+  enabled: boolean;
+  faceValueVnd: number;
+  scopeName: string;
+  validityDays: number;
+};
+
+export function parsePromoAutoBenefit(value: unknown): PromoAutoBenefit | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown>;
+  if (typeof item.merchantId !== "string") return undefined;
+  return {
+    merchantId: item.merchantId,
+    enabled: item.enabled === true,
+    faceValueVnd: typeof item.faceValueVnd === "number" && item.faceValueVnd > 0 ? Math.floor(item.faceValueVnd) : 0,
+    scopeName: typeof item.scopeName === "string" ? item.scopeName : "",
+    validityDays: typeof item.validityDays === "number" && item.validityDays > 0 ? Math.floor(item.validityDays) : 0,
+  };
+}
+
+// MERCHANT-CREATOR-PROMO-001：专属码二维码载荷。扫出来就是这个字符串，
+// 报码框认它（也认裸码，兼容手抄）。前缀防误扫 —— 随手扫到别的二维码，
+// 形状对不上直接拒，不会把电话号码当成码报上去。
+export function promoQrValue(code: string): string {
+  return `PROXY-PROMO:${code.trim().toUpperCase()}`;
+}
+
+export function parsePromoQr(text: string): string | undefined {
+  const raw = text.trim();
+  const code = raw.startsWith("PROXY-PROMO:") ? raw.slice("PROXY-PROMO:".length) : raw;
+  const normalized = code.trim().toUpperCase();
+  return /^[A-Z0-9]{4,16}$/.test(normalized) ? normalized : undefined;
 }
 
 export function parsePromoStats(value: unknown): PromoStats {
@@ -513,13 +556,26 @@ export class SupplyClient {
     return parsed;
   }
 
-  public async listMerchantBenefits(input: { merchantId: string }): Promise<PromoBenefit[]> {
+  public async listMerchantBenefits(input: { merchantId: string }): Promise<{ benefits: PromoBenefit[]; autoBenefit?: PromoAutoBenefit | undefined }> {
     const body = this.body(await this.command("ListPromoAssets", { type: "PromoBenefit", id: "query" }, { merchantId: input.merchantId, role: "bound" }));
-    if (!Array.isArray(body.benefits)) return [];
-    return body.benefits.flatMap((entry: unknown) => {
+    const benefits = Array.isArray(body.benefits) ? body.benefits.flatMap((entry: unknown) => {
       const parsed = parsePromoBenefit(entry);
       return parsed ? [parsed] : [];
-    });
+    }) : [];
+    const auto = parsePromoAutoBenefit(body.autoBenefit);
+    return auto ? { benefits, autoBenefit: auto } : { benefits };
+  }
+
+  // MERCHANT-CREATOR-PROMO-001：自动档。开一次，以后没绑过的码来报码自动建绑定。
+  public async setAutoPromoBenefit(input: { merchantId: string; enabled: boolean; faceValueVnd?: number; scopeName?: string; validityDays?: number }): Promise<PromoAutoBenefit> {
+    const payload: Record<string, unknown> = { merchantId: input.merchantId, enabled: input.enabled };
+    if (input.faceValueVnd !== undefined) payload.faceValueVnd = input.faceValueVnd;
+    if (input.scopeName !== undefined) payload.scopeName = input.scopeName;
+    if (input.validityDays !== undefined) payload.validityDays = input.validityDays;
+    const body = this.body(await this.command("SetAutoPromoBenefit", { type: "PromoAutoBenefit", id: "mine" }, payload));
+    const parsed = parsePromoAutoBenefit(body.autoBenefit);
+    if (!parsed) throw new SupplyProtocolError("auto benefit malformed");
+    return parsed;
   }
 
   public async quotePromoCode(input: { merchantId: string; code: string; amountVnd?: number; firstVisit?: boolean }): Promise<{ quote: PromoQuote; faceValueVnd: number; scopeName: string }> {
