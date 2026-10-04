@@ -22,8 +22,9 @@ import (
 )
 
 var (
-	ErrPromoCodeNotFound = errors.New("promo code not found")
-	ErrPromoNotBound     = errors.New("promo code not bound by merchant")
+	ErrPromoCodeNotFound   = errors.New("promo code not found")
+	ErrPromoNotBound       = errors.New("promo code not bound by merchant")
+	ErrAutoBenefitNotFound = errors.New("auto benefit not set")
 )
 
 // promoCodeRe：4–16 位大写字母数字。归一化（去空格转大写）后校验 ——
@@ -48,6 +49,8 @@ type PromoCode struct {
 
 // PromoBenefit 是商家对某个码的优惠承诺：直减 faceValueVND，scopeName 写适用范围
 // （比如"全场饮品"），validUntil 是 YYYY-MM-DD。同一商家对同一码同时只认一条。
+// Source 记这条哪来的：MANUAL（逐个绑）/ AUTO（自动档报码时建的）——
+// 账上能分清，商家才知道哪些是自己点的、哪些是自动进来的。
 type PromoBenefit struct {
 	MerchantID   string    `json:"merchantId"`
 	Code         string    `json:"code"`
@@ -55,7 +58,20 @@ type PromoBenefit struct {
 	ScopeName    string    `json:"scopeName"`
 	ValidUntil   string    `json:"validUntil"`
 	Status       string    `json:"status"` // ACTIVE | DISABLED
+	Source       string    `json:"source"` // MANUAL | AUTO
 	CreatedAt    time.Time `json:"createdAt"`
+}
+
+// PromoAutoBenefit 是商家的默认优惠（自动档）：开一次，以后本家没绑过的码
+// 来报码，自动按默认建 ACTIVE 绑定再走报码 —— 商家不用逐个码手工绑。
+// 关掉只停"以后自动建"，已经建出来的绑定不受影响（要停逐个停）。
+type PromoAutoBenefit struct {
+	MerchantID   string    `json:"merchantId"`
+	Enabled      bool      `json:"enabled"`
+	FaceValueVND int64     `json:"faceValueVnd"`
+	ScopeName    string    `json:"scopeName"`
+	ValidityDays int       `json:"validityDays"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 // PromoQuote 是一笔报码归因行：谁（code→agent）在谁家（merchant）什么时候，
@@ -70,6 +86,21 @@ type PromoQuote struct {
 	DiscountVND int64     `json:"discountVnd"`
 	FirstVisit  bool      `json:"firstVisit"`
 	QuotedAt    time.Time `json:"quotedAt"`
+}
+
+// activePromoCodeFor：QuerySuppliers 给商家带码 —— 该 agent 的 ACTIVE 码，
+// 没有返回 ""。码是传播物不是秘密，商家可见是设计不是泄漏。
+func activePromoCodeFor(ctx context.Context, s *Service, agentID string) string {
+	codes, err := s.repository.ListPromoCodesByAgent(ctx, agentID)
+	if err != nil {
+		return ""
+	}
+	for _, c := range codes {
+		if c.Status == "ACTIVE" {
+			return c.Code
+		}
+	}
+	return ""
 }
 
 // PromoStats：按码聚合 + 商家合计。attributedVND 是归因 GMV（报码单金额之和，
@@ -232,7 +263,8 @@ func (s *Service) bindPromoBenefit(ctx context.Context, e command.Envelope) comm
 	}
 	benefit := PromoBenefit{
 		MerchantID: merchantID, Code: code, FaceValueVND: p.FaceValueVND,
-		ScopeName: scope, ValidUntil: p.ValidUntil, Status: "ACTIVE", CreatedAt: now,
+		ScopeName: scope, ValidUntil: p.ValidUntil, Status: "ACTIVE",
+		Source: "MANUAL", CreatedAt: now,
 	}
 	if err := s.repository.SavePromoBenefit(ctx, benefit); err != nil {
 		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
@@ -271,6 +303,66 @@ func (s *Service) disablePromoBenefit(ctx context.Context, e command.Envelope) c
 		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
 	}
 	return acceptedWithPayload(e, "PromoBenefit", merchantID+"/"+code, 2, "DISABLED", map[string]any{"benefit": benefit}, nil)
+}
+
+type setAutoPromoBenefitPayload struct {
+	Enabled      bool   `json:"enabled"`
+	FaceValueVND int64  `json:"faceValueVnd"`
+	ScopeName    string `json:"scopeName"`
+	ValidityDays int    `json:"validityDays"`
+}
+
+// setAutoPromoBenefit：商家设默认优惠（自动档开关）。开着时，本家没绑过的码
+// 来报码自动按默认建绑定；关掉只停以后自动建，已经建出来的不受影响。
+// validityDays 1..365（默认优惠的有效期从建绑定那天算）。
+func (s *Service) setAutoPromoBenefit(ctx context.Context, e command.Envelope) command.Result {
+	var p setAutoPromoBenefitPayload
+	if !decode(e.Payload, &p) {
+		return command.Rejected(e, "INVALID_AUTO_BENEFIT", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_auto_benefit", nil)
+	}
+	merchantID := invitationMerchantID(e)
+	if merchantID == "" {
+		return command.Rejected(e, "INVITATION_MERCHANT_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.invitation_merchant_required", nil)
+	}
+	if p.Enabled {
+		if p.FaceValueVND <= 0 || p.FaceValueVND > maxPromoBenefitVND {
+			return command.Rejected(e, "INVALID_PROMO_VALUE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_value", nil)
+		}
+		if strings.TrimSpace(p.ScopeName) == "" {
+			return command.Rejected(e, "INVALID_PROMO_SCOPE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_scope", nil)
+		}
+		if p.ValidityDays < 1 || p.ValidityDays > 365 {
+			return command.Rejected(e, "INVALID_PROMO_VALIDITY", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_promo_validity", nil)
+		}
+	}
+	now := s.clock.Now().UTC()
+	auto := PromoAutoBenefit{
+		MerchantID: merchantID, Enabled: p.Enabled, FaceValueVND: p.FaceValueVND,
+		ScopeName: strings.TrimSpace(p.ScopeName), ValidityDays: p.ValidityDays, UpdatedAt: now,
+	}
+	if err := s.repository.SaveAutoPromoBenefit(ctx, auto); err != nil {
+		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
+	}
+	return acceptedWithPayload(e, "PromoAutoBenefit", merchantID, 1, "SET", map[string]any{"autoBenefit": auto}, nil)
+}
+
+// autoBindPromoBenefit：自动档建绑定。默认没设或关着就回 ErrPromoNotBound，
+// 调用方原样拒掉（PROMO_NOT_BOUND），和手工没绑一个说法。
+func (s *Service) autoBindPromoBenefit(ctx context.Context, merchantID, code string, now time.Time) (PromoBenefit, error) {
+	auto, err := s.repository.GetAutoPromoBenefit(ctx, merchantID)
+	if err != nil || !auto.Enabled {
+		return PromoBenefit{}, ErrPromoNotBound
+	}
+	benefit := PromoBenefit{
+		MerchantID: merchantID, Code: code, FaceValueVND: auto.FaceValueVND,
+		ScopeName:  auto.ScopeName,
+		ValidUntil: now.AddDate(0, 0, auto.ValidityDays).Format("2006-01-02"),
+		Status:     "ACTIVE", Source: "AUTO", CreatedAt: now,
+	}
+	if err := s.repository.SavePromoBenefit(ctx, benefit); err != nil {
+		return PromoBenefit{}, err
+	}
+	return benefit, nil
 }
 
 type quotePromoCodePayload struct {
@@ -312,9 +404,14 @@ func (s *Service) quotePromoCode(ctx context.Context, e command.Envelope) comman
 	}
 	benefit, err := s.repository.GetPromoBenefit(ctx, merchantID, code)
 	if errors.Is(err, ErrPromoNotBound) {
-		return command.Rejected(e, "PROMO_NOT_BOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.promo_not_bound", nil)
-	}
-	if err != nil {
+		// 自动档：本家没绑过这个码，但默认优惠开着 —— 按默认建一条
+		// ACTIVE 绑定（source=AUTO）再往下走。默认关着就原样拒掉，
+		// 不猜商家愿不愿意认这个码。
+		benefit, err = s.autoBindPromoBenefit(ctx, merchantID, code, s.clock.Now().UTC())
+		if err != nil {
+			return command.Rejected(e, "PROMO_NOT_BOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.promo_not_bound", nil)
+		}
+	} else if err != nil {
 		return command.Rejected(e, "PROMO_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_read_failed", nil)
 	}
 	now := s.clock.Now().UTC()
@@ -387,7 +484,16 @@ func (s *Service) listPromoAssets(ctx context.Context, e command.Envelope) comma
 		if benefits == nil {
 			benefits = []PromoBenefit{}
 		}
-		return acceptedWithPayload(e, "PromoBenefit", merchantID, 1, "LISTED", map[string]any{"benefits": benefits}, nil)
+		// 自动档配置一起带出来（没设过就是 null，调用方按"没开"处理）。
+		auto, err := s.repository.GetAutoPromoBenefit(ctx, merchantID)
+		if err != nil && !errors.Is(err, ErrAutoBenefitNotFound) {
+			return command.Rejected(e, "PROMO_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_read_failed", nil)
+		}
+		payload := map[string]any{"benefits": benefits}
+		if err == nil {
+			payload["autoBenefit"] = auto
+		}
+		return acceptedWithPayload(e, "PromoBenefit", merchantID, 1, "LISTED", payload, nil)
 	case "quotes":
 		merchantID := invitationMerchantID(e)
 		if merchantID == "" {

@@ -39,6 +39,7 @@ var merchantPublishCommands = map[string]bool{
 	"QuotePromoCode":      true,
 	"ListPromoAssets":     true,
 	"GetPromoStats":       true,
+	"SetAutoPromoBenefit": true,
 }
 
 // resolveMerchantPublish verifies an optional payload merchantId for

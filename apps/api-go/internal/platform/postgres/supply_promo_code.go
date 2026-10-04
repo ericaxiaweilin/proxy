@@ -68,19 +68,26 @@ func (r *SupplyRepository) ListPromoCodesByAgent(ctx context.Context, agentID st
 
 func (r *SupplyRepository) SavePromoBenefit(ctx context.Context, b supply.PromoBenefit) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO supply.promo_benefits (merchant_id, code, face_value_vnd, scope_name, valid_until, status, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		b.MerchantID, b.Code, b.FaceValueVND, b.ScopeName, b.ValidUntil, b.Status, b.CreatedAt,
+		INSERT INTO supply.promo_benefits (merchant_id, code, face_value_vnd, scope_name, valid_until, status, created_at, source)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		b.MerchantID, b.Code, b.FaceValueVND, b.ScopeName, b.ValidUntil, b.Status, b.CreatedAt, promoBenefitSource(b.Source),
 	)
 	return err
+}
+
+func promoBenefitSource(source string) string {
+	if source == "AUTO" {
+		return "AUTO"
+	}
+	return "MANUAL"
 }
 
 func (r *SupplyRepository) GetPromoBenefit(ctx context.Context, merchantID, code string) (supply.PromoBenefit, error) {
 	var b supply.PromoBenefit
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT merchant_id, code, face_value_vnd, scope_name, valid_until, status, created_at
+		SELECT merchant_id, code, face_value_vnd, scope_name, valid_until, status, created_at, COALESCE(source, 'MANUAL')
 		FROM supply.promo_benefits WHERE merchant_id=$1 AND code=$2`, merchantID, code).Scan(
-		&b.MerchantID, &b.Code, &b.FaceValueVND, &b.ScopeName, &b.ValidUntil, &b.Status, &b.CreatedAt,
+		&b.MerchantID, &b.Code, &b.FaceValueVND, &b.ScopeName, &b.ValidUntil, &b.Status, &b.CreatedAt, &b.Source,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return supply.PromoBenefit{}, supply.ErrPromoNotBound
@@ -91,9 +98,9 @@ func (r *SupplyRepository) GetPromoBenefit(ctx context.Context, merchantID, code
 func (r *SupplyRepository) UpdatePromoBenefit(ctx context.Context, b supply.PromoBenefit) error {
 	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		UPDATE supply.promo_benefits
-		SET face_value_vnd=$3, scope_name=$4, valid_until=$5, status=$6
+		SET face_value_vnd=$3, scope_name=$4, valid_until=$5, status=$6, source=$7
 		WHERE merchant_id=$1 AND code=$2`,
-		b.MerchantID, b.Code, b.FaceValueVND, b.ScopeName, b.ValidUntil, b.Status,
+		b.MerchantID, b.Code, b.FaceValueVND, b.ScopeName, b.ValidUntil, b.Status, promoBenefitSource(b.Source),
 	)
 	if err != nil {
 		return err
@@ -106,7 +113,7 @@ func (r *SupplyRepository) UpdatePromoBenefit(ctx context.Context, b supply.Prom
 
 func (r *SupplyRepository) ListPromoBenefitsByMerchant(ctx context.Context, merchantID string) ([]supply.PromoBenefit, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT merchant_id, code, face_value_vnd, scope_name, valid_until, status, created_at
+		SELECT merchant_id, code, face_value_vnd, scope_name, valid_until, status, created_at, COALESCE(source, 'MANUAL')
 		FROM supply.promo_benefits WHERE merchant_id=$1 ORDER BY created_at DESC`, merchantID)
 	if err != nil {
 		return nil, err
@@ -115,7 +122,7 @@ func (r *SupplyRepository) ListPromoBenefitsByMerchant(ctx context.Context, merc
 	result := []supply.PromoBenefit{}
 	for rows.Next() {
 		var b supply.PromoBenefit
-		if err := rows.Scan(&b.MerchantID, &b.Code, &b.FaceValueVND, &b.ScopeName, &b.ValidUntil, &b.Status, &b.CreatedAt); err != nil {
+		if err := rows.Scan(&b.MerchantID, &b.Code, &b.FaceValueVND, &b.ScopeName, &b.ValidUntil, &b.Status, &b.CreatedAt, &b.Source); err != nil {
 			return nil, err
 		}
 		result = append(result, b)
@@ -157,4 +164,29 @@ func (r *SupplyRepository) ListPromoQuotesByMerchant(ctx context.Context, mercha
 
 func (r *SupplyRepository) ListPromoQuotesByAgent(ctx context.Context, agentID string) ([]supply.PromoQuote, error) {
 	return r.listPromoQuotes(ctx, "agent_id", agentID)
+}
+
+func (r *SupplyRepository) SaveAutoPromoBenefit(ctx context.Context, a supply.PromoAutoBenefit) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO supply.promo_auto_benefits (merchant_id, enabled, face_value_vnd, scope_name, validity_days, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (merchant_id) DO UPDATE SET enabled=EXCLUDED.enabled,
+			face_value_vnd=EXCLUDED.face_value_vnd, scope_name=EXCLUDED.scope_name,
+			validity_days=EXCLUDED.validity_days, updated_at=EXCLUDED.updated_at`,
+		a.MerchantID, a.Enabled, a.FaceValueVND, a.ScopeName, a.ValidityDays, a.UpdatedAt,
+	)
+	return err
+}
+
+func (r *SupplyRepository) GetAutoPromoBenefit(ctx context.Context, merchantID string) (supply.PromoAutoBenefit, error) {
+	var a supply.PromoAutoBenefit
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT merchant_id, enabled, face_value_vnd, scope_name, validity_days, updated_at
+		FROM supply.promo_auto_benefits WHERE merchant_id=$1`, merchantID).Scan(
+		&a.MerchantID, &a.Enabled, &a.FaceValueVND, &a.ScopeName, &a.ValidityDays, &a.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return supply.PromoAutoBenefit{}, supply.ErrAutoBenefitNotFound
+	}
+	return a, err
 }

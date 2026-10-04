@@ -148,3 +148,96 @@ func TestPromoCodeClaimBindQuoteLifecycle(t *testing.T) {
 		t.Fatalf("list my codes: %s (%+v)", r.Outcome, r.Error)
 	}
 }
+
+func TestPromoAutoBenefitFlow(t *testing.T) {
+	s := New()
+	setupAgent(t, s, "agent_auto", "Auto", []string{"ZH"}, "hn", 1200000)
+	claimAs(t, s, "agent_auto", "AUTO88")
+
+	autoPayload := func(enabled bool) map[string]any {
+		return map[string]any{
+			"enabled": enabled, "faceValueVnd": 30000,
+			"scopeName": "全场", "validityDays": 30,
+		}
+	}
+	// 自动档没开：没绑的码报不上。
+	if outcome, _ := promoAsMerchant(t, s, "QuotePromoCode", map[string]any{
+		"code": "AUTO88", "amountVnd": 150000,
+	}, "merchant_auto"); outcome == "ACCEPTED" {
+		t.Fatal("quote without binding or auto must be rejected")
+	}
+	// 脏的默认直接拒（金额 0 / 天数 0）。
+	if outcome, _ := promoAsMerchant(t, s, "SetAutoPromoBenefit", map[string]any{
+		"enabled": true, "faceValueVnd": 0, "scopeName": "全场", "validityDays": 30,
+	}, "merchant_auto"); outcome == "ACCEPTED" {
+		t.Fatal("auto with zero face value must be rejected")
+	}
+	// 开自动档。
+	if outcome, _ := promoAsMerchant(t, s, "SetAutoPromoBenefit", autoPayload(true), "merchant_auto"); outcome != "ACCEPTED" {
+		t.Fatalf("set auto: %s", outcome)
+	}
+	// 同一个码报码：自动建 AUTO 绑定再走报码。
+	if outcome, view := promoAsMerchant(t, s, "QuotePromoCode", map[string]any{
+		"code": "AUTO88", "amountVnd": 150000, "firstVisit": true,
+	}, "merchant_auto"); outcome != "ACCEPTED" {
+		t.Fatalf("auto quote: %s (%+v)", outcome, view)
+	} else if benefit, _ := view["benefit"].(map[string]any); benefit["faceValueVnd"] != float64(30000) {
+		t.Fatalf("auto quote must apply default terms, got %v", benefit)
+	}
+	// 自动建出来的绑定在列表里，来源标 AUTO。
+	env := envelopeFor("ListPromoAssets", map[string]any{"role": "bound", "merchantId": "merchant_auto"}, "")
+	env.AuthContext = map[string]any{"merchantID": "merchant_auto"}
+	r := s.Handle(env)
+	var boundView struct {
+		Benefits []map[string]any `json:"benefits"`
+		Auto     map[string]any   `json:"autoBenefit"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &boundView)
+	if len(boundView.Benefits) != 1 || boundView.Benefits[0]["source"] != "AUTO" {
+		t.Fatalf("auto-created binding must list with source=AUTO, got %v", boundView.Benefits)
+	}
+	if boundView.Auto["enabled"] != true {
+		t.Fatalf("bound list must carry auto config, got %v", boundView.Auto)
+	}
+	// 关掉自动档：新码报不上（已建的不受影响，这里不测）。
+	if outcome, _ := promoAsMerchant(t, s, "SetAutoPromoBenefit", autoPayload(false), "merchant_auto"); outcome != "ACCEPTED" {
+		t.Fatalf("disable auto: %s", outcome)
+	}
+	setupAgent(t, s, "agent_auto2", "Auto2", []string{"ZH"}, "hn", 1200000)
+	claimAs(t, s, "agent_auto2", "AUTO99")
+	if outcome, _ := promoAsMerchant(t, s, "QuotePromoCode", map[string]any{
+		"code": "AUTO99", "amountVnd": 100000,
+	}, "merchant_auto"); outcome == "ACCEPTED" {
+		t.Fatal("quote with auto off must be rejected")
+	}
+}
+
+func TestQuerySuppliersCarriesPromoCode(t *testing.T) {
+	s := New()
+	setupAgent(t, s, "agent_withcode", "WithCode", []string{"ZH"}, "hn", 1200000)
+	setupAgent(t, s, "agent_nocode", "NoCode", []string{"ZH"}, "hn", 1200000)
+	claimAs(t, s, "agent_withcode", "WITH88")
+	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	r := s.Handle(envelopeFor("QuerySuppliers", map[string]any{
+		"marketId": "hn", "startAt": start, "durationH": 8,
+		"serviceType": "CITY_COMPANION", "languages": []string{"ZH"},
+	}, ""))
+	var view struct {
+		Suppliers []map[string]any `json:"suppliers"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	if len(view.Suppliers) != 2 {
+		t.Fatalf("want 2 suppliers, got %d", len(view.Suppliers))
+	}
+	byAgent := map[string]map[string]any{}
+	for _, supplier := range view.Suppliers {
+		id, _ := supplier["agentId"].(string)
+		byAgent[id] = supplier
+	}
+	if byAgent["agent_withcode"]["promoCode"] != "WITH88" {
+		t.Fatalf("supplier must carry her promo code, got %v", byAgent["agent_withcode"]["promoCode"])
+	}
+	if code, ok := byAgent["agent_nocode"]["promoCode"]; !ok || code != "" {
+		t.Fatalf("supplier without code must carry empty promoCode, got %v", code)
+	}
+}

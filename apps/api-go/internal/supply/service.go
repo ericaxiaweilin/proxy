@@ -268,6 +268,9 @@ type Repository interface {
 	SavePromoQuote(ctx context.Context, q PromoQuote) error
 	ListPromoQuotesByMerchant(ctx context.Context, merchantID string) ([]PromoQuote, error)
 	ListPromoQuotesByAgent(ctx context.Context, agentID string) ([]PromoQuote, error)
+	// MERCHANT-CREATOR-PROMO-001：自动档（商家默认优惠，一家一行，upsert）。
+	SaveAutoPromoBenefit(ctx context.Context, a PromoAutoBenefit) error
+	GetAutoPromoBenefit(ctx context.Context, merchantID string) (PromoAutoBenefit, error)
 }
 
 // TransactionalRepository 由支持事务性 outbox 的存储实现（事件与状态原子提交）。
@@ -304,6 +307,7 @@ type MemoryRepository struct {
 	promoCodes    map[string]PromoCode
 	promoBenefits map[string]PromoBenefit
 	promoQuotes   map[string]PromoQuote
+	promoAuto     map[string]PromoAutoBenefit
 	events        []event.DomainEvent
 }
 
@@ -320,6 +324,7 @@ func NewMemoryRepository() *MemoryRepository {
 		promoCodes:    make(map[string]PromoCode),
 		promoBenefits: make(map[string]PromoBenefit),
 		promoQuotes:   make(map[string]PromoQuote),
+		promoAuto:     make(map[string]PromoAutoBenefit),
 	}
 }
 
@@ -709,6 +714,23 @@ func (r *MemoryRepository) ListPromoQuotesByAgent(_ context.Context, agentID str
 	return result, nil
 }
 
+func (r *MemoryRepository) SaveAutoPromoBenefit(_ context.Context, a PromoAutoBenefit) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.promoAuto[a.MerchantID] = a
+	return nil
+}
+
+func (r *MemoryRepository) GetAutoPromoBenefit(_ context.Context, merchantID string) (PromoAutoBenefit, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, exists := r.promoAuto[merchantID]
+	if !exists {
+		return PromoAutoBenefit{}, ErrAutoBenefitNotFound
+	}
+	return a, nil
+}
+
 func (r *MemoryRepository) ProfilesSnapshot(_ context.Context) ([]AgentProfile, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -823,7 +845,8 @@ func (s *Service) Supports(commandType string) bool {
 		"CreateCandidateBatch", "GetCandidateBatch",
 		"InviteCreator", "RespondCollabInvitation", "CancelCollabInvitation", "ListCollabInvitations",
 		"ClaimPromoCode", "DisablePromoCode", "BindPromoBenefit", "DisablePromoBenefit",
-		"QuotePromoCode", "ListPromoAssets", "GetPromoStats":
+		"QuotePromoCode", "ListPromoAssets", "GetPromoStats",
+		"SetAutoPromoBenefit":
 		return true
 	default:
 		return false
@@ -892,6 +915,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listPromoAssets(ctx, e)
 	case "GetPromoStats":
 		return s.getPromoStats(ctx, e)
+	case "SetAutoPromoBenefit":
+		return s.setAutoPromoBenefit(ctx, e)
 	default:
 		return command.Rejected(e, "SUPPLY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "supply.unsupported_command", nil)
 	}
@@ -1833,6 +1858,10 @@ func (s *Service) querySuppliers(ctx context.Context, e command.Envelope) comman
 			}(),
 			"referencePrice": svc.ReferencePrice,
 			"currency":       svc.Currency,
+			// MERCHANT-CREATOR-PROMO-001：creator 的 ACTIVE 专属码直接跟出来 ——
+			// 商家在人才库/详情里就能看到她的码（码本来就是拿来传播的，不是秘密），
+			// 绑定时选人即选码，不用手抄。没有码印 "" 不印 null。
+			"promoCode": activePromoCodeFor(ctx, s, profile.AgentID),
 			// 评价分（见上）：Total 0..100；satisfactionRate/fulfillmentRate
 			// 无记录时为 0，调用方看 hasTrackRecord 决定印分数还是印「新人」。
 			// completedOrders 是真实成交单量（matching.Signals.Completed，
