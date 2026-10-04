@@ -24,8 +24,9 @@ func scanInvitation(scan func(...any) error) (supply.CollabInvitation, error) {
 	var startAt, respondedAt *time.Time
 	err := scan(
 		&inv.ID, &inv.MerchantID, &inv.AgentID, &inv.ServiceType,
-		&startAt, &inv.DurationH, &inv.PriceVND, &inv.Currency, &inv.Message,
-		&inv.Status, &inv.CreatedAt, &respondedAt, &inv.ExpiresAt,
+		&startAt, &inv.DurationH, &inv.PriceMinVND, &inv.PriceMaxVND, &inv.Negotiable,
+		&inv.Purpose, &inv.Message, &inv.Status, &inv.TermsVersion, &inv.CounterBy,
+		&inv.Currency, &inv.CreatedAt, &respondedAt, &inv.ExpiresAt,
 	)
 	if err != nil {
 		return supply.CollabInvitation{}, err
@@ -40,15 +41,17 @@ func scanInvitation(scan func(...any) error) (supply.CollabInvitation, error) {
 }
 
 const collabInvitationColumns = `id, merchant_id, agent_id, service_type, start_at,
-	duration_h, price_vnd, currency, message, status, created_at, responded_at, expires_at`
+	duration_h, price_min_vnd, price_max_vnd, negotiable, purpose, message, status,
+	terms_version, counter_by, currency, created_at, responded_at, expires_at`
 
 func (r *SupplyRepository) SaveInvitation(ctx context.Context, inv supply.CollabInvitation) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO supply.collab_invitations (`+collabInvitationColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
 		inv.ID, inv.MerchantID, inv.AgentID, inv.ServiceType,
-		nullTime(inv.StartAt), inv.DurationH, inv.PriceVND, inv.Currency, inv.Message,
-		inv.Status, inv.CreatedAt, nullTime(inv.RespondedAt), inv.ExpiresAt,
+		nullTime(inv.StartAt), inv.DurationH, inv.PriceMinVND, inv.PriceMaxVND, inv.Negotiable,
+		inv.Purpose, inv.Message, inv.Status, inv.TermsVersion, inv.CounterBy,
+		inv.Currency, inv.CreatedAt, nullTime(inv.RespondedAt), inv.ExpiresAt,
 	)
 	return err
 }
@@ -66,11 +69,15 @@ func (r *SupplyRepository) GetInvitation(ctx context.Context, id string) (supply
 func (r *SupplyRepository) UpdateInvitation(ctx context.Context, inv supply.CollabInvitation) error {
 	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		UPDATE supply.collab_invitations
-		SET service_type=$2, start_at=$3, duration_h=$4, price_vnd=$5, currency=$6,
-		    message=$7, status=$8, responded_at=$9, expires_at=$10
+		SET service_type=$2, start_at=$3, duration_h=$4,
+		    price_min_vnd=$5, price_max_vnd=$6, negotiable=$7, purpose=$8,
+		    message=$9, status=$10, terms_version=$11, counter_by=$12,
+		    currency=$13, responded_at=$14, expires_at=$15
 		WHERE id=$1`,
-		inv.ID, inv.ServiceType, nullTime(inv.StartAt), inv.DurationH, inv.PriceVND,
-		inv.Currency, inv.Message, inv.Status, nullTime(inv.RespondedAt), inv.ExpiresAt,
+		inv.ID, inv.ServiceType, nullTime(inv.StartAt), inv.DurationH,
+		inv.PriceMinVND, inv.PriceMaxVND, inv.Negotiable, inv.Purpose,
+		inv.Message, inv.Status, inv.TermsVersion, inv.CounterBy,
+		inv.Currency, nullTime(inv.RespondedAt), inv.ExpiresAt,
 	)
 	if err != nil {
 		return err
