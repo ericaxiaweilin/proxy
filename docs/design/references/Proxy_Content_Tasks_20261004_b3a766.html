@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>生产内容 - 精修版</title>
+<style>
+:root {
+  --bg: #F4F5F7; --text-main: #111; --text-sub: #86868b;
+  --accent: #d0f55c; --ok: #34C759; --danger: #FF3B30; --warn: #FF9500; --info: #0071e3;
+  --tiktok: #000000; --douyin: #FE2C55; --instagram: #E1306C; --own: #5856D6;
+  --border: #eaeaea;
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.04);
+  --shadow-md: 0 8px 24px rgba(0,0,0,0.06);
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+body { margin:0; padding:20px; background:var(--bg); color:var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  display:flex; justify-content:center; min-height:100vh;}
+.phone-mock { width:100%; max-width: 420px; background: var(--bg); border-radius: 32px;
+  padding: 24px; box-shadow: var(--shadow-md); position: relative; overflow: hidden; min-height: 800px;}
+
+.page { display: none; }
+.page.active { display: block; animation: slideIn 0.25s ease; }
+@keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+.header h1 { margin: 0 0 8px 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+.header p { margin: 0 0 20px 0; color: var(--text-sub); font-size: 13px; }
+.tabs { display: flex; gap: 8px; margin-bottom: 24px; }
+.tab { padding: 8px 18px; border-radius: 999px; font-size: 14px; font-weight: 600;
+  border: 1px solid var(--border); background: #fff; color: var(--text-main); cursor: pointer;}
+.tab.active { background: #1A1A1E; color: #fff; border-color: #1A1A1E; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid-card { background: #fff; border: 1px solid var(--border); border-radius: 20px; padding: 18px; cursor: pointer;}
+.grid-card .icon { width: 40px; height: 40px; border-radius: 12px; background: var(--accent);
+  display: grid; place-items: center; font-size: 18px; margin-bottom: 14px; font-weight: bold;}
+.grid-card h3 { margin: 0 0 6px 0; font-size: 15px; font-weight: 700; }
+.grid-card p { margin: 0; font-size: 12px; color: var(--text-sub); }
+
+.sub-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.back-btn { width: 40px; height: 40px; border-radius: 50%; background: #fff; border: 1px solid var(--border);
+  display: grid; place-items: center; cursor: pointer; flex: none; box-shadow: var(--shadow-sm);}
+.back-btn svg { width: 18px; height: 18px; }
+.sub-header-text h1 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+.sub-header-text p { margin: 2px 0 0 0; font-size: 11px; color: var(--text-sub); }
+
+.dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+.dash-item { background: #fff; border: 1px solid var(--border); border-radius: 20px; padding: 16px;
+  display: flex; flex-direction: column; align-items: center; text-align: center; cursor: pointer; position: relative;}
+.dash-item.has-drill::after { content: '›'; position: absolute; top: 12px; right: 14px; color: #ccc; font-size: 16px;}
+.dash-value { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+.dash-label { font-size: 12px; color: var(--text-sub); font-weight: 500; }
+
+.section-title { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+.section-title h2 { margin: 0; font-size: 16px; font-weight: 800; }
+.section-title span { font-size: 12px; color: var(--text-sub); }
+
+.status-filter { display: flex; gap: 8px; margin-bottom: 16px; overflow-x: auto; padding-bottom: 4px;}
+.status-chip {
+  padding: 6px 14px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  border: 1px solid var(--border); background: #fff; color: var(--text-sub); cursor: pointer; white-space: nowrap;
+}
+.status-chip.active { background: #1A1A1E; color: #fff; border-color: #1A1A1E; }
+
+/* 任务卡片 */
+.task-card {
+  background: #fff; border-radius: 20px; border: 1px solid var(--border);
+  padding: 16px; margin-bottom: 12px; box-shadow: var(--shadow-sm);
+}
+.task-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;}
+.task-creator { display: flex; align-items: center; gap: 10px; }
+.task-creator img { width: 40px; height: 40px; border-radius: 50%; }
+.creator-info-text .creator-name { font-size: 15px; font-weight: 800; }
+.creator-info-text .creator-handle { font-size: 11px; color: var(--text-sub); }
+
+.task-status {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  padding: 4px 10px; border-radius: 8px;
+}
+.task-status.pending { background: rgba(255,149,0,0.15); color: #b36b00; }
+.task-status.producing { background: rgba(0,113,227,0.12); color: #0071e3; }
+.task-status.reviewing { background: rgba(255,204,0,0.2); color: #8a6d00; }
+.task-status.published { background: rgba(52,199,89,0.15); color: #1a9e69; }
+.task-status.rejected { background: rgba(255,59,48,0.12); color: #c41e14; }
+
+/* 平台标签行（卡片上） */
+.platform-row {
+  display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.platform-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 700;
+}
+.platform-tag.tiktok { background: rgba(0,0,0,0.08); color: #000; }
+.platform-tag.douyin { background: rgba(254,44,85,0.12); color: #FE2C55; }
+.platform-tag.instagram { background: rgba(225,48,108,0.12); color: #E1306C; }
+.platform-tag.own { background: rgba(88,86,214,0.12); color: #5856D6; }
+.platform-tag.multi { background: rgba(0,0,0,0.05); color: #666; }
+
+.task-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; line-height: 1.4;}
+
+.progress-bar { height: 4px; background: #f0f0f5; border-radius: 2px; overflow: hidden; margin-bottom: 12px;}
+.progress { height: 100%; background: var(--ok); border-radius: 2px; }
+.progress.pending { background: var(--warn); width: 20%; }
+.progress.producing { background: var(--info); width: 50%; }
+.progress.reviewing { background: #FFCC00; width: 80%; }
+.progress.published { background: var(--ok); width: 100%; }
+
+/* 数据四件套 */
+.code-stats { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; text-align: center;
+  border-top: 1px solid #f0f0f0; padding-top: 12px; }
+.code-stat-item { display: flex; flex-direction: column; cursor: pointer; padding: 4px 0;}
+.code-stat-value { font-size: 15px; font-weight: 800; }
+.code-stat-label { font-size: 10px; color: var(--text-sub); margin-top: 3px; }
+.highlight-new { color: var(--ok); }
+.highlight-money { color: var(--danger); }
+.highlight-info { color: var(--info); }
+
+.card-actions { display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0f0f0;}
+.btn-card-action { flex: 1; padding: 10px; border-radius: 10px; font-size: 12px; font-weight: 700;
+  border: 1px solid var(--border); background: #fff; cursor: pointer;}
+.btn-card-action.primary { background: var(--accent); border-color: var(--accent); color: #111;}
+.btn-card-action.danger { background: transparent; border-color: rgba(255,59,48,0.3); color: var(--danger);}
+
+/* 详情页 */
+.detail-card { background: #fff; border-radius: 20px; padding: 20px; border: 1px solid var(--border); margin-bottom: 14px; }
+.detail-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f5f5f5;}
+.detail-row:last-child { border-bottom: none; }
+.detail-label { font-size: 13px; color: var(--text-sub); }
+.detail-value { font-size: 13px; font-weight: 700; text-align: right;}
+.detail-value.big { font-size: 18px; color: var(--danger); }
+
+/* 视频预览 */
+.video-preview {
+  width: 100%; height: 200px; background: linear-gradient(135deg, #2a2a32, #111); border-radius: 16px;
+  display: grid; place-items: center; color: #fff; font-size: 14px; margin-bottom: 16px;
+  position: relative; overflow: hidden;
+}
+.video-preview::after {
+  content: '▶'; position: absolute; font-size: 40px; color: rgba(255,255,255,0.8);
+  width: 64px; height: 64px; border-radius: 50%; background: rgba(255,255,255,0.15);
+  display: grid; place-items: center;
+}
+
+/* ====== 多平台发布卡片（核心精修） ====== */
+.platform-section-title {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 12px;
+}
+.platform-section-title h3 { margin: 0; font-size: 15px; font-weight: 800; }
+.platform-section-title .count {
+  font-size: 11px; color: var(--text-sub); font-weight: 600;
+  background: #f0f0f5; padding: 3px 8px; border-radius: 6px;
+}
+
+.platform-publish-card {
+  background: #fff; border-radius: 16px; border: 1px solid var(--border);
+  padding: 14px; margin-bottom: 12px;
+}
+.platform-publish-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.platform-badge-lg {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 800;
+}
+.platform-icon {
+  width: 32px; height: 32px; border-radius: 9px;
+  display: grid; place-items: center; color: #fff; font-size: 16px; font-weight: 900;
+  flex: none;
+}
+.platform-icon.tiktok { background: linear-gradient(135deg, #000 0%, #25F4EE 50%, #FE2C55 100%); }
+.platform-icon.douyin { background: linear-gradient(135deg, #FE2C55 0%, #000 100%); }
+.platform-icon.instagram { background: linear-gradient(135deg, #833AB4 0%, #FD1D1D 50%, #FCB045 100%); }
+.platform-icon.own { background: linear-gradient(135deg, #5856D6 0%, #1A1A1E 100%); }
+
+.platform-status {
+  font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 6px;
+}
+.platform-status.published { background: rgba(52,199,89,0.15); color: #1a9e69; }
+.platform-status.pending { background: rgba(255,149,0,0.15); color: #b36b00; }
+.platform-status.not-published { background: #f0f0f5; color: #666; }
+
+/* 该平台的独立数据 */
+.platform-stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  background: #f9f9fb; border-radius: 12px; padding: 10px; margin-bottom: 10px;
+  text-align: center;
+}
+.platform-stat-value { font-size: 14px; font-weight: 800; color: #111; }
+.platform-stat-label { font-size: 10px; color: var(--text-sub); margin-top: 2px;}
+
+/* 平台发布信息行 */
+.platform-meta {
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: 11px; color: var(--text-sub);
+  padding-top: 10px; border-top: 1px solid #f0f0f0;
+}
+.platform-meta-row { display: flex; justify-content: space-between; }
+.platform-meta-row .value { color: #111; font-weight: 600; }
+.platform-link {
+  color: var(--info); text-decoration: none; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 3px;
+}
+
+/* 评论区 */
+.comment-row { display: flex; gap: 10px; padding: 12px 0; border-bottom: 1px solid #f5f5f5;}
+.comment-row:last-child { border-bottom: none;}
+.comment-avatar {
+  width: 32px; height: 32px; border-radius: 50%; background: #f0f0f5; flex: none;
+  display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #666;
+}
+.comment-body { flex: 1; }
+.comment-name { font-size: 12px; font-weight: 700; margin-bottom: 3px;}
+.comment-text { font-size: 12px; color: #555; line-height: 1.5;}
+.comment-time { font-size: 10px; color: var(--text-sub); margin-top: 3px;}
+
+.btn-primary-lg { width: 100%; height: 48px; border-radius: 14px; background: #1A1A1E; color: #fff;
+  font-size: 15px; font-weight: 700; border: none; cursor: pointer;}
+.btn-secondary-lg { width: 100%; height: 48px; border-radius: 14px; background: transparent; color: #111;
+  font-size: 14px; font-weight: 600; border: 1px solid var(--border); cursor: pointer; margin-top: 10px;}
+
+.badge-status { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 700;}
+.badge-status.ok { background: rgba(52,199,89,0.15); color: #1a9e69; }
+.badge-status.info { background: rgba(0,113,227,0.15); color: #0071e3; }
+</style>
+</head>
+<body>
+
+<div class="phone-mock">
+
+  <!-- 主页 -->
+  <div class="page active" id="page-main">
+    <div class="header">
+      <h1>Creator 经营</h1>
+      <p>围绕真实经营目标匹配、邀请，并追踪到店与消费结果。</p>
+    </div>
+    <div class="tabs">
+      <button class="tab active">智能匹配</button>
+      <button class="tab">Creator</button>
+      <button class="tab">合作</button>
+      <button class="tab">结果</button>
+    </div>
+    <div class="grid">
+      <div class="grid-card" onclick="goPage('page-new-customer')">
+        <div class="icon">◻</div><h3>带到店新客</h3><p>到店、带客、核销</p>
+      </div>
+      <div class="grid-card" onclick="goPage('page-content')">
+        <div class="icon">◎</div><h3>生产内容</h3><p>探店、短视频、UGC</p>
+      </div>
+      <div class="grid-card" onclick="goPage('page-exposure')">
+        <div class="icon">↗</div><h3>扩大本地曝光</h3><p>覆盖与互动</p>
+      </div>
+      <div class="grid-card" onclick="goPage('page-coupon')">
+        <div class="icon">▽</div><h3>推广券与活动</h3><p>领取、预约、核销</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 生产内容主页 -->
+  <div class="page" id="page-content">
+    <div class="sub-header">
+      <button class="back-btn" onclick="goPage('page-main')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="sub-header-text">
+        <h1>生产内容</h1>
+        <p>内容任务 · 多平台发布 · 效果追踪</p>
+      </div>
+    </div>
+
+    <div class="dashboard-grid">
+      <div class="dash-item has-drill"><div class="dash-value">28</div><div class="dash-label">本店相关视频</div></div>
+      <div class="dash-item has-drill"><div class="dash-value">18</div><div class="dash-label">已发布</div></div>
+      <div class="dash-item has-drill"><div class="dash-value">5</div><div class="dash-label">待审核</div></div>
+      <div class="dash-item"><div class="dash-value">52.4w</div><div class="dash-label">总播放量</div></div>
+    </div>
+
+    <div class="status-filter">
+      <div class="status-chip active">全部 (28)</div>
+      <div class="status-chip">待接单 (2)</div>
+      <div class="status-chip">拍摄中 (3)</div>
+      <div class="status-chip">待审核 (5)</div>
+      <div class="status-chip">已发布 (18)</div>
+    </div>
+
+    <div class="section-title">
+      <h2>内容任务</h2>
+      <span>按交付时间排序</span>
+    </div>
+
+    <!-- 任务1：待审核（多平台） -->
+    <div class="task-card">
+      <div class="task-header">
+        <div class="task-creator">
+          <img src="https://i.pravatar.cc/150?img=1" alt="An">
+          <div class="creator-info-text">
+            <div class="creator-name">An</div>
+            <div class="creator-handle">@an_hanoi</div>
+          </div>
+        </div>
+        <span class="task-status reviewing">⏳ 待审核</span>
+      </div>
+
+      <!-- 多平台标签 -->
+      <div class="platform-row">
+        <span class="platform-tag tiktok">🎵 TikTok</span>
+        <span class="platform-tag douyin">🎶 抖音</span>
+        <span class="platform-tag own">🌐 自有平台</span>
+      </div>
+
+      <div class="task-title">"The Workshop 二层包厢初体验"</div>
+
+      <div class="progress-bar"><div class="progress reviewing"></div></div>
+
+      <div class="card-actions">
+        <button class="btn-card-action danger" onclick="goPage('page-content-review')">查看并审核</button>
+        <button class="btn-card-action primary" onclick="goPage('page-content-detail')">查看详情</button>
+      </div>
+    </div>
+
+    <!-- 任务2：拍摄中 -->
+    <div class="task-card">
+      <div class="task-header">
+        <div class="task-creator">
+          <img src="https://i.pravatar.cc/150?img=5" alt="Linh">
+          <div class="creator-info-text">
+            <div class="creator-name">Linh</div>
+            <div class="creator-handle">@linh_hanoi</div>
+          </div>
+        </div>
+        <span class="task-status producing">🎬 拍摄中</span>
+      </div>
+
+      <div class="platform-row">
+        <span class="platform-tag tiktok">🎵 TikTok</span>
+      </div>
+
+      <div class="task-title">"深夜咖啡角 · 30 秒看懂菜单"</div>
+
+      <div class="progress-bar"><div class="progress producing"></div></div>
+
+      <div class="card-actions">
+        <button class="btn-card-action">催促提醒</button>
+        <button class="btn-card-action primary" onclick="goPage('page-content-detail')">查看进度</button>
+      </div>
+    </div>
+
+    <!-- 任务3：已发布（多平台数据） -->
+    <div class="task-card">
+      <div class="task-header">
+        <div class="task-creator">
+          <img src="https://i.pravatar.cc/150?img=9" alt="Mai">
+          <div class="creator-info-text">
+            <div class="creator-name">Mai</div>
+            <div class="creator-handle">@mai_saigon</div>
+          </div>
+        </div>
+        <span class="task-status published">✓ 已发布</span>
+      </div>
+
+      <div class="platform-row">
+        <span class="platform-tag tiktok">🎵 TikTok</span>
+        <span class="platform-tag douyin">🎶 抖音</span>
+        <span class="platform-tag instagram">📷 IG</span>
+      </div>
+
+      <div class="task-title">"周末夜宵地图，第 5 站"</div>
+
+      <!-- 全平台汇总数据 -->
+      <div class="code-stats">
+        <div class="code-stat-item" onclick="goPage('page-content-detail')">
+          <div class="code-stat-value highlight-info">19.6w</div>
+          <div class="code-stat-label">总播放</div>
+        </div>
+        <div class="code-stat-item">
+          <div class="code-stat-value">6,240</div>
+          <div class="code-stat-label">总点赞</div>
+        </div>
+        <div class="code-stat-item">
+          <div class="code-stat-value">628</div>
+          <div class="code-stat-label">总评论</div>
+        </div>
+        <div class="code-stat-item">
+          <div class="code-stat-value highlight-money">¥1.8w</div>
+          <div class="code-stat-label">带动消费</div>
+        </div>
+      </div>
+
+      <div class="card-actions">
+        <button class="btn-card-action">数据复盘</button>
+        <button class="btn-card-action primary" onclick="goPage('page-content-detail')">查看详情</button>
+      </div>
+    </div>
+
+    <!-- 任务4：待接单 -->
+    <div class="task-card">
+      <div class="task-header">
+        <div class="task-creator">
+          <img src="https://i.pravatar.cc/150?img=12" alt="Kai">
+          <div class="creator-info-text">
+            <div class="creator-name">Kai</div>
+            <div class="creator-handle">@kai_hcmc</div>
+          </div>
+        </div>
+        <span class="task-status pending">⏱ 待接单</span>
+      </div>
+
+      <div class="platform-row">
+        <span class="platform-tag tiktok">🎵 TikTok</span>
+        <span class="platform-tag own">🌐 自有平台</span>
+      </div>
+
+      <div class="task-title">"雨天的第二层空间"</div>
+
+      <div class="progress-bar"><div class="progress pending"></div></div>
+
+      <div class="card-actions">
+        <button class="btn-card-action">撤回邀请</button>
+        <button class="btn-card-action primary">再次提醒</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 内容详情页（多平台精修版） -->
+  <div class="page" id="page-content-detail">
+    <div class="sub-header">
+      <button class="back-btn" onclick="goPage('page-content')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="sub-header-text">
+        <h1>内容详情</h1>
+        <p>Mai · 3 个平台已发布</p>
+      </div>
+    </div>
+
+    <!-- 视频预览 -->
+    <div class="video-preview">"周末夜宵地图，第 5 站"</div>
+
+    <!-- 内容基础信息 -->
+    <div class="detail-card">
+      <div class="detail-row"><span class="detail-label">创作者</span><span class="detail-value">Mai @mai_saigon</span></div>
+      <div class="detail-row"><span class="detail-label">内容类型</span><span class="detail-value">UGC 图文 + 短视频</span></div>
+      <div class="detail-row"><span class="detail-label">审核状态</span><span class="detail-value"><span class="badge-status ok">✓ 已通过</span></span></div>
+      <div class="detail-row"><span class="detail-label">首次发布</span><span class="detail-value">2026-10-02 19:30</span></div>
+    </div>
+
+    <!-- ========== 多平台发布区块（核心） ========== -->
+    <div class="platform-section-title">
+      <h3>发布平台</h3>
+      <span class="count">3 / 4 已发布</span>
+    </div>
+
+    <!-- TikTok -->
+    <div class="platform-publish-card">
+      <div class="platform-publish-header">
+        <div class="platform-badge-lg">
+          <div class="platform-icon tiktok">♪</div>
+          TikTok
+        </div>
+        <span class="platform-status published">✓ 已发布</span>
+      </div>
+
+      <div class="platform-stats">
+        <div>
+          <div class="platform-stat-value">12.4w</div>
+          <div class="platform-stat-label">播放</div>
+        </div>
+        <div>
+          <div class="platform-stat-value">3,820</div>
+          <div class="platform-stat-label">点赞</div>
+        </div>
+        <div>
+          <div class="platform-stat-value">428</div>
+          <div class="platform-stat-label">评论</div>
+        </div>
+      </div>
+
+      <div class="platform-meta">
+        <div class="platform-meta-row">
+          <span>发布时间</span>
+          <span class="value">2026-10-02 19:30</span>
+        </div>
+        <div class="platform-meta-row">
+          <span>发布链接</span>
+          <a class="platform-link" href="#">查看 ↗</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- 抖音 -->
+    <div class="platform-publish-card">
+      <div class="platform-publish-header">
+        <div class="platform-badge-lg">
+          <div class="platform-icon douyin">♫</div>
+          抖音
+        </div>
+        <span class="platform-status published">✓ 已发布</span>
+      </div>
+
+      <div class="platform-stats">
+        <div>
+          <div class="platform-stat-value">5.8w</div>
+          <div class="platform-stat-label">播放</div>
+        </div>
+        <div>
+          <div class="platform-stat-value">1,920</div>
+          <div class="platform-stat-label">点赞</div>
+        </div>
+        <div>
+          <div class="platform-stat-value">156</div>
+          <div class="platform-stat-label">评论</div>
+        </div>
+      </div>
+
+      <div class="platform-meta">
+        <div class="platform-meta-row">
+          <span>发布时间</span>
+          <span class="value">2026-10-03 10:15</span>
+        </div>
+        <div class="platform-meta-row">
+          <span>发布链接</span>
+          <a class="platform-link" href="#">查看 ↗</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Instagram -->
+    <div class="platform-publish-card">
+      <div class="platform-publish-header">
+        <div class="platform-badge-lg">
+          <div class="platform-icon instagram">◎</div>
+          Instagram
+        </div>
+        <span class="platform-status published">✓ 已发布</span>
+      </div>
+
+      <div class="platform-stats">
+        <div>
+          <div class="platform-stat-value">1.4w</div>
+          <div class="platform-stat-label">播放</div>
+        </div>
+        <div>
+          <div class="platform-stat-value">500</div>
+          <div class="platform-stat-label">点赞</div>
+        </div>
+        <div>
+          <div class="platform-stat-value">44</div>
+          <div class="platform-stat-label">评论</div>
+        </div>
+      </div>
+
+      <div class="platform-meta">
+        <div class="platform-meta-row">
+          <span>发布时间</span>
+          <span class="value">2026-10-03 20:45</span>
+        </div>
+        <div class="platform-meta-row">
+          <span>发布链接</span>
+          <a class="platform-link" href="#">查看 ↗</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- 自有平台（未发布） -->
+    <div class="platform-publish-card" style="opacity: 0.7;">
+      <div class="platform-publish-header">
+        <div class="platform-badge-lg">
+          <div class="platform-icon own">◎</div>
+          PAO0 自有平台
+        </div>
+        <span class="platform-status not-published">未发布</span>
+      </div>
+
+      <div class="platform-meta" style="border-top: none; padding-top: 0;">
+        <div class="platform-meta-row">
+          <span>说明</span>
+          <span class="value">内容审核通过后自动同步</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 转化效果汇总 -->
+    <div class="detail-card">
+      <div style="font-size: 12px; color: var(--text-sub); margin-bottom: 10px; font-weight: 600;">全平台转化效果</div>
+      <div class="detail-row"><span class="detail-label">通过本视频到店</span><span class="detail-value">128 人</span></div>
+      <div class="detail-row"><span class="detail-label">使用优惠码核销</span><span class="detail-value">86 单</span></div>
+      <div class="detail-row"><span class="detail-label">带动消费</span><span class="detail-value big">¥18,400</span></div>
+    </div>
+
+    <!-- 热评 -->
+    <div class="detail-card">
+      <div style="font-size: 12px; color: var(--text-sub); margin-bottom: 10px; font-weight: 600;">热评（628）</div>
+      <div class="comment-row">
+        <div class="comment-avatar">L</div>
+        <div class="comment-body">
+          <div class="comment-name">用户 ****3456</div>
+          <div class="comment-text">这家店我去过，环境确实好，服务也很到位！</div>
+          <div class="comment-time">2小时前 · 32 赞</div>
+        </div>
+      </div>
+      <div class="comment-row">
+        <div class="comment-avatar">M</div>
+        <div class="comment-body">
+          <div class="comment-name">用户 ****7890</div>
+          <div class="comment-text">看起来不错，周末去试试</div>
+          <div class="comment-time">4小时前 · 18 赞</div>
+        </div>
+      </div>
+      <div class="comment-row">
+        <div class="comment-avatar">K</div>
+        <div class="comment-body">
+          <div class="comment-name">用户 ****1234</div>
+          <div class="comment-text">价格怎么样？有没有隐藏消费？</div>
+          <div class="comment-time">6小时前 · 12 赞</div>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn-primary-lg" onclick="alert('已复制全部平台链接')">复制全部平台链接</button>
+    <button class="btn-secondary-lg" onclick="alert('已导出分平台数据报表')">导出分平台报表</button>
+  </div>
+
+  <!-- 内容审核页 -->
+  <div class="page" id="page-content-review">
+    <div class="sub-header">
+      <button class="back-btn" onclick="goPage('page-content')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="sub-header-text">
+        <h1>内容审核</h1>
+        <p>An · 计划发 3 个平台</p>
+      </div>
+    </div>
+
+    <div class="video-preview">"The Workshop 二层包厢初体验"</div>
+
+    <!-- 计划发布平台 -->
+    <div class="detail-card">
+      <div style="font-size: 12px; color: var(--text-sub); margin-bottom: 10px; font-weight: 600;">计划发布平台</div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <span class="platform-tag tiktok" style="padding: 6px 12px; font-size: 11px;">🎵 TikTok</span>
+        <span class="platform-tag douyin" style="padding: 6px 12px; font-size: 11px;">🎶 抖音</span>
+        <span class="platform-tag own" style="padding: 6px 12px; font-size: 11px;">🌐 自有平台</span>
+      </div>
+    </div>
+
+    <div class="detail-card">
+      <div class="detail-row"><span class="detail-label">提交人</span><span class="detail-value">An @an_hanoi</span></div>
+      <div class="detail-row"><span class="detail-label">内容类型</span><span class="detail-value">探店短视频</span></div>
+      <div class="detail-row"><span class="detail-label">时长</span><span class="detail-value">0:42</span></div>
+      <div class="detail-row"><span class="detail-label">提交时间</span><span class="detail-value">2026-10-04 18:33</span></div>
+    </div>
+
+    <div class="detail-card">
+      <div style="font-size: 12px; color: var(--text-sub); margin-bottom: 10px; font-weight: 600;">审核要点</div>
+      <div class="detail-row"><span class="detail-label">门店画面是否清晰</span><span class="detail-value"><span class="badge-status ok">✓ 通过</span></span></div>
+      <div class="detail-row"><span class="detail-label">是否含站外联系方式</span><span class="detail-value"><span class="badge-status ok">✓ 无</span></span></div>
+      <div class="detail-row"><span class="detail-label">是否与实物相符</span><span class="detail-value"><span class="badge-status info">人工判断</span></span></div>
+      <div class="detail-row"><span class="detail-label">是否有竞品露出</span><span class="detail-value"><span class="badge-status ok">✓ 无</span></span></div>
+    </div>
+
+    <button class="btn-primary-lg" onclick="alert('审核通过，内容将同步至 3 个平台');goPage('page-content')" style="background: var(--ok);">✓ 审核通过</button>
+    <button class="btn-secondary-lg" onclick="alert('请填写打回原因');" style="color: var(--danger);">打回重拍</button>
+  </div>
+
+  <!-- 其它页面 -->
+  <div class="page" id="page-new-customer">
+    <div class="sub-header">
+      <button class="back-btn" onclick="goPage('page-main')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="sub-header-text"><h1>带到店新客</h1><p>餐饮专属折扣</p></div>
+    </div>
+  </div>
+  <div class="page" id="page-exposure">
+    <div class="sub-header">
+      <button class="back-btn" onclick="goPage('page-main')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="sub-header-text"><h1>扩大曝光</h1><p>覆盖追踪</p></div>
+    </div>
+  </div>
+  <div class="page" id="page-coupon">
+    <div class="sub-header">
+      <button class="back-btn" onclick="goPage('page-main')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="sub-header-text"><h1>推广券与活动</h1><p>核销追踪</p></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function goPage(pageId) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById(pageId).classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  document.querySelectorAll('.tabs .tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+    });
+  });
+  document.querySelectorAll('.status-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.status-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>
