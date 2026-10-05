@@ -98,12 +98,21 @@ describe("NOTIF-BELL-001: 接线（这条是本次的真病）", () => {
   it("AppShell 真的读了 notification prop —— 它原来是死的", () => {
     // 反向臂在前：改动前 AppShell 里 `notification` 只出现 3 次（import / 解构 / 类型），
     // 一次都不调。把调用删掉，下面第一条立刻红。
-    expect(shell, "notification prop 又变回死的了（只声明不读）").toContain("notification.listInbox()");
+    //
+    // MERCHANT-CREATOR-NOTIFY-001：断言跟着一起改成 listInboxPage() —— 服务端现在
+    // 分页返回（以前一次全量，本地库已 926 行且只增）。这里跟着改的是**调用形状**，
+    // 「prop 必须被读」这条意图一个字没变：把调用删掉照样红。
+    expect(shell, "notification prop 又变回死的了（只声明不读）").toContain("notification.listInboxPage()");
     expect(shell).toContain("notification");
   });
 
   it("角标是数出来的，不是原型那个写死的 9+", () => {
-    expect(shell).toContain("badgeText(unreadCount(inboxItems))");
+    // MERCHANT-CREATOR-NOTIFY-001：分页之后角标**不能**再数当前列表
+    // （unreadCount(inboxItems) 会被页大小封顶：角标显示 20 而真实未读 300 ——
+    // 那是假数字，用户据此判断「我有没有漏看消息」）。所以这里要求角标用服务端
+    // 给的 inboxUnreadTotal，unreadCount 只作为 fallback 保留在表达式里。
+    expect(shell, "角标必须用服务端给的全部未读数，而不是数当前页").toContain("badgeText(inboxUnreadTotal || unreadCount(inboxItems))");
+    expect(shell).toContain("setInboxUnreadTotal(page.unreadTotal)");
     // 顶栏里不许出现字面量角标。
     expect(shell, "顶栏又写死了一个 9+ 角标").not.toContain('badge="9+"');
   });

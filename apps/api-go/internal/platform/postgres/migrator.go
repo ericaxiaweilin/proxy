@@ -181,17 +181,47 @@ func (m *Migrator) Apply(ctx context.Context, dryRun bool) (applied []string, pe
 	return applied, pending, nil
 }
 
+// applyOne 逐文件执行。**整个文件在一个事务里**（MERCHANT-CREATOR-NOTIFY-001）。
+//
+// 之前是 pool.Exec(整份文件)：pgx 对多语句走 simple protocol，语句之间**没有**
+// 隐式事务 ⇒ 中途失败时前面的语句已经落库，而 recordApplied 不会执行 ⇒ 下次
+// 启动重跑这个文件时，ADD COLUMN IF NOT EXISTS 之类的语句会「静默成功」而真正
+// 失败的那步照旧失败，于是这个迁移永远卡在那里，而数据库处于半应用状态。
+//
+// 实况（176 那次）：UPDATE 因 RLS 一行都匹配不到（不是报错！），
+// SET NOT NULL 失败，文件后面的 CREATE INDEX 照跑 —— 结果是
+// 「列存在、可空、926 行全 NULL」，看起来迁移成功了，其实 sweeper 永远不会删
+// 任何东西。这正是「安静」最贵的一次：没人会发现，也没人知道该重跑哪一步。
+//
+// 事务包住之后：文件里任何一步失败 ⇒ 全部回滚 ⇒ schema_migrations 不记录 ⇒
+// 下次干净重跑。失败要么全发生要么全不发生。
+//
+// 注意：正因为整个文件是原子的，迁移文件里**不能**自带 BEGIN/COMMIT（会撞
+// "there is already a transaction in progress"）。仓库里现有 13 个匹配到 BEGIN
+// 的文件都是 PL/pgSQL 的 DO $$ ... BEGIN ... END$$，不是事务控制，验证过。
 func (m *Migrator) applyOne(ctx context.Context, f migrationFile) error {
 	sum := sha256Hex([]byte(f.Content))
-	// 跑 migration
-	if _, err := m.pool.Exec(ctx, f.Content); err != nil {
+	tx, err := m.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, f.Content); err != nil {
 		return fmt.Errorf("exec: %w", err)
 	}
-	// 记 schema_migrations
-	if err := m.recordApplied(ctx, f.Version, sum); err != nil {
+	// 记 schema_migrations：在同一个事务里，成功即记录，失败即一起回滚。
+	if err := m.ensureSchemaMigrationsTable(ctx); err != nil {
 		return fmt.Errorf("record: %w", err)
 	}
-	return nil
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO public.schema_migrations (version, checksum, filename)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (version) DO UPDATE
+		SET applied_at = now(), checksum = EXCLUDED.checksum, filename = EXCLUDED.filename`,
+		f.Version, sum, f.Version+".sql"); err != nil {
+		return fmt.Errorf("record: %w", err)
+	}
+	return tx.Commit(ctx)
 }
 
 // ensureSchemaMigrationsTable 确保 schema_migrations 表存在。

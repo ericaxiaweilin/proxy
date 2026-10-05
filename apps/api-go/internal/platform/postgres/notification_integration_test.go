@@ -92,36 +92,36 @@ func TestNotificationPostgresRoundTrip(t *testing.T) {
 
 	// 5. ListInbox for userID must return exactly the 3 we sent, in
 	// deterministic order (newest first by created_at DESC).
-	items, err := repo.ListInbox(ctx, userID, false)
+	items, err := repo.ListInbox(ctx, userID, false, 0, "")
 	if err != nil {
 		t.Fatalf("ListInbox: %v", err)
 	}
-	if len(items) != 3 {
-		t.Fatalf("expected 3 items, got %d", len(items))
+	if len(items.Items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(items.Items))
 	}
-	if items[0].CreatedAt.Before(items[1].CreatedAt) {
+	if items.Items[0].CreatedAt.Before(items.Items[1].CreatedAt) {
 		t.Fatalf("ListInbox not sorted DESC by created_at")
 	}
 	// Cross-tenant: the other user's item must NOT leak in.
-	for _, it := range items {
+	for _, it := range items.Items {
 		if it.RecipientID != userID {
 			t.Fatalf("cross-tenant leak: %+v", it)
 		}
 	}
 
 	// 6. Mark one of them read; unreadOnly must now skip it.
-	first := items[0]
+	first := items.Items[0]
 	if err := repo.MarkRead(ctx, first.ID, userID); err != nil {
 		t.Fatalf("MarkRead: %v", err)
 	}
-	unread, err := repo.ListInbox(ctx, userID, true)
+	unread, err := repo.ListInbox(ctx, userID, true, 0, "")
 	if err != nil {
 		t.Fatalf("ListInbox(unread): %v", err)
 	}
-	if len(unread) != 2 {
-		t.Fatalf("unreadOnly must return 2, got %d", len(unread))
+	if len(unread.Items) != 2 {
+		t.Fatalf("unreadOnly must return 2, got %d", len(unread.Items))
 	}
-	for _, it := range unread {
+	for _, it := range unread.Items {
 		if it.Read {
 			t.Fatalf("unreadOnly returned a read item: %+v", it)
 		}
@@ -133,8 +133,8 @@ func TestNotificationPostgresRoundTrip(t *testing.T) {
 	}
 	got, _ = repo.GetDeviceToken(ctx, userID, deviceID)
 	_ = got
-	items, _ = repo.ListInbox(ctx, userID, false)
-	if !items[0].Read {
+	items, _ = repo.ListInbox(ctx, userID, false, 0, "")
+	if !items.Items[0].Read {
 		t.Fatalf("cross-tenant MarkRead must not have flipped read flag")
 	}
 
@@ -145,8 +145,8 @@ func TestNotificationPostgresRoundTrip(t *testing.T) {
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("SendInboxNotification(no link): %+v", r.Error)
 	}
-	items, _ = repo.ListInbox(ctx, userID, false)
-	noLink := items[0]
+	items, _ = repo.ListInbox(ctx, userID, false, 0, "")
+	noLink := items.Items[0]
 	if noLink.DeepLink != "" {
 		t.Fatalf("missing deep link must come back empty, got %q", noLink.DeepLink)
 	}
@@ -339,15 +339,15 @@ func TestNotificationEmptyInboxSerialisesAsArrayNotNull(t *testing.T) {
 	// 一个**确定没有任何行**的收件人。用纳秒时间戳保证它不可能是别人造出来的。
 	recipient := "user_notif_empty_" + itoa(time.Now().UnixNano())
 
-	items, err := repo.ListInbox(ctx, recipient, false)
+	items, err := repo.ListInbox(ctx, recipient, false, 0, "")
 	if err != nil {
 		t.Fatalf("ListInbox: %v", err)
 	}
-	if items == nil {
+	if items.Items == nil {
 		t.Fatal("PG ListInbox must return an empty slice, not nil — nil marshals to `null` and the client throws")
 	}
-	if len(items) != 0 {
-		t.Fatalf("expected an empty inbox for %s, got %d rows", recipient, len(items))
+	if len(items.Items) != 0 {
+		t.Fatalf("expected an empty inbox for %s, got %d rows", recipient, len(items.Items))
 	}
 
 	r := svc.HandleContext(ctx, notificationEnvelope("ListInbox", map[string]any{}, recipient))
@@ -360,6 +360,16 @@ func TestNotificationEmptyInboxSerialisesAsArrayNotNull(t *testing.T) {
 	if !strings.Contains(r.OperationRef, `"items":[]`) {
 		t.Fatalf("operationRef must carry an empty array, got: %s", r.OperationRef)
 	}
+}
+
+// superuserRoleName 找一个能绕过 RLS 的角色来清理测试自己写的行
+// （inbox_items 的 DELETE 未授权 —— 那是 migration 173 的设计，测试清理是例外）。
+func superuserRoleName(ctx context.Context, pool *pgxpool.Pool) string {
+	var name string
+	if err := pool.QueryRow(ctx, `SELECT rolname FROM pg_roles WHERE rolsuper LIMIT 1`).Scan(&name); err != nil {
+		return ""
+	}
+	return name
 }
 
 func notificationEnvelope(commandType string, payload map[string]any, actorID string) command.Envelope {
@@ -582,7 +592,7 @@ func TestNotificationScopeDoesNotLeakAcrossPooledConnections(t *testing.T) {
 	repo := NewNotificationRepository(pool)
 	recipient := "user_scope_leak_" + itoa(time.Now().UnixNano())
 
-	if _, err := repo.ListInbox(ctx, recipient, false); err != nil {
+	if _, err := repo.ListInbox(ctx, recipient, false, 0, ""); err != nil {
 		t.Fatalf("ListInbox: %v", err)
 	}
 	// 复用池里的连接，但这个查询本身没声明任何作用域。
@@ -601,7 +611,7 @@ func TestNotificationRejectsEmptyScopeBeforeQuerying(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	repo := NewNotificationRepository(pool)
-	if _, err := repo.ListInbox(ctx, "", false); err == nil {
+	if _, err := repo.ListInbox(ctx, "", false, 0, ""); err == nil {
 		t.Fatal("an empty recipient must be rejected")
 	}
 	if err := repo.MarkRead(ctx, "inbox_x", "  "); err == nil {
@@ -765,11 +775,11 @@ func TestNotificationRepositoryWorksOnNonSuperuserConnection(t *testing.T) {
 		pool.Exec(ctx, `DELETE FROM notification.inbox_items WHERE id = ANY($1)`, []string{"inbox_ns_own_" + run, "inbox_ns_other_" + run})
 	})
 
-	items, err := repo.ListInbox(ctx, recipient, false)
+	items, err := repo.ListInbox(ctx, recipient, false, 0, "")
 	if err != nil {
 		t.Fatalf("ListInbox on a non-superuser connection must work: %v", err)
 	}
-	if len(items) != 1 || items[0].RecipientID != recipient {
+	if len(items.Items) != 1 || items.Items[0].RecipientID != recipient {
 		t.Fatalf("ListInbox must return exactly this recipient's row, got %+v", items)
 	}
 
@@ -824,5 +834,114 @@ func TestNotificationRepositoryWorksOnNonSuperuserConnection(t *testing.T) {
 	}
 	if len(tokens) != 0 {
 		t.Fatalf("a retired token must not remain a push target, got %d", len(tokens))
+	}
+}
+
+// MERCHANT-CREATOR-NOTIFY-001：PG 这一侧的分页 + 未读总数 + 过期回收。
+//
+// 内存实现已经钉了分页形状，但两套实现必须**形状一致**（NOTIF-EMPTY-LIST-001 的
+// 同类要求）—— PG 那边以前是全量返回。这条钉住 PG 也分页、也返回真实未读总数。
+func TestInboxPaginationAndExpiryOnPG(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewNotificationRepository(pool)
+	run := itoa(time.Now().UnixNano())
+	recipient := "user_pg_pager_" + run
+	other := "user_pg_pager_other_" + run
+	base := time.Now().UTC().Truncate(time.Second)
+
+	pipeline := notification.NewPipeline(repo, nil)
+	ids := []string{}
+	for i := 0; i < 7; i++ {
+		item, _, err := pipeline.Emit(ctx, notification.Notification{
+			RecipientID: recipient, Type: "Probe", Title: "t",
+			DedupeKey: notification.EventDedupeKey("evt_pg_page_" + run + "_" + string(rune('a'+i))),
+		})
+		if err != nil {
+			t.Fatalf("seed inbox item %d: %v", i, err)
+		}
+		ids = append(ids, item.ID)
+	}
+	// 别人的两条：必须既不出现在这一页，也不进未读总数。
+	for i := 0; i < 2; i++ {
+		if _, _, err := pipeline.Emit(ctx, notification.Notification{
+			RecipientID: other, Type: "Probe", Title: "other",
+			DedupeKey: notification.EventDedupeKey("evt_pg_other_" + run + "_" + string(rune('a'+i))),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		// inbox_items 的 DELETE 未授权（migration 173），测试清理用超级用户。
+		if _, err := pool.Exec(bg, `SET LOCAL ROLE `+superuserRoleName(bg, pool)); err != nil {
+			pool.Exec(bg, `DELETE FROM notification.inbox_items WHERE recipient_id IN ($1,$2)`, recipient, other)
+			return
+		}
+		pool.Exec(bg, `DELETE FROM notification.inbox_items WHERE recipient_id IN ($1,$2)`, recipient, other)
+	})
+
+	page1, err := repo.ListInbox(ctx, recipient, false, 3, "")
+	if err != nil {
+		t.Fatalf("ListInbox page1: %v", err)
+	}
+	if len(page1.Items) != 3 {
+		t.Fatalf("limit=3 must return 3, got %d", len(page1.Items))
+	}
+	if page1.NextCursor == "" {
+		t.Fatal("7 rows over 3-per-page must advertise a second page")
+	}
+	if page1.UnreadTotal != 7 {
+		t.Fatalf("unreadTotal = %d, want 7 (and not the other user's 2)", page1.UnreadTotal)
+	}
+
+	// 翻到底：每条恰好出现一次。
+	seen := map[string]bool{}
+	cursor := ""
+	for i := 0; i < 5; i++ {
+		page, err := repo.ListInbox(ctx, recipient, false, 3, cursor)
+		if err != nil {
+			t.Fatalf("page %d: %v", i, err)
+		}
+		for _, item := range page.Items {
+			if seen[item.ID] {
+				t.Fatalf("pagination repeated %s", item.ID)
+			}
+			seen[item.ID] = true
+			if item.RecipientID != recipient {
+				t.Fatalf("another recipient's row leaked in: %+v", item)
+			}
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	if len(seen) != 7 {
+		t.Fatalf("paging must cover all 7 rows exactly once, got %d", len(seen))
+	}
+
+	// 过期回收：把两行的 expires_at 推到过去，然后跑 sweeper。
+	if _, err := pool.Exec(ctx, `
+		UPDATE notification.inbox_items SET expires_at = $1
+		WHERE recipient_id=$2 AND id = ANY($3)`, base.Add(-48*time.Hour), recipient, ids[:2]); err != nil {
+		t.Fatalf("backdate two rows: %v", err)
+	}
+	purged, err := repo.PurgeExpiredInboxItems(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("PurgeExpiredInboxItems: %v", err)
+	}
+	if purged < 2 {
+		t.Fatalf("expected at least 2 purged rows, got %d", purged)
+	}
+	after, err := repo.ListInbox(ctx, recipient, false, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Items) != 5 {
+		t.Fatalf("expired rows must disappear from the inbox, got %d rows", len(after.Items))
+	}
+	if after.UnreadTotal != 5 {
+		t.Fatalf("unreadTotal must drop with the purged rows, got %d", after.UnreadTotal)
 	}
 }

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -194,17 +196,33 @@ func (r *NotificationRepository) InsertInboxItemOnce(ctx context.Context, item n
 	return tag.RowsAffected() == 1, nil
 }
 
-func (r *NotificationRepository) ListInbox(ctx context.Context, recipientID string, unreadOnly bool) ([]notification.InboxItem, error) {
-	// unreadOnly is honored by the in-memory path; PG should too so the
-	// two paths stay in lockstep on shape.
+// ListInbox 取一页。排序与分页规则必须与内存实现**逐条一致**（NOTIF-EMPTY-LIST-001
+// 的同类要求）：(created_at DESC, id DESC)，游标是 (created_at, id) 而不是 offset。
+//
+// 为什么不用 offset：offset 在「边读边有新通知进来」时会漏行或重复行，而收件箱
+// 一直在长。游标续在「严格更旧」的位置上，同刻的项靠 id 打破并列。
+//
+// 只返回**未过期**的（migration 176）：已过期的等 sweeper 回收，在被回收之前
+// 也不该出现在用户面前。
+func (r *NotificationRepository) ListInbox(ctx context.Context, recipientID string, unreadOnly bool, limit int, cursor string) (notification.InboxPage, error) {
 	sqlStr := `
 		SELECT id, recipient_id, type, title, body, deep_link, read, created_at
 		FROM notification.inbox_items
-		WHERE recipient_id=$1`
+		WHERE recipient_id=$1
+		  AND expires_at > now()`
+	args := []any{recipientID}
 	if unreadOnly {
 		sqlStr += ` AND read = FALSE`
 	}
-	sqlStr += ` ORDER BY created_at DESC`
+	if afterAt, afterID, hasCursor := notification.DecodeInboxCursor(cursor); hasCursor {
+		// (created_at, id) 的字典序比较：PostgreSQL 支持 row 比较。
+		sqlStr += ` AND (created_at, id) < ($2, $3)`
+		args = append(args, afterAt, afterID)
+	}
+	// 多取一条用来判断「还有没有下一页」，而不是再发一次 count 查询。
+	sqlStr += ` ORDER BY created_at DESC, id DESC LIMIT $` + strconv.Itoa(len(args)+1)
+	args = append(args, notification.MaxInboxPageSize+1)
+
 	// NOTIF-EMPTY-LIST-001：**必须**初始化成非 nil 的空切片，不能留 nil。
 	//
 	// 这里返回 nil 时，上层 `listInbox` 把它塞进
@@ -212,13 +230,19 @@ func (r *NotificationRepository) ListInbox(ctx context.Context, recipientID stri
 	// **`null`** 而不是 `[]`。客户端（notification-client.ts）读的是
 	// `Array.isArray(body.items)` —— `null` 过不了这关，于是**收件箱为空**的
 	// 用户看到的是「通知没取到，下拉重试」这个**加载失败**态，而不是空态。
-	// 现网只有 2 个收件人（business_001 / user_0377fe95…）有行，其余全部命中
-	// 这条 —— 也就是说这个 bug 对绝大多数用户都是 100% 复现的。
 	//
 	// 空列表和「没有列表」不是一回事：前者是数据，后者是协议破损。
 	items := []notification.InboxItem{}
+	pageLimit := limit
+	if pageLimit <= 0 {
+		pageLimit = notification.DefaultInboxPageSize
+	}
+	if pageLimit > notification.MaxInboxPageSize {
+		pageLimit = notification.MaxInboxPageSize
+	}
+	var next string
 	err := r.withRecipient(ctx, recipientID, func(q sqlQueryer) error {
-		rows, err := q.Query(ctx, sqlStr, recipientID)
+		rows, err := q.Query(ctx, sqlStr, args...)
 		if err != nil {
 			return err
 		}
@@ -237,9 +261,59 @@ func (r *NotificationRepository) ListInbox(ctx context.Context, recipientID stri
 		return rows.Err()
 	})
 	if err != nil {
-		return nil, err
+		return notification.InboxPage{}, err
 	}
-	return items, nil
+	// 多取的那一条只是探针，不进响应。切页逻辑与内存实现共用同一份。
+	items, next = notification.PaginateInbox(items, pageLimit)
+
+	// 未读总数：与分页/游标/过滤**无关**，因为铃铛角标要的是「我一共漏看多少」。
+	unreadTotal := 0
+	if err := r.withRecipient(ctx, recipientID, func(q sqlQueryer) error {
+		return q.QueryRow(ctx, `
+			SELECT count(*) FROM notification.inbox_items
+			WHERE recipient_id=$1 AND read = FALSE AND expires_at > now()`, recipientID).Scan(&unreadTotal)
+	}); err != nil {
+		return notification.InboxPage{}, err
+	}
+	return notification.InboxPage{Items: items, NextCursor: next, UnreadTotal: unreadTotal}, nil
+}
+
+// PurgeExpiredInboxItems 回收已过期的读件箱（migration 176，90 天保留期）。
+//
+// 这是仓库铁律里明确列出的 infra GC 例外（和 conversation.PurgeExpiredMessages
+// 同一个模式：固定期限 + sweeper + 日志）。被删的**只是读件箱**，事实本身
+// （订单、内容任务、邀约）在业务表里不动。
+//
+// 返回删掉的行数，交给 worker 打日志 —— 一个静默的 GC 是没法运维的。
+func (r *NotificationRepository) PurgeExpiredInboxItems(ctx context.Context, now time.Time) (int64, error) {
+	// 走超级用户/表属主之外的路径不行：inbox_items 上有 FORCE RLS，而这个
+	// 回收动作**不属于任何收件人**。所以它必须绕开 RLS —— 用表属主身份 +
+	// 事务级关掉 RLS，而不是靠给某个用户开权限。
+	//
+	// 为什么不设 proxy.recipient_id：这属于「平台级回收」，把它伪装成某个
+	// 用户的操作正是 RLS 要防的那类事（审计日志里会显示成某个用户在删数据）。
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `ALTER TABLE notification.inbox_items DISABLE ROW LEVEL SECURITY`); err != nil {
+		return 0, fmt.Errorf("inbox gc: cannot disable row level security (is this role the table owner?): %w", err)
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM notification.inbox_items WHERE expires_at <= $1`, now)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE notification.inbox_items ENABLE ROW LEVEL SECURITY`); err != nil {
+		return 0, fmt.Errorf("inbox gc: failed to re-enable row level security: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE notification.inbox_items FORCE ROW LEVEL SECURITY`); err != nil {
+		return 0, fmt.Errorf("inbox gc: failed to restore FORCE row level security: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (r *NotificationRepository) MarkRead(ctx context.Context, itemID, recipientID string) error {

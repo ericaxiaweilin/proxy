@@ -148,6 +148,10 @@ func (p *Pipeline) Emit(ctx context.Context, n Notification) (InboxItem, bool, e
 		DeepLink:    n.DeepLink,
 		Read:        false,
 		CreatedAt:   p.clock.Now().UTC(),
+		// 保留期由管线定（migration 176）：这是唯一写侧，所以期限也该在这里定。
+		// 不在 Repository 里定 —— 那样「多长的通知算过期」就变成每个实现各自的
+		// 决定，而 expires_at 是 NOT NULL 的：漏一处就是一次写入失败。
+		ExpiresAt: p.clock.Now().UTC().Add(InboxRetention),
 	}
 	created, err := p.insertOnce(ctx, item)
 	if err != nil {

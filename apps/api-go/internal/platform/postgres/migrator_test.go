@@ -348,3 +348,69 @@ func TestMigrator_NonSqlFilesIgnored(t *testing.T) {
 // sharedPool is provided by TestMain in testdb_test.go
 var _ = pgx.ErrNoRows
 var _ = strings.HasSuffix
+
+// MERCHANT-CREATOR-NOTIFY-001：迁移必须**整份文件原子**。
+//
+// 176 那次踩到的：UPDATE 因 RLS 一行都匹配不到（那不是报错，是 policy 判 NULL），
+// SET NOT NULL 失败，而文件后面的 CREATE INDEX 照跑。pgx 对多语句走 simple
+// protocol，语句之间没有隐式事务 ⇒ 结果留下「列存在、可空、926 行全 NULL」的
+// 半应用状态：看起来迁移成功了，sweeper 却永远不会删任何东西，而且没人知道
+// 该重跑哪一步。
+//
+// 这条钉的是：文件里任何一步失败 ⇒ 整个文件回滚，且 schema_migrations 不记录
+// （下次干净重跑）。
+func TestMigrationIsAllOrNothing(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	m0 := NewMigrator(pool, "../../migrations")
+	if err := m0.ensureSchemaMigrationsTable(ctx); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	version := "997_atomicity_probe"
+	failing := "CREATE TABLE public.atomicity_probe_a (id TEXT);\n" +
+		"SELECT 1 FROM public.definitely_missing_relation_for_atomicity_probe;\n" // 这一步必失败
+	path := filepath.Join(dir, version+".sql")
+	if err := os.WriteFile(path, []byte(failing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := NewMigrator(pool, dir)
+	if _, _, err := m.Apply(ctx, false); err == nil {
+		t.Fatal("a migration with a failing statement must fail")
+	}
+
+	var leftovers int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_name='atomicity_probe_a'`).Scan(&leftovers); err != nil {
+		t.Fatal(err)
+	}
+	if leftovers != 0 {
+		t.Fatal("the statement that ran before the failure must have been rolled back — 半应用状态就是这次要消灭的东西")
+	}
+	var recorded int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM public.schema_migrations WHERE version=$1`, version).Scan(&recorded); err != nil {
+		t.Fatal(err)
+	}
+	if recorded != 0 {
+		t.Fatal("a failed migration must not be recorded as applied (otherwise it never retries)")
+	}
+
+	// 改成合法内容后必须能干净重跑。
+	ok := "CREATE TABLE public.atomicity_probe_a (id TEXT);\n"
+	if err := os.WriteFile(path, []byte(ok), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := m.Apply(ctx, false); err != nil {
+		t.Fatalf("retry after fixing the file must succeed: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM public.schema_migrations WHERE version=$1`, version).Scan(&recorded); err != nil {
+		t.Fatal(err)
+	}
+	if recorded != 1 {
+		t.Fatalf("a successful retry must be recorded, got %d rows", recorded)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DROP TABLE IF EXISTS public.atomicity_probe_a`)
+		_, _ = pool.Exec(bg, `DELETE FROM public.schema_migrations WHERE version=$1`, version)
+	})
+}

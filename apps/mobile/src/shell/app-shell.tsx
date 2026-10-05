@@ -227,6 +227,8 @@ export function AppShell({
   // SlotOfferCreated 43 / OfferAccepted 42 / OrderCreated 2）。缺的只有用户能看见的那一头。
   const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
   const [inboxItems, setInboxItems] = useState<ReadonlyArray<InboxItem>>([]);
+  // 铃铛角标：服务端给的全部未读数（分页之后不能数当前页）。
+  const [inboxUnreadTotal, setInboxUnreadTotal] = useState(0);
   useEffect(() => {
     let cancelled = false;
     const refresh = (): void => {
@@ -244,9 +246,15 @@ export function AppShell({
   useEffect(() => {
     if (tab !== "HOME") return;
     let cancelled = false;
-    void notification.listInbox()
-      .then((next) => {
-        if (!cancelled) setInboxItems(next);
+    void notification.listInboxPage()
+      .then((page) => {
+        if (!cancelled) {
+          setInboxItems(page.items);
+          // 角标用服务端给的全部未读数，而不是数当前页 —— 以前是
+          // unreadCount(inboxItems)，分页之后那个数字会被页大小封顶，
+          // 变成「角标说 20、你其实漏了 300 条」这种假数字。
+          setInboxUnreadTotal(page.unreadTotal);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -719,7 +727,7 @@ export function AppShell({
             undefined ⇒ 不画角标），不是原型那个写死的 "9+"。 */}
         {isNavVisible && tab === "HOME" ? (
           <Header
-            badge={badgeText(unreadCount(inboxItems))}
+            badge={badgeText(inboxUnreadTotal || unreadCount(inboxItems))}
             compact={compactWidth}
             onOpenNotifications={() => setNotificationCenterOpen(true)}
           />

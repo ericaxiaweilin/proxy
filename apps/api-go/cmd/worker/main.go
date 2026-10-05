@@ -393,7 +393,8 @@ func main() {
 	// NOTIF-PIPELINE-001：通知走**和 API 同一条**管线 —— 同一个 Repository、
 	// 同一个推送通道选择逻辑（PushProviderFromEnv，认 NOTIFICATION_PUSH）。
 	// 以前 worker 自己写 SQL、API 走 Service，推送通道只有 API 那半知道。
-	inboxRepo := postgres.NewNotificationRepository(pool)
+	notificationRepository := postgres.NewNotificationRepository(pool)
+	inboxRepo := notificationRepository
 	pushProvider, pushNote := notification.PushProviderFromEnv(os.Getenv, inboxRepo)
 	// MERCHANT-CREATOR-NOTIFY-001：推送失败逐条进日志，再聚合成一条可告警计数。
 	// 以前是 `_ = p.push.Push(...)`，落库成功后就再没人知道推送挂了。
@@ -493,6 +494,13 @@ func main() {
 		case <-gravityTicker.C:
 			recomputeGravity(ctx, gravityStore)
 		case <-sweeperTicker.C:
+			// MERCHANT-CREATOR-NOTIFY-001：收件箱回收（migration 176，90 天保留期）。
+			// 不做的话它只增不减（现在 926 行），而 ListInbox 会把它整页整页发给客户端。
+			if n, err := notificationRepository.PurgeExpiredInboxItems(ctx, time.Now().UTC()); err != nil {
+				log.Printf("inbox gc failed: %v", err)
+			} else if n > 0 {
+				log.Printf("inbox gc purged: count=%d", n)
+			}
 			if n, err := conversationRepository.PurgeExpiredMessages(ctx, time.Now().UTC()); err != nil {
 				log.Printf("conversation sweep failed: %v", err)
 			} else if n > 0 {

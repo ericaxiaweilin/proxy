@@ -3,10 +3,12 @@ package notification
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +38,51 @@ type InboxItem struct {
 	DeepLink    string    `json:"deepLink,omitempty"`
 	Read        bool      `json:"read"`
 	CreatedAt   time.Time `json:"createdAt"`
+	// ExpiresAt 是这一条**读件箱**的回收时刻（migration 176，90 天保留期）。
+	//
+	// 不进 JSON：它是保留期元数据，不是用户看得到的事实。
+	//
+	// 收件箱以前只增不减（现在库里 926 行），而 ListInbox 会把它全量返回给客户端 ——
+	// 没有期限就是必然撑爆，只是时间问题。
+	ExpiresAt time.Time `json:"-"`
 }
+
+// InboxRetention 是读件箱保留期。
+//
+// 90 天，比会话消息的 30 天长：通知是**平台说过的话**，已读之后仍可能是用户
+// 回看事实的依据（「我的专属折扣当时是多少」）；会话消息 30 天后归档是社交流的
+// 常识，收件箱不是。
+//
+// 被回收的只是读件箱这一条，事实本身（订单、内容任务、邀约）在业务表里不动。
+const InboxRetention = 90 * 24 * time.Hour
+
+// InboxPage 是一页收件箱 + 下一页游标（MERCHANT-CREATOR-NOTIFY-001）。
+//
+// 为什么现在就需要分页：ListInbox 以前**一次全量返回**，客户端一次全拉。
+// 实况（2026-10-05 本地库）已经 926 行且只增 —— 一年后打开 App 是几百条，
+// 一次请求拉完，弱网下首屏直接卡住。这不是「可能发生」，是没有任何机制阻止它。
+//
+// Cursor 是**不透明**的（base64 的 created_at+id），不是 offset：offset 在
+// 「边读边有新通知进来」时会漏行或重复行，而收件箱恰恰一直在长。
+type InboxPage struct {
+	Items      []InboxItem `json:"items"`
+	NextCursor string      `json:"nextCursor,omitempty"`
+	// UnreadTotal 是**全部**未读数，不受当前页/过滤影响。
+	//
+	// 为什么必须有它：铃铛角标以前是前端数当前列表算出来的
+	// （badgeText(unreadCount(inboxItems))）。有了分页之后那个数字会被页大小
+	// 封顶 —— 角标显示「20」而真实未读是 300，这是**假数字**，而假数字比旧数字
+	// 危险（用户据此判断「我有没有漏看消息」）。仓库里已经因为同类问题写过
+	// 「宁可显示一个旧数字，也不显示一个假的 0」。这个字段让它重新变成真数字。
+	UnreadTotal int `json:"unreadTotal"`
+}
+
+// DefaultInboxPageSize 是没有显式 limit 时的页大小。
+//
+// 20 是按「通知中心一屏大约能放下这么多条」定的。上限 50：客户端一次请求
+// 不该能把服务端拖成一次全表扫描。
+const DefaultInboxPageSize = 20
+const MaxInboxPageSize = 50
 
 type Repository interface {
 	UpsertDeviceToken(ctx context.Context, t DeviceToken) error
@@ -73,7 +119,10 @@ type Repository interface {
 	// worker 那条路径自己在 SQL 里写 ON CONFLICT —— 同一个语义两处实现，
 	// 迟早会分叉。
 	InsertInboxItemOnce(ctx context.Context, item InboxItem) (bool, error)
-	ListInbox(ctx context.Context, recipientID string, unreadOnly bool) ([]InboxItem, error)
+	// ListInbox 取一页。cursor 为空表示第一页。返回值必须是非 nil 空切片
+	// （NOTIF-EMPTY-LIST-001：nil 会被 json.Marshal 变成 null，客户端就把它
+	// 当成「协议破损」而不是「空收件箱」）。
+	ListInbox(ctx context.Context, recipientID string, unreadOnly bool, limit int, cursor string) (InboxPage, error)
 	MarkRead(ctx context.Context, itemID, recipientID string) error
 	// HasInboxDeepLink 回答「这条深链是不是**发给我的**」。
 	//
@@ -147,20 +196,118 @@ func (r *MemoryRepository) InsertInboxItemOnce(_ context.Context, item InboxItem
 	r.inbox[item.ID] = item
 	return true, nil
 }
-func (r *MemoryRepository) ListInbox(_ context.Context, recipientID string, unreadOnly bool) ([]InboxItem, error) {
+func (r *MemoryRepository) ListInbox(_ context.Context, recipientID string, unreadOnly bool, limit int, cursor string) (InboxPage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	result := []InboxItem{}
+	matched := []InboxItem{}
 	for _, item := range r.inbox {
-		if item.RecipientID == recipientID {
-			if unreadOnly && item.Read {
-				continue
+		if item.RecipientID != recipientID {
+			continue
+		}
+		if unreadOnly && item.Read {
+			continue
+		}
+		matched = append(matched, item)
+	}
+	// 与 PG 实现同序：最新在前，(created_at, id) 稳定打破同刻并列。
+	sort.SliceStable(matched, func(i, j int) bool {
+		if !matched[i].CreatedAt.Equal(matched[j].CreatedAt) {
+			return matched[i].CreatedAt.After(matched[j].CreatedAt)
+		}
+		return matched[i].ID > matched[j].ID
+	})
+	after, hasCursor := decodeInboxCursor(cursor)
+	if hasCursor {
+		kept := matched[:0]
+		for _, item := range matched {
+			if inboxItemIsOlderThan(item, after) {
+				kept = append(kept, item)
 			}
-			result = append(result, item)
+		}
+		matched = kept
+	}
+	page, next := PaginateInbox(matched, limit)
+	unreadTotal := 0
+	for _, item := range matched {
+		if !item.Read {
+			unreadTotal++
 		}
 	}
-	return result, nil
+	return InboxPage{Items: page, NextCursor: next, UnreadTotal: unreadTotal}, nil
 }
+
+// paginateInbox 切一页并算出下一页游标。两个实现共用，保证形状一致。
+//
+// 边界：limit<=0 用 DefaultInboxPageSize，超上限夹到 MaxInboxPageSize ——
+// 客户端传 limit=10000 时不该让它变成一次全表扫描。
+// PaginateInbox 切一页并算出下一页游标。**两个 Repository 实现共用这一份**。
+func PaginateInbox(sortedDesc []InboxItem, limit int) ([]InboxItem, string) {
+	if limit <= 0 {
+		limit = DefaultInboxPageSize
+	}
+	if limit > MaxInboxPageSize {
+		limit = MaxInboxPageSize
+	}
+	if len(sortedDesc) <= limit {
+		// 非 nil 空切片：nil 会被序列化成 null（NOTIF-EMPTY-LIST-001）
+		return sortedDesc, ""
+	}
+	page := sortedDesc[:limit]
+	last := page[len(page)-1]
+	return page, EncodeInboxCursor(last.CreatedAt, last.ID)
+}
+
+// inboxItemIsOlderThan 判断 item 是否严格位于游标之后（更旧）。
+// 相等即视为「已返回过」—— 同一刻的项靠 id 打破并列，游标要能精确续上。
+func inboxItemIsOlderThan(item InboxItem, cursor inboxCursor) bool {
+	if !item.CreatedAt.Equal(cursor.createdAt) {
+		return item.CreatedAt.Before(cursor.createdAt)
+	}
+	return item.ID < cursor.id
+}
+
+type inboxCursor struct {
+	createdAt time.Time
+	id        string
+}
+
+// EncodeInboxCursor 把 (created_at, id) 编成不透明游标。
+//
+// 游标编码放在领域包里而不是各自实现一遍：游标是**契约**（PG 与内存实现必须
+// 互相认出对方的游标，否则换实现就翻不了页），各写一份早晚会分叉。
+func EncodeInboxCursor(createdAt time.Time, id string) string {
+	raw := createdAt.UTC().Format(time.RFC3339Nano) + "\n" + id
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// decodeInboxCursor 解不出就当「没有游标」（从头开始）—— 一个坏游标不该让
+// 整个收件箱打不开，那比多返回几行糟得多。客户端也能靠 nextCursor 的存在与否
+// 判断要不要翻页，不依赖游标内容。
+// DecodeInboxCursor 解不出就返回 ok=false（调用方当「从头开始」）。
+func DecodeInboxCursor(cursor string) (time.Time, string, bool) {
+	c, ok := decodeInboxCursor(cursor)
+	return c.createdAt, c.id, ok
+}
+
+func decodeInboxCursor(cursor string) (inboxCursor, bool) {
+	if strings.TrimSpace(cursor) == "" {
+		return inboxCursor{}, false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return inboxCursor{}, false
+	}
+	parts := strings.SplitN(string(raw), "\n", 2)
+	if len(parts) != 2 {
+		return inboxCursor{}, false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return inboxCursor{}, false
+	}
+	return inboxCursor{createdAt: ts.UTC(), id: parts[1]}, true
+}
+
 func (r *MemoryRepository) MarkRead(_ context.Context, itemID, recipientID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -343,9 +490,40 @@ func (s *Service) sendInbox(ctx context.Context, e command.Envelope) command.Res
 	}, events)
 }
 
+// listInboxPayload 是 ListInbox 的入参。limit/cursor 都可选（MERCHANT-CREATOR-NOTIFY-001）。
+type listInboxPayload struct {
+	Limit  int    `json:"limit"`
+	Cursor string `json:"cursor"`
+	// UnreadOnly 一直存在但客户端从没传过 —— 保留，因为「只看未读」是通知中心
+	// 的常规视图，而未读数是要在列表上显示的。
+	UnreadOnly bool `json:"unreadOnly"`
+}
+
 func (s *Service) listInbox(ctx context.Context, e command.Envelope) command.Result {
 	recipientID := e.Principal.ID
-	items, _ := s.repo.ListInbox(ctx, recipientID, false)
+	var p listInboxPayload
+	// 解析失败不拒：limit/cursor 都是可选的增强，不该因为客户端多传一个
+	// 未知字段就打不开收件箱。decode 只在 payload 里找不到已知字段时返回 false。
+	if raw := e.Payload; raw != nil {
+		if v, has := raw["limit"]; has {
+			if n, isNum := v.(float64); isNum {
+				p.Limit = int(n)
+			}
+		}
+		if v, has := raw["cursor"].(string); has {
+			p.Cursor = v
+		}
+		if v, has := raw["unreadOnly"].(bool); has {
+			p.UnreadOnly = v
+		}
+	}
+	if p.Limit < 0 {
+		p.Limit = 0
+	}
+	page, err := s.repo.ListInbox(ctx, recipientID, p.UnreadOnly, p.Limit, p.Cursor)
+	if err != nil {
+		return command.Rejected(e, "INBOX_READ_FAILED", "INTERNAL", "SAFE_RETRY", "notification.inbox_read_failed", nil)
+	}
 	// NOTIF-EMPTY-LIST-001：空收件箱**必须**编码成 `[]`，不是 `null`。
 	//
 	// 这是命令面的契约，不是某一个 Repository 的私事：`json.Marshal` 把 nil 切片
@@ -353,10 +531,15 @@ func (s *Service) listInbox(ctx context.Context, e command.Envelope) command.Res
 	// **收件箱为空**的用户看到「通知没取到，下拉重试」的失败态。
 	// PG 那个实现原来正是返回 nil（已单独修），但只修那一处等于把契约挂在
 	// 某一个实现的自觉上；这里再兜一层，换第三个 Repository 也不会复发。
-	if items == nil {
-		items = []InboxItem{}
+	if page.Items == nil {
+		page.Items = []InboxItem{}
 	}
-	return acceptedWithPayload(e, "Inbox", recipientID, 1, "LISTED", map[string]any{"items": items}, nil)
+	return acceptedWithPayload(e, "Inbox", recipientID, 1, "LISTED", map[string]any{
+		"items":       page.Items,
+		"nextCursor":  page.NextCursor,
+		"hasMore":     page.NextCursor != "",
+		"unreadTotal": page.UnreadTotal,
+	}, nil)
 }
 
 func (s *Service) markRead(ctx context.Context, e command.Envelope) command.Result {

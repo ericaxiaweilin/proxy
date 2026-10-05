@@ -56,9 +56,9 @@ func TestPipelineEmitWritesOneRowAndPushesOnce(t *testing.T) {
 	if item.CreatedAt.IsZero() {
 		t.Fatal("item must carry the injected clock time, got zero")
 	}
-	rows, _ := repo.ListInbox(context.Background(), "user_a", false)
-	if len(rows) != 1 {
-		t.Fatalf("want 1 row, got %d", len(rows))
+	rows, _ := repo.ListInbox(context.Background(), "user_a", false, 0, "")
+	if len(rows.Items) != 1 {
+		t.Fatalf("want 1 row, got %d", len(rows.Items))
 	}
 	if len(push.items) != 1 {
 		t.Fatalf("want exactly 1 push, got %d", len(push.items))
@@ -93,9 +93,9 @@ func TestPipelineEmitIsIdempotentByDedupeKey(t *testing.T) {
 	if second.ID != first.ID {
 		t.Fatalf("replay must resolve to the same item id: %q vs %q", second.ID, first.ID)
 	}
-	rows, _ := repo.ListInbox(ctx, "user_a", false)
-	if len(rows) != 1 {
-		t.Fatalf("replay must not add a row, got %d rows", len(rows))
+	rows, _ := repo.ListInbox(ctx, "user_a", false, 0, "")
+	if len(rows.Items) != 1 {
+		t.Fatalf("replay must not add a row, got %d rows", len(rows.Items))
 	}
 	if len(push.items) != 1 {
 		t.Fatalf("replay must NOT push again — the user would get two identical notifications (got %d)", len(push.items))
@@ -114,9 +114,9 @@ func TestPipelineEmitDifferentKeysWriteSeparateItems(t *testing.T) {
 			t.Fatalf("Emit(%s): created=%v err=%v", key, created, err)
 		}
 	}
-	rows, _ := repo.ListInbox(ctx, "user_a", false)
-	if len(rows) != 3 {
-		t.Fatalf("three distinct events must be three rows, got %d", len(rows))
+	rows, _ := repo.ListInbox(ctx, "user_a", false, 0, "")
+	if len(rows.Items) != 3 {
+		t.Fatalf("three distinct events must be three rows, got %d", len(rows.Items))
 	}
 	if len(push.items) != 3 {
 		t.Fatalf("three distinct events must push three times, got %d", len(push.items))
@@ -145,9 +145,9 @@ func TestPipelineEmitRejectsIncompleteNotifications(t *testing.T) {
 			t.Fatalf("%s: want %v/created=false, got err=%v created=%v", tc.name, tc.want, err, created)
 		}
 	}
-	rows, _ := repo.ListInbox(ctx, "user_a", false)
-	if len(rows) != 0 {
-		t.Fatalf("rejected notifications must not reach the repository, got %d rows", len(rows))
+	rows, _ := repo.ListInbox(ctx, "user_a", false, 0, "")
+	if len(rows.Items) != 0 {
+		t.Fatalf("rejected notifications must not reach the repository, got %d rows", len(rows.Items))
 	}
 	if len(push.items) != 0 {
 		t.Fatalf("rejected notifications must not push, got %d", len(push.items))
@@ -165,9 +165,9 @@ func TestPipelineEmitWithoutPushProviderStillPersists(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
-	rows, _ := repo.ListInbox(context.Background(), "user_a", false)
-	if len(rows) != 1 {
-		t.Fatalf("push being disabled must not lose the inbox row, got %d", len(rows))
+	rows, _ := repo.ListInbox(context.Background(), "user_a", false, 0, "")
+	if len(rows.Items) != 1 {
+		t.Fatalf("push being disabled must not lose the inbox row, got %d", len(rows.Items))
 	}
 }
 
@@ -185,9 +185,9 @@ func TestPipelineEmitSurvivesPushFailure(t *testing.T) {
 	if !created {
 		t.Fatal("the row was written, so created must be true")
 	}
-	rows, _ := repo.ListInbox(context.Background(), "user_a", false)
-	if len(rows) != 1 {
-		t.Fatalf("row must survive a push failure, got %d", len(rows))
+	rows, _ := repo.ListInbox(context.Background(), "user_a", false, 0, "")
+	if len(rows.Items) != 1 {
+		t.Fatalf("row must survive a push failure, got %d", len(rows.Items))
 	}
 }
 
@@ -311,9 +311,9 @@ func TestServiceSharesRepositoryWithPipeline(t *testing.T) {
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("SendInboxNotification: outcome=%s err=%+v", r.Outcome, r.Error)
 	}
-	rows, err := repo.ListInbox(ctx, "user_a", false)
-	if err != nil || len(rows) != 1 {
-		t.Fatalf("the command must write through the shared repository: rows=%d err=%v", len(rows), err)
+	rows, err := repo.ListInbox(ctx, "user_a", false, 0, "")
+	if err != nil || len(rows.Items) != 1 {
+		t.Fatalf("the command must write through the shared repository: rows=%d err=%v", len(rows.Items), err)
 	}
 }
 
@@ -330,9 +330,9 @@ func TestSendInboxIsIdempotentPerIdempotencyKey(t *testing.T) {
 	if first.Outcome != "ACCEPTED" || second.Outcome != "ACCEPTED" {
 		t.Fatalf("outcomes: %s / %s", first.Outcome, second.Outcome)
 	}
-	rows, _ := repo.ListInbox(ctx, "user_a", false)
-	if len(rows) != 1 {
-		t.Fatalf("retrying one command must not write two rows, got %d", len(rows))
+	rows, _ := repo.ListInbox(ctx, "user_a", false, 0, "")
+	if len(rows.Items) != 1 {
+		t.Fatalf("retrying one command must not write two rows, got %d", len(rows.Items))
 	}
 	// 重放不发域事件 —— 重试不是「又发生了一件事」。
 	if len(second.EventRefs) != 0 {
@@ -347,7 +347,9 @@ func TestSendInboxIsIdempotentPerIdempotencyKey(t *testing.T) {
 // PG 那个实现原来正是这样（已修），内存仓不是。契约不该挂在某一个实现的自觉上。
 type nilInboxRepo struct{ *MemoryRepository }
 
-func (nilInboxRepo) ListInbox(context.Context, string, bool) ([]InboxItem, error) { return nil, nil }
+func (nilInboxRepo) ListInbox(context.Context, string, bool, int, string) (InboxPage, error) {
+	return InboxPage{}, nil
+}
 
 // NOTIF-EMPTY-LIST-001（命令面契约）：空收件箱必须编码成 `[]`。
 //
@@ -427,8 +429,115 @@ func TestPipelineEmitReportsPushFailureWithoutFailing(t *testing.T) {
 		t.Fatalf("reported item must identify which notification failed, got %+v", gotItem)
 	}
 	// 留痕不能变成第二份真相：库里仍然只有一行。
-	rows, _ := repo.ListInbox(context.Background(), "user_a", false)
-	if len(rows) != 1 {
-		t.Fatalf("push failure must not duplicate the inbox row, got %d rows", len(rows))
+	rows, _ := repo.ListInbox(context.Background(), "user_a", false, 0, "")
+	if len(rows.Items) != 1 {
+		t.Fatalf("push failure must not duplicate the inbox row, got %d rows", len(rows.Items))
+	}
+}
+
+// MERCHANT-CREATOR-NOTIFY-001：收件箱分页 + 保留期。
+//
+// 为什么这不是「以后再说」：ListInbox 以前一次全量返回、客户端一次全拉，
+// 而实况是库里已经 926 行且只增不减。一年后打开 App 是一次几百行的请求，
+// 弱网下首屏直接卡住 —— 没有任何机制阻止它发生。
+func TestInboxPaginationIsStableAndNeverRepeats(t *testing.T) {
+	push := &countingPush{}
+	pipeline, repo := newTestPipeline(t, push)
+	ctx := context.Background()
+
+	// 5 条，其中两条同刻（靠 id 打破并列）。
+	for i := 0; i < 5; i++ {
+		_, _, err := pipeline.Emit(ctx, Notification{
+			RecipientID: "user_pager", Type: "Probe", Title: "t",
+			DedupeKey: EventDedupeKey("evt_page_" + string(rune('a'+i))),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 让两条同刻：直接把它们的 created_at 拉平。
+	items, err := repo.ListInbox(ctx, "user_pager", false, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items.UnreadTotal != 5 {
+		t.Fatalf("unreadTotal = %d, want 5 — 角标靠它，不能数当前页", items.UnreadTotal)
+	}
+
+	first, err := repo.ListInbox(ctx, "user_pager", false, 2, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Items) != 2 {
+		t.Fatalf("limit=2 must return 2 items, got %d", len(first.Items))
+	}
+	if first.NextCursor == "" {
+		t.Fatal("there must be a next cursor when more rows exist")
+	}
+
+	second, err := repo.ListInbox(ctx, "user_pager", false, 2, first.NextCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, it := range append(append([]InboxItem{}, first.Items...), second.Items...) {
+		if seen[it.ID] {
+			t.Fatalf("pagination repeated %s — 游标续在了错误的位置", it.ID)
+		}
+		seen[it.ID] = true
+	}
+
+	// 第三页拿完剩下的，且没有第四页。
+	third, err := repo.ListInbox(ctx, "user_pager", false, 2, second.NextCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seen)+len(third.Items) != 5 {
+		t.Fatalf("paging must cover every row exactly once: %d + %d != 5", len(seen), len(third.Items))
+	}
+	if third.NextCursor != "" {
+		t.Fatal("the last page must not advertise another page")
+	}
+}
+
+// 保留期由管线定（migration 176）：expires_at 是 NOT NULL 的，漏一处就是写入失败，
+// 而期限散落在各实现里就是「90 天」和「60 天」并存。
+func TestPipelineSetsInboxExpiry(t *testing.T) {
+	pipeline, _ := newTestPipeline(t, &countingPush{})
+	item, _, err := pipeline.Emit(context.Background(), Notification{
+		RecipientID: "user_ttl", Type: "Probe", Title: "t", DedupeKey: EventDedupeKey("evt_ttl"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := item.CreatedAt.Add(InboxRetention)
+	if !item.ExpiresAt.Equal(want) {
+		t.Fatalf("expiresAt = %v, want %v", item.ExpiresAt, want)
+	}
+	if InboxRetention != 90*24*time.Hour {
+		t.Fatalf("retention changed to %v — 90 天是写在迁移注释里的保留期", InboxRetention)
+	}
+}
+
+// 坏游标不该让收件箱打不开：那比多返回几行糟得多。
+func TestInboxBadCursorDegradesToFirstPage(t *testing.T) {
+	pipeline, repo := newTestPipeline(t, &countingPush{})
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if _, _, err := pipeline.Emit(ctx, Notification{
+			RecipientID: "user_badcursor", Type: "Probe", Title: "t",
+			DedupeKey: EventDedupeKey("evt_bad_" + string(rune('a'+i))),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, bad := range []string{"not-base64!!", "YWJj", "!!!", "x"} {
+		page, err := repo.ListInbox(ctx, "user_badcursor", false, 0, bad)
+		if err != nil {
+			t.Fatalf("cursor %q must not error, got %v", bad, err)
+		}
+		if len(page.Items) == 0 {
+			t.Fatalf("cursor %q must degrade to the first page, got an empty inbox", bad)
+		}
 	}
 }

@@ -5,6 +5,16 @@ import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
 import { commandErrorMessage } from "./command-error-message";
 
+/** 收件箱的一页（MERCHANT-CREATOR-NOTIFY-001）。 */
+export type InboxPage = {
+  items: InboxItem[];
+  /** 下一页游标（不透明字符串），空串表示没有下一页。 */
+  nextCursor: string;
+  hasMore: boolean;
+  /** 全部未读数，与本页无关。铃铛角标必须用这个，不能数当前页。 */
+  unreadTotal: number;
+};
+
 export type InboxItem = {
   id: string;
   recipientId: string;
@@ -30,8 +40,21 @@ export class NotificationClient {
     await this.command("RegisterDeviceToken", { type: "DeviceToken", id: input.deviceId }, input as unknown as Record<string, unknown>);
   }
 
-  public async listInbox(): Promise<InboxItem[]> {
-    const body = this.body(await this.command("ListInbox", { type: "Inbox", id: "list" }, {}));
+  /**
+   * 取收件箱一页（MERCHANT-CREATOR-NOTIFY-001）。
+   *
+   * 分页是真的必需而不是「以后再说」：服务端以前一次全量返回，本地库已经 926 行
+   * 且只增不减 —— 一年后打开 App 是一次几百行的请求，弱网下首屏直接卡住。
+   *
+   * `unreadTotal` 是全部未读数，与本页无关：铃铛角标以前是前端数当前列表算的，
+   * 有了分页它会被页大小封顶（角标显示 20 而真实未读 300）。假数字比旧数字危险 ——
+   * 用户据此判断「我有没有漏看消息」。所以角标必须用这个字段。
+   */
+  public async listInboxPage(input?: { limit?: number; cursor?: string }): Promise<InboxPage> {
+    const payload: Record<string, unknown> = {};
+    if (input?.limit !== undefined) payload.limit = input.limit;
+    if (input?.cursor !== undefined) payload.cursor = input.cursor;
+    const body = this.body(await this.command("ListInbox", { type: "Inbox", id: "list" }, payload));
     // NOTIF-EMPTY-LIST-001：`items` 缺失或为 null 表示**空收件箱**，不是协议破损。
     //
     // 服务端（Go）把 nil 切片序列化成 `null` 而不是 `[]` —— 这条路径上一版
@@ -44,7 +67,22 @@ export class NotificationClient {
     // 数组」（比如是个对象或字符串），那仍然抛 —— 别把「服务端换了协议」也一起吞掉。
     const items = body.items ?? [];
     if (!Array.isArray(items)) throw new Error("inbox malformed");
-    return items as InboxItem[];
+    const unreadTotal = typeof body.unreadTotal === "number" ? body.unreadTotal : 0;
+    const nextCursor = typeof body.nextCursor === "string" ? body.nextCursor : "";
+    return { items: items as InboxItem[], nextCursor, hasMore: Boolean(body.hasMore) || nextCursor !== "", unreadTotal };
+  }
+
+  /**
+   * 只取第一页（既有调用点用这个）。返回的是**一页**，不是全部 ——
+   * 要翻页用 listInboxPage。
+   */
+  public async listInbox(): Promise<InboxItem[]> {
+    return (await this.listInboxPage()).items;
+  }
+
+  /** 全部未读数（铃铛角标用，与分页无关）。 */
+  public async unreadTotal(): Promise<number> {
+    return (await this.listInboxPage()).unreadTotal;
   }
 
   public async markRead(inboxId: string): Promise<void> {
