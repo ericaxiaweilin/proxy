@@ -1021,6 +1021,19 @@ func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.R
 	}
 	// R8 Pillar #6: 写入 Snapshot 之前评估 Cash Eligibility.
 	cashStatus, cashReason := assessCashEligibility(p.SettlementMode, p.AgreedCompensation, p.CashEligibilityOverride)
+	// ORDER-CANCEL-WINDOW-001：startTime 建单时**从不校验**（原样抄 payload），
+	// 而它决定取消窗口是 12 小时还是 5 分钟。所以一个格式错误的时间（比如只给
+	// "10:00" 或不带时区的 "2026-10-08 09:00"）会**静默**把用户该有的 12 小时降级成
+	// 5 分钟 —— 用户约了一周之后却只剩 5 分钟能反悔，而除了通知里那句
+	// 「下单后 5 分钟内可取消」之外没有任何地方会提示为什么。
+	//
+	// 这里只**说**，不拦：拒掉 startTime 为空的请求是破坏性的 API 变更（现有调用方
+	// 可能真的没有预约时间，那属于「尽快上门」，合法），该不该要求绝对时间需要产品
+	// 口径。先让它在日志里可见，不再是静默降级。
+	if _, ok := parseScheduledStart(Order{Snapshot: OrderSnapshot{StartTime: p.StartTime}}); !ok {
+		log.Printf("fulfillment: offer from need %s has no absolute startTime (%q) — cancellation window falls back to %s; ORDER-CANCEL-WINDOW-001",
+			p.NeedID, p.StartTime, lastMinuteCancellationWindow)
+	}
 	snapshot := OrderSnapshot{
 		Requester:          e.Actor.ID,
 		Agent:              p.AgentID,

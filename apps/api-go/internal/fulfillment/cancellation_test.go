@@ -1,7 +1,11 @@
 package fulfillment
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"log"
+	"strings"
 	"testing"
 	"time"
 )
@@ -161,5 +165,85 @@ func TestCancelOrderIsBlockedOnceTheWindowCloses(t *testing.T) {
 	}
 	if _, ok := details["windowKind"]; !ok {
 		t.Fatalf("拒绝必须带 windowKind 回去: %+v", details)
+	}
+}
+
+// 时区：startTime 走 json.Marshal → JSONB → json.Unmarshal（postgres/fulfillment.go:523）
+// 往返一趟。12 小时窗口是**绝对时刻**上的差，所以偏移量算错就会让截止点偏一整天 ——
+// 而偏移偏了之后症状是「明明约了一周后，却只剩 5 分钟」，用户只会觉得平台在坑他。
+func TestCancellationWindowSurvivesTheJSONRoundTripAndTimezoneOffsets(t *testing.T) {
+	created := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
+	// 同一个绝对时刻的三种写法：UTC、越南 +07、以及 -05（跨日）
+	want := created.Add(72 * time.Hour)
+	for _, raw := range []string{
+		want.Format(time.RFC3339),                                    // 2026-10-08T09:00:00Z
+		want.In(time.FixedZone("ICT", 7*3600)).Format(time.RFC3339),  // +07:00
+		want.In(time.FixedZone("EST", -5*3600)).Format(time.RFC3339), // -05:00
+	} {
+		order := Order{CreatedAt: created, Snapshot: OrderSnapshot{StartTime: raw}}
+
+		// 原样
+		if _, kind := cancellationDeadline(order); kind != windowPlanned {
+			t.Fatalf("startTime=%q: kind = %q, want %q", raw, kind, windowPlanned)
+		}
+		// 经 JSONB 往返（和 PG repo 同一套编解码）
+		blob, err := json.Marshal(order.Snapshot)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var back OrderSnapshot
+		if err := json.Unmarshal(blob, &back); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		round := Order{CreatedAt: created, Snapshot: back}
+		deadline, kind := cancellationDeadline(round)
+		if kind != windowPlanned {
+			t.Fatalf("startTime=%q 往返后 kind = %q, want %q", raw, kind, windowPlanned)
+		}
+		if want := want.Add(-plannedCancellationLead); !deadline.Equal(want) {
+			t.Fatalf("startTime=%q 往返后 deadline = %v, want %v（偏移算错会让窗口偏掉）", raw, deadline, want)
+		}
+	}
+
+	// 没有时区信息的写法必须被当成「取不到时间」→ 5 分钟分支，而不是被猜一个 UTC。
+	// 这类输入（"2026-10-08 09:00"）看起来像时间，但基准未知，猜 UTC 就是编造事实。
+	for _, naive := range []string{"2026-10-08 09:00", "2026-10-08T09:00", "2026-10-08"} {
+		order := Order{CreatedAt: created, Snapshot: OrderSnapshot{StartTime: naive}}
+		if _, kind := cancellationDeadline(order); kind != windowUnknownTime {
+			t.Fatalf("startTime=%q 必须走 unknown 分支（时区未知不猜），got %q", naive, kind)
+		}
+	}
+}
+
+// 坏 startTime 必须留下**可观测的痕迹**，而不是静默降级。
+//
+// 之所以要有这条：startTime 建单时从不校验，而它决定窗口是 12 小时还是 5 分钟。
+// 一个格式错误的时间会让用户「约了一周之后却只剩 5 分钟能反悔」，而除了通知里那句
+// 「下单后 5 分钟内可取消」之外没有任何地方会说为什么。
+func TestOfferWithoutAbsoluteStartTimeIsLogged(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		startTime string
+		wantLog   bool
+	}{
+		{"正常的 RFC3339", "2026-12-01T09:30:00Z", false},
+		{"越南本地时间（也合法，RFC3339 带偏移）", "2026-12-01T09:30:00+07:00", false},
+		{"空", "", true},
+		{"只有时分", "10:00", true},
+		{"没有时区", "2026-12-01 09:30", true},
+	} {
+		var buf bytes.Buffer
+		prev := log.Writer()
+		log.SetOutput(&buf)
+		s := New()
+		payload := offerPayload()
+		payload["startTime"] = tc.startTime
+		s.Handle(envelopeFor("CreateOffer", payload, ""))
+		log.SetOutput(prev)
+
+		got := strings.Contains(buf.String(), "no absolute startTime")
+		if got != tc.wantLog {
+			t.Fatalf("startTime=%q: 日志出现=%v，期望=%v（日志内容：%s）", tc.startTime, got, tc.wantLog, buf.String())
+		}
 	}
 }
