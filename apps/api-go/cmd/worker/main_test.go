@@ -206,8 +206,18 @@ func inboxForEventCaseLabels(t *testing.T) []string {
 		t.Fatal("inboxForEvent not found in main.go")
 	}
 	body := string(src)[start:]
-	// 只取 switch 部分：default 之后是收尾，也可能有别的东西。
-	if end := strings.Index(body, "\ndefault:"); end >= 0 {
+	// ⚠️ 这里原来写的是 `strings.Index(body, "\ndefault:")` —— 2026-10-05 修。
+	// 源码里 switch 的标签是**缩进**的（`\tdefault:`），所以 `\ndefault:` 永远
+	// 匹配不上，`end` 恒为 -1，于是 body 是 `func inboxForEvent(` 之后的**整个文件**。
+	//
+	// 后果：它一直在扫 `inboxForEvent` 外面所有函数的 `case "Xxx":` —— 只是到现在
+	// 为止没有别的函数在 switch 里写纯字母的 case 标签，所以碰巧没报错。第一份
+	// 真正会踩到的就是本轮加的 orderCancellationNotice（`case "planned":`），
+	// 报出来是「inboxForEvent 映射了 planned，但没人发这个事件」。
+	//
+	// 一个「只可能误报、不会漏报」的守卫比没有守卫更坏：它红的时候你会去查事件名
+	// 拼写，而真正的问题在守卫自己身上。所以改成按大括号配平取函数体。
+	if end := goFunctionBody(string(src), start); end > 0 {
 		body = body[:end]
 	}
 	caseRe := regexp.MustCompile(`case((?:\s*"[A-Za-z]+"\s*,?)+):`)
@@ -943,4 +953,26 @@ func TestOrderCreatedNoticeCarriesTheNonRefundableTerm(t *testing.T) {
 		t.Fatalf("the notice must say why (真人服务), got %q", body)
 	}
 	_ = recipient
+}
+
+// goFunctionBody 从 start（func 关键字位置）开始按大括号配平，返回函数体的结束偏移。
+// 用来把「某个函数的源码」和「这个文件剩下的全部源码」区分开。
+func goFunctionBody(src string, start int) int {
+	open := strings.Index(src[start:], "{")
+	if open < 0 {
+		return -1
+	}
+	depth := 0
+	for i := start + open; i < len(src); i++ {
+		switch src[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i - start
+			}
+		}
+	}
+	return -1
 }

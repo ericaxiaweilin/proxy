@@ -128,11 +128,15 @@ func TestDirectSettlementEachPartyConfirmsOwnSide(t *testing.T) {
 }
 
 // ORDER-SETTLE-GUARD-001：只有一方声明过结算时，另一方仍能取消。
+//
+// 2026-10-05：这里原本先 StartExecution 再取消，用来证明「一方声明不锁取消」。
+// 但取消窗口规则（ORDER-CANCEL-WINDOW-001）落地后**执行中一律不能取消**，于是那个
+// 写法变成在测「EXECUTING 锁不锁取消」，测不到本意了。改成在 CONFIRMED 阶段取消：
+// 同样是「一方声明过结算」，本意不变，而且更贴近真实场景（服务还没开始）。
 func TestOneSidedSettlementDoesNotLockCancellation(t *testing.T) {
 	s := New()
 	orderID := createOffer(t, s)
 	confirmAsAgent(s, orderID)
-	s.Handle(envelopeFor("StartExecution", map[string]any{}, orderID))
 	if r := s.Handle(envelopeFor("RecordDirectSettlement", map[string]any{"agreedAmount": 1200000}, orderID)); r.Outcome != "ACCEPTED" {
 		t.Fatalf("payer settlement: %+v", r.Error)
 	}

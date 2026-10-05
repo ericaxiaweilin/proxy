@@ -1195,23 +1195,47 @@ func TestCancelOrderRequesterCanCancelOffered(t *testing.T) {
 	}
 }
 
-func TestCancelOrderAgentCanCancelExecuting(t *testing.T) {
-	s := New()
-	orderID := createOffer(t, s)
-	r := confirmAsAgent(s, orderID)
-	if r.Outcome != "ACCEPTED" {
-		t.Fatalf("confirm: %s", r.Outcome)
-	}
-	r = s.Handle(envelopeFor("StartExecution", map[string]any{}, orderID))
-	if r.Outcome != "ACCEPTED" {
-		t.Fatalf("start: %s", r.Outcome)
-	}
-	agentCancel := envelopeFor("CancelOrder", map[string]any{"reason": "emergency"}, orderID)
-	agentCancel.Actor.ID = "agent_linh"
-	agentCancel.Principal.ID = "agent_linh"
-	r = s.Handle(agentCancel)
-	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "CANCELLED" {
-		t.Fatalf("agent cancel: %s / %s", r.Outcome, r.Aggregate.State)
+// ORDER-CANCEL-WINDOW-001（2026-10-05 用户规则：「不能取消的是执行中 执行完不可能取消」）：
+// 执行中一律不能取消 —— **包括 creator 自己**。
+//
+// ⚠️ 这里原来叫 TestCancelOrderAgentCanCancelExecuting，断言的是反过来的一件事：
+// creator 可以在 EXECUTING 时用 reason="emergency" 取消订单。那是一条**没有注释、
+// 没有文档**的逃生阀（大概是留给现场出状况时中止的），而用户的新规则直接推翻了它。
+//
+// 为什么要在这里写清楚而不是悄悄改掉：这是一条安全阀。真人服务现场确实可能出状况
+// （顾客骚扰、场地没了、临时被叫走），没有中止手段的 creator 只能硬撑到结束。
+// 用户明确说「执行中不能取消」，所以按规则执行；但如果这条逃生阀是有意保留的，
+// 恢复它只需要在 cancelOrder 里给 agent 开一个例外（见下面的注释）。
+func TestCancelOrderExecutingIsRejectedForEveryone(t *testing.T) {
+	for _, actor := range []struct{ id, why string }{
+		{"agent_linh", "creator 也不行 —— 规则是「执行中不能取消」"},
+		{"user_001", "下单方当然也不行"},
+	} {
+		s := New()
+		orderID := createOffer(t, s)
+		if r := confirmAsAgent(s, orderID); r.Outcome != "ACCEPTED" {
+			t.Fatalf("confirm: %s", r.Outcome)
+		}
+		if r := s.Handle(envelopeFor("StartExecution", map[string]any{}, orderID)); r.Outcome != "ACCEPTED" {
+			t.Fatalf("start: %s", r.Outcome)
+		}
+		cmd := envelopeFor("CancelOrder", map[string]any{"reason": "emergency"}, orderID)
+		cmd.Actor.ID = actor.id
+		cmd.Principal.ID = actor.id
+		r := s.Handle(cmd)
+		if r.Outcome != "REJECTED" {
+			t.Fatalf("%s: executing order must not be cancellable (%s), got %s", actor.why, actor.id, r.Outcome)
+		}
+		if code := r.Error.ErrorCode; code != "ORDER_ALREADY_EXECUTING" {
+			t.Fatalf("%s: want ORDER_ALREADY_EXECUTING, got %s", actor.why, code)
+		}
+		order, err := s.repository.GetOrder(context.Background(), orderID)
+		if err != nil {
+			t.Fatalf("get order: %v", err)
+		}
+		if order.Lifecycle != "EXECUTING" {
+			t.Fatalf("order must stay EXECUTING, got %s", order.Lifecycle)
+		}
 	}
 }
 

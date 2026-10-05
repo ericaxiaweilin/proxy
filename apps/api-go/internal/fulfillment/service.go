@@ -1226,9 +1226,24 @@ func (s *Service) acceptOfferAsOrder(ctx context.Context, e command.Envelope, of
 	offer.Status = "ACCEPTED"
 	offer.Version++
 	offer.UpdatedAt = now
+	// 把取消截止时间**算好**放进 payload，而不是让通知去猜。
+	//
+	// 这条通知之前写的是「真人服务，确认后不能退款」—— 而那时后端允许取消一个
+	// CONFIRMED 的订单，也就是说 app 在说自己做不到的事。现在取消窗口规则落地了
+	// （ORDER-CANCEL-WINDOW-001），通知就能报一个**真的**截止点。
+	//
+	// 附带价值：用户拿到的是「我什么时候之前还能反悔」，而不是一句没有信息量的
+	// 「不能退款」—— 后者只会让人吵架，前者能让人自己决定。
+	cancelUntil, cancelWindowKind := cancellationDeadline(order)
 	domainEvents := []event.DomainEvent{
 		event.New("OfferAccepted", "Offer", offer.ID, offer.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"offerId": offer.ID, "slotId": offer.SlotID}),
-		event.New("OrderCreatedFromOffer", "Order", order.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"offerId": offer.ID, "slotId": offer.SlotID, "taskId": offer.TaskID}),
+		event.New("OrderCreatedFromOffer", "Order", order.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+			"offerId":      offer.ID,
+			"slotId":       offer.SlotID,
+			"taskId":       offer.TaskID,
+			"cancelUntil":  cancelUntil.Format(time.RFC3339),
+			"cancelWindow": string(cancelWindowKind),
+		}),
 	}
 	// Atomically update offer and create order
 	if err := s.repository.AcceptOfferAndCreateOrder(ctx, offer, order, offer.Version-1, domainEvents); err != nil {
@@ -2258,6 +2273,24 @@ func (s *Service) cancelOrder(ctx context.Context, e command.Envelope) command.R
 	if order.Settlement != nil && order.Settlement.PayerConfirmed && order.Settlement.PayeeConfirmed {
 		return command.Rejected(e, "ORDER_SETTLED_NOT_CANCELLABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.order_settled_not_cancellable", map[string]any{"lifecycle": order.Lifecycle})
 	}
+	// 执行中不能取消：服务已经在发生，钱不该退。
+	if order.Lifecycle == "EXECUTING" {
+		return command.Rejected(e, "ORDER_ALREADY_EXECUTING", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.order_already_executing", map[string]any{"lifecycle": order.Lifecycle})
+	}
+	// ORDER-CANCEL-WINDOW-001（2026-10-05 用户定的取消窗口）：能不能取消由**距离
+	// 约定执行时间还有多久**决定，不是由生命周期决定 ——
+	//   · 提前预约（≥12h）：取消开放到「执行前 12h」；
+	//   · 临期下单（<12h）：只开放「下单后 5 分钟」；
+	//   · 执行前 12h 之后 / 临期单过 5 分钟：一律不能取消，适用于所有订单。
+	// 拒绝时把截止时间和分支一起带回去，否则用户只会当成 bug。
+	if open, deadline, kind := cancellationWindowOpen(order, s.clock.Now().UTC()); !open {
+		return command.Rejected(e, "ORDER_CANCELLATION_WINDOW_CLOSED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.order_cancellation_window_closed", map[string]any{
+			"lifecycle":   order.Lifecycle,
+			"cancelUntil": deadline.Format(time.RFC3339),
+			"windowKind":  string(kind),
+		})
+	}
+
 	now := s.clock.Now().UTC()
 	order.Lifecycle = "CANCELLED"
 	lapsePendingAmendments(&order, now, "order cancelled")

@@ -98,7 +98,8 @@ func TestMaterialChangeGuardsMoneyAndLapsesOnTerminal(t *testing.T) {
 	if r, _ := proposeChange(s, "user_001", orderID, map[string]any{"agreedCompensation": 6000000}); errorCode(r) != "CASH_ELIGIBILITY_REVIEW" {
 		t.Fatalf("a re-price above the cash pilot limit must be CASH_ELIGIBILITY_REVIEW, got %s %+v", r.Outcome, r.Error)
 	}
-	s.Handle(envelopeFor("StartExecution", map[string]any{}, orderID))
+	// 2026-10-05：不 StartExecution 了 —— 执行中一律不能取消（ORDER-CANCEL-WINDOW-001），
+	// 想在这里测「取消后待定条款作废」就得在执行前取消。结算在 CONFIRMED 也能记录。
 	s.Handle(envelopeFor("RecordDirectSettlement", map[string]any{"agreedAmount": 1200000}, orderID))
 	if r, _ := proposeChange(s, "agent_linh", orderID, map[string]any{"agreedCompensation": 1300000}); errorCode(r) != "AMENDMENT_AFTER_SETTLEMENT" {
 		t.Fatalf("no re-pricing once a settlement is declared, got %+v", r.Error)
