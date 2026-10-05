@@ -691,3 +691,138 @@ func TestEraseAccountStillDeletesPushTokensUnderRLS(t *testing.T) {
 		t.Fatalf("%d push token(s) survived account erasure", left)
 	}
 }
+
+// MERCHANT-CREATOR-NOTIFY-001（173）：开一个**非超级用户**角色的连接池。
+//
+// 为什么非要这么费劲：仓库自己的集成测试跑在 initdb -U proxy 建的临时集群上，
+// 那个 proxy 是**超级用户**，而超级用户绕过所有权限与 RLS —— 也就是说
+// 「Repository 的 withRecipient/set_config 写对了没有」「policy 拦没拦住」
+// 这两件事，常规测试**一件都验不到**（migration 112 记的就是这个坑）。
+//
+// 角色策略沿用 order_role_integration_test.go：临时 NOLOGIN 非超级用户角色 +
+// GRANT proxy（policy 是 TO proxy，成员按 pg_has_role 匹配）+ Cleanup 回收。
+func requireNonSuperuserPool(t *testing.T, pool *pgxpool.Pool, roleSuffix string) *pgxpool.Pool {
+	t.Helper()
+	ctx := context.Background()
+	role := "notif_nonsuper_" + roleSuffix + "_" + itoa(time.Now().UnixNano())
+	if _, err := pool.Exec(ctx, `CREATE ROLE `+role+` NOLOGIN NOSUPERUSER`); err != nil {
+		t.Skipf("cannot create scratch role (needs CREATEROLE): %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DROP OWNED BY `+role)
+		_, _ = pool.Exec(ctx, `DROP ROLE IF EXISTS `+role)
+	})
+	if _, err := pool.Exec(ctx, `GRANT `+"proxy"+` TO `+role); err != nil {
+		t.Fatalf("grant proxy role to scratch role: %v", err)
+	}
+	cfg, err := pgxpool.ParseConfig(pool.Config().ConnString())
+	if err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	// 连接一建立就是这个非超级用户角色。必须用连接参数而不是 SET LOCAL ROLE：
+	// Repository 的每个方法自己 Begin，谁也替它包事务。
+	cfg.ConnConfig.RuntimeParams["role"] = role
+	scoped, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("scoped pool: %v", err)
+	}
+	t.Cleanup(scoped.Close)
+	var isSuper bool
+	if err := scoped.QueryRow(ctx, `SELECT rolsuper FROM pg_roles WHERE rolname = current_user`).Scan(&isSuper); err != nil {
+		t.Fatalf("probe current role: %v", err)
+	}
+	if isSuper {
+		t.Fatal("scoped pool must not be superuser, otherwise every assertion below is vacuous")
+	}
+	return scoped
+}
+
+// Repository 的方法在**非超级用户**连接上必须照样能用 —— 这条验的是
+// withRecipient / withUserAccount 的 GUC 键名和 set_config 真的对。
+//
+// 没有它的话：GUC 键名写错一个字母 ⇒ 每次调用都读 0 行 / 写被拒，而**所有
+// 常规测试照样全绿**（超级用户绕过 RLS），故障要等到真部署才显形。
+func TestNotificationRepositoryWorksOnNonSuperuserConnection(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	scoped := requireNonSuperuserPool(t, pool, "repo")
+	run := itoa(time.Now().UnixNano())
+	recipient := "user_nonsuper_" + run
+	other := "user_nonsuper_other_" + run
+	repo := NewNotificationRepository(scoped)
+
+	// 先用超级用户种两行：一行给 recipient，一行给别人。
+	seed := func(id, who string) {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO notification.inbox_items (id,recipient_id,type,title,body,deep_link,read,created_at)
+			VALUES ($1,$2,'Probe','t','b',NULL,false,now())`, id, who); err != nil {
+			t.Fatalf("seed inbox item: %v", err)
+		}
+	}
+	seed("inbox_ns_own_"+run, recipient)
+	seed("inbox_ns_other_"+run, other)
+	t.Cleanup(func() {
+		pool.Exec(ctx, `DELETE FROM notification.inbox_items WHERE id = ANY($1)`, []string{"inbox_ns_own_" + run, "inbox_ns_other_" + run})
+	})
+
+	items, err := repo.ListInbox(ctx, recipient, false)
+	if err != nil {
+		t.Fatalf("ListInbox on a non-superuser connection must work: %v", err)
+	}
+	if len(items) != 1 || items[0].RecipientID != recipient {
+		t.Fatalf("ListInbox must return exactly this recipient's row, got %+v", items)
+	}
+
+	// 写入自己的收件箱（管线的工作面）：必须成功。
+	created, err := repo.InsertInboxItemOnce(ctx, notification.InboxItem{
+		ID: "inbox_ns_new_" + run, RecipientID: recipient, Type: "Probe", Title: "新通知", CreatedAt: time.Now().UTC(),
+	})
+	if err != nil || !created {
+		t.Fatalf("InsertInboxItemOnce must succeed on a non-superuser connection: created=%v err=%v", created, err)
+	}
+
+	// 幂等：同一个 id 再来一次必须 created=false（管线靠这个不重复推送）。
+	created, err = repo.InsertInboxItemOnce(ctx, notification.InboxItem{
+		ID: "inbox_ns_new_" + run, RecipientID: recipient, Type: "Probe", Title: "新通知", CreatedAt: time.Now().UTC(),
+	})
+	if err != nil || created {
+		t.Fatalf("replay must report created=false, got created=%v err=%v", created, err)
+	}
+
+	// 标已读 + 深链归属，两者都走同一条 GUC 路径。
+	if err := repo.MarkRead(ctx, "inbox_ns_new_"+run, recipient); err != nil {
+		t.Fatalf("MarkRead: %v", err)
+	}
+	owns, err := repo.HasInboxDeepLink(ctx, recipient, "/probe/ns/"+run)
+	if err != nil {
+		t.Fatalf("HasInboxDeepLink: %v", err)
+	}
+	if owns {
+		t.Fatal("a deep link nobody was sent must not count as owned")
+	}
+
+	// 设备令牌：同一套机制的另一张表。
+	tok := notification.DeviceToken{
+		ID: "dtok_ns_" + run, UserAccountID: recipient, DeviceID: "dev_ns_" + run,
+		Platform: "IOS", Token: "apns_ns", Status: "ACTIVE", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.UpsertDeviceToken(ctx, tok); err != nil {
+		t.Fatalf("UpsertDeviceToken: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(ctx, `DELETE FROM notification.device_tokens WHERE id=$1`, tok.ID) })
+	tokens, err := repo.ListDeviceTokens(ctx, recipient)
+	if err != nil || len(tokens) != 1 {
+		t.Fatalf("ListDeviceTokens must return the token, got %d err=%v", len(tokens), err)
+	}
+	// 退役：173 之后必须带 UserAccountID 才声明得了作用域。
+	if err := repo.DeactivateDeviceToken(ctx, tok); err != nil {
+		t.Fatalf("DeactivateDeviceToken: %v", err)
+	}
+	tokens, err = repo.ListDeviceTokens(ctx, recipient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens) != 0 {
+		t.Fatalf("a retired token must not remain a push target, got %d", len(tokens))
+	}
+}
