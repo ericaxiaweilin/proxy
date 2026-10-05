@@ -245,3 +245,56 @@ func TestContentNudgeAndReviewEventsArePersisted(t *testing.T) {
 		t.Fatalf("events not persisted to the creator: %+v", got)
 	}
 }
+
+// MERCHANT-CREATOR-NOTIFY-001：内容任务的两个事件（催一下 / 审核结果）也要用
+// **可投递**的收件人。
+//
+// 这两条以前拿 payload 里的 agentId 当收件人，而 agentId 不是任何会话的 principal
+// （本地库：121 个 creator，0 个的 agent_id 是 user account；sessions 里
+// principal_id LIKE 'agent_%' 为 0 行）。所以「商家提醒了你」「稿件被打回」这两条
+// 通知从来没有人读得到，而任务状态照样推进、没有任何报错。
+func TestContentTaskNotificationsUseADeliverableRecipient(t *testing.T) {
+	repo := NewMemoryRepository()
+	s := NewWithRepository(repo)
+	setupAgentAs(t, s, "agent_ct", "user_ct")
+	task := createTask(t, s, "agent_ct", "m_ct")
+	// 顺序有讲究：催一下只在「等 creator 回应」或「在拍」时适用（CONTENT_NUDGE_
+	// NOT_APPLICABLE），所以先在 PENDING 阶段催，再接受 → 投稿 → 审核。
+	if r := contentCmd(t, s, "NudgeContentTask", map[string]any{"taskId": task.ID}, "", "m_ct"); r.Outcome != "ACCEPTED" {
+		t.Fatalf("nudge: %s %+v", r.Outcome, r.Error)
+	}
+	respondAs(t, s, map[string]any{"invitationId": task.InvitationID, "decision": "ACCEPTED"}, "agent_ct", "")
+	contentCmd(t, s, "SubmitContentDraft", map[string]any{"taskId": task.ID, "mediaAssetIds": []string{"ma_1"}, "caption": "二层包厢的光线"}, "agent_ct", "")
+	if r := contentCmd(t, s, "ReviewContentDraft", map[string]any{
+		"taskId": task.ID, "decision": "APPROVE",
+		"checks": map[string]any{"storeClear": true, "matchesReality": true, "noCompetitor": true, "noContact": true},
+	}, "", "m_ct"); r.Outcome != "ACCEPTED" {
+		t.Fatalf("review: %s %+v", r.Outcome, r.Error)
+	}
+
+	for _, eventType := range []string{"ContentTaskNudged", "ContentDraftReviewed"} {
+		got := notifiedRecipients(repo, eventType)
+		if len(got) != 1 || got[0] != "user_ct" {
+			t.Fatalf("%s recipient = %v, want [user_ct]（user account，不是 agent id）", eventType, got)
+		}
+	}
+}
+
+// profile 上没有 user account ⇒ **不发事件**（而不是发一条没人收得到的），
+// 而任务状态机照常推进 —— 通知的可推导性不该阻塞业务动作。
+func TestContentTaskWithoutDeliverableRecipientStillAdvances(t *testing.T) {
+	repo := NewMemoryRepository()
+	s := NewWithRepository(repo)
+	setupAgentAs(t, s, "agent_ct_nouid", "") // actor 为空 ⇒ profile 上没有 user account
+	task := createTask(t, s, "agent_ct_nouid", "m_ct2")
+
+	if r := contentCmd(t, s, "NudgeContentTask", map[string]any{"taskId": task.ID}, "", "m_ct2"); r.Outcome != "ACCEPTED" {
+		t.Fatalf("the nudge must still succeed, got %s (%+v)", r.Outcome, r.Error)
+	}
+	if got := notifiedRecipients(repo, "ContentTaskNudged"); len(got) != 0 {
+		t.Fatalf("nobody may be notified when the recipient is unresolvable, got %v", got)
+	}
+	if stage := stageOf(t, s, "m_ct2", task.ID); stage == "" {
+		t.Fatal("the task must still be in a real state")
+	}
+}

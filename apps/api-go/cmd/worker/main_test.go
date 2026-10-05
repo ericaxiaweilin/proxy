@@ -24,30 +24,46 @@ func testEvent(eventType, principalID, aggregateID string, payload map[string]an
 	}
 }
 
-// NOTIF-INVITE-OFFER-001: offer 必须投给 5 分钟内要行动的 agent，
+// NOTIF-INVITE-OFFER-001: offer 必须投给 5 分钟内要行动的 creator，
 // 而不是发起 offer 的 requester（以前收件人写反了，等于把信送给发信人）。
+//
+// MERCHANT-CREATOR-NOTIFY-001 更新：收件人从 payload.agentId 改成
+// payload.notifyPrincipalId（creator 的 user account id）—— agentId 不是任何会话的
+// principal，投过去通知会正确落库然后永远没人读到。
 func TestInboxForEventRoutesOfferToAgent(t *testing.T) {
 	recipient, title, _, deepLink, ok := inboxForEvent(testEvent(
-		"SlotOfferCreated", "requester-u1", "off_1",
-		map[string]any{"agentId": "agent-xiaomei"},
+		"OfferCreated", "requester-u1", "off_1",
+		map[string]any{"agentId": "agent-xiaomei", "notifyPrincipalId": "user-xiaomei"},
 	))
 	if !ok {
-		t.Fatal("SlotOfferCreated must produce an inbox item")
+		t.Fatal("OfferCreated must produce an inbox item")
 	}
-	if recipient != "agent-xiaomei" {
-		t.Fatalf("offer routed to %q, want the acting agent", recipient)
+	if recipient != "user-xiaomei" {
+		t.Fatalf("offer routed to %q, want the acting creator's account", recipient)
+	}
+	if recipient == "requester-u1" {
+		t.Fatal("offer must never go back to the requester")
 	}
 	if title == "" || deepLink == "" {
 		t.Fatal("offer inbox needs a title and a deep link")
 	}
 }
 
-func TestInboxForEventFallsBackWhenAgentMissing(t *testing.T) {
-	recipient, _, _, _, ok := inboxForEvent(testEvent(
-		"SlotOfferCreated", "requester-u1", "off_1", nil,
-	))
-	if !ok || recipient != "requester-u1" {
-		t.Fatalf("missing agentId must fall back to principal, got %q ok=%v", recipient, ok)
+// 收件人算不出来时**不投**，绝不回退到发起人。
+//
+// 这条以前是反的（「missing agentId must fall back to principal」）—— 那个回退正是
+// 把信送给发信人：requester 刚发完 offer 就在自己收件箱里看到「客户已发 Offer」。
+// 更糟的是它会覆盖掉「收件人不可投递」这个事实：一条投给不可投递地址的通知，
+// 和没有通知在数据上长得一样（都有一行），但没人会去看有没有人读得到。
+func TestInboxForEventDoesNotFallBackToTheRequester(t *testing.T) {
+	for _, payload := range []map[string]any{
+		nil,
+		{"agentId": "agent-xiaomei"},
+	} {
+		recipient, _, _, _, ok := inboxForEvent(testEvent("OfferCreated", "requester-u1", "off_1", payload))
+		if ok {
+			t.Fatalf("an offer with no deliverable recipient must not be delivered (went to %q)", recipient)
+		}
 	}
 }
 
@@ -101,7 +117,7 @@ func TestWorkerDeliveryGoesThroughPipeline(t *testing.T) {
 	rec := &recordingProducer{}
 	d := businessInboxDelivery{inner: logDelivery{}, producer: rec}
 
-	e := testEvent("OfferCreated", "requester-u1", "off_1", map[string]any{"agentId": "agent-xiaomei"})
+	e := testEvent("OfferCreated", "requester-u1", "off_1", map[string]any{"agentId": "agent-xiaomei", "notifyPrincipalId": "user-xiaomei"})
 	e.EventID = "evt_route_1"
 	if err := d.createInboxForEvent(context.Background(), e); err != nil {
 		t.Fatalf("createInboxForEvent: %v", err)
@@ -110,7 +126,7 @@ func TestWorkerDeliveryGoesThroughPipeline(t *testing.T) {
 		t.Fatalf("the worker must emit exactly one notification, got %d", len(rec.got))
 	}
 	got := rec.got[0]
-	if got.RecipientID != "agent-xiaomei" {
+	if got.RecipientID != "user-xiaomei" {
 		t.Fatalf("recipient must come from inboxForEvent, got %q", got.RecipientID)
 	}
 	if got.Type != "OfferCreated" {
@@ -284,7 +300,7 @@ func TestWorkerDeliveryKeepsBatchAliveButCountsMissedNotifications(t *testing.T)
 	boom := errors.New("insert inbox: duplicate key value violates unique constraint")
 	d := newBusinessInboxDelivery(logDelivery{}, &failingProducer{err: boom})
 
-	e := testEvent("OfferCreated", "requester-u1", "off_1", map[string]any{"agentId": "agent-xiaomei"})
+	e := testEvent("OfferCreated", "requester-u1", "off_1", map[string]any{"agentId": "agent-xiaomei", "notifyPrincipalId": "user-xiaomei"})
 	e.EventID = "evt_missed_1"
 	if err := d.Deliver(context.Background(), e); err != nil {
 		t.Fatalf("notification failure must not fail the outbox batch, got %v", err)
@@ -679,5 +695,59 @@ func TestInboxForEventDoesNotGuessRecipientForMerchantCreatorEvents(t *testing.T
 		if ok {
 			t.Fatalf("%s without notifyPrincipalId must not be delivered (it went to %q)", eventType, recipient)
 		}
+	}
+}
+
+// MERCHANT-CREATOR-NOTIFY-001：内容任务两条通知的收件人必须是 notifyPrincipalId，
+// **不是** agentId。
+//
+// 这两条以前是 `payloadString("agentId")`，于是通知正确地写进 inbox_items 然后
+// 永远没人读到（agentId 不是任何会话的 principal）。而正向/反向门禁都不会说话：
+// 映射有 case、事件有人发、事件确实处理了 —— 只是一行没人读的记录。
+//
+// 缺 notifyPrincipalId ⇒ 不投。这里最要紧的是**不许回退到 agentId**：回退过去
+// 就是把「静默失效」换成「静默写错地址」，后者更难查。
+func TestContentTaskNotificationsNeverFallBackToAgentId(t *testing.T) {
+	for _, eventType := range []string{"ContentTaskNudged", "ContentDraftReviewed"} {
+		// 有 notifyPrincipalId ⇒ 用它，即使 payload 里同时有 agentId。
+		recipient, title, body, _, ok := inboxForEvent(testEvent(eventType, "merchant_1", "ct_1", map[string]any{
+			"agentId": "agent_x", "notifyPrincipalId": "user_agent_x",
+			"title": "t", "stage": "AWAITING", "decision": "APPROVE",
+		}))
+		if !ok || recipient != "user_agent_x" {
+			t.Fatalf("%s must deliver to notifyPrincipalId, got %q (ok=%v)", eventType, recipient, ok)
+		}
+		if title == "" || body == "" {
+			t.Fatalf("%s must carry copy, got %q / %q", eventType, title, body)
+		}
+
+		// 只有 agentId ⇒ **不投**。绝不能回退到 agentId。
+		if recipient, _, _, _, ok := inboxForEvent(testEvent(eventType, "merchant_1", "ct_1", map[string]any{
+			"agentId": "agent_x", "title": "t", "stage": "AWAITING", "decision": "APPROVE",
+		})); ok {
+			t.Fatalf("%s without notifyPrincipalId must NOT be delivered (it would go to %q, which nobody can read)", eventType, recipient)
+		}
+
+		// 两者都没有 ⇒ 不投，且**绝不**回退到 actor（那是商家自己）。
+		if recipient, _, _, _, ok := inboxForEvent(testEvent(eventType, "merchant_1", "ct_1", map[string]any{})); ok {
+			t.Fatalf("%s with no recipient must not be delivered (got %q)", eventType, recipient)
+		}
+	}
+}
+
+// OfferCreated 同一条规则：5 分钟时效的通知，收件人必须是可投递 id。
+func TestOfferNotificationNeverFallsBackToAgentId(t *testing.T) {
+	recipient, _, _, _, ok := inboxForEvent(testEvent("OfferCreated", "requester-u1", "ord_1", map[string]any{
+		"agentId": "agent_x", "notifyPrincipalId": "user_agent_x",
+	}))
+	if !ok || recipient != "user_agent_x" {
+		t.Fatalf("OfferCreated must deliver to notifyPrincipalId, got %q (ok=%v)", recipient, ok)
+	}
+	// 只有 agentId 时不投：Offer 有 5 分钟时效，投到一个没人读的地址等于没投，
+	// 而订单照样创建 —— 静默失效比不投更坏。
+	if recipient, _, _, _, ok := inboxForEvent(testEvent("OfferCreated", "requester-u1", "ord_1", map[string]any{
+		"agentId": "agent_x",
+	})); ok {
+		t.Fatalf("OfferCreated without notifyPrincipalId must NOT be delivered (it would go to %q)", recipient)
 	}
 }

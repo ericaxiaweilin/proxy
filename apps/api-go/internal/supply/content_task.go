@@ -628,9 +628,15 @@ func (s *Service) reviewContentDraft(ctx context.Context, e command.Envelope) co
 	now := s.clock.Now().UTC()
 	t.Review = &ContentReview{Decision: p.Decision, Note: note, Checks: checks, ReviewedAt: now}
 	t.UpdatedAt = now
-	domainEvents := []event.DomainEvent{event.New("ContentDraftReviewed", "ContentTask", t.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"agentId": t.AgentID, "decision": p.Decision, "title": t.Title,
-	})}
+	// notifyPrincipalId = creator 的**可投递**收件人（user account id），不是 agentId
+	// —— agentId 不是任何会话的 principal（见 notification.AgentInboxResolver 的实测数据）。
+	// 解析不出来就不发事件，而不是发一条没人收得到的。
+	var domainEvents []event.DomainEvent
+	if recipient := s.creatorInboxRecipient(ctx, t.AgentID); recipient != "" {
+		domainEvents = []event.DomainEvent{event.New("ContentDraftReviewed", "ContentTask", t.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+			"agentId": t.AgentID, "decision": p.Decision, "title": t.Title, "notifyPrincipalId": recipient,
+		})}
+	}
 	if err := s.saveContentTaskWithEvents(ctx, t, domainEvents); err != nil {
 		return command.Rejected(e, "CONTENT_TASK_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.content_task_write_failed", nil)
 	}
@@ -661,9 +667,14 @@ func (s *Service) nudgeContentTask(ctx context.Context, e command.Envelope) comm
 		return command.Rejected(e, "CONTENT_NUDGE_TOO_SOON", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.content_nudge_too_soon", nil)
 	}
 	t.NudgedAt = now
-	domainEvents := []event.DomainEvent{event.New("ContentTaskNudged", "ContentTask", t.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"agentId": t.AgentID, "stage": stage, "title": t.Title, "invitationId": t.InvitationID,
-	})}
+	// 收件人是 creator 的可投递收件人（user account id），不是 agentId —— 理由同上。
+	var domainEvents []event.DomainEvent
+	if recipient := s.creatorInboxRecipient(ctx, t.AgentID); recipient != "" {
+		domainEvents = []event.DomainEvent{event.New("ContentTaskNudged", "ContentTask", t.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+			"agentId": t.AgentID, "stage": stage, "title": t.Title, "invitationId": t.InvitationID,
+			"notifyPrincipalId": recipient,
+		})}
+	}
 	if err := s.saveContentTaskWithEvents(ctx, t, domainEvents); err != nil {
 		return command.Rejected(e, "CONTENT_TASK_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.content_task_write_failed", nil)
 	}

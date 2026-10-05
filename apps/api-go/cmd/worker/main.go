@@ -206,8 +206,19 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 		return fallbackRecipient(""), "需求已发布", "你的需求已进入撮合", "/tasks/" + e.AggregateID, true
 	case "TaskSlotsCreated":
 		return "", "", "", "", false // skip noisy
+	// ⚠️ OfferCreated 收件人是 notifyPrincipalId（creator 的 user account id），
+	// **不是** agentId —— agentId 不是任何会话的 principal，投过去等于没投，
+	// 而 Offer 有 5 分钟时效、订单照样创建、没有任何报错。
+	//
+	// SlotOfferCreated 是另一个域（localnet/task 档位报价），它发的 payload 里
+	// 没有 notifyPrincipalId ⇒ 这两条**不投**。宁可少通知也不写一行没人读的记录；
+	// 要接的话得先给那个域也加上解析（见 notification.AgentInboxResolver）。
 	case "OfferCreated", "SlotOfferCreated":
-		return fallbackRecipient(payloadString("agentId")), "收到 Offer", "客户已发 Offer，5分钟内有效", "/offers/" + e.AggregateID, true
+		creator := payloadString("notifyPrincipalId")
+		if creator == "" {
+			return "", "", "", "", false
+		}
+		return creator, "收到 Offer", "客户已发 Offer，5分钟内有效", "/offers/" + e.AggregateID, true
 	// 真实事件名是 OrderCreatedFromOffer（Aggregate 是 order，所以 /orders/<ord_…> 是对的）。
 	// 别再加回 "OrderCreated" / "OfferAccepted" —— 见函数头注释第 3、4 条。
 	case "OrderCreatedFromOffer":
@@ -225,27 +236,34 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 			reply = "对方想先问问细节再决定"
 		}
 		return fallbackRecipient(payloadString("hostId")), "邀请有回复了", reply, "/invitations/" + e.AggregateID, true
-	// CONTENT-TASK-001：商家「催一下」/ 审核结果 → 投给 creator（payload.agentId）。
-	// 没有 agentId 就不投（不回退到发起人 —— 那是商家自己）。
+	// CONTENT-TASK-001：商家「催一下」/ 审核结果 → 投给 creator。
+	//
+	// ⚠️ 收件人是 payload.**notifyPrincipalId**（creator 的 user account id），
+	// **不是** payload.agentId。agentId 不是任何会话的 principal（本地库 121 个
+	// creator，0 个的 agent_id 是 user account），拿它当收件人的通知会正确落进
+	// inbox_items 然后永远没人读到。
+	//
+	// **这里刻意不回退到 agentId**：以前就是回退过去的，于是这两条通知一直在
+	// 写一行没人读的记录。缺 notifyPrincipalId ⇒ 不投（映射层回 ok=false）。
 	case "ContentTaskNudged":
-		agent := payloadString("agentId")
-		if agent == "" {
+		creator := payloadString("notifyPrincipalId")
+		if creator == "" {
 			return "", "", "", "", false
 		}
 		body := "商家在等你的内容稿件"
 		if payloadString("stage") == "AWAITING" {
 			body = "商家在等你回复内容合作邀请"
 		}
-		return agent, "商家提醒了你", body, "", true
+		return creator, "商家提醒了你", body, "", true
 	case "ContentDraftReviewed":
-		agent := payloadString("agentId")
-		if agent == "" {
+		creator := payloadString("notifyPrincipalId")
+		if creator == "" {
 			return "", "", "", "", false
 		}
 		if payloadString("decision") == "APPROVE" {
-			return agent, "稿件审核通过", "可以发布了，发完记得贴上各平台链接", "", true
+			return creator, "稿件审核通过", "可以发布了，发完记得贴上各平台链接", "", true
 		}
-		return agent, "稿件被打回", "商家写了修改意见，改好后可重新提交", "", true
+		return creator, "稿件被打回", "商家写了修改意见，改好后可重新提交", "", true
 
 		// ── MERCHANT-CREATOR-NOTIFY-001：商家↔creator 的往来 ──────────────────
 		//
