@@ -3,8 +3,10 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/outbox"
@@ -122,6 +124,31 @@ func (r *OutboxRepository) Claim(ctx context.Context, workerID string, limit int
 	return result, nil
 }
 
+// scanOutboxMessage 读一行 outbox 消息。Claim 与 ListDeadLetters 共用 ——
+// 两个地方扫同一张表，扫法必须一样（漏一列就是「有的死信看起来没有 last_error」）。
+func scanOutboxMessage(rows pgx.Rows) (outbox.Message, error) {
+	var e event.DomainEvent
+	var message outbox.Message
+	var causationID *string
+	var payload []byte
+	if err := rows.Scan(
+		&e.EventID, &e.EventType, &e.EventVersion, &e.AggregateType, &e.AggregateID,
+		&e.AggregateVersion, &e.PrincipalID, &e.OccurredAt, &e.CorrelationID,
+		&causationID, &payload, &message.Status, &message.Attempts,
+		&message.AvailableAt, &message.LastError,
+	); err != nil {
+		return outbox.Message{}, err
+	}
+	if causationID != nil {
+		e.CausationID = *causationID
+	}
+	if err := json.Unmarshal(payload, &e.Payload); err != nil {
+		return outbox.Message{}, err
+	}
+	message.Event = e
+	return message, nil
+}
+
 func (r *OutboxRepository) MarkSent(ctx context.Context, workerID, eventID string, sentAt time.Time) error {
 	commandTag, err := r.pool.Exec(ctx, `
 		UPDATE integration.outbox_messages
@@ -154,6 +181,69 @@ func (r *OutboxRepository) MarkFailed(ctx context.Context, workerID, eventID, re
 		return outbox.ErrMessageNotClaimed
 	}
 	return nil
+}
+
+// ListDeadLetters 列出死信。freshSince 零值 = 不限时间（用于「有多少条太旧的」）。
+//
+// 按 occurred_at 排而不是 created_at：occurred_at 是**事件自己发生的时间**，也就是
+// 「这条通知说的是什么时候的事」。用 created_at 会把一条积压很久的旧事件算成新
+// 的，从而被自动重放 —— 那正是「把 6 周前的需求已发布补发到今天」这个蠢错。
+func (r *OutboxRepository) ListDeadLetters(ctx context.Context, freshSince time.Time, limit int) ([]outbox.Message, error) {
+	if limit <= 0 {
+		limit = outbox.MaxDeadLetterReplayBatch
+	}
+	sqlStr := `
+		SELECT event_id, event_type, event_version, aggregate_type, aggregate_id,
+		       aggregate_version, principal_id, occurred_at, correlation_id,
+		       causation_id, payload, status, attempts,
+		       COALESCE(claimed_until, occurred_at), COALESCE(last_error, '')
+		FROM integration.outbox_messages
+		WHERE status = 'DEAD_LETTER'`
+	args := []any{}
+	if !freshSince.IsZero() {
+		sqlStr += ` AND occurred_at >= $1`
+		args = append(args, freshSince.UTC())
+	}
+	sqlStr += fmt.Sprintf(` ORDER BY occurred_at ASC LIMIT $%d`, len(args)+1)
+	args = append(args, limit)
+
+	rows, err := r.pool.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []outbox.Message{}
+	for rows.Next() {
+		message, err := scanOutboxMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, message)
+	}
+	return result, rows.Err()
+}
+
+// Replay 把死信放回 PENDING。
+//
+// attempts 必须清零：Claim 之后 RunOnce 会用「attempts >= MaxAttempts」直接再判
+// DEAD_LETTER，不清零的话重放出来的那一次跑完立刻又变死信 —— 变成无限循环。
+//
+// last_error **不覆盖**：那是失败原因的证据，重放是「再试一次」而不是抹掉。
+func (r *OutboxRepository) Replay(ctx context.Context, eventIDs []string, now time.Time) (int, error) {
+	if len(eventIDs) == 0 {
+		return 0, nil
+	}
+	commandTag, err := r.pool.Exec(ctx, `
+		UPDATE integration.outbox_messages
+		SET status = 'PENDING', attempts = 0,
+		    worker_id = NULL, claimed_until = NULL,
+		    replayed_at = $1, replay_count = replay_count + 1
+		WHERE event_id = ANY($2) AND status = 'DEAD_LETTER'`,
+		now.UTC(), eventIDs)
+	if err != nil {
+		return 0, err
+	}
+	return int(commandTag.RowsAffected()), nil
 }
 
 var _ outbox.Repository = (*OutboxRepository)(nil)

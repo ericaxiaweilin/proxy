@@ -27,16 +27,16 @@ func TestOutboxPostgresLifecycle(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	mkEvent := func(id, typ string) event.DomainEvent {
 		return event.DomainEvent{
-			EventID:         "evt_pg_" + itoa(run) + "_" + id,
-			EventType:       typ,
-			EventVersion:    1,
-			AggregateType:   "Test",
-			AggregateID:     "agg_pg_" + itoa(run),
+			EventID:          "evt_pg_" + itoa(run) + "_" + id,
+			EventType:        typ,
+			EventVersion:     1,
+			AggregateType:    "Test",
+			AggregateID:      "agg_pg_" + itoa(run),
 			AggregateVersion: 1,
-			PrincipalID:     "user_pg_1",
-			OccurredAt:      now,
-			CorrelationID:   "corr_pg_outbox",
-			Payload:         map[string]any{"k": "v"},
+			PrincipalID:      "user_pg_1",
+			OccurredAt:       now,
+			CorrelationID:    "corr_pg_outbox",
+			Payload:          map[string]any{"k": "v"},
 		}
 	}
 
@@ -278,3 +278,80 @@ func claimAllPG(t *testing.T, repo *OutboxRepository, worker string, at time.Tim
 	t.Fatalf("Claim %s never drained the queue", worker)
 	return nil
 }
+
+// MERCHANT-CREATOR-NOTIFY-001：死信重放在真 PG 上的形状。
+//
+// 单测跑的是内存仓。这条钉住 PG：够新的能回到 PENDING、太旧的留在 DEAD_LETTER、
+// last_error 不被抹掉、replay 留痕。这几条各自都能在错误时看起来「正常」——
+// 比如 replay 忘了清 attempts，那条消息跑一次又立刻变死信，成为无限循环。
+func TestOutboxDeadLetterReplayOnPG(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewOutboxRepository(pool)
+	run := itoa(time.Now().UnixNano())
+	now := time.Now().UTC()
+	fresh, stale := "evt_dl_fresh_"+run, "evt_dl_stale_"+run
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM integration.outbox_messages WHERE event_id = ANY($1)`, []string{fresh, stale})
+	})
+
+	mk := func(id string, occurredAt time.Time) {
+		t.Helper()
+		e := event.New("ProbePublished", "Probe", id, 1, "u1", "corr_"+run, "cmd_"+run, occurredAt, map[string]any{})
+		e.EventID = id
+		if err := repo.Publish(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `
+			UPDATE integration.outbox_messages
+			SET status='DEAD_LETTER', attempts=10, last_error='delivery is down (fixture)'
+			WHERE event_id=$1`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk(fresh, now.Add(-2*time.Minute))
+	mk(stale, now.Add(-30*24*time.Hour))
+
+	w := outbox.Worker{Repository: repo, Delivery: outbox.Delivery(logDeliveryForTest{})}
+	replayed, staleCount, err := w.ReapDeadLetters(ctx, now)
+	if err != nil {
+		t.Fatalf("ReapDeadLetters: %v", err)
+	}
+	if replayed != 1 || staleCount != 1 {
+		t.Fatalf("replayed=%d stale=%d, want 1/1", replayed, staleCount)
+	}
+
+	var status, lastErr string
+	var attempts, replayCount int
+	var replayedAt *time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT status, attempts, last_error, replayed_at, replay_count
+		FROM integration.outbox_messages WHERE event_id=$1`, fresh).
+		Scan(&status, &attempts, &lastErr, &replayedAt, &replayCount); err != nil {
+		t.Fatal(err)
+	}
+	if status != "PENDING" {
+		t.Fatalf("fresh dead letter must be replayed to PENDING, got %q", status)
+	}
+	if attempts != 0 {
+		t.Fatalf("attempts must be reset (else the replayed run dead-letters again immediately), got %d", attempts)
+	}
+	if lastErr != "delivery is down (fixture)" {
+		t.Fatalf("replay must not erase last_error, got %q", lastErr)
+	}
+	if replayedAt == nil || replayCount != 1 {
+		t.Fatalf("replay must be auditable: at=%v count=%d", replayedAt, replayCount)
+	}
+
+	if err := pool.QueryRow(ctx, `SELECT status FROM integration.outbox_messages WHERE event_id=$1`, stale).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "DEAD_LETTER" {
+		t.Fatalf("a 30-day-old dead letter must stay dead — 补发一条 30 天前的通知比不补发更糟, got %q", status)
+	}
+}
+
+type logDeliveryForTest struct{}
+
+func (logDeliveryForTest) Deliver(context.Context, event.DomainEvent) error { return nil }

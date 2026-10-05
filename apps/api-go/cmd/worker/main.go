@@ -406,6 +406,8 @@ func main() {
 				item.ID, item.RecipientID, item.Type, item.DeepLink, err)
 		})
 	var inboxMissed, inboxMissedLogged atomic.Int64
+	// 死信数只在变化时上报（见下面那处的注释：每 tick 都刷 = 没有告警）。
+	var lastReportedStale atomic.Int64
 	inboxDelivery := businessInboxDelivery{inner: deduped, producer: inboxPipeline, missed: &inboxMissed, missedLogged: &inboxMissedLogged}
 	log.Printf("%s", inboxPipeline.Describe())
 	log.Printf("%s", pushNote)
@@ -479,6 +481,27 @@ func main() {
 			// 而逐条 log 不会被告警。这一行是给日志告警规则用的。
 			if n := inboxDelivery.reportMissedNotifications(); n > 0 {
 				log.Printf("WARNING inbox notifications failed: since_last_tick=%d cumulative=%d", n, inboxDelivery.missedTotal())
+			}
+			// MERCHANT-CREATOR-NOTIFY-001：死信处理。够新的自动重放（重放不会产生
+			// 第二条通知 —— 收件箱的幂等 id 由事件 id 推出来）；太旧的只报数。
+			// 以前死信是「3 处写、0 处读」，本地库躺着 83 条 8 月的死信没人知道。
+			replayed, stale, reapErr := outboxWorker.ReapDeadLetters(ctx, time.Now().UTC())
+			switch {
+			case reapErr != nil:
+				log.Printf("dead letter sweep failed: %v", reapErr)
+			case replayed > 0:
+				log.Printf("dead letters replayed: count=%d (recent enough to still be meaningful)", replayed)
+			}
+			// 只在**变化时**打这一行。死信数不变还每秒刷一次，会把告警变成噪音 ——
+			// 而一条每秒钟都出现的告警等于没有告警（值班的人第一条就静音了）。
+			if int64(stale) != lastReportedStale.Load() {
+				previous := lastReportedStale.Swap(int64(stale))
+				if stale > 0 {
+					log.Printf("WARNING stale dead letters not replayed: count=%d previous=%d "+
+						"（补发一条几周前的通知比不补发更糟 —— 那是一条假的新消息；需要人工判断）", stale, previous)
+				} else {
+					log.Printf("stale dead letters cleared: count=0")
+				}
 			}
 			if n := pushFailuresLogged.Add(pushFailures.Load() - pushFailuresLogged.Load()); n > 0 {
 				log.Printf("WARNING notification pushes failed: since_last_tick=%d cumulative=%d", n, pushFailures.Load())
