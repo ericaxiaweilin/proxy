@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -71,12 +72,60 @@ func (d inboxDedupeDelivery) Deliver(ctx context.Context, e event.DomainEvent) e
 type businessInboxDelivery struct {
 	inner    outbox.Delivery
 	producer notification.Producer
+	// MERCHANT-CREATOR-NOTIFY-001：通知没投出去时，这里逐条 log error
+	// （以前是 `_ = d.createInboxForEvent(ctx, e)` —— 失败连日志都没有，
+	// 事件照样 MarkSent ⇒ 通知永久丢失、无痕迹）。
+	//
+	// 逐条 log 是「留痕」，这个计数是「能告警」：log 里翻到一行不代表有人看，
+	// 而一行 "inbox notifications failed since_last_tick=N cumulative=N"
+	// 可以直接被日志告警规则抓住。
+	missed       *atomic.Int64
+	missedLogged *atomic.Int64
+}
+
+func newBusinessInboxDelivery(inner outbox.Delivery, producer notification.Producer) businessInboxDelivery {
+	return businessInboxDelivery{inner: inner, producer: producer, missed: &atomic.Int64{}, missedLogged: &atomic.Int64{}}
 }
 
 func (d businessInboxDelivery) Deliver(ctx context.Context, e event.DomainEvent) error {
-	// Best-effort inbox notification for P0 business events; never fail the outbox batch
-	_ = d.createInboxForEvent(ctx, e)
+	// Best-effort inbox notification for P0 business events; never fail the outbox batch.
+	//
+	// 这个取舍是对的，别改：让一条标题写错的通知把「需求已发布」拖进
+	// DEAD_LETTER，是用业务事件的可投递性去换一个本该被挡住的错误。
+	// 但**不失败 ≠ 不留痕** —— 失败必须进日志和计数。
+	if err := d.createInboxForEvent(ctx, e); err != nil {
+		d.noteMissed(e, err)
+	}
 	return d.inner.Deliver(ctx, e)
+}
+
+func (d businessInboxDelivery) noteMissed(e event.DomainEvent, err error) {
+	if d.missed != nil {
+		d.missed.Add(1)
+	}
+	log.Printf("notification delivery failed: event_type=%s event_id=%s aggregate=%s/%s err=%v",
+		e.EventType, e.EventID, e.AggregateType, e.AggregateID, err)
+}
+
+// reportMissedNotifications 返回「自上次上报以来的新增失败数」，并把游标推前。
+// 供 tick 循环打一条可告警的心跳行。
+//
+// 注意别写成 `missed.Add(-missedLogged.Swap(missed.Load()))` —— 那会让
+// Swap 把游标设成总数、再用 Add 把总数减回去，计数本身就被改坏了
+// （第二次失败就报不出来）。先读总数、只动游标：
+func (d businessInboxDelivery) reportMissedNotifications() int64 {
+	if d.missed == nil || d.missedLogged == nil {
+		return 0
+	}
+	total := d.missed.Load()
+	return total - d.missedLogged.Swap(total)
+}
+
+func (d businessInboxDelivery) missedTotal() int64 {
+	if d.missed == nil {
+		return 0
+	}
+	return d.missed.Load()
 }
 
 func (d businessInboxDelivery) createInboxForEvent(ctx context.Context, e event.DomainEvent) error {
@@ -122,8 +171,9 @@ func (d businessInboxDelivery) createInboxForEvent(ctx context.Context, e event.
 // ok=false，安静跳过 —— worker 的 best-effort 语义不变。
 //
 // ⚠️ 这里每一个 case 的**事件名**都必须真的有人发 —— 上面第 3 条就是教训。
-//    `TestInboxForEventOnlyMapsEventTypesThatAreActuallyEmitted` 扫全仓
-//    `event.New("X"` 来钉这件事，加分支前先跑它。
+//
+//	`TestInboxForEventOnlyMapsEventTypesThatAreActuallyEmitted` 扫全仓
+//	`event.New("X"` 来钉这件事，加分支前先跑它。
 func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string, ok bool) {
 	payloadString := func(key string) string {
 		if e.Payload == nil {
@@ -223,10 +273,20 @@ func main() {
 	// 以前 worker 自己写 SQL、API 走 Service，推送通道只有 API 那半知道。
 	inboxRepo := postgres.NewNotificationRepository(pool)
 	pushProvider, pushNote := notification.PushProviderFromEnv(os.Getenv, inboxRepo)
-	inboxPipeline := notification.NewPipeline(inboxRepo, pushProvider)
+	// MERCHANT-CREATOR-NOTIFY-001：推送失败逐条进日志，再聚合成一条可告警计数。
+	// 以前是 `_ = p.push.Push(...)`，落库成功后就再没人知道推送挂了。
+	var pushFailures, pushFailuresLogged atomic.Int64
+	inboxPipeline := notification.NewPipeline(inboxRepo, pushProvider).OnPushFailure(
+		func(item notification.InboxItem, err error) {
+			pushFailures.Add(1)
+			log.Printf("notification push failed: item=%s recipient=%s type=%s deep_link=%s err=%v",
+				item.ID, item.RecipientID, item.Type, item.DeepLink, err)
+		})
+	var inboxMissed, inboxMissedLogged atomic.Int64
+	inboxDelivery := businessInboxDelivery{inner: deduped, producer: inboxPipeline, missed: &inboxMissed, missedLogged: &inboxMissedLogged}
 	log.Printf("%s", inboxPipeline.Describe())
 	log.Printf("%s", pushNote)
-	delivery := outbox.Delivery(businessInboxDelivery{inner: deduped, producer: inboxPipeline})
+	delivery := outbox.Delivery(inboxDelivery)
 	outboxWorker := outbox.Worker{
 		Repository:  postgres.NewOutboxRepository(pool),
 		Delivery:    delivery,
@@ -289,6 +349,16 @@ func main() {
 				log.Printf("outbox poll failed: %v", runErr)
 			} else if processed > 0 {
 				log.Printf("outbox batch delivered: count=%d", processed)
+			}
+			// MERCHANT-CREATOR-NOTIFY-001：通知投递失败不会让这批失败
+			// （那是刻意的，见 Deliver），所以**必须有**一条独立的心跳计数 ——
+			// 否则「inbox 没写进去 / 推送全挂」只会以逐条 error 的形式存在，
+			// 而逐条 log 不会被告警。这一行是给日志告警规则用的。
+			if n := inboxDelivery.reportMissedNotifications(); n > 0 {
+				log.Printf("WARNING inbox notifications failed: since_last_tick=%d cumulative=%d", n, inboxDelivery.missedTotal())
+			}
+			if n := pushFailuresLogged.Add(pushFailures.Load() - pushFailuresLogged.Load()); n > 0 {
+				log.Printf("WARNING notification pushes failed: since_last_tick=%d cumulative=%d", n, pushFailures.Load())
 			}
 			mediaProcessed, mediaErr := mediaWorker.RunOnce(ctx)
 			if mediaErr != nil {

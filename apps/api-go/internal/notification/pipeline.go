@@ -81,6 +81,19 @@ type Pipeline struct {
 	repo  Repository
 	push  PushProvider
 	clock clock.Clock
+	// onPushFailure 在**推送失败**时被调一次（不是每个令牌一次）。
+	//
+	// MERCHANT-CREATOR-NOTIFY-001：推送失败以前是 `_ = p.push.Push(...)` ——
+	// PushDispatcher 精心把「3 台里推成 2 台」和「一台都没推成」聚合成一个
+	// 带设备 id 的错误返回，然后**连日志都没有**就丢掉。落库已经成功，
+	// 推送挂在它后面；一个 `_ =` 让「用户从来没收到过推送」这件事既没有痕迹
+	// 也没有计数，排查时只能靠猜。
+	//
+	// 为什么不给 Push 单独的 outbox / 重试：推失败**不能**回滚已落库的 inbox
+	// 行（那是用户已经能看到的事实），而真要重推，正确做法是让渠道自己重投
+	// 或事后按 inbox 行补推 —— 那是「死信消费者 + 补推任务」的事，不该在这里
+	// 假装有。这里只负责**不再静默**：留痕 + 计数，语义一个字不改。
+	onPushFailure func(InboxItem, error)
 }
 
 // NewPipeline 建管线。push 传 nil = **不推送**（只落库），这是合法的
@@ -98,6 +111,15 @@ func NewPipelineWithClock(repo Repository, push PushProvider, c clock.Clock) *Pi
 	if c != nil {
 		p.clock = c
 	}
+	return p
+}
+
+// OnPushFailure 注册推送失败的回调（供日志/计数接线）。返回自身便于链式。
+//
+// 留成可选钩子而不是直接 log.Printf：让「推送失败必须被看见」这件事
+// 能被测试断言 —— captureLog 那类测法在 CI 上脆得很。
+func (p *Pipeline) OnPushFailure(fn func(InboxItem, error)) *Pipeline {
+	p.onPushFailure = fn
 	return p
 }
 
@@ -136,7 +158,11 @@ func (p *Pipeline) Emit(ctx context.Context, n Notification) (InboxItem, bool, e
 		return item, false, nil
 	}
 	if p.push != nil {
-		_ = p.push.Push(ctx, item)
+		// MERCHANT-CREATOR-NOTIFY-001：这里原来是 `_ = p.push.Push(...)`。
+		// 推送是 best-effort（失败不回滚已落库的 inbox 行），但**不能无声**。
+		if err := p.push.Push(ctx, item); err != nil && p.onPushFailure != nil {
+			p.onPushFailure(item, err)
+		}
 	}
 	return item, true, nil
 }

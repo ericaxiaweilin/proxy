@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -256,5 +257,56 @@ func TestInboxForEventPointsTheOrderLinkAtTheOrder(t *testing.T) {
 	// 而且拿 offer id 拼 /orders/ 是错链。
 	if _, _, _, _, ok := inboxForEvent(testEvent("OfferAccepted", "agent-1", "off_9", nil)); ok {
 		t.Fatal("OfferAccepted must not produce its own inbox row (its aggregate is the offer, so /orders/off_… would be a wrong link)")
+	}
+}
+
+type failingProducer struct{ err error }
+
+func (p *failingProducer) Emit(_ context.Context, n notification.Notification) (notification.InboxItem, bool, error) {
+	return notification.InboxItem{}, false, p.err
+}
+
+// MERCHANT-CREATOR-NOTIFY-001：通知投递失败**不让**这一批 outbox 失败。
+//
+// 这个取舍是对的：让一条标题写错的通知把「需求已发布」拖进 DEAD_LETTER，
+// 是用业务事件的可投递性去换一个本该被挡住的错误。
+// 但**不失败 ≠ 不留痕** —— 改之前这里是 `_ = d.createInboxForEvent(ctx, e)`，
+// 失败连日志都没有、事件照样 MarkSent ⇒ 通知永久丢失且无痕迹。
+func TestWorkerDeliveryKeepsBatchAliveButCountsMissedNotifications(t *testing.T) {
+	boom := errors.New("insert inbox: duplicate key value violates unique constraint")
+	d := newBusinessInboxDelivery(logDelivery{}, &failingProducer{err: boom})
+
+	e := testEvent("OfferCreated", "requester-u1", "off_1", map[string]any{"agentId": "agent-xiaomei"})
+	e.EventID = "evt_missed_1"
+	if err := d.Deliver(context.Background(), e); err != nil {
+		t.Fatalf("notification failure must not fail the outbox batch, got %v", err)
+	}
+	if got := d.missedTotal(); got != 1 {
+		t.Fatalf("missed notifications must be counted, got %d", got)
+	}
+	// 心跳计数：第一次报 1，之后没有新失败就不该再报（否则每 tick 刷一行噪音）。
+	if got := d.reportMissedNotifications(); got != 1 {
+		t.Fatalf("first report must be the delta since last report, got %d", got)
+	}
+	if got := d.reportMissedNotifications(); got != 0 {
+		t.Fatalf("report must not repeat without new failures, got %d", got)
+	}
+	_ = d.Deliver(context.Background(), e)
+	if got := d.reportMissedNotifications(); got != 1 {
+		t.Fatalf("a new failure must show up in the next report, got %d", got)
+	}
+	if got := d.missedTotal(); got != 2 {
+		t.Fatalf("cumulative count must keep growing, got %d", got)
+	}
+}
+
+// 没配计数器的实例（老构造路径）不能 panic —— worker 是 best-effort 的进程。
+func TestWorkerDeliveryWithoutMissCountersIsSafe(t *testing.T) {
+	d := businessInboxDelivery{inner: logDelivery{}, producer: &failingProducer{err: errors.New("boom")}}
+	if err := d.Deliver(context.Background(), testEvent("OfferCreated", "u1", "off_1", map[string]any{"agentId": "agent-x"})); err != nil {
+		t.Fatalf("delivery must still succeed, got %v", err)
+	}
+	if got := d.reportMissedNotifications(); got != 0 || d.missedTotal() != 0 {
+		t.Fatalf("nil counters must degrade to zero, got report=%d total=%d", got, d.missedTotal())
 	}
 }

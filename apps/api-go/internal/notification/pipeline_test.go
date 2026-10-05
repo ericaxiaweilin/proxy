@@ -388,3 +388,47 @@ func commandEnvelope(commandType string, payload map[string]any) command.Envelop
 		Payload:        payload,
 	}
 }
+
+// MERCHANT-CREATOR-NOTIFY-001：推送失败**不能**回滚已落库的 inbox 行
+// （那是用户已经能看到的事实），但**绝不能**无声。
+//
+// 改之前这里是 `_ = p.push.Push(...)`：PushDispatcher 精心把「3 台里推成 2 台」
+// 与「一台都没推成」聚合成带设备 id 的错误返回，然后连日志都没有就丢掉。
+// 结果是「用户从来没收到过推送」既没痕迹也没计数。
+func TestPipelineEmitReportsPushFailureWithoutFailing(t *testing.T) {
+	push := &countingPush{err: errors.New("push: 0/2 delivered for user_a: token/device-1: connection refused")}
+	pipeline, repo := newTestPipeline(t, push)
+
+	var gotItem InboxItem
+	var gotErr error
+	calls := 0
+	pipeline.OnPushFailure(func(item InboxItem, err error) {
+		calls++
+		gotItem, gotErr = item, err
+	})
+
+	item, created, err := pipeline.Emit(context.Background(), Notification{
+		RecipientID: "user_a", Type: "OfferCreated", Title: "收到 Offer",
+		DedupeKey: EventDedupeKey("evt_pushfail"),
+	})
+	if err != nil {
+		t.Fatalf("push failure must not fail Emit — the inbox row is already durable: %v", err)
+	}
+	if !created {
+		t.Fatal("item must still be created")
+	}
+	if calls != 1 {
+		t.Fatalf("push failure must be reported exactly once, got %d calls", calls)
+	}
+	if gotErr == nil || !strings.Contains(gotErr.Error(), "0/2 delivered") {
+		t.Fatalf("reported error must carry the dispatcher's detail, got %v", gotErr)
+	}
+	if gotItem.ID != item.ID || gotItem.RecipientID != "user_a" {
+		t.Fatalf("reported item must identify which notification failed, got %+v", gotItem)
+	}
+	// 留痕不能变成第二份真相：库里仍然只有一行。
+	rows, _ := repo.ListInbox(context.Background(), "user_a", false)
+	if len(rows) != 1 {
+		t.Fatalf("push failure must not duplicate the inbox row, got %d rows", len(rows))
+	}
+}
