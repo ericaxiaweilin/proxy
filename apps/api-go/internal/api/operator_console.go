@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -139,11 +140,43 @@ var (
 	operatorTags                = notConnected("标签体系（tag-service / tag-factory）", personalizationSpec+" §3")
 	operatorIntentOrchestration = notConnected("意图漏斗 + 引力 / 召回 / 排序 / 编排（gravity-service、retrieval、ranking、orchestration）", personalizationSpec+" §6 §7 §16")
 	operatorEngineAPI           = notConnected("引擎 API（/v1/decisions/evaluate 等尚未实现）", personalizationSpec+" §20")
-	operatorMerchant            = notConnected("商家与投放指标", personalizationSpec+" §17")
 	operatorRetention           = notConnected("留存与复购队列", personalizationSpec+" §17")
 	operatorTrust               = notConnected("信任与风险评分（evidence-gate、negative-breaker）", personalizationSpec+" §9 §10")
 	operatorQuality             = notConnected("数据治理（曝光谱系 / 污染风险）", personalizationSpec+" §9.1 §9.4")
 )
+
+// operatorMerchant：商家管理（OPS-MERCHANT-001）。原来是 notConnected 桩，控制台那页
+// 永远停在「未接入」。库里其实有真数（47 个主体 / 46 家店 / 819 张单），所以这一页
+// 该显示真数；没有来源的（曝光、成交额、复购）继续走「未接入」而不是编一个。
+func (s *Server) operatorMerchant(w http.ResponseWriter, r *http.Request) {
+	if s.OpsMetrics == nil {
+		notConnected("商家与投放指标（没有配数据库）", personalizationSpec+" §17")(w, r)
+		return
+	}
+	m, err := s.OpsMetrics.Merchants(r.Context(), time.Now().UTC())
+	if err != nil {
+		log.Printf("operator merchant: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "merchant_query_failed"})
+		return
+	}
+	notes := []string{
+		"曝光 / 投放效果未接入：没有把曝光落到具体门店的链路，所以这里不给「曝光」这一列，不给一个猜的数。",
+		"成交额（gross）未接入：支付还没接，金额没有事实来源 —— 显示 0 会被读成「没生意」，所以干脆不给。",
+	}
+	if m.Totals.Orders30dAll > 0 && m.Totals.Orders30d == 0 {
+		// 这就是归因链路没建起来的样子：订单有，但落不到门店。写明白，别让它长得像零。
+		notes = append(notes, fmt.Sprintf(
+			"近 %d 天有 %d 张订单，其中挂到门店的是 %d —— 不是这些店没单，是订单到门店的归因还没建（fulfillment.orders.store_id 大多为空）。",
+			m.WindowDays, m.Totals.Orders30dAll, m.Totals.Orders30d))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dataSource": OperatorLiveSource,
+		"windowDays": m.WindowDays,
+		"totals":     m.Totals,
+		"merchants":  m.Merchants,
+		"notes":      notes,
+	})
+}
 
 func (s *Server) operatorPopulation(w http.ResponseWriter, r *http.Request) {
 	if s.OpsMetrics == nil {

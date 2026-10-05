@@ -243,7 +243,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/tags", s.operatorConsole(operatorTags))
 	mux.HandleFunc("/v1/operator/intent-orchestration", s.operatorConsole(operatorIntentOrchestration))
 	mux.HandleFunc("/v1/operator/engine-api", s.operatorConsole(operatorEngineAPI))
-	mux.HandleFunc("/v1/operator/merchant", s.operatorConsole(operatorMerchant))
+	mux.HandleFunc("/v1/operator/merchant", s.operatorConsole(s.operatorMerchant))
 	mux.HandleFunc("/v1/operator/retention", s.operatorConsole(operatorRetention))
 	mux.HandleFunc("/v1/operator/trust", s.operatorConsole(operatorTrust))
 	mux.HandleFunc("/v1/operator/quality", s.operatorConsole(operatorQuality))

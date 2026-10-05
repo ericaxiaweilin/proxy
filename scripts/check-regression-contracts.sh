@@ -569,7 +569,8 @@ for OPS_PAGE in apps/market-intelligence-console/src/pages/Overview.tsx \
                 apps/market-intelligence-console/src/pages/Access.tsx \
                 apps/market-intelligence-console/src/pages/Gravity.tsx \
                 apps/market-intelligence-console/src/pages/ProviderApplications.tsx \
-                apps/market-intelligence-console/src/pages/NumberLookup.tsx; do
+                apps/market-intelligence-console/src/pages/NumberLookup.tsx \
+                apps/market-intelligence-console/src/pages/Merchant.tsx; do
   if [ ! -f "$OPS_PAGE" ]; then
     echo "  FAIL [OPS-REAL-001]: 控制台页面不见了 —— $OPS_PAGE" >&2
     exit 1
@@ -590,6 +591,40 @@ if [ -n "$OPS_FAKE" ]; then
   printf '%s\n' "$OPS_FAKE" | sed 's#^#        #' >&2
   exit 1
 fi
+# OPS-MERCHANT-001（2026-10-05）：商家管理页（/v1/operator/merchant）。
+# 这一页原来是一个包级函数 `operatorMerchant` —— 名字里带 operator、函数体里带 operator，
+# 从名字 grep 一定能查到，所以它骗过了所有「路由是否接线」的判据，而它其实是 NOT_CONNECTED 桩。
+# 库里今天有 47 个主体 / 46 家店 / 819 张单，页面上一个数都没有。
+# 现在钉四件事：
+#   ① 路由接的是**方法**（s.operatorMerchant，走 s.OpsMetrics），不是同名桩；
+#   ② 读模型的 SQL 真的对库执行过 —— api 层测试用的是 stubOpsMetrics，它证明 handler
+#      会转发字段，一个字都不证明 SQL 能跑。初稿里 `WHERE status='PENDING'`（store_recommendations
+#      从 092 建表起就没有 status 列）就是这种错：解析期就炸，表空着也炸，内存测试全绿。
+#   ③ 没有来源的列（曝光 / 成交额）不许因为「页面上一列空着难看」而被加回来；
+#   ④ 归因缺口（有订单、挂不到门店）必须写成 note，而不是显示一个 0。
+require_test "OPS-MERCHANT-001" "./internal/platform/postgres" \
+  "TestOperatorMerchantReadModelRunsAgainstRealSchema" \
+  "apps/api-go/internal/platform/postgres/operator_merchant_read_model_integration_test.go" || exit $?
+require_test "OPS-MERCHANT-001" "./internal/api" \
+  "TestOperatorMerchantServesRealCountsAndFlagsTheAttributionGap" \
+  "apps/api-go/internal/api/operator_console_test.go" || exit $?
+if ! grep -qE '"/v1/operator/merchant", s\.operatorConsole\(s\.operatorMerchant\)' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [OPS-MERCHANT-001]: /v1/operator/merchant 没接回真读模型（又变回同名 NOT_CONNECTED 桩了？）" >&2
+  exit 1
+fi
+if grep -qE 'json:"(impressions|impression|gross|repurchase_rate)"' apps/api-go/internal/opsmetrics/opsmetrics.go; then
+  echo "  FAIL [OPS-MERCHANT-001]: 读模型里出现了没有来源的商家列（曝光/成交额/复购）—— 该显示「未接入」，不是给个数。" >&2
+  exit 1
+fi
+if ! grep -q '未接入' apps/market-intelligence-console/src/pages/Merchant.tsx; then
+  echo "  FAIL [OPS-MERCHANT-001]: 商家页不再标「未接入」—— 缺来源的指标被填成了看起来真的东西。" >&2
+  exit 1
+fi
+if ! grep -q 'orders30dAll' apps/api-go/internal/opsmetrics/opsmetrics.go; then
+  echo "  FAIL [OPS-MERCHANT-001]: 挂店订单与全部订单只剩一个数 —— 归因缺口又被藏起来了。" >&2
+  exit 1
+fi
+echo "    OPS-MERCHANT-001: PASS (商家页接真读模型 · SQL 对真库跑过 · 无来源列不给数 · 归因缺口写明白)"
 # GRAVITY-001：引力状态（spec §6-§7 / §11 / §21）。规律的人在规律的时间点附近引力高；证据不足只学习；
 # 久不发生降回只观察；AI / 平台账号不建模；ACTIVE_ORCHESTRATE 不会自动给（§12 / §13 未建）；引力页只给运营。
 for t in TestRegularNoonChatterHasHighGravityBeforeNoonAndLowAtNight TestSparseOrStaleEvidenceDoesNotNudge TestNeverAutoActiveOrchestrate TestRecomputeSkipsNonHumansAndDowngradesPeopleWhoWentQuiet; do
