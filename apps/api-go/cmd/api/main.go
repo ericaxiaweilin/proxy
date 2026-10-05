@@ -313,6 +313,14 @@ func main() {
 		engagementService = engagement.NewWithRepository(postgres.NewEngagementRepository(pool))
 		fulfillmentService = fulfillment.NewWithRepository(postgres.NewFulfillmentRepositoryWithOutbox(pool, outboxRepository))
 		supplyService = supply.NewWithRepository(postgres.NewSupplyRepositoryWithOutbox(pool, outboxRepository))
+		// MERCHANT-CREATOR-NOTIFY-001：Offer 通知的收件人必须是可投递的 user account id
+		// （agentId 不是任何会话的 principal —— 本地库 121 个 creator 里 0 个的
+		// agent_id 是 user account）。
+		//
+		// **必须**接在 supplyService 换成真仓储**之后**：接在前面会绑到
+		// supply.New() 那个内存服务，于是解析永远失败 ⇒ 每条 Offer 通知都没有收件人
+		// ⇒ 又一次「静默失效」，而且更难查（接线看起来是对的）。
+		fulfillmentService.SetAgentInboxRecipient(supplyService.AgentInboxResolver())
 		// COMP-SELLER-001：候选资格只认已实名且未过期的卖家。接在这里（pool 分支内）
 		// 意味着没有数据库时 lookup 为 nil → 撮合不出候选，而不是「照常撮合」。
 		supplyService.SetSellerIdentityLookup(postgres.NewSellerRealNameRepository(pool))

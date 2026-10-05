@@ -590,8 +590,8 @@ func TestInboxForEventRoutesMerchantCreatorEventsToTheCounterparty(t *testing.T)
 	}{
 		{
 			name: "邀约发给 creator", eventType: "CollabInvitationCreated", principalID: "user_merchant_1",
-			payload: map[string]any{"merchantId": "m_1", "agentId": "agent_1", "notifyPrincipalId": "agent_1"},
-			want:    "agent_1",
+			payload: map[string]any{"merchantId": "m_1", "agentId": "agent_1", "notifyPrincipalId": "user_agent_1"},
+			want:    "user_agent_1",
 		},
 		{
 			// creator 接受 → 收件人是发活单的商家，绝不是 creator 自己
@@ -606,28 +606,28 @@ func TestInboxForEventRoutesMerchantCreatorEventsToTheCounterparty(t *testing.T)
 		},
 		{
 			name: "商家还价后通知 creator", eventType: "CollabInvitationResponded", principalID: "user_merchant_1",
-			payload: map[string]any{"decision": "COUNTERED", "agentId": "agent_1", "notifyPrincipalId": "agent_1"},
-			want:    "agent_1",
+			payload: map[string]any{"decision": "COUNTERED", "agentId": "agent_1", "notifyPrincipalId": "user_agent_1"},
+			want:    "user_agent_1",
 		},
 		{
 			name: "商家撤回通知 creator", eventType: "CollabInvitationCancelled", principalID: "user_merchant_1",
-			payload: map[string]any{"agentId": "agent_1", "notifyPrincipalId": "agent_1"},
-			want:    "agent_1",
+			payload: map[string]any{"agentId": "agent_1", "notifyPrincipalId": "user_agent_1"},
+			want:    "user_agent_1",
 		},
 		{
 			name: "专属码发给 creator", eventType: "MerchantCreatorPromoIssued", principalID: "user_merchant_1",
-			payload: map[string]any{"agentId": "agent_1", "code": "PT1", "notifyPrincipalId": "agent_1"},
-			want:    "agent_1",
+			payload: map[string]any{"agentId": "agent_1", "code": "PT1", "notifyPrincipalId": "user_agent_1"},
+			want:    "user_agent_1",
 		},
 		{
 			name: "专属码调整通知 creator", eventType: "MerchantCreatorPromoAdjusted", principalID: "user_merchant_1",
-			payload: map[string]any{"agentId": "agent_1", "code": "PT1", "notifyPrincipalId": "agent_1"},
-			want:    "agent_1",
+			payload: map[string]any{"agentId": "agent_1", "code": "PT1", "notifyPrincipalId": "user_agent_1"},
+			want:    "user_agent_1",
 		},
 		{
 			name: "发券通知码的主人", eventType: "PromoCouponIssued", principalID: "user_merchant_1",
-			payload: map[string]any{"agentId": "agent_1", "code": "PT1", "notifyPrincipalId": "agent_1"},
-			want:    "agent_1",
+			payload: map[string]any{"agentId": "agent_1", "code": "PT1", "notifyPrincipalId": "user_agent_1"},
+			want:    "user_agent_1",
 		},
 		{
 			// 唯一一条收件人是商家的：creator 报码 ⇒ 商家要知道自己被报了
@@ -637,13 +637,13 @@ func TestInboxForEventRoutesMerchantCreatorEventsToTheCounterparty(t *testing.T)
 		},
 		{
 			name: "认领码通知本人", eventType: "PromoCodeClaimed", principalID: "agent_1",
-			payload: map[string]any{"agentId": "agent_1", "notifyPrincipalId": "agent_1"},
-			want:    "agent_1",
+			payload: map[string]any{"agentId": "agent_1", "notifyPrincipalId": "user_agent_1"},
+			want:    "user_agent_1",
 		},
 		{
 			name: "绑权益通知码的主人", eventType: "PromoBenefitBound", principalID: "user_merchant_1",
-			payload: map[string]any{"merchantId": "m_1", "code": "PT1", "notifyPrincipalId": "agent_1"},
-			want:    "agent_1",
+			payload: map[string]any{"merchantId": "m_1", "code": "PT1", "notifyPrincipalId": "user_agent_1"},
+			want:    "user_agent_1",
 		},
 	}
 	for _, tc := range cases {

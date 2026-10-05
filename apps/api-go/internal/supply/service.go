@@ -17,6 +17,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/geo"
 	"github.com/proxy-app/proxy-api/internal/matching"
+	"github.com/proxy-app/proxy-api/internal/notification"
 )
 
 // Supply 真源（R14 Canonical Data Model §6 + B 完成标准）。
@@ -886,22 +887,20 @@ type Service struct {
 // ListInbox 读的是 business principal，不是自己的 user account id。这跟拿
 // agentId 当收件人是同一类错误（见 creatorInboxRecipient）。
 
-// creatorInboxRecipient 解析「这个 creator 的收件箱收件人」。
+// AgentInboxResolver 把本域的 profile 仓储暴露成 notification.AgentInboxResolver，
+// 供**别的域**（fulfillment / conversation / demand）复用同一条解析规则。
 //
-// ⚠️ **不是 agentId**。这是踩过的坑（MERCHANT-CREATOR-NOTIFY-001，2026-10-05）：
-// 收件箱按 **principal id** 索引（notification 的 listInbox/markRead/深链归属都用
-// e.Principal.ID），而 agentId 既不是 user account 也不是任何会话的 principal：
+// 为什么不各自写一遍：这条规则踩过一次（agentId 不是收件人），而域至少有四个。
+// 各写一遍早晚会分叉 —— 有人查 agent_profiles、有人查 agent_services，
+// 还会有人干脆直接用 agentId。
+func (s *Service) AgentInboxResolver() notification.AgentInboxResolver {
+	return notification.AgentInboxRecipientOf(s.creatorInboxRecipient)
+}
+
+// creatorInboxRecipient 是 notification.AgentInboxResolver 在本域的落点。
 //
-//	· identity.sessions 里 principal_id LIKE 'agent_%' 的行数 = 0；
-//	· identity.user_accounts 里 id LIKE 'agent_%' 的行数 = 0；
-//	· supply.agent_profiles.agent_id 与 user_accounts 的交集 = 0。
-//
-// 所以拿 agentId 当收件人，通知会**正确地写进 inbox_items**，然后永远没有人读到
-// —— 一行没人读的记录，比没有通知更坏（它看起来像「通知系统在工作」）。
-// 桥是 supply.agent_profiles.user_account_id（本地库 107 行对得上，
-// agent_linh → user_mockcreator_linh）。
-//
-// 查不到 user_account_id 时返回空串 ⇒ 那一侧不发通知（不猜、不用 agentId 兜底）。
+// 规则本身只有一条（agentId 不是收件人），所以实现在 notification 包里，四个域共用；
+// 这里只是把它接到本域已有的 profile 仓储上。注释里的实测数据是这条规则的全部理由。
 func (s *Service) creatorInboxRecipient(ctx context.Context, agentID string) string {
 	if strings.TrimSpace(agentID) == "" {
 		return ""
@@ -911,7 +910,7 @@ func (s *Service) creatorInboxRecipient(ctx context.Context, agentID string) str
 		log.Printf("supply notify: creator profile lookup failed, no notification for this event: agent=%s err=%v", agentID, err)
 		return ""
 	}
-	return strings.TrimSpace(profile.UserAccountID)
+	return notification.RecipientOrEmpty(profile.UserAccountID)
 }
 
 // writeAndPublishOrJust：写业务 + 发事件；**没有收件人时只写业务**。

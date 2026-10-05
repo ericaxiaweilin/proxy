@@ -16,6 +16,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/clock"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
+	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 )
@@ -47,12 +48,12 @@ type Order struct {
 	// touches the funds). nil/empty is allowed for legacy
 	// Orders created before the LC-28 gate rolled out; the
 	// migration 065 backfill is a separate task.
-	PolicyDecisionID string    `json:"policyDecisionId,omitempty"`
+	PolicyDecisionID string `json:"policyDecisionId,omitempty"`
 	// STORE-STATS-001：服务发生在哪家店（人类断言，RecordOutcome 时由订单当事一方
 	// 指认）。空 = 没归因（老订单/没填），统计时不计入任何店，不回填。
-	StoreID       string    `json:"storeId,omitempty"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	StoreID   string    `json:"storeId,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // OrderSnapshot 是 Gate G 冻结的确认快照。
@@ -565,6 +566,11 @@ type Service struct {
 	storeAccess func(ctx context.Context, storeID, userID string) (bool, error)
 	// ORDER-SLOT-OWNER-001：谁能对 task/slot 发档位报价（任务 / 机会的主人，且对方是报名人）。不接 = 拒绝。
 	slotOfferAuthorizer func(ctx context.Context, taskID, slotID, requesterID, agentID string) (bool, error)
+	// agentInboxRecipient：把 agentId 解析成**可投递**的收件人
+	// （MERCHANT-CREATOR-NOTIFY-001）。agentId 不是 user account、也不是任何会话的
+	// principal（本地库 121 个 creator 里 0 个的 agent_id 是 user account），
+	// 拿它当收件人的通知会正确落库然后永远没人读到。nil = 不接 = 不产生收件人。
+	agentInboxRecipient func(ctx context.Context, agentID string) string
 	// jurisdictionResolver resolves the requester's
 	// jurisdiction (R16.7-P1-E) so the policy decision can
 	// be evaluated under the correct regulatory family. The
@@ -891,13 +897,13 @@ type StoreOrderRecent struct {
 }
 
 type StoreOrderStats struct {
-	StoreID         string            `json:"storeId"`
-	OrderCount      int               `json:"orderCount"`
-	FullCount       int               `json:"fullCount"`
-	PartialCount    int               `json:"partialCount"`
-	RepeatRequesters int              `json:"repeatRequesters"`
-	LastOrderAt     string            `json:"lastOrderAt,omitempty"`
-	Recent          []StoreOrderRecent `json:"recent"`
+	StoreID          string             `json:"storeId"`
+	OrderCount       int                `json:"orderCount"`
+	FullCount        int                `json:"fullCount"`
+	PartialCount     int                `json:"partialCount"`
+	RepeatRequesters int                `json:"repeatRequesters"`
+	LastOrderAt      string             `json:"lastOrderAt,omitempty"`
+	Recent           []StoreOrderRecent `json:"recent"`
 }
 
 func (s *Service) getStoreOrderStats(ctx context.Context, e command.Envelope) command.Result {
@@ -1050,8 +1056,12 @@ func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.R
 		CreatedAt:   s.clock.Now().UTC(),
 		UpdatedAt:   s.clock.Now().UTC(),
 	}
+	// notifyPrincipalId 是 creator 的**可投递**收件人（不是 agentId，理由见
+	// Service.agentInboxRecipient）。这条通知的时效是 5 分钟 —— 收件人算不出来，
+	// 等于这条通知对所有人都不存在，而订单照样创建成功、没有任何报错。
 	domainEvents := []event.DomainEvent{event.New("OfferCreated", "Order", order.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, order.CreatedAt, map[string]any{
 		"agentId":            p.AgentID,
+		"notifyPrincipalId":  s.inboxRecipientForAgent(ctx, "OfferCreated", p.AgentID),
 		"agreedCompensation": p.AgreedCompensation,
 		"settlementMode":     p.SettlementMode,
 		"note":               "Gate G：Order 创建前冻结快照",
@@ -1697,6 +1707,27 @@ func (s *Service) SetStoreAccess(check func(ctx context.Context, storeID, userID
 
 // SetSlotOfferAuthorizer 接上档位报价的发起权校验（ORDER-SLOT-OWNER-001）。
 // 不接 = CreateSlotOffer 一律拒绝（fail closed）；生产在 main.go 接 demand + marketplace。
+// SetAgentInboxRecipient 接上 creator 收件人解析（见 Service.agentInboxRecipient）。
+func (s *Service) SetAgentInboxRecipient(resolver notification.AgentInboxResolver) {
+	if resolver == nil {
+		s.agentInboxRecipient = nil
+		return
+	}
+	s.agentInboxRecipient = resolver.AgentInboxRecipient
+}
+
+// inboxRecipientForAgent 是所有「通知这个 creator」的调用点。
+func (s *Service) inboxRecipientForAgent(ctx context.Context, eventType, agentID string) string {
+	if s.agentInboxRecipient == nil {
+		return ""
+	}
+	recipient := notification.RecipientOrEmpty(s.agentInboxRecipient(ctx, agentID))
+	if recipient == "" {
+		notification.LogUnresolvableRecipient(eventType, agentID)
+	}
+	return recipient
+}
+
 func (s *Service) SetSlotOfferAuthorizer(check func(ctx context.Context, taskID, slotID, requesterID, agentID string) (bool, error)) {
 	s.slotOfferAuthorizer = check
 }
