@@ -554,6 +554,42 @@ if grep -rn 'fetch("/v1/operator' apps/market-intelligence-console/src >/dev/nul
   echo "  FAIL [OPS-REAL-001]: 控制台页面绕过 opFetch 直接 fetch —— 不带运营会话，也不认 NOT_CONNECTED。" >&2
   exit 1
 fi
+# 上面那条查不到的东西，2026-10-04 真的漏过去了：Overview 的 North Star 六个 KPI
+# （MAU 186K / 成功撮合 8,612 / 30D 复购 38.4% + 假趋势 ↑12.8%）是写死在 JSX 里的，
+# 一个请求都不发 —— 所以它既不带运营会话、也不回 NOT_CONNECTED，而且是**默认落地页**，
+# 没登录就能看到。它自己页面底部还写着「其余为原型 mock」，等于知道是假的照样摆出来。
+# 两条一起钉：
+#  ① 每个页面必须走某个受权helper（opFetch/opPost/opCommand/opBlobUrl）——
+#     不然它显示的任何数字都不是这个运营账号看到的真数据；
+#  ② KPI/数值格子里不许出现字面量数字 —— 真数据必须是表达式 {…} 渲染出来的。
+# 具体文件名要写出来（不只是 glob / 目录）：pins 按路径把 step 关联到改动文件，
+# glob `pages/*.tsx` 匹配不上 pathRe，改了 Overview.tsx 也选不中这条 —— 实测
+# `--changed` 报 "No pin references any changed file"，那条判据就只在 --all 下才跑。
+for OPS_PAGE in apps/market-intelligence-console/src/pages/Overview.tsx \
+                apps/market-intelligence-console/src/pages/Access.tsx \
+                apps/market-intelligence-console/src/pages/Gravity.tsx \
+                apps/market-intelligence-console/src/pages/ProviderApplications.tsx \
+                apps/market-intelligence-console/src/pages/NumberLookup.tsx; do
+  if [ ! -f "$OPS_PAGE" ]; then
+    echo "  FAIL [OPS-REAL-001]: 控制台页面不见了 —— $OPS_PAGE" >&2
+    exit 1
+  fi
+done
+for OPS_PAGE in apps/market-intelligence-console/src/pages/*.tsx; do
+  if ! grep -qE 'opFetch|opPost|opCommand|opBlobUrl' "$OPS_PAGE"; then
+    echo "  FAIL [OPS-REAL-001]: $(basename "$OPS_PAGE") 不经过任何受权helper —— 它显示的数字没有运营会话这回事。" >&2
+    exit 1
+  fi
+done
+# ② 只在真的画 KPI 格子的页面上查（NotConnected 那类纯文字页没有这个类）。
+# 字符类里不要再写 `[`：`[0-9,.%[KkMm]]` 在 POSIX 里是「类 + 字面量 ]」，
+# 等于要求数字后面跟一个 ]，永不匹配 —— 判据会静默恒绿（2026-10-04 变异验证抓出来的）。
+OPS_FAKE=$(grep -rnE 'className="(value|num|rate|kpi-value)">[0-9][0-9,.%KkMm]*<' apps/market-intelligence-console/src/pages 2>/dev/null || true)
+if [ -n "$OPS_FAKE" ]; then
+  echo "  FAIL [OPS-REAL-001]: KPI 格子里出现字面量数字 —— 那是不问自答的假健康度。" >&2
+  printf '%s\n' "$OPS_FAKE" | sed 's#^#        #' >&2
+  exit 1
+fi
 # GRAVITY-001：引力状态（spec §6-§7 / §11 / §21）。规律的人在规律的时间点附近引力高；证据不足只学习；
 # 久不发生降回只观察；AI / 平台账号不建模；ACTIVE_ORCHESTRATE 不会自动给（§12 / §13 未建）；引力页只给运营。
 for t in TestRegularNoonChatterHasHighGravityBeforeNoonAndLowAtNight TestSparseOrStaleEvidenceDoesNotNudge TestNeverAutoActiveOrchestrate TestRecomputeSkipsNonHumansAndDowngradesPeopleWhoWentQuiet; do
