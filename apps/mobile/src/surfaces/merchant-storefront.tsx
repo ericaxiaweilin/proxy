@@ -11,6 +11,7 @@ import { ProxyQrCode } from "../components/proxy-qr-code";
 import { QrZoomOverlay } from "../components/qr-zoom-overlay";
 import { describeError, saveImageToAlbum } from "../image-export";
 import { color, shadows } from "../theme";
+import { isSignInRequiredError } from "../secure-session";
 import { retainStorePhoto, storePhotoUri, type RetainedStorePhoto } from "../expo-composer-draft-store";
 import type { BusinessClient, StoreLinesWire, StoreProduct } from "../business-client";
 import type { ConversationClient, ConversationInboxItem } from "../conversation-client";
@@ -636,7 +637,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
       {header}
       {accounts === undefined && !error ? <ProxyLoading tone="muted" /> : null}
-      {error ? <View style={styles.card}><Text selectable style={styles.errorText}>加载失败：{error}</Text></View> : null}
+      {error ? <View style={styles.card}><Text selectable style={styles.errorText}>{isSignInRequiredError(error) ? "经营数据要登录后才看得到 —— 访客身份没有商家权限，请到「我的」页登录。" : `加载失败：${error}`}</Text></View> : null}
       {accounts !== undefined && accounts.length === 0 ? (
         <View style={styles.card}>
           <ProxyEmptyState icon="storefront" title="还没有线上店铺" sub="你不需要手工搭页面。把店门、菜单、产品照片或已有文件交给企业运营助手，它会先生成店铺草稿，再由你确认发布。" cta={{ label: "让企业运营助手帮我创建", onPress: () => onStartStoreSetup?.(), disabled: !onStartStoreSetup }} />

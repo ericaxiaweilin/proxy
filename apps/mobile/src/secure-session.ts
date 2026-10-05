@@ -56,6 +56,19 @@ export class SignedOutSessionError extends Error {
   }
 }
 
+/**
+ * 这条错误是不是「本机就知道发不出去：没有会话 / 没有 principal / 已登出 / 离线访客」？
+ *
+ * 界面不能把协议原文（"authenticated principal required"）甩给用户看 —— 2026-10-05 在
+ * 模拟器上，商家面顶部就是这么一行英文，下面一片 0，用户无从知道其实是「要登录」。
+ * 但反过来，**不能把所有失败都报成「去登录」**：登录着的时候网络抖一下、服务端 500，
+ * 也被赶去登录是更糟的体验（other-profile.tsx:209 与 ai-account-profile.tsx:68 都栽过）。
+ * 所以这里只认那几个由本文件与各个 client 抛出的、确定是登录态问题的原文。
+ */
+export function isSignInRequiredError(message: string): boolean {
+  return /authenticated principal is required|authenticated principal required|signed out|sign in to continue|offline fallback session/i.test(message);
+}
+
 export type StoredSession = {
 	userAccountId: string;
 	auth: SessionAuthTokens;
@@ -215,6 +228,16 @@ function isPrincipal(value: unknown): value is PrincipalContext {
 }
 
 function cloneSession(session: StoredSession): StoredSession {
+	// MOBILE-SESSION-PRINCIPAL-001：顶层 principal 在类型上是**可选**的（升级前写进
+	// keychain 的 session 就没有这个字段），而 auth.principal 是服务端签发时必带的同一个
+	// 身份 —— 读口 isStoredSession → isSessionAuthTokens 已经保证它存在且合法。
+	// 以前这里只在顶层有时才复制，于是那条老 session 永远读得出「有登录态、没有 principal」：
+	// 每个写入口（supply / fulfillment / benefit / payment / secure-session 自己的
+	// requireAuthenticatedServerSession）都甩 "authenticated principal required"，
+	// 商家面整片报错 + 全 0，而用户看着是登录着的。不重新登录就永久坏着。
+	// 顶层有时以顶层为准（今天没有任何改顶层 principal 的流程，但语义保持原样）；
+	// 没有就退回 auth 里那一份 —— 同一个 server-issued 身份的另一个位置，不是猜出来的。
+	const principal = session.principal ?? session.auth.principal;
 	return {
 		userAccountId: session.userAccountId,
 		auth: {
@@ -227,7 +250,7 @@ function cloneSession(session: StoredSession): StoredSession {
       refreshExpiresAt: session.auth.refreshExpiresAt,
       rotation: session.auth.rotation
     },
-    ...(session.principal ? { principal: { type: session.principal.type, id: session.principal.id } } : {}),
+    principal: { type: principal.type, id: principal.id },
     // R15.34.1: 保留 serverSession 标志 (false = 离线 fallback).
     //   旧 session 不写这个字段， clone 后为 undefined → 默认看作真实
     //   server session (向下兼容)。

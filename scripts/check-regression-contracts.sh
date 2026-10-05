@@ -15510,6 +15510,44 @@ if ! pnpm --filter @proxy/mobile exec vitest run src/surfaces/business-home-acco
 fi
 echo "    MERCHANT-ACCOUNT-SWITCH-001: PASS (两个面都跟着选中的主体走 · 行为测试真的跑过)"
 
+# MOBILE-SESSION-PRINCIPAL-001 + MOBILE-SIGNIN-ERROR-TEXT-001（2026-10-05，模拟器上商家面
+# 顶部一行英文协议原文「加载失败：authenticated principal required」+ 下面一片 0）：
+#
+# 两件独立的事，都是「接口全绿、单测全绿，只有真人打开 app 才发现」那一类：
+#  ① 顶层 principal 在类型上是可选的（升级前写进 keychain 的 session 就没有），而每个
+#     写入口只看顶层 —— 那条老 session 就永久发不出任何商家命令，且不重新登录不会好。
+#     auth.principal 是服务端签发时必带的**同一个**身份，读口必须补回顶层。
+#  ② 就算补不上（真的没登录），界面也不许把协议原文甩给用户：那是一句英文异常，
+#     不告诉人「去登录」。反向的坑同样踩过：把所有失败都报成「登录后…」，
+#     登录着的时候网络抖一下也被赶去登录（other-profile.tsx:209）。
+if ! grep -qF 'const principal = session.principal ?? session.auth.principal;' apps/mobile/src/secure-session.ts; then
+  echo "  FAIL [MOBILE-SESSION-PRINCIPAL-001]: 读口不再从 auth.principal 补顶层 principal ——" >&2
+  echo "        升级前写的 session 会让这个设备的所有写路径永久报 authenticated principal required。" >&2
+  exit 1
+fi
+for SIGNIN_SURFACE in apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx apps/mobile/src/surfaces/merchant-storefront.tsx; do
+  if ! grep -qF 'isSignInRequiredError(error)' "$SIGNIN_SURFACE"; then
+    echo "  FAIL [MOBILE-SIGNIN-ERROR-TEXT-001]: $(basename "$SIGNIN_SURFACE") 又把 e.message 原文画在界面上 —— 用户看到的是一句英文异常，不是「要登录」。" >&2
+    exit 1
+  fi
+done
+if ! grep -qF 'export function isSignInRequiredError' apps/mobile/src/secure-session.ts; then
+  echo "  FAIL [MOBILE-SIGNIN-ERROR-TEXT-001]: 认登录态错误的那条规则不见了 —— 各 surface 各写一份正则，然后各自漏判。" >&2
+  exit 1
+fi
+# 名字先钉住再跑：vitest -t 匹配不到任何测试时是**退出 0**，只跑不查名字就等于没测。
+for t in "recovers the top-level principal from the server-issued one inside auth" "recognises sign-in-required failures without swallowing every other error"; do
+  if ! grep -qF "it(\"$t\"" apps/mobile/src/secure-session.test.ts; then
+    echo "  FAIL [MOBILE-SIGNIN-ERROR-TEXT-001]: 行为测试不见了 —— $t" >&2
+    exit 1
+  fi
+  if ! pnpm --filter @proxy/mobile exec vitest run src/secure-session.test.ts -t "$t" 2>&1 | grep -qE "1 passed"; then
+    echo "  FAIL [MOBILE-SIGNIN-ERROR-TEXT-001]: 这条测试没真的跑过 —— $t" >&2
+    exit 1
+  fi
+done
+echo "    MOBILE-SESSION-PRINCIPAL-001 / MOBILE-SIGNIN-ERROR-TEXT-001: PASS (老 session 的 principal 补得回来 · 登录态错误说人话且不误赶人去登录)"
+
 # NOTIF-PUSH-NATIVE-GUARD-001（2026-10-02，用户在模拟器上连报两次红屏）：
 #
 # 「原生模块没进二进制就降级成 null」这条降级**自己把 app 打挂了**。JS 侧探不到

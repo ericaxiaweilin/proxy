@@ -12,6 +12,7 @@
 // instead of the bogus '12.6tr VND' / '148 订单' fallbacks.
 
 import { pickActiveMerchant, setActiveMerchantId, subscribeActiveMerchant } from "../active-merchant-store";
+import { isSignInRequiredError } from "../secure-session";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Linking, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 // MERCHANT-ACTIVITY-DETAIL-001：推广活动要真能复制链接 / 出真码，不是摆两个图标。
@@ -1625,7 +1626,11 @@ export function MerchantMeR21Replacement({
         </View>
 
         {accounts === undefined && !error ? <ProxyLoading tone="muted" /> : null}
-        {error ? <View style={styles.card}><Text selectable style={styles.empty}>加载失败：{error}</Text></View> : null}
+        {/* MOBILE-SIGNIN-ERROR-TEXT-001：登录态问题不能把协议原文甩在脸上。2026-10-05
+            模拟器上这里显示的是「加载失败：authenticated principal required」+ 一片 0，
+            用户看不出其实是「要登录」。其他失败（网络抖、服务端 500）照原样报，
+            不能一律赶去登录 —— 那条坑 other-profile.tsx:209 记过。 */}
+        {error ? <View style={styles.card}><Text selectable style={styles.empty}>{isSignInRequiredError(error) ? "经营数据要登录后才看得到 —— 访客身份没有商家权限，请到「我的」页登录。" : `加载失败：${error}`}</Text></View> : null}
 
         {/* UI-MERCHANT-ACCOUNT-SWITCH-001：一个商家账号可以持有多个经营主体
             （business account）。activeAccountId 以前只写不读 —— 加载时永远取
