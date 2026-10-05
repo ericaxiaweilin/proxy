@@ -376,3 +376,51 @@ func notificationEnvelope(commandType string, payload map[string]any, actorID st
 		Payload:        payload,
 	}
 }
+
+// MERCHANT-CREATOR-NOTIFY-001（2026-10-05 查通知管线时挖出的真 bug）：
+// DeactivateDeviceToken 退役被 APNs/FCM 判死的令牌时写 status='INACTIVE'，
+// 而 021 建表的 CHECK 只允许 ACTIVE/REVOKED/EXPIRED ⇒ 每次退役都撞约束失败。
+// 失败在 push.go 里被静默忽略（那是"瞬时故障别退役令牌"的取舍），于是失效令牌
+// 永远留在 ACTIVE 里，每次推送都白跑一遍死令牌 —— 一开推送就会显形。
+//
+// 为什么这条只能在真 PG 上钉：内存仓储写 INACTIVE 永远成功，只有真约束会红。
+// migration 172 把 INACTIVE 补进 CHECK；这条钉住"退役能落库 + 落库后不再被
+// ListDeviceTokens 选中"，这样以后谁再改这个字面量会立刻红。
+func TestDeactivateDeviceTokenPersistsInactiveStatus(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewNotificationRepository(pool)
+	run := time.Now().UnixNano()
+	userID := "user_notif_deact_" + itoa(run)
+	deviceID := "device_notif_deact_" + itoa(run)
+	t.Cleanup(func() {
+		pool.Exec(ctx, `DELETE FROM notification.device_tokens WHERE user_account_id=$1`, userID)
+	})
+
+	if err := repo.UpsertDeviceToken(ctx, notification.DeviceToken{
+		ID: "dtok_notif_deact_" + itoa(run), UserAccountID: userID, DeviceID: deviceID,
+		Platform: "IOS", Token: "apns_token_deact", Status: "ACTIVE", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed device token: %v", err)
+	}
+	if err := repo.DeactivateDeviceToken(ctx, "dtok_notif_deact_"+itoa(run)); err != nil {
+		t.Fatalf("DeactivateDeviceToken must persist (schema CHECK must allow INACTIVE): %v", err)
+	}
+	got, err := repo.GetDeviceToken(ctx, userID, deviceID)
+	if err != nil {
+		t.Fatalf("GetDeviceToken: %v", err)
+	}
+	if got.Status != "INACTIVE" {
+		t.Fatalf("retired token status = %q, want INACTIVE", got.Status)
+	}
+	// 退役后不该再出现在推送目标里，否则每次推送都白跑死令牌。
+	tokens, err := repo.ListDeviceTokens(ctx, userID)
+	if err != nil {
+		t.Fatalf("ListDeviceTokens: %v", err)
+	}
+	for _, tok := range tokens {
+		if tok.ID == got.ID {
+			t.Fatalf("retired token must not be listed for push, got %+v", tok)
+		}
+	}
+}
