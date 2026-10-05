@@ -270,3 +270,114 @@ func TestInviteCreatorTermsGuards(t *testing.T) {
 		t.Fatal("unknown list role must be rejected")
 	}
 }
+
+// MERCHANT-CREATOR-NOTIFY-001：收件人必须是**收件人自己 principal 那个 id**。
+//
+// 这条踩过一个很贵的坑：creator 侧事件一开始拿 `agentId` 当收件人，通知**正确地**
+// 写进了 inbox_items，然后永远没人读到 —— 因为 agentId 既不是 user account，也不是
+// 任何会话的 principal（identity.sessions 里 principal_id LIKE 'agent_%' = 0 行；
+// supply.agent_profiles.agent_id 与 identity.user_accounts 的交集 = 0 行）。
+// 一行没人读的记录比没有通知更坏：它看起来像「通知系统在工作」。
+//
+// 商家侧同理，但方向相反：商户会话的 principal 是 **business id**（现网 29 个
+// principal_id='business_001' 的会话，business_001 也是收件箱行数最多的收件人），
+// 所以商家侧收件人是 merchant_id，同店成员共用那个收件箱。
+func TestEveryNotificationRecipientIsAPrincipalIdNotAnAgentId(t *testing.T) {
+	repo := NewMemoryRepository()
+	s := NewWithRepository(repo)
+	setupAgentAs(t, s, "agent_pr", "user_pr")
+
+	inv := inviteAs(t, s, invitePayload("agent_pr"), "business_001")
+
+	// ① creator 侧：收件人必须是 profile 上的 user account id，且**不是** agentId。
+	created := notifiedRecipients(repo, "CollabInvitationCreated")
+	if len(created) != 1 {
+		t.Fatalf("CollabInvitationCreated must notify the creator once, got %v", created)
+	}
+	if created[0] != "user_pr" {
+		t.Fatalf("creator-side recipient = %q, want user_pr（user account id）", created[0])
+	}
+	if created[0] == "agent_pr" {
+		t.Fatal("agentId must never be used as an inbox recipient — no session can read it")
+	}
+
+	// ② creator 还价 → 商家侧收件人是 business principal id。
+	outcome, _ := respondAs(t, s, map[string]any{
+		"invitationId": inv["id"], "decision": "COUNTERED",
+		"priceMinVnd": int64(1000000), "priceMaxVnd": int64(1300000), "negotiable": true, "purpose": "UGC",
+	}, "agent_pr", "")
+	if outcome != "ACCEPTED" {
+		t.Fatalf("creator counter must be accepted, got %s", outcome)
+	}
+	responded := notifiedRecipients(repo, "CollabInvitationResponded")
+	if len(responded) != 1 || responded[0] != "business_001" {
+		t.Fatalf("merchant-side recipient = %v, want [business_001]（商户的 business principal id）", responded)
+	}
+}
+
+// profile 上没有 user_account_id 时**不发**通知，不用 agentId 兜底 ——
+// 兜底就是重犯这个错。
+func TestCreatorWithoutUserAccountGetsNoNotificationRatherThanAnAgentId(t *testing.T) {
+	repo := NewMemoryRepository()
+	s := NewWithRepository(repo)
+	setupAgentAs(t, s, "agent_nouid", "") // actor 为空 ⇒ profile 上没有 user account
+	inviteAs(t, s, invitePayload("agent_nouid"), "business_001")
+	if got := notifiedRecipients(repo, "CollabInvitationCreated"); len(got) != 0 {
+		t.Fatalf("no user account ⇒ no notification, got %v（拿 agentId 兜底就是重犯那个错）", got)
+	}
+}
+
+// 收件人推不出来**不能**让业务动作失败：通知的可推导性永远不能反过来阻塞谈判。
+// 这条是被三个既有测试打出来的（报价直接 REJECTED）。
+func TestUndeliverableNotificationNeverBlocksTheBusinessAction(t *testing.T) {
+	repo := NewMemoryRepository()
+	s := NewWithRepository(repo)
+	setupAgentAs(t, s, "agent_nb", "user_nb")
+	inv := inviteAs(t, s, invitePayload("agent_nb"), "business_001")
+	outcome, view := respondAs(t, s, map[string]any{"invitationId": inv["id"], "decision": "ACCEPTED"}, "agent_nb", "")
+	if outcome != "ACCEPTED" {
+		t.Fatalf("the business action must succeed regardless, got %s", outcome)
+	}
+	if view["status"] != InvitationAccepted {
+		t.Fatalf("the invitation must actually be accepted, got %v", view["status"])
+	}
+}
+
+// setupAgentAs 建一个「以指定 user account 登录」的 creator（profile + service + 能力）。
+//
+// Actor.ID（user account）与 Principal.ID（agent）必须是两个不同的值 —— 线上就是这样
+// （商户会话的 principal 是 business id），而收件人只认 Actor.ID 那一侧。
+// 不复用 setupAgent：它建过一次 profile，第二次 CreateAgentProfile 会被拒
+// （PROFILE 唯一），所以必须一次就把 actor 设对。
+func setupAgentAs(t *testing.T, s *Service, agentID, userAccountID string) {
+	t.Helper()
+	as := func(commandType string, payload map[string]any) {
+		env := envelopeForPrincipal(commandType, payload, "", agentID)
+		env.Actor.ID = userAccountID
+		if r := s.Handle(env); r.Outcome != "ACCEPTED" {
+			t.Fatalf("%s %s: %s (%+v)", commandType, agentID, r.Outcome, r.Error)
+		}
+	}
+	as("CreateAgentProfile", map[string]any{
+		"agentId": agentID, "name": "Named", "photos": []string{"https://cdn.proxy.test/creators/" + agentID + ".jpg"},
+		"languages": []string{"ZH"}, "serviceAreas": []string{"hn"},
+	})
+	as("CreateAgentService", map[string]any{
+		"agentId": agentID, "serviceType": "CITY_COMPANION", "referencePrice": int64(1200000),
+		"currency": "VND", "markets": []string{"hn"},
+	})
+}
+
+// notifiedRecipients 收集某个事件类型的所有收件人（payload.notifyPrincipalId）。
+func notifiedRecipients(repo *MemoryRepository, eventType string) []string {
+	out := []string{}
+	for _, ev := range repo.Events() {
+		if ev.EventType != eventType {
+			continue
+		}
+		if who, ok := ev.Payload["notifyPrincipalId"].(string); ok {
+			out = append(out, who)
+		}
+	}
+	return out
+}

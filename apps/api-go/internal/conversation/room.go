@@ -305,7 +305,13 @@ func (s *Service) acceptMeetup(ctx context.Context, e command.Envelope) command.
 	}
 	domainEvents := perRecipientMeetupEvents(conv, meetup, e, meetup.UpdatedAt, false, map[string]any{"confirmed": nowConfirmed}, func(recipient string, at time.Time, extra map[string]any) event.DomainEvent {
 		return event.New("MeetupAccepted", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, at,
-			map[string]any{"meetupId": meetup.ID, "notifyPrincipalId": recipient, "confirmed": nowConfirmed})
+			map[string]any{
+				"meetupId": meetup.ID, "notifyPrincipalId": recipient, "confirmed": nowConfirmed,
+				// 文案分人：发起人等的是「对方答应了」，其他成员等的是「有人答应了」。
+				// 同一句话发给两类人是把「我的邀约」说成「有个会」，两边都读不出
+				// 自己该做什么。
+				"recipientIsProposer": recipient == meetup.ProposerID,
+			})
 	})
 	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
 		return s.repository.UpdateMeetup(c, meetup)

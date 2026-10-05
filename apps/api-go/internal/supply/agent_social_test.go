@@ -16,7 +16,7 @@ func socialEnvelope(t *testing.T, kind, actor, agent string, payload map[string]
 	t.Helper()
 	return command.Envelope{
 		CommandID: kind + "_" + actor + "_" + agent, CommandType: kind, CommandVersion: 1,
-		Actor:     command.Actor{Type: "USER", ID: actor}, Principal: command.Principal{Type: "INDIVIDUAL", ID: actor},
+		Actor: command.Actor{Type: "USER", ID: actor}, Principal: command.Principal{Type: "INDIVIDUAL", ID: actor},
 		Target: command.Target{Type: "AgentProfile", ID: agent}, IdempotencyKey: kind + actor + agent,
 		CorrelationID: "corr", RequestedAt: "2026-10-02T00:00:00Z", Payload: payload,
 	}

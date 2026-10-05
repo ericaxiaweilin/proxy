@@ -180,10 +180,11 @@ func (s *Service) claimPromoCode(ctx context.Context, e command.Envelope) comman
 	}
 	now := s.clock.Now().UTC()
 	promo := PromoCode{Code: code, AgentID: p.AgentID, Status: "ACTIVE", CreatedAt: now}
-	// MERCHANT-CREATOR-NOTIFY-001：写码与事件同一事务。收件人 = 认领人自己：
+	// MERCHANT-CREATOR-NOTIFY-001：写码与事件同一事务。收件人 = 认领人自己
+	// （**Actor.ID 已经是 user account id**，actor 就是登录的那个人）。
 	// 认领是一个「这个码现在归你了」的落地事实，跨端登录时得看得见。
 	domainEvents := []event.DomainEvent{event.New("PromoCodeClaimed", "PromoCode", code, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"agentId": p.AgentID, "notifyPrincipalId": p.AgentID,
+		"agentId": p.AgentID, "notifyPrincipalId": e.Actor.ID,
 	})}
 	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
 		return s.repository.SavePromoCode(c, promo)
@@ -303,7 +304,7 @@ func (s *Service) bindPromoBenefit(ctx context.Context, e command.Envelope) comm
 	// 权益照样绑上，只是不发通知。
 	notifyPrincipalID := ""
 	if codeOwner, cerr := s.repository.GetPromoCode(ctx, code); cerr == nil {
-		notifyPrincipalID = codeOwner.AgentID
+		notifyPrincipalID = s.creatorInboxRecipient(ctx, codeOwner.AgentID)
 	}
 	domainEvents := []event.DomainEvent{event.New("PromoBenefitBound", "PromoBenefit", merchantID+"/"+code, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"merchantId": merchantID, "code": code, "faceValueVnd": p.FaceValueVND, "minSpendVnd": p.MinSpendVND,
@@ -491,18 +492,13 @@ func (s *Service) quotePromoCode(ctx context.Context, e command.Envelope) comman
 		AmountVND: p.AmountVND, DiscountVND: benefit.FaceValueVND, FirstVisit: p.FirstVisit,
 		QuotedAt: now,
 	}
-	// 收件人 = 绑这条权益的商家成员（migration 175 记在权益行上）。查不到就
-	// 不通知 —— 这个码没有权益行意味着没有承诺，通知一个空头承诺没意义。
-	notifyPrincipalID := ""
-	if bound, berr := s.repository.GetPromoBenefit(ctx, merchantID, code); berr == nil {
-		notifyPrincipalID = bound.BoundByPrincipalID
-	}
+	// 收件人 = 商户的 business principal id（共享收件箱里那个 key；理由见 service.go
+	// 里「扇出到成员」那段被删掉的注释）。
 	domainEvents := []event.DomainEvent{event.New("PromoCodeQuoted", "PromoQuote", quote.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"merchantId": merchantID, "agentId": promo.AgentID, "code": code,
-		"amountVnd": p.AmountVND, "firstVisit": p.FirstVisit,
-		"notifyPrincipalId": notifyPrincipalID,
+		"amountVnd": p.AmountVND, "firstVisit": p.FirstVisit, "notifyPrincipalId": merchantID,
 	})}
-	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+	if err := s.writeAndPublishOrJust(ctx, func(c context.Context) error {
 		return s.repository.SavePromoQuote(c, quote)
 	}, domainEvents); err != nil {
 		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)

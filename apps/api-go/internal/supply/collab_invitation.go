@@ -227,19 +227,28 @@ func (s *Service) openInvitation(ctx context.Context, e command.Envelope, p invi
 		Currency:     currency,
 		CreatedAt:    now,
 		ExpiresAt:    now.Add(invitationTTL),
-		// 记下是谁发的：creator 还价的那一刻，actor 是 creator，而要通知的是
-		// 这里记下的这个 user account（migration 174 的存在理由）。
-		CreatedByPrincipalID: e.Principal.ID,
+		// 记下是谁发的（migration 174）：审计用途。
+		// Actor.ID 是**点按钮的那个 user account**；Principal.ID 在商户会话里是
+		// business id，两者不是一回事（现网有 29 个 principal_id='business_001' 的会话）。
+		// 收件人不靠这个字段 —— 商家侧收件人是 merchant_id（共享收件箱）。
+		CreatedByPrincipalID: e.Actor.ID,
 	}
-	domainEvents := []event.DomainEvent{event.New("CollabInvitationCreated", "CollabInvitation", inv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"merchantId": merchantID, "agentId": p.AgentID, "serviceType": serviceType,
-		// 收件人写死在事件里：映射层保持纯函数，不去 business 域反查「这个
-		// 商户有哪些成员」（那是猜），也不让 worker 依赖别的域。
-		"notifyPrincipalId": p.AgentID,
-	})}
+	// 收件人 = creator 的 **user account id**（不是 agentId，理由见 creatorInboxRecipient）。
+	// creator 那边只有一个人，所以不需要扇出。
+	// 解析不出来 ⇒ **不发事件**（而不是发一条收件人为空的事件：那种事件在映射层
+	// 会被跳过，动静全无，却让「这批事件里有没有真的可投递」变得无法判断）。
+	var domainEvents []event.DomainEvent
+	if recipient := s.creatorInboxRecipient(ctx, p.AgentID); recipient != "" {
+		domainEvents = []event.DomainEvent{event.New("CollabInvitationCreated", "CollabInvitation", inv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+			"merchantId": merchantID, "agentId": p.AgentID, "serviceType": serviceType,
+			"notifyPrincipalId": recipient,
+		})}
+	}
 	// 事务性 outbox：活单和事件同生共死。改之前只写业务表，事件只回给**这次
 	// 调用的客户端** —— 商家在手机上发的活单，达人在另一台手机上收不到任何东西。
-	if err := s.repository.SaveInvitationAndPublish(ctx, inv, domainEvents); err != nil {
+	if err := s.writeAndPublishOrJust(ctx, func(c context.Context) error {
+		return s.repository.SaveInvitation(c, inv)
+	}, domainEvents); err != nil {
 		return reject("INVITATION_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.invitation_write_failed")
 	}
 	return inv, domainEvents, nil
@@ -327,22 +336,36 @@ func (s *Service) respondCollabInvitation(ctx context.Context, e command.Envelop
 			next.Status = InvitationPending
 		}
 	}
-	// 收件人是**对方**：creator 回话 → 通知发活单的商家（migration 174 记下的
-	// 那个 user account）；商家回话 → 通知 creator（Principal.ID == agentID）。
-	// 历史行没有 created_by_principal_id：那时就**不发通知**，不猜收件人 ——
-	// 猜错等于把「你的活单被还价了」发给一个无关的人。
-	notifyPrincipalID := inv.CreatedByPrincipalID
+	// 收件人是**对方**：
+	//   · creator 回话 → 商户的 business principal id。**不是**「建这条活单的那个人」，
+	//     也不是 member_directory 里的成员 user account：同一商户的成员共用一个
+	//     收件箱（收件箱按 principal id 索引，而商户会话的 principal 是 business id），
+	//     所以发给这个 id 就是发给「这家店」，每个成员打开都看得到。
+	//     详见 service.go 里「扇出到成员」那段被删掉的注释。
+	//   · 商家回话 → creator 的 user account id（Principal.ID == agentID 的说法在这里
+	//     不成立，收件箱要的是 user account，见 creatorInboxRecipient）。
+	// 推不出收件人 ⇒ 不发通知，不猜：猜错等于把「你的活单被还价了」发给无关的人。
+	var domainEvents []event.DomainEvent
 	if isMerchantTurn {
-		notifyPrincipalID = inv.AgentID
+		domainEvents = []event.DomainEvent{event.New("CollabInvitationResponded", "CollabInvitation", inv.ID, 2, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+			"decision": p.Decision, "merchantId": inv.MerchantID, "agentId": inv.AgentID,
+			"notifyPrincipalId": s.creatorInboxRecipient(ctx, inv.AgentID), "respondedBy": by,
+		})}
+	} else {
+		domainEvents = []event.DomainEvent{event.New("CollabInvitationResponded", "CollabInvitation", inv.ID, 2, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+			"decision": p.Decision, "merchantId": inv.MerchantID, "agentId": inv.AgentID,
+			"notifyPrincipalId": inv.MerchantID, "respondedBy": by,
+		})}
 	}
-	domainEvents := []event.DomainEvent{event.New("CollabInvitationResponded", "CollabInvitation", inv.ID, 2, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"decision": p.Decision, "merchantId": inv.MerchantID, "agentId": inv.AgentID,
-		"notifyPrincipalId": notifyPrincipalID, "respondedBy": by,
-	})}
-	if err := s.repository.UpdateInvitationAndPublish(ctx, next, domainEvents); err != nil {
+	// 没有确定的收件人时**仍然要写状态**：谈判不能因为「不知道该通知谁」而停住。
+	receivedBy := []event.DomainEvent{}
+	if err := s.writeAndPublishOrJust(ctx, func(c context.Context) error {
+		return s.repository.UpdateInvitation(c, next)
+	}, domainEvents); err != nil {
 		return command.Rejected(e, "INVITATION_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.invitation_write_failed", nil)
 	}
-	return acceptedWithPayload(e, "CollabInvitation", inv.ID, 2, "RESPONDED", map[string]any{"invitation": next}, domainEvents)
+	receivedBy = domainEvents
+	return acceptedWithPayload(e, "CollabInvitation", inv.ID, 2, "RESPONDED", map[string]any{"invitation": next}, receivedBy)
 }
 
 type cancelInvitationPayload struct {

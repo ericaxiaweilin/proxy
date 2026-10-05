@@ -35,9 +35,9 @@ func (r *SupplyRepository) CreateProfile(ctx context.Context, p supply.AgentProf
 		return err
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO supply.agent_profiles (agent_id, name, bio, photos, languages, service_areas, status, created_at, updated_at, socials)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		p.AgentID, p.Name, p.Bio, photos, languages, areas, p.Status, p.CreatedAt, p.UpdatedAt, socials,
+		INSERT INTO supply.agent_profiles (agent_id, name, bio, photos, languages, service_areas, status, created_at, updated_at, socials, user_account_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		p.AgentID, p.Name, p.Bio, photos, languages, areas, p.Status, p.CreatedAt, p.UpdatedAt, socials, nullableString(p.UserAccountID),
 	)
 	return err
 }

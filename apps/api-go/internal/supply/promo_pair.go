@@ -677,13 +677,16 @@ func (s *Service) issueMerchantCreatorPromo(ctx context.Context, e command.Envel
 	// MERCHANT-CREATOR-NOTIFY-001：写专属码与「通知 creator」这个事件同一事务。
 	// 收件人写死在 payload 里 —— 映射层保持纯函数，不去反查「这个 creator
 	// 用哪个账号登录」。
-	// 记下是谁发的（migration 175）：creator 报这条码时通知对象是这个商家成员。
-	promo.IssuedByPrincipalID = e.Principal.ID
+	// 记下是谁发的（migration 175）：审计用途（这条专属码是谁建的）。
+	// 注意**不是**收件人 —— 商家侧收件人是商户的 business principal id。
+	promo.IssuedByPrincipalID = e.Actor.ID
 	issuedEvent := event.New("MerchantCreatorPromoIssued", "MerchantCreatorPromo", promo.Code, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"merchantId": merchantID, "agentId": p.AgentID, "code": promo.Code,
-		"percentBp": promo.Suggestion.PercentBP, "notifyPrincipalId": p.AgentID,
+		"percentBp": promo.Suggestion.PercentBP,
+		// 收件人 = creator 的 user account id（不是 agentId，见 creatorInboxRecipient）
+		"notifyPrincipalId": s.creatorInboxRecipient(ctx, p.AgentID),
 	})
-	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+	if err := s.writeAndPublishOrJust(ctx, func(c context.Context) error {
 		return s.repository.SaveMerchantCreatorPromo(c, promo)
 	}, []event.DomainEvent{issuedEvent}); err != nil {
 		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
@@ -778,7 +781,7 @@ func (s *Service) adjustMerchantCreatorPromo(ctx context.Context, e command.Enve
 	domainEvents := []event.DomainEvent{event.New("MerchantCreatorPromoAdjusted", "MerchantCreatorPromo", promo.Code, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"merchantId": merchantID, "agentId": promo.AgentID, "code": promo.Code, "mode": mode,
 		"minSpendVnd": after.MinSpendVND, "faceValueVnd": after.FaceValueVND,
-		"notifyPrincipalId": promo.AgentID,
+		"notifyPrincipalId": s.creatorInboxRecipient(ctx, promo.AgentID),
 	})}
 	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
 		if err := s.repository.UpdateMerchantCreatorPromo(c, promo); err != nil {
@@ -958,8 +961,9 @@ func (s *Service) claimPromoCoupon(ctx context.Context, e command.Envelope) comm
 		return nil
 	}, []event.DomainEvent{event.New("PromoCouponIssued", "PromoIssue", issue.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		// 收件人 = creator：这张券是用**他的码**发的，他要知道。
+		// user account id，不是 agentId（见 creatorInboxRecipient）。
 		"merchantId": promo.MerchantID, "agentId": promo.AgentID, "code": code,
-		"notifyPrincipalId": promo.AgentID,
+		"notifyPrincipalId": s.creatorInboxRecipient(ctx, promo.AgentID),
 	})}); err != nil {
 		if errors.Is(err, errPromoCouponAlreadyIssued) {
 			return acceptedWithPayload(e, "PromoIssue", issue.ID, 1, state, map[string]any{
@@ -1105,14 +1109,14 @@ func (s *Service) quotePairPromo(ctx context.Context, e command.Envelope, mercha
 		AmountVND: amount, DiscountVND: promo.Terms.FaceValueVND, FirstVisit: firstVisit,
 		CustomerID: issue.CustomerID, IssueID: issue.ID, FirstVisitSource: source, QuotedAt: now,
 	}
-	// 收件人 = 发这条码的商家成员（migration 175 记在 promo 上）。没有就是
-	// 「不知道该通知谁」（历史行）—— 那就不发，不猜。
+	// 收件人 = 商户的 business principal id（共享收件箱里那个 key；理由见 service.go
+	// 里「扇出到成员」那段被删掉的注释）。查不到也不退回 recorded principal ——
+	// merchant_id 本身就是收件人键，没什么可查的。
 	domainEvents := []event.DomainEvent{event.New("PromoCodeQuoted", "PromoQuote", quote.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"merchantId": merchantID, "agentId": promo.AgentID, "code": code, "amountVnd": amount,
-		"firstVisit": firstVisit, "firstVisitSource": source,
-		"notifyPrincipalId": promo.IssuedByPrincipalID,
+		"firstVisit": firstVisit, "firstVisitSource": source, "notifyPrincipalId": merchantID,
 	})}
-	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+	if err := s.writeAndPublishOrJust(ctx, func(c context.Context) error {
 		return s.repository.SavePromoQuote(c, quote)
 	}, domainEvents); errors.Is(err, ErrCouponAlreadyRedeemed) {
 		return command.Rejected(e, "COUPON_ALREADY_REDEEMED", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.coupon_already_redeemed", nil)

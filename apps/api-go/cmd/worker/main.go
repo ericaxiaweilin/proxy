@@ -327,6 +327,10 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 			if confirmed, _ := e.Payload["confirmed"].(bool); confirmed {
 				return who, "见面已约定", "大家都接受了，可以开始准备了", "", true
 			}
+			// 发起人收到的和同房间其他成员不是同一件事（见 room.go 那条事件）。
+			if isProposer, _ := e.Payload["recipientIsProposer"].(bool); isProposer {
+				return who, "对方接受了你的见面邀约", "可以开始准备了", "", true
+			}
 			return who, "有人接受了见面邀约", "", "", true
 		}
 		return "", "", "", "", false

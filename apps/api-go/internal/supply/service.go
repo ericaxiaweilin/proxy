@@ -871,6 +871,64 @@ type Service struct {
 	rankingSignals matching.SignalSource
 }
 
+// ⚠️ 这里**曾经**有一个「扇出到商户所有 ACTIVE 成员」的实现，是错的，已删。
+//
+// 数据说话（2026-10-05 本地库）：
+//   · identity.sessions 里 principal_type='BUSINESS' 的会话，principal_id 是
+//     **business id**（business_001，29 个会话）；
+//   · 收件箱按 principal id 索引（listInbox / markRead / 深链归属都用 e.Principal.ID），
+//     而 `business_001` 正是现网收件箱行数最多的收件人（26 行）。
+// ⇒ 同一商户的多个成员**共用同一个收件箱**。商家侧通知的收件人就是商户的
+// business principal id（也就是活单行上的 merchant_id），所以「只通知一个人」
+// 这个担心不成立：通知进的是共享收件箱，每个成员打开 App 都看得到。
+//
+// 反过来，按 member_directory.user_id 扇出会写出**没人读的收件箱行** —— 成员的
+// ListInbox 读的是 business principal，不是自己的 user account id。这跟拿
+// agentId 当收件人是同一类错误（见 creatorInboxRecipient）。
+
+// creatorInboxRecipient 解析「这个 creator 的收件箱收件人」。
+//
+// ⚠️ **不是 agentId**。这是踩过的坑（MERCHANT-CREATOR-NOTIFY-001，2026-10-05）：
+// 收件箱按 **principal id** 索引（notification 的 listInbox/markRead/深链归属都用
+// e.Principal.ID），而 agentId 既不是 user account 也不是任何会话的 principal：
+//
+//	· identity.sessions 里 principal_id LIKE 'agent_%' 的行数 = 0；
+//	· identity.user_accounts 里 id LIKE 'agent_%' 的行数 = 0；
+//	· supply.agent_profiles.agent_id 与 user_accounts 的交集 = 0。
+//
+// 所以拿 agentId 当收件人，通知会**正确地写进 inbox_items**，然后永远没有人读到
+// —— 一行没人读的记录，比没有通知更坏（它看起来像「通知系统在工作」）。
+// 桥是 supply.agent_profiles.user_account_id（本地库 107 行对得上，
+// agent_linh → user_mockcreator_linh）。
+//
+// 查不到 user_account_id 时返回空串 ⇒ 那一侧不发通知（不猜、不用 agentId 兜底）。
+func (s *Service) creatorInboxRecipient(ctx context.Context, agentID string) string {
+	if strings.TrimSpace(agentID) == "" {
+		return ""
+	}
+	profile, err := s.repository.GetProfile(ctx, agentID)
+	if err != nil {
+		log.Printf("supply notify: creator profile lookup failed, no notification for this event: agent=%s err=%v", agentID, err)
+		return ""
+	}
+	return strings.TrimSpace(profile.UserAccountID)
+}
+
+// writeAndPublishOrJust：写业务 + 发事件；**没有收件人时只写业务**。
+//
+// 这不是可选的礼貌，是可用性要求：收件人的可推导性（成员查询挂了、历史行没记录
+// 谁发的、唯一的记录人恰好就是 actor）**永远不能**反过来阻塞业务动作。原来的
+// 硬要求是 WriteAndPublish 见空事件列表就报错 —— 那条规则对「我以为有收件人」
+// 的调用点是对的（比如邀约创建：收件人就是 actor 之外的 creator，算不出来是 bug），
+// 但对「收件人本来就可能不存在」的商家侧扇出就是错的：报价不能因为「不知道该
+// 通知谁」而失败。
+func (s *Service) writeAndPublishOrJust(ctx context.Context, write func(context.Context) error, domainEvents []event.DomainEvent) error {
+	if len(domainEvents) == 0 {
+		return write(ctx)
+	}
+	return s.repository.WriteAndPublish(ctx, write, domainEvents)
+}
+
 // SetRankingSignals 接上撮合排序信号（履约 / 满意 / 引力响应）。
 func (s *Service) SetRankingSignals(source matching.SignalSource) {
 	s.rankingSignals = source
@@ -896,6 +954,13 @@ func (s *Service) SetSellerIdentityLookup(lookup SellerIdentityLookup) {
 
 func New() *Service {
 	return NewWithRepository(NewMemoryRepository())
+}
+
+// Events 返回内存仓见过的全部事件（测试用：断言「通知发出去了」只能看这里）。
+func (r *MemoryRepository) Events() []event.DomainEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]event.DomainEvent(nil), r.events...)
 }
 
 func NewWithRepository(repository TransactionalRepository) *Service {
@@ -1054,6 +1119,16 @@ func (s *Service) createProfile(ctx context.Context, e command.Envelope) command
 		Status:       "ACTIVE",
 		CreatedAt:    s.clock.Now().UTC(),
 		UpdatedAt:    s.clock.Now().UTC(),
+		// 记下这个 agent 背后的 **user account id**（MERCHANT-CREATOR-NOTIFY-001）。
+		//
+		// 它是「通知这个 creator」的**唯一**可投递地址：agentId 不是 user account、
+		// 也不是任何会话的 principal（identity.sessions 里 principal_id LIKE 'agent_%'
+		// = 0 行），拿它当收件人会让通知写进一个没人读的收件箱。
+		//
+		// 用 Actor.ID（登录的那个人）而不是 Principal.ID：这里刚校验过
+		// p.AgentID == e.Principal.ID（principal → profile 1:1），而 Actor.ID 是
+		// 那个 user account。两者在商户会话里不是一回事。
+		UserAccountID: strings.TrimSpace(e.Actor.ID),
 	}
 	domainEvents := []event.DomainEvent{event.New("AgentProfileCreated", "AgentProfile", p.AgentID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, profile.CreatedAt, map[string]any{
 		"agentId": p.AgentID,

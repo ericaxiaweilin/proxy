@@ -33,7 +33,7 @@ func seedAgentForAttestation(t *testing.T, s *Service, agentID string) {
 	t.Helper()
 	r := s.Handle(envelopeForPrincipal("CreateAgentProfile", map[string]any{
 		"agentId": agentID, "name": "Attest " + agentID,
-		"photos": []string{"https://cdn.proxy.test/creators/" + agentID + ".jpg"},
+		"photos":    []string{"https://cdn.proxy.test/creators/" + agentID + ".jpg"},
 		"languages": []string{"VI"}, "serviceAreas": []string{"hn"},
 	}, "", agentID))
 	if r.Outcome != "ACCEPTED" {
