@@ -69,6 +69,25 @@ func (g *StaticOperatorGate) AllowlistedPrincipals() []string {
 	return out
 }
 
+// OrphanScopePrincipals names the entries that do nothing: PROXY_OPERATOR_SCOPES mentions a
+// principal that is not in PROXY_OPERATOR_PRINCIPALS. Usually that is a typo for a real
+// operator's id — the narrowing the runbook describes never happens, while the person who
+// wrote it believes it did. That is a fail-open of the documentation kind, so cmd/api logs it
+// at boot.
+func (g *StaticOperatorGate) OrphanScopePrincipals() []string {
+	if g == nil {
+		return nil
+	}
+	var out []string
+	for id := range g.scoped {
+		if !g.principalIDs[id] {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // ConfiguredScopes returns the per-principal scope narrowing from PROXY_OPERATOR_SCOPES.
 // A principal absent from the result is not narrowed and therefore holds the full
 // vocabulary (the pre-scope behaviour) — the distinction matters, because "no entry" and

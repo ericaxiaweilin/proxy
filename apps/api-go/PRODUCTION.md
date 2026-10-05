@@ -90,6 +90,10 @@ in as any user.
   line in the startup log. Narrowing is fail-closed, so a typo loses power rather than
   granting it; read the boot log after changing this, or check `/v1/operator/access`
   (console page 「运营权限」), which reports what the running process actually resolved.
+* An entry naming a principal that is **not** in `PROXY_OPERATOR_PRINCIPALS` does nothing,
+  and the boot log says so (`OrphanScopePrincipals`). The risk is not the unknown id — it
+  has no powers anyway — it is the real operator you meant to narrow: with a misspelled id
+  they keep every scope while the runbook reads as if they were restricted.
 * 12 scopes: `CASE MARKETPLACE SAFETY PAYMENTS IDENTITY AUTHORITY MODERATION CAPABILITY
   CONTRIBUTION MEDIA PLATFORM ANALYTICS`. Each gated command maps to exactly one required
   scope (`requiredOperatorScope` in `internal/api/operator_scopes.go`; a boot-time test

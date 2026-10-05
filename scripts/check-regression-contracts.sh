@@ -549,7 +549,15 @@ if ! grep -q 'WithPrincipalScopes' apps/api-go/cmd/api/main.go; then
   echo "  FAIL [OPS-SCOPE-WIRED-001]: 读了 PROXY_OPERATOR_SCOPES 却没调 WithPrincipalScopes —— 读进来不用等于没读。" >&2
   exit 1
 fi
-echo "    OPS-SCOPE-WIRED-001: PASS (per-principal scope 接上 main.go，不再是死配置)"
+# 接上了还差一件事：id 打错时得有人说话。配置里写了个不在白名单的 principal，
+# 那条收窄就什么都不做，而真正想收紧的那个人照样全 scope —— 静默的假安全感。
+if ! grep -q 'OrphanScopePrincipals' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [OPS-SCOPE-WIRED-001]: PROXY_OPERATOR_SCOPES 里的孤儿条目没人报 —— 打错 id = 以为收紧了。" >&2
+  exit 1
+fi
+require_test "OPS-SCOPE-WIRED-001" "./internal/api" "TestOrphanScopeEntriesAreReported" \
+  "apps/api-go/internal/api/operator_access_test.go" || exit $?
+echo "    OPS-SCOPE-WIRED-001: PASS (per-principal scope 接上 main.go + 孤儿条目启动即报，不再是死配置)"
 if grep -rn 'fetch("/v1/operator' apps/market-intelligence-console/src >/dev/null; then
   echo "  FAIL [OPS-REAL-001]: 控制台页面绕过 opFetch 直接 fetch —— 不带运营会话，也不认 NOT_CONNECTED。" >&2
   exit 1

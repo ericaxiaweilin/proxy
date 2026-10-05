@@ -309,3 +309,40 @@ func TestAuditReportsNotConnectedWithoutAStore(t *testing.T) {
 		t.Fatal("a recorder with no store must report connected=false")
 	}
 }
+
+// OPS-SCOPE-WIRED-001：PROXY_OPERATOR_SCOPES 里的 id 打错一个字母，最坏的情况是**静默无害**：
+// 那个假 id 本来就没权限（所以什么事都没发生），而真正想收紧的那个人一条条目都没配上 ——
+// 于是他照样全 scope，写配置的人却以为已经收紧了。这是文档层面的 fail-open，
+// 只能靠启动时点名（cmd/api 把它打进启动日志）。
+func TestOrphanScopeEntriesAreReported(t *testing.T) {
+	gate := NewStaticOperatorGate([]string{"op_real"}).WithPrincipalScopes(map[string]map[OperatorScope]bool{
+		"op_ral": {ScopeCase: true}, // 想收紧 op_real，打错成 op_ral
+	})
+	orphan := gate.OrphanScopePrincipals()
+	if len(orphan) != 1 || orphan[0] != "op_ral" {
+		t.Fatalf("orphan scope entries = %q, want exactly the one that is not allowlisted", orphan)
+	}
+	// 警告的意义全在这第二行上：被担心漏权限的那个人，此刻确实还是全 scope。
+	all := gate.ScopesFor(command.Actor{Type: "USER", ID: "u"}, command.Principal{Type: "INDIVIDUAL", ID: "op_real"}, nil)
+	if len(all) != len(allOperatorScopes) {
+		t.Fatalf("op_real holds %d scopes, want all %d —— 这条警告存在就是因为收紧根本没生效", len(all), len(allOperatorScopes))
+	}
+	// 那个打错的 id 什么都没有（所以他不是运营，警告只是说「这条配置没起作用」）。
+	if got := gate.ScopesFor(command.Actor{Type: "USER", ID: "u"}, command.Principal{Type: "INDIVIDUAL", ID: "op_ral"}, nil); len(got) != 0 {
+		t.Fatalf("非白名单 id 拿到了 %v scope", got)
+	}
+	// 配对上了就不该报；没配 scope 也不该报。
+	clean := NewStaticOperatorGate([]string{"op_real"}).WithPrincipalScopes(map[string]map[OperatorScope]bool{
+		"op_real": {ScopeCase: true},
+	})
+	if got := clean.OrphanScopePrincipals(); len(got) != 0 {
+		t.Fatalf("clean config reported %q", got)
+	}
+	if got := NewStaticOperatorGate([]string{"op_real"}).OrphanScopePrincipals(); len(got) != 0 {
+		t.Fatalf("no scope config reported %q", got)
+	}
+	var nilGate *StaticOperatorGate
+	if got := nilGate.OrphanScopePrincipals(); got != nil {
+		t.Fatalf("nil gate must not panic, got %q", got)
+	}
+}

@@ -878,6 +878,13 @@ func main() {
 		if len(scoped) > 0 {
 			gate.WithPrincipalScopes(scoped)
 			log.Printf("proxy api go: operator scopes narrowed for %d principal(s)", len(scoped))
+			// 收窄写在一个不在白名单里的 id 上 = 这条配置什么都不做。真正的危险不是那个
+			// 假 id（它本来就没权限），而是**打错的那个真运营**：他照样全 scope，而写配置的
+			// 人以为已经收紧了。这种事只会出现在启动日志里，所以必须在这里说。
+			if orphans := gate.OrphanScopePrincipals(); len(orphans) > 0 {
+				log.Printf("proxy api go: PROXY_OPERATOR_SCOPES 里这些 id 不在 PROXY_OPERATOR_PRINCIPALS，"+
+					"因此没有任何效果（是不是打错了？）: %s", strings.Join(orphans, ", "))
+			}
 		}
 		server.Operator = gate
 	}
