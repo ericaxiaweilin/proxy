@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/supply"
 )
 
@@ -26,7 +27,7 @@ func scanInvitation(scan func(...any) error) (supply.CollabInvitation, error) {
 		&inv.ID, &inv.MerchantID, &inv.AgentID, &inv.ServiceType,
 		&startAt, &inv.DurationH, &inv.PriceMinVND, &inv.PriceMaxVND, &inv.Negotiable,
 		&inv.Purpose, &inv.Message, &inv.Status, &inv.TermsVersion, &inv.CounterBy,
-		&inv.Currency, &inv.CreatedAt, &respondedAt, &inv.ExpiresAt,
+		&inv.Currency, &inv.CreatedAt, &respondedAt, &inv.ExpiresAt, &inv.CreatedByPrincipalID,
 	)
 	if err != nil {
 		return supply.CollabInvitation{}, err
@@ -42,7 +43,8 @@ func scanInvitation(scan func(...any) error) (supply.CollabInvitation, error) {
 
 const collabInvitationColumns = `id, merchant_id, agent_id, service_type, start_at,
 	duration_h, price_min_vnd, price_max_vnd, negotiable, purpose, message, status,
-	terms_version, counter_by, currency, created_at, responded_at, expires_at`
+	terms_version, counter_by, currency, created_at, responded_at, expires_at,
+	created_by_principal_id`
 
 func (r *SupplyRepository) SaveInvitation(ctx context.Context, inv supply.CollabInvitation) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
@@ -113,4 +115,30 @@ func (r *SupplyRepository) ListInvitationsByMerchant(ctx context.Context, mercha
 
 func (r *SupplyRepository) ListInvitationsByAgent(ctx context.Context, agentID string) ([]supply.CollabInvitation, error) {
 	return r.listInvitations(ctx, "agent_id", agentID)
+}
+
+// SaveInvitationAndPublish / UpdateInvitationAndPublish：活单状态和事件同一事务落库。
+//
+// MERCHANT-CREATOR-NOTIFY-001：改之前 SaveInvitation / UpdateInvitation 只写业务表，
+// 事件只在 Result.EventRefs 里回给**这次调用的客户端**。而「达人收到了新邀约吗」
+// 是个跨端问题 —— 商家在手机上发的活单，达人在另一台手机上不会收到任何东西。
+// 没接 outbox 的直接后果：supply 域发的 18 类事件**一条都进不了通知管线**。
+func (r *SupplyRepository) SaveInvitationAndPublish(ctx context.Context, inv supply.CollabInvitation, domainEvents []event.DomainEvent) error {
+	return r.WriteAndPublish(ctx, func(transactionContext context.Context) error {
+		_, err := queryerForContext(transactionContext, r.pool).Exec(transactionContext, `
+		INSERT INTO supply.collab_invitations (`+collabInvitationColumns+`)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+			inv.ID, inv.MerchantID, inv.AgentID, inv.ServiceType,
+			nullTime(inv.StartAt), inv.DurationH, inv.PriceMinVND, inv.PriceMaxVND, inv.Negotiable,
+			inv.Purpose, inv.Message, inv.Status, inv.TermsVersion, inv.CounterBy,
+			inv.Currency, inv.CreatedAt, nullTime(inv.RespondedAt), inv.ExpiresAt, nullableString(inv.CreatedByPrincipalID),
+		)
+		return err
+	}, domainEvents)
+}
+
+func (r *SupplyRepository) UpdateInvitationAndPublish(ctx context.Context, inv supply.CollabInvitation, domainEvents []event.DomainEvent) error {
+	return r.WriteAndPublish(ctx, func(transactionContext context.Context) error {
+		return r.UpdateInvitation(transactionContext, inv)
+	}, domainEvents)
 }

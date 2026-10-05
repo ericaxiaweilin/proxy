@@ -68,6 +68,12 @@ type CollabInvitation struct {
 	CreatedAt    time.Time `json:"createdAt"`
 	RespondedAt  time.Time `json:"respondedAt,omitempty"`
 	ExpiresAt    time.Time `json:"expiresAt"`
+	// CreatedByPrincipalID 是发这条活单的 user account id（migration 174）。
+	//
+	// 它存在的原因是**收件人**：creator 还价/接受/拒绝那一刻，actor 是 creator，
+	// 而要通知的是发活单的商家 —— 那个 id 不在事件的任何字段里，不事先记下来
+	// 就只能猜（见该列注释）。对客户端是只读信息，不接受 wire 输入。
+	CreatedByPrincipalID string `json:"createdByPrincipalId,omitempty"`
 }
 
 // expired 读到过期就算过期 —— 不靠定时任务扫（v1 没扫表进程），
@@ -221,13 +227,21 @@ func (s *Service) openInvitation(ctx context.Context, e command.Envelope, p invi
 		Currency:     currency,
 		CreatedAt:    now,
 		ExpiresAt:    now.Add(invitationTTL),
-	}
-	if err := s.repository.SaveInvitation(ctx, inv); err != nil {
-		return reject("INVITATION_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.invitation_write_failed")
+		// 记下是谁发的：creator 还价的那一刻，actor 是 creator，而要通知的是
+		// 这里记下的这个 user account（migration 174 的存在理由）。
+		CreatedByPrincipalID: e.Principal.ID,
 	}
 	domainEvents := []event.DomainEvent{event.New("CollabInvitationCreated", "CollabInvitation", inv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"merchantId": merchantID, "agentId": p.AgentID, "serviceType": serviceType,
+		// 收件人写死在事件里：映射层保持纯函数，不去 business 域反查「这个
+		// 商户有哪些成员」（那是猜），也不让 worker 依赖别的域。
+		"notifyPrincipalId": p.AgentID,
 	})}
+	// 事务性 outbox：活单和事件同生共死。改之前只写业务表，事件只回给**这次
+	// 调用的客户端** —— 商家在手机上发的活单，达人在另一台手机上收不到任何东西。
+	if err := s.repository.SaveInvitationAndPublish(ctx, inv, domainEvents); err != nil {
+		return reject("INVITATION_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.invitation_write_failed")
+	}
 	return inv, domainEvents, nil
 }
 
@@ -313,12 +327,21 @@ func (s *Service) respondCollabInvitation(ctx context.Context, e command.Envelop
 			next.Status = InvitationPending
 		}
 	}
-	if err := s.repository.UpdateInvitation(ctx, next); err != nil {
-		return command.Rejected(e, "INVITATION_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.invitation_write_failed", nil)
+	// 收件人是**对方**：creator 回话 → 通知发活单的商家（migration 174 记下的
+	// 那个 user account）；商家回话 → 通知 creator（Principal.ID == agentID）。
+	// 历史行没有 created_by_principal_id：那时就**不发通知**，不猜收件人 ——
+	// 猜错等于把「你的活单被还价了」发给一个无关的人。
+	notifyPrincipalID := inv.CreatedByPrincipalID
+	if isMerchantTurn {
+		notifyPrincipalID = inv.AgentID
 	}
 	domainEvents := []event.DomainEvent{event.New("CollabInvitationResponded", "CollabInvitation", inv.ID, 2, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"decision": p.Decision, "merchantId": inv.MerchantID, "agentId": inv.AgentID,
+		"notifyPrincipalId": notifyPrincipalID, "respondedBy": by,
 	})}
+	if err := s.repository.UpdateInvitationAndPublish(ctx, next, domainEvents); err != nil {
+		return command.Rejected(e, "INVITATION_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.invitation_write_failed", nil)
+	}
 	return acceptedWithPayload(e, "CollabInvitation", inv.ID, 2, "RESPONDED", map[string]any{"invitation": next}, domainEvents)
 }
 
@@ -353,10 +376,15 @@ func (s *Service) cancelCollabInvitation(ctx context.Context, e command.Envelope
 	}
 	inv.Status = InvitationCancelled
 	inv.RespondedAt = now
-	if err := s.repository.UpdateInvitation(ctx, inv); err != nil {
+	// 商家撤回 = creator 那边有个待办凭空消失，必须说一声（否则 creator 打开
+	// 才发现，回话时才发现更糟）。
+	domainEvents := []event.DomainEvent{event.New("CollabInvitationCancelled", "CollabInvitation", inv.ID, 2, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"merchantId": inv.MerchantID, "agentId": inv.AgentID, "notifyPrincipalId": inv.AgentID,
+	})}
+	if err := s.repository.UpdateInvitationAndPublish(ctx, inv, domainEvents); err != nil {
 		return command.Rejected(e, "INVITATION_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.invitation_write_failed", nil)
 	}
-	return acceptedWithPayload(e, "CollabInvitation", inv.ID, 2, "CANCELLED", map[string]any{"invitation": inv}, nil)
+	return acceptedWithPayload(e, "CollabInvitation", inv.ID, 2, "CANCELLED", map[string]any{"invitation": inv}, domainEvents)
 }
 
 type listInvitationsPayload struct {

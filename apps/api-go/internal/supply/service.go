@@ -297,9 +297,22 @@ type Repository interface {
 }
 
 // TransactionalRepository 由支持事务性 outbox 的存储实现（事件与状态原子提交）。
+// TransactionalRepository = Repository + 能把领域事件和业务写放进**同一个事务**。
+//
+// MERCHANT-CREATOR-NOTIFY-001：WriteAndPublish 是这个域接 outbox 的统一入口。
+// 之前 supply 域只接了 CandidateBatch 一处，于是另外 18 类事件（邀约、还价、
+// 发券、绑权益、报码、调整专属码、内容催稿…）全部只回给**调用方的客户端**，
+// 对方在另一台设备上什么都收不到 —— 而事件本身是齐的、类型是对的，漏的只是
+// 「进 outbox」这一步，所以没有任何报错、没有失败标记，只有一个安静的事实：
+// 商家和达人之间的每一次往来都没有通知。
 type TransactionalRepository interface {
 	Repository
 	SaveCandidateBatchAndPublish(ctx context.Context, b CandidateBatch, domainEvents []event.DomainEvent) error
+	// WriteAndPublish 把 write 回调和 domainEvents 放进同一事务。write 里用
+	// 普通仓储方法即可（runInTransaction 把事务放进 ctx，queryerForContext 会认）。
+	WriteAndPublish(ctx context.Context, write func(context.Context) error, domainEvents []event.DomainEvent) error
+	SaveInvitationAndPublish(ctx context.Context, inv CollabInvitation, domainEvents []event.DomainEvent) error
+	UpdateInvitationAndPublish(ctx context.Context, inv CollabInvitation, domainEvents []event.DomainEvent) error
 }
 
 var (
@@ -557,6 +570,32 @@ func (r *MemoryRepository) SaveCandidateBatchAndPublish(_ context.Context, b Can
 	r.batches[b.ID] = b
 	r.events = append(r.events, domainEvents...)
 	return nil
+}
+
+// 内存仓的 WriteAndPublish：没有事务可谈，但要**同样**把事件收进去 ——
+// 两个实现对「写和事件是否都发生了」必须回答一致，否则测试用内存仓、
+// 线上跑 PG，差异会藏在没人看的那一侧。
+func (r *MemoryRepository) WriteAndPublish(_ context.Context, write func(context.Context) error, domainEvents []event.DomainEvent) error {
+	if len(domainEvents) == 0 {
+		return errors.New("WriteAndPublish requires at least one domain event")
+	}
+	// 先写后记事件，**不要**在这里 Lock 再调 write 里的 Save*：那些方法自己
+	// 会取同一把锁，而 Go 的 mutex 不可重入 ⇒ 自己等自己，整包测试死到超时。
+	if err := write(context.Background()); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, domainEvents...)
+	return nil
+}
+
+func (r *MemoryRepository) SaveInvitationAndPublish(ctx context.Context, inv CollabInvitation, domainEvents []event.DomainEvent) error {
+	return r.WriteAndPublish(ctx, func(context.Context) error { return r.SaveInvitation(ctx, inv) }, domainEvents)
+}
+
+func (r *MemoryRepository) UpdateInvitationAndPublish(ctx context.Context, inv CollabInvitation, domainEvents []event.DomainEvent) error {
+	return r.WriteAndPublish(ctx, func(context.Context) error { return r.UpdateInvitation(ctx, inv) }, domainEvents)
 }
 
 func (r *MemoryRepository) GetCandidateBatch(_ context.Context, batchID string) (CandidateBatch, error) {

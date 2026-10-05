@@ -425,6 +425,40 @@ func (r *SupplyRepository) SaveCandidateBatchAndPublish(ctx context.Context, b s
 	})
 }
 
+// WriteAndPublish 是 supply 域接事务性 outbox 的**统一入口**：业务写和事件落在
+// 同一个事务里，同生共死。
+//
+// 为什么不是一个 `XxxAndPublish` 一个方法：这个域有十来个写点（邀约、还价、
+// 发券、绑权益、报码、调整专属码…），每个都手写一遍「开事务 → 写 → 逐条 publish」
+// 就是十份近乎相同的代码，而它们会各自漂移 —— 这正是这个域已经发生过一次的事
+// （SaveInvitation 只写业务表，事件只回给调用方的客户端，于是 18 类事件一条都
+// 进不了通知管线）。
+//
+// write 回调里用的是**普通仓储方法**：runInTransaction 把事务放进 ctx，
+// queryerForContext 会认出来，所以回调里的写自动落在同一事务里。
+// 没配 outbox 就报错 —— 那种配置下事件会丢，而调用方以为发出去了。
+func (r *SupplyRepository) WriteAndPublish(ctx context.Context, write func(context.Context) error, domainEvents []event.DomainEvent) error {
+	if r.outbox == nil {
+		return errors.New("supply transactional outbox is not configured")
+	}
+	if len(domainEvents) == 0 {
+		// 一个事件都不发还叫什么 AndPublish：直接报错，免得以后有人以为
+		// 「这里已经接上通知管线了」。
+		return errors.New("WriteAndPublish requires at least one domain event")
+	}
+	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, transaction pgx.Tx) error {
+		if err := write(transactionContext); err != nil {
+			return err
+		}
+		for _, domainEvent := range domainEvents {
+			if err := r.outbox.publishWithExec(transactionContext, transaction, domainEvent); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (r *SupplyRepository) GetCandidateBatch(ctx context.Context, batchID string) (supply.CandidateBatch, error) {
 	var b supply.CandidateBatch
 	var candidates []byte
