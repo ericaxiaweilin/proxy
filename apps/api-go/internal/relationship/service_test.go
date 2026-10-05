@@ -199,3 +199,58 @@ func TestAcceptFriendRequestRequiresExistingFriendship(t *testing.T) {
 		t.Fatalf("missing row should be rejected, got %s / %+v", r.Outcome, r.Error)
 	}
 }
+
+// MERCHANT-CREATOR-NOTIFY-001：好友请求必须通知到**被申请方**，且事件和关系行
+// 同一事务。
+//
+// 改之前 UpsertFriendship 只写关系表，事件只回给**发起申请的本人** —— 对方在
+// 另一台手机上什么也收不到，而申请挂在那里，对方不打开 App 就永远不知道。
+// 这个洞没人发现，是因为它在结果里看不出破绽：请求照样 ACCEPTED，关系照样建好。
+func TestSendFriendRequestNotifiesTheTarget(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewWithRepository(repo)
+
+	if r := svc.Handle(envelope("SendFriendRequest", "user_alice", "user_bob")); r.Outcome != "ACCEPTED" {
+		t.Fatalf("alice→bob: %s", r.Outcome)
+	}
+	events := repo.Events()
+	if len(events) != 1 {
+		t.Fatalf("want exactly 1 domain event, got %d", len(events))
+	}
+	ev := events[0]
+	if ev.EventType != "FriendRequestSent" {
+		t.Fatalf("event type = %q", ev.EventType)
+	}
+	if ev.AggregateID == "" || ev.AggregateID == "pending" {
+		t.Fatalf("the event must carry the real friendship id (outbox looks up by aggregate), got %q", ev.AggregateID)
+	}
+	// 关系行的 id 必须就是事件的聚合 id。
+	got, err := repo.GetFriendship(contextBackground(), "user_alice", "user_bob")
+	if err != nil {
+		t.Fatalf("GetFriendship: %v", err)
+	}
+	if got.ID != ev.AggregateID {
+		t.Fatalf("event aggregate %q != friendship id %q — outbox 按聚合就查不到这条事件", ev.AggregateID, got.ID)
+	}
+	notify, _ := ev.Payload["notifyPrincipalId"].(string)
+	if notify != "user_bob" {
+		t.Fatalf("notifyPrincipalId = %q, want user_bob（收件人是被申请方，不是发起人）", notify)
+	}
+	if notify == "user_alice" {
+		t.Fatal("the notification must not go back to the requester")
+	}
+}
+
+// 内存仓没有事务可谈，但**不能**因此少记事件：两个实现对「关系和事件是不是都
+// 发生了」必须回答一致，否则差异会藏在没人看的那一侧（单测跑内存、线上跑 PG）。
+func TestUpsertFriendshipAndPublishRefusesToStoreHalfTheFact(t *testing.T) {
+	repo := NewMemoryRepository()
+	if _, err := repo.UpsertFriendshipAndPublish(contextBackground(), FriendshipRecord{
+		ID: "fr_x", UserA: "user_a", UserB: "user_b", State: FriendshipPending,
+	}, nil); err == nil {
+		t.Fatal("an empty event list must be rejected — otherwise a caller can believe the notification went out")
+	}
+	if rows, _ := repo.ListByUser(contextBackground(), "user_a"); len(rows) != 0 {
+		t.Fatalf("a rejected call must leave no friendship row, got %d", len(rows))
+	}
+}

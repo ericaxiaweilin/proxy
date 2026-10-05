@@ -317,6 +317,15 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 		}
 		return "", "", "", "", false
 
+	case "FriendRequestSent":
+		// 好友请求的收件人就是 payload.targetId（已过 targetAccountExists 校验的
+		// user account id），所以这一条**不需要**为了知道收件人去改 schema ——
+		// 可推导的收件人就不该落库成事实（对比 174/175 那两列是不得已）。
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "有人加你为好友", "处理一下就能开始聊天了", "", true
+		}
+		return "", "", "", "", false
+
 	// 深链刻意留空：/collab-invitations/ 和专属码页都不在
 	// notification.deepLinkPrefixes 白名单里，而客户端路由表里也没有对应页面 ——
 	// 硬塞一个前缀的结果是「点开白屏」。加深链要 allowlist（service.go:385）

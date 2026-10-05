@@ -106,6 +106,9 @@ type Repository interface {
 	// UpsertFriendship writes the (UserA,UserB) row,
 	// overwriting any previous state. Returns the saved row.
 	UpsertFriendship(ctx context.Context, rec FriendshipRecord) (FriendshipRecord, error)
+	// UpsertFriendshipAndPublish 把好友关系与事件放进同一事务（MERCHANT-CREATOR-NOTIFY-001）。
+	// 收件人（被申请方）由写侧算好放进事件 payload，通知映射层保持纯函数。
+	UpsertFriendshipAndPublish(ctx context.Context, rec FriendshipRecord, domainEvents []event.DomainEvent) (FriendshipRecord, error)
 	// GetFriendship returns the row for the unordered pair.
 	// Returns ErrFriendshipNotFound when no row exists.
 	GetFriendship(ctx context.Context, userA, userB string) (FriendshipRecord, error)
@@ -320,22 +323,34 @@ func (s *Service) sendFriendRequest(ctx context.Context, e command.Envelope) com
 		return command.Rejected(e, "FRIEND_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "relationship.write_failed", nil)
 	}
 	now := s.clock.Now().UTC()
-	rec, err := s.repo.UpsertFriendship(ctx, FriendshipRecord{
-		ID:          newID("fr_"),
+	// 事件与关系行同一事务（MERCHANT-CREATOR-NOTIFY-001）：改之前只写关系表，
+	// 事件只回给**发起申请的本人** —— 对方在另一台手机上什么也收不到，而申请
+	// 挂在那里，对方不打开 App 就永远不知道。
+	//
+	// 收件人就是 targetID（已过 targetAccountExists 校验，确实是 user account
+	// id）—— 所以这里不需要 174/175 那种「把 actor 之外的收件人记到行上」的招：
+	// 被申请方就是请求里的 targetUserId，可推导的就不该落库成事实。
+	//
+	// ID 先生成出来，事件才能带上**真实**的聚合 id：outbox 按聚合反查全靠它，
+	// 塞个占位串等于这条事件以后查不到、也删不掉。
+	id := newID("fr_")
+	ev := event.New("FriendRequestSent", "Friendship", id, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"requesterId":       e.Actor.ID,
+		"targetId":          targetID,
+		"notifyPrincipalId": targetID,
+	})
+	rec, err := s.repo.UpsertFriendshipAndPublish(ctx, FriendshipRecord{
+		ID:          id,
 		UserA:       a,
 		UserB:       b,
 		State:       FriendshipPending,
 		RequesterID: e.Actor.ID,
 		CreatedAt:   now,
 		UpdatedAt:   now,
-	})
+	}, []event.DomainEvent{ev})
 	if err != nil {
 		return command.Rejected(e, "FRIEND_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "relationship.write_failed", nil)
 	}
-	ev := event.New("FriendRequestSent", "Friendship", rec.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"requesterId": e.Actor.ID,
-		"targetId":    targetID,
-	})
 	r := command.Accepted(e, "Friendship", rec.ID, 1, string(FriendshipPending), []string{ev.EventID})
 	raw, _ := json.Marshal(map[string]any{"friendship": rec})
 	r.OperationRef = string(raw)
@@ -477,10 +492,39 @@ func newID(prefix string) string {
 type MemoryRepository struct {
 	mu   sync.Mutex
 	rows map[string]FriendshipRecord
+	// events 让测试能断言「事件确实发出去了」（MERCHANT-CREATOR-NOTIFY-001：
+	// 内存仓不记事件的话，PG 上才有的那些通知路径在单测里等于不存在）。
+	events []event.DomainEvent
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{rows: map[string]FriendshipRecord{}}
+}
+
+// Events 返回这个内存仓见过的全部事件（测试用）。
+func (r *MemoryRepository) Events() []event.DomainEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]event.DomainEvent(nil), r.events...)
+}
+
+// UpsertFriendshipAndPublish 与 PG 实现回答同一个问题：「关系和事件是不是都
+// 发生了」。内存仓没有事务可谈，但**不能**因此少记事件 —— 两个实现对失败的
+// 回答不一样的话，测试用内存仓、线上跑 PG，差异会藏在没人看的那一侧。
+func (r *MemoryRepository) UpsertFriendshipAndPublish(_ context.Context, rec FriendshipRecord, domainEvents []event.DomainEvent) (FriendshipRecord, error) {
+	if len(domainEvents) == 0 {
+		return FriendshipRecord{}, errors.New("UpsertFriendshipAndPublish requires at least one domain event")
+	}
+	// 先写后记，且**不要**在这里 Lock 再调下面的 UpsertFriendship：那个方法自己
+	// 取同一把锁，Go 的 mutex 不可重入 ⇒ 自己等自己。
+	saved, err := r.UpsertFriendship(context.Background(), rec)
+	if err != nil {
+		return FriendshipRecord{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, domainEvents...)
+	return saved, nil
 }
 
 func (r *MemoryRepository) UpsertFriendship(_ context.Context, rec FriendshipRecord) (FriendshipRecord, error) {

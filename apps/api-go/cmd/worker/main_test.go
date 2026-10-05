@@ -571,7 +571,6 @@ var eventsPendingNotificationDecision = map[string]string{
 	"WalletChanged":          "该通知但需要独立设计：余额变化要带金额与方向",
 
 	// ── 社交邀请：该通知，且优先级高 ─────────────────────────────────────
-	"FriendRequestSent":     "该通知，优先级高：收件人=被邀请方；缺 inviteeId→principal 的落库事实（和 174 同类问题）",
 	"ReferralInviteCreated": "该通知：收件人=被邀请方",
 	"TopicInviteCreated":    "该通知：收件人=被邀请方",
 }

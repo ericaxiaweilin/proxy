@@ -339,7 +339,9 @@ func main() {
 		// AVATAR-DELIVER-001: 头像同样要提权——上传默认 OWNER_ONLY，
 		// 公开 thumb/play 路由要求 APPROVED && PUBLIC，不提权头像恒 404。
 		identityService.SetProfileMediaAuthorizer(mediaService)
-		relationshipService = relationship.NewWithRepository(postgres.NewRelationshipRepository(pool))
+		// MERCHANT-CREATOR-NOTIFY-001：好友请求要能通知到对方，所以仓储必须带
+		// outbox（没带的话 AndPublish 会直接报错，而不是安静地只写关系表）。
+		relationshipService = relationship.NewWithRepository(postgres.NewRelationshipRepositoryWithOutbox(pool, outboxRepository))
 		paymentService = payment.NewWithRepository(postgres.NewPaymentRepository(pool, outboxRepository))
 		// NOTIF-PUSH-001：推送通道要能把「收件人」翻译成「哪几台设备」，
 		// 所以分发器必须拿到 **PG 的** notification 仓（内存仓没有设备令牌）。

@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/relationship"
 )
 
@@ -17,11 +18,18 @@ import (
 // in the domain layer and the SQL CHECK agree on which
 // user is UserA.
 type RelationshipRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	outbox *OutboxRepository
 }
 
+// NewRelationshipRepository 只读用法/测试用（没有 outbox ⇒ 不能发事件）。
 func NewRelationshipRepository(pool *pgxpool.Pool) *RelationshipRepository {
 	return &RelationshipRepository{pool: pool}
+}
+
+// NewRelationshipRepositoryWithOutbox 是生产接线：好友请求要能通知到人。
+func NewRelationshipRepositoryWithOutbox(pool *pgxpool.Pool, outboxRepository *OutboxRepository) *RelationshipRepository {
+	return &RelationshipRepository{pool: pool, outbox: outboxRepository}
 }
 
 func (r *RelationshipRepository) UpsertFriendship(ctx context.Context, rec relationship.FriendshipRecord) (relationship.FriendshipRecord, error) {
@@ -38,6 +46,48 @@ func (r *RelationshipRepository) UpsertFriendship(ctx context.Context, rec relat
 	var state string
 	var out relationship.FriendshipRecord
 	if err := row.Scan(&out.ID, &out.UserA, &out.UserB, &state, &out.RequesterID, &out.BlockedBy, &out.CreatedAt, &out.UpdatedAt); err != nil {
+		return relationship.FriendshipRecord{}, err
+	}
+	out.State = relationship.FriendshipStatus(state)
+	return out, nil
+}
+
+// UpsertFriendshipAndPublish：好友关系与「对方收到了好友申请」这个事件同一事务。
+//
+// MERCHANT-CREATOR-NOTIFY-001：改之前 UpsertFriendship 只写关系表，事件只在
+// Result.EventRefs 里回给**发起申请的本人** —— 而「对方」在另一台手机上什么
+// 都收不到。申请挂在那里，对方不打开 App 就永远不知道。
+func (r *RelationshipRepository) UpsertFriendshipAndPublish(ctx context.Context, rec relationship.FriendshipRecord, domainEvents []event.DomainEvent) (relationship.FriendshipRecord, error) {
+	if r.outbox == nil {
+		return relationship.FriendshipRecord{}, errors.New("relationship transactional outbox is not configured")
+	}
+	if len(domainEvents) == 0 {
+		return relationship.FriendshipRecord{}, errors.New("UpsertFriendshipAndPublish requires at least one domain event")
+	}
+	var out relationship.FriendshipRecord
+	var state string
+	err := runInTransaction(ctx, r.pool, func(transactionContext context.Context, transaction pgx.Tx) error {
+		row := queryerForContext(transactionContext, r.pool).QueryRow(transactionContext, `
+			INSERT INTO relationship.friendships (id, user_a, user_b, state, requester_id, blocked_by, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			ON CONFLICT (user_a, user_b) DO UPDATE SET
+				state=EXCLUDED.state,
+				requester_id=EXCLUDED.requester_id,
+				blocked_by=EXCLUDED.blocked_by,
+				updated_at=EXCLUDED.updated_at
+			RETURNING id, user_a, user_b, state, requester_id, blocked_by, created_at, updated_at`,
+			rec.ID, rec.UserA, rec.UserB, string(rec.State), rec.RequesterID, rec.BlockedBy, rec.CreatedAt, rec.UpdatedAt)
+		if err := row.Scan(&out.ID, &out.UserA, &out.UserB, &state, &out.RequesterID, &out.BlockedBy, &out.CreatedAt, &out.UpdatedAt); err != nil {
+			return err
+		}
+		for _, domainEvent := range domainEvents {
+			if err := r.outbox.publishWithExec(transactionContext, transaction, domainEvent); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return relationship.FriendshipRecord{}, err
 	}
 	out.State = relationship.FriendshipStatus(state)
