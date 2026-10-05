@@ -13282,12 +13282,19 @@ if curl -sf --noproxy '*' --max-time 3 http://127.0.0.1:4100/health/live >/dev/n
     echo "        PERSON-DISTANCE-ZERO-001 禁止用 0 表示「就在你脚下」。" >&2
     exit 1
   fi
-  if ! grep -qF 'ORDER BY meters ASC' "$_rail_sql"; then
+  # 2026-10-05: 判据从 `ORDER BY meters ASC` 跟着改成 `ORDER BY m.meters ASC`。
+  # 30aa1e18（For You 基线）把距离计算挪进了 `measured` CTE，于是排序列带上了
+  # 表别名 `m.`；语义没变（仍是按距离升序），变的是写法。这条判据从那时起就一直
+  # 红着 —— 判据要跟着实现走，但也不能改成「有没有 ORDER BY 都算过」。
+  if ! grep -qF 'ORDER BY m.meters ASC' "$_rail_sql"; then
     echo "  FAIL [HOME-RAIL-SERVER-001]: nearby 不再按距离升序 —— 「最近的」就不是最近的了。" >&2
     exit 1
   fi
   # 无坐标的人必须被排除在结果外（有 JOIN + IS NOT NULL 双重保证）
-  if ! grep -qF 'WHERE a.lat IS NOT NULL AND a.lng IS NOT NULL' "$_rail_sql"; then
+  # 同上：30aa1e18 把「有坐标的人」收进 `located` CTE 并起了别名 `l`，于是这条从
+  # `WHERE a.lat IS NOT NULL AND a.lng IS NOT NULL` 变成 `l.` 版本。守卫本身还在
+  # （无坐标的人在 CTE 里就被滤掉），判据跟着别名走 —— 仍要求显式的 IS NOT NULL。
+  if ! grep -qF 'WHERE l.lat IS NOT NULL AND l.lng IS NOT NULL' "$_rail_sql"; then
     echo "  FAIL [HOME-RAIL-SERVER-001]: nearby 不再排除无坐标的人 —— 「距离未知」会被当成命中。" >&2
     exit 1
   fi
@@ -13928,7 +13935,12 @@ if [ -f "$CREATOR_PRICING_TS" ] && [ -f "$CREATOR_LIST_ME" ] && [ -f "$CREATOR_L
   #    负向注入时三条臂全是**假绿**：把 `styles.creatorTag}` 改成
   #    `styles.creatorTagX}` 之后，裸子串仍然命中同一行里的
   #    `styles.creatorTagText` —— 判据被自己的兄弟样式吸收了。
-  CLC_BRANCH=$(awk '/visibleCreators\.map\(\(creator\) =>/{f=1} f{print} f&&/style=\{styles\.creatorRow\}/{n++} n>0&&/^          \}\)/{exit}' "$CREATOR_LIST_ME")
+  # ⚠️ 2026-10-05: 判据前必须**剥注释**。这个文件里有一段注释正好写着
+  # 「『可邀请』标签已下掉」—— 负向断言（不许再出现「可邀请」文案）会命中它自己的
+  # 说明文字。仓里已经踩过同一个坑（HOME-RAIL-SERVER-001 的注释里写着第一版的错
+  # 代码，grep 全文直接把自己判红）：门禁自己骗人比门禁骗红更糟。
+  CLC_BRANCH=$(perl -0pe 's{/\*.*?\*/}{}gs' "$CREATOR_LIST_ME" | sed 's|//.*||' \
+    | awk '/visibleCreators\.map\(\(creator\) =>/{f=1} f{print} f&&/style=\{styles\.creatorRow\}/{n++} n>0&&/^          \}\)/{exit}')
   if ! printf '%s' "$CLC_BRANCH" | grep -qE 'styles\.creatorTag[^A-Za-z0-9_]'; then
     echo "  FAIL [CREATOR-LIST-CARD-001]: 列表卡不再画标签胶囊 —— 又退回纯文字通讯录。" >&2
     CLC_B=1
@@ -13941,12 +13953,29 @@ if [ -f "$CREATOR_PRICING_TS" ] && [ -f "$CREATOR_LIST_ME" ] && [ -f "$CREATOR_L
     echo "  FAIL [CREATOR-LIST-CARD-001]: 列表卡不再画右列报价与主操作。" >&2
     CLC_B=1
   fi
-  if ! printf '%s' "$CLC_BRANCH" | grep -qE 'creator\.eligibility\.eligible[^A-Za-z0-9_]'; then
-    echo "  FAIL [CREATOR-LIST-CARD-001]: 列表卡不再读服务端 eligibility —— 可邀请态没依据了。" >&2
+  # 2026-10-05 用户裁决：「可邀请不是一个必须的标签吧 —— 你是什么标准判断可邀请的？
+  # 可以移除，换成评价分 / 等级分」。于是列表卡不再展示可邀请态：
+  # 这批列表本来就只含服务端 Eligible 的（QuerySuppliers 已过滤），再贴一个
+  # ✓可邀请 是同义反复，而且"可邀请"没有公开判定标准。所以判据从「读 eligibility
+  # 并画可邀请胶囊」改成「读服务端真实评价分，且不出现可邀请文案」—— 事实来源换了，
+  # 「不许编」的钉法没换（评价分仍只来自 QuerySuppliers.rating ← matching.Score）。
+  if ! printf '%s' "$CLC_BRANCH" | grep -qE 'creatorRatingLabel\(creator\.rating\)'; then
+    echo "  FAIL [CREATOR-LIST-CARD-001]: 列表卡不再读服务端评价分 —— 等级分没依据了。" >&2
     CLC_B=1
   fi
-  if ! printf '%s' "$CLC_BRANCH" | grep -qE 'creator\.serviceType[^A-Za-z0-9_]'; then
-    echo "  FAIL [CREATOR-LIST-CARD-001]: 列表卡不再用真实的服务类型字段。" >&2
+  if printf '%s' "$CLC_BRANCH" | grep -qE '可邀请|不符合资格'; then
+    echo "  FAIL [CREATOR-LIST-CARD-001]: 列表卡又出现「可邀请」文案 —— 用户已裁决去掉。" >&2
+    CLC_B=1
+  fi
+  # 2026-10-05 同轮裁决：标签行只放「内容大类 / 语言 / 地址」，服务类型退出标签
+  # （它和查询条件重复），垂类上位。所以判据从「用 serviceType」改成「大类在、
+  # serviceType 不在标签行」。
+  if ! printf '%s' "$CLC_BRANCH" | grep -qE 'creator\.verticalTags[^A-Za-z0-9_]'; then
+    echo "  FAIL [CREATOR-LIST-CARD-001]: 列表卡不再读内容垂类 —— 大类标签没依据了。" >&2
+    CLC_B=1
+  fi
+  if printf '%s' "$CLC_BRANCH" | grep -qE 'labelServiceType\('; then
+    echo "  FAIL [CREATOR-LIST-CARD-001]: 服务类型又回到标签行 —— 与查询条件重复。" >&2
     CLC_B=1
   fi
   [ "$CLC_B" -eq 0 ] || exit 1
