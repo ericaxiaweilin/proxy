@@ -28,7 +28,7 @@ var operatorConsolePaths = []string{
 
 var notConnectedConsolePaths = []string{
 	"decision-engine", "clarification-gate", "supply-health", "fulfillment-attribution", "research", "tags",
-	"intent-orchestration", "engine-api", "retention", "trust", "quality",
+	"intent-orchestration", "engine-api", "trust", "quality",
 }
 
 // merchant 曾经是桩，OPS-MERCHANT-001 把它换成真实读模型；这里断言它**不再**属于
@@ -37,7 +37,7 @@ var notConnectedConsolePaths = []string{
 //
 // matching / matching/trace 是 OPS-MATCHING-TUNABLES-001 接上去的：旋钮来自库
 // （没有行就是出厂默认），轨迹读的是 supply.candidate_batches 里存着的快照。
-var liveConsolePaths = []string{"population", "behavior", "merchant", "matching", "matching/trace"}
+var liveConsolePaths = []string{"population", "behavior", "merchant", "matching", "matching/trace", "retention"}
 
 type stubOpsMetrics struct{}
 
@@ -60,6 +60,19 @@ func (stubOpsMetrics) Merchants(_ context.Context, _ time.Time) (opsmetrics.Merc
 			{BusinessID: "biz_probe_1", Name: "Three Beans", Stores: 1, ActiveStores: 1, Members: 1,
 				Products: 6, Orders30d: 0, StoresWithDescription: 1, StoresWithHours: 1},
 		},
+	}, nil
+}
+
+// Retention 用本机库的真实形状：窗口内 196 个下单人、117 个下过 ≥2 次，
+// 而**没有人在窗口之前下过单**（priorWindowRequesters=0）—— 这一页必须因此拒绝
+// 给同期群留存率，而不是摆一个 100% 上去。
+func (stubOpsMetrics) Retention(_ context.Context, _ time.Time) (opsmetrics.Retention, error) {
+	return opsmetrics.Retention{
+		WindowDays: 30, Orders: 415, Requesters: 196, RepeatRequests: 117,
+		RepeatRequesterRate: 59.7, SamePairRepeatGroups: 117, AgentsWithOrders: 191,
+		Completed: 12, Cancelled: 12,
+		Lifecycle: map[string]int64{"CONFIRMED": 336, "OFFERED": 49, "EXECUTING": 6, "COMPLETED": 12, "CANCELLED": 12},
+		ActiveLast14d: 9, ActivePrev14d: 1, ReturnedUsers: 1, PriorWindowRequesters: 0,
 	}, nil
 }
 

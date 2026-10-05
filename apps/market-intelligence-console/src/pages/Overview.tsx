@@ -6,11 +6,13 @@ import { fetchExperienceMetrics, opFetch, type ExperienceMetrics } from "../lib/
 // 写死在 JSX 里的，一个请求都不发 —— 而且它是默认落地页，**没登录也能看到**。
 // 本页原来的注释自己就写着「假的健康度比没有健康度更糟：它让人停止怀疑」。
 //
-// 现在：有真实来源的（用户构成、行为信号、runtime 指标）走 opFetch，因此和别的
-// 页面一样受运营门保护；没有来源的（有效意图 / 成功撮合 / 完成履约 / 复购 / 负反馈率）
+// 现在：有真实来源的（用户构成、行为信号、复购、runtime 指标）走 opFetch，因此和别的
+// 页面一样受运营门保护；没有来源的（有效意图 / 成功撮合 / 完成履约 / 负反馈率）
 // 显示「未接入」并写明缺哪个模块，不编。
 type Population = { kpis: Record<string, number>; windowDays: number; genderMissing?: string };
 type Behavior = { events: Record<string, number>; windowDays: number; topInterestMissing?: string };
+// OPS-RETENTION-001：复购这一格以前在「未接入」那一列里，现在接的是真读模型
+type Retention = { dataSource: string; retention: { windowDays: number; requesters: number; repeatRequesters: number; repeatRequesterRate: number } };
 
 // 这些是规格里有、后端还没有对应模块的指标。列出来是为了让「空」是有原因的，
 // 不是忘了画。
@@ -18,7 +20,6 @@ const NOT_CONNECTED: Array<[string, string]> = [
   ["有效意图", "intent-service（澄清门）"],
   ["成功撮合", "撮合结果归因（outcome-service）"],
   ["完成履约", "履约结算 —— 且支付未接入，成交额没有事实来源"],
-  ["30D 复购/复用", "留存队列（cohort）"],
   ["负反馈率", "负反馈熔断（§10）"],
 ];
 
@@ -32,6 +33,7 @@ export function Overview() {
   const [error, setError] = useState<string | null>(null);
   const [pop, setPop] = useState<Population | null>(null);
   const [behavior, setBehavior] = useState<Behavior | null>(null);
+  const [ret, setRet] = useState<Retention | null>(null);
 
   useEffect(() => {
     fetchExperienceMetrics().then(setMetrics).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
@@ -43,6 +45,7 @@ export function Overview() {
   useEffect(() => {
     opFetch<Population>("/v1/operator/population").then(setPop).catch(() => {});
     opFetch<Behavior>("/v1/operator/behavior").then(setBehavior).catch(() => {});
+    opFetch<Retention>("/v1/operator/retention").then(setRet).catch(() => {});
   }, []);
 
   return (
@@ -59,6 +62,15 @@ export function Overview() {
             <div className="meta">GET /v1/operator/population</div>
           </div>
         )) : <div className="notice">加载用户构成…（这一页所有数字都来自真实查询，没有来源的只显示「未接入」）</div>}
+        {/* OPS-RETENTION-001：口径是「同一个需求方近 30 天 ≥2 张单」，分母是窗口内下过单的人。
+            同期群留存不在这里 —— 库里窗口前没有可比人群，硬算就是编。 */}
+        <div className="kpi">
+          <div className="label">30D 复购（需求方）</div>
+          <div className="value">{ret && ret.retention.requesters > 0 ? `${ret.retention.repeatRequesterRate}%` : "—"}</div>
+          <div className="meta">
+            {ret ? `${ret.retention.repeatRequesters.toLocaleString()} / ${ret.retention.requesters.toLocaleString()} 个下单的人 · GET /v1/operator/retention` : "GET /v1/operator/retention"}
+          </div>
+        </div>
         {NOT_CONNECTED.map(([label, missing]) => (
           <div className="kpi" key={label}>
             <div className="label">{label}</div>
@@ -98,6 +110,7 @@ export function Overview() {
       <div className="engine-inline" style={{ marginTop: 10 }}>
         本页不再有写死的数字：<span className="engine-link">/v1/operator/population</span>、
         <span className="engine-link">/v1/operator/behavior</span>、
+        <span className="engine-link">/v1/operator/retention</span>、
         <span className="engine-link">/v1/experience/metrics</span> 是真实来源；
         规格里有、后端还没做的指标一律显示「未接入」并写明缺哪个模块。
       </div>

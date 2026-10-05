@@ -82,6 +82,7 @@ type Source interface {
 	Population(ctx context.Context, now time.Time) (Population, error)
 	Behavior(ctx context.Context, now time.Time) (Behavior, error)
 	Merchants(ctx context.Context, now time.Time) (Merchants, error)
+	Retention(ctx context.Context, now time.Time) (Retention, error)
 }
 
 type Postgres struct {

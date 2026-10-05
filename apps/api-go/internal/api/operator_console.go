@@ -140,7 +140,6 @@ var (
 	operatorTags                = notConnected("标签体系（tag-service / tag-factory）", personalizationSpec+" §3")
 	operatorIntentOrchestration = notConnected("意图漏斗 + 引力 / 召回 / 排序 / 编排（gravity-service、retrieval、ranking、orchestration）", personalizationSpec+" §6 §7 §16")
 	operatorEngineAPI           = notConnected("引擎 API（/v1/decisions/evaluate 等尚未实现）", personalizationSpec+" §20")
-	operatorRetention           = notConnected("留存与复购队列", personalizationSpec+" §17")
 	operatorTrust               = notConnected("信任与风险评分（evidence-gate、negative-breaker）", personalizationSpec+" §9 §10")
 	operatorQuality             = notConnected("数据治理（曝光谱系 / 污染风险）", personalizationSpec+" §9.1 §9.4")
 )

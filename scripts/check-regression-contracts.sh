@@ -579,7 +579,8 @@ for OPS_PAGE in apps/market-intelligence-console/src/pages/Overview.tsx \
                 apps/market-intelligence-console/src/pages/ProviderApplications.tsx \
                 apps/market-intelligence-console/src/pages/NumberLookup.tsx \
                 apps/market-intelligence-console/src/pages/Merchant.tsx \
-                apps/market-intelligence-console/src/pages/Matching.tsx; do
+                apps/market-intelligence-console/src/pages/Matching.tsx \
+                apps/market-intelligence-console/src/pages/Retention.tsx; do
   if [ ! -f "$OPS_PAGE" ]; then
     echo "  FAIL [OPS-REAL-001]: 控制台页面不见了 —— $OPS_PAGE" >&2
     exit 1
@@ -686,6 +687,34 @@ if [ ! -f apps/market-intelligence-console/src/pages/Matching.tsx ] \
   exit 1
 fi
 echo "    OPS-MATCHING-TUNABLES-001: PASS (默认值=今天的行为 · 边界不出 NaN · MARKETPLACE 门 + 审计 · SQL 对真库跑过 · 曝光信号进不来)"
+# OPS-RETENTION-001（2026-10-05）：留存与复购页。
+# 这一页守的重点跟商家页一样：**没有来源的指标不许被造出来**。两个具体的诱惑：
+#   ① 同期群留存 —— 库里窗口内的下单人，在窗口之前下过单的是 0 个，没有前期人群就没有
+#      可比的两期，这时候摆一个「100% 留存」不是疏忽，是编数据；
+#   ② 回访率 —— 前一个 14 天窗口只有个位数活跃的人，任何百分比都是噪声。
+# 所以读模型的结构里根本没有 returnedRate / cohortRetention 这类字段。这里从结构上钉：
+# 谁要加回来，必须先回答「分母是谁、够不够大」。
+for t in TestOperatorRetentionRefusesRatesItCannotJustify TestOperatorRetentionWordingFollowsTheData TestOperatorRetentionWithoutADBIsNotConnected TestOperatorRetentionQueryFailureIsAnErrorNotZeroes; do
+  require_test "OPS-RETENTION-001" "./internal/api" "$t" \
+    "apps/api-go/internal/api/operator_retention_test.go" || exit $?
+done
+for t in TestOperatorRetentionCountsRealOrdersAcrossTwoWindows TestOperatorRetentionNeverInventsARateFromAnEmptyWindow; do
+  require_test "OPS-RETENTION-001" "./internal/platform/postgres" "$t" \
+    "apps/api-go/internal/platform/postgres/operator_retention_integration_test.go" || exit $?
+done
+if ! grep -qE '"/v1/operator/retention", s\.operatorConsole\(s\.operatorRetention\)' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [OPS-RETENTION-001]: /v1/operator/retention 没接回真读模型（又变回 notConnected 桩了？）" >&2
+  exit 1
+fi
+if grep -qE 'json:"(returnedRate|retentionRate|cohortRetention|gross|revenue)"' apps/api-go/internal/opsmetrics/retention.go; then
+  echo "  FAIL [OPS-RETENTION-001]: 读模型里出现了没有分母的比率字段 —— 这一页的规矩是算不出来就不给。" >&2
+  exit 1
+fi
+if ! grep -q '未接入' apps/market-intelligence-console/src/pages/Retention.tsx; then
+  echo "  FAIL [OPS-RETENTION-001]: 留存页不再标「未接入」—— 金额复购这类没来源的东西被填成了看起来真的数。" >&2
+  exit 1
+fi
+echo "    OPS-RETENTION-001: PASS (复购用真单算 · 留存/回访率结构上不存在 · SQL 对真库跑过 · 措辞跟着数据变)"
 # GRAVITY-001：引力状态（spec §6-§7 / §11 / §21）。规律的人在规律的时间点附近引力高；证据不足只学习；
 # 久不发生降回只观察；AI / 平台账号不建模；ACTIVE_ORCHESTRATE 不会自动给（§12 / §13 未建）；引力页只给运营。
 for t in TestRegularNoonChatterHasHighGravityBeforeNoonAndLowAtNight TestSparseOrStaleEvidenceDoesNotNudge TestNeverAutoActiveOrchestrate TestRecomputeSkipsNonHumansAndDowngradesPeopleWhoWentQuiet; do
