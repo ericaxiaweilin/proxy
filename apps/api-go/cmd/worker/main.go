@@ -192,6 +192,15 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 		}
 		return e.AggregateID
 	}
+	// 收件人一律取 payload.notifyPrincipalId，**不回退到 PrincipalID**：
+	// PrincipalID 是 actor，是发信人自己。回退过去等于把「你的活单被还价了」
+	// 发给还价那个人（函数头第 1 条教训就是这个）。notifyPrincipalId 为空 =
+	// 「不知道该通知谁」（历史行没有这个字段）—— 那就不发，不猜。
+	merchantCreatorRecipient := func() (string, bool) {
+		who := payloadString("notifyPrincipalId")
+		return who, who != ""
+	}
+
 	switch e.EventType {
 	case "TaskPublished":
 		return fallbackRecipient(""), "需求已发布", "你的需求已进入撮合", "/tasks/" + e.AggregateID, true
@@ -237,6 +246,81 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 			return agent, "稿件审核通过", "可以发布了，发完记得贴上各平台链接", "", true
 		}
 		return agent, "稿件被打回", "商家写了修改意见，改好后可重新提交", "", true
+
+		// ── MERCHANT-CREATOR-NOTIFY-001：商家↔creator 的往来 ──────────────────
+		//
+		// 这一整段以前**一个 case 都没有**：supply 域发的 CollabInvitationCreated /
+		// CollabInvitationResponded / MerchantCreatorPromo* / Promo* 全都落在
+		// default → ok=false → 安静跳过。商家发了活单、creator 没人知道；creator
+		// 还了价，商家没人知道。事件是齐的，映射是空的，中间那一层没人写。
+		//
+
+	case "CollabInvitationCreated":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "收到合作邀约", "有商家向你发来合作邀约，去看看条件", "", true
+		}
+		return "", "", "", "", false
+	case "CollabInvitationResponded":
+		if who, ok := merchantCreatorRecipient(); ok {
+			// 用 if/else 而不是内层 switch：这个 switch 的 case 标签是 decision
+			// 的**值**，不是事件名，而正向门禁
+			// （TestInboxForEventOnlyMapsEventTypesThatAreActuallyEmitted）会把
+			// switch 里任何 case 标签当成「映射了的事件名」⇒ ACCEPTED/DECLINED/
+			// COUNTERED 被判成永不发的事件，门禁直接变红。门禁是对的，别改门禁。
+			decision := payloadString("decision")
+			if decision == "COUNTERED" {
+				return who, "对方还价了", "对方提出了新的合作条件，去看看能不能接受", "", true
+			}
+			if decision == "ACCEPTED" {
+				return who, "合作邀约有回复了", "对方接受了邀约", "", true
+			}
+			if decision == "DECLINED" {
+				return who, "合作邀约有回复了", "对方婉拒了这次邀约", "", true
+			}
+			return who, "合作邀约有回复了", "对方回复了这次邀约", "", true
+		}
+		return "", "", "", "", false
+	case "CollabInvitationCancelled":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "合作邀约已撤回", "发邀约的商家撤回了这次合作，去看看详情", "", true
+		}
+		return "", "", "", "", false
+	case "MerchantCreatorPromoIssued":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "你有专属折扣码了", "这家商家给了你专属折扣，见专属码页", "", true
+		}
+		return "", "", "", "", false
+	case "MerchantCreatorPromoAdjusted":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "你的专属折扣变了", "商家调整了给你的折扣，报价前先看一眼", "", true
+		}
+		return "", "", "", "", false
+	case "PromoCouponIssued":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "你的码发出了优惠券", "有顾客用你的码领到了专属券", "", true
+		}
+		return "", "", "", "", false
+	case "PromoCodeClaimed":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "你的码已启用", "专属码已生效，可以开始报价了", "", true
+		}
+		return "", "", "", "", false
+	case "PromoBenefitBound":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "你的码配好了优惠", "商家为你的码配好了折扣，现在可以报了", "", true
+		}
+		return "", "", "", "", false
+	case "PromoCodeQuoted":
+		// 这一条收件人是**商家**（creator 报码 → 商家要知道自己被报了）。
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "你的码被使用了", "有 creator 用你的码报出了订单", "", true
+		}
+		return "", "", "", "", false
+
+	// 深链刻意留空：/collab-invitations/ 和专属码页都不在
+	// notification.deepLinkPrefixes 白名单里，而客户端路由表里也没有对应页面 ——
+	// 硬塞一个前缀的结果是「点开白屏」。加深链要 allowlist（service.go:385）
+	// 和移动端路由（notif-deeplink-route.ts）两边一起加，那是另一件事。
 	default:
 		return "", "", "", "", false
 	}

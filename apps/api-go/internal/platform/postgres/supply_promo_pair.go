@@ -19,12 +19,17 @@ func uniqueViolationOn(err error, constraint string) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
 }
 
-const pairPromoColumns = `code, merchant_id, merchant_name, agent_id, creator_name, terms, status, mode, suggestion, note, created_at, updated_at`
+// 同 collabInvitationColumns：INSERT 用裸列名，读回用带 COALESCE 的版本。
+// issued_by_principal_id 可空（migration 175 之前建的行），而 pgx 扫 NULL 进
+// *string 会直接报错 ——「历史行读不出来」不是我们想要的失败方式。
+const pairPromoColumns = `code, merchant_id, merchant_name, agent_id, creator_name, terms, status, mode, suggestion, note, created_at, updated_at, issued_by_principal_id`
+
+const pairPromoSelectColumns = `code, merchant_id, merchant_name, agent_id, creator_name, terms, status, mode, suggestion, note, created_at, updated_at, COALESCE(issued_by_principal_id, '')`
 
 func scanPairPromo(row pgx.Row) (supply.MerchantCreatorPromo, error) {
 	var p supply.MerchantCreatorPromo
 	var terms, suggestion []byte
-	if err := row.Scan(&p.Code, &p.MerchantID, &p.MerchantName, &p.AgentID, &p.CreatorName, &terms, &p.Status, &p.Mode, &suggestion, &p.Note, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	if err := row.Scan(&p.Code, &p.MerchantID, &p.MerchantName, &p.AgentID, &p.CreatorName, &terms, &p.Status, &p.Mode, &suggestion, &p.Note, &p.CreatedAt, &p.UpdatedAt, &p.IssuedByPrincipalID); err != nil {
 		return p, err
 	}
 	if err := json.Unmarshal(terms, &p.Terms); err != nil {
@@ -47,8 +52,8 @@ func (r *SupplyRepository) SaveMerchantCreatorPromo(ctx context.Context, p suppl
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO supply.merchant_creator_promos (`+pairPromoColumns+`, category)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-		p.Code, p.MerchantID, p.MerchantName, p.AgentID, p.CreatorName, terms, p.Status, p.Mode, suggestion, p.Note, p.CreatedAt, p.UpdatedAt, p.Terms.Category,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+		p.Code, p.MerchantID, p.MerchantName, p.AgentID, p.CreatorName, terms, p.Status, p.Mode, suggestion, p.Note, p.CreatedAt, p.UpdatedAt, nullableString(p.IssuedByPrincipalID), p.Terms.Category,
 	)
 	return err
 }
@@ -78,7 +83,7 @@ func (r *SupplyRepository) UpdateMerchantCreatorPromo(ctx context.Context, p sup
 }
 
 func (r *SupplyRepository) getPairPromo(ctx context.Context, where string, args ...any) (supply.MerchantCreatorPromo, error) {
-	p, err := scanPairPromo(queryerForContext(ctx, r.pool).QueryRow(ctx, `SELECT `+pairPromoColumns+` FROM supply.merchant_creator_promos WHERE `+where, args...))
+	p, err := scanPairPromo(queryerForContext(ctx, r.pool).QueryRow(ctx, `SELECT `+pairPromoSelectColumns+` FROM supply.merchant_creator_promos WHERE `+where, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return supply.MerchantCreatorPromo{}, supply.ErrPairPromoNotFound
 	}
@@ -94,7 +99,7 @@ func (r *SupplyRepository) GetMerchantCreatorPromoByPair(ctx context.Context, me
 }
 
 func (r *SupplyRepository) listPairPromos(ctx context.Context, where string, arg string) ([]supply.MerchantCreatorPromo, error) {
-	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `SELECT `+pairPromoColumns+` FROM supply.merchant_creator_promos WHERE `+where+` ORDER BY created_at`, arg)
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `SELECT `+pairPromoSelectColumns+` FROM supply.merchant_creator_promos WHERE `+where+` ORDER BY created_at`, arg)
 	if err != nil {
 		return nil, err
 	}

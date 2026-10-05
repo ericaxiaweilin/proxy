@@ -68,9 +68,9 @@ func (r *SupplyRepository) ListPromoCodesByAgent(ctx context.Context, agentID st
 
 func (r *SupplyRepository) SavePromoBenefit(ctx context.Context, b supply.PromoBenefit) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO supply.promo_benefits (merchant_id, code, face_value_vnd, scope_name, valid_until, status, created_at, source, min_spend_vnd, note)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		b.MerchantID, b.Code, b.FaceValueVND, b.ScopeName, b.ValidUntil, b.Status, b.CreatedAt, promoBenefitSource(b.Source), b.MinSpendVND, b.Note,
+		INSERT INTO supply.promo_benefits (merchant_id, code, face_value_vnd, scope_name, valid_until, status, created_at, source, min_spend_vnd, note, bound_by_principal_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		b.MerchantID, b.Code, b.FaceValueVND, b.ScopeName, b.ValidUntil, b.Status, b.CreatedAt, promoBenefitSource(b.Source), b.MinSpendVND, b.Note, nullableString(b.BoundByPrincipalID),
 	)
 	return err
 }
@@ -85,9 +85,9 @@ func promoBenefitSource(source string) string {
 func (r *SupplyRepository) GetPromoBenefit(ctx context.Context, merchantID, code string) (supply.PromoBenefit, error) {
 	var b supply.PromoBenefit
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT merchant_id, code, face_value_vnd, scope_name, valid_until, status, created_at, COALESCE(source, 'MANUAL'), min_spend_vnd, note
+		SELECT merchant_id, code, face_value_vnd, scope_name, valid_until, status, created_at, COALESCE(source, 'MANUAL'), min_spend_vnd, note, COALESCE(bound_by_principal_id, '')
 		FROM supply.promo_benefits WHERE merchant_id=$1 AND code=$2`, merchantID, code).Scan(
-		&b.MerchantID, &b.Code, &b.FaceValueVND, &b.ScopeName, &b.ValidUntil, &b.Status, &b.CreatedAt, &b.Source, &b.MinSpendVND, &b.Note,
+		&b.MerchantID, &b.Code, &b.FaceValueVND, &b.ScopeName, &b.ValidUntil, &b.Status, &b.CreatedAt, &b.Source, &b.MinSpendVND, &b.Note, &b.BoundByPrincipalID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return supply.PromoBenefit{}, supply.ErrPromoNotBound
@@ -113,7 +113,7 @@ func (r *SupplyRepository) UpdatePromoBenefit(ctx context.Context, b supply.Prom
 
 func (r *SupplyRepository) ListPromoBenefitsByMerchant(ctx context.Context, merchantID string) ([]supply.PromoBenefit, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT merchant_id, code, face_value_vnd, scope_name, valid_until, status, created_at, COALESCE(source, 'MANUAL'), min_spend_vnd, note
+		SELECT merchant_id, code, face_value_vnd, scope_name, valid_until, status, created_at, COALESCE(source, 'MANUAL'), min_spend_vnd, note, COALESCE(bound_by_principal_id, '')
 		FROM supply.promo_benefits WHERE merchant_id=$1 ORDER BY created_at DESC`, merchantID)
 	if err != nil {
 		return nil, err
@@ -122,7 +122,7 @@ func (r *SupplyRepository) ListPromoBenefitsByMerchant(ctx context.Context, merc
 	result := []supply.PromoBenefit{}
 	for rows.Next() {
 		var b supply.PromoBenefit
-		if err := rows.Scan(&b.MerchantID, &b.Code, &b.FaceValueVND, &b.ScopeName, &b.ValidUntil, &b.Status, &b.CreatedAt, &b.Source, &b.MinSpendVND, &b.Note); err != nil {
+		if err := rows.Scan(&b.MerchantID, &b.Code, &b.FaceValueVND, &b.ScopeName, &b.ValidUntil, &b.Status, &b.CreatedAt, &b.Source, &b.MinSpendVND, &b.Note, &b.BoundByPrincipalID); err != nil {
 			return nil, err
 		}
 		result = append(result, b)

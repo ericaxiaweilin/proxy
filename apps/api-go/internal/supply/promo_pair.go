@@ -100,6 +100,10 @@ type MerchantCreatorPromo struct {
 	Note         string          `json:"note,omitempty"`
 	CreatedAt    time.Time       `json:"createdAt"`
 	UpdatedAt    time.Time       `json:"updatedAt"`
+	// IssuedByPrincipalID 是发这条专属码的商家成员 user account id（migration 175）。
+	// 存在的理由是**收件人**：creator 报码那一刻在场的是 creator，要通知的是
+	// 商家 —— 而商家成员列表可能有多个，通知「随便哪个」比不通知更糟。
+	IssuedByPrincipalID string `json:"-"`
 }
 
 // PromoChange 是一次条款调整的留痕（原型「记录留痕，方便团队回看」）。只增不改。
@@ -539,8 +543,12 @@ func pairPromoMerchantOnly(e command.Envelope) (string, *command.Result) {
 
 // ---------------------------------------------------------------- 商家：发码 / 调整 / 列表 / 依据
 
-// newPairPromo：给（商家, creator）建专属码，条款按系统建议起步（mode=SUGGESTED）。
+// newPairPromo：给（商家, creator）**建**专属码，条款按系统建议起步（mode=SUGGESTED）。
 // 店名 / 品类读门店资料；读不到店名时用 fallbackName。
+//
+// 只建不写（MERCHANT-CREATOR-NOTIFY-001）：两个调用方的语义不一样 ——
+// 单发命令要把「写 + 事件」放进同一事务，自动补码的循环不能发事件。
+// 写和发事件的决定权因此必须留在调用方，不能藏在这个 helper 里。
 func (s *Service) newPairPromo(ctx context.Context, merchantID, agentID, creatorName, fallbackName string, now time.Time) (MerchantCreatorPromo, error) {
 	store := s.merchantStore(ctx, merchantID)
 	category := StoreCategoryGroup(store.Category)
@@ -566,11 +574,14 @@ func (s *Service) newPairPromo(ctx context.Context, merchantID, agentID, creator
 		},
 		Status: "ACTIVE", Mode: PromoModeSuggested, Suggestion: suggestion, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := s.repository.SaveMerchantCreatorPromo(ctx, promo); err != nil {
-		return MerchantCreatorPromo{}, err
-	}
 	return promo, nil
 }
+
+// errPromoCouponAlreadyIssued 是**事务内部**用的哨兵：同一张券并发发两次时，
+// SavePromoIssue 的唯一键冲突要把整笔事务退掉（包括那条 Issued 事件 ——
+// 券没发出去就不该有「已发券」的通知），但对外要回的是 ALREADY_ISSUED 这个
+// 正常业务结果，不是错误。
+var errPromoCouponAlreadyIssued = errors.New("promo coupon already issued")
 
 // maxAutoIssuePerList：一次打开页面最多自动补多少个码（防一次请求太重；下次打开接着补）。
 const maxAutoIssuePerList = 50
@@ -604,6 +615,13 @@ func (s *Service) ensurePairPromos(ctx context.Context, merchantID, marketID, fa
 		}
 		promo, err := s.newPairPromo(ctx, merchantID, profile.AgentID, profile.Name, fallbackName, now)
 		if err != nil {
+			continue
+		}
+		// 自动补码**不发通知**：一次打开页面最多补 50 个码，逐个通知 creator
+		// 等于用推送轰炸（用户2026-10-04 定的交互是「商家唯一操作是选下单或调
+		// 折扣」，不是让人被 50 条通知追着跑）。这条在反向门禁的显式
+		// no-notify 清单里写着理由，不是「忘了」。
+		if err := s.repository.SaveMerchantCreatorPromo(ctx, promo); err != nil {
 			continue
 		}
 		existing = append(existing, promo)
@@ -656,10 +674,21 @@ func (s *Service) issueMerchantCreatorPromo(ctx context.Context, e command.Envel
 	if err != nil {
 		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
 	}
-	domainEvents := []event.DomainEvent{event.New("MerchantCreatorPromoIssued", "MerchantCreatorPromo", promo.Code, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"merchantId": merchantID, "agentId": p.AgentID, "code": promo.Code, "percentBp": promo.Suggestion.PercentBP,
-	})}
-	return acceptedWithPayload(e, "MerchantCreatorPromo", promo.Code, 1, "ISSUED", map[string]any{"promo": promo}, domainEvents)
+	// MERCHANT-CREATOR-NOTIFY-001：写专属码与「通知 creator」这个事件同一事务。
+	// 收件人写死在 payload 里 —— 映射层保持纯函数，不去反查「这个 creator
+	// 用哪个账号登录」。
+	// 记下是谁发的（migration 175）：creator 报这条码时通知对象是这个商家成员。
+	promo.IssuedByPrincipalID = e.Principal.ID
+	issuedEvent := event.New("MerchantCreatorPromoIssued", "MerchantCreatorPromo", promo.Code, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"merchantId": merchantID, "agentId": p.AgentID, "code": promo.Code,
+		"percentBp": promo.Suggestion.PercentBP, "notifyPrincipalId": p.AgentID,
+	})
+	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+		return s.repository.SaveMerchantCreatorPromo(c, promo)
+	}, []event.DomainEvent{issuedEvent}); err != nil {
+		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
+	}
+	return acceptedWithPayload(e, "MerchantCreatorPromo", promo.Code, 1, "ISSUED", map[string]any{"promo": promo}, []event.DomainEvent{issuedEvent})
 }
 
 type adjustPairPromoPayload struct {
@@ -743,16 +772,22 @@ func (s *Service) adjustMerchantCreatorPromo(ctx context.Context, e command.Enve
 	if strings.TrimSpace(p.Note) != "" {
 		promo.Note = strings.TrimSpace(p.Note)
 	}
-	if err := s.repository.UpdateMerchantCreatorPromo(ctx, promo); err != nil {
-		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
-	}
 	change := PromoChange{ID: newID("pc_"), Code: promo.Code, ActorID: e.Principal.ID, Before: before, After: after, Mode: mode, Note: strings.TrimSpace(p.Note), ChangedAt: now}
-	if err := s.repository.SavePromoChange(ctx, change); err != nil {
+	// MERCHANT-CREATOR-NOTIFY-001：调整专属码 = 「你给这个人的折扣变了」，creator
+	// 必须知道（否则他按旧折扣报价，报价和实付对不上）。三处写 + 事件同一事务。
+	domainEvents := []event.DomainEvent{event.New("MerchantCreatorPromoAdjusted", "MerchantCreatorPromo", promo.Code, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"merchantId": merchantID, "agentId": promo.AgentID, "code": promo.Code, "mode": mode,
+		"minSpendVnd": after.MinSpendVND, "faceValueVnd": after.FaceValueVND,
+		"notifyPrincipalId": promo.AgentID,
+	})}
+	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+		if err := s.repository.UpdateMerchantCreatorPromo(c, promo); err != nil {
+			return err
+		}
+		return s.repository.SavePromoChange(c, change)
+	}, domainEvents); err != nil {
 		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
 	}
-	domainEvents := []event.DomainEvent{event.New("MerchantCreatorPromoAdjusted", "MerchantCreatorPromo", promo.Code, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"merchantId": merchantID, "code": promo.Code, "mode": mode, "minSpendVnd": after.MinSpendVND, "faceValueVnd": after.FaceValueVND,
-	})}
 	return acceptedWithPayload(e, "MerchantCreatorPromo", promo.Code, 1, "ADJUSTED", map[string]any{"promo": promo, "change": change}, domainEvents)
 }
 
@@ -908,20 +943,30 @@ func (s *Service) claimPromoCoupon(ctx context.Context, e command.Envelope) comm
 	}
 	issue := PromoIssue{ID: newID("cp_"), Code: code, MerchantID: promo.MerchantID, AgentID: promo.AgentID, CustomerID: e.Actor.ID, IssuedAt: now}
 	state := "ISSUED"
-	if err := s.repository.SavePromoIssue(ctx, issue); errors.Is(err, ErrPromoAlreadyIssued) {
-		prior, perr := s.repository.GetPromoIssueByCustomer(ctx, code, e.Actor.ID)
-		if perr != nil {
-			return command.Rejected(e, "PROMO_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_read_failed", nil)
-		}
-		issue, state = prior, "ALREADY_ISSUED"
-	} else if err != nil {
-		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
-	}
 	var domainEvents []event.DomainEvent
-	if state == "ISSUED" {
-		domainEvents = []event.DomainEvent{event.New("PromoCouponIssued", "PromoIssue", issue.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-			"merchantId": promo.MerchantID, "agentId": promo.AgentID, "code": code,
-		})}
+	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+		if err := s.repository.SavePromoIssue(c, issue); errors.Is(err, ErrPromoAlreadyIssued) {
+			prior, perr := s.repository.GetPromoIssueByCustomer(c, code, e.Actor.ID)
+			if perr != nil {
+				return perr
+			}
+			issue, state = prior, "ALREADY_ISSULED"
+			return errPromoCouponAlreadyIssued
+		} else if err != nil {
+			return err
+		}
+		return nil
+	}, []event.DomainEvent{event.New("PromoCouponIssued", "PromoIssue", issue.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		// 收件人 = creator：这张券是用**他的码**发的，他要知道。
+		"merchantId": promo.MerchantID, "agentId": promo.AgentID, "code": code,
+		"notifyPrincipalId": promo.AgentID,
+	})}); err != nil {
+		if errors.Is(err, errPromoCouponAlreadyIssued) {
+			return acceptedWithPayload(e, "PromoIssue", issue.ID, 1, state, map[string]any{
+				"coupon": issue, "promo": publicPromoView(promo), "alreadyClaimed": true,
+			}, nil)
+		}
+		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
 	}
 	return acceptedWithPayload(e, "PromoIssue", issue.ID, 1, state, map[string]any{
 		"coupon": issue, "promo": publicPromoView(promo), "alreadyClaimed": state == "ALREADY_ISSUED",
@@ -1060,14 +1105,20 @@ func (s *Service) quotePairPromo(ctx context.Context, e command.Envelope, mercha
 		AmountVND: amount, DiscountVND: promo.Terms.FaceValueVND, FirstVisit: firstVisit,
 		CustomerID: issue.CustomerID, IssueID: issue.ID, FirstVisitSource: source, QuotedAt: now,
 	}
-	if err := s.repository.SavePromoQuote(ctx, quote); errors.Is(err, ErrCouponAlreadyRedeemed) {
+	// 收件人 = 发这条码的商家成员（migration 175 记在 promo 上）。没有就是
+	// 「不知道该通知谁」（历史行）—— 那就不发，不猜。
+	domainEvents := []event.DomainEvent{event.New("PromoCodeQuoted", "PromoQuote", quote.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"merchantId": merchantID, "agentId": promo.AgentID, "code": code, "amountVnd": amount,
+		"firstVisit": firstVisit, "firstVisitSource": source,
+		"notifyPrincipalId": promo.IssuedByPrincipalID,
+	})}
+	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+		return s.repository.SavePromoQuote(c, quote)
+	}, domainEvents); errors.Is(err, ErrCouponAlreadyRedeemed) {
 		return command.Rejected(e, "COUPON_ALREADY_REDEEMED", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.coupon_already_redeemed", nil)
 	} else if err != nil {
 		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
 	}
-	domainEvents := []event.DomainEvent{event.New("PromoCodeQuoted", "PromoQuote", quote.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"merchantId": merchantID, "agentId": promo.AgentID, "code": code, "amountVnd": amount, "firstVisit": firstVisit, "firstVisitSource": source,
-	})}
 	return acceptedWithPayload(e, "PromoQuote", quote.ID, 1, "QUOTED", map[string]any{
 		"quote": quote,
 		"benefit": map[string]any{

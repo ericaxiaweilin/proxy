@@ -64,6 +64,10 @@ type PromoBenefit struct {
 	Source       string    `json:"source"` // MANUAL | AUTO
 	Note         string    `json:"note,omitempty"`
 	CreatedAt    time.Time `json:"createdAt"`
+	// BoundByPrincipalID 是把这条权益绑到该码上的商家成员 user account id
+	// （migration 175）。存在的理由和 IssuedByPrincipalID 一样：报码那一刻要
+	// 通知的是商家，而商家成员不止一个。
+	BoundByPrincipalID string `json:"-"`
 }
 
 // PromoAutoBenefit 是商家的默认优惠（自动档）：开一次，以后本家没绑过的码
@@ -83,13 +87,13 @@ type PromoAutoBenefit struct {
 // 单子多少钱（amountVND，店员填，不填记 0）、减了多少（discountVND，绑定快照）、
 // 是不是新客（firstVisit，店员按顾客自述勾，平台不核验）。
 type PromoQuote struct {
-	ID          string    `json:"id"`
-	MerchantID  string    `json:"merchantId"`
-	AgentID     string    `json:"agentId"`
-	Code        string    `json:"code"`
-	AmountVND   int64     `json:"amountVnd"`
-	DiscountVND int64     `json:"discountVnd"`
-	FirstVisit  bool      `json:"firstVisit"`
+	ID          string `json:"id"`
+	MerchantID  string `json:"merchantId"`
+	AgentID     string `json:"agentId"`
+	Code        string `json:"code"`
+	AmountVND   int64  `json:"amountVnd"`
+	DiscountVND int64  `json:"discountVnd"`
+	FirstVisit  bool   `json:"firstVisit"`
 	// MERCHANT-CREATOR-PROMO-002：凭券核销时记下顾客和券（新客由系统判定，source=SYSTEM）；
 	// 匿名输码核销这两项为空，新客按店员勾选（source=CLERK）。
 	CustomerID       string    `json:"customerId,omitempty"`
@@ -176,12 +180,16 @@ func (s *Service) claimPromoCode(ctx context.Context, e command.Envelope) comman
 	}
 	now := s.clock.Now().UTC()
 	promo := PromoCode{Code: code, AgentID: p.AgentID, Status: "ACTIVE", CreatedAt: now}
-	if err := s.repository.SavePromoCode(ctx, promo); err != nil {
+	// MERCHANT-CREATOR-NOTIFY-001：写码与事件同一事务。收件人 = 认领人自己：
+	// 认领是一个「这个码现在归你了」的落地事实，跨端登录时得看得见。
+	domainEvents := []event.DomainEvent{event.New("PromoCodeClaimed", "PromoCode", code, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"agentId": p.AgentID, "notifyPrincipalId": p.AgentID,
+	})}
+	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+		return s.repository.SavePromoCode(c, promo)
+	}, domainEvents); err != nil {
 		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
 	}
-	domainEvents := []event.DomainEvent{event.New("PromoCodeClaimed", "PromoCode", code, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"agentId": p.AgentID,
-	})}
 	return acceptedWithPayload(e, "PromoCode", code, 1, "CLAIMED", map[string]any{"promoCode": promo}, domainEvents)
 }
 
@@ -287,15 +295,25 @@ func (s *Service) bindPromoBenefit(ctx context.Context, e command.Envelope) comm
 	benefit := PromoBenefit{
 		MerchantID: merchantID, Code: code, FaceValueVND: p.FaceValueVND,
 		MinSpendVND: p.MinSpendVND,
-		ScopeName: scope, ValidUntil: p.ValidUntil, Status: "ACTIVE",
+		ScopeName:   scope, ValidUntil: p.ValidUntil, Status: "ACTIVE",
 		Source: "MANUAL", Note: strings.TrimSpace(p.Note), CreatedAt: now,
 	}
-	if err := s.repository.SavePromoBenefit(ctx, benefit); err != nil {
-		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
+	// 收件人 = 这个码的主人（creator）：商家给码配好了折扣，他得知道现在可以
+	// 报这个码。码的主人从码本身查（不是猜 merchant 成员），查不到就不发 ——
+	// 权益照样绑上，只是不发通知。
+	notifyPrincipalID := ""
+	if codeOwner, cerr := s.repository.GetPromoCode(ctx, code); cerr == nil {
+		notifyPrincipalID = codeOwner.AgentID
 	}
 	domainEvents := []event.DomainEvent{event.New("PromoBenefitBound", "PromoBenefit", merchantID+"/"+code, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"merchantId": merchantID, "code": code, "faceValueVnd": p.FaceValueVND, "minSpendVnd": p.MinSpendVND,
+		"notifyPrincipalId": notifyPrincipalID,
 	})}
+	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+		return s.repository.SavePromoBenefit(c, benefit)
+	}, domainEvents); err != nil {
+		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
+	}
 	return acceptedWithPayload(e, "PromoBenefit", merchantID+"/"+code, 1, "BOUND", map[string]any{"benefit": benefit}, domainEvents)
 }
 
@@ -473,13 +491,22 @@ func (s *Service) quotePromoCode(ctx context.Context, e command.Envelope) comman
 		AmountVND: p.AmountVND, DiscountVND: benefit.FaceValueVND, FirstVisit: p.FirstVisit,
 		QuotedAt: now,
 	}
-	if err := s.repository.SavePromoQuote(ctx, quote); err != nil {
-		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
+	// 收件人 = 绑这条权益的商家成员（migration 175 记在权益行上）。查不到就
+	// 不通知 —— 这个码没有权益行意味着没有承诺，通知一个空头承诺没意义。
+	notifyPrincipalID := ""
+	if bound, berr := s.repository.GetPromoBenefit(ctx, merchantID, code); berr == nil {
+		notifyPrincipalID = bound.BoundByPrincipalID
 	}
 	domainEvents := []event.DomainEvent{event.New("PromoCodeQuoted", "PromoQuote", quote.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"merchantId": merchantID, "agentId": promo.AgentID, "code": code,
 		"amountVnd": p.AmountVND, "firstVisit": p.FirstVisit,
+		"notifyPrincipalId": notifyPrincipalID,
 	})}
+	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+		return s.repository.SavePromoQuote(c, quote)
+	}, domainEvents); err != nil {
+		return command.Rejected(e, "PROMO_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.promo_write_failed", nil)
+	}
 	return acceptedWithPayload(e, "PromoQuote", quote.ID, 1, "QUOTED", map[string]any{
 		"quote": quote,
 		"benefit": map[string]any{

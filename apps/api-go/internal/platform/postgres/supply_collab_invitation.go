@@ -41,10 +41,21 @@ func scanInvitation(scan func(...any) error) (supply.CollabInvitation, error) {
 	return inv, nil
 }
 
+// collabInvitationColumns 是 INSERT 用的**裸列名**列表；
+// collabInvitationSelectColumns 是读回用的版本，created_by_principal_id 走 COALESCE。
+//
+// 为什么要分两个：这列可空（migration 174 之前建的行），而 pgx 扫 NULL 进
+// *string 会直接报错 ——「历史行读不出来」不是我们想要的失败方式。但 COALESCE
+// 不能出现在 INSERT 的列名位置（语法错误），所以两边必须各有一份。
 const collabInvitationColumns = `id, merchant_id, agent_id, service_type, start_at,
 	duration_h, price_min_vnd, price_max_vnd, negotiable, purpose, message, status,
 	terms_version, counter_by, currency, created_at, responded_at, expires_at,
 	created_by_principal_id`
+
+const collabInvitationSelectColumns = `id, merchant_id, agent_id, service_type, start_at,
+	duration_h, price_min_vnd, price_max_vnd, negotiable, purpose, message, status,
+	terms_version, counter_by, currency, created_at, responded_at, expires_at,
+	COALESCE(created_by_principal_id, '')`
 
 func (r *SupplyRepository) SaveInvitation(ctx context.Context, inv supply.CollabInvitation) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
@@ -60,7 +71,7 @@ func (r *SupplyRepository) SaveInvitation(ctx context.Context, inv supply.Collab
 
 func (r *SupplyRepository) GetInvitation(ctx context.Context, id string) (supply.CollabInvitation, error) {
 	inv, err := scanInvitation(queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT `+collabInvitationColumns+`
+		SELECT `+collabInvitationSelectColumns+`
 		FROM supply.collab_invitations WHERE id=$1`, id).Scan)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return supply.CollabInvitation{}, supply.ErrInvitationNotFound
@@ -92,7 +103,7 @@ func (r *SupplyRepository) UpdateInvitation(ctx context.Context, inv supply.Coll
 
 func (r *SupplyRepository) listInvitations(ctx context.Context, column, value string) ([]supply.CollabInvitation, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT `+collabInvitationColumns+`
+		SELECT `+collabInvitationSelectColumns+`
 		FROM supply.collab_invitations WHERE `+column+`=$1 ORDER BY created_at DESC`, value)
 	if err != nil {
 		return nil, err
