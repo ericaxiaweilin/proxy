@@ -156,9 +156,6 @@ func (s *Service) proposeMeetup(ctx context.Context, e command.Envelope) command
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	if err := s.repository.CreateMeetup(ctx, meetup); err != nil {
-		return command.Rejected(e, "MEETUP_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.meetup_create_failed", nil)
-	}
 	proxy := &ProxyObjectRef{
 		ObjectType: "invitation",
 		ObjectID:   meetup.ID,
@@ -181,12 +178,71 @@ func (s *Service) proposeMeetup(ctx context.Context, e command.Envelope) command
 	if err := s.repository.AppendMessage(ctx, msg); err != nil {
 		return command.Rejected(e, "MESSAGE_SEND_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.send_failed", nil)
 	}
-	domainEvents := []event.DomainEvent{event.New("MeetupProposed", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"meetupId": meetup.ID})}
+	// 状态与事件同一事务（MERCHANT-CREATOR-NOTIFY-001）：改之前事件只回给**提议人
+	// 自己**，被邀的人收不到任何东西 —— 见面邀约在对方的会话里静悄悄地躺着。
+	domainEvents := perRecipientMeetupEvents(conv, meetup, e, now, false, nil, func(recipient string, at time.Time, extra map[string]any) event.DomainEvent {
+		return event.New("MeetupProposed", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, at,
+			map[string]any{"meetupId": meetup.ID, "notifyPrincipalId": recipient})
+	})
+	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+		return s.repository.CreateMeetup(c, meetup)
+	}, domainEvents); err != nil {
+		// 错误码沿用原来的 MEETUP_CREATE_FAILED：事务化不该改变对外契约。
+		return command.Rejected(e, "MEETUP_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.meetup_create_failed", nil)
+	}
 	return acceptedWithPayload(e, "Meetup", meetup.ID, 1, "PENDING", map[string]any{"meetup": meetup, "message": msg}, domainEvents)
 }
 
 type meetupIDPayload struct {
 	MeetupID string `json:"meetupId"`
+}
+
+// MERCHANT-CREATOR-NOTIFY-001：见面邀约的事件要**按人**发，一个收件人一条。
+//
+// 为什么不是一个事件 + worker 扇出：收件箱的幂等 id 是由 DedupeKey（= 事件 id）
+// 确定性推出来的，同一个 key 给两个收件人会在主键上撞车。要真扇出，得先把幂等
+// 键改成 per-(事件, 收件人) —— 那是管线层的改动，不该和「先把通知发出去」混在
+// 一次里。现在写侧一人一条事件：DM 就是 1 条，群是 N-1 条，每条 id 天然唯一。
+//
+// skip 是 actor 自己：他刚做的动作，界面里立刻看得到，通知他等于回声。
+func meetupNotificationRecipients(conv Conversation, meetup Meetup, actorID string, onlyPending bool) []string {
+	out := make([]string, 0, len(conv.Participants))
+	accepted := map[string]bool{}
+	for _, who := range meetup.AcceptedBy {
+		accepted[who] = true
+	}
+	for _, participant := range conv.Participants {
+		if participant == "" || participant == actorID {
+			continue
+		}
+		// 催稿的语义就是「还没接受的人」：已经答应的人不该再被催一次。
+		if onlyPending && accepted[participant] {
+			continue
+		}
+		out = append(out, participant)
+	}
+	return out
+}
+
+// perRecipientMeetupEvents 为每个收件人调一次 newEvent 生成一条事件。
+//
+// newEvent 是**闭包**而不是一个 eventType 字符串，是有原因的：正向门禁
+// （cmd/worker 的 TestInboxForEventOnlyMapsEventTypesThatAreActuallyEmitted）
+// 靠扫源码里的 `event.New("X"` 字面量来判断「映射的事件有没有人发」。把事件名
+// 变成参数之后，那五个字面量就从源码里消失了，门禁立刻判它们「永远不会触发」而
+// 变红 —— 门禁是对的：它正是为了挡住「事件类型写错/事件没人发」这类洞。
+// 所以事件名留在调用点的闭包里，扫描器看得见，门禁继续有效。
+func perRecipientMeetupEvents(
+	conv Conversation, meetup Meetup, e command.Envelope, at time.Time,
+	onlyPending bool, extra map[string]any,
+	newEvent func(recipient string, at time.Time, extra map[string]any) event.DomainEvent,
+) []event.DomainEvent {
+	recipients := meetupNotificationRecipients(conv, meetup, e.Actor.ID, onlyPending)
+	out := make([]event.DomainEvent, 0, len(recipients))
+	for _, recipient := range recipients {
+		out = append(out, newEvent(recipient, at, extra))
+	}
+	return out
 }
 
 // loadMeetupForActor 是 Accept/Nudge/Arrive/Complete 共用的读取+权限校验：
@@ -247,7 +303,13 @@ func (s *Service) acceptMeetup(ctx context.Context, e command.Envelope) command.
 	if nowConfirmed {
 		meetup.Status = "CONFIRMED"
 	}
-	if err := s.repository.UpdateMeetup(ctx, meetup); err != nil {
+	domainEvents := perRecipientMeetupEvents(conv, meetup, e, meetup.UpdatedAt, false, map[string]any{"confirmed": nowConfirmed}, func(recipient string, at time.Time, extra map[string]any) event.DomainEvent {
+		return event.New("MeetupAccepted", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, at,
+			map[string]any{"meetupId": meetup.ID, "notifyPrincipalId": recipient, "confirmed": nowConfirmed})
+	})
+	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+		return s.repository.UpdateMeetup(c, meetup)
+	}, domainEvents); err != nil {
 		return command.Rejected(e, "MEETUP_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.meetup_update_failed", nil)
 	}
 	if nowConfirmed {
@@ -255,7 +317,6 @@ func (s *Service) acceptMeetup(ctx context.Context, e command.Envelope) command.
 	} else {
 		_ = s.appendSystemMessage(ctx, conv, "有人接受了见面邀约")
 	}
-	domainEvents := []event.DomainEvent{event.New("MeetupAccepted", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, meetup.UpdatedAt, map[string]any{"meetupId": meetup.ID, "confirmed": nowConfirmed})}
 	return acceptedWithPayload(e, "Meetup", meetup.ID, 1, meetup.Status, map[string]any{"meetup": meetup}, domainEvents)
 }
 
@@ -270,10 +331,22 @@ func (s *Service) nudgeMeetup(ctx context.Context, e command.Envelope) command.R
 	if meetup.ProposerID != e.Actor.ID {
 		return command.Rejected(e, "ONLY_PROPOSER_CAN_NUDGE", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.only_proposer_can_nudge", nil)
 	}
-	if err := s.appendSystemMessage(ctx, conv, "发起人催了一下，还没接受见面邀约的成员请尽快回应"); err != nil {
+	// 催的语义就是「还没接受的人」：已经答应的人不该再被催一次（见
+	// meetupNotificationRecipients 里的 onlyPending）。
+	domainEvents := perRecipientMeetupEvents(conv, meetup, e, s.clock.Now().UTC(), true, nil, func(recipient string, at time.Time, extra map[string]any) event.DomainEvent {
+		return event.New("MeetupNudged", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, at,
+			map[string]any{"meetupId": meetup.ID, "notifyPrincipalId": recipient})
+	})
+	// 提醒消息与「对方收到了吗」同一事务。
+	//
+	// 这一条曾经只构造事件、不发布 —— 那正是这次要消灭的那类洞（事件建好了，
+	// 谁也收不到，而且没有任何报错）。是被 TestMeetupNudgeOnlyReachesThoseWho-
+	// HaveNotAccepted 当场抓出来的：事件列表是空的。
+	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+		return s.appendSystemMessage(c, conv, "发起人催了一下，还没接受见面邀约的成员请尽快回应")
+	}, domainEvents); err != nil {
 		return command.Rejected(e, "MESSAGE_SEND_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.send_failed", nil)
 	}
-	domainEvents := []event.DomainEvent{event.New("MeetupNudged", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{"meetupId": meetup.ID})}
 	return acceptedWithPayload(e, "Meetup", meetup.ID, 1, "NUDGED", map[string]any{"meetup": meetup}, domainEvents)
 }
 
@@ -287,11 +360,16 @@ func (s *Service) arriveMeetup(ctx context.Context, e command.Envelope) command.
 	}
 	meetup.Status = "ONGOING"
 	meetup.UpdatedAt = s.clock.Now().UTC()
-	if err := s.repository.UpdateMeetup(ctx, meetup); err != nil {
+	domainEvents := perRecipientMeetupEvents(conv, meetup, e, meetup.UpdatedAt, false, nil, func(recipient string, at time.Time, extra map[string]any) event.DomainEvent {
+		return event.New("MeetupStarted", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, at,
+			map[string]any{"meetupId": meetup.ID, "notifyPrincipalId": recipient})
+	})
+	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+		return s.repository.UpdateMeetup(c, meetup)
+	}, domainEvents); err != nil {
 		return command.Rejected(e, "MEETUP_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.meetup_update_failed", nil)
 	}
 	_ = s.appendSystemMessage(ctx, conv, "有人已到达 · 见面开始")
-	domainEvents := []event.DomainEvent{event.New("MeetupStarted", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, meetup.UpdatedAt, map[string]any{"meetupId": meetup.ID})}
 	return acceptedWithPayload(e, "Meetup", meetup.ID, 1, meetup.Status, map[string]any{"meetup": meetup}, domainEvents)
 }
 
@@ -305,14 +383,21 @@ func (s *Service) completeMeetup(ctx context.Context, e command.Envelope) comman
 	}
 	meetup.Status = "COMPLETED"
 	meetup.UpdatedAt = s.clock.Now().UTC()
-	if err := s.repository.UpdateMeetup(ctx, meetup); err != nil {
+	conv.State = "ARCHIVED"
+	domainEvents := perRecipientMeetupEvents(conv, meetup, e, meetup.UpdatedAt, false, nil, func(recipient string, at time.Time, extra map[string]any) event.DomainEvent {
+		return event.New("MeetupCompleted", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, at,
+			map[string]any{"meetupId": meetup.ID, "notifyPrincipalId": recipient})
+	})
+	// 见面状态 + 房间归档 + 「对方收到了吗」同生共死。改之前这三样各写各的：
+	// 归档成功、事件丢掉，对方那边一点动静都没有。
+	if err := s.repository.WriteAndPublish(ctx, func(c context.Context) error {
+		if err := s.repository.UpdateMeetup(c, meetup); err != nil {
+			return err
+		}
+		return s.repository.UpdateConversation(c, conv)
+	}, domainEvents); err != nil {
 		return command.Rejected(e, "MEETUP_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.meetup_update_failed", nil)
 	}
-	conv.State = "ARCHIVED"
-	if err := s.repository.UpdateConversation(ctx, conv); err != nil {
-		return command.Rejected(e, "CONVERSATION_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.update_failed", nil)
-	}
 	_ = s.appendSystemMessage(ctx, conv, "见面已结束 · 房间归档")
-	domainEvents := []event.DomainEvent{event.New("MeetupCompleted", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, meetup.UpdatedAt, map[string]any{"meetupId": meetup.ID})}
 	return acceptedWithPayload(e, "Meetup", meetup.ID, 1, meetup.Status, map[string]any{"meetup": meetup}, domainEvents)
 }

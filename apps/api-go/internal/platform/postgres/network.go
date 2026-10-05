@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/engagement"
+	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 )
@@ -943,11 +944,43 @@ var _ localcontext.Repository = (*LocalContextRepository)(nil)
 // ---------- Conversation ----------
 
 type ConversationRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	outbox *OutboxRepository
 }
 
 func NewConversationRepository(pool *pgxpool.Pool) *ConversationRepository {
 	return &ConversationRepository{pool: pool}
+}
+
+// NewConversationRepositoryWithOutbox：见面邀约这类动作要把事件发进 outbox
+// （MERCHANT-CREATOR-NOTIFY-001），否则状态推进了而对方收不到任何东西。
+func NewConversationRepositoryWithOutbox(pool *pgxpool.Pool, outboxRepository *OutboxRepository) *ConversationRepository {
+	return &ConversationRepository{pool: pool, outbox: outboxRepository}
+}
+
+// WriteAndPublish 把 write 回调与领域事件放进同一事务。
+//
+// write 里用普通仓储方法即可：runInTransaction 把事务放进 ctx，queryerForContext
+// 会认出来。没配 outbox 或事件列表为空都直接报错 ——
+// 「只写状态、事件丢了」正是这次要找的东西，不该被当成一次成功的写入。
+func (r *ConversationRepository) WriteAndPublish(ctx context.Context, write func(context.Context) error, domainEvents []event.DomainEvent) error {
+	if r.outbox == nil {
+		return errors.New("conversation transactional outbox is not configured")
+	}
+	if len(domainEvents) == 0 {
+		return errors.New("WriteAndPublish requires at least one domain event")
+	}
+	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, transaction pgx.Tx) error {
+		if err := write(transactionContext); err != nil {
+			return err
+		}
+		for _, domainEvent := range domainEvents {
+			if err := r.outbox.publishWithExec(transactionContext, transaction, domainEvent); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (r *ConversationRepository) CreateConversation(ctx context.Context, c conversation.Conversation) error {

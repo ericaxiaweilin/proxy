@@ -3,9 +3,11 @@ package conversation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/event"
 )
 
 // ROOM-CREATE-001: 创建房间（GROUP + 场景）+ 见面邀约状态机测试。
@@ -205,4 +207,90 @@ func TestListConversationsAttachesActiveMeetup(t *testing.T) {
 	if !found {
 		t.Fatalf("room conversation not found in inbox")
 	}
+}
+
+// MERCHANT-CREATOR-NOTIFY-001：见面邀约的事件要**按人**发，一个收件人一条，
+// 而且不含 actor 自己。
+//
+// 改之前事件只回给**提议人自己**：被邀的人在另一台手机上收不到任何东西，而见面
+// 邀约就静悄悄地躺在会话里。这个洞在结果里看不出破绽 —— 状态照样 PENDING，
+// 房间照样建好。
+func TestMeetupNotifiesEachOtherParticipantOnce(t *testing.T) {
+	s, repo := NewWithMemoryRepository()
+	convID := startRoomForTest(t, s, []string{"user_002", "user_003"})
+	before := len(repo.Events())
+
+	meetup := proposeMeetupForTest(t, s, convID, "user_001")
+	proposed := repo.Events()[before:]
+	if len(proposed) != 2 {
+		t.Fatalf("a 3-person room must produce one event per other participant, got %d", len(proposed))
+	}
+	got := map[string]bool{}
+	for _, ev := range proposed {
+		if ev.EventType != "MeetupProposed" {
+			t.Fatalf("event type = %q", ev.EventType)
+		}
+		notify, _ := ev.Payload["notifyPrincipalId"].(string)
+		if notify == "user_001" {
+			t.Fatal("the proposer must not be notified of their own proposal")
+		}
+		if got[notify] {
+			t.Fatalf("%s got two notifications for one proposal", notify)
+		}
+		got[notify] = true
+	}
+	if !got["user_002"] || !got["user_003"] {
+		t.Fatalf("both other participants must be notified, got %v", got)
+	}
+	// 事件必须带真实 meetupId：收件箱深链/文案将来要用它。
+	if id, _ := proposed[0].Payload["meetupId"].(string); id != meetup.ID {
+		t.Fatalf("payload meetupId = %q, want %q", id, meetup.ID)
+	}
+}
+
+// 催的语义是「还没接受的人」：已经答应的人不该再被催一次。
+func TestMeetupNudgeOnlyReachesThoseWhoHaveNotAccepted(t *testing.T) {
+	s, repo := NewWithMemoryRepository()
+	convID := startRoomForTest(t, s, []string{"user_002", "user_003"})
+	meetup := proposeMeetupForTest(t, s, convID, "user_001")
+
+	if r := s.Handle(envelopeAs("AcceptMeetup", map[string]any{"meetupId": meetup.ID}, convID, "user_002")); r.Outcome != "ACCEPTED" {
+		t.Fatalf("accept: %+v", r.Error)
+	}
+	before := len(repo.Events())
+	if r := s.Handle(envelopeAs("NudgeMeetup", map[string]any{"meetupId": meetup.ID}, convID, "user_001")); r.Outcome != "ACCEPTED" {
+		t.Fatalf("nudge: %+v", r.Error)
+	}
+	var nudged []string
+	for _, ev := range repo.Events()[before:] {
+		if ev.EventType != "MeetupNudged" {
+			continue
+		}
+		nudged = append(nudged, ev.Payload["notifyPrincipalId"].(string))
+	}
+	if len(nudged) != 1 || nudged[0] != "user_003" {
+		t.Fatalf("only the member who has not accepted may be nudged, got %v", nudged)
+	}
+}
+
+// 状态与事件必须同一事务：没有 outbox 的仓储要**拒绝**这场写入，
+// 而不是安静地只写状态（那正是这次要找的失败形态）。
+func TestMeetupWriteRefusesToSkipEvents(t *testing.T) {
+	s := NewWithRepository(&noOutboxConversationRepository{MemoryRepository: NewMemoryRepository()})
+	convID := startRoomForTest(t, s, []string{"user_002", "user_003"})
+	result := s.Handle(envelopeAs("ProposeMeetup", map[string]any{
+		"sceneEmoji": "📷", "sceneName": "City Walk", "place": "湖畔", "timeLabel": "今天 15:00",
+	}, convID, "user_001"))
+	if result.Outcome != "REJECTED" {
+		t.Fatalf("a meetup must not be stored without its notifications, got %s", result.Outcome)
+	}
+}
+
+// noOutboxConversationRepository 模拟「仓储没接 outbox」的部署（WriteAndPublish 报错）。
+type noOutboxConversationRepository struct {
+	*MemoryRepository
+}
+
+func (r *noOutboxConversationRepository) WriteAndPublish(context.Context, func(context.Context) error, []event.DomainEvent) error {
+	return errors.New("conversation transactional outbox is not configured")
 }

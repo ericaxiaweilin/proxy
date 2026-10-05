@@ -304,7 +304,9 @@ func main() {
 		}
 		demandService = demand.NewWithRepository(admissionGate, fundingGate, postgres.NewDemandRepositoryWithOutbox(pool, outboxRepository))
 		localContextService = localcontext.NewWithRepository(postgres.NewLocalContextRepository(pool))
-		conversationService = conversation.NewWithModelStack(postgres.NewConversationRepository(pool), modelStack)
+		// MERCHANT-CREATOR-NOTIFY-001：见面邀约的状态变更要与「对方收到了吗」
+		// 同一事务，所以仓储必须带 outbox。
+		conversationService = conversation.NewWithModelStack(postgres.NewConversationRepositoryWithOutbox(pool, outboxRepository), modelStack)
 		// UNREAD-PIPELINE-001: 阅读位走 PG（和消息同 durability 口径）。
 		conversationService.WithDialogs(postgres.NewDialogRepository(pool))
 		conversationService.SetMediaStoreDir(mediaStoreDir)

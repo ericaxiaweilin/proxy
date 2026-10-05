@@ -32,13 +32,13 @@ import (
 
 // Conversation 是对话聚合。
 type Conversation struct {
-	ID            string     `json:"conversationId"`
-	Type          string     `json:"conversationType"` // DM | GROUP | SUPPORT
-	OriginType    string     `json:"originType"`       // HOME | TASK | POST | PROFILE | SERVICE | ACTIVITY | NEED | OFFER | ORDER
-	OriginID      string     `json:"originId"`
-	MarketID      string     `json:"marketId,omitempty"`
-	State         string     `json:"state"` // ACTIVE | ARCHIVED | BLOCKED
-	Participants  []string   `json:"participants"`
+	ID           string   `json:"conversationId"`
+	Type         string   `json:"conversationType"` // DM | GROUP | SUPPORT
+	OriginType   string   `json:"originType"`       // HOME | TASK | POST | PROFILE | SERVICE | ACTIVITY | NEED | OFFER | ORDER
+	OriginID     string   `json:"originId"`
+	MarketID     string   `json:"marketId,omitempty"`
+	State        string   `json:"state"` // ACTIVE | ARCHIVED | BLOCKED
+	Participants []string `json:"participants"`
 	// ROOM-CREATE-001: 「创建房间」= GROUP conversation 附带场景元数据。仅
 	// GROUP 会用；DM/SUPPORT 恒为 nil。见 startConversation 里的赋值。
 	RoomScene     *RoomScene `json:"roomScene,omitempty"`
@@ -59,26 +59,26 @@ type RoomScene struct {
 // docs/design/references/Proxy_Message_Object_Schema_v1.json 与
 // Proxy_Messaging_Engineering_Spec_v1.md §2/§11。
 type Message struct {
-	ID             string             `json:"messageId"`
-	ConversationID string             `json:"conversationId"`     // legacy; 同义 dialog_id
-	DialogID       string             `json:"dialogId,omitempty"` // v1 正式；与 ConversationID 同值过渡期双写
-	ConvoID        *string            `json:"convoId,omitempty"`  // v1: 所属 Convo 分支
-	ReplyTo        *string            `json:"replyTo,omitempty"`    // QUOTE-REPLY-001: 引用的消息 ID（同会话内）；客户端按 ID 解析引用块
-	SenderID       string             `json:"senderId"`
-	SenderSnapshot *IdentitySnapshot  `json:"senderSnapshot,omitempty"` // v1: 发送时固化的 displayName/avatar/username
+	ID             string            `json:"messageId"`
+	ConversationID string            `json:"conversationId"`     // legacy; 同义 dialog_id
+	DialogID       string            `json:"dialogId,omitempty"` // v1 正式；与 ConversationID 同值过渡期双写
+	ConvoID        *string           `json:"convoId,omitempty"`  // v1: 所属 Convo 分支
+	ReplyTo        *string           `json:"replyTo,omitempty"`  // QUOTE-REPLY-001: 引用的消息 ID（同会话内）；客户端按 ID 解析引用块
+	SenderID       string            `json:"senderId"`
+	SenderSnapshot *IdentitySnapshot `json:"senderSnapshot,omitempty"` // v1: 发送时固化的 displayName/avatar/username
 	// AI-MANAGE-008：这条是 AI 替 SenderID 那个真人写的（代回复）："ai_stand_in"；空 = 人自己写的。
-	AuthoredBy string `json:"authoredBy,omitempty"`
-	MessageType    string             `json:"messageType"`              // v0: TEXT | IMAGE | VIDEO | LOCATION | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
-	Kind           string             `json:"kind,omitempty"`           // v1: text|image|video|file|location|contact|proxy_object|poll|call_recording|system_event
-	Body           string             `json:"body,omitempty"`           // v1 text 仍用 body
-	MediaRef       string             `json:"mediaRef,omitempty"`
-	ProxyObject    *ProxyObjectRef    `json:"proxyObject,omitempty"` // v1
-	SecurityV1     *MessageSecurityV1 `json:"security,omitempty"`    // v1; 与 Protection 双写过渡
-	Delivery       *MessageDelivery   `json:"delivery,omitempty"`    // v1
-	Seq            int64              `json:"seq,omitempty"`         // v1: dialog 内递增，用于 ReadCursor
-	CreatedAt      time.Time          `json:"createdAt"`
-	EditedAt       *time.Time         `json:"editedAt,omitempty"`
-	DeletedAt      *time.Time         `json:"deletedAt,omitempty"`
+	AuthoredBy  string             `json:"authoredBy,omitempty"`
+	MessageType string             `json:"messageType"`    // v0: TEXT | IMAGE | VIDEO | LOCATION | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
+	Kind        string             `json:"kind,omitempty"` // v1: text|image|video|file|location|contact|proxy_object|poll|call_recording|system_event
+	Body        string             `json:"body,omitempty"` // v1 text 仍用 body
+	MediaRef    string             `json:"mediaRef,omitempty"`
+	ProxyObject *ProxyObjectRef    `json:"proxyObject,omitempty"` // v1
+	SecurityV1  *MessageSecurityV1 `json:"security,omitempty"`    // v1; 与 Protection 双写过渡
+	Delivery    *MessageDelivery   `json:"delivery,omitempty"`    // v1
+	Seq         int64              `json:"seq,omitempty"`         // v1: dialog 内递增，用于 ReadCursor
+	CreatedAt   time.Time          `json:"createdAt"`
+	EditedAt    *time.Time         `json:"editedAt,omitempty"`
+	DeletedAt   *time.Time         `json:"deletedAt,omitempty"`
 	// Protection is the per-message anti-leak envelope. See
 	// message_protection.go and RFC v0.1 §3. Defaults applied in
 	// sendMessage; per-type rules in DefaultProtectionFor.
@@ -143,6 +143,10 @@ type Repository interface {
 	GetNeedDraft(ctx context.Context, draftID string) (NeedDraft, error)
 	UpdateNeedDraft(ctx context.Context, d NeedDraft) error
 	Snapshot(ctx context.Context) ([]Conversation, error)
+	// WriteAndPublish 把 write 回调与领域事件放进同一事务（MERCHANT-CREATOR-NOTIFY-001）。
+	// 见面邀约这类动作的状态变更与「对方收到了吗」必须同生共死：只写状态不发事件，
+	// 请求照样成功、状态照样推进，而对方永远收不到。
+	WriteAndPublish(ctx context.Context, write func(context.Context) error, domainEvents []event.DomainEvent) error
 	// PurgeExpiredMessages hard-deletes messages past protection.ExpiresAt.
 	// Lotus RFC §5 (30-day default TTL). PG impl uses index on
 	// protection->>'expiresAt'; Memory impl scans. Returns deleted count.
@@ -311,6 +315,31 @@ func (r *MemoryRepository) UpdateNeedDraft(_ context.Context, d NeedDraft) error
 		return ErrDraftNotFound
 	}
 	r.drafts[d.DraftID] = d
+	return nil
+}
+
+// WriteAndPublish（内存仓）：没有事务可谈，但不能因此少记事件 —— 两个实现对
+// 「状态和事件是不是都发生了」必须回答一致，否则差异会藏在没人看的那一侧。
+//
+// 先写后记，且**不要**在这里 Lock 再调 write 里的仓储方法：那些方法自己取同一
+// 把锁，Go 的 mutex 不可重入 ⇒ 自己等自己。
+// Events 返回这个内存仓见过的全部事件（测试用）。
+func (r *MemoryRepository) Events() []event.DomainEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]event.DomainEvent(nil), r.events...)
+}
+
+func (r *MemoryRepository) WriteAndPublish(_ context.Context, write func(context.Context) error, domainEvents []event.DomainEvent) error {
+	if len(domainEvents) == 0 {
+		return errors.New("WriteAndPublish requires at least one domain event")
+	}
+	if err := write(context.Background()); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, domainEvents...)
 	return nil
 }
 
@@ -564,12 +593,12 @@ type Service struct {
 	// 两边都是可选注入；语义见 ai_engine_gate.go（状态读取 fail-open，
 	// 计量失败不打断聊天）。
 	aiEngineChatState AiEngineChatStateReader
-	tokenMeter         TokenMeter
+	tokenMeter        TokenMeter
 	// AI-MANAGE-014：全自动代回复按本人「节奏」延迟发出（见 stand_in_rhythm.go）。
 	standInScheduler StandInScheduler
 	// orderPermission：AI 分身只对有接单权限的人开（ORDER-PERMISSION-TWIN-001）。
 	orderPermission func(ctx context.Context, userAccountID string) (bool, error)
-	standInPlans     standInPlanner
+	standInPlans    standInPlanner
 }
 
 // MediaAuthorizer 由 media 包实现（注入避免循环依赖，同 localnet.MediaLookup
@@ -617,6 +646,13 @@ func (s *Service) SweepExpiredMessages(ctx context.Context) (int64, error) {
 
 func New() *Service {
 	return NewWithRepository(NewMemoryRepository())
+}
+
+// NewWithMemoryRepository 返回服务 + 它自己的内存仓，测试要断言「事件发出去了」
+// 时用（MERCHANT-CREATOR-NOTIFY-001：见面邀约的通知就是只在这条路径上产生的）。
+func NewWithMemoryRepository() (*Service, *MemoryRepository) {
+	repo := NewMemoryRepository()
+	return NewWithRepository(repo), repo
 }
 
 func NewWithRepository(repository Repository) *Service {
@@ -1288,7 +1324,7 @@ func (s *Service) latestDirectConversation(ctx context.Context, actorID, counter
 }
 
 // latestAssistantConversation 找该用户最新的助手串 —— 不管当初是哪个入口
-//（proxy_ai / user_proxy_ai）建的。ASSISTANT-THREAD-001 建会话复用就靠它。
+// （proxy_ai / user_proxy_ai）建的。ASSISTANT-THREAD-001 建会话复用就靠它。
 func (s *Service) latestAssistantConversation(ctx context.Context, actorID string) (Conversation, bool) {
 	conversations, err := s.repository.Snapshot(ctx)
 	if err != nil {
@@ -1655,7 +1691,7 @@ func (s *Service) serverFormResponseReply(ctx context.Context, conv Conversation
 // 出来。用户看到的就是"AI 没回复之前，对话列表都是加载中"。
 //
 // generateAIReply 只读仓储快照（memory 仓自带锁，PG 走连接池）+ 调模型底座
-//（自带细粒度锁），不碰服务的可变状态，所以解锁是安全的。用户消息与分隔符
+// （自带细粒度锁），不碰服务的可变状态，所以解锁是安全的。用户消息与分隔符
 // 的落库仍在锁内串行，Seq 不会撞；AI 回复本来就不带 Seq。
 //
 // defer 写法保证 panic 时也能重新上锁 —— 否则 HandleContext 的 defer Unlock
@@ -1870,7 +1906,7 @@ func platformAIPersonaForMode(mode string) (aipersona.PlatformAccount, bool) {
 // 渲染出来 —— "AI 虚拟女孩"用需求助手的口吻说话。
 //
 // 会话本身知道对面是 ai_account_00X，所以在这里兜底。判定只会从 false 变 true
-//（门禁更严、人设更对），不会放宽 —— 跟 companion_gate.go 里那句
+// （门禁更严、人设更对），不会放宽 —— 跟 companion_gate.go 里那句
 // "客户端拦得住手，拦不住 curl"同一个理由：合规判定不能寄托在调用方记得传参。
 //
 // platformAccounts 里没有 proxy_ai（首页 / 需求助手不是伴侣），所以 HOME 会话

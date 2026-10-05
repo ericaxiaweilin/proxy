@@ -540,11 +540,6 @@ var eventsWithoutNotification = map[string]string{
 // 知道从哪儿下手，而不是重新判断一遍「这个到底要不要通知」。
 var eventsPendingNotificationDecision = map[string]string{
 	// ── 见面/撮合：这些是用户明确在等的消息 ──────────────────────────────
-	"MeetupProposed":              "该通知：收件人=对方；缺 deep link（meetups/ 不在白名单）+ 文案",
-	"MeetupAccepted":              "该通知：收件人=提议方",
-	"MeetupStarted":               "该通知：收件人=双方",
-	"MeetupCompleted":             "该通知：收件人=双方（行程结束）",
-	"MeetupNudged":                "该通知：收件人=被提醒方（已有 ContentTaskNudged 的先例可循）",
 	"CityCompanionNeedCreated":    "该通知：收件人=可接单的 creator 群（要分批/扇出，不能一人一条）",
 	"CityCompanionConfirmed":      "该通知：收件人=发起需求方",
 	"CityCompanionRouteAccepted":  "该通知：收件人=双方",

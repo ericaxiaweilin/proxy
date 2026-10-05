@@ -317,6 +317,35 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 		}
 		return "", "", "", "", false
 
+	case "MeetupProposed":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "有人约你见面", "确认一下时间和地点", "", true
+		}
+		return "", "", "", "", false
+	case "MeetupAccepted":
+		if who, ok := merchantCreatorRecipient(); ok {
+			if confirmed, _ := e.Payload["confirmed"].(bool); confirmed {
+				return who, "见面已约定", "大家都接受了，可以开始准备了", "", true
+			}
+			return who, "有人接受了见面邀约", "", "", true
+		}
+		return "", "", "", "", false
+	case "MeetupNudged":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "发起人在等你回应", "见面邀约还没接受", "", true
+		}
+		return "", "", "", "", false
+	case "MeetupStarted":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "见面开始了", "对方已到达", "", true
+		}
+		return "", "", "", "", false
+	case "MeetupCompleted":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "见面已结束", "房间已归档，记得互相评价", "", true
+		}
+		return "", "", "", "", false
+
 	case "FriendRequestSent":
 		// 好友请求的收件人就是 payload.targetId（已过 targetAccountExists 校验的
 		// user account id），所以这一条**不需要**为了知道收件人去改 schema ——
