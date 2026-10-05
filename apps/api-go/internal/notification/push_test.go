@@ -287,6 +287,50 @@ func TestAPNsProviderTokenRejectsMissingIdentifiers(t *testing.T) {
 	}
 }
 
+// 2026-10-05: Apple 后台下载的 .p8 是 PKCS#8，但 `openssl ecparam -genkey
+// -name prime256v1`（最顺手的生成/转换命令）产出的是 SEC1。原来只认 PKCS#8，
+// 于是 SEC1 钥匙报出来的是一句给 Go 开发者看的 x509 提示 —— 照着文档配部署的人
+// 完全看不出「你的密钥格式不对、换个编码就行」。同一把私钥的两种编码，没有理由
+// 只认一种。
+func TestParseAPNsKeyAcceptsBothSEC1AndPKCS8(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	sec1DER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal SEC1: %v", err)
+	}
+	pkcs8DER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal PKCS#8: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		block *pem.Block
+	}{
+		{"SEC1 (BEGIN EC PRIVATE KEY)", &pem.Block{Type: "EC PRIVATE KEY", Bytes: sec1DER}},
+		{"PKCS#8 (Apple 下载的 .p8)", &pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8DER}},
+	} {
+		parsed, err := parseAPNsKey(pem.EncodeToMemory(tc.block))
+		if err != nil {
+			t.Fatalf("%s must be accepted: %v", tc.name, err)
+		}
+		if !parsed.Equal(key) {
+			t.Fatalf("%s parsed to a different key", tc.name)
+		}
+	}
+	// 两种都不是时，错误要说清试过什么，别再抛裸 x509 文本
+	notAKey := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("garbage")})
+	_, err = parseAPNsKey(notAKey)
+	if err == nil {
+		t.Fatal("garbage must be rejected")
+	}
+	if !strings.Contains(err.Error(), "SEC1") {
+		t.Fatalf("the error must say which encodings were tried, got %v", err)
+	}
+}
+
 func TestParseAPNsKeyRejectsWrongKeyTypes(t *testing.T) {
 	if _, err := parseAPNsKey([]byte("not pem at all")); err == nil {
 		t.Fatal("a non-PEM file must be rejected")

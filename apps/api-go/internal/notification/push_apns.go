@@ -89,21 +89,39 @@ func NewAPNsSenderFromConfig(cfg PushConfig) (*APNsSender, error) {
 	}, nil
 }
 
-// parseAPNsKey 解析 Apple 的 .p8（PKCS#8 的 EC 私钥）。
-// 显式拒绝非 P-256 的曲线：ES256 这个名字就写死了 P-256，
+// parseAPNsKey 解析 Apple 的 .p8 —— EC 私钥，P-256 曲线。
+//
+// 两种编码都接受（2026-10-05 修）：
+//
+//	· PKCS#8（`BEGIN PRIVATE KEY`）—— Apple 后台下载的 .p8 就是这个格式；
+//	· SEC1（`BEGIN EC PRIVATE KEY`）—— 用 `openssl ecparam -genkey -name
+//	  prime256v1` 这条最顺手的命令生成/转换出来的就是这个格式。
+//
+// 原来只认 PKCS#8，于是 SEC1 密钥会报
+// `x509: failed to parse private key (use ParseECPrivateKey instead ...)` ——
+// 这句话是对 Go 开发者说的，对「照着文档配部署」的人毫无意义，而且错误里
+// 完全看不出「你的密钥格式不对、换个编码就行」。两把钥匙在密码学上是同一把，
+// 没有理由只认一种编码。
+//
+// 仍然显式拒绝非 P-256 的曲线：ES256 这个名字就写死了 P-256，
 // 拿 P-384 的钥匙去签会得到一个 Apple 侧看不懂的签名。
 func parseAPNsKey(raw []byte) (*ecdsa.PrivateKey, error) {
 	block, _ := pem.Decode(raw)
 	if block == nil {
 		return nil, errors.New("not a PEM file")
 	}
-	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, err
-	}
-	key, ok := parsed.(*ecdsa.PrivateKey)
-	if !ok {
-		return nil, fmt.Errorf("expected an EC private key, got %T", parsed)
+	var key *ecdsa.PrivateKey
+	if sec1, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+		key = sec1
+	} else {
+		parsed, pkcs8Err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if pkcs8Err != nil {
+			return nil, fmt.Errorf("not an EC private key (tried SEC1 and PKCS#8): %w", pkcs8Err)
+		}
+		var ok bool
+		if key, ok = parsed.(*ecdsa.PrivateKey); !ok {
+			return nil, fmt.Errorf("expected an EC private key, got %T", parsed)
+		}
 	}
 	if key.Curve.Params().Name != "P-256" {
 		return nil, fmt.Errorf("ES256 requires P-256, got %s", key.Curve.Params().Name)

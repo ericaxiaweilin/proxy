@@ -20,7 +20,12 @@ export type PushPlatform = "IOS" | "ANDROID";
 export type PushPermission = "granted" | "denied" | "undetermined";
 
 export type PushRegistrationDecision =
-  | { kind: "register"; deviceId: string; platform: PushPlatform; token: string }
+  | {
+      kind: "register";
+      deviceId: string;
+      platform: PushPlatform;
+      token: string;
+    }
   | { kind: "skip"; reason: string };
 
 /**
@@ -65,7 +70,8 @@ export function decidePushRegistration(input: {
 
   // 没授权就不注册：注册了也推不到，只会让 device_tokens 里多一行永远失败的
   // 记录。用户之后在系统设置里打开通知，下次启动会重新走到这里。
-  if (input.permission !== "granted") return { kind: "skip", reason: `permission-${input.permission}` };
+  if (input.permission !== "granted")
+    return { kind: "skip", reason: `permission-${input.permission}` };
 
   const deviceId = (input.deviceId ?? "").trim();
   if (!deviceId) return { kind: "skip", reason: "missing-device-id" };
@@ -118,7 +124,9 @@ export type PushRegistrationOutcome =
   | { status: "skipped"; reason: string }
   | { status: "failed"; reason: string };
 
-function permissionFrom(settings: { status?: string; granted?: boolean } | undefined): PushPermission {
+function permissionFrom(
+  settings: { status?: string; granted?: boolean } | undefined,
+): PushPermission {
   if (settings?.granted === true) return "granted";
   if (settings?.status === "granted") return "granted";
   if (settings?.status === "denied") return "denied";
@@ -136,15 +144,45 @@ function permissionFrom(settings: { status?: string; granted?: boolean } | undef
  * 这里只在已经 granted 时取令牌；拿不到就跳过，等下一次。
  */
 export async function registerForPush(input: {
-  client: { registerDevice(i: { deviceId: string; platform: string; token: string }): Promise<void> };
+  client: {
+    registerDevice(i: {
+      deviceId: string;
+      platform: string;
+      token: string;
+    }): Promise<void>;
+  };
   os: string;
   deviceId: string;
   signedIn: boolean;
   loadModule?: () => Promise<PushModule | null>;
 }): Promise<PushRegistrationOutcome> {
+  // 先说清楚「为什么没有原生模块」。这两种情况长得一样（loadPushModule 都返回
+  // null），但含义完全不同，而原来的理由词把第二种的真实原因说错了：
+  //   · push-disabled-by-flag —— 开关没开。**不是故障**，是一行配置。
+  //   · push-module-unavailable —— 开关开了但模块装不上（原生模块没进二进制）。
+  // 之前一律报 "push-module-unavailable"，等于把「我没配」说成「环境坏了」：
+  // 排查的人会去查证书和二进制，而真正要做的只是设一个环境变量。
+  //
+  // 为什么开关保持「默认关」：它守的是 NOTIF-PUSH-NATIVE-GUARD-001（见
+  // push-registration.test.ts）—— 二进制里没有推送能力时不要去 import 它。
+  // 让推送真的跑起来要两件事同时成立：APNs 证书装好 + 重建带推送能力的二进制，
+  // 之后才把 EXPO_PUBLIC_PUSH 设为 1。
+  if (input.loadModule === undefined && process.env.EXPO_PUBLIC_PUSH !== "1") {
+    return {
+      status: "skipped",
+      reason:
+        "push-disabled-by-flag: EXPO_PUBLIC_PUSH!=1（装好 APNs 证书、重建带推送能力的二进制后设为 1）",
+    };
+  }
   const load = input.loadModule ?? loadPushModule;
   const module = await load();
-  if (!module) return { status: "skipped", reason: "push-module-unavailable" };
+  if (!module) {
+    return {
+      status: "skipped",
+      reason:
+        "push-module-unavailable: EXPO_PUBLIC_PUSH=1 但 expo-notifications 装不上（原生模块没进二进制？）",
+    };
+  }
 
   let permission: PushPermission = "undetermined";
   let token = "";
@@ -152,10 +190,16 @@ export async function registerForPush(input: {
     permission = permissionFrom(await module.getPermissionsAsync());
     if (permission === "granted") {
       const deviceToken = await module.getDevicePushTokenAsync();
-      token = typeof deviceToken?.data === "string" ? deviceToken.data : String(deviceToken?.data ?? "");
+      token =
+        typeof deviceToken?.data === "string"
+          ? deviceToken.data
+          : String(deviceToken?.data ?? "");
     }
   } catch (error) {
-    return { status: "failed", reason: error instanceof Error ? error.message : "push-token-unavailable" };
+    return {
+      status: "failed",
+      reason: error instanceof Error ? error.message : "push-token-unavailable",
+    };
   }
 
   const decision = decidePushRegistration({
@@ -165,12 +209,20 @@ export async function registerForPush(input: {
     token,
     signedIn: input.signedIn,
   });
-  if (decision.kind === "skip") return { status: "skipped", reason: decision.reason };
+  if (decision.kind === "skip")
+    return { status: "skipped", reason: decision.reason };
 
   try {
-    await input.client.registerDevice({ deviceId: decision.deviceId, platform: decision.platform, token: decision.token });
+    await input.client.registerDevice({
+      deviceId: decision.deviceId,
+      platform: decision.platform,
+      token: decision.token,
+    });
   } catch (error) {
-    return { status: "failed", reason: error instanceof Error ? error.message : "register-device-failed" };
+    return {
+      status: "failed",
+      reason: error instanceof Error ? error.message : "register-device-failed",
+    };
   }
   return { status: "registered", platform: decision.platform };
 }

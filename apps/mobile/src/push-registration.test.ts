@@ -61,7 +61,10 @@ describe("NOTIF-PUSH-001: 设备令牌注册的准入条件", () => {
   it("没授权不注册 —— 注册了也推不到，只会多一行永远失败的记录", () => {
     for (const permission of ["denied", "undetermined"] as const) {
       const decision = decidePushRegistration({ ...base, permission });
-      expect(decision).toEqual({ kind: "skip", reason: `permission-${permission}` });
+      expect(decision).toEqual({
+        kind: "skip",
+        reason: `permission-${permission}`,
+      });
     }
   });
 
@@ -100,9 +103,35 @@ describe("NOTIF-PUSH-001: 原生模块缺席时必须降级，不能把 app 打�
       signedIn: true,
       loadModule: async () => null,
     });
-    expect(outcome).toEqual({ status: "skipped", reason: "push-module-unavailable" });
+    // 理由词要说清是「开关开了但模块装不上」，而不是笼统的 unavailable（2026-10-05 改）。
+    expect(outcome.status).toBe("skipped");
+    expect(outcome.status === "skipped" && outcome.reason).toContain(
+      "expo-notifications 装不上",
+    );
     // 模块都没有就绝不该去调命令 —— 那会给服务端写一行推不到的死令牌。
     expect(client.registerDevice).not.toHaveBeenCalled();
+  });
+
+  it("开关没开就说「配置没开」，别把一行配置说成环境坏了（2026-10-05）", async () => {
+    const previous = process.env.EXPO_PUBLIC_PUSH;
+    delete process.env.EXPO_PUBLIC_PUSH;
+    try {
+      const client = { registerDevice: vi.fn().mockResolvedValue(undefined) };
+      const outcome = await registerForPush({
+        client,
+        os: "ios",
+        deviceId: "device_abc",
+        signedIn: true,
+      });
+      // 不注入 loadModule 时才会走真实分支，理由必须落在 flag 上
+      expect(outcome.status).toBe("skipped");
+      expect(outcome.status === "skipped" && outcome.reason).toContain(
+        "EXPO_PUBLIC_PUSH",
+      );
+      expect(pushModuleImport.attempts).toBe(0);
+    } finally {
+      if (previous !== undefined) process.env.EXPO_PUBLIC_PUSH = previous;
+    }
   });
 
   it("授权齐全时真的把令牌交上去", async () => {
@@ -139,7 +168,10 @@ describe("NOTIF-PUSH-001: 原生模块缺席时必须降级，不能把 app 打�
           getDevicePushTokenAsync,
         }),
     });
-    expect(outcome).toEqual({ status: "skipped", reason: "permission-undetermined" });
+    expect(outcome).toEqual({
+      status: "skipped",
+      reason: "permission-undetermined",
+    });
     expect(requestPermissionsAsync).not.toHaveBeenCalled();
     expect(getDevicePushTokenAsync).not.toHaveBeenCalled();
     expect(client.registerDevice).not.toHaveBeenCalled();
@@ -159,12 +191,19 @@ describe("NOTIF-PUSH-001: 原生模块缺席时必须降级，不能把 app 打�
           },
         }),
     });
-    expect(outcome).toEqual({ status: "failed", reason: "no APNs environment" });
+    expect(outcome).toEqual({
+      status: "failed",
+      reason: "no APNs environment",
+    });
     expect(client.registerDevice).not.toHaveBeenCalled();
   });
 
   it("命令被服务端拒了是 failed，启动流程不许因此中断", async () => {
-    const client = { registerDevice: vi.fn().mockRejectedValue(new Error("notifications require a real sign-in")) };
+    const client = {
+      registerDevice: vi
+        .fn()
+        .mockRejectedValue(new Error("notifications require a real sign-in")),
+    };
     const outcome = await registerForPush({
       client,
       os: "ios",
@@ -185,7 +224,10 @@ describe("NOTIF-PUSH-001: 原生模块缺席时必须降级，不能把 app 打�
       signedIn: true,
       loadModule: async () =>
         fakeModule({
-          getDevicePushTokenAsync: async () => ({ type: "android", data: "fcm_token_xyz" }),
+          getDevicePushTokenAsync: async () => ({
+            type: "android",
+            data: "fcm_token_xyz",
+          }),
         }),
     });
     expect(client.registerDevice).toHaveBeenCalledWith({
@@ -204,7 +246,10 @@ describe("NOTIF-PUSH-001: 原生模块缺席时必须降级，不能把 app 打�
       signedIn: true,
       loadModule: async () => fakeModule(),
     });
-    expect(outcome).toEqual({ status: "skipped", reason: "unsupported-platform" });
+    expect(outcome).toEqual({
+      status: "skipped",
+      reason: "unsupported-platform",
+    });
     expect(client.registerDevice).not.toHaveBeenCalled();
   });
 });
