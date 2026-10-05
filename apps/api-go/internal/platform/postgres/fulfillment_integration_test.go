@@ -300,19 +300,25 @@ func cleanupFulfillmentPG(t *testing.T, pool *pgxpool.Pool, ids []any) {
 	staleOfferID, _ := ids[2].(string)
 	traceOrderID, _ := ids[3].(string)
 	if orderID != "" {
-		if _, err := pool.Exec(ctx, `DELETE FROM fulfillment.order_events WHERE order_id=$1`, orderID); err != nil {
-			t.Logf("cleanup order_events: %v", err)
+		// ⚠️ 这两条原来指向**不存在的表**（fulfillment.order_events /
+		// fulfillment.evidence），所以每次清理都失败、每次跑测试都往库里留行 ——
+		// 和 supply.agents 那条同一种 bug。真实位置：
+		//   · 凭证在 execution.evidence（列：id / order_id / media_asset_id / …）
+		//   · 订单的领域事件在 integration.outbox_messages（aggregate_type='Order'，
+		//     本地库 1791 行），从来没有什么 order_events 表。
+		if _, err := pool.Exec(ctx, `DELETE FROM execution.evidence WHERE order_id=$1`, orderID); err != nil {
+			t.Errorf("cleanup execution.evidence: %v", err)
 		}
-		if _, err := pool.Exec(ctx, `DELETE FROM fulfillment.evidence WHERE order_id=$1`, orderID); err != nil {
-			t.Logf("cleanup evidence: %v", err)
+		if _, err := pool.Exec(ctx, `DELETE FROM integration.outbox_messages WHERE aggregate_type='Order' AND aggregate_id=$1`, orderID); err != nil {
+			t.Errorf("cleanup order outbox messages: %v", err)
 		}
 		if _, err := pool.Exec(ctx, `DELETE FROM fulfillment.orders WHERE id=$1`, orderID); err != nil {
 			t.Logf("cleanup orders: %v", err)
 		}
 	}
 	if traceOrderID != "" {
-		if _, err := pool.Exec(ctx, `DELETE FROM fulfillment.order_events WHERE order_id=$1`, traceOrderID); err != nil {
-			t.Logf("cleanup trace order_events: %v", err)
+		if _, err := pool.Exec(ctx, `DELETE FROM integration.outbox_messages WHERE aggregate_type='Order' AND aggregate_id=$1`, traceOrderID); err != nil {
+			t.Errorf("cleanup trace order outbox messages: %v", err)
 		}
 		if _, err := pool.Exec(ctx, `DELETE FROM fulfillment.orders WHERE id=$1`, traceOrderID); err != nil {
 			t.Logf("cleanup trace orders: %v", err)

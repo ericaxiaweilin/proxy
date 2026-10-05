@@ -117,9 +117,24 @@ func TestSupplyPostgresVerificationLifecycle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateProfile: %v", err)
 	}
+	// ⚠️ 原来这里删的是 `supply.agents WHERE id=$1` —— **那张表根本不存在**
+	// （profile 落在 supply.agent_profiles）。所以那句每次都报错，而 `_, _ =` 把错误
+	// 吞掉了：每次跑测试都往库里留一行 agent_profiles。
+	//
+	// 实测（2026-10-05）：一个月里积了 14 行 `agent_verify_pg_*` / "Test Agent"，
+	// created_at 全是零值（种子没给时间）。它们不是真人，而是测试幽灵 —— 而且它们把
+	// 通知收件人调查带偏了：我一度把「14 个 creator 收不到 creator 侧通知」当成一个
+	// 要回填的数据问题，而真相是「没有真人受影响，是测试在漏行」。
+	//
+	// 教训：`_, _ = pool.Exec(...)` 写在 Cleanup 里等于「清理失败但没人知道」。
+	// 这里显式 t.Errorf，让清理失败变成可见的失败。
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM supply.capability_verifications WHERE agent_id=$1`, agentID)
-		_, _ = pool.Exec(ctx, `DELETE FROM supply.agents WHERE id=$1`, agentID)
+		if _, err := pool.Exec(ctx, `DELETE FROM supply.capability_verifications WHERE agent_id=$1`, agentID); err != nil {
+			t.Errorf("cleanup capability_verifications: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM supply.agent_profiles WHERE agent_id=$1`, agentID); err != nil {
+			t.Errorf("cleanup agent_profiles: %v", err)
+		}
 	})
 
 	// 2. Three verifications: one VERIFIED (still valid), one

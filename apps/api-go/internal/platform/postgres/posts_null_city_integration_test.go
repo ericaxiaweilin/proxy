@@ -43,7 +43,12 @@ func TestFeedReadsSurviveNullCityScope(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM localnet.posts WHERE id = $1`, postID)
-		_, _ = pool.Exec(ctx, `DELETE FROM identity.handles WHERE handle = $1`, handle)
+		// ⚠️ 原来删的是 `identity.handles` —— **那张表不存在**（handle 是
+		// identity.profiles 上的一列）。所以这句每次都失败、每次跑测试都留一行 profile，
+		// 而且 `_, _ =` 把错误吞掉了。改成真实位置，并把失败变成可见的 t.Errorf。
+		if _, err := pool.Exec(ctx, `DELETE FROM identity.profiles WHERE handle = $1`, handle); err != nil {
+			t.Errorf("cleanup identity.profiles by handle: %v", err)
+		}
 	})
 
 	var isNull bool
