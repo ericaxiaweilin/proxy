@@ -75,6 +75,29 @@ in as any user.
 | Variable                     | Required | Notes |
 |------------------------------|----------|-------|
 | `PROXY_OPERATOR_PRINCIPALS`  | no (fail-closed) | comma-separated principal ids allowed to execute privileged commands (capability review, contribution moderation, payout authorization, media readiness override). Unset = every operator command rejected. |
+| `PROXY_OPERATOR_SCOPES`      | no       | per-principal narrowing of the allowlist above. Format: `principal_id:SCOPE,SCOPE;principal_id:*` (`*` = all). Unset = every allowlisted principal holds **all** scopes, i.e. the historical behaviour. See below. |
+
+### Narrowing one operator without revoking the others (OPS-SCOPE-WIRED-001)
+
+`PROXY_OPERATOR_SCOPES=cs_agent_1:CASE,ANALYTICS;ops_lead:*`
+
+* `;` separates entries, `:` splits principal from its comma-separated scope list;
+  whitespace around ids and scope names is ignored.
+* A principal named in `PROXY_OPERATOR_PRINCIPALS` but **absent** from this variable
+  holds all scopes. A principal present with nothing usable in its list (e.g. every
+  name misspelled) holds nothing — denied, not defaulted open.
+* Unknown scope names and malformed entries are skipped with a `PROXY_OPERATOR_SCOPES:`
+  line in the startup log. Narrowing is fail-closed, so a typo loses power rather than
+  granting it; read the boot log after changing this, or check `/v1/operator/access`
+  (console page 「运营权限」), which reports what the running process actually resolved.
+* 12 scopes: `CASE MARKETPLACE SAFETY PAYMENTS IDENTITY AUTHORITY MODERATION CAPABILITY
+  CONTRIBUTION MEDIA PLATFORM ANALYTICS`. Each gated command maps to exactly one required
+  scope (`requiredOperatorScope` in `internal/api/operator_scopes.go`; a boot-time test
+  fails if a command has no mapping), and the access page lists them per scope.
+* Everything an operator *writes* is appended to `operator.action_log` (append-only,
+  migration 161) with the scope that authorised it; `GET /v1/operator/access` shows
+  the recent rows. A failed audit write is counted and reported, not swallowed — but
+  it does not roll back the action, because the action already happened.
 
 ### Customer-service number lookup (PUBLIC-NO-LOOKUP-001)
 
@@ -82,11 +105,9 @@ Users read order / signup / demand / invitation / activity numbers (16+ all-digi
 numbers, one global sequence) to customer service. The operator command
 `LookupPublicNumber` resolves a number back to its entity. It is a cross-party
 read, so it needs the operator gate **and** the `CASE` scope, and it requires a
-written reason. (Today every principal in `PROXY_OPERATOR_PRINCIPALS` holds all
-scopes: the per-principal scope parser `PROXY_OPERATOR_SCOPES` exists in
-`internal/api/operator_scopes.go` but is not wired in `cmd/api/main.go` yet, so
-a customer-service principal added to `PROXY_OPERATOR_PRINCIPALS` also gets every
-other operator power until it is.)
+written reason. Giving customer service only `CASE` is a configuration change now
+(`PROXY_OPERATOR_SCOPES=…:CASE`); until that variable is set, an allowlisted
+principal holds every operator power.
 
 Every lookup (found, not found, bad number) appends one row to
 `operator.number_lookups` in the command's own transaction; if that row cannot
