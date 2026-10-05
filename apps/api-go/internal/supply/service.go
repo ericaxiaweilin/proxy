@@ -894,7 +894,25 @@ type Service struct {
 // 各写一遍早晚会分叉 —— 有人查 agent_profiles、有人查 agent_services，
 // 还会有人干脆直接用 agentId。
 func (s *Service) AgentInboxResolver() notification.AgentInboxResolver {
-	return notification.AgentInboxRecipientOf(s.creatorInboxRecipient)
+	return notification.AgentInboxResolverFuncOf(s.creatorInboxRecipient, s.inboxRecipientForAnyPerson)
+}
+
+// inboxRecipientForAnyPerson 是宽松版解析（id 命名空间混合的地方用）。
+//
+// 先按 agent id 查一次 profile：查到就用它的 user_account_id；查不到就**原样
+// 返回** —— 因为那个 id 多半已经是 user account 了（实测 fulfillment.orders.agent_id
+// 里 134 行本身就是 user_account）。查不到 agent profile **不等于**不可投递。
+func (s *Service) inboxRecipientForAnyPerson(ctx context.Context, id string) string {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return ""
+	}
+	if profile, err := s.repository.GetProfile(ctx, trimmed); err == nil {
+		if userAccountID := notification.RecipientOrEmpty(profile.UserAccountID); userAccountID != "" {
+			return userAccountID
+		}
+	}
+	return trimmed
 }
 
 // creatorInboxRecipient 是 notification.AgentInboxResolver 在本域的落点。

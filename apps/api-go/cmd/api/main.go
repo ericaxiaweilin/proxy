@@ -320,6 +320,8 @@ func main() {
 		// **必须**接在 supplyService 换成真仓储**之后**：接在前面会绑到
 		// supply.New() 那个内存服务，于是解析永远失败 ⇒ 每条 Offer 通知都没有收件人
 		// ⇒ 又一次「静默失效」，而且更难查（接线看起来是对的）。
+		// 同一个解析器同时提供严格版（确定是 agent id）与宽松版（id 命名空间混合，
+		// 如订单的 requester/agent —— 那些 id 多数本身就是 user_account）。
 		fulfillmentService.SetAgentInboxRecipient(supplyService.AgentInboxResolver())
 		// COMP-SELLER-001：候选资格只认已实名且未过期的卖家。接在这里（pool 分支内）
 		// 意味着没有数据库时 lookup 为 nil → 撮合不出候选，而不是「照常撮合」。

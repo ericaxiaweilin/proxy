@@ -28,17 +28,45 @@ import (
 type AgentInboxResolver interface {
 	// AgentInboxRecipient 返回该 creator 的可投递收件人 id。查不到时返回空串。
 	AgentInboxRecipient(ctx context.Context, agentID string) string
+	// InboxRecipientFor 解析「任何指代人的 id」。
+	//
+	// 与 AgentInboxRecipient 的区别是**不假定**这个 id 一定是 agent id：
+	//   · 是 agent id（有 profile）→ profile.user_account_id；
+	//   · 不是 → 原样返回。
+	//
+	// 什么时候用这个：id 命名空间**混合**的地方。实测订单表就是这样 ——
+	// fulfillment.orders.agent_id 里 134 行本身就是 user_account（真实数据），
+	// 1 行是 agent id，684 行两边都不是（fixture 脏数据）。对这种字段用
+	// 严格版会误杀 134 个本来就能收到通知的人，用 agentId 兜底又会重犯
+	// 「没人读」的错。
+	InboxRecipientFor(ctx context.Context, id string) string
 }
 
 // AgentInboxRecipientOf 是给「只有函数、没有结构」的域用的适配器。
-func AgentInboxRecipientOf(fn func(ctx context.Context, agentID string) string) AgentInboxResolver {
-	return agentInboxResolverFunc(fn)
+//
+// 宽松版直接用同一个函数（不查 profile 就原样返回）。**只在 id 命名空间确定
+// 干净的域用**：如果那个 id 可能压根不是 user account，原样返回就等于把
+// 「没人读的地址」又放回来了 —— 那种域请用 AgentInboxResolverFuncOf 明确传两个。
+func AgentInboxRecipientOf(strict func(ctx context.Context, agentID string) string) AgentInboxResolver {
+	return AgentInboxResolverFuncOf(strict, strict)
 }
 
-type agentInboxResolverFunc func(ctx context.Context, agentID string) string
+// AgentInboxResolverFuncOf 同时提供严格版与宽松版解析。
+func AgentInboxResolverFuncOf(strict, permissive func(ctx context.Context, id string) string) AgentInboxResolver {
+	return agentInboxResolverFunc{strict: strict, permissive: permissive}
+}
+
+type agentInboxResolverFunc struct {
+	strict     func(ctx context.Context, agentID string) string
+	permissive func(ctx context.Context, id string) string
+}
 
 func (f agentInboxResolverFunc) AgentInboxRecipient(ctx context.Context, agentID string) string {
-	return f(ctx, agentID)
+	return f.strict(ctx, agentID)
+}
+
+func (f agentInboxResolverFunc) InboxRecipientFor(ctx context.Context, id string) string {
+	return f.permissive(ctx, id)
 }
 
 // RecipientOrEmpty 归一化：空 id 一律返回空串，让调用点能用「非空即有收件人」

@@ -483,6 +483,15 @@ var eventsWithoutNotification = map[string]string{
 	"SpendDailyUpserted": "每日聚合 upsert，纯内部写入，频率高且无人可通知",
 
 	// ── 内部投影：媒体/上下文/草稿/聚合 ───────────────────────────────────
+	// ── 没有生产者：映射了也永远不会触发 ────────────────────────────────
+	//
+	// MaterializedEvent 这个导出函数在**非测试代码里没有任何调用方**：唯一的订单
+	// 创建路径（acceptOffer）发的是 OrderCreatedFromOffer，而它已经映射了。
+	//
+	// 正向门禁看不见这一点 —— 它扫的是 `event.New("X"` 字面量，而那个字面量确实在
+	// 源码里，只是它所在的函数没人调。这类「死分支」只能靠人读代码发现，所以写清
+	// 在这里；函数本身留着不删（那是另一个决定）。
+	"OrderMaterialized":           "没有生产者：MaterializedEvent 在非测试代码里零调用方；真实路径发的是 OrderCreatedFromOffer（已映射）",
 	"AnonymousSessionCreated":     "匿名会话创建是内部投影，用户不需要被告知自己被建了个匿名会话",
 	"AttributionRecorded":         "归因记录是内部数据，用户看到的是结果不是归因",
 	"DisplayIdentityCreated":      "显示身份的创建是系统内部步骤",
@@ -563,13 +572,6 @@ var eventsPendingNotificationDecision = map[string]string{
 	"CityCompanionCompleted":      "该通知：收件人=双方",
 
 	// ── 订单/履约 ────────────────────────────────────────────────────────
-	"OrderMaterialized":             "该通知：缺 deep link（orders/ 在白名单，但聚合是 order_materialized，路由要确认）",
-	"OrderCancelled":                "该通知：收件人=下单方",
-	"OrderCheckedIn":                "该通知：收件人=对方（打卡是协作动作）",
-	"ExecutionStarted":              "该通知：收件人=双方",
-	"EvidenceSubmitted":             "该通知：收件人=审核方",
-	"SatisfactionRecorded":          "该通知：收件人=被评价方（评价是该知道的）",
-	"CooperationConfirmed":          "该通知：收件人=双方（合作达成）",
 	"OfferAccepted":                 "刻意不发：它和 OrderCreatedFromOffer 在同一批 domainEvents 里，单发会让同件事收两条（见 inboxForEvent 头注释第 4 条）",
 	"NeedConfirmedFromConversation": "该通知：收件人=发需求方",
 	"NeedCreatedFromPost":           "该通知：收件人=从帖子转需求的发帖人",
@@ -749,5 +751,59 @@ func TestOfferNotificationNeverFallsBackToAgentId(t *testing.T) {
 		"agentId": "agent_x",
 	})); ok {
 		t.Fatalf("OfferCreated without notifyPrincipalId must NOT be delivered (it would go to %q)", recipient)
+	}
+}
+
+// MERCHANT-CREATOR-NOTIFY-001：订单履约六条通知的映射。
+//
+// 收件人是 payload.notifyPrincipalId（订单对手方的可投递 id）。**缺它就不投**，
+// 而且绝不能回退到 actor —— 那是「你取消了订单」回到取消者自己收件箱里。
+func TestOrderFulfillmentNotificationsUseTheCounterpartyRecipient(t *testing.T) {
+	events := []string{
+		"OrderCancelled", "OrderCheckedIn", "ExecutionStarted",
+		"EvidenceSubmitted", "SatisfactionRecorded", "CooperationConfirmed",
+	}
+	for _, eventType := range events {
+		recipient, title, body, _, ok := inboxForEvent(testEvent(eventType, "actor_u1", "ord_1", map[string]any{
+			"notifyPrincipalId": "user_counterparty",
+			"notifyRole":        "AGENT",
+			"reason":            "对方临时有事",
+			"marketId":          "hn",
+			"mediaAssetId":      "ma_1",
+			"decision":          "APPROVE",
+		}))
+		if !ok || recipient != "user_counterparty" {
+			t.Fatalf("%s must deliver to notifyPrincipalId, got %q (ok=%v)", eventType, recipient, ok)
+		}
+		if title == "" || body == "" {
+			t.Fatalf("%s must carry copy, got %q / %q", eventType, title, body)
+		}
+		if recipient == "actor_u1" {
+			t.Fatalf("%s delivered the notification back to the actor", eventType)
+		}
+
+		// 缺 notifyPrincipalId ⇒ 不投（也不能退到 actor）。
+		if recipient, _, _, _, ok := inboxForEvent(testEvent(eventType, "actor_u1", "ord_1", map[string]any{
+			"orderId": "ord_1", "reason": "x",
+		})); ok {
+			t.Fatalf("%s without notifyPrincipalId must NOT be delivered (went to %q)", eventType, recipient)
+		}
+	}
+}
+
+// 取消原因**不回显**对方写的自由文本。
+//
+// payload 里的 reason 是对方原话（fulfillment 只把空值兜成 "user-cancelled"）。
+// 把它挂在平台名下既不体面，也可能带不该出现在通知里的内容。
+func TestOrderCancelledDoesNotEchoTheOtherPartysFreeText(t *testing.T) {
+	_, _, body, _, ok := inboxForEvent(testEvent("OrderCancelled", "actor_u1", "ord_1", map[string]any{
+		"notifyPrincipalId": "user_cp",
+		"reason":            "他手机号是 0912 345 678 别打给他",
+	}))
+	if !ok {
+		t.Fatal("OrderCancelled must be delivered")
+	}
+	if strings.Contains(body, "0912") || strings.Contains(body, "别打给他") {
+		t.Fatalf("the other party's free text must not be echoed into the notification body: %q", body)
 	}
 }

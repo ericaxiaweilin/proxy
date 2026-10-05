@@ -571,6 +571,9 @@ type Service struct {
 	// principal（本地库 121 个 creator 里 0 个的 agent_id 是 user account），
 	// 拿它当收件人的通知会正确落库然后永远没人读到。nil = 不接 = 不产生收件人。
 	agentInboxRecipient func(ctx context.Context, agentID string) string
+	// personInboxRecipient 是宽松版解析（id 命名空间混合的地方，如订单的
+	// requester/agent —— 那些 id 多数本身就是 user account，见 orderPartyRecipients）。
+	personInboxRecipient func(ctx context.Context, id string) string
 	// jurisdictionResolver resolves the requester's
 	// jurisdiction (R16.7-P1-E) so the policy decision can
 	// be evaluated under the correct regulatory family. The
@@ -1431,7 +1434,13 @@ func (s *Service) checkInOrder(ctx context.Context, e command.Envelope) command.
 	// Offline check-in denied: must be online (for now require payload online flag or just allow, but we enforce must be online by rejecting if no market)
 	// Location precision redaction: only marketId + label, no precise lat/lng
 	now := s.clock.Now().UTC()
-	domainEvents := []event.DomainEvent{event.New("OrderCheckedIn", "Order", order.ID, order.Version+1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"marketId": p.MarketID})}
+	// MERCHANT-CREATOR-NOTIFY-001：打卡是协作动作 —— 对方要知道你到了。
+	// 收件人 = 订单对手方（去掉 actor），按人一条。
+	domainEvents := orderEvents(s, ctx, order, e, now, s.orderPartyRecipients(ctx, order, e.Actor.ID),
+		func(_ orderPartyRecipient, orderID string, version int, at time.Time, payload map[string]any) event.DomainEvent {
+			payload["marketId"] = p.MarketID
+			return event.New("OrderCheckedIn", "Order", orderID, version+1, e.Principal.ID, e.CorrelationID, e.CommandID, at, payload)
+		})
 	order.Lifecycle = "EXECUTING"
 	order.Version++
 	order.UpdatedAt = now
@@ -1471,7 +1480,12 @@ func (s *Service) submitEvidence(ctx context.Context, e command.Envelope) comman
 	}
 	// Duplicate evidence submit check: if already have evidence for same media, reject (simplified)
 	now := s.clock.Now().UTC()
-	domainEvents := []event.DomainEvent{event.New("EvidenceSubmitted", "Order", order.ID, order.Version+1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"mediaAssetId": p.MediaAssetID, "type": p.EvidenceType})}
+	domainEvents := orderEvents(s, ctx, order, e, now, s.orderPartyRecipients(ctx, order, e.Actor.ID),
+		func(_ orderPartyRecipient, orderID string, version int, at time.Time, payload map[string]any) event.DomainEvent {
+			payload["mediaAssetId"] = p.MediaAssetID
+			payload["type"] = p.EvidenceType
+			return event.New("EvidenceSubmitted", "Order", orderID, version+1, e.Principal.ID, e.CorrelationID, e.CommandID, at, payload)
+		})
 	// No state change, just event; version bump for audit
 	order.Version++
 	order.UpdatedAt = now
@@ -1536,10 +1550,12 @@ func (s *Service) confirmCooperation(ctx context.Context, e command.Envelope) co
 	order.Lifecycle = "CONFIRMED"
 	order.Version++
 	order.UpdatedAt = s.clock.Now().UTC()
-	domainEvents := []event.DomainEvent{event.New("CooperationConfirmed", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, order.UpdatedAt, map[string]any{
-		"snapshot":         order.Snapshot,
-		"policyDecisionId": order.PolicyDecisionID,
-	})}
+	domainEvents := orderEvents(s, ctx, order, e, order.UpdatedAt, s.orderPartyRecipients(ctx, order, e.Actor.ID),
+		func(_ orderPartyRecipient, orderID string, _ int, at time.Time, payload map[string]any) event.DomainEvent {
+			payload["snapshot"] = order.Snapshot
+			payload["policyDecisionId"] = order.PolicyDecisionID
+			return event.New("CooperationConfirmed", "Order", orderID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, at, payload)
+		})
 	// R16.7-P1-B (LC-28): the (order, decision, lifecycle) stamp in
 	// `policy.order_decisions` is the system of record. POLICY-STAMP-DURABLE-001:
 	// it is written in the same transaction as the lifecycle change — a lost
@@ -1584,7 +1600,10 @@ func (s *Service) startExecution(ctx context.Context, e command.Envelope) comman
 	order.Lifecycle = "EXECUTING"
 	order.Version++
 	order.UpdatedAt = s.clock.Now().UTC()
-	domainEvents := []event.DomainEvent{event.New("ExecutionStarted", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, order.UpdatedAt, map[string]any{})}
+	domainEvents := orderEvents(s, ctx, order, e, order.UpdatedAt, s.orderPartyRecipients(ctx, order, e.Actor.ID),
+		func(_ orderPartyRecipient, orderID string, _ int, at time.Time, payload map[string]any) event.DomainEvent {
+			return event.New("ExecutionStarted", "Order", orderID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, at, payload)
+		})
 	if err := s.commitOrder(ctx, before, order, domainEvents); err != nil {
 		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
@@ -1714,6 +1733,99 @@ func (s *Service) SetAgentInboxRecipient(resolver notification.AgentInboxResolve
 		return
 	}
 	s.agentInboxRecipient = resolver.AgentInboxRecipient
+	s.personInboxRecipient = resolver.InboxRecipientFor
+}
+
+// orderPartyRecipients 返回这次动作要通知的订单对手方（**去掉 actor**）。
+//
+// 为什么不通知 actor：他刚做的动作，界面里立刻看得到，通知他等于回声。
+// 为什么可能不止一个：合作/履约这类动作双方都在等（打卡要知道对方到了、
+// 评价要被对方知道）。
+//
+// 用宽松版解析（InboxRecipientFor）而不是严格版：订单里的 requester/agent id
+// 命名空间是**混合**的 —— 实测 819 条订单里 requester 694 条本身就是 user_account、
+// agent 134 条是 user_account、1 条是 agent id、其余 684 条两边都不是（fixture 脏数据）。
+// 严格版会误杀那 694+134 个本来就能收到通知的人。
+func (s *Service) orderPartyRecipients(ctx context.Context, order Order, actorID string) []orderPartyRecipient {
+	if s.agentInboxRecipient == nil {
+		return nil
+	}
+	candidates := []struct {
+		role string
+		id   string
+	}{
+		{"REQUESTER", order.RequesterID},
+		{"AGENT", order.AgentID},
+	}
+	out := make([]orderPartyRecipient, 0, len(candidates))
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		id := notification.RecipientOrEmpty(candidate.id)
+		if id == "" || id == actorID || seen[id] {
+			continue
+		}
+		recipient := notification.RecipientOrEmpty(s.inboxRecipientForPerson(ctx, id))
+		if recipient == "" || seen[recipient] {
+			continue
+		}
+		seen[recipient] = true
+		out = append(out, orderPartyRecipient{role: candidate.role, recipient: recipient})
+	}
+	return out
+}
+
+type orderPartyRecipient struct {
+	role      string
+	recipient string
+}
+
+// inboxRecipientForPerson 是宽松版解析（personInboxRecipient 的落点）。
+func (s *Service) inboxRecipientForPerson(ctx context.Context, id string) string {
+	if s.personInboxRecipient == nil {
+		return ""
+	}
+	return notification.RecipientOrEmpty(s.personInboxRecipient(ctx, id))
+}
+
+// orderEvents 为订单对手方各生成一条事件。
+//
+// **按人一条**，和 conversation 的见面邀约同一个理由：收件箱的幂等 id 由
+// DedupeKey（= 事件 id）确定性推出，同一个 key 给两个收件人会在主键上撞车。
+//
+// newEvent 是**闭包**而不是 eventType 字符串。这是第三次因为把事件名当参数而
+// 被正向门禁抓住（第一次是 meetup，第二次是 merchantSideEvents）：cmd/worker 的
+// TestInboxForEventOnlyMapsEventTypesThatAreActuallyEmitted 靠扫源码里的
+// `event.New("X"` 字面量判断「映射的事件有没有人发」，事件名变成参数后字面量就从
+// 源码里消失，门禁立刻判它「永远不会触发」而变红。门禁是对的 —— 所以事件名留在
+// 调用点的闭包里。
+func orderEvents(
+	s *Service, ctx context.Context, order Order, e command.Envelope, at time.Time,
+	parties []orderPartyRecipient,
+	newEvent func(party orderPartyRecipient, orderID string, version int, at time.Time, payload map[string]any) event.DomainEvent,
+) []event.DomainEvent {
+	if len(parties) == 0 {
+		// ⚠️ 推不出收件人时**仍然发这条事件**，只是不带 notifyPrincipalId。
+		//
+		// 这不是「退而求其次」，是必须这样：domain event 是**业务事实**（订单状态
+		// 变了、谁做的），审计表要记它、其它消费者也要看它。曾经我在这里直接返回
+		// 空切片，结果连审计行都空了 —— TestOrderTransitionIsStampedAndAuditedPostgres
+		// 立刻抓到（audit 行的 Events 字段空）。也就是说「通知投递不出去」会一路
+		// 影响到审计链，而审计链跟通知可投递性毫无关系。
+		//
+		// 带空 notifyPrincipalId 的事件会被映射层跳过（不产生一行没人读的记录），
+		// 事实照旧进 outbox 与审计。
+		parties = []orderPartyRecipient{{role: "", recipient: ""}}
+	}
+	out := make([]event.DomainEvent, 0, len(parties))
+	for _, party := range parties {
+		payload := map[string]any{
+			"orderId":           order.ID,
+			"notifyPrincipalId": party.recipient,
+			"notifyRole":        party.role,
+		}
+		out = append(out, newEvent(party, order.ID, order.Version, at, payload))
+	}
+	return out
 }
 
 // inboxRecipientForAgent 是所有「通知这个 creator」的调用点。
@@ -1827,11 +1939,19 @@ func (s *Service) recordSatisfaction(ctx context.Context, e command.Envelope) co
 	order.Outcome.Satisfaction = &SatisfactionRecord{Resolved: p.Resolved, RepeatIntent: p.RepeatIntent, RecordedAt: now}
 	order.Version++
 	order.UpdatedAt = now
-	domainEvents := []event.DomainEvent{event.New("SatisfactionRecorded", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"resolved":     p.Resolved,
-		"repeatIntent": p.RepeatIntent,
-		"note":         "履约事实不要求用户重复打分",
-	})}
+	// payload 保持原样（只是**追加** notifyPrincipalId / notifyRole）：事件流的内容
+	// 不该被我为了加收件人而删字段 —— 现在没有消费者读它们，但「反正没人读」不是
+	// 删掉别人事件载荷的理由。
+	domainEvents := orderEvents(s, ctx, order, e, now, s.orderPartyRecipients(ctx, order, e.Actor.ID),
+		func(_ orderPartyRecipient, orderID string, _ int, at time.Time, payload map[string]any) event.DomainEvent {
+			// payload 保持原样（只是**追加** notifyPrincipalId / notifyRole）：事件流的
+			// 内容不该因为我加了收件人就删字段 —— 现在没有消费者读它们，但「反正没人
+			// 读」不是删掉别人事件载荷的理由。
+			payload["resolved"] = p.Resolved
+			payload["repeatIntent"] = p.RepeatIntent
+			payload["note"] = "履约事实不要求用户重复打分"
+			return event.New("SatisfactionRecorded", "Order", orderID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, at, payload)
+		})
 	if err := s.commitOrder(ctx, before, order, domainEvents); err != nil {
 		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}
@@ -2141,12 +2261,14 @@ func (s *Service) cancelOrder(ctx context.Context, e command.Envelope) command.R
 	if reason == "" {
 		reason = "user-cancelled"
 	}
-	domainEvents := []event.DomainEvent{event.New("OrderCancelled", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"orderId": order.ID,
-		"reason":  reason,
-		"by":      e.Actor.ID,
-		"role":    viewerRole(order, e.Actor.ID),
-	})}
+	// 取消订单必须通知对手方：对方可能已经按这个订单安排了档期/行程。
+	domainEvents := orderEvents(s, ctx, order, e, now, s.orderPartyRecipients(ctx, order, e.Actor.ID),
+		func(_ orderPartyRecipient, orderID string, _ int, at time.Time, payload map[string]any) event.DomainEvent {
+			payload["reason"] = reason
+			payload["by"] = e.Actor.ID
+			payload["role"] = viewerRole(order, e.Actor.ID)
+			return event.New("OrderCancelled", "Order", orderID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, at, payload)
+		})
 	if err := s.commitOrder(ctx, before, order, domainEvents); err != nil {
 		return orderUpdateRejected(e, err, "ORDER_UPDATE_FAILED", "fulfillment.update_failed")
 	}

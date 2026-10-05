@@ -368,6 +368,43 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 		}
 		return "", "", "", "", false
 
+	// ── 订单履约（MERCHANT-CREATOR-NOTIFY-001）─────────────────────────
+	//
+	// 收件人 = payload.notifyPrincipalId（订单对手方的**可投递** id，去掉 actor），
+	// 由 fulfillment 侧按人生成（一个订单两方 ⇒ 两条事件；收件箱的幂等 id 由事件 id
+	// 推出来，同一个 key 给两个收件人会在主键上撞车）。
+	// 没有 notifyPrincipalId ⇒ 不投，**绝不**回退到 actor —— 那是「回声」。
+	case "OrderCancelled":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "订单已取消", orderCancelledNotice, "", true
+		}
+		return "", "", "", "", false
+	case "OrderCheckedIn":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "对方已到达", "打卡了，可以开始履约", "", true
+		}
+		return "", "", "", "", false
+	case "ExecutionStarted":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "订单开始履约", "订单已进入执行阶段", "", true
+		}
+		return "", "", "", "", false
+	case "EvidenceSubmitted":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "对方提交了履约凭证", "去核对一下", "", true
+		}
+		return "", "", "", "", false
+	case "SatisfactionRecorded":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "对方评价了这次合作", "去看看对方怎么说", "", true
+		}
+		return "", "", "", "", false
+	case "CooperationConfirmed":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "合作已达成", "订单已确认，可以开始准备了", "", true
+		}
+		return "", "", "", "", false
+
 	case "FriendRequestSent":
 		// 好友请求的收件人就是 payload.targetId（已过 targetAccountExists 校验的
 		// user account id），所以这一条**不需要**为了知道收件人去改 schema ——
@@ -385,6 +422,14 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 		return "", "", "", "", false
 	}
 }
+
+// 取消原因**不回显**。
+//
+// payload 里的 reason 是对方写的一句自由文本（fulfillment 侧只把空值兜成
+// "user-cancelled"）。把它回显进通知有两个问题：一行放不下；二是通知是「平台
+// 自己说话的渠道」，把别人的原话挂在平台名下既不体面，也可能带不该在通知里
+// 出现的内容。对方想知道细节，点进订单看 —— 那里有完整记录和理由。
+const orderCancelledNotice = "对方取消了这次订单，详情看订单页"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
