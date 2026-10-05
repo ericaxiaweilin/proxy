@@ -222,7 +222,20 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 	// 真实事件名是 OrderCreatedFromOffer（Aggregate 是 order，所以 /orders/<ord_…> 是对的）。
 	// 别再加回 "OrderCreated" / "OfferAccepted" —— 见函数头注释第 3、4 条。
 	case "OrderCreatedFromOffer":
-		return fallbackRecipient(""), "订单已成立", "已生成订单，可打卡", "/orders/" + e.AggregateID, true
+		// 文案带上「真人服务、确认后不能退」（用户 2026-10-05：「下单要提醒交易后
+		// 不能退款，因为真人服务 怎么退」）。
+		//
+		// 为什么放在通知里而不是只放在下单确认弹窗：通知是我们唯一能后端控制的
+		// 落点，而**确认弹窗那一层需要设计基线**（docs/design/CURRENT_BASELINE.json
+		// 对订单确认没有任何规定）—— 不凭空发明交互。真正该放的地方是用户点确认
+		// 之前那一刻，这一条是补位，不是替代。
+		//
+		// ⚠️ 这条承诺要成立，后端也得管得住：现在 fulfillment 仍有
+		// `RefundPaymentIntent` 这条 operator 命令（api/security.go 的
+		// operator-only 名单里）。平台说「不能退」而后台能退，是承诺与实现不一致 ——
+		// 那条命令要么删、要么明确标注它只用于「录入手工退款」（线下退给 creator），
+		// 这需要产品/法务口径，不是我能替你们定的。
+		return fallbackRecipient(""), "订单已成立", "真人服务，确认后不能退款；已生成订单，可打卡", "/orders/" + e.AggregateID, true
 	case "InvitationCreated":
 		return fallbackRecipient(payloadString("inviteeId")), "收到场景邀请", "有人邀请你一起去场景看看", "/invitations/" + e.AggregateID, true
 	case "InvitationResponded":

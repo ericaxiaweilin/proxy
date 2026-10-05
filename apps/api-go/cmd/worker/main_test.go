@@ -446,7 +446,28 @@ var eventsWithoutNotification = map[string]string{
 	"ContributionActivated":      "同上",
 	"ContributionSubmitted":      "贡献提交有专门的提交流程反馈",
 	"ContributionReviewed":       "贡献审核结果有审核页",
-	"ContributionRewardGranted":  "贡献奖励：金额类变化要走账务通知（见 pending 里的 PaymentIntentSucceeded 说明），不是这个无模板通道",
+	// ── 假支付：通知它们等于陈述一个不存在的钱的事实 ────────────────────────
+	//
+	// 2026-10-05 用户说清：「我们没有支付，不存在支付退款」。代码侧核实一致：
+	//   · payment.VietQRProvider.CreateQR 只是拼一个字符串
+	//     "VQR|<order>|<amount>|<currency>|<ref>"，注释写着「真实对接时替换为
+	//     NAPAS 官方 SDK / 银行聚合网关」；
+	//   · Refund 直接返回 "refund_"+paymentIntentID，什么也没做；
+	//   · NewWithRepository 默认 sandbox=true；
+	//   · 全仓没有任何下单流程会创建/确认支付意图。
+	//
+	// 所以「支付成功」「已退款到账」「已放款」这些通知，用户点开也拿不到钱 ——
+	// 而收件箱是平台自己说话的渠道，在这里写「已退款」等于平台盖一个假事实。
+	// 宁可一条都不发。
+	//
+	// ⚠️ 真接了支付之后这几条要**重新决定**，不能就这么一直不发：那时它们才有事实
+	// 基础（金额文案也要一起定：VND 无小数，但 120,000đ 与 120K 两种写法都出现过）。
+	"PaymentIntentSucceeded":     "没有真实支付：VietQRProvider 只拼一个假 QR 字符串（注释写明「真实对接时替换为 NAPAS SDK」）、Refund 直接返回假 id、默认 sandbox=true、全仓没有下单会触发扣款。通知「支付成功/已退款」等于平台盖一个不存在的钱的事实。真接了支付要重新决定",
+	"PaymentRefunded":            "同上（没有真实支付就不存在退款）",
+	"PaymentIntentCreated":       "内部状态机推进：真正有事实基础的只有 Succeeded/Refunded，而那两个本身也是假支付（见上）",
+	"PayoutReleased":             "同上（没有真实支付就不存在放款）",
+	"WalletChanged":              "同上（钱包余额变化没有事实来源）",
+	"ContributionRewardGranted":  "贡献奖励是金额类变化，而真实支付尚不存在（见 PaymentIntentSucceeded 那条）—— 没有事实来源就不能写成一条通知",
 	"MediaAssetReviewed":         "审核结果有专门界面",
 	"MediaReviewDecisionAmended": "审核决定修订是审计动作",
 
@@ -492,6 +513,24 @@ var eventsWithoutNotification = map[string]string{
 	// 源码里，只是它所在的函数没人调。这类「死分支」只能靠人读代码发现，所以写清
 	// 在这里；函数本身留着不删（那是另一个决定）。
 	"OrderMaterialized": "没有生产者：MaterializedEvent 在非测试代码里零调用方；真实路径发的是 OrderCreatedFromOffer（已映射）",
+	// ── 假支付：通知它们等于陈述一个不存在的钱的事实 ────────────────────────
+	//
+	// 2026-10-05 用户说清：「我们没有支付，不存在支付退款」。代码侧核实一致：
+	//   · payment.VietQRProvider.CreateQR 只是拼一个字符串
+	//     "VQR|<order>|<amount>|<currency>|<ref>"，注释写着「真实对接时替换为
+	//     NAPAS 官方 SDK / 银行聚合网关」；
+	//   · Refund 直接返回 "refund_"+paymentIntentID，什么也没做；
+	//   · NewWithRepository 默认 sandbox=true；
+	//   · 全仓没有任何下单流程会创建/确认支付意图（CreatePaymentIntent 只有支付域
+	//     自己和 openapi 在用）。
+	//
+	// 所以「支付成功」「已退款到账」「已放款」这些通知，用户点开也拿不到钱 ——
+	// 而收件箱是平台自己说话的渠道，在这里写「已退款」等于平台盖章一个假事实。
+	// 宁可一条都不发。
+	//
+	// ⚠️ 真接了支付之后这几条要**重新决定**，不能就这么一直不发：那时它们才有事实
+	// 基础（金额文案也要一起定：VND 无小数，120,000đ / 120K 两种写法都出现过）。
+
 	// ── self-event：做这件事的人就是唯一相关的人 ─────────────────────────
 	//
 	// ReferralInvite 的模型里**只有** ContributorPrincipalID + InviteCode，**没有
@@ -584,12 +623,7 @@ var eventsPendingNotificationDecision = map[string]string{
 	"OfferAccepted": "刻意不发：它和 OrderCreatedFromOffer 在同一批 domainEvents 里，单发会让同件事收两条（见 inboxForEvent 头注释第 4 条）",
 
 	// ── 账务：需要独立设计（金额/币种/对账口径），不能塞进现在这个无模板通道 ──
-	"PaymentIntentSucceeded": "该通知但**需要独立设计**：金额/币种/失败重试文案，通知域目前没有模板层",
-	"PaymentRefunded":        "同上",
-	"NeedCreatedFromPost":    "收件人不明：payload 里 creatorPrincipalId 是**被归因方**，而 actor 可能就是同一个人（回声）也可能是平台代操作；要先定这条命令对谁可见、谁该被告知",
-	"PaymentIntentCreated":   "内部状态机推进（真正该通知的是 Succeeded/Refunded）",
-	"PayoutReleased":         "该通知但需要独立设计：出账是财务口径",
-	"WalletChanged":          "该通知但需要独立设计：余额变化要带金额与方向",
+	"NeedCreatedFromPost": "收件人不明：payload 里 creatorPrincipalId 是**被归因方**，而 actor 可能就是同一个人（回声）也可能是平台代操作；要先定这条命令对谁可见、谁该被告知",
 
 	// ── 社交邀请：该通知，且优先级高 ─────────────────────────────────────
 }
@@ -888,4 +922,25 @@ func TestTopicInviteAndNeedConfirmedUseTheResolvedRecipient(t *testing.T) {
 			t.Fatalf("%s without notifyPrincipalId must NOT be delivered (went to %q)", eventType, recipient)
 		}
 	}
+}
+
+// 用户 2026-10-05：「下单要提醒交易后不能退款，因为真人服务 怎么退」。
+//
+// 这条钉住提醒**真的在下单通知里** —— 不是写在别处的承诺。曾经的文案只有
+// 「已生成订单，可打卡」，用户看不到任何关于退款的告知。
+func TestOrderCreatedNoticeCarriesTheNonRefundableTerm(t *testing.T) {
+	recipient, title, body, deepLink, ok := inboxForEvent(testEvent("OrderCreatedFromOffer", "user_buyer", "ord_1", map[string]any{}))
+	if !ok {
+		t.Fatal("OrderCreatedFromOffer must produce a notification")
+	}
+	if title == "" || deepLink == "" {
+		t.Fatalf("title/deep link must be filled, got %q / %q", title, deepLink)
+	}
+	if !strings.Contains(body, "不能退款") {
+		t.Fatalf("the non-refundable term must be in the order-created notice, got %q", body)
+	}
+	if !strings.Contains(body, "真人服务") {
+		t.Fatalf("the notice must say why (真人服务), got %q", body)
+	}
+	_ = recipient
 }
