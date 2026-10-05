@@ -33,7 +33,10 @@ const file = new File(dir, "blocked-users-v1.json");
 function readSnapshot(): BlocklistSnapshot {
   if (!file.exists) return { version: 1, blocked: [] };
   try {
-    const raw = file.json() as unknown;
+    // 同步读：expo-file-system 57 的 File.json() 返回 Promise。以前当同步结果用，
+    // 读到的永远是个 Promise（不是名单）⇒ 每次重开黑名单都是空的，下一次拉黑还会
+    // 拿空名单覆盖写盘，把之前拉黑的人全冲掉（2026-10-05 查商家账号记不住时一起发现）。
+    const raw = JSON.parse(file.textSync()) as unknown;
     if (!raw || typeof raw !== "object") return { version: 1, blocked: [] };
     const candidate = raw as Partial<BlocklistSnapshot>;
     if (candidate.version !== 1 || !Array.isArray(candidate.blocked)) {

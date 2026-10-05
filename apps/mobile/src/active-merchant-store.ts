@@ -12,7 +12,9 @@ const file = new File(dir, "active-merchant-v1.json");
 function read(): string | undefined {
   try {
     if (!file.exists) return undefined;
-    const raw = file.json() as { version?: number; accountId?: unknown } | null;
+    // 同步读：expo-file-system 57 的 File.json() 返回 Promise —— 以前当同步结果用，
+    // 读到的永远是个 Promise，「记住的账号」每次重开都丢、回到列表第一个。
+    const raw = JSON.parse(file.textSync()) as { version?: number; accountId?: unknown } | null;
     return raw && raw.version === 1 && typeof raw.accountId === "string" && raw.accountId !== "" ? raw.accountId : undefined;
   } catch {
     return undefined;
