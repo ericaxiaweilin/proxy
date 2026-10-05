@@ -365,6 +365,11 @@ func main() {
 		outcomeService = outcome.NewWithRepository(postgres.NewOutcomeRepository(pool))
 		localNetService = localnet.NewWithAll(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService), modelStack, scene.NewSceneAestheticAdapter(sceneService))
 		cityCompanionService = citycompanion.NewWithRepositoryAndSupplier(postgres.NewCityCompanionRepository(pool), supply.NewCityCompanionSupplier(supplyService))
+		// MERCHANT-CREATOR-NOTIFY-001：同城伴游的 agent 侧收件人必须解析成
+		// user account（候选来自 supply，ConfirmedAgent.AgentId 是 agent id）。
+		if supplyService != nil {
+			cityCompanionService.SetPersonInboxRecipient(supplyService.AgentInboxResolver())
+		}
 		// R15.13 P3: bind the scene aggregate to PostgreSQL when
 		// DATABASE_URL is set. Without DATABASE_URL the in-memory
 		// repository continues to serve (the smoke scripts rely on

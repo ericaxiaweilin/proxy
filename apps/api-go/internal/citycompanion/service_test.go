@@ -1,6 +1,7 @@
 package citycompanion
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -301,4 +302,79 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// MERCHANT-CREATOR-NOTIFY-001：同城伴游四条通知的收件人。
+//
+// owner 侧是 user account（实测 citycompanion.needs 5/5 都是真账号）⇒ 原样即可；
+// agent 侧是 **agent id**（候选来自 supply，SupplyCandidate.AgentID）⇒ 必须解析，
+// 否则通知会正确落进一个没人读的收件箱。
+func TestCityCompanionRecipientsResolveTheAgentSide(t *testing.T) {
+	svc := New()
+	svc.SetPersonInboxRecipient(fakeResolver{})
+	need := CityCompanionNeed{
+		ID: "ccn_1", OwnerUserID: "user_owner",
+		ConfirmedAgent: &ConfirmedAgent{AgentID: "agent_x", Name: "X"},
+	}
+
+	// actor 是 agent ⇒ 只通知 owner。
+	owner, agent := svc.notifyRecipients(context.Background(), need, "agent_x")
+	if owner != "user_owner" || agent != "" {
+		t.Fatalf("agent acting ⇒ notify owner only, got owner=%q agent=%q", owner, agent)
+	}
+	// actor 是 owner ⇒ 只通知 agent，而且必须解析成 user account。
+	owner, agent = svc.notifyRecipients(context.Background(), need, "user_owner")
+	if owner != "" || agent != "user_account_for_agent_x" {
+		t.Fatalf("owner acting ⇒ notify the agent's account only, got owner=%q agent=%q", owner, agent)
+	}
+	if agent == "agent_x" {
+		t.Fatal("the agent id must be resolved, never used as the inbox recipient")
+	}
+	// 第三方 ⇒ 两边都通知。
+	owner, agent = svc.notifyRecipients(context.Background(), need, "user_third")
+	if owner != "user_owner" || agent != "user_account_for_agent_x" {
+		t.Fatalf("a third party acting ⇒ notify both sides, got owner=%q agent=%q", owner, agent)
+	}
+}
+
+// 没接解析器 ⇒ 没有收件人（绝不猜、绝不用 agentId 兜底）。
+func TestCityCompanionWithoutResolverProducesNoAgentRecipient(t *testing.T) {
+	svc := New() // 没接解析器
+	need := CityCompanionNeed{ID: "ccn_2", OwnerUserID: "user_owner", ConfirmedAgent: &ConfirmedAgent{AgentID: "agent_x"}}
+	owner, agent := svc.notifyRecipients(context.Background(), need, "user_owner")
+	if owner != "" || agent != "" {
+		t.Fatalf("without a resolver there must be NO recipient, got owner=%q agent=%q", owner, agent)
+	}
+}
+
+// ConfirmedAgent 是**指针**，没确认过的本单是 nil —— 取字段会 panic（= 生产 500）。
+// 这条是被既有的 TestGenerateAndAcceptRoute 抓出来的：一条没确认过的本单走
+// 完成/路线路径就会段错误。
+func TestUnconfirmedNeedDoesNotPanic(t *testing.T) {
+	svc := New()
+	svc.SetPersonInboxRecipient(fakeResolver{})
+	need := CityCompanionNeed{ID: "ccn_3", OwnerUserID: "user_owner"} // ConfirmedAgent == nil
+	owner, agent := svc.notifyRecipients(context.Background(), need, "user_owner")
+	if owner != "" || agent != "" {
+		t.Fatalf("an unconfirmed need has no agent to notify, got owner=%q agent=%q", owner, agent)
+	}
+	if got := confirmedAgentID(need); got != "" {
+		t.Fatalf("confirmedAgentID on an unconfirmed need must be empty, got %q", got)
+	}
+}
+
+type fakeResolver struct{}
+
+func (fakeResolver) AgentInboxRecipient(_ context.Context, agentID string) string {
+	if agentID == "agent_x" {
+		return "user_account_for_agent_x"
+	}
+	return ""
+}
+
+func (fakeResolver) InboxRecipientFor(_ context.Context, id string) string {
+	if id == "agent_x" {
+		return "user_account_for_agent_x"
+	}
+	return id
 }

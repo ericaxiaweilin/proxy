@@ -565,11 +565,11 @@ var eventsWithoutNotification = map[string]string{
 // 知道从哪儿下手，而不是重新判断一遍「这个到底要不要通知」。
 var eventsPendingNotificationDecision = map[string]string{
 	// ── 见面/撮合：这些是用户明确在等的消息 ──────────────────────────────
-	"CityCompanionNeedCreated":    "该通知：收件人=可接单的 creator 群（要分批/扇出，不能一人一条）",
-	"CityCompanionConfirmed":      "该通知：收件人=发起需求方",
-	"CityCompanionRouteAccepted":  "该通知：收件人=双方",
-	"CityCompanionRouteGenerated": "该通知：收件人=发起方（路线生成完成）",
-	"CityCompanionCompleted":      "该通知：收件人=双方",
+	// CityCompanionNeedCreated 刻意**不映射**：它是「向所有可接单的 creator 广播」。
+	// 「谁该收到、以什么频率、最多能有多少个接收方」是产品决定，不是实现细节 ——
+	// 没有通知偏好与限流之前发广播等于骚扰。要做的话需要先定：分批？按匹配度排序？
+	// 接单上限？这些定下来之前，这条事件走 default 安静跳过是有意的选择。
+	"CityCompanionNeedCreated": "广播给所有可接单 creator：收件人范围/频率/上限都是产品决定，没有偏好与限流之前发广播等于骚扰",
 
 	// ── 订单/履约 ────────────────────────────────────────────────────────
 	"OfferAccepted":                 "刻意不发：它和 OrderCreatedFromOffer 在同一批 domainEvents 里，单发会让同件事收两条（见 inboxForEvent 头注释第 4 条）",
@@ -805,5 +805,46 @@ func TestOrderCancelledDoesNotEchoTheOtherPartysFreeText(t *testing.T) {
 	}
 	if strings.Contains(body, "0912") || strings.Contains(body, "别打给他") {
 		t.Fatalf("the other party's free text must not be echoed into the notification body: %q", body)
+	}
+}
+
+// MERCHANT-CREATOR-NOTIFY-001：同城伴游四条通知。
+//
+// 收件人是 payload.notifyPrincipalId（citycompanion 侧算好的对手方，agent id 已经
+// 解析成 user account）。CityCompanionNeedCreated 刻意不映射 —— 广播给所有可接单的
+// creator 是产品决定（范围/频率/上限），没有偏好与限流之前发广播等于骚扰。
+func TestCityCompanionNotificationsUseTheResolvedRecipient(t *testing.T) {
+	for _, eventType := range []string{
+		"CityCompanionConfirmed", "CityCompanionRouteGenerated",
+		"CityCompanionRouteAccepted", "CityCompanionCompleted",
+	} {
+		recipient, title, body, _, ok := inboxForEvent(testEvent(eventType, "actor_u1", "ccn_1", map[string]any{
+			"notifyPrincipalId": "user_counterparty", "agentId": "agent_x", "routeVersion": "2",
+		}))
+		if !ok || recipient != "user_counterparty" {
+			t.Fatalf("%s must deliver to notifyPrincipalId, got %q (ok=%v)", eventType, recipient, ok)
+		}
+		if title == "" || body == "" {
+			t.Fatalf("%s must carry copy, got %q / %q", eventType, title, body)
+		}
+		if recipient == "actor_u1" {
+			t.Fatalf("%s delivered the notification back to the actor", eventType)
+		}
+		if recipient, _, _, _, ok := inboxForEvent(testEvent(eventType, "actor_u1", "ccn_1", map[string]any{
+			"agentId": "agent_x",
+		})); ok {
+			t.Fatalf("%s without notifyPrincipalId must NOT be delivered (went to %q)", eventType, recipient)
+		}
+	}
+}
+
+// 广播类事件**不许**被映射：CityCompanionNeedCreated 是「向所有可接单的 creator 广播」。
+// 这条钉住「没有偏好与限流之前不广播」这个决定 —— 谁要加这个 case，会在这里红。
+func TestCityCompanionNeedCreatedIsNotBroadcast(t *testing.T) {
+	recipient, _, _, _, ok := inboxForEvent(testEvent("CityCompanionNeedCreated", "owner_u1", "ccn_1", map[string]any{
+		"ownerUserId": "owner_u1", "budgetVnd": int64(500000), "meeting": "coffeeshop",
+	}))
+	if ok {
+		t.Fatalf("a broadcast must not be delivered from a single event payload (got %q) — 收件人范围/频率/上限是产品决定", recipient)
 	}
 }

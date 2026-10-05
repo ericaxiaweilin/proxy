@@ -15,6 +15,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/matching"
+	"github.com/proxy-app/proxy-api/internal/notification"
 )
 
 // CityCompanionNeed 是城市同行需求的聚合。
@@ -198,6 +199,59 @@ type Service struct {
 	pool       []*Candidate
 	supplier   Supplier
 	clock      clock.Clock
+	// personInboxRecipient 把「指代人的 id」解析成**可投递**的收件人
+	// （MERCHANT-CREATOR-NOTIFY-001）。
+	//
+	// 为什么这个域需要它：候选来自 supply（SupplyCandidate.AgentID），所以
+	// need.ConfirmedAgent.AgentId 是 **agent id** —— 而 agent id 不是任何会话的
+	// principal（本地库 121 个 creator，0 个的 agent_id 是 user account；sessions
+	// 里 principal_id LIKE 'agent_%' 为 0 行）。拿它当收件人的通知会正确落库然后
+	// 永远没人读到。规则只有一条，所以实现在 notification 包里，各域共用。
+	//
+	// nil = 没接 = 这类通知没有收件人（事件照发，映射层跳过）。
+	personInboxRecipient func(ctx context.Context, id string) string
+}
+
+// confirmedAgentID 安全取已确认的 agent id（没确认过时是空串而不是 panic）。
+func confirmedAgentID(need CityCompanionNeed) string {
+	if need.ConfirmedAgent == nil {
+		return ""
+	}
+	return need.ConfirmedAgent.AgentID
+}
+
+// SetPersonInboxRecipient 接上收件人解析（见 Service.personInboxRecipient）。
+func (s *Service) SetPersonInboxRecipient(resolver notification.AgentInboxResolver) {
+	if resolver == nil {
+		s.personInboxRecipient = nil
+		return
+	}
+	s.personInboxRecipient = resolver.InboxRecipientFor
+}
+
+// notifyRecipients 算出这条本单事件要通知的人（去掉 actor）。
+//
+// owner 侧是 user account（need.OwnerUserID，实测 5/5 都是真账号）⇒ 原样即可；
+// agent 侧是 agent id ⇒ 必须解析。两边都可能为空（历史行 / 没接解析器）⇒ 返回空串，
+// 由调用点决定发不发事件。
+func (s *Service) notifyRecipients(ctx context.Context, need CityCompanionNeed, actorID string) (owner, agent string) {
+	resolve := func(id string) string {
+		if s.personInboxRecipient == nil {
+			return ""
+		}
+		return notification.RecipientOrEmpty(s.personInboxRecipient(ctx, notification.RecipientOrEmpty(id)))
+	}
+	rawOwner := notification.RecipientOrEmpty(need.OwnerUserID)
+	if rawOwner != "" && rawOwner != actorID {
+		owner = resolve(rawOwner)
+	}
+	// ConfirmedAgent 是**指针**，没确认过的本单是 nil —— 直接取字段会 panic。
+	// （这个 nil 是既有测试 TestGenerateAndAcceptRoute 抓出来的：一条没确认过的
+	// 本单走完成/路线路径就会 500。）
+	if need.ConfirmedAgent != nil && need.ConfirmedAgent.AgentID != "" && need.ConfirmedAgent.AgentID != actorID {
+		agent = resolve(need.ConfirmedAgent.AgentID)
+	}
+	return owner, agent
 }
 
 // DurationHours 把 "4H"/"8H" 解析为小时数。
@@ -564,12 +618,16 @@ func (s *Service) confirm(ctx context.Context, e command.Envelope) command.Resul
 	need.Lifecycle = "CONFIRMED"
 	need.Version++
 	need.UpdatedAt = s.clock.Now().UTC()
+	// 收件人 = 本单主人（等的就是这个）；agent 是 actor，不通知自己。
+	ownerRecipient, _ := s.notifyRecipients(ctx, need, e.Actor.ID)
 	domainEvents := []event.DomainEvent{event.New("CityCompanionConfirmed", "CityCompanionNeed", need.ID, need.Version, e.Principal.ID, e.CorrelationID, e.CommandID, need.UpdatedAt, map[string]any{
 		"agentId":           p.AgentID,
 		"offerVnd":          p.OfferVND,
 		"includeCafe":       p.IncludeCafe,
 		"includeRestaurant": p.IncludeRestaurant,
 		"servicePriceNote":  "本单服务价格，不属于人的长期标价",
+		// 缺收件人 ⇒ 事件里不带这个键，映射层跳过（事实照旧进 outbox 与审计）。
+		"notifyPrincipalId": ownerRecipient,
 	})}
 	if err := s.repository.UpdateNeed(ctx, need, p.ExpectedVersion); err != nil {
 		if errors.Is(err, ErrVersionConflict) {
@@ -605,8 +663,15 @@ func (s *Service) complete(ctx context.Context, e command.Envelope) command.Resu
 	need.Lifecycle = "COMPLETED"
 	need.Version++
 	need.UpdatedAt = s.clock.Now().UTC()
+	// 完成由一方触发 ⇒ 通知**对手方**（谁完成都不该收到自己的通知）。
+	ownerRecipient, agentRecipient := s.notifyRecipients(ctx, need, e.Actor.ID)
+	notify := ownerRecipient
+	if notify == "" {
+		notify = agentRecipient
+	}
 	domainEvents := []event.DomainEvent{event.New("CityCompanionCompleted", "CityCompanionNeed", need.ID, need.Version, e.Principal.ID, e.CorrelationID, e.CommandID, need.UpdatedAt, map[string]any{
-		"agentId": need.ConfirmedAgent.AgentID,
+		"agentId":           confirmedAgentID(need),
+		"notifyPrincipalId": notify,
 	})}
 	if err := s.repository.UpdateNeed(ctx, need, p.ExpectedVersion); err != nil {
 		if errors.Is(err, ErrVersionConflict) {
@@ -762,11 +827,14 @@ func (s *Service) generateRoute(ctx context.Context, e command.Envelope) command
 	need.Route = &route
 	need.Version++
 	need.UpdatedAt = s.clock.Now().UTC()
+	// 路线生成完，接单的 creator 才是下一步要行动的人。
+	_, agentRecipient := s.notifyRecipients(ctx, need, e.Actor.ID)
 	domainEvents := []event.DomainEvent{event.New("CityCompanionRouteGenerated", "CityCompanionNeed", need.ID, need.Version, e.Principal.ID, e.CorrelationID, e.CommandID, need.UpdatedAt, map[string]any{
-		"routeVersion": route.Version,
-		"style":        route.Style,
-		"stops":        stopNames(stops),
-		"note":         "AI involvement HIGH / transaction authority LOW：路线是建议方案，不锁定消费/价格/人选/商家安排",
+		"notifyPrincipalId": agentRecipient,
+		"routeVersion":      route.Version,
+		"style":             route.Style,
+		"stops":             stopNames(stops),
+		"note":              "AI involvement HIGH / transaction authority LOW：路线是建议方案，不锁定消费/价格/人选/商家安排",
 	})}
 	if err := s.repository.UpdateNeed(ctx, need, p.ExpectedVersion); err != nil {
 		if errors.Is(err, ErrVersionConflict) {
@@ -810,8 +878,11 @@ func (s *Service) acceptRoute(ctx context.Context, e command.Envelope) command.R
 	need.Route.Accepted = true
 	need.Version++
 	need.UpdatedAt = s.clock.Now().UTC()
+	// 对方接受了路线 ⇒ 本单主人知道可以出发了。
+	ownerRecipient, _ := s.notifyRecipients(ctx, need, e.Actor.ID)
 	domainEvents := []event.DomainEvent{event.New("CityCompanionRouteAccepted", "CityCompanionNeed", need.ID, need.Version, e.Principal.ID, e.CorrelationID, e.CommandID, need.UpdatedAt, map[string]any{
-		"routeVersion": need.Route.Version,
+		"routeVersion":      need.Route.Version,
+		"notifyPrincipalId": ownerRecipient,
 	})}
 	if err := s.repository.UpdateNeed(ctx, need, p.ExpectedVersion); err != nil {
 		if errors.Is(err, ErrVersionConflict) {

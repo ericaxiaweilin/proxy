@@ -368,6 +368,35 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 		}
 		return "", "", "", "", false
 
+	// ── 同城伴游（MERCHANT-CREATOR-NOTIFY-001）─────────────────────────
+	//
+	// 收件人是 payload.notifyPrincipalId（citycompanion 侧算好的对手方，agent id
+	// 已经解析成 user account）。缺它就不投 —— 绝不回退 actor。
+	//
+	// CityCompanionNeedCreated 刻意**不**映射：它是「向所有可接单的 creator 广播」，
+	// 而「谁该收到、以什么频率、最多能有多少个接收方」是产品决定，不是实现细节。
+	// 没有偏好/限流机制之前发广播等于骚扰。理由记在 eventsPendingNotificationDecision。
+	case "CityCompanionConfirmed":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "有人接了你的单", "对方已确认，去看看报价和包含项", "", true
+		}
+		return "", "", "", "", false
+	case "CityCompanionRouteGenerated":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "路线已生成", "去看看这次安排的路线", "", true
+		}
+		return "", "", "", "", false
+	case "CityCompanionRouteAccepted":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "对方接受了路线", "可以按这条路线出发了", "", true
+		}
+		return "", "", "", "", false
+	case "CityCompanionCompleted":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "这单完成了", "去给对方一个评价吧", "", true
+		}
+		return "", "", "", "", false
+
 	// ── 订单履约（MERCHANT-CREATOR-NOTIFY-001）─────────────────────────
 	//
 	// 收件人 = payload.notifyPrincipalId（订单对手方的**可投递** id，去掉 actor），
