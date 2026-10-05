@@ -14850,7 +14850,8 @@ fi
 #      里早就 `new NotificationClient(...)` 传下来了，AppShell 只把它写进类型、
 #      从没调过一次。服务端 notification 域（ListInbox / MarkInboxRead）和移动端
 #      notification-client.ts 都齐了，缺的只有用户能看见的这一头。
-#   2. 角标是 `badgeText(unreadCount(inboxItems))` **数**出来的，不是原型那个写死的
+#   2. 角标是**数**出来的（分页前是 `badgeText(unreadCount(inboxItems))`，分页后优先
+#      用服务端 `inboxUnreadTotal`，见下面 2026-10-05 的口径更新），不是原型那个写死的
 #      "9+"；0 条时 badgeText 回 undefined ⇒ 不画角标，而不是画一个 "0"。
 #   3. 界面里不许出现原型那四条示意数据（后端一条都没有），也不许把
 #      `resolveDeepLink` 接上 —— 服务端那个函数还是桩（internal/notification/service.go：
@@ -14864,11 +14865,15 @@ if [ -f "$NOTIF_BELL_SHELL" ] && [ -f "$NOTIF_BELL_CENTER" ] && [ -f "$NOTIF_BEL
     echo "  FAIL [NOTIF-BELL-001]: the notification-bell regression test is missing." >&2
     exit 1
   fi
-  if ! grep -qF 'notification.listInbox()' "$NOTIF_BELL_SHELL"; then
+  if ! grep -qF 'notification.listInboxPage()' "$NOTIF_BELL_SHELL"; then
     echo "  FAIL [NOTIF-BELL-001]: AppShell 不再读 notification prop —— 铃铛又变回一个没有数据的装饰。" >&2
     exit 1
   fi
-  if ! grep -qF 'badgeText(unreadCount(inboxItems))' "$NOTIF_BELL_SHELL"; then
+  # 2026-10-05 口径更新（383abe48 收件箱分页 + 90 天保留期）：方法随分页改名
+  # listInbox → listInboxPage；角标改为**优先用服务端 unreadTotal**，因为分页之后
+  # 本地数出来的只是「这一页的未读数」，会被页大小封顶（app-shell.tsx:254 写明了）。
+  # 这条要守的东西没变：角标是数出来的，不是原型那个写死的 "9+"。
+  if ! grep -qF 'badgeText(inboxUnreadTotal || unreadCount(inboxItems))' "$NOTIF_BELL_SHELL"; then
     echo "  FAIL [NOTIF-BELL-001]: 顶栏角标不再由未读数算出（原型那个写死的 9+ 回来了）。" >&2
     exit 1
   fi
@@ -15104,7 +15109,10 @@ if [ -f "$NOTIF_PG_REPO" ] && [ -f "$NOTIF_SERVICE" ] && [ -f "$NOTIF_MOBILE_CLI
     echo "        nil 会被 json.Marshal 写成 null，收件箱为空的用户会看到「通知没取到」。" >&2
     exit 1
   fi
-  if ! grep -qF 'items = []InboxItem{}' "$NOTIF_SERVICE"; then
+  # 2026-10-05 口径更新：分页把返回值包成了 InboxPage，兜空切片那行随之变成
+  # `page.Items = []InboxItem{}`（service.go:535，仍由 `if page.Items == nil` 守着）。
+  # 要守的东西没变：命令面自己兜一层，不靠某一个 Repository 的自觉。
+  if ! grep -qF 'page.Items = []InboxItem{}' "$NOTIF_SERVICE"; then
     echo "  FAIL [NOTIF-EMPTY-LIST-001]: 命令面不再兜空切片 ——" >&2
     echo "        只修 PG 等于把契约挂在某一个实现的自觉上，换第三个 Repository 就复发。" >&2
     exit 1
@@ -15167,7 +15175,9 @@ if [ -f "$NOTIF_PUSH" ] && [ -f "$NOTIF_PUSH_APNS" ] && [ -f "$NOTIF_PUSH_FCM" ]
     exit 1
   fi
   # 退役必须只认 Unregistered：瞬时故障退役是**不可逆**的，用户从此收不到推送。
-  if ! grep -qF 'errors.Is(err, ErrDeviceTokenUnregistered) && d.retire(ctx, token.ID)' "$NOTIF_PUSH"; then
+  # （2026-10-05 口径更新：retire 改收整个 token 行 —— 退役要按行主键更新，
+  # 只有 id 不够；条件本身一个字没动。TestDispatcherDoesNotRetireTokensOnATransientFailure 是同一条的行为证明。）
+  if ! grep -qF 'errors.Is(err, ErrDeviceTokenUnregistered) && d.retire(ctx, token)' "$NOTIF_PUSH"; then
     echo "  FAIL [NOTIF-PUSH-001]: 令牌退役不再限定 Unregistered ——" >&2
     echo "        APNs 抖一下就把好令牌标成 INACTIVE，用户永久收不到推送且没人会去修。" >&2
     exit 1
