@@ -285,9 +285,12 @@ export function MerchantPromoSurface({ supply, merchantId, merchantName, marketI
       </Pressable>
 
       <Modal animationType="slide" transparent visible={sheet !== undefined} onRequestClose={() => setSheet(undefined)}>
-        <Pressable style={s.backdrop} onPress={() => setSheet(undefined)}>
-          <Pressable style={s.sheet} onPress={() => undefined}>
-            <ScrollView keyboardShouldPersistTaps="handled">
+        {/* 背景和弹层是兄弟节点：弹层包在可点的 Pressable 里会吃掉滑动，ScrollView 不收缩时
+            长表单（调整折扣）被 maxHeight 裁掉、底部按钮够不着（CONTENT-TASK-001 实机发现）。 */}
+        <View style={s.modalRoot}>
+          <Pressable style={s.backdrop} onPress={() => setSheet(undefined)} accessibilityLabel="关闭" />
+          <View style={s.sheet}>
+            <ScrollView keyboardShouldPersistTaps="handled" style={s.sheetScroll}>
               {sheet?.kind === "adjust" ? (
                 <View>
                   <Text selectable style={s.sheetTitle}>调整折扣</Text>
@@ -341,8 +344,8 @@ export function MerchantPromoSurface({ supply, merchantId, merchantName, marketI
                 </View>
               ) : null}
             </ScrollView>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -550,7 +553,9 @@ const s = StyleSheet.create({
   segmentOn: { backgroundColor: "#FFFFFF" },
   segmentText: { color: P.sub, fontSize: 12, fontWeight: "700" },
   segmentTextOn: { color: P.text },
-  backdrop: { backgroundColor: "rgba(0,0,0,0.35)", flex: 1, justifyContent: "flex-end" },
+  modalRoot: { backgroundColor: "rgba(0,0,0,0.35)", flex: 1, justifyContent: "flex-end" },
+  backdrop: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  sheetScroll: { flexShrink: 1 },
   sheet: { backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: "88%", padding: 20, paddingBottom: 34 },
   sheetTitle: { color: P.text, fontSize: 16, fontWeight: "800" },
   qrBig: { backgroundColor: "#FFFFFF", borderColor: P.border, borderRadius: 16, borderWidth: 1, marginVertical: 16, padding: 14 },

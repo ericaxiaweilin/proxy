@@ -13,7 +13,7 @@
 
 import { pickActiveMerchant, setActiveMerchantId, subscribeActiveMerchant } from "../active-merchant-store";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 // MERCHANT-ACTIVITY-DETAIL-001：推广活动要真能复制链接 / 出真码，不是摆两个图标。
 import * as Clipboard from "expo-clipboard";
 // ACTIVITY-COVER-001：与横滑卡 / 门店相册同一套图片渲染。
@@ -30,11 +30,12 @@ import type { SupplyClient, SupplierCandidate, AgentPassport, CollabInvitation, 
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations, resolveCreatorPhoto } from "./merchant-creator-recommendations";
 import { MerchantPromoSurface } from "./merchant-promo";
+import { MerchantContentSurface } from "./merchant-content";
 import { InviteSchedulePicker, matchDaySlot } from "../components/invite-schedule-picker";
 import { combineDayAndTime, dayOptions, timeSlotOptions, type TimeSlot } from "../direct-invite-schedule";
 // CREATOR-LIST-CARD-001：报价格式化与横滑卡共用同一个纯模块实现 —— 同一个人不许两个价。
 import { formatReferencePrice } from "../creator-pricing";
-import { creatorRatingLabel, formatFansCount, formatInviteDateTime, formatPriceRange, formatRatePercent, formatServiceVolume, labelInvitationPurpose, labelMarket, labelLanguage, labelVertical } from "../creator-capability-labels";
+import { creatorRatingLabel, formatFansCount, formatInviteDateTime, formatPriceRange, formatRatePercent, formatServiceVolume, labelInvitationPurpose, labelInvitationStatus, labelMarket, labelLanguage, labelServiceType, labelVertical } from "../creator-capability-labels";
 // CREATOR-SOCIAL-001：社媒 canonical 链接与平台中文名（和服务端封闭集合对齐）。
 import { socialPlatformLabel, socialProfileUrl } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
@@ -42,7 +43,11 @@ import { localApiBaseUrl } from "../native-clients";
 import { activityCoverUri } from "../media-thumb-url";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
-import { ProxyBackGlyph, ProxyEmptyState, ProxyLoading } from "../components/proxy-foundation";
+import { ProxyBackGlyph, ProxyEmptyState, ProxyIconButton, ProxyLoading } from "../components/proxy-foundation";
+// MERCHANT-ACTIVITY-DETAIL-001：活动二维码走共享二维码组件（和门店码 / 专属码同一套）。
+import { ProxyQrCode } from "../components/proxy-qr-code";
+// 活动码载荷（PROXY-ACTIVITY:<编号>）由扫码解析模块统一生成，不在这里现拼。
+import { activityQrPayload } from "../profile-qr";
 
 type MerchantPage =
   | "root"
@@ -198,6 +203,30 @@ function activitySettlementLabel(term: string | undefined): string {
   return "—";
 }
 
+// MERCHANT-ACTIVITY-DETAIL-001（2026-10-04）：画出来的键，今天按不了。
+//
+// 这不是偷懒的占位 —— 是把「有这颗键但服务端还没这条能力」如实说出来。原型
+// deepseek_html_20261004_e74898 的活动详情有六个键（报名名单 / 提醒报名 / 编辑活动 /
+// 推广活动 / 上传封面 / 取消活动），活动域只实现了推广活动这一条真链路：
+//   · 报名名单 —— 没有「列这场活动的报名人」的命令
+//   · 提醒报名 —— 没有推送通道
+//   · 编辑活动 —— 没有改活动的命令（PublishActivity 只能新建）
+//   · 上传封面 —— 商家端没接媒体上传
+//   · 取消活动 —— CancelActivity 是**报名者**取消自己的报名
+//     （participation.go TransitionParticipation 到 PartCancelled），
+//     商家取消整场活动是另一条状态机，服务端没有
+// 形状照原型摆（两列网格），但按不了，并且明说按不了 —— 点不进去却长得
+// 能点的按钮，比不画更坏（PLACEHOLDER-001）。
+function UnavailableActionTile({ icon, title }: { icon: ProxyIconName; title: string }): React.JSX.Element {
+  return (
+    <View accessibilityLabel={`${title}（暂不可用）`} accessibilityState={{ disabled: true }} style={styles.actActionTile}>
+      <ProxyIcon color={color.muted} name={icon} size={19} />
+      <Text selectable style={[styles.actActionText, styles.actActionTextOff]}>{title}</Text>
+      <Text selectable style={styles.actActionOff}>暂不可用</Text>
+    </View>
+  );
+}
+
 export function MerchantMeR21Replacement({
   business,
   supply,
@@ -272,10 +301,6 @@ export function MerchantMeR21Replacement({
   // 当前商家账号的门店：活动导流 / 场景运营都按它认「本店」。
   const [myStores, setMyStores] = useState<BusinessStoreWire[]>([]);
   const [creatorView, setCreatorView] = useState<"MATCH" | "CREATORS" | "COLLABS" | "RESULTS">("MATCH");
-  // MERCHANT-CREATOR-CONTENT-001：生产内容页的真实数据源 —— 本店发出的定向邀约
-  // （ListCollabInvitations role=sent）。purpose=UGC 那一类就是内容生产合作，
-  // 页上每一行都是服务端返回的邀约，不是页面里写死的样例。
-  const [contentInvites, setContentInvites] = useState<CollabInvitation[] | undefined>(undefined);
   const [creatorQuery, setCreatorQuery] = useState("");
   const [myInvitation, setMyInvitation] = useState<CollabInvitation | undefined>(undefined);
   const [inviteFormOpen, setInviteFormOpen] = useState(false);
@@ -328,26 +353,6 @@ export function MerchantMeR21Replacement({
     return () => { active = false; };
   }, [page, creatorView, supply, activeAccount]);
 
-  // MERCHANT-CREATOR-CONTENT-001：进生产内容页才拉邀约（同一批数据在 creatorDetail
-  // 里已经为了单个人拉过一次，不重复预拉）。读失败照进空态，不挡整页。
-  useEffect(() => {
-    if (page !== "content" || !supply || !activeAccount) return;
-    let active = true;
-    setContentInvites(undefined);
-    supply.listSentInvitations({ merchantId: activeAccount.id })
-      .then((invs) => {
-        if (!active) return;
-        // 新的在前；同一个人只留最新一单 —— 旧的那单已经被这单取代了，
-        // 全量铺开会把同一个人重复数成好几条内容合作。
-        const latestPerAgent = new Map<string, CollabInvitation>();
-        for (const inv of [...invs].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))) {
-          if (!latestPerAgent.has(inv.agentId)) latestPerAgent.set(inv.agentId, inv);
-        }
-        setContentInvites([...latestPerAgent.values()]);
-      })
-      .catch(() => { if (active) setContentInvites([]); });
-    return () => { active = false; };
-  }, [page, supply, activeAccount]);
 
   // MERCHANT-CREATOR-INVITE-001：发出 / 还价 / 接受 / 拒绝 / 撤回定向邀约。
   // merchantId 永远取当前 activeAccount（网关验成员身份后盖章）。
@@ -1135,27 +1140,189 @@ export function MerchantMeR21Replacement({
     );
   }
 
+  // MERCHANT-ACTIVITY-DETAIL-001（2026-10-04）：按原型 deepseek_html_20261004_e74898
+  // 重做这一页。以前它只有一张 summary 卡 + 三行入口（其中「定向券」跳的是本页
+  // 根本不存在的子页），原型上的读数一个都没有。
+  //
+  // 诚实边界（这一版刻意没做的，都是没有服务端能力的，不是忘了做）：
+  //   · 报名名单 / 提醒报名 / 编辑活动 / 取消活动 —— 活动域只实现了
+  //     List / Publish / ToggleInterest / Join / CancelJoin(自己的报名) /
+  //     Checkin / MarkNoShow，没有名册、没有推送、没有改活动、没有商家取消活动
+  //     （CancelActivity 是**报名者**取消自己的报名，见 participation.go）。
+  //     这四个键画成「暂不可用」，不摆点得进去却什么都不做的按钮。
+  //   · 评论分析（情感占比 / 高频问题 / 关键词云）—— 全仓 0 行后端，
+  //     界面上是诚实空态，不是拿假数字画一条彩色进度条。
+  //   · 活动二维码 / 活动链接 —— 见 activityShareText 的注释。
   if (page === "activityDetail" && selectedActivity) {
+    const act = selectedActivity;
+    const coverUri = activityCoverUri(act, localApiBaseUrl);
+    const capacity = act.capacity ?? 0;
+    const gap = capacity > 0 ? Math.max(0, capacity - act.joined) : 0;
+    const copyShareText = async (): Promise<void> => {
+      await Clipboard.setStringAsync(activityShareText(act));
+      setActivityLinkCopied(true);
+    };
     return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
-          {detailHead({ onBack: () => setPage("activity"), title: selectedActivity.title })}
-          {summary({
-            meta: `${selectedActivity.time} · ${selectedActivity.venueName}`,
-            stats: [
-              [selectedActivity.people || "—", "人数"],
-              [selectedActivity.joined.toString(), "已报名"],
-              [selectedActivity.capacity?.toString() ?? "—", "容量"],
-              [selectedActivity.priceLabel, "费用"],
-            ],
-            title: selectedActivity.title,
+          {detailHead({
+            onBack: () => setPage("activity"),
+            title: "活动详情",
+            sub: activityStatusLabel(act.status),
+            right: (
+              <ProxyIconButton
+                accessibilityLabel="推广活动"
+                onPress={() => { setActivityLinkCopied(false); setActivitySheet("share"); }}
+              >
+                <ProxyIcon color={color.ink} name="shareUp" size={19} />
+              </ProxyIconButton>
+            ),
           })}
-          <SimpleRows onPress={setPage} rows={[["已锁定 Creator", `${creators.length} 位当前可匹配`, "creator"], ["定向券", "查看活动关联权益", "voucher"], ["结果", "等待真实归因数据", "sales"]]} />
+
+          {/* 封面 + 标题 + 三行 meta。活动照片没上传就显示诚实占位，
+              不拿场景图 / 门店图冒充这张活动的实拍（ACTIVITY-COVER-001）。 */}
+          <View style={styles.actCard}>
+            {coverUri ? (
+              <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-activity-detail:${act.activityId}`} source={{ uri: coverUri }} style={styles.actCover} transition={0} />
+            ) : (
+              <View style={styles.actCoverEmpty}>
+                <ProxyIcon color={color.muted} name="camera" size={22} />
+                <Text selectable style={styles.meta}>活动照片待上传</Text>
+              </View>
+            )}
+            <View style={styles.actBody}>
+              <Text selectable style={styles.actTitle}>{act.title}</Text>
+              {act.venueName !== "" ? <View style={styles.actMetaRow}><ProxyIcon color={color.muted} name="pin" size={14} /><Text selectable style={styles.meta}>{act.venueName}</Text></View> : null}
+              {act.time !== "" ? <View style={styles.actMetaRow}><ProxyIcon color={color.muted} name="clock" size={14} /><Text selectable style={styles.meta}>{act.time}</Text></View> : null}
+              {act.consumption !== "" ? <View style={styles.actMetaRow}><ProxyIcon color={color.muted} name="infoCircle" size={14} /><Text selectable style={styles.meta}>{act.consumption}</Text></View> : null}
+            </View>
+          </View>
+
+          {/* 三个读数：感兴趣 / 已报名 / 评论。全是活动契约里的字段
+              （interested / joined / qaCount），不是页面里现编的数。 */}
+          <View style={styles.actMetrics}>
+            {([[String(act.interested), "感兴趣", color.proxyPurple], [String(act.joined), "已报名", color.proxyGreen], [String(act.qaCount), "评论", color.error]] as const).map(([value, label, tone]) => (
+              <View key={label} style={styles.actMetricCell}>
+                <Text selectable style={[styles.actMetricValue, { color: tone }]}>{value}</Text>
+                <Text selectable style={styles.actMetricLabel}>{label}</Text>
+              </View>
+            ))}
+          </View>
+
+          {capacity > 0 ? (
+            <View style={styles.actCard}>
+              <View style={styles.actProgressHead}>
+                <Text selectable style={styles.actSectionLabel}>报名进度</Text>
+                <Text selectable style={styles.actProgressValue}>{`${act.joined} / ${capacity} 人`}</Text>
+              </View>
+              <View style={styles.actProgressTrack}>
+                <View style={[styles.actProgressFill, { width: `${Math.min(100, Math.round((act.joined / capacity) * 100))}%` }]} />
+              </View>
+              <Text selectable style={styles.meta}>
+                {gap > 0 ? `还差 ${gap} 人满员` : "已满员"}
+                {act.shares > 0 ? ` · 已分享 ${act.shares} 次` : ""}
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={styles.actCard}>
+            <Text selectable style={styles.actSectionLabel}>活动权益</Text>
+            <Text selectable style={styles.actBenefit}>{act.benefit !== "" ? act.benefit : "本店未填写权益"}</Text>
+            <View style={styles.actMetaGrid}>
+              <View style={styles.actMetaCell}>
+                <Text selectable style={styles.actMetaLabel}>参与费用</Text>
+                <Text selectable style={styles.actMetaValue}>{activityFeeLabel(act)}</Text>
+              </View>
+              <View style={styles.actMetaCell}>
+                <Text selectable style={styles.actMetaLabel}>付费方式</Text>
+                <Text selectable style={styles.actMetaValue}>{activitySettlementLabel(act.consumptionTerm)}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* 评论分析：诚实空态。原型上这一块最抢眼（情感占比条 + 高频问题 +
+              关键词云），但 sentiment / comment insight 这套数据全仓一行都没有
+              —— 画出来就是编的。等分析接口上线，这里换成真数据。 */}
+          <View style={styles.actCard}>
+            <Text selectable style={styles.actSectionLabel}>用户评论分析</Text>
+            <ProxyEmptyState
+              title="评论分析还没接入"
+              sub={`这场活动目前有 ${act.qaCount} 条评论；情感占比与高频问题要等服务端分析上线才显示，这里不拿假数字占位。`}
+            />
+          </View>
+
+          <Text selectable style={styles.actionSectionLabel}>商家操作</Text>
+          <View style={styles.actActionGrid}>
+            <UnavailableActionTile icon="group" title="报名名单" />
+            <UnavailableActionTile icon="bell" title="提醒报名" />
+            <UnavailableActionTile icon="editProfile" title="编辑活动" />
+            <Pressable accessibilityLabel="推广活动" onPress={() => { setActivityLinkCopied(false); setActivitySheet("share"); }} style={[styles.actActionTile, styles.actActionPrimary]}>
+              <ProxyIcon color={color.ink} name="shareUp" size={19} />
+              <Text selectable style={styles.actActionText}>推广活动</Text>
+            </Pressable>
+          </View>
+          <Text selectable style={styles.actActionNote}>
+            报名名单、提醒报名、编辑活动需要服务端补对应能力（名册 / 推送 / 改活动），今天按不了。
+          </Text>
           <View style={styles.actions}>
-            <Pressable onPress={() => setPage("creator")} style={styles.primary}><Text selectable style={styles.primaryText}>继续补位</Text></Pressable>
-            <Pressable onPress={() => setPage("sales")} style={styles.secondary}><Text selectable style={styles.secondaryText}>查看结果</Text></Pressable>
+            <Pressable accessibilityLabel="继续补位，去 Creator 人才库" onPress={() => setPage("creator")} style={styles.secondary}>
+              <Text selectable style={styles.secondaryText}>继续补位</Text>
+            </Pressable>
+            <Pressable accessibilityLabel="查看结果" onPress={() => setPage("sales")} style={styles.secondary}>
+              <Text selectable style={styles.secondaryText}>查看结果</Text>
+            </Pressable>
           </View>
         </ScrollView>
+
+        {/* 推广面板。原型四个去向里三个今天是真动作：复制 / 系统分享 / 二维码
+            （扫码器已认 PROXY-ACTIVITY:<编号>，见 profile-qr.ts）。推送给合作
+            Creator、推送给同城粉丝要受众查询与推送投放，那部分还没做 ——
+            做不了就不摆成能点的，写在下面那行说明里。 */}
+        <Modal animationType="slide" transparent visible={activitySheet !== undefined} onRequestClose={() => setActivitySheet(undefined)}>
+          <Pressable accessibilityLabel="关闭推广面板" style={styles.sheetBackdrop} onPress={() => setActivitySheet(undefined)}>
+            <Pressable style={styles.sheet} onPress={() => undefined}>
+              {activitySheet === "qr" && act.code !== undefined && act.code !== "" ? (
+                <View>
+                  <Text selectable style={styles.sheetTitle}>活动二维码</Text>
+                  <View style={styles.qrBig}>
+                    <ProxyQrCode value={activityQrPayload(act.code) ?? ""} size={200} />
+                  </View>
+                  <Text selectable style={styles.sheetHint}>{`编号 ${act.code} · 顾客用 Proxy「扫一扫」扫这个码就能进这场活动。`}</Text>
+                  <Pressable accessibilityLabel="返回推广面板" onPress={() => setActivitySheet("share")} style={styles.sheetClose}>
+                    <Text selectable style={styles.sheetCloseText}>返回</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <>
+              <Text selectable style={styles.sheetTitle}>推广活动</Text>
+              <Pressable accessibilityLabel="复制活动信息" onPress={() => void copyShareText()} style={styles.sheetRow}>
+                <Text selectable style={styles.sheetRowText}>{activityLinkCopied ? "已复制活动信息" : "复制活动信息"}</Text>
+                <Text selectable style={styles.chev}>›</Text>
+              </Pressable>
+              <Pressable accessibilityLabel="用系统分享发送" onPress={() => { void Share.share({ message: activityShareText(act) }); setActivitySheet(undefined); }} style={styles.sheetRow}>
+                <Text selectable style={styles.sheetRowText}>用系统分享发送</Text>
+                <Text selectable style={styles.chev}>›</Text>
+              </Pressable>
+              {act.code !== undefined && act.code !== "" ? (
+                <Pressable accessibilityLabel="生成活动二维码" onPress={() => setActivitySheet("qr")} style={styles.sheetRow}>
+                  <Text selectable style={styles.sheetRowText}>生成活动二维码</Text>
+                  <Text selectable style={styles.chev}>›</Text>
+                </Pressable>
+              ) : (
+                // 没有服务端分配的活动编号就没有码可发（payload 收编号，不收 URL）。
+                <Text selectable style={styles.sheetHint}>这场活动还没有编号，生成不了二维码。</Text>
+              )}
+              <Text selectable style={styles.sheetHint}>
+                推送给合作 Creator、推送给同城粉丝还没接通：投放要受众查询与推送配额。这里不摆按了没反应的行。
+              </Text>
+              <Pressable accessibilityLabel="关闭" onPress={() => setActivitySheet(undefined)} style={styles.sheetClose}>
+                <Text selectable style={styles.sheetCloseText}>关闭</Text>
+              </Pressable>
+                </>
+              )}
+            </Pressable>
+          </Pressable>
+        </Modal>
       </View>
     );
   }
@@ -1231,75 +1398,30 @@ export function MerchantMeR21Replacement({
   // 原型 deepseek_html_20261004_e74898 / 设计稿 Proxy_Creator_Promo_20261004 的
   // page-content 只有一行眉题「探店短视频」，没有正文；这一页的正文按原型语气补齐，
   // 数据全部来自服务端邀约记录 —— 一行都不许是页面里写死的样例。
+  // CONTENT-TASK-001：生产内容 = 内容任务（UGC 邀约 + 稿件 / 审核 / 发布链接），取代
+  // MERCHANT-CREATOR-CONTENT-001 的邀约列表（那时没有交付数据，「已交付成片」只能写 —）。
+  // 数据源还是同一批邀约，由 ListMerchantContentTasks 在服务端组装，页面不再自己拉邀约。
   if (page === "content") {
-    const invites = contentInvites ?? [];
-    const live = invites.filter((inv) => inv.status === "PENDING" || inv.status === "COUNTERED" || inv.status === "ACCEPTED");
-    const settled = invites.filter((inv) => inv.status === "DECLINED" || inv.status === "CANCELLED" || inv.status === "EXPIRED");
+    if (!supply || !activeAccount) {
+      return (
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            {detailHead({ onBack: () => setPage("creator"), title: "生产内容" })}
+            <Text selectable style={styles.meta}>账号数据没读出来，稍后再试。</Text>
+          </ScrollView>
+        </View>
+      );
+    }
     return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
-          {detailHead({ onBack: () => setPage("creator"), title: "生产内容", sub: "探店、短视频、UGC" })}
-          <View style={styles.search}>
-            <ProxyIcon color={color.muted} name="target" size={18} />
-            <Text selectable style={styles.searchHint}>从人才库挑人发一条 UGC 产出邀约，这里看进度。</Text>
-          </View>
-          {contentInvites === undefined ? <ProxyLoading tone="muted" /> : (
-            <>
-              {summary({
-                title: "内容合作",
-                meta: `${invites.length} 单真实邀约 · 本店发出`,
-                stats: [
-                  [invites.length.toString(), "内容邀约"],
-                  [live.length.toString(), "进行中"],
-                  [settled.length.toString(), "已结束"],
-                  // 交付物（成片/发布链接）这份数据模型里没有字段：邀约只到「接受」，
-                  // 没有「已交付」事件。没数就是没数，不拿「进行中」顶替，也不编。
-                  ["—", "已交付成片"],
-                ],
-              })}
-              {sectionHead("内容邀约", `${invites.length} 单`)}
-              {invites.length === 0 ? (
-                <ProxyEmptyState
-                  title="还没有内容合作"
-                  sub="到 Creator 人才库挑人，发一条 UGC 产出邀约；她会带着档期和报价回你。"
-                />
-              ) : null}
-              {invites.map((inv) => {
-                const purposeLabel = labelInvitationPurpose(inv.purpose);
-                const statusLabel = labelInvitationStatus(inv.status);
-                const when = formatInviteDateTime(inv.startAt, inv.durationH);
-                return (
-                  // 不做成可点的行：这一行只拿得到 agentId，解析不出这个人 ——
-                  // 点了去哪儿都得靠猜。宁可不可点，不摆一个跳去人才库列表的假入口。
-                  // （要约人回页，进她的 creatorDetail 那一路。）
-                  <View key={inv.id} style={styles.contentCollabCard} accessibilityLabel={`内容邀约 ${statusLabel}`}>
-                    <View style={styles.rowCopy}>
-                      <Text selectable numberOfLines={1} style={styles.contentCollabTitle}>
-                        {purposeLabel !== "" ? purposeLabel : labelServiceType(inv.serviceType)}
-                      </Text>
-                      {when !== "" ? <Text selectable style={styles.meta}>{when}</Text> : null}
-                      <Text selectable style={styles.meta}>
-                        {`${formatPriceRange(inv.priceMinVnd, inv.priceMaxVnd, inv.currency)}${inv.negotiable ? " · 可谈" : " · 一口价"}`}
-                      </Text>
-                    </View>
-                    {statusLabel !== "" ? (
-                      <View style={[styles.creatorEligibility, inv.status === "ACCEPTED" ? styles.creatorEligibilityOn : styles.creatorEligibilityOff]}>
-                        <Text selectable style={[styles.creatorEligibilityText, inv.status === "ACCEPTED" ? styles.creatorEligibilityTextOn : styles.creatorEligibilityTextOff]}>{statusLabel}</Text>
-                      </View>
-                    ) : null}
-                  </View>
-                );
-              })}
-              <View style={styles.actions}>
-                <Pressable accessibilityLabel="去 Creator 人才库挑人" onPress={() => setPage("creator")} style={styles.primary}>
-                  <Text selectable style={styles.primaryText}>去人才库挑人</Text>
-                </Pressable>
-                <Pressable accessibilityLabel="查看推广券与活动" onPress={() => onOpenVouchers()} style={styles.secondary}>
-                  <Text selectable style={styles.secondaryText}>推广券与活动</Text>
-                </Pressable>
-              </View>
-            </>
-          )}
+          <MerchantContentSurface
+            supply={supply}
+            merchantId={activeAccount.id}
+            creators={creators.map((c) => ({ agentId: c.agentId, name: c.name, photoUri: resolveCreatorPhoto(c.photos[0]) }))}
+            onBack={() => setPage("creator")}
+            onOpenCreators={() => { setCreatorView("CREATORS"); setPage("creator"); }}
+          />
         </ScrollView>
       </View>
     );
@@ -1747,6 +1869,11 @@ const styles = StyleSheet.create({
   emptyTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
   subPageBack: { marginBottom: 10, paddingVertical: 4 },
   detailHead: { marginBottom: 12 },
+  // MERCHANT-ACTIVITY-DETAIL-001：标题与右侧动作键同一行，状态眉题在标题下面。
+  detailHeadRow: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
+  detailHeadText: { flex: 1, minWidth: 0 },
+  detailSub: { color: color.muted, fontSize: 12, fontWeight: "600", lineHeight: 17, marginTop: 2 },
+  detailHeadActions: { flexDirection: "row", gap: 6, paddingTop: 2 },
   detailTitle: { color: color.ink, fontSize: 24, fontWeight: "900", letterSpacing: -0.7, lineHeight: 30 },
   objectTitle: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 20 },
   summary: { backgroundColor: color.deep, borderRadius: 24, padding: 15 },
@@ -1763,6 +1890,80 @@ const styles = StyleSheet.create({
   activityCover: { backgroundColor: color.surface, borderRadius: 12, height: 64, width: 64 },
   activityCoverEmpty: { alignItems: "center", backgroundColor: color.surface, borderRadius: 12, height: 64, justifyContent: "center", width: 64 },
   activityTop: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
+  // MERCHANT-ACTIVITY-DETAIL-001：活动详情按原型 deepseek_html_20261004_e74898 排的版。
+  // 一律 R3 token + 描边不投影（shadows.card 已经是透明投影，见 theme.tsx），
+  // 不搬原型里的 #d0f55c / #0071e3 / #FF3B30 这些 hex —— 那套色不在 R3 里，
+  // 搬进来就是新的硬编码欠账。
+  actCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, gap: 8, marginTop: 12, overflow: "hidden", padding: 16 },
+  // 封面按原型是 16:9 大图；没有上传就走诚实占位（不拿场景图冒充这张活动的实拍）。
+  actCover: { aspectRatio: 16 / 9, backgroundColor: color.surface, width: "100%" },
+  actCoverEmpty: { alignItems: "center", aspectRatio: 16 / 9, backgroundColor: color.surface, borderBottomColor: color.line, borderBottomWidth: 1, gap: 6, justifyContent: "center", width: "100%" },
+  actBody: { gap: 6, paddingHorizontal: 2, paddingTop: 12 },
+  actTitle: { color: color.ink, fontSize: 18, fontWeight: "900", letterSpacing: -0.4, lineHeight: 24 },
+  actMetaRow: { alignItems: "center", flexDirection: "row", gap: 7 },
+  // 三个读数一格。原型的情感/成功/警示三色在 R3 里没有对应语义位，
+  // 这里用 proxyPurple / proxyGreen / error —— 都是已存在的 token。
+  actMetrics: { flexDirection: "row", gap: 10, marginTop: 12 },
+  actMetricCell: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, gap: 3, paddingVertical: 14 },
+  actMetricValue: { fontSize: 22, fontWeight: "900", letterSpacing: -0.5, lineHeight: 28 },
+  actMetricLabel: { color: color.muted, fontSize: 11, fontWeight: "600" },
+  actProgressHead: { alignItems: "baseline", flexDirection: "row", justifyContent: "space-between" },
+  actProgressValue: { color: color.muted, fontSize: 13, fontWeight: "700" },
+  actProgressTrack: { backgroundColor: color.surface, borderRadius: 99, height: 8, overflow: "hidden" },
+  actProgressFill: { backgroundColor: color.magenta, borderRadius: 99, height: "100%" },
+  actSectionLabel: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 20 },
+  actBenefit: { color: color.ink, fontSize: 14, lineHeight: 20 },
+  actMetaGrid: { borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", gap: 10, paddingTop: 12 },
+  actMetaCell: { flex: 1, gap: 3 },
+  actMetaLabel: { color: color.muted, fontSize: 11, fontWeight: "600" },
+  actMetaValue: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  actionSectionLabel: { color: color.muted, fontSize: 12, fontWeight: "800", letterSpacing: 0.5, marginTop: 20 },
+  actActionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 10 },
+  actActionTile: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 8, minHeight: 52, paddingHorizontal: 12, width: "48.5%" },
+  actActionPrimary: { backgroundColor: color.lime, borderColor: color.lime },
+  actActionText: { color: color.ink, flex: 1, fontSize: 14, fontWeight: "800" },
+  actActionTextOff: { color: color.muted },
+  actActionOff: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  actActionNote: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 10 },
+  // 推广面板（底部弹层）。和 merchant-promo 的 sheet 同一套形状。
+  sheetBackdrop: { backgroundColor: "rgba(23,19,31,0.45)", flex: 1, justifyContent: "flex-end" },
+  sheet: { backgroundColor: color.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, gap: 4, padding: 20, paddingBottom: 34 },
+  sheetTitle: { color: color.ink, fontSize: 17, fontWeight: "900", marginBottom: 8 },
+  sheetRow: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", minHeight: 52 },
+  sheetRowText: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  sheetHint: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 12 },
+  sheetClose: { alignItems: "center", backgroundColor: color.surface, borderRadius: 14, justifyContent: "center", marginTop: 16, minHeight: 48 },
+  sheetCloseText: { color: color.ink, fontSize: 15, fontWeight: "800" },
+  qrBig: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, marginVertical: 16, padding: 14 },
+  // MERCHANT-CREATOR-CONTENT-001：生产内容页的形状取自设计稿
+  // Proxy_Creator_Promo_20261004_bc214e.html 的 .dash-grid / .collab-card /
+  // .reason-line / .code-stats / .discount-status（结构保留我那一版的内容邀约，
+  // 视觉换成这份稿子的）。颜色仍全部走 R3 token —— 稿子里的
+  // #f9f9fb / #eaeaea / #d0f55c / #34C759 分别对到 surface / line / lime /
+  // proxyGreen，不把 hex 抄进来（token-as-value 门禁 + DESIGN-CLEANUP-001）。
+  dashGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 12 },
+  dashItem: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, gap: 4, paddingVertical: 16, width: "48.5%" },
+  dashValue: { color: color.ink, fontSize: 22, fontWeight: "800", letterSpacing: -0.5, lineHeight: 28 },
+  dashLabel: { color: color.muted, fontSize: 12, fontWeight: "500" },
+  collabCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, gap: 12, marginTop: 12, padding: 16, ...shadows.card },
+  collabHeader: { alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "space-between" },
+  collabTitle: { color: color.ink, flex: 1, fontSize: 15, fontWeight: "800", minWidth: 0 },
+  discountStatus: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+  discountStatusOn: { backgroundColor: color.proxyGreenSoft },
+  discountStatusWait: { backgroundColor: color.stateWarnBg },
+  discountStatusText: { fontSize: 11, fontWeight: "700" },
+  discountStatusTextOn: { color: color.proxyGreen },
+  discountStatusTextWait: { color: color.warnBannerText },
+  reasonLine: { alignItems: "center", backgroundColor: color.surface, borderRadius: 10, flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingVertical: 8 },
+  reasonDot: { backgroundColor: color.proxyGreen, borderRadius: 999, height: 4, width: 4 },
+  reasonText: { color: color.muted, flex: 1, fontSize: 11, fontWeight: "600", minWidth: 0 },
+  codeStats: { borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", paddingTop: 12 },
+  codeStatItem: { alignItems: "center", flex: 1, gap: 3, paddingVertical: 4 },
+  codeStatValue: { color: color.ink, fontSize: 13, fontWeight: "800", textAlign: "center" },
+  codeStatValueOk: { color: color.proxyGreen },
+  codeStatValueWait: { color: color.muted },
+  codeStatLabel: { color: color.muted, fontSize: 11, fontWeight: "500" },
+  searchHint: { color: color.muted, flex: 1, fontSize: 13, lineHeight: 18 },
   progress: { backgroundColor: "#F2EDF5", borderColor: color.line, borderRadius: 99, borderWidth: 1, height: 9, marginTop: 10, overflow: "hidden" },
   progressFill: { backgroundColor: color.magenta, borderRadius: 99, height: 9 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 10 },

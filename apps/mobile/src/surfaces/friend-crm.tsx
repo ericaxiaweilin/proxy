@@ -297,7 +297,7 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   // 查到 / 没这个人 / 查询失败 / 没有登录态 / 这是店铺名片，谁也不许长得像谁：
   // 把「查不到」显示成「查询失败」会让人一直重试，把「没登录」显示成
   // 「查不到」会让人以为码坏了，把「店铺名片」显示成「查无此人」会让人以为店关了。
-  const [scanLookup, setScanLookup] = useState<"found" | "missing" | "failed" | "no-client" | "store" | "promo">();
+  const [scanLookup, setScanLookup] = useState<"found" | "missing" | "failed" | "no-client" | "store" | "promo" | "activity">();
   const [scanMatch, setScanMatch] = useState<ProfileWire>();
   const [scanBusy, setScanBusy] = useState(false);
   // 相机每帧可能触发多次 barcode 事件：ref 锁住重复解析（state 更新是异步的）。
@@ -605,6 +605,13 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
       setScanLookup("promo");
       return;
     }
+    // MERCHANT-ACTIVITY-DETAIL-001：扫到活动码 —— 不是加好友，是进那场活动。
+    // 必须在这里单独分支：漏掉的话它会掉进下面的 person 路径，拿活动编号去
+    // getProfileByHandle 查人，查不到还报「这张名片指向的人不存在」。
+    if (parsed.kind === "activity") {
+      setScanLookup("activity");
+      return;
+    }
     if (!profileClient) {
       setScanLookup("no-client");
       return;
@@ -819,6 +826,7 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
                   （这个注释刻意不写出那条指路原文 —— 测试对这条文案有反向钉，
                   写在注释里会让钉在正确的树上误报。） */}
               {scanLookup === "promo" && scanned.kind === "promo" ? <PromoCouponClaim code={scanned.code} /> : null}
+              {scanLookup === "activity" && scanned.kind === "activity" ? <Text selectable style={styles.scanHitNote}>这是活动「{scanned.code}」的码。到活动列表里搜这个编号就能进这场活动。</Text> : null}
               {scanLookup === "store" ? <Text selectable style={styles.scanHitNote}>这是「{scanned.name}」的店铺名片，不是个人名片 —— 加好友要扫对方个人的二维码。App 目前不支持用店铺名片加好友。</Text> : null}
             </View>
           ) : null}

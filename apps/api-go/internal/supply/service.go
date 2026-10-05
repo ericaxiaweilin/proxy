@@ -288,6 +288,12 @@ type Repository interface {
 	ListPromoIssuesByMerchant(ctx context.Context, merchantID string) ([]PromoIssue, error)
 	ListPromoIssuesByAgent(ctx context.Context, agentID string) ([]PromoIssue, error)
 	ListPromoIssuesByCustomer(ctx context.Context, customerID string) ([]PromoIssue, error)
+	// CONTENT-TASK-001：内容任务（一张 UGC 邀约一行；Save 同一邀约重复写不报错、不覆盖）。
+	SaveContentTask(ctx context.Context, t ContentTask) error
+	UpdateContentTask(ctx context.Context, t ContentTask) error
+	GetContentTask(ctx context.Context, id string) (ContentTask, error)
+	ListContentTasksByMerchant(ctx context.Context, merchantID string) ([]ContentTask, error)
+	ListContentTasksByAgent(ctx context.Context, agentID string) ([]ContentTask, error)
 }
 
 // TransactionalRepository 由支持事务性 outbox 的存储实现（事件与状态原子提交）。
@@ -326,10 +332,12 @@ type MemoryRepository struct {
 	promoQuotes   map[string]PromoQuote
 	promoAuto     map[string]PromoAutoBenefit
 	// MERCHANT-CREATOR-PROMO-002（懒初始化，见 promo_pair_memory.go）。
-	pairPromos   map[string]MerchantCreatorPromo
+	pairPromos map[string]MerchantCreatorPromo
+	// CONTENT-TASK-001（懒初始化，见 content_task_memory.go）。
+	contentTasks map[string]ContentTask
 	promoChanges []PromoChange
 	promoIssues  map[string]PromoIssue
-	events        []event.DomainEvent
+	events       []event.DomainEvent
 }
 
 func NewMemoryRepository() *MemoryRepository {
@@ -871,7 +879,9 @@ func (s *Service) Supports(commandType string) bool {
 		"QuotePromoCode", "ListPromoAssets", "GetPromoStats",
 		"SetAutoPromoBenefit",
 		"IssueMerchantCreatorPromo", "AdjustMerchantCreatorPromo", "ListMerchantCreatorPromos", "GetMerchantCreatorPromoBasis",
-		"ClaimPromoCoupon", "ListMyPromoCoupons", "ListMyMerchantPromos":
+		"ClaimPromoCoupon", "ListMyPromoCoupons", "ListMyMerchantPromos",
+		"CreateContentTask", "ListMerchantContentTasks", "ListMyContentTasks",
+		"SubmitContentDraft", "ReviewContentDraft", "AddContentPublication", "NudgeContentTask":
 		return true
 	default:
 		return false
@@ -956,6 +966,20 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listMyPromoCoupons(ctx, e)
 	case "ListMyMerchantPromos":
 		return s.listMyMerchantPromos(ctx, e)
+	case "CreateContentTask":
+		return s.createContentTask(ctx, e)
+	case "ListMerchantContentTasks":
+		return s.listMerchantContentTasks(ctx, e)
+	case "ListMyContentTasks":
+		return s.listMyContentTasks(ctx, e)
+	case "SubmitContentDraft":
+		return s.submitContentDraft(ctx, e)
+	case "ReviewContentDraft":
+		return s.reviewContentDraft(ctx, e)
+	case "AddContentPublication":
+		return s.addContentPublication(ctx, e)
+	case "NudgeContentTask":
+		return s.nudgeContentTask(ctx, e)
 	default:
 		return command.Rejected(e, "SUPPLY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "supply.unsupported_command", nil)
 	}

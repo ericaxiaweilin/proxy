@@ -152,23 +152,38 @@ func (s *Service) inviteCreator(ctx context.Context, e command.Envelope) command
 	if !decode(e.Payload, &p) || p.AgentID == "" {
 		return command.Rejected(e, "INVALID_INVITATION", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_invitation", nil)
 	}
+	inv, domainEvents, rejected := s.openInvitation(ctx, e, p)
+	if rejected != nil {
+		return *rejected
+	}
+	return acceptedWithPayload(e, "CollabInvitation", inv.ID, 1, "CREATED", map[string]any{"invitation": inv}, domainEvents)
+}
+
+// openInvitation：建一张邀约（校验 + 防重 + 落库）。InviteCreator 和 CreateContentTask
+// （CONTENT-TASK-001：内容任务就是一张 purpose=UGC 的邀约 + 任务说明）共用这一条，
+// 不各写一套邀约逻辑。
+func (s *Service) openInvitation(ctx context.Context, e command.Envelope, p inviteCreatorPayload) (CollabInvitation, []event.DomainEvent, *command.Result) {
+	reject := func(code, kind, retry, key string) (CollabInvitation, []event.DomainEvent, *command.Result) {
+		r := command.Rejected(e, code, kind, retry, key, nil)
+		return CollabInvitation{}, nil, &r
+	}
 	merchantID := invitationMerchantID(e)
 	if merchantID == "" {
-		return command.Rejected(e, "INVITATION_MERCHANT_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.invitation_merchant_required", nil)
+		return reject("INVITATION_MERCHANT_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.invitation_merchant_required")
 	}
 	profile, err := s.repository.GetProfile(ctx, p.AgentID)
 	if errors.Is(err, ErrProfileNotFound) {
-		return command.Rejected(e, "AGENT_PROFILE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.profile_not_found", nil)
+		return reject("AGENT_PROFILE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.profile_not_found")
 	}
 	if err != nil {
-		return command.Rejected(e, "PROFILE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.profile_read_failed", nil)
+		return reject("PROFILE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.profile_read_failed")
 	}
 	if profile.Status != "ACTIVE" {
-		return command.Rejected(e, "AGENT_NOT_INVITABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.agent_not_invitable", nil)
+		return reject("AGENT_NOT_INVITABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.agent_not_invitable")
 	}
 	startAt, bad := validateTerms(e, p.invitationTerms)
 	if bad != nil {
-		return *bad
+		return CollabInvitation{}, nil, bad
 	}
 	serviceType := p.ServiceType
 	if serviceType == "" {
@@ -181,12 +196,12 @@ func (s *Service) inviteCreator(ctx context.Context, e command.Envelope) command
 	now := s.clock.Now().UTC()
 	existing, err := s.repository.ListInvitationsByMerchant(ctx, merchantID)
 	if err != nil {
-		return command.Rejected(e, "INVITATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.invitation_read_failed", nil)
+		return reject("INVITATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.invitation_read_failed")
 	}
 	for _, inv := range existing {
 		if inv.AgentID == p.AgentID && !inv.expired(now) &&
 			(inv.Status == InvitationPending || inv.Status == InvitationCountered) {
-			return command.Rejected(e, "INVITATION_ALREADY_PENDING", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.invitation_already_pending", nil)
+			return reject("INVITATION_ALREADY_PENDING", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.invitation_already_pending")
 		}
 	}
 	inv := CollabInvitation{
@@ -208,12 +223,12 @@ func (s *Service) inviteCreator(ctx context.Context, e command.Envelope) command
 		ExpiresAt:    now.Add(invitationTTL),
 	}
 	if err := s.repository.SaveInvitation(ctx, inv); err != nil {
-		return command.Rejected(e, "INVITATION_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.invitation_write_failed", nil)
+		return reject("INVITATION_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.invitation_write_failed")
 	}
 	domainEvents := []event.DomainEvent{event.New("CollabInvitationCreated", "CollabInvitation", inv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"merchantId": merchantID, "agentId": p.AgentID, "serviceType": serviceType,
 	})}
-	return acceptedWithPayload(e, "CollabInvitation", inv.ID, 1, "CREATED", map[string]any{"invitation": inv}, domainEvents)
+	return inv, domainEvents, nil
 }
 
 type respondInvitationPayload struct {

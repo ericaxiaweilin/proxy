@@ -15,6 +15,7 @@ import { auditLines, buildTermChange, canCancelOrder, canChangePrice, canConfirm
 // 个人管理页那一份，两处不能各写一套。
 import { formatClaimNumber } from "../claim-number";
 import type { MediaClient } from "../media-client";
+import { CreatorContentTasks } from "../components/creator-content-tasks";
 import type { ModerationClient } from "../moderation-client";
 import { ReportSheet } from "../components/report-sheet";
 import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
@@ -144,6 +145,8 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
   const [counterDurationH, setCounterDurationH] = useState(8);
   const [counterMessage, setCounterMessage] = useState("");
   const [inviteNotice, setInviteNotice] = useState<string | undefined>(undefined);
+  // CONTENT-TASK-001：每次刷新订单页（含接受邀约后）让「我的内容任务」跟着重读。
+  const [contentRefresh, setContentRefresh] = useState(0);
   // HOME-MYORDERS-JOINS-001（用户「我的订单还是空白」2026-09-29）：For You 下单
   // 走 JoinActivity —— 是活动报名，不落履约订单（join is join 的钉早已定死两条链）。
   // 但下单成功页发了编号，我的订单却看不到这笔记录，用户的预期是断的。这里把
@@ -164,6 +167,7 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
     setPhase("LOADING");
     void client.listMyOrders().then((rows) => { if (active) { setOrders(rows); setPhase("READY"); } }).catch(() => { if (active) setPhase("ERROR"); });
     void client.listAgentOffers().then((rows) => { if (active) setPendingOffers(rows.filter((offer) => offer.status === "OFFERED")); }).catch(() => { if (active) setPendingOffers([]); });
+    setContentRefresh((n) => n + 1);
     void supply.listReceivedInvitations().then((rows) => { if (active) setReceivedInvites(rows.filter((inv) => inv.status === "PENDING")); }).catch(() => { if (active) setReceivedInvites([]); });
     void activityClient.listMyActivities().then((payload) => {
       if (!active) return;
@@ -937,6 +941,8 @@ export function MyOrdersSurface({ client, moderation, mediaClient, business, onB
             ))}
           </View>
         ) : null}
+        {/* CONTENT-TASK-001：接了商家的内容任务后在这里交稿 / 看审核意见 / 贴发布链接。 */}
+        <CreatorContentTasks supply={supply} mediaClient={mediaClient} refreshKey={contentRefresh} />
         {joinsFailed ? <Text selectable style={styles.orderNotice}>活动报名记录没读出来，报名是否成功以「我的活动」为准。</Text> : null}
         {joinedEntries.length > 0 ? (
           <View style={{ marginBottom: 11 }}>

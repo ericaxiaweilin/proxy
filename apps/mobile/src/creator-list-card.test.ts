@@ -220,12 +220,17 @@ describe("CREATOR-LIST-CARD-001 详情页同一套语言", () => {
 });
 
 describe("经营目标卡去向", () => {
-  it("曝光进销售归因，推广券进券中心；带新客和生产内容不挂假按钮", () => {
-    // 有去向的两张是 Pressable（点得进去），没去向的两张保持 View ——
-    // 点不进去的按钮不许摆出来骗点击。
+  it("四张目标卡都有真实去向；生产内容已接，不再挂死卡", () => {
+    // MERCHANT-CREATOR-CONTENT-001（2026-10-04）之后四张全部点得进去：
+    // 带新客→专属码，生产内容→生产内容页，曝光→销售归因，推广券→券中心。
+    expect(me).toContain('title === \'带来到店新客\' ? (): void => setPage("promo")');
+    expect(me).toContain('title === \'生产内容\' ? (): void => setPage("content")');
     expect(me).toContain('title === \'扩大本地曝光\' ? (): void => setPage("sales")');
     expect(me).toContain('title === \'推广券与活动\' ? (): void => onOpenVouchers()');
-    // 没去向的两张保持 View（注释被 strip 掉，断实现：三元兜底是 undefined + View 分支）。
+    // 生产内容必须有那一页，否则「接上了」只是把死卡换成了跳空页。
+    expect(me).toContain('if (page === "content")');
+    // 三元兜底与 View 分支留着当以后新增「还没做」卡时的默认形状 ——
+    // 仍然不许出现一张既没 go 又不声明「暂不可用」的卡。
     expect(me).toContain(": undefined;");
     expect(me).toContain(" : <View key={title}");
   });

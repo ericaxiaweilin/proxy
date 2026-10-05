@@ -166,6 +166,27 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 			reply = "对方想先问问细节再决定"
 		}
 		return fallbackRecipient(payloadString("hostId")), "邀请有回复了", reply, "/invitations/" + e.AggregateID, true
+	// CONTENT-TASK-001：商家「催一下」/ 审核结果 → 投给 creator（payload.agentId）。
+	// 没有 agentId 就不投（不回退到发起人 —— 那是商家自己）。
+	case "ContentTaskNudged":
+		agent := payloadString("agentId")
+		if agent == "" {
+			return "", "", "", "", false
+		}
+		body := "商家在等你的内容稿件"
+		if payloadString("stage") == "AWAITING" {
+			body = "商家在等你回复内容合作邀请"
+		}
+		return agent, "商家提醒了你", body, "", true
+	case "ContentDraftReviewed":
+		agent := payloadString("agentId")
+		if agent == "" {
+			return "", "", "", "", false
+		}
+		if payloadString("decision") == "APPROVE" {
+			return agent, "稿件审核通过", "可以发布了，发完记得贴上各平台链接", "", true
+		}
+		return agent, "稿件被打回", "商家写了修改意见，改好后可重新提交", "", true
 	default:
 		return "", "", "", "", false
 	}

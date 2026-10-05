@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { labelInvitationStatus } from "./creator-capability-labels";
+import { activityQrPayload, parseScannedQr, scannedCaption } from "./profile-qr";
 
 // MERCHANT-CREATOR-CONTENT-001 / MERCHANT-ACTIVITY-DETAIL-001（2026-10-04）
 //
@@ -41,22 +42,20 @@ describe("MERCHANT-CREATOR-CONTENT-001 生产内容", () => {
     expect(me).toContain('"content"');
   });
 
-  it("页上每一行都来自服务端邀约，不是页面里写死的样例", () => {
-    // 数据源是真实命令 ListCollabInvitations（role=sent），不是本地常量数组。
-    expect(me).toContain("supply.listSentInvitations({ merchantId: activeAccount.id })");
-    // 同一个人只留最新一单 —— 否则一个人被数成好几条内容合作。
-    expect(me).toContain("latestPerAgent");
-    // 展示走共享格式化（和人才库 / 经营详情同一个人同一条串）。
-    expect(me).toContain("formatPriceRange(inv.priceMinVnd, inv.priceMaxVnd, inv.currency)");
-    expect(me).toContain("formatInviteDateTime(inv.startAt, inv.durationH)");
-    expect(me).toContain("labelInvitationPurpose(inv.purpose)");
-    expect(me).toContain("labelInvitationStatus(inv.status)");
+  // CONTENT-TASK-001（2026-10-04）：这一页换成内容任务页（surfaces/merchant-content.tsx）。
+  // 数据源仍是本店发出的邀约 —— 服务端 ListMerchantContentTasks 按商家读邀约、把 UGC 的
+  // 组装成任务（稿件 / 审核 / 发布链接），页面不再自己拉一份邀约。详细断言在 content-task.test.ts。
+  it("页上每一行都来自服务端（内容任务 = 本店发出的 UGC 邀约），不是页面里写死的样例", () => {
+    const content = strip(read("./surfaces/merchant-content.tsx"));
+    expect(me).toContain("<MerchantContentSurface");
+    expect(content).toContain("supply.listMerchantContentTasks({ merchantId })");
+    expect(content).not.toMatch(/const\s+\w+\s*:\s*ContentTaskView\[\]\s*=\s*\[/);
   });
 
-  it("没有邀约时是诚实空态 + 一个真去向，不摆假行", () => {
-    expect(me).toContain('title="还没有内容合作"');
-    // 空态之外还给一条真链路（去人才库挑人），不是死胡同。
-    expect(me).toContain('accessibilityLabel="去 Creator 人才库挑人"');
+  it("没有任务时是诚实空态 + 一个真去向，不摆假行", () => {
+    const content = strip(read("./surfaces/merchant-content.tsx"));
+    expect(content).toContain('"还没有内容合作"');
+    expect(content).toContain('accessibilityLabel="去 Creator 人才库挑人"');
   });
 
   it("邀约状态标签走共享映射，封闭集跟服务端对齐", () => {
@@ -98,26 +97,31 @@ describe("MERCHANT-ACTIVITY-DETAIL-001 活动详情", () => {
     expect(me).toContain("暂不可用");
     // 唯一真链路：推广活动可点，并且真的能打开面板。
     expect(me).toContain('setActivitySheet("share")');
-    // 报名名单 / 提醒报名 / 编辑活动都不许是 Pressable。
-    expect(me).not.toContain("onPress={() => setActivitySheet(\"roster\")}");
+    // 报名名单 / 提醒报名 / 编辑活动都不许是 Pressable —— 它们还没有服务端命令。
+    // （MERCHANT-ACTIVITY-OPS-002 起这些键接上真命令时，本条与下面的 not.toContain
+    //   要一起改成正向断言，不能靠删断言变绿。）
+    expect(me).not.toContain("UnavailableActionTile icon=\"group\" title=\"报名名单\" enabled");
   });
 
   it("商家端不拿 CancelActivity 当成「取消活动」", () => {
     // CancelActivity 是报名者取消自己的报名（participation.go）。商家取消整场
-    // 活动服务端没有 —— 所以这一页不许出现一个调 CancelActivity 的取消键。
+    // 活动是另一条命令（MERPCHANT-ACTIVITY-OPS-001），不能复用这个名字 ——
+    // 同名不同聚合体，日志里根本分不开。
     expect(me).not.toContain("cancelActivity(");
-    expect(me).not.toContain("取消活动");
   });
 
   it("推广复制的是真实活动信息，不拼一条打不开的链接", () => {
-    // App 只注册 proxy:// 一个 scheme（app.json），没有 universal-link 域名，
-    // 扫码器只认人 / 店 / 专属码（profile-qr.ts ScannedQr）。所以不许出现
-    // 硬拼的活动 URL —— 那是一条点不开的链接。
+    // App 只注册 proxy:// 一个 scheme（app.json），没有 universal-link 域名。
+    // 所以二维码走扁平载荷 PROXY-ACTIVITY:<编号>，不许出现硬拼的 https 链接 ——
+    // 那是一条点不开的东西。
     expect(me).not.toContain("https://proxy.app/activity");
     expect(me).toContain("Clipboard.setStringAsync(activityShareText(act))");
     expect(me).toContain("Share.share({ message: activityShareText(act) })");
-    // 推送给 Creator / 同城粉丝 / 二维码没有通道 —— 在说明里说清，不摆成能点的行。
-    expect(me).toContain("推送给合作 Creator、推送给同城粉丝、活动二维码这三项还没接通");
+    expect(me).toContain("ProxyQrCode value={activityQrPayload(act.code) ?? \"\"}");
+    // 没有编号就不给码：载荷收编号，不收 URL，也不收标题。
+    expect(me).toContain("这场活动还没有编号，生成不了二维码。");
+    // 推送两项还没接通 —— 在说明里说清，不摆成能点的行。
+    expect(me).toContain("推送给合作 Creator、推送给同城粉丝还没接通");
   });
 
   it("评论分析是诚实空态，不画百分比", () => {
@@ -129,5 +133,28 @@ describe("MERCHANT-ACTIVITY-DETAIL-001 活动详情", () => {
     for (const fake of ["62%", "28%", "10%", "sentiment", "keywordCloud", "topicItem"]) {
       expect(me, `假数据 ${fake} 又被画回来了`).not.toContain(fake);
     }
+  });
+});
+describe("MERCHANT-ACTIVITY-DETAIL-001 活动二维码载荷", () => {
+  it("扫码器认 PROXY-ACTIVITY:<编号>，且只认服务端分配的编号", () => {
+    expect(parseScannedQr("PROXY-ACTIVITY:1000000000123")).toEqual({ kind: "activity", code: "1000000000123", name: "" });
+    // 老编号形态（PX-A-yymmdd-####）仍要认 —— 发出去的码还在别人相册里。
+    expect(parseScannedQr("PROXY-ACTIVITY:PX-A-260904-0007")).toEqual({ kind: "activity", code: "PX-A-260904-0007", name: "" });
+    // 载荷里绝不放标题 / 店名：扫到什么就照什么跳等于替钓鱼码开门。
+    expect(parseScannedQr("PROXY-ACTIVITY:抹茶之夜")).toBeNull();
+    expect(parseScannedQr("PROXY-ACTIVITY:1000000000123; DROP TABLE")).toBeNull();
+    // 扫码页要有独立分支 —— 漏掉会掉进 person 路径拿活动编号去查人。
+    const crm = read("./surfaces/friend-crm.tsx");
+    expect(crm).toContain('parsed.kind === "activity"');
+  });
+
+  it("码下方展示的是编号（App 回查得到的那串），不是标题", () => {
+    expect(scannedCaption({ kind: "activity", code: "1000000000123", name: "" })).toBe("1000000000123");
+  });
+
+  it("没有编号就不生成码", () => {
+    expect(activityQrPayload("1000000000123")).toBe("PROXY-ACTIVITY:1000000000123");
+    expect(activityQrPayload(undefined)).toBeNull();
+    expect(activityQrPayload("")).toBeNull();
   });
 });

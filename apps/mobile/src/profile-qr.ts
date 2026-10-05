@@ -172,7 +172,14 @@ export type ScannedQr =
   | { kind: "person"; handle: string; name: string }
   | { kind: "store"; storeId: string; name: string }
   // MERCHANT-CREATOR-PROMO-002：达人在某家店的专属码（PROXY-PROMO:AN-WORKSHOP）—— 扫到就领券。
-  | { kind: "promo"; code: string; name: string };
+  | { kind: "promo"; code: string; name: string }
+  // MERCHANT-ACTIVITY-DETAIL-001：活动码（PROXY-ACTIVITY:<活动编号>）—— 扫到就进那场活动。
+  //
+  // 走**扁平 scheme**，不走 https://proxy.app/activity/...：App 只注册了 proxy://
+  // 这一个 scheme（app.json），没有 associatedDomains、没有
+  // apple-app-site-association —— 拼一条 https 链接就是发一个点不开的东西出去。
+  // 载荷只放服务端分配的活动编号（activity.code，全数字），扫码端拿它回查活动。
+  | { kind: "activity"; code: string; name: string };
 
 /** 旧的裸 `proxy.app/...` 归一成 https 全量；未知形状原样透传，绝不瞎改。 */
 export function toQrPayload(value: string): string {
@@ -211,6 +218,15 @@ export function parseScannedQr(value: string): ScannedQr | null {
   const promo = /^PROXY-PROMO:([A-Z0-9]{2,10}-[A-Z0-9]{2,10}(?:-[2-9])?)$/i.exec(v);
   if (promo?.[1]) return { kind: "promo", code: promo[1].toUpperCase(), name: "" };
 
+  // MERCHANT-ACTIVITY-DETAIL-001：活动码。只收**服务端分配的全数字编号**
+  // （ActivitySchema.code，PUBLIC-NO-001 起共享序列分配）。老活动的编号是
+  // PX-A-yymmdd-#### 那种形态 —— 同样认，见下面第二个正则。载荷里绝不放
+  // 标题 / 店名 / 任何客户端能编的文本：扫到什么就照什么跳等于替钓鱼码开门。
+  const activityDigits = /^PROXY-ACTIVITY:([0-9]{4,24})$/i.exec(v);
+  if (activityDigits?.[1]) return { kind: "activity", code: activityDigits[1], name: "" };
+  const activityLegacy = /^PROXY-ACTIVITY:(PX-A-[0-9]{6}-[0-9]{1,6})$/i.exec(v);
+  if (activityLegacy?.[1]) return { kind: "activity", code: activityLegacy[1].toUpperCase(), name: "" };
+
   const card = parseContactCard(v);
   if (card) {
     if (card.handle) return { kind: "person", handle: card.handle, name: card.name };
@@ -231,8 +247,22 @@ export function parseScannedQr(value: string): ScannedQr | null {
   return null;
 }
 
-/** 码下方展示 / 复制的那串。人给 `@handle`（**这个才是 App 搜得到的**），店铺给店名。 */
+// MERCHANT-ACTIVITY-DETAIL-001：活动码给编号 —— 那是 App 回查得到活动的那串东西，
+  // 不是标题（标题会变，编号不变）。
 export function scannedCaption(scanned: ScannedQr): string {
   if (scanned.kind === "promo") return scanned.code;
+  if (scanned.kind === "activity") return scanned.code;
   return scanned.kind === "person" ? `@${scanned.handle}` : scanned.name;
+}
+
+/**
+ * MERCHANT-ACTIVITY-DETAIL-001：活动的二维码载荷。
+ * 传活动编号（ActivitySchema.code），不传 activityId —— 编号是客服与用户之间
+ * 也会念的那串，扫不出来时用户能直接报出来。没有编号就不给码：宁可商家看到
+ * 「还没编号」，也不发一张扫不出任何东西的码。
+ */
+export function activityQrPayload(code: string | undefined): string | null {
+  const trimmed = (code ?? "").trim();
+  if (trimmed === "") return null;
+  return `PROXY-ACTIVITY:${trimmed}`;
 }

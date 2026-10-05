@@ -4,6 +4,7 @@ import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
 import { commandErrorMessage } from "./command-error-message";
+import { parseContentCounts, parseContentTask, parseContentTasks, type ContentChecks, type ContentTaskCounts, type ContentTaskView } from "./content-task";
 
 // CREATOR-SOCIAL-001：社媒条目。handle 只存用户名（服务端校验过形状），
 // 显示时的 canonical 链接由 socialProfileUrl 按平台拼 —— 不拼用户给的 URL。
@@ -802,6 +803,38 @@ export class SupplyClient {
 
   // MERCHANT-CREATOR-INVITE-001：creator 收邀约 + 回复。principal 就是 agent 本人，
   // 服务端按 Principal.ID == agentID 校验 —— 调这个方法的面必须保证是本人视角。
+  // CONTENT-TASK-001：内容任务。商家侧带 merchantId（网关盖章）；creator 侧不带，按本人鉴权。
+  public async listMerchantContentTasks(input: { merchantId: string }): Promise<{ tasks: ContentTaskView[]; counts: ContentTaskCounts }> {
+    const body = this.body(await this.command("ListMerchantContentTasks", { type: "ContentTask", id: "query" }, { merchantId: input.merchantId }));
+    return { tasks: parseContentTasks(body.tasks), counts: parseContentCounts(body.counts) };
+  }
+
+  public async createContentTask(input: { merchantId: string; agentId: string; title: string; brief: string; contentType: string; platforms: string[]; priceMinVnd: number; priceMaxVnd: number; negotiable: boolean }): Promise<void> {
+    await this.command("CreateContentTask", { type: "ContentTask", id: "new" }, { ...input });
+  }
+
+  public async reviewContentDraft(input: { merchantId: string; taskId: string; decision: "APPROVE" | "REJECT"; note: string; checks: Omit<ContentChecks, "noContact"> }): Promise<ContentTaskView | undefined> {
+    const body = this.body(await this.command("ReviewContentDraft", { type: "ContentTask", id: input.taskId }, { ...input }));
+    return parseContentTask(body.task);
+  }
+
+  public async nudgeContentTask(input: { merchantId: string; taskId: string }): Promise<void> {
+    await this.command("NudgeContentTask", { type: "ContentTask", id: input.taskId }, { ...input });
+  }
+
+  public async listMyContentTasks(): Promise<ContentTaskView[]> {
+    const body = this.body(await this.command("ListMyContentTasks", { type: "ContentTask", id: "mine" }, {}));
+    return parseContentTasks(body.tasks);
+  }
+
+  public async submitContentDraft(input: { taskId: string; mediaAssetIds: string[]; caption: string; durationSec: number }): Promise<void> {
+    await this.command("SubmitContentDraft", { type: "ContentTask", id: input.taskId }, { ...input });
+  }
+
+  public async addContentPublication(input: { taskId: string; platform: string; url: string }): Promise<void> {
+    await this.command("AddContentPublication", { type: "ContentTask", id: input.taskId }, { ...input });
+  }
+
   public async listReceivedInvitations(): Promise<CollabInvitation[]> {
     const body = this.body(await this.command("ListCollabInvitations", { type: "CollabInvitation", id: "query" }, { role: "received" }));
     return parseCollabInvitations(body.invitations);

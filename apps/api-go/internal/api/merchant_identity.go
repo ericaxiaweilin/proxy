@@ -47,6 +47,12 @@ var merchantPublishCommands = map[string]bool{
 	"AdjustMerchantCreatorPromo":   true,
 	"ListMerchantCreatorPromos":    true,
 	"GetMerchantCreatorPromoBasis": true,
+	// CONTENT-TASK-001：内容任务的商家侧四件套。creator 侧（ListMyContentTasks /
+	// SubmitContentDraft / AddContentPublication）不带 merchantId，按 Principal 鉴权。
+	"CreateContentTask":        true,
+	"ListMerchantContentTasks": true,
+	"ReviewContentDraft":       true,
+	"NudgeContentTask":         true,
 }
 
 // resolveMerchantPublish verifies an optional payload merchantId for
