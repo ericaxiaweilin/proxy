@@ -570,7 +570,8 @@ for OPS_PAGE in apps/market-intelligence-console/src/pages/Overview.tsx \
                 apps/market-intelligence-console/src/pages/Gravity.tsx \
                 apps/market-intelligence-console/src/pages/ProviderApplications.tsx \
                 apps/market-intelligence-console/src/pages/NumberLookup.tsx \
-                apps/market-intelligence-console/src/pages/Merchant.tsx; do
+                apps/market-intelligence-console/src/pages/Merchant.tsx \
+                apps/market-intelligence-console/src/pages/Matching.tsx; do
   if [ ! -f "$OPS_PAGE" ]; then
     echo "  FAIL [OPS-REAL-001]: 控制台页面不见了 —— $OPS_PAGE" >&2
     exit 1
@@ -625,6 +626,58 @@ if ! grep -q 'orders30dAll' apps/api-go/internal/opsmetrics/opsmetrics.go; then
   exit 1
 fi
 echo "    OPS-MERCHANT-001: PASS (商家页接真读模型 · SQL 对真库跑过 · 无来源列不给数 · 归因缺口写明白)"
+# OPS-MATCHING-TUNABLES-001（2026-10-05）：撮合引擎管理。
+# 引擎的排序口径以前只存在于代码里：运营看不到「谁排在前面是因为什么」，也不可能在不发版
+# 的情况下调。现在旋钮可持久化 + 决策留痕可读，代价是多了一条**能改全平台撮合**的路径，
+# 所以这几条一起钉：
+#   ① 默认值必须还是接线时那批数（接运行时配置的前提是「不配 = 今天的行为」，
+#      有人顺手改默认值就是改引擎行为，必须被这条钉住并说清理由）；
+#   ② 边界内任何组合都不能算出 NaN（0/0 会让排序静默按输入顺序出，一个错都不报 ——
+#      这是把常量变成可调之后**新引入**的坑）；
+#   ③ 门是 MARKETPLACE（不是「是运营就行」），每次改动 —— 包括被拒的 —— 都留审计；
+#   ④ 落库失败不能说成功（生效值与库里不一致时页面必须报分歧，而不是各摆一套）；
+#   ⑤ SQL 对真库跑过（OPS-MERCHANT-001 的教训：内存桩证明不了列名，全绿而线上解析期报错）；
+#   ⑥ 旋钮表里永远不许出现曝光类信号 —— MATCH-RANK-001 那条钉管的是 source.go 读什么，
+#      现在多了一条「加个 popularityWeight 旋钮」的旁路，这里堵住。
+for t in TestTunablesDefaultToTheHardcodedValues TestTunablesWithRejectsUnknownAndOutOfRange TestTunablesBoundariesNeverProduceNanScores TestSetTunablesTakesEffectAndRankUsesOneSnapshot TestInvariantWarningsStayQuietOnTheDefaults; do
+  require_test "OPS-MATCHING-TUNABLES-001" "./internal/matching" "$t" \
+    "apps/api-go/internal/matching/tunables_test.go" || exit $?
+done
+for t in TestOperatorMatchingTunablesDoorIsMarketplaceAndAudited TestOperatorMatchingPageShowsCurrentDefaultAndStoredProvenance TestOperatorMatchingTraceReportsWhatItActuallyRead TestOperatorMatchingWriteFailureKeepsEngineAndAudits; do
+  require_test "OPS-MATCHING-TUNABLES-001" "./internal/api" "$t" \
+    "apps/api-go/internal/api/operator_matching_test.go" || exit $?
+done
+for t in TestOperatorMatchingTunablesStoreRoundTrip TestOperatorMatchingDecisionTraceReadsStoredSnapshots; do
+  require_test "OPS-MATCHING-TUNABLES-001" "./internal/platform/postgres" "$t" \
+    "apps/api-go/internal/platform/postgres/operator_matching_tunables_integration_test.go" || exit $?
+done
+if [ ! -f apps/api-go/migrations/179_decision_engine_tunables.sql ]; then
+  echo "  FAIL [OPS-MATCHING-TUNABLES-001]: 旋钮表迁移不见了 —— 改动留不下第二次。" >&2
+  exit 1
+fi
+# 迁移里不许 seed 默认值：seed 一份就等于造出第二个「默认值」来源，
+# 代码里的默认值改了而 seed 没改，界面会摆一套引擎根本不用的数。
+if grep -q 'INSERT INTO decision.engine_tunables' apps/api-go/migrations/179_decision_engine_tunables.sql; then
+  echo "  FAIL [OPS-MATCHING-TUNABLES-001]: 迁移在 seed 旋钮默认值 —— 缺行才是默认，两处默认值一定会漂。" >&2
+  exit 1
+fi
+if ! grep -qE '"/v1/operator/matching/tunables", s\.operatorConsoleGated\(http\.MethodPost, ScopeMarketplace' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [OPS-MATCHING-TUNABLES-001]: 改旋钮的门不再是 MARKETPLACE —— 动全平台撮合口径的权限被放宽了。" >&2
+  exit 1
+fi
+if grep -qiE '\{"(exposure|impression|popularity|likes|followers)[A-Za-z]*"' apps/api-go/internal/matching/tunables.go; then
+  echo "  FAIL [OPS-MATCHING-TUNABLES-001]: 旋钮表里出现了曝光类信号 —— PRD R15.2 Popularity ≠ Qualification，不能从配置门绕进来。" >&2
+  exit 1
+fi
+# 「有这一页」要钉的是**渲染那一行**：只 grep 文件在不在、或者页名出现过没有 ——
+# App.tsx 里 `matching: "撮合引擎管理"` 那一行就让这种判据绿了，而 render 被删掉
+# （2026-10-05 变异验证抓出来的：删掉 {page === "matching" && <Matching />} 判据照样过）。
+if [ ! -f apps/market-intelligence-console/src/pages/Matching.tsx ] \
+   || ! grep -qF '{page === "matching" && <Matching />}' apps/market-intelligence-console/src/App.tsx; then
+  echo "  FAIL [OPS-MATCHING-TUNABLES-001]: 后端能改了但界面上打不开这一页 —— 看不见等于没做。" >&2
+  exit 1
+fi
+echo "    OPS-MATCHING-TUNABLES-001: PASS (默认值=今天的行为 · 边界不出 NaN · MARKETPLACE 门 + 审计 · SQL 对真库跑过 · 曝光信号进不来)"
 # GRAVITY-001：引力状态（spec §6-§7 / §11 / §21）。规律的人在规律的时间点附近引力高；证据不足只学习；
 # 久不发生降回只观察；AI / 平台账号不建模；ACTIVE_ORCHESTRATE 不会自动给（§12 / §13 未建）；引力页只给运营。
 for t in TestRegularNoonChatterHasHighGravityBeforeNoonAndLowAtNight TestSparseOrStaleEvidenceDoesNotNudge TestNeverAutoActiveOrchestrate TestRecomputeSkipsNonHumansAndDowngradesPeopleWhoWentQuiet; do
@@ -654,8 +707,13 @@ if ! grep -q 'action_log_append_only' apps/api-go/migrations/161_operator_action
 fi
 # 每个运营写口都必须真的记账。数的是 handler 里的 auditWrite 调用点：
 # 新增一个 POST /v1/operator/* 却忘了接审计，这里就会红。
-OA_OPS_POSTS=$(grep -cE 'operatorConsoleMethod\(http\.MethodPost' apps/api-go/internal/api/server.go)
-OA_AUDITED=$(grep -c 's\.auditWrite(r, "' apps/api-go/internal/api/operator_gravity.go apps/api-go/internal/api/provider_application.go | awk -F: '{s+=$2} END {print s+0}')
+# 每个运营写口都必须真的记账。数的是 handler 里的 auditWrite 调用点：
+# 新增一个 POST /v1/operator/* 却忘了接审计，这里就会红。
+# 两道门都要数：OPS-MATCHING-TUNABLES-001 的写口走的是 operatorConsoleGated（因为它要
+# MARKETPLACE 而不是控制台默认的 ANALYTICS）—— 只数 operatorConsoleMethod 的话，
+# 新写口可以靠「换一道门」静默躲过这条计数。
+OA_OPS_POSTS=$(grep -cE 'operatorConsole(Method|Gated)\(http\.MethodPost' apps/api-go/internal/api/server.go)
+OA_AUDITED=$(grep -c 's\.auditWrite(r, "' apps/api-go/internal/api/operator_gravity.go apps/api-go/internal/api/provider_application.go apps/api-go/internal/api/operator_matching.go | awk -F: '{s+=$2} END {print s+0}')
 if [ "$OA_OPS_POSTS" -gt "$OA_AUDITED" ]; then
   echo "  FAIL [OPS-AUDIT-001]: $OA_OPS_POSTS 个运营写口只有 $OA_AUDITED 个接了审计 —— 剩下的没人能追溯。" >&2
   exit 1

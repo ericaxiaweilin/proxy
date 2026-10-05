@@ -44,36 +44,38 @@ type Breakdown struct {
 	HasTrackRecord   bool    `json:"hasTrackRecord"`
 }
 
-const (
-	priorOrders       = 3.0
-	priorCompleteRate = 0.8
-	priorRatings      = 2.0
-	priorSatisfaction = 0.6
-	neutralResponse   = 0.3
-)
+// 这些数现在住在 Tunables 里（OPS-MATCHING-TUNABLES-001）：默认值就是下面这些字面量，
+// 运营可以在控制台改，改了立刻生效并且留审计。Score 不再直接读常量，
+// 而是在每个批次开头取一份旋钮快照。
 
-// Score 算一个候选的得分。price / budget 为 0 表示不知道，适配分给 0（不猜）。
+// Score 用当前生效的旋钮算一个候选的得分。price / budget 为 0 表示不知道，适配分给 0（不猜）。
 func Score(s Signals, price, budget int64) Breakdown {
+	return CurrentTunables().Score(s, price, budget)
+}
+
+// Score 用指定的一套旋钮算分。Rank 用它（一个批次必须按同一套数打分），
+// 单独的调用方用上面那个包级 Score。
+func (t Tunables) Score(s Signals, price, budget int64) Breakdown {
 	ended := float64(s.Completed + s.Cancelled)
-	completeRate := (float64(s.Completed) + priorOrders*priorCompleteRate) / (ended + priorOrders)
+	completeRate := (float64(s.Completed) + t.PriorOrders*t.PriorComplete) / (ended + t.PriorOrders)
 	onTimeRate := 1.0
 	if s.Completed > 0 {
-		onTimeRate = (float64(s.OnTime) + 1) / (float64(s.Completed) + 1)
+		onTimeRate = (float64(s.OnTime) + t.OnTimePrior) / (float64(s.Completed) + t.OnTimePrior)
 	}
-	satisfaction := (s.SatisfactionSum + priorRatings*priorSatisfaction) / (float64(s.Rated) + priorRatings)
-	reuse := (float64(s.WouldReuse) + priorRatings*priorSatisfaction) / (float64(s.Rated) + priorRatings)
-	response := neutralResponse
+	satisfaction := (s.SatisfactionSum + t.PriorRatings*t.PriorSatisfaction) / (float64(s.Rated) + t.PriorRatings)
+	reuse := (float64(s.WouldReuse) + t.PriorRatings*t.PriorSatisfaction) / (float64(s.Rated) + t.PriorRatings)
+	response := t.NeutralResponse
 	if s.ChatP60 != nil {
 		response = math.Max(0, math.Min(1, *s.ChatP60))
 	}
 	b := Breakdown{
-		Reliability:  round2(40 * completeRate * onTimeRate),
-		Satisfaction: round2(30 * (0.7*satisfaction + 0.3*reuse)),
-		Experience:   round2(15 * math.Min(1, math.Log1p(float64(s.Completed))/math.Log1p(50))),
-		Response:     round2(10 * response),
+		Reliability:  round2(t.ReliabilityWeight * completeRate * onTimeRate),
+		Satisfaction: round2(t.SatisfactionWeight * (t.RatingShare*satisfaction + t.ReuseShare*reuse)),
+		Experience:   round2(t.ExperienceWeight * math.Min(1, math.Log1p(float64(s.Completed))/math.Log1p(t.ExperienceSat))),
+		Response:     round2(t.ResponseWeight * response),
 	}
 	if budget > 0 && price > 0 && price <= budget {
-		b.Fit = 5
+		b.Fit = round2(t.FitPoints)
 	}
 	b.Total = round2(b.Reliability + b.Satisfaction + b.Experience + b.Response + b.Fit)
 	if ended > 0 {
@@ -95,9 +97,15 @@ type Ranked struct {
 
 // Rank 按总分从高到低；同分按价格低的在前，再按 id（稳定、可复现）。
 func Rank(agentIDs []string, prices map[string]int64, signals map[string]Signals, budget int64) []Ranked {
+	return CurrentTunables().Rank(agentIDs, prices, signals, budget)
+}
+
+// Rank 用指定的一套旋钮排序。快照只在批次开头取一次：中途运营改了旋钮，
+// 不能让同一批候选一半按新数、一半按旧数。
+func (t Tunables) Rank(agentIDs []string, prices map[string]int64, signals map[string]Signals, budget int64) []Ranked {
 	out := make([]Ranked, 0, len(agentIDs))
 	for _, id := range agentIDs {
-		out = append(out, Ranked{AgentID: id, Price: prices[id], Breakdown: Score(signals[id], prices[id], budget)})
+		out = append(out, Ranked{AgentID: id, Price: prices[id], Breakdown: t.Score(signals[id], prices[id], budget)})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Breakdown.Total != out[j].Breakdown.Total {

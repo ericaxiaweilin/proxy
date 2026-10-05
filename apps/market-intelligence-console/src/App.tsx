@@ -18,13 +18,14 @@ import { Gravity } from "./pages/Gravity";
 import { ProviderApplications } from "./pages/ProviderApplications";
 import { EngineAPI } from "./pages/EngineAPI";
 import { Merchant } from "./pages/Merchant";
+import { Matching } from "./pages/Matching";
 import { Retention } from "./pages/Retention";
 import { Trust } from "./pages/Trust";
 import { Quality } from "./pages/Quality";
 import { NumberLookup } from "./pages/NumberLookup";
 import { Access } from "./pages/Access";
 
-type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access";
+type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access";
 
 const TITLES: Record<Page, string> = {
   overview: "平台总览",
@@ -43,6 +44,7 @@ const TITLES: Record<Page, string> = {
   executionruntime: "Execution Runtime",
   fulfillmentattr: "Fulfillment Attribution",
   merchant: "商家与投放",
+  matching: "撮合引擎管理",
   retention: "留存与复购",
   trust: "信任与风险",
   providers: "KYC认证审核",
@@ -72,7 +74,7 @@ export function App() {
         </div>
         <div className="navgroup">Decision Engine</div>
         <div className="nav">
-          {(["engine", "engineapi"] as Page[]).map((p) => (
+          {(["engine", "engineapi", "matching"] as Page[]).map((p) => (
             <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
           ))}
         </div>
@@ -145,6 +147,8 @@ export function App() {
           {page === "intent" && <Gravity />}
           {page === "orchestration" && <IntentOrchestration />}
           {page === "merchant" && <Merchant />}
+          {/* OPS-MATCHING-TUNABLES-001：引擎口径 + 决策留痕，改口径要 MARKETPLACE */}
+          {page === "matching" && <Matching />}
           {page === "retention" && <Retention />}
           {page === "trust" && <Trust />}
           {page === "providers" && <ProviderApplications />}
@@ -152,7 +156,7 @@ export function App() {
           {page === "access" && <Access />}
           {page === "quality" && <Quality />}
           {page === "workbench" && <Quality />}
-          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "retention", "trust", "quality", "workbench", "numberlookup", "access"].includes(page) && (
+          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "retention", "trust", "quality", "workbench", "numberlookup", "access"].includes(page) && (
             <div className="notice">
               <b>{TITLES[page]}</b> — 已接线 19 页（v9 全量）。
             </div>

@@ -29,6 +29,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
+	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/notification"
@@ -140,6 +141,9 @@ type Server struct {
 	OpsMetrics opsmetrics.Source
 	// Gravity：引力状态存储（GRAVITY-001）。nil = 没配库，相关页返回 NOT_CONNECTED。
 	Gravity gravity.Store
+	// Matching：撮合排序的旋钮存储与决策留痕读模型（OPS-MATCHING-TUNABLES-001）。
+	// nil = 没配库，/v1/operator/matching 返回 NOT_CONNECTED，引擎按出厂默认跑。
+	Matching matching.ConsoleStore
 	// ProviderApps：接单权限申请 + 运营审核（ORDER-PERMISSION-001）。nil = 端点返回 503。
 	ProviderApps *providerapp.Service
 	// Audit：运营动作审计（OPS-AUDIT-001）。nil = 没配库，运营写口照样执行，
@@ -250,6 +254,12 @@ func (s *Server) Handler() http.Handler {
 	// GRAVITY-001: 引力状态（真实派生数据，spec §6-§7 / §21）。
 	mux.HandleFunc("/v1/operator/gravity", s.operatorConsole(s.operatorGravity))
 	mux.HandleFunc("/v1/operator/gravity/recompute", s.operatorConsoleMethod(http.MethodPost, s.operatorGravityRecompute))
+	// OPS-MATCHING-TUNABLES-001：撮合引擎管理。读口跟其他控制台页一样要 ANALYTICS；
+	// 改旋钮是**动全平台撮合口径**，所以门是 MARKETPLACE（撮合域的授权），
+	// 而且必填理由 + 落 operator.action_log（OPS-AUDIT-001）。
+	mux.HandleFunc("/v1/operator/matching", s.operatorConsole(s.operatorMatching))
+	mux.HandleFunc("/v1/operator/matching/trace", s.operatorConsole(s.operatorMatchingTrace))
+	mux.HandleFunc("/v1/operator/matching/tunables", s.operatorConsoleGated(http.MethodPost, ScopeMarketplace, s.operatorMatchingTunables))
 	mux.HandleFunc("/v1/operator/provider-applications", s.operatorConsole(s.operatorProviderApplications))
 	mux.HandleFunc("/v1/operator/provider-applications/review", s.operatorConsoleMethod(http.MethodPost, s.operatorProviderApplicationReview))
 	// OPS-ACCESS-001: 运营权限自己的可观测面 —— 词汇表 / 当前配置 / 我生效的 scope /

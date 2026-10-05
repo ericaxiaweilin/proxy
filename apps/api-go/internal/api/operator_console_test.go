@@ -23,7 +23,7 @@ import (
 var operatorConsolePaths = []string{
 	"context-field", "surface-plans", "execution-runtime", "decision-engine", "clarification-gate", "supply-health",
 	"fulfillment-attribution", "behavior", "research", "population", "tags", "intent-orchestration", "engine-api",
-	"merchant", "retention", "trust", "quality",
+	"merchant", "retention", "trust", "quality", "matching", "matching/trace",
 }
 
 var notConnectedConsolePaths = []string{
@@ -34,7 +34,10 @@ var notConnectedConsolePaths = []string{
 // merchant 曾经是桩，OPS-MERCHANT-001 把它换成真实读模型；这里断言它**不再**属于
 // "必须回 NOT_CONNECTED" 那一组，而属于下面的 LIVE 组 —— 挪走要留下痕迹，
 // 不然下一次有人把它塞回桩也没人拦。
-var liveConsolePaths = []string{"population", "behavior", "merchant"}
+//
+// matching / matching/trace 是 OPS-MATCHING-TUNABLES-001 接上去的：旋钮来自库
+// （没有行就是出厂默认），轨迹读的是 supply.candidate_batches 里存着的快照。
+var liveConsolePaths = []string{"population", "behavior", "merchant", "matching", "matching/trace"}
 
 type stubOpsMetrics struct{}
 
@@ -66,6 +69,9 @@ func operatorConsoleServer() *Server {
 		Operator:   NewStaticOperatorGate([]string{"user_ops"}),
 		OpsMetrics: stubOpsMetrics{},
 		Gravity:    gravity.NewMemory(),
+		// 撮合引擎管理（OPS-MATCHING-TUNABLES-001）：假存储只证明 handler 与门，
+		// SQL 由 internal/platform/postgres 的集成测试对真库钉。
+		Matching: &fakeMatching{},
 		Authenticator: strictAuthenticator{validTokens: map[string]identity.AuthenticatedSession{
 			"ops_token":  {Principal: command.Principal{Type: "INDIVIDUAL", ID: "user_ops"}},
 			"user_token": {Principal: command.Principal{Type: "INDIVIDUAL", ID: "user_xiaomei"}},
