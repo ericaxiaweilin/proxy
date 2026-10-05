@@ -323,6 +323,9 @@ func main() {
 		// 同一个解析器同时提供严格版（确定是 agent id）与宽松版（id 命名空间混合，
 		// 如订单的 requester/agent —— 那些 id 多数本身就是 user_account）。
 		fulfillmentService.SetAgentInboxRecipient(supplyService.AgentInboxResolver())
+		// 同上：会话成员实测是 user account，但走宽松版解析 —— id 命名空间混用时
+		// 原样返回，两种情况都对。
+		conversationService.SetPersonInboxRecipient(supplyService.AgentInboxResolver())
 		// COMP-SELLER-001：候选资格只认已实名且未过期的卖家。接在这里（pool 分支内）
 		// 意味着没有数据库时 lookup 为 nil → 撮合不出候选，而不是「照常撮合」。
 		supplyService.SetSellerIdentityLookup(postgres.NewSellerRealNameRepository(pool))
@@ -698,6 +701,12 @@ func main() {
 		server.Gravity = gravity.NewPostgres(pool)
 		// OPS-AUDIT-001：运营动作审计（operator.action_log，migration 161，只追加）。
 		server.Audit = operatoraudit.NewRecorder(operatoraudit.NewPostgres(pool))
+		// OPS-MATCHING-TUNABLES-001：撮合引擎的旋钮与决策留痕（控制台 /v1/operator/matching）。
+		// 加载失败绝不拦启动：退回出厂默认就是改代码之前那套数，引擎照常跑，
+		// 而原因写进启动日志（配置读不出来 = 起不来 是另一种不可用）。
+		matchingStore := matching.NewPostgres(pool)
+		server.Matching = matchingStore
+		log.Printf("proxy api go: %s", matching.ApplyStoredTunables(ctx, matchingStore))
 		// PROVIDER-APPLY-001：申请成为小美 + 运营审核。资料门与发帖同一道（profileCompleteness）。
 		providerStore := providerapp.NewPostgres(pool)
 		server.ProviderApps = providerapp.NewService(providerStore, providerStore, providerapp.Deps{

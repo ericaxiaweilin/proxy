@@ -368,6 +368,20 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 		}
 		return "", "", "", "", false
 
+	// ── 定向邀请与需求成形（MERCHANT-CREATOR-NOTIFY-001）─────────────────
+	//
+	// 收件人是 payload.notifyPrincipalId。缺它就不投，绝不回退 actor。
+	case "TopicInviteCreated":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "有人找你聊一个话题", "去看看对方想聊什么", "", true
+		}
+		return "", "", "", "", false
+	case "NeedConfirmedFromConversation":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "需求确认下来了", "对方把一条需求确认了，去看看能不能接", "", true
+		}
+		return "", "", "", "", false
+
 	// ── 同城伴游（MERCHANT-CREATOR-NOTIFY-001）─────────────────────────
 	//
 	// 收件人是 payload.notifyPrincipalId（citycompanion 侧算好的对手方，agent id

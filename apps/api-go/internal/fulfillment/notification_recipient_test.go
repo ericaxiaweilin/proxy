@@ -144,3 +144,25 @@ func TestOrderEventIsStillEmittedWhenNoRecipientIsResolvable(t *testing.T) {
 		t.Fatalf("with no resolver the recipient must be empty (the mapping layer then skips it), got %q", recipient)
 	}
 }
+
+// MERCHANT-CREATOR-NOTIFY-001：TopicInviteCreated 的收件人是被邀请的 creator。
+//
+// 创建时就校验了 `e.Actor.ID != agentID`（不能自己邀请自己），所以收件人一定
+// 是对方、不会是回声。而 offer.AgentID 是 agent id ⇒ 必须解析。
+func TestTopicInviteNotificationResolvesTheInvitedCreator(t *testing.T) {
+	s := New()
+	if got := s.inboxRecipientForPerson(context.Background(), "agent_x"); got != "" {
+		t.Fatalf("without a resolver there must be NO recipient, got %q", got)
+	}
+	s.SetAgentInboxRecipient(stubPersonResolver{})
+	// stubPersonResolver 只认 agent_ag / agent_same 这两个 id（它就是个替身，不是真的解析器）。
+	if got := s.inboxRecipientForPerson(context.Background(), "agent_ag"); got != "user_ag" {
+		t.Fatalf("recipient = %q, want user_ag（agent id 必须解析成 user account）", got)
+	}
+	if got := s.inboxRecipientForPerson(context.Background(), "agent_unknown"); got != "agent_unknown" {
+		t.Fatalf("an unknown id passes through unchanged (the permissive resolver's contract), got %q", got)
+	}
+	if got := s.inboxRecipientForPerson(context.Background(), "user_direct"); got != "user_direct" {
+		t.Fatalf("an id that is already a principal must pass through, got %q", got)
+	}
+}

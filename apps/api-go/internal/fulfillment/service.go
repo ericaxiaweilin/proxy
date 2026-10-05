@@ -1293,8 +1293,14 @@ func (s *Service) createTopicInvite(ctx context.Context, e command.Envelope) com
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
+	// MERCHANT-CREATOR-NOTIFY-001：收件人 = 被邀请的 creator 的**可投递** id
+	// （offer.AgentID 是 agent id，见 Service.agentInboxRecipient）。上面刚校验过
+	// `e.Actor.ID != agentID` ⇒ 收件人一定是对方，不会是回声。
 	domainEvents := []event.DomainEvent{event.New("TopicInviteCreated", "Offer", offer.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"agentId": offer.AgentID, "topicKey": offer.TopicKey, "expiresAt": offer.ExpiresAt.Format(time.RFC3339),
+		"agentId":           offer.AgentID,
+		"topicKey":          offer.TopicKey,
+		"expiresAt":         offer.ExpiresAt.Format(time.RFC3339),
+		"notifyPrincipalId": s.inboxRecipientForPerson(ctx, offer.AgentID),
 	})}
 	if err := s.repository.CreateOfferAndPublish(ctx, offer, domainEvents); err != nil {
 		return command.Rejected(e, "TOPIC_INVITE_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.topic_invite_failed", nil)

@@ -21,6 +21,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
+	"github.com/proxy-app/proxy-api/internal/notification"
 )
 
 // Conversation / DM（R14 Chapter21I §6 + R9 Gate C/D/K）。
@@ -594,6 +595,12 @@ type Service struct {
 	// 计量失败不打断聊天）。
 	aiEngineChatState AiEngineChatStateReader
 	tokenMeter        TokenMeter
+	// personInboxRecipient 把「指代人的 id」解析成**可投递**的收件人
+	// （MERCHANT-CREATOR-NOTIFY-001）。会话参与者实测是 user account
+	// （conversation.dialogs 的 member_ids 30/30 都能对上 identity.user_accounts），
+	// 但仍走解析：id 命名空间混用时宽松版会原样返回，两边都对。
+	// nil = 没接 = 这类通知没有收件人（事件照发，映射层跳过）。
+	personInboxRecipient func(ctx context.Context, id string) string
 	// AI-MANAGE-014：全自动代回复按本人「节奏」延迟发出（见 stand_in_rhythm.go）。
 	standInScheduler StandInScheduler
 	// orderPermission：AI 分身只对有接单权限的人开（ORDER-PERMISSION-TWIN-001）。
@@ -2435,6 +2442,43 @@ func (s *Service) createNeedDraft(ctx context.Context, e command.Envelope) comma
 // ---------- ConfirmNeedDraft ----------
 // 用户明确确认后 Need Draft → 正式 Need（保留 Conversation origin）。
 
+// SetPersonInboxRecipient 接上收件人解析（见 Service.personInboxRecipient）。
+func (s *Service) SetPersonInboxRecipient(resolver notification.AgentInboxResolver) {
+	if resolver == nil {
+		s.personInboxRecipient = nil
+		return
+	}
+	s.personInboxRecipient = resolver.InboxRecipientFor
+}
+
+// needConfirmedRecipients = 会话里除 actor 之外、且能解析出收件人的成员。
+//
+// 为什么要通知他们：确认草稿 = 这条需求正式成形，接下来该行动的是对话里的另一方
+// （通常是能接单的 creator）。actor 自己刚点的确认，不通知（回声）。
+// 按人一条：会话可能是群（dialogs 的 member_ids 不止一个人），而收件箱的幂等 id
+// 由事件 id 推出，同一个 key 给两个收件人会在主键上撞车。
+func (s *Service) needConfirmedRecipients(ctx context.Context, conv Conversation, actorID string) []string {
+	if s.personInboxRecipient == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, member := range conv.Participants {
+		member = notification.RecipientOrEmpty(member)
+		if member == "" || member == actorID || seen[member] {
+			continue
+		}
+		recipient := notification.RecipientOrEmpty(s.personInboxRecipient(ctx, member))
+		if recipient == "" || seen[recipient] {
+			continue
+		}
+		seen[member] = true
+		seen[recipient] = true
+		out = append(out, recipient)
+	}
+	return out
+}
+
 func (s *Service) confirmNeedDraft(ctx context.Context, e command.Envelope) command.Result {
 	var p struct {
 		DraftID string `json:"draftId"`
@@ -2468,13 +2512,25 @@ func (s *Service) confirmNeedDraft(ctx context.Context, e command.Envelope) comm
 	if err := s.repository.UpdateNeedDraft(ctx, draft); err != nil {
 		return command.Rejected(e, "NEED_DRAFT_CONFIRM_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.draft_confirm_failed", nil)
 	}
-	domainEvents := []event.DomainEvent{event.New("NeedConfirmedFromConversation", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
-		"needId":     needID,
-		"draftId":    draft.DraftID,
-		"originType": conv.OriginType,
-		"originId":   conv.OriginID,
-		"note":       "Need 生成后 Conversation 不丢失；origin 保留",
-	})}
+	// MERCHANT-CREATOR-NOTIFY-001：按人一条，收件人是会话里除 actor 外的成员。
+	// 没有收件人时**仍然发这一条不带收件人的事件** —— 它是业务事实（需求成形了），
+	// 审计与其它消费者要看得见；而带空收件人的事件会被映射层跳过，不产生一行没人读
+	// 的记录。审计链跟通知可投递性无关，这条不能混。
+	recipients := s.needConfirmedRecipients(ctx, conv, e.Actor.ID)
+	if len(recipients) == 0 {
+		recipients = []string{""}
+	}
+	domainEvents := make([]event.DomainEvent, 0, len(recipients))
+	for _, recipient := range recipients {
+		domainEvents = append(domainEvents, event.New("NeedConfirmedFromConversation", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+			"needId":            needID,
+			"draftId":           draft.DraftID,
+			"originType":        conv.OriginType,
+			"originId":          conv.OriginID,
+			"note":              "Need 生成后 Conversation 不丢失；origin 保留",
+			"notifyPrincipalId": recipient,
+		}))
+	}
 	return acceptedWithPayload(e, "Conversation", conv.ID, 1, conv.State, map[string]any{
 		"needId":    needID,
 		"confirmed": true,

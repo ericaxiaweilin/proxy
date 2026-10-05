@@ -491,7 +491,16 @@ var eventsWithoutNotification = map[string]string{
 	// 正向门禁看不见这一点 —— 它扫的是 `event.New("X"` 字面量，而那个字面量确实在
 	// 源码里，只是它所在的函数没人调。这类「死分支」只能靠人读代码发现，所以写清
 	// 在这里；函数本身留着不删（那是另一个决定）。
-	"OrderMaterialized":           "没有生产者：MaterializedEvent 在非测试代码里零调用方；真实路径发的是 OrderCreatedFromOffer（已映射）",
+	"OrderMaterialized": "没有生产者：MaterializedEvent 在非测试代码里零调用方；真实路径发的是 OrderCreatedFromOffer（已映射）",
+	// ── self-event：做这件事的人就是唯一相关的人 ─────────────────────────
+	//
+	// ReferralInvite 的模型里**只有** ContributorPrincipalID + InviteCode，**没有
+	// invitee 字段**。也就是说「创建邀请码」是 self-event：被邀请的人是之后**用这个
+	// 码**的人，那一刻会产生另一条事实，而那条事件还不存在。所以这里没有对手方可通知
+	// —— 通知自己等于回声。
+	// （之前我把它记成「收件人=被邀请方」，是错的：那个收件人此刻还不存在。）
+	"ReferralInviteCreated": "self-event：ReferralInvite 模型里没有 invitee（只有邀请码），被邀请人是之后用码的人 —— 创建时没有对手方",
+
 	"AnonymousSessionCreated":     "匿名会话创建是内部投影，用户不需要被告知自己被建了个匿名会话",
 	"AttributionRecorded":         "归因记录是内部数据，用户看到的是结果不是归因",
 	"DisplayIdentityCreated":      "显示身份的创建是系统内部步骤",
@@ -572,20 +581,17 @@ var eventsPendingNotificationDecision = map[string]string{
 	"CityCompanionNeedCreated": "广播给所有可接单 creator：收件人范围/频率/上限都是产品决定，没有偏好与限流之前发广播等于骚扰",
 
 	// ── 订单/履约 ────────────────────────────────────────────────────────
-	"OfferAccepted":                 "刻意不发：它和 OrderCreatedFromOffer 在同一批 domainEvents 里，单发会让同件事收两条（见 inboxForEvent 头注释第 4 条）",
-	"NeedConfirmedFromConversation": "该通知：收件人=发需求方",
-	"NeedCreatedFromPost":           "该通知：收件人=从帖子转需求的发帖人",
+	"OfferAccepted": "刻意不发：它和 OrderCreatedFromOffer 在同一批 domainEvents 里，单发会让同件事收两条（见 inboxForEvent 头注释第 4 条）",
 
 	// ── 账务：需要独立设计（金额/币种/对账口径），不能塞进现在这个无模板通道 ──
 	"PaymentIntentSucceeded": "该通知但**需要独立设计**：金额/币种/失败重试文案，通知域目前没有模板层",
 	"PaymentRefunded":        "同上",
+	"NeedCreatedFromPost":    "收件人不明：payload 里 creatorPrincipalId 是**被归因方**，而 actor 可能就是同一个人（回声）也可能是平台代操作；要先定这条命令对谁可见、谁该被告知",
 	"PaymentIntentCreated":   "内部状态机推进（真正该通知的是 Succeeded/Refunded）",
 	"PayoutReleased":         "该通知但需要独立设计：出账是财务口径",
 	"WalletChanged":          "该通知但需要独立设计：余额变化要带金额与方向",
 
 	// ── 社交邀请：该通知，且优先级高 ─────────────────────────────────────
-	"ReferralInviteCreated": "该通知：收件人=被邀请方",
-	"TopicInviteCreated":    "该通知：收件人=被邀请方",
 }
 
 // MERCHANT-CREATOR-NOTIFY-001：商家↔creator 的映射。
@@ -846,5 +852,40 @@ func TestCityCompanionNeedCreatedIsNotBroadcast(t *testing.T) {
 	}))
 	if ok {
 		t.Fatalf("a broadcast must not be delivered from a single event payload (got %q) — 收件人范围/频率/上限是产品决定", recipient)
+	}
+}
+
+// MERCHANT-CREATOR-NOTIFY-001：定向邀请 + 需求成形两条。
+//
+// ReferralInviteCreated 刻意**不**映射：它的模型里没有 invitee（只有邀请码），
+// 被邀请人是之后用码的人 —— 创建那一刻没有对手方，通知自己等于回声。
+// 这条钉住「不要给它加映射」。
+func TestReferralInviteIsNotNotifiedAsItHasNoInvitee(t *testing.T) {
+	if recipient, _, _, _, ok := inboxForEvent(testEvent("ReferralInviteCreated", "user_a", "ri_1", map[string]any{
+		"inviteCode": "ABC123", "contributionType": "REVIEW",
+	})); ok {
+		t.Fatalf("a self-event with no invitee must not be delivered (got %q)", recipient)
+	}
+}
+
+func TestTopicInviteAndNeedConfirmedUseTheResolvedRecipient(t *testing.T) {
+	for _, eventType := range []string{"TopicInviteCreated", "NeedConfirmedFromConversation"} {
+		recipient, title, body, _, ok := inboxForEvent(testEvent(eventType, "actor_u1", "agg_1", map[string]any{
+			"notifyPrincipalId": "user_counterparty", "agentId": "agent_x", "needId": "need_1", "topicKey": "t",
+		}))
+		if !ok || recipient != "user_counterparty" {
+			t.Fatalf("%s must deliver to notifyPrincipalId, got %q (ok=%v)", eventType, recipient, ok)
+		}
+		if title == "" || body == "" {
+			t.Fatalf("%s must carry copy, got %q / %q", eventType, title, body)
+		}
+		if recipient == "actor_u1" {
+			t.Fatalf("%s delivered the notification back to the actor", eventType)
+		}
+		if recipient, _, _, _, ok := inboxForEvent(testEvent(eventType, "actor_u1", "agg_1", map[string]any{
+			"agentId": "agent_x",
+		})); ok {
+			t.Fatalf("%s without notifyPrincipalId must NOT be delivered (went to %q)", eventType, recipient)
+		}
 	}
 }

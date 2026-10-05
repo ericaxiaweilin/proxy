@@ -294,3 +294,49 @@ type noOutboxConversationRepository struct {
 func (r *noOutboxConversationRepository) WriteAndPublish(context.Context, func(context.Context) error, []event.DomainEvent) error {
 	return errors.New("conversation transactional outbox is not configured")
 }
+
+// newNeedNotifyService 建一个接了解析器的 service（会话成员实测是 user account，
+// 宽松版解析会原样返回）。
+func newNeedNotifyService(t *testing.T) *Service {
+	t.Helper()
+	s := New()
+	s.SetPersonInboxRecipient(passthroughResolver{})
+	return s
+}
+
+// MERCHANT-CREATOR-NOTIFY-001：需求从对话草稿确认成形时，通知会话里**其他人**。
+//
+// actor 是刚点确认的人（`isParticipant` 校验过），通知他等于回声。房间里可能不止
+// 一个人（dialogs 的 member_ids 是数组），所以按人一条。
+func TestNeedConfirmedNotifiesOtherParticipantsOnceEach(t *testing.T) {
+	s := newNeedNotifyService(t)
+	conv := Conversation{ID: "conv_n1", Participants: []string{"user_a", "user_b", "user_c"}}
+
+	// actor 是 user_b ⇒ 通知 user_a 和 user_c。
+	got := s.needConfirmedRecipients(context.Background(), conv, "user_b")
+	if len(got) != 2 {
+		t.Fatalf("both other members must be notified, got %v", got)
+	}
+	for _, who := range got {
+		if who == "user_b" {
+			t.Fatal("the actor must not be notified of their own confirmation")
+		}
+	}
+	// 没接解析器 ⇒ 没有收件人（绝不猜）。这里必须用真的没接的实例 ——
+	// 用 newNeedNotifyService 会把「没接」这个前提悄悄变成「接了」。
+	bare := New()
+	if got := bare.needConfirmedRecipients(context.Background(), conv, "user_b"); len(got) != 0 {
+		t.Fatalf("without a resolver there must be NO recipient, got %v", got)
+	}
+	// 同一个成员出现两次 ⇒ 只通知一次。
+	dup := Conversation{ID: "conv_n2", Participants: []string{"user_a", "user_a", "user_c"}}
+	if got := s.needConfirmedRecipients(context.Background(), dup, "user_b"); len(got) != 2 {
+		t.Fatalf("a duplicated member must be notified once, got %v", got)
+	}
+}
+
+type passthroughResolver struct{}
+
+func (passthroughResolver) AgentInboxRecipient(_ context.Context, _ string) string { return "" }
+
+func (passthroughResolver) InboxRecipientFor(_ context.Context, id string) string { return id }
