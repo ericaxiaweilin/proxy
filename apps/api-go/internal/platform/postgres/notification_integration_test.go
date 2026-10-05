@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/notification"
 )
@@ -397,13 +399,16 @@ func TestDeactivateDeviceTokenPersistsInactiveStatus(t *testing.T) {
 		pool.Exec(ctx, `DELETE FROM notification.device_tokens WHERE user_account_id=$1`, userID)
 	})
 
-	if err := repo.UpsertDeviceToken(ctx, notification.DeviceToken{
+	tok := notification.DeviceToken{
 		ID: "dtok_notif_deact_" + itoa(run), UserAccountID: userID, DeviceID: deviceID,
 		Platform: "IOS", Token: "apns_token_deact", Status: "ACTIVE", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
-	}); err != nil {
+	}
+	if err := repo.UpsertDeviceToken(ctx, tok); err != nil {
 		t.Fatalf("seed device token: %v", err)
 	}
-	if err := repo.DeactivateDeviceToken(ctx, "dtok_notif_deact_"+itoa(run)); err != nil {
+	// 173 之后退役要带 UserAccountID：设备令牌按 user_account_id 做 RLS 隔离，
+	// 没有用户账号就声明不了作用域，DB 会拒（fail-closed）。
+	if err := repo.DeactivateDeviceToken(ctx, tok); err != nil {
 		t.Fatalf("DeactivateDeviceToken must persist (schema CHECK must allow INACTIVE): %v", err)
 	}
 	got, err := repo.GetDeviceToken(ctx, userID, deviceID)
@@ -422,5 +427,267 @@ func TestDeactivateDeviceTokenPersistsInactiveStatus(t *testing.T) {
 		if tok.ID == got.ID {
 			t.Fatalf("retired token must not be listed for push, got %+v", tok)
 		}
+	}
+}
+
+// MERCHANT-CREATOR-NOTIFY-001（migrations/173）：收件箱隔离下沉到 DB。
+//
+// **必须用非超级用户角色实测** —— 超级用户绕过所有权限检查，只测超级用户等于
+// 什么都没测（migration 112 记的就是这个坑：临时集群是 initdb -U proxy 建的，
+// 那个 proxy 是超级用户，于是 RLS 在测试里永远是摆设）。做法和
+// order_role_integration_test.go 一致：本次运行建一个临时非超级用户角色，
+// GRANT proxy TO 它（policy 是 TO proxy，成员角色按 pg_has_role 匹配），
+// 再 SET LOCAL ROLE 切过去 —— 于是 current_user 是非超级用户，RLS 真的生效。
+func TestNotificationInboxRLSIsolatesRecipients(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	run := time.Now().UnixNano()
+	scratch := "notif_rls_" + itoa(run)
+	owner := "user_rls_owner_" + itoa(run)
+	stranger := "user_rls_stranger_" + itoa(run)
+	itemID := "inbox_rls_" + itoa(run)
+
+	if _, err := pool.Exec(ctx, `CREATE ROLE `+scratch+` NOLOGIN NOSUPERUSER`); err != nil {
+		t.Skipf("cannot create scratch role (needs CREATEROLE): %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DROP OWNED BY `+scratch)
+		_, _ = pool.Exec(ctx, `DROP ROLE IF EXISTS `+scratch)
+	})
+	if _, err := pool.Exec(ctx, `GRANT `+"proxy"+` TO `+scratch); err != nil {
+		t.Fatalf("grant proxy role to scratch: %v", err)
+	}
+	// 种子数据由超级用户写（测试自己这次创建的行，run 后缀 + Cleanup）。
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO notification.inbox_items (id,recipient_id,type,title,body,deep_link,read,created_at)
+		VALUES ($1,$2,'Probe','owner 的通知','body',NULL,false,now())`, itemID, owner); err != nil {
+		t.Fatalf("seed inbox item: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(ctx, `DELETE FROM notification.inbox_items WHERE id=$1`, itemID)
+	})
+
+	asScratch := func(t *testing.T, fn func(tx pgx.Tx)) {
+		t.Helper()
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		if _, err := tx.Exec(ctx, `SET LOCAL ROLE `+scratch); err != nil {
+			t.Fatal(err)
+		}
+		fn(tx)
+	}
+
+	// ① 没声明作用域 ⇒ 读 0 行。**fail-closed 是刻意的**：漏设 GUC 的症状要是
+	//    「0 行」而不是「静默看到全部」，否则漏设就等于越权。
+	asScratch(t, func(tx pgx.Tx) {
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM notification.inbox_items`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Fatalf("without proxy.recipient_id the inbox must read 0 rows, got %d — fail-closed is broken", n)
+		}
+	})
+
+	// ② 声明成别人 ⇒ 读 0 行。
+	asScratch(t, func(tx pgx.Tx) {
+		if _, err := tx.Exec(ctx, `SELECT set_config('proxy.recipient_id', $1, true)`, stranger); err != nil {
+			t.Fatal(err)
+		}
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM notification.inbox_items`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Fatalf("recipient %s must not see %s's inbox, got %d rows", stranger, owner, n)
+		}
+	})
+
+	// ③ 声明成自己 ⇒ 只看得到自己的那一条。
+	asScratch(t, func(tx pgx.Tx) {
+		if _, err := tx.Exec(ctx, `SELECT set_config('proxy.recipient_id', $1, true)`, owner); err != nil {
+			t.Fatal(err)
+		}
+		var n int
+		var gotRecipient string
+		if err := tx.QueryRow(ctx, `SELECT count(*), min(recipient_id) FROM notification.inbox_items`).Scan(&n, &gotRecipient); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 || gotRecipient != owner {
+			t.Fatalf("own inbox must be visible and nobody else's: rows=%d recipient=%s", n, gotRecipient)
+		}
+	})
+
+	// ④ 声明成自己，也不能往别人收件箱塞东西（伪造平台通知的那条路）。
+	asScratch(t, func(tx pgx.Tx) {
+		if _, err := tx.Exec(ctx, `SELECT set_config('proxy.recipient_id', $1, true)`, stranger); err != nil {
+			t.Fatal(err)
+		}
+		_, err := tx.Exec(ctx, `
+			INSERT INTO notification.inbox_items (id,recipient_id,type,title,body,deep_link,read,created_at)
+			VALUES ($1,$2,'Probe','伪造的系统通知','body',NULL,false,now())`, "inbox_rls_forged_"+itoa(run), owner)
+		if err == nil {
+			t.Fatal("inserting into another recipient's inbox must be rejected by RLS")
+		}
+	})
+
+	// ⑤ DELETE 一律不给（173 REVOKE）：仓库铁律是「数据永不按代码删除」。
+	asScratch(t, func(tx pgx.Tx) {
+		if _, err := tx.Exec(ctx, `SELECT set_config('proxy.recipient_id', $1, true)`, owner); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM notification.inbox_items WHERE id=$1`, itemID); err == nil {
+			t.Fatal("DELETE must be denied on inbox_items")
+		}
+	})
+
+	// ⑥ 投递事实不可改（标题/正文/深链）—— 各自一个事务：被拒的语句会让整个
+	//    事务进入 aborted，后面的话都变成 25P02，那不是我们想验的东西。
+	asScratch(t, func(tx pgx.Tx) {
+		if _, err := tx.Exec(ctx, `SELECT set_config('proxy.recipient_id', $1, true)`, owner); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE notification.inbox_items SET title='改写了' WHERE id=$1`, itemID); err == nil {
+			t.Fatal("rewriting an already-delivered notification body must be denied")
+		}
+	})
+
+	// ⑦ 自己标已读必须仍然可以（否则 173 把「已读」功能一起关掉了）。
+	asScratch(t, func(tx pgx.Tx) {
+		if _, err := tx.Exec(ctx, `SELECT set_config('proxy.recipient_id', $1, true)`, owner); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE notification.inbox_items SET read=TRUE WHERE id=$1`, itemID); err != nil {
+			t.Fatalf("marking own notification read must be allowed: %v", err)
+		}
+		var read bool
+		if err := tx.QueryRow(ctx, `SELECT read FROM notification.inbox_items WHERE id=$1`, itemID).Scan(&read); err != nil {
+			t.Fatal(err)
+		}
+		if !read {
+			t.Fatal("read=TRUE must actually land")
+		}
+	})
+}
+
+// 173 的作用域是**事务级**（set_config(..., true)）—— 借出去的那条连接回到池子时
+// 不得还带着「这是给 user_A 查的」。这个测试只靠观察连接池行为就够：跑完一次
+// ListInbox 之后，在一个**没设过 GUC 的查询**里读 current_setting，必须是空。
+func TestNotificationScopeDoesNotLeakAcrossPooledConnections(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewNotificationRepository(pool)
+	recipient := "user_scope_leak_" + itoa(time.Now().UnixNano())
+
+	if _, err := repo.ListInbox(ctx, recipient, false); err != nil {
+		t.Fatalf("ListInbox: %v", err)
+	}
+	// 复用池里的连接，但这个查询本身没声明任何作用域。
+	var scope string
+	if err := pool.QueryRow(ctx, `SELECT coalesce(current_setting('proxy.recipient_id', true), '')`).Scan(&scope); err != nil {
+		t.Fatal(err)
+	}
+	if scope != "" {
+		t.Fatalf("notification scope leaked to a pooled connection: proxy.recipient_id=%q", scope)
+	}
+}
+
+// 空收件人必须在**碰数据库之前**就被拒：否则 policy 判 NULL，报出来的是
+// 「读 0 行 / 写被拒」这种看不出原因的错误。
+func TestNotificationRejectsEmptyScopeBeforeQuerying(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewNotificationRepository(pool)
+	if _, err := repo.ListInbox(ctx, "", false); err == nil {
+		t.Fatal("an empty recipient must be rejected")
+	}
+	if err := repo.MarkRead(ctx, "inbox_x", "  "); err == nil {
+		t.Fatal("a blank recipient must be rejected")
+	}
+}
+
+// MERCHANT-CREATOR-NOTIFY-001（173）：账户删除那一步要 DELETE device_tokens，
+// 而那张表按 user_account_id 开了 FORCE RLS。
+//
+// 为什么单独钉：症状极坏 —— 不声明作用域时 DELETE 一行都删不掉，
+// RowsAffected=0、receipt.PushTokens=0，函数却**照样返回 nil**。于是
+// 「设备已删除」被记成成功，而平台继续往一台已注销账号的设备推消息。
+// 而且上面那个既有测试（PushTokens==1）是在**超级用户**连接上跑的，RLS 被绕过，
+// 它压根看不见这个问题 —— 这就是必须用非超级用户角色实测的原因。
+//
+// 做法：另开一个池，用 `options=-c role=<scratch>` 让连接**一上来就是**
+// 非超级用户角色（EraseCrossAggregateIdentity 内部自己 Begin，没人能替它
+// 包一层 SET LOCAL ROLE）。
+func TestEraseAccountStillDeletesPushTokensUnderRLS(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	run := itoa(time.Now().UnixNano())
+	scratch := "notif_erase_" + run
+	userID := "xagg_rls_" + run
+
+	if _, err := pool.Exec(ctx, `CREATE ROLE `+scratch+` NOLOGIN NOSUPERUSER`); err != nil {
+		t.Skipf("cannot create scratch role (needs CREATEROLE): %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DROP OWNED BY `+scratch)
+		_, _ = pool.Exec(ctx, `DROP ROLE IF EXISTS `+scratch)
+	})
+	if _, err := pool.Exec(ctx, `GRANT `+"proxy"+` TO `+scratch); err != nil {
+		t.Fatalf("grant proxy role to scratch: %v", err)
+	}
+
+	// 种子：身份行 + 一个推送令牌（超级用户写；清理也用超级用户）。
+	f := newCrossAggregateFixture(run)
+	f.userID = userID
+	seedCrossAggregateCopies(t, ctx, f)
+	t.Cleanup(func() { cleanupCrossAggregateFixture(t, f) })
+
+	// 非超级用户池：连接建立时就带上 role。
+	dsn := pool.Config().ConnConfig.Copy()
+	dsn.RuntimeParams["role"] = scratch
+	cfg, err := pgxpool.ParseConfig(dsn.ConnString())
+	if err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	cfg.ConnConfig.RuntimeParams["role"] = scratch
+	scoped, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("scoped pool: %v", err)
+	}
+	defer scoped.Close()
+
+	var isSuper bool
+	if err := scoped.QueryRow(ctx, `SELECT rolsuper FROM pg_roles WHERE rolname = current_user`).Scan(&isSuper); err != nil {
+		t.Fatalf("probe current role: %v", err)
+	}
+	if isSuper {
+		t.Fatal("the scoped pool must not be a superuser, otherwise this test proves nothing")
+	}
+
+	// 先钉住种子真的在：否则「删掉了 0 行因为本来就没有」会被当成通过。
+	var seeded int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM notification.device_tokens WHERE user_account_id=$1`, userID).Scan(&seeded); err != nil {
+		t.Fatal(err)
+	}
+	if seeded != 1 {
+		t.Fatalf("fixture must seed exactly 1 push token, got %d", seeded)
+	}
+
+	receipt, err := NewIdentityRepository(scoped).EraseCrossAggregateIdentity(ctx, userID)
+	if err != nil {
+		t.Fatalf("EraseCrossAggregateIdentity must succeed: %v", err)
+	}
+	if receipt.PushTokens != 1 {
+		t.Fatalf("receipt.PushTokens = %d — the RLS-scoped DELETE deleted nothing while still reporting success", receipt.PushTokens)
+	}
+	var left int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM notification.device_tokens WHERE user_account_id=$1`, userID).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 {
+		t.Fatalf("%d push token(s) survived account erasure", left)
 	}
 }

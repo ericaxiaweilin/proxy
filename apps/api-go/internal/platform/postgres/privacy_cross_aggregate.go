@@ -68,6 +68,18 @@ func (r *IdentityRepository) EraseCrossAggregateIdentity(ctx context.Context, us
 		return nil
 	}
 
+	// MERCHANT-CREATOR-NOTIFY-001（migration 173）：账户删除最后一步要
+	// DELETE notification.device_tokens，而那张表按 user_account_id 开了
+	// **FORCE RLS**。不声明作用域的话，那条 DELETE 会一行都删不掉 ——
+	// 而且症状极坏：RowsAffected=0，receipt.PushTokens=0，函数**照样返回
+	// nil**，于是「设备已删除」被记成成功，而平台继续往一台已注销账号的
+	// 设备推消息（正是这段注释开头担心的那个残留）。
+	//
+	// 声明放在擦除开始处（事务级，连接还回池子时自动消失）。
+	if _, err := tx.Exec(ctx, `SELECT set_config('proxy.user_account_id', $1, true)`, userID); err != nil {
+		return receipt, err
+	}
+
 	// 1. The avatar. This MUST be the first statement that depends on
 	//    identity.profiles, because the profile row is what makes the
 	//    avatar identifiable at all.

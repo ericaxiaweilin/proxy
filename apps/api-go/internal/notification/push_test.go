@@ -51,8 +51,8 @@ func (f *fakeTokenLister) ListDeviceTokens(_ context.Context, user string) ([]De
 	return out, nil
 }
 
-func (f *fakeTokenLister) DeactivateDeviceToken(_ context.Context, id string) error {
-	f.retired = append(f.retired, id)
+func (f *fakeTokenLister) DeactivateDeviceToken(_ context.Context, token DeviceToken) error {
+	f.retired = append(f.retired, token.ID)
 	return nil
 }
 

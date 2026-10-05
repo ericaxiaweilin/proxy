@@ -58,7 +58,7 @@ type DeviceTokenLister interface {
 // 可选能力：不实现只是每次多付一次注定失败的往返（用户卸载后我们就一直推、
 // 一直失败）。实现了链路就自愈 —— 这是把「推送失败」从噪音变成动作的那一步。
 type DeviceTokenRetirer interface {
-	DeactivateDeviceToken(ctx context.Context, tokenID string) error
+	DeactivateDeviceToken(ctx context.Context, token DeviceToken) error
 }
 
 // PushDispatcher 实现 PushProvider：把一个 InboxItem 展开成「推给这个收件人的
@@ -113,7 +113,7 @@ func (d *PushDispatcher) Push(ctx context.Context, item InboxItem) error {
 		if err := sender.Send(ctx, token, msg); err != nil {
 			// 失效令牌**退役**，不要留着重试：用户卸载后我们会永远为它推、
 			// 永远失败，日志里堆满噪音而没人知道该做什么。
-			if errors.Is(err, ErrDeviceTokenUnregistered) && d.retire(ctx, token.ID) {
+			if errors.Is(err, ErrDeviceTokenUnregistered) && d.retire(ctx, token) {
 				retired++
 			}
 			failures = append(failures, fmt.Sprintf("%s/%s: %v", token.ID, token.Platform, err))
@@ -134,12 +134,12 @@ func (d *PushDispatcher) Push(ctx context.Context, item InboxItem) error {
 }
 
 // retire 尽力退役一个失效令牌；失败只影响下次是否还会重试，不该让推送本身报错。
-func (d *PushDispatcher) retire(ctx context.Context, tokenID string) bool {
+func (d *PushDispatcher) retire(ctx context.Context, token DeviceToken) bool {
 	retirer, ok := d.tokens.(DeviceTokenRetirer)
-	if !ok || tokenID == "" {
+	if !ok || token.ID == "" {
 		return false
 	}
-	return retirer.DeactivateDeviceToken(ctx, tokenID) == nil
+	return retirer.DeactivateDeviceToken(ctx, token) == nil
 }
 
 func (d *PushDispatcher) senderFor(platform string) PushSender {

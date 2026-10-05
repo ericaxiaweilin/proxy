@@ -53,10 +53,14 @@ type Repository interface {
 	ListDeviceTokens(ctx context.Context, userAccountID string) ([]DeviceToken, error)
 	// DeactivateDeviceToken 把 APNs/FCM 明确告知失效的令牌标成 INACTIVE。
 	//
+	// 收整个 DeviceToken 而不是只给 tokenID：migration 173 之后设备令牌按
+	// user_account_id 做 RLS 隔离，没有用户账号就没法声明「我这次是为哪个
+	// 用户账号操作」，DB 会直接拒（fail-closed）。
+	//
 	// 用户卸载 / 换机之后，那条令牌**永远**推不通。不退役的话每次推送都为它
 	// 白跑一趟，日志里堆满「apns status=410」，而没有任何一步会去修它。
 	// 这是把「推送失败」从噪音变成动作的那一步。
-	DeactivateDeviceToken(ctx context.Context, tokenID string) error
+	DeactivateDeviceToken(ctx context.Context, token DeviceToken) error
 	// InsertInboxItemOnce 写一行 inbox，并回答「这次是不是真的新增」。
 	//
 	// 返回值不是装饰：管线靠它决定推不推送（见 pipeline.go 的 Emit）。
@@ -122,11 +126,11 @@ func (r *MemoryRepository) ListDeviceTokens(_ context.Context, userAccountID str
 	}
 	return result, nil
 }
-func (r *MemoryRepository) DeactivateDeviceToken(_ context.Context, tokenID string) error {
+func (r *MemoryRepository) DeactivateDeviceToken(_ context.Context, token DeviceToken) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for key, t := range r.devices {
-		if t.ID == tokenID {
+		if t.ID == token.ID {
 			t.Status = "INACTIVE"
 			r.devices[key] = t
 			return nil
