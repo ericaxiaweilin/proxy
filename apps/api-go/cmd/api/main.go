@@ -715,13 +715,33 @@ func main() {
 		matchingStore := matching.NewPostgres(pool)
 		server.Matching = matchingStore
 		// MARKET-RANK-001：市场报名人按同一套撮合口径排序（可靠 / 距离 / 新人 / 负载…），给发单方看理由。
-		marketplaceService.SetApplicantRanker(func(ctx context.Context, ids []string, lat, lng *float64) ([]matching.Ranked, error) {
+		rankUsers := func(ctx context.Context, ids []string, lat, lng *float64) ([]matching.Ranked, error) {
 			signals, err := matchingStore.UserSignals(ctx, ids)
 			if err != nil {
 				return nil, err
 			}
 			return matching.Rank(ids, nil, matching.WithDistances(signals, ids, lat, lng), 0), nil
-		})
+		}
+		marketplaceService.SetApplicantRanker(rankUsers)
+		// MARKET-INVITE-001：快速发单 10 分钟没人报名 ⇒ 按同一套排名邀请 30km 内合适的人（两轮，各 5 人）。
+		if dispatchEngine != nil {
+			nearbyProfiles := postgres.NewIdentityRepository(pool)
+			dispatchEngine.Inviter = nearbyInviter{
+				market: marketplaceService,
+				nearby: func(ctx context.Context, lat, lng, maxDistanceM float64, limit int) ([]string, error) {
+					profiles, err := nearbyProfiles.ListProfilesNearby(ctx, lat, lng, maxDistanceM, nil, nil, limit)
+					if err != nil {
+						return nil, err
+					}
+					ids := make([]string, 0, len(profiles))
+					for _, p := range profiles {
+						ids = append(ids, p.UserAccountID)
+					}
+					return ids, nil
+				},
+				rank: rankUsers,
+			}
+		}
 		server.Dispatch = dispatchEngine
 		server.DispatchStats = dispatchStore
 		go runDispatchLoop(ctx, dispatchEngine)

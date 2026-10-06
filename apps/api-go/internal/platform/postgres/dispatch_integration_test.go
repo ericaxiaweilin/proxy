@@ -102,3 +102,62 @@ func TestDispatchRunsRoundTripThroughPostgres(t *testing.T) {
 		t.Fatalf("stats read the real tables: %+v %v", stats, err)
 	}
 }
+
+type pgNoApplicants struct{}
+
+func (pgNoApplicants) Candidates(context.Context, dispatch.Run, map[string]bool) ([]dispatch.Candidate, string, error) {
+	return nil, "", nil
+}
+
+type pgInviter struct{}
+
+func (pgInviter) Invite(_ context.Context, _ dispatch.Run, exclude map[string]bool, limit int) ([]string, string, error) {
+	out := []string{}
+	for _, id := range []string{"inv_a", "inv_b"} {
+		if !exclude[id] {
+			out = append(out, id)
+		}
+	}
+	return out, "", nil
+}
+
+// MARKET-INVITE-001：邀请的流水、run 上的「邀过谁」、以及给每位被邀者的 outbox 事件，同一个事务落库。
+func TestMarketInvitationsPersistWithTheirOutboxEvents(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	opp := "opp_invite_probe_" + time.Now().Format("150405.000000")
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM integration.outbox_messages WHERE aggregate_id = $1`, opp)
+		_, _ = pool.Exec(bg, `DELETE FROM dispatch.runs WHERE task_id = $1`, opp)
+	})
+	now := time.Now().UTC()
+	engine := &dispatch.Engine{Repo: dispatch.NewPostgres(pool), Offers: &pgFakeOffers{status: map[string]string{}},
+		Sources: map[string]dispatch.CandidateSource{dispatch.KindMarket: pgNoApplicants{}}, Inviter: pgInviter{},
+		Now: func() time.Time { return now }, NewID: func() string { return opp + "_run" }}
+	if _, err := engine.StartMarket(ctx, opp, "owner_probe"); err != nil {
+		t.Fatalf("StartMarket: %v", err)
+	}
+	if _, err := engine.Tick(ctx); err != nil { // WAITING
+		t.Fatal(err)
+	}
+	now = now.Add(11 * time.Minute)
+	if _, err := engine.Tick(ctx); err != nil { // INVITED
+		t.Fatal(err)
+	}
+	r, steps, err := engine.Repo.Get(ctx, opp+"_run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Kind != dispatch.KindMarket || r.InviteRounds != 1 || len(r.Invited) != 2 || r.InvitedAt == nil || !r.Waiting {
+		t.Fatalf("invite state persisted on the run: %+v", r)
+	}
+	if steps[len(steps)-1].Kind != dispatch.StepInvited {
+		t.Fatalf("the invitation is on the trail: %+v", steps)
+	}
+	var events int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM integration.outbox_messages
+		WHERE aggregate_id = $1 AND event_type = 'MarketOpportunityInvited' AND payload->>'notifyPrincipalId' IN ('inv_a', 'inv_b')`, opp).Scan(&events); err != nil || events != 2 {
+		t.Fatalf("one outbox event per invitee, written with the step: %d (%v)", events, err)
+	}
+}

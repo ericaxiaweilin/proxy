@@ -368,3 +368,108 @@ func TestMarketWithdrawRaceWithAConfirmationCountsAsAssigned(t *testing.T) {
 		t.Fatalf("a confirmation that beat the withdrawal wins; b is never selected: %+v sent=%v", r, w.sent)
 	}
 }
+
+// ---- MARKET-INVITE-001：没人报名就主动邀请附近合适的人 ----
+
+type fakeInviter struct {
+	pool     []string
+	skip     string
+	calls    int
+	excluded []map[string]bool
+}
+
+func (f *fakeInviter) Invite(_ context.Context, _ Run, exclude map[string]bool, limit int) ([]string, string, error) {
+	f.calls++
+	f.excluded = append(f.excluded, exclude)
+	if f.skip != "" {
+		return nil, f.skip, nil
+	}
+	out := []string{}
+	for _, id := range f.pool {
+		if !exclude[id] && len(out) < limit {
+			out = append(out, id)
+		}
+	}
+	return out, "", nil
+}
+
+func eventsOf(e *Engine, kind string) []string {
+	out := []string{}
+	for _, ev := range e.Repo.(*Memory).Events() {
+		if ev.EventType == kind {
+			who, _ := ev.Payload["notifyPrincipalId"].(string)
+			out = append(out, who)
+		}
+	}
+	return out
+}
+
+func TestNoApplicantsMeansTwoRoundsOfInvitationsThenSilence(t *testing.T) {
+	ctx := context.Background()
+	e, _, _, now := marketEngine()
+	inv := &fakeInviter{pool: []string{"p1", "p2", "p3", "p4", "p5", "p6", "p7", "owner_1"}}
+	e.Inviter = inv
+	_, _ = e.StartMarket(ctx, "opp_1", "owner_1")
+	run(t, e) // WAITING
+	*now = now.Add(9 * time.Minute)
+	run(t, e)
+	if inv.calls != 0 {
+		t.Fatal("nobody is bothered before 10 minutes")
+	}
+	*now = now.Add(2 * time.Minute)
+	r := run(t, e)
+	if inv.calls != 1 || len(r.Invited) != 5 || r.InviteRounds != 1 {
+		t.Fatalf("round 1 invites 5 people: %+v", r)
+	}
+	if !inv.excluded[0]["owner_1"] {
+		t.Fatal("the poster never invites himself")
+	}
+	*now = now.Add(20 * time.Minute)
+	run(t, e)
+	if inv.calls != 1 {
+		t.Fatal("round 2 waits a full 30 minutes")
+	}
+	*now = now.Add(11 * time.Minute)
+	r = run(t, e)
+	if inv.calls != 2 || fmt.Sprint(r.Invited[5:]) != "[p6 p7]" {
+		t.Fatalf("round 2 invites only people not invited before: %+v", r.Invited)
+	}
+	*now = now.Add(5 * time.Hour)
+	run(t, e)
+	if inv.calls != 2 {
+		t.Fatal("after two rounds the platform stops inviting")
+	}
+	if got := eventsOf(e, "MarketOpportunityInvited"); len(got) != 7 {
+		t.Fatalf("every invitee gets one notification event: %v", got)
+	}
+}
+
+func TestInvitingImpossibleIsRecordedOnceAndNotRetried(t *testing.T) {
+	ctx := context.Background()
+	e, _, _, now := marketEngine()
+	inv := &fakeInviter{skip: "opportunity_has_no_location"}
+	e.Inviter = inv
+	_, _ = e.StartMarket(ctx, "opp_1", "owner_1")
+	run(t, e)
+	*now = now.Add(11 * time.Minute)
+	run(t, e)
+	*now = now.Add(2 * time.Hour)
+	run(t, e)
+	if inv.calls != 1 {
+		t.Fatalf("a skip is final, not retried every tick: %d calls", inv.calls)
+	}
+	if got := stepKinds(t, e); got[len(got)-1] != StepInviteSkipped {
+		t.Fatalf("the reason is on the trail: %v", got)
+	}
+}
+
+func TestTheSelectedApplicantIsToldShehasFiveMinutes(t *testing.T) {
+	ctx := context.Background()
+	e, _, src, _ := marketEngine()
+	_, _ = e.StartMarket(ctx, "opp_1", "owner_1")
+	src.applicants = []Candidate{{AgentID: "amy", Ref: "app_amy"}}
+	run(t, e)
+	if got := eventsOf(e, "MarketApplicationSelected"); fmt.Sprint(got) != "[amy]" {
+		t.Fatalf("the platform's pick is notified, otherwise she never confirms in time: %v", got)
+	}
+}

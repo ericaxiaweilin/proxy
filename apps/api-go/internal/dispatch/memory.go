@@ -4,13 +4,23 @@ import (
 	"context"
 	"sort"
 	"sync"
+
+	"github.com/proxy-app/proxy-api/internal/event"
 )
 
 // Memory 是无库模式与单元测试用的存储。
 type Memory struct {
-	mu    sync.Mutex
-	runs  map[string]Run
-	steps map[string][]Step
+	mu     sync.Mutex
+	runs   map[string]Run
+	steps  map[string][]Step
+	events []event.DomainEvent // 与 PG 实现写进 outbox 的是同一份（EventsFor）
+}
+
+// Events 是推进过程中要发出去的通知事件（测试用）。
+func (m *Memory) Events() []event.DomainEvent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]event.DomainEvent(nil), m.events...)
 }
 
 func NewMemory() *Memory { return &Memory{runs: map[string]Run{}, steps: map[string][]Step{}} }
@@ -74,6 +84,7 @@ func (m *Memory) ProcessDue(_ context.Context, limit int, fn func(Run) (Run, []S
 		m.mu.Lock()
 		m.runs[id] = next
 		m.steps[id] = append(m.steps[id], steps...)
+		m.events = append(m.events, EventsFor(next, steps)...)
 		m.mu.Unlock()
 		n++
 	}
@@ -134,5 +145,6 @@ func (m *Memory) Save(_ context.Context, run Run, expectedVersion int, steps []S
 	}
 	m.runs[run.ID] = run
 	m.steps[run.ID] = append(m.steps[run.ID], steps...)
+	m.events = append(m.events, EventsFor(run, steps)...)
 	return nil
 }

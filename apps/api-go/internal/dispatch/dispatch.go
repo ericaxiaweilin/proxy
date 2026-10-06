@@ -26,6 +26,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/proxy-app/proxy-api/internal/event"
 )
 
 const (
@@ -59,6 +61,8 @@ const (
 	StepWaiting         = "WAITING_APPLICANTS"
 	StepNewApplicant    = "NEW_APPLICANT"
 	StepOwnerTookOver   = "OWNER_TOOK_OVER"
+	StepInvited         = "INVITED"        // 主动邀请附近的服务者来报名（detail.invitees）
+	StepInviteSkipped   = "INVITE_SKIPPED" // 邀请不了（例如发单没有坐标），只记一次，不再试
 	OfferTTL            = 5 * time.Minute
 	SystemActor         = "dispatch"
 	defaultTickBatch    = 50
@@ -91,11 +95,13 @@ type Run struct {
 	CurrentExpiresAt *time.Time  `json:"currentExpiresAt,omitempty"`
 	AssignedAgentID  string      `json:"assignedAgentId,omitempty"`
 	// Waiting：市场单还没有可选的报名人（已经记过一条 WAITING_APPLICANTS，不再重复记）。
-	Waiting   bool       `json:"waiting,omitempty"`
-	InvitedAt *time.Time `json:"invitedAt,omitempty"` // 最近一次主动邀请附近服务者报名的时间
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
-	Version   int        `json:"version"`
+	Waiting      bool       `json:"waiting,omitempty"`
+	InvitedAt    *time.Time `json:"invitedAt,omitempty"` // 最近一次主动邀请附近服务者报名的时间
+	InviteRounds int        `json:"inviteRounds,omitempty"`
+	Invited      []string   `json:"invited,omitempty"` // 邀请过的人：同一个人不邀第二次
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+	Version      int        `json:"version"`
 }
 
 // Step 是一条派单流水。
@@ -123,6 +129,20 @@ type OfferPort interface {
 type Withdrawer interface {
 	Withdraw(ctx context.Context, run Run, offerID string) error
 }
+
+// Inviter 是可选的：市场单发布后迟迟没人报名，按撮合排名邀请附近合适的服务者（MARKET-INVITE-001）。
+// exclude 是不该再邀的人（邀过的、发单方自己）；skip != "" 表示这一单邀请不了（原因写进流水，不再试）。
+type Inviter interface {
+	Invite(ctx context.Context, run Run, exclude map[string]bool, limit int) (invitees []string, skip string, err error)
+}
+
+// 邀请节奏（2026-10-06 定）：发布 10 分钟还没人报名 ⇒ 邀 5 人；再过 30 分钟还没人 ⇒ 再邀 5 人；之后不再打扰。
+const (
+	InviteAfter     = 10 * time.Minute
+	ReinviteAfter   = 30 * time.Minute
+	MaxInviteRounds = 2
+	InviteBatch     = 5
+)
 
 // CandidateSource 是可选的：给动态候选的 Run（市场单）每一轮重新排「还没试过的」候选。
 // stop != "" 表示别再派了（例如发单方自己选了人），引擎把 Run 停掉并记下原因。
@@ -154,6 +174,8 @@ type Engine struct {
 	Offers OfferPort
 	// Sources 按 Run.Kind 给动态候选；没有的 Kind 用建单时的快照。
 	Sources map[string]CandidateSource
+	// Inviter：没人报名时主动邀请。nil = 只等。
+	Inviter Inviter
 	Now     func() time.Time
 	NewID   func() string
 }
@@ -356,6 +378,29 @@ func (e *Engine) advance(ctx context.Context, r Run, busy map[string]bool) (Run,
 				step(StepWaiting, "", "", nil)
 				return touch(r, now), steps, nil
 			}
+			if e.Inviter != nil && r.InviteRounds < MaxInviteRounds && dueForInvite(r, now) {
+				exclude := map[string]bool{r.RequesterID: true}
+				for _, id := range r.Invited {
+					exclude[id] = true
+				}
+				invitees, skip, err := e.Inviter.Invite(ctx, r, exclude, InviteBatch)
+				if err != nil {
+					return r, steps, err
+				}
+				r.InviteRounds++
+				r.InvitedAt = &now
+				if skip != "" || len(invitees) == 0 {
+					if skip == "" {
+						skip = "nobody_suitable_nearby"
+					}
+					r.InviteRounds = MaxInviteRounds // 邀请不了就不再每轮去试
+					step(StepInviteSkipped, "", "", map[string]any{"reason": skip})
+				} else {
+					r.Invited = append(r.Invited, invitees...)
+					step(StepInvited, "", "", map[string]any{"invitees": invitees, "round": r.InviteRounds})
+				}
+				return touch(r, now), steps, nil
+			}
 			if len(steps) > 0 {
 				return touch(r, now), steps, nil
 			}
@@ -477,4 +522,39 @@ func (e *Engine) Assign(ctx context.Context, id string, c Candidate, operator, r
 	}
 	all := append([]Step{pre}, steps...)
 	return next, all, e.Repo.Save(ctx, next, prev, all)
+}
+
+func dueForInvite(r Run, now time.Time) bool {
+	if r.InvitedAt == nil {
+		return now.Sub(r.CreatedAt) >= InviteAfter
+	}
+	return now.Sub(*r.InvitedAt) >= ReinviteAfter
+}
+
+// EventsFor 是这些流水要让谁知道（写进 outbox，由 worker 投成站内通知 + 推送）。
+//
+//   - 平台代选了她（MARKET 的 OFFER_SENT）⇒ MarketApplicationSelected 给她：
+//     不告诉她，她就不知道要在 5 分钟内确认，代选会一个接一个超时；
+//   - 主动邀请（INVITED）⇒ 每位被邀的人一条 MarketOpportunityInvited。
+//
+// 事件 id 由引擎生成、和流水同一个事务落库；收件人统一放 payload.notifyPrincipalId（用户账号）。
+func EventsFor(run Run, steps []Step) []event.DomainEvent {
+	out := []event.DomainEvent{}
+	for _, st := range steps {
+		switch {
+		case run.Kind == KindMarket && st.Kind == StepOfferSent && st.AgentID != "":
+			out = append(out, event.New("MarketApplicationSelected", "MarketApplication", st.OfferID, 1, run.RequesterID,
+				run.ID, run.ID, st.At, map[string]any{
+					"notifyPrincipalId": st.AgentID, "opportunityId": run.TaskID, "applicationId": st.OfferID,
+					"confirmWithinSeconds": int(OfferTTL / time.Second),
+				}))
+		case st.Kind == StepInvited:
+			invitees, _ := st.Detail["invitees"].([]string)
+			for _, who := range invitees {
+				out = append(out, event.New("MarketOpportunityInvited", "MarketOpportunity", run.TaskID, 1, run.RequesterID,
+					run.ID, run.ID, st.At, map[string]any{"notifyPrincipalId": who, "opportunityId": run.TaskID}))
+			}
+		}
+	}
+	return out
 }

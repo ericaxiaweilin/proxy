@@ -1213,6 +1213,11 @@ func (s *Service) ExpireSelection(ctx context.Context, opportunityID, applicatio
 	return expirer.ExpireSelection(ctx, opportunityID, applicationID, ownerID)
 }
 
+// Opportunity 读一条机会（派单 / 邀请要它的坐标与主人）。
+func (s *Service) Opportunity(ctx context.Context, id string) (Opportunity, error) {
+	return s.repository.Get(ctx, id)
+}
+
 // ApplicationsForDispatch 是派单读报名人的口子：与发单方看到的同一份排序。
 func (s *Service) ApplicationsForDispatch(ctx context.Context, opportunityID, ownerID string) ([]RankedApplication, error) {
 	applications, err := s.repository.ListApplications(ctx, opportunityID, ownerID)

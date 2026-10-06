@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS dispatch.runs (
     -- MARKET-FAST-001：市场单还没人报名（只记一次 WAITING_APPLICANTS）/ 最近一次主动邀请的时间。
     waiting            BOOLEAN NOT NULL DEFAULT false,
     invited_at         TIMESTAMPTZ,
+    invite_rounds      INTEGER NOT NULL DEFAULT 0 CHECK (invite_rounds >= 0),
+    -- 邀请过的用户账号（JSONB 数组）：同一个人不邀第二次。
+    invited            JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(invited) = 'array'),
     created_at         TIMESTAMPTZ NOT NULL,
     updated_at         TIMESTAMPTZ NOT NULL,
     version            INTEGER NOT NULL CHECK (version > 0),

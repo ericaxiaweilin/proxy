@@ -273,6 +273,19 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 		// 还了价，商家没人知道。事件是齐的，映射是空的，中间那一层没人写。
 		//
 
+	// MARKET-FAST-001：快速发单里平台替发单方选中了她。不告诉她，她就不知道要在 5 分钟内确认，
+	// 代选会一个接一个超时。收件人是 notifyPrincipalId（报名人的用户账号），不回退。
+	case "MarketApplicationSelected":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "你被选中了", "发单方选了你，5 分钟内确认就成单；超时会换下一位", "", true
+		}
+		return "", "", "", "", false
+	// MARKET-INVITE-001：快速发单迟迟没人报名，按撮合排名邀请附近合适的人。
+	case "MarketOpportunityInvited":
+		if who, ok := merchantCreatorRecipient(); ok {
+			return who, "附近有个单适合你", "有人在你附近发了单，去市场看看要不要报名", "", true
+		}
+		return "", "", "", "", false
 	case "CollabInvitationCreated":
 		if who, ok := merchantCreatorRecipient(); ok {
 			return who, "收到合作邀约", "有商家向你发来合作邀约，去看看条件", "", true

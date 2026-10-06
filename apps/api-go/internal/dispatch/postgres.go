@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/proxy-app/proxy-api/internal/event"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -17,20 +19,26 @@ func NewPostgres(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
 const runColumns = `id, task_id, slot_id, requester_id, batch_id, budget_vnd, status, candidates, cursor,
 	current_offer_id, current_agent_id, current_expires_at, assigned_agent_id, created_at, updated_at, version,
-	kind, waiting, invited_at`
+	kind, waiting, invited_at, invite_rounds, invited`
 
 func scanRun(row pgx.Row) (Run, error) {
 	var r Run
 	var raw []byte
 	var offer, agent, assigned *string
+	var invited []byte
 	err := row.Scan(&r.ID, &r.TaskID, &r.SlotID, &r.RequesterID, &r.BatchID, &r.BudgetVND, &r.Status, &raw, &r.Cursor,
 		&offer, &agent, &r.CurrentExpiresAt, &assigned, &r.CreatedAt, &r.UpdatedAt, &r.Version,
-		&r.Kind, &r.Waiting, &r.InvitedAt)
+		&r.Kind, &r.Waiting, &r.InvitedAt, &r.InviteRounds, &invited)
 	if err != nil {
 		return Run{}, err
 	}
 	if err := json.Unmarshal(raw, &r.Candidates); err != nil {
 		return Run{}, err
+	}
+	if len(invited) > 0 {
+		if err := json.Unmarshal(invited, &r.Invited); err != nil {
+			return Run{}, err
+		}
 	}
 	if offer != nil {
 		r.CurrentOfferID = *offer
@@ -80,11 +88,11 @@ func (p *Postgres) Create(ctx context.Context, runs []Run, steps []Step) error {
 				raw = []byte("[]")
 			}
 			tag, err := tx.Exec(ctx, `INSERT INTO dispatch.runs (`+runColumns+`)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 				ON CONFLICT (task_id, slot_id) DO NOTHING`,
 				r.ID, r.TaskID, r.SlotID, r.RequesterID, r.BatchID, r.BudgetVND, r.Status, raw, r.Cursor,
 				nullable(r.CurrentOfferID), nullable(r.CurrentAgentID), r.CurrentExpiresAt, nullable(r.AssignedAgentID),
-				r.CreatedAt, r.UpdatedAt, r.Version, kindOrTask(r.Kind), r.Waiting, r.InvitedAt)
+				r.CreatedAt, r.UpdatedAt, r.Version, kindOrTask(r.Kind), r.Waiting, r.InvitedAt, r.InviteRounds, invitedJSON(r))
 			if err != nil {
 				return err
 			}
@@ -102,10 +110,10 @@ func (p *Postgres) update(ctx context.Context, tx pgx.Tx, r Run, expectedVersion
 	}
 	tag, err := tx.Exec(ctx, `UPDATE dispatch.runs SET status = $2, candidates = $3, cursor = $4, current_offer_id = $5,
 		current_agent_id = $6, current_expires_at = $7, assigned_agent_id = $8, updated_at = $9, version = $10,
-		waiting = $12, invited_at = $13
+		waiting = $12, invited_at = $13, invite_rounds = $14, invited = $15
 		WHERE id = $1 AND version = $11`,
 		r.ID, r.Status, raw, r.Cursor, nullable(r.CurrentOfferID), nullable(r.CurrentAgentID), r.CurrentExpiresAt,
-		nullable(r.AssignedAgentID), r.UpdatedAt, r.Version, expectedVersion, r.Waiting, r.InvitedAt)
+		nullable(r.AssignedAgentID), r.UpdatedAt, r.Version, expectedVersion, r.Waiting, r.InvitedAt, r.InviteRounds, invitedJSON(r))
 	if err != nil {
 		return err
 	}
@@ -147,7 +155,10 @@ func (p *Postgres) ProcessDue(ctx context.Context, limit int, fn func(Run) (Run,
 				}
 			}
 			n++
-			return insertSteps(ctx, tx, steps)
+			if err := insertSteps(ctx, tx, steps); err != nil {
+				return err
+			}
+			return insertEvents(ctx, tx, EventsFor(next, steps))
 		})
 		if err != nil {
 			return n, err
@@ -221,7 +232,10 @@ func (p *Postgres) Save(ctx context.Context, run Run, expectedVersion int, steps
 		if err := p.update(ctx, tx, run, expectedVersion); err != nil {
 			return err
 		}
-		return insertSteps(ctx, tx, steps)
+		if err := insertSteps(ctx, tx, steps); err != nil {
+			return err
+		}
+		return insertEvents(ctx, tx, EventsFor(run, steps))
 	})
 }
 
@@ -251,4 +265,38 @@ func kindOrTask(kind string) string {
 		return KindTask
 	}
 	return kind
+}
+
+func invitedJSON(r Run) []byte {
+	if len(r.Invited) == 0 {
+		return []byte("[]")
+	}
+	raw, _ := json.Marshal(r.Invited)
+	return raw
+}
+
+// insertEvents 与 platform/postgres.OutboxRepository 同一条 INSERT（同一张表、同一组列）：
+// 派单的流水和它要发的通知在同一个事务里，要么都落、要么都不落。
+func insertEvents(ctx context.Context, tx pgx.Tx, events []event.DomainEvent) error {
+	for _, e := range events {
+		payload, err := e.MarshalPayload()
+		if err != nil {
+			return err
+		}
+		var causation *string
+		if e.CausationID != "" {
+			causation = &e.CausationID
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO integration.outbox_messages (
+				event_id, event_type, event_version, aggregate_type, aggregate_id,
+				aggregate_version, principal_id, occurred_at, correlation_id, causation_id, payload
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			ON CONFLICT (event_id) DO NOTHING`,
+			e.EventID, e.EventType, e.EventVersion, e.AggregateType, e.AggregateID,
+			e.AggregateVersion, e.PrincipalID, e.OccurredAt, e.CorrelationID, causation, payload); err != nil {
+			return err
+		}
+	}
+	return nil
 }

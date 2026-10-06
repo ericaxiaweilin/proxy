@@ -56,6 +56,10 @@ function stepText(s: Step): string {
     case "WAITING_APPLICANTS": return "还没有人报名，等报名";
     case "NEW_APPLICANT": return `${s.agentId} 新报名，重新开始代选`;
     case "OWNER_TOOK_OVER": return "发单方自己选了人，平台停止代选";
+    case "INVITED": return `没人报名，邀请了附近 ${(d.invitees as string[] | undefined)?.length ?? 0} 位合适的人（第 ${String(d.round ?? 1)} 轮）：${((d.invitees as string[] | undefined) ?? []).join("、")}`;
+    case "INVITE_SKIPPED": return d.reason === "opportunity_has_no_location"
+      ? "想邀请附近的人，但这张单没有坐标，说不出「附近」"
+      : "附近 30km 内没有可邀请的人";
     case "OFFER_SENT": return d.price ? `发邀约给 ${s.agentId}（${vnd(Number(d.price))}，5 分钟内有效）` : `代选 ${s.agentId}，等她 5 分钟内确认`;
     case "EXPIRED": return `${s.agentId} 5 分钟没接，顺延下一位`;
     case "OFFER_CANCELLED": return `给 ${s.agentId} 的邀约被撤回，顺延下一位`;

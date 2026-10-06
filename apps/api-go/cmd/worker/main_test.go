@@ -976,3 +976,18 @@ func goFunctionBody(src string, start int) int {
 	}
 	return -1
 }
+
+// MARKET-FAST-001 / MARKET-INVITE-001：两条市场派单通知都投给 payload.notifyPrincipalId，缺了就不投（不猜收件人）。
+func TestInboxForEventRoutesMarketDispatchNoticesToTheApplicant(t *testing.T) {
+	for _, kind := range []string{"MarketApplicationSelected", "MarketOpportunityInvited"} {
+		e := event.DomainEvent{EventType: kind, AggregateID: "opp_1", PrincipalID: "owner_1", Payload: map[string]any{"notifyPrincipalId": "user_amy"}}
+		who, title, _, _, ok := inboxForEvent(e)
+		if !ok || who != "user_amy" || title == "" {
+			t.Fatalf("%s goes to the applicant, not the poster: who=%q ok=%v", kind, who, ok)
+		}
+		bare := event.DomainEvent{EventType: kind, AggregateID: "opp_1", PrincipalID: "owner_1"}
+		if _, _, _, _, ok := inboxForEvent(bare); ok {
+			t.Fatalf("%s without notifyPrincipalId must not be delivered to a guessed recipient", kind)
+		}
+	}
+}
