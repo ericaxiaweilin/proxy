@@ -18,6 +18,7 @@ import {
   filterSuppliers,
   MOMENT_ACTION_ID,
   MOMENT_TEMPLATES,
+  PRO_LOGOS,
   PRO_SERVICES,
   PRO_TABS,
   type DemandSpecs,
@@ -33,6 +34,7 @@ import { Image } from "expo-image";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { localApiBaseUrl } from "../native-clients";
 import { ProxyBackGlyph } from "../components/proxy-foundation";
+import { ProxyIcon } from "../components/proxy-icon";
 
 type Step = "moment" | "people" | "specs" | "done";
 
@@ -89,6 +91,20 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const [step, setStep] = useState<Step>("moment");
   // UI-ORDER-LOGO-001: Moment 图标复用场景动作既有 logo（不是另做一套）
   const actionIconFor = (momentId: string): number | undefined => SCENE_ACTIONS.find((item) => item.id === MOMENT_ACTION_ID[momentId])?.icon as number | undefined;
+  // 「专业」四行服务的 logo。2026-10-06 用户连着两轮问「专业服务为什么没有 logo」/
+  // 「还是没找回专业的 logo 啊」—— 这四行一直只画单字 mark（文/签/法/商），
+  // 而 Moment 那几行走 actionIconFor() 拿到场景动作 SVG，同一格里一边有图一边只有字。
+  // 资产来源（scene → 场景动作既有 SVG；icon → ProxyIcon 矢量字形；都没配才回落 mark）
+  // 与逐条依据写在 demand-moments.ts 的 PRO_LOGOS，这里只负责画。
+  const proLogoNode = (service: ProService): React.JSX.Element => {
+    const logo = PRO_LOGOS[service.id];
+    if (logo !== undefined && "scene" in logo) {
+      const art = SCENE_ACTIONS.find((item) => item.id === logo.scene)?.icon as number | undefined;
+      if (art !== undefined) return <Image contentFit="contain" source={art} style={styles.momentIcon} />;
+    }
+    if (logo !== undefined && "icon" in logo) return <ProxyIcon color={color.ink} name={logo.icon} size={24} />;
+    return <Text selectable style={styles.momentEmojiText}>{service.mark}</Text>;
+  };
   // R58 城市协助 · Professional：当前选中的服务（现场翻译 / 签证协助 / 法律咨询 / 商务协助）
   const [proService, setProService] = useState<string | undefined>(undefined);
   // 「专业」分类下的子标签（原型 sub-tabs：全部 / 翻译 / 签证 / 法律 / 商务）。
@@ -384,7 +400,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                   const active = proService === service.id;
                   return (
                     <Pressable key={service.id} accessibilityLabel={`选择${service.title}`} onPress={() => selectProService(service)} style={[styles.catalogItem, active && styles.momentCardOn]}>
-                      <View style={styles.momentEmoji}><Text selectable style={styles.momentEmojiText}>{service.mark}</Text></View>
+                      <View style={styles.momentEmoji}>{proLogoNode(service)}</View>
                       <View style={styles.momentCopy}>
                         <Text selectable style={styles.momentTitle}>{service.title}</Text>
                         <Text selectable style={styles.momentDesc}>{service.sub}</Text>

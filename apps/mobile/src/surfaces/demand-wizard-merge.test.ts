@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { PRO_LOGOS, PRO_SERVICES } from "../demand-moments";
 
 // DEMAND-PRO-MERGE-001: 2026-10-06 用户：「本质是把2个散的合并成一个 而不是把城市协助
 // 放在外面」。发布需求页原本是**两套**选择器 —— 双栏（左 rail + 右 Moment 列表），以及
@@ -96,5 +97,29 @@ describe("DEMAND-PRO-MERGE-001", () => {
     // 不是另做一套）—— 映射漏了就会回落到 emoji，跟 Moment 那排长得不一样。
     expect(moments).toContain('ballgame: "sport"');
     expect(moments).toContain('ride: "cycling"');
+  });
+
+  it("专业四行都接了 logo，而且用的是既有资产（用户连着两轮问）", () => {
+    // 2026-10-06 用户：「专业服务为什么没有 logo 图片资产 之前设计了 自己找找」
+    // →「还是没找回专业的 logo 啊 找不到了吗」。查证结论：四条服务本身**从来没有**
+    // 图片资产（R58 原型 pro-card 纯文字、服务端 templates.go 只给 Mark 文本）；
+    // 但页面确实丢过一个 logo —— 城市协助入口卡的 urban-support，被合并整块删掉。
+    const discovery = readFileSync(
+      fileURLToPath(new URL("../components/scene-activity-discovery.tsx", import.meta.url)),
+      "utf8"
+    );
+    for (const service of PRO_SERVICES) {
+      const logo = PRO_LOGOS[service.id];
+      expect(logo, `${service.title} 没配 logo —— 又会退成一行纯文字`).toBeDefined();
+      if (logo !== undefined && "scene" in logo) {
+        // scene id 必须是 SCENE_ACTIONS 里真有的（配错 id 会静默回落成 mark）。
+        expect(discovery, `${service.title} 的 scene id「${logo.scene}」不在 SCENE_ACTIONS 里`)
+          .toContain(`id: "${logo.scene}"`);
+      }
+    }
+    // 被合并删掉的那一枚必须回到页面上：城市协助 → urban-support。
+    expect(PRO_LOGOS.business).toEqual({ scene: "urban-support" });
+    // 向导真的在画它（数据层配了但界面没接 = 白配）。
+    expect(wizard).toContain("{proLogoNode(service)}");
   });
 });

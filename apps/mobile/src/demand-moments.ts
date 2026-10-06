@@ -14,6 +14,8 @@
 
 import type { PublishMarketOpportunityInput } from "@proxy/contracts";
 import type { SupplierCandidate } from "./supply-client";
+// 只借字形**类型**（`import type` 会被完全擦除，不把 RN 组件拉进这个纯模块）。
+import type { ProxyIconName } from "./components/proxy-icon";
 
 export type MomentTemplate = {
   id: string;
@@ -99,6 +101,11 @@ export type ProService = {
   cat: ProDomain;
   title: string;
   sub: string;
+  /**
+   * 单字标记（文 / 签 / 法 / 商）。**现在是兜底**，不是主视觉 —— 见 PRO_LOGOS。
+   * R58 原型的 pro-card 本来就只有文字（`<b>现场翻译</b><small>…</small>`，无图标），
+   * 服务端 `apps/api-go/internal/marketplace/templates.go` 也只给 Mark 文本。
+   */
   mark: string;
   tags: string[];
   price: string;
@@ -113,6 +120,43 @@ export const PRO_SERVICES: readonly ProService[] = [
   { id: "legal", cat: "legal", title: "法律咨询", sub: "按执业资格与领域匹配", mark: "法", tags: ["法律", "咨询"], price: "面议", range: "按领域与时长", note: "按执业资格与领域匹配专业人士。", cert: "按执业资格与领域匹配" },
   { id: "business", cat: "biz", title: "商务协助", sub: "会议 / 本地协调 / 陪同", mark: "商", tags: ["商务", "陪同"], price: "面议", range: "按会议与陪同", note: "会议支持、本地协调与现场陪同。", cert: "会议 / 本地协调 / 陪同" }
 ];
+
+/**
+ * 「专业」四行服务的 logo。2026-10-06 用户连着两轮问：「专业服务为什么没有 logo
+ * 图片资产 之前设计了 自己找找」/「还是没找回专业的 logo 啊 找不到了吗」。
+ *
+ * 查证结论（说清楚，免得再被问第三次）：
+ *   · **这四条服务从来没有过图片资产** —— R58 原型的 pro-card 是纯文字
+ *     （`<b>现场翻译</b><small>语言 / 时长 / 场景</small><span>能力认证</span>`，一个图标都没有），
+ *     服务端 `templates.go` 也只给 Mark 文本。全仓 49 个 SVG 里没有签证/法律/商务。
+ *   · **但页面上确实「丢」过一个 logo**：城市协助那张入口卡（`professionalEntry`）原来渲染
+ *     `urban-support.svg`（`acc0d67d` 按 UI-ORDER-LOGO-001 补的）。2026-10-06 合并进双栏时
+ *     那张卡整块删掉，logo 跟着没了 —— 用户说的「找回」就是这个。
+ *
+ * 所以这里把四行接回既有 logo，**不新画资产**：
+ *   · `scene` = `SCENE_ACTIONS` 的 action id（`assets/scene-activity/actions/*.svg`）
+ *   · `icon`  = `ProxyIcon` 的矢量字形 —— **只在没有对应图片资产时**用。
+ *     先例：`components/market-type-logo.tsx` 的 `chat_companion`（那里写着「没有对应的
+ *     SCENE_ACTIONS 图片资产 …… 用 ProxyIcon 的矢量 chat 字形，不用假图片凑数」）。
+ *
+ * 逐条依据：
+ *   · 现场翻译 → translation：SCENE_ACTIONS 的 label 就是「翻译」；
+ *     `market-type-logo.tsx` 的 bilingual_store 也用它。
+ *   · 签证协助 → travel：SCENE_ACTIONS 的 label「出游」（护照 / 出入境），四枚里最贴近的。
+ *   · 法律咨询 → fileText：**没有任何** scene-action 是法律/合同的；fileText 是本仓既有的
+ *     法务字形（`me.tsx` 设置页 settingsRowLegalDocs 用的就是它）。
+ *   · 商务协助 → urban-support：SCENE_ACTIONS 的 label「城市协助」；`ACTION_DETAILS` 里
+ *     business-companion（商务陪同）挂的就是 familyId urban-support，城市协助模板本来也映射它
+ *     （MOMENT_ACTION_ID.pro）。
+ */
+export type ProLogo = { scene: string } | { icon: ProxyIconName };
+
+export const PRO_LOGOS: Record<string, ProLogo> = {
+  translate: { scene: "translation" },
+  visa: { scene: "travel" },
+  legal: { icon: "fileText" },
+  business: { scene: "urban-support" }
+};
 
 /**
  * 发布器「专业」分类下的一排子标签（原型 sub-tabs：全部 / 翻译 / 签证 / 法律 / 商务）。
