@@ -1451,7 +1451,6 @@ export function MerchantMeR21Replacement({
             // 不再只限于自己认领过全局码的人。
             creators={creators.map((c) => ({ agentId: c.agentId, name: c.name, photoUri: resolveCreatorPhoto(c.photos[0]) }))}
             onBack={() => setPage("creator")}
-            onOpenStore={() => setPage("store")}
             // 「选择下单」：进这位 creator 的主页，走现有的「邀请合作」下单流程。
             onSelectCreator={(agentId) => {
               const picked = creators.find((c) => c.agentId === agentId);

@@ -99,10 +99,15 @@ describe("MERCHANT-CREATOR-PROMO-002 creator 看自己在各家店的码", () =>
   });
 });
 
-describe("MERCHANT-CREATOR-PROMO-002 品类读门店资料，没填就提示去店铺填", () => {
-  it("不在专属码页选品类；门店没填品类时如实提示并给入口", () => {
+describe("MERCHANT-CREATOR-PROMO-002 品类读门店资料；没核定就只如实说明", () => {
+  it("不在专属码页选品类；没核定时说明清楚，且不给一个做不到的入口", () => {
     expect(promo).toContain("const storeCategory = storeInfo?.category ?? \"\";");
-    expect(promo).toContain("本店资料里还没填品类");
-    expect(promo).toContain("去店铺填品类");
+    expect(promo).toContain("本店品类还没由平台核定");
+    // 2026-10-06 改：品类是**平台核定项、商家侧只读**（my-stores-hub.tsx 2026-10-04 的
+    // 决定），店铺 hub 上既没有品类编辑器、未核定时连那一节都不画 —— 所以旧那个
+    // 「跳去店铺页」的按钮是死路，连同 onOpenStore 这个 prop 一起撤掉了。
+    // 反面断言查的是 merchant-promo.tsx 的源码，本文件自己的注释不会被喂红。
+    expect(promo).not.toContain("onOpenStore");
+    expect(promo).not.toContain("还没填品类");
   });
 });

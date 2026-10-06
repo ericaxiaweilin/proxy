@@ -43,7 +43,7 @@ type Sheet =
   | { kind: "basis"; view: PairPromoView; suggestion?: PromoSuggestion | undefined; changes?: PromoChange[] | undefined; error?: string | undefined }
   | { kind: "code"; view: PairPromoView };
 
-export function MerchantPromoSurface({ supply, merchantId, merchantName, marketId, creators, onBack, onOpenStore, onSelectCreator }: {
+export function MerchantPromoSurface({ supply, merchantId, merchantName, marketId, creators, onBack, onSelectCreator }: {
   supply: SupplyClient;
   merchantId: string;
   merchantName: string;
@@ -54,8 +54,6 @@ export function MerchantPromoSurface({ supply, merchantId, merchantName, marketI
   onBack: () => void;
   // 「选择下单」：进这位 creator 的主页走现有的邀约下单流程。
   onSelectCreator?: ((agentId: string) => void) | undefined;
-  // 门店资料里没填品类时，跳去「店铺」页填（品类只在那里维护一处）。
-  onOpenStore?: (() => void) | undefined;
 }): React.JSX.Element {
   const [views, setViews] = useState<PairPromoView[]>([]);
   const [totals, setTotals] = useState<PairPromoStats | undefined>(undefined);
@@ -203,7 +201,10 @@ export function MerchantPromoSurface({ supply, merchantId, merchantName, marketI
   };
 
   const conversion = conversionBp < 0 ? "—" : `${Math.round(conversionBp / 100)}%`;
-  // 本店品类：服务端从门店资料读的（店主在「店铺」里填的那个）。
+  // 本店品类：服务端从门店资料读的。**商家侧只读** —— 品类是平台核定项
+  // （my-stores-hub.tsx 2026-10-04 的决定：「咖啡店就是咖啡店…那是平台后台审核过的」），
+  // 客户端也没有传品类的口子（见 supply-client 的 createPromo 注释：品类不由客户端传）。
+  // 所以这里只可能读到两种：已核定的那个，或者空（还没核定）。
   const storeCategory = storeInfo?.category ?? "";
   return (
     <View>
@@ -223,10 +224,13 @@ export function MerchantPromoSurface({ supply, merchantId, merchantName, marketI
         <Dash value={conversion} label="核销转化率" />
       </View>
 
+      {/* 品类为空 = 平台还没核定，不是「商家忘了填」—— 商家侧根本没有能填品类的地方
+          （店铺 hub 的「店铺品类」是只读的，而且未核定时连那一节都不画）。
+          所以这里只如实说明，不给按钮：给一个指向店铺页的入口是死路，而且是在让商家
+          做产品不让他做的事。什么时候补上，是平台侧的事，不在这页编流程。 */}
       {storeInfo && storeInfo.category === "" ? (
         <View style={s.notice}>
-          <Text selectable style={s.noticeText}>本店资料里还没填品类：专属码先按「本店全部品类」发，系统建议也算不了内容垂直度和同品类平均。在「店铺」里填上品类后会自动用上。</Text>
-          {onOpenStore ? <Pressable onPress={onOpenStore} style={[s.btnAction, { marginTop: 8 }]} accessibilityLabel="去店铺填品类"><Text selectable style={s.btnText}>去店铺填品类</Text></Pressable> : null}
+          <Text selectable style={s.noticeText}>本店品类还没由平台核定：专属码先按「本店全部品类」发，系统建议也算不了内容垂直度和同品类平均。核定后会自动用上。</Text>
         </View>
       ) : null}
       <View style={s.sectionTitle}>
