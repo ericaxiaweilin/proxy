@@ -19,13 +19,14 @@ import { ProviderApplications } from "./pages/ProviderApplications";
 import { EngineAPI } from "./pages/EngineAPI";
 import { Merchant } from "./pages/Merchant";
 import { Matching } from "./pages/Matching";
+import { Dispatch } from "./pages/Dispatch";
 import { Retention } from "./pages/Retention";
 import { Trust } from "./pages/Trust";
 import { Quality } from "./pages/Quality";
 import { NumberLookup } from "./pages/NumberLookup";
 import { Access } from "./pages/Access";
 
-type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access";
+type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access";
 
 const TITLES: Record<Page, string> = {
   overview: "平台总览",
@@ -45,6 +46,7 @@ const TITLES: Record<Page, string> = {
   fulfillmentattr: "Fulfillment Attribution",
   merchant: "商家与投放",
   matching: "撮合引擎管理",
+  dispatch: "派单调度",
   retention: "留存与复购",
   trust: "信任与风险",
   providers: "KYC认证审核",
@@ -66,6 +68,13 @@ export function App() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand"><div className="logo">🦦</div>Proxy</div>
+        {/* DISPATCH-LOOP-001：运营每天真正在用的那一页，放最上面。 */}
+        <div className="navgroup">工作台</div>
+        <div className="nav">
+          {(["dispatch"] as Page[]).map((p) => (
+            <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
+          ))}
+        </div>
         <div className="navgroup">Intelligence</div>
         <div className="nav">
           {(["overview", "population", "behavior", "tags", "intent", "orchestration"] as Page[]).map((p) => (
@@ -149,6 +158,8 @@ export function App() {
           {page === "merchant" && <Merchant />}
           {/* OPS-MATCHING-TUNABLES-001：引擎口径 + 决策留痕，改口径要 MARKETPLACE */}
           {page === "matching" && <Matching />}
+          {/* DISPATCH-LOOP-001：快速模式的单卡在哪、为什么；重派 / 点名 / 停止要 MARKETPLACE */}
+          {page === "dispatch" && <Dispatch />}
           {page === "retention" && <Retention />}
           {page === "trust" && <Trust />}
           {page === "providers" && <ProviderApplications />}
@@ -156,7 +167,7 @@ export function App() {
           {page === "access" && <Access />}
           {page === "quality" && <Quality />}
           {page === "workbench" && <Quality />}
-          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "retention", "trust", "quality", "workbench", "numberlookup", "access"].includes(page) && (
+          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "retention", "trust", "quality", "workbench", "numberlookup", "access"].includes(page) && (
             <div className="notice">
               <b>{TITLES[page]}</b> — 已接线 19 页（v9 全量）。
             </div>
