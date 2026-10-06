@@ -215,8 +215,6 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   const [linesError, setLinesError] = useState<string | undefined>(undefined);
   const [spend, setSpend] = useState<Record<string, { totalOrders: number; totalGrossMinor: number; days: SpendDaily[] } | undefined>>({});
   const [uploadingStoreId, setUploadingStoreId] = useState<string | undefined>(undefined);
-  // 相册上传分类：environment（店铺环境）| menu（菜单菜品），按店各自独立，默认环境。
-  const [photoCatByStore, setPhotoCatByStore] = useState<Record<string, "environment" | "menu">>({});
   const [products, setProducts] = useState<Record<string, StoreProduct[]>>({});
   // R36.x MENU-001: 菜单新增/编辑表单状态。"new" 表示新增，否则为被编辑商品 id。
   const [editingProductFor, setEditingProductFor] = useState<string | undefined>(undefined);
@@ -1050,24 +1048,13 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                     <Text selectable style={styles.photoHeadTitle}>照片与视频</Text>
                     <Text selectable style={styles.photoHeadMeta}>环境 · 菜品 · 活动 · {sPhotos.length} 张</Text>
                   </View>
-                  <View style={styles.chipRow}>
-                    {(["environment", "menu"] as const).map((c) => {
-                      const active = (photoCatByStore[s.id] ?? "environment") === c;
-                      return (
-                        <Pressable
-                          key={c}
-                          onPress={() => setPhotoCatByStore((prev) => ({ ...prev, [s.id]: c }))}
-                          style={[styles.chip, active && styles.chipOn]}
-                        >
-                          <Text selectable style={[styles.chipText, active && styles.chipTextOn]}>
-                            {c === "environment" ? "店铺环境" : "菜单菜品"}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
+                  {/* 用户 2026-10-04「这个移除[相册分类]…因为这2个重复」：
+                      相册不再分环境 / 菜品。店详情那两节（菜品 / 店铺照片）已经把这层
+                      分类讲完了，这里再摆一排分类 chip 是同一件事说两遍。上传一律按
+                      environment 送（也是服务端默认值）；列表行的分类标签保留，老照片
+                      里标过菜品的还看得出是哪一类。 */}
                   <Pressable
-                    onPress={() => pickAndUploadPhoto(s.id, photoCatByStore[s.id] ?? "environment")}
+                    onPress={() => pickAndUploadPhoto(s.id, "environment")}
                     disabled={uploadingStoreId === s.id}
                     style={[styles.uploadButton, uploadingStoreId === s.id ? styles.uploadButtonBusy : null]}
                   >

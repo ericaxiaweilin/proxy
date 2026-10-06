@@ -7,7 +7,9 @@ import { InMemorySecureStorageDriver, SecureSessionStore } from "./secure-sessio
 
 // STORE-PHOTO-CAT-001（用户「照片上传没有区分店铺环境 / 菜单 / 店铺 logo」）：
 // 相册上传必须带 category（environment | menu），店铺 logo 走 logoAssetPath、
-// 菜品图走 product.mediaAssetId，本来就和相册是三条线。这里锁移动端一半：
+// 菜品图走 product.mediaAssetId，本来就和相册是三条线。这里锁移动端一半。
+// 2026-10-04 更新：分类的**选择器**撤了（见下），但 category 这条 wire 契约和
+// 列表行的分类展示都还在 —— 撤的是 UI，不是数据。
 function makeStore(): SecureSessionStore {
   return new SecureSessionStore(new InMemorySecureStorageDriver());
 }
@@ -78,11 +80,17 @@ describe("STORE-PHOTO-CAT-001 相册上传带分类", () => {
     expect(captured[1]?.["category"]).toBe("menu");
   });
 
-  it("表单有环境/菜品选择器，列表行展示分类", () => {
+  // 2026-10-04 用户「这个移除店铺环境 菜单菜品 …因为这2个重复 要么就把外面的
+  // 菜品移除」：分类选择器撤掉 —— 店详情的「菜品 / 店铺照片」两节已经把这层分类
+  // 讲完了，相册页再摆一排 chip 是同一件事说两遍。上传回归默认 environment，
+  // 列表行的分类标签保留（老照片里标过菜品的仍看得出来），wire 契约不变。
+  it("相册页不再有环境/菜品选择器，上传走默认分类", () => {
     const ui = readFileSync(fileURLToPath(new URL("./surfaces/merchant-storefront.tsx", import.meta.url)), "utf8");
-    expect(ui).toContain("photoCatByStore");
-    expect(ui).toContain("店铺环境");
-    expect(ui).toContain("菜单菜品");
-    expect(ui).toContain("pickAndUploadPhoto(s.id, photoCatByStore[s.id]");
+    expect(ui).not.toContain("photoCatByStore");
+    expect(ui).not.toContain("店铺环境");
+    expect(ui).not.toContain("菜单菜品");
+    expect(ui).toContain('pickAndUploadPhoto(s.id, "environment")');
+    // 列表行的分类标签是既有数据的展示，不跟着选择器一起走。
+    expect(ui).toContain('p.category === "menu" ? "菜品" : "环境"');
   });
 });
