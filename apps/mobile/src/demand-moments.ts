@@ -58,9 +58,18 @@ export const MOMENT_ACTION_ID: Record<string, string> = {
 /**
  * R58 城市协助 · Professional 服务目录（对齐原型 pro-card 四类）：
  * 现场翻译 / 签证协助 / 法律咨询 / 商务协助。价格与备注取自原型服务条目。
+ *
+ * 2026-10-06 用户：「本质是把2个散的合并成一个 而不是把城市协助放在外面」——
+ * 这四条不再单独占一张入口卡 + 一格子卡（professionalEntry + proGrid），
+ * 而是整格搬进发布器左 rail 的「专业」分类，与 Moment 用同一套行样式渲染。
+ * 因此每条服务补一个 `cat`：它就是「专业」分类下那排子标签（原型 sub-tabs）的归属。
  */
+export type ProDomain = "trans" | "visa" | "legal" | "biz";
+
 export type ProService = {
   id: string;
+  /** 子域：决定它落在哪个子标签下。 */
+  cat: ProDomain;
   title: string;
   sub: string;
   mark: string;
@@ -72,10 +81,28 @@ export type ProService = {
 };
 
 export const PRO_SERVICES: readonly ProService[] = [
-  { id: "translate", title: "现场翻译", sub: "商务 / 生活", mark: "文", tags: ["翻译", "现场"], price: "500K", range: "400–800K", note: "按明确场景提供翻译协助 · 默认 2 小时。", cert: "语言 / 时长 / 场景" },
-  { id: "visa", title: "签证协助", sub: "材料 / 流程 / 预约", mark: "签", tags: ["签证", "预约"], price: "面议", range: "按材料与周期", note: "材料清单、流程陪同与预约协助。", cert: "材料 / 流程 / 预约" },
-  { id: "legal", title: "法律咨询", sub: "按执业资格与领域匹配", mark: "法", tags: ["法律", "咨询"], price: "面议", range: "按领域与时长", note: "按执业资格与领域匹配专业人士。", cert: "按执业资格与领域匹配" },
-  { id: "business", title: "商务协助", sub: "会议 / 本地协调 / 陪同", mark: "商", tags: ["商务", "陪同"], price: "面议", range: "按会议与陪同", note: "会议支持、本地协调与现场陪同。", cert: "会议 / 本地协调 / 陪同" }
+  { id: "translate", cat: "trans", title: "现场翻译", sub: "商务 / 生活", mark: "文", tags: ["翻译", "现场"], price: "500K", range: "400–800K", note: "按明确场景提供翻译协助 · 默认 2 小时。", cert: "语言 / 时长 / 场景" },
+  { id: "visa", cat: "visa", title: "签证协助", sub: "材料 / 流程 / 预约", mark: "签", tags: ["签证", "预约"], price: "面议", range: "按材料与周期", note: "材料清单、流程陪同与预约协助。", cert: "材料 / 流程 / 预约" },
+  { id: "legal", cat: "legal", title: "法律咨询", sub: "按执业资格与领域匹配", mark: "法", tags: ["法律", "咨询"], price: "面议", range: "按领域与时长", note: "按执业资格与领域匹配专业人士。", cert: "按执业资格与领域匹配" },
+  { id: "business", cat: "biz", title: "商务协助", sub: "会议 / 本地协调 / 陪同", mark: "商", tags: ["商务", "陪同"], price: "面议", range: "按会议与陪同", note: "会议支持、本地协调与现场陪同。", cert: "会议 / 本地协调 / 陪同" }
+];
+
+/**
+ * 发布器「专业」分类下的一排子标签（原型 sub-tabs：全部 / 翻译 / 签证 / 法律 / 商务）。
+ * 注意与 Moment 的 quick-filter 无关 —— 那排是 Moment 属性（ratios / timeTags），
+ * 进「专业」会整排藏起来。
+ *
+ * 原型那一排还多一个「城市协助」（装着「城市向导」「陪诊协助」两条）。本仓这两条
+ * 概念都有（`creator-capability-labels.ts` 的 GUIDE=城市向导、场景主题 medical-companion=陪诊），
+ * 但把它们加成新的服务条目是**产品内容决定**，不是 UI 决定 —— 没有自行发明，
+ * 所以这里暂时只有四个子域。要加，条目和子标签一起加。
+ */
+export const PRO_TABS: readonly { k: "all" | ProDomain; label: string }[] = [
+  { k: "all", label: "全部" },
+  { k: "trans", label: "翻译" },
+  { k: "visa", label: "签证" },
+  { k: "legal", label: "法律" },
+  { k: "biz", label: "商务" }
 ];
 
 export type DemandSpecs = {

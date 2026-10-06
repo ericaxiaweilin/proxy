@@ -19,9 +19,11 @@ import {
   MOMENT_ACTION_ID,
   MOMENT_TEMPLATES,
   PRO_SERVICES,
+  PRO_TABS,
   type DemandSpecs,
   type MomentTemplate,
   type PeopleSheetFilters,
+  type ProDomain,
   type ProService
 } from "../demand-moments";
 import { resolveAssetSource } from "../media/asset-sources";
@@ -46,12 +48,21 @@ const QUICK_FILTERS = [
 type QuickFilterId = typeof QUICK_FILTERS[number]["id"];
 
 // R58 原型左侧分类 rail：热门 / 见面 / 娱乐 / 出行 / 主题。
+// 2026-10-06 用户：「本质是把2个散的合并成一个 而不是把城市协助放在外面」——
+// 「专业」进 rail，城市协助从「双栏之外的一张卡」变成 rail 上的一格。
+// 原型那一版 rail 只有「热门 / 娱乐 / 专业」三项：**没有照抄**。原型的 items 是它
+// 自己编的一套内容（打球/美食/电影/摄影/逛街…），跟本仓 MOMENT_TEMPLATES 的 7 个
+// 模板对不上；照抄会把「见面 / 出行 / 主题」三档连同 喝咖啡/吃饭/拍照/City Walk/看展
+// 一起弄丢，还得重排每个模板的 `category`（`MomentTemplate` 的类型也钉着这四个值）。
+// 那是产品分类决定，不是这次要的「合并」—— 所以保留原五档，专业追加在最后
+// （原型里它也排在消费类之后）。
 const CATEGORIES = [
   { id: "all", label: "热门" },
   { id: "meet", label: "见面" },
   { id: "fun", label: "娱乐" },
   { id: "outdoor", label: "出行" },
-  { id: "theme", label: "主题" }
+  { id: "theme", label: "主题" },
+  { id: "pro", label: "专业" }
 ] as const;
 type CategoryId = typeof CATEGORIES[number]["id"];
 
@@ -75,9 +86,10 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const [step, setStep] = useState<Step>("moment");
   // UI-ORDER-LOGO-001: Moment 图标复用场景动作既有 logo（不是另做一套）
   const actionIconFor = (momentId: string): number | undefined => SCENE_ACTIONS.find((item) => item.id === MOMENT_ACTION_ID[momentId])?.icon as number | undefined;
-  const proIcon = actionIconFor("pro");
   // R58 城市协助 · Professional：当前选中的服务（现场翻译 / 签证协助 / 法律咨询 / 商务协助）
   const [proService, setProService] = useState<string | undefined>(undefined);
+  // 「专业」分类下的子标签（原型 sub-tabs：全部 / 翻译 / 签证 / 法律 / 商务）。
+  const [proTab, setProTab] = useState<"all" | ProDomain>("all");
   // 服务卡默认折叠：不占用 Moment 列表与「下一步」之间的空间，避免误触/遮挡
   // 只记录选择：再点同一张卡＝取消选择（并把模板一并清掉，避免留下「城市协助但没选服务」的悬空态）
   const selectProService = (service: ProService): void => {
@@ -146,6 +158,12 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   }
 
   const moments = MOMENT_TEMPLATES.filter((item) => {
+    // 2026-10-06 合并：pro 不再当一张 Moment 卡出现在列表里（原来它挂在「主题」下，
+    // 于是城市协助同时以三种样子出现：主题里的一张卡 + 双栏外的一张入口卡 +
+    // 一格子卡 + 规格步再来一遍）。现在它是 rail 上的「专业」分类，只在那一格出现。
+    // 数据层不动：pro 模板仍是发布载体 —— ORDER-SCENARIO-001 按
+    // `template.id === "pro"` 把场景标成 assistance（订单流程据此走全流程）。
+    if (item.id === "pro") return false;
     const q = query.trim().toLowerCase();
     if (q !== "" && !`${item.title}${item.venue}${item.theme}`.toLowerCase().includes(q)) return false;
     if (category !== "all" && item.category !== category) return false;
@@ -155,6 +173,17 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     if (quickFilter === "weekend" && !item.timeTags.includes("周末")) return false;
     if (quickFilter === "theme" && item.category !== "theme") return false;
     return true;
+  });
+
+  // 「专业」分类的条目：与 Moment 共用同一套行样式（catalogItem），所以两边看起来是
+  // **同一个选择器**，而不是两张表 —— 这就是这次要的「合并成一个」。
+  // 子标签 + 搜索同时生效（AND）；Moment 那排 quick-filter 不适用（服务没有
+  // ratios / timeTags 这些字段），进「专业」时整排藏起来，见下面的渲染。
+  const proQuery = query.trim().toLowerCase();
+  const proVisible = PRO_SERVICES.filter((service) => {
+    if (proTab !== "all" && service.cat !== proTab) return false;
+    if (proQuery === "") return true;
+    return `${service.title}${service.sub}${service.tags.join("")}`.toLowerCase().includes(proQuery);
   });
 
   function createCustom(): void {
@@ -300,14 +329,19 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               <Text selectable style={styles.generateText}>生成</Text>
             </Pressable>
           </View>
-          {/* R58 单行 quick-filter */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickFilterRow}>
-            {QUICK_FILTERS.map((filter) => (
-              <Pressable key={filter.id} onPress={() => setQuickFilter(filter.id)} style={[styles.filterChip, quickFilter === filter.id && styles.filterChipOn]}>
-                <Text selectable style={[styles.filterText, quickFilter === filter.id && styles.filterTextOn]}>{filter.label}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+          {/* R58 单行 quick-filter。全部 / 1:1 / 3–4 人 / 晚间 / 周末 / 主题玩法都是
+              **Moment 的属性**（ratios / timeTags / category），服务条目没有这些字段 ——
+              进「专业」时整排藏起来，不摆一排按下去没反应的控件。搜索框不藏：
+              它在「专业」下筛的是服务条目（见 proVisible）。 */}
+          {category === "pro" ? null : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickFilterRow}>
+              {QUICK_FILTERS.map((filter) => (
+                <Pressable key={filter.id} onPress={() => setQuickFilter(filter.id)} style={[styles.filterChip, quickFilter === filter.id && styles.filterChipOn]}>
+                  <Text selectable style={[styles.filterText, quickFilter === filter.id && styles.filterTextOn]}>{filter.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          )}
           {/* R58 双栏：左分类 rail + 右 Moment 卡片列表 */}
           <View style={styles.deliveryLayout}>
             <View style={styles.categoryRail}>
@@ -320,8 +354,42 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <View style={styles.catalogPane}>
               <View style={styles.catalogHead}>
                 <Text selectable style={styles.catalogTitle}>{CATEGORIES.find((cat) => cat.id === category)?.label ?? "热门"}</Text>
-                <Text selectable style={styles.catalogHint}>高频 Moment</Text>
+                <Text selectable style={styles.catalogHint}>{category === "pro" ? "城市协助 · Professional" : "高频 Moment"}</Text>
               </View>
+              {category === "pro" ? (<>
+                {/* 2026-10-06 合并：城市协助原来在双栏**之外** —— 一张「城市协助 ·
+                    Professional」入口卡 + 一格子卡（professionalEntry + proGrid），
+                    规格步还再摆一遍。现在整格搬进这个选择器：与 Moment 同一个 rail、
+                    同一套行样式、同一个高亮（momentCardOn），选中的服务照旧喂给
+                    selectProService（它负责把 pro 模板一起设上，并把「面议」的价留空）。 */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.proTabRow}>
+                  {PRO_TABS.map((tab) => (
+                    <Pressable key={tab.k} onPress={() => setProTab(tab.k)} style={[styles.filterChip, proTab === tab.k && styles.filterChipOn]}>
+                      <Text selectable style={[styles.filterText, proTab === tab.k && styles.filterTextOn]}>{tab.label}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+                {proVisible.map((service) => {
+                  const active = proService === service.id;
+                  return (
+                    <Pressable key={service.id} accessibilityLabel={`选择${service.title}`} onPress={() => selectProService(service)} style={[styles.catalogItem, active && styles.momentCardOn]}>
+                      <View style={styles.momentEmoji}><Text selectable style={styles.momentEmojiText}>{service.mark}</Text></View>
+                      <View style={styles.momentCopy}>
+                        <Text selectable style={styles.momentTitle}>{service.title}</Text>
+                        <Text selectable style={styles.momentDesc}>{service.sub}</Text>
+                        <View style={styles.catalogTags}>
+                          {service.tags.map((tag) => <View key={tag} style={styles.catalogTag}><Text selectable style={styles.catalogTagText}>{tag}</Text></View>)}
+                        </View>
+                      </View>
+                      <View style={styles.catalogSide}>
+                        <Text selectable style={styles.catalogSideRatio}>{service.price}</Text>
+                        <Text selectable style={styles.catalogSideTime}>{service.range}</Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+                {proVisible.length === 0 ? <Text selectable style={styles.empty}>没有匹配的专业服务，换个子标签或清空搜索。</Text> : null}
+              </>) : null}
               {moments.map((item) => {
                 const active = template?.id === item.id;
                 const icon = actionIconFor(item.id);
@@ -346,7 +414,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                   </Pressable>
                 );
               })}
-              {moments.length === 0 ? <Text selectable style={styles.empty}>没有匹配的 Moment，换个条件或点生成。</Text> : null}
+              {/* 「专业」下 moments 恒为空（pro 已被排除、其余模板 category 对不上），
+                  这条空态只在 Moment 分类里说话，否则会和上面那条服务的空态打架。 */}
+              {moments.length === 0 && category !== "pro" ? <Text selectable style={styles.empty}>没有匹配的 Moment，换个条件或点生成。</Text> : null}
             </View>
           </View>
           <View style={styles.currentCard}>
@@ -356,47 +426,10 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           <Pressable disabled={!template} onPress={() => setStep("people")} style={[styles.primaryBtn, !template && styles.disabled]}>
             <Text selectable style={styles.primaryBtnText}>下一步 · 选人 / 服务 / 价格</Text>
           </Pressable>
-          {/* R58 城市协助 · Professional：服务目录默认展开（原型 pro-card 四类：
-              现场翻译 / 签证协助 / 法律咨询 / 商务协助）。放在主 CTA 之下——
-              既不遮「下一步」，也不用再点一次才看到 item（此前只在「规格」步
-              按模板才出现，导致点了「城市协助」看不到任何条目）。 */}
-          <View style={styles.professionalEntry}>
-            <View style={styles.proIcon}>
-              {proIcon !== undefined
-                ? <Image contentFit="contain" source={proIcon} style={styles.proIconArt} />
-                : <Text selectable style={styles.proIconText}>证</Text>}
-            </View>
-            <View style={styles.proCopy}>
-              <Text selectable style={styles.proTitle}>城市协助 · Professional</Text>
-              <Text selectable style={styles.proDesc}>翻译 / 签证 / 法律 / 商务 · 专业认证优先</Text>
-            </View>
-            <Text selectable style={styles.proLink}>专业认证 ›</Text>
-          </View>
-          <View style={styles.proGrid}>
-            {PRO_SERVICES.map((service) => {
-              const active = proService === service.id;
-              return (
-                <Pressable
-                  accessibilityLabel={`选择${service.title}`}
-                  key={service.id}
-                  onPress={() => selectProService(service)}
-                  style={[styles.proCard, active && styles.proCardOn]}
-                >
-                  <View style={styles.proCardHead}>
-                    <Text selectable style={styles.proCardTitle}>{service.title}</Text>
-                    <View style={[styles.proCardCert, active && styles.proCardCertOn]}>
-                      <Text selectable style={[styles.proCardCertText, active && styles.proCardCertTextOn]}>{service.cert}</Text>
-                    </View>
-                  </View>
-                  <Text selectable style={styles.proCardSub}>{service.sub}</Text>
-                  <View style={styles.proCardFoot}>
-                    <Text selectable style={styles.proCardPrice}>{service.price}</Text>
-                    <Text selectable style={styles.proCardRange}>{service.range}</Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
+          {/* 2026-10-06 合并：这里原本是「城市协助 · Professional」入口卡 + 一格子卡
+              （professionalEntry + proGrid），现在整格搬进上面的双栏选择器 ——
+              rail 上的「专业」分类，与 Moment 同一套行样式。城市协助不再挂在
+              选择器外面；这一屏的底部也就只剩「下一步」一个出口。 */}
         </>
       ) : step === "people" ? (
         <>
@@ -512,6 +545,11 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               <Text selectable style={styles.confirmEyebrow}>Moment · {specs.ratio || template?.defaultRatio}</Text>
               <Text selectable style={styles.confirmTitle}>{template?.title}</Text>
               {selectedPerson ? <Text selectable style={styles.confirmSub}>意向人选：{selectedPerson.name}（发布仍为公开市场）</Text> : null}
+              {/* 2026-10-06 合并：专业服务的选择收进了选 Moment 那一步的双栏选择器，
+                  规格步不再摆第二遍服务目录（那一格是第三份拷贝）。但「选了哪个服务」
+                  得还看得见 —— 这是发布前最后一屏，模板名只到「城市协助」为止。
+                  要换服务就点右上「更换」回选 Moment 那一步。 */}
+              {proService ? <Text selectable style={styles.confirmSub}>专业服务：{PRO_SERVICES.find((item) => item.id === proService)?.title ?? ""}</Text> : null}
             </View>
             <Pressable onPress={() => setStep("moment")}><Text selectable style={styles.linkText}>更换</Text></Pressable>
           </View>
@@ -573,40 +611,10 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             ))}
           </View>
 
-          {template?.id === "pro" ? (
-            <>
-              {/* R58 城市协助服务目录（原型 pro-card 四类：现场翻译 / 签证协助 /
-                  法律咨询 / 商务协助）。放在「规格」步按模板展开，不再挤在
-                  选 Moment 那一步挡「下一步」。 */}
-              <Text selectable style={styles.fieldLabel}>专业服务 · 城市协助</Text>
-              <View style={styles.proGrid}>
-                {PRO_SERVICES.map((service) => {
-                  const active = proService === service.id;
-                  return (
-                    <Pressable
-                      accessibilityLabel={`选择${service.title}`}
-                      key={service.id}
-                      onPress={() => selectProService(service)}
-                      style={[styles.proCard, active && styles.proCardOn]}
-                    >
-                      <View style={styles.proCardHead}>
-                        <Text selectable style={styles.proCardTitle}>{service.title}</Text>
-                        <View style={[styles.proCardCert, active && styles.proCardCertOn]}>
-                          <Text selectable style={[styles.proCardCertText, active && styles.proCardCertTextOn]}>{service.cert}</Text>
-                        </View>
-                      </View>
-                      <Text selectable style={styles.proCardSub}>{service.sub}</Text>
-                      <View style={styles.proCardFoot}>
-                        <Text selectable style={styles.proCardPrice}>{service.price}</Text>
-                        <Text selectable style={styles.proCardRange}>{service.range}</Text>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {proService ? <Text selectable style={styles.hint}>{PRO_SERVICES.find((item) => item.id === proService)?.note ?? ""}</Text> : null}
-            </>
-          ) : null}
+          {/* 2026-10-06 合并：这里原本是城市协助服务目录的**第三份拷贝** ——
+              按模板展开的 proGrid，外加选中服务那行 note。服务选择已经收进
+              选 Moment 那一步的双栏选择器（rail 上的「专业」），规格步不再摆
+              第二遍目录；「选了哪个服务」由上面 confirmCard 里那行交代。 */}
 
           <View style={styles.fieldLabelRow}>
             <Text selectable style={styles.fieldLabelNoGap}>预计服务价</Text>
@@ -719,6 +727,9 @@ const styles = StyleSheet.create({
   catalogHead: { flexDirection: "row", alignItems: "baseline", gap: 7, marginBottom: 2 },
   catalogTitle: { color: color.ink, fontSize: 15, fontWeight: "900" },
   catalogHint: { color: color.muted, fontSize: 11 },
+  // 「专业」分类的子标签行（原型 sub-tabs）。pane 比整屏窄，所以横向可滚。
+  // 与 Moment 的 quickFilterRow 分开命名：那一排筛的是 Moment 属性，语义不同。
+  proTabRow: { flexDirection: "row", gap: 6, paddingBottom: 6, paddingTop: 6 },
   catalogItem: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 11, paddingVertical: 11 },
   catalogTags: { flexDirection: "row", gap: 5, marginTop: 4, flexWrap: "wrap" },
   catalogTag: { backgroundColor: "#F5F2EE", borderRadius: 7, paddingHorizontal: 6, paddingVertical: 2 },
@@ -728,35 +739,18 @@ const styles = StyleSheet.create({
   catalogSideTime: { color: color.muted, fontSize: 11 },
   momentEmoji: { alignItems: "center", backgroundColor: color.surface, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
   momentIcon: { height: 26, tintColor: color.ink, width: 26 },
-  // R58 城市协助 · Professional 服务卡（对齐原型 pro-card）
-  proIconArt: { height: 22, tintColor: color.ink, width: 22 },
-  proGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 10 },
-  proCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexBasis: "47%", flexGrow: 1, gap: 5, padding: 12 },
-  proCardOn: { borderColor: color.ink, borderWidth: 2 },
-  proCardHead: { alignItems: "center", flexDirection: "row", gap: 6, justifyContent: "space-between" },
-  proCardTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
-  proCardCert: { backgroundColor: color.surface, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 3 },
-  proCardCertOn: { backgroundColor: color.ink },
-  proCardCertText: { color: color.muted, fontSize: 11, fontWeight: "700" },
-  proCardCertTextOn: { color: color.white },
-  proCardSub: { color: color.muted, fontSize: 11 },
-  proCardFoot: { alignItems: "baseline", flexDirection: "row", gap: 6 },
-  proCardPrice: { color: color.ink, fontSize: 15, fontWeight: "900" },
-  proCardRange: { color: color.muted, fontSize: 11 },
+  // 2026-10-06 合并：这里原本有两组专业服务样式 ——
+  // `proCard*`（双栏外那格 2 列服务卡）与 `professionalEntry / proIcon* / proCopy /
+  // proTitle / proDesc / proLink`（那张「城市协助 · Professional」入口卡）。
+  // 城市协助整格搬进双栏选择器后两组都没人用了 —— 本仓对死代码有前科，一并删净。
+  // 服务行现在直接复用 Moment 那套（catalogItem / momentEmoji / momentTitle / …），
+  // 这正是「合并成一个选择器」该有的样子：两边长得一样，因为是同一套样式。
   momentEmojiText: { color: color.ink, fontSize: 20, fontWeight: "800" },
   momentCopy: { flex: 1 },
   momentTitle: { color: color.ink, fontSize: 16, fontWeight: "800" },
   momentDesc: { color: color.muted, fontSize: 11, marginTop: 2 },
   momentCardOn: { borderColor: color.violet, borderWidth: 2 },
   empty: { color: color.muted, fontSize: 12, marginVertical: 12, textAlign: "center" },
-  // R58 城市协助 · Professional 次入口。
-  professionalEntry: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, flexDirection: "row", gap: 9, marginTop: 11, padding: 11 },
-  proIcon: { alignItems: "center", backgroundColor: "#F3EEE7", borderRadius: 10, height: 35, justifyContent: "center", width: 35 },
-  proIconText: { color: "#8A6D2F", fontSize: 17, fontWeight: "900" },
-  proCopy: { flex: 1 },
-  proTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
-  proDesc: { color: color.muted, fontSize: 11, marginTop: 2 },
-  proLink: { color: color.violet, fontSize: 12, fontWeight: "800" },
   currentCard: { backgroundColor: color.surface, borderRadius: 14, marginTop: 12, padding: 12 },
   currentLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
   currentValue: { color: color.ink, fontSize: 14, fontWeight: "800", marginTop: 2 },
