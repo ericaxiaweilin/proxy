@@ -21,6 +21,8 @@ import { type FulfillmentClient } from "../fulfillment-client";
 import { type ProfileClient, type ProfileWire } from "../profile-client";
 import { type MarketplaceClient, type MarketApplication } from "../marketplace-client";
 import { nearestCityLabel } from "../market-city-label";
+// MARKET-RANK-001: 选人工作台的排序理由与"超时未确认"状态走六语言字典。
+import { useI18n, type I18n } from "../i18n";
 import { type MediaClient } from "../media-client";
 import { type SupplyClient, type SupplierCandidate } from "../supply-client";
 import { useMerchantIdentity } from "../use-merchant-identity";
@@ -1697,8 +1699,47 @@ function applicantTitle(profile: ProfileWire | undefined, applicantId: string): 
   const handle = profile?.handle?.trim().replace(/^@/, "");
   return handle ? `${name} @${handle}` : name;
 }
+
+// MARKET-RANK-001：这一屏新增的只有「她为什么排在这里」与一个状态词，别的一律
+// 沿用原来的硬编码 —— 那些不是这次任务的范围，顺手改字典就是偷偷扩大改动面。
+//
+// 排序理由：服务端 reasons 是一串 { code, value? }，最多显示 3 条，用「 · 」
+// 接成一行放在名字下面。
+//   · 未知 code 静默跳过。服务端先加码、App 后跟是常态；旧 App 因为不认识新码
+//     而整份报名名单读不出来，比少显示一条理由糟得多。
+//   · 带数字的码缺 value 就跳过 —— 宁可少一条，也不要渲染出「完成率 NaN%」。
+const MAX_RANK_REASONS = 3;
+function rankReasonsLine(t: I18n["t"], reasons: MarketApplication["reasons"]): string {
+  if (!reasons || reasons.length === 0) return "";
+  const parts: string[] = [];
+  for (const reason of reasons) {
+    if (parts.length >= MAX_RANK_REASONS) break;
+    const value = typeof reason.value === "number" && Number.isFinite(reason.value) ? reason.value : undefined;
+    if (reason.code === "NEWCOMER") parts.push(t("market.rank.newcomer"));
+    else if (reason.code === "BUSY") parts.push(t("market.rank.busy"));
+    else if (reason.code === "FULFILLMENT_RATE" && value !== undefined) parts.push(t("market.rank.fulfillment", { pct: Math.round(value * 100) }));
+    else if (reason.code === "SATISFACTION_RATE" && value !== undefined) parts.push(t("market.rank.satisfaction", { pct: Math.round(value * 100) }));
+    else if (reason.code === "DISTANCE_KM" && value !== undefined) parts.push(t("market.rank.distance", { km: value.toFixed(1) }));
+  }
+  return parts.join(" · ");
+}
+
+// MARKET-RANK-001：SELECTION_EXPIRED（平台已选中，5 分钟内没确认）不能落进兜底
+// 的「未选择」里 —— 那一栏原本只有 SUBMITTED/SELECTED/CONFIRMED 三种状态，
+// 「未选择」说的是"没人选她"，会把"选了她但她超时了"说反。
+// 其余四种仍走原来的硬编码文案。
+function applicationStatusText(t: I18n["t"], application: MarketApplication): string {
+  if (application.status === "SELECTION_EXPIRED") return t("market.application.selectionExpired");
+  return application.status === "SUBMITTED" ? "待选择"
+    : application.status === "SELECTED" ? "等待对方确认"
+    : application.status === "CONFIRMED" ? "双方已确认"
+    : "未选择";
+}
+
 function SelectWorkbench({ marketplace, fulfillment, profileClient, opportunity, onBack }: { marketplace: MarketplaceClient; fulfillment?: FulfillmentClient | undefined; profileClient?: ProfileClient | undefined; opportunity: MarketOpportunity; onBack: () => void }): React.JSX.Element {
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
+  // MARKET-RANK-001：只有新加的理由行与状态词走字典，面板其余硬编码不动。
+  const { t } = useI18n();
   const [candidates, setCandidates] = useState<MarketApplication[]>([]);
   const [workingId, setWorkingId] = useState<string>();
   const [error, setError] = useState<string>();
@@ -1806,27 +1847,46 @@ function SelectWorkbench({ marketplace, fulfillment, profileClient, opportunity,
         </View>
       ) : null}
       {offerMsg ? <Text selectable style={styles.offerMsg}>{offerMsg}</Text> : null}
-      {candidates.map((c) => (
-        <View key={c.applicationId} style={[styles.r4Card, (c.status === "SELECTED" || c.status === "CONFIRMED") && { borderColor: color.magenta }]}>
-          <View style={styles.r4Top}>
-            <Text selectable style={styles.r4Title}>{applicantTitle(applicantProfiles[c.applicantId], c.applicantId)}</Text>
-            <View style={styles.r4FitBadge}>
-              <Text selectable style={styles.r4FitText}>{c.status === "SUBMITTED" ? "待选择" : c.status === "SELECTED" ? "等待对方确认" : c.status === "CONFIRMED" ? "双方已确认" : "未选择"}</Text>
+      {/*
+        MARKET-RANK-001：这一 map 就是排名本身 —— 直接按服务端返回的顺序渲染，
+        不在客户端再排一次。顺序是服务端按匹配分算出来的，客户端"顺手排一下"
+        只会在分数变动时让她看到跟别的入口不一样的次序，而且没有第二处真值可查。
+      */}
+      {candidates.map((c) => {
+        // 没有 rank 的（已失效的报名）不显示理由：名次是"排第几"的意思，
+        // 一个人不该在没有名次时还挂着"完成率 95%"。理由全是未知码时也整行不画
+        //（未知码静默跳过就是跳过，不能留一行空白当痕迹）。
+        const reasonLine = c.rank ? rankReasonsLine(t, c.reasons) : "";
+        return (
+          <View key={c.applicationId} style={[styles.r4Card, (c.status === "SELECTED" || c.status === "CONFIRMED") && { borderColor: color.magenta }]}>
+            <View style={styles.r4Top}>
+              <View style={styles.r4NameRow}>
+                {c.rank ? (
+                  <View style={styles.r4RankBadge}>
+                    <Text selectable style={styles.r4RankText}>{`#${c.rank}`}</Text>
+                  </View>
+                ) : null}
+                <Text selectable style={styles.r4Title}>{applicantTitle(applicantProfiles[c.applicantId], c.applicantId)}</Text>
+              </View>
+              <View style={styles.r4FitBadge}>
+                <Text selectable style={styles.r4FitText}>{applicationStatusText(t, c)}</Text>
+              </View>
+            </View>
+            {reasonLine ? <Text selectable style={styles.r4ReasonLine}>{reasonLine}</Text> : null}
+            <Text selectable style={styles.r4Meta}>本次报价 {c.quote} · {c.scope || "申请人未填写服务范围"}</Text>
+            <View style={styles.r4Actions}>
+              <Pressable disabled={c.status !== "SUBMITTED" || Boolean(workingId)} onPress={() => void select(c)} style={c.status === "SUBMITTED" ? styles.r4ActionPrimary : styles.r4ActionGhost}>
+                <Text selectable style={c.status === "SUBMITTED" ? styles.r4ActionPrimaryText : styles.r4ActionGhostText}>{workingId === c.applicationId ? "保存中…" : c.status === "SUBMITTED" ? "选择并发出合作邀请" : "状态已记录"}</Text>
+              </Pressable>
+              {c.status === "SUBMITTED" && fulfillment ? (
+                <Pressable disabled={Boolean(offerWorkingId)} onPress={() => void offer(c)} style={styles.r4ActionGhost} accessibilityLabel={`给申请人发 Offer`}>
+                  <Text selectable style={styles.r4ActionGhostText}>{offerWorkingId === c.applicationId ? "发 Offer 中…" : "发 Offer →"}</Text>
+                </Pressable>
+              ) : null}
             </View>
           </View>
-          <Text selectable style={styles.r4Meta}>本次报价 {c.quote} · {c.scope || "申请人未填写服务范围"}</Text>
-          <View style={styles.r4Actions}>
-            <Pressable disabled={c.status !== "SUBMITTED" || Boolean(workingId)} onPress={() => void select(c)} style={c.status === "SUBMITTED" ? styles.r4ActionPrimary : styles.r4ActionGhost}>
-              <Text selectable style={c.status === "SUBMITTED" ? styles.r4ActionPrimaryText : styles.r4ActionGhostText}>{workingId === c.applicationId ? "保存中…" : c.status === "SUBMITTED" ? "选择并发出合作邀请" : "状态已记录"}</Text>
-            </Pressable>
-            {c.status === "SUBMITTED" && fulfillment ? (
-              <Pressable disabled={Boolean(offerWorkingId)} onPress={() => void offer(c)} style={styles.r4ActionGhost} accessibilityLabel={`给申请人发 Offer`}>
-                <Text selectable style={styles.r4ActionGhostText}>{offerWorkingId === c.applicationId ? "发 Offer 中…" : "发 Offer →"}</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
@@ -2301,6 +2361,11 @@ const styles = StyleSheet.create({
   r4Title: { color: color.ink, flex: 1, fontSize: 12, fontWeight: "800", lineHeight: 17 },
   r4Budget: { color: color.ink, fontSize: 13, fontWeight: "900" },
   r4Meta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },
+  // MARKET-RANK-001：名次徽标 + 名字下面那行"为什么排在这里"。
+  r4NameRow: { alignItems: "center", flex: 1, flexDirection: "row", gap: 6 },
+  r4RankBadge: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2 },
+  r4RankText: { color: color.ink, fontSize: 11, fontWeight: "900" },
+  r4ReasonLine: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
   r4PriceStrip: { flexDirection: "row", gap: 6, marginTop: 8 },
   r4PriceCell: { backgroundColor: color.surface, borderRadius: 10, flex: 1, padding: 8 },
   r4PriceCellHot: { backgroundColor: color.warn },

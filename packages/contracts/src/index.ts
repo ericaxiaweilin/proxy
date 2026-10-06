@@ -947,11 +947,18 @@ export const MarketApplicationSchema = z.object({
   applicantId: z.string().min(1),
   quote: z.string().min(1),
   scope: z.string(),
-  status: z.enum(["SUBMITTED", "SELECTED", "NOT_SELECTED", "CONFIRMED"]),
+  status: z.enum(["SUBMITTED", "SELECTED", "NOT_SELECTED", "CONFIRMED", "SELECTION_EXPIRED"]),
   createdAt: z.string().min(1),
   selectedAt: z.string().optional(),
   confirmedAt: z.string().optional(),
-  orderRef: z.string().optional()
+  orderRef: z.string().optional(),
+  // MARKET-RANK-001: ListMarketApplications 已按匹配分排序下发。rank=1 最好；
+  // 已失效（非 live）的报名没有 rank，服务端不下发该字段。
+  rank: z.number().int().positive().optional(),
+  // 分数明细，仅用于排查/埋点，不直接展示给用户。
+  ranking: z.record(z.unknown()).optional(),
+  // 排序理由，UI 最多取前 3 条展示；未知 code 静默跳过。
+  reasons: z.array(z.object({ code: z.string(), value: z.number().optional() })).optional()
 });
 export type MarketApplication = z.infer<typeof MarketApplicationSchema>;
 
