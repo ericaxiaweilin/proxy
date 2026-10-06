@@ -45,6 +45,8 @@ import { activityCoverUri, mediaThumbUrl } from "../media-thumb-url";
 import { type Activity, type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
+// SCENE-CARD-REUSE-001: 场景卡唯一实现（组件里那句话是给下一个想单搞的人看的）。
+import { SceneCoverCard } from "../components/scene-cover-card";
 import { SCENE_ACTIONS, SceneActivityDiscovery } from "../components/scene-activity-discovery";
 import {
   RECOMMEND_FILTER_CHIPS,
@@ -2193,33 +2195,28 @@ export function RequesterHome({
           </Pressable>
         </View>
         <HorizontalSwipeRail style={styles.hotRail} contentContainerStyle={styles.hotRailContent}>
+          {/* SCENE-CARD-REUSE-001（2026-10-06，用户：「直接服用home那个就好
+              别自己傻傻的单独搞」）：卡片本体抽成 components/scene-cover-card.tsx，
+              home 是这份卡的基准；发布向导的「选场景」步用的就是这同一个组件。
+              这里的 JSX 只剩数据映射，不再有自己的卡片样式。 */}
           {hotScenes.map((scene, index) => (
-            <Pressable key={scene.id} accessibilityLabel={scene.name} onPress={() => onOpenSceneMap?.(scene.id)} style={styles.hotCard}>
-              <View style={styles.hotCover}>
-                {(() => { const uri = hotSceneImageUrl(scene); return uri ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`hot-scene:${scene.id}`} source={{ uri }} style={styles.hotCoverImage} transition={0} /> : <View style={[styles.hotCoverImage, styles.hotCoverFallback]}><Text selectable style={styles.hotCoverFallbackText}>{scene.type.slice(0, 2) || "场景"}</Text></View>; })()}
-                <View style={styles.hotCoverShade} />
-                {index < 3 && scene.visitedCount > 0 ? <View style={[styles.hotBadge, index === 0 && styles.hotBadgeFirst, index === 1 && styles.hotBadgeSecond]}>
-                  <Text selectable style={[styles.hotBadgeText, (index === 0 || index === 1) && styles.hotBadgeTextOn]}>{`TOP ${index + 1}`}</Text>
-                </View> : null}
-                {/* SCENE-DISTANCE-BADGE-001（用户：「所有的场景必须标注距离数」）：
-                    这个横滑之前完全没有距离——加真实定位 + haversine，没坐标/
-                    没定位就不画，不冒充。 */}
-                {(() => { const distance = shopCardDistance(sceneDistanceMeters(homeOrigin, scene)); return distance ? <View style={styles.hotDistanceBadge}><Text selectable style={styles.hotDistanceText}>{distance}</Text></View> : null; })()}
-                <Text selectable style={styles.hotCoverTitle} numberOfLines={2}>{scene.name}</Text>
-              </View>
-              <View style={styles.hotBody}>
-                <Text selectable style={styles.hotMeta} numberOfLines={1}>{[scene.category, scene.area].filter(Boolean).join(" · ") || scene.type}</Text>
-                <View style={styles.hotFoot}>
-                  <Text selectable style={styles.hotCount}>{t("hotScenesVisits", { count: scene.visitedCount })}</Text>
-                  {(scene.ratingCount ?? 0) > 0 && typeof scene.rating === "number" ? (
-                    <View style={styles.hotRatingRow}>
-                      <Text selectable style={styles.hotRatingStar}>★</Text>
-                      <Text selectable style={styles.hotRatingText}>{scene.rating.toFixed(1)}</Text>
-                    </View>
-                  ) : null}
-                </View>
-              </View>
-            </Pressable>
+            <SceneCoverCard
+              key={scene.id}
+              accessibilityLabel={scene.name}
+              name={scene.name}
+              imageUrl={hotSceneImageUrl(scene)}
+              fallbackText={scene.type.slice(0, 2) || "场景"}
+              meta={[scene.category, scene.area].filter(Boolean).join(" · ") || scene.type}
+              // SCENE-DISTANCE-BADGE-001（用户：「所有的场景必须标注距离数」）：
+              // 真实定位 + haversine，没坐标/没定位就不画，不冒充。
+              distance={(() => { const distance = shopCardDistance(sceneDistanceMeters(homeOrigin, scene)); return distance ? distance : undefined; })()}
+              badgeText={index < 3 && scene.visitedCount > 0 ? `TOP ${index + 1}` : undefined}
+              badgeTone={index === 0 ? "first" : index === 1 ? "second" : "plain"}
+              footText={t("hotScenesVisits", { count: scene.visitedCount })}
+              rating={(scene.ratingCount ?? 0) > 0 && typeof scene.rating === "number" ? scene.rating : undefined}
+              recyclingKey={`hot-scene:${scene.id}`}
+              onPress={() => onOpenSceneMap?.(scene.id)}
+            />
           ))}
         </HorizontalSwipeRail>
       </View> : null}
@@ -2741,27 +2738,8 @@ const styles = StyleSheet.create({
   hotMoreChevron: { color: color.muted, fontSize: 16, fontWeight: "800", marginLeft: 2 },
   hotRail: { marginBottom: 10, marginHorizontal: -16 },
   hotRailContent: { gap: 12, paddingHorizontal: 16 },
-  hotCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, overflow: "hidden", width: 156 },
-  hotCover: { height: 104, justifyContent: "flex-end", position: "relative" },
-  hotCoverImage: { height: "100%", position: "absolute", width: "100%" },
-  hotCoverFallback: { alignItems: "center", backgroundColor: color.surface, justifyContent: "center" },
-  hotCoverFallbackText: { color: color.muted, fontSize: 22, fontWeight: "900" },
-  hotCoverShade: { backgroundColor: "rgba(23, 19, 31, 0.42)", bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
-  hotBadge: { alignItems: "center", backgroundColor: color.white, borderRadius: 6, left: 8, paddingHorizontal: 7, paddingVertical: 3, position: "absolute", top: 8 },
-  hotBadgeFirst: { backgroundColor: color.magenta },
-  hotBadgeSecond: { backgroundColor: color.factUnknownBg },
-  hotBadgeText: { color: color.ink, fontSize: 11, fontWeight: "900", letterSpacing: 0.2 },
-  hotBadgeTextOn: { color: color.white },
-  hotDistanceBadge: { alignItems: "center", backgroundColor: "rgba(23,19,31,0.55)", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3, position: "absolute", right: 8, top: 8 },
-  hotDistanceText: { color: color.white, fontSize: 11, fontWeight: "900", letterSpacing: 0.2 },
-  hotCoverTitle: { bottom: 10, color: color.white, fontSize: 14.5, fontWeight: "900", left: 12, position: "absolute", right: 12, textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6 },
-  hotBody: { gap: 6, padding: 12, paddingTop: 10 },
-  hotMeta: { color: color.muted, fontSize: 11, fontWeight: "700" },
-  hotFoot: { alignItems: "center", borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingTop: 8 },
-  hotCount: { color: color.muted, fontSize: 11, fontWeight: "800" },
-  hotRatingRow: { alignItems: "center", flexDirection: "row", gap: 3 },
-  hotRatingStar: { color: "#F5B400", fontSize: 11 },
-  hotRatingText: { color: "#8C6A00", fontSize: 11, fontWeight: "900" },
+  // SCENE-CARD-REUSE-001：热门场景卡本体已抽到 components/scene-cover-card.tsx
+  // （原 hotCard…hotRatingText 21 条样式随之搬走），这里只留 section 壳的样式。
   sceneWideRail: { gap: 12, paddingRight: 16, paddingVertical: 4 },
   sceneWideCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 5, padding: 10, width: 220 },
   sceneWideImage: { borderRadius: 12, height: 132, width: "100%" },

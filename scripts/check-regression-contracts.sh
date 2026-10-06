@@ -16015,11 +16015,25 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: 「等接单」文案没了 —— 非专业的默认接单方式必须有名字。" >&2
     DSF_B=1
   fi
-  # DEMAND-AVATAR-SHAPE-001（2026-10-06，用户：「场景 人都要带头像 区别是人是圆圈
-  # 头像 场景是方块矩形头像」）：形状即类型。场景行方块头像（borderRadius 10）
-  # 与人行的圆头像（CircularAvatarImage / personAvatar borderRadius 22）必须同时在。
-  if ! grep -qF 'sceneAvatar: { borderRadius: 10, height: 104, width: 104 }' apps/mobile/src/surfaces/demand-wizard.tsx; then
-    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 场景头像不是 104 方块了 —— 形状即类型（场景方 104 / 人圆 44）。" >&2
+  # DEMAND-AVATAR-SHAPE-001 / SCENE-CARD-REUSE-001（2026-10-06，用户：「场景 人都要
+  # 带头像 区别是人是圆圈头像 场景是方块矩形头像」「直接服用home那个就好 别自己
+  # 傻傻的单独搞」）：场景卡唯一实现在 components/scene-cover-card.tsx（home 同款
+  # 104 封面），home 和发布向导都必须用这个组件 —— 任何一边再出现自己的手搓卡片
+  # 样式（sceneRow / hotCard）就是分叉，红。
+  if ! grep -qF 'SceneCoverCard' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 选场景步不再复用 SceneCoverCard —— 场景卡只能有一份实现。" >&2
+    DSF_B=1
+  fi
+  if ! grep -qF 'SceneCoverCard' apps/mobile/src/surfaces/requester-home.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: home 热门场景卡不再走 SceneCoverCard —— 场景卡只能有一份实现。" >&2
+    DSF_B=1
+  fi
+  if grep -qF 'sceneAvatar: { borderRadius: 10' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 向导里又冒出手搓的场景头像样式（sceneAvatar）—— 用 SceneCoverCard。" >&2
+    DSF_B=1
+  fi
+  if grep -qE '^  hotCard: \{' apps/mobile/src/surfaces/requester-home.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: home 里又出现内联 hotCard 样式 —— 卡片本体在 components/scene-cover-card.tsx。" >&2
     DSF_B=1
   fi
   if ! grep -qF 'CircularAvatarImage' apps/mobile/src/surfaces/demand-wizard.tsx; then

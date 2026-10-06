@@ -45,6 +45,9 @@ import { loadSceneSpots, type SceneSpot } from "../activity-create-form";
 import type { SceneOrigin } from "../scene-shop-directory";
 import { ProxyBackGlyph } from "../components/proxy-foundation";
 import { ProxyIcon } from "../components/proxy-icon";
+// SCENE-CARD-REUSE-001：场景卡唯一实现在 components/scene-cover-card.tsx（home 同款），
+// 选场景步直接复用，不再有自己的卡片样式。
+import { SceneCoverCard } from "../components/scene-cover-card";
 
 // DEMAND-SCENE-FIRST-001（2026-10-06）：「scene」这一步是为了把「选人」从默认路径上
 // 挪走而存在的。
@@ -619,10 +622,20 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <Pressable onPress={() => setStep("moment")}><Text selectable style={styles.linkText}>更换</Text></Pressable>
           </View>
           <Text selectable style={styles.sectionSub}>先挑个地方 · {template?.venueLabel}</Text>
+          {/* SCENE-CARD-REUSE-001（2026-10-06，用户：「直接服用home那个就好
+              别自己傻傻的单独搞」）：这里不再自己手搓场景行（原来那份 sceneRow +
+              方形头像整体删掉），直接复用 home 热门场景卡的本体
+              components/scene-cover-card.tsx —— 卡片形状、封面 104、距离角标
+              全部跟 home 同一份实现，home 改了这里跟着变。 */}
           {sceneOptions.map((option) => (
-            <Pressable
+            <SceneCoverCard
               key={option.scene.id}
               accessibilityLabel={`选择场景 ${option.scene.name}`}
+              name={option.scene.name}
+              imageUrl={option.scene.imageUrl === "" ? undefined : option.scene.imageUrl}
+              fallbackText={option.scene.type.slice(0, 2) || "场景"}
+              meta={option.scene.area}
+              distance={option.distance === "" ? undefined : option.distance}
               onPress={() => {
                 setSpecs((prev) => ({
                   ...prev,
@@ -632,26 +645,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                 }));
                 setStep("specs");
               }}
-              style={styles.sceneRow}
-            >
-              {/* DEMAND-AVATAR-SHAPE-001（2026-10-06，用户：「场景 人都要带头像
-                  区别是人是圆圈头像 场景是方块矩形头像」）：场景行也要带头像，
-                  形状是**方块矩形**（borderRadius 10），与选人步的圆头像
-                  （44，borderRadius 22 / CircularAvatarImage）一眼区分 —— 形状即类型，
-                  尺寸也是类型：场景 104（跟 home 场景封面同高，用户拍板），人 44。
-                  有真图用真图（SceneSpot.imageUrl，activity-wizard 同款 expo-image
-                  用法），没图垫首字方块，不甩空白格。 */}
-              {option.scene.imageUrl !== "" ? (
-                <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`demand-scene:${option.scene.id}`} source={{ uri: option.scene.imageUrl }} style={styles.sceneAvatar} transition={0} />
-              ) : (
-                <View style={[styles.sceneAvatar, styles.sceneAvatarFallback]}><Text selectable style={styles.sceneAvatarText}>{option.scene.name.trim().charAt(0) || "地"}</Text></View>
-              )}
-              <View style={styles.sceneCopy}>
-                <Text selectable style={styles.sceneName}>{option.scene.name}</Text>
-                <Text selectable style={styles.sceneMeta}>{option.scene.area}</Text>
-              </View>
-              {option.distance === "" ? null : <Text selectable style={styles.sceneDistance}>{option.distance}</Text>}
-            </Pressable>
+            />
           ))}
           {sceneOptions.length === 0 ? (
             <Text selectable style={styles.empty}>这一类暂时没有可选的地方，先填个大概，接单的人会来确认。</Text>
@@ -1105,17 +1099,9 @@ const styles = StyleSheet.create({
   summaryLabel: { color: color.muted, fontSize: 13 },
   summaryValue: { color: color.ink, fontSize: 13, fontWeight: "700" },
   doneRow: { flexDirection: "row", gap: 10, marginTop: 16 },
-  // DEMAND-SCENE-FIRST-001：选场景步的行样式。跟着 personCard 那套规格走（白底
-  // 卡 + 右侧一格距离）。头像形状即类型（DEMAND-AVATAR-SHAPE-001）：场景是方块
-  // 矩形（borderRadius 10），人是圆（personAvatar borderRadius 22 / 圆形裁剪）。
-  sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 8, padding: 12 },
-  sceneAvatar: { borderRadius: 10, height: 104, width: 104 },
-  sceneAvatarFallback: { alignItems: "center", backgroundColor: color.surface, justifyContent: "center" },
-  sceneAvatarText: { color: color.ink, fontSize: 40, fontWeight: "800" },
-  sceneCopy: { flex: 1 },
-  sceneName: { color: color.ink, fontSize: 15, fontWeight: "800" },
-  sceneMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
-  sceneDistance: { color: color.violet, fontSize: 12, fontWeight: "800" },
+  // SCENE-CARD-REUSE-001：选场景步的卡片本体已删（sceneRow/sceneAvatar 等 8 条），
+  // 直接用 components/scene-cover-card.tsx —— home 的热门场景卡就是唯一实现，
+  // 这里不再有自己的卡片样式。
   // 接单方式那行：chip 是「等接单」，直接约只是一条小字链接 —— 故意不做成和
   // 等接单同权的第二颗 chip，否则又回「第一排」了。
   modeRow: { alignItems: "center", flexDirection: "row", gap: 12 },
