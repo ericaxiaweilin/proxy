@@ -24,6 +24,14 @@ func (f fakeSender) VerifyOTP(_ context.Context, _ string, code string) (bool, e
 }
 
 func testService(missing []string) (*Service, *[]Application) {
+	s, _, activated := testServiceWithMemory(missing)
+	return s, activated
+}
+
+// testServiceWithMemory 额外把 Memory 交出来 —— 给需要「绕过 Service 自己的写入口、
+// 直接伪造一行状态」的测试用（KYC-PHONE-VN-001 要造一张非越南号的已验证挑战单，
+// 而 RequestPhoneVerification 那道闸已经不允许它被造出来了）。
+func testServiceWithMemory(missing []string) (*Service, *Memory, *[]Application) {
 	activated := &[]Application{}
 	mem := NewMemory()
 	return NewService(mem, mem, Deps{
@@ -35,7 +43,7 @@ func testService(missing []string) (*Service, *[]Application) {
 			*activated = append(*activated, a)
 			return "agent_linh", nil
 		},
-	}), activated
+	}), mem, activated
 }
 
 var testTerms = Terms{Version: "v1", Items: []TermItem{{ID: "monitoring"}, {ID: "cancel"}}}
@@ -336,5 +344,72 @@ func TestKYCDoesNotRequireCityAreasOrLanguages(t *testing.T) {
 	in.City, in.ServiceAreas, in.Languages = "", nil, nil
 	if _, err := s.Submit(context.Background(), "user_1", in); err != nil {
 		t.Fatalf("KYC must not require service-profile fields: %v", err)
+	}
+}
+
+// KYC-PHONE-VN-001（2026-10-06，用户：「接单kyc只有越南手机号注册才行」）：
+// 接单 KYC 只收越南手机号。客户端（provider-application-client.ts 的 phoneDigitsError）
+// 一直只放行 +84，注释里还写着「两边一致」；服务端当时只查通用 E.164，那句是空话。
+func TestKYCPhoneRequestOnlyAcceptsVietnameseNumbers(t *testing.T) {
+	ctx := context.Background()
+	s, _ := testService(nil)
+
+	// 越南写法：本地 0 开头、国际 +84、带空格 —— 都归一化成 +84 后 9 位，放行。
+	for _, in := range []string{"090 123 4567", "+84901234567", "+84 901 234 567"} {
+		if _, err := s.RequestPhoneVerification(ctx, "user_vn", in); err != nil {
+			t.Errorf("vietnamese %q rejected: %v", in, err)
+		}
+	}
+	// 非越南号：连码都不该发出去 —— 挡住的是「把短信发出去」那一步本身。
+	for _, in := range []string{"+8613800138000", "+14155552671", "+6591234567"} {
+		_, err := s.RequestPhoneVerification(ctx, "user_xx", in)
+		var v *ValidationError
+		if !errors.As(err, &v) || len(v.Fields) != 1 || v.Fields[0] != "phone_not_vietnamese" {
+			t.Errorf("non-vietnamese %q = %v, want phone_not_vietnamese", in, err)
+		}
+	}
+}
+
+// 强版（红绿分离）：Request 那道闸已经不让非越南号被造出来了，所以这里绕过它、
+// 直接往 Memory 里塞一张「已验证」的 +86 挑战单 —— Submit 必须自己再拦一次。
+// 两道闸各自独立成立，不是只靠发码那一步。
+func TestSubmitRejectsNonVietnamesePhoneEvenWithVerifiedChallenge(t *testing.T) {
+	ctx := context.Background()
+	s, mem, _ := testServiceWithMemory(nil)
+	now := time.Now().UTC()
+
+	if err := mem.CreatePhoneChallenge(ctx, PhoneChallenge{
+		ID: "ch_foreign", UserAccountID: "user_1", Phone: "+8613800138000",
+		Status: PhoneChallengeVerified, Attempts: 1, MaxAttempts: 5,
+		RequestedAt: now, ExpiresAt: now.Add(5 * time.Minute), VerifiedAt: now,
+	}); err != nil {
+		t.Fatalf("seed foreign challenge: %v", err)
+	}
+
+	in := Input{
+		RealName: "Nguyễn Linh", BirthDate: time.Now().AddDate(-25, 0, 0).Format("2006-01-02"),
+		Phone: "+8613800138000", PhoneChallengeID: "ch_foreign",
+		NoCrime: true, DataConsent: true, Emergency: "Mẹ 0987654321",
+		TermsVersion: "v1", Accepted: []string{"monitoring", "cancel"},
+	}
+	_, err := s.Submit(ctx, "user_1", in)
+	var v *ValidationError
+	if !errors.As(err, &v) {
+		t.Fatalf("want ValidationError, got %v", err)
+	}
+	got := false
+	for _, f := range v.Fields {
+		if f == "phone_not_verified" {
+			t.Fatalf("foreign number must fail as phone_not_vietnamese, not as merely unverified: %v", v.Fields)
+		}
+		if f == "phone_not_vietnamese" {
+			got = true
+		}
+	}
+	if !got {
+		t.Fatalf("foreign verified phone = %v, want phone_not_vietnamese", v.Fields)
+	}
+	if app, err := mem.Latest(ctx, "user_1"); err != nil || app != nil {
+		t.Fatalf("rejected submit must not write an application: %+v err=%v", app, err)
 	}
 }

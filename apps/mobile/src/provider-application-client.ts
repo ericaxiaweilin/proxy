@@ -146,6 +146,7 @@ const FIELD_TEXT: Readonly<Record<string, string>> = {
   birth_date: "出生日期不对（格式 2001-05-20，需年满 18 岁）",
   phone: "手机号格式不对",
   phone_not_verified: "请先验证手机号（获取验证码并输入正确的码）",
+  phone_not_vietnamese: "接单只支持越南手机号（+84 开头，后面 9 位）",
   city: "请填写所在城市",
   service_areas: "至少选一个服务区域",
   languages: "至少选一种会说的语言",

@@ -31,6 +31,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -395,6 +396,43 @@ func normalizePhone(v string) string {
 	return out
 }
 
+// KYC-PHONE-VN-001（2026-10-06，用户：「接单kyc只有越南手机号注册才行」）：
+// 接单 KYC 只收越南手机号。
+//
+// 客户端一直就是这么做的 —— apps/mobile/src/provider-application-client.ts 的
+// phoneDigitsError 只放行 `+84` 后跟 9 位（或本地 `0` 后跟 9 位），注释里还写着
+// 「只收越南手机号 …… 两边一致」。但服务端当时只查「+ 开头、8–15 位」这种通用
+// E.164，于是那句「两边一致」是空话：绕过客户端直接打 API，`+86` / `+1` 的号照样
+// 能收到验证码、并通过 KYC。这条把服务端补成客户端声称的样子，fail-closed。
+//
+// 规则与客户端逐字对齐（`^\+84\d{9}$`）：故意不在这里加「越南号段首位必须是
+// 3/5/7/8/9」那层 —— 登录用的 vn-phone.ts 有那层，但 KYC 客户端没有；比客户端
+// 严会让用户在客户端填得过、服务端却报错。要收紧就两边一起收。
+var vietnamesePhoneE164 = regexp.MustCompile(`^\+84\d{9}$`)
+
+// looksLikeE164 是原先那道通用格式闸：+ 开头、8–15 位数字。
+func looksLikeE164(phone string) bool {
+	digits := strings.TrimPrefix(phone, "+")
+	return strings.HasPrefix(phone, "+") && len(digits) >= 8 && len(digits) <= 15
+}
+
+// isVietnamesePhone 判定归一化后的号码是不是越南手机号（+84 + 9 位）。
+func isVietnamesePhone(phone string) bool {
+	return vietnamesePhoneE164.MatchString(phone)
+}
+
+// phoneFieldError 返回手机号该报哪个字段码，没问题返回 ""。
+// 空 / 明显不成形 → "phone"；成形但不是越南号 → "phone_not_vietnamese"。
+func phoneFieldError(phone string) string {
+	if !looksLikeE164(phone) {
+		return "phone"
+	}
+	if !isVietnamesePhone(phone) {
+		return "phone_not_vietnamese"
+	}
+	return ""
+}
+
 func validate(in Input, terms Terms, now time.Time, phoneVerified bool) []string {
 	fields := []string{}
 	if n := utf8.RuneCountInString(in.RealName); n < 2 || n > MaxRealName {
@@ -417,8 +455,11 @@ func validate(in Input, terms Terms, now time.Time, phoneVerified bool) []string
 	if in.Gender != "" && in.Gender != "FEMALE" && in.Gender != "MALE" && in.Gender != "OTHER" {
 		fields = append(fields, "gender")
 	}
-	if digits := strings.TrimPrefix(in.Phone, "+"); len(digits) < 8 || len(digits) > 15 || !strings.HasPrefix(in.Phone, "+") {
-		fields = append(fields, "phone")
+	// KYC-PHONE-VN-001: 先看是不是越南号，再看验没验证 —— 顺序不能反，否则
+	// 「拿 +86 的号验过了」会落到 phone_not_verified 上，读起来像只差个验证码，
+	// 其实是这个号根本不该被接受。
+	if code := phoneFieldError(in.Phone); code != "" {
+		fields = append(fields, code)
 	} else if !phoneVerified {
 		// KYC-PHONE-ONLY-001: 手机号格式对不算数，必须真的收到过验证码并验对。
 		fields = append(fields, "phone_not_verified")
@@ -651,8 +692,10 @@ func (s *Service) RequestPhoneVerification(ctx context.Context, userAccountID, p
 		return nil, ErrUnavailable
 	}
 	phone = normalizePhone(phone)
-	if digits := strings.TrimPrefix(phone, "+"); len(digits) < 8 || len(digits) > 15 || !strings.HasPrefix(phone, "+") {
-		return nil, &ValidationError{Fields: []string{"phone"}}
+	// KYC-PHONE-VN-001: 这里是真正「把短信发出去」的那一步 —— 非越南号必须在
+	// 这里就挡住，否则等于替海外号码付了短信费、还验了一个不该被接受的号。
+	if code := phoneFieldError(phone); code != "" {
+		return nil, &ValidationError{Fields: []string{code}}
 	}
 	providerRef, expiresAt, err := s.deps.Phone.RequestOTP(ctx, phone, "PROVIDER_APPLICATION_PHONE_VERIFY")
 	if err != nil {

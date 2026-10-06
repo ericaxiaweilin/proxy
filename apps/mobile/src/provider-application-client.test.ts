@@ -17,6 +17,13 @@ describe("PROVIDER-APPLY-001 client", () => {
     expect(providerApplicationErrorText(new Error("x"))).toBe("暂时没连上服务，稍后再试。");
   });
 
+  // KYC-PHONE-VN-001（2026-10-06）：接单 KYC 只收 +84。服务端新加的字段码必须有
+  // 对应的人话 —— 认不出的码会被上面的兜底吞掉，用户只会看到「有信息不合格」。
+  it("maps phone_not_vietnamese to a specific message", () => {
+    expect(providerApplicationFieldErrors(["phone_not_vietnamese"])).toEqual(["接单只支持越南手机号（+84 开头，后面 9 位）"]);
+    expect(phoneDigitsError("+86 1312345678")).toBe("越南手机号是 +84 开头，后面 9 位");
+  });
+
   it("status card per state; withdrawn or none shows the form", () => {
     expect(providerApplicationStatusCard(null)).toBeNull();
     expect(providerApplicationStatusCard({ ...base, status: "WITHDRAWN" })).toBeNull();
