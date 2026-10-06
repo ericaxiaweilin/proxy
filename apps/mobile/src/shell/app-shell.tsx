@@ -1037,6 +1037,11 @@ export function AppShell({
               userCenter={sceneMapOrigin ? { lat: sceneMapOrigin.latitude, lng: sceneMapOrigin.longitude } : undefined}
               // ORDER-APPLY-KYC-GATE-001：市场接单没过 KYC → 切「我的」直达 KYC认证。
               onRequireKYC={() => { setTab("ME"); setMeOpenSubPage(meSubPage("providerapply") ?? undefined); }}
+              // 2026-10-06 用户「任何场景 人物 点击头像 可以看详情页」：发布向导选人步
+              // 头像 → 平台公开主页（OtherProfileSurface，business-home 的 creator 头像
+              // 走的同一条）。userId 沿用 business-home 惯例 userAccountId || agentId；
+              // 头像 URI 由向导用 resolveCreatorPhoto 解析好带来。
+              onOpenPersonProfile={(person, avatarUri) => setOpenHumanProfile({ userId: person.userAccountId || person.agentId, name: person.name, ...(avatarUri ? { avatarUri } : {}), posts: [], mediaByPost: {} })}
             />
         ) : tab === "FEED" ? (
           feedChatAuthor ? (

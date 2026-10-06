@@ -192,11 +192,11 @@ export function SceneShopDirectory({
   onOpenScene?: ((sceneId: string) => void) | undefined;
   /**
    * SCENE-CARD-REUSE-001 / 场景选择模式（2026-10-06）：给了 onPick = 这份场景
-   * list 被当作**选择器**用（目前唯一调用方：发布向导的「选场景」步）——
-   * 列表卡片点了**直接选中**回发布流（onPick(scene)），**不进单店详情**
-   * （场景主页）：用户口径「我发布需求 要一直发布订单的 而不是去看场景主页」，
-   * 看主页是场景浏览的工作流，不是发布的工作流。
-   * 不给 onPick 就是 home 同款浏览模式，点卡片照旧进详情，行为一点不变。
+   * list 被当作**选择器**用（目前唯一调用方：发布向导的「选场景」步）。
+   * 点位分工（用户口径，含他对上一条说法的修正「任何场景 人物 点击头像 可以看
+   * 详情页」）：点**卡片** = 选中（onPick 直接回发布流）；点**头像/照片** = 看
+   * 单店详情（场景主页）—— 详情页主按钮是「选这个场景」，看完照样能选。
+   * 不给 onPick 就是 home 同款浏览模式：点卡片/照片都进详情。
    */
   onPick?: ((scene: SceneShopBrief) => void) | undefined;
   /** 选择模式下「暂不选场景」的出路（保留原来的「暂不选，继续」语义）；浏览模式不传。 */
@@ -476,12 +476,15 @@ export function SceneShopDirectory({
                     const distance = shopCardDistance(sceneDistanceMeters(origin, scene));
                     const address = shopAddressLine(scene);
                     const signal = shopCardSignal(scene);
-                    // 选择模式（onPick）：点卡片**直接选中**回发布流 —— 用户口径
-                    // 「我发布需求 要一直发布订单的 而不是去看场景主页」，单店
-                    // 详情（场景主页）在选择模式下不接。浏览模式照旧进详情。
+                    // 点位分工（2026-10-06 用户：「任何场景 人物 点击头像 可以看详情页」，
+                    // 修正他上一条「不进主页」的说法）：**头像/照片 = 看详情**（两种模式
+                    // 都开单店主页）；卡片其余部分 = 动作 —— 选择模式（onPick）点了
+                    // 直接选中回发布流，浏览模式进详情。
                     return <Pressable accessibilityLabel={onPick ? `选择场景 ${scene.name}` : `场景 ${scene.name}`} key={scene.id} onPress={() => (onPick ? onPick(scene) : setSelectedId(scene.id))} style={styles.card}>
                       <View style={styles.cardPhoto}>
-                        {photo ? <Image contentFit="cover" source={{ uri: photo }} style={styles.cardImage} /> : <View style={[styles.cardImage, styles.photoPlaceholder]}><Text selectable style={styles.photoPlaceholderText}>{scene.type.slice(0, 2) || "场景"}</Text></View>}
+                        <Pressable accessibilityLabel={`看${scene.name}主页`} onPress={() => setSelectedId(scene.id)} style={styles.cardImagePress}>
+                          {photo ? <Image contentFit="cover" source={{ uri: photo }} style={styles.cardImage} /> : <View style={[styles.cardImage, styles.photoPlaceholder]}><Text selectable style={styles.photoPlaceholderText}>{scene.type.slice(0, 2) || "场景"}</Text></View>}
+                        </Pressable>
                         {scene.hereCount !== undefined && scene.hereCount > 0 ? <View style={styles.liveDot} /> : null}
                         {/* SCENE-CATEGORY-BADGE-001：分类角标 —— 真实枚举，缺值不画，
                             资质/状态类角标不许在这里出现（SCENE-NO-FABRICATED-001）。 */}
@@ -588,15 +591,21 @@ export function SceneShopDirectory({
               </View> : null}
               <Text selectable style={styles.checkinHint}>{checkinHint(hereChecked, checkinDistance)}</Text>
 
-              {/* 邀约那条链路要选人 + 填报酬 + 两步命令 —— 复制一份就是第二个
-                  真相，所以转交给场景自己的那一屏去做。
-                  选择模式（onPick）到不了这一屏：列表卡片直接 onPick 回发布流，
-                  场景主页在选择模式下不接（用户：「我发布需求 要一直发布订单的
-                  而不是去看场景主页」）。 */}
-              <Pressable accessibilityLabel="让小美来这个场景" disabled={!selected || !onOpenScene} onPress={() => { if (selected) onOpenScene?.(selected.id); }} style={[styles.primaryAction, (!selected || !onOpenScene) && styles.actionButtonBusy]}>
-                <Text selectable style={styles.primaryActionText}>让小美来这个场景</Text>
-                <Text selectable style={styles.primaryActionSub}>约她出图 / 同行 · 选人、时间、报酬在场景页里定</Text>
-              </Pressable>
+              {/* 选择模式（onPick）仍能从头像进到这一屏（看主页是合法路径），
+                  所以主按钮按模式切换：「选这个场景」把场景交回发布流；
+                  浏览模式照旧是邀约 CTA —— 那条链路要选人 + 填报酬 + 两步命令，
+                  复制一份就是第二个真相，所以转交给场景自己的那一屏去做。 */}
+              {onPick ? (
+                <Pressable accessibilityLabel="选这个场景" disabled={!selected} onPress={() => { if (selected) onPick(selected); }} style={[styles.primaryAction, !selected && styles.actionButtonBusy]}>
+                  <Text selectable style={styles.primaryActionText}>选这个场景</Text>
+                  <Text selectable style={styles.primaryActionSub}>名字和位置会自动带到发布单里</Text>
+                </Pressable>
+              ) : (
+                <Pressable accessibilityLabel="让小美来这个场景" disabled={!selected || !onOpenScene} onPress={() => { if (selected) onOpenScene?.(selected.id); }} style={[styles.primaryAction, (!selected || !onOpenScene) && styles.actionButtonBusy]}>
+                  <Text selectable style={styles.primaryActionText}>让小美来这个场景</Text>
+                  <Text selectable style={styles.primaryActionSub}>约她出图 / 同行 · 选人、时间、报酬在场景页里定</Text>
+                </Pressable>
+              )}
 
               {/* SCENE-HOME-DETAIL-001（2026-09-27）：参考稿第 3 屏比对了下面三块，
                   之前这一屏**故意没画**（缺数据源）。后端已经发下来 humans /
@@ -782,6 +791,8 @@ const styles = StyleSheet.create({
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, padding: 11 },
   cardPhoto: { borderRadius: 13, height: 112, overflow: "hidden", position: "relative", width: 96 },
   cardImage: { backgroundColor: color.surface, height: "100%", width: "100%" },
+  // 照片的「看主页」点击层：撑满 cardPhoto，否则百分比高度的图会塌成 0。
+  cardImagePress: { height: "100%", width: "100%" },
   liveDot: { backgroundColor: color.mint, borderRadius: 4, height: 8, position: "absolute", right: 6, top: 6, width: 8 },
   // SCENE-CATEGORY-BADGE-001：封面左上角分类角标。mint 底白字、绝对定位、
   // 跟 liveDot 共享 112pt 高的封面（top:6 距顶边），左缘跟卡片内边距对齐。

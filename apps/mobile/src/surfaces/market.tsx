@@ -138,7 +138,8 @@ export function MarketSurface({
   onSubPageOpenChange,
   bottomNavVisible,
   userCenter,
-  onRequireKYC
+  onRequireKYC,
+  onOpenPersonProfile
 }: {
   activities: ActivityClient;
   marketplace: MarketplaceClient;
@@ -171,6 +172,10 @@ export function MarketSurface({
   // 地图初开就该以人为中心 —— 而不是先摆河内、非要点一下按钮。
   // 缺省 = 没接线：退回订单 centroid / 河内（原来唯一的样子），不编位置。
   userCenter?: { lat: number; lng: number } | undefined;
+  // 2026-10-06 用户「任何场景 人物 点击头像 可以看详情页」：转发给发布需求向导，
+  // 选人步头像 → 平台公开主页（壳接 OtherProfileSurface）。缺省 = 没接线，
+  // 向导头像不可点（选择行为不变），不会把没接线的宿主弄坏。
+  onOpenPersonProfile?: ((person: SupplierCandidate, avatarUri?: string) => void) | undefined;
 }): React.JSX.Element {
   const normalized = normalizeTab(initialTab);
   const [tab, setTab] = useState<"OPPORTUNITY" | "ACTIVITY">(normalized);
@@ -512,6 +517,7 @@ export function MarketSurface({
           }}
           onViewMarket={() => setDemandWizardOpen(false)}
           onCreateActivity={() => { setDemandWizardOpen(false); openActivityPublisher(); }}
+          onOpenPersonProfile={onOpenPersonProfile}
         />
       ) : activityPublishOpen && pageTab === "ACTIVITY" ? (
         <ActivityWizard

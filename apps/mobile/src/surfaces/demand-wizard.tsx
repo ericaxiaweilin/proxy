@@ -35,6 +35,8 @@ import { MapCanvas } from "../components/map-canvas";
 import { SCENE_ACTIONS } from "../components/scene-activity-discovery";
 import { Image } from "expo-image";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
+// 头像进主页的 photo→URI 解析跟 business-home/商家侧同一条（resolveCreatorPhoto）。
+import { resolveCreatorPhoto } from "./merchant-creator-recommendations";
 import { localApiBaseUrl } from "../native-clients";
 // 卡面右下角的距离（用户选「接真实距离」）：真实定位 + 真实场景目录。
 import { getCurrentFix } from "../device-location";
@@ -123,13 +125,17 @@ const DRAFT_KEY = "proxy.demandWizard.draft.v1";
 
 type DraftState = { templateId: string; specs: DemandSpecs };
 
-export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewMarket, onCreateActivity }: {
+export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewMarket, onCreateActivity, onOpenPersonProfile }: {
   marketplace: MarketplaceClient;
   supply?: SupplyClient | undefined;
   onBack: () => void;
   onPublished: (opportunity: MarketOpportunity) => void;
   onViewMarket: () => void;
   onCreateActivity: () => void;
+  // 2026-10-06 用户：「任何场景 人物 点击头像 可以看详情页」。有回调时选人步的
+  // 头像可点开主页（app-shell 接 OtherProfileSurface，business-home 的 creator
+  // 头像走的就是同一条）；不传则头像不可点，选择行为不变。
+  onOpenPersonProfile?: ((person: SupplierCandidate, avatarUri?: string) => void) | undefined;
 }): React.JSX.Element {
   const [step, setStep] = useState<Step>("moment");
   // UI-ORDER-LOGO-001: Moment 图标复用场景动作既有 logo（不是另做一套）
@@ -710,10 +716,19 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                 : undefined;
               return (
                 <View key={person.agentId} style={[styles.personCard, active && styles.momentCardOn]}>
+                  {/* 点位分工（2026-10-06 用户口径，场景侧同款）：头像 = 看主页，
+                      卡片其余部分 = 选择。主页由调用方接（app-shell 的
+                      OtherProfileSurface），回调没给就不可点。 */}
                   {typeof photo === "object" ? (
-                    <CircularAvatarImage accessibilityLabel={`${person.name}头像`} size={44} source={photo} />
+                    <Pressable accessibilityLabel={`看${person.name}主页`} disabled={!onOpenPersonProfile} onPress={() => onOpenPersonProfile?.(person, resolveCreatorPhoto(person.photos[0]))}>
+                      <CircularAvatarImage accessibilityLabel={`${person.name}头像`} size={44} source={photo} />
+                    </Pressable>
                   ) : (
-                    <View style={styles.personAvatar}><Text selectable style={styles.personAvatarText}>{person.name.trim().charAt(0) || "?"}</Text></View>
+                    onOpenPersonProfile
+                      ? <Pressable accessibilityLabel={`看${person.name}主页`} onPress={() => onOpenPersonProfile?.(person)}>
+                          <View style={styles.personAvatar}><Text selectable style={styles.personAvatarText}>{person.name.trim().charAt(0) || "?"}</Text></View>
+                        </Pressable>
+                      : <View style={styles.personAvatar}><Text selectable style={styles.personAvatarText}>{person.name.trim().charAt(0) || "?"}</Text></View>
                   )}
                   <View style={styles.personCopy}>
                     <View style={styles.personNameRow}>
