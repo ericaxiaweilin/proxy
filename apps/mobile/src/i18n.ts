@@ -3032,7 +3032,7 @@ settingsCacheClearedWith: "ລ້າງ cache ແລ້ວ, ຄືນ {size}",
   "demand.matching.manual": "ເລືອກຄົນທີ່ລົງຊື່ເອງ",
   "demand.matching.fast": "ໄວ: ແພລັດຟອມເລືອກໃຫ້",
   "demand.matching.manualHint": "ຄົນທີ່ລົງຊື່ ທ່ານເບິ່ງແລະເລືອກເອງ.",
-  "demand.matching.fastHint": "ແພລັດຟອມເລືອກຄົນທີ່ລົງຊື່ຕາມອັນດັບລວມ; ເຂົາຢືນຢັນພາຍໃນ 5 ນາທີແລ້ວຈຶ່ງເປັນເຄາີ, ບໍ່ຢືນຢັນກໍລົງໄປໃຫ້ຄົນຄົນຖັດໄປ.",
+  "demand.matching.fastHint": "ແພລັດຟອມເລືອກຜູ້ສະໝັກຕາມອັນດັບລວມ; ຖ້າລາວຢືນຢັນພາຍໃນ 5 ນາທີ ຄຳສັ່ງຈະສຳເລັດ, ຖ້າບໍ່ຢືນຢັນຈະປ່ຽນໄປຫາຄົນຕໍ່ໄປອັດຕະໂນມັດ.",
 };
 
 const KO: Messages = {
@@ -3616,7 +3616,7 @@ settingsCacheClearedWith: "캐시를 정리해 {size}를 확보했습니다",
   "demand.matching.manual": "신청자 직접 고르기",
   "demand.matching.fast": "빠른 매칭: 플랫폼이 대신 고름",
   "demand.matching.manualHint": "신청한 사람은 직접 확인하고 직접 고릅니다.",
-  "demand.matching.fastHint": "플랫폼이 종합 순위 순으로 신청자를 대신 고릅니다. 5분 이내에 확정하면 成約, 확정하지 않으면 자동으로 다음 분에게 넘어갑니다.",
+  "demand.matching.fastHint": "플랫폼이 종합 순위 순으로 신청자를 대신 고릅니다. 5분 이내에 확정하면 주문이 성사되고, 확정하지 않으면 자동으로 다음 사람에게 넘어갑니다.",
 };
 
 const JA: Messages = {
@@ -4198,7 +4198,7 @@ settingsCacheClearedWith: "キャッシュを削除し、{size} 空きました"
   "market.rank.busy": "別の予約あり",
   "market.application.selectionExpired": "選ばれましたが時間内に確認されませんでした",
   "demand.matching.manual": "応募者は自分で選ぶ",
-  "demand.matching.fast": "速攻: プラットフォームが代行",
+  "demand.matching.fast": "おまかせ: プラットフォームが選ぶ",
   "demand.matching.manualHint": "応募した人は自分で見て、自分で選びます。",
   "demand.matching.fastHint": "プラットフォームが総合順位で応募者を選びます。5分以内に確定すれば成約、確定しなければ自動的に次の方へ回ります。",
 };
