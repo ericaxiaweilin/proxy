@@ -578,7 +578,7 @@ const s = StyleSheet.create({
   card: { backgroundColor: "#FFFFFF", borderColor: P.border, borderRadius: 20, borderWidth: 1, marginBottom: 12, padding: 16 },
   cardHeader: { alignItems: "flex-start", flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
   creatorRow: { alignItems: "center", flexDirection: "row", gap: 10 },
-  avatar: { borderRadius: 20, height: 40, width: 40 },
+  avatar: { borderRadius: 22, height: 44, width: 44 },
   avatarFallback: { alignItems: "center", backgroundColor: P.accent, justifyContent: "center" },
   avatarText: { color: P.text, fontSize: 16, fontWeight: "800" },
   creatorName: { color: P.text, fontSize: 15, fontWeight: "800" },

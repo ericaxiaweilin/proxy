@@ -16085,3 +16085,47 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
     exit 1
   fi
 fi
+
+# AVATAR-UNIFY-001（2026-10-06，用户：「场景头像大小 人头像大小 都是所有页面一样大小
+# 不能不一样」）。行头像全 app 统一 44×44：场景方（borderRadius 10）人圆（22 或圆裁剪），
+# 尺寸只有一个数。逐文件钉 —— `size=` 是通用 prop（图标也在用），不能全局扫；
+# 反面断言钉的是改动前的旧字面量，谁改回去谁红。
+# 例外（不是行头像，故意不统一）：me.tsx 个人主页 hero 大头像（82/88）。
+if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
+  AU_B=0
+  au_check() {
+    if ! grep -qF "$2" "$1"; then
+      echo "  FAIL [AVATAR-UNIFY-001]: $3" >&2
+      AU_B=1
+    fi
+  }
+  au_absent() {
+    if grep -qF "$2" "$1"; then
+      echo "  FAIL [AVATAR-UNIFY-001]: $3" >&2
+      AU_B=1
+    fi
+  }
+  au_absent apps/mobile/src/surfaces/reality-scene-map.tsx "size={52} uri={humanAvatarUri" "场景详情选中人行头像又回 52 —— 行头像统一 44。"
+  au_absent apps/mobile/src/surfaces/reality-scene-map.tsx "size={64} uri=" "场景详情选人 rail 头像又回 64 —— 行头像统一 44（原 SCENE-HUMANS-002 的放大已收编）。"
+  au_check   apps/mobile/src/surfaces/reality-scene-map.tsx "humanRing: { borderColor: \"transparent\", borderRadius: 24, borderWidth: 2, padding: 2 }" "rail 外圈没有跟着 44 收。"
+  au_absent apps/mobile/src/surfaces/feed.tsx "size={36} uri={avatarSource.uri}" "feed 评论头像又回 36。"
+  au_absent apps/mobile/src/surfaces/feed.tsx "borderRadius: 18, height: 36" "feed 行头像容器又回 36。"
+  au_absent apps/mobile/src/surfaces/me.tsx "size={46}" "me 页行头像又回 46。"
+  au_absent apps/mobile/src/surfaces/me.tsx "size={40}" "me 页行头像又回 40。"
+  au_absent apps/mobile/src/surfaces/my-benefits.tsx "size={52}" "权益页头像又回 52。"
+  au_absent apps/mobile/src/surfaces/ComposerV2Screen.tsx "size={42}" "发布器作者头像又回 42。"
+  au_absent apps/mobile/src/surfaces/provider-application.tsx "size={52}" " Provider 申请页头像又回 52。"
+  au_absent apps/mobile/src/surfaces/ProfileTabs.tsx "size={38}" "ProfileTabs 头像又回 38。"
+  au_absent apps/mobile/src/surfaces/ProfileTabs.tsx "size={36}" "ProfileTabs 头像又回 36。"
+  au_check   apps/mobile/src/surfaces/coffee-scenes.tsx "borderRadius: 999, height: 44, justifyContent: \"center\", width: 44" "咖啡场景行头像不是 44。"
+  au_absent apps/mobile/src/surfaces/coffee-scenes.tsx "height: 36, justifyContent: \"center\", width: 36" "咖啡场景行头像又回 36。"
+  au_absent apps/mobile/src/surfaces/friend-crm.tsx "borderRadius: 12, height: 42" "CRM 行头像又回 42。"
+  au_absent apps/mobile/src/surfaces/messages.tsx "width: 50, height: 50" "会话列表头像又回 50。"
+  au_absent apps/mobile/src/surfaces/merchant-content.tsx "borderRadius: 20, height: 40, width: 40" "商家内容页头像又回 40。"
+  au_absent apps/mobile/src/surfaces/merchant-promo.tsx "borderRadius: 20, height: 40, width: 40" "商家推广页头像又回 40。"
+  if [ "$AU_B" -eq 0 ]; then
+    echo "    AVATAR-UNIFY-001: PASS (行头像全 app 统一 44 · 场景方/人圆 · hero 82/88 是声明的例外)"
+  else
+    exit 1
+  fi
+fi

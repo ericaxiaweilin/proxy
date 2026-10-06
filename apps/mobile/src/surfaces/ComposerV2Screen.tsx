@@ -733,7 +733,7 @@ export function ComposerV2Screen({
         <ScrollView contentContainerStyle={styles.composerBody} keyboardShouldPersistTaps="handled">
           <View style={styles.postRow}>
             <View style={[styles.avatar, !author?.avatarUri && author?.name ? { alignItems: "center", backgroundColor: initialAvatarTint(viewerAccountId ?? author.name).backgroundColor, justifyContent: "center" } : null]}>
-              {author?.avatarUri ? <CircularAvatarImage accessibilityLabel={`${author.name}头像`} size={42} uri={author.avatarUri} />
+              {author?.avatarUri ? <CircularAvatarImage accessibilityLabel={`${author.name}头像`} size={44} uri={author.avatarUri} />
                 : author?.name ? <Text selectable style={{ color: initialAvatarTint(viewerAccountId ?? author.name).color, fontSize: 17, fontWeight: "900" }}>{author.name.slice(0, 1).toUpperCase()}</Text> : null}
             </View>
             <View style={styles.postColumn}>

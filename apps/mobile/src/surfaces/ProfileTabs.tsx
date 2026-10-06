@@ -762,7 +762,7 @@ function PostCard(props: {
       <View style={styles.postHead}>
         <View style={styles.postAvatar}>
           {props.avatarUri ? (
-            <CircularAvatarImage accessibilityLabel={`${props.name}头像`} size={38} uri={props.avatarUri} />
+            <CircularAvatarImage accessibilityLabel={`${props.name}头像`} size={44} uri={props.avatarUri} />
           ) : (
             <Text selectable style={styles.postAvatarText}>{(props.name || "?").charAt(0).toUpperCase()}</Text>
           )}
@@ -963,7 +963,7 @@ function RepliesTab(props: {
           <View key={reply.replyId} style={styles.replyCard}>
             <View style={styles.replyAvatar}>
               {props.avatarUri ? (
-                <CircularAvatarImage accessibilityLabel={`${props.name}头像`} size={36} uri={props.avatarUri} />
+                <CircularAvatarImage accessibilityLabel={`${props.name}头像`} size={44} uri={props.avatarUri} />
               ) : (
                 <Text selectable style={styles.replyAvatarText}>{(props.name || "?").charAt(0).toUpperCase()}</Text>
               )}

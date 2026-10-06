@@ -267,7 +267,7 @@ export function ProviderApplicationSurface({ mediaClient, avatarUri, displayName
       {step === "basic" ? <View style={s.card}>
         {stepHead(1, "先填基础信息", "用于实名比对。")}
         <Pressable accessibilityLabel="头像，在个人管理里修改" disabled={!onEditProfile} onPress={onEditProfile} style={s.avatarRow}>
-          <View style={s.avatarBox}>{avatarUri ? <CircularAvatarImage size={52} uri={avatarUri} /> : <Text selectable style={s.avatarLetter}>{(displayName ?? "").slice(0, 1).toUpperCase() || "?"}</Text>}</View>
+          <View style={s.avatarBox}>{avatarUri ? <CircularAvatarImage size={44} uri={avatarUri} /> : <Text selectable style={s.avatarLetter}>{(displayName ?? "").slice(0, 1).toUpperCase() || "?"}</Text>}</View>
           <View style={s.checkCopy}>
             <Text selectable style={s.checkTitle}>{avatarUri ? "头像" : "还没有头像"}</Text>
             <Text selectable style={s.muted}>正面清晰 · 别用滤镜 · 在「个人管理」里改</Text>

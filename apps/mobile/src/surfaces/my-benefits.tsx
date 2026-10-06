@@ -101,7 +101,7 @@ export function MyGrowthSurface({
       <View style={styles.hero}>
         <View style={styles.heroHead}>
           {viewerAvatarUri ? (
-            <CircularAvatarImage size={52} uri={viewerAvatarUri} />
+            <CircularAvatarImage size={44} uri={viewerAvatarUri} />
           ) : (
             <View style={styles.heroAvatarFallback}><Text selectable style={styles.heroAvatarFallbackText}>{initial}</Text></View>
           )}

@@ -3169,7 +3169,7 @@ function SharePostSheet({ target, contacts, contactsError, sendingTo, onPickCont
                   <Pressable disabled={sendingTo !== null} key={peerUserId} onPress={() => onPickContact(peerUserId)} style={postMenuStyles.row}>
                     <View style={sharePostStyles.avatar}>
                       {avatarSource ? (
-                        <CircularAvatarImage accessibilityLabel={`${displayName}头像`} size={36} uri={avatarSource.uri} />
+                        <CircularAvatarImage accessibilityLabel={`${displayName}头像`} size={44} uri={avatarSource.uri} />
                       ) : (
                         <Text selectable style={sharePostStyles.avatarInitial}>{displayName.charAt(0).toUpperCase()}</Text>
                       )}
@@ -3203,7 +3203,7 @@ const sharePostStyles = StyleSheet.create({
   loading: { color: color.muted, fontSize: 12, paddingVertical: 16, textAlign: "center" },
   empty: { color: color.muted, fontSize: 12, lineHeight: 18, paddingVertical: 16, textAlign: "center" },
   list: { maxHeight: 320 },
-  avatar: { alignItems: "center", backgroundColor: color.surface, borderRadius: 18, height: 36, justifyContent: "center", marginRight: 12, width: 36 },
+  avatar: { alignItems: "center", backgroundColor: color.surface, borderRadius: 22, height: 44, justifyContent: "center", marginRight: 12, width: 44 },
   avatarInitial: { color: color.ink, fontSize: 14, fontWeight: "700" },
   sending: { color: color.muted, fontSize: 11 }
 });

@@ -3450,7 +3450,7 @@ export function MeSurface({
             <View style={styles.profileTop}>
               <Gradient from="#241246" to="#7A2CFF" style={styles.profileAvatar}>
                 {hubProfile.hasAvatar ? (
-                  <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={46} uri={profileAvatarUri!} />
+                  <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={44} uri={profileAvatarUri!} />
                 ) : (
                   <Text selectable style={styles.profileAvatarText}>{hubProfile.initial}</Text>
                 )}
@@ -3503,7 +3503,7 @@ export function MeSurface({
             {persona.avatarGrad ? (
               <Gradient from={color.magenta} to={color.violet} style={styles.identityAvatar}>
                 {hubProfile.hasAvatar ? (
-                  <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={40} uri={profileAvatarUri!} />
+                  <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={44} uri={profileAvatarUri!} />
                 ) : (
                   <Text selectable style={styles.identityAvatarText}>{hubProfile.initial}</Text>
                 )}
@@ -3511,7 +3511,7 @@ export function MeSurface({
             ) : (
               <View style={[styles.identityAvatar, styles.identityAvatarSolid]}>
                 {hubProfile.hasAvatar ? (
-                  <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={40} uri={profileAvatarUri!} />
+                  <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={44} uri={profileAvatarUri!} />
                 ) : (
                   <Text selectable style={styles.identityAvatarText}>{hubProfile.initial}</Text>
                 )}
