@@ -16015,6 +16015,17 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: 「等接单」文案没了 —— 非专业的默认接单方式必须有名字。" >&2
     DSF_B=1
   fi
+  # DEMAND-AVATAR-SHAPE-001（2026-10-06，用户：「场景 人都要带头像 区别是人是圆圈
+  # 头像 场景是方块矩形头像」）：形状即类型。场景行方块头像（borderRadius 10）
+  # 与人行的圆头像（CircularAvatarImage / personAvatar borderRadius 22）必须同时在。
+  if ! grep -qF 'sceneAvatar: { borderRadius: 10, height: 44, width: 44 }' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 场景头像不是方块矩形了 —— 形状即类型：场景方、人圆。" >&2
+    DSF_B=1
+  fi
+  if ! grep -qF 'CircularAvatarImage' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 人行的圆头像裁剪没了。" >&2
+    DSF_B=1
+  fi
   if grep -qF '小美' apps/mobile/src/surfaces/demand-wizard.tsx; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: 发布向导里出现那个代称（用户 2026-10-06：不要代它）。" >&2
     DSF_B=1

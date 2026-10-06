@@ -634,6 +634,17 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               }}
               style={styles.sceneRow}
             >
+              {/* DEMAND-AVATAR-SHAPE-001（2026-10-06，用户：「场景 人都要带头像
+                  区别是人是圆圈头像 场景是方块矩形头像」）：场景行也要带头像，
+                  形状是**方块矩形**（borderRadius 10），与选人步的圆头像
+                  （borderRadius 22 / CircularAvatarImage）一眼区分 —— 形状即类型。
+                  有真图用真图（SceneSpot.imageUrl，activity-wizard 同款 expo-image
+                  用法），没图垫首字方块，不甩空白格。 */}
+              {option.scene.imageUrl !== "" ? (
+                <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`demand-scene:${option.scene.id}`} source={{ uri: option.scene.imageUrl }} style={styles.sceneAvatar} transition={0} />
+              ) : (
+                <View style={[styles.sceneAvatar, styles.sceneAvatarFallback]}><Text selectable style={styles.sceneAvatarText}>{option.scene.name.trim().charAt(0) || "地"}</Text></View>
+              )}
               <View style={styles.sceneCopy}>
                 <Text selectable style={styles.sceneName}>{option.scene.name}</Text>
                 <Text selectable style={styles.sceneMeta}>{option.scene.area}</Text>
@@ -1094,8 +1105,12 @@ const styles = StyleSheet.create({
   summaryValue: { color: color.ink, fontSize: 13, fontWeight: "700" },
   doneRow: { flexDirection: "row", gap: 10, marginTop: 16 },
   // DEMAND-SCENE-FIRST-001：选场景步的行样式。跟着 personCard 那套规格走（白底
-  // 卡 + 右侧一格距离），只是没有头像和「选择 TA」按钮 —— 场景不是人，不做人形卡。
+  // 卡 + 右侧一格距离）。头像形状即类型（DEMAND-AVATAR-SHAPE-001）：场景是方块
+  // 矩形（borderRadius 10），人是圆（personAvatar borderRadius 22 / 圆形裁剪）。
   sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 8, padding: 12 },
+  sceneAvatar: { borderRadius: 10, height: 44, width: 44 },
+  sceneAvatarFallback: { alignItems: "center", backgroundColor: color.surface, justifyContent: "center" },
+  sceneAvatarText: { color: color.ink, fontSize: 17, fontWeight: "800" },
   sceneCopy: { flex: 1 },
   sceneName: { color: color.ink, fontSize: 15, fontWeight: "800" },
   sceneMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
