@@ -196,7 +196,23 @@ export class SessionAuthClient {
       errorCode === "DEVICE_PROOF_INVALID" ||
       errorCode === "SESSION_NOT_USABLE"
     ) {
-      await this.input.secureSessionStore.clear();
+      // MOBILE-SESSION-EVICTED-RECOVERY-001（2026-10-06，用户：「模拟器已经有登陆了
+      // 为什么提示还要登陆」）：这里**不删 keychain**。
+      //
+      // 以前删了，于是「服务端判定这条会话不可用」和「本机从来没有凭据」变成同一件事。
+      // 而 app 冷启动的静默恢复通道（native-app.tsx：refresh 失败 →
+      // resumeTrustedDeviceSession 用设备凭据换一条新会话）**前提就是本机还留着那条记录** ——
+      // 记录被删掉，status 就成了 SIGNED_OUT，那个分支根本进不去，恢复永远不会发生，
+      // 用户只能重新收一次验证码。
+      //
+      // 会话为什么会不可用：同一账号第 3 次登录会按 issued_at FIFO 驱逐最老的一条
+      // （identity/service.go enforceMaxConcurrentSessions，MaxConcurrentSessions = 2，
+      // Lotus RFC §6）。开发机上运营控制台和手机共用账号，手机就是那条「最老的」。
+      // 被踢本身是设计内行为，**但被踢之后不该升级成「必须重新登录」**。
+      //
+      // 保留记录不会让人卡住：冷启动先试 refresh（失败）→ 再试设备凭据静默恢复；
+      // 恢复不成才落到登录页 —— 而登录页正好是用户该在的地方。
+      // 「用户主动退出」不受影响：signOut() 自己会 clear()，那时本机确实不该留记录。
       throw new SessionExpiredError();
     }
 	if (response.status < 200 || response.status >= 300 || !auth) {

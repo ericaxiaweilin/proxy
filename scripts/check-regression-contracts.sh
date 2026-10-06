@@ -867,6 +867,99 @@ for f in apps/api-go/internal/platform/postgres/engagement_pin_integration_test.
 done
 echo "    OPS-REAL-001: PASS (operator console is operator-only; no fixture numbers; population/behaviour live)"
 
+# MOBILE-SESSION-EVICTED-RECOVERY-001（2026-10-06，用户：「模拟器已经有登陆了 为什么提示还要登陆」）：
+#
+# 服务端把这条会话判成不可用之后（同账号第 3 次登录按 issued_at FIFO 驱逐**最老**的一条，
+# identity/service.go enforceMaxConcurrentSessions，MaxConcurrentSessions = 2，Lotus RFC §6），
+# 客户端 refresh 收到 SESSION_NOT_USABLE。旧代码在那一步 **clear() 掉 keychain**，
+# 于是「服务端拒了这条会话」和「本机从来没有凭据」变成同一件事 —— 而冷启动的静默恢复
+# （native-app.tsx：refresh 失败 → resumeTrustedDeviceSession 用设备凭据换新会话）
+# **前提就是本机还留着那条记录**。记录被删 → status 就是 SIGNED_OUT → 那个分支进不去 →
+# 用户被踢一次就得重新收一次验证码。**被踢是设计内行为；被踢之后升级成「必须重登」才是 bug。**
+#
+# 判据分两半，缺一不可：
+#  ① 行为：记录必须活下来（vitest 断言 keychain 里 refreshToken 还在）。
+#  ② 结构：恢复的**消费方**还在（留着记录但没人消费，等于没修）。
+# 不钉注释/字面量：这个仓踩过 `_tripwireMarker` 那种「留个字符串骗过 grep」的坑。
+# 源码侧的结构判据：performRefresh 里不许出现 .clear()。
+# 路径**必须写在 if 这一行里面**，不能先 `AUTH_CLIENT=...` 再引用变量：
+# `pins --changed` 是按「这个 step 的**代码行**里有没有字面量路径」把 step 关联到改动
+# 文件的（**注释不算** —— 上面这段注释里写了 auth-client.ts / native-app.tsx /
+# identity/service.go，但 `pins --list` 只把 #173 关联到 auth-client.ts，即证）。
+# 路径写在上一行的赋值里，关联就落在那个**没有断言**的赋值 step 上，判据本身反而选不中
+# ⇒ 改了 auth-client.ts 不会跑它（只有 --all 跑得到），等于没钉。
+#
+# 只禁「clear 紧跟 throw SessionExpiredError」这一对：performRefresh 里另有一处
+# **合法**的 clear（write 失败时丢掉写不进去的记录，紧跟的是 `throw error`），
+# 所以不能简单地禁掉整个函数里的 .clear() —— 那样控制跑就会假红。
+if sed -n '/private async performRefresh/,/^  private /p' apps/mobile/src/auth-client.ts | grep -A1 'secureSessionStore\.clear()' | grep -qF 'throw new SessionExpiredError();'; then
+  echo "  FAIL [MOBILE-SESSION-EVICTED-RECOVERY-001]: refresh 被拒时又在删 keychain ——" >&2
+  echo "        记录一删，冷启动的静默恢复就永远进不去，被驱逐一次就得重新收一次验证码。" >&2
+  exit 1
+fi
+for t in "keeps the keychain record when the server says the session is not usable after eviction" "keeps the keychain record when refresh is rejected"; do
+  if ! grep -qF "it(\"$t\"" apps/mobile/src/auth-client.test.ts; then
+    echo "  FAIL [MOBILE-SESSION-EVICTED-RECOVERY-001]: 行为测试不见了 —— $t" >&2
+    exit 1
+  fi
+  if ! pnpm --filter @proxy/mobile exec vitest run src/auth-client.test.ts -t "$t" 2>&1 | grep -qE "1 passed"; then
+    echo "  FAIL [MOBILE-SESSION-EVICTED-RECOVERY-001]: 这条测试没真的跑过 —— $t" >&2
+    exit 1
+  fi
+done
+# 这里**不能**只 grep 整个文件里的 resumeTrustedDeviceSession()：它有两处调用
+# （native-app.tsx:206 冷启动静默恢复 / :455「继续上次登录」卡片）。
+# 少掉冷启动那处、只留卡片那处，弱断言照样绿 —— 但用户冷启动仍然直接落到登录页，
+# 正是这个 bug 本身。所以把范围收窄到**冷启动那条分支**
+# （refresh 失败 → 设备凭据恢复 → 恢复不成才 SIGNED_OUT），断言在走到 SIGNED_OUT 之前
+# 必须先试过恢复。范围取不到就 fail-closed（空串 → grep 不中 → 红）。
+# 路径同理写在 if 行里（见上面那段说明），否则 --changed 选不中这条断言。
+if ! sed -n '/if (state.status === "AUTHENTICATED") {/,/setPhase("SIGNED_OUT")/p' apps/mobile/src/native-app.tsx | grep -qF 'resumeTrustedDeviceSession()'; then
+  echo "  FAIL [MOBILE-SESSION-EVICTED-RECOVERY-001]: 冷启动的静默恢复没了 ——" >&2
+  echo "        留着的 keychain 记录没人消费，被驱逐一次仍然只能重新登录。" >&2
+  exit 1
+fi
+# 反向：用户**主动**退出必须仍然清掉记录，否则「登出」会被下一次冷启动的静默恢复复活。
+if ! grep -qF 'it("sign out revokes the server session and clears local bearer credentials"' apps/mobile/src/auth-client.test.ts; then
+  echo "  FAIL [MOBILE-SESSION-EVICTED-RECOVERY-001]: 「登出必须清凭据」这条测试不见了 —— 主动退出会被静默恢复复活。" >&2
+  exit 1
+fi
+if ! pnpm --filter @proxy/mobile exec vitest run src/auth-client.test.ts -t "sign out revokes the server session and clears local bearer credentials" 2>&1 | grep -qE "1 passed"; then
+  echo "  FAIL [MOBILE-SESSION-EVICTED-RECOVERY-001]: 「登出必须清凭据」这条测试没真的跑过。" >&2
+  exit 1
+fi
+echo "    MOBILE-SESSION-EVICTED-RECOVERY-001: PASS (被驱逐不再销毁恢复原料 · 主动登出仍然清凭据)"
+
+# OPS-SESSION-SLOT-RELEASE-001（2026-10-06）：
+#
+# 控制台注释写着「关掉标签页就退出」，但旧代码只做到**客户端忘掉 token** ——
+# 服务端那条会话还是 ACTIVE，30 天不释放，照样占着账号 2 个设备位里的一个。
+# 而运营控制台和开发者手机用**同一个账号**（PROXY_OPERATOR_PRINCIPALS 那个），
+# 于是每开一次控制台标签页就多压一个槽位、FIFO 挤掉最老的那条 —— 最老的通常就是手机上那条。
+# 2026-10-06 实测：手机会话 REVOKED 与 ops_web 新会话 issued 相差 5–6 毫秒，两次。
+#
+# 钉「把承诺做实的三个部件」：关标签页的钩子、真的发 RevokeSession、带得上 sessionId。
+# 文件路径写全（不用 glob）：pins 靠路径把 step 关联到改动文件，glob 选不中这条判据。
+if ! grep -qF 'addEventListener("pagehide", releaseOpsSession)' apps/market-intelligence-console/src/lib/api.ts; then
+  echo "  FAIL [OPS-SESSION-SLOT-RELEASE-001]: 控制台关标签页不再释放服务端会话 ——" >&2
+  echo "        「关掉标签页就退出」退回成只忘 token，每开一次标签页就白占一个设备位。" >&2
+  exit 1
+fi
+if ! grep -qF 'commandType: "RevokeSession"' apps/market-intelligence-console/src/lib/api.ts; then
+  echo "  FAIL [OPS-SESSION-SLOT-RELEASE-001]: 关标签页时不再发 RevokeSession —— 设备位没还回去。" >&2
+  exit 1
+fi
+if ! grep -qF 'keepalive: true' apps/market-intelligence-console/src/lib/api.ts; then
+  echo "  FAIL [OPS-SESSION-SLOT-RELEASE-001]: 卸载阶段的请求没带 keepalive —— 页面走了请求就断，等于没发。" >&2
+  exit 1
+fi
+if ! grep -qF 'sessionId: auth.sessionId' apps/market-intelligence-console/src/lib/api.ts; then
+  echo "  FAIL [OPS-SESSION-SLOT-RELEASE-001]: 登录时不再存 sessionId —— RevokeSession 没有 target，释放会静默失效。" >&2
+  exit 1
+fi
+echo "    OPS-SESSION-SLOT-RELEASE-001: PASS (关标签页真的把服务端设备位还回去)"
+
+
 require_test "UI-SOCIAL-002" "./internal/identity" \
   "TestAccountPreferencesRejectsAnonymousActorAndOversizedContact" \
   "apps/api-go/internal/identity/account_preferences_test.go" || exit $?

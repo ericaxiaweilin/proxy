@@ -4,7 +4,9 @@
 //   这里区分:
 //   - OfflineFallbackSessionError / "require a real sign-in" / "principal required"
 //     → 改口为 "请登录后重试"
-//   - SessionExpiredError (server 实际 拒了, keychain 清掉, 仍需重登)
+//   - SessionExpiredError (server 真的拒了这条会话：过期 / 被同账号新登录驱逐；
+//     MOBILE-SESSION-EVICTED-RECOVERY-001 之后 keychain **不再**被删，
+//     冷启动会拿设备凭据静默恢复，但这次操作仍然失败)
 //     → "会话过期，请重新登录后重试"
 //   - 其他 (真网络) → 保持原 fallback
 //
@@ -19,8 +21,9 @@ export function mapEngagementError(error: unknown, fallback: string): string {
     return "访客不能点赞 / 回复 / 举报，请登录后重试。";
   }
   if (error instanceof SessionExpiredError) {
-    // auth-client 在 server 拒接 (401) 且 refresh 失败后 扊掉 keychain,
-    //   扊不掉走 authClient.request() 调 engagement 的时候。
+    // 这条由 auth-client 在「refresh 被服务端拒绝」时抛出（也可能来自
+    // request() 用新 token 重试仍 401）。文案说的是「这一次没成功」，
+    // 不代表凭据没了 —— 恢复在下次冷启动。
     return "会话已过期，请重新登录后重试。";
   }
   if (error instanceof Error) {

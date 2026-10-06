@@ -65,7 +65,28 @@ describe("mobile session auth client", () => {
     expect(seen.at(-1)?.headers.Authorization).toBe("Bearer access_2");
   });
 
-  it("clears secure credentials when refresh is rejected", async () => {
+  // MOBILE-SESSION-EVICTED-RECOVERY-001（2026-10-06）：
+  // 「服务端说这条会话不可用」**不再**等于「本机删掉凭据」。
+  // 删了记录，冷启动那条静默恢复（native-app.tsx：refresh 失败 →
+  // resumeTrustedDeviceSession）就永远进不去，用户被踢一次就得重新收验证码。
+  // 这里断言的是**记录还在** —— 它是恢复通道的原料。
+  // 真实触发场景：同账号第 3 次登录按 FIFO 驱逐最老的一条
+  // （identity/service.go enforceMaxConcurrentSessions），服务端回
+  // SESSION_NOT_USABLE（service.go refreshSession 的 ErrSessionNotFound 分支）。
+  it("keeps the keychain record when the server says the session is not usable after eviction", async () => {
+    const driver = new InMemorySecureStorageDriver();
+    const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
+    await store.write(initialSession);
+    const client = new SessionAuthClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: store,
+      transport: async () => response(409, { outcome: "REJECTED", error: { errorCode: "SESSION_NOT_USABLE" } })
+    });
+    await expect(client.refresh()).rejects.toBeInstanceOf(SessionExpiredError);
+    expect((await store.read())?.auth.refreshToken).toBe("refresh_1");
+  });
+
+  it("keeps the keychain record when refresh is rejected", async () => {
     const driver = new InMemorySecureStorageDriver();
     const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
     await store.write(initialSession);
@@ -75,10 +96,10 @@ describe("mobile session auth client", () => {
       transport: async () => response(401, { error: { errorCode: "REFRESH_TOKEN_INVALID" } })
     });
     await expect(client.refresh()).rejects.toBeInstanceOf(SessionExpiredError);
-    expect(await store.read()).toBeUndefined();
+    expect((await store.read())?.auth.refreshToken).toBe("refresh_1");
   });
 
-  it("clears credentials when the server rejects the installation device proof", async () => {
+  it("keeps the keychain record when the server rejects the installation device proof", async () => {
     const driver = new InMemorySecureStorageDriver();
     const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
     await store.write(initialSession);
@@ -89,7 +110,7 @@ describe("mobile session auth client", () => {
       transport: async () => response(409, { outcome: "REJECTED", error: { errorCode: "DEVICE_PROOF_INVALID" } })
     });
     await expect(client.refresh()).rejects.toBeInstanceOf(SessionExpiredError);
-    expect(await store.read()).toBeUndefined();
+    expect((await store.read())?.auth.refreshToken).toBe("refresh_1");
   });
 
   it("preserves secure credentials when refresh service is temporarily unavailable", async () => {

@@ -54,7 +54,7 @@ function emit(status: OpStatus): void {
   for (const listener of listeners) listener(status);
 }
 
-type OpsSession = { accessToken: string; userAccountId: string };
+type OpsSession = { accessToken: string; userAccountId: string; sessionId?: string };
 
 export function readOpsSession(): OpsSession | undefined {
   try {
@@ -67,6 +67,56 @@ export function readOpsSession(): OpsSession | undefined {
 
 export function clearOpsSession(): void {
   try { sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+}
+
+// OPS-SESSION-SLOT-RELEASE-001（2026-10-06）：「关掉标签页就退出」以前只做到了
+// **客户端忘掉 token** —— 服务端那条会话还是 ACTIVE，30 天不释放。
+//
+// 为什么这会伤人：账号同时只有 2 个设备位（identity/service.go
+// enforceMaxConcurrentSessions，MaxConcurrentSessions = 2，Lotus RFC §6），
+// 新登录按 issued_at FIFO 驱逐**最老**的那条。运营控制台和开发者手机用的是
+// **同一个账号**（PROXY_OPERATOR_PRINCIPALS 那个），所以每开一次控制台标签页就
+// 多压一个槽位、把最老的挤出去 —— 而最老的通常就是手机上那条，于是开发者
+// 莫名其妙被登出（2026-10-06 实测：手机会话 REVOKED 与 ops_web 新会话 issued
+// 相差 5–6 毫秒，两次）。
+//
+// 修法就是把这句承诺做实：关标签页时真的发 RevokeSession。keepalive 让请求能在
+// 页面卸载之后发出去；失败也不要紧（最坏退回今天的行为，多占一个槽位）。
+// 会话仍然只在 sessionStorage —— 不引入持久登录，这条是原本就写明的意图。
+function releaseOpsSession(): void {
+  const session = readOpsSession();
+  clearOpsSession();
+  if (!session?.sessionId || !session.accessToken) return;
+  const id = `ops_release_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    void fetch(`${BASE}/v1/commands/RevokeSession`, {
+      method: "POST",
+      keepalive: true,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessToken}` },
+      body: JSON.stringify({
+        commandId: id,
+        commandType: "RevokeSession",
+        commandVersion: 1,
+        actor: { type: "USER", id: session.userAccountId },
+        principal: { type: "INDIVIDUAL", id: session.userAccountId },
+        target: { type: "Session", id: session.sessionId },
+        idempotencyKey: `${id}_key`,
+        authContext: { sessionId: session.sessionId },
+        purpose: "operator_console_tab_close",
+        correlationId: id,
+        causationId: "",
+        requestedAt: new Date().toISOString(),
+        payload: { reason: "USER_LOGOUT" }
+      })
+    }).catch(() => undefined);
+  } catch { /* 卸载阶段尽力而为，失败退回旧行为 */ }
+}
+
+let opsReleaseInstalled = false;
+if (typeof window !== "undefined" && !opsReleaseInstalled) {
+  opsReleaseInstalled = true;
+  // pagehide 比 beforeunload 可靠（后者在移动端/bfcache 场景常不触发）。
+  window.addEventListener("pagehide", releaseOpsSession);
 }
 
 export class OpStatusError extends Error {
@@ -133,9 +183,16 @@ export async function completeEmailLogin(challengeId: string, code: string): Pro
   if (verified.outcome !== "ACCEPTED") throw new Error("验证码不对或已过期");
   const { deviceId, deviceCredential } = deviceIdentity();
   const session = await loginCommand("CreateSession", { type: "Session", id: "new" }, { deviceId, challengeId, deviceCredential });
-  const auth = session.auth as { accessToken?: string; userAccountId?: string } | undefined;
+  const auth = session.auth as { accessToken?: string; userAccountId?: string; sessionId?: string } | undefined;
   if (session.outcome !== "ACCEPTED" || !auth?.accessToken || !auth.userAccountId) throw new Error("登录没有成功");
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify({ accessToken: auth.accessToken, userAccountId: auth.userAccountId }));
+  // sessionId 必须一起存：关标签页时要拿它发 RevokeSession，把这条会话的
+  // 设备位真的还回去（OPS-SESSION-SLOT-RELEASE-001）。只存 token 的话
+  // 服务端那条 ACTIVE 会一直占着账号 2 个槽位里的一个。
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+    accessToken: auth.accessToken,
+    userAccountId: auth.userAccountId,
+    ...(auth.sessionId ? { sessionId: auth.sessionId } : {})
+  }));
 }
 
 // 运营看私有图（如接单申请的证件 / 自拍）：<img> 带不了 Authorization，所以取成 blob 再给 object URL。
