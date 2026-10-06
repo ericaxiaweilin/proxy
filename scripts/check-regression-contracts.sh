@@ -15981,3 +15981,56 @@ if [ -f "$FACE" ] && [ -f "$HUB_SHOP" ]; then
     exit 1
   fi
 fi
+
+# DEMAND-SCENE-FIRST-001（2026-10-06，用户：「不能一来就是人 list，只有专业模式才能是
+# 人 list，娱乐跟场景相关的 优先选场景」「选人是要低调点 不要做成第一排」「不要代那个
+# 代称 也不要说等谁接单 就是等接单 直接约」）。
+# 分流（demand-wizard.tsx 的 advanceFromMoment）：专业 → 人 list（专业靠人变现，这是
+# 唯一允许直接进选人的路径）；绑场景且有真实候选 → 选场景（momentSceneOptions，首页
+# 入口卡同款口径：scenesForAction + sceneDistanceMeters + shopCardDistance）；其余
+# （绑人 / 目录里一条场景都没有）→ 直接进规格。「直接约」在规格底部是一行小字链接，
+# 不是一步。
+# 反向钉各有咬合点：
+#   ① 选 Moment 的主按钮不许再写死 onPress={() => setStep("people")} —— 那是旧结构，
+#      「选人独占一整屏」这个高调问题的根子；
+#   ② 向导源码不许出现那个代称、界面不许出现「抢」字 —— 措辞按 R4 调性决定走，
+#      机制是先到先得但「抢」不上界面（注释里也不许：这条钉按字面扫全文件）；
+#   ③ i18n 全文不许出现那个代称 —— 六个语言的 chainHint / publishDemandA11y 都已
+#      在 2026-10-06 清成「等接单 / 等人接」口径（用户点名）。
+if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
+  DSF_B=0
+  if ! grep -qF 'advanceFromMoment' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: moment 步的分流函数没了 —— 又变成一律进选人。" >&2
+    DSF_B=1
+  fi
+  if ! grep -qF 'momentSceneOptions(' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 选场景步的数据源没接（momentSceneOptions）。" >&2
+    DSF_B=1
+  fi
+  if grep -qF 'disabled={!template} onPress={() => setStep("people")}' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 选 Moment 的主按钮又写死进选人了 —— 默认路径必须先过场景。" >&2
+    DSF_B=1
+  fi
+  if ! grep -qF '等接单' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 「等接单」文案没了 —— 非专业的默认接单方式必须有名字。" >&2
+    DSF_B=1
+  fi
+  if grep -qF '小美' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 发布向导里出现那个代称（用户 2026-10-06：不要代它）。" >&2
+    DSF_B=1
+  fi
+  if grep -qF '抢单' apps/mobile/src/surfaces/demand-wizard.tsx || grep -qF '抢单' apps/mobile/src/i18n.ts; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 界面出现「抢单」—— 机制先到先得，措辞只用「等接单 / 直接约」。" >&2
+    DSF_B=1
+  fi
+  if grep -qF '小美' apps/mobile/src/i18n.ts; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: i18n 里出现那个代称（六个语言的 chainHint / publishDemandA11y 都已清，别加回来）。" >&2
+    DSF_B=1
+  fi
+  if [ "$DSF_B" -eq 0 ]; then
+    pnpm --dir apps/mobile exec vitest run src/demand-moments.test.ts src/surfaces/demand-wizard-card.test.ts src/surfaces/demand-wizard-copy.test.ts src/surfaces/demand-wizard-merge.test.ts >/dev/null || exit $?
+    echo "    DEMAND-SCENE-FIRST-001: PASS (专业走人 list · 绑场景先选场景 · 等接单默认 · 直接约只是规格底一行小字 · 界面无禁词)"
+  else
+    exit 1
+  fi
+fi

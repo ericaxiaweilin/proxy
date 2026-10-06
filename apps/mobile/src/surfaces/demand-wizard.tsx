@@ -20,6 +20,8 @@ import {
   MOMENT_TEMPLATES,
   momentDistanceLabel,
   momentMetaLine,
+  momentSceneOptions,
+  type SceneOption,
   momentStartPrice,
   PRO_LOGOS,
   PRO_SERVICES,
@@ -44,7 +46,37 @@ import type { SceneOrigin } from "../scene-shop-directory";
 import { ProxyBackGlyph } from "../components/proxy-foundation";
 import { ProxyIcon } from "../components/proxy-icon";
 
-type Step = "moment" | "people" | "specs" | "done";
+// DEMAND-SCENE-FIRST-001（2026-10-06）：「scene」这一步是为了把「选人」从默认路径上
+// 挪走而存在的。
+//
+// 用户原话：「不能一来就是人 list，只有专业模式才能是人 list，娱乐跟场景相关的
+// 优先选场景」「选人是要低调点 不要做成第一排」。
+//
+// 结构上原来的 `Step` 只有 moment → people → specs，选人**必然独占一整屏**，所以
+// 「低调」在旧结构里做不到 —— 它是被 Step 的形状逼出来的，不是样式问题。现在：
+//   娱乐/场景类  moment → **scene（真实门店）** → specs
+//   专业        moment → people（人 list，专业就是靠人变现）
+//   运动        moment → specs（目录里真的一条场地都没有，见 momentSceneOptions 注释）
+// 「直接约」在 specs 底部是一行小字入口，不是一步。
+type Step = "moment" | "scene" | "people" | "specs" | "done";
+
+/**
+ * 接单方式。用户 2026-10-06 定名：**等接单** / **直接约**。
+ *
+ * 两个硬约束：
+ *  1. **不要写那个代称**（用户 2026-10-06 点名：不要代它，也不要说「等它接单」）。
+ *     调性依据同 `market-fixtures.ts` 的「R4 决定：移除体验上架（真人货架）以不
+ *     拉低接单方身价」—— 所以本文件全文不出现那个词，门禁按字面扫。
+ *  2. **不要把「抢」字上界面**。机制上是先到先得，但「抢」字把接单方写成抢食的人，
+ *     与上面那条决定直接打架。契约/内部沟通可以用 `open`/`direct`，界面只用
+ *     「等接单 / 直接约」。
+ *
+ * ⚠️ 两种模式目前**发布行为完全一样**（都是公开市场，`selectedPerson` 仍是
+ * 「意向人选」，文件头 5–6 行与 FOR-YOU-SLOT-001 都是这个口径）。「直接约」在这里
+ * 只决定**要不要走人选那一步**，不发定向邀请 —— 定向邀请要改
+ * `PublishMarketOpportunityInput` 契约，那是另一个决定，不在本次范围。
+ */
+type FulfillMode = "open" | "direct";
 
 // R58 原型单行 quick-filter：全部 / 1:1 / 3–4 人 / 晚间 / 周末 / 主题玩法。
 const QUICK_FILTERS = [
@@ -143,6 +175,13 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const [people, setPeople] = useState<SupplierCandidate[]>([]);
   const [peopleLoaded, setPeopleLoaded] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<SupplierCandidate>();
+  // 接单方式（等接单 / 直接约）：非专业模板默认「等接单」；专业**没有默认** ——
+  // 用户 2026-10-06 原话「专业模式…依靠专业能力变现的 没有默认」，所以 pro 进
+  // specs 前必须显式选一个，没选就不放行发布（见 specs 步的 publish 禁用）。
+  // peopleReturn：people 步现在有两个入口（专业从 moment 进、直接约从 specs 进），
+  // 「上一步」回到入口那一屏，不能写死。
+  const [mode, setMode] = useState<FulfillMode>();
+  const [peopleReturn, setPeopleReturn] = useState<Step>("specs");
   const [publishing, setPublishing] = useState(false);
   const [negotiable, setNegotiable] = useState(false);
   const [error, setError] = useState<string>();
@@ -165,6 +204,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
         const draft = parsed.specs as Partial<DemandSpecs>;
         if (cancelled) return;
         setTemplate(found);
+        // 草稿只存模板+规格，接单方式不存：恢复时按同一套默认（非专业等接单，
+        // 专业无默认）重新给，跟点选模板走的是同一条规则。
+        setMode(found.id === "pro" ? undefined : "open");
         setSpecs({ ...defaultSpecsFor(found), ...draft, prefs: Array.isArray(draft.prefs) ? draft.prefs : [] });
         setDraftRestored(true);
       } catch {
@@ -285,14 +327,19 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     };
     setTemplate(custom);
     setSpecs(defaultSpecsFor(custom));
+    setMode("open");
     setError(undefined);
-    setStep("people");
+    // 自定义需求按绑人处理（见上面 binding 注释），选场景无从谈起；默认路径也
+    // 不该经过人 list —— 「直接约」在规格底部随时可进，这里先走等接单。
+    setStep("specs");
   }
 
   function pickTemplate(next: MomentTemplate): void {
     setTemplate(next);
     setSpecs(defaultSpecsFor(next));
     setSelectedPerson(undefined);
+    // 非专业默认「等接单」；专业没有默认（用户口径），进 specs 前必须显式选。
+    setMode(next.id === "pro" ? undefined : "open");
     setError(undefined);
   }
 
@@ -320,6 +367,30 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     (sheetFilters.maxBudget > 0 ? 1 : 0) +
     (sheetFilters.day !== "不限" ? 1 : 0);
   const visiblePeople = filterSuppliers(people, peopleFilters, sheetFilters);
+
+  // DEMAND-SCENE-FIRST-001：选场景步的候选。绑定人的模板（运动/专业/自定义）这里
+  // 恒为空 —— 空的四种成因见 `momentSceneOptions` 的注释，调不调用方都只管一件事：
+  // 空就跳过选场景，不许甩空白屏。
+  const sceneOptions = template ? momentSceneOptions(scenes, template.id, origin) : [];
+  const isPro = template?.id === "pro";
+
+  // moment 步的出口。分流规则（2026-10-06 用户口径）：
+  //   专业 → 人 list（专业靠人变现，这是唯一允许直接进 people 的路径）；
+  //   绑场景且有真实候选 → 选场景（**默认路径里没有选人这一步**）；
+  //   其余（绑人 / 目录里一条场景都没有）→ 直接进规格，「直接约」留在规格底部。
+  function advanceFromMoment(): void {
+    if (!template) return;
+    if (isPro) {
+      setPeopleReturn("moment");
+      setStep("people");
+      return;
+    }
+    if (sceneOptions.length > 0) {
+      setStep("scene");
+      return;
+    }
+    setStep("specs");
+  }
 
   function togglePref(pref: string): void {
     setSpecs((prev) => ({
@@ -361,8 +432,11 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
 
   function back(): void {
     if (step === "moment") onBack();
-    else if (step === "people") setStep("moment");
-    else if (step === "specs") setStep("people");
+    else if (step === "scene") setStep("moment");
+    else if (step === "people") setStep(peopleReturn);
+    // specs 的上一步：有真实场景候选就回选场景，否则回选 Moment —— 无状态可判，
+    // 不必记「从哪进的 specs」。
+    else if (step === "specs") setStep(!isPro && sceneOptions.length > 0 ? "scene" : "moment");
   }
 
   const showNotes = specs.notes.trim() !== "";
@@ -516,7 +590,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <Text selectable style={styles.currentLabel}>当前需求</Text>
             <Text selectable style={styles.currentValue}>{template ? `${template.title}${proService ? ` · ${PRO_SERVICES.find((item) => item.id === proService)?.title ?? ""}` : ""} · ${specs.ratio || template.defaultRatio}` : "先选一个"}</Text>
           </View>
-          <Pressable disabled={!template} onPress={() => setStep("people")} style={[styles.primaryBtn, !template && styles.disabled]}>
+          <Pressable disabled={!template} onPress={advanceFromMoment} style={[styles.primaryBtn, !template && styles.disabled]}>
             <Text selectable style={styles.primaryBtnText}>选择</Text>
           </Pressable>
           {/* 2026-10-06 合并：这里原本是「城市协助 · Professional」入口卡 + 一格子卡
@@ -527,7 +601,53 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               「下一步 · 选人 / 服务 / 价格」收成一个「选择」。那个后缀是在替用户复述
               他刚做完的动作（选人 / 服务 / 价格本来就在下面那一屏），没信息量；
               「上一步 / 选择」这组词自己就把方向说完了。
-              只改文案，不动行为 —— 点了还是进「选人」那一步。 */}
+              同日 DEMAND-SCENE-FIRST-001：行为改了 —— 不再一律进「选人」，按
+              advanceFromMoment 分流（专业进选人，其余优先选场景，见函数注释）。 */}
+        </>
+      ) : step === "scene" ? (
+        <>
+          {/* 选场景步（DEMAND-SCENE-FIRST-001）：娱乐/场景类的**默认第二步**。
+              数据就是首页入口卡同款的 momentSceneOptions —— 真实目录 + 真实距离，
+              近的在前；没有定位时按名字排，距离格留空。选中即写进 specs.place
+              （带真坐标，订单可上图），然后照常进规格。
+              「暂不选」必须给：目录是会变的，把用户卡死在这一步等于让他放弃发布。 */}
+          <View style={styles.confirmCard}>
+            <View style={styles.confirmCopy}>
+              <Text selectable style={styles.confirmEyebrow}>Moment · {template?.defaultRatio}</Text>
+              <Text selectable style={styles.confirmTitle}>{template?.title}</Text>
+            </View>
+            <Pressable onPress={() => setStep("moment")}><Text selectable style={styles.linkText}>更换</Text></Pressable>
+          </View>
+          <Text selectable style={styles.sectionSub}>先挑个地方 · {template?.venueLabel}</Text>
+          {sceneOptions.map((option) => (
+            <Pressable
+              key={option.scene.id}
+              accessibilityLabel={`选择场景 ${option.scene.name}`}
+              onPress={() => {
+                setSpecs((prev) => ({
+                  ...prev,
+                  place: option.scene.name,
+                  lat: option.scene.latitude,
+                  lng: option.scene.longitude
+                }));
+                setStep("specs");
+              }}
+              style={styles.sceneRow}
+            >
+              <View style={styles.sceneCopy}>
+                <Text selectable style={styles.sceneName}>{option.scene.name}</Text>
+                <Text selectable style={styles.sceneMeta}>{option.scene.area}</Text>
+              </View>
+              {option.distance === "" ? null : <Text selectable style={styles.sceneDistance}>{option.distance}</Text>}
+            </Pressable>
+          ))}
+          {sceneOptions.length === 0 ? (
+            <Text selectable style={styles.empty}>这一类暂时没有可选的地方，先填个大概，接单的人会来确认。</Text>
+          ) : null}
+          <View style={styles.doneRow}>
+            <Pressable onPress={() => setStep("moment")} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
+            <Pressable onPress={() => setStep("specs")} style={styles.primaryBtnFlex}><Text selectable style={styles.primaryBtnText}>暂不选，继续</Text></Pressable>
+          </View>
         </>
       ) : step === "people" ? (
         <>
@@ -624,7 +744,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                       {person.availability ? "有档期" : "档期待确认"} · {person.referencePrice > 0 ? `参考 ${Math.round(person.referencePrice / 1000)}K ${person.currency}` : "价格面议"}
                     </Text>
                   </View>
-                  <Pressable accessibilityLabel={`选择${person.name}`} onPress={() => setSelectedPerson(active ? undefined : person)} style={[styles.selectBtn, active && styles.selectBtnOn]}>
+                  <Pressable accessibilityLabel={`选择${person.name}`} onPress={() => { setSelectedPerson(active ? undefined : person); setMode(active ? "open" : "direct"); }} style={[styles.selectBtn, active && styles.selectBtnOn]}>
                     <Text selectable style={[styles.selectText, active && styles.selectTextOn]}>{active ? "已选择" : "选择 TA"}</Text>
                   </Pressable>
                 </View>
@@ -632,7 +752,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             })}
           {error ? <Text selectable style={styles.error}>{error}</Text> : null}
           <View style={styles.doneRow}>
-            <Pressable onPress={() => setStep("moment")} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
+            {/* 上一步回**入口**：专业从选 Moment 进来就回 moment，「直接约」从规格
+                进来就回规格 —— peopleReturn 记着从哪进来的，不写死。 */}
+            <Pressable onPress={() => setStep(peopleReturn)} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
             <Pressable onPress={() => setStep("specs")} style={styles.primaryBtnFlex}><Text selectable style={styles.primaryBtnText}>选择</Text></Pressable>
           </View>
         </>
@@ -730,10 +852,32 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           <Text selectable style={styles.fieldLabel}>备注 · 可选</Text>
           <TextInput maxLength={500} multiline onChangeText={(notes) => setSpecs((prev) => ({ ...prev, notes }))} placeholder="补充说明（随订单展示）" placeholderTextColor={color.muted} style={[styles.input, styles.notesInput]} value={specs.notes} />
 
+          {/* DEMAND-SCENE-FIRST-001：接单方式，压在发布按钮前、整屏最后 —— 这是它
+              「低调」的位置实现。默认「等接单」：主路径从头到尾不出现人 list；
+              「直接约」是同一行里的小字链接（用户 2026-10-06：「选人是要低调点
+              不要做成第一排」）。专业**没有默认**（用户口径：专业靠专业能力变现），
+              没选就不放行发布 —— 提示语会说明，不是静默禁用。
+              命名口径：「等接单 / 直接约」（用户 2026-10-06 定名，依据见 FulfillMode
+              类型注释；门禁按字面扫禁词）。 */}
+          <View style={styles.fieldLabelRow}>
+            <Text selectable style={styles.fieldLabelNoGap}>怎么找人</Text>
+            <Text selectable style={styles.modeHint}>{isPro && mode === undefined ? "专业服务先选一种 · 没有默认" : "默认等接单 · 谁有空谁响应"}</Text>
+          </View>
+          <View style={styles.modeRow}>
+            <Pressable onPress={() => setMode("open")} style={[styles.chip, mode === "open" && styles.chipOn]}>
+              <Text selectable style={[styles.chipText, mode === "open" && styles.chipTextOn]}>等接单</Text>
+            </Pressable>
+            <Pressable onPress={() => { setPeopleReturn("specs"); setStep("people"); }} style={styles.directLink}>
+              <Text selectable style={styles.directLinkText}>或 直接约 ›</Text>
+            </Pressable>
+          </View>
+
           {error ? <Text selectable style={styles.error}>{error}</Text> : null}
           <View style={styles.doneRow}>
-            <Pressable onPress={() => setStep("people")} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
-            <Pressable disabled={publishing || !template} onPress={() => void publish()} style={[styles.primaryBtnFlex, (publishing || !template) && styles.disabled]}>
+            {/* 上一步：有真实场景候选就回选场景，否则回选 Moment（专业也是回 moment），
+                与头部返回键 back() 同一条规则，不写死「回选人」。 */}
+            <Pressable onPress={back} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
+            <Pressable disabled={publishing || !template || (isPro && mode === undefined)} onPress={() => void publish()} style={[styles.primaryBtnFlex, (publishing || !template || (isPro && mode === undefined)) && styles.disabled]}>
               <Text selectable style={styles.primaryBtnText}>{publishing ? "发布中…" : "发布到市场"}</Text>
             </Pressable>
           </View>
@@ -939,5 +1083,18 @@ const styles = StyleSheet.create({
   summaryRowLast: { borderBottomWidth: 0 },
   summaryLabel: { color: color.muted, fontSize: 13 },
   summaryValue: { color: color.ink, fontSize: 13, fontWeight: "700" },
-  doneRow: { flexDirection: "row", gap: 10, marginTop: 16 }
+  doneRow: { flexDirection: "row", gap: 10, marginTop: 16 },
+  // DEMAND-SCENE-FIRST-001：选场景步的行样式。跟着 personCard 那套规格走（白底
+  // 卡 + 右侧一格距离），只是没有头像和「选择 TA」按钮 —— 场景不是人，不做人形卡。
+  sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 8, padding: 12 },
+  sceneCopy: { flex: 1 },
+  sceneName: { color: color.ink, fontSize: 15, fontWeight: "800" },
+  sceneMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
+  sceneDistance: { color: color.violet, fontSize: 12, fontWeight: "800" },
+  // 接单方式那行：chip 是「等接单」，直接约只是一条小字链接 —— 故意不做成和
+  // 等接单同权的第二颗 chip，否则又回「第一排」了。
+  modeRow: { alignItems: "center", flexDirection: "row", gap: 12 },
+  modeHint: { color: color.muted, fontSize: 11 },
+  directLink: { paddingVertical: 8 },
+  directLinkText: { color: color.violet, fontSize: 13, fontWeight: "700" }
 });
