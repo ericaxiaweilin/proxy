@@ -262,6 +262,11 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     if (name === "") return;
     const custom: MomentTemplate = {
       id: `custom-${Date.now().toString(36)}`,
+      // 自定义需求归类不了：用户手打的字，既不知道发生在哪个固定场所，也没有对应的
+      // 接单者。按**绑人**处理 ⇒ 底行只有时间。不猜一个场景 —— 猜错就是把用户送到
+      // 一个他没说的地方（`MOMENT_ACTION_ID` 里也没有 `custom-*` 这条链路）。
+      // 行为与加 binding 之前完全一致：那会儿也是拿不到距离、只画时间。
+      binding: "person",
       emoji: "＋",
       title: name.slice(0, 20),
       venue: "",

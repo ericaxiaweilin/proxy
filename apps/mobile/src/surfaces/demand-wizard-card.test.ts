@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { MOMENT_TEMPLATES, momentDistanceLabel, momentMetaLine, momentStartPrice } from "../demand-moments";
+import { MOMENT_ACTION_ID, MOMENT_TEMPLATES, momentDistanceLabel, momentMetaLine, momentStartPrice } from "../demand-moments";
+import { ACTION_SCENE_KEYWORDS } from "../scene-category-entries";
 import type { SceneSpot } from "../activity-create-form";
 
 // DEMAND-WIZARD-CARD-001: 发布需求卡片右侧那一格画什么。
@@ -147,5 +148,66 @@ describe("DEMAND-WIZARD-LOCATION-001 距离那一格必须真的问得到定位"
   it("没定位时仍旧不编距离（拿到 undefined 就走原有回退，不塞假坐标）", () => {
     // 断言的是「setOrigin 只在 fix 为真时执行」，不是「一定 setOrigin」。
     expect(wizard).toContain("if (!cancelled && fix) setOrigin(");
+  });
+});
+
+// DEMAND-MOMENT-BINDING-001（2026-10-06 用户：「骑行绑定人 不是场景 …… 就2种
+// 一种是时间+距离 一种是时间」）。
+//
+// 底行只有两种形状，哪一种由模板的 `binding` 决定。此前「骑行没有距离」是
+// **归属词恰好没命中**的副产品 —— 目录里哪天加一条骑行场景，它就会突然冒出距离，
+// 跟「绑定人」这条口径相反。所以这里钉的不是「骑行现在显示什么」（那是数据），
+// 而是「骑行绑人 ⇒ 目录里放什么都一个距离都不画」（那是口径）。
+describe("DEMAND-MOMENT-BINDING-001 绑定场景 / 绑定人", () => {
+  const hanoi = { latitude: 21.0288, longitude: 105.8525 };
+  const spot = (over: Partial<SceneSpot>): SceneSpot => ({
+    id: "s", name: "", type: "", category: "", area: "", imageUrl: "",
+    latitude: Number.NaN, longitude: Number.NaN,
+    ...over
+  });
+
+  it("每个模板都声明了 binding，且只有 scene / person 两种", () => {
+    expect(MOMENT_TEMPLATES.length).toBeGreaterThan(0);
+    for (const template of MOMENT_TEMPLATES) {
+      expect(["scene", "person"], `${template.title} 的 binding 不认识`).toContain(template.binding);
+    }
+  });
+
+  it("骑行绑定人：就算目录里有一条骑行场景，也一个距离都不画", () => {
+    const bike = spot({ id: "b1", name: "西湖骑行绿道", type: "骑行 · 绿道", area: "西湖", latitude: 21.055, longitude: 105.82 });
+    expect(momentDistanceLabel([bike], "ride", hanoi)).toBe("");
+  });
+
+  it("绑定人的模板拿不到距离，绑定场景的照旧拿得到", () => {
+    const personBound = MOMENT_TEMPLATES.filter((item) => item.binding === "person");
+    expect(personBound.map((item) => item.id)).toContain("ride");
+    for (const template of personBound) {
+      // 关键：尽量给一个**能命中它自己归属词**的场景（骑行就给骑行场景），
+      // 这样唯一能拦住距离的就是 binding —— 否则这条钉会靠「关键词恰好不匹配」
+      // 蒙过去（注入验证时实测过：给咖啡场景，撤掉守卫它照样绿）。
+      const words = ACTION_SCENE_KEYWORDS[MOMENT_ACTION_ID[template.id] ?? ""] ?? [];
+      const scene = spot({ id: "p1", name: words[0] ?? "无关场景", type: words[0] ?? "无关", area: "还剑湖", latitude: 21.0285, longitude: 105.853 });
+      expect(momentDistanceLabel([scene], template.id, hanoi), `${template.title} 绑人却给出了距离`).toBe("");
+    }
+    const cafe = spot({ id: "c1", name: "Cafe Giang", type: "咖啡", area: "还剑湖", latitude: 21.0285, longitude: 105.853 });
+    expect(momentDistanceLabel([cafe], "coffee", hanoi)).toMatch(/^\d+m$/);
+  });
+
+  it("绑定场景的模板必须有关键词表，否则会静默拿不到距离", () => {
+    for (const template of MOMENT_TEMPLATES.filter((item) => item.binding === "scene")) {
+      const actionId = MOMENT_ACTION_ID[template.id] ?? "";
+      expect(actionId, `${template.title} 绑场景却没有 action id`).not.toBe("");
+      expect(ACTION_SCENE_KEYWORDS[actionId], `${template.title} 绑场景却没有归属词`).toBeDefined();
+    }
+  });
+
+  it("底行只有两种形状：时间+距离，或时间。永远没有「只有距离」", () => {
+    for (const template of MOMENT_TEMPLATES) {
+      // 有距离 ⇒ 时间+距离；时间那一格恒非空，所以顺序和内容都是确定的。
+      expect(momentMetaLine("1.2km", template)).toBe(`1.2km · ${template.defaultDuration}`);
+      // 没距离 ⇒ 只剩时间，而且**不是空串**（空串会让底行整格消失）。
+      expect(momentMetaLine("", template)).toBe(template.defaultDuration);
+      expect(momentMetaLine("", template)).not.toBe("");
+    }
   });
 });

@@ -52,25 +52,42 @@ export type MomentTemplate = {
    * 注意 `"fun"` 现在**没有任何模板**：唯一那条 fun（唱歌）随 KTV 一起撤了。
    * rail 的「娱乐」不是按 fun 家族筛的（见 demand-wizard.tsx 的 moments 过滤）。
    */
+  /**
+   * 这一类 Moment **绑定场景**还是**绑定人**。
+   *
+   * 2026-10-06 用户：「骑行绑定人 不是场景 …… 就2种 一种是时间+距离 一种是时间」。
+   * 卡片底行因此只有两种形状：
+   *   · `"scene"` —— 发生在一个固定场所（咖啡馆 / 餐厅 / 街区 / 美术馆）：底行
+   *     `时间 + 距离`，距离 = 你的定位 → **这一类最近的**那一个真实场景。
+   *   · `"person"` —— 不在固定场所（骑行 / 打球 / 城市协助）：底行**只有时间**。
+   *     人那一侧以后接「附近某位接单者的接单时间」；**这个数据源现在不存在**
+   *     （`SupplierCandidate` 只有 availability 窗口和一个响应**分数**，没有接单时长），
+   *     所以先只画时间 —— 不编一个距离，也不编一个接单时间。
+   *
+   * 为什么要有这个字段：以前「骑行没有距离」是**归属词恰好没命中**的副产品。
+   * 哪天场景目录里加了一条骑行场景，它就会突然冒出距离，跟「绑定人」这条口径相反。
+   * 现在绑人就是绑人：目录里有什么都不画距离。
+   */
+  binding: "scene" | "person";
   category: "meet" | "fun" | "outdoor" | "theme" | "sport";
   /** R58 原型卡片 tags（如 咖啡/咖啡馆）。 */
   tags: string[];
 };
 
 export const MOMENT_TEMPLATES: MomentTemplate[] = [
-  { id: "coffee", emoji: "☕", title: "喝咖啡", venue: "咖啡馆", venueLabel: "咖啡馆 · 轻松见面", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "今晚 19:00", defaultDuration: "2 小时", theme: "咖啡", timeTags: ["晚间"], skills: "中文 · 轻松见面", priceRef: "150–300K", defaultPrice: "200,000₫", category: "meet", tags: ["咖啡", "咖啡馆"] },
-  { id: "meal", emoji: "餐", title: "吃饭", venue: "餐厅", venueLabel: "餐厅 · 默认 1:1", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "今晚 18:30", defaultDuration: "2 小时", theme: "用餐", timeTags: ["晚间"], skills: "中文 · 本地餐厅", priceRef: "200–400K", defaultPrice: "300,000₫", category: "meet", tags: ["用餐", "餐厅"] },
-  { id: "photo", emoji: "相", title: "拍照", venue: "街区", venueLabel: "街拍 / 旅行照", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "2 小时", theme: "拍照", timeTags: ["下午"], skills: "中文 · 街拍", priceRef: "300–600K", defaultPrice: "400,000₫", category: "outdoor", tags: ["拍照", "街区"] },
-  { id: "citywalk", emoji: "走", title: "City Walk", venue: "街区", venueLabel: "街区漫游 · 本地路线", ratios: ["1:1", "≤ 4:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "半天", theme: "City Walk", timeTags: ["下午", "周末"], skills: "中文 · 本地路线", priceRef: "150–300K", defaultPrice: "200,000₫", category: "outdoor", tags: ["City Walk", "街区"] },
-  { id: "exhibition", emoji: "展", title: "看展", venue: "美术馆", venueLabel: "美术馆 · 一起看", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "半天", theme: "看展", timeTags: ["下午", "周末"], skills: "中文 · 艺术", priceRef: "150–300K", defaultPrice: "200,000₫", category: "theme", tags: ["看展", "美术馆"] },
+  { id: "coffee", binding: "scene", emoji: "☕", title: "喝咖啡", venue: "咖啡馆", venueLabel: "咖啡馆 · 轻松见面", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "今晚 19:00", defaultDuration: "2 小时", theme: "咖啡", timeTags: ["晚间"], skills: "中文 · 轻松见面", priceRef: "150–300K", defaultPrice: "200,000₫", category: "meet", tags: ["咖啡", "咖啡馆"] },
+  { id: "meal", binding: "scene", emoji: "餐", title: "吃饭", venue: "餐厅", venueLabel: "餐厅 · 默认 1:1", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "今晚 18:30", defaultDuration: "2 小时", theme: "用餐", timeTags: ["晚间"], skills: "中文 · 本地餐厅", priceRef: "200–400K", defaultPrice: "300,000₫", category: "meet", tags: ["用餐", "餐厅"] },
+  { id: "photo", binding: "scene", emoji: "相", title: "拍照", venue: "街区", venueLabel: "街拍 / 旅行照", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "2 小时", theme: "拍照", timeTags: ["下午"], skills: "中文 · 街拍", priceRef: "300–600K", defaultPrice: "400,000₫", category: "outdoor", tags: ["拍照", "街区"] },
+  { id: "citywalk", binding: "scene", emoji: "走", title: "City Walk", venue: "街区", venueLabel: "街区漫游 · 本地路线", ratios: ["1:1", "≤ 4:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "半天", theme: "City Walk", timeTags: ["下午", "周末"], skills: "中文 · 本地路线", priceRef: "150–300K", defaultPrice: "200,000₫", category: "outdoor", tags: ["City Walk", "街区"] },
+  { id: "exhibition", binding: "scene", emoji: "展", title: "看展", venue: "美术馆", venueLabel: "美术馆 · 一起看", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "半天", theme: "看展", timeTags: ["下午", "周末"], skills: "中文 · 艺术", priceRef: "150–300K", defaultPrice: "200,000₫", category: "theme", tags: ["看展", "美术馆"] },
   // 2026-10-06 用户：「说错 加运动」—— rail 第四档「运动」的两条模板。
   // 图标复用场景动作既有 logo（sport.svg / cycling.svg，见 MOMENT_ACTION_ID），
   // 没有新画资产。两条都取自 SCENE_ACTIONS 的 sport 家族（scene-activity-discovery.tsx
   // 的 ACTION_DETAILS：跑步/骑行/羽毛球/网球/瑜伽都挂 familyId "sport"）。
   // 只加两条、不铺满那个家族：用户要的是「基本够了」，不是把运动做成一个子目录。
-  { id: "ballgame", emoji: "球", title: "打球", venue: "球馆", venueLabel: "球馆 · 约一场", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "周末 15:00", defaultDuration: "2 小时", theme: "运动", timeTags: ["下午", "周末"], skills: "中文 · 球类运动", priceRef: "200–400K", defaultPrice: "300,000₫", category: "sport", tags: ["运动", "球馆"] },
-  { id: "ride", emoji: "骑", title: "骑行", venue: "绿道", venueLabel: "城市绿道 · 一起骑", ratios: ["1:1", "≤ 4:1"], defaultRatio: "1:1", defaultTime: "周末 早上", defaultDuration: "半天", theme: "骑行", timeTags: ["周末"], skills: "中文 · 骑行", priceRef: "150–300K", defaultPrice: "200,000₫", category: "sport", tags: ["骑行", "绿道"] },
-  { id: "pro", emoji: "证", title: "城市协助", venue: "按需", venueLabel: "翻译 / 签证 / 法律 / 商务 · 专业认证优先", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "", defaultDuration: "2 小时", theme: "服务协助", timeTags: [], skills: "中文 · 专业协助", priceRef: "面议", defaultPrice: "", category: "theme", tags: ["专业", "认证"] }
+  { id: "ballgame", binding: "person", emoji: "球", title: "打球", venue: "球馆", venueLabel: "球馆 · 约一场", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "周末 15:00", defaultDuration: "2 小时", theme: "运动", timeTags: ["下午", "周末"], skills: "中文 · 球类运动", priceRef: "200–400K", defaultPrice: "300,000₫", category: "sport", tags: ["运动", "球馆"] },
+  { id: "ride", binding: "person", emoji: "骑", title: "骑行", venue: "绿道", venueLabel: "城市绿道 · 一起骑", ratios: ["1:1", "≤ 4:1"], defaultRatio: "1:1", defaultTime: "周末 早上", defaultDuration: "半天", theme: "骑行", timeTags: ["周末"], skills: "中文 · 骑行", priceRef: "150–300K", defaultPrice: "200,000₫", category: "sport", tags: ["骑行", "绿道"] },
+  { id: "pro", binding: "person", emoji: "证", title: "城市协助", venue: "按需", venueLabel: "翻译 / 签证 / 法律 / 商务 · 专业认证优先", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "", defaultDuration: "2 小时", theme: "服务协助", timeTags: [], skills: "中文 · 专业协助", priceRef: "面议", defaultPrice: "", category: "theme", tags: ["专业", "认证"] }
 ];
 
 // UI-ORDER-LOGO-001: 发布向导的 Moment 图标必须复用场景动作既有 logo（首页「动作」行
@@ -116,9 +133,10 @@ export function momentStartPrice(template: MomentTemplate): { amount: string; un
  *   · 场景目录走 GET /v1/reality-scenes（公开免登，与首页 / 场景目录页同一份）。
  *   · 归属哪一类：模板 id → 动作 id（`MOMENT_ACTION_ID`），再交给 `scenesForAction`
  *     按归属词命中 —— 和首页场景入口卡同一个函数，不另写一套子串匹配。
- *   · 拿不到就返回**空串**、整格不画：没定位 / 这一类一个真实场景都没有
- *     （打球与城市协助的 action id 目前就没有归属词，这是如实反映，不是缺陷）/
- *     最近的那个也在 50km 外（`shopCardDistance` 的 FAR_AWAY 口径）。
+ *   · **绑定人的模板直接返回空串**（`binding === "person"`：骑行 / 打球 / 城市协助）——
+ *     它们是产品口径上的「不绑场景」，跟目录里有没有这类场景无关。
+ *   · 绑定场景的模板拿不到就返回**空串**、整格不画：没定位 / 这一类一个真实场景
+ *     都没有 / 最近的那个也在 50km 外（`shopCardDistance` 的 FAR_AWAY 口径）。
  *     不拿河内市中心当「你的位置」—— 那会把所有距离都算成假的。
  */
 export function momentDistanceLabel(
@@ -126,6 +144,10 @@ export function momentDistanceLabel(
   templateId: string,
   origin: SceneOrigin | undefined,
 ): string {
+  // 绑定人 ⇒ 永远不画距离。放在**最前面**，连定位都不看：这是产品口径，不是
+  // 「目录里碰巧没有这类场景」。以后场景目录里加了一条骑行场景，这里也不会
+  // 突然冒出距离（那正是用户「骑行绑定人 不是场景」要防的）。
+  if (MOMENT_TEMPLATES.find((item) => item.id === templateId)?.binding === "person") return "";
   if (!origin) return "";
   const actionId = MOMENT_ACTION_ID[templateId];
   if (actionId === undefined) return "";
@@ -140,7 +162,16 @@ export function momentDistanceLabel(
 
 /**
  * 卡片底行的 meta（原型 `item-meta`：`dist · dur`）。
- * 距离拿不到就只剩时长 —— 不写「—」占位（那看着像加载失败，见 formatShopDistance）。
+ *
+ * 2026-10-06 用户：「就2种 一种是时间+距离 一种是时间」—— 底行**只有这两种形状**。
+ * 原因是时间那一格**恒非空**（模板自己的 `defaultDuration`）：距离拿得到就是
+ * `时间 + 距离`；拿不到（绑定人 / 没定位 / 这一类没场景 / 最近的在 50km 外）就只剩
+ * `时间`。**永远不会出现「只有距离」**—— 那需要一个空的时间，而模板不允许。
+ *
+ * 距离那一格不写「—」占位（那看着像加载失败，见 formatShopDistance）。
+ *
+ * ⚠️ 顺序沿用原型：**距离在前**。用户那句「时间+距离」说的是「哪两格一起出现」，
+ * 不是先后顺序 —— 原型是 `metaParts = [it.dist, it.dur]`。
  */
 export function momentMetaLine(distance: string, template: MomentTemplate): string {
   return [distance, template.defaultDuration].filter((part) => part !== "").join(" · ");
