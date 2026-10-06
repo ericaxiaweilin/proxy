@@ -117,3 +117,35 @@ describe("DEMAND-WIZARD-CARD-001 距离是算出来的，不是编的", () => {
     expect(momentMetaLine("", coffee)).toBe(coffee.defaultDuration);
   });
 });
+
+// DEMAND-WIZARD-LOCATION-001（2026-10-06 用户「缺少距离字段」）：算得对不等于看得见。
+//
+// 上面那组钉的是 momentDistanceLabel / momentMetaLine 的**算法**，它们全绿的时候，
+// 用户截图里五张卡的底行仍然只剩时长 —— 因为这一屏取定位时用了 getCurrentFix 的
+// 默认值（requestPermission: false）：没授权时 helper 第一行就返回 undefined，
+// origin 恒为 undefined，每条模板的距离都算成空串。模拟器的 TCC.db 里连一条
+// kTCCServiceLocation 都没有，正说明这一屏从来没弹过授权框。
+//
+// 兄弟屏 hot-scenes / scene-shop-directory 都是挂载时 requestPermission: true；
+// 这一屏对齐它们。DEVICE-LOCATION-003 里 helper 的默认值仍归 device-location.test.ts
+// 钉（那条默认值是给开屏那次用的），本文件只钉**这一屏有没有问**。
+describe("DEMAND-WIZARD-LOCATION-001 距离那一格必须真的问得到定位", () => {
+  const wizard = readFileSync(
+    fileURLToPath(new URL("./demand-wizard.tsx", import.meta.url)),
+    "utf8"
+  );
+
+  it("挂载时取定位必须带 requestPermission: true", () => {
+    expect(wizard).toContain("getCurrentFix(expoLocationApi, { requestPermission: true })");
+  });
+
+  it("不许退回不带 options 的裸调用（那正是「永远没有距离」的写法）", () => {
+    // 裸调用 = 括号紧跟在 expoLocationApi 后面，一个 options 都没有。
+    expect(wizard).not.toContain("getCurrentFix(expoLocationApi)");
+  });
+
+  it("没定位时仍旧不编距离（拿到 undefined 就走原有回退，不塞假坐标）", () => {
+    // 断言的是「setOrigin 只在 fix 为真时执行」，不是「一定 setOrigin」。
+    expect(wizard).toContain("if (!cancelled && fix) setOrigin(");
+  });
+});

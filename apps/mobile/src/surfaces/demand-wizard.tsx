@@ -175,14 +175,25 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   }, []);
 
   // 距离角标的两个来源：公开场景目录（免登）+ 设备定位。
-  // getCurrentFix 默认**不弹**授权框（DEVICE-LOCATION-003：打开 App 就调，不能每次
-  // 冷启动都弹）—— 没授权/超时就返回 undefined，卡面整格不画距离，不编一个。
+  //
+  // 2026-10-06 用户：「缺少距离字段」—— 截图里五张卡的底行只剩时长，一格距离都没有。
+  // 根因不是算错，是**这一屏从来没问过定位**：getCurrentFix 的 requestPermission
+  // 默认 false，本屏又没传 —— 没授权时它第一行就 return undefined，于是 origin 恒为
+  // undefined，momentDistanceLabel 对每条模板都返回空串。新装、或者没逛过首页/热门
+  // 的用户，永远看不到距离（模拟器的 TCC 里连一条 kTCCServiceLocation 都没有）。
+  //
+  // DEVICE-LOCATION-003 管的是**开屏**那一次（app-shell 挂载时定一次位，不能每次冷
+  // 启动都弹），不是「任何一屏都不许问」。同一份定位的兄弟屏早就这么做了：
+  // hot-scenes / scene-shop-directory 都是挂载时 requestPermission: true。这一屏也是
+  // 用户主动点进来的（点「发布需求」），弹窗由用户动作触发，不违反那条口径。
+  //
+  // 拿到什么用什么：没授权/超时仍旧返回 undefined，卡面照旧不画距离，不编一个。
   useEffect(() => {
     let cancelled = false;
     void loadSceneSpots(fetch, localApiBaseUrl)
       .then((list) => { if (!cancelled) setScenes(list); })
       .catch(() => undefined);
-    void getCurrentFix(expoLocationApi).then((fix) => {
+    void getCurrentFix(expoLocationApi, { requestPermission: true }).then((fix) => {
       if (!cancelled && fix) setOrigin({ latitude: fix.latitude, longitude: fix.longitude });
     });
     return () => { cancelled = true; };
