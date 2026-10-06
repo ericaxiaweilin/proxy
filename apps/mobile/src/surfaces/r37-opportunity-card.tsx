@@ -191,12 +191,18 @@ export function R37OpportunityCard({ opportunity, onOpen, onDismiss }: { opportu
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 12 },
+  // 2026-10-06 用户：「市场页面图片左边UI留一点点间隔」—— 缩略图原来贴着卡片左缘，
+  // 因为 R37 重写这张卡时把旧 r4CardFlat 的 paddingHorizontal: 12 丢了，而本页
+  // 其它行（searchRow / statusFilterRow）都是 12。补回同一个 12，左右一起对齐。
+  // 内边距加在卡片上、不加在盒子外面：卡片盒宽不变，底部分隔线仍然通栏。
+  card: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 12, paddingHorizontal: 12 },
   // 市场·订单重做：96×96 正方形缩略图，不再拉伸撑满卡片高度。
   thumbWrap: { alignSelf: "center" },
   thumb: { backgroundColor: "#F1ECE3", borderRadius: 12, height: 96, overflow: "hidden", width: 96 },
   sampleTag: { backgroundColor: "rgba(20,19,26,.74)", borderRadius: 6, bottom: 6, left: 6, paddingHorizontal: 6, paddingVertical: 3, position: "absolute" }, sampleTagText: { color: color.white, fontSize: 11, fontWeight: "800" },
-  body: { flex: 1, gap: 5, justifyContent: "center", minWidth: 0, paddingBottom: 10, paddingRight: 6, paddingTop: 10 },
+  // paddingRight 原来是 6（卡片没有内边距时代的补丁）。现在卡片两侧各出 12，
+  // 再留 6 右边就是 18、和本页其它行的 12 对不齐 —— 交回卡片统一出。
+  body: { flex: 1, gap: 5, justifyContent: "center", minWidth: 0, paddingBottom: 10, paddingTop: 10 },
   typeRow: { alignItems: "center", flexDirection: "row", gap: 8 },
   oppTitle: { color: color.ink, flex: 1, fontSize: 13, fontWeight: "900", letterSpacing: -0.2, minWidth: 0 },
   fitTag: { alignItems: "center", flexDirection: "row", gap: 4 },

@@ -45,7 +45,10 @@ describe("MARKET-LOGO-SINGLE-TILE-001", () => {
   });
 
   it("centers the square thumbnail instead of stretching it flush to the card edges", () => {
-    expect(card).toContain('card: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 12 }');
+    // 2026-10-06 用户：「市场页面图片左边UI留一点点间隔」—— 这条快照跟着改成带
+    // paddingHorizontal: 12（缩略图不再贴卡片左缘，和本页其它行的 12 对齐）。
+    // 断言的原意没变：缩略图是居中/内缩的方块，不是撑满卡片边缘的竖长矩形。
+    expect(card).toContain('card: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 12, paddingHorizontal: 12 }');
     expect(card).toMatch(/thumbWrap:\s*\{\s*alignSelf:\s*"center"\s*\}/);
     expect(card).toMatch(/thumb:\s*\{[^}]*borderRadius:\s*12/);
   });
