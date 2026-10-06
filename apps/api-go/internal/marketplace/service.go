@@ -1,6 +1,7 @@
 package marketplace
 
 import (
+	"sort"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/proxy-app/proxy-api/internal/aiboundary"
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
 )
@@ -30,6 +32,8 @@ import (
 // pulling the fulfillment package into the marketplace compile graph.
 type Service struct {
 	repository Repository
+	// MARKET-RANK-001：报名人排序。nil = 按报名时间（无库 / 测试）。
+	applicantRanker ApplicantRanker
 	// numbers 给发布的需求 / 邀约分配全数字编号（PUBLIC-NO-001）。与订单编号同一个
 	// 分配器：一个号只指向一样东西。PG 仓默认用共享序列；main.go 注入同一个实例。
 	numbers      ordernumber.Allocator
@@ -558,7 +562,7 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_list_failed", nil)
 		}
-		return payload(e, "MarketOpportunity", id, "APPLICATIONS_READY", map[string]any{"applications": applications})
+		return payload(e, "MarketOpportunity", id, "APPLICATIONS_READY", map[string]any{"applications": s.rankApplications(ctx, id, applications)})
 	case "SelectMarketApplication":
 		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.SelectOpportunityApplication) {
 			return rejected(e, "AI_ACTION_FORBIDDEN", "ai.action_forbidden")
@@ -1055,4 +1059,110 @@ func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
 			math.Sin(dLng/2)*math.Sin(dLng/2)
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 	return earthRadiusKm * c
+}
+
+
+// ---------- MARKET-RANK-001：报名人按撮合排序 ----------
+//
+// 以前发单方看到的报名列表是「谁先报名谁在前」。现在用同一套撮合口径（internal/matching：可靠 /
+// 满意 / 经验 / 响应 / 距离 / 新人 / 负载）排，并给出排在前面的理由 —— 理由是**结构化的代码 + 数值**，
+// 由 App 按用户语言渲染（服务端不拼中文 / 越南文句子）。仍在等结果的报名（已报名 / 已选中 / 已确认）
+// 按名次在前；已经落选、已过期的排在后面，按报名时间。没接排序器（无库 / 测试）= 原样返回。
+
+// ApplicantRanker 给一组报名人打分排序。lat/lng 是机会地点（没有就是 nil，不算距离）。
+type ApplicantRanker func(ctx context.Context, applicantIDs []string, lat, lng *float64) ([]matching.Ranked, error)
+
+func (s *Service) SetApplicantRanker(r ApplicantRanker) { s.applicantRanker = r }
+
+// RankReason 是「为什么她排在前面」的一条。Code 封闭集合：
+// FULFILLMENT_RATE（完成率，0-1）/ SATISFACTION_RATE（满意率，0-1）/ COMPLETED_ORDERS（完成单数）/
+// DISTANCE_KM（离机会地点公里数）/ NEWCOMER（新人，无数值）/ BUSY（手上未结束的单数）/ RESPONSIVE（近期常在线）。
+type RankReason struct {
+	Code  string   `json:"code"`
+	Value *float64 `json:"value,omitempty"`
+}
+
+// RankedApplication 是返回给发单方的一条报名：原有字段不变，加上名次、得分明细与理由。
+type RankedApplication struct {
+	Application
+	Rank    int                 `json:"rank,omitempty"` // 1 起；落选 / 过期的没有名次
+	Ranking *matching.Breakdown `json:"ranking,omitempty"`
+	Reasons []RankReason        `json:"reasons,omitempty"`
+}
+
+func liveApplication(status string) bool {
+	return status == "SUBMITTED" || status == "SELECTED" || status == "CONFIRMED"
+}
+
+func (s *Service) rankApplications(ctx context.Context, opportunityID string, applications []Application) []RankedApplication {
+	out := make([]RankedApplication, 0, len(applications))
+	for _, a := range applications {
+		out = append(out, RankedApplication{Application: a})
+	}
+	if s.applicantRanker == nil || len(applications) == 0 {
+		return out
+	}
+	var lat, lng *float64
+	if opp, err := s.repository.Get(ctx, opportunityID); err == nil {
+		lat, lng = opp.Lat, opp.Lng
+	}
+	ids := []string{}
+	for _, a := range applications {
+		if liveApplication(a.Status) {
+			ids = append(ids, a.ApplicantID)
+		}
+	}
+	ranked, err := s.applicantRanker(ctx, ids, lat, lng)
+	if err != nil {
+		// 排序是锦上添花：读信号失败就按原顺序给，列表本身不能因此打不开。
+		return out
+	}
+	position := map[string]int{}
+	breakdown := map[string]matching.Breakdown{}
+	for i, r := range ranked {
+		position[r.AgentID] = i + 1
+		breakdown[r.AgentID] = r.Breakdown
+	}
+	for i := range out {
+		if !liveApplication(out[i].Status) {
+			continue
+		}
+		if n, ok := position[out[i].ApplicantID]; ok {
+			b := breakdown[out[i].ApplicantID]
+			out[i].Rank, out[i].Ranking, out[i].Reasons = n, &b, rankReasons(b)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, rj := out[i].Rank, out[j].Rank
+		if (ri > 0) != (rj > 0) {
+			return ri > 0
+		}
+		if ri > 0 {
+			return ri < rj
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out
+}
+
+// rankReasons 只说真有的事：没有履约记录就不说完成率，没有位置就不说距离。
+func rankReasons(b matching.Breakdown) []RankReason {
+	v := func(x float64) *float64 { return &x }
+	out := []RankReason{}
+	if b.HasTrackRecord {
+		out = append(out, RankReason{Code: "FULFILLMENT_RATE", Value: v(b.FulfillmentRate)})
+		if b.SatisfactionRate > 0 {
+			out = append(out, RankReason{Code: "SATISFACTION_RATE", Value: v(b.SatisfactionRate)})
+		}
+	}
+	if b.DistanceKm != nil {
+		out = append(out, RankReason{Code: "DISTANCE_KM", Value: v(*b.DistanceKm)})
+	}
+	if b.NewcomerBoost > 0 {
+		out = append(out, RankReason{Code: "NEWCOMER"})
+	}
+	if b.LoadPenalty > 0 {
+		out = append(out, RankReason{Code: "BUSY"})
+	}
+	return out
 }

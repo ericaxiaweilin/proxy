@@ -712,6 +712,14 @@ func main() {
 		// 而原因写进启动日志（配置读不出来 = 起不来 是另一种不可用）。
 		matchingStore := matching.NewPostgres(pool)
 		server.Matching = matchingStore
+		// MARKET-RANK-001：市场报名人按同一套撮合口径排序（可靠 / 距离 / 新人 / 负载…），给发单方看理由。
+		marketplaceService.SetApplicantRanker(func(ctx context.Context, ids []string, lat, lng *float64) ([]matching.Ranked, error) {
+			signals, err := matchingStore.UserSignals(ctx, ids)
+			if err != nil {
+				return nil, err
+			}
+			return matching.Rank(ids, nil, matching.WithDistances(signals, ids, lat, lng), 0), nil
+		})
 		server.Dispatch = dispatchEngine
 		server.DispatchStats = dispatchStore
 		go runDispatchLoop(ctx, dispatchEngine)
