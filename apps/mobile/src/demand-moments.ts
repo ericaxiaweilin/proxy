@@ -177,48 +177,9 @@ export function momentMetaLine(distance: string, template: MomentTemplate): stri
   return [distance, template.defaultDuration].filter((part) => part !== "").join(" · ");
 }
 
-/**
- * DEMAND-SCENE-FIRST-001（2026-10-06）：某个 Moment 此刻**真的能选**的真实场景
- * （带距离，近的在前）。给「选场景」那一步当数据源。
- *
- * 用户：「不能一来就是小美list 只有专业模式才能是人list 娱乐跟场景相关的 优先选
- * 场景」—— 绑定场景的 Moment 在选完模板后先挑一家真实门店，再谈别的。
- *
- * 与 `momentDistanceLabel` **同一套口径**（同一个 scenesForAction、同一个
- * sceneDistanceMeters、同一个 shopCardDistance），只是它只留最近的那个数，这里把
- * 整份候选交出去给选择器 —— 首页入口卡、场景目录页、发布向导必须算得一样。
- *
- * ⚠️ 空列表有四种成因，其中三种**不是 bug**，调用方必须给得出话，不能甩一个
- * 空白屏给用户：
- *   1. `binding === "person"`（骑行 / 打球 / 城市协助）→ 产品口径就是不绑场景；
- *   2. 这一类在真实目录里一条都没有 —— 实测 `/v1/reality-scenes` 28 条：
- *      cycling 命中 **0** 条，`sport` 连归属词都没配（目录里只有一个公园，没有球馆）；
- *   3. 这一类有场景，但全在 50km 外（`shopCardDistance` 的 FAR_AWAY 口径）；
- *   4. 没定位 —— 这时**仍然列出场景**（按名排），只是距离那格是空的：挑不出远近
- *      也总比什么都不给选好。
- */
-export type SceneOption = { scene: SceneSpot; distance: string };
-
-export function momentSceneOptions(
-  scenes: readonly SceneSpot[],
-  templateId: string,
-  origin: SceneOrigin | undefined,
-): SceneOption[] {
-  if (MOMENT_TEMPLATES.find((item) => item.id === templateId)?.binding === "person") return [];
-  const actionId = MOMENT_ACTION_ID[templateId];
-  if (actionId === undefined) return [];
-  const scored = scenesForAction(scenes, actionId).map((scene) => ({
-    scene,
-    meters: origin === undefined ? undefined : sceneDistanceMeters(origin, scene)
-  }));
-  scored.sort((a, b) => {
-    if (a.meters === undefined && b.meters === undefined) return a.scene.name.localeCompare(b.scene.name);
-    if (a.meters === undefined) return 1;
-    if (b.meters === undefined) return -1;
-    return a.meters - b.meters;
-  });
-  return scored.map((item) => ({ scene: item.scene, distance: shopCardDistance(item.meters) }));
-}
+// DEMAND-SCENE-FIRST-001 的 momentSceneOptions/SceneOption 已删（2026-10-06）：
+// 选场景步改为直接挂 SceneShopDirectory（home 场景 list 本体），它自己加载目录、
+// 排距离、筛区域 —— 向导不再需要一份预打分的候选数组。卡面距离仍走 momentDistanceLabel。
 
 /**
  * R58 城市协助 · Professional 服务目录（对齐原型 pro-card 四类）：

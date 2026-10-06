@@ -181,6 +181,8 @@ export function SceneShopDirectory({
   apiBaseUrl,
   onClose,
   onOpenScene,
+  onPick,
+  onSkip,
 }: {
   actionId: string;
   label: string;
@@ -188,6 +190,16 @@ export function SceneShopDirectory({
   apiBaseUrl: string | undefined;
   onClose: () => void;
   onOpenScene?: ((sceneId: string) => void) | undefined;
+  /**
+   * SCENE-CARD-REUSE-001 / 场景选择模式（2026-10-06）：给了 onPick = 这份场景
+   * list 被当作**选择器**用（目前唯一调用方：发布向导的「选场景」步）——
+   * 单店详情页的主按钮从「让小美来这个场景」换成「选这个场景」，点了把选中的
+   * 场景原样交回给调用方（名字 + 坐标），由调用方决定接下来去哪。
+   * 不给 onPick 就是 home 同款浏览模式，行为一点不变。
+   */
+  onPick?: ((scene: SceneShopBrief) => void) | undefined;
+  /** 选择模式下「暂不选场景」的出路（保留原来的「暂不选，继续」语义）；浏览模式不传。 */
+  onSkip?: (() => void) | undefined;
 }): React.JSX.Element {
   const safeArea = useSafeAreaInsets();
   const [scenes, setScenes] = useState<readonly SceneShopBrief[]>([]);
@@ -447,6 +459,14 @@ export function SceneShopDirectory({
               </Pressable>
             ) : null}
 
+            {/* 选择模式（onPick）才有这条出路：不想挑地方就空着地点直接发布。
+                浏览模式没有这一行 —— home 上没有「跳过场景」这个动作。 */}
+            {onSkip ? (
+              <Pressable accessibilityLabel="暂不选场景" onPress={onSkip} style={styles.skipRow}>
+                <Text selectable style={styles.skipText}>暂不选场景，直接填地点 ›</Text>
+              </Pressable>
+            ) : null}
+
             {catalogState === "ERROR" ? <Text selectable style={styles.empty}>目录没能加载，刷新再试试。</Text>
               : catalogState === "LOADING" ? <Text selectable style={styles.empty}>正在加载附近场景…</Text>
                 : rows.length === 0 ? <Text selectable style={styles.empty}>{areas.length > 0 ? "这个区域还没有接入的场景，取消筛选看看。" : `附近还没有接入的${label}场景。`}</Text>
@@ -564,12 +584,21 @@ export function SceneShopDirectory({
               </View> : null}
               <Text selectable style={styles.checkinHint}>{checkinHint(hereChecked, checkinDistance)}</Text>
 
-              {/* 邀约那条链路要选人 + 填报酬 + 两步命令 —— 复制一份就是第二个
-                  真相，所以转交给场景自己的那一屏去做。 */}
-              <Pressable accessibilityLabel="让小美来这个场景" disabled={!selected || !onOpenScene} onPress={() => { if (selected) onOpenScene?.(selected.id); }} style={[styles.primaryAction, (!selected || !onOpenScene) && styles.actionButtonBusy]}>
-                <Text selectable style={styles.primaryActionText}>让小美来这个场景</Text>
-                <Text selectable style={styles.primaryActionSub}>约她出图 / 同行 · 选人、时间、报酬在场景页里定</Text>
-              </Pressable>
+              {/* 选择模式（onPick）主按钮换成「选这个场景」：向导要的是把场景
+                  带回去，不是走邀约链路；浏览模式（没有 onPick）照旧是邀约
+                  CTA —— 那条链路要选人 + 填报酬 + 两步命令，复制一份就是
+                  第二个真相，所以转交给场景自己的那一屏去做。 */}
+              {onPick ? (
+                <Pressable accessibilityLabel="选这个场景" disabled={!selected} onPress={() => { if (selected) onPick(selected); }} style={[styles.primaryAction, !selected && styles.actionButtonBusy]}>
+                  <Text selectable style={styles.primaryActionText}>选这个场景</Text>
+                  <Text selectable style={styles.primaryActionSub}>名字和位置会自动带到发布单里</Text>
+                </Pressable>
+              ) : (
+                <Pressable accessibilityLabel="让小美来这个场景" disabled={!selected || !onOpenScene} onPress={() => { if (selected) onOpenScene?.(selected.id); }} style={[styles.primaryAction, (!selected || !onOpenScene) && styles.actionButtonBusy]}>
+                  <Text selectable style={styles.primaryActionText}>让小美来这个场景</Text>
+                  <Text selectable style={styles.primaryActionSub}>约她出图 / 同行 · 选人、时间、报酬在场景页里定</Text>
+                </Pressable>
+              )}
 
               {/* SCENE-HOME-DETAIL-001（2026-09-27）：参考稿第 3 屏比对了下面三块，
                   之前这一屏**故意没画**（缺数据源）。后端已经发下来 humans /
@@ -745,6 +774,9 @@ const styles = StyleSheet.create({
   // SCENE-LOCATION-PICKER-001: 跟 badminton-companion.tsx 的 locationRow 同款——
   // 点开的是共用的 LocationListPicker，不再是一行横滑 chip。
   locationRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 8, marginBottom: 12, marginHorizontal: 16, paddingHorizontal: 14, paddingVertical: 11 },
+  // 选择模式（onPick）专属：安静的跳过链接，不是主按钮 —— 选场景是默认，跳过是出路不是入口。
+  skipRow: { alignItems: "center", marginBottom: 12, marginHorizontal: 16, paddingVertical: 6 },
+  skipText: { color: color.muted, fontSize: 12.5, fontWeight: "700" },
   locationText: { color: color.ink, flex: 1, fontSize: 12.5, fontWeight: "800" },
   locationMore: { color: color.muted, fontSize: 11.5, fontWeight: "800" },
   empty: { color: color.muted, fontSize: 13, lineHeight: 20, paddingHorizontal: 16, paddingVertical: 22 },

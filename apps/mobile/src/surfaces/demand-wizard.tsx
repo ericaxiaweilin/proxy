@@ -20,8 +20,6 @@ import {
   MOMENT_TEMPLATES,
   momentDistanceLabel,
   momentMetaLine,
-  momentSceneOptions,
-  type SceneOption,
   momentStartPrice,
   PRO_LOGOS,
   PRO_SERVICES,
@@ -45,9 +43,11 @@ import { loadSceneSpots, type SceneSpot } from "../activity-create-form";
 import type { SceneOrigin } from "../scene-shop-directory";
 import { ProxyBackGlyph } from "../components/proxy-foundation";
 import { ProxyIcon } from "../components/proxy-icon";
-// SCENE-CARD-REUSE-001：场景卡唯一实现在 components/scene-cover-card.tsx（home 同款），
-// 选场景步直接复用，不再有自己的卡片样式。
-import { SceneCoverCard } from "../components/scene-cover-card";
+// SCENE-CARD-REUSE-001（2026-10-06，用户「还是没有引用 home-场景list 代码」）：
+// 选场景步不再自己拼列表（SceneCoverCard 版也删了），直接挂 home 场景卡片点进去
+// 的那份场景 list 本体 SceneShopDirectory —— 数据加载 / 距离排序 / 筛选 / 单店
+// 详情全部是它自己的，向导只通过 onPick 把选中的场景带回来。
+import { SceneShopDirectory } from "../components/scene-shop-directory";
 
 // DEMAND-SCENE-FIRST-001（2026-10-06）：「scene」这一步是为了把「选人」从默认路径上
 // 挪走而存在的。
@@ -59,7 +59,7 @@ import { SceneCoverCard } from "../components/scene-cover-card";
 // 「低调」在旧结构里做不到 —— 它是被 Step 的形状逼出来的，不是样式问题。现在：
 //   娱乐/场景类  moment → **scene（真实门店）** → specs
 //   专业        moment → people（人 list，专业就是靠人变现）
-//   运动        moment → specs（目录里真的一条场地都没有，见 momentSceneOptions 注释）
+//   运动        moment → specs（绑人，不进场景 list；目录里本来也没有球馆/绿道）
 // 「直接约」在 specs 底部是一行小字入口，不是一步。
 type Step = "moment" | "scene" | "people" | "specs" | "done";
 
@@ -371,16 +371,15 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     (sheetFilters.day !== "不限" ? 1 : 0);
   const visiblePeople = filterSuppliers(people, peopleFilters, sheetFilters);
 
-  // DEMAND-SCENE-FIRST-001：选场景步的候选。绑定人的模板（运动/专业/自定义）这里
-  // 恒为空 —— 空的四种成因见 `momentSceneOptions` 的注释，调不调用方都只管一件事：
-  // 空就跳过选场景，不许甩空白屏。
-  const sceneOptions = template ? momentSceneOptions(scenes, template.id, origin) : [];
   const isPro = template?.id === "pro";
+  // 只有绑场景的模板走场景 list（SceneShopDirectory 自己有诚实空态，目录里没货
+  // 它自己会说，不需要调用方预判候选数）；绑人（运动/自定义）和 pro 不进。
+  const sceneBinding = template?.binding === "scene";
 
   // moment 步的出口。分流规则（2026-10-06 用户口径）：
   //   专业 → 人 list（专业靠人变现，这是唯一允许直接进 people 的路径）；
-  //   绑场景且有真实候选 → 选场景（**默认路径里没有选人这一步**）；
-  //   其余（绑人 / 目录里一条场景都没有）→ 直接进规格，「直接约」留在规格底部。
+  //   绑场景 → 场景 list（home 场景 list 本体，**默认路径里没有选人这一步**）；
+  //   绑人 → 直接进规格，「直接约」留在规格底部。
   function advanceFromMoment(): void {
     if (!template) return;
     if (isPro) {
@@ -388,7 +387,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
       setStep("people");
       return;
     }
-    if (sceneOptions.length > 0) {
+    if (sceneBinding) {
       setStep("scene");
       return;
     }
@@ -437,9 +436,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     if (step === "moment") onBack();
     else if (step === "scene") setStep("moment");
     else if (step === "people") setStep(peopleReturn);
-    // specs 的上一步：有真实场景候选就回选场景，否则回选 Moment —— 无状态可判，
+    // specs 的上一步：绑场景的模板回场景 list，否则回选 Moment —— 无状态可判，
     // 不必记「从哪进的 specs」。
-    else if (step === "specs") setStep(!isPro && sceneOptions.length > 0 ? "scene" : "moment");
+    else if (step === "specs") setStep(!isPro && sceneBinding ? "scene" : "moment");
   }
 
   const showNotes = specs.notes.trim() !== "";
@@ -609,55 +608,27 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
         </>
       ) : step === "scene" ? (
         <>
-          {/* 选场景步（DEMAND-SCENE-FIRST-001）：娱乐/场景类的**默认第二步**。
-              数据就是首页入口卡同款的 momentSceneOptions —— 真实目录 + 真实距离，
-              近的在前；没有定位时按名字排，距离格留空。选中即写进 specs.place
-              （带真坐标，订单可上图），然后照常进规格。
-              「暂不选」必须给：目录是会变的，把用户卡死在这一步等于让他放弃发布。 */}
-          <View style={styles.confirmCard}>
-            <View style={styles.confirmCopy}>
-              <Text selectable style={styles.confirmEyebrow}>Moment</Text>
-              <Text selectable style={styles.confirmTitle}>{template?.title}</Text>
-            </View>
-            <Pressable onPress={() => setStep("moment")}><Text selectable style={styles.linkText}>更换</Text></Pressable>
-          </View>
-          <Text selectable style={styles.sectionSub}>先挑个地方 · {template?.venueLabel}</Text>
-          {/* SCENE-CARD-REUSE-001（2026-10-06，用户：「直接服用home那个就好
-              别自己傻傻的单独搞」）：这里不再自己手搓场景行（原来那份 sceneRow +
-              方形头像整体删掉），直接复用 home 热门场景卡的本体
-              components/scene-cover-card.tsx —— 卡片形状、封面 104、距离角标
-              全部跟 home 同一份实现，home 改了这里跟着变。 */}
-          {sceneOptions.map((option) => (
-            <SceneCoverCard
-              key={option.scene.id}
-              accessibilityLabel={`选择场景 ${option.scene.name}`}
-              name={option.scene.name}
-              imageUrl={option.scene.imageUrl === "" ? undefined : option.scene.imageUrl}
-              fallbackText={option.scene.type.slice(0, 2) || "场景"}
-              // 卡面内容跟 home 同一条公式：meta = category · area；foot 放 type
-              // （「咖啡 · 动态场景」这类真值）—— 之前只喂了 area 一行、foot 不画，
-              // 卡面下面是空的，用户看到的就是「只有头像没有 list 内容」。
-              meta={[option.scene.category, option.scene.area].filter(Boolean).join(" · ") || option.scene.type}
-              footText={option.scene.type}
-              distance={option.distance === "" ? undefined : option.distance}
-              onPress={() => {
-                setSpecs((prev) => ({
-                  ...prev,
-                  place: option.scene.name,
-                  lat: option.scene.latitude,
-                  lng: option.scene.longitude
-                }));
-                setStep("specs");
-              }}
-            />
-          ))}
-          {sceneOptions.length === 0 ? (
-            <Text selectable style={styles.empty}>这一类暂时没有可选的地方，先填个大概，接单的人会来确认。</Text>
-          ) : null}
-          <View style={styles.doneRow}>
-            <Pressable onPress={() => setStep("moment")} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
-            <Pressable onPress={() => setStep("specs")} style={styles.primaryBtnFlex}><Text selectable style={styles.primaryBtnText}>暂不选，继续</Text></Pressable>
-          </View>
+          {/* 选场景步（SCENE-CARD-REUSE-001）：**就是 home 场景卡片点进去的那份
+              场景 list 本体**（SceneShopDirectory 全屏 Modal，2026-10-06 用户两次
+              纠偏后定案：卡片复用还不算，列表也必须是同一段代码）。数据加载 /
+              距离排序 / 区域筛选 / 单店详情全是它自己的；onPick 把选中的场景
+              （名字 + 坐标）带进规格，onSkip 保留「暂不选」的出路，onClose 回
+              选 Moment。列表没货时它自己有诚实空态，不甩空白屏。 */}
+          <SceneShopDirectory
+            actionId={(template && MOMENT_ACTION_ID[template.id]) || ""}
+            label={template?.title ?? ""}
+            unit="家"
+            apiBaseUrl={localApiBaseUrl}
+            onClose={() => setStep("moment")}
+            onSkip={() => setStep("specs")}
+            onPick={(scene) => {
+              // 坐标 (0,0) = 数据没有真坐标（openNavigation 同一条守卫）——
+              // 这时不写 lat/lng，规格里保持纯文字地点，不让地图钉到海上。
+              const hasCoords = Number.isFinite(scene.latitude) && Number.isFinite(scene.longitude) && !(scene.latitude === 0 && scene.longitude === 0);
+              setSpecs((prev) => ({ ...prev, place: scene.name, ...(hasCoords ? { lat: scene.latitude, lng: scene.longitude } : {}) }));
+              setStep("specs");
+            }}
+          />
         </>
       ) : step === "people" ? (
         <>
@@ -1103,9 +1074,9 @@ const styles = StyleSheet.create({
   summaryLabel: { color: color.muted, fontSize: 13 },
   summaryValue: { color: color.ink, fontSize: 13, fontWeight: "700" },
   doneRow: { flexDirection: "row", gap: 10, marginTop: 16 },
-  // SCENE-CARD-REUSE-001：选场景步的卡片本体已删（sceneRow/sceneAvatar 等 8 条），
-  // 直接用 components/scene-cover-card.tsx —— home 的热门场景卡就是唯一实现，
-  // 这里不再有自己的卡片样式。
+  // SCENE-CARD-REUSE-001：选场景步的手搓卡片样式已整体删除（sceneRow/sceneAvatar
+  // 等 8 条），场景列表直接挂 SceneShopDirectory（home 场景 list 本体），
+  // 这里不再有任何自己的场景卡/行样式。
   // 接单方式那行：chip 是「等接单」，直接约只是一条小字链接 —— 故意不做成和
   // 等接单同权的第二颗 chip，否则又回「第一排」了。
   modeRow: { alignItems: "center", flexDirection: "row", gap: 12 },

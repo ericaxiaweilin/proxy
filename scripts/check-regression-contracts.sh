@@ -15986,8 +15986,8 @@ fi
 # 人 list，娱乐跟场景相关的 优先选场景」「选人是要低调点 不要做成第一排」「不要代那个
 # 代称 也不要说等谁接单 就是等接单 直接约」）。
 # 分流（demand-wizard.tsx 的 advanceFromMoment）：专业 → 人 list（专业靠人变现，这是
-# 唯一允许直接进选人的路径）；绑场景且有真实候选 → 选场景（momentSceneOptions，首页
-# 入口卡同款口径：scenesForAction + sceneDistanceMeters + shopCardDistance）；其余
+# 唯一允许直接进选人的路径）；绑场景 → 场景 list（SCENE-CARD-REUSE-001：直接挂
+# home 那份 SceneShopDirectory 本体，加 onPick/onSkip 两个可选回调，浏览模式不变）；其余
 # （绑人 / 目录里一条场景都没有）→ 直接进规格。「直接约」在规格底部是一行小字链接，
 # 不是一步。
 # 反向钉各有咬合点：
@@ -16003,8 +16003,12 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: moment 步的分流函数没了 —— 又变成一律进选人。" >&2
     DSF_B=1
   fi
-  if ! grep -qF 'momentSceneOptions(' apps/mobile/src/surfaces/demand-wizard.tsx; then
-    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 选场景步的数据源没接（momentSceneOptions）。" >&2
+  if ! grep -qF 'SceneShopDirectory' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 选场景步没挂 SceneShopDirectory —— 场景 list 只能是 home 那份，不许自己拼。" >&2
+    DSF_B=1
+  fi
+  if ! grep -qF 'onPick' apps/mobile/src/components/scene-shop-directory.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: SceneShopDirectory 的选择模式回调（onPick）丢了。" >&2
     DSF_B=1
   fi
   if grep -qF 'disabled={!template} onPress={() => setStep("people")}' apps/mobile/src/surfaces/demand-wizard.tsx; then
@@ -16020,8 +16024,12 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
   # 傻傻的单独搞」）：场景卡唯一实现在 components/scene-cover-card.tsx（home 同款
   # 104 封面），home 和发布向导都必须用这个组件 —— 任何一边再出现自己的手搓卡片
   # 样式（sceneRow / hotCard）就是分叉，红。
-  if ! grep -qF 'SceneCoverCard' apps/mobile/src/surfaces/demand-wizard.tsx; then
-    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 选场景步不再复用 SceneCoverCard —— 场景卡只能有一份实现。" >&2
+  if grep -qF 'scene-cover-card' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 向导里又出现 SceneCoverCard —— 场景 list 本体是 SceneShopDirectory，卡是 home 的。" >&2
+    DSF_B=1
+  fi
+  if grep -qF 'sceneOptions.map' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 向导又在手搓场景列表（sceneOptions.map）—— 挂 SceneShopDirectory。" >&2
     DSF_B=1
   fi
   if ! grep -qF 'SceneCoverCard' apps/mobile/src/surfaces/requester-home.tsx; then
