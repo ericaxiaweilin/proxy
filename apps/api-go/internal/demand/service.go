@@ -421,7 +421,9 @@ func canEdit(draft TaskDraft, e command.Envelope) bool {
 }
 func isMaterialField(key string) bool {
 	switch key {
-	case "industry", "scenario", "startAt", "endAt", "location", "slotGroups", "mustRequirements", "deliverables", "budget", "matchingMode", "catalogVersion", "policySnapshot":
+	case "industry", "scenario", "startAt", "endAt", "location", "slotGroups", "mustRequirements", "deliverables", "budget", "matchingMode", "catalogVersion", "policySnapshot",
+		// DISPATCH-LOOP-001：同意「预算内由平台替我发邀约」等于授权花钱，改它要重新确认。选填，不在预览必填项里。
+		"autoDispatch":
 		return true
 	default:
 		return false

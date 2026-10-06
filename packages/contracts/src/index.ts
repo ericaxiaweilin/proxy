@@ -286,6 +286,8 @@ export const TaskDraftChangesSchema = z.object({
   deliverables: z.array(z.string().min(1)).optional(),
   budget: TaskBudgetSchema.optional(),
   matchingMode: z.enum(["FAST", "CURATED"]).optional(),
+  // DISPATCH-LOOP-001：需求方同意「预算内由平台替我发邀约」。只对 FAST + 每档位固定价 VND 预算生效。
+  autoDispatch: z.boolean().optional(),
   catalogVersion: z.string().min(1).optional(),
   policySnapshot: z.object({ policySetId: z.string().min(1), policySetVersion: z.string().min(1) }).optional(),
   confirmation: DemandConfirmationSchema.optional(),

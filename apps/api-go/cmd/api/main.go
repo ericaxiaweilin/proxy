@@ -16,6 +16,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
+	"github.com/proxy-app/proxy-api/internal/dispatch"
 	"github.com/proxy-app/proxy-api/internal/emergency"
 	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/experience"
@@ -136,6 +137,8 @@ func main() {
 	conversationService.SetMediaStoreDir(mediaStoreDir)
 	engagementService := engagement.New()
 	fulfillmentService := fulfillment.New()
+	var dispatchEngine *dispatch.Engine
+	var dispatchStore *dispatch.Postgres
 	supplyService := supply.New()
 	mediaService := media.New()
 	mediaService.SetStoreDir(mediaStoreDir)
@@ -201,7 +204,7 @@ func main() {
 	// on realitySceneService.ListMyCheckinHistory (read-only), same pattern
 	// as ratingService above.
 	sceneReviewService := scenereview.New(scenereview.NewMemoryRepository(), realitySceneService)
-	demandService.SetBatchCreator(newSupplyBatchCreator(supplyService))
+	demandService.SetBatchCreator(newSupplyBatchCreator(supplyService, nil))
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -391,7 +394,10 @@ func main() {
 		voucherService.SetSettlementCreator(voucher.LogSettlementCreator{})
 		benefitService = benefit.NewService(postgres.NewBenefitRepository(pool))
 		ratingService = rating.New(postgres.NewRatingRepository(pool), fulfillmentService.Repository())
-		demandService.SetBatchCreator(newSupplyBatchCreator(supplyService))
+		// DISPATCH-LOOP-001：FAST 需求的自动派单（存储 migration 181，推进在下面的 runDispatchLoop）。
+		dispatchStore = dispatch.NewPostgres(pool)
+		dispatchEngine = newDispatchEngine(dispatchStore, fulfillmentService)
+		demandService.SetBatchCreator(newSupplyBatchCreator(supplyService, dispatchEngine))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
@@ -706,6 +712,9 @@ func main() {
 		// 而原因写进启动日志（配置读不出来 = 起不来 是另一种不可用）。
 		matchingStore := matching.NewPostgres(pool)
 		server.Matching = matchingStore
+		server.Dispatch = dispatchEngine
+		server.DispatchStats = dispatchStore
+		go runDispatchLoop(ctx, dispatchEngine)
 		log.Printf("proxy api go: %s", matching.ApplyStoredTunables(ctx, matchingStore))
 		// PROVIDER-APPLY-001：申请成为小美 + 运营审核。资料门与发帖同一道（profileCompleteness）。
 		providerStore := providerapp.NewPostgres(pool)

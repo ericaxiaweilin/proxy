@@ -16,6 +16,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
+	"github.com/proxy-app/proxy-api/internal/dispatch"
 	"github.com/proxy-app/proxy-api/internal/emergency"
 	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/experience"
@@ -144,6 +145,9 @@ type Server struct {
 	// Matching：撮合排序的旋钮存储与决策留痕读模型（OPS-MATCHING-TUNABLES-001）。
 	// nil = 没配库，/v1/operator/matching 返回 NOT_CONNECTED，引擎按出厂默认跑。
 	Matching matching.ConsoleStore
+	// Dispatch：FAST 需求的自动派单（DISPATCH-LOOP-001）。nil = 没配库，工作台返回 NOT_CONNECTED。
+	Dispatch      *dispatch.Engine
+	DispatchStats DispatchStatsSource
 	// ProviderApps：接单权限申请 + 运营审核（ORDER-PERMISSION-001）。nil = 端点返回 503。
 	ProviderApps *providerapp.Service
 	// Audit：运营动作审计（OPS-AUDIT-001）。nil = 没配库，运营写口照样执行，
@@ -260,6 +264,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/matching", s.operatorConsole(s.operatorMatching))
 	mux.HandleFunc("/v1/operator/matching/trace", s.operatorConsole(s.operatorMatchingTrace))
 	mux.HandleFunc("/v1/operator/matching/tunables", s.operatorConsoleGated(http.MethodPost, ScopeMarketplace, s.operatorMatchingTunables))
+	mux.HandleFunc("/v1/operator/dispatch", s.operatorConsole(s.operatorDispatch))
+	mux.HandleFunc("/v1/operator/dispatch/run", s.operatorConsole(s.operatorDispatchRun))
+	mux.HandleFunc("/v1/operator/dispatch/actions", s.operatorConsoleGated(http.MethodPost, ScopeMarketplace, s.operatorDispatchAction))
 	mux.HandleFunc("/v1/operator/provider-applications", s.operatorConsole(s.operatorProviderApplications))
 	mux.HandleFunc("/v1/operator/provider-applications/review", s.operatorConsoleMethod(http.MethodPost, s.operatorProviderApplicationReview))
 	// OPS-ACCESS-001: 运营权限自己的可观测面 —— 词汇表 / 当前配置 / 我生效的 scope /
