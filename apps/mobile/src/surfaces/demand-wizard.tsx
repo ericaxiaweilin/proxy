@@ -664,7 +664,13 @@ function SummaryRow({ label, value, last }: { label: string; value: string; last
 }
 
 const styles = StyleSheet.create({
-  content: { paddingBottom: 32, paddingHorizontal: 16, paddingTop: 8 },
+  // 2026-10-06 用户：「这个页面2边不要留白」—— 页边距清零，整页通栏。
+  // 这个包裹层同时套着 head / tabs / hero / 搜索行 / quick-filter / 双栏
+  // deliveryLayout，所以清零是**整页**生效（标题、输入框、分段按钮一起贴边），
+  // 不只是那张双栏卡片。要只让双栏通栏就改这里成 16、给 deliveryLayout 加
+  // marginHorizontal: -16（一行的事，但那不是这次要的）。
+  // 与 market.tsx 的 contentFlat（订单/地图 tab 通栏）同一个做法。
+  content: { paddingBottom: 32, paddingHorizontal: 0, paddingTop: 8 },
   head: { alignItems: "center", flexDirection: "row", marginBottom: 8 },
   backBtn: { alignItems: "center", height: 38, justifyContent: "center", width: 38 },
   title: { color: color.ink, flex: 1, fontSize: 20, fontWeight: "900", textAlign: "center" },
