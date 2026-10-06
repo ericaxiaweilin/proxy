@@ -64,6 +64,13 @@ export type SceneCategoryEntry = {
 };
 
 /**
+ * `scenesForAction` 真正读的字段。约束收窄到这三项，而不是 `SceneCategoryBrief` ——
+ * 调用方手里的形状比它更瘦：发布需求向导拿的是 `SceneSpot`（有坐标，没有
+ * `visitedCount`），它要的是**同一份**关键词命中，不该为了过类型再写一套匹配。
+ */
+export type SceneMatchFields = { name: string; area: string; type: string };
+
+/**
  * 一个主动作分类下命中的真实场景。
  *
  * 单独提出来是因为**入口卡的计数**和**点进去那页列表的内容**必须是同一批
@@ -73,7 +80,7 @@ export type SceneCategoryEntry = {
  * 未知动作 id 返回空 —— 不是「匹配全部」。动作目录里新增一个 id 而忘了加
  * 归属词，就该看到空列表，而不是看到整个场景目录。
  */
-export function scenesForAction<T extends SceneCategoryBrief>(
+export function scenesForAction<T extends SceneMatchFields>(
   scenes: readonly T[],
   actionId: string,
 ): readonly T[] {

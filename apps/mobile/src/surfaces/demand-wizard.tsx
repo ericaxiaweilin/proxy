@@ -4,7 +4,7 @@
 // 选人（浏览+筛选+跳过）、规格、价格说明、成功页。发布走
 // marketplace.publish（成功即进市场）；选人仅浏览意向（发布恒为
 // 公开市场）；草稿存本机。一期备注随机会落库（见 demand-moments）。
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { MarketplaceClient } from "../marketplace-client";
 import type { MarketOpportunity } from "../market-fixtures";
@@ -18,6 +18,8 @@ import {
   filterSuppliers,
   MOMENT_ACTION_ID,
   MOMENT_TEMPLATES,
+  momentDistanceLabel,
+  momentMetaLine,
   momentStartPrice,
   PRO_LOGOS,
   PRO_SERVICES,
@@ -34,6 +36,11 @@ import { SCENE_ACTIONS } from "../components/scene-activity-discovery";
 import { Image } from "expo-image";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { localApiBaseUrl } from "../native-clients";
+// 卡面右下角的距离（用户选「接真实距离」）：真实定位 + 真实场景目录。
+import { getCurrentFix } from "../device-location";
+import { expoLocationApi } from "../device-location-native";
+import { loadSceneSpots, type SceneSpot } from "../activity-create-form";
+import type { SceneOrigin } from "../scene-shop-directory";
 import { ProxyBackGlyph } from "../components/proxy-foundation";
 import { ProxyIcon } from "../components/proxy-icon";
 
@@ -141,6 +148,10 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const [error, setError] = useState<string>();
   const [result, setResult] = useState<MarketOpportunity>();
   const [draftRestored, setDraftRestored] = useState(false);
+  // 卡面右下角的距离（用户选「接真实距离」）：真实场景目录 + 真实定位。
+  // 两者各管各、失败互不挡 —— 与 activity-wizard 同一套。
+  const [scenes, setScenes] = useState<readonly SceneSpot[]>([]);
+  const [origin, setOrigin] = useState<SceneOrigin>();
 
   // 草稿：本机存取上次的模板+规格，进页恢复，发布成功清除。
   useEffect(() => {
@@ -162,6 +173,27 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
+
+  // 距离角标的两个来源：公开场景目录（免登）+ 设备定位。
+  // getCurrentFix 默认**不弹**授权框（DEVICE-LOCATION-003：打开 App 就调，不能每次
+  // 冷启动都弹）—— 没授权/超时就返回 undefined，卡面整格不画距离，不编一个。
+  useEffect(() => {
+    let cancelled = false;
+    void loadSceneSpots(fetch, localApiBaseUrl)
+      .then((list) => { if (!cancelled) setScenes(list); })
+      .catch(() => undefined);
+    void getCurrentFix(expoLocationApi).then((fix) => {
+      if (!cancelled && fix) setOrigin({ latitude: fix.latitude, longitude: fix.longitude });
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // 每条模板的距离只跟「场景目录 / 定位」有关 —— 别每帧重算一遍归属词子串匹配。
+  const momentDistances = useMemo(() => {
+    const labels: Record<string, string> = {};
+    for (const item of MOMENT_TEMPLATES) labels[item.id] = momentDistanceLabel(scenes, item.id, origin);
+    return labels;
+  }, [scenes, origin]);
 
   async function saveDraft(): Promise<void> {
     if (!template) {
@@ -422,6 +454,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                 const active = template?.id === item.id;
                 const icon = actionIconFor(item.id);
                 const startPrice = momentStartPrice(item);
+                // 真实距离（你的定位 → 这类 Moment 最近的真实场景）。拿不到就是空串，
+                // 底行只剩时长 —— 见 demand-moments 的 momentDistanceLabel。
+                const distance = momentDistances[item.id] ?? "";
                 return (
                   <Pressable key={item.id} accessibilityLabel={`选择${item.title}`} onPress={() => pickTemplate(item)} style={[styles.catalogItem, active && styles.momentCardOn]}>
                     <View style={styles.momentEmoji}>
@@ -435,7 +470,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                         价格贴在**标题那一行**的右端，不在侧栏。此前是「左列 标题/描述/标签 +
                         右列 1:1 / 今晚 19:00」的两栏侧栏 —— 价格没落对行，1:1 又要先懂概念。
                         1:1 撤掉，换起步价（见 demand-moments 的 momentStartPrice）；
-                        「今晚 19:00」那个**具体时刻**换成模板时长（这类 Moment 大概要多久）。 */}
+                        底行是「距离 · 大概时长」：距离是**真实**的（用户选「接真实距离」，
+                        定位 → 最近的真实场景），时长取模板的 defaultDuration。 */}
                     <View style={styles.momentCopy}>
                       <View style={styles.momentTop}>
                         <Text selectable style={styles.momentTitle}>{item.title}</Text>
@@ -449,7 +485,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                         <View style={styles.catalogTags}>
                           {item.tags.map((tag) => <View key={tag} style={styles.catalogTag}><Text selectable style={styles.catalogTagText}>{tag}</Text></View>)}
                         </View>
-                        <Text selectable style={styles.momentMeta}>{item.defaultDuration}</Text>
+                        <Text selectable style={styles.momentMeta}>{momentMetaLine(distance, item)}</Text>
                       </View>
                     </View>
                   </Pressable>
@@ -801,7 +837,9 @@ const styles = StyleSheet.create({
   momentTop: { alignItems: "flex-start", flexDirection: "row", gap: 10, justifyContent: "space-between" },
   momentPrice: { alignItems: "flex-end", flexShrink: 0 },
   momentPriceNum: { color: color.ink, fontSize: 15, fontWeight: "900" },
-  momentPriceUnit: { color: color.muted, fontSize: 10, marginTop: 2 },
+  // 11pt 是底线（design-system-r3 的「读的文字不许小于 11pt」）—— 原型这里写 10.5，
+  // 但那是封面角标那类装饰的白名单口径；「起步价」是**读的**文字，不往白名单里塞。
+  momentPriceUnit: { color: color.muted, fontSize: 11, marginTop: 2 },
   // 原型 item-bottom / item-meta：tags 在左，meta 靠 marginLeft:auto 推到右端。
   // alignItems 用 flex-end 而不是 center：catalogTags 自带 marginTop 4（专业行在用），
   // center 会把它顶下去 2px，flex-end 则两个都贴底，看着才齐。

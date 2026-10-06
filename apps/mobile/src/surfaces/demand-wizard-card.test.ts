@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { MOMENT_TEMPLATES, momentStartPrice } from "../demand-moments";
+import { MOMENT_TEMPLATES, momentDistanceLabel, momentMetaLine, momentStartPrice } from "../demand-moments";
+import type { SceneSpot } from "../activity-create-form";
 
 // DEMAND-WIZARD-CARD-001: 发布需求卡片右侧那一格画什么。
 //
@@ -11,9 +12,11 @@ import { MOMENT_TEMPLATES, momentStartPrice } from "../demand-moments";
 //
 // 此前卡面右侧是一个独立侧栏：上格是 `defaultRatio`（`1:1`），下格是
 // `defaultTime`（`今晚 19:00`）。1:1 要用户先懂「几个人对几个人」才读得懂，撤掉；
-// 「今晚 19:00」是个**具体时刻**，换成模板时长（这类 Moment 大概要多久）。
+// 底行换成「距离 · 大概时长」。
 //
-// 这条钉守的是「1:1 和具体时刻别再回到卡面上」，以及「价格真的挂在标题那一行」。
+// 距离那一格**不编数**：用户在被问到数据源时选的是「接真实距离」，所以距离是
+// 「你的定位 → 这类 Moment 最近的真实场景」算出来的（见 momentDistanceLabel）。
+//
 // ⚠️ 反面断言只落在**渲染出来的节点**上（`item.xxx` / `styles.xxx`），不裸查「1:1」
 // 或「今晚 19:00」—— 这段注释和组件里的注释都写着那些字，裸查会被自己的注释喂红
 // （本仓有前科）。
@@ -41,14 +44,16 @@ describe("DEMAND-WIZARD-CARD-001 发布需求卡片右侧那一格", () => {
     expect(momentRow).not.toContain("styles.catalogSideTime");
   });
 
-  it("起步价挂在标题那一行的右端，时长在底行", () => {
+  it("起步价挂在标题那一行的右端，底行是「距离 · 时长」", () => {
     // 价格和标题同一个 flex 行（momentTop）—— 不是原来那个独立侧栏。
     expect(momentRow).toContain("styles.momentTop");
     expect(momentRow).toContain("styles.momentPriceNum");
     expect(momentRow).toContain("momentStartPrice(item)");
-    // 底行：tags 在左，时长靠 marginLeft:auto 推到右端（momentMeta）。
+    // 底行：tags 在左，meta 靠 marginLeft:auto 推到右端（momentMeta）。
     expect(momentRow).toContain("styles.momentBottom");
-    expect(momentRow).toContain("item.defaultDuration");
+    expect(momentRow).toContain("momentMetaLine(distance, item)");
+    // 距离来自真实定位 + 真实场景目录，不是写死的数。
+    expect(momentRow).toContain("momentDistances[item.id]");
   });
 
   it("起步价：有价才挂标签，面议不挂", () => {
@@ -63,5 +68,52 @@ describe("DEMAND-WIZARD-CARD-001 发布需求卡片右侧那一格", () => {
         expect(start.unit, `${template.title} 有价却没挂起步价标签`).not.toBe("");
       }
     }
+  });
+});
+
+describe("DEMAND-WIZARD-CARD-001 距离是算出来的，不是编的", () => {
+  const hanoi = { latitude: 21.0288, longitude: 105.8525 };
+  const spot = (over: Partial<SceneSpot>): SceneSpot => ({
+    id: "s", name: "", type: "", category: "", area: "", imageUrl: "",
+    latitude: Number.NaN, longitude: Number.NaN,
+    ...over
+  });
+  // 关键词命中 coffee 的归属词「咖啡」（ACTION_SCENE_KEYWORDS）。
+  const cafe = spot({ id: "c1", name: "Cafe Giang", type: "咖啡", area: "还剑湖", latitude: 21.0285, longitude: 105.8530 });
+
+  it("有定位 + 有真实场景 → 按原型口径给出距离", () => {
+    // 同一片街区，几十米级 —— 口径就是 formatShopDistance（不足 1km 写米）。
+    expect(momentDistanceLabel([cafe], "coffee", hanoi)).toMatch(/^\d+m$/);
+  });
+
+  it("取最近的那个场景，不是列表里第一个", () => {
+    const far = spot({ id: "c2", name: "Cafe 远", type: "咖啡", latitude: 21.20, longitude: 106.00 });
+    // 数组顺序反着来，结果必须一样 —— 否则就是「拿第一个」而不是「拿最近的」。
+    expect(momentDistanceLabel([far, cafe], "coffee", hanoi))
+      .toBe(momentDistanceLabel([cafe], "coffee", hanoi));
+    expect(momentDistanceLabel([far, cafe], "coffee", hanoi))
+      .not.toBe(momentDistanceLabel([far], "coffee", hanoi));
+  });
+
+  it("拿不到距离就返回空串，一个数都不编", () => {
+    // 没定位 —— 不拿河内市中心当「你的位置」。
+    expect(momentDistanceLabel([cafe], "coffee", undefined)).toBe("");
+    // 这一类没有归属词（打球 / 城市协助的 action id 目前就没有）—— 如实返回空。
+    expect(momentDistanceLabel([cafe], "ballgame", hanoi)).toBe("");
+    // 脏坐标 —— 不算，也不当成 0。
+    expect(momentDistanceLabel([spot({ id: "bad", name: "咖啡", type: "咖啡" })], "coffee", hanoi)).toBe("");
+    // 空目录。
+    expect(momentDistanceLabel([], "coffee", hanoi)).toBe("");
+  });
+
+  it("人在 50km 外就不写距离（shopCardDistance 的 FAR_AWAY 口径）", () => {
+    // 河内 → 胡志明市约 1100km：直线距离是真的，但对用户毫无意义。
+    expect(momentDistanceLabel([cafe], "coffee", { latitude: 10.7769, longitude: 106.7009 })).toBe("");
+  });
+
+  it("底行 = 距离 · 时长；没距离就只剩时长", () => {
+    const coffee = MOMENT_TEMPLATES.find((item) => item.id === "coffee")!;
+    expect(momentMetaLine("1.2km", coffee)).toBe(`1.2km · ${coffee.defaultDuration}`);
+    expect(momentMetaLine("", coffee)).toBe(coffee.defaultDuration);
   });
 });

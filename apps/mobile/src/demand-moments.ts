@@ -14,6 +14,12 @@
 
 import type { PublishMarketOpportunityInput } from "@proxy/contracts";
 import type { SupplierCandidate } from "./supply-client";
+import type { SceneSpot } from "./activity-create-form";
+// 距离这一格复用场景目录那套：归属词命中（scenesForAction）+ 直线距离
+// （sceneDistanceMeters）+ 原型口径的文案（shopCardDistance）。三样都是纯函数，
+// 不另写一份 —— 同一个动作在首页入口卡、场景目录页、发布向导里必须算得一样。
+import { scenesForAction } from "./scene-category-entries";
+import { sceneDistanceMeters, shopCardDistance, type SceneOrigin } from "./scene-shop-directory";
 // 只借字形**类型**（`import type` 会被完全擦除，不把 RN 组件拉进这个纯模块）。
 import type { ProxyIconName } from "./components/proxy-icon";
 
@@ -99,6 +105,45 @@ export function momentStartPrice(template: MomentTemplate): { amount: string; un
   return template.defaultPrice.trim() !== ""
     ? { amount: template.defaultPrice, unit: "起步价" }
     : { amount: template.priceRef, unit: "" };
+}
+
+/**
+ * 卡片右下角的距离（原型 `item-meta` 的 `dist`，如 `1.2km`）。
+ *
+ * 2026-10-06 用户：「有距离」。追问数据源后用户选的是**接真实距离**（不是照抄
+ * 原型里那串写死的 1.2km），所以这里一个数都不编：
+ *   · 距离 = 你的**真实定位** → 「这类 Moment 最近的**真实场景**」的直线距离。
+ *   · 场景目录走 GET /v1/reality-scenes（公开免登，与首页 / 场景目录页同一份）。
+ *   · 归属哪一类：模板 id → 动作 id（`MOMENT_ACTION_ID`），再交给 `scenesForAction`
+ *     按归属词命中 —— 和首页场景入口卡同一个函数，不另写一套子串匹配。
+ *   · 拿不到就返回**空串**、整格不画：没定位 / 这一类一个真实场景都没有
+ *     （打球与城市协助的 action id 目前就没有归属词，这是如实反映，不是缺陷）/
+ *     最近的那个也在 50km 外（`shopCardDistance` 的 FAR_AWAY 口径）。
+ *     不拿河内市中心当「你的位置」—— 那会把所有距离都算成假的。
+ */
+export function momentDistanceLabel(
+  scenes: readonly SceneSpot[],
+  templateId: string,
+  origin: SceneOrigin | undefined,
+): string {
+  if (!origin) return "";
+  const actionId = MOMENT_ACTION_ID[templateId];
+  if (actionId === undefined) return "";
+  let nearest: number | undefined;
+  for (const scene of scenesForAction(scenes, actionId)) {
+    const meters = sceneDistanceMeters(origin, scene);
+    if (meters === undefined) continue;
+    if (nearest === undefined || meters < nearest) nearest = meters;
+  }
+  return shopCardDistance(nearest);
+}
+
+/**
+ * 卡片底行的 meta（原型 `item-meta`：`dist · dur`）。
+ * 距离拿不到就只剩时长 —— 不写「—」占位（那看着像加载失败，见 formatShopDistance）。
+ */
+export function momentMetaLine(distance: string, template: MomentTemplate): string {
+  return [distance, template.defaultDuration].filter((part) => part !== "").join(" · ");
 }
 
 /**
