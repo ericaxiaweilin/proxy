@@ -829,9 +829,9 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                           {selected.category ? <Text selectable style={styles.metaPill}>{selected.category}</Text> : null}
                           <Text selectable style={styles.metaPill}>{selected.available ? "在售" : "已下架"}</Text>
                         </View>
-                        <View style={styles.linesEditActions}>
+                        <View style={[styles.linesEditActions, styles.panelActionsFlush]}>
                           <Pressable onPress={() => startEditProduct(s.id, selected)} style={[styles.createBtn, styles.linesEditCancel]}>
-                            <Text selectable style={styles.createBtnText}>编辑</Text>
+                            <Text selectable style={styles.linesEditCancelText}>编辑</Text>
                           </Pressable>
                           <Pressable onPress={() => void toggleProduct(s.id, selected)} style={styles.createBtn}>
                             <Text selectable style={styles.createBtnText}>{selected.available ? "下架" : "上架"}</Text>
@@ -865,7 +865,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         </Text>
                       </Pressable>
                       {productError ? <Text selectable style={styles.errorText}>{productError}</Text> : null}
-                      <View style={styles.linesEditActions}><Pressable onPress={() => { setEditingProductFor(undefined); setEditingProductId(undefined); }} style={[styles.createBtn, styles.linesEditCancel]}><Text selectable style={styles.createBtnText}>取消</Text></Pressable><Pressable disabled={savingProduct} onPress={() => void saveProduct(s.id)} style={styles.createBtn}><Text selectable style={styles.createBtnText}>{savingProduct ? "保存中…" : "保存"}</Text></Pressable></View>
+                      <View style={[styles.linesEditActions, styles.panelActionsFlush]}><Pressable onPress={() => { setEditingProductFor(undefined); setEditingProductId(undefined); }} style={[styles.createBtn, styles.linesEditCancel]}><Text selectable style={styles.linesEditCancelText}>取消</Text></Pressable><Pressable disabled={savingProduct} onPress={() => void saveProduct(s.id)} style={[styles.createBtn, savingProduct ? styles.createBtnBusy : null]}><Text selectable style={styles.createBtnText}>{savingProduct ? "保存中…" : "保存"}</Text></Pressable></View>
                     </View>
                   ) : null}</View></> : null}
 
@@ -1257,6 +1257,13 @@ const styles = StyleSheet.create({
   cancelBtn: { alignItems: "center", height: 50, justifyContent: "center", paddingHorizontal: 14 },
   cancelBtnText: { color: color.muted, fontSize: 15, fontWeight: "600" },
   linesEditCancel: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1 },
+  // 描边那版必须是深色字：白底 + createBtnText 的白字 = 一个看不见的「取消」
+  // （用户 2026-10-06 截图里那个空白椭圆就是这个）。
+  linesEditCancelText: { color: color.ink },
+  // managerPanel 里的动作行要跟面板内其它元素（输入框 / 上传照片）左对齐。
+  // linesEditActions 的 paddingHorizontal: 16 是给「经营资料」页级表单用的（那里对齐
+  // sectionCard），搬进面板就是再多缩进 16pt —— 和 2026-10-06 修的版心重复是同一类错。
+  panelActionsFlush: { paddingHorizontal: 0 },
   photoHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   photoHeadTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   photoHeadMeta: { color: color.muted, fontSize: 11 },
@@ -1333,7 +1340,11 @@ const styles = StyleSheet.create({
   qrActions: { flexDirection: "row", gap: 8, marginTop: 10 },
   storeQrNotice: { color: color.muted, fontSize: 11, marginTop: 6 },
   createInput: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 10, borderWidth: 1, color: color.ink, fontSize: 14, marginTop: 8, paddingHorizontal: 12, paddingVertical: 10 },
-  createBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, marginTop: 10, paddingVertical: 12 },
+  // 这个按钮只挂在 flexDirection: "row" 的动作行里（SKU 详情、菜品编辑器）⇒ 必须
+  // flex: 1 才撑得开。原来没有 flex，宽度就贴着文字，再叠 borderRadius: 999 就渲染成
+  // 一个竖椭圆（用户 2026-10-06 截图里「保存」两个字直接溢到圆外）。marginTop 也是
+  // 多余的：行自己已经有 marginTop: 10，留着还会把按钮从行的垂直中线上顶下去。
+  createBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, flex: 1, justifyContent: "center", paddingHorizontal: 14, paddingVertical: 12 },
   createBtnBusy: { opacity: 0.6 },
   createBtnText: { color: color.white, fontSize: 13, fontWeight: "800" },
   scopeNote: { backgroundColor: "#F7F4F8", borderRadius: 13, marginTop: 8, padding: 11 },
