@@ -4816,7 +4816,19 @@ if ! grep -qF 's.Moderation != nil && s.Moderation.Supports' \
   exit 1
 fi
 # 没接数据库实现的话，开发模式下内存仓储会静默吞掉举报。
-if ! grep -qF 'moderation.NewWithRepository(postgres.NewModerationRepository(pool))' \
+#
+# 2026-10-06 修正：这里原来钉的是整条字面量
+# `moderation.NewWithRepository(postgres.NewModerationRepository(pool))`。
+# ORDER-DISPUTE-001 要求 moderation 实现 TransactionalRepository（举报留痕与
+# 「通知用户结果」必须同生共死），所以仓储换成带 outbox 的
+# `NewModerationRepositoryWithOutbox(pool, outboxRepository)` —— 比原来更强，
+# 不是退化；但字面量没了，这条钉开始假红，而门禁是顺序 exit 1，它又把后面整条
+# 门禁一起挡掉。跟 2026-10-04 修的 HOME-FORYOU-LOCK-001 是同一个毛病：
+# 钉了某一种写法，没钉住语义。
+#
+# 现在钉语义：moderation 必须真的换掉内存仓、接上**某个 postgres 仓储**就过
+# （带不带 outbox 都过）—— 内存仓会静默吞掉举报，PG 仓不会。
+if ! grep -qE 'moderationService = moderation\.NewWithRepository\(postgres\.NewModerationRepository' \
      apps/api-go/cmd/api/main.go; then
   echo "  FAIL [COMP-REPORT-001]: the Postgres report repository is no longer" >&2
   echo "        wired, so reports would only live in memory." >&2
