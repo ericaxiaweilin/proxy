@@ -1948,15 +1948,22 @@ pnpm --dir apps/mobile exec vitest run src/profile-client.test.ts || exit $?
 echo "    PROFILE-001: PASS (server + mobile half wired to UpdateProfile / GetProfile)"
 
 # CANCEL-001: Order lifecycle enum included CANCELLED, but no
-# command ever wrote it. Either party (Requester or Agent) can
-# now cancel an OFFERED / CONFIRMED / EXECUTING order. The
-# me-orders surface shows a destructive outline button on every
+# command ever wrote it. 现在 Requester 与 Agent 都能取消订单，但
+# **只在取消窗口内**（窗口本身见 692bff42「12h / 5 分钟」）；
+# 一旦进了 EXECUTING 就谁都取消不了（ORDER_ALREADY_EXECUTING）。
+# The me-orders surface shows a destructive outline button on every
 # pre-terminal row; COMPLETED / CANCELLED rows hide it.
+#
+# 2026-10-06 修漂移：下面第二条原本 require 的
+# TestCancelOrderAgentCanCancelExecuting 已被 692bff42 删掉、换成
+# TestCancelOrderExecutingIsRejectedForEveryone（策略也跟着反了：执行中不可取消）。
+# 钉却还点着那个已经不存在的符号 ⇒ 门禁跑到这里就 exit 1，后面 2400+ 行全没跑。
+# 这里只按**已发布的行为**把名字对齐，不改策略 —— 策略在 692bff42 里，且自带新测试。
 require_test "CANCEL-001" "./internal/fulfillment" \
   "TestCancelOrderRequesterCanCancelOffered" \
   "apps/api-go/internal/fulfillment/service_test.go" || exit $?
 require_test "CANCEL-001" "./internal/fulfillment" \
-  "TestCancelOrderAgentCanCancelExecuting" \
+  "TestCancelOrderExecutingIsRejectedForEveryone" \
   "apps/api-go/internal/fulfillment/service_test.go" || exit $?
 require_test "CANCEL-001" "./internal/fulfillment" \
   "TestCancelOrderOutsiderForbidden" \
@@ -2405,14 +2412,25 @@ echo "    ORDER-FLOW-COPY-001: PASS"
 # no way to edit description / contact / hours / logo.
 # This tripwire asserts the inline edit form is wired
 # (startEditLines + saveLines + client.upsertStoreLines)
-# and that the createBtnBusy style exists so the saving
-# state has a visible disabled cue.
+# and that the lines editor's saving state has a visible
+# cue (savingLinesFor + saveBtnBusy) so the button doesn't
+# look dead while the write is in flight.
+#
+# 2026-10-06 修漂移：这条注释原先写「asserts … the createBtnBusy style exists」，
+# 但 ① 断言里**根本没有**这一条（注释在替一个不存在的断言背书），② createBtnBusy
+# 是**商品**保存按钮用的样式；lines 编辑器用的是 saveBtn / saveBtnBusy。
+# 现在补上真断言，并把样式名改对。
 if ! grep -q 'startEditLines\|saveLines' apps/mobile/src/surfaces/merchant-storefront.tsx; then
   echo "  FAIL [LINES-EDITOR-001]: storefront has no inline edit form for store lines" >&2
   exit 1
 fi
 if ! grep -q 'client.upsertStoreLines' apps/mobile/src/surfaces/merchant-storefront.tsx; then
   echo "  FAIL [LINES-EDITOR-001]: saveLines never calls client.upsertStoreLines" >&2
+  exit 1
+fi
+if ! grep -q 'savingLinesFor' apps/mobile/src/surfaces/merchant-storefront.tsx \
+  || ! grep -q 'saveBtnBusy' apps/mobile/src/surfaces/merchant-storefront.tsx; then
+  echo "  FAIL [LINES-EDITOR-001]: lines save button has no visible saving cue (savingLinesFor / saveBtnBusy)" >&2
   exit 1
 fi
 pnpm --dir apps/mobile exec vitest run src/business-client.test.ts >/dev/null || exit $?
