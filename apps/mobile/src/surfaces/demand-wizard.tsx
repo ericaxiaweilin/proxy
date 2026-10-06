@@ -615,12 +615,17 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
       ) : step === "scene" ? (
         <>
           {/* 选场景步（SCENE-CARD-REUSE-001）：**就是 home 场景卡片点进去的那份
-              场景 list 本体**（SceneShopDirectory 全屏 Modal，2026-10-06 用户两次
-              纠偏后定案：卡片复用还不算，列表也必须是同一段代码）。数据加载 /
-              距离排序 / 区域筛选 / 单店详情全是它自己的；onPick 把选中的场景
-              （名字 + 坐标）带进规格，onSkip 保留「暂不选」的出路，onClose 回
-              选 Moment。列表没货时它自己有诚实空态，不甩空白屏。 */}
+              场景 list 本体**（2026-10-06 用户三次纠偏：卡片复用不算、列表也必须
+              同一段代码；「原型是尽量合并在一页 你这是跳转2页的 还是尽量在一页吧」
+              —— **内嵌**本页，不再整页 Modal 跳出：embedded 模式去掉它自己的
+              Modal/顶栏/竖滚，数据加载/距离排序/单店详情仍是它自己的代码）。
+              点卡片 = 选中（onPick 名字+坐标）；点头像 = 单店详情
+              （AVATAR-DETAIL-001，内嵌下同页内切换）；「自动分配」= 不定地点
+              直接进规格。搭子类 Moment 绑人、目录里本来就没有场地，按同一条
+              一页口径直接进规格（advanceFromMoment 已分流），不单独跳页。 */}
+          <Text selectable style={styles.sectionSub}>先挑个地方 · 不想选就自动分配</Text>
           <SceneShopDirectory
+            embedded
             actionId={(template && MOMENT_ACTION_ID[template.id]) || ""}
             label={template?.title ?? ""}
             unit="家"

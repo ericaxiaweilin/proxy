@@ -183,6 +183,7 @@ export function SceneShopDirectory({
   onOpenScene,
   onPick,
   onSkip,
+  embedded,
 }: {
   actionId: string;
   label: string;
@@ -201,6 +202,15 @@ export function SceneShopDirectory({
   onPick?: ((scene: SceneShopBrief) => void) | undefined;
   /** 选择模式下「暂不选场景」的出路（保留原来的「暂不选，继续」语义）；浏览模式不传。 */
   onSkip?: (() => void) | undefined;
+  /**
+   * 一页内嵌（2026-10-06 用户：「原型是尽量合并在一页 你这是跳转2页的 还是
+   * 尽量在一页吧」）：发布向导把这份场景 list **内嵌**进自己的页面，不再整页
+   * Modal 跳出。内嵌时本组件不渲染 Modal 外壳和自带顶栏，也不自带竖向
+   * ScrollView（宿主根已是竖滚，嵌套竖滚互相抢手势）—— 竖向滚动交给宿主，
+   * 这里只铺内容；区域选择器也不进（它自带竖滚），排序条仍在。
+   * 浏览模式（home 等不传 embedded）一切照旧。
+   */
+  embedded?: boolean | undefined;
 }): React.JSX.Element {
   const safeArea = useSafeAreaInsets();
   const [scenes, setScenes] = useState<readonly SceneShopBrief[]>([]);
@@ -410,10 +420,18 @@ export function SceneShopDirectory({
   // 才退回目录里的 imageUrl。两个都没有就是灰底 —— 不编一张占位图。
   const heroUri = detail?.heroImageUrl || (selected ? absoluteNetworkURL(apiBaseUrl ?? "", selected.imageUrl) : undefined);
 
-  return (
-    <Modal animationType="slide" onRequestClose={() => (selectedId ? setSelectedId(undefined) : onClose())} visible>
-      <View style={[styles.page, { paddingTop: safeArea.top }]}>
-        {pickerOpen ? (
+  // 内嵌模式的滚动宿主：View（宿主管竖滚）或 ScrollView（浏览模式自带竖滚）。
+  const ScrollHost = (embedded ? View : ScrollView) as unknown as React.ComponentType<{
+    children?: React.ReactNode;
+    style?: unknown;
+    contentContainerStyle?: unknown;
+    showsVerticalScrollIndicator?: boolean;
+  }>;
+  const scrollHostProps: { style?: unknown; contentContainerStyle?: unknown; showsVerticalScrollIndicator?: boolean } = embedded
+    ? { style: styles.scrollBody }
+    : { contentContainerStyle: styles.scrollBody, showsVerticalScrollIndicator: false };
+
+  const directoryBody = pickerOpen ? (
           <LocationListPicker
             bottomInset={safeArea.bottom}
             footerLabel={areas.length > 0 ? `已选 ${areas.length} 个区域` : "未选择区域 · 默认显示全部"}
@@ -428,12 +446,14 @@ export function SceneShopDirectory({
             title="选择区域"
           />
         ) : selectedId === undefined ? (
-          <ScrollView contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
+          <ScrollHost {...scrollHostProps}>
+            {!embedded ? (
             <View style={styles.topbar}>
               <Pressable accessibilityLabel="返回" hitSlop={8} onPress={onClose} style={styles.roundButton}><ProxyBackGlyph /></Pressable>
               <Text selectable style={styles.topbarTitle}>{label}</Text>
               <View style={styles.topbarSpacer} />
             </View>
+            ) : null}
 
             <View style={styles.listHead}>
               <Text selectable style={styles.listTitle}>{`附近${label}`}<Text selectable style={styles.listCount}>{`  ${shopCountText(rows.length, unit)}`}</Text></Text>
@@ -449,8 +469,10 @@ export function SceneShopDirectory({
               ))}
             </ScrollView>
             {/* SCENE-LOCATION-PICKER-001: 只有唯一区域就不给这一行——点了没反应
-                的入口是死按钮。弹出的是跟「运动 · 羽毛球」共用的同一个选择器。 */}
-            {facets.length > 1 ? (
+                的入口是死按钮。弹出的是跟「运动 · 羽毛球」共用的同一个选择器。
+                内嵌模式不进这里：选择器自带竖滚（嵌套滚动抢手势），发布页里
+                排序条仍在、区域筛选属加分项。 */}
+            {!embedded && facets.length > 1 ? (
               <Pressable accessibilityLabel="选择区域" onPress={() => setPickerOpen(true)} style={styles.locationRow}>
                 <ProxyIcon color={color.magenta} name="pin" size={16} />
                 <Text selectable numberOfLines={1} style={styles.locationText}>
@@ -462,9 +484,13 @@ export function SceneShopDirectory({
 
             {/* 选择模式（onPick）才有这条出路：不想挑地方就空着地点直接发布。
                 浏览模式没有这一行 —— home 上没有「跳过场景」这个动作。 */}
+            {/* 自动分配（2026-10-06 用户：「自动分配 搭子也遵循原型设计的」）：
+                不想挑就把「定地点」交给系统 —— 地点留空继续发布（默认发到市场，
+                接单方确认；搭子类 Moment 绑人、目录里本来没有场地，同一条口径，
+                直接进规格不进场景 list）。行为 = 原 onSkip，只是把话说直白。 */}
             {onSkip ? (
-              <Pressable accessibilityLabel="暂不选场景" onPress={onSkip} style={styles.skipRow}>
-                <Text selectable style={styles.skipText}>暂不选场景，直接填地点 ›</Text>
+              <Pressable accessibilityLabel="自动分配" onPress={onSkip} style={styles.skipRow}>
+                <Text selectable style={styles.skipText}>不想选地方？自动分配 ›</Text>
               </Pressable>
             ) : null}
 
@@ -525,9 +551,9 @@ export function SceneShopDirectory({
 
             {rows.length > 0 ? <Text selectable style={styles.listEnd}>{shopListEndText(rows.length, unit)}</Text> : null}
             {notice ? <Text selectable style={styles.notice}>{notice}</Text> : null}
-          </ScrollView>
+          </ScrollHost>
         ) : (
-          <ScrollView contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
+          <ScrollHost {...scrollHostProps}>
             <View style={styles.hero}>
               {heroUri ? <Image contentFit="cover" source={{ uri: heroUri }} style={styles.heroImage} /> : <View style={[styles.heroImage, styles.photoPlaceholder]}><Text selectable style={styles.heroPlaceholderText}>{selected?.type.slice(0, 2) || "场景"}</Text></View>}
               <View pointerEvents="none" style={styles.heroShade} />
@@ -755,9 +781,15 @@ export function SceneShopDirectory({
               {detail ? <Text selectable style={styles.boundary}>{detail.truthBoundary}</Text> : null}
               {notice ? <Text selectable style={styles.notice}>{notice}</Text> : null}
             </View>
-          </ScrollView>
-        )}
-      </View>
+          </ScrollHost>
+        );
+
+  // 内嵌：内容直接交给宿主页面（发布向导的滚动容器），不再整页弹出。
+  if (embedded) return directoryBody;
+
+  return (
+    <Modal animationType="slide" onRequestClose={() => (selectedId ? setSelectedId(undefined) : onClose())} visible>
+      <View style={[styles.page, { paddingTop: safeArea.top }]}>{directoryBody}</View>
     </Modal>
   );
 }
