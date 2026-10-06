@@ -91,6 +91,10 @@ export type DemandSpecs = {
   // 无 = 老行为（纯文字地点、无钉）。草稿持久化顺带存取。
   lat?: number | undefined;
   lng?: number | undefined;
+  // MARKET-FAST-001: 快速撮合（可选，缺省 false = 自己挑报名的人）。
+  // true = 发布带 matchingMode:"FAST"，由平台按撮合排名代选报名人
+  // （她 5 分钟内确认即成单，超时自动换下一位）。
+  fast?: boolean;
 };
 
 export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
@@ -101,7 +105,8 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
     place: template.venue,
     prefs: ["公共场所见面"],
     price: template.defaultPrice,
-    notes: ""
+    notes: "",
+    fast: false
   };
 }
 
@@ -134,7 +139,9 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
     skills,
     lens: ["NOW", "NEARBY"],
     ...(notes === "" ? {} : { desc: notes.slice(0, 500) }),
-    ...(hasPin ? { lat: specs.lat as number, lng: specs.lng as number } : {})
+    ...(hasPin ? { lat: specs.lat as number, lng: specs.lng as number } : {}),
+    // MARKET-FAST-001: 只有选了「快速」才带这个键；默认（自己挑）输出与改动前一致。
+    ...(specs.fast ? { matchingMode: "FAST" as const } : {})
   };
 }
 

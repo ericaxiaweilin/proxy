@@ -685,6 +685,16 @@ export interface Messages {
   "market.rank.newcomer": string;
   "market.rank.busy": string;
   "market.application.selectionExpired": string;
+  // ---- MARKET-FAST-001：发布向导规格步的「谁来挑报名的人」----
+  //
+  // 二选一（自己挑 / 平台按排名代选）+ 随选择变化的那一行说明。这一屏其余文案
+  // 仍是硬编码中文，但 MARKET-FAST-001 带来的这四句走字典：它决定的是**谁能
+  // 成交**（平台代选＝成单对象由平台挑），写死中文时切到别的语言，选项与后果
+  // 说明都留在中文 —— 用户看的是会改变撮合结果的那一句。
+  "demand.matching.manual": string;
+  "demand.matching.fast": string;
+  "demand.matching.manualHint": string;
+  "demand.matching.fastHint": string;
 }
 
 const ZH: Messages = {
@@ -1265,6 +1275,10 @@ settingsCacheClearedWith: "缓存已清理，释放 {size}",
   "market.rank.newcomer": "新人",
   "market.rank.busy": "手上有单",
   "market.application.selectionExpired": "已选中，超时未确认",
+  "demand.matching.manual": "自己挑报名的人",
+  "demand.matching.fast": "快速：平台帮我选",
+  "demand.matching.manualHint": "报名的人你自己看、自己选。",
+  "demand.matching.fastHint": "平台按综合排名替你选中报名的人，她 5 分钟内确认就成单，没确认自动换下一位。",
 };
 
 const VI: Messages = {
@@ -1846,6 +1860,10 @@ settingsCacheClearedWith: "Đã dọn bộ nhớ đệm, giải phóng {size}",
   "market.rank.newcomer": "Người mới",
   "market.rank.busy": "Đang có đơn",
   "market.application.selectionExpired": "Đã chọn, hết giờ mà chưa xác nhận",
+  "demand.matching.manual": "Tự chọn người đăng ký",
+  "demand.matching.fast": "Nhanh: nền tảng chọn hộ",
+  "demand.matching.manualHint": "Người đăng ký thì bạn tự xem và tự chọn.",
+  "demand.matching.fastHint": "Nền tảng chọn người đăng ký theo thứ hạng tổng hợp; cô ấy xác nhận trong 5 phút thì thành đơn, không xác nhận thì tự động chuyển sang người kế tiếp.",
 };
 
 const EN: Messages = {
@@ -2427,6 +2445,10 @@ settingsCacheClearedWith: "Cache cleared, {size} freed",
   "market.rank.newcomer": "Newcomer",
   "market.rank.busy": "Already booked",
   "market.application.selectionExpired": "Selected, not confirmed in time",
+  "demand.matching.manual": "Pick who applies myself",
+  "demand.matching.fast": "Fast: platform picks for me",
+  "demand.matching.manualHint": "You review who applies and pick them yourself.",
+  "demand.matching.fastHint": "The platform picks who applies by overall ranking. If she confirms within 5 minutes the order is placed; if she doesn't, it moves to the next one.",
 };
 
 const LO: Messages = {
@@ -3007,6 +3029,10 @@ settingsCacheClearedWith: "ລ້າງ cache ແລ້ວ, ຄືນ {size}",
   "market.rank.newcomer": "ຄົນໃໝ່",
   "market.rank.busy": "ມີວຽກຢູ່ແລ້ວ",
   "market.application.selectionExpired": "ໄດ້ເລືອກແລ້ວ ແຕ່ບໍ່ໄດ້ຢືນຢັນໃນເວລາ",
+  "demand.matching.manual": "ເລືອກຄົນທີ່ລົງຊື່ເອງ",
+  "demand.matching.fast": "ໄວ: ແພລັດຟອມເລືອກໃຫ້",
+  "demand.matching.manualHint": "ຄົນທີ່ລົງຊື່ ທ່ານເບິ່ງແລະເລືອກເອງ.",
+  "demand.matching.fastHint": "ແພລັດຟອມເລືອກຄົນທີ່ລົງຊື່ຕາມອັນດັບລວມ; ເຂົາຢືນຢັນພາຍໃນ 5 ນາທີແລ້ວຈຶ່ງເປັນເຄາີ, ບໍ່ຢືນຢັນກໍລົງໄປໃຫ້ຄົນຄົນຖັດໄປ.",
 };
 
 const KO: Messages = {
@@ -3587,6 +3613,10 @@ settingsCacheClearedWith: "캐시를 정리해 {size}를 확보했습니다",
   "market.rank.newcomer": "신규 참가자",
   "market.rank.busy": "이미 예약된 일 있음",
   "market.application.selectionExpired": "선택되었으나 시간 내 확인하지 않음",
+  "demand.matching.manual": "신청자 직접 고르기",
+  "demand.matching.fast": "빠른 매칭: 플랫폼이 대신 고름",
+  "demand.matching.manualHint": "신청한 사람은 직접 확인하고 직접 고릅니다.",
+  "demand.matching.fastHint": "플랫폼이 종합 순위 순으로 신청자를 대신 고릅니다. 5분 이내에 확정하면 成約, 확정하지 않으면 자동으로 다음 분에게 넘어갑니다.",
 };
 
 const JA: Messages = {
@@ -4167,6 +4197,10 @@ settingsCacheClearedWith: "キャッシュを削除し、{size} 空きました"
   "market.rank.newcomer": "新規参加者",
   "market.rank.busy": "別の予約あり",
   "market.application.selectionExpired": "選ばれましたが時間内に確認されませんでした",
+  "demand.matching.manual": "応募者は自分で選ぶ",
+  "demand.matching.fast": "速攻: プラットフォームが代行",
+  "demand.matching.manualHint": "応募した人は自分で見て、自分で選びます。",
+  "demand.matching.fastHint": "プラットフォームが総合順位で応募者を選びます。5分以内に確定すれば成約、確定しなければ自動的に次の方へ回ります。",
 };
 
 export const I18N: Record<Language, Messages> = {

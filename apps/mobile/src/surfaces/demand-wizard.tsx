@@ -10,6 +10,7 @@ import type { MarketplaceClient } from "../marketplace-client";
 import type { MarketOpportunity } from "../market-fixtures";
 import type { SupplierCandidate, SupplyClient } from "../supply-client";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
+import { useI18n } from "../i18n";
 import { color } from "../theme";
 import {
   buildDemandPublishInput,
@@ -72,6 +73,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   onViewMarket: () => void;
   onCreateActivity: () => void;
 }): React.JSX.Element {
+  const { t } = useI18n();
   const [step, setStep] = useState<Step>("moment");
   // UI-ORDER-LOGO-001: Moment 图标复用场景动作既有 logo（不是另做一套）
   const actionIconFor = (momentId: string): number | undefined => SCENE_ACTIONS.find((item) => item.id === MOMENT_ACTION_ID[momentId])?.icon as number | undefined;
@@ -621,6 +623,20 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           <Text selectable style={styles.hint}>参考 {template?.priceRef} · 可协商；现场消费不包含在内。</Text>
           <Text selectable style={styles.hint}>ⓘ 价格由场景基础价、时间、人数和额外偏好组成；偏好只用于匹配，不按行为收费。服务参考价；餐饮、咖啡、KTV、门票等现场消费不包含在内。</Text>
 
+          {/* MARKET-FAST-001：谁来挑报名的人。二选一（默认「自己挑」，与改动前
+              一致）。选「快速」= 同意平台按撮合排名代选报名人（她 5 分钟内确认
+              即成单，超时自动换下一位），发布时带 matchingMode:"FAST"。四句文案
+              走字典 —— 它说明的是谁能成交，不该写死中文。 */}
+          <View style={[styles.chipRow, styles.matchRow]}>
+            <Pressable onPress={() => setSpecs((prev) => ({ ...prev, fast: false }))} style={[styles.chip, specs.fast !== true && styles.chipOn]}>
+              <Text selectable style={[styles.chipText, specs.fast !== true && styles.chipTextOn]}>{t("demand.matching.manual")}</Text>
+            </Pressable>
+            <Pressable onPress={() => setSpecs((prev) => ({ ...prev, fast: true }))} style={[styles.chip, specs.fast === true && styles.chipOn]}>
+              <Text selectable style={[styles.chipText, specs.fast === true && styles.chipTextOn]}>{t("demand.matching.fast")}</Text>
+            </Pressable>
+          </View>
+          <Text selectable style={styles.hint}>{specs.fast === true ? t("demand.matching.fastHint") : t("demand.matching.manualHint")}</Text>
+
           <Text selectable style={styles.fieldLabel}>备注 · 可选</Text>
           <TextInput maxLength={500} multiline onChangeText={(notes) => setSpecs((prev) => ({ ...prev, notes }))} placeholder="补充说明（随订单展示）" placeholderTextColor={color.muted} style={[styles.input, styles.notesInput]} value={specs.notes} />
 
@@ -785,6 +801,8 @@ const styles = StyleSheet.create({
   specSummary: { backgroundColor: color.surface, borderRadius: 12, marginBottom: 4, padding: 10 },
   specSummaryText: { color: color.ink, fontSize: 12, lineHeight: 18 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  // MARKET-FAST-001：撮合方式二选一与上方价格说明拉开一段（同 fieldLabel 的间距）。
+  matchRow: { marginTop: 14 },
   chip: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 8 },
   chipOn: { backgroundColor: color.ink, borderColor: color.ink },
   chipText: { color: color.ink, fontSize: 13, fontWeight: "700" },
