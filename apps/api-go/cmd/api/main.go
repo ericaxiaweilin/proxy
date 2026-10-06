@@ -19,6 +19,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/dispatch"
 	"github.com/proxy-app/proxy-api/internal/emergency"
 	"github.com/proxy-app/proxy-api/internal/engagement"
+	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/experience"
 	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
@@ -399,6 +400,15 @@ func main() {
 		dispatchEngine = newDispatchEngine(dispatchStore, fulfillmentService)
 		// MARKET-FAST-001：同一个引擎也代选快速市场发单的报名人。
 		wireMarketDispatch(dispatchEngine, marketplaceService)
+		// MARKET-SELECT-NOTIFY-001：发单方自己选了人 ⇒ 告诉被选中的那位（平台代选的由派单发，不重复）。
+		marketplaceService.SetManualSelectHook(func(ctx context.Context, ownerID string, app marketplace.Application) {
+			ev := event.New("MarketApplicationSelected", "MarketApplication", app.ID, 1, ownerID, app.ID, app.ID, time.Now().UTC(), map[string]any{
+				"notifyPrincipalId": app.ApplicantID, "opportunityId": app.OpportunityID, "applicationId": app.ID, "byPlatform": false,
+			})
+			if err := outboxRepository.Publish(ctx, ev); err != nil {
+				log.Printf("market select notify: outbox publish failed application=%s: %v", app.ID, err)
+			}
+		})
 		demandService.SetBatchCreator(newSupplyBatchCreator(supplyService, dispatchEngine))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)

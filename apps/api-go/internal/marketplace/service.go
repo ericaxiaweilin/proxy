@@ -37,6 +37,8 @@ type Service struct {
 	// MARKET-FAST-001：快速发单的派单钩子。nil = 不派（无库 / 测试）。
 	onFastPublished func(ctx context.Context, opportunity Opportunity)
 	onApplied       func(ctx context.Context, opportunityID, applicantID string)
+	// MARKET-SELECT-NOTIFY-001：发单方**自己**选了人之后（平台代选的由派单自己通知，不重复）。
+	onManualSelect func(ctx context.Context, ownerID string, application Application)
 	// numbers 给发布的需求 / 邀约分配全数字编号（PUBLIC-NO-001）。与订单编号同一个
 	// 分配器：一个号只指向一样东西。PG 仓默认用共享序列；main.go 注入同一个实例。
 	numbers      ordernumber.Allocator
@@ -597,6 +599,11 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		}
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_SELECT_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_select_failed", nil)
+		}
+		// MARKET-SELECT-NOTIFY-001：被选中的人以前收不到任何通知，只能自己刷到。平台代选的那次
+		// （AuthContext.delegatedBy=dispatch）由派单引擎在同一事务里发，这里跳过，免得她收到两条。
+		if delegated, _ := e.AuthContext["delegatedBy"].(string); delegated != "dispatch" && s.onManualSelect != nil {
+			s.onManualSelect(ctx, e.Actor.ID, selected)
 		}
 		return payload(e, "MarketApplication", selected.ID, selected.Status, map[string]any{"application": selected})
 	case "ConfirmMarketApplication":
@@ -1270,4 +1277,9 @@ func (r *MemoryRepository) ExpireSelection(_ context.Context, opportunityID, app
 		}
 	}
 	return nil
+}
+
+// SetManualSelectHook 接上「发单方自己选了人」之后的通知。
+func (s *Service) SetManualSelectHook(hook func(ctx context.Context, ownerID string, application Application)) {
+	s.onManualSelect = hook
 }

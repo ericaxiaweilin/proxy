@@ -275,15 +275,22 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 
 	// MARKET-FAST-001：快速发单里平台替发单方选中了她。不告诉她，她就不知道要在 5 分钟内确认，
 	// 代选会一个接一个超时。收件人是 notifyPrincipalId（报名人的用户账号），不回退。
+	//
+	// MARKET-SELECT-NOTIFY-001：发单方**自己**选的人也走这一条（byPlatform=false）：没有 5 分钟限时，
+	// 文案不能吓她。两种都带 /market/<机会> 深链，点开就是要确认的那张单。
 	case "MarketApplicationSelected":
 		if who, ok := merchantCreatorRecipient(); ok {
-			return who, "你被选中了", "发单方选了你，5 分钟内确认就成单；超时会换下一位", "", true
+			link := marketDeepLink(payloadString("opportunityId"))
+			if byPlatform, _ := e.Payload["byPlatform"].(bool); byPlatform {
+				return who, "你被选中了", "发单方选了你，5 分钟内确认就成单；超时会换下一位", link, true
+			}
+			return who, "你被选中了", "发单方选了你，去确认就成单", link, true
 		}
 		return "", "", "", "", false
 	// MARKET-INVITE-001：快速发单迟迟没人报名，按撮合排名邀请附近合适的人。
 	case "MarketOpportunityInvited":
 		if who, ok := merchantCreatorRecipient(); ok {
-			return who, "附近有个单适合你", "有人在你附近发了单，去市场看看要不要报名", "", true
+			return who, "附近有个单适合你", "有人在你附近发了单，去市场看看要不要报名", marketDeepLink(payloadString("opportunityId")), true
 		}
 		return "", "", "", "", false
 	case "CollabInvitationCreated":
@@ -733,4 +740,12 @@ func payloadText(payload map[string]any, key string) string {
 	}
 	v, _ := payload[key].(string)
 	return v
+}
+
+// marketDeepLink 是市场单的站内深链；没有机会 id 就不给链接（点开只标已读），不拼一个打不开的路径。
+func marketDeepLink(opportunityID string) string {
+	if opportunityID == "" {
+		return ""
+	}
+	return "/market/" + opportunityID
 }

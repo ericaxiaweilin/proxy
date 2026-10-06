@@ -991,3 +991,23 @@ func TestInboxForEventRoutesMarketDispatchNoticesToTheApplicant(t *testing.T) {
 		}
 	}
 }
+
+// MARKET-SELECT-NOTIFY-001：平台代选的说「5 分钟」，发单方自己选的不限时、不能吓她；两种都点开就是那张单。
+func TestMarketSelectionNoticeDependsOnWhoSelectedAndLinksToTheOpportunity(t *testing.T) {
+	platform := event.DomainEvent{EventType: "MarketApplicationSelected", Payload: map[string]any{
+		"notifyPrincipalId": "user_amy", "opportunityId": "opp_1", "byPlatform": true}}
+	_, _, body, link, ok := inboxForEvent(platform)
+	if !ok || !strings.Contains(body, "5 分钟") || link != "/market/opp_1" {
+		t.Fatalf("platform pick: body=%q link=%q", body, link)
+	}
+	manual := event.DomainEvent{EventType: "MarketApplicationSelected", Payload: map[string]any{
+		"notifyPrincipalId": "user_amy", "opportunityId": "opp_1", "byPlatform": false}}
+	_, _, body, link, ok = inboxForEvent(manual)
+	if !ok || strings.Contains(body, "5 分钟") || link != "/market/opp_1" {
+		t.Fatalf("a poster's own pick has no countdown: body=%q link=%q", body, link)
+	}
+	noOpp := event.DomainEvent{EventType: "MarketOpportunityInvited", Payload: map[string]any{"notifyPrincipalId": "user_amy"}}
+	if _, _, _, link, ok := inboxForEvent(noOpp); !ok || link != "" {
+		t.Fatalf("without an opportunity id there is no link to fake: %q", link)
+	}
+}

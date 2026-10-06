@@ -546,7 +546,7 @@ func EventsFor(run Run, steps []Step) []event.DomainEvent {
 			out = append(out, event.New("MarketApplicationSelected", "MarketApplication", st.OfferID, 1, run.RequesterID,
 				run.ID, run.ID, st.At, map[string]any{
 					"notifyPrincipalId": st.AgentID, "opportunityId": run.TaskID, "applicationId": st.OfferID,
-					"confirmWithinSeconds": int(OfferTTL / time.Second),
+					"confirmWithinSeconds": int(OfferTTL / time.Second), "byPlatform": true,
 				}))
 		case st.Kind == StepInvited:
 			invitees, _ := st.Detail["invitees"].([]string)

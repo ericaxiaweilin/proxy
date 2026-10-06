@@ -565,7 +565,8 @@ func (s *Service) markRead(ctx context.Context, e command.Envelope) command.Resu
 // 这边就**只认**什么深链。不在这张表里的一律拒绝 —— 客户端路由表里没有的
 // 路径跳过去就是白屏，而 `javascript:` / `//evil.com` 这类伪装成「相对路径」
 // 的东西更糟。加新的深链类型时两边一起加，别只加生产者。
-var deepLinkPrefixes = []string{"/tasks/", "/offers/", "/orders/", "/vouchers/", "/invitations/"}
+// /market/<opportunityId>：MARKET-SELECT-NOTIFY-001（被选中 / 被邀请报名的通知点开就是那张单）。
+var deepLinkPrefixes = []string{"/tasks/", "/offers/", "/orders/", "/vouchers/", "/invitations/", "/market/"}
 
 // deepLinkScheme 是 app 自己的 URL scheme（apps/mobile/app.json 的 "scheme": "proxy"）。
 //

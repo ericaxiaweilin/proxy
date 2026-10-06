@@ -88,3 +88,37 @@ func TestRankingFailureFallsBackToApplyOrder(t *testing.T) {
 		t.Fatalf("the list still opens, in apply order, without ranks: %+v", apps)
 	}
 }
+
+// MARKET-SELECT-NOTIFY-001：发单方自己选人 ⇒ 钩子被调（通知她）；平台代选（delegatedBy=dispatch）⇒ 不调，
+// 那条由派单引擎在同一事务里发，否则她会收到两条。
+func TestManualSelectNotifiesButAPlatformPickDoesNotTwice(t *testing.T) {
+	s := New()
+	var notified []string
+	s.SetManualSelectHook(func(_ context.Context, ownerID string, app Application) {
+		notified = append(notified, ownerID+"->"+app.ApplicantID)
+	})
+	id := publishAndApply(t, s, "amy", "bao")
+	byApplicant := map[string]string{}
+	for _, a := range listApplications(t, s, id) {
+		byApplicant[a.ApplicantID] = a.ID
+	}
+	env := marketEnvelope("SelectMarketApplication", "owner", map[string]any{"opportunityId": id, "applicationId": byApplicant["amy"]})
+	env.AuthContext = map[string]any{"delegatedBy": "dispatch"}
+	if r := s.HandleContext(t.Context(), env); r.Outcome != "ACCEPTED" {
+		t.Fatalf("platform select: %+v", r)
+	}
+	if len(notified) != 0 {
+		t.Fatalf("a platform pick is notified by the dispatcher, not here: %v", notified)
+	}
+	if err := s.ExpireSelection(t.Context(), id, byApplicant["amy"], "owner"); err != nil {
+		t.Fatal(err)
+	}
+	manual := marketEnvelope("SelectMarketApplication", "owner", map[string]any{"opportunityId": id, "applicationId": byApplicant["bao"]})
+	manual.IdempotencyKey = "manual_bao"
+	if r := s.HandleContext(t.Context(), manual); r.Outcome != "ACCEPTED" {
+		t.Fatalf("manual select: %+v", r)
+	}
+	if len(notified) != 1 || notified[0] != "owner->bao" {
+		t.Fatalf("the poster picking bao himself tells bao: %v", notified)
+	}
+}

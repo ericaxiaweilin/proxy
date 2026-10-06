@@ -124,6 +124,7 @@ func TestResolvableDeepLinkAcceptsEveryPrefixTheWorkerProduces(t *testing.T) {
 		"/orders/ord_1",
 		"/vouchers/vch_1",
 		"/invitations/inv_1",
+		"/market/opp_1", // MARKET-SELECT-NOTIFY-001
 	}
 	for _, link := range produced {
 		if !isResolvableDeepLink(link) {
