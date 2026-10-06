@@ -193,9 +193,10 @@ export function SceneShopDirectory({
   /**
    * SCENE-CARD-REUSE-001 / 场景选择模式（2026-10-06）：给了 onPick = 这份场景
    * list 被当作**选择器**用（目前唯一调用方：发布向导的「选场景」步）——
-   * 单店详情页的主按钮从「让小美来这个场景」换成「选这个场景」，点了把选中的
-   * 场景原样交回给调用方（名字 + 坐标），由调用方决定接下来去哪。
-   * 不给 onPick 就是 home 同款浏览模式，行为一点不变。
+   * 列表卡片点了**直接选中**回发布流（onPick(scene)），**不进单店详情**
+   * （场景主页）：用户口径「我发布需求 要一直发布订单的 而不是去看场景主页」，
+   * 看主页是场景浏览的工作流，不是发布的工作流。
+   * 不给 onPick 就是 home 同款浏览模式，点卡片照旧进详情，行为一点不变。
    */
   onPick?: ((scene: SceneShopBrief) => void) | undefined;
   /** 选择模式下「暂不选场景」的出路（保留原来的「暂不选，继续」语义）；浏览模式不传。 */
@@ -475,7 +476,10 @@ export function SceneShopDirectory({
                     const distance = shopCardDistance(sceneDistanceMeters(origin, scene));
                     const address = shopAddressLine(scene);
                     const signal = shopCardSignal(scene);
-                    return <Pressable accessibilityLabel={`场景 ${scene.name}`} key={scene.id} onPress={() => setSelectedId(scene.id)} style={styles.card}>
+                    // 选择模式（onPick）：点卡片**直接选中**回发布流 —— 用户口径
+                    // 「我发布需求 要一直发布订单的 而不是去看场景主页」，单店
+                    // 详情（场景主页）在选择模式下不接。浏览模式照旧进详情。
+                    return <Pressable accessibilityLabel={onPick ? `选择场景 ${scene.name}` : `场景 ${scene.name}`} key={scene.id} onPress={() => (onPick ? onPick(scene) : setSelectedId(scene.id))} style={styles.card}>
                       <View style={styles.cardPhoto}>
                         {photo ? <Image contentFit="cover" source={{ uri: photo }} style={styles.cardImage} /> : <View style={[styles.cardImage, styles.photoPlaceholder]}><Text selectable style={styles.photoPlaceholderText}>{scene.type.slice(0, 2) || "场景"}</Text></View>}
                         {scene.hereCount !== undefined && scene.hereCount > 0 ? <View style={styles.liveDot} /> : null}
@@ -584,21 +588,15 @@ export function SceneShopDirectory({
               </View> : null}
               <Text selectable style={styles.checkinHint}>{checkinHint(hereChecked, checkinDistance)}</Text>
 
-              {/* 选择模式（onPick）主按钮换成「选这个场景」：向导要的是把场景
-                  带回去，不是走邀约链路；浏览模式（没有 onPick）照旧是邀约
-                  CTA —— 那条链路要选人 + 填报酬 + 两步命令，复制一份就是
-                  第二个真相，所以转交给场景自己的那一屏去做。 */}
-              {onPick ? (
-                <Pressable accessibilityLabel="选这个场景" disabled={!selected} onPress={() => { if (selected) onPick(selected); }} style={[styles.primaryAction, !selected && styles.actionButtonBusy]}>
-                  <Text selectable style={styles.primaryActionText}>选这个场景</Text>
-                  <Text selectable style={styles.primaryActionSub}>名字和位置会自动带到发布单里</Text>
-                </Pressable>
-              ) : (
-                <Pressable accessibilityLabel="让小美来这个场景" disabled={!selected || !onOpenScene} onPress={() => { if (selected) onOpenScene?.(selected.id); }} style={[styles.primaryAction, (!selected || !onOpenScene) && styles.actionButtonBusy]}>
-                  <Text selectable style={styles.primaryActionText}>让小美来这个场景</Text>
-                  <Text selectable style={styles.primaryActionSub}>约她出图 / 同行 · 选人、时间、报酬在场景页里定</Text>
-                </Pressable>
-              )}
+              {/* 邀约那条链路要选人 + 填报酬 + 两步命令 —— 复制一份就是第二个
+                  真相，所以转交给场景自己的那一屏去做。
+                  选择模式（onPick）到不了这一屏：列表卡片直接 onPick 回发布流，
+                  场景主页在选择模式下不接（用户：「我发布需求 要一直发布订单的
+                  而不是去看场景主页」）。 */}
+              <Pressable accessibilityLabel="让小美来这个场景" disabled={!selected || !onOpenScene} onPress={() => { if (selected) onOpenScene?.(selected.id); }} style={[styles.primaryAction, (!selected || !onOpenScene) && styles.actionButtonBusy]}>
+                <Text selectable style={styles.primaryActionText}>让小美来这个场景</Text>
+                <Text selectable style={styles.primaryActionSub}>约她出图 / 同行 · 选人、时间、报酬在场景页里定</Text>
+              </Pressable>
 
               {/* SCENE-HOME-DETAIL-001（2026-09-27）：参考稿第 3 屏比对了下面三块，
                   之前这一屏**故意没画**（缺数据源）。后端已经发下来 humans /
