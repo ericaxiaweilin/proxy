@@ -36,6 +36,24 @@ describe("R58 demand wizard mapping", () => {
     expect(PublishMarketOpportunityInputSchema.safeParse(input).success).toBe(true);
   });
 
+  // DEMAND-HEADCOUNT-001（2026-10-06，用户：「你们几人就不要搞1:1了 如实输入人数
+  // 就好了」）：人数是如实填的自由文本。三种形状各有各的待遇：
+  //   纯数字   → 补「人」字（发布行读得通：「… · 2 人」）；
+  //   自带单位 → 原样带上（「2 大 1 小」不许被机器改成「2 大 1 小 人」）；
+  //   没填     → 从发布行里整个消失，不甩一个孤零零的「·」。
+  // 默认规格也不再预填 defaultRatio —— defaultSpecsFor 的 ratio 恒为空串。
+  it("keeps headcount verbatim, units only for bare digits", () => {
+    const template = MOMENT_TEMPLATES[0]!;
+    expect(defaultSpecsFor(template).ratio).toBe("");
+    const bare = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "2", time: "今晚 19:00", duration: "2 小时" });
+    expect(bare.time).toBe("今晚 19:00 · 2 小时 · 2 人");
+    const verbatim = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "2 大 1 小", time: "今晚 19:00", duration: "2 小时" });
+    expect(verbatim.time).toBe("今晚 19:00 · 2 小时 · 2 大 1 小");
+    const empty = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "  ", time: "今晚 19:00", duration: "2 小时" });
+    expect(empty.time).toBe("今晚 19:00 · 2 小时");
+    expect(PublishMarketOpportunityInputSchema.safeParse(bare).success).toBe(true);
+  });
+
   it("falls back without ever emitting empty required fields", () => {
     const template = MOMENT_TEMPLATES[3]!;
     const input = buildDemandPublishInput(template, {

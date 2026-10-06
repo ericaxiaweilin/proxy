@@ -329,7 +329,10 @@ export type DemandSpecs = {
 
 export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
   return {
-    ratio: template.defaultRatio,
+    // DEMAND-HEADCOUNT-001（2026-10-06，用户：「你们几人就不要搞1:1了 如实输入
+    // 人数就好了」）：默认不再预填 `defaultRatio`（`1:1`）—— 那个概念要用户先懂
+    // 「几个人对几个人」才读得懂。人数让用户如实填，不填就是空。
+    ratio: "",
     time: template.defaultTime,
     duration: template.defaultDuration,
     place: template.venue,
@@ -346,7 +349,11 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
   template: MomentTemplate,
   specs: DemandSpecs
 ): PublishMarketOpportunityInput {
-  const time = [specs.time, specs.duration, specs.ratio].filter((part) => part.trim() !== "").join(" · ");
+  // DEMAND-HEADCOUNT-001：人数是自由文本（「2」「2 大 1 小」都行）。纯数字时补
+  // 个「人」字让它读得通，用户自己写了单位的就原样带上 —— 不翻译成 1:1 那套。
+  const headcount = specs.ratio.trim();
+  const time = [specs.time, specs.duration, headcount === "" ? "" : /^\d+$/.test(headcount) ? `${headcount} 人` : headcount]
+    .filter((part) => part.trim() !== "").join(" · ");
   const skills = [template.skills, ...specs.prefs.map((pref) => pref.trim()).filter((pref) => pref !== "")]
     .join(" · ");
   const notes = specs.notes.trim();

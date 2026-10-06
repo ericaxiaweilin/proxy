@@ -588,7 +588,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           </View>
           <View style={styles.currentCard}>
             <Text selectable style={styles.currentLabel}>当前需求</Text>
-            <Text selectable style={styles.currentValue}>{template ? `${template.title}${proService ? ` · ${PRO_SERVICES.find((item) => item.id === proService)?.title ?? ""}` : ""} · ${specs.ratio || template.defaultRatio}` : "先选一个"}</Text>
+            <Text selectable style={styles.currentValue}>{template ? `${template.title}${proService ? ` · ${PRO_SERVICES.find((item) => item.id === proService)?.title ?? ""}` : ""}` : "先选一个"}</Text>
           </View>
           <Pressable disabled={!template} onPress={advanceFromMoment} style={[styles.primaryBtn, !template && styles.disabled]}>
             <Text selectable style={styles.primaryBtnText}>选择</Text>
@@ -613,7 +613,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               「暂不选」必须给：目录是会变的，把用户卡死在这一步等于让他放弃发布。 */}
           <View style={styles.confirmCard}>
             <View style={styles.confirmCopy}>
-              <Text selectable style={styles.confirmEyebrow}>Moment · {template?.defaultRatio}</Text>
+              <Text selectable style={styles.confirmEyebrow}>Moment</Text>
               <Text selectable style={styles.confirmTitle}>{template?.title}</Text>
             </View>
             <Pressable onPress={() => setStep("moment")}><Text selectable style={styles.linkText}>更换</Text></Pressable>
@@ -653,7 +653,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
         <>
           <View style={styles.confirmCard}>
             <View style={styles.confirmCopy}>
-              <Text selectable style={styles.confirmEyebrow}>Moment · {template?.defaultRatio}</Text>
+              <Text selectable style={styles.confirmEyebrow}>Moment</Text>
               <Text selectable style={styles.confirmTitle}>{template?.title}</Text>
             </View>
             <Pressable onPress={() => setStep("moment")}><Text selectable style={styles.linkText}>更换</Text></Pressable>
@@ -762,7 +762,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
         <>
           <View style={styles.confirmCard}>
             <View style={styles.confirmCopy}>
-              <Text selectable style={styles.confirmEyebrow}>Moment · {specs.ratio || template?.defaultRatio}</Text>
+              <Text selectable style={styles.confirmEyebrow}>Moment</Text>
               <Text selectable style={styles.confirmTitle}>{template?.title}</Text>
               {selectedPerson ? <Text selectable style={styles.confirmSub}>意向人选：{selectedPerson.name}（发布仍为公开市场）</Text> : null}
               {/* 2026-10-06 合并：专业服务的选择收进了选 Moment 那一步的双栏选择器，
@@ -780,14 +780,22 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             </Text>
           </View>
 
+          {/* DEMAND-HEADCOUNT-001（2026-10-06，用户：「你们几人就不要搞1:1了
+              如实输入人数就好了」）。ratio 这套「1:1 / ≤ 3:1」要用户先懂
+              「几个人对几个人」才读得懂 —— 卡面那侧今天上午已经撤过一轮
+              （demand-wizard-card.test.ts 的「移除1:1」），这里把规格步的
+              chips 也收掉，换成如实填人数的自由输入。模板数据里的
+              ratios/defaultRatio 保留（快筛还用），只是不再渲染出来。 */}
           <Text selectable style={styles.fieldLabel}>你们几人</Text>
-          <View style={styles.chipRow}>
-            {(template?.ratios ?? []).map((ratio) => (
-              <Pressable key={ratio} onPress={() => setSpecs((prev) => ({ ...prev, ratio }))} style={[styles.chip, specs.ratio === ratio && styles.chipOn]}>
-                <Text selectable style={[styles.chipText, specs.ratio === ratio && styles.chipTextOn]}>{ratio}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <TextInput
+            accessibilityLabel="填写人数"
+            onChangeText={(ratio) => setSpecs((prev) => ({ ...prev, ratio }))}
+            placeholder="如实填 · 如 2 人"
+            placeholderTextColor={color.muted}
+            style={styles.input}
+            testID="demand-headcount"
+            value={specs.ratio}
+          />
 
           <Text selectable style={styles.fieldLabel}>时间段</Text>
           <TextInput onChangeText={(time) => setSpecs((prev) => ({ ...prev, time }))} placeholder={template?.defaultTime} placeholderTextColor={color.muted} style={styles.input} value={specs.time} />
@@ -889,7 +897,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <Text selectable style={styles.summaryEyebrow}>Opportunity</Text>
             <Text selectable style={styles.summaryTitle}>{result?.title ?? template?.title}</Text>
             <SummaryRow label="对象" value="公开市场" />
-            <SummaryRow label="客户方" value={specs.ratio === "1:1" ? "1 人 · 1:1" : (specs.ratio || (template?.defaultRatio ?? ""))} />
+            {/* DEMAND-HEADCOUNT-001：展示如实填的人数，不再翻译成 1:1 那套。 */}
+            <SummaryRow label="人数" value={specs.ratio.trim() === "" ? "未填" : specs.ratio.trim()} />
             <SummaryRow label="标准" value={`${specs.time} · ${specs.duration}`} />
             <SummaryRow label="价格" value={negotiable ? `${specs.price} · 可协商` : specs.price} last={!showNotes && !showPerson} />
             {showNotes ? <SummaryRow label="备注" value={specs.notes.trim()} last={!showPerson} /> : null}

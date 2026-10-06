@@ -16034,3 +16034,43 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
     exit 1
   fi
 fi
+
+# DEMAND-HEADCOUNT-001（2026-10-06，用户：「你们几人就不要搞1:1了 如实输入人数就好了」）。
+# 「1:1 / ≤ 3:1」那套 ratio 语言在卡面那侧已经撤过一轮（demand-wizard-card.test.ts 的
+# 「移除1:1」，反面断言只落渲染节点 —— 模板数据里 ratios/defaultRatio 还在，快筛还用），
+# 这条钉把规格步也收掉：
+#   ① chips 数据源（template?.ratios ?? []）不许再渲染成选择器 —— 换成自由输入
+#      （testID="demand-headcount"）；
+#   ② 「Moment · {…defaultRatio}」眉行不许回来 —— 默认人数不再预填
+#      （demand-moments.ts 的 defaultSpecsFor ratio 恒空串）；
+#   ③ 完成页不许再出现「客户方」这个 ratio 话术的标签，展示的就是如实填的人数。
+# 反面断言都落**渲染形态**，不裸查「1:1」字符串 —— 数据里还有，别误伤。
+if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
+  DHC_B=0
+  if ! grep -qF 'testID="demand-headcount"' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-HEADCOUNT-001]: 「你们几人」的自由输入没了 —— 人数要如实填，不许回到 ratio chips。" >&2
+    DHC_B=1
+  fi
+  if grep -qF '(template?.ratios ?? [])' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-HEADCOUNT-001]: ratio chips 又渲染出来了 —— 1:1 那套要用户先懂「几个人对几个人」。" >&2
+    DHC_B=1
+  fi
+  if grep -qF 'Moment · {template?.defaultRatio}' apps/mobile/src/surfaces/demand-wizard.tsx || grep -qF 'Moment · {specs.ratio' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-HEADCOUNT-001]: 眉行又把 ratio 拼回去了。" >&2
+    DHC_B=1
+  fi
+  if grep -qF 'ratio: template.defaultRatio' apps/mobile/src/demand-moments.ts; then
+    echo "  FAIL [DEMAND-HEADCOUNT-001]: 默认规格又预填 defaultRatio 了 —— 人数必须用户如实填。" >&2
+    DHC_B=1
+  fi
+  if grep -qF '客户方' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-HEADCOUNT-001]: 完成页又出现「客户方」标签 —— 展示如实填的人数。" >&2
+    DHC_B=1
+  fi
+  if [ "$DHC_B" -eq 0 ]; then
+    pnpm --dir apps/mobile exec vitest run src/demand-moments.test.ts >/dev/null || exit $?
+    echo "    DEMAND-HEADCOUNT-001: PASS (人数如实填 · 纯数字补「人」· 自带单位原样 · 不填则不出现 · 默认不预填 ratio)"
+  else
+    exit 1
+  fi
+fi
