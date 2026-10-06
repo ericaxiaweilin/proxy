@@ -1,8 +1,12 @@
 // demand-moments.ts — R58 发布需求一期的 Moment 模板 + 发布映射。
 //
-// 模板内容（6 个 Moment + 参考价）来自 R58 原型；一期为前端常量，
+// 模板内容（Moment + 城市协助 + 参考价）来自 R58 原型；一期为前端常量，
 // 后续可转服务端配置。备注随机会落库展示（500 字内）；选人匹配走
 // 二期草稿流，一期发布即公开市场。
+//
+// 2026-10-06 用户：「唱歌不要搞 😂」—— KTV 那条模板整条撤掉（含
+// MOMENT_ACTION_ID 里的映射），roster 钉 `demand-moments.test.ts` 同步收窄。
+// 注释里不再写条目数：原来写「6 个 Moment」，撤一条就烂一个数。
 
 import type { PublishMarketOpportunityInput } from "@proxy/contracts";
 import type { SupplierCandidate } from "./supply-client";
@@ -34,7 +38,6 @@ export type MomentTemplate = {
 export const MOMENT_TEMPLATES: MomentTemplate[] = [
   { id: "coffee", emoji: "☕", title: "喝咖啡", venue: "咖啡馆", venueLabel: "咖啡馆 · 轻松见面", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "今晚 19:00", defaultDuration: "2 小时", theme: "咖啡", timeTags: ["晚间"], skills: "中文 · 轻松见面", priceRef: "150–300K", defaultPrice: "200,000₫", category: "meet", tags: ["咖啡", "咖啡馆"] },
   { id: "meal", emoji: "餐", title: "吃饭", venue: "餐厅", venueLabel: "餐厅 · 默认 1:1", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "今晚 18:30", defaultDuration: "2 小时", theme: "用餐", timeTags: ["晚间"], skills: "中文 · 本地餐厅", priceRef: "200–400K", defaultPrice: "300,000₫", category: "meet", tags: ["用餐", "餐厅"] },
-  { id: "ktv", emoji: "♪", title: "唱歌", venue: "KTV", venueLabel: "KTV · 夜间 Moment", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "20:00–22:00", defaultDuration: "2 小时", theme: "唱歌", timeTags: ["晚间"], skills: "中文 · 夜间", priceRef: "300–500K", defaultPrice: "400,000₫", category: "fun", tags: ["唱歌", "KTV"] },
   { id: "photo", emoji: "相", title: "拍照", venue: "街区", venueLabel: "街拍 / 旅行照", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "2 小时", theme: "拍照", timeTags: ["下午"], skills: "中文 · 街拍", priceRef: "300–600K", defaultPrice: "400,000₫", category: "outdoor", tags: ["拍照", "街区"] },
   { id: "citywalk", emoji: "走", title: "City Walk", venue: "街区", venueLabel: "街区漫游 · 本地路线", ratios: ["1:1", "≤ 4:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "半天", theme: "City Walk", timeTags: ["下午", "周末"], skills: "中文 · 本地路线", priceRef: "150–300K", defaultPrice: "200,000₫", category: "outdoor", tags: ["City Walk", "街区"] },
   { id: "exhibition", emoji: "展", title: "看展", venue: "美术馆", venueLabel: "美术馆 · 一起看", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "半天", theme: "看展", timeTags: ["下午", "周末"], skills: "中文 · 艺术", priceRef: "150–300K", defaultPrice: "200,000₫", category: "theme", tags: ["看展", "美术馆"] },
@@ -48,7 +51,6 @@ export const MOMENT_TEMPLATES: MomentTemplate[] = [
 export const MOMENT_ACTION_ID: Record<string, string> = {
   coffee: "coffee",
   meal: "dining",
-  ktv: "music",
   photo: "photo",
   citywalk: "city-walk",
   exhibition: "exhibition",

@@ -45,6 +45,26 @@ describe("DEMAND-PRO-MERGE-001", () => {
     expect(wizard).toContain('if (item.id === "pro") return false;');
   });
 
+  it("rail 就三档：热门 / 娱乐 / 专业（收掉的档位别自己长回来）", () => {
+    // 2026-10-06 用户：「其它改 就改成热门 娱乐 专业就可以 …… 先3个够了 以后跑起来再说吧」。
+    for (const label of ["热门", "娱乐", "专业"]) {
+      expect(wizard).toContain(`label: "${label}"`);
+    }
+    // 反面：上一版的三档（见面/出行/主题）不许回来 —— 回来就会把娱乐那一格重新切碎。
+    // 断言带 `label: "` 前缀：注释里写着这三个词，裸名会被自己的注释喂红。
+    for (const gone of ["见面", "出行", "主题"]) {
+      expect(wizard).not.toContain(`label: "${gone}"`);
+    }
+  });
+
+  it("娱乐 = 所有非 pro 的 Moment，rail 不再按 Moment 家族分档", () => {
+    // rail 收成三档后娱乐必须吃下 meet/outdoor/theme 三个家族，否则
+    // 喝咖啡/吃饭/拍照/City Walk/看展 在 rail 里就没地方去了（一个模板都没丢）。
+    expect(wizard).toContain('if (category === "pro") return false;');
+    // 反面：rail 不许再拿 Moment 家族当档位 —— 那样「娱乐」会缩回只剩一个模板。
+    expect(wizard).not.toContain("item.category !== category");
+  });
+
   it("子标签来自真实服务，不摆点不动的空标签", () => {
     const moments = readFileSync(
       fileURLToPath(new URL("../demand-moments.ts", import.meta.url)),

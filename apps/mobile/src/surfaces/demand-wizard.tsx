@@ -47,21 +47,18 @@ const QUICK_FILTERS = [
 ] as const;
 type QuickFilterId = typeof QUICK_FILTERS[number]["id"];
 
-// R58 原型左侧分类 rail：热门 / 见面 / 娱乐 / 出行 / 主题。
-// 2026-10-06 用户：「本质是把2个散的合并成一个 而不是把城市协助放在外面」——
-// 「专业」进 rail，城市协助从「双栏之外的一张卡」变成 rail 上的一格。
-// 原型那一版 rail 只有「热门 / 娱乐 / 专业」三项：**没有照抄**。原型的 items 是它
-// 自己编的一套内容（打球/美食/电影/摄影/逛街…），跟本仓 MOMENT_TEMPLATES 的 7 个
-// 模板对不上；照抄会把「见面 / 出行 / 主题」三档连同 喝咖啡/吃饭/拍照/City Walk/看展
-// 一起弄丢，还得重排每个模板的 `category`（`MomentTemplate` 的类型也钉着这四个值）。
-// 那是产品分类决定，不是这次要的「合并」—— 所以保留原五档，专业追加在最后
-// （原型里它也排在消费类之后）。
+// 2026-10-06 用户：「其它改 就改成热门 娱乐 专业就可以 …… 先3个够了 以后跑起来再说吧」。
+// rail 从五档收成三档：**热门（全部）/ 娱乐（所有非 pro 的 Moment）/ 专业（城市协助服务）**。
+// 上一轮我保留五档的理由是「照原型的 3 项会丢见面/出行/主题三档 + 5 个模板」——
+// 用户明确要 3 档，所以改用「娱乐吃下所有消费类 Moment」的收法，**一个模板都没丢**：
+// 喝咖啡/吃饭/拍照/City Walk/看展 全归娱乐，只是不再细分。
+// 数据层的 `MomentTemplate.category`（meet/fun/outdoor/theme）**不动** —— 它是 Moment
+// 家族，还被「主题玩法」那条 quick-filter 用着；rail 的分档比它粗，见下面 moments 的过滤。
+// 用户提过的备选是再加一档「运动」：没做 —— 本仓没有运动类 Moment 模板，加一档
+// 只会得到一个点开空白的分类（跟子标签那条一样，不摆空标签）。
 const CATEGORIES = [
   { id: "all", label: "热门" },
-  { id: "meet", label: "见面" },
   { id: "fun", label: "娱乐" },
-  { id: "outdoor", label: "出行" },
-  { id: "theme", label: "主题" },
   { id: "pro", label: "专业" }
 ] as const;
 type CategoryId = typeof CATEGORIES[number]["id"];
@@ -166,7 +163,11 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     if (item.id === "pro") return false;
     const q = query.trim().toLowerCase();
     if (q !== "" && !`${item.title}${item.venue}${item.theme}`.toLowerCase().includes(q)) return false;
-    if (category !== "all" && item.category !== category) return false;
+    // rail 只有三档，所以 rail 这一维**只筛掉「专业」**：热门与娱乐都收全部非 pro 的
+    // Moment（「娱乐」不再等于数据层的 family —— 那只剩一个模板）。
+    // 数据层的 `MomentTemplate.category` 因此不参与 rail 分档了，但字段留着：
+    // 「主题玩法」那条 quick-filter 还在按它筛。
+    if (category === "pro") return false;
     if (quickFilter === "one" && !item.ratios.includes("1:1")) return false;
     if (quickFilter === "small" && !(item.ratios.includes("≤ 3:1") || item.ratios.includes("≤ 4:1"))) return false;
     if (quickFilter === "evening" && !item.timeTags.includes("晚间")) return false;

@@ -5,8 +5,10 @@ import { buildDemandPublishInput, defaultSpecsFor, MOMENT_TEMPLATES } from "./de
 
 describe("R58 demand wizard mapping", () => {
   it("ships moment templates with defaults", () => {
+    // 2026-10-06 用户：「唱歌不要搞 😂」—— KTV 那条模板撤掉了，roster 跟着收窄。
+    // 这条钉是**逐条列 id**的（不是数字），撤/加模板必须在这里显形。
     expect(MOMENT_TEMPLATES.map((template) => template.id)).toEqual(
-      ["coffee", "meal", "ktv", "photo", "citywalk", "exhibition", "pro"]
+      ["coffee", "meal", "photo", "citywalk", "exhibition", "pro"]
     );
     for (const template of MOMENT_TEMPLATES) {
       expect(template.title.trim()).not.toBe("");
