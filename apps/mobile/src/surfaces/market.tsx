@@ -135,6 +135,7 @@ export function MarketSurface({
   onOpenRealityScene,
   onChromeVisibilityChange,
   onMapPickOpenChange,
+  onSubPageOpenChange,
   bottomNavVisible,
   userCenter,
   onRequireKYC
@@ -155,6 +156,14 @@ export function MarketSurface({
   onChromeVisibilityChange?: (visible: boolean) => void;
   // 创建活动的全页选地点地图：打开期间壳藏底栏（跟 hotScenesOpen 同模式）。
   onMapPickOpenChange?: ((open: boolean) => void) | undefined;
+  // NAV-L2-001（2026-10-06，用户「说了 底栏在非1级页面不要出现」）：市场 tab 下面
+  // 还挂着一堆**非一级页面** —— 发布需求向导 / 创建活动向导 / 选人工作台 / 机会详情 /
+  // 活动详情。它们都渲染在同一个 ScrollView 里（in-page takeover），此前没人往上报，
+  // 于是壳以为还在一级，底栏一直挂着。
+  // 命名与 me.tsx / merchant-me 的 `onSubPageOpenChange` 一致：同一个信号、同一个含义
+  //（「我现在不是一级页面了」），壳那边取或进 isNavVisible。
+  // 不接线时恒为 undefined ⇒ 退回旧行为（底栏常显），不会把没接线的宿主弄坏。
+  onSubPageOpenChange?: ((open: boolean) => void) | undefined;
   bottomNavVisible?: boolean;
   // ORDER-APPLY-KYC-GATE-001：没过 KYC 点接单 → 弹提示 → 跳 KYC 页。壳接线（切 ME + 直达 providerapply）。
   onRequireKYC?: (() => void) | undefined;
@@ -219,6 +228,17 @@ export function MarketSurface({
   useModuleBackHandler(demandWizardOpen ? () => { setDemandWizardOpen(false); return true; } : undefined);
   useModuleBackHandler(activityDetail ? () => { setActivityDetail(null); return true; } : undefined);
   useModuleBackHandler(oppDetail ? () => { setOppDetail(null); return true; } : undefined);
+  // NAV-L2-001（2026-10-06，用户「说了 底栏在非1级页面不要出现」）：上面那六个
+  // useModuleBackHandler 列的就是「市场 tab 里的非一级页面」—— 同一份清单喂给壳：
+  // 只要有一个开着就上报，壳收底栏（底栏只有一级模块有）。
+  // 为什么必须上报而不是让 market 自己画：底栏是**壳**画的（ProxyNativeTabBarView），
+  // market 只能通过 bottomNavVisible 知道自己该留多少 padding，关不掉它。
+  const marketSubPageOpen =
+    demandWizardOpen || activityPublishOpen || Boolean(selectOpp) || Boolean(oppDetail) || Boolean(activityDetail);
+  useEffect(() => {
+    onSubPageOpenChange?.(marketSubPageOpen);
+    return () => onSubPageOpenChange?.(false);
+  }, [marketSubPageOpen, onSubPageOpenChange]);
   // SCROLL-CHROME-001: shared controller (see shell/scroll-chrome.ts).
   // 底部防回弹保留为 canHide 否决：隐藏底栏会把内容区 paddingBottom 从 120 切到 16，
   // 内容总高度瞬间 -104；若此时已在底部，offset 会被钳制回弹，回弹的上位移又会触发

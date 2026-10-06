@@ -449,6 +449,12 @@ export function AppShell({
   // 创建活动从地点行进的全页场景地图：跟 realitySceneOpen 同一个待遇
   //（覆盖整个 body 的目的地，底栏只有一级模块有）。
   const [activityMapPickOpen, setActivityMapPickOpen] = useState(false);
+  // NAV-L2-001（2026-10-06，用户「说了 底栏在非1级页面不要出现」）：市场 tab 自己
+  // 还挂着一堆非一级页面（发布需求向导 / 创建活动向导 / 选人工作台 / 机会详情 /
+  // 活动详情）。它们渲染在 market 的 ScrollView 里，底栏却是壳画的 —— market 关不掉，
+  // 只能上报。信号名与 me.tsx / merchant-me 的 onSubPageOpenChange 同义，这里取或进
+  // isNavVisible（见下面的 meSubPageOpen）。
+  const [marketSubPageOpen, setMarketSubPageOpen] = useState(false);
   // ACTIVITY-REF-001：从动态里的活动卡片进活动详情。存 id 而不是 boolean ——
   // 「打开活动详情」必须指向**某一个**活动。以前只有不带 id 的 ACTIVITY_DETAIL
   // 路由（coming-soon.tsx），点进去只能落到活动列表，不是引用指向的那个活动。
@@ -663,7 +669,7 @@ export function AppShell({
   // body 的目的地」，不是某个 tab 的子页面 —— 所以也要一起收掉导航 chrome。
   // 否则从动态点进他人主页后底栏还在，用户切个 tab 就会被留在一个没人负责关闭的
   // 主页上（它的写入方不在那个 tab，返回键也回不到正确的来源）。
-  const isNavVisible = !realitySceneOpen && !hotScenesOpen && !activityMapPickOpen && !activityDetailId && !openAIProfile && !openHumanProfile && !meSubPageOpen && selectShellChromeVisible({
+  const isNavVisible = !realitySceneOpen && !hotScenesOpen && !activityMapPickOpen && !activityDetailId && !openAIProfile && !openHumanProfile && !meSubPageOpen && !marketSubPageOpen && selectShellChromeVisible({
     tab,
     feedChromeVisible,
     homeChromeVisible,
@@ -1020,6 +1026,7 @@ export function AppShell({
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
               onChromeVisibilityChange={setFeedChromeVisible}
               onMapPickOpenChange={setActivityMapPickOpen}
+              onSubPageOpenChange={setMarketSubPageOpen}
               bottomNavVisible={isNavVisible}
               userCenter={sceneMapOrigin ? { lat: sceneMapOrigin.latitude, lng: sceneMapOrigin.longitude } : undefined}
               // ORDER-APPLY-KYC-GATE-001：市场接单没过 KYC → 切「我的」直达 KYC认证。
