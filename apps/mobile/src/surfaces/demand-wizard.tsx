@@ -634,7 +634,11 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               name={option.scene.name}
               imageUrl={option.scene.imageUrl === "" ? undefined : option.scene.imageUrl}
               fallbackText={option.scene.type.slice(0, 2) || "场景"}
-              meta={option.scene.area}
+              // 卡面内容跟 home 同一条公式：meta = category · area；foot 放 type
+              // （「咖啡 · 动态场景」这类真值）—— 之前只喂了 area 一行、foot 不画，
+              // 卡面下面是空的，用户看到的就是「只有头像没有 list 内容」。
+              meta={[option.scene.category, option.scene.area].filter(Boolean).join(" · ") || option.scene.type}
+              footText={option.scene.type}
               distance={option.distance === "" ? undefined : option.distance}
               onPress={() => {
                 setSpecs((prev) => ({
