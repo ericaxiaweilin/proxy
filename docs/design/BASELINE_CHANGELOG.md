@@ -4,6 +4,41 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 349 — 2026-10-06
+
+- **商家侧的店铺品类从「自选」改成「平台核定、只读」**（用户原话：「这个线上店铺品类
+  咖啡店就是咖啡店 不能自己选其它美甲什么的 那是平台后台审核过的 不是给商家自己
+  改来改去的」）。
+
+  店详情（`apps/mobile/src/surfaces/my-stores-hub.tsx` 的 `StoreDetail`）里那排
+  「咖啡厅 / SPA / 美甲 / 摄影 / 茶馆 / 酒吧 + 清空」是 Revision 321 交付的品类
+  编辑器（原型 2ef163 的 6 品类）。本轮整条撤掉：不再渲染任何可点的品类 chip，
+  也不再调 `SetStoreCategory` —— `saveCategory` / `savingCategory` / `categoryError` /
+  `patchCategory` / `onCategorySaved` / `STORE_CATEGORIES` 六处一并删净（留着就是死
+  代码，本仓对死代码有前科）。**只显示平台已核定的那一个**（只读胶囊）；没核定时
+  不画这一节，不拿空行冒充「未设置」。
+
+  **有两件事没做，都不是漏做：**
+
+  1. **服务端 `SetStoreCategory` 没关。** `internal/business/service.go:837` 仍然接受
+     OWNER / ADMIN / OPERATOR 自填，函数注释也还写着「店主自填」，`service_test.go`
+     仍断言店主能改、外人被拒。要真做到「商家改不了」，得动服务端契约（命令本身 /
+     角色闸 / openapi 生成物 / 那条测试），是另一档成本，需要产品先定。
+  2. **平台侧的写入口在这份仓库里不存在。** `apps/market-intelligence-console` 没有
+     品类编辑器；建店命令的客户端调用（`apps/mobile/src/business-client.ts:143`）也
+     不带 category。也就是说撤掉商家侧之后，**品类目前没有任何一条路径能写入** ——
+     这条缺口不补上，「平台核定」就还只是口径。
+
+  **连带缺口（已知、未处理）**：`apps/mobile/src/surfaces/merchant-promo.tsx:228`
+  的空态文案仍写着「在「店铺」里填上品类后会自动用上」并配了一个「去店铺填品类」
+  按钮 —— 那条路现在走不通了。它由当天早些时候的 `MERCHANT-CREATOR-PROMO-002`
+  （用户：「本身我是商家登陆，就知道自己开的什么店」，口径是「品类只在店铺页维护
+  一处」）钉着，与本轮口径直接冲突，需产品定夺后再改，没有自行改写。
+
+- 钉：`apps/mobile/src/store-consolidate.test.ts` 新增「品类是平台核定项：详情只显示，
+  商家改不了」（4 条反向臂：`saveCategory` / `STORE_CATEGORIES` / `清除品类` /
+  `setStoreCategory`；2 条正向臂：`店铺品类` / `row.store.category`）。
+
 ## Revision 348 — 2026-10-04
 
 - **商家侧「我的 → Creator 经营」的列表从通讯录条目换成卡片**

@@ -50,9 +50,6 @@ import {
   satisfactionRate, satisfactionRateText, satisfactionText,
 } from "../my-store-hub-model";
 
-// 原型 2ef163 的品类（推荐表单同一套）：品类编辑器只给这 6 个 + 清除，不手填 ——
-// 手填必然漂移（"咖啡" vs "咖啡厅"），筛选 chips 会裂成两个。
-const STORE_CATEGORIES = ["咖啡厅", "SPA", "美甲", "摄影", "茶馆", "酒吧"] as const;
 import { SUB_PAGE_CONTENT } from "./me-sub-pages";
 // STORE-CONSOLIDATE-001：二维码卡（单店版，从旧 surface 的多店实现重写）。 
 import { StoreQrCard } from "../components/store-qr-card";
@@ -219,12 +216,6 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate,
     setCopied(true);
   }, []);
 
-  const patchCategory = useCallback((storeId: string, saved: string) => {
-    setShops((prev) => prev?.map((row) => row.store.id === storeId
-      ? { ...row, store: { ...row.store, category: saved } }
-      : row) ?? null);
-  }, []);
-
   if (selected) {
     // STORE-CONSOLIDATE-001（B 口径）：资产编辑是店详情的子视图 —— 菜品/照片/
     // 详情的增删改走原子页（复用，不复制），回来还停在这家店。
@@ -271,7 +262,6 @@ export function MyStoresHub({ business, fulfillment, profile, onOpenStoreCreate,
           copied={copied}
           requesterNames={requesterNames}
           business={business}
-          onCategorySaved={patchCategory}
           onCopyAddress={() => void copyAddress(selected.store.address)}
           onOpenVouchers={onOpenVouchers}
           onManageProducts={(page) => setShowAssets(page)}
@@ -395,12 +385,11 @@ function HubNav({ backLabel, onBack, title }: {
   );
 }
 
-function StoreDetail({ row, copied, requesterNames, business, onCategorySaved, onCopyAddress, onOpenVouchers, onManageProducts, onEditDetails }: {
+function StoreDetail({ row, copied, requesterNames, business, onCopyAddress, onOpenVouchers, onManageProducts, onEditDetails }: {
   row: HubShop;
   copied: boolean;
   requesterNames: ReadonlyMap<string, string>;
   business: BusinessClient;
-  onCategorySaved: (storeId: string, category: string) => void;
   onCopyAddress: () => void;
   // STORE-CONSOLIDATE-001：券入口从 MerchantStorefrontSurface 搬过来。
   onOpenVouchers?: (() => void) | undefined;
@@ -433,8 +422,6 @@ function StoreDetail({ row, copied, requesterNames, business, onCategorySaved, o
   }
   if (desc !== "") infoRows.push(["简介", desc]);
   if (joinedDate !== "") infoRows.push(["入驻时间", joinedDate]);
-  const [savingCategory, setSavingCategory] = useState(false);
-  const [categoryError, setCategoryError] = useState<string | undefined>(undefined);
   // STORE-CONSOLIDATE-001：本店菜品只读列表（编辑走原子页）。读不到就不画这一节，
   // 不拿"0 道菜"冒充"这家店没菜"。
   const [products, setProducts] = useState<StoreProduct[] | undefined>(undefined);
@@ -452,16 +439,6 @@ function StoreDetail({ row, copied, requesterNames, business, onCategorySaved, o
     business.listStorePhotos(row.store.id).then((list) => { if (active) setPhotos(list); }).catch(() => { if (active) setPhotos([]); });
     return () => { active = false; };
   }, [business, row.store.id]);
-  const saveCategory = (value: string): void => {
-    if (value === (row.store.category ?? "").trim() || savingCategory) return;
-    setSavingCategory(true);
-    setCategoryError(undefined);
-    business.setStoreCategory(row.store.id, value).then(
-      (saved) => { onCategorySaved(row.store.id, (saved.category ?? "").trim()); },
-      (e: unknown) => { setCategoryError(e instanceof Error ? e.message : "保存失败"); },
-    ).finally(() => { setSavingCategory(false); });
-  };
-
   return (
     <View>
       <View style={s.hero}>
@@ -526,23 +503,18 @@ function StoreDetail({ row, copied, requesterNames, business, onCategorySaved, o
         {row.linesFailed ? <Text selectable style={s.error}>店铺资料没读出来，稍后再试。</Text> : null}
       </View>
 
-      {/* 品类决定列表 chips 里出现什么：只给原型那 6 个 + 清除，不手填。 */}
-      <Text selectable style={s.secTitle}>店铺品类</Text>
-      <View style={s.catRow}>
-        {STORE_CATEGORIES.map((c) => {
-          const on = (row.store.category ?? "").trim() === c;
-          return <Pressable accessibilityLabel={`品类 ${c}`} disabled={savingCategory} key={c} onPress={() => saveCategory(c)} style={[s.chip, on && s.chipOn]}>
-            <Text selectable style={[s.chipText, on && s.chipTextOn]}>{c}</Text>
-          </Pressable>;
-        })}
-        {(row.store.category ?? "").trim() !== "" ? (
-          <Pressable accessibilityLabel="清除品类" disabled={savingCategory} onPress={() => saveCategory("")} style={s.chip}>
-            <Text selectable style={s.chipText}>清除</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      {savingCategory ? <Text selectable style={s.mutedLine}>保存品类中…</Text> : null}
-      {categoryError ? <Text selectable style={s.error}>{categoryError}</Text> : null}
+      {/* 2026-10-04 用户：「咖啡店就是咖啡店 不能自己选其它美甲什么的 那是平台后台
+          审核过的 不是给商家自己改来改去的」。Revision 321 那套「6 品类 + 清除」
+          编辑器据此撤掉 —— 品类是平台核定项，商家侧只读。
+          只画已核定的那一个；没核定就不画这一节，不拿空行冒充「未设置」。 */}
+      {(row.store.category ?? "").trim() !== "" ? (<>
+        <Text selectable style={s.secTitle}>店铺品类</Text>
+        <View style={s.catRow}>
+          <View style={[s.chip, s.chipOn]}>
+            <Text selectable style={[s.chipText, s.chipTextOn]}>{(row.store.category ?? "").trim()}</Text>
+          </View>
+        </View>
+      </>) : null}
 
       <View style={s.secHead}>
         <Text selectable style={s.secTitle}>最近接单</Text>
@@ -756,5 +728,4 @@ const s = StyleSheet.create({
   limeBtn: { alignItems: "center", backgroundColor: color.lime, borderRadius: 14, flex: 1, paddingVertical: 13 },
   limeText: { color: color.ink, fontSize: 14, fontWeight: "900" },
   catRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 6 },
-  mutedLine: { color: color.muted, fontSize: 12, fontWeight: "700", marginTop: 6 },
 });

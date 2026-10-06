@@ -78,6 +78,20 @@ describe("STORE-CONSOLIDATE-001 管店只有一个入口", () => {
     expect(hub).toContain("showAssets");
   });
 
+  // 2026-10-04 用户：「咖啡店就是咖啡店 不能自己选其它美甲什么的 那是平台后台
+  // 审核过的 不是给商家自己改来改去的」。品类是平台核定项，商家侧只读 ——
+  // Revision 321 那套「6 品类 + 清空」编辑器撤掉了，别加回来。
+  it("品类是平台核定项：详情只显示，商家改不了", () => {
+    const detail = hub.slice(hub.indexOf("function StoreDetail"));
+    expect(detail).not.toContain("saveCategory");
+    expect(detail).not.toContain("STORE_CATEGORIES");
+    expect(detail).not.toContain("清除品类");
+    expect(hub).not.toContain("setStoreCategory");
+    // 但核定过的品类必须还看得见 —— 全撤了商家就不知道自己开的是什么店。
+    expect(detail).toContain("店铺品类");
+    expect(detail).toContain("row.store.category");
+  });
+
   it("建店直连助手，不绕已经不存在的第二入口", () => {
     expect(me).toContain('onOpenStoreCreate={() => openSubPage("enterpriseops")}');
     expect(me).not.toContain('onOpenStoreCreate={() => openSubPage("merchantstorefront")}');
