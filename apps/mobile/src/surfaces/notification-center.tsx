@@ -3,7 +3,7 @@ import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, StyleS
 import { ProxyIcon } from "../components/proxy-icon";
 import { useI18n } from "../i18n";
 import { relativeTimeKey, sortNewestFirst } from "../notification-bell";
-import { deepLinkRouteFor } from "../notif-deeplink-route";
+import { deepLinkRouteFor, type DeepLinkRoute } from "../notif-deeplink-route";
 import type { InboxItem, NotificationClient } from "../notification-client";
 import { color, foundation, shadows } from "../theme";
 
@@ -83,8 +83,9 @@ export function NotificationCenterSurface({
 }: {
   client: NotificationClient;
   onClose: () => void;
-  /** 深链有对应页面时跳过去（AppShell 拿到的是「我的」页的子页路由）。 */
-  onNavigate?: (route: string) => void;
+  /** 深链有对应页面时跳过去。带 id：路由 + 通知指向的那条记录（market 要用）。
+   *  AppShell 拿到的是「我的」页的子页路由，或市场里那一个订单。 */
+  onNavigate?: (route: DeepLinkRoute) => void;
   presentation?: "modal" | "overlay";
   visible: boolean;
 }): React.JSX.Element | null {
@@ -145,6 +146,9 @@ export function NotificationCenterSurface({
   //
   // 标已读和跳转是两件事：读没读是本地状态，跳不跳取决于上面两道门。
   // 所以标已读先做、无条件做；跳转失败了也只是停在这一页。
+  //
+  // MARKET-SELECT-NOTIFY-001：route 现在带 id（{ route, id }）。myorders /
+  // myscenes 只需要目的地路由，market 需要那个 id 才能落到「这一单」而不是列表页。
   const openItem = useCallback(
     (item: InboxItem) => {
       markRead(item);

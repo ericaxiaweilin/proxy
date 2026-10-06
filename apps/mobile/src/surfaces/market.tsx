@@ -133,6 +133,8 @@ export function MarketSurface({
   moderation,
   profileClient,
   initialTab = "OPPORTUNITY",
+  initialOpportunityId,
+  onDeepLinkConsumed,
   onOpenExperience,
   onOpenRealityScene,
   onChromeVisibilityChange,
@@ -152,6 +154,18 @@ export function MarketSurface({
   profileClient?: ProfileClient | undefined;
   marketLabel: string;
   initialTab?: MarketTab;
+  // MARKET-SELECT-NOTIFY-001：通知深链 `/market/<id>` 指的那一个订单。
+  // 直达详情页而不是列表页 —— 用户点的正是刚才那条「你被选中了 /
+  // 附近有个单适合你」，被丢回列表让他自己找等于没跳。
+  // 复用已有的 OpportunityDetail：报名过的人在那里看到自己的申请
+  // （viewerApplicationStatus === "SELECTED" 时那颗「确认合作」按钮就在里面），
+  // 没报名的人看到「报名报价」。缺省 = 没有深链，就是平时那个列表页。
+  initialOpportunityId?: string | undefined;
+  // 深链被消费掉（找到 / 没找到都算）时回调一次，壳把那个 id 清空。
+  // 不清的后果：MarketSurface 切走 tab 再回来会 remount，带着**上一次那条**通知
+  // 又把用户拽进那个订单详情 —— 用户自己想逛市场却被通知劫持。
+  // 同一个「请求 + 消费」形状见 meOpenSubPage / feedSearchSeed。
+  onDeepLinkConsumed?: (() => void) | undefined;
   onOpenExperience?: ((experienceId: string) => void) | undefined;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -292,6 +306,27 @@ export function MarketSurface({
   useEffect(() => {
     if (tab === "OPPORTUNITY") void loadOpportunities();
   }, [tab, loadOpportunities]);
+
+  // MARKET-SELECT-NOTIFY-001: 通知深链落在**那一个**订单上。
+  //
+  // 三件事必须分清:
+  //   1. **等列表回来**。深链到达时机会列表可能还在 LOADING（冷启动/第一次切到
+  //      市场 tab），立刻 find 一定找不到 —— 那会把「还没加载完」误判成「这单
+  //      不存在」然后把用户丢回列表页。所以只有不在 LOADING 时才下结论。
+  //   2. **找不到就只显示列表，不弹错误**。单子被删了 / 现在看不见了 —— 弹一句
+  //      「页面不存在」是在讲一件用户改变不了的事。市场列表本身就是那一页。
+  //   3. **消费掉就算**。找到 / 找不到都清掉（并通知壳清掉它那份），否则下次拉
+  //      列表或下次进市场 tab 会又把用户拽回同一个详情页。
+  const [pendingOpportunityId, setPendingOpportunityId] = useState<string | undefined>(initialOpportunityId);
+  useEffect(() => { setPendingOpportunityId(initialOpportunityId); }, [initialOpportunityId]);
+  useEffect(() => {
+    if (!pendingOpportunityId) return;
+    if (opportunityPhase === "LOADING") return;
+    const found = opportunityItems.find((item) => item.id === pendingOpportunityId);
+    setPendingOpportunityId(undefined);
+    onDeepLinkConsumed?.();
+    if (found) setOppDetail(found);
+  }, [pendingOpportunityId, opportunityItems, opportunityPhase, onDeepLinkConsumed]);
 
   // PULL-REFRESH-001: 下拉重拉当前 tab 的数据。
   const marketPull = usePullToRefresh(useCallback(() => (tab === "OPPORTUNITY" ? loadOpportunities() : loadActivities()), [tab, loadOpportunities, loadActivities]));
