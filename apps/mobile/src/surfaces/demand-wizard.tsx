@@ -702,7 +702,14 @@ const styles = StyleSheet.create({
   filterTextOn: { color: color.white },
   filterRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
   // R58 双栏 delivery-layout：左分类 rail + 右卡片列表。
-  deliveryLayout: { backgroundColor: color.white, borderColor: color.line, borderRadius: 22, borderWidth: 1, flexDirection: "row", marginTop: 14, minHeight: 320, overflow: "hidden" },
+  // 2026-10-06 用户：「不要保留r角 这不是图片」—— 这一格是内容容器（左 rail + 右列表），
+  // 不是图片，圆角 22 是照图片框那套给的，撤掉。上一轮把 content 的横向 padding 清零后，
+  // 这张卡片左右已经贴到屏幕边，22 的圆角在屏幕边缘被切掉，看着就像一张被裁过的图 ——
+  // 这句就是冲它来的。
+  // 同页的 mapWrapper 不动：它的圆角 22 由 MAP-CONTAINER-PARITY-001 钉着，是
+  // Home / Market / 发布器三处地图容器的统一语言，不是本地口味（map-container-parity.test.ts:148）。
+  // overflow 保留：它挡的是 categoryRail 的整格底色外溢，不是给圆角用的，所以圆角撤了它不用动。
+  deliveryLayout: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1, flexDirection: "row", marginTop: 14, minHeight: 320, overflow: "hidden" },
   categoryRail: { backgroundColor: "#F4F1EC", borderRightColor: color.line, borderRightWidth: 1, width: 66 },
   categoryBtn: { alignItems: "center", justifyContent: "center", minHeight: 56, paddingHorizontal: 4 },
   categoryBtnOn: { backgroundColor: color.white },
