@@ -2096,6 +2096,9 @@ type batchPayload struct {
 	Capabilities []string `json:"capabilities"`
 	// MATCH-RANK-001：需求方预算（可选）。给了才算「预算适配」分，不给不猜。
 	BudgetVND int64 `json:"budgetVnd"`
+	// DISPATCH-RANK-002：需求地点（可选）。给了才算距离分；只给了大概区域的需求不带坐标。
+	Lat *float64 `json:"lat,omitempty"`
+	Lng *float64 `json:"lng,omitempty"`
 }
 
 func (s *Service) createCandidateBatch(ctx context.Context, e command.Envelope) command.Result {
@@ -2161,13 +2164,13 @@ func (s *Service) createCandidateBatch(ctx context.Context, e command.Envelope) 
 		prices[c.AgentID] = c.ReferencePrice
 		byID[c.AgentID] = c
 	}
-	ranked := matching.Rank(ids, prices, s.rankSignals(ctx, ids), p.BudgetVND)
+	ranked := matching.Rank(ids, prices, matching.WithDistances(s.rankSignals(ctx, ids), ids, p.Lat, p.Lng), p.BudgetVND)
 	candidates = candidates[:0]
 	for _, r := range ranked {
 		c := byID[r.AgentID]
 		breakdown := r.Breakdown
 		c.Ranking = &breakdown
-		c.RankingReason = "verified_capabilities_and_availability; ranked_by_reliability_satisfaction_experience_response_fit"
+		c.RankingReason = "verified_capabilities_and_availability; ranked_by_reliability_satisfaction_experience_response_fit_distance_newcomer_load"
 		candidates = append(candidates, c)
 	}
 	now := s.clock.Now().UTC()

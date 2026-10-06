@@ -250,9 +250,10 @@ func TestQuerySuppliersCarriesRealRating(t *testing.T) {
 	if !ok {
 		t.Fatalf("MERCHANT-CREATOR-TAGS-001: suppliers entry must carry rating, got %v", view.Suppliers[0]["rating"])
 	}
-	// 无记录 = 先验 Total：40*0.8 + 30*0.6 + 0 + 10*0.3 = 53。
-	if raw["total"] != float64(53) {
-		t.Fatalf("no-record agent must score the prior total 53, got %v", raw["total"])
+	// 无记录 = 先验 Total：40*0.8 + 30*0.6 + 0 + 10*0.3 = 53，
+	// 再加 DISPATCH-RANK-002 的新人加权（0 单拿满 8）= 61。没有位置、手上没活 ⇒ 距离 0、负载 0。
+	if raw["total"] != float64(61) {
+		t.Fatalf("no-record agent must score the prior total 53 + newcomer boost 8 = 61, got %v", raw["total"])
 	}
 	if raw["hasTrackRecord"] != false {
 		t.Fatalf("no-record agent must report hasTrackRecord=false, got %v", raw["hasTrackRecord"])

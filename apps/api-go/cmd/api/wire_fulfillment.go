@@ -95,6 +95,14 @@ func newSupplyBatchCreator(supplyService *supply.Service) demand.BatchCreator {
 			if len(capabilities) > 0 {
 				payload["capabilities"] = capabilities
 			}
+			// DISPATCH-RANK-002：精确地点 / 场所带坐标的需求才参与距离排序。
+			if loc, ok := draft.Changes["location"].(map[string]any); ok {
+				lat, latOK := loc["lat"].(float64)
+				lng, lngOK := loc["lng"].(float64)
+				if latOK && lngOK && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 {
+					payload["lat"], payload["lng"] = lat, lng
+				}
+			}
 			env := command.Envelope{
 				CommandID:      "batch_" + draft.ID,
 				CommandType:    "CreateCandidateBatch",

@@ -55,6 +55,34 @@ func (p *Postgres) Signals(ctx context.Context, agentIDs []string) (map[string]S
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// DISPATCH-RANK-002：位置（算距离用）与手上还没结束的活（负载）。
+	loadRows, err := p.pool.Query(ctx, `
+		SELECT a.agent_id, a.lat, a.lng,
+			(SELECT COUNT(*) FROM fulfillment.offers f
+				WHERE f.agent_id = a.agent_id AND f.status = 'OFFERED' AND f.expires_at > now())
+			+ (SELECT COUNT(*) FROM fulfillment.orders o
+				WHERE o.agent_id = a.agent_id AND o.lifecycle NOT IN ('COMPLETED', 'CANCELLED'))
+		FROM supply.agent_profiles a
+		WHERE a.agent_id = ANY($1)`, agentIDs)
+	if err != nil {
+		return nil, err
+	}
+	for loadRows.Next() {
+		var id string
+		var lat, lng *float64
+		var load int
+		if err := loadRows.Scan(&id, &lat, &lng, &load); err != nil {
+			loadRows.Close()
+			return nil, err
+		}
+		s := out[id]
+		s.Lat, s.Lng, s.ActiveLoad = lat, lng, load
+		out[id] = s
+	}
+	loadRows.Close()
+	if err := loadRows.Err(); err != nil {
+		return nil, err
+	}
 	gravityRows, err := p.pool.Query(ctx, `
 		SELECT a.agent_id, s.p60
 		FROM supply.agent_profiles a
