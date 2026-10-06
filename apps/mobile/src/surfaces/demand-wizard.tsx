@@ -840,7 +840,12 @@ const styles = StyleSheet.create({
   mapWrapper: { borderColor: color.line, borderRadius: 22, borderWidth: 1, height: 330, marginTop: 8, overflow: "hidden", width: "100%" },
   hint: { color: color.muted, fontSize: 11, marginTop: 6 },
   error: { color: color.error, fontSize: 12, marginTop: 12, textAlign: "center" },
-  primaryBtn: { alignItems: "center", backgroundColor: color.magenta, borderRadius: 14, marginTop: 18, minHeight: 50, justifyContent: "center" },
+  // 2026-10-06 用户（截图指着这一步的「选择」）：「这个选择不需要做那么宽 也不需要粉色」。
+  // 原来照 R58 原型：原型 .next-btn 是 `width:100%` + 粉色渐变（#EC1E5E→#D81B60）。
+  // 现在收成**贴右边的小药丸**：宽度跟着字走（paddingHorizontal，不再撑满），
+  // 底色用 color.ink —— 就是这一页「生成」「应用筛选」用的那个主色，不是粉色。
+  // 只改这一处：primaryBtn 只有第一步用（第二/三步那排是 primaryBtnFlex，跟「上一步」同排）。
+  primaryBtn: { alignItems: "center", alignSelf: "flex-end", backgroundColor: color.ink, borderRadius: 14, justifyContent: "center", marginRight: 16, marginTop: 14, paddingHorizontal: 32, paddingVertical: 13 },
   primaryBtnFlex: { alignItems: "center", backgroundColor: color.magenta, borderRadius: 14, flex: 1, minHeight: 50, justifyContent: "center" },
   primaryBtnText: { color: color.white, fontSize: 15, fontWeight: "900" },
   secondaryBtn: { alignItems: "center", borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, minHeight: 50, justifyContent: "center" },
