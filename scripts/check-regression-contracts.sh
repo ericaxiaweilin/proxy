@@ -9895,8 +9895,24 @@ require_test "NOTIF-INVITE-OFFER-001" "./cmd/worker" \
 require_test "NOTIF-INVITE-OFFER-001" "./cmd/worker" \
   "TestInboxForEventRoutesInvitations" \
   "apps/api-go/cmd/worker/main_test.go" || exit $?
+# 2026-10-06 修正：这里原来钉的是 TestInboxForEventFallsBackWhenAgentMissing ——
+# 那个名字描述的是**旧行为**（agent 缺失时退回给 requester）。cf8201b1
+# 「内容任务与 Offer 的收件人也必须是可投递 id」把这个语义**故意反了过来**：
+# 退回给 requester = 把信送给发信人自己，而且会掩盖「收件人不可投递」这个事实
+# （一条投给不可投递地址的通知，和没有通知在数据上长得一样）。所以那个测试被
+# 改名成 TestInboxForEventDoesNotFallBackToTheRequester，断言也从「要退回」变成
+# 「不许退回」—— 比原来严。钉没跟着改，于是假红（第三次「钉字面量」了，见
+# HOME-FORYOU-LOCK-001 / COMP-REPORT-001）。
+# 顺带把 cf8201b1 为同一条关切补的另外两个测试也钉上：它们当时加进来时没进门禁，
+# 等于「写了但没人守」。
 require_test "NOTIF-INVITE-OFFER-001" "./cmd/worker" \
-  "TestInboxForEventFallsBackWhenAgentMissing" \
+  "TestInboxForEventDoesNotFallBackToTheRequester" \
+  "apps/api-go/cmd/worker/main_test.go" || exit $?
+require_test "NOTIF-INVITE-OFFER-001" "./cmd/worker" \
+  "TestContentTaskNotificationsNeverFallBackToAgentId" \
+  "apps/api-go/cmd/worker/main_test.go" || exit $?
+require_test "NOTIF-INVITE-OFFER-001" "./cmd/worker" \
+  "TestOfferNotificationNeverFallsBackToAgentId" \
   "apps/api-go/cmd/worker/main_test.go" || exit $?
 require_test "NOTIF-INVITE-OFFER-001" "./cmd/worker" \
   "TestInboxForEventSkipsUnknown" \
