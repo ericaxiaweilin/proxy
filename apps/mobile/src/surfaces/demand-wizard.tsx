@@ -52,13 +52,19 @@ type QuickFilterId = typeof QUICK_FILTERS[number]["id"];
 // 上一轮我保留五档的理由是「照原型的 3 项会丢见面/出行/主题三档 + 5 个模板」——
 // 用户明确要 3 档，所以改用「娱乐吃下所有消费类 Moment」的收法，**一个模板都没丢**：
 // 喝咖啡/吃饭/拍照/City Walk/看展 全归娱乐，只是不再细分。
-// 数据层的 `MomentTemplate.category`（meet/fun/outdoor/theme）**不动** —— 它是 Moment
+// 数据层的 `MomentTemplate.category`（meet/fun/outdoor/theme）**语义不动** —— 它是 Moment
 // 家族，还被「主题玩法」那条 quick-filter 用着；rail 的分档比它粗，见下面 moments 的过滤。
-// 用户提过的备选是再加一档「运动」：没做 —— 本仓没有运动类 Moment 模板，加一档
-// 只会得到一个点开空白的分类（跟子标签那条一样，不摆空标签）。
+// （下面「加运动」那轮给这个 union 补了 `"sport"`：不是改旧值，是加一个新值。）
+//
+// 2026-10-06 同轮追加：「说错 加运动」。上一版这里写着「没做 —— 本仓没有运动类 Moment
+// 模板，加一档只会得到一个点开空白的分类」；用户要加，所以**模板和档位一起加**：
+// demand-moments.ts 补了打球 / 骑行两条（category: "sport"，图标复用 sport.svg /
+// cycling.svg），rail 才有第四档可点。档位与模板必须同进同出 —— 只加档位就是空标签。
+// 「基本够了」按 2 条算，不铺满运动家族（跑步/网球/瑜伽…）。
 const CATEGORIES = [
   { id: "all", label: "热门" },
   { id: "fun", label: "娱乐" },
+  { id: "sport", label: "运动" },
   { id: "pro", label: "专业" }
 ] as const;
 type CategoryId = typeof CATEGORIES[number]["id"];
@@ -163,10 +169,14 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     if (item.id === "pro") return false;
     const q = query.trim().toLowerCase();
     if (q !== "" && !`${item.title}${item.venue}${item.theme}`.toLowerCase().includes(q)) return false;
-    // rail 只有三档，所以 rail 这一维**只筛掉「专业」**：热门与娱乐都收全部非 pro 的
-    // Moment（「娱乐」不再等于数据层的 family —— 那只剩一个模板）。
-    // 数据层的 `MomentTemplate.category` 因此不参与 rail 分档了，但字段留着：
-    // 「主题玩法」那条 quick-filter 还在按它筛。
+    // rail 四档：热门（全部非 pro）/ 娱乐 / 运动 / 专业。
+    // 娱乐与运动**互斥**，热门 = 娱乐 ∪ 运动（专业另算）。把运动从娱乐里摘出去是
+    // **零可见变化**：运动模板是这一版新加的，此前娱乐 = 所有非 pro，与
+    // 「所有非 pro 且非运动」在旧数据上完全一致 —— 没有哪条老模板被搬走。
+    // rail 这一维只认 `MomentTemplate.category` 的「运动」一个值；meet/outdoor/theme
+    // 仍然不参与分档（「主题玩法」那条 quick-filter 还在按 category === "theme" 筛）。
+    if (category === "sport" && item.category !== "sport") return false;
+    if (category === "fun" && item.category === "sport") return false;
     if (category === "pro") return false;
     if (quickFilter === "one" && !item.ratios.includes("1:1")) return false;
     if (quickFilter === "small" && !(item.ratios.includes("≤ 3:1") || item.ratios.includes("≤ 4:1"))) return false;

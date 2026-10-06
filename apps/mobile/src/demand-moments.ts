@@ -7,6 +7,10 @@
 // 2026-10-06 用户：「唱歌不要搞 😂」—— KTV 那条模板整条撤掉（含
 // MOMENT_ACTION_ID 里的映射），roster 钉 `demand-moments.test.ts` 同步收窄。
 // 注释里不再写条目数：原来写「6 个 Moment」，撤一条就烂一个数。
+//
+// 同日紧接着用户：「说错 加运动」—— 补回两条运动模板（打球 / 骑行）支撑 rail
+// 第四档。**这不是把唱歌换了个名字加回来**：KTV 是娱乐向的聚会模板，运动是另一类。
+// 一撤一加，roster 净 +1 条。
 
 import type { PublishMarketOpportunityInput } from "@proxy/contracts";
 import type { SupplierCandidate } from "./supply-client";
@@ -29,8 +33,18 @@ export type MomentTemplate = {
   priceRef: string;
   /** 默认填入的参考价。 */
   defaultPrice: string;
-  /** R58 原型分类：热门 / 见面 / 娱乐 / 出行 / 主题。 */
-  category: "meet" | "fun" | "outdoor" | "theme";
+  /**
+   * R58 原型分类：热门 / 见面 / 娱乐 / 出行 / 主题。
+   *
+   * 2026-10-06 补 `"sport"`：用户「说错 加运动」—— 发布器 rail 加第四档「运动」。
+   * 原型里**没有**这一档，所以它不属于 R58 原型分类；但 rail 要按家族筛运动模板，
+   * 就得有个字段能认出来。挂在 category 上而不是另起一个字段：它和 meet/fun/… 是
+   * 同一维的东西（这一条属于哪一类）。
+   *
+   * 注意 `"fun"` 现在**没有任何模板**：唯一那条 fun（唱歌）随 KTV 一起撤了。
+   * rail 的「娱乐」不是按 fun 家族筛的（见 demand-wizard.tsx 的 moments 过滤）。
+   */
+  category: "meet" | "fun" | "outdoor" | "theme" | "sport";
   /** R58 原型卡片 tags（如 咖啡/咖啡馆）。 */
   tags: string[];
 };
@@ -41,6 +55,13 @@ export const MOMENT_TEMPLATES: MomentTemplate[] = [
   { id: "photo", emoji: "相", title: "拍照", venue: "街区", venueLabel: "街拍 / 旅行照", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "2 小时", theme: "拍照", timeTags: ["下午"], skills: "中文 · 街拍", priceRef: "300–600K", defaultPrice: "400,000₫", category: "outdoor", tags: ["拍照", "街区"] },
   { id: "citywalk", emoji: "走", title: "City Walk", venue: "街区", venueLabel: "街区漫游 · 本地路线", ratios: ["1:1", "≤ 4:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "半天", theme: "City Walk", timeTags: ["下午", "周末"], skills: "中文 · 本地路线", priceRef: "150–300K", defaultPrice: "200,000₫", category: "outdoor", tags: ["City Walk", "街区"] },
   { id: "exhibition", emoji: "展", title: "看展", venue: "美术馆", venueLabel: "美术馆 · 一起看", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "半天", theme: "看展", timeTags: ["下午", "周末"], skills: "中文 · 艺术", priceRef: "150–300K", defaultPrice: "200,000₫", category: "theme", tags: ["看展", "美术馆"] },
+  // 2026-10-06 用户：「说错 加运动」—— rail 第四档「运动」的两条模板。
+  // 图标复用场景动作既有 logo（sport.svg / cycling.svg，见 MOMENT_ACTION_ID），
+  // 没有新画资产。两条都取自 SCENE_ACTIONS 的 sport 家族（scene-activity-discovery.tsx
+  // 的 ACTION_DETAILS：跑步/骑行/羽毛球/网球/瑜伽都挂 familyId "sport"）。
+  // 只加两条、不铺满那个家族：用户要的是「基本够了」，不是把运动做成一个子目录。
+  { id: "ballgame", emoji: "球", title: "打球", venue: "球馆", venueLabel: "球馆 · 约一场", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "周末 15:00", defaultDuration: "2 小时", theme: "运动", timeTags: ["下午", "周末"], skills: "中文 · 球类运动", priceRef: "200–400K", defaultPrice: "300,000₫", category: "sport", tags: ["运动", "球馆"] },
+  { id: "ride", emoji: "骑", title: "骑行", venue: "绿道", venueLabel: "城市绿道 · 一起骑", ratios: ["1:1", "≤ 4:1"], defaultRatio: "1:1", defaultTime: "周末 早上", defaultDuration: "半天", theme: "骑行", timeTags: ["周末"], skills: "中文 · 骑行", priceRef: "150–300K", defaultPrice: "200,000₫", category: "sport", tags: ["骑行", "绿道"] },
   { id: "pro", emoji: "证", title: "城市协助", venue: "按需", venueLabel: "翻译 / 签证 / 法律 / 商务 · 专业认证优先", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "", defaultDuration: "2 小时", theme: "服务协助", timeTags: [], skills: "中文 · 专业协助", priceRef: "面议", defaultPrice: "", category: "theme", tags: ["专业", "认证"] }
 ];
 
@@ -54,6 +75,10 @@ export const MOMENT_ACTION_ID: Record<string, string> = {
   photo: "photo",
   citywalk: "city-walk",
   exhibition: "exhibition",
+  // 2026-10-06「加运动」：打球 → sport.svg，骑行 → cycling.svg。两个 action id
+  // 都在 SCENE_ACTIONS 里（label 运动 / 骑行），不需要新资产。
+  ballgame: "sport",
+  ride: "cycling",
   pro: "urban-support"
 };
 

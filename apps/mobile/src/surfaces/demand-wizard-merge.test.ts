@@ -10,6 +10,9 @@ import { fileURLToPath } from "node:url";
 // 现在城市协助是 rail 上的「专业」分类，服务条目复用 Moment 同一套行样式（catalogItem /
 // momentEmoji / momentTitle / …）—— 两边长得一样，因为是同一个选择器。
 //
+// 2026-10-06 后续：rail 先收成三档（热门/娱乐/专业，用户「先3个够了」），再补第四档
+// 「运动」（用户「说错 加运动」）。下面第三条钉记的就是这四档的最终形状。
+//
 // 这条钉守的是「别再散开」：谁要加回一个选择器之外的城市协助入口，这里先红。
 // 注意所有反面断言都带 `styles.` 前缀或整句 —— 上面这些注释里写着 professionalEntry /
 // proGrid / proCard 这些**名字**，裸名断言会被自己的注释喂红（本仓有前科）。
@@ -45,9 +48,10 @@ describe("DEMAND-PRO-MERGE-001", () => {
     expect(wizard).toContain('if (item.id === "pro") return false;');
   });
 
-  it("rail 就三档：热门 / 娱乐 / 专业（收掉的档位别自己长回来）", () => {
-    // 2026-10-06 用户：「其它改 就改成热门 娱乐 专业就可以 …… 先3个够了 以后跑起来再说吧」。
-    for (const label of ["热门", "娱乐", "专业"]) {
+  it("rail 四档：热门 / 娱乐 / 运动 / 专业（收掉的档位别自己长回来）", () => {
+    // 2026-10-06 用户：「其它改 就改成热门 娱乐 专业就可以 …… 先3个够了 以后跑起来再说吧」，
+    // 同轮又追加「说错 加运动」—— 三档之后补第四档。
+    for (const label of ["热门", "娱乐", "运动", "专业"]) {
       expect(wizard).toContain(`label: "${label}"`);
     }
     // 反面：上一版的三档（见面/出行/主题）不许回来 —— 回来就会把娱乐那一格重新切碎。
@@ -57,9 +61,11 @@ describe("DEMAND-PRO-MERGE-001", () => {
     }
   });
 
-  it("娱乐 = 所有非 pro 的 Moment，rail 不再按 Moment 家族分档", () => {
-    // rail 收成三档后娱乐必须吃下 meet/outdoor/theme 三个家族，否则
-    // 喝咖啡/吃饭/拍照/City Walk/看展 在 rail 里就没地方去了（一个模板都没丢）。
+  it("娱乐与运动互斥、热门吃全部非 pro，rail 不按 Moment 家族分档", () => {
+    // 运动档只收 category === "sport" 的模板；娱乐把运动摘出去；两者相加 = 热门。
+    // 摘运动是零可见变化：运动模板是这一版新加的，没有老模板被搬走。
+    expect(wizard).toContain('if (category === "sport" && item.category !== "sport") return false;');
+    expect(wizard).toContain('if (category === "fun" && item.category === "sport") return false;');
     expect(wizard).toContain('if (category === "pro") return false;');
     // 反面：rail 不许再拿 Moment 家族当档位 —— 那样「娱乐」会缩回只剩一个模板。
     expect(wizard).not.toContain("item.category !== category");
@@ -74,5 +80,21 @@ describe("DEMAND-PRO-MERGE-001", () => {
     // 原型那排还多一个「城市协助」子标签（装着「城市向导」「陪诊协助」两条），
     // 但本仓没有这两条服务条目 —— 摆上去就是点开空白的标签。
     expect(moments).not.toContain('label: "城市协助"');
+  });
+
+  it("档位与模板同进同出 —— 运动档背后真有运动模板，不是点开空白", () => {
+    // 2026-10-06 用户「说错 加运动」。上一版我没加档位，理由就是「本仓没有运动类
+    // Moment 模板，加一档只会得到一个点开空白的分类」。这次档位和模板一起加，
+    // 所以这条钉守的是：谁再把运动档单独留着、把模板撤了，这里先红。
+    const moments = readFileSync(
+      fileURLToPath(new URL("../demand-moments.ts", import.meta.url)),
+      "utf8"
+    );
+    // 「运动」档按 category: "sport" 筛 —— 一条 sport 模板都没有就是空标签。
+    expect(moments).toContain('category: "sport"');
+    // 两条运动模板都必须有图标映射（UI-ORDER-LOGO-001：复用场景动作既有 logo，
+    // 不是另做一套）—— 映射漏了就会回落到 emoji，跟 Moment 那排长得不一样。
+    expect(moments).toContain('ballgame: "sport"');
+    expect(moments).toContain('ride: "cycling"');
   });
 });
