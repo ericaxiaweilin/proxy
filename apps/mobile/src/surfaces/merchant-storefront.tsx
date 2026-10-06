@@ -1161,7 +1161,11 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
-  container: { gap: 10, padding: 16, paddingBottom: 24 },
+  // 版心（左右页边距）只由宿主出一份：me.tsx 的 styles.content 是 paddingHorizontal: 15，
+  // hub 自己不带内边距，HubNav 的标题就压在那条线上。这一层原来又补了 16 ⇒ 卡片比它上面
+  // 的标题多缩进 16pt，就是「两边留白太多」。同族的 wallet / friend-crm 也是宿主裸挂、
+  // 版心自持，页边距只出一份。改回去之前先量标题和卡片的左边缘，两边必须对齐。
+  container: { gap: 10, paddingBottom: 24, paddingTop: 16 },
   title: { color: color.ink, fontSize: 18, fontWeight: "900" },
   sub: { color: color.muted, fontSize: 12 },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, padding: 14, ...shadows.card },
@@ -1170,8 +1174,9 @@ const styles = StyleSheet.create({
   accountName: { color: color.ink, fontSize: 16, fontWeight: "900" },
   accountMeta: { color: color.muted, fontSize: 11 },
   storeCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, padding: 14, gap: 8, ...shadows.card },
-  // 编辑资料态：整栏顶到屏幕边，左右零留白。
-  storeCardPlain: { gap: 12, marginHorizontal: -16 },
+  // 编辑资料态：整栏顶到版心边，左右零留白。版心归宿主之后这里已经没有自己的横向
+  // 内边距可抵消 —— 再留 -16 会把卡片撑出版心、两边各多出 16pt（右侧还会被屏幕裁掉）。
+  storeCardPlain: { gap: 12 },
   summary: { backgroundColor: color.deep, borderRadius: 24, padding: 15 },
   summaryTitle: { color: color.white, fontSize: 15, fontWeight: "800", lineHeight: 21 },
   summaryMeta: { color: "#D7D0DD", fontSize: 12, lineHeight: 17, marginTop: 4 },
