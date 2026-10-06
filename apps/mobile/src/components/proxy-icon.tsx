@@ -19,6 +19,16 @@ export type ProxyIconName =
   // emoji 自带切面和高光，且不受 color prop 影响 —— 彩色宝石被 color 染成纯白/
   // 纯蓝反而不对。这是仓库里第一次为「必须用 emoji」的字形走这条通道。
   | "gem"
+  // MARKET-TAB-GEM-OUTLINE-001（2026-10-06，用户「自己做个💎形轮廓logo 目前是菱形」）：
+  // 市场 tab 的字形。**跟 gem 不是一回事** —— gem 是钱包那条通道上的 💎 emoji
+  // （彩色、不受 color 染色）；gemOutline 是**矢量描边**的宝石轮廓：平顶台面 +
+  // 左右腰棱 + 底部亭尖，中间一条腰棱线。跟其余 tab 字形同一套 common 线宽。
+  //
+  // ⚠️ iOS **不读这里**：iOS 底栏是原生 UITabBar，五颗字形写死在
+  // apps/mobile/modules/proxy-native-tab-bar/ios/ProxyNativeTabBarView.swift 的
+  // case 1。只改本条 = 只改 Android/Web，iOS 上市场那格不会动（Revision 341 那次
+  // 就是这么白改了一轮，见 Revision 343）。两边坐标必须逐字相同。
+  | "gemOutline"
   | "circle"
   | "ring"
   | "meRing"
@@ -258,8 +268,23 @@ function MasterModuleIcon({ name, size, color, filled }: { name: ProxyIconName; 
     // 顶点坐标一个不改，按本文件 diamond 的写法搬成闭合 Path（M → 隐式 L → z）。
     // 描边跟 common 走（fill:none + strokeWidth 2.2），跟其余 4 个 tab 字形同一套线宽，
     // 不写成实心 —— 底栏五颗里只有它实心会像另一个控件。
+    //
+    // 2026-10-06 起**底栏不再指它**（用户改口径要宝石轮廓，见下面 gemOutline）。
+    // 字形本身保留不删：这是用户自己给的坐标，留着能一行改回去；坐标由
+    // market-tab-pentagon.test.ts 钉着不变。
     case "pentagon":
       return canvas(<Path {...common} d="M12 3 21 15 18 21 6 21 3 15z"/>);
+    // MARKET-TAB-GEM-OUTLINE-001（2026-10-06，用户「自己做个💎形轮廓logo 目前是菱形」）：
+    // 宝石轮廓。几何是自画的（用户要「自己做个」），24 栅格：台面 x8.5→x15.5 在 y=4.5；
+    // 左右腰棱在 y=10.5（x4 / x20，全形最宽处）；亭尖在 x=12、y=20.5。
+    // 取景约 16×16（正方形，跟 💎 emoji 的纵横比一致）—— 早先试过一版 18×15 的，
+    // 太扁，读起来像个平底碗而不是宝石。
+    // **腰棱线是「这是宝石、不是风筝」的那一笔** —— 只画轮廓不画它，读起来仍是个菱形，
+    // 而用户抱怨的正是「目前是菱形」。所以这条横线不是装饰，是识别点。
+    // 描边跟 common 走，与其余 4 颗 tab 同一套线宽；不写实心。
+    // iOS 那份在 ProxyNativeTabBarView.swift 的 case 1，坐标必须逐字相同。
+    case "gemOutline":
+      return canvas(<><Path {...common} d="M8.5 4.5H15.5L20 10.5 12 20.5 4 10.5z"/><Path {...common} d="M4 10.5H20"/></>);
     // NOTIF-BELL-001：原型顶栏铃铛（两条子路径照抄，铃身 + 下摆的锤）。
     // 描边用 commonBell（1.8，跟原型一致），fill 仍是 none —— 是描边铃铛不是实心。
     case "bell":

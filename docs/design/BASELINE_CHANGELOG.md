@@ -4,6 +4,51 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 350 — 2026-10-06
+
+- **市场 tab 的 logo 换成宝石轮廓**（`MARKET-TAB-GEM-OUTLINE-001`，用户原话：「自己做个
+  💎形轮廓logo 目前是菱形」）。字形是自画的 —— 用户说「自己做个」，没给坐标。24 栅格：
+  台面 x8→x16 在 y=5、左右腰棱在 y=9.5（x3 / x21）、亭尖在 (12,20)，**再加一条腰棱线**
+  （x3→x21）。那条线不是装饰：只画轮廓不画它，读起来仍是个菱形 —— 而用户抱怨的正是
+  「目前是菱形」，所以它是这个字形唯一的识别点。
+
+- **本轮的关键是补上 Revision 341 漏掉的那一层：iOS 原生字形。** Revision 341 只把
+  `app-shell.tsx` 的 `rootTabs` 指到 pentagon；Revision 343 已查明 iOS 底栏是原生
+  UITabBar、JS dock 在 iOS 上根本不渲染，但那一轮明确只「记录、不改」。本轮两边一起改：
+
+  · **JS**：`proxy-icon.tsx` 新增 `case "gemOutline":`（两条 `{...common}` 子路径 —— 轮廓
+    + 腰棱线），`app-shell.tsx` 的 MARKET 项改指它。
+  · **iOS**：`ProxyNativeTabBarView.swift` 的 `case 1` 从 `// diamond` 换成宝石轮廓，
+    坐标与 JS **逐字相同**。
+
+- **⚠️ 交付状态：iOS 上的改动要重建原生包才生效**（Metro 热更推不动 Swift）。只提交
+  Swift 不重建，设备上仍是旧的菱形 —— 正是 Revision 343 描述过的那种「交付一个设备上
+  看不见的改动」。本轮把这条警示写进了三处注释（`proxy-icon.tsx` / `app-shell.tsx` /
+  `ProxyNativeTabBarView.swift`），以免下一个人再踩。
+
+- **五边形（`MARKET-TAB-PENTAGON-001`）保留不删**：字形与坐标原样留在 `proxy-icon.tsx`，
+  只是底栏不再指它。理由：那是用户自己给的坐标，留着能一行改回去；本仓对死代码有前科，
+  但图标注册表（`CURRENT_BASELINE.json` 的 `production.iconRegistry`）里多一枚未被引用的
+  字形，与「一条走不通的写入路径」（Revision 349 那种）不同类。若产品确认不要了，删
+  `case "pentagon":` 与 union 里的 `| "pentagon"` 即可 —— 钉和门禁块会同步报红，属预期。
+
+- **钉：`market-tab-pentagon.test.ts`**（文件名保留：2026-10-01 建，门禁按文件名取它）。
+  文件内现在驻**两条**钉：`MARKET-TAB-PENTAGON-001` 降级为「五边形字形仍在、坐标未改」，
+  `MARKET-TAB-GEM-OUTLINE-001` 管新接线。**新钉特意跨两个渲染器** —— 除 JS 的
+  `case "gemOutline":` 与 shell 接线外，还读 `ProxyNativeTabBarView.swift` 的 `case 1`，
+  按序断言五个顶点、且旧 diamond 的 (20,12)/(4,12) 已消失。逐臂注入验过三条：JS 腰棱线
+  改坐标 → 红；iOS 亭尖漂移 → 红（`expected -1 to be greater than 153`）；底栏指回
+  pentagon → 红。门禁块（`check-regression-contracts.sh`）按同口径重写，并单独跑过：
+  好树上 PASS、把 iOS 的 `case 1` 改回 diamond 时以 iOS 专属文案 FAIL。
+
+- **方法论教训（值得记）**：排查「改了源码但设备没变」时，我先在截图上反复取证，得出
+  「app 跑着旧 bundle」的结论 —— **是错的**。真相在 `IMPLEMENTATION_CONTRACTS.json` 的
+  Revision 343 里写着：iOS 底栏是**原生**的，JS dock 在 iOS 上不渲染。教训是
+  **先去 `docs/design/` 查那一层归谁渲染，再谈「为什么没生效」**；同层证据（截图）之间
+  互相印证不出跨层的结论。
+
+- `baselineRevision` 349 → 350。
+
 ## Revision 349 — 2026-10-06
 
 - **商家侧的店铺品类从「自选」改成「平台核定、只读」**（用户原话：「这个线上店铺品类

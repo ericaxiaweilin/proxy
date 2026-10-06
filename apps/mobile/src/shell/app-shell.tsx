@@ -130,11 +130,17 @@ const ROOT_TO_FIRST_PAGE: Record<RootTab, PageId> = {
 function rootTabs(t: (key: MessageKey) => string): ReadonlyArray<{ id: RootTab; icon: ProxyIconName; label: string; badge?: string }> {
   return [
     { id: "HOME", icon: "home", label: t("tabHome") },
-    // MARKET-TAB-PENTAGON-001（2026-10-01，用户「把市场的logo换成这个」）：市场这一格
-    // 的 logo 从通用菱形 diamond 换成用户给的五边形 pentagon。**只换这一格** ——
-    // diamond 还被「我的订单 / feed 分类兜底 / 城市选项 / 草稿卡片」复用着（见
-    // proxy-icon.tsx 里 gem 那段注释），改 diamond 的字形会波及那 4 处。
-    { id: "MARKET", icon: "pentagon", label: t("tabMarket") },
+    // MARKET-TAB-GEM-OUTLINE-001（2026-10-06，用户「自己做个💎形轮廓logo 目前是菱形」）：
+    // 市场这一格的 logo 从五边形 pentagon 换成宝石轮廓 gemOutline。**只换这一格** ——
+    // diamond 还被「我的订单 / feed 分类兜底 / 城市选项 / 草稿卡片」复用着，改 diamond
+    // 的字形会波及那 4 处（见 proxy-icon.tsx 里 gem 那段注释）。
+    //
+    // ⚠️ 改这一行**只影响 Android / Web**。iOS 底栏是原生 UITabBar（本文件的
+    // Platform.OS === "ios" 分支直接 return ProxyNativeTabBarView），JS 这套 dock 在
+    // iOS 上根本不渲染。iOS 那颗字形在 ProxyNativeTabBarView.swift 的 case 1，
+    // 必须一起改，而且**要重建原生包才生效**（Metro 热更推不动 Swift）。
+    // Revision 341 只改了 JS 侧，于是 iOS 上市场那格一直是菱形 —— 见 Revision 343。
+    { id: "MARKET", icon: "gemOutline", label: t("tabMarket") },
     { id: "FEED", icon: "target", label: t("tabFeed") },
     { id: "MESSAGES", icon: "chat", label: t("tabMessages"), badge: "9+" },
     { id: "ME", icon: "meRing", label: t("tabMe") }

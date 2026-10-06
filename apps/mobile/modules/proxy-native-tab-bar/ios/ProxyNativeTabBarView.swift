@@ -109,8 +109,15 @@ final class ProxyNativeTabBarView: ExpoView, UITabBarDelegate {
       case 0: // home
         path.move(to: CGPoint(x: 4, y: 10.5)); path.addLine(to: CGPoint(x: 12, y: 4)); path.addLine(to: CGPoint(x: 20, y: 10.5))
         path.move(to: CGPoint(x: 6.5, y: 10)); path.addLine(to: CGPoint(x: 6.5, y: 19)); path.addLine(to: CGPoint(x: 17.5, y: 19)); path.addLine(to: CGPoint(x: 17.5, y: 10))
-      case 1: // diamond
-        path.move(to: CGPoint(x: 12, y: 4)); path.addLine(to: CGPoint(x: 20, y: 12)); path.addLine(to: CGPoint(x: 12, y: 20)); path.addLine(to: CGPoint(x: 4, y: 12)); path.close()
+      case 1: // gem outline (MARKET-TAB-GEM-OUTLINE-001)
+        // 与 apps/mobile/src/components/proxy-icon.tsx 的 case "gemOutline" 逐字同坐标：
+        // 台面 x8.5→x15.5 在 y=4.5、左右腰棱在 y=10.5（x4 / x20）、亭尖 (12,20.5)，
+        // 外加一条把左右腰棱连起来的腰棱线（没有它读起来只是个菱形）。
+        // ⚠️ 改这里必须**重建原生包**才生效 —— Metro 热更推不动 Swift。
+        path.move(to: CGPoint(x: 8.5, y: 4.5)); path.addLine(to: CGPoint(x: 15.5, y: 4.5))
+        path.addLine(to: CGPoint(x: 20, y: 10.5)); path.addLine(to: CGPoint(x: 12, y: 20.5))
+        path.addLine(to: CGPoint(x: 4, y: 10.5)); path.close()
+        path.move(to: CGPoint(x: 4, y: 10.5)); path.addLine(to: CGPoint(x: 20, y: 10.5))
       case 2: // target
         path.append(UIBezierPath(ovalIn: CGRect(x: 5, y: 5, width: 14, height: 14)))
         path.append(UIBezierPath(ovalIn: CGRect(x: 9, y: 9, width: 6, height: 6)))

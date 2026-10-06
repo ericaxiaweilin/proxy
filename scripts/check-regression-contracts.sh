@@ -15031,57 +15031,105 @@ if [ -f "$SOCIAL_GO" ] && [ -f "$SOCIAL_MIG" ]; then
   echo "    CREATOR-SOCIAL-001: PASS (社媒可绑 · 可见性按人过滤 · 商家详情显示)"
 fi
 
-# MARKET-TAB-PENTAGON-001（2026-10-01，用户「把市场的logo换成这个」）：
-# 用户给的是一枚五边形
-#   <svg viewBox="0 0 24 24"><polygon points="12 3 21 15 18 21 6 21 3 15"></polygon></svg>
-# 底栏 MARKET 这一格原来用通用菱形 diamond。
+# MARKET-TAB-GEM-OUTLINE-001（2026-10-06，用户「自己做个💎形轮廓logo 目前是菱形」）：
+# 市场 tab 的字形从用户给的五边形换成宝石轮廓 gemOutline：台面 + 左右腰棱 + 亭尖，
+# 再加一条腰棱线（没有那条线，只画轮廓读起来仍是个菱形 —— 正是用户抱怨的那点）。
 #
 # 为什么**不改 diamond**：diamond 画的是 `M12 4 20 12 12 20 4 12z` —— 四个顶点
 # (12,4)(20,12)(12,20)(4,12)，边长全 11.31，是「正方形转 45°」。它被当通用菱形
-# 符号复用在 5 处（底栏 MARKET / 我的订单 / feed 分类兜底 / 城市选项 / 首页聊天框
-# ORDER 机会），而且它的路径被 WALLET-GEM-ICON-001 钉死。改它会把这 5 处一起换掉，
-# 并撞掉那条钉 —— 所以新开一个 pentagon 字形，只把 MARKET 指过去。
+# 符号复用在 4 处（我的订单 / feed 分类兜底 / 城市选项 / 首页聊天框 ORDER 机会），
+# 而且它的路径被 WALLET-GEM-ICON-001 钉死。改它会把这 4 处一起换掉 —— 所以另开字形。
 #
-# 这条钉守的是**接线**：字形在 switch 里（只声明联合类型 `| "pentagon"` 而不实现
-# = 渲染 null 的假绿）、顶点坐标一字不改、**只有** MARKET 指向它、diamond 原封不动。
-MARKET_PENTAGON_ICON=apps/mobile/src/components/proxy-icon.tsx
-MARKET_PENTAGON_SHELL=apps/mobile/src/shell/app-shell.tsx
-if [ -f "$MARKET_PENTAGON_ICON" ] && [ -f "$MARKET_PENTAGON_SHELL" ]; then
+# ⚠️ 这条钉必须**跨两个渲染器**：JS 字形（Android / Web 的 dock）和 iOS 原生 dock
+# （ProxyNativeTabBarView.swift 的 case 1）。Revision 341 只改了 JS 侧，而 iOS 底栏是
+# 原生 UITabBar、JS dock 在 iOS 上根本不渲染 —— 于是「市场 logo 换了」在设备上是假的，
+# 白做一轮（Revision 343 记录了这次事故）。所以本块两边都查。
+#
+# 守的是**接线**：两边字形都在、坐标一字不改、**只有** MARKET 指向它、diamond 原封不动、
+# 用户给的五边形字形保留不删（便于一行改回）。
+MARKET_GEM_ICON=apps/mobile/src/components/proxy-icon.tsx
+MARKET_GEM_SHELL=apps/mobile/src/shell/app-shell.tsx
+MARKET_GEM_NATIVE=apps/mobile/modules/proxy-native-tab-bar/ios/ProxyNativeTabBarView.swift
+if [ -f "$MARKET_GEM_ICON" ] && [ -f "$MARKET_GEM_SHELL" ] && [ -f "$MARKET_GEM_NATIVE" ]; then
   if [ ! -f apps/mobile/src/market-tab-pentagon.test.ts ]; then
-    echo "  FAIL [MARKET-TAB-PENTAGON-001]: the market-tab pentagon regression test is missing." >&2
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: the market-tab glyph regression test is missing." >&2
     exit 1
   fi
-  if ! grep -qF 'case "pentagon":' "$MARKET_PENTAGON_ICON"; then
-    echo "  FAIL [MARKET-TAB-PENTAGON-001]: ProxyIcon 的 switch 里没有 case \"pentagon\":（声明不实现 = 渲染 null 的假绿）。" >&2
+  # --- JS 字形 ---
+  if ! grep -qF 'case "gemOutline":' "$MARKET_GEM_ICON"; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: ProxyIcon 的 switch 里没有 case \"gemOutline\":（声明不实现 = 渲染 null 的假绿）。" >&2
     exit 1
   fi
-  if grep -qF 'if (name === "pentagon") {' "$MARKET_PENTAGON_ICON"; then
-    echo "  FAIL [MARKET-TAB-PENTAGON-001]: pentagon 写成了不可达的 if 分支（被 MasterModuleIcon 的提前 return 遮住）。" >&2
+  if grep -qF 'if (name === "gemOutline") {' "$MARKET_GEM_ICON"; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: gemOutline 写成了不可达的 if 分支（被 MasterModuleIcon 的提前 return 遮住）。" >&2
     exit 1
   fi
-  if ! grep -qF 'd="M12 3 21 15 18 21 6 21 3 15z"' "$MARKET_PENTAGON_ICON"; then
-    echo "  FAIL [MARKET-TAB-PENTAGON-001]: 五边形顶点坐标被改了（应原样照抄用户给的 points=\"12 3 21 15 18 21 6 21 3 15\"）。" >&2
+  if ! grep -qF 'd="M8.5 4.5H15.5L20 10.5 12 20.5 4 10.5z"' "$MARKET_GEM_ICON"; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: 宝石轮廓的顶点坐标被改了（台面 8.5,4.5→15.5,4.5 / 右腰棱 20,10.5 / 亭尖 12,20.5 / 左腰棱 4,10.5）。" >&2
     exit 1
   fi
-  if ! grep -qF '{ id: "MARKET", icon: "pentagon", label: t("tabMarket") }' "$MARKET_PENTAGON_SHELL"; then
-    echo "  FAIL [MARKET-TAB-PENTAGON-001]: 底栏 MARKET 不再指向 pentagon（市场 logo 换回去了）。" >&2
+  if ! grep -qF 'd="M4 10.5H20"' "$MARKET_GEM_ICON"; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: 腰棱线不见了 —— 只画轮廓读起来还是菱形，正是用户抱怨的那一点。" >&2
     exit 1
   fi
-  if grep -qF '{ id: "MARKET", icon: "diamond"' "$MARKET_PENTAGON_SHELL"; then
-    echo "  FAIL [MARKET-TAB-PENTAGON-001]: MARKET 又和 diamond 配对了。" >&2
+  # --- iOS 原生字形（Revision 341 漏掉的正是这一层）---
+  # 取 case 1 的**切片**再查：腰棱那两个坐标 (4,10.5) / (20,10.5) 在 case 0（home 屋顶）
+  # 里也有，全文件 grep 会假绿 —— 那就成了「看着在守、其实没守」。
+  _ios_case1=$(sed -n "/case 1:/,/case 2:/p" "$MARKET_GEM_NATIVE")
+  if printf "%s" "$_ios_case1" | grep -qF 'CGPoint(x: 20, y: 12)'; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: iOS case 1 还是 diamond（只改 JS = 设备上不生效）。" >&2
     exit 1
   fi
-  _pentagon_uses=$(grep -cF 'icon: "pentagon"' "$MARKET_PENTAGON_SHELL" || true)
-  if [ "$_pentagon_uses" -ne 1 ]; then
-    echo "  FAIL [MARKET-TAB-PENTAGON-001]: 五边形出现在 $_pentagon_uses 处（应恰好 1 处 —— 抄到别处 = 图标跟错行）。" >&2
+  if ! printf "%s" "$_ios_case1" | grep -qF 'CGPoint(x: 8.5, y: 4.5)'; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: iOS case 1 缺台面左端 (8.5,4.5) —— 与 JS 字形漂移了。" >&2
     exit 1
   fi
-  if ! grep -qF 'd="M12 4 20 12 12 20 4 12z"' "$MARKET_PENTAGON_ICON"; then
-    echo "  FAIL [MARKET-TAB-PENTAGON-001]: diamond 的路径被动过了 —— 它还被另外 4 处复用着。" >&2
+  if ! printf "%s" "$_ios_case1" | grep -qF 'CGPoint(x: 15.5, y: 4.5)'; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: iOS case 1 缺台面右端 (15.5,4.5) —— 与 JS 字形漂移了。" >&2
+    exit 1
+  fi
+  if ! printf "%s" "$_ios_case1" | grep -qF 'CGPoint(x: 12, y: 20.5)'; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: iOS case 1 缺亭尖 (12,20.5) —— 与 JS 字形漂移了。" >&2
+    exit 1
+  fi
+  _ios_girdle=$(printf "%s" "$_ios_case1" | grep -cF 'CGPoint(x: 20, y: 10.5)' || true)
+  if [ "$_ios_girdle" -lt 2 ]; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: iOS case 1 的腰棱线不见了（(20,10.5) 出现 $_ios_girdle 次，应 >=2：右腰棱 + 腰棱线终点）。" >&2
+    exit 1
+  fi
+  # --- 接线 ---
+  if ! grep -qF '{ id: "MARKET", icon: "gemOutline", label: t("tabMarket") }' "$MARKET_GEM_SHELL"; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: 底栏 MARKET 不再指向 gemOutline（市场 logo 换回去了）。" >&2
+    exit 1
+  fi
+  if grep -qF '{ id: "MARKET", icon: "diamond"' "$MARKET_GEM_SHELL"; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: MARKET 又和 diamond 配对了。" >&2
+    exit 1
+  fi
+  if grep -qF '{ id: "MARKET", icon: "pentagon"' "$MARKET_GEM_SHELL"; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: MARKET 又和 pentagon 配对了。" >&2
+    exit 1
+  fi
+  _gem_uses=$(grep -cF 'icon: "gemOutline"' "$MARKET_GEM_SHELL" || true)
+  if [ "$_gem_uses" -ne 1 ]; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: 宝石轮廓出现在 $_gem_uses 处（应恰好 1 处 —— 抄到别处 = 图标跟错行）。" >&2
+    exit 1
+  fi
+  # --- 保留不动的两样：用户给的五边形、diamond ---
+  if ! grep -qF 'case "pentagon":' "$MARKET_GEM_ICON"; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: 用户给的五边形字形被删了（应保留，便于一行改回）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'd="M12 3 21 15 18 21 6 21 3 15z"' "$MARKET_GEM_ICON"; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: 五边形顶点坐标被改了（应原样照抄用户给的 points=\"12 3 21 15 18 21 6 21 3 15\"）。" >&2
+    exit 1
+  fi
+  if ! grep -qF 'd="M12 4 20 12 12 20 4 12z"' "$MARKET_GEM_ICON"; then
+    echo "  FAIL [MARKET-TAB-GEM-OUTLINE-001]: diamond 的路径被动过了 —— 它还被另外 4 处复用着。" >&2
     exit 1
   fi
   pnpm --dir apps/mobile exec vitest run src/market-tab-pentagon.test.ts || exit $?
-  echo "    MARKET-TAB-PENTAGON-001: PASS (市场 tab 的字形是用户给的五边形，diamond 未被改动)"
+  echo "    MARKET-TAB-GEM-OUTLINE-001: PASS (市场 tab 的字形是宝石轮廓；JS 与 iOS 原生两份都在，diamond 未被改动)"
 fi
 
 # NOTIF-BELL-001（2026-10-01，用户「新增了铃铛提醒」）：
