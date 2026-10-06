@@ -9917,12 +9917,24 @@ require_test "NOTIF-INVITE-OFFER-001" "./cmd/worker" \
 require_test "NOTIF-INVITE-OFFER-001" "./cmd/worker" \
   "TestInboxForEventSkipsUnknown" \
   "apps/api-go/cmd/worker/main_test.go" || exit $?
+# 2026-10-06 再修（同一条钉第三次）：这里原来钉 `payloadString("agentId")`。
+# 但 **agentId 不是任何会话的 principal** —— 按它投递等于投给空地址，而 Offer
+# 有 5 分钟时效、订单照样创建、全程零报错（worker/main.go:210-216 的注释讲的
+# 就是这个坑）。收件人早就改成 `notifyPrincipalId` 了，钉没跟上。
 if ! grep -q '"hostId": inv.HostID' apps/api-go/internal/scene/service.go ||
-   ! grep -q 'payloadString("agentId")' apps/api-go/cmd/worker/main.go ||
+   ! grep -q 'payloadString("notifyPrincipalId")' apps/api-go/cmd/worker/main.go ||
    ! grep -q 'payloadString("inviteeId")' apps/api-go/cmd/worker/main.go ||
    ! grep -q 'NOTIF-INVITE-OFFER-001' apps/mobile/src/surfaces/me-invite-actions.test.ts; then
   echo "  FAIL [NOTIF-INVITE-OFFER-001]: 通知路由又断了 ——" >&2
   echo "        offer 投给发信人自己，或邀请继续零触达。" >&2
+  exit 1
+fi
+# 反向钉：光钉正面不够 —— 只钉正面，下一个人把看起来更"对"的裸 agentId 加回来
+# 也照样绿。裸 agentId 投过去是**静默丢单**（Offer 5 分钟失效、订单照建、无报错），
+# 比报错误得多，所以必须显式禁止。
+if grep -q 'payloadString("agentId")' apps/api-go/cmd/worker/main.go; then
+  echo "  FAIL [NOTIF-INVITE-OFFER-001]: 收件人退回裸 payloadString(\"agentId\") ——" >&2
+  echo "        agentId 不是会话 principal，投过去等于静默丢通知（见 worker/main.go 注释）。" >&2
   exit 1
 fi
 # 反向钉：空壳询问按钮不许回来（没输入框的询问 = 换皮的拒绝）。
