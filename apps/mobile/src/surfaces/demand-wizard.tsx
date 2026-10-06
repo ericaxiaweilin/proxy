@@ -350,7 +350,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           <View style={styles.searchRow}>
             <View style={styles.searchBox}>
               <Text selectable style={styles.searchIcon}>⌕</Text>
-              <TextInput onChangeText={setQuery} placeholder="例如：4个人，周六晚上唱歌" placeholderTextColor="#A9A2B0" style={styles.searchInput} value={query} />
+              <TextInput onChangeText={setQuery} placeholder="例如：4个人，周六下午一起打球" placeholderTextColor="#A9A2B0" style={styles.searchInput} value={query} />
             </View>
             <Pressable accessibilityLabel="按输入生成需求" disabled={query.trim() === ""} onPress={createCustom} style={[styles.generateBtn, query.trim() === "" && styles.disabled]}>
               <Text selectable style={styles.generateText}>生成</Text>
