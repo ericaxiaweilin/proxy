@@ -109,7 +109,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const [proService, setProService] = useState<string | undefined>(undefined);
   // 「专业」分类下的子标签（原型 sub-tabs：全部 / 翻译 / 签证 / 法律 / 商务）。
   const [proTab, setProTab] = useState<"all" | ProDomain>("all");
-  // 服务卡默认折叠：不占用 Moment 列表与「下一步」之间的空间，避免误触/遮挡
+  // 服务卡默认折叠：不占用 Moment 列表与底部「选择」之间的空间，避免误触/遮挡
   // 只记录选择：再点同一张卡＝取消选择（并把模板一并清掉，避免留下「城市协助但没选服务」的悬空态）
   const selectProService = (service: ProService): void => {
     const pro = MOMENT_TEMPLATES.find((item) => item.id === "pro");
@@ -451,12 +451,17 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <Text selectable style={styles.currentValue}>{template ? `${template.title}${proService ? ` · ${PRO_SERVICES.find((item) => item.id === proService)?.title ?? ""}` : ""} · ${specs.ratio || template.defaultRatio}` : "先选一个"}</Text>
           </View>
           <Pressable disabled={!template} onPress={() => setStep("people")} style={[styles.primaryBtn, !template && styles.disabled]}>
-            <Text selectable style={styles.primaryBtnText}>下一步 · 选人 / 服务 / 价格</Text>
+            <Text selectable style={styles.primaryBtnText}>选择</Text>
           </Pressable>
           {/* 2026-10-06 合并：这里原本是「城市协助 · Professional」入口卡 + 一格子卡
               （professionalEntry + proGrid），现在整格搬进上面的双栏选择器 ——
               rail 上的「专业」分类，与 Moment 同一套行样式。城市协助不再挂在
-              选择器外面；这一屏的底部也就只剩「下一步」一个出口。 */}
+              选择器外面；这一屏的底部也就只剩这一个出口。
+              2026-10-06 文案（用户「选择代替 下一步xxxx … 大家知道选择」）：按钮从
+              「下一步 · 选人 / 服务 / 价格」收成一个「选择」。那个后缀是在替用户复述
+              他刚做完的动作（选人 / 服务 / 价格本来就在下面那一屏），没信息量；
+              「上一步 / 选择」这组词自己就把方向说完了。
+              只改文案，不动行为 —— 点了还是进「选人」那一步。 */}
         </>
       ) : step === "people" ? (
         <>
@@ -562,7 +567,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           {error ? <Text selectable style={styles.error}>{error}</Text> : null}
           <View style={styles.doneRow}>
             <Pressable onPress={() => setStep("moment")} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
-            <Pressable onPress={() => setStep("specs")} style={styles.primaryBtnFlex}><Text selectable style={styles.primaryBtnText}>下一步 · 规格</Text></Pressable>
+            <Pressable onPress={() => setStep("specs")} style={styles.primaryBtnFlex}><Text selectable style={styles.primaryBtnText}>选择</Text></Pressable>
           </View>
         </>
       ) : step === "specs" ? (
