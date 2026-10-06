@@ -364,8 +364,8 @@ const styles = StyleSheet.create({
 
   shopCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, marginBottom: 9, padding: 12, ...shadows.card },
   shopRow1: { alignItems: "center", flexDirection: "row", gap: 12, marginBottom: 10 },
-  shopThumb: { alignItems: "center", backgroundColor: color.surface, borderRadius: 14, height: 46, justifyContent: "center", position: "relative", width: 46 },
-  shopThumbEmoji: { fontSize: 20 },
+  shopThumb: { alignItems: "center", backgroundColor: color.surface, borderRadius: 14, height: 104, justifyContent: "center", position: "relative", width: 104 },
+  shopThumbEmoji: { fontSize: 44 },
   shopBadgeHot: { backgroundColor: color.magenta, borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1, position: "absolute", right: -6, top: -6 },
   shopBadgeNew: { backgroundColor: color.mint, borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1, position: "absolute", right: -6, top: -6 },
   shopBadgeText: { color: color.white, fontSize: 11, fontWeight: "800" },

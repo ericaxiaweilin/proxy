@@ -16018,8 +16018,8 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
   # DEMAND-AVATAR-SHAPE-001（2026-10-06，用户：「场景 人都要带头像 区别是人是圆圈
   # 头像 场景是方块矩形头像」）：形状即类型。场景行方块头像（borderRadius 10）
   # 与人行的圆头像（CircularAvatarImage / personAvatar borderRadius 22）必须同时在。
-  if ! grep -qF 'sceneAvatar: { borderRadius: 10, height: 44, width: 44 }' apps/mobile/src/surfaces/demand-wizard.tsx; then
-    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 场景头像不是方块矩形了 —— 形状即类型：场景方、人圆。" >&2
+  if ! grep -qF 'sceneAvatar: { borderRadius: 10, height: 104, width: 104 }' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 场景头像不是 104 方块了 —— 形状即类型（场景方 104 / 人圆 44）。" >&2
     DSF_B=1
   fi
   if ! grep -qF 'CircularAvatarImage' apps/mobile/src/surfaces/demand-wizard.tsx; then
@@ -16087,8 +16087,8 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
 fi
 
 # AVATAR-UNIFY-001（2026-10-06，用户：「场景头像大小 人头像大小 都是所有页面一样大小
-# 不能不一样」）。行头像全 app 统一 44×44：场景方（borderRadius 10）人圆（22 或圆裁剪），
-# 尺寸只有一个数。逐文件钉 —— `size=` 是通用 prop（图标也在用），不能全局扫；
+# 不能不一样」，随后拍板场景升档：行头像两档制 —— **场景 104×104 方**（跟 home 场景
+# 封面同高）、**人 44×44 圆**，各自全 app 一个数。逐文件钉 —— `size=` 是通用 prop（图标也在用），不能全局扫；
 # 反面断言钉的是改动前的旧字面量，谁改回去谁红。
 # 例外（不是行头像，故意不统一）：me.tsx 个人主页 hero 大头像（82/88）。
 if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
@@ -16124,7 +16124,7 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
   au_absent apps/mobile/src/surfaces/merchant-content.tsx "borderRadius: 20, height: 40, width: 40" "商家内容页头像又回 40。"
   au_absent apps/mobile/src/surfaces/merchant-promo.tsx "borderRadius: 20, height: 40, width: 40" "商家推广页头像又回 40。"
   if [ "$AU_B" -eq 0 ]; then
-    echo "    AVATAR-UNIFY-001: PASS (行头像全 app 统一 44 · 场景方/人圆 · hero 82/88 是声明的例外)"
+    echo "    AVATAR-UNIFY-001: PASS (行头像两档：场景 104 方 / 人 44 圆 · 各自全 app 统一 · hero 82/88 是声明的例外)"
   else
     exit 1
   fi

@@ -637,7 +637,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               {/* DEMAND-AVATAR-SHAPE-001（2026-10-06，用户：「场景 人都要带头像
                   区别是人是圆圈头像 场景是方块矩形头像」）：场景行也要带头像，
                   形状是**方块矩形**（borderRadius 10），与选人步的圆头像
-                  （borderRadius 22 / CircularAvatarImage）一眼区分 —— 形状即类型。
+                  （44，borderRadius 22 / CircularAvatarImage）一眼区分 —— 形状即类型，
+                  尺寸也是类型：场景 104（跟 home 场景封面同高，用户拍板），人 44。
                   有真图用真图（SceneSpot.imageUrl，activity-wizard 同款 expo-image
                   用法），没图垫首字方块，不甩空白格。 */}
               {option.scene.imageUrl !== "" ? (
@@ -1108,9 +1109,9 @@ const styles = StyleSheet.create({
   // 卡 + 右侧一格距离）。头像形状即类型（DEMAND-AVATAR-SHAPE-001）：场景是方块
   // 矩形（borderRadius 10），人是圆（personAvatar borderRadius 22 / 圆形裁剪）。
   sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 8, padding: 12 },
-  sceneAvatar: { borderRadius: 10, height: 44, width: 44 },
+  sceneAvatar: { borderRadius: 10, height: 104, width: 104 },
   sceneAvatarFallback: { alignItems: "center", backgroundColor: color.surface, justifyContent: "center" },
-  sceneAvatarText: { color: color.ink, fontSize: 17, fontWeight: "800" },
+  sceneAvatarText: { color: color.ink, fontSize: 40, fontWeight: "800" },
   sceneCopy: { flex: 1 },
   sceneName: { color: color.ink, fontSize: 15, fontWeight: "800" },
   sceneMeta: { color: color.muted, fontSize: 11, marginTop: 2 },

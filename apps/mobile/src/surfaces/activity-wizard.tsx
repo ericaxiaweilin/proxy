@@ -1006,7 +1006,7 @@ const styles = StyleSheet.create({
   sheetRetryText: { color: color.white, fontSize: 13, fontWeight: "800" },
   spotRow: { alignItems: "center", borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 12, marginBottom: 8, padding: 12 },
   spotRowOn: { backgroundColor: color.offWhite, borderColor: color.ink },
-  spotImg: { borderRadius: 12, height: 52, width: 52 },
+  spotImg: { borderRadius: 12, height: 104, width: 104 },
   spotFallback: { alignItems: "center", backgroundColor: color.offWhite, justifyContent: "center" },
   spotInitial: { color: color.muted, fontSize: 20, fontWeight: "900" },
   spotBody: { flex: 1 },
