@@ -18,6 +18,7 @@ import {
   filterSuppliers,
   MOMENT_ACTION_ID,
   MOMENT_TEMPLATES,
+  momentStartPrice,
   PRO_LOGOS,
   PRO_SERVICES,
   PRO_TABS,
@@ -420,6 +421,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               {moments.map((item) => {
                 const active = template?.id === item.id;
                 const icon = actionIconFor(item.id);
+                const startPrice = momentStartPrice(item);
                 return (
                   <Pressable key={item.id} accessibilityLabel={`选择${item.title}`} onPress={() => pickTemplate(item)} style={[styles.catalogItem, active && styles.momentCardOn]}>
                     <View style={styles.momentEmoji}>
@@ -427,16 +429,28 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                         ? <Image contentFit="contain" source={icon} style={styles.momentIcon} />
                         : <Text selectable style={styles.momentEmojiText}>{item.emoji}</Text>}
                     </View>
+                    {/* 2026-10-06 用户：「我给你的原型基本要对齐啊 …… 有距离 有大概接单时间
+                        移除1:1 因为概念理解复杂 变成起步价格」—— 行结构按原型卡片重排。
+                        原型是 item-top（名字 | 价格）/ item-desc / item-bottom（tags | meta）：
+                        价格贴在**标题那一行**的右端，不在侧栏。此前是「左列 标题/描述/标签 +
+                        右列 1:1 / 今晚 19:00」的两栏侧栏 —— 价格没落对行，1:1 又要先懂概念。
+                        1:1 撤掉，换起步价（见 demand-moments 的 momentStartPrice）；
+                        「今晚 19:00」那个**具体时刻**换成模板时长（这类 Moment 大概要多久）。 */}
                     <View style={styles.momentCopy}>
-                      <Text selectable style={styles.momentTitle}>{item.title}</Text>
-                      <Text selectable style={styles.momentDesc}>{item.venueLabel}</Text>
-                      <View style={styles.catalogTags}>
-                        {item.tags.map((tag) => <View key={tag} style={styles.catalogTag}><Text selectable style={styles.catalogTagText}>{tag}</Text></View>)}
+                      <View style={styles.momentTop}>
+                        <Text selectable style={styles.momentTitle}>{item.title}</Text>
+                        <View style={styles.momentPrice}>
+                          <Text selectable style={styles.momentPriceNum}>{startPrice.amount}</Text>
+                          {startPrice.unit === "" ? null : <Text selectable style={styles.momentPriceUnit}>{startPrice.unit}</Text>}
+                        </View>
                       </View>
-                    </View>
-                    <View style={styles.catalogSide}>
-                      <Text selectable style={styles.catalogSideRatio}>{item.defaultRatio}</Text>
-                      <Text selectable style={styles.catalogSideTime}>{item.defaultTime || "时间自定"}</Text>
+                      <Text selectable style={styles.momentDesc}>{item.venueLabel}</Text>
+                      <View style={styles.momentBottom}>
+                        <View style={styles.catalogTags}>
+                          {item.tags.map((tag) => <View key={tag} style={styles.catalogTag}><Text selectable style={styles.catalogTagText}>{tag}</Text></View>)}
+                        </View>
+                        <Text selectable style={styles.momentMeta}>{item.defaultDuration}</Text>
+                      </View>
                     </View>
                   </Pressable>
                 );
@@ -781,6 +795,18 @@ const styles = StyleSheet.create({
   momentCopy: { flex: 1 },
   momentTitle: { color: color.ink, fontSize: 16, fontWeight: "800" },
   momentDesc: { color: color.muted, fontSize: 11, marginTop: 2 },
+  // 原型 item-top / item-price：名字在左、价格贴右端同一行。
+  // 价格用 ink（不是原型的 accent 粉）：用户上一轮刚要求这一屏去掉粉色
+  // （「这个选择……也不需要粉色」），卡面就先保持单色，别再插一块粉进来。
+  momentTop: { alignItems: "flex-start", flexDirection: "row", gap: 10, justifyContent: "space-between" },
+  momentPrice: { alignItems: "flex-end", flexShrink: 0 },
+  momentPriceNum: { color: color.ink, fontSize: 15, fontWeight: "900" },
+  momentPriceUnit: { color: color.muted, fontSize: 10, marginTop: 2 },
+  // 原型 item-bottom / item-meta：tags 在左，meta 靠 marginLeft:auto 推到右端。
+  // alignItems 用 flex-end 而不是 center：catalogTags 自带 marginTop 4（专业行在用），
+  // center 会把它顶下去 2px，flex-end 则两个都贴底，看着才齐。
+  momentBottom: { alignItems: "flex-end", flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  momentMeta: { color: color.muted, fontSize: 11, marginLeft: "auto" },
   momentCardOn: { borderColor: color.violet, borderWidth: 2 },
   empty: { color: color.muted, fontSize: 12, marginVertical: 12, textAlign: "center" },
   currentCard: { backgroundColor: color.surface, borderRadius: 14, marginTop: 12, padding: 12 },

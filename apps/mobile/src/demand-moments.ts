@@ -85,6 +85,23 @@ export const MOMENT_ACTION_ID: Record<string, string> = {
 };
 
 /**
+ * 卡片右上角的「起步价」（原型卡片 `item-price`：`num` + `unit`）。
+ *
+ * 2026-10-06 用户：「移除1:1 因为概念理解复杂 变成起步价格」—— 这一格原来是
+ * `defaultRatio`（`1:1`）。那个概念要用户先懂「几个人对几个人」才读得懂，撤掉，
+ * 换成模板自己的起步价。
+ *
+ * 取数：`defaultPrice`（`200,000₫`）优先；「面议」类模板（`defaultPrice` 为空，
+ * 如城市协助）回落 `priceRef`（`面议`）。**标签只在真有数字时才挂** ——
+ * 「面议 / 起步价」自相矛盾，那时 unit 返回空串，卡面只留「面议」。
+ */
+export function momentStartPrice(template: MomentTemplate): { amount: string; unit: string } {
+  return template.defaultPrice.trim() !== ""
+    ? { amount: template.defaultPrice, unit: "起步价" }
+    : { amount: template.priceRef, unit: "" };
+}
+
+/**
  * R58 城市协助 · Professional 服务目录（对齐原型 pro-card 四类）：
  * 现场翻译 / 签证协助 / 法律咨询 / 商务协助。价格与备注取自原型服务条目。
  *
