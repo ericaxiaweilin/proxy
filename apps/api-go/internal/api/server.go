@@ -239,7 +239,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/execution-runtime", s.operatorConsole(s.operatorExecutionRuntime))
 	mux.HandleFunc("/v1/operator/decision-engine", s.operatorConsole(operatorDecisionEngine))
 	mux.HandleFunc("/v1/operator/clarification-gate", s.operatorConsole(operatorClarificationGate))
-	mux.HandleFunc("/v1/operator/supply-health", s.operatorConsole(operatorSupplyHealth))
+	mux.HandleFunc("/v1/operator/supply-health", s.operatorConsole(s.operatorSupplyHealth))
 	mux.HandleFunc("/v1/operator/fulfillment-attribution", s.operatorConsole(operatorFulfillmentAttr))
 	mux.HandleFunc("/v1/operator/behavior", s.operatorConsole(s.operatorBehavior))
 	mux.HandleFunc("/v1/operator/research", s.operatorConsole(operatorResearch))

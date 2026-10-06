@@ -715,6 +715,43 @@ if ! grep -q '未接入' apps/market-intelligence-console/src/pages/Retention.ts
   exit 1
 fi
 echo "    OPS-RETENTION-001: PASS (复购用真单算 · 留存/回访率结构上不存在 · SQL 对真库跑过 · 措辞跟着数据变)"
+# OPS-SUPPLY-HEALTH-001（2026-10-05）：供给健康度页。
+# 这一页最容易出的事故是**数错列**：seller_real_name_verifications 的 user_account_id
+# 整列是 NULL（身份记在 agent_id 上），按它数会得到 0 —— 而 0 会被读成「供给方一个都没
+# 核验」，比没有数更坏。所以除了测试，这里直接钉 SQL 用哪一列。
+# 另一条：需求侧今天只有草稿、0 个正式任务，比值一律不给（结构上就没有那个字段）。
+for t in TestOperatorSupplyHealthRefusesARatioWithAnEmptyDenominator TestOperatorSupplyHealthWordingFollowsTheDemandSide TestOperatorSupplyHealthWithoutADBIsNotConnected TestOperatorSupplyHealthQueryFailureIsAnErrorNotZeroes; do
+  require_test "OPS-SUPPLY-HEALTH-001" "./internal/api" "$t" \
+    "apps/api-go/internal/api/operator_supply_health_test.go" || exit $?
+done
+for t in TestOperatorSupplyHealthCountsByTheRightColumns TestOperatorSupplyHealthOnAnEmptyMarket; do
+  require_test "OPS-SUPPLY-HEALTH-001" "./internal/platform/postgres" "$t" \
+    "apps/api-go/internal/platform/postgres/operator_supply_health_integration_test.go" || exit $?
+done
+if ! grep -qE '"/v1/operator/supply-health", s\.operatorConsole\(s\.operatorSupplyHealth\)' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [OPS-SUPPLY-HEALTH-001]: /v1/operator/supply-health 没接回真读模型。" >&2
+  exit 1
+fi
+# 剥注释再查：这一条要禁的是**代码里**按 user_account_id 数，而包注释里正写着
+# 「不要按 user_account_id 数」—— 不剥注释，解释自己的那句话会把判据判红（MERCHANT 那块同理）。
+osh_code=$(sed 's|//.*$||' apps/api-go/internal/opsmetrics/supplyhealth.go)
+if ! printf '%s\n' "$osh_code" | grep -q "COUNT(DISTINCT agent_id)"; then
+  echo "  FAIL [OPS-SUPPLY-HEALTH-001]: 实名核验不再按 agent_id 数 —— 那张表的 user_account_id 全是 NULL，会数出 0。" >&2
+  exit 1
+fi
+if printf '%s\n' "$osh_code" | grep -q "user_account_id"; then
+  echo "  FAIL [OPS-SUPPLY-HEALTH-001]: 供给读模型的 SQL 里出现了 user_account_id —— 那一列在核验表里是空的。" >&2
+  exit 1
+fi
+if grep -qE 'json:"(supplyDemandRatio|ratio|conversionRate|coveragePercent)"' apps/api-go/internal/opsmetrics/supplyhealth.go; then
+  echo "  FAIL [OPS-SUPPLY-HEALTH-001]: 供给页出现了比值字段 —— 分母接近 0 / 各步不是同一批人时不许相除。" >&2
+  exit 1
+fi
+if ! grep -q '不算' apps/market-intelligence-console/src/pages/SupplyActivation.tsx; then
+  echo "  FAIL [OPS-SUPPLY-HEALTH-001]: 供给页不再明说「供需比不算」—— 空位会被读成漏做。" >&2
+  exit 1
+fi
+echo "    OPS-SUPPLY-HEALTH-001: PASS (核验按 agent_id 数 · 两种时间窗口径分开 · 比值结构上不存在 · SQL 对真库跑过)"
 # GRAVITY-001：引力状态（spec §6-§7 / §11 / §21）。规律的人在规律的时间点附近引力高；证据不足只学习；
 # 久不发生降回只观察；AI / 平台账号不建模；ACTIVE_ORCHESTRATE 不会自动给（§12 / §13 未建）；引力页只给运营。
 for t in TestRegularNoonChatterHasHighGravityBeforeNoonAndLowAtNight TestSparseOrStaleEvidenceDoesNotNudge TestNeverAutoActiveOrchestrate TestRecomputeSkipsNonHumansAndDowngradesPeopleWhoWentQuiet; do

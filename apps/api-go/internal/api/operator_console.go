@@ -134,7 +134,6 @@ const personalizationSpec = "docs/spec/personalization/Proxy_Personalization_Orc
 var (
 	operatorDecisionEngine      = notConnected("决策引擎（/v1/decisions/evaluate 未实现；runtime.Decide 只有一条暴雨规则）", personalizationSpec+" §11 §16 §20")
 	operatorClarificationGate   = notConnected("澄清门（intent-service）", personalizationSpec+" §16")
-	operatorSupplyHealth        = notConnected("供给健康度（按 segment 的供给/需求比、激活漏斗）", personalizationSpec+" §5 Market Graph")
 	operatorFulfillmentAttr     = notConnected("决策 → 曝光 → 结果 归因链（outcome-service）", personalizationSpec+" §17 §18")
 	operatorResearch            = notConnected("Geometry Research / 影子流量（experiment-service）", personalizationSpec+" §18 §19")
 	operatorTags                = notConnected("标签体系（tag-service / tag-factory）", personalizationSpec+" §3")

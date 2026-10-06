@@ -27,7 +27,7 @@ var operatorConsolePaths = []string{
 }
 
 var notConnectedConsolePaths = []string{
-	"decision-engine", "clarification-gate", "supply-health", "fulfillment-attribution", "research", "tags",
+	"decision-engine", "clarification-gate", "fulfillment-attribution", "research", "tags",
 	"intent-orchestration", "engine-api", "trust", "quality",
 }
 
@@ -37,7 +37,7 @@ var notConnectedConsolePaths = []string{
 //
 // matching / matching/trace 是 OPS-MATCHING-TUNABLES-001 接上去的：旋钮来自库
 // （没有行就是出厂默认），轨迹读的是 supply.candidate_batches 里存着的快照。
-var liveConsolePaths = []string{"population", "behavior", "merchant", "matching", "matching/trace", "retention"}
+var liveConsolePaths = []string{"population", "behavior", "merchant", "matching", "matching/trace", "retention", "supply-health"}
 
 type stubOpsMetrics struct{}
 
@@ -73,6 +73,19 @@ func (stubOpsMetrics) Retention(_ context.Context, _ time.Time) (opsmetrics.Rete
 		Completed: 12, Cancelled: 12,
 		Lifecycle: map[string]int64{"CONFIRMED": 336, "OFFERED": 49, "EXECUTING": 6, "COMPLETED": 12, "CANCELLED": 12},
 		ActiveLast14d: 9, ActivePrev14d: 1, ReturnedUsers: 1, PriorWindowRequesters: 0,
+	}, nil
+}
+
+// SupplyHealth 用本机库的真实形状：106 个 ACTIVE 服务者、实名核验 7 通过 / 6 过期，
+// 而需求侧正式任务是 0 —— 这一页必须因此拒绝给供需比。
+func (stubOpsMetrics) SupplyHealth(_ context.Context, _ time.Time) (opsmetrics.SupplyHealth, error) {
+	return opsmetrics.SupplyHealth{
+		WindowDays: 30, Agents: 107, AgentsActive: 106, AgentsDraft: 1, AgentsNew: 12,
+		AgentsWithBio: 61, AgentsWithLanguages: 88,
+		AgentsWithAvailability: 106, AgentsWithOpenWindow: 41,
+		RealNameVerified: 7, RealNameExpired: 6, CapabilityVerified: 6,
+		AgentsWithOrders: 0, OrdersWindow: 355,
+		DemandTaskDrafts: 54, DemandTasks: 0, CityCompanionNeeds: 5,
 	}, nil
 }
 

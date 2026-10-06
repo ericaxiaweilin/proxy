@@ -15,20 +15,13 @@ import (
 // 两个具体的诱惑：窗口前没有人群可比时摆一个「留存 100%」；前一个窗口只有 1 个活跃
 // 的人时摆一个「回访率 100%」。两个都会被人当结论念出去。
 
+// 嵌 stubOpsMetrics：Source 以后再加一个指标，这里不用跟着补空方法。
 type retentionStubSource struct {
+	stubOpsMetrics
 	retention opsmetrics.Retention
 	err       error
 }
 
-func (retentionStubSource) Population(context.Context, time.Time) (opsmetrics.Population, error) {
-	return opsmetrics.Population{}, nil
-}
-func (retentionStubSource) Behavior(context.Context, time.Time) (opsmetrics.Behavior, error) {
-	return opsmetrics.Behavior{}, nil
-}
-func (retentionStubSource) Merchants(context.Context, time.Time) (opsmetrics.Merchants, error) {
-	return opsmetrics.Merchants{}, nil
-}
 func (r retentionStubSource) Retention(context.Context, time.Time) (opsmetrics.Retention, error) {
 	return r.retention, r.err
 }
@@ -74,6 +67,14 @@ func TestOperatorRetentionRefusesRatesItCannotJustify(t *testing.T) {
 		t.Fatalf("真数没透出来: %+v", payload.Retention)
 	}
 	joined := strings.Join(payload.Notes, "\n")
+	// 同 OPS-SUPPLY-HEALTH-001：控制台按纯文本渲染 notes，markdown 星号会原样出现在界面上。
+	if strings.Contains(joined, "**") {
+		t.Fatalf("说明文字里还有 markdown 星号：%s", joined)
+	}
+	// 状态机分布不能印成 Go 的 map[...]（那是调试输出，不是给人读的说明）。
+	if strings.Contains(joined, "map[") {
+		t.Fatalf("说明里出现了 Go map 的原始打印：%s", joined)
+	}
 	for _, want := range []string{
 		"金额",              // 说清这不是金额复购
 		"同期群留存", "没有前期人群", // 拒绝给留存，并说明为什么
