@@ -234,3 +234,137 @@ func TestOperatorRetryAssignAndCancel(t *testing.T) {
 		t.Fatalf("a cancelled run sends nothing more: %+v", r)
 	}
 }
+
+// ---- MARKET-FAST-001：市场发单的快速模式 ----
+
+type fakeSource struct {
+	applicants []Candidate
+	stop       string
+}
+
+func (f *fakeSource) Candidates(_ context.Context, _ Run, tried map[string]bool) ([]Candidate, string, error) {
+	if f.stop != "" {
+		return nil, f.stop, nil
+	}
+	out := []Candidate{}
+	for _, c := range f.applicants {
+		if !tried[c.AgentID] {
+			out = append(out, c)
+		}
+	}
+	return out, "", nil
+}
+
+type withdrawingOffers struct {
+	*fakeOffers
+	withdrawn []string
+}
+
+func (w *withdrawingOffers) Withdraw(_ context.Context, _ Run, offerID string) error {
+	w.withdrawn = append(w.withdrawn, offerID)
+	w.status[offerID] = "CANCELLED"
+	return nil
+}
+
+func marketEngine() (*Engine, *withdrawingOffers, *fakeSource, *time.Time) {
+	e, offers, now := newEngine()
+	w := &withdrawingOffers{fakeOffers: offers}
+	src := &fakeSource{}
+	e.Offers = w
+	e.Sources = map[string]CandidateSource{KindMarket: src}
+	return e, w, src, now
+}
+
+func stepKinds(t *testing.T, e *Engine) []string {
+	t.Helper()
+	_, steps, _ := e.Repo.Get(context.Background(), "run_1")
+	out := []string{}
+	for _, s := range steps {
+		out = append(out, s.Kind)
+	}
+	return out
+}
+
+func TestMarketRunWaitsQuietlyThenSelectsTheBestApplicant(t *testing.T) {
+	ctx := context.Background()
+	e, w, src, now := marketEngine()
+	if _, err := e.StartMarket(ctx, "opp_1", "owner_1"); err != nil {
+		t.Fatal(err)
+	}
+	run(t, e)
+	run(t, e)
+	if got := stepKinds(t, e); fmt.Sprint(got) != fmt.Sprint([]string{StepStarted, StepWaiting}) {
+		t.Fatalf("no applicants yet: one WAITING step, no spam: %v", got)
+	}
+	// 两人报名（来源已按撮合排好序）。市场单的价格是发单价：0 也照样选，不比预算。
+	src.applicants = []Candidate{{AgentID: "best", Ref: "app_best"}, {AgentID: "second", Ref: "app_second"}}
+	r := run(t, e)
+	if r.CurrentAgentID != "best" || r.Status != StatusRunning || r.Waiting {
+		t.Fatalf("the top-ranked applicant is selected: %+v", r)
+	}
+	*now = now.Add(6 * time.Minute)
+	r = run(t, e)
+	if len(w.withdrawn) != 1 || r.CurrentAgentID != "second" {
+		t.Fatalf("after 5 minutes the selection is withdrawn before the next one is selected: withdrawn=%v run=%+v", w.withdrawn, r)
+	}
+	w.status[r.CurrentOfferID] = "ACCEPTED"
+	if r = run(t, e); r.Status != StatusAssigned || r.AssignedAgentID != "second" {
+		t.Fatalf("she confirmed ⇒ assigned: %+v", r)
+	}
+}
+
+func TestMarketRunStopsWhenTheOwnerPicksSomeoneHimself(t *testing.T) {
+	ctx := context.Background()
+	e, _, src, _ := marketEngine()
+	_, _ = e.StartMarket(ctx, "opp_1", "owner_1")
+	src.stop = "owner_selected_manually"
+	if r := run(t, e); r.Status != StatusCancelled {
+		t.Fatalf("the owner's own choice wins; the platform stops: %+v", r)
+	}
+	if got := stepKinds(t, e); got[len(got)-1] != StepOwnerTookOver {
+		t.Fatalf("the reason is on the trail: %v", got)
+	}
+}
+
+func TestMarketRunExhaustsAndReopensOnANewApplicant(t *testing.T) {
+	ctx := context.Background()
+	e, w, src, now := marketEngine()
+	_, _ = e.StartMarket(ctx, "opp_1", "owner_1")
+	src.applicants = []Candidate{{AgentID: "only", Ref: "app_only"}}
+	run(t, e)
+	*now = now.Add(6 * time.Minute)
+	if r := run(t, e); r.Status != StatusExhausted {
+		t.Fatalf("everyone who applied was tried ⇒ exhausted (ops queue): %+v", r)
+	}
+	src.applicants = append(src.applicants, Candidate{AgentID: "late", Ref: "app_late"})
+	if err := e.Reopen(ctx, "opp_1", "late"); err != nil {
+		t.Fatal(err)
+	}
+	r := run(t, e)
+	if r.Status != StatusRunning || r.CurrentAgentID != "late" || len(w.sent) != 2 {
+		t.Fatalf("a new applicant reopens the run and is selected next: %+v sent=%v", r, w.sent)
+	}
+}
+
+// 撤回那一刻她确认了：不能再选下一位（否则两个人同时被选中）。
+type racingOffers struct{ *withdrawingOffers }
+
+func (r *racingOffers) Withdraw(_ context.Context, _ Run, offerID string) error {
+	r.status[offerID] = "ACCEPTED" // 她在撤回落库前一瞬间确认了，撤回成了空操作
+	return nil
+}
+
+func TestMarketWithdrawRaceWithAConfirmationCountsAsAssigned(t *testing.T) {
+	ctx := context.Background()
+	e, w, src, now := marketEngine()
+	race := &racingOffers{w}
+	e.Offers = race
+	_, _ = e.StartMarket(ctx, "opp_1", "owner_1")
+	src.applicants = []Candidate{{AgentID: "a", Ref: "app_a"}, {AgentID: "b", Ref: "app_b"}}
+	run(t, e)
+	*now = now.Add(6 * time.Minute)
+	r := run(t, e)
+	if r.Status != StatusAssigned || r.AssignedAgentID != "a" || len(w.sent) != 1 {
+		t.Fatalf("a confirmation that beat the withdrawal wins; b is never selected: %+v sent=%v", r, w.sent)
+	}
+}

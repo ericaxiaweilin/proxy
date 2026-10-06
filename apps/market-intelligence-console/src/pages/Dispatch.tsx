@@ -12,7 +12,7 @@ import { opFetch, opPost } from "../lib/api";
 
 type Candidate = { agentId: string; price: number; currency?: string };
 type Run = {
-  id: string; taskId: string; slotId: string; requesterId: string; batchId: string; budgetVnd: number;
+  id: string; kind?: "TASK" | "MARKET"; waiting?: boolean; taskId: string; slotId: string; requesterId: string; batchId: string; budgetVnd: number;
   status: "RUNNING" | "ASSIGNED" | "EXHAUSTED" | "CANCELLED"; candidates: Candidate[] | null; cursor: number;
   currentOfferId?: string; currentAgentId?: string; currentExpiresAt?: string; assignedAgentId?: string;
   createdAt: string; updatedAt: string; version: number;
@@ -50,8 +50,13 @@ const mmss = (s: number): string => `${Math.floor(s / 60)}:${String(Math.max(0, 
 function stepText(s: Step): string {
   const d = s.detail ?? {};
   switch (s.kind) {
-    case "STARTED": return `开始派单：${d.candidates ?? 0} 位候选，预算 ${vnd(Number(d.budgetVnd ?? 0))}`;
-    case "OFFER_SENT": return `发邀约给 ${s.agentId}（${vnd(Number(d.price ?? 0))}，5 分钟内有效）`;
+    case "STARTED": return d.kind === "MARKET"
+      ? "快速发单：开始按撮合排名代选报名人"
+      : `开始派单：${d.candidates ?? 0} 位候选，预算 ${vnd(Number(d.budgetVnd ?? 0))}`;
+    case "WAITING_APPLICANTS": return "还没有人报名，等报名";
+    case "NEW_APPLICANT": return `${s.agentId} 新报名，重新开始代选`;
+    case "OWNER_TOOK_OVER": return "发单方自己选了人，平台停止代选";
+    case "OFFER_SENT": return d.price ? `发邀约给 ${s.agentId}（${vnd(Number(d.price))}，5 分钟内有效）` : `代选 ${s.agentId}，等她 5 分钟内确认`;
     case "EXPIRED": return `${s.agentId} 5 分钟没接，顺延下一位`;
     case "OFFER_CANCELLED": return `给 ${s.agentId} 的邀约被撤回，顺延下一位`;
     case "ACCEPTED": return `${s.agentId} 接单了 ✓`;
@@ -130,15 +135,16 @@ export function Dispatch() {
             <tbody>
               {runs.map((r) => (
                 <tr key={r.id} onClick={() => setOpenId(openId === r.id ? "" : r.id)} style={{ cursor: "pointer", background: openId === r.id ? "rgba(47,125,225,0.08)" : undefined }}>
-                  <td>{r.taskId}<div style={{ color: "#8a8190", fontSize: 11 }}>{r.slotId} · {r.id}</div></td>
+                  <td>{r.kind === "MARKET" ? "市场单 " : ""}{r.taskId}<div style={{ color: "#8a8190", fontSize: 11 }}>{r.kind === "MARKET" ? "快速发单 · 代选报名人" : r.slotId} · {r.id}</div></td>
                   <td><b style={{ color: STATUS[r.status].color }}>{STATUS[r.status].label}</b></td>
                   <td>
                     {r.status === "RUNNING" && r.currentAgentId
                       ? <>在等 {r.currentAgentId}{r.waitingSeconds != null ? <span style={{ color: "#8a8190" }}> · {mmss(r.waitingSeconds)} / 5:00</span> : null}</>
-                      : r.status === "ASSIGNED" ? <>{r.assignedAgentId} 接了</> : <span style={{ color: "#8a8190" }}>—</span>}
+                      : r.status === "ASSIGNED" ? <>{r.assignedAgentId} 接了</>
+                      : r.waiting ? <span style={{ color: "#8a8190" }}>等人报名</span> : <span style={{ color: "#8a8190" }}>—</span>}
                   </td>
                   <td className="numc">{r.tried} / {(r.candidates ?? []).length}</td>
-                  <td className="numc">{vnd(r.budgetVnd)}</td>
+                  <td className="numc">{r.kind === "MARKET" ? "发单价" : vnd(r.budgetVnd)}</td>
                   <td>{clock(r.updatedAt)}</td>
                 </tr>
               ))}

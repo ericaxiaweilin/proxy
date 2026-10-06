@@ -13,12 +13,24 @@
 //     30km 骑摩托就是 1 小时，50km 要 2 小时；改时间等于替需求方改需求。
 //
 // 每一步都写一条 Step（谁、什么时候、为什么跳过），运营看到的是「这张单卡在哪」，不是一个状态码。
+//
+// MARKET-FAST-001（2026-10-06）：同一个引擎也管**市场发单**的快速模式（Kind = MARKET）。区别只有三处：
+//   - 候选不是建单时的一份快照，而是**不断有人报名**：每一轮由 CandidateSource 按撮合排名给出
+//     「还没试过的有效报名人」，排在已经试过的那些后面；
+//   - 「发邀约」= 以发单方身份**选中**一位报名人，5 分钟内她确认就成单；超时由 Withdrawer 撤回选中、
+//     其他报名人恢复可选，再选下一位。价格就是发单价，不比预算；
+//   - 试完所有报名人不算终局：有新人报名时 Reopen 把它拉回来。发单方自己动手选了人 ⇒ 停手，不覆盖他。
 package dispatch
 
 import (
 	"context"
 	"errors"
 	"time"
+)
+
+const (
+	KindTask   = "TASK"
+	KindMarket = "MARKET"
 )
 
 const (
@@ -44,6 +56,9 @@ const (
 	StepOperatorAssign  = "OPERATOR_ASSIGN"
 	StepOperatorCancel  = "OPERATOR_CANCEL"
 	StepSendFailed      = "SEND_FAILED" // 基础设施错误：这一位不算跳过，下一轮重试
+	StepWaiting         = "WAITING_APPLICANTS"
+	StepNewApplicant    = "NEW_APPLICANT"
+	StepOwnerTookOver   = "OWNER_TOOK_OVER"
 	OfferTTL            = 5 * time.Minute
 	SystemActor         = "dispatch"
 	defaultTickBatch    = 50
@@ -55,11 +70,14 @@ type Candidate struct {
 	AgentID  string `json:"agentId"`
 	Price    int64  `json:"price"`
 	Currency string `json:"currency,omitempty"`
+	// Ref 是这一位在业务里的句柄：市场单里是她的报名 id（选中 / 撤回都按它）。
+	Ref string `json:"ref,omitempty"`
 }
 
 // Run 是一个档位的派单过程。
 type Run struct {
 	ID               string      `json:"id"`
+	Kind             string      `json:"kind"` // TASK（需求档位）| MARKET（市场发单）
 	TaskID           string      `json:"taskId"`
 	SlotID           string      `json:"slotId"`
 	RequesterID      string      `json:"requesterId"`
@@ -72,9 +90,12 @@ type Run struct {
 	CurrentAgentID   string      `json:"currentAgentId,omitempty"`
 	CurrentExpiresAt *time.Time  `json:"currentExpiresAt,omitempty"`
 	AssignedAgentID  string      `json:"assignedAgentId,omitempty"`
-	CreatedAt        time.Time   `json:"createdAt"`
-	UpdatedAt        time.Time   `json:"updatedAt"`
-	Version          int         `json:"version"`
+	// Waiting：市场单还没有可选的报名人（已经记过一条 WAITING_APPLICANTS，不再重复记）。
+	Waiting   bool       `json:"waiting,omitempty"`
+	InvitedAt *time.Time `json:"invitedAt,omitempty"` // 最近一次主动邀请附近服务者报名的时间
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+	Version   int        `json:"version"`
 }
 
 // Step 是一条派单流水。
@@ -95,6 +116,18 @@ type OfferPort interface {
 	Send(ctx context.Context, run Run, c Candidate, ttl time.Duration) (offerID string, expiresAt time.Time, refused string, err error)
 	// Status 是 OFFERED / ACCEPTED / EXPIRED / CANCELLED（过期是按 TTL 推出来的）。
 	Status(ctx context.Context, run Run, offerID string) (string, error)
+}
+
+// Withdrawer 是可选的：OfferPort 实现它，引擎在一张「还在等」的邀约超时后先撤回再顺延
+// （市场的「选中」不会自己过期，不撤回她就还能确认，其他报名人也一直是落选状态）。
+type Withdrawer interface {
+	Withdraw(ctx context.Context, run Run, offerID string) error
+}
+
+// CandidateSource 是可选的：给动态候选的 Run（市场单）每一轮重新排「还没试过的」候选。
+// stop != "" 表示别再派了（例如发单方自己选了人），引擎把 Run 停掉并记下原因。
+type CandidateSource interface {
+	Candidates(ctx context.Context, run Run, tried map[string]bool) (fresh []Candidate, stop string, err error)
 }
 
 // Repository 存 Run 与 Step。
@@ -119,8 +152,10 @@ var (
 type Engine struct {
 	Repo   Repository
 	Offers OfferPort
-	Now    func() time.Time
-	NewID  func() string
+	// Sources 按 Run.Kind 给动态候选；没有的 Kind 用建单时的快照。
+	Sources map[string]CandidateSource
+	Now     func() time.Time
+	NewID   func() string
 }
 
 func (e *Engine) now() time.Time {
@@ -173,7 +208,7 @@ func (e *Engine) Start(ctx context.Context, t Task) ([]Run, error) {
 	steps := []Step{}
 	for _, slot := range t.SlotIDs {
 		r := Run{
-			ID: e.NewID(), TaskID: t.TaskID, SlotID: slot, RequesterID: t.RequesterID, BatchID: t.BatchID,
+			ID: e.NewID(), Kind: KindTask, TaskID: t.TaskID, SlotID: slot, RequesterID: t.RequesterID, BatchID: t.BatchID,
 			BudgetVND: t.BudgetVND, Status: StatusRunning, Candidates: append([]Candidate(nil), candidates...),
 			CreatedAt: now, UpdatedAt: now, Version: 1,
 		}
@@ -187,6 +222,37 @@ func (e *Engine) Start(ctx context.Context, t Task) ([]Run, error) {
 		runs = append(runs, r)
 	}
 	return runs, e.Repo.Create(ctx, runs, steps)
+}
+
+// StartMarket 为一条快速模式的市场发单建 Run（发单方选「快速」= 同意平台代选）。
+// 候选一开始是空的：报名人由 CandidateSource 每一轮现排。
+func (e *Engine) StartMarket(ctx context.Context, opportunityID, ownerID string) (Run, error) {
+	now := e.now()
+	r := Run{ID: e.NewID(), Kind: KindMarket, TaskID: opportunityID, SlotID: "market", RequesterID: ownerID,
+		BatchID: "market", Status: StatusRunning, Candidates: []Candidate{}, CreatedAt: now, UpdatedAt: now, Version: 1}
+	return r, e.Repo.Create(ctx, []Run{r}, []Step{{RunID: r.ID, Kind: StepStarted, Actor: SystemActor, At: now,
+		Detail: map[string]any{"kind": KindMarket}}})
+}
+
+// Reopen 在有新人报名时把一条试完了的市场单拉回在派（下一轮就会选她）。
+func (e *Engine) Reopen(ctx context.Context, taskID, applicantID string) error {
+	runs, err := e.Repo.TaskRuns(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	for _, r := range runs {
+		if r.Kind != KindMarket || r.Status != StatusExhausted {
+			continue
+		}
+		now := e.now()
+		prev := r.Version
+		r.Status = StatusRunning
+		r = touch(r, now)
+		if err := e.Repo.Save(ctx, r, prev, []Step{{RunID: r.ID, Kind: StepNewApplicant, AgentID: applicantID, Actor: SystemActor, At: now}}); err != nil && !errors.Is(err, ErrVersionConflict) {
+			return err
+		}
+	}
+	return nil
 }
 
 // Tick 推进所有到点的 Run。
@@ -246,6 +312,20 @@ func (e *Engine) advance(ctx context.Context, r Run, busy map[string]bool) (Run,
 			if r.CurrentExpiresAt != nil && now.Before(*r.CurrentExpiresAt) {
 				return r, nil, nil // 还在等她
 			}
+			if w, ok := e.Offers.(Withdrawer); ok {
+				if err := w.Withdraw(ctx, r, r.CurrentOfferID); err != nil {
+					return r, nil, err // 撤不回就不能选下一位（否则两个人同时被选中），下一轮再试
+				}
+				// 撤回那一刻她恰好确认了：撤回是空操作，按派成处理，绝不再选下一位。
+				if again, err := e.Offers.Status(ctx, r, r.CurrentOfferID); err != nil {
+					return r, nil, err
+				} else if again == "ACCEPTED" {
+					r.Status, r.AssignedAgentID = StatusAssigned, r.CurrentAgentID
+					step(StepAccepted, r.CurrentAgentID, r.CurrentOfferID, map[string]any{"raced": true})
+					r.CurrentExpiresAt = nil
+					return touch(r, now), steps, nil
+				}
+			}
 			step(StepExpired, r.CurrentAgentID, r.CurrentOfferID, nil)
 		case "CANCELLED":
 			step(StepOfferCancelled, r.CurrentAgentID, r.CurrentOfferID, nil)
@@ -254,14 +334,44 @@ func (e *Engine) advance(ctx context.Context, r Run, busy map[string]bool) (Run,
 		}
 		r.CurrentOfferID, r.CurrentAgentID, r.CurrentExpiresAt = "", "", nil
 	}
+	if src, ok := e.Sources[r.Kind]; ok {
+		tried := map[string]bool{}
+		for _, c := range r.Candidates[:min(r.Cursor, len(r.Candidates))] {
+			tried[c.AgentID] = true
+		}
+		fresh, stop, err := src.Candidates(ctx, r, tried)
+		if err != nil {
+			return r, steps, err
+		}
+		if stop != "" {
+			r.Status = StatusCancelled
+			step(StepOwnerTookOver, "", "", map[string]any{"reason": stop})
+			return touch(r, now), steps, nil
+		}
+		r.Candidates = append(append([]Candidate{}, r.Candidates[:min(r.Cursor, len(r.Candidates))]...), fresh...)
+		if r.Cursor >= len(r.Candidates) && r.Cursor == 0 {
+			// 还没人报名：保持在派，只在第一次记一条，不刷流水。
+			if !r.Waiting {
+				r.Waiting = true
+				step(StepWaiting, "", "", nil)
+				return touch(r, now), steps, nil
+			}
+			if len(steps) > 0 {
+				return touch(r, now), steps, nil
+			}
+			return r, nil, nil
+		}
+		r.Waiting = false
+	}
+	market := r.Kind == KindMarket
 	for r.Cursor < len(r.Candidates) {
 		c := r.Candidates[r.Cursor]
 		switch {
-		case c.Price <= 0:
+		case !market && c.Price <= 0:
 			r.Cursor++
 			step(StepSkippedNoPrice, c.AgentID, "", nil)
 			continue
-		case c.Price > r.BudgetVND:
+		case !market && c.Price > r.BudgetVND:
 			r.Cursor++
 			step(StepSkippedBudget, c.AgentID, "", map[string]any{"price": c.Price, "budgetVnd": r.BudgetVND})
 			continue
@@ -344,8 +454,8 @@ func (e *Engine) Assign(ctx context.Context, id string, c Candidate, operator, r
 	if r.CurrentOfferID != "" {
 		return r, nil, errors.New("an offer is still waiting; cancel or let it expire first")
 	}
-	// 点名也守同一条规则：替需求方承诺的钱不能超过他给的预算。
-	if c.Price <= 0 || c.Price > r.BudgetVND {
+	// 点名也守同一条规则：替需求方承诺的钱不能超过他给的预算（市场单的价格就是发单价，不比预算）。
+	if r.Kind != KindMarket && (c.Price <= 0 || c.Price > r.BudgetVND) {
 		return r, nil, errors.New("the chosen agent's price must be within the requester's budget")
 	}
 	now := e.now()

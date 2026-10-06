@@ -782,6 +782,8 @@ export const MarketOpportunitySchema = z.object({
   // 发布向导按 moment 家族填（pro → assistance）；订单流程按它分档（城市协助
   // 永远走全流程）。缺省 = 历史数据，按金额档兜底。
   scenario: z.enum(["ordinary", "assistance"]).optional(),
+  // MARKET-FAST-001：FAST = 发单方同意平台按撮合排名代选报名人；缺省 = 自己挑。
+  matchingMode: z.enum(["FAST"]).optional(),
   // CLIENT-RATING-001: 发布者（Owner）的真实评分聚合 —— 由接单方完成订单后
   // 打分产生。只有 ratingCount > 0 时 server 才下发这两个字段；没有真实评价
   // 历史时缺省，客户端不能把缺省当成 0 星渲染。
@@ -933,7 +935,9 @@ export const PublishMarketOpportunityInputSchema = z.object({
   // Apply 只收目标人。不传 = 公开发布，行为与之前完全一致。
   targetUserId: z.string().min(1).optional(),
   // ORDER-SCENARIO-001: 发布向导按 moment 家族填（pro → assistance）。
-  scenario: z.enum(["ordinary", "assistance"]).optional()
+  scenario: z.enum(["ordinary", "assistance"]).optional(),
+  // MARKET-FAST-001：选「快速」= 同意平台按撮合排名代选报名人（她 5 分钟内确认即成单，超时换下一位）。
+  matchingMode: z.enum(["FAST"]).optional()
 });
 export type PublishMarketOpportunityInput = z.infer<typeof PublishMarketOpportunityInputSchema>;
 

@@ -16,14 +16,16 @@ type Postgres struct{ pool *pgxpool.Pool }
 func NewPostgres(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
 const runColumns = `id, task_id, slot_id, requester_id, batch_id, budget_vnd, status, candidates, cursor,
-	current_offer_id, current_agent_id, current_expires_at, assigned_agent_id, created_at, updated_at, version`
+	current_offer_id, current_agent_id, current_expires_at, assigned_agent_id, created_at, updated_at, version,
+	kind, waiting, invited_at`
 
 func scanRun(row pgx.Row) (Run, error) {
 	var r Run
 	var raw []byte
 	var offer, agent, assigned *string
 	err := row.Scan(&r.ID, &r.TaskID, &r.SlotID, &r.RequesterID, &r.BatchID, &r.BudgetVND, &r.Status, &raw, &r.Cursor,
-		&offer, &agent, &r.CurrentExpiresAt, &assigned, &r.CreatedAt, &r.UpdatedAt, &r.Version)
+		&offer, &agent, &r.CurrentExpiresAt, &assigned, &r.CreatedAt, &r.UpdatedAt, &r.Version,
+		&r.Kind, &r.Waiting, &r.InvitedAt)
 	if err != nil {
 		return Run{}, err
 	}
@@ -78,11 +80,11 @@ func (p *Postgres) Create(ctx context.Context, runs []Run, steps []Step) error {
 				raw = []byte("[]")
 			}
 			tag, err := tx.Exec(ctx, `INSERT INTO dispatch.runs (`+runColumns+`)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 				ON CONFLICT (task_id, slot_id) DO NOTHING`,
 				r.ID, r.TaskID, r.SlotID, r.RequesterID, r.BatchID, r.BudgetVND, r.Status, raw, r.Cursor,
 				nullable(r.CurrentOfferID), nullable(r.CurrentAgentID), r.CurrentExpiresAt, nullable(r.AssignedAgentID),
-				r.CreatedAt, r.UpdatedAt, r.Version)
+				r.CreatedAt, r.UpdatedAt, r.Version, kindOrTask(r.Kind), r.Waiting, r.InvitedAt)
 			if err != nil {
 				return err
 			}
@@ -99,10 +101,11 @@ func (p *Postgres) update(ctx context.Context, tx pgx.Tx, r Run, expectedVersion
 		return err
 	}
 	tag, err := tx.Exec(ctx, `UPDATE dispatch.runs SET status = $2, candidates = $3, cursor = $4, current_offer_id = $5,
-		current_agent_id = $6, current_expires_at = $7, assigned_agent_id = $8, updated_at = $9, version = $10
+		current_agent_id = $6, current_expires_at = $7, assigned_agent_id = $8, updated_at = $9, version = $10,
+		waiting = $12, invited_at = $13
 		WHERE id = $1 AND version = $11`,
 		r.ID, r.Status, raw, r.Cursor, nullable(r.CurrentOfferID), nullable(r.CurrentAgentID), r.CurrentExpiresAt,
-		nullable(r.AssignedAgentID), r.UpdatedAt, r.Version, expectedVersion)
+		nullable(r.AssignedAgentID), r.UpdatedAt, r.Version, expectedVersion, r.Waiting, r.InvitedAt)
 	if err != nil {
 		return err
 	}
@@ -241,4 +244,11 @@ func (p *Postgres) Stats(ctx context.Context, since time.Time) (Stats, error) {
 		LEFT JOIN LATERAL (SELECT at FROM dispatch.steps st WHERE st.run_id = r.id AND st.kind = 'ACCEPTED' ORDER BY id LIMIT 1) a ON true
 		WHERE r.created_at >= $1`, since).Scan(&s.Running, &s.Assigned, &s.Exhausted, &s.Cancelled, &s.MedianMinutesToAssign)
 	return s, err
+}
+
+func kindOrTask(kind string) string {
+	if kind == "" {
+		return KindTask
+	}
+	return kind
 }

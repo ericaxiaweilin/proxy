@@ -1,4 +1,4 @@
--- DISPATCH-LOOP-001（2026-10-06）：快速模式（matchingMode=FAST）的自动派单。
+-- DISPATCH-LOOP-001 / MARKET-FAST-001（2026-10-06）：快速模式的自动派单 —— 需求档位（TASK）与市场发单（MARKET）。
 --
 -- 一张需求的每个档位一行 run：按候选批次的排名一次只给一个人发邀约（5 分钟），被接 ⇒ ASSIGNED，
 -- 过期 / 被撤 ⇒ 顺延下一位，候选用完 ⇒ EXHAUSTED（进运营工作台的「待人工」）。规则与理由见
@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS dispatch.runs (
     slot_id            TEXT NOT NULL,
     requester_id       TEXT NOT NULL,
     batch_id           TEXT NOT NULL,
-    budget_vnd         BIGINT NOT NULL CHECK (budget_vnd > 0),
+    kind               TEXT NOT NULL DEFAULT 'TASK' CHECK (kind IN ('TASK', 'MARKET')),
+    -- 需求档位才有预算（标价 ≤ 预算才发）；市场单的价格就是发单价，没有预算这回事。
+    budget_vnd         BIGINT NOT NULL DEFAULT 0 CHECK (kind = 'MARKET' OR budget_vnd > 0),
     status             TEXT NOT NULL CHECK (status IN ('RUNNING', 'ASSIGNED', 'EXHAUSTED', 'CANCELLED')),
     candidates         JSONB NOT NULL CHECK (jsonb_typeof(candidates) = 'array'),
     cursor             INTEGER NOT NULL DEFAULT 0 CHECK (cursor >= 0),
@@ -27,6 +29,9 @@ CREATE TABLE IF NOT EXISTS dispatch.runs (
     current_agent_id   TEXT,
     current_expires_at TIMESTAMPTZ,
     assigned_agent_id  TEXT,
+    -- MARKET-FAST-001：市场单还没人报名（只记一次 WAITING_APPLICANTS）/ 最近一次主动邀请的时间。
+    waiting            BOOLEAN NOT NULL DEFAULT false,
+    invited_at         TIMESTAMPTZ,
     created_at         TIMESTAMPTZ NOT NULL,
     updated_at         TIMESTAMPTZ NOT NULL,
     version            INTEGER NOT NULL CHECK (version > 0),

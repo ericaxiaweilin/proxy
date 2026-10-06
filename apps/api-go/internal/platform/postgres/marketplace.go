@@ -334,3 +334,71 @@ func (r *MarketplaceRepository) Dismiss(ctx context.Context, viewerID, opportuni
 
 var _ marketplace.Repository = (*MarketplaceRepository)(nil)
 var _ marketplace.NumberReader = (*MarketplaceRepository)(nil)
+
+// ExpireSelection 撤回平台代选的那次选中（MARKET-FAST-001）：那一条 SELECTED ⇒ SELECTION_EXPIRED，
+// 其余 NOT_SELECTED ⇒ SUBMITTED（重新可选）。与 SelectApplication 同一把锁（机会行 + 报名行 FOR UPDATE），
+// 所以不会和她的确认交错：她先确认 ⇒ 这里看到 CONFIRMED，返回冲突、什么都不改。
+func (r *MarketplaceRepository) ExpireSelection(ctx context.Context, opportunityID, applicationID, ownerID string) error {
+	return runInTransaction(ctx, r.pool, func(txCtx context.Context, tx pgx.Tx) error {
+		var actualOwner string
+		if err := tx.QueryRow(txCtx, `SELECT owner_id FROM marketplace.opportunities WHERE id=$1 FOR UPDATE`, opportunityID).Scan(&actualOwner); errors.Is(err, pgx.ErrNoRows) || (err == nil && actualOwner != ownerID) {
+			return marketplace.ErrOpportunityNotFound
+		} else if err != nil {
+			return err
+		}
+		rows, err := tx.Query(txCtx, `SELECT id, payload FROM marketplace.applications WHERE opportunity_id=$1 FOR UPDATE`, opportunityID)
+		if err != nil {
+			return err
+		}
+		type stored struct {
+			id  string
+			app marketplace.Application
+		}
+		var all []stored
+		for rows.Next() {
+			var item stored
+			var raw []byte
+			if err := rows.Scan(&item.id, &raw); err != nil {
+				rows.Close()
+				return err
+			}
+			if err := json.Unmarshal(raw, &item.app); err != nil {
+				rows.Close()
+				return err
+			}
+			all = append(all, item)
+		}
+		rows.Close()
+		found := false
+		for _, item := range all {
+			if item.id == applicationID {
+				found = true
+				if item.app.Status != "SELECTED" {
+					return marketplace.ErrApplicationStateConflict
+				}
+			}
+		}
+		if !found {
+			return marketplace.ErrApplicationNotFound
+		}
+		for _, item := range all {
+			app := item.app
+			switch {
+			case item.id == applicationID:
+				app.Status = "SELECTION_EXPIRED"
+			case app.Status == "NOT_SELECTED":
+				app.Status = "SUBMITTED"
+			default:
+				continue
+			}
+			raw, err := json.Marshal(app)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(txCtx, `UPDATE marketplace.applications SET payload=$2 WHERE id=$1`, item.id, raw); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
