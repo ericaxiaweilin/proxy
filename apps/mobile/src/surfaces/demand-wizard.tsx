@@ -195,6 +195,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const [peopleReturn, setPeopleReturn] = useState<Step>("specs");
   const [publishing, setPublishing] = useState(false);
   const [negotiable, setNegotiable] = useState(false);
+  // DEMAND-HEADCOUNT-003：下拉菜单的开关（常态只露触发器那一行）。
+  const [headcountOpen, setHeadcountOpen] = useState(false);
   const [error, setError] = useState<string>();
   const [result, setResult] = useState<MarketOpportunity>();
   const [draftRestored, setDraftRestored] = useState(false);
@@ -399,6 +401,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     // SCENE-STEP-ONEPAGE-001（2026-10-06，用户「选择场景还是跳页 没有和原型一样
     // 一页」）：不再有独立的「选场景」步 —— 场景 list 作为**规格页里的一个段落**
     // （地点栏上方），绑场景的模板也直接进规格，点卡片在同一页填地点。
+    // DEMAND-HEADCOUNT-003：下拉菜单不带到下一屏（上次没选就走的，回来是收起的）。
+    setHeadcountOpen(false);
     setStep("specs");
   }
 
@@ -434,6 +438,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     setTemplate(undefined);
     setSpecs(defaultSpecsFor(MOMENT_TEMPLATES[0]!));
     setSelectedPerson(undefined);
+    setHeadcountOpen(false);
     setError(undefined);
     setResult(undefined);
     setDraftRestored(false);
@@ -753,17 +758,26 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             </Text>
           </View>
 
-          {/* DEMAND-HEADCOUNT-002（2026-10-07，用户：「你们几人是输入框 改为选择
-              默认1人 最大上限为6人」）：自由输入换成 1–6 人选择，默认 1 人。
-              模板数据里的 ratios/defaultRatio 保留（快筛还用），只是不渲染。 */}
+          {/* DEMAND-HEADCOUNT-003（2026-10-07，用户：「搞成下拉选择框的 … 不要做成
+              让客户增大摩擦力的视觉」）：六颗常驻 chips 太重，换成贴着触发按钮的
+              下拉（SCENE-PICKER-FILTER-ANCHORED-004 同款语言：触发器 + caret，
+              选项行 + ✓，选即收）。常态只占一行小框，默认 1 人。模板数据里的
+              ratios/defaultRatio 保留（快筛还用），只是不渲染。 */}
           <Text selectable style={styles.fieldLabel}>你们几人</Text>
-          <View style={styles.chipRow} testID="demand-headcount">
-            {HEADCOUNT_OPTIONS.map((count) => (
-              <Pressable key={count} accessibilityLabel={`选择${count}人`} onPress={() => setSpecs((prev) => ({ ...prev, ratio: count }))} style={[styles.chip, specs.ratio === count && styles.chipOn]}>
-                <Text selectable style={[styles.chipText, specs.ratio === count && styles.chipTextOn]}>{`${count} 人`}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <Pressable accessibilityLabel="选择人数" onPress={() => setHeadcountOpen((open) => !open)} style={styles.headcountTrigger} testID="demand-headcount">
+            <Text selectable style={styles.headcountTriggerText}>{`${normalizeHeadcount(specs.ratio)} 人`}</Text>
+            <Text selectable style={styles.headcountCaret}>{headcountOpen ? "▴" : "▾"}</Text>
+          </Pressable>
+          {headcountOpen ? (
+            <View style={styles.headcountMenu}>
+              {HEADCOUNT_OPTIONS.map((count, index) => (
+                <Pressable key={count} accessibilityLabel={`选择${count}人`} onPress={() => { setSpecs((prev) => ({ ...prev, ratio: count })); setHeadcountOpen(false); }} style={[styles.headcountOption, index === HEADCOUNT_OPTIONS.length - 1 && styles.headcountOptionLast]}>
+                  <Text selectable style={styles.headcountOptionText}>{`${count} 人`}</Text>
+                  {specs.ratio === count ? <Text selectable style={styles.headcountCheck}>✓</Text> : null}
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
 
           <Text selectable style={styles.fieldLabel}>时间段</Text>
           <TextInput onChangeText={(time) => setSpecs((prev) => ({ ...prev, time }))} placeholder={template?.defaultTime} placeholderTextColor={color.muted} style={styles.input} value={specs.time} />
@@ -1059,6 +1073,17 @@ const styles = StyleSheet.create({
   chipText: { color: color.ink, fontSize: 13, fontWeight: "700" },
   chipTextOn: { color: color.white },
   input: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 15, paddingHorizontal: 14, paddingVertical: 10 },
+  // DEMAND-HEADCOUNT-003：下拉触发器 + 菜单。关态只占一行（跟 input 同一套
+  // 边框/圆角/padding，看着就是个小选择框）；选项行 + ✓ 沿用
+  // filterDropdownOption 那套语言，不另起一套。
+  headcountTrigger: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10 },
+  headcountTriggerText: { color: color.ink, fontSize: 15, fontWeight: "700" },
+  headcountCaret: { color: color.muted, fontSize: 13, fontWeight: "800" },
+  headcountMenu: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, marginTop: 6 },
+  headcountOption: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 12 },
+  headcountOptionLast: { borderBottomWidth: 0 },
+  headcountOptionText: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  headcountCheck: { color: color.ink, fontSize: 14, fontWeight: "900" },
   priceMain: { alignItems: "center", flexDirection: "row", gap: 8 },
   priceInput: { flex: 1 },
   negoBtn: { alignItems: "center", borderColor: color.line, borderRadius: 12, borderWidth: 1, justifyContent: "center", paddingHorizontal: 14, paddingVertical: 10 },
