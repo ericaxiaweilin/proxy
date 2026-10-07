@@ -16262,10 +16262,10 @@ fi
 # DEMAND-SUBSECTION-003（2026-10-07，用户看了原型的渲染图：「你实现的没有对齐原型
 # 这样看起来很不起眼 其实这是重要选择 对齐原型」）：接单方式原来是一颗「等接单」chip
 # + 一条「或 直接约 ›」小字链接 —— 撑不起「重要选择」。原型 ② 是一枚**等权分段控件**
-# （灰轨道 + 白色药丸，选中项带 mint 角标）压一张**说明卡**（44 圆图标 + 名称 + 角标
-# + 一行描述，accent 实线边 + accent-soft 底）。这条钉守形态：
+# （灰轨道 + 白色药丸，选中项带 mint 角标）。这条钉守形态：
 #   ① 分段控件在，且**两段都**是 modeToggleBtn（等权，flex:1），选中态是白药丸；
-#   ② 说明卡在（autoCard / autoIcon / autoBadge / autoDesc 四个都在）；
+#   ② 说明卡在（autoCard / autoIcon / autoBadge / autoDesc 四个都在），且**只有一张** ——
+#      原型里 accent 说明卡只属于「系统分配」那一支（#autoMode）；
 #   ③ 专业没选时不摆卡：判据必须写成 `) : mode === "open" ? (`，undefined 落到 null；
 #   ④ 两段的名字仍是用户 2026-10-06 定名的 等接单 / 直接约（原型那两个词是
 #      「系统分配 / 自己挑」，没换 —— 换名字要先推翻他自己那条命名决定）；
@@ -16276,6 +16276,23 @@ fi
 #        要挡的是它被挂回 JSX。所以反向注入必须注入 `style={styles.X}` 才算数
 #        （实测：只注入 `directLinkText: {` 定义行，这条臂**不**报红，看着像假守卫）。
 # 说明卡/控件的**文案**不在这里钉（用户随时会改词），只钉它们存在。
+#
+# DEMAND-DIRECT-LIST-001（2026-10-07 第二轮，用户：「直接约没有接真人接单list啊」）：
+# 原型 ② 的「自己挑」那支**不是一张说明卡**，是 `.person-list` 本体 —— 上一版把卡
+# 当入口、真人名单留在「选人」步里，于是这一段看起来完全没有接单的人。现在补：
+#   ⑥ 直接约那支画出**真人候选行**，且与选人步共用同一份实现（PersonRow 两处调用）
+#      —— 两处各写一份就是 CREATOR-AVATAR-001 说的「同一份 SupplierCandidate 两个面
+#      两个画法」；
+#   ⑦ 名单要真的拉起来：加载条件必须含 `step === "specs" && mode === "direct"`，
+#      只在选人步拉的话这一列永远停在「正在匹配…」，看着就像没有真人；
+#   ⑧ 行上读数走**共享格式化**（formatReferencePrice / creatorRatingLabel /
+#      formatServiceVolume）—— CREATOR-LIST-CARD-001 的口径：同一份数据两套格式化
+#      就是「同一个人两个价」。反面：报价不许退回手写除法。
+# ⚠️ 原型那张人卡上的**编造读数**（★ 星级 / 128 单 / 距离 /「/小时 起」）以及
+#    「报价不许退回手写除法」这两组**反面**断言都不放这里：本段说明里就引用了那串当反例，
+#    而 shell 的 grep 不剥注释 ⇒ 会被自己的注释喂红。按本仓既有分工
+#    （CREATOR-LIST-CARD-001 同款决定）交给 demand-wizard-specs-skeleton.test.ts
+#    用真正的 stripComments 断言 —— 本块最后 require 了那个文件，删了它就红。
 if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
   DS3_B=0
   if ! grep -qF 'style={styles.modeToggle}' apps/mobile/src/surfaces/demand-wizard.tsx; then
@@ -16293,10 +16310,41 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
       DS3_B=1
     fi
   done
+  # DEMAND-DIRECT-LIST-001：说明卡**只属于「系统分配」那一支**（原型 #autoMode）。
+  # 直接约那一支要画真人候选行，不该再摆一张卡 —— 钉成恰好 1 张。
+  if [ "$(grep -cF 'style={styles.autoCard}' apps/mobile/src/surfaces/demand-wizard.tsx)" != "1" ]; then
+    echo "  FAIL [DEMAND-SUBSECTION-003]: 说明卡不在「系统分配」那一支（或又给「直接约」摆了一张）—— 原型里直接约那支是 .person-list。" >&2
+    DS3_B=1
+  fi
   if ! grep -qF ') : mode === "open" ? (' apps/mobile/src/surfaces/demand-wizard.tsx; then
     echo "  FAIL [DEMAND-SUBSECTION-003]: 卡的判据被改了 —— 专业没选时也会摆出「系统推荐 · 推荐」，在没选的事上冒充已选。" >&2
     DS3_B=1
   fi
+  # ⑥ 直接约那支画的是**真人候选行**，而且与选人步共用同一份实现（PersonRow 两处调用）。
+  if [ "$(grep -cF '<PersonRow' apps/mobile/src/surfaces/demand-wizard.tsx)" -lt 2 ]; then
+    echo "  FAIL [DEMAND-SUBSECTION-003]: 候选人行不再两处共用 —— 直接约那支又退回一张空卡/入口了（用户：直接约没有接真人接单list啊）。" >&2
+    DS3_B=1
+  fi
+  if [ "$(grep -cF 'visiblePeople.map' apps/mobile/src/surfaces/demand-wizard.tsx)" != "2" ]; then
+    echo "  FAIL [DEMAND-SUBSECTION-003]: 候选人名单不在两处画（选人步 + 规格页直接约那一列）。" >&2
+    DS3_B=1
+  fi
+  # ⑦ 名单要真的拉起来 —— 只在选人步拉的话，规格页这一列永远停在「正在匹配…」。
+  if ! grep -qF 'step === "specs" && mode === "direct"' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SUBSECTION-003]: 「直接约」不再拉起供给目录 —— 那一列会永远停在「正在匹配…」，看着像没有真人。" >&2
+    DS3_B=1
+  fi
+  # ⑧ 行上读数走共享格式化（同一份数据两套格式化 = 「同一个人两个价 / 两个分」）。
+  for ds3_fmt in 'formatReferencePrice(person.referencePrice, person.currency)' 'creatorRatingLabel(person.rating)' 'formatServiceVolume(person.rating?.completedOrders)'; do
+    if ! grep -qF "$ds3_fmt" apps/mobile/src/surfaces/demand-wizard.tsx; then
+      echo "  FAIL [DEMAND-SUBSECTION-003]: 候选行没走共享格式化（${ds3_fmt}）—— 另写一份会出现「同一个人两个价 / 两个分」。" >&2
+      DS3_B=1
+    fi
+  done
+  # 反面：报价不许退回手写除法（1_200_000 会印成「1200K VND」，共享实现印「1.2tr VND」）。
+  # ⚠️ 这条和上面「编造读数」那组一样**不放 shell 层**：裸 `grep -qF` 不剥注释，将来任何
+  # 一句解释「别用 Math.round(person.referencePrice / 1000)」的注释都会把它喂红。
+  # 交给 demand-wizard-specs-skeleton.test.ts 的 stripComments 版断言（下面 require 了它）。
   # ⚠️ 收窄到**分段控件那一颗**的 JSX 形态：裸 `}>直接约</Text>` 会被下面说明卡的名字
   # 喂绿（卡里也写着「直接约」）—— 段名被换掉了这条臂却照样绿，就是假守卫。
   if ! grep -qF 'styles.modeToggleTextOn]}>等接单</Text>' apps/mobile/src/surfaces/demand-wizard.tsx ||

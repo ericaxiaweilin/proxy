@@ -24,6 +24,15 @@ describe("DEMAND-SPECS-SKELETON-001 规格步是编号分段 + 底部汇总条",
     return wizard.slice(wizard.lastIndexOf("no={", at), at).trim();
   }
 
+  // 反向臂要在**剥掉注释**的源码上判：改动说明里会原样引用原型的编造读数当反例
+  // （「★ 4.9 · 128 单」那串），不剥的话那些 not.toContain 会被我自己的注释喂红
+  // —— 本仓这个坑踩过四次，两个方向都踩过。
+  // 只剥 /* */（含 JSX 的 {/* */}）与**整行** //，不碰行尾的 //：否则会把 URL 之后的
+  // 代码一起吃掉，反向臂就变成空断言（看着绿，其实什么都没查）。
+  function stripComments(src: string): string {
+    return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  }
+
   it("五段编号分段：选场景 / 选搭子 / 时间与人数 / 价格 / 备注", () => {
     expect(wizard).toContain("SpecsSection");
     // DEMAND-SCENE-MAP-001 起第 1 段标题按有无列表切换（有列表才叫选场景）。
@@ -52,9 +61,14 @@ describe("DEMAND-SPECS-SKELETON-001 规格步是编号分段 + 底部汇总条",
     expect(wizard).not.toContain("怎么找人</Text>");
   });
 
-  it("DEMAND-SUBSECTION-003 搭子是原型那枚等权分段控件 + 说明卡", () => {
-    // 用户 2026-10-07 看了原型的渲染图：「你实现的没有对齐原型 这样看起来很不起眼
-    // 其实这是重要选择 对齐原型」。原来是一颗 chip + 一条小字链接 —— 撑不起「重要选择」。
+  it("DEMAND-SUBSECTION-003 搭子是等权分段控件；「直接约」那支接的是真人接单 list", () => {
+    // 用户 2026-10-07 连着两轮：
+    //   ①「你实现的没有对齐原型 这样看起来很不起眼 其实这是重要选择 对齐原型」
+    //     → 原来是一颗 chip + 一条小字链接，换成原型 ② 的等权分段控件；
+    //   ②「直接约没有接真人接单list啊」
+    //     → 原型的「自己挑」那支**不是说明卡**，是 .person-list 本体（accent 说明卡
+    //       只属于「系统分配」那支）。上一版把卡当入口、真人 list 留在「选人」步里，
+    //       于是这一段看起来完全没有接单的人。
     // 段内两段的名字仍是用户 2026-10-06 定名的 等接单 / 直接约（DEMAND-SCENE-FIRST-001
     // 按字面扫），换的只是**控件形态**。
     expect(wizard).toContain("}>等接单</Text>");
@@ -63,8 +77,10 @@ describe("DEMAND-SPECS-SKELETON-001 规格步是编号分段 + 底部汇总条",
     expect(wizard).toContain("style={styles.modeToggle}");
     expect(wizard).toContain("styles.modeToggleBtnOn");
     expect(wizard.match(/styles\.modeToggleBtn,/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
-    // 说明卡：44 圆图标 + 名称 + 角标 + 描述（原型 .auto-card / .auto-icon / .auto-badge）。
-    expect(wizard).toContain("style={styles.autoCard}");
+    // 说明卡**只属于「系统分配」那一支**（原型 #autoMode 里的 .auto-card：
+    // 44 圆图标 + 名称 + 角标 + 描述）。这里钉成 1 —— 直接约那支要画人 list，
+    // 不该再摆一张卡。
+    expect(wizard.match(/style=\{styles\.autoCard\}/g)?.length ?? 0).toBe(1);
     expect(wizard).toContain("styles.autoIcon");
     expect(wizard).toContain("styles.autoBadge");
     expect(wizard).toContain("styles.autoDesc");
@@ -72,10 +88,33 @@ describe("DEMAND-SPECS-SKELETON-001 规格步是编号分段 + 底部汇总条",
     // 专业模式没选时不摆卡（判据写死成这两个分支，undefined 落到 null）——
     // 不然「系统推荐 · 推荐」会在一件还没选的事上冒充已选。
     expect(wizard).toContain(') : mode === "open" ? (');
+    // 直接约那一支画的是**真人候选行**：PersonRow 一处实现、两处调用
+    // （选人步 + 规格页这一列）。两处各写一份就是 CREATOR-AVATAR-001 说的
+    // 「同一份 SupplierCandidate 在两个面里画法不一样」。
+    expect(wizard.match(/<PersonRow/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(wizard.match(/visiblePeople\.map/g)?.length ?? 0).toBe(2);
+    // 名单来自真实供给目录，且选「直接约」时就把它拉起来 —— 只在选人步拉的话，
+    // 规格页这一列永远是「正在匹配…」，看着就像没有真人。
+    expect(wizard).toContain('step === "specs" && mode === "direct"');
+    // 行上的读数走共享格式化，不在这一支另写一份（否则「同一个人两个价 / 两个分」）。
+    expect(wizard).toContain("formatReferencePrice(person.referencePrice, person.currency)");
+    expect(wizard).toContain("creatorRatingLabel(person.rating)");
+    expect(wizard).toContain("formatServiceVolume(person.rating?.completedOrders)");
     // 反面：旧的 chip + 小字链接形态不许回来。钉**样式名**不钉文案 —— 上面那段注释里
     // 引用了旧文案，裸串会被自己的注释喂绿（这一轮真踩过）。两个样式已随形态一起删除。
     expect(wizard).not.toContain("styles.directLinkText");
     expect(wizard).not.toContain("styles.chipOn");
+    // 反面：原型那张人卡上的读数**一个都不许抄** —— ★ 星级、128 单、距离、「/小时 起」
+    // 在 SupplierCandidate 里都没有对应字段（有的是 rating.total 0..100 的服务端分、
+    // 真实 completedOrders、真实 referencePrice）。照抄就是 CREATOR-LIST-CARD-001
+    // 第 2 条禁的那件事：让编造的东西看起来像真实读数。
+    const code = stripComments(wizard);
+    expect(code).not.toContain("★");
+    expect(code).not.toContain("128 单");
+    expect(code).not.toContain("/小时 起");
+    // 反面：报价不许退回手写除法 —— 1_200_000 会被印成「1200K VND」，
+    // 而共享实现印「1.2tr VND」（越南盾百万位写 tr，越南商家不认 M）。
+    expect(code).not.toContain("Math.round(person.referencePrice");
   });
 
   it("分段顺序即页面顺序：场景 → 搭子 → 人时 → 价格 → 备注", () => {

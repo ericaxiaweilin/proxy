@@ -44,6 +44,13 @@ import { Image } from "expo-image";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 // 头像进主页的 photo→URI 解析跟 business-home/商家侧同一条（resolveCreatorPhoto）。
 import { resolveCreatorPhoto } from "./merchant-creator-recommendations";
+// 候选行上的读数一律走共享格式化，不在这里另写一份 —— CREATOR-LIST-CARD-001 /
+// CREATOR-AVATAR-001 立的口径：同一份 SupplierCandidate 在多个面里各写一份，
+// 就会出现「同一个人两个价」「同一个人两个分」，用户只能猜哪个是错的。
+// 尤其是报价：本文件原来手写 `Math.round(referencePrice / 1000)}K`，对 1_200_000
+// 会印出「1200K VND」，而共享实现印「1.2tr VND」（越南盾百万位要写 tr）。
+import { creatorRatingLabel, formatServiceVolume, labelLanguage } from "../creator-capability-labels";
+import { formatReferencePrice } from "../creator-pricing";
 import { localApiBaseUrl } from "../native-clients";
 // 卡面右下角的距离（用户选「接真实距离」）：真实定位 + 真实场景目录。
 import { getCurrentFix } from "../device-location";
@@ -140,6 +147,69 @@ const PEOPLE_FILTERS = ["推荐", "附近", "现在可用", "已认证"] as cons
 const DRAFT_KEY = "proxy.demandWizard.draft.v1";
 
 type DraftState = { templateId: string; specs: DemandSpecs };
+
+// DEMAND-DIRECT-LIST-001（2026-10-07，用户「直接约没有接真人接单list啊」）：
+// 候选行原来只在「选人」步里内联写了一遍。规格页的「直接约」现在要画**同一批人**，
+// 所以抽成一个组件两处共用 —— 否则就是 CREATOR-AVATAR-001 警告过的
+// 「同一份 SupplierCandidate 在两个面里画法不一样」。
+//
+// ⚠️ 行上的读数**不照抄原型**。原型那张人卡写的是「★ 4.9 · 128 单 · 1.2km ·
+// 200K/小时 起」，而 SupplierCandidate 里**没有**星级、也**没有**距离：它有的是
+// rating.total（服务端 matching.Score 的 0..100 分）、真实 completedOrders
+// （Postgres 订单表）和真实 referencePrice。照抄那几个数就是
+// CREATOR-LIST-CARD-001 第 2 条禁的那件事 —— 让编造的东西看起来像真实读数。
+// 所以这里印的是「评级 · N 分」「服务 N 单」；没成交记录一律印「新人」不编分。
+function PersonRow({ person, active, onOpenProfile, onSelect }: {
+  person: SupplierCandidate;
+  active: boolean;
+  onOpenProfile?: ((person: SupplierCandidate, avatarUri?: string) => void) | undefined;
+  onSelect: () => void;
+}): React.JSX.Element {
+  const photo = person.photos.length > 0
+    ? resolveAssetSource(
+        person.photos[0]!.startsWith("/") ? { kind: "serverPath", path: person.photos[0]! } : { kind: "remote", url: person.photos[0]! },
+        { baseUrl: localApiBaseUrl }
+      )
+    : undefined;
+  const ratingLine = creatorRatingLabel(person.rating);
+  return (
+    <View style={[styles.personCard, active && styles.momentCardOn]}>
+      {/* 点位分工（2026-10-06 用户口径，场景侧同款）：头像 = 看主页，
+          卡片其余部分 = 选择。主页由调用方接（app-shell 的
+          OtherProfileSurface），回调没给就不可点。 */}
+      {typeof photo === "object" ? (
+        <Pressable accessibilityLabel={`看${person.name}主页`} disabled={!onOpenProfile} onPress={() => onOpenProfile?.(person, resolveCreatorPhoto(person.photos[0]))}>
+          <CircularAvatarImage accessibilityLabel={`${person.name}头像`} size={44} source={photo} />
+        </Pressable>
+      ) : (
+        onOpenProfile
+          ? <Pressable accessibilityLabel={`看${person.name}主页`} onPress={() => onOpenProfile?.(person)}>
+              <View style={styles.personAvatar}><Text selectable style={styles.personAvatarText}>{person.name.trim().charAt(0) || "?"}</Text></View>
+            </Pressable>
+          : <View style={styles.personAvatar}><Text selectable style={styles.personAvatarText}>{person.name.trim().charAt(0) || "?"}</Text></View>
+      )}
+      <View style={styles.personCopy}>
+        <View style={styles.personNameRow}>
+          <Text selectable style={styles.personName}>{person.name}</Text>
+          {person.eligibility.capabilitiesOk ? <Text selectable style={styles.certBadge}>已认证</Text> : null}
+        </View>
+        {/* 语言印全称（labelLanguage）：中国用户不认 ZH/VI 这类缩写。 */}
+        <Text selectable style={styles.personMeta}>
+          {person.languages.length > 0 ? person.languages.map(labelLanguage).join(" · ") : person.serviceType}
+          {" · "}{person.availability ? "有档期" : "档期待确认"}
+        </Text>
+        <Text selectable style={styles.personMeta}>
+          {formatReferencePrice(person.referencePrice, person.currency)}
+          {ratingLine !== "" ? ` · ${ratingLine}` : ""}
+          {` · ${formatServiceVolume(person.rating?.completedOrders)}`}
+        </Text>
+      </View>
+      <Pressable accessibilityLabel={`选择${person.name}`} onPress={onSelect} style={[styles.selectBtn, active && styles.selectBtnOn]}>
+        <Text selectable style={[styles.selectText, active && styles.selectTextOn]}>{active ? "已选择" : "选择 TA"}</Text>
+      </Pressable>
+    </View>
+  );
+}
 
 export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewMarket, onCreateActivity, onOpenPersonProfile }: {
   marketplace: MarketplaceClient;
@@ -378,8 +448,14 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   }
 
   // 选人：supply 名单本机过滤；仅浏览意向，发布恒为公开市场。
+  //
+  // DEMAND-DIRECT-LIST-001（2026-10-07）：规格页选「直接约」时**也要**这份名单 ——
+  // 那一段现在直接把真人候选 list 画出来（用户「直接约没有接真人接单list啊」），
+  // 所以加载条件不能只认 step === "people"，否则规格页那一列永远是空的。
+  // 两个入口共用同一次请求（peopleLoaded 是闸，只拉一次）。
   useEffect(() => {
-    if (step !== "people" || peopleLoaded || !supply) return;
+    const wantsPeople = step === "people" || (step === "specs" && mode === "direct");
+    if (!wantsPeople || peopleLoaded || !supply) return;
     let cancelled = false;
     void supply.querySuppliers({ marketId: "hn", capability: "ZH", limit: 12 }).then((items) => {
       if (cancelled) return;
@@ -389,7 +465,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
       if (!cancelled) setPeopleLoaded(true);
     });
     return () => { cancelled = true; };
-  }, [step, peopleLoaded, supply]);
+  }, [step, mode, peopleLoaded, supply]);
 
   function togglePeopleFilter(filter: string): void {
     setPeopleFilters((prev) => prev.includes(filter) ? prev.filter((item) => item !== filter) : [...prev, filter]);
@@ -741,46 +817,15 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           {!supply ? <Text selectable style={styles.empty}>供给目录不可用，直接发布到市场。</Text>
             : !peopleLoaded ? <Text selectable style={styles.empty}>正在匹配…</Text>
             : visiblePeople.length === 0 ? <Text selectable style={styles.empty}>当前筛选没有匹配的人，放宽条件或直接发布到市场。</Text>
-            : visiblePeople.map((person) => {
-              const active = selectedPerson?.agentId === person.agentId;
-              const photo = person.photos.length > 0
-                ? resolveAssetSource(
-                    person.photos[0]!.startsWith("/") ? { kind: "serverPath", path: person.photos[0]! } : { kind: "remote", url: person.photos[0]! },
-                    { baseUrl: localApiBaseUrl }
-                  )
-                : undefined;
-              return (
-                <View key={person.agentId} style={[styles.personCard, active && styles.momentCardOn]}>
-                  {/* 点位分工（2026-10-06 用户口径，场景侧同款）：头像 = 看主页，
-                      卡片其余部分 = 选择。主页由调用方接（app-shell 的
-                      OtherProfileSurface），回调没给就不可点。 */}
-                  {typeof photo === "object" ? (
-                    <Pressable accessibilityLabel={`看${person.name}主页`} disabled={!onOpenPersonProfile} onPress={() => onOpenPersonProfile?.(person, resolveCreatorPhoto(person.photos[0]))}>
-                      <CircularAvatarImage accessibilityLabel={`${person.name}头像`} size={44} source={photo} />
-                    </Pressable>
-                  ) : (
-                    onOpenPersonProfile
-                      ? <Pressable accessibilityLabel={`看${person.name}主页`} onPress={() => onOpenPersonProfile?.(person)}>
-                          <View style={styles.personAvatar}><Text selectable style={styles.personAvatarText}>{person.name.trim().charAt(0) || "?"}</Text></View>
-                        </Pressable>
-                      : <View style={styles.personAvatar}><Text selectable style={styles.personAvatarText}>{person.name.trim().charAt(0) || "?"}</Text></View>
-                  )}
-                  <View style={styles.personCopy}>
-                    <View style={styles.personNameRow}>
-                      <Text selectable style={styles.personName}>{person.name}</Text>
-                      {person.eligibility.capabilitiesOk ? <Text selectable style={styles.certBadge}>已认证</Text> : null}
-                    </View>
-                    <Text selectable style={styles.personMeta}>{person.languages.length > 0 ? person.languages.join(" · ") : person.serviceType}</Text>
-                    <Text selectable style={styles.personMeta}>
-                      {person.availability ? "有档期" : "档期待确认"} · {person.referencePrice > 0 ? `参考 ${Math.round(person.referencePrice / 1000)}K ${person.currency}` : "价格面议"}
-                    </Text>
-                  </View>
-                  <Pressable accessibilityLabel={`选择${person.name}`} onPress={() => { setSelectedPerson(active ? undefined : person); setMode(active ? "open" : "direct"); }} style={[styles.selectBtn, active && styles.selectBtnOn]}>
-                    <Text selectable style={[styles.selectText, active && styles.selectTextOn]}>{active ? "已选择" : "选择 TA"}</Text>
-                  </Pressable>
-                </View>
-              );
-            })}
+            : visiblePeople.map((person) => (
+              <PersonRow
+                key={person.agentId}
+                active={selectedPerson?.agentId === person.agentId}
+                onOpenProfile={onOpenPersonProfile}
+                onSelect={() => { const active = selectedPerson?.agentId === person.agentId; setSelectedPerson(active ? undefined : person); setMode(active ? "open" : "direct"); }}
+                person={person}
+              />
+            ))}
           {error ? <Text selectable style={styles.error}>{error}</Text> : null}
           <View style={styles.doneRow}>
             {/* 上一步回**入口**：专业从选 Moment 进来就回 moment，「直接约」从规格
@@ -930,12 +975,21 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               照原型补上。
               控件语义不变，两段就是**等接单 / 直接约**（用户 2026-10-06 定名，
               DEMAND-SCENE-FIRST-001 按字面扫；原型那两个词是「系统分配 / 自己挑」，
-              没换 —— 换名字要先推翻他自己那条命名决定）。点「直接约」只**选中**，
-              真正的入口是下面那张卡（原型的 自己挑 段下面接人 list；本仓的选人是一整步
-              带筛选/供给目录，不塞回段里，所以卡只做入口）。
+              没换 —— 换名字要先推翻他自己那条命名决定）。点「直接约」**把下面那列
+              真人候选 list 打开**（DEMAND-DIRECT-LIST-001：原来这里只摆了一张入口卡，
+              用户「直接约没有接真人接单list啊」—— 原型那一段本来就是 .person-list）。
               段头 hint 保持动态（专业那句是**发布闸**的说明 —— 没选不放行，不能丢）。 */}
           <SpecsSection
-            hint={isPro && mode === undefined ? "专业服务先选一种 · 没有默认" : "默认等接单 · 谁有空谁响应"}
+            hint={
+              // 段头 hint 要跟着**当前选择**走：专业那句是**发布闸**的说明（没选不放行，
+              // 不能丢）；直接约选了之后还写「默认等接单 · 谁有空谁响应」是自相矛盾 ——
+              // 用户正看着一列真人，hint 却在说「默认等接单」。
+              isPro && mode === undefined
+                ? "专业服务先选一种 · 没有默认"
+                : mode === "direct"
+                  ? "自己挑一个 · 选中即定向邀约"
+                  : "默认等接单 · 谁有空谁响应"
+            }
             no={2}
             title="选搭子"
           >
@@ -950,22 +1004,45 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             </Pressable>
           </View>
           {mode === "direct" ? (
-            <Pressable accessibilityLabel={selectedPerson ? `查看已选的${selectedPerson.name}` : "去挑一个搭子"} onPress={() => { setPeopleReturn("specs"); setStep("people"); }} style={styles.autoCard}>
-              <View style={styles.autoIcon}>
-                <ProxyIcon color={color.white} name={selectedPerson ? "check" : "search"} size={20} />
-              </View>
-              <View style={styles.autoBody}>
-                <View style={styles.autoNameRow}>
-                  <Text selectable style={styles.autoName}>直接约</Text>
-                  <Text selectable style={styles.autoBadge}>{selectedPerson ? "已选" : "自己挑"}</Text>
-                </View>
-                <Text selectable style={styles.autoDesc}>
-                  {selectedPerson
-                    ? `已选 ${selectedPerson.name} · 只对 TA 可见，等 TA 确认。`
-                    : "从附近可接单的人里自己挑一个，选中就是定向邀约。"}
-                </Text>
-              </View>
-            </Pressable>
+            <>
+              {/* DEMAND-DIRECT-LIST-001（2026-10-07，用户「直接约没有接真人接单list啊」）：
+                  原型 ② 的「自己挑」那一段**不是一张说明卡**，是 `.person-list` 本体 ——
+                  accent 说明卡只属于「系统分配」那一支（原型的 #autoMode）。我上一版
+                  把卡当入口、真人 list 留在「选人」步里，于是这一段看起来完全没有
+                  「接单的人」。现在把同一批候选人直接画在这里：数据是
+                  supply.querySuppliers 的真实返回（不是 fixture），行是 PersonRow
+                  （和选人步同一份实现，避免 CREATOR-AVATAR-001 那类「两个面两个画法」），
+                  选中即定向邀约（buildDemandPublishInput 带 targetUserId）。 */}
+              {!supply ? <Text selectable style={styles.empty}>供给目录不可用，直接发布到市场。</Text>
+                : !peopleLoaded ? <Text selectable style={styles.empty}>正在匹配…</Text>
+                : visiblePeople.length === 0 ? <Text selectable style={styles.empty}>附近暂时没有可接单的人，放宽条件或直接发布到市场。</Text>
+                : (
+                  <>
+                    <Text selectable style={styles.sectionSub}>{`附近可接单的人 · ${visiblePeople.length} 人`}</Text>
+                    {visiblePeople.map((person) => (
+                      <PersonRow
+                        key={person.agentId}
+                        active={selectedPerson?.agentId === person.agentId}
+                        onOpenProfile={onOpenPersonProfile}
+                        onSelect={() => {
+                          const active = selectedPerson?.agentId === person.agentId;
+                          // 在这一段取消选择时**保持「直接约」**：用户是在分段控件上
+                          // 显式选的，取消某一个人不该把整段收起来。选人步那一支才回等接单。
+                          setSelectedPerson(active ? undefined : person);
+                          if (!active) setMode("direct");
+                        }}
+                        person={person}
+                      />
+                    ))}
+                  </>
+                )}
+              {/* 名单本身带不动筛选（语言/时间/认证/预算），那个还在「选人」步里，
+                  这里只留一个入口 —— 不把整套筛选 UI 复制一份。 */}
+              <Pressable accessibilityLabel="按条件筛选搭子" onPress={() => { setPeopleReturn("specs"); setStep("people"); }} style={styles.filterHeadRow}>
+                <Text selectable style={styles.sectionSub}>筛选</Text>
+                <Text selectable style={styles.sheetToggleText}>全部条件 ›</Text>
+              </Pressable>
+            </>
           ) : mode === "open" ? (
             <View style={styles.autoCard}>
               <View style={styles.autoIcon}>
