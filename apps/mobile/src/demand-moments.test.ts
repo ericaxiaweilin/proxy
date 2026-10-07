@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PublishMarketOpportunityInputSchema } from "@proxy/contracts";
 import type { SupplierCandidate } from "./supply-client";
-import { buildDemandPublishInput, DEFAULT_HEADCOUNT, DEFAULT_TIME_SLOT, defaultSpecsFor, HEADCOUNT_OPTIONS, MAX_HEADCOUNT, MOMENT_TEMPLATES, normalizeHeadcount, normalizeTimeSlot, TIME_SLOT_MAX_HOUR, TIME_SLOT_MIN_HOUR, TIME_SLOT_OPTIONS } from "./demand-moments";
+import { buildDemandPublishInput, DEFAULT_DURATION, DEFAULT_HEADCOUNT, DEFAULT_TIME_SLOT, defaultSpecsFor, DURATION_MAX_HOURS, DURATION_MIN_HOURS, DURATION_OPTIONS, HEADCOUNT_OPTIONS, MAX_HEADCOUNT, MOMENT_TEMPLATES, normalizeDuration, normalizeHeadcount, normalizeTimeSlot, TIME_SLOT_MAX_HOUR, TIME_SLOT_MIN_HOUR, TIME_SLOT_OPTIONS } from "./demand-moments";
 
 describe("R58 demand wizard mapping", () => {
   it("ships moment templates with defaults", () => {
@@ -96,6 +96,31 @@ describe("R58 demand wizard mapping", () => {
     expect(legacy.time).toContain("19:00");
     expect(legacy.time).not.toContain("今晚");
     expect(legacy.date).toBe("19:00");
+    expect(PublishMarketOpportunityInputSchema.safeParse(legacy).success).toBe(true);
+  });
+
+  // DEMAND-DURATION-001（2026-10-07，用户：「时长也用滚轮 1H-8H就可以」）：
+  // 时长是 1–8 小时的滚轮（8 档，默认 2 小时）。模板的「半天 / 全天」只当
+  // 默认值的来源（半天→4 小时）；发布行恒为「N 小时」。
+  it("selects duration 1-8 hours, defaults to 2", () => {
+    expect(DURATION_MIN_HOURS).toBe(1);
+    expect(DURATION_MAX_HOURS).toBe(8);
+    expect(DEFAULT_DURATION).toBe("2 小时");
+    expect(DURATION_OPTIONS).toEqual(["1 小时", "2 小时", "3 小时", "4 小时", "5 小时", "6 小时", "7 小时", "8 小时"]);
+    const byId = (id: string): string => defaultSpecsFor(MOMENT_TEMPLATES.find((t) => t.id === id)!).duration;
+    expect(byId("coffee")).toBe("2 小时");
+    expect(byId("citywalk")).toBe("4 小时");
+    expect(byId("ride")).toBe("4 小时");
+    // 归一：前导数字夹到 1–8，没数字的按词给，都没有回默认。
+    expect(normalizeDuration("10 小时")).toBe("8 小时");
+    expect(normalizeDuration("0")).toBe("1 小时");
+    expect(normalizeDuration("半天")).toBe("4 小时");
+    expect(normalizeDuration("全天")).toBe("8 小时");
+    expect(normalizeDuration("  ")).toBe("2 小时");
+    // 发布行恒为「N 小时」。
+    const template = MOMENT_TEMPLATES[0]!;
+    const legacy = buildDemandPublishInput(template, { ...defaultSpecsFor(template), duration: "半天" });
+    expect(legacy.time).toBe("19:00 · 4 小时 · 1 人");
     expect(PublishMarketOpportunityInputSchema.safeParse(legacy).success).toBe(true);
   });
 

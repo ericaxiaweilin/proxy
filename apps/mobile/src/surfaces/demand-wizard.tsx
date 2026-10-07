@@ -15,6 +15,7 @@ import {
   buildDemandPublishInput,
   DEFAULT_PEOPLE_FILTERS,
   defaultSpecsFor,
+  DURATION_OPTIONS,
   filterSuppliers,
   HEADCOUNT_OPTIONS,
   MOMENT_ACTION_ID,
@@ -22,6 +23,7 @@ import {
   momentDistanceLabel,
   momentMetaLine,
   momentStartPrice,
+  normalizeDuration,
   normalizeHeadcount,
   normalizeTimeSlot,
   PRO_LOGOS,
@@ -121,7 +123,8 @@ const CATEGORIES = [
 type CategoryId = typeof CATEGORIES[number]["id"];
 
 const TIME_FILTERS = ["全部", "晚间", "下午", "周末"];
-const DURATIONS = ["2 小时", "半天", "全天"];
+// DEMAND-DURATION-001：时长三颗 chips（「2 小时 / 半天 / 全天」）已删，换成 1–8 小时
+// 滚轮（DURATION_OPTIONS）。模板的 defaultDuration 只当默认值的来源。
 const PREF_OPTIONS = ["公共场所见面", "中文", "附近"];
 const PEOPLE_FILTERS = ["推荐", "附近", "现在可用", "已认证"] as const;
 
@@ -201,6 +204,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const [headcountOpen, setHeadcountOpen] = useState(false);
   // DEMAND-TIMESLOT-001：同上，时间段下拉的开关。
   const [timeOpen, setTimeOpen] = useState(false);
+  // DEMAND-DURATION-001：同上，时长滚轮的开关。
+  const [durationOpen, setDurationOpen] = useState(false);
   const [error, setError] = useState<string>();
   const [result, setResult] = useState<MarketOpportunity>();
   const [draftRestored, setDraftRestored] = useState(false);
@@ -225,8 +230,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
         // 专业无默认）重新给，跟点选模板走的是同一条规则。
         // DEMAND-HEADCOUNT-002：老草稿的自由文本人数收敛到 1–6（默认 1 人）。
         // DEMAND-TIMESLOT-001：老草稿的时间（「今晚 19:00」「下午」…）收敛到档位上。
+        // DEMAND-DURATION-001：老草稿的时长（「半天」「全天」…）收敛到 1–8 小时。
         setMode(found.id === "pro" ? undefined : "open");
-        setSpecs({ ...defaultSpecsFor(found), ...draft, prefs: Array.isArray(draft.prefs) ? draft.prefs : [], ratio: normalizeHeadcount(draft.ratio), time: normalizeTimeSlot(draft.time) });
+        setSpecs({ ...defaultSpecsFor(found), ...draft, prefs: Array.isArray(draft.prefs) ? draft.prefs : [], ratio: normalizeHeadcount(draft.ratio), time: normalizeTimeSlot(draft.time), duration: normalizeDuration(draft.duration) });
         setDraftRestored(true);
       } catch {
         // 坏草稿忽略。
@@ -410,6 +416,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     setHeadcountOpen(false);
     // DEMAND-TIMESLOT-001：同上。
     setTimeOpen(false);
+    // DEMAND-DURATION-001：同上。
+    setDurationOpen(false);
     setStep("specs");
   }
 
@@ -447,6 +455,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     setSelectedPerson(undefined);
     setHeadcountOpen(false);
     setTimeOpen(false);
+    setDurationOpen(false);
     setError(undefined);
     setResult(undefined);
     setDraftRestored(false);
@@ -798,21 +807,34 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <Text selectable style={styles.headcountCaret}>▾</Text>
           </Pressable>
           {timeOpen ? (
-            <TimeWheelSheet
+            <WheelSheet
+              closeLabel="关闭时间选择"
               onCancel={() => setTimeOpen(false)}
               onConfirm={(slot) => { setSpecs((prev) => ({ ...prev, time: slot })); setTimeOpen(false); }}
+              options={TIME_SLOT_OPTIONS}
+              title="开始时间"
               value={normalizeTimeSlot(specs.time)}
             />
           ) : null}
 
+          {/* DEMAND-DURATION-001（2026-10-07，用户：「时长也用滚轮 1H-8H就可以」）：
+              三颗 chips 换成跟时间段同一个滚轮弹层（标题「时长」，1–8 小时）。
+              常态只占一行小框，默认 2 小时。 */}
           <Text selectable style={styles.fieldLabel}>时长</Text>
-          <View style={styles.chipRow}>
-            {DURATIONS.map((duration) => (
-              <Pressable key={duration} onPress={() => setSpecs((prev) => ({ ...prev, duration }))} style={[styles.chip, specs.duration === duration && styles.chipOn]}>
-                <Text selectable style={[styles.chipText, specs.duration === duration && styles.chipTextOn]}>{duration}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <Pressable accessibilityLabel="选择时长" onPress={() => setDurationOpen(true)} style={styles.headcountTrigger} testID="demand-duration">
+            <Text selectable style={styles.headcountTriggerText}>{normalizeDuration(specs.duration)}</Text>
+            <Text selectable style={styles.headcountCaret}>▾</Text>
+          </Pressable>
+          {durationOpen ? (
+            <WheelSheet
+              closeLabel="关闭时长选择"
+              onCancel={() => setDurationOpen(false)}
+              onConfirm={(slot) => { setSpecs((prev) => ({ ...prev, duration: slot })); setDurationOpen(false); }}
+              options={DURATION_OPTIONS}
+              title="时长"
+              value={normalizeDuration(specs.duration)}
+            />
+          ) : null}
 
           {/* SCENE-STEP-ONEPAGE-001（2026-10-06，用户：「选择场景还是跳页 没有和
               原型一样 一页」）：场景 list 不是一步，是**规格页里的一个段落** ——
@@ -954,14 +976,19 @@ function SummaryRow({ label, value, last }: { label: string; value: string; last
   );
 }
 
-// DEMAND-TIMESLOT-002 滚轮弹层。原型结构照搬：遮罩 + 底部 sheet + 把手 +
+// DEMAND-TIMESLOT-002 滚轮弹层；DEMAND-DURATION-001 起由时间段独享改为两人共用
+// （标题 + 选项数组由调用方给）。原型结构照搬：遮罩 + 底部 sheet + 把手 +
 // 取消/标题/确定 + 滚轮（上下留白让首尾能滚到中间，松手吸附，点选直达）。
 // temp 是弹层里的临时值 —— 取消不写回，确定才写（跟原型一致）。
 const TIME_WHEEL_ITEM_H = 44;
 const TIME_WHEEL_H = 220;
 
-function TimeWheelSheet({ value, onCancel, onConfirm }: {
+function WheelSheet({ title, options, value, closeLabel, onCancel, onConfirm }: {
+  title: string;
+  options: readonly string[];
   value: string;
+  /** 遮罩的无障碍标签（时间/时长各叫各的，免得读屏分不清）。 */
+  closeLabel: string;
   onCancel: () => void;
   onConfirm: (slot: string) => void;
 }): React.JSX.Element {
@@ -971,31 +998,31 @@ function TimeWheelSheet({ value, onCancel, onConfirm }: {
   // 打开即定位到当前值。挂载后下一帧再滚 —— 首帧还没量好，直接滚会被吞掉。
   useEffect(() => {
     const timer = setTimeout(() => {
-      scrollRef.current?.scrollTo({ y: Math.max(0, TIME_SLOT_OPTIONS.indexOf(value)) * TIME_WHEEL_ITEM_H, animated: false });
+      scrollRef.current?.scrollTo({ y: Math.max(0, options.indexOf(value)) * TIME_WHEEL_ITEM_H, animated: false });
     }, 30);
     return () => clearTimeout(timer);
-  }, [value]);
+  }, [options, value]);
 
   function settle(offsetY: number): void {
-    const slot = TIME_SLOT_OPTIONS[Math.min(Math.max(Math.round(offsetY / TIME_WHEEL_ITEM_H), 0), TIME_SLOT_OPTIONS.length - 1)];
+    const slot = options[Math.min(Math.max(Math.round(offsetY / TIME_WHEEL_ITEM_H), 0), options.length - 1)];
     if (slot !== undefined) setTemp(slot);
   }
 
   function pick(slot: string): void {
     setTemp(slot);
-    scrollRef.current?.scrollTo({ y: Math.max(0, TIME_SLOT_OPTIONS.indexOf(slot)) * TIME_WHEEL_ITEM_H, animated: true });
+    scrollRef.current?.scrollTo({ y: Math.max(0, options.indexOf(slot)) * TIME_WHEEL_ITEM_H, animated: true });
   }
 
   return (
     <Modal animationType="slide" onRequestClose={onCancel} transparent visible>
-      <Pressable accessibilityLabel="关闭时间选择" onPress={onCancel} style={styles.timeSheetMask} />
+      <Pressable accessibilityLabel={closeLabel} onPress={onCancel} style={styles.timeSheetMask} />
       <View style={styles.timeSheet}>
         <View style={styles.timeSheetHandle} />
         <View style={styles.timeSheetHead}>
           <Pressable accessibilityLabel="取消" onPress={onCancel} style={styles.timeSheetCancel}>
             <Text selectable style={styles.timeSheetCancelText}>取消</Text>
           </Pressable>
-          <Text selectable style={styles.timeSheetTitle}>开始时间</Text>
+          <Text selectable style={styles.timeSheetTitle}>{title}</Text>
           <Pressable accessibilityLabel="确定" onPress={() => onConfirm(temp)} style={styles.timeSheetConfirm}>
             <Text selectable style={styles.timeSheetConfirmText}>确定</Text>
           </Pressable>
@@ -1013,7 +1040,7 @@ function TimeWheelSheet({ value, onCancel, onConfirm }: {
             snapToInterval={TIME_WHEEL_ITEM_H}
             style={styles.timeWheelScroll}
           >
-            {TIME_SLOT_OPTIONS.map((slot) => (
+            {options.map((slot) => (
               <Pressable key={slot} accessibilityLabel={`选择${slot}`} onPress={() => pick(slot)} style={styles.timeWheelItem}>
                 <Text selectable style={[styles.timeWheelItemText, temp === slot && styles.timeWheelItemTextOn]}>{slot}</Text>
               </Pressable>

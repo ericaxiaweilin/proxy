@@ -168,13 +168,16 @@ export function momentDistanceLabel(
  * `时间 + 距离`；拿不到（绑定人 / 没定位 / 这一类没场景 / 最近的在 50km 外）就只剩
  * `时间`。**永远不会出现「只有距离」**—— 那需要一个空的时间，而模板不允许。
  *
+ * DEMAND-DURATION-001：时长那一格走 normalizeDuration（「半天」→「4 小时」）——
+ * 卡面跟规格步滚轮说同一种话，不是一边半天一边 4 小时。
+ *
  * 距离那一格不写「—」占位（那看着像加载失败，见 formatShopDistance）。
  *
  * ⚠️ 顺序沿用原型：**距离在前**。用户那句「时间+距离」说的是「哪两格一起出现」，
  * 不是先后顺序 —— 原型是 `metaParts = [it.dist, it.dur]`。
  */
 export function momentMetaLine(distance: string, template: MomentTemplate): string {
-  return [distance, template.defaultDuration].filter((part) => part !== "").join(" · ");
+  return [distance, normalizeDuration(template.defaultDuration)].filter((part) => part !== "").join(" · ");
 }
 
 // DEMAND-SCENE-FIRST-001 的 momentSceneOptions/SceneOption 已删（2026-10-06）：
@@ -357,6 +360,38 @@ export function normalizeTimeSlot(value: unknown): string {
   return DEFAULT_TIME_SLOT;
 }
 
+// DEMAND-DURATION-001（2026-10-07，用户：「时长也用滚轮 1H-8H就可以」）：
+// 时长不再是「2 小时 / 半天 / 全天」三颗 chips，是 1–8 小时的滚轮（8 档，
+// 「N 小时」）。模板的 defaultDuration（「半天」…）只当默认值的来源。
+export const DURATION_MIN_HOURS = 1;
+export const DURATION_MAX_HOURS = 8;
+export const DEFAULT_DURATION = "2 小时";
+
+export const DURATION_OPTIONS: readonly string[] = (() => {
+  const out: string[] = [];
+  for (let hours = DURATION_MIN_HOURS; hours <= DURATION_MAX_HOURS; hours += 1) {
+    out.push(`${hours} 小时`);
+  }
+  return out;
+})();
+
+/**
+ * 时长归一：新 UI 只产出 1–8 小时，这里收的是模板默认值/老草稿/外来值 ——
+ * 前导数字截出来夹到 1–8（如「10 小时」→「8 小时」）；没数字的按词给
+ * （半天→4 小时，全天/一天→8 小时），都没有回默认 2 小时。
+ */
+export function normalizeDuration(value: unknown): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  const leading = raw.match(/^\d+/);
+  if (leading?.[0] !== undefined) {
+    const parsed = Number.parseInt(leading[0], 10);
+    if (Number.isFinite(parsed)) return `${Math.min(Math.max(parsed, DURATION_MIN_HOURS), DURATION_MAX_HOURS)} 小时`;
+  }
+  if (/半天/.test(raw)) return "4 小时";
+  if (/全天|一天|整天/.test(raw)) return "8 小时";
+  return DEFAULT_DURATION;
+}
+
 export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
   return {
     // DEMAND-HEADCOUNT-002：默认 1 人（选择器首项高亮即此值）。
@@ -364,7 +399,9 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
     // DEMAND-TIMESLOT-001：模板的 defaultTime（「今晚 19:00」「下午」…）只当
     // 默认值的来源，收敛到下拉档位上 —— 线上不再出现「今晚」这种词。
     time: normalizeTimeSlot(template.defaultTime),
-    duration: template.defaultDuration,
+    // DEMAND-DURATION-001：模板的 defaultDuration（「半天」…）同理，只当来源，
+    // 收敛到 1–8 小时档位上。
+    duration: normalizeDuration(template.defaultDuration),
     place: template.venue,
     prefs: ["公共场所见面"],
     price: template.defaultPrice,
@@ -383,9 +420,12 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
   // 老草稿的自由文本经 normalizeHeadcount 收敛（前导数字截断夹到 1–6），不再原样透传。
   // DEMAND-TIMESLOT-001：时间恒为下拉档位（HH:MM，06:00–22:00），老自由文本
   // （「今晚 19:00」「下午」…）经 normalizeTimeSlot 收敛 —— 线上不再出现「今晚」。
+  // DEMAND-DURATION-001：时长恒为 1–8 小时档位，「半天 / 全天」经
+  // normalizeDuration 收敛（半天→4 小时，全天→8 小时）。
   const headcount = normalizeHeadcount(specs.ratio);
   const slot = normalizeTimeSlot(specs.time);
-  const time = [slot, specs.duration, `${headcount} 人`]
+  const duration = normalizeDuration(specs.duration);
+  const time = [slot, duration, `${headcount} 人`]
     .filter((part) => part.trim() !== "").join(" · ");
   const skills = [template.skills, ...specs.prefs.map((pref) => pref.trim()).filter((pref) => pref !== "")]
     .join(" · ");

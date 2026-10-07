@@ -28,7 +28,7 @@ describe("DEMAND-TIMESLOT-002 时间段是滚轮弹层，不是输入框", () =>
   });
 
   it("触发器开滚轮弹层：取消 / 开始时间 / 确定，临时值确认才写回", () => {
-    expect(section).toContain("TimeWheelSheet");
+    expect(section).toContain("WheelSheet");
     expect(section).toContain("onConfirm");
     expect(section).toContain("onCancel");
     expect(wizard).toContain("开始时间");
@@ -39,7 +39,10 @@ describe("DEMAND-TIMESLOT-002 时间段是滚轮弹层，不是输入框", () =>
   it("滚轮认得出：高亮条 + 吸附 + 点选直达 + 开局定位", () => {
     expect(wizard).toContain("timeWheelHighlight");
     expect(wizard).toContain("snapToInterval");
-    expect(wizard).toContain("TIME_SLOT_OPTIONS.map");
+    // DEMAND-DURATION-001 起滚轮由时间段独享改为共用（WheelSheet 吃 options 参数），
+    // 时间这处传的还是 06:00–22:00 那组档位。
+    expect(wizard).toContain("options.map");
+    expect(section).toContain("options={TIME_SLOT_OPTIONS}");
     expect(wizard).toContain("scrollTo({ y:");
   });
 

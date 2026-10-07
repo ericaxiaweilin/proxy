@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { MOMENT_ACTION_ID, MOMENT_TEMPLATES, momentDistanceLabel, momentMetaLine, momentStartPrice } from "../demand-moments";
+import { MOMENT_ACTION_ID, MOMENT_TEMPLATES, momentDistanceLabel, momentMetaLine, momentStartPrice, normalizeDuration } from "../demand-moments";
 import { ACTION_SCENE_KEYWORDS } from "../scene-category-entries";
 import type { SceneSpot } from "../activity-create-form";
 
@@ -114,8 +114,8 @@ describe("DEMAND-WIZARD-CARD-001 距离是算出来的，不是编的", () => {
 
   it("底行 = 距离 · 时长；没距离就只剩时长", () => {
     const coffee = MOMENT_TEMPLATES.find((item) => item.id === "coffee")!;
-    expect(momentMetaLine("1.2km", coffee)).toBe(`1.2km · ${coffee.defaultDuration}`);
-    expect(momentMetaLine("", coffee)).toBe(coffee.defaultDuration);
+    expect(momentMetaLine("1.2km", coffee)).toBe(`1.2km · ${normalizeDuration(coffee.defaultDuration)}`);
+    expect(momentMetaLine("", coffee)).toBe(normalizeDuration(coffee.defaultDuration));
   });
 });
 
@@ -204,9 +204,10 @@ describe("DEMAND-MOMENT-BINDING-001 绑定场景 / 绑定人", () => {
   it("底行只有两种形状：时间+距离，或时间。永远没有「只有距离」", () => {
     for (const template of MOMENT_TEMPLATES) {
       // 有距离 ⇒ 时间+距离；时间那一格恒非空，所以顺序和内容都是确定的。
-      expect(momentMetaLine("1.2km", template)).toBe(`1.2km · ${template.defaultDuration}`);
+      // DEMAND-DURATION-001：时长那一格走归一（「半天」→「4 小时」），卡面跟滚轮同一种话。
+      expect(momentMetaLine("1.2km", template)).toBe(`1.2km · ${normalizeDuration(template.defaultDuration)}`);
       // 没距离 ⇒ 只剩时间，而且**不是空串**（空串会让底行整格消失）。
-      expect(momentMetaLine("", template)).toBe(template.defaultDuration);
+      expect(momentMetaLine("", template)).toBe(normalizeDuration(template.defaultDuration));
       expect(momentMetaLine("", template)).not.toBe("");
     }
   });
