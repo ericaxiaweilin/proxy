@@ -63,7 +63,7 @@ import { SceneShopDirectory } from "../components/scene-shop-directory";
 //   专业        moment → people（人 list，专业就是靠人变现）
 //   运动        moment → specs（绑人，不进场景 list；目录里本来也没有球馆/绿道）
 // 「直接约」在 specs 底部是一行小字入口，不是一步。
-type Step = "moment" | "scene" | "people" | "specs" | "done";
+type Step = "moment" | "people" | "specs" | "done";
 
 /**
  * 接单方式。用户 2026-10-06 定名：**等接单** / **直接约**。
@@ -393,10 +393,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
       setStep("people");
       return;
     }
-    if (sceneBinding) {
-      setStep("scene");
-      return;
-    }
+    // SCENE-STEP-ONEPAGE-001（2026-10-06，用户「选择场景还是跳页 没有和原型一样
+    // 一页」）：不再有独立的「选场景」步 —— 场景 list 作为**规格页里的一个段落**
+    // （地点栏上方），绑场景的模板也直接进规格，点卡片在同一页填地点。
     setStep("specs");
   }
 
@@ -440,11 +439,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
 
   function back(): void {
     if (step === "moment") onBack();
-    else if (step === "scene") setStep("moment");
     else if (step === "people") setStep(peopleReturn);
-    // specs 的上一步：绑场景的模板回场景 list，否则回选 Moment —— 无状态可判，
-    // 不必记「从哪进的 specs」。
-    else if (step === "specs") setStep(!isPro && sceneBinding ? "scene" : "moment");
+    // specs 的上一步恒回选 Moment（场景 list 已并入本页，没有中间步）。
+    else if (step === "specs") setStep("moment");
   }
 
   const showNotes = specs.notes.trim() !== "";
@@ -610,36 +607,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               他刚做完的动作（选人 / 服务 / 价格本来就在下面那一屏），没信息量；
               「上一步 / 选择」这组词自己就把方向说完了。
               同日 DEMAND-SCENE-FIRST-001：行为改了 —— 不再一律进「选人」，按
-              advanceFromMoment 分流（专业进选人，其余优先选场景，见函数注释）。 */}
-        </>
-      ) : step === "scene" ? (
-        <>
-          {/* 选场景步（SCENE-CARD-REUSE-001）：**就是 home 场景卡片点进去的那份
-              场景 list 本体**（2026-10-06 用户三次纠偏：卡片复用不算、列表也必须
-              同一段代码；「原型是尽量合并在一页 你这是跳转2页的 还是尽量在一页吧」
-              —— **内嵌**本页，不再整页 Modal 跳出：embedded 模式去掉它自己的
-              Modal/顶栏/竖滚，数据加载/距离排序/单店详情仍是它自己的代码）。
-              点卡片 = 选中（onPick 名字+坐标）；点头像 = 单店详情
-              （AVATAR-DETAIL-001，内嵌下同页内切换）；「自动分配」= 不定地点
-              直接进规格。搭子类 Moment 绑人、目录里本来就没有场地，按同一条
-              一页口径直接进规格（advanceFromMoment 已分流），不单独跳页。 */}
-          <Text selectable style={styles.sectionSub}>先挑个地方 · 不想选就自动分配</Text>
-          <SceneShopDirectory
-            embedded
-            actionId={(template && MOMENT_ACTION_ID[template.id]) || ""}
-            label={template?.title ?? ""}
-            unit="家"
-            apiBaseUrl={localApiBaseUrl}
-            onClose={() => setStep("moment")}
-            onSkip={() => setStep("specs")}
-            onPick={(scene) => {
-              // 坐标 (0,0) = 数据没有真坐标（openNavigation 同一条守卫）——
-              // 这时不写 lat/lng，规格里保持纯文字地点，不让地图钉到海上。
-              const hasCoords = Number.isFinite(scene.latitude) && Number.isFinite(scene.longitude) && !(scene.latitude === 0 && scene.longitude === 0);
-              setSpecs((prev) => ({ ...prev, place: scene.name, ...(hasCoords ? { lat: scene.latitude, lng: scene.longitude } : {}) }));
-              setStep("specs");
-            }}
-          />
+              advanceFromMoment 分流（专业进选人，其余直接进规格 —— 场景 list
+              已并入规格页，见 SCENE-STEP-ONEPAGE-001）。 */}
         </>
       ) : step === "people" ? (
         <>
@@ -809,6 +778,33 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               </Pressable>
             ))}
           </View>
+
+          {/* SCENE-STEP-ONEPAGE-001（2026-10-06，用户：「选择场景还是跳页 没有和
+              原型一样 一页」）：场景 list 不是一步，是**规格页里的一个段落** ——
+              还是 home 那份 SceneShopDirectory 本体（embedded 模式：无 Modal/
+              顶栏/竖滚，数据/排序/详情是它自己的代码），点卡片**在本页**把名字+
+              坐标填进下面的地点栏（(0,0) 守卫：无真坐标不写 lat/lng，不让地图钉
+              到海上），人不离开、页不跳转。不想选就不管这一段 = 自动分配（地点
+              留空发到市场，接单方确认；搭子类绑人模板目录里本来没有场地，
+              sceneBinding 为假时这一段整个不渲染，同一条一页口径）。
+              点头像看单店详情（AVATAR-DETAIL-001，同页内切换）。 */}
+          {sceneBinding ? (
+            <View style={styles.sceneSection}>
+              <Text selectable style={styles.sectionSub}>先挑个地方 · 不想选就自动分配</Text>
+              <SceneShopDirectory
+                embedded
+                actionId={(template && MOMENT_ACTION_ID[template.id]) || ""}
+                label={template?.title ?? ""}
+                unit="家"
+                apiBaseUrl={localApiBaseUrl}
+                onClose={() => setStep("moment")}
+                onPick={(scene) => {
+                  const hasCoords = Number.isFinite(scene.latitude) && Number.isFinite(scene.longitude) && !(scene.latitude === 0 && scene.longitude === 0);
+                  setSpecs((prev) => ({ ...prev, place: scene.name, ...(hasCoords ? { lat: scene.latitude, lng: scene.longitude } : {}) }));
+                }}
+              />
+            </View>
+          ) : null}
 
           <Text selectable style={styles.fieldLabel}>地点</Text>
           <TextInput onChangeText={(place) => setSpecs((prev) => ({ ...prev, place }))} placeholder={template?.venue} placeholderTextColor={color.muted} style={styles.input} value={specs.place} />
@@ -1022,6 +1018,8 @@ const styles = StyleSheet.create({
   currentValue: { color: color.ink, fontSize: 14, fontWeight: "800", marginTop: 2 },
   sectionTitle: { color: color.ink, fontSize: 16, fontWeight: "800" },
   sectionSub: { color: color.muted, fontSize: 12, marginBottom: 10, marginTop: 4 },
+  // SCENE-STEP-ONEPAGE-001：规格页里的场景 list 段落（不是一步）。
+  sceneSection: { marginBottom: 12 },
   filterHeadRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   sheetToggle: { paddingHorizontal: 6, paddingVertical: 4 },
   sheetToggleText: { color: color.violet, fontSize: 12, fontWeight: "800" },
