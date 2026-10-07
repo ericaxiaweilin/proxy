@@ -16012,8 +16012,8 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
     DSF_B=1
   fi
   # DEMAND-SCENE-GATE-001（2026-10-07，用户：「有场景绑定的 比如咖啡 饭店 绑定一个场景
-  # 选择后 再弹出下面的选项」）：绑场景的模板必须先选场景才出下面几段（时间与人数 /
-  # 价格 / 备注 / 怎么找人）。判据是 place 非空（不是 lat/lng —— 无坐标场景也要算数）。
+  # 选择后 再弹出下面的选项」）：绑场景的模板必须先选场景才出下面几段（选搭子 /
+  # 时间与人数 / 价格 / 备注）。判据是 place 非空（不是 lat/lng —— 无坐标场景也要算数）。
   if ! grep -qF 'const sceneReady = !sceneBinding || specs.place.trim() !== "";' apps/mobile/src/surfaces/demand-wizard.tsx; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: 绑场景模板的「选完场景才出下面选项」闸（sceneReady）丢了。" >&2
     DSF_B=1
@@ -16206,6 +16206,52 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
       exit 1
     }
     echo "    DEMAND-INFO-CARD-001: PASS (时间与人数一张卡三行 · 行间细线 · 三个触发器都在 · 无独立小框)"
+  else
+    exit 1
+  fi
+fi
+
+# DEMAND-SUBSECTION-002（2026-10-07，用户：「这个怎么找人 要对齐原型 搭子 而不是
+# 怎么找人 放在时间与人数上面」）：接单方式那一行原来叫「怎么找人」、压在整屏最后
+# （备注之后）；现在按原型成为第 2 段「选搭子」，位置在 ① 选场景 之后、时间与人数
+# 之前。这条钉守「名字 + 位置」两件事：
+#   ① 段标题是原型 ② 的原话「选搭子」，且**在**时间与人数之前（按行号比）；
+#   ② 反面：行内 label「怎么找人」不许回来（它就是被换掉的那个名字）。
+# 段号与标题的**配对**（选搭子=2 / 时间与人数=3 / 价格=4 / 备注=5）交给
+# demand-wizard-specs-skeleton.test.ts 的 stepNoOf 钉 —— bash 里比行号 + 认多行 prop
+# 太脆（props 一换行就假红）。这里 require 那个测试文件还在。
+if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
+  DSS_B=0
+  if ! grep -qF 'title="选搭子"' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SUBSECTION-002]: 第 2 段的标题不是原型那个「选搭子」。" >&2
+    DSS_B=1
+  fi
+  DSS_JI=$(grep -nF 'title="选搭子"' apps/mobile/src/surfaces/demand-wizard.tsx | head -1 | cut -d: -f1)
+  DSS_SH=$(grep -nF 'title="时间与人数"' apps/mobile/src/surfaces/demand-wizard.tsx | head -1 | cut -d: -f1)
+  if [ -z "$DSS_JI" ] || [ -z "$DSS_SH" ] || [ "$DSS_JI" -ge "$DSS_SH" ]; then
+    echo "  FAIL [DEMAND-SUBSECTION-002]: 选搭子不在时间与人数**上面**（或两个标题有一个没了）。" >&2
+    DSS_B=1
+  fi
+  if grep -qF '怎么找人</Text>' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SUBSECTION-002]: 行内 label「怎么找人」又回来了 —— 段标题就是「选搭子」。" >&2
+    DSS_B=1
+  fi
+  # ⚠️ 用 JSX 形态 `>…</Text>`，不用裸串「或 直接约 ›」—— 上面那段注释里也写着这个词，
+  # 裸 grep 会被自己的注释喂绿（本仓前科）。
+  if ! grep -qF '>或 直接约 ›</Text>' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SUBSECTION-002]: 段里的「直接约」入口丢了 —— 搬家时把控件弄掉了。" >&2
+    DSS_B=1
+  fi
+  if ! grep -qF 'stepNoOf' apps/mobile/src/surfaces/demand-wizard-specs-skeleton.test.ts; then
+    echo "  FAIL [DEMAND-SUBSECTION-002]: 段号↔标题配对的钉（stepNoOf）不在了 —— 段号抄错一位没人管。" >&2
+    DSS_B=1
+  fi
+  if [ "$DSS_B" -eq 0 ]; then
+    pnpm --dir apps/mobile exec vitest run src/surfaces/demand-wizard-specs-skeleton.test.ts >/dev/null || {
+      echo "  FAIL [DEMAND-SUBSECTION-002]: 骨架钉测试红了 —— 分段/顺序/汇总条被改坏了。" >&2
+      exit 1
+    }
+    echo "    DEMAND-SUBSECTION-002: PASS (选搭子是第 2 段 · 压在时间与人数之前 · 无「怎么找人」label · 直接约入口在)"
   else
     exit 1
   fi

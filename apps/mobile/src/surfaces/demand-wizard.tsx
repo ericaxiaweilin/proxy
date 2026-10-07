@@ -409,7 +409,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
 
   // DEMAND-SCENE-GATE-001（2026-10-07，用户：「在发布需求 有场景绑定的 比如咖啡 饭店
   // 绑定一个场景选择后 再弹出下面的选项」）：绑场景的模板**先选场景**，选完才出现
-  // 下面几段（时间与人数 / 价格 / 备注 / 怎么找人）。未选 = 只留第 1 段 + 一句提示。
+  // 下面几段（选搭子 / 时间与人数 / 价格 / 备注）。未选 = 只留第 1 段 + 一句提示。
   // 判据用 place 非空（不是 lat/lng）：目录里有没真坐标的场景，(0,0) 守卫不写 lat/lng，
   // 但「他选过」这件事必须算数 —— 否则选了却打不开下面，人以为坏了。
   // 绑人 / 协助模板不受影响（没有这一段可等）。
@@ -917,8 +917,33 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           {/* DEMAND-SPECS-ORDER-001（2026-10-07，用户：「这几个参数不要放在顶部」）：
               人数 / 时间 / 时长三块从摘要下面搬到地点 + 地图之后 —— 先定地方，
               再定人时时长。三块相对顺序不动（你们几人 → 约定见面时间 → 时长）。 */}
-          {/* DEMAND-SPECS-SKELETON-001：第 2 段 · 时间与人数。 */}
-          <SpecsSection hint="默认已填好" no={2} title="时间与人数">
+          {/* DEMAND-SUBSECTION-002（2026-10-07，用户：「这个怎么找人 要对齐原型 搭子
+              而不是怎么找人 放在时间与人数上面」）：接单方式那一行原来压在整屏最后
+              （备注之后），现在按原型提到 ① 选场景 之后、时间与人数之前，成为第 2 段。
+              标题取原型 ② 的原话「选搭子」（跟 ① 的「选场景」同构）；段号顺移一位
+              （时间与人数 3 / 价格 4 / 备注 5）。
+              段内控件一个不动：等接单 chip + 「或 直接约 ›」小字链接 —— 用户 2026-10-06
+              定的「选人要低调，不做成第一排」+ 命名口径「等接单 / 直接约」（门禁按字面
+              扫，DEMAND-SCENE-FIRST-001）。原来挂在行内 label「怎么找人」上的提示挪到
+              段头 hint 槽；那句「专业服务先选一种 · 没有默认」是**发布闸**的说明
+              （专业没选就不放行），不能丢，所以 hint 保持动态。 */}
+          <SpecsSection
+            hint={isPro && mode === undefined ? "专业服务先选一种 · 没有默认" : "默认等接单 · 谁有空谁响应"}
+            no={2}
+            title="选搭子"
+          >
+          <View style={styles.modeRow}>
+            <Pressable onPress={() => setMode("open")} style={[styles.chip, mode === "open" && styles.chipOn]}>
+              <Text selectable style={[styles.chipText, mode === "open" && styles.chipTextOn]}>等接单</Text>
+            </Pressable>
+            <Pressable onPress={() => { setPeopleReturn("specs"); setStep("people"); }} style={styles.directLink}>
+              <Text selectable style={styles.directLinkText}>或 直接约 ›</Text>
+            </Pressable>
+          </View>
+          </SpecsSection>
+
+          {/* DEMAND-SPECS-SKELETON-001：第 3 段 · 时间与人数。 */}
+          <SpecsSection hint="默认已填好" no={3} title="时间与人数">
           {/* DEMAND-INFO-CARD-001（2026-10-07，用户：「人数 时间xx也按照原型做紧凑模式」）：
               原型 deepseek_html_20261007_d726c2 的 ③ 是**一张** `.info-card` 里三行
               `.info-row`（左 label 占满 + 右「值 + ▾」，行间 1px 细线）。改之前是三个
@@ -1002,7 +1027,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           </SpecsSection>
 
           {/* DEMAND-SPECS-SKELETON-001：第 3 段 · 价格。 */}
-          <SpecsSection hint="可协商" no={3} title="价格">
+          <SpecsSection hint="可协商" no={4} title="价格">
           {/* 2026-10-06 合并：这里原本是城市协助服务目录的**第三份拷贝** ——
               按模板展开的 proGrid，外加选中服务那行 note。服务选择已经收进
               选 Moment 那一步的双栏选择器（rail 上的「专业」），规格步不再摆
@@ -1023,30 +1048,11 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           <Text selectable style={styles.hint}>ⓘ 价格由场景基础价、时间、人数组成。服务参考价；餐饮、咖啡、KTV、门票等现场消费不包含在内。</Text>
           </SpecsSection>
 
-          {/* DEMAND-SPECS-SKELETON-001：第 4 段 · 备注。 */}
-          <SpecsSection hint="可选" no={4} title="备注">
+          {/* DEMAND-SPECS-SKELETON-001：第 5 段 · 备注。 */}
+          <SpecsSection hint="可选" no={5} title="备注">
           <TextInput maxLength={500} multiline onChangeText={(notes) => setSpecs((prev) => ({ ...prev, notes }))} placeholder="补充说明（随订单展示）" placeholderTextColor={color.muted} style={[styles.input, styles.notesInput]} value={specs.notes} />
           </SpecsSection>
 
-          {/* DEMAND-SCENE-FIRST-001：接单方式，压在发布按钮前、整屏最后 —— 这是它
-              「低调」的位置实现。默认「等接单」：主路径从头到尾不出现人 list；
-              「直接约」是同一行里的小字链接（用户 2026-10-06：「选人是要低调点
-              不要做成第一排」）。专业**没有默认**（用户口径：专业靠专业能力变现），
-              没选就不放行发布 —— 提示语会说明，不是静默禁用。
-              命名口径：「等接单 / 直接约」（用户 2026-10-06 定名，依据见 FulfillMode
-              类型注释；门禁按字面扫禁词）。 */}
-          <View style={styles.fieldLabelRow}>
-            <Text selectable style={styles.fieldLabelNoGap}>怎么找人</Text>
-            <Text selectable style={styles.modeHint}>{isPro && mode === undefined ? "专业服务先选一种 · 没有默认" : "默认等接单 · 谁有空谁响应"}</Text>
-          </View>
-          <View style={styles.modeRow}>
-            <Pressable onPress={() => setMode("open")} style={[styles.chip, mode === "open" && styles.chipOn]}>
-              <Text selectable style={[styles.chipText, mode === "open" && styles.chipTextOn]}>等接单</Text>
-            </Pressable>
-            <Pressable onPress={() => { setPeopleReturn("specs"); setStep("people"); }} style={styles.directLink}>
-              <Text selectable style={styles.directLinkText}>或 直接约 ›</Text>
-            </Pressable>
-          </View>
           </>
           ) : (
             <Text selectable style={styles.empty}>先选一家 · 不选就自动分配。</Text>
@@ -1459,7 +1465,6 @@ const styles = StyleSheet.create({
   // 接单方式那行：chip 是「等接单」，直接约只是一条小字链接 —— 故意不做成和
   // 等接单同权的第二颗 chip，否则又回「第一排」了。
   modeRow: { alignItems: "center", flexDirection: "row", gap: 12 },
-  modeHint: { color: color.muted, fontSize: 11 },
   directLink: { paddingVertical: 8 },
   directLinkText: { color: color.violet, fontSize: 13, fontWeight: "700" }
 });
