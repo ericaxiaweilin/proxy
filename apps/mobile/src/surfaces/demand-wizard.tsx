@@ -125,7 +125,8 @@ type CategoryId = typeof CATEGORIES[number]["id"];
 const TIME_FILTERS = ["全部", "晚间", "下午", "周末"];
 // DEMAND-DURATION-001：时长三颗 chips（「2 小时 / 半天 / 全天」）已删，换成 1–8 小时
 // 滚轮（DURATION_OPTIONS）。模板的 defaultDuration 只当默认值的来源。
-const PREF_OPTIONS = ["公共场所见面", "中文", "附近"];
+// DEMAND-PREFS-REMOVE-001：场景偏好行已删（用户「在这个页面没什么用」），连同它的
+// 选项常量一起清掉 —— 默认偏好照旧随发布走（见 demand-moments 的 defaultSpecsFor）。
 const PEOPLE_FILTERS = ["推荐", "附近", "现在可用", "已认证"] as const;
 
 const DRAFT_KEY = "proxy.demandWizard.draft.v1";
@@ -419,13 +420,6 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     // DEMAND-DURATION-001：同上。
     setDurationOpen(false);
     setStep("specs");
-  }
-
-  function togglePref(pref: string): void {
-    setSpecs((prev) => ({
-      ...prev,
-      prefs: prev.prefs.includes(pref) ? prev.prefs.filter((item) => item !== pref) : [...prev.prefs, pref]
-    }));
   }
 
   async function publish(): Promise<void> {
@@ -887,15 +881,6 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             />
           ) : null}
 
-          <Text selectable style={styles.fieldLabel}>场景偏好 · 影响匹配 / 报价</Text>
-          <View style={styles.chipRow}>
-            {PREF_OPTIONS.map((pref) => (
-              <Pressable key={pref} onPress={() => togglePref(pref)} style={[styles.chip, specs.prefs.includes(pref) && styles.chipOn]}>
-                <Text selectable style={[styles.chipText, specs.prefs.includes(pref) && styles.chipTextOn]}>{pref}</Text>
-              </Pressable>
-            ))}
-          </View>
-
           {/* 2026-10-06 合并：这里原本是城市协助服务目录的**第三份拷贝** ——
               按模板展开的 proGrid，外加选中服务那行 note。服务选择已经收进
               选 Moment 那一步的双栏选择器（rail 上的「专业」），规格步不再摆
@@ -912,7 +897,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             </Pressable>
           </View>
           <Text selectable style={styles.hint}>参考 {template?.priceRef} · 可协商；现场消费不包含在内。</Text>
-          <Text selectable style={styles.hint}>ⓘ 价格由场景基础价、时间、人数和额外偏好组成；偏好只用于匹配，不按行为收费。服务参考价；餐饮、咖啡、KTV、门票等现场消费不包含在内。</Text>
+          {/* DEMAND-PREFS-REMOVE-001：偏好行删了，这句里的「额外偏好 / 偏好只用于匹配」
+              跟着拿掉 —— 用户已经没处设偏好，别留一句没由来的话。 */}
+          <Text selectable style={styles.hint}>ⓘ 价格由场景基础价、时间、人数组成。服务参考价；餐饮、咖啡、KTV、门票等现场消费不包含在内。</Text>
 
           <Text selectable style={styles.fieldLabel}>备注 · 可选</Text>
           <TextInput maxLength={500} multiline onChangeText={(notes) => setSpecs((prev) => ({ ...prev, notes }))} placeholder="补充说明（随订单展示）" placeholderTextColor={color.muted} style={[styles.input, styles.notesInput]} value={specs.notes} />

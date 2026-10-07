@@ -13,9 +13,10 @@ describe("DEMAND-DURATION-001 时长是滚轮弹层，不是三颗 chips", () =>
     fileURLToPath(new URL("./demand-wizard.tsx", import.meta.url)),
     "utf8"
   );
-  // 从渲染出来的「时长」标题切到下一个渲染标题「场景偏好」—— 触发器整段在里面。
-  // （DEMAND-SPECS-ORDER-001 起时长搬到了地点 + 地图之后，地点已不在后面。）
-  const section = wizard.slice(wizard.indexOf("}>时长"), wizard.indexOf("场景偏好"));
+  // 从渲染出来的「时长」标题切到下一个渲染标题「预计服务价」—— 触发器整段在里面。
+  // （偏好行被 DEMAND-PREFS-REMOVE-001 删了，「场景偏好」已不在文件里；
+  //  用带 "}>" 前缀的精确写法：裸词会先撞到 publish 里那句报错文案。）
+  const section = wizard.slice(wizard.indexOf("}>时长"), wizard.indexOf("}>预计服务价"));
   const moments = readFileSync(
     fileURLToPath(new URL("../demand-moments.ts", import.meta.url)),
     "utf8"
@@ -47,12 +48,22 @@ describe("DEMAND-DURATION-001 时长是滚轮弹层，不是三颗 chips", () =>
   });
 
   it("DEMAND-SPECS-ORDER-001 人数 / 时间 / 时长在地点 + 地图之后，不在顶部", () => {
-    // 渲染顺序即页面顺序：先挑地方（场景段 + 地点），再定人时时长，最后偏好。
-    const order = ["}>地点", 'testID="demand-headcount"', 'testID="demand-timeslot"', 'testID="demand-duration"', "场景偏好"]
+    // 渲染顺序即页面顺序：先挑地方（场景段 + 地点），再定人时时长。
+    const order = ["}>地点", 'testID="demand-headcount"', 'testID="demand-timeslot"', 'testID="demand-duration"', "}>预计服务价"]
       .map((marker) => wizard.indexOf(marker));
     for (const [i, pos] of order.entries()) {
       expect(pos).toBeGreaterThan(-1);
       if (i > 0) expect(pos).toBeGreaterThan(order[i - 1]!);
     }
+  });
+
+  it("DEMAND-PREFS-REMOVE-001 偏好行不在页面上，死代码不留", () => {
+    // 偏好行整段移除：渲染标题、选项循环、切换函数、选项常量都不许回来。
+    // 反面只精确到渲染写法与代码标识（注释里的 tombstone 不算）。
+    // （默认偏好还在数据层随发布走，见 demand-moments 的 defaultSpecsFor ——
+    //  这里只钉页面上不再摆这一行。）
+    expect(wizard).not.toContain("}>场景偏好");
+    expect(wizard).not.toContain("PREF_OPTIONS");
+    expect(wizard).not.toContain("togglePref");
   });
 });
