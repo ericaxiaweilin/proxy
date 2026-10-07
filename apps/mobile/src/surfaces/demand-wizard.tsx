@@ -400,6 +400,14 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   // 它自己会说，不需要调用方预判候选数）；绑人（运动/自定义）和 pro 不进。
   const sceneBinding = template?.binding === "scene";
 
+  // DEMAND-SCENE-GATE-001（2026-10-07，用户：「在发布需求 有场景绑定的 比如咖啡 饭店
+  // 绑定一个场景选择后 再弹出下面的选项」）：绑场景的模板**先选场景**，选完才出现
+  // 下面几段（时间与人数 / 价格 / 备注 / 怎么找人）。未选 = 只留第 1 段 + 一句提示。
+  // 判据用 place 非空（不是 lat/lng）：目录里有没真坐标的场景，(0,0) 守卫不写 lat/lng，
+  // 但「他选过」这件事必须算数 —— 否则选了却打不开下面，人以为坏了。
+  // 绑人 / 协助模板不受影响（没有这一段可等）。
+  const sceneReady = !sceneBinding || specs.place.trim() !== "";
+
   // moment 步的出口。分流规则（2026-10-06 用户口径）：
   //   专业 → 人 list（专业靠人变现，这是唯一允许直接进 people 的路径）；
   //   绑场景 → 场景 list（home 场景 list 本体，**默认路径里没有选人这一步**）；
@@ -802,8 +810,10 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               />
               {/* DEMAND-SCENE-MAP-001：有列表，地点手填框撤掉（用户：「list 下面放
                   一个地点没意义」）—— 选中回填 + 这一行已选反馈，× 清掉重选。
-                  无列表模板（绑人 / 协助）照旧手填 + 手动地图，见下面。 */}
-              {specs.lat !== undefined && specs.lng !== undefined ? (
+                  无列表模板（绑人 / 协助）照旧手填 + 手动地图，见下面。
+                  判据用 place 非空（DEMAND-SCENE-GATE-001 同一条）：目录里没真坐标
+                  的场景选中后不写 lat/lng，但「已选」这一行必须出现，否则清不掉。 */}
+              {specs.place.trim() !== "" ? (
                 <View style={styles.pickedRow}>
                   <Text selectable numberOfLines={1} style={styles.pickedText}>已选：{specs.place.trim() === "" ? template?.venue ?? "" : specs.place.trim()}</Text>
                   <Pressable accessibilityLabel="清除已选地点" onPress={() => setSpecs((prev) => ({ ...prev, place: "", lat: undefined, lng: undefined }))} style={styles.pickedClear}>
@@ -840,6 +850,10 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           )}
           </SpecsSection>
 
+          {/* DEMAND-SCENE-GATE-001：选完场景（sceneReady）才放下面几段。没选时只留
+              一句诚实提示 —— 底部「发布到市场」一直在，不想选就直接发（自动分配）。 */}
+          {sceneReady ? (
+          <>
           {/* DEMAND-SPECS-ORDER-001（2026-10-07，用户：「这几个参数不要放在顶部」）：
               人数 / 时间 / 时长三块从摘要下面搬到地点 + 地图之后 —— 先定地方，
               再定人时时长。三块相对顺序不动（你们几人 → 时间段 → 时长）。 */}
@@ -953,6 +967,10 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               <Text selectable style={styles.directLinkText}>或 直接约 ›</Text>
             </Pressable>
           </View>
+          </>
+          ) : (
+            <Text selectable style={styles.empty}>先在上面选一家 · 选完再填时间和价格；不想选就直接发布（自动分配）。</Text>
+          )}
 
           {/* DEMAND-SPECS-SKELETON-001：报错 + 上一步/发布搬进底部固定条（原型 bottom
               区）—— 长页不用拉到底才看得到。 */}

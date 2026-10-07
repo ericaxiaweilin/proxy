@@ -16011,6 +16011,17 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: SceneShopDirectory 的选择模式回调（onPick）丢了。" >&2
     DSF_B=1
   fi
+  # DEMAND-SCENE-GATE-001（2026-10-07，用户：「有场景绑定的 比如咖啡 饭店 绑定一个场景
+  # 选择后 再弹出下面的选项」）：绑场景的模板必须先选场景才出下面几段（时间与人数 /
+  # 价格 / 备注 / 怎么找人）。判据是 place 非空（不是 lat/lng —— 无坐标场景也要算数）。
+  if ! grep -qF 'const sceneReady = !sceneBinding || specs.place.trim() !== "";' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 绑场景模板的「选完场景才出下面选项」闸（sceneReady）丢了。" >&2
+    DSF_B=1
+  fi
+  if ! grep -qF '{sceneReady ? (' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: sceneReady 算了没用 —— 下面几段没被它闸住。" >&2
+    DSF_B=1
+  fi
   if grep -qF 'disabled={!template} onPress={() => setStep("people")}' apps/mobile/src/surfaces/demand-wizard.tsx; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: 选 Moment 的主按钮又写死进选人了 —— 默认路径必须先过场景。" >&2
     DSF_B=1
