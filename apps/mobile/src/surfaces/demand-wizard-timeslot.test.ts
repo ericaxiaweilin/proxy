@@ -16,7 +16,7 @@ describe("DEMAND-TIMESLOT-002 时间段是滚轮弹层，不是输入框", () =>
     "utf8"
   );
   // 从渲染出来的「时间段」标题切到下一个渲染标题「时长」—— 触发器整段在里面。
-  const section = wizard.slice(wizard.indexOf("}>时间段"), wizard.indexOf("}>时长"));
+  const section = wizard.slice(wizard.indexOf("}>约定见面时间"), wizard.indexOf("}>时长"));
   const moments = readFileSync(
     fileURLToPath(new URL("../demand-moments.ts", import.meta.url)),
     "utf8"

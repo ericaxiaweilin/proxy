@@ -864,7 +864,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           <>
           {/* DEMAND-SPECS-ORDER-001（2026-10-07，用户：「这几个参数不要放在顶部」）：
               人数 / 时间 / 时长三块从摘要下面搬到地点 + 地图之后 —— 先定地方，
-              再定人时时长。三块相对顺序不动（你们几人 → 时间段 → 时长）。 */}
+              再定人时时长。三块相对顺序不动（你们几人 → 约定见面时间 → 时长）。 */}
           {/* DEMAND-SPECS-SKELETON-001：第 2 段 · 时间与人数。 */}
           <SpecsSection hint="默认已填好" no={2} title="时间与人数">
           {/* DEMAND-HEADCOUNT-003（2026-10-07，用户：「搞成下拉选择框的 … 不要做成
@@ -893,8 +893,12 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               / 确定，中间高亮条，点选 + 滚选，松手吸附）。档位还是 TIME_SLOT_OPTIONS
               （06:00–22:00 半小时一档），行只写 HH:MM —— 早上/晚上这类词跟「今晚」
               一样不上界面。渐隐遮罩没做：仓里没有渐变包，高亮条 + 吸附已够认出滚轮。 */}
-          <Text selectable style={styles.fieldLabel}>时间段</Text>
-          <Pressable accessibilityLabel="选择时间段" onPress={() => setTimeOpen(true)} style={styles.headcountTrigger} testID="demand-timeslot">
+          {/* DEMAND-TIMESLOT-003（2026-10-07，用户：「时间段改为约定见面时间」）：
+              字段名从「时间段」改成「约定见面时间」—— 用户填的是**碰头那一刻**，
+              不是一段可漂移的区间（滚轮选的也确实是单个 HH:MM）。值口径不变：
+              TIME_SLOT_OPTIONS（06:00–22:00 半小时一档），行只写 HH:MM。 */}
+          <Text selectable style={styles.fieldLabel}>约定见面时间</Text>
+          <Pressable accessibilityLabel="选择约定见面时间" onPress={() => setTimeOpen(true)} style={styles.headcountTrigger} testID="demand-timeslot">
             <Text selectable style={styles.headcountTriggerText}>{normalizeTimeSlot(specs.time)}</Text>
             <Text selectable style={styles.headcountCaret}>▾</Text>
           </Pressable>
@@ -904,7 +908,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               onCancel={() => setTimeOpen(false)}
               onConfirm={(slot) => { setSpecs((prev) => ({ ...prev, time: slot })); setTimeOpen(false); }}
               options={TIME_SLOT_OPTIONS}
-              title="开始时间"
+              title="约定见面时间"
               value={normalizeTimeSlot(specs.time)}
             />
           ) : null}

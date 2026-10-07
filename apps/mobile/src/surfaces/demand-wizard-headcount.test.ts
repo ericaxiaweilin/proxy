@@ -16,7 +16,7 @@ describe("DEMAND-HEADCOUNT-003 你们几人是下拉选择，不是常驻六颗"
     "utf8"
   );
   // 从渲染出来的「你们几人」标题切到下一个渲染标题「时间段」—— 下拉整段在里面。
-  const section = wizard.slice(wizard.indexOf("}>你们几人"), wizard.indexOf("}>时间段"));
+  const section = wizard.slice(wizard.indexOf("}>你们几人"), wizard.indexOf("}>约定见面时间"));
   const moments = readFileSync(
     fileURLToPath(new URL("../demand-moments.ts", import.meta.url)),
     "utf8"
