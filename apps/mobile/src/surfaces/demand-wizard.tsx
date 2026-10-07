@@ -83,10 +83,17 @@ type Step = "moment" | "people" | "specs" | "done";
  *     与上面那条决定直接打架。契约/内部沟通可以用 `open`/`direct`，界面只用
  *     「等接单 / 直接约」。
  *
- * ⚠️ 两种模式目前**发布行为完全一样**（都是公开市场，`selectedPerson` 仍是
- * 「意向人选」，文件头 5–6 行与 FOR-YOU-SLOT-001 都是这个口径）。「直接约」在这里
- * 只决定**要不要走人选那一步**，不发定向邀请 —— 定向邀请要改
- * `PublishMarketOpportunityInput` 契约，那是另一个决定，不在本次范围。
+ * ⚠️ 2026-10-07 更正（DEMAND-TARGET-KEEP-001）：上面「两种模式发布行为完全一样」那句
+ * **已经过期**。它当时的理由写在下面 —— 「定向邀请要改 PublishMarketOpportunityInput
+ * 契约，那是另一个决定，不在本次范围」。**那个契约字段已经存在了**：
+ * `PublishMarketOpportunityInput.targetUserId`（OPP-TARGETED-001，注释原话「选人 →
+ * 向 TA 发出邀约；带上后 server 把机会快照为 targetAccountId 非空，List 只对目标人和
+ * owner 可见，Apply 只收目标人」），而且 market.tsx 的发布表单**一直在发**它
+ * （`...(targetAgent ? { targetUserId: targetAgent.agentId } : {})`）。
+ * 于是本向导是唯一一处把选择丢在半路的地方：收了 selectedPerson、界面上写着
+ * 「意向人选：X」，wire 上却不带 —— 用户 2026-10-07「不能丢弃搭子选择」。
+ * 现在：`direct` + 选了人 → 带 targetUserId（定向邀约）；其余 → 不带（公开发布，
+ * wire 形状与改动前逐字节相同）。`open` 仍是默认，文案口径「等接单 / 直接约」不变。
  */
 type FulfillMode = "open" | "direct";
 
@@ -445,7 +452,11 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     setPublishing(true);
     setError(undefined);
     try {
-      const opportunity = await marketplace.publish(buildDemandPublishInput(template, specs));
+      const opportunity = await marketplace.publish(
+        // DEMAND-TARGET-KEEP-001：搭子选择跟着需求走（定向邀约）。targetAgent 为空
+        // 时第三个参数是 undefined，wire 形状与改动前一致。
+        buildDemandPublishInput(template, specs, targetAgent?.agentId)
+      );
       setResult(opportunity);
       onPublished(opportunity);
       await nativeSecureStorageDriver.deleteItem(DRAFT_KEY).catch(() => undefined);
@@ -480,6 +491,11 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const showNotes = specs.notes.trim() !== "";
   const showPerson = selectedPerson !== undefined;
 
+  // DEMAND-TARGET-KEEP-001：定向只在**当前**是「直接约」时成立。点回「等接单」就是
+  // 公开发布 —— 判据取 mode（用户最后选的接单方式），不是「曾经选过人」：
+  // 选完人再点「等接单」，选的人还在 selectedPerson 里，但意图已经变回公开。
+  const targetAgent = mode === "direct" ? selectedPerson : undefined;
+
   // DEMAND-SPECS-SKELETON-001：规格步按确认下单原型套编号分段（1 选场景 / 2 时间与
   // 人数 / 3 价格 / 4 备注）。四段恒渲染（第 1 段里场景 list 才按绑定出没），
   // 编号写死 1–4，不用计数。
@@ -496,7 +512,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
         <Pressable accessibilityLabel="返回" onPress={back} style={styles.backBtn}>
           <ProxyBackGlyph />
         </Pressable>
-        <Text selectable style={styles.title}>{step === "done" ? "✓ 需求已发布" : "发布需求"}</Text>
+        {/* DEMAND-TARGET-KEEP-001：定向邀约不是「需求已发布」—— 它只对一个人可见，
+            标题照 market.tsx 的说法分开（「邀约已发出」/「需求已发布」）。 */}
+        <Text selectable style={styles.title}>{step === "done" ? (targetAgent ? "✓ 邀约已发出" : "✓ 需求已发布") : "发布需求"}</Text>
         {step === "done" ? <View style={styles.headSpacer} /> : (
           <Pressable accessibilityLabel="存草稿" onPress={() => void saveDraft()} style={styles.draftBtn}>
             <Text selectable style={styles.draftText}>草稿</Text>
@@ -773,11 +791,33 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
         </>
       ) : step === "specs" ? (
         <>
+          {/* DEMAND-SPECS-GUTTER-001（2026-10-07，用户：「x稍微太靠右边缘了 调整下」）：
+              规格页整页通栏（content 的 paddingHorizontal 是 0，2026-10-06 用户
+              「这个页面2边不要留白」—— 那条说的是**选 Moment 那一屏**的双栏卡片，
+              但 content 是三步共用的，规格步跟着一起贴了边）。实测截图：段头标题
+              在 x=0，右侧 hint（「默认已填好」/「可协商」/「可选」）被屏幕边裁掉，
+              选完场景后的 X 字形也顶在 x=0；而下面的场景卡由 SceneShopDirectory
+              自带 16 内边距 —— 同一页两条竖线。
+              这里给规格步自己套一层 16 的页边距（不碰共用的 content，选 Moment
+              那屏的通栏原样保留），段头 / 场景卡 / 字段 / 卡片全部落在同一条 16 上。
+              数值取 16 不取原型的 20：本页底部条 specsBottomBar 和场景卡本来都是 16，
+              跟随仓内既有栅格，不新造一条。 */}
+          <View style={styles.specsGutter}>
           <View style={styles.confirmCard}>
             <View style={styles.confirmCopy}>
               <Text selectable style={styles.confirmEyebrow}>Moment</Text>
               <Text selectable style={styles.confirmTitle}>{template?.title}</Text>
-              {selectedPerson ? <Text selectable style={styles.confirmSub}>意向人选：{selectedPerson.name}（发布仍为公开市场）</Text> : null}
+              {/* DEMAND-TARGET-KEEP-001：这句以前恒写「（发布仍为公开市场）」—— 而
+                  wire 上根本不带搭子，那句话是在替一个「选择被丢掉」的实现背书。
+                  现在两态分开说：定向就是定向（只对 TA 可见、等 TA 确认），
+                  公开就是公开。文案口径照 market.tsx 的「邀约已发出 / 等待确认」。 */}
+              {selectedPerson ? (
+                <Text selectable style={styles.confirmSub}>
+                  {targetAgent
+                    ? `定向邀约：${selectedPerson.name}（只对 TA 可见，等 TA 确认）`
+                    : `意向人选：${selectedPerson.name}（发布仍为公开市场）`}
+                </Text>
+              ) : null}
               {/* 2026-10-06 合并：专业服务的选择收进了选 Moment 那一步的双栏选择器，
                   规格步不再摆第二遍服务目录（那一格是第三份拷贝）。但「选了哪个服务」
                   得还看得见 —— 这是发布前最后一屏，模板名只到「城市协助」为止。
@@ -810,7 +850,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                   // 字形就用字形 —— 复用 ProxyIcon 的 close（两根斜杠组成的 ×，跟各处
                   // 关闭按钮同一个），文案退到 accessibilityLabel 供读屏。hitSlop 补
                   // 触控面积（16px 字形比原 13px 文字还小，不加会难点）。
-                  <Pressable accessibilityLabel="清除已选地点" hitSlop={8} onPress={() => { setSpecs((prev) => ({ ...prev, place: "", lat: undefined, lng: undefined })); setPickedSceneId(undefined); }}>
+                  <Pressable accessibilityLabel="清除已选地点" hitSlop={8} onPress={() => { setSpecs((prev) => ({ ...prev, place: "", lat: undefined, lng: undefined })); setPickedSceneId(undefined); }} style={styles.specHintAction}>
                     <ProxyIcon color={color.violet} name="close" size={16} />
                   </Pressable>
                 )
@@ -879,15 +919,26 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               再定人时时长。三块相对顺序不动（你们几人 → 约定见面时间 → 时长）。 */}
           {/* DEMAND-SPECS-SKELETON-001：第 2 段 · 时间与人数。 */}
           <SpecsSection hint="默认已填好" no={2} title="时间与人数">
+          {/* DEMAND-INFO-CARD-001（2026-10-07，用户：「人数 时间xx也按照原型做紧凑模式」）：
+              原型 deepseek_html_20261007_d726c2 的 ③ 是**一张** `.info-card` 里三行
+              `.info-row`（左 label 占满 + 右「值 + ▾」，行间 1px 细线）。改之前是三个
+              各自带边框的小框、每个上面还各挂一行 fieldLabel —— 纵向占了三倍。这里照
+              原型收成一张卡：三个 testID、三个弹层（下拉菜单 / 两个 WheelSheet）一个
+              都不动，只换容器与行形态。
+              下拉菜单留在**卡内、紧跟它那一行**：下拉贴着触发器是本来的语言
+              （DEMAND-HEADCOUNT-003），别为了卡形把它挪到卡外。 */}
+          <View style={styles.infoCard}>
           {/* DEMAND-HEADCOUNT-003（2026-10-07，用户：「搞成下拉选择框的 … 不要做成
               让客户增大摩擦力的视觉」）：六颗常驻 chips 太重，换成贴着触发按钮的
               下拉（SCENE-PICKER-FILTER-ANCHORED-004 同款语言：触发器 + caret，
-              选项行 + ✓，选即收）。常态只占一行小框，默认 1 人。模板数据里的
+              选项行 + ✓，选即收）。常态只占一行，默认 1 人。模板数据里的
               ratios/defaultRatio 保留（快筛还用），只是不渲染。 */}
-          <Text selectable style={styles.fieldLabel}>你们几人</Text>
-          <Pressable accessibilityLabel="选择人数" onPress={() => setHeadcountOpen((open) => !open)} style={styles.headcountTrigger} testID="demand-headcount">
-            <Text selectable style={styles.headcountTriggerText}>{`${normalizeHeadcount(specs.ratio)} 人`}</Text>
-            <Text selectable style={styles.headcountCaret}>{headcountOpen ? "▴" : "▾"}</Text>
+          <Pressable accessibilityLabel="选择人数" onPress={() => setHeadcountOpen((open) => !open)} style={styles.infoRow} testID="demand-headcount">
+            <Text selectable style={styles.infoLabel}>你们几人</Text>
+            <View style={styles.infoValue}>
+              <Text selectable style={styles.infoValueText}>{`${normalizeHeadcount(specs.ratio)} 人`}</Text>
+              <Text selectable style={styles.infoArrow}>{headcountOpen ? "▴" : "▾"}</Text>
+            </View>
           </Pressable>
           {headcountOpen ? (
             <View style={styles.headcountMenu}>
@@ -909,10 +960,12 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               字段名从「时间段」改成「约定见面时间」—— 用户填的是**碰头那一刻**，
               不是一段可漂移的区间（滚轮选的也确实是单个 HH:MM）。值口径不变：
               TIME_SLOT_OPTIONS（06:00–22:00 半小时一档），行只写 HH:MM。 */}
-          <Text selectable style={styles.fieldLabel}>约定见面时间</Text>
-          <Pressable accessibilityLabel="选择约定见面时间" onPress={() => setTimeOpen(true)} style={styles.headcountTrigger} testID="demand-timeslot">
-            <Text selectable style={styles.headcountTriggerText}>{normalizeTimeSlot(specs.time)}</Text>
-            <Text selectable style={styles.headcountCaret}>▾</Text>
+          <Pressable accessibilityLabel="选择约定见面时间" onPress={() => setTimeOpen(true)} style={[styles.infoRow, styles.infoRowDivider]} testID="demand-timeslot">
+            <Text selectable style={styles.infoLabel}>约定见面时间</Text>
+            <View style={styles.infoValue}>
+              <Text selectable style={styles.infoValueText}>{normalizeTimeSlot(specs.time)}</Text>
+              <Text selectable style={styles.infoArrow}>▾</Text>
+            </View>
           </Pressable>
           {timeOpen ? (
             <WheelSheet
@@ -928,10 +981,12 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           {/* DEMAND-DURATION-001（2026-10-07，用户：「时长也用滚轮 1H-8H就可以」）：
               三颗 chips 换成跟时间段同一个滚轮弹层（标题「时长」，1–8 小时）。
               常态只占一行小框，默认 2 小时。 */}
-          <Text selectable style={styles.fieldLabel}>时长</Text>
-          <Pressable accessibilityLabel="选择时长" onPress={() => setDurationOpen(true)} style={styles.headcountTrigger} testID="demand-duration">
-            <Text selectable style={styles.headcountTriggerText}>{normalizeDuration(specs.duration)}</Text>
-            <Text selectable style={styles.headcountCaret}>▾</Text>
+          <Pressable accessibilityLabel="选择时长" onPress={() => setDurationOpen(true)} style={[styles.infoRow, styles.infoRowDivider]} testID="demand-duration">
+            <Text selectable style={styles.infoLabel}>时长</Text>
+            <View style={styles.infoValue}>
+              <Text selectable style={styles.infoValueText}>{normalizeDuration(specs.duration)}</Text>
+              <Text selectable style={styles.infoArrow}>▾</Text>
+            </View>
           </Pressable>
           {durationOpen ? (
             <WheelSheet
@@ -943,6 +998,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               value={normalizeDuration(specs.duration)}
             />
           ) : null}
+          </View>
           </SpecsSection>
 
           {/* DEMAND-SPECS-SKELETON-001：第 3 段 · 价格。 */}
@@ -995,17 +1051,20 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           ) : (
             <Text selectable style={styles.empty}>先选一家 · 不选就自动分配。</Text>
           )}
+          </View>
 
           {/* DEMAND-SPECS-SKELETON-001：报错 + 上一步/发布搬进底部固定条（原型 bottom
               区）—— 长页不用拉到底才看得到。 */}
         </>
       ) : (
         <>
-          <Text selectable style={styles.doneSub}>你的需求已经进入市场。</Text>
+          <Text selectable style={styles.doneSub}>{targetAgent ? `已经向 ${targetAgent.name} 发出需求，等待 TA 确认。` : "你的需求已经进入市场。"}</Text>
           <View style={styles.summaryCard}>
             <Text selectable style={styles.summaryEyebrow}>Opportunity</Text>
             <Text selectable style={styles.summaryTitle}>{result?.title ?? template?.title}</Text>
-            <SummaryRow label="对象" value="公开市场" />
+            {/* DEMAND-TARGET-KEEP-001：对象这行要跟真实发布口径一致。定向邀约写
+                「公开市场」会让用户以为谁都看得到 —— 契约里它只对 TA 和 owner 可见。 */}
+            <SummaryRow label="对象" value={targetAgent ? `定向 · ${targetAgent.name}` : "公开市场"} />
             {/* DEMAND-HEADCOUNT-002：展示 1–6 人的选择（默认 1 人）。 */}
             <SummaryRow label="人数" value={`${normalizeHeadcount(specs.ratio)} 人`} />
             <SummaryRow label="标准" value={`${specs.time} · ${specs.duration}`} />
@@ -1030,7 +1089,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
         <View style={styles.doneRow}>
           <Pressable onPress={back} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
           <Pressable disabled={publishing || !template || (isPro && mode === undefined)} onPress={() => void publish()} style={[styles.primaryBtnFlex, (publishing || !template || (isPro && mode === undefined)) && styles.disabled]}>
-            <Text selectable style={styles.primaryBtnText}>{publishing ? "发布中…" : "发布到市场"}</Text>
+            {/* DEMAND-TARGET-KEEP-001：按钮文案跟真实发布口径走 —— 选了人就是邀约，
+                没选人才是发布。market.tsx:1684 早就是这个形状，这里跟上。 */}
+            <Text selectable style={styles.primaryBtnText}>{publishing ? "发布中…" : targetAgent ? `向 ${targetAgent.name} 发出邀约` : "发布到市场"}</Text>
           </Pressable>
         </View>
       </View>
@@ -1064,7 +1125,15 @@ function SpecsSection({ no, title, hint, children }: {
           <View style={styles.specStepBadge}><Text selectable style={styles.specStepBadgeText}>{no}</Text></View>
           <Text selectable style={styles.specSectionTitle}>{title}</Text>
         </View>
-        {hint ? <Text selectable style={styles.specSectionHint}>{hint}</Text> : null}
+        {hint === undefined || hint === "" ? null : typeof hint === "string" ? (
+          <Text selectable style={styles.specSectionHint}>{hint}</Text>
+        ) : (
+          // DEMAND-SPECS-GUTTER-001：hint 槽现在也会放**动作**（选完场景那个 X 字形），
+          // 不能再无脑裹一层 <Text> —— Pressable 塞在 Text 里是行内流，命中区跟着
+          // 字形走（16px），既难点、位置也由文本基线决定。是节点就直接渲染，
+          // 由调用方自己给盒子。
+          hint
+        )}
       </View>
       {children}
     </View>
@@ -1291,12 +1360,21 @@ const styles = StyleSheet.create({
   page: { flex: 1 },
   pageScroll: { flex: 1 },
   specSection: { borderBottomColor: color.line, borderBottomWidth: 1, paddingBottom: 16 },
+  // DEMAND-SPECS-GUTTER-001：规格步自己的 16 页边距。**不能**加在共用的 content 上
+  // （选 Moment 那屏要通栏，用户 2026-10-06 点名过），所以只在规格步的渲染处套一层。
+  specsGutter: { paddingHorizontal: 16 },
   specSectionHead: { alignItems: "baseline", flexDirection: "row", justifyContent: "space-between", marginBottom: 10, marginTop: 14 },
   specSectionTitleRow: { alignItems: "center", flexDirection: "row" },
   specStepBadge: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, height: 20, justifyContent: "center", marginRight: 8, width: 20 },
   specStepBadgeText: { color: color.white, fontSize: 11, fontWeight: "800" },
   specSectionTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   specSectionHint: { color: color.muted, fontSize: 11 },
+  // DEMAND-SPECS-GUTTER-001：段头 hint 槽里的**动作**盒子（选完场景那个 X 字形）。
+  // 16px 字形直接贴边既难点也看着顶到屏幕上（用户：「x稍微太靠右边缘了」）——
+  // 给一个 28×28 的命中盒把字形居中，右缘就落在页边距 + 6 上（原型 .x-btn 是
+  // 24×24 里放 12px svg，同一个思路）。alignSelf 是给段头那行用的：
+  // specSectionHead 是 baseline 对齐，动作盒不参与文本基线，自己居中。
+  specHintAction: { alignItems: "center", alignSelf: "center", height: 28, justifyContent: "center", width: 28 },
   specsBottomBar: { backgroundColor: color.white, borderTopColor: color.line, borderTopWidth: 1, paddingBottom: 16, paddingHorizontal: 16, paddingTop: 10 },
   specsBottomSummary: { alignItems: "baseline", flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
   specsBottomSummaryText: { color: color.muted, flex: 1, fontSize: 12, fontWeight: "500" },
@@ -1307,13 +1385,22 @@ const styles = StyleSheet.create({
   chipText: { color: color.ink, fontSize: 13, fontWeight: "700" },
   chipTextOn: { color: color.white },
   input: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 15, paddingHorizontal: 14, paddingVertical: 10 },
-  // DEMAND-HEADCOUNT-003：下拉触发器 + 菜单。关态只占一行（跟 input 同一套
-  // 边框/圆角/padding，看着就是个小选择框）；选项行 + ✓ 沿用
-  // filterDropdownOption 那套语言，不另起一套。
-  headcountTrigger: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10 },
-  headcountTriggerText: { color: color.ink, fontSize: 15, fontWeight: "700" },
-  headcountCaret: { color: color.muted, fontSize: 13, fontWeight: "800" },
-  headcountMenu: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, marginTop: 6 },
+  // DEMAND-INFO-CARD-001（2026-10-07，用户：「人数 时间xx也按照原型做紧凑模式」）：
+  // 原型 ③ 的 `.info-card` / `.info-row` / `.info-label` / `.info-value` / `.arrow`。
+  // 一张卡 + 三行，行间 1px 细线（RN 没有 `+` 兄弟选择器，第 2、3 行各自带上边线）。
+  // 行内左侧 label 占满（flex:1），右侧值 + caret 贴右。
+  // ⚠️ 原型的 `.arrow` 是 10px —— 这里用 11：design-system-r3.test.ts 的下限是 11。
+  infoCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, overflow: "hidden" },
+  infoRow: { alignItems: "center", flexDirection: "row", gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
+  infoRowDivider: { borderTopColor: color.line, borderTopWidth: 1 },
+  infoLabel: { color: color.ink, flex: 1, fontSize: 13.5, fontWeight: "600" },
+  infoValue: { alignItems: "center", flexDirection: "row", gap: 6 },
+  infoValueText: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  infoArrow: { color: color.muted, fontSize: 11, fontWeight: "800" },
+  // DEMAND-HEADCOUNT-003：下拉菜单。开在卡内、紧跟它那一行 —— 所以**不要**外框/
+  // 圆角/外边距，只留白底：选项行自带的下边线把它和下面的行接成同一张卡。
+  // 选项行 + ✓ 沿用 filterDropdownOption 那套语言，不另起一套。
+  headcountMenu: { backgroundColor: color.white },
   // DEMAND-TIMESLOT-002：滚轮弹层样式（原型同款结构）。确定按钮用 ink ——
   // 本页去粉（见 primaryBtn 注释），不把原型的粉色带进来。
   timeSheetMask: { backgroundColor: "rgba(0,0,0,0.35)", flex: 1 },

@@ -15,8 +15,13 @@ describe("DEMAND-TIMESLOT-002 时间段是滚轮弹层，不是输入框", () =>
     fileURLToPath(new URL("./demand-wizard.tsx", import.meta.url)),
     "utf8"
   );
-  // 从渲染出来的「时间段」标题切到下一个渲染标题「时长」—— 触发器整段在里面。
-  const section = wizard.slice(wizard.indexOf("}>约定见面时间"), wizard.indexOf("}>时长"));
+  // 从「约定见面时间」这一行的触发器切到下一行「时长」的触发器 —— 触发器整段在里面。
+  // DEMAND-INFO-CARD-001 起行是「左 label + 右 值」的紧凑卡行，`}>约定见面时间` 落在
+  // testID **之后**（label 是 Pressable 的子节点）⇒ 锚换成行自己的 accessibilityLabel。
+  // 两个锚都显式判空：indexOf 找不到返回 -1，`slice(x, -1)` 会**静默切到文件末尾**。
+  const start = wizard.indexOf('accessibilityLabel="选择约定见面时间"');
+  const end = wizard.indexOf('accessibilityLabel="选择时长"');
+  const section = start >= 0 && end > start ? wizard.slice(start, end) : "";
   const moments = readFileSync(
     fileURLToPath(new URL("../demand-moments.ts", import.meta.url)),
     "utf8"
@@ -27,11 +32,18 @@ describe("DEMAND-TIMESLOT-002 时间段是滚轮弹层，不是输入框", () =>
     expect(section).toContain('testID="demand-timeslot"');
   });
 
-  it("触发器开滚轮弹层：取消 / 开始时间 / 确定，临时值确认才写回", () => {
+  it("触发器开滚轮弹层：取消 / 约定见面时间 / 确定，临时值确认才写回", () => {
     expect(section).toContain("WheelSheet");
     expect(section).toContain("onConfirm");
     expect(section).toContain("onCancel");
-    expect(wizard).toContain("开始时间");
+    // DEMAND-TIMESLOT-003（2026-10-07 用户：「时间段改为约定见面时间」）起弹层标题
+    // 与行 label 都是「约定见面时间」。
+    // ⚠️ 这里原来断言的是裸串「开始时间」—— 那个词在文件里**只出现在注释里**
+    //    （原型弹层的标题），渲染层一个字都没有 ⇒ 改掉那句注释它就变成空断言。
+    //    改成钉 JSX 形态：行 label 的 `}>约定见面时间</Text>` + 弹层的 `title="…"`，
+    //    两者都骗不过去（注释里没有这两种形状）。
+    expect(section).toContain("}>约定见面时间</Text>");
+    expect(section).toContain('title="约定见面时间"');
     expect(wizard).toContain('"取消"');
     expect(wizard).toContain('"确定"');
   });

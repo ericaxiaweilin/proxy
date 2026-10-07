@@ -13,10 +13,15 @@ describe("DEMAND-DURATION-001 时长是滚轮弹层，不是三颗 chips", () =>
     fileURLToPath(new URL("./demand-wizard.tsx", import.meta.url)),
     "utf8"
   );
-  // 从渲染出来的「时长」标题切到下一个渲染标题「预计服务价」—— 触发器整段在里面。
+  // 从「时长」这一行的触发器切到下一个渲染标题「预计服务价」—— 触发器整段在里面。
   // （偏好行被 DEMAND-PREFS-REMOVE-001 删了，「场景偏好」已不在文件里；
   //  用带 "}>" 前缀的精确写法：裸词会先撞到 publish 里那句报错文案。）
-  const section = wizard.slice(wizard.indexOf("}>时长"), wizard.indexOf("}>预计服务价"));
+  // DEMAND-INFO-CARD-001 起行是「左 label + 右 值」的紧凑卡行，`}>时长` 落在 testID
+  // **之后**（label 是 Pressable 的子节点）⇒ 锚换成行自己的 accessibilityLabel。
+  // 两个锚都显式判空：indexOf 找不到返回 -1，`slice(x, -1)` 会**静默切到文件末尾**。
+  const start = wizard.indexOf('accessibilityLabel="选择时长"');
+  const end = wizard.indexOf("}>预计服务价");
+  const section = start >= 0 && end > start ? wizard.slice(start, end) : "";
   const moments = readFileSync(
     fileURLToPath(new URL("../demand-moments.ts", import.meta.url)),
     "utf8"

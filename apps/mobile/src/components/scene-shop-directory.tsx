@@ -461,7 +461,7 @@ export function SceneShopDirectory({
     showsVerticalScrollIndicator?: boolean;
   }>;
   const scrollHostProps: { style?: unknown; contentContainerStyle?: unknown; showsVerticalScrollIndicator?: boolean } = embedded
-    ? { style: styles.scrollBody }
+    ? { style: [styles.scrollBody, styles.scrollBodyEmbedded] }
     : { contentContainerStyle: styles.scrollBody, showsVerticalScrollIndicator: false };
 
   const directoryBody = pickerOpen ? (
@@ -914,6 +914,14 @@ export function SceneShopDirectory({
 const styles = StyleSheet.create({
   page: { backgroundColor: color.offWhite, flex: 1 },
   scrollBody: { paddingBottom: 40 },
+  // DEMAND-SPECS-GUTTER-001（2026-10-07）：embedded 时**横向内边距归宿主**。
+  // 本组件里 listHead / chipBar / pickFilterAreas / pickViewToggle / pickMapWrap /
+  // locationRow / skipRow / empty / cardList 这九处各自带 16 的横向内边距 —— 浏览
+  // 模式（Modal）里那是它们唯一的内边距，必须留；但嵌进发布向导后，宿主又给了一层
+  // 页边距，两层的和就是 32，场景卡会比同一页的段头/字段多缩进 16。
+  // 所以只在 embedded 下把整块内容**外扩 16**，让那九处 16 正好抵消宿主的页边距
+  // —— 一处声明，不用去改九个样式（改了要跟 home 分叉）。
+  scrollBodyEmbedded: { marginHorizontal: -16 },
   topbar: { alignItems: "center", flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 8 },
   roundButton: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, height: 40, justifyContent: "center", width: 40 },
   topbarTitle: { color: color.ink, flex: 1, fontSize: 17, fontWeight: "900" },

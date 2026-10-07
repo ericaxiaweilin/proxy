@@ -423,7 +423,14 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
  * 场景偏好并入 skills；一期 moneyFlow 固定 EARN（Moment 服务皆为获酬）。
  */export function buildDemandPublishInput(
   template: MomentTemplate,
-  specs: DemandSpecs
+  specs: DemandSpecs,
+  // DEMAND-TARGET-KEEP-001（2026-10-07，用户：「不能丢弃搭子选择」）：选中的搭子
+  // 必须跟着需求一起发出去。契约里这条一直是有的 —— PublishMarketOpportunityInput
+  // 的 targetUserId（OPP-TARGETED-001「选人 → 向 TA 发出邀约」：带上后服务端把机会
+  // 快照成定向，只对 TA 和 owner 可见、只收 TA 报名）。兄弟实现 market.tsx 一直在发
+  // （targetAgent.agentId），**只有发布需求向导没接** —— 向导收了 selectedPerson、
+  // 界面上还写着「意向人选：X」，发布出去的却永远是公开市场，选择被丢在半路。
+  targetUserId?: string | undefined
 ): PublishMarketOpportunityInput {
   // DEMAND-HEADCOUNT-002：人数恒为 1–6 的选择（默认 1 人），发布行恒带「N 人」。
   // 老草稿的自由文本经 normalizeHeadcount 收敛（前导数字截断夹到 1–6），不再原样透传。
@@ -457,7 +464,13 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
     skills,
     lens: ["NOW", "NEARBY"],
     ...(notes === "" ? {} : { desc: notes.slice(0, 500) }),
-    ...(hasPin ? { lat: specs.lat as number, lng: specs.lng as number } : {})
+    ...(hasPin ? { lat: specs.lat as number, lng: specs.lng as number } : {}),
+    // DEMAND-TARGET-KEEP-001：定向邀约。空串/undefined 都不带 —— 不带 = 公开发布，
+    // 行为与之前完全一致（契约注释原话）。写成一整条而非 `targetUserId` 直传，
+    // 是为了让「没选人」这条路径的 wire 形状与改动前逐字节相同。
+    ...(targetUserId === undefined || targetUserId.trim() === ""
+      ? {}
+      : { targetUserId: targetUserId.trim() })
   };
 }
 

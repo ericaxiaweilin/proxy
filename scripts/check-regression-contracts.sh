@@ -16159,6 +16159,110 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
   fi
 fi
 
+# DEMAND-INFO-CARD-001（2026-10-07，用户：「人数 时间xx也按照原型做紧凑模式」）。
+# 原型 deepseek_html_20261007_d726c2 的 ③ 是**一张** `.info-card` 里三行 `.info-row`
+# （左 label 占满 + 右「值 + ▾」，行间 1px 细线）。改动前是三个各自带边框的小框、
+# 每个上面还各挂一行 fieldLabel —— 纵向占了三倍。这条钉守「一张卡三行」这个形态：
+#   ① 卡容器在，且三行都走同一套行样式（第 1 行裸 infoRow，第 2/3 行带 infoRowDivider
+#      画行间细线 —— RN 没有 `+` 兄弟选择器，上边线只能写在行自己身上）；
+#   ② 三个字段的 testID 一个不少（弹层都挂在它们上面）；
+#   ③ 反面：上一版的自带边框小框（headcountTrigger）不许回来，也不许每个字段再各挂
+#      一行 fieldLabel —— 回来了就不是紧凑卡。
+# 断言落**渲染写法**（`style={styles.x}`），不裸查样式名：样式表里定义还在，
+# 裸名会被定义行喂绿（本仓有前科）。
+if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
+  DIC_B=0
+  if ! grep -qF 'style={styles.infoCard}' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-INFO-CARD-001]: 时间与人数的紧凑卡容器没了 —— 三行又散回独立小框。" >&2
+    DIC_B=1
+  fi
+  if ! grep -qF 'style={styles.infoRow}' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-INFO-CARD-001]: 卡里第一行不走 infoRow —— 行样式又分家了。" >&2
+    DIC_B=1
+  fi
+  if [ "$(grep -cF 'styles.infoRowDivider' apps/mobile/src/surfaces/demand-wizard.tsx)" -lt 2 ]; then
+    echo "  FAIL [DEMAND-INFO-CARD-001]: 行间细线少于两条 —— 三行没接成一张卡。" >&2
+    DIC_B=1
+  fi
+  for tid in demand-headcount demand-timeslot demand-duration; do
+    if ! grep -qF "testID=\"$tid\"" apps/mobile/src/surfaces/demand-wizard.tsx; then
+      echo "  FAIL [DEMAND-INFO-CARD-001]: 紧凑卡里的 $tid 丢了 —— 那一行不能点。" >&2
+      DIC_B=1
+    fi
+  done
+  if grep -qF 'styles.headcountTrigger' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-INFO-CARD-001]: 自带边框的独立小框（headcountTrigger）又回来了 —— 那就是三个框，不是一张卡。" >&2
+    DIC_B=1
+  fi
+  if grep -qF 'fieldLabel}>你们几人' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-INFO-CARD-001]: 「你们几人」又在框外单挂一行 fieldLabel —— label 要收进行里（左 label + 右 值）。" >&2
+    DIC_B=1
+  fi
+  if [ "$DIC_B" -eq 0 ]; then
+    # 委派给三条钉测试；失败要**自己报 ID**，别只留 vitest 的输出 ——
+    # 门禁日志里看不到 pin 名，下一个人会以为是别人的测试红了。
+    pnpm --dir apps/mobile exec vitest run src/surfaces/demand-wizard-headcount.test.ts src/surfaces/demand-wizard-timeslot.test.ts src/surfaces/demand-wizard-duration.test.ts >/dev/null || {
+      echo "  FAIL [DEMAND-INFO-CARD-001]: 紧凑卡的三条钉测试红了 —— 卡形/行形态/触发器被改坏了。" >&2
+      exit 1
+    }
+    echo "    DEMAND-INFO-CARD-001: PASS (时间与人数一张卡三行 · 行间细线 · 三个触发器都在 · 无独立小框)"
+  else
+    exit 1
+  fi
+fi
+
+# DEMAND-TARGET-KEEP-001（2026-10-07，用户：「不能丢弃搭子选择」）：向导收了搭子
+# （selectedPerson）、界面写着「意向人选：X」，发布出去的却永远是公开市场 —— 选择被
+# 丢在半路。契约里这条一直有（PublishMarketOpportunityInput.targetUserId，
+# OPP-TARGETED-001「选人 → 向 TA 发出邀约」），兄弟实现 market.tsx 一直在发，
+# 只有发布向导没接。这条钉守接线与口径：
+#   ① 发布调用带第三参（选中的人）；反面：改动前的两参调用不许回来 —— 这条是
+#      「helper 建好了没人调」的形状，只测 helper 行为抓不到；
+#   ② 定向只由「直接约」决定（点回「等接单」就是公开），判据取 mode 而不是
+#      「曾经选过人」；
+#   ③ 界面口径分开（邀约 ≠ 已发布）。
+# 行为层（键缺席 vs 键在、trim、契约校验）由 demand-wizard-target.test.ts 守，
+# 这里 require 它存在，免得钉住接线而测试被删。
+if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
+  DTK_B=0
+  if ! grep -qF 'buildDemandPublishInput(template, specs, targetAgent?.agentId)' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-TARGET-KEEP-001]: 发布没带上选中的搭子 —— 选择又被丢在半路（发出去还是公开市场）。" >&2
+    DTK_B=1
+  fi
+  if grep -qF 'buildDemandPublishInput(template, specs)' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-TARGET-KEEP-001]: 发布退回两参调用 —— 选了谁都不影响发布结果。" >&2
+    DTK_B=1
+  fi
+  if ! grep -qF 'const targetAgent = mode === "direct" ? selectedPerson : undefined;' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-TARGET-KEEP-001]: 定向判据丢了 —— 定向/公开不再由「接单方式」决定。" >&2
+    DTK_B=1
+  fi
+  if ! grep -qF '向 ${targetAgent.name} 发出邀约' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-TARGET-KEEP-001]: 按钮又只说「发布到市场」—— 定向邀约不是公开发布。" >&2
+    DTK_B=1
+  fi
+  if ! grep -qF 'targetUserId === undefined || targetUserId.trim() === ""' apps/mobile/src/demand-moments.ts ||
+     ! grep -qF 'targetUserId: targetUserId.trim()' apps/mobile/src/demand-moments.ts; then
+    echo "  FAIL [DEMAND-TARGET-KEEP-001]: 发布输入没把 targetUserId 接上（或空白没被挡）—— 定向邀约发不出去。" >&2
+    DTK_B=1
+  fi
+  # ⚠️ 收窄到 describe 标题，不用裸 ID：测试文件的头部注释里也写着 DEMAND-TARGET-KEEP-001，
+  # 裸 grep 会被**注释**喂绿（本仓前科：钉被自己的解释注释养活）。describe 标题只有测试本身有。
+  if ! grep -qF 'DEMAND-TARGET-KEEP-001 搭子选择跟着需求走' apps/mobile/src/surfaces/demand-wizard-target.test.ts; then
+    echo "  FAIL [DEMAND-TARGET-KEEP-001]: 行为测试 demand-wizard-target.test.ts 不在了（或 describe 被改名）—— 接线钉会变成空守卫。" >&2
+    DTK_B=1
+  fi
+  if [ "$DTK_B" -eq 0 ]; then
+    pnpm --dir apps/mobile exec vitest run src/surfaces/demand-wizard-target.test.ts >/dev/null || {
+      echo "  FAIL [DEMAND-TARGET-KEEP-001]: 行为测试红了 —— 搭子选择的 wire 形状变了（键缺席 / trim / 契约校验）。" >&2
+      exit 1
+    }
+    echo "    DEMAND-TARGET-KEEP-001: PASS (选中的人跟着发布走 · 空白不带该键 · 定向/公开由接单方式决定 · 口径分开)"
+  else
+    exit 1
+  fi
+fi
+
 # AVATAR-UNIFY-001（2026-10-06，用户：「场景头像大小 人头像大小 都是所有页面一样大小
 # 不能不一样」，随后拍板场景升档：行头像两档制 —— **场景 104×104 方**（跟 home 场景
 # 封面同高）、**人 44×44 圆**，各自全 app 一个数。逐文件钉 —— `size=` 是通用 prop（图标也在用），不能全局扫；
