@@ -221,6 +221,9 @@ export function SceneShopDirectory({
   // SCENE-LOCATION-PICKER-001: 区域选择器是否打开——跟 badminton-companion.tsx
   // 的 screen 状态机同一个道理，靠 state 切内容，不再套第二个 Modal。
   const [pickerOpen, setPickerOpen] = useState(false);
+  // DEMAND-SCENE-HEADER-001：内嵌选场景时的区域筛选展开开关（默认收起）。
+  // 内嵌不进 LocationListPicker（自带竖滚，宿主已是竖滚），区域 chips 直接平铺。
+  const [filterOpen, setFilterOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string>();
   const [detail, setDetail] = useState<ShopDetail>();
   const [detailState, setDetailState] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
@@ -457,17 +460,56 @@ export function SceneShopDirectory({
 
             <View style={styles.listHead}>
               <Text selectable style={styles.listTitle}>{`附近${label}`}<Text selectable style={styles.listCount}>{`  ${shopCountText(rows.length, unit)}`}</Text></Text>
+              {/* DEMAND-SCENE-HEADER-001：内嵌选场景不摆定位说明行（用户原话里的
+                  「废话」）—— 标题 + 计数 + 三颗就够。浏览页照旧。 */}
+              {!embedded ? (
               <Text selectable style={styles.listLocation}>{shopListLocationLine(origin !== undefined, rows.map((row) => row.area), rows.length > 0 && rows.every((row) => isFarAway(sceneDistanceMeters(origin, row))))}</Text>
+              ) : null}
             </View>
 
-            {/* 排序条：只放这一趟真的能用的项。没有定位就不给「最近」。 */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipBar}>
-              {sorts.map((sort) => (
-                <Pressable accessibilityLabel={`排序 ${sort.label}`} key={sort.id} onPress={() => setSortId(sort.id)} style={[styles.sortChip, sortId === sort.id && styles.sortChipOn]}>
-                  <Text selectable style={[styles.sortChipText, sortId === sort.id && styles.sortChipTextOn]}>{sort.label}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
+            {embedded ? (
+              <>
+                {/* DEMAND-SCENE-HEADER-001：内嵌只留三颗 —— 推荐 / 附近（= 最近，
+                    按用户原话叫）/ 筛选。收藏 / 去过两颗不进内嵌（浏览页照旧）。
+                    筛选挂现成的区域过滤（areas + toggleArea），chips 平铺，不套
+                    LocationListPicker（自带竖滚，嵌套抢手势）。 */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipBar}>
+                  <Pressable accessibilityLabel="排序 推荐" onPress={() => setSortId("recommended")} style={[styles.sortChip, sortId === "recommended" && styles.sortChipOn]}>
+                    <Text selectable style={[styles.sortChipText, sortId === "recommended" && styles.sortChipTextOn]}>推荐</Text>
+                  </Pressable>
+                  {origin !== undefined ? (
+                    <Pressable accessibilityLabel="排序 附近" onPress={() => setSortId("nearest")} style={[styles.sortChip, sortId === "nearest" && styles.sortChipOn]}>
+                      <Text selectable style={[styles.sortChipText, sortId === "nearest" && styles.sortChipTextOn]}>附近</Text>
+                    </Pressable>
+                  ) : null}
+                  {facets.length > 1 ? (
+                    <Pressable accessibilityLabel="按区域筛选" onPress={() => setFilterOpen((open) => !open)} style={[styles.sortChip, areas.length > 0 && styles.sortChipOn]}>
+                      <Text selectable style={[styles.sortChipText, areas.length > 0 && styles.sortChipTextOn]}>筛选{areas.length > 0 ? ` · ${areas.length}` : ""}</Text>
+                    </Pressable>
+                  ) : null}
+                </ScrollView>
+                {filterOpen && facets.length > 1 ? (
+                  <View style={styles.pickFilterAreas}>
+                    {facets.map((area) => (
+                      <Pressable key={area} accessibilityLabel={`区域 ${area}`} onPress={() => toggleArea(area)} style={[styles.sortChip, areas.includes(area) && styles.sortChipOn]}>
+                        <Text selectable style={[styles.sortChipText, areas.includes(area) && styles.sortChipTextOn]}>{area}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </>
+            ) : (
+              <>
+                {/* 排序条：只放这一趟真的能用的项。没有定位就不给「最近」。 */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipBar}>
+                  {sorts.map((sort) => (
+                    <Pressable accessibilityLabel={`排序 ${sort.label}`} key={sort.id} onPress={() => setSortId(sort.id)} style={[styles.sortChip, sortId === sort.id && styles.sortChipOn]}>
+                      <Text selectable style={[styles.sortChipText, sortId === sort.id && styles.sortChipTextOn]}>{sort.label}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </>
+            )}
             {/* SCENE-LOCATION-PICKER-001: 只有唯一区域就不给这一行——点了没反应
                 的入口是死按钮。弹出的是跟「运动 · 羽毛球」共用的同一个选择器。
                 内嵌模式不进这里：选择器自带竖滚（嵌套滚动抢手势），发布页里
@@ -810,6 +852,8 @@ const styles = StyleSheet.create({
   sortChipOn: { backgroundColor: color.ink, borderColor: color.ink },
   sortChipText: { color: color.muted, fontSize: 12, fontWeight: "800" },
   sortChipTextOn: { color: color.white },
+  // DEMAND-SCENE-HEADER-001：内嵌筛选展开后的区域 chips（平铺换行，不滚）。
+  pickFilterAreas: { flexDirection: "row", flexWrap: "wrap", gap: 7, paddingBottom: 10, paddingHorizontal: 16 },
   // SCENE-LOCATION-PICKER-001: 跟 badminton-companion.tsx 的 locationRow 同款——
   // 点开的是共用的 LocationListPicker，不再是一行横滑 chip。
   locationRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 8, marginBottom: 12, marginHorizontal: 16, paddingHorizontal: 14, paddingVertical: 11 },
