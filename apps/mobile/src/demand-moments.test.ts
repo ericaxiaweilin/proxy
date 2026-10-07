@@ -39,6 +39,17 @@ describe("R58 demand wizard mapping", () => {
   // DEMAND-HEADCOUNT-002（2026-10-07，用户：「你们几人是输入框 改为选择 默认1人
   // 最大上限为6人」）：人数是 1–6 的选择，默认 1 人。发布行恒带「N 人」；
   // 老草稿的自由文本经归一收敛（前导数字截断夹到 1–6），没数字回默认。
+  // DEMAND-SCENE-GATE-002（2026-10-07，用户：「模拟器没改好 没选择还是弹出了下面的
+  // 选项」）：place 不给默认值 —— template.venue 全是类别词（咖啡馆/餐厅/街区/球馆/
+  // 绿道），填进去会让「已选：咖啡馆」和「选完场景才出选项」的闸一起假成立。
+  // 发布位置不变：location 本来就 place 空 → venue 回落。
+  it("defaults place to empty (venue is a category, not a place)", () => {
+    for (const template of MOMENT_TEMPLATES) {
+      expect(defaultSpecsFor(template).place).toBe("");
+      expect(buildDemandPublishInput(template, defaultSpecsFor(template)).location).toBe(template.venue);
+    }
+  });
+
   it("selects headcount 1-6, defaults to 1", () => {
     const template = MOMENT_TEMPLATES[0]!;
     expect(HEADCOUNT_OPTIONS).toEqual(["1", "2", "3", "4", "5", "6"]);

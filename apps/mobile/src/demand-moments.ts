@@ -402,7 +402,16 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
     // DEMAND-DURATION-001：模板的 defaultDuration（「半天」…）同理，只当来源，
     // 收敛到 1–8 小时档位上。
     duration: normalizeDuration(template.defaultDuration),
-    place: template.venue,
+    // DEMAND-SCENE-GATE-002（2026-10-07，用户：「模拟器没改好 没选择还是弹出了
+    // 下面的选项」）：place **不再默认填 template.venue** —— 那一列全是**类别词**
+    // （咖啡馆 / 餐厅 / 街区 / 美术馆 / 球馆 / 绿道 / 按需），没有一个是地点。
+    // 填进去会让两件事一起假成立：
+    //   ① 绑场景模板第 1 段下面那句「已选：咖啡馆」在没选的时候出现；
+    //   ② 「选完场景才出下面选项」的闸（按 place 非空判）被默认值顶开。
+    // 发布载荷不受影响：buildDemandPublishInput 的 location 本来就
+    // `place 空 → template.venue` 回落，打出来的位置一模一样；界面上 venue
+    // 该出现的地方（输入框 placeholder、底部汇总）也都各自有回落。
+    place: "",
     prefs: ["公共场所见面"],
     price: template.defaultPrice,
     notes: ""

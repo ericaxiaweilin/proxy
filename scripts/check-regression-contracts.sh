@@ -16044,6 +16044,13 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: 卡片列表没走 listRows —— 已选后收不起列表（还是全量铺）。" >&2
     DSF_B=1
   fi
+  # DEMAND-SCENE-GATE-002（2026-10-07，用户：「模拟器没改好 没选择还是弹出了下面的选项」）：
+  # place 不许再默认填 template.venue —— venue 全是类别词（咖啡馆/餐厅/街区），填进去会让
+  # 「已选：咖啡馆」和「选完场景才出选项」的闸一起假成立。发布位置不受影响（location 回落）。
+  if grep -qF 'place: template.venue,' apps/mobile/src/demand-moments.ts; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: place 又被填了 venue 默认值 —— 没选场景也会出现「已选」和下面几段。" >&2
+    DSF_B=1
+  fi
   if grep -qF 'disabled={!template} onPress={() => setStep("people")}' apps/mobile/src/surfaces/demand-wizard.tsx; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: 选 Moment 的主按钮又写死进选人了 —— 默认路径必须先过场景。" >&2
     DSF_B=1
