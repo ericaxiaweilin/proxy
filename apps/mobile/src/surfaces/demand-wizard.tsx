@@ -921,25 +921,65 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               而不是怎么找人 放在时间与人数上面」）：接单方式那一行原来压在整屏最后
               （备注之后），现在按原型提到 ① 选场景 之后、时间与人数之前，成为第 2 段。
               标题取原型 ② 的原话「选搭子」（跟 ① 的「选场景」同构）；段号顺移一位
-              （时间与人数 3 / 价格 4 / 备注 5）。
-              段内控件一个不动：等接单 chip + 「或 直接约 ›」小字链接 —— 用户 2026-10-06
-              定的「选人要低调，不做成第一排」+ 命名口径「等接单 / 直接约」（门禁按字面
-              扫，DEMAND-SCENE-FIRST-001）。原来挂在行内 label「怎么找人」上的提示挪到
-              段头 hint 槽；那句「专业服务先选一种 · 没有默认」是**发布闸**的说明
-              （专业没选就不放行），不能丢，所以 hint 保持动态。 */}
+              （时间与人数 3 / 价格 4 / 备注 5）。 */}
+          {/* DEMAND-SUBSECTION-003（2026-10-07，用户看了原型的渲染图：「你实现的没有
+              对齐原型 这样看起来很不起眼 其实这是重要选择 对齐原型」）：原来是一颗
+              「等接单」chip + 一条「或 直接约 ›」小字链接 —— 原型 ② 是一枚**等权分段
+              控件**（灰轨道 + 白色药丸，选中项带 mint「更快」角标）压一张**说明卡**
+              （44 圆图标 + 名称 + 角标 + 一行描述，accent 实线边 + accent-soft 底）。
+              照原型补上。
+              控件语义不变，两段就是**等接单 / 直接约**（用户 2026-10-06 定名，
+              DEMAND-SCENE-FIRST-001 按字面扫；原型那两个词是「系统分配 / 自己挑」，
+              没换 —— 换名字要先推翻他自己那条命名决定）。点「直接约」只**选中**，
+              真正的入口是下面那张卡（原型的 自己挑 段下面接人 list；本仓的选人是一整步
+              带筛选/供给目录，不塞回段里，所以卡只做入口）。
+              段头 hint 保持动态（专业那句是**发布闸**的说明 —— 没选不放行，不能丢）。 */}
           <SpecsSection
             hint={isPro && mode === undefined ? "专业服务先选一种 · 没有默认" : "默认等接单 · 谁有空谁响应"}
             no={2}
             title="选搭子"
           >
-          <View style={styles.modeRow}>
-            <Pressable onPress={() => setMode("open")} style={[styles.chip, mode === "open" && styles.chipOn]}>
-              <Text selectable style={[styles.chipText, mode === "open" && styles.chipTextOn]}>等接单</Text>
+          <View style={styles.modeToggle}>
+            <Pressable accessibilityLabel="等接单" onPress={() => setMode("open")} style={[styles.modeToggleBtn, mode === "open" && styles.modeToggleBtnOn]}>
+              <Text selectable style={[styles.modeToggleText, mode === "open" && styles.modeToggleTextOn]}>等接单</Text>
+              {/* 原型 `.mt-btn .small` 那颗「更快」角标。 */}
+              <Text selectable style={styles.modeToggleBadge}>更快</Text>
             </Pressable>
-            <Pressable onPress={() => { setPeopleReturn("specs"); setStep("people"); }} style={styles.directLink}>
-              <Text selectable style={styles.directLinkText}>或 直接约 ›</Text>
+            <Pressable accessibilityLabel="直接约" onPress={() => setMode("direct")} style={[styles.modeToggleBtn, mode === "direct" && styles.modeToggleBtnOn]}>
+              <Text selectable style={[styles.modeToggleText, mode === "direct" && styles.modeToggleTextOn]}>直接约</Text>
             </Pressable>
           </View>
+          {mode === "direct" ? (
+            <Pressable accessibilityLabel={selectedPerson ? `查看已选的${selectedPerson.name}` : "去挑一个搭子"} onPress={() => { setPeopleReturn("specs"); setStep("people"); }} style={styles.autoCard}>
+              <View style={styles.autoIcon}>
+                <ProxyIcon color={color.white} name={selectedPerson ? "check" : "search"} size={20} />
+              </View>
+              <View style={styles.autoBody}>
+                <View style={styles.autoNameRow}>
+                  <Text selectable style={styles.autoName}>直接约</Text>
+                  <Text selectable style={styles.autoBadge}>{selectedPerson ? "已选" : "自己挑"}</Text>
+                </View>
+                <Text selectable style={styles.autoDesc}>
+                  {selectedPerson
+                    ? `已选 ${selectedPerson.name} · 只对 TA 可见，等 TA 确认。`
+                    : "从附近可接单的人里自己挑一个，选中就是定向邀约。"}
+                </Text>
+              </View>
+            </Pressable>
+          ) : mode === "open" ? (
+            <View style={styles.autoCard}>
+              <View style={styles.autoIcon}>
+                <ProxyIcon color={color.white} name="sparkle" size={20} />
+              </View>
+              <View style={styles.autoBody}>
+                <View style={styles.autoNameRow}>
+                  <Text selectable style={styles.autoName}>系统推荐</Text>
+                  <Text selectable style={styles.autoBadge}>推荐</Text>
+                </View>
+                <Text selectable style={styles.autoDesc}>按评分、距离、擅长匹配最适合的搭子。通常 5–15 分钟响应。</Text>
+              </View>
+            </View>
+          ) : null}
           </SpecsSection>
 
           {/* DEMAND-SPECS-SKELETON-001：第 3 段 · 时间与人数。 */}
@@ -1386,10 +1426,6 @@ const styles = StyleSheet.create({
   specsBottomSummaryText: { color: color.muted, flex: 1, fontSize: 12, fontWeight: "500" },
   specsBottomPrice: { color: color.ink, fontSize: 15, fontWeight: "900", marginLeft: 12 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 8 },
-  chipOn: { backgroundColor: color.ink, borderColor: color.ink },
-  chipText: { color: color.ink, fontSize: 13, fontWeight: "700" },
-  chipTextOn: { color: color.white },
   input: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 15, paddingHorizontal: 14, paddingVertical: 10 },
   // DEMAND-INFO-CARD-001（2026-10-07，用户：「人数 时间xx也按照原型做紧凑模式」）：
   // 原型 ③ 的 `.info-card` / `.info-row` / `.info-label` / `.info-value` / `.arrow`。
@@ -1462,9 +1498,27 @@ const styles = StyleSheet.create({
   // SCENE-CARD-REUSE-001：选场景步的手搓卡片样式已整体删除（sceneRow/sceneAvatar
   // 等 8 条），场景列表直接挂 SceneShopDirectory（home 场景 list 本体），
   // 这里不再有任何自己的场景卡/行样式。
-  // 接单方式那行：chip 是「等接单」，直接约只是一条小字链接 —— 故意不做成和
-  // 等接单同权的第二颗 chip，否则又回「第一排」了。
-  modeRow: { alignItems: "center", flexDirection: "row", gap: 12 },
-  directLink: { paddingVertical: 8 },
-  directLinkText: { color: color.violet, fontSize: 13, fontWeight: "700" }
+  // DEMAND-SUBSECTION-003：原型 ② 的 `.mode-toggle` / `.auto-card`。
+  // 轨道用 color.surface（原型 #f2f2f5），**选中项是白药丸 + ink 字**（原型
+  // `.mt-btn.active`）。注意本页另一处分段控件（scene-shop-directory 的
+  // pickViewToggle，列表/地图）是 ink 实心 —— 这里照原型走白药丸：那处是「视图切换」，
+  // 这处是「二选一的模式」，原型的语义就是选中项浮起来。
+  modeToggle: { backgroundColor: color.surface, borderRadius: 11, flexDirection: "row", padding: 3 },
+  modeToggleBtn: { alignItems: "center", borderRadius: 8, flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", paddingVertical: 9 },
+  modeToggleBtnOn: { backgroundColor: color.white },
+  modeToggleText: { color: color.muted, fontSize: 12.5, fontWeight: "600" },
+  modeToggleTextOn: { color: color.ink, fontWeight: "700" },
+  // 原型 `.mt-btn .small` 那颗「更快」角标：10pt / mint。这里 11 —— design-system-r3
+  // 的下限是 11，不为 1pt 去动装饰白名单（形状对齐兄弟 certBadge）。
+  modeToggleBadge: { backgroundColor: "#E4F8F5", borderRadius: 8, color: color.mint, fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 2 },
+  // 原型 `.auto-card.active`：accent 实线边 + accent-soft 底。本页的 accent 就是
+  // primaryBtnFlex 那颗 color.magenta（原型的 --accent #EC1E5E 同一族），
+  // 底色借已有的 attentionBg（= 原型的 rgba(236,30,94,.06) 那层淡粉）。
+  autoCard: { alignItems: "center", backgroundColor: color.attentionBg, borderColor: color.magenta, borderRadius: 12, borderWidth: 1.5, flexDirection: "row", gap: 12, marginTop: 10, padding: 16 },
+  autoIcon: { alignItems: "center", backgroundColor: color.magenta, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  autoBody: { flex: 1, minWidth: 0 },
+  autoNameRow: { alignItems: "center", flexDirection: "row", gap: 6 },
+  autoName: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  autoBadge: { backgroundColor: color.magenta, borderRadius: 8, color: color.white, fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 2 },
+  autoDesc: { color: color.muted, fontSize: 11.5, lineHeight: 16, marginTop: 4 }
 });

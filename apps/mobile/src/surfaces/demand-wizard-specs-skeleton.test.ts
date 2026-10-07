@@ -50,9 +50,32 @@ describe("DEMAND-SPECS-SKELETON-001 规格步是编号分段 + 底部汇总条",
     // 反面：被换掉的那个行内 label 不许回来。用 JSX 形态断言 —— 注释里还留着
     // 「怎么找人」这几个字（讲这次改动的由来），裸名会被自己的注释喂红。
     expect(wizard).not.toContain("怎么找人</Text>");
-    // 段内控件一个不动（等接单 chip + 直接约小字链接，DEMAND-SCENE-FIRST-001 钉字面）。
+  });
+
+  it("DEMAND-SUBSECTION-003 搭子是原型那枚等权分段控件 + 说明卡", () => {
+    // 用户 2026-10-07 看了原型的渲染图：「你实现的没有对齐原型 这样看起来很不起眼
+    // 其实这是重要选择 对齐原型」。原来是一颗 chip + 一条小字链接 —— 撑不起「重要选择」。
+    // 段内两段的名字仍是用户 2026-10-06 定名的 等接单 / 直接约（DEMAND-SCENE-FIRST-001
+    // 按字面扫），换的只是**控件形态**。
     expect(wizard).toContain("}>等接单</Text>");
-    expect(wizard).toContain("或 直接约 ›");
+    expect(wizard).toContain("}>直接约</Text>");
+    // 分段控件：等权两段（flex:1）+ 白药丸选中态。
+    expect(wizard).toContain("style={styles.modeToggle}");
+    expect(wizard).toContain("styles.modeToggleBtnOn");
+    expect(wizard.match(/styles\.modeToggleBtn,/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    // 说明卡：44 圆图标 + 名称 + 角标 + 描述（原型 .auto-card / .auto-icon / .auto-badge）。
+    expect(wizard).toContain("style={styles.autoCard}");
+    expect(wizard).toContain("styles.autoIcon");
+    expect(wizard).toContain("styles.autoBadge");
+    expect(wizard).toContain("styles.autoDesc");
+    expect(wizard).toContain("}>系统推荐</Text>");
+    // 专业模式没选时不摆卡（判据写死成这两个分支，undefined 落到 null）——
+    // 不然「系统推荐 · 推荐」会在一件还没选的事上冒充已选。
+    expect(wizard).toContain(') : mode === "open" ? (');
+    // 反面：旧的 chip + 小字链接形态不许回来。钉**样式名**不钉文案 —— 上面那段注释里
+    // 引用了旧文案，裸串会被自己的注释喂绿（这一轮真踩过）。两个样式已随形态一起删除。
+    expect(wizard).not.toContain("styles.directLinkText");
+    expect(wizard).not.toContain("styles.chipOn");
   });
 
   it("分段顺序即页面顺序：场景 → 搭子 → 人时 → 价格 → 备注", () => {

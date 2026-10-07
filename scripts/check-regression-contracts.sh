@@ -16238,8 +16238,10 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
   fi
   # ⚠️ 用 JSX 形态 `>…</Text>`，不用裸串「或 直接约 ›」—— 上面那段注释里也写着这个词，
   # 裸 grep 会被自己的注释喂绿（本仓前科）。
-  if ! grep -qF '>或 直接约 ›</Text>' apps/mobile/src/surfaces/demand-wizard.tsx; then
-    echo "  FAIL [DEMAND-SUBSECTION-002]: 段里的「直接约」入口丢了 —— 搬家时把控件弄掉了。" >&2
+  # DEMAND-SUBSECTION-003 起这一段改成了等权分段控件，判据换成下面的块，这里只留
+  # 「两段的名字还是用户定名的那两个」。
+  if ! grep -qF '}>直接约</Text>' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SUBSECTION-002]: 段里的「直接约」那一段丢了 —— 搬家时把控件弄掉了。" >&2
     DSS_B=1
   fi
   if ! grep -qF 'stepNoOf' apps/mobile/src/surfaces/demand-wizard-specs-skeleton.test.ts; then
@@ -16252,6 +16254,67 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
       exit 1
     }
     echo "    DEMAND-SUBSECTION-002: PASS (选搭子是第 2 段 · 压在时间与人数之前 · 无「怎么找人」label · 直接约入口在)"
+  else
+    exit 1
+  fi
+fi
+
+# DEMAND-SUBSECTION-003（2026-10-07，用户看了原型的渲染图：「你实现的没有对齐原型
+# 这样看起来很不起眼 其实这是重要选择 对齐原型」）：接单方式原来是一颗「等接单」chip
+# + 一条「或 直接约 ›」小字链接 —— 撑不起「重要选择」。原型 ② 是一枚**等权分段控件**
+# （灰轨道 + 白色药丸，选中项带 mint 角标）压一张**说明卡**（44 圆图标 + 名称 + 角标
+# + 一行描述，accent 实线边 + accent-soft 底）。这条钉守形态：
+#   ① 分段控件在，且**两段都**是 modeToggleBtn（等权，flex:1），选中态是白药丸；
+#   ② 说明卡在（autoCard / autoIcon / autoBadge / autoDesc 四个都在）；
+#   ③ 专业没选时不摆卡：判据必须写成 `) : mode === "open" ? (`，undefined 落到 null；
+#   ④ 两段的名字仍是用户 2026-10-06 定名的 等接单 / 直接约（原型那两个词是
+#      「系统分配 / 自己挑」，没换 —— 换名字要先推翻他自己那条命名决定）；
+#   ⑤ 反面：旧的 chip + 小字链接形态不许回来 —— 钉**引用形态** `styles.directLinkText` /
+#      `styles.chipOn`（两个样式已随形态删除，全仓 0 引用）。两条口径要记牢：
+#      · 不钉裸名：本块注释里就写着这两个名字，裸名会被自己的注释喂绿；
+#      · 钉的是**引用**、不是**定义** —— 单独复活一个没人挂的样式定义是无害死代码，
+#        要挡的是它被挂回 JSX。所以反向注入必须注入 `style={styles.X}` 才算数
+#        （实测：只注入 `directLinkText: {` 定义行，这条臂**不**报红，看着像假守卫）。
+# 说明卡/控件的**文案**不在这里钉（用户随时会改词），只钉它们存在。
+if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
+  DS3_B=0
+  if ! grep -qF 'style={styles.modeToggle}' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SUBSECTION-003]: 等权分段控件没了 —— 又退回 chip + 小字链接那种不起眼的形态。" >&2
+    DS3_B=1
+  fi
+  if [ "$(grep -cF 'styles.modeToggleBtn,' apps/mobile/src/surfaces/demand-wizard.tsx)" -lt 2 ] ||
+     ! grep -qF 'styles.modeToggleBtnOn' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SUBSECTION-003]: 分段控件不是两段等权（或选中态丢了）—— 有一段按不下去。" >&2
+    DS3_B=1
+  fi
+  for ds3 in 'style={styles.autoCard}' 'styles.autoIcon' 'styles.autoBadge' 'styles.autoDesc'; do
+    if ! grep -qF "$ds3" apps/mobile/src/surfaces/demand-wizard.tsx; then
+      echo "  FAIL [DEMAND-SUBSECTION-003]: 说明卡缺件（${ds3}）—— 原型那张卡是 图标 + 名称 + 角标 + 描述。" >&2
+      DS3_B=1
+    fi
+  done
+  if ! grep -qF ') : mode === "open" ? (' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SUBSECTION-003]: 卡的判据被改了 —— 专业没选时也会摆出「系统推荐 · 推荐」，在没选的事上冒充已选。" >&2
+    DS3_B=1
+  fi
+  # ⚠️ 收窄到**分段控件那一颗**的 JSX 形态：裸 `}>直接约</Text>` 会被下面说明卡的名字
+  # 喂绿（卡里也写着「直接约」）—— 段名被换掉了这条臂却照样绿，就是假守卫。
+  if ! grep -qF 'styles.modeToggleTextOn]}>等接单</Text>' apps/mobile/src/surfaces/demand-wizard.tsx ||
+     ! grep -qF 'styles.modeToggleTextOn]}>直接约</Text>' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SUBSECTION-003]: 分段控件的两段名字被换掉了 —— 用户 2026-10-06 定名「等接单 / 直接约」。" >&2
+    DS3_B=1
+  fi
+  if grep -qF 'styles.directLinkText' apps/mobile/src/surfaces/demand-wizard.tsx ||
+     grep -qF 'styles.chipOn' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SUBSECTION-003]: 旧的 chip + 小字链接形态回来了 —— 这一段要用等权分段控件。" >&2
+    DS3_B=1
+  fi
+  if [ "$DS3_B" -eq 0 ]; then
+    pnpm --dir apps/mobile exec vitest run src/surfaces/demand-wizard-specs-skeleton.test.ts >/dev/null || {
+      echo "  FAIL [DEMAND-SUBSECTION-003]: 骨架钉测试红了 —— 分段控件/说明卡的形态被改坏了。" >&2
+      exit 1
+    }
+    echo "    DEMAND-SUBSECTION-003: PASS (等权分段控件 + 说明卡 · 专业未选不摆卡 · 两段名字不变 · 无旧 chip 形态)"
   else
     exit 1
   fi
