@@ -5,6 +5,7 @@
 // marketplace.publish（成功即进市场）；选人仅浏览意向（发布恒为
 // 公开市场）；草稿存本机。一期备注随机会落库（见 demand-moments）。
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { MarketplaceClient } from "../marketplace-client";
 import type { MarketOpportunity } from "../market-fixtures";
@@ -466,8 +467,18 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const showNotes = specs.notes.trim() !== "";
   const showPerson = selectedPerson !== undefined;
 
+  // DEMAND-SPECS-SKELETON-001：规格步按确认下单原型套编号分段（1 选场景 / 2 时间与
+  // 人数 / 3 价格 / 4 备注）。四段恒渲染（第 1 段里场景 list 才按绑定出没），
+  // 编号写死 1–4，不用计数。
+
+  // 底部汇总条（一行当前选择 + 价格），原型 bottom 区的同款位置。
+  const placeLabel = specs.place.trim() === "" ? template?.venue ?? "" : specs.place.trim();
+  const priceLabel = specs.price.trim() === "" ? "待定" : (negotiable ? `${specs.price.trim()} · 可协商` : specs.price.trim());
+  const bottomSummary = `${placeLabel} · ${normalizeTimeSlot(specs.time)} · ${normalizeDuration(specs.duration)} · ${normalizeHeadcount(specs.ratio)} 人`;
+
   return (
-    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <View style={styles.page}>
+    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} style={styles.pageScroll}>
       <View style={styles.head}>
         <Pressable accessibilityLabel="返回" onPress={back} style={styles.backBtn}>
           <ProxyBackGlyph />
@@ -762,13 +773,6 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             </View>
             <Pressable onPress={() => setStep("moment")}><Text selectable style={styles.linkText}>更换</Text></Pressable>
           </View>
-          <Text selectable style={styles.sectionSub}>Moment 规格 · 默认已帮你填好</Text>
-          <View style={styles.specSummary}>
-            <Text selectable style={styles.specSummaryText}>
-              {specs.prefs.includes("公共场所见面") ? "公共场所见面" : "见面方式自定"} · {specs.duration || "时长自定"} · 现场消费双方自结
-            </Text>
-          </View>
-
           {/* SCENE-STEP-ONEPAGE-001（2026-10-06，用户：「选择场景还是跳页 没有和
               原型一样 一页」）：场景 list 不是一步，是**规格页里的一个段落** ——
               还是 home 那份 SceneShopDirectory 本体（embedded 模式：无 Modal/
@@ -778,9 +782,12 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               留空发到市场，接单方确认；搭子类绑人模板目录里本来没有场地，
               sceneBinding 为假时这一段整个不渲染，同一条一页口径）。
               点头像看单店详情（AVATAR-DETAIL-001，同页内切换）。 */}
+          {/* DEMAND-SPECS-SKELETON-001：第 1 段 · 选场景。顶上的规格摘要盒撤了 ——
+              当前选择收到底部汇总条（原型 bottom 区），一页只讲一遍。
+              段内标题「先挑个地方」由段头 hint 接了，不再另起一行。 */}
+          <SpecsSection hint={sceneBinding ? "不想选就自动分配" : "填个碰头地点"} no={1} title="选场景">
           {sceneBinding ? (
             <View style={styles.sceneSection}>
-              <Text selectable style={styles.sectionSub}>先挑个地方 · 不想选就自动分配</Text>
               <SceneShopDirectory
                 embedded
                 actionId={(template && MOMENT_ACTION_ID[template.id]) || ""}
@@ -816,10 +823,13 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               testID="demand-place-map"
             />
           </View>
+          </SpecsSection>
 
           {/* DEMAND-SPECS-ORDER-001（2026-10-07，用户：「这几个参数不要放在顶部」）：
               人数 / 时间 / 时长三块从摘要下面搬到地点 + 地图之后 —— 先定地方，
               再定人时时长。三块相对顺序不动（你们几人 → 时间段 → 时长）。 */}
+          {/* DEMAND-SPECS-SKELETON-001：第 2 段 · 时间与人数。 */}
+          <SpecsSection hint="默认已填好" no={2} title="时间与人数">
           {/* DEMAND-HEADCOUNT-003（2026-10-07，用户：「搞成下拉选择框的 … 不要做成
               让客户增大摩擦力的视觉」）：六颗常驻 chips 太重，换成贴着触发按钮的
               下拉（SCENE-PICKER-FILTER-ANCHORED-004 同款语言：触发器 + caret，
@@ -880,12 +890,14 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               value={normalizeDuration(specs.duration)}
             />
           ) : null}
+          </SpecsSection>
 
+          {/* DEMAND-SPECS-SKELETON-001：第 3 段 · 价格。 */}
+          <SpecsSection hint="可协商" no={3} title="价格">
           {/* 2026-10-06 合并：这里原本是城市协助服务目录的**第三份拷贝** ——
               按模板展开的 proGrid，外加选中服务那行 note。服务选择已经收进
               选 Moment 那一步的双栏选择器（rail 上的「专业」），规格步不再摆
               第二遍目录；「选了哪个服务」由上面 confirmCard 里那行交代。 */}
-
           <View style={styles.fieldLabelRow}>
             <Text selectable style={styles.fieldLabelNoGap}>预计服务价</Text>
             <Text selectable style={styles.dynamicBadge}>动态</Text>
@@ -900,9 +912,12 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           {/* DEMAND-PREFS-REMOVE-001：偏好行删了，这句里的「额外偏好 / 偏好只用于匹配」
               跟着拿掉 —— 用户已经没处设偏好，别留一句没由来的话。 */}
           <Text selectable style={styles.hint}>ⓘ 价格由场景基础价、时间、人数组成。服务参考价；餐饮、咖啡、KTV、门票等现场消费不包含在内。</Text>
+          </SpecsSection>
 
-          <Text selectable style={styles.fieldLabel}>备注 · 可选</Text>
+          {/* DEMAND-SPECS-SKELETON-001：第 4 段 · 备注。 */}
+          <SpecsSection hint="可选" no={4} title="备注">
           <TextInput maxLength={500} multiline onChangeText={(notes) => setSpecs((prev) => ({ ...prev, notes }))} placeholder="补充说明（随订单展示）" placeholderTextColor={color.muted} style={[styles.input, styles.notesInput]} value={specs.notes} />
+          </SpecsSection>
 
           {/* DEMAND-SCENE-FIRST-001：接单方式，压在发布按钮前、整屏最后 —— 这是它
               「低调」的位置实现。默认「等接单」：主路径从头到尾不出现人 list；
@@ -924,15 +939,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             </Pressable>
           </View>
 
-          {error ? <Text selectable style={styles.error}>{error}</Text> : null}
-          <View style={styles.doneRow}>
-            {/* 上一步：有真实场景候选就回选场景，否则回选 Moment（专业也是回 moment），
-                与头部返回键 back() 同一条规则，不写死「回选人」。 */}
-            <Pressable onPress={back} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
-            <Pressable disabled={publishing || !template || (isPro && mode === undefined)} onPress={() => void publish()} style={[styles.primaryBtnFlex, (publishing || !template || (isPro && mode === undefined)) && styles.disabled]}>
-              <Text selectable style={styles.primaryBtnText}>{publishing ? "发布中…" : "发布到市场"}</Text>
-            </Pressable>
-          </View>
+          {/* DEMAND-SPECS-SKELETON-001：报错 + 上一步/发布搬进底部固定条（原型 bottom
+              区）—— 长页不用拉到底才看得到。 */}
         </>
       ) : (
         <>
@@ -955,6 +963,22 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
         </>
       )}
     </ScrollView>
+    {step === "specs" ? (
+      <View style={styles.specsBottomBar}>
+        <View style={styles.specsBottomSummary}>
+          <Text selectable numberOfLines={1} style={styles.specsBottomSummaryText}>{bottomSummary}</Text>
+          <Text selectable style={styles.specsBottomPrice}>{priceLabel}</Text>
+        </View>
+        {error ? <Text selectable style={styles.error}>{error}</Text> : null}
+        <View style={styles.doneRow}>
+          <Pressable onPress={back} style={styles.secondaryBtn}><Text selectable style={styles.secondaryBtnText}>上一步</Text></Pressable>
+          <Pressable disabled={publishing || !template || (isPro && mode === undefined)} onPress={() => void publish()} style={[styles.primaryBtnFlex, (publishing || !template || (isPro && mode === undefined)) && styles.disabled]}>
+            <Text selectable style={styles.primaryBtnText}>{publishing ? "发布中…" : "发布到市场"}</Text>
+          </Pressable>
+        </View>
+      </View>
+    ) : null}
+    </View>
   );
 }
 
@@ -962,6 +986,28 @@ function SummaryRow({ label, value, last }: { label: string; value: string; last
     <View style={[styles.summaryRow, last && styles.summaryRowLast]}>
       <Text selectable style={styles.summaryLabel}>{label}</Text>
       <Text selectable style={styles.summaryValue}>{value}</Text>
+    </View>
+  );
+}
+
+// DEMAND-SPECS-SKELETON-001 编号分段（原型 section 骨架：数字徽 + 标题 + 右侧 hint，
+// 段间细线）。徽用 ink —— 本页去粉，不把原型的粉色带进来。
+function SpecsSection({ no, title, hint, children }: {
+  no: number;
+  title: string;
+  hint?: string | undefined;
+  children: ReactNode;
+}): React.JSX.Element {
+  return (
+    <View style={styles.specSection}>
+      <View style={styles.specSectionHead}>
+        <View style={styles.specSectionTitleRow}>
+          <View style={styles.specStepBadge}><Text selectable style={styles.specStepBadgeText}>{no}</Text></View>
+          <Text selectable style={styles.specSectionTitle}>{title}</Text>
+        </View>
+        {hint ? <Text selectable style={styles.specSectionHint}>{hint}</Text> : null}
+      </View>
+      {children}
     </View>
   );
 }
@@ -1176,8 +1222,22 @@ const styles = StyleSheet.create({
   fieldLabelRow: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 6, marginTop: 14 },
   fieldLabelNoGap: { color: color.ink, fontSize: 13, fontWeight: "800" },
   dynamicBadge: { backgroundColor: color.surface, borderRadius: 8, color: color.violet, fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 2 },
-  specSummary: { backgroundColor: color.surface, borderRadius: 12, marginBottom: 4, padding: 10 },
-  specSummaryText: { color: color.ink, fontSize: 12, lineHeight: 18 },
+  // DEMAND-SPECS-SKELETON-001：编号分段 + 底部汇总条。顶上的 specSummary 盒撤了
+  // （当前选择收到底部条，一页只讲一遍），这俩样式没人用了，一并删净。
+  // 分段：段间细线 + 数字徽（ink，去粉）+ 标题 + 右侧 hint。
+  page: { flex: 1 },
+  pageScroll: { flex: 1 },
+  specSection: { borderBottomColor: color.line, borderBottomWidth: 1, paddingBottom: 16 },
+  specSectionHead: { alignItems: "baseline", flexDirection: "row", justifyContent: "space-between", marginBottom: 10, marginTop: 14 },
+  specSectionTitleRow: { alignItems: "center", flexDirection: "row" },
+  specStepBadge: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, height: 20, justifyContent: "center", marginRight: 8, width: 20 },
+  specStepBadgeText: { color: color.white, fontSize: 11, fontWeight: "800" },
+  specSectionTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  specSectionHint: { color: color.muted, fontSize: 11 },
+  specsBottomBar: { backgroundColor: color.white, borderTopColor: color.line, borderTopWidth: 1, paddingBottom: 16, paddingHorizontal: 16, paddingTop: 10 },
+  specsBottomSummary: { alignItems: "baseline", flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
+  specsBottomSummaryText: { color: color.muted, flex: 1, fontSize: 12, fontWeight: "500" },
+  specsBottomPrice: { color: color.ink, fontSize: 15, fontWeight: "900", marginLeft: 12 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 8 },
   chipOn: { backgroundColor: color.ink, borderColor: color.ink },
