@@ -4,8 +4,8 @@
 // 选人（浏览+筛选+跳过）、规格、价格说明、成功页。发布走
 // marketplace.publish（成功即进市场）；选人仅浏览意向（发布恒为
 // 公开市场）；草稿存本机。一期备注随机会落库（见 demand-moments）。
-import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { MarketplaceClient } from "../marketplace-client";
 import type { MarketOpportunity } from "../market-fixtures";
 import type { SupplierCandidate, SupplyClient } from "../supply-client";
@@ -787,26 +787,22 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             </View>
           ) : null}
 
-          {/* DEMAND-TIMESLOT-001（2026-10-07，用户：「不要写今晚 … 时间下拉就可以
-              06:00-22:00，支持 m 精度」）：自由输入换成 06:00–22:00 半小时一档的
-              下拉，跟「你们几人」同一套触发器 + 菜单语言。33 档菜单 CAP 高度、
-              内部可滚，不把整页顶开。 */}
+          {/* DEMAND-TIMESLOT-002（2026-10-07，用户给原型 deepseek_html_20261007：
+              「时间用滚轮的」）：下拉列表换成 iOS 滚轮 + 底部弹层（取消 / 开始时间
+              / 确定，中间高亮条，点选 + 滚选，松手吸附）。档位还是 TIME_SLOT_OPTIONS
+              （06:00–22:00 半小时一档），行只写 HH:MM —— 早上/晚上这类词跟「今晚」
+              一样不上界面。渐隐遮罩没做：仓里没有渐变包，高亮条 + 吸附已够认出滚轮。 */}
           <Text selectable style={styles.fieldLabel}>时间段</Text>
-          <Pressable accessibilityLabel="选择时间段" onPress={() => setTimeOpen((open) => !open)} style={styles.headcountTrigger} testID="demand-timeslot">
+          <Pressable accessibilityLabel="选择时间段" onPress={() => setTimeOpen(true)} style={styles.headcountTrigger} testID="demand-timeslot">
             <Text selectable style={styles.headcountTriggerText}>{normalizeTimeSlot(specs.time)}</Text>
-            <Text selectable style={styles.headcountCaret}>{timeOpen ? "▴" : "▾"}</Text>
+            <Text selectable style={styles.headcountCaret}>▾</Text>
           </Pressable>
           {timeOpen ? (
-            <View style={styles.headcountMenu}>
-              <ScrollView nestedScrollEnabled style={styles.headcountMenuList}>
-                {TIME_SLOT_OPTIONS.map((slot, index) => (
-                  <Pressable key={slot} accessibilityLabel={`选择${slot}`} onPress={() => { setSpecs((prev) => ({ ...prev, time: slot })); setTimeOpen(false); }} style={[styles.headcountOption, index === TIME_SLOT_OPTIONS.length - 1 && styles.headcountOptionLast]}>
-                    <Text selectable style={styles.headcountOptionText}>{slot}</Text>
-                    {specs.time === slot ? <Text selectable style={styles.headcountCheck}>✓</Text> : null}
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </View>
+            <TimeWheelSheet
+              onCancel={() => setTimeOpen(false)}
+              onConfirm={(slot) => { setSpecs((prev) => ({ ...prev, time: slot })); setTimeOpen(false); }}
+              value={normalizeTimeSlot(specs.time)}
+            />
           ) : null}
 
           <Text selectable style={styles.fieldLabel}>时长</Text>
@@ -955,6 +951,77 @@ function SummaryRow({ label, value, last }: { label: string; value: string; last
       <Text selectable style={styles.summaryLabel}>{label}</Text>
       <Text selectable style={styles.summaryValue}>{value}</Text>
     </View>
+  );
+}
+
+// DEMAND-TIMESLOT-002 滚轮弹层。原型结构照搬：遮罩 + 底部 sheet + 把手 +
+// 取消/标题/确定 + 滚轮（上下留白让首尾能滚到中间，松手吸附，点选直达）。
+// temp 是弹层里的临时值 —— 取消不写回，确定才写（跟原型一致）。
+const TIME_WHEEL_ITEM_H = 44;
+const TIME_WHEEL_H = 220;
+
+function TimeWheelSheet({ value, onCancel, onConfirm }: {
+  value: string;
+  onCancel: () => void;
+  onConfirm: (slot: string) => void;
+}): React.JSX.Element {
+  const [temp, setTemp] = useState(value);
+  const scrollRef = useRef<ScrollView>(null);
+
+  // 打开即定位到当前值。挂载后下一帧再滚 —— 首帧还没量好，直接滚会被吞掉。
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      scrollRef.current?.scrollTo({ y: Math.max(0, TIME_SLOT_OPTIONS.indexOf(value)) * TIME_WHEEL_ITEM_H, animated: false });
+    }, 30);
+    return () => clearTimeout(timer);
+  }, [value]);
+
+  function settle(offsetY: number): void {
+    const slot = TIME_SLOT_OPTIONS[Math.min(Math.max(Math.round(offsetY / TIME_WHEEL_ITEM_H), 0), TIME_SLOT_OPTIONS.length - 1)];
+    if (slot !== undefined) setTemp(slot);
+  }
+
+  function pick(slot: string): void {
+    setTemp(slot);
+    scrollRef.current?.scrollTo({ y: Math.max(0, TIME_SLOT_OPTIONS.indexOf(slot)) * TIME_WHEEL_ITEM_H, animated: true });
+  }
+
+  return (
+    <Modal animationType="slide" onRequestClose={onCancel} transparent visible>
+      <Pressable accessibilityLabel="关闭时间选择" onPress={onCancel} style={styles.timeSheetMask} />
+      <View style={styles.timeSheet}>
+        <View style={styles.timeSheetHandle} />
+        <View style={styles.timeSheetHead}>
+          <Pressable accessibilityLabel="取消" onPress={onCancel} style={styles.timeSheetCancel}>
+            <Text selectable style={styles.timeSheetCancelText}>取消</Text>
+          </Pressable>
+          <Text selectable style={styles.timeSheetTitle}>开始时间</Text>
+          <Pressable accessibilityLabel="确定" onPress={() => onConfirm(temp)} style={styles.timeSheetConfirm}>
+            <Text selectable style={styles.timeSheetConfirmText}>确定</Text>
+          </Pressable>
+        </View>
+        <View style={styles.timeWheelWrap}>
+          <View pointerEvents="none" style={styles.timeWheelHighlight} />
+          <ScrollView
+            contentContainerStyle={{ paddingVertical: (TIME_WHEEL_H - TIME_WHEEL_ITEM_H) / 2 }}
+            decelerationRate="fast"
+            onMomentumScrollEnd={(event) => settle(event.nativeEvent.contentOffset.y)}
+            onScrollEndDrag={(event) => { if ((event.nativeEvent.velocity?.y ?? 0) === 0) settle(event.nativeEvent.contentOffset.y); }}
+            ref={scrollRef}
+            showsVerticalScrollIndicator={false}
+            snapToAlignment="center"
+            snapToInterval={TIME_WHEEL_ITEM_H}
+            style={styles.timeWheelScroll}
+          >
+            {TIME_SLOT_OPTIONS.map((slot) => (
+              <Pressable key={slot} accessibilityLabel={`选择${slot}`} onPress={() => pick(slot)} style={styles.timeWheelItem}>
+                <Text selectable style={[styles.timeWheelItemText, temp === slot && styles.timeWheelItemTextOn]}>{slot}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1107,9 +1174,23 @@ const styles = StyleSheet.create({
   headcountTriggerText: { color: color.ink, fontSize: 15, fontWeight: "700" },
   headcountCaret: { color: color.muted, fontSize: 13, fontWeight: "800" },
   headcountMenu: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, marginTop: 6 },
-  // DEMAND-TIMESLOT-001：时间 33 档，菜单 CAP 高度内部滚（filterDropdownList 同款），
-  // 不把整页顶开。Android 嵌套滚靠 nestedScrollEnabled（见上面的 ScrollView）。
-  headcountMenuList: { maxHeight: 280 },
+  // DEMAND-TIMESLOT-002：滚轮弹层样式（原型同款结构）。确定按钮用 ink ——
+  // 本页去粉（见 primaryBtn 注释），不把原型的粉色带进来。
+  timeSheetMask: { backgroundColor: "rgba(0,0,0,0.35)", flex: 1 },
+  timeSheet: { backgroundColor: color.white, borderTopLeftRadius: 22, borderTopRightRadius: 22, bottom: 0, left: 0, paddingBottom: 24, position: "absolute", right: 0 },
+  timeSheetHandle: { alignSelf: "center", backgroundColor: "#D0CEC8", borderRadius: 2, height: 4, marginTop: 10, width: 40 },
+  timeSheetHead: { alignItems: "center", flexDirection: "row", paddingHorizontal: 8, paddingVertical: 8 },
+  timeSheetCancel: { borderRadius: 9, paddingHorizontal: 12, paddingVertical: 8 },
+  timeSheetCancelText: { color: color.muted, fontSize: 13, fontWeight: "600" },
+  timeSheetTitle: { color: color.ink, flex: 1, fontSize: 15, fontWeight: "800", textAlign: "center" },
+  timeSheetConfirm: { backgroundColor: color.ink, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 8 },
+  timeSheetConfirmText: { color: color.white, fontSize: 13, fontWeight: "600" },
+  timeWheelWrap: { height: 220, overflow: "hidden", position: "relative" },
+  timeWheelHighlight: { backgroundColor: color.surface, borderRadius: 10, height: 44, left: 20, position: "absolute", right: 20, top: 88 },
+  timeWheelScroll: { flex: 1 },
+  timeWheelItem: { alignItems: "center", height: 44, justifyContent: "center" },
+  timeWheelItemText: { color: color.muted, fontSize: 17, fontWeight: "500" },
+  timeWheelItemTextOn: { color: color.ink, fontSize: 19, fontWeight: "800" },
   headcountOption: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 12 },
   headcountOptionLast: { borderBottomWidth: 0 },
   headcountOptionText: { color: color.ink, fontSize: 14, fontWeight: "700" },
