@@ -43,13 +43,14 @@ describe("opportunityWhenLabel (the shared 什么时候 string)", () => {
   // 端到端：真的跑一遍发布映射。这条断言就是截图里那一行 ——
   // 生产者写什么、渲染点拼什么，两边一起钉住。
   // DEMAND-HEADCOUNT-002：默认人数从 1:1 换成 1–6 选择（默认 1 人），发布行恒带「1 人」。
+  // DEMAND-TIMESLOT-001：默认时间从「今晚 19:00」换成下拉档位「19:00」。
   it("reproduces the screenshot row from the real publish mapping", () => {
     const coffee = MOMENT_TEMPLATES.find((template) => template.id === "coffee")!;
     const published = buildDemandPublishInput(coffee, defaultSpecsFor(coffee));
-    expect(published.date).toBe("今晚 19:00");
-    expect(published.time).toBe("今晚 19:00 · 2 小时 · 1 人");
-    expect(opportunityWhenLabel(published)).toBe("今晚 19:00 · 2 小时 · 1 人");
-    expect(opportunityWhenLabel(published)).not.toContain("今晚 19:00 今晚 19:00");
+    expect(published.date).toBe("19:00");
+    expect(published.time).toBe("19:00 · 2 小时 · 1 人");
+    expect(opportunityWhenLabel(published)).toBe("19:00 · 2 小时 · 1 人");
+    expect(opportunityWhenLabel(published)).not.toContain("19:00 19:00");
   });
 });
 

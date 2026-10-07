@@ -23,9 +23,11 @@ import {
   momentMetaLine,
   momentStartPrice,
   normalizeHeadcount,
+  normalizeTimeSlot,
   PRO_LOGOS,
   PRO_SERVICES,
   PRO_TABS,
+  TIME_SLOT_OPTIONS,
   type DemandSpecs,
   type MomentTemplate,
   type PeopleSheetFilters,
@@ -197,6 +199,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const [negotiable, setNegotiable] = useState(false);
   // DEMAND-HEADCOUNT-003：下拉菜单的开关（常态只露触发器那一行）。
   const [headcountOpen, setHeadcountOpen] = useState(false);
+  // DEMAND-TIMESLOT-001：同上，时间段下拉的开关。
+  const [timeOpen, setTimeOpen] = useState(false);
   const [error, setError] = useState<string>();
   const [result, setResult] = useState<MarketOpportunity>();
   const [draftRestored, setDraftRestored] = useState(false);
@@ -220,8 +224,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
         // 草稿只存模板+规格，接单方式不存：恢复时按同一套默认（非专业等接单，
         // 专业无默认）重新给，跟点选模板走的是同一条规则。
         // DEMAND-HEADCOUNT-002：老草稿的自由文本人数收敛到 1–6（默认 1 人）。
+        // DEMAND-TIMESLOT-001：老草稿的时间（「今晚 19:00」「下午」…）收敛到档位上。
         setMode(found.id === "pro" ? undefined : "open");
-        setSpecs({ ...defaultSpecsFor(found), ...draft, prefs: Array.isArray(draft.prefs) ? draft.prefs : [], ratio: normalizeHeadcount(draft.ratio) });
+        setSpecs({ ...defaultSpecsFor(found), ...draft, prefs: Array.isArray(draft.prefs) ? draft.prefs : [], ratio: normalizeHeadcount(draft.ratio), time: normalizeTimeSlot(draft.time) });
         setDraftRestored(true);
       } catch {
         // 坏草稿忽略。
@@ -403,6 +408,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     // （地点栏上方），绑场景的模板也直接进规格，点卡片在同一页填地点。
     // DEMAND-HEADCOUNT-003：下拉菜单不带到下一屏（上次没选就走的，回来是收起的）。
     setHeadcountOpen(false);
+    // DEMAND-TIMESLOT-001：同上。
+    setTimeOpen(false);
     setStep("specs");
   }
 
@@ -439,6 +446,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     setSpecs(defaultSpecsFor(MOMENT_TEMPLATES[0]!));
     setSelectedPerson(undefined);
     setHeadcountOpen(false);
+    setTimeOpen(false);
     setError(undefined);
     setResult(undefined);
     setDraftRestored(false);
@@ -779,8 +787,27 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             </View>
           ) : null}
 
+          {/* DEMAND-TIMESLOT-001（2026-10-07，用户：「不要写今晚 … 时间下拉就可以
+              06:00-22:00，支持 m 精度」）：自由输入换成 06:00–22:00 半小时一档的
+              下拉，跟「你们几人」同一套触发器 + 菜单语言。33 档菜单 CAP 高度、
+              内部可滚，不把整页顶开。 */}
           <Text selectable style={styles.fieldLabel}>时间段</Text>
-          <TextInput onChangeText={(time) => setSpecs((prev) => ({ ...prev, time }))} placeholder={template?.defaultTime} placeholderTextColor={color.muted} style={styles.input} value={specs.time} />
+          <Pressable accessibilityLabel="选择时间段" onPress={() => setTimeOpen((open) => !open)} style={styles.headcountTrigger} testID="demand-timeslot">
+            <Text selectable style={styles.headcountTriggerText}>{normalizeTimeSlot(specs.time)}</Text>
+            <Text selectable style={styles.headcountCaret}>{timeOpen ? "▴" : "▾"}</Text>
+          </Pressable>
+          {timeOpen ? (
+            <View style={styles.headcountMenu}>
+              <ScrollView nestedScrollEnabled style={styles.headcountMenuList}>
+                {TIME_SLOT_OPTIONS.map((slot, index) => (
+                  <Pressable key={slot} accessibilityLabel={`选择${slot}`} onPress={() => { setSpecs((prev) => ({ ...prev, time: slot })); setTimeOpen(false); }} style={[styles.headcountOption, index === TIME_SLOT_OPTIONS.length - 1 && styles.headcountOptionLast]}>
+                    <Text selectable style={styles.headcountOptionText}>{slot}</Text>
+                    {specs.time === slot ? <Text selectable style={styles.headcountCheck}>✓</Text> : null}
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
 
           <Text selectable style={styles.fieldLabel}>时长</Text>
           <View style={styles.chipRow}>
@@ -1080,6 +1107,9 @@ const styles = StyleSheet.create({
   headcountTriggerText: { color: color.ink, fontSize: 15, fontWeight: "700" },
   headcountCaret: { color: color.muted, fontSize: 13, fontWeight: "800" },
   headcountMenu: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, marginTop: 6 },
+  // DEMAND-TIMESLOT-001：时间 33 档，菜单 CAP 高度内部滚（filterDropdownList 同款），
+  // 不把整页顶开。Android 嵌套滚靠 nestedScrollEnabled（见上面的 ScrollView）。
+  headcountMenuList: { maxHeight: 280 },
   headcountOption: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 12 },
   headcountOptionLast: { borderBottomWidth: 0 },
   headcountOptionText: { color: color.ink, fontSize: 14, fontWeight: "700" },

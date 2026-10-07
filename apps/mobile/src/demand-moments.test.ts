@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PublishMarketOpportunityInputSchema } from "@proxy/contracts";
 import type { SupplierCandidate } from "./supply-client";
-import { buildDemandPublishInput, DEFAULT_HEADCOUNT, defaultSpecsFor, HEADCOUNT_OPTIONS, MAX_HEADCOUNT, MOMENT_TEMPLATES, normalizeHeadcount } from "./demand-moments";
+import { buildDemandPublishInput, DEFAULT_HEADCOUNT, DEFAULT_TIME_SLOT, defaultSpecsFor, HEADCOUNT_OPTIONS, MAX_HEADCOUNT, MOMENT_TEMPLATES, normalizeHeadcount, normalizeTimeSlot, TIME_SLOT_MAX_HOUR, TIME_SLOT_MIN_HOUR, TIME_SLOT_OPTIONS } from "./demand-moments";
 
 describe("R58 demand wizard mapping", () => {
   it("ships moment templates with defaults", () => {
@@ -23,7 +23,7 @@ describe("R58 demand wizard mapping", () => {
     const input = buildDemandPublishInput(template, {
       ...defaultSpecsFor(template),
       ratio: "2",
-      time: "今晚 19:00",
+      time: "19:00",
       duration: "2 小时",
       place: "西湖",
       prefs: ["公共场所见面", "中文"],
@@ -31,7 +31,7 @@ describe("R58 demand wizard mapping", () => {
     });
     expect(input.title).toBe("喝咖啡");
     expect(input.moneyFlow).toBe("EARN");
-    expect(input.time).toContain("今晚 19:00");
+    expect(input.time).toContain("19:00");
     expect(input.skills).toContain("公共场所见面");
     expect(PublishMarketOpportunityInputSchema.safeParse(input).success).toBe(true);
   });
@@ -45,10 +45,10 @@ describe("R58 demand wizard mapping", () => {
     expect(MAX_HEADCOUNT).toBe(6);
     expect(DEFAULT_HEADCOUNT).toBe("1");
     expect(defaultSpecsFor(template).ratio).toBe("1");
-    const two = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "2", time: "今晚 19:00", duration: "2 小时" });
-    expect(two.time).toBe("今晚 19:00 · 2 小时 · 2 人");
-    const six = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "6", time: "今晚 19:00", duration: "2 小时" });
-    expect(six.time).toBe("今晚 19:00 · 2 小时 · 6 人");
+    const two = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "2", time: "19:00", duration: "2 小时" });
+    expect(two.time).toBe("19:00 · 2 小时 · 2 人");
+    const six = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "6", time: "19:00", duration: "2 小时" });
+    expect(six.time).toBe("19:00 · 2 小时 · 6 人");
     const def = buildDemandPublishInput(template, defaultSpecsFor(template));
     expect(def.time).toContain("1 人");
     // 老草稿迁移：前导数字截断夹到 1–6，没数字回默认。
@@ -56,11 +56,47 @@ describe("R58 demand wizard mapping", () => {
     expect(normalizeHeadcount("10")).toBe("6");
     expect(normalizeHeadcount("  ")).toBe("1");
     expect(normalizeHeadcount(undefined)).toBe("1");
-    const legacy = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "2 大 1 小", time: "今晚 19:00", duration: "2 小时" });
-    expect(legacy.time).toBe("今晚 19:00 · 2 小时 · 2 人");
-    const empty = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "  ", time: "今晚 19:00", duration: "2 小时" });
-    expect(empty.time).toBe("今晚 19:00 · 2 小时 · 1 人");
+    const legacy = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "2 大 1 小", time: "19:00", duration: "2 小时" });
+    expect(legacy.time).toBe("19:00 · 2 小时 · 2 人");
+    const empty = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "  ", time: "19:00", duration: "2 小时" });
+    expect(empty.time).toBe("19:00 · 2 小时 · 1 人");
     expect(PublishMarketOpportunityInputSchema.safeParse(two).success).toBe(true);
+  });
+
+  // DEMAND-TIMESLOT-001（2026-10-07，用户：「不要写今晚 … 时间下拉就可以
+  // 06:00-22:00，支持 m 精度」）：时间段是 06:00–22:00 半小时一档的下拉（33 档）。
+  // 模板的「今晚 19:00」「下午」…只当默认值的来源；发布行恒为 HH:MM，「今晚」到此为止。
+  it("selects time 06:00-22:00 in half-hour slots", () => {
+    expect(TIME_SLOT_MIN_HOUR).toBe(6);
+    expect(TIME_SLOT_MAX_HOUR).toBe(22);
+    expect(DEFAULT_TIME_SLOT).toBe("19:00");
+    expect(TIME_SLOT_OPTIONS).toHaveLength(33);
+    expect(TIME_SLOT_OPTIONS[0]).toBe("06:00");
+    expect(TIME_SLOT_OPTIONS[TIME_SLOT_OPTIONS.length - 1]).toBe("22:00");
+    expect(TIME_SLOT_OPTIONS).toContain("19:00");
+    // 模板默认值收敛：时刻原样留，中文词按早晚给，空回默认。
+    const byId = (id: string): string => defaultSpecsFor(MOMENT_TEMPLATES.find((t) => t.id === id)!).time;
+    expect(byId("coffee")).toBe("19:00");
+    expect(byId("meal")).toBe("18:30");
+    expect(byId("photo")).toBe("15:00");
+    expect(byId("ballgame")).toBe("15:00");
+    expect(byId("ride")).toBe("09:00");
+    expect(byId("pro")).toBe("19:00");
+    // 归一：夹小时、分钟贴档、关键词、默认。
+    expect(normalizeTimeSlot("今晚 19:00")).toBe("19:00");
+    expect(normalizeTimeSlot("周末 15:00")).toBe("15:00");
+    expect(normalizeTimeSlot("19:47")).toBe("20:00");
+    expect(normalizeTimeSlot("05:10")).toBe("06:00");
+    expect(normalizeTimeSlot("25:00")).toBe("22:00");
+    expect(normalizeTimeSlot("下午")).toBe("15:00");
+    expect(normalizeTimeSlot("  ")).toBe("19:00");
+    // 发布行恒为 HH:MM，老自由文本不再透传。
+    const template = MOMENT_TEMPLATES[0]!;
+    const legacy = buildDemandPublishInput(template, { ...defaultSpecsFor(template), time: "今晚 19:00" });
+    expect(legacy.time).toContain("19:00");
+    expect(legacy.time).not.toContain("今晚");
+    expect(legacy.date).toBe("19:00");
+    expect(PublishMarketOpportunityInputSchema.safeParse(legacy).success).toBe(true);
   });
 
   it("falls back without ever emitting empty required fields", () => {
@@ -70,6 +106,9 @@ describe("R58 demand wizard mapping", () => {
     });
     expect(PublishMarketOpportunityInputSchema.safeParse(input).success).toBe(true);
     expect(input.location).toBe(template.venue);
+    // DEMAND-TIMESLOT-001：空时间也收敛到默认档，不再甩「近期」。
+    expect(input.date).toBe("19:00");
+    expect(input.time).toContain("19:00");
   });
 
   it("carries notes to desc only when present", () => {

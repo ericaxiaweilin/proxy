@@ -310,11 +310,60 @@ export function normalizeHeadcount(value: unknown): string {
   return DEFAULT_HEADCOUNT;
 }
 
+// DEMAND-TIMESLOT-001（2026-10-07，用户：「不要写今晚 … 时间下拉就可以
+// 06:00-22:00，支持 m 精度」）：时间段不再是自由输入，是 06:00–22:00 半小时一档
+// 的下拉（33 档，HH:MM 自带分钟精度）。模板的 defaultTime 只当默认值的来源。
+export const TIME_SLOT_MIN_HOUR = 6;
+export const TIME_SLOT_MAX_HOUR = 22;
+export const DEFAULT_TIME_SLOT = "19:00";
+
+function formatTimeSlot(hour: number, minute: number): string {
+  return `${String(hour).padStart(2, "0")}:${minute === 0 ? "00" : "30"}`;
+}
+
+export const TIME_SLOT_OPTIONS: readonly string[] = (() => {
+  const out: string[] = [];
+  for (let hour = TIME_SLOT_MIN_HOUR; hour <= TIME_SLOT_MAX_HOUR; hour += 1) {
+    out.push(formatTimeSlot(hour, 0));
+    if (hour !== TIME_SLOT_MAX_HOUR) out.push(formatTimeSlot(hour, 30));
+  }
+  return out;
+})();
+
+/**
+ * 时间归一：新 UI 只产出档位值，这里收的是模板默认值/老草稿/外来值 ——
+ * HH:MM 截出来夹到 06:00–22:00、分钟就近贴到 :00/:30（如「19:47」→「20:00」，
+ * 「05:10」→「06:00」）；没数字的按早晚关键词给（中午→12:00，下午→15:00，
+ * 早上→09:00，晚上→19:00），都没有回默认 19:00。「今晚」这类词到此为止。
+ */
+export function normalizeTimeSlot(value: unknown): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  const clock = raw.match(/(\d{1,2}):(\d{2})/);
+  if (clock?.[1] !== undefined && clock?.[2] !== undefined) {
+    const parsedHour = Number.parseInt(clock[1], 10);
+    const parsedMinute = Number.parseInt(clock[2], 10);
+    if (Number.isFinite(parsedHour) && Number.isFinite(parsedMinute)) {
+      let hour = Math.min(Math.max(parsedHour, TIME_SLOT_MIN_HOUR), TIME_SLOT_MAX_HOUR);
+      if (parsedMinute >= 45) hour += 1;
+      if (hour > TIME_SLOT_MAX_HOUR) return formatTimeSlot(TIME_SLOT_MAX_HOUR, 0);
+      const minute = parsedMinute < 15 || parsedMinute >= 45 ? 0 : 30;
+      return formatTimeSlot(hour, minute);
+    }
+  }
+  if (/中午/.test(raw)) return "12:00";
+  if (/上午|早|晨/.test(raw)) return "09:00";
+  if (/下午|午/.test(raw)) return "15:00";
+  if (/晚|夜|宵/.test(raw)) return "19:00";
+  return DEFAULT_TIME_SLOT;
+}
+
 export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
   return {
     // DEMAND-HEADCOUNT-002：默认 1 人（选择器首项高亮即此值）。
     ratio: DEFAULT_HEADCOUNT,
-    time: template.defaultTime,
+    // DEMAND-TIMESLOT-001：模板的 defaultTime（「今晚 19:00」「下午」…）只当
+    // 默认值的来源，收敛到下拉档位上 —— 线上不再出现「今晚」这种词。
+    time: normalizeTimeSlot(template.defaultTime),
     duration: template.defaultDuration,
     place: template.venue,
     prefs: ["公共场所见面"],
@@ -332,8 +381,11 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
 ): PublishMarketOpportunityInput {
   // DEMAND-HEADCOUNT-002：人数恒为 1–6 的选择（默认 1 人），发布行恒带「N 人」。
   // 老草稿的自由文本经 normalizeHeadcount 收敛（前导数字截断夹到 1–6），不再原样透传。
+  // DEMAND-TIMESLOT-001：时间恒为下拉档位（HH:MM，06:00–22:00），老自由文本
+  // （「今晚 19:00」「下午」…）经 normalizeTimeSlot 收敛 —— 线上不再出现「今晚」。
   const headcount = normalizeHeadcount(specs.ratio);
-  const time = [specs.time, specs.duration, `${headcount} 人`]
+  const slot = normalizeTimeSlot(specs.time);
+  const time = [slot, specs.duration, `${headcount} 人`]
     .filter((part) => part.trim() !== "").join(" · ");
   const skills = [template.skills, ...specs.prefs.map((pref) => pref.trim()).filter((pref) => pref !== "")]
     .join(" · ");
@@ -348,7 +400,7 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
     // ORDER-SCENARIO-001: 场景跟着 moment 家族走 —— pro（城市协助）标 assistance，
     // 其余普通消费标 ordinary。订单流程按它分档（城市协助永远全流程）。
     scenario: template.id === "pro" ? "assistance" : "ordinary",
-    date: specs.time.trim() === "" ? "近期" : specs.time.trim(),
+    date: slot,
     time: time === "" ? template.defaultTime : time,
     location: specs.place.trim() === "" ? template.venue : specs.place.trim(),
     price: specs.price.trim(),
