@@ -798,7 +798,22 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           {/* DEMAND-SPECS-SKELETON-001：第 1 段 · 选场景。顶上的规格摘要盒撤了 ——
               当前选择收到底部汇总条（原型 bottom 区），一页只讲一遍。
               段内标题「先挑个地方」由段头 hint 接了，不再另起一行。 */}
-          <SpecsSection hint={sceneBinding ? "不想选就自动分配" : "填个碰头地点"} no={1} title={sceneBinding ? "选场景" : "地点"}>
+          <SpecsSection
+            hint={sceneBinding
+              ? (specs.place.trim() !== ""
+                ? (
+                  // DEMAND-NOISE-TRIM-001：选完场景，这一格换成「清除」动作 ——
+                  // 原来下面单占一行「已选：XXX · 清除」，跟上面那张已经变色的
+                  // 选中卡说的是同一件事（名字重复一遍 = 废话）。
+                  <Pressable accessibilityLabel="清除已选地点" onPress={() => { setSpecs((prev) => ({ ...prev, place: "", lat: undefined, lng: undefined })); setPickedSceneId(undefined); }}>
+                    <Text selectable style={styles.linkText}>清除</Text>
+                  </Pressable>
+                )
+                : "不想选就自动分配")
+              : "填个碰头地点"}
+            no={1}
+            title={sceneBinding ? "选场景" : "地点"}
+          >
           {sceneBinding ? (
             <View style={styles.sceneSection}>
               <SceneShopDirectory
@@ -817,18 +832,10 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                 pickedId={pickedSceneId}
               />
               {/* DEMAND-SCENE-MAP-001：有列表，地点手填框撤掉（用户：「list 下面放
-                  一个地点没意义」）—— 选中回填 + 这一行已选反馈，× 清掉重选。
-                  无列表模板（绑人 / 协助）照旧手填 + 手动地图，见下面。
-                  判据用 place 非空（DEMAND-SCENE-GATE-001 同一条）：目录里没真坐标
-                  的场景选中后不写 lat/lng，但「已选」这一行必须出现，否则清不掉。 */}
-              {specs.place.trim() !== "" ? (
-                <View style={styles.pickedRow}>
-                  <Text selectable numberOfLines={1} style={styles.pickedText}>已选：{specs.place.trim() === "" ? template?.venue ?? "" : specs.place.trim()}</Text>
-                  <Pressable accessibilityLabel="清除已选地点" onPress={() => { setSpecs((prev) => ({ ...prev, place: "", lat: undefined, lng: undefined })); setPickedSceneId(undefined); }} style={styles.pickedClear}>
-                    <Text selectable style={styles.pickedClearText}>清除</Text>
-                  </Pressable>
-                </View>
-              ) : null}
+                  一个地点没意义」）。DEMAND-NOISE-TRIM-001：连「已选：XXX」那行也撤
+                  —— 选中的卡在上面已经变色（DEMAND-SCENE-PICKED-COLOR-001），
+                  「清除」搬到段头 hint 槽，不再重复一遍名字。
+                  无列表模板（绑人 / 协助）照旧手填 + 手动地图，见下面。 */}
             </View>
           ) : null}
 
@@ -981,7 +988,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           </View>
           </>
           ) : (
-            <Text selectable style={styles.empty}>先在上面选一家 · 选完再填时间和价格；不想选就直接发布（自动分配）。</Text>
+            <Text selectable style={styles.empty}>先选一家 · 不选就自动分配。</Text>
           )}
 
           {/* DEMAND-SPECS-SKELETON-001：报错 + 上一步/发布搬进底部固定条（原型 bottom
@@ -1040,7 +1047,9 @@ function SummaryRow({ label, value, last }: { label: string; value: string; last
 function SpecsSection({ no, title, hint, children }: {
   no: number;
   title: string;
-  hint?: string | undefined;
+  // DEMAND-NOISE-TRIM-001：hint 收 ReactNode —— 选完场景后这一格放「清除」动作
+  //（原来单独占一整行「已选：X · 清除」，跟上面那张选中卡重复）。
+  hint?: ReactNode;
   children: ReactNode;
 }): React.JSX.Element {
   return (
@@ -1235,10 +1244,9 @@ const styles = StyleSheet.create({
   // SCENE-STEP-ONEPAGE-001：规格页里的场景 list 段落（不是一步）。
   sceneSection: { marginBottom: 12 },
   // DEMAND-SCENE-MAP-001：列表/地图里选中后的已选行（清掉重选）。
-  pickedRow: { alignItems: "center", backgroundColor: color.surface, borderRadius: 12, flexDirection: "row", justifyContent: "space-between", marginTop: 8, paddingHorizontal: 14, paddingVertical: 10 },
-  pickedText: { color: color.ink, flex: 1, fontSize: 13, fontWeight: "700" },
-  pickedClear: { paddingHorizontal: 6, paddingVertical: 4 },
-  pickedClearText: { color: color.violet, fontSize: 12, fontWeight: "800" },
+  // DEMAND-NOISE-TRIM-001：「已选：XXX · 清除」整行撤了（选中卡自己会变色，
+  // 「清除」搬进段头 hint 槽）—— 原来那四条样式（pickedRow/pickedText/
+  // pickedClear/pickedClearText）引用归零，一并删掉，不留死样式。
   filterHeadRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   sheetToggle: { paddingHorizontal: 6, paddingVertical: 4 },
   sheetToggleText: { color: color.violet, fontSize: 12, fontWeight: "800" },

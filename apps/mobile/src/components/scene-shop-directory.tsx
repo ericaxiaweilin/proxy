@@ -637,7 +637,10 @@ export function SceneShopDirectory({
                           <Text selectable numberOfLines={1} style={styles.cardName}>{scene.name}</Text>
                           <Pressable accessibilityLabel={saved.has(scene.id) ? "取消收藏" : "收藏"} hitSlop={8} onPress={() => { void toggleSaved(scene); }} style={styles.heart}><ProxyIcon color={color.magenta} filled={saved.has(scene.id)} name="heart" size={20} /></Pressable>
                         </View>
-                        {signal ? <Text selectable style={styles.cardSignal}>{signal}</Text> : null}
+                        {/* DEMAND-NOISE-TRIM-001（2026-10-07，用户：「功能可以 就是
+                            废话有点多」）：signal（「1 人收藏」）是浏览信息，选场景时
+                            没有决策价值 —— 内嵌（选择上下文）不画，浏览页照旧。 */}
+                        {signal && !embedded ? <Text selectable style={styles.cardSignal}>{signal}</Text> : null}
                         {address ? <Text selectable numberOfLines={1} style={styles.cardAddress}>{`📍 ${address}`}</Text> : null}
                         {/* SCENE-RATING-CHIP-001: chip 行照「运动 · 羽毛球」卡 ——
                             ★ 评分（金）/ N 人去过 / 城市（蓝）三色，再接类型标签。
@@ -647,6 +650,10 @@ export function SceneShopDirectory({
                             <Text selectable style={[styles.tagText, chip.kind === "RATING" && styles.tagRatingText, chip.kind === "AREA" && styles.tagAreaText]}>{chip.text}</Text>
                           </View>
                         ))}</View>
+                        {/* DEMAND-NOISE-TRIM-001：底部那行（「此刻无人在此里」+ 进详情
+                            箭头）是**浏览**的入口 —— 选择上下文（内嵌）里，看详情是点
+                            头像、选中是点卡片，这一行只剩噪音，不画。浏览页照旧。 */}
+                        {!embedded ? (
                         <View style={styles.cardFoot}>
                           <Text selectable style={styles.cardFootText}>{shopHereLine(scene.hereCount)}</Text>
                           {/* SCENE-HOME-PROTOTYPE-001（2026-09-28）：原来是文本字符 `›`
@@ -654,6 +661,7 @@ export function SceneShopDirectory({
                               fontSize 漂、粗细跟 chevronLeft 对不上。换真字形。 */}
                           <ProxyIcon color={color.muted} name="chevronRight" size={16} />
                         </View>
+                        ) : null}
                       </View>
                     </Pressable>;
                   })}</View>}
