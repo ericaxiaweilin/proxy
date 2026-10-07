@@ -805,8 +805,13 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                   // DEMAND-NOISE-TRIM-001：选完场景，这一格换成「清除」动作 ——
                   // 原来下面单占一行「已选：XXX · 清除」，跟上面那张已经变色的
                   // 选中卡说的是同一件事（名字重复一遍 = 废话）。
-                  <Pressable accessibilityLabel="清除已选地点" onPress={() => { setSpecs((prev) => ({ ...prev, place: "", lat: undefined, lng: undefined })); setPickedSceneId(undefined); }}>
-                    <Text selectable style={styles.linkText}>清除</Text>
+                  // DEMAND-NOISE-TRIM-002（2026-10-07，用户：「可以用X号代替啊 能用
+                  // logo 尽量别用文字」）：这个动作是**通用语义**（取消选择），有现成
+                  // 字形就用字形 —— 复用 ProxyIcon 的 close（两根斜杠组成的 ×，跟各处
+                  // 关闭按钮同一个），文案退到 accessibilityLabel 供读屏。hitSlop 补
+                  // 触控面积（16px 字形比原 13px 文字还小，不加会难点）。
+                  <Pressable accessibilityLabel="清除已选地点" hitSlop={8} onPress={() => { setSpecs((prev) => ({ ...prev, place: "", lat: undefined, lng: undefined })); setPickedSceneId(undefined); }}>
+                    <ProxyIcon color={color.violet} name="close" size={16} />
                   </Pressable>
                 )
                 : "不想选就自动分配")

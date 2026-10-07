@@ -27,6 +27,16 @@ describe("DEMAND-SCENE-MAP-001 有列表不用手填地点，选中给已选反�
     expect(wizard).not.toContain("styles.pickedRow");
   });
 
+  it("清除动作用 close 字形，不摆文字", () => {
+    // DEMAND-NOISE-TRIM-002（2026-10-07，用户：「可以用X号代替啊 能用logo尽量别用
+    // 文字」）：取消选择是通用语义 —— 有现成字形就用字形（ProxyIcon 的 close，
+    // 跟各处关闭按钮同一个 ×），文案退到 accessibilityLabel 供读屏。
+    expect(wizard).toContain('name="close"');
+    // 反向：段头 hint 里不许再把「清除」两个字摆出来。收精确到 JSX 写法（`>清除<`）——
+    // 上面注释里也写着「清除」两个字（用「」包着），裸串会被自己的注释喂红。
+    expect(wizard).not.toContain(">清除<");
+  });
+
   it("手填地点 + 手动地图只留给无列表模板", () => {
     // 地点输入与手动地图包在 !sceneBinding 分支里 —— 有列表时不渲染。
     expect(wizard).toContain("{sceneBinding ? null : (");
