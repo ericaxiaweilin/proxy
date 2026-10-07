@@ -288,12 +288,32 @@ export type DemandSpecs = {
   lng?: number | undefined;
 };
 
+// DEMAND-HEADCOUNT-002（2026-10-07，用户：「你们几人是输入框 改为选择 默认1人
+// 最大上限为6人」）：人数不再是自由输入，是 1–6 人的选择。模板数据里的
+// ratios/defaultRatio 保留（快筛还用），只是不渲染；DemandSpecs.ratio 存
+// "1"–"6"（默认 "1"），发布行恒带「N 人」。
+export const HEADCOUNT_OPTIONS = ["1", "2", "3", "4", "5", "6"] as const;
+export const DEFAULT_HEADCOUNT = "1";
+export const MAX_HEADCOUNT = 6;
+
+/**
+ * 人数归一：新 UI 只产出 1–6，这里收的是老草稿/外来值 —— 前导数字截断并
+ * 夹到 1–6（如「2 大 1 小」→「2」、「10」→「6」），没数字的一律回默认「1」。
+ */
+export function normalizeHeadcount(value: unknown): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  const leading = raw.match(/^\d+/);
+  if (leading?.[0] !== undefined) {
+    const parsed = Number.parseInt(leading[0], 10);
+    if (Number.isFinite(parsed)) return String(Math.min(Math.max(parsed, 1), MAX_HEADCOUNT));
+  }
+  return DEFAULT_HEADCOUNT;
+}
+
 export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
   return {
-    // DEMAND-HEADCOUNT-001（2026-10-06，用户：「你们几人就不要搞1:1了 如实输入
-    // 人数就好了」）：默认不再预填 `defaultRatio`（`1:1`）—— 那个概念要用户先懂
-    // 「几个人对几个人」才读得懂。人数让用户如实填，不填就是空。
-    ratio: "",
+    // DEMAND-HEADCOUNT-002：默认 1 人（选择器首项高亮即此值）。
+    ratio: DEFAULT_HEADCOUNT,
     time: template.defaultTime,
     duration: template.defaultDuration,
     place: template.venue,
@@ -310,10 +330,10 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
   template: MomentTemplate,
   specs: DemandSpecs
 ): PublishMarketOpportunityInput {
-  // DEMAND-HEADCOUNT-001：人数是自由文本（「2」「2 大 1 小」都行）。纯数字时补
-  // 个「人」字让它读得通，用户自己写了单位的就原样带上 —— 不翻译成 1:1 那套。
-  const headcount = specs.ratio.trim();
-  const time = [specs.time, specs.duration, headcount === "" ? "" : /^\d+$/.test(headcount) ? `${headcount} 人` : headcount]
+  // DEMAND-HEADCOUNT-002：人数恒为 1–6 的选择（默认 1 人），发布行恒带「N 人」。
+  // 老草稿的自由文本经 normalizeHeadcount 收敛（前导数字截断夹到 1–6），不再原样透传。
+  const headcount = normalizeHeadcount(specs.ratio);
+  const time = [specs.time, specs.duration, `${headcount} 人`]
     .filter((part) => part.trim() !== "").join(" · ");
   const skills = [template.skills, ...specs.prefs.map((pref) => pref.trim()).filter((pref) => pref !== "")]
     .join(" · ");

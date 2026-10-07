@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PublishMarketOpportunityInputSchema } from "@proxy/contracts";
 import type { SupplierCandidate } from "./supply-client";
-import { buildDemandPublishInput, defaultSpecsFor, MOMENT_TEMPLATES } from "./demand-moments";
+import { buildDemandPublishInput, DEFAULT_HEADCOUNT, defaultSpecsFor, HEADCOUNT_OPTIONS, MAX_HEADCOUNT, MOMENT_TEMPLATES, normalizeHeadcount } from "./demand-moments";
 
 describe("R58 demand wizard mapping", () => {
   it("ships moment templates with defaults", () => {
@@ -22,7 +22,7 @@ describe("R58 demand wizard mapping", () => {
     const template = MOMENT_TEMPLATES[0]!;
     const input = buildDemandPublishInput(template, {
       ...defaultSpecsFor(template),
-      ratio: "1:1",
+      ratio: "2",
       time: "今晚 19:00",
       duration: "2 小时",
       place: "西湖",
@@ -36,22 +36,31 @@ describe("R58 demand wizard mapping", () => {
     expect(PublishMarketOpportunityInputSchema.safeParse(input).success).toBe(true);
   });
 
-  // DEMAND-HEADCOUNT-001（2026-10-06，用户：「你们几人就不要搞1:1了 如实输入人数
-  // 就好了」）：人数是如实填的自由文本。三种形状各有各的待遇：
-  //   纯数字   → 补「人」字（发布行读得通：「… · 2 人」）；
-  //   自带单位 → 原样带上（「2 大 1 小」不许被机器改成「2 大 1 小 人」）；
-  //   没填     → 从发布行里整个消失，不甩一个孤零零的「·」。
-  // 默认规格也不再预填 defaultRatio —— defaultSpecsFor 的 ratio 恒为空串。
-  it("keeps headcount verbatim, units only for bare digits", () => {
+  // DEMAND-HEADCOUNT-002（2026-10-07，用户：「你们几人是输入框 改为选择 默认1人
+  // 最大上限为6人」）：人数是 1–6 的选择，默认 1 人。发布行恒带「N 人」；
+  // 老草稿的自由文本经归一收敛（前导数字截断夹到 1–6），没数字回默认。
+  it("selects headcount 1-6, defaults to 1", () => {
     const template = MOMENT_TEMPLATES[0]!;
-    expect(defaultSpecsFor(template).ratio).toBe("");
-    const bare = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "2", time: "今晚 19:00", duration: "2 小时" });
-    expect(bare.time).toBe("今晚 19:00 · 2 小时 · 2 人");
-    const verbatim = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "2 大 1 小", time: "今晚 19:00", duration: "2 小时" });
-    expect(verbatim.time).toBe("今晚 19:00 · 2 小时 · 2 大 1 小");
+    expect(HEADCOUNT_OPTIONS).toEqual(["1", "2", "3", "4", "5", "6"]);
+    expect(MAX_HEADCOUNT).toBe(6);
+    expect(DEFAULT_HEADCOUNT).toBe("1");
+    expect(defaultSpecsFor(template).ratio).toBe("1");
+    const two = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "2", time: "今晚 19:00", duration: "2 小时" });
+    expect(two.time).toBe("今晚 19:00 · 2 小时 · 2 人");
+    const six = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "6", time: "今晚 19:00", duration: "2 小时" });
+    expect(six.time).toBe("今晚 19:00 · 2 小时 · 6 人");
+    const def = buildDemandPublishInput(template, defaultSpecsFor(template));
+    expect(def.time).toContain("1 人");
+    // 老草稿迁移：前导数字截断夹到 1–6，没数字回默认。
+    expect(normalizeHeadcount("2 大 1 小")).toBe("2");
+    expect(normalizeHeadcount("10")).toBe("6");
+    expect(normalizeHeadcount("  ")).toBe("1");
+    expect(normalizeHeadcount(undefined)).toBe("1");
+    const legacy = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "2 大 1 小", time: "今晚 19:00", duration: "2 小时" });
+    expect(legacy.time).toBe("今晚 19:00 · 2 小时 · 2 人");
     const empty = buildDemandPublishInput(template, { ...defaultSpecsFor(template), ratio: "  ", time: "今晚 19:00", duration: "2 小时" });
-    expect(empty.time).toBe("今晚 19:00 · 2 小时");
-    expect(PublishMarketOpportunityInputSchema.safeParse(bare).success).toBe(true);
+    expect(empty.time).toBe("今晚 19:00 · 2 小时 · 1 人");
+    expect(PublishMarketOpportunityInputSchema.safeParse(two).success).toBe(true);
   });
 
   it("falls back without ever emitting empty required fields", () => {
