@@ -35,6 +35,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
+import MapView, { Marker } from "react-native-maps";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { color } from "../theme";
@@ -224,6 +225,9 @@ export function SceneShopDirectory({
   // DEMAND-SCENE-HEADER-001：内嵌选场景时的区域筛选展开开关（默认收起）。
   // 内嵌不进 LocationListPicker（自带竖滚，宿主已是竖滚），区域 chips 直接平铺。
   const [filterOpen, setFilterOpen] = useState(false);
+  // DEMAND-SCENE-MAP-001：内嵌选场景的列表 / 地图切换（默认列表）。
+  // 地图只当天前列表的钉子（同一份 rows，筛选同样生效），点钉 = 选中回发布流。
+  const [viewMode, setViewMode] = useState<"list" | "map">("list");
   const [selectedId, setSelectedId] = useState<string>();
   const [detail, setDetail] = useState<ShopDetail>();
   const [detailState, setDetailState] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
@@ -342,6 +346,14 @@ export function SceneShopDirectory({
     [scenes, actionId, sortId, areas, origin],
   );
   const sorts = availableShopSorts(origin !== undefined);
+  // DEMAND-SCENE-MAP-001：能上钉的才进地图 —— 脏坐标/(0,0) 不画（跟向导 onPick 的
+  // hasCoords 同一条守卫）。定位没有就拿第一家当中心，不编假坐标；一家可钉的
+  // 都没有就不给地图入口（点了也是一张空图）。
+  const mappable = useMemo(
+    () => rows.filter((scene) => Number.isFinite(scene.latitude) && Number.isFinite(scene.longitude) && !(scene.latitude === 0 && scene.longitude === 0)),
+    [rows],
+  );
+  const mapCenter = origin ?? (mappable[0] !== undefined ? { latitude: mappable[0].latitude, longitude: mappable[0].longitude } : undefined);
   const selected = selectedId ? matched.find((scene) => scene.id === selectedId) : undefined;
   const hereChecked = selectedId ? here.has(selectedId) : false;
 
@@ -467,6 +479,18 @@ export function SceneShopDirectory({
               ) : null}
             </View>
 
+            {/* DEMAND-SCENE-MAP-001：列表 / 地图切换（只进内嵌）。一家可钉的都没有
+                就不给入口 —— 点开一张空图没有意义。 */}
+            {embedded && mapCenter !== undefined ? (
+              <View style={styles.pickViewToggle}>
+                {(["list", "map"] as const).map((mode) => (
+                  <Pressable key={mode} accessibilityLabel={mode === "list" ? "列表模式" : "地图模式"} onPress={() => setViewMode(mode)} style={[styles.pickViewBtn, viewMode === mode && styles.pickViewBtnOn]}>
+                    <Text selectable style={[styles.pickViewText, viewMode === mode && styles.pickViewTextOn]}>{mode === "list" ? "列表" : "地图"}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+
             {embedded ? (
               <>
                 {/* DEMAND-SCENE-HEADER-001：内嵌只留三颗 —— 推荐 / 附近（= 最近，
@@ -539,6 +563,24 @@ export function SceneShopDirectory({
             {catalogState === "ERROR" ? <Text selectable style={styles.empty}>目录没能加载，刷新再试试。</Text>
               : catalogState === "LOADING" ? <Text selectable style={styles.empty}>正在加载附近场景…</Text>
                 : rows.length === 0 ? <Text selectable style={styles.empty}>{areas.length > 0 ? "这个区域还没有接入的场景，取消筛选看看。" : `附近还没有接入的${label}场景。`}</Text>
+                  : viewMode === "map" && embedded && mapCenter !== undefined ? (
+                    <View style={styles.pickMapWrap}>
+                      <MapView
+                        initialRegion={{ latitude: mapCenter.latitude, longitude: mapCenter.longitude, latitudeDelta: 0.1, longitudeDelta: 0.1 }}
+                        showsUserLocation={origin !== undefined}
+                        style={styles.pickMap}
+                      >
+                        {mappable.map((scene) => (
+                          <Marker
+                            key={scene.id}
+                            coordinate={{ latitude: scene.latitude, longitude: scene.longitude }}
+                            onPress={() => (onPick ? onPick(scene) : setSelectedId(scene.id))}
+                            title={scene.name}
+                          />
+                        ))}
+                      </MapView>
+                    </View>
+                    )
                   : <View style={styles.cardList}>{rows.map((scene) => {
                     const photo = absoluteNetworkURL(apiBaseUrl ?? "", scene.imageUrl);
                     const distance = shopCardDistance(sceneDistanceMeters(origin, scene));
@@ -854,6 +896,14 @@ const styles = StyleSheet.create({
   sortChipTextOn: { color: color.white },
   // DEMAND-SCENE-HEADER-001：内嵌筛选展开后的区域 chips（平铺换行，不滚）。
   pickFilterAreas: { flexDirection: "row", flexWrap: "wrap", gap: 7, paddingBottom: 10, paddingHorizontal: 16 },
+  // DEMAND-SCENE-MAP-001：内嵌列表 / 地图切换 + 地图框。
+  pickViewToggle: { flexDirection: "row", gap: 8, marginBottom: 8, paddingHorizontal: 16 },
+  pickViewBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, paddingVertical: 8 },
+  pickViewBtnOn: { backgroundColor: color.ink, borderColor: color.ink },
+  pickViewText: { color: color.muted, fontSize: 12, fontWeight: "800" },
+  pickViewTextOn: { color: color.white },
+  pickMapWrap: { borderColor: color.line, borderRadius: 22, borderWidth: 1, height: 320, marginBottom: 12, marginHorizontal: 16, overflow: "hidden" },
+  pickMap: { height: "100%", width: "100%" },
   // SCENE-LOCATION-PICKER-001: 跟 badminton-companion.tsx 的 locationRow 同款——
   // 点开的是共用的 LocationListPicker，不再是一行横滑 chip。
   locationRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 8, marginBottom: 12, marginHorizontal: 16, paddingHorizontal: 14, paddingVertical: 11 },

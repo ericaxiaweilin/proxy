@@ -785,7 +785,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           {/* DEMAND-SPECS-SKELETON-001：第 1 段 · 选场景。顶上的规格摘要盒撤了 ——
               当前选择收到底部汇总条（原型 bottom 区），一页只讲一遍。
               段内标题「先挑个地方」由段头 hint 接了，不再另起一行。 */}
-          <SpecsSection hint={sceneBinding ? "不想选就自动分配" : "填个碰头地点"} no={1} title="选场景">
+          <SpecsSection hint={sceneBinding ? "不想选就自动分配" : "填个碰头地点"} no={1} title={sceneBinding ? "选场景" : "地点"}>
           {sceneBinding ? (
             <View style={styles.sceneSection}>
               <SceneShopDirectory
@@ -800,9 +800,22 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                   setSpecs((prev) => ({ ...prev, place: scene.name, ...(hasCoords ? { lat: scene.latitude, lng: scene.longitude } : {}) }));
                 }}
               />
+              {/* DEMAND-SCENE-MAP-001：有列表，地点手填框撤掉（用户：「list 下面放
+                  一个地点没意义」）—— 选中回填 + 这一行已选反馈，× 清掉重选。
+                  无列表模板（绑人 / 协助）照旧手填 + 手动地图，见下面。 */}
+              {specs.lat !== undefined && specs.lng !== undefined ? (
+                <View style={styles.pickedRow}>
+                  <Text selectable numberOfLines={1} style={styles.pickedText}>已选：{specs.place.trim() === "" ? template?.venue ?? "" : specs.place.trim()}</Text>
+                  <Pressable accessibilityLabel="清除已选地点" onPress={() => setSpecs((prev) => ({ ...prev, place: "", lat: undefined, lng: undefined }))} style={styles.pickedClear}>
+                    <Text selectable style={styles.pickedClearText}>清除</Text>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           ) : null}
 
+          {sceneBinding ? null : (
+          <>
           <Text selectable style={styles.fieldLabel}>地点</Text>
           <TextInput onChangeText={(place) => setSpecs((prev) => ({ ...prev, place }))} placeholder={template?.venue} placeholderTextColor={color.muted} style={styles.input} value={specs.place} />
           {/* OPP-REAL-COORDS-001: 地图选点（可选，不卡发布）。点/拖即记真坐标，
@@ -823,6 +836,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               testID="demand-place-map"
             />
           </View>
+          </>
+          )}
           </SpecsSection>
 
           {/* DEMAND-SPECS-ORDER-001（2026-10-07，用户：「这几个参数不要放在顶部」）：
@@ -1189,6 +1204,11 @@ const styles = StyleSheet.create({
   sectionSub: { color: color.muted, fontSize: 12, marginBottom: 10, marginTop: 4 },
   // SCENE-STEP-ONEPAGE-001：规格页里的场景 list 段落（不是一步）。
   sceneSection: { marginBottom: 12 },
+  // DEMAND-SCENE-MAP-001：列表/地图里选中后的已选行（清掉重选）。
+  pickedRow: { alignItems: "center", backgroundColor: color.surface, borderRadius: 12, flexDirection: "row", justifyContent: "space-between", marginTop: 8, paddingHorizontal: 14, paddingVertical: 10 },
+  pickedText: { color: color.ink, flex: 1, fontSize: 13, fontWeight: "700" },
+  pickedClear: { paddingHorizontal: 6, paddingVertical: 4 },
+  pickedClearText: { color: color.violet, fontSize: 12, fontWeight: "800" },
   filterHeadRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   sheetToggle: { paddingHorizontal: 6, paddingVertical: 4 },
   sheetToggleText: { color: color.violet, fontSize: 12, fontWeight: "800" },

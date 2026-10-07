@@ -39,3 +39,26 @@ describe("DEMAND-SCENE-HEADER-001 内嵌选场景头部只有标题计数和三�
     expect(src).toContain("sorts.map");
   });
 });
+
+// DEMAND-SCENE-MAP-001（2026-10-07，用户：「地点在这里应该在咖啡店 list 加一个
+// 地图模式」）：内嵌选场景有列表 / 地图切换，钉子是同一份 rows（筛选同样生效），
+// 点钉 = 选中回发布流（跟点卡片同一个 onPick）。没可钉的就不给入口。
+describe("DEMAND-SCENE-MAP-001 内嵌选场景有地图模式，钉子一点即选", () => {
+  const src = readFileSync(
+    fileURLToPath(new URL("./scene-shop-directory.tsx", import.meta.url)),
+    "utf8"
+  );
+
+  it("列表 / 地图切换只进内嵌，有可钉的才给", () => {
+    expect(src).toContain("列表模式");
+    expect(src).toContain("地图模式");
+    expect(src).toContain("pickViewToggle");
+    expect(src).toContain("mapCenter !== undefined");
+  });
+
+  it("钉子是同一份 rows，脏坐标不上钉，点钉走同一个 onPick", () => {
+    expect(src).toContain("mappable");
+    expect(src).toContain("<Marker");
+    expect(src).toContain("onPress={() => (onPick ? onPick(scene) : setSelectedId(scene.id))}");
+  });
+});

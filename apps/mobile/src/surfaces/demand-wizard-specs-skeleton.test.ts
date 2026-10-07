@@ -17,7 +17,8 @@ describe("DEMAND-SPECS-SKELETON-001 规格步是编号分段 + 底部汇总条",
 
   it("四段编号分段：选场景 / 时间与人数 / 价格 / 备注", () => {
     expect(wizard).toContain("SpecsSection");
-    expect(wizard).toContain('no={1} title="选场景"');
+    // DEMAND-SCENE-MAP-001 起第 1 段标题按有无列表切换（有列表才叫选场景）。
+    expect(wizard).toContain('no={1} title={sceneBinding ? "选场景" : "地点"}');
     expect(wizard).toContain('no={2} title="时间与人数"');
     expect(wizard).toContain('no={3} title="价格"');
     expect(wizard).toContain('no={4} title="备注"');
@@ -26,7 +27,7 @@ describe("DEMAND-SPECS-SKELETON-001 规格步是编号分段 + 底部汇总条",
   });
 
   it("分段顺序即页面顺序：场景 → 人时 → 价格 → 备注", () => {
-    const order = ['no={1} title="选场景"', 'no={2} title="时间与人数"', 'no={3} title="价格"', 'no={4} title="备注"']
+    const order = ['no={1} title={sceneBinding ? "选场景" : "地点"}', 'no={2} title="时间与人数"', 'no={3} title="价格"', 'no={4} title="备注"']
       .map((marker) => wizard.indexOf(marker));
     for (const [i, pos] of order.entries()) {
       expect(pos).toBeGreaterThan(-1);
