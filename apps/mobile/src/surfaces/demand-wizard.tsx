@@ -775,6 +775,57 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             </Text>
           </View>
 
+          {/* SCENE-STEP-ONEPAGE-001（2026-10-06，用户：「选择场景还是跳页 没有和
+              原型一样 一页」）：场景 list 不是一步，是**规格页里的一个段落** ——
+              还是 home 那份 SceneShopDirectory 本体（embedded 模式：无 Modal/
+              顶栏/竖滚，数据/排序/详情是它自己的代码），点卡片**在本页**把名字+
+              坐标填进下面的地点栏（(0,0) 守卫：无真坐标不写 lat/lng，不让地图钉
+              到海上），人不离开、页不跳转。不想选就不管这一段 = 自动分配（地点
+              留空发到市场，接单方确认；搭子类绑人模板目录里本来没有场地，
+              sceneBinding 为假时这一段整个不渲染，同一条一页口径）。
+              点头像看单店详情（AVATAR-DETAIL-001，同页内切换）。 */}
+          {sceneBinding ? (
+            <View style={styles.sceneSection}>
+              <Text selectable style={styles.sectionSub}>先挑个地方 · 不想选就自动分配</Text>
+              <SceneShopDirectory
+                embedded
+                actionId={(template && MOMENT_ACTION_ID[template.id]) || ""}
+                label={template?.title ?? ""}
+                unit="家"
+                apiBaseUrl={localApiBaseUrl}
+                onClose={() => setStep("moment")}
+                onPick={(scene) => {
+                  const hasCoords = Number.isFinite(scene.latitude) && Number.isFinite(scene.longitude) && !(scene.latitude === 0 && scene.longitude === 0);
+                  setSpecs((prev) => ({ ...prev, place: scene.name, ...(hasCoords ? { lat: scene.latitude, lng: scene.longitude } : {}) }));
+                }}
+              />
+            </View>
+          ) : null}
+
+          <Text selectable style={styles.fieldLabel}>地点</Text>
+          <TextInput onChangeText={(place) => setSpecs((prev) => ({ ...prev, place }))} placeholder={template?.venue} placeholderTextColor={color.muted} style={styles.input} value={specs.place} />
+          {/* OPP-REAL-COORDS-001: 地图选点（可选，不卡发布）。点/拖即记真坐标，
+              发布带 lat/lng、订单上图；不动则纯文字地点、无钉。 */}
+          <View style={styles.mapWrapper}>
+            <MapCanvas
+              cityHint=""
+              initialPin={{ x: 5, y: 5 }}
+              radiusMeters={1000}
+              {...(specs.lat !== undefined && specs.lng !== undefined
+                ? { initialCoordinate: { lat: specs.lat, lng: specs.lng } }
+                : {})}
+              onChange={(_grid, coordinate) => {
+                if (coordinate && Number.isFinite(coordinate.lat) && Number.isFinite(coordinate.lng)) {
+                  setSpecs((prev) => ({ ...prev, lat: coordinate.lat, lng: coordinate.lng }));
+                }
+              }}
+              testID="demand-place-map"
+            />
+          </View>
+
+          {/* DEMAND-SPECS-ORDER-001（2026-10-07，用户：「这几个参数不要放在顶部」）：
+              人数 / 时间 / 时长三块从摘要下面搬到地点 + 地图之后 —— 先定地方，
+              再定人时时长。三块相对顺序不动（你们几人 → 时间段 → 时长）。 */}
           {/* DEMAND-HEADCOUNT-003（2026-10-07，用户：「搞成下拉选择框的 … 不要做成
               让客户增大摩擦力的视觉」）：六颗常驻 chips 太重，换成贴着触发按钮的
               下拉（SCENE-PICKER-FILTER-ANCHORED-004 同款语言：触发器 + caret，
@@ -835,54 +886,6 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               value={normalizeDuration(specs.duration)}
             />
           ) : null}
-
-          {/* SCENE-STEP-ONEPAGE-001（2026-10-06，用户：「选择场景还是跳页 没有和
-              原型一样 一页」）：场景 list 不是一步，是**规格页里的一个段落** ——
-              还是 home 那份 SceneShopDirectory 本体（embedded 模式：无 Modal/
-              顶栏/竖滚，数据/排序/详情是它自己的代码），点卡片**在本页**把名字+
-              坐标填进下面的地点栏（(0,0) 守卫：无真坐标不写 lat/lng，不让地图钉
-              到海上），人不离开、页不跳转。不想选就不管这一段 = 自动分配（地点
-              留空发到市场，接单方确认；搭子类绑人模板目录里本来没有场地，
-              sceneBinding 为假时这一段整个不渲染，同一条一页口径）。
-              点头像看单店详情（AVATAR-DETAIL-001，同页内切换）。 */}
-          {sceneBinding ? (
-            <View style={styles.sceneSection}>
-              <Text selectable style={styles.sectionSub}>先挑个地方 · 不想选就自动分配</Text>
-              <SceneShopDirectory
-                embedded
-                actionId={(template && MOMENT_ACTION_ID[template.id]) || ""}
-                label={template?.title ?? ""}
-                unit="家"
-                apiBaseUrl={localApiBaseUrl}
-                onClose={() => setStep("moment")}
-                onPick={(scene) => {
-                  const hasCoords = Number.isFinite(scene.latitude) && Number.isFinite(scene.longitude) && !(scene.latitude === 0 && scene.longitude === 0);
-                  setSpecs((prev) => ({ ...prev, place: scene.name, ...(hasCoords ? { lat: scene.latitude, lng: scene.longitude } : {}) }));
-                }}
-              />
-            </View>
-          ) : null}
-
-          <Text selectable style={styles.fieldLabel}>地点</Text>
-          <TextInput onChangeText={(place) => setSpecs((prev) => ({ ...prev, place }))} placeholder={template?.venue} placeholderTextColor={color.muted} style={styles.input} value={specs.place} />
-          {/* OPP-REAL-COORDS-001: 地图选点（可选，不卡发布）。点/拖即记真坐标，
-              发布带 lat/lng、订单上图；不动则纯文字地点、无钉。 */}
-          <View style={styles.mapWrapper}>
-            <MapCanvas
-              cityHint=""
-              initialPin={{ x: 5, y: 5 }}
-              radiusMeters={1000}
-              {...(specs.lat !== undefined && specs.lng !== undefined
-                ? { initialCoordinate: { lat: specs.lat, lng: specs.lng } }
-                : {})}
-              onChange={(_grid, coordinate) => {
-                if (coordinate && Number.isFinite(coordinate.lat) && Number.isFinite(coordinate.lng)) {
-                  setSpecs((prev) => ({ ...prev, lat: coordinate.lat, lng: coordinate.lng }));
-                }
-              }}
-              testID="demand-place-map"
-            />
-          </View>
 
           <Text selectable style={styles.fieldLabel}>场景偏好 · 影响匹配 / 报价</Text>
           <View style={styles.chipRow}>

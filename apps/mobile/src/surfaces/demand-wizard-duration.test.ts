@@ -13,8 +13,9 @@ describe("DEMAND-DURATION-001 时长是滚轮弹层，不是三颗 chips", () =>
     fileURLToPath(new URL("./demand-wizard.tsx", import.meta.url)),
     "utf8"
   );
-  // 从渲染出来的「时长」标题切到下一个渲染标题「地点」—— 触发器整段在里面。
-  const section = wizard.slice(wizard.indexOf("}>时长"), wizard.indexOf("}>地点"));
+  // 从渲染出来的「时长」标题切到下一个渲染标题「场景偏好」—— 触发器整段在里面。
+  // （DEMAND-SPECS-ORDER-001 起时长搬到了地点 + 地图之后，地点已不在后面。）
+  const section = wizard.slice(wizard.indexOf("}>时长"), wizard.indexOf("场景偏好"));
   const moments = readFileSync(
     fileURLToPath(new URL("../demand-moments.ts", import.meta.url)),
     "utf8"
@@ -43,5 +44,15 @@ describe("DEMAND-DURATION-001 时长是滚轮弹层，不是三颗 chips", () =>
     expect(moments).toContain("DURATION_MIN_HOURS = 1");
     expect(moments).toContain("DURATION_MAX_HOURS = 8");
     expect(moments).toContain('DEFAULT_DURATION = "2 小时"');
+  });
+
+  it("DEMAND-SPECS-ORDER-001 人数 / 时间 / 时长在地点 + 地图之后，不在顶部", () => {
+    // 渲染顺序即页面顺序：先挑地方（场景段 + 地点），再定人时时长，最后偏好。
+    const order = ["}>地点", 'testID="demand-headcount"', 'testID="demand-timeslot"', 'testID="demand-duration"', "场景偏好"]
+      .map((marker) => wizard.indexOf(marker));
+    for (const [i, pos] of order.entries()) {
+      expect(pos).toBeGreaterThan(-1);
+      if (i > 0) expect(pos).toBeGreaterThan(order[i - 1]!);
+    }
   });
 });
