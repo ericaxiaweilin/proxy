@@ -353,6 +353,16 @@ export function SceneShopDirectory({
     () => shopDirectoryRows(scenes, actionId, { sortId, areas, ...(origin ? { origin } : {}) }),
     [scenes, actionId, sortId, areas, origin],
   );
+
+  // DEMAND-SCENE-PICKED-TOP-001（2026-10-07 用户：「说了 选中一个场景 再弹出下面的
+  // 把选中的场景置顶 只显示选中的 下面跟着选项...」）：选择模式下**已选 = 列表收起**，
+  // 只留选中的那一张置顶，下面直接接选项段。清除（宿主）清掉 pickedId，列表自动
+  // 展开回全量 —— 收起/展开是同一件事的两个状态，不额外加开关。
+  // 选中的那家从 matched 里找（不是 rows）：选完再去筛区域/换排序，不能把已选
+  // 那张筛没。
+  const pickedScene = pickedId === undefined ? undefined : (matched.find((scene) => scene.id === pickedId) ?? rows.find((scene) => scene.id === pickedId));
+  const collapsed = pickedScene !== undefined;
+  const listRows = collapsed ? [pickedScene] : rows;
   const sorts = availableShopSorts(origin !== undefined);
   // DEMAND-SCENE-MAP-001：能上钉的才进地图 —— 脏坐标/(0,0) 不画（跟向导 onPick 的
   // hasCoords 同一条守卫）。定位没有就拿第一家当中心，不编假坐标；一家可钉的
@@ -478,6 +488,7 @@ export function SceneShopDirectory({
             </View>
             ) : null}
 
+            {!collapsed ? (
             <View style={styles.listHead}>
               <Text selectable style={styles.listTitle}>{`附近${label}`}<Text selectable style={styles.listCount}>{`  ${shopCountText(rows.length, unit)}`}</Text></Text>
               {/* DEMAND-SCENE-HEADER-001：内嵌选场景不摆定位说明行（用户原话里的
@@ -486,10 +497,11 @@ export function SceneShopDirectory({
               <Text selectable style={styles.listLocation}>{shopListLocationLine(origin !== undefined, rows.map((row) => row.area), rows.length > 0 && rows.every((row) => isFarAway(sceneDistanceMeters(origin, row))))}</Text>
               ) : null}
             </View>
+            ) : null}
 
             {/* DEMAND-SCENE-MAP-001：列表 / 地图切换（只进内嵌）。一家可钉的都没有
                 就不给入口 —— 点开一张空图没有意义。 */}
-            {embedded && mapCenter !== undefined ? (
+            {embedded && !collapsed && mapCenter !== undefined ? (
               <View style={styles.pickViewToggle}>
                 {(["list", "map"] as const).map((mode) => (
                   <Pressable key={mode} accessibilityLabel={mode === "list" ? "列表模式" : "地图模式"} onPress={() => setViewMode(mode)} style={[styles.pickViewBtn, viewMode === mode && styles.pickViewBtnOn]}>
@@ -499,7 +511,7 @@ export function SceneShopDirectory({
               </View>
             ) : null}
 
-            {embedded ? (
+            {!collapsed && embedded ? (
               <>
                 {/* DEMAND-SCENE-HEADER-001：内嵌只留三颗 —— 推荐 / 附近（= 最近，
                     按用户原话叫）/ 筛选。收藏 / 去过两颗不进内嵌（浏览页照旧）。
@@ -530,7 +542,7 @@ export function SceneShopDirectory({
                   </View>
                 ) : null}
               </>
-            ) : (
+            ) : collapsed ? null : (
               <>
                 {/* 排序条：只放这一趟真的能用的项。没有定位就不给「最近」。 */}
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipBar}>
@@ -562,7 +574,7 @@ export function SceneShopDirectory({
                 不想挑就把「定地点」交给系统 —— 地点留空继续发布（默认发到市场，
                 接单方确认；搭子类 Moment 绑人、目录里本来没有场地，同一条口径，
                 直接进规格不进场景 list）。行为 = 原 onSkip，只是把话说直白。 */}
-            {onSkip ? (
+            {onSkip && !collapsed ? (
               <Pressable accessibilityLabel="自动分配" onPress={onSkip} style={styles.skipRow}>
                 <Text selectable style={styles.skipText}>不想选地方？自动分配 ›</Text>
               </Pressable>
@@ -570,8 +582,8 @@ export function SceneShopDirectory({
 
             {catalogState === "ERROR" ? <Text selectable style={styles.empty}>目录没能加载，刷新再试试。</Text>
               : catalogState === "LOADING" ? <Text selectable style={styles.empty}>正在加载附近场景…</Text>
-                : rows.length === 0 ? <Text selectable style={styles.empty}>{areas.length > 0 ? "这个区域还没有接入的场景，取消筛选看看。" : `附近还没有接入的${label}场景。`}</Text>
-                  : viewMode === "map" && embedded && mapCenter !== undefined ? (
+                : listRows.length === 0 ? <Text selectable style={styles.empty}>{areas.length > 0 ? "这个区域还没有接入的场景，取消筛选看看。" : `附近还没有接入的${label}场景。`}</Text>
+                  : viewMode === "map" && embedded && !collapsed && mapCenter !== undefined ? (
                     <View style={styles.pickMapWrap}>
                       <MapView
                         initialRegion={{ latitude: mapCenter.latitude, longitude: mapCenter.longitude, latitudeDelta: 0.1, longitudeDelta: 0.1 }}
@@ -592,7 +604,7 @@ export function SceneShopDirectory({
                       </MapView>
                     </View>
                     )
-                  : <View style={styles.cardList}>{rows.map((scene) => {
+                  : <View style={styles.cardList}>{listRows.map((scene) => {
                     const photo = absoluteNetworkURL(apiBaseUrl ?? "", scene.imageUrl);
                     const distance = shopCardDistance(sceneDistanceMeters(origin, scene));
                     const address = shopAddressLine(scene);
@@ -646,7 +658,7 @@ export function SceneShopDirectory({
                     </Pressable>;
                   })}</View>}
 
-            {rows.length > 0 ? <Text selectable style={styles.listEnd}>{shopListEndText(rows.length, unit)}</Text> : null}
+            {!collapsed && rows.length > 0 ? <Text selectable style={styles.listEnd}>{shopListEndText(rows.length, unit)}</Text> : null}
             {notice ? <Text selectable style={styles.notice}>{notice}</Text> : null}
           </ScrollHost>
         ) : (

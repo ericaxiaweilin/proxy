@@ -16033,6 +16033,17 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: 向导没把 pickedId 传给场景 list —— 选中态永远不会亮。" >&2
     DSF_B=1
   fi
+  # DEMAND-SCENE-PICKED-TOP-001（2026-10-07，用户：「选中一个场景 再弹出下面的 把选中的
+  # 场景置顶 只显示选中的 下面跟着选项」）：已选 = 列表收起成那一张（置顶），下面直接
+  # 接选项段。收起判据与渲染都必须真的用上。
+  if ! grep -qF 'const collapsed = pickedScene !== undefined;' apps/mobile/src/components/scene-shop-directory.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 已选后收起列表的判据（collapsed）丢了。" >&2
+    DSF_B=1
+  fi
+  if ! grep -qF 'listRows.map((scene) => {' apps/mobile/src/components/scene-shop-directory.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 卡片列表没走 listRows —— 已选后收不起列表（还是全量铺）。" >&2
+    DSF_B=1
+  fi
   if grep -qF 'disabled={!template} onPress={() => setStep("people")}' apps/mobile/src/surfaces/demand-wizard.tsx; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: 选 Moment 的主按钮又写死进选人了 —— 默认路径必须先过场景。" >&2
     DSF_B=1
