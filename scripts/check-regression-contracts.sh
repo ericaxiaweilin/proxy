@@ -16022,6 +16022,17 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: sceneReady 算了没用 —— 下面几段没被它闸住。" >&2
     DSF_B=1
   fi
+  # DEMAND-SCENE-PICKED-COLOR-001（2026-10-07，用户：「点击店铺场景 要有颜色变化能清晰
+  # 表示被选中 用成熟的组件代码就可以」）：选中态 = violet 边框（momentCardOn 同一套），
+  # 且向导必须把 pickedId 传下来 —— 只加样式不接线等于没有反馈。
+  if ! grep -qF 'cardPicked: { borderColor: color.violet, borderWidth: 2 }' apps/mobile/src/components/scene-shop-directory.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 选中卡的 violet 边框（cardPicked）丢了 —— 点了看不出选中。" >&2
+    DSF_B=1
+  fi
+  if ! grep -qF 'pickedId={pickedSceneId}' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-SCENE-FIRST-001]: 向导没把 pickedId 传给场景 list —— 选中态永远不会亮。" >&2
+    DSF_B=1
+  fi
   if grep -qF 'disabled={!template} onPress={() => setStep("people")}' apps/mobile/src/surfaces/demand-wizard.tsx; then
     echo "  FAIL [DEMAND-SCENE-FIRST-001]: 选 Moment 的主按钮又写死进选人了 —— 默认路径必须先过场景。" >&2
     DSF_B=1

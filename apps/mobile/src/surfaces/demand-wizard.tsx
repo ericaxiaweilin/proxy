@@ -408,6 +408,11 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   // 绑人 / 协助模板不受影响（没有这一段可等）。
   const sceneReady = !sceneBinding || specs.place.trim() !== "";
 
+  // DEMAND-SCENE-PICKED-COLOR-001：选中的场景 id —— 交给场景 list 画选中态
+  //（列表卡 violet 边框 / 地图 marker 换色）。清除已选、换模板都复位。
+  const [pickedSceneId, setPickedSceneId] = useState<string | undefined>(undefined);
+  useEffect(() => { setPickedSceneId(undefined); }, [template?.id]);
+
   // moment 步的出口。分流规则（2026-10-06 用户口径）：
   //   专业 → 人 list（专业靠人变现，这是唯一允许直接进 people 的路径）；
   //   绑场景 → 场景 list（home 场景 list 本体，**默认路径里没有选人这一步**）；
@@ -806,7 +811,10 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
                 onPick={(scene) => {
                   const hasCoords = Number.isFinite(scene.latitude) && Number.isFinite(scene.longitude) && !(scene.latitude === 0 && scene.longitude === 0);
                   setSpecs((prev) => ({ ...prev, place: scene.name, ...(hasCoords ? { lat: scene.latitude, lng: scene.longitude } : {}) }));
+                  // DEMAND-SCENE-PICKED-COLOR-001：记住选的是哪一家，卡片立刻变色。
+                  setPickedSceneId(scene.id);
                 }}
+                pickedId={pickedSceneId}
               />
               {/* DEMAND-SCENE-MAP-001：有列表，地点手填框撤掉（用户：「list 下面放
                   一个地点没意义」）—— 选中回填 + 这一行已选反馈，× 清掉重选。
@@ -816,7 +824,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               {specs.place.trim() !== "" ? (
                 <View style={styles.pickedRow}>
                   <Text selectable numberOfLines={1} style={styles.pickedText}>已选：{specs.place.trim() === "" ? template?.venue ?? "" : specs.place.trim()}</Text>
-                  <Pressable accessibilityLabel="清除已选地点" onPress={() => setSpecs((prev) => ({ ...prev, place: "", lat: undefined, lng: undefined }))} style={styles.pickedClear}>
+                  <Pressable accessibilityLabel="清除已选地点" onPress={() => { setSpecs((prev) => ({ ...prev, place: "", lat: undefined, lng: undefined })); setPickedSceneId(undefined); }} style={styles.pickedClear}>
                     <Text selectable style={styles.pickedClearText}>清除</Text>
                   </Pressable>
                 </View>

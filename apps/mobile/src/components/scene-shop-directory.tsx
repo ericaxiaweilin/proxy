@@ -184,6 +184,7 @@ export function SceneShopDirectory({
   onOpenScene,
   onPick,
   onSkip,
+  pickedId,
   embedded,
 }: {
   actionId: string;
@@ -203,6 +204,13 @@ export function SceneShopDirectory({
   onPick?: ((scene: SceneShopBrief) => void) | undefined;
   /** 选择模式下「暂不选场景」的出路（保留原来的「暂不选，继续」语义）；浏览模式不传。 */
   onSkip?: (() => void) | undefined;
+  /**
+   * DEMAND-SCENE-PICKED-COLOR-001（2026-10-07，用户：「点击店铺场景 要有颜色变化
+   * 能清晰表示被选中」）：选择模式下**已选中**的场景 id —— 命中的列表卡换成
+   * violet 边框（跟向导 momentCardOn 同一套选中语言，不新造视觉），地图模式的
+   * marker 同步换色。不传 = 没有高亮（浏览模式照旧）。
+   */
+  pickedId?: string | undefined;
   /**
    * 一页内嵌（2026-10-06 用户：「原型是尽量合并在一页 你这是跳转2页的 还是
    * 尽量在一页吧」）：发布向导把这份场景 list **内嵌**进自己的页面，不再整页
@@ -575,6 +583,9 @@ export function SceneShopDirectory({
                             key={scene.id}
                             coordinate={{ latitude: scene.latitude, longitude: scene.longitude }}
                             onPress={() => (onPick ? onPick(scene) : setSelectedId(scene.id))}
+                            // DEMAND-SCENE-PICKED-COLOR-001：选中的那根换色（列表卡
+                            // 同一条反馈，两处不能说两套话）。
+                            {...(pickedId === scene.id ? { pinColor: color.violet } : {})}
                             title={scene.name}
                           />
                         ))}
@@ -590,7 +601,9 @@ export function SceneShopDirectory({
                     // 修正他上一条「不进主页」的说法）：**头像/照片 = 看详情**（两种模式
                     // 都开单店主页）；卡片其余部分 = 动作 —— 选择模式（onPick）点了
                     // 直接选中回发布流，浏览模式进详情。
-                    return <Pressable accessibilityLabel={onPick ? `选择场景 ${scene.name}` : `场景 ${scene.name}`} key={scene.id} onPress={() => (onPick ? onPick(scene) : setSelectedId(scene.id))} style={styles.card}>
+                    // DEMAND-SCENE-PICKED-COLOR-001：选中的那张换成 violet 边框（跟
+                    // momentCardOn 同一套），颜色变化即「被选中」的明确反馈。
+                    return <Pressable accessibilityLabel={onPick ? `${pickedId === scene.id ? "已选场景 " : "选择场景 "}${scene.name}` : `场景 ${scene.name}`} key={scene.id} onPress={() => (onPick ? onPick(scene) : setSelectedId(scene.id))} style={[styles.card, pickedId === scene.id && styles.cardPicked]}>
                       <View style={styles.cardPhoto}>
                         <Pressable accessibilityLabel={`看${scene.name}主页`} onPress={() => setSelectedId(scene.id)} style={styles.cardImagePress}>
                           {photo ? <Image contentFit="cover" source={{ uri: photo }} style={styles.cardImage} /> : <View style={[styles.cardImage, styles.photoPlaceholder]}><Text selectable style={styles.photoPlaceholderText}>{scene.type.slice(0, 2) || "场景"}</Text></View>}
@@ -915,6 +928,9 @@ const styles = StyleSheet.create({
   empty: { color: color.muted, fontSize: 13, lineHeight: 20, paddingHorizontal: 16, paddingVertical: 22 },
   cardList: { gap: 10, paddingHorizontal: 16 },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, padding: 11 },
+  // DEMAND-SCENE-PICKED-COLOR-001：选中卡 —— 值照抄向导的 momentCardOn
+  //（borderColor violet / borderWidth 2），选中语言全仓一套。
+  cardPicked: { borderColor: color.violet, borderWidth: 2 },
   cardPhoto: { borderRadius: 13, height: 112, overflow: "hidden", position: "relative", width: 96 },
   cardImage: { backgroundColor: color.surface, height: "100%", width: "100%" },
   // 照片的「看主页」点击层：撑满 cardPhoto，否则百分比高度的图会塌成 0。
