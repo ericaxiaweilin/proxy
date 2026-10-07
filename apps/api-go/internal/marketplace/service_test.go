@@ -961,6 +961,7 @@ func TestListOpportunityTemplatesShipsWholeEngine(t *testing.T) {
 		Specs           []MomentSpecs         `json:"specs"`
 		Policies        []MomentPolicy        `json:"policies"`
 		Pricing         []PricingRule         `json:"pricing"`
+		QualityTiers    []QualityTierRule     `json:"qualityTiers"`
 		ActivityPresets []ActivityPreset      `json:"activityPresets"`
 	}
 	if err := json.Unmarshal([]byte(resp.OperationRef), &body); err != nil {
@@ -977,6 +978,12 @@ func TestListOpportunityTemplatesShipsWholeEngine(t *testing.T) {
 	}
 	if len(body.ActivityPresets) != 6 {
 		t.Fatalf("wire activityPresets: got %d (dispatch layer must forward every engine field)", len(body.ActivityPresets))
+	}
+	// DEMAND-PRICE-ENGINE-001：资历档同样走 dispatch map —— 组装层漏一个字段，
+	// 客户端就算不出上浮，而且**看不出来**（只是永远不加价）。钉在 wire 层。
+	if len(body.QualityTiers) != len(qualityTiers) || len(body.QualityTiers) == 0 {
+		t.Fatalf("wire qualityTiers: got %d want %d (dispatch layer must forward every engine field)",
+			len(body.QualityTiers), len(qualityTiers))
 	}
 }
 

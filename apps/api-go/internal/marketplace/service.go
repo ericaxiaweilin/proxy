@@ -335,6 +335,9 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 			"specs":      snap.Specs,
 			"policies":   snap.Policies,
 			"pricing":    snap.Pricing,
+			// DEMAND-PRICE-ENGINE-001：资历档上浮规则。档位阈值是运营策略，
+			// 跟着目录下发（客户端不写死），改阈值不用发版。
+			"qualityTiers": snap.QualityTiers,
 			// OPP-CATALOG-002 (R58 activity line): creation-flow presets
 			// ride the same anonymous snapshot read.
 			"activityPresets": snap.ActivityPresets,

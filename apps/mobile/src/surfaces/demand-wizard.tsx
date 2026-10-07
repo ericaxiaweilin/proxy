@@ -51,6 +51,11 @@ import { resolveCreatorPhoto } from "./merchant-creator-recommendations";
 // 会印出「1200K VND」，而共享实现印「1.2tr VND」（越南盾百万位要写 tr）。
 import { creatorRatingLabel, formatServiceVolume, labelLanguage } from "../creator-capability-labels";
 import { formatReferencePrice } from "../creator-pricing";
+// DEMAND-PRICE-ENGINE-001：价格从「用户手填」改成「系统算」。这一份是把 R58 那套
+// **已经在跑**的动态定价引擎（服务端 catalog_engine.go 的 pricingRules → 契约下发）
+// 接到这一屏；market.tsx 早就接了，向导一直没接。管线本身在 demand-price.ts。
+import { baseKFromTemplatePrice, demandPriceQuote, demandPriceToWire, engineTemplateId, tierUpliftLabel } from "../demand-price";
+import type { ListOpportunityTemplatesPayload } from "@proxy/contracts";
 import { localApiBaseUrl } from "../native-clients";
 // 卡面右下角的距离（用户选「接真实距离」）：真实定位 + 真实场景目录。
 import { getCurrentFix } from "../device-location";
@@ -211,6 +216,18 @@ function PersonRow({ person, active, onOpenProfile, onSelect }: {
   );
 }
 
+// DEMAND-PRICE-ENGINE-001：报价分解的一行（基础 / 时长 / 时段 / 人数 / 资历档）。
+// 只画**真的加了钱**的项 —— 零 delta 不进 lines，跟 market.tsx 的动态报价分解
+// 同一口径（列一行 0 元会让用户以为「这项本来就不要钱」）。
+function PriceLine({ label, amountK }: { label: string; amountK: number }): React.JSX.Element {
+  return (
+    <View style={styles.priceLineRow}>
+      <Text selectable style={styles.priceLineLabel}>{label}</Text>
+      <Text selectable style={styles.priceLineAmount}>{amountK > 0 ? `+${amountK}K` : `${amountK}K`}</Text>
+    </View>
+  );
+}
+
 export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewMarket, onCreateActivity, onOpenPersonProfile }: {
   marketplace: MarketplaceClient;
   supply?: SupplyClient | undefined;
@@ -278,7 +295,10 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const [mode, setMode] = useState<FulfillMode>();
   const [peopleReturn, setPeopleReturn] = useState<Step>("specs");
   const [publishing, setPublishing] = useState(false);
-  const [negotiable, setNegotiable] = useState(false);
+  // DEMAND-PRICE-ENGINE-001：价格不再是用户输入项，「可协商」开关随之下线
+  // （价格由系统按 基础 + 时长 + 时段 + 人数 + 资历档 算出来，没有可谈的空间）。
+  // 服务端目录（定价规则 + 档位表）—— 拿到之前价格算不出来，界面显示「计算中」。
+  const [catalog, setCatalog] = useState<ListOpportunityTemplatesPayload>();
   // DEMAND-HEADCOUNT-003：下拉菜单的开关（常态只露触发器那一行）。
   const [headcountOpen, setHeadcountOpen] = useState(false);
   // DEMAND-TIMESLOT-001：同上，时间段下拉的开关。
@@ -292,6 +312,17 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   // 两者各管各、失败互不挡 —— 与 activity-wizard 同一套。
   const [scenes, setScenes] = useState<readonly SceneSpot[]>([]);
   const [origin, setOrigin] = useState<SceneOrigin>();
+
+  // DEMAND-PRICE-ENGINE-001：价格由系统算，规则**只从服务端目录来**（本仓
+  // 「客户端词表零硬编码」的原则）。拉一次就够 —— 目录是只读常量表。
+  // 拉失败不编价：界面落「由服务方报价」，见 priceComputable。
+  useEffect(() => {
+    let cancelled = false;
+    void marketplace.listCatalog().then((payload) => {
+      if (!cancelled) setCatalog(payload);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [marketplace]);
 
   // 草稿：本机存取上次的模板+规格，进页恢复，发布成功清除。
   useEffect(() => {
@@ -521,17 +552,22 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
 
   async function publish(): Promise<void> {
     if (publishing || !template) return;
-    if (specs.price.trim() === "") {
-      setError("请填写预计服务价（可按参考价填，可协商）。");
-      return;
-    }
+    // DEMAND-PRICE-ENGINE-001：这里原来拦「请填写预计服务价」—— 价格已经不是
+    // 用户填的了，拦的是**算不出来**：引擎没有这张卡的价目（自定义需求 /
+    // 签证 / 法律 / 商务）。那不是错误，是「由服务方报价」：照常发布，
+    // moneyFlow 落 TBD + 空价（契约允许的唯一组合）。
     setPublishing(true);
     setError(undefined);
     try {
       const opportunity = await marketplace.publish(
         // DEMAND-TARGET-KEEP-001：搭子选择跟着需求走（定向邀约）。targetAgent 为空
         // 时第三个参数是 undefined，wire 形状与改动前一致。
-        buildDemandPublishInput(template, specs, targetAgent?.agentId)
+        buildDemandPublishInput(
+          template,
+          specs,
+          targetAgent?.agentId,
+          priceQuote === undefined ? { price: "", moneyFlow: "TBD" } : { price: demandPriceToWire(priceQuote), moneyFlow: "EARN" }
+        )
       );
       setResult(opportunity);
       onPublished(opportunity);
@@ -572,13 +608,49 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   // 选完人再点「等接单」，选的人还在 selectedPerson 里，但意图已经变回公开。
   const targetAgent = mode === "direct" ? selectedPerson : undefined;
 
+  // DEMAND-PRICE-ENGINE-001：统一价格管线。基础价 / 时长 / 时段 / 人数 全部取自
+  // 服务端目录里那一份规则（不在这里另写价格表，否则又变成「同一个人两个价」那类
+  // 问题的价格版）。资历档只在**选中了人**的那一支成立 —— 「等接单」发布时还没有
+  // 接单的人，算不出「接单人的履约」。
+  const engineId = template === undefined ? undefined : engineTemplateId(template.id);
+  const engineTemplate = engineId === undefined ? undefined : catalog?.templates?.find((item) => item.id === engineId);
+  const engineSpec = engineId === undefined ? undefined : catalog?.specs?.find((item) => item.templateId === engineId);
+  const enginePricing = engineId === undefined ? undefined : catalog?.pricing?.find((item) => item.templateId === engineId);
+  const baseK = engineTemplate === undefined ? 0 : baseKFromTemplatePrice(engineTemplate.price);
+  // 算得出价 = 引擎有这张卡 + 有基础价 + 有档位表。任一缺失就**不编价**：
+  // 自定义需求、签证/法律/商务在引擎里本来就没有价目（它们的 priceRef 是「面议」）。
+  const priceComputable = baseK > 0 && engineSpec !== undefined;
+  // exactOptionalPropertyTypes：可选属性不接受显式 undefined，逐项投影。
+  const pricingLite = enginePricing === undefined ? undefined : {
+    ...(enginePricing.duration === undefined ? {} : { duration: enginePricing.duration }),
+    ...(enginePricing.time === undefined ? {} : { time: enginePricing.time }),
+    ...(enginePricing.group === undefined ? {} : { group: enginePricing.group }),
+  };
+  const priceQuote = priceComputable && engineSpec !== undefined
+    ? demandPriceQuote({
+        baseK,
+        duration: normalizeDuration(specs.duration),
+        timeSlot: normalizeTimeSlot(specs.time),
+        headcount: Number.parseInt(normalizeHeadcount(specs.ratio), 10),
+        durations: engineSpec.durations,
+        times: engineSpec.times,
+        groups: engineSpec.groups,
+        ...(pricingLite === undefined ? {} : { pricing: pricingLite }),
+        ...(targetAgent?.rating === undefined ? {} : { rating: targetAgent.rating }),
+        ...(catalog?.qualityTiers === undefined ? {} : { tiers: catalog.qualityTiers })
+      })
+    : undefined;
+
   // DEMAND-SPECS-SKELETON-001：规格步按确认下单原型套编号分段（1 选场景 / 2 时间与
   // 人数 / 3 价格 / 4 备注）。四段恒渲染（第 1 段里场景 list 才按绑定出没），
   // 编号写死 1–4，不用计数。
 
   // 底部汇总条（一行当前选择 + 价格），原型 bottom 区的同款位置。
   const placeLabel = specs.place.trim() === "" ? template?.venue ?? "" : specs.place.trim();
-  const priceLabel = specs.price.trim() === "" ? "待定" : (negotiable ? `${specs.price.trim()} · 可协商` : specs.price.trim());
+  // DEMAND-PRICE-ENGINE-001：价格不再是用户输入项，「可协商」随之作废 ——
+  // 价是系统算出来的，没有可谈的空间。算不出来就写「由服务方报价」（不是「待定」：
+  // 待定听着像还没填，实际是这一档本来就不由平台定价）。
+  const priceLabel = priceQuote === undefined ? "由服务方报价" : demandPriceToWire(priceQuote);
   const bottomSummary = `${placeLabel} · ${normalizeTimeSlot(specs.time)} · ${normalizeDuration(specs.duration)} · ${normalizeHeadcount(specs.ratio)} 人`;
 
   return (
@@ -1143,26 +1215,42 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           </View>
           </SpecsSection>
 
-          {/* DEMAND-SPECS-SKELETON-001：第 3 段 · 价格。 */}
-          <SpecsSection hint="可协商" no={4} title="价格">
-          {/* 2026-10-06 合并：这里原本是城市协助服务目录的**第三份拷贝** ——
-              按模板展开的 proGrid，外加选中服务那行 note。服务选择已经收进
-              选 Moment 那一步的双栏选择器（rail 上的「专业」），规格步不再摆
-              第二遍目录；「选了哪个服务」由上面 confirmCard 里那行交代。 */}
+          {/* DEMAND-SPECS-SKELETON-001：第 4 段 · 价格。
+              DEMAND-PRICE-ENGINE-001（2026-10-07，用户：「这个价格要怎么弄 给用户肯定
+              不能输入 而是系统计算出来的 算法要做好统一的计算管线 不再搞用户自己输入
+              协商了」）：原来这里是**一个自由文本输入框 + 一颗「可协商」开关** ——
+              用户自己编价、自己决定能不能谈。而这一段下面那句「价格由场景基础价、
+              时间、人数组成」全仓只有它自己一处、零实现：文案承诺了系统算价，实际是
+              手填。现在整段改成**只读的报价分解**，价由 demand-price.ts 那条统一管线
+              按服务端目录下发的规则算出来（基础 + 时长 + 时段 + 人数 + 资历档）。
+              「协商」在这一屏下线：价是算出来的，没有可谈的空间。
+              注：`specs.price` 字段仍在（草稿兼容），但已不再是用户输入 —— 发布时
+              以 priceQuote 为准（见 publish）。 */}
+          <SpecsSection hint={priceQuote === undefined ? "由服务方报价" : "系统计算"} no={4} title="价格">
           <View style={styles.fieldLabelRow}>
             <Text selectable style={styles.fieldLabelNoGap}>预计服务价</Text>
-            <Text selectable style={styles.dynamicBadge}>动态</Text>
+            {priceQuote === undefined ? null : <Text selectable style={styles.dynamicBadge}>动态</Text>}
           </View>
-          <View style={styles.priceMain}>
-            <TextInput keyboardType="numbers-and-punctuation" onChangeText={(price) => setSpecs((prev) => ({ ...prev, price }))} placeholder={template?.defaultPrice} placeholderTextColor={color.muted} style={[styles.input, styles.priceInput]} value={specs.price} />
-            <Pressable accessibilityLabel={negotiable ? "取消可协商" : "标记可协商"} onPress={() => setNegotiable((current) => !current)} style={[styles.negoBtn, negotiable && styles.negoBtnOn]}>
-              <Text selectable style={[styles.negoBtnText, negotiable && styles.negoBtnTextOn]}>{negotiable ? "✓ 可协商" : "可协商"}</Text>
-            </Pressable>
-          </View>
-          <Text selectable style={styles.hint}>参考 {template?.priceRef} · 可协商；现场消费不包含在内。</Text>
-          {/* DEMAND-PREFS-REMOVE-001：偏好行删了，这句里的「额外偏好 / 偏好只用于匹配」
-              跟着拿掉 —— 用户已经没处设偏好，别留一句没由来的话。 */}
-          <Text selectable style={styles.hint}>ⓘ 价格由场景基础价、时间、人数组成。服务参考价；餐饮、咖啡、KTV、门票等现场消费不包含在内。</Text>
+          {priceQuote === undefined ? (
+            <>
+              {/* 引擎里没有这一档的价目：自定义需求、签证 / 法律 / 商务。它们的
+                  priceRef 本来就是「面议」—— 平台不编一个数，落 moneyFlow TBD，
+                  由接单方报价。这不是「还没填」，是「本来就不由平台定价」。 */}
+              <Text selectable style={styles.priceQuoteTotal}>由服务方报价</Text>
+              <Text selectable style={styles.hint}>这一档没有平台价目（按具体情况定），发布后由接单方报价。</Text>
+            </>
+          ) : (
+            <>
+              <Text selectable style={styles.priceQuoteTotal}>{demandPriceToWire(priceQuote)}</Text>
+              <View style={styles.priceBreakdown}>
+                <PriceLine amountK={priceQuote.baseK} label="基础" />
+                {priceQuote.lines.map((line) => <PriceLine amountK={line.amountK} key={line.label} label={line.label} />)}
+                {priceQuote.tier === undefined ? null : <PriceLine amountK={priceQuote.tier.amountK} label={tierUpliftLabel(priceQuote.tier)} />}
+              </View>
+              {priceQuote.notice === undefined ? null : <Text selectable style={styles.hint}>{priceQuote.notice}</Text>}
+            </>
+          )}
+          <Text selectable style={styles.hint}>ⓘ 价格由场景基础价、时间、人数组成，按当前选择由系统算出。餐饮、咖啡、KTV、门票等现场消费不包含在内。</Text>
           </SpecsSection>
 
           {/* DEMAND-SPECS-SKELETON-001：第 5 段 · 备注。 */}
@@ -1191,7 +1279,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             {/* DEMAND-HEADCOUNT-002：展示 1–6 人的选择（默认 1 人）。 */}
             <SummaryRow label="人数" value={`${normalizeHeadcount(specs.ratio)} 人`} />
             <SummaryRow label="标准" value={`${specs.time} · ${specs.duration}`} />
-            <SummaryRow label="价格" value={negotiable ? `${specs.price} · 可协商` : specs.price} last={!showNotes && !showPerson} />
+            <SummaryRow label="价格" value={priceLabel} last={!showNotes && !showPerson} />
             {showNotes ? <SummaryRow label="备注" value={specs.notes.trim()} last={!showPerson} /> : null}
             {showPerson ? <SummaryRow label="意向人选" value={selectedPerson.name} last /> : null}
           </View>
@@ -1541,12 +1629,14 @@ const styles = StyleSheet.create({
   headcountOptionLast: { borderBottomWidth: 0 },
   headcountOptionText: { color: color.ink, fontSize: 14, fontWeight: "700" },
   headcountCheck: { color: color.ink, fontSize: 14, fontWeight: "900" },
-  priceMain: { alignItems: "center", flexDirection: "row", gap: 8 },
-  priceInput: { flex: 1 },
-  negoBtn: { alignItems: "center", borderColor: color.line, borderRadius: 12, borderWidth: 1, justifyContent: "center", paddingHorizontal: 14, paddingVertical: 10 },
-  negoBtnOn: { backgroundColor: color.ink, borderColor: color.ink },
-  negoBtnText: { color: color.ink, fontSize: 13, fontWeight: "700" },
-  negoBtnTextOn: { color: color.white },
+  // DEMAND-PRICE-ENGINE-001：价格段从「输入框 + 可协商开关」换成只读报价分解。
+  // 原来的 priceMain / priceInput / negoBtn / negoBtnOn / negoBtnText / negoBtnTextOn
+  // 六条样式随形态一起删除（形态没了就别留死样式 —— 单看样式表会以为还有这个控件）。
+  priceQuoteTotal: { color: color.ink, fontSize: 22, fontWeight: "700", marginBottom: 8 },
+  priceBreakdown: { backgroundColor: color.surface, borderRadius: 12, gap: 5, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 10 },
+  priceLineRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  priceLineLabel: { color: color.muted, fontSize: 12.5 },
+  priceLineAmount: { color: color.ink, fontSize: 12.5, fontWeight: "700" },
   notesInput: { minHeight: 64, textAlignVertical: "top" },
   // OPP-REAL-COORDS-001: 地点选图框，跟 Market 内联卡同规格（高 330/圆角 22）。
   mapWrapper: { borderColor: color.line, borderRadius: 22, borderWidth: 1, height: 330, marginTop: 8, overflow: "hidden", width: "100%" },

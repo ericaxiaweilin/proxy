@@ -857,6 +857,18 @@ export const ListOpportunityTemplatesPayloadSchema = z.object({
     group: z.record(z.string(), z.number().int()).optional(),
     perPair: z.boolean().optional()
   })).optional(),
+  // DEMAND-PRICE-ENGINE-001：资历档上浮规则（履约/评分达标 ⇒ 算价上浮）。
+  // 阈值是运营策略，跟着目录下发，客户端不写死；可选以兼容旧载荷。
+  // ⚠️ 规则只看**原始质量信号**（fulfillment / satisfaction / orders），
+  // 不看 matching.Score 的 Total —— 那个分的输入里含 price/budget，拿它定价会成环。
+  qualityTiers: z.array(z.object({
+    key: z.string().min(1),
+    label: z.string().min(1),
+    minFulfillment: z.number().min(0).max(1),
+    minSatisfaction: z.number().min(0).max(1),
+    minOrders: z.number().int().min(1),
+    upliftPermille: z.number().int().positive()
+  })).optional(),
   // OPP-CATALOG-002 (R58 activity line): creation-flow presets.
   activityPresets: z.array(z.object({
     id: z.string().min(1),
@@ -876,6 +888,8 @@ export type OpportunityCatalogCategory = NonNullable<ListOpportunityTemplatesPay
 export type MomentSpec = NonNullable<ListOpportunityTemplatesPayload["specs"]>[number];
 export type MomentPolicyInfo = NonNullable<ListOpportunityTemplatesPayload["policies"]>[number];
 export type MomentPricingRule = NonNullable<ListOpportunityTemplatesPayload["pricing"]>[number];
+// DEMAND-PRICE-ENGINE-001: 资历档规则（履约/评分达标 ⇒ 算价上浮）。
+export type QualityTierRule = NonNullable<ListOpportunityTemplatesPayload["qualityTiers"]>[number];
 export type ActivityPresetInfo = NonNullable<ListOpportunityTemplatesPayload["activityPresets"]>[number];
 
 // OPP-SUGGEST-001: 发布搜索"生成"wire 契约（SuggestOpportunityTemplate）。

@@ -16382,11 +16382,16 @@ fi
 # 这里 require 它存在，免得钉住接线而测试被删。
 if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
   DTK_B=0
-  if ! grep -qF 'buildDemandPublishInput(template, specs, targetAgent?.agentId)' apps/mobile/src/surfaces/demand-wizard.tsx; then
+  # ⚠️ 调用**跨行了**（接上动态报价后是四参，第 4 个是算出来的价），单行 `-qF` 会假红。
+  # 拆成两半查：调用在 + 第三参是选中的人。**跨行形态**（含「两参写法」那条反面）
+  # 交给下面的行为测试 —— 它的正则是空白容忍的；shell 的 grep 逐行匹配，跨行两参抓不到。
+  if ! grep -qF 'buildDemandPublishInput(' apps/mobile/src/surfaces/demand-wizard.tsx ||
+     ! grep -qF 'targetAgent?.agentId,' apps/mobile/src/surfaces/demand-wizard.tsx; then
     echo "  FAIL [DEMAND-TARGET-KEEP-001]: 发布没带上选中的搭子 —— 选择又被丢在半路（发出去还是公开市场）。" >&2
     DTK_B=1
   fi
-  if grep -qF 'buildDemandPublishInput(template, specs)' apps/mobile/src/surfaces/demand-wizard.tsx; then
+  # 反面：单行形态的两参调用（选择被丢在半路）不许回来。跨行写法由行为测试挡。
+  if grep -qE 'buildDemandPublishInput\([[:space:]]*template,[[:space:]]*specs[[:space:]]*\)' apps/mobile/src/surfaces/demand-wizard.tsx; then
     echo "  FAIL [DEMAND-TARGET-KEEP-001]: 发布退回两参调用 —— 选了谁都不影响发布结果。" >&2
     DTK_B=1
   fi
@@ -16415,6 +16420,114 @@ if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
       exit 1
     }
     echo "    DEMAND-TARGET-KEEP-001: PASS (选中的人跟着发布走 · 空白不带该键 · 定向/公开由接单方式决定 · 口径分开)"
+  else
+    exit 1
+  fi
+fi
+
+# DEMAND-PRICE-ENGINE-001（2026-10-07，用户：「这个价格要怎么弄 给用户肯定不能输入 而是
+# 系统计算出来的 算法要做好统一的计算管线 不再搞用户自己输入 协商了」，随后拍板
+# 「可以 那就接上 履约 / 评分这个要有 算是对努力干 越意好好干的奖励」）：
+# 发布需求第 4 段的价格从**用户手填**改成**系统算**。
+#
+# 这一块**不新造算法**：R58 那套动态定价引擎（服务端 catalog_engine.go 的 pricingRules
+# → 契约下发 → market-template-price.ts 的 momentPriceQuote）早就在跑，market.tsx 早就
+# 接了，只有发布向导没接 —— 价格是个自由文本输入框，而界面上那句「价格由场景基础价、
+# 时间、人数组成」全仓只有它自己一处、零实现：文案承诺了系统算价，实际是用户手填。
+#
+# 守四件事：
+#   ① 用户不能再编价：价格输入框（`value={specs.price}`）与「可协商」开关
+#      （`styles.negoBtn*`）都不许回来。反面钉的是**引用形态** `styles.X`，不是裸名 ——
+#      本块与向导里的注释都写着 negoBtn，裸 grep 会被自己的注释喂绿（本仓前科）。
+#   ② 价只能来自那条统一管线：向导调 demandPriceQuote / demandPriceToWire / tierUpliftLabel，
+#      且**不另写**价格表（`pricingRules` 全仓只有服务端一处）。
+#   ③ 履约 / 评分是**奖励（上浮）**，且只从原始质量信号算：三条全达标才给档、无成交记录
+#      不给档、服务端不下发档位表就不加价。⚠️ **绝不读 matching.Score 的 Total** ——
+#      那个分的签名是 `Score(signals, price, budget)`，**输入里含价格**，拿它反推价格就是
+#      价格→分→价格的循环；而且它是「适配分」不是质量分。这条在 demand-price.ts 的
+#      stripComments 断言里钉（那里是唯一实现处）。
+#   ④ 算不出来就**不编价**：落 moneyFlow TBD + 空价（契约允许的唯一组合），界面写
+#      「由服务方报价」—— 自定义需求 / 签证 / 法律 / 商务在引擎里本来就没有价目。
+#
+# 服务端那份表（qualityTiers）与契约字段一起钉：只有前端接了、服务端不下发，档位永远空。
+# 行为层由 demand-price.test.ts 守（含「2 个人比 1 个人贵」那条用户原话）。
+# ⚠️ Go 侧断言一律用 `[[:space:]]+` 容空白：本仓没有 gofmt 门禁，catalog_engine.go
+#    还带着大量既存格式漂移 —— 钉死空格数会造出假红。
+if [ -f apps/mobile/src/surfaces/demand-wizard.tsx ]; then
+  DPE_B=0
+  # ① 价格不再是用户输入项。
+  if grep -qF 'value={specs.price}' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-PRICE-ENGINE-001]: 价格输入框回来了 —— 价要系统算，不许用户自己编。" >&2
+    DPE_B=1
+  fi
+  if grep -qF 'styles.negoBtn' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-PRICE-ENGINE-001]: 「可协商」开关回来了 —— 价是算出来的，没有可谈的空间。" >&2
+    DPE_B=1
+  fi
+  # 正面：价格段还在（别靠把整段删掉来让上面两条过 —— 那会把报价一起删没）。
+  if ! grep -qF 'title="价格"' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-PRICE-ENGINE-001]: 价格段没了 —— 报价分解要在这一屏看得见。" >&2
+    DPE_B=1
+  fi
+  # ② 价只能来自统一管线（向导不许另写一张价格表）。
+  for dpe_call in 'demandPriceQuote(' 'demandPriceToWire(' 'tierUpliftLabel('; do
+    if ! grep -qF "$dpe_call" apps/mobile/src/surfaces/demand-wizard.tsx; then
+      echo "  FAIL [DEMAND-PRICE-ENGINE-001]: 向导没接统一管线（缺 ${dpe_call}）—— 价格又变成这一屏自己算/自己填的。" >&2
+      DPE_B=1
+    fi
+  done
+  # ⚠️ 「向导里不许出现第二张价格表（`pricingRules`）」这条**不在这里**：向导第 55 行
+  # 的说明注释里就写着服务端那张表的类名（那是在解释这套价是从哪来的），而 shell 的
+  # `grep -qF` 不剥注释 ⇒ 会被自己的注释喂红（实测：这条把整块钉成常红，后面 9 条臂
+  # 全被同一个假红盖住，看着像"臂都验过了"）。按本仓分工交给 demand-price.test.ts 的
+  # stripComments 版断言（下面 require 了那个文件，删了它就红）。
+  # ③ 档位表来自服务端目录；客户端不许写死上浮率（写死 = 前端自己发奖励，服务端改表不生效）。
+  if ! grep -qF 'catalog?.qualityTiers' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-PRICE-ENGINE-001]: 向导没把服务端的档位表传进管线 —— 资历奖励永远是空的。" >&2
+    DPE_B=1
+  fi
+  if grep -qF 'upliftPermille:' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-PRICE-ENGINE-001]: 向导里写死了上浮率 —— 档位表是服务端的运营策略，不在客户端。" >&2
+    DPE_B=1
+  fi
+  # ④ 算不出来就不编价（契约里 TBD 不许带非零价）。
+  if ! grep -qF '{ price: "", moneyFlow: "TBD" }' apps/mobile/src/surfaces/demand-wizard.tsx; then
+    echo "  FAIL [DEMAND-PRICE-ENGINE-001]: 算不出价的兜底没了 —— 自定义需求 / 签证 / 法律 会被编一个数发出去。" >&2
+    DPE_B=1
+  fi
+  # 发布输入吃**算出来的价**，而不是草稿里那个旧手填值（界面显示系统价、发出去是旧值 = 假接线）。
+  if ! grep -qF 'computedPrice?.price ?? specs.price.trim()' apps/mobile/src/demand-moments.ts ||
+     ! grep -qF 'computedPrice?.moneyFlow ?? "EARN"' apps/mobile/src/demand-moments.ts; then
+    echo "  FAIL [DEMAND-PRICE-ENGINE-001]: 发布输入没用算出来的价 —— 界面显示系统价、发出去还是旧手填值。" >&2
+    DPE_B=1
+  fi
+  # 服务端那份档位表 + 契约字段：只有前端接了、服务端不下发，档位永远空。
+  if ! grep -qE 'QualityTiers[[:space:]]+\[\]QualityTierRule' apps/api-go/internal/marketplace/catalog_engine.go ||
+     ! grep -qF '"qualityTiers"' apps/api-go/internal/marketplace/catalog_engine.go; then
+    echo "  FAIL [DEMAND-PRICE-ENGINE-001]: 服务端目录没有下发 qualityTiers —— 履约/评分奖励接不上。" >&2
+    DPE_B=1
+  fi
+  if ! grep -qF '"qualityTiers": snap.QualityTiers' apps/api-go/internal/marketplace/service.go; then
+    echo "  FAIL [DEMAND-PRICE-ENGINE-001]: 档位表在 dispatch 层被丢了 —— 服务端算了，客户端收不到。" >&2
+    DPE_B=1
+  fi
+  if ! grep -qE 'qualityTiers[[:space:]]*:' packages/contracts/src/index.ts; then
+    echo "  FAIL [DEMAND-PRICE-ENGINE-001]: 契约没有 qualityTiers —— 字段过不了校验，客户端拿不到。" >&2
+    DPE_B=1
+  fi
+  if [ "$DPE_B" -eq 0 ]; then
+    pnpm --dir apps/mobile exec vitest run src/demand-price.test.ts >/dev/null || {
+      echo "  FAIL [DEMAND-PRICE-ENGINE-001]: 统一管线的测试红了 —— 档位解析 / 资历档 / 总价被改坏了。" >&2
+      exit 1
+    }
+    # 服务端侧：档位表的形状与「从高到低」排序。失败要自己报 ID（下面 require_test 会打）。
+    require_test "DEMAND-PRICE-ENGINE-001" "./internal/marketplace" \
+      "TestQualityTierTableIsWellFormed" \
+      "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+    require_test "DEMAND-PRICE-ENGINE-001" "./internal/marketplace" \
+      "TestListOpportunityTemplatesShipsWholeEngine" \
+      "apps/api-go/internal/marketplace/service_test.go" || exit $?
+    echo "    DEMAND-PRICE-ENGINE-001: PASS (价由统一管线算 · 无输入框/无协商 · 履约评分是上浮奖励 · 算不出不编价 · 服务端下发档位表)"
   else
     exit 1
   fi

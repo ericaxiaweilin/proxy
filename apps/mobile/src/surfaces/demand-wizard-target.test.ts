@@ -42,10 +42,17 @@ describe("DEMAND-TARGET-KEEP-001 搭子选择跟着需求走", () => {
   });
 
   it("向导接线：发布调用把选中的人传进去，不再是两参调用", () => {
-    expect(wizard).toContain("buildDemandPublishInput(template, specs, targetAgent?.agentId)");
-    // 反面：改动前的两参调用（选择被丢在半路）不许回来。
+    // 钉「调用点」，不钉「某一行字面量」：这条原本钉的是单行三参调用，接上动态
+    // 报价后调用变成跨行四参（第 4 个参数是算出来的价），单行 toContain 会假红 ——
+    // 而改动其实是对的。用带空白容忍的正则，跨行/重排都不会误报。
+    //
+    // ① 形态：还是 template, specs 起手（两参调用是被钉掉的形状，见 ③）。
+    expect(wizard).toMatch(/buildDemandPublishInput\(\s*template,\s*specs,/);
+    // ② 接线：第三个参数是选中的搭子。只测 ① 的话「向导没接线」照样绿。
+    expect(wizard).toMatch(/buildDemandPublishInput\([\s\S]{0,200}?targetAgent\?\.agentId/);
+    // ③ 反面：改动前的两参调用（选择被丢在半路）不许回来。
     // 注意这不是 ① 那种行为断言能覆盖的 —— helper 是对的，是调用点没接线。
-    expect(wizard).not.toContain("buildDemandPublishInput(template, specs)");
+    expect(wizard).not.toMatch(/buildDemandPublishInput\(\s*template,\s*specs\s*\)/);
   });
 
   it("定向只由「直接约」决定；点回「等接单」就是公开", () => {

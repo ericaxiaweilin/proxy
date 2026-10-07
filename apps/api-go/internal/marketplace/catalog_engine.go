@@ -136,12 +136,17 @@ var momentPolicies = map[string]MomentPolicy{
 	"shopping": {Mode: "Moment", Ratio: "1:1", RatioText: "默认 1:1", Fixed: true, Groups: []string{"1 人"}, Prefs: []MomentPreference{
 		{Key: "style", Label: "方式", Options: []MomentPrefOption{{Value: "随意逛", Add: 0}, {Value: "帮选购", Add: 50}}},
 	}},
-	"movie": {Mode: "Moment", Ratio: "1:1", RatioText: "固定 1:1", Fixed: true, Groups: []string{"1 人"}, Prefs: nil},
+	// ⚠️ 无偏好的模板要写**空切片**，不能留 nil：Go 的 encoding/json 把 nil slice
+	// 编成 `null`，而契约里 prefs 是「数组或不存在」—— `null` 会让客户端整包
+	// safeParse 失败（listCatalog 直接抛），整个 R58 目录引擎静默降级。
+	// 2026-10-07 实测：就是这三条把 market.tsx 的动态报价卡和发布向导的系统算价
+	// 一起打成空转（改前全仓没人发现，因为两处都是「优雅降级」）。
+	"movie": {Mode: "Moment", Ratio: "1:1", RatioText: "固定 1:1", Fixed: true, Groups: []string{"1 人"}, Prefs: []MomentPreference{}},
 	"explore": {Mode: "Moment", Ratio: "1:1", RatioText: "默认 1:1", Fixed: true, Groups: []string{"1 人"}, Prefs: []MomentPreference{
 		{Key: "style", Label: "方式", Options: []MomentPrefOption{{Value: "随意探店", Add: 0}, {Value: "拍照记录", Add: 50}}},
 	}},
-	"sport": {Mode: "Moment", Ratio: "≤ 4:1", RatioText: "按项目容量匹配", Fixed: false, Groups: []string{"1 人", "2 人", "3–4 人"}, Prefs: nil},
-	"translate": {Mode: "Professional", Ratio: "按任务", RatioText: "专业服务按任务容量", Fixed: false, Groups: []string{"1 人"}, Prefs: nil},
+	"sport": {Mode: "Moment", Ratio: "≤ 4:1", RatioText: "按项目容量匹配", Fixed: false, Groups: []string{"1 人", "2 人", "3–4 人"}, Prefs: []MomentPreference{}},
+	"translate": {Mode: "Professional", Ratio: "按任务", RatioText: "专业服务按任务容量", Fixed: false, Groups: []string{"1 人"}, Prefs: []MomentPreference{}},
 }
 
 // PricingRule is the per-card dynamic price engine. Map keys must be a
@@ -168,6 +173,36 @@ var pricingRules = map[string]PricingRule{
 	"sunset-coffee":  {Duration: map[string]int{"1.5 小时": -20, "2 小时": 0}, Time: map[string]int{"17:00–19:00": 20, "17:30–19:30": 30}, Group: map[string]int{"1 人": 0}},
 	"film-walk":      {Duration: map[string]int{"2 小时": 0, "3 小时": 90}, Time: map[string]int{"09:00–12:00": 0, "14:00–17:00": 20}, Group: map[string]int{"1 人": 0}},
 	"night-ktv":      {Duration: map[string]int{"2 小时": 0, "3 小时": 100}, Time: map[string]int{"20:00–22:00": 30, "20:00–23:00": 70, "22:00 后": 100}, Group: map[string]int{"1 人": 0}},
+}
+
+// QualityTierRule is the 资历档 pricing rule — the reward for actually
+// doing the work well. A companion whose REAL quality signals clear the
+// floors earns an uplift on the computed price; the tier NAME is shown
+// to the requester, the raw score never is.
+//
+// ⚠️ It deliberately does NOT read matching.Score's Total. That score
+// takes price/budget as inputs (matching.go: Score(signals, price,
+// budget)), so feeding it back into a price is a cycle. Only raw quality
+// signals (fulfillment / satisfaction / completed orders) may drive money.
+//
+// Ordered best-first; first match wins. No match = the base tier with no
+// uplift: an unproven companion is never credited with a track record
+// they do not have (same rule as the 「新人」 label on the cards).
+type QualityTierRule struct {
+	Key             string  `json:"key"`
+	Label           string  `json:"label"`           // 展示档位名，原始分不外露
+	MinFulfillment  float64 `json:"minFulfillment"`  // 0..1
+	MinSatisfaction float64 `json:"minSatisfaction"` // 0..1
+	MinOrders       int     `json:"minOrders"`
+	UpliftPermille  int     `json:"upliftPermille"` // +250 = 上浮 25%
+}
+
+// qualityTiers are operator policy, not app constants: they ship with the
+// catalog so the thresholds can move without an app release. The numbers
+// are a first cut — 履约/满意 双达标 且 有真实单量 才给上浮。
+var qualityTiers = []QualityTierRule{
+	{Key: "veteran", Label: "资深", MinFulfillment: 0.95, MinSatisfaction: 0.9, MinOrders: 20, UpliftPermille: 250},
+	{Key: "skilled", Label: "熟练", MinFulfillment: 0.9, MinSatisfaction: 0.85, MinOrders: 5, UpliftPermille: 100},
 }
 
 // resolveTemplate looks a card up by ID.
@@ -213,6 +248,9 @@ type catalogSnapshot struct {
 	Specs     []MomentSpecs         `json:"specs"`
 	Policies  []MomentPolicy        `json:"policies"`
 	Pricing   []PricingRule        `json:"pricing"`
+	// 资历档规则（DEMAND-PRICE-ENGINE-001）：与模板无关的一张全局表 ——
+	// 履约/评分达标的人算价时上浮，档位名可见、原始分不露。
+	QualityTiers []QualityTierRule `json:"qualityTiers"`
 	// OPP-CATALOG-002 (R58 activity line): creation-flow presets.
 	ActivityPresets []ActivityPreset `json:"activityPresets"`
 }
@@ -222,7 +260,7 @@ type catalogSnapshot struct {
 // at a real template; every template must have specs + policy. Broken
 // cross-refs are a catalog bug — the guard test fails the build.
 func buildCatalogSnapshot() catalogSnapshot {
-	snap := catalogSnapshot{Templates: opportunityTemplates, Categories: templateCategories, ActivityPresets: activityPresets}
+	snap := catalogSnapshot{Templates: opportunityTemplates, Categories: templateCategories, QualityTiers: qualityTiers, ActivityPresets: activityPresets}
 	for _, t := range opportunityTemplates {
 		spec, hasSpec := momentSpecs[t.ID]
 		if hasSpec {

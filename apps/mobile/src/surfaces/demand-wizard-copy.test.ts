@@ -48,8 +48,10 @@ describe("DEMAND-WIZARD-COPY-001 发布需求页的用户可见文案", () => {
   it("搜索框示例不拿已撤掉的模板当范例", () => {
     const placeholders = [...wizard.matchAll(/placeholder="([^"]*)"/g)].map((match) => match[1]!);
     // 只数**字符串字面量**占位：搜索框的「例如：…」和备注的「补充说明（随订单展示）」。
-    // 价格输入那个是 `placeholder={template?.defaultPrice}`，表达式不是字面量，
-    // 也写不进一个已撤掉的能力名 —— 所以它不该被这条正则收进来。
+    // 场地输入那个是 `placeholder={template?.venue}`（表达式，取模板自带的场地名），
+    // 不是字面量，也写不进一个已撤掉的能力名 —— 所以它不该被这条正则收进来。
+    // （价格输入原本还有一个 `placeholder={template?.defaultPrice}`，2026-10-07 接上
+    // 系统定价后那个输入框整条删了，这里只剩场地这一个表达式占位。）
     expect(placeholders.length).toBeGreaterThanOrEqual(2);
     for (const placeholder of placeholders) {
       // 唱歌 = 2026-10-06 撤掉的 KTV 模板；KTV 顺带一起禁（同一条能力）。

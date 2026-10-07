@@ -157,11 +157,12 @@ func TestCatalogSnapshotSerializesWholeEngine(t *testing.T) {
 		t.Fatalf("marshal snapshot: %v", err)
 	}
 	var back struct {
-		Templates  []OpportunityTemplate `json:"templates"`
-		Categories []TemplateCategory    `json:"categories"`
-		Specs      []MomentSpecs         `json:"specs"`
-		Policies   []MomentPolicy        `json:"policies"`
-		Pricing    []PricingRule         `json:"pricing"`
+		Templates    []OpportunityTemplate `json:"templates"`
+		Categories   []TemplateCategory    `json:"categories"`
+		Specs        []MomentSpecs         `json:"specs"`
+		Policies     []MomentPolicy        `json:"policies"`
+		Pricing      []PricingRule         `json:"pricing"`
+		QualityTiers []QualityTierRule     `json:"qualityTiers"`
 	}
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatalf("unmarshal snapshot: %v", err)
@@ -179,6 +180,68 @@ func TestCatalogSnapshotSerializesWholeEngine(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "perPair") {
 		t.Fatal("pricing perPair missing from wire JSON")
+	}
+	if !strings.Contains(string(raw), "upliftPermille") {
+		t.Fatal("qualityTiers upliftPermille missing from wire JSON")
+	}
+	if len(back.QualityTiers) == 0 {
+		t.Fatal("qualityTiers lost in JSON round-trip")
+	}
+	// CATALOG-NULL-ARRAY-001（2026-10-07）：wire 上不许出现 `"prefs":null`。
+	//
+	// Go 把 nil slice 编成 `null`，契约里 prefs 是「数组或不存在」—— `null` 会让
+	// 客户端**整包** safeParse 失败：listCatalog() 直接抛，market.tsx 的动态报价卡
+	// 和发布向导的系统算价一起静默降级成「算不出价」。两处都是优雅降级，所以这个
+	// 缺陷可以一直没人发现 —— 实测 movie / sport / translate 三条就是 nil。
+	// 钉在**序列化后的字节**上，不钉 Prefs 字段：断言的是客户端真正收到的东西。
+	if strings.Contains(string(raw), `"prefs":null`) {
+		t.Fatal(`catalog wire JSON contains "prefs":null — 客户端整包校验会失败，价格引擎静默降级`)
+	}
+	// 正面：三条无偏好的模板必须以**空数组**出现（既不是 null，也不是被省略 ——
+	// 省略会掩盖「这条本来就没偏好」这个事实）。
+	if !strings.Contains(string(raw), `"prefs":[]`) {
+		t.Fatal(`catalog wire JSON lost the empty-prefs array form`)
+	}
+}
+
+// DEMAND-PRICE-ENGINE-001：资历档是**运营策略**，写错了会直接改钱 ——
+// 这条钉住表本身的形状，不钉具体阈值（阈值就是要能随时调的）。
+func TestQualityTierTableIsWellFormed(t *testing.T) {
+	if len(qualityTiers) == 0 {
+		t.Fatal("qualityTiers is empty — 履约/评分奖励没接上")
+	}
+	seenKey := map[string]bool{}
+	seenLabel := map[string]bool{}
+	for i, tier := range qualityTiers {
+		if tier.Key == "" || tier.Label == "" {
+			t.Fatalf("tier missing key/label: %+v", tier)
+		}
+		if seenKey[tier.Key] {
+			t.Fatalf("duplicate tier key %s", tier.Key)
+		}
+		if seenLabel[tier.Label] {
+			t.Fatalf("duplicate tier label %s（档位名要能区分，否则用户看不出贵在哪）", tier.Label)
+		}
+		seenKey[tier.Key] = true
+		seenLabel[tier.Label] = true
+		// 上浮必须是**正数**：这是给干得好的人的奖励，不是惩罚。
+		if tier.UpliftPermille <= 0 {
+			t.Fatalf("tier %s uplift must be positive, got %d", tier.Key, tier.UpliftPermille)
+		}
+		if tier.MinFulfillment < 0 || tier.MinFulfillment > 1 || tier.MinSatisfaction < 0 || tier.MinSatisfaction > 1 {
+			t.Fatalf("tier %s rates must be 0..1: %+v", tier.Key, tier)
+		}
+		if tier.MinOrders < 1 {
+			t.Fatalf("tier %s must require a real order count, got %d（无成交记录不许定级）", tier.Key, tier.MinOrders)
+		}
+		// 顺序即优先级（首个命中生效）⇒ 必须从高到低，否则低档会吃掉高档。
+		// 从高到低 = 门槛**单调不升**：后一档的门槛不许比前一档更严。
+		if i > 0 {
+			prev := qualityTiers[i-1]
+			if tier.MinOrders > prev.MinOrders || tier.MinFulfillment > prev.MinFulfillment {
+				t.Fatalf("qualityTiers must be ordered best-first; %s breaks the order", tier.Key)
+			}
+		}
 	}
 }
 

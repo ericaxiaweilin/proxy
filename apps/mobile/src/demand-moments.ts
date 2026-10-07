@@ -430,7 +430,13 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
   // 快照成定向，只对 TA 和 owner 可见、只收 TA 报名）。兄弟实现 market.tsx 一直在发
   // （targetAgent.agentId），**只有发布需求向导没接** —— 向导收了 selectedPerson、
   // 界面上还写着「意向人选：X」，发布出去的却永远是公开市场，选择被丢在半路。
-  targetUserId?: string | undefined
+  targetUserId?: string | undefined,
+  // DEMAND-PRICE-ENGINE-001：**系统算出来的价**（demand-price.ts 那条管线产出）。
+  // 不传 = 沿用 specs.price + EARN —— 老调用点与既有测试逐字节不变。
+  // 引擎没有这张卡的价目时（自定义需求 / 签证 / 法律 / 商务）调用方传
+  // `{ price: "", moneyFlow: "TBD" }`：契约里 TBD 不许带非零价，所以价必须是空串，
+  // 由服务端按 moneyFlow 推 opportunityPriceLabel —— 不编一个数糊上去。
+  computedPrice?: { price: string; moneyFlow: "EARN" | "TBD" } | undefined
 ): PublishMarketOpportunityInput {
   // DEMAND-HEADCOUNT-002：人数恒为 1–6 的选择（默认 1 人），发布行恒带「N 人」。
   // 老草稿的自由文本经 normalizeHeadcount 收敛（前导数字截断夹到 1–6），不再原样透传。
@@ -459,8 +465,8 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
     date: slot,
     time: time === "" ? template.defaultTime : time,
     location: specs.place.trim() === "" ? template.venue : specs.place.trim(),
-    price: specs.price.trim(),
-    moneyFlow: "EARN",
+    price: computedPrice?.price ?? specs.price.trim(),
+    moneyFlow: computedPrice?.moneyFlow ?? "EARN",
     skills,
     lens: ["NOW", "NEARBY"],
     ...(notes === "" ? {} : { desc: notes.slice(0, 500) }),
