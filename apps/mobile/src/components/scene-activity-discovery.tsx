@@ -423,6 +423,31 @@ export function SceneActivityDiscovery({
   // SCENE-HOME-CARD-FLOW-001（2026-09-24，用户：「旧的卡片点击要保持和新版本卡片一样的流程」）：
   // Moment 卡点击不再进旧详情浮层，直接走入口卡同一套 —— 按动作找分类 entry，进场景目录
   // （列表 → 单店详情）。该动作没有真实场景（没 entry）才回退旧详情浮层。
+  const renderEntryCard = (entry: (typeof entries)[number]): React.JSX.Element => {
+        const photo = absoluteNetworkURL(apiBaseUrl ?? "", entry.imageUrl);
+        const sub = [entry.visitedTotal > 0 ? `${entry.visitedTotal} 人去过` : "", ...entry.areas].filter(Boolean).join(" · ");
+        return <Pressable accessibilityLabel={`场景分类 ${entry.label} · ${entry.count} ${entry.unit}`} key={entry.actionId} onPress={() => setDirectoryEntry(entry)} style={styles.entryCard}>
+          {photo ? <Image contentFit="cover" source={{ uri: photo }} style={styles.entryPhoto} /> : <View style={[styles.photoPending, styles.entryPhoto]} />}
+          <Svg height="100%" pointerEvents="none" style={styles.entryShade} width="100%">
+            <Defs>
+              <SvgLinearGradient id={`sceneEntryShade-${entry.actionId}`} x1="0" x2="0" y1="0" y2="1">
+                <Stop offset="0" stopColor="#000000" stopOpacity={0} />
+                <Stop offset="0.62" stopColor="#000000" stopOpacity={0} />
+                <Stop offset="1" stopColor="#000000" stopOpacity={0.48} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect fill={`url(#sceneEntryShade-${entry.actionId})`} height="100%" width="100%" x="0" y="0" />
+          </Svg>
+          <View style={styles.entryCountPill}>
+            <Text selectable style={styles.entryCountText}>{entry.count} {entry.unit}</Text>
+            <Text selectable style={styles.entryCountChevron}>›</Text>
+          </View>
+          <View style={styles.entryContent}>
+            <Text selectable style={styles.entryTitle}>{entry.label}</Text>
+            {sub ? <Text selectable style={styles.entrySub}>{sub}</Text> : null}
+          </View>
+        </Pressable>;
+  };
   const renderMomentCard = (moment: MomentSeed, home = false): React.JSX.Element => {
     const live = liveSceneFor(moment.scene);
     const action = taxon(ACTIONS, moment.action);
@@ -496,31 +521,7 @@ export function SceneActivityDiscovery({
           两行 —— 后端没有这两项的数据源，不做。
           没有任何真实场景时整块不出 —— 首页不再拿本地 MOMENTS fixture 当内容。
           Moment 大图卡整体挪进「动作分类」页右侧列表，之前那版的设计没有丢。 */}
-      {visibleEntries.length > 0 ? <View style={styles.entryList}>{visibleEntries.map((entry) => {
-        const photo = absoluteNetworkURL(apiBaseUrl ?? "", entry.imageUrl);
-        const sub = [entry.visitedTotal > 0 ? `${entry.visitedTotal} 人去过` : "", ...entry.areas].filter(Boolean).join(" · ");
-        return <Pressable accessibilityLabel={`场景分类 ${entry.label} · ${entry.count} ${entry.unit}`} key={entry.actionId} onPress={() => setDirectoryEntry(entry)} style={styles.entryCard}>
-          {photo ? <Image contentFit="cover" source={{ uri: photo }} style={styles.entryPhoto} /> : <View style={[styles.photoPending, styles.entryPhoto]} />}
-          <Svg height="100%" pointerEvents="none" style={styles.entryShade} width="100%">
-            <Defs>
-              <SvgLinearGradient id={`sceneEntryShade-${entry.actionId}`} x1="0" x2="0" y1="0" y2="1">
-                <Stop offset="0" stopColor="#000000" stopOpacity={0} />
-                <Stop offset="0.62" stopColor="#000000" stopOpacity={0} />
-                <Stop offset="1" stopColor="#000000" stopOpacity={0.48} />
-              </SvgLinearGradient>
-            </Defs>
-            <Rect fill={`url(#sceneEntryShade-${entry.actionId})`} height="100%" width="100%" x="0" y="0" />
-          </Svg>
-          <View style={styles.entryCountPill}>
-            <Text selectable style={styles.entryCountText}>{entry.count} {entry.unit}</Text>
-            <Text selectable style={styles.entryCountChevron}>›</Text>
-          </View>
-          <View style={styles.entryContent}>
-            <Text selectable style={styles.entryTitle}>{entry.label}</Text>
-            {sub ? <Text selectable style={styles.entrySub}>{sub}</Text> : null}
-          </View>
-        </Pressable>;
-      })}</View> : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>附近还没有接入真实场景</Text><Text selectable style={styles.emptyText}>场景目录接上后这里会显示分类入口。</Text></View>}
+      {visibleEntries.length > 0 ? <View style={styles.entryList}>{visibleEntries.map(renderEntryCard)}</View> : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>附近还没有接入真实场景</Text><Text selectable style={styles.emptyText}>场景目录接上后这里会显示分类入口。</Text></View>}
 
       {/* SPORT-BADMINTON-001（2026-09-25，用户：「home 场景加一个运动·羽毛球卡片，
           点击进入这个 原型给你了」；紧接着「大卡片怎么成了 list 了」）：运动 · 羽毛球入口。
@@ -693,7 +694,10 @@ export function SceneActivityDiscovery({
                     SCENE-HOME-ENTRY-001（2026-09-24）：这一列从「小行卡片」换成这套
                     大图卡 —— 首页那格让给场景入口卡之后，Moment 浏览整条挪进来，
                     内容与交互原样保留，只是换了个入口。 */}
-                {filtered.length > 0 ? filtered.map((moment) => renderMomentCard(moment)) : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>这类还没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个金额/时间/场合筛选，看看更多组合。</Text></View>}
+                {/* 选了动作且该动作有真实场地：直接摆场地入口卡（点进去就是场地列表）；
+                    运动没有 Moment 种子，不摆这个就是一块空白（2026-10-08）。 */}
+                {actionId && entriesForAction.length > 0 ? entriesForAction.map(renderEntryCard) : null}
+                {filtered.length > 0 ? filtered.map((moment) => renderMomentCard(moment)) : entriesForAction.length > 0 && actionId ? null : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>这类还没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个金额/时间/场合筛选，看看更多组合。</Text></View>}
               </ScrollView>
             </View>
 
