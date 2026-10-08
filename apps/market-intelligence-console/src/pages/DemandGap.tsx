@@ -41,7 +41,7 @@ const hrs = (h: number): string => (h >= 48 ? `${(h / 24).toFixed(1)} 天` : `${
 const MODE: Record<string, string> = { FAST: "快速发单" };
 const mode = (m: string): string => (m ? MODE[m] ?? m : DASH);
 
-export function DemandGap() {
+export function DemandGap({ onPreview }: { onPreview?: ((opportunityId: string) => void) | undefined }) {
   const [days, setDays] = useState<number>(30);
   const [data, setData] = useState<Payload | null>(null);
 
@@ -139,10 +139,10 @@ export function DemandGap() {
           </div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>单</th><th>主题</th><th>标题</th><th className="numc">价格</th><th>片区</th><th className="numc">已等</th><th>模式</th></tr></thead>
+              <thead><tr><th>单</th><th>主题</th><th>标题</th><th className="numc">价格</th><th>片区</th><th className="numc">已等</th><th>模式</th>{onPreview ? <th></th> : null}</tr></thead>
               <tbody>
                 {gap.unfilled.length === 0
-                  ? <tr><td>{DASH}</td><td colSpan={6} style={META}>窗口内没有超过 24 小时没人报名的单</td></tr>
+                  ? <tr><td>{DASH}</td><td colSpan={onPreview ? 7 : 6} style={META}>窗口内没有超过 24 小时没人报名的单</td></tr>
                   : gap.unfilled.map((u) => (
                     <tr key={u.id}>
                       <td><b>{u.id}</b></td>
@@ -152,6 +152,11 @@ export function DemandGap() {
                       <td>{u.cell || DASH}</td>
                       <td className="numc">{hrs(u.ageHours)}</td>
                       <td>{mode(u.matchingMode)}</td>
+                      {onPreview ? (
+                        <td>
+                          <button onClick={() => onPreview(u.id)} style={{ padding: "3px 8px", fontSize: 10 }}>预览</button>
+                        </td>
+                      ) : null}
                     </tr>
                   ))}
               </tbody>

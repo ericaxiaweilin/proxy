@@ -73,9 +73,13 @@ export function App() {
   // OPS-REAL-001：页面取数时遇到 未登录 / 非运营 / 未接入，由这里统一展示；换页清空，登录后整页重取。
   const [status, setStatus] = useState<OpStatus | undefined>(undefined);
   const [reload, setReload] = useState(0);
+  // 从需求缺口页点「预览」带过来的单号；只在跳转那一次用，直接走菜单进「撮合预览」时要清空，
+  // 否则表单会停在上一张单上。
+  const [previewId, setPreviewId] = useState<string | undefined>(undefined);
   const [who, setWho] = useState(() => readOpsSession()?.userAccountId);
   useEffect(() => onOpStatus(setStatus), []);
   const setPage = (next: Page): void => { setStatus(undefined); setPageRaw(next); };
+  const navTo = (next: Page): void => { if (next === "matchpreview") setPreviewId(undefined); setPage(next); };
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -84,43 +88,43 @@ export function App() {
         <div className="navgroup">工作台</div>
         <div className="nav">
           {(["dispatch", "marketboard", "storeboard", "moderation", "matchpreview"] as Page[]).map((p) => (
-            <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
+            <button key={p} className={page === p ? "active" : ""} onClick={() => navTo(p)}>{TITLES[p]}</button>
           ))}
         </div>
         <div className="navgroup">Intelligence</div>
         <div className="nav">
           {(["overview", "population", "behavior", "tags", "intent", "orchestration", "demandgap", "insights"] as Page[]).map((p) => (
-            <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
+            <button key={p} className={page === p ? "active" : ""} onClick={() => navTo(p)}>{TITLES[p]}</button>
           ))}
         </div>
         <div className="navgroup">Decision Engine</div>
         <div className="nav">
           {(["engine", "engineapi", "matching"] as Page[]).map((p) => (
-            <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
+            <button key={p} className={page === p ? "active" : ""} onClick={() => navTo(p)}>{TITLES[p]}</button>
           ))}
         </div>
         <div className="navgroup">Context & Experience</div>
         <div className="nav">
           {(["contextfield", "surface", "research"] as Page[]).map((p) => (
-            <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
+            <button key={p} className={page === p ? "active" : ""} onClick={() => navTo(p)}>{TITLES[p]}</button>
           ))}
         </div>
         <div className="navgroup">Market Execution</div>
         <div className="nav">
           {(["clarification", "supplyactivation", "executionruntime", "fulfillmentattr"] as Page[]).map((p) => (
-            <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
+            <button key={p} className={page === p ? "active" : ""} onClick={() => navTo(p)}>{TITLES[p]}</button>
           ))}
         </div>
         <div className="navgroup">Market</div>
         <div className="nav">
           {(["providers", "numberlookup", "merchant", "retention", "trust"] as Page[]).map((p) => (
-            <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
+            <button key={p} className={page === p ? "active" : ""} onClick={() => navTo(p)}>{TITLES[p]}</button>
           ))}
         </div>
         <div className="navgroup">Data</div>
         <div className="nav">
           {(["quality", "workbench"] as Page[]).map((p) => (
-            <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
+            <button key={p} className={page === p ? "active" : ""} onClick={() => navTo(p)}>{TITLES[p]}</button>
           ))}
         </div>
         {/* OPS-ACCESS-001：谁能做什么，得能看见。放在最后是因为它讲的是这个控制台
@@ -128,7 +132,7 @@ export function App() {
         <div className="navgroup">运营权限</div>
         <div className="nav">
           {(["access"] as Page[]).map((p) => (
-            <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
+            <button key={p} className={page === p ? "active" : ""} onClick={() => navTo(p)}>{TITLES[p]}</button>
           ))}
         </div>
         <div className="sidebar-foot">
@@ -179,9 +183,9 @@ export function App() {
           {/* OPS-MODERATION-001：举报队列与处置（处置只记录，不执行下架 / 封号） */}
           {page === "moderation" && <Moderation />}
           {/* OPS-MATCH-PREVIEW-001：撮合预览 —— 这张单此刻会邀谁、为什么（只读） */}
-          {page === "matchpreview" && <MatchPreview />}
+          {page === "matchpreview" && <MatchPreview key={previewId} initialId={previewId} />}
           {/* OPS-INSIGHT-001：需求缺口（供需并排、不给比值）与用户洞察（标签分群，小格子抑制） */}
-          {page === "demandgap" && <DemandGap />}
+          {page === "demandgap" && <DemandGap onPreview={(id) => { setPreviewId(id); setPage("matchpreview"); }} />}
           {page === "insights" && <Insights />}
           {page === "retention" && <Retention />}
           {page === "trust" && <Trust />}

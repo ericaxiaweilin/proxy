@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { opFetch, OpStatusError } from "../lib/api";
 
 // OPS-MATCH-PREVIEW-001（2026-10-08）：撮合预览 —— 一张还没人接的单，引擎此刻会按什么顺序邀谁。
@@ -55,8 +55,8 @@ const parts = (b: Breakdown): string => {
 
 const tagName = (t: SharedTag): string => `${t.label}·${t.value}`.replace(/_/g, " ");
 
-export function MatchPreview() {
-  const [opportunityId, setOpportunityId] = useState("");
+export function MatchPreview({ initialId }: { initialId?: string | undefined }) {
+  const [opportunityId, setOpportunityId] = useState(initialId ?? "");
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState<Payload | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -76,6 +76,13 @@ export function MatchPreview() {
       setBusy(false);
     }
   };
+
+  // 从需求缺口页带编号跳过来：挂载即查一次，走的就是点「查看」那条路。
+  // App 用 key={编号} 重挂本页，所以这里只在挂载时跑，不跟输入框里的改动联动。
+  useEffect(() => {
+    if (initialId) void look();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const live: Preview | undefined = data?.dataSource === "LIVE" ? data?.preview : undefined;
 
