@@ -12,7 +12,10 @@ import { fetchExperienceMetrics, opFetch, type ExperienceMetrics } from "../lib/
 type Population = { kpis: Record<string, number>; windowDays: number; genderMissing?: string };
 type Behavior = { events: Record<string, number>; windowDays: number; topInterestMissing?: string };
 // OPS-RETENTION-001：复购这一格以前在「未接入」那一列里，现在接的是真读模型
-type Retention = { dataSource: string; retention: { windowDays: number; requesters: number; repeatRequesters: number; repeatRequesterRate: number } };
+// OPS-DATA-ENV-001：repeatRequesterRate 是 number | null —— null 表示「这一轮不给比率」
+// （数据环境没声明成生产，或分母是 0）。这一格必须显示「不给数」而不是 0%：这一页是默认
+// 落地页，一个假的百分比比空白传播得更远。
+type Retention = { dataSource: string; retention: { windowDays: number; requesters: number; repeatRequesters: number; realRequesters: number; realRepeatRequesters: number; repeatRequesterRate: number | null } };
 
 // 这些是规格里有、后端还没有对应模块的指标。列出来是为了让「空」是有原因的，
 // 不是忘了画。
@@ -66,9 +69,9 @@ export function Overview() {
             同期群留存不在这里 —— 库里窗口前没有可比人群，硬算就是编。 */}
         <div className="kpi">
           <div className="label">30D 复购（需求方）</div>
-          <div className="value">{ret && ret.retention.requesters > 0 ? `${ret.retention.repeatRequesterRate}%` : "—"}</div>
+          <div className="value">{ret ? (ret.retention.repeatRequesterRate === null ? "不给数" : `${ret.retention.repeatRequesterRate}%`) : "—"}</div>
           <div className="meta">
-            {ret ? `${ret.retention.repeatRequesters.toLocaleString()} / ${ret.retention.requesters.toLocaleString()} 个下单的人 · GET /v1/operator/retention` : "GET /v1/operator/retention"}
+            {ret ? `${ret.retention.realRepeatRequesters.toLocaleString()} / ${ret.retention.realRequesters.toLocaleString()} 个能追溯到账号的下单人 · GET /v1/operator/retention` : "GET /v1/operator/retention"}
           </div>
         </div>
         {NOT_CONNECTED.map(([label, missing]) => (

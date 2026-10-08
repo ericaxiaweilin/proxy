@@ -101,11 +101,15 @@ func (s *Server) operatorAccess(w http.ResponseWriter, r *http.Request) {
 		"principals": principals,
 		"me":         me,
 		"audit":      audit,
+		// OPS-DATA-ENV-001：这一页是「系统当前到底怎么配的」唯一的可观测面，数据环境声明漏在
+		// 这里就等于漏在整个后台里没人知道 —— 而它决定了比率型指标给不给看。
+		"dataEnv": dataEnvStatus(),
 		"notes": []string{
 			"授权只读：白名单与 scope 收窄都来自 env（PROXY_OPERATOR_PRINCIPALS / PROXY_OPERATOR_SCOPES），改完要重启 api。",
 			"没有条目的白名单账号 = 持全部 scope（接 scope 配置之前的老行为）；配成空集 = 明确全拒。两者相反。",
 			"带 role=OPERATOR 的会话也算运营，但它在 env 里不可寻址，所以恒持全部 scope —— 这是一个已知缺口，收紧它只能靠静默断运营，故没做。",
 			"业务数据页（逐人明细、行为信号、引力状态）要 ANALYTICS；只有这一页不要 —— 被收窄的运营也得看得见自己有什么权限，否则权限模型只能靠猜。",
+			"数据环境（PROXY_OPERATOR_DATA_ENV）不是权限，是「这套读数出自哪一套数据」的声明：没声明成 production 时比率型指标一律不给，只给原始计数。",
 		},
 	})
 }

@@ -31,11 +31,32 @@ func TestWarningsAllExpectedWhenNoEnv(t *testing.T) {
 			"DATABASE_URL is unset",
 			"PROXY_LOGIN_PROVIDER is unset",
 			"PROXY_OPERATOR_PRINCIPALS is unset",
+			"PROXY_OPERATOR_DATA_ENV is unset",
 			"MODELSTACK_* is partially or fully unset",
 			"OBJECT_STORAGE_ENDPOINT is unset",
 		} {
 			if !strings.Contains(joined, needle) {
 				t.Fatalf("missing warning %q in: %s", needle, joined)
+			}
+		}
+	})
+}
+
+// OPS-DATA-ENV-001：非 production 的声明必须也被说出来。「设了但设错」比「没设」更危险 ——
+// 没设的时候控制台只会拒绝，设成 prod/Production 这种手误时人以为自己已经打开了那一页。
+func TestWarningsFlagNonProductionDataEnv(t *testing.T) {
+	for _, value := range []string{"prod", "Production", "PRODUCTION", "dev", "staging"} {
+		withEnv(t, map[string]string{"PROXY_OPERATOR_DATA_ENV": value}, func() {
+			joined := strings.Join(Warnings(), "\n")
+			if !strings.Contains(joined, `not "production"`) {
+				t.Fatalf("PROXY_OPERATOR_DATA_ENV=%q 不该被当成生产，得警告：\n%s", value, joined)
+			}
+		})
+	}
+	withEnv(t, map[string]string{"PROXY_OPERATOR_DATA_ENV": "production"}, func() {
+		for _, w := range Warnings() {
+			if strings.Contains(w, "PROXY_OPERATOR_DATA_ENV") {
+				t.Fatalf("声明成 production 之后不该再有数据环境警告：%s", w)
 			}
 		}
 	})
@@ -47,6 +68,7 @@ func TestWarningsAllClearWhenProdEnvIsSet(t *testing.T) {
 		"PROXY_LOGIN_PROVIDER":         "smtp",
 		"PROXY_SMTP_HOST":              "smtp.example.com",
 		"PROXY_OPERATOR_PRINCIPALS":    "prin_alice,prin_bob",
+		"PROXY_OPERATOR_DATA_ENV":      "production",
 		"MODELSTACK_CONTROL_PLANE_URL": "http://cp:14041",
 		"MODELSTACK_GATEWAY_URL":       "http://gw:14042",
 		"MODELSTACK_GATEWAY_API_KEY":   "secret",
@@ -109,9 +131,9 @@ func TestWarningsRemindsOperatorToRestrictCloudflareOrigin(t *testing.T) {
 
 func TestWarningsDetectsInvalidPoolBoundsAndSemver(t *testing.T) {
 	withEnv(t, map[string]string{
-		"PROXY_DB_MAX_CONNS":      "1000",
-		"PROXY_DB_MIN_CONNS":      "99",
-		"PROXY_MIN_APP_VERSION":   "not-semver",
+		"PROXY_DB_MAX_CONNS":        "1000",
+		"PROXY_DB_MIN_CONNS":        "99",
+		"PROXY_MIN_APP_VERSION":     "not-semver",
 		"PROXY_TRUST_CLOUDFLARE_IP": "false",
 	}, func() {
 		joined := strings.Join(Warnings(), "\n")
@@ -177,6 +199,7 @@ func TestProductionDocCoversEveryWarning(t *testing.T) {
 			"DATABASE_URL",
 			"PROXY_LOGIN_PROVIDER",
 			"PROXY_OPERATOR_PRINCIPALS",
+			"PROXY_OPERATOR_DATA_ENV",
 			"MODELSTACK_",
 			"OBJECT_STORAGE_ENDPOINT",
 			"PROXY_TRUST_CLOUDFLARE_IP",
