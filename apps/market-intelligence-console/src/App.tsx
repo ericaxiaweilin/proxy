@@ -33,8 +33,9 @@ import { AuthorityRequests } from "./pages/AuthorityRequests";
 import { MatchPreview } from "./pages/MatchPreview";
 import { DemandGap } from "./pages/DemandGap";
 import { Insights } from "./pages/Insights";
+import { Providers } from "./pages/Providers";
 
-type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "marketboard" | "storeboard" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access" | "moderation" | "appeals" | "authority" | "matchpreview" | "demandgap" | "insights";
+type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "marketboard" | "storeboard" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access" | "moderation" | "appeals" | "authority" | "matchpreview" | "demandgap" | "insights" | "providerprofiles";
 
 const TITLES: Record<Page, string> = {
   overview: "平台总览",
@@ -70,6 +71,7 @@ const TITLES: Record<Page, string> = {
   matchpreview: "撮合预览",
   demandgap: "需求缺口",
   insights: "用户洞察",
+  providerprofiles: "小美画像",
 };
 
 export function App() {
@@ -97,7 +99,7 @@ export function App() {
         </div>
         <div className="navgroup">Intelligence</div>
         <div className="nav">
-          {(["overview", "population", "behavior", "tags", "intent", "orchestration", "demandgap", "insights"] as Page[]).map((p) => (
+          {(["overview", "population", "behavior", "tags", "intent", "orchestration", "demandgap", "insights", "providerprofiles"] as Page[]).map((p) => (
             <button key={p} className={page === p ? "active" : ""} onClick={() => navTo(p)}>{TITLES[p]}</button>
           ))}
         </div>
@@ -195,6 +197,7 @@ export function App() {
           {/* OPS-INSIGHT-001：需求缺口（供需并排、不给比值）与用户洞察（标签分群，小格子抑制） */}
           {page === "demandgap" && <DemandGap onPreview={(id) => { setPreviewId(id); setPage("matchpreview"); }} />}
           {page === "insights" && <Insights />}
+          {page === "providerprofiles" && <Providers />}
           {page === "retention" && <Retention />}
           {page === "trust" && <Trust />}
           {page === "providers" && <ProviderApplications />}
@@ -202,7 +205,7 @@ export function App() {
           {page === "access" && <Access />}
           {page === "quality" && <Quality />}
           {page === "workbench" && <Quality />}
-          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "marketboard", "storeboard", "retention", "trust", "quality", "workbench", "numberlookup", "access", "moderation", "appeals", "authority", "matchpreview", "demandgap", "insights"].includes(page) && (
+          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "marketboard", "storeboard", "retention", "trust", "quality", "workbench", "numberlookup", "access", "moderation", "appeals", "authority", "matchpreview", "demandgap", "insights", "providerprofiles"].includes(page) && (
             <div className="notice">
               <b>{TITLES[page]}</b> — 已接线 19 页（v9 全量）。
             </div>
