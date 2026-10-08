@@ -53,6 +53,8 @@ const (
 	AxisOrderScenario    = "ORDER_SCENARIO"
 	AxisTimeSlot         = "TIME_SLOT"
 	AxisExpertiseService = "EXPERTISE_SERVICE"
+	// 行为模式（规则推导，不靠关键词）：应用使用强度与重心、聊天风格。值是 usage/… 、chat/… 路径。
+	AxisPattern = "PATTERN"
 )
 
 // Use 是读标签的人报上的用途（规格 §3.2 allowed_use）。
@@ -110,6 +112,7 @@ var axes = []Axis{
 	{AxisPriceBand, "消费价位", "NEUTRAL", 90 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 2, 1, false},
 	{AxisOrderScenario, "消费场景", "NEUTRAL", 90 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 2, 1, false},
 	{AxisTimeSlot, "下单时段偏好", "NEUTRAL", 90 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 2, 1, false},
+	{AxisPattern, "行为模式", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
 	// 供给侧：她实际完成过什么（比声明更可信）。
 	{AxisExpertiseService, "完成过的服务", "POSITIVE", 180 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 3, 1, false},
 }
@@ -178,6 +181,8 @@ type Tag struct {
 	ExpiresAt       time.Time `json:"expiresAt"`
 	ComputedAt      time.Time `json:"computedAt"`
 	RuleVersion     string    `json:"ruleVersion"`
+	// Label 是给人看的名字（词典里的中文名）；只在对外展示时填（BuildProfile / ListMyTags）。
+	Label string `json:"label,omitempty"`
 }
 
 // ID 是 axis:value，对人和日志都可读。
@@ -233,9 +238,31 @@ type Signal struct {
 	Explicit bool
 }
 
+// UsageEvidence：应用使用（SCREEN_VIEW / APP_SESSION）。ScreenMs 只含合法 screen id。
+type UsageEvidence struct {
+	ScreenMs    map[string]int64
+	SessionMs   int64 // 前台会话总时长
+	Sessions    int
+	ActiveDays  int
+	First, Last time.Time
+}
+
+// ChatEvidence：聊天**元数据**（条数 / 会话数 / 谁先开口 / 回复多快）。**不含任何正文**——私人通信内容
+// 不做画像（架构文档 §3：聊天内容分析要单独的同意目的，未开放）。
+type ChatEvidence struct {
+	Messages      int
+	Conversations int
+	Initiated     int // 自己先开口的会话数
+	Replies       int // 紧跟在对方消息之后的消息数
+	FastReplies   int // 其中 10 分钟内回的
+	First, Last   time.Time
+}
+
 // Evidence 是一个人在窗口内的全部证据（已经过同意过滤）。
 type Evidence struct {
 	Signals    []Signal
+	Usage      UsageEvidence
+	Chat       ChatEvidence
 	UserID     string
 	TopicViews map[string]TopicEvidence
 	Activities map[string]ActivityEvidence
@@ -336,6 +363,7 @@ func Derive(ev Evidence, now time.Time) []Tag {
 	}
 
 	out = append(out, deriveAffinity(ev, now)...)
+	out = append(out, derivePatterns(ev, now)...)
 
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Axis != out[j].Axis {
@@ -583,4 +611,87 @@ func Overlap(a, b []Tag) float64 {
 func (t Tag) Describe() string {
 	axis, _ := LookupAxis(t.Axis)
 	return fmt.Sprintf("%s · %s（强度 %.2f，置信 %.2f，%d 条证据）", axis.Label, strings.ReplaceAll(t.Value, "_", " "), t.Strength, t.Confidence, t.EvidenceCount)
+}
+
+// 行为模式阈值。都是「够多才下结论」：样本不够不出标签。
+const (
+	minUsageDays     = 3
+	minFocusScreenMs = 3 * 60 * 1000
+	focusShare       = 0.25
+	lightDayMs       = 5 * 60 * 1000
+	heavyDayMs       = 30 * 60 * 1000
+	minChatMessages  = 30
+	minChatConvs     = 3
+	initiatorShare   = 0.6
+	minChatReplies   = 5
+	fastReplyShare   = 0.7
+)
+
+// derivePatterns：应用使用与聊天风格的规则标签。值是路径（usage/…、chat/…），词典里对应 DERIVED 节点。
+func derivePatterns(ev Evidence, now time.Time) []Tag {
+	var out []Tag
+	add := func(value string, strength float64, evidence int, first, last time.Time) {
+		axis, _ := LookupAxis(AxisPattern)
+		if last.IsZero() {
+			last = now
+		}
+		t := Tag{UserID: ev.UserID, Axis: AxisPattern, Value: value, Strength: round3(strength), Confidence: confidence(evidence, 1), Source: SourceBehavior,
+			EvidenceCount: evidence, SourceDiversity: 1, FirstSeen: first, LastSeen: last, ExpiresAt: last.Add(axis.TTL), ComputedAt: now, RuleVersion: RuleVersion}
+		if t.ExpiresAt.After(now) && ValidValue(value) {
+			out = append(out, t)
+		}
+	}
+	u := ev.Usage
+	if u.ActiveDays >= minUsageDays {
+		perDay := u.SessionMs / int64(u.ActiveDays)
+		switch {
+		case perDay >= heavyDayMs:
+			add("usage/intensity/heavy", saturate(float64(perDay), float64(heavyDayMs)), u.ActiveDays, u.First, u.Last)
+		case perDay >= lightDayMs:
+			add("usage/intensity/regular", 0.6, u.ActiveDays, u.First, u.Last)
+		case perDay > 0:
+			add("usage/intensity/light", 0.6, u.ActiveDays, u.First, u.Last)
+		}
+	}
+	var total int64
+	for _, ms := range u.ScreenMs {
+		total += ms
+	}
+	if total >= minFocusScreenMs {
+		for screen, ms := range u.ScreenMs {
+			if share := float64(ms) / float64(total); share >= focusShare {
+				add("usage/focus/"+screen, share, u.Sessions+1, u.First, u.Last)
+			}
+		}
+	}
+	c := ev.Chat
+	if c.Messages >= minChatMessages {
+		add("chat/active", saturate(float64(c.Messages), 100), c.Messages, c.First, c.Last)
+	}
+	if c.Conversations >= minChatConvs && float64(c.Initiated)/float64(c.Conversations) >= initiatorShare {
+		add("chat/initiator", float64(c.Initiated)/float64(c.Conversations), c.Conversations, c.First, c.Last)
+	}
+	if c.Replies >= minChatReplies && float64(c.FastReplies)/float64(c.Replies) >= fastReplyShare {
+		add("chat/fast_reply", float64(c.FastReplies)/float64(c.Replies), c.Replies, c.First, c.Last)
+	}
+	return out
+}
+
+// LabelFor：标签取值的人话名字。兴趣主题和行为模式查词典；其余轴的取值本身就是可读的（店名 id 除外，展示层另查）。
+func LabelFor(axis, value string) string {
+	tx, err := DefaultTaxonomy()
+	if err != nil {
+		return value
+	}
+	switch axis {
+	case AxisInterestTopic, AxisAversionTopic:
+		if _, ok := tx.Node("interest/" + value); ok {
+			return tx.Label("interest/" + value)
+		}
+	case AxisPattern:
+		if _, ok := tx.Node(value); ok {
+			return tx.Label(value)
+		}
+	}
+	return strings.ReplaceAll(value, "_", " ")
 }

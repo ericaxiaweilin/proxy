@@ -385,3 +385,94 @@ func TestEveryBehaviourSourceFeedsTopicTags(t *testing.T) {
 		}
 	}
 }
+
+// 应用使用与聊天风格：被动行为过同意；聊天只用元数据，插入的消息正文是空的也能出标签。
+func TestUsageAndChatPatternsFromConsentedEventsAndMessageMetadata(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	heavy, nobody, peer := "u_up_h_"+stamp, "u_up_n_"+stamp, "u_up_p_"+stamp
+	users := []string{heavy, nobody, peer}
+	conv := make([]string, 0, 4)
+	for i := 0; i < 4; i++ {
+		conv = append(conv, fmt.Sprintf("conv_up_%d_%s", i, stamp))
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM tag.user_tags WHERE user_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM localnet.interaction_events WHERE actor_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM privacy.purpose_consents WHERE user_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM conversation.messages WHERE conversation_id = ANY($1)`, conv)
+		_, _ = pool.Exec(bg, `DELETE FROM conversation.conversations WHERE id = ANY($1)`, conv)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+	exec(`INSERT INTO privacy.purpose_consents (id, user_id, purpose, policy_version, action, acted_at, source) VALUES ($1,$2,'RECOMMENDATION','2026-10-08','GRANT',$3,'TEST')`, "pc_up_"+stamp, heavy, now.Add(-72*time.Hour))
+	// 5 个活跃日，每天一个 40 分钟会话；市场屏停留 8 分钟，首页 1 分钟。
+	for d := 0; d < 5; d++ {
+		exec(`INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, created_at, watch_ms) VALUES ($1,'APP_SESSION',$2,'APP','app',$3,2400000)`,
+			fmt.Sprintf("evt_up_s%d_%s", d, stamp), heavy, now.Add(-time.Duration(d)*24*time.Hour-time.Hour))
+	}
+	exec(`INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, created_at, watch_ms) VALUES ($1,'SCREEN_VIEW',$2,'SCREEN','market',$3,480000),($4,'SCREEN_VIEW',$2,'SCREEN','home',$3,60000)`,
+		"evt_up_m_"+stamp, heavy, now.Add(-time.Hour), "evt_up_h_"+stamp)
+	// 没同意的人：同样的事件不产生标签。
+	for d := 0; d < 5; d++ {
+		exec(`INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, created_at, watch_ms) VALUES ($1,'APP_SESSION',$2,'APP','app',$3,2400000)`,
+			fmt.Sprintf("evt_up_n%d_%s", d, stamp), nobody, now.Add(-time.Duration(d)*24*time.Hour-time.Hour))
+	}
+	// 聊天：4 个会话都是 heavy 先开口，之后双方来回；正文留空（只测元数据）。
+	exec(`INSERT INTO privacy.purpose_consents (id, user_id, purpose, policy_version, action, acted_at, source) VALUES ($1,$2,'RECOMMENDATION','2026-10-08','GRANT',$3,'TEST')`, "pc_up2_"+stamp, peer, now.Add(-72*time.Hour))
+	n := 0
+	for ci, c := range conv {
+		exec(`INSERT INTO conversation.conversations (id, type, origin_type, origin_id, participants, created_at, last_message_at) VALUES ($1,'DIRECT','TEST','t','[]'::jsonb,$2,$2)`, c, now.Add(-48*time.Hour))
+		base := now.Add(-time.Duration(40-ci) * time.Hour)
+		for k := 0; k < 8; k++ {
+			sender := heavy
+			if k%2 == 1 {
+				sender = peer
+			}
+			n++
+			exec(`INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, created_at) VALUES ($1,$2,$3,'TEXT','',$4)`,
+				fmt.Sprintf("msg_up_%d_%s", n, stamp), c, sender, base.Add(time.Duration(k)*2*time.Minute))
+		}
+	}
+	// 凑够 30 条：heavy 再发 2 条/会话以上不必——4*4=16 条；加一轮。
+	for ci, c := range conv {
+		for k := 0; k < 4; k++ {
+			n++
+			exec(`INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, created_at) VALUES ($1,$2,$3,'TEXT','',$4)`,
+				fmt.Sprintf("msg_up_%d_%s", n, stamp), c, heavy, now.Add(-time.Duration(30-ci)*time.Hour).Add(time.Duration(k)*time.Minute))
+		}
+	}
+	exec(`UPDATE conversation.messages SET sender_id = $1 WHERE id LIKE 'msg_up_%' || $2 AND sender_id = $3 AND false`, heavy, stamp, peer)
+
+	store := tagging.NewPostgres(pool)
+	if _, err := tagging.Recompute(ctx, store, now); err != nil {
+		t.Fatalf("Recompute: %v", err)
+	}
+	has := func(u, v string) bool {
+		tags, _ := store.TagsOf(ctx, u)
+		for _, tg := range tags {
+			if tg.Axis == tagging.AxisPattern && tg.Value == v {
+				return true
+			}
+		}
+		return false
+	}
+	for _, want := range []string{"usage/intensity/heavy", "usage/focus/market", "chat/initiator"} {
+		if !has(heavy, want) {
+			t.Errorf("heavy user should have %s", want)
+		}
+	}
+	if has(heavy, "usage/focus/home") {
+		t.Error("home is under a quarter of the dwell")
+	}
+	if has(nobody, "usage/intensity/heavy") {
+		t.Error("without consent app usage must not become a tag")
+	}
+}

@@ -1,0 +1,205 @@
+{
+ "domain": "pattern",
+ "nodes": [
+  {
+   "id": "usage",
+   "parent": "",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "应用使用",
+    "vi": "Sử dụng ứng dụng",
+    "en": "App usage"
+   }
+  },
+  {
+   "id": "chat",
+   "parent": "",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "聊天风格",
+    "vi": "Phong cách trò chuyện",
+    "en": "Chat style"
+   }
+  },
+  {
+   "id": "usage/intensity",
+   "parent": "usage",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "使用强度",
+    "vi": "Mức độ sử dụng",
+    "en": "Intensity"
+   }
+  },
+  {
+   "id": "usage/intensity/light",
+   "parent": "usage/intensity",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "轻度使用",
+    "vi": "Dùng nhẹ",
+    "en": "Light user"
+   }
+  },
+  {
+   "id": "usage/intensity/regular",
+   "parent": "usage/intensity",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "常规使用",
+    "vi": "Dùng đều",
+    "en": "Regular user"
+   }
+  },
+  {
+   "id": "usage/intensity/heavy",
+   "parent": "usage/intensity",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "重度使用",
+    "vi": "Dùng nhiều",
+    "en": "Heavy user"
+   }
+  },
+  {
+   "id": "usage/focus",
+   "parent": "usage",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "使用重心",
+    "vi": "Trọng tâm sử dụng",
+    "en": "Usage focus"
+   }
+  },
+  {
+   "id": "usage/focus/home",
+   "parent": "usage/focus",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "常看：首页",
+    "vi": "Hay xem: Trang chủ",
+    "en": "Focus: Home"
+   }
+  },
+  {
+   "id": "usage/focus/feed",
+   "parent": "usage/focus",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "常看：动态",
+    "vi": "Hay xem: Bảng tin",
+    "en": "Focus: Feed"
+   }
+  },
+  {
+   "id": "usage/focus/market",
+   "parent": "usage/focus",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "常看：市场",
+    "vi": "Hay xem: Chợ",
+    "en": "Focus: Market"
+   }
+  },
+  {
+   "id": "usage/focus/activities",
+   "parent": "usage/focus",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "常看：活动",
+    "vi": "Hay xem: Hoạt động",
+    "en": "Focus: Activities"
+   }
+  },
+  {
+   "id": "usage/focus/scenes",
+   "parent": "usage/focus",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "常看：场景",
+    "vi": "Hay xem: Địa điểm",
+    "en": "Focus: Scenes"
+   }
+  },
+  {
+   "id": "usage/focus/orders",
+   "parent": "usage/focus",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "常看：订单",
+    "vi": "Hay xem: Đơn hàng",
+    "en": "Focus: Orders"
+   }
+  },
+  {
+   "id": "usage/focus/me",
+   "parent": "usage/focus",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "常看：我的",
+    "vi": "Hay xem: Của tôi",
+    "en": "Focus: Me"
+   }
+  },
+  {
+   "id": "usage/focus/messages",
+   "parent": "usage/focus",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "常看：消息",
+    "vi": "Hay xem: Tin nhắn",
+    "en": "Focus: Messages"
+   }
+  },
+  {
+   "id": "usage/focus/notifications",
+   "parent": "usage/focus",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "常看：通知",
+    "vi": "Hay xem: Thông báo",
+    "en": "Focus: Notifications"
+   }
+  },
+  {
+   "id": "usage/focus/explore",
+   "parent": "usage/focus",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "常看：探索",
+    "vi": "Hay xem: Khám phá",
+    "en": "Focus: Explore"
+   }
+  },
+  {
+   "id": "chat/active",
+   "parent": "chat",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "聊天活跃",
+    "vi": "Hay trò chuyện",
+    "en": "Chatty"
+   }
+  },
+  {
+   "id": "chat/initiator",
+   "parent": "chat",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "常主动开口",
+    "vi": "Hay bắt chuyện",
+    "en": "Starts conversations"
+   }
+  },
+  {
+   "id": "chat/fast_reply",
+   "parent": "chat",
+   "kind": "DERIVED",
+   "name": {
+    "zh": "回复很快",
+    "vi": "Trả lời nhanh",
+    "en": "Replies fast"
+   }
+  }
+ ]
+}

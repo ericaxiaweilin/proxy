@@ -243,3 +243,27 @@ func TestUnicodeValuesAreFineButPunctuationInjectionIsNot(t *testing.T) {
 		}
 	}
 }
+
+func TestUsageAndChatPatternsNeedEnoughEvidenceAndNeverTouchContent(t *testing.T) {
+	ev := Evidence{UserID: "u",
+		Usage: UsageEvidence{ScreenMs: map[string]int64{"market": 8 * 60_000, "feed": 2 * 60_000, "me": 60_000}, SessionMs: 5 * 40 * 60_000, Sessions: 12, ActiveDays: 5, First: ago(10 * 24 * time.Hour), Last: ago(time.Hour)},
+		Chat:  ChatEvidence{Messages: 80, Conversations: 5, Initiated: 4, Replies: 20, FastReplies: 18, First: ago(10 * 24 * time.Hour), Last: ago(time.Hour)},
+	}
+	tags := Derive(ev, now)
+	for _, want := range []string{"usage/intensity/heavy", "usage/focus/market", "chat/active", "chat/initiator", "chat/fast_reply"} {
+		if _, ok := find(tags, AxisPattern, want); !ok {
+			t.Errorf("expected pattern %s in %v", want, tags)
+		}
+	}
+	if _, ok := find(tags, AxisPattern, "usage/focus/me"); ok {
+		t.Error("a screen under 25% of the dwell is not the focus")
+	}
+	thin := Evidence{UserID: "u", Usage: UsageEvidence{ScreenMs: map[string]int64{"market": 60_000}, SessionMs: 60_000, ActiveDays: 1, Last: ago(time.Hour)},
+		Chat: ChatEvidence{Messages: 5, Conversations: 1, Initiated: 1, Replies: 2, FastReplies: 2, Last: ago(time.Hour)}}
+	if got := Derive(thin, now); len(got) != 0 {
+		t.Fatalf("thin evidence gives no patterns: %v", got)
+	}
+	if LabelFor(AxisPattern, "chat/fast_reply") != "回复很快" || LabelFor(AxisPattern, "usage/focus/market") != "常看：市场" {
+		t.Errorf("pattern labels come from the dictionary: %q", LabelFor(AxisPattern, "usage/focus/market"))
+	}
+}

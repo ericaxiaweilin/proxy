@@ -60,6 +60,8 @@ var behaviouralCommandToEventType = map[string]string{
 	"RecordProfileOpen":     "PROFILE_OPEN",
 	"RecordCandidateViewed": "CANDIDATE_VIEWED",
 	"RecordActivityView":    "ACTIVITY_VIEW",
+	"RecordScreenView":      "SCREEN_VIEW",
+	"RecordAppSession":      "APP_SESSION",
 }
 
 // 结构性钉：被闸住的事件类型集合，必须和测试里列出的命令集合完全一致。

@@ -434,6 +434,11 @@ func (p *Postgres) loadSignals(ctx context.Context, since time.Time, valid strin
 		return err
 	}
 
+	// 2e) 应用使用与聊天风格（行为模式）。
+	if err := p.loadBehaviourPatterns(ctx, since, valid, get, out); err != nil {
+		return err
+	}
+
 	// 3) 声明：她自己写在接单资料里的服务能力 / 垂类 / 语种。当前状态，不是行为，不需要浏览同意。
 	for _, q := range []struct{ axis, sql string }{
 		{AxisSkill, `SELECT ap.user_account_id, s.service_type FROM supply.agent_profiles ap
@@ -579,4 +584,112 @@ func (p *Postgres) PruneOlderThan(ctx context.Context, cutoff time.Time) (int64,
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// loadBehaviourPatterns：应用使用（屏幕停留 / 会话）与聊天**元数据**。都是被动行为，过同一条同意规则。
+// 聊天只数条数 / 会话数 / 谁先开口 / 回得多快，**绝不读正文**。
+func (p *Postgres) loadBehaviourPatterns(ctx context.Context, since time.Time, valid string, get func(string) Evidence, out map[string]Evidence) error {
+	// 屏幕停留：screen id 已在写入口被收窄成安全字符；这里再兜一道 ValidValue。
+	rows, err := p.pool.Query(ctx, `
+		SELECT e.actor_id, e.target_id, COALESCE(SUM(e.watch_ms), 0), MIN(e.created_at), MAX(e.created_at)
+		FROM localnet.interaction_events e
+		WHERE e.event_type = 'SCREEN_VIEW' AND e.created_at >= $1 AND e.watch_ms > 0 AND `+valid+`
+		GROUP BY e.actor_id, e.target_id`, since)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var user, screen string
+		var ms int64
+		var first, last time.Time
+		if err := rows.Scan(&user, &screen, &ms, &first, &last); err != nil {
+			rows.Close()
+			return err
+		}
+		if !ValidValue(screen) {
+			continue
+		}
+		ev := get(user)
+		if ev.Usage.ScreenMs == nil {
+			ev.Usage.ScreenMs = map[string]int64{}
+		}
+		ev.Usage.ScreenMs[screen] += ms
+		if ev.Usage.First.IsZero() || first.Before(ev.Usage.First) {
+			ev.Usage.First = first
+		}
+		if last.After(ev.Usage.Last) {
+			ev.Usage.Last = last
+		}
+		out[user] = ev
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// 前台会话：总时长、次数、活跃天数（越南时间）。
+	rows, err = p.pool.Query(ctx, `
+		SELECT e.actor_id, COALESCE(SUM(e.watch_ms), 0), COUNT(*), COUNT(DISTINCT (e.created_at AT TIME ZONE `+vnTZ+`)::date), MIN(e.created_at), MAX(e.created_at)
+		FROM localnet.interaction_events e
+		WHERE e.event_type = 'APP_SESSION' AND e.created_at >= $1 AND e.watch_ms > 0 AND `+valid+`
+		GROUP BY e.actor_id`, since)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var user string
+		var ms int64
+		var n, days int
+		var first, last time.Time
+		if err := rows.Scan(&user, &ms, &n, &days, &first, &last); err != nil {
+			rows.Close()
+			return err
+		}
+		ev := get(user)
+		ev.Usage.SessionMs, ev.Usage.Sessions, ev.Usage.ActiveDays = ms, n, days
+		if ev.Usage.First.IsZero() || first.Before(ev.Usage.First) {
+			ev.Usage.First = first
+		}
+		if last.After(ev.Usage.Last) {
+			ev.Usage.Last = last
+		}
+		out[user] = ev
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// 聊天元数据。发信人是被画像的人；AI 代回的消息（authored_by 非空）和系统消息不算他的。
+	chatValid := consent.ValidAtSQL("m.sender_id", "m.created_at", consent.Recommendation)
+	rows, err = p.pool.Query(ctx, `
+		WITH msgs AS (
+		  SELECT m.sender_id, m.conversation_id, m.created_at,
+		         LAG(m.sender_id) OVER w AS prev_sender, LAG(m.created_at) OVER w AS prev_at,
+		         (SELECT m2.sender_id FROM conversation.messages m2 WHERE m2.conversation_id = m.conversation_id ORDER BY m2.created_at, m2.id LIMIT 1) AS opener
+		    FROM conversation.messages m
+		   WHERE m.deleted_at IS NULL AND m.created_at >= $1 AND m.message_type <> 'SYSTEM_CONTEXT' AND COALESCE(m.authored_by, '') = ''
+		  WINDOW w AS (PARTITION BY m.conversation_id ORDER BY m.created_at, m.id)
+		)
+		SELECT sender_id, COUNT(*), COUNT(DISTINCT conversation_id),
+		       COUNT(DISTINCT conversation_id) FILTER (WHERE opener = sender_id),
+		       COUNT(*) FILTER (WHERE prev_sender IS NOT NULL AND prev_sender <> sender_id),
+		       COUNT(*) FILTER (WHERE prev_sender IS NOT NULL AND prev_sender <> sender_id AND created_at - prev_at <= interval '10 minutes'),
+		       MIN(created_at), MAX(created_at)
+		  FROM msgs m WHERE `+chatValid+`
+		 GROUP BY sender_id`, since)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var user string
+		var c ChatEvidence
+		if err := rows.Scan(&user, &c.Messages, &c.Conversations, &c.Initiated, &c.Replies, &c.FastReplies, &c.First, &c.Last); err != nil {
+			rows.Close()
+			return err
+		}
+		ev := get(user)
+		ev.Chat = c
+		out[user] = ev
+	}
+	rows.Close()
+	return rows.Err()
 }

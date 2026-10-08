@@ -126,7 +126,7 @@ func Topics() []string {
 
 // TopicHit 是正文命中的一个主题标签取值及其权重系数（叶 1、父 0.5、祖父 0.25…）。
 type TopicHit struct {
-	Value  string  // 如 "outdoor/hiking"（词典节点 id 去掉 "interest/" 前缀），或旧词表的中文词
+	Value  string // 如 "outdoor/hiking"（词典节点 id 去掉 "interest/" 前缀），或旧词表的中文词
 	Factor float64
 }
 

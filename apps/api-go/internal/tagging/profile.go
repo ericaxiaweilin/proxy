@@ -56,12 +56,15 @@ func BuildProfile(userID string, tags []Tag, perAxis int) Profile {
 		if len(list) > perAxis {
 			list = list[:perAxis]
 		}
+		for i := range list {
+			list[i].Label = LabelFor(list[i].Axis, list[i].Value)
+		}
 		p.Dimensions = append(p.Dimensions, Dimension{Axis: axis.Axis, Label: axis.Label, Polarity: axis.Polarity, Tags: list})
 		p.AxisCount++
 		if axis.Polarity == "POSITIVE" && len(phrases) < 4 {
 			vals := make([]string, 0, 2)
 			for i := 0; i < len(list) && i < 2; i++ {
-				vals = append(vals, strings.ReplaceAll(list[i].Value, "_", " "))
+				vals = append(vals, list[i].Label)
 			}
 			phrases = append(phrases, axis.Label+"："+strings.Join(vals, "、"))
 		}

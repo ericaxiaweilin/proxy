@@ -40,6 +40,8 @@ type Node struct {
 	Keywords []string `json:"keywords,omitempty"`
 	// Status: ACTIVE（默认）| DEPRECATED（不再命中、旧标签自然过期）。
 	Status string `json:"status,omitempty"`
+	// Kind: KEYWORD（默认，靠关键词命中）| DERIVED（由规则 / 统计推导，如应用使用与聊天风格，没有关键词）。
+	Kind string `json:"kind,omitempty"`
 }
 
 type taxonomyFile struct {
@@ -130,7 +132,7 @@ func BuildTaxonomy(all []Node) (*Taxonomy, error) {
 	owners := map[string][]string{}
 	for _, id := range t.order {
 		n := t.nodes[id]
-		if n.Status != "ACTIVE" {
+		if n.Status != "ACTIVE" || n.Kind == "DERIVED" {
 			continue
 		}
 		for _, kw := range n.Keywords {
@@ -180,7 +182,10 @@ func validateNode(n Node) error {
 	if n.Status != "" && n.Status != "ACTIVE" && n.Status != "DEPRECATED" {
 		return fmt.Errorf("taxonomy: %q has unknown status %q", n.ID, n.Status)
 	}
-	if n.Status != "DEPRECATED" && len(n.Keywords) < 2 && n.Parent != "" {
+	if n.Kind != "" && n.Kind != "KEYWORD" && n.Kind != "DERIVED" {
+		return fmt.Errorf("taxonomy: %q has unknown kind %q", n.ID, n.Kind)
+	}
+	if n.Status != "DEPRECATED" && n.Kind != "DERIVED" && len(n.Keywords) < 2 && n.Parent != "" {
 		return fmt.Errorf("taxonomy: leaf/branch %q needs at least 2 keywords", n.ID)
 	}
 	seen := map[string]bool{}

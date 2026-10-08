@@ -410,6 +410,9 @@ var behaviouralTrackingEventTypes = map[string]string{
 	"CANDIDATE_VIEWED": capturePurposeAny,
 	// TAG-SYSTEM-001：看活动页多久。进「兴趣标签」的证据之一，和其它浏览事件一样先验同意。
 	"ACTIVITY_VIEW": capturePurposeAny,
+	// 应用使用（浏览轨迹的原料）：停留的屏幕、前台会话时长。和其它浏览事件同一条闸。
+	"SCREEN_VIEW": capturePurposeAny,
+	"APP_SESSION": capturePurposeAny,
 }
 
 // PurposeConsent 是**一次**同意动作（授予或撤回），不是「当前状态」。
@@ -1451,7 +1454,7 @@ func (s *Service) Supports(commandType string) bool {
 	case "CreatePost", "UpdatePostAudience", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "ListPostsAtScene", "CreateNeedFromPost", "RecordAttribution",
 		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed", "RecordMediaImpression",
 		"ShortlistAgent", "ListInteractionEvents", "ListPostImpressionStats", "ListProfileViewStats", "ListProfileViewers", "ListMediaImpressionStats", "ListMediaActivityForViewer", "VotePostPoll",
-		"RecordMediaZoom", "RecordActivityView", "GetContentAnalytics", "ListPostAudience",
+		"RecordMediaZoom", "RecordActivityView", "RecordScreenView", "RecordAppSession", "GetContentAnalytics", "ListPostAudience",
 		// COMP-PURPOSE-CONSENT-001：按目的的同意。写侧与读侧都要有，
 		// 否则 App 的开关就只是本地状态 —— 而本地状态不是同意。
 		"RecordPurposeConsent", "GetPurposeConsent":
@@ -1497,6 +1500,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.recordMediaZoom(ctx, e)
 	case "RecordActivityView":
 		return s.recordActivityView(ctx, e)
+	case "RecordScreenView":
+		return s.recordScreenView(ctx, e)
+	case "RecordAppSession":
+		return s.recordAppSession(ctx, e)
 	case "RecordPurposeConsent":
 		return s.recordPurposeConsent(ctx, e)
 	case "GetPurposeConsent":
@@ -2874,6 +2881,44 @@ func (s *Service) recordMediaZoom(ctx context.Context, e command.Envelope) comma
 // 再入库；标签层只在「事件那一刻同意有效且现在没撤回」时才读它。
 func (s *Service) recordActivityView(ctx context.Context, e command.Envelope) command.Result {
 	return s.appendInteraction(ctx, e, "ACTIVITY_VIEW", "ACTIVITY")
+}
+
+// 应用使用事件：屏幕停留 / 前台会话。screen id 会变成标签取值，所以只收小写字母数字下划线连字符，
+// 任意字符串（含用户输入）一律拒绝；停留封顶 30 分钟（切后台忘关不造垃圾数据）。
+const maxUsageMs = 30 * 60 * 1000
+
+func validScreenID(id string) bool {
+	if id == "" || len(id) > 40 {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) recordScreenView(ctx context.Context, e command.Envelope) command.Result {
+	var p interactionPayload
+	if decode(e.Payload, &p) && !validScreenID(p.TargetID) {
+		return command.Rejected(e, "INVALID_SCREEN", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_screen", nil)
+	}
+	if p.WatchMs > maxUsageMs {
+		e.Payload["watchMs"] = float64(maxUsageMs)
+	}
+	return s.appendInteraction(ctx, e, "SCREEN_VIEW", "SCREEN")
+}
+
+func (s *Service) recordAppSession(ctx context.Context, e command.Envelope) command.Result {
+	if e.Payload == nil {
+		return command.Rejected(e, "INVALID_INTERACTION", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_interaction", nil)
+	}
+	e.Payload["targetId"] = "app" // 会话没有对象；固定值，客户端传什么都不信
+	if ms, ok := e.Payload["watchMs"].(float64); ok && ms > maxUsageMs {
+		e.Payload["watchMs"] = float64(maxUsageMs)
+	}
+	return s.appendInteraction(ctx, e, "APP_SESSION", "APP")
 }
 
 func (s *Service) shortlistAgent(ctx context.Context, e command.Envelope) command.Result {
