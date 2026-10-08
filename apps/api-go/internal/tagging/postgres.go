@@ -83,7 +83,7 @@ func (p *Postgres) LoadEvidence(ctx context.Context, since time.Time) (map[strin
 
 	// 2) 活动：看活动页的停留（被动，要同意）。
 	rows, err = p.pool.Query(ctx, `
-		SELECT e.actor_id, COALESCE(a.payload->>'category', ''), COUNT(*), COALESCE(SUM(e.watch_ms), 0), MIN(e.created_at), MAX(e.created_at)
+		SELECT e.actor_id, COALESCE(a.payload->>'category', ''), COUNT(*), COALESCE(SUM(`+dwellCreditSQL(DwellActivity, "e.watch_ms")+`), 0)::float8, MIN(e.created_at), MAX(e.created_at)
 		FROM localnet.interaction_events e
 		JOIN activity.activities a ON a.id = e.target_id
 		WHERE e.event_type = 'ACTIVITY_VIEW' AND e.target_type = 'ACTIVITY'
@@ -95,7 +95,7 @@ func (p *Postgres) LoadEvidence(ctx context.Context, since time.Time) (map[strin
 	for rows.Next() {
 		var id, category string
 		var a ActivityEvidence
-		if err := rows.Scan(&id, &category, &a.Views, &a.DwellMs, &a.First, &a.Last); err != nil {
+		if err := rows.Scan(&id, &category, &a.Views, &a.DwellCredit, &a.First, &a.Last); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -288,16 +288,15 @@ func (p *Postgres) loadSignals(ctx context.Context, since time.Time, valid strin
 		return err
 	}
 
-	// 2) 创作者偏好：看谁的内容停得久（被动，过同意）。30 秒停留 = 1 点权重。
+	// 2) 创作者偏好：**只认主动点进主页**（每次 0.5 点，被动，过同意）。信息流里看某个人的帖子停得久，
+	//    不再给创作者加分——看人久不等于想约她（TAG-DWELL-001：人物的被动停留不进口味类标签）。
 	rows, err = p.pool.Query(ctx, `
-		SELECT e.actor_id, p.author_id, COUNT(*), COALESCE(SUM(e.watch_ms), 0)::float8 / 30000.0, MIN(e.created_at), MAX(e.created_at)
+		SELECT e.actor_id, e.target_id, COUNT(*), COUNT(*) * 0.5, MIN(e.created_at), MAX(e.created_at)
 		FROM localnet.interaction_events e
-		JOIN localnet.posts p ON p.id = e.target_id
-		WHERE e.event_type = 'POST_IMPRESSION' AND e.target_type = 'POST'
-		  AND e.created_at >= $1 AND e.watch_ms > 0
-		  AND p.author_type = 'USER' AND p.author_id <> e.actor_id
+		WHERE e.event_type = 'PROFILE_OPEN' AND e.target_type = 'PROFILE'
+		  AND e.created_at >= $1 AND e.target_id <> e.actor_id
 		  AND `+valid+`
-		GROUP BY e.actor_id, p.author_id`, since)
+		GROUP BY e.actor_id, e.target_id`, since)
 	if err != nil {
 		return err
 	}
@@ -319,7 +318,7 @@ func (p *Postgres) loadSignals(ctx context.Context, since time.Time, valid strin
 
 	// 2b) 内容话题：看过的帖子（被动，过同意）+ 自己发的帖子（主动）。正文在 Go 里抽话题。
 	rows, err = p.pool.Query(ctx, `
-		SELECT e.actor_id, p.body, COUNT(*), COALESCE(SUM(e.watch_ms), 0)::float8 / 30000.0, MIN(e.created_at), MAX(e.created_at)
+		SELECT e.actor_id, p.body, COUNT(*), COALESCE(SUM(`+dwellCreditSQL(DwellPost, "e.watch_ms")+`), 0)::float8, MIN(e.created_at), MAX(e.created_at)
 		FROM localnet.interaction_events e
 		JOIN localnet.posts p ON p.id = e.target_id
 		WHERE e.event_type = 'POST_IMPRESSION' AND e.target_type = 'POST'

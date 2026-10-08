@@ -10,7 +10,8 @@ import { endPostView } from "./post-impression";
 //   - 离开视口 / 页面卸载 / App 切后台 时结算，停留 < 0.8 秒算一划而过，不记（不然快速滑动刷出一堆假浏览）；
 //   - 自己的帖子不记；开关（隐私与数据 → 动态浏览统计）关了 endPostView 自己短路。
 
-export const MIN_IMPRESSION_MS = 800;
+// 只过滤误触 / 快速滑过；「算不算真的看了」由服务端标签层按对象类型分档（TAG-DWELL-001），这里不再替它决定。
+export const MIN_IMPRESSION_MS = 300;
 
 export type CardFrame = { y: number; height: number };
 

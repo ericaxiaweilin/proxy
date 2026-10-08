@@ -81,7 +81,7 @@ export const beginActivityView = beginPostView;
 // 息屏、以及从列表点进详情又立刻退回去，都不该被记成一次浏览。
 // <1s 的门槛放在这里而不是调用方，是为了让每个调用点都不必重复写它 ——
 // 漏写一个调用点就是一次假浏览，而假浏览正是这套闸当初要消灭的东西。
-const MIN_ACTIVITY_VIEW_MS = 1000;
+const MIN_ACTIVITY_VIEW_MS = 300; // 只去噪；分档在服务端（TAG-DWELL-001）
 
 export async function endActivityView(
   localNet: Pick<LocalNetClient, "recordActivityView">,
@@ -137,7 +137,7 @@ export async function recordMediaZoom(
 
 // TAG-PIPELINE：屏幕停留 / 前台会话，同一套采集闸（fail-closed）。<1s 不记（点进去立刻切走不算停留）；
 // 单段封顶 30 分钟（服务端同样封顶）。
-const MIN_USAGE_MS = 1000;
+const MIN_USAGE_MS = 300; // 只去噪；分档在服务端（TAG-DWELL-001）
 const MAX_USAGE_MS = 30 * 60 * 1000;
 
 export async function endScreenView(

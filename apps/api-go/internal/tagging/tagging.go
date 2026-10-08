@@ -211,12 +211,13 @@ type TopicEvidence struct {
 
 // ActivityEvidence：某类活动上的证据。Views/DwellMs 是被动的（要同意），Interested/Joined 是用户主动做的。
 type ActivityEvidence struct {
-	Views      int
-	DwellMs    int64
-	Interested int
-	Joined     int
-	First      time.Time
-	Last       time.Time
+	Views int
+	// DwellCredit：看活动详情页的停留折成的信用（DwellCredit()，每次浏览最多 1）。
+	DwellCredit float64
+	Interested  int
+	Joined      int
+	First       time.Time
+	Last        time.Time
 }
 
 // CellEvidence：一个粗粒度网格里出现过的天数。
@@ -281,8 +282,8 @@ const (
 	// 回避：至少 5 次曝光，且快速划走占比 ≥ 70%。
 	minAversionEvents = 5
 	aversionRatio     = 0.70
-	// 活动兴趣：主动点「感兴趣」比被动看 60 秒更重。
-	activityDwellScale   = 60_000.0
+	// 活动兴趣：主动点「感兴趣」比被动看更重；被动看 2 次「认真看」（信用 2.0）时强度约 0.63。
+	activityDwellScale   = 2.0
 	activityInterestGain = 0.35
 	activityJoinGain     = 0.55
 	minActivitySignals   = 1
@@ -333,7 +334,7 @@ func Derive(ev Evidence, now time.Time) []Tag {
 		if a.Views+explicit < minActivitySignals {
 			continue
 		}
-		strength := saturate(float64(a.DwellMs), activityDwellScale)
+		strength := saturate(a.DwellCredit, activityDwellScale)
 		strength = clamp01(1 - (1-strength)*math.Exp(-activityInterestGain*float64(a.Interested))*math.Exp(-activityJoinGain*float64(a.Joined)))
 		source, diversity := SourceBehavior, 1
 		switch {

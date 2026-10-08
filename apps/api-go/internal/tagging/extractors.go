@@ -86,7 +86,7 @@ func (p *Postgres) loadActivityTopics(ctx context.Context, since time.Time, vali
 		sql      string
 		explicit bool
 	}{
-		{`SELECT e.actor_id, a.payload::text, COALESCE(SUM(e.watch_ms), 0)::float8 / 30000.0 * ` + "1.0" + `, MIN(e.created_at), MAX(e.created_at), COUNT(*)
+		{`SELECT e.actor_id, a.payload::text, COALESCE(SUM(` + dwellCreditSQL(DwellActivity, "e.watch_ms") + `), 0)::float8, MIN(e.created_at), MAX(e.created_at), COUNT(*)
 		    FROM localnet.interaction_events e JOIN activity.activities a ON a.id = e.target_id
 		   WHERE e.event_type = 'ACTIVITY_VIEW' AND e.target_type = 'ACTIVITY' AND e.created_at >= $1 AND e.watch_ms > 0 AND ` + valid + `
 		   GROUP BY e.actor_id, a.id, a.payload::text`, false},

@@ -1,6 +1,7 @@
 package tagging
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -64,8 +65,8 @@ func TestQuickSkipsBecomeAversionNotInterest(t *testing.T) {
 }
 
 func TestExplicitActionsOutweighPassiveViewingAndMarkTheSource(t *testing.T) {
-	passive := Evidence{UserID: "u", Activities: map[string]ActivityEvidence{"徒步": {Views: 3, DwellMs: 30_000, First: ago(time.Hour), Last: ago(time.Hour)}}}
-	explicit := Evidence{UserID: "u", Activities: map[string]ActivityEvidence{"徒步": {Views: 3, DwellMs: 30_000, Interested: 1, Joined: 1, First: ago(time.Hour), Last: ago(time.Hour)}}}
+	passive := Evidence{UserID: "u", Activities: map[string]ActivityEvidence{"徒步": {Views: 3, DwellCredit: 1.5, First: ago(time.Hour), Last: ago(time.Hour)}}}
+	explicit := Evidence{UserID: "u", Activities: map[string]ActivityEvidence{"徒步": {Views: 3, DwellCredit: 1.5, Interested: 1, Joined: 1, First: ago(time.Hour), Last: ago(time.Hour)}}}
 	p, _ := find(Derive(passive, now), AxisInterestActivity, "徒步")
 	e, _ := find(Derive(explicit, now), AxisInterestActivity, "徒步")
 	if e.Strength <= p.Strength {
@@ -265,5 +266,29 @@ func TestUsageAndChatPatternsNeedEnoughEvidenceAndNeverTouchContent(t *testing.T
 	}
 	if LabelFor(AxisPattern, "chat/fast_reply") != "回复很快" || LabelFor(AxisPattern, "usage/focus/market") != "常看：市场" {
 		t.Errorf("pattern labels come from the dictionary: %q", LabelFor(AxisPattern, "usage/focus/market"))
+	}
+}
+
+// TAG-DWELL-001：停留按对象类型分档，不是一个统一秒数。
+func TestDwellCreditIsPerObjectClassNotOneThreshold(t *testing.T) {
+	for _, c := range []struct {
+		class DwellClass
+		ms    int
+		want  float64
+	}{
+		{DwellPost, 700, 0},       // 一眼划过
+		{DwellPost, 2000, 0.10},   // 扫了一眼
+		{DwellPost, 16000, 0.80},  // 认真看
+		{DwellPost, 300000, 1.00}, // 挂机不会超过 1
+		{DwellActivity, 2000, 0},  // 活动详情页要 3 秒才算
+		{DwellActivity, 12000, 0.70},
+		{DwellClass("PERSON"), 60000, 0}, // 人物（和任何不认识的类型）被动停留不给分
+	} {
+		if got := DwellCredit(c.class, c.ms); got != c.want {
+			t.Fatalf("%s %dms = %v, want %v", c.class, c.ms, got, c.want)
+		}
+	}
+	if sql := dwellCreditSQL(DwellActivity, "x"); !strings.Contains(sql, "WHEN x >= 30000 THEN 1.00") || !strings.Contains(sql, "ELSE 0 END") {
+		t.Fatalf("sql and go share one table: %s", sql)
 	}
 }
