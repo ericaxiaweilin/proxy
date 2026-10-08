@@ -28,8 +28,10 @@ import { Quality } from "./pages/Quality";
 import { NumberLookup } from "./pages/NumberLookup";
 import { Access } from "./pages/Access";
 import { Moderation } from "./pages/Moderation";
+import { DemandGap } from "./pages/DemandGap";
+import { Insights } from "./pages/Insights";
 
-type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "marketboard" | "storeboard" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access" | "moderation";
+type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "marketboard" | "storeboard" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access" | "moderation" | "demandgap" | "insights";
 
 const TITLES: Record<Page, string> = {
   overview: "平台总览",
@@ -60,6 +62,8 @@ const TITLES: Record<Page, string> = {
   workbench: "交叉分析工作台",
   access: "运营权限",
   moderation: "举报处置",
+  demandgap: "需求缺口",
+  insights: "用户洞察",
 };
 
 export function App() {
@@ -83,7 +87,7 @@ export function App() {
         </div>
         <div className="navgroup">Intelligence</div>
         <div className="nav">
-          {(["overview", "population", "behavior", "tags", "intent", "orchestration"] as Page[]).map((p) => (
+          {(["overview", "population", "behavior", "tags", "intent", "orchestration", "demandgap", "insights"] as Page[]).map((p) => (
             <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
           ))}
         </div>
@@ -172,6 +176,9 @@ export function App() {
           {page === "storeboard" && <StoreBoard />}
           {/* OPS-MODERATION-001：举报队列与处置（处置只记录，不执行下架 / 封号） */}
           {page === "moderation" && <Moderation />}
+          {/* OPS-INSIGHT-001：需求缺口（供需并排、不给比值）与用户洞察（标签分群，小格子抑制） */}
+          {page === "demandgap" && <DemandGap />}
+          {page === "insights" && <Insights />}
           {page === "retention" && <Retention />}
           {page === "trust" && <Trust />}
           {page === "providers" && <ProviderApplications />}
@@ -179,7 +186,7 @@ export function App() {
           {page === "access" && <Access />}
           {page === "quality" && <Quality />}
           {page === "workbench" && <Quality />}
-          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "marketboard", "storeboard", "retention", "trust", "quality", "workbench", "numberlookup", "access", "moderation"].includes(page) && (
+          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "marketboard", "storeboard", "retention", "trust", "quality", "workbench", "numberlookup", "access", "moderation", "demandgap", "insights"].includes(page) && (
             <div className="notice">
               <b>{TITLES[page]}</b> — 已接线 19 页（v9 全量）。
             </div>
