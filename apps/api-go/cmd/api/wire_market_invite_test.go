@@ -10,6 +10,7 @@ import (
 
 	"github.com/proxy-app/proxy-api/internal/dispatch"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
+	"github.com/proxy-app/proxy-api/internal/matchengine"
 	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/tagging"
 )
@@ -188,5 +189,59 @@ func TestMatchPreviewShowsTheSameCandidatesAsInvitingAndTheirSharedTags(t *testi
 	noLoc := publishFast(t, svc, false)
 	if r, _ := inv.Preview(ctx, noLoc, 10, nil, now); r.Reason != "opportunity_has_no_location" || len(r.Candidates) != 0 {
 		t.Fatalf("no coordinates, no 'nearby', and it says why: %+v", r)
+	}
+}
+
+// MATCH-ENGINE-001：走引擎时，没过门的人带原因码出现在预览里，只有过门的人被邀请。
+func TestInviterViaEngineGatesAndExplains(t *testing.T) {
+	ctx := context.Background()
+	svc := marketplace.New()
+	opp := publishFast(t, svc, true)
+	marketCmd(svc, "ApplyToMarketOpportunity", "already", map[string]any{"opportunityId": opp, "quote": "800,000₫", "scope": "中文"})
+	lat, lng := 21.05, 105.82
+	inv := nearbyInviter{
+		market: svc,
+		nearby: func(context.Context, float64, float64, float64, int) ([]string, error) {
+			return []string{"owner", "already", "restricted", "good", "ok"}, nil
+		},
+		signals: func(_ context.Context, _ string, ids []string, _, _ *float64) (map[string]matching.Signals, error) {
+			out := map[string]matching.Signals{}
+			for _, id := range ids {
+				out[id] = matching.Signals{Lat: &lat, Lng: &lng}
+			}
+			return out, nil
+		},
+		engineFor: func(excluded map[string]string, size int) *matchengine.Engine {
+			return &matchengine.Engine{SetSize: size, Gates: []matchengine.Gate{
+				matchengine.ExclusionGate{Excluded: excluded},
+				matchengine.AccountGate{Level: func(_ context.Context, id string) (string, error) {
+					if id == "restricted" {
+						return "RESTRICTED", nil
+					}
+					return "", nil
+				}},
+			}}
+		},
+	}
+	got, skip, err := inv.Invite(ctx, dispatch.Run{TaskID: opp, RequesterID: "owner"}, nil, 5)
+	if err != nil || skip != "" {
+		t.Fatalf("invite: %v %q", err, skip)
+	}
+	if len(got) != 2 {
+		t.Fatalf("only gate-passing people are invited: %v", got)
+	}
+	res, err := inv.Preview(ctx, opp, 5, &tagging.Service{}, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasons := map[string]string{}
+	for _, x := range res.Ineligible {
+		reasons[x.AgentID] = x.Reason
+	}
+	if reasons["owner"] != matchengine.ReasonSelf || reasons["already"] != matchengine.ReasonAlreadyApplied || reasons["restricted"] != matchengine.ReasonAccountRestricted {
+		t.Fatalf("every dropped person carries a reason: %v", reasons)
+	}
+	if res.RankVersion == "" || res.Health.Retrieved != 5 {
+		t.Fatalf("run metadata missing: %+v", res.Health)
 	}
 }

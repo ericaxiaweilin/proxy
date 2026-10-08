@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/proxy-app/proxy-api/internal/accountstatus"
 	"github.com/proxy-app/proxy-api/internal/activity"
 	"github.com/proxy-app/proxy-api/internal/aipersona"
 	"github.com/proxy-app/proxy-api/internal/benefit"
@@ -24,7 +25,10 @@ import (
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/gravity"
 	"github.com/proxy-app/proxy-api/internal/growth"
+	"github.com/proxy-app/proxy-api/internal/guidance"
 	"github.com/proxy-app/proxy-api/internal/identity"
+	"github.com/proxy-app/proxy-api/internal/incentive"
+	"github.com/proxy-app/proxy-api/internal/insight"
 	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
@@ -33,15 +37,9 @@ import (
 	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
-	"github.com/proxy-app/proxy-api/internal/accountstatus"
-	"github.com/proxy-app/proxy-api/internal/guidance"
-	"github.com/proxy-app/proxy-api/internal/incentive"
-	"github.com/proxy-app/proxy-api/internal/insight"
-	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/numberlookup"
 	"github.com/proxy-app/proxy-api/internal/operatoraudit"
-	"github.com/proxy-app/proxy-api/internal/research"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
@@ -51,6 +49,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/rating"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/relationship"
+	"github.com/proxy-app/proxy-api/internal/research"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/scenereview"
@@ -58,6 +57,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/storeboard"
 	"github.com/proxy-app/proxy-api/internal/storeonboarding"
 	"github.com/proxy-app/proxy-api/internal/supply"
+	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/twininsight"
 	"github.com/proxy-app/proxy-api/internal/usermodel"
 	"github.com/proxy-app/proxy-api/internal/voucher"
@@ -134,16 +134,18 @@ type Server struct {
 	// CASE scope，每次查询留痕。nil = 命令按未实现处理。
 	NumberLookup *numberlookup.Service
 	// Tagging：标签层的写命令（RecordCoarseLocation）与运营读取（TAG-SYSTEM-001）。
-	Tagging      *tagging.Commands
+	Tagging *tagging.Commands
 	// Guidance：下一步引导（GetNextSteps）。
 	Guidance *guidance.Commands
 	// Incentive：激励规则与用户读自己的奖励（INCENTIVE-001）。
 	IncentiveStore    incentive.Store
 	IncentiveCommands *incentive.Commands
 	// Insight：需求缺口与标签分群读模型（OPS-INSIGHT-001）。
-	Insight      insight.Source
+	Insight insight.Source
 	// MatchPreview：撮合预览（OPS-MATCH-PREVIEW-001），组合根接线。
 	MatchPreview MatchPreviewFunc
+	// MATCH-ENGINE-001：撮合决策账查询（matching.decisions）。
+	MatchExplain MatchExplainFunc
 	// MatchEval：撮合离线回放评估（OPS-MATCH-EVAL-001），组合根接线。
 	MatchEval MatchEvalSource
 	// ProviderList / ProviderProfile：小美画像（OPS-PROVIDER-PROFILE-001），组合根接线。
@@ -153,7 +155,7 @@ type Server struct {
 	AccountStatus *accountstatus.Service
 	// AccountInFlight：一个人手上没结束的订单数（封禁不自动取消，运营页提醒人工善后）。
 	AccountInFlight func(ctx context.Context, userID string) (int, error)
-	TagStore     tagging.Store
+	TagStore        tagging.Store
 	// PolicyDecisions is the LC-28 audit-log writer. The
 	// fulfillment service uses it to gate the OFFERED →
 	// CONFIRMED transition for PLATFORM_PAY orders. Wired
@@ -305,6 +307,7 @@ func (s *Server) Handler() http.Handler {
 	// 而且必填理由 + 落 operator.action_log（OPS-AUDIT-001）。
 	mux.HandleFunc("/v1/operator/matching", s.operatorConsole(s.operatorMatching))
 	mux.HandleFunc("/v1/operator/matching/trace", s.operatorConsole(s.operatorMatchingTrace))
+	mux.HandleFunc("/v1/operator/matching/explain", s.operatorConsole(s.operatorMatchingExplain))
 	mux.HandleFunc("/v1/operator/matching/tunables", s.operatorConsoleGated(http.MethodPost, ScopeMarketplace, s.operatorMatchingTunables))
 	mux.HandleFunc("/v1/operator/dispatch", s.operatorConsole(s.operatorDispatch))
 	mux.HandleFunc("/v1/operator/dispatch/run", s.operatorConsole(s.operatorDispatchRun))

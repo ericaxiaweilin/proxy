@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/proxy-app/proxy-api/internal/accountstatus"
 	"github.com/proxy-app/proxy-api/internal/activity"
 	"github.com/proxy-app/proxy-api/internal/aipersona"
 	"github.com/proxy-app/proxy-api/internal/aisystem"
@@ -28,12 +29,16 @@ import (
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/gravity"
 	"github.com/proxy-app/proxy-api/internal/growth"
+	"github.com/proxy-app/proxy-api/internal/guidance"
 	"github.com/proxy-app/proxy-api/internal/identity"
+	"github.com/proxy-app/proxy-api/internal/incentive"
+	"github.com/proxy-app/proxy-api/internal/insight"
 	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
+	"github.com/proxy-app/proxy-api/internal/matchengine"
 	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
@@ -41,14 +46,8 @@ import (
 	"github.com/proxy-app/proxy-api/internal/numberlookup"
 	"github.com/proxy-app/proxy-api/internal/operatoraudit"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
-	"github.com/proxy-app/proxy-api/internal/accountstatus"
-	"github.com/proxy-app/proxy-api/internal/guidance"
-	"github.com/proxy-app/proxy-api/internal/incentive"
-	"github.com/proxy-app/proxy-api/internal/insight"
-	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
 	"github.com/proxy-app/proxy-api/internal/outcome"
-	"github.com/proxy-app/proxy-api/internal/research"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
@@ -57,6 +56,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/rating"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/relationship"
+	"github.com/proxy-app/proxy-api/internal/research"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/scenereview"
@@ -64,6 +64,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/storeboard"
 	"github.com/proxy-app/proxy-api/internal/storeonboarding"
 	"github.com/proxy-app/proxy-api/internal/supply"
+	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/usermodel"
 	"github.com/proxy-app/proxy-api/internal/voucher"
 	"github.com/proxy-app/proxy-api/internal/wallet"
@@ -792,6 +793,8 @@ func main() {
 		// MARKET-INVITE-001：快速发单 10 分钟没人报名 ⇒ 按同一套排名邀请 30km 内合适的人（两轮，各 5 人）。
 		if dispatchEngine != nil {
 			nearbyProfiles := postgres.NewIdentityRepository(pool)
+			engineStore := matchengine.NewPostgres(pool)
+			server.MatchExplain = engineStore.Explain
 			inviter := nearbyInviter{
 				market: marketplaceService,
 				nearby: func(ctx context.Context, lat, lng, maxDistanceM float64, limit int) ([]string, error) {
@@ -806,6 +809,47 @@ func main() {
 					return ids, nil
 				},
 				rank: rankUsers,
+				signals: func(ctx context.Context, requesterID string, ids []string, lat, lng *float64) (map[string]matching.Signals, error) {
+					sigs, err := matchingStore.UserSignals(ctx, ids)
+					if err != nil {
+						return nil, err
+					}
+					// 标签契合：读不出来 / 没标签 = 不算（TagFit 留 nil）。
+					if requesterID != "" && server.TagStore != nil {
+						tagSvc := &tagging.Service{Store: server.TagStore}
+						if mine := tagSvc.TagsFor(ctx, requesterID, tagging.UseMatching); len(mine) > 0 {
+							for _, id := range ids {
+								if theirs := tagSvc.TagsFor(ctx, id, tagging.UseMatching); len(theirs) > 0 {
+									fit := tagging.Affinity(mine, theirs, time.Now().UTC())
+									sig := sigs[id]
+									sig.TagFit = &fit
+									sigs[id] = sig
+								}
+							}
+						}
+					}
+					return matching.WithDistances(sigs, ids, lat, lng), nil
+				},
+				engineFor: func(excluded map[string]string, size int) *matchengine.Engine {
+					return &matchengine.Engine{
+						SetSize: size,
+						Gates: []matchengine.Gate{
+							matchengine.ExclusionGate{Excluded: excluded},
+							matchengine.AccountGate{Level: server.AccountStatus.LevelOf},
+							matchengine.SafetyGate{Blocked: engineStore.SafetyBlocked},
+							matchengine.PermissionGate{Granted: func(ctx context.Context, id string) (bool, error) {
+								if server.OrderPermission == nil {
+									return false, nil
+								}
+								return server.OrderPermission(ctx, id)
+							}},
+							matchengine.UserBlockGate{Blocked: engineStore.UserBlocked},
+							matchengine.LocationGate{RadiusM: inviteRadiusM},
+						},
+						Recorder:     engineStore,
+						OnAuditError: func(err error) { log.Printf("match engine audit: %v", err) },
+					}
+				},
 				// 晚绑定：ProviderApps 在这段之后才建好，邀请发生在运行期，那时 server.OrderPermission 已就位。
 				permitted: func(ctx context.Context, id string) (bool, error) {
 					if server.OrderPermission == nil {

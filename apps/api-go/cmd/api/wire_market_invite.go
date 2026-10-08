@@ -7,6 +7,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/api"
 	"github.com/proxy-app/proxy-api/internal/dispatch"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
+	"github.com/proxy-app/proxy-api/internal/matchengine"
 	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/tagging"
 )
@@ -26,6 +27,9 @@ type nearbyInviter struct {
 	// 平台不能替她出现在别人的邀约里（2026-10-08 仓库审核：未经同意被曝光）；而且没通过 KYC
 	// 的人本来也报不了名。读不出来 = 当作没有（fail-closed）。
 	permitted func(ctx context.Context, userID string) (bool, error)
+	// MATCH-ENGINE-001：配了这两个就走统一撮合引擎（资格门链 + 审计 + 探索位 + 版本）；没配走下面的旧路径（单测用）。
+	engineFor func(excluded map[string]string, size int) *matchengine.Engine
+	signals   func(ctx context.Context, requesterID string, ids []string, lat, lng *float64) (map[string]matching.Signals, error)
 }
 
 // onlyPermitted 留下有接单权限的人；任何一个人的权限读不出来都当作没有。
@@ -43,6 +47,9 @@ func onlyPermitted(ctx context.Context, ids []string, permitted func(context.Con
 }
 
 func (n nearbyInviter) Invite(ctx context.Context, run dispatch.Run, exclude map[string]bool, limit int) ([]string, string, error) {
+	if n.engineFor != nil && n.signals != nil {
+		return n.inviteViaEngine(ctx, run, exclude, limit)
+	}
 	opp, err := n.market.Opportunity(ctx, run.TaskID)
 	if err != nil {
 		return nil, "", err
@@ -91,6 +98,9 @@ func (n nearbyInviter) Invite(ctx context.Context, run dispatch.Run, exclude map
 
 // Preview 是撮合预览：与 Invite 同一套候选与排名，但不发任何邀约，并带上每个候选的明细与共同标签。
 func (n nearbyInviter) Preview(ctx context.Context, opportunityID string, limit int, tags *tagging.Service, now time.Time) (api.MatchPreviewResult, error) {
+	if n.engineFor != nil && n.signals != nil {
+		return n.previewViaEngine(ctx, opportunityID, limit, tags, now)
+	}
 	res := api.MatchPreviewResult{OpportunityID: opportunityID, TagFitWeight: matching.CurrentTunables().TagFitWeight, Candidates: []api.MatchPreviewItem{}}
 	opp, err := n.market.Opportunity(ctx, opportunityID)
 	if err != nil {

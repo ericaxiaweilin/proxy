@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/proxy-app/proxy-api/internal/matchengine"
 	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/operatoraudit"
 	"github.com/proxy-app/proxy-api/internal/tagging"
@@ -30,6 +31,9 @@ type MatchPreviewItem struct {
 	Affinity  float64             `json:"affinity"`
 	Shared    []tagging.SharedTag `json:"sharedTags"`
 	TagCount  int                 `json:"tagCount"`
+	// 引擎给的匹配理由码（不是黑盒分数）和是否探索位。
+	Reasons     []string `json:"reasons,omitempty"`
+	Exploration bool     `json:"exploration,omitempty"`
 }
 
 // MatchPreviewResult 是整页。
@@ -39,6 +43,11 @@ type MatchPreviewResult struct {
 	OwnerTagCount int                `json:"ownerTagCount"`
 	TagFitWeight  float64            `json:"tagFitWeight"` // 当前共同兴趣权重；0 = 标签还没参与排名
 	Candidates    []MatchPreviewItem `json:"candidates"`
+	// 引擎的整次运行：snapshot / 口径版本 / 供给健康 / 没过门的人及原因（最多 50 条）。
+	SnapshotID  string                   `json:"snapshotId,omitempty"`
+	RankVersion string                   `json:"rankVersion,omitempty"`
+	Health      matchengine.SupplyHealth `json:"supplyHealth"`
+	Ineligible  []matchengine.Ineligible `json:"ineligible,omitempty"`
 }
 
 // MatchPreviewFunc 由组合根接线（它需要市场、附近、权限、排名、标签几样东西）。

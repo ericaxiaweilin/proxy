@@ -12,7 +12,9 @@ import (
 
 type fakeProviders struct{ rows []insight.ProviderRow }
 
-func (f fakeProviders) Providers(context.Context, int) ([]insight.ProviderRow, error) { return f.rows, nil }
+func (f fakeProviders) Providers(context.Context, int) ([]insight.ProviderRow, error) {
+	return f.rows, nil
+}
 func (f fakeProviders) Provider(_ context.Context, id string) (insight.ProviderRow, bool, error) {
 	for _, r := range f.rows {
 		if r.UserID == id {
@@ -21,7 +23,12 @@ func (f fakeProviders) Provider(_ context.Context, id string) (insight.ProviderR
 	}
 	return insight.ProviderRow{}, false, nil
 }
-func (fakeProviders) TopInterests(context.Context, time.Time, int) ([]insight.InterestRow, error) { return nil, nil }
+func (fakeProviders) TopInterests(context.Context, time.Time, int) ([]insight.InterestRow, error) {
+	return nil, nil
+}
+func (fakeProviders) Sources(context.Context, time.Time) ([]insight.SourceCount, error) {
+	return nil, nil
+}
 func (fakeProviders) DemandGap(context.Context, time.Time, int) (insight.DemandGap, error) {
 	return insight.DemandGap{}, nil
 }
