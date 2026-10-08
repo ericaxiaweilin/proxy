@@ -76,7 +76,7 @@ describe("scene activity discovery contract", () => {
     // behaviour there (including "every primary action has keywords, so no
     // button on that row is dead"). Here we only pin that the row is built
     // from that single source rather than a second hardcoded list.
-    expect(source).toContain('import { ENTRY_ACTION_IDS, PRIMARY_ACTION_IDS, sceneCategoryEntries } from "../scene-category-entries";');
+    expect(source).toContain('import { ENTRY_ACTION_IDS, PRIMARY_ACTION_IDS, scenesForAction, sceneCategoryEntries } from "../scene-category-entries";');
     expect(source).toContain("PRIMARY_ACTION_IDS.map");
     expect(source).toContain("styles.actionRow");
     expect(source).toContain("PRIMARY_ACTIONS.map");

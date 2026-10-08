@@ -59,7 +59,7 @@ describe("SCENE-LOCATION-PICKER-001 SceneShopDirectory (all 6 real scene-categor
     expect(directory).toContain("onToggle={toggleArea}");
     expect(directory).toContain("selected={areas}");
     // 反向臂：不能新造一套跟 shopDirectoryRows 的 areas 参数脱节的选中态。
-    expect(directory).toContain("shopDirectoryRows(scenes, actionId, { sortId, areas,");
+    expect(directory).toContain("shopDirectoryRows(narrowed, actionId, { sortId, areas,");
   });
 
   it("single Modal, no nesting: the picker swaps in via state inside the same top-level Modal", () => {

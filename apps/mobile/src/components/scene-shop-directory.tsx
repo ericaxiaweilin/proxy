@@ -186,8 +186,11 @@ export function SceneShopDirectory({
   onSkip,
   pickedId,
   embedded,
+  narrow,
 }: {
   actionId: string;
+  /** 动作下的子路线（海边散步 / 胶片 City Walk…）：只留命中的场景；不传 = 整个动作。 */
+  narrow?: ((scene: SceneShopBrief) => boolean) | undefined;
   label: string;
   unit: string;
   apiBaseUrl: string | undefined;
@@ -347,11 +350,12 @@ export function SceneShopDirectory({
     return () => { cancelled = true; };
   }, [localNet, selectedId, session]);
 
-  const matched = useMemo(() => shopDirectoryRows(scenes, actionId), [scenes, actionId]);
+  const narrowed = useMemo(() => (narrow ? scenes.filter(narrow) : scenes), [scenes, narrow]);
+  const matched = useMemo(() => shopDirectoryRows(narrowed, actionId), [narrowed, actionId]);
   const facets = useMemo(() => shopAreaFacets(matched), [matched]);
   const rows = useMemo(
-    () => shopDirectoryRows(scenes, actionId, { sortId, areas, ...(origin ? { origin } : {}) }),
-    [scenes, actionId, sortId, areas, origin],
+    () => shopDirectoryRows(narrowed, actionId, { sortId, areas, ...(origin ? { origin } : {}) }),
+    [narrowed, actionId, sortId, areas, origin],
   );
 
   // DEMAND-SCENE-PICKED-TOP-001（2026-10-07 用户：「说了 选中一个场景 再弹出下面的

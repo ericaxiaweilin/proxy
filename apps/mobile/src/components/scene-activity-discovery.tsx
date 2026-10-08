@@ -7,7 +7,7 @@ import { ProxyIcon } from "./proxy-icon";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { createSceneFavoritesStore, type SavedSceneEntry } from "../scene-favorites";
-import { ENTRY_ACTION_IDS, PRIMARY_ACTION_IDS, sceneCategoryEntries } from "../scene-category-entries";
+import { ENTRY_ACTION_IDS, PRIMARY_ACTION_IDS, scenesForAction, sceneCategoryEntries } from "../scene-category-entries";
 // SCENE-SHOP-DIRECTORY-001：入口卡点进去是原型第 2/3 屏（分类列表 → 单店
 // 详情）。两屏在同一个全屏 Modal 里，返回逐层收。
 import { SceneShopDirectory } from "./scene-shop-directory";
@@ -285,7 +285,7 @@ const ACTION_FAMILY_LABELS: Record<string, string> = {
   "urban-support": "城市协助细分",
 };
 
-function sceneMatches(brief: SceneDiscoveryBrief, sceneId: string): boolean {
+function sceneMatches(brief: { name: string; area: string; type: string }, sceneId: string): boolean {
   const haystack = `${brief.name} ${brief.area} ${brief.type}`.toLowerCase();
   const words: Record<string, readonly string[]> = {
     cafe: ["咖啡", "cafe", "coffee"], lake: ["湖", "lake", "westlake", "西湖"],
@@ -328,7 +328,9 @@ export function SceneActivityDiscovery({
   // 的中间页。所以这里的类型只留列表真正要用的三个字段，不是完整的
   // SceneCategoryEntry（没有真实场景命中时，count/visitedTotal/areas/imageUrl
   // 这些派生字段本来就没有真实值，不编占位）。
-  const [directoryEntry, setDirectoryEntry] = useState<{ actionId: string; label: string; unit: "家" | "个" }>();
+  const [directoryEntry, setDirectoryEntry] = useState<{ actionId: string; label: string; unit: "家" | "个"; momentId?: string }>();
+  // 「更多」里选中的子路线（海边散步…）：点卡 = 选中并高亮，底部「选择场景」才进列表。
+  const [pickedMomentId, setPickedMomentId] = useState<string | undefined>();
   // SPORT-BADMINTON-001：运动 · 羽毛球那张卡。整页是全屏 Modal，自己管三屏切换。
   const [badmintonOpen, setBadmintonOpen] = useState(false);
   const [assets, setAssets] = useState<SceneAssetCatalog>();
@@ -398,6 +400,7 @@ export function SceneActivityDiscovery({
 
   const resetAll = (): void => {
     setActionId(undefined);
+    setPickedMomentId(undefined);
     setOccasionId(undefined);
     setTimeId(undefined);
     setPriceId(undefined);
@@ -405,6 +408,9 @@ export function SceneActivityDiscovery({
 
   // SCENE-HOME-ENTRY-001：入口卡按真实场景算，跟 MOMENTS fixture 无关。
   // 计数逻辑在 ../scene-category-entries（纯模块，有真行为测试）。
+  // 子路线（moment）带的语义场景（old-town / beach…）→ 只留命中的场景；没选子路线 = 整个动作。
+  const directoryMoment = directoryEntry?.momentId ? MOMENTS.find((m) => m.id === directoryEntry.momentId) : undefined;
+  const directoryNarrow = useMemo(() => (directoryMoment ? (scene: { name: string; area: string; type: string }) => sceneMatches(scene, directoryMoment.scene) : undefined), [directoryMoment]);
   const entries = useMemo(() => sceneCategoryEntries(scenes, ENTRY_ACTIONS), [scenes]);
   const entriesForAction = entries.filter((entry) => entry.actionId === actionMatchId(actionId));
   // 选了细分动作（跑步/羽毛球…）时它本来就没有对应入口卡 —— 那就把全部入口
@@ -460,7 +466,9 @@ export function SceneActivityDiscovery({
     // SCENE-CARD-DIRECT-LIST-001：真有命中就用真数据的 label/unit；没有命中
     // 也直接开列表（用动作分类表自己的 label，unit 默认"个"——没有真实场景就
     // 没有真实的商家占比，不编）。列表进去自己会说"附近还没有接入的 X 场景"。
-    return <Pressable accessibilityLabel={`Moment ${moment.title}`} key={moment.id} onPress={() => setDirectoryEntry(directoryTarget ?? { actionId: actionMatchId(moment.action) ?? moment.action, label: action.label, unit: "个" })} style={styles.sceneCard}>
+    const picked = !home && pickedMomentId === moment.id;
+    const base = directoryTarget ?? { actionId: actionMatchId(moment.action) ?? moment.action, label: action.label, unit: "个" as const };
+    return <Pressable accessibilityLabel={`Moment ${moment.title}${picked ? " 已选" : ""}`} key={moment.id} onPress={() => (home ? setDirectoryEntry({ ...base, label: moment.title, momentId: moment.id }) : setPickedMomentId(picked ? undefined : moment.id))} style={[styles.sceneCard, picked && styles.sceneCardPicked]}>
       {absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) || networkSource("moments", moment.id) ? <Image contentFit="cover" source={(absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) ? { uri: absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl)! } : networkSource("moments", moment.id))!} style={styles.sceneCardPhoto} /> : <View style={[styles.photoPending, styles.sceneCardPhoto]} />}
       <Svg height="100%" pointerEvents="none" style={styles.sceneCardShade} width="100%">
         <Defs>
@@ -706,8 +714,13 @@ export function SceneActivityDiscovery({
           <View style={[styles.pickerActions, { paddingBottom: Math.max(12, safeArea.bottom) }]}><Pressable onPress={resetAll} style={styles.pickerReset}><Text selectable style={styles.pickerResetText}>重置</Text></Pressable>{/* 2026-10-08（用户：点了咖啡后底下是 重置/完成，完成还是回 home —— 应该是 选择 → 场景 list）：
               主按钮不再是「完成」回首页，而是进该动作的场景列表；没有真实场景的动作进去由列表自己说「还没有接入」，不再回首页。 */}
             {actionId ? (() => {
-              const target = entriesForAction[0] ?? { actionId: actionMatchId(actionId) ?? actionId, label: taxon(ACTIONS, actionMatchId(actionId) ?? actionId).label, unit: "个" as const };
-              return <Pressable accessibilityLabel={`选择场景 ${target.label}`} onPress={() => setDirectoryEntry(target)} style={styles.pickerDone}><Text selectable style={styles.pickerDoneText}>{entriesForAction[0] ? `选择场景 · ${entriesForAction[0].count} ${entriesForAction[0].unit}` : "选择场景"}</Text></Pressable>;
+              const moment = pickedMomentId ? MOMENTS.find((m) => m.id === pickedMomentId && m.action === actionMatchId(actionId)) : undefined;
+              const base = entriesForAction[0] ?? { actionId: actionMatchId(actionId) ?? actionId, label: taxon(ACTIONS, actionMatchId(actionId) ?? actionId).label, unit: "个" as const };
+              const count = moment
+                ? scenes.filter((scene) => scenesForAction([scene], base.actionId).length > 0 && sceneMatches(scene, moment.scene)).length
+                : entriesForAction[0]?.count;
+              const target = moment ? { ...base, label: moment.title, momentId: moment.id } : base;
+              return <Pressable accessibilityLabel={`选择场景 ${target.label}`} onPress={() => setDirectoryEntry(target)} style={styles.pickerDone}><Text selectable style={styles.pickerDoneText}>{count === undefined ? "选择场景" : count === 0 ? "选择场景 · 暂无" : `选择场景 · ${count} ${base.unit}`}</Text></Pressable>;
             })() : null}</View>
         </View>
       </Modal>
@@ -716,6 +729,7 @@ export function SceneActivityDiscovery({
           返回逐层收（列表里点返回关整页，详情里点返回回列表）。 */}
       {directoryEntry ? <SceneShopDirectory
         actionId={directoryEntry.actionId}
+        narrow={directoryNarrow}
         label={directoryEntry.label}
         unit={directoryEntry.unit}
         apiBaseUrl={apiBaseUrl}
@@ -775,6 +789,7 @@ const styles = StyleSheet.create({
   // 二进制的 react-native-svg，不是斑马条纹近似）。
   sceneList: { gap: 14, marginTop: 13 },
   sceneCard: { backgroundColor: "#DDD7CF", borderRadius: 18, justifyContent: "flex-end", minHeight: 224, overflow: "hidden" },
+  sceneCardPicked: { borderColor: "#151515", borderWidth: 3 },
   sceneCardPhoto: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   sceneCardShade: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   sceneFavorite: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.35)", borderRadius: 17, height: 34, justifyContent: "center", position: "absolute", right: 12, top: 12, width: 34 },

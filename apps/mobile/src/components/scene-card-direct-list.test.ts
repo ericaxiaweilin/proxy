@@ -24,13 +24,15 @@ describe("SCENE-CARD-DIRECT-LIST-001 every scene card opens the real list direct
   });
 
   it("a moment card always calls setDirectoryEntry on press, with no fallback branch", () => {
-    expect(code).toContain("onPress={() => setDirectoryEntry(directoryTarget ?? { actionId: actionMatchId(moment.action) ?? moment.action, label: action.label, unit: \"个\" })}");
+    // 首页卡直接开列表（带上子路线 momentId）；「更多」里点卡 = 选中，底部「选择场景」才开。
+    expect(code).toContain("const base = directoryTarget ?? { actionId: actionMatchId(moment.action) ?? moment.action, label: action.label, unit: \"个\" as const };");
+    expect(code).toContain("home ? setDirectoryEntry({ ...base, label: moment.title, momentId: moment.id }) : setPickedMomentId(");
     // 反向臂：旧的双分支写法（真命中开列表，没命中弹 sheet）不能悄悄回来。
     expect(code).not.toMatch(/if\s*\(directoryTarget\)\s*setDirectoryEntry\(directoryTarget\);\s*else\s*setDetail\(moment\)/);
   });
 
   it("no real scene category has zero matches faked into a fabricated count — the fallback entry carries no count/visitedTotal/areas/imageUrl", () => {
-    expect(code).toContain('const [directoryEntry, setDirectoryEntry] = useState<{ actionId: string; label: string; unit: "家" | "个" }>();');
+    expect(code).toContain('const [directoryEntry, setDirectoryEntry] = useState<{ actionId: string; label: string; unit: "家" | "个"; momentId?: string }>();');
   });
 
   it("dead onCompose prop (only consumer was the removed sheet) was removed, not left dangling", () => {
