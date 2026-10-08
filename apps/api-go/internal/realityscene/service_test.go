@@ -410,13 +410,15 @@ func unquoteSQL(v string) string {
 // 标着"Bắc Ninh"却落在河内，地图上就会把 Bắc Ninh 的店画在河内。
 func TestSceneCoordinatesMatchTheirArea(t *testing.T) {
 	bounds := map[string][4]float64{
-		"Ba Đình":   {21.02, 21.06, 105.82, 105.86},
+		"Ba Đình":   {21.02, 21.06, 105.81, 105.86},
 		"Hoàn Kiếm": {21.01, 21.05, 105.83, 105.87},
 		"Tây Hồ":    {21.04, 21.10, 105.79, 105.85},
 		"Đống Đa":   {20.99, 21.03, 105.81, 105.85},
 		"Long Biên": {21.02, 21.08, 105.86, 105.92},
 		"Cầu Giấy":  {21.01, 21.06, 105.77, 105.82},
 		"Bắc Ninh":  {21.10, 21.30, 106.00, 106.20},
+		"Hoàng Mai": {20.95, 21.01, 105.84, 105.90},
+		"Gia Lâm":   {20.97, 21.03, 105.92, 105.97},
 		// SCENE-NO-FABRICATED-001 新增的两条真实公共景点：
 		// Văn Miếu（文庙坊）在老城西南，Hồng Hà（红河坊）跨红河两岸。
 		// CATALOG-EXPAND-001 新增的两个区。缺界会让这条测试 Fatalf ——

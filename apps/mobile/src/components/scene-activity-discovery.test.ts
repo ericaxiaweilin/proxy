@@ -76,7 +76,7 @@ describe("scene activity discovery contract", () => {
     // behaviour there (including "every primary action has keywords, so no
     // button on that row is dead"). Here we only pin that the row is built
     // from that single source rather than a second hardcoded list.
-    expect(source).toContain('import { PRIMARY_ACTION_IDS, sceneCategoryEntries } from "../scene-category-entries";');
+    expect(source).toContain('import { ENTRY_ACTION_IDS, PRIMARY_ACTION_IDS, sceneCategoryEntries } from "../scene-category-entries";');
     expect(source).toContain("PRIMARY_ACTION_IDS.map");
     expect(source).toContain("styles.actionRow");
     expect(source).toContain("PRIMARY_ACTIONS.map");
@@ -365,7 +365,7 @@ describe("SCENE-CARD-STACK-005: single-column big Moment cards", () => {
 describe("SCENE-HOME-ENTRY-001: home entry cards are wired to the pure, tested derivation", () => {
   it("consumes the pure module instead of re-deriving counts inline in the untestable .tsx", () => {
     expect(source).toContain('from "../scene-category-entries"');
-    expect(source).toContain("sceneCategoryEntries(scenes, PRIMARY_ACTIONS)");
+    expect(source).toContain("sceneCategoryEntries(scenes, ENTRY_ACTIONS)");
     expect(source).toContain("PRIMARY_ACTION_IDS.map");
     // The .tsx must not own a second copy of the derivation — a count computed
     // here would be invisible to scene-category-entries.test.ts.
@@ -375,7 +375,7 @@ describe("SCENE-HOME-ENTRY-001: home entry cards are wired to the pure, tested d
   });
 
   it("renders an entry card per real category and an honest empty state otherwise", () => {
-    expect(source).toContain("const entries = useMemo(() => sceneCategoryEntries(scenes, PRIMARY_ACTIONS), [scenes]);");
+    expect(source).toContain("const entries = useMemo(() => sceneCategoryEntries(scenes, ENTRY_ACTIONS), [scenes]);");
     expect(source).toContain("visibleEntries.length > 0 ?");
     expect(source).toContain("styles.entryCard");
     expect(source).toContain("styles.entryCountPill");
@@ -388,7 +388,7 @@ describe("SCENE-HOME-ENTRY-001: home entry cards are wired to the pure, tested d
     // scene list as its only data input, and its own behaviour test proves an
     // empty list yields zero cards. So pinning the call site is enough — the
     // fixture cannot reach the cards without this line changing.
-    expect(source).toContain("sceneCategoryEntries(scenes, PRIMARY_ACTIONS)");
+    expect(source).toContain("sceneCategoryEntries(scenes, ENTRY_ACTIONS)");
     expect(source).toContain("scenes: readonly SceneDiscoveryBrief[];");
   });
 

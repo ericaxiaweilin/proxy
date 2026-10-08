@@ -84,8 +84,10 @@ export const MOMENT_TEMPLATES: MomentTemplate[] = [
   // 图标复用场景动作既有 logo（sport.svg / cycling.svg，见 MOMENT_ACTION_ID），
   // 没有新画资产。两条都取自 SCENE_ACTIONS 的 sport 家族（scene-activity-discovery.tsx
   // 的 ACTION_DETAILS：跑步/骑行/羽毛球/网球/瑜伽都挂 familyId "sport"）。
+  // 2026-10-08：打球改绑场景（SPORT-VENUES-001）——场景目录有了真实运动场地（migrations/192），
+  // 跟娱乐一样先选球馆/球场再填规格；骑行仍绑人（OSM 里绿道是线，目录没有点）。
   // 只加两条、不铺满那个家族：用户要的是「基本够了」，不是把运动做成一个子目录。
-  { id: "ballgame", binding: "person", emoji: "球", title: "打球", venue: "球馆", venueLabel: "球馆 · 约一场", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "周末 15:00", defaultDuration: "2 小时", theme: "运动", timeTags: ["下午", "周末"], skills: "中文 · 球类运动", priceRef: "200–400K", defaultPrice: "300,000₫", category: "sport", tags: ["运动", "球馆"] },
+  { id: "ballgame", binding: "scene", emoji: "球", title: "打球", venue: "球馆", venueLabel: "球馆 · 约一场", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "周末 15:00", defaultDuration: "2 小时", theme: "运动", timeTags: ["下午", "周末"], skills: "中文 · 球类运动", priceRef: "200–400K", defaultPrice: "300,000₫", category: "sport", tags: ["运动", "球馆"] },
   { id: "ride", binding: "person", emoji: "骑", title: "骑行", venue: "绿道", venueLabel: "城市绿道 · 一起骑", ratios: ["1:1", "≤ 4:1"], defaultRatio: "1:1", defaultTime: "周末 早上", defaultDuration: "半天", theme: "骑行", timeTags: ["周末"], skills: "中文 · 骑行", priceRef: "150–300K", defaultPrice: "200,000₫", category: "sport", tags: ["骑行", "绿道"] },
   { id: "pro", binding: "person", emoji: "证", title: "城市协助", venue: "按需", venueLabel: "翻译 / 签证 / 法律 / 商务 · 专业认证优先", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "", defaultDuration: "2 小时", theme: "服务协助", timeTags: [], skills: "中文 · 专业协助", priceRef: "面议", defaultPrice: "", category: "theme", tags: ["专业", "认证"] }
 ];

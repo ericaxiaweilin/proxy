@@ -81,7 +81,8 @@ import { SceneShopDirectory } from "../components/scene-shop-directory";
 // 「低调」在旧结构里做不到 —— 它是被 Step 的形状逼出来的，不是样式问题。现在：
 //   娱乐/场景类  moment → **scene（真实门店）** → specs
 //   专业        moment → people（人 list，专业就是靠人变现）
-//   运动        moment → specs（绑人，不进场景 list；目录里本来也没有球馆/绿道）
+//   运动·打球   同娱乐：选场景（球馆/球场，SPORT-VENUES-001 起目录里有真实场地）
+//   运动·骑行   moment → specs（绑人；目录里没有绿道这种点）
 // 「直接约」在 specs 底部是一行小字入口，不是一步。
 type Step = "moment" | "people" | "specs" | "done";
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTION_SCENE_KEYWORDS, PRIMARY_ACTION_IDS, sceneCategoryEntries, type SceneCategoryAction, type SceneCategoryBrief } from "./scene-category-entries";
+import { ACTION_SCENE_KEYWORDS, ENTRY_ACTION_IDS, PRIMARY_ACTION_IDS, sceneCategoryEntries, type SceneCategoryAction, type SceneCategoryBrief } from "./scene-category-entries";
 
 // SCENE-HOME-ENTRY-001：首页入口卡上那些数字是**用户会当成事实读的**（「23 家」
 // 「12 人去过」），所以这块不能只靠 grep 文本钉守着 —— 下面全是真行为断言。
@@ -122,5 +122,16 @@ describe("sceneCategoryEntries: 首页场景入口卡的计数只有真实来源
     for (const id of PRIMARY_ACTION_IDS) {
       expect(ACTION_SCENE_KEYWORDS[id]?.length ?? 0).toBeGreaterThan(0);
     }
+  });
+
+  it("运动有自己的入口卡：只认运动场地，不抢咖啡/景点", () => {
+    expect([...ENTRY_ACTION_IDS]).toEqual([...PRIMARY_ACTION_IDS, "sport"]);
+    const acts = [{ id: "sport", label: "运动" }, { id: "coffee", label: "咖啡" }];
+    const entries = sceneCategoryEntries([
+      scene({ name: "Xoài Arena", type: "运动 · 羽毛球场", category: "商家" }),
+      scene({ name: "Sân Pickleball", type: "运动 · 匹克球场", category: "其他" }),
+      scene({ name: "Hồ Hoàn Kiếm", type: "公共景点 · 湖边", category: "景点" }),
+    ], acts);
+    expect(entries.map((entry) => [entry.actionId, entry.count])).toEqual([["sport", 2]]);
   });
 });

@@ -13,6 +13,13 @@
 export const PRIMARY_ACTION_IDS = ["coffee", "dining", "city-walk", "photo", "cycling", "exhibition"] as const;
 
 /**
+ * 首页入口卡（场景目录入口）比那一行多一个「运动」：运动不在原型的 6 格里
+ * （它从「全部」进），但它有真实场地（migrations/192），不出卡首页的运动
+ * 就是空白 —— 用户 2026-10-08 指出。顺序：6 个主动作之后。
+ */
+export const ENTRY_ACTION_IDS = [...PRIMARY_ACTION_IDS, "sport"] as const;
+
+/**
  * 动作 → 真实场景的归属词。
  *
  * 后端**没有**「这个场景属于哪个动作」这张表：公开列表 /v1/reality-scenes
@@ -30,6 +37,8 @@ export const ACTION_SCENE_KEYWORDS: Record<string, readonly string[]> = {
   photo: ["拍照", "photo", "观景", "景点", "viewpoint", "camera"],
   cycling: ["骑行", "cycling", "bike", "自行车", "xe đạp"],
   exhibition: ["美术馆", "画廊", "gallery", "museum", "展"],
+  // 骑行绿道不在这里（OSM 里是线，场景目录没有）；这里只认运动场地。
+  sport: ["运动", "球场", "球馆", "体育馆", "sport", "badminton", "pickleball", "tennis", "cầu lông"],
 };
 
 /** 入口卡需要的那几个真实字段（`realityscene.Scene` 公开列表的子集）。 */

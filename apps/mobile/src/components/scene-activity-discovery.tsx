@@ -7,7 +7,7 @@ import { ProxyIcon } from "./proxy-icon";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { createSceneFavoritesStore, type SavedSceneEntry } from "../scene-favorites";
-import { PRIMARY_ACTION_IDS, sceneCategoryEntries } from "../scene-category-entries";
+import { ENTRY_ACTION_IDS, PRIMARY_ACTION_IDS, sceneCategoryEntries } from "../scene-category-entries";
 // SCENE-SHOP-DIRECTORY-001：入口卡点进去是原型第 2/3 屏（分类列表 → 单店
 // 详情）。两屏在同一个全屏 Modal 里，返回逐层收。
 import { SceneShopDirectory } from "./scene-shop-directory";
@@ -83,6 +83,8 @@ const SPORT_ACTION_ICON: ImageSource = ACTIONS.find((action) => action.id === "s
  * ../scene-category-entries（纯模块，能被真的测）。
  */
 export const PRIMARY_ACTIONS: readonly Taxon[] = PRIMARY_ACTION_IDS.map((id) => ACTIONS.find((action) => action.id === id)!);
+// 入口卡 = 6 个主动作 + 运动（有真实场地才出卡，见 scene-category-entries）。
+const ENTRY_ACTIONS: readonly Taxon[] = ENTRY_ACTION_IDS.map((id) => ACTIONS.find((action) => action.id === id)!);
 
 // Detail nodes extend a stable top-level taxonomy without making Home wider.
 // matchActionId keeps today's Moment projection compatible until ranking moves
@@ -403,7 +405,7 @@ export function SceneActivityDiscovery({
 
   // SCENE-HOME-ENTRY-001：入口卡按真实场景算，跟 MOMENTS fixture 无关。
   // 计数逻辑在 ../scene-category-entries（纯模块，有真行为测试）。
-  const entries = useMemo(() => sceneCategoryEntries(scenes, PRIMARY_ACTIONS), [scenes]);
+  const entries = useMemo(() => sceneCategoryEntries(scenes, ENTRY_ACTIONS), [scenes]);
   const entriesForAction = entries.filter((entry) => entry.actionId === actionMatchId(actionId));
   // 选了细分动作（跑步/羽毛球…）时它本来就没有对应入口卡 —— 那就把全部入口
   // 摆出来，而不是给用户一块空。
