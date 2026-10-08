@@ -267,6 +267,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/dispatch", s.operatorConsole(s.operatorDispatch))
 	mux.HandleFunc("/v1/operator/dispatch/run", s.operatorConsole(s.operatorDispatchRun))
 	mux.HandleFunc("/v1/operator/dispatch/actions", s.operatorConsoleGated(http.MethodPost, ScopeMarketplace, s.operatorDispatchAction))
+	// MARKET-FAST-001：市场发单看板 —— 快速发单一段时间内的表现（只读，同一道 ANALYTICS 门）。
+	mux.HandleFunc("/v1/operator/market-dispatch", s.operatorConsole(s.operatorMarketBoard))
 	mux.HandleFunc("/v1/operator/provider-applications", s.operatorConsole(s.operatorProviderApplications))
 	mux.HandleFunc("/v1/operator/provider-applications/review", s.operatorConsoleMethod(http.MethodPost, s.operatorProviderApplicationReview))
 	// OPS-ACCESS-001: 运营权限自己的可观测面 —— 词汇表 / 当前配置 / 我生效的 scope /
