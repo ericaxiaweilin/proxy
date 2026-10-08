@@ -123,6 +123,12 @@ in as any user.
 * Visible at boot: `internal/bootenv` warns when the variable is unset *and* when it is set
   to something other than `production`; `/v1/operator/access` reports the value the running
   process actually resolved, so the declaration is checkable without reading the env file.
+* The declaration is a claim, so `/v1/operator/access` also shows what it is a claim *about*:
+  the database name, server address and port the process is connected to, asked from the
+  server itself (`current_database()` / `host(inet_server_addr())` / `inet_server_port()`).
+  The connection string is never parsed for this — `DATABASE_URL` carries a username and a
+  password, and this screen gets screenshots. If the identity cannot be queried, the page
+  says so instead of rendering an empty `@:0`.
 
 ### Customer-service number lookup (PUBLIC-NO-LOOKUP-001)
 

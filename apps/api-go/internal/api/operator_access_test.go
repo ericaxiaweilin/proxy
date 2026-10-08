@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/gravity"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/operatoraudit"
+	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 )
 
 // OPS-ACCESS-001：运营权限要有可观测面，而且它报的必须是**代码真的在执行**的那一套。
@@ -344,5 +346,98 @@ func TestOrphanScopeEntriesAreReported(t *testing.T) {
 	var nilGate *StaticOperatorGate
 	if got := nilGate.OrphanScopePrincipals(); got != nil {
 		t.Fatalf("nil gate must not panic, got %q", got)
+	}
+}
+
+// OPS-DATA-ENV-001（第二段）：数据环境是一句**断言**，运营得能核对它讲的是哪一个库。
+//
+// 起因很实际：这台 dev 库和服务器上的库都叫 proxy，控制台上长得一模一样。没有「这一屏读数
+// 出自哪台库」，production 的声明就只能靠人相信它 —— 而这一整轮的教训正是「我以为校验过了」。
+type identityStubSource struct {
+	stubOpsMetrics
+	id  opsmetrics.DBIdentity
+	err error
+}
+
+func (s identityStubSource) DBIdentity(context.Context) (opsmetrics.DBIdentity, error) {
+	return s.id, s.err
+}
+
+func accessDataEnv(t *testing.T, src opsmetrics.Source) map[string]any {
+	t.Helper()
+	server := operatorConsoleServer()
+	server.OpsMetrics = src
+	rec := consoleGet(server, "access", "ops_token")
+	var body struct {
+		DataEnv map[string]any `json:"dataEnv"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.DataEnv == nil {
+		t.Fatal("运营权限页里没有 dataEnv 这一段")
+	}
+	return body.DataEnv
+}
+
+func TestOperatorAccessNamesTheDatabaseItReads(t *testing.T) {
+	env := accessDataEnv(t, identityStubSource{id: opsmetrics.DBIdentity{
+		Database: "proxy", Host: "127.0.0.1", Port: 5432, Version: "15.4",
+	}})
+	if got := env["database"]; got != "proxy@127.0.0.1:5432" {
+		t.Fatalf("database = %v，应当短形是 dbname@host:port —— 运营要拿它跟部署清单对一眼", got)
+	}
+	if note, _ := env["databaseNote"].(string); note != "" {
+		t.Fatalf("问出来了却还带着一句问不出来：%q", note)
+	}
+	if env["businessRatesPublished"] != false {
+		t.Fatalf("没声明 production 却声称比率已发布：%v", env)
+	}
+}
+
+// 问不出来时必须明说问不出来。空字符串会在界面上印成「@:0」，那看起来像一个库名很难看的库，
+// 而不是「这一项无法核对」—— 又一处「把没拿到当成拿到零」。
+func TestOperatorAccessSaysWhenTheDatabaseIsUnknown(t *testing.T) {
+	// 来源根本不报告（例如内存实现的读模型）。
+	env := accessDataEnv(t, stubOpsMetrics{})
+	if got, _ := env["database"].(string); got != "" {
+		t.Fatalf("来源不报告却给出了库名 %q", got)
+	}
+	if note, _ := env["databaseNote"].(string); note == "" {
+		t.Fatal("问不出库身份时必须写明为什么，不能留空让界面显示一个空位")
+	}
+	// 报告了但查询失败（连不上、权限不足）。
+	env = accessDataEnv(t, identityStubSource{err: context.DeadlineExceeded})
+	if got, _ := env["database"].(string); got != "" {
+		t.Fatalf("查询失败却给出了库名 %q", got)
+	}
+	if note, _ := env["databaseNote"].(string); note == "" {
+		t.Fatal("查询失败必须写在界面上")
+	}
+}
+
+// 这条是这个功能的安全边界：库身份只能从服务端目录函数问出来，绝不能把连接串拆开印到界面上。
+// 用一条会随结构变化而失败的测试钉住字段集合，而不是靠注释里写「别打印密码」。
+func TestDatabaseIdentityCarriesNoCredentials(t *testing.T) {
+	raw, err := json.Marshal(opsmetrics.DBIdentity{Database: "proxy", Host: "127.0.0.1", Port: 5432, Version: "15.4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys map[string]any
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"database": true, "host": true, "port": true, "version": true}
+	for k := range keys {
+		if !want[k] {
+			t.Fatalf("DBIdentity 多了一个字段 %q —— 连接串里的用户名/密码就是这样被顺手带进界面的，"+
+				"这一屏会被截图、会进录屏。要加字段先证明它不含凭据。", k)
+		}
+	}
+	if len(keys) != len(want) {
+		t.Fatalf("DBIdentity 字段集合 = %v，want %v", keys, want)
+	}
+	if strings.Contains(string(raw), "://") || strings.Contains(string(raw), "@") {
+		t.Fatalf("序列化结果里出现了连接串形状：%s", raw)
 	}
 }

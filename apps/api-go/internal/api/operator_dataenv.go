@@ -1,8 +1,12 @@
 package api
 
 import (
+	"context"
+	"log"
 	"os"
 	"strings"
+
+	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 )
 
 // OPS-DATA-ENV-001（2026-10-08）：控制台连的是哪一套数据，必须由部署说出来，不能让读数猜。
@@ -71,9 +75,13 @@ func businessRateRefusal(stats string) string {
 	return out
 }
 
-// dataEnvStatus 是给 /v1/operator/access 看的那一段：声明了什么、据此发布了什么。
-// 这一页是运营看「系统当前怎么配的」的地方，环境声明漏在这里就等于漏在整个后台里没人知道。
-func dataEnvStatus() map[string]any {
+// dataEnvStatus 是给 /v1/operator/access 看的那一段：声明了什么、据此发布了什么、以及这句声明
+// 是关于**哪一个库**的。这一页是运营看「系统当前怎么配的」的地方，环境声明漏在这里就等于
+// 漏在整个后台里没人知道。
+//
+// database 这一项把声明变成可核对的事实：运营拿库名和地址跟部署清单对一眼，就知道自己看的是
+// 哪套数据。问不出来时明说问不出来（databaseNote），不印一个空的「@:0」让人以为那是个库。
+func dataEnvStatus(ctx context.Context, src opsmetrics.Source) map[string]any {
 	declared := operatorDataEnv()
 	published := businessRatesPublished()
 	note := "比率型指标停用：这一页只给原始计数。"
@@ -82,10 +90,27 @@ func dataEnvStatus() map[string]any {
 	} else if declared != "" {
 		note = "已声明但不是 production（值拼错 = 按非生产处理，不会给比率）。比率型指标停用。"
 	}
-	return map[string]any{
+	out := map[string]any{
 		"variable":               DataEnvVar,
 		"declared":               declared,
 		"businessRatesPublished": published,
 		"note":                   note,
+		"database":               "",
+		"databaseNote":           "当前的读数来源没有报告它连的是哪一个库。",
 	}
+	// 用可选接口而不是给 opsmetrics.Source 加方法：Source 的测试桩散在别人的在途文件里，
+	// 接口多一个方法就会让那些夹具编译不过。
+	if q, ok := src.(interface {
+		DBIdentity(context.Context) (opsmetrics.DBIdentity, error)
+	}); ok {
+		if id, err := q.DBIdentity(ctx); err != nil {
+			log.Printf("operator data env: db identity query failed: %v", err)
+			out["databaseNote"] = "问不出库身份（查询失败）—— 所以这句声明此刻无法核对。"
+		} else {
+			out["database"] = id.String()
+			out["databaseVersion"] = id.Version
+			out["databaseNote"] = ""
+		}
+	}
+	return out
 }

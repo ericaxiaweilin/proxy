@@ -793,7 +793,7 @@ if grep -qF '后端还没有实现' apps/market-intelligence-console/src/compone
   echo "  FAIL [OPS-DATA-ENV-001]: 界面上仍然写着「后端还没有实现」—— 数据环境拒绝时模块是实现着的，这句就成了假话。" >&2
   exit 1
 fi
-if ! grep -qF '"dataEnv": dataEnvStatus(),' apps/api-go/internal/api/operator_access.go; then
+if ! grep -qE '"dataEnv": dataEnvStatus\(' apps/api-go/internal/api/operator_access.go; then
   echo "  FAIL [OPS-DATA-ENV-001]: 运营权限页不再显示数据环境声明 —— 比率为什么不给看，只能靠猜。" >&2
   exit 1
 fi
@@ -821,7 +821,31 @@ if grep -qF 'notConnected(businessRateRefusal' apps/api-go/internal/api/operator
   echo "  FAIL [OPS-DATA-ENV-001]: 比率被关掉的方式又变回整页拒绝 —— 那会连带抹掉所有引用这一页的界面。" >&2
   exit 1
 fi
-echo "    OPS-DATA-ENV-001: PASS (只有 production 发布比率 · 未声明/拼错都落到不给数 · null 不是 0 · 两个渲染点+权限页都看得见 · 启动日志+运行手册)"
+# 声明的另一半：这一屏读数出自哪一个库。库身份只能问服务端目录函数 —— 连接串里有用户名和
+# 密码，把它拆开打印进一个会被截图的界面，就是自己造了一条凭据外泄路径。
+# （文件名写在命令里：先 assign 给变量再 grep，这一步在 --changed 索引里是「不引用任何文件」，
+#  永远不会参与 —— OPS-DATA-ENV-001 第一段就踩过这个坑，别踩第二次。）
+if ! grep -qF 'SELECT current_database(),' apps/api-go/internal/opsmetrics/dbidentity.go; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 库身份不再问服务端目录函数 —— 那等于没有可核对的来源。" >&2
+  exit 1
+fi
+if sed 's|//.*$||' apps/api-go/internal/opsmetrics/dbidentity.go | grep -qE 'DATABASE_URL|ConnString|ParseConfig'; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 库身份从连接串里取 —— DATABASE_URL 含用户名/密码，这一屏会被截图和录屏。" >&2
+  exit 1
+fi
+for t in TestOperatorAccessNamesTheDatabaseItReads TestOperatorAccessSaysWhenTheDatabaseIsUnknown TestDatabaseIdentityCarriesNoCredentials; do
+  require_test "OPS-DATA-ENV-001" "./internal/api" "$t" \
+    "apps/api-go/internal/api/operator_access_test.go" || exit $?
+done
+require_test "OPS-DATA-ENV-001" "./internal/platform/postgres" \
+  "TestPostgresDatabaseIdentityNamesTheConnectedDatabase" \
+  "apps/api-go/internal/platform/postgres/operator_dbidentity_integration_test.go" || exit $?
+# 问不出来必须写在界面上：留空位会被读成「一个名字很难看的库」，而不是「这一项无法核对」。
+if ! grep -qF 'data.dataEnv.databaseNote' apps/market-intelligence-console/src/pages/Access.tsx; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 权限页不再显示「问不出库身份」那句 —— 空位会被当成一个真实的库。" >&2
+  exit 1
+fi
+echo "    OPS-DATA-ENV-001: PASS (只有 production 发布比率 · 未声明/拼错都落到不给数 · null 不是 0 · 两个渲染点+权限页都看得见 · 库身份可核对且不含凭据)"
 # OPS-SUPPLY-HEALTH-001（2026-10-05）：供给健康度页。
 # 这一页最容易出的事故是**数错列**：seller_real_name_verifications 的 user_account_id
 # 整列是 NULL（身份记在 agent_id 上），按它数会得到 0 —— 而 0 会被读成「供给方一个都没
