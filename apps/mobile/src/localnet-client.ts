@@ -485,6 +485,45 @@ export class LocalNetClient {
     return body.stats.filter(isMediaImpressionStats);
   }
 
+  // TWIN-SIGNALS-001: 活动详情页的曝光上报 —— 形状与 recordPostImpression 一致
+  // （访客不发、失败静默、不重试，重试只会制造重复曝光）。采集闸在调用方
+  // endActivityView 里：服务端会以 CONSENT_REQUIRED 拒收未同意的调用，客户端
+  // 不该把请求发出去再被拒。
+  public async recordActivityView(activityId: string, watchMs: number): Promise<void> {
+    try {
+      if (!activityId) return;
+      const session = await this.optionalSession();
+      if (!session) return;
+      await this.sendCommand(
+        session,
+        "RecordActivityView",
+        { type: "Activity", id: activityId },
+        { targetType: "ACTIVITY", targetId: activityId, watchMs: Math.max(0, Math.floor(watchMs)) }
+      );
+    } catch {
+      // 埋点失败静默，见方法注释。
+    }
+  }
+
+  // 粗略位置上报 —— 同 recordPostImpression 的三条（访客不发、失败静默、不重试）。
+  // 服务端把坐标收敛到 ~1km 网格后丢弃原始定位，所以客户端这边**不存、不写日志**：
+  // 那一次网格化之后原值不该在别处再留一份。行为采集同意 + 实时位置同意
+  // （FUZZY_REGION / PRECISE_GPS）的判定在调用方 reportCoarseLocationIfDue。
+  public async recordCoarseLocation(lat: number, lng: number): Promise<void> {
+    try {
+      const session = await this.optionalSession();
+      if (!session) return;
+      await this.sendCommand(
+        session,
+        "RecordCoarseLocation",
+        { type: "Location", id: "self" },
+        { lat, lng }
+      );
+    } catch {
+      // 埋点失败静默。
+    }
+  }
+
   // CONTENT-ANALYTICS-001: 全屏看图时双击 / 捏合放大 —— 运营侧信号，用户侧不展示。埋点失败静默。
   public async recordMediaZoom(mediaAssetId: string): Promise<void> {
     try {

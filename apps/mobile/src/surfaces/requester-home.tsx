@@ -39,7 +39,7 @@ import { activityStatus, activityOptions, lockValueFor, personOptions, pickForPe
 import type { ExperienceClient } from "../experience-client";
 import type { RelationshipClient } from "../relationship-client";
 import type { ProfileClient, ProfileWire } from "../profile-client";
-import { localApiBaseUrl } from "../native-clients";
+import { localApiBaseUrl, sessionAuthClient } from "../native-clients";
 // ACTIVITY-COVER-001：媒体 thumb URL 单一来源（门店相册 / 场景照片墙 / 活动封面共用）。
 import { activityCoverUri, mediaThumbUrl } from "../media-thumb-url";
 import { type Activity, type SceneToolId } from "@proxy/contracts";
@@ -64,6 +64,12 @@ import { activitiesAtCoffeeShops, busyKey, detectOrderConflict, isCoffeeShopScen
 import { getCurrentFix } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
 import { sceneDistanceMeters, shopCardDistance, type SceneOrigin } from "../scene-shop-directory";
+// TWIN-SIGNALS-001（位置分支）：粗略位置上报。同意判定与节流都在纯函数
+// reportCoarseLocationIfDue 里，这里只提供 App 侧的两道闸和一次上报出口。
+import { reportCoarseLocationIfDue } from "../coarse-location-report";
+import { anyCaptureEnabled, createBehaviorAnalyticsStore } from "../behavior-analytics-settings";
+import { ALL_LOCATION_CONSENT_KINDS, isActiveConsent, resolveLocationConsentClient } from "../location-consent-client";
+import { nativeSecureStorageDriver } from "../native-secure-storage";
 
 export interface RequesterGoal {
   category: HardDemandCategory;
@@ -274,6 +280,13 @@ export function RequesterHome({
   const [clarifyChoices, setClarifyChoices] = useState<ReadonlyArray<string>>();
   // HOME-PEOPLE-SEARCH-001: 全站真人结果（服务端 searchProfiles）。本地
   // people 索引只是推荐预览，新注册用户不在里面；够长且有 client 就问
+  // TWIN-SIGNALS-001（位置分支）的两道闸。两个 client **必须 memo 住**：
+// 下面那个 effect 的依赖里没有它们，但每次渲染都新建的话，等于把「本次
+// 是不是同一个同意来源」交给对象引用 —— 跟 me.tsx 里那条 SAFETY-NET-001
+// 注释是同一个坑（那里是无限请求，这里是同意读出来没有稳定身份）。
+const coarseLocationConsentStore = useMemo(() => createBehaviorAnalyticsStore(nativeSecureStorageDriver), []);
+const coarseLocationConsent = useMemo(() => resolveLocationConsentClient({ authClient: sessionAuthClient }), []);
+
   // 服务端，结果区独立展示，不断本地流程。
   // HOME-RAIL-SERVER-001：rail 的服务端推荐人。与 serverPeople（搜索结果）是两回事 ——
   // 那是"用户搜了某个名字"，这里是"打开首页就有谁在附近"。
@@ -833,6 +846,16 @@ export function RequesterHome({
   // SCENE-DISTANCE-BADGE-001：真实设备定位，取不到就没有距离——不编一个位置
   // （同 hot-scenes.tsx / scene-shop-directory.tsx 的口径）。
   const [homeOrigin, setHomeOrigin] = useState<SceneOrigin>();
+  // TWIN-SIGNALS-001（位置分支）：粗略位置上报只接在**这一处** —— 首页本来就
+  // 要读一次设备定位（上面的距离角标 + updateMyLocation）。两处分别去读定位，
+  // 会出现「角标说 3km、埋点按另一个点记」的矛盾，而且等于凭空多一次定位请求。
+  //
+  // 两道同意（行为采集 + 实时位置）判定全在 reportCoarseLocationIfDue 里，
+  // fail-closed：没同意就一个坐标都不发（本次定位是首页本来就要的那一份，
+  // 不是为了埋点额外发起的请求）。fire-and-forget：埋点失败静默，绝不影响
+  // 下面的渲染路径。上报时刻只活在本进程内存里，重启后重来一次最坏情况
+  // 是多发一条，不是漏发 —— 换持久化存储不值得为它多碰一层 keychain。
+  const coarseLocationSentAt = useRef<number | undefined>(undefined);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -844,6 +867,27 @@ export function RequesterHome({
           // 别人「附近 30km」才算得到你。只上报真实 fix，河内兜底原点绝不上报；
           // 失败不打扰（下次进首页再报）。服务端只拿它算距离，不把坐标发给别人。
           void profileClient?.updateMyLocation({ latitude: fix.latitude, longitude: fix.longitude }).catch(() => undefined);
+          if (localNet) {
+            void reportCoarseLocationIfDue({
+              now: () => Date.now(),
+              lastSentAt: () => coarseLocationSentAt.current,
+              markSent: (at) => { coarseLocationSentAt.current = at; },
+              captureEnabled: () => anyCaptureEnabled(coarseLocationConsentStore),
+              // FUZZY_REGION 与 PRECISE_GPS 是两份独立同意（NĐ 356 Art. 6.3
+              // 禁止捆绑），任一有效就算有实时位置授权。一项读失败只当那一项
+              // 没开 —— 访客会 401，正是靠这里 fail-closed 掉的。
+              locationConsentActive: async () => {
+                for (const kind of ALL_LOCATION_CONSENT_KINDS) {
+                  try {
+                    if (isActiveConsent(await coarseLocationConsent.getStatus(kind))) return true;
+                  } catch { /* 这一项读不出来 = 没开 */ }
+                }
+                return false;
+              },
+              getFix: async () => ({ lat: fix.latitude, lng: fix.longitude }),
+              send: (lat, lng) => localNet.recordCoarseLocation(lat, lng)
+            });
+          }
         }
       } catch { /* 没定位：热门场景卡不带距离角标 */ }
     })();

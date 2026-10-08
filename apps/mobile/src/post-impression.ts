@@ -72,6 +72,34 @@ export async function endPostView(
   }
 }
 
+// 活动详情页停留跟帖子停留是同一个「开始时刻」概念（Date.now()），复用同一个函数。
+export const beginActivityView = beginPostView;
+
+// 活动详情页的停留 —— 跟 endPostView 同一套采集闸、同一套封顶、同一个
+// 「开始时刻」概念（beginPostView 就是 beginActivityView），只是上报目标从
+// 「这条帖子」换成「这个活动」。封顶与 <1s 不记的理由完全一样：切后台忘关、
+// 息屏、以及从列表点进详情又立刻退回去，都不该被记成一次浏览。
+// <1s 的门槛放在这里而不是调用方，是为了让每个调用点都不必重复写它 ——
+// 漏写一个调用点就是一次假浏览，而假浏览正是这套闸当初要消灭的东西。
+const MIN_ACTIVITY_VIEW_MS = 1000;
+
+export async function endActivityView(
+  localNet: Pick<LocalNetClient, "recordActivityView">,
+  activityId: string,
+  startedAt: number,
+  store?: BehaviorAnalyticsStore
+): Promise<void> {
+  if (!activityId) return;
+  if (!(await behaviorAnalyticsEnabled(store))) return;
+  const watchMs = Math.min(Math.max(0, Date.now() - startedAt), MAX_WATCH_MS);
+  if (watchMs < MIN_ACTIVITY_VIEW_MS) return;
+  try {
+    await localNet.recordActivityView(activityId, watchMs);
+  } catch {
+    // 双保险：真正的 client 内部已经静默，这里再兜一层 —— 埋点永远不抛。
+  }
+}
+
 // MEDIA-DWELL-001: 单张照片/视频的停留——跟 endPostView 同一套开关和封顶，
 // 只是上报目标从"这条帖子"细到"帖子里的这一张"。调用方每次划到下一张媒体
 // 都要 flush 上一张（见 MediaViewer 里的分段逻辑），不是整个查看会话关闭

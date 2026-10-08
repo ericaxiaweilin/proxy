@@ -1,6 +1,6 @@
 // ACTIVITY_DETAIL — 活动详情去占位化
 // 接线：ActivityClient.listActivities 真实列表 + ToggleInterest / Join
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { color, shadows } from "../theme";
 import type { ActivityClient } from "../activity-client";
@@ -8,11 +8,18 @@ import type { Activity } from "@proxy/contracts";
 import { activityAIDisclosure, activityAIPersonaName, activityMoneySummary } from "./activity-detail-model";
 // ACTIVITY-COVER-001：封面图走媒体资产（与门店相册同一套 thumb 路由）。
 import { activityCoverUri } from "../media-thumb-url";
-import { localApiBaseUrl } from "../native-clients";
+import { localApiBaseUrl, nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 // COMP-REPORT-002: 活动与（商家主办的）主办商家都要可举报。
 import { ReportSheet } from "../components/report-sheet";
 import { activityReportTargets, type ModerationClient, type ReportTarget } from "../moderation-client";
 import { ProxyBackGlyph, ProxyLoading } from "../components/proxy-foundation";
+// TWIN-SIGNALS-001：进过活动详情页 = 一次曝光，按活动记一次停留 —— 跟
+// 帖子曝光同一个采集闸（endActivityView 里判），失败静默，埋点从不影响
+// 下面的渲染路径。LocalNetClient 在本 surface 内构造，与
+// scene-shop-directory.tsx 同一套做法：这条渲染路径的调用方（app-shell /
+// me-orders / coming-soon）都不持有 localNet，不该为此给每个调用点加 prop。
+import { LocalNetClient } from "../localnet-client";
+import { beginActivityView, endActivityView } from "../post-impression";
 
 // R17.x persona 色：与 tasks.tsx personaColorStyle 同源（ai_001=紫/002=粉/
 // 003=绿/004=橙/005=金）。tasks 侧为 canonical；这里仅为明细页封面
@@ -52,6 +59,25 @@ export function ActivityDetailSurface({ client, moderation, initialActivityId, o
     })();
     return () => { c = true; };
   }, [client, initialActivityId]);
+  // TWIN-SIGNALS-001：明细页可见时开始计时，离开/切走这个活动时结算。
+  // 依赖用 selected?.activityId（字符串）而不是 selected（对象引用）——
+  // 每次 refresh 都换新对象引用，用对象会让计时每刷新一次就重开一次，
+  // 一次浏览被切成好几段。跟 other-profile.tsx 同一个理由。
+  //
+  // 本文件没有 AppState 处理器，所以按约定**不加**全局监听：切后台的停留
+  // 由下面的 5 分钟封顶兜住（endActivityView），不为了埋点去装一个全局监听。
+  const analyticsLocalNet = useMemo(
+    () => new LocalNetClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore, baseUrl: localApiBaseUrl }),
+    []
+  );
+  const activityViewStartRef = useRef(0);
+  const selectedActivityId = selected?.activityId;
+  useEffect(() => {
+    if (!selectedActivityId) return;
+    activityViewStartRef.current = beginActivityView();
+    const activityId = selectedActivityId;
+    return () => { void endActivityView(analyticsLocalNet, activityId, activityViewStartRef.current); };
+  }, [selectedActivityId, analyticsLocalNet]);
   if (selected) {
     const aiDisclosure = activityAIDisclosure(selected);
     // ACTIVITY-COVER-001：商家传的封面资产优先；都没有就不画图（下方有如实占位）。

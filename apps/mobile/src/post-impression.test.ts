@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { anyCaptureEnabled, CONSENT_PURPOSES, createBehaviorAnalyticsStore } from "./behavior-analytics-settings";
-import { beginMediaView, beginPostView, endMediaView, endPostView, recordMediaZoom } from "./post-impression";
+import { beginActivityView, beginMediaView, beginPostView, endActivityView, endMediaView, endPostView, recordMediaZoom } from "./post-impression";
 
 // TWIN-SIGNALS-001 / MEDIA-DWELL-001 —— 行为采集闸。
 //
@@ -299,5 +299,69 @@ describe("media dwell gate", () => {
     expect(sent).toHaveLength(2);
     const failing = { recordMediaImpression: async (): Promise<void> => { throw new Error("net down"); } };
     await expect(endMediaView(failing, "media_c", beginMediaView(), store)).resolves.toBeUndefined();
+  });
+});
+
+// 活动详情页停留：同一个采集闸、同一个 5 分钟封顶，外加一条「不到 1 秒不算
+// 一次浏览」。最后这条的理由很具体：从活动列表点进详情、扫一眼、退回去，
+// 那不是「看了这个活动」，而是点错了。不钉住它，活动详情页的浏览量会被
+// 这种点开又关上的噪声灌满 —— 而浏览量是活动详情页唯一的行为信号。
+describe("activity view gate", () => {
+  function activityCollecting() {
+    const sent: Array<{ activityId: string; watchMs: number }> = [];
+    return {
+      sent,
+      localNet: {
+        recordActivityView: async (activityId: string, watchMs: number) => { sent.push({ activityId, watchMs }); }
+      }
+    };
+  }
+
+  it("未同意时一个事件都不造（从未设置过 / 显式关掉 / 读失败都是「不造」）", async () => {
+    const fresh = createBehaviorAnalyticsStore(memoryDriver());
+    const allOff = createBehaviorAnalyticsStore(memoryDriver());
+    for (const purpose of CONSENT_PURPOSES) await allOff.write(purpose, false);
+    const broken = createBehaviorAnalyticsStore(brokenDriver());
+    for (const store of [fresh, allOff, broken]) {
+      const { sent, localNet } = activityCollecting();
+      await endActivityView(localNet, "act_1", Date.now() - 30_000, store);
+      expect(sent).toHaveLength(0);
+    }
+  });
+
+  it("显式开启才上报；停留封顶 5 分钟；空 activityId 短路；发送失败不抛", async () => {
+    const store = createBehaviorAnalyticsStore(memoryDriver());
+    await store.write("TWIN_INSIGHT", true);
+    const { sent, localNet } = activityCollecting();
+    await endActivityView(localNet, "act_1", Date.now() - 30_000, store);
+    expect(sent).toHaveLength(1);
+    const first = sent[0];
+    if (!first) throw new Error("expected one activity view");
+    expect(first.activityId).toBe("act_1");
+    // 封顶：开了一小时也只记 5 分钟（切后台忘关不能灌进时长）。
+    await endActivityView(localNet, "act_2", Date.now() - 60 * 60 * 1000, store);
+    expect(sent[1]?.watchMs).toBe(5 * 60 * 1000);
+    await endActivityView(localNet, "", Date.now() - 30_000, store);
+    expect(sent).toHaveLength(2);
+    const failing = { recordActivityView: async (): Promise<void> => { throw new Error("net down"); } };
+    await expect(endActivityView(failing, "act_3", Date.now() - 30_000, store)).resolves.toBeUndefined();
+  });
+
+  it("停留不到 1 秒 = 点开又关掉，不记成一次浏览", async () => {
+    const store = createBehaviorAnalyticsStore(memoryDriver());
+    await store.write("OPERATOR_AUDIENCE_DETAIL", true);
+    const { sent, localNet } = activityCollecting();
+    await endActivityView(localNet, "act_1", Date.now() - 500, store);
+    expect(sent).toHaveLength(0);
+    // 恰好 1 秒就是「看了」，门槛是 >= 不是 >。
+    await endActivityView(localNet, "act_1", Date.now() - 1_000, store);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("beginActivityView 就是帖子那套开始时刻（Date.now()），不是另起一套时钟", () => {
+    const before = Date.now();
+    const started = beginActivityView();
+    expect(started).toBeGreaterThanOrEqual(before);
+    expect(started).toBeLessThanOrEqual(Date.now());
   });
 });
