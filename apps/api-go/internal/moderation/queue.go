@@ -102,13 +102,15 @@ type ReportQueueEntry struct {
 
 // ReportQueueItem 是运营队列里的一行，带算好的时限与超时判定。
 type ReportQueueItem struct {
-	ReportID   string    `json:"reportId"`
-	TargetType string    `json:"targetType"`
-	TargetID   string    `json:"targetId"`
-	Reason     string    `json:"reason"`
-	State      string    `json:"state"`
-	CreatedAt  time.Time `json:"createdAt"`
-	DueAt      time.Time `json:"dueAt"`
+	ReportID   string `json:"reportId"`
+	TargetType string `json:"targetType"`
+	TargetID   string `json:"targetId"`
+	Reason     string `json:"reason"`
+	// Note 是举报人写的原话。运营判断「成不成立」要看它；队列已经是 operator-only。
+	Note      string    `json:"note,omitempty"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"createdAt"`
+	DueAt     time.Time `json:"dueAt"`
 	// AgeHours 是「从受理到（处理完 / 现在）」的小时数：
 	//   - 未处理完 → 已经等了多久；
 	//   - 已处理完 → 实际花了多久。
@@ -264,6 +266,7 @@ func buildReportQueue(entries []ReportQueueEntry, now time.Time, includeClosed b
 			TargetType:        report.TargetType,
 			TargetID:          report.TargetID,
 			Reason:            report.Reason,
+			Note:              report.Note,
 			State:             state,
 			CreatedAt:         report.CreatedAt.UTC(),
 			DueAt:             dueAt.UTC(),

@@ -27,8 +27,9 @@ import { Trust } from "./pages/Trust";
 import { Quality } from "./pages/Quality";
 import { NumberLookup } from "./pages/NumberLookup";
 import { Access } from "./pages/Access";
+import { Moderation } from "./pages/Moderation";
 
-type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "marketboard" | "storeboard" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access";
+type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "marketboard" | "storeboard" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access" | "moderation";
 
 const TITLES: Record<Page, string> = {
   overview: "平台总览",
@@ -58,6 +59,7 @@ const TITLES: Record<Page, string> = {
   quality: "数据治理",
   workbench: "交叉分析工作台",
   access: "运营权限",
+  moderation: "举报处置",
 };
 
 export function App() {
@@ -75,7 +77,7 @@ export function App() {
         {/* DISPATCH-LOOP-001：运营每天真正在用的那一页，放最上面。 */}
         <div className="navgroup">工作台</div>
         <div className="nav">
-          {(["dispatch", "marketboard", "storeboard"] as Page[]).map((p) => (
+          {(["dispatch", "marketboard", "storeboard", "moderation"] as Page[]).map((p) => (
             <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
           ))}
         </div>
@@ -168,6 +170,8 @@ export function App() {
           {page === "marketboard" && <MarketBoard />}
           {/* STORE-ATTRIBUTION-P1：门店预约与承载 —— 哪一家店拿到了承载预约、承载快照有多新（只读） */}
           {page === "storeboard" && <StoreBoard />}
+          {/* OPS-MODERATION-001：举报队列与处置（处置只记录，不执行下架 / 封号） */}
+          {page === "moderation" && <Moderation />}
           {page === "retention" && <Retention />}
           {page === "trust" && <Trust />}
           {page === "providers" && <ProviderApplications />}
@@ -175,7 +179,7 @@ export function App() {
           {page === "access" && <Access />}
           {page === "quality" && <Quality />}
           {page === "workbench" && <Quality />}
-          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "marketboard", "storeboard", "retention", "trust", "quality", "workbench", "numberlookup", "access"].includes(page) && (
+          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "marketboard", "storeboard", "retention", "trust", "quality", "workbench", "numberlookup", "access", "moderation"].includes(page) && (
             <div className="notice">
               <b>{TITLES[page]}</b> — 已接线 19 页（v9 全量）。
             </div>
