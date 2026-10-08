@@ -161,8 +161,8 @@ func TestFineGrainedTagsFromVenuesCreatorsAndDeclaredProfile(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	stamp := time.Now().Format("150405.000000")
-	saver, watcher, noConsentWatcher, provider := "u_ft_s_"+stamp, "u_ft_w_"+stamp, "u_ft_n_"+stamp, "u_ft_p_"+stamp
-	users := []string{saver, watcher, noConsentWatcher, provider}
+	saver, watcher, noConsentWatcher, provider, dwellOnly := "u_ft_s_"+stamp, "u_ft_w_"+stamp, "u_ft_n_"+stamp, "u_ft_p_"+stamp, "u_ft_d_"+stamp
+	users := []string{saver, watcher, noConsentWatcher, provider, dwellOnly}
 	author := "u_ft_author_" + stamp
 	post := "p_ft_" + stamp
 	agent := "agent_ft_" + stamp
@@ -190,7 +190,15 @@ func TestFineGrainedTagsFromVenuesCreatorsAndDeclaredProfile(t *testing.T) {
 	// 创作者偏好：被动，要同意。watcher 同意了，noConsentWatcher 没有。
 	exec(`INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, scene_type) VALUES ($1,'USER',$2,'x',$3,'COFFEE')`, post, author, now)
 	exec(`INSERT INTO privacy.purpose_consents (id, user_id, purpose, policy_version, action, acted_at, source) VALUES ($1,$2,'RECOMMENDATION','2026-10-08','GRANT',$3,'TEST')`, "pc_ft_"+stamp, watcher, now.Add(-72*time.Hour))
+	exec(`INSERT INTO privacy.purpose_consents (id, user_id, purpose, policy_version, action, acted_at, source) VALUES ($1,$2,'RECOMMENDATION','2026-10-08','GRANT',$3,'TEST')`, "pc_ftd_"+stamp, dwellOnly, now.Add(-72*time.Hour))
+	// TAG-DWELL-001：创作者偏好只认主动点进主页；信息流里停得久（dwellOnly）不给创作者加分。
 	for _, u := range []string{watcher, noConsentWatcher} {
+		for i := 0; i < 6; i++ {
+			exec(`INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, created_at, watch_ms) VALUES ($1,'PROFILE_OPEN',$2,'PROFILE',$3,$4,0)`,
+				fmt.Sprintf("evt_ftpo_%s_%d", u, i), u, author, now.Add(-time.Duration(i+1)*time.Hour))
+		}
+	}
+	for _, u := range []string{watcher, noConsentWatcher, dwellOnly} {
 		for i := 0; i < 4; i++ {
 			exec(`INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, created_at, watch_ms) VALUES ($1,'POST_IMPRESSION',$2,'POST',$3,$4,40000)`,
 				fmt.Sprintf("evt_ft_%s_%d", u, i), u, post, now.Add(-time.Duration(i+1)*time.Hour))
@@ -229,7 +237,10 @@ func TestFineGrainedTagsFromVenuesCreatorsAndDeclaredProfile(t *testing.T) {
 		t.Error("even a single saved restaurant gives a (low-confidence) kind tag")
 	}
 	if !has(watcher, tagging.AxisCreatorAffinity, author) {
-		t.Error("a consenting viewer who dwelt on one creator's posts has a creator-affinity tag")
+		t.Error("a consenting viewer who opened one creator's profile several times has a creator-affinity tag")
+	}
+	if has(dwellOnly, tagging.AxisCreatorAffinity, author) {
+		t.Error("passive dwell on a person's posts must not become a taste tag")
 	}
 	if has(noConsentWatcher, tagging.AxisCreatorAffinity, author) {
 		t.Error("without consent, passive viewing must not become a tag")
