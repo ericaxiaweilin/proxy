@@ -1,0 +1,599 @@
+{
+  "domain": "interest",
+  "nodes": [
+    {
+      "id": "interest/travel/trip_types",
+      "parent": "interest/travel",
+      "name": { "zh": "出游方式", "vi": "Kiểu đi chơi", "en": "Ways to travel" },
+      "keywords": ["kiểu đi chơi", "出游方式", "đi kiểu nào"]
+    },
+    {
+      "id": "interest/travel/trip_types/phuot",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "摩旅", "vi": "Đi phượt", "en": "Motorbike touring" },
+      "keywords": ["phượt", "摩旅", "xe số đi chơi", "touring đường"]
+    },
+    {
+      "id": "interest/travel/trip_types/road_trip",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "自驾环线", "vi": "Lái xe đường dài", "en": "Road trip" },
+      "keywords": ["自驾游", "lái xe đường dài", "road trip", "tự lái xe"]
+    },
+    {
+      "id": "interest/travel/trip_types/train",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "火车旅行", "vi": "Đi tàu hỏa", "en": "Train trips" },
+      "keywords": ["tàu hỏa", "火车旅行", "toa mềm", "giường nằm tàu"]
+    },
+    {
+      "id": "interest/travel/trip_types/bus",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "长途大巴", "vi": "Xe khách đường dài", "en": "Coach buses" },
+      "keywords": ["xe khách", "长途汽车", "bến xe", "ghế nằm"]
+    },
+    {
+      "id": "interest/travel/trip_types/overnight",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "夕发朝至", "vi": "Phương tiện đêm", "en": "Overnight rides" },
+      "keywords": ["tàu đêm", "xe đêm", "夕发朝至", "ngủ trên xe"]
+    },
+    {
+      "id": "interest/travel/trip_types/cruise",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "游轮过夜", "vi": "Ngủ đêm trên du thuyền", "en": "Overnight cruise" },
+      "keywords": ["du thuyền", "游轮", "cruise", "ngủ vịnh"]
+    },
+    {
+      "id": "interest/travel/trip_types/island_hop",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "跳岛", "vi": "Đi đảo", "en": "Island hopping" },
+      "keywords": ["跳岛", "tàu ra đảo", "cano ra đảo", "đi đảo"]
+    },
+    {
+      "id": "interest/travel/trip_types/homestay",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "民宿", "vi": "Homestay", "en": "Homestay" },
+      "keywords": ["homestay", "民宿", "ngủ lại nhà dân"]
+    },
+    {
+      "id": "interest/travel/trip_types/camping",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "露营过夜", "vi": "Cắm trại qua đêm", "en": "Camping" },
+      "keywords": ["cắm trại", "露营", "lều trại", "đêm ngoài trời"]
+    },
+    {
+      "id": "interest/travel/trip_types/backpack",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "背包穷游", "vi": "Du lịch bụi", "en": "Backpacking" },
+      "keywords": ["du lịch bụi", "背包客", "backpacking", "balo đi đường"]
+    },
+    {
+      "id": "interest/travel/trip_types/solo",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "独自出行", "vi": "Đi một mình", "en": "Solo trips" },
+      "keywords": ["solo travel", "独自出行", "đi một mình"]
+    },
+    {
+      "id": "interest/travel/trip_types/self_guided",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "自由行", "vi": "Đi tự túc", "en": "Independent trips" },
+      "keywords": ["tự túc", "自由行", "không qua tour", "tự lo mọi thứ"]
+    },
+    {
+      "id": "interest/travel/trip_types/group_tour",
+      "parent": "interest/travel/trip_types",
+      "name": { "zh": "跟团游", "vi": "Đi tour trọn gói", "en": "Package tours" },
+      "keywords": ["tour ghép", "跟团", "trọn gói", "đi theo đoàn"]
+    },
+    {
+      "id": "interest/travel/trip_groups",
+      "parent": "interest/travel",
+      "name": { "zh": "同行的人", "vi": "Đi cùng ai", "en": "Who goes along" },
+      "keywords": ["跟谁去", "đi cùng bạn", "bạn đồng hành"]
+    },
+    {
+      "id": "interest/travel/trip_groups/friends",
+      "parent": "interest/travel/trip_groups",
+      "name": { "zh": "朋友结伴游", "vi": "Đi chơi nhóm bạn", "en": "Friends trip" },
+      "keywords": ["nhóm bạn đi chơi", "朋友结伴", "friends trip", "đi theo hội"]
+    },
+    {
+      "id": "interest/travel/trip_groups/class",
+      "parent": "interest/travel/trip_groups",
+      "name": { "zh": "同学聚会游", "vi": "Họp lớp đi chơi", "en": "Class reunions" },
+      "keywords": ["họp lớp", "同学聚会", "class trip", "kỷ yếu"]
+    },
+    {
+      "id": "interest/travel/trip_groups/colleague",
+      "parent": "interest/travel/trip_groups",
+      "name": { "zh": "公司团建", "vi": "Đi chơi công ty", "en": "Company trips" },
+      "keywords": ["team building", "公司团建", "đi chơi công ty"]
+    },
+    {
+      "id": "interest/travel/trip_groups/elder",
+      "parent": "interest/travel/trip_groups",
+      "name": { "zh": "带长辈出行", "vi": "Đi cùng ông bà", "en": "Trips with elders" },
+      "keywords": ["带爸妈出行", "đi cùng ông bà", "elderly parents trip"]
+    },
+    {
+      "id": "interest/travel/trip_groups/parent_child",
+      "parent": "interest/travel/trip_groups",
+      "name": { "zh": "带娃出游", "vi": "Du lịch cùng con", "en": "Family trips" },
+      "keywords": ["du lịch cùng con", "带娃出游", "family trip", "vừa chơi vừa trông con"]
+    },
+    {
+      "id": "interest/travel/trip_groups/couple",
+      "parent": "interest/travel/trip_groups",
+      "name": { "zh": "二人旅行", "vi": "Đi đôi", "en": "Couple trips" },
+      "keywords": ["二人同行", "du lịch đôi", "couple trip"]
+    },
+    {
+      "id": "interest/travel/trip_groups/honeymoon",
+      "parent": "interest/travel/trip_groups",
+      "name": { "zh": "蜜月旅行", "vi": "Tuần trăng mật", "en": "Honeymoon" },
+      "keywords": ["honeymoon", "蜜月", "tuần trăng mật"]
+    },
+    {
+      "id": "interest/travel/planning",
+      "parent": "interest/travel",
+      "name": { "zh": "行前准备", "vi": "Chuẩn bị chuyến đi", "en": "Trip planning" },
+      "keywords": ["行程规划", "lên kế hoạch đi chơi", "cẩm nang"]
+    },
+    {
+      "id": "interest/travel/planning/itinerary",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "路线安排", "vi": "Sắp xếp lịch trình", "en": "Route planning" },
+      "keywords": ["sắp xếp lịch trình", "路线安排", "itinerary", "chia ngày"]
+    },
+    {
+      "id": "interest/travel/planning/budget",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "旅行预算", "vi": "Ngân sách chuyến đi", "en": "Trip budget" },
+      "keywords": ["chi phí chuyến đi", "旅行预算", "trip cost", "hết bao nhiêu"]
+    },
+    {
+      "id": "interest/travel/planning/packing",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "打包行李", "vi": "Chuẩn bị hành lý", "en": "Packing" },
+      "keywords": ["hành lý", "打包行李", "packing", "vali kéo", "mang gì khi đi"]
+    },
+    {
+      "id": "interest/travel/planning/tickets",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "抢票订位", "vi": "Săn vé", "en": "Ticket hunting" },
+      "keywords": ["săn vé", "订票", "còn chỗ không", "book vé"]
+    },
+    {
+      "id": "interest/travel/planning/booking",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "订房", "vi": "Đặt phòng", "en": "Room booking" },
+      "keywords": ["đặt phòng", "订房", "khách sạn", "chỗ ở rẻ"]
+    },
+    {
+      "id": "interest/travel/planning/visa",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "签证材料", "vi": "Thủ tục thị thực", "en": "Visa & papers" },
+      "keywords": ["thị thực", "签证材料", "visa", "hộ chiếu"]
+    },
+    {
+      "id": "interest/travel/planning/translate",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "外语沟通", "vi": "Giao tiếp khi đi", "en": "Language help" },
+      "keywords": ["语言不通", "phiên dịch hỗ trợ", "phrasebook"]
+    },
+    {
+      "id": "interest/travel/planning/weather",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "看天气选时间", "vi": "Xem thời tiết", "en": "Weather timing" },
+      "keywords": ["thời tiết", "看天气", "mùa nào đi", "tránh mưa"]
+    },
+    {
+      "id": "interest/travel/planning/weekend",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "周末短途", "vi": "Kỳ nghỉ cuối tuần", "en": "Weekend getaways" },
+      "keywords": ["cuối tuần", "周末短途", "weekend trip", "đi gần hà nội"]
+    },
+    {
+      "id": "interest/travel/planning/summer",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "暑期出游", "vi": "Du lịch hè", "en": "Summer holidays" },
+      "keywords": ["du lịch hè", "暑期出游", "nghỉ hè", "hè này đi đâu"]
+    },
+    {
+      "id": "interest/travel/planning/tet",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "春节假期出行", "vi": "Nghỉ Tết đi chơi", "en": "Tet holiday trips" },
+      "keywords": ["tết này đi đâu", "春节假期", "tet holiday", "nghỉ dài ngày"]
+    },
+    {
+      "id": "interest/travel/planning/off_season",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "淡季出游", "vi": "Du lịch ngược mùa", "en": "Off-season trips" },
+      "keywords": ["ngược mùa", "淡季出游", "avoid crowds"]
+    },
+    {
+      "id": "interest/travel/planning/gear",
+      "parent": "interest/travel/planning",
+      "name": { "zh": "出行装备", "vi": "Đồ dùng đi đường", "en": "Travel gear" },
+      "keywords": ["đồ dùng đi đường", "出行装备", "túi ngủ", "sạc dự phòng"]
+    },
+    {
+      "id": "interest/travel/styles",
+      "parent": "interest/travel",
+      "name": { "zh": "主题玩法", "vi": "Hình thức trải nghiệm", "en": "Trip styles" },
+      "keywords": ["主题玩法", "hình thức trải nghiệm", "đi để làm gì"]
+    },
+    {
+      "id": "interest/travel/styles/check_in",
+      "parent": "interest/travel/styles",
+      "name": { "zh": "打卡拍照", "vi": "Sống ảo", "en": "Photo check-ins" },
+      "keywords": ["sống ảo", "打卡拍照", "chụp ảnh đẹp", "view đẹp"]
+    },
+    {
+      "id": "interest/travel/styles/agritour",
+      "parent": "interest/travel/styles",
+      "name": { "zh": "农场体验", "vi": "Trải nghiệm làm nông", "en": "Farm experience" },
+      "keywords": ["trải nghiệm làm nông", "农场体验", "farmstay", "gặt lúa"]
+    },
+    {
+      "id": "interest/travel/styles/trek",
+      "parent": "interest/travel/styles",
+      "name": { "zh": "向导徒步", "vi": "Trekking có guide", "en": "Guided trekking" },
+      "keywords": ["trekking", "徒步穿越", "leo Fansipan", "đi rừng cùng guide"]
+    },
+    {
+      "id": "interest/travel/styles/diving",
+      "parent": "interest/travel/styles",
+      "name": { "zh": "浮潜深潜", "vi": "Lặn biển", "en": "Snorkelling & diving" },
+      "keywords": ["lặn biển", "浮潜", "snorkeling", "ngắm san hô"]
+    },
+    {
+      "id": "interest/travel/styles/food_crawl",
+      "parent": "interest/travel/styles",
+      "name": { "zh": "异地吃逛", "vi": "Ăn gì ở đâu", "en": "Food stops" },
+      "keywords": ["đặc sản ba miền", "异地觅食", "food stop"]
+    },
+    {
+      "id": "interest/travel/styles/pilgrimage",
+      "parent": "interest/travel/styles",
+      "name": { "zh": "访寺短途", "vi": "Đi vãn cảnh chùa", "en": "Temple day trips" },
+      "keywords": ["vãn cảnh chùa", "访寺", "chùa hương", "đền vua hùng"]
+    },
+    {
+      "id": "interest/travel/styles/village_stay",
+      "parent": "interest/travel/styles",
+      "name": { "zh": "山村住一晚", "vi": "Ngủ bản làng", "en": "Village stays" },
+      "keywords": ["ngủ bản", "山村住一晚", "cơm bản", "đường mòn bản làng"]
+    },
+    {
+      "id": "interest/travel/styles/volunteer",
+      "parent": "interest/travel/styles",
+      "name": { "zh": "义工旅行", "vi": "Đi làm tình nguyện", "en": "Volunteer trips" },
+      "keywords": ["tình nguyện mùa hè", "义工旅行", "volunteer trip", "xóa nhà tạm"]
+    },
+    {
+      "id": "interest/travel/styles/study_tour",
+      "parent": "interest/travel/styles",
+      "name": { "zh": "研学营", "vi": "Học đường trải nghiệm", "en": "Study tours" },
+      "keywords": ["研学", "học đường trải nghiệm", "study tour", "trại hè thiếu nhi"]
+    },
+    {
+      "id": "interest/travel/styles/quiet_retreat",
+      "parent": "interest/travel/styles",
+      "name": { "zh": "静心度假", "vi": "Nghỉ dưỡng tĩnh lặng", "en": "Quiet retreats" },
+      "keywords": ["静养之旅", "tĩnh lặng bên hồ", "detox digital", "yoga retreat"]
+    },
+    {
+      "id": "interest/travel/styles/abandoned",
+      "parent": "interest/travel/styles",
+      "name": { "zh": "废弃景点探秘", "vi": "Địa điểm bỏ hoang", "en": "Abandoned spots" },
+      "keywords": ["bỏ hoang", "废弃景点", "tàu cũ", "nhà máy cũ"]
+    },
+    {
+      "id": "interest/travel/north",
+      "parent": "interest/travel",
+      "name": { "zh": "越南北部", "vi": "Miền Bắc", "en": "Northern Vietnam" },
+      "keywords": ["miền bắc", "越南北部", "vùng cao phía bắc"]
+    },
+    {
+      "id": "interest/travel/north/sapa",
+      "parent": "interest/travel/north",
+      "name": { "zh": "沙巴", "vi": "Sa Pa", "en": "Sa Pa" },
+      "keywords": ["sapa", "沙巴", "fansipan", "đèo ô quy hồ", "ruộng bậc thang"]
+    },
+    {
+      "id": "interest/travel/north/ha_giang",
+      "parent": "interest/travel/north",
+      "name": { "zh": "河江", "vi": "Hà Giang", "en": "Ha Giang" },
+      "keywords": ["hà giang", "河江", "sông nho quế", "đèo mã pí lé", "yên minh"]
+    },
+    {
+      "id": "interest/travel/north/dongvan",
+      "parent": "interest/travel/north",
+      "name": { "zh": "同文", "vi": "Đồng Văn", "en": "Dong Van" },
+      "keywords": ["đồng văn", "同文", "phó bảng", "dinh thự họ vương", "lũng cù"]
+    },
+    {
+      "id": "interest/travel/north/ninhbinh",
+      "parent": "interest/travel/north",
+      "name": { "zh": "宁平", "vi": "Ninh Bình", "en": "Ninh Binh" },
+      "keywords": ["ninh bình", "宁平", "tràng an", "hoa lư", "tam cúc"]
+    },
+    {
+      "id": "interest/travel/north/halong",
+      "parent": "interest/travel/north",
+      "name": { "zh": "下龙湾", "vi": "Vịnh Hạ Long", "en": "Ha Long Bay" },
+      "keywords": ["vịnh hạ long", "下龙湾", "tuần châu", "bai cháy"]
+    },
+    {
+      "id": "interest/travel/north/catba",
+      "parent": "interest/travel/north",
+      "name": { "zh": "吉婆岛", "vi": "Đảo Cát Bà", "en": "Cat Ba island" },
+      "keywords": ["cát bà", "吉婆岛", "vịnh lan hạ", "đảo khỉ"]
+    },
+    {
+      "id": "interest/travel/north/bacninh",
+      "parent": "interest/travel/north",
+      "name": { "zh": "北宁", "vi": "Bắc Ninh", "en": "Bac Ninh" },
+      "keywords": ["bắc ninh", "北宁", "đồi tam giang", "chùa phật tích", "đình bảng"]
+    },
+    {
+      "id": "interest/travel/north/mocchau",
+      "parent": "interest/travel/north",
+      "name": { "zh": "木州", "vi": "Mộc Châu", "en": "Moc Chau" },
+      "keywords": ["mộc châu", "木州", "đồi chè", "mận hậu"]
+    },
+    {
+      "id": "interest/travel/north/pacbo",
+      "parent": "interest/travel/north",
+      "name": { "zh": "德天瀑布", "vi": "Thác Bản Giốc", "en": "Ban Gioc falls" },
+      "keywords": ["bản giốc", "德天瀑布", "pác bó", "hồ sông giáo"]
+    },
+    {
+      "id": "interest/travel/north/babe",
+      "parent": "interest/travel/north",
+      "name": { "zh": "巴贝湖", "vi": "Hồ Ba Bể", "en": "Ba Be lake" },
+      "keywords": ["ba bể", "巴贝湖", "động puông", "thuyền hồ ba bể"]
+    },
+    {
+      "id": "interest/travel/north/langson",
+      "parent": "interest/travel/north",
+      "name": { "zh": "谅山", "vi": "Lạng Sơn", "en": "Lang Son" },
+      "keywords": ["lạng sơn", "谅山", "chùa thanh lê", "cửa khẩu hữu nghị"]
+    },
+    {
+      "id": "interest/travel/north/dienbien",
+      "parent": "interest/travel/north",
+      "name": { "zh": "奠边", "vi": "Điện Biên", "en": "Dien Bien" },
+      "keywords": ["điện biên", "奠边", "mường thanh", "a pa chải"]
+    },
+    {
+      "id": "interest/travel/north/hoanglien",
+      "parent": "interest/travel/north",
+      "name": { "zh": "番西邦峰", "vi": "Dãy Hoàng Liên", "en": "Hoang Lien range" },
+      "keywords": ["hoàng liên", "番西邦", "tả van phình", "nóc nhà đông dương"]
+    },
+    {
+      "id": "interest/travel/north/thainuyen",
+      "parent": "interest/travel/north",
+      "name": { "zh": "太原茶山", "vi": "Đồi chè Thái Nguyên", "en": "Thai Nguyen tea hills" },
+      "keywords": ["thái nguyên", "đồi chè tân cương", "chè khô"]
+    },
+    {
+      "id": "interest/travel/north/northeast_loop",
+      "parent": "interest/travel/north",
+      "name": { "zh": "东北环线", "vi": "Hành trình đông bắc", "en": "Northeast loop" },
+      "keywords": ["đông bắc", "东北环线", "quảng uyên", "móng cái"]
+    },
+    {
+      "id": "interest/travel/north/northwest_loop",
+      "parent": "interest/travel/north",
+      "name": { "zh": "西北环线", "vi": "Hành trình tây bắc", "en": "Northwest loop" },
+      "keywords": ["tây bắc", "西北环线", "đèo pha đin", "mù căng chải"]
+    },
+    {
+      "id": "interest/travel/north/hanoi_escape",
+      "parent": "interest/travel/north",
+      "name": { "zh": "环都市短途", "vi": "Đi chơi quanh Hà Nội", "en": "Hanoi day escapes" },
+      "keywords": ["sóc sơn", "ba vì", "thắng ích", "cổ loa", "đổi gió cuối tuần"]
+    },
+    {
+      "id": "interest/travel/central",
+      "parent": "interest/travel",
+      "name": { "zh": "越南中部", "vi": "Miền Trung", "en": "Central Vietnam" },
+      "keywords": ["miền trung", "越南中部", "bờ biển miền trung"]
+    },
+    {
+      "id": "interest/travel/central/danang",
+      "parent": "interest/travel/central",
+      "name": { "zh": "岘港", "vi": "Đà Nẵng", "en": "Da Nang" },
+      "keywords": ["đà nẵng", "岘港", "mỹ khê", "cầu rồng", "sơn trà"]
+    },
+    {
+      "id": "interest/travel/central/bana",
+      "parent": "interest/travel/central",
+      "name": { "zh": "巴拿山金桥", "vi": "Bà Nà Hills", "en": "Ba Na hills" },
+      "keywords": ["bà nà", "巴拿山", "cầu vàng", "sun world"]
+    },
+    {
+      "id": "interest/travel/central/hoian",
+      "parent": "interest/travel/central",
+      "name": { "zh": "会安古镇", "vi": "Phố cổ Hội An", "en": "Hoi An old town" },
+      "keywords": ["hội an", "会安古镇", "đèn lồng hội an", "cầu japan"]
+    },
+    {
+      "id": "interest/travel/central/hue",
+      "parent": "interest/travel/central",
+      "name": { "zh": "顺化", "vi": "Huế", "en": "Hue" },
+      "keywords": ["huế", "顺化", "đại nội", "sông hương", "hải vân"]
+    },
+    {
+      "id": "interest/travel/central/dalat",
+      "parent": "interest/travel/central",
+      "name": { "zh": "大叻", "vi": "Đà Lạt", "en": "Da Lat" },
+      "keywords": ["đà lạt", "大叻", "thành phố ngàn hoa", "dinh bảo đại", "săn mây đà lạt"]
+    },
+    {
+      "id": "interest/travel/central/nhatrang",
+      "parent": "interest/travel/central",
+      "name": { "zh": "芽庄", "vi": "Nha Trang", "en": "Nha Trang" },
+      "keywords": ["nha trang", "芽庄", "vinwonders nha trang", "vịnh nha trang"]
+    },
+    {
+      "id": "interest/travel/central/phyquoc",
+      "parent": "interest/travel/central",
+      "name": { "zh": "富国岛", "vi": "Phú Quốc", "en": "Phu Quoc island" },
+      "keywords": ["phú quốc", "富国岛", "cáp treo phú quốc", "hòn thơm", "bãi sao"]
+    },
+    {
+      "id": "interest/travel/central/muine",
+      "parent": "interest/travel/central",
+      "name": { "zh": "美奈沙丘", "vi": "Mũi Né", "en": "Mui Ne dunes" },
+      "keywords": ["mũi né", "美奈", "đồi cát bay", "suối tiên"]
+    },
+    {
+      "id": "interest/travel/central/phongnha",
+      "parent": "interest/travel/central",
+      "name": { "zh": "峰牙洞穴", "vi": "Phong Nha", "en": "Phong Nha caves" },
+      "keywords": ["phong nha", "sơn đoòng", "hang động", "vườn quốc gia"]
+    },
+    {
+      "id": "interest/travel/central/quynhon",
+      "parent": "interest/travel/central",
+      "name": { "zh": "归仁", "vi": "Quy Nhơn", "en": "Quy Nhon" },
+      "keywords": ["quy nhơn", "归仁", "kỳ co", "bãi trứng"]
+    },
+    {
+      "id": "interest/travel/south",
+      "parent": "interest/travel",
+      "name": { "zh": "越南南部", "vi": "Miền Nam", "en": "Southern Vietnam" },
+      "keywords": ["miền nam", "越南南部", "sông nước miền nam"]
+    },
+    {
+      "id": "interest/travel/south/saigon",
+      "parent": "interest/travel/south",
+      "name": { "zh": "西贡", "vi": "Sài Gòn", "en": "Saigon" },
+      "keywords": ["sài gòn", "西贡", "đi sài gòn", "nhà thờ đức bà"]
+    },
+    {
+      "id": "interest/travel/south/cantho",
+      "parent": "interest/travel/south",
+      "name": { "zh": "芹苴", "vi": "Cần Thơ", "en": "Can Tho" },
+      "keywords": ["cần thơ", "chợ nổi cái răng", "miệt vườn"]
+    },
+    {
+      "id": "interest/travel/south/chaudoc",
+      "parent": "interest/travel/south",
+      "name": { "zh": "朱笃", "vi": "Châu Đốc", "en": "Chau Doc" },
+      "keywords": ["châu đốc", "朱笃", "miếu bà chúa xứ", "trại cá"]
+    },
+    {
+      "id": "interest/travel/south/bentre",
+      "parent": "interest/travel/south",
+      "name": { "zh": "槟椥", "vi": "Bến Tre", "en": "Ben Tre" },
+      "keywords": ["bến tre", "dừa bến tre", "kênh rạch"]
+    },
+    {
+      "id": "interest/travel/south/vungtau",
+      "parent": "interest/travel/south",
+      "name": { "zh": "头顿", "vi": "Vũng Tàu", "en": "Vung Tau" },
+      "keywords": ["vũng tàu", "头顿", "đồi con heo", "biển sau"]
+    },
+    {
+      "id": "interest/travel/south/condao",
+      "parent": "interest/travel/south",
+      "name": { "zh": "昆仑岛", "vi": "Côn Đảo", "en": "Con Dao" },
+      "keywords": ["côn đảo", "đầm ốc", "biển côn đảo"]
+    },
+    {
+      "id": "interest/travel/south/phuyen",
+      "parent": "interest/travel/south",
+      "name": { "zh": "富安", "vi": "Phú Yên", "en": "Phu Yen" },
+      "keywords": ["phú yên", "gành đá đĩa", "đầm ô loan"]
+    },
+    {
+      "id": "interest/travel/south/ninhthuan",
+      "parent": "interest/travel/south",
+      "name": { "zh": "宁顺", "vi": "Ninh Thuận", "en": "Ninh Thuan" },
+      "keywords": ["ninh thuận", "đèo cả", "vịnh vĩnh hy", "vườn nho"]
+    },
+    {
+      "id": "interest/travel/abroad",
+      "parent": "interest/travel",
+      "name": { "zh": "出境游", "vi": "Đi nước ngoài", "en": "Trips abroad" },
+      "keywords": ["出境游", "du lịch nước ngoài", "đi nước ngoài"]
+    },
+    {
+      "id": "interest/travel/abroad/china",
+      "parent": "interest/travel/abroad",
+      "name": { "zh": "中国行", "vi": "Đi Trung Quốc", "en": "China trips" },
+      "keywords": ["trung quốc", "中国游", "nam ninh", "quảng châu", "đi trung quốc"]
+    },
+    {
+      "id": "interest/travel/abroad/china_cities",
+      "parent": "interest/travel/abroad",
+      "name": { "zh": "中国城市打卡", "vi": "Thành phố Trung Quốc", "en": "Chinese cities" },
+      "keywords": ["thượng hải", "chengdu", "quế lâm", "vân nam", "bắc kinh"]
+    },
+    {
+      "id": "interest/travel/abroad/china_border",
+      "parent": "interest/travel/abroad",
+      "name": { "zh": "边境赶集", "vi": "Đi chợ biên giới", "en": "Border markets" },
+      "keywords": ["chợ biên", "cửa khẩu hà khẩu", "lào cai", "đồng đăng"]
+    },
+    {
+      "id": "interest/travel/abroad/thailand",
+      "parent": "interest/travel/abroad",
+      "name": { "zh": "泰国", "vi": "Thái Lan", "en": "Thailand" },
+      "keywords": ["thái lan", "泰国", "bangkok", "chiang mai", "phuket"]
+    },
+    {
+      "id": "interest/travel/abroad/japan",
+      "parent": "interest/travel/abroad",
+      "name": { "zh": "日本", "vi": "Nhật Bản", "en": "Japan" },
+      "keywords": ["nhật bản", "日本", "tokyo", "osaka", "núi phú sĩ", "mùa anh đào"]
+    },
+    {
+      "id": "interest/travel/abroad/korea",
+      "parent": "interest/travel/abroad",
+      "name": { "zh": "韩国", "vi": "Hàn Quốc", "en": "South Korea" },
+      "keywords": ["hàn quốc", "韩国", "seoul", "đảo jeju", "mùa thu hàn quốc"]
+    },
+    {
+      "id": "interest/travel/abroad/singapore_my",
+      "parent": "interest/travel/abroad",
+      "name": { "zh": "新加坡·马来西亚", "vi": "Singapore & Malaysia", "en": "Singapore & Malaysia" },
+      "keywords": ["singapore", "新加坡", "malaysia", "kuala lumpur", "sentosa"]
+    },
+    {
+      "id": "interest/travel/abroad/bali",
+      "parent": "interest/travel/abroad",
+      "name": { "zh": "巴厘岛", "vi": "Đảo Bali", "en": "Bali" },
+      "keywords": ["bali", "巴厘岛", "ubud", "đi bali"]
+    },
+    {
+      "id": "interest/travel/abroad/laos",
+      "parent": "interest/travel/abroad",
+      "name": { "zh": "老挝", "vi": "Lào", "en": "Laos" },
+      "keywords": ["đi lào", "老挝", "viang chan", "luang prabang"]
+    },
+    {
+      "id": "interest/travel/abroad/cambodia",
+      "parent": "interest/travel/abroad",
+      "name": { "zh": "柬埔寨", "vi": "Campuchia", "en": "Cambodia" },
+      "keywords": ["campuchia", "柬埔寨", "siem reap", "ang wat"]
+    },
+    {
+      "id": "interest/travel/abroad/europe",
+      "parent": "interest/travel/abroad",
+      "name": { "zh": "欧洲", "vi": "Châu Âu", "en": "Europe" },
+      "keywords": ["châu âu", "欧洲", "thụy sĩ", "italy"]
+    },
+    {
+      "id": "interest/travel/abroad/australia",
+      "parent": "interest/travel/abroad",
+      "name": { "zh": "澳洲", "vi": "Úc", "en": "Australia" },
+      "keywords": ["nước úc", "澳洲", "sydney", "melbourne"]
+    }
+  ]
+}
