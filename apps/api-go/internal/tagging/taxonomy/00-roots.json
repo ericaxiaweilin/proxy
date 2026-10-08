@@ -1,0 +1,377 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest",
+   "name": {
+    "zh": "兴趣",
+    "vi": "Sở thích",
+    "en": "Interests"
+   }
+  },
+  {
+   "id": "interest/outdoor",
+   "parent": "interest",
+   "name": {
+    "zh": "户外",
+    "vi": "Ngoài trời",
+    "en": "Outdoors"
+   },
+   "keywords": [
+    "户外",
+    "outdoor",
+    "ngoài trời"
+   ]
+  },
+  {
+   "id": "interest/sports",
+   "parent": "interest",
+   "name": {
+    "zh": "运动",
+    "vi": "Thể thao",
+    "en": "Sports"
+   },
+   "keywords": [
+    "运动",
+    "sports",
+    "thể thao"
+   ]
+  },
+  {
+   "id": "interest/food",
+   "parent": "interest",
+   "name": {
+    "zh": "美食",
+    "vi": "Ẩm thực",
+    "en": "Food"
+   },
+   "keywords": [
+    "美食",
+    "ẩm thực",
+    "foodie"
+   ]
+  },
+  {
+   "id": "interest/drink",
+   "parent": "interest",
+   "name": {
+    "zh": "饮品",
+    "vi": "Đồ uống",
+    "en": "Drinks"
+   },
+   "keywords": [
+    "饮品",
+    "đồ uống",
+    "drinks"
+   ]
+  },
+  {
+   "id": "interest/travel",
+   "parent": "interest",
+   "name": {
+    "zh": "旅行",
+    "vi": "Du lịch",
+    "en": "Travel"
+   },
+   "keywords": [
+    "旅行",
+    "du lịch",
+    "travel"
+   ]
+  },
+  {
+   "id": "interest/culture",
+   "parent": "interest",
+   "name": {
+    "zh": "文化艺术",
+    "vi": "Văn hóa nghệ thuật",
+    "en": "Culture & Arts"
+   },
+   "keywords": [
+    "文化",
+    "艺术",
+    "văn hóa"
+   ]
+  },
+  {
+   "id": "interest/music",
+   "parent": "interest",
+   "name": {
+    "zh": "音乐",
+    "vi": "Âm nhạc",
+    "en": "Music"
+   },
+   "keywords": [
+    "音乐",
+    "âm nhạc",
+    "music"
+   ]
+  },
+  {
+   "id": "interest/film",
+   "parent": "interest",
+   "name": {
+    "zh": "影视",
+    "vi": "Phim ảnh",
+    "en": "Film & TV"
+   },
+   "keywords": [
+    "影视",
+    "phim ảnh",
+    "movies"
+   ]
+  },
+  {
+   "id": "interest/reading",
+   "parent": "interest",
+   "name": {
+    "zh": "阅读写作",
+    "vi": "Đọc & viết",
+    "en": "Reading & Writing"
+   },
+   "keywords": [
+    "阅读",
+    "đọc sách",
+    "reading"
+   ]
+  },
+  {
+   "id": "interest/tech",
+   "parent": "interest",
+   "name": {
+    "zh": "科技数码",
+    "vi": "Công nghệ",
+    "en": "Tech"
+   },
+   "keywords": [
+    "科技",
+    "công nghệ",
+    "tech"
+   ]
+  },
+  {
+   "id": "interest/work",
+   "parent": "interest",
+   "name": {
+    "zh": "职场商务",
+    "vi": "Công việc & kinh doanh",
+    "en": "Work & Business"
+   },
+   "keywords": [
+    "职场",
+    "kinh doanh",
+    "business"
+   ]
+  },
+  {
+   "id": "interest/learning",
+   "parent": "interest",
+   "name": {
+    "zh": "学习语言",
+    "vi": "Học tập & ngôn ngữ",
+    "en": "Learning & Languages"
+   },
+   "keywords": [
+    "学习",
+    "học tập",
+    "learning"
+   ]
+  },
+  {
+   "id": "interest/wellness",
+   "parent": "interest",
+   "name": {
+    "zh": "健康生活",
+    "vi": "Sức khỏe",
+    "en": "Health & Wellness"
+   },
+   "keywords": [
+    "健康",
+    "sức khỏe",
+    "wellness"
+   ]
+  },
+  {
+   "id": "interest/family",
+   "parent": "interest",
+   "name": {
+    "zh": "亲子家庭",
+    "vi": "Gia đình",
+    "en": "Family"
+   },
+   "keywords": [
+    "亲子",
+    "gia đình",
+    "family"
+   ]
+  },
+  {
+   "id": "interest/pets",
+   "parent": "interest",
+   "name": {
+    "zh": "宠物",
+    "vi": "Thú cưng",
+    "en": "Pets"
+   },
+   "keywords": [
+    "宠物",
+    "thú cưng",
+    "pets"
+   ]
+  },
+  {
+   "id": "interest/home",
+   "parent": "interest",
+   "name": {
+    "zh": "居家生活",
+    "vi": "Nhà cửa",
+    "en": "Home Living"
+   },
+   "keywords": [
+    "居家",
+    "nhà cửa",
+    "home living"
+   ]
+  },
+  {
+   "id": "interest/fashion",
+   "parent": "interest",
+   "name": {
+    "zh": "时尚美妆",
+    "vi": "Thời trang & làm đẹp",
+    "en": "Fashion & Beauty"
+   },
+   "keywords": [
+    "时尚",
+    "thời trang",
+    "fashion"
+   ]
+  },
+  {
+   "id": "interest/photography",
+   "parent": "interest",
+   "name": {
+    "zh": "摄影影像",
+    "vi": "Nhiếp ảnh",
+    "en": "Photography"
+   },
+   "keywords": [
+    "摄影",
+    "nhiếp ảnh",
+    "photography"
+   ]
+  },
+  {
+   "id": "interest/games",
+   "parent": "interest",
+   "name": {
+    "zh": "游戏娱乐",
+    "vi": "Trò chơi",
+    "en": "Games"
+   },
+   "keywords": [
+    "游戏",
+    "trò chơi",
+    "gaming"
+   ]
+  },
+  {
+   "id": "interest/social",
+   "parent": "interest",
+   "name": {
+    "zh": "社交聚会",
+    "vi": "Giao lưu",
+    "en": "Social"
+   },
+   "keywords": [
+    "社交",
+    "giao lưu",
+    "social"
+   ]
+  },
+  {
+   "id": "interest/local",
+   "parent": "interest",
+   "name": {
+    "zh": "本地生活",
+    "vi": "Đời sống địa phương",
+    "en": "Local Life"
+   },
+   "keywords": [
+    "本地生活",
+    "địa phương",
+    "local life"
+   ]
+  },
+  {
+   "id": "interest/shopping",
+   "parent": "interest",
+   "name": {
+    "zh": "购物",
+    "vi": "Mua sắm",
+    "en": "Shopping"
+   },
+   "keywords": [
+    "购物",
+    "mua sắm",
+    "shopping"
+   ]
+  },
+  {
+   "id": "interest/transport",
+   "parent": "interest",
+   "name": {
+    "zh": "出行交通",
+    "vi": "Di chuyển",
+    "en": "Transport"
+   },
+   "keywords": [
+    "出行",
+    "di chuyển",
+    "transport"
+   ]
+  },
+  {
+   "id": "interest/festival",
+   "parent": "interest",
+   "name": {
+    "zh": "节日民俗",
+    "vi": "Lễ hội",
+    "en": "Festivals"
+   },
+   "keywords": [
+    "节日",
+    "lễ hội",
+    "festival"
+   ]
+  },
+  {
+   "id": "interest/crafts",
+   "parent": "interest",
+   "name": {
+    "zh": "手作创作",
+    "vi": "Thủ công",
+    "en": "Crafts & Making"
+   },
+   "keywords": [
+    "手作",
+    "thủ công",
+    "crafts"
+   ]
+  },
+  {
+   "id": "interest/services",
+   "parent": "interest",
+   "name": {
+    "zh": "城市协助服务",
+    "vi": "Dịch vụ hỗ trợ",
+    "en": "City Assistance"
+   },
+   "keywords": [
+    "城市协助",
+    "hỗ trợ",
+    "assistance"
+   ]
+  }
+ ]
+}
