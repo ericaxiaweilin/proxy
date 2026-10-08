@@ -13,6 +13,7 @@ type Rule = {
   id: string; label: string; trigger: string; rewardKind: string;
   campaignId?: string; benefitId?: string; points?: number;
   minAccountAgeHours: number; active: boolean; createdBy: string; createdAt: string;
+  audience?: string; startsAt?: string; endsAt?: string; minPoints?: number;
 };
 type Row = { rule: Rule; granted: number; failed: number; pointsGranted: number };
 type Payload = {
@@ -24,8 +25,16 @@ const BENEFIT_CLAIM = "BENEFIT_CLAIM";
 const GROWTH_POINTS = "GROWTH_POINTS";
 
 const TRIGGER: Record<string, string> = {
-  FIRST_POST: "首次发帖", FIRST_DEMAND: "首次发需求", FIRST_ACTIVITY: "首次参加活动",
+  FIRST_POST: "首次发帖", FIRST_DEMAND: "首次发需求", FIRST_ACTIVITY: "首次参加活动", SCORE_REACHED: "积分达到门槛",
 };
+const AUDIENCE: Record<string, string> = { USER: "用户", PROVIDER: "小美", MERCHANT: "商家" };
+const toLocalInput = (iso?: string): string => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
+const fmtTime = (iso?: string): string => (iso ? toLocalInput(iso).replace("T", " ") : "不限");
+const windowText = (r: Rule): string => (!r.startsAt && !r.endsAt ? "不限" : `${fmtTime(r.startsAt)} → ${fmtTime(r.endsAt)}`);
 const REWARD: Record<string, string> = { [BENEFIT_CLAIM]: "券", [GROWTH_POINTS]: "成长值" };
 
 const dash = (v: string | undefined): string => (v && v.trim() !== "" ? v : "—");
@@ -66,6 +75,7 @@ export function Incentives() {
 
   return (
     <>
+      <IdentityTiers />
       <div className="section-title"><h2>激励规则 · 做成哪件事发什么</h2><span>GET /v1/operator/incentives · 每 30 秒刷新</span></div>
       {(data.notes ?? []).map((n) => <div key={n} className="notice">{n}</div>)}
       <div className="engine-inline" style={{ display: "flex", gap: 6, margin: "10px 0" }}>
@@ -85,14 +95,16 @@ export function Incentives() {
       {toggleErr ? <div style={{ color: "#d9534f", margin: "0 0 8px" }}>{toggleErr}</div> : null}
       {rows.length === 0 ? <div className="notice">还没有规则。</div> : (
         <div className="table-wrap"><table>
-          <thead><tr><th>规则</th><th>触发</th><th>奖励</th><th>账号最小年龄</th><th>状态</th><th className="numc">已发</th><th className="numc">未通过</th><th className="numc">成长值合计</th><th>操作</th></tr></thead>
+          <thead><tr><th>规则</th><th>对象</th><th>触发</th><th>奖励</th><th>时间窗口</th><th>账号最小年龄</th><th>状态</th><th className="numc">已发</th><th className="numc">未通过</th><th className="numc">成长值合计</th><th>操作</th></tr></thead>
           <tbody>{rows.map((it) => {
             const r = it.rule;
             return (
               <tr key={r.id}>
                 <td><b>{dash(r.label)}</b><div style={{ color: "#8a8190", fontSize: 11 }}>{dash(r.id)}</div></td>
-                <td>{dash(TRIGGER[r.trigger] ?? r.trigger)}</td>
+                <td>{dash(AUDIENCE[r.audience ?? "USER"])}</td>
+                <td>{dash(TRIGGER[r.trigger] ?? r.trigger)}{r.trigger === "SCORE_REACHED" ? ` ≥ ${r.minPoints ?? 0} 分` : ""}</td>
                 <td>{rewardText(r)}</td>
+                <td>{windowText(r)}</td>
                 <td>{r.minAccountAgeHours} 小时</td>
                 <td><b style={{ color: r.active ? "#2e9d5b" : "#8a8190" }}>{r.active ? "生效中" : "未生效"}</b></td>
                 <td className="numc">{it.granted}</td>
@@ -126,6 +138,10 @@ function RuleForm({ triggers, rewardKinds, maxPoints, rule, onDone }: {
   const [benefitId, setBenefitId] = useState(rule?.benefitId ?? "");
   const [points, setPoints] = useState(String(rule?.points ?? ""));
   const [ageHours, setAgeHours] = useState(String(rule?.minAccountAgeHours ?? 24));
+  const [audience, setAudience] = useState(rule?.audience ?? "USER");
+  const [minPoints, setMinPoints] = useState(String(rule?.minPoints ?? ""));
+  const [startsAt, setStartsAt] = useState(toLocalInput(rule?.startsAt));
+  const [endsAt, setEndsAt] = useState(toLocalInput(rule?.endsAt));
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -135,7 +151,9 @@ function RuleForm({ triggers, rewardKinds, maxPoints, rule, onDone }: {
     && (rewardKind === BENEFIT_CLAIM
       ? campaignId.trim() !== "" && benefitId.trim() !== ""
       : points.trim() !== "" && Number.isInteger(pointsNum) && pointsNum >= 1 && pointsNum <= maxPoints)
-    && Number.isInteger(ageNum) && ageNum >= 0;
+    && Number.isInteger(ageNum) && ageNum >= 0
+    && (trigger !== "SCORE_REACHED" || (Number.isInteger(Number(minPoints)) && Number(minPoints) > 0))
+    && (startsAt === "" || endsAt === "" || new Date(endsAt) > new Date(startsAt));
 
   const submit = async (): Promise<void> => {
     setBusy(true); setErr("");
@@ -147,6 +165,10 @@ function RuleForm({ triggers, rewardKinds, maxPoints, rule, onDone }: {
           ? { campaignId: campaignId.trim(), benefitId: benefitId.trim() }
           : { points: pointsNum }),
         minAccountAgeHours: ageNum,
+        audience,
+        ...(trigger === "SCORE_REACHED" ? { minPoints: Number(minPoints) } : {}),
+        ...(startsAt ? { startsAt: new Date(startsAt).toISOString() } : {}),
+        ...(endsAt ? { endsAt: new Date(endsAt).toISOString() } : {}),
       });
       onDone("新建的规则默认未生效。");
     } catch (e) {
@@ -186,6 +208,16 @@ function RuleForm({ triggers, rewardKinds, maxPoints, rule, onDone }: {
             placeholder={`成长值（1..${maxPoints}）`} style={{ minWidth: 180, padding: 8 }} />
         </div>
       ) : null}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+        <select value={audience} onChange={(e) => setAudience(e.target.value)} style={{ padding: 8 }}>
+          {Object.entries(AUDIENCE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        {trigger === "SCORE_REACHED" ? (
+          <input value={minPoints} onChange={(e) => setMinPoints(e.target.value)} type="number" min={1} placeholder="积分门槛" style={{ width: 120, padding: 8 }} />
+        ) : null}
+        <label style={{ color: "#8a8190", fontSize: 11 }}>开始 <input value={startsAt} onChange={(e) => setStartsAt(e.target.value)} type="datetime-local" style={{ padding: 6 }} /></label>
+        <label style={{ color: "#8a8190", fontSize: 11 }}>结束 <input value={endsAt} onChange={(e) => setEndsAt(e.target.value)} type="datetime-local" style={{ padding: 6 }} /></label>
+      </div>
       <div style={{ marginTop: 8 }}>
         <input value={ageHours} onChange={(e) => setAgeHours(e.target.value)} type="number" min={0}
           placeholder="账号最小年龄（小时）" style={{ minWidth: 180, padding: 8 }} />
@@ -197,5 +229,36 @@ function RuleForm({ triggers, rewardKinds, maxPoints, rule, onDone }: {
         <span style={{ color: "#8a8190", marginLeft: 8, fontSize: 11 }}>保存后是未生效，要手动打开</span>
       </div>
     </div>
+  );
+}
+
+type Step = { tier: string; name: string; stars: number; min: number };
+type TierPayload = {
+  dataSource: string;
+  kinds?: Array<{ kind: string; ladder: Step[]; earnRules: Array<{ reason: string; label: string; points: number }> }>;
+  distribution?: Array<{ kind: string; tier: string; stars: number; users: number }>;
+};
+
+// 固定部分：身份体系（铜 / 银 / 金 × 1–3 星）+ 积分赚取规则。奖励活动是下面那张表（不固定）。
+function IdentityTiers() {
+  const [data, setData] = useState<TierPayload | null>(null);
+  useEffect(() => { opFetch<TierPayload>("/v1/operator/identity-tiers").then(setData).catch(() => {}); }, []);
+  if (!data || data.dataSource !== "LIVE" || !data.kinds) return null;
+  const count = (kind: string, st: Step): number =>
+    (data.distribution ?? []).find((b) => b.kind === kind && b.tier === st.tier && b.stars === st.stars)?.users ?? 0;
+  return (
+    <>
+      <div className="section-title"><h2>身份体系 · 固定</h2><span>GET /v1/operator/identity-tiers</span></div>
+      <div className="table-wrap"><table>
+        <thead><tr><th>身份</th><th>等级（积分起点 · 人数）</th><th>赚积分</th></tr></thead>
+        <tbody>{data.kinds.map((k) => (
+          <tr key={k.kind}>
+            <td><b>{AUDIENCE[k.kind] ?? k.kind}</b></td>
+            <td style={{ fontSize: 12 }}>{k.ladder.map((st) => `${st.name}${"★".repeat(st.stars)} ${st.min} · ${count(k.kind, st)}`).join("　")}</td>
+            <td style={{ fontSize: 12 }}>{k.earnRules.length === 0 ? "—" : k.earnRules.map((r) => `${r.label} +${r.points}`).join("；")}</td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+    </>
   );
 }
