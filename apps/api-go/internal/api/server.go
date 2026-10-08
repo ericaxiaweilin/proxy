@@ -149,6 +149,8 @@ type Server struct {
 	MatchExplain MatchExplainFunc
 	// WEATHER-001：天气与见面时间建议；nil = 503。
 	Weather *weather.Service
+	// IDENTITY-POINTS-001：身份成长体系（积分账本 + 等级）。
+	IdentityTiers IdentityTierSource
 	// MatchEval：撮合离线回放评估（OPS-MATCH-EVAL-001），组合根接线。
 	MatchEval MatchEvalSource
 	// ProviderList / ProviderProfile：小美画像（OPS-PROVIDER-PROFILE-001），组合根接线。
@@ -311,6 +313,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/matching", s.operatorConsole(s.operatorMatching))
 	mux.HandleFunc("/v1/operator/matching/trace", s.operatorConsole(s.operatorMatchingTrace))
 	mux.HandleFunc("/v1/operator/matching/explain", s.operatorConsole(s.operatorMatchingExplain))
+	mux.HandleFunc("/v1/operator/identity-tiers", s.operatorConsole(s.operatorIdentityTiers))
 	mux.HandleFunc("/v1/operator/matching/tunables", s.operatorConsoleGated(http.MethodPost, ScopeMarketplace, s.operatorMatchingTunables))
 	mux.HandleFunc("/v1/operator/dispatch", s.operatorConsole(s.operatorDispatch))
 	mux.HandleFunc("/v1/operator/dispatch/run", s.operatorConsole(s.operatorDispatchRun))

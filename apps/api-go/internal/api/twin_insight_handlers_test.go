@@ -38,7 +38,7 @@ func newTwinInsightFixture(t *testing.T) twinInsightFixture {
 	personaSvc := aipersona.NewService(aipersona.NewMemoryRepository(), "terms-1.1")
 	personaSvc.SetAgeLookup(twinCenterAdultLookup{})
 	persona, err := personaSvc.CreatePersona(context.Background(), aipersona.Persona{
-		OwnerID:    "user_insight_owner",
+		OwnerID:     "user_insight_owner",
 		DisplayName: "Insight Twin",
 		PersonaType: aipersona.PersonaTypeUserTwin,
 	})

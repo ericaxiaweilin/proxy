@@ -112,8 +112,18 @@ func TestR1563DiagnoseIphonePostWithMedia(t *testing.T) {
 	if cmuResult.Outcome != "ACCEPTED" {
 		t.Fatalf("[3] CompleteMediaUpload outcome=%s errorCode=%s messageKey=%s state=%s",
 			cmuResult.Outcome,
-			func() string { if cmuResult.Error != nil { return cmuResult.Error.ErrorCode } ; return "" }(),
-			func() string { if cmuResult.Error != nil { return cmuResult.Error.MessageKey } ; return "" }(),
+			func() string {
+				if cmuResult.Error != nil {
+					return cmuResult.Error.ErrorCode
+				}
+				return ""
+			}(),
+			func() string {
+				if cmuResult.Error != nil {
+					return cmuResult.Error.MessageKey
+				}
+				return ""
+			}(),
 			cmuResult.Aggregate.State)
 	}
 	t.Logf("[3] CompleteMediaUpload OK state=%s", cmuResult.Aggregate.State)
@@ -133,8 +143,18 @@ func TestR1563DiagnoseIphonePostWithMedia(t *testing.T) {
 	if pmaResult.Outcome != "ACCEPTED" {
 		t.Fatalf("[4] ProcessMediaAsset outcome=%s errorCode=%s messageKey=%s",
 			pmaResult.Outcome,
-			func() string { if pmaResult.Error != nil { return pmaResult.Error.ErrorCode } ; return "" }(),
-			func() string { if pmaResult.Error != nil { return pmaResult.Error.MessageKey } ; return "" }())
+			func() string {
+				if pmaResult.Error != nil {
+					return pmaResult.Error.ErrorCode
+				}
+				return ""
+			}(),
+			func() string {
+				if pmaResult.Error != nil {
+					return pmaResult.Error.MessageKey
+				}
+				return ""
+			}())
 	}
 	t.Logf("[4] ProcessMediaAsset OK state=%s", pmaResult.Aggregate.State)
 
@@ -159,9 +179,24 @@ func TestR1563DiagnoseIphonePostWithMedia(t *testing.T) {
 	if cpResult.Outcome != "ACCEPTED" {
 		t.Fatalf("[5] CreatePost outcome=%s errorCode=%s messageKey=%s errorCategory=%s",
 			cpResult.Outcome,
-			func() string { if cpResult.Error != nil { return cpResult.Error.ErrorCode } ; return "" }(),
-			func() string { if cpResult.Error != nil { return cpResult.Error.MessageKey } ; return "" }(),
-			func() string { if cpResult.Error != nil { return cpResult.Error.Category } ; return "" }())
+			func() string {
+				if cpResult.Error != nil {
+					return cpResult.Error.ErrorCode
+				}
+				return ""
+			}(),
+			func() string {
+				if cpResult.Error != nil {
+					return cpResult.Error.MessageKey
+				}
+				return ""
+			}(),
+			func() string {
+				if cpResult.Error != nil {
+					return cpResult.Error.Category
+				}
+				return ""
+			}())
 	}
 	t.Logf("[5] CreatePost OK postId=%s state=%s", cpResult.Aggregate.ID, cpResult.Aggregate.State)
 }

@@ -56,11 +56,11 @@ func renderPrivacyRequest(r identity.PrivacyRequest) privacyRequestEnvelope {
 // It wraps the in-memory data export assembled by the service plus a
 // few envelope fields so the client can prove the export is fresh.
 type privacyExportEnvelope struct {
-	Data          json.RawMessage            `json:"data"`
-	FormatVersion string                     `json:"formatVersion"`
-	LegalBasis    string                     `json:"legalBasis"`
-	GeneratedAt   time.Time                  `json:"generatedAt"`
-	History       []privacyRequestEnvelope   `json:"history"`
+	Data          json.RawMessage          `json:"data"`
+	FormatVersion string                   `json:"formatVersion"`
+	LegalBasis    string                   `json:"legalBasis"`
+	GeneratedAt   time.Time                `json:"generatedAt"`
+	History       []privacyRequestEnvelope `json:"history"`
 }
 
 // privacyMe handles GET /v1/privacy/me. The endpoint returns the
@@ -324,18 +324,18 @@ func buildPrivacyCommandEnvelope(r *http.Request, session identity.Authenticated
 		authContext["userAgent"] = ua
 	}
 	envelope := command.Envelope{
-		CommandID:     newRequestID(r, commandType),
-		CommandType:   commandType,
+		CommandID:      newRequestID(r, commandType),
+		CommandType:    commandType,
 		CommandVersion: 1,
-		Actor:         session.Actor,
-		Principal:     session.Principal,
-		Target:        command.Target{Type: "PrivacyRequest", ID: session.Principal.ID},
+		Actor:          session.Actor,
+		Principal:      session.Principal,
+		Target:         command.Target{Type: "PrivacyRequest", ID: session.Principal.ID},
 		IdempotencyKey: extractIdempotencyKey(r),
-		AuthContext:   authContext,
-		CorrelationID: extractCorrelationID(r),
-		CausationID:   r.Header.Get("X-Request-Causation"),
-		RequestedAt:   "",
-		Payload:       payload,
+		AuthContext:    authContext,
+		CorrelationID:  extractCorrelationID(r),
+		CausationID:    r.Header.Get("X-Request-Causation"),
+		RequestedAt:    "",
+		Payload:        payload,
 	}
 	return envelope
 }

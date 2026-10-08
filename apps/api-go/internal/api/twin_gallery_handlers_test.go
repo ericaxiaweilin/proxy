@@ -22,8 +22,8 @@ import (
 // correctly authenticated owner gets exactly their own scoped items.
 
 type galleryTestFixture struct {
-	server    *Server
-	persona   aipersona.Persona
+	server     *Server
+	persona    aipersona.Persona
 	ownerToken string
 	otherToken string
 }

@@ -126,3 +126,41 @@ func TestGrantsAreIdempotentSkipInactiveRulesRestrictedPeopleAndRetryTransientFa
 		t.Fatalf("once capacity returns, the person who missed out is served: %d", n)
 	}
 }
+
+// 奖励活动不固定：对象、时间窗口、分数门槛由运营配。
+func TestScoreCampaignNeedsAThresholdAndAValidWindow(t *testing.T) {
+	base := Rule{ID: "c1", Label: "十月咖啡券", Trigger: TriggerScoreReached, RewardKind: RewardBenefitClaim, CampaignID: "c", BenefitID: "b", CreatedBy: "op", Audience: "USER"}
+	if err := Validate(base); err != ErrScoreNeeded {
+		t.Fatalf("a score campaign without a threshold is rejected: %v", err)
+	}
+	base.MinPoints = 500
+	if err := Validate(base); err != nil {
+		t.Fatalf("valid: %v", err)
+	}
+	start := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	end := start.Add(-time.Hour)
+	bad := base
+	bad.StartsAt, bad.EndsAt = &start, &end
+	if err := Validate(bad); err != ErrBadWindow {
+		t.Fatalf("window must end after it starts: %v", err)
+	}
+	bad = base
+	bad.Audience = "ROBOT"
+	if err := Validate(bad); err != ErrBadAudience {
+		t.Fatalf("audience: %v", err)
+	}
+}
+
+func TestInWindow(t *testing.T) {
+	start := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	end := start.Add(48 * time.Hour)
+	r := Rule{StartsAt: &start, EndsAt: &end}
+	for at, want := range map[time.Time]bool{start.Add(-time.Second): false, start: true, end.Add(-time.Second): true, end: false} {
+		if InWindow(r, at) != want {
+			t.Fatalf("%v want %v", at, want)
+		}
+	}
+	if !InWindow(Rule{}, start) {
+		t.Fatal("no window = always open")
+	}
+}

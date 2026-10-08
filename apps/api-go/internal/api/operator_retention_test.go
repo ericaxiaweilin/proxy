@@ -87,7 +87,7 @@ func TestOperatorRetentionRefusesRatesItCannotJustify(t *testing.T) {
 		"同期群留存", "没有前期人群", // 拒绝给留存，并说明为什么
 		"噪声",        // 回访只给人数
 		"订单数不等于成交数", // 415 单里只有 12 单走完履约
-		"能追溯到账号", // 复购率的分母是能追溯到账号的那批
+		"能追溯到账号",    // 复购率的分母是能追溯到账号的那批
 		"不是生意",      // 而且必须明说追溯不到账号的那些是什么
 		// OPS-DATA-ENV-001：这一步排不掉脚本建的账号，说明里必须自己把边界说出来，
 		// 不然「对得上账号」又会被读成「是真人」—— 上一版就是这么错的。
@@ -255,9 +255,9 @@ func TestOperatorRetentionPublishesMetricsWhenDataEnvIsProduction(t *testing.T) 
 		RepeatRequesterRate: ratePtr(22.9), Lifecycle: map[string]int64{"COMPLETED": 415},
 	}), "retention", "ops_token")
 	var body struct {
-		DataSource     string  `json:"dataSource"`
-		DataEnv        string  `json:"dataEnv"`
-		RatesPublished bool    `json:"ratesPublished"`
+		DataSource     string `json:"dataSource"`
+		DataEnv        string `json:"dataEnv"`
+		RatesPublished bool   `json:"ratesPublished"`
 		Retention      struct {
 			RepeatRequesterRate *float64 `json:"repeatRequesterRate"`
 		} `json:"retention"`

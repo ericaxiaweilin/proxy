@@ -207,7 +207,7 @@ func TestMerchantPublishWithoutMerchantStaysPersonal(t *testing.T) {
 }
 
 // VOUCHER-ISSUE-001: 商户发行券定义。owner 带店声明 → 200，定义归属为验过的店；
-/// stranger 冒用 → 403 到不了 service；owner 不带声明 → 409（发行定义无商户无意义）。
+// / stranger 冒用 → 403 到不了 service；owner 不带声明 → 409（发行定义无商户无意义）。
 func validDefinitionPayload(bizID string) map[string]any {
 	p := map[string]any{
 		"family": "COFFEE", "faceValueMinor": 50000, "scopeName": "木光咖啡",

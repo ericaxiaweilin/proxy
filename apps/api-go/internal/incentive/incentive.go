@@ -19,6 +19,8 @@ const (
 	TriggerFirstPost     = "FIRST_POST"
 	TriggerFirstDemand   = "FIRST_DEMAND"
 	TriggerFirstActivity = "FIRST_ACTIVITY"
+	// SCORE_REACHED：积分达到门槛（按分数开的奖励活动，配合时间窗口用）。
+	TriggerScoreReached = "SCORE_REACHED"
 
 	RewardBenefitClaim = "BENEFIT_CLAIM"
 	RewardGrowthPoints = "GROWTH_POINTS"
@@ -27,30 +29,40 @@ const (
 	StatusFailed  = "FAILED"
 )
 
-func Triggers() []string    { return []string{TriggerFirstPost, TriggerFirstDemand, TriggerFirstActivity} }
+func Triggers() []string {
+	return []string{TriggerFirstPost, TriggerFirstDemand, TriggerFirstActivity, TriggerScoreReached}
+}
+
+func Audiences() []string   { return []string{"USER", "PROVIDER", "MERCHANT"} }
 func RewardKinds() []string { return []string{RewardBenefitClaim, RewardGrowthPoints} }
 
 const MaxPoints = 1000
 
 type Rule struct {
-	ID                 string    `json:"id"`
-	Label              string    `json:"label"`
-	Trigger            string    `json:"trigger"`
-	RewardKind         string    `json:"rewardKind"`
-	CampaignID         string    `json:"campaignId,omitempty"`
-	BenefitID          string    `json:"benefitId,omitempty"`
-	Points             int       `json:"points,omitempty"`
-	MinAccountAgeHours int       `json:"minAccountAgeHours"`
-	Active             bool      `json:"active"`
-	CreatedBy          string    `json:"createdBy"`
-	CreatedAt          time.Time `json:"createdAt"`
-	UpdatedAt          time.Time `json:"updatedAt"`
+	ID                 string `json:"id"`
+	Label              string `json:"label"`
+	Trigger            string `json:"trigger"`
+	RewardKind         string `json:"rewardKind"`
+	CampaignID         string `json:"campaignId,omitempty"`
+	BenefitID          string `json:"benefitId,omitempty"`
+	Points             int    `json:"points,omitempty"`
+	MinAccountAgeHours int    `json:"minAccountAgeHours"`
+	// 奖励活动不是固定的：对象（用户 / 小美 / 商家）、时间窗口、积分门槛都由运营配。
+	Audience  string     `json:"audience"`
+	StartsAt  *time.Time `json:"startsAt,omitempty"`
+	EndsAt    *time.Time `json:"endsAt,omitempty"`
+	MinPoints int        `json:"minPoints"`
+	Active    bool       `json:"active"`
+	CreatedBy string     `json:"createdBy"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
 type Grant struct {
 	ID         string    `json:"id"`
 	RuleID     string    `json:"ruleId"`
 	UserID     string    `json:"userId,omitempty"`
+	Audience   string    `json:"audience,omitempty"`
 	RewardKind string    `json:"rewardKind"`
 	ClaimID    string    `json:"claimId,omitempty"`
 	Points     int       `json:"points,omitempty"`
@@ -66,6 +78,9 @@ var (
 	ErrBenefitNeeded = errors.New("incentive: a benefit reward needs campaignId and benefitId")
 	ErrBadPoints     = errors.New("incentive: points must be 1..1000")
 	ErrActorNeeded   = errors.New("incentive: the operator must be identified")
+	ErrBadAudience   = errors.New("incentive: audience must be USER, PROVIDER or MERCHANT")
+	ErrBadWindow     = errors.New("incentive: the window must end after it starts")
+	ErrScoreNeeded   = errors.New("incentive: a SCORE_REACHED campaign needs minPoints > 0")
 )
 
 // Validate 检查一条规则。奖励类型只认两种；现金一类的名字（CASH / MONEY / WALLET …）一律走 ErrBadReward。
@@ -87,8 +102,20 @@ func Validate(r Rule) error {
 	} else if r.Points < 1 || r.Points > MaxPoints || r.CampaignID != "" || r.BenefitID != "" {
 		return ErrBadPoints
 	}
-	if r.MinAccountAgeHours < 0 {
+	if r.MinAccountAgeHours < 0 || r.MinPoints < 0 {
 		return ErrBadPoints
+	}
+	if r.Audience == "" {
+		r.Audience = "USER"
+	}
+	if !contains(Audiences(), r.Audience) {
+		return ErrBadAudience
+	}
+	if r.StartsAt != nil && r.EndsAt != nil && !r.EndsAt.After(*r.StartsAt) {
+		return ErrBadWindow
+	}
+	if r.Trigger == TriggerScoreReached && r.MinPoints <= 0 {
+		return ErrScoreNeeded
 	}
 	return nil
 }
@@ -152,7 +179,7 @@ func RunGrants(ctx context.Context, st Store, claimer Claimer, notify Notifier, 
 	}
 	total := 0
 	for _, r := range rules {
-		if !r.Active {
+		if !r.Active || !InWindow(r, now) {
 			continue
 		}
 		ids, err := st.Candidates(ctx, r, now, perRule)
@@ -163,7 +190,7 @@ func RunGrants(ctx context.Context, st Store, claimer Claimer, notify Notifier, 
 			if restricted != nil && restricted(ctx, id) {
 				continue
 			}
-			g := Grant{ID: newID(), RuleID: r.ID, UserID: id, RewardKind: r.RewardKind, GrantedAt: now.UTC(), Status: StatusGranted}
+			g := Grant{ID: newID(), RuleID: r.ID, UserID: id, Audience: r.Audience, RewardKind: r.RewardKind, GrantedAt: now.UTC(), Status: StatusGranted}
 			switch r.RewardKind {
 			case RewardGrowthPoints:
 				g.Points = r.Points
@@ -191,4 +218,15 @@ func RunGrants(ctx context.Context, st Store, claimer Claimer, notify Notifier, 
 		}
 	}
 	return total, nil
+}
+
+// InWindow：奖励活动现在开着吗（没配时间 = 不限）。
+func InWindow(r Rule, now time.Time) bool {
+	if r.StartsAt != nil && now.Before(*r.StartsAt) {
+		return false
+	}
+	if r.EndsAt != nil && !now.Before(*r.EndsAt) {
+		return false
+	}
+	return true
 }

@@ -1,0 +1,108 @@
+package identitytier
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Postgres struct{ pool *pgxpool.Pool }
+
+func NewPostgres(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
+
+// Points：这个人在这个身份下的积分（账本求和）。
+func (p *Postgres) Points(ctx context.Context, k Kind, id string) (int, error) {
+	var n int
+	err := p.pool.QueryRow(ctx, `SELECT COALESCE(SUM(delta), 0) FROM growth.point_ledger WHERE subject_kind = $1 AND subject_id = $2`, string(k), id).Scan(&n)
+	return n, err
+}
+
+// Credit：记一笔积分（幂等：同一 (身份, 人, 原因, ref) 只记一次）。返回是否真的新增。
+func (p *Postgres) Credit(ctx context.Context, k Kind, id string, delta int, reason, ref string, now time.Time) (bool, error) {
+	tag, err := p.pool.Exec(ctx, `
+		INSERT INTO growth.point_ledger (id, subject_kind, subject_id, delta, reason, ref, created_at)
+		VALUES ('pl_' || md5($1 || '|' || $2 || '|' || $4 || '|' || $5), $1, $2, $3, $4, $5, $6)
+		ON CONFLICT (subject_kind, subject_id, reason, ref) DO NOTHING`, string(k), id, delta, reason, ref, now.UTC())
+	return tag.RowsAffected() == 1, err
+}
+
+const collectWindow = 35 * 24 * time.Hour
+
+// CollectUser：把用户已经做成的事折成积分（固定规则，见 EarnRules）。幂等，可以每轮重跑；只看最近 35 天。
+// 只给 ACTIVE 账号加分。返回新增的笔数。
+func (p *Postgres) CollectUser(ctx context.Context, now time.Time) (int, error) {
+	rules := map[string]int{}
+	for _, r := range EarnRules(User) {
+		rules[r.Reason] = r.Points
+	}
+	since := now.Add(-collectWindow).UTC()
+	total := 0
+	run := func(sql string, args ...any) error {
+		tag, err := p.pool.Exec(ctx, sql, args...)
+		total += int(tag.RowsAffected())
+		return err
+	}
+	const ins = `INSERT INTO growth.point_ledger (id, subject_kind, subject_id, delta, reason, ref, created_at)
+		SELECT 'pl_' || md5('USER|' || uid || '|' || $1 || '|' || ref), 'USER', uid, $2, $1, ref, $3 FROM (`
+	const tail = `) x ON CONFLICT (subject_kind, subject_id, reason, ref) DO NOTHING`
+	// 完善资料。
+	if err := run(ins+`SELECT u.id AS uid, ''::text AS ref FROM identity.user_accounts u
+		JOIN identity.profiles pr ON pr.user_account_id = u.id AND btrim(pr.name) <> '' AND pr.avatar_path <> ''
+		WHERE u.status = 'ACTIVE'`+tail, "PROFILE_COMPLETE", rules["PROFILE_COMPLETE"], now.UTC()); err != nil {
+		return total, err
+	}
+	// 发帖：每人每天最多算 3 条（越南时区的自然日）。
+	if err := run(ins+`SELECT author_id AS uid, id AS ref FROM (
+			SELECT po.author_id, po.id, row_number() OVER (PARTITION BY po.author_id, (po.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date ORDER BY po.created_at, po.id) AS rn
+			  FROM localnet.posts po JOIN identity.user_accounts u ON u.id = po.author_id AND u.status = 'ACTIVE'
+			 WHERE po.author_type = 'USER' AND po.status = 'PUBLISHED' AND po.created_at >= $4) ranked WHERE rn <= 3`+tail, "POST_PUBLISHED", rules["POST_PUBLISHED"], now.UTC(), since); err != nil {
+		return total, err
+	}
+	// 参加活动。
+	if err := run(ins+`SELECT pt.actor_id AS uid, pt.activity_id AS ref FROM activity.participants pt
+		JOIN identity.user_accounts u ON u.id = pt.actor_id AND u.status = 'ACTIVE' WHERE pt.joined_at >= $4`+tail, "ACTIVITY_JOINED", rules["ACTIVITY_JOINED"], now.UTC(), since); err != nil {
+		return total, err
+	}
+	// 完成订单（作为下单方）。
+	if err := run(ins+`SELECT o.requester_id AS uid, o.id AS ref FROM fulfillment.orders o
+		JOIN identity.user_accounts u ON u.id = o.requester_id AND u.status = 'ACTIVE' WHERE o.lifecycle = 'COMPLETED' AND o.updated_at >= $4`+tail, "ORDER_COMPLETED", rules["ORDER_COMPLETED"], now.UTC(), since); err != nil {
+		return total, err
+	}
+	return total, nil
+}
+
+type Bucket struct {
+	Kind  Kind   `json:"kind"`
+	Tier  string `json:"tier"`
+	Stars int    `json:"stars"`
+	Users int    `json:"users"`
+}
+
+// Distribution：各身份下各等级有多少人（只数账本里有积分的人；没记过分的人不在这里，也不编成 0 分的铜 1）。
+func (p *Postgres) Distribution(ctx context.Context) ([]Bucket, error) {
+	rows, err := p.pool.Query(ctx, `SELECT subject_kind, subject_id, SUM(delta)::int FROM growth.point_ledger GROUP BY 1, 2`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	count := map[[3]string]int{}
+	for rows.Next() {
+		var k, id string
+		var pts int
+		if err := rows.Scan(&k, &id, &pts); err != nil {
+			return nil, err
+		}
+		l := Resolve(Kind(k), pts)
+		count[[3]string{k, l.Tier, itoa(l.Stars)}]++
+	}
+	out := []Bucket{}
+	for _, k := range Kinds() {
+		for _, s := range Ladder(k) {
+			out = append(out, Bucket{Kind: k, Tier: s.Tier, Stars: s.Stars, Users: count[[3]string{string(k), s.Tier, itoa(s.Stars)}]})
+		}
+	}
+	return out, rows.Err()
+}
+
+func itoa(n int) string { return string(rune('0' + n)) }

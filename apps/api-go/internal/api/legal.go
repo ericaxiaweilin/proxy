@@ -47,14 +47,14 @@ var privacyV11Text string
 const legalDocVersion = "1.1"
 
 type legalDocEnvelope struct {
-	Kind        string    `json:"kind"`
-	Version     string    `json:"version"`
-	Locale      string    `json:"locale"`
-	Title       string    `json:"title"`
-	EffectiveAt string    `json:"effectiveAt"`
-	ContentSHA256 string  `json:"contentSha256"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	Content     string    `json:"content"`
+	Kind          string    `json:"kind"`
+	Version       string    `json:"version"`
+	Locale        string    `json:"locale"`
+	Title         string    `json:"title"`
+	EffectiveAt   string    `json:"effectiveAt"`
+	ContentSHA256 string    `json:"contentSha256"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+	Content       string    `json:"content"`
 }
 
 // legalDoc serves a single legal document by kind. Anonymous, public,
@@ -87,14 +87,14 @@ func (s *Server) legalDoc(w http.ResponseWriter, r *http.Request) {
 	}
 	sum := sha256.Sum256([]byte(body))
 	env := legalDocEnvelope{
-		Kind:           kind,
-		Version:        legalDocVersion,
-		Locale:         "vi-VN",
-		Title:          title,
-		EffectiveAt:    "[YYYY-MM-DD]",
-		ContentSHA256:  hex.EncodeToString(sum[:]),
-		UpdatedAt:      time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC),
-		Content:        body,
+		Kind:          kind,
+		Version:       legalDocVersion,
+		Locale:        "vi-VN",
+		Title:         title,
+		EffectiveAt:   "[YYYY-MM-DD]",
+		ContentSHA256: hex.EncodeToString(sum[:]),
+		UpdatedAt:     time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC),
+		Content:       body,
 	}
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

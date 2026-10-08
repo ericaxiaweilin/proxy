@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/proxy-app/proxy-api/internal/identitytier"
 	"github.com/proxy-app/proxy-api/internal/weather"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -761,6 +762,7 @@ func main() {
 		// OPS-AUDIT-001：运营动作审计（operator.action_log，migration 161，只追加）。
 		server.Audit = operatoraudit.NewRecorder(operatoraudit.NewPostgres(pool))
 		server.Weather = &weather.Service{Provider: weather.OpenMeteo{}}
+		server.IdentityTiers = identitytier.NewPostgres(pool)
 		// OPS-MATCHING-TUNABLES-001：撮合引擎的旋钮与决策留痕（控制台 /v1/operator/matching）。
 		// 加载失败绝不拦启动：退回出厂默认就是改代码之前那套数，引擎照常跑，
 		// 而原因写进启动日志（配置读不出来 = 起不来 是另一种不可用）。

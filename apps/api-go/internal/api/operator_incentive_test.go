@@ -38,7 +38,7 @@ func (m *memIncentives) SetActive(_ context.Context, id string, active bool, _ t
 func (m *memIncentives) Candidates(context.Context, incentive.Rule, time.Time, int) ([]string, error) {
 	return nil, nil
 }
-func (m *memIncentives) RecordGrant(context.Context, incentive.Grant) (bool, error) { return true, nil }
+func (m *memIncentives) RecordGrant(context.Context, incentive.Grant) (bool, error)  { return true, nil }
 func (m *memIncentives) GrantsOf(context.Context, string) ([]incentive.Grant, error) { return nil, nil }
 func (m *memIncentives) Stats(context.Context) ([]incentive.RuleStat, error)         { return nil, nil }
 

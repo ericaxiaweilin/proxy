@@ -58,15 +58,15 @@ func (s *Server) experienceMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	m := runtime.GlobalMetrics.Snapshot()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"compile_count":           m.CompileCount,
-		"compile_latency_p50_ms":  m.CompileLatencyP50.Milliseconds(),
-		"compile_latency_p95_ms":  m.CompileLatencyP95.Milliseconds(),
-		"validation_fail":         m.ValidationFailCount,
-		"capability_fallback":     m.CapabilityFallbackCount,
-		"delta_apply_success":     m.DeltaApplySuccess,
-		"delta_reject":            m.DeltaRejectCount,
-		"snapshot_recovery":       m.SnapshotRecoveryCount,
-		"no_ui_change":            m.NoUIChangeCount,
+		"compile_count":          m.CompileCount,
+		"compile_latency_p50_ms": m.CompileLatencyP50.Milliseconds(),
+		"compile_latency_p95_ms": m.CompileLatencyP95.Milliseconds(),
+		"validation_fail":        m.ValidationFailCount,
+		"capability_fallback":    m.CapabilityFallbackCount,
+		"delta_apply_success":    m.DeltaApplySuccess,
+		"delta_reject":           m.DeltaRejectCount,
+		"snapshot_recovery":      m.SnapshotRecoveryCount,
+		"no_ui_change":           m.NoUIChangeCount,
 	})
 }
 

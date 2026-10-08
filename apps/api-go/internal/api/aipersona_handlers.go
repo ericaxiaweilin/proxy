@@ -257,14 +257,14 @@ func (s *Server) hasLiveConsent(w http.ResponseWriter, r *http.Request) {
 // 不含任何凭证或私人数据，匿名可读。接单/报名/收付款不在此面，
 // 仍由 aiboundary + 各服务门禁禁止（见回归测试）。
 type AIAssistant struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Role     string `json:"role"`
-	Color    string `json:"color"`
-	Photo    string `json:"photo"`
-	Avatar   string `json:"avatar"`
-	Tagline  string `json:"tagline"`
-	AIBadge  string `json:"aiBadge"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Role    string `json:"role"`
+	Color   string `json:"color"`
+	Photo   string `json:"photo"`
+	Avatar  string `json:"avatar"`
+	Tagline string `json:"tagline"`
+	AIBadge string `json:"aiBadge"`
 }
 
 // platformAIAssistants 是 5 小美唯一展示真相源（与 activity 种子、

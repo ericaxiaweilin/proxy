@@ -33,7 +33,7 @@ func (s *Server) legalStatus(w http.ResponseWriter, r *http.Request) {
 		status = map[string]compliance.KillSwitchView{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"killed": status,
+		"killed":    status,
 		"checkedAt": time.Now().UTC().Format(time.RFC3339),
 	})
 }
@@ -145,7 +145,7 @@ func (s *Server) operatorKillSwitchRearm(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"category": string(category),
-		"status": "REARMED",
+		"status":   "REARMED",
 	})
 }
 
@@ -208,12 +208,12 @@ func (s *Server) requireOperator(w http.ResponseWriter, r *http.Request) bool {
 
 func killSwitchResponse(k *compliance.KillSwitch) map[string]any {
 	out := map[string]any{
-		"id": k.ID,
+		"id":       k.ID,
 		"category": string(k.Category),
-		"status": string(k.Status),
-		"reason": k.Reason,
-		"setBy": k.SetBy,
-		"setAt": k.SetAt.UTC().Format(time.RFC3339),
+		"status":   string(k.Status),
+		"reason":   k.Reason,
+		"setBy":    k.SetBy,
+		"setAt":    k.SetAt.UTC().Format(time.RFC3339),
 		// LC-16 (2026-09-21): whether this row actually blocks
 		// anything. A false here means the switch is a record of
 		// the operator's decision, not a mitigation. The audit

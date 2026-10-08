@@ -21,8 +21,8 @@ func (s *Server) operatorContextField(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"context_snapshot": snap,
 		"decision": map[string]any{
-			"intent":        intent,
-			"no_ui_change":  noChangeReason,
+			"intent":       intent,
+			"no_ui_change": noChangeReason,
 		},
 		"as_of": time.Now().UTC().Format(time.RFC3339),
 	})
@@ -73,15 +73,15 @@ func (s *Server) operatorSurfacePlans(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(b2, &schemaJSON)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"surface_id": surfaceID,
-		"latest_plan": planJSON,
+		"surface_id":    surfaceID,
+		"latest_plan":   planJSON,
 		"latest_schema": schemaJSON,
 		"metrics": map[string]any{
 			"compile_count": metrics.CompileCount, "capability_fallback": metrics.CapabilityFallbackCount,
 			"delta_reject": metrics.DeltaRejectCount, "no_ui_change": metrics.NoUIChangeCount,
 		},
 		"pattern_candidates": patterns,
-		"policy_version": "surface_policy_v5",
+		"policy_version":     "surface_policy_v5",
 	})
 }
 

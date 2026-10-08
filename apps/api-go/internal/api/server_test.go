@@ -608,7 +608,9 @@ func TestSellerRealNameAttestationRequiresOperator(t *testing.T) {
 // name 非空 —— 任何已登录用户都能往这张全局表里塞模板。
 //
 // 危害不只是命名空间污染：CreateObservationSet 的兼容门写的是
-//   `if len(ListTemplates()) > 0 { 必须引用已存在的模板 }`
+//
+//	`if len(ListTemplates()) > 0 { 必须引用已存在的模板 }`
+//
 // 也就是「有没有模板」本身是一个全局开关。普通用户塞一个垃圾模板，就能把整个
 // 平台踢出 bootstrap —— 之后**所有人**用历史模板 ID 建观察集都会被
 // TEMPLATE_NOT_FOUND 拒掉，且失败原因指向调用方。
@@ -811,7 +813,7 @@ func TestVersionMiddlewareRequiresUpgrade(t *testing.T) {
 // running with PROXY_LOGIN_PROVIDER=smtp but no PROXY_SMTP_HOST sees the
 // "fail_closed_no_smtp_env" status instead of a silent REJECTED every login.
 // Boot-time log.Fatalf in cmd/api/main.go is the primary guard; this test
-//// ensures the runtime fallback path (UnconfiguredLoginChallengeProvider)
+// // ensures the runtime fallback path (UnconfiguredLoginChallengeProvider)
 // is also observable.
 func TestReadyEndpointSurfacesLoginProviderFailClosed(t *testing.T) {
 	t.Setenv("PROXY_LOGIN_PROVIDER", "smtp")
@@ -993,7 +995,7 @@ func TestPrivacyMeReturnsDataExport(t *testing.T) {
 		Payload: map[string]any{
 			"deviceId": "dev_privacy_1", "platform": "IOS",
 			"deviceCredential": "0123456789012345678901234567890123456789",
-			"dateOfBirth": "2000-01-01", "legalDocVersion": "1.1",
+			"dateOfBirth":      "2000-01-01", "legalDocVersion": "1.1",
 			"consents": map[string]any{"terms": true, "privacy": true},
 		},
 	})
@@ -1049,7 +1051,7 @@ func TestPrivacyExportAndCancelFlow(t *testing.T) {
 		Payload: map[string]any{
 			"deviceId": "dev_privacy_2", "platform": "IOS",
 			"deviceCredential": "abcdefghijklmnopqrstuvwxyz123456",
-			"dateOfBirth": "2000-01-01", "legalDocVersion": "1.1",
+			"dateOfBirth":      "2000-01-01", "legalDocVersion": "1.1",
 			"consents": map[string]any{"terms": true, "privacy": true},
 		},
 	})
@@ -1135,7 +1137,7 @@ func TestPrivacyDuplicateExportReturns409(t *testing.T) {
 		Payload: map[string]any{
 			"deviceId": "dev_privacy_3", "platform": "ANDROID",
 			"deviceCredential": "01234567890123456789012345678901",
-			"dateOfBirth": "2000-01-01", "legalDocVersion": "1.1",
+			"dateOfBirth":      "2000-01-01", "legalDocVersion": "1.1",
 			"consents": map[string]any{"terms": true, "privacy": true},
 		},
 	})
@@ -1164,7 +1166,7 @@ func TestPrivacyRequestsHistory(t *testing.T) {
 		Payload: map[string]any{
 			"deviceId": "dev_privacy_4", "platform": "IOS",
 			"deviceCredential": "98765432109876543210987654321098",
-			"dateOfBirth": "2000-01-01", "legalDocVersion": "1.1",
+			"dateOfBirth":      "2000-01-01", "legalDocVersion": "1.1",
 			"consents": map[string]any{"terms": true, "privacy": true},
 		},
 	})
@@ -1185,7 +1187,7 @@ func TestPrivacyRequestsHistory(t *testing.T) {
 		t.Fatalf("list: %d %s", list.Code, list.Body.String())
 	}
 	var listBody struct {
-		Count    int            `json:"count"`
+		Count    int              `json:"count"`
 		Requests []map[string]any `json:"requests"`
 	}
 	if err := json.Unmarshal(list.Body.Bytes(), &listBody); err != nil {

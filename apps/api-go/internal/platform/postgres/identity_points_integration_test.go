@@ -1,0 +1,99 @@
+package postgres
+
+// IDENTITY-POINTS-001 对真库：固定规则把用户做过的事折成积分（幂等、发帖每天最多 3 条）；
+// 账本不能改；按分数开的奖励活动只发给到线的人，成长值奖励进账本。
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/proxy-app/proxy-api/internal/identitytier"
+	"github.com/proxy-app/proxy-api/internal/incentive"
+)
+
+func TestIdentityPointsCollectIdempotentlyAndScoreCampaignsGrantOnlyThoseWhoReachedTheLine(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	rich, poor := "u_ip_r_"+stamp, "u_ip_p_"+stamp
+	rule := "inc_ip_" + stamp
+	users := []string{rich, poor}
+	posts := []string{}
+	for i := 0; i < 5; i++ {
+		posts = append(posts, fmt.Sprintf("p_ip_%s_%d", stamp, i))
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM incentive.grants WHERE rule_id = $1`, rule)
+		_, _ = pool.Exec(bg, `DELETE FROM incentive.rules WHERE id = $1`, rule)
+		_, _ = pool.Exec(bg, `DELETE FROM growth.point_ledger WHERE subject_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM localnet.posts WHERE id = ANY($1)`, posts)
+		_, _ = pool.Exec(bg, `DELETE FROM identity.profiles WHERE user_account_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM identity.user_accounts WHERE id = ANY($1)`, users)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+	for _, u := range users {
+		exec(`INSERT INTO identity.user_accounts (id, status, created_at, updated_at) VALUES ($1,'ACTIVE',$2,$2)`, u, now.Add(-72*time.Hour))
+		exec(`INSERT INTO identity.profiles (user_account_id, name, handle, city, avatar_path, updated_at) VALUES ($1,'N','h_`+u+`','HN','assets/x',$2)`, u, now)
+	}
+	// rich 同一天发了 5 条帖：只算 3 条。
+	for i, id := range posts {
+		exec(`INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, status) VALUES ($1,'USER',$2,'x',$3,'PUBLISHED')`, id, rich, now.Add(-time.Duration(i+1)*time.Minute))
+	}
+	st := identitytier.NewPostgres(pool)
+	if _, err := st.CollectUser(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	richPts, _ := st.Points(ctx, identitytier.User, rich)
+	poorPts, _ := st.Points(ctx, identitytier.User, poor)
+	if richPts != 30+3*5 || poorPts != 30 {
+		t.Fatalf("profile 30 + at most 3 posts/day x 5: rich=%d poor=%d", richPts, poorPts)
+	}
+	if _, err := st.CollectUser(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := st.Points(ctx, identitytier.User, rich); again != richPts {
+		t.Fatalf("collecting twice must not double count: %d -> %d", richPts, again)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE growth.point_ledger SET delta = 9999 WHERE subject_id = $1`, rich); err == nil {
+		t.Fatal("the ledger cannot be edited")
+	}
+
+	// 按分数开的奖励活动：门槛 40 分 —— rich(45) 到线，poor(30) 没到；成长值奖励进账本。
+	ruleAt := now.Add(-time.Hour)
+	inc := incentive.NewPostgres(pool)
+	r := incentive.Rule{ID: rule, Label: "分数奖励", Trigger: incentive.TriggerScoreReached, RewardKind: incentive.RewardGrowthPoints, Points: 20, MinAccountAgeHours: 24, MinPoints: 40, Audience: "USER", CreatedBy: "op", CreatedAt: ruleAt, UpdatedAt: ruleAt}
+	if err := inc.UpsertRule(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := inc.Candidates(ctx, r, now, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasID := func(id string) bool {
+		for _, x := range ids {
+			if x == id {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasID(rich) || hasID(poor) {
+		t.Fatalf("only those who reached the line: rich=%v poor=%v", hasID(rich), hasID(poor))
+	}
+	g := incentive.Grant{ID: "g_ip_" + stamp, RuleID: rule, UserID: rich, Audience: "USER", RewardKind: incentive.RewardGrowthPoints, Points: 20, Status: incentive.StatusGranted, GrantedAt: now}
+	if ins, err := inc.RecordGrant(ctx, g); err != nil || !ins {
+		t.Fatalf("grant: %v %v", ins, err)
+	}
+	if after, _ := st.Points(ctx, identitytier.User, rich); after != richPts+20 {
+		t.Fatalf("growth-points rewards land in the ledger: %d", after)
+	}
+}

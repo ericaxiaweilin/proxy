@@ -1,10 +1,10 @@
 package api
 
 import (
-	"github.com/proxy-app/proxy-api/internal/accountstatus"
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/proxy-app/proxy-api/internal/accountstatus"
 	"io"
 	"log"
 	"net/http"

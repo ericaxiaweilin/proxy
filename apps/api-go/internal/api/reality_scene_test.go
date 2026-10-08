@@ -96,4 +96,3 @@ func TestPublicRealityScenesRejectsWrites(t *testing.T) {
 		t.Fatalf("status=%d", recorder.Code)
 	}
 }
-

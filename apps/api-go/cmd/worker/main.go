@@ -21,6 +21,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/gravity"
 	"github.com/proxy-app/proxy-api/internal/guidance"
 	"github.com/proxy-app/proxy-api/internal/identity"
+	"github.com/proxy-app/proxy-api/internal/identitytier"
 	"github.com/proxy-app/proxy-api/internal/incentive"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/notification"
@@ -687,7 +688,14 @@ func main() {
 	incentiveNotifier := incentiveNotifier{pipeline: inboxPipeline}
 	incentiveTicker := time.NewTicker(5 * time.Minute)
 	defer incentiveTicker.Stop()
+	tierStore := identitytier.NewPostgres(pool)
 	runIncentives := func() {
+		// 先把用户已经做成的事折成积分（固定规则，幂等），再按分数发奖励活动。
+		if n, err := tierStore.CollectUser(ctx, time.Now().UTC()); err != nil {
+			log.Printf("identity points failed: %v", err)
+		} else if n > 0 {
+			log.Printf("identity points: credited=%d", n)
+		}
 		n, err := incentive.RunGrants(ctx, incentiveStore, incentiveClaimer, incentiveNotifier, func(c context.Context, id string) bool {
 			lvl, err := accountGate.LevelOf(c, id)
 			return err != nil || lvl != "" // 被限制或读不出来：不发
