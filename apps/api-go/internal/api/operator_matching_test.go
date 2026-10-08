@@ -209,7 +209,8 @@ func TestOperatorMatchingPageShowsCurrentDefaultAndStoredProvenance(t *testing.T
 		if v.Description == "" {
 			t.Fatalf("旋钮 %q 没有说明：运营看不到它管什么，就不敢调也不敢确认", v.Key)
 		}
-		if v.DefaultValue == 0 {
+		// tagFitWeight 出厂就是 0（TAG-SYSTEM-001：标签上线不改任何人的排名），0 就是它真实的默认值。
+		if v.DefaultValue == 0 && v.Key != "tagFitWeight" {
 			t.Fatalf("%q 没有默认值可对照", v.Key)
 		}
 		if v.Source == "OVERRIDE" {
