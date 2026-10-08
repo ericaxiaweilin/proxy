@@ -695,6 +695,25 @@ export interface Messages {
   "demand.matching.fast": string;
   "demand.matching.manualHint": string;
   "demand.matching.fastHint": string;
+  // COMP-CONSENT-PIPELINE-001（2026-10-08）：动态浏览统计从一个总闸拆成
+  // **三个各自独立**的同意开关（推荐 / 分身洞察 / 运营逐人明细）。
+  //
+  // 为什么这三句必须进字典、而不是继续写死中文：它们是**用户对每一项敏感
+  // 个人数据用途的知情表示**，写死中文就等于越南/老挝/日韩用户在同意一件
+  // 自己没读过的用途。Art. 6.3 禁止含糊、误导的指示 —— 「看不懂的那句话」
+  // 就是含糊的一种。
+  //
+  // 「356/2025/NĐ-CP」与「Nghị định」在**所有**语言里都不译：那是文号，
+  // 译了就指向另一份法令。「AI 分身 · 好友洞察」在非中文语言里给的是该语言
+  // 的说法而不是汉字原文（那是产品功能名，各语言要能读懂）。
+  "consent.heading": string;
+  "consent.note": string;
+  "consent.reco.title": string;
+  "consent.reco.desc": string;
+  "consent.twin.title": string;
+  "consent.twin.desc": string;
+  "consent.ops.title": string;
+  "consent.ops.desc": string;
 }
 
 const ZH: Messages = {
@@ -1279,6 +1298,14 @@ settingsCacheClearedWith: "缓存已清理，释放 {size}",
   "demand.matching.fast": "快速：平台帮我选",
   "demand.matching.manualHint": "报名的人你自己看、自己选。",
   "demand.matching.fastHint": "平台按综合排名替你选中报名的人，她 5 分钟内确认就成单，没确认自动换下一位。",
+  "consent.heading": "动态浏览统计 · 敏感数据",
+  "consent.note": "三项各自独立，可以只开其中一项；全部关闭时不记录任何浏览行为。依据越南个人数据保护法与 356/2025/NĐ-CP。",
+  "consent.reco.title": "用浏览行为推荐内容",
+  "consent.reco.desc": "默认关闭。开启后记录你看过哪些动态，用来给你推更对味的内容。随时可关。",
+  "consent.twin.title": "AI 分身 · 好友洞察",
+  "consent.twin.desc": "默认关闭。开启后记录你看过哪些动态和主页，用来生成「AI 分身 · 好友洞察」里的浏览统计。随时可关。",
+  "consent.ops.title": "运营可查看我的浏览明细",
+  "consent.ops.desc": "默认关闭。开启后，平台运营侧可以查看你浏览别人动态的逐人明细（看了哪条、停留几秒、放大几次），用于内容运营。随时可关。",
 };
 
 const VI: Messages = {
@@ -1864,6 +1891,14 @@ settingsCacheClearedWith: "Đã dọn bộ nhớ đệm, giải phóng {size}",
   "demand.matching.fast": "Nhanh: nền tảng chọn hộ",
   "demand.matching.manualHint": "Người đăng ký thì bạn tự xem và tự chọn.",
   "demand.matching.fastHint": "Nền tảng chọn người đăng ký theo thứ hạng tổng hợp; cô ấy xác nhận trong 5 phút thì thành đơn, không xác nhận thì tự động chuyển sang người kế tiếp.",
+  "consent.heading": "Thống kê lượt xem · Dữ liệu nhạy cảm",
+  "consent.note": "Ba mục đích hoàn toàn độc lập, bạn có thể chỉ bật một mục; khi tất cả đều tắt thì không có hành vi xem nào được ghi lại. Theo Luật Bảo vệ dữ liệu cá nhân Việt Nam và Nghị định 356/2025/NĐ-CP.",
+  "consent.reco.title": "Gợi ý nội dung theo hành vi xem",
+  "consent.reco.desc": "Mặc định tắt. Khi bật, ứng dụng ghi lại bạn đã xem những bài nào để gợi ý nội dung hợp với bạn hơn. Bạn có thể tắt bất cứ lúc nào.",
+  "consent.twin.title": "Bản sao AI · Thấu hiểu bạn bè",
+  "consent.twin.desc": "Mặc định tắt. Khi bật, ứng dụng ghi lại bạn đã xem những bài và trang cá nhân nào để tạo thống kê lượt xem trong “Bản sao AI · Thấu hiểu bạn bè”. Bạn có thể tắt bất cứ lúc nào.",
+  "consent.ops.title": "Bộ phận vận hành có thể xem chi tiết lượt xem của tôi",
+  "consent.ops.desc": "Mặc định tắt. Khi bật, bộ phận vận hành của nền tảng có thể xem theo từng người chi tiết về việc bạn xem bài của người khác (xem bài nào, xem bao lâu, phóng to mấy lần), dùng cho vận hành nội dung. Bạn có thể tắt bất cứ lúc nào.",
 };
 
 const EN: Messages = {
@@ -2449,6 +2484,14 @@ settingsCacheClearedWith: "Cache cleared, {size} freed",
   "demand.matching.fast": "Fast: platform picks for me",
   "demand.matching.manualHint": "You review who applies and pick them yourself.",
   "demand.matching.fastHint": "The platform picks who applies by overall ranking. If she confirms within 5 minutes the order is placed; if she doesn't, it moves to the next one.",
+  "consent.heading": "Browsing statistics · Sensitive data",
+  "consent.note": "The three purposes are independent, so you can turn on just one of them; with all of them off, no browsing behaviour is recorded at all. Under Vietnam's personal data protection law and 356/2025/NĐ-CP.",
+  "consent.reco.title": "Recommend content from what I browse",
+  "consent.reco.desc": "Off by default. When on, it records which posts you viewed so the platform can recommend content that fits you better. You can turn it off at any time.",
+  "consent.twin.title": "AI twin · Friend insights",
+  "consent.twin.desc": "Off by default. When on, it records which posts and profiles you viewed to produce the browsing statistics in “AI twin · Friend insights”. You can turn it off at any time.",
+  "consent.ops.title": "Operations staff can see my per-person view details",
+  "consent.ops.desc": "Off by default. When on, the platform's operations team can see, person by person, how you viewed other people's posts (which post, how many seconds, how many zooms), for content operations. You can turn it off at any time.",
 };
 
 const LO: Messages = {
@@ -3033,6 +3076,14 @@ settingsCacheClearedWith: "ລ້າງ cache ແລ້ວ, ຄືນ {size}",
   "demand.matching.fast": "ໄວ: ແພລັດຟອມເລືອກໃຫ້",
   "demand.matching.manualHint": "ຄົນທີ່ລົງຊື່ ທ່ານເບິ່ງແລະເລືອກເອງ.",
   "demand.matching.fastHint": "ແພລັດຟອມເລືອກຜູ້ສະໝັກຕາມອັນດັບລວມ; ຖ້າລາວຢືນຢັນພາຍໃນ 5 ນາທີ ຄຳສັ່ງຈະສຳເລັດ, ຖ້າບໍ່ຢືນຢັນຈະປ່ຽນໄປຫາຄົນຕໍ່ໄປອັດຕະໂນມັດ.",
+  "consent.heading": "ສະຖິດການເບິ່ງເນື່ອງ · ຂໍ້ມູນອ່ານໃຈ",
+  "consent.note": "ສາມຢ່ງຫຼັກເປັນອິລະຫລະ ທ່ານເປັນຄົນທີ່ເປີດໄດ້ພຽງແຕ່ອັນໜຶ່ງ; ຖ້າປິດທັງໝົດ ຈະບໍ່ມີການບັນທຶກພ຤ດິບການເບິ່ງເນື່ອງໃດໆ. ອີງຕາມກົດໜາຍຂໍ້ມູນສ່ວນຕົວ ສປປ ວຽດນະກຳນະ ແລະ 356/2025/NĐ-CP.",
+  "consent.reco.title": "ແນະນຳເນື້ອງຈາກພ຤ດິບການເບິ່ງ",
+  "consent.reco.desc": "ປິດໂດຍລີ່ມຕົ້ນ. ເມື່ອເປີດ ຈະບັນທຶກວ່າທ່ານໄດ້ເບິ່ງຂໍ້ຄວາມໃດ ເພື່ອໃຫ້ແພລັດຟອມມ່ານາຍເນື້ອງທີ່ເຫມາະກັບທ່ານ. ປິດໄດ້ເວລາໃດກໍໄດ້.",
+  "consent.twin.title": "AI ຕົວຕຽນ · ເຂົ້າໃຈເພື່ອນ",
+  "consent.twin.desc": "ປິດໂດຍລີ່ມຕົ້ນ. ເມື່ອເປີດ ຈະບັນທຶກວ່າທ່ານໄດ້ເບິ່ງຂໍ້ຄວາມໃດ ແລະ ໜ້າເວັບຂອງຜູ້ຊື່ໃດ ເພື່ອສ້າງສະຖິດການເບິ່ງເນື່ອງໃນ “AI ຕົວຕຽນ · ເຂົ້າໃຈເພື່ອນ”. ປິດໄດ້ເວລາໃດກໍໄດ້.",
+  "consent.ops.title": "ຝ່າຍດູແລດຫນ້າທີ່ເຫັນລາຍລະອຽດການເບິ່ງຂອງຂ້ອຍໄດ້",
+  "consent.ops.desc": "ປິດໂດຍລີ່ມຕົ້ນ. ເມື່ອເປີດ ຝ່າຍດູແລດຫນ້າຂອງແພລັດຟອມຈະເຫັນລາຍລະອຽດ ຕໍ່ຄົນ ຂອງການທີ່ທ່ານໄດ້ເບິ່ງຂໍ້ຄວາມຂອງຜູ້ອື່ນ (ຂໍ້ຄວາມໃດ, ຢູ່ນາທີໃດ, ຂະຍາຍໃຫ້ຂະຍານກາຍຈັດຈຸດ), ໃຊ້ສຳລັບການດູແລຫນ້າເນື້ອງ. ປິດໄດ້ເວລາໃດກໍໄດ້.",
 };
 
 const KO: Messages = {
@@ -3617,6 +3668,14 @@ settingsCacheClearedWith: "캐시를 정리해 {size}를 확보했습니다",
   "demand.matching.fast": "빠른 매칭: 플랫폼이 대신 고름",
   "demand.matching.manualHint": "신청한 사람은 직접 확인하고 직접 고릅니다.",
   "demand.matching.fastHint": "플랫폼이 종합 순위 순으로 신청자를 대신 고릅니다. 5분 이내에 확정하면 주문이 성사되고, 확정하지 않으면 자동으로 다음 사람에게 넘어갑니다.",
+  "consent.heading": "조회 통계 · 민감 데이터",
+  "consent.note": "세 항목은 서로 독립이며 하나만 켤 수 있습니다. 모두 끄면 조회 행동이 전혀 기록되지 않습니다. 베트남 개인정보 보호법과 356/2025/NĐ-CP에 따릅니다.",
+  "consent.reco.title": "조회 기록으로 콘텐츠 추천",
+  "consent.reco.desc": "기본값은 꺼짐입니다. 켜면 어떤 게시물을 봤는지 기록해 더 잘 맞는 콘텐츠를 추천합니다. 언제든지 끌 수 있습니다.",
+  "consent.twin.title": "AI 분신 · 친구 인사이트",
+  "consent.twin.desc": "기본값은 꺼짐입니다. 켜면 어떤 게시물과 프로필을 봤는지 기록해 「AI 분신 · 친구 인사이트」의 조회 통계를 만듭니다. 언제든지 끌 수 있습니다.",
+  "consent.ops.title": "운영팀이 내 조회 내역을 볼 수 있음",
+  "consent.ops.desc": "기본값은 꺼짐입니다. 켜면 플랫폼 운영측이 다른 사람의 게시물을 본 내역을 사람별로 볼 수 있습니다(어느 게시물, 몇 초 체류, 몇 번 확대). 이는 콘텐츠 운영에 사용됩니다. 언제든지 끌 수 있습니다.",
 };
 
 const JA: Messages = {
@@ -4201,6 +4260,14 @@ settingsCacheClearedWith: "キャッシュを削除し、{size} 空きました"
   "demand.matching.fast": "おまかせ: プラットフォームが選ぶ",
   "demand.matching.manualHint": "応募した人は自分で見て、自分で選びます。",
   "demand.matching.fastHint": "プラットフォームが総合順位で応募者を選びます。5分以内に確定すれば成約、確定しなければ自動的に次の方へ回ります。",
+  "consent.heading": "閲覧統計 · センシティブデータ",
+  "consent.note": "3項目はそれぞれ独立で、1項目だけ有効にすることもできます。すべて無効にすると、閲覧行動はまったく記録されません。ベトナムの個人情報保護法および 356/2025/NĐ-CP に基づきます。",
+  "consent.reco.title": "閲覧履歴からコンテンツを提案",
+  "consent.reco.desc": "初期状態はオフです。有効にすると、どの投稿を見たかを記録し、自分に合ったコンテンツを提案します。いつでもオフにできます。",
+  "consent.twin.title": "AI 分身 · 友達インサイト",
+  "consent.twin.desc": "初期状態はオフです。有効にすると、どの投稿とプロフィールを見たかを記録し、「AI 分身 · 友達インサイト」の閲覧統計を作成します。いつでもオフにできます。",
+  "consent.ops.title": "運営チームが私の閲覧履歴の詳細を見られる",
+  "consent.ops.desc": "初期状態はオフです。有効にすると、プラットフォームの運営チームが、他人の投稿を私がどう見たかを本人ごとに把握できます（どの投稿、何秒間、何回拡大したか）。これはコンテンツ運営のためのものです。いつでもオフにできます。",
 };
 
 export const I18N: Record<Language, Messages> = {

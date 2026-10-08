@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { CONSENT_PURPOSES } from "./behavior-analytics-settings";
+import { I18N } from "./i18n";
 
 // COMP-SENSITIVE-CONSENT-001 / COMP-DPO-HONEST-001 / COMP-MERCHANT-GAP-HONEST-001
 // —— 2026-09-27 越南合规扫描之后留下的钉子。
@@ -60,12 +62,24 @@ describe("compliance pin scan surface", () => {
 
 // 1. 敏感行为数据：必须显式同意，且 fail-closed。
 describe("COMP-SENSITIVE-CONSENT-001 敏感行为数据须显式同意", () => {
-  it("采集闸的默认状态是关，不是开", () => {
-    expect(meCode).toContain("const [behaviorAnalytics, setBehaviorAnalytics] = useState(false);");
+  // COMP-CONSENT-PIPELINE-001（2026-10-08）：同意从一个总闸拆成三个目的，
+  // 所以「默认关」这条钉从**一个** useState(false) 变成**三个** false ——
+  // 默认值现在是一张表，注入测试把任意一项改成 true 这条就会红。
+  it("三个采集目的的默认状态都是关，不是开", () => {
+    expect(meCode).toContain("const [behaviorAnalyticsByPurpose, setBehaviorAnalyticsByPurpose] = useState<Record<ConsentPurpose, boolean>>({");
+    for (const purpose of CONSENT_PURPOSES) {
+      expect(meCode, `${purpose} must default to off`).toContain(`${purpose}: false`);
+    }
+    // 旧的单闸 state 必须真的没了：留着就说明还有别的界面上写它。
+    expect(meCode).not.toContain("const [behaviorAnalytics, setBehaviorAnalytics] = useState(false);");
+    // 目的的集合就是这三个，少一个就少一个可同意的用途，多一个是凭空多一个。
+    expect([...CONSENT_PURPOSES]).toEqual(["RECOMMENDATION", "TWIN_INSIGHT", "OPERATOR_AUDIENCE_DETAIL"]);
   });
 
-  it("读不到 / 读失败都算未同意：闸是 `=== true`，不是 `!== false`", () => {
-    expect(impressionCode).toContain("return (await activeStore.read()) === true;");
+  it("读不到 / 读失败都算未同意：闸是 `anyCaptureEnabled`，不是 `!== false`", () => {
+    // anyCaptureEnabled 内部是逐目的的 `=== true`（在 settings 模块里钉），
+    // 这里钉的是埋点这一侧确实走它、且外层仍然 fail-closed。
+    expect(impressionCode).toContain("return await anyCaptureEnabled(activeStore);");
     // 负向断言必须跑在剥注释的源码上：注释里写着历史形态 `!== false`。
     expect(impressionCode).not.toContain("!== false");
     // 外层 catch（读 store 时抛）也必须 fail-closed，不能放行。
@@ -78,6 +92,9 @@ describe("COMP-SENSITIVE-CONSENT-001 敏感行为数据须显式同意", () => {
     expect(settingsCode).toMatch(/catch\s*\{\s*return undefined;\s*\}/);
     // fail-open 回归最可能的写法：catch 里 return true。
     expect(settingsCode).not.toMatch(/catch\s*\{[^}]*\btrue\b/);
+    // 「有没有一项开着」的判定也必须 fail-closed。
+    expect(settingsCode).toContain("export async function anyCaptureEnabled");
+    expect(settingsCode).toContain("if ((await store.read(purpose)) === true) return true;");
   });
 
   it("法条依据留在文件里（文档性断言，跑在原始源码上）", () => {
@@ -88,14 +105,47 @@ describe("COMP-SENSITIVE-CONSENT-001 敏感行为数据须显式同意", () => {
     expect(settingsSource).toContain("不等于同意");
   });
 
-  it("开关文案说全三个真实用途，并点明是敏感数据、默认关闭", () => {
-    // 用途不全 = 目的不符（NĐ 330/2026 Điều 39.1(a)）。
-    expect(meCode).toContain("给你推更对味的内容");
-    expect(meCode).toContain("AI 分身 · 好友洞察");
-    expect(meCode).toContain("平台运营侧可查看逐人明细");
-    // 征求敏感数据同意时要明确告知这是敏感数据。
-    expect(meCode).toContain("敏感个人数据");
-    expect(meCode).toContain("默认关闭");
+  // COMP-CONSENT-PIPELINE-001：文案从「一段话说全三个用途」改成「三个开关
+  // 各说各的用途」。原来这条钉的是「三个用途都出现在同一段文字里」；现在
+  // 等价的约束是**更强**的那个：每个目的**各自**有一句标题 + 一句说明，
+  // 而且没有任何一个目的的说明会漏掉它自己的用途。三行都走字典，所以断言
+  // 钉的是字典里的真文案 + 界面上确实按目的逐行渲染。
+  it("三个目的各有一句标题 + 一句说明，说清它自己的用途、默认关闭、是敏感数据", () => {
+    const zh = I18N.zh;
+    // 敏感数据要明确告知；法条依据要留。
+    expect(zh["consent.heading"]).toContain("敏感数据");
+    expect(zh["consent.note"]).toContain("356/2025/NĐ-CP");
+    expect(zh["consent.note"]).toContain("各自独立");
+    // 用途不能说少：推荐 / 分身洞察 / 运营逐人明细，三句各自的说明里都得有。
+    expect(zh["consent.reco.title"]).toBe("用浏览行为推荐内容");
+    expect(zh["consent.reco.desc"]).toContain("更对味");
+    expect(zh["consent.twin.title"]).toBe("AI 分身 · 好友洞察");
+    expect(zh["consent.twin.desc"]).toContain("AI 分身 · 好友洞察");
+    expect(zh["consent.ops.title"]).toBe("运营可查看我的浏览明细");
+    expect(zh["consent.ops.desc"]).toContain("逐人明细");
+    expect(zh["consent.ops.desc"]).toContain("停留几秒");
+    expect(zh["consent.ops.desc"]).toContain("放大几次");
+    // 三句都得说清「默认关闭 + 随时可关」—— 旧文案是统一一句，拆开之后
+    // 每一句都要自带，否则其中两项就变成了默认开。
+    for (const key of ["consent.reco.desc", "consent.twin.desc", "consent.ops.desc"] as const) {
+      expect(zh[key], key).toContain("默认关闭");
+      expect(zh[key], key).toContain("随时可关");
+    }
+    // 界面确实按目的逐行渲染三行，且每一行只拨自己的目的。
+    expect(meCode).toContain("const CONSENT_PURPOSE_ROWS");
+    for (const [purpose, titleKey] of [
+      ["RECOMMENDATION", "consent.reco.title"],
+      ["TWIN_INSIGHT", "consent.twin.title"],
+      ["OPERATOR_AUDIENCE_DETAIL", "consent.ops.title"]
+    ] as const) {
+      expect(meCode, `${purpose} row must name its own keys`).toContain(`"${purpose}"`);
+      expect(meCode, `${purpose} row must read ${titleKey}`).toContain(titleKey);
+    }
+    expect(meCode).toContain("onPress={() => toggleBehaviorAnalytics(purpose)}");
+    expect(meCode).toContain("await localNet.recordPurposeConsent(purpose, next, BEHAVIOR_ANALYTICS_CONSENT_SOURCE)");
+    // 渲染层不许再留写死的这段旧文案（改了一半 = 字典说翻了、界面还是中文）。
+    expect(meCode).not.toContain("平台运营侧可查看逐人明细");
+    expect(meCode).not.toContain("默认关闭。开启后记录你看过哪些动态、多图动态里具体看了哪张照片多久");
   });
 });
 
