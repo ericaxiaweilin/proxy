@@ -681,15 +681,22 @@ export function SceneActivityDiscovery({
 
           <View style={[styles.pickerActions, { paddingBottom: Math.max(12, safeArea.bottom) }]}><Pressable onPress={resetAll} style={styles.pickerReset}><Text selectable style={styles.pickerResetText}>重置</Text></Pressable>{/* 2026-10-08（用户：点了咖啡后底下是 重置/完成，完成还是回 home —— 应该是 选择 → 场景 list）：
               主按钮不再是「完成」回首页，而是进该动作的场景列表；没有真实场景的动作进去由列表自己说「还没有接入」，不再回首页。 */}
-            {actionId ? (() => {
-              const moment = pickedMomentId ? MOMENTS.find((m) => m.id === pickedMomentId && m.action === actionMatchId(actionId)) : undefined;
-              const base = entriesForAction[0] ?? { actionId: actionMatchId(actionId) ?? actionId, label: taxon(ACTIONS, actionMatchId(actionId) ?? actionId).label, unit: "个" as const };
+            {(() => {
+              // 2026-10-08（用户：随机点一张主路由卡片只有「重置」没有「选择」）：热门里没选动作档就点了 Moment 卡，
+              // actionId 是空的，按钮整个不渲染。动作取「已选的档」，没有就取已选 Moment 自己的动作。
+              const pickedMoment = pickedMomentId ? MOMENTS.find((m) => m.id === pickedMomentId) : undefined;
+              const effectiveAction = actionId ?? pickedMoment?.action;
+              if (!effectiveAction) {
+                return <View accessibilityState={{ disabled: true }} style={[styles.pickerDone, { opacity: 0.4 }]}><Text selectable style={styles.pickerDoneText}>选择场景</Text></View>;
+              }
+              const moment = pickedMoment && pickedMoment.action === actionMatchId(effectiveAction) ? pickedMoment : undefined;
+              const base = entriesForAction[0] ?? { actionId: actionMatchId(effectiveAction) ?? effectiveAction, label: taxon(ACTIONS, actionMatchId(effectiveAction) ?? effectiveAction).label, unit: "个" as const };
               const target: { actionId: string; label: string; unit: "家" | "个"; momentId?: string } = moment ? resolveMomentTarget(moment, base) : base;
               const count = target.momentId && moment
                 ? scenes.filter((scene) => scenesForAction([scene], base.actionId).length > 0 && sceneMatches(scene, moment.scene)).length
                 : entriesForAction[0]?.count;
               return <Pressable accessibilityLabel={`选择场景 ${target.label}`} onPress={() => openDirectory(target)} style={styles.pickerDone}><Text selectable style={styles.pickerDoneText}>{count === undefined ? "选择场景" : count === 0 ? "选择场景 · 暂无" : `选择场景 · ${count} ${base.unit}`}</Text></Pressable>;
-            })() : null}</View>
+            })()}</View>
         </View>
       </Modal>
 
