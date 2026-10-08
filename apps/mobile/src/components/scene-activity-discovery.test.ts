@@ -396,7 +396,7 @@ describe("SCENE-HOME-ENTRY-001: home entry cards are wired to the pure, tested d
     // SCENE-SHOP-DIRECTORY-001: 卡片以前直接开动作分类页（picker）。原型里
     // 卡片点进去是**这个分类自己的列表**（咖啡 → 附近咖啡 N 家 → 单店详情），
     // 动作分类页仍然从右上「全部」进 —— 那条路一个都没少。
-    expect(source).toContain("onPress={() => setDirectoryEntry(entry)}");
+    expect(source).toContain("onPress={() => openDirectory(entry)}");
     expect(source).toContain("<SceneShopDirectory");
     expect(source).toContain("actionId={directoryEntry.actionId}");
     expect(source).toContain("unit={directoryEntry.unit}");
