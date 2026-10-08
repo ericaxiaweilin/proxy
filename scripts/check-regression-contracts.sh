@@ -12625,6 +12625,20 @@ require_test "COMP-CONSENT-PIPELINE-001" "./internal/localnet" \
 require_test "COMP-CONSENT-PIPELINE-001" "./internal/localnet" \
   "TestTheRetiredOneSwitchConsentNoLongerOpensTheCaptureGate" \
   "apps/api-go/internal/localnet/purpose_consent_test.go" || exit $?
+# TAG-SYSTEM-001：标签层是行为的派生物——三条钉：粗粒度位置要两道同意都在且不留原始坐标；
+# 读标签必须报用途；排名里的共同兴趣出厂权重为 0（上线不改任何人的排名）。
+require_test "TAG-SYSTEM-001" "./internal/tagging" \
+  "TestCoarseLocationNeedsBothConsentsAndStoresOnlyTheCell" \
+  "apps/api-go/internal/tagging/commands_test.go" || exit $?
+require_test "TAG-SYSTEM-001" "./internal/tagging" \
+  "TestReadingRequiresAnAllowedUseAndSkipsExpired" \
+  "apps/api-go/internal/tagging/tagging_test.go" || exit $?
+require_test "TAG-SYSTEM-001" "./internal/tagging" \
+  "TestRecomputeClearsTagsOfPeopleWhoNoLongerHaveEvidence" \
+  "apps/api-go/internal/tagging/store_test.go" || exit $?
+require_test "TAG-SYSTEM-001" "./internal/matching" \
+  "TestTagFitIsOffByDefaultAndNeverPunishesPeopleWithoutTags" \
+  "apps/api-go/internal/matching/matching_test.go" || exit $?
 # 开关必须**写服务端**，不能退回成本地布尔。本地布尔不是同意：
 # 用户以为关掉了、服务端还在采，是这条链路最坏的失败模式。
 if ! grep -q 'recordPurposeConsent' apps/mobile/src/surfaces/me.tsx; then
